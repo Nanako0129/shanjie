@@ -1,0 +1,24 @@
+## existing  unigram  {'n': 109, 'sent_acc': 0.688, 'lenient_acc': 0.697, 'char_acc': 0.9434}
+## existing  jev-1.13.0-choice8  {'n': 109, 'sent_acc': 0.853, 'lenient_acc': 0.872, 'char_acc': 0.973, 'oracle@8': 0.963}
+## homophones  unigram  {'n': 165, 'sent_acc': 0.461, 'lenient_acc': 0.473, 'char_acc': 0.9123}
+## homophones  jev-1.13.0-choice8  {'n': 165, 'sent_acc': 0.818, 'lenient_acc': 0.836, 'char_acc': 0.9732, 'oracle@8': 0.915}
+## oov  unigram  {'n': 25, 'sent_acc': 0.2, 'lenient_acc': 0.2, 'char_acc': 0.8571}
+## oov  jev-1.13.0-choice8  {'n': 25, 'sent_acc': 0.6, 'lenient_acc': 0.6, 'char_acc': 0.9307, 'oracle@8': 0.68}
+## user-reported  unigram  {'n': 1, 'sent_acc': 0.0, 'lenient_acc': 0.0, 'char_acc': 0.6429}
+## user-reported  jev-1.13.0-choice8  {'n': 1, 'sent_acc': 0.0, 'lenient_acc': 0.0, 'char_acc': 0.6429, 'oracle@8': 0.0}
+## ALL  unigram  {'n': 300, 'sent_acc': 0.52, 'lenient_acc': 0.53, 'char_acc': 0.9153}
+## ALL  jev-1.13.0-choice8  {'n': 300, 'sent_acc': 0.81, 'lenient_acc': 0.827, 'char_acc': 0.9674, 'oracle@8': 0.91}
+   ✗ [oov] 我買了一條拭鏡布 → 我買了一條是境不
+   ✗ [oov] 我把線材都放進收納盒 → 我把線材都放進收納合
+   ✗ [oov] 出門前記得帶充電線 → 出門前記得代充電線
+   ✗ [oov] 浴室地板要鋪防滑墊 → 浴室地板藥舖防滑電
+   ✗ [oov] 這罐密封罐可以裝餅乾 → 這慣密封慣可以裝餅乾
+   ✗ [oov] 廚房新裝了一個濾水壺 → 廚房新莊了一個綠水壺
+   ✗ [oov] 可以墊一個散熱墊 → 可以電一個散熱墊
+   ✗ [oov] 請拿洗碗海綿給我 → 請拏洗碗海綿給我
+   ✗ [oov] 下雨天要帶摺疊傘 → 下雨天要帶折疊傘
+   ✗ [oov] 這個保險箱用的是密碼鎖 → 這個保險箱用的是密碼所
+   ✗ [user-reported] 什麼品牌或款式的拭鏡布比較好 → 什麼品牌貨款是的是境不比較好
+## latency  warm  {'n': 29, 'p50_ms': 187, 'p95_ms': 229, 'min_ms': 163}
+## latency  cold  {'n': 10, 'p50_ms': 206, 'p95_ms': 243, 'min_ms': 185}
+## usage  batch_input_tokens=89243  est_cost_usd=0.0037
