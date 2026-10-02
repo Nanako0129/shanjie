@@ -3,3 +3,5 @@ target/
 __pycache__/
 *.pyc
 .DS_Store
+eval/dev/user-reported.txt
+.claude/

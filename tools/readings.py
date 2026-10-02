@@ -7,10 +7,11 @@
 
 規則（依序）：
   0. tools/reading_overrides.tsv 裡人工確認過的詞：直接用（不在詞庫讀音裡就標 GAP，不寫入）；
-  1. 多字詞在萌典：取萌典第一個讀音（不取「又音」），而且必須是詞庫裡這個詞的讀音之一；
+  1. 「一」「不」打本調（ㄧ、ㄅㄨˋ），不打變調：含這兩字的詞，只剩一個候選符合時用它
+     （要排在萌典前面：萌典詞條把「不要」寫成變調 ㄅㄨˊ ㄧㄠˋ）；
+  2. 多字詞在萌典：取萌典第一個讀音（不取「又音」），而且必須是詞庫裡這個詞的讀音之一；
      （單字不套用：萌典把「的」的第一個讀音排成 ㄉㄧˋ）
-  2. 單字在小麥注音 heterophony1.list（破音字主要讀音，反映台灣打字習慣）：用它；
-  3. 「一」「不」打本調（ㄧ、ㄅㄨˋ），不打變調：只剩一個候選符合時用它；
+  3. 單字在小麥注音 heterophony1.list（破音字主要讀音，反映台灣打字習慣）：用它；
   4. 詞庫裡這個詞只有一個讀音，或第一名分數明顯較高（差 ≥ 0.5）：用詞庫第一名；
   5. 其他：用詞庫第一名但標 CHECK。
 萌典是 CC BY-ND，只用來決定評測輸入的讀音，不散布其內容。
@@ -75,12 +76,12 @@ def main(src, dst):
                     continue
                 citation = [c for c in cands
                             if all(r == {"一": "ㄧ", "不": "ㄅㄨˋ"}.get(ch, r) for ch, r in zip(w, c))]
-                if len(w) > 1 and w in moe and moe[w] in cands:
+                if len(citation) == 1 and len(citation) < len(cands) and any(ch in "一不" for ch in w):
+                    pick = citation[0]
+                elif len(w) > 1 and w in moe and moe[w] in cands:
                     pick = moe[w]
                 elif len(w) == 1 and w in hetero and (hetero[w],) in cands:
                     pick = (hetero[w],)
-                elif len(citation) == 1 and len(citation) < len(cands) and any(ch in "一不" for ch in w):
-                    pick = citation[0]
                 elif len(cands) == 1 or alts[w][0][0] - alts[w][1][0] >= 0.5:
                     pick = cands[0]
                 else:
