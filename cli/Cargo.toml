@@ -1,0 +1,11 @@
+[package]
+name = "cli"
+version = "0.0.0"
+edition = "2021"
+
+[[bin]]
+name = "shanjie-eval"
+path = "src/main.rs"
+
+[dependencies]
+core = { path = "../core" }
