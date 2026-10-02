@@ -5,3 +5,5 @@ __pycache__/
 .DS_Store
 eval/dev/user-reported.txt
 .claude/
+experiments/jev/results/j1.txt
+experiments/jev/results/j1_raw.jsonl

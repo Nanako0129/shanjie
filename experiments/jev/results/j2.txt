@@ -1,0 +1,17 @@
+## words scored 1592  input_tokens=288826  est_cost_usd=0.0121  model=jev-1.13.0
+   公視 jev=0.86 lex=-3.97477073  vs  公式 jev=1.40 lex=-5.09961744
+   公事 jev=1.13 lex=-5.49025821  vs  攻勢 jev=0.86 lex=-5.19377584
+   那邊 jev=2.86 lex=-4.24825543  vs  納編 jev=0.71 lex=—
+   其中 jev=1.87 lex=-3.59909258  vs  期中 jev=1.36 lex=-5.08159434
+   常常 jev=3.08 lex=-3.91190557  vs  嚐嚐 jev=2.08 lex=-5.79128821
+   權力 jev=1.37 lex=-4.13010676  vs  權利 jev=1.67 lex=-4.13447157
+   程式 jev=1.26 lex=-3.98088765  vs  城市 jev=2.14 lex=-3.89320324
+   部署 jev=1.20 lex=-5.18922822  vs  部屬 jev=1.14 lex=-4.85974559
+   意義 jev=1.53 lex=-3.8200897  vs  異議 jev=1.38 lex=-4.74661781
+   精力 jev=1.44 lex=-4.95139136  vs  經歷 jev=1.63 lex=-4.41410342
+   反映 jev=1.63 lex=-4.30698837  vs  反應 jev=1.51 lex=-3.98595729
+   ㄍㄨㄥ ㄕˋ 依 Jev 排序：公式 > 公事 > 公視 > 攻勢
+## dev/existing  unigram 75/109  →  jev-adjusted(W=0.5) 76/109
+## dev/homophones  unigram 76/165  →  jev-adjusted(W=0.5) 73/165
+## dev/oov  unigram 5/25  →  jev-adjusted(W=0.5) 5/25
+## dev/user-reported  unigram 0/1  →  jev-adjusted(W=0.5) 0/1
