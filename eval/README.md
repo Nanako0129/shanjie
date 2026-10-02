@@ -6,7 +6,7 @@
 | `dev/existing.txt` | 109 | 確認過 | 同 trap＋daily，讀音改成使用者實際會打的 |
 | `dev/homophones.txt` | 165 | 確認過 | 同音陷阱與單字混淆（同音組取奇數行） |
 | `dev/oov.txt`、`dev/oov_words.list` | 25 | 確認過 | 關鍵詞不在 S0 詞庫快照裡、但每個字都讀得出 |
-| `dev/user-reported.txt` | 6 | 使用者實際打的注音 | 使用者遇到的錯字（2026-10-03 同意以 CC0 釋出）；之後回報的句子直接加在這裡 |
+| `dev/user-reported.txt` | 7 | 使用者實際打的注音 | 使用者遇到的錯字（2026-10-03 同意以 CC0 釋出）；之後回報的句子直接加在這裡 |
 | `holdout/holdout.txt`、`holdout/oov_words.list` | 227（最後 25 列是 OOV） | 寫作者確認 | **保留集**：只有片結束的 fresh verifier 會跑；同音組取偶數行 |
 | `learn/cases.tsv` | 14 組 × 5 列 | 確認過 | 學習模擬（teach／common／rare＋same_ctx） |
 
