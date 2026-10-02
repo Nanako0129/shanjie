@@ -1,0 +1,13 @@
+## existing  M1-nbest32/gemma  {'n': 109, 'sent_acc': 0.963, 'lenient_acc': 0.982, 'char_acc': 0.9936, 'p50_ms': 290, 'p95_ms': 402}
+## homophones  M1-nbest32/gemma  {'n': 165, 'sent_acc': 0.909, 'lenient_acc': 0.939, 'char_acc': 0.9886, 'p50_ms': 322, 'p95_ms': 989}
+## oov  M1-nbest32/gemma  {'n': 25, 'sent_acc': 0.76, 'lenient_acc': 0.76, 'char_acc': 0.9654, 'p50_ms': 285, 'p95_ms': 315}
+   x 我買了一條拭鏡布 -> 我買了一條試鏡部
+   x 我新買的藍牙耳機很好用 -> 我新買的藍芽耳機很好用
+   x 我把線材都放進收納盒 -> 我把線材都放進收納合
+   x 浴室地板要鋪防滑墊 -> 浴室地板要鋪防滑電
+   x 這罐密封罐可以裝餅乾 -> 這冠密封冠可以裝餅乾
+   x 可以墊一個散熱墊 -> 可以店一個散熱墊
+## user-reported  M1-nbest32/gemma  {'n': 3, 'sent_acc': 0.667, 'lenient_acc': 0.667, 'char_acc': 0.9649, 'p50_ms': 282, 'p95_ms': 908}
+   x 什麼品牌或款式的拭鏡布比較好 -> 什麼品牌或款式的試鏡不比較好
+## dev  M1-nbest32/gemma  {'n': 302, 'sent_acc': 0.914, 'lenient_acc': 0.937, 'char_acc': 0.9875, 'p50_ms': 295, 'p95_ms': 848}
+## peak_gpu_mem_MiB  M1-nbest32/gemma  5776

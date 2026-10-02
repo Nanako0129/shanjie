@@ -1,0 +1,3 @@
+## existing  M2-B8/gemma  {'n': 50, 'sent_acc': 0.8, 'lenient_acc': 0.86, 'char_acc': 0.9553, 'p50_ms': 544, 'p95_ms': 726}
+## dev  M2-B8/gemma  {'n': 50, 'sent_acc': 0.8, 'lenient_acc': 0.86, 'char_acc': 0.9553, 'p50_ms': 544, 'p95_ms': 726}
+## peak_gpu_mem_MiB  M2-B8/gemma  5327

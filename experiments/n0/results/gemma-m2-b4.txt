@@ -1,0 +1,14 @@
+## existing  M2-B4/gemma  {'n': 109, 'sent_acc': 0.78, 'lenient_acc': 0.862, 'char_acc': 0.9562, 'p50_ms': 1005, 'p95_ms': 1365}
+## homophones  M2-B4/gemma  {'n': 165, 'sent_acc': 0.782, 'lenient_acc': 0.848, 'char_acc': 0.9679, 'p50_ms': 1243, 'p95_ms': 1608}
+## oov  M2-B4/gemma  {'n': 25, 'sent_acc': 0.72, 'lenient_acc': 0.76, 'char_acc': 0.9437, 'p50_ms': 1378, 'p95_ms': 1540}
+   x 我買了一條拭鏡布 -> 我買了壹條是靚布
+   x 我新買的藍牙耳機很好用 -> 我新買的藍芽耳機很好用
+   x 浴室地板要鋪防滑墊 -> 欲試的板要鋪防滑墊
+   x 這罐密封罐可以裝餅乾 -> 這罐蜜蜂罐可以裝餅乾
+   x 請把衣服放進脫水籃 -> 請把伊芙放進脫水籃
+   x 我幫新平板買了平板殼 -> 我幫新平版買了平板殼
+   x 我想買一台空氣炸鍋 -> 我想買一臺空氣炸鍋
+## user-reported  M2-B4/gemma  {'n': 1, 'sent_acc': 0.0, 'lenient_acc': 0.0, 'char_acc': 0.7857, 'p50_ms': 1747, 'p95_ms': 1747}
+   x 什麼品牌或款式的拭鏡布比較好 -> 什麽品牌和款式的試鏡布比較好
+## dev  M2-B4/gemma  {'n': 300, 'sent_acc': 0.773, 'lenient_acc': 0.843, 'char_acc': 0.961, 'p50_ms': 1145, 'p95_ms': 1542}
+## peak_gpu_mem_MiB  M2-B4/gemma  5304

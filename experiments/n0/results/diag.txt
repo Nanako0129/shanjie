@@ -1,0 +1,2 @@
+gemma: rows with a char whose reading is not in single-syllable lexicon: 2/302 chars=媽; rows with a char lacking a single-char token: 0/302
+qwen: rows with a char whose reading is not in single-syllable lexicon: 2/302 chars=媽; rows with a char lacking a single-char token: 34/302

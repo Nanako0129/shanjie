@@ -1,0 +1,13 @@
+## existing  M1-nbest32/qwen  {'n': 109, 'sent_acc': 0.89, 'lenient_acc': 0.954, 'char_acc': 0.9807, 'p50_ms': 146, 'p95_ms': 164}
+## homophones  M1-nbest32/qwen  {'n': 165, 'sent_acc': 0.879, 'lenient_acc': 0.909, 'char_acc': 0.9853, 'p50_ms': 155, 'p95_ms': 175}
+## oov  M1-nbest32/qwen  {'n': 25, 'sent_acc': 0.76, 'lenient_acc': 0.76, 'char_acc': 0.961, 'p50_ms': 158, 'p95_ms': 161}
+   x 我買了一條拭鏡布 -> 我買了一條試鏡部
+   x 我把線材都放進收納盒 -> 我把線材都放進收納合
+   x 浴室地板要鋪防滑墊 -> 浴室地板要鋪防滑電
+   x 這罐密封罐可以裝餅乾 -> 這罐蜜蜂冠可以裝餅乾
+   x 可以墊一個散熱墊 -> 可以墊一個散熱電
+   x 下雨天要帶摺疊傘 -> 下雨天要帶折疊傘
+## user-reported  M1-nbest32/qwen  {'n': 3, 'sent_acc': 0.667, 'lenient_acc': 0.667, 'char_acc': 0.9474, 'p50_ms': 165, 'p95_ms': 188}
+   x 什麼品牌或款式的拭鏡布比較好 -> 什麼品牌或款式的是敬不比較好
+## dev  M1-nbest32/qwen  {'n': 302, 'sent_acc': 0.871, 'lenient_acc': 0.911, 'char_acc': 0.9809, 'p50_ms': 153, 'p95_ms': 171}
+## peak_gpu_mem_MiB  M1-nbest32/qwen  3587

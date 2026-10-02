@@ -1,0 +1,12 @@
+## existing  M2-B8/gemma  {'n': 109, 'sent_acc': 0.817, 'lenient_acc': 0.89, 'char_acc': 0.9627, 'p50_ms': 1151, 'p95_ms': 1507}
+## homophones  M2-B8/gemma  {'n': 165, 'sent_acc': 0.842, 'lenient_acc': 0.903, 'char_acc': 0.9772, 'p50_ms': 1293, 'p95_ms': 1660}
+## oov  M2-B8/gemma  {'n': 25, 'sent_acc': 0.8, 'lenient_acc': 0.8, 'char_acc': 0.9697, 'p50_ms': 1406, 'p95_ms': 1641}
+   x 我買了一條拭鏡布 -> 我買了一條試鏡布
+   x 我新買的藍牙耳機很好用 -> 我新買的藍芽耳機很好用
+   x 浴室地板要鋪防滑墊 -> 欲試的板要鋪防滑墊
+   x 我幫新平板買了平板殼 -> 我幫新平版買了平板殼
+   x 玄關裝了一個拖鞋架 -> 玄關裝了一個脫鞋架
+## user-reported  M2-B8/gemma  {'n': 1, 'sent_acc': 0.0, 'lenient_acc': 0.0, 'char_acc': 0.8571, 'p50_ms': 1794, 'p95_ms': 1794}
+   x 什麼品牌或款式的拭鏡布比較好 -> 什麼品牌和款式的試鏡布比較好
+## dev  M2-B8/gemma  {'n': 300, 'sent_acc': 0.827, 'lenient_acc': 0.887, 'char_acc': 0.9714, 'p50_ms': 1267, 'p95_ms': 1640}
+## peak_gpu_mem_MiB  M2-B8/gemma  5328
