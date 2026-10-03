@@ -1,0 +1,7 @@
+## existing  openrouter-openai_gpt-6-luna-k16-rnone  {'n': 109, 'sent_acc': 0.982, 'lenient_acc': 0.991, 'char_acc': 0.9961, 'oracle@16': 1.0}
+## homophones  openrouter-openai_gpt-6-luna-k16-rnone  {'n': 165, 'sent_acc': 0.909, 'lenient_acc': 0.921, 'char_acc': 0.9893, 'oracle@16': 0.945}
+## oov  openrouter-openai_gpt-6-luna-k16-rnone  {'n': 25, 'sent_acc': 0.76, 'lenient_acc': 0.76, 'char_acc': 0.9654, 'oracle@16': 0.76}
+## user-reported  openrouter-openai_gpt-6-luna-k16-rnone  {'n': 8, 'sent_acc': 0.625, 'lenient_acc': 0.625, 'char_acc': 0.949, 'oracle@16': 0.875}
+## ALL  openrouter-openai_gpt-6-luna-k16-rnone  {'n': 307, 'sent_acc': 0.915, 'lenient_acc': 0.925, 'char_acc': 0.9877, 'oracle@16': 0.948}
+## latency  openrouter-openai_gpt-6-luna-k16-rnone  {'n': 307, 'p50_ms': 1057, 'p95_ms': 1449}
+## usage  openrouter-openai_gpt-6-luna-k16-rnone  {'invalid': 4, 'in_tokens': 93906, 'out_tokens': 3684, 'usd': 0.0112, 'ledger_usd': 0.0935}

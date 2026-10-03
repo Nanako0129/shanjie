@@ -1,0 +1,7 @@
+## existing  gemini-gemini-3.5-flash-lite-k16-rlow  {'n': 109, 'sent_acc': 0.927, 'lenient_acc': 0.936, 'char_acc': 0.9871, 'oracle@16': 1.0}
+## homophones  gemini-gemini-3.5-flash-lite-k16-rlow  {'n': 165, 'sent_acc': 0.867, 'lenient_acc': 0.885, 'char_acc': 0.9819, 'oracle@16': 0.945}
+## oov  gemini-gemini-3.5-flash-lite-k16-rlow  {'n': 25, 'sent_acc': 0.72, 'lenient_acc': 0.72, 'char_acc': 0.9481, 'oracle@16': 0.76}
+## user-reported  gemini-gemini-3.5-flash-lite-k16-rlow  {'n': 7, 'sent_acc': 0.429, 'lenient_acc': 0.429, 'char_acc': 0.908, 'oracle@16': 0.857}
+## ALL  gemini-gemini-3.5-flash-lite-k16-rlow  {'n': 306, 'sent_acc': 0.866, 'lenient_acc': 0.879, 'char_acc': 0.978, 'oracle@16': 0.948}
+## latency  gemini-gemini-3.5-flash-lite-k16-rlow  {'n': 306, 'p50_ms': 743, 'p95_ms': 1021}
+## usage  gemini-gemini-3.5-flash-lite-k16-rlow  {'invalid': 3, 'in_tokens': 75825, 'out_tokens': 2239, 'usd': 0.0283, 'ledger_usd': 0.4932}

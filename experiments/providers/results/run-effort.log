@@ -1,0 +1,33 @@
+=== opengateway deepseek/deepseek-v4.1-flash-ultrafast effort=none 07:02:07
+## existing  opengateway-deepseek_deepseek-v4.1-flash-ultrafast-k16-rnone  {'n': 109, 'sent_acc': 0.963, 'lenient_acc': 1.0, 'char_acc': 0.991, 'oracle@16': 1.0}
+## homophones  opengateway-deepseek_deepseek-v4.1-flash-ultrafast-k16-rnone  {'n': 165, 'sent_acc': 0.891, 'lenient_acc': 0.909, 'char_acc': 0.9866, 'oracle@16': 0.945}
+## oov  opengateway-deepseek_deepseek-v4.1-flash-ultrafast-k16-rnone  {'n': 25, 'sent_acc': 0.76, 'lenient_acc': 0.76, 'char_acc': 0.9567, 'oracle@16': 0.76}
+## user-reported  opengateway-deepseek_deepseek-v4.1-flash-ultrafast-k16-rnone  {'n': 7, 'sent_acc': 0.714, 'lenient_acc': 0.714, 'char_acc': 0.954, 'oracle@16': 0.857}
+## ALL  opengateway-deepseek_deepseek-v4.1-flash-ultrafast-k16-rnone  {'n': 306, 'sent_acc': 0.902, 'lenient_acc': 0.925, 'char_acc': 0.9842, 'oracle@16': 0.948}
+## latency  opengateway-deepseek_deepseek-v4.1-flash-ultrafast-k16-rnone  {'n': 306, 'p50_ms': 378, 'p95_ms': 1590}
+## usage  opengateway-deepseek_deepseek-v4.1-flash-ultrafast-k16-rnone  {'invalid': 0, 'in_tokens': 75801, 'out_tokens': 2142, 'usd': 0.0822, 'ledger_usd': 0.0822}
+=== openrouter openai/gpt-6-luna effort=none 07:05:30
+## existing  openrouter-openai_gpt-6-luna-k16-rnone  {'n': 109, 'sent_acc': 0.982, 'lenient_acc': 0.991, 'char_acc': 0.9961, 'oracle@16': 1.0}
+## homophones  openrouter-openai_gpt-6-luna-k16-rnone  {'n': 165, 'sent_acc': 0.909, 'lenient_acc': 0.921, 'char_acc': 0.9893, 'oracle@16': 0.945}
+## oov  openrouter-openai_gpt-6-luna-k16-rnone  {'n': 25, 'sent_acc': 0.76, 'lenient_acc': 0.76, 'char_acc': 0.9654, 'oracle@16': 0.76}
+## user-reported  openrouter-openai_gpt-6-luna-k16-rnone  {'n': 8, 'sent_acc': 0.625, 'lenient_acc': 0.625, 'char_acc': 0.949, 'oracle@16': 0.875}
+## ALL  openrouter-openai_gpt-6-luna-k16-rnone  {'n': 307, 'sent_acc': 0.915, 'lenient_acc': 0.925, 'char_acc': 0.9877, 'oracle@16': 0.948}
+## latency  openrouter-openai_gpt-6-luna-k16-rnone  {'n': 307, 'p50_ms': 1057, 'p95_ms': 1449}
+## usage  openrouter-openai_gpt-6-luna-k16-rnone  {'invalid': 4, 'in_tokens': 93906, 'out_tokens': 3684, 'usd': 0.0112, 'ledger_usd': 0.0935}
+=== cerebras gpt-oss-120b effort=medium 07:11:10
+## existing  cerebras-gpt-oss-120b-k16-rmedium  {'n': 109, 'sent_acc': 0.982, 'lenient_acc': 0.982, 'char_acc': 0.9961, 'oracle@16': 1.0}
+## homophones  cerebras-gpt-oss-120b-k16-rmedium  {'n': 165, 'sent_acc': 0.915, 'lenient_acc': 0.927, 'char_acc': 0.9859, 'oracle@16': 0.945}
+## oov  cerebras-gpt-oss-120b-k16-rmedium  {'n': 25, 'sent_acc': 0.76, 'lenient_acc': 0.76, 'char_acc': 0.961, 'oracle@16': 0.76}
+## user-reported  cerebras-gpt-oss-120b-k16-rmedium  {'n': 8, 'sent_acc': 0.625, 'lenient_acc': 0.625, 'char_acc': 0.9592, 'oracle@16': 0.875}
+## ALL  cerebras-gpt-oss-120b-k16-rmedium  {'n': 307, 'sent_acc': 0.919, 'lenient_acc': 0.925, 'char_acc': 0.9858, 'oracle@16': 0.948}
+## latency  cerebras-gpt-oss-120b-k16-rmedium  {'n': 307, 'p50_ms': 356, 'p95_ms': 759}
+## usage  cerebras-gpt-oss-120b-k16-rmedium  {'invalid': 3, 'in_tokens': 141491, 'out_tokens': 54558, 'usd': 0.3052, 'ledger_usd': 0.3986}
+=== openrouter openai/gpt-6-luna effort=medium 07:13:20
+## existing  openrouter-openai_gpt-6-luna-k16-rmedium  {'n': 109, 'sent_acc': 0.991, 'lenient_acc': 0.991, 'char_acc': 0.9987, 'oracle@16': 1.0}
+## homophones  openrouter-openai_gpt-6-luna-k16-rmedium  {'n': 165, 'sent_acc': 0.903, 'lenient_acc': 0.915, 'char_acc': 0.9886, 'oracle@16': 0.945}
+## oov  openrouter-openai_gpt-6-luna-k16-rmedium  {'n': 25, 'sent_acc': 0.76, 'lenient_acc': 0.76, 'char_acc': 0.9654, 'oracle@16': 0.76}
+## user-reported  openrouter-openai_gpt-6-luna-k16-rmedium  {'n': 8, 'sent_acc': 0.625, 'lenient_acc': 0.625, 'char_acc': 0.949, 'oracle@16': 0.875}
+## ALL  openrouter-openai_gpt-6-luna-k16-rmedium  {'n': 307, 'sent_acc': 0.915, 'lenient_acc': 0.922, 'char_acc': 0.9881, 'oracle@16': 0.948}
+## latency  openrouter-openai_gpt-6-luna-k16-rmedium  {'n': 307, 'p50_ms': 2195, 'p95_ms': 4417}
+## usage  openrouter-openai_gpt-6-luna-k16-rmedium  {'invalid': 0, 'in_tokens': 93906, 'out_tokens': 16596, 'usd': 0.0177, 'ledger_usd': 0.4163, 'served_by': ['OpenAI']}
+EFFORT DONE 07:26:03

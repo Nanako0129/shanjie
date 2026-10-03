@@ -1,0 +1,33 @@
+=== opengateway deepseek/deepseek-v4.1-flash-ultrafast 06:59:43
+## existing  opengateway-deepseek_deepseek-v4.1-flash-ultrafast-k16-rlow  {'n': 109, 'sent_acc': 0.972, 'lenient_acc': 0.972, 'char_acc': 0.9949, 'oracle@16': 1.0}
+## homophones  opengateway-deepseek_deepseek-v4.1-flash-ultrafast-k16-rlow  {'n': 165, 'sent_acc': 0.903, 'lenient_acc': 0.921, 'char_acc': 0.9853, 'oracle@16': 0.945}
+## oov  opengateway-deepseek_deepseek-v4.1-flash-ultrafast-k16-rlow  {'n': 25, 'sent_acc': 0.76, 'lenient_acc': 0.76, 'char_acc': 0.9481, 'oracle@16': 0.76}
+## user-reported  opengateway-deepseek_deepseek-v4.1-flash-ultrafast-k16-rlow  {'n': 7, 'sent_acc': 0.429, 'lenient_acc': 0.429, 'char_acc': 0.908, 'oracle@16': 0.857}
+## ALL  opengateway-deepseek_deepseek-v4.1-flash-ultrafast-k16-rlow  {'n': 306, 'sent_acc': 0.905, 'lenient_acc': 0.915, 'char_acc': 0.9822, 'oracle@16': 0.948}
+## latency  opengateway-deepseek_deepseek-v4.1-flash-ultrafast-k16-rlow  {'n': 306, 'p50_ms': 1064, 'p95_ms': 6983}
+## usage  opengateway-deepseek_deepseek-v4.1-flash-ultrafast-k16-rlow  {'invalid': 13, 'in_tokens': 83451, 'out_tokens': 35700, 'usd': 0.1906, 'ledger_usd': 0.1906}
+=== opengateway z-ai/glm-5.3-flash-ultrafast 07:10:14
+## existing  opengateway-z-ai_glm-5.3-flash-ultrafast-k16-rlow  {'n': 109, 'sent_acc': 0.972, 'lenient_acc': 0.982, 'char_acc': 0.9949, 'oracle@16': 1.0}
+## homophones  opengateway-z-ai_glm-5.3-flash-ultrafast-k16-rlow  {'n': 165, 'sent_acc': 0.885, 'lenient_acc': 0.897, 'char_acc': 0.9866, 'oracle@16': 0.945}
+## oov  opengateway-z-ai_glm-5.3-flash-ultrafast-k16-rlow  {'n': 25, 'sent_acc': 0.76, 'lenient_acc': 0.76, 'char_acc': 0.9654, 'oracle@16': 0.76}
+## user-reported  opengateway-z-ai_glm-5.3-flash-ultrafast-k16-rlow  {'n': 8, 'sent_acc': 0.625, 'lenient_acc': 0.625, 'char_acc': 0.9592, 'oracle@16': 0.875}
+## ALL  opengateway-z-ai_glm-5.3-flash-ultrafast-k16-rlow  {'n': 307, 'sent_acc': 0.899, 'lenient_acc': 0.909, 'char_acc': 0.9862, 'oracle@16': 0.948}
+## latency  opengateway-z-ai_glm-5.3-flash-ultrafast-k16-rlow  {'n': 307, 'p50_ms': 509, 'p95_ms': 1858}
+## usage  opengateway-z-ai_glm-5.3-flash-ultrafast-k16-rlow  {'invalid': 0, 'in_tokens': 87111, 'out_tokens': 3672, 'usd': 0.0981, 'ledger_usd': 0.2887}
+=== opengateway openai/gpt-6-luna 07:13:52
+## existing  opengateway-openai_gpt-6-luna-k16-rlow  {'n': 109, 'sent_acc': 0.982, 'lenient_acc': 0.991, 'char_acc': 0.9961, 'oracle@16': 1.0}
+## homophones  opengateway-openai_gpt-6-luna-k16-rlow  {'n': 165, 'sent_acc': 0.897, 'lenient_acc': 0.909, 'char_acc': 0.9873, 'oracle@16': 0.945}
+## oov  opengateway-openai_gpt-6-luna-k16-rlow  {'n': 25, 'sent_acc': 0.76, 'lenient_acc': 0.76, 'char_acc': 0.9654, 'oracle@16': 0.76}
+## user-reported  opengateway-openai_gpt-6-luna-k16-rlow  {'n': 8, 'sent_acc': 0.625, 'lenient_acc': 0.625, 'char_acc': 0.949, 'oracle@16': 0.875}
+## ALL  opengateway-openai_gpt-6-luna-k16-rlow  {'n': 307, 'sent_acc': 0.909, 'lenient_acc': 0.919, 'char_acc': 0.9865, 'oracle@16': 0.948}
+## latency  opengateway-openai_gpt-6-luna-k16-rlow  {'n': 307, 'p50_ms': 1167, 'p95_ms': 2510}
+## usage  opengateway-openai_gpt-6-luna-k16-rlow  {'invalid': 0, 'in_tokens': 94827, 'out_tokens': 11774, 'usd': 0.1301, 'ledger_usd': 0.4188, 'served_by': ['None']}
+=== opengateway moonshotai/kimi-k3-ultrafast 07:21:05
+## existing  opengateway-moonshotai_kimi-k3-ultrafast-k16-rlow  {'n': 109, 'sent_acc': 0.972, 'lenient_acc': 0.982, 'char_acc': 0.9949, 'oracle@16': 1.0}
+## homophones  opengateway-moonshotai_kimi-k3-ultrafast-k16-rlow  {'n': 165, 'sent_acc': 0.903, 'lenient_acc': 0.915, 'char_acc': 0.988, 'oracle@16': 0.945}
+## oov  opengateway-moonshotai_kimi-k3-ultrafast-k16-rlow  {'n': 25, 'sent_acc': 0.72, 'lenient_acc': 0.72, 'char_acc': 0.961, 'oracle@16': 0.76}
+## user-reported  opengateway-moonshotai_kimi-k3-ultrafast-k16-rlow  {'n': 8, 'sent_acc': 0.75, 'lenient_acc': 0.75, 'char_acc': 0.9388, 'oracle@16': 0.875}
+## ALL  opengateway-moonshotai_kimi-k3-ultrafast-k16-rlow  {'n': 307, 'sent_acc': 0.909, 'lenient_acc': 0.919, 'char_acc': 0.9858, 'oracle@16': 0.948}
+## latency  opengateway-moonshotai_kimi-k3-ultrafast-k16-rlow  {'n': 307, 'p50_ms': 4057, 'p95_ms': 8127}
+## usage  opengateway-moonshotai_kimi-k3-ultrafast-k16-rlow  {'invalid': 1, 'in_tokens': 139639, 'out_tokens': 34715, 'usd': 0.2438, 'ledger_usd': 0.6626, 'served_by': ['None']}
+OG DONE 07:44:12

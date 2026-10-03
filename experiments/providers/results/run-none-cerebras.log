@@ -1,0 +1,9 @@
+=== cerebras qwen-3.8-27b effort=none 07:02:53
+## existing  cerebras-qwen-3.8-27b-k16-rnone  {'n': 109, 'sent_acc': 0.982, 'lenient_acc': 0.982, 'char_acc': 0.9961, 'oracle@16': 1.0}
+## homophones  cerebras-qwen-3.8-27b-k16-rnone  {'n': 165, 'sent_acc': 0.885, 'lenient_acc': 0.903, 'char_acc': 0.9859, 'oracle@16': 0.945}
+## oov  cerebras-qwen-3.8-27b-k16-rnone  {'n': 25, 'sent_acc': 0.76, 'lenient_acc': 0.76, 'char_acc': 0.9567, 'oracle@16': 0.76}
+## user-reported  cerebras-qwen-3.8-27b-k16-rnone  {'n': 8, 'sent_acc': 0.625, 'lenient_acc': 0.625, 'char_acc': 0.949, 'oracle@16': 0.875}
+## ALL  cerebras-qwen-3.8-27b-k16-rnone  {'n': 307, 'sent_acc': 0.902, 'lenient_acc': 0.912, 'char_acc': 0.985, 'oracle@16': 0.948}
+## latency  cerebras-qwen-3.8-27b-k16-rnone  {'n': 307, 'p50_ms': 309, 'p95_ms': 438}
+## usage  cerebras-qwen-3.8-27b-k16-rnone  {'invalid': 0, 'in_tokens': 117003, 'out_tokens': 2159, 'usd': 0.0728, 'ledger_usd': 0.0728}
+NONE-CEREBRAS DONE 07:04:40

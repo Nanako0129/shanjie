@@ -1,0 +1,7 @@
+## existing  openrouter@groq-meta-llama_llama-3.1-8b-instruct-k16-rdefault  {'n': 109, 'sent_acc': 0.844, 'lenient_acc': 0.899, 'char_acc': 0.9704, 'oracle@16': 1.0}
+## homophones  openrouter@groq-meta-llama_llama-3.1-8b-instruct-k16-rdefault  {'n': 165, 'sent_acc': 0.703, 'lenient_acc': 0.77, 'char_acc': 0.9612, 'oracle@16': 0.945}
+## oov  openrouter@groq-meta-llama_llama-3.1-8b-instruct-k16-rdefault  {'n': 25, 'sent_acc': 0.48, 'lenient_acc': 0.48, 'char_acc': 0.9091, 'oracle@16': 0.76}
+## user-reported  openrouter@groq-meta-llama_llama-3.1-8b-instruct-k16-rdefault  {'n': 8, 'sent_acc': 0.375, 'lenient_acc': 0.375, 'char_acc': 0.9184, 'oracle@16': 0.875}
+## ALL  openrouter@groq-meta-llama_llama-3.1-8b-instruct-k16-rdefault  {'n': 307, 'sent_acc': 0.726, 'lenient_acc': 0.782, 'char_acc': 0.9577, 'oracle@16': 0.948}
+## latency  openrouter@groq-meta-llama_llama-3.1-8b-instruct-k16-rdefault  {'n': 307, 'p50_ms': 221, 'p95_ms': 344}
+## usage  openrouter@groq-meta-llama_llama-3.1-8b-instruct-k16-rdefault  {'invalid': 0, 'in_tokens': 99338, 'out_tokens': 2763, 'usd': 0.0052, 'ledger_usd': 0.0688, 'served_by': ['Groq']}

@@ -1,0 +1,92 @@
+=== cerebras gpt-oss-120b 06:31:13
+## existing  cerebras-gpt-oss-120b-k16-rlow  {'n': 109, 'sent_acc': 0.954, 'lenient_acc': 0.954, 'char_acc': 0.9897, 'oracle@16': 1.0}
+## homophones  cerebras-gpt-oss-120b-k16-rlow  {'n': 165, 'sent_acc': 0.897, 'lenient_acc': 0.909, 'char_acc': 0.9859, 'oracle@16': 0.945}
+## oov  cerebras-gpt-oss-120b-k16-rlow  {'n': 25, 'sent_acc': 0.72, 'lenient_acc': 0.72, 'char_acc': 0.9524, 'oracle@16': 0.76}
+## user-reported  cerebras-gpt-oss-120b-k16-rlow  {'n': 3, 'sent_acc': 0.667, 'lenient_acc': 0.667, 'char_acc': 0.9649, 'oracle@16': 0.667}
+## ALL  cerebras-gpt-oss-120b-k16-rlow  {'n': 302, 'sent_acc': 0.901, 'lenient_acc': 0.907, 'char_acc': 0.9836, 'oracle@16': 0.947}
+## latency  cerebras-gpt-oss-120b-k16-rlow  {'n': 302, 'p50_ms': 298, 'p95_ms': 510}
+## usage  cerebras-gpt-oss-120b-k16-rlow  {'invalid': 0, 'in_tokens': 139248, 'out_tokens': 17823, 'usd': 0.1049, 'ledger_usd': 0.1123}
+=== cerebras qwen-3.8-27b 06:33:15
+## existing  cerebras-qwen-3.8-27b-k16-rlow  {'n': 109, 'sent_acc': 0.963, 'lenient_acc': 0.963, 'char_acc': 0.9923, 'oracle@16': 1.0}
+## homophones  cerebras-qwen-3.8-27b-k16-rlow  {'n': 165, 'sent_acc': 0.885, 'lenient_acc': 0.903, 'char_acc': 0.9806, 'oracle@16': 0.945}
+## oov  cerebras-qwen-3.8-27b-k16-rlow  {'n': 25, 'sent_acc': 0.72, 'lenient_acc': 0.72, 'char_acc': 0.9264, 'oracle@16': 0.76}
+## user-reported  cerebras-qwen-3.8-27b-k16-rlow  {'n': 3, 'sent_acc': 0.667, 'lenient_acc': 0.667, 'char_acc': 0.9123, 'oracle@16': 0.667}
+## ALL  cerebras-qwen-3.8-27b-k16-rlow  {'n': 302, 'sent_acc': 0.897, 'lenient_acc': 0.907, 'char_acc': 0.9777, 'oracle@16': 0.947}
+## latency  cerebras-qwen-3.8-27b-k16-rlow  {'n': 302, 'p50_ms': 594, 'p95_ms': 977}
+## usage  cerebras-qwen-3.8-27b-k16-rlow  {'invalid': 18, 'in_tokens': 122366, 'out_tokens': 136820, 'usd': 0.2376, 'ledger_usd': 0.3499}
+=== openrouter deepseek/deepseek-v4.1-flash 06:36:34
+## existing  openrouter-deepseek_deepseek-v4.1-flash-k16-rlow  {'n': 109, 'sent_acc': 0.954, 'lenient_acc': 0.954, 'char_acc': 0.991, 'oracle@16': 1.0}
+## homophones  openrouter-deepseek_deepseek-v4.1-flash-k16-rlow  {'n': 165, 'sent_acc': 0.897, 'lenient_acc': 0.915, 'char_acc': 0.9846, 'oracle@16': 0.945}
+## oov  openrouter-deepseek_deepseek-v4.1-flash-k16-rlow  {'n': 25, 'sent_acc': 0.76, 'lenient_acc': 0.76, 'char_acc': 0.9437, 'oracle@16': 0.76}
+## user-reported  openrouter-deepseek_deepseek-v4.1-flash-k16-rlow  {'n': 3, 'sent_acc': 0.667, 'lenient_acc': 0.667, 'char_acc': 0.9123, 'oracle@16': 0.667}
+## ALL  openrouter-deepseek_deepseek-v4.1-flash-k16-rlow  {'n': 302, 'sent_acc': 0.904, 'lenient_acc': 0.914, 'char_acc': 0.9812, 'oracle@16': 0.947}
+## latency  openrouter-deepseek_deepseek-v4.1-flash-k16-rlow  {'n': 302, 'p50_ms': 1253, 'p95_ms': 5902}
+## usage  openrouter-deepseek_deepseek-v4.1-flash-k16-rlow  {'invalid': 12, 'in_tokens': 88829, 'out_tokens': 36020, 'usd': 0.0444, 'ledger_usd': 0.3942}
+=== openrouter qwen/qwen3.8-flash 06:46:41
+## existing  openrouter-qwen_qwen3.8-flash-k16-rlow  {'n': 1, 'sent_acc': 1.0, 'lenient_acc': 1.0, 'char_acc': 1.0, 'oracle@16': 1.0}
+## ALL  openrouter-qwen_qwen3.8-flash-k16-rlow  {'n': 1, 'sent_acc': 1.0, 'lenient_acc': 1.0, 'char_acc': 1.0, 'oracle@16': 1.0}
+## latency  openrouter-qwen_qwen3.8-flash-k16-rlow  {'n': 1, 'p50_ms': 6696, 'p95_ms': 6696}
+## usage  openrouter-qwen_qwen3.8-flash-k16-rlow  {'invalid': 0, 'in_tokens': 316, 'out_tokens': 492, 'usd': 0.0003, 'ledger_usd': 0.3945}
+RATE_LIMIT HTTP 429 at row 1 (1 rows saved): b'{"error":{"message":"Provider returned error","code":429,"metadata":{"raw":"qwen/qwen3.8-flash is temporarily rate-limited upstream. Please retry shortly, or add your own key to accumulate your rate l'
+FAILED openrouter qwen/qwen3.8-flash
+=== openrouter z-ai/glm-5.3-flash 06:46:54
+## existing  openrouter-z-ai_glm-5.3-flash-k16-rlow  {'n': 109, 'sent_acc': 0.972, 'lenient_acc': 0.982, 'char_acc': 0.9949, 'oracle@16': 1.0}
+## homophones  openrouter-z-ai_glm-5.3-flash-k16-rlow  {'n': 165, 'sent_acc': 0.867, 'lenient_acc': 0.885, 'char_acc': 0.9846, 'oracle@16': 0.945}
+## oov  openrouter-z-ai_glm-5.3-flash-k16-rlow  {'n': 25, 'sent_acc': 0.76, 'lenient_acc': 0.76, 'char_acc': 0.9654, 'oracle@16': 0.76}
+## user-reported  openrouter-z-ai_glm-5.3-flash-k16-rlow  {'n': 3, 'sent_acc': 0.667, 'lenient_acc': 0.667, 'char_acc': 0.9649, 'oracle@16': 0.667}
+## ALL  openrouter-z-ai_glm-5.3-flash-k16-rlow  {'n': 302, 'sent_acc': 0.894, 'lenient_acc': 0.907, 'char_acc': 0.9855, 'oracle@16': 0.947}
+## latency  openrouter-z-ai_glm-5.3-flash-k16-rlow  {'n': 302, 'p50_ms': 520, 'p95_ms': 1349}
+## usage  openrouter-z-ai_glm-5.3-flash-k16-rlow  {'invalid': 0, 'in_tokens': 85774, 'out_tokens': 3656, 'usd': 0.0559, 'ledger_usd': 0.4504}
+=== openrouter openai/gpt-6-luna 06:50:08
+## existing  openrouter-openai_gpt-6-luna-k16-rlow  {'n': 109, 'sent_acc': 1.0, 'lenient_acc': 1.0, 'char_acc': 1.0, 'oracle@16': 1.0}
+## homophones  openrouter-openai_gpt-6-luna-k16-rlow  {'n': 165, 'sent_acc': 0.909, 'lenient_acc': 0.921, 'char_acc': 0.9893, 'oracle@16': 0.945}
+## oov  openrouter-openai_gpt-6-luna-k16-rlow  {'n': 25, 'sent_acc': 0.76, 'lenient_acc': 0.76, 'char_acc': 0.9654, 'oracle@16': 0.76}
+## user-reported  openrouter-openai_gpt-6-luna-k16-rlow  {'n': 3, 'sent_acc': 0.667, 'lenient_acc': 0.667, 'char_acc': 0.9649, 'oracle@16': 0.667}
+## ALL  openrouter-openai_gpt-6-luna-k16-rlow  {'n': 302, 'sent_acc': 0.927, 'lenient_acc': 0.934, 'char_acc': 0.9898, 'oracle@16': 0.947}
+## latency  openrouter-openai_gpt-6-luna-k16-rlow  {'n': 302, 'p50_ms': 1136, 'p95_ms': 3146}
+## usage  openrouter-openai_gpt-6-luna-k16-rlow  {'invalid': 3, 'in_tokens': 92438, 'out_tokens': 10453, 'usd': 0.0145, 'ledger_usd': 0.4648}
+=== openrouter qwen/qwen3.8-flash (resume) 06:57:37
+resume from row 1
+## existing  openrouter-qwen_qwen3.8-flash-k16-rlow  {'n': 1, 'sent_acc': 1.0, 'lenient_acc': 1.0, 'char_acc': 1.0, 'oracle@16': 1.0}
+## ALL  openrouter-qwen_qwen3.8-flash-k16-rlow  {'n': 1, 'sent_acc': 1.0, 'lenient_acc': 1.0, 'char_acc': 1.0, 'oracle@16': 1.0}
+## latency  openrouter-qwen_qwen3.8-flash-k16-rlow  {'n': 1, 'p50_ms': 6696, 'p95_ms': 6696}
+## usage  openrouter-qwen_qwen3.8-flash-k16-rlow  {'invalid': 0, 'in_tokens': 0, 'out_tokens': 0, 'usd': 0.0000, 'ledger_usd': 0.4648}
+RATE_LIMIT HTTP 429 at row 1 (1 rows saved): b'{"error":{"message":"Provider returned error","code":429,"metadata":{"raw":"qwen/qwen3.8-flash is temporarily rate-limited upstream. Please retry shortly, or add your own key to accumulate your rate l'
+FAILED openrouter qwen/qwen3.8-flash
+=== gemini gemini-3.5-flash-lite 06:57:42
+Traceback (most recent call last):
+  File "/Users/nanako/side-project/shanjie/experiments/providers/n1_providers.py", line 161, in <module>
+    main()
+    ~~~~^^
+  File "/Users/nanako/side-project/shanjie/experiments/providers/n1_providers.py", line 127, in main
+    content = (out["choices"][0]["message"].get("content") or "")
+               ~~~~~~~~~~~~~~~~~^^^^^^^^^^^
+KeyError: 'message'
+FAILED gemini gemini-3.5-flash-lite
+=== gemini gemini-3.8-flash 06:58:31
+Traceback (most recent call last):
+  File "/Users/nanako/side-project/shanjie/experiments/providers/n1_providers.py", line 161, in <module>
+    if __name__ == "__main__":
+        ^^^^^^
+  File "/Users/nanako/side-project/shanjie/experiments/providers/n1_providers.py", line 127, in main
+    # 被安全過濾擋掉等情況會沒有 message：當成不合法回應（R1：退回第一名），不讓整批崩潰
+KeyError: 'message'
+FAILED gemini gemini-3.8-flash
+CHEAP DONE 06:59:50
+=== gemini gemini-3.5-flash-lite (rerun) 07:00:08
+## existing  gemini-gemini-3.5-flash-lite-k16-rlow  {'n': 109, 'sent_acc': 0.927, 'lenient_acc': 0.936, 'char_acc': 0.9871, 'oracle@16': 1.0}
+## homophones  gemini-gemini-3.5-flash-lite-k16-rlow  {'n': 165, 'sent_acc': 0.867, 'lenient_acc': 0.885, 'char_acc': 0.9819, 'oracle@16': 0.945}
+## oov  gemini-gemini-3.5-flash-lite-k16-rlow  {'n': 25, 'sent_acc': 0.72, 'lenient_acc': 0.72, 'char_acc': 0.9481, 'oracle@16': 0.76}
+## user-reported  gemini-gemini-3.5-flash-lite-k16-rlow  {'n': 7, 'sent_acc': 0.429, 'lenient_acc': 0.429, 'char_acc': 0.908, 'oracle@16': 0.857}
+## ALL  gemini-gemini-3.5-flash-lite-k16-rlow  {'n': 306, 'sent_acc': 0.866, 'lenient_acc': 0.879, 'char_acc': 0.978, 'oracle@16': 0.948}
+## latency  gemini-gemini-3.5-flash-lite-k16-rlow  {'n': 306, 'p50_ms': 743, 'p95_ms': 1021}
+## usage  gemini-gemini-3.5-flash-lite-k16-rlow  {'invalid': 3, 'in_tokens': 75825, 'out_tokens': 2239, 'usd': 0.0283, 'ledger_usd': 0.4932}
+=== gemini gemini-3.8-flash (rerun) 07:04:07
+## existing  gemini-gemini-3.8-flash-k16-rlow  {'n': 109, 'sent_acc': 0.982, 'lenient_acc': 0.982, 'char_acc': 0.9974, 'oracle@16': 1.0}
+## homophones  gemini-gemini-3.8-flash-k16-rlow  {'n': 165, 'sent_acc': 0.909, 'lenient_acc': 0.921, 'char_acc': 0.9886, 'oracle@16': 0.945}
+## oov  gemini-gemini-3.8-flash-k16-rlow  {'n': 25, 'sent_acc': 0.76, 'lenient_acc': 0.76, 'char_acc': 0.9567, 'oracle@16': 0.76}
+## user-reported  gemini-gemini-3.8-flash-k16-rlow  {'n': 8, 'sent_acc': 0.875, 'lenient_acc': 0.875, 'char_acc': 0.9796, 'oracle@16': 0.875}
+## ALL  gemini-gemini-3.8-flash-k16-rlow  {'n': 307, 'sent_acc': 0.922, 'lenient_acc': 0.928, 'char_acc': 0.9881, 'oracle@16': 0.948}
+## latency  gemini-gemini-3.8-flash-k16-rlow  {'n': 307, 'p50_ms': 1237, 'p95_ms': 2473}
+## usage  gemini-gemini-3.8-flash-k16-rlow  {'invalid': 1, 'in_tokens': 76107, 'out_tokens': 2477, 'usd': 0.0664, 'ledger_usd': 0.5596}
+CHEAP DONE 07:11:11

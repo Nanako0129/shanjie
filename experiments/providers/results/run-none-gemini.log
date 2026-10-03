@@ -1,0 +1,11 @@
+=== gemini gemini-3.5-flash-lite effort=none 07:11:24
+HTTP_ERROR HTTP 400 at row 0 (0 rows saved): b'[{\n  "error": {\n    "code": 400,\n    "message": "Request contains an invalid argument.",\n    "status": "INVALID_ARGUMENT"\n  }\n}\n]'
+FAILED gemini gemini-3.5-flash-lite none
+=== gemini gemini-3.8-flash effort=none 07:11:25
+## existing  gemini-gemini-3.8-flash-k16-rnone  {'n': 83, 'sent_acc': 1.0, 'lenient_acc': 1.0, 'char_acc': 1.0, 'oracle@16': 1.0}
+## ALL  gemini-gemini-3.8-flash-k16-rnone  {'n': 83, 'sent_acc': 1.0, 'lenient_acc': 1.0, 'char_acc': 1.0, 'oracle@16': 1.0}
+## latency  gemini-gemini-3.8-flash-k16-rnone  {'n': 83, 'p50_ms': 1162, 'p95_ms': 1526}
+## usage  gemini-gemini-3.8-flash-k16-rnone  {'invalid': 1, 'in_tokens': 19032, 'out_tokens': 654, 'usd': 0.0167, 'ledger_usd': 0.0167}
+HTTP_ERROR HTTP 503 at row 83 (83 rows saved): b'[{\n  "error": {\n    "code": 503,\n    "message": "The service is currently unavailable.",\n    "status": "UNAVAILABLE"\n  }\n}\n]'
+FAILED gemini gemini-3.8-flash none
+NONE-GEMINI DONE 07:13:05

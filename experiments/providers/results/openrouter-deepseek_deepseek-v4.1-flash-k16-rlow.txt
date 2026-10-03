@@ -1,0 +1,7 @@
+## existing  openrouter-deepseek_deepseek-v4.1-flash-k16-rlow  {'n': 109, 'sent_acc': 0.954, 'lenient_acc': 0.954, 'char_acc': 0.991, 'oracle@16': 1.0}
+## homophones  openrouter-deepseek_deepseek-v4.1-flash-k16-rlow  {'n': 165, 'sent_acc': 0.897, 'lenient_acc': 0.915, 'char_acc': 0.9846, 'oracle@16': 0.945}
+## oov  openrouter-deepseek_deepseek-v4.1-flash-k16-rlow  {'n': 25, 'sent_acc': 0.76, 'lenient_acc': 0.76, 'char_acc': 0.9437, 'oracle@16': 0.76}
+## user-reported  openrouter-deepseek_deepseek-v4.1-flash-k16-rlow  {'n': 3, 'sent_acc': 0.667, 'lenient_acc': 0.667, 'char_acc': 0.9123, 'oracle@16': 0.667}
+## ALL  openrouter-deepseek_deepseek-v4.1-flash-k16-rlow  {'n': 302, 'sent_acc': 0.904, 'lenient_acc': 0.914, 'char_acc': 0.9812, 'oracle@16': 0.947}
+## latency  openrouter-deepseek_deepseek-v4.1-flash-k16-rlow  {'n': 302, 'p50_ms': 1253, 'p95_ms': 5902}
+## usage  openrouter-deepseek_deepseek-v4.1-flash-k16-rlow  {'invalid': 12, 'in_tokens': 88829, 'out_tokens': 36020, 'usd': 0.0444, 'ledger_usd': 0.3942}

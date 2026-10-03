@@ -1,0 +1,44 @@
+=== resume openrouter meta-llama/llama-3.3-70b-instruct --or-provider groq --reasoning default --json-object --budget-usd 0.5 07:18:15
+resume from row 166
+## existing  openrouter@groq-meta-llama_llama-3.3-70b-instruct-k16-rdefault  {'n': 109, 'sent_acc': 0.936, 'lenient_acc': 0.954, 'char_acc': 0.9871, 'oracle@16': 1.0}
+## homophones  openrouter@groq-meta-llama_llama-3.3-70b-instruct-k16-rdefault  {'n': 165, 'sent_acc': 0.842, 'lenient_acc': 0.873, 'char_acc': 0.9759, 'oracle@16': 0.945}
+## oov  openrouter@groq-meta-llama_llama-3.3-70b-instruct-k16-rdefault  {'n': 25, 'sent_acc': 0.64, 'lenient_acc': 0.64, 'char_acc': 0.9307, 'oracle@16': 0.76}
+## user-reported  openrouter@groq-meta-llama_llama-3.3-70b-instruct-k16-rdefault  {'n': 8, 'sent_acc': 0.375, 'lenient_acc': 0.375, 'char_acc': 0.9286, 'oracle@16': 0.875}
+## ALL  openrouter@groq-meta-llama_llama-3.3-70b-instruct-k16-rdefault  {'n': 307, 'sent_acc': 0.847, 'lenient_acc': 0.87, 'char_acc': 0.9735, 'oracle@16': 0.948}
+## latency  openrouter@groq-meta-llama_llama-3.3-70b-instruct-k16-rdefault  {'n': 307, 'p50_ms': 229, 'p95_ms': 360}
+## usage  openrouter@groq-meta-llama_llama-3.3-70b-instruct-k16-rdefault  {'invalid': 0, 'in_tokens': 99338, 'out_tokens': 2763, 'usd': 0.0608, 'ledger_usd': 0.0976, 'served_by': ['Groq']}
+=== resume openrouter openai/gpt-oss-20b --or-provider groq --reasoning low --budget-usd 0.5 07:18:51
+resume from row 73
+## existing  openrouter@groq-openai_gpt-oss-20b-k16-rlow  {'n': 109, 'sent_acc': 0.917, 'lenient_acc': 0.936, 'char_acc': 0.9846, 'oracle@16': 1.0}
+## homophones  openrouter@groq-openai_gpt-oss-20b-k16-rlow  {'n': 165, 'sent_acc': 0.848, 'lenient_acc': 0.867, 'char_acc': 0.9813, 'oracle@16': 0.945}
+## oov  openrouter@groq-openai_gpt-oss-20b-k16-rlow  {'n': 25, 'sent_acc': 0.68, 'lenient_acc': 0.68, 'char_acc': 0.9264, 'oracle@16': 0.76}
+## user-reported  openrouter@groq-openai_gpt-oss-20b-k16-rlow  {'n': 8, 'sent_acc': 0.625, 'lenient_acc': 0.625, 'char_acc': 0.9592, 'oracle@16': 0.875}
+## ALL  openrouter@groq-openai_gpt-oss-20b-k16-rlow  {'n': 307, 'sent_acc': 0.853, 'lenient_acc': 0.87, 'char_acc': 0.9765, 'oracle@16': 0.948}
+## latency  openrouter@groq-openai_gpt-oss-20b-k16-rlow  {'n': 307, 'p50_ms': 580, 'p95_ms': 858}
+## usage  openrouter@groq-openai_gpt-oss-20b-k16-rlow  {'invalid': 8, 'in_tokens': 117214, 'out_tokens': 17824, 'usd': 0.0136, 'ledger_usd': 0.1083, 'served_by': ['Groq']}
+=== resume gemini gemini-3.8-flash --reasoning none --price-in 0.75 --price-out 3.75 --budget-usd 0.5 07:21:12
+resume from row 83
+## existing  gemini-gemini-3.8-flash-k16-rnone  {'n': 109, 'sent_acc': 0.991, 'lenient_acc': 0.991, 'char_acc': 0.9987, 'oracle@16': 1.0}
+## homophones  gemini-gemini-3.8-flash-k16-rnone  {'n': 165, 'sent_acc': 0.909, 'lenient_acc': 0.921, 'char_acc': 0.9886, 'oracle@16': 0.945}
+## oov  gemini-gemini-3.8-flash-k16-rnone  {'n': 25, 'sent_acc': 0.76, 'lenient_acc': 0.76, 'char_acc': 0.9654, 'oracle@16': 0.76}
+## user-reported  gemini-gemini-3.8-flash-k16-rnone  {'n': 8, 'sent_acc': 0.875, 'lenient_acc': 0.875, 'char_acc': 0.9796, 'oracle@16': 0.875}
+## ALL  gemini-gemini-3.8-flash-k16-rnone  {'n': 307, 'sent_acc': 0.925, 'lenient_acc': 0.932, 'char_acc': 0.9892, 'oracle@16': 0.948}
+## latency  gemini-gemini-3.8-flash-k16-rnone  {'n': 307, 'p50_ms': 1245, 'p95_ms': 2466}
+## usage  gemini-gemini-3.8-flash-k16-rnone  {'invalid': 0, 'in_tokens': 76107, 'out_tokens': 2428, 'usd': 0.0662, 'ledger_usd': 0.0662, 'served_by': ['None']}
+=== resume openrouter qwen/qwen3.8-flash --reasoning low 07:26:36
+resume from row 1
+## existing  openrouter-qwen_qwen3.8-flash-k16-rlow  {'n': 1, 'sent_acc': 1.0, 'lenient_acc': 1.0, 'char_acc': 1.0, 'oracle@16': 1.0}
+## ALL  openrouter-qwen_qwen3.8-flash-k16-rlow  {'n': 1, 'sent_acc': 1.0, 'lenient_acc': 1.0, 'char_acc': 1.0, 'oracle@16': 1.0}
+## latency  openrouter-qwen_qwen3.8-flash-k16-rlow  {'n': 1, 'p50_ms': 6696, 'p95_ms': 6696}
+## usage  openrouter-qwen_qwen3.8-flash-k16-rlow  {'invalid': 0, 'in_tokens': 0, 'out_tokens': 0, 'usd': 0.0000, 'ledger_usd': 0.5596, 'served_by': ['None']}
+RATE_LIMIT HTTP 429 at row 1 (1 rows saved): b'{"error":{"message":"Provider returned error","code":429,"metadata":{"raw":"qwen/qwen3.8-flash is temporarily rate-limited upstream. Please retry shortly, or add your own key to accumulate your rate l'
+FAILED resume openrouter qwen/qwen3.8-flash --reasoning low
+=== resume openrouter qwen/qwen3.8-flash --reasoning none --budget-usd 0.5 07:26:42
+resume from row 2
+## existing  openrouter-qwen_qwen3.8-flash-k16-rnone  {'n': 5, 'sent_acc': 1.0, 'lenient_acc': 1.0, 'char_acc': 1.0, 'oracle@16': 1.0}
+## ALL  openrouter-qwen_qwen3.8-flash-k16-rnone  {'n': 5, 'sent_acc': 1.0, 'lenient_acc': 1.0, 'char_acc': 1.0, 'oracle@16': 1.0}
+## latency  openrouter-qwen_qwen3.8-flash-k16-rnone  {'n': 5, 'p50_ms': 6023, 'p95_ms': 6217}
+## usage  openrouter-qwen_qwen3.8-flash-k16-rnone  {'invalid': 0, 'in_tokens': 1257, 'out_tokens': 30, 'usd': 0.0002, 'ledger_usd': 0.0125, 'served_by': ['Alibaba', 'None']}
+RATE_LIMIT HTTP 429 at row 5 (5 rows saved): b'{"error":{"message":"Provider returned error","code":429,"metadata":{"raw":"qwen/qwen3.8-flash is temporarily rate-limited upstream. Please retry shortly, or add your own key to accumulate your rate l'
+FAILED resume openrouter qwen/qwen3.8-flash --reasoning none --budget-usd 0.5
+RESUME DONE 07:27:05

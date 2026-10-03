@@ -1,0 +1,7 @@
+## existing  cerebras-gpt-oss-120b-k16-rmedium  {'n': 109, 'sent_acc': 0.982, 'lenient_acc': 0.982, 'char_acc': 0.9961, 'oracle@16': 1.0}
+## homophones  cerebras-gpt-oss-120b-k16-rmedium  {'n': 165, 'sent_acc': 0.915, 'lenient_acc': 0.927, 'char_acc': 0.9859, 'oracle@16': 0.945}
+## oov  cerebras-gpt-oss-120b-k16-rmedium  {'n': 25, 'sent_acc': 0.76, 'lenient_acc': 0.76, 'char_acc': 0.961, 'oracle@16': 0.76}
+## user-reported  cerebras-gpt-oss-120b-k16-rmedium  {'n': 8, 'sent_acc': 0.625, 'lenient_acc': 0.625, 'char_acc': 0.9592, 'oracle@16': 0.875}
+## ALL  cerebras-gpt-oss-120b-k16-rmedium  {'n': 307, 'sent_acc': 0.919, 'lenient_acc': 0.925, 'char_acc': 0.9858, 'oracle@16': 0.948}
+## latency  cerebras-gpt-oss-120b-k16-rmedium  {'n': 307, 'p50_ms': 356, 'p95_ms': 759}
+## usage  cerebras-gpt-oss-120b-k16-rmedium  {'invalid': 3, 'in_tokens': 141491, 'out_tokens': 54558, 'usd': 0.3052, 'ledger_usd': 0.3986}

@@ -1,0 +1,7 @@
+## existing  gemini-gemini-3.8-flash-k16-rnone  {'n': 109, 'sent_acc': 0.991, 'lenient_acc': 0.991, 'char_acc': 0.9987, 'oracle@16': 1.0}
+## homophones  gemini-gemini-3.8-flash-k16-rnone  {'n': 165, 'sent_acc': 0.909, 'lenient_acc': 0.921, 'char_acc': 0.9886, 'oracle@16': 0.945}
+## oov  gemini-gemini-3.8-flash-k16-rnone  {'n': 25, 'sent_acc': 0.76, 'lenient_acc': 0.76, 'char_acc': 0.9654, 'oracle@16': 0.76}
+## user-reported  gemini-gemini-3.8-flash-k16-rnone  {'n': 8, 'sent_acc': 0.875, 'lenient_acc': 0.875, 'char_acc': 0.9796, 'oracle@16': 0.875}
+## ALL  gemini-gemini-3.8-flash-k16-rnone  {'n': 307, 'sent_acc': 0.925, 'lenient_acc': 0.932, 'char_acc': 0.9892, 'oracle@16': 0.948}
+## latency  gemini-gemini-3.8-flash-k16-rnone  {'n': 307, 'p50_ms': 1245, 'p95_ms': 2466}
+## usage  gemini-gemini-3.8-flash-k16-rnone  {'invalid': 0, 'in_tokens': 76107, 'out_tokens': 2428, 'usd': 0.0662, 'ledger_usd': 0.0662, 'served_by': ['None']}

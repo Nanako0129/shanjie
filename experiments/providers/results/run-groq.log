@@ -1,0 +1,32 @@
+=== groq meta-llama/llama-3.3-70b-instruct effort=default 07:13:05
+## existing  openrouter@groq-meta-llama_llama-3.3-70b-instruct-k16-rdefault  {'n': 109, 'sent_acc': 0.936, 'lenient_acc': 0.954, 'char_acc': 0.9871, 'oracle@16': 1.0}
+## homophones  openrouter@groq-meta-llama_llama-3.3-70b-instruct-k16-rdefault  {'n': 57, 'sent_acc': 0.789, 'lenient_acc': 0.825, 'char_acc': 0.9646, 'oracle@16': 0.93}
+## ALL  openrouter@groq-meta-llama_llama-3.3-70b-instruct-k16-rdefault  {'n': 166, 'sent_acc': 0.886, 'lenient_acc': 0.91, 'char_acc': 0.9779, 'oracle@16': 0.976}
+## latency  openrouter@groq-meta-llama_llama-3.3-70b-instruct-k16-rdefault  {'n': 166, 'p50_ms': 232, 'p95_ms': 360}
+## usage  openrouter@groq-meta-llama_llama-3.3-70b-instruct-k16-rdefault  {'invalid': 2, 'in_tokens': 52244, 'out_tokens': 1494, 'usd': 0.0320, 'ledger_usd': 0.0320, 'served_by': ['Groq']}
+RATE_LIMIT HTTP 429 at row 166 (166 rows saved): b'{"error":{"message":"Provider returned error","code":429,"metadata":{"raw":"meta-llama/llama-3.3-70b-instruct is temporarily rate-limited upstream. Please retry shortly, or add your own key to accumul'
+FAILED groq meta-llama/llama-3.3-70b-instruct default
+=== groq openai/gpt-oss-120b effort=low 07:13:47
+## existing  openrouter@groq-openai_gpt-oss-120b-k16-rlow  {'n': 109, 'sent_acc': 0.972, 'lenient_acc': 0.972, 'char_acc': 0.9936, 'oracle@16': 1.0}
+## homophones  openrouter@groq-openai_gpt-oss-120b-k16-rlow  {'n': 165, 'sent_acc': 0.885, 'lenient_acc': 0.897, 'char_acc': 0.9853, 'oracle@16': 0.945}
+## oov  openrouter@groq-openai_gpt-oss-120b-k16-rlow  {'n': 25, 'sent_acc': 0.72, 'lenient_acc': 0.72, 'char_acc': 0.9524, 'oracle@16': 0.76}
+## user-reported  openrouter@groq-openai_gpt-oss-120b-k16-rlow  {'n': 8, 'sent_acc': 0.5, 'lenient_acc': 0.5, 'char_acc': 0.949, 'oracle@16': 0.875}
+## ALL  openrouter@groq-openai_gpt-oss-120b-k16-rlow  {'n': 307, 'sent_acc': 0.893, 'lenient_acc': 0.899, 'char_acc': 0.9835, 'oracle@16': 0.948}
+## latency  openrouter@groq-openai_gpt-oss-120b-k16-rlow  {'n': 307, 'p50_ms': 369, 'p95_ms': 688}
+## usage  openrouter@groq-openai_gpt-oss-120b-k16-rlow  {'invalid': 0, 'in_tokens': 118773, 'out_tokens': 18121, 'usd': 0.0287, 'ledger_usd': 0.0607, 'served_by': ['Groq']}
+=== groq openai/gpt-oss-20b effort=low 07:16:00
+## existing  openrouter@groq-openai_gpt-oss-20b-k16-rlow  {'n': 73, 'sent_acc': 0.89, 'lenient_acc': 0.918, 'char_acc': 0.9786, 'oracle@16': 1.0}
+## ALL  openrouter@groq-openai_gpt-oss-20b-k16-rlow  {'n': 73, 'sent_acc': 0.89, 'lenient_acc': 0.918, 'char_acc': 0.9786, 'oracle@16': 1.0}
+## latency  openrouter@groq-openai_gpt-oss-20b-k16-rlow  {'n': 73, 'p50_ms': 572, 'p95_ms': 769}
+## usage  openrouter@groq-openai_gpt-oss-20b-k16-rlow  {'invalid': 4, 'in_tokens': 25985, 'out_tokens': 3561, 'usd': 0.0029, 'ledger_usd': 0.0636, 'served_by': ['Groq']}
+RATE_LIMIT HTTP 429 at row 73 (73 rows saved): b'{"error":{"message":"Provider returned error","code":429,"metadata":{"raw":"openai/gpt-oss-20b is temporarily rate-limited upstream. Please retry shortly, or add your own key to accumulate your rate l'
+FAILED groq openai/gpt-oss-20b low
+=== groq meta-llama/llama-3.1-8b-instruct effort=default 07:16:43
+## existing  openrouter@groq-meta-llama_llama-3.1-8b-instruct-k16-rdefault  {'n': 109, 'sent_acc': 0.844, 'lenient_acc': 0.899, 'char_acc': 0.9704, 'oracle@16': 1.0}
+## homophones  openrouter@groq-meta-llama_llama-3.1-8b-instruct-k16-rdefault  {'n': 165, 'sent_acc': 0.703, 'lenient_acc': 0.77, 'char_acc': 0.9612, 'oracle@16': 0.945}
+## oov  openrouter@groq-meta-llama_llama-3.1-8b-instruct-k16-rdefault  {'n': 25, 'sent_acc': 0.48, 'lenient_acc': 0.48, 'char_acc': 0.9091, 'oracle@16': 0.76}
+## user-reported  openrouter@groq-meta-llama_llama-3.1-8b-instruct-k16-rdefault  {'n': 8, 'sent_acc': 0.375, 'lenient_acc': 0.375, 'char_acc': 0.9184, 'oracle@16': 0.875}
+## ALL  openrouter@groq-meta-llama_llama-3.1-8b-instruct-k16-rdefault  {'n': 307, 'sent_acc': 0.726, 'lenient_acc': 0.782, 'char_acc': 0.9577, 'oracle@16': 0.948}
+## latency  openrouter@groq-meta-llama_llama-3.1-8b-instruct-k16-rdefault  {'n': 307, 'p50_ms': 221, 'p95_ms': 344}
+## usage  openrouter@groq-meta-llama_llama-3.1-8b-instruct-k16-rdefault  {'invalid': 0, 'in_tokens': 99338, 'out_tokens': 2763, 'usd': 0.0052, 'ledger_usd': 0.0688, 'served_by': ['Groq']}
+GROQ DONE 07:17:55

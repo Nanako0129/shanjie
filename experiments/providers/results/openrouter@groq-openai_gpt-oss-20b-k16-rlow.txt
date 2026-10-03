@@ -1,0 +1,7 @@
+## existing  openrouter@groq-openai_gpt-oss-20b-k16-rlow  {'n': 109, 'sent_acc': 0.917, 'lenient_acc': 0.936, 'char_acc': 0.9846, 'oracle@16': 1.0}
+## homophones  openrouter@groq-openai_gpt-oss-20b-k16-rlow  {'n': 165, 'sent_acc': 0.848, 'lenient_acc': 0.867, 'char_acc': 0.9813, 'oracle@16': 0.945}
+## oov  openrouter@groq-openai_gpt-oss-20b-k16-rlow  {'n': 25, 'sent_acc': 0.68, 'lenient_acc': 0.68, 'char_acc': 0.9264, 'oracle@16': 0.76}
+## user-reported  openrouter@groq-openai_gpt-oss-20b-k16-rlow  {'n': 8, 'sent_acc': 0.625, 'lenient_acc': 0.625, 'char_acc': 0.9592, 'oracle@16': 0.875}
+## ALL  openrouter@groq-openai_gpt-oss-20b-k16-rlow  {'n': 307, 'sent_acc': 0.853, 'lenient_acc': 0.87, 'char_acc': 0.9765, 'oracle@16': 0.948}
+## latency  openrouter@groq-openai_gpt-oss-20b-k16-rlow  {'n': 307, 'p50_ms': 580, 'p95_ms': 858}
+## usage  openrouter@groq-openai_gpt-oss-20b-k16-rlow  {'invalid': 8, 'in_tokens': 117214, 'out_tokens': 17824, 'usd': 0.0136, 'ledger_usd': 0.1083, 'served_by': ['Groq']}

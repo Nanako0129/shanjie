@@ -1,0 +1,7 @@
+## existing  opengateway-z-ai_glm-5.3-flash-ultrafast-k16-rlow  {'n': 109, 'sent_acc': 0.972, 'lenient_acc': 0.982, 'char_acc': 0.9949, 'oracle@16': 1.0}
+## homophones  opengateway-z-ai_glm-5.3-flash-ultrafast-k16-rlow  {'n': 165, 'sent_acc': 0.885, 'lenient_acc': 0.897, 'char_acc': 0.9866, 'oracle@16': 0.945}
+## oov  opengateway-z-ai_glm-5.3-flash-ultrafast-k16-rlow  {'n': 25, 'sent_acc': 0.76, 'lenient_acc': 0.76, 'char_acc': 0.9654, 'oracle@16': 0.76}
+## user-reported  opengateway-z-ai_glm-5.3-flash-ultrafast-k16-rlow  {'n': 8, 'sent_acc': 0.625, 'lenient_acc': 0.625, 'char_acc': 0.9592, 'oracle@16': 0.875}
+## ALL  opengateway-z-ai_glm-5.3-flash-ultrafast-k16-rlow  {'n': 307, 'sent_acc': 0.899, 'lenient_acc': 0.909, 'char_acc': 0.9862, 'oracle@16': 0.948}
+## latency  opengateway-z-ai_glm-5.3-flash-ultrafast-k16-rlow  {'n': 307, 'p50_ms': 509, 'p95_ms': 1858}
+## usage  opengateway-z-ai_glm-5.3-flash-ultrafast-k16-rlow  {'invalid': 0, 'in_tokens': 87111, 'out_tokens': 3672, 'usd': 0.0981, 'ledger_usd': 0.2887}

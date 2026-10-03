@@ -1,0 +1,7 @@
+## existing  cerebras-gpt-oss-120b-k16-rlow  {'n': 109, 'sent_acc': 0.954, 'lenient_acc': 0.954, 'char_acc': 0.9897, 'oracle@16': 1.0}
+## homophones  cerebras-gpt-oss-120b-k16-rlow  {'n': 165, 'sent_acc': 0.897, 'lenient_acc': 0.909, 'char_acc': 0.9859, 'oracle@16': 0.945}
+## oov  cerebras-gpt-oss-120b-k16-rlow  {'n': 25, 'sent_acc': 0.72, 'lenient_acc': 0.72, 'char_acc': 0.9524, 'oracle@16': 0.76}
+## user-reported  cerebras-gpt-oss-120b-k16-rlow  {'n': 3, 'sent_acc': 0.667, 'lenient_acc': 0.667, 'char_acc': 0.9649, 'oracle@16': 0.667}
+## ALL  cerebras-gpt-oss-120b-k16-rlow  {'n': 302, 'sent_acc': 0.901, 'lenient_acc': 0.907, 'char_acc': 0.9836, 'oracle@16': 0.947}
+## latency  cerebras-gpt-oss-120b-k16-rlow  {'n': 302, 'p50_ms': 298, 'p95_ms': 510}
+## usage  cerebras-gpt-oss-120b-k16-rlow  {'invalid': 0, 'in_tokens': 139248, 'out_tokens': 17823, 'usd': 0.1049, 'ledger_usd': 0.1123}

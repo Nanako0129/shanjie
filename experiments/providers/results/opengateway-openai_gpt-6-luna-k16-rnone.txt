@@ -1,0 +1,7 @@
+## existing  opengateway-openai_gpt-6-luna-k16-rnone  {'n': 109, 'sent_acc': 0.982, 'lenient_acc': 1.0, 'char_acc': 0.9949, 'oracle@16': 1.0}
+## homophones  opengateway-openai_gpt-6-luna-k16-rnone  {'n': 165, 'sent_acc': 0.897, 'lenient_acc': 0.909, 'char_acc': 0.988, 'oracle@16': 0.945}
+## oov  opengateway-openai_gpt-6-luna-k16-rnone  {'n': 25, 'sent_acc': 0.76, 'lenient_acc': 0.76, 'char_acc': 0.9654, 'oracle@16': 0.76}
+## user-reported  opengateway-openai_gpt-6-luna-k16-rnone  {'n': 9, 'sent_acc': 0.667, 'lenient_acc': 0.667, 'char_acc': 0.9545, 'oracle@16': 0.889}
+## ALL  opengateway-openai_gpt-6-luna-k16-rnone  {'n': 308, 'sent_acc': 0.909, 'lenient_acc': 0.922, 'char_acc': 0.9866, 'oracle@16': 0.948}
+## latency  opengateway-openai_gpt-6-luna-k16-rnone  {'n': 308, 'p50_ms': 1054, 'p95_ms': 1709}
+## usage  opengateway-openai_gpt-6-luna-k16-rnone  {'invalid': 0, 'in_tokens': 95201, 'out_tokens': 3388, 'usd': 0.1054, 'ledger_usd': 0.2039, 'served_by': ['None']}

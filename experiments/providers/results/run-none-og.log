@@ -1,0 +1,25 @@
+=== opengateway z-ai/glm-5.3-flash-ultrafast effort=none 07:44:25
+## existing  opengateway-z-ai_glm-5.3-flash-ultrafast-k16-rnone  {'n': 109, 'sent_acc': 0.972, 'lenient_acc': 0.982, 'char_acc': 0.9949, 'oracle@16': 1.0}
+## homophones  opengateway-z-ai_glm-5.3-flash-ultrafast-k16-rnone  {'n': 165, 'sent_acc': 0.885, 'lenient_acc': 0.897, 'char_acc': 0.9866, 'oracle@16': 0.945}
+## oov  opengateway-z-ai_glm-5.3-flash-ultrafast-k16-rnone  {'n': 25, 'sent_acc': 0.76, 'lenient_acc': 0.76, 'char_acc': 0.9654, 'oracle@16': 0.76}
+## user-reported  opengateway-z-ai_glm-5.3-flash-ultrafast-k16-rnone  {'n': 9, 'sent_acc': 0.667, 'lenient_acc': 0.667, 'char_acc': 0.9636, 'oracle@16': 0.889}
+## ALL  opengateway-z-ai_glm-5.3-flash-ultrafast-k16-rnone  {'n': 308, 'sent_acc': 0.899, 'lenient_acc': 0.909, 'char_acc': 0.9862, 'oracle@16': 0.948}
+## latency  opengateway-z-ai_glm-5.3-flash-ultrafast-k16-rnone  {'n': 308, 'p50_ms': 547, 'p95_ms': 1601}
+## usage  opengateway-z-ai_glm-5.3-flash-ultrafast-k16-rnone  {'invalid': 0, 'in_tokens': 87458, 'out_tokens': 3687, 'usd': 0.0985, 'ledger_usd': 0.0985, 'served_by': ['None']}
+=== opengateway openai/gpt-6-luna effort=none 07:48:18
+## existing  opengateway-openai_gpt-6-luna-k16-rnone  {'n': 109, 'sent_acc': 0.982, 'lenient_acc': 1.0, 'char_acc': 0.9949, 'oracle@16': 1.0}
+## homophones  opengateway-openai_gpt-6-luna-k16-rnone  {'n': 165, 'sent_acc': 0.897, 'lenient_acc': 0.909, 'char_acc': 0.988, 'oracle@16': 0.945}
+## oov  opengateway-openai_gpt-6-luna-k16-rnone  {'n': 25, 'sent_acc': 0.76, 'lenient_acc': 0.76, 'char_acc': 0.9654, 'oracle@16': 0.76}
+## user-reported  opengateway-openai_gpt-6-luna-k16-rnone  {'n': 9, 'sent_acc': 0.667, 'lenient_acc': 0.667, 'char_acc': 0.9545, 'oracle@16': 0.889}
+## ALL  opengateway-openai_gpt-6-luna-k16-rnone  {'n': 308, 'sent_acc': 0.909, 'lenient_acc': 0.922, 'char_acc': 0.9866, 'oracle@16': 0.948}
+## latency  opengateway-openai_gpt-6-luna-k16-rnone  {'n': 308, 'p50_ms': 1054, 'p95_ms': 1709}
+## usage  opengateway-openai_gpt-6-luna-k16-rnone  {'invalid': 0, 'in_tokens': 95201, 'out_tokens': 3388, 'usd': 0.1054, 'ledger_usd': 0.2039, 'served_by': ['None']}
+=== opengateway moonshotai/kimi-k3-ultrafast effort=none 07:54:09
+## existing  opengateway-moonshotai_kimi-k3-ultrafast-k16-rnone  {'n': 109, 'sent_acc': 0.963, 'lenient_acc': 0.991, 'char_acc': 0.991, 'oracle@16': 1.0}
+## homophones  opengateway-moonshotai_kimi-k3-ultrafast-k16-rnone  {'n': 165, 'sent_acc': 0.891, 'lenient_acc': 0.903, 'char_acc': 0.9866, 'oracle@16': 0.945}
+## oov  opengateway-moonshotai_kimi-k3-ultrafast-k16-rnone  {'n': 25, 'sent_acc': 0.76, 'lenient_acc': 0.76, 'char_acc': 0.9654, 'oracle@16': 0.76}
+## user-reported  opengateway-moonshotai_kimi-k3-ultrafast-k16-rnone  {'n': 9, 'sent_acc': 0.556, 'lenient_acc': 0.556, 'char_acc': 0.9455, 'oracle@16': 0.889}
+## ALL  opengateway-moonshotai_kimi-k3-ultrafast-k16-rnone  {'n': 308, 'sent_acc': 0.896, 'lenient_acc': 0.912, 'char_acc': 0.9843, 'oracle@16': 0.948}
+## latency  opengateway-moonshotai_kimi-k3-ultrafast-k16-rnone  {'n': 308, 'p50_ms': 2058, 'p95_ms': 2852}
+## usage  opengateway-moonshotai_kimi-k3-ultrafast-k16-rnone  {'invalid': 0, 'in_tokens': 119227, 'out_tokens': 4908, 'usd': 0.1340, 'ledger_usd': 0.3378, 'served_by': ['None']}
+NONE-OG DONE 08:04:48

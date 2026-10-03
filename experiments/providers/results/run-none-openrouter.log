@@ -1,0 +1,19 @@
+=== openrouter deepseek/deepseek-v4.1-flash effort=none 07:02:53
+## existing  openrouter-deepseek_deepseek-v4.1-flash-k16-rnone  {'n': 109, 'sent_acc': 0.972, 'lenient_acc': 0.982, 'char_acc': 0.9949, 'oracle@16': 1.0}
+## homophones  openrouter-deepseek_deepseek-v4.1-flash-k16-rnone  {'n': 165, 'sent_acc': 0.879, 'lenient_acc': 0.897, 'char_acc': 0.9859, 'oracle@16': 0.945}
+## oov  openrouter-deepseek_deepseek-v4.1-flash-k16-rnone  {'n': 25, 'sent_acc': 0.68, 'lenient_acc': 0.68, 'char_acc': 0.9437, 'oracle@16': 0.76}
+## user-reported  openrouter-deepseek_deepseek-v4.1-flash-k16-rnone  {'n': 8, 'sent_acc': 0.625, 'lenient_acc': 0.75, 'char_acc': 0.949, 'oracle@16': 0.875}
+## ALL  openrouter-deepseek_deepseek-v4.1-flash-k16-rnone  {'n': 307, 'sent_acc': 0.889, 'lenient_acc': 0.906, 'char_acc': 0.9835, 'oracle@16': 0.948}
+## latency  openrouter-deepseek_deepseek-v4.1-flash-k16-rnone  {'n': 307, 'p50_ms': 986, 'p95_ms': 1978}
+## usage  openrouter-deepseek_deepseek-v4.1-flash-k16-rnone  {'invalid': 0, 'in_tokens': 81265, 'out_tokens': 1930, 'usd': 0.0123, 'ledger_usd': 0.0123}
+=== openrouter z-ai/glm-5.3-flash effort=none 07:08:39
+HTTP_ERROR HTTP 400 at row 0 (0 rows saved): b'{"error":{"message":"Reasoning is mandatory for this endpoint and cannot be disabled.","code":400,"metadata":{"provider_name":null}}}'
+FAILED openrouter z-ai/glm-5.3-flash none
+=== openrouter qwen/qwen3.8-flash effort=none 07:08:39
+## existing  openrouter-qwen_qwen3.8-flash-k16-rnone  {'n': 2, 'sent_acc': 1.0, 'lenient_acc': 1.0, 'char_acc': 1.0, 'oracle@16': 1.0}
+## ALL  openrouter-qwen_qwen3.8-flash-k16-rnone  {'n': 2, 'sent_acc': 1.0, 'lenient_acc': 1.0, 'char_acc': 1.0, 'oracle@16': 1.0}
+## latency  openrouter-qwen_qwen3.8-flash-k16-rnone  {'n': 2, 'p50_ms': 6159, 'p95_ms': 6159}
+## usage  openrouter-qwen_qwen3.8-flash-k16-rnone  {'invalid': 0, 'in_tokens': 519, 'out_tokens': 12, 'usd': 0.0001, 'ledger_usd': 0.0123}
+RATE_LIMIT HTTP 429 at row 2 (2 rows saved): b'{"error":{"message":"Provider returned error","code":429,"metadata":{"raw":"qwen/qwen3.8-flash is temporarily rate-limited upstream. Please retry shortly, or add your own key to accumulate your rate l'
+FAILED openrouter qwen/qwen3.8-flash none
+NONE-OPENROUTER DONE 07:08:54

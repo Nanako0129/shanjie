@@ -1,0 +1,7 @@
+## existing  cerebras-qwen-3.8-27b-k16-rlow  {'n': 109, 'sent_acc': 0.963, 'lenient_acc': 0.963, 'char_acc': 0.9923, 'oracle@16': 1.0}
+## homophones  cerebras-qwen-3.8-27b-k16-rlow  {'n': 165, 'sent_acc': 0.885, 'lenient_acc': 0.903, 'char_acc': 0.9806, 'oracle@16': 0.945}
+## oov  cerebras-qwen-3.8-27b-k16-rlow  {'n': 25, 'sent_acc': 0.72, 'lenient_acc': 0.72, 'char_acc': 0.9264, 'oracle@16': 0.76}
+## user-reported  cerebras-qwen-3.8-27b-k16-rlow  {'n': 3, 'sent_acc': 0.667, 'lenient_acc': 0.667, 'char_acc': 0.9123, 'oracle@16': 0.667}
+## ALL  cerebras-qwen-3.8-27b-k16-rlow  {'n': 302, 'sent_acc': 0.897, 'lenient_acc': 0.907, 'char_acc': 0.9777, 'oracle@16': 0.947}
+## latency  cerebras-qwen-3.8-27b-k16-rlow  {'n': 302, 'p50_ms': 594, 'p95_ms': 977}
+## usage  cerebras-qwen-3.8-27b-k16-rlow  {'invalid': 18, 'in_tokens': 122366, 'out_tokens': 136820, 'usd': 0.2376, 'ledger_usd': 0.3499}

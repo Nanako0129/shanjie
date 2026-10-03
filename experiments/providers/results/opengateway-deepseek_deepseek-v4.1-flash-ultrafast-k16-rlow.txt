@@ -1,0 +1,7 @@
+## existing  opengateway-deepseek_deepseek-v4.1-flash-ultrafast-k16-rlow  {'n': 109, 'sent_acc': 0.972, 'lenient_acc': 0.972, 'char_acc': 0.9949, 'oracle@16': 1.0}
+## homophones  opengateway-deepseek_deepseek-v4.1-flash-ultrafast-k16-rlow  {'n': 165, 'sent_acc': 0.903, 'lenient_acc': 0.921, 'char_acc': 0.9853, 'oracle@16': 0.945}
+## oov  opengateway-deepseek_deepseek-v4.1-flash-ultrafast-k16-rlow  {'n': 25, 'sent_acc': 0.76, 'lenient_acc': 0.76, 'char_acc': 0.9481, 'oracle@16': 0.76}
+## user-reported  opengateway-deepseek_deepseek-v4.1-flash-ultrafast-k16-rlow  {'n': 7, 'sent_acc': 0.429, 'lenient_acc': 0.429, 'char_acc': 0.908, 'oracle@16': 0.857}
+## ALL  opengateway-deepseek_deepseek-v4.1-flash-ultrafast-k16-rlow  {'n': 306, 'sent_acc': 0.905, 'lenient_acc': 0.915, 'char_acc': 0.9822, 'oracle@16': 0.948}
+## latency  opengateway-deepseek_deepseek-v4.1-flash-ultrafast-k16-rlow  {'n': 306, 'p50_ms': 1064, 'p95_ms': 6983}
+## usage  opengateway-deepseek_deepseek-v4.1-flash-ultrafast-k16-rlow  {'invalid': 13, 'in_tokens': 83451, 'out_tokens': 35700, 'usd': 0.1906, 'ledger_usd': 0.1906}

@@ -1,0 +1,7 @@
+## existing  opengateway-moonshotai_kimi-k3-ultrafast-k16-rnone  {'n': 109, 'sent_acc': 0.963, 'lenient_acc': 0.991, 'char_acc': 0.991, 'oracle@16': 1.0}
+## homophones  opengateway-moonshotai_kimi-k3-ultrafast-k16-rnone  {'n': 165, 'sent_acc': 0.891, 'lenient_acc': 0.903, 'char_acc': 0.9866, 'oracle@16': 0.945}
+## oov  opengateway-moonshotai_kimi-k3-ultrafast-k16-rnone  {'n': 25, 'sent_acc': 0.76, 'lenient_acc': 0.76, 'char_acc': 0.9654, 'oracle@16': 0.76}
+## user-reported  opengateway-moonshotai_kimi-k3-ultrafast-k16-rnone  {'n': 9, 'sent_acc': 0.556, 'lenient_acc': 0.556, 'char_acc': 0.9455, 'oracle@16': 0.889}
+## ALL  opengateway-moonshotai_kimi-k3-ultrafast-k16-rnone  {'n': 308, 'sent_acc': 0.896, 'lenient_acc': 0.912, 'char_acc': 0.9843, 'oracle@16': 0.948}
+## latency  opengateway-moonshotai_kimi-k3-ultrafast-k16-rnone  {'n': 308, 'p50_ms': 2058, 'p95_ms': 2852}
+## usage  opengateway-moonshotai_kimi-k3-ultrafast-k16-rnone  {'invalid': 0, 'in_tokens': 119227, 'out_tokens': 4908, 'usd': 0.1340, 'ledger_usd': 0.3378, 'served_by': ['None']}

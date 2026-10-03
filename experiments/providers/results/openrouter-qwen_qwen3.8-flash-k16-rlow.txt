@@ -1,0 +1,4 @@
+## existing  openrouter-qwen_qwen3.8-flash-k16-rlow  {'n': 1, 'sent_acc': 1.0, 'lenient_acc': 1.0, 'char_acc': 1.0, 'oracle@16': 1.0}
+## ALL  openrouter-qwen_qwen3.8-flash-k16-rlow  {'n': 1, 'sent_acc': 1.0, 'lenient_acc': 1.0, 'char_acc': 1.0, 'oracle@16': 1.0}
+## latency  openrouter-qwen_qwen3.8-flash-k16-rlow  {'n': 1, 'p50_ms': 6696, 'p95_ms': 6696}
+## usage  openrouter-qwen_qwen3.8-flash-k16-rlow  {'invalid': 0, 'in_tokens': 0, 'out_tokens': 0, 'usd': 0.0000, 'ledger_usd': 0.5596, 'served_by': ['None']}
