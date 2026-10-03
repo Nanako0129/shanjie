@@ -191,7 +191,7 @@ int32_t shanjie_engine_set_profile(ShanjieEngine *engine, uint32_t profile, Shan
   # zsh 不拆 $LIBS 這種變數，所以命令替換直接放進 cc 的參數（sh、bash、zsh 都會拆）。
   # 2026-10-03 實際印出 `-lSystem -lc -lm`；ld 會警告 `ignoring duplicate libraries: '-lSystem'`，無害。
   cc -std=c11 -Wall -Wextra -Werror -Icore/include core/tests/c/abi_smoke.c target/release/libcore.a \
-    $(cargo rustc --release -p core --crate-type staticlib -- --print native-static-libs 2>&1 | sed -n 's/.*native-static-libs: //p') \
+    $(cargo rustc --color never --release -p core --crate-type staticlib -- --print native-static-libs 2>&1 | sed -n 's/.*native-static-libs: //p') \
     -o "$T/abi_smoke"
   "$T/abi_smoke" data/lexicon data/lm/bigram.sjlm
   ```

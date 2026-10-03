@@ -58,7 +58,7 @@ jobs:
           T="$RUNNER_TEMP"
           cargo build --release --locked -p core
           cc -std=c11 -Wall -Wextra -Werror -Icore/include core/tests/c/abi_smoke.c target/release/libcore.a \
-            $(cargo rustc --release --locked -p core --crate-type staticlib -- --print native-static-libs 2>&1 | sed -n 's/.*native-static-libs: //p') \
+            $(cargo rustc --color never --release --locked -p core --crate-type staticlib -- --print native-static-libs 2>&1 | sed -n 's/.*native-static-libs: //p') \
             -o "$T/abi_smoke"
           "$T/abi_smoke" data/lexicon data/lm/bigram.sjlm
 
