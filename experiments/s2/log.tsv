@@ -1,0 +1,2 @@
+time	commit	config	dev302	typing76	discord	news	note
+2026-10-03T14:31:34	bdab786	{"lam": 0.5, "corpora": [["counts-50000.pkl", 1], ["counts-colloquial2.pkl", 5]]}	231/302	65/76	685/845	235/294	baseline: wiki 50k + colloquial k5
