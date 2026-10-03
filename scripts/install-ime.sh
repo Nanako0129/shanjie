@@ -19,11 +19,24 @@ LSREGISTER=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchSe
 SRC="$1"
 [ -d "$SRC" ] && [ -x "$SRC/Contents/MacOS/shanjie" ] || fail "$SRC is not a shanjie.app"
 
+# Only a real install may touch the system (LaunchServices, running processes, the input source
+# registry). With HOME pointed anywhere other than this account's home directory, as the tests do,
+# the script refuses unless SHANJIE_INSTALL_FILES_ONLY=1, which stops before any of that. A stray
+# registration of an unsigned shanjie.app makes macOS show "shanjie.app is damaged" dialogs on the
+# user's screen (seen 2026-10-04, when a review agent ran a copied binary inside such a bundle).
+FILES_ONLY="${SHANJIE_INSTALL_FILES_ONLY:-}"
+ACCOUNT_HOME="$(dscl . -read "/Users/$(id -un)" NFSHomeDirectory 2>/dev/null | awk '{print $2}')"
+if [ "$FILES_ONLY" != 1 ]; then
+  [ -n "$ACCOUNT_HOME" ] && [ "$(cd "$HOME" && pwd -P)" = "$(cd "$ACCOUNT_HOME" && pwd -P)" ] \
+    || fail "HOME is not this account's home directory; refusing to install (tests set SHANJIE_INSTALL_FILES_ONLY=1)"
+fi
+
 # Paths this script removes or moves: the installed bundle, staging directories and the kept
 # previous version, all inside ~/Library/Input Methods. The helper directory names do not end in
 # .app (the staging directory does contain a shanjie.app while the copy runs).
 mkdir -p "$HOME/Library/Input Methods"
-rm -rf "$HOME/Library/Input Methods"/.shanjie-staging-*   # left by an earlier run that was killed
+# A run killed outright (SIGKILL, power loss) can leave a .shanjie-staging-* behind; it is not
+# removed automatically, because a concurrent run's live staging directory looks the same.
 
 # 1. Copy the new bundle to a fresh staging directory next to the destination. A failed copy
 #    leaves the installed bundle untouched.
@@ -36,6 +49,7 @@ cleanup() {
   # copy, where the staged bundle may be incomplete.
   if [ -n "$SWAPPING" ] && [ ! -e "$HOME/Library/Input Methods/shanjie.app" ] && [ -d "$STAGE/shanjie.app" ]; then
     mv "$STAGE/shanjie.app" "$HOME/Library/Input Methods/shanjie.app" || true
+    echo "interrupted: the new version was moved into place but not registered; run this script again" >&2
   fi
   rm -rf "$STAGE"
 }
@@ -48,10 +62,13 @@ ditto "$SRC" "$STAGE/shanjie.app"
 #    resolves the bundle ID to the installed copy. (`shanjie install` skips TIS registration when
 #    the bundle ID is already known, so it would not do this on an upgrade.) Not measured on a real
 #    system yet; the user's install test checks which copy runs.
-if [ -e "$HOME/Library/Input Methods/shanjie.app" ] || [ -L "$HOME/Library/Input Methods/shanjie.app" ]; then
-  rm -rf "$HOME/Library/Input Methods/.shanjie-previous"
+if [ -e "$HOME/Library/Input Methods/shanjie.app" ]; then
+  if [ -e "$HOME/Library/Input Methods/.shanjie-previous" ]; then
+    chmod -R u+w "$HOME/Library/Input Methods/.shanjie-previous"   # a read-only directory must not block upgrades
+    rm -rf "$HOME/Library/Input Methods/.shanjie-previous"
+  fi
   SWAPPING=1
-  "$LSREGISTER" -u "$HOME/Library/Input Methods/shanjie.app" 2>/dev/null || true
+  [ "$FILES_ONLY" = 1 ] || "$LSREGISTER" -u "$HOME/Library/Input Methods/shanjie.app" 2>/dev/null || true
   mv "$HOME/Library/Input Methods/shanjie.app" "$HOME/Library/Input Methods/.shanjie-previous"
   KEPT=1
 fi
@@ -61,7 +78,7 @@ SWAPPING=
 
 # Test hook (scripts/test-install-ime.sh): stop after the file swap, before touching running
 # processes or the input source registry.
-if [ "${SHANJIE_INSTALL_FILES_ONLY:-}" = 1 ]; then
+if [ "$FILES_ONLY" = 1 ]; then
   echo "files only: installed to $HOME/Library/Input Methods/shanjie.app"
   exit 0
 fi
@@ -78,6 +95,8 @@ pkill -f "$PATTERN" || rc=$?
 [ "$rc" -eq 0 ] || [ "$rc" -eq 1 ] || fail "pkill failed ($rc)"
 # Wait for it to exit, so the new process can take over the input method's connection name.
 for _ in 1 2 3 4 5 6 7 8 9 10; do pgrep -f "$PATTERN" >/dev/null || break; sleep 0.5; done
+pgrep -f "$PATTERN" >/dev/null \
+  && echo "warning: a shanjie process is still running after 5 s; if the old version keeps serving input, log out and back in" >&2
 
 # 4. Register and enable both input modes, from the installed copy.
 if ! "$HOME/Library/Input Methods/shanjie.app/Contents/MacOS/shanjie" install; then
@@ -85,10 +104,10 @@ if ! "$HOME/Library/Input Methods/shanjie.app/Contents/MacOS/shanjie" install; t
   # Checked on disk, not by KEPT: an earlier run killed between the two renames also leaves one.
   if [ -d "$HOME/Library/Input Methods/.shanjie-previous" ]; then
     echo "To go back to the previous version:" >&2
-    echo "  pkill -f 'Input Methods/shanjie.app/Contents/MacOS/shanjie'" >&2
     echo "  rm -rf ~/Library/Input\\ Methods/shanjie.app" >&2
     echo "  mv ~/Library/Input\\ Methods/.shanjie-previous ~/Library/Input\\ Methods/shanjie.app" >&2
     echo "  $LSREGISTER -f ~/Library/Input\\ Methods/shanjie.app" >&2
+    echo "  pkill -f '$PATTERN'" >&2
     echo "  ~/Library/Input\\ Methods/shanjie.app/Contents/MacOS/shanjie install" >&2
   fi
   exit 1

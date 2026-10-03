@@ -1,9 +1,9 @@
 #!/bin/bash
 # Exercises install-ime.sh's file handling without touching the real system: HOME points at a
-# temporary directory, SHANJIE_INSTALL_FILES_ONLY=1 stops before pkill and registration, and the
-# app is a stub whose executable only exits 1, so even if the hook stopped working nothing could be
-# registered. (lsregister -u on the stub's temporary path is the one system call it makes; it only
-# removes a registration, and the stub was never registered.)
+# temporary directory and SHANJIE_INSTALL_FILES_ONLY=1, in which the script calls no lsregister,
+# pkill or registration at all. If that hook broke, install-ime.sh would refuse to run at all, since
+# HOME is not this account's home directory (checked by the first case below). The app is a stub
+# whose executable only exits 1. The stub's executable is never run.
 #
 #   scripts/test-install-ime.sh
 set -euo pipefail
@@ -26,6 +26,11 @@ no_staging() { ! ls -d "$IM"/.shanjie-staging-* >/dev/null 2>&1; }
 
 stub "$T/v1/shanjie.app" v1
 stub "$T/v2/shanjie.app" v2
+
+# Guard: without the files-only hook, a HOME other than the account's real home is refused before
+# anything is copied, registered or stopped.
+if HOME="$T" "$ROOT/scripts/install-ime.sh" "$T/v1/shanjie.app" >/dev/null 2>&1; then fail "ran on a temporary HOME without the hook"; fi
+[ ! -e "$IM" ] || fail "the refused run still created files"
 
 # 0. A failing copy on a fresh install leaves nothing installed (the staged copy may be partial).
 stub "$T/bad0/shanjie.app" bad0
