@@ -46,20 +46,27 @@ def counts(name):
     return _counts[name]
 
 
-def merged(corpora):
-    uni, bi = collections.Counter(), collections.Counter()
+def merged(corpora, tri_corpora=()):
+    """corpora 的 uni／bi／tri 全部相加；tri_corpora 只取 tri（例如只算了少量篇數 trigram 的維基檔）。"""
+    uni, bi, tri = collections.Counter(), collections.Counter(), collections.Counter()
+    for name, w in tri_corpora:
+        for k, v in counts(name).get("tri", {}).items():
+            tri[k] += v * w
     for name, w in corpora:
         c = counts(name)
         for k, v in c["uni"].items():
             uni[k] += v * w
         for k, v in c["bi"].items():
             bi[k] += v * w
-    return uni, bi
+        for k, v in c.get("tri", {}).items():
+            tri[k] += v * w
+    return uni, bi, tri
 
 
 class LM:
-    def __init__(self, cfg, uni, bi):
-        self.cfg, self.uni, self.bi = cfg, uni, bi
+    def __init__(self, cfg, uni, bi, tri=None):
+        self.cfg, self.uni, self.bi, self.tri = cfg, uni, bi, tri or {}
+        self.order = cfg.get("order", 2)
         self.lam, self.D = cfg.get("lam", 0.5), cfg.get("D", 0.75)
         self.model, self.eos_on, self.floor = cfg.get("model", "bonus"), cfg.get("eos", False), cfg.get("floor")
         self.N = sum(uni.values())
@@ -70,18 +77,28 @@ class LM:
             if w == "</s>":
                 eos_total += c
         self.p_eos = max(eos_total, 1) / self.N
+        self.ctx2 = {}
+        if self.order == 3:
+            for (u, v, w), c in self.tri.items():
+                t, n = self.ctx2.get((u, v), (0, 0)); self.ctx2[(u, v)] = (t + c, n + 1)
         self.memo = {}
 
-    def _p(self, v, w, pb):
+    def _p(self, v, w, pb, u=None):
         t, n = self.ctx.get(v, (0, 0))
-        return (max(self.bi.get((v, w), 0) - self.D, 0) / t + self.D * n / t * pb) if t else pb
+        p = (max(self.bi.get((v, w), 0) - self.D, 0) / t + self.D * n / t * pb) if t else pb
+        if self.order == 3 and u is not None:
+            t3, n3 = self.ctx2.get((u, v), (0, 0))
+            if t3:
+                p = max(self.tri.get((u, v, w), 0) - self.D, 0) / t3 + self.D * n3 / t3 * p
+        return p
 
     def word(self, hist, word, lp):
-        key = (hist[-1], word, lp)
+        u = hist[-2] if self.order == 3 and len(hist) >= 2 else ("<s>" if self.order == 3 else None)
+        key = (u, hist[-1], word, lp)
         if key in self.memo:
             return self.memo[key]
         if self.model == "interp":
-            sc = self.lam * math.log10(self._p(hist[-1], word, 10 ** lp)) + (1 - self.lam) * lp
+            sc = self.lam * math.log10(self._p(hist[-1], word, 10 ** lp, u)) + (1 - self.lam) * lp
         else:
             cu = self.uni.get(word, 0)
             b = 0.0
@@ -94,10 +111,10 @@ class LM:
         self.memo[key] = sc
         return sc
 
-    def eos(self, last):
+    def eos(self, last, prev=None):
         if not self.eos_on:
             return 0.0
-        return self.lam * math.log10(self._p(last, "</s>", self.p_eos))
+        return self.lam * math.log10(self._p(last, "</s>", self.p_eos, prev if self.order == 3 else None))
 
 
 def adjust_lexicon(base, overlay_words, uni, cfg):
@@ -154,7 +171,7 @@ def decode(lex, syls, lm, beam=64):
                     if surface not in cand or sc > cand[surface][0]:
                         cand[surface] = (sc, ws + (word,))
         hyps[i] = sorted(cand.values(), key=lambda x: -x[0])[:beam]
-    out = [(s + lm.eos(ws[-1] if ws else "<s>"), ws) for s, ws in hyps[n]]
+    out = [(s + lm.eos(ws[-1] if ws else "<s>", ws[-2] if len(ws) >= 2 else "<s>"), ws) for s, ws in hyps[n]]
     return sorted(out, key=lambda x: -x[0])
 
 
@@ -212,12 +229,13 @@ def main():
     commit = subprocess.run(["git", "-C", ROOT, "rev-parse", "--short", "HEAD"], capture_output=True, text=True).stdout.strip()
     dirty = subprocess.run(["git", "-C", ROOT, "status", "--porcelain", "--", "experiments", "data", "reference"], capture_output=True, text=True).stdout.strip()
     overlay_words = {l.split("\t")[1] for l in open(os.path.join(ROOT, "data", "lexicon", "overlay-add.tsv"), encoding="utf-8")}
-    prev_corpora, uni, bi = None, None, None
+    prev_corpora, uni, bi, tri = None, None, None, None
     for cfg in cfgs:
         t1 = time.time()
-        if cfg["corpora"] != prev_corpora:
-            uni, bi = merged(cfg["corpora"]); prev_corpora = cfg["corpora"]
-        lm = LM(cfg, uni, bi)
+        if (cfg["corpora"], cfg.get("tri_corpora", [])) != prev_corpora:
+            uni, bi, tri = merged(cfg["corpora"], cfg.get("tri_corpora", []))
+            prev_corpora = (cfg["corpora"], cfg.get("tri_corpora", []))
+        lm = LM(cfg, uni, bi, tri)
         lex_cfg = adjust_lexicon(lex, overlay_words, uni, cfg)
         t2 = time.time()
         run = datetime.datetime.now().strftime("%Y%m%d-%H%M%S") + "-" + hashlib.md5(json.dumps(cfg, sort_keys=True).encode()).hexdigest()[:6]

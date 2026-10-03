@@ -122,7 +122,8 @@ def segment(lex, text):
 _W = {}
 
 
-def _init():
+def _init(trigram=False):
+    _W["trigram"] = trigram
     _W["lex"] = ime.Lexicon(os.path.join(ROOT, "data", "lexicon", "mcbpmf-data.txt"),
                             overlay=os.path.join(ROOT, "data", "lexicon", "overlay-add.tsv"))
     _W["conv"] = load_conv()
@@ -130,7 +131,7 @@ def _init():
 
 def count_batch(texts):
     lex, (phrase, char, maxp) = _W["lex"], _W["conv"]
-    uni, bi, sents = collections.Counter(), collections.Counter(), 0
+    uni, bi, tri, sents = collections.Counter(), collections.Counter(), collections.Counter(), 0
     for raw in texts:
         t = raw.replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&").replace("&quot;", '"')
         for _ in range(3):
@@ -149,7 +150,11 @@ def count_batch(texts):
                 for w in ws:
                     uni[w] += 1; bi[(prev, w)] += 1; prev = w
                 bi[(prev, "</s>")] += 1
-    return uni, bi, sents
+                if _W.get("trigram"):
+                    seq = ["<s>", "<s>"] + ws + ["</s>"]
+                    for i in range(2, len(seq)):
+                        tri[(seq[i - 2], seq[i - 1], seq[i])] += 1
+    return uni, bi, tri, sents
 
 
 def batches(it, size=200):
@@ -167,17 +172,21 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--articles", type=int, default=50_000)
     ap.add_argument("--procs", type=int, default=max(1, os.cpu_count() - 2))
+    ap.add_argument("--trigram", action="store_true", help="也算 trigram（記憶體用量大，請搭配較少的篇數）")
     a = ap.parse_args()
     os.makedirs(OUT, exist_ok=True)
-    uni, bi = collections.Counter(), collections.Counter()
+    uni, bi, tri = collections.Counter(), collections.Counter(), collections.Counter()
     sents = arts = 0
-    with mp.Pool(a.procs, initializer=_init) as pool:
-        for u, b, s_ in pool.imap_unordered(count_batch, batches(articles(a.articles))):
-            uni.update(u); bi.update(b); sents += s_; arts += 200
+    with mp.Pool(a.procs, initializer=_init, initargs=(a.trigram,)) as pool:
+        for u, b, t, s_ in pool.imap_unordered(count_batch, batches(articles(a.articles))):
+            uni.update(u); bi.update(b); tri.update(t); sents += s_; arts += 200
             if arts % 10000 == 0:
                 print(f"~{arts} articles, {sents} runs, {len(uni)} words, {len(bi)} bigrams", flush=True)
     arts = min(arts, a.articles)
-    pickle.dump({"uni": uni, "bi": bi, "articles": arts, "runs": sents}, open(os.path.join(OUT, f"counts-{arts}.pkl"), "wb"))
+    out = {"uni": uni, "bi": bi, "articles": arts, "runs": sents}
+    if a.trigram:
+        out["tri"] = tri
+    pickle.dump(out, open(os.path.join(OUT, f"counts-{arts}{'-tri' if a.trigram else ''}.pkl"), "wb"))
     print(f"done: {arts} articles, {sents} runs, {sum(uni.values())} tokens, {len(uni)} types, {len(bi)} bigram types")
 
 

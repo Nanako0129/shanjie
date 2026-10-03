@@ -24,7 +24,7 @@ def main():
     out, paths = sys.argv[1], sys.argv[2:]
     bc._init()
     lex, (phrase, char, maxp) = bc._W["lex"], bc._W["conv"]
-    uni, bi, runs = collections.Counter(), collections.Counter(), 0
+    uni, bi, tri, runs = collections.Counter(), collections.Counter(), collections.Counter(), 0
     for p in paths:
         for s in lines(p):
             for run in bc.HAN.findall(bc.convert(s, phrase, char, maxp)):
@@ -38,7 +38,10 @@ def main():
                 for w in ws:
                     uni[w] += 1; bi[(prev, w)] += 1; prev = w
                 bi[(prev, "</s>")] += 1
-    pickle.dump({"uni": uni, "bi": bi, "articles": 0, "runs": runs}, open(out, "wb"))
+                seq = ["<s>", "<s>"] + ws + ["</s>"]
+                for i in range(2, len(seq)):
+                    tri[(seq[i - 2], seq[i - 1], seq[i])] += 1
+    pickle.dump({"uni": uni, "bi": bi, "tri": tri, "articles": 0, "runs": runs}, open(out, "wb"))
     print(f"{runs} runs, {sum(uni.values())} tokens, {len(uni)} types, {len(bi)} bigram types")
 
 
