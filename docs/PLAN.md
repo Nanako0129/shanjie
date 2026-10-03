@@ -65,7 +65,7 @@ v4 日期 2026-10-03。v1 經 `pilotfish:plan-verifier`（REVISE，4 項）與 `
 
 **角色。** main：架構、契約、整合、驗收判斷。`pilotfish:executor`：核心與殼的實作。`pilotfish:mech-executor`：資料轉換、測試搬遷、評測資料。`pilotfish:security-executor`：§7 R1–R9 的實作（privacy gate、日誌規則、Keychain、雲端送出、學習檔儲存、模型下載驗證）。每片結束：fresh `pilotfish:verifier` 對該片驗收條件。UI 實機確認：交給使用者，main 先備好具體動作與預期結果。所有 agent 不得碰使用者的 login keychain（不讀、不寫、不 lock/unlock），測試一律用注入的記憶體 store。
 
-**回滾。** 全部在新 repo `~/side-project/shanjie`；安裝只放 `~/Library/Input Methods/shanjie.app`，刪掉即復原；不讀寫小麥注音、自然輸入法、Apple 注音的任何使用者資料。
+**回滾。** 全部在新 repo `~/side-project/shanjie`；安裝只放 `~/Library/Input Methods/shanjie.app`（覆蓋安裝時另有保留上一版的 `.shanjie-previous`），刪掉這兩個即復原；不讀寫小麥注音、自然輸入法、Apple 注音的任何使用者資料。
 
 **全域停止條件。** 同因失敗 2 次：main 接手或改切法；任一片超過預算 2 倍：暫停回報；驗收數字對不上：不調參數硬湊，先回報差異。
 
@@ -488,6 +488,8 @@ S3a 不需要外觀參考，可以先做；S3b 等使用者提供 macOS 內建�
 
 #### S3b：Swift 輸入法本體（截圖已於 2026-10-03 取得）
 
+**狀態（2026-10-04）：agent 可做的部分完成**（PR #3，merge 880dfbf）。fresh verifier CONFIRMED：驗收 1–8 獨立重跑、verifier 自己做的六項突變（i–vi）都由斷言抓到（executor 另做九項，見研究紀錄）；自測前後使用者的輸入法清單與偏好不變；CI（core、shell）全綠。CodeRabbit 沒有行內意見，但摘要的安全架構區塊列了兩項 Medium：(1) 安裝腳本先刪再複製沒有退路——PR #4 改成先複製到暫存、上一版取消 LaunchServices 登記後保留為 `.shanjie-previous`、再改名就位，並以假 app 在暫存 HOME 測試；(2) secure input 只在 deactivate 檢查——試做全面檢查後，本地審查指出全系統旗標會讓使用者的字悄悄消失，所以維持只在 deactivate 檢查，延到 S4 的 privacyGate 以實機證據決定。`release` environment 已照 syrtis 建好（只准 main 與 `v*`、需要使用者核准、3 個 variables）。**待使用者**：設定 3 個 secrets → 手動試跑 Release → 推 `v0.1.0` → 安裝實測（驗收 9–16）。
+
 - InputMethodKit app `shanjie.app`（`com.nyanako.inputmethod.shanjie`），用 SwiftPM 建置、腳本組 app bundle；本機與 CI 一律 ad-hoc 簽章，正式版在 GitHub Actions 的 `release` environment 用 Developer ID 簽章並公證（見 s3b §2、§3）；結構參考小麥注音（MIT）。
 - 候選窗先試 `IMKCandidates`；外觀、組字區底線、深色模式依使用者截圖。
 - `privacyGate`（R3）延到 S4：S3b 沒有學習、雲端、左文，gate 沒有東西可擋（見 `docs/contracts/s3b.md` §9）。
@@ -498,7 +500,7 @@ S3a 不需要外觀參考，可以先做；S3b 等使用者提供 macOS 內建�
 - **前提**：PR #1（GitHub Actions CI）合併到 main 之後才開工，S3b 的分支從那個 main 開出來。
 - **預算**：security-executor 1 回合＋1 次修正。
 - **停止**：開工時 main 上沒有 `.github/workflows/ci.yml`，或 `.gitignore` 沒有 `build/`，就停下回報；IMKCandidates 無法只當顯示用時停下回報（自建玻璃視窗是下一輪）；資料檔或 LM 缺少時建置失敗並說明；任何步驟需要本機鑰匙圈或 secret 的值時停下回報。
-- **回滾**：revert S3b 的 commit；已安裝的版本由使用者從 `~/Library/Input Methods/` 刪除。
+- **回滾**：revert S3b 的 commit；已安裝的版本由使用者從 `~/Library/Input Methods/` 刪除（`shanjie.app` 與 `.shanjie-previous`）。
 - 對照截圖與實機時要確認的暫定行為（S3a verifier 的 P4 與契約 §8）：Shift＋空白鍵目前等同空白鍵；候選開著時按超出本頁的數字鍵，目前候選維持開啟；候選頁到頭停住不繞回（只有空白鍵繞回）；Ctrl+Shift+\ 直通；Command 等組合鍵在組字中直通且不送出組字區。
 
 #### S3 原有要求
@@ -511,6 +513,7 @@ S3a 不需要外觀參考，可以先做；S3b 等使用者提供 macOS 內建�
 
 ### S4：使用者模型
 
+- **從 S3b 移來（2026-10-04）**：secure input 生效時，非按鍵的送出（deactivate、commitComposition、換擁有者、切換排列）要不要丟棄組字。S3b 只在 deactivate 丟棄，但 `IsSecureEventInputEnabled()` 是全系統旗標：任何 App 開著 secure input 時，deactivate 這條也會悄悄丟字。要先實機確認焦點移到密碼欄時組字送到哪個 client，再決定每條路徑的做法（CodeRabbit PR #3 的 Medium 之一）。
 - **從 S3b 移來（2026-10-03）**：`privacyGate`（R3：`IsSecureEventInputEnabled()` 或 denylist 時停學習、停雲端、不讀左文；判斷不了就擋；選單顯示暫停狀態）、gate 單元測試、gate 轉為生效時 `reset`；左文讀取與 R4。
 
 - 左文由殼讀取、經 C ABI 傳入，R4（最後換行截斷、計數單位與上限、只活在記憶體、多行與 emoji 邊界測試）在這片實作。
@@ -760,7 +763,7 @@ plan-verifier 第一次：REVISE（6 項阻擋）。security-reviewer：無 P0�
 | plan-verifier 6 | privacyGate、中英切換在 PLAN 與契約不一致 | FIX：privacyGate 與 gate 測試延到 S4；中英切換用系統 Caps Lock；PLAN、s3a §3、§6 一併改 |
 | security P2-1 | 日誌規則是黑名單，數值預設公開 | FIX：白名單，只記靜態字串與回傳碼；PLAN R2 同步 |
 | security P2-2 | 共用引擎跨 controller 的組字擁有者沒定義 | FIX：s3b §5 組字擁有者；兩個假 controller 的測試 |
-| security P2-3 | 安裝腳本順序與複製方式 | FIX：先移除、`ditto`、以完整路徑 `pkill`、執行已安裝那份的 `install`；固定字面路徑；不用 sudo |
+| security P2-3 | 安裝腳本順序與複製方式 | FIX：固定字面路徑、不用 sudo、以完整路徑 `pkill`、執行已安裝那份的 `install`。2026-10-04 再改（PR #4）：先複製到暫存、上一版取消登記後保留為 `.shanjie-previous`、再改名就位，見 s3b §4 |
 | security P2-4 | entitlements 沒有明寫為空 | FIX：不給 entitlements 檔，驗收檢查輸出為空、flags 含 runtime |
 | security P3 | `try!` 與錯誤型別、非 0 回傳碼殘留組字、`nil` 事件、候選陣列清除、滑鼠選候選、secure input 的預期、自測參數與 UserDefaults、`build/` 未忽略 | FIX：全部寫進 s3b；`build/` 已在 PR #1 加入 `.gitignore` |
 | plan-verifier 2 | PLAN 仍寫 Apple Development 簽章；PR #1 沒列為前提；擁有者只記 ObjectIdentifier、deactivate 不檢查擁有者；日誌擷取沒證明已接上；release 的 build 沒下載模型 | FIX：PLAN 改寫簽章；加前提與停止條件；擁有者改弱參照、deactivate／commit 先檢查、deinit 丟棄，加兩個測試；起始＋結束標記與逾時；release build 先下載並比對模型 |
