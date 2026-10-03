@@ -20,7 +20,7 @@ v4 日期 2026-10-03。v1 經 `pilotfish:plan-verifier`（REVISE，4 項）與 `
 
 | ID | 條件 | 量法 |
 |---|---|---|
-| A1 | 口語評測集整句正確率（句尾計分），拆成兩個可分開歸責的數字（v5，N0 後）：**A1a 候選含正解率**（同步路徑前 16 名候選含正解）≥ 98%，由 S1＋S2 負責；**A1b 判斷挑對率**（正解在候選內的句子裡，重排挑對的比例）≥ 97%，**在端上路徑量，由 S5 負責；v1 完成以端上為準**。雲端（S6，選用）啟用時另報雲端的 A1b，不構成 v1 完成條件。兩者相乘約等於原本的完整端上路徑 ≥ 95%。只有 lattice＋n-gram 的同步路徑 top-1 ≥ 85% | 片 E 產出的保留集，只在片結束時由 verifier 跑 |
+| A1 | 口語評測集整句正確率（句尾計分），拆成兩個可分開歸責的數字（v5，N0 後）：**A1a 候選含正解率**（同步路徑前 64 名候選含正解；使用者 2026-10-03 決定交給判斷器 64 名）≥ 98%，由 S1＋S2 負責；**A1b 判斷挑對率**（正解在候選內的句子裡，重排挑對的比例）≥ 97%，**在端上路徑量，由 S5 負責；v1 完成以端上為準**。雲端（S6，選用）啟用時另報雲端的 A1b，不構成 v1 完成條件。兩者相乘約等於原本的完整端上路徑 ≥ 95%。只有 lattice＋n-gram 的同步路徑 top-1 ≥ 85% | 片 E 產出的保留集，只在片結束時由 verifier 跑 |
 | A2 | 學習不污染：改選一次冷門詞後，常用詞句 0 退步；同前文的冷門詞句 ≥ 80% 學會 | 片 E 產出的 ≥ 10 組學習案例 |
 | A3 | 延遲（M5 Mac）：同步路徑每鍵 p95 < 16 ms；神經驗證 p95 < 300 ms、非同步、不阻塞按鍵。雲端主力模式（選用，§2 S6）另訂：送出前等待 p95 ≤ 1 秒（使用者 2026-10-03 核定），硬逾時就送本機結果 | 核心 bench＋殼內打點 |
 | A7 | 不拖慢電腦（v5，使用者 2026-10-03 在 Mac 量測時回報「電腦很卡」）：本機模型推論期間，按鍵到組字區顯示的 p95 仍 < 16 ms；推論用低 QoS、新按鍵就取消進行中的推論；使用者實測打字時不卡 | 殼內打點＋使用者實測 |
@@ -151,68 +151,84 @@ v4 日期 2026-10-03。v1 經 `pilotfish:plan-verifier`（REVISE，4 項）與 `
 
 ### S1：詞庫 v1 與候選生成（第一個可執行片，v5）
 
-- **目標。** 讓正解進入同步路徑的前 16 名候選（A1a 的詞庫那一半）。只改候選生成，不碰重排。
-- **前置（全部可檢查）。**
-  1. 使用者核准 v5 的 envelope 與 S1。
-  2. main 寫好 `docs/contracts/s1.md`：下方契約全文，加上步驟 1 的產出。步驟 1 的產出是：所選來源、來源檔 SHA-256、新詞預設分數的數值。步驟 2 開工前，契約必須已經完整。
+- **目標。** 讓正解進入同步路徑的前 64 名候選（A1a 的詞庫那一半）。只改候選生成，不碰重排。
+- **前置（全部成立）。**
+  1. 使用者核准 v5 與 S1。
+  2. 使用者在步驟 1 停止條件觸發後做了兩個決定：補詞來源用 CC BY-SA 的維基標題與維基詞典；候選數放寬到 64。日期 2026-10-03。
+  3. `docs/contracts/s1.md` 記錄步驟 1 的調查與下方各值。
 - **名詞。**
-  - **開發集前 302 列。** `eval/dev/*.txt` 依檔名排序（CLI 現行行為），依序為 existing 109、homophones 165、oov 25、user-reported 前 3 列。user-reported 之後增加的列不算在內，所以這 302 列在 S1 期間固定不變。
+  - **開發集前 302 列。** `eval/dev/*.txt` 依檔名排序（CLI 現行行為），依序為 existing 109、homophones 165、oov 25、user-reported 前 3 列。之後增加的列不算在內，所以這 302 列在 S1 期間固定不變。
   - **OOV 子集。** 該集合中，句子含有該集合 `oov_words.list` 任一詞的列。開發集用 `eval/dev/oov_words.list`，保留集用 `eval/holdout/oov_words.list`。由 CLI 判定；verifier 不開保留集內容。
   - **每鍵延遲。** 每一句對讀音的每個前綴（第 1..n 個音節）各重新解碼一次，模擬每打完一個音節就重算；p95 取全部前綴的計時。
   - **既有 109 句。** 指 `eval/dev/existing.txt`，讀音已確認過；不是 golden 用的 trap＋daily。
 - **契約。**
-  - **基底不動。** `data/lexicon/mcbpmf-data.txt`（SHA-256 見 S0）原封不動。新詞放在疊加層 `data/lexicon/overlay-add.tsv`，欄位為 `讀音	詞	分數	來源標籤`。
-    - 疊加層只收基底沒有的（讀音, 詞）組合：`tools/build_overlay.py` 會濾掉和基底重複的組合。核心載入時如果還是遇到重複，就回報錯誤，不靜默覆蓋。所以疊加層只會新增，不會改動既有詞的分數。
-    - `shanjie-eval --no-overlay` 只用基底，並沿用 S0 的搜尋參數，輸出必須和 `eval/golden/unigram.txt` 逐行相同。
-    - **S1 不調整既有詞的分數**：同音詞排序交給 S2。
-  - **新詞來源。** 只能來自授權可再散布、而且獨立於評測集的通用詞表。
-    - **禁止從 `eval/` 的句子挑詞加入**：開發集的 OOV 詞只能用來量某個來源的涵蓋率，作為診斷。
-    - 疊加層必須能由三樣東西完整重新產生，不得手動加列：鎖定雜湊的來源檔（放在 repo 的 `data/sources/`；依上一條，來源本來就必須可再散布）、`tools/reading_overrides.tsv`、轉換腳本 `tools/build_overlay.py`。
-    - 來源清單、授權、來源檔 SHA-256 寫進 `LICENSES/data.md` 與契約；萌典（CC BY-ND）不得用於詞庫。
-  - **新詞讀音（優先順序）。**
-    1. 來源檔本身附的注音。
-    2. `tools/readings.py --no-moe`：只套規則 0、1、3、4、5；規則 2 用萌典，只限評測。
-    3. CHECK 列由 main 確認，記進 `tools/reading_overrides.tsv`。
+  - **基底不動。** `data/lexicon/mcbpmf-data.txt`（SHA-256 見 S0）原封不動。新詞放在疊加層 `data/lexicon/overlay-add.tsv`，欄位為 `讀音	詞	分數	來源標籤`，讀音以 `-` 連接音節，和基底相同。
+    - 疊加層只收基底**沒有的詞**：以詞判斷，不管讀音。核心載入時遇到和基底同讀音同詞的列，就回報錯誤，不靜默覆蓋。所以 S1 不會改動既有詞的分數，同音詞排序交給 S2。
+    - `shanjie-eval --no-overlay` 只用基底。`unigram` 行沿用 S0 的搜尋參數，因此 `--no-overlay` 跑 trap、daily、moedict、`--learn-sim` 的輸出必須和 `eval/golden/unigram.txt` 逐行相同。
+  - **來源（使用者 2026-10-03 決定，鎖定版本）。**
 
-    `tools/readings.py` 裡的 `heterophony1.list` 改成讀 repo 內的副本 `data/lexicon/heterophony1.list`（小麥注音，MIT），不再依賴 repo 外的路徑。g2pW 不在 S1 範圍（裝到 188 要使用者同意）。
-  - **新詞分數。** 預設 = 同字數基底詞分數的第 25 百分位，由 main 在步驟 1 算出，寫進契約。來源若附詞頻，改用契約寫明的換算公式；公式同樣在步驟 1 定好。
-  - **搜尋參數。** 測 `BEAM ∈ {32, 64}`、`PER_KEY ∈ {12, 16, 24}` 對 oracle@16 與每鍵延遲的影響，選每鍵 p95 < 16 ms 裡 oracle 最高的組合。選定值寫進契約。
+    | 標籤 | 檔案 | SHA-256 | 授權 | 用途 |
+    |---|---|---|---|---|
+    | `zhwiki` | `https://dumps.wikimedia.org/zhwiki/20261001/zhwiki-20261001-all-titles-in-ns0.gz` | `016e97bf584196a0eb0522ab9b6300ffccae6fb64d2188bd81a53182a28d6d67` | CC BY-SA 4.0 | 詞 |
+    | `wikt` | `https://dumps.wikimedia.org/enwiktionary/20261001/enwiktionary-20261001-all-titles-in-ns0.gz` | `1c840da0ddb78eed78e6f1b6fe613c1a2eced952801fd7d676f4dac9e581d4fd` | CC BY-SA 4.0 | 詞 |
+    | `wikt` | `https://dumps.wikimedia.org/zhwiktionary/20261001/zhwiktionary-20261001-all-titles-in-ns0.gz` | `95e915cd85992b4fe990187dca845ea85e257deba39d8054b014781015d3f7f0` | CC BY-SA 4.0 | 詞 |
+    | — | OpenCC `data/dictionary/STCharacters.txt`，commit `3ac34aa439a9908dd49fa92b5174b46314787ac2` | `a0ca1601c70648cf48b33c3c6210ccbecc5c7eead4b4c3daf76587ba2c03582b` | Apache-2.0 | 只用來過濾，不進疊加層 |
+
+    三個 dump 的 sha1 已和 Wikimedia 官方的 `sha1sums.txt` 比對相符。來源檔不進 repo，因為合計 55 MB。`tools/build_overlay.py` 下載到 `~/.cache/shanjie/sources/` 後驗證 SHA-256，不符就中止。
+  - **篩選。** 用程式依序做，不得手動加減：
+    1. 純漢字 2–4 字（U+4E00–U+9FFF）。
+    2. 不在基底的詞表裡。
+    3. 每個字都是基底的單字詞條。
+    4. 不含簡體專用字：STCharacters 裡繁體對應和自己不同的字。
+    5. 維基詞典（英、中）的標題全收。中文維基的標題只收「複合詞」：去掉第一個字或最後一個字之後，剩下的是基底裡的多字詞。
+
+    複合詞規則是 main 看過開發集 OOV 詞（收納盒、防滑墊…）之後定的。它是一般的構詞規則，不是逐詞挑選，但仍有偏向開發集的風險，由保留集把關，報告時要揭露。**禁止從 `eval/` 的句子挑詞加入**。
+  - **讀音。** 用基底的 `to_syllables`：以基底詞切分，取最高分讀音；轉不出讀音的詞略過。不做人工確認，避免人手偏向評測句。`tools/readings.py` 不改。
+  - **分數。** 同字數基底詞條分數的第 25 百分位：所有讀音長度為 L 的詞條分數由小到大排序，取 `sorted[len // 4]`。結果是 2 字 `-7.17149945`、3 字 `-7.04116568`、4 字 `-6.60980192`。
+  - **來源標籤。** 出現在任一維基詞典的標 `wikt`，其餘標 `zhwiki`。
+  - **授權。** `overlay-add.tsv` 以 CC BY-SA 4.0 釋出，署名 Wikipedia 與 Wiktionary 貢獻者，寫進 `LICENSES/data.md`；程式碼仍是 Apache-2.0。
+  - **搜尋參數。** S1 路徑 `BEAM = 64`：要 64 名候選，BEAM 至少 64。`PER_KEY = 12`：步驟 1 實測放寬到 24 也沒有差別。S0 的常數保留給 `unigram` 行與 golden。
+  - **步驟 1 的參考結果。** Python 原型和核心逐位元組相同，開發集前 302 列：
+    - 新增 342,761 詞。
+    - oracle@64 為 98.3%（基底 97.7%），oracle@16 為 95.4%（基底 94.7%）。
+    - unigram top-1 為 54.0%（基底 51.7%）；既有 109 句 top-1 為 76（基底 75）。
+    - OOV 子集 @64 為 24/27（基底 22/27）。
   - **評測 CLI。**
-    - 只對 `dev`、`holdout` 另印一行 `## <集名>  extra  {'oracle@16': …, 'oov_n': …, 'oov_sent_acc': …, 'oov_oracle@16': …}`。既有的 `## … unigram {…}` 行格式不變；trap、daily、moedict 的輸出完全不變，因此 `--no-overlay` 的 golden 比對不受影響。
-    - `--limit N`：只對 `dev` 有效，取依檔名排序後的前 N 列。驗收用 `--set dev --limit 302`，n 必須是 302。
+    - `unigram` 行格式與參數不變。
+    - 只對 `dev`、`holdout` 另印一行 `## <集名>  extra  {'oracle@16': …, 'oracle@64': …, 'oov_n': …, 'oov_sent_acc': …, 'oov_oracle@64': …}`。這行一律用 S1 參數，所以有疊加層和 `--no-overlay` 兩種跑法的差距只來自疊加層。
+    - `--limit N`：只對 `dev` 有效，取依檔名排序後的前 N 列。
     - `--bench` 改量每鍵延遲（定義見上）。
-    - 開發集另印 oracle@16 漏掉的列，附序號；保留集只印數字、不印句子。
-    - 有疊加層和 `--no-overlay` 兩種跑法都要印。`--no-overlay` 用 S0 的搜尋參數；S0 的常數保留給這條路徑用，掃描選定的值另外定義成新常數。
+    - 開發集另印 oracle@64 漏掉的列，附序號；保留集只印數字、不印句子。
 - **步驟與擁有者。**
-  1. main（唯讀）：調查候選來源，核對授權與開發集 OOV 詞的涵蓋率；選定來源，算出預設分數，補進契約。
-  2. `pilotfish:mech-executor`：完成 `tools/build_overlay.py`、`readings.py --no-moe`、`heterophony1.list` 副本，並產生疊加層的第一版和 CHECK 清單。
-  2b. main：確認 CHECK 列，寫進 `tools/reading_overrides.tsv`，再用 `build_overlay.py` 重新產生疊加層。
-  3. `pilotfish:executor`：完成核心的疊加層載入、`--no-overlay`、CLI 指標與每鍵 bench、參數掃描。擁有 `core/src/lib.rs`、`core/src/eval.rs`、`core/src/tests.rs`、`cli/`。
+  1. ✅ main（唯讀）：調查來源，使用者已決定；篩選、讀音、分數已定。調查紀錄在 `docs/contracts/s1.md`。
+  2. `pilotfish:mech-executor`：
+     - 寫 `tools/build_overlay.py`：下載並驗證來源、篩選、用 `reference/proto/ime.py` 的 `to_syllables` 產生讀音、寫出疊加層。
+     - 產生 `data/lexicon/overlay-add.tsv`。
+     - 更新 `LICENSES/data.md`。
+     - 用一段 Python 自我檢查，確認輸出和基底的交集為 0 詞。
+  3. `pilotfish:executor`：完成核心的疊加層載入（重複就回報錯誤）、`--no-overlay`、S1 常數、`extra` 行、`--limit`、每鍵 bench，並更新 `core/src/tests.rs`。擁有 `core/src/lib.rs`、`core/src/eval.rs`、`core/src/tests.rs`、`cli/`。
   4. fresh `pilotfish:verifier`：跑驗收，包含保留集。只執行 CLI，不開保留集內容。
 - **驗收。**
   1. `--no-overlay` 的 golden `diff` 為空。
-  2. `--set dev --limit 302` 的 oracle@16 ≥ 96.5%（S1 起點 94.7%，即最多漏 10 列；n = 302）。
-  3. OOV 子集 oracle@16：
-     - 開發集 ≥ 90%（起點約 76%，以 `--no-overlay` 印出的值為準）。
-     - 保留集：verifier 跑 `--set holdout` 兩次，「有疊加層」減「`--no-overlay`」≥ 15 個百分點，並報 `oov_n`。這個差距同時包含疊加層和搜尋參數兩個效果，報告要揭露。
-  4. `eval/dev/existing.txt` 的 unigram top-1 和 oracle@16 都不退步。
-  5. 每鍵解碼 p95 < 16 ms（release 版，`--set dev --limit 302 --bench`）。
-  6. 可重現：verifier 用鎖定雜湊的來源檔和 `tools/build_overlay.py` 重新產生疊加層，和 commit 的檔案 `diff` 為空；來源檔 SHA-256 相符；每筆標籤都在 `LICENSES/data.md` 裡。這項檢查要真的能抓到東西：手動多加一列，就必須失敗。
-  7. `cargo test` 綠；單元測試涵蓋三件事：
-     - 疊加層含和基底重複的（讀音, 詞）時，載入回報錯誤。
-     - `--no-overlay` 不載入疊加層。
-     - `build_overlay.py` 的輸出和基底交集為 0 列。
-- **範圍外。** 既有詞分數調整、n-gram 與詞性（S2）；重排模型；使用者詞庫（S4）；萌典衍生資料；C ABI（S3）。
+  2. `--set dev --limit 302`（n = 302）：oracle@64 ≥ 98.0%，而且等於步驟 1 的 Python 參考值 98.3%（297/302），核心和原型的結果要一致。
+  3. OOV 子集 oracle@64：
+     - 開發集 = 24/27（參考值）。
+     - 保留集：verifier 跑 `--set holdout` 兩次，「有疊加層」減「`--no-overlay`」≥ 8 個百分點，並報 `oov_n`。
+  4. top-1 不退步：`eval/dev/existing.txt` 的 unigram top-1 ≥ 75/109；開發集前 302 列有疊加層時的 top-1 不低於 `--no-overlay`。
+  5. 載入疊加層後，每鍵解碼 p95 < 16 ms（release 版，`--set dev --limit 302 --bench`）；另報詞庫載入時間與記憶體。
+  6. 可重現：verifier 跑 `tools/build_overlay.py`，來源 SHA-256 相符，產出和 commit 的 `overlay-add.tsv` 的 `diff` 為空。在疊加層手動多加一列，這項檢查就必須失敗。
+  7. `cargo test` 綠；單元測試涵蓋：疊加層和基底同讀音同詞時載入回報錯誤；`--no-overlay` 不載入疊加層。
+- **範圍外。** 既有詞分數調整、n-gram 與詞性（S2）；重排模型；使用者詞庫（S4）；萌典衍生資料；C ABI（S3）；`tools/readings.py`。
 - **預算。** mech-executor 1 回合＋1 次修正；executor 1 回合＋1 次修正。
 - **停止。**
-  - 沒有任何可再散布的來源能涵蓋開發集 OOV 詞的 50%：暫停，回報候選來源與授權，請使用者決定。
+  - 來源下載不到，或 SHA-256 不符（Wikimedia 會下架舊 dump）：中止，回報。
   - 驗收 2 或 3 達不到：不手動補詞或調分數硬湊；回報漏掉的列與原因分類。
 - **回滾。** 刪疊加層檔案，或用 `--no-overlay`。
 
 ### S2：基礎 n-gram（同步路徑）
 
 - 字／詞 trigram，自寫訓練與讀取（不用 KenLM）；口語合成句由 Gemma 4 E2B 在 188 上產生。
-- 驗收：開發集同步路徑 ≥ 85%，片結束時保留集 ≥ 85%；**A1a：開發集與保留集 oracle@16 ≥ 98%**（S1＋S2 合計；N0 的 9 句同音詞排序漏掉屬於這片）；每鍵 p95 < 16 ms；模型檔 ≤ 100 MB。P1 詞性連接併入這片（見下）。
+- 驗收：開發集同步路徑 ≥ 85%，片結束時保留集 ≥ 85%；**A1a：開發集與保留集 oracle@64 ≥ 98%**（S1＋S2 合計；N0 的 9 句同音詞排序漏掉屬於這片）；每鍵 p95 < 16 ms；模型檔 ≤ 100 MB。P1 詞性連接併入這片（見下）。
 
 ### 使用者提出的兩個方向（2026-10-03，待排入；排入前要過 plan-verifier）
 
@@ -294,6 +310,8 @@ v4 日期 2026-10-03。v1 經 `pilotfish:plan-verifier`（REVISE，4 項）與 `
 | 讀音標注偏大陸讀音 | 只用 g2pW 注音權重＋小麥讀音；以萌典評測讀音一致率 |
 | 神經驗證延遲 | S5 先量後選；超標就退成送出前驗證；路線 3（S7）是更小模型的後備 |
 | 本機模型拖慢整台電腦（2026-10-03 實際發生） | A7；低 QoS、新按鍵就取消；Mac 量測經使用者同意並挑時間 |
+| 64 名候選讓判斷器更容易挑錯（N1／N0 是用 16／32 名量的） | S5、S6 量 A1b 時改用 64 名，必要時再決定判斷器實際看幾名 |
+| 疊加層以 CC BY-SA 釋出（share-alike） | 只限 `overlay-add.tsv` 這個檔；程式碼仍是 Apache-2.0；`LICENSES/data.md` 註明署名 |
 | 詞庫補詞過度擬合評測集 | S1 禁止從 `eval/` 挑詞、每筆有來源標籤；保留集由 verifier 量 |
 | 輸入法看得到所有按鍵 | §7 R1–R9 |
 | 專利 | §6；不是法律意見；若改成商業產品要做 FTO |
@@ -312,6 +330,7 @@ v4 日期 2026-10-03。v1 經 `pilotfish:plan-verifier`（REVISE，4 項）與 `
 | Mac 延遲量測 | 同意「只量延遲」；量測中使用者回報「電腦很卡」，已停。之後 Mac 上的量測先問時間，在使用者沒在用電腦時跑（S5） |
 | 雲端實測（N1） | 同意總預算 US$5、只跑便宜模型；花了約 US$2.24（部分為估算，見 `experiments/providers/README.md`） |
 | 雲端主力模式的延遲 | p95 ≤ 1 秒（使用者選「寬一點」）；預設的本機路徑仍是 300 ms |
+| S1 補詞來源與候選數 | 步驟 1 的停止條件觸發（可再散布來源都不到一半）後，使用者選：補詞用 CC BY-SA 的中文維基標題與維基詞典；判斷器的候選從 16 名放寬到 64 名 |
 | 核准（v5） | 核准 v5 與 S1（含未再審的收尾修正）；S1 以 AUTO 執行：只在本機 commit、不 push；可再散布來源不夠、驗收達不到、或要裝新軟體時停下來問 |
 
 原本的待決清單：
