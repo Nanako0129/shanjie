@@ -216,7 +216,8 @@
 
 - `shanjie install` 依序：一律呼叫 `TISRegisterInputSource(Bundle.main.bundleURL)`（不再在 bundle ID 已知時略過）→ 在 `TISCreateInputSourceList` 找 `<BUNDLE_ID>.zhuyin`：
   - 列不到 → **exit 3**（和其他失敗區分；目前 main.swift 只用 0、1、64）。
-  - 列得到 → 啟用；啟用失敗 → exit 1（一般失敗）。
+  - 列得到 → 先啟用輸入法本體（`kTISPropertyInputModeID` 為 nil 的那一筆，輸入來源 ID 就是 bundle ID），再啟用模式；任一個失敗 → exit 1（一般失敗）。
+  - 接著查已啟用清單（`TISCreateInputSourceList(…, false)`）裡有沒有輸入法本體；沒有 → **exit 3**。2026-10-04 用 0.1.0 實測：只啟用模式時，輸入法本體維持停用，任何地方都列不到這個輸入法，`install` 卻回 0。在註冊後、第一次登出前，兩個啟用呼叫都回 noErr，同一行程的已啟用清單也列得到模式，但列不到本體，換一個行程查也是停用；登出再登入後兩者都是已啟用。所以只看本體有沒有出現在已啟用清單（修訂三，v0.1.1）。
   - 啟用成功後，列得到舊的 `<BUNDLE_ID>.standard`／`.eten` 就 `TISDisableInputSource`；停用失敗只印警告；列不到就什麼都不做 → exit 0。
 - 輸入模式 ID 一律不會切換排列：殼不覆寫 IMK 的 `setValue(_:forTag:client:)`，連舊版的 `.standard`／`.eten` 在還沒被停用時也一樣（PR #5 審查：否則系統每次啟用時會把選單選的排列切回去）。排列只由選單與偏好決定。
 - `install` 的回傳碼：`TISRegisterInputSource` 失敗而且列不到 `.zhuyin` → exit 1（一般失敗，安裝腳本印還原指令）；註冊成功但列不到 → exit 3（登出再登入）。
