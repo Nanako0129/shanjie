@@ -119,12 +119,22 @@ final class CandidatePanelAdapter: CandidatePanel {
     }
 
     func show(_ candidates: [String], selected: Int) {
-        let items = candidates.map { $0 as NSString }
-        panel.setCandidateData(items)
-        if items.indices.contains(selected) {
-            panel.selectCandidate(withIdentifier: panel.candidateStringIdentifier(items[selected]))
-        }
+        panel.setCandidateData(candidates.map { $0 as NSString })
         panel.show(kIMKLocateCandidatesBelowHint)
+        guard candidates.indices.contains(selected) else { return }
+        // User report 2026-10-04 (v0.1.1): the highlight stayed on the first candidate while the
+        // core's selection moved. Selecting by `candidateStringIdentifier`, before or after
+        // show(), did not move it. The panel is a single row, so a cell's line number is its
+        // position (IMKCandidates.h); select by that and read the selection back.
+        let target = panel.candidateIdentifier(atLineNumber: selected)
+        if target != NSNotFound, panel.selectCandidate(withIdentifier: target), panel.selectedCandidate() == target {
+            return
+        }
+        // Fallback, as DINKIssTyle-IME (MIT) drives IMKCandidates: from the first cell, step the
+        // panel's own highlight with its responder actions.
+        let first = panel.candidateIdentifier(atLineNumber: 0)
+        if first != NSNotFound { _ = panel.selectCandidate(withIdentifier: first) }
+        for _ in 0..<selected { panel.moveRight(nil) }
     }
 
     func hide() {
