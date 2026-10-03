@@ -107,7 +107,8 @@ def adjust_lexicon(base, overlay_words, uni, cfg):
     overlay_cap=true：疊加層的詞分數取 min(原分數, log10(c(w)/N))；語料沒見過的再扣 overlay_unseen（預設 1.0）。
     """
     beta, cap, unseen = cfg.get("prior_mix", 0.0), cfg.get("overlay_cap", False), cfg.get("overlay_unseen", 1.0)
-    if not beta and not cap:
+    packs = cfg.get("packs", [])   # [[類別, 分數位移], ...]，詞包在 ~/.cache/shanjie/work/names/<類別>.tsv
+    if not beta and not cap and not packs:
         return base
     N = sum(uni.values())
     lex = ime.Lexicon.__new__(ime.Lexicon)
@@ -122,6 +123,15 @@ def adjust_lexicon(base, overlay_words, uni, cfg):
             lex.by_reading[key].append((w, lp))
             if w not in lex.by_word or lp > lex.by_word[w][1]:
                 lex.by_word[w] = (key, lp)
+    for name, offset in packs:
+        for line in open(os.path.join(os.path.expanduser("~/.cache/shanjie/work/names"), f"{name}.tsv"), encoding="utf-8"):
+            r, w, sc, _ = line.rstrip("\n").split("\t")
+            key, lp = tuple(r.split("-")), float(sc) + offset
+            if w in lex.by_word:
+                continue
+            lex.by_reading[key].append((w, lp))
+            lex.by_word[w] = (key, lp)
+            lex.max_len = max(lex.max_len, len(key))
     for k in lex.by_reading:
         lex.by_reading[k].sort(key=lambda x: -x[1])
     return lex
