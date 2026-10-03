@@ -361,6 +361,8 @@ v4 日期 2026-10-03。v1 經 `pilotfish:plan-verifier`（REVISE，4 項）與 `
 
 #### S2c：bigram 語言模型進核心
 
+**狀態：完成（2026-10-03，commit 6620294、3be8675）。** fresh verifier CONFIRMED：驗收 1–9 獨立重跑，五項突變都失敗。保留集（只由 verifier 跑一次）：chat top1 175／227（77.1%）、formal 181／227（79.7%），oracle@64 226／227（99.6%，**A1a 達成**；LM 模式的 oracle 用寬鬆對照）。引擎載入 LM 後峰值 RSS 238 MB，每鍵 p95 1.18 ms。
+
 - **目標。** 把 S2 的 bigram 語言模型（`reference/proto/lm.py`）照原樣移植到 Rust 核心，讓按鍵引擎可以用聊天／書面兩種設定解碼；評測 CLI 能產生和 Python 參考實作相同的結果。
 - **語意基準。** `reference/proto/lm.py`、`reference/proto/lm_eval.py`；模型檔格式見 `tools/build_lm.py` 的說明（SJLM0001）。衝突時以 Python 的實際行為為準並回報。必須逐項照做：
   - `back(v)`：先把該前文每個保留條目的 `(c − D)` 依檔案順序以 f64 逐項累加，再算 `1 − 累加值 / t`（除一次）。`P(w|v) = (c − D)/t + back(v)·10^lp`（c 為 0 時只有後項）；v 沒有保留條目時 `P = 10^lp`。
@@ -491,7 +493,11 @@ S3a 不需要外觀參考，可以先做；S3b 等使用者提供 macOS 內建�
 - `privacyGate`（R3）：`IsSecureEventInputEnabled()` 或 denylist 時停學習、停雲端、不讀左文。
 - 殼依前景 App 的 bundle ID 判斷聊天或書面，只把這個列舉傳給核心，供 S2 的語言模型設定切換；核心不持有 App 身分。
 - 安裝與實機測試由使用者執行：TextEdit／Notes／Safari 打陷阱集前 10 句、R3 的三處 secure input 情境、Caps Lock 切換、兩種排列。
-- 契約在截圖到手後再寫，另外送審並由使用者核准。
+- **契約：`docs/contracts/s3b.md`（2026-10-03，使用者已提供 4 張深色模式截圖）。** 最小可安裝版：橫式候選條（IMKCandidates）、組字底線、數字選字、標準與倚天兩個輸入模式、依 App 切換聊天／書面設定、`--selftest`、使用者執行的安裝腳本。展開網格、直式、表情候選等記為 S3b-2。
+- **擁有者**：`pilotfish:security-executor`（整片一人負責：按鍵內容與日誌規則、簽章與 hardened runtime、安裝腳本）；fresh `pilotfish:verifier` 驗收 agent 可做的 1–7 項；8–12 由使用者實測。
+- **預算**：security-executor 1 回合＋1 次修正。
+- **停止**：IMKCandidates 無法只當顯示用時停下回報（自建玻璃視窗是下一輪）；資料檔或 LM 缺少時建置失敗並說明。
+- **回滾**：revert S3b 的 commit；已安裝的版本由使用者從 `~/Library/Input Methods/` 刪除。
 - 對照截圖與實機時要確認的暫定行為（S3a verifier 的 P4 與契約 §8）：Shift＋空白鍵目前等同空白鍵；候選開著時按超出本頁的數字鍵，目前候選維持開啟；候選頁到頭停住不繞回（只有空白鍵繞回）；Ctrl+Shift+\ 直通；Command 等組合鍵在組字中直通且不送出組字區。
 
 #### S3 原有要求
