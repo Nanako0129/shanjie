@@ -151,6 +151,11 @@ fn row2_punctuation_goes_into_the_composition() {
     typ(&mut e, " "); // candidates open
     let o = k(&mut e, Key::ch('\\', MOD_CONTROL));
     assert!(o.handled && o.commit.is_empty() && o.preedit == format!("{shown}、") && o.candidates.is_empty() && o.selected.is_none());
+    // Ctrl+\ drops a pending syllable too.
+    let mut e = std();
+    typ(&mut e, NIHAO);
+    typ(&mut e, "c");
+    assert!(k(&mut e, Key::ch('\\', MOD_CONTROL)).preedit == "你好、");
     // Empty composition: the punctuation alone is the composition; Enter commits it.
     let mut e = std();
     let o = k(&mut e, Key::ch(',', MOD_SHIFT));
