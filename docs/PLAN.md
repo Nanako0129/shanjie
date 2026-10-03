@@ -254,7 +254,13 @@ v4 日期 2026-10-03。v1 經 `pilotfish:plan-verifier`（REVISE，4 項）與 `
   - 競品實測：小麥注音 17 MB、自然輸入法 131 MB。
 - **前置（全部成立）。**
   1. 使用者同意「過審就開工」（§4）。
-  2. main 已 commit S1 的完整輸出當對照檔。這三份都在 HEAD 用 release 版產生，重跑兩次逐位元組相同：
+  2. main 已在重構前 commit 三個守門測試，golden 碰不到它們描述的行為，名稱也要寫進 `docs/contracts/l.md`：
+     - `learner_word_score_takes_last_duplicate`
+     - `overlay_duplicate_within_overlay_is_error`
+     - `overlay_bad_rows_report_length_only`
+
+     這三個測試的斷言在重構後不得修改。
+  3. main 已 commit S1 的完整輸出當對照檔。這三份都在 HEAD 用 release 版產生，重跑兩次逐位元組相同：
      - `eval/golden/s1-dev302.txt`：`--set dev --limit 302`。
      - `eval/golden/s1-dev302-nooverlay.txt`：同上加 `--no-overlay`。
      - `eval/golden/s1-overlay-sets.txt`：`--set trap daily moedict --learn-sim`，有疊加層。
@@ -277,7 +283,7 @@ v4 日期 2026-10-03。v1 經 `pilotfish:plan-verifier`（REVISE，4 項）與 `
 - **驗收。**
   1. 舊 golden：`--set trap daily moedict --learn-sim --no-overlay` 和 `eval/golden/unigram.txt` 的 diff 為空。
   2. 三份 S1 對照檔各自用對應的指令重新產生，diff 都為空。`cargo test` 必須涵蓋這三項比對。
-  3. 峰值 RSS（`/usr/bin/time -l` 的 maximum resident set size）：`--set dev --limit 302`（有疊加層）≤ 131 MB；另報 `--no-overlay` 的值。
+  3. 峰值 RSS（`/usr/bin/time -l` 的 maximum resident set size，單位是位元組）：`--set dev --limit 302`（有疊加層）≤ 137,363,456 bytes（131 MiB）；另報 `--no-overlay` 的值。競品的 131 MB 是 `footprint` 量的，和 RSS 不是同一種量法，比較只能當近似。
   4. 每鍵延遲：`--set dev --limit 302 --bench` 跑 3 次取中位數，p95 ≤ 5 ms（S1 實測 2.6–3.9 ms），且遠低於 A3 的 16 ms；另報載入時間。
   5. `cargo test` 綠。既有測試的斷言都還在，只是改用新的存取方式。
 - **範圍外。** 任何會改變輸出的改動，包括分數、參數、排序規則；建置期二進位格式與記憶體映射；n-gram（S2）。
