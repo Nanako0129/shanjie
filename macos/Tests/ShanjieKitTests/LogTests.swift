@@ -205,8 +205,9 @@ final class StdCapture: @unchecked Sendable {
     private let drained = DispatchSemaphore(value: 0)
     private var finished = false
     private var text = ""
-    /// False if the reader did not reach end-of-file in time (something still held the pipe open).
-    private(set) var complete = true
+    /// Set by finish(): true once the reader reached end-of-file, false on a timeout (something
+    /// still held the pipe open). False before finish() has run.
+    private(set) var complete = false
 
     init() {
         fflush(stdout)

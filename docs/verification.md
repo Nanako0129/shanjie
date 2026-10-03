@@ -8,7 +8,7 @@
 |---|---|
 | `make test` | `cargo test --release --locked`，再跑 `macos/` 的 `swift test`（真核心＋真模型的殼測試、`log stream` 日誌測試、自測嚴格度） |
 | `make selftest-bundled` | 用 release 設定組出 `build/selftest/shanjie.app`，從 bundle 自己的 `Resources/` 跑 `--selftest` |
-| `scripts/test-install-ime.sh` | 在暫存的 HOME 裡，用執行檔只會 `exit 1` 的假 app 跑 `install-ime.sh` 的檔案處理（`SHANJIE_INSTALL_FILES_ONLY=1`，不結束行程、不註冊）：全新安裝、覆蓋安裝（舊版進垃圾桶）、從已安裝那份重裝、複製失敗 |
+| `scripts/test-install-ime.sh` | 在暫存的 HOME 裡，用執行檔只會 `exit 1` 的假 app 跑 `install-ime.sh` 的檔案處理（`SHANJIE_INSTALL_FILES_ONLY=1`，不結束行程、不註冊）：全新安裝、覆蓋安裝（上一版保留為 `.shanjie-previous`）、從已安裝那份重裝、複製失敗 |
 | `make bundle` ＋ `scripts/check-app.sh` | 組出 `build/shanjie.app`（正式 bundle ID、ad-hoc、hardened runtime、沒有 entitlements），再跑 s3b 契約 §10 的檢查 2、3、6 |
 | C 標頭冒煙測試（s3a §7.4） | 指令照 `.github/workflows/ci.yml` 的「C header smoke test」步驟 |
 | S2v 寬鬆比對一致性 | 指令照 `.github/workflows/ci.yml` 的「Lenient comparison parity」步驟 |
