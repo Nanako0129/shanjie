@@ -26,6 +26,13 @@ STYLES = ["朋友在通訊軟體上的閒聊", "群組裡的簡短回覆", "抱�
 PROMPT = ("請寫 20 句台灣年輕人在{style}中會打的句子，主題是「{topic}」。\n"
           "要求：台灣用語、繁體中文、口語自然，可以用語助詞（啦、喔、欸、齁、吧、嗎、耶）和常見流行用語；"
           "每句 6 到 30 個字；不要人名、不要英文、不要數字、不要表情符號；一行一句，不要編號或引號。")
+# 針對容易混淆的同音字類別；只指定字，不放任何評測句
+CONFUSIONS = ["在／再", "的／得／地", "做／作", "已／以", "即／及", "帶／代", "讚／贊", "啦／拉", "到／道", "那／哪",
+              "是／事／市", "就／舊", "因／應", "須／需", "其／期", "和／合", "像／象", "分／份", "常／嚐",
+              "再見／在見", "部／不", "新／心", "知道／支到", "叫／較", "踩／採", "廢／費", "揪／糾", "爆／報"]
+TARGET = ("請寫 20 句台灣年輕人在{style}中會打的句子，主題是「{topic}」，而且每一句都要自然地用到「{conf}」其中一個字，"
+          "用法要正確，各種用法都要出現。\n要求：台灣用語、繁體中文、口語自然，可以用語助詞（啦、喔、欸、齁、吧、嗎、耶）；"
+          "每句 6 到 30 個字；不要人名、不要英文、不要數字、不要表情符號；一行一句，不要編號或引號。")
 lock = threading.Lock()
 
 
@@ -62,6 +69,7 @@ def main():
     ap.add_argument("--requests", type=int, default=50)
     ap.add_argument("--workers", type=int, default=6)
     ap.add_argument("--budget-usd", type=float, default=10.0)
+    ap.add_argument("--targeted", action="store_true", help="每次提示都指定一組易混淆的同音字")
     a = ap.parse_args()
     key = os.environ.get("CEREBRAS_API_KEY", "").strip()
     if not key:
@@ -70,11 +78,14 @@ def main():
     ledger = os.path.join(OUT, "synth-spend.json")
     spent = json.load(open(ledger))["usd"] if os.path.exists(ledger) else 0.0
     bad = simp_only()
-    out_path = os.path.join(OUT, "synth.txt")
+    out_path = os.path.join(OUT, "synth-targeted.txt" if a.targeted else "synth.txt")
     seen = set(open(out_path, encoding="utf-8").read().splitlines()) if os.path.exists(out_path) else set()
     han = re.compile(r"[一-鿿]")
     combos = list(itertools.product(TOPICS, STYLES)); random.shuffle(combos)
-    prompts = [PROMPT.format(topic=t, style=s) for t, s in itertools.islice(itertools.cycle(combos), a.requests)]
+    if a.targeted:
+        prompts = [TARGET.format(topic=t, style=s, conf=random.choice(CONFUSIONS)) for t, s in itertools.islice(itertools.cycle(combos), a.requests)]
+    else:
+        prompts = [PROMPT.format(topic=t, style=s) for t, s in itertools.islice(itertools.cycle(combos), a.requests)]
     kept = 0
     with cf.ThreadPoolExecutor(a.workers) as ex, open(out_path, "a", encoding="utf-8") as f:
         for out in ex.map(lambda p: call(key, p), prompts):

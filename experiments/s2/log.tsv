@@ -1,2 +1,13 @@
 time	commit	config	dev302	typing76	discord	news	note
 2026-10-03T14:31:34	bdab786	{"lam": 0.5, "corpora": [["counts-50000.pkl", 1], ["counts-colloquial2.pkl", 5]]}	231/302	65/76	685/845	235/294	baseline: wiki 50k + colloquial k5
+2026-10-03T14:41:53	3c4f63b	{"lam": 0.4, "D": 0.75, "corpora": [["counts-50000.pkl", 1], ["counts-colloquial2.pkl", 5]]}	227/302	65/76	693/845	232/294	round1 tune lam=0.4 D=0.75 k=5
+2026-10-03T14:42:26	3c4f63b	{"lam": 0.6, "D": 0.75, "corpora": [["counts-50000.pkl", 1], ["counts-colloquial2.pkl", 5]]}	228/302	65/76	680/845	235/294	round1 tune lam=0.6 D=0.75 k=5
+2026-10-03T14:42:50	3c4f63b	{"lam": 0.5, "D": 0.5, "corpora": [["counts-50000.pkl", 1], ["counts-colloquial2.pkl", 5]]}	229/302	66/76	684/845	235/294	round1 tune lam=0.5 D=0.5 k=5
+2026-10-03T14:43:14	3c4f63b	{"lam": 0.5, "D": 0.9, "corpora": [["counts-50000.pkl", 1], ["counts-colloquial2.pkl", 5]]}	231/302	65/76	687/845	236/294	round1 tune lam=0.5 D=0.9 k=5
+2026-10-03T14:43:39	3c4f63b	{"lam": 0.5, "D": 0.75, "corpora": [["counts-50000.pkl", 1], ["counts-colloquial2.pkl", 3]]}	230/302	66/76	689/845	235/294	round1 tune lam=0.5 D=0.75 k=3
+2026-10-03T14:43:57	3c4f63b	{"lam": 0.5, "D": 0.75, "corpora": [["counts-50000.pkl", 1], ["counts-colloquial2.pkl", 8]]}	230/302	65/76	682/845	234/294	round1 tune lam=0.5 D=0.75 k=8
+2026-10-03T14:46:12	3c4f63b	{"lam": 0.5, "corpora": [["counts-50000.pkl", 1], ["counts-colloquial2.pkl", 5], ["counts-targeted.pkl", 5]]}	228/302	65/76	684/845	236/294	round2 targeted kt=5
+2026-10-03T14:47:05	3c4f63b	{"lam": 0.5, "corpora": [["counts-50000.pkl", 1], ["counts-colloquial2.pkl", 5], ["counts-targeted.pkl", 10]]}	228/302	65/76	681/845	238/294	round2 targeted kt=10
+2026-10-03T14:48:04	3c4f63b	{"lam": 0.5, "corpora": [["counts-50000.pkl", 1], ["counts-colloquial2.pkl", 5], ["counts-targeted.pkl", 20]]}	228/302	64/76	678/845	237/294	round2 targeted kt=20
+2026-10-03T14:56:48	3c4f63b	{"lam": 0.5, "corpora": [["counts-200000.pkl", 1], ["counts-colloquial2.pkl", 12]]}	235/302	65/76	694/845	234/294	round3 wiki200k k=12
+2026-10-03T14:57:46	3c4f63b	{"lam": 0.5, "corpora": [["counts-200000.pkl", 1], ["counts-colloquial2.pkl", 5]]}	235/302	65/76	697/845	234/294	round3 wiki200k k=5
