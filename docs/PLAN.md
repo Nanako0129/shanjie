@@ -359,6 +359,65 @@ v4 日期 2026-10-03。v1 經 `pilotfish:plan-verifier`（REVISE，4 項）與 `
 - **驗證。** fresh `pilotfish:verifier`：重跑 1–7；抽查 10 組詞對，確實在辭典裡寫著「也作／亦作」且讀音相同；把 `SHANJIE_VARIANTS` 指向只有說明行的檔案時，驗收 3 的「表真的有生效」與驗收 6 必須失敗，拿掉環境變數後通過。
 - **回滾。** revert S2v 的 commit（golden 一併還原）。
 
+#### S2c：bigram 語言模型進核心
+
+- **目標。** 把 S2 的 bigram 語言模型（`reference/proto/lm.py`）照原樣移植到 Rust 核心，讓按鍵引擎可以用聊天／書面兩種設定解碼；評測 CLI 能產生和 Python 參考實作相同的結果。
+- **語意基準。** `reference/proto/lm.py`、`reference/proto/lm_eval.py`；模型檔格式見 `tools/build_lm.py` 的說明（SJLM0001）。衝突時以 Python 的實際行為為準並回報。必須逐項照做：
+  - `back(v)`：先把該前文每個保留條目的 `(c − D)` 依檔案順序以 f64 逐項累加，再算 `1 − 累加值 / t`（除一次）。`P(w|v) = (c − D)/t + back(v)·10^lp`（c 為 0 時只有後項）；v 沒有保留條目時 `P = 10^lp`。
+  - 詞分數 `λ·log10 P + (1 − λ)·lp`；句尾 `λ·log10 P(</s>|最後一詞)`，回退分布用 `eos_total / N`；運算順序照 Python（f64、`log10`、`powf`），不得合併或重排。
+  - **疊加層上限**：詞的字串出現在 `overlay-add.tsv` 第二欄的，**不論來自基底或疊加層**，分數改成 `min(lp, log10(c/N))`，c 為 unigram 次數；c 為 0 時 `lp − 1.0`。改完後每個讀音的詞條依新分數由高到低**穩定排序**，再取前 `PER_KEY` 個。上限只用在解碼；讀音產生（`to_syllables`）照舊用原本的詞庫。
+  - **上限後詞庫只有一個建構函式**（放在 `core/src/lm.rs`，輸入是原始詞庫、`overlay-add.tsv` 的內容與 LM），評測 CLI 與引擎都呼叫它，不得各寫一份。
+  - 解碼照 `lm.decode`：每個位置保留 beam 個；展開順序、surface 去重（嚴格較高才取代）、穩定排序都和 `decode_beam` 相同；走完後每條路徑加句尾項，再穩定排序一次。beam 用 `BEAM_S1`。
+  - 設定：chat λ＝0.5、formal λ＝0.7。
+- **擁有範圍。**
+  1. `pilotfish:executor`：新檔 `core/src/lm.rs`；`core/src/lib.rs` 加 `pub mod lm` 與必要的**新增**方法（不得改變既有方法的行為）；`core/src/engine.rs` 接上 LM；評測 CLI 的 LM 模式；`eval/golden/s2-lm.txt` 與 `eval/golden/s2-lm-dev302-top1.tsv`；測試。
+  2. `pilotfish:security-executor`：`ffi.rs`、`shanjie.h` 新增 LM 的兩個函式；`docs/contracts/s3a.md` §6 的簽章與通用規則已由 main 寫好，照做；`core/tests/c/abi_smoke.c` 擴充成兩個參數（資料目錄、LM 路徑），並更新 s3a §7.4 的指令。在第 1 步之後。
+  3. fresh `pilotfish:verifier`。
+- **評測 CLI 的 LM 模式。** `shanjie-eval --lm PATH --profile chat|formal [--name NAME]` 加上 `--dev N`、`--rows FILE [--limit N]` 或 `--set holdout` 其中之一，參數意義與輸出格式和 `lm_eval.py` 相同：`## <名稱>  lm-<profile>  {'n': …, 'top1': …, 'oracle@64': …, 'top1_sha256': '…'}`。名稱規則同 `lm_eval.py`（`--name` 優先，否則 `dev<N>` 或檔名）；保留集的名稱是 `holdout`。top1 與 oracle 用寬鬆對照（§S2v）。`--dump FILE` 的欄位與 `lm_eval.py` 相同，分數以數值比對、不要求字串相同。`--set holdout` 只印那一行：不接受 `--dump`、不印句子。
+- **對照檔的產生指令**（在 repo 根目錄、以 bash 執行，`$T` 是暫存目錄；Python 產生、commit 進 repo）：
+  ```sh
+  M=data/lm/bigram.sjlm
+  for p in chat formal; do
+    python3 reference/proto/lm_eval.py --lm $M --profile $p --dev 302 --dump $T/$p.dump
+    python3 reference/proto/lm_eval.py --lm $M --profile $p --rows eval/dev/user-typing.txt --name typing76
+  done >| eval/golden/s2-lm.txt
+  { echo "# dev302 每列的第一名：chat<TAB>formal。由 lm_eval.py --dump 的第 1 名組成（docs/PLAN.md §S2c）。"
+    paste <(awk -F'\t' '$2==1{print $3}' $T/chat.dump) <(awk -F'\t' '$2==1{print $3}' $T/formal.dump); } >| eval/golden/s2-lm-dev302-top1.tsv
+  ```
+  Rust CLI 用同樣的參數（含 `--lm $M`）。
+- **引擎。**
+  - 沒載入 LM 時行為完全不變（S3a 的測試照舊通過）。
+  - **疊加層詞集的來源**：`Engine::new(data_dir)` 記住 `data_dir`；載入 LM 時從 `data_dir/overlay-add.tsv` 取疊加層內容，用上面那個唯一的建構函式建立上限後詞庫。用 `with_lexicon` 建立的引擎沒有 `data_dir`，只能用另一個方法傳入已建好的 LM 與上限後詞庫（測試用）。C ABI 一律走 `new`。
+  - **固定詞與 bigram**：固定詞把音節切成幾段。每段空白區間解碼時，前文是左邊的固定詞（沒有就是 `<s>`）；句尾項換成「接到右邊固定詞」的詞分數 `word(λ, 段的最後一詞, 右邊固定詞, lp_F)`（右邊沒有固定詞才用真正的句尾項）。相鄰兩個固定詞之間沒有空白區間時，直接加右邊固定詞的詞分數，前文是左邊固定詞。
+    - **`lp_F` 的定義**：上限後詞庫裡，讀音等於該固定區間音節的條目中，這個詞的最高分（同一讀音下有重複詞條時取最大值）。
+    - 這樣各段在固定詞已知時彼此獨立；在 beam 不截斷時，等於「整句解碼、限制路徑經過固定詞」的最佳解，beam＝64 時是近似。
+  - 候選清單的排序仍照 S3a（原始詞庫分數），不受 LM 影響。
+  - **預設設定是 chat。**
+  - **reset 只清組字**：reset（兩種模式）與碼 4 之後的自動 reset 只清組字狀態，保留已載入的 LM 與目前的設定。s3a §6 的「reset 後等於新建的 engine」改成「等於新建、載入相同 LM、使用相同設定的 engine」。
+  - **設定與載入的時機**：沒載入 LM 時也可以切換設定（只記住，載入後才生效）。載入 LM 不改目前的組字區顯示，下一次組字區變動才用新的解碼；殼應在啟動、組字區為空時載入。
+- **C ABI（新增，不改既有函式；簽章寫進 `docs/contracts/s3a.md` §6）。**
+  - `int32_t shanjie_engine_load_lm(ShanjieEngine *e, const char *path)`：0 成功、1 NULL、2 不是 UTF-8、3 讀檔或格式錯誤（含引擎沒有 `data_dir`）、4 內部錯誤。失敗時 LM 維持原本的狀態（沒有 LM 或原本的 LM）；碼 4 時另照 §6 丟棄組字。
+  - `int32_t shanjie_engine_set_profile(ShanjieEngine *e, uint32_t profile, ShanjieOutput **out)`：profile 0 chat、1 formal。成功時重算組字區並回傳畫面快照（`handled = 1`、`commit` 為空）。回傳碼 1 NULL、2 profile 超出範圍、4 內部錯誤；非 0 時 `*out = NULL`，碼 4 時丟棄組字，與 §6 相同。
+  - 殼依前景 App 決定 profile（S3b），核心不持有 App 身分。
+  - 兩個新函式都照 s3a §6 的規則：`catch_unwind`、靜音 panic hook、錯誤訊息不含路徑或任何內容（R2）、`unsafe` 只在 `ffi.rs`。`shanjie.h` 補上對應註解。
+- **驗收。**
+  1. 既有的 golden、三份 S1 對照檔、S3a 全部測試照舊通過（沒有 LM 的路徑不變）。
+  2. **LM 對照檔**：Rust CLI 用與上面相同的 4 組參數，輸出和 `eval/golden/s2-lm.txt` 逐位元組相同；`cargo test` 涵蓋。`s2-lm-dev302-top1.tsv` 的 chat 欄與 formal 欄各自以 `\n` 串接（不含結尾換行）的 SHA-256（略過 `#` 開頭的行），必須等於 `s2-lm.txt` 裡 dev302 對應那行的 `top1_sha256`。
+  3. **逐分數對照**：dev302 的 chat 與 formal，`--dump` 兩邊的列號、名次、surface 完全相同，分數以數值比對差 ≤ 1e-9（預期完全相同）。
+  4. **引擎重播**：S3a 的 302 列重播在載入 LM 後，送出的字串等於 `eval/golden/s2-lm-dev302-top1.tsv` 對應的欄（由 Python 產生，不由引擎自己的詞庫算），chat 與 formal 各 302／302（標準排列；倚天跑 chat）。**其中標準排列的 chat 這一組必須走正式路徑**：`Engine::new(data/lexicon)` 加 `load_lm(data/lm/bigram.sjlm)`，不得用測試用的傳入方法。verifier 把 `load_lm` 改成跳過上限（直接用原始詞庫）時，這一組至少 1 列必須失敗；若沒有任何一列受上限影響，executor 要回報。
+  5. **固定詞**：
+     (a) **分數相等**：引擎提供測試用的方法，回傳目前組字的總分，算法與 `lm.decode` 的路徑分數相同：路徑上每個詞（含固定詞）依序加 `word(λ, 前一詞, 詞, lp)`（第一個詞的前一詞是 `<s>`，固定詞的 lp 是 `lp_F`），最後加 `eos(λ, 最後一詞)`；每個詞只算一次。固定詞等於整句第一名在同一區間的詞時，總分等於整句第一名的分數（≤ 1e-9），輸出字串也相同。至少一個案例的固定詞是疊加層詞、而且上限確實改變了它的分數；把 `lp_F` 改成原始分數時，這個測試必須失敗。beam＝64 是近似，若某個案例因此不相等，換一個案例並在報告中說明，不得調整 beam。
+     (b) 一個測試證明右邊固定詞的轉移分數會改變左段的選擇：把轉移分數換成真正的句尾項時，這個測試必須失敗。
+  6. **C ABI**：兩個新函式的各回傳碼（set_profile 的 1、2、4，碼 4 時 `*out` 為 NULL 且組字清空）。C 冒煙測試載入 `data/lm/bigram.sjlm`，打一句「unigram 第一名、chat 第一名、formal 第一名三者互不相同」的開發集句子（chat 與 formal 以 CLI `--dump` 為準；unigram 是沒載入 LM 的引擎送出的字串；executor 挑句並把三個結果寫進測試註解）：打完音節後先確認組字區顯示 chat 第一名，再呼叫 `set_profile(formal)`，回傳的快照顯示 formal 第一名，按 Enter 送出的也是 formal 第一名。找不到這樣的句子就停下來回報。verifier 把 set_profile 改成只回 0、不改狀態時，冒煙測試必須失敗。接著在同一個引擎上，各以 reset 模式 0 與 1 清空後再打同一句：組字區與送出的字串仍是 formal 第一名。verifier 讓 reset 丟掉 LM 或改回 chat 時，這一段必須失敗。
+  7. **效能**：release 重播（載入 LM）每鍵 p95 < 16 ms；回報 LM 載入時間與引擎（詞庫＋上限後詞庫＋LM）的峰值 RSS。上限後詞庫可以和原始詞庫共用字串池，由 executor 決定。
+  8. 模型檔 ≤ 100 MB（目前 80,040,411 bytes）。
+  9. **保留集**（片結束，只由 verifier 跑一次）：`--set holdout` 在 chat 與 formal 的 top1 與 oracle@64，只回數字。A1a 要求 oracle@64 ≥ 98%；低於時照實回報、記為 A1a 未達成，由使用者決定，不是這片的停止條件。報告時註明 LM 模式的 oracle 用寬鬆對照，S1 的 `extra` 行（97.8%）用完全相符。
+- **模型檔不進 repo**（`data/lm/` 在 `.gitignore`）：用 `tools/build_lm.py` 從本機計數重建，SHA-256 `9879fd8b264b1c1f4c083ccedf84dc5625cd8d2595bd2d13150eed5a0520a923`。需要它的測試在檔案不存在時**直接失敗**，訊息說明怎麼建，不得默默跳過。散布方式留給 S8。
+- **範圍外。** 改分數、參數、剪枝或語料；候選清單用 LM 排序；trigram；學習（S4）。
+- **預算。** executor、security-executor 各 1 回合＋1 次修正。
+- **停止。** 驗收 2、3、4 有任何差異：回報第一個不同的列與原因，不得修改 Python 參考實作或對照檔來湊。峰值 RSS 超過 300 MB：回報實測值與瓶頸。
+- **回滾。** revert S2c 的 commit。
+
 ### 使用者提出的兩個方向（2026-10-03，待排入；排入前要過 plan-verifier）
 
 **P1 詞性連接（併入 S2）。** 同音詞若詞性不同（常常 副詞／嚐嚐 動詞、在／再、的／得／地），用詞性連接分數（Mozc 式 connection cost）或詞類 n-gram 判斷，在本機毫秒等級完成。估算（main 人工標記，不是量測）：開發集 unigram 的 185 次錯誤中 101 次（55%）是詞性不同；144 句錯句中 67 句（47%）的錯誤全是詞性不同，若全部修好，開發集上限 52.0% → 74.3%。其餘 45% 是同詞性（權力／權利、公式／公事），只能靠語意。待解：繁體中文詞性資料的授權（CKIP 為 GPL、UD Chinese-GSD 為 CC BY-SA、平衡語料庫只限學術），以及用 Gemma 4 E2B 或 Jev 標詞性的可行性。
@@ -664,3 +723,16 @@ plan-verifier 第一次：REVISE，4 項阻擋。security-reviewer：無 P0，2 
 |---|---|---|
 | plan-verifier 1 | 驗收 3 的 Rust／Python 對照跑不起來；golden 允許完全不變；寬鬆定義在 S0 契約等多處；正規化有歧義 | FIX：函式層級 `--lenient-dump` 對照＋S0 暫存複本對照；寫明預期差異（第 116 行）；S0 契約與 PLAN §S0 列為產出；正規化全部在產生表時做完 |
 | plan-verifier 2 | 「改動行數 ≥ 2,000」分不出空表；驗收 6 與驗證步驟對環境變數的要求矛盾 | FIX：改成「探測檔前 N 行的每個異體都換成標準形」；`--probe` 不讀環境變數；CLI 測試不設定也不清除 `SHANJIE_VARIANTS` |
+
+### S2c 契約審查（2026-10-03）
+
+| 來源 | 問題 | 處置 |
+|---|---|---|
+| plan-verifier 1-1 | 引擎拿不到疊加層詞集；重播的預期值由引擎自己的詞庫算，漏掉上限也會綠 | FIX：引擎記住 `data_dir`，上限後詞庫只有一個建構函式；預期值改用 Python 產生的 `s2-lm-dev302-top1.tsv`；拿掉上限必須有列失敗 |
+| plan-verifier 1-2 | 固定詞的 lp 沒定義 | FIX：`lp_F`＝上限後詞庫中該讀音下這個詞的最高分；驗收 5(a) 改比總分，含疊加層固定詞 |
+| plan-verifier 1-3 | 所選句子若 chat 與 formal 相同，set_profile 空做也會過 | FIX：三種第一名互不相同；組字中切換、看快照與送出 |
+| plan-verifier 1-4 | set_profile 重算組字區卻沒有輸出快照 | FIX：加 `ShanjieOutput **out`，照 s3a §6；簽章寫進 s3a.md §6 |
+| 非阻擋 | 名稱、back 的寫法、dump 比對方式、保留集模式、A1a 未達時的處理、beam 近似、設定與載入時機、RSS、完整 SHA | 全部寫進契約 |
+| plan-verifier 3（收尾） | reset 是否保留 LM 與設定沒寫；照 s3a「等於新建 engine」做會讓殼每次 reset 都丟掉 LM | FIX：reset 只清組字、保留 LM 與設定；驗收 6 加 reset 後仍是 formal 第一名，並有反向檢查 |
+| plan-verifier 2 | 正式路徑（`new`＋`load_lm`）沒有驗收經過，漏接上限也會綠 | FIX：驗收 4 的標準排列 chat 組必須走正式路徑；verifier 讓 `load_lm` 跳過上限時必須失敗 |
+| 非阻擋 | 預設設定、總分重複計算、beam 近似、unigram 來源、冒煙程式參數、§6 通用條文、golden 指令的 `--lm`、top1 檔交叉驗證 | 全部寫進契約與 s3a §6 |

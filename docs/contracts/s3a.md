@@ -126,14 +126,17 @@ void    shanjie_engine_free(ShanjieEngine *engine);
 int32_t shanjie_engine_key(ShanjieEngine *engine, ShanjieKey key, ShanjieOutput **out);
 int32_t shanjie_engine_reset(ShanjieEngine *engine, uint32_t mode, ShanjieOutput **out); // mode 0 送出後清空、1 丟棄
 void    shanjie_output_free(ShanjieOutput *output);
+// S2c 新增（docs/PLAN.md §S2c）
+int32_t shanjie_engine_load_lm(ShanjieEngine *engine, const char *path);               // 不改目前的組字區顯示
+int32_t shanjie_engine_set_profile(ShanjieEngine *engine, uint32_t profile, ShanjieOutput **out); // 0 chat（預設）、1 formal；重算組字區並回傳快照
 ```
 
-- **回傳碼**：0 成功、1 必要的指標是 NULL、2 輸入不合法（data_dir 不是 UTF-8、`ch` 不是合法的 Unicode scalar、layout 或 mode 超出範圍）、3 資料載入失敗、4 內部錯誤（攔下的 panic 或解碼錯誤）。
-- **reset**：mode 0 時 `commit` 是目前組字區的顯示字串（未完成音節丟掉）；mode 1 時 `commit` 為空。兩者都清掉所有組字狀態，之後的輸出必須和新建的 engine 相同。殼在 `commitComposition:`、`deactivateServer`、換 client、privacyGate 轉為生效、Caps Lock 打開時呼叫（S3b 決定用哪個 mode）。
+- **回傳碼**：0 成功、1 必要的指標是 NULL、2 輸入不合法（data_dir 或 LM 路徑不是 UTF-8、`ch` 不是合法的 Unicode scalar、layout、mode 或 profile 超出範圍）、3 資料載入失敗（含 LM 檔讀取或格式錯誤、引擎沒有 data_dir）、4 內部錯誤（攔下的 panic 或解碼錯誤）。`load_lm` 失敗時 LM 維持原狀；碼 4 時任何函式都照下面的規則丟棄組字。
+- **reset**：mode 0 時 `commit` 是目前組字區的顯示字串（未完成音節丟掉）；mode 1 時 `commit` 為空。兩者都清掉所有組字狀態，之後的輸出必須和新建的 engine 相同；S2c 起是「新建、載入相同 LM、使用相同設定的 engine」，reset 不清 LM 與設定。殼在 `commitComposition:`、`deactivateServer`、換 client、privacyGate 轉為生效、Caps Lock 打開時呼叫（S3b 決定用哪個 mode）。
 - **記憶體與生命週期**：
   - 回傳非 0 時，`*out` 一律設成 NULL，而且不配置任何記憶體。
   - `shanjie_engine_free(NULL)`、`shanjie_output_free(NULL)` 什麼都不做。重複釋放、或釋放不是核心配置的指標，屬於未定義行為。
-  - `ShanjieOutput` 擁有自己的字串副本，有效期到 `shanjie_output_free` 為止，不受之後的 `engine_key`、`engine_reset`、`engine_free` 影響。
+  - `ShanjieOutput` 擁有自己的字串副本，有效期到 `shanjie_output_free` 為止，不受之後的 `engine_key`、`engine_reset`、`engine_set_profile`、`engine_load_lm`、`engine_free` 影響。
   - handle 不是 thread-safe：所有呼叫都在同一個執行緒（IMK 主執行緒）。
   - 回傳碼 4 之後，engine 自動 reset（mode 1），丟掉可能只改了一半的組字。
   - 殼收到非 0 回傳時，當作「不處理」直通，而且不記錄這個按鍵。
