@@ -71,11 +71,11 @@ final class KeyMapTests: XCTestCase {
     @MainActor
     func testBothLayoutsThroughTheCore() throws {
         let res = try XCTUnwrap(TestData.resources())
-        let shell = Shell(resources: res, panel: FakePanel(), isSecureInput: { false })
+        let shell = Shell(resources: res, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore())
         let c = Controller(shell)
         c.session.activate()
         for eten in [false, true] {
-            if eten { c.session.setInputMode("com.nyanako.inputmethod.shanjie.eten") }
+            if eten { c.session.selectLayout(.eten) }
             XCTAssertEqual(Layouts.symbols.count, 37)
             for (symbol, std, et) in Layouts.symbols {
                 XCTAssertTrue(c.type(String(eten ? et : std)).allSatisfy { $0 })

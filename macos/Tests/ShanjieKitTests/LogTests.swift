@@ -70,7 +70,7 @@ final class LogTests: XCTestCase {
         defer { _ = std.finish(); releaseIssues() }  // an early exit must neither leave the pipe nor lose held issues
         let stdProbe = "shanjie-std-probe-\(nonce)"
         FileHandle.standardError.write(Data("\(stdProbe)\n".utf8))
-        let shell = Shell(resources: resources, panel: FakePanel(), isSecureInput: { false })
+        let shell = Shell(resources: resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore())
         let c = Controller(shell, bundle: bundleMarker)
         c.session.activate()                            // profile from a marked bundle ID
         c.type(Row10.standardKeys)
@@ -86,9 +86,9 @@ final class LogTests: XCTestCase {
         XCTAssertTrue(c.client.text.hasSuffix("你好"), "deactivate did not commit the composition")
         c.session.activate()
         c.type("su3")
-        c.session.setInputMode("com.nyanako.inputmethod.shanjie.eten") // mode switch commits and rebuilds
+        c.session.selectLayout(.eten) // mode switch commits and rebuilds
         let broken = FileManager.default.temporaryDirectory.appendingPathComponent(pathMarker, isDirectory: true)
-        let failed = Shell(resources: broken, panel: FakePanel(), isSecureInput: { false })  // engine_new fails on a marked path
+        let failed = Shell(resources: broken, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore())  // engine_new fails on a marked path
         XCTAssertNil(failed.engine, "the marked data path did not fail engine creation")
 
         let stdText = std.finish()

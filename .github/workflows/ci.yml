@@ -126,6 +126,6 @@ jobs:
       - name: Bundled selftest (shipping bundle ID)
         run: make selftest-bundled SELFTEST_BUNDLE_ID=
 
-      # Contract section 10, acceptance 2, 3 and 6, on build/shanjie.app.
+      # Contract section 10, acceptance 2, 3 and 6, on build/善解輸入法.app.
       - name: Acceptance checks 2, 3 and 6
         run: scripts/check-app.sh
