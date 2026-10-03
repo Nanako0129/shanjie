@@ -112,6 +112,10 @@ jobs:
       - name: Build the app (ad-hoc)
         run: make bundle
 
+      # install-ime.sh's file swap and rollback, in a temporary HOME; nothing is registered.
+      - name: Install script file swap
+        run: scripts/test-install-ime.sh build/shanjie.app
+
       # Includes the log-stream test (acceptance 5): it needs /usr/bin/log
       # stream, which the runner's user can run.
       - name: Swift tests

@@ -61,8 +61,8 @@
 
 - `scripts/install-ime.sh <shanjie.app 的路徑>`（通常是解壓後的 Release 附件；也接受 `build/shanjie.app` 自己建的 ad-hoc 版）：
   - `#!/bin/bash`、`set -euo pipefail`；`$HOME` 為空就中止；不用 sudo（R9）。
-  - 目的地固定為字面路徑 `"$HOME/Library/Input Methods/shanjie.app"`；`rm -rf` 只准作用在這個路徑。
-  - 順序：先 `ditto` 到同一個資料夾裡的暫存名稱 `.shanjie-staging`（不是 `.app`，系統不會當成輸入法；複製失敗時舊版不受影響）→ 移除舊 bundle → `mv` 改名就位（同一個磁碟，是原子的改名；CodeRabbit 在 PR #3 指出原本先刪再複製沒有退路）→ 以完整路徑結束舊行程（`pkill -f "$HOME/Library/Input Methods/shanjie.app/Contents/MacOS/shanjie"`，沒有就略過）→ 執行**已安裝那一份**的 `Contents/MacOS/shanjie install`（`TISRegisterInputSource`＋`TISEnableInputSource` 兩個輸入模式，照小麥 `main.swift` 的 `install()`）。
+  - 目的地固定為字面路徑 `"$HOME/Library/Input Methods/shanjie.app"`；`rm -rf` 與 `mv` 只准作用在三個字面路徑：這個目的地、暫存的 `.shanjie-staging`、暫放舊版的 `.shanjie-old`（兩個輔助名稱都不是 `.app`，系統不會當成輸入法）。
+  - 順序：先 `ditto` 到 `.shanjie-staging`（複製失敗時舊版不受影響）→ 舊版改名為 `.shanjie-old` → 新版改名就位 → 刪除 `.shanjie-old`（刪不掉就留著並警告，下次安裝清掉）。中途失敗或中斷時，`trap` 把舊版放回原位（CodeRabbit 在 PR #3 指出原本先刪再複製沒有退路）。`scripts/test-install-ime.sh` 在暫存的 HOME 裡以 `SHANJIE_INSTALL_FILES_ONLY=1` 驗證全新安裝、覆蓋安裝、複製失敗、舊版刪不掉四種情況，CI 也跑；在真實系統上的行為由使用者驗收 10 確認（含覆蓋安裝一次）→ 以完整路徑結束舊行程（`pkill -f "$HOME/Library/Input Methods/shanjie.app/Contents/MacOS/shanjie"`，沒有就略過）→ 執行**已安裝那一份**的 `Contents/MacOS/shanjie install`（`TISRegisterInputSource`＋`TISEnableInputSource` 兩個輸入模式，照小麥 `main.swift` 的 `install()`）。
   - 最後印出下一步：到「系統設定 → 鍵盤 → 輸入方式」確認「善解」已出現；沒出現就登出再登入。
 - **agent 不得執行 `install-ime.sh`、`shanjie install`、或啟動 app**；只由使用者執行。
 
@@ -74,8 +74,8 @@
 - **組字擁有者**：IMK 對每個 client 各建一個 controller，但引擎只有一個。殼用**弱參照**（`weak` 指向擁有者 controller）記住目前組字屬於誰；「擁有者仍有效」的定義是弱參照不是 nil。不得只記 `ObjectIdentifier`（被釋放的 controller 位址可能被新的重用）。
   - 某個 controller 的 `handle` 或 `activateServer` 進來時，若組字區有字而擁有者不是它：擁有者仍有效就 `reset(0)` 送回擁有者的 client，否則 `reset(1)` 丟棄；之後才處理新的事件，擁有者改成目前這個 controller。**擁有者一改變就依新擁有者的 client 重新 `set_profile`。**
   - `activateServer` 的順序固定為：先處理擁有者（上一條）、再 `set_profile`。
-  - `deactivateServer` 與 `commitComposition(_:)`：**只有呼叫者就是擁有者時**才 reset 並送出、隱藏候選窗、清掉殼保存的候選陣列。
-  - **secure input**：所有不是按鍵造成的送出（`deactivateServer`、`commitComposition`、換擁有者、切換輸入模式）都經過同一個出口；secure input 生效時，這個出口把 `reset(0)` 改成 `reset(1)` 丟棄，避免把組字送進剛變成密碼欄的欄位（CodeRabbit 在 PR #3 指出原本只有 deactivate 有檢查）。不是擁有者時什麼都不做：不碰組字，也不碰共用的候選窗與候選陣列。
+  - `deactivateServer` 與 `commitComposition(_:)`：**只有呼叫者就是擁有者時**才 reset 並送出、隱藏候選窗、清掉殼保存的候選陣列（`deactivateServer` 用 `reset(0)` 送回它的 client；secure input 生效時改用 `reset(1)` 丟棄，避免把組字送進剛取得焦點的密碼欄）。不是擁有者時什麼都不做：不碰組字，也不碰共用的候選窗與候選陣列。
+  - **secure input 只在 `deactivateServer` 檢查**（2026-10-04 決定）。CodeRabbit 在 PR #3 建議所有非按鍵的送出都檢查；試做後的本地審查指出 `IsSecureEventInputEnabled()` 是全系統旗標，任何 App 開著 secure input 時，點別處、切換排列或換擁有者都會悄悄丟掉使用者打的字。組字實際會被送到哪個 client 要實機才知道，所以延到 S4 的 privacyGate，以實機證據決定。不是擁有者時什麼都不做：不碰組字，也不碰共用的候選窗與候選陣列。
   - secure input 的判斷由 `Shanjie` target 以閉包（包 `IsSecureEventInputEnabled()`）注入 `ShanjieKit`，測試用假的閉包驅動兩種情況。
   - controller 的 `deinit`：weak 參照在 deinit 時已經讀成 nil，所以規則是「deinit 時若擁有者讀成 nil 且組字區有字，就 `reset(1)`、隱藏候選窗、清掉候選陣列」。
 
@@ -128,7 +128,7 @@
    - 切換輸入模式：標準組字中切到倚天 → 先送出、之後倚天的鍵位生效。
    - 回傳碼非 0：之後核心的組字也是空的（下一鍵不會讓舊組字重新出現）。
    - 擁有者改變時重設設定：A（Discord）組字中，B（TextEdit）直接按鍵打第 10 列並送出，得到 formal 第一名。
-   - secure input：假閉包回傳 true 時，`deactivateServer`、`commitComposition`、換擁有者、切換輸入模式都丟棄組字、不送出。
+   - secure input：假閉包回傳 true 時，擁有者的 `deactivateServer` 丟棄組字、不送出。
    - 非擁有者的 `deactivateServer` 不隱藏擁有者的候選窗、不清候選陣列。
    - verifier 把殼裡的 `shanjie_engine_key` 呼叫改成固定回傳非 0，或把 `set_profile` 改成不呼叫核心時，必須有測試失敗。
 5. **日誌行為測試（R2）**：
@@ -145,7 +145,7 @@
 
 **使用者實測（安裝後，由使用者執行並回報）：**
 9. 使用者在 `release` environment 設好簽章材料，先以 `workflow_dispatch` 試跑簽章與公證，全綠後推 `v0.1.0` tag；release 工作全綠，Release 頁面有 `shanjie-0.1.0.zip`。
-10. 下載、解壓，執行 `scripts/install-ime.sh <解壓後的 shanjie.app>`：「善解（標準）」「善解（倚天）」出現在輸入方式中。
+10. 下載、解壓，執行 `scripts/install-ime.sh <解壓後的 shanjie.app>`：「善解（標準）」「善解（倚天）」出現在輸入方式中；再執行一次（覆蓋安裝）仍正常，`~/Library/Input Methods/` 裡沒有 `.shanjie-staging` 或 `.shanjie-old` 殘留。
 11. 在 TextEdit、備忘錄、Safari 各打陷阱集前 10 句（main 會提供按鍵清單）：組字有底線、候選窗出現在下方、數字選字、Enter 送出。
 12. 對照截圖 1：候選條的形狀、號碼、選取色、深淺色模式；不像的地方記下來，進 S3b-2。
 13. 組字中按 Caps Lock 切到英文：記錄組字是被送出、丟棄還是殘留（§6 的推論在此實測）；再切回；倚天模式打幾句。
@@ -176,7 +176,7 @@
 - **release.yml**：gate 只等 `ci.yml`（`scripts/check-ci-gate.sh`，改寫自 syrtis，用假 `gh` 測過成功、失敗、沒有 run、API 失敗四種情況）。sign 工作不 checkout、不執行任何 repo 程式，只對 artifact 用 Apple 的工具；Team ID 寫死為 `2LJ882GPY8`，`vars.APPLE_TEAM_ID` 不同就失敗。手動觸發只接受 main，跑到驗證為止，不發布。
 - **Makefile 的過期檢查**：照 syrtis 的 `relink_if_stale`／`rebuild_if_header_stale`，路徑改成新版 SwiftPM 的 `macos/.build/out/...`。實測 Swift 6.4 在 `libcore.a` 變動時本來就會重新連結；標頭內容變動沒辦法在不改 `core/` 的前提下實測（只改時間戳不會重編）。
 - **日誌擷取的過濾條件**：`LogTests` 用 `processIdentifier == <測試行程的 PID>`（§10 驗收 5 已改成這個寫法）。log stream 只抓得到 unified log；`NSLog`／`print` 在測試行程裡只寫到 stderr／stdout，由同時進行的 stdout／stderr 擷取負責抓。
-- **擷取期間扣住 issue**：`LogTests` 覆寫 `record(_:)`，在 stdout／stderr 擷取期間扣住所有 XCTest issue（包括 `FakeClient` 等輔助程式裡的斷言），擷取結束後才記錄；`defer` 確保提早離開時也會還原 stdout／stderr 並記錄扣住的 issue。`StdCapture.finish()` 可重複呼叫，`deinit` 也會還原。擷取期間取候選用 `first` 加 `if let`（不在擷取期間 throw）；`ShellTests` 用 `XCTUnwrap`，候選不足時是斷言失敗、不是陣列越界中止（verifier P4）。
+- **擷取期間扣住 issue**：`LogTests` 以 `nonisolated` 覆寫 `record(_:)`（XCTest 可能從任何執行緒記錄，扣住的清單有鎖），在 stdout／stderr 擷取期間扣住所有 XCTest issue（包括 `FakeClient` 等輔助程式裡的斷言），擷取結束後才記錄；所以擷取期間可以直接斷言。`defer` 確保提早離開時也會還原 stdout／stderr 並記錄扣住的 issue。`StdCapture.finish()` 可重複呼叫、每次回傳相同內容，`deinit` 也會還原。擷取期間取候選用 `first` 加 `if let`（不在擷取期間 throw）；`ShellTests` 用 `XCTUnwrap`，候選不足時是斷言失敗、不是陣列越界中止（verifier P4）。
 
 ## 12. 範圍外
 

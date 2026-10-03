@@ -338,3 +338,4 @@
   - 突變（引擎回非 0、設定不呼叫核心、擁有者三條規則、`.public`／`.private`／`print`／`NSLog` 外洩）都要由斷言抓到。
   - 簽章在 CI 的 `release` environment（一次性鑰匙圈），本機與 agent 一律 ad-hoc，不碰登入鑰匙圈。
 - 待使用者實測確認：候選窗開著時按鍵先交給殼（`IMKCandidatesSendServerKeyEventFirst`）、候選號碼 1–9 是否顯示、選單列圖示的深淺色、Caps Lock 切換時的組字去向。
+- 一次判斷修正（2026-10-04）：CodeRabbit 在 PR #3 建議所有非按鍵的送出都在 secure input 時丟棄組字。我先照做，本地審查隨即指出 `IsSecureEventInputEnabled()` 是全系統旗標，任何 App 開著 secure input 時，點別處或切換排列都會讓使用者的字悄悄消失。審查意見是證據不是指令：採納前要先問「這樣改的代價是什麼」。最後維持只在 deactivate 檢查，延到 S4 以實機證據決定。
