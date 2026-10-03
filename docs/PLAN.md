@@ -96,7 +96,7 @@ v4 日期 2026-10-03。v1 經 `pilotfish:plan-verifier`（REVISE，4 項）與 `
   - 搜尋參數：`BEAM=32`、`PER_KEY=12`、詞最長 = 詞庫最長讀音。
   - 讀音產生 `to_syllables`：字元 DP，嚴格 `>` 才取代，詞取「最高分讀音」；轉不出讀音的測試列在評測前剔除（陷阱集因此是 64 句）。
   - 同分規則：每個讀音的詞依分數穩定排序（同分保留檔案順序）；N-best 候選以 surface 字串去重，只有分數嚴格較高才取代，插入順序穩定；取前 BEAM 名是穩定排序。
-  - 指標：`n`、`sent_acc`、`lenient_acc`、`char_acc`、`oracle@32`；捨入與 Python `round()` 相同（以二進位浮點值為準的 half-even），位數同原型；字長、切片、`char_acc` 的單位都是 Unicode code point（不是 grapheme）；LENIENT 對照 `她妳它牠嘗周臺裏 → 他你他他嚐週台裡`。
+  - 指標：`n`、`sent_acc`、`lenient_acc`、`char_acc`、`oracle@32`；捨入與 Python `round()` 相同（以二進位浮點值為準的 half-even），位數同原型；字長、切片、`char_acc` 的單位都是 Unicode code point（不是 grapheme）；LENIENT 對照 `她妳它牠嘗周臺裏 → 他你他他嚐週台裡`，S2v 起再套教育部異體詞表（見 §S2v）。
   - CLI：`shanjie-eval [--set trap|daily|moedict|dev|holdout ...] [--learn-sim] [--check-readings]`；測試檔格式 `前文|句子` 或 `前文|句子|讀音`（讀音以空白分隔音節）：有第三欄就直接用、不重算，沒有就照 `to_syllables` 產生；`--check-readings` 列出每一列實際使用的讀音並與第三欄比對，回報不一致列數；`dev`、`holdout` 讀 `eval/dev/`、`eval/holdout/`（S0 時可為空目錄，只要求解析器有測試）；集名對照 `trap → 同音陷阱集`、`daily → 日常驗證集`、`moedict → 萌典例句`；輸出行 `## <中文集名>  unigram  {...}`，`{...}` 必須和 Python `repr(dict)` 逐字相同（單引號、key 順序、`round()` 後的浮點表示），因此也能被 `ast.literal_eval` 解析；學習模擬表格式同 golden。golden 裡還有三件只看原型才知道的格式：miss 行 `   ✗ 正解 → 輸出`（萌典不印）、區塊前的空行、`1.0` 的寫法；契約檔要逐一點名。
   - 學習模擬的兩個副作用照抄：`Promotion.bonus` 在晉升時會寫入 `top`；`dict(by_reading[讀音])[詞]` 遇到同讀音重複詞時取最後一筆。
   - 錯誤訊息（R2）：核心的所有 `Err` 與 panic 訊息不得包含輸入的讀音或文字，只帶錯誤種類與長度。
@@ -314,10 +314,12 @@ v4 日期 2026-10-03。v1 經 `pilotfish:plan-verifier`（REVISE，4 項）與 `
 
 #### S2v：寬鬆對照加入教育部異體詞
 
+**狀態：main 已實作，等 fresh verifier。** 異體 2,072 個；Rust／Python 函式層級對照 7,313 行相同；S0 暫存複本對照相同；golden 只有 `lenient_acc` 改變（開發集 +1、萌典 +3）；新基準在 `docs/research-log.md`。
+
 - **目標。** 寬鬆對照除了原本的單字對照（她妳它牠嘗周臺裏 → 他你他他嚐週台裡），再把教育部《重編國語辭典修訂本》明列「也作／亦作」、而且讀音相同的詞視為相同。
 - **來源與標準。** g0v/moedict-data 的 `dict-revised_bkup.json`（commit a6dc997，本機路徑同 `tools/readings.py` 的 `MOEDICT`），CC BY-ND 3.0 TW，只用於評測。
   - 詞條標題 T 至少 2 字、不含 `{` 缺字碼；只看釋義的 `def` 欄（`link` 欄裡只有 1 處「也作」，不算）。`def` 含 `也作「…」` 或 `亦作「…」` 時，引號內以 `」、「` 分隔的每個 Y：字數與 T 相同、Y ≠ T、不含 `{`，而且 T 與 Y 至少有一個注音讀音（`heteronyms[].bopomofo`）相同。Y 必須也是詞條才有讀音可比。main 試算：2,081 組詞對。
-  - dev302 的 5 句異體錯誤裡，只有「散布／散佈」「念書／唸書」符合；摺疊／折疊、碼錶／碼表、回覆／回復在辭典裡是各自獨立的詞條，不算。
+  - dev302 的 5 句異體錯誤裡，只有「念書／唸書」符合（**更正**：寫契約時說「散布／散佈」也符合是錯的；那次試算還沒加讀音條件，而「散佈」在辭典裡沒有獨立詞條、查不到讀音，照標準不收）；摺疊／折疊、碼錶／碼表、回覆／回復在辭典裡是各自獨立的詞條，不算。
 - **正規化全部在產生表時做完**（`tools/build_variants.py`）：
   1. 每個詞先套原本的單字對照（她妳它牠嘗周臺裏 → 他你他他嚐週台裡）。
   2. 套完後兩邊相同的詞對丟掉；其餘詞對不分方向做聯集，每組的標準形取 Python `min()`（碼位最小）。

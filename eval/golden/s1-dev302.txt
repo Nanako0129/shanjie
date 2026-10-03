@@ -1,5 +1,5 @@
 
-## 開發集  unigram  {'n': 302, 'sent_acc': 0.54, 'lenient_acc': 0.55, 'char_acc': 0.9211, 'oracle@32': 0.974}
+## 開發集  unigram  {'n': 302, 'sent_acc': 0.54, 'lenient_acc': 0.553, 'char_acc': 0.9211, 'oracle@32': 0.974}
    ✗ 你一定要嚐嚐 → 你一定要常常
    ✗ 媽媽做了蛋糕要我嚐嚐看 → 媽媽做了蛋糕要我常常看
    ✗ 你先嚐嚐 → 你先常常

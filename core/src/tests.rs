@@ -107,8 +107,19 @@ fn python_round_and_repr() {
 
 #[test]
 fn lenient_comparison() {
-    assert_eq!(lenient("她妳它牠嘗周臺裏"), "他你他他嚐週台裡");
-    assert_eq!(lenient("abc甲"), "abc甲");
+    assert_eq!(char_map("她妳它牠嘗周臺裏"), "他你他他嚐週台裡");
+    assert_eq!(char_map("abc甲"), "abc甲");
+    // longest match wins; the char map runs first; untouched text passes through
+    let l = Lenient::parse("# note\n甲乙\t丙丁\n甲乙戊\t己己己\n台北\t北台\n").unwrap();
+    assert_eq!(l.apply("甲乙戊甲乙x"), "己己己丙丁x");
+    assert_eq!(l.apply("臺北"), "北台");
+    assert_eq!(l.apply("abc"), "abc");
+    // malformed or duplicate lines are errors carrying only the line number
+    assert_eq!(Lenient::parse("# h\n甲乙\n").err(), Some(Error::BadVariants { line: 2 }));
+    assert_eq!(Lenient::parse("甲乙\t丙\t丁\n").err(), Some(Error::BadVariants { line: 1 }));
+    assert_eq!(Lenient::parse("甲乙\t丙丁\n甲乙\t戊己\n").err(), Some(Error::BadVariants { line: 2 }));
+    // an empty table leaves only the char map
+    assert_eq!(Lenient::parse("# only a header\n").unwrap().apply("臺甲乙"), "台甲乙");
 }
 
 #[test]
@@ -122,7 +133,7 @@ fn three_column_rows_and_check_readings() {
     // second reading disagrees with to_syllables: caught
     assert_eq!(check_readings(&l, &rows), (2, 1));
     // confirmed reading is used as-is (not run through to_syllables)
-    let (m, _) = evaluate(&l, &rows[1..2], |_| {}).unwrap();
+    let (m, _) = evaluate(&l, &Lenient::parse("").unwrap(), &rows[1..2], |_| {}).unwrap();
     assert_eq!(m.sent_acc, 1.0);
     // rows with a reading survive the usable() filter even if to_syllables fails
     let r = parse_rows("|丙|a\n").unwrap();

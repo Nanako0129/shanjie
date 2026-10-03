@@ -18,7 +18,7 @@ sys.path.insert(0, HERE)
 import ime  # noqa: E402
 import lm as L  # noqa: E402
 
-LENIENT = str.maketrans("她妳它牠嘗周臺裏", "他你他他嚐週台裡")
+from eval import lenient  # noqa: E402  單字對照＋異體詞表（§S2v）
 
 
 def rows_of(paths):
@@ -55,8 +55,8 @@ def main():
         nb = L.decode(lex, syls, lm, a.profile)
         surf = ["".join(ws) for _, ws in nb]
         firsts.append(surf[0])
-        top1 += surf[0].translate(LENIENT) == t.translate(LENIENT)
-        o64 += t.translate(LENIENT) in {s.translate(LENIENT) for s in surf}
+        top1 += lenient(surf[0]) == lenient(t)
+        o64 += lenient(t) in {lenient(s) for s in surf}
         if dump:
             for r, (sc, ws) in enumerate(nb, 1):
                 dump.write(f"{i}\t{r}\t{''.join(ws)}\t{sc!r}\n")

@@ -30,11 +30,11 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
 sys.path.insert(0, os.path.join(ROOT, "reference", "proto"))
 import ime  # noqa: E402
+from eval import lenient  # noqa: E402  單字對照＋異體詞表（docs/PLAN.md §S2v）
 
 WORK = os.path.expanduser("~/.cache/shanjie/work/s2")
 PRIVATE = os.path.expanduser("~/side-project/shanjie-private")
 LOG = os.path.join(HERE, "log2.tsv")
-LENIENT = str.maketrans("她妳它牠嘗周臺裏", "他你他他嚐週台裡")
 CAP = 10.0
 LN10 = math.log(10)
 _counts = {}
@@ -217,8 +217,8 @@ def all_sets():
 
 def score_row(lex, lm, truth, syls):
     nb = decode(lex, syls, lm)
-    t = truth.translate(LENIENT)
-    surf = ["".join(ws).translate(LENIENT) for _, ws in nb]
+    t = lenient(truth)
+    surf = [lenient("".join(ws)) for _, ws in nb]
     rank = surf.index(t) if t in surf else -1
     top = nb[0][0]
     z = sum(math.exp((s - top) * LN10) for s, _ in nb)

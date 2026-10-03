@@ -18,8 +18,48 @@ HERE = os.path.dirname(__file__)
 MOEDICT = os.path.join(HERE, "..", "repos", "moedict-data", "dict-revised_bkup.json")
 SAMPLE = os.path.join(HERE, "tests", "moedict_sample.txt")
 CJK = re.compile(r"^[一-鿿]+$")
-# 寬鬆比對：上下文本來就判斷不了的人稱、以及兩種寫法都算對的異體字
-LENIENT = str.maketrans("她妳它牠嘗周臺裏", "他你他他嚐週台裡")
+# 寬鬆比對：上下文本來就判斷不了的人稱、以及兩種寫法都算對的異體字。
+# 先套這張單字對照，再套教育部異體詞表 eval/variants.tsv（docs/PLAN.md §S2v，2026-10-03 加入）。
+CHARMAP = str.maketrans("她妳它牠嘗周臺裏", "他你他他嚐週台裡")
+VARIANTS = os.environ.get("SHANJIE_VARIANTS") or os.path.join(HERE, "..", "..", "eval", "variants.tsv")
+_table = None
+
+
+def load_variants(path):
+    """異體表：# 開頭是說明行，其餘每行剛好「異體<TAB>標準形」；欄數不對或異體重複就報錯。不做任何轉換。"""
+    table = {}
+    for line in open(path, encoding="utf-8"):
+        if line.startswith("#"):
+            continue
+        p = line.rstrip("\n").split("\t")
+        if len(p) != 2 or not p[0] or not p[1]:
+            raise ValueError("variants.tsv: bad line")
+        if p[0] in table:
+            raise ValueError("variants.tsv: duplicate variant")
+        table[p[0]] = p[1]
+    return table
+
+
+def lenient(s):
+    """先套單字對照，再由左到右最長匹配，把異體換成標準形。"""
+    global _table
+    if _table is None:
+        t = load_variants(VARIANTS)
+        _table = (t, max(map(len, t), default=0))
+    table, longest = _table
+    s = s.translate(CHARMAP)
+    out, i = [], 0
+    while i < len(s):
+        for n in range(min(longest, len(s) - i), 0, -1):
+            c = table.get(s[i:i + n])
+            if c is not None:
+                out.append(c)
+                i += n
+                break
+        else:
+            out.append(s[i])
+            i += 1
+    return "".join(out)
 
 
 def load_rows(name):
@@ -51,7 +91,7 @@ def load_moedict(lex, n=300, seed=0):
 
 
 def evaluate(lex, rows, lm=None):
-    sent_ok = char_ok = chars = oracle = lenient = 0
+    sent_ok = char_ok = chars = oracle = len_ok = 0
     misses, latency = [], []
     for ctx, truth in rows:
         syls = lex.to_syllables(truth)
@@ -65,13 +105,13 @@ def evaluate(lex, rows, lm=None):
             out = rerank(lm, ctx, nbest)
             latency.append(time.perf_counter() - t)
         sent_ok += out == truth
-        lenient += out.translate(LENIENT) == truth.translate(LENIENT)
+        len_ok += lenient(out) == lenient(truth)
         char_ok += sum(a == b for a, b in zip(out, truth))
         chars += len(truth)
         if out != truth:
             misses.append((truth, out))
     n = len(rows)
-    res = {"n": n, "sent_acc": round(sent_ok / n, 3), "lenient_acc": round(lenient / n, 3),
+    res = {"n": n, "sent_acc": round(sent_ok / n, 3), "lenient_acc": round(len_ok / n, 3),
            "char_acc": round(char_ok / chars, 4), f"oracle@{BEAM}": round(oracle / n, 3)}
     if latency:
         latency.sort()
@@ -143,4 +183,8 @@ def main(models):
 
 
 if __name__ == "__main__":
-    main(sys.argv[1:])
+    if sys.argv[1:2] == ["--lenient-dump"]:   # S2v 對照：每行印 lenient(行)
+        for line in open(sys.argv[2], encoding="utf-8"):
+            print(lenient(line.rstrip("\n")))
+    else:
+        main(sys.argv[1:])

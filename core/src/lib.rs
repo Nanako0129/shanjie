@@ -21,6 +21,7 @@ pub enum Error {
     MissingSeparator { line_len: usize },
     BadOverlayRow { line_len: usize },
     OverlayDuplicate { word_len: usize },
+    BadVariants { line: usize },
 }
 
 impl fmt::Display for Error {
@@ -36,6 +37,7 @@ impl fmt::Display for Error {
             Error::OverlayDuplicate { word_len } => {
                 write!(f, "overlay duplicates a base entry (word length {word_len})")
             }
+            Error::BadVariants { line } => write!(f, "bad variants table (line {line})"),
         }
     }
 }

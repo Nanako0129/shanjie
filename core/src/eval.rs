@@ -40,12 +40,58 @@ pub fn usable(lex: &Lexicon, rows: Vec<Row>) -> Vec<Row> {
     rows.into_iter().filter(|r| r.reading.is_some() || lex.to_syllables(&r.sent).is_some()).collect()
 }
 
-pub fn lenient(s: &str) -> String {
+/// The S0 char map. Lenient comparison applies it first, then the MOE variant table (`Lenient`).
+pub fn char_map(s: &str) -> String {
     const FROM: &str = "她妳它牠嘗周臺裏";
     const TO: &str = "他你他他嚐週台裡";
     s.chars()
         .map(|c| FROM.chars().position(|f| f == c).map_or(c, |p| TO.chars().nth(p).unwrap()))
         .collect()
+}
+
+/// Lenient comparison (docs/PLAN.md S2v): `char_map`, then greedy left-to-right longest match over
+/// eval/variants.tsv, replacing each variant with its canonical form. The table is already normalized
+/// by tools/build_variants.py; loading does no conversion and rejects bad or duplicate lines.
+pub struct Lenient {
+    table: HashMap<String, String>,
+    longest: usize,
+}
+
+impl Lenient {
+    pub fn parse(text: &str) -> Result<Lenient, Error> {
+        let mut table = HashMap::new();
+        for (i, line) in text.lines().enumerate() {
+            if line.starts_with('#') {
+                continue;
+            }
+            let bad = Error::BadVariants { line: i + 1 };
+            let mut it = line.split('\t');
+            let (Some(v), Some(c), None) = (it.next(), it.next(), it.next()) else { return Err(bad) };
+            if v.is_empty() || c.is_empty() || table.insert(v.to_string(), c.to_string()).is_some() {
+                return Err(bad);
+            }
+        }
+        let longest = table.keys().map(|k| k.chars().count()).max().unwrap_or(0);
+        Ok(Lenient { table, longest })
+    }
+
+    pub fn apply(&self, s: &str) -> String {
+        let cs: Vec<char> = char_map(s).chars().collect();
+        let (mut out, mut i) = (String::new(), 0);
+        'outer: while i < cs.len() {
+            for n in (1..=self.longest.min(cs.len() - i)).rev() {
+                let key: String = cs[i..i + n].iter().collect();
+                if let Some(c) = self.table.get(&key) {
+                    out.push_str(c);
+                    i += n;
+                    continue 'outer;
+                }
+            }
+            out.push(cs[i]);
+            i += 1;
+        }
+        out
+    }
 }
 
 /// Python round(x, k) then repr(): exact decimal rounding, shortest round-trip, `1.0` not `1`.
@@ -87,6 +133,7 @@ pub fn row_syllables(lex: &Lexicon, r: &Row) -> Result<Syls, Error> {
 /// Returns metrics and misses (truth, output). `on_decode` receives each decode duration.
 pub fn evaluate(
     lex: &Lexicon,
+    len: &Lenient,
     rows: &[Row],
     mut on_decode: impl FnMut(std::time::Duration),
 ) -> Result<(Metrics, Vec<(String, String)>), Error> {
@@ -101,7 +148,7 @@ pub fn evaluate(
         oracle += texts.contains(&r.sent) as usize;
         let out = &texts[0];
         sent_ok += (out == &r.sent) as usize;
-        len_ok += (lenient(out) == lenient(&r.sent)) as usize;
+        len_ok += (len.apply(out) == len.apply(&r.sent)) as usize;
         char_ok += out.chars().zip(r.sent.chars()).filter(|(a, b)| a == b).count();
         chars += r.sent.chars().count();
         if out != &r.sent {

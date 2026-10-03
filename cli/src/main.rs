@@ -42,7 +42,26 @@ fn oov_words(name: &str) -> Vec<String> {
     fs::read_to_string(p).unwrap_or_default().lines().filter(|l| !l.is_empty()).map(String::from).collect()
 }
 
+/// S2v lenient table: SHANJIE_VARIANTS if set, else the repo's eval/variants.tsv; missing or bad is an error.
+fn load_lenient() -> Result<Lenient, String> {
+    let p = std::env::var_os("SHANJIE_VARIANTS").map(PathBuf::from).unwrap_or_else(|| root().join("eval/variants.tsv"));
+    let text = fs::read_to_string(p).map_err(|e| format!("cannot read variants table ({:?})", e.kind()))?;
+    Lenient::parse(&text).map_err(|e| e.to_string())
+}
+
 fn run() -> Result<(), String> {
+    let len = load_lenient()?;
+    let mut args = std::env::args().skip(1);
+    if let (Some(a), Some(f), None) = (args.next(), args.next(), args.next()) {
+        if a == "--lenient-dump" {
+            // S2v parity check: one lenient(line) per input line, nothing else.
+            let text = fs::read_to_string(f).map_err(|e| format!("cannot read file ({:?})", e.kind()))?;
+            for line in text.lines() {
+                println!("{}", len.apply(line));
+            }
+            return Ok(());
+        }
+    }
     let (mut sets, mut learn, mut check, mut bench) = (Vec::new(), false, false, false);
     let (mut in_set, mut no_overlay, mut limit, mut in_limit) = (false, false, None::<usize>, false);
     for a in std::env::args().skip(1) {
@@ -90,7 +109,7 @@ fn run() -> Result<(), String> {
             eprintln!("set is empty, skipped (length {})", s.chars().count());
             continue;
         }
-        let (m, misses) = evaluate(&lex, &rows, |_| {}).map_err(|e| e.to_string())?;
+        let (m, misses) = evaluate(&lex, &len, &rows, |_| {}).map_err(|e| e.to_string())?;
         println!("\n## {name}  unigram  {}", m.repr());
         // 保留集只印指標：錯句會把內容露給調整系統的人（PLAN 片 E 保留集規則）
         if name != "萌典例句" && name != "保留集" {

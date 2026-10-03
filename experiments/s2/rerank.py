@@ -28,10 +28,10 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
 sys.path.insert(0, os.path.join(ROOT, "reference", "proto"))
 import ime  # noqa: E402
+from eval import lenient  # noqa: E402  單字對照＋異體詞表（docs/PLAN.md §S2v）
 import lm as L  # noqa: E402
 
 WORK = os.path.expanduser("~/.cache/shanjie/work/s2/rerank")
-LENIENT = str.maketrans("她妳它牠嘗周臺裏", "他你他他嚐週台裡")
 HAN = re.compile(r"[一-鿿]{4,30}")
 DENSE = ["total", "lex", "lm", "nw", "n1", "nov"]
 
@@ -88,7 +88,7 @@ def prep(name, path, limit, profile):
         data.append((t, cands))
     os.makedirs(WORK, exist_ok=True)
     pickle.dump(data, open(os.path.join(WORK, f"{name}.pkl"), "wb"))
-    ok = sum(c[0][0].translate(LENIENT) == t.translate(LENIENT) for t, c in data)
+    ok = sum(lenient(c[0][0]) == lenient(t) for t, c in data)
     print(f"{name}: {len(data)} 句，現行第一名正確 {ok}")
 
 
@@ -131,12 +131,12 @@ def train(names, out, epochs=3, K=0):
         random.Random(ep).shuffle(data)
         upd = 0
         for t, cands in data:
-            tt = t.translate(LENIENT)
-            gold_s, gold = next(((s, f) for s, f in cands if s.translate(LENIENT) == tt), (None, None))
+            tt = lenient(t)
+            gold_s, gold = next(((s, f) for s, f in cands if lenient(s) == tt), (None, None))
             if gold is None:
                 continue
             best = best_of(w, cands, K)
-            if best[0].translate(LENIENT) == tt:
+            if lenient(best[0]) == tt:
                 c += 1; continue
             if K:
                 p = diff_pos(gold_s, best[0])
@@ -164,8 +164,8 @@ def evaluate(model, names):
     K = w.pop("__pairs__", 0)
     for n in names:
         data = pickle.load(open(os.path.join(WORK, f"{n}.pkl"), "rb"))
-        base = sum(c[0][0].translate(LENIENT) == t.translate(LENIENT) for t, c in data)
-        new = sum(best_of(w, c, K)[0].translate(LENIENT) == t.translate(LENIENT) for t, c in data)
+        base = sum(lenient(c[0][0]) == lenient(t) for t, c in data)
+        new = sum(lenient(best_of(w, c, K)[0]) == lenient(t) for t, c in data)
         print(f"{n}: {len(data)} 句  原排序 {base}  重排 {new}  ({new - base:+d})")
 
 
