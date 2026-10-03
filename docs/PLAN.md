@@ -488,7 +488,7 @@ S3a 不需要外觀參考，可以先做；S3b 等使用者提供 macOS 內建�
 
 #### S3b：Swift 輸入法本體（截圖已於 2026-10-03 取得）
 
-**狀態（2026-10-04）：agent 可做的部分完成**（PR #3，merge 880dfbf）。fresh verifier CONFIRMED：驗收 1–8 獨立重跑、verifier 自己做的六項突變（i–vi）都由斷言抓到（executor 另做九項，見研究紀錄）；自測前後使用者的輸入法清單與偏好不變；CI（core、shell）全綠。CodeRabbit 沒有行內意見，但摘要的安全架構區塊列了兩項 Medium：(1) 安裝腳本先刪再複製沒有退路——PR #4 改成先複製到暫存、舊版移到垃圾桶、再改名就位，並以假 app 在暫存 HOME 測試；(2) secure input 只在 deactivate 檢查——試做全面檢查後，本地審查指出全系統旗標會讓使用者的字悄悄消失，所以維持只在 deactivate 檢查，延到 S4 的 privacyGate 以實機證據決定。`release` environment 已照 syrtis 建好（只准 main 與 `v*`、需要使用者核准、3 個 variables）。**待使用者**：設定 3 個 secrets → 手動試跑 Release → 推 `v0.1.0` → 安裝實測（驗收 9–16）。
+**狀態（2026-10-04）：agent 可做的部分完成**（PR #3，merge 880dfbf）。fresh verifier CONFIRMED：驗收 1–8 獨立重跑、verifier 自己做的六項突變（i–vi）都由斷言抓到（executor 另做九項，見研究紀錄）；自測前後使用者的輸入法清單與偏好不變；CI（core、shell）全綠。CodeRabbit 沒有行內意見，但摘要的安全架構區塊列了兩項 Medium：(1) 安裝腳本先刪再複製沒有退路——PR #4 改成先複製到暫存、上一版取消 LaunchServices 登記後保留為 `.shanjie-previous`、再改名就位，並以假 app 在暫存 HOME 測試；(2) secure input 只在 deactivate 檢查——試做全面檢查後，本地審查指出全系統旗標會讓使用者的字悄悄消失，所以維持只在 deactivate 檢查，延到 S4 的 privacyGate 以實機證據決定。`release` environment 已照 syrtis 建好（只准 main 與 `v*`、需要使用者核准、3 個 variables）。**待使用者**：設定 3 個 secrets → 手動試跑 Release → 推 `v0.1.0` → 安裝實測（驗收 9–16）。
 
 - InputMethodKit app `shanjie.app`（`com.nyanako.inputmethod.shanjie`），用 SwiftPM 建置、腳本組 app bundle；本機與 CI 一律 ad-hoc 簽章，正式版在 GitHub Actions 的 `release` environment 用 Developer ID 簽章並公證（見 s3b §2、§3）；結構參考小麥注音（MIT）。
 - 候選窗先試 `IMKCandidates`；外觀、組字區底線、深色模式依使用者截圖。
@@ -763,7 +763,7 @@ plan-verifier 第一次：REVISE（6 項阻擋）。security-reviewer：無 P0�
 | plan-verifier 6 | privacyGate、中英切換在 PLAN 與契約不一致 | FIX：privacyGate 與 gate 測試延到 S4；中英切換用系統 Caps Lock；PLAN、s3a §3、§6 一併改 |
 | security P2-1 | 日誌規則是黑名單，數值預設公開 | FIX：白名單，只記靜態字串與回傳碼；PLAN R2 同步 |
 | security P2-2 | 共用引擎跨 controller 的組字擁有者沒定義 | FIX：s3b §5 組字擁有者；兩個假 controller 的測試 |
-| security P2-3 | 安裝腳本順序與複製方式 | FIX：先移除、`ditto`、以完整路徑 `pkill`、執行已安裝那份的 `install`；固定字面路徑；不用 sudo |
+| security P2-3 | 安裝腳本順序與複製方式 | FIX：固定字面路徑、不用 sudo、以完整路徑 `pkill`、執行已安裝那份的 `install`。2026-10-04 再改（PR #4）：先複製到暫存、上一版取消登記後保留為 `.shanjie-previous`、再改名就位，見 s3b §4 |
 | security P2-4 | entitlements 沒有明寫為空 | FIX：不給 entitlements 檔，驗收檢查輸出為空、flags 含 runtime |
 | security P3 | `try!` 與錯誤型別、非 0 回傳碼殘留組字、`nil` 事件、候選陣列清除、滑鼠選候選、secure input 的預期、自測參數與 UserDefaults、`build/` 未忽略 | FIX：全部寫進 s3b；`build/` 已在 PR #1 加入 `.gitignore` |
 | plan-verifier 2 | PLAN 仍寫 Apple Development 簽章；PR #1 沒列為前提；擁有者只記 ObjectIdentifier、deactivate 不檢查擁有者；日誌擷取沒證明已接上；release 的 build 沒下載模型 | FIX：PLAN 改寫簽章；加前提與停止條件；擁有者改弱參照、deactivate／commit 先檢查、deinit 丟棄，加兩個測試；起始＋結束標記與逾時；release build 先下載並比對模型 |

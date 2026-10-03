@@ -61,8 +61,8 @@
 
 - `scripts/install-ime.sh <shanjie.app 的路徑>`（通常是解壓後的 Release 附件；也接受 `build/shanjie.app` 自己建的 ad-hoc 版）：
   - `#!/bin/bash`、`set -euo pipefail`；`$HOME` 為空就中止；不用 sudo（R9）。
-  - 目的地固定為字面路徑 `"$HOME/Library/Input Methods/shanjie.app"`；腳本只刪除或搬移兩個字面路徑：這個目的地與這次執行的暫存 `.shanjie-staging-<PID>`（帶 PID，兩次重疊的安裝不會動到彼此；不是 `.app`，系統不會當成輸入法）。舊版一律移到 `~/.Trash`，不刪除。
-  - 順序：先 `ditto` 到 `.shanjie-staging-<PID>`（複製失敗時已安裝的版本不受影響）→ 舊版移到 `~/.Trash/shanjie-<時間>-<pid>.app`（和小麥注音的安裝程式一樣，需要時可手動放回）→ 暫存改名就位 → 以完整路徑結束舊行程 → 執行**已安裝那一份**的 `install`（註冊失敗時提示可從垃圾桶放回舊版）。2026-10-04 從「改名＋失敗還原」簡化而來：還原邏輯每修一輪就多一種邊界情況，移到垃圾桶則沒有刪除、沒有殘留要清。`scripts/test-install-ime.sh` 用一個執行檔只會 `exit 1` 的假 app、在暫存的 HOME 裡以 `SHANJIE_INSTALL_FILES_ONLY=1` 驗證全新安裝、覆蓋安裝（舊版進垃圾桶）、從已安裝那份重裝、複製失敗四種情況，CI 也跑；就算測試開關失效，假 app 也無法註冊任何東西。在真實系統上的行為由使用者驗收 10 確認。
+  - 目的地固定為字面路徑 `"$HOME/Library/Input Methods/shanjie.app"`。腳本只刪除或搬移 `~/Library/Input Methods` 裡的三個位置：這個目的地、`mktemp` 建的唯一暫存資料夾 `.shanjie-staging-XXXXXX`、保留上一版的 `.shanjie-previous`。兩個輔助名稱都不是 `.app`，輸入法系統與 LaunchServices 都不會把它們當成 app。不要同時執行兩次安裝（未加鎖）。
+  - 順序：先 `ditto` 到暫存資料夾（複製失敗時已安裝的版本不受影響）→ 舊版先 `lsregister -u`（避免系統依 bundle ID 啟動到它）再改名為 `.shanjie-previous`（取代更早保留的那一份）→ 新版改名就位 → 以完整路徑（HOME 裡的正規表示式字元已跳脫）結束舊行程 → 執行**已安裝那一份**的 `install`；註冊失敗時印出換回上一版的確切指令。中途中斷時，`trap` 把新版放上去而不是刪掉（這條路徑沒有自動測試）。2026-10-04 的設計演變：改名＋失敗還原的版本每修一輪就多一種邊界情況；改成移到 `~/.Trash` 後，審查指出 `mv` 進垃圾桶可能被隱私保護擋下、垃圾桶裡的舊版可能仍登記在 LaunchServices（小麥注音是用 `NSWorkspace.recycle`，不是 `mv`），所以改成在同一個資料夾保留一份不是 `.app` 的上一版。`scripts/test-install-ime.sh` 用執行檔只會 `exit 1` 的假 app、在暫存的 HOME 裡以 `SHANJIE_INSTALL_FILES_ONLY=1` 驗證全新安裝、覆蓋安裝（上一版被保留）、從已安裝那份重裝、複製失敗（錯誤來自 ditto、什麼都沒變）四種情況，CI 也跑。在真實系統上的行為由使用者驗收 10 確認。
   - 最後印出下一步：到「系統設定 → 鍵盤 → 輸入方式」確認「善解」已出現；沒出現就登出再登入。
 - **agent 不得對真實的 HOME 執行 `install-ime.sh`、執行 `shanjie install`、或啟動 app**；agent 與 CI 只能透過 `scripts/test-install-ime.sh`（暫存 HOME、假 app、`SHANJIE_INSTALL_FILES_ONLY=1`）執行它。真正的安裝只由使用者執行。
 
@@ -145,7 +145,7 @@
 
 **使用者實測（安裝後，由使用者執行並回報）：**
 9. 使用者在 `release` environment 設好簽章材料，先以 `workflow_dispatch` 試跑簽章與公證，全綠後推 `v0.1.0` tag；release 工作全綠，Release 頁面有 `shanjie-0.1.0.zip`。
-10. 下載、解壓，執行 `scripts/install-ime.sh <解壓後的 shanjie.app>`：「善解（標準）」「善解（倚天）」出現在輸入方式中；再執行一次（覆蓋安裝）仍正常，舊版出現在垃圾桶，`~/Library/Input Methods/` 裡沒有 `.shanjie-staging-*` 殘留。
+10. 下載、解壓，執行 `scripts/install-ime.sh <解壓後的 shanjie.app>`：「善解（標準）」「善解（倚天）」出現在輸入方式中；再執行一次（覆蓋安裝）仍正常，上一版保留為 `.shanjie-previous`，`~/Library/Input Methods/` 裡沒有 `.shanjie-staging-*` 殘留，`pgrep -fl shanjie` 顯示執行中的是 `~/Library/Input Methods/shanjie.app` 那一份。
 11. 在 TextEdit、備忘錄、Safari 各打陷阱集前 10 句（main 會提供按鍵清單）：組字有底線、候選窗出現在下方、數字選字、Enter 送出。
 12. 對照截圖 1：候選條的形狀、號碼、選取色、深淺色模式；不像的地方記下來，進 S3b-2。
 13. 組字中按 Caps Lock 切到英文：記錄組字是被送出、丟棄還是殘留（§6 的推論在此實測）；再切回；倚天模式打幾句。
