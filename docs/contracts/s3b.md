@@ -181,13 +181,13 @@
 - **修訂 13（單一輸入模式、選單切換排列、`善解輸入法.app`，2026-10-04 實作）**：
   - **偏好**：`LayoutStore` 協定只有一個 `layout: String?`（存 `InputMode` 的 raw value）。`ShanjieKit` 只有記憶體版 `MemoryLayoutStore`；UserDefaults 版 `DefaultsLayoutStore` 在 `Shanjie` target 的 `main.swift`，用 `UserDefaults.standard`（由 IMK 行程讀時就是 app 自己的網域，即 bundle ID），鍵 `layout`。`Shell.init` 的 `layoutStore` 沒有預設值；先讀偏好算出排列、再呼叫唯一一次 `build()`。值不存在、空字串、大小寫不同（`ETEN`）、`zhuyin` 或完整模式 ID 都視為不合法 → 標準。
   - **選單**：`menu()` 每次呼叫都重建一個 `NSMenu`，兩個項目「標準鍵盤」「倚天鍵盤」，目前的排列 `state = .on`；action 分別是 `selectStandardLayout(_:)`、`selectEtenLayout(_:)`，不設 target、不看 `sender`（仿小麥注音，由 IMK 轉給 controller）。選了就呼叫 `Shell.selectLayout`：先走既有的 `switchMode`（組字送回擁有者、重建引擎、重載 LM 與設定），再存偏好；選目前的排列時不重建，但仍寫一次偏好。選單動作不改變組字擁有者。**未驗證**：IMK 實際如何呼叫這兩個 action、打勾是否顯示，沒有啟動輸入法實測（契約禁止），由使用者實測（§13.4 第 5 項）確認。
-  - **`setValue`**：`InputMode(modeID:)` 仍只看最後一段，`.zhuyin` 得到 nil 而被忽略（有測試）。舊的 `.standard`／`.eten` 模式 ID 仍會被認得並切換（不存偏好）；`install` 會停用那兩個模式，正常不會再送來，所以沒有另外擋。
+  - **`setValue`**：殼不覆寫（`InputController.swift` 有註解說明），`InputMode(modeID:)` 與 `Session.setInputMode` 已刪除；任何模式 ID，包括還沒被停用的舊 `.standard`／`.eten`，都不會改變排列（§13.3）。
   - **`shanjie install`**：`TISRegisterInputSource` 一律呼叫；它回傳錯誤時只印警告、繼續查清單（契約沒寫註冊失敗怎麼處理；已登記過的 bundle 再註冊是否回錯誤沒有量測），由「列不到 `.zhuyin` → exit 3」決定結果。模式以 `kTISPropertyInputModeID` 比對（沿用原本的做法）。停用舊模式失敗時印一行固定的警告，不影響 exit 0。
   - **`install-ime.sh`**：目的地、舊名稱、上一版三個字面路徑放在 `DEST`／`LEGACY`／`PREV` 變數；`lsregister -u` 集中在 `unregister()`，files-only 時不呼叫。上一版的選擇：有 `善解輸入法.app` 就是它，否則是舊的 `shanjie.app`；新版就位後若舊名稱還在（兩者並存），`lsregister -u` 後先 `chmod -R u+w` 再刪除。`SHANJIE_TEST_LSREGISTER` 只在 files-only 分支讀取。exit 3 的訊息照契約的文字，但路徑寫成 `~/Library/Input\ Methods/…`，讓使用者可以直接貼上執行。`pkill`／`pgrep` 的正規表示式是 `^<跳脫後的 HOME>/Library/Input Methods/(善解輸入法|shanjie)\.app/Contents/MacOS/shanjie( |$)`；用 `grep -E` 對含 `.`、空白與括號的 HOME 量過（命中兩個名稱、不命中 `.shanjie-previous` 與 `.` 被換掉的路徑），`pkill` 本身沒有在真實系統跑過。
   - **`test-install-ime.sh`**：lsregister、`pkill`、`pgrep` 的替身只把呼叫寫進一個紀錄檔；每個情況結束都斷言紀錄檔不存在。拒絕執行的情況用 `chmod 500` 的 HOME，並比對錯誤訊息是 HOME 檢查的那一句。新增只有舊名稱、新舊並存（舊名稱唯讀、另有更早的 `.shanjie-previous`）兩種升級。2026-10-04 實測：把 `unregister()` 的 files-only 判斷拿掉，測試以「overwrite: the system was called: lsregister -u …」失敗（呼叫的是替身）。
   - **`check-app.sh`**：模式清單只取 PlistBuddy 輸出中一層縮排的鍵，必須恰好是 `.zhuyin`（另以兩個模式的 plist 副本確認會列出兩行）；另查資料夾名稱、`CFBundleDevelopmentRegion = en`、`CFBundleName = Shanjie`、`LSHasLocalizedDisplayName`，以及 `zh-Hant`／`en` 兩份 `InfoPlist.strings` 的 `CFBundleName`、`CFBundleDisplayName` 與模式名稱。
   - **Makefile**：`APP_NAME`／`LEGACY_APP_NAME` 兩個變數；`clean-bundle` 對 `build/`、`build/selftest/` 的兩個名稱逐一 `lsregister -u`（印出每一行，錯誤忽略）後一起刪除。
-  - **測試**：探針鍵 `s`（標準是 ㄋ、倚天是 ㄙ）。原本用 `setInputMode(".eten")` 切換的測試（`ShellTests`、`KeyMapTests`、`LogTests`）改走選單動作 `selectLayout`。2026-10-04 實測突變：把 `Shell.init` 改成先 `build()` 再讀偏好，`testStoredEtenLayoutAppliesFromTheStart` 與 `testTheInputModeIDDoesNotChangeTheLayout` 失敗（preedit 是 ㄋ 而不是 ㄙ），還原後全綠。
+  - **測試**：探針鍵 `s`（標準是 ㄋ、倚天是 ㄙ）。原本用 `setInputMode(".eten")` 切換的測試（`ShellTests`、`KeyMapTests`、`LogTests`）改走選單動作 `selectLayout`。2026-10-04 實測突變：把 `Shell.init` 改成先 `build()` 再讀偏好，`testStoredEtenLayoutAppliesFromTheStart` 失敗（preedit 是 ㄋ 而不是 ㄙ），還原後全綠。
 
 ## 12. 範圍外
 
@@ -225,7 +225,7 @@
 - **未驗證**：重新登記一個已登記過的 bundle 後，TIS 是否立刻更新模式清單（可能要登出再登入）。
 - `scripts/install-ime.sh`：先取得 `install` 的回傳碼（不能用 `if ! …` 吞掉）。回傳 3 時印固定訊息「系統還沒載入新的輸入方式清單：請登出再登入，然後只執行 `~/Library/Input Methods/善解輸入法.app/Contents/MacOS/shanjie install`」（不要重跑整個腳本：那會把剛裝的版本當成上一版、刪掉真正的上一版），**不印**換回上一版的指令；其他非 0 才印還原指令。exit 3 這條路徑在 files-only 測試到不了，只由使用者實測涵蓋。
 - 目的地改為 `~/Library/Input Methods/善解輸入法.app`。舊名稱 `~/Library/Input Methods/shanjie.app`：
-  - 只有舊名稱時，視為上一版：`lsregister -u` 後改名為 `.shanjie-previous`（與現行規則相同）。
+  - 只有舊名稱時，視為上一版：先改名為 `.shanjie-previous`、成功後才 `lsregister -u`（與 §4 的順序相同）。
   - 新舊名稱同時存在時，新名稱那份才是上一版（照現行規則保留為 `.shanjie-previous`），舊名稱那份 `lsregister -u` 後刪除。
   - §4 的「只刪除或搬移的位置」因此加上舊名稱 `shanjie.app`（共四個字面路徑）。
   - pkill 的比對涵蓋新舊兩個名稱。HOME 檢查、files-only、mktemp 暫存、trap 等規則不變。
