@@ -1,9 +1,10 @@
 //! S3a key engine (docs/contracts/s3a.md): key events in, preedit / commit / candidates out.
 //! R2: no input text in errors or panics; types holding input text do not derive Debug.
 
+use crate::lm::{decode_segment, CappedLexicon, End, Lm, Profile};
 use crate::{decode_beam, Lexicon, NoLearning, BEAM_S1};
 use std::collections::HashSet;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 pub const MOD_SHIFT: u32 = 1;
@@ -152,8 +153,21 @@ struct Cands {
     sel: usize,
 }
 
+/// Loaded bigram model and the capped lexicon built from it (decoding only).
+#[derive(Clone)]
+struct LmState {
+    lm: Arc<Lm>,
+    capped: Arc<CappedLexicon>,
+}
+
 pub struct Engine {
     lex: Arc<Lexicon>,
+    /// Where `new` read the data from; `None` for `with_lexicon` engines (they cannot `load_lm`).
+    data_dir: Option<PathBuf>,
+    lm: Option<LmState>,
+    profile: Profile,
+    /// Words of the current best path with the lp each was scored with (LM mode only).
+    path: Vec<(String, f64)>,
     layout: Layout,
     syls: Vec<String>,
     cursor: usize,
@@ -174,13 +188,19 @@ pub fn load_lexicon(data_dir: &Path) -> Result<Arc<Lexicon>, EngineError> {
 
 impl Engine {
     pub fn new(data_dir: &Path, layout: Layout) -> Result<Engine, EngineError> {
-        Ok(Engine::with_lexicon(load_lexicon(data_dir)?, layout))
+        let mut e = Engine::with_lexicon(load_lexicon(data_dir)?, layout);
+        e.data_dir = Some(data_dir.to_path_buf());
+        Ok(e)
     }
 
     /// Share an already-loaded lexicon (tests load the 131 MB file once).
     pub fn with_lexicon(lex: Arc<Lexicon>, layout: Layout) -> Engine {
         Engine {
             lex,
+            data_dir: None,
+            lm: None,
+            profile: Profile::Chat,
+            path: Vec::new(),
             layout,
             syls: Vec::new(),
             cursor: 0,
@@ -190,6 +210,50 @@ impl Engine {
             display: String::new(),
             cands: None,
         }
+    }
+
+    /// S2c: read the model at `path` and `data_dir/overlay-add.tsv`, build the capped lexicon with the
+    /// shared constructor. Failure leaves the previous state. The composition display is not recomputed;
+    /// the next change to it decodes with the new model.
+    pub fn load_lm(&mut self, path: &Path) -> Result<(), EngineError> {
+        let dir = self.data_dir.as_ref().ok_or(EngineError::LoadFailed)?;
+        let overlay = std::fs::read_to_string(dir.join("overlay-add.tsv")).map_err(|_| EngineError::LoadFailed)?;
+        let lm = Lm::load(path).map_err(|_| EngineError::LoadFailed)?;
+        let capped = CappedLexicon::new(self.lex.clone(), &overlay, &lm);
+        self.lm = Some(LmState { lm: Arc::new(lm), capped: Arc::new(capped) });
+        Ok(())
+    }
+
+    /// Test-purpose injection for `with_lexicon` engines: a prebuilt model and its capped lexicon
+    /// (built by `CappedLexicon::new` from this engine's lexicon).
+    pub fn set_lm(&mut self, lm: Arc<Lm>, capped: Arc<CappedLexicon>) {
+        self.lm = Some(LmState { lm, capped });
+    }
+
+    /// Switch the profile (default chat; remembered even before a model is loaded), recompute the
+    /// composition and return the snapshot. On a decode failure the engine resets itself.
+    pub fn set_profile(&mut self, profile: Profile) -> Result<Output, EngineError> {
+        self.profile = profile;
+        if let Err(e) = self.refresh() {
+            self.clear_all();
+            return Err(e);
+        }
+        self.handled()
+    }
+
+    /// Total score of the current best path as `lm.decode` scores one: every word (fixed words with
+    /// their capped `lp_F`) adds `word(λ, previous, w, lp)`, then `eos` of the last word. `None` without
+    /// a model or without syllables.
+    pub fn total_score(&self) -> Option<f64> {
+        let st = self.lm.as_ref()?;
+        let lam = self.profile.lambda();
+        let mut prev = "<s>";
+        let mut total = 0.0;
+        for (w, lp) in &self.path {
+            total += st.lm.word(lam, prev, w, *lp);
+            prev = w;
+        }
+        (!self.path.is_empty()).then(|| total + st.lm.eos(lam, prev))
     }
 
     /// §6 reset: Commit returns the display string (pending syllable dropped); both clear everything.
@@ -214,6 +278,7 @@ impl Engine {
         self.order.clear();
         self.fixed.clear();
         self.display.clear();
+        self.path.clear();
         self.cands = None;
     }
 
@@ -243,6 +308,9 @@ impl Engine {
 
     /// Recompute the display string: free segments decoded top-1, fixed words in between (§3.1).
     fn refresh(&mut self) -> Result<(), EngineError> {
+        if let Some(st) = self.lm.clone() {
+            return self.refresh_lm(&st);
+        }
         let mut out = String::new();
         let mut pos = 0;
         let seg =|from: usize, to: usize, out: &mut String| -> Result<(), EngineError> {
@@ -260,6 +328,43 @@ impl Engine {
         }
         seg(pos, self.syls.len(), &mut out)?;
         self.display = out;
+        Ok(())
+    }
+
+    /// S2c: each blank stretch is decoded with the bigram model. Its left context is the fixed word on
+    /// its left (`<s>` if none); it closes with the transition into the fixed word on its right, or with
+    /// the sentence end when there is none. Fixed words score with `lp_F`, the capped score under their reading.
+    fn refresh_lm(&mut self, st: &LmState) -> Result<(), EngineError> {
+        let lam = self.profile.lambda();
+        let mut lp_fixed = Vec::with_capacity(self.fixed.len());
+        for f in &self.fixed {
+            lp_fixed.push(st.capped.best_lp(&self.syls[f.start..f.end], &f.word).ok_or(EngineError::Internal)?);
+        }
+        let (mut out, mut path) = (String::new(), Vec::new());
+        for gap in 0..=self.fixed.len() {
+            let from = if gap == 0 { 0 } else { self.fixed[gap - 1].end };
+            let right = self.fixed.get(gap);
+            let to = right.map_or(self.syls.len(), |f| f.start);
+            if from < to {
+                let prev = if gap == 0 { "<s>" } else { self.fixed[gap - 1].word.as_str() };
+                let end = match right {
+                    Some(f) => End::Next { word: &f.word, lp: lp_fixed[gap] },
+                    None => End::Eos,
+                };
+                let best = decode_segment(&st.capped, &self.syls[from..to], &st.lm, lam, prev, end, BEAM_S1)
+                    .map_err(|_| EngineError::Internal)?;
+                for (w, lp) in &best.first().ok_or(EngineError::Internal)?.1 {
+                    out.push_str(w);
+                    path.push((w.to_string(), *lp));
+                }
+            }
+            if let Some(f) = right {
+                out.push_str(&f.word);
+                path.push((f.word.clone(), lp_fixed[gap]));
+            }
+        }
+        self.display = out;
+        self.path = path;
         Ok(())
     }
 

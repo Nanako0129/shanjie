@@ -45,3 +45,54 @@ fn lenient_dump_uses_the_variant_table() {
     assert_eq!(lines[0], lines[1], "念書 and 唸書 must compare equal");
     assert_ne!(lines[2], lines[3], "散佈 has no dictionary entry, so it is not a listed variant");
 }
+
+const LM_MISSING: &str = "data/lm/bigram.sjlm is missing: build it with `python3 tools/build_lm.py` (counts in ~/.cache/shanjie/work/s2, see docs/PLAN.md S2c)";
+
+fn lm_path() -> String {
+    let p = format!("{}/../data/lm/bigram.sjlm", env!("CARGO_MANIFEST_DIR"));
+    assert!(std::path::Path::new(&p).exists(), "{LM_MISSING}");
+    p
+}
+
+/// S2c acceptance 2: the four argument sets of the contract's golden-generation block.
+#[test]
+fn lm_mode_matches_golden_byte_for_byte() {
+    let (lm, root) = (lm_path(), concat!(env!("CARGO_MANIFEST_DIR"), "/.."));
+    let typing = format!("{root}/eval/dev/user-typing.txt");
+    let mut got = String::new();
+    for p in ["chat", "formal"] {
+        got += &run(&["--lm", &lm, "--profile", p, "--dev", "302"]);
+        got += &run(&["--lm", &lm, "--profile", p, "--rows", &typing, "--name", "typing76"]);
+    }
+    assert_eq!(got, golden("s2-lm.txt"));
+}
+
+/// S2c acceptance 2, second half: the top1 file's columns hash to the summary lines' top1_sha256.
+#[test]
+fn lm_top1_tsv_hashes_match_summary_lines() {
+    let tsv = golden("s2-lm-dev302-top1.tsv");
+    let rows: Vec<Vec<&str>> = tsv.lines().filter(|l| !l.starts_with('#')).map(|l| l.split('\t').collect()).collect();
+    assert_eq!(rows.len(), 302);
+    let summary = golden("s2-lm.txt");
+    for (col, p) in ["chat", "formal"].iter().enumerate() {
+        let joined = rows.iter().map(|r| r[col]).collect::<Vec<_>>().join("\n");
+        let want = summary.lines().find(|l| l.starts_with(&format!("## dev302  lm-{p}  "))).unwrap();
+        assert!(want.contains(&format!("'top1_sha256': '{}'", core::eval::sha256_hex(joined.as_bytes()))));
+    }
+}
+
+#[test]
+fn sha256_known_vectors() {
+    assert_eq!(core::eval::sha256_hex(b""), "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
+    assert_eq!(core::eval::sha256_hex(b"abc"), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+}
+
+#[test]
+fn lm_file_is_the_documented_build() {
+    let bytes = std::fs::read(lm_path()).unwrap();
+    assert_eq!(
+        core::eval::sha256_hex(&bytes),
+        "9879fd8b264b1c1f4c083ccedf84dc5625cd8d2595bd2d13150eed5a0520a923",
+        "data/lm/bigram.sjlm differs from the documented build; rebuild with tools/build_lm.py"
+    );
+}

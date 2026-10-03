@@ -1,6 +1,9 @@
+use core::engine::load_lexicon;
 use core::eval::*;
-use core::{decode_beam, Error, Lexicon, NoLearning, BEAM_S1};
+use core::lm::{decode, CappedLexicon, Lm, Profile};
+use core::{decode_beam, Error, Lexicon, NoLearning, Syls, BEAM_S1};
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -53,8 +56,119 @@ fn load_lenient() -> Result<Lenient, String> {
     Lenient::parse(&text).map_err(|e| e.to_string())
 }
 
+/// lm_eval.py `rows_of`: only lines with exactly three `|` fields (context|sentence|reading).
+fn three_field_rows(text: &str) -> Vec<(String, Syls)> {
+    text.lines()
+        .filter_map(|l| {
+            let p: Vec<&str> = l.split('|').collect();
+            (p.len() == 3).then(|| (p[1].to_string(), p[2].split_whitespace().map(String::from).collect()))
+        })
+        .collect()
+}
+
+/// S2c LM mode (docs/PLAN.md S2c): the one summary line of lm_eval.py, plus the optional `--dump`.
+fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
+    let (mut lm_path, mut profile, mut name, mut dev, mut rows_file) = (None, None, None, None, None);
+    let (mut limit, mut set, mut dump) = (None::<usize>, None, None);
+    let mut it = args.iter();
+    while let Some(a) = it.next() {
+        let mut val = || it.next().cloned().ok_or_else(|| "missing option value".to_string());
+        let num = |v: String| v.parse::<usize>().map_err(|_| format!("bad number (length {})", v.chars().count()));
+        match a.as_str() {
+            "--lm" => lm_path = Some(val()?),
+            "--profile" => profile = Some(val()?),
+            "--name" => name = Some(val()?),
+            "--dev" => dev = Some(num(val()?)?),
+            "--rows" => rows_file = Some(val()?),
+            "--limit" => limit = Some(num(val()?)?),
+            "--set" => set = Some(val()?),
+            "--dump" => dump = Some(val()?),
+            _ => return Err("unknown argument".into()),
+        }
+    }
+    let profile_name = profile.ok_or("--profile is required")?;
+    let prof = match profile_name.as_str() {
+        "chat" => Profile::Chat,
+        "formal" => Profile::Formal,
+        _ => return Err("--profile must be chat or formal".into()),
+    };
+    let lm = Lm::load(std::path::Path::new(&lm_path.ok_or("--lm is required")?)).map_err(|e| e.to_string())?;
+    let dir = root().join("data/lexicon");
+    let lex = load_lexicon(&dir).map_err(|_| "cannot load lexicon".to_string())?;
+    let overlay = fs::read_to_string(dir.join("overlay-add.tsv")).map_err(|e| format!("cannot read overlay ({:?})", e.kind()))?;
+    let capped = CappedLexicon::new(lex.clone(), &overlay, &lm);
+
+    let read = |p: &Path| fs::read_to_string(p).map_err(|e| format!("cannot read file ({:?})", e.kind()));
+    // (display name, [(truth, reading)])
+    let (default_name, rows): (String, Vec<(String, Syls)>) = match (dev, rows_file, set.as_deref()) {
+        (Some(n), None, None) => {
+            let mut files: Vec<PathBuf> = fs::read_dir(root().join("eval/dev"))
+                .map_err(|e| format!("cannot read directory ({:?})", e.kind()))?
+                .filter_map(|e| e.ok().map(|e| e.path()))
+                .filter(|p| p.extension().is_some_and(|x| x == "txt"))
+                .collect();
+            files.sort();
+            let mut rows = Vec::new();
+            for f in files {
+                rows.extend(three_field_rows(&read(&f)?));
+            }
+            rows.truncate(n);
+            (format!("dev{n}"), rows)
+        }
+        (None, Some(f), None) => {
+            let mut rows = three_field_rows(&read(Path::new(&f))?);
+            if let Some(n) = limit.filter(|&n| n != 0) {
+                rows.truncate(n);
+            }
+            (Path::new(&f).file_name().map_or(String::new(), |s| s.to_string_lossy().into_owned()), rows)
+        }
+        (None, None, Some("holdout")) => {
+            // Summary line only: the sentences must never reach the output.
+            if dump.is_some() {
+                return Err("--dump is not allowed with --set holdout".into());
+            }
+            let (_, rows) = load_set(&lex, "holdout")?;
+            let rows = rows
+                .iter()
+                .map(|r| Ok((r.sent.clone(), row_syllables(&lex, r).map_err(|e| e.to_string())?)))
+                .collect::<Result<Vec<_>, String>>()?;
+            ("holdout".to_string(), rows)
+        }
+        _ => return Err("need exactly one of --dev, --rows, --set holdout".into()),
+    };
+    let name = name.unwrap_or(default_name);
+    let mut dump = match dump {
+        Some(f) => Some(std::io::BufWriter::new(fs::File::create(f).map_err(|e| format!("cannot create dump ({:?})", e.kind()))?)),
+        None => None,
+    };
+    let (mut top1, mut o64, mut firsts) = (0usize, 0usize, Vec::new());
+    for (i, (truth, syls)) in rows.iter().enumerate() {
+        let nb = decode(&capped, syls, &lm, prof, BEAM_S1).map_err(|e| e.to_string())?;
+        let mut surf: Vec<String> = nb.iter().map(|(_, ws)| ws.concat()).collect();
+        let t = len.apply(truth);
+        top1 += (len.apply(&surf[0]) == t) as usize;
+        o64 += surf.iter().any(|s| len.apply(s) == t) as usize;
+        if let Some(d) = dump.as_mut() {
+            for (r, ((sc, _), s)) in nb.iter().zip(&surf).enumerate() {
+                writeln!(d, "{}\t{}\t{s}\t{sc:?}", i + 1, r + 1).map_err(|_| "cannot write dump".to_string())?;
+            }
+        }
+        firsts.push(surf.swap_remove(0));
+    }
+    if let Some(mut d) = dump {
+        d.flush().map_err(|_| "cannot write dump".to_string())?;
+    }
+    let sha = sha256_hex(firsts.join("\n").as_bytes());
+    println!("## {name}  lm-{profile_name}  {{'n': {}, 'top1': {top1}, 'oracle@64': {o64}, 'top1_sha256': '{sha}'}}", rows.len());
+    Ok(())
+}
+
 fn run() -> Result<(), String> {
     let len = load_lenient()?;
+    let all: Vec<String> = std::env::args().skip(1).collect();
+    if all.iter().any(|a| a == "--lm") {
+        return run_lm(&all, &len);
+    }
     let mut args = std::env::args().skip(1);
     if let (Some(a), Some(f), None) = (args.next(), args.next(), args.next()) {
         if a == "--lenient-dump" {
