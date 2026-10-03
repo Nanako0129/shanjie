@@ -22,7 +22,8 @@ cask "shanjie" do
   caveats <<~EOS
     After the first install, register and enable the input method:
       "$HOME/Library/Input Methods/善解輸入法.app/Contents/MacOS/shanjie" install
-    If it says the input mode list is not loaded yet, log out and log back in,
-    then run it again.
+    The first install usually needs a log out and log in before macOS accepts
+    the input method: if the command exits with 3, log out, log back in, and
+    run it again.
   EOS
 end
