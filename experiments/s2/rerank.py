@@ -9,6 +9,8 @@
 特徵：
   稠密：路徑總分、詞庫分數和、LM log10 機率和、詞數、單字詞數、疊加層詞數。
   稀疏：每個單字詞 w 的 U|w、L|前一詞|w、R|w|後一詞（句首句尾以 <s>、</s> 表示）。
+  字對（--pairs K，第 12 輪）：距離 1..K 的兩個字 P{d}|a|b。所有候選字數相同（同一串音節），
+     兩個候選的分數差只來自「碰到兩者不同位置」的字對，所以只算這些，不必展開整句。
 用法：python3 experiments/s2/rerank.py prep <名稱> <句子檔或 rows 檔> [--limit N] [--profile chat]
       python3 experiments/s2/rerank.py train <名稱>... --out <模型>
       python3 experiments/s2/rerank.py eval <模型> <名稱>...
@@ -95,7 +97,34 @@ def score(w, f):
     return sum(w.get(k, 0.0) * d[k] for k in DENSE) + sum(w.get(k, 0.0) for k in sp)
 
 
-def train(names, out, epochs=3):
+def pairs(s, pos, K):
+    """碰到 pos 中任一位置、距離 1..K 的字對特徵（同一對只算一次）。"""
+    out = set()
+    for i in pos:
+        for d in range(1, K + 1):
+            if i + d < len(s):
+                out.add((i, d))
+            if i - d >= 0:
+                out.add((i - d, d))
+    return [f"P{d}|{s[i]}|{s[i + d]}" for i, d in out]
+
+
+def diff_pos(a, b):
+    return [i for i, (x, y) in enumerate(zip(a, b)) if x != y]
+
+
+def best_of(w, cands, K):
+    """最高分的候選。K>0 時字對分數相對第一名計算（共同的字對互相抵銷）。"""
+    if not K:
+        return max(cands, key=lambda x: score(w, x[1]))
+    ref = cands[0][0]
+    def sc(c):
+        p = diff_pos(c[0], ref)
+        return score(w, c[1]) + sum(w.get(k, 0.0) for k in pairs(c[0], p, K)) - sum(w.get(k, 0.0) for k in pairs(ref, p, K))
+    return max(cands, key=sc)
+
+
+def train(names, out, epochs=3, K=0):
     data = [x for n in names for x in pickle.load(open(os.path.join(WORK, f"{n}.pkl"), "rb"))]
     w, acc, c = collections.defaultdict(float, {"total": 1.0}), collections.defaultdict(float), 1
     for ep in range(epochs):
@@ -103,12 +132,18 @@ def train(names, out, epochs=3):
         upd = 0
         for t, cands in data:
             tt = t.translate(LENIENT)
-            gold = next((f for s, f in cands if s.translate(LENIENT) == tt), None)
+            gold_s, gold = next(((s, f) for s, f in cands if s.translate(LENIENT) == tt), (None, None))
             if gold is None:
                 continue
-            best = max(cands, key=lambda x: score(w, x[1]))
+            best = best_of(w, cands, K)
             if best[0].translate(LENIENT) == tt:
                 c += 1; continue
+            if K:
+                p = diff_pos(gold_s, best[0])
+                for k in pairs(gold_s, p, K):
+                    w[k] += 1; acc[k] += c
+                for k in pairs(best[0], p, K):
+                    w[k] -= 1; acc[k] -= c
             for k in DENSE:
                 d = gold[0][k] - best[1][0][k]
                 w[k] += d; acc[k] += c * d
@@ -119,16 +154,18 @@ def train(names, out, epochs=3):
             upd += 1; c += 1
         print(f"epoch {ep}: {upd} updates", flush=True)
     avg = {k: w[k] - acc[k] / c for k in set(w) | set(acc)}
+    avg["__pairs__"] = K
     pickle.dump(avg, open(out, "wb"))
     print(f"features {len(avg)}; dense", {k: round(avg.get(k, 0), 4) for k in DENSE})
 
 
 def evaluate(model, names):
     w = pickle.load(open(model, "rb"))
+    K = w.pop("__pairs__", 0)
     for n in names:
         data = pickle.load(open(os.path.join(WORK, f"{n}.pkl"), "rb"))
         base = sum(c[0][0].translate(LENIENT) == t.translate(LENIENT) for t, c in data)
-        new = sum(max(c, key=lambda x: score(w, x[1]))[0].translate(LENIENT) == t.translate(LENIENT) for t, c in data)
+        new = sum(best_of(w, c, K)[0].translate(LENIENT) == t.translate(LENIENT) for t, c in data)
         print(f"{n}: {len(data)} 句  原排序 {base}  重排 {new}  ({new - base:+d})")
 
 
@@ -139,12 +176,13 @@ def main():
     p.add_argument("--profile", default="chat")
     t = sub.add_parser("train"); t.add_argument("names", nargs="+"); t.add_argument("--out", required=True)
     t.add_argument("--epochs", type=int, default=3)
+    t.add_argument("--pairs", type=int, default=0, help="字對特徵的最大距離（0＝不用）")
     e = sub.add_parser("eval"); e.add_argument("model"); e.add_argument("names", nargs="+")
     a = ap.parse_args()
     if a.cmd == "prep":
         prep(a.name, a.path, a.limit, a.profile)
     elif a.cmd == "train":
-        train(a.names, a.out, a.epochs)
+        train(a.names, a.out, a.epochs, a.pairs)
     else:
         evaluate(a.model, a.names)
 
