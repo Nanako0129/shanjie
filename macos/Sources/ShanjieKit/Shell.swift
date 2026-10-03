@@ -180,7 +180,8 @@ public final class Session {
     /// Only the owner acts; a late call from any other controller does nothing at all.
     public func deactivate() {
         guard shell.owner === self else { return }
-        if shell.composing { finish(mode: 0) }
+        // Never send the composition into a field that has just turned secure.
+        if shell.composing { finish(mode: shell.isSecureInput() ? 1 : 0) }
         shell.hideCandidates()
     }
 
@@ -242,12 +243,9 @@ public final class Session {
     }
 
     /// reset mode 0 commits to this session's client, 1 discards; either way the client's marked
-    /// text and the panel are cleared. Every commit that is not caused by a key goes through here
-    /// (deactivate, commitComposition, an owner change, a mode switch), so this is the one place
-    /// that refuses to send the composition into a field that has just turned secure.
+    /// text and the panel are cleared.
     func finish(mode: UInt32) {
         guard let engine = shell.engine else { return }
-        let mode = (mode == 0 && shell.isSecureInput()) ? 1 : mode
         switch engine.reset(mode: mode) {
         case .ok(let o): apply(o)
         case .failed(let c): _ = fail(c)

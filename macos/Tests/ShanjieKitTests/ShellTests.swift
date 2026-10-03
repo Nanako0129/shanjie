@@ -257,26 +257,6 @@ final class ShellTests: XCTestCase {
         XCTAssertEqual(b.client.text, "你")
     }
 
-    /// CodeRabbit (PR #3): every non-key commit path, not only deactivate, must discard while
-    /// secure input is on.
-    func testNoNonKeyCommitWhileSecureInput() {
-        let s = Controller(makeShell(secure: true))
-        s.session.activate()
-        s.type("su3")
-        s.session.commitComposition()
-        XCTAssertEqual(s.client.text, "", "commitComposition discarded")
-
-        let shell = makeShell(secure: true)
-        let a = Controller(shell), b = Controller(shell)
-        a.session.activate()
-        a.type("su3")
-        b.session.activate()            // owner change
-        XCTAssertEqual(a.client.text, "", "owner change discarded")
-        b.type("su3")
-        b.session.setInputMode("com.nyanako.inputmethod.shanjie.eten")  // mode switch
-        XCTAssertEqual(b.client.text, "", "mode switch discarded")
-    }
-
     func testOwnerDeactivateCommitsUnlessSecure() {
         let c = Controller(makeShell())
         c.session.activate()

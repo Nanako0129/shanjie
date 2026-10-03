@@ -20,18 +20,41 @@ SRC="$(cd "$SRC" && pwd -P)"
 [ "$SRC" != "$(cd "$HOME/Library/Input Methods/shanjie.app" 2>/dev/null && pwd -P)" ] \
   || fail "give the downloaded or built app, not the installed copy"
 
-# 1. Stage the new bundle next to the destination first (same volume, so step 2 is a rename). If
-#    the copy fails, the installed bundle is untouched. The staging name is not *.app, so the
-#    input method system never sees it. These two literal paths are the only ones rm -rf touches.
+# The only paths rm -rf or mv ever touch, written out literally: the installed bundle, the staged
+# copy and the set-aside previous bundle. The two helper names are not *.app, so the input method
+# system never treats them as input methods.
+cleanup() {
+  # Interrupted or failed between setting the old bundle aside and moving the new one in: put the
+  # old one back, so the user is never left without an installed copy.
+  if [ ! -e "$HOME/Library/Input Methods/shanjie.app" ] && [ -e "$HOME/Library/Input Methods/.shanjie-old" ]; then
+    mv "$HOME/Library/Input Methods/.shanjie-old" "$HOME/Library/Input Methods/shanjie.app" || true
+  fi
+  rm -rf "$HOME/Library/Input Methods/.shanjie-staging"
+}
+trap cleanup EXIT
+
+# 1. Stage the new bundle next to the destination (same volume). A failed copy leaves the installed
+#    bundle untouched.
 mkdir -p "$HOME/Library/Input Methods"
-rm -rf "$HOME/Library/Input Methods/.shanjie-staging"
-trap 'rm -rf "$HOME/Library/Input Methods/.shanjie-staging"' EXIT
+rm -rf "$HOME/Library/Input Methods/.shanjie-staging" "$HOME/Library/Input Methods/.shanjie-old"
 ditto "$SRC" "$HOME/Library/Input Methods/.shanjie-staging"
 
-# 2. Replace: remove the old bundle, then rename the staged copy into place.
-rm -rf "$HOME/Library/Input Methods/shanjie.app"
-[ ! -e "$HOME/Library/Input Methods/shanjie.app" ] || fail "the old bundle could not be removed"
+# 2. Swap by renames: set the old bundle aside, move the new one in (cleanup restores the old one if
+#    this fails), then delete the old one. A failure to delete it leaves .shanjie-old behind with a
+#    warning; the new bundle is already in place.
+if [ -e "$HOME/Library/Input Methods/shanjie.app" ]; then
+  mv "$HOME/Library/Input Methods/shanjie.app" "$HOME/Library/Input Methods/.shanjie-old"
+fi
 mv "$HOME/Library/Input Methods/.shanjie-staging" "$HOME/Library/Input Methods/shanjie.app"
+rm -rf "$HOME/Library/Input Methods/.shanjie-old" \
+  || echo "warning: could not delete the previous bundle at ~/Library/Input Methods/.shanjie-old" >&2
+
+# Test hook (scripts/test-install-ime.sh, with HOME pointed at a temporary directory): stop after the
+# file swap, before touching running processes or the input source registry.
+if [ "${SHANJIE_INSTALL_FILES_ONLY:-}" = 1 ]; then
+  echo "files only: installed to $HOME/Library/Input Methods/shanjie.app"
+  exit 0
+fi
 
 # 3. Stop the running old copy, matched by its full path; none running is fine.
 rc=0

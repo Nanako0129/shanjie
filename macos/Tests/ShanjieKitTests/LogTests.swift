@@ -10,16 +10,31 @@ import XCTest
 final class LogTests: XCTestCase {
     /// While stdout/stderr are captured, an XCTest issue (from this test or any helper, such as
     /// FakeClient's replacement-range check) would print its message, typed text included, into the
-    /// capture. Issues are held during the capture and recorded once it has ended.
-    private var holdIssues: [XCTIssue]?
+    /// capture. Issues are held during the capture and recorded once it has ended. XCTest may record
+    /// from any thread, so the override is nonisolated and the holder is lock-protected.
+    private let issueLock = NSLock()
+    nonisolated(unsafe) private var heldIssues: [XCTIssue]?
 
-    override func record(_ issue: XCTIssue) {
-        if holdIssues != nil { holdIssues!.append(issue) } else { super.record(issue) }
+    nonisolated override func record(_ issue: XCTIssue) {
+        issueLock.lock()
+        if heldIssues != nil {
+            heldIssues!.append(issue)
+            issueLock.unlock()
+            return
+        }
+        issueLock.unlock()
+        super.record(issue)
+    }
+
+    private func holdIssues() {
+        issueLock.lock(); heldIssues = []; issueLock.unlock()
     }
 
     private func releaseIssues() {
-        let held = holdIssues ?? []
-        holdIssues = nil
+        issueLock.lock()
+        let held = heldIssues ?? []
+        heldIssues = nil
+        issueLock.unlock()
         held.forEach { super.record($0) }
     }
 
@@ -47,11 +62,10 @@ final class LogTests: XCTestCase {
         // Negative actions, with this process's stdout and stderr captured too: in a process that
         // has a stderr (a test runner, unlike the launchd-started input method), NSLog and print
         // write there instead of to the unified log, so the log stream alone would miss them.
-        // Nothing between StdCapture() and std.finish() may assert: a failing XCTest assertion prints
-        // its message, which here would carry the typed text into the captured stderr and turn into a
-        // second, misleading "reached stdout or stderr" failure. Outcomes are recorded and asserted later.
+        // Issues raised while stdout/stderr are captured are held (record(_:) above) so their
+        // messages cannot carry typed text into the capture; they are recorded right after it.
         let resources = try XCTUnwrap(TestData.resources())
-        holdIssues = []                                 // see record(_:) below
+        holdIssues()
         let std = StdCapture()
         defer { _ = std.finish(); releaseIssues() }  // an early exit must neither leave the pipe nor lose held issues
         let stdProbe = "shanjie-std-probe-\(nonce)"
@@ -61,29 +75,25 @@ final class LogTests: XCTestCase {
         c.session.activate()                            // profile from a marked bundle ID
         c.type(Row10.standardKeys)
         c.press(Keys.enter)                             // commits the marker sentence
-        let typedRow10 = c.client.text == Row10.formal  // the typing path really ran
+        XCTAssertEqual(c.client.text, Row10.formal, "the typing path really ran")
         c.type("su3 ")
-        let candidateShown = c.panel.items.first
-        if let first = candidateShown { c.session.candidateSelected(first) }   // mouse selection
-        let rejected = !c.session.send(ShanjieKey(kind: 99, ch: 0, modifiers: 0))  // non-zero code
+        let first = c.panel.items.first                 // optional, not XCTUnwrap: no throw while captured
+        XCTAssertNotNil(first, "no candidate was shown for the mouse-selection path")
+        if let first { c.session.candidateSelected(first) }   // mouse selection
+        XCTAssertFalse(c.session.send(ShanjieKey(kind: 99, ch: 0, modifiers: 0)))  // non-zero code
         c.type("su3cl3")
         c.session.deactivate()                          // commits 你好
-        let committedOnDeactivate = c.client.text.hasSuffix("你好")
+        XCTAssertTrue(c.client.text.hasSuffix("你好"), "deactivate did not commit the composition")
         c.session.activate()
         c.type("su3")
         c.session.setInputMode("com.nyanako.inputmethod.shanjie.eten") // mode switch commits and rebuilds
         let broken = FileManager.default.temporaryDirectory.appendingPathComponent(pathMarker, isDirectory: true)
         let failed = Shell(resources: broken, panel: FakePanel(), isSecureInput: { false })  // engine_new fails on a marked path
-        let engineFailed = failed.engine == nil
+        XCTAssertNil(failed.engine, "the marked data path did not fail engine creation")
 
         let stdText = std.finish()
         releaseIssues()
         XCTAssertTrue(stdText.contains(stdProbe), "the stdout/stderr capture is not connected")
-        XCTAssertTrue(typedRow10, "the typing path did not commit row 10")
-        XCTAssertNotNil(candidateShown, "no candidate was shown for the mouse-selection path")
-        XCTAssertTrue(rejected, "the non-zero return code path was not taken")
-        XCTAssertTrue(committedOnDeactivate, "deactivate did not commit the composition")
-        XCTAssertTrue(engineFailed, "the marked data path did not fail engine creation")
 
         // End marker: a different one, same Logger and level; the capture runs until it is seen.
         let ended = capture.wait(for: end, timeout: 10) {
@@ -226,6 +236,7 @@ final class StdCapture: @unchecked Sendable {
         let rest = pipe.fileHandleForReading.readDataToEndOfFile()
         lock.lock()
         defer { lock.unlock() }
-        return String(decoding: buffer + rest, as: UTF8.self)
+        buffer.append(rest)   // so a repeat call returns the same text
+        return String(decoding: buffer, as: UTF8.self)
     }
 }
