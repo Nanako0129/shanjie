@@ -8,6 +8,8 @@ use std::fmt;
 
 pub const BEAM: usize = 32;
 pub const PER_KEY: usize = 12;
+/// S1 candidate path (PLAN S1): 64 candidates need a beam of at least 64. S0 BEAM stays for `unigram`/golden.
+pub const BEAM_S1: usize = 64;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Error {
@@ -15,6 +17,8 @@ pub enum Error {
     EmptyLexicon,
     NoPath { len: usize },
     MissingSeparator { line_len: usize },
+    BadOverlayRow { line_len: usize },
+    OverlayDuplicate { word_len: usize },
 }
 
 impl fmt::Display for Error {
@@ -25,6 +29,10 @@ impl fmt::Display for Error {
             Error::NoPath { len } => write!(f, "no decode path (input length {len})"),
             Error::MissingSeparator { line_len } => {
                 write!(f, "missing separator (line length {line_len})")
+            }
+            Error::BadOverlayRow { line_len } => write!(f, "bad overlay row (line length {line_len})"),
+            Error::OverlayDuplicate { word_len } => {
+                write!(f, "overlay duplicates a base entry (word length {word_len})")
             }
         }
     }
@@ -41,6 +49,11 @@ pub struct Lexicon {
 
 impl Lexicon {
     pub fn parse(text: &str) -> Result<Lexicon, Error> {
+        Self::parse_with(text, None)
+    }
+
+    /// Base parse, then overlay rows `reading\tword\tscore\ttag` appended in file order, then one stable sort.
+    pub fn parse_with(text: &str, overlay: Option<&str>) -> Result<Lexicon, Error> {
         let mut by_reading: HashMap<Syls, Vec<(String, f64)>> = HashMap::new();
         let mut by_word: HashMap<String, (Syls, f64)> = HashMap::new();
         for line in text.lines() {
@@ -60,6 +73,27 @@ impl Lexicon {
                 .parse()
                 .map_err(|_| Error::BadScore { token_len: parts[2].chars().count() })?;
             by_reading.entry(syls.clone()).or_default().push((word.to_string(), score));
+            match by_word.get(word) {
+                Some((_, s)) if !(score > *s) => {}
+                _ => {
+                    by_word.insert(word.to_string(), (syls, score));
+                }
+            }
+        }
+        for line in overlay.unwrap_or("").lines() {
+            let bad = || Error::BadOverlayRow { line_len: line.chars().count() };
+            let parts: Vec<&str> = line.split('\t').collect();
+            if parts.len() != 4 {
+                return Err(bad());
+            }
+            let syls: Syls = parts[0].split('-').map(String::from).collect();
+            let word = parts[1];
+            let score: f64 = parts[2].parse().map_err(|_| bad())?;
+            let list = by_reading.entry(syls.clone()).or_default();
+            if list.iter().any(|(w, _)| w == word) {
+                return Err(Error::OverlayDuplicate { word_len: word.chars().count() });
+            }
+            list.push((word.to_string(), score));
             match by_word.get(word) {
                 Some((_, s)) if !(score > *s) => {}
                 _ => {
@@ -233,6 +267,15 @@ pub fn decode(
     syls: &[String],
     learner: &mut dyn Learner,
 ) -> Result<Vec<(f64, Vec<String>)>, Error> {
+    decode_beam(lex, syls, learner, BEAM)
+}
+
+pub fn decode_beam(
+    lex: &Lexicon,
+    syls: &[String],
+    learner: &mut dyn Learner,
+    beam: usize,
+) -> Result<Vec<(f64, Vec<String>)>, Error> {
     let n = syls.len();
     // hyps[i]: (score, surface, words)
     let mut hyps: Vec<Vec<(f64, String, Vec<String>)>> = vec![Vec::new(); n + 1];
@@ -271,7 +314,7 @@ pub fn decode(
         }
         // Stable descending sort == heapq.nlargest tie behavior.
         cand.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
-        cand.truncate(BEAM);
+        cand.truncate(beam);
         hyps[i] = cand;
     }
     let out = std::mem::take(&mut hyps[n]);

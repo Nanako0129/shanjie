@@ -154,3 +154,26 @@ fn r2_errors_never_contain_input() {
 fn lex_err_text(s: &str) -> String {
     Lexicon::parse(s).err().map(|e| e.to_string()).unwrap_or_default()
 }
+
+#[test]
+fn overlay_duplicate_of_base_entry_is_error() {
+    let e = Lexicon::parse_with("a 甲 -1.0\n", Some("a\t甲\t-2.0\twikt\n")).err().unwrap();
+    assert_eq!(e, Error::OverlayDuplicate { word_len: 1 });
+    assert!(!e.to_string().contains('甲'));
+}
+
+#[test]
+fn no_overlay_parse_is_identical() {
+    let t = "a 甲 -1.0\na 乙 -1.0\na-b 甲乙 -2.0\n";
+    let (x, y) = (Lexicon::parse(t).unwrap(), Lexicon::parse_with(t, None).unwrap());
+    assert_eq!(x.by_reading, y.by_reading);
+    assert_eq!(x.by_word, y.by_word);
+    assert_eq!(x.max_len, y.max_len);
+}
+
+#[test]
+fn overlay_tie_sorts_base_first_then_file_order() {
+    let l = Lexicon::parse_with("a 甲 -1.0\na 丙 -3.0\n", Some("a\t乙\t-1.0\twikt\na\t丁\t-1.0\twikt\na\t戊\t-0.5\twikt\n")).unwrap();
+    let a: Vec<&str> = l.by_reading[&v(&["a"])].iter().map(|(w, _)| w.as_str()).collect();
+    assert_eq!(a, ["戊", "甲", "乙", "丁", "丙"]);
+}

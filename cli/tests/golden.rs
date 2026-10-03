@@ -9,7 +9,7 @@ fn run(args: &[&str]) -> String {
 #[test]
 fn matches_golden_byte_for_byte() {
     let golden = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../eval/golden/unigram.txt")).unwrap();
-    assert_eq!(run(&["--set", "trap", "daily", "moedict", "--learn-sim"]), golden);
+    assert_eq!(run(&["--set", "trap", "daily", "moedict", "--learn-sim", "--no-overlay"]), golden);
 }
 
 #[test]

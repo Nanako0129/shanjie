@@ -116,6 +116,40 @@ pub fn evaluate(
     ))
 }
 
+/// S1 path (beam 64): the `extra` line payload and the 1-based rows missed at @64.
+pub fn s1_extra(lex: &Lexicon, rows: &[Row], oov_words: &[String]) -> Result<(String, String, Vec<usize>), Error> {
+    let (mut o16, mut o64, mut oov_n, mut oov_ok, mut oov_o64) = (0usize, 0usize, 0usize, 0usize, 0usize);
+    let mut misses = Vec::new();
+    for (i, r) in rows.iter().enumerate() {
+        let nbest = decode_beam(lex, &row_syllables(lex, r)?, &mut NoLearning, BEAM_S1)?;
+        let texts: Vec<String> = nbest.iter().map(|(_, w)| w.concat()).collect();
+        let (h16, h64) = (texts.iter().take(16).any(|t| *t == r.sent), texts.contains(&r.sent));
+        o16 += h16 as usize;
+        o64 += h64 as usize;
+        if !h64 {
+            misses.push(i + 1);
+        }
+        if oov_words.iter().any(|w| r.sent.contains(w.as_str())) {
+            oov_n += 1;
+            oov_ok += (texts[0] == r.sent) as usize;
+            oov_o64 += h64 as usize;
+        }
+    }
+    let f = |a: usize, b: usize| if b == 0 { 0.0 } else { a as f64 / b as f64 };
+    let n = rows.len();
+    Ok((
+        format!(
+            "{{'oracle@16': {}, 'oracle@64': {}, 'oov_n': {oov_n}, 'oov_sent_acc': {}, 'oov_oracle@64': {}}}",
+            pyround(f(o16, n), 3),
+            pyround(f(o64, n), 3),
+            pyround(f(oov_ok, oov_n), 3),
+            pyround(f(oov_o64, oov_n), 3)
+        ),
+        format!("   counts: oracle@16 {o16}/{n}, oracle@64 {o64}/{n}, oov_sent_acc {oov_ok}/{oov_n}, oov_oracle@64 {oov_o64}/{oov_n}"),
+        misses,
+    ))
+}
+
 /// `## 讀音檢查` payload: (rows with a confirmed reading, rows where to_syllables disagrees).
 pub fn check_readings(lex: &Lexicon, rows: &[Row]) -> (usize, usize) {
     let with: Vec<&Row> = rows.iter().filter(|r| r.reading.is_some()).collect();
