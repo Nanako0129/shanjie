@@ -9,16 +9,28 @@
  *  - A handle is not thread-safe: make every call on one thread (the IMK main thread).
  *  - Any non-zero return: treat the key as not handled (pass it through) and do not record it.
  *
- * Return codes: 0 success, 1 a required pointer is NULL, 2 invalid input (data_dir not UTF-8, ch not
- * a Unicode scalar, kind / layout / mode out of range), 3 data load failed, 4 internal error (caught
- * panic or decode/encode error; the engine has already been reset in discard mode).
+ * Return codes: 0 success, 1 a required pointer is NULL, 2 invalid input (data_dir or LM path not
+ * UTF-8, ch not a Unicode scalar, kind / layout / mode / profile out of range), 3 data load failed
+ * (including an unreadable or malformed LM file), 4 internal error (caught panic or decode/encode
+ * error; the engine has already been reset in discard mode). shanjie_engine_load_lm failing leaves the
+ * LM state as it was (no LM, or the previously loaded one).
  *
  * Memory and lifetime:
  *  - On a non-zero return, *out is set to NULL (when out itself is non-NULL) and nothing is allocated.
  *  - shanjie_engine_free(NULL) and shanjie_output_free(NULL) do nothing. Freeing twice, or freeing a
  *    pointer this library did not return, is undefined behaviour.
  *  - A ShanjieOutput owns copies of all its strings and of the candidates array; they stay valid
- *    until shanjie_output_free, regardless of later engine_key / engine_reset / engine_free calls.
+ *    until shanjie_output_free, regardless of later engine_key / engine_reset / engine_set_profile /
+ *    engine_load_lm / engine_free calls.
+ *
+ * Language model (S2c):
+ *  - The default profile is chat. The shell picks the profile from the frontmost app (S3b); the core
+ *    keeps no app identity. A profile set before any LM is loaded is remembered and applies once loaded.
+ *  - Load the LM once at startup while the composition is empty: loading does not recompute the
+ *    current display; the next change to the composition decodes with the new model.
+ *  - shanjie_engine_reset (both modes) and the automatic reset after code 4 clear the composition only;
+ *    the loaded LM and the current profile are kept.
+ *  - The logging rules above apply to set_profile snapshots too; never log the LM path either.
  */
 #ifndef SHANJIE_H
 #define SHANJIE_H
@@ -49,6 +61,9 @@ void    shanjie_engine_free(ShanjieEngine *engine);
 int32_t shanjie_engine_key(ShanjieEngine *engine, ShanjieKey key, ShanjieOutput **out);
 int32_t shanjie_engine_reset(ShanjieEngine *engine, uint32_t mode, ShanjieOutput **out); // mode 0 commit then clear, 1 discard
 void    shanjie_output_free(ShanjieOutput *output);
+// S2c (docs/PLAN.md S2c)
+int32_t shanjie_engine_load_lm(ShanjieEngine *engine, const char *path);               // does not change the current display
+int32_t shanjie_engine_set_profile(ShanjieEngine *engine, uint32_t profile, ShanjieOutput **out); // 0 chat (default), 1 formal; recomputes and returns a snapshot (handled 1, commit "")
 
 #ifdef __cplusplus
 }

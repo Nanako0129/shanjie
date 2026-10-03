@@ -6,6 +6,7 @@
 compile_error!("C ABI requires panic=unwind");
 
 use crate::engine::{Engine, EngineError, Key, KeyKind, Layout, Output, ResetMode};
+use crate::lm::Profile;
 use std::ffi::{c_char, CStr, CString};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::Path;
@@ -238,6 +239,72 @@ pub unsafe extern "C" fn shanjie_engine_reset(
         let o = unsafe { &mut (*engine).0 }.reset(mode);
         // SAFETY: `out` checked non-NULL above.
         unsafe { emit(o, out) }
+    });
+    if rc == SHANJIE_ERR_INTERNAL {
+        // SAFETY: forwarded caller contract.
+        unsafe { discard(engine) };
+    }
+    rc
+}
+
+/// S2c. Loads the bigram model at `path` with `data_dir/overlay-add.tsv` of this engine. Does not
+/// recompute the composition display. Any failure leaves the previous LM state (none or the old model).
+///
+/// # Safety
+/// `engine` is NULL or a live handle; `path` is NULL or a NUL-terminated string.
+#[no_mangle]
+pub unsafe extern "C" fn shanjie_engine_load_lm(engine: *mut ShanjieEngine, path: *const c_char) -> i32 {
+    let rc = guard(|| {
+        if engine.is_null() || path.is_null() {
+            return SHANJIE_ERR_NULL;
+        }
+        // SAFETY: non-NULL, NUL-terminated per the caller contract.
+        let Ok(path) = unsafe { CStr::from_ptr(path) }.to_str() else {
+            return SHANJIE_ERR_INVALID;
+        };
+        // SAFETY: live handle, single-threaded use (§6).
+        let e = unsafe { &mut (*engine).0 };
+        match e.load_lm(Path::new(path)) {
+            Ok(()) => SHANJIE_OK,
+            Err(EngineError::LoadFailed) => SHANJIE_ERR_LOAD,
+            Err(EngineError::Internal) => SHANJIE_ERR_INTERNAL,
+        }
+    });
+    if rc == SHANJIE_ERR_INTERNAL {
+        // SAFETY: forwarded caller contract.
+        unsafe { discard(engine) };
+    }
+    rc
+}
+
+/// S2c. Profile 0 chat, 1 formal; recomputes the composition and returns its snapshot (`handled = 1`,
+/// empty commit). Out-of-range profile changes nothing.
+///
+/// # Safety
+/// `engine` is NULL or a live handle; `out` is NULL or valid for one pointer write.
+#[no_mangle]
+pub unsafe extern "C" fn shanjie_engine_set_profile(
+    engine: *mut ShanjieEngine,
+    profile: u32,
+    out: *mut *mut ShanjieOutput,
+) -> i32 {
+    let rc = guard(|| {
+        // SAFETY: forwarded caller contract.
+        if !unsafe { clear_out(out) } || engine.is_null() {
+            return SHANJIE_ERR_NULL;
+        }
+        let Some(profile) = Profile::from_code(profile) else { return SHANJIE_ERR_INVALID };
+        // SAFETY: live handle, single-threaded use (§6).
+        let e = unsafe { &mut (*engine).0 };
+        match e.set_profile(profile) {
+            Ok(o) => {
+                #[cfg(test)]
+                tests::inject(&o);
+                // SAFETY: `out` checked non-NULL above.
+                unsafe { emit(o, out) }
+            }
+            Err(_) => SHANJIE_ERR_INTERNAL,
+        }
     });
     if rc == SHANJIE_ERR_INTERNAL {
         // SAFETY: forwarded caller contract.
@@ -573,5 +640,151 @@ mod tests {
         let (ok, out, _) = run_child("child_errors", false);
         assert!(ok, "error-code child failed");
         assert!(out.contains("1 passed"), "child test actually ran");
+    }
+
+    // ---- S2c: load_lm / set_profile ----
+
+    /// SJLM0001 (tools/build_lm.py): vocab `<s> </s> 心 鑫`, N 10, eos 4, D 0.75; one context `<s>`
+    /// (total 4: 心 4). With the lexicon of `child_lm` (鑫 -1.0, 心 -4.0 for ㄒㄧㄣ) the single-syllable
+    /// path picks 鑫 without LM and with chat (λ 0.5), 心 with formal (λ 0.7).
+    fn tiny_lm() -> Vec<u8> {
+        let mut b = b"SJLM0001".to_vec();
+        b.extend(4u32.to_le_bytes());
+        b.extend(10u64.to_le_bytes());
+        b.extend(4u64.to_le_bytes());
+        b.extend(0.75f64.to_le_bytes());
+        for w in ["<s>", "</s>", "心", "鑫"] {
+            b.extend((w.len() as u16).to_le_bytes());
+            b.extend(w.as_bytes());
+        }
+        for u in [0u64, 0, 4, 1] {
+            b.extend(u.to_le_bytes());
+        }
+        b.extend(1u32.to_le_bytes()); // contexts
+        b.extend(0u32.to_le_bytes()); // ctx id <s>
+        b.extend(4u64.to_le_bytes()); // ctx total
+        for o in [0u32, 1] {
+            b.extend(o.to_le_bytes());
+        }
+        b.extend(1u32.to_le_bytes()); // entries
+        b.extend(2u32.to_le_bytes()); // next 心
+        b.extend(4u32.to_le_bytes()); // count
+        b
+    }
+
+    /// Types ㄒㄧㄣ (`v u p space`); returns the preedit.
+    fn type_xin(e: *mut ShanjieEngine) -> String {
+        for c in ['v', 'u', 'p'] {
+            assert!(send(e, key(CHAR, c)).0 == 0, "typing");
+        }
+        let (rc, preedit, _) = send(e, key(SPACE, '\0'));
+        assert!(rc == 0, "typing");
+        preedit
+    }
+
+    /// Calls set_profile; returns (code, out was NULL, handled, preedit, commit) and frees the output.
+    fn profile(e: *mut ShanjieEngine, p: u32) -> (i32, bool, i32, String, String) {
+        let mut o: *mut ShanjieOutput = sentinel();
+        let rc = unsafe { shanjie_engine_set_profile(e, p, &mut o) };
+        if o.is_null() {
+            return (rc, true, 0, String::new(), String::new());
+        }
+        // SAFETY: test-only read of a live output.
+        let r = unsafe {
+            let s = |p| CStr::from_ptr(p).to_str().unwrap().to_string();
+            (rc, false, (*o).handled, s((*o).preedit), s((*o).commit))
+        };
+        unsafe { shanjie_output_free(o) };
+        r
+    }
+
+    #[test]
+    fn child_lm() {
+        if !is_child("child_lm") {
+            return;
+        }
+        let dir = tiny_dir("lm", "ㄒㄧㄣ 鑫 -1.0\nㄒㄧㄣ 心 -4.0\n".as_bytes());
+        let lm_path = dir.join("tiny.sjlm");
+        std::fs::write(&lm_path, tiny_lm()).unwrap();
+        let garbage = dir.join("garbage.sjlm");
+        std::fs::write(&garbage, b"SJLM0001 not a model").unwrap();
+        let c = |p: &Path| CString::new(p.to_str().unwrap()).unwrap();
+        let (lm_c, garbage_c, missing_c) = (c(&lm_path), c(&garbage), c(&dir.join("missing.sjlm")));
+        let bad_utf8 = CString::new(vec![0xffu8, 0xfe]).unwrap();
+        let e = new_engine(&dir, 0);
+        let enter = |e| send(e, key(ENTER, '\0')).2;
+
+        // No LM: unigram; set_profile is remembered but changes nothing yet.
+        assert!(type_xin(e) == "鑫", "unigram without LM");
+        let (rc, null, handled, preedit, commit) = profile(e, 1);
+        assert!(rc == 0 && !null && handled == 1 && preedit == "鑫" && commit.is_empty(), "profile without LM");
+        assert!(profile(e, 0).0 == 0, "back to chat");
+        assert!(enter(e) == "鑫", "commit without LM");
+
+        // load_lm codes 1, 2, 3; each leaves "no LM".
+        assert!(unsafe { shanjie_engine_load_lm(ptr::null_mut(), lm_c.as_ptr()) } == 1, "load engine NULL");
+        assert!(unsafe { shanjie_engine_load_lm(e, ptr::null()) } == 1, "load path NULL");
+        assert!(unsafe { shanjie_engine_load_lm(e, bad_utf8.as_ptr()) } == 2, "load non-UTF-8");
+        assert!(unsafe { shanjie_engine_load_lm(e, missing_c.as_ptr()) } == 3, "load missing file");
+        assert!(unsafe { shanjie_engine_load_lm(e, garbage_c.as_ptr()) } == 3, "load garbage file");
+        // An engine without data_dir is not reachable through the ABI (only `new` creates engines);
+        // the closest case is the overlay vanishing from data_dir after `new`.
+        std::fs::rename(dir.join("overlay-add.tsv"), dir.join("overlay.bak")).unwrap();
+        assert!(unsafe { shanjie_engine_load_lm(e, lm_c.as_ptr()) } == 3, "load without overlay");
+        std::fs::rename(dir.join("overlay.bak"), dir.join("overlay-add.tsv")).unwrap();
+        assert!(type_xin(e) == "鑫" && profile(e, 1).3 == "鑫", "failed loads left no LM");
+        assert!(profile(e, 0).0 == 0 && enter(e) == "鑫", "still unigram");
+
+        // Success: the display is not recomputed by the load itself; the next change uses the LM.
+        assert!(send(e, key(CHAR, 'v')).0 == 0, "typing");
+        assert!(unsafe { shanjie_engine_load_lm(e, lm_c.as_ptr()) } == 0, "load ok");
+        for c in ['u', 'p'] {
+            assert!(send(e, key(CHAR, c)).0 == 0, "typing");
+        }
+        assert!(send(e, key(SPACE, '\0')).1 == "鑫", "chat with LM");
+        let (rc, null, handled, preedit, commit) = profile(e, 1);
+        assert!(rc == 0 && !null && handled == 1 && preedit == "心" && commit.is_empty(), "formal snapshot");
+        assert!(enter(e) == "心", "formal commit");
+
+        // A failed load keeps the loaded model.
+        assert!(unsafe { shanjie_engine_load_lm(e, garbage_c.as_ptr()) } == 3, "garbage after success");
+        assert!(type_xin(e) == "心", "previous LM kept");
+
+        // set_profile codes 1, 2 (state unchanged).
+        let mut o: *mut ShanjieOutput = sentinel();
+        assert!(unsafe { shanjie_engine_set_profile(e, 0, ptr::null_mut()) } == 1, "profile out NULL");
+        assert!(unsafe { shanjie_engine_set_profile(ptr::null_mut(), 0, &mut o) } == 1 && o.is_null(), "profile engine NULL");
+        for p in [2, 7, u32::MAX] {
+            let (rc, null, ..) = profile(e, p);
+            assert!(rc == 2 && null, "profile out of range");
+        }
+        assert!(send(e, key(LEFT, '\0')).1 == "心", "invalid profile changed nothing");
+
+        // set_profile code 4 (injected panic): NULL out, composition discarded, LM and profile kept.
+        ARMED.with(|a| a.set(true));
+        let (rc, null, ..) = profile(e, 1);
+        assert!(rc == 4 && null, "panic maps to code 4 with NULL out");
+        let (rc, preedit, _) = send(e, key(LEFT, '\0'));
+        assert!(rc == 0 && preedit.is_empty(), "composition discarded after code 4");
+        assert!(type_xin(e) == "心", "LM and formal kept after code 4");
+
+        // reset keeps LM and profile.
+        for mode in [0, 1] {
+            let mut o = ptr::null_mut();
+            assert!(unsafe { shanjie_engine_reset(e, mode, &mut o) } == 0, "reset");
+            unsafe { shanjie_output_free(o) };
+            assert!(type_xin(e) == "心", "reset keeps LM and profile");
+        }
+        assert!(profile(e, 0).3 == "鑫", "chat again");
+        unsafe { shanjie_engine_free(e) };
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn load_lm_and_set_profile_codes() {
+        let (ok, out, err) = run_child("child_lm", false);
+        assert!(ok, "LM child failed");
+        assert!(out.contains("1 passed"), "child test actually ran");
+        assert!(!out.contains("shanjie-ffi-") && !err.contains("shanjie-ffi-"), "a path leaked");
     }
 }

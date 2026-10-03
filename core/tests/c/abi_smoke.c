@@ -1,4 +1,4 @@
-/* S3a contract §7.4: compile and link shanjie.h against libcore.a. Usage: abi_smoke <data_dir>.
+/* S3a contract §7.4: compile and link shanjie.h against libcore.a. Usage: abi_smoke <data_dir> <lm_path>.
  * On failure prints only the check number (never string contents) and exits 1. */
 #include "shanjie.h"
 
@@ -17,14 +17,28 @@ static int str_eq(const char *a, const char *b) {
 static ShanjieKey ch_key(char c) { ShanjieKey k = {1u, (uint32_t)(unsigned char)c, 0u}; return k; }
 static ShanjieKey kind_key(uint32_t kind) { ShanjieKey k = {kind, 0u, 0u}; return k; }
 
+/* ' ' in a key string is the space bar (tone 1); everything else is a CHAR key. */
+static ShanjieKey key_of(char c) { return c == ' ' ? kind_key(2u) : ch_key(c); }
+
 /* Send keys, freeing every output. */
 static int type(ShanjieEngine *e, const char *keys) {
   for (; *keys; keys++) {
     ShanjieOutput *o = 0;
-    if (shanjie_engine_key(e, ch_key(*keys), &o) != 0 || o == 0) return 0;
+    if (shanjie_engine_key(e, key_of(*keys), &o) != 0 || o == 0) return 0;
     shanjie_output_free(o);
   }
   return 1;
+}
+
+/* Send keys; returns the output of the last key (caller frees), or NULL on any failure. */
+static ShanjieOutput *type_last(ShanjieEngine *e, const char *keys) {
+  ShanjieOutput *o = 0;
+  for (; *keys; keys++) {
+    if (o) shanjie_output_free(o);
+    o = 0;
+    if (shanjie_engine_key(e, key_of(*keys), &o) != 0 || o == 0) return 0;
+  }
+  return o;
 }
 
 /* Returns 0 on success, otherwise a check number (base + n). */
@@ -58,11 +72,77 @@ static int run(const char *dir, uint32_t layout, const char *nihao, const char *
   return 0;
 }
 
+/* S2c (docs/PLAN.md S2c acceptance 6): dev302 row 10, reading
+ *   ㄑㄧˊ ㄓㄨㄥ ㄅㄠˋ ㄍㄠˋ ㄇㄧㄥˊ ㄊㄧㄢ ㄧㄠˋ ㄐㄧㄠ
+ * standard keys `fu6 5j/_ 1l4 el4 au/6 wu0_ ul4 rul_` (_ = space bar). Expected top-1:
+ *   no LM (unigram)  其中報告明天要教
+ *   chat             其中報告明天要交
+ *   formal           期中報告明天要交
+ * (chat / formal from eval/golden/s2-lm-dev302-top1.tsv row 10, i.e. lm_eval.py --dump; unigram is what
+ * an engine without LM commits, checked by 302 below.) */
+#define ROW10 "fu65j/ 1l4el4au/6wu0 ul4rul "
+#define UNIGRAM "\xe5\x85\xb6\xe4\xb8\xad\xe5\xa0\xb1\xe5\x91\x8a\xe6\x98\x8e\xe5\xa4\xa9\xe8\xa6\x81\xe6\x95\x99"
+#define CHAT "\xe5\x85\xb6\xe4\xb8\xad\xe5\xa0\xb1\xe5\x91\x8a\xe6\x98\x8e\xe5\xa4\xa9\xe8\xa6\x81\xe4\xba\xa4"
+#define FORMAL "\xe6\x9c\x9f\xe4\xb8\xad\xe5\xa0\xb1\xe5\x91\x8a\xe6\x98\x8e\xe5\xa4\xa9\xe8\xa6\x81\xe4\xba\xa4"
+
+/* Press Enter; 1 when it is handled and commits `want` with an empty preedit. */
+static int enter_commits(ShanjieEngine *e, const char *want) {
+  ShanjieOutput *o = 0;
+  int ok;
+  if (shanjie_engine_key(e, kind_key(3u), &o) != 0 || o == 0) return 0;
+  ok = o->handled == 1 && str_eq(o->commit, want) && str_eq(o->preedit, "");
+  shanjie_output_free(o);
+  return ok;
+}
+
+/* Type the row; 1 when the preedit after the last key is `want`. */
+static int row_shows(ShanjieEngine *e, const char *want) {
+  ShanjieOutput *o = type_last(e, ROW10);
+  int ok = o != 0 && str_eq(o->preedit, want);
+  shanjie_output_free(o);
+  return ok;
+}
+
+static int run_lm(const char *dir, const char *lm, const char *missing) {
+  static ShanjieOutput dummy; /* non-NULL sentinel: proves *out is overwritten */
+  ShanjieEngine *e = 0;
+  ShanjieOutput *o = 0;
+  uint32_t mode;
+  CHECK(301, shanjie_engine_new(dir, 0, &e) == 0 && e != 0);
+  CHECK(302, row_shows(e, UNIGRAM) && enter_commits(e, UNIGRAM));
+  CHECK(303, shanjie_engine_load_lm(e, lm) == 0);
+  CHECK(304, row_shows(e, CHAT));
+  CHECK(305, shanjie_engine_set_profile(e, 1, &o) == 0 && o != 0);
+  CHECK(306, o->handled == 1 && str_eq(o->commit, ""));
+  CHECK(307, str_eq(o->preedit, FORMAL));
+  shanjie_output_free(o);
+  o = 0;
+  CHECK(308, enter_commits(e, FORMAL));
+  /* A failed load keeps the previous LM. */
+  CHECK(309, shanjie_engine_load_lm(e, missing) == 3);
+  CHECK(310, row_shows(e, FORMAL) && enter_commits(e, FORMAL));
+  /* Out-of-range profile: code 2, *out NULL, nothing changes. */
+  o = &dummy;
+  CHECK(311, shanjie_engine_set_profile(e, 7, &o) == 2 && o == 0);
+  /* Reset (both modes) keeps the LM and the formal profile. */
+  for (mode = 0; mode <= 1; mode++) {
+    int b = 312 + (int)mode * 3;
+    CHECK(b, type(e, "fu65j/ "));
+    CHECK(b + 1, shanjie_engine_reset(e, mode, &o) == 0 && o != 0);
+    shanjie_output_free(o);
+    o = 0;
+    CHECK(b + 2, row_shows(e, FORMAL) && enter_commits(e, FORMAL));
+  }
+  shanjie_engine_free(e);
+  return 0;
+}
+
 int main(int argc, char **argv) {
   int rc;
-  if (argc != 2) return 2;
+  if (argc != 3) return 2;
   rc = run(argv[1], 0, "su3cl3", "su3", 100);
   if (rc == 0) rc = run(argv[1], 1, "ne3hz3", "ne3", 200);
+  if (rc == 0) rc = run_lm(argv[1], argv[2], "/nonexistent/shanjie-missing.sjlm");
   shanjie_engine_free(0);
   shanjie_output_free(0);
   if (rc != 0) {

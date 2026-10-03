@@ -172,12 +172,13 @@ int32_t shanjie_engine_set_profile(ShanjieEngine *engine, uint32_t profile, Shan
 - **正向對照**：同一個子行程改用預設 hook 時，stderr 必須看得到標記；看不到就代表測試沒測到東西。
 - **經 C ABI 的重播**：在子行程裡經 C ABI 跑完 §7.2 的前 20 列，結果與 §7.2 相同。子行程的 stdout、stderr 除了 libtest 自己的 harness 行（`running 1 test`、`test … ok`、`test result: …` 與空行）之外沒有其他內容，而且不含這 20 列任何一列的句子或讀音字串。
 - 兩個 free 函式傳 NULL 不崩潰；各種錯誤碼的情境回傳正確的碼且 `*out` 為 NULL。
+- **S2c**：子行程測試 `child_lm`／`load_lm_and_set_profile_codes` 用手工的小 SJLM 檔，涵蓋 load_lm 的碼 1、2、3 與失敗時保留原本的 LM、set_profile 的碼 1、2、4（注入 panic）與成功快照、reset 保留 LM 與設定，並檢查子行程輸出不含暫存路徑。
 
 ### 7.4 C 標頭冒煙測試（`core/tests/c/abi_smoke.c`）
 
 `cargo test` 只從 Rust 呼叫匯出函式，看不到 `shanjie.h` 與 Rust 結構是否一致；S3b 連結的是這個標頭，所以要用 C 編譯器實際編譯、連結一次。不加 crate，用系統的 `cc`。
 
-- 驅動程式 `abi_smoke.c` 只 include `shanjie.h`，參數是資料目錄。對兩種排列各做一次：
+- 驅動程式 `abi_smoke.c` 只 include `shanjie.h`，參數是資料目錄（S2c 起加第二個參數：LM 路徑，檢查 301–317 驗證 load_lm、set_profile 與 reset 保留 LM，見 PLAN §S2c 驗收 6）。對兩種排列各做一次：
   - `shanjie_engine_new(data_dir, layout, &e)` 回 0。
   - 依排列送出「你好」的按鍵（標準 `s u 3 c l 3`、倚天 `n e 3 h z 3`），每鍵都 `shanjie_output_free`；送 Enter 後檢查 `handled == 1`、`commit` 是「你好」、`preedit` 是空字串、`cursor_utf16 == 0`、`candidate_count == 0`、`candidates == NULL`、`candidate_selected == -1`。
   - 再送 `ㄋㄧˇ` 的按鍵和空白鍵，檢查候選已開：`candidate_count` 在 1–9、`candidates[0]` 不是 NULL、`candidate_selected == 0`；接著 `shanjie_engine_reset(e, 1, &o)`，檢查 `commit` 為空字串、`preedit` 為空字串。
@@ -192,7 +193,7 @@ int32_t shanjie_engine_set_profile(ShanjieEngine *engine, uint32_t profile, Shan
   cc -std=c11 -Wall -Wextra -Werror -Icore/include core/tests/c/abi_smoke.c target/release/libcore.a \
     $(cargo rustc --release -p core --crate-type staticlib -- --print native-static-libs 2>&1 | sed -n 's/.*native-static-libs: //p') \
     -o "$T/abi_smoke"
-  "$T/abi_smoke" data/lexicon
+  "$T/abi_smoke" data/lexicon data/lm/bigram.sjlm
   ```
 
   連結參數以 `--print native-static-libs` 實際印出的為準；若和上面的寫法不同，executor 照實際值改指令並寫回本節。
@@ -233,3 +234,4 @@ int32_t shanjie_engine_set_profile(ShanjieEngine *engine, uint32_t profile, Shan
 - **評測 CLI 的資料來源**：`--dev N` 與 `--rows` 照 `lm_eval.py` 的 `rows_of`，只收恰好三欄的列，不套 `usable`（dev 的 390 列都是三欄，與 S3a 的 302 列相同）；`--set holdout` 走既有的 `load_set`（`usable` 加 `row_syllables`）。`--name` 缺省時 `--rows` 用檔名。`top1_sha256` 用 `core::eval::sha256_hex`（專案沒有雜湊 crate，自寫 FIPS 180-4，附已知向量測試）。
 - **逐分數對照（驗收 3）的指令**：`python3 reference/proto/lm_eval.py --lm data/lm/bigram.sjlm --profile chat --dev 302 --dump $T/chat.dump`，對 `shanjie-eval --lm … --profile chat --dev 302 --dump $T/r-chat.dump`，formal 同理；`cmp` 兩邊檔案（結果是位元組相同）。這個比對需要 Python，所以沒放進 `cargo test`；`cargo test` 涵蓋的是 4 組參數的摘要行（含 `top1_sha256`）與 `s2-lm-dev302-top1.tsv`。
 - **beam 近似**：驗收 5(a) 的廣度測試（前 12 列、兩種設定、每個詞各固定一次）有 2 個詞因 beam＝64 的近似得到不同整句，測試容許至多 2 個；驗收用的案例（疊加層詞五個、5(b) 兩個）都精確相等。
+- **S2c：set_profile 回傳碼 4 時**（引擎呼叫成功之後才 panic 或轉 C 字串失敗），新的設定保留、只丟棄組字；§6 只要求丟棄組字，這是刻意的：設定是殼的意圖，組字才是可能只改一半的狀態。load_lm 的碼 4 只能由 panic 觸發，沒有測試。
