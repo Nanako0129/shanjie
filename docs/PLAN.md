@@ -164,6 +164,16 @@ v4 日期 2026-10-03。v1 經 `pilotfish:plan-verifier`（REVISE，4 項）與 `
 - **契約。**
   - **基底不動。** `data/lexicon/mcbpmf-data.txt`（SHA-256 見 S0）原封不動。新詞放在疊加層 `data/lexicon/overlay-add.tsv`，欄位為 `讀音	詞	分數	來源標籤`，讀音以 `-` 連接音節，和基底相同。
     - 疊加層只收基底**沒有的詞**：以詞判斷，不管讀音。核心載入時遇到和基底同讀音同詞的列，就回報錯誤，不靜默覆蓋。所以 S1 不會改動既有詞的分數，同音詞排序交給 S2。
+    - **合併規則**（同分很常見，所以必須寫死）：
+      1. 先照 S0 解析基底。
+      2. 疊加層各列依檔案順序接在同一個讀音清單的後面。
+      3. 每個讀音清單做一次穩定排序，分數由高到低；同分時基底在前，疊加層之間照檔案順序。
+
+      疊加層的詞也加進 `by_word`，規則同 S0：分數嚴格較高才取代。這只影響開了疊加層時沒有讀音欄的集合；golden 用 `--no-overlay`，不受影響。參考實作是 `reference/proto/ime.py` 的 `Lexicon(path, overlay=...)`。
+    - **檔案格式。**
+      - 每列 `讀音\t詞\t分數\t來源標籤\n`，沒有標頭。
+      - 依詞的 code point 排序。
+      - 分數是 Python `repr(float)` 的字面，例如 `-7.17149945`。
     - `shanjie-eval --no-overlay` 只用基底。`unigram` 行沿用 S0 的搜尋參數，因此 `--no-overlay` 跑 trap、daily、moedict、`--learn-sim` 的輸出必須和 `eval/golden/unigram.txt` 逐行相同。
   - **來源（使用者 2026-10-03 決定，鎖定版本）。**
 
@@ -175,11 +185,11 @@ v4 日期 2026-10-03。v1 經 `pilotfish:plan-verifier`（REVISE，4 項）與 `
     | — | OpenCC `data/dictionary/STCharacters.txt`，commit `3ac34aa439a9908dd49fa92b5174b46314787ac2` | `a0ca1601c70648cf48b33c3c6210ccbecc5c7eead4b4c3daf76587ba2c03582b` | Apache-2.0 | 只用來過濾，不進疊加層 |
 
     三個 dump 的 sha1 已和 Wikimedia 官方的 `sha1sums.txt` 比對相符。來源檔不進 repo，因為合計 55 MB。`tools/build_overlay.py` 下載到 `~/.cache/shanjie/sources/` 後驗證 SHA-256，不符就中止。
-  - **篩選。** 用程式依序做，不得手動加減：
+  - **篩選。** 由 `tools/build_overlay.py` 依序做，不得手動加減。這支腳本就是本契約的參考實作，下列文字和腳本不一致時以腳本為準：
     1. 純漢字 2–4 字（U+4E00–U+9FFF）。
-    2. 不在基底的詞表裡。
+    2. 不在基底的詞表裡。基底詞表是照 S0 規則解析後 `by_word` 的鍵。
     3. 每個字都是基底的單字詞條。
-    4. 不含簡體專用字：STCharacters 裡繁體對應和自己不同的字。
+    4. 不含簡體專用字：在 STCharacters 中，繁體對應清單裡不含它自己的字。例如「干」的對應清單含「干」，所以不算。
     5. 維基詞典（英、中）的標題全收。中文維基的標題只收「複合詞」：去掉第一個字或最後一個字之後，剩下的是基底裡的多字詞。
 
     複合詞規則是 main 看過開發集 OOV 詞（收納盒、防滑墊…）之後定的。它是一般的構詞規則，不是逐詞挑選，但仍有偏向開發集的風險，由保留集把關，報告時要揭露。**禁止從 `eval/` 的句子挑詞加入**。
@@ -188,10 +198,10 @@ v4 日期 2026-10-03。v1 經 `pilotfish:plan-verifier`（REVISE，4 項）與 `
   - **來源標籤。** 出現在任一維基詞典的標 `wikt`，其餘標 `zhwiki`。
   - **授權。** `overlay-add.tsv` 以 CC BY-SA 4.0 釋出，署名 Wikipedia 與 Wiktionary 貢獻者，寫進 `LICENSES/data.md`；程式碼仍是 Apache-2.0。
   - **搜尋參數。** S1 路徑 `BEAM = 64`：要 64 名候選，BEAM 至少 64。`PER_KEY = 12`：步驟 1 實測放寬到 24 也沒有差別。S0 的常數保留給 `unigram` 行與 golden。
-  - **步驟 1 的參考結果。** Python 原型和核心逐位元組相同，開發集前 302 列：
-    - 新增 342,761 詞。
-    - oracle@64 為 98.3%（基底 97.7%），oracle@16 為 95.4%（基底 94.7%）。
-    - unigram top-1 為 54.0%（基底 51.7%）；既有 109 句 top-1 為 76（基底 75）。
+  - **參考結果。** `reference/proto/ime.py` 載入 commit 的 `overlay-add.tsv`（342,761 列），開發集前 302 列，`decode(beam=64)`，`PER_KEY` 12：
+    - oracle@16 為 288/302（基底 286）。
+    - oracle@64 為 297/302（基底 295）；漏掉的是第 127、229、275、282、300 列（從 1 起算）。
+    - unigram top-1 為 163/302（基底 156）；existing 的 top-1 為 76/109（基底 75）。
     - OOV 子集 @64 為 24/27（基底 22/27）。
   - **評測 CLI。**
     - `unigram` 行格式與參數不變。
@@ -201,22 +211,24 @@ v4 日期 2026-10-03。v1 經 `pilotfish:plan-verifier`（REVISE，4 項）與 `
     - 開發集另印 oracle@64 漏掉的列，附序號；保留集只印數字、不印句子。
 - **步驟與擁有者。**
   1. ✅ main（唯讀）：調查來源，使用者已決定；篩選、讀音、分數已定。調查紀錄在 `docs/contracts/s1.md`。
-  2. `pilotfish:mech-executor`：
-     - 寫 `tools/build_overlay.py`：下載並驗證來源、篩選、用 `reference/proto/ime.py` 的 `to_syllables` 產生讀音、寫出疊加層。
-     - 產生 `data/lexicon/overlay-add.tsv`。
-     - 更新 `LICENSES/data.md`。
-     - 用一段 Python 自我檢查，確認輸出和基底的交集為 0 詞。
+  2. ✅ main：寫好 `tools/build_overlay.py`（含 `--check`）、原型的 `overlay=` 參數、`data/lexicon/overlay-add.tsv`、`LICENSES/data.md`。
+     - 原本排給 mech-executor，改由 main 做：腳本就是契約的參考，和步驟 1 的證據綁在一起。
+     - 已驗：`--check` 一致；手動加一列，`--check` 失敗（exit 1）；原型在 commit 的檔案上重現上列參考結果。
   3. `pilotfish:executor`：完成核心的疊加層載入（重複就回報錯誤）、`--no-overlay`、S1 常數、`extra` 行、`--limit`、每鍵 bench，並更新 `core/src/tests.rs`。擁有 `core/src/lib.rs`、`core/src/eval.rs`、`core/src/tests.rs`、`cli/`。
   4. fresh `pilotfish:verifier`：跑驗收，包含保留集。只執行 CLI，不開保留集內容。
 - **驗收。**
   1. `--no-overlay` 的 golden `diff` 為空。
-  2. `--set dev --limit 302`（n = 302）：oracle@64 ≥ 98.0%，而且等於步驟 1 的 Python 參考值 98.3%（297/302），核心和原型的結果要一致。
+  2. `--set dev --limit 302`（n = 302）與參考結果**逐項相同**：
+     - oracle@16 288、oracle@64 297。
+     - 漏掉的列號 127、229、275、282、300。
+     - unigram top-1 163。
+     - 不同就停下來，回報第一個不同的列，不調參數。
   3. OOV 子集 oracle@64：
      - 開發集 = 24/27（參考值）。
-     - 保留集：verifier 跑 `--set holdout` 兩次，「有疊加層」減「`--no-overlay`」≥ 8 個百分點，並報 `oov_n`。
-  4. top-1 不退步：`eval/dev/existing.txt` 的 unigram top-1 ≥ 75/109；開發集前 302 列有疊加層時的 top-1 不低於 `--no-overlay`。
+     - 保留集：verifier 跑 `--set holdout` 兩次，「有疊加層」比「`--no-overlay`」多救回至少 2 列，並報 `oov_n` 與百分點差。門檻 2 列取自開發集的效果，22→24；原本寫的 8 個百分點高於開發集的 +7.4，已修正。
+  4. top-1 不退步：`--set dev --limit 109`（只含 existing.txt）的 top-1 ≥ 75/109；前 302 列有疊加層時的 top-1 不低於 `--no-overlay`。
   5. 載入疊加層後，每鍵解碼 p95 < 16 ms（release 版，`--set dev --limit 302 --bench`）；另報詞庫載入時間與記憶體。
-  6. 可重現：verifier 跑 `tools/build_overlay.py`，來源 SHA-256 相符，產出和 commit 的 `overlay-add.tsv` 的 `diff` 為空。在疊加層手動多加一列，這項檢查就必須失敗。
+  6. 可重現：verifier 跑 `python3 tools/build_overlay.py --check` 得到 exit 0：來源 SHA-256 相符，產出和 commit 的檔案相同。手動多加一列就會變成 exit 1，main 已實測。
   7. `cargo test` 綠；單元測試涵蓋：疊加層和基底同讀音同詞時載入回報錯誤；`--no-overlay` 不載入疊加層。
 - **範圍外。** 既有詞分數調整、n-gram 與詞性（S2）；重排模型；使用者詞庫（S4）；萌典衍生資料；C ABI（S3）；`tools/readings.py`。
 - **預算。** mech-executor 1 回合＋1 次修正；executor 1 回合＋1 次修正。
@@ -426,3 +438,13 @@ v4 日期 2026-10-03。v1 經 `pilotfish:plan-verifier`（REVISE，4 項）與 `
 | 非阻擋 | 保留集差距的方向與 `oov_n`；參數和疊加層效果混在一起；`tests.rs` 的擁有者；CHECK 確認的步驟；`build_overlay.py` 要讀 `reading_overrides.tsv`；來源檔放在哪裡 | 全部 FIX |
 
 這一輪已經是第二次 REVISE，而且收尾審查也是 REVISE，依審查規則不再自動送審。修正由 main 依審查者給的最小修改做完，**未再經審查**，交使用者決定核准。
+
+### plan-verifier（S1 改寫後：REVISE）
+
+S1 依使用者決定改寫後，再送一次 fresh 審查。兩項阻擋都屬實，用審查者的最小修改 (a)＋(b) 修掉；之後由使用者說「繼續」，不再送審。
+
+| # | 問題 | 處置 |
+|---|---|---|
+| 1 | 疊加層合併進詞庫的順序沒定，同分必然存在，核心可能合理地算出和原型不同的 oracle | FIX：寫死合併規則（基底先、疊加層依檔案順序接在後、一次穩定排序、同分基底在前、也進 `by_word`）；原型加 `overlay=` 參數作為參考 |
+| 2 | 參考數字來自沒 commit 的腳本，疊加層內容與順序無法重現 | FIX：`tools/build_overlay.py` 由 main 寫好並 commit，作為參考實作；寫明列順序、過濾規則 4 的語意、基底詞表的定義、分數格式；在 commit 的檔案上重現參考值，並寫下漏掉的列號 |
+| 非阻擋 | 保留集 8 個百分點高於開發集的 +7.4；existing 的 top-1 怎麼量；疊加層要另寫解析器；`extra` 行的小數位數 | 門檻改成「多救回 ≥ 2 列」；改用 `--limit 109`；其餘留給 executor |
