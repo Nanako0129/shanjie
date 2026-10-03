@@ -22,13 +22,22 @@ DUMP = os.path.join(SRC, "zhwiki-20261001-pages-articles.xml.bz2")
 
 
 def load_conv():
-    phrase, char = {}, {}
-    for f, dst in [("STPhrases.txt", phrase), ("TWPhrases.txt", phrase), ("STCharacters.txt", char), ("TWVariants.txt", char)]:
+    """回傳 (詞組表, 字表, 最長詞組)。只收「簡體專用字」：本身也是正確繁體的字（例：吃、后、里、游）不轉，
+    否則會把原本正確的繁體字改掉（2026-10-03 的 bug：吃→喫、后→後、里→裏）。詞組只在含簡體專用字時才收。"""
+    simp_only, phrase, char = set(), {}, {}
+    for line in open(os.path.join(SRC, "opencc", "STCharacters.txt"), encoding="utf-8"):
+        p = line.rstrip("\n").split("\t")
+        if len(p) == 2 and p[0] not in p[1].split(" "):
+            simp_only.add(p[0]); char[p[0]] = p[1].split(" ")[0]
+    for f in ["STPhrases.txt", "TWPhrases.txt"]:
         for line in open(os.path.join(SRC, "opencc", f), encoding="utf-8"):
             if line.startswith("#") or "\t" not in line:
                 continue
             k, v = line.rstrip("\n").split("\t")
-            dst[k] = v.split(" ")[0]
+            if f == "TWPhrases.txt":
+                TW_PHRASE[k] = v.split(" ")[0]
+            elif any(c in simp_only for c in k):
+                phrase[k] = v.split(" ")[0]
     char.update(VARIANTS)
     return phrase, char, max(map(len, phrase))
 
@@ -37,16 +46,25 @@ def load_conv():
 VARIANTS = {"爲": "為", "衆": "眾", "綫": "線", "麪": "麵", "僞": "偽", "裏": "裡", "峯": "峰", "羣": "群", "啓": "啟", "敎": "教"}
 
 
-def convert(text, phrase, char, maxp):
+TW_PHRASE = {}   # 台灣用詞（TWPhrases，鍵是繁體詞組），在簡轉繁之後第二遍套用
+
+
+def _longest(text, table, maxp, char=None):
     out, i, n = [], 0, len(text)
     while i < n:
         for L in range(min(maxp, n - i), 1, -1):
-            w = phrase.get(text[i:i + L])
+            w = table.get(text[i:i + L])
             if w:
                 out.append(w); i += L; break
         else:
-            out.append(char.get(text[i], text[i])); i += 1
+            out.append(char.get(text[i], text[i]) if char else text[i]); i += 1
     return "".join(out)
+
+
+def convert(text, phrase, char, maxp):
+    """兩段：簡轉繁（詞組＋簡體專用字），再套台灣用詞。"""
+    text = _longest(text, phrase, maxp, char)
+    return _longest(text, TW_PHRASE, max(map(len, TW_PHRASE), default=1)) if TW_PHRASE else text
 
 
 MARKUP = [

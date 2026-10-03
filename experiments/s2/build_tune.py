@@ -53,8 +53,9 @@ def main():
     for p in files:
         f = bz2.open(p, "rt", encoding="utf-8") if p.endswith(".bz2") else open(p, encoding="utf-8")
         for line in f:
-            s = bc.convert(line.rstrip("\n").split("\t")[-1], phrase, char, maxp)
-            if is_tune(s):
+            raw = line.rstrip("\n").split("\t")[-1]
+            s = bc.convert(raw, phrase, char, maxp)
+            if is_tune(raw):   # 用原始句子算雜湊：轉換方式改了，切分也不會變
                 tune.update(HAN.findall(s))
             else:
                 train.append(s)
