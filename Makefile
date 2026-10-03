@@ -1,13 +1,14 @@
 # Local entry point (docs/verification.md), modeled on syrtis's Makefile. Run from the repo root.
 # Build order matters: the Rust staticlib must exist before the Swift package links it.
 
-.PHONY: rust build test bundle selftest-bundled clean-bundle
+.PHONY: rust build test bundle installer selftest-bundled clean-bundle
 
 SWIFT_OUT := macos/.build/out
 # The bundle folder (docs/contracts/s3b.md section 13.1). LEGACY_APP_NAME is the name before
 # section 13, still cleaned up by clean-bundle.
 APP_NAME := 善解輸入法.app
 LEGACY_APP_NAME := shanjie.app
+INSTALLER_NAME := 安裝善解輸入法.app
 LSREGISTER := /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
 
 rust:
@@ -30,6 +31,14 @@ bundle: rust
 	@$(call rebuild_if_header_stale,Release)
 	scripts/build-app.sh
 
+# The installer (docs/contracts/s3c-installer.md section 3) around build/$(APP_NAME), zipped the
+# way release.yml zips it. Never launched here; scripts/check-installer.sh inspects it.
+installer: bundle
+	@V=$$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' 'build/$(APP_NAME)/Contents/Info.plist'); \
+	rm -f build/shanjie-$$V.zip; \
+	ditto -c -k --keepParent 'build/$(APP_NAME)' build/shanjie-$$V.zip; \
+	SHANJIE_VERSION=$$V scripts/build-installer.sh build build/shanjie-$$V.zip
+
 # The selftest from the configuration that ships: release, inside a .app, run from the bundle's
 # own Resources. The bundle ID is the one knob. Locally it defaults to a throwaway ID, the WEAKER
 # gate: a value keyed on the shipping ID itself would not be exercised. CI passes an empty value,
@@ -45,12 +54,12 @@ selftest-bundled: rust
 
 # Unregisters the local bundles, under the current and the legacy name, from LaunchServices
 # (errors ignored: usually never registered or not there) and deletes them. Touches nothing else.
-CLEAN_APPS := $(foreach d,build build/selftest,$(d)/$(APP_NAME) $(d)/$(LEGACY_APP_NAME))
+CLEAN_APPS := $(foreach d,build build/selftest,$(d)/$(APP_NAME) $(d)/$(LEGACY_APP_NAME)) build/$(INSTALLER_NAME)
 clean-bundle:
 	@for a in $(CLEAN_APPS); do \
 		echo "$(LSREGISTER) -u $$a"; $(LSREGISTER) -u "$$a" 2>/dev/null || true; \
 	done
-	rm -rf $(CLEAN_APPS)
+	rm -rf $(CLEAN_APPS) build/shanjie-*.zip
 
 # SwiftPM may not treat the Rust staticlib as an input. Measured 2026-10-03 with Swift 6.4: it
 # does relink when libcore.a changes, so this guard is a backstop for other toolchains; it costs

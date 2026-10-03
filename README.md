@@ -27,4 +27,6 @@ brew install --cask nanako0129/tap/shanjie
 scripts/install-ime.sh <解壓出來的 善解輸入法.app 路徑>
 ```
 
+也可以從 Releases 下載 `shanjie-installer-<版本>.zip`，解壓後點兩下「安裝善解輸入法」（測試中）。
+
 裝好後在選單列的輸入法選單選「善解輸入法」；標準／倚天鍵盤在它自己的選單裡切換。

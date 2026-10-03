@@ -130,6 +130,13 @@ jobs:
       - name: Acceptance checks 2, 3 and 6
         run: scripts/check-app.sh
 
+      # docs/contracts/s3c-installer.md section 6, acceptance 1: the installer around this build,
+      # inspected only (never launched).
+      - name: Installer
+        run: |
+          make installer
+          scripts/check-installer.sh
+
       # Contract section 14.5, acceptance 1 and 2: render-cask.sh's checks, then brew style on a
       # rendered cask (brew applies the cask rules only under a Casks/ directory).
       - name: Homebrew cask
