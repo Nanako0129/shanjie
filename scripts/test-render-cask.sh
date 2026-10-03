@@ -12,17 +12,22 @@ T="$(mktemp -d)"
 trap 'rm -rf "$T"' EXIT
 SHA=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
 
-# Good arguments: exactly the two lines differ from the template, and they carry the values.
+# Good arguments: the output is the template with exactly those two lines replaced, nothing else
+# added or removed.
 "$R" 1.2.3 "$SHA" > "$T/out.rb"
-diff "$ROOT/packaging/Casks/shanjie.rb" "$T/out.rb" | grep '^>' > "$T/added" || true
-[ "$(wc -l < "$T/added")" -eq 2 ] || fail "expected two changed lines: $(cat "$T/added")"
-grep -qx '>   version "1.2.3"' "$T/added" || fail "version line not replaced"
-grep -qx ">   sha256 \"$SHA\"" "$T/added" || fail "sha256 line not replaced"
+sed -e 's/^  version "[^"]*"$/  version "1.2.3"/' -e "s/^  sha256 \"[^\"]*\"\$/  sha256 \"$SHA\"/" \
+  "$ROOT/packaging/Casks/shanjie.rb" > "$T/expected.rb"
+cmp -s "$T/expected.rb" "$T/out.rb" || fail "output is not the template with two lines replaced: $(diff "$T/expected.rb" "$T/out.rb")"
+[ "$(diff "$ROOT/packaging/Casks/shanjie.rb" "$T/out.rb" | grep -c '^[<>]')" -eq 4 ] \
+  || fail "expected exactly two lines to change"
+grep -qx '  version "1.2.3"' "$T/out.rb" || fail "version line not replaced"
+grep -qx "  sha256 \"$SHA\"" "$T/out.rb" || fail "sha256 line not replaced"
 
 # Bad arguments and templates: exit 1, nothing on stdout.
-refuses() {  # refuses <label> <args...>
-  local label="$1"; shift
-  if "$@" > "$T/stdout" 2>/dev/null; then fail "$label: accepted"; fi
+refuses() {  # refuses <label> <args...>: exit code exactly 1, empty stdout
+  local label="$1" rc=0; shift
+  "$@" > "$T/stdout" 2>/dev/null || rc=$?
+  [ "$rc" -eq 1 ] || fail "$label: exit code $rc, expected 1"
   [ ! -s "$T/stdout" ] || fail "$label: printed output"
 }
 refuses "no arguments" "$R"
