@@ -335,38 +335,41 @@ v4 日期 2026-10-03。v1 經 `pilotfish:plan-verifier`（REVISE，4 項）與 `
 
 ### S3：IMK 殼 MVP（2026-10-03 拆成 S3a 與 S3b）
 
-S3a 不需要外觀參考，可以先做；S3b 等使用者提供 macOS 內建注音的截圖。外觀、Ctrl+\、C ABI 與 R2／R4 的原有要求不變，見下方「S3 原有要求」。
+S3a 不需要外觀參考，可以先做；S3b 等使用者提供 macOS 內建注音的截圖。外觀、Ctrl+\、C ABI 與 R2 的原有要求不變，見下方「S3 原有要求」；R4 移出 S3。
 
 #### S3a：核心的按鍵引擎與 C ABI
 
 - **目標。** 把注音輸入的所有狀態和規則放進 Rust 核心，讓 Swift 殼只做事件翻譯與繪製；幾乎所有行為都能用 `cargo test` 驗證。
 - **擁有範圍。**
-  - 新檔 `core/src/engine.rs`、`core/src/ffi.rs`、`core/include/shanjie.h`、`core/tests/engine*.rs`。
-  - `core/src/lib.rs` 只加 `pub mod` 兩行；`core/Cargo.toml` 加 `staticlib`。
-  - 不改 `decode`、`Lexicon` 與評測 CLI 的行為：golden 與 S1 對照檔必須逐位元組相同。
-- **引擎（`engine.rs`）。** `Engine` 吃按鍵事件、輸出畫面狀態：
-  - **鍵盤排列**：標準（大千）與倚天，各一張「ASCII 按鍵 → 注音符號」表，寫進契約檔 `docs/contracts/s3a.md`。
-  - **拼音節**：聲母、介音、韻母、聲調四個欄位；同一欄位再按就取代；聲調鍵完成音節；標準排列裡，有未完成音節時空白鍵等於一聲。
-  - **組字區**：已完成音節的序列加游標。每次變動都用核心 `decode` 重算第一名，左文由殼傳入，見 R4。輸出組字區顯示字串、游標位置，以及未完成音節的注音。
-  - **選字**：行為跟 macOS 內建注音一樣（使用者決定）。在截圖到手前，先依下表實作，S3b 再對照截圖修正：空白鍵在沒有未完成音節時、或 ↓ 鍵，開啟游標所在位置的候選；1–9 選字；←→↑↓ 移動；Enter 確定；Esc 關閉。
-  - **送出**：組字區有字時 Enter 送出整句；中文標點鍵先送出組字區再送出標點；標點對照表由本專案自訂，寫進 s3a.md；Ctrl+\ 輸出「、」；Backspace／Delete 刪音節或注音符號。
-  - **Caps Lock 開啟時**：引擎回報「不處理」，按鍵完全直通，不暫存（R3 的英數直通）。
+  - 新檔 `core/src/engine.rs`、`core/src/ffi.rs`、`core/include/shanjie.h`、`core/tests/engine*.rs`、`core/tests/c/abi_smoke.c`。
+  - `core/src/lib.rs` 只加 `pub mod` 兩行；`core/Cargo.toml` 加 `crate-type = ["rlib", "staticlib"]`（只放 `staticlib` 的話，`cli` 就不能再相依 `core`）。
+  - 不加 crate。`unsafe` 只准出現在 `ffi.rs`。
+  - 不改 `decode`、`decode_beam`、`Lexicon` 與評測 CLI 的行為：golden 與 S1 對照檔必須逐位元組相同。
+- **引擎（`engine.rs`）。** `Engine` 吃按鍵事件、輸出畫面狀態。細節全部寫在 `docs/contracts/s3a.md`，以契約檔為準：
+  - **鍵盤排列**：標準（大千）與倚天，各一張「ASCII 按鍵 → 注音符號」表。
+  - **拼音節**：聲母、介音、韻母三欄，同一欄再按就取代；聲調鍵完成音節；兩種排列的空白鍵在有未完成音節時都等於一聲；詞庫沒有的音節不收。
+  - **組字區**：已完成音節的序列加游標，上限 40 個音節。每次變動都用 `decode_beam(…, BEAM_S1)`、`NoLearning` 重算第一名（基底＋疊加層，和評測 CLI 預設相同），使用者選過的固定詞保留。不讀左文。
+  - **選字**：行為跟 macOS 內建注音一樣（使用者決定）。截圖到手前先依契約檔的按鍵行為表實作，S3b 再對照截圖修正。
+  - **送出**：Enter 送出整句；中文標點先送出組字區再送出標點（對照表由本專案自訂）；Ctrl+\ 輸出「、」。
+  - **Command、Option、Caps Lock、Ctrl 組合鍵**：引擎回報「不處理」，不改任何狀態（R3 的英數直通）。
 - **C ABI（`ffi.rs` ＋ `shanjie.h`）。**
-  - 不透明 handle：`shanjie_engine_new(資料目錄, 排列)`、`shanjie_engine_free`、`shanjie_engine_key(handle, 按鍵事件, 左文, 輸出指標)`、`shanjie_output_free`。
-  - 每個匯出函式包 `catch_unwind`；panic hook 不印 payload；錯誤只回錯誤碼與長度，不含任何輸入（R2）。
-  - 左文：殼傳入目前行的左側文字，核心在最後一個換行截斷、以 grapheme 計數、上限 64（R4）。
+  - 不透明 handle：`shanjie_engine_new(資料目錄, 排列)`、`shanjie_engine_free`、`shanjie_engine_key(handle, 按鍵事件, 輸出指標)`、`shanjie_engine_reset(handle, 模式, 輸出指標)`、`shanjie_output_free`。
+  - reset 讓殼在切換 App、secure input 生效等時機清掉組字狀態，避免文字跨 App 留在記憶體（安全審查 P1-1）。
+  - 每個匯出函式包 `catch_unwind`；panic hook 不印 payload；錯誤只回錯誤碼與長度，不含任何輸入（R2）。記憶體與生命週期規則見契約檔 §6。
+  - **左文不在這片**：解碼不讀左文，ABI 也不收。R4 移到第一個讀左文的切片（目前是 S4）。
 - **步驟與擁有者。**
-  1. main：寫 `docs/contracts/s3a.md`：兩張排列表、標點表、按鍵行為表、輸出結構、C 函式簽章。
-  2. `pilotfish:executor`：`engine.rs` 與引擎測試。
-  3. `pilotfish:security-executor`：`ffi.rs`、`shanjie.h`、R2／R4 測試。
+  1. main：寫 `docs/contracts/s3a.md`。
+  2. `pilotfish:executor`：`engine.rs`、引擎測試、`lib.rs` 的 `pub mod engine`。
+  3. `pilotfish:security-executor`：`ffi.rs`、`shanjie.h`、FFI 測試、`core/tests/c/abi_smoke.c`、`Cargo.toml` 的 crate-type、`lib.rs` 的 `pub mod ffi`。在第 2 步之後執行。
   4. fresh `pilotfish:verifier`。
 - **驗收。**
   1. golden 與三份 S1 對照檔逐位元組相同（`cargo test`）。
   2. 排列表測試：兩種排列各自涵蓋全部 37 個注音符號與 5 個聲調鍵。
-  3. 行為測試：拼音節、取代、聲調、Backspace、游標移動、開關候選、1–9 選字、Enter 送出、標點、Ctrl+\ →「、」、Caps Lock 直通。
-  4. **重播整合測試**：開發集前 302 列，把每列的讀音用標準排列轉成按鍵、最後按 Enter；引擎送出的字串必須等於核心 `decode` 的第一名，302／302。倚天排列同樣跑一次。
-  5. FFI：讓核心在處理標記字串時 panic，C ABI 回傳錯誤碼而不是中止程式，stderr 與回傳訊息都不含標記（R2）；左文的多行、emoji（含代理對與組合字）、超長三種邊界（R4）。
+  3. 行為測試：契約檔 §7.1，按鍵行為表每一條至少一個測試；直通鍵用「插入前後輸出逐欄位相同」驗證；reset 後與新建的 engine 相同。
+  4. **重播整合測試**：與 `--set dev --limit 302` 相同的 302 列（經 `usable()` 過濾），讀音依排列轉成按鍵、最後按 Enter；送出的字串必須等於 `decode_beam(…, BEAM_S1)` 的第一名，302／302。標準與倚天各跑一次。這只證明按鍵到解碼這條路；選字、游標、刪除由驗收 3 負責。
+  5. FFI（R2）：子行程經 C ABI 輸入標記字串並觸發 panic（payload 含標記），回傳碼 4、子行程真正的 stdout 與 stderr 都不含標記；同一個子行程改用預設 hook 時必須看得到標記（正向對照）；`panic = "abort"` 時建置失敗。
   6. 每鍵處理 p95 < 16 ms（release，重播測試中量）。
+  7. **C 標頭冒煙測試**：用系統 `cc` 編譯 `core/tests/c/abi_smoke.c`，只 include `shanjie.h` 並連結 `libcore.a`，兩種排列打「你好」、開候選、reset，exit 0；把標頭的兩個欄位對調後必須失敗。指令見契約檔 §7.4。
 - **範圍外。** Swift 殼、候選窗外觀、安裝；語言模型（S2 完成後再接上）；學習；雲端。
 - **預算。** executor 與 security-executor 各 1 回合＋1 次修正。
 - **停止。** 重播測試有任何不一致：回報第一個不同的列，不調整解碼。
@@ -376,7 +379,7 @@ S3a 不需要外觀參考，可以先做；S3b 等使用者提供 macOS 內建�
 - InputMethodKit app `shanjie.app`（`com.nyanako.inputmethod.shanjie`），用 SwiftPM 建置、腳本組 app bundle、Apple Development 簽章；結構參考小麥注音（MIT）。
 - 候選窗先試 `IMKCandidates`；外觀、組字區底線、深色模式依使用者截圖。
 - `privacyGate`（R3）：`IsSecureEventInputEnabled()` 或 denylist 時停學習、停雲端、不讀左文。
-- 前景 App 的 bundle ID 傳給核心，供 S2 的語言模型設定切換（聊天／書面）。
+- 殼依前景 App 的 bundle ID 判斷聊天或書面，只把這個列舉傳給核心，供 S2 的語言模型設定切換；核心不持有 App 身分。
 - 安裝與實機測試由使用者執行：TextEdit／Notes／Safari 打陷阱集前 10 句、R3 的三處 secure input 情境、Caps Lock 切換、兩種排列。
 - 契約在截圖到手後再寫，另外送審並由使用者核准。
 
@@ -385,11 +388,12 @@ S3a 不需要外觀參考，可以先做；S3b 等使用者提供 macOS 內建�
 - 標準注音鍵盤、組字區、候選窗、送出、Shift 中英切換、英數直通完全不暫存；`privacyGate`（R3）；呼叫核心 C ABI。
 - 外觀（使用者 2026-10-03）：參考 Apple 原生注音的介面與 Liquid Glass。優先用系統元件（先試 IMK 內建的 `IMKCandidates`，不夠再用 macOS 的玻璃效果元件自建視窗），動畫用系統預設、不自訂（使用者嫌自訂的 Liquid Glass 行為「太 Q」）。開工前請使用者提供原生注音候選窗的實際截圖當參考，不從程式碼推測外觀。
 - 按鍵（使用者 2026-10-03）：中文模式下 Ctrl+\ 輸出「、」（照字面實作）。其餘標點行為參考原生注音；Apple 系統檔 `CoreChineseEngine.framework/.../CIMPunctuationCandidates.plist` 顯示「、」的替代候選為 `\`、`＼`、`｜`，推測原生注音的反斜線鍵輸出「、」（未在介面實測）。對照表由本專案自行定義，不複製 Apple 的資料檔（著作權）。
-- 這一片引入 C ABI：每個匯出函式包 `catch_unwind`，panic hook 不印 payload（R2）；左文讀取在最後一個換行截斷、以 grapheme 計數、上限 64（R4）。
-- 驗收：XCTest 驅動按鍵狀態機（組字、選字、刪除、送出）與 gate 單元測試；FFI 測試：讓核心在處理標記字串時 panic，C ABI 回傳錯誤碼而不是 abort，且 stderr 與回傳訊息都不含標記（R2）；左文測試：多行、emoji（含代理對與組合字）、超長三種邊界（R4）；日誌行為測試：重播標記字串後 `/usr/bin/log show` 找不到（R2；zsh 內建 `log` 會攔截，必須寫完整路徑）；使用者實測：TextEdit／Notes／Safari 打陷阱集前 10 句，以及 R3 的三處 secure input 情境。
+- 這一片引入 C ABI：每個匯出函式包 `catch_unwind`，panic hook 不印 payload（R2）。左文（R4）移到第一個讀左文的切片（2026-10-03 S3a 審查後決定：S3 的解碼不讀左文）。
+- 驗收：XCTest 驅動按鍵狀態機（組字、選字、刪除、送出）與 gate 單元測試；FFI 測試：讓核心在處理標記字串時 panic，C ABI 回傳錯誤碼而不是 abort，且 stderr 與回傳訊息都不含標記（R2）；日誌行為測試：重播標記字串後 `/usr/bin/log show` 找不到（R2；zsh 內建 `log` 會攔截，必須寫完整路徑）；使用者實測：TextEdit／Notes／Safari 打陷阱集前 10 句，以及 R3 的三處 secure input 情境。
 
 ### S4：使用者模型
 
+- 左文由殼讀取、經 C ABI 傳入，R4（最後換行截斷、計數單位與上限、只活在記憶體、多行與 emoji 邊界測試）在這片實作。
 - 前文 key 用字（≤ 2 字，不用切詞結果）、天級衰減、跨 ≥ 2 種前文才全域化、`max(系統分, 混合分)`、只有打開候選窗改選才學、候選窗一鍵忘記、改選走時舊紀錄減半；儲存依 R5。
 - 驗收：A2；gate 生效時 0 筆學習；R5 的清除測試；重播標記字串後學習檔不含該標記（R2）。
 - 擁有者：`pilotfish:executor`；儲存與清除由 `pilotfish:security-executor`。
@@ -409,7 +413,7 @@ S3a 不需要外觀參考，可以先做；S3b 等使用者提供 macOS 內建�
 
 ### S6：雲端（選用、預設關；路線 2 在這裡）
 
-- `pilotfish:security-executor` 實作 R1、R6、R7；左文截斷沿用 S3 的 R4，不重做；供應商可切換（OpenAI 相容端點）。
+- `pilotfish:security-executor` 實作 R1、R6、R7；左文截斷沿用 R4 的既有實作，不重做；供應商可切換（OpenAI 相容端點）。
 - 兩種模式：
   - **一鍵校正。** 給 H 用，延遲不受限。N1 預設最準的 gpt-6-luna（OpenRouter，effort low）。
   - **雲端主力模式（路線 2）。** 每次送出前把 N-best 送雲端判斷，等待硬逾時就送本機結果。預設 Cerebras gpt-oss-120b（effort medium），92.4%，p95 740 ms；要更快可換 Cerebras qwen-3.8-27b（effort none），p95 438 ms。
@@ -528,7 +532,7 @@ S3a 不需要外觀參考，可以先做；S3b 等使用者提供 macOS 內建�
 | R1 | P1 | 雲端與端上重排都只回本機 N-best 的索引（v5：S5 改回 N-best 重排，字級規則不再需要）；其他一律丟棄；回應綁定組字 session ID，client 或 bundle 換了就丟；mock 測試：含 `\n`、索引越界、遲到回應 → 只送本機結果 | 採納；自由文字列為非目標 | S5、S6 |
 | R2 | P1 | 組字、候選、前文、payload 不進任何 log／panic／fatalError；Swift 用 `Logger` 且內容標 `privacy: .private`；FFI `catch_unwind`；行為測試：重播標記字串 → `log show` 與學習檔都找不到 | 採納 | S0（核心錯誤訊息規則＋測試，驗收 5）、S3（`catch_unwind`、FFI panic 測試、日誌行為測試）、S4（學習檔不含標記） |
 | R3 | P1 | `privacyGate(bundleID)`：`IsSecureEventInputEnabled()` 或 denylist 就停學習、停雲端、不讀左文；判斷不了就擋；選單顯示暫停狀態；使用者實測 Safari 密碼欄、Terminal 開 Secure Keyboard Entry、Terminal `sudo` | 部分採納：終端機與密碼管理器預設在**雲端** denylist；**學習**在終端機預設開。理由：使用者大量在終端機打中文；只學「注音模式下打開候選窗改選的中文詞」，英數直通（密碼、sudo）不暫存也不學。使用者可改（§4.4） | S3、S4、S6 |
-| R4 | P2 | 左文在最後換行截斷、grapheme 計數、只活在記憶體；多行與 emoji 邊界測試 | 採納 | S3（實作＋邊界測試）；S6 只沿用 |
+| R4 | P2 | 左文在最後換行截斷、grapheme 計數、只活在記憶體；多行與 emoji 邊界測試 | 採納 | 第一個讀左文的切片（目前是 S4；2026-10-03 從 S3 移出）；S6 只沿用 |
 | R5 | P2 | 學習檔放 `~/Library/Application Support/shanjie/`，權限 0600，只存「前文 ≤ 2 字、詞、分數、日期」；一鍵清除含記憶體與附屬檔（SQLite `-wal`、`-shm`）；靠 FileVault 不另加密；設定頁揭露 Time Machine 並提供排除備份 | 採納 | S4 |
 | R6 | P2 | Keychain：service＝bundle ID、`SecItemUpdate` 並檢查狀態、key 不進 URL／log／錯誤訊息；agent 測試用記憶體 store；真 Keychain 交給使用者實測；預告 ad-hoc 簽章可能跳授權提示 | 採納 | S6 |
 | R7 | P2 | `URLSessionConfiguration.ephemeral`、系統 ATS／TLS、硬逾時 2 秒、只在送出或驗證時送；opt-in 對話框列出送出內容範例與所選供應商現行的資料保留政策（v5：供應商可切換；S6 時逐家核對最新條款） | 採納 | S6 |
@@ -579,3 +583,25 @@ S1 依使用者決定改寫後，再送一次 fresh 審查。兩項阻擋都屬�
 | A1（P3） | 保留集 top-1 少 1 列（94 → 93） | 記錄；S2 的 n-gram 要重新量 top-1 |
 | A2（P3） | 記憶體約 3 倍（127 → 375 MiB） | 新增 L（精簡詞庫格式），作為 S3 的前提 |
 | A3（P4） | `no_overlay_parse_is_identical` 是同一條路徑自己比自己，攔不到任何東西 | 刪除；真正的防護是 golden CLI 測試 |
+
+### S3a 契約審查（2026-10-03）
+
+plan-verifier 第一次：REVISE，4 項阻擋。security-reviewer：無 P0，2 項 P1。
+
+| 來源 | 問題 | 處置 |
+|---|---|---|
+| plan-verifier 1 | 空白鍵「直通」與「開候選」互相矛盾；組字區有字時的聲調鍵未定義 | FIX：契約 §3 改成有判斷順序的表 |
+| plan-verifier 2 | 詞庫沒有的音節會讓整個組字區解不出來 | FIX：完成音節時就拒收；實測詞庫 1,417 個音節都有單音節詞條，收進來的一定解得出來 |
+| plan-verifier 3 | grapheme 計數需要額外 crate | FIX：S3a 不讀左文，R4 移到第一個讀左文的切片（S4），不加 crate |
+| plan-verifier 4 | 計畫寫 `decode`（beam 32），契約寫 beam 64 | FIX：統一為 `decode_beam(…, BEAM_S1)`、`NoLearning`；寫明資料目錄的兩個檔案與載入失敗的回傳碼 |
+| security P1-1 | 沒有 reset，組字會跨 App、跨 secure input 留在記憶體 | FIX：加 `shanjie_engine_reset`；送出、清空、reset 時連同固定詞一起清掉 |
+| security P1-2 | 同行程的 panic 測試會被 libtest 攔下輸出，測不到東西 | FIX：子行程＋`--nocapture`、payload 含標記、預設 hook 的正向對照、`panic = "abort"` 時建置失敗 |
+| security P2-1 | 記憶體與生命週期規則沒寫 | FIX：契約 §6 |
+| security P2-2 | 修飾鍵規則、Caps Lock 優先順序 | FIX：判斷順序第 1 條；直通鍵用「插入前後輸出相同」驗證 |
+| security P2-3 | panic payload 可能帶出原文 | FIX：契約 §6 的寫法規則 |
+| security P2-4 | 左文的讀取量與計數 | 隨 plan-verifier 3 一起移出 S3a |
+| security P3 | 組字區沒有上限；Swift 端日誌；bundle ID 進核心 | FIX：上限 40 音節；`shanjie.h` 註解；殼只傳聊天／書面列舉 |
+| security P3 | 清零（zeroization） | REJECT：同一段文字也在 AppKit 與 client App 裡，只清 Rust 的 buffer 是假保證；縮短保留時間（reset）才有效 |
+| 非阻擋 | crate-type、`usable()` 過濾後的 302 列、讀音格式、分頁、重播測試只證明按鍵到解碼 | 全部寫進契約 |
+| plan-verifier 第二次 1 | 子行程跑 libtest，stdout 一定有 harness 行，「輸出為空」永遠不會通過 | FIX：改成「除了 harness 行沒有其他內容，且不含任何一列的句子或讀音」 |
+| plan-verifier 第二次 2 | 沒有任何驗收實際用 C 編譯 `shanjie.h`，標頭和 Rust 結構可以不一致而全綠 | FIX：契約 §7.4、驗收 7：系統 `cc` 編譯連結的冒煙測試，加上欄位對調的反向檢查 |
