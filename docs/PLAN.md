@@ -37,7 +37,7 @@ v4 日期 2026-10-03。v1 經 `pilotfish:plan-verifier`（REVISE，4 項）與 `
 - 左右文：`client.string(from:actualRange:)`，在最後一個換行處截斷，以 grapheme 計數，左側上限 64 字；只存在這一次轉換的記憶體裡。
 - 不連結 LGPL 元件（KenLM 是 LGPL）；n-gram 格式自寫。
 - 程式碼授權：Apache-2.0（使用者 2026-10-03 確認）。
-- 簽章：使用者有 Apple Developer Program（Team `2LJ882GPY8`，本機有 Apple Development 與 Developer ID Application 憑證）。開發期用 Apple Development 簽章（身分固定，Keychain ACL 不會每次重建都跳提示，XPC helper 的沙盒 entitlements 有效）；S8 用 Developer ID＋`notarytool` 公證，公證憑證由使用者自己 `xcrun notarytool store-credentials` 存入鑰匙圈，agent 不碰。
+- 簽章：使用者有 Apple Developer Program（Team `2LJ882GPY8`）。正式版由 GitHub Actions 在 repo 的 `release` environment 用 Developer ID Application 簽章並公證（S3b §3）；agent 不使用本機鑰匙圈裡的任何憑證，本機與 CI 的一般建置一律 ad-hoc（2026-10-03 改走 GitHub CI/CD）。ad-hoc 的簽章身分每次建置都不同：S5（XPC helper 的沙盒權限）與 S6（Keychain ACL 不要每次重建都跳授權）需要穩定身分時，用 CI 的 Developer ID 版本實測，或屆時另議。
 
 **資料策略。**
 
@@ -307,7 +307,7 @@ v4 日期 2026-10-03。v1 經 `pilotfish:plan-verifier`（REVISE，4 項）與 `
   - 統一先驗 interp：λ·log10 P(w|v)＋(1−λ)·lp，backoff 用詞庫先驗。
   - 句尾項、疊加層分數以語料頻率為上限。
   - 語料：維基 20 萬篇＋口語 k=5。
-- **使用者決定（2026-10-03）：依 App 切換語言模型設定。** 聊天 App 用聊天設定（λ=0.5），其他 App 用書面設定（λ=0.7）；聊天 App 清單可在設定中修改。這需要 S3 殼把前景 App 的 bundle ID 傳給核心（R3 的 privacyGate 本來就要讀這個值）。
+- **使用者決定（2026-10-03）：依 App 切換語言模型設定。** 聊天 App 用聊天設定（λ=0.5），其他 App 用書面設定（λ=0.7）；聊天 App 清單可在設定中修改。殼依前景 App 的 bundle ID 判斷聊天或書面，只把列舉傳給核心（S3b）；清單的修改介面延到設定頁（S3b-2）。
 - 原驗收：開發集同步路徑 ≥ 85%，片結束時保留集 ≥ 85%；**A1a：開發集與保留集 oracle@64 ≥ 98%**（S1＋S2 合計；N0 的 9 句同音詞排序漏掉屬於這片）；每鍵 p95 < 16 ms；模型檔 ≤ 100 MB。P1 詞性連接併入這片（見下）。
 - **使用者決定（2026-10-03 晚）：S2 收尾，85% 交給整體。** 第 11、12 輪（判別式重排、隔字字對）在 dev302 只多對 0–3 句，同步路徑停在約 79–80%；剩下的錯誤多半要語意（S5）或使用者自己的資料（S4）。S2 改成兩片收尾：S2v（寬鬆對照加教育部異體詞）先做，S2c（語言模型進核心）其次。A1a、延遲、模型大小照舊；85% 不再是 S2 的條件。P1 詞性連接延後（繁中詞性資料的授權未解），不在 S2 收尾範圍。
 - **使用者決定（2026-10-03 晚）：寬鬆對照放寬到教育部並列的異體詞。** 屬於看過開發集錯句之後的「事後修改」，所以標準定死在辭典本身，不從評測句挑。
@@ -486,29 +486,32 @@ S3a 不需要外觀參考，可以先做；S3b 等使用者提供 macOS 內建�
 - **預算。** executor 與 security-executor 各 1 回合＋1 次修正。
 - **停止。** 重播測試有任何不一致：回報第一個不同的列，不調整解碼。
 
-#### S3b：Swift 輸入法本體（等截圖）
+#### S3b：Swift 輸入法本體（截圖已於 2026-10-03 取得）
 
-- InputMethodKit app `shanjie.app`（`com.nyanako.inputmethod.shanjie`），用 SwiftPM 建置、腳本組 app bundle、Apple Development 簽章；結構參考小麥注音（MIT）。
+- InputMethodKit app `shanjie.app`（`com.nyanako.inputmethod.shanjie`），用 SwiftPM 建置、腳本組 app bundle；本機與 CI 一律 ad-hoc 簽章，正式版在 GitHub Actions 的 `release` environment 用 Developer ID 簽章並公證（見 s3b §2、§3）；結構參考小麥注音（MIT）。
 - 候選窗先試 `IMKCandidates`；外觀、組字區底線、深色模式依使用者截圖。
-- `privacyGate`（R3）：`IsSecureEventInputEnabled()` 或 denylist 時停學習、停雲端、不讀左文。
+- `privacyGate`（R3）延到 S4：S3b 沒有學習、雲端、左文，gate 沒有東西可擋（見 `docs/contracts/s3b.md` §9）。
 - 殼依前景 App 的 bundle ID 判斷聊天或書面，只把這個列舉傳給核心，供 S2 的語言模型設定切換；核心不持有 App 身分。
 - 安裝與實機測試由使用者執行：TextEdit／Notes／Safari 打陷阱集前 10 句、R3 的三處 secure input 情境、Caps Lock 切換、兩種排列。
-- **契約：`docs/contracts/s3b.md`（2026-10-03，使用者已提供 4 張深色模式截圖）。** 最小可安裝版：橫式候選條（IMKCandidates）、組字底線、數字選字、標準與倚天兩個輸入模式、依 App 切換聊天／書面設定、`--selftest`、使用者執行的安裝腳本。展開網格、直式、表情候選等記為 S3b-2。
-- **擁有者**：`pilotfish:security-executor`（整片一人負責：按鍵內容與日誌規則、簽章與 hardened runtime、安裝腳本）；fresh `pilotfish:verifier` 驗收 agent 可做的 1–7 項；8–12 由使用者實測。
+- **契約：`docs/contracts/s3b.md`（2026-10-03，使用者已提供 4 張深色模式截圖）。** 最小可安裝版：橫式候選條（IMKCandidates）、組字底線、數字選字、標準與倚天兩個輸入模式、依 App 切換聊天／書面設定、`--selftest`、GitHub Actions 的建置與簽章公證發布（仿 syrtis）、使用者執行的安裝腳本。展開網格、直式、表情候選等記為 S3b-2。
+- **擁有者**：`pilotfish:security-executor`（整片一人負責：按鍵內容與日誌規則、ad-hoc 建置、release.yml、安裝腳本）；fresh `pilotfish:verifier` 驗收 agent 可做的 1–8 項；9–16 由使用者實測（含在 `release` environment 設定簽章材料、推第一個 tag）。
+- **前提**：PR #1（GitHub Actions CI）合併到 main 之後才開工，S3b 的分支從那個 main 開出來。
 - **預算**：security-executor 1 回合＋1 次修正。
-- **停止**：IMKCandidates 無法只當顯示用時停下回報（自建玻璃視窗是下一輪）；資料檔或 LM 缺少時建置失敗並說明。
+- **停止**：開工時 main 上沒有 `.github/workflows/ci.yml`，或 `.gitignore` 沒有 `build/`，就停下回報；IMKCandidates 無法只當顯示用時停下回報（自建玻璃視窗是下一輪）；資料檔或 LM 缺少時建置失敗並說明；任何步驟需要本機鑰匙圈或 secret 的值時停下回報。
 - **回滾**：revert S3b 的 commit；已安裝的版本由使用者從 `~/Library/Input Methods/` 刪除。
 - 對照截圖與實機時要確認的暫定行為（S3a verifier 的 P4 與契約 §8）：Shift＋空白鍵目前等同空白鍵；候選開著時按超出本頁的數字鍵，目前候選維持開啟；候選頁到頭停住不繞回（只有空白鍵繞回）；Ctrl+Shift+\ 直通；Command 等組合鍵在組字中直通且不送出組字區。
 
 #### S3 原有要求
 
-- 標準注音鍵盤、組字區、候選窗、送出、Shift 中英切換、英數直通完全不暫存；`privacyGate`（R3）；呼叫核心 C ABI。
+- 標準注音鍵盤、組字區、候選窗、送出、中英切換（2026-10-03 起改用系統 Caps Lock 切換輸入方式，見 s3b §6）、英數直通完全不暫存；呼叫核心 C ABI。`privacyGate`（R3）延到 S4。
 - 外觀（使用者 2026-10-03）：參考 Apple 原生注音的介面與 Liquid Glass。優先用系統元件（先試 IMK 內建的 `IMKCandidates`，不夠再用 macOS 的玻璃效果元件自建視窗），動畫用系統預設、不自訂（使用者嫌自訂的 Liquid Glass 行為「太 Q」）。開工前請使用者提供原生注音候選窗的實際截圖當參考，不從程式碼推測外觀。
 - 按鍵（使用者 2026-10-03）：中文模式下 Ctrl+\ 輸出「、」（照字面實作）。其餘標點行為參考原生注音；Apple 系統檔 `CoreChineseEngine.framework/.../CIMPunctuationCandidates.plist` 顯示「、」的替代候選為 `\`、`＼`、`｜`，推測原生注音的反斜線鍵輸出「、」（未在介面實測）。對照表由本專案自行定義，不複製 Apple 的資料檔（著作權）。
 - 這一片引入 C ABI：每個匯出函式包 `catch_unwind`，panic hook 不印 payload（R2）。左文（R4）移到第一個讀左文的切片（2026-10-03 S3a 審查後決定：S3 的解碼不讀左文）。
-- 驗收：XCTest 驅動按鍵狀態機（組字、選字、刪除、送出）與 gate 單元測試；FFI 測試：讓核心在處理標記字串時 panic，C ABI 回傳錯誤碼而不是 abort，且 stderr 與回傳訊息都不含標記（R2）；日誌行為測試：重播標記字串後 `/usr/bin/log show` 找不到（R2；zsh 內建 `log` 會攔截，必須寫完整路徑）；使用者實測：TextEdit／Notes／Safari 打陷阱集前 10 句，以及 R3 的三處 secure input 情境。
+- 驗收：XCTest 驅動按鍵狀態機（組字、選字、刪除、送出）（gate 單元測試延到 S4）；FFI 測試：讓核心在處理標記字串時 panic，C ABI 回傳錯誤碼而不是 abort，且 stderr 與回傳訊息都不含標記（R2）；日誌行為測試：重播標記字串時用 `/usr/bin/log stream --level debug` 擷取，找不到標記（R2；debug 等級不會寫進磁碟，事後用 `log show` 看不到；zsh 內建 `log` 會攔截，必須寫完整路徑；細節見 s3b §10 驗收 5）；使用者實測：TextEdit／Notes／Safari 打陷阱集前 10 句，以及 R3 的三處 secure input 情境。
 
 ### S4：使用者模型
+
+- **從 S3b 移來（2026-10-03）**：`privacyGate`（R3：`IsSecureEventInputEnabled()` 或 denylist 時停學習、停雲端、不讀左文；判斷不了就擋；選單顯示暫停狀態）、gate 單元測試、gate 轉為生效時 `reset`；左文讀取與 R4。
 
 - 左文由殼讀取、經 C ABI 傳入，R4（最後換行截斷、計數單位與上限、只活在記憶體、多行與 emoji 邊界測試）在這片實作。
 - 前文 key 用字（≤ 2 字，不用切詞結果）、天級衰減、跨 ≥ 2 種前文才全域化、`max(系統分, 混合分)`、只有打開候選窗改選才學、候選窗一鍵忘記、改選走時舊紀錄減半；儲存依 R5。
@@ -552,7 +555,7 @@ S3a 不需要外觀參考，可以先做；S3b 等使用者提供 macOS 內建�
 
 ### S8：打包與釋出
 
-- R9；Developer ID 簽章＋公證（Team `2LJ882GPY8`）；README、授權清單。外部動作每一步都要使用者當次同意。
+- Developer ID 簽章＋公證、hardened runtime、Release 附件與授權檔已在 S3b 的 `release.yml` 完成（2026-10-03）；S8 剩 README、對外說明、Homebrew cask 與更新檢查。外部動作每一步都要使用者當次同意。
 
 ## 3. 風險
 
@@ -647,14 +650,14 @@ S3a 不需要外觀參考，可以先做；S3b 等使用者提供 macOS 內建�
 | ID | 等級 | 設計規則／測試 | 處置 | 落在哪片 |
 |---|---|---|---|---|
 | R1 | P1 | 雲端與端上重排都只回本機 N-best 的索引（v5：S5 改回 N-best 重排，字級規則不再需要）；其他一律丟棄；回應綁定組字 session ID，client 或 bundle 換了就丟；mock 測試：含 `\n`、索引越界、遲到回應 → 只送本機結果 | 採納；自由文字列為非目標 | S5、S6 |
-| R2 | P1 | 組字、候選、前文、payload 不進任何 log／panic／fatalError；Swift 用 `Logger` 且內容標 `privacy: .private`；FFI `catch_unwind`；行為測試：重播標記字串 → `log show` 與學習檔都找不到 | 採納 | S0（核心錯誤訊息規則＋測試，驗收 5）、S3（`catch_unwind`、FFI panic 測試、日誌行為測試）、S4（學習檔不含標記） |
-| R3 | P1 | `privacyGate(bundleID)`：`IsSecureEventInputEnabled()` 或 denylist 就停學習、停雲端、不讀左文；判斷不了就擋；選單顯示暫停狀態；使用者實測 Safari 密碼欄、Terminal 開 Secure Keyboard Entry、Terminal `sudo` | 部分採納：終端機與密碼管理器預設在**雲端** denylist；**學習**在終端機預設開。理由：使用者大量在終端機打中文；只學「注音模式下打開候選窗改選的中文詞」，英數直通（密碼、sudo）不暫存也不學。使用者可改（§4.4） | S3、S4、S6 |
+| R2 | P1 | 組字、候選、前文、payload 不進任何 log／panic／fatalError；Swift 用 `Logger`，只記靜態字串與 C ABI 回傳碼，不內插任何其他值、不用 `.public`（2026-10-03 S3b 審查後收緊，見 s3b §9）；FFI `catch_unwind`；行為測試：重播標記字串 → `log stream --level debug` 擷取與學習檔都找不到 | 採納 | S0（核心錯誤訊息規則＋測試，驗收 5）、S3（`catch_unwind`、FFI panic 測試、日誌行為測試）、S4（學習檔不含標記） |
+| R3 | P1 | `privacyGate(bundleID)`：`IsSecureEventInputEnabled()` 或 denylist 就停學習、停雲端、不讀左文；判斷不了就擋；選單顯示暫停狀態；使用者實測 Safari 密碼欄、Terminal 開 Secure Keyboard Entry、Terminal `sudo` | 部分採納：終端機與密碼管理器預設在**雲端** denylist；**學習**在終端機預設開。理由：使用者大量在終端機打中文；只學「注音模式下打開候選窗改選的中文詞」，英數直通（密碼、sudo）不暫存也不學。使用者可改（§4.4） | S4、S6（S3b 沒有學習、雲端、左文，延到 S4） |
 | R4 | P2 | 左文在最後換行截斷、grapheme 計數、只活在記憶體；多行與 emoji 邊界測試 | 採納 | 第一個讀左文的切片（目前是 S4；2026-10-03 從 S3 移出）；S6 只沿用 |
 | R5 | P2 | 學習檔放 `~/Library/Application Support/shanjie/`，權限 0600，只存「前文 ≤ 2 字、詞、分數、日期」；一鍵清除含記憶體與附屬檔（SQLite `-wal`、`-shm`）；靠 FileVault 不另加密；設定頁揭露 Time Machine 並提供排除備份 | 採納 | S4 |
 | R6 | P2 | Keychain：service＝bundle ID、`SecItemUpdate` 並檢查狀態、key 不進 URL／log／錯誤訊息；agent 測試用記憶體 store；真 Keychain 交給使用者實測；預告 ad-hoc 簽章可能跳授權提示 | 採納 | S6 |
 | R7 | P2 | `URLSessionConfiguration.ephemeral`、系統 ATS／TLS、硬逾時 2 秒、只在送出或驗證時送；opt-in 對話框列出送出內容範例與所選供應商現行的資料保留政策（v5：供應商可切換；S6 時逐家核對最新條款） | 採納 | S6 |
 | R8 | P2 | 模型清單內建 HF repo＋commit SHA＋每檔 SHA-256，下載到暫存檔驗證後才改名；只收 safetensors／GGUF／JSON；權重在無網路的沙盒 XPC helper 解析 | 採納；XPC 從條件式改成 S5 必做 | S5 |
-| R9 | P3 | hardened runtime、不加 `disable-library-validation`、不需 root、v1 不做自動安裝（只檢查版本開瀏覽器） | 採納 | S8 |
+| R9 | P3 | hardened runtime、不加 `disable-library-validation`、不需 root、v1 不做自動安裝（只檢查版本開瀏覽器） | 採納 | S3b（簽章、hardened runtime、無 entitlements、安裝不用 sudo）；S8（更新檢查） |
 
 ### plan-verifier（v5 第一次：REVISE）
 
@@ -742,3 +745,23 @@ plan-verifier 第一次：REVISE，4 項阻擋。security-reviewer：無 P0，2 
 | plan-verifier 3（收尾） | reset 是否保留 LM 與設定沒寫；照 s3a「等於新建 engine」做會讓殼每次 reset 都丟掉 LM | FIX：reset 只清組字、保留 LM 與設定；驗收 6 加 reset 後仍是 formal 第一名，並有反向檢查 |
 | plan-verifier 2 | 正式路徑（`new`＋`load_lm`）沒有驗收經過，漏接上限也會綠 | FIX：驗收 4 的標準排列 chat 組必須走正式路徑；verifier 讓 `load_lm` 跳過上限時必須失敗 |
 | 非阻擋 | 預設設定、總分重複計算、beam 近似、unigram 來源、冒煙程式參數、§6 通用條文、golden 指令的 `--lm`、top1 檔交叉驗證 | 全部寫進契約與 s3a §6 |
+
+### S3b 契約審查（2026-10-03）
+
+plan-verifier 第一次：REVISE（6 項阻擋）。security-reviewer：無 P0，1 項 P1、4 項 P2、8 項 P3。使用者同時決定改走 GitHub CI/CD（仿 syrtis）。
+
+| 來源 | 問題 | 處置 |
+|---|---|---|
+| plan-verifier 1 | 沒有 S3b 的安全審查 | FIX：已審，本表 |
+| plan-verifier 2 | agent 跑 build-app.sh 會用登入鑰匙圈的憑證簽章 | FIX：build-app.sh 一律 ad-hoc；正式簽章與公證改在 GitHub Actions 的 `release` environment（一次性鑰匙圈），材料由使用者設定 |
+| plan-verifier 3 | 假 client 測試可能沒經過真核心；設定測試無法失敗 | FIX：一律連結 libcore.a、載入真 LM；設定測試用第 10 列，Discord 與 TextEdit 送出不同 |
+| plan-verifier 4／security P1-1 | 日誌測試抓不到 debug 等級、正向對照無效、只走快樂路徑 | FIX：`log stream --level debug`、同一個 Logger 與最低層級的正向對照、不同 nonce 標記、走錯誤路徑與 bundle ID／路徑標記、`<private>` 斷言 |
+| plan-verifier 5 | 自測在沒有 LM 時也會過 | FIX：載入失敗就 exit 非 0；第 10 列兩種設定送出必須不同 |
+| plan-verifier 6 | privacyGate、中英切換在 PLAN 與契約不一致 | FIX：privacyGate 與 gate 測試延到 S4；中英切換用系統 Caps Lock；PLAN、s3a §3、§6 一併改 |
+| security P2-1 | 日誌規則是黑名單，數值預設公開 | FIX：白名單，只記靜態字串與回傳碼；PLAN R2 同步 |
+| security P2-2 | 共用引擎跨 controller 的組字擁有者沒定義 | FIX：s3b §5 組字擁有者；兩個假 controller 的測試 |
+| security P2-3 | 安裝腳本順序與複製方式 | FIX：先移除、`ditto`、以完整路徑 `pkill`、執行已安裝那份的 `install`；固定字面路徑；不用 sudo |
+| security P2-4 | entitlements 沒有明寫為空 | FIX：不給 entitlements 檔，驗收檢查輸出為空、flags 含 runtime |
+| security P3 | `try!` 與錯誤型別、非 0 回傳碼殘留組字、`nil` 事件、候選陣列清除、滑鼠選候選、secure input 的預期、自測參數與 UserDefaults、`build/` 未忽略 | FIX：全部寫進 s3b；`build/` 已在 PR #1 加入 `.gitignore` |
+| plan-verifier 2 | PLAN 仍寫 Apple Development 簽章；PR #1 沒列為前提；擁有者只記 ObjectIdentifier、deactivate 不檢查擁有者；日誌擷取沒證明已接上；release 的 build 沒下載模型 | FIX：PLAN 改寫簽章；加前提與停止條件；擁有者改弱參照、deactivate／commit 先檢查、deinit 丟棄，加兩個測試；起始＋結束標記與逾時；release build 先下載並比對模型 |
+| 本地 /code-review（PR #2，CodeRabbit 限流） | 15 項：非 0 回傳碼沒 reset 核心；Release 沒附授權檔；deinit 時 weak 已是 nil；換擁有者沒重設設定；非擁有者的 deactivate 清掉共用候選；§9→§10 的編號；gate 照抄 syrtis 會等不存在的 workflow；log 過濾太窄；shell／release job 沒固定 Rust；模型雜湊三處；切換排列要重建引擎；使用者的 log 檢查看不到 debug；延後項目沒寫回 S4／S8／R9；secure input 判斷沒有注入點；Caps Lock 行為與 bundle ID 未實測 | 14 項 FIX（寫進 s3b 與 PLAN；模型雜湊改成單一檔 `data/bigram.sjlm.sha256`）；切換排列的延遲 DEFER 到 S3b-2（核心加 `set_layout`），記為已知限制 |
