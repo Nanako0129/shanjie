@@ -127,24 +127,116 @@ fn row1_passthrough_keys_leave_no_trace() {
     }
 }
 
-// ---------- row 2 ----------
+// ---------- row 2 (s3d: punctuation stays in the composition) ----------
+const PUNCT_TABLE: [(char, char); 10] = [(',', '，'), ('.', '。'), ('/', '？'), ('1', '！'), (';', '：'), ('[', '「'), (']', '」'), ('9', '（'), ('0', '）'), ('`', '～')];
+
+/// s3d acceptance 1: every punctuation key (and Ctrl+\) goes into the composition at the cursor, drops
+/// the pending syllable, closes candidates and commits nothing; Enter commits it with the rest.
 #[test]
-fn row2_punctuation_commits_composition_then_punct() {
-    let table = [(',', '，'), ('.', '。'), ('/', '？'), ('1', '！'), (';', '：'), ('[', '「'), (']', '」'), ('9', '（'), ('0', '）'), ('`', '～')];
-    for (c, p) in table {
+fn row2_punctuation_goes_into_the_composition() {
+    for (c, p) in PUNCT_TABLE {
         let mut e = std();
         typ(&mut e, NIHAO);
         typ(&mut e, "c"); // pending ㄏ is dropped
         let o = k(&mut e, Key::ch(c, MOD_SHIFT));
-        assert!(o.handled && o.commit == format!("你好{p}") && o.preedit.is_empty() && o.selected.is_none());
+        assert!(o.handled && o.commit.is_empty() && o.preedit == format!("你好{p}") && o.candidates.is_empty(), "{c}");
+        assert!(o.cursor_utf16 == 3, "{c}");
+        let o = kk(&mut e, KeyKind::Enter);
+        assert!(o.handled && o.commit == format!("你好{p}") && o.preedit.is_empty(), "{c}");
         assert!(kk(&mut e, KeyKind::Enter) == blank(false)); // state fully cleared
     }
+    // Ctrl+\ with candidates open: they close, 、 goes in after the composition.
     let mut e = std();
-    typ(&mut e, "su3 "); // candidates open
+    let shown = typ(&mut e, "su3").preedit;
+    typ(&mut e, " "); // candidates open
     let o = k(&mut e, Key::ch('\\', MOD_CONTROL));
-    assert!(o.handled && o.commit == "你、" && o.candidates.is_empty() && o.selected.is_none());
-    let o = k(&mut e, Key::ch(',', MOD_SHIFT)); // empty composition
-    assert!(o.handled && o.commit == "，");
+    assert!(o.handled && o.commit.is_empty() && o.preedit == format!("{shown}、") && o.candidates.is_empty() && o.selected.is_none());
+    // Ctrl+\ drops a pending syllable too.
+    let mut e = std();
+    typ(&mut e, NIHAO);
+    typ(&mut e, "c");
+    assert!(k(&mut e, Key::ch('\\', MOD_CONTROL)).preedit == "你好、");
+    // Empty composition: the punctuation alone is the composition; Enter commits it.
+    let mut e = std();
+    let o = k(&mut e, Key::ch(',', MOD_SHIFT));
+    assert!(o.handled && o.commit.is_empty() && o.preedit == "，");
+    assert!(kk(&mut e, KeyKind::Enter).commit == "，");
+    // 你好，我是 (contract acceptance 1): both sides differ, so a duplicated stretch would show; the
+    // whole sentence is committed by Enter only.
+    let woshi = typ(&mut std(), "ji3g4").preedit; // ㄨㄛˇ ㄕˋ alone
+    assert!(woshi.chars().count() == 2 && woshi != "你好");
+    let mut e = std();
+    typ(&mut e, NIHAO);
+    k(&mut e, Key::ch(',', MOD_SHIFT));
+    let o = typ(&mut e, "ji3g4");
+    assert!(o.commit.is_empty() && o.preedit == format!("你好，{woshi}"));
+    assert!(kk(&mut e, KeyKind::Enter).commit == format!("你好，{woshi}"));
+    // Esc clears it; reset(Commit) returns it.
+    let mut e = std();
+    typ(&mut e, NIHAO);
+    k(&mut e, Key::ch('.', MOD_SHIFT));
+    assert!(e.reset(ResetMode::Commit).commit == "你好。");
+    typ(&mut e, NIHAO);
+    k(&mut e, Key::ch('.', MOD_SHIFT));
+    assert!(kk(&mut e, KeyKind::Esc).preedit.is_empty());
+}
+
+/// s3d acceptance 2: the cursor and Backspace/Delete treat punctuation as one cell.
+#[test]
+fn punctuation_is_one_cell_for_editing() {
+    let mut e = std();
+    typ(&mut e, NIHAO);
+    k(&mut e, Key::ch(',', MOD_SHIFT));
+    typ(&mut e, NIHAO); // 你好，你好, cursor 5
+    for want in [4, 3, 2] {
+        assert!(kk(&mut e, KeyKind::Left).cursor_utf16 == want);
+    }
+    let o = kk(&mut e, KeyKind::Delete); // the punctuation right of the cursor
+    assert!(o.preedit == "你好你好" && o.cursor_utf16 == 2);
+    let mut e = std();
+    typ(&mut e, NIHAO);
+    k(&mut e, Key::ch(',', MOD_SHIFT));
+    let o = kk(&mut e, KeyKind::Backspace); // the punctuation left of the cursor
+    assert!(o.preedit == "你好" && o.cursor_utf16 == 2);
+    k(&mut e, Key::ch(',', MOD_SHIFT));
+    assert!(kk(&mut e, KeyKind::Home).cursor_utf16 == 0);
+    assert!(kk(&mut e, KeyKind::End).cursor_utf16 == 3);
+    // Punctuation inserted in the middle shifts what follows.
+    kk(&mut e, KeyKind::Left);
+    let o = k(&mut e, Key::ch('.', MOD_SHIFT));
+    assert!(o.preedit == "你好。，" && o.cursor_utf16 == 3);
+}
+
+/// s3d acceptance 3 (a regression check: lexicon keys never span `_punct_` readings): no candidates
+/// right after punctuation, and the range after it is the same as without it.
+#[test]
+fn candidates_never_span_punctuation() {
+    let mut e = std();
+    typ(&mut e, NIHAO);
+    let before = k(&mut e, Key::ch(',', MOD_SHIFT));
+    assert!(kk(&mut e, KeyKind::Space) == before);
+    assert!(kk(&mut e, KeyKind::Down) == before);
+    let o = typ(&mut e, NIHAO);
+    let o2 = kk(&mut e, KeyKind::Space);
+    assert!(o2.candidates[..] == cands(&[NI, HAO])[..9] && o2.preedit == o.preedit);
+    // Cursor 0 with punctuation first: nothing to list.
+    let mut e = std();
+    k(&mut e, Key::ch(',', MOD_SHIFT));
+    typ(&mut e, NIHAO);
+    let home = kk(&mut e, KeyKind::Home);
+    assert!(kk(&mut e, KeyKind::Space) == home);
+}
+
+/// s3d acceptance 5: punctuation counts toward the 40-token limit.
+#[test]
+fn punctuation_counts_toward_the_limit() {
+    let mut e = std();
+    let mut shown = String::new();
+    for _ in 1..40 {
+        shown = typ(&mut e, "su3").preedit;
+    }
+    let o = k(&mut e, Key::ch(',', MOD_SHIFT));
+    assert!(o.handled && o.commit == format!("{shown}，") && o.preedit.is_empty() && o.cursor_utf16 == 0);
 }
 
 // ---------- rows 3-8, 15 ----------
