@@ -1,6 +1,7 @@
 //! S0 core: port of reference/proto/ime.py (lexicon, to_syllables, beam decode, learners).
 //! R2 (contract section 8): errors carry a kind and a length only, never input text.
 
+pub mod engine;
 pub mod eval;
 
 use std::collections::HashMap;

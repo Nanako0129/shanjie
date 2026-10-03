@@ -192,3 +192,19 @@ void    shanjie_output_free(ShanjieOutput *output);
   連結參數以 `--print native-static-libs` 實際印出的為準；若和上面的寫法不同，executor 照實際值改指令並寫回本節。
 - 這個測試不在 `cargo test` 裡；由 security-executor 執行一次並回報輸出，verifier 再獨立執行。
 - **反向檢查**（verifier 做）：把 `shanjie.h` 裡 `ShanjieOutput` 的 `commit` 和 `preedit` 兩個欄位對調後重新編譯，驅動程式必須失敗；檢查完把標頭還原。
+
+## 8. 實作決定
+
+契約沒寫、`engine.rs` 實作時自行決定的事（S3b 對照截圖時可改）：
+
+- **API 形狀**：`Engine::new(data_dir, Layout)` 讀檔，`Engine::with_lexicon(Arc<Lexicon>, Layout)` 共用已載入的詞庫（測試每個測試檔只載入一次）；`load_lexicon(data_dir)` 單獨公開。`Key { kind: KeyKind, ch: char, modifiers: u32 }`（`KeyKind::from_code` 把 ABI 的 1–13 轉成列舉，`ch` 的合法性由 `ffi.rs` 先擋）。`Output` 欄位與 §6 一一對應（`selected: Option<usize>`、`candidates: Vec<String>`）。錯誤只有 `EngineError::LoadFailed`（碼 3）與 `Internal`（碼 4）；`key` 回 `Internal` 之前引擎已自行清空（等同 reset 模式 1）。`reset(mode)` 不會失敗。
+- **R2**：`Key`、`Output`、`Engine` 都不 `derive(Debug)`；`Output` 只 derive `PartialEq`，測試用 `assert!(a == b)`。
+- **Ctrl+\ 的判定**：只有「修飾鍵恰為 CONTROL、字元為 `\`」算 Ctrl+\；Ctrl+Shift+\ 屬第 1 條（直通）。標點鍵只認「修飾鍵恰為 SHIFT」。
+- **第 1 條的輸出**：直通時回傳 `handled = 0`、`commit` 為空，其餘欄位是目前狀態的快照（狀態不變）。第 22 條直通同理。
+- **取代後的 Backspace（第 11 條）**：同一欄被取代時，新符號算「最後放進」；Backspace 先刪它，不會還原舊符號。
+- **候選邊界**：↑↓ 在第一個／最後一個停住不繞回；←→ 在第一頁／最後一頁停住（換頁後選取回到該頁第 0 個）；只有空白鍵會從最後一頁繞回第一頁。候選開啟時 Esc／Backspace 是「已處理」（第 7 條），不會落到第 12 條以後。候選為空（不會發生，因每個音節都有詞條）時不開啟。
+- **第 8 條**：「其他鍵」＝第 3–7 條沒列到的所有鍵（含 Delete、Home、End、Tab、Enter 以外的字元；注意 Enter 屬第 6 條）。候選已關閉後，該鍵接著照第 9 條起處理，所以 Home 會真的把游標移到 0。
+- **游標在 preedit 的位置**：假設每個音節對應顯示字串的一個字元（詞庫載入時已過濾字數不等的詞；疊加層未過濾，若有不符則游標位置夾在字串長度內）。`cursor_utf16` ＝游標前的字元＋未完成音節的 UTF-16 長度。
+- **固定詞**：選字後游標不動；固定詞範圍以音節為單位；插入發生在固定詞左邊界（`start == 游標`）時整段右移，發生在右邊界（`end == 游標`）時不動；刪除的音節落在 `[start, end)` 內就移除。
+- **自動送出**：第 40 個音節完成後（`syls.len() >= 40`）立刻送出整段並清空，`handled = 1`。
+- **解碼成本**：每次組字區變動都重算所有空白段（沒做快取）；重播測試 8,336 鍵的 p95 約 1.2 ms、最大約 9 ms（release，標準與倚天相近）。

@@ -1,0 +1,460 @@
+//! S3a contract 7.1 behaviour tests. Output/Key hold input text and have no Debug: compare with `assert!(a == b)`.
+use core::engine::*;
+use std::path::Path;
+use std::sync::{Arc, OnceLock};
+
+fn lex() -> Arc<core::Lexicon> {
+    static L: OnceLock<Arc<core::Lexicon>> = OnceLock::new();
+    L.get_or_init(|| load_lexicon(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../data/lexicon")).unwrap()).clone()
+}
+fn eng(l: Layout) -> Engine {
+    Engine::with_lexicon(lex(), l)
+}
+fn std() -> Engine {
+    eng(Layout::Standard)
+}
+fn plain(c: char) -> Key {
+    if c == ' ' { Key::new(KeyKind::Space) } else { Key::ch(c, 0) }
+}
+fn k(e: &mut Engine, key: Key) -> Output {
+    e.key(key).unwrap()
+}
+fn kk(e: &mut Engine, kind: KeyKind) -> Output {
+    k(e, Key::new(kind))
+}
+fn typ(e: &mut Engine, s: &str) -> Output {
+    let mut last = None;
+    for c in s.chars() {
+        last = Some(k(e, plain(c)));
+    }
+    last.unwrap()
+}
+fn presses(e: &mut Engine, n: usize, kind: KeyKind) {
+    for _ in 0..n {
+        kk(e, kind);
+    }
+}
+const NIHAO: &str = "su3cl3"; // standard layout: ㄋㄧˇ ㄏㄠˇ
+const NI: &str = "ㄋㄧˇ";
+const HAO: &str = "ㄏㄠˇ";
+fn blank(handled: bool) -> Output {
+    Output { handled, commit: String::new(), preedit: String::new(), cursor_utf16: 0, candidates: vec![], selected: None }
+}
+/// Independent expectation of the candidate list. `end`: readings end at `ks.len()`; otherwise they start at 0.
+fn expect_cands(ks: &[&str], from_start: bool) -> Vec<String> {
+    let l = lex();
+    let mut seen = std::collections::HashSet::new();
+    let mut out = vec![];
+    for n in (1..=l.max_len.min(ks.len())).rev() {
+        let part = if from_start { &ks[..n] } else { &ks[ks.len() - n..] };
+        let key: Vec<String> = part.iter().map(|s| s.to_string()).collect();
+        for (w, _) in l.entries(&key) {
+            if seen.insert(w.to_string()) {
+                out.push(w.to_string());
+            }
+        }
+    }
+    out
+}
+fn cands(ks: &[&str]) -> Vec<String> {
+    expect_cands(ks, false)
+}
+/// Top-1 of a single syllable (what the engine displays for it).
+fn top(s: &str) -> String {
+    cands(&[s])[0].clone()
+}
+/// Open candidates for "ㄕˋ" (many homophones) and return the full expected list.
+fn open_shi(e: &mut Engine) -> Vec<String> {
+    typ(e, "g4 ");
+    let all = cands(&["ㄕˋ"]);
+    assert!(all.len() > 27, "need at least 4 pages");
+    all
+}
+
+// ---------- layouts ----------
+const SYMS: &str = "ㄅㄆㄇㄈㄉㄊㄋㄌㄍㄎㄏㄐㄑㄒㄓㄔㄕㄖㄗㄘㄙㄧㄨㄩㄚㄛㄜㄝㄞㄟㄠㄡㄢㄣㄤㄥㄦ";
+// Contract table 1 transcribed independently of engine.rs, one key per symbol in SYMS order.
+const STD_T: &str = "1qaz2wsxedcrfv5tgbyhnujm8ik,9ol.0p;/-";
+const ETEN_T: &str = "bpmfdtnlvkhg7c,./j;'sexuaorwiqzy890-=";
+
+fn layout_covers(l: Layout, table: &str, tones: [char; 4]) {
+    assert!(SYMS.chars().count() == 37 && table.chars().count() == 37);
+    for (sym, key) in SYMS.chars().zip(table.chars()) {
+        let o = k(&mut eng(l), plain(key));
+        assert!(o.handled && o.preedit == sym.to_string(), "symbol key");
+    }
+    let (m, a) = (table.chars().nth(2).unwrap(), if l == Layout::Standard { '8' } else { 'a' }); // ㄇ ㄚ
+    for (i, tk) in std::iter::once(' ').chain(tones).enumerate() {
+        let mut e = eng(l);
+        typ(&mut e, &format!("{m}{a}"));
+        let o = k(&mut e, plain(tk));
+        assert!(o.handled && o.preedit == top(&format!("ㄇㄚ{}", ["", "ˊ", "ˇ", "ˋ", "˙"][i])), "tone key");
+    }
+}
+#[test]
+fn layout_standard_covers_37_symbols_and_5_tones() {
+    layout_covers(Layout::Standard, STD_T, ['6', '3', '4', '7']);
+}
+#[test]
+fn layout_eten_covers_37_symbols_and_5_tones() {
+    layout_covers(Layout::Eten, ETEN_T, ['2', '3', '4', '1']);
+}
+
+// ---------- row 1 ----------
+#[test]
+fn row1_passthrough_keys_leave_no_trace() {
+    let junk = [
+        Key::ch('a', MOD_COMMAND),
+        Key::ch('s', MOD_OPTION),
+        Key::ch('s', MOD_CAPSLOCK),
+        Key::ch('a', MOD_CONTROL),
+        Key::ch('\\', MOD_CONTROL | MOD_SHIFT),
+        Key { kind: KeyKind::Left, ch: '\0', modifiers: MOD_CONTROL },
+        Key { kind: KeyKind::Space, ch: '\0', modifiers: MOD_COMMAND },
+    ];
+    // composition, open candidates, selecting, pending syllable
+    let script: Vec<Key> = "su3cl3 ".chars().map(plain).chain([Key::new(KeyKind::Down)]).chain("1su".chars().map(plain)).collect();
+    let (mut a, mut b) = (std(), std());
+    for key in &script {
+        assert!(k(&mut a, *key) == k(&mut b, *key));
+        for j in &junk {
+            let o = k(&mut b, *j);
+            assert!(!o.handled && o.commit.is_empty());
+        }
+    }
+    for key in [plain('3'), Key::new(KeyKind::Left), Key::new(KeyKind::Enter)] {
+        assert!(k(&mut a, key) == k(&mut b, key));
+    }
+}
+
+// ---------- row 2 ----------
+#[test]
+fn row2_punctuation_commits_composition_then_punct() {
+    let table = [(',', '，'), ('.', '。'), ('/', '？'), ('1', '！'), (';', '：'), ('[', '「'), (']', '」'), ('9', '（'), ('0', '）'), ('`', '～')];
+    for (c, p) in table {
+        let mut e = std();
+        typ(&mut e, NIHAO);
+        typ(&mut e, "c"); // pending ㄏ is dropped
+        let o = k(&mut e, Key::ch(c, MOD_SHIFT));
+        assert!(o.handled && o.commit == format!("你好{p}") && o.preedit.is_empty() && o.selected.is_none());
+        assert!(kk(&mut e, KeyKind::Enter) == blank(false)); // state fully cleared
+    }
+    let mut e = std();
+    typ(&mut e, "su3 "); // candidates open
+    let o = k(&mut e, Key::ch('\\', MOD_CONTROL));
+    assert!(o.handled && o.commit == "你、" && o.candidates.is_empty() && o.selected.is_none());
+    let o = k(&mut e, Key::ch(',', MOD_SHIFT)); // empty composition
+    assert!(o.handled && o.commit == "，");
+}
+
+// ---------- rows 3-8, 15 ----------
+#[test]
+fn row15_candidate_range_order_and_dedup() {
+    // end of two syllables: 2-syllable words first, then 1-syllable words of the last syllable
+    let mut e = std();
+    typ(&mut e, NIHAO);
+    let o = kk(&mut e, KeyKind::Down);
+    let want = cands(&[NI, HAO]);
+    assert!(o.handled && o.selected == Some(0) && o.candidates[..] == want[..9] && want[0] == "你好");
+    // cursor in the middle of three syllables: range ends at the cursor
+    kk(&mut e, KeyKind::Esc);
+    kk(&mut e, KeyKind::Esc);
+    typ(&mut e, "su3cl3su3");
+    kk(&mut e, KeyKind::Left);
+    let o = kk(&mut e, KeyKind::Space);
+    assert!(o.candidates[..] == cands(&[NI, HAO])[..9]);
+    // cursor 0: range starts at 0
+    kk(&mut e, KeyKind::Esc);
+    kk(&mut e, KeyKind::Home);
+    let o = kk(&mut e, KeyKind::Down);
+    assert!(o.candidates[..] == expect_cands(&[NI, HAO, NI], true)[..9]);
+    // dedup: no string twice
+    let all = cands(&[NI, HAO]);
+    let set: std::collections::HashSet<_> = all.iter().collect();
+    assert!(set.len() == all.len());
+}
+#[test]
+fn rows3_to_8_candidate_keys() {
+    let mut e = std();
+    let all = open_shi(&mut e);
+    let page = |p: usize| all[p * 9..((p + 1) * 9).min(all.len())].to_vec();
+    // 4: up/down move across pages, clamped at both ends
+    for i in 1..=10 {
+        let o = kk(&mut e, KeyKind::Down);
+        assert!(o.selected == Some(i % 9) && o.candidates == page(i / 9));
+    }
+    for i in (0..10).rev() {
+        let o = kk(&mut e, KeyKind::Up);
+        assert!(o.selected == Some(i % 9) && o.candidates == page(i / 9));
+    }
+    assert!(kk(&mut e, KeyKind::Up).selected == Some(0));
+    // 5: left/right change page and select its first; clamped at the first page
+    let o = kk(&mut e, KeyKind::Right);
+    assert!(o.selected == Some(0) && o.candidates == page(1));
+    let o = kk(&mut e, KeyKind::Left);
+    assert!(o.selected == Some(0) && o.candidates == page(0));
+    assert!(kk(&mut e, KeyKind::Left).candidates == page(0));
+    // 5: space = next page, wraps from the last page to the first
+    let pages = (all.len() + 8) / 9;
+    for p in 1..pages {
+        let o = kk(&mut e, KeyKind::Space);
+        assert!(o.candidates == page(p) && o.selected == Some(0));
+    }
+    assert!(kk(&mut e, KeyKind::Space).candidates == page(0));
+    // 3: digit picks the n-th of the current page and closes
+    kk(&mut e, KeyKind::Space);
+    let o = k(&mut e, plain('3'));
+    assert!(o.handled && o.selected.is_none() && o.candidates.is_empty() && o.preedit == all[9 + 2]);
+    // 3: a digit beyond the (short) last page is ignored, candidates stay open
+    let mut e = std();
+    open_shi(&mut e);
+    presses(&mut e, pages - 1, KeyKind::Space);
+    let n_last = all.len() - (pages - 1) * 9;
+    if n_last < 9 {
+        let o = k(&mut e, plain('9'));
+        assert!(o.handled && o.selected == Some(0) && o.candidates.len() == n_last);
+    }
+    // 6: enter takes the selected one
+    let mut e = std();
+    open_shi(&mut e);
+    presses(&mut e, 2, KeyKind::Down);
+    let o = kk(&mut e, KeyKind::Enter);
+    assert!(o.handled && o.commit.is_empty() && o.selected.is_none() && o.preedit == all[2]);
+    // 7: esc and backspace close without changing anything
+    for kind in [KeyKind::Esc, KeyKind::Backspace] {
+        let mut e = std();
+        open_shi(&mut e);
+        let o = kk(&mut e, kind);
+        assert!(o.handled && o.selected.is_none() && o.candidates.is_empty() && o.preedit == top("ㄕˋ") && o.cursor_utf16 == 1);
+    }
+    // 8: any other key closes, then runs from rule 9: a zhuyin key starts a syllable
+    let mut e = std();
+    open_shi(&mut e);
+    let o = k(&mut e, plain('c'));
+    assert!(o.handled && o.selected.is_none() && o.preedit == format!("{}ㄏ", top("ㄕˋ")));
+    // 8 then 21: Tab closes, commits the composition, passes through
+    let mut e = std();
+    open_shi(&mut e);
+    let o = kk(&mut e, KeyKind::Tab);
+    assert!(!o.handled && o.commit == top("ㄕˋ") && o.selected.is_none());
+    // 8 then 17: Left closes candidates... Left is a page key (rule 5), Home is "other": closes and moves the cursor
+    let mut e = std();
+    open_shi(&mut e);
+    let o = kk(&mut e, KeyKind::Home);
+    assert!(o.handled && o.selected.is_none() && o.cursor_utf16 == 0);
+}
+
+// ---------- rows 9-14 ----------
+#[test]
+fn rows9_to_14_pending_syllable() {
+    let mut e = std();
+    assert!(k(&mut e, plain('s')).preedit == "ㄋ"); // 14
+    assert!(k(&mut e, plain('u')).preedit == "ㄋㄧ"); // 9
+    assert!(k(&mut e, plain('c')).preedit == "ㄏㄧ"); // initial column replaced
+    assert!(k(&mut e, plain('s')).preedit == "ㄋㄧ");
+    // 11: removes the last placed symbol (the replaced initial counts as last)
+    assert!(kk(&mut e, KeyKind::Backspace).preedit == "ㄧ");
+    assert!(kk(&mut e, KeyKind::Backspace).preedit.is_empty());
+    // 13: other keys are handled and ignored
+    typ(&mut e, "s");
+    for key in [KeyKind::Enter, KeyKind::Left, KeyKind::Tab, KeyKind::Up, KeyKind::Delete, KeyKind::Down] {
+        let o = kk(&mut e, key);
+        assert!(o.handled && o.commit.is_empty() && o.preedit == "ㄋ");
+    }
+    assert!(k(&mut e, Key::ch('a', MOD_SHIFT)).preedit == "ㄋ");
+    // 12
+    let o = kk(&mut e, KeyKind::Esc);
+    assert!(o.handled && o.preedit.is_empty());
+    // 10: space is tone 1 (ㄧ alone is a lexicon syllable)
+    typ(&mut e, "u");
+    assert!(kk(&mut e, KeyKind::Space).preedit == top("ㄧ"));
+    // new syllable goes in at the cursor, cursor to its right (UTF-16 units)
+    let o = typ(&mut e, "su3");
+    assert!(o.preedit.chars().count() == 2 && o.cursor_utf16 == 2);
+    kk(&mut e, KeyKind::Home);
+    let o = typ(&mut e, "cl3");
+    assert!(o.cursor_utf16 == 1 && o.preedit.chars().count() == 3);
+    // the pending syllable shows at the cursor
+    let o = typ(&mut e, "c");
+    assert!(o.preedit.chars().nth(1) == Some('ㄏ') && o.cursor_utf16 == 2);
+}
+#[test]
+fn syllable_not_in_lexicon_is_rejected_composition_unchanged() {
+    assert!(lex().entries(&["ㄅㄩ".to_string()]).is_empty());
+    let mut e = std();
+    typ(&mut e, "su3");
+    let before = typ(&mut e, "1m"); // ㄅㄩ
+    for tk in [' ', '6', '3', '4', '7'] {
+        let o = k(&mut e, plain(tk));
+        assert!(o.handled && o.commit.is_empty() && o.preedit == before.preedit && o.cursor_utf16 == before.cursor_utf16);
+    }
+    let o = kk(&mut e, KeyKind::Backspace); // pending intact: ㄩ removed, ㄅ left
+    assert!(o.preedit.ends_with("ㄅ") && o.preedit.starts_with('你'));
+}
+
+// ---------- rows 16-22 ----------
+#[test]
+fn rows16_to_20_composition_editing() {
+    let mut e = std();
+    typ(&mut e, NIHAO);
+    for key in [plain('6'), Key::new(KeyKind::Up)] {
+        let o = k(&mut e, key); // 16
+        assert!(o.handled && o.preedit == "你好" && o.cursor_utf16 == 2);
+    }
+    // 17
+    assert!(kk(&mut e, KeyKind::Left).cursor_utf16 == 1);
+    assert!(kk(&mut e, KeyKind::Home).cursor_utf16 == 0);
+    assert!(kk(&mut e, KeyKind::Left).cursor_utf16 == 0);
+    assert!(kk(&mut e, KeyKind::Right).cursor_utf16 == 1);
+    assert!(kk(&mut e, KeyKind::End).cursor_utf16 == 2);
+    let o = kk(&mut e, KeyKind::Right);
+    assert!(o.handled && o.cursor_utf16 == 2);
+    // 18: Delete at the right edge ignored; Backspace removes left; edges ignored
+    assert!(kk(&mut e, KeyKind::Delete).preedit == "你好");
+    let o = kk(&mut e, KeyKind::Backspace);
+    assert!(o.preedit.chars().count() == 1 && o.cursor_utf16 == 1 && o.preedit.starts_with('你'));
+    kk(&mut e, KeyKind::Home);
+    let o = kk(&mut e, KeyKind::Backspace);
+    assert!(o.handled && o.preedit.chars().count() == 1 && o.cursor_utf16 == 0);
+    let o = kk(&mut e, KeyKind::Delete);
+    assert!(o.handled && o.preedit.is_empty());
+    // 19
+    typ(&mut e, NIHAO);
+    let o = kk(&mut e, KeyKind::Enter);
+    assert!(o.handled && o.commit == "你好" && o.preedit.is_empty());
+    // 20
+    typ(&mut e, "su3");
+    let o = kk(&mut e, KeyKind::Esc);
+    assert!(o.handled && o.commit.is_empty() && o.preedit.is_empty());
+}
+#[test]
+fn row21_other_key_commits_then_passes_through() {
+    for key in [Key::new(KeyKind::Tab), Key::ch('a', MOD_SHIFT), Key::ch('x', MOD_SHIFT), Key::ch('=', 0), Key::ch('5', MOD_SHIFT)] {
+        let mut e = std();
+        typ(&mut e, NIHAO);
+        let o = k(&mut e, key);
+        assert!(!o.handled && o.commit == "你好" && o.preedit.is_empty());
+        assert!(kk(&mut e, KeyKind::Enter) == blank(false));
+    }
+}
+#[test]
+fn row22_empty_composition_passes_through() {
+    let mut e = std();
+    for key in [Key::new(KeyKind::Tab), Key::new(KeyKind::Enter), Key::new(KeyKind::Esc), Key::new(KeyKind::Space), Key::new(KeyKind::Left), Key::new(KeyKind::Backspace), plain('6'), Key::ch('a', MOD_SHIFT)] {
+        assert!(k(&mut e, key) == blank(false));
+    }
+}
+
+// ---------- fixed words ----------
+fn pick(e: &mut Engine, list: &[String], word: &str) -> Output {
+    let idx = list.iter().position(|w| w == word).unwrap();
+    kk(e, KeyKind::Down);
+    presses(e, idx, KeyKind::Down);
+    kk(e, KeyKind::Enter)
+}
+#[test]
+fn fixed_one_syllable_word_survives_edits_and_is_removed_with_its_syllable() {
+    let two = cands(&[NI, HAO]);
+    let alt = two.iter().find(|w| w.chars().count() == 1 && **w != top(HAO)).unwrap().clone();
+    let mut e = std();
+    typ(&mut e, NIHAO);
+    let o = pick(&mut e, &two, &alt);
+    assert!(o.preedit == format!("{}{alt}", top(NI)) && o.cursor_utf16 == 2 && o.selected.is_none());
+    // insert at the cursor, right of the fixed word: unchanged
+    let o = typ(&mut e, "su3");
+    assert!(o.preedit == format!("{}{alt}{}", top(NI), top(NI)));
+    // insert at the left edge: the fixed word moves right
+    kk(&mut e, KeyKind::Home);
+    let o = typ(&mut e, "su3");
+    assert!(o.preedit.chars().count() == 4 && o.preedit.chars().nth(2) == alt.chars().next());
+    // delete the syllable on the right of the cursor (index 1, left of the fixed word): fixed shifts back
+    let o = kk(&mut e, KeyKind::Delete);
+    assert!(o.preedit.chars().count() == 3 && o.preedit.chars().nth(1) == alt.chars().next());
+    // delete the fixed word's own syllable: it is gone, a new syllable decodes freely
+    kk(&mut e, KeyKind::Esc);
+    kk(&mut e, KeyKind::Esc);
+    typ(&mut e, NIHAO);
+    pick(&mut e, &two, &alt);
+    kk(&mut e, KeyKind::Backspace);
+    let o = typ(&mut e, "cl3");
+    assert!(o.preedit == format!("{}{}", top(NI), top(HAO)));
+}
+#[test]
+fn fixed_two_syllable_word_shifts_and_is_removed_when_cut() {
+    let two = cands(&[NI, HAO]);
+    let w = two.iter().find(|w| w.chars().count() == 2 && **w != "你好").unwrap().clone();
+    let build = || {
+        let mut e = std();
+        typ(&mut e, NIHAO);
+        let o = pick(&mut e, &two, &w);
+        assert!(o.preedit == w);
+        e
+    };
+    let fresh = |s: &str| typ(&mut std(), s).preedit;
+    // insert on the right of it: kept
+    let mut e = build();
+    assert!(typ(&mut e, "su3").preedit == format!("{w}{}", top(NI)));
+    // insert at the left edge: shifts right
+    let mut e = build();
+    kk(&mut e, KeyKind::Home);
+    let o = typ(&mut e, "su3");
+    assert!(o.preedit.chars().skip(1).collect::<String>() == w);
+    // insert inside the span: removed, everything decoded freely
+    let mut e = build();
+    kk(&mut e, KeyKind::Left);
+    assert!(typ(&mut e, "su3").preedit == fresh("su3su3cl3"));
+    // delete inside the span (Backspace at the right end, Delete mid-way): removed
+    let mut e = build();
+    assert!(kk(&mut e, KeyKind::Backspace).preedit == fresh("su3"));
+    let mut e = build();
+    kk(&mut e, KeyKind::Left);
+    assert!(kk(&mut e, KeyKind::Delete).preedit == fresh("su3"));
+}
+
+// ---------- reset ----------
+#[test]
+fn reset_both_modes_equal_fresh_engine() {
+    let probe = |e: &mut Engine| -> Vec<Output> {
+        let keys: Vec<Key> = "su3 ".chars().map(plain).chain([Key::new(KeyKind::Left), Key::new(KeyKind::Esc), Key::new(KeyKind::Tab)]).chain("cl3".chars().map(plain)).chain([Key::new(KeyKind::Down), Key::new(KeyKind::Enter), Key::new(KeyKind::Home), Key::new(KeyKind::Enter)]).collect();
+        keys.into_iter().map(|key| e.key(key).unwrap()).collect()
+    };
+    for mode in [ResetMode::Commit, ResetMode::Discard] {
+        let mut e = std();
+        typ(&mut e, NIHAO);
+        kk(&mut e, KeyKind::Down);
+        kk(&mut e, KeyKind::Down);
+        kk(&mut e, KeyKind::Enter); // a fixed word exists
+        kk(&mut e, KeyKind::Left);
+        typ(&mut e, "c"); // and a pending symbol
+        let o = e.reset(mode);
+        match mode {
+            ResetMode::Commit => assert!(o.commit.chars().count() == 2 && o.preedit.is_empty()),
+            ResetMode::Discard => assert!(o == blank(true)),
+        }
+        assert!(o.candidates.is_empty() && o.selected.is_none() && o.cursor_utf16 == 0);
+        let mut fresh = std();
+        let (a, b) = (probe(&mut e), probe(&mut fresh));
+        assert!(a.len() == b.len() && a.iter().zip(&b).all(|(x, y)| x == y));
+    }
+    // with candidates open, Commit returns the display string, not a candidate
+    let mut e = std();
+    typ(&mut e, "su3 ");
+    let o = e.reset(ResetMode::Commit);
+    assert!(o.commit == top(NI) && o.selected.is_none() && o.candidates.is_empty());
+    let o = e.reset(ResetMode::Discard);
+    assert!(o == blank(true));
+}
+
+// ---------- 40-syllable auto commit ----------
+#[test]
+fn auto_commit_at_40th_syllable() {
+    let mut e = std();
+    for i in 1..40 {
+        let o = typ(&mut e, "su3");
+        assert!(o.handled && o.commit.is_empty() && o.preedit.chars().count() == i);
+    }
+    let o = typ(&mut e, "su3");
+    assert!(o.handled && o.commit.chars().count() == 40 && o.preedit.is_empty() && o.cursor_utf16 == 0);
+    let o = typ(&mut e, "su3");
+    assert!(o.commit.is_empty() && o.preedit == top(NI));
+}
