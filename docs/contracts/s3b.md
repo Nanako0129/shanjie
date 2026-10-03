@@ -186,16 +186,51 @@
 
 ## 13. 修訂一：單一輸入方式、選單切換鍵盤、中文 app 名稱（使用者 2026-10-04）
 
-使用者要求：輸入方式清單裡只有一個「善解輸入法」，鍵盤排列在它自己的選單裡選（像自然輸入法）；app 檔名改成「善解輸入法」。本節取代 §2、§4、§5、§6、§10 中與「兩個輸入模式」和 `shanjie.app` 檔名衝突的部分。
+使用者要求：輸入方式清單裡只有一個「善解輸入法」，鍵盤排列在它自己的選單裡選（像自然輸入法）；app 檔名改成「善解輸入法」。本節取代 §2–§11 中所有與「兩個輸入模式」和 `shanjie.app` 檔名衝突的文字。
 
-- **檔名與顯示名稱**：bundle 資料夾改名為 `善解輸入法.app`；顯示名稱（`CFBundleName`／`CFBundleDisplayName`，`zh-Hant.lproj`）為「善解輸入法」，英文（`en.lproj` 與 Info.plist 預設）為「Shanjie」；`LSHasLocalizedDisplayName` 保留。**不變**：bundle ID `com.nyanako.inputmethod.shanjie`、執行檔 `Contents/MacOS/shanjie`、Release 附件 `shanjie-<版本>.zip`（解壓後是 `善解輸入法.app`）。`BUNDLE_ID`／`OUT_DIR` 兩個參數照舊；`OUT_DIR` 裡的 app 一律叫 `善解輸入法.app`。
-- **單一輸入模式**：Info.plist 只有一個模式 `<BUNDLE_ID>.zhuyin`，顯示名稱「善解輸入法」（英文「Shanjie」），`TISIntendedLanguage` 為 `zh-Hant`，`tsInputModeScriptKey` 為 `smTradChinese`，`tsVisibleInputModeOrderedArrayKey` 只有它。`InputMode` 不再由輸入模式 ID 決定排列。
-- **選單**：`IMKInputController` 的 `menu()` 回傳兩個互斥的項目「標準鍵盤」「倚天鍵盤」（目前的打勾）。選了就呼叫既有的切換排列流程（§5：送出組字、重建引擎、重載 LM 與設定），並把選擇存到 app 自己的 UserDefaults（鍵 `layout`，值 `standard`／`eten`）；啟動時讀它，沒有就用標準。偏好的讀寫透過注入的介面，`ShanjieKit` 測試用記憶體版，**自測與測試都不得寫入真正的 UserDefaults**。
-- **註冊**：`shanjie install` 一律呼叫 `TISRegisterInputSource(Bundle.main.bundleURL)`（重新登記會更新模式清單，不再在 bundle ID 已知時略過），再啟用 `<BUNDLE_ID>.zhuyin`；之前版本留下的 `.standard`／`.eten` 若仍在 TIS 清單，就 `TISDisableInputSource`（只停用、不刪除）。
-- **安裝腳本**：目的地改為 `~/Library/Input Methods/善解輸入法.app`。若存在舊名稱的 `~/Library/Input Methods/shanjie.app`，視為上一版：`lsregister -u` 後改名為 `.shanjie-previous`（和現在處理舊版的方式相同），讓 `~/Library/Input Methods` 裡只剩一份帶這個 bundle ID 的 `.app`。pkill 的比對路徑同時涵蓋新舊兩個名稱。HOME 檢查、files-only、mktemp 暫存、trap 等規則不變。
-- **驗收追加**：
-  - 驗收 2：Info.plist 只有一個輸入模式，名稱在地化正確；bundle 資料夾是 `善解輸入法.app`。
-  - 驗收 4：偏好介面的測試（選倚天 → 存下 `eten`、排列切換、組字先送出；以記憶體版偏好重新建立 shell 時讀回倚天）；`InputMode` 不再依模式 ID。
-  - `test-install-ime.sh`：新名稱的全新安裝、覆蓋安裝；存在舊名稱 `shanjie.app` 時升級後只剩 `善解輸入法.app`，舊的成為 `.shanjie-previous`。
-  - 使用者實測：輸入方式清單只有一個「善解輸入法」；選單可切換標準／倚天且重開機後記住；從兩個模式的舊版升級時，舊的兩個項目不再出現（或被停用）。
-- **範圍外**：注音以外的輸入法（拼音、倉頡等）、選單裡的其他項目（偏好設定、關於）。
+### 13.1 名稱
+
+- bundle 資料夾改名為 `善解輸入法.app`。顯示名稱：`zh-Hant.lproj` 為「善解輸入法」，`en.lproj` 與 Info.plist 預設為「Shanjie」，`LSHasLocalizedDisplayName` 保留（§11 原本說非中文系統也顯示中文名，改為顯示 Shanjie）。
+- **不變**：bundle ID `com.nyanako.inputmethod.shanjie`、執行檔 `Contents/MacOS/shanjie`、Release 附件 `shanjie-<版本>.zip`（解壓後是 `善解輸入法.app`；中文檔名的 zip 用 Finder／`ditto` 解壓，`unzip` 指令可能亂碼）。
+- **要改的每一處**（逐一改成 `善解輸入法.app`，或改用一個共用變數）：`scripts/build-app.sh`（產物路徑、`rm -rf "$OUT_DIR/…"` 規則）；`scripts/check-app.sh`（預設 APP）；`Makefile`（bundle 註解、`selftest-bundled` 的執行路徑、`clean-bundle`）；`.github/workflows/ci.yml`（shell job 的路徑）；`.github/workflows/release.yml`（build 的打包、sign 的解開／簽章／公證／驗證路徑、zip 內容）；`scripts/install-ime.sh`（用法、目的地、訊息、還原指令、結尾說明）；`scripts/test-install-ime.sh`；`docs/verification.md`（指令與殘留檢查）；本契約 §3、§4、§10 驗收 10、§11 的對應文字。
+- **`make clean-bundle`** 同時處理新舊兩個名稱：對 `build/` 與 `build/selftest/` 裡的 `善解輸入法.app` 與 `shanjie.app` 都 `lsregister -u` 後刪除。
+
+### 13.2 單一輸入模式與選單
+
+- Info.plist 只有一個模式 `<BUNDLE_ID>.zhuyin`（「善解輸入法」／「Shanjie」，`TISIntendedLanguage` 為 `zh-Hant`，`tsInputModeScriptKey` 為 `smTradChinese`），`tsVisibleInputModeOrderedArrayKey` 只有它；`zh-Hant` 與 `en` 的 `InfoPlist.strings` 都有這個模式 ID 的名稱。
+- `IMKInputController.menu()` 回傳兩個互斥項目「標準鍵盤」「倚天鍵盤」（目前的打勾），**各自用獨立的 selector**（IMK 呼叫時 `sender` 不一定是 `NSMenuItem`）。選了就走既有的切換排列流程（§5：送出組字、重建引擎、重載 LM 與設定），並存下選擇。
+- **偏好**：介面 `LayoutStore`（讀／寫 `standard`／`eten`）是 `Shell.init` 的**必要參數、不給預設值**；UserDefaults 版（app 自己的網域，鍵 `layout`）只放在 `Shanjie` target，`ShanjieKit` 與測試用記憶體版，所以測試不可能寫到真正的偏好。值不存在或不合法時用標準排列。**`Shell.init` 先讀偏好、再建引擎，只建一次**（約 240 MB）。
+
+### 13.3 註冊與升級
+
+- `shanjie install` 一律呼叫 `TISRegisterInputSource(Bundle.main.bundleURL)`（不再在 bundle ID 已知時略過），然後：
+  - **成功條件**：`TISCreateInputSourceList` 列得到 `<BUNDLE_ID>.zhuyin`，而且啟用成功 → exit 0。
+  - 列得到舊的 `<BUNDLE_ID>.standard`／`.eten` → `TISDisableInputSource`；停用失敗只印警告，不影響成功；列不到就什麼都不做。
+  - 列不到 `.zhuyin` → **exit 3**（和其他失敗區分）。
+- **未驗證**：重新登記一個已登記過的 bundle 後，TIS 是否立刻更新模式清單（可能要登出再登入）。
+- `scripts/install-ime.sh`：`install` 回傳 3 時印固定訊息「系統還沒載入新的輸入方式清單：請登出再登入，然後重新執行這個腳本」，**不印**換回上一版的指令；其他非 0 才印還原指令。
+- 目的地改為 `~/Library/Input Methods/善解輸入法.app`。舊名稱 `~/Library/Input Methods/shanjie.app`：
+  - 只有舊名稱時，視為上一版：`lsregister -u` 後改名為 `.shanjie-previous`（與現行規則相同）。
+  - 新舊名稱同時存在時，新名稱那份才是上一版（照現行規則保留為 `.shanjie-previous`），舊名稱那份 `lsregister -u` 後刪除。
+  - §4 的「只刪除或搬移的位置」因此加上舊名稱 `shanjie.app`（共四個字面路徑）。
+  - pkill 的比對涵蓋新舊兩個名稱。HOME 檢查、files-only、mktemp 暫存、trap 等規則不變。
+- **測試不呼叫系統的保護**：files-only 模式下 `install-ime.sh` 接受環境變數 `SHANJIE_TEST_LSREGISTER` 指定替代的 lsregister（非 files-only 時忽略它），`test-install-ime.sh` 用一個只記錄呼叫的替身，並在 PATH 前放 `pkill`／`pgrep` 替身；每個情況結束後斷言三者**都沒被呼叫**（verifier 在 PR #4 指出原本的測試看不到這點）。
+
+### 13.4 驗收追加
+
+1. 驗收 2：Info.plist 只有一個輸入模式；`zh-Hant` 與 `en` 的名稱都正確；bundle 資料夾是 `善解輸入法.app`。
+2. 驗收 4（行為觀察）：
+   - 以存了 `eten` 的記憶體版偏好建立 shell，打一個兩種排列結果不同的注音鍵，preedit 是倚天的結果。
+   - 選單動作選倚天：組字中的內容先送出，之後打字是倚天的結果，記憶體版偏好變成 `eten`。
+   - 不合法的偏好值 → 標準排列。
+   - 刻意把 init 改成「先建引擎、再讀偏好」時，至少一個測試失敗（verifier 做）。
+3. `test-install-ime.sh`：新名稱的全新安裝與覆蓋安裝；只有舊名稱 `shanjie.app` 時升級 → 只剩 `善解輸入法.app`，舊的成為 `.shanjie-previous`；新舊並存時升級 → 新名稱那份成為 `.shanjie-previous`、舊名稱刪除；每個情況都斷言 lsregister／pkill／pgrep 替身沒被呼叫。
+4. `make bundle selftest-bundled && make clean-bundle` 在同時有舊 `build/shanjie.app` 與新 `build/善解輸入法.app` 的 `build/` 裡執行後，`find build -name '*.app'` 沒有輸出；`docs/verification.md` 的殘留檢查拿一個存在的 `build/善解輸入法.app` 會找到它。
+5. 使用者實測（取代原本驗收 10 的路徑）：
+   - 從兩模式的舊版（若有安裝）升級：記錄第一次 `install-ime.sh` 的 exit code 與訊息，以及「系統設定 → 鍵盤 → 輸入方式」清單的實際內容。**通過條件**：清單（必要時登出再登入後）只有一個「善解輸入法」可加入，加入後可正常打字。
+   - 選單切換標準／倚天後打字結果正確；登出再登入後仍記得選擇。
+   - 執行中的行程載入的是 `善解輸入法.app` 裡的執行檔（`lsof -p <PID> -d txt`）。
+
+### 13.5 範圍外
+
+注音以外的輸入法（拼音、倉頡等）；選單裡的其他項目（偏好設定、關於）。
