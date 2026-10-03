@@ -4,36 +4,50 @@
 # (TISCreateInputSourceList), never registered or enabled, and the app is never launched as an
 # input method: it runs only with `--selftest` and with arguments it must refuse.
 #
-#   scripts/check-app.sh [build/shanjie.app]
+#   scripts/check-app.sh [build/善解輸入法.app]
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-APP="${1:-$ROOT/build/shanjie.app}"
+APP="${1:-$ROOT/build/善解輸入法.app}"
 BIN="$APP/Contents/MacOS/shanjie"
 PLIST="$APP/Contents/Info.plist"
 fail() { echo "error: $*" >&2; exit 1; }
-pb() { /usr/libexec/PlistBuddy -c "Print :$1" "$PLIST" 2>/dev/null; }
+pb() { /usr/libexec/PlistBuddy -c "Print :$1" "${2:-$PLIST}" 2>/dev/null; }
+MODE=com.nyanako.inputmethod.shanjie.zhuyin
 
-# --- 2: Info.plist and Resources
+# --- 2: Info.plist and Resources (with section 13: one input mode, the 善解輸入法.app folder and
+# the zh-Hant / en names)
+[ "$(basename "$APP")" = 善解輸入法.app ] || fail "the bundle folder is not 善解輸入法.app"
 plutil -lint "$PLIST" >/dev/null || fail "Info.plist does not lint"
+[ "$(pb CFBundleDevelopmentRegion)" = en ] || fail "CFBundleDevelopmentRegion"
+[ "$(pb CFBundleName)" = Shanjie ] || fail "CFBundleName"
+[ "$(pb CFBundleDisplayName)" = 善解輸入法 ] || fail "CFBundleDisplayName must equal the folder name"
+[ "$(pb LSHasLocalizedDisplayName)" = true ] || fail "LSHasLocalizedDisplayName"
 [ "$(pb CFBundleIdentifier)" = com.nyanako.inputmethod.shanjie ] || fail "bundle ID"
 [ "$(pb InputMethodConnectionName)" = com.nyanako.inputmethod.shanjie_Connection ] || fail "InputMethodConnectionName"
 [ "$(pb InputMethodServerControllerClass)" = ShanjieInputController ] || fail "InputMethodServerControllerClass"
 [ "$(pb InputMethodServerDelegateClass)" = ShanjieInputController ] || fail "InputMethodServerDelegateClass"
 [ "$(pb LSUIElement)" = true ] || fail "LSUIElement"
-for m in standard eten; do
-  K="ComponentInputModeDict:tsInputModeListKey:com.nyanako.inputmethod.shanjie.$m"
-  [ "$(pb "$K:TISIntendedLanguage")" = zh-Hant ] || fail "mode $m: TISIntendedLanguage"
-  [ "$(pb "$K:tsInputModeScriptKey")" = smTradChinese ] || fail "mode $m: tsInputModeScriptKey"
-done
-[ "$(pb ComponentInputModeDict:tsVisibleInputModeOrderedArrayKey:0)" = com.nyanako.inputmethod.shanjie.standard ] || fail "mode order"
-[ "$(pb ComponentInputModeDict:tsVisibleInputModeOrderedArrayKey:1)" = com.nyanako.inputmethod.shanjie.eten ] || fail "mode order"
+# Exactly one input mode: its entries are the only lines indented by one level.
+[ "$(pb ComponentInputModeDict:tsInputModeListKey | grep -E '^    [^ }]' | sed 's/ = .*//')" = "    $MODE" ] \
+  || fail "the input mode list is not exactly $MODE"
+K="ComponentInputModeDict:tsInputModeListKey:$MODE"
+[ "$(pb "$K:TISIntendedLanguage")" = zh-Hant ] || fail "mode: TISIntendedLanguage"
+[ "$(pb "$K:tsInputModeScriptKey")" = smTradChinese ] || fail "mode: tsInputModeScriptKey"
+[ "$(pb ComponentInputModeDict:tsVisibleInputModeOrderedArrayKey)" = "$(printf 'Array {\n    %s\n}' "$MODE")" ] || fail "visible mode list"
 R="$APP/Contents/Resources"
-for f in mcbpmf-data.txt overlay-add.tsv bigram.sjlm shanjie.tiff zh-Hant.lproj/InfoPlist.strings \
+for lp in "zh-Hant 善解輸入法" "en Shanjie"; do
+  read -r l name <<<"$lp"
+  S="$R/$l.lproj/InfoPlist.strings"
+  plutil -lint "$S" >/dev/null || fail "$l InfoPlist.strings does not lint"
+  for k in CFBundleName CFBundleDisplayName "$MODE"; do
+    [ "$(pb "$k" "$S")" = "$name" ] || fail "$l InfoPlist.strings: $k"
+  done
+done
+for f in mcbpmf-data.txt overlay-add.tsv bigram.sjlm shanjie.tiff \
          LICENSES/LICENSE LICENSES/McBopomofo-MIT.txt LICENSES/data.md LICENSES/CC-BY-SA-4.0-attribution.txt; do
   [ -s "$R/$f" ] || fail "Resources/$f is missing or empty"
 done
-plutil -lint "$R/zh-Hant.lproj/InfoPlist.strings" >/dev/null || fail "InfoPlist.strings does not lint"
 echo "check 2: ok"
 
 # --- 3: signature: valid, hardened runtime, no entitlements at all

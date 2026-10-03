@@ -86,7 +86,7 @@ jobs:
 
       # A tar keeps the bundle's modes and symlinks; upload-artifact does not.
       - name: Archive the unsigned app
-        run: tar -cf unsigned.tar -C build shanjie.app
+        run: tar -cf unsigned.tar -C build 善解輸入法.app
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -179,7 +179,7 @@ jobs:
 
           mkdir -p "$T/work" "$T/out" "$T/check"
           tar -xf "$T/unsigned/unsigned.tar" -C "$T/work"
-          APP="$T/work/shanjie.app"
+          APP="$T/work/善解輸入法.app"
           # Hardened runtime, secure timestamp, and no --entitlements.
           codesign --force --options runtime --timestamp --sign "$IDENTITY" --keychain "$KC" "$APP"
           codesign --verify --strict --deep "$APP"
@@ -207,7 +207,7 @@ jobs:
 
           # Verify what ships: the app as extracted from the final zip.
           ditto -x -k "$T/out/$ZIP" "$T/check"
-          V="$T/check/shanjie.app"
+          V="$T/check/善解輸入法.app"
           codesign --verify --strict --deep "$V" || fail "codesign --verify --strict --deep"
           INFO=$(codesign -dv --verbose=2 "$V" 2>&1)
           grep -q '^Authority=Developer ID Application: ' <<<"$INFO" || fail "not signed with Developer ID Application"

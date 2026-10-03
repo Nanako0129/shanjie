@@ -1,5 +1,5 @@
 #!/bin/bash
-# Build build/shanjie.app (docs/contracts/s3b.md section 2): the Rust core, the Swift shell, the
+# Build build/善解輸入法.app (docs/contracts/s3b.md sections 2 and 13): the Rust core, the Swift shell, the
 # bundle with its data, model and licenses, then an ad-hoc signature with the hardened runtime and
 # no entitlements. Used locally and in CI; it never touches a keychain, installs or launches the
 # app. Developer ID signing happens only in .github/workflows/release.yml.
@@ -10,8 +10,11 @@
 #   SHANJIE_VERSION  e.g. 0.1.0; otherwise the newest git tag (v0.1.0 -> 0.1.0), otherwise 0.0.0
 #   BUNDLE_ID        default com.nyanako.inputmethod.shanjie, the shipping ID (the one place it is
 #                    spelled for builds; `make selftest-bundled` passes a throwaway one locally).
-#                    The input mode IDs and the connection name derive from it.
-#   OUT_DIR          default build, relative to the repository; the app is $OUT_DIR/shanjie.app
+#                    The input mode ID and the connection name derive from it.
+#   OUT_DIR          default build, relative to the repository; the app is $OUT_DIR/善解輸入法.app
+#
+# The folder name is the user-facing name; the executable (Contents/MacOS/shanjie), the bundle ID and
+# the release asset (shanjie-<version>.zip) keep the ASCII name.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -30,7 +33,7 @@ done
 BUNDLE_ID="${BUNDLE_ID:-com.nyanako.inputmethod.shanjie}"
 [[ "$BUNDLE_ID" =~ ^[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$ ]] || fail "BUNDLE_ID '$BUNDLE_ID' is not a reverse-DNS identifier"
 OUT_DIR="${OUT_DIR:-build}"
-# rm -rf below acts on $OUT_DIR/shanjie.app: keep it inside the repository.
+# rm -rf below acts on $OUT_DIR/善解輸入法.app: keep it inside the repository.
 [[ -n "$OUT_DIR" && "$OUT_DIR" != /* && "/$OUT_DIR/" != */../* ]] || fail "OUT_DIR must be a relative path inside the repository"
 
 VERSION="${SHANJIE_VERSION:-}"
@@ -50,9 +53,10 @@ mkdir -p "$ROOT/$OUT_DIR"
 # Keeps Spotlight and LaunchServices from indexing local bundles, so the system never finds (or
 # launches) a build/ copy of the input method by its bundle ID.
 touch "$ROOT/$OUT_DIR/.metadata_never_index"
-APP="$ROOT/$OUT_DIR/shanjie.app"
+APP="$ROOT/$OUT_DIR/善解輸入法.app"
 rm -rf "$APP"
-mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources/zh-Hant.lproj" "$APP/Contents/Resources/LICENSES"
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources/zh-Hant.lproj" "$APP/Contents/Resources/en.lproj" \
+  "$APP/Contents/Resources/LICENSES"
 cp "$BIN" "$APP/Contents/MacOS/shanjie"
 
 RES="$APP/Contents/Resources"
@@ -77,12 +81,17 @@ The program itself is Apache-2.0 (LICENSE); mcbpmf-data.txt is MIT
 (McBopomofo-MIT.txt). Details: data.md.
 EOF
 
-cat > "$RES/zh-Hant.lproj/InfoPlist.strings" <<EOF
-"CFBundleName" = "善解";
-"CFBundleDisplayName" = "善解";
-"$BUNDLE_ID.standard" = "善解（標準）";
-"$BUNDLE_ID.eten" = "善解（倚天）";
+# One input mode (section 13.2); the keyboard layout is chosen in its menu, not by mode.
+MODE="$BUNDLE_ID.zhuyin"
+strings_for() {  # strings_for <lproj> <name>
+  cat > "$RES/$1/InfoPlist.strings" <<EOF
+"CFBundleName" = "$2";
+"CFBundleDisplayName" = "$2";
+"$MODE" = "$2";
 EOF
+}
+strings_for zh-Hant.lproj 善解輸入法
+strings_for en.lproj Shanjie
 
 mode() {
   cat <<EOF
@@ -107,11 +116,14 @@ cat > "$APP/Contents/Info.plist" <<EOF
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>CFBundleDevelopmentRegion</key><string>zh-Hant</string>
+  <key>CFBundleDevelopmentRegion</key><string>en</string>
   <key>CFBundleExecutable</key><string>shanjie</string>
   <key>CFBundleIdentifier</key><string>$BUNDLE_ID</string>
   <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
-  <key>CFBundleName</key><string>shanjie</string>
+  <key>CFBundleName</key><string>Shanjie</string>
+  <!-- Finder applies the localized names only when this base display name equals the folder name
+       (善解輸入法.app); the English name comes from en.lproj. Unverified on a real system. -->
+  <key>CFBundleDisplayName</key><string>善解輸入法</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>$VERSION</string>
   <key>CFBundleVersion</key><string>$VERSION</string>
@@ -131,13 +143,11 @@ cat > "$APP/Contents/Info.plist" <<EOF
   <dict>
     <key>tsInputModeListKey</key>
     <dict>
-$(mode "$BUNDLE_ID.standard")
-$(mode "$BUNDLE_ID.eten")
+$(mode "$MODE")
     </dict>
     <key>tsVisibleInputModeOrderedArrayKey</key>
     <array>
-      <string>$BUNDLE_ID.standard</string>
-      <string>$BUNDLE_ID.eten</string>
+      <string>$MODE</string>
     </array>
   </dict>
 </dict>

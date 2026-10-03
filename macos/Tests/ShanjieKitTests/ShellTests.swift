@@ -14,8 +14,8 @@ final class ShellTests: XCTestCase {
         resources = try XCTUnwrap(TestData.resources())
     }
 
-    private func makeShell(secure: Bool = false) -> Shell {
-        let shell = Shell(resources: resources, panel: FakePanel(), isSecureInput: { secure })
+    private func makeShell(secure: Bool = false, store: LayoutStore = MemoryLayoutStore()) -> Shell {
+        let shell = Shell(resources: resources, panel: FakePanel(), isSecureInput: { secure }, layoutStore: store)
         XCTAssertNotNil(shell.engine)
         return shell
     }
@@ -148,7 +148,7 @@ final class ShellTests: XCTestCase {
     }
 
     func testEngineThatCannotBeBuiltPassesEveryKey() {
-        let shell = Shell(resources: resources.appendingPathComponent("missing"), panel: FakePanel(), isSecureInput: { false })
+        let shell = Shell(resources: resources.appendingPathComponent("missing"), panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore())
         XCTAssertNil(shell.engine)
         let c = Controller(shell)
         c.session.activate()
@@ -292,19 +292,61 @@ final class ShellTests: XCTestCase {
         XCTAssertEqual(a.client.text, "你" + Row10.chat)
     }
 
-    // MARK: input mode
+    // MARK: keyboard layout (section 13.2)
 
-    func testSwitchingModeCommitsThenUsesTheNewLayout() {
+    /// `s` is ㄋ on the standard layout and ㄙ on ETen (s3a section 1).
+    private static let probe = "s", standardProbe = "ㄋ", etenProbe = "ㄙ"
+
+    func testStoredEtenLayoutAppliesFromTheStart() {
+        let store = MemoryLayoutStore("eten")
+        let c = Controller(makeShell(store: store))
+        c.session.activate()
+        XCTAssertEqual(c.session.layout, .eten)
+        c.type(Self.probe)
+        XCTAssertEqual(c.client.marked, Self.etenProbe, "the stored layout was not used to build the engine")
+        XCTAssertEqual(store.layout, "eten")
+    }
+
+    func testMissingOrInvalidLayoutIsStandard() {
+        for value in [nil, "", "bogus", "zhuyin", "ETEN", "com.nyanako.inputmethod.shanjie.eten"] as [String?] {
+            let c = Controller(makeShell(store: MemoryLayoutStore(value)))
+            c.session.activate()
+            XCTAssertEqual(c.session.layout, .standard, "\(value ?? "nil")")
+            c.type(Self.probe)
+            XCTAssertEqual(c.client.marked, Self.standardProbe, "\(value ?? "nil")")
+        }
+    }
+
+    func testMenuSelectionCommitsSwitchesAndStores() {
+        let store = MemoryLayoutStore()
+        let c = Controller(makeShell(store: store))
+        c.session.activate()
+        c.type("su3")
+        c.session.selectLayout(.eten)
+        XCTAssertEqual(c.client.text, "你", "the composition is committed before the switch")
+        XCTAssertEqual(c.client.marked, "")
+        XCTAssertEqual(store.layout, "eten")
+        XCTAssertEqual(c.session.layout, .eten)
+        c.type(Self.probe)
+        XCTAssertEqual(c.client.marked, Self.etenProbe)
+        c.press(Keys.esc)
+        c.session.selectLayout(.standard)
+        XCTAssertEqual(store.layout, "standard")
+        c.type(Self.probe)
+        XCTAssertEqual(c.client.marked, Self.standardProbe)
+    }
+
+    func testSwitchingLayoutCommitsThenUsesTheNewLayout() {
         let c = Controller(makeShell())
         c.session.activate()
         c.type("su3")
-        c.session.setInputMode("com.nyanako.inputmethod.shanjie.eten")
+        c.session.selectLayout(.eten)
         XCTAssertEqual(c.client.text, "你")
         XCTAssertEqual(c.client.marked, "")
         c.type("ne3hz3")
         c.press(Keys.enter)
         XCTAssertEqual(c.client.text, "你你好")
-        c.session.setInputMode("com.nyanako.inputmethod.shanjie.standard")
+        c.session.selectLayout(.standard)
         c.type("su3cl3")
         c.press(Keys.enter)
         XCTAssertEqual(c.client.text, "你你好你好")
