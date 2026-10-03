@@ -45,12 +45,12 @@
 
 ## 3. CI 與發布（GitHub Actions）
 
-- **模型雜湊只有一份**：`data/bigram.sjlm.sha256`（進 git）。`build-app.sh`、`ci.yml` 的兩個 job、`release.yml` 都讀它，不得各自寫死；`ci.yml` 現有的 `LM_SHA256` 改成讀這個檔。
+- **模型雜湊只有一份**：`data/bigram.sjlm.sha256`（進 git）。`build-app.sh`、`ci.yml` 的兩個 job、`release.yml` 都讀它，不得各自寫死（原本 `ci.yml` 的 `LM_SHA256` 環境變數已移除）。
 - **Rust 工具鏈**：所有會建 `libcore.a` 的 job（`ci.yml` 的 `core` 與 `shell`、`release.yml` 的 `build`）都用和 `core` job 相同的 `dtolnay/rust-toolchain` 步驟，固定 1.97.1。
 - **`ci.yml`**（已在 main）加一個 `shell` 工作：下載 `model-v1` 的模型並比對雜湊 → `scripts/build-app.sh` → `swift test`（`macos/`）→ `build/shanjie.app/Contents/MacOS/shanjie --selftest` → §10 的驗收 2、3、6。
 - **`release.yml`**（新增，仿 syrtis 的 `release.yml`）：推 `v*` tag 時：
   1. **gate**：要求這個 commit 在 main 上 `ci.yml` 的 run 全綠（善解只有 `ci.yml`，不得照抄 syrtis 的 `ci-release.yml`），否則拒絕。
-  2. **build**（`xcode-27`）：先從 `model-v1` 下載 `bigram.sjlm` 並用和 ci.yml 相同的 `LM_SHA256` 做 `shasum -c`，再跑 `scripts/build-app.sh`，把 ad-hoc 簽章的 app 打包成 artifact。
+  2. **build**（`xcode-27`）：先從 `model-v1` 下載 `bigram.sjlm` 並以 `shasum -a 256 -c data/bigram.sjlm.sha256` 比對，再跑 `scripts/build-app.sh`，把 ad-hoc 簽章的 app 打包成 artifact。
   3. **sign**（`environment: release`，只接受 `refs/tags/v*`）：從 secrets `DEVELOPER_ID_P12_BASE64`、`DEVELOPER_ID_P12_PASSWORD`、`NOTARY_KEY_P8` 與 variables `NOTARY_KEY_ID`、`NOTARY_ISSUER_ID`、`APPLE_TEAM_ID` 建**一次性的鑰匙圈**（隨機密碼、結束時刪除），用 `Developer ID Application`（Team `2LJ882GPY8`）、`--options runtime --timestamp` 簽章，`notarytool submit --wait` 公證，`stapler staple`；再驗證：`codesign --verify --strict --deep`、`spctl -a -t exec -vv`、entitlements 為空、flags 含 `runtime`、Team ID 相符。缺任何一項材料就失敗，不得退回 ad-hoc。
   4. **publish**（只在 `v*` tag）：建立 GitHub Release，附件 `shanjie-<版本>.zip`（`ditto -c -k --keepParent` 打包公證後的 app，app 內含 `Resources/LICENSES/`）與它的 SHA-256。
 - **試跑**：`workflow_dispatch`（只接受 `main`）跑 gate、build、sign 與驗證，不 publish；讓使用者設好材料後先確認簽章與公證可行，再推 tag。
