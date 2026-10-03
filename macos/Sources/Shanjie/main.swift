@@ -1,6 +1,7 @@
 import AppKit
 import Carbon
 import InputMethodKit
+import ShanjieInstall
 import ShanjieKit
 
 // docs/contracts/s3b.md sections 4, 5 and 9. Arguments: none (run as the input method), exactly
@@ -11,75 +12,37 @@ func say(_ message: StaticString) {
     FileHandle.standardError.write(Data("\(message)\n".utf8))
 }
 
-/// Input sources registered under this bundle ID (the bundle and its input modes).
-func inputSources(bundleID: String) -> [TISInputSource] {
-    let filter = [kTISPropertyBundleID as String: bundleID] as CFDictionary
-    return TISCreateInputSourceList(filter, true)?.takeRetainedValue() as? [TISInputSource] ?? []
-}
-
-func inputModeID(_ source: TISInputSource) -> String? {
-    guard let p = TISGetInputSourceProperty(source, kTISPropertyInputModeID) else { return nil }
-    return Unmanaged<CFString>.fromOpaque(p).takeUnretainedValue() as String
-}
-
-/// docs/contracts/s3b.md section 13.3. Register the bundle (always: a bundle ID TIS already knows
-/// may still carry the old two-mode list), enable the input method and its one mode, check that
-/// the system now lists the input method as enabled, then disable the two modes of earlier
-/// versions if TIS still lists them. Run on the installed copy, by scripts/install-ime.sh or by
-/// the user after `brew install`. Exit 3 means the mode is not listed yet or the input method is
-/// not accepted yet (log out and log in, then run it again); 1 is any other failure.
-private func isEnabled(_ source: TISInputSource) -> Bool {
-    guard let p = TISGetInputSourceProperty(source, kTISPropertyInputSourceIsEnabled) else { return false }
-    return CFBooleanGetValue(Unmanaged<CFBoolean>.fromOpaque(p).takeUnretainedValue())
-}
-
+/// docs/contracts/s3b.md section 13.3, through ShanjieInstall (shared with the installer). Run on
+/// the installed copy, by scripts/install-ime.sh or by the user after `brew install`. Exit 3 means
+/// the mode is not listed yet or the input method is not accepted yet (log out and log in, then
+/// run it again); 1 is any other failure.
 func install() -> Int32 {
     guard let bundleID = Bundle.main.bundleIdentifier else {
         say("install: no bundle identifier")
         return 1
     }
-    // A failure here is not fatal by itself (an already registered bundle may report an error;
-    // not measured), but it decides the exit code below: exit 3 means "registered, the list is
-    // not refreshed yet", so a failed registration with no mode listed is an ordinary failure.
-    let registered = TISRegisterInputSource(Bundle.main.bundleURL as CFURL) == noErr
-    if !registered { say("install: warning: TISRegisterInputSource failed") }
-    let sources = inputSources(bundleID: bundleID)
-    guard let mode = sources.first(where: { inputModeID($0) == "\(bundleID).zhuyin" }) else {
-        say(registered ? "install: the input mode is not listed yet" : "install: registration failed and the input mode is not listed")
-        return registered ? 3 : 1
-    }
-    // The input method itself (the source whose ID is the bundle ID) must be enabled too, or the
-    // mode is listed nowhere (measured 2026-10-04 with 0.1.0, which enabled only the mode).
-    let parent = sources.first { inputModeID($0) == nil }
-    guard parent.map({ TISEnableInputSource($0) == noErr }) ?? false,
-          TISEnableInputSource(mode) == noErr else {
+    let result = Registration.run(bundleURL: Bundle.main.bundleURL, bundleID: bundleID, defaults: .standard)
+    if result.registerFailed { say("install: warning: TISRegisterInputSource failed") }
+    switch result.outcome {
+    case .modeNotListed:
+        say("install: the input mode is not listed yet")
+        return 3
+    case .registrationFailed:
+        say("install: registration failed and the input mode is not listed")
+        return 1
+    case .enableFailed:
         say("install: TISEnableInputSource failed")
         return 1
-    }
-    // Measured 2026-10-04: before the first log out after registration, both calls return noErr
-    // and this process's enabled list shows the mode, but not the input method itself, which
-    // stays disabled. Only the input method appearing in the enabled list counts.
-    let enabledNow = TISCreateInputSourceList(
-        [kTISPropertyBundleID as String: bundleID] as CFDictionary, false)?
-        .takeRetainedValue() as? [TISInputSource] ?? []
-    guard enabledNow.contains(where: { inputModeID($0) == nil }) else {
+    case .notAccepted:
         say("install: the system has not accepted the input method yet")
         return 3
-    }
-    // Carry over an ETen-only setup from the two-mode versions, unless a layout was chosen already.
-    let enabled = { (id: String) in sources.contains { inputModeID($0) == id && isEnabled($0) } }
-    if UserDefaults.standard.string(forKey: "layout") == nil,
-       enabled("\(bundleID).eten"), !enabled("\(bundleID).standard") {
-        UserDefaults.standard.set("eten", forKey: "layout")
-    }
-    let legacy: Set<String> = ["\(bundleID).standard", "\(bundleID).eten"]
-    for source in sources where inputModeID(source).map(legacy.contains) ?? false {
-        if TISDisableInputSource(source) != noErr {
+    case .done:
+        if result.legacyDisableFailed {
             say("install: warning: TISDisableInputSource failed for an input mode of an earlier version")
         }
+        say("install: registered and enabled")
+        return 0
     }
-    say("install: registered and enabled")
-    return 0
 }
 
 /// The chosen keyboard layout, in the app's own UserDefaults domain (its bundle ID), key `layout`
