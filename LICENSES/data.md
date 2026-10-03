@@ -3,6 +3,7 @@
 | 路徑 | 來源 | 授權 | 備註 |
 |---|---|---|---|
 | `data/lexicon/mcbpmf-data.txt` | 小麥注音 McBopomofo 3.1.1 的 `data.txt`（片語源自 libtabe `tsi.src`） | MIT（全文 `LICENSES/McBopomofo-MIT.txt`）；libtabe 為 BSD | 可再散布 |
+| `data/lexicon/overlay-add.tsv` | 由 `tools/build_overlay.py` 從 Wikimedia 2026-10-01 的標題 dump 產生：中文維基、英文維基詞典、中文維基詞典（`all-titles-in-ns0`）；OpenCC `STCharacters.txt`（Apache-2.0）只用來過濾，不在檔案內 | **CC BY-SA 4.0**，署名：Wikipedia 與 Wiktionary 貢獻者（https://creativecommons.org/licenses/by-sa/4.0/ ） | 只有這個檔是 share-alike；程式碼仍是 Apache-2.0。來源網址與 SHA-256 在 `tools/build_overlay.py` |
 | `eval/sets/trap.txt`、`eval/sets/daily.txt` | 本專案自寫 | CC0 | |
 | `eval/dev/*.txt`、`eval/holdout/*`、`eval/learn/cases.tsv` | 本專案自寫 | CC0 | |
 | `eval/dev/user-reported.txt` | 使用者回報的真實句子 | CC0（使用者 2026-10-03 同意） | |

@@ -13,7 +13,7 @@ PER_KEY = 12       # 每個讀音只展開前幾高分的詞，控制 lattice �
 
 
 class Lexicon:
-    def __init__(self, path=DATA):
+    def __init__(self, path=DATA, overlay=None):
         self.by_reading = defaultdict(list)   # 'ㄔㄤˊ-ㄔㄤˊ' -> [(word, log10p)]
         self.by_word = {}                     # word -> (best reading tuple, log10p)
         for line in open(path, encoding="utf-8"):
@@ -26,6 +26,15 @@ class Lexicon:
             syls = tuple(reading.split("-"))
             if len(word) != len(syls):
                 continue
+            self.by_reading[syls].append((word, score))
+            if word not in self.by_word or score > self.by_word[word][1]:
+                self.by_word[word] = (syls, score)
+        # S1 疊加層 `讀音\t詞\t分數\t來源`：接在基底後面（檔案順序），再和基底一起做一次穩定排序，同分時基底在前
+        for line in open(overlay, encoding="utf-8") if overlay else ():
+            reading, word, score, _ = line.rstrip("\n").split("\t")
+            syls, score = tuple(reading.split("-")), float(score)
+            if any(w == word for w, _ in self.by_reading[syls]):
+                raise ValueError("overlay duplicates a base entry")
             self.by_reading[syls].append((word, score))
             if word not in self.by_word or score > self.by_word[word][1]:
                 self.by_word[word] = (syls, score)
