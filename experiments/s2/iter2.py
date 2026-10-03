@@ -64,32 +64,44 @@ def merged(corpora, tri_corpora=()):
 
 
 class LM:
-    def __init__(self, cfg, uni, bi, tri=None):
-        self.cfg, self.uni, self.bi, self.tri = cfg, uni, bi, tri or {}
-        self.order = cfg.get("order", 2)
+    def __init__(self, cfg, uni, bi, tri=None, bi_kept=None, tri_kept=None):
+        """bi/tri 是剪枝前的完整計數（用來算前文總次數）；bi_kept/tri_kept 是剪枝後實際保留的條目。
+        被剪掉的條目不給直接機率，它們的質量歸給回退分布，所以分布仍然完整。"""
+        self.cfg, self.order = cfg, cfg.get("order", 2)
+        self.uni, self.bi_full, self.tri_full = uni, bi, tri or {}
+        self.bi = bi if bi_kept is None else bi_kept
+        self.tri = self.tri_full if tri_kept is None else tri_kept
         self.lam, self.D = cfg.get("lam", 0.5), cfg.get("D", 0.75)
         self.model, self.eos_on, self.floor = cfg.get("model", "bonus"), cfg.get("eos", False), cfg.get("floor")
         self.N = sum(uni.values())
-        self.ctx = {}
+        self.ctx, kept = {}, {}
         eos_total = 0
-        for (v, w), c in bi.items():
-            t, n = self.ctx.get(v, (0, 0)); self.ctx[v] = (t + c, n + 1)
+        for (v, w), c in self.bi_full.items():
+            t = self.ctx.get(v, 0); self.ctx[v] = t + c
             if w == "</s>":
                 eos_total += c
+        for (v, w), c in self.bi.items():
+            kept[v] = kept.get(v, 0) + max(c - self.D, 0)
+        # 回退權重：1 − 保留條目的折扣後質量 / 總次數（不剪枝時等於 D·相異數/總次數）
+        self.back = {v: 1 - kept.get(v, 0) / t for v, t in self.ctx.items()}
         self.p_eos = max(eos_total, 1) / self.N
-        self.ctx2 = {}
+        self.ctx2, self.back2 = {}, {}
         if self.order == 3:
+            kept2 = {}
+            for (u, v, w), c in self.tri_full.items():
+                self.ctx2[(u, v)] = self.ctx2.get((u, v), 0) + c
             for (u, v, w), c in self.tri.items():
-                t, n = self.ctx2.get((u, v), (0, 0)); self.ctx2[(u, v)] = (t + c, n + 1)
+                kept2[(u, v)] = kept2.get((u, v), 0) + max(c - self.D, 0)
+            self.back2 = {k: 1 - kept2.get(k, 0) / t for k, t in self.ctx2.items()}
         self.memo = {}
 
     def _p(self, v, w, pb, u=None):
-        t, n = self.ctx.get(v, (0, 0))
-        p = (max(self.bi.get((v, w), 0) - self.D, 0) / t + self.D * n / t * pb) if t else pb
+        t = self.ctx.get(v, 0)
+        p = (max(self.bi.get((v, w), 0) - self.D, 0) / t + self.back[v] * pb) if t else pb
         if self.order == 3 and u is not None:
-            t3, n3 = self.ctx2.get((u, v), (0, 0))
+            t3 = self.ctx2.get((u, v), 0)
             if t3:
-                p = max(self.tri.get((u, v, w), 0) - self.D, 0) / t3 + self.D * n3 / t3 * p
+                p = max(self.tri.get((u, v, w), 0) - self.D, 0) / t3 + self.back2[(u, v)] * p
         return p
 
     def word(self, hist, word, lp):
@@ -235,7 +247,12 @@ def main():
         if (cfg["corpora"], cfg.get("tri_corpora", [])) != prev_corpora:
             uni, bi, tri = merged(cfg["corpora"], cfg.get("tri_corpora", []))
             prev_corpora = (cfg["corpora"], cfg.get("tri_corpora", []))
-        lm = LM(cfg, uni, bi, tri)
+        # 剪枝：加權後次數低於門檻的 bigram／trigram 丟掉（S2 模型檔 ≤ 100 MB 的前置實驗）
+        pb, pt = cfg.get("prune_bi", 0), cfg.get("prune_tri", 0)
+        bi_c = {k: v for k, v in bi.items() if v >= pb} if pb else bi
+        tri_c = {k: v for k, v in tri.items() if v >= pt} if pt else tri
+        lm = LM(cfg, uni, bi, tri, bi_c, tri_c)
+        sizes = f"bi={len(bi_c)} tri={len(tri_c) if cfg.get('order', 2) == 3 else 0}"
         lex_cfg = adjust_lexicon(lex, overlay_words, uni, cfg)
         t2 = time.time()
         run = datetime.datetime.now().strftime("%Y%m%d-%H%M%S") + "-" + hashlib.md5(json.dumps(cfg, sort_keys=True).encode()).hexdigest()[:6]
@@ -252,13 +269,13 @@ def main():
         t3 = time.time()
         cols = [run, commit + ("+dirty" if dirty else ""), json.dumps(cfg, ensure_ascii=False)]
         cols += [f"{n}:{acc}/{tot}:ll={ll:.4f}:o64={o64}" for n, acc, tot, ll, o64 in summary]
-        cols += [f"load={t2 - t1:.0f}s decode={t3 - t2:.0f}s", a.note]
+        cols += [f"load={t2 - t1:.0f}s decode={t3 - t2:.0f}s {sizes}", a.note]
         new = not os.path.exists(LOG)
         with open(LOG, "a", encoding="utf-8") as f:
             if new:
                 f.write("run\tcommit\tconfig\tsets…\ttiming\tnote\n")
             f.write("\t".join(cols) + "\n")
-        print(run, " ".join(f"{n} {acc}/{tot} ({acc / tot:.1%}) ll={ll:.3f}" for n, acc, tot, ll, o64 in summary), f"[load {t2 - t1:.0f}s, decode {t3 - t2:.0f}s]", flush=True)
+        print(run, " ".join(f"{n} {acc}/{tot} ({acc / tot:.1%}) ll={ll:.3f}" for n, acc, tot, ll, o64 in summary), f"[load {t2 - t1:.0f}s, decode {t3 - t2:.0f}s, {sizes}]", flush=True)
     print(f"total {time.time() - t0:.0f}s")
 
 
