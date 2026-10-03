@@ -1,45 +1,51 @@
 #!/bin/bash
-# Exercises install-ime.sh's file swap without touching the real system: HOME points at a temporary
-# directory and SHANJIE_INSTALL_FILES_ONLY=1 stops before pkill and input source registration.
+# Exercises install-ime.sh's file handling without touching the real system: HOME points at a
+# temporary directory, SHANJIE_INSTALL_FILES_ONLY=1 stops before pkill and registration, and the
+# app is a stub whose executable only exits 1, so even if the hook stopped working nothing could be
+# registered.
 #
-#   scripts/test-install-ime.sh <path to shanjie.app>
+#   scripts/test-install-ime.sh
 set -euo pipefail
-[ "$#" -eq 1 ] && [ -x "$1/Contents/MacOS/shanjie" ] || { echo "usage: $0 <path to shanjie.app>" >&2; exit 2; }
-APP="$(cd "$1" && pwd -P)"
+
+fail() { echo "FAIL: $*" >&2; exit 1; }
 ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 T="$(mktemp -d)"
-trap 'chflags -R nouchg "$T" 2>/dev/null || true; rm -rf "$T"' EXIT
+trap 'rm -rf "$T"' EXIT
 IM="$T/Library/Input Methods"
-run() { HOME="$T" SHANJIE_INSTALL_FILES_ONLY=1 "$ROOT/scripts/install-ime.sh" "$@"; }
-check() { [ "$1" ] || { echo "FAIL: $2" >&2; exit 1; }; }
-leftovers() { [ ! -e "$IM/.shanjie-staging" ] && [ ! -e "$IM/.shanjie-old" ]; }
 
-# 1. Fresh install, then a reinstall over it: the bundle is in place, nothing is left behind.
-run "$APP" >/dev/null
-check "$(cmp -s "$APP/Contents/MacOS/shanjie" "$IM/shanjie.app/Contents/MacOS/shanjie" && echo y)" "fresh install did not place the bundle"
-leftovers && check y "" || check "" "fresh install left a helper directory"
-echo marker > "$IM/shanjie.app/Contents/old-marker"
-run "$APP" >/dev/null
-check "$([ ! -e "$IM/shanjie.app/Contents/old-marker" ] && echo y)" "reinstall did not replace the old bundle"
-leftovers && check y "" || check "" "reinstall left a helper directory"
+stub() {  # stub <dir> <marker>: a minimal shanjie.app whose executable refuses to run
+  mkdir -p "$1/Contents/MacOS"
+  printf '#!/bin/sh\nexit 1\n' > "$1/Contents/MacOS/shanjie"
+  chmod +x "$1/Contents/MacOS/shanjie"
+  echo "$2" > "$1/Contents/marker"
+}
+run() { HOME="$T" SHANJIE_INSTALL_FILES_ONLY=1 "$ROOT/scripts/install-ime.sh" "$1"; }
 
-# 2. A failing copy (an unreadable source file) leaves the installed bundle untouched.
-BAD="$T/bad/shanjie.app"; mkdir -p "$T/bad"; ditto "$APP" "$BAD"
-echo marker > "$IM/shanjie.app/Contents/old-marker"
-chmod 000 "$BAD/Contents/Resources/bigram.sjlm"
-if run "$BAD" >/dev/null 2>&1; then check "" "install from an unreadable source succeeded"; fi
-chmod 644 "$BAD/Contents/Resources/bigram.sjlm"
-check "$([ -e "$IM/shanjie.app/Contents/old-marker" ] && echo y)" "a failed copy changed the installed bundle"
-leftovers && check y "" || check "" "a failed copy left a helper directory"
+stub "$T/v1/shanjie.app" v1
+stub "$T/v2/shanjie.app" v2
 
-# 3. An old bundle that cannot be deleted: the new bundle still goes in, the old one stays aside
-#    with a warning, and the next install cleans it up once it is deletable.
-chflags uchg "$IM/shanjie.app/Contents/old-marker"
-out=$(run "$APP" 2>&1)
-check "$([ ! -e "$IM/shanjie.app/Contents/old-marker" ] && echo y)" "the new bundle is not in place"
-check "$(grep -q "could not delete the previous bundle" <<<"$out" && echo y)" "no warning about the undeletable old bundle"
-chflags -R nouchg "$IM/.shanjie-old"
-run "$APP" >/dev/null
-leftovers && check y "" || check "" "the next install did not clean up .shanjie-old"
+# 1. Fresh install.
+run "$T/v1/shanjie.app" >/dev/null
+[ "$(cat "$IM/shanjie.app/Contents/marker")" = v1 ] || fail "fresh install did not place the bundle"
+! ls -d "$IM"/.shanjie-staging-* >/dev/null 2>&1 || fail "fresh install left a staging directory"
 
-echo "install-ime.sh file swap: ok"
+# 2. Reinstall over it: the new bundle is in place and the old one is in the Trash, not deleted.
+run "$T/v2/shanjie.app" >/dev/null
+[ "$(cat "$IM/shanjie.app/Contents/marker")" = v2 ] || fail "reinstall did not replace the bundle"
+ls "$T/.Trash"/shanjie-*.app/Contents/marker >/dev/null 2>&1 || fail "the previous bundle is not in the Trash"
+[ "$(cat "$T/.Trash"/shanjie-*.app/Contents/marker)" = v1 ] || fail "the Trash holds the wrong bundle"
+! ls -d "$IM"/.shanjie-staging-* >/dev/null 2>&1 || fail "reinstall left a staging directory"
+
+# 3. Reinstalling from the installed copy itself works (the copy is staged first).
+run "$IM/shanjie.app" >/dev/null
+[ "$(cat "$IM/shanjie.app/Contents/marker")" = v2 ] || fail "reinstalling the installed copy broke it"
+
+# 4. A failing copy (an unreadable file in the source) leaves the installed bundle untouched.
+stub "$T/bad/shanjie.app" bad
+chmod 000 "$T/bad/shanjie.app/Contents/marker"
+if run "$T/bad/shanjie.app" >/dev/null 2>&1; then fail "install from an unreadable source succeeded"; fi
+chmod 644 "$T/bad/shanjie.app/Contents/marker"
+[ "$(cat "$IM/shanjie.app/Contents/marker")" = v2 ] || fail "a failed copy changed the installed bundle"
+! ls -d "$IM"/.shanjie-staging-* >/dev/null 2>&1 || fail "a failed copy left a staging directory"
+
+echo "install-ime.sh file handling: ok"

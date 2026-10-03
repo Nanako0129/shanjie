@@ -61,10 +61,10 @@
 
 - `scripts/install-ime.sh <shanjie.app 的路徑>`（通常是解壓後的 Release 附件；也接受 `build/shanjie.app` 自己建的 ad-hoc 版）：
   - `#!/bin/bash`、`set -euo pipefail`；`$HOME` 為空就中止；不用 sudo（R9）。
-  - 目的地固定為字面路徑 `"$HOME/Library/Input Methods/shanjie.app"`；`rm -rf` 與 `mv` 只准作用在三個字面路徑：這個目的地、暫存的 `.shanjie-staging`、暫放舊版的 `.shanjie-old`（兩個輔助名稱都不是 `.app`，系統不會當成輸入法）。
-  - 順序：先 `ditto` 到 `.shanjie-staging`（複製失敗時舊版不受影響）→ 舊版改名為 `.shanjie-old` → 新版改名就位 → 刪除 `.shanjie-old`（刪不掉就留著並警告，下次安裝清掉）。中途失敗或中斷時，`trap` 把舊版放回原位（CodeRabbit 在 PR #3 指出原本先刪再複製沒有退路）。`scripts/test-install-ime.sh` 在暫存的 HOME 裡以 `SHANJIE_INSTALL_FILES_ONLY=1` 驗證全新安裝、覆蓋安裝、複製失敗、舊版刪不掉四種情況，CI 也跑；在真實系統上的行為由使用者驗收 10 確認（含覆蓋安裝一次）→ 以完整路徑結束舊行程（`pkill -f "$HOME/Library/Input Methods/shanjie.app/Contents/MacOS/shanjie"`，沒有就略過）→ 執行**已安裝那一份**的 `Contents/MacOS/shanjie install`（`TISRegisterInputSource`＋`TISEnableInputSource` 兩個輸入模式，照小麥 `main.swift` 的 `install()`）。
+  - 目的地固定為字面路徑 `"$HOME/Library/Input Methods/shanjie.app"`；腳本只刪除或搬移兩個字面路徑：這個目的地與這次執行的暫存 `.shanjie-staging-<PID>`（帶 PID，兩次重疊的安裝不會動到彼此；不是 `.app`，系統不會當成輸入法）。舊版一律移到 `~/.Trash`，不刪除。
+  - 順序：先 `ditto` 到 `.shanjie-staging-<PID>`（複製失敗時已安裝的版本不受影響）→ 舊版移到 `~/.Trash/shanjie-<時間>-<pid>.app`（和小麥注音的安裝程式一樣，需要時可手動放回）→ 暫存改名就位 → 以完整路徑結束舊行程 → 執行**已安裝那一份**的 `install`（註冊失敗時提示可從垃圾桶放回舊版）。2026-10-04 從「改名＋失敗還原」簡化而來：還原邏輯每修一輪就多一種邊界情況，移到垃圾桶則沒有刪除、沒有殘留要清。`scripts/test-install-ime.sh` 用一個執行檔只會 `exit 1` 的假 app、在暫存的 HOME 裡以 `SHANJIE_INSTALL_FILES_ONLY=1` 驗證全新安裝、覆蓋安裝（舊版進垃圾桶）、從已安裝那份重裝、複製失敗四種情況，CI 也跑；就算測試開關失效，假 app 也無法註冊任何東西。在真實系統上的行為由使用者驗收 10 確認。
   - 最後印出下一步：到「系統設定 → 鍵盤 → 輸入方式」確認「善解」已出現；沒出現就登出再登入。
-- **agent 不得執行 `install-ime.sh`、`shanjie install`、或啟動 app**；只由使用者執行。
+- **agent 不得對真實的 HOME 執行 `install-ime.sh`、執行 `shanjie install`、或啟動 app**；agent 與 CI 只能透過 `scripts/test-install-ime.sh`（暫存 HOME、假 app、`SHANJIE_INSTALL_FILES_ONLY=1`）執行它。真正的安裝只由使用者執行。
 
 ## 5. 行程、引擎與組字擁有者
 
@@ -75,7 +75,7 @@
   - 某個 controller 的 `handle` 或 `activateServer` 進來時，若組字區有字而擁有者不是它：擁有者仍有效就 `reset(0)` 送回擁有者的 client，否則 `reset(1)` 丟棄；之後才處理新的事件，擁有者改成目前這個 controller。**擁有者一改變就依新擁有者的 client 重新 `set_profile`。**
   - `activateServer` 的順序固定為：先處理擁有者（上一條）、再 `set_profile`。
   - `deactivateServer` 與 `commitComposition(_:)`：**只有呼叫者就是擁有者時**才 reset 並送出、隱藏候選窗、清掉殼保存的候選陣列（`deactivateServer` 用 `reset(0)` 送回它的 client；secure input 生效時改用 `reset(1)` 丟棄，避免把組字送進剛取得焦點的密碼欄）。不是擁有者時什麼都不做：不碰組字，也不碰共用的候選窗與候選陣列。
-  - **secure input 只在 `deactivateServer` 檢查**（2026-10-04 決定）。CodeRabbit 在 PR #3 建議所有非按鍵的送出都檢查；試做後的本地審查指出 `IsSecureEventInputEnabled()` 是全系統旗標，任何 App 開著 secure input 時，點別處、切換排列或換擁有者都會悄悄丟掉使用者打的字。組字實際會被送到哪個 client 要實機才知道，所以延到 S4 的 privacyGate，以實機證據決定。不是擁有者時什麼都不做：不碰組字，也不碰共用的候選窗與候選陣列。
+  - **secure input 只在 `deactivateServer` 檢查**（2026-10-04 決定）。CodeRabbit 在 PR #3 建議所有非按鍵的送出都檢查；試做後的本地審查指出 `IsSecureEventInputEnabled()` 是全系統旗標，任何 App 開著 secure input 時，點別處、切換排列或換擁有者都會悄悄丟掉使用者打的字。組字實際會被送到哪個 client 要實機才知道，所以延到 S4 的 privacyGate，以實機證據決定。
   - secure input 的判斷由 `Shanjie` target 以閉包（包 `IsSecureEventInputEnabled()`）注入 `ShanjieKit`，測試用假的閉包驅動兩種情況。
   - controller 的 `deinit`：weak 參照在 deinit 時已經讀成 nil，所以規則是「deinit 時若擁有者讀成 nil 且組字區有字，就 `reset(1)`、隱藏候選窗、清掉候選陣列」。
 
@@ -145,7 +145,7 @@
 
 **使用者實測（安裝後，由使用者執行並回報）：**
 9. 使用者在 `release` environment 設好簽章材料，先以 `workflow_dispatch` 試跑簽章與公證，全綠後推 `v0.1.0` tag；release 工作全綠，Release 頁面有 `shanjie-0.1.0.zip`。
-10. 下載、解壓，執行 `scripts/install-ime.sh <解壓後的 shanjie.app>`：「善解（標準）」「善解（倚天）」出現在輸入方式中；再執行一次（覆蓋安裝）仍正常，`~/Library/Input Methods/` 裡沒有 `.shanjie-staging` 或 `.shanjie-old` 殘留。
+10. 下載、解壓，執行 `scripts/install-ime.sh <解壓後的 shanjie.app>`：「善解（標準）」「善解（倚天）」出現在輸入方式中；再執行一次（覆蓋安裝）仍正常，舊版出現在垃圾桶，`~/Library/Input Methods/` 裡沒有 `.shanjie-staging-*` 殘留。
 11. 在 TextEdit、備忘錄、Safari 各打陷阱集前 10 句（main 會提供按鍵清單）：組字有底線、候選窗出現在下方、數字選字、Enter 送出。
 12. 對照截圖 1：候選條的形狀、號碼、選取色、深淺色模式；不像的地方記下來，進 S3b-2。
 13. 組字中按 Caps Lock 切到英文：記錄組字是被送出、丟棄還是殘留（§6 的推論在此實測）；再切回；倚天模式打幾句。
