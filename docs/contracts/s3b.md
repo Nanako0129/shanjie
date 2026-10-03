@@ -24,30 +24,30 @@
   - `Shanjie`（executable）：`IMKInputController` 子類別、`main.swift`、`install` 與 `--selftest` 的參數處理、TIS 註冊。只有這個 target 連結 Carbon 的 TIS。
   - `ShanjieKitTests`（XCTest）。
   - 連結 `libcore.a` 與 `core/include/shanjie.h` 的方式（module map 等）由 executor 決定，寫進 §11。
-- `scripts/build-app.sh`：`cargo build --release --locked -p core` → `swift build -c release`（在 `macos/`）→ 組出 `build/shanjie.app` → **ad-hoc 簽章**：`codesign --force --sign - --options runtime`，不給任何 entitlements 檔。本機與 CI 都用這支；agent 執行它不碰任何鑰匙圈。不安裝、不啟動 app。
-- `shanjie.app/Contents`：
+- `scripts/build-app.sh`：`cargo build --release --locked -p core` → `swift build -c release`（在 `macos/`）→ 組出 `build/善解輸入法.app` → **ad-hoc 簽章**：`codesign --force --sign - --options runtime`，不給任何 entitlements 檔。本機與 CI 都用這支；agent 執行它不碰任何鑰匙圈。不安裝、不啟動 app。
+- `善解輸入法.app/Contents`：
   - `MacOS/shanjie`
   - `Resources/`：`mcbpmf-data.txt`、`overlay-add.tsv`（從 `data/lexicon/` 複製）、`bigram.sjlm`（從 `data/lm/` 複製；不存在、或 SHA-256 和 repo 追蹤的 `data/bigram.sjlm.sha256` 不符，就建置失敗，訊息說明可從 `model-v1` Release 下載）、選單列圖示、`zh-Hant.lproj/InfoPlist.strings`。
   - `Resources/LICENSES/`：`LICENSE`（Apache-2.0）、`LICENSES/McBopomofo-MIT.txt`、`LICENSES/data.md`，以及一份 CC BY-SA 4.0 的署名說明（overlay 與模型的來源與授權網址）。小麥的 MIT 要求隨附版權聲明，CC BY-SA 要求署名。
   - `Info.plist`：照小麥的鍵（`InputMethodConnectionName`、`InputMethodServerControllerClass`、`InputMethodServerDelegateClass`、`LSUIElement`、`ComponentInputModeDict`、`tsVisibleInputModeOrderedArrayKey`），bundle ID `com.nyanako.inputmethod.shanjie`，版本號來自 git tag（沒有 tag 時用 `0.0.0`）。
-  - **兩個輸入模式**：`com.nyanako.inputmethod.shanjie.standard`（「善解（標準）」）與 `com.nyanako.inputmethod.shanjie.eten`（「善解（倚天）」），`TISIntendedLanguage` 為 `zh-Hant`，`tsInputModeScriptKey` 為 `smTradChinese`。
+  - **兩個輸入模式**（§13 改為單一模式 `<bundle ID>.zhuyin`，排列改在選單切換）：`com.nyanako.inputmethod.shanjie.standard`（「善解（標準）」）與 `com.nyanako.inputmethod.shanjie.eten`（「善解（倚天）」），`TISIntendedLanguage` 為 `zh-Hant`，`tsInputModeScriptKey` 為 `smTradChinese`。
 - 選單列圖示：單色 template 圖，「解」字加圓角方框（呼應網站的印章），由腳本用 CoreText 產生 TIFF，不下載字型或圖。
 - **entitlements：一律沒有**（不提供 entitlements 檔，所以也不會有 `get-task-allow` 或 `disable-library-validation`）；hardened runtime 一定要開（R9）。
 
 ### 2.1 本機建置與測試流程（仿 syrtis，使用者 2026-10-03 要求）
 
-- repo 根目錄的 `Makefile` 是本機入口：`rust`、`build`、`test`（`cargo test --release --locked`＋`swift test`）、`bundle`（`build/shanjie.app`，出貨 bundle ID）、`selftest-bundled`、`clean-bundle`。
+- repo 根目錄的 `Makefile` 是本機入口：`rust`、`build`、`test`（`cargo test --release --locked`＋`swift test`）、`bundle`（`build/善解輸入法.app`，出貨 bundle ID）、`selftest-bundled`、`clean-bundle`。
 - **過期防護**（SwiftPM 不追蹤這兩樣）：`target/release/libcore.a` 比 Swift 執行檔新，就刪掉執行檔強迫重新連結；`core/include/shanjie.h` 比較新，就刪掉 module cache 與匯入它的 target 的建置產物。不加的話，Swift 沒改時會沿用舊的執行檔，悄悄包進舊的核心。
 - `scripts/build-app.sh` 有 `BUNDLE_ID`（預設 `com.nyanako.inputmethod.shanjie`）與 `OUT_DIR`（預設 `build`）兩個環境變數；輸入模式的 ID 由 `BUNDLE_ID` 衍生；組裝前先 `touch "$OUT_DIR/.metadata_never_index"`，避免 Spotlight 與 LaunchServices 登記本機的 bundle（對輸入法也避免系統依 bundle ID 啟動到 `build/` 裡那份）。
 - **bundled selftest**：`make selftest-bundled` 在 `build/selftest/` 組一份 release bundle 再跑 `--selftest`。本機預設用拋棄式的 `com.nyanako.inputmethod.shanjie.selftest`（不碰正式版的偏好，但 gate 較弱）；CI 用 `make selftest-bundled SELFTEST_BUNDLE_ID=`（空值＝出貨 ID，runner 是拋棄式的）。
-- **本機 bundle 邊界**：`build/` 裡的 bundle 不得啟動或註冊；實際使用與驗收以 `~/Library/Input Methods/shanjie.app` 為準。用完以 `make clean-bundle`（`lsregister -u` 後刪除）清掉。
+- **本機 bundle 邊界**：`build/` 裡的 bundle 不得啟動或註冊；實際使用與驗收以 `~/Library/Input Methods/善解輸入法.app` 為準。用完以 `make clean-bundle`（`lsregister -u` 後刪除）清掉。
 - `docs/verification.md` 記錄本機 gate、CI 跑什麼、selftest 的 ID 取捨與清理指令。
 
 ## 3. CI 與發布（GitHub Actions）
 
 - **模型雜湊只有一份**：`data/bigram.sjlm.sha256`（進 git）。`build-app.sh`、`ci.yml` 的兩個 job、`release.yml` 都讀它，不得各自寫死（原本 `ci.yml` 的 `LM_SHA256` 環境變數已移除）。
 - **Rust 工具鏈**：所有會建 `libcore.a` 的 job（`ci.yml` 的 `core` 與 `shell`、`release.yml` 的 `build`）都用和 `core` job 相同的 `dtolnay/rust-toolchain` 步驟，固定 1.97.1。
-- **`ci.yml`**（已在 main）加一個 `shell` 工作：下載 `model-v1` 的模型並比對雜湊 → `scripts/build-app.sh` → `swift test`（`macos/`）→ `build/shanjie.app/Contents/MacOS/shanjie --selftest` → §10 的驗收 2、3、6。
+- **`ci.yml`**（已在 main）加一個 `shell` 工作：下載 `model-v1` 的模型並比對雜湊 → `scripts/build-app.sh` → `swift test`（`macos/`）→ `build/善解輸入法.app/Contents/MacOS/shanjie --selftest` → §10 的驗收 2、3、6。
 - **`release.yml`**（新增，仿 syrtis 的 `release.yml`）：推 `v*` tag 時：
   1. **gate**：要求這個 commit 在 main 上 `ci.yml` 的 run 全綠（善解只有 `ci.yml`，不得照抄 syrtis 的 `ci-release.yml`），否則拒絕。
   2. **build**（`xcode-27`）：先從 `model-v1` 下載 `bigram.sjlm` 並以 `shasum -a 256 -c data/bigram.sjlm.sha256` 比對，再跑 `scripts/build-app.sh`，把 ad-hoc 簽章的 app 打包成 artifact。
@@ -59,9 +59,9 @@
 
 ## 4. 安裝（由使用者執行）
 
-- `scripts/install-ime.sh <shanjie.app 的路徑>`（通常是解壓後的 Release 附件；也接受 `build/shanjie.app` 自己建的 ad-hoc 版）：
+- `scripts/install-ime.sh <善解輸入法.app 的路徑>`（通常是解壓後的 Release 附件；也接受 `build/善解輸入法.app` 自己建的 ad-hoc 版）：
   - `#!/bin/bash`、`set -euo pipefail`；`$HOME` 為空就中止；不用 sudo（R9）。
-  - 目的地固定為字面路徑 `"$HOME/Library/Input Methods/shanjie.app"`。腳本只刪除或搬移 `~/Library/Input Methods` 裡的三個位置：這個目的地、這次執行用 `mktemp` 建的暫存資料夾、保留上一版的 `.shanjie-previous`。輔助資料夾的名稱不是 `.app`（暫存資料夾在複製期間裡面有一個 `shanjie.app`）。不要同時執行兩次安裝（未加鎖）；被直接砍掉的執行可能留下 `.shanjie-staging-*`，不會自動清（同時執行的另一份看起來一樣），要手動刪。**HOME 不是這個帳號真正的家目錄時，除非設了 `SHANJIE_INSTALL_FILES_ONLY=1`，腳本一開始就拒絕執行**；files-only 模式完全不呼叫 lsregister、pkill 或註冊。
+  - 目的地固定為字面路徑 `"$HOME/Library/Input Methods/善解輸入法.app"`。腳本只刪除或搬移 `~/Library/Input Methods` 裡的三個位置：這個目的地、這次執行用 `mktemp` 建的暫存資料夾、保留上一版的 `.shanjie-previous`。輔助資料夾的名稱不是 `.app`（暫存資料夾在複製期間裡面有一個 `善解輸入法.app`）。不要同時執行兩次安裝（未加鎖）；被直接砍掉的執行可能留下 `.shanjie-staging-*`，不會自動清（同時執行的另一份看起來一樣），要手動刪。**HOME 不是這個帳號真正的家目錄時，除非設了 `SHANJIE_INSTALL_FILES_ONLY=1`，腳本一開始就拒絕執行**；files-only 模式完全不呼叫 lsregister、pkill 或註冊。
   - 順序：`ditto` 到暫存資料夾（複製失敗時什麼都不放上去）→ 刪掉更早保留的 `.shanjie-previous`（先 `chmod -R u+w`）→ 舊版 `lsregister -u` 後改名為 `.shanjie-previous` → 新版改名就位 → 新版 `lsregister -f`（`shanjie install` 在覆蓋安裝時會略過 TIS 註冊）→ 以完整路徑（HOME 解析成實際路徑、正規表示式字元跳脫、錨定）結束舊行程並等它退出，5 秒後仍在就警告 → 執行**已安裝那一份**的 `install`；註冊失敗時印出換回上一版的指令（順序：刪新版 → 搬回上一版 → `lsregister -f` → 結束行程 → `install`）。兩次改名之間被中斷時，`trap` 把新版放上去並提示重跑（這條路徑沒有自動測試；2026-10-04 的審查 agent 在沙盒中以 SIGINT／SIGTERM／SIGHUP 手動驗證過還原）。LaunchServices 的登記行為沒有在真實系統量過。設計演變（2026-10-04）：改名＋失敗還原的版本每修一輪就多一種邊界情況；移到 `~/.Trash` 可能被隱私保護擋下、垃圾桶裡的舊版可能仍登記在 LaunchServices（小麥注音用的是 `NSWorkspace.recycle`，不是 `mv`），所以改成在同一個資料夾保留一份不是 `.app` 的上一版。`scripts/test-install-ime.sh` 用執行檔只會 `exit 1` 的假 app、在暫存 HOME 裡驗證：沒開 files-only 時拒絕執行、全新安裝時複製失敗（什麼都沒放上去）、全新安裝、覆蓋安裝（上一版被保留）、從已安裝那份重裝、覆蓋時複製失敗，CI 也跑。在真實系統上的行為由使用者驗收 10 確認。已知限制：同一版重裝一次會讓 `.shanjie-previous` 也變成這一版。
   - 最後印出下一步：到「系統設定 → 鍵盤 → 輸入方式」確認「善解」已出現；沒出現就登出再登入。
 - **agent 不得對真實的 HOME 執行 `install-ime.sh`、執行 `shanjie install`、或啟動 app**；agent 與 CI 只能透過 `scripts/test-install-ime.sh`（暫存 HOME、假 app、`SHANJIE_INSTALL_FILES_ONLY=1`）執行它。真正的安裝只由使用者執行。
@@ -117,9 +117,9 @@
 ## 10. 驗收
 
 **agent 可做的（executor 做、verifier 重做；CI 也跑 1–6）：**
-1. `scripts/build-app.sh` 成功，產出 `build/shanjie.app`。
+1. `scripts/build-app.sh` 成功，產出 `build/善解輸入法.app`。
 2. `plutil -lint` 通過；兩個輸入模式、bundle ID、`InputMethodConnectionName`、`InputMethodServerControllerClass` 都在；`Resources/` 有三個資料檔、圖示與 `LICENSES/`（含 Apache-2.0、小麥 MIT、`data.md`、CC BY-SA 署名說明）。
-3. `codesign --verify --strict --deep` 通過；`codesign -d --entitlements - build/shanjie.app` 的輸出沒有任何 entitlement；`codesign -dv` 的 flags 含 `runtime`。
+3. `codesign --verify --strict --deep` 通過；`codesign -d --entitlements - build/善解輸入法.app` 的輸出沒有任何 entitlement；`codesign -dv` 的 flags 含 `runtime`。
 4. Swift 測試（`swift test`，在 `macos/`），全部經由真正的 C 核心（`Resources` 等同的 `data/lexicon` 與 `data/lm/bigram.sjlm`；缺檔就失敗並說明怎麼取得）：
    - 按鍵翻譯：ANSI 表每個鍵、兩種排列的 37 個注音鍵與 5 個聲調鍵、各特殊鍵、修飾鍵位元、`nil` 事件。
    - 假 client：打「你好」＋Enter → `insertText("你好")` 且組字清空；打 ㄋㄧˇ＋空白 → 候選顯示（2–9 個，因為接著要按 2）、按 2 → 組字更新、候選隱藏；帶 Caps Lock 的鍵 → 回傳 false 且輸出不變；組字中按表外的鍵 → 先送出再回傳 false；`commitComposition` → 送出並清空；回傳碼非 0 的路徑 → 組字清空、候選隱藏、回傳 false。
@@ -139,13 +139,13 @@
    - 之後**結束標記**：同樣的 Logger 與層級，以 `.public` 記一個**不同的**標記；輪詢到它出現才停止擷取。起始與結束標記都出現，測試才有效。
    - 斷言：擷取結果不含任何負向標記（送出的漢字、它的注音 preedit、按鍵字元序列、bundle ID 標記、路徑標記），而且殼的 subsystem 輸出裡沒有 `<private>`（殼只准記靜態字串與回傳碼）。
    - verifier 在殼的輸出套用路徑暫時加一行 `logger.debug("\(commit, privacy: .public)")` 時，這個測試必須失敗；改成 `.private` 時，`<private>` 斷言必須失敗；改成 `NSLog("%@", commit)` 時也必須失敗。
-6. `make selftest-bundled` 與 `build/shanjie.app/Contents/MacOS/shanjie --selftest` 都 exit 0；`make` 的過期防護有效（只動 `core/` 後 `make build`，執行檔會重新連結）；執行前後 `~/Library/Input Methods/`、`~/Library/Preferences/com.nyanako.inputmethod.shanjie.plist`、TIS 的輸入法清單都沒有變化。verifier 把 `build/shanjie.app/Contents/Resources/bigram.sjlm` 改名後再跑，必須 exit 非 0；還原後 exit 0。
+6. `make selftest-bundled` 與 `build/善解輸入法.app/Contents/MacOS/shanjie --selftest` 都 exit 0；`make` 的過期防護有效（只動 `core/` 後 `make build`，執行檔會重新連結）；執行前後 `~/Library/Input Methods/`、`~/Library/Preferences/com.nyanako.inputmethod.shanjie.plist`、TIS 的輸入法清單都沒有變化。verifier 把 `build/善解輸入法.app/Contents/Resources/bigram.sjlm` 改名後再跑，必須 exit 非 0；還原後 exit 0。
 7. 核心的 `cargo test` 與 PR #1 的 CI 步驟照舊全綠。
 8. `release.yml`：在 PR 上無法真正簽章，所以 agent 只驗證結構：gate 只等 `ci.yml`；有 `workflow_dispatch` 試跑（不 publish）；build 工作用固定的 Rust 1.97.1，並在 `build-app.sh` 之前下載模型、以 `data/bigram.sjlm.sha256` 比對；sign 工作的 `environment: release`、只接受 `refs/tags/v*`、缺材料就失敗的檢查、一次性鑰匙圈在結束時刪除、驗證步驟齊全。第一次真正的發布由使用者推 tag 觸發（見下）。
 
 **使用者實測（安裝後，由使用者執行並回報）：**
 9. 使用者在 `release` environment 設好簽章材料，先以 `workflow_dispatch` 試跑簽章與公證，全綠後推 `v0.1.0` tag；release 工作全綠，Release 頁面有 `shanjie-0.1.0.zip`。
-10. 下載、解壓，執行 `scripts/install-ime.sh <解壓後的 shanjie.app>`：「善解（標準）」「善解（倚天）」出現在輸入方式中；再執行一次（覆蓋安裝）仍正常，上一版保留為 `.shanjie-previous`，`~/Library/Input Methods/` 裡沒有 `.shanjie-staging-*` 殘留，執行中的 shanjie 行程載入的是新的那一份：`lsof -p $(pgrep -f 'Input Methods/shanjie.app/Contents/MacOS/shanjie') -d txt | grep MacOS/shanjie` 顯示的路徑在 `shanjie.app` 而不是 `.shanjie-previous`，且行程啟動時間（`ps -o lstart= -p <PID>`）晚於安裝時間。（`pgrep -fl` 只看命令列，bundle 被改名後舊行程仍顯示原路徑，分辨不出新舊。）
+10. 下載、解壓，執行 `scripts/install-ime.sh <解壓後的 善解輸入法.app>`：「善解（標準）」「善解（倚天）」出現在輸入方式中；再執行一次（覆蓋安裝）仍正常，上一版保留為 `.shanjie-previous`，`~/Library/Input Methods/` 裡沒有 `.shanjie-staging-*` 殘留，執行中的 shanjie 行程載入的是新的那一份：`lsof -p $(pgrep -f 'Input Methods/善解輸入法.app/Contents/MacOS/shanjie') -d txt | grep MacOS/shanjie` 顯示的路徑在 `善解輸入法.app` 而不是 `.shanjie-previous`，且行程啟動時間（`ps -o lstart= -p <PID>`）晚於安裝時間。（`pgrep -fl` 只看命令列，bundle 被改名後舊行程仍顯示原路徑，分辨不出新舊。）
 11. 在 TextEdit、備忘錄、Safari 各打陷阱集前 10 句（main 會提供按鍵清單）：組字有底線、候選窗出現在下方、數字選字、Enter 送出。
 12. 對照截圖 1：候選條的形狀、號碼、選取色、深淺色模式；不像的地方記下來，進 S3b-2。
 13. 組字中按 Caps Lock 切到英文：記錄組字是被送出、丟棄還是殘留（§6 的推論在此實測）；再切回；倚天模式打幾句。
@@ -166,17 +166,28 @@
 - **直通不碰 client**：核心回 `handled = 0` 且 `commit` 為空（s3a 第 1、22 條，狀態不變）時，殼不呼叫 `setMarkedText`，App 看到的跟沒按過一樣。
 - **回傳碼非 0**（修訂 1）：先 `reset(1)`（核心只有碼 4 會自己丟棄），再 `setMarkedText("")`、隱藏候選窗、清空陣列、回傳 false；只記回傳碼。
 - **表外的鍵與 `nil` 事件**：同一條路徑，有組字就 `reset(0)` 送出再回傳 false。`recognizedEvents` 只回 `keyDown`，`flagsChanged` 即使送來也直接回傳 false。
-- **輸入模式**：模式 ID 是 `<bundle ID>.standard`／`.eten`，殼只看最後一段，`install` 也從執行中的 bundle ID 推出兩個模式 ID，所以拋棄式 bundle ID 的自測 bundle 也一致。IMK 每次啟用都會呼叫 `setValue`，模式沒變時不重建引擎。
+- **輸入模式**（§13 之前；現行見本節最後的修訂 13）：模式 ID 是 `<bundle ID>.standard`／`.eten`，殼只看最後一段，`install` 也從執行中的 bundle ID 推出兩個模式 ID，所以拋棄式 bundle ID 的自測 bundle 也一致。IMK 每次啟用都會呼叫 `setValue`，模式沒變時不重建引擎。
 - **日誌**：`Logger(subsystem: "com.nyanako.inputmethod.shanjie", category: "shell")`，只用 `.error`（失敗碼）與 `.debug`（「input mode switched」）。回傳碼以預設隱私內插（整數預設公開，不會出現 `<private>`）。自測與 `install` 的錯誤訊息用 `StaticString`＋數字寫到 stderr，型別上就不能內插輸入。
 - **日誌行為測試**：`log stream --level debug --style ndjson`，predicate 只濾**行程**（修訂 9），`<private>` 斷言才看殼的 subsystem；ndjson 先解碼 JSON 再比對，標記不會藏在 `\uXXXX` 後面。實測發現：測試行程有 stderr 時，`NSLog` 只寫 stderr、**不進統一日誌**（2026-10-03，探測程式在 stderr 接管線、接 `/dev/null` 時都一樣），所以單靠 `log stream` 抓不到 `NSLog`。測試因此在負向動作期間另外把本行程的 stdout／stderr（fd 1、2）導進管線，用同一組負向標記檢查，並先寫一個探針確認擷取有接上。由 launchd 啟動的輸入法沒有 stderr，那時 `NSLog` 會進統一日誌，由 `log stream` 這一半負責。另加正向對照：殼自己的錯誤訊息（`shanjie_engine_new failed, code 3`）必須出現在擷取裡。
 - **自測**：`Selftest.row10Standard` 是第 10 列在標準排列的按鍵；測試用獨立謄寫的 s3a §1 表從注音推出同一串，並斷言兩者相同。
-- **建置**：`scripts/build-app.sh` 先比對 `data/bigram.sjlm.sha256` 再建置；`BUNDLE_ID`、`OUT_DIR`（必須是 repo 內的相對路徑，因為之後會 `rm -rf "$OUT_DIR/shanjie.app"`）、`SHANJIE_VERSION` 三個環境變數；Info.plist 與 `InfoPlist.strings` 由腳本產生，模式名稱用 `InfoPlist.strings` 的「模式 ID = 名稱」；`CFBundleDevelopmentRegion` 設 `zh-Hant`，所以非中文系統也顯示中文名。授權檔放 `Resources/LICENSES/`：`LICENSE`、`McBopomofo-MIT.txt`、`data.md`，以及 `CC-BY-SA-4.0-attribution.txt`（overlay 的署名照 `LICENSES/data.md`：Wikipedia 與 Wiktionary 貢獻者；模型：Wikipedia 與 Tatoeba 貢獻者）。
+- **建置**：`scripts/build-app.sh` 先比對 `data/bigram.sjlm.sha256` 再建置；`BUNDLE_ID`、`OUT_DIR`（必須是 repo 內的相對路徑，因為之後會 `rm -rf "$OUT_DIR/善解輸入法.app"`）、`SHANJIE_VERSION` 三個環境變數；Info.plist 與 `InfoPlist.strings` 由腳本產生，模式名稱用 `InfoPlist.strings` 的「模式 ID = 名稱」；`CFBundleDevelopmentRegion` 原本設 `zh-Hant`，§13 改為 `en`（`zh-Hant.lproj` 為「善解輸入法」、`en.lproj` 與 Info.plist 為「Shanjie」，非中文系統顯示 Shanjie）。授權檔放 `Resources/LICENSES/`：`LICENSE`、`McBopomofo-MIT.txt`、`data.md`，以及 `CC-BY-SA-4.0-attribution.txt`（overlay 的署名照 `LICENSES/data.md`：Wikipedia 與 Wiktionary 貢獻者；模型：Wikipedia 與 Tatoeba 貢獻者）。
 - **選單列圖示**：`scripts/make-icon.swift` 用 CoreText 以系統字型畫「解」加圓角方框，輸出 16 px 與 32 px 兩層的 TIFF；Info.plist 每個模式加 `TISIconIsTemplate = true`。淺色、深色模式下的實際外觀與 template 是否生效**未驗證**，由使用者在驗收 12 對照。
 - **CI**：`ci.yml` 新增 `shell` 工作（`make bundle`、`swift test`、`make selftest-bundled SELFTEST_BUNDLE_ID=`、`scripts/check-app.sh`）；core 工作改讀 `data/bigram.sjlm.sha256`。`scripts/check-app.sh` 的檢查 6 比較執行前後的 `~/Library/Input Methods` 列表、偏好設定檔雜湊、以及 `TISCreateInputSourceList` 列出的全部輸入法（ID、模式、是否啟用；只讀取），並確認 `foo`、`install x`、`--selftest x`、`--SELFTEST`、空字串等參數都被拒絕。
 - **release.yml**：gate 只等 `ci.yml`（`scripts/check-ci-gate.sh`，改寫自 syrtis，用假 `gh` 測過成功、失敗、沒有 run、API 失敗四種情況）。sign 工作不 checkout、不執行任何 repo 程式，只對 artifact 用 Apple 的工具；Team ID 寫死為 `2LJ882GPY8`，`vars.APPLE_TEAM_ID` 不同就失敗。手動觸發只接受 main，跑到驗證為止，不發布。
 - **Makefile 的過期檢查**：照 syrtis 的 `relink_if_stale`／`rebuild_if_header_stale`，路徑改成新版 SwiftPM 的 `macos/.build/out/...`。實測 Swift 6.4 在 `libcore.a` 變動時本來就會重新連結；標頭內容變動沒辦法在不改 `core/` 的前提下實測（只改時間戳不會重編）。
 - **日誌擷取的過濾條件**：`LogTests` 用 `processIdentifier == <測試行程的 PID>`（§10 驗收 5 已改成這個寫法）。log stream 只抓得到 unified log；`NSLog`／`print` 在測試行程裡只寫到 stderr／stdout，由同時進行的 stdout／stderr 擷取負責抓。
 - **擷取期間扣住 issue**：`LogTests` 以 `nonisolated` 覆寫 `record(_:)`（XCTest 可能從任何執行緒記錄，扣住的清單有鎖），在 stdout／stderr 擷取期間扣住所有 XCTest issue（包括 `FakeClient` 等輔助程式裡的斷言），擷取結束後才記錄；所以擷取期間可以直接斷言。`defer` 確保提早離開時也會還原 stdout／stderr 並記錄扣住的 issue。`StdCapture.finish()` 可重複呼叫、每次回傳相同內容，`deinit` 也會還原。擷取期間取候選用 `first` 加 `if let`（不在擷取期間 throw）；`ShellTests` 用 `XCTUnwrap`，候選不足時是斷言失敗、不是陣列越界中止（verifier P4）。
+
+- **修訂 13（單一輸入模式、選單切換排列、`善解輸入法.app`，2026-10-04 實作）**：
+  - **偏好**：`LayoutStore` 協定只有一個 `layout: String?`（存 `InputMode` 的 raw value）。`ShanjieKit` 只有記憶體版 `MemoryLayoutStore`；UserDefaults 版 `DefaultsLayoutStore` 在 `Shanjie` target 的 `main.swift`，用 `UserDefaults.standard`（由 IMK 行程讀時就是 app 自己的網域，即 bundle ID），鍵 `layout`。`Shell.init` 的 `layoutStore` 沒有預設值；先讀偏好算出排列、再呼叫唯一一次 `build()`。值不存在、空字串、大小寫不同（`ETEN`）、`zhuyin` 或完整模式 ID 都視為不合法 → 標準。
+  - **選單**：`menu()` 每次呼叫都重建一個 `NSMenu`，兩個項目「標準鍵盤」「倚天鍵盤」，目前的排列 `state = .on`；action 分別是 `selectStandardLayout(_:)`、`selectEtenLayout(_:)`，不設 target、不看 `sender`（仿小麥注音，由 IMK 轉給 controller）。選了就呼叫 `Shell.selectLayout`：先走既有的 `switchMode`（組字送回擁有者、重建引擎、重載 LM 與設定），再存偏好；選目前的排列時不重建，但仍寫一次偏好。選單動作不改變組字擁有者。**未驗證**：IMK 實際如何呼叫這兩個 action、打勾是否顯示，沒有啟動輸入法實測（契約禁止），由使用者實測（§13.4 第 5 項）確認。
+  - **`setValue`**：`InputMode(modeID:)` 仍只看最後一段，`.zhuyin` 得到 nil 而被忽略（有測試）。舊的 `.standard`／`.eten` 模式 ID 仍會被認得並切換（不存偏好）；`install` 會停用那兩個模式，正常不會再送來，所以沒有另外擋。
+  - **`shanjie install`**：`TISRegisterInputSource` 一律呼叫；它回傳錯誤時只印警告、繼續查清單（契約沒寫註冊失敗怎麼處理；已登記過的 bundle 再註冊是否回錯誤沒有量測），由「列不到 `.zhuyin` → exit 3」決定結果。模式以 `kTISPropertyInputModeID` 比對（沿用原本的做法）。停用舊模式失敗時印一行固定的警告，不影響 exit 0。
+  - **`install-ime.sh`**：目的地、舊名稱、上一版三個字面路徑放在 `DEST`／`LEGACY`／`PREV` 變數；`lsregister -u` 集中在 `unregister()`，files-only 時不呼叫。上一版的選擇：有 `善解輸入法.app` 就是它，否則是舊的 `shanjie.app`；新版就位後若舊名稱還在（兩者並存），`lsregister -u` 後先 `chmod -R u+w` 再刪除。`SHANJIE_TEST_LSREGISTER` 只在 files-only 分支讀取。exit 3 的訊息照契約的文字，但路徑寫成 `~/Library/Input\ Methods/…`，讓使用者可以直接貼上執行。`pkill`／`pgrep` 的正規表示式是 `^<跳脫後的 HOME>/Library/Input Methods/(善解輸入法|shanjie)\.app/Contents/MacOS/shanjie( |$)`；用 `grep -E` 對含 `.`、空白與括號的 HOME 量過（命中兩個名稱、不命中 `.shanjie-previous` 與 `.` 被換掉的路徑），`pkill` 本身沒有在真實系統跑過。
+  - **`test-install-ime.sh`**：lsregister、`pkill`、`pgrep` 的替身只把呼叫寫進一個紀錄檔；每個情況結束都斷言紀錄檔不存在。拒絕執行的情況用 `chmod 500` 的 HOME，並比對錯誤訊息是 HOME 檢查的那一句。新增只有舊名稱、新舊並存（舊名稱唯讀、另有更早的 `.shanjie-previous`）兩種升級。2026-10-04 實測：把 `unregister()` 的 files-only 判斷拿掉，測試以「overwrite: the system was called: lsregister -u …」失敗（呼叫的是替身）。
+  - **`check-app.sh`**：模式清單只取 PlistBuddy 輸出中一層縮排的鍵，必須恰好是 `.zhuyin`（另以兩個模式的 plist 副本確認會列出兩行）；另查資料夾名稱、`CFBundleDevelopmentRegion = en`、`CFBundleName = Shanjie`、`LSHasLocalizedDisplayName`，以及 `zh-Hant`／`en` 兩份 `InfoPlist.strings` 的 `CFBundleName`、`CFBundleDisplayName` 與模式名稱。
+  - **Makefile**：`APP_NAME`／`LEGACY_APP_NAME` 兩個變數；`clean-bundle` 對 `build/`、`build/selftest/` 的兩個名稱逐一 `lsregister -u`（印出每一行，錯誤忽略）後一起刪除。
+  - **測試**：探針鍵 `s`（標準是 ㄋ、倚天是 ㄙ）。原本用 `setInputMode(".eten")` 切換的測試（`ShellTests`、`KeyMapTests`、`LogTests`）改走選單動作 `selectLayout`。2026-10-04 實測突變：把 `Shell.init` 改成先 `build()` 再讀偏好，`testStoredEtenLayoutAppliesFromTheStart` 與 `testTheInputModeIDDoesNotChangeTheLayout` 失敗（preedit 是 ㄋ 而不是 ㄙ），還原後全綠。
 
 ## 12. 範圍外
 

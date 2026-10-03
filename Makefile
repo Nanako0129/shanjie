@@ -4,6 +4,10 @@
 .PHONY: rust build test bundle selftest-bundled clean-bundle
 
 SWIFT_OUT := macos/.build/out
+# The bundle folder (docs/contracts/s3b.md section 13.1). LEGACY_APP_NAME is the name before
+# section 13, still cleaned up by clean-bundle.
+APP_NAME := 善解輸入法.app
+LEGACY_APP_NAME := shanjie.app
 LSREGISTER := /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
 
 rust:
@@ -20,7 +24,7 @@ test: rust
 	cargo test --release --locked
 	swift test --package-path macos
 
-# The shipping bundle: build/shanjie.app with the shipping bundle ID.
+# The shipping bundle: build/$(APP_NAME) with the shipping bundle ID.
 bundle: rust
 	@$(call relink_if_stale,Release)
 	@$(call rebuild_if_header_stale,Release)
@@ -37,14 +41,16 @@ selftest-bundled: rust
 	@$(call relink_if_stale,Release)
 	@$(call rebuild_if_header_stale,Release)
 	BUNDLE_ID=$(SELFTEST_BUNDLE_ID) OUT_DIR=build/selftest scripts/build-app.sh
-	build/selftest/shanjie.app/Contents/MacOS/shanjie --selftest
+	'build/selftest/$(APP_NAME)/Contents/MacOS/shanjie' --selftest
 
-# Unregisters the two local bundles from LaunchServices (errors ignored: usually never
-# registered) and deletes them. Touches nothing else.
+# Unregisters the local bundles, under the current and the legacy name, from LaunchServices
+# (errors ignored: usually never registered or not there) and deletes them. Touches nothing else.
+CLEAN_APPS := $(foreach d,build build/selftest,$(d)/$(APP_NAME) $(d)/$(LEGACY_APP_NAME))
 clean-bundle:
-	-$(LSREGISTER) -u build/shanjie.app 2>/dev/null
-	-$(LSREGISTER) -u build/selftest/shanjie.app 2>/dev/null
-	rm -rf build/shanjie.app build/selftest/shanjie.app
+	@for a in $(CLEAN_APPS); do \
+		echo "$(LSREGISTER) -u $$a"; $(LSREGISTER) -u "$$a" 2>/dev/null || true; \
+	done
+	rm -rf $(CLEAN_APPS)
 
 # SwiftPM may not treat the Rust staticlib as an input. Measured 2026-10-03 with Swift 6.4: it
 # does relink when libcore.a changes, so this guard is a backstop for other toolchains; it costs

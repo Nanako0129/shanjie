@@ -7,9 +7,9 @@
 | 指令 | 內容 |
 |---|---|
 | `make test` | `cargo test --release --locked`，再跑 `macos/` 的 `swift test`（真核心＋真模型的殼測試、`log stream` 日誌測試、自測嚴格度） |
-| `make selftest-bundled` | 用 release 設定組出 `build/selftest/shanjie.app`，從 bundle 自己的 `Resources/` 跑 `--selftest` |
-| `scripts/test-install-ime.sh` | 在暫存的 HOME 裡，用執行檔只會 `exit 1` 的假 app 跑 `install-ime.sh` 的檔案處理（`SHANJIE_INSTALL_FILES_ONLY=1`，不結束行程、不註冊）：沒開 files-only 時拒絕執行、全新安裝時複製失敗、全新安裝、覆蓋安裝（上一版保留為 `.shanjie-previous`）、從已安裝那份重裝、覆蓋時複製失敗 |
-| `make bundle` ＋ `scripts/check-app.sh` | 組出 `build/shanjie.app`（正式 bundle ID、ad-hoc、hardened runtime、沒有 entitlements），再跑 s3b 契約 §10 的檢查 2、3、6 |
+| `make selftest-bundled` | 用 release 設定組出 `build/selftest/善解輸入法.app`，從 bundle 自己的 `Resources/` 跑 `--selftest` |
+| `scripts/test-install-ime.sh` | 在暫存的 HOME 裡，用執行檔只會 `exit 1` 的假 app 跑 `install-ime.sh` 的檔案處理（`SHANJIE_INSTALL_FILES_ONLY=1`，不結束行程、不註冊）：沒開 files-only 時拒絕執行（唯讀 HOME，確認訊息來自 HOME 檢查）、全新安裝時複製失敗、全新安裝、覆蓋安裝（上一版保留為 `.shanjie-previous`）、從已安裝那份重裝、覆蓋時複製失敗、只有舊名稱 `shanjie.app` 時升級、新舊名稱並存時升級。lsregister（`SHANJIE_TEST_LSREGISTER`）、`pkill`、`pgrep` 都換成只記錄呼叫的替身，每個情況都斷言沒被呼叫 |
+| `make bundle` ＋ `scripts/check-app.sh` | 組出 `build/善解輸入法.app`（正式 bundle ID、ad-hoc、hardened runtime、沒有 entitlements），再跑 s3b 契約 §10 的檢查 2、3、6（含 §13.4 的單一輸入模式與中英文名稱） |
 | C 標頭冒煙測試（s3a §7.4） | 指令照 `.github/workflows/ci.yml` 的「C header smoke test」步驟 |
 | S2v 寬鬆比對一致性 | 指令照 `.github/workflows/ci.yml` 的「Lenient comparison parity」步驟 |
 
@@ -29,11 +29,12 @@
 
 ## build/ 的 bundle
 
-- `build/` 底下的 app **一律不啟動、不註冊**（不跑 `shanjie install`、不呼叫 TIS）。輸入法實際用的是 `~/Library/Input Methods/shanjie.app`，那一份才是準的；真正的安裝只由使用者執行 `scripts/install-ime.sh`；agent 與 CI 只透過 `scripts/test-install-ime.sh`（暫存 HOME、假 app）執行它。
+- `build/` 底下的 app **一律不啟動、不註冊**（不跑 `shanjie install`、不呼叫 TIS）。輸入法實際用的是 `~/Library/Input Methods/善解輸入法.app`，那一份才是準的；真正的安裝只由使用者執行 `scripts/install-ime.sh`；agent 與 CI 只透過 `scripts/test-install-ime.sh`（暫存 HOME、假 app）執行它。
 - `scripts/build-app.sh` 會在輸出目錄放 `.metadata_never_index`，讓 Spotlight 與 LaunchServices 不收錄本機建置，系統就不會用 bundle ID 找到並啟動 `build/` 裡的那一份。
-- 清除：`make clean-bundle`（對兩個 bundle 執行 `lsregister -u`，再刪除）。之後以下兩個指令都不應該列出任何東西：
+- 清除：`make clean-bundle`（對 `build/` 與 `build/selftest/` 裡的 `善解輸入法.app` 與改名前的 `shanjie.app` 都執行 `lsregister -u`，再刪除）。之後以下三個指令都不應該列出任何東西。`build/` 有 `.metadata_never_index` 又從不登記，`mdfind` 與 `lsregister -dump` 本來就看不到那裡的 bundle，所以第一個 `find` 才是真正會抓到殘留的檢查：
 
   ```sh
-  mdfind -name shanjie.app | grep -F "$PWD/build"
-  /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -dump | grep -F build/shanjie.app
+  find build -name '*.app'
+  mdfind -name 善解輸入法.app | grep -F "$PWD/build"; mdfind -name shanjie.app | grep -F "$PWD/build"
+  /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -dump | grep -E 'build/(selftest/)?(善解輸入法|shanjie)\.app'
   ```

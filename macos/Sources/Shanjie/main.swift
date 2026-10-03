@@ -22,35 +22,48 @@ func inputModeID(_ source: TISInputSource) -> String? {
     return Unmanaged<CFString>.fromOpaque(p).takeUnretainedValue() as String
 }
 
-/// McBopomofo's install(): register the bundle if TIS does not know it yet, then enable both
-/// input modes. Run only by scripts/install-ime.sh, on the installed copy.
+/// docs/contracts/s3b.md section 13.3. Register the bundle (always: a bundle ID TIS already knows
+/// may still carry the old two-mode list), enable the one input mode, then disable the two modes
+/// of earlier versions if TIS still lists them. Run only by scripts/install-ime.sh, on the
+/// installed copy. Exit 3 means the mode is not listed yet (install-ime.sh then asks for a log
+/// out and log in); 1 is any other failure.
 func install() -> Int32 {
     guard let bundleID = Bundle.main.bundleIdentifier else {
         say("install: no bundle identifier")
         return 1
     }
-    if inputSources(bundleID: bundleID).isEmpty {
-        guard TISRegisterInputSource(Bundle.main.bundleURL as CFURL) == noErr else {
-            say("install: TISRegisterInputSource failed")
-            return 1
-        }
+    // Not fatal by itself: the lookup below decides (an already registered bundle may report an
+    // error here; not measured).
+    if TISRegisterInputSource(Bundle.main.bundleURL as CFURL) != noErr {
+        say("install: warning: TISRegisterInputSource failed")
     }
-    let modes = Set(InputMode.allCases.map { "\(bundleID).\($0.rawValue)" })
-    var enabled = 0
-    for source in inputSources(bundleID: bundleID) {
-        guard let mode = inputModeID(source), modes.contains(mode) else { continue }
-        guard TISEnableInputSource(source) == noErr else {
-            say("install: TISEnableInputSource failed")
-            return 1
-        }
-        enabled += 1
+    let sources = inputSources(bundleID: bundleID)
+    guard let mode = sources.first(where: { inputModeID($0) == "\(bundleID).zhuyin" }) else {
+        say("install: the input mode is not listed yet")
+        return 3
     }
-    guard enabled == modes.count else {
-        say("install: input modes not found after registration")
+    guard TISEnableInputSource(mode) == noErr else {
+        say("install: TISEnableInputSource failed")
         return 1
+    }
+    let legacy: Set<String> = ["\(bundleID).standard", "\(bundleID).eten"]
+    for source in sources where inputModeID(source).map(legacy.contains) ?? false {
+        if TISDisableInputSource(source) != noErr {
+            say("install: warning: TISDisableInputSource failed for an input mode of an earlier version")
+        }
     }
     say("install: registered and enabled")
     return 0
+}
+
+/// The chosen keyboard layout, in the app's own UserDefaults domain (its bundle ID), key `layout`
+/// (section 13.2). Only the running input method creates this; tests use MemoryLayoutStore.
+@MainActor
+final class DefaultsLayoutStore: LayoutStore {
+    var layout: String? {
+        get { UserDefaults.standard.string(forKey: "layout") }
+        set { UserDefaults.standard.set(newValue, forKey: "layout") }
+    }
 }
 
 @MainActor
@@ -70,7 +83,7 @@ func runServer() -> Never {
     // Section 5: the engine is built after the IMK server exists.
     App.shell = Shell(
         resources: resources.absoluteURL, panel: CandidatePanelAdapter(server: server),
-        isSecureInput: { IsSecureEventInputEnabled() })
+        isSecureInput: { IsSecureEventInputEnabled() }, layoutStore: DefaultsLayoutStore())
     withExtendedLifetime(server) { app.run() }
     exit(0)
 }

@@ -24,19 +24,36 @@ public protocol CandidatePanel: AnyObject {
     func hide()
 }
 
-/// The two input modes of Info.plist. A mode ID is `<bundle ID>.<raw value>` (scripts/build-app.sh
-/// derives both from BUNDLE_ID), so a mode is recognised by its last component.
+/// The keyboard layout. Since docs/contracts/s3b.md section 13.2 it is chosen in the input
+/// method's menu and kept in a `LayoutStore` under its raw value; Info.plist has a single input
+/// mode, `<bundle ID>.zhuyin`, which maps to no layout.
 public enum InputMode: String, Sendable, CaseIterable {
     case standard
     case eten
 
-    /// The mode for an ID IMK passes to `setValue`, e.g. `com.nyanako.inputmethod.shanjie.eten`.
+    /// The layout for an ID IMK passes to `setValue`, by its last component. The one mode ID,
+    /// `<bundle ID>.zhuyin`, gives nil, so IMK's `setValue` never changes the layout (section 13.3).
     public init?(modeID: String) {
         guard let last = modeID.split(separator: ".").last else { return nil }
         self.init(rawValue: String(last))
     }
 
     var layout: UInt32 { self == .standard ? 0 : 1 }
+}
+
+/// Where the chosen layout is kept (section 13.2): the raw value of an `InputMode`. The app keeps
+/// it in its own UserDefaults (the Shanjie target); ShanjieKit and the tests only have the
+/// in-memory store, so a test can never write the real preference.
+@MainActor
+public protocol LayoutStore: AnyObject {
+    var layout: String? { get set }
+}
+
+/// The in-memory LayoutStore.
+@MainActor
+public final class MemoryLayoutStore: LayoutStore {
+    public var layout: String?
+    public init(_ layout: String? = nil) { self.layout = layout }
 }
 
 /// Process-wide state: the single engine (about 240 MB each, so never two at once), the single
@@ -53,6 +70,7 @@ public final class Shell {
     static let chat: UInt32 = 0, formal: UInt32 = 1
 
     private let resources: URL
+    private let layoutStore: LayoutStore
     let panel: CandidatePanel
     let isSecureInput: () -> Bool
     private(set) var engine: CoreEngine?
@@ -71,11 +89,29 @@ public final class Shell {
     /// `panel`: the one candidate panel (IMKCandidates in the app).
     /// `isSecureInput`: IsSecureEventInputEnabled in the app (Carbon lives in the executable only);
     /// tests pass a fake.
-    public init(resources: URL, panel: CandidatePanel, isSecureInput: @escaping () -> Bool) {
+    /// `layoutStore`: the chosen layout. Required, with no default, so the app cannot silently
+    /// start without its preference (section 13.2); a missing or unknown value is the standard
+    /// layout.
+    public init(resources: URL, panel: CandidatePanel, isSecureInput: @escaping () -> Bool,
+                layoutStore: LayoutStore) {
         self.resources = resources
         self.panel = panel
         self.isSecureInput = isSecureInput
+        self.layoutStore = layoutStore
+        // The preference is read before the one engine is built (about 240 MB): building first
+        // and switching after would build twice.
+        mode = layoutStore.layout.flatMap(InputMode.init(rawValue:)) ?? .standard
         build()
+    }
+
+    /// The current layout (the menu's checkmark).
+    public var layout: InputMode { mode }
+
+    /// The menu's choice (section 13.2): the existing switch (commit, rebuild), then the choice is
+    /// stored.
+    public func selectLayout(_ newMode: InputMode) {
+        switchMode(to: newMode)
+        layoutStore.layout = newMode.rawValue
     }
 
     /// Creates the engine for the current mode, then loads the LM and the current profile. A
@@ -198,10 +234,15 @@ public final class Session {
         _ = send(ShanjieKey(kind: KeyMap.char, ch: UInt32(UInt8(ascii: "1")) + UInt32(i), modifiers: 0))
     }
 
+    /// IMK's `setValue` with an input mode ID; the one mode ID maps to no layout (section 13.3).
     public func setInputMode(_ id: String) {
         guard let m = InputMode(modeID: id) else { return }
         shell.switchMode(to: m)
     }
+
+    /// The input method menu (section 13.2).
+    public var layout: InputMode { shell.layout }
+    public func selectLayout(_ m: InputMode) { shell.selectLayout(m) }
 
     // MARK: internals
 

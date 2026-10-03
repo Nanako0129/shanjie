@@ -49,6 +49,30 @@ final class ShanjieInputController: IMKInputController {
         MainActor.assumeIsolated { session.setInputMode(id) }
     }
 
+    /// docs/contracts/s3b.md section 13.2: the two layouts, the current one checked. Each item has
+    /// its own selector because IMK does not always pass the NSMenuItem as `sender`.
+    override func menu() -> NSMenu! {
+        let current = MainActor.assumeIsolated { session.layout }
+        let menu = NSMenu()
+        for (title, action, layout) in [
+            ("標準鍵盤", #selector(selectStandardLayout(_:)), InputMode.standard),
+            ("倚天鍵盤", #selector(selectEtenLayout(_:)), InputMode.eten),
+        ] {
+            let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+            item.state = layout == current ? .on : .off
+            menu.addItem(item)
+        }
+        return menu
+    }
+
+    @objc func selectStandardLayout(_ sender: Any?) {
+        MainActor.assumeIsolated { session.selectLayout(.standard) }
+    }
+
+    @objc func selectEtenLayout(_ sender: Any?) {
+        MainActor.assumeIsolated { session.selectLayout(.eten) }
+    }
+
     override func candidates(_ sender: Any!) -> [Any]! {
         MainActor.assumeIsolated { session.candidates }
     }
