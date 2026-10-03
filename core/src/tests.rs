@@ -15,20 +15,20 @@ fn top(l: &Lexicon, syls: &[&str]) -> Vec<String> {
 fn lexicon_parse_rules() {
     let l = lex("# c\n_ skip\na 甲 -1.0\nb 乙\na-b 甲乙 -2 extra\na-b 甲 -1\na-b 甲乙 -2.0\na 丙 -3\na 丁 -1.0\na 甲 -1.0\n");
     // comment, underscore, wrong column count, length mismatch skipped
-    assert_eq!(l.by_reading.len(), 2); // only a and a-b survive
-    assert_eq!(l.by_reading[&v(&["a", "b"])].len(), 1);
+    assert_eq!(l.reading_count(), 2); // only a and a-b survive
+    assert_eq!(l.entries(&v(&["a", "b"])).len(), 1);
     assert_eq!(l.max_len, 2);
     // duplicates kept, stable sort by score desc: 甲 -1, 丁 -1, 甲 -1 (file order), 丙 -3
-    let a: Vec<&str> = l.by_reading[&v(&["a"])].iter().map(|(w, _)| w.as_str()).collect();
+    let a: Vec<&str> = l.entries(&v(&["a"])).iter().map(|(w, _)| *w).collect();
     assert_eq!(a, ["甲", "丁", "甲", "丙"]);
     // by_word: first occurrence wins on a tie
-    assert_eq!(l.by_word["甲"].1, -1.0);
+    assert_eq!(l.word_info("甲").unwrap().1, -1.0);
 }
 
 #[test]
 fn by_word_strictly_greater_replaces() {
     let l = lex("a 甲 -2.0\nb 甲 -1.0\nc 甲 -1.0\n");
-    assert_eq!(l.by_word["甲"].0, v(&["b"]));
+    assert_eq!(l.word_info("甲").unwrap().0, v(&["b"]));
 }
 
 #[test]
@@ -165,7 +165,7 @@ fn overlay_duplicate_of_base_entry_is_error() {
 #[test]
 fn overlay_tie_sorts_base_first_then_file_order() {
     let l = Lexicon::parse_with("a 甲 -1.0\na 丙 -3.0\n", Some("a\t乙\t-1.0\twikt\na\t丁\t-1.0\twikt\na\t戊\t-0.5\twikt\n")).unwrap();
-    let a: Vec<&str> = l.by_reading[&v(&["a"])].iter().map(|(w, _)| w.as_str()).collect();
+    let a: Vec<&str> = l.entries(&v(&["a"])).iter().map(|(w, _)| *w).collect();
     assert_eq!(a, ["戊", "甲", "乙", "丁", "丙"]);
 }
 
