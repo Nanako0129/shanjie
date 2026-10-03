@@ -72,8 +72,8 @@ ditto "$SRC" "$STAGE/善解輸入法.app"
 
 # 2. Keep the previous version as .shanjie-previous (replacing an older one kept there), then move
 #    the new bundle into place. The previous version is the installed 善解輸入法.app, or, when only
-#    the legacy shanjie.app is installed, that one. It is unregistered from LaunchServices just
-#    before it is moved, and the new one is registered in step 3, so the system resolves the
+#    the legacy shanjie.app is installed, that one. It is moved aside first and then unregistered
+#    from LaunchServices, and the new one is registered in step 3, so the system resolves the
 #    bundle ID to the installed copy. Not measured on a real system yet; the user's install test
 #    checks which copy runs.
 OLD=
