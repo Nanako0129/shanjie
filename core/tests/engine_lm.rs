@@ -383,5 +383,10 @@ fn punctuation_is_a_sentence_boundary() {
     let (_, tx, _) = best_path(&x, profile);
     let (_, ty, _) = best_path(&y, profile);
     assert!((e.total_score().unwrap() - (tx + ty)).abs() < 1e-9);
+    // Only punctuation: no words, no total (contract §4).
+    let mut e = engine(Layout::Standard, profile);
+    e.key(Key::ch(',', MOD_SHIFT)).unwrap();
+    e.key(Key::ch('.', MOD_SHIFT)).unwrap();
+    assert!(e.total_score().is_none());
 }
 

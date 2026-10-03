@@ -156,13 +156,16 @@ fn row2_punctuation_goes_into_the_composition() {
     let o = k(&mut e, Key::ch(',', MOD_SHIFT));
     assert!(o.handled && o.commit.is_empty() && o.preedit == "，");
     assert!(kk(&mut e, KeyKind::Enter).commit == "，");
-    // 你好，你好: the whole sentence is committed by Enter only.
+    // 你好，我是 (contract acceptance 1): both sides differ, so a duplicated stretch would show; the
+    // whole sentence is committed by Enter only.
+    let woshi = typ(&mut std(), "ji3g4").preedit; // ㄨㄛˇ ㄕˋ alone
+    assert!(woshi.chars().count() == 2 && woshi != "你好");
     let mut e = std();
     typ(&mut e, NIHAO);
     k(&mut e, Key::ch(',', MOD_SHIFT));
-    let o = typ(&mut e, NIHAO);
-    assert!(o.commit.is_empty() && o.preedit == "你好，你好");
-    assert!(kk(&mut e, KeyKind::Enter).commit == "你好，你好");
+    let o = typ(&mut e, "ji3g4");
+    assert!(o.commit.is_empty() && o.preedit == format!("你好，{woshi}"));
+    assert!(kk(&mut e, KeyKind::Enter).commit == format!("你好，{woshi}"));
     // Esc clears it; reset(Commit) returns it.
     let mut e = std();
     typ(&mut e, NIHAO);
