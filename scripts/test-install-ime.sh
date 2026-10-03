@@ -27,6 +27,14 @@ no_staging() { ! ls -d "$IM"/.shanjie-staging-* >/dev/null 2>&1; }
 stub "$T/v1/shanjie.app" v1
 stub "$T/v2/shanjie.app" v2
 
+# 0. A failing copy on a fresh install leaves nothing installed (the staged copy may be partial).
+stub "$T/bad0/shanjie.app" bad0
+chmod 000 "$T/bad0/shanjie.app/Contents/marker"
+if run "$T/bad0/shanjie.app" >/dev/null 2>&1; then fail "fresh install from an unreadable source succeeded"; fi
+chmod 644 "$T/bad0/shanjie.app/Contents/marker"
+[ ! -e "$IM/shanjie.app" ] || fail "a failed fresh copy installed a partial bundle"
+no_staging || fail "a failed fresh copy left a staging directory"
+
 # 1. Fresh install: no previous version is kept.
 run "$T/v1/shanjie.app" >/dev/null
 [ "$(marker "$IM/shanjie.app")" = v1 ] || fail "fresh install did not place the bundle"
