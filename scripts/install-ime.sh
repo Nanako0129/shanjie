@@ -67,7 +67,8 @@ pkill -f "$PATTERN" || rc=$?
 # 4. Register and enable both input modes, from the installed copy.
 if ! "$HOME/Library/Input Methods/shanjie.app/Contents/MacOS/shanjie" install; then
   echo "error: registering the input method failed." >&2
-  if [ "${KEPT:-}" = 1 ]; then
+  # Checked on disk, not by KEPT: an earlier run killed between the two renames also leaves one.
+  if [ -d "$HOME/Library/Input Methods/.shanjie-previous" ]; then
     echo "To go back to the previous version:" >&2
     echo "  rm -rf ~/Library/Input\\ Methods/shanjie.app" >&2
     echo "  mv ~/Library/Input\\ Methods/.shanjie-previous ~/Library/Input\\ Methods/shanjie.app" >&2
