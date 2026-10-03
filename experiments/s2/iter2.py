@@ -100,6 +100,33 @@ class LM:
         return self.lam * math.log10(self._p(last, "</s>", self.p_eos))
 
 
+def adjust_lexicon(base, overlay_words, uni, cfg):
+    """依語料頻率重估先驗（review-fable.md 改動 2），回傳新的 Lexicon；不改檔案。
+
+    prior_mix=β：每個詞條分數改成 log10((1−β)·10^lp + β·c(w)/N)，語料沒見過的詞只留 (1−β) 那一項。
+    overlay_cap=true：疊加層的詞分數取 min(原分數, log10(c(w)/N))；語料沒見過的再扣 overlay_unseen（預設 1.0）。
+    """
+    beta, cap, unseen = cfg.get("prior_mix", 0.0), cfg.get("overlay_cap", False), cfg.get("overlay_unseen", 1.0)
+    if not beta and not cap:
+        return base
+    N = sum(uni.values())
+    lex = ime.Lexicon.__new__(ime.Lexicon)
+    lex.by_reading, lex.by_word, lex.max_len = collections.defaultdict(list), {}, base.max_len
+    for key, entries in base.by_reading.items():
+        for w, lp in entries:
+            c = uni.get(w, 0)
+            if cap and w in overlay_words:
+                lp = min(lp, math.log10(c / N)) if c else lp - unseen
+            if beta:
+                lp = math.log10((1 - beta) * 10 ** lp + beta * c / N)
+            lex.by_reading[key].append((w, lp))
+            if w not in lex.by_word or lp > lex.by_word[w][1]:
+                lex.by_word[w] = (key, lp)
+    for k in lex.by_reading:
+        lex.by_reading[k].sort(key=lambda x: -x[1])
+    return lex
+
+
 def decode(lex, syls, lm, beam=64):
     syls = tuple(syls); n = len(syls)
     hyps = [[] for _ in range(n + 1)]; hyps[0] = [(0.0, ())]
@@ -174,19 +201,21 @@ def main():
     sets = {k: v for k, v in all_sets().items() if k in a.sets.split(",")}
     commit = subprocess.run(["git", "-C", ROOT, "rev-parse", "--short", "HEAD"], capture_output=True, text=True).stdout.strip()
     dirty = subprocess.run(["git", "-C", ROOT, "status", "--porcelain", "--", "experiments", "data", "reference"], capture_output=True, text=True).stdout.strip()
+    overlay_words = {l.split("\t")[1] for l in open(os.path.join(ROOT, "data", "lexicon", "overlay-add.tsv"), encoding="utf-8")}
     prev_corpora, uni, bi = None, None, None
     for cfg in cfgs:
         t1 = time.time()
         if cfg["corpora"] != prev_corpora:
             uni, bi = merged(cfg["corpora"]); prev_corpora = cfg["corpora"]
         lm = LM(cfg, uni, bi)
+        lex_cfg = adjust_lexicon(lex, overlay_words, uni, cfg)
         t2 = time.time()
         run = datetime.datetime.now().strftime("%Y%m%d-%H%M%S") + "-" + hashlib.md5(json.dumps(cfg, sort_keys=True).encode()).hexdigest()[:6]
         summary = []
         for name, (rows, private) in sets.items():
             d = os.path.join(PRIVATE if private else WORK, "s2-runs" if private else "runs", run)
             os.makedirs(d, exist_ok=True)
-            res = [score_row(lex, lm, t, s) for t, s in rows]
+            res = [score_row(lex_cfg, lm, t, s) for t, s in rows]
             with open(os.path.join(d, f"{name}.tsv"), "w", encoding="utf-8") as f:
                 for i, (ok, rank, margin, ll, top1) in enumerate(res):
                     f.write(f"{i}\t{ok}\t{rank}\t{'' if margin is None else round(margin, 4)}\t{ll:.4f}\t{'' if private else top1}\n")
