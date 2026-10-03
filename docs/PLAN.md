@@ -339,6 +339,8 @@ S3a 不需要外觀參考，可以先做；S3b 等使用者提供 macOS 內建�
 
 #### S3a：核心的按鍵引擎與 C ABI
 
+**狀態：完成（2026-10-03，commit 1d8e101、c9525f8）。** fresh verifier CONFIRMED：7 項驗收全部獨立重跑；重播 302／302（兩種排列）；release 每鍵 p95 約 1.2–2.0 ms；C 冒煙測試 exit 0、欄位對調後失敗；突變測試（拿掉靜音 hook、直通改狀態、Ctrl+\ 判定、拒收音節）都會讓對應測試失敗。
+
 - **目標。** 把注音輸入的所有狀態和規則放進 Rust 核心，讓 Swift 殼只做事件翻譯與繪製；幾乎所有行為都能用 `cargo test` 驗證。
 - **擁有範圍。**
   - 新檔 `core/src/engine.rs`、`core/src/ffi.rs`、`core/include/shanjie.h`、`core/tests/engine*.rs`、`core/tests/c/abi_smoke.c`。
@@ -382,6 +384,7 @@ S3a 不需要外觀參考，可以先做；S3b 等使用者提供 macOS 內建�
 - 殼依前景 App 的 bundle ID 判斷聊天或書面，只把這個列舉傳給核心，供 S2 的語言模型設定切換；核心不持有 App 身分。
 - 安裝與實機測試由使用者執行：TextEdit／Notes／Safari 打陷阱集前 10 句、R3 的三處 secure input 情境、Caps Lock 切換、兩種排列。
 - 契約在截圖到手後再寫，另外送審並由使用者核准。
+- 對照截圖與實機時要確認的暫定行為（S3a verifier 的 P4 與契約 §8）：Shift＋空白鍵目前等同空白鍵；候選開著時按超出本頁的數字鍵，目前候選維持開啟；候選頁到頭停住不繞回（只有空白鍵繞回）；Ctrl+Shift+\ 直通；Command 等組合鍵在組字中直通且不送出組字區。
 
 #### S3 原有要求
 
