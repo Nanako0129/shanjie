@@ -20,7 +20,7 @@ v4 日期 2026-10-03。v1 經 `pilotfish:plan-verifier`（REVISE，4 項）與 `
 
 | ID | 條件 | 量法 |
 |---|---|---|
-| A1 | 口語評測集整句正確率（句尾計分），拆成兩個可分開歸責的數字（v5，N0 後）：**A1a 候選含正解率**（同步路徑前 64 名候選含正解；使用者 2026-10-03 決定交給判斷器 64 名）≥ 98%，由 S1＋S2 負責；**A1b 判斷挑對率**（正解在候選內的句子裡，重排挑對的比例）≥ 97%，**在端上路徑量，由 S5 負責；v1 完成以端上為準**。雲端（S6，選用）啟用時另報雲端的 A1b，不構成 v1 完成條件。兩者相乘約等於原本的完整端上路徑 ≥ 95%。只有 lattice＋n-gram 的同步路徑 top-1 ≥ 85% | 片 E 產出的保留集，只在片結束時由 verifier 跑 |
+| A1 | 口語評測集整句正確率（句尾計分），拆成兩個可分開歸責的數字（v5，N0 後）：**A1a 候選含正解率**（同步路徑前 64 名候選含正解；使用者 2026-10-03 決定交給判斷器 64 名）≥ 98%，由 S1＋S2 負責；**A1b 判斷挑對率**（正解在候選內的句子裡，重排挑對的比例）≥ 97%，**在端上路徑量，由 S5 負責；v1 完成以端上為準**。雲端（S6，選用）啟用時另報雲端的 A1b，不構成 v1 完成條件。兩者相乘約等於原本的完整端上路徑 ≥ 95%。同步路徑（lattice＋n-gram）top-1 原訂 ≥ 85%；**使用者 2026-10-03 決定改成整體目標**：同步路徑只報數字、要求不退步，85% 由加上 S4 學習與 S5 重排的整體路徑達成（S2 第 11、12 輪實測同步路徑停在 dev302 約 79–80%） | 片 E 產出的保留集，只在片結束時由 verifier 跑 |
 | A2 | 學習不污染：改選一次冷門詞後，常用詞句 0 退步；同前文的冷門詞句 ≥ 80% 學會 | 片 E 產出的 ≥ 10 組學習案例 |
 | A3 | 延遲（M5 Mac）：同步路徑每鍵 p95 < 16 ms；神經驗證 p95 < 300 ms、非同步、不阻塞按鍵。雲端主力模式（選用，§2 S6）另訂：送出前等待 p95 ≤ 1 秒（使用者 2026-10-03 核定），硬逾時就送本機結果 | 核心 bench＋殼內打點 |
 | A7 | 不拖慢電腦（v5，使用者 2026-10-03 在 Mac 量測時回報「電腦很卡」）：本機模型推論期間，按鍵到組字區顯示的 p95 仍 < 16 ms；推論用低 QoS、新按鍵就取消進行中的推論；使用者實測打字時不卡 | 殼內打點＋使用者實測 |
@@ -308,7 +308,54 @@ v4 日期 2026-10-03。v1 經 `pilotfish:plan-verifier`（REVISE，4 項）與 `
   - 句尾項、疊加層分數以語料頻率為上限。
   - 語料：維基 20 萬篇＋口語 k=5。
 - **使用者決定（2026-10-03）：依 App 切換語言模型設定。** 聊天 App 用聊天設定（λ=0.5），其他 App 用書面設定（λ=0.7）；聊天 App 清單可在設定中修改。這需要 S3 殼把前景 App 的 bundle ID 傳給核心（R3 的 privacyGate 本來就要讀這個值）。
-- 驗收：開發集同步路徑 ≥ 85%，片結束時保留集 ≥ 85%；**A1a：開發集與保留集 oracle@64 ≥ 98%**（S1＋S2 合計；N0 的 9 句同音詞排序漏掉屬於這片）；每鍵 p95 < 16 ms；模型檔 ≤ 100 MB。P1 詞性連接併入這片（見下）。
+- 原驗收：開發集同步路徑 ≥ 85%，片結束時保留集 ≥ 85%；**A1a：開發集與保留集 oracle@64 ≥ 98%**（S1＋S2 合計；N0 的 9 句同音詞排序漏掉屬於這片）；每鍵 p95 < 16 ms；模型檔 ≤ 100 MB。P1 詞性連接併入這片（見下）。
+- **使用者決定（2026-10-03 晚）：S2 收尾，85% 交給整體。** 第 11、12 輪（判別式重排、隔字字對）在 dev302 只多對 0–3 句，同步路徑停在約 79–80%；剩下的錯誤多半要語意（S5）或使用者自己的資料（S4）。S2 改成兩片收尾：S2v（寬鬆對照加教育部異體詞）先做，S2c（語言模型進核心）其次。A1a、延遲、模型大小照舊；85% 不再是 S2 的條件。P1 詞性連接延後（繁中詞性資料的授權未解），不在 S2 收尾範圍。
+- **使用者決定（2026-10-03 晚）：寬鬆對照放寬到教育部並列的異體詞。** 屬於看過開發集錯句之後的「事後修改」，所以標準定死在辭典本身，不從評測句挑。
+
+#### S2v：寬鬆對照加入教育部異體詞
+
+- **目標。** 寬鬆對照除了原本的單字對照（她妳它牠嘗周臺裏 → 他你他他嚐週台裡），再把教育部《重編國語辭典修訂本》明列「也作／亦作」、而且讀音相同的詞視為相同。
+- **來源與標準。** g0v/moedict-data 的 `dict-revised_bkup.json`（commit a6dc997，本機路徑同 `tools/readings.py` 的 `MOEDICT`），CC BY-ND 3.0 TW，只用於評測。
+  - 詞條標題 T 至少 2 字、不含 `{` 缺字碼；只看釋義的 `def` 欄（`link` 欄裡只有 1 處「也作」，不算）。`def` 含 `也作「…」` 或 `亦作「…」` 時，引號內以 `」、「` 分隔的每個 Y：字數與 T 相同、Y ≠ T、不含 `{`，而且 T 與 Y 至少有一個注音讀音（`heteronyms[].bopomofo`）相同。Y 必須也是詞條才有讀音可比。main 試算：2,081 組詞對。
+  - dev302 的 5 句異體錯誤裡，只有「散布／散佈」「念書／唸書」符合；摺疊／折疊、碼錶／碼表、回覆／回復在辭典裡是各自獨立的詞條，不算。
+- **正規化全部在產生表時做完**（`tools/build_variants.py`）：
+  1. 每個詞先套原本的單字對照（她妳它牠嘗周臺裏 → 他你他他嚐週台裡）。
+  2. 套完後兩邊相同的詞對丟掉；其餘詞對不分方向做聯集，每組的標準形取 Python `min()`（碼位最小）。
+  3. 每組除了標準形以外的詞，各寫一行 `異體\t標準形`。同一個異體對到兩個不同標準形就報錯結束（聯集之後不會發生，但要檢查）。
+  - 表中任何一欄都不含 `她妳它牠嘗周臺裏`；異體不重複。
+- **產出。**
+  - `tools/build_variants.py`：產生 `eval/variants.tsv`；`--check` 重建並逐位元組比對；`--probe` 印出對照測試用的探測字串（見驗收 3）。`--probe` 一律讀 repo 的 `eval/variants.tsv`，不受 `SHANJIE_VARIANTS` 影響。
+  - `eval/variants.tsv`：`#` 開頭的說明行（來源、commit、標準、詞對數、組數），接著每行 `異體\t標準形`，依異體排序。
+  - `LICENSES/data.md` 加一列：CC BY-ND 3.0 TW，只用於評測；每一欄都是辭典原有的詞條字串，詞對（「也作」關係）是辭典記載的事實，不是改寫釋義；署名教育部《重編國語辭典修訂本》。
+- **語意。** `lenient(s)`：先套原本的單字對照，再由左到右做最長匹配：在每個位置，若表中有異體從這裡開始，取最長的那個換成標準形並跳過它；否則保留這個字。載入器不做任何轉換；說明行以外的每一行必須剛好兩欄，異體重複就報錯結束。
+- **表的位置。** 兩邊都讀環境變數 `SHANJIE_VARIANTS`，沒設時用 repo 的 `eval/variants.tsv`。檔案不存在、格式錯誤，都報錯結束，不得默默退回舊規則。
+- **實作位置。**
+  - Rust：`core/src/eval.rs` 的 `lenient` 改成由表建立的物件；評測 CLI 載入表；新增 `--lenient-dump FILE`：對檔案每一行印出 `lenient(行)`，不印其他東西。
+  - Python：`reference/proto/eval.py` 提供同一個函式與同樣的 `--lenient-dump FILE`（第一個參數是它時，只做這件事）；`reference/proto/lm_eval.py`、`experiments/s2/iter2.py`、`experiments/s2/rerank.py` 改成引用它。
+  - 其他已結案的實驗程式（n0、providers、jev、`iterate.py`、`eval_mix.py`、`eval_bigram.py`）不改；它們記錄的數字標明是舊規則。
+  - **S0 契約一併更新**：§6 的寬鬆對照定義改指向 `eval/variants.tsv` 與本節語意；§1 的 `eval/golden/unigram.txt` SHA-256 改成新值，並加一列 `eval/variants.tsv` 的 SHA-256；§9 註明 S2v 可以修改 `reference/proto/eval.py`（只限上述兩項）。PLAN §S0 的指標行同樣改成指向本節。
+- **擁有者。** main。
+- **驗收。**
+  1. `python3 tools/build_variants.py --check` 通過；說明行的詞對數與表的行數一致。
+  2. Rust 單元測試：最長匹配、單字對照與異體的組合、重複異體與欄數錯誤會報錯。
+  3. **函式層級對照**：`python3 tools/build_variants.py --probe >| $T/probe.txt`。探測檔的**前 N 行**（N＝表的資料行數）依表的順序，每行是一個異體；之後是：每個異體接上下一行的異體；異體前後各加一個「臺」（一行）；四份 golden 檔裡所有 `✗ 正解 → 輸出` 的兩邊；開發集每一列的句子。
+     - `python3 reference/proto/eval.py --lenient-dump $T/probe.txt >| $T/py.txt` 與 `cargo run --release -q -p cli -- --lenient-dump $T/probe.txt >| $T/rs.txt`，`diff $T/py.txt $T/rs.txt` 必須為空。
+     - **表真的有生效**：`N=$(grep -vc '^#' eval/variants.tsv); diff <(head -n $N $T/rs.txt) <(grep -v '^#' eval/variants.tsv | cut -f2)` 必須為空，即每個異體都被換成它的標準形；Python 的 `py.txt` 同樣檢查。表若沒載入，這一條必失敗（異體原樣輸出）。
+  4. **S0 對照**：照 S0 契約 §9 的暫存複本方式（把 `reference/proto/*.py` 複製到 `$T`，`$T/tests/homophones.txt`、`daily.txt`、`moedict_sample.txt` 分別是 `eval/sets/` 的 trap、daily、moedict，`$T/data/mcbpmf-data.txt` 是 `data/lexicon/` 的同名檔），執行
+     `R=$PWD; diff <(cd $T && SHANJIE_VARIANTS=$R/eval/variants.tsv python3 eval.py) <(cargo run --release -q -p cli -- --set trap daily moedict --learn-sim --no-overlay)`（在 repo 根目錄執行），結果必須為空。
+  5. **golden 的預期差異**：重新產生 golden 與三份 S1 對照檔。`s1-dev302.txt`、`s1-dev302-nooverlay.txt` 的 `lenient_acc` 至少要因為第 116 行（念書／唸書）各多 1 句；其他任何變動都要逐句列出對應的詞對；只能是 `lenient_acc` 的值變動；golden 完全不變就算不通過。新的 golden commit 進 repo，`cargo test` 綠。
+  6. CLI 層級測試（`cli/tests/`）：跑 `--lenient-dump`，`唸書` 與 `念書` 的輸出相同、`散佈` 與 `散布` 相同。測試不設定也不清除 `SHANJIE_VARIANTS`（沒設時 CLI 用 repo 的表），所以驗證者把它指向空表時，這個測試會失敗。
+  7. `grep -rn 她妳它牠嘗周臺裏`：定義寬鬆對照的程式常數與文件段落（`core/src/eval.rs`、`reference/proto/eval.py`、`docs/contracts/s0.md` §6、PLAN §S0 指標行、`docs/methodology.md`）都註明之後還要套異體表；本節（§S2v）、已結案的實驗程式、它們的結果與 `docs/typing-test.md` 的歷史紀錄除外。
+  8. 新規則下重算一次，記成**新的基準**（不和舊規則的 `log2.tsv`、`runs/` 做配對比較），寫進 `docs/research-log.md`：
+     - 參考 LM（`data/lm/bigram.sjlm`）：dev302、typing76（chat 與 formal）；discordtune、Discord 845（chat）；新聞 294（formal 與 chat）。
+     - 三套輸入法的既有輸出（`~/side-project/shanjie-private/` 的 `*-out.tsv`）在 Discord 845 與新聞 294 上的寬鬆正確率。
+     - 驗證集只記統計，並記下這是第幾次看。
+     - 註明 oracle 的算法差異（S2v 之前就存在）：`lm_eval.py` 與 `iter2.py` 的 oracle 套寬鬆對照，Rust 的 `extra` 行用完全相符。
+  9. `docs/methodology.md` 更新寬鬆對照的定義，標明「事後修改」與日期。
+- **範圍外。** 單字異體（例如 佈／布、摺／折）；語意相近但讀音不同的詞；改動解碼。
+- **預算與停止。** main 1 回合＋1 次修正。驗收 3、4、5 任一對不上：回報第一個不同的行與原因，不得修改 golden 或探測檔來湊。
+- **驗證。** fresh `pilotfish:verifier`：重跑 1–7；抽查 10 組詞對，確實在辭典裡寫著「也作／亦作」且讀音相同；把 `SHANJIE_VARIANTS` 指向只有說明行的檔案時，驗收 3 的「表真的有生效」與驗收 6 必須失敗，拿掉環境變數後通過。
+- **回滾。** revert S2v 的 commit（golden 一併還原）。
 
 ### 使用者提出的兩個方向（2026-10-03，待排入；排入前要過 plan-verifier）
 
@@ -608,3 +655,10 @@ plan-verifier 第一次：REVISE，4 項阻擋。security-reviewer：無 P0，2 
 | 非阻擋 | crate-type、`usable()` 過濾後的 302 列、讀音格式、分頁、重播測試只證明按鍵到解碼 | 全部寫進契約 |
 | plan-verifier 第二次 1 | 子行程跑 libtest，stdout 一定有 harness 行，「輸出為空」永遠不會通過 | FIX：改成「除了 harness 行沒有其他內容，且不含任何一列的句子或讀音」 |
 | plan-verifier 第二次 2 | 沒有任何驗收實際用 C 編譯 `shanjie.h`，標頭和 Rust 結構可以不一致而全綠 | FIX：契約 §7.4、驗收 7：系統 `cc` 編譯連結的冒煙測試，加上欄位對調的反向檢查 |
+
+### S2v 契約審查（2026-10-03）
+
+| 來源 | 問題 | 處置 |
+|---|---|---|
+| plan-verifier 1 | 驗收 3 的 Rust／Python 對照跑不起來；golden 允許完全不變；寬鬆定義在 S0 契約等多處；正規化有歧義 | FIX：函式層級 `--lenient-dump` 對照＋S0 暫存複本對照；寫明預期差異（第 116 行）；S0 契約與 PLAN §S0 列為產出；正規化全部在產生表時做完 |
+| plan-verifier 2 | 「改動行數 ≥ 2,000」分不出空表；驗收 6 與驗證步驟對環境變數的要求矛盾 | FIX：改成「探測檔前 N 行的每個異體都換成標準形」；`--probe` 不讀環境變數；CLI 測試不設定也不清除 `SHANJIE_VARIANTS` |
