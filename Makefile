@@ -31,9 +31,11 @@ bundle: rust
 	@$(call rebuild_if_header_stale,Release)
 	scripts/build-app.sh
 
-# The installer (docs/contracts/s3c-installer.md section 3) around build/$(APP_NAME), zipped the
-# way release.yml zips it. Never launched here; scripts/check-installer.sh inspects it.
-installer: bundle
+# The installer (docs/contracts/s3c-installer.md section 3) around the existing build/$(APP_NAME)
+# (run `make bundle` first; not rebuilt here, so the app check-app.sh verified is the one wrapped),
+# zipped the way release.yml zips it. Never launched; scripts/check-installer.sh inspects it.
+installer:
+	@[ -d 'build/$(APP_NAME)' ] || { echo "error: build/$(APP_NAME) is missing; run make bundle first" >&2; exit 1; }
 	@V=$$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' 'build/$(APP_NAME)/Contents/Info.plist'); \
 	rm -f build/shanjie-$$V.zip; \
 	ditto -c -k --keepParent 'build/$(APP_NAME)' build/shanjie-$$V.zip; \

@@ -6,9 +6,11 @@ import ShanjieInstall
 // copied into place by the bundled install-ime.sh (files and processes only), then registered and
 // enabled in this process against the installed copy. Writes nothing of its own; no network.
 
-/// Chinese when the user's first preferred language is Chinese, English otherwise.
+/// Traditional Chinese when the user's first preferred language is (zh-Hant, zh-TW, zh-HK,
+/// zh-MO), English otherwise. The strings live here, not in .lproj files (contract section 1).
 func L(_ zh: String, _ en: String) -> String {
-    (Locale.preferredLanguages.first ?? "").hasPrefix("zh") ? zh : en
+    let first = Locale.preferredLanguages.first ?? ""
+    return ["zh-Hant", "zh-TW", "zh-HK", "zh-MO"].contains(where: first.hasPrefix) ? zh : en
 }
 
 enum Paths {
@@ -41,7 +43,8 @@ func run(_ executable: String, _ arguments: [String], environment: [String: Stri
     do { try process.run() } catch { return (-1, L("無法執行 ", "Cannot run ") + executable) }
     let data = pipe.fileHandleForReading.readDataToEndOfFile()
     process.waitUntilExit()
-    let text = String(decoding: data.prefix(4096), as: UTF8.self)
+    // The end, not the start: install-ime.sh prints warnings first and its error line last.
+    let text = String(decoding: data.suffix(4096), as: UTF8.self)
     return (process.terminationStatus, text)
 }
 
@@ -76,7 +79,8 @@ final class Controller: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var window: NSWindow!
     private let titleLabel = NSTextField(labelWithString: "")
     private let bodyLabel = NSTextField(wrappingLabelWithString: "")
-    private let statusLabel = NSTextField(wrappingLabelWithString: "")
+    private let statusText = NSTextView()
+    private var isBusy = false
     private let spinner = NSProgressIndicator()
     private let primary = NSButton(title: "", target: nil, action: nil)
     private let secondary = NSButton(title: "", target: nil, action: nil)
@@ -92,8 +96,19 @@ final class Controller: NSObject, NSApplicationDelegate, NSWindowDelegate {
         window.title = L("安裝善解輸入法", "Shanjie Installer")
         window.delegate = self
         titleLabel.font = .boldSystemFont(ofSize: 17)
-        statusLabel.textColor = .secondaryLabelColor
-        statusLabel.isSelectable = true
+        statusText.isEditable = false
+        statusText.isSelectable = true
+        statusText.drawsBackground = false
+        statusText.textColor = .secondaryLabelColor
+        statusText.font = .systemFont(ofSize: NSFont.systemFontSize)
+        let statusScroll = NSScrollView()
+        statusScroll.documentView = statusText
+        statusScroll.hasVerticalScroller = true
+        statusScroll.drawsBackground = false
+        statusScroll.borderType = .noBorder
+        // A long script error scrolls here instead of pushing the buttons out of the window.
+        statusScroll.heightAnchor.constraint(equalToConstant: 96).isActive = true
+        statusText.autoresizingMask = [.width]
         spinner.style = .spinning
         spinner.controlSize = .small
         spinner.isDisplayedWhenStopped = false
@@ -107,7 +122,7 @@ final class Controller: NSObject, NSApplicationDelegate, NSWindowDelegate {
         licenses.title = L("顯示授權", "Licenses")
         let buttons = NSStackView(views: [licenses, NSView(), close, secondary, primary])
         buttons.orientation = .horizontal
-        let status = NSStackView(views: [spinner, statusLabel])
+        let status = NSStackView(views: [spinner, statusScroll])
         status.orientation = .horizontal
         status.alignment = .top
         let stack = NSStackView(views: [titleLabel, bodyLabel, status, NSView(), buttons])
@@ -119,6 +134,7 @@ final class Controller: NSObject, NSApplicationDelegate, NSWindowDelegate {
             view.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -40).isActive = true
         }
         window.contentView = stack
+        installMenu()
         showPlan()
         window.center()
         window.makeKeyAndOrderFront(nil)
@@ -127,20 +143,49 @@ final class Controller: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 
+    // While copying or enabling, neither closing the window nor quitting may cut the work short:
+    // the script would be orphaned and nothing would be enabled, with no message.
+    func windowShouldClose(_ sender: NSWindow) -> Bool { !isBusy }
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        isBusy ? .terminateCancel : .terminateNow
+    }
+
+    /// Quit (Cmd-Q) and Copy (Cmd-C, for the error text); nothing else.
+    private func installMenu() {
+        let main = NSMenu()
+        let appItem = NSMenuItem()
+        appItem.submenu = NSMenu()
+        appItem.submenu?.addItem(withTitle: L("結束", "Quit"), action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        let editItem = NSMenuItem()
+        editItem.submenu = NSMenu(title: L("編輯", "Edit"))
+        editItem.submenu?.addItem(withTitle: L("拷貝", "Copy"), action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+        editItem.submenu?.addItem(withTitle: L("全選", "Select All"), action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+        main.addItem(appItem)
+        main.addItem(editItem)
+        NSApp.mainMenu = main
+    }
+
+    private var status: String {
+        get { statusText.string }
+        set { statusText.string = newValue }
+    }
+
     // MARK: states
 
     private func showPlan() {
         plan = InstallerPlan.decide(installed: Paths.installedVersion(), bundled: Paths.bundledVersion)
         titleLabel.stringValue = L("善解輸入法 ", "Shanjie ") + Paths.bundledVersion
+        let license = L("授權：程式 Apache-2.0；詞庫 MIT（小麥注音）；語言模型與擴充詞庫 CC BY-SA 4.0。",
+                        "License: program Apache-2.0; lexicon MIT (McBopomofo); language model and added words CC BY-SA 4.0.")
         let where_ = L("裝到 ~/Library/Input Methods（只有你的帳號），不需要管理員密碼。執行中的舊版會被結束，上一版保留為 .shanjie-previous。",
                        "Installs into ~/Library/Input Methods (your account only); no administrator password. A running older copy is stopped and kept as .shanjie-previous.")
-        statusLabel.stringValue = ""
+        status = ""
         switch plan {
         case .install:
-            bodyLabel.stringValue = where_
+            bodyLabel.stringValue = where_ + "\n" + license
             setButtons(primary: L("安裝", "Install"), primaryAction: { [weak self] in self?.copyThenEnable() })
         case .update:
-            bodyLabel.stringValue = L("已安裝較舊的版本。", "An older version is installed. ") + where_
+            bodyLabel.stringValue = L("已安裝較舊的版本。", "An older version is installed. ") + where_ + "\n" + license
             setButtons(primary: L("更新", "Update"), primaryAction: { [weak self] in self?.copyThenEnable() })
         case .enableSame:
             bodyLabel.stringValue = L("這個版本已經安裝。按「啟用」讓系統啟用它（登出再登入後重開安裝程式時用這個）。「重新安裝」會把目前這份當成上一版保留，取代原本保留的上一版。",
@@ -152,8 +197,13 @@ final class Controller: NSObject, NSApplicationDelegate, NSWindowDelegate {
                                       "A newer version is installed; this installer does not downgrade. Enable turns on the installed copy.")
             setButtons(primary: L("啟用", "Enable"), primaryAction: { [weak self] in self?.enable() })
         }
+        // Only copying needs the bundled zip and script; enabling an installed copy does not.
         if Paths.zip == nil || Paths.script == nil || Paths.bundledVersion.isEmpty {
-            fail(L("安裝程式不完整：找不到內附的輸入法或安裝腳本。", "The installer is incomplete: the bundled input method or script is missing."))
+            if plan.copiesFiles {
+                fail(L("安裝程式不完整：找不到內附的輸入法或安裝腳本。", "The installer is incomplete: the bundled input method or script is missing."))
+            } else {
+                secondary.isHidden = true
+            }
         }
     }
 
@@ -173,31 +223,36 @@ final class Controller: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     private func busy(_ text: String) {
-        statusLabel.stringValue = text
+        isBusy = true
+        status = text
         spinner.startAnimation(nil)
         primary.isEnabled = false
         secondary.isEnabled = false
         close.isEnabled = false
     }
 
-    private func succeed() {
+    private func succeed(note: String? = nil) {
+        isBusy = false
         spinner.stopAnimation(nil)
-        statusLabel.stringValue = L("安裝完成。從選單列的輸入法選單選「善解輸入法」。", "Installed. Choose Shanjie (善解輸入法) in the input menu in the menu bar.")
+        status = L("安裝完成。從選單列的輸入法選單選「善解輸入法」。", "Installed. Choose Shanjie (善解輸入法) in the input menu in the menu bar.")
+            + (note.map { "\n" + $0 } ?? "")
         setButtons(primary: L("完成", "Done"), primaryAction: { NSApp.terminate(nil) }, closeTitle: "")
         close.isHidden = true
     }
 
     private func needLogout() {
+        isBusy = false
         spinner.stopAnimation(nil)
-        statusLabel.stringValue = L("還差一步：請登出再登入，然後再打開這個安裝程式，按「啟用」。",
+        status = L("還差一步：請登出再登入，然後再打開這個安裝程式，按「啟用」。",
                                     "One more step: log out and log back in, then open this installer again and choose Enable.")
         setButtons(primary: L("重新檢查", "Check Again"), primaryAction: { [weak self] in self?.enable() },
                    closeTitle: L("完成", "Done"))
     }
 
     private func fail(_ detail: String) {
+        isBusy = false
         spinner.stopAnimation(nil)
-        statusLabel.stringValue = detail
+        status = detail
         setButtons(primary: nil, closeTitle: L("完成", "Done"))
     }
 
@@ -229,7 +284,7 @@ final class Controller: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
         let result = Registration.run(bundleURL: Paths.installed, bundleID: bundleID, defaults: defaults)
         switch result.outcome {
-        case .done: succeed()
+        case .done: succeed(note: result.legacyDisableFailed ? Self.legacyNote : nil)
         case .modeNotListed: needLogout()
         case .registrationFailed, .enableFailed:
             fail(L("系統拒絕啟用輸入法。可以到「系統設定 → 鍵盤 → 輸入方式」手動加入「善解輸入法」。",
@@ -238,8 +293,11 @@ final class Controller: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
     }
 
+    private static let legacyNote = L("如果輸入方式清單裡還有舊版的「善解（標準）」或「善解（倚天）」，請到「系統設定 → 鍵盤 → 輸入方式」移除。",
+                                      "If the old Shanjie (Standard) or Shanjie (ETen) entries are still listed, remove them in System Settings > Keyboard > Input Sources.")
+
     private func poll(bundleID: String) {
-        statusLabel.stringValue = L("正在等系統啟用輸入法。如果系統跳出視窗，請允許「善解輸入法」。",
+        status = L("正在等系統啟用輸入法。如果系統跳出視窗，請允許「善解輸入法」。",
                                     "Waiting for the system to turn the input method on. If it asks, allow Shanjie.")
         var ticks = 0
         Timer.scheduledTimer(withTimeInterval: pollInterval, repeats: true) { [weak self] timer in
@@ -250,10 +308,11 @@ final class Controller: NSObject, NSApplicationDelegate, NSWindowDelegate {
                     timer.invalidate()
                     // Once accepted, a second run finishes the steps after the check (ETen
                     // carry-over, disabling the modes of earlier versions).
-                    if let defaults = UserDefaults(suiteName: bundleID) {
-                        _ = Registration.run(bundleURL: Paths.installed, bundleID: bundleID, defaults: defaults)
+                    let again = UserDefaults(suiteName: bundleID).map {
+                        Registration.run(bundleURL: Paths.installed, bundleID: bundleID, defaults: $0)
                     }
-                    self.succeed()
+                    let finished = again.map { $0.outcome == .done && !$0.legacyDisableFailed } ?? false
+                    self.succeed(note: finished ? nil : Self.legacyNote)
                 } else if ticks >= self.pollLimit {
                     timer.invalidate()
                     self.needLogout()

@@ -8,7 +8,9 @@
 # Without it: an unsigned skeleton, which release.yml's sign job completes with the notarized zip
 # (the sign job runs no repository code).
 #
-# Environment: SHANJIE_VERSION as in build-app.sh (otherwise the newest git tag, otherwise 0.0.0).
+# Environment: SHANJIE_VERSION is required: the version of the input method build it wraps (the
+# Makefile reads it from build/善解輸入法.app, release.yml from the tag), so the version rule
+# lives only in build-app.sh.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -22,11 +24,7 @@ ZIP="${2:-}"
 [[ -n "$OUT_DIR" && "$OUT_DIR" != /* && "/$OUT_DIR/" != */../* ]] || fail "the out dir must be a relative path inside the repository"
 
 VERSION="${SHANJIE_VERSION:-}"
-if [ -z "$VERSION" ]; then
-  VERSION="$(git describe --tags --abbrev=0 --match 'v[0-9]*' 2>/dev/null || true)"
-  VERSION="${VERSION#v}"
-fi
-VERSION="${VERSION:-0.0.0}"
+[ -n "$VERSION" ] || fail "SHANJIE_VERSION is required"
 [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail "version '$VERSION' is not MAJOR.MINOR.PATCH"
 if [ -n "$ZIP" ]; then
   [ -f "$ZIP" ] || fail "$ZIP not found"
