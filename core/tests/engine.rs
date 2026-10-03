@@ -188,12 +188,16 @@ fn rows3_to_8_candidate_keys() {
         assert!(o.selected == Some(i % 9) && o.candidates == page(i / 9));
     }
     assert!(kk(&mut e, KeyKind::Up).selected == Some(0));
-    // 5: left/right change page and select its first; clamped at the first page
-    let o = kk(&mut e, KeyKind::Right);
-    assert!(o.selected == Some(0) && o.candidates == page(1));
-    let o = kk(&mut e, KeyKind::Left);
-    assert!(o.selected == Some(0) && o.candidates == page(0));
-    assert!(kk(&mut e, KeyKind::Left).candidates == page(0));
+    // 4: left/right move like up/down (horizontal bar), across pages, clamped at both ends
+    for i in 1..=10 {
+        let o = kk(&mut e, KeyKind::Right);
+        assert!(o.selected == Some(i % 9) && o.candidates == page(i / 9));
+    }
+    for i in (0..10).rev() {
+        let o = kk(&mut e, KeyKind::Left);
+        assert!(o.selected == Some(i % 9) && o.candidates == page(i / 9));
+    }
+    assert!(kk(&mut e, KeyKind::Left).selected == Some(0));
     // 5: space = next page, wraps from the last page to the first
     let pages = (all.len() + 8) / 9;
     for p in 1..pages {
