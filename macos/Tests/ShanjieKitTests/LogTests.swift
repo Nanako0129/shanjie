@@ -1,0 +1,193 @@
+import CShanjie
+import Foundation
+import XCTest
+@testable import ShanjieKit
+
+/// Acceptance 5 (R2, docs/contracts/s3b.md section 10.5): drive every shell path that handles
+/// input, an app's bundle ID or the data path while `log stream --level debug` captures this
+/// whole process, and require that none of it shows up.
+@MainActor
+final class LogTests: XCTestCase {
+    func testShellLogsNothingButStaticTextAndCodes() throws {
+        let nonce = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
+        let start = "shanjie-logtest-start-\(nonce)"
+        let end = "shanjie-logtest-end-\(nonce)"
+        let bundleMarker = "com.marker.\(nonce)"
+        let pathMarker = "pathmarker-\(nonce)"
+
+        // Everything this process logs, through any API or subsystem (NSLog, another Logger, ...);
+        // the subsystem is used only for the `<private>` assertion below.
+        let capture = try LogCapture(predicate: "processIdentifier == \(getpid())")
+        defer { capture.stop() }
+
+        // Start marker: the shell's own Logger and subsystem at debug, the lowest level there is
+        // (the shell uses debug and error). Nothing negative happens until it is seen.
+        let started = capture.wait(for: start, timeout: 10) {
+            Log.shell.debug("\(start, privacy: .public)")
+        }
+        guard started else {
+            return XCTFail("log stream never delivered the start marker within 10 s: the capture is not connected")
+        }
+
+        // Negative actions, with this process's stdout and stderr captured too: in a process that
+        // has a stderr (a test runner, unlike the launchd-started input method), NSLog and print
+        // write there instead of to the unified log, so the log stream alone would miss them.
+        let std = StdCapture()
+        let stdProbe = "shanjie-std-probe-\(nonce)"
+        FileHandle.standardError.write(Data("\(stdProbe)\n".utf8))
+        let resources = try XCTUnwrap(TestData.resources())
+        let shell = Shell(resources: resources, panel: FakePanel(), isSecureInput: { false })
+        let c = Controller(shell, bundle: bundleMarker)
+        c.session.activate()                            // profile from a marked bundle ID
+        c.type(Row10.standardKeys)
+        c.press(Keys.enter)                             // commits the marker sentence
+        XCTAssertEqual(c.client.text, Row10.formal, "the typing path really ran")
+        c.type("su3 ")
+        c.session.candidateSelected(c.panel.items[0])   // mouse selection
+        XCTAssertFalse(c.session.send(ShanjieKey(kind: 99, ch: 0, modifiers: 0)))  // non-zero code
+        c.type("su3cl3")
+        c.session.deactivate()                          // commits 你好
+        XCTAssertTrue(c.client.text.hasSuffix("你好"))
+        c.session.activate()
+        c.type("su3")
+        c.session.setInputMode("com.nyanako.inputmethod.shanjie.eten") // mode switch commits and rebuilds
+        let broken = FileManager.default.temporaryDirectory.appendingPathComponent(pathMarker, isDirectory: true)
+        let failed = Shell(resources: broken, panel: FakePanel(), isSecureInput: { false })  // engine_new fails on a marked path
+        XCTAssertNil(failed.engine)
+
+        let stdText = std.finish()
+        XCTAssertTrue(stdText.contains(stdProbe), "the stdout/stderr capture is not connected")
+
+        // End marker: a different one, same Logger and level; the capture runs until it is seen.
+        let ended = capture.wait(for: end, timeout: 10) {
+            Log.shell.debug("\(end, privacy: .public)")
+        }
+        XCTAssertTrue(ended, "log stream never delivered the end marker: the capture is incomplete")
+
+        let entries = capture.entries()
+        let everything = entries.map(\.text).joined(separator: "\n")
+        XCTAssertTrue(everything.contains(start) && everything.contains(end))
+        // Positive control on the shell's own error path: its static text and code are captured.
+        XCTAssertTrue(entries.contains { $0.subsystem == Log.subsystem && $0.text.contains("shanjie_engine_new failed, code 3") },
+                      "the shell's error log did not reach the capture")
+
+        let negatives = [
+            Row10.formal, Row10.chat, "你好", Row10.zhuyin, "ㄑㄧ", "ㄋㄧ",
+            Row10.standardKeys, String(Row10.standardKeys.prefix(6)), "su3cl3",
+            bundleMarker, pathMarker,
+        ]
+        for marker in negatives {
+            XCTAssertFalse(everything.contains(marker), "a negative marker reached the log")
+            XCTAssertFalse(stdText.contains(marker), "a negative marker reached stdout or stderr")
+        }
+        let shellLines = entries.filter { $0.subsystem == Log.subsystem }
+        XCTAssertFalse(shellLines.isEmpty)
+        XCTAssertFalse(shellLines.contains { $0.text.contains("<private>") },
+                       "the shell logged a redacted value; it may log static text and return codes only")
+    }
+}
+
+/// `/usr/bin/log stream` (the full path: zsh's `log` is a builtin) in ndjson, decoded per entry.
+/// JSON escapes are decoded before matching, so a marker cannot hide behind `\uXXXX`.
+final class LogCapture: @unchecked Sendable {
+    struct Entry {
+        var subsystem: String
+        var text: String  // every string field of the entry, decoded
+    }
+
+    private let process = Process()
+    private let lock = NSLock()
+    private var buffer = Data()
+
+    init(predicate: String) throws {
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/log")
+        process.arguments = ["stream", "--level", "debug", "--style", "ndjson", "--predicate", predicate]
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = pipe
+        pipe.fileHandleForReading.readabilityHandler = { [weak self] h in
+            let d = h.availableData
+            guard let self else { return }
+            self.lock.lock()
+            self.buffer.append(d)
+            self.lock.unlock()
+        }
+        try process.run()
+    }
+
+    func stop() {
+        if process.isRunning {
+            process.terminate()
+            process.waitUntilExit()
+        }
+    }
+
+    /// Calls `emit` every 200 ms until an entry contains `marker`; false after `timeout` seconds.
+    func wait(for marker: String, timeout: TimeInterval, emit: () -> Void) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            emit()
+            Thread.sleep(forTimeInterval: 0.2)
+            if entries().contains(where: { $0.text.contains(marker) }) { return true }
+        }
+        return false
+    }
+
+    func entries() -> [Entry] {
+        lock.lock()
+        let data = buffer
+        lock.unlock()
+        return data.split(separator: UInt8(ascii: "\n")).compactMap { line in
+            guard let obj = try? JSONSerialization.jsonObject(with: Data(line)) as? [String: Any] else { return nil }
+            return Entry(subsystem: obj["subsystem"] as? String ?? "", text: Self.strings(obj).joined(separator: " "))
+        }
+    }
+
+    private static func strings(_ v: Any) -> [String] {
+        switch v {
+        case let s as String: [s]
+        case let d as [String: Any]: d.values.flatMap(strings)
+        case let a as [Any]: a.flatMap(strings)
+        default: []
+        }
+    }
+}
+
+/// Redirects this process's stdout and stderr into a pipe until `finish()`, then restores them.
+final class StdCapture: @unchecked Sendable {
+    private let pipe = Pipe()
+    private let savedOut = dup(STDOUT_FILENO), savedErr = dup(STDERR_FILENO)
+    private let lock = NSLock()
+    private var buffer = Data()
+
+    init() {
+        fflush(stdout)
+        fflush(stderr)
+        pipe.fileHandleForReading.readabilityHandler = { [weak self] h in
+            let d = h.availableData
+            guard let self else { return }
+            self.lock.lock()
+            self.buffer.append(d)
+            self.lock.unlock()
+        }
+        dup2(pipe.fileHandleForWriting.fileDescriptor, STDOUT_FILENO)
+        dup2(pipe.fileHandleForWriting.fileDescriptor, STDERR_FILENO)
+    }
+
+    /// Restores both descriptors and returns everything written meanwhile.
+    func finish() -> String {
+        fflush(stdout)
+        fflush(stderr)
+        dup2(savedOut, STDOUT_FILENO)
+        dup2(savedErr, STDERR_FILENO)
+        close(savedOut)
+        close(savedErr)
+        try? pipe.fileHandleForWriting.close()
+        Thread.sleep(forTimeInterval: 0.3)  // let the reader drain the pipe
+        pipe.fileHandleForReading.readabilityHandler = nil
+        let rest = pipe.fileHandleForReading.readDataToEndOfFile()
+        lock.lock()
+        defer { lock.unlock() }
+        return String(decoding: buffer + rest, as: UTF8.self)
+    }
+}

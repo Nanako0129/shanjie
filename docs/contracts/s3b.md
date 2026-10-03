@@ -135,7 +135,26 @@
 
 ## 11. 實作決定
 
-（executor 填寫）
+契約沒寫、實作時自行決定的事（含 coordinator 在實作中轉來的修訂 1–10 與 Makefile 範圍）：
+
+- **連結 libcore.a**：`macos/Sources/CShanjie/module.modulemap` 是 `systemLibrary` target，直接引用 `core/include/shanjie.h`（不複製，避免和 `core/` 分岔）。`Package.swift` 以 `#filePath` 算出 repo 根目錄，用 `unsafeFlags` 把 `target/release/libcore.a` 的**完整路徑**交給連結器，不用 `-lcore`＋搜尋路徑，所以搜尋路徑上其他 `libcore` 不可能被誤用。平台設為 macOS 26：Homebrew rustc 的 std 是為 26.0 編的，設更低會出現大量「built for newer macOS」警告。
+- **語言模式**：`ShanjieKit` 與測試是 Swift 6 嚴格模式，型別都標 `@MainActor`（C ABI 只在主執行緒呼叫）。`Shanjie` target 改用 Swift 5 模式：IMK 標頭沒有 actor 標註，`IMKInputController` 的 override 在 Swift 6 不能是 main actor isolated，所以每個回呼用 `MainActor.assumeIsolated` 在執行期檢查主執行緒（不在主執行緒就以靜態訊息中止）。
+- **結構**：`Shell` 是行程唯一的狀態（一個引擎、一個候選窗、殼保存的候選陣列、弱參照的擁有者、`composing` 旗標）。`Session` 對應一個 IMK controller，持有它的 client；`ShanjieInputController` 只轉呼叫。`CoreEngine` 包 C handle，`CoreOutput` 在同一個呼叫裡複製成 Swift 值後立刻 `shanjie_output_free`；`CoreOutput` 不是 `Error`，也不實作 `CustomStringConvertible`／`CustomDebugStringConvertible`。
+- **假 controller 怎麼模擬 IMK 生命週期**：測試的 `Controller` 就是一個 `Session`＋`FakeClient`；把它設成 `nil` 等於 IMK 釋放 controller。`Session` 用 `isolated deinit`，在主執行緒同步執行；deinit 時弱參照已經讀成 nil，規則照修訂 3(a)：擁有者讀成 nil 且組字非空 → `reset(1)`、隱藏候選窗、清空陣列。`claim()`（`handle`／`activateServer` 開頭）也會丟棄擁有者已是 nil 的組字，作為第二道。`FakeClient` 模擬文字框：`insertText` 會取代組字。
+- **擁有者改變時**（修訂 3(b)）：`handle` 與 `activateServer` 先處理擁有者，擁有者換人時用新擁有者 client 的 bundle ID 重設 `set_profile`；`activateServer` 一律重設。非擁有者的 `deactivateServer`／`commitComposition` 完全不動作（不隱藏共用候選窗、不清陣列）。
+- **IMKCandidates 只當顯示**：一個 server 一個 `IMKCandidates`（`kIMKSingleRowSteppingCandidatePanel`），屬於 `Shell`。用 `setCandidateData` 給這一頁、`selectCandidate(withIdentifier: candidateStringIdentifier(...))` 同步選取、`show(kIMKLocateCandidatesBelowHint)`。設定 `IMKCandidatesSendServerKeyEventFirst = YES`：依 `IMKCandidates.h`，候選窗顯示時按鍵先送到 controller；候選開著時核心處理每個鍵（s3a §3 第 3–8 條），所以候選窗不應該收到要處理的鍵。**未驗證**：這是文件描述的行為，沒有啟動輸入法實測（契約禁止）。仍可能把鍵交給候選窗的情況：核心直通的鍵（第 1 條，Command／Option／Control／Caps Lock 組合鍵）在候選開著時回傳 false。若實測（驗收 11）發現候選窗自己吃鍵或選取不同步，就是 §8 的停止條件，改做自建視窗（S3b-2）。滑鼠點選（`candidateSelected(_:)`）轉成數字鍵 `1`＋位置送進核心。
+- **直通不碰 client**：核心回 `handled = 0` 且 `commit` 為空（s3a 第 1、22 條，狀態不變）時，殼不呼叫 `setMarkedText`，App 看到的跟沒按過一樣。
+- **回傳碼非 0**（修訂 1）：先 `reset(1)`（核心只有碼 4 會自己丟棄），再 `setMarkedText("")`、隱藏候選窗、清空陣列、回傳 false；只記回傳碼。
+- **表外的鍵與 `nil` 事件**：同一條路徑，有組字就 `reset(0)` 送出再回傳 false。`recognizedEvents` 只回 `keyDown`，`flagsChanged` 即使送來也直接回傳 false。
+- **輸入模式**：模式 ID 是 `<bundle ID>.standard`／`.eten`，殼只看最後一段，`install` 也從執行中的 bundle ID 推出兩個模式 ID，所以拋棄式 bundle ID 的自測 bundle 也一致。IMK 每次啟用都會呼叫 `setValue`，模式沒變時不重建引擎。
+- **日誌**：`Logger(subsystem: "com.nyanako.inputmethod.shanjie", category: "shell")`，只用 `.error`（失敗碼）與 `.debug`（「input mode switched」）。回傳碼以預設隱私內插（整數預設公開，不會出現 `<private>`）。自測與 `install` 的錯誤訊息用 `StaticString`＋數字寫到 stderr，型別上就不能內插輸入。
+- **日誌行為測試**：`log stream --level debug --style ndjson`，predicate 只濾**行程**（修訂 9），`<private>` 斷言才看殼的 subsystem；ndjson 先解碼 JSON 再比對，標記不會藏在 `\uXXXX` 後面。實測發現：測試行程有 stderr 時，`NSLog` 只寫 stderr、**不進統一日誌**（2026-10-03，探測程式在 stderr 接管線、接 `/dev/null` 時都一樣），所以單靠 `log stream` 抓不到 `NSLog`。測試因此在負向動作期間另外把本行程的 stdout／stderr（fd 1、2）導進管線，用同一組負向標記檢查，並先寫一個探針確認擷取有接上。由 launchd 啟動的輸入法沒有 stderr，那時 `NSLog` 會進統一日誌，由 `log stream` 這一半負責。另加正向對照：殼自己的錯誤訊息（`shanjie_engine_new failed, code 3`）必須出現在擷取裡。
+- **自測**：`Selftest.row10Standard` 是第 10 列在標準排列的按鍵；測試用獨立謄寫的 s3a §1 表從注音推出同一串，並斷言兩者相同。
+- **建置**：`scripts/build-app.sh` 先比對 `data/bigram.sjlm.sha256` 再建置；`BUNDLE_ID`、`OUT_DIR`（必須是 repo 內的相對路徑，因為之後會 `rm -rf "$OUT_DIR/shanjie.app"`）、`SHANJIE_VERSION` 三個環境變數；Info.plist 與 `InfoPlist.strings` 由腳本產生，模式名稱用 `InfoPlist.strings` 的「模式 ID = 名稱」；`CFBundleDevelopmentRegion` 設 `zh-Hant`，所以非中文系統也顯示中文名。授權檔放 `Resources/LICENSES/`：`LICENSE`、`McBopomofo-MIT.txt`、`data.md`，以及 `CC-BY-SA-4.0-attribution.txt`（overlay 的署名照 `LICENSES/data.md`：Wikipedia 與 Wiktionary 貢獻者；模型：Wikipedia 與 Tatoeba 貢獻者）。
+- **選單列圖示**：`scripts/make-icon.swift` 用 CoreText 以系統字型畫「解」加圓角方框，輸出 16 px 與 32 px 兩層的 TIFF；Info.plist 每個模式加 `TISIconIsTemplate = true`。淺色、深色模式下的實際外觀與 template 是否生效**未驗證**，由使用者在驗收 12 對照。
+- **CI**：`ci.yml` 新增 `shell` 工作（`make bundle`、`swift test`、`make selftest-bundled SELFTEST_BUNDLE_ID=`、`scripts/check-app.sh`）；core 工作改讀 `data/bigram.sjlm.sha256`。`scripts/check-app.sh` 的檢查 6 比較執行前後的 `~/Library/Input Methods` 列表、偏好設定檔雜湊、以及 `TISCreateInputSourceList` 列出的全部輸入法（ID、模式、是否啟用；只讀取），並確認 `foo`、`install x`、`--selftest x`、`--SELFTEST`、空字串等參數都被拒絕。
+- **release.yml**：gate 只等 `ci.yml`（`scripts/check-ci-gate.sh`，改寫自 syrtis，用假 `gh` 測過成功、失敗、沒有 run、API 失敗四種情況）。sign 工作不 checkout、不執行任何 repo 程式，只對 artifact 用 Apple 的工具；Team ID 寫死為 `2LJ882GPY8`，`vars.APPLE_TEAM_ID` 不同就失敗。手動觸發只接受 main，跑到驗證為止，不發布。
+- **Makefile 的過期檢查**：照 syrtis 的 `relink_if_stale`／`rebuild_if_header_stale`，路徑改成新版 SwiftPM 的 `macos/.build/out/...`。實測 Swift 6.4 在 `libcore.a` 變動時本來就會重新連結；標頭內容變動沒辦法在不改 `core/` 的前提下實測（只改時間戳不會重編）。
 
 ## 12. 範圍外
 

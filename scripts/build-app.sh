@@ -1,0 +1,151 @@
+#!/bin/bash
+# Build build/shanjie.app (docs/contracts/s3b.md section 2): the Rust core, the Swift shell, the
+# bundle with its data, model and licenses, then an ad-hoc signature with the hardened runtime and
+# no entitlements. Used locally and in CI; it never touches a keychain, installs or launches the
+# app. Developer ID signing happens only in .github/workflows/release.yml.
+#
+#   scripts/build-app.sh
+#
+# Environment (all optional):
+#   SHANJIE_VERSION  e.g. 0.1.0; otherwise the newest git tag (v0.1.0 -> 0.1.0), otherwise 0.0.0
+#   BUNDLE_ID        default com.nyanako.inputmethod.shanjie, the shipping ID (the one place it is
+#                    spelled for builds; `make selftest-bundled` passes a throwaway one locally).
+#                    The input mode IDs and the connection name derive from it.
+#   OUT_DIR          default build, relative to the repository; the app is $OUT_DIR/shanjie.app
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT"
+fail() { echo "error: $*" >&2; exit 1; }
+
+# The model is not in git (docs/PLAN.md S2c); check it before spending time on the build.
+[ -f data/lm/bigram.sjlm ] || fail "data/lm/bigram.sjlm is missing. Download the model-v1 release asset:
+  gh release download model-v1 -p bigram.sjlm -D data/lm"
+shasum -a 256 -c data/bigram.sjlm.sha256 >/dev/null \
+  || fail "data/lm/bigram.sjlm does not match data/bigram.sjlm.sha256; download model-v1 again"
+for f in data/lexicon/mcbpmf-data.txt data/lexicon/overlay-add.tsv LICENSE LICENSES/McBopomofo-MIT.txt LICENSES/data.md; do
+  [ -f "$f" ] || fail "$f is missing"
+done
+
+BUNDLE_ID="${BUNDLE_ID:-com.nyanako.inputmethod.shanjie}"
+[[ "$BUNDLE_ID" =~ ^[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$ ]] || fail "BUNDLE_ID '$BUNDLE_ID' is not a reverse-DNS identifier"
+OUT_DIR="${OUT_DIR:-build}"
+# rm -rf below acts on $OUT_DIR/shanjie.app: keep it inside the repository.
+[[ -n "$OUT_DIR" && "$OUT_DIR" != /* && "/$OUT_DIR/" != */../* ]] || fail "OUT_DIR must be a relative path inside the repository"
+
+VERSION="${SHANJIE_VERSION:-}"
+if [ -z "$VERSION" ]; then
+  VERSION="$(git describe --tags --abbrev=0 --match 'v[0-9]*' 2>/dev/null || true)"
+  VERSION="${VERSION#v}"
+fi
+VERSION="${VERSION:-0.0.0}"
+[[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail "version '$VERSION' is not MAJOR.MINOR.PATCH"
+
+cargo build --release --locked -p core
+swift build -c release --package-path macos
+BIN="$(swift build -c release --package-path macos --show-bin-path)/Shanjie"
+[ -x "$BIN" ] || fail "the Swift build produced no executable"
+
+mkdir -p "$ROOT/$OUT_DIR"
+# Keeps Spotlight and LaunchServices from indexing local bundles, so the system never finds (or
+# launches) a build/ copy of the input method by its bundle ID.
+touch "$ROOT/$OUT_DIR/.metadata_never_index"
+APP="$ROOT/$OUT_DIR/shanjie.app"
+rm -rf "$APP"
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources/zh-Hant.lproj" "$APP/Contents/Resources/LICENSES"
+cp "$BIN" "$APP/Contents/MacOS/shanjie"
+
+RES="$APP/Contents/Resources"
+cp data/lexicon/mcbpmf-data.txt data/lexicon/overlay-add.tsv "$RES/"
+cp -L data/lm/bigram.sjlm "$RES/"   # -L: the worktree's model may be a symlink
+swift scripts/make-icon.swift "$RES/shanjie.tiff"
+
+cp LICENSE "$RES/LICENSES/LICENSE"
+cp LICENSES/McBopomofo-MIT.txt LICENSES/data.md "$RES/LICENSES/"
+cat > "$RES/LICENSES/CC-BY-SA-4.0-attribution.txt" <<'EOF'
+overlay-add.tsv and bigram.sjlm are licensed under the Creative Commons
+Attribution-ShareAlike 4.0 International license (CC BY-SA 4.0):
+https://creativecommons.org/licenses/by-sa/4.0/
+
+overlay-add.tsv: built from Wikipedia and Wiktionary page titles.
+  Attribution: Wikipedia contributors, Wiktionary contributors.
+bigram.sjlm: word counts from Wikipedia articles, Mozilla Common Voice
+  sentences (CC0), Tatoeba sentences (CC BY 2.0 FR) and synthetic sentences.
+  Attribution: Wikipedia contributors, Tatoeba contributors.
+
+The program itself is Apache-2.0 (LICENSE); mcbpmf-data.txt is MIT
+(McBopomofo-MIT.txt). Details: data.md.
+EOF
+
+cat > "$RES/zh-Hant.lproj/InfoPlist.strings" <<EOF
+"CFBundleName" = "善解";
+"CFBundleDisplayName" = "善解";
+"$BUNDLE_ID.standard" = "善解（標準）";
+"$BUNDLE_ID.eten" = "善解（倚天）";
+EOF
+
+mode() {
+  cat <<EOF
+      <key>$1</key>
+      <dict>
+        <key>TISIntendedLanguage</key><string>zh-Hant</string>
+        <key>TISIconIsTemplate</key><true/>
+        <key>tsInputModeAlternateMenuIconFileKey</key><string>shanjie.tiff</string>
+        <key>tsInputModeCharacterRepertoireKey</key><array><string>Hant</string><string>Han</string></array>
+        <key>tsInputModeDefaultStateKey</key><true/>
+        <key>tsInputModeIsVisibleKey</key><true/>
+        <key>tsInputModeMenuIconFileKey</key><string>shanjie.tiff</string>
+        <key>tsInputModePaletteIconFileKey</key><string>shanjie.tiff</string>
+        <key>tsInputModePrimaryInScriptKey</key><true/>
+        <key>tsInputModeScriptKey</key><string>smTradChinese</string>
+      </dict>
+EOF
+}
+
+cat > "$APP/Contents/Info.plist" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleDevelopmentRegion</key><string>zh-Hant</string>
+  <key>CFBundleExecutable</key><string>shanjie</string>
+  <key>CFBundleIdentifier</key><string>$BUNDLE_ID</string>
+  <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
+  <key>CFBundleName</key><string>shanjie</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleShortVersionString</key><string>$VERSION</string>
+  <key>CFBundleVersion</key><string>$VERSION</string>
+  <key>LSMinimumSystemVersion</key><string>26.0</string>
+  <key>LSUIElement</key><true/>
+  <key>LSHasLocalizedDisplayName</key><true/>
+  <key>NSPrincipalClass</key><string>NSApplication</string>
+  <key>InputMethodConnectionName</key><string>${BUNDLE_ID}_Connection</string>
+  <key>InputMethodServerControllerClass</key><string>ShanjieInputController</string>
+  <key>InputMethodServerDelegateClass</key><string>ShanjieInputController</string>
+  <key>TICapsLockLanguageSwitchCapable</key><true/>
+  <key>TISInputSourceID</key><string>$BUNDLE_ID</string>
+  <key>TISIntendedLanguage</key><string>zh-Hant</string>
+  <key>tsInputMethodCharacterRepertoireKey</key><array><string>Hant</string></array>
+  <key>tsInputMethodIconFileKey</key><string>shanjie.tiff</string>
+  <key>ComponentInputModeDict</key>
+  <dict>
+    <key>tsInputModeListKey</key>
+    <dict>
+$(mode "$BUNDLE_ID.standard")
+$(mode "$BUNDLE_ID.eten")
+    </dict>
+    <key>tsVisibleInputModeOrderedArrayKey</key>
+    <array>
+      <string>$BUNDLE_ID.standard</string>
+      <string>$BUNDLE_ID.eten</string>
+    </array>
+  </dict>
+</dict>
+</plist>
+EOF
+plutil -lint "$APP/Contents/Info.plist" >/dev/null
+
+# Ad-hoc, hardened runtime, and deliberately no --entitlements (R9).
+codesign --force --sign - --options runtime "$APP"
+codesign --verify --strict --deep "$APP"
+echo "built $APP ($BUNDLE_ID $VERSION, ad-hoc)"

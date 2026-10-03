@@ -1,0 +1,6 @@
+// The core's C ABI header, used in place (no copy that could drift from core/). The archive itself
+// is linked by Package.swift.
+module CShanjie [system] {
+  header "../../../core/include/shanjie.h"
+  export *
+}
