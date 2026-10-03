@@ -125,6 +125,14 @@ for _ in 1 2 3 4 5 6 7 8 9 10; do pgrep -f "$PATTERN" >/dev/null || break; sleep
 pgrep -f "$PATTERN" >/dev/null \
   && echo "warning: a shanjie process is still running after 5 s; if the old version keeps serving input, log out and back in" >&2
 
+# The installer app (docs/contracts/s3c-installer.md section 4) registers and enables in its own
+# process, so it stops here, after the file swap, lsregister -f and stopping the old process.
+# Files-only mode exits earlier, before step 3, so it takes precedence.
+if [ "${SHANJIE_INSTALL_SKIP_REGISTER:-}" = 1 ]; then
+  echo "files and processes done; registration skipped"
+  exit 0
+fi
+
 # 4. Register, enable the input mode and disable the old two modes, from the installed copy. The
 #    exit code is kept, not swallowed: 3 means the system has not accepted the input method yet
 #    (usual on a first install) or has not loaded the new input mode list.

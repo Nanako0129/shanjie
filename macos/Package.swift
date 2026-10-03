@@ -20,15 +20,28 @@ let package = Package(
             dependencies: ["CShanjie"],
             linkerSettings: [.unsafeFlags([libcore])]
         ),
+        // TIS registration shared by `shanjie install` and the installer (docs/contracts/s3c-installer.md
+        // section 2.3). ShanjieKit stays free of TIS.
+        .target(
+            name: "ShanjieInstall",
+            linkerSettings: [.linkedFramework("Carbon")]
+        ),
         .executableTarget(
             name: "Shanjie",
-            dependencies: ["ShanjieKit"],
+            dependencies: ["ShanjieKit", "ShanjieInstall"],
             // The IMK glue only: IMKInputController's overrides cannot be main-actor isolated in
             // the Swift 6 mode, so the main-thread requirement is checked at run time instead
             // (MainActor.assumeIsolated). ShanjieKit and the tests stay in the Swift 6 mode.
             swiftSettings: [.swiftLanguageMode(.v5)],
             linkerSettings: [.linkedFramework("Carbon"), .linkedFramework("InputMethodKit")]
         ),
+        // 安裝善解輸入法.app; AppKit only, the window is built in code.
+        .executableTarget(
+            name: "ShanjieInstaller",
+            dependencies: ["ShanjieInstall"],
+            swiftSettings: [.swiftLanguageMode(.v5)]
+        ),
         .testTarget(name: "ShanjieKitTests", dependencies: ["ShanjieKit"]),
+        .testTarget(name: "ShanjieInstallTests", dependencies: ["ShanjieInstall"]),
     ]
 )
