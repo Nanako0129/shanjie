@@ -8,6 +8,21 @@ import XCTest
 /// whole process, and require that none of it shows up.
 @MainActor
 final class LogTests: XCTestCase {
+    /// While stdout/stderr are captured, an XCTest issue (from this test or any helper, such as
+    /// FakeClient's replacement-range check) would print its message, typed text included, into the
+    /// capture. Issues are held during the capture and recorded once it has ended.
+    private var holdIssues: [XCTIssue]?
+
+    override func record(_ issue: XCTIssue) {
+        if holdIssues != nil { holdIssues!.append(issue) } else { super.record(issue) }
+    }
+
+    private func releaseIssues() {
+        let held = holdIssues ?? []
+        holdIssues = nil
+        held.forEach { super.record($0) }
+    }
+
     func testShellLogsNothingButStaticTextAndCodes() throws {
         let nonce = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
         let start = "shanjie-logtest-start-\(nonce)"
@@ -36,7 +51,9 @@ final class LogTests: XCTestCase {
         // its message, which here would carry the typed text into the captured stderr and turn into a
         // second, misleading "reached stdout or stderr" failure. Outcomes are recorded and asserted later.
         let resources = try XCTUnwrap(TestData.resources())
+        holdIssues = []                                 // see record(_:) below
         let std = StdCapture()
+        defer { _ = std.finish(); releaseIssues() }  // an early exit must neither leave the pipe nor lose held issues
         let stdProbe = "shanjie-std-probe-\(nonce)"
         FileHandle.standardError.write(Data("\(stdProbe)\n".utf8))
         let shell = Shell(resources: resources, panel: FakePanel(), isSecureInput: { false })
@@ -60,6 +77,7 @@ final class LogTests: XCTestCase {
         let engineFailed = failed.engine == nil
 
         let stdText = std.finish()
+        releaseIssues()
         XCTAssertTrue(stdText.contains(stdProbe), "the stdout/stderr capture is not connected")
         XCTAssertTrue(typedRow10, "the typing path did not commit row 10")
         XCTAssertNotNil(candidateShown, "no candidate was shown for the mouse-selection path")
@@ -79,6 +97,8 @@ final class LogTests: XCTestCase {
         // Positive control on the shell's own error path: its static text and code are captured.
         XCTAssertTrue(entries.contains { $0.subsystem == Log.subsystem && $0.text.contains("shanjie_engine_new failed, code 3") },
                       "the shell's error log did not reach the capture")
+        XCTAssertTrue(entries.contains { $0.subsystem == Log.subsystem && $0.text.contains("core call failed, code 2") },
+                      "the non-zero return code path (fail, reset 1) did not run")
 
         let negatives = [
             Row10.formal, Row10.chat, "你好", Row10.zhuyin, "ㄑㄧ", "ㄋㄧ",
@@ -183,8 +203,17 @@ final class StdCapture: @unchecked Sendable {
         dup2(pipe.fileHandleForWriting.fileDescriptor, STDERR_FILENO)
     }
 
-    /// Restores both descriptors and returns everything written meanwhile.
+    private var finished = false
+
+    deinit { _ = finish() }
+
+    /// Restores both descriptors and returns everything written meanwhile. Idempotent: the test
+    /// also calls it from a defer, so an early exit can never leave stdout/stderr on the pipe.
     func finish() -> String {
+        lock.lock()
+        if finished { let text = String(decoding: buffer, as: UTF8.self); lock.unlock(); return text }
+        finished = true
+        lock.unlock()
         fflush(stdout)
         fflush(stderr)
         dup2(savedOut, STDOUT_FILENO)

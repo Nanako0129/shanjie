@@ -331,7 +331,7 @@
 ## 2026-10-04：S3b（Swift 輸入法本體）與 GitHub 流程
 
 - 改走 GitHub 公開 repo（`Nanako0129/shanjie`）與 PR 流程，CI 與發布仿 syrtis。公開前的隱私稽核見上一節。
-- 每個 PR 的 gate：CI 全綠，加上 CodeRabbit 或本地 `/code-review`。CodeRabbit 在公開 repo 要手動觸發，而且每小時只有 1 次額度，常被限流；這時改用本地審查。本地審查在 PR #1、#2 各抓到十幾項，其中幾項會讓功能悄悄失效：連結參數擷取到空字串照樣綠、release gate 去等不存在的 workflow、非 0 回傳碼沒 reset 核心、公開附件沒附授權檔。
+- 每個 PR 的 gate：CI 全綠，加上 CodeRabbit。CodeRabbit 在公開 repo 要手動觸發，而且每小時只有 1 次額度，常被限流；**限流等太久時**改用本地 `/code-review`（使用者 2026-10-03 授權）。碰到 C ABI 等跨語言介面的 PR 盡量等 CodeRabbit，因為內部審查和程式共用同樣的盲點。CodeRabbit 的摘要裡可能有收合的區塊（例如 PR #3 的安全架構區塊列了兩項 Medium），「沒有行內意見」不等於沒有意見，要讀完整的摘要。本地審查在 PR #1、#2 各抓到十幾項，其中幾項會讓功能悄悄失效：連結參數擷取到空字串照樣綠、release gate 去等不存在的 workflow、非 0 回傳碼沒 reset 核心、公開附件沒附授權檔。
 - S3b 的驗證設計重點：
   - 所有殼的測試都經過真正的 C 核心與語言模型，不用假引擎。
   - 日誌測試用 `log stream --level debug` 只依行程過濾，並加起始與結束標記；同時擷取測試行程的 stdout／stderr，因為有 stderr 的行程裡 `NSLog` 不進 unified log。

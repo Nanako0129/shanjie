@@ -488,7 +488,7 @@ S3a 不需要外觀參考，可以先做；S3b 等使用者提供 macOS 內建�
 
 #### S3b：Swift 輸入法本體（截圖已於 2026-10-03 取得）
 
-**狀態（2026-10-04）：agent 可做的部分完成**（PR #3，merge 880dfbf）。fresh verifier CONFIRMED：驗收 1–8 獨立重跑、六項突變都由斷言抓到；自測前後使用者的輸入法清單與偏好不變；CI（core、shell）全綠；CodeRabbit 無意見。`release` environment 已照 syrtis 建好（只准 main 與 `v*`、需要使用者核准、3 個 variables）。**待使用者**：設定 3 個 secrets → 手動試跑 Release → 推 `v0.1.0` → 安裝實測（驗收 9–16）。
+**狀態（2026-10-04）：agent 可做的部分完成**（PR #3，merge 880dfbf）。fresh verifier CONFIRMED：驗收 1–8 獨立重跑、verifier 自己做的六項突變（i–vi）都由斷言抓到（executor 另做九項，見研究紀錄）；自測前後使用者的輸入法清單與偏好不變；CI（core、shell）全綠。CodeRabbit 沒有行內意見，但摘要的安全架構區塊列了兩項 Medium（secure input 只在 deactivate 檢查、安裝腳本先刪再複製沒有退路），已在 PR #4 修正。`release` environment 已照 syrtis 建好（只准 main 與 `v*`、需要使用者核准、3 個 variables）。**待使用者**：設定 3 個 secrets → 手動試跑 Release → 推 `v0.1.0` → 安裝實測（驗收 9–16）。
 
 - InputMethodKit app `shanjie.app`（`com.nyanako.inputmethod.shanjie`），用 SwiftPM 建置、腳本組 app bundle；本機與 CI 一律 ad-hoc 簽章，正式版在 GitHub Actions 的 `release` environment 用 Developer ID 簽章並公證（見 s3b §2、§3）；結構參考小麥注音（MIT）。
 - 候選窗先試 `IMKCandidates`；外觀、組字區底線、深色模式依使用者截圖。

@@ -40,7 +40,7 @@ final class ShellTests: XCTestCase {
         c.session.activate()
         c.type("su3 ")  // ㄋㄧˇ, then space opens the candidates (rule 15)
         XCTAssertTrue(c.panel.visible)
-        XCTAssertTrue((1...9).contains(c.panel.items.count))
+        XCTAssertTrue((2...9).contains(c.panel.items.count), "the test presses 2, so it needs 2 to 9 candidates")
         XCTAssertEqual(c.panel.selected, 0)
         XCTAssertEqual(c.session.candidates, c.panel.items)
         let second = try XCTUnwrap(c.panel.items.dropFirst().first, "fewer than two candidates")
@@ -255,6 +255,26 @@ final class ShellTests: XCTestCase {
         b.press(Keys.enter)
         b.press(Keys.enter)
         XCTAssertEqual(b.client.text, "你")
+    }
+
+    /// CodeRabbit (PR #3): every non-key commit path, not only deactivate, must discard while
+    /// secure input is on.
+    func testNoNonKeyCommitWhileSecureInput() {
+        let s = Controller(makeShell(secure: true))
+        s.session.activate()
+        s.type("su3")
+        s.session.commitComposition()
+        XCTAssertEqual(s.client.text, "", "commitComposition discarded")
+
+        let shell = makeShell(secure: true)
+        let a = Controller(shell), b = Controller(shell)
+        a.session.activate()
+        a.type("su3")
+        b.session.activate()            // owner change
+        XCTAssertEqual(a.client.text, "", "owner change discarded")
+        b.type("su3")
+        b.session.setInputMode("com.nyanako.inputmethod.shanjie.eten")  // mode switch
+        XCTAssertEqual(b.client.text, "", "mode switch discarded")
     }
 
     func testOwnerDeactivateCommitsUnlessSecure() {
