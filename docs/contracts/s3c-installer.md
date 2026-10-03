@@ -14,7 +14,7 @@
   - `Contents/Resources/shanjie-<版本>.zip`：Release 的同名附件原檔（裡面是已簽章、已公證、已 staple 的輸入法本體），`cmp` 逐位元組相同。**不放展開的 .app**（仿小麥注音的 `NotarizedArchives`）：展開的輸入法放在 Resources 裡，可能被 LaunchServices 登記成同一個 bundle ID 的第二份，codesign 也只把它當資源資料（security-reviewer P2）。
   - `Contents/Resources/install-ime.sh`：repo 的 `scripts/install-ime.sh`，原樣複製。
   - `Contents/Resources/LICENSES/`：和輸入法本體相同的授權檔。
-  - `zh-Hant.lproj`、`en.lproj` 的顯示名稱與介面字串。
+  - `zh-Hant.lproj`、`en.lproj` 的顯示名稱（`InfoPlist.strings`）。介面字串寫在程式裡，依第一個偏好語言選繁體中文（`zh-Hant`、`zh-TW`、`zh-HK`、`zh-MO`）或英文。
 - Release 附件新增 `shanjie-installer-<版本>.zip`（ASCII 檔名；解壓後是 `安裝善解輸入法.app`）與它的 `.sha256`。原本的 `shanjie-<版本>.zip` 保留（brew cask 與 `install-ime.sh` 用）。
 
 ## 2. 安裝流程（安裝程式內）
@@ -46,7 +46,7 @@
 
 - `macos/Package.swift` 新增 executable target `ShanjieInstaller`（AppKit，程式碼建的視窗，不用 nib）與 library target `ShanjieInstall`。
 - `scripts/build-installer.sh <輸出資料夾> [輸入法 zip]`：組出 `安裝善解輸入法.app`（執行檔、Info.plist、lproj、`install-ime.sh`、授權檔）。給了 zip 就複製進 `Resources/` 並 ad-hoc 簽章（本機與 CI 的檢查用）；沒給就只輸出未簽章骨架（release 的 build job 用，zip 由 sign job 放入）。
-- `Makefile` 新增 `installer`：把 `build/善解輸入法.app` 用 `ditto -c -k --keepParent` 壓成 `build/shanjie-0.0.0.zip`，再組出 `build/安裝善解輸入法.app`；`clean-bundle` 一併處理（`lsregister -u` 後刪除）。
+- `Makefile` 新增 `installer`（先 `make bundle`，不重建）：把 `build/善解輸入法.app` 用 `ditto -c -k --keepParent` 壓成 `build/shanjie-<它的版本>.zip`，再組出 `build/安裝善解輸入法.app`；`build-installer.sh` 的版本一律由呼叫端以 `SHANJIE_VERSION` 傳入（版本規則只在 build-app.sh）；`clean-bundle` 一併處理（`lsregister -u` 後刪除）。
 - `release.yml`：
   - `build` job 用 `build-installer.sh` 組出**完整的未簽章安裝程式 bundle，只缺 `Resources/shanjie-<版本>.zip`**，和輸入法本體一樣用 tar 上傳。
   - `sign` job **仍然不 checkout、不跑任何 repo 的程式**，只用 Apple 的工具：在輸入法本體**公證並 staple、壓成 `shanjie-<版本>.zip` 之後**，把那個 zip 複製進安裝程式的 `Resources/`、重新 `security unlock-keychain`（第一次公證可能等很久，鑰匙圈的自動上鎖是 3600 秒）、用 Developer ID 簽章（hardened runtime、timestamp，不加 `--deep`：外層沒有巢狀程式碼，zip 只是資源）、`ditto -c -k --keepParent` 壓縮、送公證、staple、從 zip 解出來驗證（`codesign --verify --strict --deep`、`spctl -a -vv` 為 Notarized Developer ID、外層也跑 `stapler validate`、`Resources/shanjie-<版本>.zip` 和要發布的附件 `cmp` 相同）。兩次公證都在同一個 step 裡做（p8 由這個 step 的 `trap` 刪除）；`timeout-minutes` 從 90 調到 150。
@@ -71,7 +71,7 @@
 ## 6. 驗收（agent 可做的部分）
 
 1. `make installer` 後 `scripts/check-installer.sh build/安裝善解輸入法.app`：
-   - 結構：執行檔、`Resources/shanjie-0.0.0.zip`（和 `build/` 那份 `cmp` 相同、`Resources/` 裡沒有任何 `.app`）、`Resources/install-ime.sh`（和 repo 的同一份逐位元組相同）、授權檔；
+   - 結構：執行檔、`Resources/shanjie-<版本>.zip`（和 `build/` 那份 `cmp` 相同、`Resources/` 裡沒有任何 `.app`）、`Resources/install-ime.sh`（和 repo 的同一份逐位元組相同）、授權檔；
    - `Info.plist`：bundle ID、最低系統版本、沒有 `LSUIElement`；
    - `codesign -d --entitlements -` 外層沒有 entitlements，flags 含 runtime；`codesign --verify --strict --deep` 通過。
 2. `ShanjieInstall` 搬移後，`make test` 全綠；`shanjie install` 的行為和 v0.1.1 相同，傳入 `Bundle.main.bundleURL`、`Bundle.main.bundleIdentifier`、`UserDefaults.standard`（讀程式碼確認；TIS 部分無法在 agent 端執行）；安裝程式傳入已安裝路徑、從那個 bundle 讀出的 ID、`UserDefaults(suiteName: "com.nyanako.inputmethod.shanjie")`（讀程式碼確認）。
