@@ -29,6 +29,17 @@ const SHIFT_PUNCT: [(char, char); 10] = [
     ('[', '「'), (']', '」'), ('9', '（'), ('0', '）'), ('`', '～'),
 ];
 
+/// s3d §2: punctuation in the composition is a one-cell token under this reserved reading prefix
+/// (`_punct_，`); the lexicon has no such reading. Each one is also a length-1 fixed word.
+const PUNCT_PREFIX: &str = "_punct_";
+
+/// Whether a path word is a punctuation token (s3d §4): only punctuation tokens produce these
+/// characters, since no syllable reading decodes to them.
+fn is_punct_word(w: &str) -> bool {
+    let mut it = w.chars();
+    matches!((it.next(), it.next()), (Some(c), None) if c == '、' || SHIFT_PUNCT.iter().any(|&(_, p)| p == c))
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Layout {
     Standard,
@@ -242,18 +253,28 @@ impl Engine {
     }
 
     /// Total score of the current best path as `lm.decode` scores one: every word (fixed words with
-    /// their capped `lp_F`) adds `word(λ, previous, w, lp)`, then `eos` of the last word. `None` without
-    /// a model or without syllables.
+    /// their capped `lp_F`) adds `word(λ, previous, w, lp)`, then `eos` of the last word. Punctuation
+    /// splits it into sentences (s3d §4): the stretch before it closes with `eos`, the next starts from
+    /// `<s>`, and the punctuation itself scores nothing. `None` without a model or without words.
     pub fn total_score(&self) -> Option<f64> {
         let st = self.lm.as_ref()?;
         let lam = self.profile.lambda();
         let mut prev = "<s>";
         let mut total = 0.0;
+        let mut any = false;
         for (w, lp) in &self.path {
+            if is_punct_word(w) {
+                if prev != "<s>" {
+                    total += st.lm.eos(lam, prev);
+                }
+                prev = "<s>";
+                continue;
+            }
             total += st.lm.word(lam, prev, w, *lp);
             prev = w;
+            any = true;
         }
-        (!self.path.is_empty()).then(|| total + st.lm.eos(lam, prev))
+        any.then(|| if prev == "<s>" { total } else { total + st.lm.eos(lam, prev) })
     }
 
     /// §6 reset: Commit returns the display string (pending syllable dropped); both clear everything.
@@ -338,7 +359,12 @@ impl Engine {
         let lam = self.profile.lambda();
         let mut lp_fixed = Vec::with_capacity(self.fixed.len());
         for f in &self.fixed {
-            lp_fixed.push(st.capped.best_lp(&self.syls[f.start..f.end], &f.word).ok_or(EngineError::Internal)?);
+            // Punctuation has no reading in the lexicon; 0.0 only keeps `path` aligned (s3d §4).
+            lp_fixed.push(if self.is_punct(f.start) {
+                0.0
+            } else {
+                st.capped.best_lp(&self.syls[f.start..f.end], &f.word).ok_or(EngineError::Internal)?
+            });
         }
         let (mut out, mut path) = (String::new(), Vec::new());
         for gap in 0..=self.fixed.len() {
@@ -346,10 +372,14 @@ impl Engine {
             let right = self.fixed.get(gap);
             let to = right.map_or(self.syls.len(), |f| f.start);
             if from < to {
-                let prev = if gap == 0 { "<s>" } else { self.fixed[gap - 1].word.as_str() };
+                // Punctuation is a sentence boundary, as in the counts the model was built from (s3d §4).
+                let prev = match gap.checked_sub(1).map(|g| &self.fixed[g]) {
+                    Some(f) if !self.is_punct(f.start) => f.word.as_str(),
+                    _ => "<s>",
+                };
                 let end = match right {
-                    Some(f) => End::Next { word: &f.word, lp: lp_fixed[gap] },
-                    None => End::Eos,
+                    Some(f) if !self.is_punct(f.start) => End::Next { word: &f.word, lp: lp_fixed[gap] },
+                    _ => End::Eos,
                 };
                 let best = decode_segment(&st.capped, &self.syls[from..to], &st.lm, lam, prev, end, BEAM_S1)
                     .map_err(|_| EngineError::Internal)?;
@@ -398,9 +428,11 @@ impl Engine {
             None
         };
         if let Some(p) = punct {
-            let mut commit = self.take_commit();
-            commit.push(p);
-            return Ok(self.view(true, commit));
+            // s3d §1: into the composition at the cursor, not committed.
+            self.pend = [None; 3];
+            self.order.clear();
+            self.cands = None;
+            return self.insert_token(format!("{PUNCT_PREFIX}{p}"), Some(p.to_string()));
         }
         let plain = m == 0;
         // 3-8: candidates open.
@@ -505,6 +537,14 @@ impl Engine {
         if self.lex.entries(std::slice::from_ref(&syl)).is_empty() {
             return self.handled();
         }
+        self.pend = [None; 3];
+        self.order.clear();
+        self.insert_token(syl, None)
+    }
+
+    /// Insert one token (a syllable, or punctuation with its fixed word) at the cursor, shift the
+    /// fixed words on its right, recompute; at MAX_SYLLABLES tokens commit everything (s3d §1).
+    fn insert_token(&mut self, reading: String, fixed_word: Option<String>) -> Result<Output, EngineError> {
         let c = self.cursor;
         self.fixed.retain_mut(|f| {
             if f.end <= c {
@@ -517,10 +557,12 @@ impl Engine {
                 false
             }
         });
-        self.syls.insert(c, syl);
+        self.syls.insert(c, reading);
+        if let Some(word) = fixed_word {
+            self.fixed.push(Fixed { start: c, end: c + 1, word });
+            self.fixed.sort_by_key(|f| f.start);
+        }
         self.cursor += 1;
-        self.pend = [None; 3];
-        self.order.clear();
         self.refresh()?;
         if self.syls.len() >= MAX_SYLLABLES {
             let commit = self.take_commit();
@@ -545,10 +587,20 @@ impl Engine {
         self.refresh()
     }
 
-    /// §3.1 candidate range: readings ending at the cursor (or starting at 0 when the cursor is 0).
+    fn is_punct(&self, i: usize) -> bool {
+        self.syls[i].starts_with(PUNCT_PREFIX)
+    }
+
+    /// §3.1 candidate range: readings ending at the cursor (or starting at 0 when the cursor is 0),
+    /// within the run of syllables that touches it; punctuation bounds the run (s3d §3). An empty
+    /// run lists nothing, so space and down are ignored.
     fn open_candidates(&mut self) {
         let a = self.cursor;
-        let avail = if a == 0 { self.syls.len() } else { a };
+        let avail = if a == 0 {
+            (0..self.syls.len()).take_while(|&i| !self.is_punct(i)).count()
+        } else {
+            (0..a).rev().take_while(|&i| !self.is_punct(i)).count()
+        };
         let mut seen = HashSet::new();
         let mut list = Vec::new();
         for l in (1..=self.lex.max_len.min(avail)).rev() {

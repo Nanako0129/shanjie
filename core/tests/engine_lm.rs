@@ -348,3 +348,40 @@ fn candidates_ignore_the_model() {
     let (a, b) = (with.key(Key::new(KeyKind::Space)).unwrap(), without.key(Key::new(KeyKind::Space)).unwrap());
     assert!(a.candidates == b.candidates && a.selected == b.selected && !a.candidates.is_empty());
 }
+
+/// s3d acceptance 4: punctuation is a sentence boundary for the bigram model. Premises straight from
+/// the decoder (measured 2026-10-04 by a search over dev302): X = ㄊㄚ ㄔㄤˊ ends 他長 with the
+/// sentence end but 他常 with a transition into "，"; Y = ㄗㄞˋ ㄏㄨㄢˋ starts 在換 from <s> but 再換
+/// from "，". So the composition must read 他長，在換.
+#[test]
+fn punctuation_is_a_sentence_boundary() {
+    let s = shared();
+    let profile = Profile::Chat;
+    let lam = profile.lambda();
+    let syls = |r: &[&str]| r.iter().map(|x| x.to_string()).collect::<Syls>();
+    let (x, y) = (syls(&["ㄊㄚ", "ㄔㄤˊ"]), syls(&["ㄗㄞˋ", "ㄏㄨㄢˋ"]));
+    let top = |r: &Syls, start: &str, end: End| {
+        let best = decode_segment(&s.capped, r, &s.lm, lam, start, end, 64).unwrap();
+        best[0].1.iter().map(|w| w.0).collect::<String>()
+    };
+    assert_eq!(top(&x, "<s>", End::Eos), "他長");
+    assert_eq!(top(&x, "<s>", End::Next { word: "，", lp: 0.0 }), "他常");
+    assert_eq!(top(&y, "<s>", End::Eos), "在換");
+    assert_eq!(top(&y, "，", End::Eos), "再換");
+
+    let alone = |r: &Syls| {
+        let mut e = engine(Layout::Standard, profile);
+        type_row(&mut e, Layout::Standard, r).preedit
+    };
+    let mut e = engine(Layout::Standard, profile);
+    type_row(&mut e, Layout::Standard, &x);
+    e.key(Key::ch(',', MOD_SHIFT)).unwrap();
+    let o = type_row(&mut e, Layout::Standard, &y);
+    assert_eq!(o.preedit, "他長，在換");
+    assert_eq!(o.preedit, format!("{}，{}", alone(&x), alone(&y)));
+    // The total is the sum of the two sentences' scores.
+    let (_, tx, _) = best_path(&x, profile);
+    let (_, ty, _) = best_path(&y, profile);
+    assert!((e.total_score().unwrap() - (tx + ty)).abs() < 1e-9);
+}
+
