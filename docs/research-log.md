@@ -339,3 +339,18 @@
   - 簽章在 CI 的 `release` environment（一次性鑰匙圈），本機與 agent 一律 ad-hoc，不碰登入鑰匙圈。
 - 待使用者實測確認：候選窗開著時按鍵先交給殼（`IMKCandidatesSendServerKeyEventFirst`）、候選號碼 1–9 是否顯示、選單列圖示的深淺色、Caps Lock 切換時的組字去向。
 - 一次判斷修正（2026-10-04）：CodeRabbit 在 PR #3 建議所有非按鍵的送出都在 secure input 時丟棄組字。我先照做，本地審查隨即指出 `IsSecureEventInputEnabled()` 是全系統旗標，任何 App 開著 secure input 時，點別處或切換排列都會讓使用者的字悄悄消失。審查意見是證據不是指令：採納前要先問「這樣改的代價是什麼」。最後維持只在 deactivate 檢查，延到 S4 以實機證據決定。
+
+## 2026-10-04：單一輸入方式與 Homebrew cask
+
+- PR #5（s3b 修訂一）：輸入方式清單只剩一個「善解輸入法」，標準／倚天在它自己的選單裡切換（仿自然輸入法），app 改名 `善解輸入法.app`。verifier 第一次判 REFUTED，原因只在文件：§11 的實作備註還描述已經刪掉的 `setValue` 行為，並引用一個不存在的測試名稱。程式與突變全過，修文件後 CONFIRMED。
+- Homebrew cask（s3b 修訂二，§14）：照 syrtis 放進共用的 `Nanako0129/homebrew-tap`，由 `release.yml` 用 shanjie 自己的 deploy key 自動更新。
+- 一次設計修正：原本打算在 cask 的 postflight 自動執行 `shanjie install`。plan-verifier 讀 Homebrew 原始碼指出，`postflight_steps` 在沙盒裡執行（HOME 換成暫存資料夾、禁讀真正的家目錄、`~` 不展開），那一步永遠找不到執行檔；`must_succeed: false` 又會讓它靜靜失敗，安裝看起來一切正常。改成和其他 `input_method` cask 一樣，由 caveats 請使用者自己執行一行指令。教訓：容錯旗標（`must_succeed: false`）會把「沒做」變成「看起來做了」，用之前要先確定那一步真的跑得到。
+- 實測（2026-10-04）：
+  - `ditto -c -k --keepParent` 打包的中文 bundle 名稱，用 macOS 的 `/usr/bin/unzip`（Homebrew 解壓 zip 用的就是它）解開後逐位元組相同；
+  - release environment 的 `v*` 規則是 tag 類型；
+  - tap 的 ruleset 禁止刪除與 force push；
+  - 新的 deploy key 只靠自己就能 clone，`push --dry-run` 也成功。
+- 待使用者實測：
+  - `brew install` 加上 caveats 指令後能不能直接用；
+  - 有沒有 Gatekeeper 視窗；
+  - 升級時 `on_upgrade` 的 TERM 是否讓新版接手（第二次發版才測得到）。

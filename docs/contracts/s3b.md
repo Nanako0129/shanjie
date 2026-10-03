@@ -191,7 +191,7 @@
 
 ## 12. 範圍外
 
-展開網格、分頁、直式、表情候選、標籤、分段底色框、自建玻璃候選窗、設定頁與聊天 App 清單的修改介面、Homebrew cask、自動更新（Sparkle）、學習與 privacyGate（S4）、一鍵校正（H）、雲端（S6）。
+展開網格、分頁、直式、表情候選、標籤、分段底色框、自建玻璃候選窗、設定頁與聊天 App 清單的修改介面、Homebrew cask（已由 §14 納入）、自動更新（Sparkle）、學習與 privacyGate（S4）、一鍵校正（H）、雲端（S6）。
 
 **已知限制**：切換輸入模式（標準 ↔ 倚天）要重建引擎，會在主執行緒卡約 1 秒以上、期間按鍵直通。排列很少切換，先接受；之後在核心加 `set_layout`（S3b-2）。
 
@@ -249,3 +249,117 @@
 ### 13.5 範圍外
 
 注音以外的輸入法（拼音、倉頡等）；選單裡的其他項目（偏好設定、關於）。
+
+## 14. 修訂二：Homebrew cask（使用者 2026-10-04）
+
+使用者要求「補個 brew」，並選擇照 syrtis 的做法：cask 放進共用的 `Nanako0129/homebrew-tap`（和 syrtis、limpet 同一個），由 `release.yml` 在發版時自動更新。安裝指令是 `brew install --cask nanako0129/tap/shanjie`。本節取代 §12 範圍外的「Homebrew cask」，以及 PLAN S8 裡的 Homebrew 部分。
+
+### 14.1 cask
+
+- 範本放在 repo 的 `packaging/Casks/shanjie.rb`。`brew style` 只在路徑含 `Casks/` 時套用 cask 規則；2026-10-04 實測，放在別的路徑會被當成 formula 檢查。範本的 `version`、`sha256` 兩行是佔位值 `0.0.0`／64 個 0。
+- 內容：
+  - `url "https://github.com/Nanako0129/shanjie/releases/download/v#{version}/shanjie-#{version}.zip"`；`name` 兩個：「善解輸入法」「Shanjie」；英文 `desc`；`homepage "https://shanjie.nyanako.com/"`（2026-10-04 回 200）。
+  - `depends_on arch: :arm64`（建置只有 arm64）、`depends_on macos: :tahoe`（`LSMinimumSystemVersion` 26.0）。
+  - `input_method "善解輸入法.app"`：Homebrew 把它搬到 `~/Library/Input Methods/`，路徑和 `install-ime.sh` 相同。
+    - Homebrew 在 macOS 上用系統的 `/usr/bin/unzip` 解壓（`extend/os/mac/unpack_strategy/zip.rb`），而 §13.1 提醒過 `unzip` 可能把中文檔名弄成亂碼。2026-10-04 實測：用 `ditto -c -k --keepParent`（和 `release.yml` 相同）打包一個假的 `善解輸入法.app`，再用 `/usr/bin/unzip`（Apple 修改版 UnZip 6.00）解開，資料夾名稱和原名逐位元組相同。這次測的是假資料夾，不是正式的 Release 附件；正式附件由驗收 4 的解壓檢查涵蓋。
+  - **不在 cask 裡執行 `shanjie install`**，和其他 `input_method` cask 一樣（openvanilla、doubaoime、wetype 都只有 `input_method` 加 caveats）。原因（plan-verifier 讀 Homebrew 原始碼指出，main 對照確認）：
+    - Ruby 的 `postflight do` 會被目前的 `brew style` 判為違規（Cask/InstallSteps），規則要求改用 `postflight_steps`。
+    - `postflight_steps` 在 Homebrew 的沙盒裡執行（`cask/artifact/abstract_artifact.rb` 把 `HOME` 設成暫存資料夾，`sandbox.rb` 的 `deny_read_home` 擋住讀取真正的家目錄），`~` 開頭的指令路徑也不會展開（`install_steps.rb` 的 `resolve_command`）。這樣寫出來的步驟找不到執行檔；加上 `must_succeed: false`，安裝仍然顯示成功，等於「靜靜地沒做」。
+    - 就算改成 `base: :home` 讓沙盒放行讀取，`TISRegisterInputSource` 在沙盒裡能不能成功也沒有量過。
+  - `uninstall on_upgrade: :signal, signal: ["TERM", "com.nyanako.inputmethod.shanjie"]`：解除安裝和升級時都結束執行中的行程，系統下次就會啟動新版。Homebrew 預設在升級時略過 `signal`（`UPGRADE_REINSTALL_SKIP_DIRECTIVES`），所以要加 `on_upgrade`。Homebrew 用 `launchctl list` 的標籤找行程；2026-10-04 在本機看到其他輸入法的標籤是 `application.<bundle ID>.<數字>.<數字>`，符合它的比對規則。
+  - `zap trash: "~/Library/Preferences/com.nyanako.inputmethod.shanjie.plist"`：目前唯一的使用者資料，也就是 `layout` 偏好。
+  - `caveats`：第一次安裝後執行 `"$HOME/Library/Input Methods/善解輸入法.app/Contents/MacOS/shanjie" install`，由它註冊並啟用輸入方式；如果它說清單還沒載入（exit 3），就登出再登入，再執行一次。caveats 不提升級；升級後要不要再做什麼，屬於下面 `on_upgrade` 那個未驗證項目，實測後再補。
+- **未驗證**（由使用者實測，見 14.5，停止條件見 14.7）：
+  - 從 Homebrew 下載的 app 帶有 quarantine（已公證、已 staple）：在終端機執行 caveats 的 `install` 時，以及系統啟動輸入法時，會不會跳出確認視窗；
+  - `on_upgrade` 送出的 TERM 是否確實讓新版接手（要到第二次發版才測得到）。
+- README 加「安裝」一節，內容包括：
+  - brew 指令與 caveats 的內容；
+  - 從 Release 下載 zip，用 Finder 解壓後執行 `scripts/install-ime.sh`；
+  - 兩種方式二選一。
+
+### 14.2 產生 cask：`scripts/render-cask.sh <版本> <sha256>`
+
+- 讀範本，把 `version`、`sha256` 兩行換成參數值，結果印到 stdout。
+- 遇到以下情況就 exit 1、不輸出：參數個數不對；版本不是 `MAJOR.MINOR.PATCH`；sha256 不是 64 個小寫十六進位字元；範本裡這兩行任一行不是恰好一行。
+- CI 和 `release.yml` 都用這支腳本，cask 的內容只有範本一處。
+
+### 14.3 release.yml
+
+- `publish` job 加上 `environment: release`，因為 deploy key 在 release environment。發版因此要核准兩次（sign 一次、publish 一次），和 syrtis 一樣。
+- 在建立 GitHub release **之前**，檢查 `HOMEBREW_TAP_DEPLOY_KEY` 不是空的，空的就失敗，什麼都不發布。只在 `publish` 檢查：`sign` 不引用這個 secret，免得 deploy key 進到持有 p12／p8 的 runner（security P3-2）。
+- `release.yml` 開頭的說明改成：`sign` 與 `publish` 都進 environment；`publish` 只引用 `HOMEBREW_TAP_DEPLOY_KEY`。實作後用 `grep -n 'secrets\.' .github/workflows/release.yml` 確認。
+- **建立 release 要能重跑**：這個 tag 的 release 已經存在時，下載它的 `shanjie-$VERSION.zip.sha256` 附件，和這次 job 的檔案比對：
+  - 相同，而且 zip 附件也在 → 略過建立，繼續更新 cask；
+  - 其他情況（`.sha256` 不同、附件缺少）→ 失敗。整個 workflow 重跑時，簽出來的 zip 會不同，這時不能讓 cask 指向不一樣的雜湊值。
+  - 用途：「重跑失敗的 job」只會重跑 publish，用的是同一份 artifact，所以 cask 更新失敗後可以單獨重跑 publish 補上。這條路徑在第一次發版前走不到，**未驗證**。artifact 只保留一天；超過之後，改由 main 在使用者同意後手動 commit 到 tap（內容用 `render-cask.sh` 產生，雜湊值取自 Release 附件的 `.sha256`）。
+- 建立 release 之後新增兩步：
+  - 「Render the cask」（不帶任何 secret）：從 `shanjie-$VERSION.zip.sha256` 取第一欄作為雜湊值，用 `render-cask.sh` 產生 cask，寫到 `$RUNNER_TEMP/shanjie.rb`。
+  - 「Bump Homebrew cask」（只跑 git 與 ssh）：
+    1. 用 deploy key clone tap（`umask 077`，金鑰檔放在 `$RUNNER_TEMP`，用 `trap` 刪除，ssh 選項同 14.4）。
+    2. 把 `$RUNNER_TEMP/shanjie.rb` 複製到 `Casks/shanjie.rb`。
+    3. 內容沒有變就不 commit，正常結束。搭配上面「建立 release 要能重跑」，重跑同一個 tag 的 publish 會略過建立 release，並補上 cask。
+    4. 否則 commit「shanjie $VERSION」後 push，**不加 `--force`**（tap 的 ruleset 也禁止）。
+- 版本號在 build job 就限定為 `MAJOR.MINOR.PATCH`，不會有預發布版，所以不需要 syrtis 那個略過預發布版的條件。
+- **注入防護**（security P4-5）：`run:` 區塊裡不用 `${{ }}` 內插 needs／steps 的輸出，一律經 `env` 以 `"$VERSION"` 使用；雜湊值由 `render-cask.sh` 再驗一次格式。
+- publish job 需要 checkout 才拿得到腳本與範本（`sparse-checkout: scripts packaging`、`persist-credentials: false`）。
+
+### 14.4 deploy key
+
+- 整個流程（產生、上傳、驗證、刪除）放在 **main 的同一個 Bash 呼叫**裡：`umask 077; D=$(mktemp -d); trap 'rm -rf "$D"' EXIT`，金鑰不跨回合留下，也不放進 session 暫存區（其他 agent 讀得到那裡；security P3-1）。`ssh-keygen -t ed25519 -N ''` 只印指紋，金鑰內容一律不印出。
+  - 公鑰用 `gh repo deploy-key add --repo Nanako0129/homebrew-tap --allow-write --title "shanjie release (environment)"` 加上。
+  - 私鑰從 stdin 讀入：`gh secret set HOMEBREW_TAP_DEPLOY_KEY --env release --repo Nanako0129/shanjie < "$D/key"`（不用 `--body`，免得出現在 argv 裡）。
+  - 只用這把金鑰驗證：`GIT_SSH_COMMAND="ssh -i <金鑰> -o IdentitiesOnly=yes -o IdentityAgent=none -F /dev/null -o UserKnownHostsFile=<暫存區>/known_hosts -o StrictHostKeyChecking=accept-new"`。如果只有使用者自己的金鑰能通過驗證，這個檢查就會失敗。
+    - 先 clone tap 到 `$D`（驗證讀取）。
+    - 再執行 `git push --dry-run origin HEAD:refs/heads/main`（驗證寫入）。push 一定會連到 receive-pack，GitHub 對唯讀的 deploy key 會在這裡拒絕連線（依 GitHub 的行為推斷，沒有拿唯讀金鑰實際對照過）；dry-run 不寫入任何東西。
+  - 結束時 `trap` 刪掉整個 `$D`（金鑰、known_hosts、clone）。
+- 使用者同意：2026-10-04 選了「照 syrtis 放進 homebrew-tap」，之後又主動問到 deploy key，main 已說明這個流程，使用者沒有異議。
+- `release.yml` 用同一組 ssh 選項，但 `UserKnownHostsFile` 放在 `$RUNNER_TEMP`。
+
+### 14.5 驗收
+
+1. CI 的 shell job 跑 `render-cask.sh 0.0.0 <64 個 0>`，把結果寫到暫存的 `Casks/shanjie.rb`，再對它跑 `brew style`，必須沒有違規。
+2. `render-cask.sh` 的錯誤處理：
+   - 參數錯誤或範本缺行時 exit 1 且沒有輸出（暫存範本的情況由 `SHANJIE_CASK_TEMPLATE` 指定，只有測試使用）；
+   - 正常參數時，輸出和範本只有那兩行不同。
+   - 這些檢查寫在 `scripts/test-render-cask.sh`，由 CI 的 shell job 在 `brew style` 之前執行，並列入 `docs/verification.md`。
+3. deploy key：
+   - `gh repo deploy-key list --repo Nanako0129/homebrew-tap` 列出 `shanjie release (environment)`，有寫入權限；
+   - `gh secret list --env release --repo Nanako0129/shanjie` 列出 `HOMEBREW_TAP_DEPLOY_KEY`；
+   - 用 14.4 的 ssh 選項做的 clone 與 `push --dry-run` 都成功；
+   - `gh repo deploy-key list --repo Nanako0129/homebrew-tap` 只多出這一把；session 暫存區沒有金鑰檔。
+4. 發版後（推 `v0.1.0` 前要問使用者）：
+   - tap 的 `Casks/shanjie.rb` 版本是 0.1.0，sha256 等於 Release 附件的 `.sha256`；
+   - `brew fetch --cask nanako0129/tap/shanjie` 下載並通過雜湊檢查。這只下載，不安裝。
+   - 把 brew 快取裡的 zip 用 `/usr/bin/unzip` 解到 session 暫存區，確認最上層是 `善解輸入法.app`、名稱逐位元組相同，然後刪除（不執行裡面任何東西）。
+5. 使用者實測：
+   - 用 `brew install --cask nanako0129/tap/shanjie` 安裝，確認 caveats 有印出；
+   - 執行 caveats 裡的 `install` 指令，記錄它的訊息與 exit code；
+   - 記錄有沒有跳出 Gatekeeper 視窗、需不需要登出再登入；
+   - 觀察 §13.4 第 5 項（從兩模式舊版升級那條不適用，brew 是第一次安裝）。
+   - 通過條件見 14.7。
+
+### 14.6 範圍外
+
+- 送進官方 homebrew/cask；
+- `livecheck`；
+- 解除安裝時停用輸入方式（bundle 刪除後，TIS 是否在下次登入時就不再列出，**未驗證**）；
+- 同時用 `install-ime.sh` 和 brew 安裝：目的地已經有 app 時，Homebrew 預期會拒絕安裝（依 `Moved` artifact 的行為推斷，**未驗證**）。README 說明「二選一，換方式前先刪掉」；
+- 多個 tag 同時推送 tap 時的競爭（例如 syrtis 與 shanjie 同時發版）：後推的會因為不是 fast-forward 而失敗，重跑 publish 即可。
+- 把 GitHub 的 host key 寫死在 known_hosts（security P4-4，ACCEPT）。
+
+### 14.7 停止條件與回滾
+
+- **停止條件**（使用者實測 v0.1.0 之後判斷）：
+  - `brew install` 加上 caveats 的 `install` 之後（必要時登出再登入），「善解輸入法」出現在輸入方式清單、加入後可以打字 → 通過。
+  - 跳出 Gatekeeper 視窗，但按「打開」之後一切正常 → 通過，並在 README 註明這個視窗。
+  - 以下任一種 → 停止推薦 brew：
+    - 輸入方式加不進去或無法打字；
+    - Gatekeeper 擋住而且無法放行；
+    - caveats 沒有印出。
+    - 停止推薦的做法：開一個後續 PR，刪掉 README 的 brew 說明；cask 依下面的回滾移除，或修正後再發版。手動安裝（zip 加上 `install-ime.sh`）不受影響。
+  - 升級（`on_upgrade` 的 TERM）要到第二次發版才測得到。如果舊版還在服務，caveats 加一句「升級後登出再登入」，不擋 v0.1.0。
+- **回滾**（每一步都是外部動作，執行前要使用者當次同意）：
+  - deploy key：用 `gh repo deploy-key list --repo Nanako0129/homebrew-tap` 找到 `shanjie release (environment)` 的 ID，再 `gh repo deploy-key delete <ID> --repo Nanako0129/homebrew-tap`。
+  - secret：`gh secret delete HOMEBREW_TAP_DEPLOY_KEY --env release --repo Nanako0129/shanjie`。
+  - cask：在 tap 開一個 commit，`git rm Casks/shanjie.rb`（用使用者自己的 gh 身分）。
+  - `release.yml` 與 repo 內的檔案：revert 本片的 merge commit。
