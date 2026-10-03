@@ -1,0 +1,57 @@
+/*
+ * shanjie core C ABI (docs/contracts/s3a.md §6). Implemented in core/src/ffi.rs; link libcore.a.
+ *
+ * Notes for the Swift shell (S3b):
+ *  - Output contents are user input. Never pass them to NSLog, print, debugPrint, dump, os_log or any
+ *    other logging; never interpolate input text into fatalError / precondition / assert messages.
+ *  - Copy every field you need into Swift `String`s in the same call that received the output, then
+ *    call shanjie_output_free immediately. Do not keep ShanjieOutput pointers around.
+ *  - A handle is not thread-safe: make every call on one thread (the IMK main thread).
+ *  - Any non-zero return: treat the key as not handled (pass it through) and do not record it.
+ *
+ * Return codes: 0 success, 1 a required pointer is NULL, 2 invalid input (data_dir not UTF-8, ch not
+ * a Unicode scalar, kind / layout / mode out of range), 3 data load failed, 4 internal error (caught
+ * panic or decode/encode error; the engine has already been reset in discard mode).
+ *
+ * Memory and lifetime:
+ *  - On a non-zero return, *out is set to NULL (when out itself is non-NULL) and nothing is allocated.
+ *  - shanjie_engine_free(NULL) and shanjie_output_free(NULL) do nothing. Freeing twice, or freeing a
+ *    pointer this library did not return, is undefined behaviour.
+ *  - A ShanjieOutput owns copies of all its strings and of the candidates array; they stay valid
+ *    until shanjie_output_free, regardless of later engine_key / engine_reset / engine_free calls.
+ */
+#ifndef SHANJIE_H
+#define SHANJIE_H
+
+#include <stdint.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+typedef struct { uint32_t kind; uint32_t ch; uint32_t modifiers; } ShanjieKey;
+// kind: 1 CHAR, 2 SPACE, 3 ENTER, 4 BACKSPACE, 5 DELETE, 6 ESC, 7 LEFT, 8 RIGHT, 9 UP, 10 DOWN, 11 HOME, 12 END, 13 TAB
+// ch: Unicode scalar of the keycap without Shift when kind is CHAR; ignored for other kinds
+// modifiers: bit0 SHIFT, bit1 CONTROL, bit2 OPTION, bit3 COMMAND, bit4 CAPSLOCK
+typedef struct {
+  int32_t handled;            // 1 = engine handled it, do not forward; 0 = pass through (insert commit first, then let the key go)
+  const char *commit;         // UTF-8 text to insert now; may be "", never NULL
+  const char *preedit;        // UTF-8 composition display (pending Zhuyin inserted at the cursor); never NULL
+  uint32_t cursor_utf16;      // cursor in preedit, in UTF-16 code units (for NSRange); after the pending syllable
+  uint32_t candidate_count;   // candidates on the current page (0-9)
+  const char *const *candidates; // NULL when candidate_count is 0
+  int32_t candidate_selected; // selection within the page; -1 when candidates are closed
+} ShanjieOutput;
+typedef struct ShanjieEngine ShanjieEngine;
+
+int32_t shanjie_engine_new(const char *data_dir, uint32_t layout, ShanjieEngine **out); // layout 0 standard, 1 ETen
+void    shanjie_engine_free(ShanjieEngine *engine);
+int32_t shanjie_engine_key(ShanjieEngine *engine, ShanjieKey key, ShanjieOutput **out);
+int32_t shanjie_engine_reset(ShanjieEngine *engine, uint32_t mode, ShanjieOutput **out); // mode 0 commit then clear, 1 discard
+void    shanjie_output_free(ShanjieOutput *output);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif /* SHANJIE_H */

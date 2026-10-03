@@ -3,6 +3,7 @@
 
 pub mod engine;
 pub mod eval;
+pub mod ffi;
 
 use std::collections::HashMap;
 use std::fmt;
