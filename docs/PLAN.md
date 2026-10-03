@@ -333,7 +333,54 @@ v4 日期 2026-10-03。v1 經 `pilotfish:plan-verifier`（REVISE，4 項）與 `
   - 實測「電子計算機名詞」：12 萬個漢字名詞，其中 11.2 萬個不在善解詞庫裡；收了「語言模型」「回傳」「多模態」，但沒有「提示詞」「向量資料庫」「檢索增強生成」「智慧代理」「持續整合」。
   - 用法：只在使用者選了對應領域時才載入，預設不開，避免冷僻術語污染日常候選。維基標題全收（V3）比只收複合詞（V2）差，就是這種污染。
 
-### S3：IMK 殼 MVP
+### S3：IMK 殼 MVP（2026-10-03 拆成 S3a 與 S3b）
+
+S3a 不需要外觀參考，可以先做；S3b 等使用者提供 macOS 內建注音的截圖。外觀、Ctrl+\、C ABI 與 R2／R4 的原有要求不變，見下方「S3 原有要求」。
+
+#### S3a：核心的按鍵引擎與 C ABI
+
+- **目標。** 把注音輸入的所有狀態和規則放進 Rust 核心，讓 Swift 殼只做事件翻譯與繪製；幾乎所有行為都能用 `cargo test` 驗證。
+- **擁有範圍。**
+  - 新檔 `core/src/engine.rs`、`core/src/ffi.rs`、`core/include/shanjie.h`、`core/tests/engine*.rs`。
+  - `core/src/lib.rs` 只加 `pub mod` 兩行；`core/Cargo.toml` 加 `staticlib`。
+  - 不改 `decode`、`Lexicon` 與評測 CLI 的行為：golden 與 S1 對照檔必須逐位元組相同。
+- **引擎（`engine.rs`）。** `Engine` 吃按鍵事件、輸出畫面狀態：
+  - **鍵盤排列**：標準（大千）與倚天，各一張「ASCII 按鍵 → 注音符號」表，寫進契約檔 `docs/contracts/s3a.md`。
+  - **拼音節**：聲母、介音、韻母、聲調四個欄位；同一欄位再按就取代；聲調鍵完成音節；標準排列裡，有未完成音節時空白鍵等於一聲。
+  - **組字區**：已完成音節的序列加游標。每次變動都用核心 `decode` 重算第一名，左文由殼傳入，見 R4。輸出組字區顯示字串、游標位置，以及未完成音節的注音。
+  - **選字**：行為跟 macOS 內建注音一樣（使用者決定）。在截圖到手前，先依下表實作，S3b 再對照截圖修正：空白鍵在沒有未完成音節時、或 ↓ 鍵，開啟游標所在位置的候選；1–9 選字；←→↑↓ 移動；Enter 確定；Esc 關閉。
+  - **送出**：組字區有字時 Enter 送出整句；中文標點鍵先送出組字區再送出標點；標點對照表由本專案自訂，寫進 s3a.md；Ctrl+\ 輸出「、」；Backspace／Delete 刪音節或注音符號。
+  - **Caps Lock 開啟時**：引擎回報「不處理」，按鍵完全直通，不暫存（R3 的英數直通）。
+- **C ABI（`ffi.rs` ＋ `shanjie.h`）。**
+  - 不透明 handle：`shanjie_engine_new(資料目錄, 排列)`、`shanjie_engine_free`、`shanjie_engine_key(handle, 按鍵事件, 左文, 輸出指標)`、`shanjie_output_free`。
+  - 每個匯出函式包 `catch_unwind`；panic hook 不印 payload；錯誤只回錯誤碼與長度，不含任何輸入（R2）。
+  - 左文：殼傳入目前行的左側文字，核心在最後一個換行截斷、以 grapheme 計數、上限 64（R4）。
+- **步驟與擁有者。**
+  1. main：寫 `docs/contracts/s3a.md`：兩張排列表、標點表、按鍵行為表、輸出結構、C 函式簽章。
+  2. `pilotfish:executor`：`engine.rs` 與引擎測試。
+  3. `pilotfish:security-executor`：`ffi.rs`、`shanjie.h`、R2／R4 測試。
+  4. fresh `pilotfish:verifier`。
+- **驗收。**
+  1. golden 與三份 S1 對照檔逐位元組相同（`cargo test`）。
+  2. 排列表測試：兩種排列各自涵蓋全部 37 個注音符號與 5 個聲調鍵。
+  3. 行為測試：拼音節、取代、聲調、Backspace、游標移動、開關候選、1–9 選字、Enter 送出、標點、Ctrl+\ →「、」、Caps Lock 直通。
+  4. **重播整合測試**：開發集前 302 列，把每列的讀音用標準排列轉成按鍵、最後按 Enter；引擎送出的字串必須等於核心 `decode` 的第一名，302／302。倚天排列同樣跑一次。
+  5. FFI：讓核心在處理標記字串時 panic，C ABI 回傳錯誤碼而不是中止程式，stderr 與回傳訊息都不含標記（R2）；左文的多行、emoji（含代理對與組合字）、超長三種邊界（R4）。
+  6. 每鍵處理 p95 < 16 ms（release，重播測試中量）。
+- **範圍外。** Swift 殼、候選窗外觀、安裝；語言模型（S2 完成後再接上）；學習；雲端。
+- **預算。** executor 與 security-executor 各 1 回合＋1 次修正。
+- **停止。** 重播測試有任何不一致：回報第一個不同的列，不調整解碼。
+
+#### S3b：Swift 輸入法本體（等截圖）
+
+- InputMethodKit app `shanjie.app`（`com.nyanako.inputmethod.shanjie`），用 SwiftPM 建置、腳本組 app bundle、Apple Development 簽章；結構參考小麥注音（MIT）。
+- 候選窗先試 `IMKCandidates`；外觀、組字區底線、深色模式依使用者截圖。
+- `privacyGate`（R3）：`IsSecureEventInputEnabled()` 或 denylist 時停學習、停雲端、不讀左文。
+- 前景 App 的 bundle ID 傳給核心，供 S2 的語言模型設定切換（聊天／書面）。
+- 安裝與實機測試由使用者執行：TextEdit／Notes／Safari 打陷阱集前 10 句、R3 的三處 secure input 情境、Caps Lock 切換、兩種排列。
+- 契約在截圖到手後再寫，另外送審並由使用者核准。
+
+#### S3 原有要求
 
 - 標準注音鍵盤、組字區、候選窗、送出、Shift 中英切換、英數直通完全不暫存；`privacyGate`（R3）；呼叫核心 C ABI。
 - 外觀（使用者 2026-10-03）：參考 Apple 原生注音的介面與 Liquid Glass。優先用系統元件（先試 IMK 內建的 `IMKCandidates`，不夠再用 macOS 的玻璃效果元件自建視窗），動畫用系統預設、不自訂（使用者嫌自訂的 Liquid Glass 行為「太 Q」）。開工前請使用者提供原生注音候選窗的實際截圖當參考，不從程式碼推測外觀。
