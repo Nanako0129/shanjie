@@ -482,10 +482,10 @@ impl Engine {
                     self.choose(idx)?;
                 }
             }
-            KeyKind::Up => c.sel = sel.saturating_sub(1),
-            KeyKind::Down => c.sel = (sel + 1).min(len - 1),
-            KeyKind::Left => c.sel = page_start.saturating_sub(PAGE_SIZE),
-            KeyKind::Right => c.sel = next_page.unwrap_or(sel),
+            // The candidate bar is horizontal: left/right move the selection like up/down, as in
+            // the system Zhuyin (user report 2026-10-04: paging on left/right was wrong).
+            KeyKind::Up | KeyKind::Left => c.sel = sel.saturating_sub(1),
+            KeyKind::Down | KeyKind::Right => c.sel = (sel + 1).min(len - 1),
             KeyKind::Space => c.sel = next_page.unwrap_or(0),
             KeyKind::Enter => self.choose(sel)?,
             KeyKind::Esc | KeyKind::Backspace => self.cands = None,
