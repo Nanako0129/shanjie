@@ -215,16 +215,16 @@
 ### 13.3 註冊與升級
 
 - `shanjie install` 依序：一律呼叫 `TISRegisterInputSource(Bundle.main.bundleURL)`（不再在 bundle ID 已知時略過）→ 在 `TISCreateInputSourceList` 找 `<BUNDLE_ID>.zhuyin`：
-  - 列不到 → **exit 3**（和其他失敗區分；目前 main.swift 只用 0、1、64）。
+  - 列不到 → **exit 3**（和其他失敗區分；main.swift 的回傳碼是 0、1、3、64）。
   - 列得到 → 先啟用輸入法本體（`kTISPropertyInputModeID` 為 nil 的那一筆，輸入來源 ID 就是 bundle ID），再啟用模式；任一個失敗 → exit 1（一般失敗）。
   - 接著查已啟用清單（`TISCreateInputSourceList(…, false)`）裡有沒有輸入法本體；沒有 → **exit 3**。2026-10-04 用 0.1.0 實測：只啟用模式時，輸入法本體維持停用，任何地方都列不到這個輸入法，`install` 卻回 0。在註冊後、第一次登出前，兩個啟用呼叫都回 noErr，同一行程的已啟用清單也列得到模式，但列不到本體，換一個行程查也是停用；登出再登入後兩者都是已啟用。所以只看本體有沒有出現在已啟用清單（修訂三，v0.1.1）。
   - 啟用成功後，列得到舊的 `<BUNDLE_ID>.standard`／`.eten` 就 `TISDisableInputSource`；停用失敗只印警告；列不到就什麼都不做 → exit 0。
 - 輸入模式 ID 一律不會切換排列：殼不覆寫 IMK 的 `setValue(_:forTag:client:)`，連舊版的 `.standard`／`.eten` 在還沒被停用時也一樣（PR #5 審查：否則系統每次啟用時會把選單選的排列切回去）。排列只由選單與偏好決定。
-- `install` 的回傳碼：`TISRegisterInputSource` 失敗而且列不到 `.zhuyin` → exit 1（一般失敗，安裝腳本印還原指令）；註冊成功但列不到 → exit 3（登出再登入）。
+- `install` 的回傳碼：`TISRegisterInputSource` 失敗而且列不到 `.zhuyin` → exit 1（一般失敗，安裝腳本印還原指令）；註冊成功但列不到模式，或啟用後已啟用清單裡沒有輸入法本體 → exit 3（登出再登入後再執行一次 `install`）。
 - 從兩模式舊版升級時，若舊的 `.eten` 已啟用而 `.standard` 沒有、且還沒有存過 `layout`，`install` 寫入 `layout=eten`，倚天使用者升級後不必重選。
 - 安裝失敗時若保留的上一版是兩模式舊版（其 Info.plist 有 `.standard`），還原指令改成放回舊名稱 `shanjie.app`、`lsregister -f` 後登出再登入，並在輸入方式加入「善解（標準）」或「善解（倚天）」。
 - **未驗證**：重新登記一個已登記過的 bundle 後，TIS 是否立刻更新模式清單（可能要登出再登入）。
-- `scripts/install-ime.sh`：先取得 `install` 的回傳碼（不能用 `if ! …` 吞掉）。回傳 3 時印固定訊息「系統還沒載入新的輸入方式清單：請登出再登入，然後只執行 `~/Library/Input Methods/善解輸入法.app/Contents/MacOS/shanjie install`」（不要重跑整個腳本：那會把剛裝的版本當成上一版、刪掉真正的上一版），**不印**換回上一版的指令；其他非 0 才印還原指令。exit 3 這條路徑在 files-only 測試到不了，只由使用者實測涵蓋。
+- `scripts/install-ime.sh`：先取得 `install` 的回傳碼（不能用 `if ! …` 吞掉）。回傳 3 時印固定訊息「系統還沒接受新的輸入法（第一次安裝通常如此）：請登出再登入，然後只執行 `~/Library/Input Methods/善解輸入法.app/Contents/MacOS/shanjie install`」（不要重跑整個腳本：那會把剛裝的版本當成上一版、刪掉真正的上一版），**不印**換回上一版的指令；其他非 0 才印還原指令。exit 3 這條路徑在 files-only 測試到不了，只由使用者實測涵蓋。
 - 目的地改為 `~/Library/Input Methods/善解輸入法.app`。舊名稱 `~/Library/Input Methods/shanjie.app`：
   - 只有舊名稱時，視為上一版：先改名為 `.shanjie-previous`、成功後才 `lsregister -u`（與 §4 的順序相同）。
   - 新舊名稱同時存在時，新名稱那份才是上一版（照現行規則保留為 `.shanjie-previous`），舊名稱那份 `lsregister -u` 後刪除。
@@ -269,7 +269,7 @@
     - 就算改成 `base: :home` 讓沙盒放行讀取，`TISRegisterInputSource` 在沙盒裡能不能成功也沒有量過。
   - `uninstall on_upgrade: :signal, signal: ["TERM", "com.nyanako.inputmethod.shanjie"]`：解除安裝和升級時都結束執行中的行程，系統下次就會啟動新版。Homebrew 預設在升級時略過 `signal`（`UPGRADE_REINSTALL_SKIP_DIRECTIVES`），所以要加 `on_upgrade`。Homebrew 用 `launchctl list` 的標籤找行程；2026-10-04 在本機看到其他輸入法的標籤是 `application.<bundle ID>.<數字>.<數字>`，符合它的比對規則。
   - `zap trash: "~/Library/Preferences/com.nyanako.inputmethod.shanjie.plist"`：目前唯一的使用者資料，也就是 `layout` 偏好。
-  - `caveats`：第一次安裝後執行 `"$HOME/Library/Input Methods/善解輸入法.app/Contents/MacOS/shanjie" install`，由它註冊並啟用輸入方式；如果它說清單還沒載入（exit 3），就登出再登入，再執行一次。caveats 不提升級；升級後要不要再做什麼，屬於下面 `on_upgrade` 那個未驗證項目，實測後再補。
+  - `caveats`：第一次安裝後執行 `"$HOME/Library/Input Methods/善解輸入法.app/Contents/MacOS/shanjie" install`，由它註冊並啟用輸入方式；第一次安裝通常要登出再登入：它結束碼是 3 時，登出、再登入，然後再執行一次（修訂三）。caveats 不提升級；升級後要不要再做什麼，屬於下面 `on_upgrade` 那個未驗證項目，實測後再補。
 - **未驗證**（由使用者實測，見 14.5，停止條件見 14.7）：
   - 從 Homebrew 下載的 app 帶有 quarantine（已公證、已 staple）：在終端機執行 caveats 的 `install` 時，以及系統啟動輸入法時，會不會跳出確認視窗；
   - `on_upgrade` 送出的 TERM 是否確實讓新版接手（要到第二次發版才測得到）。
