@@ -20,20 +20,26 @@ jobs:
   core:
     # Xcode 27 / macOS 27, the same image the Swift shell (S3b) will need.
     runs-on: xcode-27
+    # A full run takes about 3 minutes; a hung FFI child process should not
+    # hold the runner for the 6-hour default.
+    timeout-minutes: 20
     env:
       LM_SHA256: 9879fd8b264b1c1f4c083ccedf84dc5625cd8d2595bd2d13150eed5a0520a923
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
 
-      - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
-
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+      # Pinned to the toolchain the golden files were generated with: scores
+      # must be bit-identical to the Python reference, and a codegen change
+      # has already moved one result by 1 ulp (docs/contracts/s3a.md section 9,
+      # powf lowered to exp10). The action is pinned to a master commit, as its
+      # README recommends; the `stable` branch is regenerated on every merge.
+      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
         with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          toolchain: 1.97.1
 
       # The bigram model is not in git (docs/PLAN.md S2c); it is the model-v1
-      # release asset. Tests that need it fail loudly when it is missing, so a
-      # failed download must stop here rather than surface as test noise.
+      # release asset. Checking it here fails the run in seconds with a clear
+      # message instead of after the build.
       - name: Fetch the language model
         env:
           GH_TOKEN: ${{ github.token }}
@@ -51,15 +57,16 @@ jobs:
 
       # docs/contracts/s3a.md section 7.4: compile the C header against the
       # staticlib and drive both layouts, the LM and the profile switch.
+      # macOS cc links without the native libs too, so an empty capture would
+      # pass silently; it is captured and checked first.
       - name: C header smoke test
         shell: bash
         run: |
           set -euo pipefail
           T="$RUNNER_TEMP"
-          cargo build --release --locked -p core
-          cc -std=c11 -Wall -Wextra -Werror -Icore/include core/tests/c/abi_smoke.c target/release/libcore.a \
-            $(cargo rustc --color never --release --locked -p core --crate-type staticlib -- --print native-static-libs 2>&1 | sed -n 's/.*native-static-libs: //p') \
-            -o "$T/abi_smoke"
+          LIBS=$(cargo rustc --color never --release --locked -p core --crate-type staticlib -- --print native-static-libs 2>&1 | sed -n 's/.*native-static-libs: //p')
+          test -n "$LIBS"
+          cc -std=c11 -Wall -Wextra -Werror -Icore/include core/tests/c/abi_smoke.c target/release/libcore.a $LIBS -o "$T/abi_smoke"
           "$T/abi_smoke" data/lexicon data/lm/bigram.sjlm
 
       # docs/PLAN.md S2v acceptance 3: Rust and Python lenient comparison agree
@@ -71,7 +78,7 @@ jobs:
           T="$RUNNER_TEMP"
           python3 tools/build_variants.py --probe > "$T/probe.txt"
           python3 reference/proto/eval.py --lenient-dump "$T/probe.txt" > "$T/py.txt"
-          ./target/release/shanjie-eval --lenient-dump "$T/probe.txt" > "$T/rs.txt"
+          cargo run --release --locked -q -p cli -- --lenient-dump "$T/probe.txt" > "$T/rs.txt"
           diff "$T/py.txt" "$T/rs.txt"
           N=$(grep -vc '^#' eval/variants.tsv)
           diff <(head -n "$N" "$T/rs.txt") <(grep -v '^#' eval/variants.tsv | cut -f2)

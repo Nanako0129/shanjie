@@ -190,6 +190,8 @@ int32_t shanjie_engine_set_profile(ShanjieEngine *engine, uint32_t profile, Shan
   cargo build --release -p core
   # zsh 不拆 $LIBS 這種變數，所以命令替換直接放進 cc 的參數（sh、bash、zsh 都會拆）。
   # 2026-10-03 實際印出 `-lSystem -lc -lm`；ld 會警告 `ignoring duplicate libraries: '-lSystem'`，無害。
+  # --color never：CI 的 rust-toolchain action 設了 CARGO_TERM_COLOR=always，不關掉的話最後一個旗標會接上色碼（`-lm\e[0m`）而連結失敗。
+  # CI（.github/workflows/ci.yml）另加 --locked，並先檢查擷取結果不是空的（macOS 的 cc 不帶這些旗標也能連結）。
   cc -std=c11 -Wall -Wextra -Werror -Icore/include core/tests/c/abi_smoke.c target/release/libcore.a \
     $(cargo rustc --color never --release -p core --crate-type staticlib -- --print native-static-libs 2>&1 | sed -n 's/.*native-static-libs: //p') \
     -o "$T/abi_smoke"
