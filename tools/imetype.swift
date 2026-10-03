@@ -16,7 +16,8 @@ let keyCode: [Character: CGKeyCode] = [
     "ㄈ": 6, "ㄌ": 7, "ㄏ": 8, "ㄒ": 9, "ㄖ": 11, "ㄙ": 45, "ㄩ": 46, "ㄝ": 43, "ㄡ": 47, "ㄥ": 44,
 ]
 let space: CGKeyCode = 49, ret: CGKeyCode = 36
-let keyDelay: useconds_t = 25_000       // 每個按鍵之間；太快輸入法會掉鍵
+// 每個按鍵之間；太快輸入法會掉鍵。環境變數 IMETYPE_KEY_MS 可調（預設 25 毫秒）
+let keyDelay = useconds_t((Int(ProcessInfo.processInfo.environment["IMETYPE_KEY_MS"] ?? "") ?? 25) * 1000)
 let commitDelay: useconds_t = 400_000   // 送出後等輸入法把字交給文字視窗
 
 func fail(_ msg: String) -> Never { FileHandle.standardError.write((msg + "\n").data(using: .utf8)!); exit(2) }
