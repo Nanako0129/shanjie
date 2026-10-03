@@ -132,8 +132,12 @@ final class CandidatePanelAdapter: CandidatePanel {
         }
         // Fallback, as DINKIssTyle-IME (MIT) drives IMKCandidates: from the first cell, step the
         // panel's own highlight with its responder actions.
+        // The start is read back too: if selecting the first cell did not take, step left past the
+        // page's start first, so the steps right never begin from a stale cell.
         let first = panel.candidateIdentifier(atLineNumber: 0)
-        if first != NSNotFound { _ = panel.selectCandidate(withIdentifier: first) }
+        if first == NSNotFound || !panel.selectCandidate(withIdentifier: first) || panel.selectedCandidate() != first {
+            for _ in 0..<candidates.count { panel.moveLeft(nil) }
+        }
         for _ in 0..<selected { panel.moveRight(nil) }
     }
 
