@@ -183,3 +183,19 @@
 展開網格、分頁、直式、表情候選、標籤、分段底色框、自建玻璃候選窗、設定頁與聊天 App 清單的修改介面、Homebrew cask、自動更新（Sparkle）、學習與 privacyGate（S4）、一鍵校正（H）、雲端（S6）。
 
 **已知限制**：切換輸入模式（標準 ↔ 倚天）要重建引擎，會在主執行緒卡約 1 秒以上、期間按鍵直通。排列很少切換，先接受；之後在核心加 `set_layout`（S3b-2）。
+
+## 13. 修訂一：單一輸入方式、選單切換鍵盤、中文 app 名稱（使用者 2026-10-04）
+
+使用者要求：輸入方式清單裡只有一個「善解輸入法」，鍵盤排列在它自己的選單裡選（像自然輸入法）；app 檔名改成「善解輸入法」。本節取代 §2、§4、§5、§6、§10 中與「兩個輸入模式」和 `shanjie.app` 檔名衝突的部分。
+
+- **檔名與顯示名稱**：bundle 資料夾改名為 `善解輸入法.app`；顯示名稱（`CFBundleName`／`CFBundleDisplayName`，`zh-Hant.lproj`）為「善解輸入法」，英文（`en.lproj` 與 Info.plist 預設）為「Shanjie」；`LSHasLocalizedDisplayName` 保留。**不變**：bundle ID `com.nyanako.inputmethod.shanjie`、執行檔 `Contents/MacOS/shanjie`、Release 附件 `shanjie-<版本>.zip`（解壓後是 `善解輸入法.app`）。`BUNDLE_ID`／`OUT_DIR` 兩個參數照舊；`OUT_DIR` 裡的 app 一律叫 `善解輸入法.app`。
+- **單一輸入模式**：Info.plist 只有一個模式 `<BUNDLE_ID>.zhuyin`，顯示名稱「善解輸入法」（英文「Shanjie」），`TISIntendedLanguage` 為 `zh-Hant`，`tsInputModeScriptKey` 為 `smTradChinese`，`tsVisibleInputModeOrderedArrayKey` 只有它。`InputMode` 不再由輸入模式 ID 決定排列。
+- **選單**：`IMKInputController` 的 `menu()` 回傳兩個互斥的項目「標準鍵盤」「倚天鍵盤」（目前的打勾）。選了就呼叫既有的切換排列流程（§5：送出組字、重建引擎、重載 LM 與設定），並把選擇存到 app 自己的 UserDefaults（鍵 `layout`，值 `standard`／`eten`）；啟動時讀它，沒有就用標準。偏好的讀寫透過注入的介面，`ShanjieKit` 測試用記憶體版，**自測與測試都不得寫入真正的 UserDefaults**。
+- **註冊**：`shanjie install` 一律呼叫 `TISRegisterInputSource(Bundle.main.bundleURL)`（重新登記會更新模式清單，不再在 bundle ID 已知時略過），再啟用 `<BUNDLE_ID>.zhuyin`；之前版本留下的 `.standard`／`.eten` 若仍在 TIS 清單，就 `TISDisableInputSource`（只停用、不刪除）。
+- **安裝腳本**：目的地改為 `~/Library/Input Methods/善解輸入法.app`。若存在舊名稱的 `~/Library/Input Methods/shanjie.app`，視為上一版：`lsregister -u` 後改名為 `.shanjie-previous`（和現在處理舊版的方式相同），讓 `~/Library/Input Methods` 裡只剩一份帶這個 bundle ID 的 `.app`。pkill 的比對路徑同時涵蓋新舊兩個名稱。HOME 檢查、files-only、mktemp 暫存、trap 等規則不變。
+- **驗收追加**：
+  - 驗收 2：Info.plist 只有一個輸入模式，名稱在地化正確；bundle 資料夾是 `善解輸入法.app`。
+  - 驗收 4：偏好介面的測試（選倚天 → 存下 `eten`、排列切換、組字先送出；以記憶體版偏好重新建立 shell 時讀回倚天）；`InputMode` 不再依模式 ID。
+  - `test-install-ime.sh`：新名稱的全新安裝、覆蓋安裝；存在舊名稱 `shanjie.app` 時升級後只剩 `善解輸入法.app`，舊的成為 `.shanjie-previous`。
+  - 使用者實測：輸入方式清單只有一個「善解輸入法」；選單可切換標準／倚天且重開機後記住；從兩個模式的舊版升級時，舊的兩個項目不再出現（或被停用）。
+- **範圍外**：注音以外的輸入法（拼音、倉頡等）、選單裡的其他項目（偏好設定、關於）。
