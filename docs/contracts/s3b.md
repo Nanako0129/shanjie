@@ -190,9 +190,9 @@
 
 ### 13.1 名稱
 
-- bundle 資料夾改名為 `善解輸入法.app`。顯示名稱：`zh-Hant.lproj` 為「善解輸入法」，`en.lproj` 與 Info.plist 預設為「Shanjie」，`LSHasLocalizedDisplayName` 保留（§11 原本說非中文系統也顯示中文名，改為顯示 Shanjie）。
+- bundle 資料夾改名為 `善解輸入法.app`。顯示名稱：`zh-Hant.lproj` 為「善解輸入法」，`en.lproj` 與 Info.plist 預設為「Shanjie」，`LSHasLocalizedDisplayName` 保留，`CFBundleDevelopmentRegion` 改為 `en`（其他語言的系統退回英文名；§11 原本說非中文系統也顯示中文名，改為顯示 Shanjie）。
 - **不變**：bundle ID `com.nyanako.inputmethod.shanjie`、執行檔 `Contents/MacOS/shanjie`、Release 附件 `shanjie-<版本>.zip`（解壓後是 `善解輸入法.app`；中文檔名的 zip 用 Finder／`ditto` 解壓，`unzip` 指令可能亂碼）。
-- **要改的每一處**（逐一改成 `善解輸入法.app`，或改用一個共用變數）：`scripts/build-app.sh`（產物路徑、`rm -rf "$OUT_DIR/…"` 規則）；`scripts/check-app.sh`（預設 APP）；`Makefile`（bundle 註解、`selftest-bundled` 的執行路徑、`clean-bundle`）；`.github/workflows/ci.yml`（shell job 的路徑）；`.github/workflows/release.yml`（build 的打包、sign 的解開／簽章／公證／驗證路徑、zip 內容）；`scripts/install-ime.sh`（用法、目的地、訊息、還原指令、結尾說明）；`scripts/test-install-ime.sh`；`docs/verification.md`（指令與殘留檢查）；本契約 §3、§4、§10 驗收 10、§11 的對應文字。
+- **要改的每一處**（逐一改成 `善解輸入法.app`，或改用一個共用變數）：`scripts/build-app.sh`（產物路徑、`rm -rf "$OUT_DIR/…"` 規則）；`scripts/check-app.sh`（預設 APP）；`Makefile`（bundle 註解、`selftest-bundled` 的執行路徑、`clean-bundle`）；`.github/workflows/ci.yml`（shell job 的路徑）；`.github/workflows/release.yml`（build 的打包、sign 的解開／簽章／公證／驗證路徑、zip 內容）；`scripts/install-ime.sh`（用法、目的地、訊息、還原指令、結尾說明）；`scripts/test-install-ime.sh`；`docs/verification.md`（指令與殘留檢查，並加上 `find build -name '*.app'`：`build/` 有 `.metadata_never_index` 又不登記，`mdfind` 與 `lsregister -dump` 本來就看不到它）；`docs/PLAN.md`（回滾說明的兩處要列出 `善解輸入法.app`、舊的 `shanjie.app` 與 `.shanjie-previous`，以及 S3b 段落的產品名稱）；本契約 §3、§4、§10 驗收 10、§11 的對應文字。完成後 `grep -rn 'shanjie\.app' docs scripts Makefile .github` 只剩刻意指舊名稱的行。
 - **`make clean-bundle`** 同時處理新舊兩個名稱：對 `build/` 與 `build/selftest/` 裡的 `善解輸入法.app` 與 `shanjie.app` 都 `lsregister -u` 後刪除。
 
 ### 13.2 單一輸入模式與選單
@@ -203,18 +203,19 @@
 
 ### 13.3 註冊與升級
 
-- `shanjie install` 一律呼叫 `TISRegisterInputSource(Bundle.main.bundleURL)`（不再在 bundle ID 已知時略過），然後：
-  - **成功條件**：`TISCreateInputSourceList` 列得到 `<BUNDLE_ID>.zhuyin`，而且啟用成功 → exit 0。
-  - 列得到舊的 `<BUNDLE_ID>.standard`／`.eten` → `TISDisableInputSource`；停用失敗只印警告，不影響成功；列不到就什麼都不做。
-  - 列不到 `.zhuyin` → **exit 3**（和其他失敗區分）。
+- `shanjie install` 依序：一律呼叫 `TISRegisterInputSource(Bundle.main.bundleURL)`（不再在 bundle ID 已知時略過）→ 在 `TISCreateInputSourceList` 找 `<BUNDLE_ID>.zhuyin`：
+  - 列不到 → **exit 3**（和其他失敗區分；目前 main.swift 只用 0、1、64）。
+  - 列得到 → 啟用；啟用失敗 → exit 1（一般失敗）。
+  - 啟用成功後，列得到舊的 `<BUNDLE_ID>.standard`／`.eten` 就 `TISDisableInputSource`；停用失敗只印警告；列不到就什麼都不做 → exit 0。
+- 只有一個模式，所以 IMK 的 `setValue(<BUNDLE_ID>.zhuyin)` 不會切換排列（`InputMode(modeID:)` 回傳 nil 而被忽略），這是刻意的：排列只由選單與偏好決定。
 - **未驗證**：重新登記一個已登記過的 bundle 後，TIS 是否立刻更新模式清單（可能要登出再登入）。
-- `scripts/install-ime.sh`：`install` 回傳 3 時印固定訊息「系統還沒載入新的輸入方式清單：請登出再登入，然後重新執行這個腳本」，**不印**換回上一版的指令；其他非 0 才印還原指令。
+- `scripts/install-ime.sh`：先取得 `install` 的回傳碼（不能用 `if ! …` 吞掉）。回傳 3 時印固定訊息「系統還沒載入新的輸入方式清單：請登出再登入，然後只執行 `~/Library/Input Methods/善解輸入法.app/Contents/MacOS/shanjie install`」（不要重跑整個腳本：那會把剛裝的版本當成上一版、刪掉真正的上一版），**不印**換回上一版的指令；其他非 0 才印還原指令。exit 3 這條路徑在 files-only 測試到不了，只由使用者實測涵蓋。
 - 目的地改為 `~/Library/Input Methods/善解輸入法.app`。舊名稱 `~/Library/Input Methods/shanjie.app`：
   - 只有舊名稱時，視為上一版：`lsregister -u` 後改名為 `.shanjie-previous`（與現行規則相同）。
   - 新舊名稱同時存在時，新名稱那份才是上一版（照現行規則保留為 `.shanjie-previous`），舊名稱那份 `lsregister -u` 後刪除。
   - §4 的「只刪除或搬移的位置」因此加上舊名稱 `shanjie.app`（共四個字面路徑）。
   - pkill 的比對涵蓋新舊兩個名稱。HOME 檢查、files-only、mktemp 暫存、trap 等規則不變。
-- **測試不呼叫系統的保護**：files-only 模式下 `install-ime.sh` 接受環境變數 `SHANJIE_TEST_LSREGISTER` 指定替代的 lsregister（非 files-only 時忽略它），`test-install-ime.sh` 用一個只記錄呼叫的替身，並在 PATH 前放 `pkill`／`pgrep` 替身；每個情況結束後斷言三者**都沒被呼叫**（verifier 在 PR #4 指出原本的測試看不到這點）。
+- **測試不呼叫系統的保護**：files-only 模式下 `install-ime.sh` 接受環境變數 `SHANJIE_TEST_LSREGISTER` 指定替代的 lsregister（非 files-only 時忽略它），`test-install-ime.sh` 用一個只記錄呼叫的替身，並在 PATH 前放 `pkill`／`pgrep` 替身；每個情況結束後斷言三者**都沒被呼叫**（verifier 在 PR #4 指出原本的測試看不到這點）。「沒開 files-only 時拒絕」那個情況用一個唯讀的 HOME（`chmod 500`），並斷言錯誤訊息來自 HOME 檢查：萬一 HOME 檢查退化，腳本也會在建立資料夾時就失敗，到不了真正的 lsregister。
 
 ### 13.4 驗收追加
 
@@ -225,7 +226,7 @@
    - 不合法的偏好值 → 標準排列。
    - 刻意把 init 改成「先建引擎、再讀偏好」時，至少一個測試失敗（verifier 做）。
 3. `test-install-ime.sh`：新名稱的全新安裝與覆蓋安裝；只有舊名稱 `shanjie.app` 時升級 → 只剩 `善解輸入法.app`，舊的成為 `.shanjie-previous`；新舊並存時升級 → 新名稱那份成為 `.shanjie-previous`、舊名稱刪除；每個情況都斷言 lsregister／pkill／pgrep 替身沒被呼叫。
-4. `make bundle selftest-bundled && make clean-bundle` 在同時有舊 `build/shanjie.app` 與新 `build/善解輸入法.app` 的 `build/` 裡執行後，`find build -name '*.app'` 沒有輸出；`docs/verification.md` 的殘留檢查拿一個存在的 `build/善解輸入法.app` 會找到它。
+4. `make bundle selftest-bundled && make clean-bundle` 在同時有舊 `build/shanjie.app` 與新 `build/善解輸入法.app` 的 `build/` 裡執行後，`find build -name '*.app'` 沒有輸出。`docs/verification.md` 殘留檢查裡的 `find build -name '*.app'` 對一個存在、未登記的 `build/善解輸入法.app` 會列出它，刪除後沒有輸出（過程中不呼叫 `lsregister -f` 或 TIS）。
 5. 使用者實測（取代原本驗收 10 的路徑）：
    - 從兩模式的舊版（若有安裝）升級：記錄第一次 `install-ime.sh` 的 exit code 與訊息，以及「系統設定 → 鍵盤 → 輸入方式」清單的實際內容。**通過條件**：清單（必要時登出再登入後）只有一個「善解輸入法」可加入，加入後可正常打字。
    - 選單切換標準／倚天後打字結果正確；登出再登入後仍記得選擇。
