@@ -75,7 +75,7 @@
 
 - 「注音鍵」與「聲調鍵」指 §1 表中的鍵、且沒按 Shift。
 - 第 1 條的直通不改任何狀態：一段組字中間插入任意個第 1 條的鍵，之後的輸出必須和沒按過時逐欄位相同。
-- 中英切換（Shift 單按）的狀態放在殼裡：英文模式下殼不把按鍵送進核心。
+- 中英切換：用系統的「使用大寫鎖定鍵切換輸入方式」（使用者 2026-10-03 選 Caps Lock），切換時系統停用本輸入法；殼不保留中英狀態，原本寫的 Shift 單按切換不做（見 `docs/contracts/s3b.md` §6）。
 - **組字區上限 40 個音節**：完成第 40 個音節時自動送出整段，限制每鍵延遲與文字留在記憶體的時間。開發集最長一列是 32 個音節，重播測試不會碰到上限。
 - **送出、Esc 清空、reset（§6）時，連同固定詞清掉所有組字狀態。**
 
@@ -132,7 +132,7 @@ int32_t shanjie_engine_set_profile(ShanjieEngine *engine, uint32_t profile, Shan
 ```
 
 - **回傳碼**：0 成功、1 必要的指標是 NULL、2 輸入不合法（data_dir 或 LM 路徑不是 UTF-8、`ch` 不是合法的 Unicode scalar、layout、mode 或 profile 超出範圍）、3 資料載入失敗（含 LM 檔讀取或格式錯誤、引擎沒有 data_dir）、4 內部錯誤（攔下的 panic 或解碼錯誤）。`load_lm` 失敗時 LM 維持原狀；碼 4 時任何函式都照下面的規則丟棄組字。
-- **reset**：mode 0 時 `commit` 是目前組字區的顯示字串（未完成音節丟掉）；mode 1 時 `commit` 為空。兩者都清掉所有組字狀態，之後的輸出必須和新建的 engine 相同；S2c 起是「新建、載入相同 LM、使用相同設定的 engine」，reset 不清 LM 與設定。殼在 `commitComposition:`、`deactivateServer`、換 client、privacyGate 轉為生效、Caps Lock 打開時呼叫（S3b 決定用哪個 mode）。
+- **reset**：mode 0 時 `commit` 是目前組字區的顯示字串（未完成音節丟掉）；mode 1 時 `commit` 為空。兩者都清掉所有組字狀態，之後的輸出必須和新建的 engine 相同；S2c 起是「新建、載入相同 LM、使用相同設定的 engine」，reset 不清 LM 與設定。殼在 `commitComposition:`、`deactivateServer`、組字擁有者改變時呼叫（mode 與時機見 `docs/contracts/s3b.md` §5）。Caps Lock 由系統切換輸入方式，會觸發 `deactivateServer`；「privacyGate 轉為生效時」延到 S4。
 - **記憶體與生命週期**：
   - 回傳非 0 時，`*out` 一律設成 NULL，而且不配置任何記憶體。
   - `shanjie_engine_free(NULL)`、`shanjie_output_free(NULL)` 什麼都不做。重複釋放、或釋放不是核心配置的指標，屬於未定義行為。
