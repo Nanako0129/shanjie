@@ -86,3 +86,15 @@ Loaded the whole model on CPU (no device_map), temporarily swapped `model.langua
 | 什麼品牌或款式的拭鏡布比較好 | 什麼品牌和款式的試鏡布比較好 (miss) | 什麼品牌或款式的試鏡不比較好 (miss) | 什麼品牌或款式的是敬不比較好 (miss) |
 | 我想參考蘋果原生的介面 | ok | ok | ok |
 | 所以我認為針對高延遲的部分可以在使用者輸入完用一個快速鍵自動校正 | 索以我認爲真對高延遲的部份可以… (miss) | ok | ok |
+
+## Mac (M5) latency, partial, measured under load (2026-10-03)
+The user approved measuring latency only on the Mac. `mac_latency.py` runs the same M1 method with MLX (`~/side-project/ime-research/proto/.venv`, mlx 0.32.3, mlx-lm 0.32.0) on every 5th of the first 302 dev rows (61 rows); accuracy there is only a 4-bit sanity check. Qwen 4-bit was converted locally from the cached `Qwen/Qwen3-1.7B-Base` (`mlx_lm convert -q --q-bits 4`, 948 MB); Gemma would use `mlx-community/gemma-4-e2b-4bit` (downloaded, not measured).
+
+| config | sent / lenient (61 rows) | p50 / p95 ms | peak MiB |
+|---|---|---|---|
+| Qwen 4-bit, chunk 8 | 0.803 / 0.934 | 893 / 1558 | 1324 |
+| Qwen 4-bit, chunk 32 | 0.820 / 0.918 | 487 / 1175 | 2076 |
+| Qwen bf16, chunk 8 | 0.852 / 0.918 | 814 / 1137 | 3537 |
+| Qwen bf16, chunk 32 | 0.852 / 0.918 | 629 / 980 | 4139 |
+
+Not like-for-like with 188 and not a final number: other cloud benchmark batches were running, and the user reported the machine lagging, so the runs were stopped (Gemma never ran). A diagnostic on Qwen 4-bit, chunk 32, confirmed MLX ran on `Device(gpu, 0)` with 4-bit packed weights (923 MiB of Metal buffers) and split the per-sentence time into Python N-best decode (median 6 ms) and MLX scoring (median 397 ms); one 1x40-token forward took 117 ms under that load. Remeasure only with the user's consent while the Mac is otherwise idle (PLAN S5), with prefix KV caching and fewer candidates.
