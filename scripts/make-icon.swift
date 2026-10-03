@@ -19,9 +19,10 @@ func draw(pixels: Int) -> NSBitmapImageRep {
     rep.size = NSSize(width: 16, height: 16)
     NSGraphicsContext.saveGraphicsState()
     NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+    // No scaleBy here: with rep.size at 16 pt, the context already maps points to pixels. An
+    // extra scale drew only the lower-left quarter into the 32 px (Retina) representation, which
+    // is what the menu bar showed (user screenshot 2026-10-04).
     let ctx = NSGraphicsContext.current!.cgContext
-    let scale = CGFloat(pixels) / 16
-    ctx.scaleBy(x: scale, y: scale)
 
     // The seal: a rounded square outline, inset so the stroke stays inside the 16 pt box.
     NSColor.black.setStroke()
