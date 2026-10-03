@@ -44,7 +44,11 @@ fn oov_words(name: &str) -> Vec<String> {
 
 /// S2v lenient table: SHANJIE_VARIANTS if set, else the repo's eval/variants.tsv; missing or bad is an error.
 fn load_lenient() -> Result<Lenient, String> {
-    let p = std::env::var_os("SHANJIE_VARIANTS").map(PathBuf::from).unwrap_or_else(|| root().join("eval/variants.tsv"));
+    // An empty value counts as unset, same as the Python reference (`os.environ.get(...) or default`).
+    let p = std::env::var_os("SHANJIE_VARIANTS")
+        .filter(|v| !v.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| root().join("eval/variants.tsv"));
     let text = fs::read_to_string(p).map_err(|e| format!("cannot read variants table ({:?})", e.kind()))?;
     Lenient::parse(&text).map_err(|e| e.to_string())
 }

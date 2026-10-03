@@ -314,7 +314,7 @@ v4 日期 2026-10-03。v1 經 `pilotfish:plan-verifier`（REVISE，4 項）與 `
 
 #### S2v：寬鬆對照加入教育部異體詞
 
-**狀態：main 已實作，等 fresh verifier。** 異體 2,072 個；Rust／Python 函式層級對照 7,313 行相同；S0 暫存複本對照相同；golden 只有 `lenient_acc` 改變（開發集 +1、萌典 +3）；新基準在 `docs/research-log.md`。
+**狀態：完成（2026-10-03，commit d595b95）。** fresh verifier CONFIRMED：驗收 1–7 獨立重跑；抽查 10 組詞對都在辭典寫著「也作」且讀音相同；空表時驗收 3 與 6 都失敗。 異體 2,072 個；Rust／Python 函式層級對照 7,313 行相同；S0 暫存複本對照相同；golden 只有 `lenient_acc` 改變（開發集 +1、萌典 +3）；新基準在 `docs/research-log.md`。
 
 - **目標。** 寬鬆對照除了原本的單字對照（她妳它牠嘗周臺裏 → 他你他他嚐週台裡），再把教育部《重編國語辭典修訂本》明列「也作／亦作」、而且讀音相同的詞視為相同。
 - **來源與標準。** g0v/moedict-data 的 `dict-revised_bkup.json`（commit a6dc997，本機路徑同 `tools/readings.py` 的 `MOEDICT`），CC BY-ND 3.0 TW，只用於評測。
@@ -346,7 +346,7 @@ v4 日期 2026-10-03。v1 經 `pilotfish:plan-verifier`（REVISE，4 項）與 `
   4. **S0 對照**：照 S0 契約 §9 的暫存複本方式（把 `reference/proto/*.py` 複製到 `$T`，`$T/tests/homophones.txt`、`daily.txt`、`moedict_sample.txt` 分別是 `eval/sets/` 的 trap、daily、moedict，`$T/data/mcbpmf-data.txt` 是 `data/lexicon/` 的同名檔），執行
      `R=$PWD; diff <(cd $T && SHANJIE_VARIANTS=$R/eval/variants.tsv python3 eval.py) <(cargo run --release -q -p cli -- --set trap daily moedict --learn-sim --no-overlay)`（在 repo 根目錄執行），結果必須為空。
   5. **golden 的預期差異**：重新產生 golden 與三份 S1 對照檔。`s1-dev302.txt`、`s1-dev302-nooverlay.txt` 的 `lenient_acc` 至少要因為第 116 行（念書／唸書）各多 1 句；其他任何變動都要逐句列出對應的詞對；只能是 `lenient_acc` 的值變動；golden 完全不變就算不通過。新的 golden commit 進 repo，`cargo test` 綠。
-  6. CLI 層級測試（`cli/tests/`）：跑 `--lenient-dump`，`唸書` 與 `念書` 的輸出相同、`散佈` 與 `散布` 相同。測試不設定也不清除 `SHANJIE_VARIANTS`（沒設時 CLI 用 repo 的表），所以驗證者把它指向空表時，這個測試會失敗。
+  6. CLI 層級測試（`cli/tests/`）：跑 `--lenient-dump`，`唸書` 與 `念書` 的輸出相同；`散佈` 與 `散布` 不同（實作後更正：`散佈` 不是詞條，照標準不收）。測試不設定也不清除 `SHANJIE_VARIANTS`（沒設時 CLI 用 repo 的表），所以驗證者把它指向空表時，這個測試會失敗。
   7. `grep -rn 她妳它牠嘗周臺裏`：定義寬鬆對照的程式常數與文件段落（`core/src/eval.rs`、`reference/proto/eval.py`、`docs/contracts/s0.md` §6、PLAN §S0 指標行、`docs/methodology.md`）都註明之後還要套異體表；本節（§S2v）、已結案的實驗程式、它們的結果與 `docs/typing-test.md` 的歷史紀錄除外。
   8. 新規則下重算一次，記成**新的基準**（不和舊規則的 `log2.tsv`、`runs/` 做配對比較），寫進 `docs/research-log.md`：
      - 參考 LM（`data/lm/bigram.sjlm`）：dev302、typing76（chat 與 formal）；discordtune、Discord 845（chat）；新聞 294（formal 與 chat）。
