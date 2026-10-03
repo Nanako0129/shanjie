@@ -488,7 +488,7 @@ S3a 不需要外觀參考，可以先做；S3b 等使用者提供 macOS 內建�
 
 #### S3b：Swift 輸入法本體（截圖已於 2026-10-03 取得）
 
-**狀態（2026-10-04）：agent 可做的部分完成**（PR #3，merge 880dfbf）。fresh verifier CONFIRMED：驗收 1–8 獨立重跑、verifier 自己做的六項突變（i–vi）都由斷言抓到（executor 另做九項，見研究紀錄）；自測前後使用者的輸入法清單與偏好不變；CI（core、shell）全綠。CodeRabbit 沒有行內意見，但摘要的安全架構區塊列了兩項 Medium：(1) 安裝腳本先刪再複製沒有退路——PR #4 改成暫存＋改名＋失敗還原，並在暫存 HOME 測試；(2) secure input 只在 deactivate 檢查——試做全面檢查後，本地審查指出全系統旗標會讓使用者的字悄悄消失，所以維持只在 deactivate 檢查，延到 S4 的 privacyGate 以實機證據決定。`release` environment 已照 syrtis 建好（只准 main 與 `v*`、需要使用者核准、3 個 variables）。**待使用者**：設定 3 個 secrets → 手動試跑 Release → 推 `v0.1.0` → 安裝實測（驗收 9–16）。
+**狀態（2026-10-04）：agent 可做的部分完成**（PR #3，merge 880dfbf）。fresh verifier CONFIRMED：驗收 1–8 獨立重跑、verifier 自己做的六項突變（i–vi）都由斷言抓到（executor 另做九項，見研究紀錄）；自測前後使用者的輸入法清單與偏好不變；CI（core、shell）全綠。CodeRabbit 沒有行內意見，但摘要的安全架構區塊列了兩項 Medium：(1) 安裝腳本先刪再複製沒有退路——PR #4 改成先複製到暫存、舊版移到垃圾桶、再改名就位，並以假 app 在暫存 HOME 測試；(2) secure input 只在 deactivate 檢查——試做全面檢查後，本地審查指出全系統旗標會讓使用者的字悄悄消失，所以維持只在 deactivate 檢查，延到 S4 的 privacyGate 以實機證據決定。`release` environment 已照 syrtis 建好（只准 main 與 `v*`、需要使用者核准、3 個 variables）。**待使用者**：設定 3 個 secrets → 手動試跑 Release → 推 `v0.1.0` → 安裝實測（驗收 9–16）。
 
 - InputMethodKit app `shanjie.app`（`com.nyanako.inputmethod.shanjie`），用 SwiftPM 建置、腳本組 app bundle；本機與 CI 一律 ad-hoc 簽章，正式版在 GitHub Actions 的 `release` environment 用 Developer ID 簽章並公證（見 s3b §2、§3）；結構參考小麥注音（MIT）。
 - 候選窗先試 `IMKCandidates`；外觀、組字區底線、深色模式依使用者截圖。
@@ -513,7 +513,7 @@ S3a 不需要外觀參考，可以先做；S3b 等使用者提供 macOS 內建�
 
 ### S4：使用者模型
 
-- **從 S3b 移來（2026-10-04）**：secure input 生效時，除了 deactivate 之外的非按鍵送出（commitComposition、換擁有者、切換排列）要不要丟棄組字。要先實機確認焦點移到密碼欄時組字會送到哪個 client，並權衡全系統旗標造成的悄悄丟字（CodeRabbit PR #3 的 Medium 之一）。
+- **從 S3b 移來（2026-10-04）**：secure input 生效時，非按鍵的送出（deactivate、commitComposition、換擁有者、切換排列）要不要丟棄組字。S3b 只在 deactivate 丟棄，但 `IsSecureEventInputEnabled()` 是全系統旗標：任何 App 開著 secure input 時，deactivate 這條也會悄悄丟字。要先實機確認焦點移到密碼欄時組字送到哪個 client，再決定每條路徑的做法（CodeRabbit PR #3 的 Medium 之一）。
 - **從 S3b 移來（2026-10-03）**：`privacyGate`（R3：`IsSecureEventInputEnabled()` 或 denylist 時停學習、停雲端、不讀左文；判斷不了就擋；選單顯示暫停狀態）、gate 單元測試、gate 轉為生效時 `reset`；左文讀取與 R4。
 
 - 左文由殼讀取、經 C ABI 傳入，R4（最後換行截斷、計數單位與上限、只活在記憶體、多行與 emoji 邊界測試）在這片實作。
