@@ -17,7 +17,7 @@ brew install --cask nanako0129/tap/shanjie
 "$HOME/Library/Input Methods/善解輸入法.app/Contents/MacOS/shanjie" install
 ```
 
-第二行註冊並啟用輸入方式。如果它說輸入方式清單還沒載入，登出再登入後再執行一次。
+第二行註冊並啟用輸入方式。第一次安裝通常要登出再登入，系統才會接受新的輸入法：第二行結束碼是 3 時，登出、再登入，然後再執行一次。
 
 **手動**
 

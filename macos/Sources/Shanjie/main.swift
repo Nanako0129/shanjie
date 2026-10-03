@@ -23,10 +23,11 @@ func inputModeID(_ source: TISInputSource) -> String? {
 }
 
 /// docs/contracts/s3b.md section 13.3. Register the bundle (always: a bundle ID TIS already knows
-/// may still carry the old two-mode list), enable the one input mode, then disable the two modes
-/// of earlier versions if TIS still lists them. Run only by scripts/install-ime.sh, on the
-/// installed copy. Exit 3 means the mode is not listed yet (install-ime.sh then asks for a log
-/// out and log in); 1 is any other failure.
+/// may still carry the old two-mode list), enable the input method and its one mode, check that
+/// the system now lists the input method as enabled, then disable the two modes of earlier
+/// versions if TIS still lists them. Run on the installed copy, by scripts/install-ime.sh or by
+/// the user after `brew install`. Exit 3 means the mode is not listed yet or the input method is
+/// not accepted yet (log out and log in, then run it again); 1 is any other failure.
 private func isEnabled(_ source: TISInputSource) -> Bool {
     guard let p = TISGetInputSourceProperty(source, kTISPropertyInputSourceIsEnabled) else { return false }
     return CFBooleanGetValue(Unmanaged<CFBoolean>.fromOpaque(p).takeUnretainedValue())
@@ -47,9 +48,23 @@ func install() -> Int32 {
         say(registered ? "install: the input mode is not listed yet" : "install: registration failed and the input mode is not listed")
         return registered ? 3 : 1
     }
-    guard TISEnableInputSource(mode) == noErr else {
+    // The input method itself (the source whose ID is the bundle ID) must be enabled too, or the
+    // mode is listed nowhere (measured 2026-10-04 with 0.1.0, which enabled only the mode).
+    let parent = sources.first { inputModeID($0) == nil }
+    guard parent.map({ TISEnableInputSource($0) == noErr }) ?? false,
+          TISEnableInputSource(mode) == noErr else {
         say("install: TISEnableInputSource failed")
         return 1
+    }
+    // Measured 2026-10-04: before the first log out after registration, both calls return noErr
+    // and this process's enabled list shows the mode, but not the input method itself, which
+    // stays disabled. Only the input method appearing in the enabled list counts.
+    let enabledNow = TISCreateInputSourceList(
+        [kTISPropertyBundleID as String: bundleID] as CFDictionary, false)?
+        .takeRetainedValue() as? [TISInputSource] ?? []
+    guard enabledNow.contains(where: { inputModeID($0) == nil }) else {
+        say("install: the system has not accepted the input method yet")
+        return 3
     }
     // Carry over an ETen-only setup from the two-mode versions, unless a layout was chosen already.
     let enabled = { (id: String) in sources.contains { inputModeID($0) == id && isEnabled($0) } }
