@@ -168,3 +168,31 @@ fn overlay_tie_sorts_base_first_then_file_order() {
     let a: Vec<&str> = l.by_reading[&v(&["a"])].iter().map(|(w, _)| w.as_str()).collect();
     assert_eq!(a, ["戊", "甲", "乙", "丁", "丙"]);
 }
+
+// L 的前置守門（plan-verifier 2026-10-03）：重構前先固定這三個行為，golden 碰不到它們。
+
+#[test]
+fn learner_word_score_takes_last_duplicate() {
+    // dict(by_reading[key])[word]：同讀音重複的詞取最後一筆（-3.0），不是第一筆（-2.0）
+    let l = lex("a 甲 -1.0\na 乙 -2.0\na 乙 -3.0\n");
+    let key = v(&["a"]);
+    let mut g = GlobalBoost::new(&l);
+    g.observe("<s>", &key, "乙");
+    assert!((g.bonus("x", &key, "乙") - 2.01).abs() < 1e-12);
+}
+
+#[test]
+fn overlay_duplicate_within_overlay_is_error() {
+    let e = Lexicon::parse_with("a 甲 -1.0\n", Some("a\t乙\t-2.0\twikt\na\t乙\t-3.0\tzhwiki\n")).err().unwrap();
+    assert_eq!(e, Error::OverlayDuplicate { word_len: 1 });
+}
+
+#[test]
+fn overlay_bad_rows_report_length_only() {
+    const MARK: &str = "ZQXMARKER";
+    for row in [format!("{MARK}\t{MARK}\n"), format!("a\t{MARK}\t{MARK}\ttag\n")] {
+        let e = Lexicon::parse_with("a 甲 -1.0\n", Some(&row)).err().unwrap();
+        assert_eq!(e, Error::BadOverlayRow { line_len: row.trim_end_matches('\n').chars().count() });
+        assert!(!format!("{e} {e:?}").contains(MARK));
+    }
+}
