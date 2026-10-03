@@ -162,12 +162,12 @@ v4 日期 2026-10-03。v1 經 `pilotfish:plan-verifier`（REVISE，4 項）與 `
   - **既有 109 句。** 指 `eval/dev/existing.txt`，讀音已確認過；不是 golden 用的 trap＋daily。
 - **契約。**
   - **基底不動。** `data/lexicon/mcbpmf-data.txt`（SHA-256 見 S0）原封不動。新詞放在疊加層 `data/lexicon/overlay-add.tsv`，欄位為 `讀音	詞	分數	來源標籤`。
-    - 核心在基底之後合併疊加層：同讀音同詞時取疊加層的分數。
+    - 疊加層只收基底沒有的（讀音, 詞）組合：`tools/build_overlay.py` 會濾掉和基底重複的組合。核心載入時如果還是遇到重複，就回報錯誤，不靜默覆蓋。所以疊加層只會新增，不會改動既有詞的分數。
     - `shanjie-eval --no-overlay` 只用基底，並沿用 S0 的搜尋參數，輸出必須和 `eval/golden/unigram.txt` 逐行相同。
     - **S1 不調整既有詞的分數**：同音詞排序交給 S2。
   - **新詞來源。** 只能來自授權可再散布、而且獨立於評測集的通用詞表。
     - **禁止從 `eval/` 的句子挑詞加入**：開發集的 OOV 詞只能用來量某個來源的涵蓋率，作為診斷。
-    - 疊加層必須能由「鎖定雜湊的來源檔＋轉換腳本 `tools/build_overlay.py`」完整重新產生，不得手動加列。
+    - 疊加層必須能由三樣東西完整重新產生，不得手動加列：鎖定雜湊的來源檔（放在 repo 的 `data/sources/`；依上一條，來源本來就必須可再散布）、`tools/reading_overrides.tsv`、轉換腳本 `tools/build_overlay.py`。
     - 來源清單、授權、來源檔 SHA-256 寫進 `LICENSES/data.md` 與契約；萌典（CC BY-ND）不得用於詞庫。
   - **新詞讀音（優先順序）。**
     1. 來源檔本身附的注音。
@@ -178,25 +178,30 @@ v4 日期 2026-10-03。v1 經 `pilotfish:plan-verifier`（REVISE，4 項）與 `
   - **新詞分數。** 預設 = 同字數基底詞分數的第 25 百分位，由 main 在步驟 1 算出，寫進契約。來源若附詞頻，改用契約寫明的換算公式；公式同樣在步驟 1 定好。
   - **搜尋參數。** 測 `BEAM ∈ {32, 64}`、`PER_KEY ∈ {12, 16, 24}` 對 oracle@16 與每鍵延遲的影響，選每鍵 p95 < 16 ms 裡 oracle 最高的組合。選定值寫進契約。
   - **評測 CLI。**
-    - 每個集合多印 `oracle@16`，以及 OOV 子集的 `sent_acc` 與 `oracle@16`。
+    - 只對 `dev`、`holdout` 另印一行 `## <集名>  extra  {'oracle@16': …, 'oov_n': …, 'oov_sent_acc': …, 'oov_oracle@16': …}`。既有的 `## … unigram {…}` 行格式不變；trap、daily、moedict 的輸出完全不變，因此 `--no-overlay` 的 golden 比對不受影響。
+    - `--limit N`：只對 `dev` 有效，取依檔名排序後的前 N 列。驗收用 `--set dev --limit 302`，n 必須是 302。
     - `--bench` 改量每鍵延遲（定義見上）。
-    - 開發集另印漏掉的列；保留集只印數字、不印句子。
-    - 有疊加層和 `--no-overlay` 兩種跑法都要印。
+    - 開發集另印 oracle@16 漏掉的列，附序號；保留集只印數字、不印句子。
+    - 有疊加層和 `--no-overlay` 兩種跑法都要印。`--no-overlay` 用 S0 的搜尋參數；S0 的常數保留給這條路徑用，掃描選定的值另外定義成新常數。
 - **步驟與擁有者。**
   1. main（唯讀）：調查候選來源，核對授權與開發集 OOV 詞的涵蓋率；選定來源，算出預設分數，補進契約。
-  2. `pilotfish:mech-executor`：完成 `tools/build_overlay.py`、`readings.py --no-moe`、`heterophony1.list` 副本，並產生疊加層。
-  3. `pilotfish:executor`：完成核心的疊加層載入、`--no-overlay`、CLI 指標與每鍵 bench、參數掃描。擁有 `core/src/lib.rs`、`core/src/eval.rs`、`cli/`。
+  2. `pilotfish:mech-executor`：完成 `tools/build_overlay.py`、`readings.py --no-moe`、`heterophony1.list` 副本，並產生疊加層的第一版和 CHECK 清單。
+  2b. main：確認 CHECK 列，寫進 `tools/reading_overrides.tsv`，再用 `build_overlay.py` 重新產生疊加層。
+  3. `pilotfish:executor`：完成核心的疊加層載入、`--no-overlay`、CLI 指標與每鍵 bench、參數掃描。擁有 `core/src/lib.rs`、`core/src/eval.rs`、`core/src/tests.rs`、`cli/`。
   4. fresh `pilotfish:verifier`：跑驗收，包含保留集。只執行 CLI，不開保留集內容。
 - **驗收。**
   1. `--no-overlay` 的 golden `diff` 為空。
-  2. 開發集前 302 列 oracle@16 ≥ 96.5%（S1 起點 94.7%，即最多漏 10 列）。
+  2. `--set dev --limit 302` 的 oracle@16 ≥ 96.5%（S1 起點 94.7%，即最多漏 10 列；n = 302）。
   3. OOV 子集 oracle@16：
      - 開發集 ≥ 90%（起點約 76%，以 `--no-overlay` 印出的值為準）。
-     - 保留集由 verifier 跑 `--set holdout` 兩次（有疊加層、`--no-overlay`），兩者至少差 15 個百分點。
+     - 保留集：verifier 跑 `--set holdout` 兩次，「有疊加層」減「`--no-overlay`」≥ 15 個百分點，並報 `oov_n`。這個差距同時包含疊加層和搜尋參數兩個效果，報告要揭露。
   4. `eval/dev/existing.txt` 的 unigram top-1 和 oracle@16 都不退步。
-  5. 每鍵解碼 p95 < 16 ms（release 版，開發集前 302 列）。
+  5. 每鍵解碼 p95 < 16 ms（release 版，`--set dev --limit 302 --bench`）。
   6. 可重現：verifier 用鎖定雜湊的來源檔和 `tools/build_overlay.py` 重新產生疊加層，和 commit 的檔案 `diff` 為空；來源檔 SHA-256 相符；每筆標籤都在 `LICENSES/data.md` 裡。這項檢查要真的能抓到東西：手動多加一列，就必須失敗。
-  7. `cargo test` 綠，疊加層合併規則有單元測試：同讀音同詞取疊加層分數、`--no-overlay` 不載入。
+  7. `cargo test` 綠；單元測試涵蓋三件事：
+     - 疊加層含和基底重複的（讀音, 詞）時，載入回報錯誤。
+     - `--no-overlay` 不載入疊加層。
+     - `build_overlay.py` 的輸出和基底交集為 0 列。
 - **範圍外。** 既有詞分數調整、n-gram 與詞性（S2）；重排模型；使用者詞庫（S4）；萌典衍生資料；C ABI（S3）。
 - **預算。** mech-executor 1 回合＋1 次修正；executor 1 回合＋1 次修正。
 - **停止。**
@@ -388,3 +393,16 @@ v4 日期 2026-10-03。v1 經 `pilotfish:plan-verifier`（REVISE，4 項）與 `
 | 4 | A1b 的負責片與路徑在 A1、S5、S6 三處不一致 | FIX：A1b 在端上量、由 S5 負責、v1 以端上為準；雲端的 A1b 另報 |
 | 5 | S3 與 S1 平行的前提沒有落點，`core` 的檔案所有權重疊 | FIX：前提改成 `docs/contracts/abi.md` 存在並經核准；S3 只新增 `ffi.rs`、`pub mod ffi;`、`shell/`；平行時用不同 worktree |
 | 非阻擋 | 每鍵延遲量法、302 列定義、「既有 109 句」指哪個檔、預設分數何時補進契約、`readings.py` 無條件載入萌典與 repo 外路徑、E／S0 標題、雲端硬逾時值 | 全部 FIX（S1「名詞」與契約、S6 驗收、標題） |
+
+### plan-verifier（v5 收尾審查：REVISE）
+
+前次五項：#1、#3、#4、#5 關閉；#2 只關了一半，見下表第 1 項。另外抓到兩項是修訂引起的。main 核對了 `core/src/eval.rs:70` 的 `repr` 固定鍵、`core/src/tests.rs:58,74` 寫死的常數、`cli/src/main.rs` 串接開發集的方式，證據都屬實。
+
+| # | 問題 | 處置 |
+|---|---|---|
+| 1 | 合併規則「同讀音同詞取疊加層分數」等於還有一條改既有詞分數的路 | FIX：疊加層只收基底沒有的組合；`build_overlay.py` 濾掉重複；核心遇到重複就回報錯誤；單元測試跟著改 |
+| 2 | 新指標加進 `repr` 會讓 `--no-overlay` 的 golden diff 不為空 | FIX：新指標只對 dev／holdout 另印一行 `extra`，既有行不變 |
+| 3 | 沒有機制只量「前 302 列」 | FIX：新增 `--limit N`（只對 dev），驗收寫明 `--set dev --limit 302`，n 必須是 302；漏掉的列附序號 |
+| 非阻擋 | 保留集差距的方向與 `oov_n`；參數和疊加層效果混在一起；`tests.rs` 的擁有者；CHECK 確認的步驟；`build_overlay.py` 要讀 `reading_overrides.tsv`；來源檔放在哪裡 | 全部 FIX |
+
+這一輪已經是第二次 REVISE，而且收尾審查也是 REVISE，依審查規則不再自動送審。修正由 main 依審查者給的最小修改做完，**未再經審查**，交使用者決定核准。
