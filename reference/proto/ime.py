@@ -156,6 +156,8 @@ def decode(lex, syls, learner=None, beam=BEAM):
 def segment_words(lex, text):
     """把正解句切成詞並帶讀音，用來在學習模擬裡找出「使用者改了哪個詞」。"""
     syls = lex.to_syllables(text)
+    if syls is None:   # 和核心的 segment_words 一樣：讀不出就回 None，不要在下面的回溯當掉
+        return None
     out, i = [], 0
     n = len(text)
     # 重用 to_syllables 的切法：再跑一次 DP 取詞界
