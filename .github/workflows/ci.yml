@@ -23,8 +23,6 @@ jobs:
     # A full run takes about 3 minutes; a hung FFI child process should not
     # hold the runner for the 6-hour default.
     timeout-minutes: 20
-    env:
-      LM_SHA256: 9879fd8b264b1c1f4c083ccedf84dc5625cd8d2595bd2d13150eed5a0520a923
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
 
@@ -39,14 +37,15 @@ jobs:
 
       # The bigram model is not in git (docs/PLAN.md S2c); it is the model-v1
       # release asset. Checking it here fails the run in seconds with a clear
-      # message instead of after the build.
+      # message instead of after the build. The hash has one source:
+      # data/bigram.sjlm.sha256 (also read by build-app.sh and release.yml).
       - name: Fetch the language model
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           gh release download model-v1 --repo "$GITHUB_REPOSITORY" -p bigram.sjlm -D data/lm
-          echo "$LM_SHA256  data/lm/bigram.sjlm" | shasum -a 256 -c -
+          shasum -a 256 -c data/bigram.sjlm.sha256
 
       - name: Tests (debug)
         run: cargo test --locked
@@ -82,3 +81,47 @@ jobs:
           diff "$T/py.txt" "$T/rs.txt"
           N=$(grep -vc '^#' eval/variants.tsv)
           diff <(head -n "$N" "$T/rs.txt") <(grep -v '^#' eval/variants.tsv | cut -f2)
+
+  # The Swift input method (docs/contracts/s3b.md section 3): build the ad-hoc
+  # app, the Swift tests through the real core and model, the bundled
+  # selftest, and acceptance checks 2, 3 and 6 of contract section 10.
+  shell:
+    runs-on: xcode-27
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+
+      # The same toolchain as the core job and release.yml: libcore.a is built
+      # by every job that links it.
+      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
+        with:
+          toolchain: 1.97.1
+
+      - name: Fetch the language model
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release download model-v1 --repo "$GITHUB_REPOSITORY" -p bigram.sjlm -D data/lm
+          shasum -a 256 -c data/bigram.sjlm.sha256
+
+      # The local entry points (Makefile, docs/verification.md). cargo test
+      # already ran in the core job, so only the Swift tests run here.
+      - name: Build the app (ad-hoc)
+        run: make bundle
+
+      # Includes the log-stream test (acceptance 5): it needs /usr/bin/log
+      # stream, which the runner's user can run.
+      - name: Swift tests
+        run: swift test --package-path macos
+
+      # The empty override builds with the shipping bundle ID: an ephemeral
+      # runner has no installation to collide with (see the Makefile).
+      - name: Bundled selftest (shipping bundle ID)
+        run: make selftest-bundled SELFTEST_BUNDLE_ID=
+
+      # Contract section 10, acceptance 2, 3 and 6, on build/shanjie.app.
+      - name: Acceptance checks 2, 3 and 6
+        run: scripts/check-app.sh

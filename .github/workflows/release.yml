@@ -1,0 +1,265 @@
+name: Release
+
+# docs/contracts/s3b.md section 3, modeled on syrtis's release.yml.
+#   push of a v* tag   gate, build, sign + notarize + verify, publish
+#   workflow_dispatch  dry run on main: gate, build, sign + notarize + verify; publishes nothing
+#                      (the signed zip stays a one-day artifact)
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+# Every job states its own permissions; nothing is granted by default.
+permissions: {}
+
+# Signing material lives only in the `release` Environment, never in repository secrets:
+#   secrets    DEVELOPER_ID_P12_BASE64, DEVELOPER_ID_P12_PASSWORD, NOTARY_KEY_P8
+#   variables  NOTARY_KEY_ID, NOTARY_ISSUER_ID, APPLE_TEAM_ID
+# Only `sign` enters it. `build` runs the Rust and Swift toolchains, so it holds no secret.
+# The login keychain of any machine is never involved.
+
+jobs:
+  # CI does not run on tags: the tagged (or dispatched) commit's own ci.yml run on main must be
+  # green. A mistake guard, not a security boundary (see the script).
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Require a release ref
+        run: |
+          case "$GITHUB_EVENT_NAME:$GITHUB_REF" in
+            push:refs/tags/v*|workflow_dispatch:refs/heads/main) ;;
+            *) echo "error: release refused for $GITHUB_EVENT_NAME on $GITHUB_REF" >&2; exit 1 ;;
+          esac
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts
+      - name: Require green CI for this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: scripts/check-ci-gate.sh "$GITHUB_SHA"
+
+  # Ad-hoc build, exactly as CI builds it. No Environment, read-only token.
+  build:
+    needs: gate
+    runs-on: xcode-27
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+
+      # The same toolchain as ci.yml (core and shell jobs).
+      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
+        with:
+          toolchain: 1.97.1
+
+      # Before build-app.sh, against the one tracked hash (data/bigram.sjlm.sha256, as ci.yml).
+      - name: Fetch the language model
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release download model-v1 --repo "$GITHUB_REPOSITORY" -p bigram.sjlm -D data/lm
+          shasum -a 256 -c data/bigram.sjlm.sha256
+
+      - name: Version
+        id: version
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_EVENT_NAME" = push ]; then VERSION="${GITHUB_REF_NAME#v}"; else VERSION=0.0.0; fi
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "error: tag $GITHUB_REF_NAME is not vMAJOR.MINOR.PATCH" >&2; exit 1; }
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Build the app (ad-hoc)
+        env:
+          SHANJIE_VERSION: ${{ steps.version.outputs.version }}
+        run: scripts/build-app.sh
+
+      # A tar keeps the bundle's modes and symlinks; upload-artifact does not.
+      - name: Archive the unsigned app
+        run: tar -cf unsigned.tar -C build shanjie.app
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: unsigned
+          path: unsigned.tar
+          if-no-files-found: error
+          retention-days: 1
+
+  # Developer ID signing, notarization, stapling and verification. Runs no repository code: no
+  # checkout at all, only Apple's tools on the artifact, which is unpacked into RUNNER_TEMP.
+  sign:
+    needs: build
+    runs-on: xcode-27
+    timeout-minutes: 90
+    environment: release
+    permissions:
+      contents: read
+    env:
+      VERSION: ${{ needs.build.outputs.version }}
+      # The team every release must be signed by (docs/contracts/s3b.md section 3).
+      EXPECTED_TEAM: 2LJ882GPY8
+    steps:
+      # Backstop for the Environment's deployment policy.
+      - name: Require a release ref
+        run: |
+          case "$GITHUB_EVENT_NAME:$GITHUB_REF" in
+            push:refs/tags/v*|workflow_dispatch:refs/heads/main) ;;
+            *) echo "error: signing refused for $GITHUB_EVENT_NAME on $GITHUB_REF" >&2; exit 1 ;;
+          esac
+
+      # An empty secret must stop the release, never yield an ad-hoc build. Values are never printed.
+      - name: Require the signing material
+        env:
+          DEVELOPER_ID_P12_BASE64: ${{ secrets.DEVELOPER_ID_P12_BASE64 }}
+          DEVELOPER_ID_P12_PASSWORD: ${{ secrets.DEVELOPER_ID_P12_PASSWORD }}
+          NOTARY_KEY_P8: ${{ secrets.NOTARY_KEY_P8 }}
+          NOTARY_KEY_ID: ${{ vars.NOTARY_KEY_ID }}
+          NOTARY_ISSUER_ID: ${{ vars.NOTARY_ISSUER_ID }}
+          APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+        run: |
+          missing=0
+          for name in DEVELOPER_ID_P12_BASE64 DEVELOPER_ID_P12_PASSWORD NOTARY_KEY_P8 NOTARY_KEY_ID NOTARY_ISSUER_ID APPLE_TEAM_ID; do
+            if [ -z "${!name}" ]; then echo "error: $name is empty in the release Environment" >&2; missing=1; fi
+          done
+          if [ "$APPLE_TEAM_ID" != "$EXPECTED_TEAM" ]; then echo "error: APPLE_TEAM_ID is not $EXPECTED_TEAM" >&2; missing=1; fi
+          exit "$missing"
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: unsigned
+          path: ${{ runner.temp }}/unsigned
+
+      # No `set -x` anywhere in this step: it would print the passwords.
+      - name: Sign, notarize, staple and verify
+        env:
+          DEVELOPER_ID_P12_BASE64: ${{ secrets.DEVELOPER_ID_P12_BASE64 }}
+          DEVELOPER_ID_P12_PASSWORD: ${{ secrets.DEVELOPER_ID_P12_PASSWORD }}
+          NOTARY_KEY_P8: ${{ secrets.NOTARY_KEY_P8 }}
+          NOTARY_KEY_ID: ${{ vars.NOTARY_KEY_ID }}
+          NOTARY_ISSUER_ID: ${{ vars.NOTARY_ISSUER_ID }}
+          APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          umask 077
+          fail() { echo "error: $*" >&2; exit 1; }
+          T="$RUNNER_TEMP"
+          KC="$T/signing.keychain-db"
+          P12="$T/developer-id.p12"
+          P8="$T/notary.p8"
+          trap 'rm -f "$P12" "$P8"' EXIT
+          printf '%s' "$DEVELOPER_ID_P12_BASE64" | base64 -D > "$P12"
+          printf '%s' "$NOTARY_KEY_P8" > "$P8"
+
+          # Throwaway keychain with a random password; deleted by the always() step below.
+          # -x imports the private key as non-extractable.
+          KC_PW=$(openssl rand -base64 32)
+          security create-keychain -p "$KC_PW" "$KC"
+          security set-keychain-settings -lut 3600 "$KC"
+          security unlock-keychain -p "$KC_PW" "$KC"
+          security import "$P12" -k "$KC" -P "$DEVELOPER_ID_P12_PASSWORD" -T /usr/bin/codesign -x
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KC_PW" "$KC" > /dev/null
+          # shellcheck disable=SC2046
+          security list-keychains -d user -s "$KC" $(security list-keychains -d user | xargs)
+          rm -f "$P12"
+
+          # By SHA-1, and only a Developer ID Application identity of the expected team.
+          IDENTITY=$(security find-identity -v -p codesigning "$KC" \
+            | awk -v team="($EXPECTED_TEAM)" 'index($0, "Developer ID Application:") && index($0, team) { print $2; exit }')
+          [ -n "$IDENTITY" ] || fail "no Developer ID Application identity for team $EXPECTED_TEAM"
+
+          mkdir -p "$T/work" "$T/out" "$T/check"
+          tar -xf "$T/unsigned/unsigned.tar" -C "$T/work"
+          APP="$T/work/shanjie.app"
+          # Hardened runtime, secure timestamp, and no --entitlements.
+          codesign --force --options runtime --timestamp --sign "$IDENTITY" --keychain "$KC" "$APP"
+          codesign --verify --strict --deep "$APP"
+
+          # notarytool can exit 0 on a rejected submission: the verdict is read from its JSON.
+          ditto -c -k --keepParent "$APP" "$T/submit.zip"
+          RC=0
+          xcrun notarytool submit "$T/submit.zip" --key "$P8" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER_ID" \
+            --wait --timeout 60m --output-format json > "$T/notary.json" || RC=$?
+          field() { python3 -c 'import json,sys
+          try: print(json.load(open(sys.argv[1])).get(sys.argv[2], ""))
+          except Exception: print("")' "$T/notary.json" "$1"; }
+          STATUS=$(field status)
+          ID=$(field id)
+          echo "notarization $ID: $STATUS"
+          if [ "$STATUS" != Accepted ] || [ "$RC" -ne 0 ]; then
+            [ -n "$ID" ] && xcrun notarytool log "$ID" --key "$P8" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER_ID" || true
+            fail "notarization failed (exit $RC)"
+          fi
+          xcrun stapler staple "$APP"
+
+          ZIP="shanjie-$VERSION.zip"
+          ditto -c -k --keepParent "$APP" "$T/out/$ZIP"
+          (cd "$T/out" && shasum -a 256 "$ZIP" > "$ZIP.sha256")
+
+          # Verify what ships: the app as extracted from the final zip.
+          ditto -x -k "$T/out/$ZIP" "$T/check"
+          V="$T/check/shanjie.app"
+          codesign --verify --strict --deep "$V" || fail "codesign --verify --strict --deep"
+          INFO=$(codesign -dv --verbose=2 "$V" 2>&1)
+          grep -q '^Authority=Developer ID Application: ' <<<"$INFO" || fail "not signed with Developer ID Application"
+          grep -qx "TeamIdentifier=$EXPECTED_TEAM" <<<"$INFO" || fail "team identifier is not $EXPECTED_TEAM"
+          grep -Eq 'flags=0x[0-9a-f]+\([^)]*runtime' <<<"$INFO" || fail "hardened runtime flag missing"
+          ENT=$(codesign -d --entitlements - "$V" 2>/dev/null || true)
+          [ -z "$ENT" ] || fail "the app carries entitlements"
+          xcrun stapler validate "$V" > /dev/null || fail "no stapled notarization ticket"
+          # Captured first: `spctl | grep -q` under pipefail can fail on SIGPIPE.
+          GK=$(spctl -a -t exec -vv "$V" 2>&1 || true)
+          grep -qx 'source=Notarized Developer ID' <<<"$GK" || fail "Gatekeeper does not report Notarized Developer ID: $GK"
+          echo "verified $ZIP"
+
+      - name: Remove the signing keychain
+        if: always()
+        run: security delete-keychain "$RUNNER_TEMP/signing.keychain-db" 2>/dev/null || true
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: signed
+          path: ${{ runner.temp }}/out
+          if-no-files-found: error
+          retention-days: 1
+
+  # The only job that writes: the GitHub release. Tags only; a dry run never gets here.
+  publish:
+    needs: [build, sign]
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.build.outputs.version }}
+    steps:
+      - name: Require a release tag
+        run: |
+          case "$GITHUB_EVENT_NAME:$GITHUB_REF" in
+            push:refs/tags/v*) ;;
+            *) echo "error: publishing refused for $GITHUB_EVENT_NAME on $GITHUB_REF" >&2; exit 1 ;;
+          esac
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: signed
+          path: ${{ runner.temp }}/signed
+
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        working-directory: ${{ runner.temp }}/signed
+        run: |
+          set -euo pipefail
+          shasum -a 256 -c "shanjie-$VERSION.zip.sha256"
+          gh release create "$GITHUB_REF_NAME" "shanjie-$VERSION.zip" "shanjie-$VERSION.zip.sha256" \
+            --repo "$GITHUB_REPOSITORY" --title "善解 $VERSION" --generate-notes
