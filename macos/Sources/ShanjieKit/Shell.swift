@@ -27,16 +27,9 @@ public protocol CandidatePanel: AnyObject {
 /// The keyboard layout. Since docs/contracts/s3b.md section 13.2 it is chosen in the input
 /// method's menu and kept in a `LayoutStore` under its raw value; Info.plist has a single input
 /// mode, `<bundle ID>.zhuyin`, which maps to no layout.
-public enum InputMode: String, Sendable, CaseIterable {
+public enum InputMode: String, Sendable {
     case standard
     case eten
-
-    /// The layout for an ID IMK passes to `setValue`, by its last component. The one mode ID,
-    /// `<bundle ID>.zhuyin`, gives nil, so IMK's `setValue` never changes the layout (section 13.3).
-    public init?(modeID: String) {
-        guard let last = modeID.split(separator: ".").last else { return nil }
-        self.init(rawValue: String(last))
-    }
 
     var layout: UInt32 { self == .standard ? 0 : 1 }
 }
@@ -232,12 +225,6 @@ public final class Session {
     public func candidateSelected(_ text: String) {
         guard shell.owner === self, let i = shell.candidates.firstIndex(of: text), i < 9 else { return }
         _ = send(ShanjieKey(kind: KeyMap.char, ch: UInt32(UInt8(ascii: "1")) + UInt32(i), modifiers: 0))
-    }
-
-    /// IMK's `setValue` with an input mode ID; the one mode ID maps to no layout (section 13.3).
-    public func setInputMode(_ id: String) {
-        guard let m = InputMode(modeID: id) else { return }
-        shell.switchMode(to: m)
     }
 
     /// The input method menu (section 13.2).
