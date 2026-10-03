@@ -46,7 +46,7 @@ fn lenient_dump_uses_the_variant_table() {
     assert_ne!(lines[2], lines[3], "散佈 has no dictionary entry, so it is not a listed variant");
 }
 
-const LM_MISSING: &str = "data/lm/bigram.sjlm is missing: build it with `python3 tools/build_lm.py` (counts in ~/.cache/shanjie/work/s2, see docs/PLAN.md S2c)";
+const LM_MISSING: &str = "data/lm/bigram.sjlm is missing: download it with `gh release download model-v1 -p bigram.sjlm -D data/lm` (or rebuild with tools/build_lm.py; see docs/PLAN.md S2c)";
 
 fn lm_path() -> String {
     let p = format!("{}/../data/lm/bigram.sjlm", env!("CARGO_MANIFEST_DIR"));
