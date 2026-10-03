@@ -20,13 +20,18 @@ SRC="$(cd "$SRC" && pwd -P)"
 [ "$SRC" != "$(cd "$HOME/Library/Input Methods/shanjie.app" 2>/dev/null && pwd -P)" ] \
   || fail "give the downloaded or built app, not the installed copy"
 
-# 1. Remove the old bundle. The only path rm -rf ever touches, written out literally.
-rm -rf "$HOME/Library/Input Methods/shanjie.app"
-
-# 2. Copy the new bundle (the destination was just removed, so nothing is overwritten).
+# 1. Stage the new bundle next to the destination first (same volume, so step 2 is a rename). If
+#    the copy fails, the installed bundle is untouched. The staging name is not *.app, so the
+#    input method system never sees it. These two literal paths are the only ones rm -rf touches.
 mkdir -p "$HOME/Library/Input Methods"
+rm -rf "$HOME/Library/Input Methods/.shanjie-staging"
+trap 'rm -rf "$HOME/Library/Input Methods/.shanjie-staging"' EXIT
+ditto "$SRC" "$HOME/Library/Input Methods/.shanjie-staging"
+
+# 2. Replace: remove the old bundle, then rename the staged copy into place.
+rm -rf "$HOME/Library/Input Methods/shanjie.app"
 [ ! -e "$HOME/Library/Input Methods/shanjie.app" ] || fail "the old bundle could not be removed"
-ditto "$SRC" "$HOME/Library/Input Methods/shanjie.app"
+mv "$HOME/Library/Input Methods/.shanjie-staging" "$HOME/Library/Input Methods/shanjie.app"
 
 # 3. Stop the running old copy, matched by its full path; none running is fine.
 rc=0
