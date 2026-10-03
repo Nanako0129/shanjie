@@ -558,7 +558,7 @@ S3a 不需要外觀參考，可以先做；S3b 等使用者提供 macOS 內建�
 
 ### S8：打包與釋出
 
-- Developer ID 簽章＋公證、hardened runtime、Release 附件與授權檔已在 S3b 的 `release.yml` 完成（2026-10-03）；S8 剩 README、對外說明、Homebrew cask 與更新檢查。外部動作每一步都要使用者當次同意。
+- Developer ID 簽章＋公證、hardened runtime、Release 附件與授權檔已在 S3b 的 `release.yml` 完成（2026-10-03）；S8 剩 README、對外說明與更新檢查；Homebrew cask 移到 S3b 契約 §14（使用者 2026-10-04）。外部動作每一步都要使用者當次同意。
 
 ## 3. 風險
 
@@ -768,3 +768,28 @@ plan-verifier 第一次：REVISE（6 項阻擋）。security-reviewer：無 P0�
 | security P3 | `try!` 與錯誤型別、非 0 回傳碼殘留組字、`nil` 事件、候選陣列清除、滑鼠選候選、secure input 的預期、自測參數與 UserDefaults、`build/` 未忽略 | FIX：全部寫進 s3b；`build/` 已在 PR #1 加入 `.gitignore` |
 | plan-verifier 2 | PLAN 仍寫 Apple Development 簽章；PR #1 沒列為前提；擁有者只記 ObjectIdentifier、deactivate 不檢查擁有者；日誌擷取沒證明已接上；release 的 build 沒下載模型 | FIX：PLAN 改寫簽章；加前提與停止條件；擁有者改弱參照、deactivate／commit 先檢查、deinit 丟棄，加兩個測試；起始＋結束標記與逾時；release build 先下載並比對模型 |
 | 本地 /code-review（PR #2，CodeRabbit 限流） | 15 項：非 0 回傳碼沒 reset 核心；Release 沒附授權檔；deinit 時 weak 已是 nil；換擁有者沒重設設定；非擁有者的 deactivate 清掉共用候選；§9→§10 的編號；gate 照抄 syrtis 會等不存在的 workflow；log 過濾太窄；shell／release job 沒固定 Rust；模型雜湊三處；切換排列要重建引擎；使用者的 log 檢查看不到 debug；延後項目沒寫回 S4／S8／R9；secure input 判斷沒有注入點；Caps Lock 行為與 bundle ID 未實測 | 14 項 FIX（寫進 s3b 與 PLAN；模型雜湊改成單一檔 `data/bigram.sjlm.sha256`）；切換排列的延遲 DEFER 到 S3b-2（核心加 `set_layout`），記為已知限制 |
+
+### S3b §14（Homebrew cask）契約審查（2026-10-04）
+
+plan-verifier 第一次：REVISE（1 項 P1、3 項 P2）。修正後第二次：REVISE（缺安全審查）。security-reviewer：無 P0／P1，2 項 P2、2 項 P3、9 項 P4。
+
+| 來源 | 問題 | 處置 |
+|---|---|---|
+| plan-verifier 1 P1 | `postflight_steps` 在 Homebrew 沙盒裡執行（HOME 是暫存資料夾、禁讀家目錄、`~` 不展開），`shanjie install` 永遠不會跑，`must_succeed: false` 又讓它靜靜失敗 | FIX：拿掉 postflight，caveats 請使用者自己執行 `install`（和其他 `input_method` cask 一樣），s3b §14.1 |
+| plan-verifier 1 P2 | `gh release create` 不能重跑，cask 更新失敗後無法補救 | FIX：release 已存在且 `.sha256` 相符就略過建立，不符就失敗，§14.3 |
+| plan-verifier 1 P2 | 用 `ls-remote` 驗金鑰時可能用到使用者自己的金鑰 | FIX：`IdentitiesOnly`、`IdentityAgent=none`、`-F /dev/null`，再加 clone 與 `push --dry-run` 驗寫入，§14.4 |
+| plan-verifier 1 P2 | 沒有回滾與停止條件 | FIX：§14.7 |
+| plan-verifier 2 | 沒有安全審查 | FIX：已審，本表 |
+| security P2-1 | release environment 的 `v*` 若是分支類型，推 tag 會被擋 | 已查（2026-10-04 `gh api …/deployment-branch-policies`）：`main` 是 branch、`v*` 是 tag，不用改 |
+| security P2-2 | 共用 tap 的寫入 deploy key 外洩，可以改掉所有 cask（syrtis、limpet 的使用者也受影響）；deploy key 不能限制路徑，public repo 也不能用路徑規則 | ACCEPT，靠既有控制：environment 要 Nanako0129 核准、金鑰只在 `publish` 期間進 runner、每個專案一把（可單獨撤銷）。tap 已有 ruleset `protect-main`（禁刪除、禁 non-fast-forward、無 bypass，2026-10-04 查過），惡意 commit 一定留在歷史裡、可 revert |
+| security P3-1 | 私鑰不可跨回合留在 session 的暫存區（其他 agent 讀得到） | FIX：產生、上傳、驗證、刪除在同一個 Bash 呼叫裡，`mktemp -d`＋`trap`；secret 從 stdin 讀入，不放 argv，§14.4 |
+| security P3-2 | 不要照抄 syrtis 在 `sign` 也檢查 tap key（會把 deploy key 帶進持有 p12／p8 的 runner） | FIX：只在 `publish` 檢查，§14.3 寫明 |
+| security P4-3 | Bump 步驟裡，子行程（render、git、ssh）都繼承金鑰環境變數 | FIX：`render-cask.sh` 移到前一個不帶 secret 的步驟，Bump 只跑 git 與 ssh |
+| security P4-5 | 注入：VERSION 與 SHA256 的字元集安全，但實作要守住 | FIX：`run:` 裡不用 `${{ }}` 內插 needs／steps 的輸出；sha 只取 `.sha256` 第一欄；`git push` 不加 `--force` |
+| security P4-7 | 重跑時只比 `.sha256`，zip 附件不見也會略過 | FIX：同時確認 zip 附件存在 |
+| security P4-8 | `release.yml` 開頭仍寫「只有 sign 進 environment」；草稿版本號不是佔位值 | FIX：開頭改寫；範本用 `0.0.0` |
+| security P4-4 | `accept-new` 加上空的 known_hosts，等於第一次連線就信任 | ACCEPT：公鑰認證的簽章綁在 session 上，假伺服器拿不到私鑰 |
+| security P4-1、P4-2、P4-6、P4-9 | environment secrets 只有被引用才進 runner；釘了 SHA 的兩個 action；cask 的 signal、zap、caveats；和 syrtis 同時推送 | ACCEPT（理由見審查；第一項的實作驗證：`publish` 只引用 `HOMEBREW_TAP_DEPLOY_KEY`） |
+| plan-verifier 3（收尾） | Homebrew 用 `/usr/bin/unzip` 解壓，中文的 bundle 名稱可能變亂碼，到使用者安裝時才會發現 | 實測（2026-10-04）：`ditto -c -k --keepParent` 打包的假 `善解輸入法.app`，用 `/usr/bin/unzip` 解開後名稱逐位元組相同。另外在驗收 4 加上對正式附件的解壓檢查（§14.1、§14.5） |
+| plan-verifier 3 P3 | 重跑的其他情況、artifact 保留一天、幾個沒量過卻寫成事實的說法、Bump 步驟的編號 | FIX：其他情況一律失敗；超過一天改手動 commit；標為未驗證；改正編號。CI runner 有沒有 `brew` 由 CI 本身回答 |
+

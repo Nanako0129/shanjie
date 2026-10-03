@@ -129,3 +129,17 @@ jobs:
       # Contract section 10, acceptance 2, 3 and 6, on build/善解輸入法.app.
       - name: Acceptance checks 2, 3 and 6
         run: scripts/check-app.sh
+
+      # Contract section 14.5, acceptance 1 and 2: render-cask.sh's checks, then brew style on a
+      # rendered cask (brew applies the cask rules only under a Casks/ directory).
+      - name: Homebrew cask
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+          HOMEBREW_NO_ANALYTICS: "1"
+        run: |
+          set -euo pipefail
+          scripts/test-render-cask.sh
+          mkdir -p "$RUNNER_TEMP/cask/Casks"
+          scripts/render-cask.sh 0.0.0 "$(printf '0%.0s' $(seq 64))" > "$RUNNER_TEMP/cask/Casks/shanjie.rb"
+          cd "$RUNNER_TEMP/cask"
+          brew style Casks/shanjie.rb
