@@ -21,6 +21,7 @@ MODE=com.nyanako.inputmethod.shanjie.zhuyin
 plutil -lint "$PLIST" >/dev/null || fail "Info.plist does not lint"
 [ "$(pb CFBundleDevelopmentRegion)" = en ] || fail "CFBundleDevelopmentRegion"
 [ "$(pb CFBundleName)" = Shanjie ] || fail "CFBundleName"
+[ "$(pb CFBundleDisplayName)" = 善解輸入法 ] || fail "CFBundleDisplayName must equal the folder name"
 [ "$(pb LSHasLocalizedDisplayName)" = true ] || fail "LSHasLocalizedDisplayName"
 [ "$(pb CFBundleIdentifier)" = com.nyanako.inputmethod.shanjie ] || fail "bundle ID"
 [ "$(pb InputMethodConnectionName)" = com.nyanako.inputmethod.shanjie_Connection ] || fail "InputMethodConnectionName"

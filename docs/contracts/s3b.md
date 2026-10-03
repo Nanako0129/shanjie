@@ -61,8 +61,8 @@
 
 - `scripts/install-ime.sh <善解輸入法.app 的路徑>`（通常是解壓後的 Release 附件；也接受 `build/善解輸入法.app` 自己建的 ad-hoc 版）：
   - `#!/bin/bash`、`set -euo pipefail`；`$HOME` 為空就中止；不用 sudo（R9）。
-  - 目的地固定為字面路徑 `"$HOME/Library/Input Methods/善解輸入法.app"`。腳本只刪除或搬移 `~/Library/Input Methods` 裡的三個位置：這個目的地、這次執行用 `mktemp` 建的暫存資料夾、保留上一版的 `.shanjie-previous`。輔助資料夾的名稱不是 `.app`（暫存資料夾在複製期間裡面有一個 `善解輸入法.app`）。不要同時執行兩次安裝（未加鎖）；被直接砍掉的執行可能留下 `.shanjie-staging-*`，不會自動清（同時執行的另一份看起來一樣），要手動刪。**HOME 不是這個帳號真正的家目錄時，除非設了 `SHANJIE_INSTALL_FILES_ONLY=1`，腳本一開始就拒絕執行**；files-only 模式完全不呼叫 lsregister、pkill 或註冊。
-  - 順序：`ditto` 到暫存資料夾（複製失敗時什麼都不放上去）→ 刪掉更早保留的 `.shanjie-previous`（先 `chmod -R u+w`）→ 舊版 `lsregister -u` 後改名為 `.shanjie-previous` → 新版改名就位 → 新版 `lsregister -f`（`shanjie install` 在覆蓋安裝時會略過 TIS 註冊）→ 以完整路徑（HOME 解析成實際路徑、正規表示式字元跳脫、錨定）結束舊行程並等它退出，5 秒後仍在就警告 → 執行**已安裝那一份**的 `install`；註冊失敗時印出換回上一版的指令（順序：刪新版 → 搬回上一版 → `lsregister -f` → 結束行程 → `install`）。兩次改名之間被中斷時，`trap` 把新版放上去並提示重跑（這條路徑沒有自動測試；2026-10-04 的審查 agent 在沙盒中以 SIGINT／SIGTERM／SIGHUP 手動驗證過還原）。LaunchServices 的登記行為沒有在真實系統量過。設計演變（2026-10-04）：改名＋失敗還原的版本每修一輪就多一種邊界情況；移到 `~/.Trash` 可能被隱私保護擋下、垃圾桶裡的舊版可能仍登記在 LaunchServices（小麥注音用的是 `NSWorkspace.recycle`，不是 `mv`），所以改成在同一個資料夾保留一份不是 `.app` 的上一版。`scripts/test-install-ime.sh` 用執行檔只會 `exit 1` 的假 app、在暫存 HOME 裡驗證：沒開 files-only 時拒絕執行、全新安裝時複製失敗（什麼都沒放上去）、全新安裝、覆蓋安裝（上一版被保留）、從已安裝那份重裝、覆蓋時複製失敗，CI 也跑。在真實系統上的行為由使用者驗收 10 確認。已知限制：同一版重裝一次會讓 `.shanjie-previous` 也變成這一版。
+  - 目的地固定為字面路徑 `"$HOME/Library/Input Methods/善解輸入法.app"`。腳本只刪除或搬移 `~/Library/Input Methods` 裡的四個位置（§13.3）：這個目的地、舊名稱 `shanjie.app`、這次執行用 `mktemp` 建的暫存資料夾、保留上一版的 `.shanjie-previous`。輔助資料夾的名稱不是 `.app`（暫存資料夾在複製期間裡面有一個 `善解輸入法.app`）。不要同時執行兩次安裝（未加鎖）；被直接砍掉的執行可能留下 `.shanjie-staging-*`，不會自動清（同時執行的另一份看起來一樣），要手動刪。**HOME 不是這個帳號真正的家目錄時，除非設了 `SHANJIE_INSTALL_FILES_ONLY=1`，腳本一開始就拒絕執行**；files-only 模式完全不呼叫 lsregister、pkill 或註冊。
+  - 順序（修訂 13 與 PR #5 審查後）：`ditto` 到暫存資料夾（複製失敗時什麼都不放上去）→ 刪掉更早保留的 `.shanjie-previous`（先 `chmod -R u+w`）→ 舊版（`善解輸入法.app`，沒有時是舊名稱 `shanjie.app`）**先改名**為 `.shanjie-previous`、成功後才 `lsregister -u`（改名失敗時舊版仍維持登記）→ 新版改名就位 → 新舊名稱並存時刪除舊名稱那份（失敗只警告）→ 新版 `lsregister -f` → 結束舊行程並等它退出 → 執行已安裝那一份的 `install`（一律重新註冊，見 §13.3）。`trap` 只在舊版**確實已改名移開**之後、新版就位之前被中斷時，才把新版放上去，並印出只重跑 `lsregister -f` 與 `install` 的指令（不要重跑整個腳本）。其餘描述（HOME 檢查、files-only、測試、未實測項目）見 §13.3 與 §11。
   - 最後印出下一步：到「系統設定 → 鍵盤 → 輸入方式」確認「善解」已出現；沒出現就登出再登入。
 - **agent 不得對真實的 HOME 執行 `install-ime.sh`、執行 `shanjie install`、或啟動 app**；agent 與 CI 只能透過 `scripts/test-install-ime.sh`（暫存 HOME、假 app、`SHANJIE_INSTALL_FILES_ONLY=1`）執行它。真正的安裝只由使用者執行。
 
@@ -145,7 +145,7 @@
 
 **使用者實測（安裝後，由使用者執行並回報）：**
 9. 使用者在 `release` environment 設好簽章材料，先以 `workflow_dispatch` 試跑簽章與公證，全綠後推 `v0.1.0` tag；release 工作全綠，Release 頁面有 `shanjie-0.1.0.zip`。
-10. 下載、解壓，執行 `scripts/install-ime.sh <解壓後的 善解輸入法.app>`：「善解（標準）」「善解（倚天）」出現在輸入方式中；再執行一次（覆蓋安裝）仍正常，上一版保留為 `.shanjie-previous`，`~/Library/Input Methods/` 裡沒有 `.shanjie-staging-*` 殘留，執行中的 shanjie 行程載入的是新的那一份：`lsof -p $(pgrep -f 'Input Methods/善解輸入法.app/Contents/MacOS/shanjie') -d txt | grep MacOS/shanjie` 顯示的路徑在 `善解輸入法.app` 而不是 `.shanjie-previous`，且行程啟動時間（`ps -o lstart= -p <PID>`）晚於安裝時間。（`pgrep -fl` 只看命令列，bundle 被改名後舊行程仍顯示原路徑，分辨不出新舊。）
+10. 下載、解壓（用 Finder），執行 `scripts/install-ime.sh <解壓後的 善解輸入法.app>`：輸入方式清單（必要時登出再登入後）只有一個「善解輸入法」可加入；再執行一次（覆蓋安裝）仍正常，上一版保留為 `.shanjie-previous`，`~/Library/Input Methods/` 裡沒有 `.shanjie-staging-*` 殘留；執行中的行程載入的是新的那一份（見 §13.4 第 5 項的 `lsof` 檢查）。
 11. 在 TextEdit、備忘錄、Safari 各打陷阱集前 10 句（main 會提供按鍵清單）：組字有底線、候選窗出現在下方、數字選字、Enter 送出。
 12. 對照截圖 1：候選條的形狀、號碼、選取色、深淺色模式；不像的地方記下來，進 S3b-2。
 13. 組字中按 Caps Lock 切到英文：記錄組字是被送出、丟棄還是殘留（§6 的推論在此實測）；再切回；倚天模式打幾句。
@@ -201,7 +201,7 @@
 
 ### 13.1 名稱
 
-- bundle 資料夾改名為 `善解輸入法.app`。顯示名稱：`zh-Hant.lproj` 為「善解輸入法」，`en.lproj` 與 Info.plist 預設為「Shanjie」，`LSHasLocalizedDisplayName` 保留，`CFBundleDevelopmentRegion` 改為 `en`（其他語言的系統退回英文名；§11 原本說非中文系統也顯示中文名，改為顯示 Shanjie）。
+- bundle 資料夾改名為 `善解輸入法.app`。顯示名稱：`zh-Hant.lproj` 為「善解輸入法」，`en.lproj` 為「Shanjie」；Info.plist 的基礎 `CFBundleDisplayName` 必須等於資料夾名稱「善解輸入法」（Finder 只在兩者一致時套用在地化名稱；未實測），`CFBundleName` 為 Shanjie，`LSHasLocalizedDisplayName` 保留，`CFBundleDevelopmentRegion` 改為 `en`（其他語言的系統退回英文名；§11 原本說非中文系統也顯示中文名，改為顯示 Shanjie）。
 - **不變**：bundle ID `com.nyanako.inputmethod.shanjie`、執行檔 `Contents/MacOS/shanjie`、Release 附件 `shanjie-<版本>.zip`（解壓後是 `善解輸入法.app`；中文檔名的 zip 用 Finder／`ditto` 解壓，`unzip` 指令可能亂碼）。
 - **要改的每一處**（逐一改成 `善解輸入法.app`，或改用一個共用變數）：`scripts/build-app.sh`（產物路徑、`rm -rf "$OUT_DIR/…"` 規則）；`scripts/check-app.sh`（預設 APP）；`Makefile`（bundle 註解、`selftest-bundled` 的執行路徑、`clean-bundle`）；`.github/workflows/ci.yml`（shell job 的路徑）；`.github/workflows/release.yml`（build 的打包、sign 的解開／簽章／公證／驗證路徑、zip 內容）；`scripts/install-ime.sh`（用法、目的地、訊息、還原指令、結尾說明）；`scripts/test-install-ime.sh`；`docs/verification.md`（指令與殘留檢查，並加上 `find build -name '*.app'`：`build/` 有 `.metadata_never_index` 又不登記，`mdfind` 與 `lsregister -dump` 本來就看不到它）；`docs/PLAN.md`（回滾說明的兩處要列出 `善解輸入法.app`、舊的 `shanjie.app` 與 `.shanjie-previous`，以及 S3b 段落的產品名稱）；本契約 §2–§11 每一處提到 `shanjie.app` 的地方（包括 §2 的建置描述、§10 驗收 1、3、6、10 的指令與路徑，以及 §11）。完成後 `grep -rn 'shanjie\.app' docs scripts Makefile .github` 只剩刻意指舊名稱的行。
 - **`make clean-bundle`** 同時處理新舊兩個名稱：對 `build/` 與 `build/selftest/` 裡的 `善解輸入法.app` 與 `shanjie.app` 都 `lsregister -u` 後刪除。
@@ -218,7 +218,10 @@
   - 列不到 → **exit 3**（和其他失敗區分；目前 main.swift 只用 0、1、64）。
   - 列得到 → 啟用；啟用失敗 → exit 1（一般失敗）。
   - 啟用成功後，列得到舊的 `<BUNDLE_ID>.standard`／`.eten` 就 `TISDisableInputSource`；停用失敗只印警告；列不到就什麼都不做 → exit 0。
-- 只有一個模式，所以 IMK 的 `setValue(<BUNDLE_ID>.zhuyin)` 不會切換排列（`InputMode(modeID:)` 回傳 nil 而被忽略），這是刻意的：排列只由選單與偏好決定。
+- 輸入模式 ID 一律不會切換排列：殼不覆寫 IMK 的 `setValue(_:forTag:client:)`，連舊版的 `.standard`／`.eten` 在還沒被停用時也一樣（PR #5 審查：否則系統每次啟用時會把選單選的排列切回去）。排列只由選單與偏好決定。
+- `install` 的回傳碼：`TISRegisterInputSource` 失敗而且列不到 `.zhuyin` → exit 1（一般失敗，安裝腳本印還原指令）；註冊成功但列不到 → exit 3（登出再登入）。
+- 從兩模式舊版升級時，若舊的 `.eten` 已啟用而 `.standard` 沒有、且還沒有存過 `layout`，`install` 寫入 `layout=eten`，倚天使用者升級後不必重選。
+- 安裝失敗時若保留的上一版是兩模式舊版（其 Info.plist 有 `.standard`），還原指令改成放回舊名稱 `shanjie.app`、`lsregister -f` 後登出再登入，並在輸入方式加入「善解（標準）」或「善解（倚天）」。
 - **未驗證**：重新登記一個已登記過的 bundle 後，TIS 是否立刻更新模式清單（可能要登出再登入）。
 - `scripts/install-ime.sh`：先取得 `install` 的回傳碼（不能用 `if ! …` 吞掉）。回傳 3 時印固定訊息「系統還沒載入新的輸入方式清單：請登出再登入，然後只執行 `~/Library/Input Methods/善解輸入法.app/Contents/MacOS/shanjie install`」（不要重跑整個腳本：那會把剛裝的版本當成上一版、刪掉真正的上一版），**不印**換回上一版的指令；其他非 0 才印還原指令。exit 3 這條路徑在 files-only 測試到不了，只由使用者實測涵蓋。
 - 目的地改為 `~/Library/Input Methods/善解輸入法.app`。舊名稱 `~/Library/Input Methods/shanjie.app`：

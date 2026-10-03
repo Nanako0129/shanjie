@@ -44,13 +44,13 @@ final class ShanjieInputController: IMKInputController {
         MainActor.assumeIsolated { session.commitComposition() }
     }
 
-    override func setValue(_ value: Any!, forTag tag: Int, client sender: Any!) {
-        guard tag == kTextServiceInputModePropertyTag, let id = value as? String else { return }
-        MainActor.assumeIsolated { session.setInputMode(id) }
-    }
+    // No setValue(_:forTag:client:) override: input mode IDs never change the layout, not even the
+    // two-mode IDs of earlier versions while they are still enabled; only the menu and the stored
+    // preference do (s3b section 13.3, local review of PR #5).
 
     /// docs/contracts/s3b.md section 13.2: the two layouts, the current one checked. Each item has
-    /// its own selector because IMK does not always pass the NSMenuItem as `sender`.
+    /// its own selector, as McBopomofo does, rather than relying on `sender` being the NSMenuItem
+    /// (what IMK passes as sender is not measured here).
     override func menu() -> NSMenu! {
         let current = MainActor.assumeIsolated { session.layout }
         let menu = NSMenu()

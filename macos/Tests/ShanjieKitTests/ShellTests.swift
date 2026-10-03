@@ -336,19 +336,6 @@ final class ShellTests: XCTestCase {
         XCTAssertEqual(c.client.marked, Self.standardProbe)
     }
 
-    /// IMK's setValue with the one mode ID changes nothing (section 13.3).
-    func testTheInputModeIDDoesNotChangeTheLayout() {
-        let store = MemoryLayoutStore("eten")
-        let c = Controller(makeShell(store: store))
-        c.session.activate()
-        c.type(Self.probe)
-        c.session.setInputMode("com.nyanako.inputmethod.shanjie.zhuyin")
-        XCTAssertEqual(c.client.marked, Self.etenProbe, "the composition was touched")
-        XCTAssertEqual(c.client.text, "")
-        XCTAssertEqual(c.session.layout, .eten)
-        XCTAssertEqual(store.layout, "eten")
-    }
-
     func testSwitchingLayoutCommitsThenUsesTheNewLayout() {
         let c = Controller(makeShell())
         c.session.activate()

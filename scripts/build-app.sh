@@ -121,7 +121,9 @@ cat > "$APP/Contents/Info.plist" <<EOF
   <key>CFBundleIdentifier</key><string>$BUNDLE_ID</string>
   <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
   <key>CFBundleName</key><string>Shanjie</string>
-  <key>CFBundleDisplayName</key><string>Shanjie</string>
+  <!-- Finder applies the localized names only when this base display name equals the folder name
+       (善解輸入法.app); the English name comes from en.lproj. Unverified on a real system. -->
+  <key>CFBundleDisplayName</key><string>善解輸入法</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>$VERSION</string>
   <key>CFBundleVersion</key><string>$VERSION</string>

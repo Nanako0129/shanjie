@@ -50,15 +50,20 @@ mkdir -p "$HOME/Library/Input Methods"
 # 1. Copy the new bundle to a fresh staging directory next to the destination. A failed copy
 #    leaves the installed bundle untouched.
 STAGE="$(mktemp -d "$HOME/Library/Input Methods/.shanjie-staging-XXXXXX")"
-SWAPPING=
+MOVED=
 KEPT=
 cleanup() {
-  # Only if the script stops between setting the old bundle aside and moving the new one in: put
-  # the new one in place, so the user is not left without an installed copy. Never on a failed
-  # copy, where the staged bundle may be incomplete.
-  if [ -n "$SWAPPING" ] && [ ! -e "$DEST" ] && [ -d "$STAGE/善解輸入法.app" ]; then
+  # Only if the script stops after the old bundle was actually moved aside (MOVED, set once that
+  # mv succeeded) but before the new one moved in: put the new one in place, so the user is not
+  # left without an installed copy. Never on a failed copy, where the staged bundle may be
+  # incomplete; and not keyed on "$DEST is missing", which is also true when only the legacy
+  # shanjie.app was installed.
+  if [ -n "$MOVED" ] && [ ! -e "$DEST" ] && [ -d "$STAGE/善解輸入法.app" ]; then
     mv "$STAGE/善解輸入法.app" "$DEST" || true
-    echo "interrupted: the new version was moved into place but not registered; run this script again" >&2
+    # Not "rerun the script": that would keep this version as the previous one and drop the real one.
+    echo "interrupted: the new version is in place but not registered. Run:" >&2
+    echo "  $LSREGISTER -f ~/Library/Input\\ Methods/善解輸入法.app" >&2
+    echo "  ~/Library/Input\\ Methods/善解輸入法.app/Contents/MacOS/shanjie install" >&2
   fi
   rm -rf "$STAGE"
 }
@@ -78,20 +83,24 @@ if [ -n "$OLD" ]; then
     chmod -R u+w "$PREV"   # a read-only directory must not block upgrades
     rm -rf "$PREV"
   fi
-  SWAPPING=1
-  unregister "$OLD"
+  # Move first, unregister after: if the move fails, the old bundle stays registered where it is.
   mv "$OLD" "$PREV"
+  MOVED=1
+  unregister "$PREV"
   KEPT=1
 fi
 mv "$STAGE/善解輸入法.app" "$DEST"
-SWAPPING=
+MOVED=
 [ "$KEPT" = 1 ] && echo "previous version kept at ~/Library/Input Methods/.shanjie-previous"
 # Both names were installed: the new-name copy was kept above, so the legacy one is only removed.
+# A failure here only warns: the new bundle is already in place and must still be registered.
 if [ -e "$LEGACY" ]; then
   unregister "$LEGACY"
-  chmod -R u+w "$LEGACY"
-  rm -rf "$LEGACY"
-  echo "removed the earlier shanjie.app"
+  if chmod -R u+w "$LEGACY" && rm -rf "$LEGACY"; then
+    echo "removed the earlier shanjie.app"
+  else
+    echo "warning: could not delete ~/Library/Input Methods/shanjie.app; delete it by hand" >&2
+  fi
 fi
 
 # Test hook (scripts/test-install-ime.sh): stop after the file swap, before touching running
@@ -129,7 +138,15 @@ fi
 if [ "$rc" -ne 0 ]; then
   echo "error: registering the input method failed." >&2
   # Checked on disk, not by KEPT: an earlier run killed between the two renames also leaves one.
-  if [ -d "$PREV" ]; then
+  if [ -d "$PREV" ] && grep -q '\.standard<' "$PREV/Contents/Info.plist" 2>/dev/null; then
+    # The kept version is a two-mode build from before section 13; its own install skips
+    # registration when the bundle ID is known, so TIS must reload the bundle after a log out.
+    echo "The previous version is the earlier two-mode build. To go back to it:" >&2
+    echo "  rm -rf ~/Library/Input\\ Methods/善解輸入法.app" >&2
+    echo "  mv ~/Library/Input\\ Methods/.shanjie-previous ~/Library/Input\\ Methods/shanjie.app" >&2
+    echo "  $LSREGISTER -f ~/Library/Input\\ Methods/shanjie.app" >&2
+    echo "  then log out and back in, and add 善解（標準） or 善解（倚天） in System Settings > Keyboard > Input Sources" >&2
+  elif [ -d "$PREV" ]; then
     echo "To go back to the previous version:" >&2
     echo "  rm -rf ~/Library/Input\\ Methods/善解輸入法.app" >&2
     echo "  mv ~/Library/Input\\ Methods/.shanjie-previous ~/Library/Input\\ Methods/善解輸入法.app" >&2

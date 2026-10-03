@@ -125,4 +125,23 @@ run "$H" "$T/v2/$APP" >/dev/null
 [ "$(ls -A "$IM" | wc -l)" -eq 2 ] || fail "unexpected files: $(ls -A "$IM")"
 no_calls "upgrade with both names"
 
+
+# 7. Legacy upgrade where moving shanjie.app aside fails (a mv stand-in refuses it): the new bundle
+#    must not be put next to the legacy one, and the legacy one stays where it was.
+H="$T/legacy-mv"
+IM="$H/Library/Input Methods"
+stub "$IM/shanjie.app" old
+cat > "$T/tools/mv" <<'MV'
+#!/bin/bash
+case "$1" in */shanjie.app) exit 1 ;; esac
+exec /bin/mv "$@"
+MV
+chmod +x "$T/tools/mv"
+if run "$H" "$T/v2/$APP" >/dev/null 2>&1; then fail "a failed move of shanjie.app was not reported"; fi
+rm -f "$T/tools/mv"
+[ ! -e "$IM/$APP" ] || fail "a failed legacy move put the new bundle next to shanjie.app"
+[ "$(marker "$IM/shanjie.app")" = old ] || fail "a failed legacy move changed shanjie.app"
+no_staging "$H" || fail "a failed legacy move left a staging directory"
+no_calls "failed legacy move"
+
 echo "install-ime.sh file handling: ok"

@@ -27,24 +27,35 @@ func inputModeID(_ source: TISInputSource) -> String? {
 /// of earlier versions if TIS still lists them. Run only by scripts/install-ime.sh, on the
 /// installed copy. Exit 3 means the mode is not listed yet (install-ime.sh then asks for a log
 /// out and log in); 1 is any other failure.
+private func isEnabled(_ source: TISInputSource) -> Bool {
+    guard let p = TISGetInputSourceProperty(source, kTISPropertyInputSourceIsEnabled) else { return false }
+    return CFBooleanGetValue(Unmanaged<CFBoolean>.fromOpaque(p).takeUnretainedValue())
+}
+
 func install() -> Int32 {
     guard let bundleID = Bundle.main.bundleIdentifier else {
         say("install: no bundle identifier")
         return 1
     }
-    // Not fatal by itself: the lookup below decides (an already registered bundle may report an
-    // error here; not measured).
-    if TISRegisterInputSource(Bundle.main.bundleURL as CFURL) != noErr {
-        say("install: warning: TISRegisterInputSource failed")
-    }
+    // A failure here is not fatal by itself (an already registered bundle may report an error;
+    // not measured), but it decides the exit code below: exit 3 means "registered, the list is
+    // not refreshed yet", so a failed registration with no mode listed is an ordinary failure.
+    let registered = TISRegisterInputSource(Bundle.main.bundleURL as CFURL) == noErr
+    if !registered { say("install: warning: TISRegisterInputSource failed") }
     let sources = inputSources(bundleID: bundleID)
     guard let mode = sources.first(where: { inputModeID($0) == "\(bundleID).zhuyin" }) else {
-        say("install: the input mode is not listed yet")
-        return 3
+        say(registered ? "install: the input mode is not listed yet" : "install: registration failed and the input mode is not listed")
+        return registered ? 3 : 1
     }
     guard TISEnableInputSource(mode) == noErr else {
         say("install: TISEnableInputSource failed")
         return 1
+    }
+    // Carry over an ETen-only setup from the two-mode versions, unless a layout was chosen already.
+    let enabled = { (id: String) in sources.contains { inputModeID($0) == id && isEnabled($0) } }
+    if UserDefaults.standard.string(forKey: "layout") == nil,
+       enabled("\(bundleID).eten"), !enabled("\(bundleID).standard") {
+        UserDefaults.standard.set("eten", forKey: "layout")
     }
     let legacy: Set<String> = ["\(bundleID).standard", "\(bundleID).eten"]
     for source in sources where inputModeID(source).map(legacy.contains) ?? false {
