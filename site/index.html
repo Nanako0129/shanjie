@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>善解 — 開源 macOS 注音輸入法</title>
+<meta name="description" content="善解是一個開源的 macOS 注音輸入法，專心把同音字選對。這裡是它公開的開發路線圖。">
+<meta property="og:title" content="善解，所以選對。">
+<meta property="og:description" content="開源的 macOS 注音輸入法，專心把同音字選對。公開開發路線圖。">
+<meta name="theme-color" content="#F6F1E7" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#1A1816" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&family=Noto+Serif+TC:wght@600;900&display=swap">
+<style>
+  :root {
+    --paper: #F6F1E7; --paper-2: #EFE8DA; --ink: #1F1D1A; --ink-2: #5A544C; --line: #D9CFBD;
+    --seal: #B83A2E; --seal-ink: #F6F1E7; --ok: #3F6B4F; --wip: #9A6A1E;
+    --serif: "Noto Serif TC", "Songti TC", "PMingLiU", serif;
+    --sans: "Noto Sans TC", -apple-system, "PingFang TC", "Heiti TC", sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper: #1A1816; --paper-2: #24211E; --ink: #EDE6D8; --ink-2: #AAA192; --line: #3A352F;
+      --seal: #D4553F; --seal-ink: #1A1816; --ok: #8DBA98; --wip: #E0B060;
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper: #1A1816; --paper-2: #24211E; --ink: #EDE6D8; --ink-2: #AAA192; --line: #3A352F;
+    --seal: #D4553F; --seal-ink: #1A1816; --ok: #8DBA98; --wip: #E0B060;
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body { margin: 0; background: var(--paper); color: var(--ink); font: 17px/1.8 var(--sans); -webkit-font-smoothing: antialiased; }
+  main { max-width: 760px; margin: 0 auto; padding: 0 16px 72px; }
+  a { color: var(--seal); text-underline-offset: 3px; }
+  h1, h2, h3 { font-family: var(--serif); font-weight: 900; letter-spacing: .02em; }
+  h2 { font-size: 26px; margin: 72px 0 8px; }
+  h2 + .sub { color: var(--ink-2); margin: 0 0 24px; }
+  .rule { border: 0; border-top: 1px solid var(--line); margin: 0; }
+
+  /* 首屏 */
+  .hero { padding: 72px 0 40px; display: grid; grid-template-columns: auto 1fr; gap: 28px; align-items: center; }
+  .seal { width: 108px; height: 108px; border-radius: 14px; background: var(--seal); display: grid; place-items: center;
+          box-shadow: inset 0 0 0 5px var(--seal), inset 0 0 0 7.5px var(--seal-ink); }
+  .seal span { font: 900 62px/1 var(--serif); color: var(--seal-ink); transform: translateY(-2px); }
+  .name { font: 900 clamp(40px, 9vw, 64px)/1.1 var(--serif); margin: 0; letter-spacing: .08em; }
+  .tagline { font: 600 clamp(20px, 4.2vw, 26px)/1.5 var(--serif); margin: 10px 0 0; }
+  .lede { color: var(--ink-2); margin: 20px 0 0; grid-column: 1 / -1; max-width: 36em; }
+  .badge { display: inline-block; margin-top: 18px; font-size: 14px; padding: 2px 12px; border: 1px solid var(--line); border-radius: 999px; color: var(--ink-2); }
+  @media (max-width: 520px) { .hero { grid-template-columns: 1fr; gap: 20px; } .seal { width: 84px; height: 84px; } .seal span { font-size: 48px; } }
+
+  /* 錯字例子 */
+  .pairs { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; }
+  .pair { background: var(--paper-2); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; }
+  .pair .zy { font-size: 14px; color: var(--ink-2); letter-spacing: .1em; }
+  .pair .right { font: 900 26px/1.4 var(--serif); }
+  .pair .wrong { color: var(--ink-2); text-decoration: line-through; text-decoration-color: var(--seal); text-decoration-thickness: 2px; margin-left: 10px; font-size: 18px; }
+  .pair .ctx { font-size: 14px; color: var(--ink-2); margin-top: 4px; }
+
+  /* 三層 */
+  .layers { display: grid; gap: 12px; counter-reset: layer; }
+  .layer { display: grid; grid-template-columns: 44px 1fr; gap: 14px; padding: 18px; border: 1px solid var(--line); border-radius: 12px; }
+  .layer::before { counter-increment: layer; content: counter(layer); font: 900 22px/44px var(--serif); text-align: center;
+                   width: 44px; height: 44px; border-radius: 10px; background: var(--paper-2); border: 1px solid var(--line); }
+  .layer h3 { margin: 0; font-size: 19px; }
+  .layer p { margin: 4px 0 0; color: var(--ink-2); font-size: 16px; }
+  .layer .when { font-size: 14px; color: var(--seal); }
+
+  /* 數字 */
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
+  .stat { padding: 18px; border-left: 3px solid var(--seal); background: var(--paper-2); border-radius: 0 12px 12px 0; }
+  .stat b { display: block; font: 900 30px/1.2 var(--serif); }
+  .stat span { font-size: 15px; color: var(--ink-2); }
+
+  /* 路線圖 */
+  .road { list-style: none; margin: 0; padding: 0; }
+  .road li { position: relative; padding: 0 0 26px 34px; }
+  .road li::before { content: ""; position: absolute; left: 8px; top: 12px; bottom: -12px; width: 2px; background: var(--line); }
+  .road li:last-child::before { display: none; }
+  .road .dot { position: absolute; left: 0; top: 6px; width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--line); background: var(--paper); }
+  .road .done .dot { background: var(--seal); border-color: var(--seal); }
+  .road .wip .dot { border-color: var(--seal); background: var(--paper); box-shadow: inset 0 0 0 4px var(--paper), inset 0 0 0 9px var(--seal); }
+  .road h3 { margin: 0; font-size: 19px; display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; }
+  .road .tag { font: 500 13px/1.6 var(--sans); padding: 0 9px; border-radius: 999px; border: 1px solid var(--line); color: var(--ink-2); }
+  .road .done .tag { color: var(--ok); border-color: currentColor; }
+  .road .wip .tag { color: var(--wip); border-color: currentColor; }
+  .road p { margin: 4px 0 0; color: var(--ink-2); font-size: 16px; }
+
+  /* 詳細 */
+  details { border-top: 1px solid var(--line); padding: 12px 0; }
+  details:last-of-type { border-bottom: 1px solid var(--line); }
+  summary { cursor: pointer; font-weight: 500; }
+  details p, details ul { color: var(--ink-2); font-size: 16px; }
+  details ul { padding-left: 1.2em; }
+
+  footer { margin-top: 72px; padding-top: 20px; border-top: 1px solid var(--line); color: var(--ink-2); font-size: 14px; display: flex; flex-wrap: wrap; gap: 6px 18px; justify-content: space-between; }
+</style>
+</head>
+<body>
+<main>
+
+<header class="hero">
+  <div class="seal" aria-hidden="true"><span>解</span></div>
+  <div>
+    <h1 class="name">善解</h1>
+    <p class="tagline">善解，所以選對。</p>
+  </div>
+  <p class="lede">一個開源的 macOS 注音輸入法，專心把同音字選對：看懂你前面寫了什麼，選出你真正要打的那個字。<br><span class="badge">開發中・尚未提供下載</span></p>
+</header>
+
+<hr class="rule">
+
+<section>
+  <h2>為什麼要做</h2>
+  <p class="sub">注音輸入最常見的困擾不是打不出字，而是打出了「同音的另一個字」。</p>
+  <div class="pairs">
+    <div class="pair"><div class="zy">ㄔㄤˊ ㄔㄤˊ</div><div><span class="right">常常</span><span class="wrong">嚐嚐</span></div><div class="ctx">改選過一次「嚐嚐」，之後每句都被搶走</div></div>
+    <div class="pair"><div class="zy">ㄋㄚˋ ㄅㄧㄢ</div><div><span class="right">那邊</span><span class="wrong">納編</span></div><div class="ctx">詞頻來自新聞語料，口語反而排在後面</div></div>
+    <div class="pair"><div class="zy">ㄕˋ ㄐㄧㄥˋ ㄅㄨˋ</div><div><span class="right">拭鏡布</span><span class="wrong">是竟不</span></div><div class="ctx">詞庫沒收的日常用語，只能一字一字湊</div></div>
+  </div>
+</section>
+
+<section>
+  <h2>怎麼做</h2>
+  <p class="sub">三層分工：每一次按鍵都在本機即時完成，語意判斷只在需要時加入，而且只能從本機的候選裡挑。</p>
+  <div class="layers">
+    <div class="layer"><div><h3>候選生成</h3><p>詞庫與語言模型在本機產生前 64 名候選，每一鍵都要在 16 毫秒內完成。</p><div class="when">每次按鍵・本機</div></div></div>
+    <div class="layer"><div><h3>本機重排</h3><p>小型語言模型看你前面寫的內容，從候選中挑出最合理的一句；在背景執行，不拖慢打字。</p><div class="when">停頓或送出前・本機</div></div></div>
+    <div class="layer"><div><h3>雲端校正（選用）</h3><p>打完按一下快速鍵，請雲端模型再看一次。預設關閉；雲端只能回傳候選的編號，不能自己寫字。</p><div class="when">你按下快速鍵時・雲端</div></div></div>
+  </div>
+</section>
+
+<section>
+  <h2>目前的實測</h2>
+  <p class="sub">所有數字都來自專案的評測集，句子由專案自寫並以 CC0 釋出。</p>
+  <div class="stats">
+    <div class="stat"><b>98.3%</b><span>正解出現在前 64 名候選的比例（開發集 302 句；未補詞前 97.7%）</span></div>
+    <div class="stat"><b>92.7%</b><span>目前最準的判斷器從候選中挑對整句的比例（開發集，雲端）</span></div>
+    <div class="stat"><b>1.7 ms</b><span>每打一個音節重新產生候選的時間（p95，M5 Mac）</span></div>
+  </div>
+  <details>
+    <summary>這些數字怎麼量的</summary>
+    <p>評測分成開發集與保留集。開發集用來調整；保留集由另一個流程撰寫、開發過程中不看內容，只在每個階段結束時量一次，用來確認進步不是因為「背了題目」。保留集上，補詞讓前 64 名含正解的比例從 96.9% 升到 97.8%。</p>
+    <p>判斷器比較了本機模型與多家雲端服務的三十多組設定；所有判斷器都卡在同一個上限：正解根本不在候選裡的句子，誰也救不回來。所以目前的重點是先把正解放進候選。</p>
+  </details>
+</section>
+
+<section>
+  <h2>路線圖</h2>
+  <p class="sub">依序進行，每一段都有可量測的驗收條件，由獨立的檢查流程確認後才算完成。</p>
+  <ol class="road">
+    <li class="done"><span class="dot"></span><h3>評測基準 <span class="tag">完成</span></h3><p>Rust 核心與研究原型逐字一致，之後每一步都能和基準對照。</p></li>
+    <li class="done"><span class="dot"></span><h3>評測資料 <span class="tag">完成</span></h3><p>口語開發集與獨立撰寫的保留集，含同音陷阱與詞庫沒收的日常用語。</p></li>
+    <li class="done"><span class="dot"></span><h3>語意選字可行性 <span class="tag">完成</span></h3><p>實測本機與雲端模型的準確度與延遲，找出真正的瓶頸在候選，而不在判斷。</p></li>
+    <li class="done"><span class="dot"></span><h3>詞庫 v1 <span class="tag">完成</span></h3><p>從維基標題與維基詞典補進約 34 萬個詞，並可從鎖定版本的來源完整重建。</p></li>
+    <li class="done"><span class="dot"></span><h3>精簡詞庫格式 <span class="tag">完成</span></h3><p>重寫詞庫在記憶體中的結構：輸出逐字不變，記憶體從約 390 MB 降到約 88 MB。</p></li>
+    <li class="wip"><span class="dot"></span><h3>語言模型與詞性 <span class="tag">下一步</span></h3><p>用上下文與詞性處理「常常／嚐嚐」「在／再」這類排序問題。</p></li>
+    <li><span class="dot"></span><h3>macOS 輸入法本體 <span class="tag">規劃中</span></h3><p>標準注音鍵盤、候選窗、中英切換；外觀參考 Apple 原生注音，中文模式下 Ctrl+\ 輸出「、」。</p></li>
+    <li><span class="dot"></span><h3>一鍵校正、個人化學習、新手測驗 <span class="tag">規劃中</span></h3><p>打完一段可以請模型重看；只從你在候選窗的改選學習，而且依前文分開記，不會一次改選就污染所有句子。</p></li>
+    <li><span class="dot"></span><h3>本機重排與雲端校正 <span class="tag">規劃中</span></h3><p>把語意判斷接進輸入法；本機優先，雲端選用。</p></li>
+    <li><span class="dot"></span><h3>打包與釋出 <span class="tag">規劃中</span></h3><p>簽章、公證，提供下載。</p></li>
+  </ol>
+</section>
+
+<section>
+  <h2>隱私</h2>
+  <p class="sub">輸入法看得到你打的每一個字，所以這些是設計上的硬規則（隨開發逐項實作）。</p>
+  <details open>
+    <summary>設計原則</summary>
+    <ul>
+      <li>雲端功能預設關閉；開啟後只在你按快速鍵或送出時傳送，不會逐鍵傳送。</li>
+      <li>雲端只能回傳候選的編號，不能產生文字；回應不合規就直接用本機結果。</li>
+      <li>密碼欄、安全輸入模式下停止學習與雲端；終端機不傳送到雲端。</li>
+      <li>你打的內容不寫進任何日誌或錯誤訊息。</li>
+      <li>學習資料只存在本機，可以一鍵清除。</li>
+    </ul>
+  </details>
+</section>
+
+<section>
+  <h2>開源與授權</h2>
+  <details>
+    <summary>授權清單</summary>
+    <ul>
+      <li>程式碼：Apache-2.0。</li>
+      <li>基礎詞庫：小麥注音（MIT；片語源自 libtabe，BSD）。</li>
+      <li>補充詞表：由維基百科與維基詞典的條目標題產生，CC BY-SA 4.0，署名維基百科與維基詞典貢獻者。</li>
+      <li>評測句：專案自寫，CC0。</li>
+    </ul>
+    <p>原始碼公開時間待定。</p>
+  </details>
+</section>
+
+<footer>
+  <span>善解 shanjie</span>
+  <span>最後更新：2026-10-03</span>
+</footer>
+
+</main>
+</body>
+</html>
