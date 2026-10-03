@@ -89,9 +89,16 @@ jobs:
           SHANJIE_VERSION: ${{ steps.version.outputs.version }}
         run: scripts/build-app.sh
 
-      # A tar keeps the bundle's modes and symlinks; upload-artifact does not.
-      - name: Archive the unsigned app
-        run: tar -cf unsigned.tar -C build 善解輸入法.app
+      # The installer skeleton (docs/contracts/s3c-installer.md section 3): everything except the
+      # input method zip, which only exists after signing. Built here so `sign` runs no repo code.
+      - name: Build the installer skeleton (unsigned)
+        env:
+          SHANJIE_VERSION: ${{ steps.version.outputs.version }}
+        run: scripts/build-installer.sh build
+
+      # A tar keeps the bundles' modes and symlinks; upload-artifact does not.
+      - name: Archive the unsigned apps
+        run: tar -cf unsigned.tar -C build 善解輸入法.app 安裝善解輸入法.app
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -105,7 +112,8 @@ jobs:
   sign:
     needs: build
     runs-on: xcode-27
-    timeout-minutes: 90
+    # Two notarizations (the input method, then the installer) can each wait a long time.
+    timeout-minutes: 150
     environment: release
     permissions:
       contents: read
@@ -190,41 +198,70 @@ jobs:
           codesign --verify --strict --deep "$APP"
 
           # notarytool can exit 0 on a rejected submission: the verdict is read from its JSON.
-          ditto -c -k --keepParent "$APP" "$T/submit.zip"
-          RC=0
-          xcrun notarytool submit "$T/submit.zip" --key "$P8" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER_ID" \
-            --wait --timeout 60m --output-format json > "$T/notary.json" || RC=$?
+          # notarize <app>: submit a zip of it, wait, require Accepted, then staple the app.
           field() { python3 -c 'import json,sys
           try: print(json.load(open(sys.argv[1])).get(sys.argv[2], ""))
           except Exception: print("")' "$T/notary.json" "$1"; }
-          STATUS=$(field status)
-          ID=$(field id)
-          echo "notarization $ID: $STATUS"
-          if [ "$STATUS" != Accepted ] || [ "$RC" -ne 0 ]; then
-            [ -n "$ID" ] && xcrun notarytool log "$ID" --key "$P8" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER_ID" || true
-            fail "notarization failed (exit $RC)"
-          fi
-          xcrun stapler staple "$APP"
+          notarize() {
+            rm -f "$T/submit.zip" "$T/notary.json"
+            ditto -c -k --keepParent "$1" "$T/submit.zip"
+            RC=0
+            xcrun notarytool submit "$T/submit.zip" --key "$P8" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER_ID" \
+              --wait --timeout 60m --output-format json > "$T/notary.json" || RC=$?
+            STATUS=$(field status)
+            ID=$(field id)
+            echo "notarization $ID: $STATUS"
+            if [ "$STATUS" != Accepted ] || [ "$RC" -ne 0 ]; then
+              [ -n "$ID" ] && xcrun notarytool log "$ID" --key "$P8" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER_ID" || true
+              fail "notarization failed (exit $RC)"
+            fi
+            xcrun stapler staple "$1"
+          }
+          notarize "$APP"
 
           ZIP="shanjie-$VERSION.zip"
           ditto -c -k --keepParent "$APP" "$T/out/$ZIP"
           (cd "$T/out" && shasum -a 256 "$ZIP" > "$ZIP.sha256")
 
-          # Verify what ships: the app as extracted from the final zip.
+          # verify <app>: what ships, as extracted from its final zip.
+          verify() {
+            V="$1"
+            codesign --verify --strict --deep "$V" || fail "codesign --verify --strict --deep: $V"
+            INFO=$(codesign -dv --verbose=2 "$V" 2>&1)
+            grep -q '^Authority=Developer ID Application: ' <<<"$INFO" || fail "not signed with Developer ID Application: $V"
+            grep -qx "TeamIdentifier=$EXPECTED_TEAM" <<<"$INFO" || fail "team identifier is not $EXPECTED_TEAM: $V"
+            grep -Eq 'flags=0x[0-9a-f]+\([^)]*runtime' <<<"$INFO" || fail "hardened runtime flag missing: $V"
+            ENT=$(codesign -d --entitlements - "$V" 2>/dev/null || true)
+            [ -z "$ENT" ] || fail "the app carries entitlements: $V"
+            xcrun stapler validate "$V" > /dev/null || fail "no stapled notarization ticket: $V"
+            # Captured first: `spctl | grep -q` under pipefail can fail on SIGPIPE.
+            GK=$(spctl -a -t exec -vv "$V" 2>&1 || true)
+            grep -qx 'source=Notarized Developer ID' <<<"$GK" || fail "Gatekeeper does not report Notarized Developer ID: $GK"
+          }
           ditto -x -k "$T/out/$ZIP" "$T/check"
-          V="$T/check/善解輸入法.app"
-          codesign --verify --strict --deep "$V" || fail "codesign --verify --strict --deep"
-          INFO=$(codesign -dv --verbose=2 "$V" 2>&1)
-          grep -q '^Authority=Developer ID Application: ' <<<"$INFO" || fail "not signed with Developer ID Application"
-          grep -qx "TeamIdentifier=$EXPECTED_TEAM" <<<"$INFO" || fail "team identifier is not $EXPECTED_TEAM"
-          grep -Eq 'flags=0x[0-9a-f]+\([^)]*runtime' <<<"$INFO" || fail "hardened runtime flag missing"
-          ENT=$(codesign -d --entitlements - "$V" 2>/dev/null || true)
-          [ -z "$ENT" ] || fail "the app carries entitlements"
-          xcrun stapler validate "$V" > /dev/null || fail "no stapled notarization ticket"
-          # Captured first: `spctl | grep -q` under pipefail can fail on SIGPIPE.
-          GK=$(spctl -a -t exec -vv "$V" 2>&1 || true)
-          grep -qx 'source=Notarized Developer ID' <<<"$GK" || fail "Gatekeeper does not report Notarized Developer ID: $GK"
+          verify "$T/check/善解輸入法.app"
           echo "verified $ZIP"
+
+          # The installer (docs/contracts/s3c-installer.md section 3): the skeleton from `build`,
+          # plus the zip just published, signed, notarized and stapled the same way. No --deep:
+          # the zip is a resource, not nested code.
+          INST="$T/work/安裝善解輸入法.app"
+          [ -d "$INST/Contents/Resources" ] || fail "the installer skeleton is missing from the build artifact"
+          cp "$T/out/$ZIP" "$INST/Contents/Resources/$ZIP"
+          # The first notarization may have outlasted the keychain's 3600 s auto-lock.
+          security unlock-keychain -p "$KC_PW" "$KC"
+          codesign --force --options runtime --timestamp --sign "$IDENTITY" --keychain "$KC" "$INST"
+          codesign --verify --strict --deep "$INST"
+          notarize "$INST"
+          IZIP="shanjie-installer-$VERSION.zip"
+          ditto -c -k --keepParent "$INST" "$T/out/$IZIP"
+          (cd "$T/out" && shasum -a 256 "$IZIP" > "$IZIP.sha256")
+          mkdir -p "$T/check-installer"
+          ditto -x -k "$T/out/$IZIP" "$T/check-installer"
+          verify "$T/check-installer/安裝善解輸入法.app"
+          cmp -s "$T/check-installer/安裝善解輸入法.app/Contents/Resources/$ZIP" "$T/out/$ZIP" \
+            || fail "the installer's bundled zip differs from $ZIP"
+          echo "verified $IZIP"
 
       - name: Remove the signing keychain
         if: always()
@@ -277,26 +314,31 @@ jobs:
           path: ${{ runner.temp }}/signed
 
       # A rerun of this job (same artifact) finds the release already there: creation is skipped
-      # when the zip is attached and the .sha256 asset is identical; anything else fails, so the
-      # cask never points at a different zip.
+      # when both zips (input method and installer) are attached and both .sha256 assets are
+      # identical; anything else fails, so the cask never points at a different zip.
       - name: Create the GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
         working-directory: ${{ runner.temp }}/signed
         run: |
           set -euo pipefail
-          shasum -a 256 -c "shanjie-$VERSION.zip.sha256"
+          ZIPS=("shanjie-$VERSION.zip" "shanjie-installer-$VERSION.zip")
+          for z in "${ZIPS[@]}"; do shasum -a 256 -c "$z.sha256"; done
           if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
-            gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json assets -q '.assets[].name' \
-              | grep -qxF "shanjie-$VERSION.zip" \
-              || { echo "error: release $GITHUB_REF_NAME exists without shanjie-$VERSION.zip" >&2; exit 1; }
-            gh release download "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
-              -p "shanjie-$VERSION.zip.sha256" -O "$RUNNER_TEMP/published.sha256"
-            cmp -s "$RUNNER_TEMP/published.sha256" "shanjie-$VERSION.zip.sha256" \
-              || { echo "error: release $GITHUB_REF_NAME has a different shanjie-$VERSION.zip.sha256" >&2; exit 1; }
-            echo "release $GITHUB_REF_NAME already published with this zip; not creating it again"
+            # Captured first: `gh | grep -q` under pipefail can fail on SIGPIPE.
+            ASSETS=$(gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json assets -q '.assets[].name')
+            for z in "${ZIPS[@]}"; do
+              grep -qxF "$z" <<<"$ASSETS" \
+                || { echo "error: release $GITHUB_REF_NAME exists without $z" >&2; exit 1; }
+              rm -f "$RUNNER_TEMP/published.sha256"
+              gh release download "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" -p "$z.sha256" -O "$RUNNER_TEMP/published.sha256"
+              cmp -s "$RUNNER_TEMP/published.sha256" "$z.sha256" \
+                || { echo "error: release $GITHUB_REF_NAME has a different $z.sha256" >&2; exit 1; }
+            done
+            echo "release $GITHUB_REF_NAME already published with these zips; not creating it again"
           else
-            gh release create "$GITHUB_REF_NAME" "shanjie-$VERSION.zip" "shanjie-$VERSION.zip.sha256" \
+            gh release create "$GITHUB_REF_NAME" \
+              "${ZIPS[0]}" "${ZIPS[0]}.sha256" "${ZIPS[1]}" "${ZIPS[1]}.sha256" \
               --repo "$GITHUB_REPOSITORY" --title "善解 $VERSION" --generate-notes
           fi
 

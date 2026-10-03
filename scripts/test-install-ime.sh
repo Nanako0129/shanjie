@@ -144,4 +144,15 @@ rm -f "$T/tools/mv"
 no_staging "$H" || fail "a failed legacy move left a staging directory"
 no_calls "failed legacy move"
 
+# 8. Files-only and skip-register together (the installer's variable must not defeat the test
+#    hook): files-only still decides, so the run ends at the files-only line, before step 3.
+H="$T/both-flags"
+IM="$H/Library/Input Methods"
+mkdir -p "$H"
+out=$(SHANJIE_INSTALL_SKIP_REGISTER=1 run "$H" "$T/v1/$APP")
+grep -q '^files only: installed to ' <<<"$out" || fail "skip-register changed the files-only exit: $out"
+! grep -q 'registration skipped' <<<"$out" || fail "skip-register ran past the files-only hook: $out"
+[ "$(marker "$IM/$APP")" = v1 ] || fail "files-only with skip-register did not install"
+no_calls "files-only with skip-register"
+
 echo "install-ime.sh file handling: ok"
