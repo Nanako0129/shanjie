@@ -246,16 +246,46 @@ v4 日期 2026-10-03。v1 經 `pilotfish:plan-verifier`（REVISE，4 項）與 `
   - 驗收 2 或 3 達不到：不手動補詞或調分數硬湊；回報漏掉的列與原因分類。
 - **回滾。** 刪疊加層檔案，或用 `--no-overlay`。
 
-### L：精簡詞庫格式（S3 的前提，可以和 S2 平行）
+### L：精簡詞庫格式（S3 的前提；使用者 2026-10-03 定為 S2 之前做）
 
-- **目標。** 換掉 S0 為了逐位元組對照原型而用的直白結構，也就是每個讀音、每個詞都是獨立配置的 `String`；改成精簡格式，例如排序陣列加字串池，或建置期產生的二進位檔再用記憶體映射。純重構，輸出不變。
+- **目標。** 換掉 S0 為了逐位元組對照原型而用的直白結構，讓詞庫的記憶體降到競品的量級；**純重構，所有輸出逐字不變**。
+  - 現行結構是 `HashMap<Vec<String>, Vec<(String, f64)>>` 加上 `HashMap<String, (Vec<String>, f64)>`，每個讀音、每個詞都是獨立配置的 `String`。
+  - S1 載入基底＋疊加層後，CLI 峰值 RSS 約 375 MiB；只載基底約 127 MiB。
+  - 競品實測：小麥注音 17 MB、自然輸入法 131 MB。
+- **前置（全部成立）。**
+  1. 使用者同意「過審就開工」（§4）。
+  2. main 已 commit S1 的完整輸出當對照檔。這三份都在 HEAD 用 release 版產生，重跑兩次逐位元組相同：
+     - `eval/golden/s1-dev302.txt`：`--set dev --limit 302`。
+     - `eval/golden/s1-dev302-nooverlay.txt`：同上加 `--no-overlay`。
+     - `eval/golden/s1-overlay-sets.txt`：`--set trap daily moedict --learn-sim`，有疊加層。
+- **契約。**
+  - **語意不變。** 下列行為全部照舊，以現行 `core/src/lib.rs` 為準：
+    - 解析與合併：行過濾、基底先、疊加層依檔案順序接在後、一次穩定排序、同分保留順序。
+    - `by_word` 的嚴格較高才取代。
+    - `word_score` 的「同讀音重複詞取最後一筆」。
+    - `best_score`、`max_len`。
+    - `segment_spans` 的嚴格 `>`。
+    - `decode` 與 `decode_beam` 的展開順序、同分處理、截斷。
+    - 錯誤種類與訊息（R2：只帶長度）。
+  - **分數維持 `f64`。** 不得改成 `f32` 或定點數：路徑分數是許多 log10 相加，精度一變，同分與排序就會變。
+  - **只用標準函式庫。** 不加 crate，不用 `unsafe`，不用記憶體映射。資料仍然在執行時從文字檔載入；建置期二進位格式不在 L 範圍。
+  - **結構由 executor 決定**，但要寫進 `docs/contracts/l.md`。建議方向：音節字串化成整數 id，詞串進一個共用字串池再用（位移, 長度）引用，各讀音的詞條放在一個連續陣列裡用區間引用。
+  - **公開介面。** `Lexicon` 的欄位可以改成私有、改用存取方法。`core/src/tests.rs` 跟著改，但每個既有測試斷言的行為都要保留，不得刪掉測試來讓它通過。
+- **步驟與擁有者。**
+  1. `pilotfish:executor`：完成重構與 `docs/contracts/l.md`，並在 `cli/tests/` 加一個測試，比對上述三份對照檔。擁有 `core/src/lib.rs`、`core/src/eval.rs`、`core/src/tests.rs`、`cli/`、`docs/contracts/l.md`。
+  2. fresh `pilotfish:verifier`：驗收。
 - **驗收。**
-  1. golden diff 為空。
-  2. `--set dev --limit 302` 與 S1 參考逐項相同：oracle@16 288、oracle@64 297、同樣的漏掉列號、top-1 163。
-  3. 載入基底＋疊加層時，`/usr/bin/time -l shanjie-eval --set dev --limit 302` 的峰值 RSS ≤ 131 MB，也就是自然輸入法的實測值；目標是接近小麥注音的 17 MB 這個量級。
-  4. 每鍵 p95 不比 S1 慢超過 20%（S1 是 2.6–3.9 ms）。
-  5. 載入時間另報。
-- **擁有者。** `pilotfish:executor`；fresh `pilotfish:verifier`。開工前 main 寫契約，交 `pilotfish:plan-verifier` 審。
+  1. 舊 golden：`--set trap daily moedict --learn-sim --no-overlay` 和 `eval/golden/unigram.txt` 的 diff 為空。
+  2. 三份 S1 對照檔各自用對應的指令重新產生，diff 都為空。`cargo test` 必須涵蓋這三項比對。
+  3. 峰值 RSS（`/usr/bin/time -l` 的 maximum resident set size）：`--set dev --limit 302`（有疊加層）≤ 131 MB；另報 `--no-overlay` 的值。
+  4. 每鍵延遲：`--set dev --limit 302 --bench` 跑 3 次取中位數，p95 ≤ 5 ms（S1 實測 2.6–3.9 ms），且遠低於 A3 的 16 ms；另報載入時間。
+  5. `cargo test` 綠。既有測試的斷言都還在，只是改用新的存取方式。
+- **範圍外。** 任何會改變輸出的改動，包括分數、參數、排序規則；建置期二進位格式與記憶體映射；n-gram（S2）。
+- **預算。** executor 1 回合＋1 次修正。
+- **停止。**
+  - 對照檔出現任何差異：停下來，回報第一個不同的行和原因，不得修改對照檔。
+  - 記憶體在 std-only 的限制下降不到 131 MB：回報實測值和瓶頸。
+- **回滾。** revert L 的 commit。
 
 ### S2：基礎 n-gram（同步路徑）
 
