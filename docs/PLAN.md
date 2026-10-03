@@ -507,9 +507,11 @@ S3a 不需要外觀參考，可以先做；S3b 等使用者提供 macOS 內建�
 - 外觀（使用者 2026-10-03）：參考 Apple 原生注音的介面與 Liquid Glass。優先用系統元件（先試 IMK 內建的 `IMKCandidates`，不夠再用 macOS 的玻璃效果元件自建視窗），動畫用系統預設、不自訂（使用者嫌自訂的 Liquid Glass 行為「太 Q」）。開工前請使用者提供原生注音候選窗的實際截圖當參考，不從程式碼推測外觀。
 - 按鍵（使用者 2026-10-03）：中文模式下 Ctrl+\ 輸出「、」（照字面實作）。其餘標點行為參考原生注音；Apple 系統檔 `CoreChineseEngine.framework/.../CIMPunctuationCandidates.plist` 顯示「、」的替代候選為 `\`、`＼`、`｜`，推測原生注音的反斜線鍵輸出「、」（未在介面實測）。對照表由本專案自行定義，不複製 Apple 的資料檔（著作權）。
 - 這一片引入 C ABI：每個匯出函式包 `catch_unwind`，panic hook 不印 payload（R2）。左文（R4）移到第一個讀左文的切片（2026-10-03 S3a 審查後決定：S3 的解碼不讀左文）。
-- 驗收：XCTest 驅動按鍵狀態機（組字、選字、刪除、送出）（gate 單元測試延到 S4）；FFI 測試：讓核心在處理標記字串時 panic，C ABI 回傳錯誤碼而不是 abort，且 stderr 與回傳訊息都不含標記（R2）；日誌行為測試：重播標記字串後 `/usr/bin/log show` 找不到（R2；zsh 內建 `log` 會攔截，必須寫完整路徑）；使用者實測：TextEdit／Notes／Safari 打陷阱集前 10 句，以及 R3 的三處 secure input 情境。
+- 驗收：XCTest 驅動按鍵狀態機（組字、選字、刪除、送出）（gate 單元測試延到 S4）；FFI 測試：讓核心在處理標記字串時 panic，C ABI 回傳錯誤碼而不是 abort，且 stderr 與回傳訊息都不含標記（R2）；日誌行為測試：重播標記字串時用 `/usr/bin/log stream --level debug` 擷取，找不到標記（R2；debug 等級不會寫進磁碟，事後用 `log show` 看不到；zsh 內建 `log` 會攔截，必須寫完整路徑；細節見 s3b §10 驗收 5）；使用者實測：TextEdit／Notes／Safari 打陷阱集前 10 句，以及 R3 的三處 secure input 情境。
 
 ### S4：使用者模型
+
+- **從 S3b 移來（2026-10-03）**：`privacyGate`（R3：`IsSecureEventInputEnabled()` 或 denylist 時停學習、停雲端、不讀左文；判斷不了就擋；選單顯示暫停狀態）、gate 單元測試、gate 轉為生效時 `reset`；左文讀取與 R4。
 
 - 左文由殼讀取、經 C ABI 傳入，R4（最後換行截斷、計數單位與上限、只活在記憶體、多行與 emoji 邊界測試）在這片實作。
 - 前文 key 用字（≤ 2 字，不用切詞結果）、天級衰減、跨 ≥ 2 種前文才全域化、`max(系統分, 混合分)`、只有打開候選窗改選才學、候選窗一鍵忘記、改選走時舊紀錄減半；儲存依 R5。
@@ -553,7 +555,7 @@ S3a 不需要外觀參考，可以先做；S3b 等使用者提供 macOS 內建�
 
 ### S8：打包與釋出
 
-- R9；Developer ID 簽章＋公證（Team `2LJ882GPY8`）；README、授權清單。外部動作每一步都要使用者當次同意。
+- Developer ID 簽章＋公證、hardened runtime、Release 附件與授權檔已在 S3b 的 `release.yml` 完成（2026-10-03）；S8 剩 README、對外說明、Homebrew cask 與更新檢查。外部動作每一步都要使用者當次同意。
 
 ## 3. 風險
 
@@ -648,14 +650,14 @@ S3a 不需要外觀參考，可以先做；S3b 等使用者提供 macOS 內建�
 | ID | 等級 | 設計規則／測試 | 處置 | 落在哪片 |
 |---|---|---|---|---|
 | R1 | P1 | 雲端與端上重排都只回本機 N-best 的索引（v5：S5 改回 N-best 重排，字級規則不再需要）；其他一律丟棄；回應綁定組字 session ID，client 或 bundle 換了就丟；mock 測試：含 `\n`、索引越界、遲到回應 → 只送本機結果 | 採納；自由文字列為非目標 | S5、S6 |
-| R2 | P1 | 組字、候選、前文、payload 不進任何 log／panic／fatalError；Swift 用 `Logger`，只記靜態字串與 C ABI 回傳碼，不內插任何其他值、不用 `.public`（2026-10-03 S3b 審查後收緊，見 s3b §9）；FFI `catch_unwind`；行為測試：重播標記字串 → `log show` 與學習檔都找不到 | 採納 | S0（核心錯誤訊息規則＋測試，驗收 5）、S3（`catch_unwind`、FFI panic 測試、日誌行為測試）、S4（學習檔不含標記） |
+| R2 | P1 | 組字、候選、前文、payload 不進任何 log／panic／fatalError；Swift 用 `Logger`，只記靜態字串與 C ABI 回傳碼，不內插任何其他值、不用 `.public`（2026-10-03 S3b 審查後收緊，見 s3b §9）；FFI `catch_unwind`；行為測試：重播標記字串 → `log stream --level debug` 擷取與學習檔都找不到 | 採納 | S0（核心錯誤訊息規則＋測試，驗收 5）、S3（`catch_unwind`、FFI panic 測試、日誌行為測試）、S4（學習檔不含標記） |
 | R3 | P1 | `privacyGate(bundleID)`：`IsSecureEventInputEnabled()` 或 denylist 就停學習、停雲端、不讀左文；判斷不了就擋；選單顯示暫停狀態；使用者實測 Safari 密碼欄、Terminal 開 Secure Keyboard Entry、Terminal `sudo` | 部分採納：終端機與密碼管理器預設在**雲端** denylist；**學習**在終端機預設開。理由：使用者大量在終端機打中文；只學「注音模式下打開候選窗改選的中文詞」，英數直通（密碼、sudo）不暫存也不學。使用者可改（§4.4） | S4、S6（S3b 沒有學習、雲端、左文，延到 S4） |
 | R4 | P2 | 左文在最後換行截斷、grapheme 計數、只活在記憶體；多行與 emoji 邊界測試 | 採納 | 第一個讀左文的切片（目前是 S4；2026-10-03 從 S3 移出）；S6 只沿用 |
 | R5 | P2 | 學習檔放 `~/Library/Application Support/shanjie/`，權限 0600，只存「前文 ≤ 2 字、詞、分數、日期」；一鍵清除含記憶體與附屬檔（SQLite `-wal`、`-shm`）；靠 FileVault 不另加密；設定頁揭露 Time Machine 並提供排除備份 | 採納 | S4 |
 | R6 | P2 | Keychain：service＝bundle ID、`SecItemUpdate` 並檢查狀態、key 不進 URL／log／錯誤訊息；agent 測試用記憶體 store；真 Keychain 交給使用者實測；預告 ad-hoc 簽章可能跳授權提示 | 採納 | S6 |
 | R7 | P2 | `URLSessionConfiguration.ephemeral`、系統 ATS／TLS、硬逾時 2 秒、只在送出或驗證時送；opt-in 對話框列出送出內容範例與所選供應商現行的資料保留政策（v5：供應商可切換；S6 時逐家核對最新條款） | 採納 | S6 |
 | R8 | P2 | 模型清單內建 HF repo＋commit SHA＋每檔 SHA-256，下載到暫存檔驗證後才改名；只收 safetensors／GGUF／JSON；權重在無網路的沙盒 XPC helper 解析 | 採納；XPC 從條件式改成 S5 必做 | S5 |
-| R9 | P3 | hardened runtime、不加 `disable-library-validation`、不需 root、v1 不做自動安裝（只檢查版本開瀏覽器） | 採納 | S8 |
+| R9 | P3 | hardened runtime、不加 `disable-library-validation`、不需 root、v1 不做自動安裝（只檢查版本開瀏覽器） | 採納 | S3b（簽章、hardened runtime、無 entitlements、安裝不用 sudo）；S8（更新檢查） |
 
 ### plan-verifier（v5 第一次：REVISE）
 
@@ -762,3 +764,4 @@ plan-verifier 第一次：REVISE（6 項阻擋）。security-reviewer：無 P0�
 | security P2-4 | entitlements 沒有明寫為空 | FIX：不給 entitlements 檔，驗收檢查輸出為空、flags 含 runtime |
 | security P3 | `try!` 與錯誤型別、非 0 回傳碼殘留組字、`nil` 事件、候選陣列清除、滑鼠選候選、secure input 的預期、自測參數與 UserDefaults、`build/` 未忽略 | FIX：全部寫進 s3b；`build/` 已在 PR #1 加入 `.gitignore` |
 | plan-verifier 2 | PLAN 仍寫 Apple Development 簽章；PR #1 沒列為前提；擁有者只記 ObjectIdentifier、deactivate 不檢查擁有者；日誌擷取沒證明已接上；release 的 build 沒下載模型 | FIX：PLAN 改寫簽章；加前提與停止條件；擁有者改弱參照、deactivate／commit 先檢查、deinit 丟棄，加兩個測試；起始＋結束標記與逾時；release build 先下載並比對模型 |
+| 本地 /code-review（PR #2，CodeRabbit 限流） | 15 項：非 0 回傳碼沒 reset 核心；Release 沒附授權檔；deinit 時 weak 已是 nil；換擁有者沒重設設定；非擁有者的 deactivate 清掉共用候選；§9→§10 的編號；gate 照抄 syrtis 會等不存在的 workflow；log 過濾太窄；shell／release job 沒固定 Rust；模型雜湊三處；切換排列要重建引擎；使用者的 log 檢查看不到 debug；延後項目沒寫回 S4／S8／R9；secure input 判斷沒有注入點；Caps Lock 行為與 bundle ID 未實測 | 14 項 FIX（寫進 s3b 與 PLAN；模型雜湊改成單一檔 `data/bigram.sjlm.sha256`）；切換排列的延遲 DEFER 到 S3b-2（核心加 `set_layout`），記為已知限制 |
