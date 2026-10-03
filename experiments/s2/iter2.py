@@ -9,7 +9,7 @@
   floor 是 bonus 模型的下限。
 - 一次可以跑多組設定（JSON 陣列），共用已載入的計數；分開計時載入和解碼。
 
-集合：調整集 cvtune、wikitune（不參與計數的真人句，見 build_tune.py）；挑戰集 dev302、typing76（按類別看，不當門檻）；
+集合：調整集 cvtune、wikitune（不參與計數的真人句，見 build_tune.py）、discordtune（使用者 Discord 群的私有調整集，和驗證集不重疊，只在本機）；挑戰集 dev302、typing76（按類別看，不當門檻）；
 驗證集 discord、news（私有，只看數字；每累積幾個候選才看一次）。保留集不在這裡。
 用法：python3 experiments/s2/iter2.py '<設定 JSON 或陣列>' [--sets cvtune,wikitune,dev302,typing76] [--note …]
 """
@@ -138,6 +138,7 @@ def all_sets():
             devrows += rows_of(f)
     s = {"cvtune": (os.path.join(WORK, "tune", "cvtune.txt"), False), "wikitune": (os.path.join(WORK, "tune", "wikitune.txt"), False),
          "dev302": (None, False), "typing76": (os.path.join(ROOT, "eval", "dev", "user-typing.txt"), False),
+         "discordtune": (os.path.join(PRIVATE, "discord-tune-rows.txt"), True),
          "discord": (os.path.join(PRIVATE, "discord-rows.txt"), True), "news": (os.path.join(PRIVATE, "news", "news-rows-300.txt"), True)}
     out = {}
     for name, (path, private) in s.items():
