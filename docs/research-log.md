@@ -327,3 +327,15 @@
 - **保留集**（片結束，只由 verifier 量一次，只看數字）：chat 175／227（77.1%）、formal 181／227（79.7%）；候選含正解 226／227（99.6%），A1a 達成。對照 S1 結束時的保留集（只有詞庫）top-1 是 93／227。
 - S2 至此收尾：同步路徑停在約 77–80%，85% 交給整體（S4 個人學習、S5 重排）。
 - 公開前的隱私稽核：整個 git 歷史（含已刪內容與 commit 訊息）對 Discord 五份私有資料，8 字以上子句的整句命中 0、12 字片段命中 0；也沒有 API key 或私鑰。
+
+## 2026-10-04：S3b（Swift 輸入法本體）與 GitHub 流程
+
+- 改走 GitHub 公開 repo（`Nanako0129/shanjie`）與 PR 流程，CI 與發布仿 syrtis。公開前的隱私稽核見上一節。
+- 每個 PR 的 gate：CI 全綠，加上 CodeRabbit。CodeRabbit 在公開 repo 要手動觸發，而且每小時只有 1 次額度，常被限流；**限流等太久時**改用本地 `/code-review`（使用者 2026-10-03 授權）。碰到 C ABI 等跨語言介面的 PR 盡量等 CodeRabbit，因為內部審查和程式共用同樣的盲點。CodeRabbit 的摘要裡可能有收合的區塊（例如 PR #3 的安全架構區塊列了兩項 Medium），「沒有行內意見」不等於沒有意見，要讀完整的摘要。本地審查在 PR #1、#2 各抓到十幾項，其中幾項會讓功能悄悄失效：連結參數擷取到空字串照樣綠、release gate 去等不存在的 workflow、非 0 回傳碼沒 reset 核心、公開附件沒附授權檔。
+- S3b 的驗證設計重點：
+  - 所有殼的測試都經過真正的 C 核心與語言模型，不用假引擎。
+  - 日誌測試用 `log stream --level debug` 只依行程過濾，並加起始與結束標記；同時擷取測試行程的 stdout／stderr，因為有 stderr 的行程裡 `NSLog` 不進 unified log。
+  - 突變（引擎回非 0、設定不呼叫核心、擁有者三條規則、`.public`／`.private`／`print`／`NSLog` 外洩）都要由斷言抓到。
+  - 簽章在 CI 的 `release` environment（一次性鑰匙圈），本機與 agent 一律 ad-hoc，不碰登入鑰匙圈。
+- 待使用者實測確認：候選窗開著時按鍵先交給殼（`IMKCandidatesSendServerKeyEventFirst`）、候選號碼 1–9 是否顯示、選單列圖示的深淺色、Caps Lock 切換時的組字去向。
+- 一次判斷修正（2026-10-04）：CodeRabbit 在 PR #3 建議所有非按鍵的送出都在 secure input 時丟棄組字。我先照做，本地審查隨即指出 `IsSecureEventInputEnabled()` 是全系統旗標，任何 App 開著 secure input 時，點別處或切換排列都會讓使用者的字悄悄消失。審查意見是證據不是指令：採納前要先問「這樣改的代價是什麼」。最後維持只在 deactivate 檢查，延到 S4 以實機證據決定。
