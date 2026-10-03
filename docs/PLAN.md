@@ -65,7 +65,7 @@ v4 日期 2026-10-03。v1 經 `pilotfish:plan-verifier`（REVISE，4 項）與 `
 
 **角色。** main：架構、契約、整合、驗收判斷。`pilotfish:executor`：核心與殼的實作。`pilotfish:mech-executor`：資料轉換、測試搬遷、評測資料。`pilotfish:security-executor`：§7 R1–R9 的實作（privacy gate、日誌規則、Keychain、雲端送出、學習檔儲存、模型下載驗證）。每片結束：fresh `pilotfish:verifier` 對該片驗收條件。UI 實機確認：交給使用者，main 先備好具體動作與預期結果。所有 agent 不得碰使用者的 login keychain（不讀、不寫、不 lock/unlock），測試一律用注入的記憶體 store。
 
-**回滾。** 全部在新 repo `~/side-project/shanjie`；安裝只放 `~/Library/Input Methods/shanjie.app`，刪掉即復原；不讀寫小麥注音、自然輸入法、Apple 注音的任何使用者資料。
+**回滾。** 全部在新 repo `~/side-project/shanjie`；安裝只放 `~/Library/Input Methods/shanjie.app`（覆蓋安裝時另有保留上一版的 `.shanjie-previous`），刪掉這兩個即復原；不讀寫小麥注音、自然輸入法、Apple 注音的任何使用者資料。
 
 **全域停止條件。** 同因失敗 2 次：main 接手或改切法；任一片超過預算 2 倍：暫停回報；驗收數字對不上：不調參數硬湊，先回報差異。
 
@@ -500,7 +500,7 @@ S3a 不需要外觀參考，可以先做；S3b 等使用者提供 macOS 內建�
 - **前提**：PR #1（GitHub Actions CI）合併到 main 之後才開工，S3b 的分支從那個 main 開出來。
 - **預算**：security-executor 1 回合＋1 次修正。
 - **停止**：開工時 main 上沒有 `.github/workflows/ci.yml`，或 `.gitignore` 沒有 `build/`，就停下回報；IMKCandidates 無法只當顯示用時停下回報（自建玻璃視窗是下一輪）；資料檔或 LM 缺少時建置失敗並說明；任何步驟需要本機鑰匙圈或 secret 的值時停下回報。
-- **回滾**：revert S3b 的 commit；已安裝的版本由使用者從 `~/Library/Input Methods/` 刪除。
+- **回滾**：revert S3b 的 commit；已安裝的版本由使用者從 `~/Library/Input Methods/` 刪除（`shanjie.app` 與 `.shanjie-previous`）。
 - 對照截圖與實機時要確認的暫定行為（S3a verifier 的 P4 與契約 §8）：Shift＋空白鍵目前等同空白鍵；候選開著時按超出本頁的數字鍵，目前候選維持開啟；候選頁到頭停住不繞回（只有空白鍵繞回）；Ctrl+Shift+\ 直通；Command 等組合鍵在組字中直通且不送出組字區。
 
 #### S3 原有要求
