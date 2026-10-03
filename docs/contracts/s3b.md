@@ -173,6 +173,8 @@
 - **CI**：`ci.yml` 新增 `shell` 工作（`make bundle`、`swift test`、`make selftest-bundled SELFTEST_BUNDLE_ID=`、`scripts/check-app.sh`）；core 工作改讀 `data/bigram.sjlm.sha256`。`scripts/check-app.sh` 的檢查 6 比較執行前後的 `~/Library/Input Methods` 列表、偏好設定檔雜湊、以及 `TISCreateInputSourceList` 列出的全部輸入法（ID、模式、是否啟用；只讀取），並確認 `foo`、`install x`、`--selftest x`、`--SELFTEST`、空字串等參數都被拒絕。
 - **release.yml**：gate 只等 `ci.yml`（`scripts/check-ci-gate.sh`，改寫自 syrtis，用假 `gh` 測過成功、失敗、沒有 run、API 失敗四種情況）。sign 工作不 checkout、不執行任何 repo 程式，只對 artifact 用 Apple 的工具；Team ID 寫死為 `2LJ882GPY8`，`vars.APPLE_TEAM_ID` 不同就失敗。手動觸發只接受 main，跑到驗證為止，不發布。
 - **Makefile 的過期檢查**：照 syrtis 的 `relink_if_stale`／`rebuild_if_header_stale`，路徑改成新版 SwiftPM 的 `macos/.build/out/...`。實測 Swift 6.4 在 `libcore.a` 變動時本來就會重新連結；標頭內容變動沒辦法在不改 `core/` 的前提下實測（只改時間戳不會重編）。
+- **日誌擷取的過濾條件（verifier 2026-10-04 指出）**：`LogTests` 用 `processIdentifier == <測試行程的 PID>`，比 §10 驗收 5 寫的「依行程名稱」更嚴，擷取範圍相同；`NSLog`、其他 subsystem 的 Logger 一樣會被抓到。
+- **擷取期間不斷言**：`LogTests` 在 stdout／stderr 擷取開始到 `std.finish()` 之間只記錄結果、不做斷言，避免 XCTest 的失敗訊息把句子帶進擷取內容、造成連帶的「外洩」失敗（verifier P4）。測試用 `XCTUnwrap` 取候選，候選數量不足時是斷言失敗、不是陣列越界中止。
 
 ## 12. 範圍外
 

@@ -35,7 +35,7 @@ final class ShellTests: XCTestCase {
         XCTAssertFalse(c.panel.visible)
     }
 
-    func testCandidatesShowThenNumberSelects() {
+    func testCandidatesShowThenNumberSelects() throws {
         let c = Controller(makeShell())
         c.session.activate()
         c.type("su3 ")  // ㄋㄧˇ, then space opens the candidates (rule 15)
@@ -43,7 +43,7 @@ final class ShellTests: XCTestCase {
         XCTAssertTrue((1...9).contains(c.panel.items.count))
         XCTAssertEqual(c.panel.selected, 0)
         XCTAssertEqual(c.session.candidates, c.panel.items)
-        let second = c.panel.items[1]
+        let second = try XCTUnwrap(c.panel.items.dropFirst().first, "fewer than two candidates")
         XCTAssertTrue(c.type("2")[0])
         XCTAssertEqual(c.client.marked, second, "the composition shows the chosen candidate")
         XCTAssertFalse(c.panel.visible)
@@ -51,11 +51,11 @@ final class ShellTests: XCTestCase {
         XCTAssertEqual(c.client.text, "")
     }
 
-    func testMouseSelectionGoesThroughTheCoreAsANumberKey() {
+    func testMouseSelectionGoesThroughTheCoreAsANumberKey() throws {
         let c = Controller(makeShell())
         c.session.activate()
         c.type("su3 ")
-        let second = c.panel.items[1]
+        let second = try XCTUnwrap(c.panel.items.dropFirst().first, "fewer than two candidates")
         c.session.candidateSelected(second)
         XCTAssertEqual(c.client.marked, second)
         XCTAssertFalse(c.panel.visible)

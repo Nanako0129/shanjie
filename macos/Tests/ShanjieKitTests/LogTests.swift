@@ -32,31 +32,40 @@ final class LogTests: XCTestCase {
         // Negative actions, with this process's stdout and stderr captured too: in a process that
         // has a stderr (a test runner, unlike the launchd-started input method), NSLog and print
         // write there instead of to the unified log, so the log stream alone would miss them.
+        // Nothing between StdCapture() and std.finish() may assert: a failing XCTest assertion prints
+        // its message, which here would carry the typed text into the captured stderr and turn into a
+        // second, misleading "reached stdout or stderr" failure. Outcomes are recorded and asserted later.
+        let resources = try XCTUnwrap(TestData.resources())
         let std = StdCapture()
         let stdProbe = "shanjie-std-probe-\(nonce)"
         FileHandle.standardError.write(Data("\(stdProbe)\n".utf8))
-        let resources = try XCTUnwrap(TestData.resources())
         let shell = Shell(resources: resources, panel: FakePanel(), isSecureInput: { false })
         let c = Controller(shell, bundle: bundleMarker)
         c.session.activate()                            // profile from a marked bundle ID
         c.type(Row10.standardKeys)
         c.press(Keys.enter)                             // commits the marker sentence
-        XCTAssertEqual(c.client.text, Row10.formal, "the typing path really ran")
+        let typedRow10 = c.client.text == Row10.formal  // the typing path really ran
         c.type("su3 ")
-        c.session.candidateSelected(c.panel.items[0])   // mouse selection
-        XCTAssertFalse(c.session.send(ShanjieKey(kind: 99, ch: 0, modifiers: 0)))  // non-zero code
+        let candidateShown = c.panel.items.first
+        if let first = candidateShown { c.session.candidateSelected(first) }   // mouse selection
+        let rejected = !c.session.send(ShanjieKey(kind: 99, ch: 0, modifiers: 0))  // non-zero code
         c.type("su3cl3")
         c.session.deactivate()                          // commits 你好
-        XCTAssertTrue(c.client.text.hasSuffix("你好"))
+        let committedOnDeactivate = c.client.text.hasSuffix("你好")
         c.session.activate()
         c.type("su3")
         c.session.setInputMode("com.nyanako.inputmethod.shanjie.eten") // mode switch commits and rebuilds
         let broken = FileManager.default.temporaryDirectory.appendingPathComponent(pathMarker, isDirectory: true)
         let failed = Shell(resources: broken, panel: FakePanel(), isSecureInput: { false })  // engine_new fails on a marked path
-        XCTAssertNil(failed.engine)
+        let engineFailed = failed.engine == nil
 
         let stdText = std.finish()
         XCTAssertTrue(stdText.contains(stdProbe), "the stdout/stderr capture is not connected")
+        XCTAssertTrue(typedRow10, "the typing path did not commit row 10")
+        XCTAssertNotNil(candidateShown, "no candidate was shown for the mouse-selection path")
+        XCTAssertTrue(rejected, "the non-zero return code path was not taken")
+        XCTAssertTrue(committedOnDeactivate, "deactivate did not commit the composition")
+        XCTAssertTrue(engineFailed, "the marked data path did not fail engine creation")
 
         // End marker: a different one, same Logger and level; the capture runs until it is seen.
         let ended = capture.wait(for: end, timeout: 10) {
