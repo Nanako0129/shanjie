@@ -299,10 +299,12 @@ def score_set(name, limit, a, taus):
     gold = {k: L(r["truth"]) for k, r in enumerate(rows)}
     in8 = {k for k in range(n_all) if gold[k] in [L(c) for c in rows[k]["cands"]]}
     cond = {}  # name -> dict(sent, first, status counts, lat, tokens)
-    idle = False
+    idle, load = False, None
     mp = os.path.join(d, "apple-meta.json")
     if os.path.exists(mp):
-        idle = json.load(open(mp)).get("idle_window", False)
+        meta = json.load(open(mp))
+        idle = meta.get("idle_window", False)
+        load = meta.get("load")  # what the user reported about the Mac during the run, if anything
     ar = {c: read_apple(d, c, rows) for c in ("fwd", "rev", "ctx")}
     for c, rev in (("fwd", False), ("rev", True), ("ctx", False)):
         res = ar[c]
@@ -351,7 +353,7 @@ def score_set(name, limit, a, taus):
                    "first_pick": (sum(c["first"].get(k, False) for k in cov if k in c["first"]) / max(1, len([k for k in cov if k in c["first"]]))) if c["first"] else None,
                    "blocked": st.count("blocked"), "unparsable": st.count("unparsable"), "errors": st.count("error"),
                    "lat_p50": pct(lat, .5), "lat_p95": pct(lat, .95), "lat_max": max(lat) if lat else None,
-                   "lat_note": ("idle window" if idle else "load unknown") if cn.startswith("A-") else "per request (s*1000)",
+                   "lat_note": (load or ("idle window" if idle else "load unknown")) if cn.startswith("A-") else "per request (s*1000)",
                    "jev_tokens": c.get("tokens"), "tau": c.get("tau"), "mode": c.get("mode") or None}
             if cn in ("A-rev", "J-sent-rev", "A-both"):
                 fw = cond["A-fwd" if cn[0] == "A" else "J-sent-fwd"]["sent"]
