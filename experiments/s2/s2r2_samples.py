@@ -1,7 +1,7 @@
 """S2r-2 §4.3：給 main 人工抽查的樣本（公開資料；種子固定）。比較 main 的疊加層（c6abd58）和工作樹的疊加層。
 
 寫出兩個 TSV：changed（主要讀音改變的列＋新增的變調列，50 列）和 he（讀音有「和」且主要讀音改變的列，50 列）。
-用法：python3 experiments/s2/s2r2_samples.py OUTDIR
+用法：python3 experiments/s2/s2r2_samples.py OUTDIR [SEED]
 """
 import os
 import random
@@ -9,7 +9,7 @@ import subprocess
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-SEED = 20261004
+SEED = int(sys.argv[2]) if len(sys.argv) > 2 else 20261004
 OLD_REV = "c6abd58"
 
 

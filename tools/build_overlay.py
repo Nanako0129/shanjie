@@ -67,6 +67,8 @@ def normalize(word, syls):
             out[i] = "ㄅㄨˋ"
         elif ch == "法" and out[i] == "ㄈㄚˋ":
             out[i] = "ㄈㄚˇ"
+        elif ch == "和" and out[i] == "ㄏㄢˋ" and word[i + 1:i + 2] in ("麵", "麪", "泥"):
+            out[i] = "ㄏㄨㄛˊ"                      # 審訂表：和麵、和泥
         elif ch == "和" and out[i] == "ㄏㄢˋ":
             out[i] = "ㄏㄜˋ" if i > 0 and (word[i - 1] in HE4_PREV or HE4_ANY & set(word[:i])) else "ㄏㄜˊ"
     return out
