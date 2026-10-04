@@ -51,7 +51,7 @@
 | # | 狀態 | 按鍵 | 行為 |
 |---|---|---|---|
 | 1 | 任何 | 帶 COMMAND、OPTION、CAPSLOCK，或帶 CONTROL 但不是 Ctrl+\ | 不處理（直通），**不改任何狀態** |
-| 2 | 任何 | Shift＋§4 標點鍵、Ctrl+\ | 丟掉未完成音節、關閉候選，**把標點插入組字區的游標處**（不送出；2026-10-04 起，見 `docs/contracts/s3d-punctuation.md`；原本是「送出組字區，再送出標點」） |
+| 2 | 任何 | §4 的標點鍵（Shift 表與單按表）、Ctrl+\ | 丟掉未完成音節、關閉候選，**把標點插入組字區的游標處**（不送出；2026-10-04 起，見 `docs/contracts/s3d-punctuation.md`；原本是「送出組字區，再送出標點」） |
 | 3 | 候選開啟 | 1–9 | 選目前頁的第 n 個（超出本頁則忽略），關閉候選 |
 | 4 | 候選開啟 | ↑↓、←→ | 移動選取（跨頁）。候選條是橫的，←→ 和系統注音一樣逐一移動（2026-10-04 使用者實測後改；原本是翻頁） |
 | 5 | 候選開啟 | 空白鍵 | 下一頁，最後一頁再按回第一頁 |
@@ -92,12 +92,23 @@
 
 | 按鍵 | 輸出 | 按鍵 | 輸出 |
 |---|---|---|---|
-| Shift+, | ， | Shift+[ | 「 |
-| Shift+. | 。 | Shift+] | 」 |
+| Shift+, | ， | Shift+[ | 『 |
+| Shift+. | 。 | Shift+] | 』 |
 | Shift+/ | ？ | Shift+9 | （ |
 | Shift+1 | ！ | Shift+0 | ） |
 | Shift+; | ： | Shift+` | ～ |
-| Ctrl+\ | 、 | | |
+| Shift+\ | ｜ | Shift+' | “ |
+| Shift+= | ＋ | Ctrl+\ | 、 |
+
+**單按也是標點的鍵**（2026-10-05 起，該鍵在目前排列不是注音鍵或聲調鍵時才算）：
+
+| 按鍵 | 輸出 | 按鍵 | 輸出 |
+|---|---|---|---|
+| [ | 「 | ] | 」 |
+| \ | 、 | ' | ‘ |
+| = | ＝ | ` | · |
+
+倚天排列的 `'`、`=` 是注音鍵，照舊。依據：使用者說「[ 還要打 Shift」，main 用一支只對自己視窗送鍵的探測程式，實測 macOS 內建繁體注音（`com.apple.inputmethod.TCIM.Zhuyin`）在這 6 個鍵單按與 Shift 的輸出（關掉文字視窗的自動替換），表上照它；原本 Shift+[ ／ Shift+] 的「」也改成蘋果的『』。實測沒有複製 Apple 的任何資料檔。
 
 ## 5. 資料載入
 
@@ -210,7 +221,7 @@ int32_t shanjie_engine_set_punctuation(ShanjieEngine *engine, const char *table)
 
 - **API 形狀**：`Engine::new(data_dir, Layout)` 讀檔，`Engine::with_lexicon(Arc<Lexicon>, Layout)` 共用已載入的詞庫（測試每個測試檔只載入一次）；`load_lexicon(data_dir)` 單獨公開。`Key { kind: KeyKind, ch: char, modifiers: u32 }`（`KeyKind::from_code` 把 ABI 的 1–13 轉成列舉，`ch` 的合法性由 `ffi.rs` 先擋）。`Output` 欄位與 §6 一一對應（`selected: Option<usize>`、`candidates: Vec<String>`）。錯誤只有 `EngineError::LoadFailed`（碼 3）與 `Internal`（碼 4）；`key` 回 `Internal` 之前引擎已自行清空（等同 reset 模式 1）。`reset(mode)` 不會失敗。
 - **R2**：`Key`、`Output`、`Engine` 都不 `derive(Debug)`；`Output` 只 derive `PartialEq`，測試用 `assert!(a == b)`。
-- **Ctrl+\ 的判定**：只有「修飾鍵恰為 CONTROL、字元為 `\`」算 Ctrl+\；Ctrl+Shift+\ 屬第 1 條（直通）。標點鍵只認「修飾鍵恰為 SHIFT」。
+- **Ctrl+\ 的判定**：只有「修飾鍵恰為 CONTROL、字元為 `\`」算 Ctrl+\；Ctrl+Shift+\ 屬第 1 條（直通）。§4 的 Shift 表只認「修飾鍵恰為 SHIFT」；單按表只認「沒有修飾鍵、而且該鍵在目前排列不是注音鍵或聲調鍵」（2026-10-05 起）。
 - **第 1 條的輸出**：直通時回傳 `handled = 0`、`commit` 為空，其餘欄位是目前狀態的快照（狀態不變）。第 22 條直通同理。
 - **取代後的 Backspace（第 11 條）**：同一欄被取代時，新符號算「最後放進」；Backspace 先刪它，不會還原舊符號。
 - **候選邊界**：↑↓ 在第一個／最後一個停住不繞回；←→ 和 ↑↓ 相同；只有空白鍵會從最後一頁繞回第一頁。候選開啟時 Esc／Backspace 是「已處理」（第 7 條），不會落到第 12 條以後。候選為空（不會發生，因每個音節都有詞條）時不開啟。
