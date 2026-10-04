@@ -76,17 +76,17 @@ Candidates from the production CLI at c6abd58 (chat profile), top 8 distinct str
 | discordtune | all | A-both | 1000 | 83.5% → 82.2% | 97.3% | 84.5% | 17 | 30 | -13 | 0.0789 | — | 54.8% | 0/0 | — |
 | discordtune | all | A-fwd@tau | 1000 | 83.5% → 84.0% | 97.3% | 86.3% | 19 | 14 | 5 | 0.487 | 72.4% | — | 0/0 | 355/470/1467 |
 | discordtune | all | A-both@tau | 1000 | 83.5% → 84.3% | 97.3% | 86.6% | 10 | 2 | 8 | 0.0386 | — | — | 0/0 | — |
-| discordtune | A | A-fwd | 500 | 82.6% → 75.6% | 97.0% | 77.9% | 35 | 70 | -35 | 0.0008 | 70.4% | — | 0/0 | 355/470/1467 |
-| discordtune | A | A-rev | 500 | 82.6% → 49.2% | 97.0% | 50.7% | 23 | 190 | -167 | 0 | 10.4% | 55.6% | 0/0 | 374/546/943 |
-| discordtune | A | A-ctx | 251 | 75.3% → 55.8% | 97.6% | 57.1% | 8 | 57 | -49 | 0 | 48.2% | — | 0/0 | 398/632/1086 |
+| discordtune | A | A-fwd | 500 | 82.6% → 75.6% | 97.0% | 77.9% | 35 | 70 | -35 | 0.0008 | 70.4% | — | 0/0 | 360/487/1467 |
+| discordtune | A | A-rev | 500 | 82.6% → 49.2% | 97.0% | 50.7% | 23 | 190 | -167 | 0 | 10.4% | 55.6% | 0/0 | 384/581/943 |
+| discordtune | A | A-ctx | 251 | 75.3% → 55.8% | 97.6% | 57.1% | 8 | 57 | -49 | 0 | 48.2% | — | 0/0 | 390/527/727 |
 | discordtune | A | A-both | 500 | 82.6% → 81.8% | 97.0% | 84.3% | 14 | 18 | -4 | 0.597 | — | 55.6% | 0/0 | — |
-| discordtune | A | A-fwd@tau | 500 | 82.6% → 83.6% | 97.0% | 86.2% | 11 | 6 | 5 | 0.332 | 70.4% | — | 0/0 | 355/470/1467 |
+| discordtune | A | A-fwd@tau | 500 | 82.6% → 83.6% | 97.0% | 86.2% | 11 | 6 | 5 | 0.332 | 70.4% | — | 0/0 | 360/487/1467 |
 | discordtune | A | A-both@tau | 500 | 82.6% → 84.0% | 97.0% | 86.6% | 9 | 2 | 7 | 0.0654 | — | — | 0/0 | — |
-| discordtune | B | A-fwd | 500 | 84.4% → 75.2% | 97.6% | 77.0% | 22 | 68 | -46 | 0 | 74.4% | — | 0/0 | 355/470/1467 |
-| discordtune | B | A-rev | 500 | 84.4% → 49.4% | 97.6% | 50.6% | 10 | 185 | -175 | 0 | 14.2% | 54.0% | 0/0 | 374/546/943 |
-| discordtune | B | A-ctx | 206 | 73.3% → 52.9% | 98.5% | 53.7% | 9 | 51 | -42 | 0 | 41.8% | — | 0/0 | 398/632/1086 |
+| discordtune | B | A-fwd | 500 | 84.4% → 75.2% | 97.6% | 77.0% | 22 | 68 | -46 | 0 | 74.4% | — | 0/0 | 351/451/661 |
+| discordtune | B | A-rev | 500 | 84.4% → 49.4% | 97.6% | 50.6% | 10 | 185 | -175 | 0 | 14.2% | 54.0% | 0/0 | 364/498/700 |
+| discordtune | B | A-ctx | 206 | 73.3% → 52.9% | 98.5% | 53.7% | 9 | 51 | -42 | 0 | 41.8% | — | 0/0 | 421/682/1086 |
 | discordtune | B | A-both | 500 | 84.4% → 82.6% | 97.6% | 84.6% | 3 | 12 | -9 | 0.0352 | — | 54.0% | 0/0 | — |
-| discordtune | B | A-fwd@tau | 500 | 84.4% → 84.4% | 97.6% | 86.5% | 8 | 8 | 0 | 1 | 74.4% | — | 0/0 | 355/470/1467 |
+| discordtune | B | A-fwd@tau | 500 | 84.4% → 84.4% | 97.6% | 86.5% | 8 | 8 | 0 | 1 | 74.4% | — | 0/0 | 351/451/661 |
 | discordtune | B | A-both@tau | 500 | 84.4% → 84.6% | 97.6% | 86.7% | 1 | 0 | 1 | 1 | — | — | 0/0 | — |
 | cvtune | all | A-fwd | 1000 | 85.1% → 81.7% | 97.2% | 84.0% | 70 | 104 | -34 | 0.0121 | 72.7% | — | 0/0 | 476/1075/4202 |
 | cvtune | all | A-rev | 1000 | 85.1% → 59.7% | 97.2% | 61.4% | 48 | 302 | -254 | 0 | 10.1% | 51.1% | 0/0 | 408/686/2125 |
@@ -113,7 +113,7 @@ Candidates from the production CLI at c6abd58 (chat profile), top 8 distinct str
 | typing76 | all | A-fwd@tau | 76 | 85.5% → 88.2% | 97.4% | 90.5% | 2 | 0 | 2 | 0.5 | 77.6% | — | 0/0 | 388/578/634 |
 | typing76 | all | A-both@tau | 76 | 85.5% → 86.8% | 97.4% | 89.2% | 2 | 1 | 1 | 1 | — | — | 0/0 | — |
 
-In this table, fixed/broken are against rank 1, except A-ctx, whose fixed/broken are against A-fwd on the same rows. The base accuracy shown for A-ctx is rank 1 on those rows.
+In this table, fixed/broken are against rank 1, except A-ctx, whose fixed/broken are against A-fwd on the same rows. The base accuracy shown for A-ctx is A-fwd's on those rows; rank 1 on the 457 discordtune rows with a context is 82.3%. Apple latency is per row and split by half; Jev latency is per request over the whole set.
 
 ### Pre-registered decision (contract section 5)
 
@@ -125,5 +125,5 @@ In this table, fixed/broken are against rank 1, except A-ctx, whose fixed/broken
 ### What the numbers say
 
 - **dev302 points the wrong way.** The 2026-10-04 probe and this run's dev302 row agree with each other (Apple +27), but dev302 does not predict the user's chats (discordtune −81). Sentences written by the project or an LLM do not stand in for real chat.
-- **Apple's on-device model picks by position.** Reversing the candidate order changes its pick on 51–55% of rows. It chooses the first option 72% of the time in forward order and 12% in reverse. Jev's flip rate is about 10%.
+- **Apple's on-device model picks by position.** Reversing the candidate order changes its pick on 49–55% of rows. On discordtune it chooses the first option 72% of the time in forward order and 12% in reverse (72–78% and 10–15% across the four sets). Jev's flip rate is 5–11%.
 - **Next experiment for an on-device judge**: a question shape that does not present a list of options, such as per-candidate scoring or the per-position shape, before any S5 integration.
