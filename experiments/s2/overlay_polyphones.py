@@ -83,16 +83,16 @@ def main():
             if j - i == 1 and len(readings[c]) > 1 and c not in "一不":
                 k = char_cat(syls[i], readings[c] - {syls[i]})
                 cat = max(cat, k)
-                gch.append((c, k))
+                gch.append((c, k, i))
         if cat < 0:
             continue
         guessed += 1
         per_cat[cat] += 1
-        for c, k in gch:
+        for c, k, _ in gch:
             if k == cat:
                 chars[cat][c] += 1
         if cat == 2:
-            samples.append((w, r, " ".join(f"{c}:{syls[w.index(c)]}/" + "/".join(sorted(readings[c] - {syls[w.index(c)]})) for c, k in gch if k == 2)))
+            samples.append((w, r, " ".join(f"{c}:{syls[i]}/" + "/".join(sorted(readings[c] - {syls[i]})) for c, k, i in gch if k == 2)))
     print(f"overlay words {total}; guessed (polyphone single-char segment, excluding 一/不) {guessed} ({guessed / total:.1%})")
     for k, name in enumerate(CATS):
         print(f"  {name}: {per_cat[k]}  top20 chars: " + " ".join(f"{c}{n}" for c, n in chars[k].most_common(20)))
