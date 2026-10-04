@@ -8,3 +8,6 @@ __pycache__/
 data/lm/
 /build/
 /macos/.build/
+
+# S5j smoke outputs (limit runs)
+experiments/s5-judges/results/*-n*/
