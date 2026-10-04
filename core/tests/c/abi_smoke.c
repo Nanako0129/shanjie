@@ -1,4 +1,4 @@
-/* S3a contract §7.4: compile and link shanjie.h against libcore.a. Usage: abi_smoke <data_dir> <lm_path>.
+/* S3a contract §7.4: compile and link shanjie.h against libcore.a. Usage: abi_smoke <data_dir> <lm_path> [learning_dir].
  * On failure prints only the check number (never string contents) and exits 1. */
 #include "shanjie.h"
 
@@ -150,13 +150,52 @@ static int run_punct(const char *dir) {
   return 0;
 }
 
+/* S4: argument checks of the five learning functions. `learn_dir` (optional) is an empty, writable
+ * directory for the calls that touch the learning file. */
+static int run_learn(const char *dir, const char *learn_dir) {
+  ShanjieEngine *e = 0;
+  uint32_t flags = 7u;
+  CHECK(501, shanjie_engine_new(dir, 0, &e) == 0 && e != 0);
+  /* NULL engine */
+  CHECK(502, shanjie_engine_set_left_context(0, "") == 1);
+  CHECK(503, shanjie_engine_set_learning(0, 1u) == 1);
+  CHECK(504, shanjie_engine_learning_open(0, "x") == 1);
+  CHECK(505, shanjie_engine_learning_clear(0) == 1);
+  CHECK(506, shanjie_engine_learning_status(0, &flags) == 1 && flags == 7u);
+  /* NULL argument */
+  CHECK(507, shanjie_engine_learning_open(e, 0) == 1);
+  CHECK(508, shanjie_engine_learning_status(e, 0) == 1);
+  /* left context: NULL and "" mean none; anything not UTF-8 is 2 */
+  CHECK(509, shanjie_engine_set_left_context(e, 0) == 0);
+  CHECK(510, shanjie_engine_set_left_context(e, "") == 0);
+  CHECK(511, shanjie_engine_set_left_context(e, "\xe5\xa5\xbd\xe4\xbb\x96") == 0);
+  CHECK(512, shanjie_engine_set_left_context(e, "\xff\xfe") == 2);
+  /* learning flag: 0 and 1 only; off by default */
+  CHECK(513, shanjie_engine_set_learning(e, 2u) == 2);
+  CHECK(514, shanjie_engine_set_learning(e, 1u) == 0);
+  CHECK(515, shanjie_engine_set_learning(e, 0u) == 0);
+  /* nothing written yet */
+  CHECK(516, shanjie_engine_learning_status(e, &flags) == 0 && flags == 0u);
+  /* without a file, clear only drops memory */
+  CHECK(517, shanjie_engine_learning_clear(e) == 0);
+  if (learn_dir) {
+    CHECK(518, shanjie_engine_learning_open(e, learn_dir) == 0);
+    CHECK(519, shanjie_engine_learning_status(e, &flags) == 0 && flags == 0u);
+    CHECK(520, shanjie_engine_learning_clear(e) == 0);
+    CHECK(521, shanjie_engine_learning_clear(e) == 0); /* a missing file is success */
+  }
+  shanjie_engine_free(e);
+  return 0;
+}
+
 int main(int argc, char **argv) {
   int rc;
-  if (argc != 3) return 2;
+  if (argc != 3 && argc != 4) return 2;
   rc = run(argv[1], 0, "su3cl3", "su3", 100);
   if (rc == 0) rc = run(argv[1], 1, "ne3hz3", "ne3", 200);
   if (rc == 0) rc = run_lm(argv[1], argv[2], "/nonexistent/shanjie-missing.sjlm");
   if (rc == 0) rc = run_punct(argv[1]);
+  if (rc == 0) rc = run_learn(argv[1], argc == 4 ? argv[3] : 0);
   shanjie_engine_free(0);
   shanjie_output_free(0);
   if (rc != 0) {

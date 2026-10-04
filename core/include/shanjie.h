@@ -82,8 +82,13 @@ int32_t shanjie_engine_set_learning(ShanjieEngine *engine, uint32_t enabled);
 //   missing. A missing file starts empty; a corrupt one is renamed learning.tsv.corrupt and starts
 //   empty (both 0). 3 on I/O failure or a directory not owned by the user.
 int32_t shanjie_engine_learning_open(ShanjieEngine *engine, const char *dir);
+// Forgetting: KEY with COMMAND (bit3) and kind BACKSPACE (4) while candidates are open removes the
+//   highlighted word's learned records for that reading (all contexts) and re-decodes; the output
+//   shows the new composition with the candidates still open. Without candidates the key passes through.
 // learning_clear: drops memory, pending learns and the files (a missing file is success); 3 on failure.
 int32_t shanjie_engine_learning_clear(ShanjieEngine *engine);
+// Learning happens only at a commit (Enter, a key the engine passes through after committing, or the
+//   40-syllable auto-commit), never on shanjie_engine_reset or Esc, and never for punctuation picks.
 // learning_status: *flags bit0 = the last write of the learning file failed.
 int32_t shanjie_engine_learning_status(ShanjieEngine *engine, uint32_t *flags);
 
