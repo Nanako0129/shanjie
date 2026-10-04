@@ -85,7 +85,7 @@
 6. **速度**：同場量 v0.1.0、v0.1.1、v0.1.2，報 p95 中位數與 max、載入時間、RSS；三版的重播與 CLI 都是 302／302 一致，結果記下總按鍵數。
 7. **私有資料沒被碰到**（不需要 root；2026-10-05 main 在本機實測過這個做法）：executor 的完整執行（`run v0.1.0 v0.1.1 v0.1.2 --private-root <空的暫存目錄>`）包在
    `sandbox-exec -p '(version 1)(allow default)(deny file* (subpath "/Users/nanako/side-project/shanjie-private") (with send-signal SIGKILL))'` 裡跑。任何對真實私有目錄的存取（含 stat、`os.path.exists`）都會讓程序當場被殺（結束碼 137），所以通過條件是「整個執行以 0 結束」。
-   - 突變（只做一次，main 會先告知使用者，因為會跳出 macOS 的當機報告）：在工具裡暫時加一行讀 `/Users/nanako/side-project/shanjie-private/discord-tune-rows.txt`，同一個指令必須以 137 結束；之後還原。
+   - 突變**由 main 執行**（只做一次，先告知使用者，因為會跳出 macOS 的當機報告；executor 不做這一步）：在工具裡暫時加一行讀 `/Users/nanako/side-project/shanjie-private/discord-tune-rows.txt`，同一個指令必須以 137 結束；之後還原。
    - 子程序（cargo、CLI、重播程式）也在同一個沙盒裡，一樣受限。
 
 ## 4. 範圍外
@@ -99,7 +99,7 @@
 | 檔案或工作 | 負責人 |
 |---|---|
 | `tools/bench.py`、`tools/bench/replay/`、`eval/bench/suite-v1/`、`docs/benchmark.md` 的產生器（executor 的試跑結果不 commit） | `pilotfish:executor` |
-| 用私有資料重跑 `run v0.1.0 v0.1.1 v0.1.2`，commit 基準線的 `eval/bench/results/*.json` 與 `docs/benchmark.md`；驗收 2、驗收 3 的 main 部分；保留集（請 verifier 量）；`docs/PLAN.md`、`README.md`（指向 benchmark.md）、`docs/research-log.md`、`docs/methodology.md`（量測規則）、`docs/verification.md` | main |
+| 用私有資料重跑 `run v0.1.0 v0.1.1 v0.1.2`，commit 基準線的 `eval/bench/results/*.json` 與 `docs/benchmark.md`；驗收 2、驗收 3 的 main 部分、驗收 7 的突變；保留集（請 verifier 量）；`docs/PLAN.md`、`README.md`（指向 benchmark.md）、`docs/research-log.md`、`docs/methodology.md`（量測規則）、`docs/verification.md` | main |
 
 - **預算**：executor 1 回合加 1 次修正。
 - **executor 不可以做的事**：
