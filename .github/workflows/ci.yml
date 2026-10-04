@@ -49,15 +49,21 @@ jobs:
           if [[ "$BASE" =~ ^0+$ ]] || ! git cat-file -e "$BASE^{commit}" 2>/dev/null; then
             run=true
           else
-            # --no-renames: rename detection would fetch file contents; listing
-            # both the old and the new path is also the conservative answer.
-            run=$(git diff --no-renames --name-only "$BASE...$GITHUB_SHA" | scripts/ci-changes.sh | sed 's/^run=//')
+            # A PR compares against the merge base (three dots); a push compares
+            # the two trees directly (two dots), so commits a force push dropped
+            # from main still count. --no-renames: rename detection would fetch
+            # file contents; listing both the old and the new path is also the
+            # conservative answer.
+            range="$BASE..$GITHUB_SHA"
+            [[ "$GITHUB_EVENT_NAME" == pull_request ]] && range="$BASE...$GITHUB_SHA"
+            run=$(git diff --no-renames --name-only "$range" | scripts/ci-changes.sh | sed 's/^run=//')
           fi
           # On main, a skip is only safe when the previous commit's run passed:
           # otherwise a docs-only commit after a red, cancelled or unfinished
           # run would conclude `success` and clear the release gate
-          # (scripts/check-ci-gate.sh) for code that last failed. By induction,
-          # every skipped main commit sits on a tree whose last full run passed.
+          # (scripts/check-ci-gate.sh) for code that last failed. The check sees
+          # the previous run as it is at decision time: a later re-run of that
+          # commit that turns red does not reach commits already skipped.
           if [[ "$run" == false && "$GITHUB_EVENT_NAME" == push ]]; then
             prev=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$BASE&event=push&branch=main&per_page=100" \
                      --jq '[.workflow_runs[]] | sort_by(.created_at) | last | .conclusion // "none"' 2>/dev/null || echo none)
