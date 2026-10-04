@@ -46,14 +46,20 @@ const PUNCT_PREFIX: &str = "_punct_";
 /// data/lexicon/mcbpmf-data.txt (McBopomofo, MIT): ， `_punctuation_Standard_<` lines 1093-1097;
 /// 。 `_punctuation_Standard_>` 1098-1103; ： `_punctuation_:` 1044-1045; 「 `_punctuation_{`
 /// 2302-2308 and 」 `_punctuation_}` 2313-2319 (`_punctuation_[`/`]` hold only 「」); 、
-/// `_punctuation_\\` 1105-1106. The other marks have no alternatives there.
-const DEFAULT_PUNCT: [(char, &[&str]); 6] = [
+/// `_punctuation_\\` 1105-1106. The other marks have no alternatives there. 『』 (now Shift+[ / Shift+])
+/// and the quotes ‘“ (plain and Shift+') are ours, so a mark without Apple's table still reaches its
+/// pair and the closing quotes ’”.
+const DEFAULT_PUNCT: [(char, &[&str]); 10] = [
     ('，', &["〈", "《", "︿", "︽"]),
     ('。', &["．", "〉", "》", "﹀", "︾"]),
     ('：', &["；"]),
     ('「', &["『", "《", "〔", "｛", "〈", "【", "〖"]),
     ('」', &["』", "》", "〕", "｝", "〉", "】", "〗"]),
     ('、', &["＼", "／"]),
+    ('『', &["「", "《", "〔", "｛", "〈", "【", "〖"]),
+    ('』', &["」", "》", "〕", "｝", "〉", "】", "〗"]),
+    ('‘', &["’"]),
+    ('“', &["”"]),
 ];
 /// s3e §3 limits on a table passed to `set_punctuation`.
 const PUNCT_TABLE_MAX_BYTES: usize = 64 * 1024;

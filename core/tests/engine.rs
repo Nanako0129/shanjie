@@ -150,7 +150,8 @@ fn row2_unshifted_bracket_row_is_punctuation() {
     for (c, p) in PLAIN_PUNCT_TABLE {
         let o = k(&mut eng(Layout::Eten), plain(c));
         if c == '\'' || c == '=' {
-            assert!(o.handled && o.preedit != p.to_string(), "Eten {c} is a Zhuyin key");
+            let zy = if c == '\'' { "ㄘ" } else { "ㄦ" };
+            assert!(o.handled && o.preedit == zy, "Eten {c} is the Zhuyin key {zy}");
         } else {
             assert!(o.handled && o.preedit == p.to_string(), "Eten {c}");
         }
@@ -267,6 +268,14 @@ fn default_punctuation_candidates() {
     };
     assert!(list('[').contains(&"『".to_string()) && list('[')[0] == "「");
     assert!(list('/') == vec!["？".to_string()]);
+    // 『 (Shift+[) and the plain quote reach their pair and the closing quote without Apple's table.
+    let mut e = std();
+    k(&mut e, Key::ch('[', MOD_SHIFT));
+    let c = kk(&mut e, KeyKind::Space).candidates;
+    assert!(c[0] == "『" && c.contains(&"「".to_string()));
+    let mut e = std();
+    k(&mut e, plain('\''));
+    assert!(kk(&mut e, KeyKind::Space).candidates == vec!["‘".to_string(), "’".to_string()]);
 }
 
 /// s3e acceptance 1: a table from the shell; choosing an alternative replaces the mark, Enter commits
