@@ -48,30 +48,42 @@ final class ShanjieInputController: IMKInputController {
     // two-mode IDs of earlier versions while they are still enabled; only the menu and the stored
     // preference do (s3b section 13.3, local review of PR #5).
 
-    /// docs/contracts/s3b.md section 13.2: the two layouts, the current one checked. Each item has
-    /// its own selector, as McBopomofo does, rather than relying on `sender` being the NSMenuItem
-    /// (what IMK passes as sender is not measured here).
+    /// docs/contracts/s3b.md section 13.2 and S4 sections 3-4: the entries ShanjieKit builds
+    /// (`Session.menu`). Each action has its own selector, as McBopomofo does, rather than relying
+    /// on `sender` being the NSMenuItem (what IMK passes as sender is not measured here). The clear
+    /// is confirmed in the menu itself, in two steps, so it needs no window.
     override func menu() -> NSMenu! {
-        let current = MainActor.assumeIsolated { session.layout }
+        let entries = MainActor.assumeIsolated { session.menu }
         let menu = NSMenu()
-        for (title, action, layout) in [
-            ("標準鍵盤", #selector(selectStandardLayout(_:)), InputMode.standard),
-            ("倚天鍵盤", #selector(selectEtenLayout(_:)), InputMode.eten),
-        ] {
-            let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
-            item.state = layout == current ? .on : .off
+        for entry in entries {
+            let item = NSMenuItem(title: entry.title, action: entry.action.map(Self.selector(for:)), keyEquivalent: "")
+            item.state = entry.checked ? .on : .off
             menu.addItem(item)
         }
         return menu
     }
 
-    @objc func selectStandardLayout(_ sender: Any?) {
-        MainActor.assumeIsolated { session.selectLayout(.standard) }
+    private static func selector(for action: MenuEntry.Action) -> Selector {
+        switch action {
+        case .layout(.standard): #selector(selectStandardLayout(_:))
+        case .layout(.eten): #selector(selectEtenLayout(_:))
+        case .askClear: #selector(askClearLearning(_:))
+        case .confirmClear: #selector(confirmClearLearning(_:))
+        case .cancelClear: #selector(cancelClearLearning(_:))
+        case .toggleBackup: #selector(toggleLearningBackup(_:))
+        }
     }
 
-    @objc func selectEtenLayout(_ sender: Any?) {
-        MainActor.assumeIsolated { session.selectLayout(.eten) }
+    private func perform(_ action: MenuEntry.Action) {
+        MainActor.assumeIsolated { session.perform(action) }
     }
+
+    @objc func selectStandardLayout(_ sender: Any?) { perform(.layout(.standard)) }
+    @objc func selectEtenLayout(_ sender: Any?) { perform(.layout(.eten)) }
+    @objc func askClearLearning(_ sender: Any?) { perform(.askClear) }
+    @objc func confirmClearLearning(_ sender: Any?) { perform(.confirmClear) }
+    @objc func cancelClearLearning(_ sender: Any?) { perform(.cancelClear) }
+    @objc func toggleLearningBackup(_ sender: Any?) { perform(.toggleBackup) }
 
     override func candidates(_ sender: Any!) -> [Any]! {
         MainActor.assumeIsolated { session.candidates }
@@ -102,6 +114,16 @@ final class ClientAdapter: TextClient {
         client?.setMarkedText(
             text, selectionRange: selectionRange,
             replacementRange: NSRange(location: NSNotFound, length: 0))
+    }
+
+    // S4 left context (docs/contracts/s4-learning.md section 2). No client: no insertion point,
+    // so no read follows.
+    func selectedRange() -> NSRange { client?.selectedRange() ?? NSRange(location: NSNotFound, length: 0) }
+
+    func markedRange() -> NSRange { client?.markedRange() ?? NSRange(location: NSNotFound, length: 0) }
+
+    func attributedSubstring(from range: NSRange) -> NSAttributedString? {
+        client?.attributedSubstring(from: range)
     }
 }
 
