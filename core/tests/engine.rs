@@ -128,7 +128,34 @@ fn row1_passthrough_keys_leave_no_trace() {
 }
 
 // ---------- row 2 (s3d: punctuation stays in the composition) ----------
-const PUNCT_TABLE: [(char, char); 10] = [(',', '，'), ('.', '。'), ('/', '？'), ('1', '！'), (';', '：'), ('[', '「'), (']', '」'), ('9', '（'), ('0', '）'), ('`', '～')];
+const PUNCT_TABLE: [(char, char); 13] = [
+    (',', '，'), ('.', '。'), ('/', '？'), ('1', '！'), (';', '：'), ('[', '『'), (']', '』'), ('9', '（'), ('0', '）'),
+    ('`', '～'), ('\\', '｜'), ('\'', '“'), ('=', '＋'),
+];
+/// Unshifted keys that are punctuation (Apple's Zhuyin, key probe 2026-10-05).
+const PLAIN_PUNCT_TABLE: [(char, char); 6] = [('[', '「'), (']', '」'), ('\\', '、'), ('\'', '‘'), ('=', '＝'), ('`', '·')];
+
+/// The bracket row without Shift goes into the composition like the Shift table; in Eten, ' and = stay
+/// Zhuyin keys (they are symbols there), the others still give punctuation.
+#[test]
+fn row2_unshifted_bracket_row_is_punctuation() {
+    for (c, p) in PLAIN_PUNCT_TABLE {
+        let mut e = std();
+        typ(&mut e, NIHAO);
+        let o = k(&mut e, plain(c));
+        assert!(o.handled && o.commit.is_empty() && o.preedit == format!("你好{p}"), "{c}");
+        let o = kk(&mut e, KeyKind::Enter);
+        assert!(o.commit == format!("你好{p}"), "{c}");
+    }
+    for (c, p) in PLAIN_PUNCT_TABLE {
+        let o = k(&mut eng(Layout::Eten), plain(c));
+        if c == '\'' || c == '=' {
+            assert!(o.handled && o.preedit != p.to_string(), "Eten {c} is a Zhuyin key");
+        } else {
+            assert!(o.handled && o.preedit == p.to_string(), "Eten {c}");
+        }
+    }
+}
 
 /// s3d acceptance 1: every punctuation key (and Ctrl+\) goes into the composition at the cursor, drops
 /// the pending syllable, closes candidates and commits nothing; Enter commits it with the rest.
@@ -235,7 +262,7 @@ fn candidates_never_span_punctuation() {
 fn default_punctuation_candidates() {
     let list = |c: char| {
         let mut e = std();
-        k(&mut e, Key::ch(c, MOD_SHIFT));
+        k(&mut e, if c == '[' { plain(c) } else { Key::ch(c, MOD_SHIFT) });
         kk(&mut e, KeyKind::Space).candidates
     };
     assert!(list('[').contains(&"『".to_string()) && list('[')[0] == "「");
@@ -303,7 +330,7 @@ fn set_punctuation_validates_and_keeps_the_old_table() {
     // Success replaces the whole table: a mark the new table does not list has no alternatives
     // left (the built-in 「 list is gone).
     e.reset(ResetMode::Discard);
-    k(&mut e, Key::ch('[', MOD_SHIFT));
+    k(&mut e, plain('['));
     assert!(kk(&mut e, KeyKind::Space).candidates == vec!["「".to_string()]);
 }
 
@@ -505,7 +532,7 @@ fn rows16_to_20_composition_editing() {
 }
 #[test]
 fn row21_other_key_commits_then_passes_through() {
-    for key in [Key::new(KeyKind::Tab), Key::ch('a', MOD_SHIFT), Key::ch('x', MOD_SHIFT), Key::ch('=', 0), Key::ch('5', MOD_SHIFT)] {
+    for key in [Key::new(KeyKind::Tab), Key::ch('a', MOD_SHIFT), Key::ch('x', MOD_SHIFT), Key::ch('-', MOD_SHIFT), Key::ch('5', MOD_SHIFT)] {
         let mut e = std();
         typ(&mut e, NIHAO);
         let o = k(&mut e, key);
