@@ -15,6 +15,11 @@ public protocol TextClient: AnyObject {
     var bundleIdentifier: String? { get }
     func insertText(_ text: String, replacementRange: NSRange)
     func setMarkedText(_ text: NSAttributedString, selectionRange: NSRange)
+    // S4 left context (docs/contracts/s4-learning.md section 2), NSTextInputClient semantics:
+    // markedRange is {NSNotFound, 0} when the client has no marked text.
+    func selectedRange() -> NSRange
+    func markedRange() -> NSRange
+    func attributedSubstring(from range: NSRange) -> NSAttributedString?
 }
 
 /// A display-only candidate list (IMKCandidates in the app). It never receives keys.
@@ -74,6 +79,14 @@ public final class Shell {
     private(set) var engine: CoreEngine?
     private(set) var mode: InputMode = .standard
     private(set) var profile: UInt32 = Shell.chat
+    /// S4: the learning directory (section 4), `nil` for none (no file is opened or written).
+    let learningDirectory: URL?
+    /// The last `shanjie_engine_learning_open` of the current engine failed.
+    var learningOpenFailed = false
+    /// The menu's two-step clear (section 4): armed by the first item, cleared by any outcome.
+    var confirmingClear = false
+    /// The last clear returned non-zero; shown in the menu until a clear succeeds.
+    var clearFailed = false
 
     /// The owning session. "Still valid" means this weak reference is not nil; an address
     /// (ObjectIdentifier) is never used, as a freed controller's address can be reused.
@@ -92,12 +105,17 @@ public final class Shell {
     /// `layoutStore`: the chosen layout. Required, with no default, so the app cannot silently
     /// start without its preference (section 13.2); a missing or unknown value is the standard
     /// layout.
+    /// `learningDirectory`: where the core keeps learning.tsv (S4 section 4), `Shell.learningURL()`
+    /// in the app; tests pass a temporary directory or nil. Required, with no default, so no caller
+    /// can reach the real Application Support by omission.
     /// `punctuationTable`: Apple's punctuation candidate table (s3e); tests pass another path.
     /// `punctuationNames`: Apple's punctuation names (s3f); tests pass another path.
     public init(resources: URL, panel: CandidatePanel, isSecureInput: @escaping () -> Bool,
-                layoutStore: LayoutStore, punctuationTable: URL = PunctuationTable.systemURL,
+                layoutStore: LayoutStore, learningDirectory: URL?,
+                punctuationTable: URL = PunctuationTable.systemURL,
                 punctuationNames: URL = PunctuationNames.systemURL) {
         self.resources = resources
+        self.learningDirectory = learningDirectory
         // Read once: the converted table never changes while the process runs, and the layout
         // switch that rebuilds the engine already blocks.
         punctuation = PunctuationTable.load(from: punctuationTable)
@@ -145,6 +163,12 @@ public final class Shell {
         if let table = punctuation {
             let code = e.setPunctuation(table)
             if code != 0 { Log.shell.error("punctuation candidates: core rejected the system table, code \(code)") }
+        }
+        // S4: learning stays off (the core's default) until send() or finish() samples the gate.
+        if let dir = learningDirectory {
+            let code = e.learningOpen(dir: dir.path)
+            learningOpenFailed = code != 0
+            if code != 0 { Log.shell.error("shanjie_engine_learning_open failed, code \(code)") }
         }
         engine = e
     }
@@ -301,6 +325,14 @@ public final class Session {
     /// The single place a key reaches the core.
     func send(_ key: ShanjieKey) -> Bool {
         guard let engine = shell.engine else { return false }
+        let paused = applyLearningGate(engine)
+        // Section 2: once per composition, before the key that may start it and so before its
+        // first setMarkedText. Only a character key without Control, Option, Command or Caps Lock
+        // can start one, so pass-through keys outside a composition never read the client.
+        if !shell.composing && key.kind == KeyMap.char && key.modifiers & ~1 == 0 {
+            let code = engine.setLeftContext(paused ? nil : leftContext())
+            if code != 0 { Log.shell.error("shanjie_engine_set_left_context failed, code \(code)") }
+        }
         switch engine.key(key) {
         case .ok(let o):
             // handled 0 with nothing to commit is a pure pass-through (s3a rules 1 and 22): the
@@ -316,6 +348,7 @@ public final class Session {
     /// text and the panel are cleared.
     func finish(mode: UInt32) {
         guard let engine = shell.engine else { return }
+        applyLearningGate(engine)
         switch engine.reset(mode: mode) {
         case .ok(let o): apply(o)
         case .failed(let c): _ = fail(c)
