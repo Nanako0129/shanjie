@@ -35,7 +35,7 @@
 | discordtune（私有） | `<private-root>/discord-tune-rows.txt` | 4,958 | chat | 使用者真實聊天，調參數時看過；repo 只放統計 |
 
 - 每格的指標：n、top1、oracle@64、`top1_sha256`（第一名字串串起來的雜湊）。
-- **和上一列逐列比**：修好、弄壞、McNemar 雙尾精確 p。工具檢查每一格 top1(新) − top1(舊) = 修好 − 弄壞，不相等就失敗退出。
+- **和上一列逐列比**：修好、弄壞、McNemar 雙尾精確 p。工具檢查兩版逐列結果的列數都等於集合列數，而且上一版逐列算出的 top1 等於它紀錄裡的 top1；不符就停下。（原本寫的「top1(新) − top1(舊) = 修好 − 弄壞」在兩個等長的 0／1 序列上恆成立，檢查不到東西，`/code-review` 指出後改掉。）
 
 ### 1.2 速度與記憶體
 
@@ -59,7 +59,7 @@
   - 公開與私有集合的**統計數字**寫進 `eval/bench/results/<label>.json`（含集合、`variants.tsv`、模型與詞庫的指紋、環境、重播與 CLI 的一致列數、總按鍵數）。逐列輸出寫快取：公開集合在 `~/.cache/shanjie/bench/rows/`，私有集合在 `<private-root>/bench/`。逐列輸出不進 repo（wikitune 句子是 CC BY-SA，cvtune 句子來自 Common Voice／Tatoeba）。
   - 逐列比較需要上一列的輸出：從快取讀，快取不在或雜湊和 results JSON 的 `top1_sha256` 不符就重跑上一版。
   - `table`：從所有 results JSON 重產 `docs/benchmark.md`，不手改。
-- **指紋**：每個集合檔的 SHA-256、套件 `variants.tsv` 的雜湊、模型雜湊、該版 `data/lexicon` 的雜湊（只記錄）。集合或 variants 指紋和上一列不同時，該格標「集合變動」，不算 Δ。工具從不讀取或雜湊 `eval/holdout/` 底下的檔案。
+- **指紋**：每個集合檔的 SHA-256、套件 `variants.tsv` 的雜湊、模型雜湊、該版 `data/lexicon` 的雜湊（只記錄）。快取以（commit、集合 SHA-256、variants、模型）為鍵；上一版紀錄的指紋和目前的套件不同時，工具在目前的套件下重跑上一版再比，不拿舊結果硬比，並在 stderr 說明原因。工具從不讀取或雜湊 `eval/holdout/` 底下的檔案。
 - **缺檔**：私有集合缺檔時，該欄寫「—（沒有私有資料）」並在 stderr 說明；公開集合缺檔就失敗退出。不默默略過。
 - `docs/benchmark.md`：
   - 主表：版本 × 集合的 top1%，附和上一版的修好／弄壞／p；
@@ -73,7 +73,7 @@
 1. **決定性**：同一版跑兩次，results JSON 的準確率欄與 `top1_sha256` 完全相同；`table` 重產的 `docs/benchmark.md` 逐位元組相同。
 2. **對得上研究紀錄**（main）：v0.1.2（ef20c40；研究紀錄的 B 是分支 2f4f684，詞庫與 CLI 和 ef20c40 相同，不同就照停止條件處理）chat 的 cvtune 3,121／3,677、wikitune 1,860／2,733、dev302＋typing76 合計 303／378（研究紀錄 S2r-2 一節）；discordtune 4,172／4,958。對不上就停下來回報。
 3. **逐列比較正確**：
-   - executor：工具的「Δtop1 = 修好 − 弄壞」檢查在每一格都通過；另外用套件的 rows 檔自己跑兩版 CLI 的 dump、獨立重算 v0.1.1 → v0.1.2 在 cvtune、wikitune 的修好／弄壞，和工具一致（不經過 `s2r_eval.py`，它會讀私有檔）。
+   - executor：工具的列數與上一版 top1 檢查在每一格都通過；另外用套件的 rows 檔自己跑兩版 CLI 的 dump、獨立重算 v0.1.1 → v0.1.2 在 cvtune、wikitune 的修好／弄壞，和工具一致（不經過 `s2r_eval.py`，它會讀私有檔）。
    - main：同一組數字和 `experiments/s2/s2r_eval.py ab <v0.1.1 CLI> <v0.1.2 CLI> --which orig --all --sets cvtune,wikitune` 一致。
 4. **舊版本**：v0.1.0、v0.1.1 都能 build 並產出完整的一列，**包括 probe**（集合來自套件，不是該版本的匯出）；同一次執行裡三個版本的集合指紋相同。任何一版 build 或執行失敗，表上寫原因，不留空白。
 5. **突變**：
@@ -133,3 +133,11 @@
 | P2 §3.7 的 `fs_usage` 要 root，executor 跑不了；「同等方式」沒定義 | FIX：改成 `sandbox-exec` 的拒絕規則加 SIGKILL，通過條件是結束碼 0；突變必須得到 137（main 實測過）|
 | P3 `SHANJIE_VARIANTS` 要絕對路徑 | FIX：§1.1 |
 | P3 保留集要從 tag 的 worktree build | FIX：§1.3 |
+
+**本地 `/code-review`（77e296e，medium）**：4 項，全部 FIX（9219aa1）。
+| 問題 | 處置 |
+|---|---|
+| high：某格失敗時表上會顯示成「沒有私有資料」，多版本時還會整次不寫結果 | 每格記錄自己的結果或錯誤；失敗顯示「失敗：原因」；結果一律寫出，有失敗就以 1 結束 |
+| medium：`git archive | tar` 沒有 pipefail，匯出失敗會留下壞快取 | 分兩步各自檢查結束碼，成功才寫標記 |
+| medium：「集合變動」永遠不會觸發，快取只以 commit 為鍵 | 快取鍵含指紋；指紋不同就重跑上一版（§2） |
+| low：Δtop1 = 修好 − 弄壞 恆成立 | 改成列數與上一版 top1 的檢查（§1.1） |
