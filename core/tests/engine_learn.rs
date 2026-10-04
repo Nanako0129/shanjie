@@ -1110,6 +1110,27 @@ fn store_forget_leaves_no_trace_and_clear_starts_over() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// §4: forget rewrites even when memory holds no record of the word: a record pruned on load (here
+/// 100 days old) is still in the file until a full rewrite, and the forget must take it out now.
+#[test]
+fn store_forget_rewrites_even_when_memory_has_no_record() {
+    let dir = tmp_dir("forgetpruned");
+    let mut e = tiny(TINY, TINY);
+    e.learning_open(&dir).unwrap();
+    assert_eq!(repick(&mut e, "ㄒㄧㄣ"), "欣");
+    let mut e = tiny(TINY, TINY);
+    e.set_today(Some(DAY + 100));
+    e.learning_open(&dir).unwrap();
+    assert_eq!(n_records(&e), 0, "pruned in memory on load");
+    assert!(raw(&dir).contains("欣"), "still in the file");
+    forget(&mut e, "ㄒㄧㄣ", "欣");
+    assert!(!raw(&dir).contains("欣"), "the forget rewrote the file");
+    assert_eq!(e.learning_status(), 0);
+    let (e2, opened) = reopen(&dir);
+    assert_eq!((opened, n_records(&e2)), (core::learn_store::Opened::Loaded { skipped: 0 }, 0));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// §6.13: a symlink, a FIFO, a second hard link, a file emptied by hand or one with group bits in
 /// place of the learning file: the append is refused and the full rewrite replaces it with a 0600
 /// regular file, never writing through the link.
