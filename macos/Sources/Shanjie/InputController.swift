@@ -118,10 +118,10 @@ final class CandidatePanelAdapter: CandidatePanel {
         panel.setAttributes([IMKCandidatesSendServerKeyEventFirst: NSNumber(value: true)])
     }
 
-    /// s3f: the name's point size. Apple's cells show the name smaller than the mark (user's
-    /// screenshots, 2026-10-05); IMKCandidates does not expose its own font size, so this is a
-    /// first value for the user's visual rounds.
-    static let noteFontSize: CGFloat = 12
+    /// s3f: the name's point size, matched to the system Zhuyin input method. Round 1 used 12 pt;
+    /// in the user's same-scale screenshots (2026-10-05) Apple's "全形逗號" measured 46 px wide and
+    /// 10 px tall against our 62 and 14, about 0.73 of 12 pt, which is the mini control size (9 pt).
+    static let noteFontSize = NSFont.systemFontSize(for: .mini)
 
     func show(_ candidates: [String], notes: [String?], selected: Int) {
         panel.setCandidateData(zip(candidates, notes).map { c, note -> Any in
