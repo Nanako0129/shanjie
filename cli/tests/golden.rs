@@ -30,6 +30,13 @@ fn matches_s1_references_byte_for_byte() {
     assert_eq!(run(&["--set", "trap", "daily", "moedict", "--learn-sim"]), golden("s1-overlay-sets.txt"));
 }
 
+/// S2r: the probe rows only decode right with sandhi-add.tsv loaded; reference/proto/check_unigram_overlay.py
+/// checks the same golden from Python.
+#[test]
+fn matches_s2r_probe_unigram_byte_for_byte() {
+    assert_eq!(run(&["--set", "probe"]), golden("s2r-probe-unigram.txt"));
+}
+
 #[test]
 fn lenient_dump_uses_the_variant_table() {
     // S2v acceptance 6. SHANJIE_VARIANTS is neither set nor cleared here, so pointing it at an

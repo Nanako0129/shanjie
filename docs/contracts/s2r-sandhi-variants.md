@@ -28,19 +28,20 @@
 輸入：`data/lexicon/mcbpmf-data.txt`（基底，MIT）；讀 `data/lexicon/overlay-add.tsv` 只為了去重。輸出：`data/lexicon/sandhi-add.tsv`，每列 `讀音\t詞\t分數\tsandhi`；`--check` 重產並和現有檔逐位元組比對。
 
 - 只處理基底的**多字**列（單字列不動：ㄧ／ㄧˊ／ㄧˋ、ㄅㄨˋ／ㄅㄨˊ 都已存在），略過 `#`、`_` 開頭與字數不等於音節數的列（和 `Lexicon::parse_with` 相同）。
-- 「下一音節的聲調」：看讀音字串最後的聲調符號（無符號＝陰平、ˊ＝陽平、ˇ＝上聲、ˋ＝去聲、˙＝輕聲）；下一個字是「不」時視為去聲（不的本調是去聲）；下一個字是「個」而讀輕聲時視為去聲（審訂表「個」不取輕聲，`research-moe-readings.md` §1.2；ㄧˊ 是推論，標為未驗證）。
+- 「下一音節的聲調」：看讀音字串最後的聲調符號（無符號＝陰平、ˊ＝陽平、ˇ＝上聲、ˋ＝去聲、˙＝輕聲）；下一個字是「不」時視為去聲（不的本調是去聲）；**實作中加入**：下一個字是「一」時視為陰平（一的本調；`/code-review` 找到「不」接已變調的「一」被當成去聲前）；下一個字是「個」而讀輕聲時視為去聲（審訂表「個」不取輕聲，`research-moe-readings.md` §1.2）。「個」這條的依據：審訂表把「個」定為 ㄍㄜˋ，簡編本「去聲前變 ㄧˊ」直接適用，基底自己也收了 `ㄧˊ-ㄍㄜ˙ 一個`（`mcbpmf-data.txt` 第 157134 行）；簡編本線上只能全文檢索，沒找到可直接對照的「一個」詞條。用到這條的 7 列：一個鼻孔出氣、一個不小心、一個接一個、一個小時、一個小時後、一個人住、一個字。
 - **排除**（「一」一律只用本調、不生成變調）：
   - 前一字是「第」或數字字（零〇一二三四五六七八九十百千萬億兆兩）；
   - 後一字是數字字或「月」；
   - 「一」在詞尾；
   - 疊字動詞中間（前一字＝後一字，例：問一問、看一看）。
+  - **實作中加入**（§4.6 第一次抽查 3／50 不合規則，依停止條件修生成器）：數字字加「廿卅佰仟」；詞中的詞尾——基底裡以「一」結尾、每個讀音都讀 ㄧ、而且基底沒有任何一列在它後面接字時把「一」變調的詞（統一、單一、唯一、國一，共 133 個；`final_words`）；序詞、詞中詞尾與專名清單 `LISTED`（main 逐列看過 R1 的全部 358 列後列出 41 項：校名、宿舍、年級、編號、路線、審級、世代等序詞，`final_words` 判斷不了的詞尾（同一性、正一教、弘一大師），以及日本人名、品牌等教育部沒有規則的專名）。
 - 每條規則對一列至多產生一個變體（把這一列中所有符合條件的位置一起改），規則各自獨立套用在**原列**上：
 
 | 規則 | 條件 | 產生 | 預期新增列（`research-moe-readings.md` §7） |
 |---|---|---|---|
-| R1 一 本調→變調 | 「一」讀 ㄧ、不在排除範圍、下一音節有聲調可判 | 去聲前 → ㄧˊ；陰平／陽平／上聲前 → ㄧˋ；其他（輕聲且下一字不是「個」）不改 | 354 |
-| R2 一／不 變調→本調 | 「一」讀 ㄧˊ 或 ㄧˋ，或「不」讀 ㄅㄨˊ | 這一列所有的「一」改成 ㄧ、所有的「不」改成 ㄅㄨˋ（同一詞兩個字都在變調時，產生的是全部本調的那一列，例：一動不動） | 約 987（研究報告分開量的 R2a 134＋R2b 853，兩者重疊很少） |
-| R3 不 本調→變調 | 「不」讀 ㄅㄨˋ 且下一音節是去聲 | 改成 ㄅㄨˊ | 13 |
+| R1 一 本調→變調 | 「一」讀 ㄧ、不在排除範圍、下一音節有聲調可判 | 去聲前 → ㄧˊ；陰平／陽平／上聲前 → ㄧˋ；其他（輕聲且下一字不是「個」）不改 | 354（實作：原排除 358；加入上面的排除後 284，少的 74 列逐列列在 `docs/research-log.md`） |
+| R2 一／不 變調→本調 | 「一」讀 ㄧˊ 或 ㄧˋ，或「不」讀 ㄅㄨˊ | 這一列所有的「一」改成 ㄧ、所有的「不」改成 ㄅㄨˋ（同一詞兩個字都在變調時，產生的是全部本調的那一列，例：一動不動） | 約 987（研究報告分開量的 R2a 134＋R2b 853，兩者重疊很少；實作 976，差 1.1%） |
+| R3 不 本調→變調 | 「不」讀 ㄅㄨˋ 且下一音節是去聲 | 改成 ㄅㄨˊ | 13（實作 14，差 7.7%） |
 | R5 法 | 「法」讀 ㄈㄚˋ（審訂表無此音） | 改成 ㄈㄚˇ | 28 |
 
 - 分數照抄來源列；（讀音, 詞）已在基底或疊加層就不產生；同一個（讀音, 詞）由多列產生時取最高分；輸出依（讀音, 詞）的 UTF-8 位元組序排序。
@@ -73,10 +74,12 @@
 
 - 重產**前**先寫下每份預期變動的列數（推法：數該集合裡讀音含新變體讀音的列），重產後列出實際變動的列（公開集合可列句子），和預期比對；差很多就停。
 - **跨語言檢查**（取代「Rust 跟自己比」）：新增 `reference/proto/check_unigram_overlay.py`，用 Python `ime.Lexicon`（兩份疊加層）以 unigram 解碼 dev302 與 S1 的疊加層集合，第一名必須和新的 Rust golden 完全一致；本機與 verifier 都跑。
+  - **實作中加入**：dev302 與 S1 集合的讀音都是基底已有的，拿掉 `sandhi-add.tsv` 這項檢查照樣通過（實測），所以評測 CLI 加 `--set probe`（讀 `eval/probe/`），Rust 產生 `eval/golden/s2r-probe-unigram.txt`（`cli/tests/golden.rs` 逐位元組比對），Python 檢查也比對它；兩邊拿掉 `sandhi-add.tsv` 都會失敗。
 
 ## 4. 評測（`docs/methodology.md` §3 的規則）
 
 0. **基準（停止條件）**：新增 `experiments/s2/build_probe.py`（含 `--check`：重產並逐位元組比對），從 cvtune、dev302、typing76 取含「一」或「不」的列，依 §1 的規則把每個可換的位置換成**另一種合規讀音**（本調↔變調；排除範圍不換），一列產生一個探針列；公開的探針列寫到 `eval/probe/s2r-probe.txt`（格式同 dev 檔 `前文|句子|讀音`，**不放在 `eval/dev/` 底下**，否則會改變「開發集前 302 列」）；discordtune 用同一規則產生，存在 `~/side-project/shanjie-private/s2-probe/`，在 `iter2.py` 的集合清單註冊為私有，只出列數與數字。以**現行**詞庫量探針 top-1，和同一批列原本讀音的 top-1 配對比較。兩者差距在一個配對標準誤以內就停：前提不成立。
+   - **實作中改變**：cvtune 與 discordtune 的探針不寫檔、不在 `iter2.py` 註冊；`experiments/s2/s2r_eval.py` 用同一個 `flip` 現算，私有與否照 `iter2.all_sets` 的標記，逐列結果只寫進私有目錄。
 1. **主指標**：補齊後探針 top-1 對補齊前，cvtune 探針與 discordtune 探針各自配對比較，p < 0.05 且淨值為正（gate 集合）；dev302、typing76 的探針只報數字（挑戰集，不當門檻，`methodology.md` §2）。
 2. **不退步**：cvtune、wikitune、discordtune 用原本的讀音配對比較，不得顯著退步；dev302、typing76 報數字。跑之前先寫下預期變動的列數。
 3. **正式路徑**：
@@ -93,7 +96,7 @@
 ## 5. 負責人、範圍、停止條件與預算
 
 - 負責人：main 親自實作（判斷多、檔案跨 Rust／Python／腳本），不委派；`core/src/ffi.rs` 只改測試資料與一條斷言，不動匯出函式。
-- 檔案範圍（只改這些）：`tools/build_sandhi.py`、`data/lexicon/sandhi-add.tsv`、`eval/probe/s2r-probe.txt`、`scripts/check-app.sh`、`macos/Tests/ShanjieKitTests/Support.swift`、`macos/Tests/ShanjieKitTests/SelftestTests.swift`、`core/src/engine.rs`、`core/src/ffi.rs`（測試）、`core/tests/`（新斷言）、`cli/src/main.rs`、`reference/proto/ime.py`、`reference/proto/lm_eval.py`、`reference/proto/check_unigram_overlay.py`、`experiments/s2/iter2.py`、`experiments/s2/build_probe.py`、`eval/golden/`（重產與新增期望檔）、`scripts/build-app.sh`、`LICENSES/data.md`、`docs/contracts/s3a.md`、`docs/contracts/s3b.md`、`docs/PLAN.md`、`docs/research-log.md`、`docs/methodology.md`（探針集的說明）。
+- 檔案範圍（只改這些；實作中加入 `cli/tests/golden.rs`、`experiments/s2/s2r_eval.py` 與 `.github/workflows/ci.yml`，見 §3、§4 與 research-log）：`tools/build_sandhi.py`、`data/lexicon/sandhi-add.tsv`、`eval/probe/s2r-probe.txt`、`scripts/check-app.sh`、`macos/Tests/ShanjieKitTests/Support.swift`、`macos/Tests/ShanjieKitTests/SelftestTests.swift`、`core/src/engine.rs`、`core/src/ffi.rs`（測試）、`core/tests/`（新斷言）、`cli/src/main.rs`、`reference/proto/ime.py`、`reference/proto/lm_eval.py`、`reference/proto/check_unigram_overlay.py`、`experiments/s2/iter2.py`、`experiments/s2/build_probe.py`、`eval/golden/`（重產與新增期望檔）、`scripts/build-app.sh`、`LICENSES/data.md`、`docs/contracts/s3a.md`、`docs/contracts/s3b.md`、`docs/PLAN.md`、`docs/research-log.md`、`docs/methodology.md`（探針集的說明）。
 - 停止條件：第 0 步基準差距在一個標準誤內；任一 gate 集合顯著退步；生成器列數和 §1 預期差超過 10%；golden 變動列數和預期差很多；抽查不合規則超過 2 列；跨語言檢查不一致。
 - 預算：實作加審查最多三輪；評測在本機跑，沿用 S2 的工具（`experiments/s2/log2.tsv` 記錄的過往 run：每組設定解碼約 30–90 秒、載入 40–160 秒；本片的實際耗時未量）。
 - 回滾：revert 本片的 merge commit；`sandhi-add.tsv` 是新增檔。

@@ -46,7 +46,7 @@ def main():
         name = a.name or os.path.basename(a.rows)
     lm = L.BigramLM(a.lm)
     base = ime.Lexicon(os.path.join(ROOT, "data", "lexicon", "mcbpmf-data.txt"),
-                       overlay=os.path.join(ROOT, "data", "lexicon", "overlay-add.tsv"))
+                       overlay=ime.OVERLAYS)
     ov = {l.split("\t")[1] for l in open(os.path.join(ROOT, "data", "lexicon", "overlay-add.tsv"), encoding="utf-8")}
     lex = L.cap_overlay(base, ov, lm)
     top1, o64, firsts = 0, 0, []

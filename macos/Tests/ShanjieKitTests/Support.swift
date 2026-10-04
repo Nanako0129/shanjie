@@ -14,6 +14,7 @@ enum TestData {
     static let files: [(name: String, source: String)] = [
         ("mcbpmf-data.txt", "data/lexicon/mcbpmf-data.txt"),
         ("overlay-add.tsv", "data/lexicon/overlay-add.tsv"),
+        ("sandhi-add.tsv", "data/lexicon/sandhi-add.tsv"),
         ("bigram.sjlm", "data/lm/bigram.sjlm"),
     ]
 
