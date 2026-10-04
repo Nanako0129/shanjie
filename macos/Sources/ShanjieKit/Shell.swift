@@ -20,7 +20,8 @@ public protocol TextClient: AnyObject {
 /// A display-only candidate list (IMKCandidates in the app). It never receives keys.
 @MainActor
 public protocol CandidatePanel: AnyObject {
-    func show(_ candidates: [String], selected: Int)
+    /// `notes[i]`: the name shown beside `candidates[i]` (s3f), `nil` for none.
+    func show(_ candidates: [String], notes: [String?], selected: Int)
     func hide()
 }
 
@@ -65,6 +66,8 @@ public final class Shell {
     private let resources: URL
     /// s3e: the converted system punctuation table, `nil` when unavailable (the core keeps its own).
     private let punctuation: String?
+    /// s3f: Apple's punctuation names; empty when unavailable (candidates show without names).
+    private let names: [String: String]
     private let layoutStore: LayoutStore
     let panel: CandidatePanel
     let isSecureInput: () -> Bool
@@ -79,6 +82,8 @@ public final class Shell {
     var composing = false
     /// The page the panel shows, kept only to map a mouse click back to a number key.
     private(set) var candidates: [String] = []
+    /// The same page as the cells read (`CandidateText.display`), for the same mapping.
+    private(set) var cells: [String] = []
 
     /// `resources`: the absolute Resources directory holding the lexicon files and bigram.sjlm.
     /// `panel`: the one candidate panel (IMKCandidates in the app).
@@ -88,14 +93,20 @@ public final class Shell {
     /// start without its preference (section 13.2); a missing or unknown value is the standard
     /// layout.
     /// `punctuationTable`: Apple's punctuation candidate table (s3e); tests pass another path.
+    /// `punctuationNames`: Apple's punctuation names (s3f); tests pass another path.
     public init(resources: URL, panel: CandidatePanel, isSecureInput: @escaping () -> Bool,
-                layoutStore: LayoutStore, punctuationTable: URL = PunctuationTable.systemURL) {
+                layoutStore: LayoutStore, punctuationTable: URL = PunctuationTable.systemURL,
+                punctuationNames: URL = PunctuationNames.systemURL) {
         self.resources = resources
         // Read once: the converted table never changes while the process runs, and the layout
         // switch that rebuilds the engine already blocks.
         punctuation = PunctuationTable.load(from: punctuationTable)
         if punctuation == nil {
             Log.shell.notice("punctuation candidates: system table unavailable, using the built-in list")
+        }
+        names = PunctuationNames.load(from: punctuationNames)
+        if names.isEmpty {
+            Log.shell.notice("punctuation names: system table unavailable, candidates show without names")
         }
         self.panel = panel
         self.isSecureInput = isSecureInput
@@ -156,13 +167,17 @@ public final class Shell {
     }
 
     func showCandidates(_ list: [String], selected: Int) {
+        // Only an exact punctuation mark has a name: a word candidate is never a key of the table.
+        let notes = list.map { names[$0] }
         candidates = list
-        panel.show(list, selected: selected)
+        cells = zip(list, notes).map { CandidateText.display($0, note: $1) }
+        panel.show(list, notes: notes, selected: selected)
     }
 
     func hideCandidates() {
         panel.hide()
         candidates = []
+        cells = []
     }
 
     /// Discards a composition whose owner is gone; there is no client left to clear.
@@ -237,7 +252,9 @@ public final class Session {
     /// A mouse click on a candidate: sent to the core as that candidate's number key, so the
     /// core decides what happens (section 8). Never inserted directly.
     public func candidateSelected(_ text: String) {
-        guard shell.owner === self, let i = shell.candidates.firstIndex(of: text), i < 9 else { return }
+        // IMK hands back the cell's text: the candidate plus its name for a named cell (s3f).
+        guard shell.owner === self, let i = shell.cells.firstIndex(of: text) ?? shell.candidates.firstIndex(of: text),
+              i < 9 else { return }
         _ = send(ShanjieKey(kind: KeyMap.char, ch: UInt32(UInt8(ascii: "1")) + UInt32(i), modifiers: 0))
     }
 
