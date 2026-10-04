@@ -73,7 +73,7 @@ func runServer() -> Never {
     App.shell = Shell(
         resources: resources.absoluteURL, panel: CandidatePanelAdapter(server: server),
         isSecureInput: { IsSecureEventInputEnabled() }, layoutStore: DefaultsLayoutStore(),
-        learningDirectory: Shell.learningURL())
+        learningDirectory: Shell.learningURL(), dialogs: AlertDialogs())
     withExtendedLifetime(server) { app.run() }
     exit(0)
 }

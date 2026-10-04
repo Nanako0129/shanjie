@@ -17,9 +17,9 @@ final class LearningTests: XCTestCase {
     /// A gate whose secure-input answer a test can flip mid-composition.
     final class Gate { var secure = false }
 
-    private func makeShell(gate: Gate = Gate(), learning: URL? = nil) -> Shell {
+    private func makeShell(gate: Gate = Gate(), learning: URL? = nil, dialogs: FakeDialogs = FakeDialogs()) -> Shell {
         let shell = Shell(resources: resources, panel: FakePanel(), isSecureInput: { gate.secure },
-                          layoutStore: MemoryLayoutStore(), learningDirectory: learning)
+                          layoutStore: MemoryLayoutStore(), learningDirectory: learning, dialogs: dialogs)
         XCTAssertNotNil(shell.engine)
         return shell
     }
@@ -132,31 +132,39 @@ final class LearningTests: XCTestCase {
 
     // MARK: menu: clear and backup (section 4)
 
-    func testClearIsConfirmedInTheMenu() {
-        let c = Controller(makeShell(learning: TestLearning.directory()))
-        let titles = { c.session.menu.map(\.title) }
-        XCTAssertEqual(titles(), ["標準鍵盤", "倚天鍵盤", "清除選字記憶…", "不要備份選字記憶"])
-        c.session.perform(.askClear)
-        XCTAssertEqual(titles(), ["標準鍵盤", "倚天鍵盤", "確定清除選字記憶",
-                                  "清除只刪本機檔案；已經進 Time Machine 備份或本機快照的副本不受影響", "取消",
-                                  "不要備份選字記憶"])
-        c.session.perform(.cancelClear)
-        XCTAssertEqual(titles(), ["標準鍵盤", "倚天鍵盤", "清除選字記憶…", "不要備份選字記憶"])
-        c.session.perform(.askClear)
-        c.session.perform(.confirmClear)
-        XCTAssertEqual(titles(), ["標準鍵盤", "倚天鍵盤", "清除選字記憶…", "不要備份選字記憶"])
+    /// The clear asks in a window (user request 2026-10-05); 取消 keeps everything, 清除 clears.
+    func testClearAsksInAWindowFirst() throws {
+        let dir = TestLearning.directory()
+        let dialogs = FakeDialogs()
+        let c = Controller(makeShell(learning: dir, dialogs: dialogs))
+        XCTAssertEqual(c.session.menu.map(\.title), ["標準鍵盤", "倚天鍵盤", "清除選字記憶…", "不要備份選字記憶"])
+        XCTAssertEqual(c.session.menu.first { $0.title == "清除選字記憶…" }?.action, .clear)
+        c.session.activate()
+        try repick(c)
+        c.press(Keys.enter)
+        XCTAssertFalse(TestLearning.records(in: dir).isEmpty)
+        dialogs.answer = false
+        c.session.perform(.clear)
+        XCTAssertEqual(dialogs.asked, 1)
+        XCTAssertFalse(TestLearning.records(in: dir).isEmpty, "取消 cleared the records")
+        dialogs.answer = true
+        c.session.perform(.clear)
+        XCTAssertEqual(dialogs.asked, 2)
+        XCTAssertTrue(TestLearning.records(in: dir).isEmpty, "清除 did not clear")
+        XCTAssertEqual(dialogs.failures, 0)
+        XCTAssertEqual(c.session.menu.map(\.title), ["標準鍵盤", "倚天鍵盤", "清除選字記憶…", "不要備份選字記憶"])
     }
 
     /// A clear that does not succeed is shown, never passed off as done (here: no engine at all).
     func testFailedClearIsShown() {
+        let dialogs = FakeDialogs()
         let shell = Shell(resources: resources.appendingPathComponent("missing"), panel: FakePanel(),
                           isSecureInput: { false }, layoutStore: MemoryLayoutStore(),
-                          learningDirectory: TestLearning.directory())
+                          learningDirectory: TestLearning.directory(), dialogs: dialogs)
         XCTAssertNil(shell.engine)
         let c = Controller(shell)
-        c.session.perform(.askClear)
-        c.session.perform(.confirmClear)
-        XCTAssertTrue(c.session.menu.contains(MenuEntry(title: "清除失敗")))
+        c.session.perform(.clear)
+        XCTAssertEqual(dialogs.failures, 1, "the failure window did not open")
     }
 
     func testBackupIsOnByDefaultAndTheExclusionSurvivesAClear() throws {
@@ -169,8 +177,7 @@ final class LearningTests: XCTestCase {
         c.session.perform(.toggleBackup)
         XCTAssertEqual(try excluded(), true, "set on the directory")
         XCTAssertEqual(toggle()?.checked, true)
-        c.session.perform(.askClear)
-        c.session.perform(.confirmClear)
+        c.session.perform(.clear)
         XCTAssertTrue(FileManager.default.fileExists(atPath: dir.path), "the directory stays")
         XCTAssertEqual(try excluded(), true, "a clear keeps the flag")
         c.session.perform(.toggleBackup)
@@ -268,24 +275,22 @@ final class LearningTests: XCTestCase {
         c.press(Keys.enter)
         XCTAssertFalse(TestLearning.records(in: dir).isEmpty)
         c.session.perform(.toggleBackup)
-        c.session.perform(.askClear)
-        c.session.perform(.confirmClear)
+        c.session.perform(.clear)
         let left = try FileManager.default.contentsOfDirectory(atPath: dir.path)
         XCTAssertEqual(left, [])
         XCTAssertEqual(try dir.resourceValues(forKeys: [.isExcludedFromBackupKey]).isExcludedFromBackup, true)
-        XCTAssertFalse(c.session.menu.contains(MenuEntry(title: "清除失敗")))
     }
 
-    /// Code 3 from the core (a file that cannot be deleted) is shown as 清除失敗.
+    /// Code 3 from the core (a file that cannot be deleted) opens the failure window.
     func testCoreClearFailureIsShown() throws {
         let dir = TestLearning.directory()
-        let c = Controller(makeShell(learning: dir))
+        let dialogs = FakeDialogs()
+        let c = Controller(makeShell(learning: dir, dialogs: dialogs))
         let blocker = dir.appendingPathComponent("learning.tsv", isDirectory: true)
         try FileManager.default.createDirectory(at: blocker, withIntermediateDirectories: false)
         try Data("x".utf8).write(to: blocker.appendingPathComponent("x"))
-        c.session.perform(.askClear)
-        c.session.perform(.confirmClear)
-        XCTAssertTrue(c.session.menu.contains(MenuEntry(title: "清除失敗")))
+        c.session.perform(.clear)
+        XCTAssertEqual(dialogs.failures, 1, "the failure window did not open")
     }
 
     /// A failed write (read-only directory) shows the fixed status line.

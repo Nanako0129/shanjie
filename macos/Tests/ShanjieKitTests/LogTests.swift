@@ -79,7 +79,7 @@ final class LogTests: XCTestCase {
         try? FileManager.default.createDirectory(at: learning, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: learning) }
         let shell = Shell(resources: resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(),
-                          learningDirectory: learning)
+                          learningDirectory: learning, dialogs: FakeDialogs())
         let c = Controller(shell, bundle: bundleMarker)
         c.client.before = "ab\t\(Self.contextMarker)"
         c.session.activate()                            // profile from a marked bundle ID
@@ -97,15 +97,15 @@ final class LogTests: XCTestCase {
         c.session.activate()
         c.type("su3")
         c.session.selectLayout(.eten) // mode switch commits and rebuilds
-        for action: MenuEntry.Action in [.askClear, .confirmClear, .toggleBackup, .toggleBackup] {
+        for action: MenuEntry.Action in [.clear, .toggleBackup, .toggleBackup] {
             c.session.perform(action)                   // S4 menu: clear, backup exclusion
         }
         XCTAssertGreaterThan(c.client.reads, 0, "the left-context read did not run")
         let broken = FileManager.default.temporaryDirectory.appendingPathComponent(pathMarker, isDirectory: true)
-        let failed = Shell(resources: broken, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(), learningDirectory: nil)  // engine_new fails on a marked path
+        let failed = Shell(resources: broken, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(), learningDirectory: nil, dialogs: FakeDialogs())  // engine_new fails on a marked path
         XCTAssertNil(failed.engine, "the marked data path did not fail engine creation")
         // s3e: no punctuation table at a marked path -> the fixed fallback line (the path never logged).
-        _ = Shell(resources: resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(), learningDirectory: nil,
+        _ = Shell(resources: resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(), learningDirectory: nil, dialogs: FakeDialogs(),
                   punctuationTable: broken.appendingPathComponent("punct.plist"))
 
         let stdText = std.finish()
