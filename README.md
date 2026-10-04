@@ -3,7 +3,7 @@
 以「選字正確」為第一優先的開源 macOS 注音輸入法（開發中）。
 
 - 計畫：`docs/PLAN.md`
-- 目前階段：S3b（最小可安裝版，契約見 `docs/contracts/s3b.md`）
+- 目前階段：v0.1.2（可安裝的注音輸入法，含標點留在組字區、標點候選、教育部「一／不／法」讀音變體與維基疊加層讀音修正）。下一步是 S4 選字記憶（契約 `docs/contracts/s4-learning.md`）。各版改動見 [Releases](https://github.com/Nanako0129/shanjie/releases)。
 - 授權：程式碼 Apache-2.0（`LICENSE`）；資料見 `LICENSES/data.md`
 
 ## 安裝
