@@ -4,7 +4,9 @@
 |---|---|---|---|
 | `data/lexicon/mcbpmf-data.txt` | 小麥注音 McBopomofo 3.1.1 的 `data.txt`（片語源自 libtabe `tsi.src`） | MIT（全文 `LICENSES/McBopomofo-MIT.txt`）；libtabe 為 BSD | 可再散布 |
 | `data/lexicon/overlay-add.tsv` | 由 `tools/build_overlay.py` 從 Wikimedia 2026-10-01 的標題 dump 產生：中文維基、英文維基詞典、中文維基詞典（`all-titles-in-ns0`）；OpenCC `STCharacters.txt`（Apache-2.0）只用來過濾，不在檔案內 | **CC BY-SA 4.0**，署名：Wikipedia 與 Wiktionary 貢獻者（https://creativecommons.org/licenses/by-sa/4.0/ ） | 只有這個檔是 share-alike；程式碼仍是 Apache-2.0。來源網址與 SHA-256 在 `tools/build_overlay.py` |
+| `data/lexicon/sandhi-add.tsv` | 由 `tools/build_sandhi.py` 從 `mcbpmf-data.txt` 的多字詞產生：把「一」「不」改成另一種合規讀音（本調↔變調）、「法」的 ㄈㄚˋ 改成 ㄈㄚˇ | MIT（小麥基底的衍生；全文 `LICENSES/McBopomofo-MIT.txt`） | 規則依據教育部《國語辭典簡編本》〈單一音讀〉與 88 年《國語一字多音審訂表》；規則是事實，檔案不含任何教育部資料 |
 | `eval/sets/trap.txt`、`eval/sets/daily.txt` | 本專案自寫 | CC0 | |
+| `eval/probe/s2r-probe.txt` | 由 `experiments/s2/build_probe.py` 從 `eval/dev/` 的句子產生（換「一」「不」的讀音） | CC0 | |
 | `eval/dev/*.txt`、`eval/holdout/*`、`eval/learn/cases.tsv` | 本專案自寫 | CC0 | |
 | `eval/dev/user-reported.txt` | 使用者回報的真實句子 | CC0（使用者 2026-10-03 同意） | |
 | `eval/sets/moedict.txt` | 教育部《重編國語辭典修訂本》例句抽樣（經 g0v/moedict-data） | CC BY-ND 3.0 TW | **只用於評測，不得用來建詞庫或改作** |

@@ -401,3 +401,37 @@ fn punctuation_is_a_sentence_boundary() {
     assert!(e.total_score().is_none());
 }
 
+/// S2r (docs/contracts/s2r-sandhi-variants.md §4.3): the reading-flip probe through the production
+/// path (`Engine::new` reads sandhi-add.tsv, then `load_lm`) matches the Python top-1, and two rows
+/// the variants fix (typing the other MOE-standard reading of 不 and of 一) read correctly.
+#[test]
+fn sandhi_probe_production_path() {
+    let probe = std::fs::read_to_string(root().join("eval/probe/s2r-probe.txt")).unwrap();
+    let rows: Vec<(String, Syls)> = parse_rows(&probe)
+        .unwrap()
+        .into_iter()
+        .map(|r| (r.sent, r.reading.expect("probe rows carry readings")))
+        .collect();
+    let want: Vec<String> = std::fs::read_to_string(root().join("eval/golden/s2r-probe-top1.tsv"))
+        .unwrap()
+        .lines()
+        .filter(|l| !l.starts_with('#'))
+        .map(String::from)
+        .collect();
+    assert!(rows.len() == want.len() && !rows.is_empty(), "probe and expected file differ in length");
+    let mut e = Engine::new(&root().join("data/lexicon"), Layout::Standard).unwrap();
+    e.load_lm(&lm_path()).unwrap();
+    let commit = |e: &mut Engine, syls: &Syls| {
+        let mut s = String::new();
+        for k in syls.iter().flat_map(|x| keys_of(Layout::Standard, x)).chain([Key::new(KeyKind::Enter)]) {
+            s.push_str(&e.key(k).unwrap().commit);
+        }
+        s
+    };
+    let diff: Vec<usize> = (0..rows.len()).filter(|&i| commit(&mut e, &rows[i].1) != want[i]).map(|i| i + 1).collect();
+    assert!(diff.is_empty(), "probe replay differs from the Python top-1 at rows {diff:?}");
+    // Wrong before sandhi-add.tsv existed (不事業配喔, 務會議場), right with it.
+    let syls = |r: &str| r.split(' ').map(String::from).collect::<Syls>();
+    assert_eq!(commit(&mut e, &syls("ㄅㄨˋ ㄕˋ ㄧㄝˋ ㄆㄟˋ ㄛ")), "不是業配喔");
+    assert_eq!(commit(&mut e, &syls("ㄓㄜˋ ㄐㄧㄢˋ ㄕˋ ㄅㄣˇ ㄕˋ ㄨˋ ㄏㄨㄟˋ ㄧˋ ㄔㄤˇ")), "這件事本是誤會一場");
+}

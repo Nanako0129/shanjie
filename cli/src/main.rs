@@ -34,6 +34,8 @@ fn load_set(lex: &Lexicon, name: &str) -> Result<(&'static str, Vec<Row>), Strin
         "daily" => ("日常驗證集", parse_rows(&read(&sets.join("daily.txt"))?).map_err(|e| e.to_string())?),
         "moedict" => ("萌典例句", parse_moedict(&read(&sets.join("moedict.txt"))?)),
         "dev" => ("開發集", dir_rows("eval/dev")?),
+        // S2r: dev302 + typing76 rows with 一/不 typed in the other standard reading (experiments/s2/build_probe.py)
+        "probe" => ("探針集", dir_rows("eval/probe")?),
         "holdout" => ("保留集", dir_rows("eval/holdout")?),
         _ => return Err(format!("unknown set name (length {})", name.chars().count())),
     })
@@ -201,18 +203,16 @@ fn run() -> Result<(), String> {
     if sets.is_empty() {
         sets = ["trap", "daily", "moedict"].map(String::from).to_vec();
     }
-    let text = fs::read_to_string(root().join("data/lexicon/mcbpmf-data.txt"))
-        .map_err(|e| format!("cannot read lexicon ({:?})", e.kind()))?;
-    let overlay = if no_overlay {
-        None
-    } else {
-        Some(
-            fs::read_to_string(root().join("data/lexicon/overlay-add.tsv"))
-                .map_err(|e| format!("cannot read overlay ({:?})", e.kind()))?,
-        )
-    };
+    // The shipped lexicon is the engine's load_lexicon (base + overlay-add.tsv + sandhi-add.tsv, S2r);
+    // --no-overlay parses the base alone. load_ms includes reading the files in both cases.
     let t_load = Instant::now();
-    let lex = Lexicon::parse_with(&text, overlay.as_deref()).map_err(|e: Error| e.to_string())?;
+    let lex = if no_overlay {
+        let text = fs::read_to_string(root().join("data/lexicon/mcbpmf-data.txt"))
+            .map_err(|e| format!("cannot read lexicon ({:?})", e.kind()))?;
+        std::sync::Arc::new(Lexicon::parse_with(&text, None).map_err(|e: Error| e.to_string())?)
+    } else {
+        load_lexicon(&root().join("data/lexicon")).map_err(|_| "cannot load lexicon".to_string())?
+    };
     let load_time = t_load.elapsed();
 
     let mut loaded = Vec::new();

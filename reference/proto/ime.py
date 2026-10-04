@@ -8,6 +8,9 @@ import os
 from collections import defaultdict
 
 DATA = os.path.join(os.path.dirname(__file__), "data", "mcbpmf-data.txt")
+# 核心 load_lexicon 載入的疊加層，依這個順序接在 data/lexicon/mcbpmf-data.txt 後面（S2r）。
+_LEXDIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "data", "lexicon")
+OVERLAYS = [os.path.join(_LEXDIR, "overlay-add.tsv"), os.path.join(_LEXDIR, "sandhi-add.tsv")]
 BEAM = 32          # 每個位置保留的部分路徑數；N-best 上限也是它
 PER_KEY = 12       # 每個讀音只展開前幾高分的詞，控制 lattice 寬度
 
@@ -29,8 +32,10 @@ class Lexicon:
             self.by_reading[syls].append((word, score))
             if word not in self.by_word or score > self.by_word[word][1]:
                 self.by_word[word] = (syls, score)
-        # S1 疊加層 `讀音\t詞\t分數\t來源`：接在基底後面（檔案順序），再和基底一起做一次穩定排序，同分時基底在前
-        for line in open(overlay, encoding="utf-8") if overlay else ():
+        # S1 疊加層 `讀音\t詞\t分數\t來源`：接在基底後面（檔案順序），再和基底一起做一次穩定排序，同分時基底在前。
+        # overlay 可以是單一路徑或路徑清單（S2r：overlay-add.tsv 之後接 sandhi-add.tsv，順序和核心相同）。
+        paths = [overlay] if isinstance(overlay, str) else list(overlay or ())
+        for line in (l for p in paths for l in open(p, encoding="utf-8")):
             reading, word, score, _ = line.rstrip("\n").split("\t")
             syls, score = tuple(reading.split("-")), float(score)
             if any(w == word for w, _ in self.by_reading[syls]):
