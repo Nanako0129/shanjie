@@ -428,6 +428,7 @@ v4 日期 2026-10-03。v1 經 `pilotfish:plan-verifier`（REVISE，4 項）與 `
 - **做法。** `tools/build_sandhi.py` 從小麥基底產生 `data/lexicon/sandhi-add.tsv`（1,302 列，MIT），引擎、評測 CLI、Python 參考實作都接在 `overlay-add.tsv` 後面載入；app 的 Resources 與檢查跟著加。
 - **結果。** 換成另一種標準讀音的探針列：cvtune +36（p = 5.6e-9）、discordtune +62（p = 6e-17）；原讀音在所有集合都不顯著退步；每鍵 p95 1.19–1.31 ms（main 1.19–1.25 ms），峰值 RSS +1.5 MB。
 - **下一片 S2r-2。** 疊加層的上游讀音錯誤（非去聲前的「不」標 ㄅㄨˊ、人名地名的「和」標 ㄏㄢˋ）與疊加層的變體；順便補一個會抓到 `next_tone`「一」修正被改回去的小檢查（verifier 建議）。另外審核疊加層的多音字讀音：zaoseq-bopomofo 的做法是「多音字只能由已知詞的明確讀音決定，否則不收」，他們因此清掉 10,813 個假同音詞（見下方「外部專案借鏡」）；先量我們有多少疊加層詞的讀音來自非首選讀音，再決定降分或剔除。
+- **S2r-2（進行中，契約 `docs/contracts/s2r2-overlay-readings.md`）。** `tools/build_overlay.py` 把疊加層的一／不／法／和正規化成審訂表讀音，並為含一／不的詞多輸出一列變調讀音（342,761 → 345,694 列，仍是 CC BY-SA 4.0）；核心不改。結果與待辦見 `docs/research-log.md` 的 S2r-2 一節。
 
 ### 使用者提出的兩個方向（2026-10-03，待排入；排入前要過 plan-verifier）
 

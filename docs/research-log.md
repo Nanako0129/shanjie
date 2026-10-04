@@ -402,6 +402,26 @@
 - **驗收**：第二輪 `/code-review`（medium）沒有新發現。fresh verifier CONFIRMED：7 項獨立重跑，三個突變都以斷言失敗；抽 30 列 0 列不合規則；公開集合的數字全部吻合；保留集（只由 verifier 量）main 與本分支 chat 175／227、formal 181／227、oracle@64 226，第一名輸出的雜湊相同，也就是保留集上逐列不變。verifier 提醒：沒有 commit 進 repo 的檢查會抓到 `next_tone` 的「一」修正被改回去（兩個 `--check` 照樣通過，只有現算的私有探針受影響），留給 S2r-2 補一個小檢查。
 - **App 檢查**：`make bundle` 後跑 `scripts/check-app.sh` 的第 2、3 項通過；拿掉 bundle 裡的 `sandhi-add.tsv`，第 2 項就失敗。第 6 項會執行 bundle 內的程式，而 bundle ID 和使用者安裝的正式版相同，所以本機不跑，交給 CI；跑完確認 `lsregister -dump` 裡沒有 build 出來的 bundle。`SelftestTests` 兩個模型負向測試的 stderr 都是 `shanjie_engine_load_lm failed`，代表已經越過詞庫載入。
 
+## 2026-10-04：S2r-2 疊加層讀音修正與變調列
+
+契約 `docs/contracts/s2r2-overlay-readings.md`。`tools/build_overlay.py` 在 `to_syllables` 之後加兩步：`normalize`（一 ㄧ、不 ㄅㄨˋ、法 ㄈㄚˇ、和 ㄏㄢˋ → ㄏㄜˊ／ㄏㄜˋ）與 `sandhi_variant`（主要列的一／不照 `build_sandhi.other_reading` 換變調，有換就在主要列後面加一列，同分同來源）。
+
+- **列數（和契約預估逐項相符）**：主要讀音改變 2,195（預估 2,195）：不 ㄅㄨˊ→ㄅㄨˋ 1,616、和 ㄏㄢˋ→ㄏㄜˊ 571、和 →ㄏㄜˋ 5、法 27、一 ㄧˋ／ㄧˊ→ㄧ 5（一列可能同時改兩個字，所以各項相加略多於列數）；新增變調列 2,933（預估 2,933）；總列數 342,761 → 345,694。`sandhi-add.tsv` 逐位元組不變。
+- **和的例外（契約內部不一致）**：契約規則是「前一字是 唱倡附應酬賡 才讀 ㄏㄜˋ」，但它的例子「一唱百和」「一倡一和」前一字是百、一。規則照字面會把這兩個詞讀成 ㄏㄜˊ。生成器多加一條：「和」前面任何位置有唱或倡也算 ㄏㄜˋ。影響 2 列（一唱百和、一倡一和）。待 main 確認。
+- **`--check` 自我檢查（契約 §2）**：`build_sandhi.self_check` 三條斷言；把 `next_tone` 的 `if nxt == YI: return 1` 拿掉，`--check` 以 AssertionError「真不一般: 不 followed by 一 must not sandhi, got 'ㄅㄨˊ'」失敗（exit 1）。
+- **第 0 步（main 的資料上會錯）**：`core/tests/engine_lm.rs` 的 `overlay_readings_production_path`（`Engine::new` 加 `load_lm`）七組輸入，換回 main 的 `overlay-add.tsv` 時 6 組打不出來（三不沾→三部詹、不乾膠→不甘教、上原和→上原合、上和下睦→上和下目、賡和→庚和、一丈青 ㄧˊ→一丈清）；一丈紅的本調那組在 main 也過，只當對照。`overlay_sandhi_rows_load_and_cap`（契約 §4.6 (a)(b)）在 main 的資料上因找不到變調列失敗。(c) 在 `reference/proto/check_overlay_variants.py`，`--self-test` 把兩列對調後以斷言失敗。
+- **§4.6 突變**：把一丈紅的兩列對調，`word_info` 斷言失敗（回傳 ㄧˊ）；`CappedLexicon` 給空的疊加層文字，「cap lowers」斷言失敗。契約說的「只給 `CappedLexicon` 主要列」測不出差別：封頂以詞（第 2 欄）為單位，實測只給每個詞第一列時測試照樣通過，這是核心不用改的證據，不是測試的缺口。
+- **golden（§4.4）**：用原本的產生者在 main 的疊加層上重跑，六份都和 repo 裡的逐位元組相同（流程可重現）。本分支重產後只有 `s2r-probe-unigram.txt` 一列變：`下一站是台北車站` 的第一名 `下一戰是台北車站` → `下一站式台北車站`（探針句，兩者都錯）。`s1-dev302.txt`、`s1-overlay-sets.txt`、`s2-lm.txt`、`s2-lm-dev302-top1.tsv`、`s2r-probe-top1.tsv` 不變；`unigram.txt`、`s1-dev302-nooverlay.txt` 不變。事前預期（`experiments/s2/s2r2_predict.py`，含改變或新增詞的公開句子）：dev 3 句（哪一個比較便宜、…無線充電座和一包…、幾乎不用再手動修）、探針 3 句、daily 1 句，其他集合 0；實際只有探針 1 句改變。`check_unigram_overlay.py` 三份一致。
+- **評測（`s2r_eval.py`，A = c6abd58 的 CLI、B = 本分支，chat）**：探針 public 63/83 → 63/83、cvtune 490 → 493/611（修好 3、弄壞 0，p=0.25）、wikitune 138 → 140/208（修好 2、弄壞 0）。原讀音全部列：public 303/378 不變、cvtune 3120 → 3121/3677、wikitune 1859 → 1860/2733（各修好 1、弄壞 0）。含疊加層「和」詞的列：public 1 列、cvtune 17 列、wikitune 36 列，A、B 完全相同（1/1、16/16、20/20）。discordtune 由 main 跑。
+- **效能**：`replay_standard_chat_production_path` p95 每鍵 main 1.20–1.26 ms、本分支 1.24–1.32 ms；峰值 RSS main 374.7／376.2 MB、本分支 375.6／374.4 MB（各 2 次），沒有差別。
+- **破音字審核（`experiments/s2/overlay_polyphones.py`，只量測）**：疊加層 342,761 個詞裡 124,579 列（36.3%，和契約的量測相符）有「單字段是基底破音字」（不含一、不）。依猜錯時和其他讀音的差異分類（一列取最嚴重的）：
+  - 只差輕聲／本調 7,735 列；最多的字：頭 水 公 西 下 巴 太 奶 鼓 婆 寶 謝 思 娘 個 姑 係 妹 遮 吧。
+  - 聲調不同 39,374 列；王 三 法 中 化 語 上 文 打 正 多 相 黑 骨 有 亞 論 空 分 號。
+  - 聲母或韻母不同 77,470 列；兒 子 仔 大 縣 白 地 石 區 車 阿 家 學 行 長 的 食 角 紅 女。
+  - 「聲韻」類抽樣檔 `experiments/s2/overlay-polyphones-sample50.tsv`（種子 20261004）待 main 判讀猜錯幾列。注意這個分類只看「有沒有其他讀音」，沒有看其他讀音的頻率；兒（ㄦˊ／ㄖㄣˊ）、子、仔、縣這類字的次要讀音很罕見，猜錯率應該遠低於列數。
+  - 暫定建議（待 main 的判讀確認，本片不實作）：下一片先看抽樣的猜錯率，再只對高風險字（讀音分數接近、例如 行 長 的 大 角 食）輸出多個讀音或降分，其餘不動；一律剔除會丟掉三分之一的疊加層。
+- **採用規則**：依契約 §4.7，這片是依教育部規則修正讀音，不是調參數；採用條件是抽查符合規則（main 判讀 `experiments/s2/s2r2-sample-changed.tsv`、`s2r2-sample-he.tsv`）加 gate 集合不顯著退步（上列數字沒有任何一組退步）。
+
 ## 2026-10-04：外部專案研究與晶晶輸入法檢查
 
 使用者請研究三個專案：Jevboard（https://github.com/AsheeHuang/Jevboard ）、晶晶輸入法 ZingIME（https://zingime.com/ ）、zaoseq-bopomofo（https://github.com/ZaoSeq/zaoseq-bopomofo-public ）。三份報告由 general-purpose agent（fable）唯讀研究，main 核對了與決定有關的事實。可借鏡的項目整理在 `docs/PLAN.md`「外部專案借鏡」。
