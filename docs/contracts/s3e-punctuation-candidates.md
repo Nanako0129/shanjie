@@ -71,4 +71,5 @@
 
 ## 7. 實作紀錄
 
-（實作時填：CI runner 上有沒有系統檔、系統檔測試放在哪裡。）
+- 2026-10-04 量測：CI 的 `xcode-27-arm64` runner 有這個系統檔，`testSystemTableReachesTheCore` 在 CI run 37197450319 通過（0.742 秒），所以它留在 `swift test` 裡，CI 與本機都跑。日後 runner 映像拿掉這個檔時，這個測試會失敗而不是略過，屆時再依 §4.3 改放本機目標。
+- `/code-review`（high）的處置：Swift 端的驗證改成逐個 Unicode scalar 檢查 tab、換行、NUL（CRLF 是一個 Swift Character，原本會漏），並套用核心的 64 KB／1,000 行上限；`Shell` 只在初始化時讀一次系統表；測試裡的獨立引擎先釋放再建 `Shell`；s3a §6 的回傳碼說明補上標點表；`set_lm` 的說明文字搬回原位。游標寬度改由解碼結果直接算的建議延後（目前「音節一字」的不變式成立，標點另算）；兩個去重集合與 40×40 的掃描接受。

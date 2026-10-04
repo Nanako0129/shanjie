@@ -12,6 +12,7 @@ final class PunctuationTableTests: XCTestCase {
             "，": ["、", "《"],
             "：": ["；", 7],            // the non-string element is dropped
             "。": ["a\tb"],             // a tab inside an alternative: skipped whole
+            "、": ["＼\r\nx"],          // a CRLF (one Swift Character) holds a line feed: skipped whole
             "「」": ["『"],             // two scalars: skipped
             "？": [String](),          // no alternatives: skipped
             "！": "not an array",       // skipped
@@ -41,9 +42,11 @@ final class PunctuationTableTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: path), "the system punctuation table is missing: \(path)")
         let table = try XCTUnwrap(PunctuationTable.load(from: PunctuationTable.systemURL), "the system table converted to nothing")
         let resources = try XCTUnwrap(TestData.resources())
-        let (engine, code) = CoreEngine.make(dataDir: resources.path, layout: 0)
-        XCTAssertEqual(code, 0)
-        XCTAssertEqual(try XCTUnwrap(engine).setPunctuation(table), 0, "the core rejected the converted system table")
+        try {   // scoped: this engine is freed before the Shell builds its own (one ~240 MB engine at a time)
+            let (engine, code) = CoreEngine.make(dataDir: resources.path, layout: 0)
+            XCTAssertEqual(code, 0)
+            XCTAssertEqual(try XCTUnwrap(engine).setPunctuation(table), 0, "the core rejected the converted system table")
+        }()
         let shell = Shell(resources: resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore())
         let items = comma(shell)
         XCTAssertEqual(items.first, "，")
