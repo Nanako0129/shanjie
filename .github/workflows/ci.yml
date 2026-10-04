@@ -82,6 +82,17 @@ jobs:
           N=$(grep -vc '^#' eval/variants.tsv)
           diff <(head -n "$N" "$T/rs.txt") <(grep -v '^#' eval/variants.tsv | cut -f2)
 
+      # docs/contracts/s2r-sandhi-variants.md sections 1, 3 and 4.0: the sandhi
+      # rows and the public probe rebuild byte for byte, and Python's unigram
+      # decode with both overlays matches the Rust goldens.
+      - name: Sandhi rows, probe and unigram parity
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/build_sandhi.py --check
+          python3 experiments/s2/build_probe.py --check
+          python3 reference/proto/check_unigram_overlay.py
+
   # The Swift input method (docs/contracts/s3b.md section 3): build the ad-hoc
   # app, the Swift tests through the real core and model, the bundled
   # selftest, and acceptance checks 2, 3 and 6 of contract section 10.

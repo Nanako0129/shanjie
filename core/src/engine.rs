@@ -207,11 +207,27 @@ pub struct Engine {
     cands: Option<Cands>,
 }
 
-/// Base lexicon + overlay from `data_dir` (§5), same as the eval CLI default.
+/// Base lexicon + overlay from `data_dir` (§5), same as the eval CLI default. The overlay rows are
+/// `overlay-add.tsv` then `sandhi-add.tsv` (S2r: MOE-standard 一/不 readings derived from the base),
+/// in that fixed order; both are required.
 pub fn load_lexicon(data_dir: &Path) -> Result<Arc<Lexicon>, EngineError> {
     let base = std::fs::read_to_string(data_dir.join("mcbpmf-data.txt")).map_err(|_| EngineError::LoadFailed)?;
     let overlay = std::fs::read_to_string(data_dir.join("overlay-add.tsv")).map_err(|_| EngineError::LoadFailed)?;
-    Lexicon::parse_with(&base, Some(&overlay)).map(Arc::new).map_err(|_| EngineError::LoadFailed)
+    let sandhi = std::fs::read_to_string(data_dir.join("sandhi-add.tsv")).map_err(|_| EngineError::LoadFailed)?;
+    Lexicon::parse_with(&base, Some(&join_overlays(overlay, &sandhi))).map(Arc::new).map_err(|_| EngineError::LoadFailed)
+}
+
+/// The overlay text the lexicon is parsed with: `overlay-add.tsv` then `sandhi-add.tsv`, with a line
+/// break between them even if the first lacks a trailing one. Appends in place
+/// with an exact reserve: peak RSS of the engine_lm production replay (2026-10-04) was 373 MB before S2r,
+/// 390 MB when the 17 MB overlay-add.tsv was copied, 411 MB when push_str grew it by doubling, 375 MB now.
+fn join_overlays(mut overlay: String, sandhi: &str) -> String {
+    overlay.reserve_exact(sandhi.len() + 1);
+    if !overlay.is_empty() && !overlay.ends_with('\n') {
+        overlay.push('\n');
+    }
+    overlay.push_str(sandhi);
+    overlay
 }
 
 impl Engine {

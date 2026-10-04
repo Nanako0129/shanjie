@@ -101,7 +101,7 @@
 
 ## 5. 資料載入
 
-`data_dir` 裡必須有 `mcbpmf-data.txt` 與 `overlay-add.tsv`，用 `Lexicon::parse_with(基底, Some(疊加層))` 載入，和評測 CLI 預設相同。任一個不存在或解析失敗，回傳碼 3。
+`data_dir` 裡必須有 `mcbpmf-data.txt`、`overlay-add.tsv` 與 `sandhi-add.tsv`（S2r 加入），用 `Lexicon::parse_with(基底, Some(疊加層))` 載入，疊加層是 `overlay-add.tsv` 接著 `sandhi-add.tsv`（`engine::join_overlays`，前一份沒有結尾換行就補一個），和評測 CLI 預設相同。任一個不存在或解析失敗，回傳碼 3。
 
 ## 6. C ABI（`core/include/shanjie.h`）
 
