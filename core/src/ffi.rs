@@ -335,6 +335,70 @@ pub unsafe extern "C" fn shanjie_engine_set_punctuation(engine: *mut ShanjieEngi
     })
 }
 
+// S4 interface stubs (docs/contracts/s4-learning.md §8 "介面先行"): they check pointers and argument
+// ranges only, so the shell can link and write its tests; the S4 executor replaces the bodies.
+
+/// # Safety
+/// `engine` is NULL or a live handle; `utf8` is NULL or a NUL-terminated string.
+#[no_mangle]
+pub unsafe extern "C" fn shanjie_engine_set_left_context(engine: *mut ShanjieEngine, utf8: *const c_char) -> i32 {
+    guard(|| {
+        if engine.is_null() {
+            return SHANJIE_ERR_NULL;
+        }
+        // SAFETY: NUL-terminated per the caller contract.
+        if !utf8.is_null() && unsafe { CStr::from_ptr(utf8) }.to_str().is_err() {
+            return SHANJIE_ERR_INVALID;
+        }
+        SHANJIE_OK
+    })
+}
+
+/// # Safety
+/// `engine` is NULL or a live handle.
+#[no_mangle]
+pub unsafe extern "C" fn shanjie_engine_set_learning(engine: *mut ShanjieEngine, enabled: u32) -> i32 {
+    guard(|| {
+        if engine.is_null() {
+            return SHANJIE_ERR_NULL;
+        }
+        if enabled > 1 { SHANJIE_ERR_INVALID } else { SHANJIE_OK }
+    })
+}
+
+/// # Safety
+/// `engine` is NULL or a live handle; `dir` is NULL or a NUL-terminated string.
+#[no_mangle]
+pub unsafe extern "C" fn shanjie_engine_learning_open(engine: *mut ShanjieEngine, dir: *const c_char) -> i32 {
+    guard(|| {
+        if engine.is_null() || dir.is_null() {
+            return SHANJIE_ERR_NULL;
+        }
+        SHANJIE_OK
+    })
+}
+
+/// # Safety
+/// `engine` is NULL or a live handle.
+#[no_mangle]
+pub unsafe extern "C" fn shanjie_engine_learning_clear(engine: *mut ShanjieEngine) -> i32 {
+    guard(|| if engine.is_null() { SHANJIE_ERR_NULL } else { SHANJIE_OK })
+}
+
+/// # Safety
+/// `engine` is NULL or a live handle; `flags` is NULL or writable.
+#[no_mangle]
+pub unsafe extern "C" fn shanjie_engine_learning_status(engine: *mut ShanjieEngine, flags: *mut u32) -> i32 {
+    guard(|| {
+        if engine.is_null() || flags.is_null() {
+            return SHANJIE_ERR_NULL;
+        }
+        // SAFETY: non-NULL and writable per the caller contract.
+        unsafe { *flags = 0 };
+        SHANJIE_OK
+    })
+}
+
 /// # Safety
 /// `output` is NULL or an output from this library not yet freed.
 #[no_mangle]
