@@ -401,3 +401,19 @@
 - **`/code-review`（high）**：10 項。修了 8 項，最重要的是 `next_tone` 把「不」後面已變調的「一」（ㄧˋ）當成去聲，探針因此會把「真不一般」的「不」換成不合規的 ㄅㄨˊ。改成以「一」的本調（陰平）判斷，並把逐位置的換讀音邏輯收成生成器與探針共用的 `other_reading`。修正後 `sandhi-add.tsv` 與公開探針逐位元組不變（詞庫沒有這種列，所以 bug 只在探針），cvtune 與 discordtune 探針重新評測，第 0 步基準與主指標的數字和修正前完全相同。其餘：Python 的疊加層清單集中成 `ime.OVERLAYS`；評測 CLI 的 unigram 路徑改呼叫引擎的 `load_lexicon`；探針不再寫沒人讀的檔；私有旗標改用 `all_sets` 的標記；文件用語與數字。「個」讀輕聲時視為去聲的依據補進契約 §1。延後：評測腳本每組重載兩次 LM（只影響速度）。舊的 S2 實驗腳本（`build_counts.py`、`rerank.py` 等）仍只載入 `overlay-add.tsv`：它們記錄的數字是那樣跑出來的，改了反而無法重現。
 - **驗收**：第二輪 `/code-review`（medium）沒有新發現。fresh verifier CONFIRMED：7 項獨立重跑，三個突變都以斷言失敗；抽 30 列 0 列不合規則；公開集合的數字全部吻合；保留集（只由 verifier 量）main 與本分支 chat 175／227、formal 181／227、oracle@64 226，第一名輸出的雜湊相同，也就是保留集上逐列不變。verifier 提醒：沒有 commit 進 repo 的檢查會抓到 `next_tone` 的「一」修正被改回去（兩個 `--check` 照樣通過，只有現算的私有探針受影響），留給 S2r-2 補一個小檢查。
 - **App 檢查**：`make bundle` 後跑 `scripts/check-app.sh` 的第 2、3 項通過；拿掉 bundle 裡的 `sandhi-add.tsv`，第 2 項就失敗。第 6 項會執行 bundle 內的程式，而 bundle ID 和使用者安裝的正式版相同，所以本機不跑，交給 CI；跑完確認 `lsregister -dump` 裡沒有 build 出來的 bundle。`SelftestTests` 兩個模型負向測試的 stderr 都是 `shanjie_engine_load_lm failed`，代表已經越過詞庫載入。
+
+## 2026-10-04：外部專案研究與晶晶輸入法檢查
+
+使用者請研究三個專案：Jevboard（https://github.com/AsheeHuang/Jevboard ）、晶晶輸入法 ZingIME（https://zingime.com/ ）、zaoseq-bopomofo（https://github.com/ZaoSeq/zaoseq-bopomofo-public ）。三份報告由 general-purpose agent（fable）唯讀研究，main 核對了與決定有關的事實。可借鏡的項目整理在 `docs/PLAN.md`「外部專案借鏡」。
+
+- **Jevboard**（MIT，C#）：Windows 系統匣工具，不是輸入法。疊在微軟注音上，用 UI Automation 讀候選，送 Jev（`jev-latest`）挑字。它的評測集是看過失敗案例後補寫的，門檻也靠肉眼定，數字不能和我們比。值得量的是兩點：選項順序偏差，以及「每個字位出一題」的題型。
+- **zaoseq-bopomofo**（Apache-2.0，Python）：研究核心。輸入法本體、個人化學習和排序模型都在私有 repo。可借鏡的是評測做法：讀音政策、漏候選分類、近似句洩漏檢查、事前凍結的驗收協定、判斷器門控與順序偏差量測。
+- **晶晶輸入法 2.7**（閉源付費，小麥注音分支）：使用者要求實機測試，main 下載 dmg 並靜態檢查（只讀檔案，沒有反組譯），使用者自己用官方安裝程式安裝。
+  - **模型**：`Resources/RerankerModel` 是 Qwen2 架構（24 層、hidden 896、4-bit MLX），README 寫 `base_model: mlx-community/Qwen2.5-0.5B-4bit`。和 Hugging Face 原版逐張量比對：前 8 層、詞嵌入、正規化層逐位元組相同；第 8–23 層的 7 種線性層全部不同，符合 mlx_lm.lora 預設訓練最後 16 層後合併。App 內嵌的開源聲明也寫明是 QLoRA 微調，訓練資料是 agentlans/traditional-chinese（ODC-BY）。官網沒有寫是哪個模型。
+  - **更正**：main 一度跟使用者說「晶晶沒列出 Qwen 的授權」，這只對官網的授權說明頁成立。主程式裡內嵌了完整的開源聲明，包含 Apache-2.0 第 4(b) 條的修改聲明。
+  - **權限**：主程式匯入 `CGEventTapCreate`、`CGEventPost`、`AXIsProcessTrusted`，有輔助使用權限時會建立系統層級的按鍵攔截，用在喵喵守門員和 iPhone 鏡像的 Enter／Esc。隱私頁卻寫輔助使用「僅用於喵喵守門員」，還說「輸入監控」是所有第三方輸入法的必要權限；小麥注音上游和善解都沒有用這些 API。
+  - **連網**：每天檢查更新（Sparkle，有 EdDSA 簽章）、驗證序號（Lemon Squeezy）、更新詞庫。首頁寫「完全不連網」，安裝時同意的授權條款（2026-05-26）把這些寫成「未來」的功能。
+  - **背景服務**：`ZingIME-reranker` 是只聽 `127.0.0.1:48763`、沒有驗證的 HTTP JSON 服務。
+  - **安裝**：官方安裝程式只啟用了輸入模式、沒有啟用上層的輸入法，所以安裝後選單看不到它。這跟善解 v0.1.0 的 bug 相同（PR #7 修掉）。啟用上層輸入法的動作被權限檢查擋下，改由使用者在系統設定加入。
+  - **報告**：https://claude.ai/artifact/XfpMvWYfqxaQwXZB1R2qVt （本機 `~/zingime-security-report.md`）。報告的立場是：模型出處、權限用途、連網行為只有裝好後才看得到，侵害使用者的知情權。
+- **對善解的決定**：公開網站寫明目前不連網、不申請輸入監控與輔助使用、用了哪些資料與模型，跟我們在報告裡對別人的要求一致。晶晶和善解的逐句比較，等使用者用 24 句測試清單實測後再記錄。
