@@ -255,7 +255,7 @@ fn a2_candidate_pick_learning_on_cases_tsv() {
     let (mut regress, mut moot, mut failed) = (Vec::new(), Vec::new(), Vec::new());
     println!("group | row kinds: exact/word before -> after | records written");
     for g in &gs {
-        e.learning_clear().unwrap();
+        e.learning_clear().unwrap_err(); // no store: an error (§4), memory still dropped
         let teach = g.rows.iter().find(|r| r.kind == "teach").unwrap();
         let (tctx, _, _) = span_of(&teach.sent, &g.word);
         let before: Vec<(bool, bool)> = g.rows.iter().map(|r| judge(&mut e, g, r)).collect();
@@ -306,7 +306,7 @@ fn a2_candidate_pick_learning_on_cases_tsv() {
     assert!(learned_reach * 100 >= wrong_reach * 80, "same-context learn rate under 80%");
 
     // Informational: all 14 groups taught on one learner, then every common row.
-    e.learning_clear().unwrap();
+    e.learning_clear().unwrap_err(); // no store: an error (§4), memory still dropped
     for g in &gs {
         teach_row(&mut e, g, g.rows.iter().find(|r| r.kind == "teach").unwrap());
     }
@@ -326,7 +326,7 @@ fn a2_mirror_teach_the_other_word() {
     e.set_learning(true);
     let (mut learned, mut wrong, mut learned_reach, mut wrong_reach) = (0, 0, 0, 0);
     for g in &groups() {
-        e.learning_clear().unwrap();
+        e.learning_clear().unwrap_err(); // no store: an error (§4), memory still dropped
         let teach = g.rows.iter().find(|r| r.kind == "teach").unwrap();
         let same = g.rows.iter().find(|r| r.same == Some(true)).unwrap();
         let (tctx, _, _) = span_of(&teach.sent, &g.word);
@@ -472,7 +472,7 @@ fn learned_word_beyond_per_key_is_enumerated() {
     e.key(k(KeyKind::Enter)).unwrap();
     assert_eq!(type_syls(&mut e, reading).preedit, word, "rank 21 word wins after one teach");
     e.key(k(KeyKind::Esc)).unwrap();
-    e.learning_clear().unwrap();
+    e.learning_clear().unwrap_err(); // no store: an error (§4), memory still dropped
     assert_ne!(type_syls(&mut e, reading).preedit, word, "and only because of the record");
 }
 
@@ -793,12 +793,61 @@ fn learning_panic_keeps_the_commit() {
     assert_eq!(n_records(&e), 1);
 }
 
-// ---------- store-dependent (run after integration with learn_store) ----------
+// ---------- store-dependent (§6.13; temporary directories only) ----------
 
 fn tmp_dir(tag: &str) -> PathBuf {
     let d = std::env::temp_dir().join(format!("shanjie-learn-{}-{tag}", std::process::id()));
     let _ = std::fs::remove_dir_all(&d);
     d
+}
+/// A sibling of `dir` outside the store directory, for link targets.
+fn outside(dir: &Path) -> PathBuf {
+    PathBuf::from(format!("{}-outside", dir.display()))
+}
+fn file_of(dir: &Path) -> PathBuf {
+    dir.join(core::learn_store::FILE)
+}
+fn raw(dir: &Path) -> String {
+    std::fs::read_to_string(file_of(dir)).unwrap()
+}
+/// Data lines (after the header) of the learning file.
+fn data_lines(dir: &Path) -> usize {
+    raw(dir).lines().skip(1).count()
+}
+const FORGET: Key = Key { kind: KeyKind::Backspace, ch: '\0', modifiers: MOD_COMMAND };
+/// A new tiny engine on `dir` (the "fresh engine" every write test ends with).
+fn reopen(dir: &Path) -> (Engine, core::learn_store::Opened) {
+    let mut e = tiny(TINY, TINY);
+    let opened = e.learning_open(dir).unwrap();
+    (e, opened)
+}
+/// Records as a sorted list, to compare two learners regardless of record order.
+fn sorted(e: &Engine) -> Vec<String> {
+    let mut v: Vec<String> = e.learner().records().iter().map(|r| format!("{}|{:?}|{}|{}|{}", r.context, r.reading, r.word, r.weight, r.day)).collect();
+    v.sort();
+    v
+}
+/// Records new or changed since `before`, by position: between full rewrites nothing is pruned, a
+/// teach updates records in place and pushes new ones at the end.
+fn changed(before: &[Record], e: &Engine) -> usize {
+    e.learner().records().iter().enumerate().filter(|(i, r)| before.get(*i) != Some(*r)).count()
+}
+/// One learning Enter on a one-syllable TINY reading: pick the homophone that is not shown.
+fn repick(e: &mut Engine, reading: &str) -> String {
+    let shown = type_syls(e, reading).preedit;
+    let word = if reading == "ㄒㄧㄣ" { if shown == "欣" { "鑫" } else { "欣" } } else if shown == "奔" { "犇" } else { "奔" };
+    pick(e, 1, 1, word);
+    assert_eq!(e.key(k(KeyKind::Enter)).unwrap().commit, word);
+    word.to_string()
+}
+/// ⌘⌫ on `word` of a one-syllable reading, then close the composition.
+fn forget(e: &mut Engine, reading: &str, word: &str) {
+    type_syls(e, reading);
+    let o = e.key(k(KeyKind::Space)).unwrap();
+    highlight(e, o, word);
+    e.key(FORGET).unwrap();
+    e.key(k(KeyKind::Esc)).unwrap();
+    e.key(k(KeyKind::Esc)).unwrap();
 }
 
 #[test]
@@ -809,21 +858,20 @@ fn store_commit_writes_the_file_and_reopen_restores() {
     type_syls(&mut e, "ㄒㄧㄣ");
     pick(&mut e, 1, 1, "欣");
     e.key(k(KeyKind::Enter)).unwrap();
-    let text = std::fs::read_to_string(dir.join("learning.tsv")).unwrap();
+    let text = raw(&dir);
     let rows: Vec<Vec<&str>> = text.lines().skip(1).map(|l| l.split('\t').collect()).collect();
     assert_eq!(rows.len(), 1);
     assert_eq!(&rows[0][..3], ["^", "ㄒㄧㄣ", "欣"]);
     assert_eq!(rows[0].len(), 5, "five fields only");
     assert_eq!(e.learning_status(), 0);
-    let mut e2 = tiny(TINY, TINY);
-    e2.learning_open(&dir).unwrap();
+    let (mut e2, _) = reopen(&dir);
     assert_eq!(type_syls(&mut e2, "ㄒㄧㄣ").preedit, "欣");
     // forget writes immediately
     let o = e2.key(k(KeyKind::Space)).unwrap();
     highlight(&mut e2, o, "欣");
-    e2.key(Key { kind: KeyKind::Backspace, ch: '\0', modifiers: MOD_COMMAND }).unwrap();
-    let text = std::fs::read_to_string(dir.join("learning.tsv")).unwrap();
-    assert_eq!(text.lines().count(), 1, "header only");
+    e2.key(FORGET).unwrap();
+    assert_eq!(raw(&dir).lines().count(), 1, "header only");
+    assert_eq!(n_records(&reopen(&dir).0), 0);
     let _ = std::fs::remove_dir_all(&dir);
 }
 #[test]
@@ -835,20 +883,22 @@ fn store_learning_off_then_enter_writes_nothing_and_clear_removes_the_file() {
     pick(&mut e, 1, 1, "欣");
     e.set_learning(false);
     e.key(k(KeyKind::Enter)).unwrap();
-    assert!(!dir.join("learning.tsv").exists(), "set_learning(0) then Enter writes nothing");
+    assert!(!file_of(&dir).exists(), "set_learning(0) then Enter writes nothing");
     e.set_learning(true);
     type_syls(&mut e, "ㄒㄧㄣ");
     pick(&mut e, 1, 1, "欣");
     e.key(k(KeyKind::Enter)).unwrap();
-    assert!(dir.join("learning.tsv").exists());
+    assert!(file_of(&dir).exists());
     // a pick made before clear is not learned by the next Enter
     type_syls(&mut e, "ㄅㄣ");
     pick(&mut e, 1, 1, "奔");
     e.learning_clear().unwrap();
-    assert!(!dir.join("learning.tsv").exists());
+    assert!(!file_of(&dir).exists());
     e.key(k(KeyKind::Enter)).unwrap();
-    assert!(!dir.join("learning.tsv").exists() && n_records(&e) == 0);
+    assert!(!file_of(&dir).exists() && n_records(&e) == 0);
     e.learning_clear().unwrap(); // already gone: success
+    let (e2, opened) = reopen(&dir);
+    assert_eq!((opened, n_records(&e2)), (core::learn_store::Opened::Fresh, 0));
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -863,7 +913,250 @@ fn store_write_failure_sets_the_status_flag_and_keeps_the_commit() {
     pick(&mut e, 1, 1, "欣");
     assert_eq!(e.key(k(KeyKind::Enter)).unwrap().commit, "欣");
     assert_eq!(e.learning_status(), 1);
+    // Nothing could be written; the next engine finds no store directory to open.
+    assert!(tiny(TINY, TINY).learning_open(&dir).is_err());
     let _ = std::fs::remove_file(&dir);
+}
+
+/// §4: without a successful learning_open, clear is an error (ABI 3), but memory still goes.
+#[test]
+fn clear_without_a_store_is_an_error() {
+    let mut e = picked();
+    e.key(k(KeyKind::Enter)).unwrap();
+    assert_eq!(n_records(&e), 1);
+    assert!(e.learning_clear().is_err());
+    assert_eq!(n_records(&e), 0);
+}
+
+/// §6.13 steps 1-4: a failed full rewrite during a forget must not let a later append succeed, or
+/// the forgotten word would come back on the next load.
+#[test]
+fn store_failed_rewrite_then_forget_never_brings_the_word_back() {
+    let dir = tmp_dir("failforget");
+    let tmp = dir.join(core::learn_store::TMP);
+    let mut e = tiny(TINY, TINY);
+    e.learning_open(&dir).unwrap();
+    // 1. teach W, Enter; a directory at the temporary's name makes every full rewrite fail; forget W
+    assert_eq!(repick(&mut e, "ㄒㄧㄣ"), "欣");
+    assert!(raw(&dir).contains("欣"));
+    std::fs::create_dir(&tmp).unwrap();
+    std::fs::write(tmp.join("x"), b"x").unwrap();
+    forget(&mut e, "ㄒㄧㄣ", "欣");
+    assert_eq!(e.learning_status(), 1, "the forget's rewrite failed");
+    // 2. another learning Enter: no append, the file is unchanged byte for byte, bit0 stays
+    let before = std::fs::read(file_of(&dir)).unwrap();
+    assert_eq!(repick(&mut e, "ㄅㄣ"), "奔");
+    assert_eq!(std::fs::read(file_of(&dir)).unwrap(), before, "nothing appended while a rewrite is owed");
+    assert_eq!(e.learning_status(), 1);
+    // 3. the obstacle goes; a learning Enter (not a forget) rewrites and clears bit0
+    std::fs::remove_dir_all(&tmp).unwrap();
+    repick(&mut e, "ㄅㄣ");
+    assert_eq!(e.learning_status(), 0);
+    // 4. a new engine: W has no record
+    let (e2, _) = reopen(&dir);
+    assert!(e2.learner().records().iter().all(|r| r.word != "欣"), "the forgotten word stays forgotten");
+    assert!(!raw(&dir).contains("欣"));
+    assert_eq!(sorted(&e2), sorted(&e), "what was written reads back");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// §6.13: a panic inside the forget, after memory changed and before the file did: bit0 is untouched
+/// but the next learning Enter is a full rewrite, so the word is gone from the file too.
+#[test]
+fn store_forget_panic_forces_the_next_write_to_rewrite() {
+    let dir = tmp_dir("forgetpanic");
+    let mut e = tiny(TINY, TINY);
+    e.learning_open(&dir).unwrap();
+    repick(&mut e, "ㄒㄧㄣ"); // full rewrite (first write after open)
+    repick(&mut e, "ㄒㄧㄣ"); // append
+    assert!(data_lines(&dir) > n_records(&e), "an append left a superseded line");
+    e.inject_forget_panic();
+    type_syls(&mut e, "ㄒㄧㄣ");
+    let o = e.key(k(KeyKind::Space)).unwrap();
+    highlight(&mut e, o, "欣");
+    let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| e.key(FORGET)));
+    assert!(r.is_err(), "the injected panic fired");
+    e.reset(ResetMode::Discard); // what the C ABI does after a panic (code 4)
+    assert_eq!(e.learning_status(), 0, "bit0 is not touched by a panic");
+    assert!(raw(&dir).contains("欣"), "the file was not written yet");
+    repick(&mut e, "ㄅㄣ");
+    assert_eq!(data_lines(&dir), n_records(&e), "a full rewrite, not an append");
+    assert!(!raw(&dir).contains("欣"));
+    let (e2, _) = reopen(&dir);
+    assert_eq!(sorted(&e2), sorted(&e));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// §6.13: 100 days pass on the same engine; the first write of the new day rewrites and prunes.
+#[test]
+fn store_hundred_days_without_reopening_prunes_the_file() {
+    let dir = tmp_dir("day100");
+    let mut e = tiny(TINY, TINY);
+    e.learning_open(&dir).unwrap();
+    assert_eq!(repick(&mut e, "ㄒㄧㄣ"), "欣");
+    e.set_today(Some(DAY + 100));
+    repick(&mut e, "ㄅㄣ");
+    assert!(!raw(&dir).contains("欣"), "the 100-day-old record is gone from the file (day rule)");
+    let mut e2 = tiny(TINY, TINY);
+    e2.set_today(Some(DAY + 100));
+    e2.learning_open(&dir).unwrap();
+    assert_eq!(sorted(&e2), sorted(&e));
+    assert_eq!(n_records(&e2), 1);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// §6.13: 100 days pass and a new engine opens; its first write rewrites and prunes.
+#[test]
+fn store_hundred_days_then_reopen_prunes_the_file() {
+    let dir = tmp_dir("day100open");
+    let mut e = tiny(TINY, TINY);
+    e.learning_open(&dir).unwrap();
+    assert_eq!(repick(&mut e, "ㄒㄧㄣ"), "欣");
+    let mut e = tiny(TINY, TINY);
+    e.set_today(Some(DAY + 100));
+    e.learning_open(&dir).unwrap();
+    repick(&mut e, "ㄅㄣ");
+    assert!(!raw(&dir).contains("欣"));
+    let mut e2 = tiny(TINY, TINY);
+    e2.set_today(Some(DAY + 100));
+    e2.learning_open(&dir).unwrap();
+    assert_eq!(sorted(&e2), sorted(&e));
+    assert_eq!(n_records(&e2), 1);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// §6.13: the last line cut inside its word field, no newline: skipped on load, and the next write
+/// (the first after open, a full rewrite) never glues an append onto it.
+#[test]
+fn store_torn_tail_is_skipped_and_never_glued() {
+    use core::learn_store::Opened;
+    let dir = tmp_dir("torn");
+    let mut e = tiny(TINY, TINY);
+    e.learning_open(&dir).unwrap();
+    assert_eq!(repick(&mut e, "ㄒㄧㄣ"), "欣");
+    assert_eq!(repick(&mut e, "ㄅㄣ"), "奔"); // appended: the last line is ^ ㄅㄣ 奔 ...
+    let text = raw(&dir);
+    let last = text.trim_end_matches('\n').rfind('\n').unwrap() + 1;
+    let word_at = last + text[last..].match_indices('\t').nth(1).unwrap().0 + 1;
+    assert!(text[word_at..].starts_with("奔"));
+    std::fs::write(file_of(&dir), &text.as_bytes()[..word_at + 1]).unwrap(); // half of 奔's bytes
+    let (mut e2, opened) = reopen(&dir);
+    assert_eq!(opened, Opened::Loaded { skipped: 1 });
+    assert!(e2.learner().records().iter().all(|r| r.word != "奔") && n_records(&e2) == 1);
+    repick(&mut e2, "ㄅㄣ");
+    let (e3, opened) = reopen(&dir);
+    assert_eq!(opened, Opened::Loaded { skipped: 0 }, "no glued or broken line");
+    assert_eq!(data_lines(&dir), n_records(&e3));
+    assert!(raw(&dir).ends_with('\n'));
+    assert_eq!(sorted(&e3), sorted(&e2));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// §6.13: each learning Enter adds exactly the changed records as lines (not a rewrite); the Enter
+/// that would reach JOURNAL_MAX appended lines rewrites, leaving one line per record.
+#[test]
+fn store_append_grows_by_the_touched_records_and_compacts_at_journal_max() {
+    use core::learn_store::JOURNAL_MAX;
+    let dir = tmp_dir("journal");
+    let mut e = tiny(TINY, TINY);
+    e.learning_open(&dir).unwrap();
+    repick(&mut e, "ㄒㄧㄣ");
+    assert_eq!(data_lines(&dir), n_records(&e), "first write after open: full rewrite");
+    let mut appended = 0;
+    let mut compacted = false;
+    for _ in 0..JOURNAL_MAX {
+        let before: Vec<Record> = e.learner().records().to_vec();
+        let lines = data_lines(&dir);
+        repick(&mut e, "ㄒㄧㄣ");
+        let touched = changed(&before, &e);
+        assert!(touched >= 1);
+        if appended + touched >= JOURNAL_MAX {
+            assert_eq!(data_lines(&dir), n_records(&e), "compacted at JOURNAL_MAX");
+            compacted = true;
+            break;
+        }
+        assert_eq!(data_lines(&dir), lines + touched, "one line per changed record");
+        appended += touched;
+    }
+    assert!(compacted);
+    let (e2, _) = reopen(&dir);
+    assert_eq!(sorted(&e2), sorted(&e));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// §6.13: after a forget the word appears 0 times in the file; after a clear the next learning Enter
+/// starts a new file holding only the header and the new records.
+#[test]
+fn store_forget_leaves_no_trace_and_clear_starts_over() {
+    let dir = tmp_dir("forgetclear");
+    let mut e = tiny(TINY, TINY);
+    e.learning_open(&dir).unwrap();
+    for _ in 0..3 {
+        repick(&mut e, "ㄒㄧㄣ");
+    }
+    repick(&mut e, "ㄅㄣ");
+    assert!(raw(&dir).matches("欣").count() >= 2, "appended versions of 欣");
+    forget(&mut e, "ㄒㄧㄣ", "欣");
+    assert_eq!(raw(&dir).matches("欣").count(), 0);
+    assert_eq!(e.learning_status(), 0);
+    let (e2, _) = reopen(&dir);
+    assert_eq!(sorted(&e2), sorted(&e));
+    e.learning_clear().unwrap();
+    assert!(!file_of(&dir).exists() && dir.is_dir());
+    let w = repick(&mut e, "ㄅㄣ");
+    assert_eq!(raw(&dir), format!("{}\n^\tㄅㄣ\t{w}\t1\t{DAY}\n", core::learn_store::HEADER));
+    let (e2, _) = reopen(&dir);
+    assert_eq!(sorted(&e2), sorted(&e));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// §6.13: a symlink, a FIFO, a second hard link, a file emptied by hand or one with group bits in
+/// place of the learning file: the append is refused and the full rewrite replaces it with a 0600
+/// regular file, never writing through the link.
+#[test]
+fn store_append_refusals_fall_back_to_a_full_rewrite() {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    for case in ["symlink", "fifo", "hardlink", "empty", "mode"] {
+        let dir = tmp_dir(&format!("refuse-{case}"));
+        let out = outside(&dir);
+        let _ = std::fs::remove_file(&out);
+        let mut e = tiny(TINY, TINY);
+        e.learning_open(&dir).unwrap();
+        repick(&mut e, "ㄒㄧㄣ");
+        let f = file_of(&dir);
+        match case {
+            "symlink" => {
+                std::fs::write(&out, raw(&dir)).unwrap();
+                std::fs::remove_file(&f).unwrap();
+                std::os::unix::fs::symlink(&out, &f).unwrap();
+            }
+            "fifo" => {
+                std::fs::remove_file(&f).unwrap();
+                assert!(std::process::Command::new("/usr/bin/mkfifo").arg(&f).status().unwrap().success());
+            }
+            "hardlink" => std::fs::hard_link(&f, &out).unwrap(),
+            "empty" => std::fs::write(&f, b"").unwrap(),
+            _ => std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o640)).unwrap(),
+        }
+        let kept = std::fs::read(&out).ok();
+        // In a thread with a time limit: a FIFO must never block the key path.
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            repick(&mut e, "ㄒㄧㄣ");
+            let _ = tx.send(e);
+        });
+        let e = rx.recv_timeout(std::time::Duration::from_secs(10)).expect("the Enter blocked");
+        let md = std::fs::symlink_metadata(&f).unwrap();
+        assert!(md.file_type().is_file(), "{case}: a regular file");
+        assert_eq!((md.mode() & 0o777, md.nlink()), (0o600, 1), "{case}: 0600, one link");
+        assert_eq!(e.learning_status(), 0, "{case}");
+        assert_eq!(data_lines(&dir), n_records(&e), "{case}: a full rewrite");
+        assert_eq!(std::fs::read(&out).ok(), kept, "{case}: nothing written through a link");
+        let (e2, _) = reopen(&dir);
+        assert_eq!(sorted(&e2), sorted(&e), "{case}");
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_file(&out);
+    }
 }
 
 #[test]
@@ -898,7 +1191,8 @@ fn p95(mut t: Vec<std::time::Duration>) -> std::time::Duration {
 
 /// A full store (CAPACITY active records) on the readings dev302 types: every 1-2 syllable span's top
 /// three lexicon words under a run of context keys (sentinel and global first), so most typed spans hit
-/// the learned path. `pick_enter` then adds one record per Enter, so every timed save also trims.
+/// the learned path. The first learning Enter after open rewrites the full file (and trims to
+/// CAPACITY); the timed Enters after it append (revision one, §4 and §11).
 #[test]
 fn perf_full_store_per_key_and_enter_with_write() {
     use std::time::{Duration, Instant};
@@ -956,25 +1250,46 @@ fn perf_full_store_per_key_and_enter_with_write() {
     let keys = replay(&mut e);
     assert_eq!(n_records(&e), CAPACITY, "no re-pick, nothing learned");
 
+    // §6.14: the first learning Enter after open is a full rewrite (reported apart); the next 100+ on
+    // the same day take the append path and are the gated sample.
     let mut enters = Vec::new();
-    for s in rows.iter().take(100) {
+    let mut first = None;
+    let (mut base_lines, mut touched) = (0, 0);
+    for s in rows.iter().take(121) {
         type_syls(&mut e, &s.join(" "));
         let o = e.key(k(KeyKind::Space)).unwrap();
         assert!(o.candidates.len() > 1, "a second candidate to re-pick");
         e.key(k(KeyKind::Down)).unwrap();
         e.key(k(KeyKind::Enter)).unwrap();
+        let before: Vec<Record> = if first.is_some() { e.learner().records().to_vec() } else { Vec::new() };
         let t = Instant::now();
         e.key(k(KeyKind::Enter)).unwrap();
-        enters.push(t.elapsed());
+        let dt = t.elapsed();
         assert_eq!(e.learning_status(), 0, "the write succeeded");
+        if first.is_none() {
+            first = Some(dt);
+            base_lines = std::fs::read_to_string(dir.join("learning.tsv")).unwrap().lines().count();
+            assert_eq!(base_lines, n_records(&e) + 1, "the first write after open rewrote the file");
+        } else {
+            enters.push(dt);
+            touched += changed(&before, &e);
+        }
     }
     let text = std::fs::read_to_string(dir.join("learning.tsv")).unwrap();
-    assert_eq!(text.lines().count(), CAPACITY + 1, "each Enter rewrote the full file");
+    assert!(touched > 0);
+    assert_eq!(text.lines().count(), base_lines + touched, "every later Enter appended its changed records, none rewrote");
+    // ⌘⌫ (always a full rewrite), reported only
+    type_syls(&mut e, &rows[0].join(" "));
+    e.key(k(KeyKind::Space)).unwrap();
+    let t = Instant::now();
+    e.key(Key { kind: KeyKind::Backspace, ch: '\0', modifiers: MOD_COMMAND }).unwrap();
+    let forget = t.elapsed();
     let (pk, pe) = (p95(keys.clone()), p95(enters.clone()));
     println!(
-        "load {load:?} rss +{} MB (peak; alone with --test-threads=1) | keys {} p95 {pk:?} (empty store {base:?}) | enter+write {} p95 {pe:?} max {:?}",
+        "load {load:?} rss +{} MB (peak; alone with --test-threads=1) | keys {} p95 {pk:?} (empty store {base:?}) | first enter (full rewrite) {:?} | append enters {} p95 {pe:?} max {:?} | forget (full rewrite) {forget:?}",
         rss / (1 << 20),
         keys.len(),
+        first.unwrap(),
         enters.len(),
         enters.iter().max().unwrap()
     );

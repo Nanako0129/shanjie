@@ -5,18 +5,25 @@
 //! context key, reading (syllables joined by `-`, as in the lexicon), word, weight, day. A record
 //! that would not read back as itself (a tab, newline or control character in a field, a `-` or an
 //! empty syllable in the reading, a bad context, weight or day) is never written and is skipped one
-//! line at a time on load.
+//! line at a time on load. When a (context, reading, word) appears on several lines, the last one
+//! wins: `append` adds newer versions of records at the end (revision one, §4 and §11).
 //!
-//! Directory 0700 with an owner check; writes go to the fixed temporary name `learning.tsv.tmp`
-//! (unlink, create_new, O_NOFOLLOW, mode 0600, write, fsync, rename); loads open with
-//! O_NOFOLLOW|O_NONBLOCK, require a regular file by fstat and cap it at 16 MB. A bad header or an
-//! oversized file is renamed to `learning.tsv.corrupt` (0600, one copy). Nothing here logs: no path
-//! and no record ever leaves this module except as data.
+//! Directory 0700 with an owner check. Two write paths (the engine picks one, §4):
+//! - `save`, the full rewrite: the fixed temporary name `learning.tsv.tmp` (unlink, create_new,
+//!   O_NOFOLLOW, mode 0600), write, F_BARRIERFSYNC (F_FULLFSYNC if that fails), rename;
+//! - `append`: an existing file only, O_WRONLY|O_APPEND|O_NOFOLLOW|O_NONBLOCK, refused unless fstat
+//!   shows a regular file of ours, no group/other bits, one link, at least a header's length, and
+//!   room under 16 MB; one write, no fsync; a short write is a failure.
+//!
+//! Loads open with O_NOFOLLOW|O_NONBLOCK, require a regular file by fstat and cap it at 16 MB. A
+//! bad header or an oversized file is renamed to `learning.tsv.corrupt` (0600, one copy). Nothing
+//! here logs: no path and no record ever leaves this module except as data.
 
 use crate::learn::{context_key, Record, GLOBAL};
 use std::fmt::Write as _;
 use std::fs::{self, DirBuilder, File, OpenOptions, Permissions};
 use std::io::{ErrorKind, Read, Write};
+use std::os::fd::AsRawFd;
 use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
@@ -25,6 +32,10 @@ pub const TMP: &str = "learning.tsv.tmp";
 pub const CORRUPT: &str = "learning.tsv.corrupt";
 pub const HEADER: &str = "#shanjie-learning v1";
 pub const MAX_BYTES: u64 = 16 * 1024 * 1024;
+/// Lines appended since the last full rewrite that force the next write to be a full rewrite (§4):
+/// bounds how many superseded lines the file and the load carry. A learning Enter appends at most 3
+/// lines, so at least 341 appending Enters pass between two rewrites.
+pub const JOURNAL_MAX: usize = 1024;
 
 // <fcntl.h> values. std has no names for them and the crate has no libc dependency; the shipping
 // target is macOS only (CI builds and tests core on macOS). The symlink and FIFO tests in
@@ -35,9 +46,22 @@ const O_NOFOLLOW: i32 = 0x0100;
 const O_NONBLOCK: i32 = 0x0004;
 #[cfg(target_os = "macos")]
 const ELOOP: i32 = 62;
+#[cfg(target_os = "macos")]
+const F_FULLFSYNC: i32 = 51;
+#[cfg(target_os = "macos")]
+const F_BARRIERFSYNC: i32 = 85;
 
 extern "C" {
     fn geteuid() -> u32;
+    fn fcntl(fd: i32, cmd: i32, ...) -> i32;
+}
+
+/// F_BARRIERFSYNC, else F_FULLFSYNC (§4): orders the data before the rename without waiting for the
+/// drive's cache flush on the key path (Rust's `sync_all` is F_FULLFSYNC on macOS, p99 35 ms in
+/// §11). False when both fail.
+fn barrier(f: &File) -> bool {
+    // SAFETY: a valid open descriptor; neither command takes an argument.
+    unsafe { fcntl(f.as_raw_fd(), F_BARRIERFSYNC) != -1 || fcntl(f.as_raw_fd(), F_FULLFSYNC) != -1 }
 }
 
 /// Latest accepted day (9999-12-31 as days since 1970-01-01); earlier than 0 is rejected too.
@@ -61,6 +85,13 @@ pub enum Opened {
     /// Header wrong, not a regular file, or over MAX_BYTES: renamed to CORRUPT (when it was a file),
     /// start empty.
     Corrupt,
+}
+
+/// The five-field lines of the valid records, appended to `buf`.
+fn lines(records: &[Record], buf: &mut String) {
+    for r in records.iter().filter(|r| valid(r)) {
+        let _ = writeln!(buf, "{}\t{}\t{}\t{}\t{}", r.context, r.reading.join("-"), r.word, r.weight, r.day);
+    }
 }
 
 pub struct LearnStore {
@@ -155,11 +186,20 @@ impl LearnStore {
             self.quarantine(&path, &f)?;
             return Ok((Vec::new(), Opened::Corrupt));
         }
-        let (mut records, mut skipped) = (Vec::new(), 0);
+        let (mut records, mut skipped) = (Vec::<Record>::new(), 0);
+        // Last line wins for a repeated (context, reading, word): appends carry the newer version.
+        let mut at = std::collections::HashMap::new();
         for line in lines.filter(|l| !l.is_empty()) {
-            match std::str::from_utf8(line).ok().and_then(parse) {
-                Some(r) => records.push(r),
-                None => skipped += 1,
+            let Some(r) = std::str::from_utf8(line).ok().and_then(parse) else {
+                skipped += 1;
+                continue;
+            };
+            match at.entry((r.context.clone(), r.reading.clone(), r.word.clone())) {
+                std::collections::hash_map::Entry::Occupied(e) => records[*e.get()] = r,
+                std::collections::hash_map::Entry::Vacant(e) => {
+                    e.insert(records.len());
+                    records.push(r);
+                }
             }
         }
         Ok((records, Opened::Loaded { skipped }))
@@ -172,16 +212,24 @@ impl LearnStore {
         io(f.set_permissions(Permissions::from_mode(0o600)))
     }
 
-    /// Atomic replace of `FILE` with `records`.
+    /// Full rewrite: atomic replace of `FILE` with `records`. A failed barrier is a failure.
     pub fn save(&self, records: &[Record]) -> Result<(), StoreError> {
+        self.rewrite(records, false)
+    }
+
+    /// Full rewrite for a forget (§4): renames even when both barriers fail, since leaving the
+    /// forgotten word on disk is worse than a less durable file (privacy over durability).
+    pub fn save_forgetting(&self, records: &[Record]) -> Result<(), StoreError> {
+        self.rewrite(records, true)
+    }
+
+    fn rewrite(&self, records: &[Record], rename_unsynced: bool) -> Result<(), StoreError> {
         let mut buf = String::with_capacity(64 + records.len() * 40);
         buf.push_str(HEADER);
         buf.push('\n');
         // Straight into `buf`: a String per record took 2-3 times as long at CAPACITY (measured
-        // 2026-10-05), on every learning Enter.
-        for r in records.iter().filter(|r| valid(r)) {
-            let _ = writeln!(buf, "{}\t{}\t{}\t{}\t{}", r.context, r.reading.join("-"), r.word, r.weight, r.day);
-        }
+        // 2026-10-05).
+        lines(records, &mut buf);
         let tmp = self.dir.join(TMP);
         remove(&tmp)?;
         let written = (|| {
@@ -192,7 +240,9 @@ impl LearnStore {
                 .custom_flags(O_NOFOLLOW)
                 .open(&tmp)?;
             f.write_all(buf.as_bytes())?;
-            f.sync_all()?;
+            if !barrier(&f) && !rename_unsynced {
+                return Err(std::io::Error::other("sync"));
+            }
             drop(f);
             fs::rename(&tmp, self.dir.join(FILE))
         })();
@@ -201,6 +251,30 @@ impl LearnStore {
             return Err(StoreError::Io);
         }
         Ok(())
+    }
+
+    /// Appends `records` (the ones a commit changed) to the existing `FILE` in one write (§4). Any
+    /// refusal or a short write is `Err`; the caller then does a full rewrite, which also replaces
+    /// whatever a short write left at the end.
+    pub fn append(&self, records: &[Record]) -> Result<(), StoreError> {
+        let mut buf = String::new();
+        lines(records, &mut buf);
+        // O_NOFOLLOW: a symlink fails with ELOOP; O_NONBLOCK: a FIFO without a reader fails with
+        // ENXIO instead of waiting. No O_CREAT: a missing file is a failure, not a new headerless file.
+        let mut f = io(OpenOptions::new().append(true).custom_flags(O_NOFOLLOW | O_NONBLOCK).open(self.dir.join(FILE)))?;
+        let md = io(f.metadata())?;
+        // SAFETY: geteuid has no preconditions and cannot fail.
+        let ours = md.uid() == unsafe { geteuid() };
+        // At least the header and its newline: a file emptied by hand gets a full rewrite instead of
+        // headerless lines that the next load would quarantine whole.
+        let fits = md.len() > HEADER.len() as u64 && md.len() + buf.len() as u64 <= MAX_BYTES;
+        if !md.is_file() || !ours || md.mode() & 0o077 != 0 || md.nlink() != 1 || !fits {
+            return Err(StoreError::Io);
+        }
+        match f.write(buf.as_bytes()) {
+            Ok(n) if n == buf.len() => Ok(()),
+            _ => Err(StoreError::Io),
+        }
     }
 
     /// Deletes FILE, TMP and CORRUPT (ENOENT is success); keeps the directory and its backup flag.

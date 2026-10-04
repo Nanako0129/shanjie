@@ -176,8 +176,8 @@ static int run_learn(const char *dir, const char *learn_dir) {
   CHECK(515, shanjie_engine_set_learning(e, 0u) == 0);
   /* nothing written yet */
   CHECK(516, shanjie_engine_learning_status(e, &flags) == 0 && flags == 0u);
-  /* without a file, clear only drops memory */
-  CHECK(517, shanjie_engine_learning_clear(e) == 0);
+  /* no learning_open has succeeded: clear drops memory but returns 3, never a pretend success */
+  CHECK(517, shanjie_engine_learning_clear(e) == 3);
   if (learn_dir) {
     CHECK(518, shanjie_engine_learning_open(e, learn_dir) == 0);
     CHECK(519, shanjie_engine_learning_status(e, &flags) == 0 && flags == 0u);

@@ -1,8 +1,8 @@
 //! S3a key engine (docs/contracts/s3a.md): key events in, preedit / commit / candidates out.
 //! R2: no input text in errors or panics; types holding input text do not derive Debug.
 
-use crate::learn::{context_key, local_day, Learner};
-use crate::learn_store::{LearnStore, Opened, StoreError};
+use crate::learn::{context_key, local_day, Learner, Record};
+use crate::learn_store::{LearnStore, Opened, StoreError, JOURNAL_MAX};
 use crate::lm::{decode_segment_learned, CappedLexicon, End, Learn, Lm, Profile};
 use crate::{decode_beam, Lexicon, NoLearning, BEAM_S1};
 use std::collections::{HashMap, HashSet};
@@ -216,11 +216,24 @@ pub struct Engine {
     learning: bool,
     learner: Learner,
     store: Option<LearnStore>,
+    /// §4 bit0: the last full rewrite failed. Set by a failed full rewrite; cleared only by a
+    /// successful full rewrite or clear. While it is set, `must_rewrite` is set too.
     write_failed: bool,
+    /// §4: the next write must be a full rewrite. Set before a forget or clear touches memory and
+    /// before every full rewrite; cleared only when a full rewrite's rename (or a clear) succeeds, so
+    /// a failure or a panic part way leaves it set.
+    must_rewrite: bool,
+    /// §4: day of the last successful full rewrite; `None` after open and after a clear, so the first
+    /// write then, and the first write of each day, is a full rewrite.
+    last_full: Option<i64>,
+    /// §4: lines appended since the last full rewrite.
+    appended: usize,
     /// Test-purpose clock (day number); `None` uses the local calendar day.
     today: Option<i64>,
     /// Test-purpose injection: the next learning pass panics (contract §6.9).
     learn_panic: bool,
+    /// Test-purpose injection: the next ⌘⌫ forget panics after changing memory (§6.13).
+    forget_panic: bool,
 }
 
 /// Base lexicon + overlay from `data_dir` (§5), same as the eval CLI default. The overlay rows are
@@ -275,8 +288,12 @@ impl Engine {
             learner: Learner::default(),
             store: None,
             write_failed: false,
+            must_rewrite: false,
+            last_full: None,
+            appended: 0,
             today: None,
             learn_panic: false,
+            forget_panic: false,
         }
     }
 
@@ -297,28 +314,39 @@ impl Engine {
         }
     }
 
-    /// §4: load `dir/learning.tsv`. On error the previous learner and store stay.
+    /// §4: load `dir/learning.tsv` (memory pruned only; the file is tidied by the first write, which
+    /// is always a full rewrite). On error the previous learner and store stay. `must_rewrite` and
+    /// bit0 are left as they are: only a successful full rewrite or clear clears them.
     pub fn learning_open(&mut self, dir: &Path) -> Result<Opened, StoreError> {
         let (store, records, opened) = LearnStore::open(dir)?;
         self.learner = Learner::from_records(records);
         self.learner.prune(self.today());
         self.store = Some(store);
-        self.write_failed = false;
+        self.last_full = None;
+        self.appended = 0;
         Ok(opened)
     }
 
     /// §4: forget everything: memory, pending learns, files. Memory and pending learns go even when
-    /// deleting the files fails.
+    /// deleting the files fails. Without a store (no successful `learning_open`) it is an error: there
+    /// is no file it could have deleted, and the shell must not show the clear as done.
     pub fn learning_clear(&mut self) -> Result<(), StoreError> {
+        if self.store.is_some() {
+            self.must_rewrite = true;
+        }
         self.learner.clear();
         self.fixed.iter_mut().for_each(|f| f.pre = None);
-        match &self.store {
-            Some(s) => s.clear(),
-            None => Ok(()),
-        }
+        let store = self.store.as_ref().ok_or(StoreError::Io)?;
+        store.clear()?;
+        // The next write starts a new file from the header by the day rule, not by finding none.
+        self.last_full = None;
+        self.appended = 0;
+        self.must_rewrite = false;
+        self.write_failed = false;
+        Ok(())
     }
 
-    /// bit0: the last write of the learning file failed.
+    /// bit0: the last full rewrite of the learning file failed (§4).
     pub fn learning_status(&self) -> u32 {
         self.write_failed as u32
     }
@@ -337,15 +365,47 @@ impl Engine {
         self.learn_panic = true;
     }
 
+    /// Test-purpose injection: the next ⌘⌫ forget panics right after removing the word from memory,
+    /// before the file is rewritten (§6.13).
+    pub fn inject_forget_panic(&mut self) {
+        self.forget_panic = true;
+    }
+
     fn today(&self) -> i64 {
         self.today.unwrap_or_else(local_day)
     }
 
-    /// Prune and write the learning file; a failure only sets the status flag (§4).
-    fn save(&mut self) {
-        self.learner.prune(self.today());
-        if let Some(store) = &self.store {
-            self.write_failed = store.save(self.learner.records()).is_err();
+    /// §4 write after a learning commit: append `touched` when allowed, else a full rewrite.
+    /// Without a store only memory is pruned (to keep CAPACITY).
+    fn persist(&mut self, touched: &[Record]) {
+        let today = self.today();
+        let Some(store) = &self.store else {
+            self.learner.prune(today);
+            return;
+        };
+        let append_ok = !self.must_rewrite && self.last_full == Some(today) && self.appended + touched.len() < JOURNAL_MAX;
+        if append_ok && store.append(touched).is_ok() {
+            self.appended += touched.len();
+            return;
+        }
+        self.rewrite(false);
+    }
+
+    /// §4 full rewrite: prune, then replace the file. Success clears `must_rewrite` and bit0; a
+    /// failure leaves `must_rewrite` set and sets bit0. No-op without a store.
+    fn rewrite(&mut self, forgetting: bool) {
+        let today = self.today();
+        let Some(store) = &self.store else { return };
+        self.must_rewrite = true;
+        self.learner.prune(today);
+        let r = if forgetting { store.save_forgetting(self.learner.records()) } else { store.save(self.learner.records()) };
+        if r.is_ok() {
+            self.must_rewrite = false;
+            self.write_failed = false;
+            self.last_full = Some(today);
+            self.appended = 0;
+        } else {
+            self.write_failed = true;
         }
     }
 
@@ -371,11 +431,12 @@ impl Engine {
                     Some((ctx, self.syls[f.start..f.end].to_vec(), f.word.clone(), pre.clone()))
                 })
                 .collect();
+            let mut touched = Vec::new();
             for (ctx, reading, word, displaced) in &plans {
-                self.learner.teach(ctx, reading, word, displaced, today);
+                touched.extend(self.learner.teach(ctx, reading, word, displaced, today));
             }
             if !plans.is_empty() {
-                self.save();
+                self.persist(&touched);
             }
         }));
     }
@@ -850,6 +911,9 @@ impl Engine {
     }
 
     /// §1.5: drop the highlighted candidate's records for its reading (all keys), then re-decode.
+    /// With a store the file is always fully rewritten (§4): a record pruned from memory on load can
+    /// still be in the file, so "memory changed" says nothing about the file. `must_rewrite` is set
+    /// first, so a panic or failure part way makes the next write a full rewrite too.
     fn forget_highlighted(&mut self) -> Result<(), EngineError> {
         let Some(c) = &self.cands else { return Ok(()) };
         let Some((word, l)) = c.list.get(c.sel).cloned() else { return Ok(()) };
@@ -857,11 +921,14 @@ impl Engine {
         if self.is_punct(start) {
             return Ok(());
         }
-        let before = self.learner.records().len();
-        self.learner.forget(&self.syls[start..end], &word);
-        if self.learner.records().len() != before {
-            self.save();
+        if self.store.is_some() {
+            self.must_rewrite = true;
         }
+        self.learner.forget(&self.syls[start..end], &word);
+        if std::mem::take(&mut self.forget_panic) {
+            panic!("injected forget panic");
+        }
+        self.rewrite(true);
         self.refresh()
     }
 
