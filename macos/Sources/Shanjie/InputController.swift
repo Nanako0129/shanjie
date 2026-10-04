@@ -118,8 +118,19 @@ final class CandidatePanelAdapter: CandidatePanel {
         panel.setAttributes([IMKCandidatesSendServerKeyEventFirst: NSNumber(value: true)])
     }
 
-    func show(_ candidates: [String], selected: Int) {
-        panel.setCandidateData(candidates.map { $0 as NSString })
+    /// s3f: the name's point size. Apple's cells show the name smaller than the mark (user's
+    /// screenshots, 2026-10-05); IMKCandidates does not expose its own font size, so this is a
+    /// first value for the user's visual rounds.
+    static let noteFontSize: CGFloat = 12
+
+    func show(_ candidates: [String], notes: [String?], selected: Int) {
+        panel.setCandidateData(zip(candidates, notes).map { c, note -> Any in
+            guard let note else { return c as NSString }
+            let cell = NSMutableAttributedString(string: c)
+            cell.append(NSAttributedString(string: CandidateText.separator + note,
+                                           attributes: [.font: NSFont.systemFont(ofSize: Self.noteFontSize)]))
+            return cell
+        })
         panel.show(kIMKLocateCandidatesBelowHint)
         guard candidates.indices.contains(selected) else { return }
         // User report 2026-10-04 (v0.1.1): the highlight stayed on the first candidate while the
