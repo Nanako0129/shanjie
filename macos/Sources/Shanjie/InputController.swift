@@ -140,19 +140,11 @@ final class CandidatePanelAdapter: CandidatePanel {
         panel.setAttributes([IMKCandidatesSendServerKeyEventFirst: NSNumber(value: true)])
     }
 
-    /// s3f: the name's point size, matched to the system Zhuyin input method. Round 1 used 12 pt;
-    /// in the user's same-scale screenshots (2026-10-05) Apple's "全形逗號" measured 46 px wide and
-    /// 10 px tall against our 62 and 14, about 0.73 of 12 pt, which is the mini control size (9 pt).
-    static let noteFontSize = NSFont.systemFontSize(for: .mini)
-
+    /// s3f: a named cell is the plain text `CandidateText.display` gives. IMKCandidates draws every
+    /// cell in its own font: names set to 12 pt and then 9 pt rendered identically in the user's
+    /// screenshots (2026-10-05), so a smaller name, as in Apple's panel, needs our own window (S3b-2).
     func show(_ candidates: [String], notes: [String?], selected: Int) {
-        panel.setCandidateData(zip(candidates, notes).map { c, note -> Any in
-            guard let note else { return c as NSString }
-            let cell = NSMutableAttributedString(string: c)
-            cell.append(NSAttributedString(string: CandidateText.separator + note,
-                                           attributes: [.font: NSFont.systemFont(ofSize: Self.noteFontSize)]))
-            return cell
-        })
+        panel.setCandidateData(zip(candidates, notes).map { CandidateText.display($0, note: $1) as NSString })
         panel.show(kIMKLocateCandidatesBelowHint)
         guard candidates.indices.contains(selected) else { return }
         // User report 2026-10-04 (v0.1.1): the highlight stayed on the first candidate while the
