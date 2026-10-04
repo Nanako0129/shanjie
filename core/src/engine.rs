@@ -3,7 +3,7 @@
 
 use crate::lm::{decode_segment, CappedLexicon, End, Lm, Profile};
 use crate::{decode_beam, Lexicon, NoLearning, BEAM_S1};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -33,11 +33,25 @@ const SHIFT_PUNCT: [(char, char); 10] = [
 /// (`_punct_，`); the lexicon has no such reading. Each one is also a length-1 fixed word.
 const PUNCT_PREFIX: &str = "_punct_";
 
-/// Whether a path word is a punctuation token (s3d §4): only punctuation tokens produce these
-/// characters, since no syllable reading decodes to them.
-fn is_punct_word(w: &str) -> bool {
-    let mut it = w.chars();
-    matches!((it.next(), it.next()), (Some(c), None) if c == '、' || SHIFT_PUNCT.iter().any(|&(_, p)| p == c))
+/// s3e §3: built-in punctuation alternatives, used until `set_punctuation` succeeds. From
+/// data/lexicon/mcbpmf-data.txt (McBopomofo, MIT): ， `_punctuation_Standard_<` lines 1093-1097;
+/// 。 `_punctuation_Standard_>` 1098-1103; ： `_punctuation_:` 1044-1045; 「 `_punctuation_{`
+/// 2302-2308 and 」 `_punctuation_}` 2313-2319 (`_punctuation_[`/`]` hold only 「」); 、
+/// `_punctuation_\\` 1105-1106. The other marks have no alternatives there.
+const DEFAULT_PUNCT: [(char, &[&str]); 6] = [
+    ('，', &["〈", "《", "︿", "︽"]),
+    ('。', &["．", "〉", "》", "﹀", "︾"]),
+    ('：', &["；"]),
+    ('「', &["『", "《", "〔", "｛", "〈", "【", "〖"]),
+    ('」', &["』", "》", "〕", "｝", "〉", "】", "〗"]),
+    ('、', &["＼", "／"]),
+];
+/// s3e §3 limits on a table passed to `set_punctuation`.
+const PUNCT_TABLE_MAX_BYTES: usize = 64 * 1024;
+const PUNCT_TABLE_MAX_LINES: usize = 1000;
+
+fn default_punct() -> HashMap<char, Vec<String>> {
+    DEFAULT_PUNCT.iter().map(|(k, v)| (*k, v.iter().map(|s| s.to_string()).collect())).collect()
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -177,8 +191,11 @@ pub struct Engine {
     data_dir: Option<PathBuf>,
     lm: Option<LmState>,
     profile: Profile,
-    /// Words of the current best path with the lp each was scored with (LM mode only).
-    path: Vec<(String, f64)>,
+    /// Words of the current best path with the lp each was scored with, and whether the word is a
+    /// punctuation token (LM mode only).
+    path: Vec<(String, f64, bool)>,
+    /// s3e: punctuation mark -> its alternatives (built-in default until `set_punctuation`).
+    punct: HashMap<char, Vec<String>>,
     layout: Layout,
     syls: Vec<String>,
     cursor: usize,
@@ -212,6 +229,7 @@ impl Engine {
             lm: None,
             profile: Profile::Chat,
             path: Vec::new(),
+            punct: default_punct(),
             layout,
             syls: Vec::new(),
             cursor: 0,
@@ -233,6 +251,40 @@ impl Engine {
         let capped = CappedLexicon::new(self.lex.clone(), &overlay, &lm);
         self.lm = Some(LmState { lm: Arc::new(lm), capped: Arc::new(capped) });
         Ok(())
+    }
+
+    /// s3e §3: replace the punctuation alternatives with `table` (lines `mark\talt\talt…`, blank
+    /// lines ignored, a repeated mark overrides the earlier line). On any invalid input nothing
+    /// changes and `false` is returned. The composition is not recomputed.
+    pub fn set_punctuation(&mut self, table: &str) -> bool {
+        if table.len() > PUNCT_TABLE_MAX_BYTES {
+            return false;
+        }
+        let lines: Vec<&str> = table.split('\n').filter(|l| !l.is_empty()).collect();
+        if lines.is_empty() || lines.len() > PUNCT_TABLE_MAX_LINES {
+            return false;
+        }
+        let mut map = HashMap::new();
+        for line in lines {
+            let mut fields = line.split('\t');
+            let mut key = fields.next().unwrap_or("").chars();
+            let (Some(mark), None) = (key.next(), key.next()) else { return false };
+            let alts: Vec<String> = fields.map(str::to_string).collect();
+            if alts.is_empty() || alts.iter().any(String::is_empty) {
+                return false;
+            }
+            map.insert(mark, alts);
+        }
+        self.punct = map;
+        true
+    }
+
+    /// Display chars of token `i`: 1 for a syllable, the fixed word's length for punctuation.
+    fn token_width(&self, i: usize) -> usize {
+        if !self.is_punct(i) {
+            return 1;
+        }
+        self.fixed.iter().find(|f| f.start == i).map_or(1, |f| f.word.chars().count())
     }
 
     /// Test-purpose injection for `with_lexicon` engines: a prebuilt model and its capped lexicon
@@ -262,8 +314,8 @@ impl Engine {
         let mut prev = "<s>";
         let mut total = 0.0;
         let mut any = false;
-        for (w, lp) in &self.path {
-            if is_punct_word(w) {
+        for (w, lp, is_punct) in &self.path {
+            if *is_punct {
                 if prev != "<s>" {
                     total += st.lm.eos(lam, prev);
                 }
@@ -309,8 +361,9 @@ impl Engine {
 
     fn view(&self, handled: bool, commit: String) -> Output {
         let chars: Vec<char> = self.display.chars().collect();
-        // ponytail: assumes one display char per syllable (lexicon invariant); clamped otherwise.
-        let at = self.cursor.min(chars.len());
+        // A syllable shows as one char (lexicon invariant); a punctuation token as its fixed word,
+        // which can be longer (⋯⋯, s3e §3). Clamped in case the invariant ever breaks.
+        let at = (0..self.cursor).map(|i| self.token_width(i)).sum::<usize>().min(chars.len());
         let pending = self.pending();
         let mut preedit: String = chars[..at].iter().collect();
         preedit.push_str(&pending);
@@ -385,12 +438,12 @@ impl Engine {
                     .map_err(|_| EngineError::Internal)?;
                 for (w, lp) in &best.first().ok_or(EngineError::Internal)?.1 {
                     out.push_str(w);
-                    path.push((w.to_string(), *lp));
+                    path.push((w.to_string(), *lp, false));
                 }
             }
             if let Some(f) = right {
                 out.push_str(&f.word);
-                path.push((f.word.clone(), lp_fixed[gap]));
+                path.push((f.word.clone(), lp_fixed[gap], self.is_punct(f.start)));
             }
         }
         self.display = out;
@@ -603,6 +656,21 @@ impl Engine {
         };
         let mut seen = HashSet::new();
         let mut list = Vec::new();
+        // s3e §3: right after punctuation (or punctuation first at cursor 0), list the typed mark,
+        // then its alternatives.
+        let touching = if a == 0 { 0 } else { a - 1 };
+        if avail == 0 && touching < self.syls.len() && self.is_punct(touching) {
+            let typed = self.syls[touching][PUNCT_PREFIX.len()..].to_string();
+            let alts = typed.chars().next().and_then(|c| self.punct.get(&c)).cloned().unwrap_or_default();
+            let mut listed = HashSet::new();
+            for w in std::iter::once(typed).chain(alts) {
+                if listed.insert(w.clone()) {
+                    list.push((w, 1));
+                }
+            }
+            self.cands = Some(Cands { list, sel: 0 });
+            return;
+        }
         for l in (1..=self.lex.max_len.min(avail)).rev() {
             let key = if a == 0 { &self.syls[..l] } else { &self.syls[a - l..a] };
             for (w, _) in self.lex.entries(key) {
