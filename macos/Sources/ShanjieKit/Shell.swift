@@ -239,21 +239,10 @@ public final class Session {
     // MARK: IMK callbacks
 
     /// Returns whether the key was consumed. `event` is nil when IMK passes nil.
-    /// ↓ (125) and ↑ (126): the s3f round-2 experiment above.
-    static let panelKeys: Set<UInt16> = [125, 126]
-
     public func handle(_ event: NSEvent?) -> Bool {
         guard shell.engine != nil else { return false }
         guard event == nil || event?.type == .keyDown else { return false }
         if claim() { applyProfile() }
-        // s3f round 2 (experiment, 2026-10-05): with candidates showing, ↓ and ↑ go to the system
-        // candidate panel instead of the core (IMKCandidatesSendServerKeyEventFirst hands a key the
-        // controller declines to the panel), to see whether IMKCandidates expands into Apple's grid
-        // with its own animation. ← → still move the core's selection, as in Apple's input method.
-        if let event, !shell.candidates.isEmpty, Self.panelKeys.contains(event.keyCode),
-           event.modifierFlags.intersection(.deviceIndependentFlagsMask).subtracting([.numericPad, .function]).isEmpty {
-            return false
-        }
         guard let event,
               let key = KeyMap.translate(keyCode: event.keyCode, flags: event.modifierFlags)
         else {
