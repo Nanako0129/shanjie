@@ -435,3 +435,61 @@ fn sandhi_probe_production_path() {
     assert_eq!(commit(&mut e, &syls("ㄅㄨˋ ㄕˋ ㄧㄝˋ ㄆㄟˋ ㄛ")), "不是業配喔");
     assert_eq!(commit(&mut e, &syls("ㄓㄜˋ ㄐㄧㄢˋ ㄕˋ ㄅㄣˇ ㄕˋ ㄨˋ ㄏㄨㄟˋ ㄧˋ ㄔㄤˇ")), "這件事本是誤會一場");
 }
+
+fn syls_of(r: &str) -> Syls {
+    r.split(' ').map(String::from).collect()
+}
+
+/// Types a reading and commits with Enter, like the replay tests.
+fn commit_reading(e: &mut Engine, reading: &str) -> String {
+    let mut s = String::new();
+    for k in syls_of(reading).iter().flat_map(|x| keys_of(Layout::Standard, x)).chain([Key::new(KeyKind::Enter)]) {
+        s.push_str(&e.key(k).unwrap().commit);
+    }
+    s
+}
+
+/// S2r-2 (docs/contracts/s2r2-overlay-readings.md §4.5): overlay words read with the MOE readings
+/// through the production path (`Engine::new`, then `load_lm`). Each reading was wrong on main:
+/// the overlay had 三不沾 and 不乾膠 with ㄅㄨˊ before a non-falling tone, 上原和 and 上和下睦 with
+/// ㄏㄢˋ, 賡和 with ㄏㄢˋ (now ㄏㄜˋ), and no sandhi row for 一丈青 (ㄧˊ).
+#[test]
+fn overlay_readings_production_path() {
+    let mut e = Engine::new(&root().join("data/lexicon"), Layout::Standard).unwrap();
+    e.load_lm(&lm_path()).unwrap();
+    let cases = [
+        ("ㄙㄢ ㄅㄨˋ ㄓㄢ", "三不沾"),
+        ("ㄅㄨˋ ㄍㄢ ㄐㄧㄠ", "不乾膠"),
+        ("ㄕㄤˋ ㄩㄢˊ ㄏㄜˊ", "上原和"),
+        ("ㄕㄤˋ ㄏㄜˊ ㄒㄧㄚˋ ㄇㄨˋ", "上和下睦"),
+        ("ㄍㄥ ㄏㄜˋ", "賡和"),
+        ("ㄧˊ ㄓㄤˋ ㄑㄧㄥ", "一丈青"),
+        ("ㄧ ㄓㄤˋ ㄏㄨㄥˊ", "一丈紅"),
+    ];
+    let bad: Vec<String> = cases
+        .iter()
+        .filter_map(|(r, want)| {
+            let got = commit_reading(&mut e, r);
+            (got != *want).then(|| format!("{r} -> {got} (want {want})"))
+        })
+        .collect();
+    assert!(bad.is_empty(), "wrong commits: {bad:?}");
+}
+
+/// S2r-2 §4.6: the core needs no change for sandhi rows in overlay-add.tsv. 一丈紅 has two rows
+/// (primary ㄧ first, variant ㄧˊ right after, same word, variant score 0.5 lower):
+/// (a) the real files parse and `word_info` returns the primary reading (the higher score decides),
+/// (b) the variant row scores the primary minus 0.5 and `CappedLexicon` caps both readings (at most the penalty apart), below the raw one,
+/// (c) Python's `by_word` agrees (reference/proto/check_overlay_variants.py).
+#[test]
+fn overlay_sandhi_rows_load_and_cap() {
+    let s = shared();
+    let (primary, variant) = (syls_of("ㄧ ㄓㄤˋ ㄏㄨㄥˊ"), syls_of("ㄧˊ ㄓㄤˋ ㄏㄨㄥˊ"));
+    let (got, raw) = s.lex.word_info("一丈紅").expect("一丈紅 is in the lexicon");
+    assert_eq!(got, primary, "word_info must return the primary reading (the higher-scored row)");
+    let vraw = s.lex.entries(&variant).iter().find(|(w, _)| *w == "一丈紅").map(|(_, sc)| *sc).expect("the variant row is loaded");
+    assert!((raw - vraw - 0.5).abs() < 1e-9, "the variant row scores the primary minus the 0.5 penalty ({raw} vs {vraw})");
+    let (cp, cv) = (s.capped.best_lp(&primary, "一丈紅").unwrap(), s.capped.best_lp(&variant, "一丈紅").unwrap());
+    assert!(cv <= cp && cp - cv <= 0.5 + 1e-9, "capped variant is at most the penalty below the primary ({cp} vs {cv})");
+    assert!(cp < raw, "the cap lowers the raw overlay score {raw} (got {cp})");
+}
