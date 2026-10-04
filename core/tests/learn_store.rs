@@ -321,3 +321,37 @@ fn records_100_days_old_are_pruned_across_save_and_load() {
     let (_, records, _) = LearnStore::open(&dir).unwrap();
     assert_eq!(records, vec![rec("中", "ㄅㄚˇ", "吧", 1.0, today)]);
 }
+
+/// §6.13: the same record appended twice, then reopened: one record, the later weight and day.
+#[test]
+fn append_twice_then_open_keeps_the_last_line() {
+    let (_p, dir) = temp();
+    let (store, _, _) = LearnStore::open(&dir).unwrap();
+    store.save(&sample()).unwrap();
+    store.append(&[rec("管把", "ㄅㄚˇ", "把", 2.0, 20_010)]).unwrap();
+    store.append(&[rec("管把", "ㄅㄚˇ", "把", 3.5, 20_020), rec("中", "ㄅㄚˇ", "吧", 1.0, 20_020)]).unwrap();
+    assert_eq!(fs::read_to_string(dir.join(FILE)).unwrap().lines().count(), 1 + 4 + 3);
+    assert_eq!(mode(&dir.join(FILE)), 0o600);
+    let (_, records, opened) = LearnStore::open(&dir).unwrap();
+    assert_eq!(opened, Opened::Loaded { skipped: 0 });
+    let mut want = sample();
+    want[0] = rec("管把", "ㄅㄚˇ", "把", 3.5, 20_020);
+    want.push(rec("中", "ㄅㄚˇ", "吧", 1.0, 20_020));
+    assert_eq!(records, want);
+}
+
+/// §4: append never creates the file and never takes it past 16 MB.
+#[test]
+fn append_needs_an_existing_file_with_room() {
+    let (_p, dir) = temp();
+    let (store, _, _) = LearnStore::open(&dir).unwrap();
+    assert_eq!(store.append(&sample()), Err(StoreError::Io));
+    assert!(!dir.join(FILE).exists(), "no headerless file created");
+    let f = fs::File::create(dir.join(FILE)).unwrap();
+    std::io::Write::write_all(&mut &f, format!("{HEADER}\n").as_bytes()).unwrap();
+    f.set_len(MAX_BYTES - 10).unwrap(); // sparse
+    drop(f);
+    fs::set_permissions(dir.join(FILE), fs::Permissions::from_mode(0o600)).unwrap();
+    assert_eq!(store.append(&sample()[..1]), Err(StoreError::Io));
+    assert_eq!(fs::metadata(dir.join(FILE)).unwrap().len(), MAX_BYTES - 10);
+}

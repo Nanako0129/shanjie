@@ -16,7 +16,7 @@ pub const GLOBAL: &str = "";
 pub const HALF_LIFE_DAYS: f64 = 14.0;
 /// A record boosts decoding only from this weight up (§1.4).
 pub const ACTIVE: f64 = 0.5;
-/// Records decayed below this are dropped on load and save (§1.3): about 60 days unused, so a
+/// Records decayed below this are dropped on load and on a full rewrite (§1.3): about 60 days unused, so a
 /// repeated teach still has room to accumulate, while long-dead entries do not linger on disk.
 pub const PRUNE_FLOOR: f64 = 0.05;
 /// At most this many records; the lowest weights go first (§1.3).
@@ -136,37 +136,45 @@ impl Learner {
             .copied()
             .find(|&i| self.records[i].context == context && self.records[i].word == word)
     }
-    /// Adds `delta` to the decayed weight of (context, reading, word), creating the record if needed.
-    fn bump(&mut self, context: &str, reading: &[String], word: &str, today: i64, delta: f64) {
+    /// Adds `delta` to the decayed weight of (context, reading, word), creating the record if needed;
+    /// returns the record as it now is.
+    fn bump(&mut self, context: &str, reading: &[String], word: &str, today: i64, delta: f64) -> Record {
         match self.find(context, reading, word) {
             Some(i) => {
                 let r = &mut self.records[i];
                 r.weight = decayed(r, today) + delta;
                 r.day = today;
+                r.clone()
             }
             None => {
                 self.index.entry(reading_key(reading)).or_default().push(self.records.len());
-                self.records.push(Record {
+                let r = Record {
                     context: context.to_string(),
                     reading: reading.to_vec(),
                     word: word.to_string(),
                     weight: delta,
                     day: today,
-                });
+                };
+                self.records.push(r.clone());
+                r
             }
         }
     }
     /// One re-pick at commit (§1.2–§1.3): `context` is a full key from `context_key`, `displaced` the
-    /// word shown before the pick (its weight halves if it had a record under this key).
-    pub fn teach(&mut self, context: &str, reading: &[String], word: &str, displaced: &str, today: i64) {
+    /// word shown before the pick (its weight halves if it had a record under this key). Returns the
+    /// records it changed, as they now are (displaced, taught, global; at most 3): what an append
+    /// writes (§4).
+    pub fn teach(&mut self, context: &str, reading: &[String], word: &str, displaced: &str, today: i64) -> Vec<Record> {
+        let mut touched = Vec::with_capacity(3);
         if let Some(i) = self.find(context, reading, displaced) {
             let r = &mut self.records[i];
             r.weight = decayed(r, today) * 0.5;
             r.day = today;
+            touched.push(r.clone());
         }
-        self.bump(context, reading, word, today, 1.0);
+        touched.push(self.bump(context, reading, word, today, 1.0));
         // §1.3 globalize: ≥ 2 distinct full keys (SENTINEL counts) with an active record.
-        let Some(ix) = self.index.get(&reading_key(reading)) else { return };
+        let Some(ix) = self.index.get(&reading_key(reading)) else { return touched };
         let keys: std::collections::HashSet<&str> = ix
             .iter()
             .map(|&i| &self.records[i])
@@ -174,9 +182,15 @@ impl Learner {
             .map(|r| r.context.as_str())
             .collect();
         if keys.len() >= 2 {
-            let have = self.find(GLOBAL, reading, word).map_or(0.0, |i| decayed(&self.records[i], today));
-            self.bump(GLOBAL, reading, word, today, (1.0 - have).max(0.0));
+            let prev = self.find(GLOBAL, reading, word).map(|i| self.records[i].clone());
+            let have = prev.as_ref().map_or(0.0, |r| decayed(r, today));
+            let now = self.bump(GLOBAL, reading, word, today, (1.0 - have).max(0.0));
+            // A global already at full weight today is unchanged: nothing to append for it.
+            if prev.as_ref() != Some(&now) {
+                touched.push(now);
+            }
         }
+        touched
     }
     /// Words with an active record for `reading` reachable from `context` by the §1.1 lookup order
     /// (exact, last character, global), with their decayed weight. The first level that has any

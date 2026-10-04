@@ -85,11 +85,21 @@ int32_t shanjie_engine_learning_open(ShanjieEngine *engine, const char *dir);
 // Forgetting: KEY with COMMAND (bit3) and kind BACKSPACE (4) while candidates are open removes the
 //   highlighted word's learned records for that reading (all contexts) and re-decodes; the output
 //   shows the new composition with the candidates still open. Without candidates the key passes through.
+//   After a successful learning_open a forget ALWAYS rewrites the whole learning file, even when
+//   memory held no record of the word (a record pruned on load can still be in the file); before any
+//   successful learning_open it changes memory only. A failed rewrite sets status bit0.
 // learning_clear: drops memory, pending learns and the files (a missing file is success); 3 on failure.
+//   Also 3 when no learning_open has succeeded on this engine (no file it could have deleted); memory
+//   and pending learns are dropped anyway.
 int32_t shanjie_engine_learning_clear(ShanjieEngine *engine);
 // Learning happens only at a commit (Enter, a key the engine passes through after committing, or the
 //   40-syllable auto-commit), never on shanjie_engine_reset or Esc, and never for punctuation picks.
-// learning_status: *flags bit0 = the last write of the learning file failed.
+// Writes: a learning commit appends only the records it changed; a full rewrite happens on a forget,
+//   on the first write after learning_open or a clear, on the first write of each day, every 1,024
+//   appended lines, after any failed append, and after a failed full rewrite or forget.
+// learning_status: *flags bit0 = the last FULL REWRITE of the learning file failed (an append that
+//   fails falls back to a full rewrite, so it counts only through that rewrite). Set by a failed full
+//   rewrite; cleared only by a successful full rewrite or a successful learning_clear.
 int32_t shanjie_engine_learning_status(ShanjieEngine *engine, uint32_t *flags);
 
 #ifdef __cplusplus
