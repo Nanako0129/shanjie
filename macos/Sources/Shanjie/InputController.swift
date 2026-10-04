@@ -140,8 +140,11 @@ final class CandidatePanelAdapter: CandidatePanel {
         panel.setAttributes([IMKCandidatesSendServerKeyEventFirst: NSNumber(value: true)])
     }
 
-    func show(_ candidates: [String], selected: Int) {
-        panel.setCandidateData(candidates.map { $0 as NSString })
+    /// s3f: a named cell is the plain text `CandidateText.display` gives. IMKCandidates draws every
+    /// cell in its own font: names set to 12 pt and then 9 pt rendered identically in the user's
+    /// screenshots (2026-10-05), so a smaller name, as in Apple's panel, needs our own window (S3b-2).
+    func show(_ candidates: [String], notes: [String?], selected: Int) {
+        panel.setCandidateData(zip(candidates, notes).map { CandidateText.display($0, note: $1) as NSString })
         panel.show(kIMKLocateCandidatesBelowHint)
         guard candidates.indices.contains(selected) else { return }
         // User report 2026-10-04 (v0.1.1): the highlight stayed on the first candidate while the

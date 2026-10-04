@@ -35,3 +35,44 @@ public enum PunctuationTable {
         return table
     }
 }
+
+/// docs/contracts/s3f-punctuation-names.md: Apple's names for punctuation marks ("，" is
+/// "全形逗號"), shown beside each punctuation candidate like the system Zhuyin input method. Read
+/// at run time from the user's own macOS, next to the candidate table above; never copied.
+public enum PunctuationNames {
+    public static let systemURL = PunctuationTable.systemURL.deletingLastPathComponent()
+        .appendingPathComponent("CIMPunctuationDescription_zh_Hant.strings")
+
+    /// Names are a few characters (141 entries, the longest 8, on macOS 27.0.1); a longer value, or a file
+    /// with more entries than any punctuation table could use, is not a names table.
+    static let maxName = 16, maxEntries = 1000
+
+    /// Mark → name. An entry whose key or name is empty, holds a tab, a line feed or NUL, or whose
+    /// name is longer than `maxName`, is skipped; empty when the file is unreadable, is not a
+    /// dictionary or has more than `maxEntries` entries. Empty means no names are shown.
+    public static func load(from url: URL) -> [String: String] {
+        guard let data = try? Data(contentsOf: url),
+              let dict = (try? PropertyListSerialization.propertyList(from: data, format: nil)) as? [String: Any],
+              dict.count <= maxEntries
+        else { return [:] }
+        let bad: (String) -> Bool = { $0.isEmpty || $0.unicodeScalars.contains { $0 == "\t" || $0 == "\n" || $0 == "\0" } }
+        var names: [String: String] = [:]
+        for (key, value) in dict {
+            guard let name = value as? String, !bad(key), !bad(name), name.count <= maxName else { continue }
+            names[key] = name
+        }
+        return names
+    }
+}
+
+/// What a candidate cell reads: the candidate, then its name if it has one. One definition, so a
+/// mouse click on a named cell (IMK hands back the cell's text) maps to the same position.
+public enum CandidateText {
+    /// An en space: Apple's cells leave a clear gap between the mark and its name (user's
+    /// screenshots, 2026-10-05).
+    public static let separator = "\u{2002}"
+
+    public static func display(_ candidate: String, note: String?) -> String {
+        note.map { candidate + separator + $0 } ?? candidate
+    }
+}

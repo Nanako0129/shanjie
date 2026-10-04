@@ -105,11 +105,13 @@ final class FakeClient: TextClient {
 final class FakePanel: CandidatePanel {
     private(set) var visible = false
     private(set) var items: [String] = []
+    private(set) var notes: [String?] = []
     private(set) var selected = -1
 
-    func show(_ candidates: [String], selected: Int) {
+    func show(_ candidates: [String], notes: [String?], selected: Int) {
         visible = true
         items = candidates
+        self.notes = notes
         self.selected = selected
     }
 
