@@ -2,6 +2,10 @@ name: CI
 
 # Core build and tests on every pull request and every push to main.
 # Modeled on syrtis (Nanako0129/syrtis .github/workflows/ci.yml).
+# The workflow always runs, so every main commit keeps a concluded run for the
+# release gate (scripts/check-ci-gate.sh); the `changes` job skips the macOS
+# jobs when only documentation or the website changed (scripts/ci-changes.sh),
+# and skipped jobs leave the run's conclusion `success`.
 on:
   push:
     branches: [main]
@@ -17,7 +21,60 @@ permissions:
   contents: read
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # actions: read lets the push case look up the previous main commit's run.
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      run: ${{ steps.diff.outputs.run }}
+    steps:
+      # Full history without file contents: enough for `git diff --name-only`.
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          fetch-depth: 0
+          filter: blob:none
+          persist-credentials: false
+      - id: diff
+        shell: bash
+        env:
+          BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # A new branch (all-zero before) or a base outside the history (force
+          # push) cannot be diffed, so everything runs.
+          if [[ "$BASE" =~ ^0+$ ]] || ! git cat-file -e "$BASE^{commit}" 2>/dev/null; then
+            run=true
+          else
+            # A PR compares against the merge base (three dots); a push compares
+            # the two trees directly (two dots), so commits a force push dropped
+            # from main still count. --no-renames: rename detection would fetch
+            # file contents; listing both the old and the new path is also the
+            # conservative answer.
+            range="$BASE..$GITHUB_SHA"
+            [[ "$GITHUB_EVENT_NAME" == pull_request ]] && range="$BASE...$GITHUB_SHA"
+            run=$(git diff --no-renames --name-only "$range" | scripts/ci-changes.sh | sed 's/^run=//')
+          fi
+          # On main, a skip is only safe when the previous commit's run passed:
+          # otherwise a docs-only commit after a red, cancelled or unfinished
+          # run would conclude `success` and clear the release gate
+          # (scripts/check-ci-gate.sh) for code that last failed. The check sees
+          # the previous run as it is at decision time: a later re-run of that
+          # commit that turns red does not reach commits already skipped.
+          if [[ "$run" == false && "$GITHUB_EVENT_NAME" == push ]]; then
+            prev=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$BASE&event=push&branch=main&per_page=100" \
+                     --jq '[.workflow_runs[]] | sort_by(.created_at) | last | .conclusion // "none"' 2>/dev/null || echo none)
+            echo "previous main run for $BASE: $prev"
+            [[ "$prev" == success ]] || run=true
+          fi
+          echo "run=$run" | tee -a "$GITHUB_OUTPUT"
+
   core:
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
     # Xcode 27 / macOS 27, the same image the Swift shell (S3b) will need.
     runs-on: xcode-27
     # A full run takes about 3 minutes; a hung FFI child process should not
@@ -97,6 +154,8 @@ jobs:
   # app, the Swift tests through the real core and model, the bundled
   # selftest, and acceptance checks 2, 3 and 6 of contract section 10.
   shell:
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
     runs-on: xcode-27
     timeout-minutes: 30
     steps:
