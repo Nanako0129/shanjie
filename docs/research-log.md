@@ -436,3 +436,4 @@
 - 錯誤線索：`CGGetEventTapList` 看到 Logitech Options+ 有一個卡住的主動攔截器，攔的正是 flagsChanged；重啟它沒有修好。
 - 修法（使用者同意後執行）：重啟 `TextInputMenuAgent`，再強制結束 `TextInputSwitcher`（它不理 SIGTERM，系統會按需要再開），之後恢復正常。兩步連著做，分不出是哪一步。根因未知。
 - 之後可以考慮在說明文件放一段「Caps Lock 切換失效時」的排除步驟，因為使用者很容易以為是輸入法的問題。
+- **更正（同日稍晚，再次發生）**：重啟上面那兩個程序、`CursorUIViewService`，關掉 Parsec、RustDesk，先按一次 Ctrl+Space，這些都沒用；負載降到平常水準仍然失效。所以第一次「重啟後恢復」應該是巧合，重啟不是修法。新觀察：失效時 Ctrl+Space 與選單切換都正常，只有 Caps Lock 這條路徑壞；輸入法選單裡目前輸入法那一段只剩「…………」。使用者說 RustDesk 遠端連線時一定會發生。Grok 與網路搜尋整理的社群紀錄（Apple 中文／日文社群、V2EX、Stack Exchange）：睡眠喚醒後或 Synergy 類跨機輸入工具使用後出現，要登出再登入才恢復。善解的 Info.plist 有宣告 `TICapsLockLanguageSwitchCapable`，和小麥相同，可以排除。修飾鍵沒有被改過。
