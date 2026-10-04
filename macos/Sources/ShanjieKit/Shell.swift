@@ -277,8 +277,7 @@ public final class Session {
     /// core decides what happens (section 8). Never inserted directly.
     public func candidateSelected(_ text: String) {
         // IMK hands back the cell's text: the candidate plus its name for a named cell (s3f).
-        guard shell.owner === self, let i = shell.cells.firstIndex(of: text) ?? shell.candidates.firstIndex(of: text),
-              i < 9 else { return }
+        guard shell.owner === self, let i = shell.cells.firstIndex(of: text), i < 9 else { return }
         _ = send(ShanjieKey(kind: KeyMap.char, ch: UInt32(UInt8(ascii: "1")) + UInt32(i), modifiers: 0))
     }
 
