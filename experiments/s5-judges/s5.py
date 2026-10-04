@@ -128,14 +128,21 @@ def apple(name, limit, a):
         with open(inp, "w", encoding="utf-8") as f:
             for k, r in pend:
                 cs = r["cands"][::-1] if rev else r["cands"]
-                f.write("\t".join([str(k), r["ctx"] if ctx else ""] + cs) + "\n")
+                # judge.swift splits on tabs and lines: a tab in the context would become a candidate
+                c = r["ctx"].translate({9: 32, 10: 32, 13: 32}) if ctx else ""
+                f.write("\t".join([str(k), c] + cs) + "\n")
         cmd = [JUDGE, inp, outp] + (["--force-fail"] if a.force_fail else [])
         p = subprocess.run(cmd, capture_output=True, text=True)
         print(f"apple {name} {cond}: rc={p.returncode} {p.stdout.strip()[:80]}")
         if p.returncode != 0:
             die("judge failed")
-        with open(os.path.join(d, "apple-meta.json"), "w") as f:
-            json.dump({"idle_window": bool(a.idle)}, f)
+        # merge: keep a hand-added "load" and the other conditions' idle flags across resumed runs
+        mp = os.path.join(d, "apple-meta.json")
+        meta = json.load(open(mp)) if os.path.exists(mp) else {}
+        meta.setdefault("idle_by_cond", {})[cond] = bool(a.idle)
+        meta["idle_window"] = all(meta["idle_by_cond"].values())
+        with open(mp, "w") as f:
+            json.dump(meta, f, ensure_ascii=False)
 
 
 # ---------------------------------------------------------------- jev
@@ -313,12 +320,12 @@ def score_set(name, limit, a, taus):
         sent = pick_sent(rows, res, rev)
         cond["A-" + c] = {"sent": {k: s for k, s in enumerate(sent) if s}, "first": {k: res[k][0] == 1 for k in res if res[k][0]},
                          "cover": set(res) if c == "ctx" else None,
-                         "st": [v[2] for v in res.values()], "lat": [v[1] for v in res.values()]}
+                         "st": {k: v[2] for k, v in res.items()}, "lat": {k: v[1] for k, v in res.items()}}
     if "A-fwd" in cond and "A-rev" in cond:
         f, r = cond["A-fwd"]["sent"], cond["A-rev"]["sent"]
-        cond["A-both"] = {"sent": {k: f[k] for k in f if k in r and r[k] == f[k]}, "first": {}, "st": [], "lat": []}
+        cond["A-both"] = {"sent": {k: f[k] for k in f if k in r and r[k] == f[k]}, "first": {}, "st": {}, "lat": {}}
     for cn, cj in jev_conds(d, rows).items():
-        cond["J-" + cn] = {"sent": cj["sent"], "first": cj["first"], "cover": set(cj["sent"]), "st": [], "lat": [x * 1000 for x in cj["secs"]],
+        cond["J-" + cn] = {"sent": cj["sent"], "first": cj["first"], "cover": set(cj["sent"]), "st": {}, "lat": [x * 1000 for x in cj["secs"]],
                           "tokens": cj["tokens"], "mode": cj["mode"]}
     # gated variants
     for g in ("A-fwd", "A-both"):
@@ -344,8 +351,9 @@ def score_set(name, limit, a, taus):
             bok = [int(L(ref.get(k, base_s[k])) == gold[k]) for k in cov]
             fixed, broken, p, se = mcnemar(bok, ok)
             o8 = [k for k in cov if k in in8]
-            st = c.get("st") or []
-            lat = c["lat"]
+            st = [c["st"][k] for k in cov if k in c["st"]]
+            # Apple: per row, so each subset gets its own; Jev: per request, always the whole set
+            lat = [c["lat"][k] for k in cov if k in c["lat"]] if isinstance(c["lat"], dict) else c["lat"]
             rec = {"set": name, "subset": sub, "cond": cn, "n": len(cov), "base_acc": sum(bok) / len(cov), "acc": sum(ok) / len(cov),
                    "oracle8": len(o8) / len(cov),
                    "a1b8": (sum(int(L(fin[k]) == gold[k]) for k in o8) / len(o8)) if o8 else None,
@@ -399,6 +407,8 @@ def score(sets, limit, a):
         pass
     elif os.path.exists(taus_path):
         taus = {k: (math.inf if v == "inf" else v) for k, v in json.load(open(taus_path)).items()}
+    if not taus and not a.tau_self and "discordtune" not in sets:
+        print(f"s5: no {taus_path}: gated rows (@tau) are left out of score.json", file=sys.stderr)
     for name in sets:
         if name == "discordtune" or a.tau_self:
             # first pass without gating to choose tau, then rescore with it
