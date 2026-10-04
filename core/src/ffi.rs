@@ -335,8 +335,7 @@ pub unsafe extern "C" fn shanjie_engine_set_punctuation(engine: *mut ShanjieEngi
     })
 }
 
-// S4 interface stubs (docs/contracts/s4-learning.md §8 "介面先行"): they check pointers and argument
-// ranges only, so the shell can link and write its tests; the S4 executor replaces the bodies.
+// S4 (docs/contracts/s4-learning.md §2–§4): see core/include/shanjie.h for the semantics.
 
 /// # Safety
 /// `engine` is NULL or a live handle; `utf8` is NULL or a NUL-terminated string.
@@ -346,11 +345,23 @@ pub unsafe extern "C" fn shanjie_engine_set_left_context(engine: *mut ShanjieEng
         if engine.is_null() {
             return SHANJIE_ERR_NULL;
         }
-        // SAFETY: NUL-terminated per the caller contract.
-        if !utf8.is_null() && unsafe { CStr::from_ptr(utf8) }.to_str().is_err() {
-            return SHANJIE_ERR_INVALID;
+        // SAFETY: live handle, single-threaded use (§6).
+        let e = unsafe { &mut (*engine).0 };
+        if utf8.is_null() {
+            e.set_left_context("");
+            return SHANJIE_OK;
         }
-        SHANJIE_OK
+        // SAFETY: NUL-terminated per the caller contract.
+        match unsafe { CStr::from_ptr(utf8) }.to_str() {
+            Ok(s) => {
+                e.set_left_context(s);
+                SHANJIE_OK
+            }
+            Err(_) => {
+                e.set_left_context("");
+                SHANJIE_ERR_INVALID
+            }
+        }
     })
 }
 
@@ -362,7 +373,12 @@ pub unsafe extern "C" fn shanjie_engine_set_learning(engine: *mut ShanjieEngine,
         if engine.is_null() {
             return SHANJIE_ERR_NULL;
         }
-        if enabled > 1 { SHANJIE_ERR_INVALID } else { SHANJIE_OK }
+        if enabled > 1 {
+            return SHANJIE_ERR_INVALID;
+        }
+        // SAFETY: live handle, single-threaded use (§6).
+        unsafe { &mut (*engine).0 }.set_learning(enabled == 1);
+        SHANJIE_OK
     })
 }
 
@@ -374,7 +390,15 @@ pub unsafe extern "C" fn shanjie_engine_learning_open(engine: *mut ShanjieEngine
         if engine.is_null() || dir.is_null() {
             return SHANJIE_ERR_NULL;
         }
-        SHANJIE_OK
+        // SAFETY: non-NULL, NUL-terminated per the caller contract.
+        let Ok(dir) = unsafe { CStr::from_ptr(dir) }.to_str() else {
+            return SHANJIE_ERR_INVALID;
+        };
+        // SAFETY: live handle, single-threaded use (§6).
+        match unsafe { &mut (*engine).0 }.learning_open(Path::new(dir)) {
+            Ok(_) => SHANJIE_OK,
+            Err(_) => SHANJIE_ERR_LOAD,
+        }
     })
 }
 
@@ -382,7 +406,16 @@ pub unsafe extern "C" fn shanjie_engine_learning_open(engine: *mut ShanjieEngine
 /// `engine` is NULL or a live handle.
 #[no_mangle]
 pub unsafe extern "C" fn shanjie_engine_learning_clear(engine: *mut ShanjieEngine) -> i32 {
-    guard(|| if engine.is_null() { SHANJIE_ERR_NULL } else { SHANJIE_OK })
+    guard(|| {
+        if engine.is_null() {
+            return SHANJIE_ERR_NULL;
+        }
+        // SAFETY: live handle, single-threaded use (§6).
+        match unsafe { &mut (*engine).0 }.learning_clear() {
+            Ok(()) => SHANJIE_OK,
+            Err(_) => SHANJIE_ERR_LOAD,
+        }
+    })
 }
 
 /// # Safety
@@ -393,8 +426,8 @@ pub unsafe extern "C" fn shanjie_engine_learning_status(engine: *mut ShanjieEngi
         if engine.is_null() || flags.is_null() {
             return SHANJIE_ERR_NULL;
         }
-        // SAFETY: non-NULL and writable per the caller contract.
-        unsafe { *flags = 0 };
+        // SAFETY: live handle; `flags` non-NULL and writable per the caller contract.
+        unsafe { *flags = (*engine).0.learning_status() };
         SHANJIE_OK
     })
 }

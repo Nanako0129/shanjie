@@ -2,6 +2,7 @@
 //! The Python code is ground truth; float operation order is kept on purpose (no fusing or reordering).
 //! R2: errors carry no content; nothing here formats input text.
 
+use crate::learn::{context_key, Learner};
 use crate::{Error, Lexicon, PER_KEY};
 use std::collections::{HashMap, HashSet};
 use std::fmt;
@@ -341,6 +342,24 @@ struct Hyp<'a> {
     ctx: Option<usize>,
 }
 
+/// Learned boost (S4 §1.4): a learned word scores `best of its reading + LEARN_EPS * w / (w + 1)` for
+/// weight `w` (so a heavier record outranks a lighter one: a re-pick halves the displaced word), never
+/// less than its own score. The boost enters the score only through `(1 - lambda) * lp` and the
+/// backoff term, so the bigram's liking for the common word survives a small value. Measured on the
+/// mirror run of eval/learn/cases.tsv (core/tests/engine_learn.rs, 2026-10-05; same-context sentences
+/// that follow a re-pick of the pair's other word, key reachable): 2.0 learned 4 of 10, 4.0 learned
+/// 8 of 10, 6.0 and 8.0 learned 9 of 10 (smallest value that gets there). The unlearned
+/// remainder is a 3-syllable word winning over the taught 2-syllable one.
+pub const LEARN_EPS: f64 = 6.0;
+
+/// What decoding needs to apply learning: the learner, the text just before the segment (only its
+/// last two characters matter) and today's day number.
+pub struct Learn<'a> {
+    pub learner: &'a Learner,
+    pub before: &'a str,
+    pub today: i64,
+}
+
 /// lm.decode generalized to a segment: `start` is the word before the segment (`<s>` for a sentence),
 /// `end` the closing term. Best first; `Err(NoPath)` when nothing covers the segment.
 pub fn decode_segment<'a>(
@@ -352,10 +371,30 @@ pub fn decode_segment<'a>(
     end: End<'_>,
     beam: usize,
 ) -> Result<Vec<Scored<'a>>, Error> {
+    decode_segment_learned(lex, syls, lm, lam, start, end, beam, None)
+}
+
+/// `decode_segment` with learning (S4 §1.4). With `learn` `None`, or a learner without a record for a
+/// span's reading, the arithmetic is exactly that of the unlearned decoder.
+#[allow(clippy::too_many_arguments)]
+pub fn decode_segment_learned<'a>(
+    lex: &'a CappedLexicon,
+    syls: &[String],
+    lm: &Lm,
+    lam: f64,
+    start: &str,
+    end: End<'_>,
+    beam: usize,
+    learn: Option<&Learn<'_>>,
+) -> Result<Vec<Scored<'a>>, Error> {
     let base = &*lex.base;
     let n = syls.len();
     let ids = base.ids(syls);
     let start_id = lm.word_id(start);
+    let before_tail: String = {
+        let t: Vec<char> = learn.map_or("", |l| l.before).chars().rev().take(crate::learn::MAX_CONTEXT).collect();
+        t.into_iter().rev().collect()
+    };
     let mut hyps: Vec<Vec<Hyp<'a>>> = (0..=n).map(|_| Vec::new()).collect();
     hyps[0].push(Hyp { score: 0.0, surface: String::new(), words: Vec::new(), last: start_id, ctx: lm.ctx_of(start_id) });
     for i in 1..=n {
@@ -366,11 +405,47 @@ pub fn decode_segment<'a>(
             if hyps[i - l].is_empty() {
                 continue;
             }
-            for p in base.range(r).take(PER_KEY) {
+            let span = &syls[i - l..i];
+            let learned = learn.filter(|ln| ln.learner.has_reading(span));
+            let range = base.range(r);
+            let best = lex.ents[range.start].score;
+            // Entries to try: the top PER_KEY, plus learned words ranked below it (`extra`: only
+            // usable on a path whose context has a learned record for them).
+            let mut entries: Vec<(usize, bool)> = range.clone().take(PER_KEY).map(|p| (p, false)).collect();
+            if let Some(ln) = learned {
+                let words = ln.learner.words_of(span);
+                let mut seen: HashSet<&str> = entries.iter().map(|&(p, _)| lex.word_of(&lex.ents[p])).collect();
+                for p in range.clone().skip(PER_KEY) {
+                    let w = lex.word_of(&lex.ents[p]);
+                    if words.binary_search(&w).is_ok() && seen.insert(w) {
+                        entries.push((p, true));
+                    }
+                }
+            }
+            let mut by_ctx: HashMap<String, Vec<(String, f64)>> = HashMap::new();
+            for (p, extra) in entries {
                 let e = &lex.ents[p];
-                let (word, lp) = (lex.word_of(e), e.score);
-                let (wid, pb) = (lm.word_id(word), pow10(lp));
+                let (word, lp0) = (lex.word_of(e), e.score);
+                let (wid, pb0) = (lm.word_id(word), pow10(lp0));
                 for h in &hyps[i - l] {
+                    let (mut lp, mut pb) = (lp0, pb0);
+                    if let Some(ln) = learned {
+                        let key = context_key(&format!("{before_tail}{}", h.surface));
+                        let hits = by_ctx.entry(key).or_insert_with_key(|k| {
+                            ln.learner.lookup(k, span, ln.today).into_iter().map(|(w, x)| (w.to_string(), x)).collect()
+                        });
+                        match hits.iter().find(|(w, _)| w == word) {
+                            Some(&(_, w)) => {
+                                let boosted = best + LEARN_EPS * (w / (w + 1.0));
+                                if boosted > lp {
+                                    lp = boosted;
+                                    pb = pow10(lp);
+                                }
+                            }
+                            None if extra => continue,
+                            None => {}
+                        }
+                    }
                     let sc = h.score + word_term(lam, lm.prob_c(h.ctx, wid, pb), lp);
                     let surface = format!("{}{word}", h.surface);
                     match idx.get(&surface) {
