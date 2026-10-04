@@ -135,10 +135,16 @@ class Ver:
         if not os.path.exists(os.path.join(self.dir, ".exported")):
             shutil.rmtree(self.dir, ignore_errors=True)
             os.makedirs(self.dir)
-            tar = subprocess.run(f"git -C '{ROOT}' archive {self.sha} Cargo.toml Cargo.lock core cli data eval/variants.tsv | tar -x -C '{self.dir}'",
-                                 shell=True, capture_output=True, text=True)
-            if tar.returncode:
-                raise RuntimeError("git archive failed: " + tar.stderr[-300:])
+            tarball = self.dir + ".tar"
+            try:  # two steps so a failed archive can never leave a marker behind
+                sh(["git", "-C", ROOT, "archive", "-o", tarball, self.sha, "Cargo.toml", "Cargo.lock", "core", "cli", "data", "eval/variants.tsv"])
+                sh(["tar", "-x", "-f", tarball, "-C", self.dir])
+            except Exception:
+                shutil.rmtree(self.dir, ignore_errors=True)
+                raise
+            finally:
+                if os.path.exists(tarball):
+                    os.remove(tarball)
             open(os.path.join(self.dir, ".exported"), "w").close()
         sh(["cargo", "build", "--release", "-p", "cli"], cwd=self.dir)
         rd = os.path.join(self.dir, "replay")
@@ -156,7 +162,8 @@ class Ver:
 
 def cell_cache(ctx, ver, name, prof):
     base = os.path.join(ctx.private_root, "bench/rows") if SETS[name][3] else os.path.join(CACHE, "rows")
-    return os.path.join(base, ver.sha, f"{name}.{prof}.tsv")
+    key = sha_str(f"{ctx.fp[name]}|{VARIANTS_SHA}|{ctx.model_sha}")[:16]  # set, variants and model all key the cache
+    return os.path.join(base, ver.sha, key, f"{name}.{prof}.tsv")
 
 
 def run_cell(ctx, ver, name, prof):
@@ -175,21 +182,35 @@ def run_cell(ctx, ver, name, prof):
     return res, ok
 
 
+def matches(ctx, rc, name):
+    """Does a recorded cell (with the fingerprints it was measured under) match the current suite?"""
+    return bool(rc) and rc.get("fp") == ctx.fp[name] and rc.get("variants") == VARIANTS_SHA and rc.get("model") == ctx.model_sha
+
+
 def prev_ok(ctx, ver, name, prof, known):
-    """Previous row's per-row correctness: from its cached dump if the hash still matches the record, else rerun it."""
+    """Previous row's per-row correctness under the CURRENT suite. Uses the cached dump only if the record's
+    fingerprints match and the dump still scores to the recorded hash; otherwise reruns the version (and says why)."""
     cell = f"{name}/{prof}"
+    rc = known.get(ver.sha, {}).get(cell)
+    fresh = matches(ctx, rc, name)
     dump = cell_cache(ctx, ver, name, prof)
-    want = known.get(ver.sha, {}).get(cell)
-    if want and os.path.exists(dump):
-        res, ok = score(ctx.files[name], dump)
-        if res["top1_sha256"] == want:
-            return ok
-        print(f"bench: cached rows of {ver.ref} {cell} do not match the recorded hash, rerunning", file=sys.stderr)
+    why = "no recorded result" if not rc else None if fresh else "recorded set/variants/model fingerprints differ from the current suite"
+    if fresh and os.path.exists(dump):
+        try:
+            res, ok = score(ctx.files[name], dump)
+            if res["top1_sha256"] == rc["top1_sha256"]:
+                return ok, rc
+            why = "cached rows do not match the recorded hash"
+        except Exception as e:
+            why = f"cached rows unreadable ({e})"
+    elif fresh:
+        why = "cached rows missing"
+    print(f"bench: previous row {ver.ref} {cell}: {why}, rerunning under the current suite", file=sys.stderr)
     ver.build()
     res, ok = run_cell(ctx, ver, name, prof)
-    if want and res["top1_sha256"] != want:
+    if fresh and res["top1_sha256"] != rc["top1_sha256"]:
         die(f"{ver.ref} {cell}: rerun top1_sha256 differs from the recorded one (not deterministic?)")
-    return ok
+    return ok, (rc if fresh else None)
 
 
 class Ctx:
@@ -228,10 +249,13 @@ def known_from_results():
     k = {}
     for f in sorted(os.listdir(RESULTS)) if os.path.isdir(RESULTS) else []:
         if f.endswith(".json"):
-            for v in json.load(open(os.path.join(RESULTS, f), encoding="utf-8"))["versions"]:
-                if "accuracy" in v:
-                    k[v["sha"]] = {c: r["top1_sha256"] for c, r in v["accuracy"].items() if "top1_sha256" in r}
+            j = json.load(open(os.path.join(RESULTS, f), encoding="utf-8"))
+            for v in j["versions"]:  # per cell, the latest file that actually measured it wins
+                for cell, r in v.get("accuracy", {}).items():
+                    if "top1_sha256" in r:
+                        k.setdefault(v["sha"], {})[cell] = {**r, "fp": v["fingerprints"][cell.split("/")[0]], "variants": j["variants_sha256"], "model": j["model_sha256"]}
     return k
+
 
 
 def measure_speed(ctx, vers):
@@ -284,30 +308,42 @@ def cmd_run(args):
               "sets": {n: {"sha256": ctx.fp.get(n), "private": SETS[n][3]} if n in ctx.files else {"missing": True} for n in SETS},
               "versions": []}
     oks, failed = {}, False
+
+    def one(v, n, p):
+        try:
+            return run_cell(ctx, v, n, p)
+        except Exception as e:
+            return {"error": str(e)[-400:]}, None
+
     for v in vers:
         rec = {"ref": v.ref, "sha": v.sha}
         result["versions"].append(rec)
         try:
             v.build()
             rec["lexicon_sha256"] = v.lexicon_sha
-            with ThreadPoolExecutor(max_workers=3) as ex:
-                futs = {c: ex.submit(run_cell, ctx, v, *c) for c in cells}
-                rec["accuracy"] = {}
-                for (n, p), f in futs.items():
-                    res, ok = f.result()
-                    n_rows = res["n"]
-                    rec["accuracy"][f"{n}/{p}"] = res
-                    oks[(v.sha, n, p)] = ok
-            for n in SETS:
-                if n not in ctx.files:
-                    rec["accuracy"][f"{n}/chat"] = {"missing": True}
-            rec["fingerprints"] = dict(ctx.fp)
-            known[v.sha] = {c: r["top1_sha256"] for c, r in rec["accuracy"].items() if "top1_sha256" in r}
         except Exception as e:
             rec["error"] = str(e)
             failed = True
             print(f"bench: {v.ref}: {e}", file=sys.stderr)
-    # compare with the previous row
+            continue
+        with ThreadPoolExecutor(max_workers=3) as ex:
+            futs = {c: ex.submit(one, v, *c) for c in cells}
+        rec["accuracy"] = {}
+        for (n, p), f in futs.items():
+            res, ok = f.result()
+            rec["accuracy"][f"{n}/{p}"] = res
+            if ok is None:
+                failed = True
+                print(f"bench: {v.ref} {n}/{p}: {res['error']}", file=sys.stderr)
+            else:
+                oks[(v.sha, n, p)] = ok
+        for n in SETS:
+            if n not in ctx.files:
+                rec["accuracy"][f"{n}/chat"] = {"missing": True}
+        rec["fingerprints"] = dict(ctx.fp)
+        known[v.sha] = {c: {**r, "fp": ctx.fp[c.split("/")[0]], "variants": VARIANTS_SHA, "model": ctx.model_sha}
+                        for c, r in rec["accuracy"].items() if "top1_sha256" in r}
+    # compare with the previous row (failed cells are skipped, not raised)
     order = ([base] if base else []) + vers
     for i, v in enumerate(vers):
         rec = result["versions"][i]
@@ -315,36 +351,41 @@ def cmd_run(args):
         if j == 0 or "accuracy" not in rec:
             continue
         pv = order[j - 1]
-        prec = next((r for r in result["versions"] if r["sha"] == pv.sha), None)
         rec["vs"] = pv.ref
         rec["vs_prev"] = {}
         for (n, p) in cells:
             cell = f"{n}/{p}"
-            if prec and "error" in prec:
+            if (v.sha, n, p) not in oks:
                 continue
-            if prec and prec.get("fingerprints", ctx.fp).get(n) != ctx.fp[n]:
-                rec["vs_prev"][cell] = {"set_changed": True}
+            prec = next((r for r in result["versions"] if r["sha"] == pv.sha), None)
+            if prec and "error" in prec.get("accuracy", {}).get(cell, {}):
+                rec["vs_prev"][cell] = {"error": "previous row failed: " + prec["accuracy"][cell]["error"][-200:]}
                 continue
             try:
-                old = prev_ok(ctx, pv, n, p, known)
+                old, rc = prev_ok(ctx, pv, n, p, known)
             except Exception as e:
-                rec["vs_prev"][cell] = {"error": str(e)}
+                rec["vs_prev"][cell] = {"error": str(e)[-400:]}
                 failed = True
                 continue
             new = oks[(v.sha, n, p)]
+            nrows = rec["accuracy"][cell]["n"]
+            if not len(new) == len(old) == nrows:
+                die(f"{v.ref} {cell}: row counts differ (new {len(new)}, previous {len(old)}, set {nrows})")
+            if rc and sum(old) != rc["top1"]:
+                die(f"{pv.ref} {cell}: per-row top1 {sum(old)} != recorded top1 {rc['top1']}")
             fixed = sum(a and not b for a, b in zip(new, old))
             broken = sum(b and not a for a, b in zip(new, old))
-            if sum(new) - sum(old) != fixed - broken:
-                die(f"{v.ref} {cell}: delta top1 {sum(new) - sum(old)} != fixed {fixed} - broken {broken}")
             rec["vs_prev"][cell] = {"fixed": fixed, "broken": broken, "p": mcnemar(fixed, broken)}
-    ok_vers = [v for i, v in enumerate(vers) if "accuracy" in result["versions"][i]]
-    speed = measure_speed(ctx, ok_vers) if ok_vers and "dev302" in ctx.files else {}
+    ok_vers = [v for v in vers if (v.sha, "dev302", "chat") in oks]
+    speed = measure_speed(ctx, ok_vers) if ok_vers else {}
     for rec in result["versions"]:
         if rec["sha"] in speed:
             rec["speed"] = speed[rec["sha"]]
-            if "error" in rec["speed"]:
-                failed = True
-                print(f"bench: {rec['ref']}: {rec['speed']['error']}", file=sys.stderr)
+        elif "accuracy" in rec and "dev302" in ctx.files:
+            rec["speed"] = {"error": "dev302/chat failed, no replay check possible"}
+        if "error" in rec.get("speed", {}):
+            failed = True
+            print(f"bench: {rec['ref']}: {rec['speed']['error']}", file=sys.stderr)
     result["env"] = {"machine": sh(["sysctl", "-n", "hw.model"]).strip(), "macos": platform.mac_ver()[0],
                      "cargo": sh(["cargo", "--version"]).strip(), "load_avg_start": load0, "load_avg_end": os.getloadavg()[0]}
     os.makedirs(RESULTS, exist_ok=True)
@@ -354,15 +395,18 @@ def cmd_run(args):
     sys.exit(1 if failed else 0)
 
 
+
 # ---------- docs/benchmark.md ----------
 def pct(r):
+    if "error" in r:
+        return "失敗：" + r["error"].replace("|", "/").replace("\n", " ")[:200]
     return "—（沒有私有資料）" if r.get("missing") else f"{100 * r['top1'] / r['n']:.2f}%"
 
 
 def cell_text(rec, cell):
     r = rec["accuracy"].get(cell, {"missing": True})
     t = pct(r)
-    if "missing" in r:
+    if "missing" in r or "error" in r:
         return t
     t += f"<br>{r['top1']}/{r['n']}"
     d = rec.get("vs_prev", {}).get(cell)
