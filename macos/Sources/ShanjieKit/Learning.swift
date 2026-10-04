@@ -69,8 +69,10 @@ public struct MenuEntry: Equatable, Sendable {
 /// the user.
 @MainActor
 public protocol LearningDialogs: AnyObject {
-    /// "清除選字記憶…": true only when the user chose 清除.
-    func confirmClear() -> Bool
+    /// "清除選字記憶…": calls `answer` with true only when the user chose 清除. It returns at once:
+    /// the window must not block the input method while it is open; `answer` may never be called
+    /// (a window already open ignores a second request).
+    func confirmClear(_ answer: @escaping @MainActor (Bool) -> Void)
     /// The clear returned non-zero; never passed off as done.
     func clearFailed()
 }
@@ -184,7 +186,9 @@ extension Session {
         case .layout(let m):
             shell.selectLayout(m)
         case .clear:
-            if shell.dialogs.confirmClear() { shell.clearLearning() }
+            shell.dialogs.confirmClear { [weak shell] clear in
+                if clear { shell?.clearLearning() }
+            }
         case .toggleBackup:
             shell.setBackupExcluded(!shell.backupExcluded)
         }

@@ -168,35 +168,65 @@ final class CandidatePanelAdapter: CandidatePanel {
 }
 
 /// The clear's windows (S4 section 4). The input method is an agent app (LSUIElement): it comes
-/// forward for the alert, then gives focus back to the app the user was typing in.
+/// forward for the window, then gives focus back to the app the user was typing in. The window is
+/// not run modally: `runModal` inside the menu action would stop the input method from serving
+/// every other app while it is open (2026-10-05 review), so the buttons call back instead.
 @MainActor
-final class AlertDialogs: LearningDialogs {
-    func confirmClear() -> Bool {
-        let alert = NSAlert()
-        alert.alertStyle = .warning
-        alert.messageText = DialogText.clearTitle
-        alert.informativeText = DialogText.clearMessage
+final class AlertDialogs: NSObject, LearningDialogs {
+    private var open: NSAlert?
+    private var reply: ((Int) -> Void)?
+    /// The app to give focus back to, captured when the first window opens; a follow-up window
+    /// (the failure after a confirmed clear) keeps it, since the input method is frontmost then.
+    private var previous: NSRunningApplication?
+
+    func confirmClear(_ answer: @escaping @MainActor (Bool) -> Void) {
         // 取消 first: it is the default button (Return), so a destructive action is never one
         // keystroke away; 清除 is marked destructive.
-        alert.addButton(withTitle: DialogText.cancel)
-        alert.addButton(withTitle: DialogText.clearButton).hasDestructiveAction = true
-        return run(alert) == .alertSecondButtonReturn
+        show(.warning, DialogText.clearTitle, DialogText.clearMessage,
+             buttons: [DialogText.cancel, DialogText.clearButton], destructive: 1) { answer($0 == 1) }
     }
 
     func clearFailed() {
-        let alert = NSAlert()
-        alert.alertStyle = .critical
-        alert.messageText = DialogText.failedTitle
-        alert.informativeText = DialogText.failedMessage
-        alert.addButton(withTitle: DialogText.ok)
-        _ = run(alert)
+        show(.critical, DialogText.failedTitle, DialogText.failedMessage, buttons: [DialogText.ok], destructive: nil) { _ in }
     }
 
-    private func run(_ alert: NSAlert) -> NSApplication.ModalResponse {
-        let previous = NSWorkspace.shared.frontmostApplication
+    private func show(_ style: NSAlert.Style, _ title: String, _ message: String, buttons: [String],
+                      destructive: Int?, then: @escaping (Int) -> Void) {
+        guard open == nil else { return }
+        let alert = NSAlert()
+        alert.alertStyle = style
+        alert.messageText = title
+        alert.informativeText = message
+        for (i, title) in buttons.enumerated() {
+            let button = alert.addButton(withTitle: title)
+            button.tag = i
+            button.target = self
+            button.action = #selector(pressed(_:))
+            button.hasDestructiveAction = i == destructive
+        }
+        if let front = NSWorkspace.shared.frontmostApplication, front != NSRunningApplication.current {
+            previous = front
+        }
+        open = alert
+        reply = then
+        alert.layout()
+        alert.window.level = .modalPanel
+        alert.window.center()
         NSApp.activate()
-        let response = alert.runModal()
-        previous?.activate()
-        return response
+        alert.window.makeKeyAndOrderFront(nil)
+    }
+
+    @objc private func pressed(_ sender: NSButton) {
+        guard let alert = open else { return }
+        alert.window.orderOut(nil)
+        open = nil
+        let then = reply
+        reply = nil
+        then?(sender.tag)
+        // A follow-up window (the failure) opened from `then` keeps the input method forward.
+        if open == nil {
+            previous?.activate()
+            previous = nil
+        }
     }
 }

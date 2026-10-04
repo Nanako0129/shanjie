@@ -107,7 +107,7 @@ final class FakeDialogs: LearningDialogs {
     var answer = true
     private(set) var asked = 0
     private(set) var failures = 0
-    func confirmClear() -> Bool { asked += 1; return answer }
+    func confirmClear(_ reply: @escaping @MainActor (Bool) -> Void) { asked += 1; reply(answer) }
     func clearFailed() { failures += 1 }
 }
 
