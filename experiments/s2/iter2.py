@@ -236,7 +236,7 @@ def main():
     cfgs = cfgs if isinstance(cfgs, list) else [cfgs]
     t0 = time.time()
     lex = ime.Lexicon(os.path.join(ROOT, "data", "lexicon", "mcbpmf-data.txt"),
-                      overlay=os.path.join(ROOT, "data", "lexicon", "overlay-add.tsv"))
+                      overlay=ime.OVERLAYS)
     sets = {k: v for k, v in all_sets().items() if k in a.sets.split(",")}
     commit = subprocess.run(["git", "-C", ROOT, "rev-parse", "--short", "HEAD"], capture_output=True, text=True).stdout.strip()
     dirty = subprocess.run(["git", "-C", ROOT, "status", "--porcelain", "--", "experiments", "data", "reference"], capture_output=True, text=True).stdout.strip()

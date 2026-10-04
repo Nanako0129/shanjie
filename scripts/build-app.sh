@@ -26,7 +26,7 @@ fail() { echo "error: $*" >&2; exit 1; }
   gh release download model-v1 -p bigram.sjlm -D data/lm"
 shasum -a 256 -c data/bigram.sjlm.sha256 >/dev/null \
   || fail "data/lm/bigram.sjlm does not match data/bigram.sjlm.sha256; download model-v1 again"
-for f in data/lexicon/mcbpmf-data.txt data/lexicon/overlay-add.tsv LICENSE LICENSES/McBopomofo-MIT.txt LICENSES/data.md; do
+for f in data/lexicon/mcbpmf-data.txt data/lexicon/overlay-add.tsv data/lexicon/sandhi-add.tsv LICENSE LICENSES/McBopomofo-MIT.txt LICENSES/data.md; do
   [ -f "$f" ] || fail "$f is missing"
 done
 
@@ -60,7 +60,7 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources/zh-Hant.lproj" "$APP/Con
 cp "$BIN" "$APP/Contents/MacOS/shanjie"
 
 RES="$APP/Contents/Resources"
-cp data/lexicon/mcbpmf-data.txt data/lexicon/overlay-add.tsv "$RES/"
+cp data/lexicon/mcbpmf-data.txt data/lexicon/overlay-add.tsv data/lexicon/sandhi-add.tsv "$RES/"
 cp -L data/lm/bigram.sjlm "$RES/"   # -L: the worktree's model may be a symlink
 swift scripts/make-icon.swift "$RES/shanjie.tiff"
 

@@ -413,6 +413,7 @@ mod tests {
         std::fs::create_dir_all(&d).unwrap();
         std::fs::write(d.join("mcbpmf-data.txt"), base).unwrap();
         std::fs::write(d.join("overlay-add.tsv"), "").unwrap();
+        std::fs::write(d.join("sandhi-add.tsv"), "").unwrap();
         d
     }
 
@@ -611,6 +612,10 @@ mod tests {
         e = sentinel();
         assert!(unsafe { shanjie_engine_new(dir_c.as_ptr(), 0, &mut e) } == 3 && e.is_null(), "new missing overlay");
         std::fs::write(dir.join("overlay-add.tsv"), "").unwrap();
+        std::fs::remove_file(dir.join("sandhi-add.tsv")).unwrap();
+        e = sentinel();
+        assert!(unsafe { shanjie_engine_new(dir_c.as_ptr(), 0, &mut e) } == 3 && e.is_null(), "new missing sandhi-add.tsv");
+        std::fs::write(dir.join("sandhi-add.tsv"), "").unwrap();
         let e = new_engine(&dir, 0);
 
         // engine_key
