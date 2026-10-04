@@ -24,6 +24,10 @@ jobs:
   changes:
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    # actions: read lets the push case look up the previous main commit's run.
+    permissions:
+      contents: read
+      actions: read
     outputs:
       run: ${{ steps.diff.outputs.run }}
     steps:
@@ -37,18 +41,30 @@ jobs:
         shell: bash
         env:
           BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           # A new branch (all-zero before) or a base outside the history (force
           # push) cannot be diffed, so everything runs.
           if [[ "$BASE" =~ ^0+$ ]] || ! git cat-file -e "$BASE^{commit}" 2>/dev/null; then
-            echo "run=true" >> "$GITHUB_OUTPUT"
+            run=true
           else
             # --no-renames: rename detection would fetch file contents; listing
             # both the old and the new path is also the conservative answer.
-            git diff --no-renames --name-only "$BASE...$GITHUB_SHA" | scripts/ci-changes.sh >> "$GITHUB_OUTPUT"
+            run=$(git diff --no-renames --name-only "$BASE...$GITHUB_SHA" | scripts/ci-changes.sh | sed 's/^run=//')
           fi
-          cat "$GITHUB_OUTPUT"
+          # On main, a skip is only safe when the previous commit's run passed:
+          # otherwise a docs-only commit after a red, cancelled or unfinished
+          # run would conclude `success` and clear the release gate
+          # (scripts/check-ci-gate.sh) for code that last failed. By induction,
+          # every skipped main commit sits on a tree whose last full run passed.
+          if [[ "$run" == false && "$GITHUB_EVENT_NAME" == push ]]; then
+            prev=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$BASE&event=push&branch=main&per_page=100" \
+                     --jq '[.workflow_runs[]] | sort_by(.created_at) | last | .conclusion // "none"' 2>/dev/null || echo none)
+            echo "previous main run for $BASE: $prev"
+            [[ "$prev" == success ]] || run=true
+          fi
+          echo "run=$run" | tee -a "$GITHUB_OUTPUT"
 
   core:
     needs: changes
