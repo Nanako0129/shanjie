@@ -293,12 +293,18 @@ fn set_punctuation_validates_and_keeps_the_old_table() {
     assert!(kept == vec!["，".to_string(), "、".to_string()]);
     let too_many_lines = "，\t、\n".repeat(1001);
     let too_big = format!("，\t{}", "、".repeat(30_000));
-    for bad in ["", "\n\n", "，\n", "，\t", "，\t、\t", "，，\t、", too_many_lines.as_str(), too_big.as_str()] {
+    // The last one has a valid line before the invalid one: nothing of it may apply.
+    for bad in ["", "\n\n", "，\n", "，\t", "，\t、\t", "，，\t、", too_many_lines.as_str(), too_big.as_str(), "，\t《\n，\n"] {
         assert!(!e.set_punctuation(bad), "accepted an invalid table ({} bytes)", bad.len());
         assert!(comma(&mut e) == kept, "a refused table changed the old one");
     }
     assert!(e.set_punctuation("，\t、\n，\t《\n"));
     assert!(comma(&mut e) == vec!["，".to_string(), "《".to_string()]);
+    // Success replaces the whole table: a mark the new table does not list has no alternatives
+    // left (the built-in 「 list is gone).
+    e.reset(ResetMode::Discard);
+    k(&mut e, Key::ch('[', MOD_SHIFT));
+    assert!(kk(&mut e, KeyKind::Space).candidates == vec!["「".to_string()]);
 }
 
 /// s3d acceptance 5: punctuation counts toward the 40-token limit.

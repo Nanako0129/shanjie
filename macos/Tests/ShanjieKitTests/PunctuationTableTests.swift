@@ -13,6 +13,7 @@ final class PunctuationTableTests: XCTestCase {
             "：": ["；", 7],            // the non-string element is dropped
             "。": ["a\tb"],             // a tab inside an alternative: skipped whole
             "、": ["＼\r\nx"],          // a CRLF (one Swift Character) holds a line feed: skipped whole
+            "；": ["\r\n"],             // an alternative that is exactly a CRLF: skipped whole
             "「」": ["『"],             // two scalars: skipped
             "？": [String](),          // no alternatives: skipped
             "！": "not an array",       // skipped
