@@ -63,7 +63,8 @@ public final class Shell {
     static let chat: UInt32 = 0, formal: UInt32 = 1
 
     private let resources: URL
-    private let punctuationTable: URL
+    /// s3e: the converted system punctuation table, `nil` when unavailable (the core keeps its own).
+    private let punctuation: String?
     private let layoutStore: LayoutStore
     let panel: CandidatePanel
     let isSecureInput: () -> Bool
@@ -90,7 +91,12 @@ public final class Shell {
     public init(resources: URL, panel: CandidatePanel, isSecureInput: @escaping () -> Bool,
                 layoutStore: LayoutStore, punctuationTable: URL = PunctuationTable.systemURL) {
         self.resources = resources
-        self.punctuationTable = punctuationTable
+        // Read once: the converted table never changes while the process runs, and the layout
+        // switch that rebuilds the engine already blocks.
+        punctuation = PunctuationTable.load(from: punctuationTable)
+        if punctuation == nil {
+            Log.shell.notice("punctuation candidates: system table unavailable, using the built-in list")
+        }
         self.panel = panel
         self.isSecureInput = isSecureInput
         self.layoutStore = layoutStore
@@ -125,11 +131,9 @@ public final class Shell {
             Log.shell.error("shanjie_engine_set_profile failed, code \(c)")
         }
         // s3e: the system's punctuation candidates; without them the core's built-in list stays.
-        if let table = PunctuationTable.load(from: punctuationTable) {
+        if let table = punctuation {
             let code = e.setPunctuation(table)
             if code != 0 { Log.shell.error("punctuation candidates: core rejected the system table, code \(code)") }
-        } else {
-            Log.shell.notice("punctuation candidates: system table unavailable, using the built-in list")
         }
         engine = e
     }

@@ -253,8 +253,6 @@ impl Engine {
         Ok(())
     }
 
-    /// Test-purpose injection for `with_lexicon` engines: a prebuilt model and its capped lexicon
-    /// (built by `CappedLexicon::new` from this engine's lexicon).
     /// s3e §3: replace the punctuation alternatives with `table` (lines `mark\talt\talt…`, blank
     /// lines ignored, a repeated mark overrides the earlier line). On any invalid input nothing
     /// changes and `false` is returned. The composition is not recomputed.
@@ -289,6 +287,8 @@ impl Engine {
         self.fixed.iter().find(|f| f.start == i).map_or(1, |f| f.word.chars().count())
     }
 
+    /// Test-purpose injection for `with_lexicon` engines: a prebuilt model and its capped lexicon
+    /// (built by `CappedLexicon::new` from this engine's lexicon).
     pub fn set_lm(&mut self, lm: Arc<Lm>, capped: Arc<CappedLexicon>) {
         self.lm = Some(LmState { lm, capped });
     }
