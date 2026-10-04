@@ -309,7 +309,6 @@ fn clear_reports_a_failure_but_still_removes_the_rest() {
 /// §6.13 "100 days old records are pruned on load and save": the pruning is Learner::prune
 /// (core/src/learn.rs, the executor's), so this runs once both halves are merged.
 #[test]
-#[ignore = "post-integration: needs Learner::prune from the executor's branch"]
 fn records_100_days_old_are_pruned_across_save_and_load() {
     let (_p, dir) = temp();
     let today = 20_100;

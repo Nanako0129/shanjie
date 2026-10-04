@@ -204,13 +204,6 @@ enum Row10 {
     static let formal = "期中報告明天要交"
 }
 
-/// S4 (docs/contracts/s4-learning.md section 8): tests that need the real learning core are written
-/// now and skipped until main merges the executor's branch (core/src/learn.rs, engine.rs, ffi.rs).
-/// Main flips this to true in the integration commit; the stubs before it learn and store nothing.
-enum Integration {
-    static let learningCore = false
-}
-
 /// A temporary learning directory (S4 section 4); never the real Application Support.
 enum TestLearning {
     static func directory(create: Bool = true) -> URL {

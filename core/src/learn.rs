@@ -209,25 +209,45 @@ impl Learner {
         }
         Vec::new()
     }
-    /// §1.5: removes every record of (reading, word) under every key, including SENTINEL and GLOBAL.
-    pub fn forget(&mut self, reading: &[String], word: &str) {
-        let n = self.records.len();
-        self.records.retain(|r| !(r.word == word && r.reading == reading));
-        if self.records.len() != n {
-            self.reindex();
+    /// Removes the records at positions `drop` with swap_remove, patching the index instead of
+    /// rebuilding it: every learning Enter on a full store trims one record, and a rebuild of
+    /// CAPACITY entries took about 5 ms of the 16 ms key budget (§6.14). Record order is not kept.
+    fn remove_at(&mut self, mut drop: Vec<usize>) {
+        // Highest first: whatever sits last is never a later victim.
+        drop.sort_unstable_by(|a, b| b.cmp(a));
+        for i in drop {
+            let last = self.records.len() - 1;
+            let key = reading_key(&self.records[i].reading);
+            let bucket = self.index.get_mut(&key).expect("indexed");
+            bucket.retain(|&j| j != i);
+            if bucket.is_empty() {
+                self.index.remove(&key);
+            }
+            if i != last {
+                let moved = self.index.get_mut(&reading_key(&self.records[last].reading)).expect("indexed");
+                *moved.iter_mut().find(|j| **j == last).expect("indexed") = i;
+            }
+            self.records.swap_remove(i);
         }
     }
-    /// §1.3: drop below PRUNE_FLOOR once decayed to `today`, then trim to CAPACITY (lowest first).
+    /// §1.5: removes every record of (reading, word) under every key, including SENTINEL and GLOBAL.
+    pub fn forget(&mut self, reading: &[String], word: &str) {
+        let drop = self.index.get(&reading_key(reading)).map_or(Vec::new(), |ix| {
+            ix.iter().copied().filter(|&i| self.records[i].word == word).collect()
+        });
+        self.remove_at(drop);
+    }
+    /// §1.3: drop below PRUNE_FLOOR once decayed to `today`, then trim to CAPACITY (lowest first;
+    /// among equal weights the later record goes first).
     pub fn prune(&mut self, today: i64) {
-        let n = self.records.len();
-        self.records.retain(|r| decayed(r, today) >= PRUNE_FLOOR);
-        if self.records.len() > CAPACITY {
-            self.records.sort_by(|a, b| decayed(b, today).partial_cmp(&decayed(a, today)).unwrap_or(std::cmp::Ordering::Equal));
-            self.records.truncate(CAPACITY);
+        let w: Vec<f64> = self.records.iter().map(|r| decayed(r, today)).collect();
+        let (mut live, mut drop): (Vec<usize>, Vec<usize>) = (0..w.len()).partition(|&i| w[i] >= PRUNE_FLOOR);
+        if live.len() > CAPACITY {
+            // A partition, not a sort: on a full store a save trims about one record.
+            live.select_nth_unstable_by(CAPACITY, |&a, &b| w[b].total_cmp(&w[a]).then(a.cmp(&b)));
+            drop.extend_from_slice(&live[CAPACITY..]);
         }
-        if self.records.len() != n {
-            self.reindex();
-        }
+        self.remove_at(drop);
     }
     pub fn clear(&mut self) {
         self.records.clear();

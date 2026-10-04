@@ -1,6 +1,5 @@
-//! S4 core tests (docs/contracts/s4-learning.md §6 items 1-9). Needs data/lm/bigram.sjlm like engine_lm.rs.
-//! Tests that need the learning file (`learn_store`, written by another executor) are `#[ignore]`d with
-//! the reason; main runs them after integration with `cargo test --release -- --ignored`.
+//! S4 core tests (docs/contracts/s4-learning.md §6 items 1-9 and 14). Needs data/lm/bigram.sjlm like
+//! engine_lm.rs. The `store_` tests write the learning file into a temporary directory.
 use core::engine::*;
 use core::eval::{parse_rows, usable};
 use core::learn::{context_key, Learner, Record, CAPACITY, GLOBAL, PRUNE_FLOOR, SENTINEL};
@@ -571,14 +570,29 @@ fn prune_drops_decayed_records_and_caps_the_total() {
     let r = "ㄒㄧㄣ";
     let mut l = Learner::from_records(vec![rec("他", r, "a", 1.0, DAY - 70), rec("他", r, "b", 1.0, DAY - 10), rec("他", r, "c", 0.06, DAY)]);
     l.prune(DAY);
-    let words: Vec<&str> = l.records().iter().map(|x| x.word.as_str()).collect();
-    assert_eq!(words, ["b", "c"], "70 days old is under PRUNE_FLOOR {PRUNE_FLOOR}; 10 days is not");
+    assert_eq!(index_words(&l, r), ["b", "c"], "70 days old is under PRUNE_FLOOR {PRUNE_FLOOR}; 10 days is not");
     let mut big: Vec<Record> = (0..CAPACITY + 10).map(|i| rec("他", r, &format!("w{i}"), 1.0 + i as f64, DAY)).collect();
     big.push(rec("他", r, "low", 0.3, DAY));
+    // a second reading, so removals move records across index buckets
+    big.extend((0..20).map(|i| rec("他", "ㄅㄣ", &format!("b{i}"), 100.0 + i as f64, DAY)));
     let mut l = Learner::from_records(big);
     l.prune(DAY);
     assert_eq!(l.records().len(), CAPACITY);
     assert!(l.records().iter().all(|x| x.word != "low" && x.word != "w0"), "lowest weights go first");
+    assert_eq!(index_words(&l, "ㄅㄣ").len(), 20);
+    assert_eq!(index_words(&l, r).len() + 20, CAPACITY);
+}
+/// Words reached through the index for `reading`, checked against a scan of the records: a stale
+/// index after removals would disagree.
+fn index_words<'a>(l: &'a Learner, reading: &str) -> Vec<&'a str> {
+    let r = syls(reading);
+    let mut scan: Vec<&str> = l.records().iter().filter(|x| x.reading == r).map(|x| x.word.as_str()).collect();
+    scan.sort_unstable();
+    scan.dedup();
+    let via_index = l.words_of(&r);
+    assert_eq!(via_index, scan, "index agrees with the records");
+    assert_eq!(l.has_reading(&r), !scan.is_empty());
+    via_index
 }
 
 #[test]
@@ -591,7 +605,9 @@ fn forget_removes_every_key() {
     l.teach("他", &r, "新", "鑫", DAY);
     l.forget(&r, "欣");
     assert_eq!(l.records().len(), 1, "only 新 is left");
-    assert_eq!(l.records()[0].word, "新");
+    assert_eq!(index_words(&l, "ㄒㄧㄣ"), ["新"]);
+    l.forget(&r, "新");
+    assert!(index_words(&l, "ㄒㄧㄣ").is_empty());
 }
 
 /// Teach, see the learned word in the composition, press ⌘⌫ on it: no record is left and the
@@ -786,7 +802,6 @@ fn tmp_dir(tag: &str) -> PathBuf {
 }
 
 #[test]
-#[ignore = "needs learn_store (security-executor); run after integration with --ignored"]
 fn store_commit_writes_the_file_and_reopen_restores() {
     let dir = tmp_dir("commit");
     let mut e = tiny(TINY, TINY);
@@ -812,7 +827,6 @@ fn store_commit_writes_the_file_and_reopen_restores() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 #[test]
-#[ignore = "needs learn_store (security-executor); run after integration with --ignored"]
 fn store_learning_off_then_enter_writes_nothing_and_clear_removes_the_file() {
     let dir = tmp_dir("off");
     let mut e = tiny(TINY, TINY);
@@ -839,7 +853,6 @@ fn store_learning_off_then_enter_writes_nothing_and_clear_removes_the_file() {
 }
 
 #[test]
-#[ignore = "needs learn_store (security-executor); run after integration with --ignored"]
 fn store_write_failure_sets_the_status_flag_and_keeps_the_commit() {
     let dir = tmp_dir("fail");
     let mut e = tiny(TINY, TINY);
@@ -856,4 +869,116 @@ fn store_write_failure_sets_the_status_flag_and_keeps_the_commit() {
 #[test]
 fn global_key_is_not_the_sentinel() {
     assert_ne!(GLOBAL, SENTINEL);
+}
+
+// ---------- §6.14 performance (asserted in release builds only, like engine_replay.rs) ----------
+
+/// Peak resident set size in bytes (macOS reports ru_maxrss in bytes).
+fn max_rss() -> i64 {
+    #[repr(C)]
+    struct Rusage {
+        times: [i64; 4],
+        maxrss: i64,
+        rest: [i64; 13],
+    }
+    extern "C" {
+        fn getrusage(who: i32, out: *mut Rusage) -> i32;
+    }
+    // SAFETY: RUSAGE_SELF (0) and a buffer laid out as struct rusage on 64-bit macOS.
+    unsafe {
+        let mut r: Rusage = std::mem::zeroed();
+        getrusage(0, &mut r);
+        r.maxrss
+    }
+}
+fn p95(mut t: Vec<std::time::Duration>) -> std::time::Duration {
+    t.sort();
+    t[t.len() * 95 / 100]
+}
+
+/// A full store (CAPACITY active records) on the readings dev302 types: every 1-2 syllable span's top
+/// three lexicon words under a run of context keys (sentinel and global first), so most typed spans hit
+/// the learned path. `pick_enter` then adds one record per Enter, so every timed save also trims.
+#[test]
+fn perf_full_store_per_key_and_enter_with_write() {
+    use std::time::{Duration, Instant};
+    let rows = dev302();
+    let lex = &shared().lex;
+    let mut spans: Vec<Syls> = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for s in &rows {
+        for l in 1..=2 {
+            for w in s.windows(l) {
+                if seen.insert(w.to_vec()) {
+                    spans.push(w.to_vec());
+                }
+            }
+        }
+    }
+    let contexts = ["^", "", "我", "你們", "今天", "的", "了", "在", "是", "他說", "大家", "一個", "不會", "這樣", "所以", "還是", "沒有"];
+    let mut records = Vec::new();
+    'fill: for c in contexts {
+        for span in &spans {
+            for (word, _) in lex.entries(span).into_iter().take(3) {
+                records.push(Record { context: c.into(), reading: span.clone(), word: word.into(), weight: 1.0, day: DAY });
+                if records.len() == CAPACITY {
+                    break 'fill;
+                }
+            }
+        }
+    }
+    assert_eq!(records.len(), CAPACITY, "dev302 spans give enough records");
+    let dir = tmp_dir("perf");
+    let (store, _, _) = core::learn_store::LearnStore::open(&dir).unwrap();
+    store.save(&records).unwrap();
+
+    let mut e = engine();
+    let replay = |e: &mut Engine| {
+        let mut t = Vec::new();
+        for s in &rows {
+            for key in s.iter().flat_map(|x| keys_of(x)).chain([k(KeyKind::Enter)]) {
+                let t0 = Instant::now();
+                e.key(key).unwrap();
+                t.push(t0.elapsed());
+            }
+        }
+        t
+    };
+    // the same replay before the store opens: the comparison point for the per-key p95
+    let base = p95(replay(&mut e));
+    let rss0 = max_rss();
+    let t = Instant::now();
+    e.learning_open(&dir).unwrap();
+    let load = t.elapsed();
+    let rss = max_rss() - rss0;
+    assert_eq!(n_records(&e), CAPACITY, "every seeded record loaded");
+
+    let keys = replay(&mut e);
+    assert_eq!(n_records(&e), CAPACITY, "no re-pick, nothing learned");
+
+    let mut enters = Vec::new();
+    for s in rows.iter().take(100) {
+        type_syls(&mut e, &s.join(" "));
+        let o = e.key(k(KeyKind::Space)).unwrap();
+        assert!(o.candidates.len() > 1, "a second candidate to re-pick");
+        e.key(k(KeyKind::Down)).unwrap();
+        e.key(k(KeyKind::Enter)).unwrap();
+        let t = Instant::now();
+        e.key(k(KeyKind::Enter)).unwrap();
+        enters.push(t.elapsed());
+        assert_eq!(e.learning_status(), 0, "the write succeeded");
+    }
+    let text = std::fs::read_to_string(dir.join("learning.tsv")).unwrap();
+    assert_eq!(text.lines().count(), CAPACITY + 1, "each Enter rewrote the full file");
+    let (pk, pe) = (p95(keys.clone()), p95(enters.clone()));
+    println!(
+        "load {load:?} rss +{} MB (peak; alone with --test-threads=1) | keys {} p95 {pk:?} (empty store {base:?}) | enter+write {} p95 {pe:?} max {:?}",
+        rss / (1 << 20),
+        keys.len(),
+        enters.len(),
+        enters.iter().max().unwrap()
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+    #[cfg(not(debug_assertions))]
+    assert!(pk < Duration::from_millis(16) && pe < Duration::from_millis(16), "p95 over 16 ms");
 }
