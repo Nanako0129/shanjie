@@ -124,6 +124,8 @@ jobs:
           test -n "$LIBS"
           cc -std=c11 -Wall -Wextra -Werror -Icore/include core/tests/c/abi_smoke.c target/release/libcore.a $LIBS -o "$T/abi_smoke"
           "$T/abi_smoke" data/lexicon data/lm/bigram.sjlm
+          # S4: a third argument (a fresh learning directory) runs the learning checks 518-521.
+          "$T/abi_smoke" data/lexicon data/lm/bigram.sjlm "$T/learn"
 
       # docs/PLAN.md S2v acceptance 3: Rust and Python lenient comparison agree
       # on every probe line, and the variant table is actually applied.

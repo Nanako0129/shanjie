@@ -51,8 +51,39 @@ final class FakeClient: TextClient {
     private(set) var calls: [Call] = []
     private(set) var text = ""   // committed text
     private(set) var marked = ""
+    /// S4: the document's text before anything this client received; the insertion point is
+    /// after `before + text`.
+    var before = ""
+    /// Overrides for the left-context tests: no insertion point, or marked text left over.
+    var selectedOverride: NSRange?
+    var markedOverride: NSRange?
+    /// Every call of the three reading methods, and each range requested.
+    private(set) var reads = 0
+    private(set) var requested: [NSRange] = []
 
     init(bundle: String? = "com.apple.TextEdit") { bundleIdentifier = bundle }
+
+    private var document: NSString { (before + text + marked) as NSString }
+
+    func selectedRange() -> NSRange {
+        reads += 1
+        return selectedOverride ?? NSRange(location: document.length, length: 0)
+    }
+
+    /// NSTextInputClient: {NSNotFound, 0} without marked text.
+    func markedRange() -> NSRange {
+        reads += 1
+        if let markedOverride { return markedOverride }
+        let m = (marked as NSString).length
+        return m == 0 ? NSRange(location: NSNotFound, length: 0) : NSRange(location: document.length - m, length: m)
+    }
+
+    func attributedSubstring(from range: NSRange) -> NSAttributedString? {
+        reads += 1
+        requested.append(range)
+        guard range.location != NSNotFound, NSMaxRange(range) <= document.length else { return nil }
+        return NSAttributedString(string: document.substring(with: range))
+    }
 
     func insertText(_ text: String, replacementRange: NSRange) {
         XCTAssertEqual(replacementRange.location, NSNotFound)
@@ -173,4 +204,20 @@ enum Row10 {
     static let standardKeys = Layouts.keys(zhuyin, eten: false)
     static let chat = "其中報告明天要交"
     static let formal = "期中報告明天要交"
+}
+
+/// A temporary learning directory (S4 section 4); never the real Application Support.
+enum TestLearning {
+    static func directory(create: Bool = true) -> URL {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("shanjie-learning-\(UUID().uuidString)", isDirectory: true)
+        if create { try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true) }
+        return dir
+    }
+
+    /// The record lines of learning.tsv (header excluded); empty when there is no file.
+    static func records(in dir: URL) -> [String] {
+        guard let text = try? String(contentsOf: dir.appendingPathComponent("learning.tsv"), encoding: .utf8) else { return [] }
+        return text.split(separator: "\n").dropFirst().map(String.init)
+    }
 }

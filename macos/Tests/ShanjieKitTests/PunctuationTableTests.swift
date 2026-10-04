@@ -48,7 +48,7 @@ final class PunctuationTableTests: XCTestCase {
             XCTAssertEqual(code, 0)
             XCTAssertEqual(try XCTUnwrap(engine).setPunctuation(table), 0, "the core rejected the converted system table")
         }()
-        let shell = Shell(resources: resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore())
+        let shell = Shell(resources: resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(), learningDirectory: nil)
         let items = comma(shell)
         XCTAssertEqual(items.first, "，")
         XCTAssertTrue(items.contains("、"), "the system table's alternatives for ， did not reach the candidates")
@@ -79,7 +79,7 @@ final class PunctuationTableTests: XCTestCase {
         let path = PunctuationNames.systemURL.path
         XCTAssertTrue(FileManager.default.fileExists(atPath: path), "the system punctuation names are missing: \(path)")
         let resources = try XCTUnwrap(TestData.resources())
-        let shell = Shell(resources: resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore())
+        let shell = Shell(resources: resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(), learningDirectory: nil)
         let c = Controller(shell)
         c.session.activate()
         c.press(Keys.code(for: ","), flags: .shift)
@@ -102,7 +102,7 @@ final class PunctuationTableTests: XCTestCase {
         let resources = try XCTUnwrap(TestData.resources())
         let missing = FileManager.default.temporaryDirectory.appendingPathComponent("no-names-\(UUID().uuidString).strings")
         let shell = Shell(resources: resources, panel: FakePanel(), isSecureInput: { false },
-                          layoutStore: MemoryLayoutStore(), punctuationNames: missing)
+                          layoutStore: MemoryLayoutStore(), learningDirectory: nil, punctuationNames: missing)
         let c = Controller(shell)
         c.session.activate()
         c.press(Keys.code(for: ","), flags: .shift)
@@ -110,7 +110,7 @@ final class PunctuationTableTests: XCTestCase {
         XCTAssertFalse(c.panel.items.isEmpty)
         XCTAssertTrue(c.panel.notes.allSatisfy { $0 == nil }, "no names table, no names")
 
-        let words = Controller(Shell(resources: resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore()))
+        let words = Controller(Shell(resources: resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(), learningDirectory: nil))
         words.session.activate()
         words.type("su3")   // ㄋㄧˇ
         words.press(Keys.space)
@@ -123,7 +123,7 @@ final class PunctuationTableTests: XCTestCase {
         let resources = try XCTUnwrap(TestData.resources())
         let missing = FileManager.default.temporaryDirectory.appendingPathComponent("no-such-\(UUID().uuidString).plist")
         let shell = Shell(resources: resources, panel: FakePanel(), isSecureInput: { false },
-                          layoutStore: MemoryLayoutStore(), punctuationTable: missing)
+                          layoutStore: MemoryLayoutStore(), learningDirectory: nil, punctuationTable: missing)
         XCTAssertEqual(comma(shell), ["，", "〈", "《", "︿", "︽"])
     }
 }

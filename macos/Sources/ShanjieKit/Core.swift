@@ -43,6 +43,28 @@ final class CoreEngine {
     /// s3e: replace the punctuation alternatives; 0 on success, 2 on an invalid table (kept as before).
     func setPunctuation(_ table: String) -> Int32 { shanjie_engine_set_punctuation(handle, table) }
 
+    // S4 (docs/contracts/s4-learning.md sections 2-4); each returns the C ABI code.
+
+    /// `nil` means no left context (NULL).
+    func setLeftContext(_ text: String?) -> Int32 {
+        guard let text else { return shanjie_engine_set_left_context(handle, nil) }
+        return text.withCString { shanjie_engine_set_left_context(handle, $0) }
+    }
+
+    func setLearning(_ enabled: Bool) -> Int32 { shanjie_engine_set_learning(handle, enabled ? 1 : 0) }
+
+    func learningOpen(dir: String) -> Int32 { shanjie_engine_learning_open(handle, dir) }
+
+    func learningClear() -> Int32 { shanjie_engine_learning_clear(handle) }
+
+    /// bit0: a full rewrite of the learning file failed and no full rewrite or clear has succeeded
+    /// since (S4 section 4; a failed append that falls back to a successful rewrite does not set it).
+    /// `nil` on a non-zero code.
+    func learningStatus() -> UInt32? {
+        var flags: UInt32 = 0
+        return shanjie_engine_learning_status(handle, &flags) == 0 ? flags : nil
+    }
+
     func key(_ key: ShanjieKey) -> CoreResult {
         var out: UnsafeMutablePointer<ShanjieOutput>?
         return Self.take(shanjie_engine_key(handle, key, &out), out)
