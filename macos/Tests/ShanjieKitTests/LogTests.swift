@@ -90,6 +90,9 @@ final class LogTests: XCTestCase {
         let broken = FileManager.default.temporaryDirectory.appendingPathComponent(pathMarker, isDirectory: true)
         let failed = Shell(resources: broken, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore())  // engine_new fails on a marked path
         XCTAssertNil(failed.engine, "the marked data path did not fail engine creation")
+        // s3e: no punctuation table at a marked path -> the fixed fallback line (the path never logged).
+        _ = Shell(resources: resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(),
+                  punctuationTable: broken.appendingPathComponent("punct.plist"))
 
         let stdText = std.finish()
         releaseIssues()
@@ -110,6 +113,8 @@ final class LogTests: XCTestCase {
                       "the shell's error log did not reach the capture")
         XCTAssertTrue(entries.contains { $0.subsystem == Log.subsystem && $0.text.contains("core call failed, code 2") },
                       "the non-zero return code path (fail, reset 1) did not run")
+        XCTAssertTrue(entries.contains { $0.subsystem == Log.subsystem && $0.text.contains("punctuation candidates: system table unavailable, using the built-in list") },
+                      "the punctuation fallback did not log its fixed line")
 
         let negatives = [
             Row10.formal, Row10.chat, "你好", Row10.zhuyin, "ㄑㄧ", "ㄋㄧ",
