@@ -64,6 +64,10 @@ void    shanjie_output_free(ShanjieOutput *output);
 // S2c (docs/PLAN.md S2c)
 int32_t shanjie_engine_load_lm(ShanjieEngine *engine, const char *path);               // does not change the current display
 int32_t shanjie_engine_set_profile(ShanjieEngine *engine, uint32_t profile, ShanjieOutput **out); // 0 chat (default), 1 formal; recomputes and returns a snapshot (handled 1, commit "")
+// s3e (docs/contracts/s3e-punctuation-candidates.md): punctuation alternatives, UTF-8 lines
+// "mark\talt\talt...", blank lines ignored, a repeated mark overrides; at most 64 KB / 1,000 lines.
+// 2 on any invalid input, keeping the previous table (a built-in default until the first success).
+int32_t shanjie_engine_set_punctuation(ShanjieEngine *engine, const char *table); // does not change the current display
 
 #ifdef __cplusplus
 }

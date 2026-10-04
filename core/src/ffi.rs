@@ -313,6 +313,28 @@ pub unsafe extern "C" fn shanjie_engine_set_profile(
     rc
 }
 
+/// s3e. Replace the punctuation alternatives with `table`: UTF-8 lines `mark\talt\talt…`, blank
+/// lines ignored, a repeated mark overrides the earlier line, at most 64 KB and 1,000 lines. Any
+/// invalid input returns 2 and keeps the previous table. Does not change the current display.
+///
+/// # Safety
+/// `engine` is NULL or a live handle; `table` is NULL or a NUL-terminated string.
+#[no_mangle]
+pub unsafe extern "C" fn shanjie_engine_set_punctuation(engine: *mut ShanjieEngine, table: *const c_char) -> i32 {
+    guard(|| {
+        if engine.is_null() || table.is_null() {
+            return SHANJIE_ERR_NULL;
+        }
+        // SAFETY: non-NULL, NUL-terminated per the caller contract.
+        let Ok(table) = unsafe { CStr::from_ptr(table) }.to_str() else {
+            return SHANJIE_ERR_INVALID;
+        };
+        // SAFETY: live handle, single-threaded use (§6).
+        let e = unsafe { &mut (*engine).0 };
+        if e.set_punctuation(table) { SHANJIE_OK } else { SHANJIE_ERR_INVALID }
+    })
+}
+
 /// # Safety
 /// `output` is NULL or an output from this library not yet freed.
 #[no_mangle]

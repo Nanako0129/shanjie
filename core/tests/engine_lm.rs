@@ -383,6 +383,17 @@ fn punctuation_is_a_sentence_boundary() {
     let (_, tx, _) = best_path(&x, profile);
     let (_, ty, _) = best_path(&y, profile);
     assert!((e.total_score().unwrap() - (tx + ty)).abs() < 1e-9);
+    // s3e: an alternative (《, outside the s3a §4 set) is still a boundary, with the same total.
+    let before = e.total_score().unwrap();
+    let mut e2 = engine(Layout::Standard, profile);
+    type_row(&mut e2, Layout::Standard, &x);
+    e2.key(Key::ch(',', MOD_SHIFT)).unwrap();
+    let o = e2.key(Key::new(KeyKind::Space)).unwrap();
+    assert_eq!(o.candidates[2], "《");
+    e2.key(Key::ch('3', 0)).unwrap();
+    let o = type_row(&mut e2, Layout::Standard, &y);
+    assert_eq!(o.preedit, "他長《在換");
+    assert!((e2.total_score().unwrap() - before).abs() < 1e-9);
     // Only punctuation: no words, no total (contract §4).
     let mut e = engine(Layout::Standard, profile);
     e.key(Key::ch(',', MOD_SHIFT)).unwrap();

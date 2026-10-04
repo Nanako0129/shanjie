@@ -40,6 +40,9 @@ final class CoreEngine {
 
     func loadLM(path: String) -> Int32 { shanjie_engine_load_lm(handle, path) }
 
+    /// s3e: replace the punctuation alternatives; 0 on success, 2 on an invalid table (kept as before).
+    func setPunctuation(_ table: String) -> Int32 { shanjie_engine_set_punctuation(handle, table) }
+
     func key(_ key: ShanjieKey) -> CoreResult {
         var out: UnsafeMutablePointer<ShanjieOutput>?
         return Self.take(shanjie_engine_key(handle, key, &out), out)

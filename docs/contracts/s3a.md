@@ -129,6 +129,8 @@ void    shanjie_output_free(ShanjieOutput *output);
 // S2c 新增（docs/PLAN.md §S2c）
 int32_t shanjie_engine_load_lm(ShanjieEngine *engine, const char *path);               // 不改目前的組字區顯示
 int32_t shanjie_engine_set_profile(ShanjieEngine *engine, uint32_t profile, ShanjieOutput **out); // 0 chat（預設）、1 formal；重算組字區並回傳快照
+// s3e 新增（docs/contracts/s3e-punctuation-candidates.md）
+int32_t shanjie_engine_set_punctuation(ShanjieEngine *engine, const char *table); // 標點候選表；不合法回 2 並保留原表；不改目前顯示
 ```
 
 - **回傳碼**：0 成功、1 必要的指標是 NULL、2 輸入不合法（data_dir 或 LM 路徑不是 UTF-8、`ch` 不是合法的 Unicode scalar、layout、mode 或 profile 超出範圍）、3 資料載入失敗（含 LM 檔讀取或格式錯誤、引擎沒有 data_dir）、4 內部錯誤（攔下的 panic 或解碼錯誤）。`load_lm` 失敗時 LM 維持原狀；碼 4 時任何函式都照下面的規則丟棄組字。
