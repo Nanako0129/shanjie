@@ -38,6 +38,9 @@ final class LogTests: XCTestCase {
         held.forEach { super.record($0) }
     }
 
+    /// Han text before the insertion point (S4 section 2); its last two characters reach the core.
+    static let contextMarker = "鑑識前文"
+
     func testShellLogsNothingButStaticTextAndCodes() throws {
         let nonce = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
         let start = "shanjie-logtest-start-\(nonce)"
@@ -70,8 +73,15 @@ final class LogTests: XCTestCase {
         defer { _ = std.finish(); releaseIssues() }  // an early exit must neither leave the pipe nor lose held issues
         let stdProbe = "shanjie-std-probe-\(nonce)"
         FileHandle.standardError.write(Data("\(stdProbe)\n".utf8))
-        let shell = Shell(resources: resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore())
+        // S4: a marked learning directory and a marked left context (sections 2 and 4).
+        let learning = FileManager.default.temporaryDirectory
+            .appendingPathComponent("shanjie-tests-\(pathMarker)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: learning, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: learning) }
+        let shell = Shell(resources: resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(),
+                          learningDirectory: learning)
         let c = Controller(shell, bundle: bundleMarker)
+        c.client.before = "ab\t\(Self.contextMarker)"
         c.session.activate()                            // profile from a marked bundle ID
         c.type(Row10.standardKeys)
         c.press(Keys.enter)                             // commits the marker sentence
@@ -87,11 +97,15 @@ final class LogTests: XCTestCase {
         c.session.activate()
         c.type("su3")
         c.session.selectLayout(.eten) // mode switch commits and rebuilds
+        for action: MenuEntry.Action in [.askClear, .confirmClear, .toggleBackup, .toggleBackup] {
+            c.session.perform(action)                   // S4 menu: clear, backup exclusion
+        }
+        XCTAssertGreaterThan(c.client.reads, 0, "the left-context read did not run")
         let broken = FileManager.default.temporaryDirectory.appendingPathComponent(pathMarker, isDirectory: true)
-        let failed = Shell(resources: broken, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore())  // engine_new fails on a marked path
+        let failed = Shell(resources: broken, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(), learningDirectory: nil)  // engine_new fails on a marked path
         XCTAssertNil(failed.engine, "the marked data path did not fail engine creation")
         // s3e: no punctuation table at a marked path -> the fixed fallback line (the path never logged).
-        _ = Shell(resources: resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(),
+        _ = Shell(resources: resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(), learningDirectory: nil,
                   punctuationTable: broken.appendingPathComponent("punct.plist"))
 
         let stdText = std.finish()
@@ -119,7 +133,7 @@ final class LogTests: XCTestCase {
         let negatives = [
             Row10.formal, Row10.chat, "你好", Row10.zhuyin, "ㄑㄧ", "ㄋㄧ",
             Row10.standardKeys, String(Row10.standardKeys.prefix(6)), "su3cl3",
-            bundleMarker, pathMarker,
+            bundleMarker, pathMarker, Self.contextMarker,
         ]
         for marker in negatives {
             XCTAssertFalse(everything.contains(marker), "a negative marker reached the log")
