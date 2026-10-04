@@ -87,6 +87,12 @@
   .stat b { display: block; font: 900 30px/1.2 var(--serif); }
   .stat span { font-size: 15px; color: var(--ink-2); }
 
+  /* 安裝 */
+  .steps { margin: 0; padding-left: 1.3em; display: grid; gap: 10px; }
+  code, .cmd { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 14px; }
+  code { background: var(--paper-2); padding: 1px 6px; border-radius: 6px; overflow-wrap: anywhere; }
+  .cmd { display: block; background: var(--paper-2); border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; margin: 8px 0; overflow-x: auto; white-space: pre; }
+
   /* 路線圖 */
   .road { list-style: none; margin: 0; padding: 0; }
   .road li { position: relative; padding: 0 0 26px 34px; }
@@ -120,10 +126,20 @@
     <h1 class="name">善解</h1>
     <p class="tagline">善解，所以選對。</p>
   </div>
-  <p class="lede">一個開源的 macOS 注音輸入法，專心把同音字選對：看懂你前面寫了什麼，選出你真正要打的那個字。<br><span class="badge">開發中・尚未提供下載</span></p>
+  <p class="lede">一個開源的 macOS 注音輸入法，專心把同音字選對：看懂你前面寫了什麼，選出你真正要打的那個字。<br><span class="badge">v0.1.1 可下載・Apple 晶片、macOS 26 以上</span></p>
 </header>
 
 <hr class="rule">
+
+<section>
+  <h2>安裝</h2>
+  <p class="sub">目前是早期版本：可以日常打字，但還沒有個人化學習，選錯的字不會被記住。</p>
+  <ol class="steps">
+    <li>從 <a href="https://github.com/Nanako0129/shanjie/releases/latest">GitHub Releases</a> 下載 <code>shanjie-installer-0.1.1.zip</code>，解壓縮後打開「安裝善解輸入法」。</li>
+    <li>或用 Homebrew：<span class="cmd">brew install --cask nanako0129/tap/shanjie</span>裝好後照終端機的提示執行一次 <code>install</code>。</li>
+    <li>第一次安裝後，如果輸入法清單裡沒有善解，登出再登入一次。</li>
+  </ol>
+</section>
 
 <section>
   <h2>為什麼要做</h2>
@@ -151,12 +167,14 @@
   <div class="stats">
     <div class="stat"><b>98.3%</b><span>正解出現在前 64 名候選的比例（開發集 302 句；未補詞前 97.7%）</span></div>
     <div class="stat"><b>92.7%</b><span>目前最準的判斷器從候選中挑對整句的比例（開發集，雲端）</span></div>
-    <div class="stat"><b>1.7 ms</b><span>每打一個音節重新產生候選的時間（p95，M5 Mac）</span></div>
+    <div class="stat"><b>77.1%</b><span>輸入法實際送出整句的正確率（保留集 227 句，聊天設定）</span></div>
+    <div class="stat"><b>1.3 ms</b><span>每個按鍵的處理時間，含語言模型（p95，M5 Mac）</span></div>
   </div>
   <details>
     <summary>這些數字怎麼量的</summary>
     <p>評測分成開發集與保留集。開發集用來調整；保留集由另一個流程撰寫、開發過程中不看內容，只在每個階段結束時量一次，用來確認進步不是因為「背了題目」。保留集上，補詞讓前 64 名含正解的比例從 96.9% 升到 97.8%。</p>
     <p>判斷器比較了本機模型與多家雲端服務的三十多組設定；所有判斷器都卡在同一個上限：正解根本不在候選裡的句子，誰也救不回來。所以目前的重點是先把正解放進候選。</p>
+    <p>輸入法實際送出整句的正確率，保留集上聊天設定 77.1%、書面設定 79.7%；這是目前只用詞庫與語言模型、還沒有語意重排的成績。</p>
   </details>
 </section>
 
@@ -169,11 +187,14 @@
     <li class="done"><span class="dot"></span><h3>語意選字可行性 <span class="tag">完成</span></h3><p>實測本機與雲端模型的準確度與延遲，找出真正的瓶頸在候選，而不在判斷。</p></li>
     <li class="done"><span class="dot"></span><h3>詞庫 v1 <span class="tag">完成</span></h3><p>從維基標題與維基詞典補進約 34 萬個詞，並可從鎖定版本的來源完整重建。</p></li>
     <li class="done"><span class="dot"></span><h3>精簡詞庫格式 <span class="tag">完成</span></h3><p>重寫詞庫在記憶體中的結構：輸出逐字不變，記憶體從約 390 MB 降到約 88 MB。</p></li>
-    <li class="wip"><span class="dot"></span><h3>語言模型與詞性 <span class="tag">下一步</span></h3><p>用上下文與詞性處理「常常／嚐嚐」「在／再」這類排序問題。</p></li>
-    <li><span class="dot"></span><h3>macOS 輸入法本體 <span class="tag">規劃中</span></h3><p>標準注音鍵盤、候選窗、中英切換；外觀參考 Apple 原生注音，中文模式下 Ctrl+\ 輸出「、」。</p></li>
-    <li><span class="dot"></span><h3>一鍵校正、個人化學習、新手測驗 <span class="tag">規劃中</span></h3><p>打完一段可以請模型重看；只從你在候選窗的改選學習，而且依前文分開記，不會一次改選就污染所有句子。</p></li>
+    <li class="done"><span class="dot"></span><h3>語言模型 <span class="tag">完成</span></h3><p>用上下文排序候選，分聊天與書面兩種設定；每一鍵的處理時間 p95 不到 2 毫秒。</p></li>
+    <li class="done"><span class="dot"></span><h3>macOS 輸入法本體 <span class="tag">完成</span></h3><p>標準注音鍵盤、候選窗，中文模式下 Ctrl+\ 輸出「、」。標點留在組字區、標點候選清單已完成，會在下一版釋出。</p></li>
+    <li class="done"><span class="dot"></span><h3>打包與釋出 <span class="tag">完成</span></h3><p>Developer ID 簽章與 Apple 公證、安裝程式、Homebrew。</p></li>
+    <li class="done"><span class="dot"></span><h3>標準讀音 <span class="tag">完成</span></h3><p>依教育部規範，「一」「不」打本調或變調都能打出整個詞（ㄅㄨˋ ㄕˋ 和 ㄅㄨˊ ㄕˋ 都是「不是」），「法國」的「法」用審定音 ㄈㄚˇ。會在下一版釋出。</p></li>
+    <li class="wip"><span class="dot"></span><h3>讀音修正與個人化學習 <span class="tag">下一步</span></h3><p>修正補充詞表裡的錯誤讀音；接著只從你在候選窗的改選學習，依前文分開記，不會一次改選就污染所有句子。</p></li>
+    <li><span class="dot"></span><h3>候選網格與標點說明 <span class="tag">規劃中</span></h3><p>按 ↓ 展開成多欄候選，標點附上名稱，比照 Apple 原生注音。</p></li>
+    <li><span class="dot"></span><h3>一鍵校正、新手測驗 <span class="tag">規劃中</span></h3><p>打完一段可以請模型重看；第一次使用時用簡單測驗了解你的打字習慣。</p></li>
     <li><span class="dot"></span><h3>本機重排與雲端校正 <span class="tag">規劃中</span></h3><p>把語意判斷接進輸入法；本機優先，雲端選用。</p></li>
-    <li><span class="dot"></span><h3>打包與釋出 <span class="tag">規劃中</span></h3><p>簽章、公證，提供下載。</p></li>
   </ol>
 </section>
 
@@ -183,6 +204,9 @@
   <details open>
     <summary>設計原則</summary>
     <ul>
+      <li>目前版本完全不連網：沒有更新檢查、沒有雲端功能，不送出任何資料。</li>
+      <li>不申請「輸入監控」與「輔助使用」權限。系統的輸入法框架本來就會把按鍵交給輸入法，不需要監看整個系統。</li>
+      <li>用了哪些資料與模型、各自的授權，下載前就寫在這一頁（見「開源與授權」）。</li>
       <li>雲端功能預設關閉；開啟後只在你按快速鍵或送出時傳送，不會逐鍵傳送。</li>
       <li>雲端只能回傳候選的編號，不能產生文字；回應不合規就直接用本機結果。</li>
       <li>密碼欄、安全輸入模式下停止學習與雲端；終端機不傳送到雲端。</li>
@@ -194,21 +218,24 @@
 
 <section>
   <h2>開源與授權</h2>
-  <details>
+  <details open>
     <summary>授權清單</summary>
     <ul>
       <li>程式碼：Apache-2.0。</li>
       <li>基礎詞庫：小麥注音（MIT；片語源自 libtabe，BSD）。</li>
       <li>補充詞表：由維基百科與維基詞典的條目標題產生，CC BY-SA 4.0，署名維基百科與維基詞典貢獻者。</li>
+      <li>標準讀音變體：依教育部《國語辭典簡編本》〈單一音讀〉與《國語一字多音審訂表》的規則，從小麥注音詞庫產生，MIT。規則是事實，檔案不含教育部資料。</li>
+      <li>語言模型（詞的兩兩搭配頻率）：由維基百科 2026-10-01 的 20 萬篇條目、Mozilla Common Voice 繁中（台灣）句子、Tatoeba 中文句子，以及 gpt-oss-120b 產生的台灣口語合成句計算，CC BY-SA 4.0，署名維基百科與 Tatoeba 貢獻者。不含任何私人對話。</li>
+      <li>目前沒有使用任何神經網路模型。</li>
       <li>評測句：專案自寫，CC0。</li>
     </ul>
-    <p>原始碼公開時間待定。</p>
+    <p>原始碼：<a href="https://github.com/Nanako0129/shanjie">github.com/Nanako0129/shanjie</a></p>
   </details>
 </section>
 
 <footer>
   <span>善解 shanjie</span>
-  <span>最後更新：2026-10-03</span>
+  <span>最後更新：2026-10-04</span>
 </footer>
 
 </main>
