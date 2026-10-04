@@ -2,6 +2,10 @@ name: CI
 
 # Core build and tests on every pull request and every push to main.
 # Modeled on syrtis (Nanako0129/syrtis .github/workflows/ci.yml).
+# The workflow always runs, so every main commit keeps a concluded run for the
+# release gate (scripts/check-ci-gate.sh); the `changes` job skips the macOS
+# jobs when only documentation or the website changed (scripts/ci-changes.sh),
+# and skipped jobs leave the run's conclusion `success`.
 on:
   push:
     branches: [main]
@@ -17,7 +21,38 @@ permissions:
   contents: read
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      run: ${{ steps.diff.outputs.run }}
+    steps:
+      # Full history without file contents: enough for `git diff --name-only`.
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          fetch-depth: 0
+          filter: blob:none
+          persist-credentials: false
+      - id: diff
+        shell: bash
+        env:
+          BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          set -euo pipefail
+          # A new branch (all-zero before) or a base outside the history (force
+          # push) cannot be diffed, so everything runs.
+          if [[ "$BASE" =~ ^0+$ ]] || ! git cat-file -e "$BASE^{commit}" 2>/dev/null; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            # --no-renames: rename detection would fetch file contents; listing
+            # both the old and the new path is also the conservative answer.
+            git diff --no-renames --name-only "$BASE...$GITHUB_SHA" | scripts/ci-changes.sh >> "$GITHUB_OUTPUT"
+          fi
+          cat "$GITHUB_OUTPUT"
+
   core:
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
     # Xcode 27 / macOS 27, the same image the Swift shell (S3b) will need.
     runs-on: xcode-27
     # A full run takes about 3 minutes; a hung FFI child process should not
@@ -97,6 +132,8 @@ jobs:
   # app, the Swift tests through the real core and model, the bundled
   # selftest, and acceptance checks 2, 3 and 6 of contract section 10.
   shell:
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
     runs-on: xcode-27
     timeout-minutes: 30
     steps:
