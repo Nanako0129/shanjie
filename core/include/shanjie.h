@@ -68,6 +68,24 @@ int32_t shanjie_engine_set_profile(ShanjieEngine *engine, uint32_t profile, Shan
 // "mark\talt\talt...", blank lines ignored, a repeated mark overrides; at most 64 KB / 1,000 lines.
 // 2 on any invalid input, keeping the previous table (a built-in default until the first success).
 int32_t shanjie_engine_set_punctuation(ShanjieEngine *engine, const char *table); // does not change the current display
+// S4 (docs/contracts/s4-learning.md): learning from candidate-window re-picks. Every function returns 1
+// when engine (or a required pointer) is NULL. None of them changes the current display, except that
+// learning_clear and a forget may re-decode on the next key.
+// set_left_context: copies the text before the insertion point; only its last <= 2 consecutive Han
+//   characters are kept (S4 section 1.1). NULL or "" means none. Not UTF-8: returns 2 and clears.
+//   Cleared by the core after every commit, reset and code 4; call it at every composition start.
+int32_t shanjie_engine_set_left_context(ShanjieEngine *engine, const char *utf8);
+// set_learning: 0 or 1 (2 otherwise). Default 0 at engine creation (fail-closed). 0 drops pending
+//   learns; a span is learned only if the flag was 1 both when it was chosen and at commit.
+int32_t shanjie_engine_set_learning(ShanjieEngine *engine, uint32_t enabled);
+// learning_open: dir is the learning directory (.../Application Support/shanjie); created 0700 if
+//   missing. A missing file starts empty; a corrupt one is renamed learning.tsv.corrupt and starts
+//   empty (both 0). 3 on I/O failure or a directory not owned by the user.
+int32_t shanjie_engine_learning_open(ShanjieEngine *engine, const char *dir);
+// learning_clear: drops memory, pending learns and the files (a missing file is success); 3 on failure.
+int32_t shanjie_engine_learning_clear(ShanjieEngine *engine);
+// learning_status: *flags bit0 = the last write of the learning file failed.
+int32_t shanjie_engine_learning_status(ShanjieEngine *engine, uint32_t *flags);
 
 #ifdef __cplusplus
 }
