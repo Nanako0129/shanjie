@@ -26,11 +26,17 @@ const KEYS_ETEN: &str = "bpmfdtnlvkhg7c,./j;'sexuaorwiqzy890-=";
 const TONE_MARKS: [&str; 5] = ["", "ˊ", "ˇ", "ˋ", "˙"];
 const TONE_KEYS_STANDARD: [char; 4] = ['6', '3', '4', '7'];
 const TONE_KEYS_ETEN: [char; 4] = ['2', '3', '4', '1'];
-/// Shift + key -> punctuation (§4).
-const SHIFT_PUNCT: [(char, char); 10] = [
+/// Shift + key -> punctuation (§4). The bracket row follows Apple's Zhuyin
+/// (com.apple.inputmethod.TCIM.Zhuyin), measured 2026-10-05 with a key probe that typed each key into
+/// its own window: ⇧[ 『, ⇧] 』, ⇧\ ｜, ⇧' “, ⇧= ＋, ⇧` ～.
+const SHIFT_PUNCT: [(char, char); 13] = [
     (',', '，'), ('.', '。'), ('/', '？'), ('1', '！'), (';', '：'),
-    ('[', '「'), (']', '」'), ('9', '（'), ('0', '）'), ('`', '～'),
+    ('[', '『'), (']', '』'), ('9', '（'), ('0', '）'), ('`', '～'),
+    ('\\', '｜'), ('\'', '“'), ('=', '＋'),
 ];
+/// Unshifted key -> punctuation, from the same probe: [ 「, ] 」, \ 、, ' ‘, = ＝, ` ·. Only when the key is
+/// neither a Zhuyin nor a tone key in the current layout (Eten uses ' and = for Zhuyin).
+const PLAIN_PUNCT: [(char, char); 6] = [('[', '「'), (']', '」'), ('\\', '、'), ('\'', '‘'), ('=', '＝'), ('`', '·')];
 
 /// s3d §2: punctuation in the composition is a one-cell token under this reserved reading prefix
 /// (`_punct_，`); the lexicon has no such reading. Each one is also a length-1 fixed word.
@@ -690,6 +696,8 @@ impl Engine {
             Some('、')
         } else if is_char && m == MOD_SHIFT {
             SHIFT_PUNCT.iter().find(|(c, _)| *c == k.ch).map(|(_, p)| *p)
+        } else if is_char && m == 0 && self.layout.symbol_of(k.ch).is_none() && self.layout.tone_of(k.ch).is_none() {
+            PLAIN_PUNCT.iter().find(|(c, _)| *c == k.ch).map(|(_, p)| *p)
         } else {
             None
         };
