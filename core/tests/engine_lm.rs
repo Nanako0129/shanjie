@@ -477,9 +477,9 @@ fn overlay_readings_production_path() {
 }
 
 /// S2r-2 §4.6: the core needs no change for sandhi rows in overlay-add.tsv. 一丈紅 has two rows
-/// (primary ㄧ first, variant ㄧˊ right after, same score and word):
+/// (primary ㄧ first, variant ㄧˊ right after, same word, variant score 0.5 lower):
 /// (a) the real files parse and `word_info` returns the primary reading,
-/// (b) `CappedLexicon` caps both readings to the same score, below the raw one,
+/// (b) the variant row scores the primary minus 0.5 and `CappedLexicon` caps both readings (at most the penalty apart), below the raw one,
 /// (c) Python's `by_word` agrees (reference/proto/check_overlay_variants.py).
 #[test]
 fn overlay_sandhi_rows_load_and_cap() {
@@ -487,8 +487,9 @@ fn overlay_sandhi_rows_load_and_cap() {
     let (primary, variant) = (syls_of("ㄧ ㄓㄤˋ ㄏㄨㄥˊ"), syls_of("ㄧˊ ㄓㄤˋ ㄏㄨㄥˊ"));
     let (got, raw) = s.lex.word_info("一丈紅").expect("一丈紅 is in the lexicon");
     assert_eq!(got, primary, "word_info must return the primary (file-order first) reading");
-    assert!(s.lex.entries(&variant).iter().any(|(w, _)| *w == "一丈紅"), "the variant row is loaded");
+    let vraw = s.lex.entries(&variant).iter().find(|(w, _)| *w == "一丈紅").map(|(_, sc)| *sc).expect("the variant row is loaded");
+    assert!((raw - vraw - 0.5).abs() < 1e-9, "the variant row scores the primary minus the 0.5 penalty ({raw} vs {vraw})");
     let (cp, cv) = (s.capped.best_lp(&primary, "一丈紅").unwrap(), s.capped.best_lp(&variant, "一丈紅").unwrap());
-    assert_eq!(cp, cv, "both readings get the same capped score");
+    assert!(cv <= cp && cp - cv <= 0.5 + 1e-9, "capped variant is at most the penalty below the primary ({cp} vs {cv})");
     assert!(cp < raw, "the cap lowers the raw overlay score {raw} (got {cp})");
 }
