@@ -34,6 +34,9 @@ SOURCES = {  # 檔名: (網址, SHA-256)；Wikimedia 2026-10-01 dump 的 sha1 �
                      "a0ca1601c70648cf48b33c3c6210ccbecc5c7eead4b4c3daf76587ba2c03582b"),
 }
 SCORE = {2: -7.17149945, 3: -7.04116568, 4: -6.60980192}   # 基底同字數詞條分數的第 25 百分位；build() 會重算核對
+# 變調列的分數＝主要列 − 這個值（log10，約 1/3）。變調列常和別的詞共用讀音（同一成語的異體寫法、罕見詞），
+# 同分時由檔案順序決定誰排第一；降一點讓「已經有這個讀音的詞」贏，變調列只在沒有競爭者時才排第一。
+VARIANT_PENALTY = 0.5
 HAN = re.compile(r"^[一-鿿]{2,4}$")
 
 
@@ -117,8 +120,8 @@ def build():
         src = "wikt" if w in wikt else "zhwiki"
         rows.append(f"{'-'.join(syls)}\t{w}\t{SCORE[len(w)]!r}\t{src}\n")
         var = sandhi_variant(w, syls)
-        if var:                                     # 主要列在前，變調列緊接其後（同分、同來源）
-            rows.append(f"{'-'.join(var)}\t{w}\t{SCORE[len(w)]!r}\t{src}\n")
+        if var:                                     # 主要列在前，變調列緊接其後（同來源，分數 − VARIANT_PENALTY）
+            rows.append(f"{'-'.join(var)}\t{w}\t{round(SCORE[len(w)] - VARIANT_PENALTY, 8)!r}\t{src}\n")
     assert not {r.split("\t")[1] for r in rows} & words   # 疊加層和基底的詞表交集必須是 0
     return rows
 
