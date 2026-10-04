@@ -51,7 +51,7 @@ final class ShanjieInputController: IMKInputController {
     /// docs/contracts/s3b.md section 13.2 and S4 sections 3-4: the entries ShanjieKit builds
     /// (`Session.menu`). Each action has its own selector, as McBopomofo does, rather than relying
     /// on `sender` being the NSMenuItem (what IMK passes as sender is not measured here). The clear
-    /// is confirmed in the menu itself, in two steps, so it needs no window.
+    /// asks in a window (`AlertDialogs`).
     override func menu() -> NSMenu! {
         let entries = MainActor.assumeIsolated { session.menu }
         let menu = NSMenu()
@@ -67,9 +67,7 @@ final class ShanjieInputController: IMKInputController {
         switch action {
         case .layout(.standard): #selector(selectStandardLayout(_:))
         case .layout(.eten): #selector(selectEtenLayout(_:))
-        case .askClear: #selector(askClearLearning(_:))
-        case .confirmClear: #selector(confirmClearLearning(_:))
-        case .cancelClear: #selector(cancelClearLearning(_:))
+        case .clear: #selector(clearLearning(_:))
         case .toggleBackup: #selector(toggleLearningBackup(_:))
         }
     }
@@ -80,9 +78,7 @@ final class ShanjieInputController: IMKInputController {
 
     @objc func selectStandardLayout(_ sender: Any?) { perform(.layout(.standard)) }
     @objc func selectEtenLayout(_ sender: Any?) { perform(.layout(.eten)) }
-    @objc func askClearLearning(_ sender: Any?) { perform(.askClear) }
-    @objc func confirmClearLearning(_ sender: Any?) { perform(.confirmClear) }
-    @objc func cancelClearLearning(_ sender: Any?) { perform(.cancelClear) }
+    @objc func clearLearning(_ sender: Any?) { perform(.clear) }
     @objc func toggleLearningBackup(_ sender: Any?) { perform(.toggleBackup) }
 
     override func candidates(_ sender: Any!) -> [Any]! {
@@ -168,5 +164,39 @@ final class CandidatePanelAdapter: CandidatePanel {
 
     func hide() {
         panel.hide()
+    }
+}
+
+/// The clear's windows (S4 section 4). The input method is an agent app (LSUIElement): it comes
+/// forward for the alert, then gives focus back to the app the user was typing in.
+@MainActor
+final class AlertDialogs: LearningDialogs {
+    func confirmClear() -> Bool {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = DialogText.clearTitle
+        alert.informativeText = DialogText.clearMessage
+        // 取消 first: it is the default button (Return), so a destructive action is never one
+        // keystroke away; 清除 is marked destructive.
+        alert.addButton(withTitle: DialogText.cancel)
+        alert.addButton(withTitle: DialogText.clearButton).hasDestructiveAction = true
+        return run(alert) == .alertSecondButtonReturn
+    }
+
+    func clearFailed() {
+        let alert = NSAlert()
+        alert.alertStyle = .critical
+        alert.messageText = DialogText.failedTitle
+        alert.informativeText = DialogText.failedMessage
+        alert.addButton(withTitle: DialogText.ok)
+        _ = run(alert)
+    }
+
+    private func run(_ alert: NSAlert) -> NSApplication.ModalResponse {
+        let previous = NSWorkspace.shared.frontmostApplication
+        NSApp.activate()
+        let response = alert.runModal()
+        previous?.activate()
+        return response
     }
 }

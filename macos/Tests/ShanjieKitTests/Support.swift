@@ -101,6 +101,16 @@ final class FakeClient: TextClient {
     }
 }
 
+/// Answers the clear's windows for the user (S4 section 4) and counts them.
+@MainActor
+final class FakeDialogs: LearningDialogs {
+    var answer = true
+    private(set) var asked = 0
+    private(set) var failures = 0
+    func confirmClear() -> Bool { asked += 1; return answer }
+    func clearFailed() { failures += 1 }
+}
+
 @MainActor
 final class FakePanel: CandidatePanel {
     private(set) var visible = false
