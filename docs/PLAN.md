@@ -559,6 +559,7 @@ S3a 不需要外觀參考，可以先做；S3b 等使用者提供 macOS 內建�
 ### 待排入（使用者實測 2026-10-04，見 research-log 同日）
 
 - **讀音條件權重**：罕用讀音（如「雀」唸 ㄑㄧㄠˇ）不該拿到常用讀音語料的 bigram 加分；把詞庫的讀音權重和語言模型一起放進解碼分數。驗收：dev302、保留集不退步，`ㄑㄧㄠˇ ㄎㄜ` 不再出「雀科」。
+- **建置產物被 LaunchServices 登記**：`scripts/check-app.sh` 第 6 項執行 bundle 裡的 `--selftest`，執行 .app 內的二進位會讓系統登記那個 bundle（`.metadata_never_index` 擋不住）。2026-10-04 在使用者機器上查到 `build/shanjie.app`（00:40 的兩模式舊版、bundle ID 與正式版相同）仍在登記中，用 `make clean-bundle` 清掉。待辦：自測跑完立刻對該 bundle `lsregister -u`，並在 `docs/verification.md` 的殘留檢查加 `lsregister -dump`。
 - **聲調容錯**：讀音完全對不上時，把只差一個聲調的常用詞放進候選尾端。先量準確度與延遲。
 
 ### S8：打包與釋出

@@ -207,24 +207,104 @@ fn punctuation_is_one_cell_for_editing() {
     assert!(o.preedit == "你好。，" && o.cursor_utf16 == 3);
 }
 
-/// s3d acceptance 3 (a regression check: lexicon keys never span `_punct_` readings): no candidates
-/// right after punctuation, and the range after it is the same as without it.
+/// s3d acceptance 3 as amended by s3e: right after punctuation, space and down list that mark's
+/// candidates (the typed mark first); the syllable range after punctuation is unchanged by it.
 #[test]
 fn candidates_never_span_punctuation() {
+    let default_comma: Vec<String> = ["，", "〈", "《", "︿", "︽"].map(String::from).to_vec();
     let mut e = std();
     typ(&mut e, NIHAO);
-    let before = k(&mut e, Key::ch(',', MOD_SHIFT));
-    assert!(kk(&mut e, KeyKind::Space) == before);
-    assert!(kk(&mut e, KeyKind::Down) == before);
+    k(&mut e, Key::ch(',', MOD_SHIFT));
+    assert!(kk(&mut e, KeyKind::Space).candidates == default_comma);
+    kk(&mut e, KeyKind::Esc);
+    assert!(kk(&mut e, KeyKind::Down).candidates == default_comma);
+    kk(&mut e, KeyKind::Esc);
     let o = typ(&mut e, NIHAO);
     let o2 = kk(&mut e, KeyKind::Space);
     assert!(o2.candidates[..] == cands(&[NI, HAO])[..9] && o2.preedit == o.preedit);
-    // Cursor 0 with punctuation first: nothing to list.
+    // Cursor 0 with punctuation first: that mark's candidates.
     let mut e = std();
     k(&mut e, Key::ch(',', MOD_SHIFT));
     typ(&mut e, NIHAO);
-    let home = kk(&mut e, KeyKind::Home);
-    assert!(kk(&mut e, KeyKind::Space) == home);
+    kk(&mut e, KeyKind::Home);
+    assert!(kk(&mut e, KeyKind::Space).candidates == default_comma);
+}
+
+/// s3e acceptance 1: the built-in table (no `set_punctuation`).
+#[test]
+fn default_punctuation_candidates() {
+    let list = |c: char| {
+        let mut e = std();
+        k(&mut e, Key::ch(c, MOD_SHIFT));
+        kk(&mut e, KeyKind::Space).candidates
+    };
+    assert!(list('[').contains(&"『".to_string()) && list('[')[0] == "「");
+    assert!(list('/') == vec!["？".to_string()]);
+}
+
+/// s3e acceptance 1: a table from the shell; choosing an alternative replaces the mark, Enter commits
+/// it, and reopening lists the same candidates with the typed mark first.
+#[test]
+fn chosen_punctuation_alternative_replaces_the_mark() {
+    let mut e = std();
+    assert!(e.set_punctuation("，\t、\t《\n"));
+    typ(&mut e, NIHAO);
+    k(&mut e, Key::ch(',', MOD_SHIFT));
+    let want: Vec<String> = ["，", "、", "《"].map(String::from).to_vec();
+    assert!(kk(&mut e, KeyKind::Space).candidates == want);
+    let o = k(&mut e, plain('2'));
+    assert!(o.preedit == "你好、" && o.candidates.is_empty() && o.cursor_utf16 == 3);
+    assert!(kk(&mut e, KeyKind::Space).candidates == want);
+    kk(&mut e, KeyKind::Esc);
+    assert!(kk(&mut e, KeyKind::Enter).commit == "你好、");
+}
+
+/// s3e acceptance 1: a multi-character alternative keeps the caret right.
+#[test]
+fn multi_char_punctuation_keeps_the_caret() {
+    let mut e = std();
+    assert!(e.set_punctuation("。\t⋯⋯"));
+    typ(&mut e, NIHAO);
+    k(&mut e, Key::ch('.', MOD_SHIFT));
+    kk(&mut e, KeyKind::Space);
+    let o = k(&mut e, plain('2'));
+    assert!(o.preedit == "你好⋯⋯" && o.cursor_utf16 == 4);
+    let o = typ(&mut e, "su3");
+    let ni = typ(&mut std(), "su3").preedit;
+    assert!(o.preedit == format!("你好⋯⋯{ni}") && o.cursor_utf16 == 5);
+    let o = kk(&mut e, KeyKind::Left);
+    assert!(o.cursor_utf16 == 4);
+    let o = kk(&mut e, KeyKind::Left);
+    assert!(o.cursor_utf16 == 2);
+}
+
+/// s3e acceptance 2 at the Rust level: every invalid table is refused and keeps the previous one;
+/// blank lines and a trailing newline are fine; a repeated mark overrides.
+#[test]
+fn set_punctuation_validates_and_keeps_the_old_table() {
+    let mut e = std();
+    let comma = |e: &mut Engine| {
+        e.reset(ResetMode::Discard);
+        k(e, Key::ch(',', MOD_SHIFT));
+        kk(e, KeyKind::Space).candidates
+    };
+    assert!(e.set_punctuation("，\t、\n\n"));
+    let kept = comma(&mut e);
+    assert!(kept == vec!["，".to_string(), "、".to_string()]);
+    let too_many_lines = "，\t、\n".repeat(1001);
+    let too_big = format!("，\t{}", "、".repeat(30_000));
+    // The last one has a valid line before the invalid one: nothing of it may apply.
+    for bad in ["", "\n\n", "，\n", "，\t", "，\t、\t", "，，\t、", too_many_lines.as_str(), too_big.as_str(), "，\t《\n，\n"] {
+        assert!(!e.set_punctuation(bad), "accepted an invalid table ({} bytes)", bad.len());
+        assert!(comma(&mut e) == kept, "a refused table changed the old one");
+    }
+    assert!(e.set_punctuation("，\t、\n，\t《\n"));
+    assert!(comma(&mut e) == vec!["，".to_string(), "《".to_string()]);
+    // Success replaces the whole table: a mark the new table does not list has no alternatives
+    // left (the built-in 「 list is gone).
+    e.reset(ResetMode::Discard);
+    k(&mut e, Key::ch('[', MOD_SHIFT));
+    assert!(kk(&mut e, KeyKind::Space).candidates == vec!["「".to_string()]);
 }
 
 /// s3d acceptance 5: punctuation counts toward the 40-token limit.

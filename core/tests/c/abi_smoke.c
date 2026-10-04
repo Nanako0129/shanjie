@@ -137,12 +137,26 @@ static int run_lm(const char *dir, const char *lm, const char *missing) {
   return 0;
 }
 
+/* s3e: set_punctuation return codes; behaviour is covered by the Rust tests. */
+static int run_punct(const char *dir) {
+  ShanjieEngine *e = 0;
+  CHECK(401, shanjie_engine_new(dir, 0, &e) == 0 && e != 0);
+  CHECK(402, shanjie_engine_set_punctuation(0, "\xef\xbc\x8c\t\xe3\x80\x81\n") == 1);
+  CHECK(403, shanjie_engine_set_punctuation(e, 0) == 1);
+  CHECK(404, shanjie_engine_set_punctuation(e, "\xef\xbc\x8c\t\xe3\x80\x81\n") == 0); /* ，\t、 */
+  CHECK(405, shanjie_engine_set_punctuation(e, "\xef\xbc\x8c\n") == 2);                  /* no alternative */
+  CHECK(406, shanjie_engine_set_punctuation(e, "\xff\t\xe3\x80\x81") == 2);             /* not UTF-8 */
+  shanjie_engine_free(e);
+  return 0;
+}
+
 int main(int argc, char **argv) {
   int rc;
   if (argc != 3) return 2;
   rc = run(argv[1], 0, "su3cl3", "su3", 100);
   if (rc == 0) rc = run(argv[1], 1, "ne3hz3", "ne3", 200);
   if (rc == 0) rc = run_lm(argv[1], argv[2], "/nonexistent/shanjie-missing.sjlm");
+  if (rc == 0) rc = run_punct(argv[1]);
   shanjie_engine_free(0);
   shanjie_output_free(0);
   if (rc != 0) {
