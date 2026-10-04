@@ -1,9 +1,12 @@
 //! S3a key engine (docs/contracts/s3a.md): key events in, preedit / commit / candidates out.
 //! R2: no input text in errors or panics; types holding input text do not derive Debug.
 
-use crate::lm::{decode_segment, CappedLexicon, End, Lm, Profile};
+use crate::learn::{context_key, local_day, Learner, Record};
+use crate::learn_store::{LearnStore, Opened, StoreError, JOURNAL_MAX};
+use crate::lm::{decode_segment_learned, CappedLexicon, End, Learn, Lm, Profile};
 use crate::{decode_beam, Lexicon, NoLearning, BEAM_S1};
 use std::collections::{HashMap, HashSet};
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -170,6 +173,9 @@ struct Fixed {
     start: usize,
     end: usize,
     word: String,
+    /// S4: the text the span showed before the candidate pick, when the pick is a pending learn
+    /// (chosen while learning was on, not punctuation). Learned at commit if still on and different.
+    pre: Option<String>,
 }
 
 struct Cands {
@@ -205,6 +211,29 @@ pub struct Engine {
     fixed: Vec<Fixed>,
     display: String,
     cands: Option<Cands>,
+    /// S4: the Han tail (≤ 2 chars) of the text before the insertion point, from `set_left_context`.
+    left: String,
+    learning: bool,
+    learner: Learner,
+    store: Option<LearnStore>,
+    /// §4 bit0: the last full rewrite failed. Set by a failed full rewrite; cleared only by a
+    /// successful full rewrite or clear. While it is set, `must_rewrite` is set too.
+    write_failed: bool,
+    /// §4: the next write must be a full rewrite. Set before a forget or clear touches memory and
+    /// before every full rewrite; cleared only when a full rewrite's rename (or a clear) succeeds, so
+    /// a failure or a panic part way leaves it set.
+    must_rewrite: bool,
+    /// §4: day of the last successful full rewrite; `None` after open and after a clear, so the first
+    /// write then, and the first write of each day, is a full rewrite.
+    last_full: Option<i64>,
+    /// §4: lines appended since the last full rewrite.
+    appended: usize,
+    /// Test-purpose clock (day number); `None` uses the local calendar day.
+    today: Option<i64>,
+    /// Test-purpose injection: the next learning pass panics (contract §6.9).
+    learn_panic: bool,
+    /// Test-purpose injection: the next ⌘⌫ forget panics after changing memory (§6.13).
+    forget_panic: bool,
 }
 
 /// Base lexicon + overlay from `data_dir` (§5), same as the eval CLI default. The overlay rows are
@@ -254,7 +283,162 @@ impl Engine {
             fixed: Vec::new(),
             display: String::new(),
             cands: None,
+            left: String::new(),
+            learning: false,
+            learner: Learner::default(),
+            store: None,
+            write_failed: false,
+            must_rewrite: false,
+            last_full: None,
+            appended: 0,
+            today: None,
+            learn_panic: false,
+            forget_panic: false,
         }
+    }
+
+    // ---- S4 learning (docs/contracts/s4-learning.md) ----
+
+    /// §2: keep only the last ≤ 2 consecutive Han characters of `text` (none: empty).
+    pub fn set_left_context(&mut self, text: &str) {
+        let k = context_key(text);
+        self.left = if k == crate::learn::SENTINEL { String::new() } else { k };
+    }
+
+    /// §3: off by default. Turning it off drops pending learns; a span is learned only if the flag was
+    /// on both when it was chosen and at commit.
+    pub fn set_learning(&mut self, on: bool) {
+        self.learning = on;
+        if !on {
+            self.fixed.iter_mut().for_each(|f| f.pre = None);
+        }
+    }
+
+    /// §4: load `dir/learning.tsv` (memory pruned only; the file is tidied by the first write, which
+    /// is always a full rewrite). On error the previous learner and store stay. `must_rewrite` and
+    /// bit0 are left as they are: only a successful full rewrite or clear clears them.
+    pub fn learning_open(&mut self, dir: &Path) -> Result<Opened, StoreError> {
+        let (store, records, opened) = LearnStore::open(dir)?;
+        self.learner = Learner::from_records(records);
+        self.learner.prune(self.today());
+        self.store = Some(store);
+        self.last_full = None;
+        self.appended = 0;
+        Ok(opened)
+    }
+
+    /// §4: forget everything: memory, pending learns, files. Memory and pending learns go even when
+    /// deleting the files fails. Without a store (no successful `learning_open`) it is an error: there
+    /// is no file it could have deleted, and the shell must not show the clear as done.
+    pub fn learning_clear(&mut self) -> Result<(), StoreError> {
+        if self.store.is_some() {
+            self.must_rewrite = true;
+        }
+        self.learner.clear();
+        self.fixed.iter_mut().for_each(|f| f.pre = None);
+        let store = self.store.as_ref().ok_or(StoreError::Io)?;
+        store.clear()?;
+        // The next write starts a new file from the header by the day rule, not by finding none.
+        self.last_full = None;
+        self.appended = 0;
+        self.must_rewrite = false;
+        self.write_failed = false;
+        Ok(())
+    }
+
+    /// bit0: the last full rewrite of the learning file failed (§4).
+    pub fn learning_status(&self) -> u32 {
+        self.write_failed as u32
+    }
+
+    pub fn learner(&self) -> &Learner {
+        &self.learner
+    }
+
+    /// Test-purpose clock: day number to use instead of the local day.
+    pub fn set_today(&mut self, day: Option<i64>) {
+        self.today = day;
+    }
+
+    /// Test-purpose injection: the next commit's learning pass panics (§6.9).
+    pub fn inject_learn_panic(&mut self) {
+        self.learn_panic = true;
+    }
+
+    /// Test-purpose injection: the next ⌘⌫ forget panics right after removing the word from memory,
+    /// before the file is rewritten (§6.13).
+    pub fn inject_forget_panic(&mut self) {
+        self.forget_panic = true;
+    }
+
+    fn today(&self) -> i64 {
+        self.today.unwrap_or_else(local_day)
+    }
+
+    /// §4 write after a learning commit: append `touched` when allowed, else a full rewrite.
+    /// Without a store only memory is pruned (to keep CAPACITY).
+    fn persist(&mut self, touched: &[Record]) {
+        let today = self.today();
+        let Some(store) = &self.store else {
+            self.learner.prune(today);
+            return;
+        };
+        let append_ok = !self.must_rewrite && self.last_full == Some(today) && self.appended + touched.len() < JOURNAL_MAX;
+        if append_ok && store.append(touched).is_ok() {
+            self.appended += touched.len();
+            return;
+        }
+        self.rewrite(false);
+    }
+
+    /// §4 full rewrite: prune, then replace the file. Success clears `must_rewrite` and bit0; a
+    /// failure leaves `must_rewrite` set and sets bit0. No-op without a store.
+    fn rewrite(&mut self, forgetting: bool) {
+        let today = self.today();
+        let Some(store) = &self.store else { return };
+        self.must_rewrite = true;
+        self.learner.prune(today);
+        let r = if forgetting { store.save_forgetting(self.learner.records()) } else { store.save(self.learner.records()) };
+        if r.is_ok() {
+            self.must_rewrite = false;
+            self.write_failed = false;
+            self.last_full = Some(today);
+            self.appended = 0;
+        } else {
+            self.write_failed = true;
+        }
+    }
+
+    /// §1.2: runs after the commit text is known, inside its own `catch_unwind`: whatever fails here
+    /// only costs this learn. `display` is the committed text.
+    fn learn_commit(&mut self, display: &str) {
+        if !self.learning || self.fixed.iter().all(|f| f.pre.is_none()) {
+            return;
+        }
+        let _ = catch_unwind(AssertUnwindSafe(|| {
+            if std::mem::take(&mut self.learn_panic) {
+                panic!("injected learning panic");
+            }
+            let today = self.today();
+            let plans: Vec<_> = self
+                .fixed
+                .iter()
+                .filter_map(|f| {
+                    let pre = f.pre.as_ref().filter(|p| **p != f.word && !self.is_punct(f.start))?;
+                    let off: usize = (0..f.start).map(|i| self.token_width(i)).sum();
+                    let before: String = display.chars().take(off).collect();
+                    let ctx = context_key(&format!("{}{before}", self.left));
+                    Some((ctx, self.syls[f.start..f.end].to_vec(), f.word.clone(), pre.clone()))
+                })
+                .collect();
+            let mut touched = Vec::new();
+            for (ctx, reading, word, displaced) in &plans {
+                touched.extend(self.learner.teach(ctx, reading, word, displaced, today));
+            }
+            if !plans.is_empty() {
+                self.persist(&touched);
+            }
+        }));
     }
 
     /// S2c: read the model at `path` and `data_dir/overlay-add.tsv`, build the capped lexicon with the
@@ -361,6 +545,7 @@ impl Engine {
     }
 
     fn clear_all(&mut self) {
+        self.left.clear();
         self.syls.clear();
         self.cursor = 0;
         self.pend = [None; 3];
@@ -426,6 +611,8 @@ impl Engine {
     /// the sentence end when there is none. Fixed words score with `lp_F`, the capped score under their reading.
     fn refresh_lm(&mut self, st: &LmState) -> Result<(), EngineError> {
         let lam = self.profile.lambda();
+        // The clock (a libc time conversion) is read only when a record could use it.
+        let today = if self.learner.is_empty() { 0 } else { self.today() };
         let mut lp_fixed = Vec::with_capacity(self.fixed.len());
         for f in &self.fixed {
             // Punctuation has no reading in the lexicon; 0.0 only keeps `path` aligned (s3d §4).
@@ -450,8 +637,12 @@ impl Engine {
                     Some(f) if !self.is_punct(f.start) => End::Next { word: &f.word, lp: lp_fixed[gap] },
                     _ => End::Eos,
                 };
-                let best = decode_segment(&st.capped, &self.syls[from..to], &st.lm, lam, prev, end, BEAM_S1)
-                    .map_err(|_| EngineError::Internal)?;
+                let before = format!("{}{out}", self.left);
+                let learn = (!self.learner.is_empty()).then(|| Learn { learner: &self.learner, before: &before, today });
+                let best = decode_segment_learned(
+                    &st.capped, &self.syls[from..to], &st.lm, lam, prev, end, BEAM_S1, learn.as_ref(),
+                )
+                .map_err(|_| EngineError::Internal)?;
                 for (w, lp) in &best.first().ok_or(EngineError::Internal)?.1 {
                     out.push_str(w);
                     path.push((w.to_string(), *lp, false));
@@ -476,6 +667,7 @@ impl Engine {
     /// Commit the whole composition and clear all state.
     fn take_commit(&mut self) -> String {
         let s = std::mem::take(&mut self.display);
+        self.learn_commit(&s);
         self.clear_all();
         s
     }
@@ -483,6 +675,11 @@ impl Engine {
     fn dispatch(&mut self, k: Key) -> Result<Output, EngineError> {
         let m = k.modifiers;
         let is_char = k.kind == KeyKind::Char;
+        // §1.5: ⌘⌫ with candidates open forgets the highlighted word (before rule 1 passes ⌘ keys on).
+        if k.kind == KeyKind::Backspace && m & MOD_COMMAND != 0 && self.cands.is_some() {
+            self.forget_highlighted()?;
+            return self.handled();
+        }
         let ctrl_bs = is_char && k.ch == '\\' && m == MOD_CONTROL;
         // 1: pass through, no state change.
         if m & (MOD_OPTION | MOD_COMMAND | MOD_CAPSLOCK) != 0 || (m & MOD_CONTROL != 0 && !ctrl_bs) {
@@ -628,7 +825,7 @@ impl Engine {
         });
         self.syls.insert(c, reading);
         if let Some(word) = fixed_word {
-            self.fixed.push(Fixed { start: c, end: c + 1, word });
+            self.fixed.push(Fixed { start: c, end: c + 1, word, pre: None });
             self.fixed.sort_by_key(|f| f.start);
         }
         self.cursor += 1;
@@ -700,13 +897,58 @@ impl Engine {
         }
     }
 
+    /// S4 §1.2: what to remember as the text before this pick, `None` for punctuation. Re-picking the
+    /// exact span of an earlier pick keeps that pick's original text.
+    fn pre_pick(&self, start: usize, end: usize) -> Option<String> {
+        if self.is_punct(start) {
+            return None;
+        }
+        if let Some(f) = self.fixed.iter().find(|f| f.start == start && f.end == end && f.pre.is_some()) {
+            return f.pre.clone();
+        }
+        let off: usize = (0..start).map(|i| self.token_width(i)).sum();
+        let len: usize = (start..end).map(|i| self.token_width(i)).sum();
+        Some(self.display.chars().skip(off).take(len).collect())
+    }
+
+    /// §1.5: drop the highlighted candidate's records for its reading (all keys), then re-decode.
+    /// With a store the file is always fully rewritten (§4): a record pruned from memory on load can
+    /// still be in the file, so "memory changed" says nothing about the file. `must_rewrite` is set
+    /// first, so a panic or failure part way makes the next write a full rewrite too.
+    fn forget_highlighted(&mut self) -> Result<(), EngineError> {
+        let Some(c) = &self.cands else { return Ok(()) };
+        let Some((word, l)) = c.list.get(c.sel).cloned() else { return Ok(()) };
+        let (start, end) = if self.cursor == 0 { (0, l) } else { (self.cursor - l, self.cursor) };
+        if self.is_punct(start) {
+            return Ok(());
+        }
+        if self.store.is_some() {
+            self.must_rewrite = true;
+        }
+        // A pending learn of the same word would teach it again at the next commit and append it
+        // back (§1.5), as learning_clear's pending-learn drop prevents for clear.
+        let syls = &self.syls;
+        for f in self.fixed.iter_mut() {
+            if f.word == word && syls[f.start..f.end] == syls[start..end] {
+                f.pre = None;
+            }
+        }
+        self.learner.forget(&self.syls[start..end], &word);
+        if std::mem::take(&mut self.forget_panic) {
+            panic!("injected forget panic");
+        }
+        self.rewrite(true);
+        self.refresh()
+    }
+
     /// Fix candidate `idx` over its range, close candidates, recompute.
     fn choose(&mut self, idx: usize) -> Result<(), EngineError> {
         let Some(c) = self.cands.take() else { return Ok(()) };
         let Some((word, l)) = c.list.get(idx).cloned() else { return Ok(()) };
         let (start, end) = if self.cursor == 0 { (0, l) } else { (self.cursor - l, self.cursor) };
+        let pre = self.learning.then(|| self.pre_pick(start, end)).flatten();
         self.fixed.retain(|f| !(f.start < end && start < f.end));
-        self.fixed.push(Fixed { start, end, word });
+        self.fixed.push(Fixed { start, end, word, pre });
         self.fixed.sort_by_key(|f| f.start);
         self.refresh()
     }

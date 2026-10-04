@@ -4,6 +4,8 @@
 pub mod engine;
 pub mod eval;
 pub mod ffi;
+pub mod learn;
+pub mod learn_store;
 pub mod lm;
 
 use std::collections::HashMap;

@@ -335,6 +335,103 @@ pub unsafe extern "C" fn shanjie_engine_set_punctuation(engine: *mut ShanjieEngi
     })
 }
 
+// S4 (docs/contracts/s4-learning.md §2–§4): see core/include/shanjie.h for the semantics.
+
+/// # Safety
+/// `engine` is NULL or a live handle; `utf8` is NULL or a NUL-terminated string.
+#[no_mangle]
+pub unsafe extern "C" fn shanjie_engine_set_left_context(engine: *mut ShanjieEngine, utf8: *const c_char) -> i32 {
+    guard(|| {
+        if engine.is_null() {
+            return SHANJIE_ERR_NULL;
+        }
+        // SAFETY: live handle, single-threaded use (§6).
+        let e = unsafe { &mut (*engine).0 };
+        if utf8.is_null() {
+            e.set_left_context("");
+            return SHANJIE_OK;
+        }
+        // SAFETY: NUL-terminated per the caller contract.
+        match unsafe { CStr::from_ptr(utf8) }.to_str() {
+            Ok(s) => {
+                e.set_left_context(s);
+                SHANJIE_OK
+            }
+            Err(_) => {
+                e.set_left_context("");
+                SHANJIE_ERR_INVALID
+            }
+        }
+    })
+}
+
+/// # Safety
+/// `engine` is NULL or a live handle.
+#[no_mangle]
+pub unsafe extern "C" fn shanjie_engine_set_learning(engine: *mut ShanjieEngine, enabled: u32) -> i32 {
+    guard(|| {
+        if engine.is_null() {
+            return SHANJIE_ERR_NULL;
+        }
+        if enabled > 1 {
+            return SHANJIE_ERR_INVALID;
+        }
+        // SAFETY: live handle, single-threaded use (§6).
+        unsafe { &mut (*engine).0 }.set_learning(enabled == 1);
+        SHANJIE_OK
+    })
+}
+
+/// # Safety
+/// `engine` is NULL or a live handle; `dir` is NULL or a NUL-terminated string.
+#[no_mangle]
+pub unsafe extern "C" fn shanjie_engine_learning_open(engine: *mut ShanjieEngine, dir: *const c_char) -> i32 {
+    guard(|| {
+        if engine.is_null() || dir.is_null() {
+            return SHANJIE_ERR_NULL;
+        }
+        // SAFETY: non-NULL, NUL-terminated per the caller contract.
+        let Ok(dir) = unsafe { CStr::from_ptr(dir) }.to_str() else {
+            return SHANJIE_ERR_INVALID;
+        };
+        // SAFETY: live handle, single-threaded use (§6).
+        match unsafe { &mut (*engine).0 }.learning_open(Path::new(dir)) {
+            Ok(_) => SHANJIE_OK,
+            Err(_) => SHANJIE_ERR_LOAD,
+        }
+    })
+}
+
+/// # Safety
+/// `engine` is NULL or a live handle.
+#[no_mangle]
+pub unsafe extern "C" fn shanjie_engine_learning_clear(engine: *mut ShanjieEngine) -> i32 {
+    guard(|| {
+        if engine.is_null() {
+            return SHANJIE_ERR_NULL;
+        }
+        // SAFETY: live handle, single-threaded use (§6).
+        match unsafe { &mut (*engine).0 }.learning_clear() {
+            Ok(()) => SHANJIE_OK,
+            Err(_) => SHANJIE_ERR_LOAD,
+        }
+    })
+}
+
+/// # Safety
+/// `engine` is NULL or a live handle; `flags` is NULL or writable.
+#[no_mangle]
+pub unsafe extern "C" fn shanjie_engine_learning_status(engine: *mut ShanjieEngine, flags: *mut u32) -> i32 {
+    guard(|| {
+        if engine.is_null() || flags.is_null() {
+            return SHANJIE_ERR_NULL;
+        }
+        // SAFETY: live handle; `flags` non-NULL and writable per the caller contract.
+        unsafe { *flags = (*engine).0.learning_status() };
+        SHANJIE_OK
+    })
+}
+
 /// # Safety
 /// `output` is NULL or an output from this library not yet freed.
 #[no_mangle]
