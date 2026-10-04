@@ -15,6 +15,8 @@ import urllib.request
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "reference", "proto"))
+sys.path.insert(0, os.path.join(ROOT, "tools"))
+import build_sandhi  # noqa: E402
 import ime  # noqa: E402
 
 BASE = os.path.join(ROOT, "data", "lexicon", "mcbpmf-data.txt")
@@ -32,6 +34,9 @@ SOURCES = {  # 檔名: (網址, SHA-256)；Wikimedia 2026-10-01 dump 的 sha1 �
                      "a0ca1601c70648cf48b33c3c6210ccbecc5c7eead4b4c3daf76587ba2c03582b"),
 }
 SCORE = {2: -7.17149945, 3: -7.04116568, 4: -6.60980192}   # 基底同字數詞條分數的第 25 百分位；build() 會重算核對
+# 變調列的分數＝主要列 − 這個值（log10，約 1/3）。變調列常和別的詞共用讀音（同一成語的異體寫法、罕見詞），
+# 同分時由檔案順序決定誰排第一；降一點讓「已經有這個讀音的詞」贏，變調列只在沒有競爭者時才排第一。
+VARIANT_PENALTY = 0.5
 HAN = re.compile(r"^[一-鿿]{2,4}$")
 
 
@@ -49,6 +54,36 @@ def fetch(name):
     if h.hexdigest() != sha:
         sys.exit(f"SHA-256 mismatch for source {name}; delete {path} to refetch, or the dump changed upstream")
     return path
+
+
+HE4_PREV = set("唱倡附應酬賡")   # 「和」前一字是這些 → ㄏㄜˋ（唱和、附和）；其他 ㄏㄢˋ → ㄏㄜˊ（疊加層是詞條標題，多為人名地名）
+HE4_ANY = set("唱倡")            # 契約 §1 的例子「一唱百和」「一倡一和」讀 ㄏㄜˋ，但「和」前一字是百、一：「和」前面任何位置有唱、倡也算
+
+
+def normalize(word, syls):
+    """S2r-2 §1.1：to_syllables 猜出來的讀音改回審訂表的本調（一 ㄧ、不 ㄅㄨˋ、法 ㄈㄚˇ、和 ㄏㄢˋ→ㄏㄜˊ／ㄏㄜˋ）。"""
+    out = list(syls)
+    for i, ch in enumerate(word):
+        if ch == "一" and out[i] in ("ㄧˊ", "ㄧˋ"):
+            out[i] = "ㄧ"
+        elif ch == "不" and out[i] == "ㄅㄨˊ":
+            out[i] = "ㄅㄨˋ"
+        elif ch == "法" and out[i] == "ㄈㄚˋ":
+            out[i] = "ㄈㄚˇ"
+        elif ch == "和" and out[i] == "ㄏㄢˋ" and word[i + 1:i + 2] in ("麵", "麪", "泥"):
+            out[i] = "ㄏㄨㄛˊ"                      # 審訂表：和麵、和泥
+        elif ch == "和" and out[i] == "ㄏㄢˋ":
+            out[i] = "ㄏㄜˋ" if i > 0 and (word[i - 1] in HE4_PREV or HE4_ANY & set(word[:i])) else "ㄏㄜˊ"
+    return out
+
+
+def sandhi_variant(word, syls):
+    """§1.2：主要列的「一」「不」照 build_sandhi.other_reading 換成變調；沒有任何位置換就回 None。"""
+    out = list(syls)
+    for i, ch in enumerate(word):
+        if ch in "一不":
+            out[i] = build_sandhi.other_reading(word, syls, i) or out[i]
+    return out if out != list(syls) else None
 
 
 def build():
@@ -81,7 +116,12 @@ def build():
         syls = base.to_syllables(w)
         if syls is None:
             continue
-        rows.append(f"{'-'.join(syls)}\t{w}\t{SCORE[len(w)]!r}\t{'wikt' if w in wikt else 'zhwiki'}\n")
+        syls = normalize(w, syls)
+        src = "wikt" if w in wikt else "zhwiki"
+        rows.append(f"{'-'.join(syls)}\t{w}\t{SCORE[len(w)]!r}\t{src}\n")
+        var = sandhi_variant(w, syls)
+        if var:                                     # 主要列在前，變調列緊接其後（同來源，分數 − VARIANT_PENALTY）
+            rows.append(f"{'-'.join(var)}\t{w}\t{round(SCORE[len(w)] - VARIANT_PENALTY, 8)!r}\t{src}\n")
     assert not {r.split("\t")[1] for r in rows} & words   # 疊加層和基底的詞表交集必須是 0
     return rows
 
