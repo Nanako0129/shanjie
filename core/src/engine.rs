@@ -611,7 +611,8 @@ impl Engine {
     /// the sentence end when there is none. Fixed words score with `lp_F`, the capped score under their reading.
     fn refresh_lm(&mut self, st: &LmState) -> Result<(), EngineError> {
         let lam = self.profile.lambda();
-        let today = self.today();
+        // The clock (a libc time conversion) is read only when a record could use it.
+        let today = if self.learner.is_empty() { 0 } else { self.today() };
         let mut lp_fixed = Vec::with_capacity(self.fixed.len());
         for f in &self.fixed {
             // Punctuation has no reading in the lexicon; 0.0 only keeps `path` aligned (s3d §4).
@@ -923,6 +924,14 @@ impl Engine {
         }
         if self.store.is_some() {
             self.must_rewrite = true;
+        }
+        // A pending learn of the same word would teach it again at the next commit and append it
+        // back (§1.5), as learning_clear's pending-learn drop prevents for clear.
+        let syls = &self.syls;
+        for f in self.fixed.iter_mut() {
+            if f.word == word && syls[f.start..f.end] == syls[start..end] {
+                f.pre = None;
+            }
         }
         self.learner.forget(&self.syls[start..end], &word);
         if std::mem::take(&mut self.forget_panic) {

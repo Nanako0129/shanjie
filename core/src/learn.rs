@@ -40,7 +40,8 @@ pub fn context_key(prefix: &str) -> String {
 }
 
 /// One learned record (§1.3, §4). `day` is the local calendar day as days since 1970-01-01.
-#[derive(Clone, Debug, PartialEq)]
+/// No `Debug`: it holds learned words (s3a §6 R2, types holding input text).
+#[derive(Clone, PartialEq)]
 pub struct Record {
     pub context: String,
     pub reading: Vec<String>,

@@ -33,8 +33,8 @@ pub const CORRUPT: &str = "learning.tsv.corrupt";
 pub const HEADER: &str = "#shanjie-learning v1";
 pub const MAX_BYTES: u64 = 16 * 1024 * 1024;
 /// Lines appended since the last full rewrite that force the next write to be a full rewrite (§4):
-/// bounds how many superseded lines the file and the load carry. A learning Enter appends at most 3
-/// lines, so at least 341 appending Enters pass between two rewrites.
+/// bounds how many superseded lines the file and the load carry. Each re-picked span appends at most
+/// 3 lines (taught, displaced, global); one Enter can carry several spans.
 pub const JOURNAL_MAX: usize = 1024;
 
 // <fcntl.h> values. std has no names for them and the crate has no libc dependency; the shipping
