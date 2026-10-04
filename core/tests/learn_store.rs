@@ -108,7 +108,7 @@ fn save_then_open_round_trips_with_0600_and_no_temporary_left() {
     assert!(text.lines().skip(1).all(|l| l.split('\t').count() == 5), "five fields per line");
     let (_, records, opened) = LearnStore::open(&dir).unwrap();
     assert_eq!(opened, Opened::Loaded { skipped: 0 });
-    assert_eq!(records, sample());
+    assert!(records == sample(), "records differ (contents not printed: R2)");
 }
 
 #[test]
@@ -157,11 +157,11 @@ fn bad_lines_are_skipped_one_by_one() {
     fs::write(dir.join(FILE), bytes).unwrap();
     let (_, records, opened) = LearnStore::open(&dir).unwrap();
     assert_eq!(opened, Opened::Loaded { skipped: 9 });
-    assert_eq!(records, vec![
+    assert!(records == vec![
         rec("中", "ㄅㄚˇ", "把", 1.0, 20_000),
         rec("^", "ㄅㄚˇ", "把", 0.5, 20_001),
         rec("", "ㄅㄚˇ", "把", 0.5, 20_001),
-    ]);
+    ], "records differ (contents not printed: R2)");
 }
 
 #[test]
@@ -238,7 +238,7 @@ fn symlink_in_place_of_the_temporary_is_not_written_through() {
     store.save(&sample()).unwrap();
     assert_eq!(fs::read(&target).unwrap(), b"keep");
     assert!(!dir.join(TMP).exists());
-    assert_eq!(LearnStore::open(&dir).unwrap().1, sample());
+    assert!(LearnStore::open(&dir).unwrap().1 == sample(), "records differ (contents not printed: R2)");
 }
 
 #[test]
@@ -319,7 +319,7 @@ fn records_100_days_old_are_pruned_across_save_and_load() {
     learner.prune(today);
     store.save(learner.records()).unwrap();
     let (_, records, _) = LearnStore::open(&dir).unwrap();
-    assert_eq!(records, vec![rec("中", "ㄅㄚˇ", "吧", 1.0, today)]);
+    assert!(records == vec![rec("中", "ㄅㄚˇ", "吧", 1.0, today)], "records differ (contents not printed: R2)");
 }
 
 /// §6.13: the same record appended twice, then reopened: one record, the later weight and day.
@@ -337,7 +337,7 @@ fn append_twice_then_open_keeps_the_last_line() {
     let mut want = sample();
     want[0] = rec("管把", "ㄅㄚˇ", "把", 3.5, 20_020);
     want.push(rec("中", "ㄅㄚˇ", "吧", 1.0, 20_020));
-    assert_eq!(records, want);
+    assert!(records == want, "records differ (contents not printed: R2)");
 }
 
 /// §4: append never creates the file and never takes it past 16 MB.

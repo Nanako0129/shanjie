@@ -874,6 +874,27 @@ fn store_commit_writes_the_file_and_reopen_restores() {
     assert_eq!(n_records(&reopen(&dir).0), 0);
     let _ = std::fs::remove_dir_all(&dir);
 }
+/// Code review 2026-10-05: ⌘⌫ on a word picked in this same composition must also drop that pick's
+/// pending learn, or the next Enter teaches the forgotten word again and appends it back to disk.
+#[test]
+fn store_forget_then_enter_does_not_learn_the_word_back() {
+    let dir = tmp_dir("forget-enter");
+    let mut e = tiny(TINY, TINY);
+    e.learning_open(&dir).unwrap();
+    type_syls(&mut e, "ㄒㄧㄣ");
+    pick(&mut e, 1, 1, "欣"); // a re-pick over the default 鑫: learned at commit unless dropped
+    let o = e.key(k(KeyKind::Space)).unwrap(); // the same span's candidates again
+    highlight(&mut e, o, "欣");
+    e.key(Key { kind: KeyKind::Backspace, ch: '\0', modifiers: MOD_COMMAND }).unwrap();
+    e.key(k(KeyKind::Esc)).unwrap(); // closes the candidates, keeps the composition
+    assert_eq!(e.key(k(KeyKind::Enter)).unwrap().commit, "欣");
+    let mut fresh = tiny(TINY, TINY);
+    fresh.learning_open(&dir).unwrap();
+    assert!(fresh.learner().records().iter().all(|r| r.word != "欣"), "the forgotten word was learned back");
+    let text = std::fs::read_to_string(dir.join("learning.tsv")).unwrap_or_default();
+    assert!(!text.contains('欣'), "a line of the forgotten word is on disk");
+    let _ = std::fs::remove_dir_all(&dir);
+}
 #[test]
 fn store_learning_off_then_enter_writes_nothing_and_clear_removes_the_file() {
     let dir = tmp_dir("off");
@@ -1216,7 +1237,7 @@ fn p95(mut t: Vec<std::time::Duration>) -> std::time::Duration {
 /// CAPACITY); the timed Enters after it append (revision one, §4 and §11).
 #[test]
 fn perf_full_store_per_key_and_enter_with_write() {
-    use std::time::{Duration, Instant};
+    use std::time::Instant;
     let rows = dev302();
     let lex = &shared().lex;
     let mut spans: Vec<Syls> = Vec::new();
@@ -1316,5 +1337,5 @@ fn perf_full_store_per_key_and_enter_with_write() {
     );
     let _ = std::fs::remove_dir_all(&dir);
     #[cfg(not(debug_assertions))]
-    assert!(pk < Duration::from_millis(16) && pe < Duration::from_millis(16), "p95 over 16 ms");
+    assert!(pk < std::time::Duration::from_millis(16) && pe < std::time::Duration::from_millis(16), "p95 over 16 ms");
 }

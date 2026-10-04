@@ -422,19 +422,33 @@ pub fn decode_segment_learned<'a>(
                     }
                 }
             }
-            let mut by_ctx: HashMap<String, Vec<(String, f64)>> = HashMap::new();
+            // Each hypothesis's learned hits depend only on its context key, not on the entry: look
+            // them up once per hypothesis (shared by key) before trying the entries.
+            let hits_of: Vec<usize>;
+            let mut hits: Vec<Vec<(&str, f64)>> = Vec::new();
+            if let Some(ln) = learned {
+                let mut by_ctx: HashMap<String, usize> = HashMap::new();
+                hits_of = hyps[i - l]
+                    .iter()
+                    .map(|h| {
+                        let key = context_key(&format!("{before_tail}{}", h.surface));
+                        *by_ctx.entry(key).or_insert_with_key(|k| {
+                            hits.push(ln.learner.lookup(k, span, ln.today));
+                            hits.len() - 1
+                        })
+                    })
+                    .collect();
+            } else {
+                hits_of = Vec::new();
+            }
             for (p, extra) in entries {
                 let e = &lex.ents[p];
                 let (word, lp0) = (lex.word_of(e), e.score);
                 let (wid, pb0) = (lm.word_id(word), pow10(lp0));
-                for h in &hyps[i - l] {
+                for (hi, h) in hyps[i - l].iter().enumerate() {
                     let (mut lp, mut pb) = (lp0, pb0);
-                    if let Some(ln) = learned {
-                        let key = context_key(&format!("{before_tail}{}", h.surface));
-                        let hits = by_ctx.entry(key).or_insert_with_key(|k| {
-                            ln.learner.lookup(k, span, ln.today).into_iter().map(|(w, x)| (w.to_string(), x)).collect()
-                        });
-                        match hits.iter().find(|(w, _)| w == word) {
+                    if learned.is_some() {
+                        match hits[hits_of[hi]].iter().find(|(w, _)| *w == word) {
                             Some(&(_, w)) => {
                                 let boosted = best + LEARN_EPS * (w / (w + 1.0));
                                 if boosted > lp {

@@ -80,7 +80,8 @@ int32_t shanjie_engine_set_left_context(ShanjieEngine *engine, const char *utf8)
 int32_t shanjie_engine_set_learning(ShanjieEngine *engine, uint32_t enabled);
 // learning_open: dir is the learning directory (.../Application Support/shanjie); created 0700 if
 //   missing. A missing file starts empty; a corrupt one is renamed learning.tsv.corrupt and starts
-//   empty (both 0). 3 on I/O failure or a directory not owned by the user.
+//   empty (both 0). 1 when engine or dir is NULL; 2 when dir is not UTF-8; 3 on I/O failure or a
+//   directory not owned by the user.
 int32_t shanjie_engine_learning_open(ShanjieEngine *engine, const char *dir);
 // Forgetting: KEY with COMMAND (bit3) and kind BACKSPACE (4) while candidates are open removes the
 //   highlighted word's learned records for that reading (all contexts) and re-decodes; the output

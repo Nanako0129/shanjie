@@ -57,7 +57,9 @@ final class CoreEngine {
 
     func learningClear() -> Int32 { shanjie_engine_learning_clear(handle) }
 
-    /// bit0: the last write of the learning file failed. `nil` on a non-zero code.
+    /// bit0: a full rewrite of the learning file failed and no full rewrite or clear has succeeded
+    /// since (S4 section 4; a failed append that falls back to a successful rewrite does not set it).
+    /// `nil` on a non-zero code.
     func learningStatus() -> UInt32? {
         var flags: UInt32 = 0
         return shanjie_engine_learning_status(handle, &flags) == 0 ? flags : nil
