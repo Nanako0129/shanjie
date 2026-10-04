@@ -437,3 +437,10 @@
 - 修法（使用者同意後執行）：重啟 `TextInputMenuAgent`，再強制結束 `TextInputSwitcher`（它不理 SIGTERM，系統會按需要再開），之後恢復正常。兩步連著做，分不出是哪一步。根因未知。
 - 之後可以考慮在說明文件放一段「Caps Lock 切換失效時」的排除步驟，因為使用者很容易以為是輸入法的問題。
 - **更正（同日稍晚，再次發生）**：重啟上面那兩個程序、`CursorUIViewService`，關掉 Parsec、RustDesk，先按一次 Ctrl+Space，這些都沒用；負載降到平常水準仍然失效。所以第一次「重啟後恢復」應該是巧合，重啟不是修法。新觀察：失效時 Ctrl+Space 與選單切換都正常，只有 Caps Lock 這條路徑壞；輸入法選單裡目前輸入法那一段只剩「…………」。使用者說 RustDesk 遠端連線時一定會發生。Grok 與網路搜尋整理的社群紀錄（Apple 中文／日文社群、V2EX、Stack Exchange）：睡眠喚醒後或 Synergy 類跨機輸入工具使用後出現，要登出再登入才恢復。善解的 Info.plist 有宣告 `TICapsLockLanguageSwitchCapable`，和小麥相同，可以排除。修飾鍵沒有被改過。
+
+## 2026-10-05：S4 修訂一（就地追加）的實作與驗收
+
+- **實作**：security-executor（d0f05a8、0a68f39）照契約 §4 做追加路徑、完整重寫的觸發條件、`must_rewrite`、bit0、日期規則；§6.13 的測試全部到位，四個指定突變都以斷言失敗。
+- **`/code-review`（high）**：一項隱私錯誤：在同一段組字裡選了某個詞再按 ⌘⌫ 忘記，接著按 Enter，待學的選字會把剛忘記的詞再學回去、寫回檔案。另有 `Record` 帶 `Debug`（違反 R2）、熱路徑重複配置字串、每次解碼都讀時鐘、一個錯誤註解、標頭與殼的註解不一致、契約 §1.4 的加分公式沒跟上程式。executor 被使用者停掉，main 直接修（a730a64），測試掛勾留在 `Engine` 延後（C ABI 與殼都碰不到）。新測試 `store_forget_then_enter_does_not_learn_the_word_back`，拿掉修正就以斷言失敗。
+- **fresh verifier**：CONFIRMED。測試全過；7 個自己做的突變全部被斷言抓到；保留集 main 與本分支 chat 175／227、formal 181／227、oracle@64 226，第一名輸出雜湊相同（解碼迴圈改過，逐列不變）。建議 CI 的 C 冒煙測試也帶學習目錄（8a17ca8 採納）；「效能測試沒固定日期」不成立（`engine()` 已 `set_today(Some(DAY))`）。
+- **§6.14 正式量測**（main，乾淨工作樹，負載約 7，連跑三次，store 50,000 筆）：每鍵 p95 1.65–1.77 ms（空學習檔 1.39–1.43 ms）；帶改選的 Enter p95 0.17–0.20 ms（修訂前 16.0–19.7 ms）；開啟後第一次寫入 13.3–14.7 ms、⌘⌫ 忘記 12.8–18.1 ms（兩者只報不擋）；載入 40–42 ms；RSS +24–28 MB。
