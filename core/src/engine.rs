@@ -26,11 +26,17 @@ const KEYS_ETEN: &str = "bpmfdtnlvkhg7c,./j;'sexuaorwiqzy890-=";
 const TONE_MARKS: [&str; 5] = ["", "ˊ", "ˇ", "ˋ", "˙"];
 const TONE_KEYS_STANDARD: [char; 4] = ['6', '3', '4', '7'];
 const TONE_KEYS_ETEN: [char; 4] = ['2', '3', '4', '1'];
-/// Shift + key -> punctuation (§4).
-const SHIFT_PUNCT: [(char, char); 10] = [
+/// Shift + key -> punctuation (§4). The bracket row follows Apple's Zhuyin
+/// (com.apple.inputmethod.TCIM.Zhuyin), measured 2026-10-05 with a key probe that typed each key into
+/// its own window: ⇧[ 『, ⇧] 』, ⇧\ ｜, ⇧' “, ⇧= ＋, ⇧` ～.
+const SHIFT_PUNCT: [(char, char); 13] = [
     (',', '，'), ('.', '。'), ('/', '？'), ('1', '！'), (';', '：'),
-    ('[', '「'), (']', '」'), ('9', '（'), ('0', '）'), ('`', '～'),
+    ('[', '『'), (']', '』'), ('9', '（'), ('0', '）'), ('`', '～'),
+    ('\\', '｜'), ('\'', '“'), ('=', '＋'),
 ];
+/// Unshifted key -> punctuation, from the same probe: [ 「, ] 」, \ 、, ' ‘, = ＝, ` ·. Only when the key is
+/// neither a Zhuyin nor a tone key in the current layout (Eten uses ' and = for Zhuyin).
+const PLAIN_PUNCT: [(char, char); 6] = [('[', '「'), (']', '」'), ('\\', '、'), ('\'', '‘'), ('=', '＝'), ('`', '·')];
 
 /// s3d §2: punctuation in the composition is a one-cell token under this reserved reading prefix
 /// (`_punct_，`); the lexicon has no such reading. Each one is also a length-1 fixed word.
@@ -40,14 +46,20 @@ const PUNCT_PREFIX: &str = "_punct_";
 /// data/lexicon/mcbpmf-data.txt (McBopomofo, MIT): ， `_punctuation_Standard_<` lines 1093-1097;
 /// 。 `_punctuation_Standard_>` 1098-1103; ： `_punctuation_:` 1044-1045; 「 `_punctuation_{`
 /// 2302-2308 and 」 `_punctuation_}` 2313-2319 (`_punctuation_[`/`]` hold only 「」); 、
-/// `_punctuation_\\` 1105-1106. The other marks have no alternatives there.
-const DEFAULT_PUNCT: [(char, &[&str]); 6] = [
+/// `_punctuation_\\` 1105-1106. The other marks have no alternatives there. 『』 (now Shift+[ / Shift+])
+/// and the quotes ‘“ (plain and Shift+') are ours, so a mark without Apple's table still reaches its
+/// pair and the closing quotes ’”.
+const DEFAULT_PUNCT: [(char, &[&str]); 10] = [
     ('，', &["〈", "《", "︿", "︽"]),
     ('。', &["．", "〉", "》", "﹀", "︾"]),
     ('：', &["；"]),
     ('「', &["『", "《", "〔", "｛", "〈", "【", "〖"]),
     ('」', &["』", "》", "〕", "｝", "〉", "】", "〗"]),
     ('、', &["＼", "／"]),
+    ('『', &["「", "《", "〔", "｛", "〈", "【", "〖"]),
+    ('』', &["」", "》", "〕", "｝", "〉", "】", "〗"]),
+    ('‘', &["’"]),
+    ('“', &["”"]),
 ];
 /// s3e §3 limits on a table passed to `set_punctuation`.
 const PUNCT_TABLE_MAX_BYTES: usize = 64 * 1024;
@@ -690,6 +702,8 @@ impl Engine {
             Some('、')
         } else if is_char && m == MOD_SHIFT {
             SHIFT_PUNCT.iter().find(|(c, _)| *c == k.ch).map(|(_, p)| *p)
+        } else if is_char && m == 0 && self.layout.symbol_of(k.ch).is_none() && self.layout.tone_of(k.ch).is_none() {
+            PLAIN_PUNCT.iter().find(|(c, _)| *c == k.ch).map(|(_, p)| *p)
         } else {
             None
         };
