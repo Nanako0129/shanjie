@@ -14,6 +14,7 @@
 //! and no record ever leaves this module except as data.
 
 use crate::learn::{context_key, Record, GLOBAL};
+use std::fmt::Write as _;
 use std::fs::{self, DirBuilder, File, OpenOptions, Permissions};
 use std::io::{ErrorKind, Read, Write};
 use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt};
@@ -176,8 +177,10 @@ impl LearnStore {
         let mut buf = String::with_capacity(64 + records.len() * 40);
         buf.push_str(HEADER);
         buf.push('\n');
+        // Straight into `buf`: a String per record took 2-3 times as long at CAPACITY (measured
+        // 2026-10-05), on every learning Enter.
         for r in records.iter().filter(|r| valid(r)) {
-            buf.push_str(&format!("{}\t{}\t{}\t{}\t{}\n", r.context, r.reading.join("-"), r.word, r.weight, r.day));
+            let _ = writeln!(buf, "{}\t{}\t{}\t{}\t{}", r.context, r.reading.join("-"), r.word, r.weight, r.day);
         }
         let tmp = self.dir.join(TMP);
         remove(&tmp)?;

@@ -5,7 +5,7 @@ import XCTest
 
 /// S4 in the shell (docs/contracts/s4-learning.md section 6.11-6.13, shell parts): left context,
 /// privacyGate, menu and the learning directory, through the real C core. Learning directories
-/// are temporary; tests marked post-integration skip until `Integration.learningCore` is true.
+/// are temporary.
 @MainActor
 final class LearningTests: XCTestCase {
     private var resources: URL!
@@ -22,10 +22,6 @@ final class LearningTests: XCTestCase {
                           layoutStore: MemoryLayoutStore(), learningDirectory: learning)
         XCTAssertNotNil(shell.engine)
         return shell
-    }
-
-    private func requireCore() throws {
-        try XCTSkipUnless(Integration.learningCore, "post-integration: needs the executor's learning core")
     }
 
     // MARK: 6.11 left context (string processing, range, timing)
@@ -188,7 +184,7 @@ final class LearningTests: XCTestCase {
         XCTAssertTrue(url.path.hasSuffix("/Library/Application Support/shanjie"))
     }
 
-    // MARK: post-integration (main enables with Integration.learningCore)
+    // MARK: through the learning core
 
     /// Types ㄋㄧˇ, opens the candidates, picks the second one (a re-pick) and leaves the composition
     /// open; returns the picked word.
@@ -201,7 +197,6 @@ final class LearningTests: XCTestCase {
     }
 
     func testRepickThenEnterStoresARecord() throws {
-        try requireCore()
         let dir = TestLearning.directory()
         let c = Controller(makeShell(learning: dir))
         c.session.activate()
@@ -215,7 +210,6 @@ final class LearningTests: XCTestCase {
     }
 
     func testGateTurningOnMidCompositionStoresNothing() throws {
-        try requireCore()
         let dir = TestLearning.directory(), gate = Gate()
         let c = Controller(makeShell(gate: gate, learning: dir))
         c.session.activate()
@@ -226,7 +220,6 @@ final class LearningTests: XCTestCase {
     }
 
     func testPickWhileGatedThenOpenedStoresNothing() throws {
-        try requireCore()
         let dir = TestLearning.directory(), gate = Gate()
         let c = Controller(makeShell(gate: gate, learning: dir))
         c.session.activate()
@@ -239,7 +232,6 @@ final class LearningTests: XCTestCase {
 
     /// Section 6.8 (XCTest part): secure input on mid-composition, then each reset path.
     func testResetPathsWithSecureInputStoreNothing() throws {
-        try requireCore()
         for path in ["commitComposition", "deactivate", "claim"] {
             let dir = TestLearning.directory(), gate = Gate()
             let shell = makeShell(gate: gate, learning: dir)
@@ -257,7 +249,6 @@ final class LearningTests: XCTestCase {
     }
 
     func testLayoutSwitchReenablesLearning() throws {
-        try requireCore()
         let dir = TestLearning.directory()
         let c = Controller(makeShell(learning: dir))
         c.session.activate()
@@ -270,7 +261,6 @@ final class LearningTests: XCTestCase {
     }
 
     func testClearRemovesFilesKeepsDirectoryAndFlag() throws {
-        try requireCore()
         let dir = TestLearning.directory()
         let c = Controller(makeShell(learning: dir))
         c.session.activate()
@@ -288,7 +278,6 @@ final class LearningTests: XCTestCase {
 
     /// Code 3 from the core (a file that cannot be deleted) is shown as 清除失敗.
     func testCoreClearFailureIsShown() throws {
-        try requireCore()
         let dir = TestLearning.directory()
         let c = Controller(makeShell(learning: dir))
         let blocker = dir.appendingPathComponent("learning.tsv", isDirectory: true)
@@ -301,7 +290,6 @@ final class LearningTests: XCTestCase {
 
     /// A failed write (read-only directory) shows the fixed status line.
     func testFailedWriteIsShown() throws {
-        try requireCore()
         let dir = TestLearning.directory()
         let c = Controller(makeShell(learning: dir))
         c.session.activate()
