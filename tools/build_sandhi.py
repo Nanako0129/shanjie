@@ -150,6 +150,16 @@ def r5_fa(word, syls):
 RULES = [("R1", r1_yi_sandhi), ("R2", r2_base_tone), ("R3", r3_bu_sandhi), ("R5", r5_fa)]
 
 
+def self_check():
+    """S2r-2 §2：other_reading 的已知邊界（拿掉 next_tone 的「一 → 1」會讓第一條失敗）。"""
+    got = other_reading("真不一般", ["ㄓㄣ", "ㄅㄨˋ", "ㄧˋ", "ㄅㄢ"], 1)
+    assert got is None, f"真不一般: 不 followed by 一 must not sandhi, got {got!r}"
+    got = other_reading("一不做二不休", ["ㄧ", "ㄅㄨˋ", "ㄗㄨㄛˋ", "ㄦˋ", "ㄅㄨˋ", "ㄒㄧㄡ"], 0)
+    assert got == YI_RISE, f"一不做二不休: first 一 before 不 must be ㄧˊ, got {got!r}"
+    got = other_reading("不一會", ["ㄅㄨˋ", "ㄧ", "ㄏㄨㄟˋ"], 0)
+    assert got != BU_RISE, f"不一會: 不 before 一 must not become ㄅㄨˊ, got {got!r}"
+
+
 def base_rows(path=BASE):
     """基底的有效列，規則同 Lexicon::parse_with：略過 # 與 _ 開頭、三欄、字數等於音節數。"""
     for line in open(path, encoding="utf-8"):
@@ -197,6 +207,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--check", action="store_true", help="重產並和現有檔逐位元組比對，不寫檔")
     a = ap.parse_args()
+    if a.check:
+        self_check()
     text, per_rule = build()
     print("rows per rule (first rule to produce each row):", dict(sorted(per_rule.items())), "total", text.count("\n"), file=sys.stderr)
     if a.check:
