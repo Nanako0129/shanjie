@@ -22,7 +22,8 @@ public protocol TextClient: AnyObject {
     func attributedSubstring(from range: NSRange) -> NSAttributedString?
     /// s3b2 section 2.2: the line rectangle of the composition (screen coordinates), `nil` if the
     /// client reports none.
-    func lineRect() -> NSRect?
+    /// `cursor`: the composition cursor in UTF-16 units within the marked text.
+    func lineRect(cursor: Int) -> NSRect?
 }
 
 /// A display-only candidate list (an NSPanel in the app). It never receives keys.
@@ -360,7 +361,7 @@ public final class Session {
         if o.candidates.isEmpty {
             shell.hideCandidates()
         } else {
-            shell.showCandidates(o.candidates, selected: o.selected, lineRect: client.lineRect())
+            shell.showCandidates(o.candidates, selected: o.selected, lineRect: client.lineRect(cursor: Int(o.cursorUTF16)))
         }
     }
 

@@ -113,15 +113,16 @@ final class ClientAdapter: TextClient {
         client?.attributedSubstring(from: range)
     }
 
-    /// s3b2 section 2.2, as McBopomofo does: from the last marked character back until the client
-    /// reports a rectangle other than the (0, 0) origin it leaves untouched when it has none.
-    func lineRect() -> NSRect? {
+    /// s3b2 section 2.2, as McBopomofo does (InputMethodController.swift:910): the index is within
+    /// the marked text, starting at the character before the cursor, back until the client reports
+    /// a rectangle other than the (0, 0) origin it leaves untouched when it has none.
+    func lineRect(cursor: Int) -> NSRect? {
         guard let client else { return nil }
         let marked = client.markedRange()
         guard marked.location != NSNotFound, marked.length > 0 else { return nil }
         var rect = NSRect(x: 0, y: 0, width: 16, height: 16)
-        var index = NSMaxRange(marked) - 1
-        while rect.origin.x == 0, rect.origin.y == 0, index >= marked.location {
+        var index = min(max(cursor - 1, 0), marked.length - 1)
+        while rect.origin.x == 0, rect.origin.y == 0, index >= 0 {
             _ = client.attributes(forCharacterIndex: index, lineHeightRectangle: &rect)
             index -= 1
         }

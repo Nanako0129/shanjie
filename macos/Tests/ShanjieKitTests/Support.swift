@@ -59,7 +59,8 @@ final class FakeClient: TextClient {
     var markedOverride: NSRange?
     /// s3b2: the line rectangle this client reports.
     var line: NSRect? = NSRect(x: 100, y: 200, width: 8, height: 18)
-    func lineRect() -> NSRect? { line }
+    private(set) var lineCursor: Int?
+    func lineRect(cursor: Int) -> NSRect? { lineCursor = cursor; return line }
 
     /// Every call of the three reading methods, and each range requested.
     private(set) var reads = 0

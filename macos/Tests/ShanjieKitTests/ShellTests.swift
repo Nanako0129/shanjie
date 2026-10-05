@@ -58,6 +58,16 @@ final class ShellTests: XCTestCase {
         XCTAssertEqual(c.panel.lineRect, c.client.line)
     }
 
+    /// s3b2 section 2.2: the rectangle is asked for at the composition cursor, not at the end.
+    func testLineRectIsAskedAtTheCursor() {
+        let c = Controller(makeShell())
+        c.session.activate()
+        c.type("su3cl3")
+        _ = c.session.handle(Keys.event(123))  // ←: the cursor moves between the two syllables
+        c.type(" ")
+        XCTAssertEqual(c.client.lineCursor, 1)
+    }
+
     func testClickByNonOwnerOrOutOfPageDoesNothing() {
         let shell = makeShell()
         let a = Controller(shell), b = Controller(shell)
