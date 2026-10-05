@@ -15,7 +15,7 @@
 - 需要使用者決定的事，用選擇題問，推薦的選項放第一個。
 - 使用者明說的需求照字面做；要偏離時先做到，再附上有依據的說明。
 - verifier 或其他會改檔的 agent 在某個 worktree 跑的時候，不碰那個 worktree；要急修就先停掉它。
-- commit 一律接在測試成功之後（`make test && git commit …`），commit 前看 `git diff --cached --stat` 有沒有預期外的檔案。
+- commit 一律接在測試成功之後（`make test && git commit …`），commit 前看 `git diff --cached --stat` 有沒有預期外的檔案。測試或 merge 的輸出不要經過 `| tail`、`| grep` 再接 `&&`：管線的結束碼是最後一個指令的，失敗會被吃掉（2026-10-05 因此 commit 了一次沒過的測試）。要篩選輸出就先導到檔案、看 `$?`，再 commit。
 
 ## 文件要跟著更新
 
