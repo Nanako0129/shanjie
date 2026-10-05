@@ -102,8 +102,6 @@ public final class Shell {
     weak var owner: Session?
     /// Whether the composition (as last applied to a client) is non-empty.
     var composing = false
-    /// What the panel shows (the core's last candidates output).
-    private(set) var candidates: [String] = []
 
     /// `resources`: the absolute Resources directory holding the lexicon files and bigram.sjlm.
     /// `panel`: the one candidate panel (an NSPanel in the app).
@@ -204,14 +202,12 @@ public final class Shell {
     func showCandidates(_ list: [String], selected: Int, columns: Int, first: Int, total: Int, lineRect: NSRect?) {
         // Only an exact punctuation mark has a name: a word candidate is never a key of the table.
         let notes = list.map { names[$0] }
-        candidates = list
         panel.show(list, notes: notes, selected: selected, columns: columns, first: first, total: total,
                    lineRect: lineRect)
     }
 
     func hideCandidates() {
         panel.hide()
-        candidates = []
     }
 
     /// Discards a composition whose owner is gone; there is no client left to clear.

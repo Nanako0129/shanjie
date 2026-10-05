@@ -17,8 +17,19 @@ pub const MOD_COMMAND: u32 = 8;
 pub const MOD_CAPSLOCK: u32 = 16;
 pub const MAX_SYLLABLES: usize = 40;
 pub const PAGE_SIZE: usize = 9;
-/// Expanded grid columns for ordinary candidates (a-4: six per row, numbers 1-6 on the selected row).
+/// Expanded grid columns for ordinary candidates whose longest word has at most `GRID_SHORT_CHARS`
+/// characters (a-4: six per row, numbers 1-6 on the selected row). s3b2 §8.7.
 pub const GRID_COLUMNS: usize = 6;
+/// Columns when the longest candidate has more than `GRID_SHORT_CHARS` and at most `GRID_MID_CHARS`
+/// characters: the shell's column width is 6 / columns times the six-column width, so a 3-4 character
+/// word needs three columns to show whole.
+pub const GRID_COLUMNS_MID: usize = 3;
+/// Columns when the longest candidate has more than `GRID_MID_CHARS` characters.
+pub const GRID_COLUMNS_LONG: usize = 2;
+/// Longest candidate (characters, not bytes) that still fits the six-column grid (a-4: two characters).
+pub const GRID_SHORT_CHARS: usize = 2;
+/// Longest candidate (characters) that fits the three-column grid.
+pub const GRID_MID_CHARS: usize = 4;
 /// Expanded grid columns when the candidates are a punctuation token's alternatives (p-2: three).
 pub const GRID_COLUMNS_PUNCT: usize = 3;
 /// Rows visible in the expanded grid (a-4: five, with a scroll bar).
@@ -203,11 +214,22 @@ struct Fixed {
     pre: Option<String>,
 }
 
+/// s3b2 §8.7: the column count for ordinary candidates, from the longest candidate in the whole list
+/// (characters, not bytes). The shell keeps the grid's total width fixed, so fewer columns are wider.
+fn grid_columns(list: &[(String, usize)]) -> usize {
+    match list.iter().map(|(w, _)| w.chars().count()).max().unwrap_or(0) {
+        0..=GRID_SHORT_CHARS => GRID_COLUMNS,
+        ..=GRID_MID_CHARS => GRID_COLUMNS_MID,
+        _ => GRID_COLUMNS_LONG,
+    }
+}
+
 struct Cands {
     /// (word, length in syllables)
     list: Vec<(String, usize)>,
     sel: usize,
-    /// Grid columns: `GRID_COLUMNS`, or `GRID_COLUMNS_PUNCT` for punctuation alternatives.
+    /// Grid columns: 6, 3 or 2 by the longest candidate (`grid_columns`), or `GRID_COLUMNS_PUNCT` for
+    /// punctuation alternatives.
     cols: usize,
     expanded: bool,
     /// First visible grid row while expanded; keeps the selected row inside `GRID_ROWS`.
@@ -838,26 +860,26 @@ impl Engine {
             let (row, col, last_row) = (sel / cols, sel % cols, (len - 1) / cols);
             // Next row, same column; a short last row ends at its last candidate.
             let below = ((row + 1) * cols + col).min(len - 1);
-            match k.kind {
-                KeyKind::Char if digit.is_some() => {
+            match (k.kind, digit) {
+                (KeyKind::Char, Some(d)) => {
                     // Digits above the column count are consumed: on the standard keyboard 7/8/9 are
                     // zhuyin keys that would close the candidates and start a syllable.
-                    let idx = row * cols + digit.unwrap_or(0);
-                    if digit.unwrap_or(0) < cols && idx < len {
+                    let idx = row * cols + d;
+                    if d < cols && idx < len {
                         self.choose(idx)?;
                     }
                 }
-                KeyKind::Down => c.sel = if row == last_row { sel } else { below },
-                KeyKind::Space => c.sel = if row == last_row { col } else { below },
-                KeyKind::Up if row == 0 => {
+                (KeyKind::Down, _) => c.sel = if row == last_row { sel } else { below },
+                (KeyKind::Space, _) => c.sel = if row == last_row { col } else { below },
+                (KeyKind::Up, _) if row == 0 => {
                     c.expanded = false;
                     c.top = 0;
                 }
-                KeyKind::Up => c.sel = sel - cols,
-                KeyKind::Left => c.sel = sel.saturating_sub(1),
-                KeyKind::Right => c.sel = (sel + 1).min(len - 1),
-                KeyKind::Enter => self.choose(sel)?,
-                KeyKind::Esc | KeyKind::Backspace => self.cands = None,
+                (KeyKind::Up, _) => c.sel = sel - cols,
+                (KeyKind::Left, _) => c.sel = sel.saturating_sub(1),
+                (KeyKind::Right, _) => c.sel = (sel + 1).min(len - 1),
+                (KeyKind::Enter, _) => self.choose(sel)?,
+                (KeyKind::Esc | KeyKind::Backspace, _) => self.cands = None,
                 _ => {
                     self.cands = None;
                     return Ok(false);
@@ -872,24 +894,24 @@ impl Engine {
         }
         let page_start = sel / PAGE_SIZE * PAGE_SIZE;
         let next_page = (page_start + PAGE_SIZE < len).then_some(page_start + PAGE_SIZE);
-        match k.kind {
-            KeyKind::Char if digit.is_some() => {
-                let idx = page_start + digit.unwrap_or(0);
+        match (k.kind, digit) {
+            (KeyKind::Char, Some(d)) => {
+                let idx = page_start + d;
                 if idx < len {
                     self.choose(idx)?;
                 }
             }
             // Left/right move the selection (user report 2026-10-04: paging on them was wrong); down
             // expands into the grid, as in the system Zhuyin (s3b2 §8.1 b-4).
-            KeyKind::Up | KeyKind::Left => c.sel = sel.saturating_sub(1),
-            KeyKind::Right => c.sel = (sel + 1).min(len - 1),
-            KeyKind::Down => {
+            (KeyKind::Up | KeyKind::Left, _) => c.sel = sel.saturating_sub(1),
+            (KeyKind::Right, _) => c.sel = (sel + 1).min(len - 1),
+            (KeyKind::Down, _) => {
                 c.expanded = true;
                 c.scroll();
             }
-            KeyKind::Space => c.sel = next_page.unwrap_or(0),
-            KeyKind::Enter => self.choose(sel)?,
-            KeyKind::Esc | KeyKind::Backspace => self.cands = None,
+            (KeyKind::Space, _) => c.sel = next_page.unwrap_or(0),
+            (KeyKind::Enter, _) => self.choose(sel)?,
+            (KeyKind::Esc | KeyKind::Backspace, _) => self.cands = None,
             _ => {
                 self.cands = None;
                 return Ok(false);
@@ -1011,7 +1033,8 @@ impl Engine {
             }
         }
         if !list.is_empty() {
-            self.cands = Some(Cands::new(list, GRID_COLUMNS));
+            let cols = grid_columns(&list);
+            self.cands = Some(Cands::new(list, cols));
         }
     }
 

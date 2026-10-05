@@ -588,6 +588,47 @@ fn grid_punctuation_has_three_columns() {
     let o = k(&mut e, plain('2'));
     assert!(o.selected.is_none() && o.preedit == alts[4]);
 }
+/// Types the syllables (standard layout, a first tone is the space key) and expands the candidates.
+fn expanded_for(syls: &[&str]) -> Output {
+    let mut e = std();
+    let layout = Layout::Standard;
+    for syl in syls {
+        let mut toned = false;
+        for c in syl.chars() {
+            match layout.key_of_tone(c) {
+                Some(tk) => {
+                    k(&mut e, Key::ch(tk, 0));
+                    toned = true;
+                }
+                None => {
+                    k(&mut e, Key::ch(layout.key_of_symbol(c).unwrap(), 0));
+                }
+            }
+        }
+        if !toned {
+            kk(&mut e, KeyKind::Space);
+        }
+    }
+    kk(&mut e, KeyKind::Space);
+    kk(&mut e, KeyKind::Down)
+}
+#[test]
+fn grid_columns_follow_the_longest_candidate() {
+    // s3b2 §8.7. The longest candidate in the whole list decides, in characters.
+    for (syls, longest, columns) in [
+        (&["ㄕˋ"][..], 1, 6),
+        (&["ㄋㄧˇ", "ㄏㄠˇ"][..], 2, 6),
+        (&["ㄅㄚ", "ㄅㄚ", "ㄅㄚ"][..], 3, 3),
+        (&["ㄅㄚ", "ㄅㄠˇ", "ㄩㄢˊ", "ㄗˇ", "ㄅㄧㄥ"][..], 5, 2),
+    ] {
+        let o = expanded_for(syls);
+        let max = o.candidates.iter().map(|w| w.chars().count()).max().unwrap();
+        assert!(max <= longest && o.columns == columns, "{syls:?}: longest shown {max}, columns {}", o.columns);
+        // the rule looks at the whole list, so the longest word of the whole list is what matters
+        let all = cands(syls);
+        assert!(all.iter().map(|w| w.chars().count()).max().unwrap() == longest, "{syls:?}");
+    }
+}
 #[test]
 fn pick_follows_candidate_first() {
     let mut e = std();
