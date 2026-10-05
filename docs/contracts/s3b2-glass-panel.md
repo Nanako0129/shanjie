@@ -67,11 +67,11 @@
 ### 2.2 資料流
 
 **行矩形進來**：
-- `TextClient` 加 `func lineRect() -> NSRect?`：
+- `TextClient` 加 `func lineRect(cursor: Int) -> NSRect?`（`cursor` 是組字區內的 UTF-16 游標）：
   - 用 `attributes(forCharacterIndex:lineHeightRectangle:)` 取得；
-  - 字元位置從組字區游標前一個字開始，取不到（原點 0,0）就往前找，做法和小麥注音 `InputMethodController.swift:910` 一樣；
+  - 索引是組字區內的位置（不是整份文件的位置；2026-10-05 實機修正），從游標前一個字開始，取不到（原點 0,0）就往前找，做法和小麥注音 `InputMethodController.swift:910` 一樣；
   - 都取不到就回傳 nil。
-- `Session.apply` 顯示候選時，讀自己 client 的 `lineRect()`，傳給 `Shell.showCandidates(_:selected:lineRect:)`。顯示候選的一定是擁有者，所以矩形就是擁有者的。
+- `Session.apply` 顯示候選時，用核心的 `cursor_utf16` 讀自己 client 的 `lineRect(cursor:)`，傳給 `Shell.showCandidates(_:selected:lineRect:)`。顯示候選的一定是擁有者，所以矩形就是擁有者的。
 - `CandidatePanel.show` 改成 `show(_ candidates: [String], notes: [String?], selected: Int, lineRect: NSRect?)`。
 
 **點選出去**：
@@ -205,6 +205,8 @@
   
   兩者擇一，另開一節修訂本契約，經 plan-verifier 審過才實作。
 - 展開動畫：用系統的動畫（`NSAnimationContext` 改視窗框），時間與曲線照 §1 的錄影；不自己調彈性（使用者偏好系統預設動態）。
+
+**已知差異（2026-10-05 code review）**：第一個候選是多字詞（例如游標在句尾時的「你好」）時，候選列對齊的是游標前一個字，所以「你好」的「你」落在組字區的「好」底下。蘋果遇到這種情況對齊哪裡還沒拍到，等使用者實機看過再決定。
 
 ## 6. 範圍外
 
