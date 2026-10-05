@@ -203,7 +203,8 @@ final class CandidatePanelAdapter: CandidatePanel {
     private let glass = NSGlassEffectView()
     /// The glass's one content view, kept for the panel's lifetime: replacing the glass's content,
     /// resizing or re-ordering the window on every selection move made the glass's glow flicker
-    /// (user report 2026-10-05), so a move only swaps the cells inside.
+    /// (user report 2026-10-05). Since 9.1 a move updates the existing cells and a scroll swaps only
+    /// the entering and leaving rows.
     private let row = GridView()
     private var lastOrigin: NSPoint?
     /// The last shown output, to animate the collapsed -> expanded change from where the bar's cells
@@ -221,9 +222,8 @@ final class CandidatePanelAdapter: CandidatePanel {
     /// The cells and the decision which survive an output (ShanjieKit); this class only adds and removes
     /// the views it reports and positions them.
     private let cellSet = CandidateCells()
-    private var cells: [CandidateCell] = []
-    /// The chevron/separator or scroll thumb currently in `row`.
-    private var decorViews: [NSView] = []
+    /// The chevron/separator or scroll thumb in `row`, and the ones held back until the animation ends.
+    private let decor = DecorSet()
     /// True from the start of an expand or collapse animation until it ends; a `show` or `hide` in
     /// that time replaces the running animation (see `settle`). `animation` numbers the groups, so the
     /// completion of an older group cannot end a newer one.
@@ -232,9 +232,6 @@ final class CandidatePanelAdapter: CandidatePanel {
     /// Grid cells that stay in place while the grid collapses (cv.mov: the lower rows are cut off by the
     /// shrinking window rather than vanishing); removed when the collapse ends or is replaced.
     private var leaving: [CandidateCell] = []
-    /// Views that arrive when the running animation ends rather than at its start: the chevron and
-    /// separator (collapse) and the scroll thumb (expand), so they do not pop in over the moving cells.
-    private var deferred: [NSView] = []
 
     init() {
         window = PanelWindow(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel],
@@ -259,7 +256,7 @@ final class CandidatePanelAdapter: CandidatePanel {
         NSAnimationContext.runAnimationGroup { ctx in
             ctx.duration = 0
             window.animator().setFrame(frame, display: true)
-            for (cell, target) in zip(cells, shownTargets) { cell.animator().setFrameOrigin(target) }
+            for (cell, target) in zip(cellSet.cells, shownTargets) { cell.animator().setFrameOrigin(target) }
         }
         animation += 1
         finishAnimation()
@@ -270,9 +267,7 @@ final class CandidatePanelAdapter: CandidatePanel {
         row.frame = NSRect(origin: .zero, size: shownSize)
         leaving.forEach { $0.removeFromSuperview() }
         leaving = []
-        deferred.forEach { row.addSubview($0) }
-        decorViews = deferred
-        deferred = []
+        decor.flush(into: row)
         animating = false
     }
 
@@ -312,6 +307,7 @@ final class CandidatePanelAdapter: CandidatePanel {
         let collapsing = !grid && shownColumns > 0 && window.isVisible
         let size: NSSize
         let targets: [NSPoint]
+        let oldCells = cellSet.cells
         let update = cellSet.update(candidates: candidates, notes: notes, selected: selected, first: first, columns: columns)
         let newCells = update.cells
         var gridWidth: CGFloat = 0
@@ -360,7 +356,7 @@ final class CandidatePanelAdapter: CandidatePanel {
             targets = t
 
             // Where the cells start: a new cell whose candidate (global index first + i) was in the old
-            // output (shownFirst ..< shownFirst + cells.count) starts at that old cell. Expanding, those
+            // output (shownFirst ..< shownFirst + oldCells.count) starts at that old cell. Expanding, those
             // are the bar's candidates, in grid row 0 or, from the bar's page 2, in later rows;
             // collapsing, each bar cell starts at the grid cell showing its candidate (cv.mov: the
             // second row's candidates fly up into the bar).
@@ -372,18 +368,16 @@ final class CandidatePanelAdapter: CandidatePanel {
             if expanding || collapsing {
                 for i in newCells.indices {
                     let j = first + i - shownFirst
-                    if cells.indices.contains(j) { starts[i] = cells[j].frame.origin }
+                    if oldCells.indices.contains(j) { starts[i] = oldCells[j].frame.origin }
                 }
             }
 
             // Collapsing: the grid cells whose candidates do not move into the bar stay where they are
             // until the window has shrunk past them.
             let staying = collapsing
-                ? cells.enumerated().filter { j, _ in !(first..<first + newCells.count).contains(shownFirst + j) }.map { $0.1 }
+                ? oldCells.enumerated().filter { j, _ in !(first..<first + newCells.count).contains(shownFirst + j) }.map { $0.1 }
                 : []
             leaving.forEach { $0.removeFromSuperview() }
-            decorViews.forEach { $0.removeFromSuperview() }
-            decorViews = []
             update.removed.forEach { if !staying.contains($0) { $0.removeFromSuperview() } }
             staying.forEach { $0.ignoresMouse = true }
             leaving = staying
@@ -391,25 +385,18 @@ final class CandidatePanelAdapter: CandidatePanel {
                 cell.setFrameOrigin(starts[i])
                 if !update.reused[i] { row.addSubview(cell) }
             }
-            var decor: [NSView] = grid ? [] : chevron(barSize: size)
+            var newDecor: [NSView] = grid ? [] : chevron(barSize: size)
             if grid, total > candidates.count {
-                decor.append(scrollThumb(first: first, total: total, columns: columns, count: candidates.count,
+                newDecor.append(scrollThumb(first: first, total: total, columns: columns, count: candidates.count,
                                          width: size.width, height: size.height))
             }
-            if expanding || collapsing {
-                deferred = decor
-            } else {
-                deferred = []
-                decor.forEach { row.addSubview($0) }
-                decorViews = decor
-            }
+            decor.replace(with: newDecor, deferred: expanding || collapsing, in: row)
             if shownSize != size {
                 // Collapsing keeps the grid-sized content view until the animation ends, so the cells
                 // flying up from the lower rows are not cut off at the start (`animate` sets the size).
                 if !collapsing { row.frame = NSRect(origin: .zero, size: size) }
                 glass.cornerRadius = grid ? Metrics.gridCornerRadius : size.height / 2
             }
-            cells = newCells
             shownColumns = columns
             shownFirst = first
             shownTotal = total
@@ -458,10 +445,8 @@ final class CandidatePanelAdapter: CandidatePanel {
     /// Display only: the bar expands with the down arrow; a click on it does nothing.
     private func chevron(barSize: NSSize) -> [NSView] {
         let left = barSize.width - Metrics.chevronArea
-        let line = NSView(frame: NSRect(x: left + Metrics.chevronSeparatorInset, y: ((barSize.height - Metrics.chevronSeparatorHeight) / 2).rounded(),
-                                        width: 1, height: Metrics.chevronSeparatorHeight))
-        line.wantsLayer = true
-        line.layer?.backgroundColor = NSColor.separatorColor.cgColor
+        let line = FilledView(frame: NSRect(x: left + Metrics.chevronSeparatorInset, y: ((barSize.height - Metrics.chevronSeparatorHeight) / 2).rounded(),
+                                            width: 1, height: Metrics.chevronSeparatorHeight), color: .separatorColor)
         let config = NSImage.SymbolConfiguration(pointSize: Metrics.chevronPointSize, weight: .medium)
         guard let image = NSImage(systemSymbolName: "chevron.down", accessibilityDescription: nil)?
             .withSymbolConfiguration(config) else { return [line] }
@@ -479,12 +464,9 @@ final class CandidatePanelAdapter: CandidatePanel {
         let track = height - Metrics.gridInset * 2
         let h = max(Metrics.scrollThumbMinHeight, (track * visibleRows / totalRows).rounded())
         let y = Metrics.gridInset + ((track - h) * CGFloat(first / columns) / max(totalRows - visibleRows, 1)).rounded()
-        let thumb = NSView(frame: NSRect(x: width - Metrics.barInset - Metrics.scrollThumbWidth, y: y,
-                                         width: Metrics.scrollThumbWidth, height: h))
-        thumb.wantsLayer = true
-        thumb.layer?.backgroundColor = NSColor.tertiaryLabelColor.cgColor
-        thumb.layer?.cornerRadius = Metrics.scrollThumbWidth / 2
-        return thumb
+        return FilledView(frame: NSRect(x: width - Metrics.barInset - Metrics.scrollThumbWidth, y: y,
+                                        width: Metrics.scrollThumbWidth, height: h),
+                          color: .tertiaryLabelColor, cornerRadius: Metrics.scrollThumbWidth / 2)
     }
 
     func hide() {
@@ -501,9 +483,7 @@ final class CandidatePanelAdapter: CandidatePanel {
         shownTargets = []
         columnWidths = []
         cellSet.reset().forEach { $0.removeFromSuperview() }
-        decorViews.forEach { $0.removeFromSuperview() }
-        decorViews = []
-        cells = []
+        decor.clear()
     }
 }
 

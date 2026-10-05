@@ -22,10 +22,10 @@ final class CandidateCellTests: XCTestCase {
     func testScrollingOneRowReusesThirtySixCells() {
         let cells = CandidateCells()
         let a = grid(cells, page: 0, selected: 0)
-        XCTAssertEqual(a.added.count, 45)
+        XCTAssertEqual(a.reused.filter { !$0 }.count, 45)
         let b = grid(cells, page: 1, selected: 9)
         XCTAssertEqual(b.reused.filter { $0 }.count, 36)
-        XCTAssertEqual(b.added.count, 9)
+        XCTAssertEqual(b.reused.filter { !$0 }.count, 9)
         XCTAssertEqual(b.removed.count, 9)
         // The removed ones are the old first row.
         XCTAssertEqual(Set(b.removed.map(ObjectIdentifier.init)), Set(a.cells[0..<9].map(ObjectIdentifier.init)))
@@ -97,11 +97,10 @@ final class CandidateCellTests: XCTestCase {
             width += 5
             super.init(frame: NSRect(x: 0, y: 0, width: width, height: CellMetrics.capsuleHeight))
             var x: CGFloat = 2
-            for (v, isNumber) in [(n, true), (c, false)] + (m.map { [($0, false)] } ?? []) {
+            for v in [n, c] + (m.map { [$0] } ?? []) {
                 v.setFrameOrigin(NSPoint(x: x, y: ((CellMetrics.capsuleHeight - v.frame.height) / 2).rounded()))
                 addSubview(v)
                 x += v.frame.width + 2
-                _ = isNumber
             }
         }
         required init?(coder: NSCoder) { fatalError() }
@@ -147,7 +146,9 @@ final class CandidateCellTests: XCTestCase {
         return Double(d.components.seconds) * 1000 + Double(d.components.attoseconds) / 1e15
     }
 
-    func testBenchmark() {
+    /// Pre-release benchmark (contract 9.1); a measurement, not a check, so it runs only with `SHANJIE_BENCH=1 swift test -c release --package-path macos --filter testBenchmark`.
+    func testBenchmark() throws {
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["SHANJIE_BENCH"] == "1", "set SHANJIE_BENCH=1 to run")
         let rounds = 200
         let all = list(400)
         let host = NSView(frame: NSRect(x: 0, y: 0, width: 600, height: 200))
