@@ -47,7 +47,8 @@ pub enum Level {
     Global,
 }
 
-fn is_single(word: &str) -> bool {
+/// A one-character word: no global level, no last-character level, never under "^" (§12).
+pub fn is_single(word: &str) -> bool {
     word.chars().count() == 1
 }
 
@@ -223,11 +224,13 @@ impl Learner {
             (Level::Global, &|c| c == GLOBAL),
         ];
         for (lv, level) in levels {
+            // Once per level: single characters are usable only at the exact level, never under "^".
+            let single_barred = lv != Level::Exact || context == SENTINEL;
             let mut hits: Vec<(&str, f64)> = Vec::new();
             for &i in ix {
                 let r = &self.records[i];
                 let w = decayed(r, today);
-                if w < ACTIVE || !level(&r.context) || (is_single(&r.word) && (lv != Level::Exact || context == SENTINEL)) {
+                if w < ACTIVE || !level(&r.context) || (single_barred && is_single(&r.word)) {
                     continue;
                 }
                 match hits.iter_mut().find(|h| h.0 == r.word) {

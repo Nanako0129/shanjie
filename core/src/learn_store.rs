@@ -19,7 +19,7 @@
 //! bad header or an oversized file is renamed to `learning.tsv.corrupt` (0600, one copy). Nothing
 //! here logs: no path and no record ever leaves this module except as data.
 
-use crate::learn::{context_key, Record, GLOBAL};
+use crate::learn::{context_key, is_single, Record, GLOBAL};
 use std::fmt::Write as _;
 use std::fs::{self, DirBuilder, File, OpenOptions, Permissions};
 use std::io::{ErrorKind, Read, Write};
@@ -119,7 +119,7 @@ fn clean(s: &str) -> bool {
 /// longer counts toward anything, and absent from the first full rewrite.
 fn valid(r: &Record) -> bool {
     (r.context == GLOBAL || context_key(&r.context) == r.context)
-        && !(r.context == GLOBAL && r.word.chars().count() == 1)
+        && !(r.context == GLOBAL && is_single(&r.word))
         && !r.reading.is_empty()
         && r.reading.iter().all(|s| clean(s) && !s.contains('-'))
         && clean(&r.word)

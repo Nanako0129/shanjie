@@ -400,7 +400,7 @@ fn context_key_learned_equals_context_key_queried() {
     assert_eq!(type_syls(&mut e, "ㄅㄣ ㄒㄧㄣ").preedit, "奔欣");
     e.key(k(KeyKind::Esc)).unwrap();
 
-    // (c) after punctuation the key is ^: a single character is not learned there (rule 6)
+    // (c) after punctuation the key is ^: a single character is not learned there (rule 6) ...
     let mut e = tiny(TINY, TINY);
     type_syls(&mut e, "ㄊㄚ");
     e.key(Key::ch(',', MOD_SHIFT)).unwrap();
@@ -408,14 +408,37 @@ fn context_key_learned_equals_context_key_queried() {
     pick(&mut e, 3, 3, "欣");
     assert_eq!(e.key(k(KeyKind::Enter)).unwrap().commit, "他，欣");
     assert!(keys(&e).is_empty());
+    // ... so the teach-time and decode-time keys are checked with a 2-character word (real model)
+    const R2: &str = "ㄑㄩㄢˊ ㄌㄧˋ";
+    let other = |shown: &str| if shown == "權力" { "全力" } else { "權力" };
+    let mut e = engine();
+    type_syls(&mut e, "ㄊㄚ");
+    e.key(Key::ch(',', MOD_SHIFT)).unwrap();
+    let w = other(type_syls(&mut e, R2).preedit.trim_start_matches("他，")).to_string();
+    pick(&mut e, 4, 4, &w);
+    assert_eq!(e.key(k(KeyKind::Enter)).unwrap().commit, format!("他，{w}"));
+    assert_eq!(keys(&e), ["^"], "after the punctuation token the key is ^");
+    type_syls(&mut e, "ㄊㄚ");
+    e.key(Key::ch(',', MOD_SHIFT)).unwrap();
+    assert_eq!(type_syls(&mut e, R2).preedit, format!("他，{w}"), "decode-time key after punctuation is the taught ^");
+    e.key(k(KeyKind::Esc)).unwrap();
+    assert_ne!(type_syls(&mut e, &format!("ㄊㄚ {R2}")).preedit, format!("他{w}"), "no punctuation: key 他, not ^");
+    e.key(k(KeyKind::Esc)).unwrap();
 
-    // (d) sentence start: same
+    // (d) sentence start: a single character is not learned, a 2-character word is, under ^
     let mut e = tiny(TINY, TINY);
     type_syls(&mut e, "ㄒㄧㄣ");
     pick(&mut e, 1, 1, "欣");
     e.key(k(KeyKind::Enter)).unwrap();
     assert!(keys(&e).is_empty());
     assert_eq!(type_syls(&mut e, "ㄒㄧㄣ").preedit, "鑫");
+    e.key(k(KeyKind::Esc)).unwrap();
+    let mut e = engine();
+    let w = other(&type_syls(&mut e, R2).preedit).to_string();
+    pick(&mut e, 2, 2, &w);
+    e.key(k(KeyKind::Enter)).unwrap();
+    assert_eq!(keys(&e), ["^"]);
+    assert_eq!(type_syls(&mut e, R2).preedit, w, "decode-time key at sentence start is ^");
     e.key(k(KeyKind::Esc)).unwrap();
 
     // (e) left context from the shell, kept to its last two Han characters
@@ -741,6 +764,7 @@ fn row_esc_does_not_learn() {
 #[test]
 fn row_decode_failure_does_not_learn() {
     let mut e = tiny(&format!("{TINY}ㄆㄧㄥˊ 平 -1.0\n"), TINY);
+    e.set_left_context(TAUGHT_AFTER);
     type_syls(&mut e, "ㄒㄧㄣ");
     pick_open(&mut e, "欣");
     e.key(k(KeyKind::End)).unwrap();
@@ -771,6 +795,7 @@ fn row_flag_must_be_on_at_pick_and_at_commit() {
     // off at the pick, on at commit
     let mut e = tiny(TINY, TINY);
     e.set_learning(false);
+    e.set_left_context(TAUGHT_AFTER);
     type_syls(&mut e, "ㄒㄧㄣ");
     pick_open(&mut e, "欣");
     e.set_learning(true);
@@ -784,6 +809,7 @@ fn row_flag_must_be_on_at_pick_and_at_commit() {
     assert_eq!(n_records(&e), 0);
     // same word picked as shown: nothing to learn
     let mut e = tiny(TINY, TINY);
+    e.set_left_context(TAUGHT_AFTER);
     type_syls(&mut e, "ㄒㄧㄣ");
     e.key(k(KeyKind::Space)).unwrap();
     e.key(k(KeyKind::Enter)).unwrap();
@@ -913,6 +939,7 @@ fn store_forget_then_enter_does_not_learn_the_word_back() {
     let dir = tmp_dir("forget-enter");
     let mut e = tiny(TINY, TINY);
     e.learning_open(&dir).unwrap();
+    e.set_left_context(TAUGHT_AFTER);
     type_syls(&mut e, "ㄒㄧㄣ");
     pick(&mut e, 1, 1, "欣"); // a re-pick over the default 鑫: learned at commit unless dropped
     let o = e.key(k(KeyKind::Space)).unwrap(); // the same span's candidates again
@@ -932,17 +959,20 @@ fn store_learning_off_then_enter_writes_nothing_and_clear_removes_the_file() {
     let dir = tmp_dir("off");
     let mut e = tiny(TINY, TINY);
     e.learning_open(&dir).unwrap();
+    e.set_left_context(TAUGHT_AFTER);
     type_syls(&mut e, "ㄒㄧㄣ");
     pick(&mut e, 1, 1, "欣");
     e.set_learning(false);
     e.key(k(KeyKind::Enter)).unwrap();
     assert!(!file_of(&dir).exists(), "set_learning(0) then Enter writes nothing");
     e.set_learning(true);
+    e.set_left_context(TAUGHT_AFTER);
     type_syls(&mut e, "ㄒㄧㄣ");
     pick(&mut e, 1, 1, "欣");
     e.key(k(KeyKind::Enter)).unwrap();
     assert!(file_of(&dir).exists());
     // a pick made before clear is not learned by the next Enter
+    e.set_left_context(TAUGHT_AFTER);
     type_syls(&mut e, "ㄅㄣ");
     pick(&mut e, 1, 1, "奔");
     e.learning_clear().unwrap();
@@ -955,6 +985,19 @@ fn store_learning_off_then_enter_writes_nothing_and_clear_removes_the_file() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// Rule 6 teaches nothing, so the Enter must not touch the store at all: no file, no rewrite.
+#[test]
+fn store_single_character_under_caret_writes_nothing() {
+    let dir = tmp_dir("caret");
+    let mut e = tiny(TINY, TINY);
+    e.learning_open(&dir).unwrap();
+    type_syls(&mut e, "ㄒㄧㄣ");
+    pick(&mut e, 1, 1, "欣");
+    assert_eq!(e.key(k(KeyKind::Enter)).unwrap().commit, "欣");
+    assert!(!file_of(&dir).exists(), "nothing learned, nothing written");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn store_write_failure_sets_the_status_flag_and_keeps_the_commit() {
     let dir = tmp_dir("fail");
@@ -962,6 +1005,7 @@ fn store_write_failure_sets_the_status_flag_and_keeps_the_commit() {
     e.learning_open(&dir).unwrap();
     std::fs::remove_dir_all(&dir).unwrap();
     std::fs::write(&dir, b"a file where the directory was").unwrap();
+    e.set_left_context(TAUGHT_AFTER);
     type_syls(&mut e, "ㄒㄧㄣ");
     pick(&mut e, 1, 1, "欣");
     assert_eq!(e.key(k(KeyKind::Enter)).unwrap().commit, "欣");
@@ -1442,6 +1486,7 @@ fn old_single_character_global_record_is_dropped_at_load() {
     assert_eq!(decode(&mut e, "", &sent), want, "so decoding is unaffected");
     assert!(raw(&dir).contains("再"), "the file is untouched until a write");
     // the first learning Enter after open is a full rewrite: the record is gone from the file
+    e.set_left_context(TAUGHT_AFTER);
     type_syls(&mut e, "ㄒㄧㄣ");
     pick(&mut e, 1, 1, "鑫");
     e.key(k(KeyKind::Enter)).unwrap();
@@ -1471,7 +1516,7 @@ fn pollution_zai_taught_under_two_contexts() {
     }
     let zai_records: Vec<String> = e.learner().records().iter().filter(|r| r.word == "再").map(|r| r.context.clone()).collect();
     assert_eq!(zai_records, ["可以"], "only the pick after 可以 is learned; none under ^, none global");
-    let (mut regress, mut collided, mut unaligned, mut checked) = (Vec::new(), Vec::new(), Vec::new(), 0);
+    let (mut regress, mut changed, mut collided, mut unaligned, mut checked) = (Vec::new(), Vec::new(), Vec::new(), Vec::new(), 0);
     for (r, b) in rows.iter().zip(&base) {
         let after = decode(&mut e, &r.0, &r.2);
         match row_collides(&r.0, &[&r.1, b, &after], &r.2, &zai, &taught, true) {
@@ -1479,8 +1524,13 @@ fn pollution_zai_taught_under_two_contexts() {
             Some(true) => collided.push(format!("{}|{} : {} -> {}", r.0, r.1, b, after)),
             Some(false) => {
                 checked += 1;
+                // Same definition as the ε sweep: a regression is a row whose whole sentence was equal to
+                // the expected one before and is not after. Any other change is only reported.
                 if &after != b {
-                    regress.push(format!("{}|{} : {} -> {}", r.0, r.1, b, after));
+                    changed.push(format!("{}|{} : {} -> {}", r.0, r.1, b, after));
+                    if *b == r.1 {
+                        regress.push(format!("{}|{} : {} -> {}", r.0, r.1, b, after));
+                    }
                 }
             }
         }
@@ -1493,11 +1543,15 @@ fn pollution_zai_taught_under_two_contexts() {
     for c in &unaligned {
         println!("  unaligned: {c}");
     }
-    println!("non-colliding regressions: {}", regress.len());
+    println!("non-colliding changed rows: {}, regressions (whole sentence was right, now not): {}", changed.len(), regress.len());
+    for c in &changed {
+        println!("  changed: {c}");
+    }
     for r in &regress {
         println!("  REGRESSION: {r}");
     }
-    assert!(regress.is_empty(), "non-colliding rows changed: {regress:?}");
+    assert!(regress.is_empty(), "non-colliding rows regressed: {regress:?}");
+    assert!(changed.is_empty(), "non-colliding rows changed: {changed:?}");
 }
 
 /// §12 rules 5 and 6 at the lookup: a single character is used only at the exact full key, and never

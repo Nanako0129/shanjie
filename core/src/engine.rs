@@ -455,7 +455,8 @@ impl Engine {
             for (ctx, reading, word, displaced) in &plans {
                 touched.extend(self.learner.teach(ctx, reading, word, displaced, today));
             }
-            if !plans.is_empty() {
+            // Nothing touched (e.g. a single character under "^", §12): no write at all.
+            if !touched.is_empty() {
                 self.persist(&touched);
             }
         }));
