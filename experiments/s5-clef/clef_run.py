@@ -109,10 +109,11 @@ class Client:
         self.path = f"/client/v4/accounts/{account}/ai/run/@cf/cloudflare/{MODEL}"
         self.headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
         self.post, self.sleep = post, sleep
+        self.model = MODEL  # S5p overrides model, path and headers to reuse this retry/parse path for Jev
 
     def ask(self, state, questions):
         """-> (answers, input tokens, tokens are an estimate, response model, seconds of the successful attempt)."""
-        body = json.dumps({"state": state, "model": MODEL, "questions": questions}, ensure_ascii=False).encode("utf-8")
+        body = json.dumps({"state": state, "model": self.model, "questions": questions}, ensure_ascii=False).encode("utf-8")
         for attempt in range(len(BACKOFF) + 1):
             t = time.perf_counter()
             try:
