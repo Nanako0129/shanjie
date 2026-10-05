@@ -147,20 +147,27 @@ private enum Metrics {
     static let barInset: CGFloat = 3
     /// Section 3 "cell pitch": 41 pt per single-character cell against a 37 pt capsule (a-3), so
     /// 4 pt between capsules.
-    static let cellSpacing: CGFloat = 4
-    /// Section 3: capsule left edge to the number, about 5 pt (a-3).
-    static let numberLeading: CGFloat = 5
-    /// Section 3: number to candidate, about 8 pt (a-3).
-    static let numberToCandidate: CGFloat = 8
-    /// Section 3: candidate to the capsule's right edge, about 6 pt (a-3).
-    static let trailing: CGFloat = 6
+    static let cellSpacing: CGFloat = 4 - 2  // our unselected cells measured 2 pt wider apart than a-3 (s-7)
+    // The gaps below are between label frames, and an NSTextField label's frame is wider than its
+    // ink (padding plus the glyph's side bearings). The values are the a-3 gaps minus what our own
+    // bar (s-3, s-7, 2026-10-05) added; s-7 then matched a-3 within 1 pt.
+    /// Section 3: capsule left edge to the number's ink, 5 pt in a-3.
+    static let numberLeading: CGFloat = 2
+    /// Section 3: number ink to candidate ink, 8 pt in a-3.
+    static let numberToCandidate: CGFloat = 2
+    /// Section 3: candidate ink to the capsule's right edge, 8 pt in a-3 (37 pt cell).
+    static let trailing: CGFloat = 5
     /// Section 3 "name": between a mark and its name, the capsules in p-1 leave almost none; 2 pt.
     static let candidateToName: CGFloat = 2
     /// Section 3 font sizes: candidate 16, number 9, name 11 (initial values, "the ink of a
     /// Han character is about 0.88 em" so 16 pt gives the 14 pt ink of a-3).
     static let candidateFont = NSFont.systemFont(ofSize: 16)
     static let numberFont = NSFont.systemFont(ofSize: 9)
-    static let nameFont = NSFont.systemFont(ofSize: 11)
+    /// 12, not 11: at 11 pt 「全形逗號」 measured 42 pt of ink in s-11 against 46 in p-1.
+    static let nameFont = NSFont.systemFont(ofSize: 12)
+    /// A label's ink starts about 2 pt inside its frame (s-7: the first candidate's ink sat 2 pt right
+    /// of the composed text's); the bar aligns ink, not frames.
+    static let labelInset: CGFloat = 2
 }
 
 /// One cell of the bar: number, candidate, optional name. The selected cell is an accent-colour
@@ -204,7 +211,7 @@ private final class CellView: NSView {
     required init?(coder: NSCoder) { fatalError("not used") }
 
     /// Where the candidate glyph starts, in this cell's coordinates.
-    var candidateMinX: CGFloat { candidate.frame.minX }
+    var candidateMinX: CGFloat { candidate.frame.minX + Metrics.labelInset }
 
     override func draw(_ dirtyRect: NSRect) {
         guard selected else { return }
