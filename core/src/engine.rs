@@ -370,11 +370,12 @@ impl Engine {
         &self.learner
     }
 
-    /// Test-purpose clock: day number to use instead of the local day.
     /// Test hook (§12): ε of the global level.
     pub fn set_eps_global(&mut self, eps: f64) {
         self.eps_global = eps;
     }
+
+    /// Test-purpose clock: day number to use instead of the local day.
     pub fn set_today(&mut self, day: Option<i64>) {
         self.today = day;
     }

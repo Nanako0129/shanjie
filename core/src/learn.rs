@@ -47,10 +47,8 @@ pub enum Level {
     Global,
 }
 
-/// §12: a single-character word never globalizes, and a global record of one (written before §12) is
-/// ignored by decoding and not written back by a full rewrite.
-pub fn is_single_global(r: &Record) -> bool {
-    r.context == GLOBAL && r.word.chars().count() == 1
+fn is_single(word: &str) -> bool {
+    word.chars().count() == 1
 }
 
 /// One learned record (§1.3, §4). `day` is the local calendar day as days since 1970-01-01.
@@ -180,6 +178,10 @@ impl Learner {
     /// records it changed, as they now are (displaced, taught, global; at most 3): what an append
     /// writes (§4).
     pub fn teach(&mut self, context: &str, reading: &[String], word: &str, displaced: &str, today: i64) -> Vec<Record> {
+        // §12 rule 6: a single character neither learns nor looks up under "^".
+        if is_single(word) && context == SENTINEL {
+            return Vec::new();
+        }
         let mut touched = Vec::with_capacity(3);
         if let Some(i) = self.find(context, reading, displaced) {
             let r = &mut self.records[i];
@@ -196,7 +198,7 @@ impl Learner {
             .filter(|r| r.word == word && r.context != GLOBAL && decayed(r, today) >= ACTIVE)
             .map(|r| r.context.as_str())
             .collect();
-        if keys.len() >= 2 && word.chars().count() > 1 {
+        if keys.len() >= 2 && !is_single(word) {
             let prev = self.find(GLOBAL, reading, word).map(|i| self.records[i].clone());
             let have = prev.as_ref().map_or(0.0, |r| decayed(r, today));
             let now = self.bump(GLOBAL, reading, word, today, (1.0 - have).max(0.0));
@@ -208,11 +210,12 @@ impl Learner {
         touched
     }
     /// Words with an active record for `reading` reachable from `context` by the §1.1 lookup order
-    /// (exact, last character, global), with their decayed weight and the level that answered. The
-    /// first level that has any active record answers; a word found by several records of that level
-    /// keeps the highest weight. Single-character global records are skipped (§12).
-    pub fn lookup(&self, context: &str, reading: &[String], today: i64) -> Vec<(&str, f64, Level)> {
-        let Some(ix) = self.index.get(&reading_key(reading)) else { return Vec::new() };
+    /// (exact, last character, global), with their decayed weight, and the level that answered. The
+    /// first level that has any usable record answers; a word found by several records of that level
+    /// keeps the highest weight. Single characters are usable only at the exact level and never under
+    /// "^" (§12 rules 5 and 6); there are no single-character global records (dropped at load).
+    pub fn lookup(&self, context: &str, reading: &[String], today: i64) -> (Level, Vec<(&str, f64)>) {
+        let Some(ix) = self.index.get(&reading_key(reading)) else { return (Level::Global, Vec::new()) };
         let last = context.chars().next_back().filter(|_| context != SENTINEL && context != GLOBAL);
         let levels: [(Level, &dyn Fn(&str) -> bool); 3] = [
             (Level::Exact, &|c| c == context),
@@ -220,24 +223,24 @@ impl Learner {
             (Level::Global, &|c| c == GLOBAL),
         ];
         for (lv, level) in levels {
-            let mut hits: Vec<(&str, f64, Level)> = Vec::new();
+            let mut hits: Vec<(&str, f64)> = Vec::new();
             for &i in ix {
                 let r = &self.records[i];
                 let w = decayed(r, today);
-                if w < ACTIVE || !level(&r.context) || is_single_global(r) {
+                if w < ACTIVE || !level(&r.context) || (is_single(&r.word) && (lv != Level::Exact || context == SENTINEL)) {
                     continue;
                 }
                 match hits.iter_mut().find(|h| h.0 == r.word) {
                     Some(h) => h.1 = h.1.max(w),
-                    None => hits.push((r.word.as_str(), w, lv)),
+                    None => hits.push((r.word.as_str(), w)),
                 }
             }
             if !hits.is_empty() {
                 hits.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal).then(a.0.cmp(b.0)));
-                return hits;
+                return (lv, hits);
             }
         }
-        Vec::new()
+        (Level::Global, Vec::new())
     }
     /// Removes the records at positions `drop` with swap_remove, patching the index instead of
     /// rebuilding it: every learning Enter on a full store trims one record, and a rebuild of
