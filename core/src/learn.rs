@@ -39,6 +39,19 @@ pub fn context_key(prefix: &str) -> String {
     }
 }
 
+/// Which lookup level answered (§1.1, §12): decides the boost size (`lm::LEARN_EPS` or the smaller global one).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Level {
+    Exact,
+    LastChar,
+    Global,
+}
+
+/// A one-character word: no global level, no last-character level, never under "^" (§12).
+pub fn is_single(word: &str) -> bool {
+    word.chars().count() == 1
+}
+
 /// One learned record (§1.3, §4). `day` is the local calendar day as days since 1970-01-01.
 /// No `Debug`: it holds learned words (s3a §6 R2, types holding input text).
 #[derive(Clone, PartialEq)]
@@ -166,6 +179,10 @@ impl Learner {
     /// records it changed, as they now are (displaced, taught, global; at most 3): what an append
     /// writes (§4).
     pub fn teach(&mut self, context: &str, reading: &[String], word: &str, displaced: &str, today: i64) -> Vec<Record> {
+        // §12 rule 6: a single character neither learns nor looks up under "^".
+        if is_single(word) && context == SENTINEL {
+            return Vec::new();
+        }
         let mut touched = Vec::with_capacity(3);
         if let Some(i) = self.find(context, reading, displaced) {
             let r = &mut self.records[i];
@@ -174,6 +191,9 @@ impl Learner {
             touched.push(r.clone());
         }
         touched.push(self.bump(context, reading, word, today, 1.0));
+        if is_single(word) {
+            return touched; // never globalizes (§12 rule 1)
+        }
         // §1.3 globalize: ≥ 2 distinct full keys (SENTINEL counts) with an active record.
         let Some(ix) = self.index.get(&reading_key(reading)) else { return touched };
         let keys: std::collections::HashSet<&str> = ix
@@ -194,22 +214,28 @@ impl Learner {
         touched
     }
     /// Words with an active record for `reading` reachable from `context` by the §1.1 lookup order
-    /// (exact, last character, global), with their decayed weight. The first level that has any
-    /// active record answers; a word found by several records of that level keeps the highest weight.
-    pub fn lookup(&self, context: &str, reading: &[String], today: i64) -> Vec<(&str, f64)> {
-        let Some(ix) = self.index.get(&reading_key(reading)) else { return Vec::new() };
+    /// (exact, last character, global), with their decayed weight, and the level that answered. The
+    /// first level that has any usable record answers; a word found by several records of that level
+    /// keeps the highest weight. Single characters skip the last-character level (§12 rule 5); a
+    /// single-character record under "^" or the global key cannot exist (rule 6: teach does not make
+    /// one, and load drops old ones).
+    pub fn lookup(&self, context: &str, reading: &[String], today: i64) -> (Level, Vec<(&str, f64)>) {
+        let Some(ix) = self.index.get(&reading_key(reading)) else { return (Level::Global, Vec::new()) };
         let last = context.chars().next_back().filter(|_| context != SENTINEL && context != GLOBAL);
-        let levels: [&dyn Fn(&str) -> bool; 3] = [
-            &|c| c == context,
-            &|c| last.is_some_and(|l| c != SENTINEL && c != GLOBAL && c.chars().next_back() == Some(l)),
-            &|c| c == GLOBAL,
+        let levels: [(Level, &dyn Fn(&str) -> bool); 3] = [
+            (Level::Exact, &|c| c == context),
+            (Level::LastChar, &|c| last.is_some_and(|l| c != SENTINEL && c != GLOBAL && c.chars().next_back() == Some(l))),
+            (Level::Global, &|c| c == GLOBAL),
         ];
-        for level in levels {
+        for (lv, level) in levels {
+            // Rule 5: no last-character level for single characters. Single-character records under "^"
+            // or the global key do not exist: teach never makes them and load drops old ones.
+            let single_barred = lv == Level::LastChar;
             let mut hits: Vec<(&str, f64)> = Vec::new();
             for &i in ix {
                 let r = &self.records[i];
                 let w = decayed(r, today);
-                if w < ACTIVE || !level(&r.context) {
+                if w < ACTIVE || !level(&r.context) || (single_barred && is_single(&r.word)) {
                     continue;
                 }
                 match hits.iter_mut().find(|h| h.0 == r.word) {
@@ -219,10 +245,10 @@ impl Learner {
             }
             if !hits.is_empty() {
                 hits.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal).then(a.0.cmp(b.0)));
-                return hits;
+                return (lv, hits);
             }
         }
-        Vec::new()
+        (Level::Global, Vec::new())
     }
     /// Removes the records at positions `drop` with swap_remove, patching the index instead of
     /// rebuilding it: every learning Enter on a full store trims one record, and a rebuild of
