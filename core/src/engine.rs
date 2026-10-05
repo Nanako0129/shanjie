@@ -456,7 +456,9 @@ impl Engine {
                 touched.extend(self.learner.teach(ctx, reading, word, displaced, today));
             }
             // Nothing touched (e.g. a single character under "^", §12): no write, unless a full
-            // rewrite is pending (a failed forget or rewrite): that is retried at every commit.
+            // rewrite is pending (a failed forget or rewrite). It is retried only by commits that reach
+            // this point: learning on and at least one re-pick (the early return above); other commits
+            // leave it pending.
             if !touched.is_empty() || self.must_rewrite {
                 self.persist(&touched);
             }

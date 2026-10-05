@@ -532,7 +532,7 @@
 ## 2026-10-05：S4 修訂二之一，第三次審查的處置
 
 - **遷移只有一處**：`learn_store::valid` 在載入時丟掉單字的全域與「^」舊紀錄（容量、`has_reading`、`words_of`、`is_empty` 都不算，第一次完整重寫後檔案裡沒有）。`Learner::lookup` 只剩規則 5：單字不走最後一字那一層。「`teach` 不會做出單字的『^』或全域紀錄」另有測試從 store 存取一輪確認。`teach` 對單字在 bump 之後就回傳，不再建全域用的 key 集合。
-- **重寫債**：上一輪「沒學到東西就不寫」讓失敗的忘記或重寫留下的待重寫，不會被「什麼都沒學」的 commit 重試。現在 `must_rewrite` 為真時仍會 `persist`；沒有 store 或沒有待重寫時照舊不寫（不建立檔案）。新測試 `store_pending_rewrite_is_retried_by_a_commit_that_learns_nothing`。
+- **重寫債**：上一輪「沒學到東西就不寫」讓失敗的忘記或重寫留下的待重寫，不會被「什麼都沒學」的 commit 重試。現在 `must_rewrite` 為真時仍會 `persist`；沒有 store 或沒有待重寫時照舊不寫（不建立檔案）。只有「學習開著、而且有改選」的 commit 會走到這裡；只送第一名或閘門暫停時的 commit 不重試，被忘記的詞會留到下一次有改選的送出（和修訂前相同）。新測試 `store_pending_rewrite_is_retried_by_a_commit_that_learns_nothing`。
 - **前文的說法更正**：`shanjie.h` 與契約原本寫成「左前文沒有漢字就不學」。實際上前文 key 是組字區裡這個詞之前的漢字加殼傳入的前文，殼傳 NULL 或閘門暫停時，組字區裡已有的漢字前文仍會讓單字學（學習開著時）與查；閘門暫停只擋學，不擋查。
 - **修正前數字重量**：用現在的指標與列集在修正前的程式（只含文件的 55980e5，程式等於 ffa9215）重跑 ㄗㄞˋ 污染測試：56 列，2 列碰撞，54 列非碰撞中 35 列輸出改變、24 列退步，產生 1 筆全域「再」。取代上面寫的「53 列、34 列」。
 - **突變**：valid 不丟「^」單字 → `single_character_pick_stays_where_it_was_taught` 失敗；`lookup` 不擋最後一字層 → 該測試與 `single_character_rules_in_the_learner` 失敗；`teach` 拿掉規則 6 → 五個測試失敗；`learn_commit` 退回只看 `touched` → 新的重寫債測試失敗。
