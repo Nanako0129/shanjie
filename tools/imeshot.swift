@@ -125,6 +125,12 @@ DispatchQueue.global().async {
     usleep(900_000)
     onMain { _ = TISSelectInputSource(src) }
     usleep(800_000)
+    // The switch can silently not take (2026-10-05: a run typed into Apple Zhuyin instead); check it.
+    let now = onMain { () -> String in
+        let cur = TISCopyCurrentKeyboardInputSource().takeRetainedValue()
+        return Unmanaged<CFString>.fromOpaque(TISGetInputSourceProperty(cur, kTISPropertyInputSourceID)).takeUnretainedValue() as String
+    }
+    guard now == sourceID else { fail("input source did not switch: wanted \(sourceID), got \(now)") }
     ensureFront()
     // IMESHOT_VIDEO=<file.mov>: record the probe region with screencapture (its dimmed overlay tells the
     // user a recording is running) from the moment the window has focus, just long enough for the steps.

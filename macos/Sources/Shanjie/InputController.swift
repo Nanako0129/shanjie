@@ -142,33 +142,14 @@ private final class PanelWindow: NSPanel {
 private enum Metrics {
     /// Section 3 "candidate bar": about 30 pt tall (a-3, la-3), corner radius half of it.
     static let barHeight: CGFloat = 30
-    /// Section 3 "selection capsule": 24 pt tall (a-3, la-3), centred in the bar.
-    static let capsuleHeight: CGFloat = 24
+    /// Section 3 "selection capsule": 24 pt tall (a-3, la-3), centred in the bar. The cell's own
+    /// spacing and fonts are `CellMetrics` in ShanjieKit.
+    static let capsuleHeight = CellMetrics.capsuleHeight
     /// Section 3: the capsule's left edge is about 3 pt from the bar's (a-3).
     static let barInset: CGFloat = 3
     /// Section 3 "cell pitch": 41 pt per single-character cell against a 37 pt capsule (a-3), so
     /// 4 pt between capsules.
     static let cellSpacing: CGFloat = 4 - 2  // our unselected cells measured 2 pt wider apart than a-3 (s-7)
-    // The gaps below are between label frames, and an NSTextField label's frame is wider than its
-    // ink (padding plus the glyph's side bearings). The values are the a-3 gaps minus what our own
-    // bar (s-3, s-7, 2026-10-05) added; s-7 then matched a-3 within 1 pt.
-    /// Section 3: capsule left edge to the number's ink, 5 pt in a-3.
-    static let numberLeading: CGFloat = 2
-    /// Section 3: number ink to candidate ink, 8 pt in a-3.
-    static let numberToCandidate: CGFloat = 2
-    /// Section 3: candidate ink to the capsule's right edge, 8 pt in a-3 (37 pt cell).
-    static let trailing: CGFloat = 5
-    /// Section 3 "name": between a mark and its name, the capsules in p-1 leave almost none; 2 pt.
-    static let candidateToName: CGFloat = 2
-    /// Section 3 font sizes: candidate 16, number 9, name 11 (initial values, "the ink of a
-    /// Han character is about 0.88 em" so 16 pt gives the 14 pt ink of a-3).
-    static let candidateFont = NSFont.systemFont(ofSize: 16)
-    static let numberFont = NSFont.systemFont(ofSize: 9)
-    /// 12, not 11: at 11 pt 「全形逗號」 measured 42 pt of ink in s-11 against 46 in p-1.
-    static let nameFont = NSFont.systemFont(ofSize: 12)
-    /// A label's ink starts about 2 pt inside its frame (s-7: the first candidate's ink sat 2 pt right
-    /// of the composed text's); the bar aligns ink, not frames.
-    static let labelInset: CGFloat = 2
 
     // Expanded grid (s3b2 sections 8, 9). The grid constants below are first values for main's
     // on-device tuning against a-4; none was measured against a screenshot (the contract's sections 1
@@ -205,81 +186,6 @@ private enum Metrics {
     static let collapseDuration: TimeInterval = 0.25
 }
 
-/// One cell of the bar: number, candidate, optional name. The selected cell is an accent-colour
-/// capsule with white text (section 2.4). A click reports the cell's position.
-private final class CellView: NSView {
-    private let number: NSTextField, candidate: NSTextField, name: NSTextField?
-    private var selected: Bool
-    private let onClick: () -> Void
-
-    /// `numberText`: the shown number; `showsNumber` false keeps its room but hides it (grid rows other
-    /// than the selected one, so the rows line up). The cell is as wide as its content.
-    init(numberText: String, showsNumber: Bool = true, text: String, note: String?,
-         selected: Bool, onClick: @escaping () -> Void) {
-        func label(_ s: String, _ font: NSFont, _ color: NSColor) -> NSTextField {
-            let t = NSTextField(labelWithString: s)
-            t.font = font
-            t.textColor = selected ? .white : color
-            t.sizeToFit()
-            return t
-        }
-        number = label(numberText, Metrics.numberFont, .secondaryLabelColor)
-        number.isHidden = !showsNumber
-        candidate = label(text, Metrics.candidateFont, .labelColor)
-        name = note.map { label($0, Metrics.nameFont, .secondaryLabelColor) }
-        self.selected = selected
-        self.onClick = onClick
-
-        var width = Metrics.numberLeading + number.frame.width + Metrics.numberToCandidate + candidate.frame.width
-        if let name { width += Metrics.candidateToName + name.frame.width }
-        width += Metrics.trailing
-        super.init(frame: NSRect(x: 0, y: 0, width: width, height: Metrics.capsuleHeight))
-
-        var x = Metrics.numberLeading
-        for (view, isNumber) in [(number, true), (candidate, false)] + (name.map { [($0, false)] } ?? []) {
-            view.setFrameOrigin(NSPoint(x: x, y: ((Metrics.capsuleHeight - view.frame.height) / 2).rounded()))
-            addSubview(view)
-            x += view.frame.width + (isNumber ? Metrics.numberToCandidate : Metrics.candidateToName)
-        }
-        setAccessibilityElement(true)
-        setAccessibilityRole(.button)
-        setAccessibilityLabel(note.map { text + " " + $0 } ?? text)
-        setAccessibilitySelected(selected)
-    }
-
-    required init?(coder: NSCoder) { fatalError("not used") }
-
-    /// Moves the selection into or out of this cell without rebuilding it: text colours, capsule,
-    /// accessibility and whether the number shows (grid rows other than the selected one hide it).
-    func update(selected: Bool, showsNumber: Bool) {
-        number.isHidden = !showsNumber
-        if selected != self.selected {
-            self.selected = selected
-            number.textColor = selected ? .white : .secondaryLabelColor
-            candidate.textColor = selected ? .white : .labelColor
-            name?.textColor = selected ? .white : .secondaryLabelColor
-            setAccessibilitySelected(selected)
-            needsDisplay = true
-        }
-    }
-
-    /// Where the candidate glyph starts, in this cell's coordinates.
-    var candidateMinX: CGFloat { candidate.frame.minX + Metrics.labelInset }
-
-    override func draw(_ dirtyRect: NSRect) {
-        guard selected else { return }
-        NSColor.controlAccentColor.setFill()
-        NSBezierPath(roundedRect: bounds, xRadius: bounds.height / 2, yRadius: bounds.height / 2).fill()
-    }
-
-    /// Set on grid cells that stay on screen while the grid collapses: their `onClick` index refers to
-    /// the old grid, so they take no clicks.
-    var ignoresMouse = false
-    override func hitTest(_ point: NSPoint) -> NSView? { ignoresMouse ? nil : super.hitTest(point) }
-    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
-    override func mouseDown(with event: NSEvent) { if !ignoresMouse { onClick() } }
-}
-
 /// The glass's one content view. Flipped, so cells are placed from the top-left and a window that
 /// grows downward leaves the first row where it was.
 private final class GridView: NSView {
@@ -312,7 +218,12 @@ final class CandidatePanelAdapter: CandidatePanel {
     private var shownTargets: [NSPoint] = []
     /// Widen-only column widths of the open grid (section 9); empty when collapsed or hidden.
     private var columnWidths: [CGFloat] = []
-    private var cells: [CellView] = []
+    /// The cells and the decision which survive an output (ShanjieKit); this class only adds and removes
+    /// the views it reports and positions them.
+    private let cellSet = CandidateCells()
+    private var cells: [CandidateCell] = []
+    /// The chevron/separator or scroll thumb currently in `row`.
+    private var decorViews: [NSView] = []
     /// True from the start of an expand or collapse animation until it ends; a `show` or `hide` in
     /// that time replaces the running animation (see `settle`). `animation` numbers the groups, so the
     /// completion of an older group cannot end a newer one.
@@ -320,7 +231,7 @@ final class CandidatePanelAdapter: CandidatePanel {
     private var animation = 0
     /// Grid cells that stay in place while the grid collapses (cv.mov: the lower rows are cut off by the
     /// shrinking window rather than vanishing); removed when the collapse ends or is replaced.
-    private var leaving: [CellView] = []
+    private var leaving: [CandidateCell] = []
     /// Views that arrive when the running animation ends rather than at its start: the chevron and
     /// separator (collapse) and the scroll thumb (expand), so they do not pop in over the moving cells.
     private var deferred: [NSView] = []
@@ -334,6 +245,7 @@ final class CandidatePanelAdapter: CandidatePanel {
         window.level = NSWindow.Level(rawValue: NSWindow.Level.popUpMenu.rawValue + 1)  // McBopomofo's value
         window.hidesOnDeactivate = false
         window.isReleasedWhenClosed = false
+        cellSet.onSelect = { [weak self] position in self?.onSelect?(position) }
         glass.contentView = row
         window.contentView = glass
     }
@@ -359,13 +271,14 @@ final class CandidatePanelAdapter: CandidatePanel {
         leaving.forEach { $0.removeFromSuperview() }
         leaving = []
         deferred.forEach { row.addSubview($0) }
+        decorViews = deferred
         deferred = []
         animating = false
     }
 
     /// Runs one expand or collapse animation: the window to `frame`, each cell to its target, with the
     /// system's default timing (no custom curve). At the end the content view takes its final size.
-    private func animate(to frame: NSRect, duration: TimeInterval, cells: [CellView], targets: [NSPoint]) {
+    private func animate(to frame: NSRect, duration: TimeInterval, cells: [CandidateCell], targets: [NSPoint]) {
         animating = true
         animation += 1
         let id = animation
@@ -399,23 +312,15 @@ final class CandidatePanelAdapter: CandidatePanel {
         let collapsing = !grid && shownColumns > 0 && window.isVisible
         let size: NSSize
         let targets: [NSPoint]
-        var newCells: [CellView] = []
+        let update = cellSet.update(candidates: candidates, notes: notes, selected: selected, first: first, columns: columns)
+        let newCells = update.cells
         var gridWidth: CGFloat = 0
         var widened = false
         var oldGridXs: [CGFloat] = []
         if inPlace {
-            for (i, cell) in cells.enumerated() { cell.update(selected: i == selected, showsNumber: showsNumber(i)) }
-            newCells = cells
             size = shownSize
             targets = shownTargets
         } else {
-            for (i, text) in candidates.enumerated() {
-                let onClick: () -> Void = { [weak self] in self?.onSelect?(i) }
-                newCells.append(CellView(numberText: String(grid ? i % columns + 1 : i + 1),
-                                         showsNumber: showsNumber(i), text: text, note: notes[i],
-                                         selected: i == selected, onClick: onClick))
-            }
-
             // Section 9: the grid's x positions and width come only from GridLayout. Widths only grow
             // while the grid stays open.
             var gridXs: [CGFloat] = []
@@ -476,12 +381,15 @@ final class CandidatePanelAdapter: CandidatePanel {
             let staying = collapsing
                 ? cells.enumerated().filter { j, _ in !(first..<first + newCells.count).contains(shownFirst + j) }.map { $0.1 }
                 : []
-            for view in row.subviews where !staying.contains(where: { $0 === view }) { view.removeFromSuperview() }
+            leaving.forEach { $0.removeFromSuperview() }
+            decorViews.forEach { $0.removeFromSuperview() }
+            decorViews = []
+            update.removed.forEach { if !staying.contains($0) { $0.removeFromSuperview() } }
             staying.forEach { $0.ignoresMouse = true }
             leaving = staying
             for (i, cell) in newCells.enumerated() {
                 cell.setFrameOrigin(starts[i])
-                row.addSubview(cell)
+                if !update.reused[i] { row.addSubview(cell) }
             }
             var decor: [NSView] = grid ? [] : chevron(barSize: size)
             if grid, total > candidates.count {
@@ -493,6 +401,7 @@ final class CandidatePanelAdapter: CandidatePanel {
             } else {
                 deferred = []
                 decor.forEach { row.addSubview($0) }
+                decorViews = decor
             }
             if shownSize != size {
                 // Collapsing keeps the grid-sized content view until the animation ends, so the cells
@@ -591,6 +500,9 @@ final class CandidatePanelAdapter: CandidatePanel {
         shownSize = .zero
         shownTargets = []
         columnWidths = []
+        cellSet.reset().forEach { $0.removeFromSuperview() }
+        decorViews.forEach { $0.removeFromSuperview() }
+        decorViews = []
         cells = []
     }
 }
