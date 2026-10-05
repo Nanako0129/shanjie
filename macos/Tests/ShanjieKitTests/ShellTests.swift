@@ -42,12 +42,11 @@ final class ShellTests: XCTestCase {
         XCTAssertTrue(c.panel.visible)
         XCTAssertTrue((2...9).contains(c.panel.items.count), "the test presses 2, so it needs 2 to 9 candidates")
         XCTAssertEqual(c.panel.selected, 0)
-        XCTAssertEqual(c.session.shell.candidates, c.panel.items)
         let second = try XCTUnwrap(c.panel.items.dropFirst().first, "fewer than two candidates")
         XCTAssertTrue(c.type("2")[0])
         XCTAssertEqual(c.client.marked, second, "the composition shows the chosen candidate")
         XCTAssertFalse(c.panel.visible)
-        XCTAssertEqual(c.session.shell.candidates, [], "the shell's candidate array is cleared")
+        XCTAssertEqual(c.panel.items, [], "the panel's candidates are cleared")
         XCTAssertEqual(c.client.text, "")
     }
 
@@ -117,7 +116,7 @@ final class ShellTests: XCTestCase {
         XCTAssertTrue(a.panel.visible)
     }
 
-    func testMouseSelectionGoesThroughTheCoreAsANumberKey() throws {
+    func testMouseClickPicksThroughTheCoreAndNeverInsertsDirectly() throws {
         let c = Controller(makeShell())
         c.session.activate()
         c.type("su3 ")
@@ -190,7 +189,7 @@ final class ShellTests: XCTestCase {
         XCTAssertFalse(c.session.send(ShanjieKey(kind: 99, ch: 0, modifiers: 0)))
         XCTAssertEqual(c.client.marked, "")
         XCTAssertFalse(c.panel.visible)
-        XCTAssertEqual(c.session.shell.candidates, [])
+        XCTAssertEqual(c.panel.items, [])
         XCTAssertFalse(c.press(Keys.enter), "the core holds no composition either")
         XCTAssertEqual(c.client.text, "")
         // The next keys start afresh: the old ㄋㄧˇ does not come back.
@@ -301,7 +300,7 @@ final class ShellTests: XCTestCase {
         XCTAssertTrue(panel.visible)
         a = nil
         XCTAssertFalse(panel.visible)
-        XCTAssertEqual(shell.candidates, [])
+        XCTAssertEqual(panel.items, [])
         XCTAssertFalse(shell.composing)
     }
 
@@ -317,7 +316,7 @@ final class ShellTests: XCTestCase {
         a.session.commitComposition()
         XCTAssertEqual(a.client.calls, aCalls)
         XCTAssertTrue(b.panel.visible, "B's candidates stay open")
-        XCTAssertFalse(b.session.shell.candidates.isEmpty, "and the shared array is intact")
+        XCTAssertFalse(b.panel.items.isEmpty, "and its candidates are intact")
         b.press(Keys.enter)
         b.press(Keys.enter)
         XCTAssertEqual(b.client.text, "你")

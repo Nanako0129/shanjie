@@ -53,7 +53,7 @@ typedef struct {
   uint32_t candidate_count;   // candidates in this output: collapsed one page (0-9), expanded the visible rows (up to 5 x candidate_columns)
   const char *const *candidates; // NULL when candidate_count is 0
   int32_t candidate_selected; // selection within this output's candidates; -1 when candidates are closed
-  uint32_t candidate_columns; // 0 = collapsed single row; > 0 = expanded grid with this many columns (6; 3 for punctuation)
+  uint32_t candidate_columns; // 0 = collapsed single row; > 0 = expanded grid with this many columns (6, 3 or 2 by the longest candidate in the whole list: at most 2 characters 6, 3-4 characters 3, 5 or more 2; 3 for punctuation; s3b2 8.7)
   uint32_t candidate_first;   // position of candidates[0] in the whole list; 0 when closed
   uint32_t candidate_total;   // length of the whole list; 0 when closed
 } ShanjieOutput;
