@@ -344,7 +344,9 @@ struct Hyp<'a> {
 
 /// Learned boost (S4 §1.4, §12): which records may boost is decided by `Learner::lookup` (single
 /// characters only at the exact full key and never under "^"). A learned word scores
-/// `best of its reading + LEARN_EPS * w / (w + 1)` for weight `w` (so a heavier record outranks a lighter one: a re-pick halves the displaced word), never
+/// `best of its reading + eps * w / (w + 1)`, eps being `LEARN_EPS` (6.0) at the exact and last-character
+/// levels and `LEARN_EPS_GLOBAL` (0.5, `Learn::eps_global`) at the global level, for weight `w`
+/// (so a heavier record outranks a lighter one: a re-pick halves the displaced word), never
 /// less than its own score. The boost enters the score only through `(1 - lambda) * lp` and the
 /// backoff term, so the bigram's liking for the common word survives a small value. Measured on the
 /// mirror run of eval/learn/cases.tsv (core/tests/engine_learn.rs, 2026-10-05; same-context sentences
@@ -363,7 +365,9 @@ pub struct Learn<'a> {
     pub learner: &'a Learner,
     pub before: &'a str,
     pub today: i64,
-    /// ε of the global level; `LEARN_EPS_GLOBAL` unless a test sweeps it.
+    /// ε of the global level: `LEARN_EPS_GLOBAL` in production; the integration tests sweep it through
+    /// `Engine::set_eps_global` (a feature or cfg(test) cannot reach integration tests, and it is one
+    /// float read per hypothesis key).
     pub eps_global: f64,
 }
 
