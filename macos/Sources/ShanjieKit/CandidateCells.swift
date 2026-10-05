@@ -45,12 +45,16 @@ public final class CandidateCell: NSView {
 
     private let numberWidth: CGFloat, candidateWidth: CGFloat, nameWidth: CGFloat
 
-    private static func measure(_ s: String, _ font: NSFont) -> (width: CGFloat, height: CGFloat) {
-        let size = NSAttributedString(string: s, attributes: [.font: font]).size()
+    private static func measure(_ s: String, _ font: NSFont) -> CGFloat {
         // Rounded up to the half point, the way a text field's frame is (it is 4 pt wider than the
         // text, rounded up to 0.5 pt), so the width matches the earlier cells.
-        return (ceil(size.width * 2) / 2, ceil(size.height))
+        ceil(NSAttributedString(string: s, attributes: [.font: font]).size().width * 2) / 2
     }
+
+    private static func lineHeight(_ font: NSFont) -> CGFloat { ceil(font.ascender - font.descender + font.leading) }
+    private static let numberHeight = lineHeight(CellMetrics.numberFont)
+    private static let candidateHeight = lineHeight(CellMetrics.candidateFont)
+    private static let nameHeight = lineHeight(CellMetrics.nameFont)
 
     /// The cell is as wide as its content; `showsNumber` false keeps the number's room but hides it
     /// (grid rows other than the selected one, so the rows line up).
@@ -61,9 +65,9 @@ public final class CandidateCell: NSView {
         self.text = text
         self.note = note
         self.isSelected = selected
-        numberWidth = Self.measure(numberText, CellMetrics.numberFont).width
-        candidateWidth = Self.measure(text, CellMetrics.candidateFont).width
-        nameWidth = note.map { Self.measure($0, CellMetrics.nameFont).width } ?? 0
+        numberWidth = Self.measure(numberText, CellMetrics.numberFont)
+        candidateWidth = Self.measure(text, CellMetrics.candidateFont)
+        nameWidth = note.map { Self.measure($0, CellMetrics.nameFont) } ?? 0
         var width = CellMetrics.numberLeading + numberWidth + CellMetrics.numberToCandidate + candidateWidth
         if note != nil { width += CellMetrics.candidateToName + nameWidth }
         width += CellMetrics.trailing
@@ -99,15 +103,14 @@ public final class CandidateCell: NSView {
             NSColor.controlAccentColor.setFill()
             NSBezierPath(roundedRect: bounds, xRadius: bounds.height / 2, yRadius: bounds.height / 2).fill()
         }
-        func put(_ s: String, _ font: NSFont, _ color: NSColor, x: CGFloat) {
-            let h = ceil(font.ascender - font.descender + font.leading)
+        func put(_ s: String, _ font: NSFont, _ h: CGFloat, _ color: NSColor, x: CGFloat) {
             let y = ((bounds.height - h) / 2).rounded()
             s.draw(at: NSPoint(x: x, y: y), withAttributes: [.font: font, .foregroundColor: isSelected ? NSColor.white : color])
         }
-        if showsNumber { put(numberText, CellMetrics.numberFont, .secondaryLabelColor, x: CellMetrics.numberLeading) }
+        if showsNumber { put(numberText, CellMetrics.numberFont, Self.numberHeight, .secondaryLabelColor, x: CellMetrics.numberLeading) }
         let cx = candidateMinX
-        put(text, CellMetrics.candidateFont, .labelColor, x: cx)
-        if let note { put(note, CellMetrics.nameFont, .secondaryLabelColor, x: cx + candidateWidth + CellMetrics.candidateToName) }
+        put(text, CellMetrics.candidateFont, Self.candidateHeight, .labelColor, x: cx)
+        if let note { put(note, CellMetrics.nameFont, Self.nameHeight, .secondaryLabelColor, x: cx + candidateWidth + CellMetrics.candidateToName) }
     }
 
     public override func hitTest(_ point: NSPoint) -> NSView? { ignoresMouse ? nil : super.hitTest(point) }
@@ -129,7 +132,6 @@ public final class CandidateCells {
         public let cells: [CandidateCell]
         /// `reused[i]` is true when `cells[i]` was already on screen.
         public let reused: [Bool]
-        public let added: [CandidateCell]
         public let removed: [CandidateCell]
     }
 
@@ -148,7 +150,6 @@ public final class CandidateCells {
         let sameMode = newColumns == columns
         var next: [CandidateCell] = []
         var reused: [Bool] = []
-        var added: [CandidateCell] = []
         var kept = Set<ObjectIdentifier>()
         for (i, text) in candidates.enumerated() {
             let numberText = String(grid ? i % newColumns + 1 : i + 1)
@@ -167,14 +168,13 @@ public final class CandidateCells {
                 cell.onClick = { [weak self] position in self?.onSelect?(position) }
                 next.append(cell)
                 reused.append(false)
-                added.append(cell)
             }
         }
         let removed = cells.filter { !kept.contains(ObjectIdentifier($0)) }
         cells = next
         columns = newColumns
         first = newFirst
-        return Update(cells: next, reused: reused, added: added, removed: removed)
+        return Update(cells: next, reused: reused, removed: removed)
     }
 
     /// Forgets every cell (the panel hides) and returns them for removal.
