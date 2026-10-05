@@ -751,6 +751,14 @@ impl Engine {
             return self.handled();
         }
         if self.syls.is_empty() {
+            // 22a (user report 2026-10-05): a tone key on an empty composition types its mark
+            // (ˊ ˇ ˋ ˙) as Apple Zhuyin does, instead of passing the digit on. Unlike Apple, which
+            // commits the mark at once, it goes into the composition like punctuation (s3d), so
+            // Backspace can still take it back and Enter sends it with the sentence (user's choice).
+            if let (KeyKind::Char, Some(t)) = (k.kind, tone) {
+                let mark = TONE_MARKS[t];
+                return self.insert_token(format!("{PUNCT_PREFIX}{mark}"), Some(mark.to_string()));
+            }
             return self.passthrough(String::new()); // 22
         }
         let n = self.syls.len();
