@@ -93,6 +93,14 @@ int32_t shanjie_engine_learning_open(ShanjieEngine *engine, const char *dir);
 //   Also 3 when no learning_open has succeeded on this engine (no file it could have deleted); memory
 //   and pending learns are dropped anyway.
 int32_t shanjie_engine_learning_clear(ShanjieEngine *engine);
+// A single-character pick is learned, and a single-character record looked up, only under a full
+//   context key made of Han characters: the last <= 2 Han characters before the word, taken from the
+//   composition text before it AND the left context from set_left_context. When no Han character
+//   precedes the word (sentence start, after punctuation or ASCII) the key is "^" and a single
+//   character is neither learned nor looked up. With a NULL left context, or a paused gate that makes
+//   the shell pass NULL, keys that follow Han characters typed in the same composition still teach
+//   (if learning is on) and look up. set_learning(0) stops teaching only; it does not stop lookup.
+//   Words of 2+ characters are unaffected (docs/contracts/s4-learning.md section 12).
 // Learning happens only at a commit (Enter, a key the engine passes through after committing, or the
 //   40-syllable auto-commit), never on shanjie_engine_reset or Esc, and never for punctuation picks.
 // Writes: a learning commit appends only the records it changed; a full rewrite happens on a forget,
