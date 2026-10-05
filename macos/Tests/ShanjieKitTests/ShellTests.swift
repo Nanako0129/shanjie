@@ -42,12 +42,11 @@ final class ShellTests: XCTestCase {
         XCTAssertTrue(c.panel.visible)
         XCTAssertTrue((2...9).contains(c.panel.items.count), "the test presses 2, so it needs 2 to 9 candidates")
         XCTAssertEqual(c.panel.selected, 0)
-        XCTAssertEqual(c.session.shell.candidates, c.panel.items)
         let second = try XCTUnwrap(c.panel.items.dropFirst().first, "fewer than two candidates")
         XCTAssertTrue(c.type("2")[0])
         XCTAssertEqual(c.client.marked, second, "the composition shows the chosen candidate")
         XCTAssertFalse(c.panel.visible)
-        XCTAssertEqual(c.session.shell.candidates, [], "the shell's candidate array is cleared")
+        XCTAssertEqual(c.panel.items, [], "the panel's candidates are cleared")
         XCTAssertEqual(c.client.text, "")
     }
 
@@ -68,6 +67,56 @@ final class ShellTests: XCTestCase {
         XCTAssertEqual(c.client.lineCursor, 1)
     }
 
+    /// The client's lineRect is a synchronous IPC: a selection move in the grid reuses the last answer,
+    /// a new syllable asks again.
+    func testLineRectIsNotAskedAgainForSelectionMoves() {
+        let c = Controller(makeShell())
+        c.session.activate()
+        c.type("su3 ")
+        XCTAssertEqual(c.client.lineAsks, 1)
+        XCTAssertTrue(c.press(125))  // ↓ expands
+        XCTAssertTrue(c.press(125))  // ↓ one row
+        XCTAssertTrue(c.press(124))  // → one cell
+        XCTAssertEqual(c.client.lineAsks, 1, "selection moves must not ask the client again")
+        XCTAssertEqual(c.panel.lineRect, c.client.line)
+        c.type("cl3 ")
+        XCTAssertGreaterThan(c.client.lineAsks, 1, "a new composition asks again")
+    }
+
+    /// s3b2 section 8: down expands (the panel is told the columns, first and total); a click on a
+    /// lower row picks that cell, and after a scroll the position counts from `first`.
+    func testExpandedGridReachesThePanelAndAClickPicksTheCell() throws {
+        let c = Controller(makeShell())
+        c.session.activate()
+        c.type("g4 ")  // ㄕˋ has more than four pages of candidates
+        XCTAssertEqual(c.panel.columns, 0)
+        XCTAssertEqual(c.panel.items.count, 9)
+        let down: UInt16 = 125
+        XCTAssertTrue(c.press(down))
+        XCTAssertEqual(c.panel.columns, 9)
+        XCTAssertEqual(c.panel.first, 0)
+        XCTAssertGreaterThan(c.panel.total, 45)
+        XCTAssertEqual(c.panel.items.count, 45)
+        XCTAssertEqual(c.panel.selected, 0)
+        let lower = c.panel.items[11]   // second row, third column
+        c.panel.click(11)
+        XCTAssertFalse(c.panel.visible)
+        XCTAssertEqual(c.client.marked, lower)
+        XCTAssertEqual(c.client.text, "")
+    }
+
+    func testClickAfterScrollingCountsFromFirst() {
+        let c = Controller(makeShell())
+        c.session.activate()
+        c.type("g4 ")
+        for _ in 0..<6 { c.press(125) }   // expand, then five rows down: the sixth row scrolls the grid
+        XCTAssertEqual(c.panel.first, 9)
+        let target = c.panel.items[3]
+        c.panel.click(3)
+        XCTAssertEqual(c.client.marked, target)
+        XCTAssertFalse(c.panel.visible)
+    }
+
     func testClickByNonOwnerOrOutOfPageDoesNothing() {
         let shell = makeShell()
         let a = Controller(shell), b = Controller(shell)
@@ -83,7 +132,7 @@ final class ShellTests: XCTestCase {
         XCTAssertTrue(a.panel.visible)
     }
 
-    func testMouseSelectionGoesThroughTheCoreAsANumberKey() throws {
+    func testMouseClickPicksThroughTheCoreAndNeverInsertsDirectly() throws {
         let c = Controller(makeShell())
         c.session.activate()
         c.type("su3 ")
@@ -168,7 +217,7 @@ final class ShellTests: XCTestCase {
         XCTAssertFalse(c.session.send(ShanjieKey(kind: 99, ch: 0, modifiers: 0)))
         XCTAssertEqual(c.client.marked, "")
         XCTAssertFalse(c.panel.visible)
-        XCTAssertEqual(c.session.shell.candidates, [])
+        XCTAssertEqual(c.panel.items, [])
         XCTAssertFalse(c.press(Keys.enter), "the core holds no composition either")
         XCTAssertEqual(c.client.text, "")
         // The next keys start afresh: the old ㄋㄧˇ does not come back.
@@ -279,7 +328,7 @@ final class ShellTests: XCTestCase {
         XCTAssertTrue(panel.visible)
         a = nil
         XCTAssertFalse(panel.visible)
-        XCTAssertEqual(shell.candidates, [])
+        XCTAssertEqual(panel.items, [])
         XCTAssertFalse(shell.composing)
     }
 
@@ -295,7 +344,7 @@ final class ShellTests: XCTestCase {
         a.session.commitComposition()
         XCTAssertEqual(a.client.calls, aCalls)
         XCTAssertTrue(b.panel.visible, "B's candidates stay open")
-        XCTAssertFalse(b.session.shell.candidates.isEmpty, "and the shared array is intact")
+        XCTAssertFalse(b.panel.items.isEmpty, "and its candidates are intact")
         b.press(Keys.enter)
         b.press(Keys.enter)
         XCTAssertEqual(b.client.text, "你")

@@ -118,7 +118,7 @@ fn highlight(e: &mut Engine, mut o: Output, word: &str) -> Output {
         if o.candidates[o.selected.unwrap()] == word {
             return o;
         }
-        o = e.key(k(KeyKind::Down)).unwrap();
+        o = e.key(k(KeyKind::Right)).unwrap();
     }
     panic!("candidate not found");
 }
@@ -718,6 +718,25 @@ fn row_enter_learns() {
     let o = e.key(k(KeyKind::Enter)).unwrap();
     assert_eq!((o.commit.as_str(), n_records(&e)), ("欣", 1));
 }
+/// s3b2 8.2: a mouse pick on the expanded grid goes through the same choose() as Enter.
+#[test]
+fn row_expanded_pick_equals_enter() {
+    let mut a = tiny(TINY, TINY);
+    // §12 rule 6: a single character learns only after Han text, as `picked()` sets up.
+    a.set_left_context(TAUGHT_AFTER);
+    type_syls(&mut a, "ㄒㄧㄣ");
+    let o = a.key(k(KeyKind::Space)).unwrap();
+    assert_eq!(o.candidates[1], "欣");
+    let o = a.key(k(KeyKind::Down)).unwrap();
+    assert_eq!((o.columns, o.first), (9, 0));
+    let o = a.pick(1).unwrap().unwrap();
+    assert_eq!((o.preedit.as_str(), o.selected), ("欣", None));
+    let ca = a.key(k(KeyKind::Enter)).unwrap().commit;
+    let mut b = picked();
+    let cb = b.key(k(KeyKind::Enter)).unwrap().commit;
+    assert_eq!((ca.as_str(), n_records(&a)), ("欣", 1));
+    assert!(ca == cb && a.learner().records() == b.learner().records(), "pick and Enter learn the same records");
+}
 #[test]
 fn row_rule21_passthrough_commit_learns() {
     let mut e = picked();
@@ -782,7 +801,7 @@ fn row_punctuation_replacement_does_not_learn() {
     let mut e = tiny(TINY, TINY);
     e.key(Key::ch(',', MOD_SHIFT)).unwrap();
     e.key(k(KeyKind::Space)).unwrap();
-    let o = e.key(k(KeyKind::Down)).unwrap();
+    let o = e.key(k(KeyKind::Right)).unwrap();
     let alt = o.candidates[o.selected.unwrap()].clone();
     assert_ne!(alt, "，");
     e.key(k(KeyKind::Enter)).unwrap();
@@ -1405,7 +1424,7 @@ fn perf_full_store_per_key_and_enter_with_write() {
         type_syls(&mut e, &s.join(" "));
         let o = e.key(k(KeyKind::Space)).unwrap();
         assert!(o.candidates.len() > 1, "a second candidate to re-pick");
-        e.key(k(KeyKind::Down)).unwrap();
+        e.key(k(KeyKind::Right)).unwrap();
         e.key(k(KeyKind::Enter)).unwrap();
         let before: Vec<Record> = if first.is_some() { e.learner().records().to_vec() } else { Vec::new() };
         let t = Instant::now();

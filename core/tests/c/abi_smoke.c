@@ -150,6 +150,38 @@ static int run_punct(const char *dir) {
   return 0;
 }
 
+/* s3b2 section 8: expand with DOWN, then mouse pick. Fields are read through the header's struct, so
+ * a reordered Rust struct fails here. */
+static int run_grid(const char *dir) {
+  static ShanjieOutput dummy;
+  ShanjieEngine *e = 0;
+  ShanjieOutput *o = 0;
+  uint32_t total;
+  CHECK(601, shanjie_engine_new(dir, 0, &e) == 0 && e != 0);
+  CHECK(602, type(e, "su3"));
+  CHECK(603, shanjie_engine_key(e, kind_key(2u), &o) == 0 && o != 0); /* SPACE opens, collapsed */
+  CHECK(604, o->candidate_columns == 0 && o->candidate_first == 0 && o->candidate_count == 9);
+  total = o->candidate_total;
+  CHECK(605, total > 9);
+  shanjie_output_free(o);
+  CHECK(606, shanjie_engine_key(e, kind_key(10u), &o) == 0 && o != 0); /* DOWN expands */
+  CHECK(607, o->candidate_columns == 9 && o->candidate_first == 0 && o->candidate_total == total);
+  CHECK(608, o->candidate_selected == 0 && o->candidate_count == (total < 9u * 5u ? total : 9u * 5u));
+  shanjie_output_free(o);
+  o = &dummy;
+  CHECK(609, shanjie_engine_pick(e, 1000u, &o) == 2 && o == 0);
+  CHECK(610, shanjie_engine_pick(0, 0u, &o) == 1 && o == 0);
+  CHECK(611, shanjie_engine_pick(e, 0u, 0) == 1);
+  CHECK(612, shanjie_engine_pick(e, 1u, &o) == 0 && o != 0);
+  CHECK(613, o->handled == 1 && o->candidate_count == 0 && o->candidate_columns == 0 && o->candidate_total == 0);
+  CHECK(614, str_eq(o->commit, "") && !str_eq(o->preedit, ""));
+  shanjie_output_free(o);
+  o = &dummy;
+  CHECK(615, shanjie_engine_pick(e, 0u, &o) == 2 && o == 0); /* closed */
+  shanjie_engine_free(e);
+  return 0;
+}
+
 /* S4: argument checks of the five learning functions. `learn_dir` (optional) is an empty, writable
  * directory for the calls that touch the learning file. */
 static int run_learn(const char *dir, const char *learn_dir) {
@@ -195,6 +227,7 @@ int main(int argc, char **argv) {
   if (rc == 0) rc = run(argv[1], 1, "ne3hz3", "ne3", 200);
   if (rc == 0) rc = run_lm(argv[1], argv[2], "/nonexistent/shanjie-missing.sjlm");
   if (rc == 0) rc = run_punct(argv[1]);
+  if (rc == 0) rc = run_grid(argv[1]);
   if (rc == 0) rc = run_learn(argv[1], argc == 4 ? argv[3] : 0);
   shanjie_engine_free(0);
   shanjie_output_free(0);
