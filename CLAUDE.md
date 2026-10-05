@@ -53,4 +53,9 @@
 
 ## 已知的系統問題
 
+- **安全輸入讓第三方輸入法反灰**（2026-10-05）：只要有任何程式開著安全輸入（密碼欄、Terminal 的 Secure Keyboard Entry；使用者說用過 Chrome 相關工具之後會出現），macOS 就把善解、小麥在選單裡反灰。
+  - `ioreg -l -w 0 | grep kCGSSessionSecureInputPID` 的 PID **不一定是持有者**：持有者是沒有視窗的背景程式時，報的是前景 App（實測）。
+  - 判斷法：切到別的 App 再查。PID 跟著前景變，就是背景程式；PID 不變，才是那個 App。
+  - 請使用者讓那個程式離開密碼欄或重開它；不要替使用者結束程式。重現用 `tools/secure-input.swift`。
+
 - **Caps Lock 切換輸入法偶爾失效**（任何輸入法都切不動、Ctrl+Space 正常）：是 macOS 的問題，不是善解。安裝後不需要做任何步驟。使用者回報時，請使用者在「系統設定 → 輔助使用 → 鍵盤」打開慢速按鍵、按一次 Caps Lock、再關掉。用指令自動化試過都無效（`hidutil` 的 `SlowKeysDelay` 設不進去；`defaults write` 寫得進去但系統不會即時套用；程式送的 Caps Lock 不會觸發切換），詳見 `docs/research-log.md`。
