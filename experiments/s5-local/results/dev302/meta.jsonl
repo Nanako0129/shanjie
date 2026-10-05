@@ -1,0 +1,4 @@
+{"runner": "run_laya", "ctx": "none", "conds": "L-noul,L-choice-fwd,L-choice-rev,L-pos", "load_s": 0.476, "peak_mb": 1119.2, "load_note": "idle window"}
+{"runner": "run_ll", "model": "Q-ll", "ctx": "none", "load_s": 0.466, "peak_mb": 1176.4, "load_note": "idle window"}
+{"runner": "run_ll", "model": "B1-ll", "ctx": "none", "load_s": 0.41, "peak_mb": 513.4, "load_note": "idle window"}
+{"runner": "run_ll", "model": "B4-ll", "ctx": "none", "load_s": 0.527, "peak_mb": 871.1, "load_note": "idle window"}
