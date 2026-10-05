@@ -62,6 +62,18 @@ final class ShellTests: XCTestCase {
         XCTAssertEqual(c.client.text, "", "never inserted directly")
     }
 
+    /// s3a rule 22a: on an empty composition a tone key types its mark (3 gives "ˇ", not "3") into
+    /// the composition; Enter sends it.
+    func testToneKeyOnEmptyCompositionTypesItsMark() {
+        let c = Controller(makeShell())
+        c.session.activate()
+        XCTAssertEqual(c.type("3"), [true])
+        XCTAssertEqual(c.client.marked, "ˇ")
+        XCTAssertEqual(c.client.text, "")
+        _ = c.session.handle(Keys.event(36))  // Return
+        XCTAssertEqual(c.client.text, "ˇ")
+    }
+
     func testCapsLockKeyPassesWithoutChangingAnything() {
         let c = Controller(makeShell())
         c.session.activate()
@@ -141,7 +153,7 @@ final class ShellTests: XCTestCase {
         c.type("su3cl")
         XCTAssertFalse(c.session.send(ShanjieKey(kind: 1, ch: 0xD800, modifiers: 0)))  // not a scalar
         XCTAssertEqual(c.client.marked, "")
-        c.type("3")  // a tone key with nothing pending and an empty composition
+        c.type("3")  // rule 22a: puts ˇ into the composition; the Enter below sends it
         c.press(Keys.enter)
         XCTAssertFalse(c.client.text.contains("你"))
         XCTAssertEqual(c.client.marked, "")
