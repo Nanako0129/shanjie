@@ -83,10 +83,8 @@ public final class Shell {
     let learningDirectory: URL?
     /// The last `shanjie_engine_learning_open` of the current engine failed.
     var learningOpenFailed = false
-    /// The menu's two-step clear (section 4): armed by the first item, cleared by any outcome.
-    var confirmingClear = false
-    /// The last clear returned non-zero; shown in the menu until a clear succeeds.
-    var clearFailed = false
+    /// The clear's confirmation and failure windows (section 4).
+    let dialogs: LearningDialogs
 
     /// The owning session. "Still valid" means this weak reference is not nil; an address
     /// (ObjectIdentifier) is never used, as a freed controller's address can be reused.
@@ -108,14 +106,17 @@ public final class Shell {
     /// `learningDirectory`: where the core keeps learning.tsv (S4 section 4), `Shell.learningURL()`
     /// in the app; tests pass a temporary directory or nil. Required, with no default, so no caller
     /// can reach the real Application Support by omission.
+    /// `dialogs`: the clear's windows (`AlertDialogs` in the app; tests answer for the user). Required,
+    /// so a build cannot ship a clear that silently does nothing.
     /// `punctuationTable`: Apple's punctuation candidate table (s3e); tests pass another path.
     /// `punctuationNames`: Apple's punctuation names (s3f); tests pass another path.
     public init(resources: URL, panel: CandidatePanel, isSecureInput: @escaping () -> Bool,
-                layoutStore: LayoutStore, learningDirectory: URL?,
+                layoutStore: LayoutStore, learningDirectory: URL?, dialogs: LearningDialogs,
                 punctuationTable: URL = PunctuationTable.systemURL,
                 punctuationNames: URL = PunctuationNames.systemURL) {
         self.resources = resources
         self.learningDirectory = learningDirectory
+        self.dialogs = dialogs
         // Read once: the converted table never changes while the process runs, and the layout
         // switch that rebuilds the engine already blocks.
         punctuation = PunctuationTable.load(from: punctuationTable)

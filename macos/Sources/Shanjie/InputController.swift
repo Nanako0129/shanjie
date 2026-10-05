@@ -51,7 +51,7 @@ final class ShanjieInputController: IMKInputController {
     /// docs/contracts/s3b.md section 13.2 and S4 sections 3-4: the entries ShanjieKit builds
     /// (`Session.menu`). Each action has its own selector, as McBopomofo does, rather than relying
     /// on `sender` being the NSMenuItem (what IMK passes as sender is not measured here). The clear
-    /// is confirmed in the menu itself, in two steps, so it needs no window.
+    /// asks in a window (`AlertDialogs`).
     override func menu() -> NSMenu! {
         let entries = MainActor.assumeIsolated { session.menu }
         let menu = NSMenu()
@@ -67,9 +67,7 @@ final class ShanjieInputController: IMKInputController {
         switch action {
         case .layout(.standard): #selector(selectStandardLayout(_:))
         case .layout(.eten): #selector(selectEtenLayout(_:))
-        case .askClear: #selector(askClearLearning(_:))
-        case .confirmClear: #selector(confirmClearLearning(_:))
-        case .cancelClear: #selector(cancelClearLearning(_:))
+        case .clear: #selector(clearLearning(_:))
         case .toggleBackup: #selector(toggleLearningBackup(_:))
         }
     }
@@ -80,9 +78,7 @@ final class ShanjieInputController: IMKInputController {
 
     @objc func selectStandardLayout(_ sender: Any?) { perform(.layout(.standard)) }
     @objc func selectEtenLayout(_ sender: Any?) { perform(.layout(.eten)) }
-    @objc func askClearLearning(_ sender: Any?) { perform(.askClear) }
-    @objc func confirmClearLearning(_ sender: Any?) { perform(.confirmClear) }
-    @objc func cancelClearLearning(_ sender: Any?) { perform(.cancelClear) }
+    @objc func clearLearning(_ sender: Any?) { perform(.clear) }
     @objc func toggleLearningBackup(_ sender: Any?) { perform(.toggleBackup) }
 
     override func candidates(_ sender: Any!) -> [Any]! {
@@ -168,5 +164,69 @@ final class CandidatePanelAdapter: CandidatePanel {
 
     func hide() {
         panel.hide()
+    }
+}
+
+/// The clear's windows (S4 section 4). The input method is an agent app (LSUIElement): it comes
+/// forward for the window, then gives focus back to the app the user was typing in. The window is
+/// not run modally: `runModal` inside the menu action would stop the input method from serving
+/// every other app while it is open (2026-10-05 review), so the buttons call back instead.
+@MainActor
+final class AlertDialogs: NSObject, LearningDialogs {
+    private var open: NSAlert?
+    private var reply: ((Int) -> Void)?
+    /// The app to give focus back to, captured when the first window opens; a follow-up window
+    /// (the failure after a confirmed clear) keeps it, since the input method is frontmost then.
+    private var previous: NSRunningApplication?
+
+    func confirmClear(_ answer: @escaping @MainActor (Bool) -> Void) {
+        // 取消 first: it is the default button (Return), so a destructive action is never one
+        // keystroke away; 清除 is marked destructive.
+        show(.warning, DialogText.clearTitle, DialogText.clearMessage,
+             buttons: [DialogText.cancel, DialogText.clearButton], destructive: 1) { answer($0 == 1) }
+    }
+
+    func clearFailed() {
+        show(.critical, DialogText.failedTitle, DialogText.failedMessage, buttons: [DialogText.ok], destructive: nil) { _ in }
+    }
+
+    private func show(_ style: NSAlert.Style, _ title: String, _ message: String, buttons: [String],
+                      destructive: Int?, then: @escaping (Int) -> Void) {
+        guard open == nil else { return }
+        let alert = NSAlert()
+        alert.alertStyle = style
+        alert.messageText = title
+        alert.informativeText = message
+        for (i, title) in buttons.enumerated() {
+            let button = alert.addButton(withTitle: title)
+            button.tag = i
+            button.target = self
+            button.action = #selector(pressed(_:))
+            button.hasDestructiveAction = i == destructive
+        }
+        if let front = NSWorkspace.shared.frontmostApplication, front != NSRunningApplication.current {
+            previous = front
+        }
+        open = alert
+        reply = then
+        alert.layout()
+        alert.window.level = .modalPanel
+        alert.window.center()
+        NSApp.activate()
+        alert.window.makeKeyAndOrderFront(nil)
+    }
+
+    @objc private func pressed(_ sender: NSButton) {
+        guard let alert = open else { return }
+        alert.window.orderOut(nil)
+        open = nil
+        let then = reply
+        reply = nil
+        then?(sender.tag)
+        // A follow-up window (the failure) opened from `then` keeps the input method forward.
+        if open == nil {
+            previous?.activate()
+            previous = nil
+        }
     }
 }
