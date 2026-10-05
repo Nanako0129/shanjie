@@ -416,5 +416,16 @@
   - 在網格裡快速連按 ↓ 捲動到第 6 排以後：畫面上只有一個選取膠囊、在選取的位置；接著用 Enter 選字，送出的就是畫面上選取的那個候選。
 - 預算：實作加量測最多 2 輪；外觀差異超過 1 pt 又修不回來，就停下來回報。
 
-**9.1 實作結果（2026-10-05）**：系統負載在 30 分鐘內始終不低於 8（10–150），照備案在同一個負載下前後各跑新舊做法（`CandidateCellTests/testBenchmark`，200 輪，release，負載 56–63，6 次）：新做法捲動一排 p50 0.35–0.52 ms、p95 1.66–2.75 ms（3 次 ≤ 2 ms、3 次超過）；展開 45 格 p95 6.1–13.3 ms；舊做法捲動一排 p95 18.6–34.3 ms，新做法快 7–49 倍。快 3 倍以上的條件每次都成立，p95 ≤ 2 ms 與展開 ≤ 5 ms 沒有穩定達到。使用者決定先繼續，**發版前在系統負載低於 8 時重跑這個基準測試（`SHANJIE_BENCH=1 swift test -c release --package-path macos --filter testBenchmark`；沒設 `SHANJIE_BENCH=1` 時它會跳過，`make test` 不跑）；達不到就不發版**。
+**9.1 實作結果（2026-10-05）**：系統負載在 30 分鐘內始終不低於 8（10–150），照備案在同一個負載下前後各跑新舊做法（`CandidateCellTests/testBenchmark`，200 輪，release，負載 56–63，6 次）：新做法捲動一排 p50 0.35–0.52 ms、p95 1.66–2.75 ms（3 次 ≤ 2 ms、3 次超過）；展開 45 格 p95 6.1–13.3 ms；舊做法捲動一排 p95 18.6–34.3 ms，新做法快 7–49 倍。快 3 倍以上的條件每次都成立，p95 ≤ 2 ms 與展開 ≤ 5 ms 沒有穩定達到。使用者決定先繼續，**發版前在系統負載低於 8 時重跑這個基準測試（`SHANJIE_BENCH=1 swift test -c release -Xswiftc -enable-testing --package-path macos --filter testBenchmark`；沒設 `SHANJIE_BENCH=1` 時它會跳過，`make test` 不跑）；達不到就不發版**。
 
+**9.1 發版前重跑（2026-10-05，main 執行；`SHANJIE_BENCH=1 swift test -c release -Xswiftc -enable-testing --package-path macos --filter testBenchmark`，200 輪，先編好再跑）**：
+- 指令更正：原本寫的 `-c release` 編不過。測試用 `@testable import`，release 建置要加 `-Xswiftc -enable-testing`。
+- 結果，三次連跑：
+
+  | 次 | 負載 | 新做法捲動一排 p50／p95 | 展開 45 格 p95 | 舊做法捲動一排 p95 |
+  |---|---|---|---|---|
+  | 1 | 6.77 | 0.25／0.57 ms | 2.67 ms | 11.62 ms |
+  | 2 | 9.59 | 0.28／0.69 ms | 2.86 ms | 11.52 ms |
+  | 3 | 9.23 | 0.34／0.79 ms | 4.11 ms | 11.75 ms |
+
+- 第 1 次在負載低於 8 時量，捲動 p95 ≤ 2 ms、展開 p95 ≤ 5 ms 兩項都達標，發版條件成立。後兩次被測試本身推到 9 以上，也都達標。
