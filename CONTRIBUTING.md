@@ -88,10 +88,16 @@ PR 需要：
     ```
 
     輸出只有一行摘要，`top1` 是 302 句裡整句全對的句數；
-  - 要知道哪幾句變了，前後各加 `--dump before.tsv`／`--dump after.tsv`。每列是「句號、名次、候選、分數」，名次 1 是善解給的結果，比對兩邊名次 1 的列：
+  - 要知道哪幾句變了，前後各加 `--dump before.tsv`／`--dump after.tsv`。每列是「句號、名次、候選、分數」，名次 1 是善解給的結果。只比句號和候選（分數幾乎每次都會變）：
 
     ```sh
-    diff <(awk -F'\t' '$2==1' before.tsv) <(awk -F'\t' '$2==1' after.tsv)
+    diff <(awk -F'\t' '$2==1{print $1"\t"$3}' before.tsv) <(awk -F'\t' '$2==1{print $1"\t"$3}' after.tsv)
+    ```
+
+  - `--dev 302` 是 `eval/dev/` 依檔名排序後的前 302 列，只涵蓋 `user-reported.txt` 的前幾句。修的是回報的錯字時，另外跑那個檔：
+
+    ```sh
+    cargo run --release -q -p cli -- --lm data/lm/bigram.sjlm --profile chat --rows eval/dev/user-reported.txt
     ```
 
   - 只要求不退步；
@@ -99,9 +105,10 @@ PR 需要：
 - **對應的文件一起更新**：契約、`docs/PLAN.md`、README。
 - **commit 加上 DCO 簽署**（見下一節）。
 
-PR 以 merge commit 合併（不 squash，保留每個 commit 方便 `git bisect`）。合併後 GitHub 會自動刪掉 PR 的分支；本機的分支與 worktree 請自己清掉：
+PR 以 merge commit 合併（不 squash，保留每個 commit 方便 `git bisect`）。合併後 GitHub 會自動刪掉本 repo 裡的 PR 分支，但不會刪你 fork 裡的分支；fork 的分支、本機的分支與 worktree 請自己清掉：
 
 ```sh
+git push origin --delete <分支>   # 你 fork 裡的分支
 git fetch --prune
 git branch -d <分支>
 git worktree remove <worktree 路徑>   # 有用 worktree 的話
