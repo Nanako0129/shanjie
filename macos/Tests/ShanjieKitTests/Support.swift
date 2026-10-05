@@ -57,6 +57,10 @@ final class FakeClient: TextClient {
     /// Overrides for the left-context tests: no insertion point, or marked text left over.
     var selectedOverride: NSRange?
     var markedOverride: NSRange?
+    /// s3b2: the line rectangle this client reports.
+    var line: NSRect? = NSRect(x: 100, y: 200, width: 8, height: 18)
+    func lineRect() -> NSRect? { line }
+
     /// Every call of the three reading methods, and each range requested.
     private(set) var reads = 0
     private(set) var requested: [NSRange] = []
@@ -117,13 +121,19 @@ final class FakePanel: CandidatePanel {
     private(set) var items: [String] = []
     private(set) var notes: [String?] = []
     private(set) var selected = -1
+    private(set) var lineRect: NSRect?
+    var onSelect: ((Int) -> Void)?
 
-    func show(_ candidates: [String], notes: [String?], selected: Int) {
+    func show(_ candidates: [String], notes: [String?], selected: Int, lineRect: NSRect?) {
+        self.lineRect = lineRect
         visible = true
         items = candidates
         self.notes = notes
         self.selected = selected
     }
+
+    /// A mouse click on the cell at `i`, as the app's panel reports it.
+    func click(_ i: Int) { onSelect?(i) }
 
     func hide() {
         visible = false

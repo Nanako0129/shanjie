@@ -71,7 +71,7 @@ func runServer() -> Never {
     }
     // Section 5: the engine is built after the IMK server exists.
     App.shell = Shell(
-        resources: resources.absoluteURL, panel: CandidatePanelAdapter(server: server),
+        resources: resources.absoluteURL, panel: CandidatePanelAdapter(),
         isSecureInput: { IsSecureEventInputEnabled() }, layoutStore: DefaultsLayoutStore(),
         learningDirectory: Shell.learningURL(), dialogs: AlertDialogs())
     withExtendedLifetime(server) { app.run() }
