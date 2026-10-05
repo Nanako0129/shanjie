@@ -578,9 +578,11 @@ fn row22a_tone_key_on_empty_composition_types_its_mark() {
             assert_eq!(sent.commit, mark, "{name} {key}: Enter sends the mark");
             assert!(sent.preedit.is_empty());
         }
-        // Shift with a tone key is not a tone key: it stays a pass-through (or punctuation).
+        // Shift with a tone key is not a tone key: it stays a pass-through (or punctuation), and no
+        // mark appears either sent or composing.
         let o = k(&mut e, Key::ch(keys[1], MOD_SHIFT));
-        assert!(!o.commit.contains(['ˊ', 'ˇ', 'ˋ', '˙']));
+        let marks = ['ˊ', 'ˇ', 'ˋ', '˙'];
+        assert!(!o.commit.contains(marks) && !o.preedit.contains(marks), "{name}: Shift+{}", keys[1]);
     }
 }
 
