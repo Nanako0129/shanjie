@@ -222,6 +222,12 @@ class Decoding(unittest.TestCase):  # (c)
             d = P.decode(v, self.noul_answers([.2, .7, .1, .3]), 4)
             self.assertEqual((d["pick"], d["tie"], d["all_same"]), (1, False, False))
 
+    def test_v1_reads_jevs_real_noul_field(self):
+        # The shape Jev returned on 2026-10-06: {"type": "noul", "noul": p}.
+        ans = {f"q_c{n + 1}": {"type": "noul", "noul": p} for n, p in enumerate([.11, .75, .3])}
+        d = P.decode("v1", ans, 3)
+        self.assertEqual((d["pick"], d["tie"], d["all_same"]), (1, False, False))
+
     def test_v1_v3_ties_flagged_and_go_to_earlier_rank(self):
         for v in ("v1", "v3"):
             d = P.decode(v, self.noul_answers([.2, .7, .1, .7]), 4)
