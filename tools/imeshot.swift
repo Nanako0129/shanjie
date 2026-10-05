@@ -116,7 +116,7 @@ DispatchQueue.global().async {
         usleep(1_500_000)  // screencapture's recording starts about a second after launch
     }
     for (i, step) in plan.enumerated() {
-        if i > 0 { ensureFront() }
+        ensureFront()
         switch step {
         case .rapid(let n, let codes):
             // About 10 ms per key: the user cannot type while this runs (2026-10-05, "太慢了").
