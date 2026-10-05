@@ -66,8 +66,8 @@ A parse failure keeps rank 1 for that row and is counted (`unparsable`). Per-row
 | 401, 403, 404, other 4xx | Stop at once (exit 1), fixed message with the status code. |
 | 429, 5xx, timeout, connection error | Up to 3 retries after 2, 4, 8 s, then stop. |
 | Response with no per-option probabilities for any question of a request | Stop; that request is not recorded. |
-| Parse failures above 1% in a condition | Stop (the failed rows stay recorded; delete the condition's file to rerun it). |
-| Estimated spend above 1 USD | Stop. Spend = input tokens x 0.09 USD per million, from the response `usage` (or `prompt_tokens`); with no `usage`, the request JSON's character count is used as an upper-bound estimate and `tok_est` is true. The count includes records already in the output directory, not other sets. |
+| Parse failures above 1% in a condition | Checked once at least 200 items are answered in that condition, or at its end (a 20-row smoke is checked at its end). Stop (the failed rows stay recorded; delete the condition's file to rerun it). |
+| Spend at or above 1 USD | Checked before every request, so a resumed run already at the cap sends nothing; stop. Spend = input tokens x 0.09 USD per million, from the response `usage` (or `prompt_tokens`); with no `usage`, the request JSON's character count is used as an upper-bound estimate and `tok_est` is true. One cap for the whole experiment: `spent_usd(dirs)` sums every `clef-*.jsonl` under `~/.cache/shanjie/work/s5-clef/*` (all sets and the smoke `-nN` dirs) and `experiments/s5-clef/results/*`. |
 | `--limit` smoke: both C-sent first-pick ratios >= 0.95 | Stop after printing. |
 | Interrupted run | Rerun the same command; keys already in the output files are not resent. |
 

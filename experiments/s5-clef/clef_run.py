@@ -8,6 +8,7 @@ row counts, numbers, HTTP status codes and fixed strings only.
 """
 import argparse
 import datetime
+import glob
 import hashlib
 import http.client
 import json
@@ -196,9 +197,23 @@ def jobs_of(rows):
     return jobs
 
 
-def run_set(name, rows, d, client):
+def spent_usd(dirs):
+    """Total input-token cost of every clef-*.jsonl in the given output dirs (one shared cap; S5p reuses this)."""
+    return sum(r["tokens"] for d in dirs for c in CONDS
+               for r in read_recs(os.path.join(d, f"clef-{c}.jsonl"))) * PRICE_PER_TOKEN
+
+
+def known_dirs():
+    """Every Clef output this experiment may have produced: cache (cvtune, smoke -nN) and repo results."""
+    return sorted(glob.glob(os.path.join(C_CACHE, "*")) + glob.glob(os.path.join(C_RESULTS, "*")))
+
+
+PARSE_CHECK_MIN = 200  # contract section 7's 1% rule needs a sample: checked from 200 answered items, or at the condition's end
+
+
+def run_set(name, rows, d, client, dirs=()):
     os.makedirs(d, exist_ok=True)
-    spent = sum(r["tokens"] for c in CONDS for r in read_recs(os.path.join(d, f"clef-{c}.jsonl"))) * PRICE_PER_TOKEN
+    spent = spent_usd(sorted({*dirs, d}))
     for cond, items in jobs_of(rows).items():
         outp = os.path.join(d, f"clef-{cond}.jsonl")
         recs = read_recs(outp)
@@ -207,6 +222,8 @@ def run_set(name, rows, d, client):
         total = sum(len(r["keys"]) for r in recs)
         todo = [it for it in items if str(it[0]) not in done]
         for b in range(0, len(todo), s5.BATCH):
+            if spent >= BUDGET_USD:  # before sending: a resumed run that is already over budget sends nothing
+                raise Stop("budget exceeded")
             chunk = todo[b:b + s5.BATCH]
             state = {"rows": [{"context": c} for _, c, _, _ in chunk]}
             qs = {f"q{n}": {"type": "choice", "instructions": ins.format(i=n) if "{i}" in ins else ins,
@@ -231,9 +248,7 @@ def run_set(name, rows, d, client):
             fails += sum(x is None for x in parsed)
             total += len(chunk)
             spent += tok * PRICE_PER_TOKEN
-            if spent > BUDGET_USD:
-                raise Stop("budget exceeded" + (" (estimated from request size)" if est else ""))
-            if fails / total > 0.01:
+            if (total >= PARSE_CHECK_MIN or b + s5.BATCH >= len(todo)) and fails / total > 0.01:
                 raise Stop(f"parse failures above 1% in {cond} ({fails}/{total})")
         print(f"clef {name} {cond}: items={len(items)} new_requests={math.ceil(len(todo) / s5.BATCH)} spent_usd={spent:.4f}")
 
@@ -246,7 +261,7 @@ def smoke_report(d):
         pk = [x for r in recs for x in r["picks"] if x is not None]
         fp[c] = sum(x == 0 for x in pk) / len(pk) if pk else None
     a0 = (read_recs(os.path.join(d, "clef-sent-fwd.jsonl")) or [{"answers": [None]}])[0]["answers"][0]
-    ok = lambda ks: sorted(k for k in ks if isinstance(k, str) and k.isidentifier() and len(k) < 32)  # noqa: E731
+    ok = lambda ks: sorted(k for k in ks if isinstance(k, str) and k.isascii() and k.isidentifier() and len(k) < 32)  # noqa: E731
     sub = next((v for v in a0.values() if isinstance(v, dict)), {}) if isinstance(a0, dict) else {}
     print(f"smoke answer_fields={ok(a0 if isinstance(a0, dict) else [])} prob_keys={ok(sub)} "
           f"first_pick fwd={fp['sent-fwd']} rev={fp['sent-rev']}")
@@ -254,7 +269,7 @@ def smoke_report(d):
         raise Stop("C-sent first-pick ratio >= 0.95 in both orders (parser broken, or the model picks by position)")
 
 
-def main(argv=None, post=default_post, sleep=time.sleep, rows_for=load_rows, out_for=out_dir):
+def main(argv=None, post=default_post, sleep=time.sleep, rows_for=load_rows, out_for=out_dir, dirs_for=known_dirs):
     ap = argparse.ArgumentParser()
     ap.add_argument("--sets", required=True)
     ap.add_argument("--limit", type=int, default=0, help="first N rows of the set (smoke; dev302 or typing76 only)")
@@ -271,7 +286,7 @@ def main(argv=None, post=default_post, sleep=time.sleep, rows_for=load_rows, out
     client = Client(token, account, post, sleep)
     for s in sets:
         d = out_for(s, a.limit)
-        run_set(s, rows[s][:a.limit or None], d, client)
+        run_set(s, rows[s][:a.limit or None], d, client, dirs_for())
         if a.limit:
             smoke_report(d)
 
