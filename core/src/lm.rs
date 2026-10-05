@@ -2,7 +2,7 @@
 //! The Python code is ground truth; float operation order is kept on purpose (no fusing or reordering).
 //! R2: errors carry no content; nothing here formats input text.
 
-use crate::learn::{context_key, Learner};
+use crate::learn::{context_key, Learner, Level};
 use crate::{Error, Lexicon, PER_KEY};
 use std::collections::{HashMap, HashSet};
 use std::fmt;
@@ -351,6 +351,10 @@ struct Hyp<'a> {
 /// 8 of 10, 6.0 and 8.0 learned 9 of 10 (smallest value that gets there). The unlearned
 /// remainder is a 3-syllable word winning over the taught 2-syllable one.
 pub const LEARN_EPS: f64 = 6.0;
+/// Boost size for the global level only (§12): enough to break a near tie, not to override a confident
+/// language model. Chosen from the table in the contract §12 (smallest value with 0 global pollution
+/// and a non-zero global learn rate).
+pub const LEARN_EPS_GLOBAL: f64 = 0.5;
 
 /// What decoding needs to apply learning: the learner, the text just before the segment (only its
 /// last two characters matter) and today's day number.
@@ -358,6 +362,8 @@ pub struct Learn<'a> {
     pub learner: &'a Learner,
     pub before: &'a str,
     pub today: i64,
+    /// ε of the global level; `LEARN_EPS_GLOBAL` unless a test sweeps it.
+    pub eps_global: f64,
 }
 
 /// lm.decode generalized to a segment: `start` is the word before the segment (`<s>` for a sentence),
@@ -425,7 +431,7 @@ pub fn decode_segment_learned<'a>(
             // Each hypothesis's learned hits depend only on its context key, not on the entry: look
             // them up once per hypothesis (shared by key) before trying the entries.
             let hits_of: Vec<usize>;
-            let mut hits: Vec<Vec<(&str, f64)>> = Vec::new();
+            let mut hits: Vec<Vec<(&str, f64, Level)>> = Vec::new();
             if let Some(ln) = learned {
                 let mut by_ctx: HashMap<String, usize> = HashMap::new();
                 hits_of = hyps[i - l]
@@ -448,10 +454,12 @@ pub fn decode_segment_learned<'a>(
                 for (hi, h) in hyps[i - l].iter().enumerate() {
                     let (mut lp, mut pb) = (lp0, pb0);
                     if learned.is_some() {
-                        match hits[hits_of[hi]].iter().find(|(w, _)| *w == word) {
-                            Some(&(_, w)) => {
-                                let boosted = best + LEARN_EPS * (w / (w + 1.0));
-                                if boosted > lp {
+                        match hits[hits_of[hi]].iter().find(|(w, _, _)| *w == word) {
+                            Some(&(_, w, lv)) => {
+                                let eps = if lv == Level::Global { learn.map_or(0.0, |l| l.eps_global) } else { LEARN_EPS };
+                                let boosted = best + eps * (w / (w + 1.0));
+                                // eps 0 switches the level off: `best + 0` would still lift a word to a tie with the top.
+                                if eps > 0.0 && boosted > lp {
                                     lp = boosted;
                                     pb = pow10(lp);
                                 }

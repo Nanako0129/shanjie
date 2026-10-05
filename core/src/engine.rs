@@ -226,6 +226,8 @@ pub struct Engine {
     /// S4: the Han tail (≤ 2 chars) of the text before the insertion point, from `set_left_context`.
     left: String,
     learning: bool,
+    /// ε of the global learning level (§12); a test hook sweeps it.
+    eps_global: f64,
     learner: Learner,
     store: Option<LearnStore>,
     /// §4 bit0: the last full rewrite failed. Set by a failed full rewrite; cleared only by a
@@ -297,6 +299,7 @@ impl Engine {
             cands: None,
             left: String::new(),
             learning: false,
+            eps_global: crate::lm::LEARN_EPS_GLOBAL,
             learner: Learner::default(),
             store: None,
             write_failed: false,
@@ -368,6 +371,10 @@ impl Engine {
     }
 
     /// Test-purpose clock: day number to use instead of the local day.
+    /// Test hook (§12): ε of the global level.
+    pub fn set_eps_global(&mut self, eps: f64) {
+        self.eps_global = eps;
+    }
     pub fn set_today(&mut self, day: Option<i64>) {
         self.today = day;
     }
@@ -650,7 +657,7 @@ impl Engine {
                     _ => End::Eos,
                 };
                 let before = format!("{}{out}", self.left);
-                let learn = (!self.learner.is_empty()).then(|| Learn { learner: &self.learner, before: &before, today });
+                let learn = (!self.learner.is_empty()).then(|| Learn { learner: &self.learner, before: &before, today, eps_global: self.eps_global });
                 let best = decode_segment_learned(
                     &st.capped, &self.syls[from..to], &st.lm, lam, prev, end, BEAM_S1, learn.as_ref(),
                 )

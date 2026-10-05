@@ -2,8 +2,8 @@
 //! engine_lm.rs. The `store_` tests write the learning file into a temporary directory.
 use core::engine::*;
 use core::eval::{parse_rows, usable};
-use core::learn::{context_key, Learner, Record, CAPACITY, GLOBAL, PRUNE_FLOOR, SENTINEL};
-use core::lm::{CappedLexicon, Lm};
+use core::learn::{context_key, Learner, Level, Record, CAPACITY, GLOBAL, PRUNE_FLOOR, SENTINEL};
+use core::lm::{self, CappedLexicon, Lm};
 use core::{Lexicon, Syls};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
@@ -320,10 +320,17 @@ fn a2_candidate_pick_learning_on_cases_tsv() {
 /// the same-context rare sentence follows. Same code path, so it exercises what A2 cannot for them.
 #[test]
 fn a2_mirror_teach_the_other_word() {
+    let (learned_reach, wrong_reach, ..) = mirror(lm::LEARN_EPS_GLOBAL);
+    assert!(learned_reach * 100 >= wrong_reach * 80, "mirror learn rate under 80%");
+}
+
+/// (learned reachable, wrong reachable, learned, wrong) of the mirror run with global ε `eps`.
+fn mirror(eps: f64) -> (usize, usize, usize, usize) {
     let mut e = Engine::new(&root().join("data/lexicon"), L).unwrap();
     e.load_lm(&lm_path()).unwrap();
     e.set_today(Some(DAY));
     e.set_learning(true);
+    e.set_eps_global(eps);
     let (mut learned, mut wrong, mut learned_reach, mut wrong_reach) = (0, 0, 0, 0);
     for g in &groups() {
         e.learning_clear().unwrap_err(); // no store: an error (§4), memory still dropped
@@ -351,8 +358,8 @@ fn a2_mirror_teach_the_other_word() {
             learned_reach += (reach && after) as usize;
         }
     }
-    println!("mirror: learned {learned}/{wrong}; reachable keys only {learned_reach}/{wrong_reach}");
-    assert!(learned_reach * 100 >= wrong_reach * 80, "mirror learn rate under 80%");
+    println!("mirror (global eps {eps}): learned {learned}/{wrong}; reachable keys only {learned_reach}/{wrong_reach}");
+    (learned_reach, wrong_reach, learned, wrong)
 }
 
 // ---------- 3: context consistency ----------
@@ -428,31 +435,32 @@ fn keys(e: &Engine) -> Vec<String> {
 
 #[test]
 fn sentinel_one_char_and_global() {
-    let r = syls("ㄅㄚˇ");
+    // §12: only words of 2+ characters globalize, so the global parts use a two-syllable word.
+    let r = syls("ㄅㄚˇ ㄅㄚˇ");
     let mut l = Learner::default();
-    l.teach(SENTINEL, &r, "把", "爸", DAY);
+    l.teach(SENTINEL, &r, "把手", "爸爸", DAY);
     assert!(l.lookup("管把", &r, DAY).is_empty() && l.lookup("", &r, DAY).is_empty(), "sentence start is not global");
     assert_eq!(l.lookup(SENTINEL, &r, DAY).len(), 1);
     assert!(l.records().iter().all(|x| x.context != GLOBAL));
 
     let mut l = Learner::default();
-    l.teach("管把", &r, "權", "全", DAY);
-    assert_eq!(l.lookup("肯把", &r, DAY)[0].0, "權", "1-char step: same last character");
-    assert_eq!(l.lookup("管把", &r, DAY)[0].0, "權");
-    assert!(l.lookup("把", &r, DAY).is_empty() || l.lookup("把", &r, DAY)[0].0 == "權", "1-char key still shares the last char");
+    l.teach("管把", &r, "權力", "全力", DAY);
+    assert_eq!(l.lookup("肯把", &r, DAY)[0].0, "權力", "1-char step: same last character");
+    assert_eq!(l.lookup("管把", &r, DAY)[0].0, "權力");
+    assert!(l.lookup("把", &r, DAY).is_empty() || l.lookup("把", &r, DAY)[0].0 == "權力", "1-char key still shares the last char");
     assert!(l.lookup("管他", &r, DAY).is_empty() && l.lookup(SENTINEL, &r, DAY).is_empty());
     assert!(l.records().iter().all(|x| x.context != GLOBAL), "one teach never globalizes");
     // a second distinct full key globalizes; 1-char matches and repeats of the same key do not
-    l.teach("管把", &r, "權", "全", DAY);
+    l.teach("管把", &r, "權力", "全力", DAY);
     assert!(l.records().iter().all(|x| x.context != GLOBAL));
-    l.teach("肯把", &r, "權", "全", DAY);
+    l.teach("肯把", &r, "權力", "全力", DAY);
     assert_eq!(l.records().iter().filter(|x| x.context == GLOBAL).count(), 1);
-    assert_eq!(l.lookup("完全不同", &r, DAY)[0].0, "權", "global answers any context");
-    assert_eq!(l.lookup(SENTINEL, &r, DAY)[0].0, "權");
+    assert_eq!(l.lookup("完全不同", &r, DAY)[0].0, "權力", "global answers any context");
+    assert_eq!(l.lookup(SENTINEL, &r, DAY)[0].0, "權力");
     // SENTINEL counts as one of the two keys
     let mut l = Learner::default();
-    l.teach(SENTINEL, &r, "權", "全", DAY);
-    l.teach("管把", &r, "權", "全", DAY);
+    l.teach(SENTINEL, &r, "權力", "全力", DAY);
+    l.teach("管把", &r, "權力", "全力", DAY);
     assert_eq!(l.records().iter().filter(|x| x.context == GLOBAL).count(), 1);
 }
 
@@ -483,6 +491,10 @@ fn probe_rows() -> Vec<(String, Syls)> {
     parse_rows(&probe).unwrap().into_iter().map(|r| (r.sent, r.reading.unwrap())).collect()
 }
 fn dev302() -> Vec<Syls> {
+    dev302_rows().into_iter().map(|r| r.2).collect()
+}
+/// (前文, sentence, reading) of the first 302 usable dev rows.
+fn dev302_rows() -> Vec<(String, String, Syls)> {
     let lex = &shared().lex;
     let mut files: Vec<PathBuf> = std::fs::read_dir(root().join("eval/dev"))
         .unwrap()
@@ -496,7 +508,12 @@ fn dev302() -> Vec<Syls> {
     }
     let mut rows = usable(lex, rows);
     rows.truncate(302);
-    rows.into_iter().map(|r| r.reading.clone().unwrap_or_else(|| lex.to_syllables(&r.sent).unwrap())).collect()
+    rows.into_iter()
+        .map(|r| {
+            let rd = r.reading.clone().unwrap_or_else(|| lex.to_syllables(&r.sent).unwrap());
+            (r.ctx, r.sent, rd)
+        })
+        .collect()
 }
 fn commit_syls(e: &mut Engine, s: &Syls) -> String {
     commit_of(e, &s.join(" "))
@@ -597,17 +614,17 @@ fn index_words<'a>(l: &'a Learner, reading: &str) -> Vec<&'a str> {
 
 #[test]
 fn forget_removes_every_key() {
-    let r = syls("ㄒㄧㄣ");
+    let r = syls("ㄒㄧㄣ ㄅㄣ");
     let mut l = Learner::default();
-    l.teach("他", &r, "欣", "鑫", DAY);
-    l.teach(SENTINEL, &r, "欣", "鑫", DAY);
+    l.teach("他", &r, "欣奔", "鑫犇", DAY);
+    l.teach(SENTINEL, &r, "欣奔", "鑫犇", DAY);
     assert_eq!(l.records().iter().filter(|x| x.context == GLOBAL).count(), 1);
-    l.teach("他", &r, "新", "鑫", DAY);
-    l.forget(&r, "欣");
+    l.teach("他", &r, "新奔", "鑫犇", DAY);
+    l.forget(&r, "欣奔");
     assert_eq!(l.records().len(), 1, "only 新 is left");
-    assert_eq!(index_words(&l, "ㄒㄧㄣ"), ["新"]);
-    l.forget(&r, "新");
-    assert!(index_words(&l, "ㄒㄧㄣ").is_empty());
+    assert_eq!(index_words(&l, "ㄒㄧㄣ ㄅㄣ"), ["新奔"]);
+    l.forget(&r, "新奔");
+    assert!(index_words(&l, "ㄒㄧㄣ ㄅㄣ").is_empty());
 }
 
 /// Teach, see the learned word in the composition, press ⌘⌫ on it: no record is left and the
@@ -1255,6 +1272,10 @@ fn perf_full_store_per_key_and_enter_with_write() {
     let mut records = Vec::new();
     'fill: for c in contexts {
         for span in &spans {
+            // §12: a single-character global record is never written, so none is seeded.
+            if c.is_empty() && span.len() == 1 {
+                continue;
+            }
             for (word, _) in lex.entries(span).into_iter().take(3) {
                 records.push(Record { context: c.into(), reading: span.clone(), word: word.into(), weight: 1.0, day: DAY });
                 if records.len() == CAPACITY {
@@ -1338,4 +1359,233 @@ fn perf_full_store_per_key_and_enter_with_write() {
     let _ = std::fs::remove_dir_all(&dir);
     #[cfg(not(debug_assertions))]
     assert!(pk < std::time::Duration::from_millis(16) && pe < std::time::Duration::from_millis(16), "p95 over 16 ms");
+}
+
+// ---------- §12: single characters do not globalize; a smaller global boost ----------
+
+/// The same text decoded and committed with `left` as the text before it (the key is consumed by the Enter).
+fn decode(e: &mut Engine, left: &str, reading: &[String]) -> String {
+    e.set_left_context(left);
+    commit_of(e, &reading.join(" "))
+}
+/// §12 collision rule: does the text before some occurrence of `span` in the row hit a record taught under
+/// one of `taught` at the exact or 1-character level? A row whose sentence does not align one character to
+/// one syllable cannot be keyed, and is treated as colliding (listed, not gated).
+fn row_collides(ctx: &str, sent: &str, rd: &[String], span: &[String], taught: &[&str]) -> bool {
+    let chars: Vec<char> = sent.chars().collect();
+    if chars.len() != rd.len() {
+        return true;
+    }
+    rd.windows(span.len()).enumerate().filter(|(_, w)| *w == span).any(|(i, _)| {
+        let key = context_key(&format!("{ctx}{}", chars[..i].iter().collect::<String>()));
+        taught.iter().any(|t| collides(t, &key))
+    })
+}
+fn has_span(rd: &[String], span: &[String]) -> bool {
+    rd.windows(span.len()).any(|w| w == span)
+}
+
+#[test]
+fn single_character_never_globalizes_two_characters_do() {
+    let one = syls("ㄗㄞˋ");
+    let mut l = Learner::default();
+    for c in ["可以", SENTINEL, "他", "我們"] {
+        l.teach(c, &one, "再", "在", DAY);
+    }
+    assert!(l.records().iter().all(|r| r.context != GLOBAL), "a single character never gets a global record");
+    let two = syls("ㄗㄞˋ ㄐㄧㄢˋ");
+    let mut l = Learner::default();
+    for c in ["可以", SENTINEL, "他"] {
+        l.teach(c, &two, "再見", "在建", DAY);
+    }
+    assert_eq!(l.records().iter().filter(|r| r.context == GLOBAL).count(), 1, "a two-character word does");
+    // the lookup says which level answered
+    assert_eq!(l.lookup("可以", &two, DAY)[0].2, Level::Exact);
+    assert_eq!(l.lookup("不以", &two, DAY)[0].2, Level::LastChar);
+    assert_eq!(l.lookup("我們", &two, DAY)[0].2, Level::Global);
+}
+
+#[test]
+fn old_single_character_global_record_is_ignored_and_dropped_by_a_rewrite() {
+    let zai = syls("ㄗㄞˋ");
+    let old = rec(GLOBAL, "ㄗㄞˋ", "再", 1.0, DAY);
+    let l = Learner::from_records(vec![old.clone()]);
+    assert!(l.lookup("我們", &zai, DAY).is_empty(), "decoding does not see it");
+    let mut l = Learner::from_records(vec![old.clone()]);
+    l.forget(&zai, "再");
+    assert!(l.records().is_empty(), "forget still removes it");
+
+    // a file written before §12, loaded by an engine: the sentence decodes as without the record
+    let dir = tmp_dir("oldglobal");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(file_of(&dir), format!("{}\n\tㄗㄞˋ\t再\t1\t{DAY}\n", core::learn_store::HEADER)).unwrap();
+    let rd = engine().learner().records().len(); // 0: a fresh engine has nothing
+    assert_eq!(rd, 0);
+    let sent = shared().lex.to_syllables("另外現在在做").unwrap();
+    let mut plain = engine();
+    let want = decode(&mut plain, "", &sent);
+    let mut e = engine();
+    e.learning_open(&dir).unwrap();
+    assert_eq!(e.learner().records().len(), 1, "loaded as is");
+    assert_eq!(decode(&mut e, "", &sent), want, "but ignored by decoding");
+    assert!(raw(&dir).contains("再"), "the file is untouched until a rewrite");
+    // the first learning Enter after open is a full rewrite: the record is gone from the file
+    type_syls(&mut e, "ㄒㄧㄣ");
+    pick(&mut e, 1, 1, "鑫");
+    e.key(k(KeyKind::Enter)).unwrap();
+    assert!(!raw(&dir).contains("再"), "a full rewrite drops it");
+    assert_eq!(e.learning_status(), 0);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The user's case (§12): 再 re-picked under 可以 and at sentence start. Rows are replayed with their own
+/// 前文; those that reach a taught record at the exact or 1-character level are listed, not gated.
+#[test]
+fn pollution_zai_taught_under_two_contexts() {
+    let lex = &shared().lex;
+    let zai = syls("ㄗㄞˋ");
+    let mut rows: Vec<(String, String, Syls)> =
+        ["另外現在在做", "我現在在家", "他在學校"].iter().map(|s| (String::new(), s.to_string(), lex.to_syllables(s).unwrap())).collect();
+    rows.extend(dev302_rows().into_iter().filter(|r| has_span(&r.2, &zai)));
+    let mut e = engine();
+    let base: Vec<String> = rows.iter().map(|r| decode(&mut e, &r.0, &r.2)).collect();
+    let taught = ["可以", SENTINEL];
+    for c in ["可以", ""] {
+        e.set_left_context(c);
+        assert_ne!(type_syls(&mut e, "ㄗㄞˋ").preedit, "再");
+        pick(&mut e, 1, 1, "再");
+        e.key(k(KeyKind::Enter)).unwrap();
+    }
+    assert_eq!(e.learner().records().iter().filter(|r| r.word == "再" && r.context != GLOBAL).count(), 2);
+    let (mut regress, mut collided, mut checked) = (Vec::new(), Vec::new(), 0);
+    for (r, b) in rows.iter().zip(&base) {
+        let after = decode(&mut e, &r.0, &r.2);
+        if row_collides(&r.0, &r.1, &r.2, &zai, &taught) {
+            collided.push(format!("{}|{} : {} -> {}", r.0, r.1, b, after));
+        } else {
+            checked += 1;
+            if &after != b {
+                regress.push(format!("{}|{} : {} -> {}", r.0, r.1, b, after));
+            }
+        }
+    }
+    println!("global 再 records: {}", e.learner().records().iter().filter(|r| r.context == GLOBAL).count());
+    println!("rows {} (checked {checked}), colliding {}:", rows.len(), collided.len());
+    for c in &collided {
+        println!("  colliding: {c}");
+    }
+    println!("non-colliding regressions: {}", regress.len());
+    for r in &regress {
+        println!("  REGRESSION: {r}");
+    }
+    assert!(regress.is_empty(), "non-colliding rows changed: {regress:?}");
+}
+
+struct Sweep {
+    learned: usize,
+    wrong: usize,
+    regress: usize,
+    checked: usize,
+    excluded: usize,
+    groups: usize,
+}
+const SWEEP_TAUGHT: [&str; 2] = ["可以", SENTINEL];
+/// Third context: no record of the two taught keys reaches it at the exact or 1-character level.
+const THIRD: &str = "我們";
+
+/// §12 global learning and global pollution tests at global ε `eps`. Per cases.tsv group whose taught
+/// word (the pair word the span does not show by default) has 2+ characters: teach it under 可以 and
+/// ^, which makes a global record; then the group's rows (decoded after 我們) and the dev302 rows that
+/// contain the span (with their own 前文) are replayed.
+fn global_sweep(eps: f64) -> Sweep {
+    let lex = &shared().lex;
+    let mut sw = Sweep { learned: 0, wrong: 0, regress: 0, checked: 0, excluded: 0, groups: 0 };
+    let dev = dev302_rows();
+    for g in &groups() {
+        let teach = g.rows.iter().find(|r| r.kind == "teach").unwrap();
+        let (_, st, en) = span_of(&teach.sent, &g.word);
+        let span: Vec<String> = syls(&teach.reading)[st..en].to_vec();
+        if !lex.entries(&span).iter().any(|(w, _)| *w == g.other) {
+            continue;
+        }
+        let mut e = engine();
+        e.set_eps_global(eps);
+        let shown = decode(&mut e, "", &span);
+        let Some((x, y)) = [(&g.word, &g.other), (&g.other, &g.word)].into_iter().find(|(x, _)| **x != shown && x.chars().count() >= 2) else { continue };
+        sw.groups += 1;
+        let rows: Vec<&Row> = g.rows.iter().filter(|r| r.kind != "teach").collect();
+        let rd = |r: &Row| syls(&r.reading);
+        // does the row show the word it should: the taught word on rare rows if x is the cold word, else the other way
+        let wants_x = |r: &Row| (x == &g.word) == (r.kind == "rare");
+        let right = |out: &str, r: &Row| {
+            let (want, not) = if wants_x(r) { (x, y) } else { (y, x) };
+            out.contains(want.as_str()) && !out.contains(not.as_str())
+        };
+        let before: Vec<String> = rows.iter().map(|r| decode(&mut e, THIRD, &rd(r))).collect();
+        let dev_rows: Vec<&(String, String, Syls)> = dev.iter().filter(|r| has_span(&r.2, &span)).collect();
+        let dev_before: Vec<String> = dev_rows.iter().map(|r| decode(&mut e, &r.0, &r.2)).collect();
+        for c in ["可以", ""] {
+            e.set_left_context(c);
+            type_syls(&mut e, &span.join(" "));
+            pick(&mut e, span.len(), span.len(), x);
+            e.key(k(KeyKind::Enter)).unwrap();
+        }
+        assert!(e.learner().records().iter().any(|r| r.context == GLOBAL && &r.word == x), "{}: a global record", g.name);
+        for (r, b) in rows.iter().zip(&before) {
+            if row_collides(THIRD, &r.sent, &rd(r), &span, &SWEEP_TAUGHT) {
+                sw.excluded += 1;
+                continue;
+            }
+            let after = decode(&mut e, THIRD, &rd(r));
+            if wants_x(r) {
+                if !right(b, r) {
+                    sw.wrong += 1;
+                    sw.learned += right(&after, r) as usize;
+                }
+            } else {
+                sw.checked += 1;
+                let worse = right(b, r) && !right(&after, r);
+                if worse {
+                    println!("   eps {eps} {}: group row {} : {b} -> {after}  REGRESSION", g.name, r.sent);
+                }
+                sw.regress += worse as usize;
+            }
+        }
+        for (r, b) in dev_rows.iter().zip(&dev_before) {
+            if row_collides(&r.0, &r.1, &r.2, &span, &SWEEP_TAUGHT) {
+                sw.excluded += 1;
+                continue;
+            }
+            sw.checked += 1;
+            let after = decode(&mut e, &r.0, &r.2);
+            // A regression is a row that was exactly right and no longer is; a wrong row that changes is only listed.
+            if &after != b {
+                let worse = *b == r.1;
+                println!("   eps {eps} {}: dev row {}|{} : {b} -> {after}{}", g.name, r.0, r.1, if worse { "  REGRESSION" } else { "  (was wrong)" });
+                sw.regress += worse as usize;
+            }
+        }
+    }
+    sw
+}
+
+// ---- sweep (needs the §12 test hook `set_eps_global`) ----
+
+#[test]
+fn global_eps_table() {
+    println!("eps_global | global learn (learned/wrong) | global pollution regressions (checked rows, excluded rows) | mirror learn (reachable) | mirror all");
+    let mut res = Vec::new();
+    for eps in [0.0, 0.5, 1.0, 1.5, 2.0, 6.0] {
+        let s = global_sweep(eps);
+        let (lr, wr, l, w) = mirror(eps);
+        println!("{eps} | {}/{} | {} ({}, {}) | {lr}/{wr} | {l}/{w}  [groups {}]", s.learned, s.wrong, s.regress, s.checked, s.excluded, s.groups);
+        res.push((eps, s, lr, wr));
+    }
+    assert_eq!(res[0].1.learned, 0, "eps_global 0: the global level has no effect");
+    let chosen = res.iter().find(|r| r.0 == lm::LEARN_EPS_GLOBAL).expect("chosen value is in the table");
+    assert_eq!(chosen.1.regress, 0, "chosen eps_global: 0 global pollution");
+    assert!(chosen.1.learned > 0, "chosen eps_global: global learn rate not 0");
+    for r in &res {
+        assert!(r.2 * 100 >= r.3 * 80 && r.2 >= 9, "mirror learn rate must not drop below 9: {} at {}", r.2, r.0);
+    }
 }

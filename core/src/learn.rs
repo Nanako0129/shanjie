@@ -39,6 +39,20 @@ pub fn context_key(prefix: &str) -> String {
     }
 }
 
+/// Which lookup level answered (§1.1, §12): decides the boost size (`lm::LEARN_EPS` or the smaller global one).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Level {
+    Exact,
+    LastChar,
+    Global,
+}
+
+/// §12: a single-character word never globalizes, and a global record of one (written before §12) is
+/// ignored by decoding and not written back by a full rewrite.
+pub fn is_single_global(r: &Record) -> bool {
+    r.context == GLOBAL && r.word.chars().count() == 1
+}
+
 /// One learned record (§1.3, §4). `day` is the local calendar day as days since 1970-01-01.
 /// No `Debug`: it holds learned words (s3a §6 R2, types holding input text).
 #[derive(Clone, PartialEq)]
@@ -182,7 +196,7 @@ impl Learner {
             .filter(|r| r.word == word && r.context != GLOBAL && decayed(r, today) >= ACTIVE)
             .map(|r| r.context.as_str())
             .collect();
-        if keys.len() >= 2 {
+        if keys.len() >= 2 && word.chars().count() > 1 {
             let prev = self.find(GLOBAL, reading, word).map(|i| self.records[i].clone());
             let have = prev.as_ref().map_or(0.0, |r| decayed(r, today));
             let now = self.bump(GLOBAL, reading, word, today, (1.0 - have).max(0.0));
@@ -194,27 +208,28 @@ impl Learner {
         touched
     }
     /// Words with an active record for `reading` reachable from `context` by the §1.1 lookup order
-    /// (exact, last character, global), with their decayed weight. The first level that has any
-    /// active record answers; a word found by several records of that level keeps the highest weight.
-    pub fn lookup(&self, context: &str, reading: &[String], today: i64) -> Vec<(&str, f64)> {
+    /// (exact, last character, global), with their decayed weight and the level that answered. The
+    /// first level that has any active record answers; a word found by several records of that level
+    /// keeps the highest weight. Single-character global records are skipped (§12).
+    pub fn lookup(&self, context: &str, reading: &[String], today: i64) -> Vec<(&str, f64, Level)> {
         let Some(ix) = self.index.get(&reading_key(reading)) else { return Vec::new() };
         let last = context.chars().next_back().filter(|_| context != SENTINEL && context != GLOBAL);
-        let levels: [&dyn Fn(&str) -> bool; 3] = [
-            &|c| c == context,
-            &|c| last.is_some_and(|l| c != SENTINEL && c != GLOBAL && c.chars().next_back() == Some(l)),
-            &|c| c == GLOBAL,
+        let levels: [(Level, &dyn Fn(&str) -> bool); 3] = [
+            (Level::Exact, &|c| c == context),
+            (Level::LastChar, &|c| last.is_some_and(|l| c != SENTINEL && c != GLOBAL && c.chars().next_back() == Some(l))),
+            (Level::Global, &|c| c == GLOBAL),
         ];
-        for level in levels {
-            let mut hits: Vec<(&str, f64)> = Vec::new();
+        for (lv, level) in levels {
+            let mut hits: Vec<(&str, f64, Level)> = Vec::new();
             for &i in ix {
                 let r = &self.records[i];
                 let w = decayed(r, today);
-                if w < ACTIVE || !level(&r.context) {
+                if w < ACTIVE || !level(&r.context) || is_single_global(r) {
                     continue;
                 }
                 match hits.iter_mut().find(|h| h.0 == r.word) {
                     Some(h) => h.1 = h.1.max(w),
-                    None => hits.push((r.word.as_str(), w)),
+                    None => hits.push((r.word.as_str(), w, lv)),
                 }
             }
             if !hits.is_empty() {
