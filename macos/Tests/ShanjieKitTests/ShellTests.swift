@@ -62,6 +62,18 @@ final class ShellTests: XCTestCase {
         XCTAssertEqual(c.client.text, "", "never inserted directly")
     }
 
+    /// s3a rule 22a: on an empty composition a tone key types its mark (3 gives "ˇ", not "3") into
+    /// the composition; Enter sends it.
+    func testToneKeyOnEmptyCompositionTypesItsMark() {
+        let c = Controller(makeShell())
+        c.session.activate()
+        XCTAssertEqual(c.type("3"), [true])
+        XCTAssertEqual(c.client.marked, "ˇ")
+        XCTAssertEqual(c.client.text, "")
+        _ = c.session.handle(Keys.event(36))  // Return
+        XCTAssertEqual(c.client.text, "ˇ")
+    }
+
     func testCapsLockKeyPassesWithoutChangingAnything() {
         let c = Controller(makeShell())
         c.session.activate()
