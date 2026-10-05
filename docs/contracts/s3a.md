@@ -52,9 +52,9 @@
 |---|---|---|---|
 | 1 | 任何 | 帶 COMMAND、OPTION、CAPSLOCK，或帶 CONTROL 但不是 Ctrl+\ | 不處理（直通），**不改任何狀態** |
 | 2 | 任何 | §4 的標點鍵（Shift 表與單按表）、Ctrl+\ | 丟掉未完成音節、關閉候選，**把標點插入組字區的游標處**（不送出；2026-10-04 起，見 `docs/contracts/s3d-punctuation.md`；原本是「送出組字區，再送出標點」） |
-| 3 | 候選開啟 | 1–9 | 選目前頁的第 n 個（超出本頁則忽略），關閉候選 |
-| 4 | 候選開啟 | ↑↓、←→ | 移動選取（跨頁）。候選條是橫的，←→ 和系統注音一樣逐一移動（2026-10-04 使用者實測後改；原本是翻頁） |
-| 5 | 候選開啟 | 空白鍵 | 下一頁，最後一頁再按回第一頁 |
+| 3 | 候選開啟 | 1–9 | 收合：選目前頁的第 n 個（超出本頁則忽略），關閉候選。展開：1–欄數選選取所在那一列的第 n 個（該列不足 n 個則吃掉、不動作）；欄數＋1 到 9 吃掉、不動作，候選照開（s3b2 §8.2） |
+| 4 | 候選開啟 | ↑↓、←→ | 收合：↑←上一個、→下一個（跨頁），↓ 展開成網格（選取不動）。展開（6 欄，標點 3 欄）：↓ 下一列同一欄（最後一列較短時到該列最後一個，已在最後一列時不動）、↑ 上一列（在第一列時收回，選取不變）、←→ 上／下一個（跨列）。←→ 和系統注音一樣逐一移動（2026-10-04 使用者實測後改；原本是翻頁；2026-10-05 起 ↓ 改為展開，s3b2 §8.2） |
+| 5 | 候選開啟 | 空白鍵 | 收合：下一頁，最後一頁再按回第一頁。展開：和 ↓ 相同，但在最後一列時回第一列同一欄 |
 | 6 | 候選開啟 | Enter | 選目前選取的，關閉候選 |
 | 7 | 候選開啟 | Esc、Backspace | 關閉候選，不改變 |
 | 8 | 候選開啟 | 其他鍵 | 關閉候選（不改變），再從第 9 條起處理這個鍵 |
@@ -82,7 +82,7 @@
 ### 3.1 候選與固定詞
 
 - **候選範圍**：設 a＝游標位置；a 為 0 時改用「從位置 0 開始」。列出讀音等於 `音節[a−L..a]`（a 為 0 時是 `音節[0..L]`）的所有詞，L 從 `min(max_len, 可用長度)` 遞減到 1；同一個 L 內照 `lex.entries` 的順序（詞庫分數由高到低）；同一個字串只出現第一次。
-- **分頁**：每頁 9 個。開啟時在第一頁、選取第 0 個。
+- **分頁**：收合時每頁 9 個。開啟時在第一頁、選取第 0 個。展開（s3b2 §8.2）為 6 欄（標點 3 欄）的網格，輸出可見的最多 5 列。
 - **固定詞**：選了長度 L 的詞 w，就把區間 `[a−L, a)`（或 `[0, L)`）固定成 w。與既有固定詞重疊的，舊的移除。游標不動。
 - **重算**：組字區有變動就重算顯示字串。固定詞把音節切成幾段，每段空白區間各自用 `decode_beam(lex, 段, &mut NoLearning, BEAM_S1)` 取第一名，再和固定詞依序串接。現行解碼是 unigram，分數可加，所以這和「整句解碼、限制路徑經過固定詞」的第一名相同。
 - **固定詞隨編輯調整**：在游標插入或刪除音節時，完全在左邊的固定詞不動，完全在右邊的跟著平移，跨過該位置的移除。
@@ -126,9 +126,12 @@ typedef struct {
   const char *commit;         // UTF-8，要立刻插入的文字，可為空字串，不為 NULL
   const char *preedit;        // UTF-8，組字區顯示字串（未完成音節的注音插在游標處），不為 NULL
   uint32_t cursor_utf16;      // 游標在 preedit 中的位置，單位是 UTF-16 code unit（給 NSRange 用）；在未完成音節之後
-  uint32_t candidate_count;   // 目前這一頁的候選數（0–9）
+  uint32_t candidate_count;   // 這次輸出的候選數：收合時是目前這一頁（0–9），展開時是可見的列（最多 5 × candidate_columns）
   const char *const *candidates; // candidate_count 為 0 時是 NULL
-  int32_t candidate_selected; // 目前頁內的選取位置；沒開候選時為 -1
+  int32_t candidate_selected; // 在這次輸出的 candidates 裡的選取位置；沒開候選時為 -1
+  uint32_t candidate_columns; // s3b2 §8.2：0 = 收合的一列；大於 0 = 展開的網格欄數（6，標點 3）
+  uint32_t candidate_first;   // candidates[0] 在整份候選清單的位置；沒開候選時為 0
+  uint32_t candidate_total;   // 整份候選清單的數量；沒開候選時為 0
 } ShanjieOutput;
 typedef struct ShanjieEngine ShanjieEngine;
 
@@ -137,6 +140,9 @@ void    shanjie_engine_free(ShanjieEngine *engine);
 int32_t shanjie_engine_key(ShanjieEngine *engine, ShanjieKey key, ShanjieOutput **out);
 int32_t shanjie_engine_reset(ShanjieEngine *engine, uint32_t mode, ShanjieOutput **out); // mode 0 送出後清空、1 丟棄
 void    shanjie_output_free(ShanjieOutput *output);
+// s3b2 §8.2 新增：滑鼠點選。index 是這次輸出 candidates 裡的位置；核心選 candidate_first + index，走和 Enter 同一個 choose()。
+// 1 = engine 或 out 為 NULL；2 = 候選沒開或 index 超出這次輸出（狀態不變）；4 = 內部錯誤（核心丟棄組字）；非 0 時 *out 是 NULL
+int32_t shanjie_engine_pick(ShanjieEngine *engine, uint32_t index, ShanjieOutput **out);
 // S2c 新增（docs/PLAN.md §S2c）
 int32_t shanjie_engine_load_lm(ShanjieEngine *engine, const char *path);               // 不改目前的組字區顯示
 int32_t shanjie_engine_set_profile(ShanjieEngine *engine, uint32_t profile, ShanjieOutput **out); // 0 chat（預設）、1 formal；重算組字區並回傳快照

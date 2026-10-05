@@ -37,6 +37,9 @@ pub struct ShanjieOutput {
     pub candidate_count: u32,
     pub candidates: *const *const c_char,
     pub candidate_selected: i32,
+    pub candidate_columns: u32,
+    pub candidate_first: u32,
+    pub candidate_total: u32,
 }
 
 /// Opaque to C.
@@ -105,6 +108,9 @@ fn to_c(o: Output) -> Option<*mut ShanjieOutput> {
             Some(s) => i32::try_from(s).ok()?,
             None => -1,
         },
+        candidate_columns: o.columns,
+        candidate_first: o.first,
+        candidate_total: o.total,
     };
     Some(Box::into_raw(Box::new(OwnedOutput { out, _strings: strings, _ptrs: ptrs })).cast())
 }
@@ -207,6 +213,41 @@ pub unsafe extern "C" fn shanjie_engine_key(
                 // SAFETY: `out` checked non-NULL above.
                 unsafe { emit(o, out) }
             }
+            Err(_) => SHANJIE_ERR_INTERNAL,
+        }
+    });
+    if rc == SHANJIE_ERR_INTERNAL {
+        // SAFETY: forwarded caller contract.
+        unsafe { discard(engine) };
+    }
+    rc
+}
+
+/// s3b2 §8.2 mouse pick: chooses `candidate_first + index` of the last output through the same
+/// `choose()` as Enter. 2 when the candidates are closed or `index` is outside that output (state
+/// unchanged).
+///
+/// # Safety
+/// `engine` is NULL or a live handle; `out` is NULL or valid for one pointer write.
+#[no_mangle]
+pub unsafe extern "C" fn shanjie_engine_pick(
+    engine: *mut ShanjieEngine,
+    index: u32,
+    out: *mut *mut ShanjieOutput,
+) -> i32 {
+    let rc = guard(|| {
+        // SAFETY: forwarded caller contract.
+        if !unsafe { clear_out(out) } || engine.is_null() {
+            return SHANJIE_ERR_NULL;
+        }
+        // SAFETY: live handle, single-threaded use (§6).
+        let e = unsafe { &mut (*engine).0 };
+        match e.pick(index as usize) {
+            Ok(Some(o)) => {
+                // SAFETY: `out` checked non-NULL above.
+                unsafe { emit(o, out) }
+            }
+            Ok(None) => SHANJIE_ERR_INVALID,
             Err(_) => SHANJIE_ERR_INTERNAL,
         }
     });
@@ -763,6 +804,79 @@ mod tests {
     fn error_codes_and_null_frees() {
         let (ok, out, _) = run_child("child_errors", false);
         assert!(ok, "error-code child failed");
+        assert!(out.contains("1 passed"), "child test actually ran");
+    }
+
+    // ---- s3b2 8.2: expand + pick ----
+
+    /// Reads the candidates and the grid fields of a live output.
+    fn read_out(o: *mut ShanjieOutput) -> (Vec<String>, i32, u32, u32, u32, String) {
+        // SAFETY: test-only read of a live output.
+        unsafe {
+            let n = (*o).candidate_count as usize;
+            let c = (0..n).map(|i| CStr::from_ptr(*(*o).candidates.add(i)).to_str().unwrap().to_string()).collect();
+            let p = CStr::from_ptr((*o).preedit).to_str().unwrap().to_string();
+            (c, (*o).candidate_selected, (*o).candidate_columns, (*o).candidate_first, (*o).candidate_total, p)
+        }
+    }
+
+    #[test]
+    fn child_pick() {
+        if !is_child("child_pick") {
+            return;
+        }
+        // 40 one-character candidates for ㄋㄧˇ: more than the 30 the grid shows.
+        let base: String = (0..40).map(|i| format!("ㄋㄧˇ {} -1.0\n", char::from_u32(0x4E00 + i).unwrap())).collect();
+        let dir = tiny_dir("pick", base.as_bytes());
+        let e = new_engine(&dir, 0);
+        let send_out = |k: ShanjieKey| {
+            let mut o = ptr::null_mut();
+            assert!(unsafe { shanjie_engine_key(e, k, &mut o) } == 0);
+            let r = read_out(o);
+            unsafe { shanjie_output_free(o) };
+            r
+        };
+        let pick = |i: u32| {
+            let mut o: *mut ShanjieOutput = sentinel();
+            let rc = unsafe { shanjie_engine_pick(e, i, &mut o) };
+            if rc != 0 {
+                assert!(o.is_null(), "*out NULL on error");
+                return (rc, None);
+            }
+            let r = read_out(o);
+            unsafe { shanjie_output_free(o) };
+            (rc, Some(r))
+        };
+        for c in ['s', 'u', '3'] {
+            send(e, key(CHAR, c));
+        }
+        assert!(pick(0).0 == 2, "closed");
+        let collapsed = send_out(key(SPACE, '\0'));
+        assert!(collapsed.0.len() == 9 && collapsed.2 == 0 && collapsed.3 == 0 && collapsed.4 == 40);
+        let grid = send_out(key(10, '\0'));
+        assert!(grid.0.len() == 30 && grid.2 == 6 && grid.3 == 0 && grid.4 == 40 && grid.1 == 0);
+        assert!(pick(30).0 == 2 && pick(u32::MAX).0 == 2, "outside the output, state unchanged");
+        let mut o: *mut ShanjieOutput = sentinel();
+        assert!(unsafe { shanjie_engine_pick(ptr::null_mut(), 0, &mut o) } == 1 && o.is_null(), "engine NULL");
+        assert!(unsafe { shanjie_engine_pick(e, 0, ptr::null_mut()) } == 1, "out NULL");
+        // five rows down: row 5, top row 1
+        let mut last = grid;
+        for _ in 0..5 {
+            last = send_out(key(10, '\0'));
+        }
+        assert!(last.3 == 6 && last.1 == 24 && last.4 == 40 && last.0.len() == 30);
+        let want = last.0[3].clone(); // candidate_first + 3 = list[9]
+        let (rc, r) = pick(3);
+        let r = r.unwrap();
+        assert!(rc == 0 && r.5 == want && r.0.is_empty() && r.1 == -1 && r.2 == 0 && r.4 == 0);
+        assert!(pick(0).0 == 2, "closed after a pick");
+        unsafe { shanjie_engine_free(e) };
+    }
+
+    #[test]
+    fn expand_and_pick_through_the_c_abi() {
+        let (ok, out, _) = run_child("child_pick", false);
+        assert!(ok, "pick child failed");
         assert!(out.contains("1 passed"), "child test actually ran");
     }
 

@@ -12,6 +12,11 @@ struct CoreOutput {
     var cursorUTF16: Int
     var candidates: [String]
     var selected: Int
+    /// s3b2 section 8.2: 0 = collapsed single row, > 0 = expanded grid with this many columns.
+    var columns: Int
+    /// Position of `candidates[0]` in the whole list, and the whole list's length (scroll bar).
+    var first: Int
+    var total: Int
 }
 
 /// The result of a core call: an output, or the non-zero C ABI return code (carries no input).
@@ -70,6 +75,13 @@ final class CoreEngine {
         return Self.take(shanjie_engine_key(handle, key, &out), out)
     }
 
+    /// s3b2 section 8.2 mouse pick: `index` is a position in the last output's candidates. Code 2
+    /// when the candidates are closed or `index` is outside that output (state unchanged).
+    func pick(_ index: UInt32) -> CoreResult {
+        var out: UnsafeMutablePointer<ShanjieOutput>?
+        return Self.take(shanjie_engine_pick(handle, index, &out), out)
+    }
+
     /// mode 0 commits the composition then clears, 1 discards.
     func reset(mode: UInt32) -> CoreResult {
         var out: UnsafeMutablePointer<ShanjieOutput>?
@@ -102,7 +114,10 @@ final class CoreEngine {
             preedit: String(cString: o.preedit),
             cursorUTF16: Int(o.cursor_utf16),
             candidates: candidates,
-            selected: Int(o.candidate_selected)
+            selected: Int(o.candidate_selected),
+            columns: Int(o.candidate_columns),
+            first: Int(o.candidate_first),
+            total: Int(o.candidate_total)
         ))
     }
 }

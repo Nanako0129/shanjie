@@ -167,7 +167,7 @@ fn fix_word(e: &mut Engine, layout: Layout, syls: &Syls, end: usize, word: &str)
         if o.candidates[o.selected.unwrap()] == word {
             return e.key(Key::new(KeyKind::Enter)).unwrap();
         }
-        o = e.key(Key::new(KeyKind::Down)).unwrap();
+        o = e.key(Key::new(KeyKind::Right)).unwrap();
     }
     panic!("candidate not found");
 }
