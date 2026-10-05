@@ -485,6 +485,7 @@
 - 之後可以考慮在說明文件放一段「Caps Lock 切換失效時」的排除步驟，因為使用者很容易以為是輸入法的問題。
 - **更正（同日稍晚，再次發生）**：重啟上面那兩個程序、`CursorUIViewService`，關掉 Parsec、RustDesk，先按一次 Ctrl+Space，這些都沒用；負載降到平常水準仍然失效。所以第一次「重啟後恢復」應該是巧合，重啟不是修法。新觀察：失效時 Ctrl+Space 與選單切換都正常，只有 Caps Lock 這條路徑壞；輸入法選單裡目前輸入法那一段只剩「…………」。使用者說 RustDesk 遠端連線時一定會發生。Grok 與網路搜尋整理的社群紀錄（Apple 中文／日文社群、V2EX、Stack Exchange）：睡眠喚醒後或 Synergy 類跨機輸入工具使用後出現，要登出再登入才恢復。善解的 Info.plist 有宣告 `TICapsLockLanguageSwitchCapable`，和小麥相同，可以排除。修飾鍵沒有被改過。
 - **再更正（同日，第二次發生時使用者實測）**：打開「輔助使用 → 鍵盤 → 慢速按鍵」，按一次 Caps Lock，再關掉慢速按鍵，就恢復正常。使用者當時用 `hidutil property --set '{"CapsLockDelayOverride":…}'` 把 Caps Lock 的延遲設成 0（之後改成 10；macOS 預設 75 ms，見 IOHIDKeyboardFilter 的 `kCapsLockDelayMS`），main 當天在 launchd 與 crontab 裡沒有找到改它的排程。延遲過短、高負載、遠端桌面都可能觸發，確切條件未證實。
+- **自動化嘗試（同日，使用者要求每次安裝後自動做復原步驟）**：都不可行，改成壞了再處理。`hidutil property --set '{"SlowKeysDelay":100}'` 讀回仍是 null，設不進去；`defaults write com.apple.universalaccess slowKey -bool true` 寫得進去，但使用者在那 30 秒內打字完全正常，系統沒有即時套用；用 CGEvent 從 HID 層送 Caps Lock（按住 0.35 秒、送兩次），輸入方式完全沒切換，送的事件走不到 Caps Lock 切換輸入法那一層。同一天裝了多次新版，Caps Lock 都正常，「安裝會觸發」不成立。
 
 ## 2026-10-05：S4 修訂一（就地追加）的實作與驗收
 
