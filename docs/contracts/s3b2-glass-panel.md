@@ -191,7 +191,7 @@
 ## 5. 2b：展開（定案見 §8）
 
 §1 看到的蘋果行為：
-- 已經開著候選時按 ↓：展開成網格。可見 5 列並可捲動；欄數見 §8.7（單字 6 欄）；標點 3 欄。
+- 已經開著候選時按 ↓：展開成網格。可見 5 列並可捲動；欄數見 §9（一律 9 欄，一排一頁；蘋果的 6 欄與 §8.7 依最長詞決定的欄數已取代）。
 - 展開時 ↓／↑：上下移動一列；←→ 左右移動。
 - 在第一列按 ↑：收回成一列，選取不變。
 - 號碼 1–6（或 1–3）只出現在選取所在的那一列，跟著選取移動。
@@ -301,13 +301,13 @@
 
 - 核心單元測試：
   - 上表每一格的按鍵在收合與展開各一次；
-  - 展開 6 欄（最長候選 2 字以內）時按 7、8、9，標點 3 欄時按 4：候選照開、組字不變；
+  - 展開 9 欄（§9）時按 1–9：都在選取所在那一排選第 n 個，沒有「超過欄數」的數字；
   - 最後一列較短時：選取在超出它長度的欄，按 ↓ 與空白鍵，`candidate_selected` 落在最後一列的最後一個；在最後一列按空白鍵回第一列同一欄；
   - `top` 捲動；`candidate_first`／`total`／展開時的 `candidate_selected`；
-  - 標點 3 欄、一般候選的欄數依 §8.7。
+  - 一般候選與標點的欄數一律 9（§9）。
 - `ffi.rs` 的 pick 測試：成功的輸出；碼 1、2 時 `*out` 是 NULL 且狀態不變；捲動後 pick 選到 `candidate_first + index`。
 - `engine_learn.rs`：展開後在下面的列 pick，產生的待學和對同一個候選按 Enter 相同。
-- C 標頭冒煙測試 `core/tests/c/abi_smoke.c`：開候選、按 ↓ 展開，斷言 `candidate_columns == 6`、`candidate_first == 0`、`candidate_total` 等於清單長度、`candidate_selected`；透過標頭呼叫 `shanjie_engine_pick`。突變：在 Rust 結構裡對調兩個新欄位，只有這個測試失敗。
+- C 標頭冒煙測試 `core/tests/c/abi_smoke.c`：開候選、按 ↓ 展開，斷言 `candidate_columns == 9`（§9）、`candidate_first == 0`、`candidate_total` 等於清單長度、`candidate_selected`；透過標頭呼叫 `shanjie_engine_pick`。突變：在 Rust 結構裡對調兩個新欄位，只有這個測試失敗。
 - 既有測試遷移（收合時 ↓ 從「下一個」變成「展開」）：
   - 把 ↓ 當「下一個」用的改成 →，斷言不刪：`core/tests/engine_learn.rs:118`、`:735`、`:1304`，`core/tests/engine_lm.rs:170`，`core/tests/engine.rs:432`、`:563-564`、`:636-637`；
   - `core/tests/engine.rs:391-392` 改成測新的 ↓ 行為；

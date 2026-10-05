@@ -67,7 +67,7 @@ func builtinScreen() -> NSScreen? {
             .map { CGDisplayIsBuiltin(CGDirectDisplayID($0.uint32Value)) != 0 } ?? false
     }
 }
-let size = demo ? NSSize(width: 640, height: 300) : NSSize(width: 520, height: 90)
+let size = demo ? NSSize(width: 900, height: 520) : NSSize(width: 520, height: 90)
 var origin = demo ? NSPoint(x: 300, y: 300) : NSPoint(x: 300, y: 500)
 if ProcessInfo.processInfo.environment["IMESHOT_SCREEN"] == "builtin" {
     guard let b = builtinScreen() else { fail("no built-in display") }
@@ -81,6 +81,9 @@ window.title = "善解截圖探測（請不要碰鍵盤）"
 let textView = NSTextView(frame: window.contentView!.bounds)
 textView.font = NSFont.systemFont(ofSize: 22)
 textView.isAutomaticQuoteSubstitutionEnabled = false
+// Demo: the candidate panel aligns its first glyph under the text and sits about 15-18 pt left of it,
+// so the text needs room on the left or the panel is cropped out of the captured window.
+if demo { textView.textContainerInset = NSSize(width: 32, height: 16) }
 window.contentView!.addSubview(textView)
 window.makeKeyAndOrderFront(nil)
 window.makeFirstResponder(textView)
