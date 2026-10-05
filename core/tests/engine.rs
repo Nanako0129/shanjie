@@ -759,8 +759,37 @@ fn row21_other_key_commits_then_passes_through() {
 #[test]
 fn row22_empty_composition_passes_through() {
     let mut e = std();
-    for key in [Key::new(KeyKind::Tab), Key::new(KeyKind::Enter), Key::new(KeyKind::Esc), Key::new(KeyKind::Space), Key::new(KeyKind::Left), Key::new(KeyKind::Backspace), plain('6'), Key::ch('a', MOD_SHIFT)] {
+    for key in [Key::new(KeyKind::Tab), Key::new(KeyKind::Enter), Key::new(KeyKind::Esc), Key::new(KeyKind::Space), Key::new(KeyKind::Left), Key::new(KeyKind::Backspace), Key::ch('a', MOD_SHIFT)] {
         assert!(k(&mut e, key) == blank(false));
+    }
+}
+/// Row 22a: on an empty composition a tone key types its mark into the composition, like
+/// punctuation, in both layouts (Apple Zhuyin, 2026-10-05: 3 Enter 4 Enter 6 Enter 7 Enter typed
+/// "ˇ\nˋ\nˊ\n˙\n"; Apple commits at once, we keep it composing by the user's choice). Backspace
+/// takes it back; Enter sends it. A second tone key with the mark composing is rule 16 (ignored).
+#[test]
+fn row22a_tone_key_on_empty_composition_types_its_mark() {
+    for (name, layout, keys) in [("standard", Layout::Standard, ['6', '3', '4', '7']), ("eten", Layout::Eten, ['2', '3', '4', '1'])] {
+        let mut e = eng(layout);
+        for (key, mark) in keys.iter().zip(["ˊ", "ˇ", "ˋ", "˙"]) {
+            let o = k(&mut e, plain(*key));
+            assert!(o.handled, "{name} {key}");
+            assert!(o.commit.is_empty(), "{name} {key}: nothing is sent yet");
+            assert_eq!(o.preedit, mark, "{name} {key}");
+            let again = k(&mut e, plain(*key));
+            assert!(again.handled && again.commit.is_empty() && again.preedit == mark, "{name} {key}: rule 16");
+            let gone = kk(&mut e, KeyKind::Backspace);
+            assert!(gone.handled && gone.preedit.is_empty() && gone.commit.is_empty(), "{name} {key}: Backspace");
+            k(&mut e, plain(*key));
+            let sent = kk(&mut e, KeyKind::Enter);
+            assert_eq!(sent.commit, mark, "{name} {key}: Enter sends the mark");
+            assert!(sent.preedit.is_empty());
+        }
+        // Shift with a tone key is not a tone key: it stays a pass-through (or punctuation), and no
+        // mark appears either sent or composing.
+        let o = k(&mut e, Key::ch(keys[1], MOD_SHIFT));
+        let marks = ['ˊ', 'ˇ', 'ˋ', '˙'];
+        assert!(!o.commit.contains(marks) && !o.preedit.contains(marks), "{name}: Shift+{}", keys[1]);
     }
 }
 
