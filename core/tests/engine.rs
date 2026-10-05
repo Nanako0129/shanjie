@@ -619,6 +619,8 @@ fn grid_columns_follow_the_longest_candidate() {
         (&["ㄕˋ"][..], 1, 6),
         (&["ㄋㄧˇ", "ㄏㄠˇ"][..], 2, 6),
         (&["ㄅㄚ", "ㄅㄚ", "ㄅㄚ"][..], 3, 3),
+        // exactly 4 characters (an idiom): the 3-4 boundary, so moving it to 3 or 5 fails here
+        (&["ㄧ", "ㄒㄧㄣ", "ㄧ", "ㄧˋ"][..], 4, 3),
         (&["ㄅㄚ", "ㄅㄠˇ", "ㄩㄢˊ", "ㄗˇ", "ㄅㄧㄥ"][..], 5, 2),
     ] {
         let o = expanded_for(syls);
