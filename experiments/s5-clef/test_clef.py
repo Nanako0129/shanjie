@@ -41,14 +41,15 @@ def top1(q):
     return {"type": "choice", "choice": crit[0], "probabilities": probs(crit, 0)}
 
 
-def run_cli(argv, post, rows=ROWS, env=ENV, sleeps=None):
+def run_cli(argv, post, rows=ROWS, env=ENV, sleeps=None, other=()):
     out, err = io.StringIO(), io.StringIO()
     with tempfile.TemporaryDirectory() as t, mock.patch.dict(os.environ, env, clear=True), \
             contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
         code = 0
         try:
             R.cli(argv, post=post, sleep=(sleeps.append if sleeps is not None else (lambda s: None)),
-                  rows_for=lambda s: rows, out_for=lambda s, n: os.path.join(t, s))
+                  rows_for=lambda s: rows, out_for=lambda s, n: os.path.join(t, s),
+                  dirs_for=lambda: [o(t) if callable(o) else o for o in other])
         except SystemExit as e:
             code = e.code
         files = {f: open(os.path.join(t, "dev302", f), encoding="utf-8").read() for f in os.listdir(os.path.join(t, "dev302"))} \
@@ -210,7 +211,7 @@ class ErrorPaths(unittest.TestCase):  # (b)
             calls.append(1)
             return reply(top1)(path, h, body)
         with tempfile.TemporaryDirectory() as t, mock.patch.dict(os.environ, ENV, clear=True), contextlib.redirect_stdout(io.StringIO()):
-            kw = dict(post=post, sleep=lambda s: None, rows_for=lambda s: ROWS, out_for=lambda s, n: os.path.join(t, s))
+            kw = dict(post=post, sleep=lambda s: None, rows_for=lambda s: ROWS, out_for=lambda s, n: os.path.join(t, s), dirs_for=lambda: [])
             R.main(["--sets", "dev302"], **kw)
             first = len(calls)
             R.main(["--sets", "dev302"], **kw)
@@ -221,10 +222,77 @@ class ErrorPaths(unittest.TestCase):  # (b)
         code, _, _ = run_cli(["--sets", "dev302"], pricey)
         self.assertEqual(code, "s5c: stop: budget exceeded")
 
+    @staticmethod
+    def prior(t, name, tokens):
+        os.makedirs(os.path.join(t, name))
+        rec = {"keys": ["0"], "secs": 0.1, "tokens": tokens, "answers": [], "picks": [0], "agree": [None]}
+        with open(os.path.join(t, name, "clef-sent-fwd.jsonl"), "w") as f:
+            f.write(json.dumps(rec) + "\n")
+
+    def test_budget_is_one_cap_across_dirs_and_checked_before_sending(self):
+        with tempfile.TemporaryDirectory() as t:
+            self.prior(t, "cvtune", 7_000_000)       # 0.63 USD
+            self.prior(t, "dev302-n20", 5_000_000)   # 0.45 USD: 1.08 together, over the cap
+            self.assertAlmostEqual(R.spent_usd([os.path.join(t, "cvtune"), os.path.join(t, "dev302-n20")]), 1.08)
+            calls = []
+            code, text, _ = run_cli(["--sets", "dev302"], lambda p, h, b: calls.append(1) or reply(top1)(p, h, b),
+                                    other=[os.path.join(t, "cvtune"), os.path.join(t, "dev302-n20")])
+        self.assertEqual((code, calls), ("s5c: stop: budget exceeded", []))
+
+    def test_under_cap_across_dirs_still_runs(self):
+        with tempfile.TemporaryDirectory() as t:
+            self.prior(t, "cvtune", 7_000_000)
+            code, _, _ = run_cli(["--sets", "dev302"], reply(top1), other=[os.path.join(t, "cvtune")])
+        self.assertEqual(code, 0)
+
+    def test_smoke_report_prints_only_ascii_field_names(self):
+        def odd(q):
+            crit = list(q["criteria"])
+            return {"type": "choice", "choice": crit[0], "選擇": 1, "probabilities": {**probs(crit, 0), "概率": 0.0}}
+        code, text, files = run_cli(["--sets", "dev302", "--limit", "5"], reply(odd))
+        self.assertIn("選擇", files["clef-sent-fwd.jsonl"])  # stored raw in the per-row file
+        self.assertTrue(text.isascii(), text)
+        self.assertIn("answer_fields=['choice', 'probabilities', 'type']", text)
+
     def test_smoke_stop_at_095(self):
         code, text, _ = run_cli(["--sets", "dev302", "--limit", "5"], reply(top1))
         self.assertEqual(code, "s5c: stop: C-sent first-pick ratio >= 0.95 in both orders (parser broken, or the model picks by position)")
         self.assertIn("answer_fields=['choice', 'probabilities', 'type'] prob_keys=['c1', 'c2'", text)
+
+
+class ParseFailureRule(unittest.TestCase):
+    BIG = [{"i": k, "truth": f"句{k}甲", "syls": [], "ctx": "", "half": "A", "cands": [f"句{k}甲", f"句{k}乙"], "margin": 1.0}
+           for k in range(300)]
+
+    @staticmethod
+    def one_failure(q):  # exactly one sentence question fails in the whole run: row 0, forward order
+        return None if "rows[" in q["instructions"] and q["criteria"]["c1"] == "句0甲" else top1(q)
+
+    def test_single_early_failure_does_not_trip_before_200_items(self):
+        code, text, files = run_cli(["--sets", "dev302"], reply(self.one_failure), rows=self.BIG)
+        self.assertEqual(code, 0)  # 1/20 after the first batch would have stopped; 1/300 at the end passes
+        self.assertEqual(len(files["clef-sent-fwd.jsonl"].strip().split("\n")), 15)
+
+    def test_resume_does_not_retrip_on_an_old_failure(self):
+        n = []
+        def flaky(path, h, body):  # first three requests succeed (the failure is in the first), then the server dies
+            n.append(1)
+            return reply(self.one_failure)(path, h, body) if len(n) <= 3 else (503, b"")
+        with tempfile.TemporaryDirectory() as t, mock.patch.dict(os.environ, ENV, clear=True), \
+                contextlib.redirect_stdout(io.StringIO()):
+            kw = dict(sleep=lambda s: None, rows_for=lambda s: self.BIG, out_for=lambda s, k: os.path.join(t, s),
+                      dirs_for=lambda: [])
+            with self.assertRaises(R.Stop):
+                R.main(["--sets", "dev302"], post=flaky, **kw)
+            R.main(["--sets", "dev302"], post=reply(self.one_failure), **kw)  # resumes; must finish
+            recs = R.read_recs(os.path.join(t, "dev302", "clef-sent-fwd.jsonl"))
+        self.assertEqual(sum(len(r["keys"]) for r in recs), 300)
+        self.assertEqual(sum(x is None for r in recs for x in r["picks"]), 1)
+
+    def test_small_condition_is_checked_at_its_end(self):
+        code, _, _ = run_cli(["--sets", "dev302", "--limit", "20"], reply(lambda q: None if q["criteria"]["c1"] == "句0甲" and "rows[" in q["instructions"] else top1(q)),
+                             rows=self.BIG)
+        self.assertEqual(code, "s5c: stop: parse failures above 1% in sent-fwd (1/20)")
 
 
 class Decoding(unittest.TestCase):  # (c)
