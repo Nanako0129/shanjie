@@ -19,7 +19,7 @@
 //! bad header or an oversized file is renamed to `learning.tsv.corrupt` (0600, one copy). Nothing
 //! here logs: no path and no record ever leaves this module except as data.
 
-use crate::learn::{context_key, is_single_global, Record, GLOBAL};
+use crate::learn::{context_key, Record, GLOBAL};
 use std::fmt::Write as _;
 use std::fs::{self, DirBuilder, File, OpenOptions, Permissions};
 use std::io::{ErrorKind, Read, Write};
@@ -89,8 +89,7 @@ pub enum Opened {
 
 /// The five-field lines of the valid records, appended to `buf`.
 fn lines(records: &[Record], buf: &mut String) {
-    // §12: a single-character global record is never written (a full rewrite drops one from an old file).
-    for r in records.iter().filter(|r| valid(r) && !is_single_global(r)) {
+    for r in records.iter().filter(|r| valid(r)) {
         let _ = writeln!(buf, "{}\t{}\t{}\t{}\t{}", r.context, r.reading.join("-"), r.word, r.weight, r.day);
     }
 }
@@ -115,9 +114,12 @@ fn clean(s: &str) -> bool {
     !s.is_empty() && !s.chars().any(char::is_control)
 }
 
-/// Whether `r` survives a write and a read unchanged; the one rule for both directions.
+/// Whether `r` survives a write and a read unchanged; the one rule for both directions. A
+/// single-character global record (written before contract §12) is invalid: skipped at load, so it no
+/// longer counts toward anything, and absent from the first full rewrite.
 fn valid(r: &Record) -> bool {
     (r.context == GLOBAL || context_key(&r.context) == r.context)
+        && !(r.context == GLOBAL && r.word.chars().count() == 1)
         && !r.reading.is_empty()
         && r.reading.iter().all(|s| clean(s) && !s.contains('-'))
         && clean(&r.word)

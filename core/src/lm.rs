@@ -342,8 +342,9 @@ struct Hyp<'a> {
     ctx: Option<usize>,
 }
 
-/// Learned boost (S4 §1.4): a learned word scores `best of its reading + LEARN_EPS * w / (w + 1)` for
-/// weight `w` (so a heavier record outranks a lighter one: a re-pick halves the displaced word), never
+/// Learned boost (S4 §1.4, §12): which records may boost is decided by `Learner::lookup` (single
+/// characters only at the exact full key and never under "^"). A learned word scores
+/// `best of its reading + LEARN_EPS * w / (w + 1)` for weight `w` (so a heavier record outranks a lighter one: a re-pick halves the displaced word), never
 /// less than its own score. The boost enters the score only through `(1 - lambda) * lp` and the
 /// backoff term, so the bigram's liking for the common word survives a small value. Measured on the
 /// mirror run of eval/learn/cases.tsv (core/tests/engine_learn.rs, 2026-10-05; same-context sentences
@@ -431,7 +432,7 @@ pub fn decode_segment_learned<'a>(
             // Each hypothesis's learned hits depend only on its context key, not on the entry: look
             // them up once per hypothesis (shared by key) before trying the entries.
             let hits_of: Vec<usize>;
-            let mut hits: Vec<Vec<(&str, f64, Level)>> = Vec::new();
+            let mut hits: Vec<(Level, Vec<(&str, f64)>)> = Vec::new();
             if let Some(ln) = learned {
                 let mut by_ctx: HashMap<String, usize> = HashMap::new();
                 hits_of = hyps[i - l]
@@ -453,19 +454,21 @@ pub fn decode_segment_learned<'a>(
                 let (wid, pb0) = (lm.word_id(word), pow10(lp0));
                 for (hi, h) in hyps[i - l].iter().enumerate() {
                     let (mut lp, mut pb) = (lp0, pb0);
-                    if learned.is_some() {
-                        match hits[hits_of[hi]].iter().find(|(w, _, _)| *w == word) {
-                            Some(&(_, w, lv)) => {
-                                let eps = if lv == Level::Global { learn.map_or(0.0, |l| l.eps_global) } else { LEARN_EPS };
+                    if let Some(ln) = learned {
+                        let (lv, ws) = &hits[hits_of[hi]];
+                        let eps = if *lv == Level::Global { ln.eps_global } else { LEARN_EPS };
+                        // eps 0 switches the level off, for `extra` entries too: `best + 0` would
+                        // still lift a word to a tie with the top.
+                        match ws.iter().find(|(w, _)| *w == word) {
+                            Some(&(_, w)) if eps > 0.0 => {
                                 let boosted = best + eps * (w / (w + 1.0));
-                                // eps 0 switches the level off: `best + 0` would still lift a word to a tie with the top.
-                                if eps > 0.0 && boosted > lp {
+                                if boosted > lp {
                                     lp = boosted;
                                     pb = pow10(lp);
                                 }
                             }
-                            None if extra => continue,
-                            None => {}
+                            _ if extra => continue,
+                            _ => {}
                         }
                     }
                     let sc = h.score + word_term(lam, lm.prob_c(h.ctx, wid, pb), lp);
