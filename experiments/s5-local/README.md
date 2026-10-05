@@ -166,6 +166,7 @@ In this table, fixed/broken are against rank 1. "vs A-fwd" and "vs J-sent-fwd" a
   - The best is Q-ll+ctxall@tau at 87.2% vs 84.4% (net +14, p = 0.081), and Q-ll@tau at +13 (p = 0.105).
   - B1-ll@tau is +3 (p = 0.65), B4-ll@tau −4, and every Laya condition is negative.
 - **cvtune gate**: no condition above passed the discordtune rule, so the gate decides nothing. For the record, Q-ll is +41 on cvtune (p = 0.0003) and Q-ll@tau +47 (p < 1e-4).
+- The table lists a subset. main checked every setting in the full discordtune output: all 21 ungated settings on the 1,000 rows and all 21 gated settings on half B. None is both significant (p < 0.05) and positive.
 - About 14 settings are tested at p < 0.05 with no multiple-comparison correction (contract §5); with no candidate, that caveat changes nothing here.
 
 ### What the numbers say
