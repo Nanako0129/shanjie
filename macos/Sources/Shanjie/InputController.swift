@@ -170,17 +170,23 @@ private enum Metrics {
     /// of the composed text's); the bar aligns ink, not frames.
     static let labelInset: CGFloat = 2
 
-    // Expanded grid (s3b2 sections 8, 9). The grid's row pitch and corner radius are first values for
-    // main's on-device tuning against a-4. Column widths come from the cells (`GridLayout`).
-    /// One grid row: the 24 pt capsule plus a 4 pt gap (the bar's 4 pt capsule spacing, section 3).
+    // Expanded grid (s3b2 sections 8, 9). The grid constants below are first values for main's
+    // on-device tuning against a-4; none was measured against a screenshot (the contract's sections 1
+    // and 3 hold no a-4 row-pitch or inset data). Column widths come from the cells (`GridLayout`).
+    /// One grid row: the 24 pt capsule (section 3) plus a 4 pt gap, the bar's capsule spacing. Derived
+    /// from those values, first value, not measured against a screenshot.
     static let gridRowPitch: CGFloat = 28
-    /// Top and bottom padding of the grid inside the glass, and its corner radius.
+    /// Top and bottom padding of the grid inside the glass, and its corner radius. Both are first values,
+    /// not measured against a screenshot.
     static let gridInset: CGFloat = 5
     static let gridCornerRadius: CGFloat = 16
-    /// Scroll indicator (a-4): a thin pill at the right edge, in a gutter beside the last column.
+    /// Scroll indicator (a-4): a thin pill at the right edge, in a gutter beside the last column. The
+    /// gutter's 9 pt is a first value, not measured against a screenshot.
     static let scrollGutter: CGFloat = 9
     /// About 5 pt wide in a-4 (measured at 2x zoom); 3 was thinner than Apple's.
     static let scrollThumbWidth: CGFloat = 5
+    /// The thumb's shortest height, so a long list still leaves a visible pill: first value, not measured
+    /// against a screenshot.
     static let scrollThumbMinHeight: CGFloat = 12
     /// The collapsed bar's expand mark (a-3): a thin separator after the last cell, then a chevron;
     /// the area from the last cell to the bar's end is about 28 pt.

@@ -67,6 +67,22 @@ final class ShellTests: XCTestCase {
         XCTAssertEqual(c.client.lineCursor, 1)
     }
 
+    /// The client's lineRect is a synchronous IPC: a selection move in the grid reuses the last answer,
+    /// a new syllable asks again.
+    func testLineRectIsNotAskedAgainForSelectionMoves() {
+        let c = Controller(makeShell())
+        c.session.activate()
+        c.type("su3 ")
+        XCTAssertEqual(c.client.lineAsks, 1)
+        XCTAssertTrue(c.press(125))  // ↓ expands
+        XCTAssertTrue(c.press(125))  // ↓ one row
+        XCTAssertTrue(c.press(124))  // → one cell
+        XCTAssertEqual(c.client.lineAsks, 1, "selection moves must not ask the client again")
+        XCTAssertEqual(c.panel.lineRect, c.client.line)
+        c.type("cl3 ")
+        XCTAssertGreaterThan(c.client.lineAsks, 1, "a new composition asks again")
+    }
+
     /// s3b2 section 8: down expands (the panel is told the columns, first and total); a click on a
     /// lower row picks that cell, and after a scroll the position counts from `first`.
     func testExpandedGridReachesThePanelAndAClickPicksTheCell() throws {

@@ -102,6 +102,10 @@ public final class Shell {
     weak var owner: Session?
     /// Whether the composition (as last applied to a client) is non-empty.
     var composing = false
+    /// The last `lineRect` answer and the preedit and cursor it was asked for. Asking the client is a
+    /// synchronous IPC on the key path, so a pure selection move (same preedit and cursor) reuses it.
+    /// Cleared whenever the panel hides: commit, reset, owner change.
+    var lineCache: (preedit: String, cursor: Int, rect: NSRect?)?
 
     /// `resources`: the absolute Resources directory holding the lexicon files and bigram.sjlm.
     /// `panel`: the one candidate panel (an NSPanel in the app).
@@ -207,6 +211,7 @@ public final class Shell {
     }
 
     func hideCandidates() {
+        lineCache = nil
         panel.hide()
     }
 
@@ -368,8 +373,16 @@ public final class Session {
         if o.candidates.isEmpty {
             shell.hideCandidates()
         } else {
+            let cursor = Int(o.cursorUTF16)
+            let rect: NSRect?
+            if let c = shell.lineCache, c.preedit == o.preedit, c.cursor == cursor {
+                rect = c.rect
+            } else {
+                rect = client.lineRect(cursor: cursor)
+                shell.lineCache = (o.preedit, cursor, rect)
+            }
             shell.showCandidates(o.candidates, selected: o.selected, columns: o.columns, first: o.first, total: o.total,
-                                 lineRect: client.lineRect(cursor: Int(o.cursorUTF16)))
+                                 lineRect: rect)
         }
     }
 
