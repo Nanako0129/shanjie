@@ -233,6 +233,10 @@ final class CandidatePanelAdapter: CandidatePanel {
     var onSelect: ((Int) -> Void)?
     private let window: PanelWindow
     private let glass = NSGlassEffectView()
+    /// The glass's one content view, kept for the panel's lifetime: replacing the glass's content,
+    /// resizing or re-ordering the window on every selection move made the glass's glow flicker
+    /// (user report 2026-10-05), so a move only swaps the cells inside.
+    private let row = NSView()
     private var lastOrigin: NSPoint?
 
     init() {
@@ -244,6 +248,7 @@ final class CandidatePanelAdapter: CandidatePanel {
         window.level = NSWindow.Level(rawValue: NSWindow.Level.popUpMenu.rawValue + 1)  // McBopomofo's value
         window.hidesOnDeactivate = false
         window.isReleasedWhenClosed = false
+        glass.contentView = row
         window.contentView = glass
     }
 
@@ -254,7 +259,7 @@ final class CandidatePanelAdapter: CandidatePanel {
                 self?.onSelect?(i)
             })
         }
-        let row = NSView()
+        row.subviews.forEach { $0.removeFromSuperview() }
         var x = Metrics.barInset
         let y = (Metrics.barHeight - Metrics.capsuleHeight) / 2
         for cell in cells {
@@ -263,10 +268,11 @@ final class CandidatePanelAdapter: CandidatePanel {
             x += cell.frame.width + Metrics.cellSpacing
         }
         let size = NSSize(width: x - Metrics.cellSpacing + Metrics.barInset, height: Metrics.barHeight)
-        row.frame = NSRect(origin: .zero, size: size)
-        glass.contentView = row
-        glass.cornerRadius = size.height / 2
-        window.setContentSize(size)
+        if window.frame.size != size {
+            row.frame = NSRect(origin: .zero, size: size)
+            glass.cornerRadius = size.height / 2
+            window.setContentSize(size)
+        }
 
         let screens = NSScreen.screens
         let rectScreen = lineRect.flatMap { r in screens.firstIndex { $0.frame.contains(r.origin) } }
@@ -277,8 +283,10 @@ final class CandidatePanelAdapter: CandidatePanel {
             lineRect: lineRect, lastOrigin: lastOrigin, size: size, alignOffset: alignOffset,
             screens: screens.map(\.visibleFrame), rectScreen: rectScreen, main: main)
         lastOrigin = origin
-        window.setFrameTopLeftPoint(origin)
-        window.orderFrontRegardless()
+        if window.frame.origin.x != origin.x || window.frame.maxY != origin.y {
+            window.setFrameTopLeftPoint(origin)
+        }
+        if !window.isVisible { window.orderFrontRegardless() }
     }
 
     func hide() {
