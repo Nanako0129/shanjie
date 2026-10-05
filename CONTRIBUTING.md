@@ -34,7 +34,7 @@
 
 ```sh
 # 語言模型不在 repo 裡，從 Release 下載（CC BY-SA 4.0）
-gh release download model-v1 -p bigram.sjlm -D data/lm
+gh release download model-v1 -R Nanako0129/shanjie -p bigram.sjlm -D data/lm
 shasum -a 256 data/lm/bigram.sjlm   # 要和 data/bigram.sjlm.sha256 相同
 
 make test      # Rust 核心測試，再跑 Swift 殼的測試
@@ -50,7 +50,7 @@ scripts/install-ime.sh build/善解輸入法.app
 ```
 
 - 會覆蓋 `~/Library/Input Methods/` 裡的善解；上一版留在 `.shanjie-previous`。
-- 從 Homebrew 版換成自己建置的版本前，先刪掉已安裝的 app。
+- 從 Homebrew 版換成自己建置的版本前，先 `brew uninstall --cask shanjie`，否則之後的 `brew upgrade` 會蓋掉你的建置。
 
 各項檢查的細節在 `docs/verification.md`。
 
@@ -87,7 +87,13 @@ PR 需要：
     cargo run --release -q -p cli -- --lm data/lm/bigram.sjlm --profile formal --dev 302
     ```
 
-    輸出最後一行的 `top1` 是 302 句裡整句全對的句數，前面 `✗` 開頭的行是錯句；
+    輸出只有一行摘要，`top1` 是 302 句裡整句全對的句數；
+  - 要知道哪幾句變了，前後各加 `--dump before.tsv`／`--dump after.tsv`。每列是「句號、名次、候選、分數」，名次 1 是善解給的結果，比對兩邊名次 1 的列：
+
+    ```sh
+    diff <(awk -F'\t' '$2==1' before.tsv) <(awk -F'\t' '$2==1' after.tsv)
+    ```
+
   - 只要求不退步；
   - 有進步的話寫出是哪幾句。
 - **對應的文件一起更新**：契約、`docs/PLAN.md`、README。
@@ -103,12 +109,12 @@ git worktree remove <worktree 路徑>   # 有用 worktree 的話
 
 ### 保留集不要拿來調參數
 
-`eval/holdout/` 是保留集，只在一片做完時跑一次，用來確認沒有對開發集過度調整。
+`eval/holdout/` 是保留集，只在一片（`docs/PLAN.md` 的一個切片）做完時，由沒參與實作的人跑一次，用來確認沒有對開發集過度調整（規則見 `eval/README.md`）。
 
 - 請不要讀它的內容來找錯字或調參數；
 - 也不要把它的句子加進其他地方。
 
-需要的話，維護者會在 PR 合併前代跑保留集，只回報數字。
+你的 PR 只需要附開發集的數字；保留集由維護者在那一片收尾時跑。
 
 ## DCO 簽署
 
@@ -137,5 +143,5 @@ Signed-off-by: 你的名字 <你的 email>
 輸入法看得到使用者打的每一個字，以下規則沒有例外：
 
 - 日誌只能記靜態字串與回傳碼，不能記組字、候選、按鍵或 App 名稱（`docs/contracts/s3b.md` §9）。
-- 不能新增連網，除非是已經規劃、預設關閉、使用者明確開啟的功能（`docs/PLAN.md` §7）。
+- 不能新增連網，除非是已經規劃、預設關閉、使用者明確開啟的功能（`docs/PLAN.md` 的 S6，以及 §7 安全審查表的 R1–R9）。
 - 不申請「輸入監控」或「輔助使用」權限；InputMethodKit 不需要。
