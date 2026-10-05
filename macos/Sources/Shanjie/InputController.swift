@@ -201,6 +201,8 @@ private enum Metrics {
     static let chevronImageInset: CGFloat = 3
     /// bv.mov 420-438: about 0.3 s, system default timing (no custom curve).
     static let expandDuration: TimeInterval = 0.3
+    /// cv.mov 499-514 (Apple, 60 fps): the grid folds back into the bar in about 15 frames.
+    static let collapseDuration: TimeInterval = 0.25
 }
 
 /// One cell of the bar: number, candidate, optional name. The selected cell is an accent-colour
@@ -319,9 +321,14 @@ final class CandidatePanelAdapter: CandidatePanel {
     private var shownFrame = NSRect.zero
     private var shownTargets: [NSPoint] = []
     private var cells: [CellView] = []
-    /// True from the start of the expand animation until it ends; a `show` or `hide` in that time
-    /// replaces the running animation (see `settle`).
+    /// True from the start of an expand or collapse animation until it ends; a `show` or `hide` in
+    /// that time replaces the running animation (see `settle`). `animation` numbers the groups, so the
+    /// completion of an older group cannot end a newer one.
     private var animating = false
+    private var animation = 0
+    /// Grid cells that stay in place while the grid collapses (cv.mov: the lower rows are cut off by the
+    /// shrinking window rather than vanishing); removed when the collapse ends or is replaced.
+    private var leaving: [NSView] = []
 
     init() {
         window = PanelWindow(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel],
@@ -347,7 +354,34 @@ final class CandidatePanelAdapter: CandidatePanel {
                 cell.animator().setFrameOrigin(target)
             }
         }
+        row.frame = NSRect(origin: .zero, size: shownSize)
+        leaving.forEach { $0.removeFromSuperview() }
+        leaving = []
         animating = false
+        animation += 1
+    }
+
+    /// Runs one expand or collapse animation: the window to `frame`, each cell to its target, with the
+    /// system's default timing (no custom curve). At the end the content view takes its final size.
+    private func animate(to frame: NSRect, duration: TimeInterval, cells: [CellView], targets: [NSPoint]) {
+        animating = true
+        animation += 1
+        let id = animation
+        NSAnimationContext.runAnimationGroup { ctx in
+            ctx.duration = duration
+            window.animator().setFrame(frame, display: true)
+            for (cell, target) in zip(cells, targets) where cell.frame.origin != target {
+                cell.animator().setFrameOrigin(target)
+            }
+        } completionHandler: { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, self.animation == id else { return }
+                self.row.frame = NSRect(origin: .zero, size: self.shownSize)
+                self.leaving.forEach { $0.removeFromSuperview() }
+                self.leaving = []
+                self.animating = false
+            }
+        }
     }
 
     func show(_ candidates: [String], notes: [String?], selected: Int, columns: Int, first: Int, total: Int,
@@ -363,6 +397,9 @@ final class CandidatePanelAdapter: CandidatePanel {
         let inPlace = window.isVisible && columns == shownColumns && first == shownFirst && total == shownTotal
             && candidates == shownCandidates && notes == shownNotes
         let expanding = grid && shownColumns == 0 && window.isVisible
+        // User request 2026-10-05 ("收回沒作動畫"), cv.mov: up on the first row folds the grid back into
+        // the bar the way it opened, the window shrinking upward while the cells fly back to the bar.
+        let collapsing = !grid && shownColumns > 0 && window.isVisible
         let size: NSSize
         let targets: [NSPoint]
         var newCells: [CellView] = []
@@ -402,16 +439,24 @@ final class CandidatePanelAdapter: CandidatePanel {
             }
             targets = t
 
-            // Where the first row's cells start when the bar expands: the bar cell showing the same candidate.
+            // Where the cells start: when the bar expands, the first row starts at the bar cells showing
+            // the same candidates; when the grid collapses, each bar cell starts at the grid cell showing
+            // its candidate (cv.mov: the second row's candidates fly up into the bar).
             var starts = targets
-            if expanding {
-                for i in 0..<min(columns, newCells.count) {
+            if expanding || collapsing {
+                for i in 0..<(expanding ? min(columns, newCells.count) : newCells.count) {
                     let j = first + i - shownFirst
                     if cells.indices.contains(j) { starts[i] = cells[j].frame.origin }
                 }
             }
 
-            row.subviews.forEach { $0.removeFromSuperview() }
+            // Collapsing: the grid cells whose candidates do not move into the bar stay where they are
+            // until the window has shrunk past them.
+            let staying = collapsing
+                ? cells.enumerated().filter { j, _ in !(first..<first + newCells.count).contains(shownFirst + j) }.map { $0.1 }
+                : []
+            for view in row.subviews where !staying.contains(where: { $0 === view }) { view.removeFromSuperview() }
+            leaving = staying
             for (i, cell) in newCells.enumerated() {
                 cell.setFrameOrigin(starts[i])
                 row.addSubview(cell)
@@ -422,7 +467,9 @@ final class CandidatePanelAdapter: CandidatePanel {
                                            width: size.width, height: size.height))
             }
             if shownSize != size {
-                row.frame = NSRect(origin: .zero, size: size)
+                // Collapsing keeps the grid-sized content view until the animation ends, so the cells
+                // flying up from the lower rows are not cut off at the start (`animate` sets the size).
+                if !collapsing { row.frame = NSRect(origin: .zero, size: size) }
                 glass.cornerRadius = grid ? Metrics.gridCornerRadius : size.height / 2
             }
             cells = newCells
@@ -447,16 +494,10 @@ final class CandidatePanelAdapter: CandidatePanel {
         let frame = NSRect(x: origin.x, y: origin.y - size.height, width: size.width, height: size.height)
         shownFrame = frame
         if expanding && !inPlace {
-            // bv.mov 420-438: the window grows downward while the first row's cells slide to their
-            // columns; the system's default timing, no custom curve.
-            animating = true
-            NSAnimationContext.runAnimationGroup { ctx in
-                ctx.duration = Metrics.expandDuration
-                window.animator().setFrame(frame, display: true)
-                for (cell, target) in zip(newCells, targets) where cell.frame.origin != target {
-                    cell.animator().setFrameOrigin(target)
-                }
-            } completionHandler: { [weak self] in MainActor.assumeIsolated { self?.animating = false } }
+            // bv.mov 420-438: the window grows downward while the first row's cells slide to their columns.
+            animate(to: frame, duration: Metrics.expandDuration, cells: newCells, targets: targets)
+        } else if collapsing {
+            animate(to: frame, duration: Metrics.collapseDuration, cells: newCells, targets: targets)
         } else if animating {
             settle(frame: frame)
         } else {
