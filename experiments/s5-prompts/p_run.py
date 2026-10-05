@@ -80,10 +80,13 @@ def build(variant, row):
 
 # ---------------------------------------------------------------- decoding
 def p_true(ans):
-    """P(true) of a noul answer: the numeric `true` of a probabilities dict (or of the answer itself); else None."""
+    """P(true) of a noul answer, else None. Jev returns it as the numeric `noul` field ({"type": "noul", "noul": 0.75},
+    measured 2026-10-06 with a self-written sentence); a `true` entry of a probabilities dict is also accepted."""
     num = lambda x: isinstance(x, (int, float)) and not isinstance(x, bool)  # noqa: E731
     if not isinstance(ans, dict):
         return None
+    if num(ans.get("noul")):
+        return float(ans["noul"])
     if num(ans.get("true")):
         return float(ans["true"])
     return next((float(v["true"]) for v in ans.values() if isinstance(v, dict) and num(v.get("true"))), None)
