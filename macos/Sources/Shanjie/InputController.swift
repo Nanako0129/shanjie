@@ -178,15 +178,22 @@ private enum Metrics {
     static let gridRowPitch: CGFloat = 28
     /// Fixed column width of the six-column grid (a-4): wide enough for a two-character word.
     static let gridColumnWidth: CGFloat = 64
-    /// Fixed column width of the three-column punctuation grid (p-2): a mark with its 4-character name.
-    static let gridPunctuationColumnWidth: CGFloat = 104
+    /// Fixed column width of the three-column punctuation grid: two word columns, so the grid is as wide
+    /// as the six-column one, as in p-2 (about 398 pt, the same as a-4). 104 left it narrower (g-16).
+    static let gridPunctuationColumnWidth: CGFloat = 2 * 64
     /// Top and bottom padding of the grid inside the glass, and its corner radius.
     static let gridInset: CGFloat = 5
     static let gridCornerRadius: CGFloat = 16
     /// Scroll indicator (a-4): a thin pill at the right edge, in a gutter beside the last column.
     static let scrollGutter: CGFloat = 9
-    static let scrollThumbWidth: CGFloat = 3
+    /// About 5 pt wide in a-4 (measured at 2x zoom); 3 was thinner than Apple's.
+    static let scrollThumbWidth: CGFloat = 5
     static let scrollThumbMinHeight: CGFloat = 12
+    /// The collapsed bar's expand mark (a-3): a thin separator after the last cell, then a chevron;
+    /// the area from the last cell to the bar's end is about 28 pt.
+    static let chevronArea: CGFloat = 28
+    static let chevronSeparatorHeight: CGFloat = 18
+    static let chevronPointSize: CGFloat = 11
     /// bv.mov 420-438: about 0.3 s, system default timing (no custom curve).
     static let expandDuration: TimeInterval = 0.3
 }
@@ -235,6 +242,11 @@ private final class CellView: NSView {
             view.setFrameOrigin(NSPoint(x: x, y: ((Metrics.capsuleHeight - view.frame.height) / 2).rounded()))
             addSubview(view)
             x += view.frame.width + (isNumber ? Metrics.numberToCandidate : Metrics.candidateToName)
+        }
+        // p-2: in a fixed grid column the name sits at the column's right edge, not right after the mark.
+        if fixedWidth != nil, let name {
+            name.setFrameOrigin(NSPoint(x: max(x - Metrics.candidateToName - name.frame.width, width - Metrics.trailing - name.frame.width),
+                                        y: name.frame.origin.y))
         }
         setAccessibilityElement(true)
         setAccessibilityRole(.button)
@@ -330,7 +342,7 @@ final class CandidatePanelAdapter: CandidatePanel {
                 targets.append(NSPoint(x: x, y: (Metrics.barHeight - Metrics.capsuleHeight) / 2))
                 x += cell.frame.width + Metrics.cellSpacing
             }
-            size = NSSize(width: x - Metrics.cellSpacing + Metrics.barInset, height: Metrics.barHeight)
+            size = NSSize(width: x - Metrics.cellSpacing + Metrics.chevronArea, height: Metrics.barHeight)
         }
 
         // Where the first row's cells start when the bar expands: the bar cell showing the same candidate.
@@ -348,6 +360,7 @@ final class CandidatePanelAdapter: CandidatePanel {
             cell.setFrameOrigin(starts[i])
             row.addSubview(cell)
         }
+        if !grid { addChevron(barSize: size) }
         if grid, total > candidates.count {
             let thumb = scrollThumb(first: first, total: total, columns: columns, count: candidates.count, height: size.height)
             row.addSubview(thumb)
@@ -389,6 +402,24 @@ final class CandidatePanelAdapter: CandidatePanel {
             }
         }
         if !window.isVisible { window.orderFrontRegardless() }
+    }
+
+    /// a-3's expand mark at the bar's right end: a separator line and a chevron, both secondary.
+    /// Display only: the bar expands with the down arrow; a click on it does nothing.
+    private func addChevron(barSize: NSSize) {
+        let left = barSize.width - Metrics.chevronArea
+        let line = NSView(frame: NSRect(x: left + 2, y: ((barSize.height - Metrics.chevronSeparatorHeight) / 2).rounded(),
+                                        width: 1, height: Metrics.chevronSeparatorHeight))
+        line.wantsLayer = true
+        line.layer?.backgroundColor = NSColor.separatorColor.cgColor
+        row.addSubview(line)
+        let config = NSImage.SymbolConfiguration(pointSize: Metrics.chevronPointSize, weight: .medium)
+        guard let image = NSImage(systemSymbolName: "chevron.down", accessibilityDescription: nil)?
+            .withSymbolConfiguration(config) else { return }
+        let view = NSImageView(image: image)
+        view.contentTintColor = .tertiaryLabelColor  // h-3: secondary and semibold were brighter than a-3
+        view.frame = NSRect(x: left + 3, y: 0, width: Metrics.chevronArea - 3, height: barSize.height)
+        row.addSubview(view)
     }
 
     /// a-4's scroll indicator: a thin pill in the gutter, sized and placed by the visible rows' share
