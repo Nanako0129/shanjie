@@ -140,7 +140,7 @@ final class CandidateCellTests: XCTestCase {
     }
 
     /// Metrics claim: the drawn cell has the old cell's width and puts its ink where the old one did
-    /// (within 1 pixel, half a point on this 2x screen). Stroke weight is not compared: `cacheDisplay`
+    /// (within 1 pixel; widths round to the highest screen scale, as the old text fields do, so this holds on a 1x CI display and on a 2x screen). Stroke weight is not compared: `cacheDisplay`
     /// of the old text fields came out heavier than a plain draw, which looks like a capture artefact
     /// (unverified); main compares on-device screenshots.
     func testWidthsAndInkMatchTheOldCells() {
