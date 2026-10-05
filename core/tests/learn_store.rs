@@ -133,6 +133,29 @@ fn records_that_would_not_read_back_are_never_written() {
     assert_eq!(text, format!("{HEADER}\n中\tㄅㄚˇ\t把\t1\t1\n"));
 }
 
+/// Contract section 12: a single-character record under ^ or the global key (from a file written before it) is skipped at
+/// load, so it counts toward nothing, and no save or append writes one.
+#[test]
+fn single_character_global_records_are_not_loaded_or_written() {
+    let (_p, dir) = temp();
+    let (store, _, _) = LearnStore::open(&dir).unwrap();
+    let old = rec("", "ㄗㄞˋ", "再", 1.0, 20_000);
+    let kept = rec("", "ㄗㄞˋ-ㄐㄧㄢˋ", "再見", 1.0, 20_000);
+    store.save(&[old.clone(), kept.clone()]).unwrap();
+    assert_eq!(fs::read_to_string(dir.join(FILE)).unwrap(), format!("{HEADER}\n\tㄗㄞˋ-ㄐㄧㄢˋ\t再見\t1\t20000\n"));
+    let body = format!("{HEADER}\n\tㄗㄞˋ-ㄐㄧㄢˋ\t再見\t1\t20000\n");
+    store.append(&[old.clone()]).unwrap();
+    assert_eq!(fs::read_to_string(dir.join(FILE)).unwrap(), body, "append writes nothing for it");
+    // a file that has one: skipped on load (counted as a bad line), the rest loads
+    fs::write(dir.join(FILE), format!("{HEADER}\n\tㄗㄞˋ\t再\t1\t20000\n^\tㄗㄞˋ\t再\t1\t20000\n{}", body.split_once('\n').unwrap().1)).unwrap();
+    let (store, records, opened) = LearnStore::open(&dir).unwrap();
+    assert_eq!(opened, Opened::Loaded { skipped: 2 });
+    assert!(records == vec![kept], "only the two-character record is loaded");
+    // and a full rewrite of what was loaded no longer has the line
+    store.save(&records).unwrap();
+    assert_eq!(fs::read_to_string(dir.join(FILE)).unwrap(), body);
+}
+
 #[test]
 fn bad_lines_are_skipped_one_by_one() {
     let (_p, dir) = temp();
@@ -148,8 +171,8 @@ fn bad_lines_are_skipped_one_by_one() {
         "中\tㄅㄚˇ\t把\t1\tx",         // bad day
         "中\tㄅㄚˇ\t把\t1",            // 4 fields
         "中\tㄅㄚˇ\t把\t1\t1\tx",      // 6 fields
-        "^\tㄅㄚˇ\t把\t0.5\t20001",    // good, sentence start
-        "\tㄅㄚˇ\t把\t0.5\t20001",     // good, global
+        "^\tㄅㄚˇ-ㄅㄚˇ\t把手\t0.5\t20001", // good, sentence start (two characters)
+        "\tㄅㄚˇ-ㄅㄚˇ\t把手\t0.5\t20001", // good, global (two characters)
         "",                           // blank: not counted
     ];
     let mut bytes = lines.join("\n").into_bytes();
@@ -159,8 +182,8 @@ fn bad_lines_are_skipped_one_by_one() {
     assert_eq!(opened, Opened::Loaded { skipped: 9 });
     assert!(records == vec![
         rec("中", "ㄅㄚˇ", "把", 1.0, 20_000),
-        rec("^", "ㄅㄚˇ", "把", 0.5, 20_001),
-        rec("", "ㄅㄚˇ", "把", 0.5, 20_001),
+        rec("^", "ㄅㄚˇ-ㄅㄚˇ", "把手", 0.5, 20_001),
+        rec("", "ㄅㄚˇ-ㄅㄚˇ", "把手", 0.5, 20_001),
     ], "records differ (contents not printed: R2)");
 }
 

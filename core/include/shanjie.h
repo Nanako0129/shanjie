@@ -50,15 +50,23 @@ typedef struct {
   const char *commit;         // UTF-8 text to insert now; may be "", never NULL
   const char *preedit;        // UTF-8 composition display (pending Zhuyin inserted at the cursor); never NULL
   uint32_t cursor_utf16;      // cursor in preedit, in UTF-16 code units (for NSRange); after the pending syllable
-  uint32_t candidate_count;   // candidates on the current page (0-9)
+  uint32_t candidate_count;   // candidates in this output: collapsed one page (0-9), expanded the visible rows (up to 5 x candidate_columns)
   const char *const *candidates; // NULL when candidate_count is 0
-  int32_t candidate_selected; // selection within the page; -1 when candidates are closed
+  int32_t candidate_selected; // selection within this output's candidates; -1 when candidates are closed
+  uint32_t candidate_columns; // 0 = collapsed single row; > 0 = expanded, always 9 (one row = one page, the selected page on top; s3b2 9)
+  uint32_t candidate_first;   // position of candidates[0] in the whole list; 0 when closed
+  uint32_t candidate_total;   // length of the whole list; 0 when closed
 } ShanjieOutput;
 typedef struct ShanjieEngine ShanjieEngine;
 
 int32_t shanjie_engine_new(const char *data_dir, uint32_t layout, ShanjieEngine **out); // layout 0 standard, 1 ETen
 void    shanjie_engine_free(ShanjieEngine *engine);
 int32_t shanjie_engine_key(ShanjieEngine *engine, ShanjieKey key, ShanjieOutput **out);
+// s3b2 (docs/contracts/s3b2-glass-panel.md section 8): mouse pick. index is a position in the last
+//   output's candidates; the core chooses candidate_first + index through the same path as ENTER, so
+//   learning behaves identically. 1 when engine or out is NULL; 2 when candidates are closed or index
+//   is outside that output (state unchanged); 4 internal (engine reset). *out is NULL on any error.
+int32_t shanjie_engine_pick(ShanjieEngine *engine, uint32_t index, ShanjieOutput **out);
 int32_t shanjie_engine_reset(ShanjieEngine *engine, uint32_t mode, ShanjieOutput **out); // mode 0 commit then clear, 1 discard
 void    shanjie_output_free(ShanjieOutput *output);
 // S2c (docs/PLAN.md S2c)
@@ -93,6 +101,14 @@ int32_t shanjie_engine_learning_open(ShanjieEngine *engine, const char *dir);
 //   Also 3 when no learning_open has succeeded on this engine (no file it could have deleted); memory
 //   and pending learns are dropped anyway.
 int32_t shanjie_engine_learning_clear(ShanjieEngine *engine);
+// A single-character pick is learned, and a single-character record looked up, only under a full
+//   context key made of Han characters: the last <= 2 Han characters before the word, taken from the
+//   composition text before it AND the left context from set_left_context. When no Han character
+//   precedes the word (sentence start, after punctuation or ASCII) the key is "^" and a single
+//   character is neither learned nor looked up. With a NULL left context, or a paused gate that makes
+//   the shell pass NULL, keys that follow Han characters typed in the same composition still teach
+//   (if learning is on) and look up. set_learning(0) stops teaching only; it does not stop lookup.
+//   Words of 2+ characters are unaffected (docs/contracts/s4-learning.md section 12).
 // Learning happens only at a commit (Enter, a key the engine passes through after committing, or the
 //   40-syllable auto-commit), never on shanjie_engine_reset or Esc, and never for punctuation picks.
 // Writes: a learning commit appends only the records it changed; a full rewrite happens on a forget,

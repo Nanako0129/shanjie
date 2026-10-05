@@ -30,10 +30,14 @@ public protocol TextClient: AnyObject {
 @MainActor
 public protocol CandidatePanel: AnyObject {
     /// `notes[i]`: the name shown beside `candidates[i]` (s3f), `nil` for none.
+    /// `columns`: 0 for the collapsed single row, else the expanded grid's columns (s3b2 section 8.3).
+    /// `first`, `total`: the position of `candidates[0]` in the whole list and the list's length
+    /// (the scroll indicator).
     /// `lineRect`: where the composition's line is (s3b2 section 2.3), `nil` if unknown.
-    func show(_ candidates: [String], notes: [String?], selected: Int, lineRect: NSRect?)
+    func show(_ candidates: [String], notes: [String?], selected: Int, columns: Int, first: Int, total: Int,
+              lineRect: NSRect?)
     func hide()
-    /// A mouse click on a cell, by position in the page shown.
+    /// A mouse click on a cell, by position in what `show` last received.
     var onSelect: ((Int) -> Void)? { get set }
 }
 
@@ -98,8 +102,10 @@ public final class Shell {
     weak var owner: Session?
     /// Whether the composition (as last applied to a client) is non-empty.
     var composing = false
-    /// The page the panel shows, kept to check a mouse click's position against it.
-    private(set) var candidates: [String] = []
+    /// The last `lineRect` answer and the preedit and cursor it was asked for. Asking the client is a
+    /// synchronous IPC on the key path, so a pure selection move (same preedit and cursor) reuses it.
+    /// Cleared whenever the panel hides: commit, reset, owner change.
+    var lineCache: (preedit: String, cursor: Int, rect: NSRect?)?
 
     /// `resources`: the absolute Resources directory holding the lexicon files and bigram.sjlm.
     /// `panel`: the one candidate panel (an NSPanel in the app).
@@ -197,16 +203,16 @@ public final class Shell {
         return engine?.setProfile(p)
     }
 
-    func showCandidates(_ list: [String], selected: Int, lineRect: NSRect?) {
+    func showCandidates(_ list: [String], selected: Int, columns: Int, first: Int, total: Int, lineRect: NSRect?) {
         // Only an exact punctuation mark has a name: a word candidate is never a key of the table.
         let notes = list.map { names[$0] }
-        candidates = list
-        panel.show(list, notes: notes, selected: selected, lineRect: lineRect)
+        panel.show(list, notes: notes, selected: selected, columns: columns, first: first, total: total,
+                   lineRect: lineRect)
     }
 
     func hideCandidates() {
+        lineCache = nil
         panel.hide()
-        candidates = []
     }
 
     /// Discards a composition whose owner is gone; there is no client left to clear.
@@ -275,11 +281,17 @@ public final class Session {
         shell.hideCandidates()
     }
 
-    /// A mouse click on a candidate: sent to the core as that candidate's number key, so the
-    /// core decides what happens (section 8). Never inserted directly.
+    /// A mouse click on a candidate (s3b2 section 8.3): `i` is its position in the output the panel
+    /// shows. The core picks it through the same path as Enter and checks the range (code 2 leaves
+    /// everything as it was); the learning gate is sampled first, as for a key.
     public func candidateSelected(at i: Int) {
-        guard shell.owner === self, shell.candidates.indices.contains(i), i < 9 else { return }
-        _ = send(ShanjieKey(kind: KeyMap.char, ch: UInt32(UInt8(ascii: "1")) + UInt32(i), modifiers: 0))
+        guard shell.owner === self, let engine = shell.engine else { return }
+        applyLearningGate(engine)
+        switch engine.pick(UInt32(truncatingIfNeeded: i)) {
+        case .ok(let o): apply(o)
+        case .failed(2): Log.shell.error("core call failed, code 2")
+        case .failed(let c): _ = fail(c)
+        }
     }
 
     /// The input method menu (section 13.2).
@@ -361,7 +373,16 @@ public final class Session {
         if o.candidates.isEmpty {
             shell.hideCandidates()
         } else {
-            shell.showCandidates(o.candidates, selected: o.selected, lineRect: client.lineRect(cursor: Int(o.cursorUTF16)))
+            let cursor = Int(o.cursorUTF16)
+            let rect: NSRect?
+            if let c = shell.lineCache, c.preedit == o.preedit, c.cursor == cursor {
+                rect = c.rect
+            } else {
+                rect = client.lineRect(cursor: cursor)
+                shell.lineCache = (o.preedit, cursor, rect)
+            }
+            shell.showCandidates(o.candidates, selected: o.selected, columns: o.columns, first: o.first, total: o.total,
+                                 lineRect: rect)
         }
     }
 

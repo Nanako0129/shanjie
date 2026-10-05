@@ -142,92 +142,60 @@ private final class PanelWindow: NSPanel {
 private enum Metrics {
     /// Section 3 "candidate bar": about 30 pt tall (a-3, la-3), corner radius half of it.
     static let barHeight: CGFloat = 30
-    /// Section 3 "selection capsule": 24 pt tall (a-3, la-3), centred in the bar.
-    static let capsuleHeight: CGFloat = 24
+    /// Section 3 "selection capsule": 24 pt tall (a-3, la-3), centred in the bar. The cell's own
+    /// spacing and fonts are `CellMetrics` in ShanjieKit.
+    static let capsuleHeight = CellMetrics.capsuleHeight
     /// Section 3: the capsule's left edge is about 3 pt from the bar's (a-3).
     static let barInset: CGFloat = 3
     /// Section 3 "cell pitch": 41 pt per single-character cell against a 37 pt capsule (a-3), so
     /// 4 pt between capsules.
     static let cellSpacing: CGFloat = 4 - 2  // our unselected cells measured 2 pt wider apart than a-3 (s-7)
-    // The gaps below are between label frames, and an NSTextField label's frame is wider than its
-    // ink (padding plus the glyph's side bearings). The values are the a-3 gaps minus what our own
-    // bar (s-3, s-7, 2026-10-05) added; s-7 then matched a-3 within 1 pt.
-    /// Section 3: capsule left edge to the number's ink, 5 pt in a-3.
-    static let numberLeading: CGFloat = 2
-    /// Section 3: number ink to candidate ink, 8 pt in a-3.
-    static let numberToCandidate: CGFloat = 2
-    /// Section 3: candidate ink to the capsule's right edge, 8 pt in a-3 (37 pt cell).
-    static let trailing: CGFloat = 5
-    /// Section 3 "name": between a mark and its name, the capsules in p-1 leave almost none; 2 pt.
-    static let candidateToName: CGFloat = 2
-    /// Section 3 font sizes: candidate 16, number 9, name 11 (initial values, "the ink of a
-    /// Han character is about 0.88 em" so 16 pt gives the 14 pt ink of a-3).
-    static let candidateFont = NSFont.systemFont(ofSize: 16)
-    static let numberFont = NSFont.systemFont(ofSize: 9)
-    /// 12, not 11: at 11 pt 「全形逗號」 measured 42 pt of ink in s-11 against 46 in p-1.
-    static let nameFont = NSFont.systemFont(ofSize: 12)
-    /// A label's ink starts about 2 pt inside its frame (s-7: the first candidate's ink sat 2 pt right
-    /// of the composed text's); the bar aligns ink, not frames.
-    static let labelInset: CGFloat = 2
+
+    // Expanded grid (s3b2 sections 8, 9). The grid constants below are first values for main's
+    // on-device tuning against a-4; none was measured against a screenshot (the contract's sections 1
+    // and 3 hold no a-4 row-pitch or inset data). Column widths come from the cells (`GridLayout`).
+    /// One grid row: the 24 pt capsule (section 3) plus a 4 pt gap, the bar's capsule spacing. Derived
+    /// from those values, first value, not measured against a screenshot.
+    static let gridRowPitch: CGFloat = 28
+    /// Top and bottom padding of the grid inside the glass, and its corner radius. Both are first values,
+    /// not measured against a screenshot.
+    static let gridInset: CGFloat = 5
+    static let gridCornerRadius: CGFloat = 16
+    /// Scroll indicator (a-4): a thin pill at the right edge, in a gutter beside the last column. The
+    /// gutter's 9 pt is a first value, not measured against a screenshot.
+    static let scrollGutter: CGFloat = 9
+    /// About 5 pt wide in a-4 (measured at 2x zoom); 3 was thinner than Apple's.
+    static let scrollThumbWidth: CGFloat = 5
+    /// The thumb's shortest height, so a long list still leaves a visible pill: first value, not measured
+    /// against a screenshot.
+    static let scrollThumbMinHeight: CGFloat = 12
+    /// The collapsed bar's expand mark (a-3): a thin separator after the last cell, then a chevron;
+    /// the area from the last cell to the bar's end is about 28 pt.
+    static let chevronArea: CGFloat = 28
+    static let chevronSeparatorHeight: CGFloat = 18
+    static let chevronPointSize: CGFloat = 11
+    /// The separator sits 2 pt right of the chevron area's left edge (a-3 leaves a thin gap after the
+    /// last cell's capsule), and the chevron 3 pt, so the chevron's ink is centred in the rest of the area.
+    static let chevronSeparatorInset: CGFloat = 2
+    static let chevronImageInset: CGFloat = 3
+    /// Section 9: a column widening while the grid is open, the system's default 0.2 s.
+    static let widenDuration: TimeInterval = 0.2
+    /// bv.mov 420-438: about 0.3 s, system default timing (no custom curve).
+    static let expandDuration: TimeInterval = 0.3
+    /// cv.mov 499-514 (Apple, 60 fps): the grid folds back into the bar in about 15 frames.
+    static let collapseDuration: TimeInterval = 0.25
 }
 
-/// One cell of the bar: number, candidate, optional name. The selected cell is an accent-colour
-/// capsule with white text (section 2.4). A click reports the cell's position.
-private final class CellView: NSView {
-    private let number: NSTextField, candidate: NSTextField, name: NSTextField?
-    private let selected: Bool
-    private let onClick: () -> Void
-
-    init(index: Int, text: String, note: String?, selected: Bool, onClick: @escaping () -> Void) {
-        func label(_ s: String, _ font: NSFont, _ color: NSColor) -> NSTextField {
-            let t = NSTextField(labelWithString: s)
-            t.font = font
-            t.textColor = selected ? .white : color
-            t.sizeToFit()
-            return t
-        }
-        number = label(String(index + 1), Metrics.numberFont, .secondaryLabelColor)
-        candidate = label(text, Metrics.candidateFont, .labelColor)
-        name = note.map { label($0, Metrics.nameFont, .secondaryLabelColor) }
-        self.selected = selected
-        self.onClick = onClick
-
-        var width = Metrics.numberLeading + number.frame.width + Metrics.numberToCandidate + candidate.frame.width
-        if let name { width += Metrics.candidateToName + name.frame.width }
-        width += Metrics.trailing
-        super.init(frame: NSRect(x: 0, y: 0, width: width, height: Metrics.capsuleHeight))
-
-        var x = Metrics.numberLeading
-        for (view, isNumber) in [(number, true), (candidate, false)] + (name.map { [($0, false)] } ?? []) {
-            view.setFrameOrigin(NSPoint(x: x, y: ((Metrics.capsuleHeight - view.frame.height) / 2).rounded()))
-            addSubview(view)
-            x += view.frame.width + (isNumber ? Metrics.numberToCandidate : Metrics.candidateToName)
-        }
-        setAccessibilityElement(true)
-        setAccessibilityRole(.button)
-        setAccessibilityLabel(note.map { text + " " + $0 } ?? text)
-        setAccessibilitySelected(selected)
-    }
-
-    required init?(coder: NSCoder) { fatalError("not used") }
-
-    /// Where the candidate glyph starts, in this cell's coordinates.
-    var candidateMinX: CGFloat { candidate.frame.minX + Metrics.labelInset }
-
-    override func draw(_ dirtyRect: NSRect) {
-        guard selected else { return }
-        NSColor.controlAccentColor.setFill()
-        NSBezierPath(roundedRect: bounds, xRadius: bounds.height / 2, yRadius: bounds.height / 2).fill()
-    }
-
-    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
-    override func mouseDown(with event: NSEvent) { onClick() }
+/// The glass's one content view. Flipped, so cells are placed from the top-left and a window that
+/// grows downward leaves the first row where it was.
+private final class GridView: NSView {
+    override var isFlipped: Bool { true }
 }
 
-/// The candidate bar (docs/contracts/s3b2-glass-panel.md): a borderless, non-activating panel with
-/// a Liquid Glass row of cells, drawn by us because IMKCandidates ignores fonts and cannot show a
-/// smaller name. Display only: it never becomes key and never receives keys; a click on a cell is
-/// reported by position through `onSelect`. It logs nothing (section 2.5).
+/// The candidate bar and its expanded grid (docs/contracts/s3b2-glass-panel.md): a borderless,
+/// non-activating panel with a Liquid Glass row of cells, drawn by us because IMKCandidates ignores
+/// fonts and cannot show a smaller name. Display only: it never becomes key and never receives keys;
+/// a click on a cell is reported by position through `onSelect`. It logs nothing (section 2.5).
 @MainActor
 final class CandidatePanelAdapter: CandidatePanel {
     var onSelect: ((Int) -> Void)?
@@ -235,9 +203,35 @@ final class CandidatePanelAdapter: CandidatePanel {
     private let glass = NSGlassEffectView()
     /// The glass's one content view, kept for the panel's lifetime: replacing the glass's content,
     /// resizing or re-ordering the window on every selection move made the glass's glow flicker
-    /// (user report 2026-10-05), so a move only swaps the cells inside.
-    private let row = NSView()
+    /// (user report 2026-10-05). Since 9.1 a move updates the existing cells and a scroll swaps only
+    /// the entering and leaving rows.
+    private let row = GridView()
     private var lastOrigin: NSPoint?
+    /// The last shown output, to animate the collapsed -> expanded change from where the bar's cells
+    /// were, and to update only the selection when nothing else changed.
+    private var shownColumns = 0
+    private var shownFirst = 0
+    private var shownTotal = 0
+    private var shownCandidates: [String] = []
+    private var shownNotes: [String?] = []
+    private var shownSize = NSSize.zero
+    private var shownFrame = NSRect.zero
+    private var shownTargets: [NSPoint] = []
+    /// Widen-only column widths of the open grid (section 9); empty when collapsed or hidden.
+    private var columnWidths: [CGFloat] = []
+    /// The cells and the decision which survive an output (ShanjieKit); this class only adds and removes
+    /// the views it reports and positions them.
+    private let cellSet = CandidateCells()
+    /// The chevron/separator or scroll thumb in `row`, and the ones held back until the animation ends.
+    private let decor = DecorSet()
+    /// True from the start of an expand or collapse animation until it ends; a `show` or `hide` in
+    /// that time replaces the running animation (see `settle`). `animation` numbers the groups, so the
+    /// completion of an older group cannot end a newer one.
+    private var animating = false
+    private var animation = 0
+    /// Grid cells that stay in place while the grid collapses (cv.mov: the lower rows are cut off by the
+    /// shrinking window rather than vanishing); removed when the collapse ends or is replaced.
+    private var leaving: [CandidateCell] = []
 
     init() {
         window = PanelWindow(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel],
@@ -248,49 +242,248 @@ final class CandidatePanelAdapter: CandidatePanel {
         window.level = NSWindow.Level(rawValue: NSWindow.Level.popUpMenu.rawValue + 1)  // McBopomofo's value
         window.hidesOnDeactivate = false
         window.isReleasedWhenClosed = false
+        cellSet.onSelect = { [weak self] position in self?.onSelect?(position) }
         glass.contentView = row
         window.contentView = glass
     }
 
-    func show(_ candidates: [String], notes: [String?], selected: Int, lineRect: NSRect?) {
-        var cells: [CellView] = []
-        for (i, text) in candidates.enumerated() {
-            cells.append(CellView(index: i, text: text, note: notes[i], selected: i == selected) { [weak self] in
-                self?.onSelect?(i)
-            })
+    /// Puts the window and every cell at their final places through a zero-duration animation group.
+    /// The intent is that an animator() change made in a group replaces the same property's running
+    /// animation, where a plain setFrame would not; unverified until main's on-device recording of a
+    /// show during a running expand or collapse confirms it. Every cell is set, even one whose model
+    /// frame already reports the target, so a running animation is always replaced.
+    private func settle(frame: NSRect) {
+        NSAnimationContext.runAnimationGroup { ctx in
+            ctx.duration = 0
+            window.animator().setFrame(frame, display: true)
+            for (cell, target) in zip(cellSet.cells, shownTargets) { cell.animator().setFrameOrigin(target) }
         }
-        row.subviews.forEach { $0.removeFromSuperview() }
-        var x = Metrics.barInset
-        let y = (Metrics.barHeight - Metrics.capsuleHeight) / 2
-        for cell in cells {
-            cell.setFrameOrigin(NSPoint(x: x, y: y))
-            row.addSubview(cell)
-            x += cell.frame.width + Metrics.cellSpacing
+        animation += 1
+        finishAnimation()
+    }
+
+    /// The end of an expand or collapse, or of one replaced by `settle`.
+    private func finishAnimation() {
+        row.frame = NSRect(origin: .zero, size: shownSize)
+        leaving.forEach { $0.removeFromSuperview() }
+        leaving = []
+        decor.flush(into: row)
+        animating = false
+    }
+
+    /// Runs one expand or collapse animation: the window to `frame`, each cell to its target, with the
+    /// system's default timing (no custom curve). At the end the content view takes its final size.
+    private func animate(to frame: NSRect, duration: TimeInterval, cells: [CandidateCell], targets: [NSPoint]) {
+        animating = true
+        animation += 1
+        let id = animation
+        NSAnimationContext.runAnimationGroup { ctx in
+            ctx.duration = duration
+            window.animator().setFrame(frame, display: true)
+            for (cell, target) in zip(cells, targets) where cell.frame.origin != target {
+                cell.animator().setFrameOrigin(target)
+            }
+        } completionHandler: { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, self.animation == id else { return }
+                self.finishAnimation()
+            }
         }
-        let size = NSSize(width: x - Metrics.cellSpacing + Metrics.barInset, height: Metrics.barHeight)
-        if window.frame.size != size {
-            row.frame = NSRect(origin: .zero, size: size)
-            glass.cornerRadius = size.height / 2
-            window.setContentSize(size)
+    }
+
+    func show(_ candidates: [String], notes: [String?], selected: Int, columns: Int, first: Int, total: Int,
+              lineRect: NSRect?) {
+        let grid = columns > 0
+        let selectedRow = grid ? selected / columns : 0
+        func showsNumber(_ i: Int) -> Bool { !grid || i / columns == selectedRow }
+
+        // Only the selection moved (section 8.7): keep the cells, change which one is selected and which
+        // row shows numbers. The glass's content view is never replaced either way.
+        let inPlace = window.isVisible && columns == shownColumns && first == shownFirst && total == shownTotal
+            && candidates == shownCandidates && notes == shownNotes
+        let expanding = grid && shownColumns == 0 && window.isVisible
+        // User request 2026-10-05 ("收回沒作動畫"), cv.mov: up on the first row folds the grid back into
+        // the bar the way it opened, the window shrinking upward while the cells fly back to the bar.
+        let collapsing = !grid && shownColumns > 0 && window.isVisible
+        let size: NSSize
+        let targets: [NSPoint]
+        let oldCells = cellSet.cells
+        let update = cellSet.update(candidates: candidates, notes: notes, selected: selected, first: first, columns: columns)
+        let newCells = update.cells
+        var gridWidth: CGFloat = 0
+        var widened = false
+        var oldGridXs: [CGFloat] = []
+        if inPlace {
+            size = shownSize
+            targets = shownTargets
+        } else {
+            // Section 9: the grid's x positions and width come only from GridLayout. Widths only grow
+            // while the grid stays open.
+            var gridXs: [CGFloat] = []
+            if grid {
+                let current = shownColumns > 0 ? columnWidths : []
+                let lay = GridLayout.layout(cellWidths: newCells.map(\.frame.width), columns: columns, current: current,
+                                            inset: Metrics.barInset, spacing: Metrics.cellSpacing,
+                                            trailing: Metrics.barInset + Metrics.scrollGutter)
+                gridXs = lay.xs
+                oldGridXs = GridLayout.layout(cellWidths: [], columns: columns, current: current, inset: Metrics.barInset,
+                                              spacing: Metrics.cellSpacing, trailing: 0).xs
+                widened = !current.isEmpty && lay.widths != current
+                columnWidths = lay.widths
+                gridWidth = lay.totalWidth
+            } else {
+                columnWidths = []
+            }
+
+            // Final positions, in the flipped content view: y counts down from the top.
+            var t: [NSPoint] = []
+            if grid {
+                let rows = (candidates.count + columns - 1) / columns
+                for i in candidates.indices {
+                    t.append(NSPoint(x: gridXs[i % columns],
+                                     y: Metrics.gridInset + CGFloat(i / columns) * Metrics.gridRowPitch
+                                         + (Metrics.gridRowPitch - Metrics.capsuleHeight) / 2))
+                }
+                size = NSSize(width: gridWidth, height: Metrics.gridInset * 2 + CGFloat(rows) * Metrics.gridRowPitch)
+            } else {
+                var x = Metrics.barInset
+                for cell in newCells {
+                    t.append(NSPoint(x: x, y: (Metrics.barHeight - Metrics.capsuleHeight) / 2))
+                    x += cell.frame.width + Metrics.cellSpacing
+                }
+                size = NSSize(width: x - Metrics.cellSpacing + Metrics.chevronArea, height: Metrics.barHeight)
+            }
+            targets = t
+
+            // Where the cells start: a new cell whose candidate (global index first + i) was in the old
+            // output (shownFirst ..< shownFirst + oldCells.count) starts at that old cell. Expanding, those
+            // are the bar's candidates, in grid row 0 or, from the bar's page 2, in later rows;
+            // collapsing, each bar cell starts at the grid cell showing its candidate (cv.mov: the
+            // second row's candidates fly up into the bar).
+            var starts = targets
+            if widened && !expanding {
+                // A column widened while the grid stays open: cells slide from where the old widths put them.
+                for i in starts.indices { starts[i].x = oldGridXs[i % columns] }
+            }
+            if expanding || collapsing {
+                for i in newCells.indices {
+                    let j = first + i - shownFirst
+                    if oldCells.indices.contains(j) { starts[i] = oldCells[j].frame.origin }
+                }
+            }
+
+            // Collapsing: the grid cells whose candidates do not move into the bar stay where they are
+            // until the window has shrunk past them.
+            let staying = collapsing
+                ? oldCells.enumerated().filter { j, _ in !(first..<first + newCells.count).contains(shownFirst + j) }.map { $0.1 }
+                : []
+            leaving.forEach { $0.removeFromSuperview() }
+            update.removed.forEach { if !staying.contains($0) { $0.removeFromSuperview() } }
+            staying.forEach { $0.ignoresMouse = true }
+            leaving = staying
+            for (i, cell) in newCells.enumerated() {
+                cell.setFrameOrigin(starts[i])
+                if !update.reused[i] { row.addSubview(cell) }
+            }
+            var newDecor: [NSView] = grid ? [] : chevron(barSize: size)
+            if grid, total > candidates.count {
+                newDecor.append(scrollThumb(first: first, total: total, columns: columns, count: candidates.count,
+                                         width: size.width, height: size.height))
+            }
+            decor.replace(with: newDecor, deferred: expanding || collapsing, in: row)
+            if shownSize != size {
+                // Collapsing keeps the grid-sized content view until the animation ends, so the cells
+                // flying up from the lower rows are not cut off at the start (`animate` sets the size).
+                if !collapsing { row.frame = NSRect(origin: .zero, size: size) }
+                glass.cornerRadius = grid ? Metrics.gridCornerRadius : size.height / 2
+            }
+            shownColumns = columns
+            shownFirst = first
+            shownTotal = total
+            shownCandidates = candidates
+            shownNotes = notes
+            shownSize = size
+            shownTargets = targets
         }
 
         let screens = NSScreen.screens
         let rectScreen = lineRect.flatMap { r in screens.firstIndex { $0.frame.contains(r.origin) } }
         let main = NSScreen.main.flatMap { m in screens.firstIndex(of: m) } ?? 0
         guard !screens.isEmpty else { return }
-        let alignOffset = Metrics.barInset + (cells.first?.candidateMinX ?? 0)
+        let alignOffset = Metrics.barInset + (newCells.first?.candidateMinX ?? 0)
         let origin = PanelPlacement.topLeft(
             lineRect: lineRect, lastOrigin: lastOrigin, size: size, alignOffset: alignOffset,
             screens: screens.map(\.visibleFrame), rectScreen: rectScreen, main: main)
         lastOrigin = origin
-        if window.frame.origin.x != origin.x || window.frame.maxY != origin.y {
-            window.setFrameTopLeftPoint(origin)
+        let frame = NSRect(x: origin.x, y: origin.y - size.height, width: size.width, height: size.height)
+        // Only the selection moved while an expand or collapse runs (autorepeat on the arrow keys):
+        // the cells were updated above and the running animation already goes to this frame and these
+        // targets, so leave it running instead of cutting it short.
+        let keepRunning = inPlace && animating && frame == shownFrame
+        shownFrame = frame
+        if keepRunning {
+            // nothing to replace
+        } else if expanding {
+            // bv.mov 420-438: the window grows downward while the first row's cells slide to their columns.
+            animate(to: frame, duration: Metrics.expandDuration, cells: newCells, targets: targets)
+        } else if collapsing {
+            animate(to: frame, duration: Metrics.collapseDuration, cells: newCells, targets: targets)
+        } else if widened {
+            animate(to: frame, duration: Metrics.widenDuration, cells: newCells, targets: targets)
+        } else if animating {
+            settle(frame: frame)
+        } else {
+            if window.frame.size != size { window.setContentSize(size) }
+            if window.frame.origin.x != origin.x || window.frame.maxY != origin.y {
+                window.setFrameTopLeftPoint(origin)
+            }
         }
         if !window.isVisible { window.orderFrontRegardless() }
     }
 
+    /// a-3's expand mark at the bar's right end: a separator line and a chevron, both secondary.
+    /// Display only: the bar expands with the down arrow; a click on it does nothing.
+    private func chevron(barSize: NSSize) -> [NSView] {
+        let left = barSize.width - Metrics.chevronArea
+        let line = FilledView(frame: NSRect(x: left + Metrics.chevronSeparatorInset, y: ((barSize.height - Metrics.chevronSeparatorHeight) / 2).rounded(),
+                                            width: 1, height: Metrics.chevronSeparatorHeight), color: .separatorColor)
+        let config = NSImage.SymbolConfiguration(pointSize: Metrics.chevronPointSize, weight: .medium)
+        guard let image = NSImage(systemSymbolName: "chevron.down", accessibilityDescription: nil)?
+            .withSymbolConfiguration(config) else { return [line] }
+        let view = NSImageView(image: image)
+        view.contentTintColor = .tertiaryLabelColor  // h-3: secondary and semibold were brighter than a-3
+        view.frame = NSRect(x: left + Metrics.chevronImageInset, y: 0, width: Metrics.chevronArea - Metrics.chevronImageInset, height: barSize.height)
+        return [line, view]
+    }
+
+    /// a-4's scroll indicator: a thin pill in the gutter, sized and placed by the visible rows' share
+    /// of all rows.
+    private func scrollThumb(first: Int, total: Int, columns: Int, count: Int, width: CGFloat, height: CGFloat) -> NSView {
+        let totalRows = CGFloat((total + columns - 1) / columns)
+        let visibleRows = CGFloat((count + columns - 1) / columns)
+        let track = height - Metrics.gridInset * 2
+        let h = max(Metrics.scrollThumbMinHeight, (track * visibleRows / totalRows).rounded())
+        let y = Metrics.gridInset + ((track - h) * CGFloat(first / columns) / max(totalRows - visibleRows, 1)).rounded()
+        return FilledView(frame: NSRect(x: width - Metrics.barInset - Metrics.scrollThumbWidth, y: y,
+                                        width: Metrics.scrollThumbWidth, height: h),
+                          color: .tertiaryLabelColor, cornerRadius: Metrics.scrollThumbWidth / 2)
+    }
+
     func hide() {
+        // A running expand animation would keep moving the window after it is ordered out and show it
+        // at its animated frame next time; end it first.
+        if animating { settle(frame: shownFrame) }
         window.orderOut(nil)
+        shownColumns = 0
+        shownFirst = 0
+        shownTotal = 0
+        shownCandidates = []
+        shownNotes = []
+        shownSize = .zero
+        shownTargets = []
+        columnWidths = []
+        cellSet.reset().forEach { $0.removeFromSuperview() }
+        decor.clear()
     }
 }
 

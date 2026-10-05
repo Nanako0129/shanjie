@@ -15,7 +15,7 @@
 - 需要使用者決定的事，用選擇題問，推薦的選項放第一個。
 - 使用者明說的需求照字面做；要偏離時先做到，再附上有依據的說明。
 - verifier 或其他會改檔的 agent 在某個 worktree 跑的時候，不碰那個 worktree；要急修就先停掉它。
-- commit 一律接在測試成功之後（`make test && git commit …`），commit 前看 `git diff --cached --stat` 有沒有預期外的檔案。
+- commit 一律接在測試成功之後（`make test && git commit …`），commit 前看 `git diff --cached --stat` 有沒有預期外的檔案。測試或 merge 的輸出不要經過 `| tail`、`| grep` 再接 `&&`：管線的結束碼是最後一個指令的，失敗會被吃掉（2026-10-05 因此 commit 了一次沒過的測試）。要篩選輸出就先導到檔案、看 `$?`，再 commit。
 
 ## 文件要跟著更新
 
@@ -37,7 +37,7 @@
 - **佔用使用者鍵盤的時間要短**：每次目標 15 秒以內，超過先問；快速連打用 `N*a,b,c`（每鍵約 10 ms）；能合併的情境合併成一次。
 - 要錄影時用 `IMESHOT_VIDEO`：周圍變暗是刻意保留的（使用者要知道正在錄），長度依步驟估算、多留幾秒。
 - 剛重裝的輸入法第一次可能吃掉前幾個鍵，先暖機。
-- 截圖只截測試視窗附近，蘋果的參考截圖不進 repo。
+- 截圖只截測試視窗附近，蘋果的參考截圖不進 repo。善解自己的實機截圖與錄影也不進 repo：背景常拍到使用者的終端機、聊天等私人畫面，只放在 session 的暫存區；要分享的 demo 用 `IMESHOT_DEMO=1`（只錄測試視窗），檔案交給使用者自己決定。
 
 ## 外觀與行為
 
@@ -52,5 +52,10 @@
 - 網站（shanjie.nyanako.com）手動部署，部署前先問；網站不放下載連結，直到使用者決定公開。
 
 ## 已知的系統問題
+
+- **安全輸入讓第三方輸入法反灰**（2026-10-05）：只要有任何程式開著安全輸入（密碼欄、Terminal 的 Secure Keyboard Entry；使用者說用過 Chrome 相關工具之後會出現），macOS 就把善解、小麥在選單裡反灰。
+  - `ioreg -l -w 0 | grep kCGSSessionSecureInputPID` 的 PID **不一定是持有者**：持有者是沒有視窗的背景程式時，報的是前景 App（實測）。
+  - 判斷法：切到別的 App 再查。PID 跟著前景變，就是背景程式；PID 不變，才是那個 App。
+  - 請使用者讓那個程式離開密碼欄或重開它；不要替使用者結束程式。重現用 `tools/secure-input.swift`。
 
 - **Caps Lock 切換輸入法偶爾失效**（任何輸入法都切不動、Ctrl+Space 正常）：是 macOS 的問題，不是善解。安裝後不需要做任何步驟。使用者回報時，請使用者在「系統設定 → 輔助使用 → 鍵盤」打開慢速按鍵、按一次 Caps Lock、再關掉。用指令自動化試過都無效（`hidutil` 的 `SlowKeysDelay` 設不進去；`defaults write` 寫得進去但系統不會即時套用；程式送的 Caps Lock 不會觸發切換），詳見 `docs/research-log.md`。
