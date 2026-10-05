@@ -231,6 +231,33 @@ final class LearningTests: XCTestCase {
         XCTAssertEqual((attrs[.posixPermissions] as? NSNumber)?.intValue, 0o600)
     }
 
+    /// A mouse pick samples the learning gate before the core call, as a key does: the gate turns on
+    /// after the last key and before the click, and the click must still learn nothing.
+    func testClickWhilePausedLearnsNothing() throws {
+        let dir = TestLearning.directory(), gate = Gate()
+        let c = Controller(makeShell(gate: gate, learning: dir))
+        c.session.activate()
+        c.type("su3 ")
+        gate.secure = true
+        c.panel.click(1)
+        gate.secure = false
+        c.press(Keys.enter)
+        XCTAssertEqual(TestLearning.records(in: dir), [])
+    }
+
+    func testClickWhileEnabledLearns() throws {
+        let dir = TestLearning.directory()
+        let c = Controller(makeShell(learning: dir))
+        c.session.activate()
+        // A two-character word: a single character at sentence start learns nothing (section 12 rule 6).
+        c.type("su3cl3 ")
+        let items = c.panel.items
+        let i = try XCTUnwrap(items.indices.dropFirst().first { items[$0].count == 2 })
+        c.panel.click(i)
+        c.press(Keys.enter)
+        XCTAssertTrue(TestLearning.records(in: dir).contains { $0.contains("\t\(items[i])\t") })
+    }
+
     func testGateTurningOnMidCompositionStoresNothing() throws {
         let dir = TestLearning.directory(), gate = Gate()
         let c = Controller(makeShell(gate: gate, learning: dir))
