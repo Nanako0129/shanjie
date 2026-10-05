@@ -6,6 +6,9 @@
 //   每一步截一張 `<輸出前綴>-<步驟序號>.png`，只截測試視窗和它下方候選窗的區域，不截全螢幕。
 //   環境變數 IMESHOT_VIDEO=<檔名.mov>：從視窗拿到焦點開始錄影，長度依步驟估算（一般步驟約 1.4 秒、
 //   快速連打另加每鍵 10 ms，再多留 3 秒）。錄影時 macOS 會讓周圍變暗，這是刻意保留的，使用者看得到正在錄。
+//   環境變數 IMESHOT_SCREEN=builtin：視窗開在筆電內建螢幕的正中央（沒有內建螢幕就中止）。
+//   環境變數 IMESHOT_DEMO=1：視窗加高，候選窗開在本程式自己的空白文字區上，截圖與錄影只截這個視窗，
+//   不會拍到後面的任何畫面（給要分享的 demo 用）。
 //   結束時印出按 Esc 前的組字範圍（markedRange）與最後的文字（含換行，用 debugDescription）。
 // 安全：按鍵只用 CGEvent.postToPid 送給本程式自己的 pid（和 tools/imetype.swift 相同），就算焦點跑掉也不會
 // 打進別的 App；每一步之前確認視窗在最前面，不在就等，最多 60 秒，叫不回來就中止；步驟參數在開始前全部
@@ -53,7 +56,27 @@ func source(_ id: String) -> TISInputSource? {
 guard let src = source(sourceID) else { fail("no input source \(sourceID)") }
 let app = NSApplication.shared
 app.setActivationPolicy(.regular)
-let window = NSWindow(contentRect: NSRect(x: 300, y: 500, width: 520, height: 90), styleMask: [.titled], backing: .buffered, defer: false)
+/// IMESHOT_DEMO=1: a tall window, so the candidate panel opens over the probe's own empty text view and
+/// screenshots and video show only this window, never what is behind it (for demo clips to share).
+let demo = ProcessInfo.processInfo.environment["IMESHOT_DEMO"] == "1"
+/// IMESHOT_SCREEN=builtin: open the window on the Mac's built-in display (when there is one), centred,
+/// e.g. to record a Retina demo away from the screen the user is working on.
+func builtinScreen() -> NSScreen? {
+    NSScreen.screens.first { s in
+        (s.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)
+            .map { CGDisplayIsBuiltin(CGDirectDisplayID($0.uint32Value)) != 0 } ?? false
+    }
+}
+let size = demo ? NSSize(width: 640, height: 300) : NSSize(width: 520, height: 90)
+var origin = demo ? NSPoint(x: 300, y: 300) : NSPoint(x: 300, y: 500)
+if ProcessInfo.processInfo.environment["IMESHOT_SCREEN"] == "builtin" {
+    guard let b = builtinScreen() else { fail("no built-in display") }
+    origin = NSPoint(x: b.visibleFrame.midX - size.width / 2, y: b.visibleFrame.midY - size.height / 2)
+}
+let window = NSWindow(contentRect: NSRect(origin: origin, size: size), styleMask: [.titled], backing: .buffered, defer: false)
+// The initializer keeps a new window on the main screen (2026-10-05: a demo meant for the built-in
+// display opened on the external one); setting the frame afterwards places it in global coordinates.
+window.setFrame(window.frameRect(forContentRect: NSRect(origin: origin, size: size)), display: false)
 window.title = "善解截圖探測（請不要碰鍵盤）"
 let textView = NSTextView(frame: window.contentView!.bounds)
 textView.font = NSFont.systemFont(ofSize: 22)
@@ -87,7 +110,8 @@ func capture(_ n: Int) {
     let f = onMain { window.frame }
     let screen = onMain { NSScreen.screens[0].frame }
     // Only the probe window and the area below it, where the candidate panel opens (top-left origin).
-    let region = "\(Int(f.minX) - 20),\(Int(screen.height - f.maxY) - 20),900,\(Int(f.height) + 420)"
+    let region = demo ? "\(Int(f.minX)),\(Int(screen.height - f.maxY)),\(Int(f.width)),\(Int(f.height))"
+                      : "\(Int(f.minX) - 20),\(Int(screen.height - f.maxY) - 20),900,\(Int(f.height) + 420)"
     let p = Process(); p.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
     p.arguments = ["-x", "-R", region, file]
     try? p.run(); p.waitUntilExit()
@@ -109,8 +133,9 @@ DispatchQueue.global().async {
         let typing = plan.reduce(0.0) { sum, s in if case .rapid(let n, let c) = s { return sum + Double(n * c.count) * 0.01 }; return sum }
         let seconds = Int((Double(plan.count) * 1.4 + typing).rounded(.up)) + 3
         let r = Process(); r.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
-        r.arguments = ["-x", "-V", String(seconds), "-R",
-                       "\(Int(f.minX) - 20),\(Int(h - f.maxY) - 20),620,330", video]
+        let area = demo ? "\(Int(f.minX)),\(Int(h - f.maxY)),\(Int(f.width)),\(Int(f.height))"
+                        : "\(Int(f.minX) - 20),\(Int(h - f.maxY) - 20),620,330"
+        r.arguments = ["-x", "-V", String(seconds), "-R", area, video]
         try? r.run()
         recorder = r
         usleep(1_500_000)  // screencapture's recording starts about a second after launch
