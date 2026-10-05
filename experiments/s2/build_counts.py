@@ -17,18 +17,22 @@ sys.path.insert(0, os.path.join(ROOT, "reference", "proto"))
 import ime  # noqa: E402
 
 SRC = os.path.expanduser("~/.cache/shanjie/sources")
-OUT = os.path.expanduser("~/.cache/shanjie/work/s2")
+OUT = os.environ.get("S2_WORK") or os.path.expanduser("~/.cache/shanjie/work/s2")   # S2_WORK：寫到別處（S2n 重建時不蓋掉舊的計數）
 DUMP = os.path.join(SRC, "zhwiki-20261001-pages-articles.xml.bz2")
 
 
 def load_conv():
-    """回傳 (詞組表, 字表, 最長詞組)。只收「簡體專用字」：本身也是正確繁體的字（例：吃、后、里、游）不轉，
-    否則會把原本正確的繁體字改掉（2026-10-03 的 bug：吃→喫、后→後、里→裏）。詞組只在含簡體專用字時才收。"""
+    """回傳 (詞組表, 字表, 最長詞組)，給「繁體句」用。只收「簡體專用字」：本身也是正確繁體的字（例：吃、后、里、游）不轉，
+    否則會把原本正確的繁體字改掉（2026-10-03 的 bug：吃→喫、后→後、里→裏）。詞組只在含簡體專用字時才收。
+    S2n：同時填好「簡體句」用的全域表（SIMP_*、MARKERS、TRAD_ONLY），見 convert()。"""
     simp_only, phrase, char = set(), {}, {}
+    keys, vals, first_char, simp_phrase = set(), set(), {}, {}
     for line in open(os.path.join(SRC, "opencc", "STCharacters.txt"), encoding="utf-8"):
         p = line.rstrip("\n").split("\t")
-        if len(p) == 2 and p[0] not in p[1].split(" "):
-            simp_only.add(p[0]); char[p[0]] = p[1].split(" ")[0]
+        if len(p) == 2 and not line.startswith("#"):   # 檔頭的 `# Format: key<TAB>value(s)` 不是對照
+            keys.add(p[0]); vals.update("".join(p[1].split(" "))); first_char[p[0]] = p[1].split(" ")[0]
+            if p[0] not in p[1].split(" "):
+                simp_only.add(p[0]); char[p[0]] = p[1].split(" ")[0]
     for f in ["STPhrases.txt", "TWPhrases.txt"]:
         for line in open(os.path.join(SRC, "opencc", f), encoding="utf-8"):
             if line.startswith("#") or "\t" not in line:
@@ -36,9 +40,18 @@ def load_conv():
             k, v = line.rstrip("\n").split("\t")
             if f == "TWPhrases.txt":
                 TW_PHRASE[k] = v.split(" ")[0]
-            elif any(c in simp_only for c in k):
-                phrase[k] = v.split(" ")[0]
+            else:
+                simp_phrase[k] = v.split(" ")[0]
+                if any(c in simp_only for c in k):
+                    phrase[k] = v.split(" ")[0]
     char.update(VARIANTS)
+    SIMP_PHRASE.clear(); SIMP_PHRASE.update(simp_phrase)
+    SIMP_CHAR.clear(); SIMP_CHAR.update(first_char)
+    MARKERS.clear(); MARKERS.update(c for c, v in first_char.items() if c != v)   # 標記字：第一個對照不是自己（含 后、于、里 這類）
+    SIMP_ONLY.clear(); SIMP_ONLY.update(simp_only)                                 # 簡體專用字：對照裡不含自己
+    TRAD_ONLY.clear(); TRAD_ONLY.update(first_char[c] for c in MARKERS)            # 繁體專用字：標記字的第一個對照（像、待、座 不在其中）
+    SIMP_MAXP[0] = max(map(len, simp_phrase))
+    TW_MAXP[0] = max(map(len, TW_PHRASE), default=1)
     return phrase, char, max(map(len, phrase))
 
 
@@ -46,13 +59,28 @@ def load_conv():
 VARIANTS = {"爲": "為", "衆": "眾", "綫": "線", "麪": "麵", "僞": "偽", "裏": "裡", "峯": "峰", "羣": "群", "啓": "啟", "敎": "教"}
 
 
-TW_PHRASE = {}   # 台灣用詞（TWPhrases，鍵是繁體詞組），在簡轉繁之後第二遍套用
+# S2n 簡體句用的表（load_conv 填）：全部 STPhrases、STCharacters 第一個對照、簡體專用字、繁體專用字
+SIMP_PHRASE, SIMP_CHAR, MARKERS, SIMP_ONLY, TRAD_ONLY, SIMP_MAXP = {}, {}, set(), set(), set(), [0]
+TW_CHAR = {**VARIANTS, "臺": "台"}   # 簡體句轉完後整句套一遍的台灣用字
+
+
+TW_PHRASE, TW_MAXP = {}, [1]   # 台灣用詞（TWPhrases，鍵是繁體詞組），在簡轉繁之後第二遍套用
+
+
+_FIRST = {}   # (id(table), len(table)) → {首字: 該首字開頭的最長鍵}，讓沒有詞組可比對的位置不必切片查表（輸出和逐長度試完全相同）
 
 
 def _longest(text, table, maxp, char=None):
+    first = _FIRST.get((id(table), len(table)))
+    if first is None:
+        first = {}
+        for k in table:
+            if len(k) > first.get(k[0], 0):
+                first[k[0]] = len(k)
+        _FIRST[(id(table), len(table))] = first
     out, i, n = [], 0, len(text)
     while i < n:
-        for L in range(min(maxp, n - i), 1, -1):
+        for L in range(min(first.get(text[i], 0), maxp, n - i), 1, -1):
             w = table.get(text[i:i + L])
             if w:
                 out.append(w); i += L; break
@@ -61,10 +89,21 @@ def _longest(text, table, maxp, char=None):
     return "".join(out)
 
 
+def is_simplified(text):
+    """簡體句（S2n 契約 §2.1）：(i) 有標記字而且沒有繁體專用字，或 (ii) 簡體專用字比繁體專用字多。"""
+    m = sum(c in MARKERS for c in text)
+    t = sum(c in TRAD_ONLY for c in text)
+    return (m > 0 and t == 0) or sum(c in SIMP_ONLY for c in text) > t
+
+
 def convert(text, phrase, char, maxp):
-    """兩段：簡轉繁（詞組＋簡體專用字），再套台灣用詞。"""
-    text = _longest(text, phrase, maxp, char)
-    return _longest(text, TW_PHRASE, max(map(len, TW_PHRASE), default=1)) if TW_PHRASE else text
+    """簡體句（S2n）：全部 STPhrases 最長優先，沒蓋到的字用 STCharacters 第一個對照，整句再套台灣用字（VARIANTS、臺→台）。
+    其他句（繁體句，含簡繁夾雜）：只轉簡體專用字。兩種都再套台灣用詞。"""
+    if is_simplified(text):
+        text = "".join(TW_CHAR.get(c, c) for c in _longest(text, SIMP_PHRASE, SIMP_MAXP[0], SIMP_CHAR))
+    else:
+        text = _longest(text, phrase, maxp, char)
+    return _longest(text, TW_PHRASE, TW_MAXP[0]) if TW_PHRASE else text
 
 
 MARKUP = [

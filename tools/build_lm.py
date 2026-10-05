@@ -28,7 +28,7 @@ import pickle
 import struct
 import sys
 
-WORK = os.path.expanduser("~/.cache/shanjie/work/s2")
+WORK = os.environ.get("S2_WORK") or os.path.expanduser("~/.cache/shanjie/work/s2")
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CORPORA = [("counts-200000.pkl", 1), ("counts-colloquial3.pkl", 5)]   # 維基 20 萬篇 ×1、口語（訓練部分＋合成句）×5
 PRUNE, D = 2, 0.75
