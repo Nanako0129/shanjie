@@ -2,11 +2,14 @@
 (e) a prefix-only scorer must trip the degeneracy stop (exit 3); (f) a wrong dev302 hash must exit non-zero
 with the fixed string. Both go through the real run_ll.main(); only the scorer / the expected hash is replaced.
 """
+import shutil
 import subprocess
 import sys
+import tempfile
 
 E = """
 import sys, s5k, run_ll
+s5k.L_REPO = sys.argv[1]  # fresh dir per run, so resume never skips rows
 def prefix_only(model, prefix_ids, cand_id_lists):
     import mlx.core as mx
     from mlx_lm.models.cache import make_prompt_cache
@@ -25,9 +28,12 @@ s5k.HASHES[k] = (s5k.HASHES[k][0], '0' * 64)
 sys.argv = ['run_ll.py', '--model', 'Q-ll', '--set', 'dev302', '--limit', '20', '--ctx', 'none']
 run_ll.main()
 """
+tmp = tempfile.mkdtemp()
 for tag, code, want in (("e prefix-only", E, 3), ("f wrong hash", F, 1)):
-    p = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+    p = subprocess.run([sys.executable, "-c", code, tmp], capture_output=True, text=True)
     print(f"{tag}: rc={p.returncode} expected={want} stdout={p.stdout.strip()!r} stderr={p.stderr.strip()!r}")
     if p.returncode != want:
+        shutil.rmtree(tmp, ignore_errors=True)
         sys.exit("selftest FAILED")
+shutil.rmtree(tmp, ignore_errors=True)
 print("selftest ok")

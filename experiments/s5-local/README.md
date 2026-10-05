@@ -49,6 +49,8 @@ The private root is taken from the environment variable `SHANJIE_PRIVATE` (no de
 
 Per condition and context mode one JSONL: `<cond>.noctx.jsonl` / `<cond>.ctx.jsonl` (`k` = row index in the S5j `rows.jsonl`, `scores` in rank order, `ms`; L-pos stores adopted `[position, option]` pairs; no sentence text). `meta.jsonl` has load time, peak memory, and the load note. Output directories: discordtune in `$SHANJIE_PRIVATE/s5-local/`, cvtune in `~/.cache/shanjie/work/s5-local/`, dev302 / typing76 in `results/`. `--limit N` writes `<set>-nN/` (smoke; not committed). Runs resume per row.
 
+`lat_first` in `score.json` is the first record of the file, i.e. "first row after load" only for a condition that starts its process (L-noul in `run_laya.py`, every ll model); other conditions show "—". `score.py` exits 1 with `s5k: TAU MISSING` when a non-discordtune set is scored and `tau.json` is absent. `selftest.py` writes into a temporary directory removed at exit.
+
 Context modes: `none` (empty context), `real` (each row's own context, only rows that have one; discordtune), `synth` (the fixed 10-character context 「我們等一下要去吃飯，」, public sets only, smoke). `score.py` names the conditions `X` (no context), `X+ctx` (rows with context, paired with the same rows' `X`), `X+ctxall` (discordtune: context where the row has one, none elsewhere, the 1000-row "with context" table), and `@tau` for gated variants.
 
 ## Full-run commands (main runs; ask the user for a quiet window first, add `--idle` only inside it)
