@@ -29,7 +29,7 @@ enum TestData {
             guard FileManager.default.fileExists(atPath: src.path) else {
                 XCTFail("""
                     \(f.source) is missing. The lexicon is in git; the model is the model-v1 release asset: \
-                    gh release download model-v1 -p bigram.sjlm -D data/lm
+                    gh release download model-v1 -R Nanako0129/shanjie -p bigram.sjlm -D data/lm
                     """, file: file, line: line)
                 return nil
             }
