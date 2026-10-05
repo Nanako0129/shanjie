@@ -191,6 +191,9 @@ impl Learner {
             touched.push(r.clone());
         }
         touched.push(self.bump(context, reading, word, today, 1.0));
+        if is_single(word) {
+            return touched; // never globalizes (§12 rule 1)
+        }
         // §1.3 globalize: ≥ 2 distinct full keys (SENTINEL counts) with an active record.
         let Some(ix) = self.index.get(&reading_key(reading)) else { return touched };
         let keys: std::collections::HashSet<&str> = ix
@@ -199,7 +202,7 @@ impl Learner {
             .filter(|r| r.word == word && r.context != GLOBAL && decayed(r, today) >= ACTIVE)
             .map(|r| r.context.as_str())
             .collect();
-        if keys.len() >= 2 && !is_single(word) {
+        if keys.len() >= 2 {
             let prev = self.find(GLOBAL, reading, word).map(|i| self.records[i].clone());
             let have = prev.as_ref().map_or(0.0, |r| decayed(r, today));
             let now = self.bump(GLOBAL, reading, word, today, (1.0 - have).max(0.0));
@@ -213,8 +216,9 @@ impl Learner {
     /// Words with an active record for `reading` reachable from `context` by the §1.1 lookup order
     /// (exact, last character, global), with their decayed weight, and the level that answered. The
     /// first level that has any usable record answers; a word found by several records of that level
-    /// keeps the highest weight. Single characters are usable only at the exact level and never under
-    /// "^" (§12 rules 5 and 6); there are no single-character global records (dropped at load).
+    /// keeps the highest weight. Single characters skip the last-character level (§12 rule 5); a
+    /// single-character record under "^" or the global key cannot exist (rule 6: teach does not make
+    /// one, and load drops old ones).
     pub fn lookup(&self, context: &str, reading: &[String], today: i64) -> (Level, Vec<(&str, f64)>) {
         let Some(ix) = self.index.get(&reading_key(reading)) else { return (Level::Global, Vec::new()) };
         let last = context.chars().next_back().filter(|_| context != SENTINEL && context != GLOBAL);
@@ -224,8 +228,9 @@ impl Learner {
             (Level::Global, &|c| c == GLOBAL),
         ];
         for (lv, level) in levels {
-            // Once per level: single characters are usable only at the exact level, never under "^".
-            let single_barred = lv != Level::Exact || context == SENTINEL;
+            // Rule 5: no last-character level for single characters. Single-character records under "^"
+            // or the global key do not exist: teach never makes them and load drops old ones.
+            let single_barred = lv == Level::LastChar;
             let mut hits: Vec<(&str, f64)> = Vec::new();
             for &i in ix {
                 let r = &self.records[i];

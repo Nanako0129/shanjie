@@ -211,6 +211,9 @@ final class LearningTests: XCTestCase {
         c.type("su3cl3 ")
         let items = c.panel.items
         let i = try XCTUnwrap(items.indices.dropFirst().first { items[$0].count == 2 })
+        // one digit selects within the first page of 9; an off-page candidate must fail loudly
+        XCTAssertLessThan(i, 9, "the two-character candidate is not on the first page")
+        guard i < 9 else { return items[i] }
         c.type("\(i + 1)")
         return items[i]
     }
