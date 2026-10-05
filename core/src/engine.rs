@@ -17,6 +17,12 @@ pub const MOD_COMMAND: u32 = 8;
 pub const MOD_CAPSLOCK: u32 = 16;
 pub const MAX_SYLLABLES: usize = 40;
 pub const PAGE_SIZE: usize = 9;
+/// Expanded grid columns for ordinary candidates (a-4: six per row, numbers 1-6 on the selected row).
+pub const GRID_COLUMNS: usize = 6;
+/// Expanded grid columns when the candidates are a punctuation token's alternatives (p-2: three).
+pub const GRID_COLUMNS_PUNCT: usize = 3;
+/// Rows visible in the expanded grid (a-4: five, with a scroll bar).
+pub const GRID_ROWS: usize = 5;
 
 /// Initial (21), medial (3), final (13) symbols in the contract's column order.
 const SYMBOLS: &str = "ㄅㄆㄇㄈㄉㄊㄋㄌㄍㄎㄏㄐㄑㄒㄓㄔㄕㄖㄗㄘㄙㄧㄨㄩㄚㄛㄜㄝㄞㄟㄠㄡㄢㄣㄤㄥㄦ";
@@ -175,10 +181,17 @@ pub struct Output {
     pub commit: String,
     pub preedit: String,
     pub cursor_utf16: u32,
-    /// Current page, at most `PAGE_SIZE`.
+    /// Collapsed: the current page, at most `PAGE_SIZE`. Expanded: the visible rows from `top`, at
+    /// most `GRID_ROWS * columns`.
     pub candidates: Vec<String>,
-    /// Index within the page; `None` when candidates are closed.
+    /// Index within `candidates`; `None` when candidates are closed.
     pub selected: Option<usize>,
+    /// 0 = collapsed single row; > 0 = expanded grid with this many columns.
+    pub columns: u32,
+    /// Position of `candidates[0]` in the whole list (what `Engine::pick` offsets from); 0 when closed.
+    pub first: u32,
+    /// Length of the whole list; 0 when closed.
+    pub total: u32,
 }
 
 struct Fixed {
@@ -194,6 +207,38 @@ struct Cands {
     /// (word, length in syllables)
     list: Vec<(String, usize)>,
     sel: usize,
+    /// Grid columns: `GRID_COLUMNS`, or `GRID_COLUMNS_PUNCT` for punctuation alternatives.
+    cols: usize,
+    expanded: bool,
+    /// First visible grid row while expanded; keeps the selected row inside `GRID_ROWS`.
+    top: usize,
+}
+
+impl Cands {
+    fn new(list: Vec<(String, usize)>, cols: usize) -> Cands {
+        Cands { list, sel: 0, cols, expanded: false, top: 0 }
+    }
+
+    fn scroll(&mut self) {
+        let row = self.sel / self.cols;
+        if row < self.top {
+            self.top = row;
+        } else if row >= self.top + GRID_ROWS {
+            self.top = row + 1 - GRID_ROWS;
+        }
+    }
+
+    /// (position of the first output candidate, how many are output).
+    fn window(&self) -> (usize, usize) {
+        let len = self.list.len();
+        if self.expanded {
+            let first = self.top * self.cols;
+            (first, (len - first).min(GRID_ROWS * self.cols))
+        } else {
+            let first = self.sel / PAGE_SIZE * PAGE_SIZE;
+            (first, (len - first).min(PAGE_SIZE))
+        }
+    }
 }
 
 /// Loaded bigram model and the capped lexicon built from it (decoding only).
@@ -582,15 +627,16 @@ impl Engine {
         preedit.push_str(&pending);
         let cursor_utf16 = preedit.encode_utf16().count() as u32;
         preedit.extend(chars[at..].iter());
-        let (candidates, selected) = match &self.cands {
+        let (candidates, selected, columns, first, total) = match &self.cands {
             Some(c) => {
-                let page = c.sel / PAGE_SIZE;
-                let list = c.list.iter().skip(page * PAGE_SIZE).take(PAGE_SIZE).map(|(w, _)| w.clone()).collect();
-                (list, Some(c.sel % PAGE_SIZE))
+                let (first, n) = c.window();
+                let list = c.list[first..first + n].iter().map(|(w, _)| w.clone()).collect();
+                let columns = if c.expanded { c.cols as u32 } else { 0 };
+                (list, Some(c.sel - first), columns, first as u32, c.list.len() as u32)
             }
-            None => (Vec::new(), None),
+            None => (Vec::new(), None, 0, 0, 0),
         };
-        Output { handled, commit, preedit, cursor_utf16, candidates, selected }
+        Output { handled, commit, preedit, cursor_utf16, candidates, selected, columns, first, total }
     }
 
     /// Recompute the display string: free segments decoded top-1, fixed words in between (§3.1).
@@ -781,23 +827,66 @@ impl Engine {
         self.handled()
     }
 
-    /// Rules 3-8. `Ok(true)` = consumed; `Ok(false)` = candidates closed, key continues at rule 9.
+    /// Rules 3-8 (s3a §3, s3b2 §8.2). `Ok(true)` = consumed; `Ok(false)` = candidates closed, key
+    /// continues at rule 9.
     fn candidate_key(&mut self, k: Key) -> Result<bool, EngineError> {
         let Some(c) = &mut self.cands else { return Ok(false) };
-        let (len, sel) = (c.list.len(), c.sel);
+        let (len, sel, cols) = (c.list.len(), c.sel, c.cols);
+        let digit = (k.kind == KeyKind::Char && k.modifiers == 0 && ('1'..='9').contains(&k.ch))
+            .then(|| k.ch as usize - '1' as usize);
+        if c.expanded {
+            let (row, col, last_row) = (sel / cols, sel % cols, (len - 1) / cols);
+            // Next row, same column; a short last row ends at its last candidate.
+            let below = ((row + 1) * cols + col).min(len - 1);
+            match k.kind {
+                KeyKind::Char if digit.is_some() => {
+                    // Digits above the column count are consumed: on the standard keyboard 7/8/9 are
+                    // zhuyin keys that would close the candidates and start a syllable.
+                    let idx = row * cols + digit.unwrap_or(0);
+                    if digit.unwrap_or(0) < cols && idx < len {
+                        self.choose(idx)?;
+                    }
+                }
+                KeyKind::Down => c.sel = if row == last_row { sel } else { below },
+                KeyKind::Space => c.sel = if row == last_row { col } else { below },
+                KeyKind::Up if row == 0 => {
+                    c.expanded = false;
+                    c.top = 0;
+                }
+                KeyKind::Up => c.sel = sel - cols,
+                KeyKind::Left => c.sel = sel.saturating_sub(1),
+                KeyKind::Right => c.sel = (sel + 1).min(len - 1),
+                KeyKind::Enter => self.choose(sel)?,
+                KeyKind::Esc | KeyKind::Backspace => self.cands = None,
+                _ => {
+                    self.cands = None;
+                    return Ok(false);
+                }
+            }
+            if let Some(c) = &mut self.cands {
+                if c.expanded {
+                    c.scroll();
+                }
+            }
+            return Ok(true);
+        }
         let page_start = sel / PAGE_SIZE * PAGE_SIZE;
         let next_page = (page_start + PAGE_SIZE < len).then_some(page_start + PAGE_SIZE);
         match k.kind {
-            KeyKind::Char if k.modifiers == 0 && ('1'..='9').contains(&k.ch) => {
-                let idx = page_start + (k.ch as usize - '1' as usize);
+            KeyKind::Char if digit.is_some() => {
+                let idx = page_start + digit.unwrap_or(0);
                 if idx < len {
                     self.choose(idx)?;
                 }
             }
-            // The candidate bar is horizontal: left/right move the selection like up/down, as in
-            // the system Zhuyin (user report 2026-10-04: paging on left/right was wrong).
+            // Left/right move the selection (user report 2026-10-04: paging on them was wrong); down
+            // expands into the grid, as in the system Zhuyin (s3b2 §8.1 b-4).
             KeyKind::Up | KeyKind::Left => c.sel = sel.saturating_sub(1),
-            KeyKind::Down | KeyKind::Right => c.sel = (sel + 1).min(len - 1),
+            KeyKind::Right => c.sel = (sel + 1).min(len - 1),
+            KeyKind::Down => {
+                c.expanded = true;
+                c.scroll();
+            }
             KeyKind::Space => c.sel = next_page.unwrap_or(0),
             KeyKind::Enter => self.choose(sel)?,
             KeyKind::Esc | KeyKind::Backspace => self.cands = None,
@@ -807,6 +896,21 @@ impl Engine {
             }
         }
         Ok(true)
+    }
+
+    /// s3b2 §8.2 mouse pick: `index` is a position in the last output's `candidates`. `Ok(None)` when
+    /// the candidates are closed or `index` is outside that output (state unchanged).
+    pub fn pick(&mut self, index: usize) -> Result<Option<Output>, EngineError> {
+        let Some(c) = &self.cands else { return Ok(None) };
+        let (first, n) = c.window();
+        if index >= n {
+            return Ok(None);
+        }
+        let r = self.choose(first + index).and_then(|()| self.handled());
+        if r.is_err() {
+            self.clear_all();
+        }
+        r.map(Some)
     }
 
     /// §2: complete the pending syllable with tone 0..=4 (0 = space = tone 1).
@@ -895,7 +999,7 @@ impl Engine {
                     list.push((w, 1));
                 }
             }
-            self.cands = Some(Cands { list, sel: 0 });
+            self.cands = Some(Cands::new(list, GRID_COLUMNS_PUNCT));
             return;
         }
         for l in (1..=self.lex.max_len.min(avail)).rev() {
@@ -907,7 +1011,7 @@ impl Engine {
             }
         }
         if !list.is_empty() {
-            self.cands = Some(Cands { list, sel: 0 });
+            self.cands = Some(Cands::new(list, GRID_COLUMNS));
         }
     }
 

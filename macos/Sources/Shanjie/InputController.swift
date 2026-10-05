@@ -169,6 +169,26 @@ private enum Metrics {
     /// A label's ink starts about 2 pt inside its frame (s-7: the first candidate's ink sat 2 pt right
     /// of the composed text's); the bar aligns ink, not frames.
     static let labelInset: CGFloat = 2
+
+    // Expanded grid (s3b2 section 8). The grid's row pitch, column width and corner radius are first
+    // values for main's on-device tuning against a-4 (six columns, five rows) and p-2 (three columns).
+    /// a-4: five rows are visible; more candidates scroll.
+    static let gridRows = 5
+    /// One grid row: the 24 pt capsule plus a 4 pt gap (the bar's 4 pt capsule spacing, section 3).
+    static let gridRowPitch: CGFloat = 28
+    /// Fixed column width of the six-column grid (a-4): wide enough for a two-character word.
+    static let gridColumnWidth: CGFloat = 64
+    /// Fixed column width of the three-column punctuation grid (p-2): a mark with its 4-character name.
+    static let gridPunctuationColumnWidth: CGFloat = 104
+    /// Top and bottom padding of the grid inside the glass, and its corner radius.
+    static let gridInset: CGFloat = 5
+    static let gridCornerRadius: CGFloat = 16
+    /// Scroll indicator (a-4): a thin pill at the right edge, in a gutter beside the last column.
+    static let scrollGutter: CGFloat = 9
+    static let scrollThumbWidth: CGFloat = 3
+    static let scrollThumbMinHeight: CGFloat = 12
+    /// bv.mov 420-438: about 0.3 s, system default timing (no custom curve).
+    static let expandDuration: TimeInterval = 0.3
 }
 
 /// One cell of the bar: number, candidate, optional name. The selected cell is an accent-colour
@@ -178,7 +198,10 @@ private final class CellView: NSView {
     private let selected: Bool
     private let onClick: () -> Void
 
-    init(index: Int, text: String, note: String?, selected: Bool, onClick: @escaping () -> Void) {
+    /// `numberText`: the shown number; `showsNumber` false keeps its room but hides it (grid rows other
+    /// than the selected one, p-2). `fixedWidth`: a fixed cell width (grid), `nil` to fit the content (bar).
+    init(numberText: String, showsNumber: Bool = true, fixedWidth: CGFloat? = nil, text: String, note: String?,
+         selected: Bool, onClick: @escaping () -> Void) {
         func label(_ s: String, _ font: NSFont, _ color: NSColor) -> NSTextField {
             let t = NSTextField(labelWithString: s)
             t.font = font
@@ -186,7 +209,8 @@ private final class CellView: NSView {
             t.sizeToFit()
             return t
         }
-        number = label(String(index + 1), Metrics.numberFont, .secondaryLabelColor)
+        number = label(numberText, Metrics.numberFont, .secondaryLabelColor)
+        number.isHidden = !showsNumber
         candidate = label(text, Metrics.candidateFont, .labelColor)
         name = note.map { label($0, Metrics.nameFont, .secondaryLabelColor) }
         self.selected = selected
@@ -195,6 +219,15 @@ private final class CellView: NSView {
         var width = Metrics.numberLeading + number.frame.width + Metrics.numberToCandidate + candidate.frame.width
         if let name { width += Metrics.candidateToName + name.frame.width }
         width += Metrics.trailing
+        if let fixed = fixedWidth {
+            // A fixed column: a candidate wider than its room is truncated, never widens the column.
+            let room = fixed - width + candidate.frame.width
+            if room < candidate.frame.width {
+                candidate.lineBreakMode = .byTruncatingTail
+                candidate.setFrameSize(NSSize(width: max(room, 0), height: candidate.frame.height))
+            }
+            width = fixed
+        }
         super.init(frame: NSRect(x: 0, y: 0, width: width, height: Metrics.capsuleHeight))
 
         var x = Metrics.numberLeading
@@ -224,10 +257,16 @@ private final class CellView: NSView {
     override func mouseDown(with event: NSEvent) { onClick() }
 }
 
-/// The candidate bar (docs/contracts/s3b2-glass-panel.md): a borderless, non-activating panel with
-/// a Liquid Glass row of cells, drawn by us because IMKCandidates ignores fonts and cannot show a
-/// smaller name. Display only: it never becomes key and never receives keys; a click on a cell is
-/// reported by position through `onSelect`. It logs nothing (section 2.5).
+/// The glass's one content view. Flipped, so cells are placed from the top-left and a window that
+/// grows downward leaves the first row where it was.
+private final class GridView: NSView {
+    override var isFlipped: Bool { true }
+}
+
+/// The candidate bar and its expanded grid (docs/contracts/s3b2-glass-panel.md): a borderless,
+/// non-activating panel with a Liquid Glass row of cells, drawn by us because IMKCandidates ignores
+/// fonts and cannot show a smaller name. Display only: it never becomes key and never receives keys;
+/// a click on a cell is reported by position through `onSelect`. It logs nothing (section 2.5).
 @MainActor
 final class CandidatePanelAdapter: CandidatePanel {
     var onSelect: ((Int) -> Void)?
@@ -236,8 +275,13 @@ final class CandidatePanelAdapter: CandidatePanel {
     /// The glass's one content view, kept for the panel's lifetime: replacing the glass's content,
     /// resizing or re-ordering the window on every selection move made the glass's glow flicker
     /// (user report 2026-10-05), so a move only swaps the cells inside.
-    private let row = NSView()
+    private let row = GridView()
     private var lastOrigin: NSPoint?
+    /// The last shown output's columns, first and the cells in it, to animate the collapsed -> expanded
+    /// change from where the bar's cells were.
+    private var shownColumns = 0
+    private var shownFirst = 0
+    private var cells: [CellView] = []
 
     init() {
         window = PanelWindow(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel],
@@ -252,45 +296,123 @@ final class CandidatePanelAdapter: CandidatePanel {
         window.contentView = glass
     }
 
-    func show(_ candidates: [String], notes: [String?], selected: Int, lineRect: NSRect?) {
-        var cells: [CellView] = []
+    func show(_ candidates: [String], notes: [String?], selected: Int, columns: Int, first: Int, total: Int,
+              lineRect: NSRect?) {
+        let grid = columns > 0
+        let selectedRow = grid ? selected / columns : 0
+        let columnWidth = columns == 3 ? Metrics.gridPunctuationColumnWidth : Metrics.gridColumnWidth
+        var newCells: [CellView] = []
         for (i, text) in candidates.enumerated() {
-            cells.append(CellView(index: i, text: text, note: notes[i], selected: i == selected) { [weak self] in
-                self?.onSelect?(i)
-            })
+            let onClick: () -> Void = { [weak self] in self?.onSelect?(i) }
+            newCells.append(grid
+                ? CellView(numberText: String(i % columns + 1), showsNumber: i / columns == selectedRow,
+                           fixedWidth: columnWidth - Metrics.cellSpacing, text: text, note: notes[i],
+                           selected: i == selected, onClick: onClick)
+                : CellView(numberText: String(i + 1), text: text, note: notes[i], selected: i == selected,
+                           onClick: onClick))
         }
+
+        // Final positions, in the flipped content view: y counts down from the top.
+        var targets: [NSPoint] = []
+        var size: NSSize
+        if grid {
+            let rows = (candidates.count + columns - 1) / columns
+            for i in candidates.indices {
+                targets.append(NSPoint(x: Metrics.barInset + CGFloat(i % columns) * columnWidth,
+                                       y: Metrics.gridInset + CGFloat(i / columns) * Metrics.gridRowPitch
+                                           + (Metrics.gridRowPitch - Metrics.capsuleHeight) / 2))
+            }
+            size = NSSize(width: Metrics.barInset * 2 + CGFloat(columns) * columnWidth + Metrics.scrollGutter,
+                          height: Metrics.gridInset * 2 + CGFloat(rows) * Metrics.gridRowPitch)
+        } else {
+            var x = Metrics.barInset
+            for cell in newCells {
+                targets.append(NSPoint(x: x, y: (Metrics.barHeight - Metrics.capsuleHeight) / 2))
+                x += cell.frame.width + Metrics.cellSpacing
+            }
+            size = NSSize(width: x - Metrics.cellSpacing + Metrics.barInset, height: Metrics.barHeight)
+        }
+
+        // Where the first row's cells start when the bar expands: the bar cell showing the same candidate.
+        let expanding = grid && shownColumns == 0 && window.isVisible
+        var starts = targets
+        if expanding {
+            for i in 0..<min(columns, newCells.count) {
+                let j = first + i - shownFirst
+                if cells.indices.contains(j) { starts[i] = cells[j].frame.origin }
+            }
+        }
+
         row.subviews.forEach { $0.removeFromSuperview() }
-        var x = Metrics.barInset
-        let y = (Metrics.barHeight - Metrics.capsuleHeight) / 2
-        for cell in cells {
-            cell.setFrameOrigin(NSPoint(x: x, y: y))
+        for (i, cell) in newCells.enumerated() {
+            cell.setFrameOrigin(starts[i])
             row.addSubview(cell)
-            x += cell.frame.width + Metrics.cellSpacing
         }
-        let size = NSSize(width: x - Metrics.cellSpacing + Metrics.barInset, height: Metrics.barHeight)
-        if window.frame.size != size {
+        if grid, total > candidates.count {
+            let thumb = scrollThumb(first: first, total: total, columns: columns, count: candidates.count, height: size.height)
+            row.addSubview(thumb)
+        }
+        cells = newCells
+        shownColumns = columns
+        shownFirst = first
+
+        let fits = window.frame.size == size
+        if !fits {
             row.frame = NSRect(origin: .zero, size: size)
-            glass.cornerRadius = size.height / 2
-            window.setContentSize(size)
+            glass.cornerRadius = grid ? Metrics.gridCornerRadius : size.height / 2
         }
 
         let screens = NSScreen.screens
         let rectScreen = lineRect.flatMap { r in screens.firstIndex { $0.frame.contains(r.origin) } }
         let main = NSScreen.main.flatMap { m in screens.firstIndex(of: m) } ?? 0
         guard !screens.isEmpty else { return }
-        let alignOffset = Metrics.barInset + (cells.first?.candidateMinX ?? 0)
+        let alignOffset = Metrics.barInset + (newCells.first?.candidateMinX ?? 0)
         let origin = PanelPlacement.topLeft(
             lineRect: lineRect, lastOrigin: lastOrigin, size: size, alignOffset: alignOffset,
             screens: screens.map(\.visibleFrame), rectScreen: rectScreen, main: main)
         lastOrigin = origin
-        if window.frame.origin.x != origin.x || window.frame.maxY != origin.y {
-            window.setFrameTopLeftPoint(origin)
+        let frame = NSRect(x: origin.x, y: origin.y - size.height, width: size.width, height: size.height)
+        if expanding {
+            // bv.mov 420-438: the window grows downward while the first row's cells slide to their
+            // columns; the system's default timing, no custom curve.
+            NSAnimationContext.runAnimationGroup { ctx in
+                ctx.duration = Metrics.expandDuration
+                window.animator().setFrame(frame, display: true)
+                for (i, cell) in newCells.enumerated() where starts[i] != targets[i] {
+                    cell.animator().setFrameOrigin(targets[i])
+                }
+            }
+        } else {
+            if !fits { window.setContentSize(size) }
+            if window.frame.origin.x != origin.x || window.frame.maxY != origin.y {
+                window.setFrameTopLeftPoint(origin)
+            }
         }
         if !window.isVisible { window.orderFrontRegardless() }
     }
 
+    /// a-4's scroll indicator: a thin pill in the gutter, sized and placed by the visible rows' share
+    /// of all rows.
+    private func scrollThumb(first: Int, total: Int, columns: Int, count: Int, height: CGFloat) -> NSView {
+        let totalRows = CGFloat((total + columns - 1) / columns)
+        let visibleRows = CGFloat((count + columns - 1) / columns)
+        let track = height - Metrics.gridInset * 2
+        let h = max(Metrics.scrollThumbMinHeight, (track * visibleRows / totalRows).rounded())
+        let y = Metrics.gridInset + ((track - h) * CGFloat(first / columns) / max(totalRows - visibleRows, 1)).rounded()
+        let width = Metrics.barInset * 2 + CGFloat(columns) * (columns == 3 ? Metrics.gridPunctuationColumnWidth : Metrics.gridColumnWidth) + Metrics.scrollGutter
+        let thumb = NSView(frame: NSRect(x: width - Metrics.barInset - Metrics.scrollThumbWidth, y: y,
+                                         width: Metrics.scrollThumbWidth, height: h))
+        thumb.wantsLayer = true
+        thumb.layer?.backgroundColor = NSColor.tertiaryLabelColor.cgColor
+        thumb.layer?.cornerRadius = Metrics.scrollThumbWidth / 2
+        return thumb
+    }
+
     func hide() {
         window.orderOut(nil)
+        shownColumns = 0
+        shownFirst = 0
+        cells = []
     }
 }
 

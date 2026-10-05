@@ -38,7 +38,7 @@ const NIHAO: &str = "su3cl3"; // standard layout: ㄋㄧˇ ㄏㄠˇ
 const NI: &str = "ㄋㄧˇ";
 const HAO: &str = "ㄏㄠˇ";
 fn blank(handled: bool) -> Output {
-    Output { handled, commit: String::new(), preedit: String::new(), cursor_utf16: 0, candidates: vec![], selected: None }
+    Output { handled, commit: String::new(), preedit: String::new(), cursor_utf16: 0, candidates: vec![], selected: None, columns: 0, first: 0, total: 0 }
 }
 /// Independent expectation of the candidate list. `end`: readings end at `ks.len()`; otherwise they start at 0.
 fn expect_cands(ks: &[&str], from_start: bool) -> Vec<String> {
@@ -386,9 +386,15 @@ fn rows3_to_8_candidate_keys() {
     let mut e = std();
     let all = open_shi(&mut e);
     let page = |p: usize| all[p * 9..((p + 1) * 9).min(all.len())].to_vec();
-    // 4: up/down move across pages, clamped at both ends
+    // 4 (s3b2 8.2): collapsed down expands the grid and leaves the selection alone; up on the first
+    // row collapses again
+    let o = kk(&mut e, KeyKind::Down);
+    assert!(o.selected == Some(0) && o.columns == 6 && o.first == 0 && o.total as usize == all.len() && o.candidates == all[..30]);
+    let o = kk(&mut e, KeyKind::Up);
+    assert!(o.selected == Some(0) && o.columns == 0 && o.candidates == page(0));
+    // 4: up/right move across pages, clamped at both ends
     for i in 1..=10 {
-        let o = kk(&mut e, KeyKind::Down);
+        let o = kk(&mut e, KeyKind::Right);
         assert!(o.selected == Some(i % 9) && o.candidates == page(i / 9));
     }
     for i in (0..10).rev() {
@@ -429,7 +435,7 @@ fn rows3_to_8_candidate_keys() {
     // 6: enter takes the selected one
     let mut e = std();
     open_shi(&mut e);
-    presses(&mut e, 2, KeyKind::Down);
+    presses(&mut e, 2, KeyKind::Right);
     let o = kk(&mut e, KeyKind::Enter);
     assert!(o.handled && o.commit.is_empty() && o.selected.is_none() && o.preedit == all[2]);
     // 7: esc and backspace close without changing anything
@@ -454,6 +460,160 @@ fn rows3_to_8_candidate_keys() {
     open_shi(&mut e);
     let o = kk(&mut e, KeyKind::Home);
     assert!(o.handled && o.selected.is_none() && o.cursor_utf16 == 0);
+}
+
+// ---------- s3b2 8.2: expanded grid ----------
+/// Position of the selection in the whole list.
+fn at(o: &Output) -> usize {
+    (o.first + o.selected.unwrap() as u32) as usize
+}
+/// Candidates for ㄕˋ opened and expanded (6 columns, more than 4 pages).
+fn expanded_shi(e: &mut Engine) -> Vec<String> {
+    let all = open_shi(e);
+    let o = kk(e, KeyKind::Down);
+    assert!(o.columns == 6 && at(&o) == 0);
+    all
+}
+#[test]
+fn grid_expanded_keys() {
+    let mut e = std();
+    let all = expanded_shi(&mut e);
+    assert!(at(&kk(&mut e, KeyKind::Down)) == 6);
+    assert!(at(&kk(&mut e, KeyKind::Space)) == 12);
+    assert!(at(&kk(&mut e, KeyKind::Up)) == 6);
+    assert!(at(&kk(&mut e, KeyKind::Left)) == 5);
+    assert!(at(&kk(&mut e, KeyKind::Right)) == 6);
+    assert!(at(&kk(&mut e, KeyKind::Right)) == 7);
+    // up on the first row collapses with the selection unchanged
+    let mut e = std();
+    expanded_shi(&mut e);
+    let o = kk(&mut e, KeyKind::Up);
+    assert!(o.columns == 0 && o.selected == Some(0) && o.candidates == all[..9]);
+    // enter takes the selected one
+    let mut e = std();
+    expanded_shi(&mut e);
+    kk(&mut e, KeyKind::Down);
+    kk(&mut e, KeyKind::Right);
+    let o = kk(&mut e, KeyKind::Enter);
+    assert!(o.selected.is_none() && o.columns == 0 && o.total == 0 && o.preedit == all[7]);
+    // esc and backspace close, they do not collapse
+    for kind in [KeyKind::Esc, KeyKind::Backspace] {
+        let mut e = std();
+        expanded_shi(&mut e);
+        let o = kk(&mut e, kind);
+        assert!(o.selected.is_none() && o.candidates.is_empty() && o.columns == 0 && o.preedit == top("ㄕˋ"));
+    }
+}
+#[test]
+fn grid_scrolls_to_keep_the_selected_row_visible() {
+    let mut e = std();
+    let all = expanded_shi(&mut e);
+    let o = kk(&mut e, KeyKind::Down);
+    assert!(o.first == 0 && o.candidates == all[..30] && o.selected == Some(6) && o.total as usize == all.len());
+    presses(&mut e, 3, KeyKind::Down);
+    let o = kk(&mut e, KeyKind::Down); // row 5: top moves to 1
+    assert!(o.first == 6 && at(&o) == 30 && o.selected == Some(24));
+    assert!(o.candidates[..] == all[6..(6 + 30).min(all.len())]);
+    assert!(kk(&mut e, KeyKind::Up).first == 6); // row 4 is still visible
+    presses(&mut e, 2, KeyKind::Up);
+    let o = kk(&mut e, KeyKind::Up); // row 1
+    assert!(o.first == 6 && at(&o) == 6 && o.selected == Some(0));
+    let o = kk(&mut e, KeyKind::Up); // row 0
+    assert!(o.first == 0 && at(&o) == 0 && o.columns == 6, "row 1 up moves to row 0");
+    // collapsed on page 3 then expanded: the selected row is visible at once
+    let mut e = std();
+    open_shi(&mut e);
+    presses(&mut e, 2, KeyKind::Space);
+    let o = kk(&mut e, KeyKind::Down); // sel 18, row 3
+    assert!(o.columns == 6 && at(&o) == 18 && o.first == 0);
+}
+#[test]
+fn grid_digits_pick_within_the_selected_row() {
+    let mut e = std();
+    let all = expanded_shi(&mut e);
+    kk(&mut e, KeyKind::Down);
+    let o = k(&mut e, plain('3'));
+    assert!(o.selected.is_none() && o.preedit == all[8]);
+    // 7, 8, 9 on six columns: consumed, nothing changes, candidates stay open
+    let mut e = std();
+    expanded_shi(&mut e);
+    let before = kk(&mut e, KeyKind::Down);
+    for d in ['7', '8', '9'] {
+        let o = k(&mut e, plain(d));
+        assert!(o.handled && o == before);
+    }
+}
+#[test]
+fn grid_short_last_row() {
+    let mut e = std();
+    let all = expanded_shi(&mut e);
+    let len = all.len();
+    let (last, rem) = ((len - 1) / 6, len - (len - 1) / 6 * 6);
+    assert!(rem < 6 && last >= 2, "fixture: a short last row");
+    // go to the penultimate row, last column
+    let target = (last - 1) * 6 + 5;
+    presses(&mut e, target, KeyKind::Right);
+    let o = kk(&mut e, KeyKind::Down);
+    assert!(at(&o) == len - 1, "down into a shorter row ends at its last candidate");
+    assert!(at(&kk(&mut e, KeyKind::Down)) == len - 1, "down on the last row does nothing");
+    // space on the last row wraps to the first row, same column
+    assert!(at(&kk(&mut e, KeyKind::Space)) == rem - 1);
+    // space from the penultimate row also lands on the last candidate
+    let mut e = std();
+    expanded_shi(&mut e);
+    presses(&mut e, target, KeyKind::Right);
+    assert!(at(&kk(&mut e, KeyKind::Space)) == len - 1);
+    // a digit beyond the short row is consumed
+    let before = kk(&mut e, KeyKind::Left);
+    let o = k(&mut e, plain(char::from_digit(rem as u32 + 1, 10).unwrap()));
+    assert!(o == before && o.selected.is_some());
+    // a digit inside it picks
+    let o = k(&mut e, plain('1'));
+    assert!(o.selected.is_none() && o.preedit == all[last * 6]);
+}
+#[test]
+fn grid_punctuation_has_three_columns() {
+    let alts: Vec<String> = ["，", "〈", "《", "︿", "︽"].map(String::from).to_vec();
+    let mut e = std();
+    k(&mut e, Key::ch(',', MOD_SHIFT));
+    kk(&mut e, KeyKind::Space);
+    let o = kk(&mut e, KeyKind::Down);
+    assert!(o.columns == 3 && o.candidates == alts && o.total == 5 && o.first == 0 && at(&o) == 0);
+    let before = kk(&mut e, KeyKind::Down);
+    assert!(at(&before) == 3);
+    let o = k(&mut e, plain('4'));
+    assert!(o == before, "digit above the column count is consumed");
+    let o = k(&mut e, plain('3'));
+    assert!(o == before, "digit past a short last row is consumed");
+    let o = k(&mut e, plain('2'));
+    assert!(o.selected.is_none() && o.preedit == alts[4]);
+}
+#[test]
+fn pick_follows_candidate_first() {
+    let mut e = std();
+    // closed
+    assert!(e.pick(0).unwrap().is_none());
+    let all = open_shi(&mut e);
+    // collapsed page 2: index counts from the page start
+    kk(&mut e, KeyKind::Space);
+    assert!(e.pick(9).unwrap().is_none(), "outside the page");
+    let o = e.pick(2).unwrap().unwrap();
+    assert!(o.handled && o.selected.is_none() && o.preedit == all[9 + 2]);
+    // expanded and scrolled
+    let mut e = std();
+    expanded_shi(&mut e);
+    presses(&mut e, 5, KeyKind::Down);
+    let first = kk(&mut e, KeyKind::Left).first as usize;
+    assert!(first == 6);
+    let n = all_len_visible(&mut e, first);
+    assert!(e.pick(n).unwrap().is_none(), "outside the visible rows");
+    let o = e.pick(7).unwrap().unwrap();
+    assert!(o.preedit == all[first + 7]);
+}
+fn all_len_visible(e: &mut Engine, first: usize) -> usize {
+    let o = kk(e, KeyKind::Right);
+    assert!(o.first as usize == first);
+    o.candidates.len()
 }
 
 // ---------- rows 9-14 ----------
@@ -561,7 +721,7 @@ fn row22_empty_composition_passes_through() {
 fn pick(e: &mut Engine, list: &[String], word: &str) -> Output {
     let idx = list.iter().position(|w| w == word).unwrap();
     kk(e, KeyKind::Down);
-    presses(e, idx, KeyKind::Down);
+    presses(e, idx, KeyKind::Right);
     kk(e, KeyKind::Enter)
 }
 #[test]
@@ -634,7 +794,7 @@ fn reset_both_modes_equal_fresh_engine() {
         let mut e = std();
         typ(&mut e, NIHAO);
         kk(&mut e, KeyKind::Down);
-        kk(&mut e, KeyKind::Down);
+        kk(&mut e, KeyKind::Right);
         kk(&mut e, KeyKind::Enter); // a fixed word exists
         kk(&mut e, KeyKind::Left);
         typ(&mut e, "c"); // and a pending symbol

@@ -123,10 +123,17 @@ final class FakePanel: CandidatePanel {
     private(set) var notes: [String?] = []
     private(set) var selected = -1
     private(set) var lineRect: NSRect?
+    private(set) var columns = 0
+    private(set) var first = 0
+    private(set) var total = 0
     var onSelect: ((Int) -> Void)?
 
-    func show(_ candidates: [String], notes: [String?], selected: Int, lineRect: NSRect?) {
+    func show(_ candidates: [String], notes: [String?], selected: Int, columns: Int, first: Int, total: Int,
+              lineRect: NSRect?) {
         self.lineRect = lineRect
+        self.columns = columns
+        self.first = first
+        self.total = total
         visible = true
         items = candidates
         self.notes = notes

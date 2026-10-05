@@ -68,6 +68,40 @@ final class ShellTests: XCTestCase {
         XCTAssertEqual(c.client.lineCursor, 1)
     }
 
+    /// s3b2 section 8: down expands (the panel is told the columns, first and total); a click on a
+    /// lower row picks that cell, and after a scroll the position counts from `first`.
+    func testExpandedGridReachesThePanelAndAClickPicksTheCell() throws {
+        let c = Controller(makeShell())
+        c.session.activate()
+        c.type("g4 ")  // ㄕˋ has more than four pages of candidates
+        XCTAssertEqual(c.panel.columns, 0)
+        XCTAssertEqual(c.panel.items.count, 9)
+        let down: UInt16 = 125
+        XCTAssertTrue(c.press(down))
+        XCTAssertEqual(c.panel.columns, 6)
+        XCTAssertEqual(c.panel.first, 0)
+        XCTAssertGreaterThan(c.panel.total, 27)
+        XCTAssertEqual(c.panel.items.count, 30)
+        XCTAssertEqual(c.panel.selected, 0)
+        let lower = c.panel.items[8]   // second row, third column
+        c.panel.click(8)
+        XCTAssertFalse(c.panel.visible)
+        XCTAssertEqual(c.client.marked, lower)
+        XCTAssertEqual(c.client.text, "")
+    }
+
+    func testClickAfterScrollingCountsFromFirst() {
+        let c = Controller(makeShell())
+        c.session.activate()
+        c.type("g4 ")
+        for _ in 0..<6 { c.press(125) }   // expand, then five rows down: the sixth row scrolls the grid
+        XCTAssertEqual(c.panel.first, 6)
+        let target = c.panel.items[3]
+        c.panel.click(3)
+        XCTAssertEqual(c.client.marked, target)
+        XCTAssertFalse(c.panel.visible)
+    }
+
     func testClickByNonOwnerOrOutOfPageDoesNothing() {
         let shell = makeShell()
         let a = Controller(shell), b = Controller(shell)
