@@ -1846,6 +1846,10 @@ fn global_eps_table() {
     assert_eq!(chosen.1.regress, 0, "chosen eps_global: 0 global pollution");
     assert!(chosen.1.learned > 0, "chosen eps_global: global learn rate not 0");
     for r in &res {
-        assert!(r.2 * 100 >= r.3 * 80 && r.2 >= 9, "mirror learn rate must not drop below 9: {} at {}", r.2, r.0);
+        // PLAN A2: of the learnable mirror cases (the model does not already produce the taught sentence) at least 80% are learned.
+        // The learnable count depends on the model (9/10 with model-v1, 8/9 once 戰機/戰績 became right on its own), so the
+        // floor is on the count of learnable cases, which keeps the rate from passing vacuously.
+        assert!(r.3 >= 8, "fewer than 8 learnable mirror cases ({} at eps {}): the rate below would not mean anything", r.3, r.0);
+        assert!(r.2 * 100 >= r.3 * 80, "mirror learn rate below 80%: {}/{} at eps {}", r.2, r.3, r.0);
     }
 }
