@@ -414,7 +414,7 @@ v4 日期 2026-10-03。v1 經 `pilotfish:plan-verifier`（REVISE，4 項）與 `
   7. **效能**：release 重播（載入 LM）每鍵 p95 < 16 ms；回報 LM 載入時間與引擎（詞庫＋上限後詞庫＋LM）的峰值 RSS。上限後詞庫可以和原始詞庫共用字串池，由 executor 決定。
   8. 模型檔 ≤ 100 MB（目前 80,040,411 bytes）。
   9. **保留集**（片結束，只由 verifier 跑一次）：`--set holdout` 在 chat 與 formal 的 top1 與 oracle@64，只回數字。A1a 要求 oracle@64 ≥ 98%；低於時照實回報、記為 A1a 未達成，由使用者決定，不是這片的停止條件。報告時註明 LM 模式的 oracle 用寬鬆對照，S1 的 `extra` 行（97.8%）用完全相符。
-- **模型檔不進 repo**（`data/lm/` 在 `.gitignore`）：從 GitHub Release `model-v1` 下載（`gh release download model-v1 -R Nanako0129/shanjie -p bigram.sjlm -D data/lm`，CC BY-SA 4.0，2026-10-03 起），或用 `tools/build_lm.py` 從本機計數重建；SHA-256 `9879fd8b264b1c1f4c083ccedf84dc5625cd8d2595bd2d13150eed5a0520a923`。需要它的測試在檔案不存在時**直接失敗**，訊息說明怎麼取得，不得默默跳過。隨輸入法散布的方式在 S3b（打包進 app）。
+- **模型檔不進 repo**（`data/lm/` 在 `.gitignore`）：從 GitHub Release `model-v2` 下載（`gh release download model-v2 -R Nanako0129/shanjie -p bigram.sjlm -D data/lm`，CC BY-SA 4.0，2026-10-03 起），或用 `tools/build_lm.py` 從本機計數重建；SHA-256 `b0bb04fb3c26221b13bf69c8003aa5f5e0e66e1f58b291e9af97989b096adb57`。需要它的測試在檔案不存在時**直接失敗**，訊息說明怎麼取得，不得默默跳過。隨輸入法散布的方式在 S3b（打包進 app）。
 - **範圍外。** 改分數、參數、剪枝或語料；候選清單用 LM 排序；trigram；學習（S4）。
 - **預算。** executor、security-executor 各 1 回合＋1 次修正。
 - **停止。** 驗收 2、3、4 有任何差異：回報第一個不同的列與原因，不得修改 Python 參考實作或對照檔來湊。峰值 RSS 超過 300 MB：回報實測值與瓶頸。
@@ -427,6 +427,7 @@ v4 日期 2026-10-03。v1 經 `pilotfish:plan-verifier`（REVISE，4 項）與 `
 - **目標。** 使用者打「一」「不」的本調或變調（教育部〈單一音讀〉：一在去聲前 ㄧˊ、陰平陽平上聲前 ㄧˋ；不在去聲前 ㄅㄨˊ；數詞序詞、詞尾、疊字中間讀本調），以及「法」的審訂音 ㄈㄚˇ，都能打出整個詞。
 - **做法。** `tools/build_sandhi.py` 從小麥基底產生 `data/lexicon/sandhi-add.tsv`（1,302 列，MIT），引擎、評測 CLI、Python 參考實作都接在 `overlay-add.tsv` 後面載入；app 的 Resources 與檢查跟著加。
 - **結果。** 換成另一種標準讀音的探針列：cvtune +36（p = 5.6e-9）、discordtune +62（p = 6e-17）；原讀音在所有集合都不顯著退步；每鍵 p95 1.19–1.31 ms（main 1.19–1.25 ms），峰值 RSS +1.5 MB。
+- **S2n（實作完成待合併，契約 `docs/contracts/s2n-simplified-residue.md`，2026-10-05）。** 語料轉換先判斷簡體句再整句轉換（含台灣用字例外 吃 皂 唇 岩 岳 咸），疊加層拿掉 3,484 個簡體寫法，重建兩份計數與語言模型 `model-v2`（79,446,114 bytes，SHA-256 見下方模型檔一段）。七詞殘留 125,635 → 0；dev302、打字測驗沒有退步，新的 cvtune／wikitune 書面設定顯著進步。未過：喫 比舊語料多 3.0 倍（詞組輸出）、書面「大概十分鐘後到」變「後道」。GitHub Release `model-v2` 需使用者同意後才建。
 - **下一片 S2r-2。** 疊加層的上游讀音錯誤（非去聲前的「不」標 ㄅㄨˊ、人名地名的「和」標 ㄏㄢˋ）與疊加層的變體；順便補一個會抓到 `next_tone`「一」修正被改回去的小檢查（verifier 建議）。另外審核疊加層的多音字讀音：zaoseq-bopomofo 的做法是「多音字只能由已知詞的明確讀音決定，否則不收」，他們因此清掉 10,813 個假同音詞（見下方「外部專案借鏡」）；先量我們有多少疊加層詞的讀音來自非首選讀音，再決定降分或剔除。
 - **S2r-2（✅ 完成 2026-10-05，PR #17，契約 `docs/contracts/s2r2-overlay-readings.md`）。** `tools/build_overlay.py` 把疊加層的一／不／法／和正規化成審訂表讀音，並為含一／不的詞多輸出一列變調讀音，分數比主要列低 0.5（342,761 → 345,694 列，仍是 CC BY-SA 4.0）；核心不改。使用者決定人名、序詞也保留變調列。探針 cvtune 490 → 493、wikitune 138 → 140、discordtune 714 → 718，原讀音各集合都不退步；保留集（只由 verifier 量）和 main 逐列相同。從基底詞沿用的讀音（如和麵桶的 ㄏㄨㄛˋ）沒改；聲韻不同的多音字抽 50 列有 4 列猜錯，留給之後的破音字片（用維基詞典詞條的讀音校正）。細節見 `docs/research-log.md` 的 S2r-2 一節。
 
