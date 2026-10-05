@@ -60,7 +60,8 @@ final class FakeClient: TextClient {
     /// s3b2: the line rectangle this client reports.
     var line: NSRect? = NSRect(x: 100, y: 200, width: 8, height: 18)
     private(set) var lineCursor: Int?
-    func lineRect(cursor: Int) -> NSRect? { lineCursor = cursor; return line }
+    private(set) var lineAsks = 0
+    func lineRect(cursor: Int) -> NSRect? { lineCursor = cursor; lineAsks += 1; return line }
 
     /// Every call of the three reading methods, and each range requested.
     private(set) var reads = 0
@@ -123,10 +124,17 @@ final class FakePanel: CandidatePanel {
     private(set) var notes: [String?] = []
     private(set) var selected = -1
     private(set) var lineRect: NSRect?
+    private(set) var columns = 0
+    private(set) var first = 0
+    private(set) var total = 0
     var onSelect: ((Int) -> Void)?
 
-    func show(_ candidates: [String], notes: [String?], selected: Int, lineRect: NSRect?) {
+    func show(_ candidates: [String], notes: [String?], selected: Int, columns: Int, first: Int, total: Int,
+              lineRect: NSRect?) {
         self.lineRect = lineRect
+        self.columns = columns
+        self.first = first
+        self.total = total
         visible = true
         items = candidates
         self.notes = notes

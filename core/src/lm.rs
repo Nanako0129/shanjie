@@ -2,7 +2,7 @@
 //! The Python code is ground truth; float operation order is kept on purpose (no fusing or reordering).
 //! R2: errors carry no content; nothing here formats input text.
 
-use crate::learn::{context_key, Learner};
+use crate::learn::{context_key, Learner, Level};
 use crate::{Error, Lexicon, PER_KEY};
 use std::collections::{HashMap, HashSet};
 use std::fmt;
@@ -342,8 +342,11 @@ struct Hyp<'a> {
     ctx: Option<usize>,
 }
 
-/// Learned boost (S4 §1.4): a learned word scores `best of its reading + LEARN_EPS * w / (w + 1)` for
-/// weight `w` (so a heavier record outranks a lighter one: a re-pick halves the displaced word), never
+/// Learned boost (S4 §1.4, §12): which records may boost is decided by `Learner::lookup` (single
+/// characters only at the exact full key and never under "^"). A learned word scores
+/// `best of its reading + eps * w / (w + 1)`, eps being `LEARN_EPS` (6.0) at the exact and last-character
+/// levels and `LEARN_EPS_GLOBAL` (0.5, `Learn::eps_global`) at the global level, for weight `w`
+/// (so a heavier record outranks a lighter one: a re-pick halves the displaced word), never
 /// less than its own score. The boost enters the score only through `(1 - lambda) * lp` and the
 /// backoff term, so the bigram's liking for the common word survives a small value. Measured on the
 /// mirror run of eval/learn/cases.tsv (core/tests/engine_learn.rs, 2026-10-05; same-context sentences
@@ -351,6 +354,10 @@ struct Hyp<'a> {
 /// 8 of 10, 6.0 and 8.0 learned 9 of 10 (smallest value that gets there). The unlearned
 /// remainder is a 3-syllable word winning over the taught 2-syllable one.
 pub const LEARN_EPS: f64 = 6.0;
+/// Boost size for the global level only (§12): enough to break a near tie, not to override a confident
+/// language model. Chosen from the table in the contract §12 (smallest value with 0 global pollution
+/// and a non-zero global learn rate).
+pub const LEARN_EPS_GLOBAL: f64 = 0.5;
 
 /// What decoding needs to apply learning: the learner, the text just before the segment (only its
 /// last two characters matter) and today's day number.
@@ -358,6 +365,10 @@ pub struct Learn<'a> {
     pub learner: &'a Learner,
     pub before: &'a str,
     pub today: i64,
+    /// ε of the global level: `LEARN_EPS_GLOBAL` in production; the integration tests sweep it through
+    /// `Engine::set_eps_global` (a feature or cfg(test) cannot reach integration tests, and it is one
+    /// float read per hypothesis key).
+    pub eps_global: f64,
 }
 
 /// lm.decode generalized to a segment: `start` is the word before the segment (`<s>` for a sentence),
@@ -425,7 +436,7 @@ pub fn decode_segment_learned<'a>(
             // Each hypothesis's learned hits depend only on its context key, not on the entry: look
             // them up once per hypothesis (shared by key) before trying the entries.
             let hits_of: Vec<usize>;
-            let mut hits: Vec<Vec<(&str, f64)>> = Vec::new();
+            let mut hits: Vec<(Level, Vec<(&str, f64)>)> = Vec::new();
             if let Some(ln) = learned {
                 let mut by_ctx: HashMap<String, usize> = HashMap::new();
                 hits_of = hyps[i - l]
@@ -447,17 +458,21 @@ pub fn decode_segment_learned<'a>(
                 let (wid, pb0) = (lm.word_id(word), pow10(lp0));
                 for (hi, h) in hyps[i - l].iter().enumerate() {
                     let (mut lp, mut pb) = (lp0, pb0);
-                    if learned.is_some() {
-                        match hits[hits_of[hi]].iter().find(|(w, _)| *w == word) {
-                            Some(&(_, w)) => {
-                                let boosted = best + LEARN_EPS * (w / (w + 1.0));
+                    if let Some(ln) = learned {
+                        let (lv, ws) = &hits[hits_of[hi]];
+                        let eps = if *lv == Level::Global { ln.eps_global } else { LEARN_EPS };
+                        // eps 0 switches the level off, for `extra` entries too: `best + 0` would
+                        // still lift a word to a tie with the top.
+                        match ws.iter().find(|(w, _)| *w == word) {
+                            Some(&(_, w)) if eps > 0.0 => {
+                                let boosted = best + eps * (w / (w + 1.0));
                                 if boosted > lp {
                                     lp = boosted;
                                     pb = pow10(lp);
                                 }
                             }
-                            None if extra => continue,
-                            None => {}
+                            _ if extra => continue,
+                            _ => {}
                         }
                     }
                     let sc = h.score + word_term(lam, lm.prob_c(h.ctx, wid, pb), lp);
