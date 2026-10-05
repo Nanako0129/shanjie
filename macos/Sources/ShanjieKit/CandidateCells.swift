@@ -46,9 +46,14 @@ public final class CandidateCell: NSView {
     private let numberWidth: CGFloat, candidateWidth: CGFloat, nameWidth: CGFloat
 
     private static func measure(_ s: String, _ font: NSFont) -> CGFloat {
-        // Rounded up to the half point, the way a text field's frame is (it is 4 pt wider than the
-        // text, rounded up to 0.5 pt), so the width matches the earlier cells.
-        ceil(NSAttributedString(string: s, attributes: [.font: font]).size().width * 2) / 2
+        // Rounded up to a device pixel the way a text field's frame is when it is not in a window yet,
+        // so the width matches the earlier cells. Measured 2026-10-05: AppKit rounds to the highest
+        // scale among the screens, not the main screen's (here: main screen 1x, built-in 2x, text field
+        // 37.5 pt; CI's single 1x display: 38.0 pt); a fixed 0.5 pt broke the match on CI.
+        // ponytail: a panel shown on a lower-scale screen of a mixed setup lands on half pixels, as the
+        // old text fields did; round per panel screen if that ever shows as blur.
+        let scale = NSScreen.screens.map(\.backingScaleFactor).max() ?? 2
+        return ceil(NSAttributedString(string: s, attributes: [.font: font]).size().width * scale) / scale
     }
 
     private static func lineHeight(_ font: NSFont) -> CGFloat { ceil(font.ascender - font.descender + font.leading) }
