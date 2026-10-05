@@ -1,6 +1,6 @@
 # S5k: local order-free judges (Laya, Bonsai, Qwen3)
 
-Spec: `docs/contracts/s5k-local-scorers.md`. This directory holds the tooling and, later, the dev302 / typing76 per-row results. Results, interpretation and the research log are written by main. Status: tooling smoke-tested on dev302 first 20 rows; **B1-ll / B4-ll are untested** (contract §9: the PrismML MLX fork could not be installed in venv B).
+Spec: `docs/contracts/s5k-local-scorers.md`. This directory holds the tooling and, later, the dev302 / typing76 per-row results. Results, interpretation and the research log are written by main. Status: tooling smoke-tested on dev302 first 20 rows; B1-ll and B4-ll smoke-tested too, under venv B.
 
 ## Files
 
@@ -19,7 +19,7 @@ Only S5j pure functions are imported (`lenient_fn`, `mcnemar`, `pct`, `positions
 | Item | Version |
 |---|---|
 | venv A | `~/.cache/shanjie/venv-s5k-a`, Python 3.12, laya-mlx 0.3.0, mlx 0.32.3, mlx-lm 0.32.0, huggingface_hub 1.33.0 |
-| venv B | `~/.cache/shanjie/venv-s5k-b`, mlx-lm 0.32.0 plus the PrismML MLX fork at `bbc151c6360ee79a7412fa23cfc5c5fc63ced1ca`. **Fork build failed; venv B holds stock mlx 0.32.3 and must not be used for Bonsai** |
+| venv B | `~/.cache/shanjie/venv-s5k-b`, mlx-lm 0.32.0 plus the PrismML MLX fork at `bbc151c6360ee79a7412fa23cfc5c5fc63ced1ca`. mlx `0.32.3.dev20261005+bbc151c6` built from the fork commit with `MACOSX_DEPLOYMENT_TARGET=26.1`; the NAX kernels are skipped because they do not compile against the macOS 27 SDK (build note from main) |
 | Laya | `laya-multilingual-mlx-fp16`: `laya-mlx convert` from `convaiinnovations/laya-multilingual@1720e3e3357cfe1e281542e223f8273b0890ca34`, fp16 |
 | Bonsai 1.7B | `bonsai-1.7b-mlx-1bit`: `prism-ml/Bonsai-1.7B-mlx-1bit@fac480d016cf265838ad087f9f3f2abac4a2c1a5` |
 | Bonsai 4B | `bonsai-4b-mlx-1bit`: `prism-ml/Bonsai-4B-mlx-1bit@3d25c52f7fa171affb188e27796be61be3df52db` |
@@ -61,7 +61,7 @@ for S in discordtune cvtune dev302 typing76; do
   $A run_laya.py --set $S --ctx none && $A run_ll.py --model Q-ll --set $S --ctx none || break
 done
 $A run_laya.py --set discordtune --ctx real && $A run_ll.py --model Q-ll --set discordtune --ctx real
-# Bonsai, only once venv B has the real PrismML fork (contract §9):
+# Bonsai (venv B, PrismML fork):
 B=~/.cache/shanjie/venv-s5k-b/bin/python
 for S in discordtune cvtune dev302 typing76; do for M in B1-ll B4-ll; do $B run_ll.py --model $M --set $S --ctx none; done; done
 for M in B1-ll B4-ll; do $B run_ll.py --model $M --set discordtune --ctx real; done
