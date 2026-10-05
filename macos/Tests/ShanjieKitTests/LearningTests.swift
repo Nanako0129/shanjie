@@ -197,10 +197,25 @@ final class LearningTests: XCTestCase {
     /// open; returns the picked word.
     @discardableResult
     private func repick(_ c: Controller) throws -> String {
+        c.client.before = "他"           // a single character learns only after a Han character (section 12)
         c.type("su3 ")
         let second = try XCTUnwrap(c.panel.items.dropFirst().first)
         c.type("2")
         return second
+    }
+
+    /// Like `repick`, for a word of two characters (ㄋㄧˇ ㄏㄠˇ): it may learn under "^" too, so when a
+    /// gate test stores nothing the gate is the reason, not the single-character rule (section 12).
+    @discardableResult
+    private func repickTwo(_ c: Controller) throws -> String {
+        c.type("su3cl3 ")
+        let items = c.panel.items
+        let i = try XCTUnwrap(items.indices.dropFirst().first { items[$0].count == 2 })
+        // one digit selects within the first page of 9; an off-page candidate must fail loudly
+        XCTAssertLessThan(i, 9, "the two-character candidate is not on the first page")
+        guard i < 9 else { return items[i] }
+        c.type("\(i + 1)")
+        return items[i]
     }
 
     func testRepickThenEnterStoresARecord() throws {
@@ -245,7 +260,7 @@ final class LearningTests: XCTestCase {
         let dir = TestLearning.directory(), gate = Gate()
         let c = Controller(makeShell(gate: gate, learning: dir))
         c.session.activate()
-        try repick(c)
+        try repickTwo(c)
         gate.secure = true
         c.press(Keys.enter)
         XCTAssertEqual(TestLearning.records(in: dir), [])
@@ -256,10 +271,20 @@ final class LearningTests: XCTestCase {
         let c = Controller(makeShell(gate: gate, learning: dir))
         c.session.activate()
         gate.secure = true
-        try repick(c)
+        try repickTwo(c)
         gate.secure = false
         c.press(Keys.enter)
         XCTAssertEqual(TestLearning.records(in: dir), [])
+    }
+
+    /// Control for the two tests above: the same two-character pick, ungated, is stored.
+    func testTwoCharacterRepickUngatedStoresARecord() throws {
+        let dir = TestLearning.directory()
+        let c = Controller(makeShell(learning: dir))
+        c.session.activate()
+        let word = try repickTwo(c)
+        c.press(Keys.enter)
+        XCTAssertTrue(TestLearning.records(in: dir).contains { $0.contains("\t\(word)\t") })
     }
 
     /// Section 6.8 (XCTest part): secure input on mid-composition, then each reset path.
@@ -285,6 +310,7 @@ final class LearningTests: XCTestCase {
         let c = Controller(makeShell(learning: dir))
         c.session.activate()
         c.session.selectLayout(.eten)    // a rebuilt engine starts with learning off
+        c.client.before = "他"           // a single character learns only after a Han character (section 12)
         c.type("ne3 ")                   // ㄋㄧˇ on ETen, then the candidates
         let second = try XCTUnwrap(c.panel.items.dropFirst().first)
         c.type("2")
