@@ -42,13 +42,35 @@ final class ShellTests: XCTestCase {
         XCTAssertTrue(c.panel.visible)
         XCTAssertTrue((2...9).contains(c.panel.items.count), "the test presses 2, so it needs 2 to 9 candidates")
         XCTAssertEqual(c.panel.selected, 0)
-        XCTAssertEqual(c.session.candidates, c.panel.items)
+        XCTAssertEqual(c.session.shell.candidates, c.panel.items)
         let second = try XCTUnwrap(c.panel.items.dropFirst().first, "fewer than two candidates")
         XCTAssertTrue(c.type("2")[0])
         XCTAssertEqual(c.client.marked, second, "the composition shows the chosen candidate")
         XCTAssertFalse(c.panel.visible)
-        XCTAssertEqual(c.session.candidates, [], "the shell's candidate array is cleared")
+        XCTAssertEqual(c.session.shell.candidates, [], "the shell's candidate array is cleared")
         XCTAssertEqual(c.client.text, "")
+    }
+
+    func testLineRectReachesThePanel() {
+        let c = Controller(makeShell())
+        c.session.activate()
+        c.type("su3 ")
+        XCTAssertEqual(c.panel.lineRect, c.client.line)
+    }
+
+    func testClickByNonOwnerOrOutOfPageDoesNothing() {
+        let shell = makeShell()
+        let a = Controller(shell), b = Controller(shell)
+        a.session.activate()
+        a.type("su3 ")
+        let n = a.panel.items.count
+        a.panel.click(n)                 // past this page
+        a.panel.click(-1)
+        XCTAssertTrue(a.panel.visible)
+        let before = a.client.calls
+        b.session.candidateSelected(at: 1)   // b does not own the composition
+        XCTAssertEqual(a.client.calls, before)
+        XCTAssertTrue(a.panel.visible)
     }
 
     func testMouseSelectionGoesThroughTheCoreAsANumberKey() throws {
@@ -56,7 +78,7 @@ final class ShellTests: XCTestCase {
         c.session.activate()
         c.type("su3 ")
         let second = try XCTUnwrap(c.panel.items.dropFirst().first, "fewer than two candidates")
-        c.session.candidateSelected(second)
+        c.panel.click(1)
         XCTAssertEqual(c.client.marked, second)
         XCTAssertFalse(c.panel.visible)
         XCTAssertEqual(c.client.text, "", "never inserted directly")
@@ -124,7 +146,7 @@ final class ShellTests: XCTestCase {
         XCTAssertFalse(c.session.send(ShanjieKey(kind: 99, ch: 0, modifiers: 0)))
         XCTAssertEqual(c.client.marked, "")
         XCTAssertFalse(c.panel.visible)
-        XCTAssertEqual(c.session.candidates, [])
+        XCTAssertEqual(c.session.shell.candidates, [])
         XCTAssertFalse(c.press(Keys.enter), "the core holds no composition either")
         XCTAssertEqual(c.client.text, "")
         // The next keys start afresh: the old ㄋㄧˇ does not come back.
@@ -251,7 +273,7 @@ final class ShellTests: XCTestCase {
         a.session.commitComposition()
         XCTAssertEqual(a.client.calls, aCalls)
         XCTAssertTrue(b.panel.visible, "B's candidates stay open")
-        XCTAssertFalse(b.session.candidates.isEmpty, "and the shared array is intact")
+        XCTAssertFalse(b.session.shell.candidates.isEmpty, "and the shared array is intact")
         b.press(Keys.enter)
         b.press(Keys.enter)
         XCTAssertEqual(b.client.text, "你")

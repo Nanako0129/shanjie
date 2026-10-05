@@ -64,15 +64,3 @@ public enum PunctuationNames {
         return names
     }
 }
-
-/// What a candidate cell reads: the candidate, then its name if it has one. One definition, so a
-/// mouse click on a named cell (IMK hands back the cell's text) maps to the same position.
-public enum CandidateText {
-    /// An en space: Apple's cells leave a clear gap between the mark and its name (user's
-    /// screenshots, 2026-10-05).
-    public static let separator = "\u{2002}"
-
-    public static func display(_ candidate: String, note: String?) -> String {
-        note.map { candidate + separator + $0 } ?? candidate
-    }
-}
