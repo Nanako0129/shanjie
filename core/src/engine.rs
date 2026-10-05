@@ -455,8 +455,9 @@ impl Engine {
             for (ctx, reading, word, displaced) in &plans {
                 touched.extend(self.learner.teach(ctx, reading, word, displaced, today));
             }
-            // Nothing touched (e.g. a single character under "^", §12): no write at all.
-            if !touched.is_empty() {
+            // Nothing touched (e.g. a single character under "^", §12): no write, unless a full
+            // rewrite is pending (a failed forget or rewrite): that is retried at every commit.
+            if !touched.is_empty() || self.must_rewrite {
                 self.persist(&touched);
             }
         }));

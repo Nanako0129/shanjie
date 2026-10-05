@@ -1057,6 +1057,30 @@ fn store_failed_rewrite_then_forget_never_brings_the_word_back() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// A rewrite that is still owed (failed forget) is retried by a commit that learns nothing (a single
+/// character under ^, rule 6), not only by one that learns something.
+#[test]
+fn store_pending_rewrite_is_retried_by_a_commit_that_learns_nothing() {
+    let dir = tmp_dir("retry-empty");
+    let tmp = dir.join(core::learn_store::TMP);
+    let mut e = tiny(TINY, TINY);
+    e.learning_open(&dir).unwrap();
+    assert_eq!(repick(&mut e, "ㄒㄧㄣ"), "欣");
+    std::fs::create_dir(&tmp).unwrap();
+    std::fs::write(tmp.join("x"), b"x").unwrap();
+    forget(&mut e, "ㄒㄧㄣ", "欣");
+    assert_eq!(e.learning_status(), 1);
+    assert!(raw(&dir).contains("欣"), "the failed forget left the word in the file");
+    std::fs::remove_dir_all(&tmp).unwrap();
+    // no left context: the pick is a single character under ^, so nothing is learned
+    type_syls(&mut e, "ㄅㄣ");
+    pick(&mut e, 1, 1, "奔");
+    assert_eq!(e.key(k(KeyKind::Enter)).unwrap().commit, "奔");
+    assert_eq!(e.learning_status(), 0, "the owed rewrite was retried");
+    assert!(!raw(&dir).contains("欣"), "and it removed the forgotten word from the file");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// §6.13: a panic inside the forget, after memory changed and before the file did: bit0 is untouched
 /// but the next learning Enter is a full rewrite, so the word is gone from the file too.
 #[test]
@@ -1331,11 +1355,11 @@ fn perf_full_store_per_key_and_enter_with_write() {
     let mut records = Vec::new();
     'fill: for c in contexts {
         for span in &spans {
-            // §12: a single-character global record is never written, so none is seeded.
-            if c.is_empty() && span.len() == 1 {
-                continue;
-            }
             for (word, _) in lex.entries(span).into_iter().take(3) {
+                // §12: a single-character record under ^ or the global key is dropped at load, so none is seeded.
+                if (c.is_empty() || c == "^") && word.chars().count() == 1 {
+                    continue;
+                }
                 records.push(Record { context: c.into(), reading: span.clone(), word: word.into(), weight: 1.0, day: DAY });
                 if records.len() == CAPACITY {
                     break 'fill;
@@ -1569,10 +1593,20 @@ fn single_character_rules_in_the_learner() {
     assert_eq!(l.lookup("可以", &one, DAY).1[0].0, "再");
     assert!(l.lookup("所以", &one, DAY).1.is_empty(), "rule 5: no last-character level for a single character");
     assert!(l.lookup(SENTINEL, &one, DAY).1.is_empty() && l.lookup("我們", &one, DAY).1.is_empty());
-    // a single-character record under ^ from an older file is not used
-    let l = Learner::from_records(vec![rec(SENTINEL, "ㄗㄞˋ", "再", 1.0, DAY), rec("可以", "ㄗㄞˋ", "再", 1.0, DAY)]);
-    assert!(l.lookup(SENTINEL, &one, DAY).1.is_empty(), "rule 6: not looked up under ^");
-    assert_eq!(l.lookup("可以", &one, DAY).1.len(), 1);
+    // teach never makes a single-character record under ^ or the global key, however often it is
+    // taught; saved and reloaded through the store none appears either
+    let mut l = Learner::default();
+    for c in [SENTINEL, "可以", "他", "我們", SENTINEL] {
+        l.teach(c, &one, "再", "在", DAY);
+    }
+    assert!(l.records().iter().all(|r| r.context != SENTINEL && r.context != GLOBAL));
+    let dir = tmp_dir("nosingleglobal");
+    let (store, _, _) = core::learn_store::LearnStore::open(&dir).unwrap();
+    store.save(l.records()).unwrap();
+    let (_, loaded, _) = core::learn_store::LearnStore::open(&dir).unwrap();
+    assert_eq!(loaded.len(), 3, "可以, 他, 我們");
+    assert!(loaded.iter().all(|r| r.context != SENTINEL && r.context != GLOBAL));
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// §12 acceptance: 再 taught after 可以 does not reach 所以, 前文 after punctuation or ASCII, or an
@@ -1607,17 +1641,23 @@ fn single_character_pick_stays_where_it_was_taught() {
             assert_eq!(&decode(&mut e, l, &lex.to_syllables(s).unwrap()), b, "{l}|{s} must not change");
         }
     }
-    // an old ^ record loaded from a file does not act either
+    // an old ^ record loaded from a file is dropped at load (learn_store::valid) and so does not act
     let dir = tmp_dir("oldsentinel");
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(file_of(&dir), format!("{}\n^\tㄗㄞˋ\t再\t1\t{DAY}\n", core::learn_store::HEADER)).unwrap();
     let mut e = engine();
     e.set_today(Some(DAY));
     e.learning_open(&dir).unwrap();
-    assert_eq!(e.learner().records().len(), 1);
+    assert!(e.learner().records().is_empty() && e.learner().is_empty() && !e.learner().has_reading(&syls("ㄗㄞˋ")));
     for ((l, s), b) in cases.iter().zip(&base) {
         assert_eq!(&decode(&mut e, l, &lex.to_syllables(s).unwrap()), b, "{l}|{s} must not change");
     }
+    // the first learning Enter is a full rewrite and the file loses the old line
+    e.set_left_context(TAUGHT_AFTER);
+    type_syls(&mut e, "ㄒㄧㄣ");
+    pick(&mut e, 1, 1, "鑫");
+    e.key(k(KeyKind::Enter)).unwrap();
+    assert!(!raw(&dir).contains("^\tㄗㄞˋ"), "dropped from the file by the rewrite");
     let _ = std::fs::remove_dir_all(&dir);
 }
 
