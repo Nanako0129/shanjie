@@ -249,11 +249,13 @@ final class LearningTests: XCTestCase {
         let dir = TestLearning.directory()
         let c = Controller(makeShell(learning: dir))
         c.session.activate()
-        c.type("su3 ")
-        let second = try XCTUnwrap(c.panel.items.dropFirst().first)
-        c.panel.click(1)
+        // A two-character word: a single character at sentence start learns nothing (section 12 rule 6).
+        c.type("su3cl3 ")
+        let items = c.panel.items
+        let i = try XCTUnwrap(items.indices.dropFirst().first { items[$0].count == 2 })
+        c.panel.click(i)
         c.press(Keys.enter)
-        XCTAssertTrue(TestLearning.records(in: dir).contains { $0.contains("\t\(second)\t") })
+        XCTAssertTrue(TestLearning.records(in: dir).contains { $0.contains("\t\(items[i])\t") })
     }
 
     func testGateTurningOnMidCompositionStoresNothing() throws {

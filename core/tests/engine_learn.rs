@@ -722,6 +722,8 @@ fn row_enter_learns() {
 #[test]
 fn row_expanded_pick_equals_enter() {
     let mut a = tiny(TINY, TINY);
+    // §12 rule 6: a single character learns only after Han text, as `picked()` sets up.
+    a.set_left_context(TAUGHT_AFTER);
     type_syls(&mut a, "ㄒㄧㄣ");
     let o = a.key(k(KeyKind::Space)).unwrap();
     assert_eq!(o.candidates[1], "欣");
