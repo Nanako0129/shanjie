@@ -46,7 +46,7 @@ enum LeftContext {
 public struct MenuEntry: Equatable, Sendable {
     public enum Action: Equatable, Sendable {
         case layout(InputMode)
-        case askClear, confirmClear, cancelClear
+        case clear
         case toggleBackup
     }
 
@@ -59,13 +59,33 @@ public struct MenuEntry: Equatable, Sendable {
         public static let pausedSecure = "學習已暫停（安全輸入）"
         public static let pausedApp = "學習已暫停（此 App）"
         public static let clear = "清除選字記憶…"
-        public static let confirmClear = "確定清除選字記憶"
-        public static let clearDisclosure = "清除只刪本機檔案；已經進 Time Machine 備份或本機快照的副本不受影響"
-        public static let cancel = "取消"
-        public static let clearFailed = "清除失敗"
         public static let excludeBackup = "不要備份選字記憶"
         public static let unavailable = "選字記憶無法存檔"
     }
+}
+
+/// The windows of the clear (section 4, user request 2026-10-05: "這個應該做成提示窗通知", replacing
+/// the two-step confirmation inside the menu). The app shows them with NSAlert; tests answer for
+/// the user.
+@MainActor
+public protocol LearningDialogs: AnyObject {
+    /// "清除選字記憶…": calls `answer` with true only when the user chose 清除. It returns at once:
+    /// the window must not block the input method while it is open; `answer` may never be called
+    /// (a window already open ignores a second request).
+    func confirmClear(_ answer: @escaping @MainActor (Bool) -> Void)
+    /// The clear returned non-zero; never passed off as done.
+    func clearFailed()
+}
+
+/// Fixed strings of those windows (R2: no app name, path or count).
+public enum DialogText {
+    public static let clearTitle = "要清除選字記憶嗎？"
+    public static let clearMessage = "會刪除這台電腦上記住的改選紀錄，之後要重新學。清除只刪本機檔案；已經進 Time Machine 備份或本機快照的副本不受影響。"
+    public static let clearButton = "清除"
+    public static let cancel = "取消"
+    public static let failedTitle = "清除選字記憶失敗"
+    public static let failedMessage = "有檔案沒有刪掉，請再試一次。"
+    public static let ok = "好"
 }
 
 extension Shell {
@@ -111,12 +131,12 @@ extension Shell {
         }
     }
 
-    /// Section 4: memory, pending learns and the three files; non-zero shows "清除失敗".
+    /// Section 4: memory, pending learns and the three files; non-zero opens the failure window.
     func clearLearning() {
-        confirmingClear = false
         let code = engine?.learningClear() ?? 4
-        clearFailed = code != 0
-        if code != 0 { Log.shell.error("shanjie_engine_learning_clear failed, code \(code)") }
+        guard code != 0 else { return }
+        Log.shell.error("shanjie_engine_learning_clear failed, code \(code)")
+        dialogs.clearFailed()
     }
 }
 
@@ -155,14 +175,7 @@ extension Session {
         }
         items.append(MenuEntry(title: "標準鍵盤", action: .layout(.standard), checked: layout == .standard))
         items.append(MenuEntry(title: "倚天鍵盤", action: .layout(.eten), checked: layout == .eten))
-        if shell.confirmingClear {
-            items.append(MenuEntry(title: T.confirmClear, action: .confirmClear))
-            items.append(MenuEntry(title: T.clearDisclosure))
-            items.append(MenuEntry(title: T.cancel, action: .cancelClear))
-        } else {
-            items.append(MenuEntry(title: T.clear, action: .askClear))
-        }
-        if shell.clearFailed { items.append(MenuEntry(title: T.clearFailed)) }
+        items.append(MenuEntry(title: T.clear, action: .clear))
         items.append(MenuEntry(title: T.excludeBackup, action: .toggleBackup, checked: shell.backupExcluded))
         if shell.learningUnavailable { items.append(MenuEntry(title: T.unavailable)) }
         return items
@@ -172,12 +185,10 @@ extension Session {
         switch action {
         case .layout(let m):
             shell.selectLayout(m)
-        case .askClear:
-            shell.confirmingClear = true
-        case .confirmClear:
-            shell.clearLearning()
-        case .cancelClear:
-            shell.confirmingClear = false
+        case .clear:
+            shell.dialogs.confirmClear { [weak shell] clear in
+                if clear { shell?.clearLearning() }
+            }
         case .toggleBackup:
             shell.setBackupExcluded(!shell.backupExcluded)
         }
