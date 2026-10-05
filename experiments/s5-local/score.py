@@ -101,10 +101,14 @@ def main():
             json.dump({k: ("inf" if v == math.inf else v) for k, v in taus.items()}, open(tpath, "w"))
     elif os.path.exists(tpath):
         taus = {k: math.inf if v == "inf" else v for k, v in json.load(open(tpath)).items()}
+    else:
+        s5k.die("TAU MISSING")  # gated rows must not vanish silently (set SHANJIE_PRIVATE, score discordtune first)
     for cn in list(cond):
         if cn in taus:
             c = cond[cn]
-            cond[cn + "@tau"] = {**c, "sent": {k: s for k, s in c["sent"].items() if rows[k]["margin"] < taus[cn]}, "tau": taus[cn]}
+            g = {k: s for k, s in c["sent"].items() if rows[k]["margin"] < taus[cn]}
+            # final picks: a row the gate leaves alone keeps rank 1
+            cond[cn + "@tau"] = {**c, "sent": g, "first": {k: (c["first"][k] if k in g else True) for k in c["first"]}, "tau": taus[cn]}
     subs = {"all": set(range(n))}
     if name == "discordtune":
         subs |= {h: {k for k, r in enumerate(rows) if r["half"] == h} for h in "AB"}
@@ -133,7 +137,8 @@ def main():
                         rec[f"vs_{ref}"] = f"n={len(com)} fixed={f2} broken={b2} p={p2:.4f}"
             lat = cond[cn.split("@")[0]]["lat"]
             if sub == "all" and len(lat) > 1:
-                rec.update(lat_first=lat[0], lat_p50=pct(lat[1:], .5), lat_p95=pct(lat[1:], .95), lat_max=max(lat[1:]))
+                # lat[0] is "first row after load" only for the condition that starts its process (L-noul; every ll model)
+                rec.update(lat_first=lat[0] if cn.split("+")[0].split("@")[0] in BASE_CONDS else "—", lat_p50=pct(lat[1:], .5), lat_p95=pct(lat[1:], .95), lat_max=max(lat[1:]))
             if cn.startswith("L-choice-rev"):
                 fw = cond[cn.replace("rev", "fwd")]["sent"]
                 both = [k for k in cov if k in fw and k in c["sent"]]
