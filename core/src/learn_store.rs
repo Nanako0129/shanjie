@@ -19,7 +19,7 @@
 //! bad header or an oversized file is renamed to `learning.tsv.corrupt` (0600, one copy). Nothing
 //! here logs: no path and no record ever leaves this module except as data.
 
-use crate::learn::{context_key, Record, GLOBAL};
+use crate::learn::{context_key, is_single, Record, GLOBAL, SENTINEL};
 use std::fmt::Write as _;
 use std::fs::{self, DirBuilder, File, OpenOptions, Permissions};
 use std::io::{ErrorKind, Read, Write};
@@ -114,9 +114,13 @@ fn clean(s: &str) -> bool {
     !s.is_empty() && !s.chars().any(char::is_control)
 }
 
-/// Whether `r` survives a write and a read unchanged; the one rule for both directions.
+/// Whether `r` survives a write and a read unchanged; the one rule for both directions. A
+/// single-character record under "^" or the global key (written before contract §12) is invalid:
+/// skipped at load, so it counts toward nothing (capacity, has_reading, words_of, is_empty) and is
+/// absent after the first full rewrite. The one place that migrates them.
 fn valid(r: &Record) -> bool {
     (r.context == GLOBAL || context_key(&r.context) == r.context)
+        && !((r.context == GLOBAL || r.context == SENTINEL) && is_single(&r.word))
         && !r.reading.is_empty()
         && r.reading.iter().all(|s| clean(s) && !s.contains('-'))
         && clean(&r.word)
