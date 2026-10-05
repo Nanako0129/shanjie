@@ -28,13 +28,15 @@
 | macOS | 26 以上，Apple 晶片 |
 | Xcode | 27（CI 用 `xcode-27`） |
 | Rust | 1.97.1（和 CI 相同；評測的 golden 檔是用這一版產生的） |
-| GitHub CLI | 用來下載語言模型 |
+| GitHub CLI（已 `gh auth login`）或 curl | 下載語言模型 |
 
 步驟：
 
 ```sh
 # 語言模型不在 repo 裡，從 Release 下載（CC BY-SA 4.0）
 gh release download model-v1 -R Nanako0129/shanjie -p bigram.sjlm -D data/lm
+# 沒有登入 gh 的話改用：
+# curl -L --create-dirs -o data/lm/bigram.sjlm https://github.com/Nanako0129/shanjie/releases/download/model-v1/bigram.sjlm
 shasum -a 256 data/lm/bigram.sjlm   # 要和 data/bigram.sjlm.sha256 相同
 
 make test      # Rust 核心測試，再跑 Swift 殼的測試
@@ -87,7 +89,7 @@ PR 需要：
     cargo run --release -q -p cli -- --lm data/lm/bigram.sjlm --profile formal --dev 302
     ```
 
-    輸出只有一行摘要，`top1` 是 302 句裡整句全對的句數；
+    輸出只有一行摘要，`top1` 是 302 句裡整句對的句數（寬鬆比對：`eval/variants.tsv` 裡的異體寫法也算對）；
   - 要知道哪幾句變了，前後各加 `--dump before.tsv`／`--dump after.tsv`。每列是「句號、名次、候選、分數」，名次 1 是善解給的結果。只比句號和候選（分數幾乎每次都會變）：
 
     ```sh
@@ -137,7 +139,7 @@ git commit -s
 Signed-off-by: 你的名字 <你的 email>
 ```
 
-忘了加的話，用 `git commit --amend -s`，或 `git rebase --signoff main` 補上。
+忘了加的話，用 `git commit --amend -s`，或 `git rebase --signoff <你的分支開始的地方>`（例如 `upstream/main`）補上。
 
 ## 授權
 
