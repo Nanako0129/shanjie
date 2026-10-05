@@ -19,7 +19,7 @@
 //! bad header or an oversized file is renamed to `learning.tsv.corrupt` (0600, one copy). Nothing
 //! here logs: no path and no record ever leaves this module except as data.
 
-use crate::learn::{context_key, Record, GLOBAL};
+use crate::learn::{context_key, is_single_global, Record, GLOBAL};
 use std::fmt::Write as _;
 use std::fs::{self, DirBuilder, File, OpenOptions, Permissions};
 use std::io::{ErrorKind, Read, Write};
@@ -89,7 +89,8 @@ pub enum Opened {
 
 /// The five-field lines of the valid records, appended to `buf`.
 fn lines(records: &[Record], buf: &mut String) {
-    for r in records.iter().filter(|r| valid(r)) {
+    // §12: a single-character global record is never written (a full rewrite drops one from an old file).
+    for r in records.iter().filter(|r| valid(r) && !is_single_global(r)) {
         let _ = writeln!(buf, "{}\t{}\t{}\t{}\t{}", r.context, r.reading.join("-"), r.word, r.weight, r.day);
     }
 }
