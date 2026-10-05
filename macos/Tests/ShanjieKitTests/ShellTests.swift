@@ -77,13 +77,13 @@ final class ShellTests: XCTestCase {
         XCTAssertEqual(c.panel.items.count, 9)
         let down: UInt16 = 125
         XCTAssertTrue(c.press(down))
-        XCTAssertEqual(c.panel.columns, 6)
+        XCTAssertEqual(c.panel.columns, 9)
         XCTAssertEqual(c.panel.first, 0)
-        XCTAssertGreaterThan(c.panel.total, 27)
-        XCTAssertEqual(c.panel.items.count, 30)
+        XCTAssertGreaterThan(c.panel.total, 45)
+        XCTAssertEqual(c.panel.items.count, 45)
         XCTAssertEqual(c.panel.selected, 0)
-        let lower = c.panel.items[8]   // second row, third column
-        c.panel.click(8)
+        let lower = c.panel.items[11]   // second row, third column
+        c.panel.click(11)
         XCTAssertFalse(c.panel.visible)
         XCTAssertEqual(c.client.marked, lower)
         XCTAssertEqual(c.client.text, "")
@@ -94,7 +94,7 @@ final class ShellTests: XCTestCase {
         c.session.activate()
         c.type("g4 ")
         for _ in 0..<6 { c.press(125) }   // expand, then five rows down: the sixth row scrolls the grid
-        XCTAssertEqual(c.panel.first, 6)
+        XCTAssertEqual(c.panel.first, 9)
         let target = c.panel.items[3]
         c.panel.click(3)
         XCTAssertEqual(c.client.marked, target)

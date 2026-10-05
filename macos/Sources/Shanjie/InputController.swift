@@ -170,16 +170,10 @@ private enum Metrics {
     /// of the composed text's); the bar aligns ink, not frames.
     static let labelInset: CGFloat = 2
 
-    // Expanded grid (s3b2 sections 8, 8.7). The grid's row pitch, column width and corner radius are
-    // first values for main's on-device tuning against a-4 (six columns, five rows) and p-2 (three).
+    // Expanded grid (s3b2 sections 8, 9). The grid's row pitch and corner radius are first values for
+    // main's on-device tuning against a-4. Column widths come from the cells (`GridLayout`).
     /// One grid row: the 24 pt capsule plus a 4 pt gap (the bar's 4 pt capsule spacing, section 3).
     static let gridRowPitch: CGFloat = 28
-    /// Column width of the six-column grid (a-4): wide enough for a two-character word. The core picks
-    /// 6, 3 or 2 columns by the longest candidate (section 8.7) and every grid is `gridColumnWidth * 6`
-    /// wide in total, so a column is `6 * gridColumnWidth / columns`: 128 pt for three columns (p-2:
-    /// about 398 pt in all, the same as a-4; 104 left it narrower, g-16) and 192 pt for two.
-    static let gridColumnWidth: CGFloat = 64
-    static let gridColumnsBase: CGFloat = 6
     /// Top and bottom padding of the grid inside the glass, and its corner radius.
     static let gridInset: CGFloat = 5
     static let gridCornerRadius: CGFloat = 16
@@ -197,6 +191,8 @@ private enum Metrics {
     /// last cell's capsule), and the chevron 3 pt, so the chevron's ink is centred in the rest of the area.
     static let chevronSeparatorInset: CGFloat = 2
     static let chevronImageInset: CGFloat = 3
+    /// Section 9: a column widening while the grid is open, the system's default 0.2 s.
+    static let widenDuration: TimeInterval = 0.2
     /// bv.mov 420-438: about 0.3 s, system default timing (no custom curve).
     static let expandDuration: TimeInterval = 0.3
     /// cv.mov 499-514 (Apple, 60 fps): the grid folds back into the bar in about 15 frames.
@@ -211,8 +207,8 @@ private final class CellView: NSView {
     private let onClick: () -> Void
 
     /// `numberText`: the shown number; `showsNumber` false keeps its room but hides it (grid rows other
-    /// than the selected one, p-2). `fixedWidth`: a fixed cell width (grid), `nil` to fit the content (bar).
-    init(numberText: String, showsNumber: Bool = true, fixedWidth: CGFloat? = nil, text: String, note: String?,
+    /// than the selected one, so the rows line up). The cell is as wide as its content.
+    init(numberText: String, showsNumber: Bool = true, text: String, note: String?,
          selected: Bool, onClick: @escaping () -> Void) {
         func label(_ s: String, _ font: NSFont, _ color: NSColor) -> NSTextField {
             let t = NSTextField(labelWithString: s)
@@ -231,15 +227,6 @@ private final class CellView: NSView {
         var width = Metrics.numberLeading + number.frame.width + Metrics.numberToCandidate + candidate.frame.width
         if let name { width += Metrics.candidateToName + name.frame.width }
         width += Metrics.trailing
-        if let fixed = fixedWidth {
-            // A fixed column: a candidate wider than its room is truncated, never widens the column.
-            let room = fixed - width + candidate.frame.width
-            if room < candidate.frame.width {
-                candidate.lineBreakMode = .byTruncatingTail
-                candidate.setFrameSize(NSSize(width: max(room, 0), height: candidate.frame.height))
-            }
-            width = fixed
-        }
         super.init(frame: NSRect(x: 0, y: 0, width: width, height: Metrics.capsuleHeight))
 
         var x = Metrics.numberLeading
@@ -247,11 +234,6 @@ private final class CellView: NSView {
             view.setFrameOrigin(NSPoint(x: x, y: ((Metrics.capsuleHeight - view.frame.height) / 2).rounded()))
             addSubview(view)
             x += view.frame.width + (isNumber ? Metrics.numberToCandidate : Metrics.candidateToName)
-        }
-        // p-2: in a fixed grid column the name sits at the column's right edge, not right after the mark.
-        if fixedWidth != nil, let name {
-            name.setFrameOrigin(NSPoint(x: max(x - Metrics.candidateToName - name.frame.width, width - Metrics.trailing - name.frame.width),
-                                        y: name.frame.origin.y))
         }
         setAccessibilityElement(true)
         setAccessibilityRole(.button)
@@ -322,6 +304,8 @@ final class CandidatePanelAdapter: CandidatePanel {
     private var shownSize = NSSize.zero
     private var shownFrame = NSRect.zero
     private var shownTargets: [NSPoint] = []
+    /// Widen-only column widths of the open grid (section 9); empty when collapsed or hidden.
+    private var columnWidths: [CGFloat] = []
     private var cells: [CellView] = []
     /// True from the start of an expand or collapse animation until it ends; a `show` or `hide` in
     /// that time replaces the running animation (see `settle`). `animation` numbers the groups, so the
@@ -398,8 +382,6 @@ final class CandidatePanelAdapter: CandidatePanel {
         let grid = columns > 0
         let selectedRow = grid ? selected / columns : 0
         func showsNumber(_ i: Int) -> Bool { !grid || i / columns == selectedRow }
-        let columnWidth = grid ? Metrics.gridColumnWidth * Metrics.gridColumnsBase / CGFloat(columns) : 0
-        let gridWidth = Metrics.barInset * 2 + Metrics.gridColumnWidth * Metrics.gridColumnsBase + Metrics.scrollGutter
 
         // Only the selection moved (section 8.7): keep the cells, change which one is selected and which
         // row shows numbers. The glass's content view is never replaced either way.
@@ -412,6 +394,9 @@ final class CandidatePanelAdapter: CandidatePanel {
         let size: NSSize
         let targets: [NSPoint]
         var newCells: [CellView] = []
+        var gridWidth: CGFloat = 0
+        var widened = false
+        var oldGridXs: [CGFloat] = []
         if inPlace {
             for (i, cell) in cells.enumerated() { cell.update(selected: i == selected, showsNumber: showsNumber(i)) }
             newCells = cells
@@ -420,12 +405,27 @@ final class CandidatePanelAdapter: CandidatePanel {
         } else {
             for (i, text) in candidates.enumerated() {
                 let onClick: () -> Void = { [weak self] in self?.onSelect?(i) }
-                newCells.append(grid
-                    ? CellView(numberText: String(i % columns + 1), showsNumber: showsNumber(i),
-                               fixedWidth: columnWidth - Metrics.cellSpacing, text: text, note: notes[i],
-                               selected: i == selected, onClick: onClick)
-                    : CellView(numberText: String(i + 1), text: text, note: notes[i], selected: i == selected,
-                               onClick: onClick))
+                newCells.append(CellView(numberText: String(grid ? i % columns + 1 : i + 1),
+                                         showsNumber: showsNumber(i), text: text, note: notes[i],
+                                         selected: i == selected, onClick: onClick))
+            }
+
+            // Section 9: the grid's x positions and width come only from GridLayout. Widths only grow
+            // while the grid stays open.
+            var gridXs: [CGFloat] = []
+            if grid {
+                let current = shownColumns > 0 ? columnWidths : []
+                let lay = GridLayout.layout(cellWidths: newCells.map(\.frame.width), columns: columns, current: current,
+                                            inset: Metrics.barInset, spacing: Metrics.cellSpacing,
+                                            trailing: Metrics.barInset + Metrics.scrollGutter)
+                gridXs = lay.xs
+                oldGridXs = GridLayout.layout(cellWidths: [], columns: columns, current: current, inset: Metrics.barInset,
+                                              spacing: Metrics.cellSpacing, trailing: 0).xs
+                widened = !current.isEmpty && lay.widths != current
+                columnWidths = lay.widths
+                gridWidth = lay.totalWidth
+            } else {
+                columnWidths = []
             }
 
             // Final positions, in the flipped content view: y counts down from the top.
@@ -433,7 +433,7 @@ final class CandidatePanelAdapter: CandidatePanel {
             if grid {
                 let rows = (candidates.count + columns - 1) / columns
                 for i in candidates.indices {
-                    t.append(NSPoint(x: Metrics.barInset + CGFloat(i % columns) * columnWidth,
+                    t.append(NSPoint(x: gridXs[i % columns],
                                      y: Metrics.gridInset + CGFloat(i / columns) * Metrics.gridRowPitch
                                          + (Metrics.gridRowPitch - Metrics.capsuleHeight) / 2))
                 }
@@ -454,6 +454,10 @@ final class CandidatePanelAdapter: CandidatePanel {
             // collapsing, each bar cell starts at the grid cell showing its candidate (cv.mov: the
             // second row's candidates fly up into the bar).
             var starts = targets
+            if widened && !expanding {
+                // A column widened while the grid stays open: cells slide from where the old widths put them.
+                for i in starts.indices { starts[i].x = oldGridXs[i % columns] }
+            }
             if expanding || collapsing {
                 for i in newCells.indices {
                     let j = first + i - shownFirst
@@ -522,6 +526,8 @@ final class CandidatePanelAdapter: CandidatePanel {
             animate(to: frame, duration: Metrics.expandDuration, cells: newCells, targets: targets)
         } else if collapsing {
             animate(to: frame, duration: Metrics.collapseDuration, cells: newCells, targets: targets)
+        } else if widened {
+            animate(to: frame, duration: Metrics.widenDuration, cells: newCells, targets: targets)
         } else if animating {
             settle(frame: frame)
         } else {
@@ -578,6 +584,7 @@ final class CandidatePanelAdapter: CandidatePanel {
         shownNotes = []
         shownSize = .zero
         shownTargets = []
+        columnWidths = []
         cells = []
     }
 }

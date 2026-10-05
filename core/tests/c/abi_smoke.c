@@ -165,7 +165,7 @@ static int run_grid(const char *dir) {
   CHECK(605, total > 9);
   shanjie_output_free(o);
   CHECK(606, shanjie_engine_key(e, kind_key(10u), &o) == 0 && o != 0); /* DOWN expands */
-  CHECK(607, o->candidate_columns == 6 && o->candidate_first == 0 && o->candidate_total == total);
+  CHECK(607, o->candidate_columns == 9 && o->candidate_first == 0 && o->candidate_total == total);
   CHECK(608, o->candidate_selected == 0 && o->candidate_count == (total < 30 ? total : 30));
   shanjie_output_free(o);
   o = &dummy;
