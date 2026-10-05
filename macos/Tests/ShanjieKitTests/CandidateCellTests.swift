@@ -45,6 +45,27 @@ final class CandidateCellTests: XCTestCase {
         XCTAssertEqual(b.cells.enumerated().filter { $0.element.showsNumber }.map(\.offset), Array(0..<9))
     }
 
+    /// A selection move inside the visible rows (no scroll) keeps every cell and moves the number row
+    /// with the selection; the same holds for the collapsed bar within a page. From the 2026-10-05 verifier.
+    func testSelectionMoveInsideVisibleRowsReusesEveryCell() {
+        let cells = CandidateCells()
+        let a = grid(cells, page: 2, selected: 0)
+        for sel in [9, 20, 44, 3] {
+            let b = grid(cells, page: 2, selected: sel)
+            XCTAssertEqual(b.reused, Array(repeating: true, count: 45), "sel \(sel)")
+            XCTAssertTrue(b.removed.isEmpty, "sel \(sel)")
+            XCTAssertEqual(b.cells.map(ObjectIdentifier.init), a.cells.map(ObjectIdentifier.init), "sel \(sel)")
+            XCTAssertEqual(b.cells.indices.filter { b.cells[$0].isSelected }, [sel])
+            XCTAssertEqual(b.cells.indices.filter { b.cells[$0].showsNumber }, Array((sel / 9 * 9)..<(sel / 9 * 9 + 9)))
+        }
+        let bar = CandidateCells()
+        let page = list(9)
+        let x = bar.update(candidates: page.texts, notes: page.notes, selected: 0, first: 0, columns: 0)
+        let y = bar.update(candidates: page.texts, notes: page.notes, selected: 5, first: 0, columns: 0)
+        XCTAssertEqual(y.reused, Array(repeating: true, count: 9))
+        XCTAssertEqual(x.cells.map(ObjectIdentifier.init), y.cells.map(ObjectIdentifier.init))
+    }
+
     func testChangingModeRebuildsEverything() {
         let cells = CandidateCells()
         let all = list(9)
