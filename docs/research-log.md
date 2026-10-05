@@ -588,3 +588,18 @@
 - 使用者說明：「辭點」是改選造成的。使用者在「詞典」把第一個字改選成「辭」，後面的「典」就變成「點」，和學習無關。
 - 新的推論，未重現：被固定的單字切斷了「辭典」這個詞，後面單獨重算時選了頻率高的「點」。排進下一版（`docs/PLAN.md`）。
 - 沒有學習時，兩種設定都打出「詞典」。教育部把「辭典」「詞典」列為異體詞，寬鬆比對下算對，所以 `user-reported.txt` 這一列量不到這個問題。要用按鍵重播（包含改選）才量得到。
+
+## 2026-10-05：安全輸入讓善解反灰；「反灰」打成「反墮」
+
+- **現象**：發佈 v0.2.0 之後，使用者回報善解在輸入法選單裡反灰、不能用，小麥注音也是；Apple 繁體注音、自然輸入法 V13 正常。使用者說用過 Chrome 相關工具之後會出現。
+- **原因**：`ioreg` 顯示 `kCGSSessionSecureInputPID` 是 Google Chrome（從前一天 05:02 一直在跑）。安全輸入開著時，macOS 把這兩個第三方輸入法反灰。善解本身沒問題：簽章、公證都通過，程序在跑。使用者處理 Chrome 之後恢復。
+- **自然輸入法 V13 為什麼沒反灰（未確認）**：比對三個輸入法的 Info.plist 與 TIS 屬性，自然和另外兩個有兩個差別。
+  - 自然沒有子模式（`ComponentInputModeDict`），TIS 類型是 `TISTypeKeyboardInputMethodWithoutModes`；善解、小麥是 `TISTypeKeyboardInputMode`。
+  - 自然裝在 `/Library/Input Methods`，另外兩個在 `~/Library/Input Methods`。
+  - `TICapsLockLanguageSwitchCapable` 三個都有，不是這個差別。
+  - 「選單沒反灰」也還不代表自然在密碼欄裡真的能打字。
+- **實驗設計**：做了一個「善解測試」：新的 bundle ID、沒有子模式，裝在 `~/Library/Input Methods/善解測試.app`。`tools/tis.swift register` 成功，`enable` 回 noErr 卻沒有生效，系統設定的加入清單裡也看不到它，要登出再登入。使用者決定先留著，下次登出後加入，再用 `tools/secure-input.swift` 開 60 秒安全輸入，對照它和正式版誰反灰。做完移除測試版。
+- **「反灰」打成「反墮」**：使用者回報這句時，實際打出的是「沒反墮」。重現結果：書面設定第一名是「反墮」，聊天設定是「反揮」。原因有兩層：
+  - 詞庫（小麥與維基補充詞表）沒有「反灰」，只能用「反」加單字湊。
+  - 「墮」的罕用讀音 ㄏㄨㄟ 拿到了「墮」常見搭配的分數，和「雀科」同類，見 PLAN「讀音條件權重」。
+  - 加進 `eval/dev/user-reported.txt`；兩種設定都打錯，oracle@64 有。
