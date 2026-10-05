@@ -523,7 +523,7 @@
 
 ## 2026-10-05：S4 修訂二之一，第二次審查的處置
 
-- **測試被規則 6 架空**：`store_forget_then_enter_does_not_learn_the_word_back`、`row_flag_must_be_on_at_pick_and_at_commit`、`row_decode_failure_does_not_learn`、Swift 的 `testPickWhileGatedThenOpenedStoresNothing` 原本在句首選單字，規則 6 讓它們不論有沒有被保護的修正都通過。改成接漢字前文（`TAUGHT_AFTER`）或改用兩字詞（Swift 加 `repickTwo` 與一個未擋閘門的對照測試）。突變結果：拿掉 ⌘⌫ 時丟掉待學選字 → 第一個失敗；選字當下的旗標改成永遠 true、`set_learning(false)` 不丟待學 → `row_flag…` 失敗；解碼失敗路徑去學習 → `row_decode…` 失敗；Swift 的 `setLearning(!paused)` 改成 `setLearning(true)` → 閘門兩個測試都失敗。
+- **測試被規則 6 架空**：`store_forget_then_enter_does_not_learn_the_word_back`、`row_flag_must_be_on_at_pick_and_at_commit`、`row_decode_failure_does_not_learn`、Swift 的 `testPickWhileGatedThenOpenedStoresNothing` 原本在句首選單字，規則 6 讓它們不論有沒有被保護的修正都通過。改成接漢字前文（`TAUGHT_AFTER`）或改用兩字詞（Swift 加 `repickTwo` 與一個未擋閘門的對照測試）。突變結果：拿掉 ⌘⌫ 時丟掉待學選字 → 第一個失敗；選字當下的旗標改成永遠 true、`set_learning(false)` 不丟待學 → `row_flag…` 失敗；解碼失敗路徑去學習 → `row_decode_failure_does_not_learn` 失敗；Swift 的 `setLearning(!paused)` 改成 `setLearning(true)` → 閘門兩個測試都失敗。
 - **前文 key 一致性**：標點後與句首兩種情況改用兩字詞（真語言模型）恢復「學習時的 key 等於解碼時查的 key」。突變：解碼端的 `before` 去掉標點 → 標點後的斷言失敗；句首的解碼 key 前面多一個字 → 句首的斷言失敗。（只改 `decode_segment` 裡 hypothesis 字面的標點不會失敗：標點後的段落前文是引擎傳進來的 `before`，不是 hypothesis 字面。）
 - **沒學到東西就不寫**：`learn_commit` 只在 `teach` 真的改了紀錄時才 `persist`，規則 6 的單字不再造成只有標頭的檔案、完整重寫或空的追加；開啟舊檔後的第一次寫入改成要真的有學習才發生，相關測試改成斷言實際行為，加了 `store_single_character_under_caret_writes_nothing`。
 - **退步的定義統一**：ㄗㄞˋ 污染測試原本把任何輸出變動都算退步，和 ε 掃描不同。現在退步＝原本整句等於期望、之後不再等於；「輸出有變動的列」另外報，兩項都斷言為 0（54 列非碰撞：退步 0、變動 0，數字沒變）。
