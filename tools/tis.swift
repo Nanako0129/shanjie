@@ -13,6 +13,8 @@ func prop(_ s: TISInputSource, _ k: CFString) -> Any? {
     guard let p = TISGetInputSourceProperty(s, k) else { return nil }
     return Unmanaged<AnyObject>.fromOpaque(p).takeUnretainedValue()
 }
+let usage = "usage: tis register <app path> | enable <id> | disable <id> | show <id-prefix>"
+guard a.count == 3 else { print(usage); exit(2) }
 switch a[1] {
 case "register":
     print("register", TISRegisterInputSource(URL(fileURLWithPath: a[2]) as CFURL))
@@ -27,5 +29,5 @@ case "show":
         guard id.hasPrefix(a[2]) else { continue }
         print(id, "enabled=\(prop(s, kTISPropertyInputSourceIsEnabled) ?? "-")", "selectCapable=\(prop(s, kTISPropertyInputSourceIsSelectCapable) ?? "-")", "type=\(prop(s, kTISPropertyInputSourceType) ?? "-")")
     }
-default: break
+default: print(usage); exit(2)
 }

@@ -592,7 +592,9 @@
 ## 2026-10-05：安全輸入讓善解反灰；「反灰」打成「反墮」
 
 - **現象**：發佈 v0.2.0 之後，使用者回報善解在輸入法選單裡反灰、不能用，小麥注音也是；Apple 繁體注音、自然輸入法 V13 正常。使用者說用過 Chrome 相關工具之後會出現。
-- **原因**：`ioreg` 顯示 `kCGSSessionSecureInputPID` 是 Google Chrome（從前一天 05:02 一直在跑）。安全輸入開著時，macOS 把這兩個第三方輸入法反灰。善解本身沒問題：簽章、公證都通過，程序在跑。使用者處理 Chrome 之後恢復。
+- **原因**：有程式開著安全輸入，macOS 因此把這兩個第三方輸入法反灰。善解本身沒問題：簽章、公證都通過，程序在跑。過一陣子使用者再看時已經恢復。
+- **是誰開的：未確認。** `ioreg` 的 `kCGSSessionSecureInputPID` 當時報的是 Google Chrome，我一度據此說是 Chrome。**更正（同日稍晚）**：用 `tools/secure-input.swift` 實測，真正持有者是這個命令列程式（PID 85367），`ioreg` 卻報成當時的前景 App（Discord，92127），兩次都一樣。這個欄位在持有者是沒有視窗的背景程式時，報的是前景 App。所以當時可能只是 Chrome 在前景，真正持有者可能是某個背景程式（使用者說用過 Chrome 相關工具之後就會出現）。
+- **可靠的判斷法**：切到別的 App 再查一次。PID 跟著前景 App 變，就是背景程式；PID 不變，才是那個 App 自己。
 - **自然輸入法 V13 為什麼沒反灰（未確認）**：比對三個輸入法的 Info.plist 與 TIS 屬性，自然和另外兩個有兩個差別。
   - 自然沒有子模式（`ComponentInputModeDict`），TIS 類型是 `TISTypeKeyboardInputMethodWithoutModes`；善解、小麥是 `TISTypeKeyboardInputMode`。
   - 自然裝在 `/Library/Input Methods`，另外兩個在 `~/Library/Input Methods`。
