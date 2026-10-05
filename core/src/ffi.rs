@@ -825,8 +825,8 @@ mod tests {
         if !is_child("child_pick") {
             return;
         }
-        // 40 one-character candidates for ㄋㄧˇ: more than the 30 the grid shows.
-        let base: String = (0..40).map(|i| format!("ㄋㄧˇ {} -1.0\n", char::from_u32(0x4E00 + i).unwrap())).collect();
+        // 60 one-character candidates for ㄋㄧˇ: more than the 45 the grid shows.
+        let base: String = (0..60).map(|i| format!("ㄋㄧˇ {} -1.0\n", char::from_u32(0x4E00 + i).unwrap())).collect();
         let dir = tiny_dir("pick", base.as_bytes());
         let e = new_engine(&dir, 0);
         let send_out = |k: ShanjieKey| {
@@ -852,10 +852,10 @@ mod tests {
         }
         assert!(pick(0).0 == 2, "closed");
         let collapsed = send_out(key(SPACE, '\0'));
-        assert!(collapsed.0.len() == 9 && collapsed.2 == 0 && collapsed.3 == 0 && collapsed.4 == 40);
+        assert!(collapsed.0.len() == 9 && collapsed.2 == 0 && collapsed.3 == 0 && collapsed.4 == 60);
         let grid = send_out(key(10, '\0'));
-        assert!(grid.0.len() == 30 && grid.2 == 6 && grid.3 == 0 && grid.4 == 40 && grid.1 == 0);
-        assert!(pick(30).0 == 2 && pick(u32::MAX).0 == 2, "outside the output, state unchanged");
+        assert!(grid.0.len() == 45 && grid.2 == 9 && grid.3 == 0 && grid.4 == 60 && grid.1 == 0);
+        assert!(pick(45).0 == 2 && pick(u32::MAX).0 == 2, "outside the output, state unchanged");
         let mut o: *mut ShanjieOutput = sentinel();
         assert!(unsafe { shanjie_engine_pick(ptr::null_mut(), 0, &mut o) } == 1 && o.is_null(), "engine NULL");
         assert!(unsafe { shanjie_engine_pick(e, 0, ptr::null_mut()) } == 1, "out NULL");
@@ -864,8 +864,8 @@ mod tests {
         for _ in 0..5 {
             last = send_out(key(10, '\0'));
         }
-        assert!(last.3 == 6 && last.1 == 24 && last.4 == 40 && last.0.len() == 30);
-        let want = last.0[3].clone(); // candidate_first + 3 = list[9]
+        assert!(last.3 == 9 && last.1 == 36 && last.4 == 60 && last.0.len() == 45);
+        let want = last.0[3].clone(); // candidate_first + 3 = list[12]
         let (rc, r) = pick(3);
         let r = r.unwrap();
         assert!(rc == 0 && r.5 == want && r.0.is_empty() && r.1 == -1 && r.2 == 0 && r.4 == 0);

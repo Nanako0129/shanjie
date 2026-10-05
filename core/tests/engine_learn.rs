@@ -677,7 +677,7 @@ fn row_expanded_pick_equals_enter() {
     let o = a.key(k(KeyKind::Space)).unwrap();
     assert_eq!(o.candidates[1], "欣");
     let o = a.key(k(KeyKind::Down)).unwrap();
-    assert_eq!((o.columns, o.first), (6, 0));
+    assert_eq!((o.columns, o.first), (9, 0));
     let o = a.pick(1).unwrap().unwrap();
     assert_eq!((o.preedit.as_str(), o.selected), ("欣", None));
     let ca = a.key(k(KeyKind::Enter)).unwrap().commit;
