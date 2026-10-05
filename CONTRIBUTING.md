@@ -34,9 +34,9 @@
 
 ```sh
 # 語言模型不在 repo 裡，從 Release 下載（CC BY-SA 4.0）
-gh release download model-v1 -R Nanako0129/shanjie -p bigram.sjlm -D data/lm
+gh release download model-v2 -R Nanako0129/shanjie -p bigram.sjlm -D data/lm
 # 沒有登入 gh 的話改用：
-# curl -L --create-dirs -o data/lm/bigram.sjlm https://github.com/Nanako0129/shanjie/releases/download/model-v1/bigram.sjlm
+# curl -L --create-dirs -o data/lm/bigram.sjlm https://github.com/Nanako0129/shanjie/releases/download/model-v2/bigram.sjlm
 shasum -a 256 data/lm/bigram.sjlm   # 要和 data/bigram.sjlm.sha256 相同
 
 make test      # Rust 核心測試，再跑 Swift 殼的測試
