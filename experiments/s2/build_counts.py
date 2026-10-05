@@ -56,7 +56,7 @@ def load_conv():
 
 
 # OpenCC 只轉簡體；維基常見的繁體異體字另外換成台灣用字
-VARIANTS = {"爲": "為", "衆": "眾", "綫": "線", "麪": "麵", "僞": "偽", "裏": "裡", "峯": "峰", "羣": "群", "啓": "啟", "敎": "教"}
+VARIANTS = {"爲": "為", "衆": "眾", "綫": "線", "麪": "麵", "僞": "偽", "裏": "裡", "峯": "峰", "羣": "群", "啓": "啟", "敎": "教", "着": "著", "説": "說"}
 
 
 # S2n 簡體句用的表（load_conv 填）：全部 STPhrases、STCharacters 第一個對照、簡體專用字、繁體專用字
@@ -104,11 +104,15 @@ def is_simplified(text):
 def convert(text, phrase, char, maxp):
     """簡體句（S2n）：全部 STPhrases 最長優先，沒蓋到的字用 STCharacters 第一個對照，整句再套台灣用字（VARIANTS、臺→台）。
     其他句（繁體句，含簡繁夾雜）：只轉簡體專用字。兩種都再套台灣用詞。"""
+    src = text
     if is_simplified(text):
         text = "".join(TW_CHAR.get(c, c) for c in _longest(text, SIMP_PHRASE, SIMP_MAXP[0], SIMP_CHAR))
     else:
-        text = _longest(text, phrase, maxp, char)
-    return _longest(text, TW_PHRASE, TW_MAXP[0]) if TW_PHRASE else text
+        # 第三次重建：詞組輸出與字表輸出（为→爲）都還帶著 STCharacters 的寫法，整句輸出再套一遍 VARIANTS（不含 臺→台）
+        text = "".join(VARIANTS.get(c, c) for c in _longest(text, phrase, maxp, char))
+    text = _longest(text, TW_PHRASE, TW_MAXP[0]) if TW_PHRASE else text
+    # 喫：STPhrases 的「吃了」「吃不出来」等詞組輸出喫；輸入句本來沒有喫就換回吃
+    return text if "喫" in src else text.replace("喫", "吃")
 
 
 MARKUP = [
