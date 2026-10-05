@@ -20,14 +20,21 @@ public protocol TextClient: AnyObject {
     func selectedRange() -> NSRange
     func markedRange() -> NSRange
     func attributedSubstring(from range: NSRange) -> NSAttributedString?
+    /// s3b2 section 2.2: the line rectangle of the composition (screen coordinates), `nil` if the
+    /// client reports none.
+    /// `cursor`: the composition cursor in UTF-16 units within the marked text.
+    func lineRect(cursor: Int) -> NSRect?
 }
 
-/// A display-only candidate list (IMKCandidates in the app). It never receives keys.
+/// A display-only candidate list (an NSPanel in the app). It never receives keys.
 @MainActor
 public protocol CandidatePanel: AnyObject {
     /// `notes[i]`: the name shown beside `candidates[i]` (s3f), `nil` for none.
-    func show(_ candidates: [String], notes: [String?], selected: Int)
+    /// `lineRect`: where the composition's line is (s3b2 section 2.3), `nil` if unknown.
+    func show(_ candidates: [String], notes: [String?], selected: Int, lineRect: NSRect?)
     func hide()
+    /// A mouse click on a cell, by position in the page shown.
+    var onSelect: ((Int) -> Void)? { get set }
 }
 
 /// The keyboard layout. Since docs/contracts/s3b.md section 13.2 it is chosen in the input
@@ -91,13 +98,11 @@ public final class Shell {
     weak var owner: Session?
     /// Whether the composition (as last applied to a client) is non-empty.
     var composing = false
-    /// The page the panel shows, kept only to map a mouse click back to a number key.
+    /// The page the panel shows, kept to check a mouse click's position against it.
     private(set) var candidates: [String] = []
-    /// The same page as the cells read (`CandidateText.display`), for the same mapping.
-    private(set) var cells: [String] = []
 
     /// `resources`: the absolute Resources directory holding the lexicon files and bigram.sjlm.
-    /// `panel`: the one candidate panel (IMKCandidates in the app).
+    /// `panel`: the one candidate panel (an NSPanel in the app).
     /// `isSecureInput`: IsSecureEventInputEnabled in the app (Carbon lives in the executable only);
     /// tests pass a fake.
     /// `layoutStore`: the chosen layout. Required, with no default, so the app cannot silently
@@ -134,6 +139,7 @@ public final class Shell {
         // and switching after would build twice.
         mode = layoutStore.layout.flatMap(InputMode.init(rawValue:)) ?? .standard
         build()
+        panel.onSelect = { [weak self] i in self?.owner?.candidateSelected(at: i) }
     }
 
     /// The current layout (the menu's checkmark).
@@ -191,18 +197,16 @@ public final class Shell {
         return engine?.setProfile(p)
     }
 
-    func showCandidates(_ list: [String], selected: Int) {
+    func showCandidates(_ list: [String], selected: Int, lineRect: NSRect?) {
         // Only an exact punctuation mark has a name: a word candidate is never a key of the table.
         let notes = list.map { names[$0] }
         candidates = list
-        cells = zip(list, notes).map { CandidateText.display($0, note: $1) }
-        panel.show(list, notes: notes, selected: selected)
+        panel.show(list, notes: notes, selected: selected, lineRect: lineRect)
     }
 
     func hideCandidates() {
         panel.hide()
         candidates = []
-        cells = []
     }
 
     /// Discards a composition whose owner is gone; there is no client left to clear.
@@ -233,9 +237,6 @@ public final class Session {
     isolated deinit {
         if shell.owner == nil && shell.composing { shell.discardOrphan() }
     }
-
-    /// The page the panel shows (IMK's `candidates(_:)`).
-    public var candidates: [String] { shell.candidates }
 
     // MARK: IMK callbacks
 
@@ -276,9 +277,8 @@ public final class Session {
 
     /// A mouse click on a candidate: sent to the core as that candidate's number key, so the
     /// core decides what happens (section 8). Never inserted directly.
-    public func candidateSelected(_ text: String) {
-        // IMK hands back the cell's text: the candidate plus its name for a named cell (s3f).
-        guard shell.owner === self, let i = shell.cells.firstIndex(of: text), i < 9 else { return }
+    public func candidateSelected(at i: Int) {
+        guard shell.owner === self, shell.candidates.indices.contains(i), i < 9 else { return }
         _ = send(ShanjieKey(kind: KeyMap.char, ch: UInt32(UInt8(ascii: "1")) + UInt32(i), modifiers: 0))
     }
 
@@ -361,7 +361,7 @@ public final class Session {
         if o.candidates.isEmpty {
             shell.hideCandidates()
         } else {
-            shell.showCandidates(o.candidates, selected: o.selected)
+            shell.showCandidates(o.candidates, selected: o.selected, lineRect: client.lineRect(cursor: Int(o.cursorUTF16)))
         }
     }
 

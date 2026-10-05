@@ -89,7 +89,7 @@ final class LogTests: XCTestCase {
         c.type("su3 ")
         let first = c.panel.items.first                 // optional, not XCTUnwrap: no throw while captured
         XCTAssertNotNil(first, "no candidate was shown for the mouse-selection path")
-        if let first { c.session.candidateSelected(first) }   // mouse selection
+        if first != nil { c.panel.click(0) }   // mouse selection
         XCTAssertFalse(c.session.send(ShanjieKey(kind: 99, ch: 0, modifiers: 0)), "the non-zero return code path was not taken")  // non-zero code
         c.type("su3cl3")
         c.session.deactivate()                          // commits 你好

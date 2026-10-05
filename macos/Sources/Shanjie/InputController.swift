@@ -80,15 +80,6 @@ final class ShanjieInputController: IMKInputController {
     @objc func selectEtenLayout(_ sender: Any?) { perform(.layout(.eten)) }
     @objc func clearLearning(_ sender: Any?) { perform(.clear) }
     @objc func toggleLearningBackup(_ sender: Any?) { perform(.toggleBackup) }
-
-    override func candidates(_ sender: Any!) -> [Any]! {
-        MainActor.assumeIsolated { session.candidates }
-    }
-
-    override func candidateSelected(_ candidateString: NSAttributedString!) {
-        guard let text = candidateString?.string else { return }
-        MainActor.assumeIsolated { session.candidateSelected(text) }
-    }
 }
 
 /// The controller's current IMKTextInput client.
@@ -121,49 +112,185 @@ final class ClientAdapter: TextClient {
     func attributedSubstring(from range: NSRange) -> NSAttributedString? {
         client?.attributedSubstring(from: range)
     }
+
+    /// s3b2 section 2.2, as McBopomofo does (InputMethodController.swift:910): the index is within
+    /// the marked text, starting at the character before the cursor, back until the client reports
+    /// a rectangle other than the (0, 0) origin it leaves untouched when it has none.
+    func lineRect(cursor: Int) -> NSRect? {
+        guard let client else { return nil }
+        let marked = client.markedRange()
+        guard marked.location != NSNotFound, marked.length > 0 else { return nil }
+        var rect = NSRect(x: 0, y: 0, width: 16, height: 16)
+        var index = min(max(cursor - 1, 0), marked.length - 1)
+        while rect.origin.x == 0, rect.origin.y == 0, index >= 0 {
+            _ = client.attributes(forCharacterIndex: index, lineHeightRectangle: &rect)
+            index -= 1
+        }
+        return rect.origin == .zero ? nil : rect
+    }
 }
 
-/// The one IMKCandidates of the server, as a display only (docs/contracts/s3b.md section 8): single row, numbers 1-9,
-/// below the composition. `IMKCandidatesSendServerKeyEventFirst` makes IMK offer every key to the
-/// controller first while the panel is visible (IMKCandidates.h); the core handles every key
-/// while its candidates are open, so the panel is not meant to act on keys itself.
-@MainActor
-final class CandidatePanelAdapter: CandidatePanel {
-    private let panel: IMKCandidates
+/// The panel that cannot take focus: keys and clicks never make it key or main (s3b2 section 2.1).
+private final class PanelWindow: NSPanel {
+    override var canBecomeKey: Bool { false }
+    override var canBecomeMain: Bool { false }
+}
 
-    init(server: IMKServer) {
-        panel = IMKCandidates(server: server, panelType: kIMKSingleRowSteppingCandidatePanel)
-        panel.setAttributes([IMKCandidatesSendServerKeyEventFirst: NSNumber(value: true)])
+/// Layout values of the candidate bar (docs/contracts/s3b2-glass-panel.md section 3). The "Apple"
+/// column was measured on 1x screenshots (1 px = 1 pt) of Apple Zhuyin, kept in main's scratchpad;
+/// these are first values, to be corrected against our own screenshots.
+private enum Metrics {
+    /// Section 3 "candidate bar": about 30 pt tall (a-3, la-3), corner radius half of it.
+    static let barHeight: CGFloat = 30
+    /// Section 3 "selection capsule": 24 pt tall (a-3, la-3), centred in the bar.
+    static let capsuleHeight: CGFloat = 24
+    /// Section 3: the capsule's left edge is about 3 pt from the bar's (a-3).
+    static let barInset: CGFloat = 3
+    /// Section 3 "cell pitch": 41 pt per single-character cell against a 37 pt capsule (a-3), so
+    /// 4 pt between capsules.
+    static let cellSpacing: CGFloat = 4 - 2  // our unselected cells measured 2 pt wider apart than a-3 (s-7)
+    // The gaps below are between label frames, and an NSTextField label's frame is wider than its
+    // ink (padding plus the glyph's side bearings). The values are the a-3 gaps minus what our own
+    // bar (s-3, s-7, 2026-10-05) added; s-7 then matched a-3 within 1 pt.
+    /// Section 3: capsule left edge to the number's ink, 5 pt in a-3.
+    static let numberLeading: CGFloat = 2
+    /// Section 3: number ink to candidate ink, 8 pt in a-3.
+    static let numberToCandidate: CGFloat = 2
+    /// Section 3: candidate ink to the capsule's right edge, 8 pt in a-3 (37 pt cell).
+    static let trailing: CGFloat = 5
+    /// Section 3 "name": between a mark and its name, the capsules in p-1 leave almost none; 2 pt.
+    static let candidateToName: CGFloat = 2
+    /// Section 3 font sizes: candidate 16, number 9, name 11 (initial values, "the ink of a
+    /// Han character is about 0.88 em" so 16 pt gives the 14 pt ink of a-3).
+    static let candidateFont = NSFont.systemFont(ofSize: 16)
+    static let numberFont = NSFont.systemFont(ofSize: 9)
+    /// 12, not 11: at 11 pt 「全形逗號」 measured 42 pt of ink in s-11 against 46 in p-1.
+    static let nameFont = NSFont.systemFont(ofSize: 12)
+    /// A label's ink starts about 2 pt inside its frame (s-7: the first candidate's ink sat 2 pt right
+    /// of the composed text's); the bar aligns ink, not frames.
+    static let labelInset: CGFloat = 2
+}
+
+/// One cell of the bar: number, candidate, optional name. The selected cell is an accent-colour
+/// capsule with white text (section 2.4). A click reports the cell's position.
+private final class CellView: NSView {
+    private let number: NSTextField, candidate: NSTextField, name: NSTextField?
+    private let selected: Bool
+    private let onClick: () -> Void
+
+    init(index: Int, text: String, note: String?, selected: Bool, onClick: @escaping () -> Void) {
+        func label(_ s: String, _ font: NSFont, _ color: NSColor) -> NSTextField {
+            let t = NSTextField(labelWithString: s)
+            t.font = font
+            t.textColor = selected ? .white : color
+            t.sizeToFit()
+            return t
+        }
+        number = label(String(index + 1), Metrics.numberFont, .secondaryLabelColor)
+        candidate = label(text, Metrics.candidateFont, .labelColor)
+        name = note.map { label($0, Metrics.nameFont, .secondaryLabelColor) }
+        self.selected = selected
+        self.onClick = onClick
+
+        var width = Metrics.numberLeading + number.frame.width + Metrics.numberToCandidate + candidate.frame.width
+        if let name { width += Metrics.candidateToName + name.frame.width }
+        width += Metrics.trailing
+        super.init(frame: NSRect(x: 0, y: 0, width: width, height: Metrics.capsuleHeight))
+
+        var x = Metrics.numberLeading
+        for (view, isNumber) in [(number, true), (candidate, false)] + (name.map { [($0, false)] } ?? []) {
+            view.setFrameOrigin(NSPoint(x: x, y: ((Metrics.capsuleHeight - view.frame.height) / 2).rounded()))
+            addSubview(view)
+            x += view.frame.width + (isNumber ? Metrics.numberToCandidate : Metrics.candidateToName)
+        }
+        setAccessibilityElement(true)
+        setAccessibilityRole(.button)
+        setAccessibilityLabel(note.map { text + " " + $0 } ?? text)
+        setAccessibilitySelected(selected)
     }
 
-    /// s3f: a named cell is the plain text `CandidateText.display` gives. IMKCandidates draws every
-    /// cell in its own font: names set to 12 pt and then 9 pt rendered identically in the user's
-    /// screenshots (2026-10-05), so a smaller name, as in Apple's panel, needs our own window (S3b-2).
-    func show(_ candidates: [String], notes: [String?], selected: Int) {
-        panel.setCandidateData(zip(candidates, notes).map { CandidateText.display($0, note: $1) as NSString })
-        panel.show(kIMKLocateCandidatesBelowHint)
-        guard candidates.indices.contains(selected) else { return }
-        // User report 2026-10-04 (v0.1.1): the highlight stayed on the first candidate while the
-        // core's selection moved. Selecting by `candidateStringIdentifier`, before or after
-        // show(), did not move it. The panel is a single row, so a cell's line number is its
-        // position (IMKCandidates.h); select by that and read the selection back.
-        let target = panel.candidateIdentifier(atLineNumber: selected)
-        if target != NSNotFound, panel.selectCandidate(withIdentifier: target), panel.selectedCandidate() == target {
-            return
+    required init?(coder: NSCoder) { fatalError("not used") }
+
+    /// Where the candidate glyph starts, in this cell's coordinates.
+    var candidateMinX: CGFloat { candidate.frame.minX + Metrics.labelInset }
+
+    override func draw(_ dirtyRect: NSRect) {
+        guard selected else { return }
+        NSColor.controlAccentColor.setFill()
+        NSBezierPath(roundedRect: bounds, xRadius: bounds.height / 2, yRadius: bounds.height / 2).fill()
+    }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+    override func mouseDown(with event: NSEvent) { onClick() }
+}
+
+/// The candidate bar (docs/contracts/s3b2-glass-panel.md): a borderless, non-activating panel with
+/// a Liquid Glass row of cells, drawn by us because IMKCandidates ignores fonts and cannot show a
+/// smaller name. Display only: it never becomes key and never receives keys; a click on a cell is
+/// reported by position through `onSelect`. It logs nothing (section 2.5).
+@MainActor
+final class CandidatePanelAdapter: CandidatePanel {
+    var onSelect: ((Int) -> Void)?
+    private let window: PanelWindow
+    private let glass = NSGlassEffectView()
+    /// The glass's one content view, kept for the panel's lifetime: replacing the glass's content,
+    /// resizing or re-ordering the window on every selection move made the glass's glow flicker
+    /// (user report 2026-10-05), so a move only swaps the cells inside.
+    private let row = NSView()
+    private var lastOrigin: NSPoint?
+
+    init() {
+        window = PanelWindow(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel],
+                             backing: .buffered, defer: true)
+        window.isOpaque = false
+        window.backgroundColor = .clear
+        window.hasShadow = true
+        window.level = NSWindow.Level(rawValue: NSWindow.Level.popUpMenu.rawValue + 1)  // McBopomofo's value
+        window.hidesOnDeactivate = false
+        window.isReleasedWhenClosed = false
+        glass.contentView = row
+        window.contentView = glass
+    }
+
+    func show(_ candidates: [String], notes: [String?], selected: Int, lineRect: NSRect?) {
+        var cells: [CellView] = []
+        for (i, text) in candidates.enumerated() {
+            cells.append(CellView(index: i, text: text, note: notes[i], selected: i == selected) { [weak self] in
+                self?.onSelect?(i)
+            })
         }
-        // Fallback, as DINKIssTyle-IME (MIT) drives IMKCandidates: from the first cell, step the
-        // panel's own highlight with its responder actions.
-        // The start is read back too: if selecting the first cell did not take, step left past the
-        // page's start first, so the steps right never begin from a stale cell.
-        let first = panel.candidateIdentifier(atLineNumber: 0)
-        if first == NSNotFound || !panel.selectCandidate(withIdentifier: first) || panel.selectedCandidate() != first {
-            for _ in 0..<candidates.count { panel.moveLeft(nil) }
+        row.subviews.forEach { $0.removeFromSuperview() }
+        var x = Metrics.barInset
+        let y = (Metrics.barHeight - Metrics.capsuleHeight) / 2
+        for cell in cells {
+            cell.setFrameOrigin(NSPoint(x: x, y: y))
+            row.addSubview(cell)
+            x += cell.frame.width + Metrics.cellSpacing
         }
-        for _ in 0..<selected { panel.moveRight(nil) }
+        let size = NSSize(width: x - Metrics.cellSpacing + Metrics.barInset, height: Metrics.barHeight)
+        if window.frame.size != size {
+            row.frame = NSRect(origin: .zero, size: size)
+            glass.cornerRadius = size.height / 2
+            window.setContentSize(size)
+        }
+
+        let screens = NSScreen.screens
+        let rectScreen = lineRect.flatMap { r in screens.firstIndex { $0.frame.contains(r.origin) } }
+        let main = NSScreen.main.flatMap { m in screens.firstIndex(of: m) } ?? 0
+        guard !screens.isEmpty else { return }
+        let alignOffset = Metrics.barInset + (cells.first?.candidateMinX ?? 0)
+        let origin = PanelPlacement.topLeft(
+            lineRect: lineRect, lastOrigin: lastOrigin, size: size, alignOffset: alignOffset,
+            screens: screens.map(\.visibleFrame), rectScreen: rectScreen, main: main)
+        lastOrigin = origin
+        if window.frame.origin.x != origin.x || window.frame.maxY != origin.y {
+            window.setFrameTopLeftPoint(origin)
+        }
+        if !window.isVisible { window.orderFrontRegardless() }
     }
 
     func hide() {
-        panel.hide()
+        window.orderOut(nil)
     }
 }
 

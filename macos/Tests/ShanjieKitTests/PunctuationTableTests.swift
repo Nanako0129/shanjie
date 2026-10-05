@@ -89,11 +89,10 @@ final class PunctuationTableTests: XCTestCase {
         XCTAssertEqual(named["、"], "頓號")
         XCTAssertEqual(c.panel.notes.count, c.panel.items.count)
 
-        // A mouse click hands back the named cell's text; it must choose that candidate (2 → 、).
+        // The panel got the name; a click on the second cell chooses the mark without it (2 → 、).
         let want = c.panel.items[1]
-        let second = CandidateText.display(want, note: c.panel.notes[1])
-        XCTAssertNotEqual(second, want, "the second cell has a name")
-        c.session.candidateSelected(second)
+        XCTAssertEqual(c.panel.notes[1], "頓號", "the second cell has a name")
+        c.panel.click(1)
         XCTAssertFalse(c.panel.visible)
         XCTAssertEqual(c.client.marked, want, "the click chose the candidate, never its name")
     }
