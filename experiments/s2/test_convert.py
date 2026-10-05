@@ -22,10 +22,13 @@ TRADITIONAL = [   # 繁體句不變；夾一個簡體專用字的繁體句只改
     ("皇后說他在里長辦公室", "皇后說他在里長辦公室"), ("大概十分鐘後到", "大概十分鐘後到"),
     ("我們今天在后面等书", "我們今天在后面等書"),
 ]
+KEEP = [   # 台灣用字例外：單字不換成 喫／巖；詞組照詞組
+    ("我们早饭吃什么", "我們早飯吃什麼"), ("这块岩石很大", "這塊岩石很大"), ("嘴唇很红", "嘴唇很紅"), ("她的嘴唇", "她的嘴唇"), ("范围很广", "範圍很廣"),
+]
 MIXED = [   # 簡體專用字比繁體專用字多：整句當簡體句；像、待這類簡繁都用的字不擋
     ("她是最后一个我在聚会上期待看到的女人", "她是最後一個我在聚會上期待看到的女人"), ("源于希腊语rhodon的合成词", "源於希臘語rhodon的合成詞"),
 ]
-for src, want in SIMPLIFIED + TRADITIONAL + MIXED:
+for src, want in SIMPLIFIED + TRADITIONAL + MIXED + KEEP:
     assert c(src) == want, (src, c(src), want)
 assert bc.is_simplified("之后") and not bc.is_simplified("台灣") and not bc.is_simplified("皇后說")
-print(f"ok: {len(SIMPLIFIED) + len(TRADITIONAL) + len(MIXED)} conversion checks")
+print(f"ok: {len(SIMPLIFIED) + len(TRADITIONAL) + len(MIXED) + len(KEEP)} conversion checks")

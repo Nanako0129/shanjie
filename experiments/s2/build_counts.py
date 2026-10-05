@@ -46,7 +46,7 @@ def load_conv():
                     phrase[k] = v.split(" ")[0]
     char.update(VARIANTS)
     SIMP_PHRASE.clear(); SIMP_PHRASE.update(simp_phrase)
-    SIMP_CHAR.clear(); SIMP_CHAR.update(first_char)
+    SIMP_CHAR.clear(); SIMP_CHAR.update({c: (c if c in TAIWAN_KEEP else v) for c, v in first_char.items()})
     MARKERS.clear(); MARKERS.update(c for c, v in first_char.items() if c != v)   # 標記字：第一個對照不是自己（含 后、于、里 這類）
     SIMP_ONLY.clear(); SIMP_ONLY.update(simp_only)                                 # 簡體專用字：對照裡不含自己
     TRAD_ONLY.clear(); TRAD_ONLY.update(first_char[c] for c in MARKERS)            # 繁體專用字：標記字的第一個對照（像、待、座 不在其中）
@@ -61,6 +61,11 @@ VARIANTS = {"爲": "為", "衆": "眾", "綫": "線", "麪": "麵", "僞": "偽"
 
 # S2n 簡體句用的表（load_conv 填）：全部 STPhrases、STCharacters 第一個對照、簡體專用字、繁體專用字
 SIMP_PHRASE, SIMP_CHAR, MARKERS, SIMP_ONLY, TRAD_ONLY, SIMP_MAXP = {}, {}, set(), set(), set(), [0]
+# 台灣用字例外（S2n 契約 §2.1）：簡體句的字表這一步保留原字，不換成 STCharacters 的第一個對照（吃→喫、岩→巖 在台灣不是正確用字）。
+# 挑法：2026-10-05 在維基前 25,000 篇被判為繁體句的句子裡，原字出現次數 >= 3 倍第一個對照、且原字 >= 30 次；
+# 比例 吃 28.8、皂 78.5、唇 12.2、岩 9.1、岳 5.0、咸 3.4（experiments/s2n/pick_exceptions.py，輸出在契約 §2.1）。
+# 后 于 里 台 干 余 不在此列：契約表明定要轉。詞組那一步照舊，所以 岩石、范围 這類由詞組決定。
+TAIWAN_KEEP = set("吃皂唇岩岳咸")
 TW_CHAR = {**VARIANTS, "臺": "台"}   # 簡體句轉完後整句套一遍的台灣用字
 
 
