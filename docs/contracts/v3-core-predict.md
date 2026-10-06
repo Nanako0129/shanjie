@@ -1,8 +1,8 @@
-# V3 核心：由前文後繼詞產生預測候選（Rust 函式，第一片）
+# V3 核心：後繼詞優先、其餘相容詞補在後面的預測候選（Rust 函式，第一片）
 
-使用者 2026-10-07 決定：#44 的即時預測進 v0.3.0，前綴補完預設開、縮寫做成設定預設關，候選只由前文的後繼詞產生、已打的注音只過濾。Python 參考實作是 `experiments/sp/predict2.py` 的 `candidates` 與分數（契約 `docs/contracts/sp2-successor-prediction.md`，記為 SP2）。
+使用者 2026-10-07 決定：#44 的即時預測進 v0.3.0，前綴補完預設開，縮寫做成設定、預設關。SP 第二片量出「只用後繼詞」在第一個音節之後覆蓋不足，使用者再決定「後繼詞優先、補充來源」；SP 第三片量出這個排序（S）在所有公開集合都不輸、也常勝過「全部相容詞依分數排」。這一片實作 S。Python 參考實作是 `experiments/sp/predict3.py` 的 `reference`、`order_s` 與分數（契約 `docs/contracts/sp3-successor-first.md`，記為 SP3；相容與分數照 SP1、SP2）。
 
-**前置條件**：SP 第二片（含 `experiments/sp/predict2.py`）已合併到 main，這個分支 rebase 到合併後的 main，executor 才開始；`golden_predict.py` import 這份已提交的 `predict2.py`，不讀其他 worktree。
+**前置條件**：SP 第三片（含 `experiments/sp/predict3.py`）已合併到 main，這個分支 rebase 到合併後的 main，executor 才開始；`golden_predict.py` import 這份已提交的 `predict3.py`，不讀其他 worktree。
 
 這一片只在 `core/` 加一個純函式和它的測試：給定模型、詞庫、前文歷史詞與已打的按鍵，回傳候選與分數，和 Python 逐位元相同。**不接引擎、不改 C ABI、不改殼層與組字器**；那些等介面契約定了，另寫契約。
 
@@ -23,28 +23,30 @@
   - 已完成的單位：字元和聲調都相同。
   - P 只用前綴解讀；PA 用前綴與縮寫的聯集。
 - **後繼詞** `succ(v)`：模型裡 `v` 的前文條目所列的後一個詞；`v` 沒有前文條目時是空的。不在詞庫裡的後繼詞略過。
-- **候選**：`succ(v)` 裡至少有一個詞庫讀音和單位相容的詞。分數 `word(λ, v, W, lp_max)`，`lp_max` 是 W 在相容讀音裡最高的 capped 分數。
-- **順序**：依序比 −分數、字數、讀音字串、詞的 code point，取前 `limit` 個。讀音字串是達到 `lp_max` 的相容讀音中，字串最小的那個，音節以 `-` 相接，和 `predict.py` 的 `det_key` 相同。
+- **候選**：詞庫裡至少有一個讀音和單位相容的字串（該模式的解讀）。分數 `word(λ, v, W, lp_max)`，`lp_max` 是 W 在相容讀音裡最高的 capped 分數。
+- **兩層**：第一層是 `succ(v)` 裡的候選，第二層是其餘候選。每個候選帶一個「是否後繼詞」的旗標。
+- **順序（S）**：先第一層、再第二層；層內依序比 −分數、字數、讀音字串、詞的 code point，取前 `limit` 個。讀音字串是達到 `lp_max` 的相容讀音中，字串最小的那個，音節以 `-` 相接，和 `predict.py` 的 `det_key` 相同。
 
 ## 2. 介面（`core` crate，名稱可依現有風格調整，語意不變）
 
 - `Lm` 加一個讀後繼詞的方法（依 id 遞增，或回傳 id 讓呼叫端查字串）。
-- 新模組（例如 `core/src/predict.rs`）：單位型別、`units_of`、模式 P／PA、`predict(...) -> Vec<(String, f64)>`。
-- 詞到讀音的反查表：第一次用到時建好，或隨詞庫建立。記憶體增加量要量，寫進研究紀錄。
+- 新模組（例如 `core/src/predict.rs`）：單位型別、`units_of`、模式 P／PA、`predict(...) -> Vec<(String, f64, bool)>`（第三欄是否為後繼詞）。
+- 依第一個音節首字元分桶的索引（和 `predict.py` 的 `Index` 相同語意），第一次用到時建好。
+- 詞到讀音的反查表：第一次用到時建好，或隨詞庫建立。索引與反查表的記憶體增加量要量，寫進研究紀錄。
 - `cli` 的 `shanjie-eval` 加一個子命令，供 golden 與量時間用（例如 `--predict <查詢檔>`，輸出格式同 golden）。
 
 ## 3. Golden（Python 產生、Rust 逐位元比對）
 
-- **產生**：新程式 `experiments/sp/golden_predict.py` 用 `predict2.candidates` 與 `scores`，寫 `eval/golden/sp-predict.txt`。
+- **產生**：新程式 `experiments/sp/golden_predict.py` 用 `predict3.reference`、`scores`、`order_s`，寫 `eval/golden/sp-predict.txt`。
 - **查詢**：typing76 的每個樣本、聊天設定。
   - P 模式：位置 P1–P4。
   - PA 模式：A1、A2。
   - **P 模式也查 A1、A2 的單位序列**（兩字以上的樣本，兩個以上未完成的單位）。Python 的 P 模式回空集合；PA 對同一組查詢多半非空。這組查詢是為了抓突變 (b)：P1–P4 由按鍵前綴建出，最多只有最後一個單位未完成，聯集和前綴解讀的結果相同。
 - **每個查詢**：
   - 一行 `## <模式> <v> <單位序列>`。單位序列寫成每個單位的「字元＋完成旗標＋聲調」，格式由實作定，寫在檔頭。
-  - 接著前 9 個候選，每行 `詞<TAB>分數`。分數用 Python 的 `repr`。
+  - 接著依 S 順序的前 9 個候選，每行 `詞<TAB>分數<TAB>是否後繼詞（1／0）`。分數用 Python 的 `repr`。
 - **比對**：Rust 測試（`cli/tests/golden.rs` 或 `core/tests/`）讀這個檔。
-  - 每個查詢的候選字串與順序要相同。
+  - 每個查詢的候選字串、順序、後繼詞旗標要相同。
   - 分數解析成 `f64` 後要位元相同。
 - 這個 golden 依賴模型。換模型時（例如 S2f 的 model-v3）照同一指令重產，和其他依賴模型的 golden 一起。
 
@@ -52,13 +54,13 @@
 
 1. `cargo test`（debug、release）全過，含 golden 的全部查詢。
 2. **突變**：每一項只在暫存副本上改，或改完立刻還原並確認 `git status` 乾淨。
-   - (a) 拿掉後繼詞過濾；
+   - (a) 拿掉後繼詞那一層（全部依分數排序）；
    - (b) P 模式改用聯集；
    - (c) `lp_max` 改成取全部讀音的最高分（不限相容）。
 
    每一項都要讓 golden 測試失敗。如果 (c) 在 typing76 的查詢裡找不到會失敗的案例，在 golden 加一個手造查詢（例如「大」ㄉ／ㄉㄞ）。
 3. **時間**（release，M 系列 Mac）：
-   - **計時範圍**：一次 `predict(...)` 呼叫在同一個程序裡的牆鐘時間，和 Python 計時的範圍相同（候選、分數、取前 64 名）。不含載入模型、建 `CappedLexicon`、建詞到讀音反查表；反查表的建立時間另外報。
+   - **計時範圍**：一次 `predict(...)` 呼叫在同一個程序裡的牆鐘時間，和 Python 計時的範圍相同（候選、分數、兩層排序、取前 `limit` 名）。不含載入模型、建 `CappedLexicon`、建索引與反查表；建立時間另外報。
    - **查詢集合**：golden 裡的 typing76 查詢（P1–P4、A1、A2，以及 P 模式的 A1、A2 單位序列；聊天設定）。
    - **輸出**：CLI 子命令加一個旗標（例如 `--predict-time`），把 p50／p95／最大值與反查表建立時間印在 stderr，不混進 golden 格式。
    - p50／p95 寫進研究紀錄；p95 超過 20 ms 是停止條件。
