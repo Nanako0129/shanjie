@@ -4,7 +4,7 @@
 
 ## 設定
 
-- key：申請處 <https://typesafe.ai> （早期存取）；放在環境變數 `TYPESAFE_API_KEY` 或 `~/.config/typesafe/api_key`（權限 0600）。程式絕不印出 key。
+- key：申請處 <https://typesafe.ai> （早期存取）；只從環境變數 `TYPESAFE_API_KEY` 讀（2026-10-06 起；repo 不寫本機的存放位置）。程式絕不印出 key。
 - 這是實驗，不是輸入法功能。若之後接進輸入法：預設關閉；沒有 key 時行為與沒有這個功能完全相同，並在選單顯示「Jev 不可用」。
 - 只用 Python 標準函式庫（`jev.py`），不裝 SDK。
 
