@@ -181,7 +181,7 @@ fn run_unigram_rows(lex: &Lexicon, len: &Lenient, rows_file: String, dump: Optio
         None => None,
     };
     let (mut top1, mut o64, mut firsts) = (0usize, 0usize, Vec::new());
-    for (i, (truth, syls)) in rows.iter().enumerate() {
+    for (i, (truth, syls, _)) in rows.iter().enumerate() {
         let nb = decode_beam(lex, syls, &mut NoLearning, BEAM_S1).map_err(|e| e.to_string())?;
         let surf: Vec<String> = nb.iter().take(64).map(|(_, ws)| ws.concat()).collect();
         let first = surf.first().ok_or("no candidates for a row")?.clone();
