@@ -133,6 +133,28 @@ Order sensitivity (measured from the per-row picks): the same rank-1 candidate i
 
 dev302 and typing76 (recorded only): C-sent-fwd 72.9% / 73.7% (rank 1: 78.8% / 85.5%), C-sent-rev 91.1% / 89.5%, C-pos 84.1% / 86.8%, flip 0.42 / 0.36. They differ from cvtune in places: on dev302, C-pos beats rank 1 (+16, p = 0.033) where cvtune loses, and C-sent-fwd is not significant (p = 0.13). Per-row files and `score.json` are in `results/`.
 
+## Results: full Clef, 27B (run 2026-10-06, `--model clef`, contract section 10)
+
+Same questions, sets and parsing; only the model changed. Files are `clef27-*.jsonl` next to the flash ones. Spend for the whole experiment (both models, smokes included) is US$0.509 by the driver's ledger at list prices, under the US$1 cap; the 27B share is about US$0.37. Not checked against the Cloudflare bill.
+
+cvtune (decides; rank-1 baseline 85.1%):
+
+| Condition | Accuracy | vs rank 1 (fixed/broken, p) | vs Jev, same condition (fixed/broken, p) | vs flash, same condition (report only) | First pick | Flip | Latency p50/p95 per request |
+|---|---|---|---|---|---|---|---|
+| C27-sent-fwd | 80.0% | 99/150, p = 0.0015 | 44/141, p ≈ 0 | 210/33 | 0.500 | | 1733/2691 ms |
+| C27-sent-rev | 90.5% | 81/27, p = 2e-7 | 39/19, p = 0.012 | 38/16 | 0.004 | 0.36 | 1800/2512 ms |
+| C27-pos | 85.7% | 64/58, p = 0.65 | 25/58, p = 0.0004 | 90/33 | | | 1484/3399 ms |
+
+Verdicts by the pre-registered rules:
+- **vs rank 1**: C27-sent-rev is a candidate for H/S6 (net +54); C27-sent-fwd is significantly worse; C27-pos is not significant.
+- **vs Jev: mixed**. C27-sent-rev is significantly better than J-sent-rev; C27-sent-fwd and C27-pos are significantly worse than their Jev pairs.
+
+Order sensitivity is smaller than flash's but still large: the rank-1 candidate is picked on 50.0% of rows when listed first and on 81.5% when listed last; picks by presented position are 500/246/96/57/34/26/24/17 forward and 4/5/5/10/17/39/105/815 reversed; 36% of rows change answer between orders (flash 54%, Jev 11%). As with flash, the win holds in one order only, so it is not a basis for H/S6 without an order-free design.
+
+dev302 and typing76 (recorded only): C27-sent-fwd 85.4% / 90.8%, C27-sent-rev 95.0% / 97.4%, C27-pos 87.7% / 89.5% (rank 1: 78.8% / 85.5%; J-sent-fwd 91.7% / 93.4%). Flip 0.25 / 0.13. Every C27 condition beats its flash counterpart on cvtune (p < 0.004 each, report only).
+
+Latency is about 2.5 times flash's and 8 times Jev's per request of 20 questions; one dev302 request took 13.3 s.
+
 ## Limitations
 
 - Workers AI offers no version pin; results are for the model as served on the run date.
