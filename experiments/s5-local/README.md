@@ -215,7 +215,7 @@ start "" /b /wait /affinity FFF %PY% run_ll_cuda.py --set discordtune --ctx real
 
 (In a `.bat` file write `%%S`.) Exit 3 on a smoke run means the degeneracy stop fired; `s5k: STOP ...` or `s5k: INPUT ...` are the other stops. The private directory is deleted afterwards whatever the result (`rmdir /s /q %USERPROFILE%\s5k-188\private`, then `dir` to confirm), and only `Q8-ll.*.jsonl` and `meta-188.jsonl` are copied back, per §11.
 
-`score.py` lists `Q8-ll` among the base conditions (paired with A-fwd and J-sent-fwd) and adds `vs_Q-ll=n=... fixed=... broken=... p=...` for `Q8-ll`, `Q8-ll+ctx` and their `@tau` variants: Q8-ll against Q-ll (1.7B), same condition, report only.
+`score.py` lists `Q8-ll` among the base conditions (paired with A-fwd and J-sent-fwd) and adds `vs_Q-ll=n=... fixed=... broken=... p=...` for every Q8-ll condition (`Q8-ll`, `+ctx`, `+ctxall` and their `@tau` variants): Q8-ll against Q-ll (1.7B), same condition, report only.
 
 ### Q8-ll results (run 2026-10-06 on 188, scored on the Mac)
 
