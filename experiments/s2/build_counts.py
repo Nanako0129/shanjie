@@ -7,6 +7,7 @@
 import argparse
 import bz2
 import collections
+import math
 import os
 import pickle
 import re
@@ -167,11 +168,75 @@ def segment(lex, text):
     return out[::-1]
 
 
+EXPECTED_MIN = 0.01   # --expected：單一段落裡期望次數低於這個值的詞與二元組不記（S2n 契約 §6.2；事先寫死，用來控制記憶體）
+
+
+def _lse10(terms):
+    m = max(terms)
+    return m + math.log10(sum(10 ** (t - m) for t in terms))
+
+
+def forward_backward(lex, text):
+    """詞圖（和 segment() 同一張：每個在 lex.by_word 裡、長度 <= lex.max_len 的子字串是一條邊，分數用 by_word 的 log10p）
+    上的前向後向，log10 空間。回傳 (n, ends, starts, alpha, beta)；ends[j]=[(i, w, lp)]、starts[i]=[(j, w, lp)]；沒有任何切法回 None。
+    alpha[0]=0、beta[n]=0，Z = beta[0]。"""
+    n = len(text)
+    ends, starts = [[] for _ in range(n + 1)], [[] for _ in range(n + 1)]
+    for j in range(1, n + 1):
+        for L in range(1, min(lex.max_len, j) + 1):
+            w = lex.by_word.get(text[j - L:j])
+            if w:
+                ends[j].append((j - L, text[j - L:j], w[1])); starts[j - L].append((j, text[j - L:j], w[1]))
+    NEG = -math.inf
+    alpha, beta = [NEG] * (n + 1), [NEG] * (n + 1)
+    alpha[0] = beta[n] = 0.0
+    for j in range(1, n + 1):
+        t = [alpha[i] + lp for i, _, lp in ends[j] if alpha[i] > NEG]
+        if t:
+            alpha[j] = _lse10(t)
+    for i in range(n - 1, -1, -1):
+        t = [lp + beta[j] for j, _, lp in starts[i] if beta[j] > NEG]
+        if t:
+            beta[i] = _lse10(t)
+    if beta[0] == NEG:
+        return None
+    return n, ends, starts, alpha, beta
+
+
+def expected_counts(lex, text, min_count=EXPECTED_MIN):
+    """S2n 契約 §6.2：一段連續漢字的期望詞數與期望二元組數（含 <s>、</s> 配對）。回傳 (uni, bi) 兩個 dict；沒有切法回 None。
+    詞 w 在 i..j：10^(alpha[i]+lp+beta[j]-Z)；相鄰 a(i..j)、b(j..k)：10^(alpha[i]+lpa+lpb+beta[k]-Z)；小於 min_count 的不記。"""
+    fb = forward_backward(lex, text)
+    if fb is None:
+        return None
+    n, ends, starts, alpha, beta = fb
+    Z, NEG = beta[0], -math.inf
+    lmin = math.log10(min_count) if min_count > 0 else NEG
+    uni, bi = collections.defaultdict(float), collections.defaultdict(float)
+    for j in range(1, n + 1):
+        for i, a, lpa in ends[j]:
+            la = alpha[i] + lpa + beta[j] - Z      # 詞 a 的對數期望次數；alpha 或 beta 是 -inf 時也是 -inf，下面的比較會濾掉
+            if la < lmin or la == NEG:
+                continue
+            e = 10 ** la
+            uni[a] += e
+            if i == 0:
+                bi[("<s>", a)] += e
+            if j == n:
+                bi[(a, "</s>")] += e
+            for k, b, lpb in starts[j]:            # 二元組不會大於 a 或 b 的期望次數，所以 la 已經過門檻才需要往下看
+                lb = alpha[i] + lpa + lpb + beta[k] - Z
+                if lb >= lmin and lb > NEG:
+                    bi[(a, b)] += 10 ** lb
+    return uni, bi
+
+
 _W = {}
 
 
-def _init(trigram=False):
+def _init(trigram=False, expected=False):
     _W["trigram"] = trigram
+    _W["expected"] = expected
     _W["lex"] = ime.Lexicon(os.path.join(ROOT, "data", "lexicon", "mcbpmf-data.txt"),
                             overlay=os.path.join(ROOT, "data", "lexicon", "overlay-add.tsv"))
     _W["conv"] = load_conv()
@@ -189,6 +254,16 @@ def count_batch(texts):
         for s in SENT.findall(t):
             for run in HAN.findall(convert(s, phrase, char, maxp)):
                 if len(run) < 2:
+                    continue
+                if _W["expected"]:
+                    r = expected_counts(lex, run)
+                    if r is None:
+                        continue
+                    sents += 1
+                    for w, e in r[0].items():
+                        uni[w] += e
+                    for k, e in r[1].items():
+                        bi[k] += e
                     continue
                 ws = segment(lex, run)
                 if not ws:
@@ -221,11 +296,14 @@ def main():
     ap.add_argument("--articles", type=int, default=50_000)
     ap.add_argument("--procs", type=int, default=max(1, os.cpu_count() - 2))
     ap.add_argument("--trigram", action="store_true", help="也算 trigram（記憶體用量大，請搭配較少的篇數）")
+    ap.add_argument("--expected", action="store_true", help="詞圖上的期望次數（S2n 契約 §6.2），取代最高分切分；不算 trigram")
     a = ap.parse_args()
+    if a.expected and a.trigram:
+        ap.error("--expected 不算 trigram")
     os.makedirs(OUT, exist_ok=True)
     uni, bi, tri = collections.Counter(), collections.Counter(), collections.Counter()
     sents = arts = 0
-    with mp.Pool(a.procs, initializer=_init, initargs=(a.trigram,)) as pool:
+    with mp.Pool(a.procs, initializer=_init, initargs=(a.trigram, a.expected)) as pool:
         for u, b, t, s_ in pool.imap_unordered(count_batch, batches(articles(a.articles))):
             uni.update(u); bi.update(b); tri.update(t); sents += s_; arts += 200
             if arts % 10000 == 0:
