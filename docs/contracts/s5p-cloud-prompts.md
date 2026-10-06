@@ -136,3 +136,16 @@
 ## 12. 執行前要補記的雜湊
 
 - Clef V0：`~/.cache/shanjie/work/s5-clef/cvtune/clef-sent-fwd.jsonl` 的 SHA-256。S5c 的 cvtune 完整執行之後由 main 記在這裡，Clef 的 A 半開跑前必須已經寫入。
+  - **已記（2026-10-06）**：`fa53ba7ccc67d217c5019896539a2dceced13f4be72d7d0fec54926ed834e074`（S5c cvtune 完整執行，研究紀錄同日）。
+- Clef 27B 的 V0：`~/.cache/shanjie/work/s5-clef/cvtune/clef27-sent-fwd.jsonl` 的 SHA-256，S5c §10 的 cvtune 執行之後由 main 記在這裡，27B 的 A 半開跑前必須已經寫入。
+
+## 13. 修訂（2026-10-06）：加入完整版 Clef（27B），供應商變成三個
+
+- **起因**：使用者 2026-10-06 要求完整版 Clef 也照原計畫跑完。S5c §10 先量 27B 的 V0（與 S5j 相同的 8 選 1 正序）。
+- **供應商**：Jev、`clef-flash`、`clef`（27B）。27B 和 flash 用同一個 `Client`，只換模型名與端點（S5c §10），金鑰相同。
+- **規則照 §4、§5 不變，套到三個供應商**：每個供應商在 A 半各自挑變體（V1–V4，V2／V4 只看正序），27B 的 V0 是 S5c §10 的 `clef27-sent-fwd.jsonl`。
+- **B 半的預先指定檢定**：每個供應商的「挑中變體 vs V0」與「挑中變體 vs 第 1 名」（3 × 2 = 6 個），加上「Jev 挑中 vs flash 挑中」「Jev 挑中 vs 27B 挑中」（2 個），共 8 個。不做其他事後比較；flash 對 27B 只報告。
+- **費用**：照模型換算（flash 0.09、27B 0.24 美元／百萬輸入 token；Jev 照 §8）。三個供應商合計（含已花的 Jev 約 0.16 美元）的估計費用超過 2 美元就停。main 的事前估計：每個 Clef 模型最多約 4,800 次請求、每次約 400 個輸入 token，flash 約 0.17 美元、27B 約 0.46 美元，合計約 0.8 美元。
+- **執行順序**：S5c §10 的 27B 執行完成、§12 補上雜湊之後，27B 的 A 半才開跑；flash 的 A 半不需要等 27B。
+- executor 的限制照 §10；網路呼叫只由 main 執行。可行性比較表（§6）加一欄 27B。
+
