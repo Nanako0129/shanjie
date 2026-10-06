@@ -42,4 +42,52 @@ Jev `jev-1.13.0` ran on public sets only. Total estimated spend was US$0.16: 4,8
 **Reading:**
 - The documented prompt style (Chinese instructions; a named state with context, reading and candidates) trends better than the original English list prompt (+9 on half B), but the improvement is not established.
 - Per-candidate noul (V1, V3), the docs' rerank recipe, was the weakest of the four on half A.
-- The Clef half and the feasibility table follow once the Workers AI token exists and S5c's full run is done (contract §8, §12).
+
+## Clef results (clef-flash and the full 27B, run 2026-10-06; contract §12, §13)
+
+V0 for each Clef model is its S5c 8-way forward file (hashes in §12). Total S5p spend by the driver's ledger: US$1.37 including Jev's estimated US$0.16, under the US$2 cap (Clef from reported tokens at list prices, not reconciled with the bill).
+
+**Half A (cvtune, 500 rows): selection** (choice variants scored on forward order only).
+
+| Variant | Jev | clef-flash | clef 27B |
+|---|---|---|---|
+| V1, noul per candidate, English | 89.2% | 84.0% | 88.2% |
+| V2, structured choice, English | 91.0% | 87.4% | **91.2%**, selected (tie with V4, lower number) |
+| V3, noul per candidate, Chinese | 89.6% | 85.2% | 87.8% |
+| V4, structured choice, Chinese | **91.2%**, selected | **88.2%**, selected | 91.2% |
+
+**Half B (cvtune, 500 rows): the 8 pre-registered tests.**
+
+| Test | Fixed | Broken | Net | p | Verdict |
+|---|---|---|---|---|---|
+| Jev V4 vs V0 | 14 | 5 | +9 | 0.064 | no significant difference |
+| Jev V4 vs rank 1 | 37 | 7 | +30 | 5.3e-06 | candidate for H/S6 |
+| flash V4 vs V0 | 142 | 17 | +125 | 9.5e-26 | prompt improvement holds |
+| flash V4 vs rank 1 | 39 | 19 | +20 | 0.012 | candidate for H/S6 |
+| 27B V2 vs V0 | 70 | 9 | +61 | 7.8e-13 | prompt improvement holds |
+| 27B V2 vs rank 1 | 40 | 7 | +33 | 1.1e-06 | candidate for H/S6 |
+| flash V4 vs Jev V4 | 8 | 18 | −10 | 0.076 | no significant difference |
+| 27B V2 vs Jev V4 | 8 | 5 | +3 | 0.58 | no significant difference |
+
+Report only (not a test): 27B V2 vs flash V4, 19 fixed / 6 broken, p = 0.015.
+
+- The Clef V0 was the 8-way list in rank order, on which both Clef models were strongly order-sensitive (S5c). The structured Chinese and English prompts lift them to Jev's level; the big V4/V2-vs-V0 gains mostly measure V0's weakness.
+- **Flip rate** between the two orders of the chosen choice variant on half B: Jev 9.4%, flash 16.4%, 27B 9.4%.
+- **Public sets (recorded only)**, rank 1 / Jev V4 / flash V4 / 27B V2: dev302 238 / 274 / 277 / 289 of 302; typing76 65 / 71 / 69 / 72 of 76.
+
+**Feasibility (contract §6; numbers from half B of each chosen variant).**
+
+| | Jev (jev-1.13.0) | clef-flash | clef (27B) |
+|---|---|---|---|
+| Accuracy on half B | 91.4% | 89.4% | 92.0% |
+| vs rank 1 | +30 (37/7) | +20 (39/19) | +33 (40/7) |
+| Latency per row (one request), p50 / p95 | 207 / 260 ms | 422 / 921 ms | 806 / 1,443 ms |
+| Cost per 1,000 rows | unverified (no published price) | US$0.043 (tokens x US$0.09/M) | US$0.117 (tokens x US$0.24/M) |
+| Version pinning | response names `jev-1.13.0`; pinning unverified | none (S5c) | none (S5c) |
+| Request limits | unverified | unverified | 65,536-token context (Cloudflare docs) |
+| Open weights / self-host | unverified | unverified | unverified |
+| Data retention and training | unverified | Cloudflare blog: not stored or trained on; docs page has no statement (S5c) | same as flash |
+
+**Reading:**
+- All three are candidates against rank 1 on half B, and none differs significantly from another in the pre-registered tests. 27B has the highest accuracy and the lowest flip rate with Jev, but it is four times slower than Jev.
+- Latencies are from this Mac per request with a fresh TLS connection for Clef; Jev reused one connection.
