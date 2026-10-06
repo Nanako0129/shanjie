@@ -40,3 +40,9 @@
 - `iterate.py` 的錯字統計以字計數，而且只算長度相同的輸出；「嚐→常 ×8」其實是 4 句。
 - `order: 3` 目前會靜默退化成 bigram，因為計數檔沒有 trigram。
 - 加分公式混用兩套 unigram，句尾的 `</s>` 有統計但解碼時沒有計分；這是下一步要修的地方。
+
+## S2n：簡體句轉換與口語計數的輸入（2026-10-05）
+
+- `counts-colloquial3.pkl` 的輸入是 `colloquial-train.txt`（`build_tune.py --part cv` 產生）加 `synth.txt`，各 ×1；用現行轉換重建後 uni／bi／tri／runs 與舊檔逐項相同（S1 版或現行疊加層都相同）。`synth-targeted.txt(.ok)` 不在內。舊的 `colloquial-train.txt` 是修掉 吃→喫 之前產生的。
+- `build_counts.py` 的 `convert` 先判斷簡體句（契約 §2.1），簡體句走全部 STPhrases、第一個對照、台灣用字（`TAIWAN_KEEP` 例外），繁體句維持只轉簡體專用字。`test_convert.py` 是固定字串檢查；`experiments/s2n/` 放挑例外字（`pick_exceptions.py`）、突變（`mutations.py`）、語料量測（`measure_residue.py`）、評測（`evaluate.py`）與模型表面字串量測（`model_surfaces.py`）。
+- 重建用 `S2_WORK=<目錄>` 避免蓋掉舊計數；維基 20 萬篇約 41 ms／篇（單程序），在多核機器上用 `--procs`。數字見 `docs/research-log.md` 2026-10-05 S2n。

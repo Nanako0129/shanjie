@@ -380,6 +380,8 @@ final class ShellTests: XCTestCase {
         b.press(Keys.enter)
         XCTAssertEqual(b.client.text, Row10.formal)
         XCTAssertEqual(a.client.text, "你")
+        // S2h §11: without a left context, as before S2h; 你 as history would make chat pick 期中 like formal.
+        a.client.selectedOverride = NSRange(location: NSNotFound, length: 0)
         a.type(Row10.standardKeys)  // and back: Discord's chat profile again
         a.press(Keys.enter)
         XCTAssertEqual(a.client.text, "你" + Row10.chat)
