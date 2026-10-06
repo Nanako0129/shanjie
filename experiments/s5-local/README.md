@@ -216,3 +216,21 @@ start "" /b /wait /affinity FFF %PY% run_ll_cuda.py --set discordtune --ctx real
 (In a `.bat` file write `%%S`.) Exit 3 on a smoke run means the degeneracy stop fired; `s5k: STOP ...` or `s5k: INPUT ...` are the other stops. The private directory is deleted afterwards whatever the result (`rmdir /s /q %USERPROFILE%\s5k-188\private`, then `dir` to confirm), and only `Q8-ll.*.jsonl` and `meta-188.jsonl` are copied back, per §11.
 
 `score.py` lists `Q8-ll` among the base conditions (paired with A-fwd and J-sent-fwd) and adds `vs_Q-ll=n=... fixed=... broken=... p=...` for `Q8-ll`, `Q8-ll+ctx` and their `@tau` variants: Q8-ll against Q-ll (1.7B), same condition, report only.
+
+### Q8-ll results (run 2026-10-06 on 188, scored on the Mac)
+
+Qwen3-8B (HF commit b968826d), nf4 with bf16 compute, RTX 3070. All sets ran `--ctx none`; discordtune also `--ctx real` (457 rows with a context). Boundary mismatches 0 everywhere. The batch stopped once after dev302 when its ssh session dropped (the next `echo` had no stdout); typing76 and discordtune `real` were rerun with output to a file. dev302 therefore has no `meta-188.jsonl`. Latency per row on discordtune: p50 491 ms, p95 508 ms without context; p50 629 ms with context.
+
+| Condition (discordtune) | All 1,000 rows: acc, fixed/broken, p | Half B: acc, fixed/broken, p | vs Q-ll (1.7B), same condition, all rows |
+|---|---|---|---|
+| Q8-ll | 82.1%, 82/96, p = 0.33 | 82.0%, 37/49 | 66/63 (p = 0.86) |
+| Q8-ll+ctxall | 85.3%, 89/71, p = 0.18 | 85.2%, 40/36 | 62/51 (p = 0.35) |
+| Q8-ll@tau (τ = 0.6309) | 86.3%, 70/42 | 85.8%, 31/24, p = 0.42 | 29/29 (p = 1.0) |
+| **Q8-ll+ctxall@tau** | 88.3%, 76/28 | **87.6%, 34/18, p = 0.037** | 32/21 (p = 0.17); half B 17/15 (p = 0.86) |
+
+Rank-1 baseline: 83.5% on all rows, 84.4% on half B. cvtune (guard): Q8-ll 88.4% (+33, p = 0.0035), Q8-ll@tau 89.5% (+44, p < 0.001); no veto. dev302 92.4% (+41), typing76 88.2% (+2), recorded only.
+
+- **Pre-registered decision (§5):** Q8-ll+ctxall@tau is an S5 candidate (half B p < 0.05 with a positive net, cvtune not vetoed). It is the first condition in S5k to pass. No other Q8-ll setting passes.
+- **Caveats:** about 14 settings are tested at p < 0.05 without correction, so one pass by chance is plausible. Against the 1.7B model under the same condition the 8B is not significantly better (half B 17/15, p = 0.86); Q-ll+ctxall@tau had p = 0.081 on half B, so passing versus not passing is within noise.
+- **Context helps (report only):** on the 457 rows with a context, adding it to Q8-ll fixed 38 and broke 6 (p < 0.0001); 1.7B 32/8.
+- **Cost:** about 0.5–0.6 s per row on a desktop GPU; not usable inside the input method as is.
