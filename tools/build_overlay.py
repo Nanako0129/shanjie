@@ -16,11 +16,15 @@ import urllib.request
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "reference", "proto"))
 sys.path.insert(0, os.path.join(ROOT, "tools"))
+sys.path.insert(0, os.path.join(ROOT, "experiments", "s2"))
+import build_counts as bc  # noqa: E402  S2n：簡體句判斷與轉換
 import build_sandhi  # noqa: E402
 import ime  # noqa: E402
+import readings  # noqa: E402  萌典路徑
 
 BASE = os.path.join(ROOT, "data", "lexicon", "mcbpmf-data.txt")
 OUT = os.path.join(ROOT, "data", "lexicon", "overlay-add.tsv")
+REMOVED = os.path.join(ROOT, "experiments", "s2n", "overlay-removed.tsv")   # S2n：被拿掉的簡體寫法（詞、轉換後的寫法、讀音）
 CACHE = os.path.expanduser("~/.cache/shanjie/sources")
 DUMPS = "https://dumps.wikimedia.org"
 SOURCES = {  # 檔名: (網址, SHA-256)；Wikimedia 2026-10-01 dump 的 sha1 已和官方 sha1sums.txt 比對過
@@ -86,6 +90,11 @@ def sandhi_variant(word, syls):
     return out if out != list(syls) else None
 
 
+def moe_titles():
+    import json
+    return {e["title"] for e in json.load(open(readings.MOEDICT, encoding="utf-8")) if e.get("title")}
+
+
 def build():
     base = ime.Lexicon(BASE)
     words = set(base.by_word)                       # 基底詞表＝解析後（套用 S0 的行過濾）的詞，不分讀音
@@ -111,33 +120,52 @@ def build():
 
     wikt = titles("enwiktionary") | titles("zhwiktionary")
     compounds = {t for t in titles("zhwiki") if t[:-1] in multi or t[1:] in multi}
-    rows = []
-    for w in sorted(wikt | compounds):              # 依詞的 code point 排序；核心照檔案順序接在基底後面
+    rows, removed = [], []
+    cand = wikt | compounds
+    moe = moe_titles()
+    conv = bc.load_conv()
+    # 第一輪：哪些詞條符合 (i)(iii)，目標寫法是什麼；第二輪：目標在基底，或在疊加層而且自己沒被拿掉，才真的拿（避免 A→B、B→C 連鎖後 B 不在了）
+    target = {}
+    for w in cand:
+        if bc.is_simplified(w) and w not in words and w not in moe:
+            w2 = bc.convert(w, *conv)
+            if w2 != w:
+                target[w] = w2
+    for w in sorted(cand):                          # 依詞的 code point 排序；核心照檔案順序接在基底後面
         syls = base.to_syllables(w)
         if syls is None:
             continue
         syls = normalize(w, syls)
+        # S2n §2.2：簡體寫法拿掉。三點都成立才拿：簡體句轉換會變成另一個寫法、新寫法已在基底或疊加層、本身不在基底也不是萌典詞目
+        # （基底的情形 titles() 已排除；後兩點仍明寫，萌典詞目才擋得到「里程」這類）
+        w2 = target.get(w)
+        if w2 and (w2 in words or (w2 in cand and w2 not in target)):
+            removed.append(f"{w}\t{w2}\t{'-'.join(syls)}\n")
+            continue
         src = "wikt" if w in wikt else "zhwiki"
         rows.append(f"{'-'.join(syls)}\t{w}\t{SCORE[len(w)]!r}\t{src}\n")
         var = sandhi_variant(w, syls)
         if var:                                     # 主要列在前，變調列緊接其後（同來源，分數 − VARIANT_PENALTY）
             rows.append(f"{'-'.join(var)}\t{w}\t{round(SCORE[len(w)] - VARIANT_PENALTY, 8)!r}\t{src}\n")
     assert not {r.split("\t")[1] for r in rows} & words   # 疊加層和基底的詞表交集必須是 0
-    return rows
+    assert not {r.split("\t")[0] for r in removed} & {r.split("\t")[1] for r in removed}   # 新寫法本身不能也被拿掉
+    return rows, removed
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--check", action="store_true")
-    rows = build()
+    rows, removed = build()
     if ap.parse_args().check:
-        same = open(OUT, encoding="utf-8").readlines() == rows
-        print(f"{len(rows)} rows; {'matches' if same else 'DIFFERS FROM'} {os.path.relpath(OUT, ROOT)}")
+        same = open(OUT, encoding="utf-8").readlines() == rows and open(REMOVED, encoding="utf-8").readlines() == removed
+        print(f"{len(rows)} rows, {len(removed)} removed; {'matches' if same else 'DIFFERS FROM'} {os.path.relpath(OUT, ROOT)} and {os.path.relpath(REMOVED, ROOT)}")
         sys.exit(0 if same else 1)
-    with open(OUT + ".tmp", "w", encoding="utf-8") as f:
-        f.writelines(rows)
-    os.replace(OUT + ".tmp", OUT)
-    print(f"wrote {len(rows)} rows to {os.path.relpath(OUT, ROOT)}")
+    os.makedirs(os.path.dirname(REMOVED), exist_ok=True)
+    for path, lines in ((OUT, rows), (REMOVED, removed)):
+        with open(path + ".tmp", "w", encoding="utf-8") as f:
+            f.writelines(lines)
+        os.replace(path + ".tmp", path)
+    print(f"wrote {len(rows)} rows to {os.path.relpath(OUT, ROOT)}, {len(removed)} removed rows to {os.path.relpath(REMOVED, ROOT)}")
 
 
 if __name__ == "__main__":
