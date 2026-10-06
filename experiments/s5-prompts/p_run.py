@@ -35,7 +35,7 @@ JEV_KEY_FILE = "~/.config/typesafe/api_key"
 CLEF_V0_SHA = "fa53ba7ccc67d217c5019896539a2dceced13f4be72d7d0fec54926ed834e074"  # recorded 2026-10-06
 CLEF_V0_PATH = os.path.join(R.C_CACHE, "cvtune", "clef-sent-fwd.jsonl")
 # contract section 13: the 27B's own V0 (clef27- prefix). None until main records it in section 12 after the S5c section 10 cvtune run.
-CLEF27_V0_SHA = None
+CLEF27_V0_SHA = "3a7c3c963454d99fc5a11a943138815b4fe5cd3ee95672c4b32ffbb3d4328079"  # recorded 2026-10-06 (S5c section 10 cvtune run)
 CLEF27_V0_PATH = os.path.join(R.C_CACHE, "cvtune", "clef27-sent-fwd.jsonl")
 PRICE = {"clef": R.PRICE_PER_TOKEN, "clef27": R.PRICE_27B}  # USD per input token; Jev is priced per question below
 VARIANTS = {"v1": ["v1"], "v2": ["v2f", "v2r"], "v3": ["v3"], "v4": ["v4f", "v4r"]}

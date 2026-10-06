@@ -110,8 +110,8 @@ class Caps27(unittest.TestCase):  # (f')
 class V0Check27(unittest.TestCase):  # (h')
     def test_unset_exits_nonzero_before_any_request_or_key(self):
         calls = []
-        self.assertIsNone(P.CLEF27_V0_SHA)  # the shipped constant is unset until main records it
-        code, _, _ = run27(A27(), lambda p, h, b: calls.append(1), env={}, v0=False)
+        with mock.patch.object(P, "CLEF27_V0_SHA", None):  # as before main recorded the hash
+            code, _, _ = run27(A27(), lambda p, h, b: calls.append(1), env={}, v0=False)
         self.assertEqual((code, calls), ("s5p: Clef27 V0 hash is not recorded in contract section 12 yet", []))
 
     def test_mismatch_and_missing_exit_nonzero_before_any_request(self):
