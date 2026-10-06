@@ -755,8 +755,8 @@ Willseed 在 Discord 分享命名實體辨識（NER）的入門文章（iThome �
   | wikitune 切尾 | chat | 2,705 | 2,374 | 2,479 | 143 | 38 | 1.6e-15 |
   | wikitune 切尾 | formal | 2,705 | 2,379 | 2,474 | 163 | 68 | 3.5e-10 |
 
-- **守門沒有否決**：dev302、typing76 的第一名完全不變（有前文的 70／58 列都沒變），錯字回報 +1。
-- **停止條件一**：「好」之後打 ㄅㄚ˙ 變成「爸」，不是「吧」（「走吧」「對吧」都對）。原因和「後道」相同：詞庫有「好吧」（訓練語料出現 509 次，被切成一個詞），所以 c(好,吧) = 0，c(好,爸) = 23。
+- **守門沒有否決**：dev302、typing76 的第 1 名正確數不變（修好 0、弄壞 0）；第一名字串有變的列：dev302 聊天 1、書面 1，typing76 聊天 1、書面 2（都是從錯的換成另一個錯的）。錯字回報（當時 30 列的版本）+1。
+- **停止條件一**：「好」之後打 ㄅㄚ˙ 變成「爸」，不是「吧」（「走吧」「對吧」都對）。原因和「後道」相同：詞庫有「好吧」（模型裡「好吧」的 unigram 509 次，被切成一個詞），模型中 c(好,吧) = 0、c(好,爸) = 23（模型只存 ≥ 2 次的二元組，所以 0 代表訓練時少於 2 次）。
 - **停止條件二**：S4 的兩個測試（`empty_learner_matches_goldens`、`global_eps_table`）原本就先設前文再解碼，規則改變了它們的結果；契約規定不得修改，所以停下。
 - 其他回報形狀：「我昨天」之後的「試了一下」修好；「我們／不如」之後的「照建議」聊天都對、書面「我們」對、「不如」仍是「趙建議」；「我」之後的「試了」變成「事了」。
 - **決定（使用者）**：先不合併，等修切分的新 n-gram 模型做出來再用新模型重測；修切分要找能一次解決這一類問題的方法。實作留在 worktree `shanjie-s2h`，沒有 commit。
@@ -767,6 +767,7 @@ Willseed 在 Discord 分享命名實體辨識（NER）的入門文章（iThome �
 
 - 要的是「給定文字」每個 token 的對數機率（像 S5k 本機的做法），不是模型生成的 token。
 - 文件寫明支援：Together AI（`/completions` 的 `echo` 加 `logprobs`）。可能支援但沒寫清楚：DeepInfra。一定可以但要自己開 GPU：Fireworks（`echo_last`）。
-- 不支援：Cloudflare Workers AI、OpenRouter、Groq、Gemini、阿里雲（只有生成 token）、Friendli serverless（文件沒有 `echo`）、OpenAI（echo 加 logprobs 已停用）。
+- 不支援（研究 agent 讀文件）：Cloudflare Workers AI、OpenRouter、Groq、Gemini、Novita（文件沒有 `echo`）、OpenAI（echo 加 logprobs 已停用）；阿里雲只讀到搜尋摘要，寫的是只有生成 token。
+- Friendli serverless（main 讀文件 `friendli.ai/docs/openapi/serverless/completions`）：`logprobs` 只對生成的 token，文件沒有 `echo`。
 - **Cerebras 實測**（main，一次請求，8 個 token）：`/v1/completions` 加 `echo: true, logprobs: 1, max_tokens: 1`，回應把輸入原樣帶回來，但 `tokens` 只有生成的 1 個 token，輸入的 7 個 token 沒有對數機率。所以 Cerebras 不能用。
 - 決定：先在 188 的 GPU 上跑較大的本機模型；雲端要等開 Together 或 DeepInfra 的帳號。
