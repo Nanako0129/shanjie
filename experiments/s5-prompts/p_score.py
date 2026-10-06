@@ -1,7 +1,7 @@
 """S5p scorer (offline), contract section 5.
 
   p_score.py select                       A half: whole-sentence accuracy of V1-V4 per provider, best variant (ties to the lower number)
-  p_score.py test --jev vN --clef vN      B half: exactly the 5 pre-named tests, plus flip rate and latency/cost for the report
+  p_score.py test --jev vN --clef vN      B half: exactly the 5 (jev+clef) or 8 (all three providers) pre-named tests, plus flip rate and latency/cost for the report
 
 V0 files are hash checked: Jev's through clef_run.verified_text, Clef's against p_run.CLEF_V0_SHA.
 Nothing here prints sentence text.
@@ -28,15 +28,16 @@ def v0_picks(provider):
     if provider == "jev":
         text = R.verified_text("cvtune", "jev-sent-fwd.jsonl")
     else:
-        P.check_clef_v0()
-        with open(P.CLEF_V0_PATH, encoding="utf-8") as f:
+        path = P.CLEF_V0_PATH if provider == "clef" else P.CLEF27_V0_PATH
+        (P.check_clef_v0 if provider == "clef" else P.check_clef27_v0)()
+        with open(path, encoding="utf-8") as f:
             text = f.read()
     out = {}
     for l in text.split("\n"):
         if l.strip():
             r = json.loads(l)
             for key, n in zip(r["keys"], range(len(r["keys"]))):
-                j = r["picks"][n] if provider == "clef" else int(r["answers"][n]["choice"][1:]) - 1
+                j = r["picks"][n] if provider != "jev" else int(r["answers"][n]["choice"][1:]) - 1
                 if j is not None:
                     out[int(key)] = j
     return out
@@ -59,9 +60,9 @@ def half(rows, h):
     return [k for k, r in enumerate(rows) if r["half"] == h]
 
 
-def select(rows, L):
+def select(rows, L, provs=("jev", "clef")):
     ks, best = half(rows, "A"), {}
-    for prov in ("jev", "clef"):
+    for prov in provs:
         accs = {}
         for v in ("v1", "v2f", "v3", "v4f"):  # choice variants: forward only
             accs[v] = sum(correct(rows, ks, variant_picks(prov, v, rows, ks), L).values()) / len(ks)
@@ -82,9 +83,9 @@ def word(r, better, worse, same):
 
 def pct_cost(provider, rs, nrows):
     lat = [r["secs"] * 1000 for r in rs.values()]
-    if provider == "clef":
-        usd = sum(r["tokens"] for r in rs.values()) * R.PRICE_PER_TOKEN
-        note = "tokens x 0.09/M" + (" (token counts estimated from characters)" if any(r["tok_est"] for r in rs.values()) else "")
+    if provider in P.PRICE:
+        usd = sum(r["tokens"] for r in rs.values()) * P.PRICE[provider]
+        note = f"tokens x {P.PRICE[provider] * 1e6:.2f}/M" + (" (token counts estimated from characters)" if any(r["tok_est"] for r in rs.values()) else "")
     else:
         usd = sum(r["nq"] for r in rs.values()) * P.JEV_USD_PER_Q
         note = "ESTIMATE from S5j's J1 rate (price unverified)"
@@ -117,11 +118,15 @@ def test(rows, L, chosen):
         p50, p95, per1k, note = pct_cost(prov, rs, len(rs))
         print(f"{prov} {base} B-half: acc={sum(ok[prov].values()) / len(ks):.4f} ties={ties} flip={flip} "
               f"lat_ms_p50={p50} p95={p95} usd_per_1000_requests={per1k:.4f} ({note})")
-    if len(ok) == 2:
-        f, b, p, _ = s5.mcnemar([ok["jev"][k] for k in ks], [ok["clef"][k] for k in ks])
-        r = {"p": p, "net": f - b}
-        print(f"clef vs jev: n={len(ks)} fixed={f} broken={b} net={f - b} p={p:.4g} -> "
-              f"{word(r, 'Clef better than Jev', 'Clef worse than Jev', 'no significant difference')}")
+    for prov, label in (("clef", "Clef"), ("clef27", "Clef 27B")):  # the 2 pre-named Jev-vs-Clef tests (section 13)
+        if "jev" in ok and prov in ok:
+            f, b, p, _ = s5.mcnemar([ok["jev"][k] for k in ks], [ok[prov][k] for k in ks])
+            r = {"p": p, "net": f - b}
+            print(f"{prov} vs jev: n={len(ks)} fixed={f} broken={b} net={f - b} p={p:.4g} -> "
+                  f"{word(r, label + ' better than Jev', label + ' worse than Jev', 'no significant difference')}")
+    if "clef" in ok and "clef27" in ok:  # report only, never a test: no " vs " in the line
+        f, b, p, _ = s5.mcnemar([ok["clef"][k] for k in ks], [ok["clef27"][k] for k in ks])
+        print(f"report-only flash->27B (not a test): n={len(ks)} fixed={f} broken={b} net={f - b} p={p:.4g}")
 
 
 def main(argv=None):
@@ -129,12 +134,14 @@ def main(argv=None):
     ap.add_argument("cmd", choices=("select", "test"))
     ap.add_argument("--jev", choices=("v1", "v2", "v3", "v4"))
     ap.add_argument("--clef", choices=("v1", "v2", "v3", "v4"))
+    ap.add_argument("--clef27", choices=("v1", "v2", "v3", "v4"))
+    ap.add_argument("--providers", default="jev,clef,clef27", help="select: which providers' A-half files to score")
     a = ap.parse_args(argv)
     rows, L = R.load_rows("cvtune"), s5.lenient_fn()
     if a.cmd == "select":
-        select(rows, L)
+        select(rows, L, tuple(a.providers.split(",")))
     else:
-        chosen = {p: v for p, v in (("jev", a.jev), ("clef", a.clef)) if v}
+        chosen = {p: v for p, v in (("jev", a.jev), ("clef", a.clef), ("clef27", a.clef27)) if v}
         if not chosen:
             R.die("give --jev and/or --clef")
         test(rows, L, chosen)

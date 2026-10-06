@@ -1,6 +1,6 @@
 """S5p driver (docs/contracts/s5p-cloud-prompts.md): prompt variants V1-V4 on Jev (jev-1.13.0) or Clef-flash.
 
-  p_run.py --provider jev|clef --sets S[,S] [--half A|B] [--variants v1,v2,v3,v4] [--limit N]
+  p_run.py --provider jev|clef|clef27 --sets S[,S] [--half A|B] [--variants v1,v2,v3,v4] [--limit N]
   p_run.py --print-request          V1-V4 request JSON for dev302 row 0 (CC0), no key, no network
   p_run.py --check-examples         example-sentence overlap check, exit 1 on any hit
 
@@ -34,6 +34,10 @@ JEV_KEY_FILE = "~/.config/typesafe/api_key"
 # contract section 12: SHA-256 of ~/.cache/shanjie/work/s5-clef/cvtune/clef-sent-fwd.jsonl. None until main fills it in.
 CLEF_V0_SHA = "fa53ba7ccc67d217c5019896539a2dceced13f4be72d7d0fec54926ed834e074"  # recorded 2026-10-06
 CLEF_V0_PATH = os.path.join(R.C_CACHE, "cvtune", "clef-sent-fwd.jsonl")
+# contract section 13: the 27B's own V0 (clef27- prefix). None until main records it in section 12 after the S5c section 10 cvtune run.
+CLEF27_V0_SHA = None
+CLEF27_V0_PATH = os.path.join(R.C_CACHE, "cvtune", "clef27-sent-fwd.jsonl")
+PRICE = {"clef": R.PRICE_PER_TOKEN, "clef27": R.PRICE_27B}  # USD per input token; Jev is priced per question below
 VARIANTS = {"v1": ["v1"], "v2": ["v2f", "v2r"], "v3": ["v3"], "v4": ["v4f", "v4r"]}
 
 # ---------------------------------------------------------------- texts (contract section 4, verbatim)
@@ -120,8 +124,8 @@ def spent(dirs):
         for f in glob.glob(os.path.join(d, "*-v*.jsonl")):
             prov = os.path.basename(f).split("-")[0]
             for r in read_recs(f):
-                if prov == "clef":
-                    usd += r["tokens"] * R.PRICE_PER_TOKEN
+                if prov in PRICE:
+                    usd += r["tokens"] * PRICE[prov]
                 else:
                     usd += r["nq"] * JEV_USD_PER_Q
                     jev_req += 1
@@ -155,11 +159,11 @@ def read_key_file():
 
 def make_client(provider, post, sleep):
     """Keys are read here, after the allowlist and the hash checks."""
-    if provider == "clef":
+    if provider in PRICE:
         token, account = os.environ.get("CF_AI_TOKEN"), os.environ.get("CF_ACCOUNT_ID")
         if not token or not account:
             die("CF_AI_TOKEN and CF_ACCOUNT_ID must be set in the environment")
-        return R.Client(token, account, post or R.default_post, sleep)
+        return R.Client(token, account, post or R.default_post, sleep, "clef" if provider == "clef27" else R.MODEL)
     key = os.environ.get("TYPESAFE_API_KEY")
     if not key:
         try:
@@ -174,17 +178,26 @@ def make_client(provider, post, sleep):
     return c
 
 
-def check_clef_v0():
-    """Contract section 12: refuse to run until the hash is recorded, and exit non-zero when the file differs."""
-    if CLEF_V0_SHA is None:
-        die("Clef V0 hash is not recorded in contract section 12 yet")
+def _check_v0(sha, path, label, fname):
+    if sha is None:
+        die(f"{label} V0 hash is not recorded in contract section 12 yet")
     try:
-        with open(CLEF_V0_PATH, "rb") as f:
-            ok = hashlib.sha256(f.read()).hexdigest() == CLEF_V0_SHA
+        with open(path, "rb") as f:
+            ok = hashlib.sha256(f.read()).hexdigest() == sha
     except OSError:
         ok = False
     if not ok:
-        die("input clef-sent-fwd.jsonl missing or hash mismatch")
+        die(f"input {fname} missing or hash mismatch")
+
+
+def check_clef_v0():
+    """Contract section 12: refuse to run until the hash is recorded, and exit non-zero when the file differs."""
+    _check_v0(CLEF_V0_SHA, CLEF_V0_PATH, "Clef", "clef-sent-fwd.jsonl")
+
+
+def check_clef27_v0():
+    """Contract section 13: the same check for the 27B's own V0 constant and path."""
+    _check_v0(CLEF27_V0_SHA, CLEF27_V0_PATH, "Clef27", "clef27-sent-fwd.jsonl")
 
 
 # ---------------------------------------------------------------- run
@@ -215,7 +228,7 @@ def run_variant(provider, variant, rows, d, client, half, state):
             state["jev_req"] += 1
             state["usd"] += len(qs) * JEV_USD_PER_Q
         else:
-            state["usd"] += tok * R.PRICE_PER_TOKEN
+            state["usd"] += tok * PRICE[provider]
         if (total >= R.PARSE_CHECK_MIN or n + 1 == len(todo)) and fails / total > 0.01:
             raise R.Stop(f"parse failures above 1% in {variant} ({fails}/{total})")
     print(f"{provider} {os.path.basename(d)} {variant}: requests_new={len(todo)} spent_usd_est={state['usd']:.4f} "
@@ -248,7 +261,7 @@ def smoke_report(provider, d, variants):
 
 def main(argv=None, post=None, sleep=time.sleep, rows_for=R.load_rows, out_for=out_dir, dirs_for=known_dirs):
     ap = argparse.ArgumentParser()
-    ap.add_argument("--provider", choices=("jev", "clef"))
+    ap.add_argument("--provider", choices=("jev", "clef", "clef27"))
     ap.add_argument("--sets")
     ap.add_argument("--half", choices=("A", "B"))
     ap.add_argument("--variants", default="v1,v2,v3,v4")
@@ -279,6 +292,8 @@ def main(argv=None, post=None, sleep=time.sleep, rows_for=R.load_rows, out_for=o
     vs = [v for x in a.variants.split(",") for v in VARIANTS[x]]
     if a.provider == "clef":
         check_clef_v0()
+    elif a.provider == "clef27":
+        check_clef27_v0()
     rows = {s: rows_for(s) for s in sets}  # hashes verified here
     client = make_client(a.provider, post, sleep)
     for s in sets:
