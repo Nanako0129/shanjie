@@ -93,6 +93,12 @@ def test_count_batch_mw():
     assert bc._W["mw"] is None
 
 
+def test_tw_forms():
+    """契約 §7：MW 轉完再換台灣字形；臺 保留。突變：convert() 不套 tw_forms()，第一條失敗（main 2026-10-06 跑過）。"""
+    assert mwconv.convert("这是爲了説明裏面", mw()) == "這是為了說明裡面"
+    assert mwconv.convert("臺北", mw()) == "臺北"
+
+
 def test_mwdata_parsers():
     lua = """local Item = require('Module:CGroup/core').Item;
 -- Item('註解', 'zh-cn:不要; zh-tw:不要;'),

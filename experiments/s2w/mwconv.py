@@ -93,7 +93,20 @@ def prefix(text, mw, groups=True, site=True):
     return "".join(out)
 
 
+_TW_FORMS = []
+
+
+def tw_forms():
+    """契約 §7：build_counts.VARIANTS（爲→為、裏→裡、説→說…）的轉換表，同一個常數、不另抄；不含 臺→台。"""
+    if not _TW_FORMS:
+        import sys
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "s2"))
+        import build_counts
+        _TW_FORMS.append(str.maketrans(build_counts.VARIANTS))
+    return _TW_FORMS[0]
+
+
 def convert(text, mw, groups=True, site=True):
-    """text 已還原 HTML 實體。回傳 zhconv-rs 轉完的全文（尚未刪模板與標記）。"""
+    """text 已還原 HTML 實體。回傳 zhconv-rs 轉完、再換成台灣字形（§7）的全文（尚未刪模板與標記）。"""
     import zhconv_rs
-    return zhconv_rs.zhconv(prefix(text, mw, groups, site) + text, "zh-tw", True)
+    return zhconv_rs.zhconv(prefix(text, mw, groups, site) + text, "zh-tw", True).translate(tw_forms())
