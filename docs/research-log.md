@@ -771,3 +771,7 @@ Willseed 在 Discord 分享命名實體辨識（NER）的入門文章（iThome �
 - Friendli serverless（main 讀文件 `friendli.ai/docs/openapi/serverless/completions`）：`logprobs` 只對生成的 token，文件沒有 `echo`。
 - **Cerebras 實測**（main，一次請求，8 個 token）：`/v1/completions` 加 `echo: true, logprobs: 1, max_tokens: 1`，回應把輸入原樣帶回來，但 `tokens` 只有生成的 1 個 token，輸入的 7 個 token 沒有對數機率。所以 Cerebras 不能用。
 - 決定：先在 188 的 GPU 上跑較大的本機模型；雲端要等開 Together 或 DeepInfra 的帳號。
+
+## 2026-10-06：刪除實驗分支 `feat/native-candidates`
+
+S3b-2 試用系統候選面板的註解與網格（兩個 wip commit：d04e7a7、3a716f6，沒有推上 GitHub）。已被自繪的玻璃候選列與候選網格（#29、#36）取代，使用者 2026-10-06 同意刪除。
