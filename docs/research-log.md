@@ -874,3 +874,15 @@ S3b-2 試用系統候選面板的註解與網格（兩個 wip commit：d04e7a7�
 - **實打對照表**：`eval/bench/static/typing-test.json` 從 `docs/typing-test.md` 的自動打字表抄 27 格，`tools/bench.py check-static` 逐格依行號、欄位、「／」前後比對通過；改一格就失敗。新聞那組的 294 句寫在組名裡，因為那一行第一個數字是網址裡的 3。
 - **基準線**：10/05 用真實資料量的 v0.1.0–v0.1.2（`eval/bench/results/2026-10-05-baseline.json`）一併進 repo；`docs/benchmark.md` 由 `table` 產生（這個檔案第一次 commit，沒有舊版可比）；`test_version_rows_and_holdout_table_unchanged` 確認拿掉參考列與實打對照後，版本列與保留集的表和不帶它們時產生的完全相同。
 - 套件 v1 仍釘 model-v1；model-v2 出貨時另寫套件 v2，並請使用者排時間做第一次里程碑實打。
+
+## 2026-10-06：S2w 前置調查，zhconv-rs 與維基的公共轉換組
+
+使用者決定 S2n 合併後馬上做 S2w。先查 PLAN 標為未確認的一點：zhconv-rs 會不會展開 NoteTA 引用的公共轉換組。只讀原始碼與線上頁面，沒有安裝或執行。
+
+- **不會**：zhconv-rs（最新發佈 0.4.2）不解析 `{{NoteTA}}`，也不帶 CGroup 資料；repo 裡的 `data/cgroups/` 只給網頁版用，`ZhConverterBuilder::cgroup()` 是註解掉的。
+- **會處理的**：條目內的 `-{…}-`，含 `H`（隱藏並加入全文規則）、`A`、`-`、`R`、`D`、`T` 等旗標；`H`／`A` 規則不分位置套用全文（MediaWiki 只影響規則之後的文字）。遇到不認得的旗標字元，整段規則會原樣輸出。抽全文規則的 regex 不跨行。
+- **公共轉換組在 dump 裡**：2026-09-01 的 pages-articles 索引有 1,000 個 `Module:CGroup/*` 標題、723 個 `Template:CGroup/*`，以及 `Module:NoteTA` 與 `MediaWiki:Conversiontable/*`（含重新導向與子頁面）。實際可用的群組約 750 個，授權 CC BY-SA 4.0。
+- **站上轉換表**：`MediaWiki:Conversiontable/zh-tw` 約 179 條（例如 通用电气 => 奇異），zhconv-rs 沒有載入。
+- **內建表的版本**：0.4.2 是 MediaWiki master `ecf4342132`（2026-02-05）；之後三次官方表更新只在尚未發佈的 main（0.5.0）。
+- **補法**：照 `Module:NoteTA` 的做法，從同一份 dump 讀出群組規則與站上轉換表，寫成 `-{H|…}-` 加在每篇文章開頭，再交給 zhconv-rs 轉換；要先轉換再刪標記。
+- **使用者決定**：裝 PyPI 的 0.4.2（Mac 與 188 都有現成 wheel），研究紀錄寫明表的版本；0.5.0 發佈後是否重跑另外決定。契約 `docs/contracts/s2w-mediawiki-zhtw.md`。
