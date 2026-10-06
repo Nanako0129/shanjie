@@ -775,3 +775,13 @@ Willseed 在 Discord 分享命名實體辨識（NER）的入門文章（iThome �
 ## 2026-10-06：刪除實驗分支 `feat/native-candidates`
 
 S3b-2 試用系統候選面板的註解與網格（兩個 wip commit：d04e7a7、3a716f6，沒有推上 GitHub）。已被自繪的玻璃候選列與候選網格（#29、#36）取代，使用者 2026-10-06 同意刪除。
+
+## 2026-10-06：S-bench 修訂一與落地
+
+使用者要基準測試參考小麥注音。依 Fable 5.1 的分析，選了「unigram 列＋靜態表＋里程碑實打」，契約 `docs/contracts/sbench.md` §7（三輪 plan-verifier 後 READY）。
+
+- **CLI**：unigram 路徑加 `--rows`／`--dump`（beam 64）。新 golden `eval/golden/sbench-unigram-typing76.txt` 由 `reference/proto/unigram_eval.py` 產生，Rust 第一次就逐位元組相同（含分數）。
+- **小麥資料基準列**（`tools/bench.py reference`，commit `8418c4f`，只用小麥基底詞庫的 unigram）：dev302 160/302（52.98%）、typing76 48/76（63.16%）、probe 37/83、cvtune 2,643/3,677（71.88%）、wikitune 1,191/2,733（43.58%）、discordtune 3,820/4,958（77.05%）。對照 v0.1.2：dev302 78.81%、typing76 85.53%、cvtune 84.88%、wikitune 68.06%、discordtune 84.15%。typing76 的 48 句和打字測驗裡「善解 unigram 錯 29 句」（47 句對）只差 1 句；差異的原因沒有查（推論是寬鬆對照的規則不同）。
+- **實打對照表**：`eval/bench/static/typing-test.json` 從 `docs/typing-test.md` 的自動打字表抄 27 格，`tools/bench.py check-static` 逐格依行號、欄位、「／」前後比對通過；改一格就失敗。新聞那組的 294 句寫在組名裡，因為那一行第一個數字是網址裡的 3。
+- **基準線**：10/05 用真實資料量的 v0.1.0–v0.1.2（`eval/bench/results/2026-10-05-baseline.json`）一併進 repo；`docs/benchmark.md` 由 `table` 產生（這個檔案第一次 commit，沒有舊版可比）；`test_version_rows_and_holdout_table_unchanged` 確認拿掉參考列與實打對照後，版本列與保留集的表和不帶它們時產生的完全相同。
+- 套件 v1 仍釘 model-v1；model-v2 出貨時另寫套件 v2，並請使用者排時間做第一次里程碑實打。
