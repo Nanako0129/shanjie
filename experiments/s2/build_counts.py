@@ -7,6 +7,7 @@
 import argparse
 import bz2
 import collections
+import hashlib
 import math
 import os
 import pickle
@@ -22,18 +23,52 @@ OUT = os.environ.get("S2_WORK") or os.path.expanduser("~/.cache/shanjie/work/s2"
 DUMP = os.path.join(SRC, "zhwiki-20261001-pages-articles.xml.bz2")
 
 
+def _checked(name, sha):
+    """讀 OpenCC 檔之前核對 SHA-256（同一個 OpenCC commit 3ac34aa…；寫在 docs/PLAN.md 的來源表）。"""
+    path = os.path.join(SRC, "opencc", name)
+    got = hashlib.sha256(open(path, "rb").read()).hexdigest()
+    if got != sha:
+        sys.exit(f"SHA-256 mismatch for OpenCC {name}: {got}")
+    return path
+
+
+# S2f 契約 §2.1：台灣字形表。TWVariants.txt 每條取第一個值；排除 4 條（詞庫的成對詞偏好不在轉換後的寫法：
+# 污 32:2、癡 12:4、樑 9:9、蔘 1:2，Fable 2026-10-07 逐條對照）；k==v 的恆等列（梁）略過。
+TW_VARIANTS_EXCLUDED = {"污", "癡", "樑", "蔘"}
+
+
+def _load_tw_variants():
+    out = {}
+    for line in open(_checked("TWVariants.txt", "245b94eb5842957e735dd44b7e7d4ff469a3643126cc8fa511adda5281e9cb86"), encoding="utf-8"):
+        p = line.rstrip("\n").split("\t")
+        if len(p) == 2 and not line.startswith("#"):
+            v = p[1].split(" ")[0]
+            if v != p[0] and p[0] not in TW_VARIANTS_EXCLUDED:
+                out[p[0]] = v
+    return out
+
+
+TW_VARIANTS = _load_tw_variants()   # 定義一次；build_overlay.py、build_tune.py（經 build_counts）與之後的 S2w 都用這一個
+# 繁體句的簡體專用字要再扣掉的字：OpenCC 沒有換回、但基底詞庫有 5 條以上用到（S2f 契約 §2.2）
+TRAD_KEEP = set("秘庄晒霉虱么肴洒痒")
+
+
 def load_conv():
     """回傳 (詞組表, 字表, 最長詞組)，給「繁體句」用。只收「簡體專用字」：本身也是正確繁體的字（例：吃、后、里、游）不轉，
     否則會把原本正確的繁體字改掉（2026-10-03 的 bug：吃→喫、后→後、里→裏）。詞組只在含簡體專用字時才收。
     S2n：同時填好「簡體句」用的全域表（SIMP_*、MARKERS、TRAD_ONLY），見 convert()。"""
     simp_only, phrase, char = set(), {}, {}
     keys, vals, first_char, simp_phrase = set(), set(), {}, {}
-    for line in open(os.path.join(SRC, "opencc", "STCharacters.txt"), encoding="utf-8"):
+    for line in open(_checked("STCharacters.txt", "a0ca1601c70648cf48b33c3c6210ccbecc5c7eead4b4c3daf76587ba2c03582b"), encoding="utf-8"):
         p = line.rstrip("\n").split("\t")
         if len(p) == 2 and not line.startswith("#"):   # 檔頭的 `# Format: key<TAB>value(s)` 不是對照
             keys.add(p[0]); vals.update("".join(p[1].split(" "))); first_char[p[0]] = p[1].split(" ")[0]
             if p[0] not in p[1].split(" "):
-                simp_only.add(p[0]); char[p[0]] = p[1].split(" ")[0]
+                simp_only.add(p[0])
+    # S2f §2.2：繁體句用縮小後的簡體專用字（扣掉 TW_VARIANTS 的目標字與 TRAD_KEEP）；SIMP_ONLY（簡繁判斷）仍用完整集合
+    trad_simp_only = simp_only - set(TW_VARIANTS.values()) - TRAD_KEEP
+    for c in trad_simp_only:
+        char[c] = first_char[c]
     for f in ["STPhrases.txt", "TWPhrases.txt"]:
         for line in open(os.path.join(SRC, "opencc", f), encoding="utf-8"):
             if line.startswith("#") or "\t" not in line:
@@ -43,12 +78,13 @@ def load_conv():
                 TW_PHRASE[k] = v.split(" ")[0]
             else:
                 simp_phrase[k] = v.split(" ")[0]
-                if any(c in simp_only for c in k):
+                if any(c in trad_simp_only for c in k):
                     phrase[k] = v.split(" ")[0]
     char.update(VARIANTS)
     SIMP_PHRASE.clear(); SIMP_PHRASE.update(simp_phrase)
     SIMP_CHAR.clear(); SIMP_CHAR.update({c: (c if c in TAIWAN_KEEP else v) for c, v in first_char.items()})
     MARKERS.clear(); MARKERS.update(c for c, v in first_char.items() if c != v)   # 標記字：第一個對照不是自己（含 后、于、里 這類）
+    TRAD_SIMP_ONLY.clear(); TRAD_SIMP_ONLY.update(trad_simp_only)                  # 繁體句的簡體專用字（縮小後）；build_overlay.py 也用
     SIMP_ONLY.clear(); SIMP_ONLY.update(simp_only)                                 # 簡體專用字：對照裡不含自己
     TRAD_ONLY.clear(); TRAD_ONLY.update(first_char[c] for c in MARKERS)            # 繁體專用字：標記字的第一個對照（像、待、座 不在其中）
     SIMP_MAXP[0] = max(map(len, simp_phrase))
@@ -62,12 +98,18 @@ VARIANTS = {"爲": "為", "衆": "眾", "綫": "線", "麪": "麵", "僞": "偽"
 
 # S2n 簡體句用的表（load_conv 填）：全部 STPhrases、STCharacters 第一個對照、簡體專用字、繁體專用字
 SIMP_PHRASE, SIMP_CHAR, MARKERS, SIMP_ONLY, TRAD_ONLY, SIMP_MAXP = {}, {}, set(), set(), set(), [0]
+TRAD_SIMP_ONLY = set()
 # 台灣用字例外（S2n 契約 §2.1）：簡體句的字表這一步保留原字，不換成 STCharacters 的第一個對照（吃→喫、岩→巖 在台灣不是正確用字）。
 # 挑法：2026-10-05 在維基前 25,000 篇被判為繁體句的句子裡，原字出現次數 >= 3 倍第一個對照、且原字 >= 30 次；
 # 比例 吃 28.8、皂 78.5、唇 12.2、岩 9.1、岳 5.0、咸 3.4（experiments/s2n/pick_exceptions.py，輸出在契約 §2.1）。
 # 后 于 里 台 干 余 不在此列：契約表明定要轉。詞組那一步照舊，所以 岩石、范围 這類由詞組決定。
-TAIWAN_KEEP = set("吃皂唇岩岳咸")
+TAIWAN_KEEP = set("吃皂唇岩岳咸秘")   # S2f：加 秘（簡體句保留，秘／祕 由 build_lm 的合併與詞庫分數決定）
+# S2f §2.4：build_lm 合併同讀音異體寫法的字表（週／周、唸／念、嚐／嘗、它／牠、妳 台灣用法有分工，不在其中）；build_overlay 的 §2.5 也用（再加 TW_VARIANTS）
+MERGE = {**VARIANTS, "佔": "占", "佈": "布", "祕": "秘", "臺": "台", "牀": "床", "汙": "污"}
 TW_CHAR = {**VARIANTS, "臺": "台"}   # 簡體句轉完後整句套一遍的台灣用字
+# S2f §2.3：全部轉換完（含 TWPhrases）之後再套一層；兩種句子各一張表（繁體句不套 臺→台）。重疊的 9 條方向相同（test_convert 檢查）
+POST_SIMP = {**TW_VARIANTS, **TW_CHAR}
+POST_TRAD = {**TW_VARIANTS, **VARIANTS}
 
 
 TW_PHRASE, TW_MAXP = {}, [1]   # 台灣用詞（TWPhrases，鍵是繁體詞組），在簡轉繁之後第二遍套用
@@ -104,16 +146,16 @@ def is_simplified(text):
 
 def convert(text, phrase, char, maxp):
     """簡體句（S2n）：全部 STPhrases 最長優先，沒蓋到的字用 STCharacters 第一個對照，整句再套台灣用字（VARIANTS、臺→台）。
-    其他句（繁體句，含簡繁夾雜）：只轉簡體專用字。兩種都再套台灣用詞。"""
-    src = text
-    if is_simplified(text):
+    其他句（繁體句，含簡繁夾雜）：只轉縮小後的簡體專用字（S2f）。兩種都再套台灣用詞，最後套台灣字形表（S2f §2.3）。"""
+    simp = is_simplified(text)
+    if simp:
         text = "".join(TW_CHAR.get(c, c) for c in _longest(text, SIMP_PHRASE, SIMP_MAXP[0], SIMP_CHAR))
     else:
         # 第三次重建：詞組輸出與字表輸出（为→爲）都還帶著 STCharacters 的寫法，整句輸出再套一遍 VARIANTS（不含 臺→台）
         text = "".join(VARIANTS.get(c, c) for c in _longest(text, phrase, maxp, char))
     text = _longest(text, TW_PHRASE, TW_MAXP[0]) if TW_PHRASE else text
-    # 喫：STPhrases 的「吃了」「吃不出来」等詞組輸出喫；輸入句本來沒有喫就換回吃
-    return text if "喫" in src else text.replace("喫", "吃")
+    table = POST_SIMP if simp else POST_TRAD   # 喫→吃 也在 TW_VARIANTS 裡，S2n 的「輸入有喫就保留」規則拿掉
+    return "".join(table.get(c, c) for c in text)
 
 
 MARKUP = [
