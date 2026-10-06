@@ -1,4 +1,4 @@
-"""S5p driver (docs/contracts/s5p-cloud-prompts.md): prompt variants V1-V4 on Jev (jev-1.13.0) or Clef-flash.
+"""S5p driver (docs/contracts/s5p-cloud-prompts.md): prompt variants V1-V4 on Jev (jev-1.13.0), clef-flash or the full 27B Clef.
 
   p_run.py --provider jev|clef|clef27 --sets S[,S] [--half A|B] [--variants v1,v2,v3,v4] [--limit N]
   p_run.py --print-request          V1-V4 request JSON for dev302 row 0 (CC0), no key, no network
@@ -30,7 +30,6 @@ BUDGET_USD = 2.0
 JEV_CAP = 6000  # contract section 8: Jev has no published price, so a hard request cap
 JEV_MODEL, JEV_HOST, JEV_PATH = "jev-1.13.0", "api.typesafe.ai", "/v1/systemone"
 JEV_USD_PER_Q = 0.004 / 300  # S5j's billed J1 (300 questions, about US$0.004); reporting estimate only
-JEV_KEY_FILE = "~/.config/typesafe/api_key"
 # contract section 12: SHA-256 of ~/.cache/shanjie/work/s5-clef/cvtune/clef-sent-fwd.jsonl. None until main fills it in.
 CLEF_V0_SHA = "fa53ba7ccc67d217c5019896539a2dceced13f4be72d7d0fec54926ed834e074"  # recorded 2026-10-06
 CLEF_V0_PATH = os.path.join(R.C_CACHE, "cvtune", "clef-sent-fwd.jsonl")
@@ -152,11 +151,6 @@ def jev_post(path, headers, body):
         conn.close()
 
 
-def read_key_file():
-    with open(os.path.expanduser(JEV_KEY_FILE), encoding="utf-8") as f:
-        return f.read()
-
-
 def make_client(provider, post, sleep):
     """Keys are read here, after the allowlist and the hash checks."""
     if provider in PRICE:
@@ -165,15 +159,9 @@ def make_client(provider, post, sleep):
             die("CF_AI_TOKEN and CF_ACCOUNT_ID must be set in the environment")
         return R.Client(token, account, post or R.default_post, sleep, "clef" if provider == "clef27" else R.MODEL,
                         gateway=R.GATEWAY)
-    key = os.environ.get("TYPESAFE_API_KEY")
+    key = (os.environ.get("TYPESAFE_API_KEY") or "").strip()
     if not key:
-        try:
-            key = read_key_file()
-        except OSError:
-            die("TYPESAFE_API_KEY is not set and the key file is not readable")
-    key = key.strip()
-    if not key:
-        die("empty Jev key")
+        die("TYPESAFE_API_KEY must be set in the environment")
     c = R.Client(key, "", post or jev_post, sleep)
     c.path, c.model = JEV_PATH, JEV_MODEL
     return c

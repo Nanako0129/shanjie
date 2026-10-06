@@ -4,7 +4,7 @@ Spec: `docs/contracts/s5c-clef-cloud.md` (conditions, hashes, decision rules and
 
 | File | Role |
 |---|---|
-| `clef_run.py` | Driver. `--sets cvtune,dev302,typing76 [--limit N]`. Resumable. HTTP layer is injectable (`Client(post=...)`). |
+| `clef_run.py` | Driver. `--sets cvtune,dev302,typing76 [--limit N] [--model clef-flash\|clef]` (`clef` is the 27B, files `clef27-*`). Resumable. Requests carry `cf-aig-gateway-id`. HTTP layer is injectable (`Client(post=...)`). |
 | `clef_score.py` | Offline scorer: S5j's metrics for C-sent-fwd, C-sent-rev, C-pos and (as a control) J-*, plus the C-vs-J pairs and the section 3 verdict. |
 | `test_clef.py` | Offline tests (fake HTTP, decoding, scorer reproduction of S5j's Jev rows). |
 | `results/` | Per-row results for dev302 and typing76 only (created by the run). |

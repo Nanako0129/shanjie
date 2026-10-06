@@ -18,11 +18,11 @@
 
 | 供應商 | 模型 | 端點 | 金鑰 |
 |---|---|---|---|
-| TypeSafe | `jev-1.13.0`（釘死，同 S5j） | `experiments/jev/jev.py` 的端點 | `~/.config/typesafe/api_key`（`jev.py` 的規則，不印出） |
+| TypeSafe | `jev-1.13.0`（釘死，同 S5j） | `experiments/jev/jev.py` 的端點 | 環境變數 `TYPESAFE_API_KEY`（不印出） |
 | Cloudflare | `clef-flash`（Workers AI 沒有版本釘選；記錄執行日期與回應的 `model`） | `…/ai/run/@cf/cloudflare/clef-flash` | 環境變數 `CF_AI_TOKEN`、`CF_ACCOUNT_ID`，付費呼叫只由 main 執行 |
 
 - 兩者共用 S5c 的驅動程式與 `Client`（`experiments/s5-clef/`，S5c 契約 `fa4471e`、工具 `8605fe7`），只換端點與金鑰；**不用** `experiments/jev/jev.py` 的 `Client`，它的錯誤訊息會帶出回應本文的前 200 字。S5c 的工具合併前不開工。
-- 金鑰在白名單與雜湊檢查之後才讀：Jev 讀環境變數 `TYPESAFE_API_KEY`，沒有就讀 `~/.config/typesafe/api_key`；Clef 讀 `CF_AI_TOKEN`、`CF_ACCOUNT_ID`。
+- 金鑰在白名單與雜湊檢查之後才讀：Jev 讀環境變數 `TYPESAFE_API_KEY`（2026-10-06 起只讀環境變數；repo 不寫本機的存放位置）；Clef 讀 `CF_AI_TOKEN`、`CF_ACCOUNT_ID`。
 - **所有網路呼叫都由 main 執行。** executor 一律離線，用假的 HTTP 層測試。
 
 ## 3. 集合與切分（只用公開集合）

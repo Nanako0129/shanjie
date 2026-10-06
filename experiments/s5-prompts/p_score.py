@@ -143,7 +143,7 @@ def main(argv=None):
     else:
         chosen = {p: v for p, v in (("jev", a.jev), ("clef", a.clef), ("clef27", a.clef27)) if v}
         if not chosen:
-            R.die("give --jev and/or --clef")
+            R.die("give at least one of --jev, --clef, --clef27")
         test(rows, L, chosen)
 
 
