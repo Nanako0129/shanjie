@@ -82,7 +82,7 @@ context_key(prefix: &str) -> Key
 ## 2. 前文讀取（R4，Swift 殼）
 
 - **讀一次**：每次組字開始、第一次 `setMarkedText` 之前讀。這時 client 還沒有 marked text。組字期間與送出前不再讀。
-- **什麼時候算沒有前文**：`selectedRange` 是 `NSNotFound`；或 `markedRange` **不是** `NSNotFound`（client 已經有 marked text，表示上一段組字還沒結束）；或讀取回傳 nil。沒有 marked text 時 `markedRange` 本來就是 `{NSNotFound, 0}`，這是正常情況，照樣讀。**更正（2026-10-06 實機）**：VS Code、Chrome、Finder 搜尋框等 client 在沒有 marked text 時回報 `{插入點, 0}`，有一個回報 `{NSNotFound, NSNotFound}`；原本只看位置，這些 App 一律被當成「還有 marked text」而讀不到前文。條件改成：`markedRange` 的長度大於 0（而且位置不是 `NSNotFound`）才算有 marked text。
+- **什麼時候算沒有前文**：`selectedRange` 是 `NSNotFound`；或 client 還有 marked text，也就是 `markedRange` 的**長度大於 0**（而且位置不是 `NSNotFound`），表示上一段組字還沒結束；或讀取回傳 nil。長度是 0 時不論位置都算沒有 marked text，照樣讀：NSTextInputClient 文件寫的是 `{NSNotFound, 0}`，但 2026-10-06 實機量到 VS Code、Chrome、Finder 搜尋框等回 `{插入點, 0}`、有一個回 `{NSNotFound, NSNotFound}`（原本只看位置，這些 App 都讀不到前文）。
 - **範圍有上限**：
   - 只請求插入點前最多 32 個 UTF-16 單位（具名常數）：`NSRange(location: max(0, ins − 32), length: ins − max(0, ins − 32))`。
   - 範圍被截過時，丟掉第一個 grapheme，避免切到代理對或 grapheme 中間。
@@ -210,6 +210,7 @@ context_key(prefix: &str) -> Key
     - 組字期間不再呼叫讀取 API；
     - gate 擋時不讀；
     - 假 client 照 NSTextInputClient 的語意，沒有 marked text 時 `markedRange` 回 `{NSNotFound, 0}`：`ab\t中` 傳進核心的是 `中`；
+    - 實機量到的空範圍（2026-10-06）：`markedRange` 是 `{插入點, 0}`、`{0, 0}` 或 `{NSNotFound, NSNotFound}` 時照樣讀（`testEmptyMarkedRangeAnywhereStillReadsTheContext`）；
     - client 帶著殘留的 marked text 時，傳 NULL。
 12. **R3**：
     - gate 單元測試，安全輸入、denylist（用其中一個密碼管理器 bundle ID）、判斷不了，三種都暫停、0 筆；
