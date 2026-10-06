@@ -163,7 +163,8 @@ def make_client(provider, post, sleep):
         token, account = os.environ.get("CF_AI_TOKEN"), os.environ.get("CF_ACCOUNT_ID")
         if not token or not account:
             die("CF_AI_TOKEN and CF_ACCOUNT_ID must be set in the environment")
-        return R.Client(token, account, post or R.default_post, sleep, "clef" if provider == "clef27" else R.MODEL)
+        return R.Client(token, account, post or R.default_post, sleep, "clef" if provider == "clef27" else R.MODEL,
+                        gateway=R.GATEWAY)
     key = os.environ.get("TYPESAFE_API_KEY")
     if not key:
         try:
