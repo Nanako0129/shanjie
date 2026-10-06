@@ -30,6 +30,8 @@ def main():
     for ctx, a, b in PAIRS:
         shared = [r for r in by.get(a, {}) if r in by.get(b, {})]
         if not shared:   # 其中一種寫法在基底沒有：只有另一種寫法的讀音可用，期望就是有的那個
+            if (a in by) == (b in by):   # 兩種都在但讀音不同，或兩種都不在：沒有「同讀音的較高分」可比
+                raise SystemExit(f"{a} / {b}: both {'present with different readings' if a in by else 'absent'} in base")
             only = a if a in by else b
             r = max(by[only], key=by[only].get)
             print(f"{a} / {b}: only {only} in base ({r}, {by[only][r]})")

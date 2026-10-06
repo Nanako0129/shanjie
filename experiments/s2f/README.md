@@ -4,7 +4,7 @@
 |---|---|
 | `overlay-variant-removed.tsv` | §2.5：疊加層裡只是基底詞異體寫法的詞（詞、基底寫法、讀音），`tools/build_overlay.py` 產生 |
 | `make_probe.py` → `probe.txt` | §3.2：字形探針，`前文\|期望寫法\|讀音`；期望寫法是基底詞庫裡同讀音兩種寫法中分數較高的那個 |
-| `cv_native.py` | §3.4：cvtune-native 子集（模型 E 的 cvtune 檔，SHA-256 核對）；舊轉換從提交 `dd7d2bf` 用 `git show` 讀成暫時模組，不在 repo 裡另存一份 |
+| `cv_native.py` | §3.4：cvtune-native 子集（模型 E 的 cvtune 檔，SHA-256 核對）；舊轉換從 main 的提交 `ae01597`（S2f 之前）用 `git show` 讀成暫時模組，不在 repo 裡另存一份 |
 
 cvtune-native 列數（Mac 上算，重建前；模型 E 的 cvtune 3756 列中）：**2117**。驗收時用同一支程式重算，必須相同。
 
