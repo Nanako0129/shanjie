@@ -24,8 +24,9 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(REPO, "reference", "proto"))
 import ime  # noqa: E402
 
-MOEDICT = os.path.expanduser("~/side-project/ime-research/repos/moedict-data/dict-revised_bkup.json")
-HETERO = os.path.expanduser("~/side-project/ime-research/repos/McBopomofo/Source/Data/heterophony1.list")
+# SHANJIE_MOEDICT／SHANJIE_HETERO：資料不在預設位置的機器（例如 Windows）用環境變數指過去
+MOEDICT = os.environ.get("SHANJIE_MOEDICT") or os.path.expanduser("~/side-project/ime-research/repos/moedict-data/dict-revised_bkup.json")
+HETERO = os.environ.get("SHANJIE_HETERO") or os.path.expanduser("~/side-project/ime-research/repos/McBopomofo/Source/Data/heterophony1.list")
 OVERRIDES = os.path.join(REPO, "tools", "reading_overrides.tsv")
 
 
@@ -54,7 +55,7 @@ def main(src, dst):
     overrides = {w: tuple(r.split()) for w, r in
                  (l.rstrip("\n").split("\t") for l in open(OVERRIDES, encoding="utf-8") if not l.startswith("#"))}
     checks = 0
-    with open(dst, "w", encoding="utf-8") as f:
+    with open(dst, "w", encoding="utf-8", newline="\n") as f:
         for line in open(src, encoding="utf-8"):
             line = line.rstrip("\n")
             if not line or line.startswith("#") or line.count("|") >= 2:
