@@ -9,6 +9,7 @@
 - 端點：`POST https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/run/@cf/cloudflare/clef-flash`，body 帶 `"model": "clef-flash"`。
 - Workers AI 沒有提供版本釘選。報告記下執行日期與回應裡的 `model` 欄位；同一次完整執行不換模型。
 - API token 與帳號 ID 從環境變數 `CF_AI_TOKEN`、`CF_ACCOUNT_ID` 讀。不印出、不寫檔、不放進指令列。
+- **2026-10-06 起經 AI Gateway**：請求帶 `cf-aig-gateway-id: default`。帳號的每日免費額度（10,000 neurons）用完後，由 Gateway 的預付額度（Unified Billing）支付；Jev 的請求不帶這個標頭。
 - 只用 `clef-flash`，不用完整版 Clef（參數量未公開，延遲 209 ms）。
 
 ## 2. 題目與集合（和 S5j 的 Jev 完全相同，可逐列配對）
@@ -104,3 +105,21 @@
 ## 9. 回滾
 
 只新增 `experiments/s5-clef/` 與 `~/.cache/shanjie/work/s5-clef/`；刪掉即可。
+
+## 10. 修訂（2026-10-06）：加跑完整版 Clef（27B）
+
+- **起因**：S5c 只量了 `clef-flash`（9B）。使用者 2026-10-06 要求完整版也照原計畫跑完。Cloudflare 文件現在寫明完整版 `@cf/cloudflare/clef` 是 27B、每百萬輸入 token 0.24 美元（當初契約寫「參數量未公開」，已不成立）。
+- **做法**：題目、集合、prep 檔、解析規則、§3 的判斷規則全部不變，只換模型。
+  - `clef_run.py` 加 `--model clef|clef-flash`，預設 `clef-flash`。預設時的請求、輸出檔名與內容逐位元組不變。`--model clef` 時端點是 `…/ai/run/@cf/cloudflare/clef`，body 的 `model` 是 `clef`，輸出檔名前綴 `clef27-`（`clef27-sent-fwd.jsonl` 等），放在同一個目錄。
+  - 費用照模型換算：`clef-flash` 0.09、`clef` 0.24 美元／百萬輸入 token。S5c 的累計上限仍是 1 美元（`clef-flash` 已花約 0.139 美元），超過就停。
+  - `clef_score.py` 加一組 C27-sent-fwd、C27-sent-rev、C27-pos：對第 1 名與對 Jev 的判斷照 §3（只看 cvtune）；另外報 C27 對 `clef-flash` 同條件的逐列配對（只報告，不另下判斷）。
+- **順序**：先冒煙（dev302 前 20 列、每個條件），再跑 cvtune、dev302、typing76。冒煙要印回答欄位與機率鍵，和 flash 不同就停下回報。
+- **產出**：dev302、typing76 的 `clef27-*.jsonl` 與 `score.json` 進 `experiments/s5-clef/results/`；README 的結果節與研究紀錄由 main 補。
+- **executor 的交付（全部離線、用假 HTTP 層，各自是會失敗的測試）**：
+  - (i) 不給 `--model` 時，請求路徑、body、輸出檔名與每筆紀錄的欄位都和修改前相同。
+  - (ii) `--model clef` 送到 `…/@cf/cloudflare/clef`，body 的 `model` 是 `clef`，寫出 `clef27-*.jsonl`。
+  - (iii) 花費檢查在所有已知目錄（含 `-nN` 冒煙目錄）加總：`clef-*` 以 0.09、`clef27-*` 以 0.24 美元／百萬 token 計；累計到 1 美元就不再送出。
+  - (iv) 有 C27 檔案時，flash 原有的判斷行不變；C27 有自己的「對第 1 名」行，以及只用三組 C27／J 配對算出的「對 Jev」判斷；C27 對 flash 的配對不進任何判斷。
+  - (vi) `--model clef` 的冒煙報告（印回答欄位、機率鍵、挑第 1 個的比例）與 §7 的 0.95 停止條件，只讀 `clef27-*` 檔。測試：`dev302-n20` 目錄裡已經有 flash 的 `clef-*` 冒煙檔，假的 27B 冒煙回應永遠挑 c1，必須以 0.95 的停止訊息結束，並印出 27B 的欄位名稱。
+  - (v) 預算：executor 1 回合加 1 次修正。
+- executor 的限制照 §8；網路呼叫只由 main 執行。

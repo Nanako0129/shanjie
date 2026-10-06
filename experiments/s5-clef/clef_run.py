@@ -26,7 +26,11 @@ import s5  # noqa: E402  constants and pure functions only: INSTR, POS_INSTR, BA
 ALLOW = ("cvtune", "dev302", "typing76")  # contract section 4; discordtune never reaches the key or the network
 HOST = "api.cloudflare.com"
 MODEL = "clef-flash"
+GATEWAY = "default"  # AI Gateway id; Workers AI billing there is set to Unified billing (2026-10-06)
 PRICE_PER_TOKEN = 0.09 / 1e6
+# contract section 10: --model clef is the 27B; its files carry the clef27- prefix so flash's stay untouched
+PRICE_27B = 0.24 / 1e6
+MODELS = {"clef-flash": ("clef", PRICE_PER_TOKEN), "clef": ("clef27", PRICE_27B)}  # model -> (file prefix, USD per token)
 BUDGET_USD = 1.0
 BACKOFF = (2, 4, 8)  # seconds before retry 1, 2, 3
 J_CACHE = os.path.expanduser("~/.cache/shanjie/work/s5-judges")
@@ -105,14 +109,17 @@ def default_post(path, headers, body):
 class Client:
     """post(path, headers, body) -> (status, bytes) is injectable; timeouts and socket errors raise OSError."""
 
-    def __init__(self, token, account, post=default_post, sleep=time.sleep):
-        self.path = f"/client/v4/accounts/{account}/ai/run/@cf/cloudflare/{MODEL}"
+    def __init__(self, token, account, post=default_post, sleep=time.sleep, model=MODEL, gateway=None):
+        self.path = f"/client/v4/accounts/{account}/ai/run/@cf/cloudflare/{model}"
         self.headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+        if gateway:  # route through AI Gateway so prepaid Unified Billing credits pay once the free allocation is used up
+            self.headers["cf-aig-gateway-id"] = gateway
         self.post, self.sleep = post, sleep
+        self.model = model  # S5p overrides model, path and headers to reuse this retry/parse path for Jev
 
     def ask(self, state, questions):
         """-> (answers, input tokens, tokens are an estimate, response model, seconds of the successful attempt)."""
-        body = json.dumps({"state": state, "model": MODEL, "questions": questions}, ensure_ascii=False).encode("utf-8")
+        body = json.dumps({"state": state, "model": self.model, "questions": questions}, ensure_ascii=False).encode("utf-8")
         for attempt in range(len(BACKOFF) + 1):
             t = time.perf_counter()
             try:
@@ -198,9 +205,9 @@ def jobs_of(rows):
 
 
 def spent_usd(dirs):
-    """Total input-token cost of every clef-*.jsonl in the given output dirs (one shared cap; S5p reuses this)."""
-    return sum(r["tokens"] for d in dirs for c in CONDS
-               for r in read_recs(os.path.join(d, f"clef-{c}.jsonl"))) * PRICE_PER_TOKEN
+    """Total input-token cost of every clef-*.jsonl (0.09/M) and clef27-*.jsonl (0.24/M) in the given dirs (one shared cap)."""
+    return sum(r["tokens"] * price for d in dirs for prefix, price in MODELS.values() for c in CONDS
+               for r in read_recs(os.path.join(d, f"{prefix}-{c}.jsonl")))
 
 
 def known_dirs():
@@ -211,11 +218,11 @@ def known_dirs():
 PARSE_CHECK_MIN = 200  # contract section 7's 1% rule needs a sample: checked from 200 answered items, or at the condition's end
 
 
-def run_set(name, rows, d, client, dirs=()):
+def run_set(name, rows, d, client, dirs=(), prefix="clef", price=PRICE_PER_TOKEN):
     os.makedirs(d, exist_ok=True)
     spent = spent_usd(sorted({*dirs, d}))
     for cond, items in jobs_of(rows).items():
-        outp = os.path.join(d, f"clef-{cond}.jsonl")
+        outp = os.path.join(d, f"{prefix}-{cond}.jsonl")
         recs = read_recs(outp)
         done = {x for r in recs for x in r["keys"]}
         fails = sum(x is None for r in recs for x in r.get("decisions", r.get("picks", [])))
@@ -247,20 +254,20 @@ def run_set(name, rows, d, client, dirs=()):
                 f.write(json.dumps(rec, ensure_ascii=False) + "\n")
             fails += sum(x is None for x in parsed)
             total += len(chunk)
-            spent += tok * PRICE_PER_TOKEN
+            spent += tok * price
             if (total >= PARSE_CHECK_MIN or b + s5.BATCH >= len(todo)) and fails / total > 0.01:
                 raise Stop(f"parse failures above 1% in {cond} ({fails}/{total})")
-        print(f"clef {name} {cond}: items={len(items)} new_requests={math.ceil(len(todo) / s5.BATCH)} spent_usd={spent:.4f}")
+        print(f"{prefix} {name} {cond}: items={len(items)} new_requests={math.ceil(len(todo) / s5.BATCH)} spent_usd={spent:.4f}")
 
 
-def smoke_report(d):
-    """Print answer field names, first-pick ratios (presented-first, as S5j) and apply the 0.95 stop."""
+def smoke_report(d, prefix="clef"):
+    """Print answer field names, first-pick ratios (presented-first, as S5j) and apply the 0.95 stop. Reads only <prefix>-* files."""
     fp = {}
     for c in ("sent-fwd", "sent-rev"):
-        recs = read_recs(os.path.join(d, f"clef-{c}.jsonl"))
+        recs = read_recs(os.path.join(d, f"{prefix}-{c}.jsonl"))
         pk = [x for r in recs for x in r["picks"] if x is not None]
         fp[c] = sum(x == 0 for x in pk) / len(pk) if pk else None
-    a0 = (read_recs(os.path.join(d, "clef-sent-fwd.jsonl")) or [{"answers": [None]}])[0]["answers"][0]
+    a0 = (read_recs(os.path.join(d, f"{prefix}-sent-fwd.jsonl")) or [{"answers": [None]}])[0]["answers"][0]
     ok = lambda ks: sorted(k for k in ks if isinstance(k, str) and k.isascii() and k.isidentifier() and len(k) < 32)  # noqa: E731
     sub = next((v for v in a0.values() if isinstance(v, dict)), {}) if isinstance(a0, dict) else {}
     print(f"smoke answer_fields={ok(a0 if isinstance(a0, dict) else [])} prob_keys={ok(sub)} "
@@ -272,6 +279,7 @@ def smoke_report(d):
 def main(argv=None, post=default_post, sleep=time.sleep, rows_for=load_rows, out_for=out_dir, dirs_for=known_dirs):
     ap = argparse.ArgumentParser()
     ap.add_argument("--sets", required=True)
+    ap.add_argument("--model", choices=tuple(MODELS), default=MODEL, help="clef-flash (default, 9B) or clef (27B, clef27- files)")
     ap.add_argument("--limit", type=int, default=0, help="first N rows of the set (smoke; dev302 or typing76 only)")
     a = ap.parse_args(argv)
     sets = a.sets.split(",")
@@ -283,12 +291,13 @@ def main(argv=None, post=default_post, sleep=time.sleep, rows_for=load_rows, out
     token, account = os.environ.get("CF_AI_TOKEN"), os.environ.get("CF_ACCOUNT_ID")
     if not token or not account:
         die("CF_AI_TOKEN and CF_ACCOUNT_ID must be set in the environment")
-    client = Client(token, account, post, sleep)
+    prefix, price = MODELS[a.model]
+    client = Client(token, account, post, sleep, a.model, gateway=GATEWAY)
     for s in sets:
         d = out_for(s, a.limit)
-        run_set(s, rows[s][:a.limit or None], d, client, dirs_for())
+        run_set(s, rows[s][:a.limit or None], d, client, dirs_for(), prefix, price)
         if a.limit:
-            smoke_report(d)
+            smoke_report(d, prefix)
 
 
 def cli(argv=None, **kw):
