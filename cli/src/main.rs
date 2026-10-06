@@ -135,7 +135,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
             let (_, rows) = load_set(&lex, "holdout")?;
             let rows = rows
                 .iter()
-                .map(|r| Ok((r.sent.clone(), row_syllables(&lex, r).map_err(|e| e.to_string())?, String::new())))
+                .map(|r| Ok((r.sent.clone(), row_syllables(&lex, r).map_err(|e| e.to_string())?, r.ctx.clone())))
                 .collect::<Result<Vec<_>, String>>()?;
             ("holdout".to_string(), rows)
         }

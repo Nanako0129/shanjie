@@ -908,3 +908,7 @@ S3b-2 試用系統候選面板的註解與網格（兩個 wip commit：d04e7a7�
   - `empty_learner_matches_goldens` 改成前文為空時對 golden、前文「好他」時學習開／關逐列相同，通過。
   - `global_eps_table`：`global_sweep` 教學迴圈改讀 `SWEEP_TAUGHT`，內容由「可以」「^」改成「佝」「^」（「佝」在模型裡沒有二元組歷史，歷史詞退回 `<s>`。「可以」下 `功力`／`公立` 一組沒有產生全域紀錄；原因的推論是歷史詞「以」讓目標詞在該前文下已是第一名、選字不再是改選，沒有逐組量）。選定 ε_global = 0.5 的五個數（groups／wrong／checked／excluded／unaligned）：改之前（main 的測試、規則關閉）13／8／45／2／0；改之後 13／9／47／0／0。關卡斷言沒有改，全部成立：ε 0 全域層無作用、ε 0.5 污染 0 且學會 8/9、鏡像 7/8。
 - **測試**：`cargo test --locked` 全過。第二輪順手修了一處合併造成的編譯錯誤：S-bench 的 `run_unigram_rows` 解構二元組，S2h 把 `three_field_rows` 改成三元組。
+- **本地 `/code-review`（main 處置）**：
+  - 修：`--set holdout --context` 原本每列都傳空的前文，帶前文那次保留集會和預設模式完全相同，摘要行卻寫 `+ctx`。改成傳每列自己的前文；預設模式不受影響（前文只在 `--context` 時使用）。Python 參考實作沒有保留集模式，不受影響。
+  - 修：`global_sweep` 的註解還寫「在 可以 和 ^ 下教」，改成 `SWEEP_TAUGHT`（佝與 ^）。只改註解；§10.3 限制的是邏輯，這處偏離在 PR 寫明。
+  - 不改、記下：`empty_learner_matches_goldens` 新加的「好他之下學習開與關第一名相同」在紀錄為空時不可能失敗。紀錄為空時 `refresh_lm` 不管開關都傳 `learn = None`，兩個引擎走同一條路徑；這是契約 §10.3 指定的寫法。前文和學習的交互作用要另外的測試（有紀錄時）才量得到，留給 S4 的下一次修訂。
