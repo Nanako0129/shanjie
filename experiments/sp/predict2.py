@@ -98,7 +98,7 @@ def eval_sample(idx, lm, lam, W, syls, v, modes, check=False):
             rec["pairs"] += 1
             rec["flips"] += top != prev_top
         prev_top = top
-        if check and t not in at.values():
+        if check and ("P" not in modes or t not in at.values()):   # 位置上的 P 查詢只有 modes 含 P 時才在上面查過
             check_query(idx, lm, lam, v, units, "P", succ, cands, sc)
     rec["ks"] = {k: max(0, K - first[k] - 1) if k in first else 0 for k in (1, 3, 9)}
     return rec
