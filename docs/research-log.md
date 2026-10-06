@@ -684,7 +684,7 @@ Willseed 提議用 CKIP、結巴做三件事：斷詞後重算 n-gram、從語�
 - **前人研究**：
   - 沒找到「外部斷詞器」對「輸入法自家詞庫切分」在轉換正確率上的直接比較。小麥、威注音、新酷音、Mozc、RIME 都沒公開這種對照。
   - Gao et al. 2000（微軟拼音）：自家詞典最大匹配，再用 trigram 以 Viterbi 重切、重估，依困惑度增刪詞；字元困惑度約降 4%。
-  - Mori, Takuma, Kurata 2006〈Phoneme-to-Text Transcription System with an Infinite Vocabulary〉（日文）：外部斷詞器的切點轉成詞界機率（stochastically segmented corpus），不硬切。對硬切加未知詞模型，字錯誤率在目標領域降 9.36%、一般領域降 3.37%（main 讀過原文）。這是唯一在轉換正確率上量到斷詞方式效果的研究。
+  - Mori, Takuma, Kurata 2006〈Phoneme-to-Text Transcription System with an Infinite Vocabulary〉（日文）：外部斷詞器的切點轉成詞界機率（stochastically segmented corpus），不硬切。和「硬切加未知詞模型」相比，字錯誤率在目標領域降 9.36%、一般領域降 3.37%（main 讀過原文）。這是唯一在轉換正確率上量到斷詞方式效果的研究。
   - 新詞挖掘（Zhao, Gao, Chang, Li 的詞典最佳化）只量了困惑度。
   - 斷詞 F1（CkipTagger README，ASBC 4.0）：CkipTagger 97.33%、Jieba-zh_TW 89.80%。測試標準就是 CKIP 的訓練標準，不拿來挑訓練切分。
   - 授權：CKIP Transformers、CkipTagger 的程式碼與 Hugging Face 上的 CKIP 模型都是 GPL-3.0，斷詞與詞性用 ASBC 4.0 訓練（ASBC 授權申請制，條款未核對）。結巴是 MIT，`dict.txt.big` 的來源官方沒寫。
