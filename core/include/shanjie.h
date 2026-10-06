@@ -72,6 +72,14 @@ void    shanjie_output_free(ShanjieOutput *output);
 // S2c (docs/PLAN.md S2c)
 int32_t shanjie_engine_load_lm(ShanjieEngine *engine, const char *path);               // does not change the current display
 int32_t shanjie_engine_set_profile(ShanjieEngine *engine, uint32_t profile, ShanjieOutput **out); // 0 chat (default), 1 formal; recomputes and returns a snapshot (handled 1, commit "")
+// sw (docs/contracts/sw-sensitive-demote.md): set_demote 0 or 1 (2 otherwise; 1 for a NULL engine).
+//   Default 1 at engine creation. With 1, the entries of data_dir/demote.tsv (required, like the other
+//   data files: shanjie_engine_new returns 3 when it is missing or malformed) are subtracted from the
+//   matching word's score in the bigram decode and in the total of a composition with fixed words;
+//   0 treats every delta as 0 and is bit-identical to a model without the file. Does not change the
+//   current display; the next change to the composition decodes with the new setting. No effect
+//   without a loaded model. The shell wires it to the "avoid ranking sensitive words first" menu item.
+int32_t shanjie_engine_set_demote(ShanjieEngine *engine, uint32_t enabled);
 // s3e (docs/contracts/s3e-punctuation-candidates.md): punctuation alternatives, UTF-8 lines
 // "mark\talt\talt...", blank lines ignored, a repeated mark overrides; at most 64 KB / 1,000 lines.
 // 2 on any invalid input, keeping the previous table (a built-in default until the first success).
