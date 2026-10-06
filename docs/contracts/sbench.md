@@ -148,13 +148,15 @@
 
 ### 7.1 小麥資料基準列
 
-- `tools/bench.py` 加一列參考列「小麥資料基準」：用**目前 checkout** 的 CLI，`--no-overlay`、不帶 `--lm`（善解的 unigram 解碼，只用小麥基底詞庫），跑套件 v1 的每個集合與 profile 欄位（unigram 沒有 profile 之分，兩欄填同一個數），計分照 §1.1（套件的 `variants.tsv`、同一套寬鬆對照）。
-- 每個套件版本只算一次，結果存 `eval/bench/results/reference-mcbpmf.json`，指紋照 §2（集合、variants、基底詞庫的雜湊）；指紋變了就重算。
-- `docs/benchmark.md` 主表的第一列是這一列，標題寫明：「善解的 unigram 解碼器加小麥的基底詞庫，近似小麥的資料；不是小麥本身的解碼器（小麥現在有沒有用 bigram 沒有核對）」。它不是版本，不算修好／弄壞；版本列的數字與比較不變。
+- **CLI 的改動（這片唯一允許改 `cli/` 的地方，由 executor 做）**：unigram 路徑（不帶 `--lm`）加 `--rows <檔>` 與 `--dump <檔>`，語意與 `--lm` 路徑相同：讀 `前文|句子|讀音` 列、每列寫前 64 名（`列號\t名次\tsurface\t分數`），摘要行的 profile 欄寫 `unigram`（例：`## typing76  unigram  {'n': 76, 'top1': …, 'oracle@64': …, 'top1_sha256': '…'}`）。可以和 `--no-overlay` 併用。不帶這兩個旗標時，既有的 `--set` 行為與所有 golden 逐位元組不變。
+  - 一致性：新 golden `eval/golden/sbench-unigram-typing76.txt`（套件 v1 的 typing76、`--no-overlay`）由 Python 參考實作（`reference/proto/ime.py` 的 unigram 解碼、只用基底詞庫）產生，Rust CLI 的輸出要逐位元組相同，`cli/tests/golden.rs` 檢查。
+- **參考列「小麥資料基準」**：`tools/bench.py reference` 子命令用目前 checkout 建出的 CLI 跑：`shanjie-eval --no-overlay --rows <套件集合> --dump <暫存>`（不帶 `--lm`、`--profile`），套件 v1 的每個集合都跑；unigram 沒有 profile 之分，chat、formal 兩欄填同一個數。計分照 §1.1（套件的 `variants.tsv`、同一套寬鬆對照，摘要行只當交叉檢查）。
+- 結果存 `eval/bench/results/reference-mcbpmf.json`，內含產生它的 **commit SHA** 與 §2 的指紋（集合、variants、基底詞庫的雜湊）。`reference` 子命令在 commit SHA 或任一指紋和現有檔案不同時才重算，並在 stderr 說明原因；同一個 commit 重跑，每格的 `top1_sha256` 相同。
+- `docs/benchmark.md` 主表的第一列是這一列，標題寫明 commit 與：「善解的 unigram 解碼器加小麥的基底詞庫，近似小麥的資料；不是小麥本身的解碼器（小麥現在有沒有用 bigram 沒有核對）」。它不是版本，不算修好／弄壞；版本列的數字與比較不變。量測規則一節加上 `tools/bench.py reference` 的重跑方法。
 
 ### 7.2 實打對照表（靜態）
 
-- 新增 `eval/bench/static/typing-test.json`：從 `docs/typing-test.md` 逐格抄錄 macOS 內建注音、小麥注音、自然輸入法在各組的結果（第一輪 23 句、第二輪 53 句、Discord 845 句、新聞 294 句；錯的句子數、錯字數、日期 2026-10-03），每一格附來源（文件的行號）。Discord、新聞只抄統計數字。
+- 新增 `eval/bench/static/typing-test.json`：從 `docs/typing-test.md` 逐格抄錄 macOS 內建注音、小麥注音、自然輸入法的**自動打字**結果（四組條件一致）：第一輪 23 句與第二輪 53 句（第 33–39 行）、Discord 845 句（第 174–180 行）、新聞 294 句（第 190–196 行）；錯的句子數、錯字數、日期 2026-10-03，每一格附來源行號。第一輪的手打結果（第 7–12 行）數字不同，不抄。Discord、新聞只抄統計數字。
 - `tools/bench.py table` 在 `docs/benchmark.md` 加一節「實打對照（靜態，2026-10-03）」從這個 JSON 產生，註明：實打是當天的產品快照、蘋果注音在測驗中會學習（文件第 202 行）、和版本列的條件不同，不做統計比較。
 - main 抄完後逐格核對，executor 不抄。
 
@@ -165,9 +167,10 @@
 ### 7.4 落地
 
 - 分支先 rebase 到 main，再照 CLAUDE.md 的合併關卡落地。套件 v1 仍釘 model-v1；model-v2 出貨時另寫套件 v2。
-- **負責人**：`pilotfish:executor` 做 7.1 與 7.2 的程式部分（`table` 的新節、讀 JSON），main 做 7.2 的抄錄與核對、rebase、合併關卡。
+- **負責人**：`pilotfish:executor` 做 7.1 的 CLI 改動與 golden、`reference` 子命令、7.2 的程式部分（`table` 的新節、讀 JSON）。main 做：7.2 的抄錄與逐格核對；用真的私有資料（`--private-root` 指向 `~/side-project/shanjie-private`）跑 `tools/bench.py reference`，commit `reference-mcbpmf.json`（discordtune 欄填好）；commit 重產的 `docs/benchmark.md`；rebase；合併關卡。
 - **驗收**：
-  - 工具既有的測試全過；新增測試：參考列的指令確實帶 `--no-overlay`、不帶 `--lm`；參考列不出現修好／弄壞；靜態 JSON 的每一格都有來源。
+  - 工具既有的測試全過；`cargo test`（含新的 unigram golden）全過；新增測試：參考列的指令確實帶 `--no-overlay`、不帶 `--lm`；參考列不出現修好／弄壞；commit SHA 改變時重算並在 stderr 說明；靜態 JSON 的每一格都有來源行號，而且該行只有一個對應的數字。
+  - 合併後的分支含 `eval/bench/results/reference-mcbpmf.json`（discordtune 欄有值），`docs/benchmark.md` 主表第一列是參考列，而且和 `tools/bench.py table` 的輸出相同。
   - `table` 重產後，版本列與保留集表和現在的 `docs/benchmark.md` 逐字相同，只多出參考列與靜態節。
 - **停止條件**：抄錄和 `docs/typing-test.md` 有任何一格不符；既有版本列的數字有任何變動；工具既有測試失敗。
-- 預算：executor 1 回合加 1 次修正。executor 的限制照 §5（不讀保留集、不讀私有資料、私有路徑只用空的暫存目錄、不安裝、不連網、不推送）。
+- 預算：executor 1 回合加 1 次修正。executor 的限制照 §5（不讀保留集、不讀私有資料、私有路徑只用空的暫存目錄、不安裝、不連網、不推送）；§5 禁止改 `cli/` 的規定，只對 §7.1 寫明的 unigram 路徑 `--rows`／`--dump` 改動與它的 golden 例外。
