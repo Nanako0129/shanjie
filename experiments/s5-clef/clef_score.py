@@ -15,7 +15,7 @@ import sys
 import clef_run as R
 
 s5 = R.s5
-SENT_REV = ("J-sent-rev", "C-sent-rev")
+SENT_REV = ("J-sent-rev", "C-sent-rev", "C27-sent-rev")
 
 
 def load_conds(texts, rows, clef):
@@ -92,14 +92,15 @@ def metrics(name, cn, c, rows, ks, base):
     return rec, cov, ok
 
 
-def score_set(name, texts_j, texts_c, rows, limit=0):
-    """-> list of records: J-*, C-*, then the C-vs-J pairs. No file is touched."""
+def score_set(name, texts_j, texts_c, rows, limit=0, texts_c27=None):
+    """-> list of records: J-*, C-*, C27-*, then the C-vs-J pairs, the C27-vs-J pairs (key pair27) and the
+    C27-vs-flash pairs (key pairflash, report only). No file is touched."""
     L = s5.lenient_fn()
     ks = set(range(limit or len(rows)))
     base = {"L": L, "s": {k: r["cands"][0] for k, r in enumerate(rows)}, "gold": {k: L(r["truth"]) for k, r in enumerate(rows)}}
     base["in8"] = {k for k in range(len(rows)) if base["gold"][k] in [L(c) for c in rows[k]["cands"]]}
     conds = {}
-    for pre, texts, clef in (("J", texts_j, False), ("C", texts_c, True)):
+    for pre, texts, clef in (("J", texts_j, False), ("C", texts_c, True), ("C27", texts_c27 or {}, True)):
         for cn, c in load_conds(texts, rows, clef).items():
             conds[f"{pre}-{cn}"] = c
     out, oks = [], {}
@@ -121,19 +122,33 @@ def score_set(name, texts_j, texts_c, rows, limit=0):
             fixed, broken, p, se = s5.mcnemar([oks[f"J-{cn}"][k] for k in both], [oks[f"C-{cn}"][k] for k in both])
             out.append({"set": name, "pair": f"C-{cn} vs J-{cn}", "n": len(both), "fixed": fixed, "broken": broken,
                         "net": fixed - broken, "p": p})
+        if f"C27-{cn}" not in oks:
+            continue
+        for other, key in ((f"J-{cn}", "pair27"), (f"C-{cn}", "pairflash")):
+            if other in oks:
+                both = sorted(oks[f"C27-{cn}"].keys() & oks[other].keys())
+                fixed, broken, p, se = s5.mcnemar([oks[other][k] for k in both], [oks[f"C27-{cn}"][k] for k in both])
+                out.append({"set": name, key: f"C27-{cn} vs {other}", "n": len(both), "fixed": fixed, "broken": broken,
+                            "net": fixed - broken, "p": p})
     return out
 
 
 def verdict(recs):
     """Contract section 3, cvtune only. Returns printable lines."""
     sig = lambda r, s: r["p"] < 0.05 and r["net"] * s > 0  # noqa: E731
-    lines = [f"vs rank 1: {r['cond']} {'CANDIDATE for H/S6' if sig(r, 1) else 'not a candidate'} (net={r['net']} p={r['p']:.4g})"
-             for r in recs if r.get("cond", "")[:1] == "C"]
-    pairs = [r for r in recs if "pair" in r]
-    better, worse = any(sig(r, 1) for r in pairs), any(sig(r, -1) for r in pairs)
-    word = ("mixed" if better and worse else "Clef better than Jev" if better else "Clef worse than Jev" if worse
-            else "no significant difference" if pairs else "no pairs")
-    return lines + [f"vs Jev: {word}"]
+    def lines(prefix, key, name, tag):
+        rk = [f"{tag}vs rank 1: {r['cond']} {'CANDIDATE for H/S6' if sig(r, 1) else 'not a candidate'} (net={r['net']} p={r['p']:.4g})"
+              for r in recs if r.get("cond", "").startswith(prefix)]
+        pairs = [r for r in recs if key in r]
+        better, worse = any(sig(r, 1) for r in pairs), any(sig(r, -1) for r in pairs)
+        word = ("mixed" if better and worse else f"{name} better than Jev" if better else f"{name} worse than Jev" if worse
+                else "no significant difference" if pairs else "no pairs")
+        return rk + [f"{tag}vs Jev: {word}"]
+    out = lines("C-", "pair", "Clef", "")
+    if any(r.get("cond", "").startswith("C27-") for r in recs):  # own judgement; the flash pairs never enter it
+        out += lines("C27-", "pair27", "Clef27", "C27 ")
+        out += [f"report only (no judgement): {r['pairflash']} net={r['net']} p={r['p']:.4g}" for r in recs if "pairflash" in r]
+    return out
 
 
 def main(argv=None, out_for=R.out_dir):
@@ -148,8 +163,8 @@ def main(argv=None, out_for=R.out_dir):
         rows = R.load_rows(s)
         tj = {c: R.verified_text(s, f"jev-{c}.jsonl") for c in R.CONDS}
         d = out_for(s, a.limit)
-        tc = {c: (open(p, encoding="utf-8").read() if os.path.exists(p := os.path.join(d, f"clef-{c}.jsonl")) else None) for c in R.CONDS}
-        recs = score_set(s, tj, tc, rows, a.limit)
+        rd = lambda pre: {c: (open(p, encoding="utf-8").read() if os.path.exists(p := os.path.join(d, f"{pre}-{c}.jsonl")) else None) for c in R.CONDS}  # noqa: E731
+        recs = score_set(s, tj, rd("clef"), rows, a.limit, rd("clef27"))
         os.makedirs(d, exist_ok=True)
         with open(os.path.join(d, "score.json"), "w") as f:
             json.dump(recs, f, indent=1)

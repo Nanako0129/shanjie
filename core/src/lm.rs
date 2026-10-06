@@ -524,6 +524,18 @@ pub fn decode_segment_learned<'a>(
     Ok(out)
 }
 
+/// S2h §1: the word that conditions the first word of a composition with no fixed word on its left.
+/// `left` is the stored context (`context_key` result, at most 2 Han characters, "" for none). Tries
+/// the whole of `left`, then its last character; the first one with bigram history in the model wins
+/// (a word without history makes `prob` ignore it, so it would be no condition at all). None: `<s>`.
+pub fn history<'a>(left: &'a str, lm: &Lm) -> &'a str {
+    let last = left.char_indices().next_back().map_or(0, |(i, _)| i);
+    [left, &left[last..]]
+        .into_iter()
+        .find(|w| !w.is_empty() && lm.ctx_of(lm.word_id(w)).is_some())
+        .unwrap_or("<s>")
+}
+
 /// lm.decode: whole sentence, beam `beam` (the contract uses `BEAM_S1`).
 pub fn decode(
     lex: &CappedLexicon,
@@ -532,7 +544,19 @@ pub fn decode(
     profile: Profile,
     beam: usize,
 ) -> Result<Vec<(f64, Vec<String>)>, Error> {
-    Ok(decode_segment(lex, syls, lm, profile.lambda(), "<s>", End::Eos, beam)?
+    decode_from(lex, syls, lm, profile, beam, "<s>")
+}
+
+/// `decode` with the first word conditioned on `start` (lm.py `decode(..., start=)`).
+pub fn decode_from(
+    lex: &CappedLexicon,
+    syls: &[String],
+    lm: &Lm,
+    profile: Profile,
+    beam: usize,
+    start: &str,
+) -> Result<Vec<(f64, Vec<String>)>, Error> {
+    Ok(decode_segment(lex, syls, lm, profile.lambda(), start, End::Eos, beam)?
         .into_iter()
         .map(|(s, ws)| (s, ws.into_iter().map(|(w, _)| w.to_string()).collect()))
         .collect())
@@ -589,6 +613,18 @@ mod tests {
         assert_eq!(lm.eos(0.5, "a"), 0.5 * ((2.0 - 0.75) / 4.0 + (1.0 - (2.0 - 0.75) / 4.0) * p_eos).log10());
         assert_eq!(lm.eos(0.5, "b"), 0.5 * p_eos.log10());
         assert_eq!((lm.count("a"), lm.count("<s>"), lm.count("zzz"), lm.total()), (6, 0, 0, 10));
+    }
+
+    /// S2h §1 on the tiny model (history only for `<s>` and `a`): whole, then last character, else `<s>`.
+    #[test]
+    fn history_prefers_whole_then_last_char_then_sentence_start() {
+        let lm = Lm::parse(&tiny()).unwrap();
+        assert_eq!(history("", &lm), "<s>");
+        assert_eq!(history("a", &lm), "a");
+        assert_eq!(history("ba", &lm), "a");
+        assert_eq!(history("ab", &lm), "<s>");
+        assert_eq!(history("b", &lm), "<s>");
+        assert_eq!(history("zz", &lm), "<s>");
     }
 
     #[test]

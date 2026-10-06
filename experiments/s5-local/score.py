@@ -11,7 +11,7 @@ import os
 import s5k
 from s5 import lenient_fn, mcnemar, pct, positions  # S5j pure functions only
 
-BASE_CONDS = ("L-noul", "B1-ll", "B4-ll", "Q-ll")  # paired with S5j's A-fwd / J-sent-fwd
+BASE_CONDS = ("L-noul", "B1-ll", "B4-ll", "Q-ll", "Q8-ll")  # paired with S5j's A-fwd / J-sent-fwd
 
 
 def load_cond(d, rows, cn, mode):
@@ -84,9 +84,12 @@ def main():
                 cond[cn + "+ctxall"] = {"sent": {**wo["sent"], **w["sent"]}, "first": {**wo["first"], **w["first"]},
                                         "scores": {}, "cover": wo["cover"], "lat": w["lat"]}
     pairs = s5j_pairs(name, rows)
-    mp = os.path.join(d, "meta.jsonl")
-    meta = [json.loads(l) for l in open(mp)] if os.path.exists(mp) else []
-    idle = bool(meta) and all(m.get("load_note") == "idle window" for m in meta)
+    def meta_of(fname):  # Mac runs log meta.jsonl, 188 runs (Q8-ll) meta-188.jsonl; each condition's lat_note uses its own
+        mp = os.path.join(d, fname)
+        ms = [json.loads(l) for l in open(mp)] if os.path.exists(mp) else []
+        return ms, bool(ms) and all(m.get("load_note") == "idle window" for m in ms)
+    meta, idle_mac = meta_of("meta.jsonl")
+    _, idle_188 = meta_of("meta-188.jsonl")
     ms = sorted(r["margin"] for r in rows)
     grid = [ms[min(n - 1, int(n * q / 10))] for q in range(1, 10)] + [math.inf]
     tpath = s5k.L_PRIV + "/tau.json"
@@ -128,13 +131,21 @@ def main():
                    "a1b8": sum(ok(fin[k], k) for k in o8) / len(o8) if o8 else None,
                    "fixed": fx, "broken": br, "net": fx - br, "p": p, "se": se,
                    "first_pick": sum(c["first"][k] for k in cov if k in c["first"]) / max(1, sum(1 for k in cov if k in c["first"])) if c["first"] else None,
-                   "tau": c.get("tau"), "lat_note": "idle window" if idle else "load unknown"}
+                   "tau": c.get("tau"),
+                   "lat_note": "idle window" if (idle_188 if cn.split("+")[0].split("@")[0] == "Q8-ll" else idle_mac) else "load unknown"}
             if cn.split("+")[0].split("@")[0] in BASE_CONDS:
                 for ref, rs in pairs.items():
                     com = [k for k in cov if k in rs]
                     if com:
                         f2, b2, p2, _ = mcnemar([ok(rs[k], k) for k in com], [ok(fin[k], k) for k in com])
                         rec[f"vs_{ref}"] = f"n={len(com)} fixed={f2} broken={b2} p={p2:.4f}"
+            if cn.startswith("Q8-ll") and cn.replace("Q8-ll", "Q-ll", 1) in cond:  # report-only: 8B vs 1.7B, same condition (contract §11)
+                q = cond[cn.replace("Q8-ll", "Q-ll", 1)]
+                com = [k for k in cov if k in q["cover"]]
+                if com:
+                    qs = {k: q["sent"].get(k, base[k]) for k in com}
+                    f2, b2, p2, _ = mcnemar([ok(qs[k], k) for k in com], [ok(fin[k], k) for k in com])
+                    rec["vs_Q-ll"] = f"n={len(com)} fixed={f2} broken={b2} p={p2:.4f}"
             lat = cond[cn.split("@")[0]]["lat"]
             if sub == "all" and len(lat) > 1:
                 # lat[0] is "first row after load" only for the condition that starts its process (L-noul; every ll model)
