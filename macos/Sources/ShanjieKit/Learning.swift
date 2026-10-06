@@ -198,7 +198,7 @@ extension Session {
         case .toggleBackup:
             shell.setBackupExcluded(!shell.backupExcluded)
         case .toggleDemote:
-            shell.setDemote(!shell.demoteOn)
+            applyDemote(!shell.demoteOn)
         }
     }
 }

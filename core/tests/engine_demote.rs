@@ -1,7 +1,7 @@
-//! SW first slice (docs/contracts/sw-sensitive-demote.md section 4 (b), (c)): the demotion table through
-//! the engine. Needs data/lm/bigram.sjlm and fails loudly without it (never skips).
+//! SW first slice (docs/contracts/sw-sensitive-demote.md section 4 (b), (c), and the load checks of section 2):
+//! the demotion table through the engine. Needs data/lm/bigram.sjlm and fails loudly without it (never skips).
 use core::engine::*;
-use core::lm::{decode, decode_segment, CappedLexicon, Demote, End, Lm, Profile};
+use core::lm::{decode, decode_from, decode_segment, CappedLexicon, Demote, End, Lm, Profile};
 use core::{Lexicon, Syls};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
@@ -13,8 +13,7 @@ fn root() -> PathBuf {
 struct Shared {
     lex: Arc<Lexicon>,
     lm: Arc<Lm>,
-    table: Demote,
-    /// The capped lexicon with data/lexicon/demote.tsv, and without it (the lexicon as before this slice).
+    /// The capped lexicon with data/lexicon/demote.tsv, and without any table (the lexicon as before this slice).
     on: Arc<CappedLexicon>,
     off: Arc<CappedLexicon>,
 }
@@ -29,9 +28,9 @@ fn shared() -> &'static Shared {
         let lm = Lm::load(&lm_file).unwrap();
         let overlay = std::fs::read_to_string(dir.join("overlay-add.tsv")).unwrap();
         let table = Demote::parse(&std::fs::read_to_string(dir.join("demote.tsv")).unwrap()).unwrap();
-        let on = Arc::new(CappedLexicon::new(lex.clone(), &overlay, &lm).with_demote(table.clone()));
-        let off = Arc::new(CappedLexicon::new(lex.clone(), &overlay, &lm));
-        Shared { lex, lm: Arc::new(lm), table, on, off }
+        let on = Arc::new(CappedLexicon::new(lex.clone(), &overlay, &lm, Some(&table)).unwrap());
+        let off = Arc::new(CappedLexicon::new(lex.clone(), &overlay, &lm, None).unwrap());
+        Shared { lex, lm: Arc::new(lm), on, off }
     })
 }
 
@@ -76,14 +75,30 @@ fn syls(s: &str) -> Syls {
     s.split(' ').map(str::to_string).collect()
 }
 
-/// Premise of the slice: the user report, `ㄍㄠˇ ㄨㄢˊ ㄓㄜˋ ㄅㄛ`, is 睪丸這波 without the table and 搞完這波 with it.
+const REPORT: &str = "ㄍㄠˇ ㄨㄢˊ ㄓㄜˋ ㄅㄛ";
+
+/// Premise of the slice: the user report is 睪丸這波 without the table and 搞完這波 with it.
 #[test]
 fn user_report_flips_with_the_table() {
     let s = shared();
-    let r = syls("ㄍㄠˇ ㄨㄢˊ ㄓㄜˋ ㄅㄛ");
     for profile in [Profile::Chat, Profile::Formal] {
-        assert_eq!(type_syls(&mut engine(&s.off, profile), &r).preedit, "睪丸這波");
-        assert_eq!(type_syls(&mut engine(&s.on, profile), &r).preedit, "搞完這波");
+        assert_eq!(type_syls(&mut engine(&s.off, profile), &syls(REPORT)).preedit, "睪丸這波");
+        assert_eq!(type_syls(&mut engine(&s.on, profile), &syls(REPORT)).preedit, "搞完這波");
+    }
+}
+
+/// Contract section 3 (setting): toggling during a composition recomputes it and returns the snapshot, so
+/// the preedit changes at once, both ways.
+#[test]
+fn toggle_mid_composition_reranks() {
+    let s = shared();
+    for profile in [Profile::Chat, Profile::Formal] {
+        let mut e = engine(&s.on, profile);
+        assert_eq!(type_syls(&mut e, &syls(REPORT)).preedit, "搞完這波");
+        let o = e.set_demote(false).unwrap();
+        assert!(o.handled && o.commit.is_empty());
+        assert_eq!(o.preedit, "睪丸這波");
+        assert_eq!(e.set_demote(true).unwrap().preedit, "搞完這波");
     }
 }
 
@@ -92,17 +107,17 @@ fn user_report_flips_with_the_table() {
 #[test]
 fn set_demote_false_equals_no_table() {
     let s = shared();
-    let rows = ["ㄍㄠˇ ㄨㄢˊ ㄓㄜˋ ㄅㄛ", "ㄑㄧㄝ ㄔㄨˊ ㄍㄠˇ ㄨㄢˊ", "ㄑㄧㄝ ㄔㄨˊ ㄍㄠ ㄨㄢˊ", "ㄗㄨㄛˇ ㄘㄜˋ ㄍㄠ ㄨㄢˊ", "ㄐㄧㄣ ㄊㄧㄢ ㄍㄠˇ ㄨㄢˊ"];
+    let rows = [REPORT, "ㄑㄧㄝ ㄔㄨˊ ㄍㄠˇ ㄨㄢˊ", "ㄑㄧㄝ ㄔㄨˊ ㄍㄠ ㄨㄢˊ", "ㄗㄨㄛˇ ㄘㄜˋ ㄍㄠ ㄨㄢˊ", "ㄐㄧㄣ ㄊㄧㄢ ㄍㄠˇ ㄨㄢˊ"];
     for profile in [Profile::Chat, Profile::Formal] {
         for r in rows {
             let r = syls(r);
             let mut a = engine(&s.on, profile);
-            a.set_demote(false);
+            a.set_demote(false).unwrap();
             let mut b = engine(&s.off, profile);
             let (oa, ob) = (type_syls(&mut a, &r), type_syls(&mut b, &r));
             assert_eq!(oa.preedit, ob.preedit);
             assert_eq!(a.total_score().unwrap().to_bits(), b.total_score().unwrap().to_bits());
-            let da = core::lm::decode_from(&s.on, &r, &s.lm, profile, 64, "<s>", false).unwrap();
+            let da = decode_from(&s.on, &r, &s.lm, profile, 64, "<s>", false).unwrap();
             let db = decode(&s.off, &r, &s.lm, profile, 64).unwrap();
             assert_eq!(da.len(), db.len());
             for (x, y) in da.iter().zip(&db) {
@@ -127,12 +142,8 @@ fn fixed_demoted_word_total_equals_top1() {
         let plain = decode(&s.off, &r, &s.lm, profile, 64).unwrap().swap_remove(0).0;
         assert!((plain - score - 2.0).abs() < 1e-9, "{plain} vs {score}");
         let mut e = engine(&s.on, profile);
-        for syl in &r {
-            for k in keys_of(syl) {
-                e.key(k).unwrap();
-            }
-        }
-        let mut o = e.key(Key::new(KeyKind::Space)).unwrap();
+        let mut o = type_syls(&mut e, &r);
+        o = e.key(Key::new(KeyKind::Space)).unwrap();
         // The cursor is at the end: the candidates are the words ending there; walk to 睪丸.
         let mut found = false;
         for _ in 0..5000 {
@@ -150,16 +161,89 @@ fn fixed_demoted_word_total_equals_top1() {
     }
 }
 
-/// 4 (c), the decoder side: the closing transition into a fixed word charges that word's delta.
+/// 4 (c), the decoder side: the closing transition into a fixed word charges that word's delta, which the
+/// fixed word finds from the same entry as the decoder (`best_lp_delta`).
 #[test]
 fn next_end_charges_the_fixed_words_delta() {
     let s = shared();
     let r = syls("ㄑㄧㄝ ㄔㄨˊ");
-    let lp = s.on.best_lp(&syls("ㄍㄠˇ ㄨㄢˊ"), "睪丸").unwrap();
-    let d = s.on.delta(&syls("ㄍㄠˇ ㄨㄢˊ"), "睪丸");
+    let (lp, d) = s.on.best_lp_delta(&syls("ㄍㄠˇ ㄨㄢˊ"), "睪丸").unwrap();
     assert_eq!(d, 2.0);
-    assert_eq!(s.on.delta(&syls("ㄍㄠ ㄨㄢˊ"), "睪丸"), 0.0);
+    assert_eq!(s.on.best_lp_delta(&syls("ㄍㄠ ㄨㄢˊ"), "睪丸").unwrap().1, 0.0);
+    assert_eq!(s.off.best_lp_delta(&syls("ㄍㄠˇ ㄨㄢˊ"), "睪丸").unwrap(), (lp, 0.0));
     let top = |delta| decode_segment(&s.on, &r, &s.lm, 0.5, "<s>", End::Next { word: "睪丸", lp, delta }, 64).unwrap()[0].0;
     assert!((top(0.0) - top(d) - d).abs() < 1e-12);
-    assert_eq!(s.table.delta("ㄍㄠˇ-ㄨㄢˊ", "睪丸"), 2.0);
+}
+
+/// A copy of data/lexicon with the given demote.tsv (symlinks for the big files).
+fn data_dir_with(tag: &str, demote: &str) -> PathBuf {
+    let d = std::env::temp_dir().join(format!("shanjie-demote-{}-{tag}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&d);
+    std::fs::create_dir_all(&d).unwrap();
+    for f in ["mcbpmf-data.txt", "overlay-add.tsv", "sandhi-add.tsv"] {
+        std::os::unix::fs::symlink(root().join("data/lexicon").join(f), d.join(f)).unwrap();
+    }
+    std::fs::write(d.join("demote.tsv"), demote).unwrap();
+    d
+}
+
+/// Contract section 2: a row that matches no lexicon entry fails engine creation: a reading typed with a
+/// space, a reading the lexicon lacks, a word absent under that reading (the standard one), and a `*` word
+/// absent everywhere. A good row and an empty table load.
+#[test]
+fn engine_new_rejects_rows_that_match_nothing() {
+    let new = |tag: &str, text: &str| {
+        let d = data_dir_with(tag, text);
+        let ok = Engine::new(&d, Layout::Standard).is_ok();
+        std::fs::remove_dir_all(&d).unwrap();
+        ok
+    };
+    assert!(new("good", "ㄍㄠˇ-ㄨㄢˊ\t睪丸\t2.0\treading\tx\n"));
+    assert!(new("star", "*\t睪丸\t2.0\treading\tx\n"));
+    assert!(new("empty", "# nothing\n"));
+    assert!(!new("space", "ㄍㄠˇ ㄨㄢˊ\t睪丸\t2.0\treading\tx\n"), "a mistyped reading");
+    assert!(!new("absent-word", "ㄍㄠˇ-ㄨㄢˊ\t睪丸癌\t2.0\treading\tx\n"), "a word absent under that reading");
+    assert!(!new("no-reading", "ㄍㄠˇ-ㄍㄠˇ\t睪丸\t2.0\treading\tx\n"), "a reading the lexicon lacks");
+    assert!(!new("star-absent", "*\t睪丸睪丸\t2.0\treading\tx\n"), "a `*` word the lexicon lacks");
+}
+
+/// Measurement for the research log (contract section 3, not an acceptance gate): after one re-pick of
+/// 睪丸 under ㄍㄠˇ ㄨㄢˊ (learning on, memory only), the top-1 of the same typing with demotion on.
+/// Run: cargo test --release --test engine_demote -- --ignored --nocapture
+#[test]
+#[ignore]
+fn measure_repick_of_the_demoted_word() {
+    let s = shared();
+    let repick = |ctx: &str, profile: Profile, reading: &str| -> String {
+        let mut e = engine(&s.on, profile);
+        e.set_today(Some(20_000));
+        e.set_learning(true);
+        let r = syls(reading);
+        e.set_left_context(ctx);
+        let mut o = type_syls(&mut e, &r);
+        // Teach: open the candidates of the span ending at the first two syllables, choose 睪丸, commit.
+        for _ in 0..r.len() - 2 {
+            e.key(Key::new(KeyKind::Left)).unwrap();
+        }
+        o = e.key(Key::new(KeyKind::Space)).unwrap();
+        for _ in 0..5000 {
+            if o.candidates[o.selected.unwrap()] == "睪丸" {
+                break;
+            }
+            o = e.key(Key::new(KeyKind::Right)).unwrap();
+        }
+        e.key(Key::new(KeyKind::Enter)).unwrap();
+        e.key(Key::new(KeyKind::End)).unwrap();
+        let taught = e.key(Key::new(KeyKind::Enter)).unwrap().commit;
+        e.set_left_context(ctx);
+        let again = type_syls(&mut e, &r).preedit;
+        format!("{taught} -> {again}")
+    };
+    for (name, ctx) in [("切除", "切除"), ("none", "")] {
+        for reading in ["ㄍㄠˇ ㄨㄢˊ", REPORT] {
+            for (pn, p) in [("chat", Profile::Chat), ("formal", Profile::Formal)] {
+                println!("MEASURE ctx={name} reading=[{reading}] {pn}: {}", repick(ctx, p, reading));
+            }
+        }
+    }
 }

@@ -249,8 +249,6 @@ pub struct Engine {
     data_dir: Option<PathBuf>,
     lm: Option<LmState>,
     profile: Profile,
-    /// `demote.tsv` of `data_dir` (empty for `with_lexicon` engines), handed to the capped lexicon by `load_lm`.
-    demote_table: Demote,
     /// Whether the table applies (default on; `set_demote`).
     demote: bool,
     /// Words of the current best path with the lp each was scored with, whether the word is a
@@ -318,8 +316,12 @@ fn join_overlays(mut overlay: String, sandhi: &str) -> String {
 impl Engine {
     pub fn new(data_dir: &Path, layout: Layout) -> Result<Engine, EngineError> {
         let mut e = Engine::with_lexicon(load_lexicon(data_dir)?, layout);
+        // Required like the other data files, and every row must name an entry of the lexicon (contract
+        // sw-sensitive-demote section 2); `load_lm` reads it again to resolve it against the capped lexicon.
         let demote = std::fs::read_to_string(data_dir.join("demote.tsv")).map_err(|_| EngineError::LoadFailed)?;
-        e.demote_table = Demote::parse(&demote).ok_or(EngineError::LoadFailed)?;
+        if !Demote::parse(&demote).is_some_and(|d| d.check(&e.lex)) {
+            return Err(EngineError::LoadFailed);
+        }
         e.data_dir = Some(data_dir.to_path_buf());
         Ok(e)
     }
@@ -331,7 +333,6 @@ impl Engine {
             data_dir: None,
             lm: None,
             profile: Profile::Chat,
-            demote_table: Demote::default(),
             demote: true,
             path: Vec::new(),
             punct: default_punct(),
@@ -516,8 +517,10 @@ impl Engine {
     pub fn load_lm(&mut self, path: &Path) -> Result<(), EngineError> {
         let dir = self.data_dir.as_ref().ok_or(EngineError::LoadFailed)?;
         let overlay = std::fs::read_to_string(dir.join("overlay-add.tsv")).map_err(|_| EngineError::LoadFailed)?;
+        let demote = std::fs::read_to_string(dir.join("demote.tsv")).map_err(|_| EngineError::LoadFailed)?;
+        let demote = Demote::parse(&demote).ok_or(EngineError::LoadFailed)?;
         let lm = Lm::load(path).map_err(|_| EngineError::LoadFailed)?;
-        let capped = CappedLexicon::new(self.lex.clone(), &overlay, &lm).with_demote(self.demote_table.clone());
+        let capped = CappedLexicon::new(self.lex.clone(), &overlay, &lm, Some(&demote)).ok_or(EngineError::LoadFailed)?;
         self.lm = Some(LmState { lm: Arc::new(lm), capped: Arc::new(capped) });
         Ok(())
     }
@@ -562,10 +565,16 @@ impl Engine {
         self.lm = Some(LmState { lm, capped });
     }
 
-    /// Whether the demotion table applies (default on). Does not recompute the display; the next change
-    /// to the composition decodes with the new setting.
-    pub fn set_demote(&mut self, on: bool) {
+    /// Whether the demotion table applies (default on, remembered even before a model is loaded);
+    /// recomputes the composition and returns the snapshot, like `set_profile`. On a decode failure the
+    /// engine resets itself.
+    pub fn set_demote(&mut self, on: bool) -> Result<Output, EngineError> {
         self.demote = on;
+        if let Err(e) = self.refresh() {
+            self.clear_all();
+            return Err(e);
+        }
+        self.handled()
     }
 
     /// Switch the profile (default chat; remembered even before a model is loaded), recompute the
@@ -580,7 +589,7 @@ impl Engine {
     }
 
     /// Total score of the current best path as `lm.decode` scores one: every word (fixed words with
-    /// their capped `lp_F`) adds `word(λ, previous, w, lp)`, then `eos` of the last word. Punctuation
+    /// their capped `lp_F`) adds `word(λ, previous, w, lp) − δ` (δ: the demotion of the entry, 0 when demotion is off), then `eos` of the last word. Punctuation
     /// splits it into sentences (s3d §4): the stretch before it closes with `eos`, the next starts from
     /// `<s>`, and the punctuation itself scores nothing. `None` without a model or without words.
     pub fn total_score(&self) -> Option<f64> {
@@ -693,16 +702,13 @@ impl Engine {
         let mut delta_fixed = Vec::with_capacity(self.fixed.len());
         for f in &self.fixed {
             // Punctuation has no reading in the lexicon; 0.0 only keeps `path` aligned (s3d §4).
-            lp_fixed.push(if self.is_punct(f.start) {
-                0.0
+            let (lp, delta) = if self.is_punct(f.start) {
+                (0.0, 0.0)
             } else {
-                st.capped.best_lp(&self.syls[f.start..f.end], &f.word).ok_or(EngineError::Internal)?
-            });
-            delta_fixed.push(if self.demote && !self.is_punct(f.start) {
-                st.capped.delta(&self.syls[f.start..f.end], &f.word)
-            } else {
-                0.0
-            });
+                st.capped.best_lp_delta(&self.syls[f.start..f.end], &f.word).ok_or(EngineError::Internal)?
+            };
+            lp_fixed.push(lp);
+            delta_fixed.push(if self.demote { delta } else { 0.0 });
         }
         let (mut out, mut path) = (String::new(), Vec::new());
         for gap in 0..=self.fixed.len() {

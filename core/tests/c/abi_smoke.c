@@ -103,6 +103,19 @@ static int row_shows(ShanjieEngine *e, const char *want) {
   return ok;
 }
 
+/* The user report (sw contract): ㄍㄠˇ ㄨㄢˊ ㄓㄜˋ ㄅㄛ, standard keys; its two possible top-1 strings. */
+#define REPORT_KEYS "el3j065k41i "
+#define REPORT_ON "\xe6\x90\x9e\xe5\xae\x8c\xe9\x80\x99\xe6\xb3\xa2"  /* 搞完這波 */
+#define REPORT_OFF "\xe7\x9d\xaa\xe4\xb8\xb8\xe9\x80\x99\xe6\xb3\xa2" /* 睪丸這波 */
+
+/* Type the report and leave it composing; 1 when the preedit after the last key is `want`. */
+static int report_shows(ShanjieEngine *e, const char *want) {
+  ShanjieOutput *o = type_last(e, REPORT_KEYS);
+  int ok = o != 0 && str_eq(o->preedit, want);
+  shanjie_output_free(o);
+  return ok;
+}
+
 static int run_lm(const char *dir, const char *lm, const char *missing) {
   static ShanjieOutput dummy; /* non-NULL sentinel: proves *out is overwritten */
   ShanjieEngine *e = 0;
@@ -124,12 +137,27 @@ static int run_lm(const char *dir, const char *lm, const char *missing) {
   /* Out-of-range profile: code 2, *out NULL, nothing changes. */
   o = &dummy;
   CHECK(311, shanjie_engine_set_profile(e, 7, &o) == 2 && o == 0);
-  /* set_demote (docs/contracts/sw-sensitive-demote.md): 0 or 1, else 2; NULL engine 1. ROW10 has no
-   * demoted word, so the display is the same either way. */
-  CHECK(701, shanjie_engine_set_demote(0, 1) == 1);
-  CHECK(702, shanjie_engine_set_demote(e, 2) == 2);
-  CHECK(703, shanjie_engine_set_demote(e, 0) == 0 && row_shows(e, FORMAL) && enter_commits(e, FORMAL));
-  CHECK(704, shanjie_engine_set_demote(e, 1) == 0 && row_shows(e, FORMAL) && enter_commits(e, FORMAL));
+  /* set_demote (docs/contracts/sw-sensitive-demote.md): 0 or 1, else 2; NULL engine or out 1; recomputes
+   * like set_profile. REPORT is the user report ㄍㄠˇ ㄨㄢˊ ㄓㄜˋ ㄅㄛ (standard keys): 搞完這波 with the
+   * table on (the default), 睪丸這波 with it off, so a set_demote that does nothing fails here. */
+  CHECK(701, shanjie_engine_set_demote(0, 1, &o) == 1 && o == 0);
+  CHECK(702, shanjie_engine_set_demote(e, 1, 0) == 1);
+  o = &dummy;
+  CHECK(703, shanjie_engine_set_demote(e, 2, &o) == 2 && o == 0);
+  CHECK(704, report_shows(e, REPORT_ON));
+  CHECK(705, shanjie_engine_set_demote(e, 0, &o) == 0 && o != 0 && str_eq(o->preedit, REPORT_OFF)); /* mid-composition */
+  shanjie_output_free(o);
+  o = 0;
+  CHECK(706, shanjie_engine_reset(e, 1, &o) == 0 && o != 0);
+  shanjie_output_free(o);
+  o = 0;
+  CHECK(707, report_shows(e, REPORT_OFF));
+  CHECK(708, shanjie_engine_set_demote(e, 1, &o) == 0 && o != 0 && str_eq(o->preedit, REPORT_ON));
+  shanjie_output_free(o);
+  o = 0;
+  CHECK(709, shanjie_engine_reset(e, 1, &o) == 0 && o != 0);
+  shanjie_output_free(o);
+  o = 0;
   /* Reset (both modes) keeps the LM and the formal profile. */
   for (mode = 0; mode <= 1; mode++) {
     int b = 312 + (int)mode * 3;

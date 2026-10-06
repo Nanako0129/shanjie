@@ -15,7 +15,7 @@ final class ShellTests: XCTestCase {
     }
 
     private func makeShell(secure: Bool = false, store: LayoutStore = MemoryLayoutStore()) -> Shell {
-        let shell = Shell(resources: resources, panel: FakePanel(), isSecureInput: { secure }, layoutStore: store, learningDirectory: nil, dialogs: FakeDialogs())
+        let shell = Shell(resources: resources, panel: FakePanel(), isSecureInput: { secure }, layoutStore: store, learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore())
         XCTAssertNotNil(shell.engine)
         return shell
     }
@@ -241,7 +241,7 @@ final class ShellTests: XCTestCase {
     }
 
     func testEngineThatCannotBeBuiltPassesEveryKey() {
-        let shell = Shell(resources: resources.appendingPathComponent("missing"), panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(), learningDirectory: nil, dialogs: FakeDialogs())
+        let shell = Shell(resources: resources.appendingPathComponent("missing"), panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(), learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore())
         XCTAssertNil(shell.engine)
         let c = Controller(shell)
         c.session.activate()
@@ -446,10 +446,15 @@ final class ShellTests: XCTestCase {
         XCTAssertEqual(item()?.checked, true, "default on")
         c.type(report)
         XCTAssertEqual(c.client.marked, "搞完這波")
-        c.press(Keys.esc)
-        c.session.perform(.toggleDemote)
+        c.session.perform(.toggleDemote)          // mid-composition: the snapshot is shown at once
         XCTAssertEqual(store.demote, false)
         XCTAssertEqual(item()?.checked, false)
+        XCTAssertEqual(c.client.marked, "睪丸這波")
+        c.session.perform(.toggleDemote)
+        XCTAssertEqual(c.client.marked, "搞完這波")
+        c.session.perform(.toggleDemote)
+        XCTAssertEqual(c.client.marked, "睪丸這波")
+        c.press(Keys.esc)
         c.type(report)
         XCTAssertEqual(c.client.marked, "睪丸這波")
         c.press(Keys.esc)
