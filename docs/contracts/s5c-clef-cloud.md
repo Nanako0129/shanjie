@@ -104,3 +104,14 @@
 ## 9. 回滾
 
 只新增 `experiments/s5-clef/` 與 `~/.cache/shanjie/work/s5-clef/`；刪掉即可。
+
+## 10. 修訂（2026-10-06）：加跑完整版 Clef（27B）
+
+- **起因**：S5c 只量了 `clef-flash`（9B）。使用者 2026-10-06 要求完整版也照原計畫跑完。Cloudflare 文件現在寫明完整版 `@cf/cloudflare/clef` 是 27B、每百萬輸入 token 0.24 美元（當初契約寫「參數量未公開」，已不成立）。
+- **做法**：題目、集合、prep 檔、解析規則、§3 的判斷規則全部不變，只換模型。
+  - `clef_run.py` 加 `--model clef|clef-flash`，預設 `clef-flash`。預設時的請求、輸出檔名與內容逐位元組不變。`--model clef` 時端點是 `…/ai/run/@cf/cloudflare/clef`，body 的 `model` 是 `clef`，輸出檔名前綴 `clef27-`（`clef27-sent-fwd.jsonl` 等），放在同一個目錄。
+  - 費用照模型換算：`clef-flash` 0.09、`clef` 0.24 美元／百萬輸入 token。S5c 的累計上限仍是 1 美元（`clef-flash` 已花約 0.139 美元），超過就停。
+  - `clef_score.py` 加一組 C27-sent-fwd、C27-sent-rev、C27-pos：對第 1 名與對 Jev 的判斷照 §3（只看 cvtune）；另外報 C27 對 `clef-flash` 同條件的逐列配對（只報告，不另下判斷）。
+- **順序**：先冒煙（dev302 前 20 列、每個條件），再跑 cvtune、dev302、typing76。冒煙要印回答欄位與機率鍵，和 flash 不同就停下回報。
+- **產出**：dev302、typing76 的 `clef27-*.jsonl` 與 `score.json` 進 `experiments/s5-clef/results/`；README 的結果節與研究紀錄由 main 補。
+- executor 的限制照 §8；網路呼叫只由 main 執行。
