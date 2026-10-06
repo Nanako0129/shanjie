@@ -44,7 +44,7 @@ HASHES = {
 }
 NROWS = {"discordtune": 1000, "cvtune": 1000, "dev302": 302, "typing76": 76}
 PUBLIC = ("dev302", "typing76")
-CONDS = ["L-noul", "L-choice-fwd", "L-choice-rev", "L-pos", "B1-ll", "B4-ll", "Q-ll"]
+CONDS = ["L-noul", "L-choice-fwd", "L-choice-rev", "L-pos", "B1-ll", "B4-ll", "Q-ll", "Q8-ll"]
 
 
 def die(msg):
