@@ -122,3 +122,11 @@ main 安裝後，請使用者在 TextEdit：打「好」按 Enter 送出，再�
 - **第二輪的預算**：executor 1 回合加 1 次修正；第一輪的實作（分支上的 WIP commit `3b90472`）可以沿用。
 - **§8、§9 對 `engine_learn.rs` 的限制的例外**：§8 的「`engine_learn.rs` 任何既有斷言失敗」停止條件、§8 檔案清單的「不改 `engine_learn.rs` 既有的測試與斷言」、§9 的禁止事項，對 `empty_learner_matches_goldens`、`global_eps_table`／`global_sweep` 以外的每一個測試照舊適用；這兩個只能照 §10.3 改（含 §10.3 (1) 讓教學迴圈讀 `SWEEP_TAUGHT` 的那一處），由 executor 改。
 - §8 的其他停止條件照舊，另加：§10.2 沒過；§10.3 的關卡斷言不成立或五個數的停止條件成立；任何 §10.3 列出以外的測試或斷言需要修改。
+
+## 11. 修訂二（2026-10-06）：Swift 殼層測試的前提
+
+- **起因**：第二輪收尾的 fresh verifier 跑 `swift test --package-path macos`，`ShellTests.testOwnerChangeReappliesTheProfile` 在分支失敗、在 main 通過（89 個測試 1 個失敗）。這個測試在 Discord（聊天設定）先打「你」，切到 TextEdit（書面設定）打第 10 列，再回到 Discord 打第 10 列，用「聊天與書面的輸出不同」判斷設定有沒有重新套用。S2h 之後，Discord 第二次組字的前文是「你」，聊天的第一名從「其中」變成「期中」，和書面相同，測試分不出設定。這是 S2h 預期的行為改變（前文改變解碼），不是殼層的錯。
+- **處置（只改這一個測試，main 改）**：在 Discord 第二次組字之前，把 `a.client.selectedOverride` 設成 `NSRange(location: NSNotFound, length: 0)`（`FakeClient` 為前文測試準備的「沒有插入點」），讓這次組字沒有前文，回到測試原本的前提。所有斷言不改，預期仍是 `"你" + Row10.chat`。
+- **驗收追加**：`swift test --package-path macos` 全過（第 5 節原本只寫了 `cargo test`）；這個測試在只拿掉這一行時必須失敗（證明它量到的是前文造成的差異，而不是別的）。
+- **範圍**：§10.4 的例外清單加上這一個測試；`macos/Tests` 其他測試與 `macos/Sources` 一律不改。其他停止條件照舊。
+- **保留集不重跑**：這個修改只動測試，解碼與資料都沒變；第二輪 verifier 已跑過一次（聊天 177、書面 183，`--context`；預設 178、184）。
