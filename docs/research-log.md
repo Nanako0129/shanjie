@@ -874,3 +874,13 @@ S3b-2 試用系統候選面板的註解與網格（兩個 wip commit：d04e7a7�
 - **實打對照表**：`eval/bench/static/typing-test.json` 從 `docs/typing-test.md` 的自動打字表抄 27 格，`tools/bench.py check-static` 逐格依行號、欄位、「／」前後比對通過；改一格就失敗。新聞那組的 294 句寫在組名裡，因為那一行第一個數字是網址裡的 3。
 - **基準線**：10/05 用真實資料量的 v0.1.0–v0.1.2（`eval/bench/results/2026-10-05-baseline.json`）一併進 repo；`docs/benchmark.md` 由 `table` 產生（這個檔案第一次 commit，沒有舊版可比）；`test_version_rows_and_holdout_table_unchanged` 確認拿掉參考列與實打對照後，版本列與保留集的表和不帶它們時產生的完全相同。
 - 套件 v1 仍釘 model-v1；model-v2 出貨時另寫套件 v2，並請使用者排時間做第一次里程碑實打。
+
+## 2026-10-06：實機讀不到前文（S4 起就有的 bug）
+
+S2h 實機驗收時，使用者在終端機、Discord、VS Code、Chrome 網址列、Finder 搜尋框打「好」＋Enter，再打 ㄅㄚ˙，全部是「巴」（引擎與殼層測試都是「吧」）。main 在安裝版加一行只記數字的暫時日誌（沒有 commit），重打一次：
+
+- 組字開始時 `selectedRange` 是 `{1, 0}`、讀回 1 個字，但 `markedRange` 是 `{1, 0}`（插入點、長度 0），不是 NSTextInputClient 文件寫的 `{NSNotFound, 0}`；有一個 client 回 `{NSNotFound, NSNotFound}`。
+- 殼層用「位置不是 `NSNotFound`」判斷「還有 marked text」，所以這些 App 一律當成沒有前文，退回 `<s>`。只有一個 client 回 `{NSNotFound, 0}`，那次讀到了 2 個漢字。
+- **影響**：S4 的選字記憶從合併起，在這些 App 裡前文 key 都是空的（單字只在完整前文下學習與查表，所以單字學習在這些 App 實際上沒有作用）；S2h 也拿不到前文。殼層測試的假 client 照文件回 `{NSNotFound, 0}`，所以測試看不到。
+- **修正**：長度是 0（任何位置），或位置是 `NSNotFound`，都算沒有 marked text；長度大於 0 才不讀。新測試 `testEmptyMarkedRangeAnywhereStillReadsTheContext`（`{4,0}`、`{0,0}`、`{NSNotFound, NSNotFound}`）在舊程式上失敗兩種、修正後全過；`swift test` 90 個測試、1 個略過、0 個失敗。S4 契約 §2 的條件同步更正。
+- **教訓**（寫進 methodology）：假 client 照文件實作，量不到真實 App 的回報；讀 client 狀態的程式要在實機上用只記數字的日誌確認過，才算有效。

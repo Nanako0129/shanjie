@@ -156,9 +156,12 @@ extension Session {
 
     /// Section 2: read once at composition start. No context when there is no insertion point or
     /// the client still holds marked text; at most `LeftContext.maxUTF16` units are requested.
+    /// "No marked text" is an empty marked range at any location: on 2026-10-06 VS Code, Chrome,
+    /// Finder's search field and others reported {insertion, 0} rather than NSTextInputClient's
+    /// {NSNotFound, 0}, and one reported {NSNotFound, NSNotFound} (numbers-only log on device).
     func leftContext() -> String? {
-        let selected = client.selectedRange()
-        guard selected.location != NSNotFound, client.markedRange().location == NSNotFound else { return nil }
+        let selected = client.selectedRange(), marked = client.markedRange()
+        guard selected.location != NSNotFound, marked.location == NSNotFound || marked.length == 0 else { return nil }
         let range = LeftContext.range(insertion: selected.location)
         guard range.length > 0, let text = client.attributedSubstring(from: range)?.string else { return nil }
         return LeftContext.han(text, truncated: range.location > 0)
