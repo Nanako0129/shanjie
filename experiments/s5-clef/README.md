@@ -85,7 +85,7 @@ Stdout and stderr carry counts, numbers, HTTP statuses and fixed strings. An une
 
 ## Commands for main
 
-`CF_AI_TOKEN` and `CF_ACCOUNT_ID` are read from the keychain item `cloudflare-workers-ai` (account field = account ID) into that one command's environment.
+`CF_AI_TOKEN` and `CF_ACCOUNT_ID` come from the environment. Only main runs paid calls; agent briefs forbid running `clef_run.py`.
 
 ```sh
 cd /Users/nanako/side-project/shanjie-s5c
@@ -107,6 +107,31 @@ python3 -B experiments/s5-clef/clef_score.py --sets cvtune,dev302,typing76
 ```
 
 The smoke prints the answer field names and probability keys (first request), the first-pick ratios for C-sent-fwd and C-sent-rev; the flip rate is in the scorer output.
+
+## Results (run 2026-10-06, model `clef-flash` as served that day)
+
+Smoke (dev302, first 20 rows): answers carry `choice`, `confidence`, `probabilities`, `type`; probabilities are keyed `c1`..`c8`; a wrong token stops with `HTTP 401: token or permission`. Full run: 357 requests. Spend, smoke included: US$0.139, computed by the driver from the input tokens Clef reported (`tokens_estimated=False`) at the US$0.09 per million list price; not checked against the Cloudflare bill.
+
+cvtune (decides; 1,000 rows, rank-1 baseline 85.1%):
+
+| Condition | Accuracy | vs rank 1 (fixed/broken, p) | First pick | Flip (fwd vs rev) | Latency p50/p95 per request of 20 questions |
+|---|---|---|---|---|---|
+| C-sent-fwd | 62.3% | 89/317, p = 4e-31 | 0.316 | | 780/1458 ms |
+| C-sent-rev | 88.3% | 82/50, p = 0.0067 | 0.008 | 0.544 | 650/956 ms |
+| C-pos | 80.0% | 61/112, p = 0.0001 | | | 567/899 ms |
+| J-sent-fwd (S5j) | 89.7% | 67/21 | 0.883 | | 220/292 ms |
+| J-sent-rev (S5j) | 88.5% | 71/37 | 0.021 | 0.112 | 213/268 ms |
+| J-pos (S5j) | 89.0% | 66/27 | | | 207/280 ms |
+
+Paired with Jev on cvtune: C-sent-fwd vs J-sent-fwd 30/304 (p ≈ 0), C-sent-rev vs J-sent-rev 35/37 (p = 0.91), C-pos vs J-pos 21/111 (p ≈ 0).
+
+Verdicts by the pre-registered rules (contract section 3):
+- **vs rank 1**: C-sent-rev is a candidate for H/S6 (net +32, p = 0.0067); C-sent-fwd and C-pos are not.
+- **vs Jev: Clef worse than Jev** (two pairs significantly worse, none better).
+
+Order sensitivity (measured from the per-row picks): the same rank-1 candidate is picked on 31.6% of rows when it is listed first (forward) and on 76.9% when it is listed last (reversed); picks by presented position are 316/280/130/85/58/44/49/38 forward and 8/12/15/18/36/45/97/769 reversed, and 54% of rows change answer between the two orders, against 11% for Jev. This is not a plain preference for the last slot (forward, the last slot gets 3.8%); the mechanism was not tested. Because the C-sent-rev candidate verdict holds in one order and fails badly in the other, it is not a basis for H/S6 without an order-free design.
+
+dev302 and typing76 (recorded only): C-sent-fwd 72.9% / 73.7% (rank 1: 78.8% / 85.5%), C-sent-rev 91.1% / 89.5%, C-pos 84.1% / 86.8%, flip 0.42 / 0.36. They differ from cvtune in places: on dev302, C-pos beats rank 1 (+16, p = 0.033) where cvtune loses, and C-sent-fwd is not significant (p = 0.13). Per-row files and `score.json` are in `results/`.
 
 ## Limitations
 
