@@ -9,6 +9,8 @@ Spec: `docs/contracts/s5k-local-scorers.md`. This directory holds the tooling an
 | `s5k.py` | shared: SHA-256 table (contract §2), hash-checked row loading, output paths, tie-break pick, degeneracy check. Forces `HF_HUB_OFFLINE=1`, `TRANSFORMERS_OFFLINE=1` |
 | `run_laya.py` | L-noul, L-choice-fwd, L-choice-rev, L-pos (venv A) |
 | `run_ll.py` | Q-ll (venv A), B1-ll / B4-ll (venv B) |
+| `run_ll_cuda.py` | Q8-ll: Qwen3-8B 4-bit (bitsandbytes nf4) on CUDA, for 188 (contract §11); pure scoring functions import without torch |
+| `test_run_ll_cuda.py` | offline tests for `run_ll_cuda.py` (`python3 -m unittest test_run_ll_cuda`, no torch) |
 | `score.py` | metrics, tau, pairing with S5j (any Python) |
 | `selftest.py` | error-path checks: prefix-only scorer trips the stop (exit 3); wrong hash exits non-zero |
 
@@ -188,3 +190,29 @@ In this table, fixed/broken are against rank 1. "vs A-fwd" and "vs J-sent-fwd" a
 - Shorter prompts or fewer candidates for latency (8 candidates per row now).
 - Qwen3 4B 4-bit as the next size up.
 - Prompt changes for the cloud judges, including Jev, are a separate tuning round.
+
+## Q8-ll on 188 (contract §11; main runs it, nothing here is executed on the Mac)
+
+`run_ll_cuda.py` takes the same `--set`, `--limit`, `--ctx none|real|synth`, `--idle` as `run_ll.py` and writes the same `Q8-ll.<noctx|ctx>.jsonl` records (`k`, `scores`, `ms`) into the same output directories. Its meta goes to `meta-188.jsonl` (run_ll's keys plus torch, transformers, bitsandbytes, GPU, quant, compute dtype, `kv_reuse`, `bos_token_id`), never to `meta.jsonl`. No KV reuse: one full forward per candidate (`kv_reuse=false`). The tokenizer adds only its default special tokens; Qwen3 has no BOS, which `bos_token_id` records. Compute dtype is bfloat16, quant nf4.
+
+Layout on 188 (`~` is `%USERPROFILE%`): repo copy `%USERPROFILE%\s5k-188\repo\` (with `experiments/s5-local/`, `experiments/s5-judges/s5.py`, `reference/proto/`, the dev302/typing76 `rows.jsonl`), cvtune `rows.jsonl` at `%USERPROFILE%\.cache\shanjie\work\s5-judges\cvtune\`, discordtune `rows.jsonl` at `%USERPROFILE%\s5k-188\private\s5-judges\discordtune\`, model at `%USERPROFILE%\models\Qwen3-8B`. Interpreter: `%USERPROFILE%\ime-research\proto\.venv\Scripts\python.exe`. One program at a time, pinned to the P-cores.
+
+```
+cd /d %USERPROFILE%\s5k-188\repo\experiments\s5-local
+set HF_HUB_OFFLINE=1
+set TRANSFORMERS_OFFLINE=1
+set SHANJIE_PRIVATE=%USERPROFILE%\s5k-188\private
+set PY=%USERPROFILE%\ime-research\proto\.venv\Scripts\python.exe
+
+rem smoke: first 20 rows of dev302, then check the five numbers with the same score checks as §8.2 (d)(h)
+start "" /b /wait /affinity FFF %PY% run_ll_cuda.py --set dev302 --limit 20 --ctx none
+start "" /b /wait /affinity FFF %PY% run_ll_cuda.py --set dev302 --limit 20 --ctx synth
+
+rem full runs, only after the smoke is clean (each command resumes where it stopped)
+for %S in (discordtune cvtune dev302 typing76) do start "" /b /wait /affinity FFF %PY% run_ll_cuda.py --set %S --ctx none
+start "" /b /wait /affinity FFF %PY% run_ll_cuda.py --set discordtune --ctx real
+```
+
+(In a `.bat` file write `%%S`.) Exit 3 on a smoke run means the degeneracy stop fired; `s5k: STOP ...` or `s5k: INPUT ...` are the other stops. The private directory is deleted afterwards whatever the result (`rmdir /s /q %USERPROFILE%\s5k-188\private`, then `dir` to confirm), and only `Q8-ll.*.jsonl` and `meta-188.jsonl` are copied back, per §11.
+
+`score.py` lists `Q8-ll` among the base conditions (paired with A-fwd and J-sent-fwd) and adds `vs_Q-ll=n=... fixed=... broken=... p=...` for `Q8-ll`, `Q8-ll+ctx` and their `@tau` variants: Q8-ll against Q-ll (1.7B), same condition, report only.
