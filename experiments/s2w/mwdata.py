@@ -20,10 +20,11 @@ TITLE = re.compile(r"<title>(.*?)</title>")
 TEXT = re.compile(r"<text[^>]*>(.*?)</text>", re.S)
 REDIR = re.compile(r"^\s*#(?:REDIRECT|重定向)\s*:?\s*\[\[([^\]|#]+)", re.I)
 LUA_STR = r"""(?:'((?:[^'\\\n]|\\.)*)'|"((?:[^"\\\n]|\\.)*)")"""
-LUA_ITEM = re.compile(r"\bItem\s*\(\s*" + LUA_STR + r"\s*,\s*" + LUA_STR)    # 組 1,2＝原文；3,4＝規則
+LUA_ITEM = re.compile(r"\bItem\s*\(\s*(?:nil|" + LUA_STR + r")\s*,\s*" + LUA_STR)    # 組 1,2＝原文（可以是 nil）；3,4＝規則
 LUA_RULE = re.compile(r"\brule\s*=\s*" + LUA_STR)                              # { type = 'item', rule = '…' }；{ type = 'text', … } 沒有 rule
-LUA_ALIAS = re.compile(r"^\s*return\s+require\s*\(?\s*['\"]Module:CGroup/([^'\"]+)['\"]", re.S)
-CITEM = re.compile(r"\{\{\s*CItem\s*\|(.*?)\}\}", re.S)
+# 別名頁的三種寫法（2026-10-06 在線上版本看到）：require('Module:CGroup/X')、require [[Module:CGroup/X]]、require( '模块:CGroup/X' )
+LUA_ALIAS = re.compile(r"^\s*return\s+require\s*\(?\s*(?:['\"]|\[\[)\s*(?:Module|模块|模組):CGroup/([^'\"\]]+?)\s*(?:['\"]|\]\])", re.S)
+CITEM = re.compile(r"\{\{\s*CItem\w*\s*\|(.*?)\}\}", re.S)   # CItem 與 CItemLan 等變體，第一個參數都是規則
 G_PARAM = re.compile(r"\{\{\s*([^{}|]+?)\s*\|([^{}]*)\}\}")
 G_KEY = re.compile(r"(?:^|\|)\s*G(\d+)\s*=\s*([^|}]*)")
 PREFIX = {"Module:CGroup/": "M", "Template:CGroup/": "T", "模板:CGroup/": "T", "樣板:CGroup/": "T", "样板:CGroup/": "T"}

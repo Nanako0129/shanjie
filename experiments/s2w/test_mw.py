@@ -105,6 +105,12 @@ return {
 }"""
     assert mwdata.module_rules(lua) == ["zh-cn:账号; zh-tw:帳號;", "zh-cn:内存; zh-tw:記憶體;", "zh-cn:a'b; zh-tw:c;"]
     assert mwdata.template_rules("{{CGroup/header}}\n{{CItem|zh-cn:甲; zh-tw:乙;|desc}}\n{{CItem|zh-cn:丙;\nzh-tw:丁;}}") == ["zh-cn:甲; zh-tw:乙;", "zh-cn:丙; zh-tw:丁;"]
+    assert mwdata.module_rules("Item(nil, 'zh-cn:朝鲜;zh-tw:北韓;'),\nItem( nil ,\"zh-cn:韩国;zh-tw:南韓;\")") == ["zh-cn:朝鲜;zh-tw:北韓;", "zh-cn:韩国;zh-tw:南韓;"]
+    assert mwdata.template_rules("{{CItemLan|zh:指環王;zh-hant:魔戒;|The Lord of the Rings}}") == ["zh:指環王;zh-hant:魔戒;"]
+    for src in ("return require('Module:CGroup/Hayate the Combat Butler')", "return require [[Module:CGroup/地名]]",
+                "return require( '模块:CGroup/IT' );", 'return require("模組:CGroup/IT")'):
+        a = mwdata.LUA_ALIAS.match(src)
+        assert a and a.group(1) in ("Hayate the Combat Butler", "地名", "IT"), src
     assert mwdata.site_rules("說明\n*通用电气=>奇異;\n* 软件 => 軟體 ;\n*壞{}=>x;\n")[0] == [("通用电气", "奇異"), ("软件", "軟體")]
     pages = {"M": {"IT": ("rules", ["r1"]), "Alias": ("alias", "IT"), "Both": ("rules", ["m"])}, "T": {"Both": ("rules", ["t"]), "OnlyT": ("rules", ["t2"])}}
     redir = {"Template:Noteta": "Template:NoteTA", "Template:N2": "Template:Noteta", "Template:Other": "Template:Foo"}
