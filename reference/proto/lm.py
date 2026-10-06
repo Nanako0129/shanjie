@@ -84,7 +84,30 @@ def cap_overlay(lex, overlay_words, lm):
     return out
 
 
-def decode(lex, syls, lm, profile, beam=64):
+_HAN = ((0x3400, 0x4DBF), (0x4E00, 0x9FFF), (0xF900, 0xFAFF), (0x20000, 0x2A6DF), (0x2A700, 0x2EBEF),
+        (0x30000, 0x3134F), (0x2F800, 0x2FA1F), (0x3007, 0x3007))
+
+
+def context_key(prefix):
+    """core/src/learn.rs context_key：尾端連續漢字、最多 2 字；沒有就是 ""（Rust 回傳哨兵，這裡用空字串）。"""
+    tail = []
+    for c in reversed(prefix):
+        if not any(a <= ord(c) <= b for a, b in _HAN) or len(tail) == 2:
+            break
+        tail.append(c)
+    return "".join(reversed(tail))
+
+
+def history(left, lm):
+    """S2h §1：前文 left（context_key 的結果）決定第一個詞的歷史詞。依序試整段、最後 1 字，
+    第一個在模型裡有 bigram 歷史紀錄的就是；都沒有（或 left 為空）是 "<s>"。"""
+    for x in (left, left[-1:]):
+        if x and lm.ctx.get(lm.ids.get(x, -1)) is not None:
+            return x
+    return "<s>"
+
+
+def decode(lex, syls, lm, profile, beam=64, start="<s>"):
     lam = PROFILES[profile]
     syls = tuple(syls); n = len(syls)
     hyps = [[] for _ in range(n + 1)]; hyps[0] = [(0.0, ())]
@@ -97,10 +120,10 @@ def decode(lex, syls, lm, profile, beam=64):
                 continue
             for word, lp in entries[:ime.PER_KEY]:
                 for s, ws in hyps[i - L]:
-                    sc = s + lm.word(lam, ws[-1] if ws else "<s>", word, lp)
+                    sc = s + lm.word(lam, ws[-1] if ws else start, word, lp)
                     surface = "".join(ws) + word
                     if surface not in cand or sc > cand[surface][0]:
                         cand[surface] = (sc, ws + (word,))
         hyps[i] = sorted(cand.values(), key=lambda x: -x[0])[:beam]
-    out = [(s + lm.eos(lam, ws[-1] if ws else "<s>"), ws) for s, ws in hyps[n]]
+    out = [(s + lm.eos(lam, ws[-1] if ws else start), ws) for s, ws in hyps[n]]
     return sorted(out, key=lambda x: -x[0])

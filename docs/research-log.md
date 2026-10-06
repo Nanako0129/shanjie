@@ -875,6 +875,51 @@ S3b-2 試用系統候選面板的註解與網格（兩個 wip commit：d04e7a7�
 - **基準線**：10/05 用真實資料量的 v0.1.0–v0.1.2（`eval/bench/results/2026-10-05-baseline.json`）一併進 repo；`docs/benchmark.md` 由 `table` 產生（這個檔案第一次 commit，沒有舊版可比）；`test_version_rows_and_holdout_table_unchanged` 確認拿掉參考列與實打對照後，版本列與保留集的表和不帶它們時產生的完全相同。
 - 套件 v1 仍釘 model-v1；model-v2 出貨時另寫套件 v2，並請使用者排時間做第一次里程碑實打。
 
+## 2026-10-06：S2h 第二輪（模型 E、整合後的樹）
+
+分支 `feat/s2h-left-context` 已合併 origin/main（S2n 模型 E、S-bench），`data/lm/bigram.sjlm` sha256 與 `data/bigram.sjlm.sha256` 相同（8847b73a…）。規則（`lm::history`）沒有改。只有數字，沒有保留集。
+
+- **§5.7／§10.2「好吧」**：`set_left_context("好")` 後打 ㄅㄚ˙，聊天與書面第一名都是「吧」（`engine_lm.rs` `left_context_turns_ba_into_the_particle` 通過）；不給前文仍是「巴」。Python 參考實作的分數（聊天）：巴 -4.1561 → 吧 -3.8451；書面：巴 -4.2207 → 吧 -3.8671。「走」「對」之後也是吧（聊天 -2.7942、-3.2697；書面 -2.3958、-3.0615）。
+- **§5.3 目標情境（關卡）**，切尾集 cvtune 3,650 列、wikitune 2,705 列（`split_tail.py`），四格全過：
+
+  | 集合 | 設定 | 句首 → 用前文 | 修好 | 弄壞 | p |
+  |---|---|---|---|---|---|
+  | cvtune 切尾 | chat | 3,254 → 3,509 | 277 | 22 | 2.5e-57 |
+  | cvtune 切尾 | formal | 3,250 → 3,515 | 296 | 31 | 2.0e-55 |
+  | wikitune 切尾 | chat | 2,370 → 2,484 | 145 | 31 | 7.9e-19 |
+  | wikitune 切尾 | formal | 2,379 → 2,489 | 160 | 50 | 1.3e-14 |
+
+- **§5.4 守門（`--context`，前文多半是上一個子句）**：
+
+  | 集合 | 設定 | 前 → 後 | 修好 | 弄壞 | p |
+  |---|---|---|---|---|---|
+  | dev302 | chat | 234 → 234 | 0 | 0 | 1 |
+  | dev302 | formal | 240 → 239 | 1 | 2 | 1 |
+  | typing76 | chat | 66 → 66 | 0 | 0 | 1 |
+  | typing76 | formal | 66 → 65 | 0 | 1 | 1 |
+  | user-reported（32 列） | chat | 9 → 10 | 1 | 0 | 1 |
+  | user-reported（32 列） | formal | 10 → 11 | 1 | 0 | 1 |
+
+- **§5.1 一致性**：新 golden `eval/golden/s2h-lm-context.txt` 用模型 E 重產（Python），Rust `cli --context` 逐位元組相同；cvtune／wikitune 切尾集的 Rust 與 Python 摘要行（含 `top1_sha256`，預設與 `--context` 各兩種設定）逐位元組相同；引擎重播與 `cli --context` 的 `top1_sha256` 相同（`engine_lm.rs`）。
+- **§5.2 沒有前文就不變**：既有 golden 沒有修改、全部通過；前文為空的列（dev302 232、typing76 18、user-reported 27，兩種設定）有無 `--context` 第一名逐列相同。
+- **§5.5 探針**（`experiments/s2h/probe.txt`，聊天，句首 → 用前文）：我們｜照建議 照建議；不如｜照建議 照建議；我｜試了 是了 → 是了（-5.6455 → -5.8492）；我昨天｜試了一下 是了一下 → 試了一下（-8.9411 → -8.5231）。書面：我們／不如｜照建議 趙建議 → 照建議（-8.5940 → -8.4934、-8.5176）；我｜試了 是了 → 試了（-5.9847 → -6.1864）；我昨天｜試了一下 是了一下 → 試了一下（-9.1877 → -7.9944）。
+- **§5.6 延遲**（release，每鍵 p95）：`engine_lm` 重播 8,336 鍵，規則關閉 1.74 ms、開啟 1.30 ms；`engine_replay` eten 2.20 ms、standard 1.93 ms（規則關閉的這兩個沒有量）。都 < 16 ms；單次量測有雜訊。
+- **§10.3 S4 測試**：
+  - `empty_learner_matches_goldens` 改成前文為空時對 golden、前文「好他」時學習開／關逐列相同，通過。
+  - `global_eps_table`：`global_sweep` 教學迴圈改讀 `SWEEP_TAUGHT`，內容由「可以」「^」改成「佝」「^」（「佝」在模型裡沒有二元組歷史，歷史詞退回 `<s>`。「可以」下 `功力`／`公立` 一組沒有產生全域紀錄；原因的推論是歷史詞「以」讓目標詞在該前文下已是第一名、選字不再是改選，沒有逐組量）。選定 ε_global = 0.5 的五個數（groups／wrong／checked／excluded／unaligned）：改之前（main 的測試、規則關閉）13／8／45／2／0；改之後 13／9／47／0／0。關卡斷言沒有改，全部成立：ε 0 全域層無作用、ε 0.5 污染 0 且學會 8/9、鏡像 7/8。
+- **測試**：`cargo test --locked` 全過。第二輪順手修了一處合併造成的編譯錯誤：S-bench 的 `run_unigram_rows` 解構二元組，S2h 把 `three_field_rows` 改成三元組。
+- **本地 `/code-review`（main 處置）**：
+  - 修：`--set holdout --context` 原本每列都傳空的前文，帶前文那次保留集會和預設模式完全相同，摘要行卻寫 `+ctx`。改成傳每列自己的前文；預設模式不受影響（前文只在 `--context` 時使用）。Python 參考實作沒有保留集模式，不受影響。
+  - 修：`global_sweep` 的註解還寫「在 可以 和 ^ 下教」，改成 `SWEEP_TAUGHT`（佝與 ^）。只改註解；§10.3 限制的是邏輯，這處偏離在 PR 寫明。
+  - 不改、記下：`empty_learner_matches_goldens` 新加的「好他之下學習開與關第一名相同」在紀錄為空時不可能失敗。紀錄為空時 `refresh_lm` 不管開關都傳 `learn = None`，兩個引擎走同一條路徑；這是契約 §10.3 指定的寫法。前文和學習的交互作用要另外的測試（有紀錄時）才量得到，留給 S4 的下一次修訂。
+- **收尾 verifier（第一次，REFUTED）**：`swift test` 有一個測試失敗（`ShellTests.testOwnerChangeReappliesTheProfile`）。測試在 Discord 先打「你」，再靠「聊天與書面輸出不同」判斷設定有沒有重新套用；S2h 之後前文「你」讓聊天也選「期中」，和書面相同。這是 S2h 預期的行為，不是殼層的錯。其他項目全部成立：關卡與守門逐格重現，「大概十分鐘後到」在有無前文時都對。
+- **契約修訂二（§11，plan-verifier READY）**：只在這個測試的第二次組字前把 `selectedOverride` 設成沒有插入點，讓它回到沒有前文的前提，斷言不改。拿掉這一行時測試失敗（「你期中報告明天要交」對「你其中報告明天要交」），所以它量到的確實是前文的影響。`swift test --package-path macos` 89 個測試、1 個略過、0 個失敗；`cargo test --locked` 全過。
+- **保留集**（第一次 verifier 跑一次，只報數字，n = 227）：聊天預設 top1 178、oracle@64 226，`--context` 177、226；書面預設 184、227，`--context` 183、227。兩種設定的 `--context` 都少 1 列，沒有做配對檢定（保留集不拿來判斷）。修訂二只改測試，保留集不重跑。
+- **程序**：那位 verifier 剝除 `top1_sha256` 的指令寫錯，四行的雜湊出現在它自己的工具輸出裡；沒有句子，回報與 repo 裡都沒有雜湊。
+- **實機驗收（契約 §7，2026-10-06）**：
+  - 第一次在終端機、Discord、VS Code、Chrome 網址列、Finder 搜尋框打「好」＋Enter＋ㄅㄚ˙，全部是「巴」。原因是殼層讀不到前文（S4 起就有的 bug，見同日「實機讀不到前文」），修正是 PR #57。
+  - 合進修正後重裝：Discord 與 Finder 搜尋框都是「吧」。
+  - 「我們」＋Enter＋ㄓㄠˋ ㄐㄧㄢˋ ㄧˋ 是「照建議」（在終端機打）；這一句在聊天設定下沒有前文也是第一名，所以只證明沒有退步，不證明終端機讀得到前文。
 ## 2026-10-06：實機讀不到前文（S4 起就有的 bug）
 
 S2h 實機驗收時，使用者在終端機、Discord、VS Code、Chrome 網址列、Finder 搜尋框打「好」＋Enter，再打 ㄅㄚ˙，全部是「巴」（引擎與殼層測試都是「吧」）。main 在安裝版加一行只記數字的暫時日誌（沒有 commit），重打一次：
