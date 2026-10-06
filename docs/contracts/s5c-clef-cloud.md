@@ -82,7 +82,7 @@
 - **main 跑真的冒煙測試**：dev302 前 20 列，每個條件都跑到。冒煙測試的所有輸出一律寫進 `~/.cache/shanjie/work/s5-clef/dev302-n20/`，不進 repo；完整執行不沿用這些列。跑完後 worktree 的 `git status --porcelain` 不得出現含 `-n20` 的路徑。回報逐選項機率的鍵名、C-sent-fwd 與 C-sent-rev 各自挑第 1 個的比例和翻轉率；另用一個錯的 token 確認 401 路徑。
 - 完整執行由 main 跑：約 400 次請求（和 S5j 的 Jev 相同），費用估計不到 0.1 美元，不吃本機資源。
 - **使用者同意與預算**：使用者 2026-10-05 選了「雲端對照 Jev（公開集合）」，預算上限 1 美元。Cloudflare 的部落格寫「不讀、不存、不拿請求訓練」；Workers AI 文件頁沒有資料保留的說明，這點未核對。送出的只有 CC0 與 CC BY 的公開句子。
-- 不另做 security-reviewer：只送公開資料，金鑰只在 main 的單一指令環境裡出現，和 S5j 的 Jev 相同。
+- 不另做 security-reviewer：只送公開資料；token 放在 settings.json 的 `env`，和 S5j 用的 Jev 金鑰（`TYPESAFE_API_KEY`）同樣放法，付費呼叫只由 main 執行，agent 的 brief 禁止使用（2026-10-06 改，原本是鑰匙圈加 main 的單一指令環境）。
 - 預算：executor 1 回合加 1 次修正。
 
 ## 7. 停止條件
