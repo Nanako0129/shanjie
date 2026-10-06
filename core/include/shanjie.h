@@ -82,6 +82,8 @@ int32_t shanjie_engine_set_punctuation(ShanjieEngine *engine, const char *table)
 // set_left_context: copies the text before the insertion point; only its last <= 2 consecutive Han
 //   characters are kept (S4 section 1.1). NULL or "" means none. Not UTF-8: returns 2 and clears.
 //   Cleared by the core after every commit, reset and code 4; call it at every composition start.
+//   S2h: also the condition of the first word in the bigram model (its last 2 characters, else the last
+//   one, whichever has bigram history; none: the sentence start).
 int32_t shanjie_engine_set_left_context(ShanjieEngine *engine, const char *utf8);
 // set_learning: 0 or 1 (2 otherwise). Default 0 at engine creation (fail-closed). 0 drops pending
 //   learns; a span is learned only if the flag was 1 both when it was chosen and at commit.
