@@ -107,6 +107,26 @@ class Reference(Tmp):
         self.assertEqual(self.result()["accuracy"]["priv"], {"missing": True})
         self.assertEqual(self.result()["accuracy"]["pub"]["top1"], 1)
 
+    def test_missing_private_set_leaves_private_root_empty(self):
+        self.run_ref()
+        self.assertEqual(os.listdir(self.args.private_root), [])
+
+    def test_failed_set_is_retried_and_says_why(self):
+        real = self.fake_sh
+
+        def broken(cmd, **kw):
+            if cmd[0] != "cargo":
+                raise RuntimeError("simulated failure")
+            return real(cmd, **kw)
+        bench.sh = broken
+        with self.assertRaises(SystemExit):
+            self.run_ref()
+        self.assertIn("error", self.result()["accuracy"]["pub"])
+        bench.sh = real
+        err = self.run_ref()
+        self.assertIn("failed last time: pub", err)
+        self.assertEqual(self.result()["accuracy"]["pub"]["top1"], 1)
+
     def test_same_commit_is_not_recomputed(self):
         self.run_ref()
         err = self.run_ref()

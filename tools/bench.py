@@ -433,6 +433,9 @@ def reference_stale(old, sha, fp):
         return f"commit changed ({str(old.get('commit'))[:7]} -> {sha[:7]})"
     if old.get("fingerprints") != fp:
         return "a fingerprint (set, variants.tsv or base lexicon) changed or a private set appeared/disappeared"
+    failed = sorted(k for k, v in (old.get("accuracy") or {}).items() if isinstance(v, dict) and "error" in v)
+    if failed:
+        return f"these sets failed last time: {', '.join(failed)}"
     return None
 
 
