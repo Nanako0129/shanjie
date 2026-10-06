@@ -106,7 +106,10 @@ main 安裝後，請使用者在 TextEdit：打「好」按 Enter 送出，再�
 ### 10.3 兩個 S4 測試的處置（只有這兩個可以改）
 
 - **`empty_learner_matches_goldens`**：這個測試的目的是「學習紀錄是空的時候，學習不改變解碼」（S4 §6.2 第 6 項）。它先 `set_left_context("好他")` 再拿沒有前文的 golden 比，S2h 之後前文本身就會改變解碼。改成兩段：(1) **前文為空**時，dev302 與 probe 和 `s2-lm-dev302-top1.tsv`、`s2r-probe-top1.tsv` 逐列相同（§5.2 保證前文為空時 S2h 不改變解碼），保留對 golden 的比對；(2) 另外加一段：前文「好他」下，學習打開（紀錄為空）與學習關閉的兩個引擎逐列第一名相同。其他斷言（`learner().records().is_empty()`）不動。
-- **`global_eps_table`**（含它呼叫的 `global_sweep`）：**只**允許改 `SWEEP_TAUGHT`（目前是「可以」與「^」兩個教學前文），讓 S4 測試原本要建立的狀態（例如「食用／實用」產生全域紀錄）在 S2h 之下仍然成立。`THIRD`（「我們」）、`mirror()`、`row_collides` 與其他共用的輔助函式一律不改。
+- **`global_eps_table`**（含它呼叫的 `global_sweep`）：只允許兩處改動，讓 S4 測試原本要建立的狀態（例如「食用／實用」產生全域紀錄）在 S2h 之下仍然成立：
+  - (1) 一次結構性改動：`global_sweep` 教學迴圈目前寫死的 `for c in ["可以", ""]` 改成讀 `SWEEP_TAUGHT`（`SENTINEL` 對應到空字串）。這樣教學用的前文和 `row_collides` 用來排除碰撞列的前文永遠相同。
+  - (2) 改 `SWEEP_TAUGHT` 的內容（目前是「可以」與「^」）。
+  - `global_sweep` 的其他部分、`THIRD`（「我們」）、`mirror()`、`row_collides` 與其他共用的輔助函式，一律和 main 相同。
   - 改之前與改之後，都在模型 E、整合後的樹上，報選定 ε_global 的五個數：`groups`、`wrong`、`checked`、`excluded`、`unaligned`（「改之前」用 main 上的測試版本、規則關閉）。`groups`、`wrong` 或 `checked` 變少，或 `excluded + unaligned` 變多，就是停止條件。
   - **關卡斷言一律不改**：ε_global 0 時全域層沒有作用；選定的 ε_global 污染為 0、學會數大於 0；鏡像關卡照 S2n 合併後 main 上的斷言：`r.3 >= 8` 且 `r.2 * 100 >= r.3 * 80`。
   - 關卡在 S2h 之下不成立就是停止條件，交給 main 決定是否另寫 S4 的修訂。
@@ -117,5 +120,5 @@ main 安裝後，請使用者在 TextEdit：打「好」按 Enter 送出，再�
 - **探針檔的位置**：`eval/probe/` 底下的 `.txt` 會被 `--set probe` 與 `s2r-probe-unigram.txt` 的 golden 讀進去，所以 §5.5 的探針改放 `experiments/s2h/probe.txt`（內容照 §5.5），`eval/README.md` 不必改。
 - **依賴模型的 golden**：`eval/golden/s2h-lm-context.txt` 用模型 E 重產。
 - **第二輪的預算**：executor 1 回合加 1 次修正；第一輪的實作（分支上的 WIP commit `3b90472`）可以沿用。
-- **§8、§9 對 `engine_learn.rs` 的限制的例外**：§8 的「`engine_learn.rs` 任何既有斷言失敗」停止條件、§8 檔案清單的「不改 `engine_learn.rs` 既有的測試與斷言」、§9 的禁止事項，對 `empty_learner_matches_goldens`、`global_eps_table`／`global_sweep` 以外的每一個測試照舊適用；這兩個只能照 §10.3 改，由 executor 改。
+- **§8、§9 對 `engine_learn.rs` 的限制的例外**：§8 的「`engine_learn.rs` 任何既有斷言失敗」停止條件、§8 檔案清單的「不改 `engine_learn.rs` 既有的測試與斷言」、§9 的禁止事項，對 `empty_learner_matches_goldens`、`global_eps_table`／`global_sweep` 以外的每一個測試照舊適用；這兩個只能照 §10.3 改（含 §10.3 (1) 讓教學迴圈讀 `SWEEP_TAUGHT` 的那一處），由 executor 改。
 - §8 的其他停止條件照舊，另加：§10.2 沒過；§10.3 的關卡斷言不成立或五個數的停止條件成立；任何 §10.3 列出以外的測試或斷言需要修改。
