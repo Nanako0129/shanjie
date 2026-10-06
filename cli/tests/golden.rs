@@ -53,7 +53,7 @@ fn lenient_dump_uses_the_variant_table() {
     assert_ne!(lines[2], lines[3], "散佈 has no dictionary entry, so it is not a listed variant");
 }
 
-const LM_MISSING: &str = "data/lm/bigram.sjlm is missing: download it with `gh release download model-v1 -R Nanako0129/shanjie -p bigram.sjlm -D data/lm` (or rebuild with tools/build_lm.py; see docs/PLAN.md S2c)";
+const LM_MISSING: &str = "data/lm/bigram.sjlm is missing: download it with `gh release download model-v2 -R Nanako0129/shanjie -p bigram.sjlm -D data/lm` (or rebuild with tools/build_lm.py; see docs/PLAN.md S2c)";
 
 fn lm_path() -> String {
     let p = format!("{}/../data/lm/bigram.sjlm", env!("CARGO_MANIFEST_DIR"));
@@ -72,6 +72,20 @@ fn lm_mode_matches_golden_byte_for_byte() {
         got += &run(&["--lm", &lm, "--profile", p, "--rows", &typing, "--name", "typing76"]);
     }
     assert_eq!(got, golden("s2-lm.txt"));
+}
+
+/// S2h acceptance 1: `--context` summary lines (Python reference output), both profiles.
+#[test]
+fn lm_context_mode_matches_golden_byte_for_byte() {
+    let (lm, root) = (lm_path(), concat!(env!("CARGO_MANIFEST_DIR"), "/.."));
+    let mut got = String::new();
+    for p in ["chat", "formal"] {
+        got += &run(&["--lm", &lm, "--profile", p, "--dev", "302", "--context"]);
+        for (f, name) in [("user-typing", "typing76"), ("user-reported", "user-reported")] {
+            got += &run(&["--lm", &lm, "--profile", p, "--rows", &format!("{root}/eval/dev/{f}.txt"), "--name", name, "--context"]);
+        }
+    }
+    assert_eq!(got, golden("s2h-lm-context.txt"));
 }
 
 /// S2c acceptance 2, second half: the top1 file's columns hash to the summary lines' top1_sha256.
@@ -99,7 +113,25 @@ fn lm_file_is_the_documented_build() {
     let bytes = std::fs::read(lm_path()).unwrap();
     assert_eq!(
         core::eval::sha256_hex(&bytes),
-        "9879fd8b264b1c1f4c083ccedf84dc5625cd8d2595bd2d13150eed5a0520a923",
+        "8847b73a7b9cf127b4882328191c3c5250fe9a55912926d5050e351ab644d240",
         "data/lm/bigram.sjlm differs from the documented build; rebuild with tools/build_lm.py"
     );
+}
+
+/// S-bench 7.1: the unigram row mode (`--no-overlay --rows --dump`, no `--lm`) equals the golden written by
+/// `reference/proto/unigram_eval.py` (summary line, then the full top-64 dump), byte for byte.
+/// Regenerate: see the docstring of reference/proto/unigram_eval.py.
+#[test]
+fn unigram_rows_mode_matches_python_golden_byte_for_byte() {
+    let root = concat!(env!("CARGO_MANIFEST_DIR"), "/..");
+    let dump = std::env::temp_dir().join(format!("shanjie-unigram-dump-{}.tsv", std::process::id()));
+    let out = Command::new(env!("CARGO_BIN_EXE_shanjie-eval"))
+        .env("SHANJIE_VARIANTS", format!("{root}/eval/bench/suite-v1/variants.tsv"))
+        .args(["--no-overlay", "--rows", &format!("{root}/eval/bench/suite-v1/typing76.txt"), "--dump", dump.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let got = String::from_utf8(out.stdout).unwrap() + &std::fs::read_to_string(&dump).unwrap();
+    std::fs::remove_file(&dump).unwrap();
+    assert_eq!(got, golden("sbench-unigram-typing76.txt"));
 }
