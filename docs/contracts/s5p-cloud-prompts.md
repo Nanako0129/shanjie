@@ -138,6 +138,7 @@
 - Clef V0：`~/.cache/shanjie/work/s5-clef/cvtune/clef-sent-fwd.jsonl` 的 SHA-256。S5c 的 cvtune 完整執行之後由 main 記在這裡，Clef 的 A 半開跑前必須已經寫入。
   - **已記（2026-10-06）**：`fa53ba7ccc67d217c5019896539a2dceced13f4be72d7d0fec54926ed834e074`（S5c cvtune 完整執行，研究紀錄同日）。
 - Clef 27B 的 V0：`~/.cache/shanjie/work/s5-clef/cvtune/clef27-sent-fwd.jsonl` 的 SHA-256，S5c §10 的 cvtune 執行之後由 main 記在這裡，27B 的 A 半開跑前必須已經寫入。
+  - **已記（2026-10-06）**：`3a7c3c963454d99fc5a11a943138815b4fe5cd3ee95672c4b32ffbb3d4328079`（S5c §10 的 cvtune 執行）。
 
 ## 13. 修訂（2026-10-06）：加入完整版 Clef（27B），供應商變成三個
 
