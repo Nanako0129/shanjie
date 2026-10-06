@@ -103,7 +103,9 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     let lex = load_lexicon(&dir).map_err(|_| "cannot load lexicon".to_string())?;
     let overlay = fs::read_to_string(dir.join("overlay-add.tsv")).map_err(|e| format!("cannot read overlay ({:?})", e.kind()))?;
     let demote_rows = fs::read_to_string(dir.join("demote.tsv")).map_err(|e| format!("cannot read demote.tsv ({:?})", e.kind()))?;
-    let capped = CappedLexicon::new(lex.clone(), &overlay, &lm).with_demote(Demote::parse(&demote_rows).ok_or("bad demote.tsv")?);
+    let table = Demote::parse(&demote_rows).filter(|d| d.check(&lex)).ok_or("bad demote.tsv")?;
+    // The table is always loaded, so a malformed one stops the run even with --no-demote.
+    let capped = CappedLexicon::new(lex.clone(), &overlay, &lm, Some(&table)).ok_or("bad demote.tsv")?;
 
     let read = |p: &Path| fs::read_to_string(p).map_err(|e| format!("cannot read file ({:?})", e.kind()));
     // (display name, [(truth, reading)])
@@ -169,7 +171,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
         d.flush().map_err(|_| "cannot write dump".to_string())?;
     }
     let sha = sha256_hex(firsts.join("\n").as_bytes());
-    println!("## {name}  lm-{profile_name}{}  {{'n': {}, 'top1': {top1}, 'oracle@64': {o64}, 'top1_sha256': '{sha}'}}", if ctx_mode { "+ctx" } else { "" }, rows.len());
+    println!("## {name}  lm-{profile_name}{}{}  {{'n': {}, 'top1': {top1}, 'oracle@64': {o64}, 'top1_sha256': '{sha}'}}", if ctx_mode { "+ctx" } else { "" }, if demote { "" } else { "-nodemote" }, rows.len());
     Ok(())
 }
 

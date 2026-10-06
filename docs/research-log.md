@@ -1033,5 +1033,11 @@ S2h 實機驗收時，使用者在終端機、Discord、VS Code、Chrome 網址�
   - 第 1 列的差距：聊天開時第一名 −13.92，關時的「睪丸這波」扣 2.0 後是 −14.67，餘裕 0.75。
 - **跨語言**：`eval/golden/sw-probe.txt`（Python 產生；8 組設定的摘要行與每列第一名的分數）由 Rust CLI 逐位元組重現（`cli/tests/golden.rs`）。
 - **既有 golden** 在降權開啟下逐位元組不變（`eval/golden/` 只新增 `sw-probe.txt`）；dev302、typing76、user-reported 在聊天、書面、加與不加 `--context` 的十二個組合，降權開與關的摘要行完全相同（公開評測檔沒有 ㄍㄠˇ ㄨㄢˊ）。
-- **突變**：拿掉讀音條件（Rust、Python 各一）、`set_demote(0)` 不生效、`total_score` 不扣 δ，各自讓指定的測試失敗。
+- **突變**：拿掉讀音條件（Rust、Python 各一）、`set_demote(0)` 不生效（C 冒煙測試也會失敗）、`total_score` 不扣 δ、拿掉列的詞庫對照，各自讓指定的測試失敗。
+- **修正輪（code review 之後，契約 a2187a9）**：
+  - `demote.tsv` 每一列必須對得上詞庫的一個詞條（讀音寫成 `ㄍㄠˇ ㄨㄢˊ`、詞庫沒有的讀音、這個讀音下沒有的詞、`*` 的詞不存在），否則引擎建立失敗（碼 3）、Python 載入丟 `ValueError`；格式規則兩邊相同（δ 只收 `[0-9]+` 或 `[0-9]+.[0-9]+`，欄位頭尾不可有空白，CRLF 與空行同樣處理）。
+  - 表在載入時一次解成「詞條位置 → δ」，解碼與固定詞都從同一個詞條取 δ，不再每個按鍵組字串或查表；分數仍和 Python 逐位元相同。
+  - `set_demote` 改成 `(engine, flag, out)`，比照 `set_profile` 重算並回傳快照；Python `decode` 預設也是套用（`cap_overlay` 從 `data/lexicon/demote.tsv` 載入並對照詞庫），`lm_eval.py` 與 `shanjie-eval` 的摘要行在 `--no-demote` 時於 profile 欄後加 `-nodemote`（`sw-probe.txt` 只有這幾個摘要行變動，分數不變）。
+  - 公開資料上 `s2h/report.py`、`s2/rerank.py`、`sp/predict.py` 建出來的詞庫（dev302、typing76、user-reported 共 409 列，聊天與書面）降權開與關的前 3 名完全相同；探針的 11 列有差別，符合預期。
+  - **量測（記錄，不是保證）**：引擎上（學習開、只在記憶體）以 ㄍㄠˇ ㄨㄢˊ 改選「睪丸」一次、提交之後，再打同樣的音，降權開啟時的第一名。前文「切除」與沒有前文、聊天與書面、只打 ㄍㄠˇ ㄨㄢˊ 與整句 ㄍㄠˇ ㄨㄢˊ ㄓㄜˋ ㄅㄛ，八種情況全部是「睪丸」（整句是「睪丸這波」）；也就是這一次改選的學習加分在這個模型上蓋過了 δ = 2.0。程式是 `core/tests/engine_demote.rs` 的 `measure_repick_of_the_demoted_word`（`--ignored --nocapture`）。只量了這八種，沒有掃別的詞或次數。「學過就不扣」留給第二片。
 - **未量測／不在這一片**：粗話與歧視用語類、候選窗排序、學過就不扣、即時預測排除；保留集與實機驗收（契約 §4 第 8、9 項）由 main 做。

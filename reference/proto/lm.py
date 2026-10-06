@@ -11,6 +11,8 @@ v 是前一個詞（句首為 "<s>"）；走完後每條路徑加句尾項再穩
 """
 import collections
 import math
+import os
+import re
 import struct
 
 import ime
@@ -67,8 +69,13 @@ class BigramLM:
         return self.uni[i] if i is not None else 0
 
 
-def cap_overlay(lex, overlay_words, lm):
-    """疊加層詞的分數取 min(lp, log10(c/N))；語料沒見過的扣 UNSEEN_OVERLAY_PENALTY。回傳新的 Lexicon。"""
+DEMOTE_TSV = os.path.join(ime._LEXDIR, "demote.tsv")
+
+
+def cap_overlay(lex, overlay_words, lm, demote_path=DEMOTE_TSV):
+    """疊加層詞的分數取 min(lp, log10(c/N))；語料沒見過的扣 UNSEEN_OVERLAY_PENALTY。回傳新的 Lexicon。
+    回傳的詞庫帶著降權表 `demote`（預設從 data/lexicon/demote.tsv 載入並對照詞庫，decode 預設套用；
+    demote_path=None 是沒有表，只給用自訂小詞庫的測試）。"""
     out = ime.Lexicon.__new__(ime.Lexicon)
     out.by_reading, out.by_word, out.max_len = collections.defaultdict(list), {}, lex.max_len
     for key, entries in lex.by_reading.items():
@@ -81,6 +88,7 @@ def cap_overlay(lex, overlay_words, lm):
                 out.by_word[w] = (key, lp)
     for k in out.by_reading:
         out.by_reading[k].sort(key=lambda x: -x[1])
+    out.demote = load_demote(demote_path, out) if demote_path else {}
     return out
 
 
@@ -107,22 +115,50 @@ def history(left, lm):
     return "<s>"
 
 
-def load_demote(path):
-    """降權表（docs/contracts/sw-sensitive-demote.md §2）：{(讀音, 詞): δ}，讀音以 "-" 相接，"*" 是所有讀音。
-    格式錯、δ 不是有限正數、重複的鍵就丟 ValueError（核心同樣讓引擎建立失敗）。空行與 # 行略過。"""
-    out = {}
-    for line in open(path, encoding="utf-8"):
-        line = line.rstrip("\n")
+_EDGE = (" ", "\t", "\r", "\x0b", "\x0c", "\u00a0")  # 核心 DEMOTE_EDGE：欄位頭尾不可有這些
+_DECIMAL = re.compile(r"[0-9]+(\.[0-9]+)?\Z", re.ASCII)  # 核心 plain_decimal：float() 會收的 "2_0"、"١" 之類都不收
+
+
+def parse_demote(text):
+    """降權表（docs/contracts/sw-sensitive-demote.md §2）的格式：回傳 [(讀音或 "*", 詞, δ)]。規則和核心的
+    Demote::parse 一樣嚴格：5 個非空欄位、欄位頭尾沒有空白、δ 是 [0-9]+ 或 [0-9]+.[0-9]+ 且有限、為正，
+    同一個（讀音, 詞）不可重複。行以 "\n" 結束（前面可有一個 "\r"，最後一行沒有 "\n" 時不剝）；
+    空行與 # 行略過。違反就丟 ValueError。"""
+    lines = text.split("\n")
+    rows, seen = [], set()
+    for i, line in enumerate(lines):
+        if i < len(lines) - 1 and line.endswith("\r"):
+            line = line[:-1]
         if not line or line[0] == "#":
             continue
         f = line.split("\t")
-        if len(f) != 5 or not f[0] or not f[1]:
+        if len(f) != 5 or any(not x or x.startswith(_EDGE) or x.endswith(_EDGE) for x in f):
             raise ValueError("bad demote row")
-        d = float(f[2])
-        if not (math.isfinite(d) and d > 0) or (f[0], f[1]) in out:
+        reading, word, delta = f[0], f[1], f[2]
+        if not _DECIMAL.match(delta):
             raise ValueError("bad demote row")
-        out[(f[0], f[1])] = d
-    return out
+        d = float(delta)
+        if not (math.isfinite(d) and d > 0) or (reading, word) in seen:
+            raise ValueError("bad demote row")
+        seen.add((reading, word))
+        rows.append((reading, word, d))
+    return rows
+
+
+def load_demote(path, lex):
+    """讀降權表並對照詞庫 lex（ime.Lexicon 或 cap_overlay 的結果）：{(讀音, 詞): δ}，讀音以 "-" 相接，
+    "*" 是所有讀音。除了格式錯，某一列在詞庫裡找不到這個讀音下的這個詞（"*" 是找不到這個詞）也丟 ValueError
+    （核心同樣讓引擎建立失敗）。"""
+    with open(path, encoding="utf-8", newline="") as f:
+        rows = parse_demote(f.read())
+    for reading, word, _ in rows:
+        if reading == "*":
+            ok = word in lex.by_word
+        else:
+            ok = any(w == word for w, _ in lex.by_reading.get(tuple(reading.split("-")), ()))
+        if not ok:
+            raise ValueError("demote row matches no lexicon entry")
+    return {(r, w): d for r, w, d in rows}
 
 
 def demote_delta(demote, reading, word):
@@ -133,8 +169,10 @@ def demote_delta(demote, reading, word):
     return d if d is not None else demote.get(("*", word), 0.0)
 
 
-def decode(lex, syls, lm, profile, beam=64, start="<s>", demote=None):
-    """demote：load_demote 的結果或 None（不降權）。詞項分數 = lm.word(...) − δ；要試哪些詞條仍依原本的分數。"""
+def decode(lex, syls, lm, profile, beam=64, start="<s>", demote=True):
+    """demote：是否套用 lex.demote（cap_overlay 從 data/lexicon/demote.tsv 載入，預設開，和核心的 decode 一樣）；
+    False 就逐位元等於沒有這張表。詞項分數 = lm.word(...) − δ；要試哪些詞條仍依原本的分數。"""
+    table = getattr(lex, "demote", None) if demote else None
     lam = PROFILES[profile]
     syls = tuple(syls); n = len(syls)
     hyps = [[] for _ in range(n + 1)]; hyps[0] = [(0.0, ())]
@@ -145,9 +183,9 @@ def decode(lex, syls, lm, profile, beam=64, start="<s>", demote=None):
             entries = lex.by_reading.get(key)
             if not entries or not hyps[i - L]:
                 continue
-            reading = "-".join(key) if demote else None
+            reading = "-".join(key) if table else None
             for word, lp in entries[:ime.PER_KEY]:
-                d = demote_delta(demote, reading, word)
+                d = demote_delta(table, reading, word)
                 for s, ws in hyps[i - L]:
                     sc = s + (lm.word(lam, ws[-1] if ws else start, word, lp) - d)
                     surface = "".join(ws) + word

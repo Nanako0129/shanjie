@@ -67,8 +67,8 @@ public final class MemoryLayoutStore: LayoutStore {
 }
 
 /// Where the "avoid ranking sensitive words first" switch is kept (docs/contracts/sw-sensitive-demote.md
-/// section 3): `nil` means never chosen, which is on. The app keeps it in its own UserDefaults; the
-/// default store in `Shell.init` is in memory, so a test can never write the real preference.
+/// section 3): `nil` means never chosen, which is on. The app keeps it in its own UserDefaults; ShanjieKit
+/// and the tests only have the in-memory store, so a test can never write the real preference.
 @MainActor
 public protocol DemoteStore: AnyObject {
     var demote: Bool? { get set }
@@ -137,13 +137,13 @@ public final class Shell {
     /// can reach the real Application Support by omission.
     /// `dialogs`: the clear's windows (`AlertDialogs` in the app; tests answer for the user). Required,
     /// so a build cannot ship a clear that silently does nothing.
-    /// `demoteStore`: the demotion switch (sw); the app passes its UserDefaults-backed store, tests use the
-    /// in-memory default.
+    /// `demoteStore`: the demotion switch (sw). Required, with no default, like `layoutStore`: the app passes
+    /// its UserDefaults-backed store, tests the in-memory one.
     /// `punctuationTable`: Apple's punctuation candidate table (s3e); tests pass another path.
     /// `punctuationNames`: Apple's punctuation names (s3f); tests pass another path.
     public init(resources: URL, panel: CandidatePanel, isSecureInput: @escaping () -> Bool,
                 layoutStore: LayoutStore, learningDirectory: URL?, dialogs: LearningDialogs,
-                demoteStore: DemoteStore = MemoryDemoteStore(),
+                demoteStore: DemoteStore,
                 punctuationTable: URL = PunctuationTable.systemURL,
                 punctuationNames: URL = PunctuationNames.systemURL) {
         self.resources = resources
@@ -181,12 +181,12 @@ public final class Shell {
         layoutStore.layout = newMode.rawValue
     }
 
-    /// The menu's choice (sw): stored, and sent to the engine now; the next change to the composition
-    /// decodes with it.
-    public func setDemote(_ on: Bool) {
+    /// The menu's choice (sw): stored, and sent to the engine, which recomputes the composition; the
+    /// snapshot is for the caller to show (like `setProfile`).
+    func setDemote(_ on: Bool) -> CoreResult? {
         demoteOn = on
         demoteStore.demote = on
-        if let code = engine?.setDemote(on), code != 0 { Log.shell.error("shanjie_engine_set_demote failed, code \(code)") }
+        return engine?.setDemote(on)
     }
 
     /// Creates the engine for the current mode, then loads the LM and the current profile. A
@@ -200,8 +200,9 @@ public final class Shell {
         }
         let lm = e.loadLM(path: resources.appendingPathComponent("bigram.sjlm").path)
         if lm != 0 { Log.shell.error("shanjie_engine_load_lm failed, code \(lm)") }
-        let demote = e.setDemote(demoteOn)
-        if demote != 0 { Log.shell.error("shanjie_engine_set_demote failed, code \(demote)") }
+        if case .failed(let c) = e.setDemote(demoteOn) {
+            Log.shell.error("shanjie_engine_set_demote failed, code \(c)")
+        }
         if case .failed(let c) = e.setProfile(profile) {
             Log.shell.error("shanjie_engine_set_profile failed, code \(c)")
         }
@@ -344,6 +345,16 @@ public final class Session {
         }
         shell.owner = self
         return true
+    }
+
+    /// The menu's demotion switch: the core recomputes the composition and the snapshot is shown, if this
+    /// session owns the composition (a toggle mid-composition visibly re-ranks).
+    func applyDemote(_ on: Bool) {
+        switch shell.setDemote(on) {
+        case .ok(let o)? where shell.owner === self: apply(o)
+        case .failed(let c)?: _ = fail(c)
+        default: break
+        }
     }
 
     /// The profile for this client's app, from its bundle ID (looked up, never kept).

@@ -29,7 +29,7 @@ fn shared() -> &'static Shared {
         let lex = load_lexicon(&root().join("data/lexicon")).unwrap();
         let lm = Lm::load(&lm_path()).unwrap();
         let overlay = std::fs::read_to_string(root().join("data/lexicon/overlay-add.tsv")).unwrap();
-        let capped = Arc::new(CappedLexicon::new(lex.clone(), &overlay, &lm));
+        let capped = Arc::new(CappedLexicon::new(lex.clone(), &overlay, &lm, None).unwrap());
         Shared { lex, lm: Arc::new(lm), capped }
     })
 }
