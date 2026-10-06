@@ -248,10 +248,10 @@ int32_t shanjie_engine_set_punctuation(ShanjieEngine *engine, const char *table)
 - **查表**：詞彙用位元組二分搜尋（id 0、1 是 `<s>`、`</s>`），前文與下一詞用二分搜尋，沒有雜湊表。
 - **`pow(10, lp)` 的坑**：Rust 的 `10f64.powf(lp)` 在底數是常數時，LLVM 會改寫成 `exp10`，末位和 Python 的 `10 ** lp`（libm `pow`）差 1 ulp（formal 的 dump 有 2 列的分數差約 3.6e-15）。`lm.rs` 的 `pow10` 用 `black_box` 藏起底數，改後 chat、formal 的 `--dump` 與 Python 逐位元組相同。
 - **上限後詞庫（`CappedLexicon::new(Arc<Lexicon>, overlay 文字, &Lm)`）**：與原詞庫共用字串池與讀音表（只多一份 `ents` 陣列，每筆 16 bytes），每個讀音的詞條範圍不變、只在範圍內重排。疊加層詞集是 `overlay-add.tsv` 每行第二欄，與 `lm_eval.py` 相同。CLI 與 `Engine::load_lm` 都呼叫它。
-- **解碼**：`decode_segment(lex, 音節, lm, λ, 前文詞, End, beam)` 是唯一的實作；`decode` 是前文 `<s>`、`End::Eos` 的特例。每個候選的 `pb` 與詞 id 在迴圈外算一次，只是提出共同項，沒有改運算順序。路徑同時帶著每個詞實際用的 lp，供 `total_score` 使用。
+- **解碼**：`decode_segment(lex, 音節, lm, λ, 前文詞, End, beam)` 是唯一的實作；`decode` 是前文 `<s>`、`End::Eos` 的特例。組字區第一段（左邊沒有固定詞的那段）的前文詞是 `lm::history(前文, lm)`：`set_left_context` 存的前文（最多 2 個漢字）整段或最後 1 個字，取第一個在模型裡有 bigram 歷史紀錄的，都沒有就是 `<s>`（S2h §1）。其他段照舊：左邊是固定詞就用那個詞，是標點就用 `<s>`。每個候選的 `pb` 與詞 id 在迴圈外算一次，只是提出共同項，沒有改運算順序。路徑同時帶著每個詞實際用的 lp，供 `total_score` 使用。
 - **引擎**：`Engine::new` 記住 `data_dir`；`load_lm(path)` 失敗時（含沒有 `data_dir`）維持原狀並回 `LoadFailed`，成功時不重算顯示。`set_lm(Arc<Lm>, Arc<CappedLexicon>)` 是 `with_lexicon` 引擎專用的注入（測試用）。`set_profile(Profile)` 先記住再重算，解碼失敗時引擎自行清空並回 `Internal`；沒載入 LM 時顯示不變。`Profile::from_code` 供 step 2 的 ABI 使用（0 chat、1 formal）。
 - **`lp_F`**：`CappedLexicon::best_lp(讀音, 詞)`，同讀音下同字串取最大值；找不到（不會發生，候選就來自這個讀音）視為內部錯誤。固定詞之間沒有空白區間時，不需要特別處理：兩個固定詞各自以「前一詞」計分，這件事只出現在 `total_score`（沿路徑逐詞累加）。
-- **`total_score()`**：沿目前最佳路徑（`refresh_lm` 同時存下的 `(詞, lp)`）依序加 `word(λ, 前一詞, 詞, lp)`，最後加 `eos`；沒有 LM 或組字區空時回 `None`。
+- **`total_score()`**：從第一段的前文詞（同上，S2h §1）開始，沿目前最佳路徑（`refresh_lm` 同時存下的 `(詞, lp)`）依序加 `word(λ, 前一詞, 詞, lp)`，最後加 `eos`；前文本身不計分；沒有 LM 或組字區空時回 `None`。
 - **reset**：`clear_all` 只清組字狀態（含路徑），不碰 `lm`、`profile`、`data_dir`。
 - **評測 CLI 的資料來源**：`--dev N` 與 `--rows` 照 `lm_eval.py` 的 `rows_of`，只收恰好三欄的列，不套 `usable`（dev 的 390 列都是三欄，與 S3a 的 302 列相同）；`--set holdout` 走既有的 `load_set`（`usable` 加 `row_syllables`）。`--name` 缺省時 `--rows` 用檔名。`top1_sha256` 用 `core::eval::sha256_hex`（專案沒有雜湊 crate，自寫 FIPS 180-4，附已知向量測試）。
 - **逐分數對照（驗收 3）的指令**：`python3 reference/proto/lm_eval.py --lm data/lm/bigram.sjlm --profile chat --dev 302 --dump $T/chat.dump`，對 `shanjie-eval --lm … --profile chat --dev 302 --dump $T/r-chat.dump`，formal 同理；`cmp` 兩邊檔案（結果是位元組相同）。這個比對需要 Python，所以沒放進 `cargo test`；`cargo test` 涵蓋的是 4 組參數的摘要行（含 `top1_sha256`）與 `s2-lm-dev302-top1.tsv`。
