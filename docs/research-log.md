@@ -716,3 +716,14 @@ Willseed 在 Discord 分享命名實體辨識（NER）的入門文章（iThome �
   - 「吧」：使用者先送出前面的字、再單獨打 ㄅㄚ˙ 時，解碼器不看前文（PLAN「前文接進 n-gram」那一項）。選字記憶的單字只在相同前文下學，所以換了前文每次都錯。
   - 「試了」：「是→了」的 bigram（「就是了」這類）壓過「試→了」。
 - 不另外調參數；前文接進 n-gram 之後用這兩列量前後差。
+
+## 2026-10-06：S5c Clef-flash 對照 Jev（公開集合，完整執行）
+
+使用者把 Cloudflare token 設好後，main 依 `docs/contracts/s5c-clef-cloud.md` 執行：冒煙測試（dev302 前 20 列，回答欄位 `choice`、`confidence`、`probabilities`、`type`，機率鍵 `c1`–`c8`）、錯的 token 停在 401，再跑 cvtune、dev302、typing76。共 357 次請求，含冒煙約 0.139 美元（驅動程式用 Clef 回報的輸入 token 數乘牌價算，沒有對帳單）。完整數字在 `experiments/s5-clef/README.md`。
+
+- **cvtune（判斷用）**：第 1 名基準 85.1%。C-sent-fwd 62.3%（修好 89／弄壞 317）、C-sent-rev 88.3%（82／50，p = 0.0067）、C-pos 80.0%（61／112）。Jev 同題 89.7%、88.5%、89.0%。
+- **預先寫死的判斷**：對第 1 名，只有 C-sent-rev 算 H／S6 候選；對 Jev，**Clef 比 Jev 差**（fwd 30／304、pos 21／111 顯著較差，rev 35／37 不顯著）。
+- **位置偏誤（推論）**：Clef 挑第一個選項的比例正序 0.316、反序 0.008，順序反過來時 54% 的列換答案（Jev 11%）。反序把第 1 名放到最後，剛好落在 Clef 偏好的位置，所以 C-sent-rev 的「候選」是位置造成的，不能直接拿來做 H／S6。
+- **延遲**：每次請求（20 題）p50 567–780 ms，Jev 約 210 ms；Clef 每次都重開 TLS 連線，比較略偏向 Jev。
+- dev302、typing76 只記錄，形狀相同。這是公開集合的雲端對照，證據比 S5j 本機用 discordtune 的結果弱。
+- **後續**：H／S6 維持 Jev。S5p 的 Clef 那一半依契約補完（cvtune 的 `clef-sent-fwd.jsonl` 雜湊 `fa53ba7c…e074` 記進 S5p §12）。
