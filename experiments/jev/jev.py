@@ -1,6 +1,6 @@
 """TypeSafe System One 的最小呼叫器（標準函式庫，不裝 SDK）。
 
-key：環境變數 TYPESAFE_API_KEY，否則 ~/.config/typesafe/api_key；絕不印出或寫進檔案。
+key：只讀環境變數 TYPESAFE_API_KEY；絕不印出或寫進檔案。
 模型釘死 jev-1.13.0：jev-latest 會靜默換模型，而模型版本是判斷結果的一部分。
 """
 import http.client
@@ -13,8 +13,10 @@ HOST = "api.typesafe.ai"
 
 
 def _key():
-    k = os.environ.get("TYPESAFE_API_KEY") or open(os.path.expanduser("~/.config/typesafe/api_key")).read()
-    return k.strip()
+    k = (os.environ.get("TYPESAFE_API_KEY") or "").strip()
+    if not k:
+        raise SystemExit("jev: TYPESAFE_API_KEY must be set in the environment")
+    return k
 
 
 class Client:
