@@ -15,8 +15,8 @@ public protocol TextClient: AnyObject {
     var bundleIdentifier: String? { get }
     func insertText(_ text: String, replacementRange: NSRange)
     func setMarkedText(_ text: NSAttributedString, selectionRange: NSRange)
-    // S4 left context (docs/contracts/s4-learning.md section 2), NSTextInputClient semantics:
-    // markedRange is {NSNotFound, 0} when the client has no marked text.
+    // S4 left context (docs/contracts/s4-learning.md section 2). NSTextInputClient documents
+    // markedRange as {NSNotFound, 0} without marked text; real clients also report {insertion, 0}.
     func selectedRange() -> NSRange
     func markedRange() -> NSRange
     func attributedSubstring(from range: NSRange) -> NSAttributedString?
