@@ -99,6 +99,34 @@ def test_tw_forms():
     assert mwconv.convert("臺北", mw()) == "臺北"
 
 
+def test_bad_rule_segments_do_not_panic():
+    """2026-10-06：NoteTA 數字參數裡以 => 開頭的段落與 HTML 註解。突變：_flat() 不丟這種段落，第一條就 panic（main 跑過）。"""
+    out = mwconv.convert("{{NoteTA|1=zh:珠穆朗瑪峰;=>zh-cn:珠穆朗玛峰;zh-tw:聖母峰;}}登上珠穆朗瑪峰", mw())
+    assert "聖母峰" in out, out
+    out = mwconv.convert("{{NoteTA|1=zh:帕爾帕廷;zh-hant:白卜庭;<!-- 註解 -->}}帕爾帕廷", mw())
+    assert "白卜庭" in out and "註解" not in out.split("}}")[-1], out
+
+
+def test_panic_becomes_a_normal_error():
+    import zhconv_rs
+
+    class Panic(BaseException):
+        pass
+
+    def boom(*a):
+        raise Panic()
+    real = zhconv_rs.zhconv
+    zhconv_rs.zhconv = boom
+    try:
+        mwconv.convert("文字", mw())
+    except RuntimeError:
+        pass
+    else:
+        raise AssertionError("panic was not turned into RuntimeError")
+    finally:
+        zhconv_rs.zhconv = real
+
+
 def test_mwdata_parsers():
     lua = """local Item = require('Module:CGroup/core').Item;
 -- Item('註解', 'zh-cn:不要; zh-tw:不要;'),
