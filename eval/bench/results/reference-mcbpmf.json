@@ -1,0 +1,56 @@
+{
+ "label": "reference-mcbpmf",
+ "suite": "v1",
+ "date": "2026-10-06",
+ "commit": "8418c4fcc1dc94900da7041d3d40e198c75c28ab",
+ "fingerprints": {
+  "sets": {
+   "dev302": "603850e444efee38b8c121e3d666d6c540acd3a27d5a6a5070a78a962dd98456",
+   "typing76": "c061f66dfade21996803137320aa986a81a3e72e3e4e1dd559abd5dc04b68d08",
+   "probe": "75aac33877ddd7907cdd6789c6da6a0f3b7c775c8c6dfa6c752a5f3e87ab6801",
+   "cvtune": "fd632479fa3819c4a6d8f21e8b9358fc636f65e9c308c58ec303afb7dc887f89",
+   "wikitune": "f76c49887b6e0b3c527c71a305cd8f2eec470ea3207dd6ee80b793cc45beea76",
+   "discordtune": "77e1c90a507fa7e6085c3fca7d377abfd527a5146f43f8c4388e72342627a775"
+  },
+  "variants": "50cb44bd0f1fa33c48624bc0185d03d4e87e99107bc15971d638528bcf69cdb3",
+  "lexicon": "0deae7b7c1dcde1d7a30d139e7068543e0c0e7112e944b63eb52947bca1db7ac"
+ },
+ "accuracy": {
+  "dev302": {
+   "n": 302,
+   "top1": 160,
+   "oracle64": 295,
+   "top1_sha256": "6debda3a787b59b8981f7a4e9e1d6ad780533cc39f8504579d570d2a2981c5f2"
+  },
+  "typing76": {
+   "n": 76,
+   "top1": 48,
+   "oracle64": 74,
+   "top1_sha256": "1c7c3ebff580b385f196d24b6dd3dadfc5a9df476151aa0f8bb3bf1dcfecfe2f"
+  },
+  "probe": {
+   "n": 83,
+   "top1": 37,
+   "oracle64": 82,
+   "top1_sha256": "9698f993c7000aa13213e4cddcfe971f5072830a63d5dedfb383437b0d2d7f1e"
+  },
+  "cvtune": {
+   "n": 3677,
+   "top1": 2643,
+   "oracle64": 3519,
+   "top1_sha256": "86a3ef9b564df9970643be394eb7c8c587d6199f90f4f7e2e349956e3b8affa3"
+  },
+  "wikitune": {
+   "n": 2733,
+   "top1": 1191,
+   "oracle64": 2125,
+   "top1_sha256": "dbb2add15b00dd10cba90474ece1e2afecba14dcefda37d9fc482cf76862a1d9"
+  },
+  "discordtune": {
+   "n": 4958,
+   "top1": 3820,
+   "oracle64": 4897,
+   "top1_sha256": "55f860096f10632847f49844f9f21c99262b70f25d2e78d6747b1651bf03cec0"
+  }
+ }
+}

@@ -1,0 +1,197 @@
+{
+  "date": "2026-10-03",
+  "source": "docs/typing-test.md",
+  "groups": [
+    {
+      "name": "第一輪（書面，自動打字）",
+      "n": {
+        "value": 23,
+        "line": 33,
+        "col": 1
+      },
+      "ime": {
+        "macOS 內建注音": {
+          "sentences": {
+            "value": 3,
+            "line": 35,
+            "col": 1,
+            "part": 0
+          },
+          "chars": {
+            "value": 3,
+            "line": 35,
+            "col": 1,
+            "part": 1
+          }
+        },
+        "小麥注音": {
+          "sentences": {
+            "value": 10,
+            "line": 36,
+            "col": 1,
+            "part": 0
+          },
+          "chars": {
+            "value": 13,
+            "line": 36,
+            "col": 1,
+            "part": 1
+          }
+        },
+        "自然輸入法": {
+          "sentences": {
+            "value": 8,
+            "line": 37,
+            "col": 1,
+            "part": 0
+          },
+          "chars": {
+            "value": 11,
+            "line": 37,
+            "col": 1,
+            "part": 1
+          }
+        }
+      }
+    },
+    {
+      "name": "第二輪（口語，自動打字）",
+      "n": {
+        "value": 53,
+        "line": 33,
+        "col": 2
+      },
+      "ime": {
+        "macOS 內建注音": {
+          "sentences": {
+            "value": 8,
+            "line": 35,
+            "col": 2,
+            "part": 0
+          },
+          "chars": {
+            "value": 10,
+            "line": 35,
+            "col": 2,
+            "part": 1
+          }
+        },
+        "小麥注音": {
+          "sentences": {
+            "value": 19,
+            "line": 36,
+            "col": 2,
+            "part": 0
+          },
+          "chars": {
+            "value": 24,
+            "line": 36,
+            "col": 2,
+            "part": 1
+          }
+        },
+        "自然輸入法": {
+          "sentences": {
+            "value": 22,
+            "line": 37,
+            "col": 2,
+            "part": 0
+          },
+          "chars": {
+            "value": 29,
+            "line": 37,
+            "col": 2,
+            "part": 1
+          }
+        }
+      }
+    },
+    {
+      "name": "第三次：Discord 群聊例句（只放本機，只記統計）",
+      "n": {
+        "value": 845,
+        "line": 171,
+        "col": 0
+      },
+      "ime": {
+        "macOS 內建注音": {
+          "sentences": {
+            "value": 100,
+            "line": 176,
+            "col": 1
+          },
+          "chars": {
+            "value": 134,
+            "line": 176,
+            "col": 2
+          }
+        },
+        "小麥注音": {
+          "sentences": {
+            "value": 199,
+            "line": 177,
+            "col": 1
+          },
+          "chars": {
+            "value": 280,
+            "line": 177,
+            "col": 2
+          }
+        },
+        "自然輸入法": {
+          "sentences": {
+            "value": 237,
+            "line": 178,
+            "col": 1
+          },
+          "chars": {
+            "value": 336,
+            "line": 178,
+            "col": 2
+          }
+        }
+      }
+    },
+    {
+      "name": "第四次：政府新聞稿（294 句，見第 188 行；只放本機，只記統計）",
+      "ime": {
+        "macOS 內建注音": {
+          "sentences": {
+            "value": 64,
+            "line": 192,
+            "col": 1
+          },
+          "chars": {
+            "value": 99,
+            "line": 192,
+            "col": 2
+          }
+        },
+        "小麥注音": {
+          "sentences": {
+            "value": 85,
+            "line": 193,
+            "col": 1
+          },
+          "chars": {
+            "value": 127,
+            "line": 193,
+            "col": 2
+          }
+        },
+        "自然輸入法": {
+          "sentences": {
+            "value": 94,
+            "line": 194,
+            "col": 1
+          },
+          "chars": {
+            "value": 152,
+            "line": 194,
+            "col": 2
+          }
+        }
+      }
+    }
+  ]
+}
