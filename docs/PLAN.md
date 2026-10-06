@@ -8,7 +8,7 @@ v5（2026-10-03，N0 之後）。S0、E 完成；N0 未過門檻（§2 N0 結果
   - S1 寫成完整的可執行片；S5、S6、S7 依實測改寫。
 - 審查：v5 送 fresh `pilotfish:plan-verifier` 審 envelope 與 S1。
 
-v4 日期 2026-10-03。v1 經 `pilotfish:plan-verifier`（REVISE，4 項）與 `pilotfish:security-reviewer`（P1×3、P2×5、P3×1）審查；v2 經 fresh `pilotfish:plan-verifier`（REVISE，2 項）審查；v3 經最後一次收尾審查（REVISE，1 項），審查次數已達上限，v4 的修正**未再經審查**，交使用者決定。處置見 §7。研究依據：`~/side-project/ime-research/README.md`、本目錄 `patents.out`、`methods.out`（grok，二手），以及 main 親自核對的事實（§6）。
+v4 日期 2026-10-03。v1 經 `pilotfish:plan-verifier`（REVISE，4 項）與 `pilotfish:security-reviewer`（P1×3、P2×5、P3×1）審查；v2 經 fresh `pilotfish:plan-verifier`（REVISE，2 項）審查；v3 經最後一次收尾審查（REVISE，1 項），審查次數已達上限，v4 的修正**未再經審查**，交使用者決定。處置見 §7。研究依據：`~/side-project/ime-research/README.md`、本目錄 `methods.out`（grok，二手），以及 main 親自核對的事實（§6）。
 
 ## 1. Envelope
 
@@ -28,7 +28,7 @@ v4 日期 2026-10-03。v1 經 `pilotfish:plan-verifier`（REVISE，4 項）與 `
 | A5 | 隱私：見 §7 的 R1–R9；其中可自動測的全部有測試，需人眼的交給使用者 | 自動測試＋使用者實測清單 |
 | A6 | 授權：每份資料、模型都有授權清單，且可合法再散布，或在執行期另行下載並顯示授權 | `LICENSES/` 清單審查 |
 
-**非目標（v1）。** iOS、Windows；拼音、倉頡；縮寫打字／首碼快打（中研院 US8364468B2 有效到 2029、訴訟中）；從使用者指定的檔案或資料夾學習（微軟 US9824085B2 有效到 2032）；下一詞預測；帳號同步；自動更新；中國大陸散布的專利評估；雲端或模型回傳的自由文字。
+**非目標（v1）。** iOS、Windows；拼音、倉頡；從使用者指定的檔案或資料夾學習；下一詞預測；帳號同步；自動更新；雲端或模型回傳的自由文字。（縮寫打字與首碼快打原本列在這裡，使用者 2026-10-07 改為要做，契約待補。）
 
 **已定的架構決策。**
 
@@ -547,7 +547,7 @@ v4 日期 2026-10-03。v1 經 `pilotfish:plan-verifier`（REVISE，4 項）與 `
 **Q 新手測驗與使用者設定檔（新切片，S3 之後、與 S4 並行）。** 第一次啟用時做簡易測驗，了解使用者常聊的領域與打字習慣。
 - 三段：(1) 常聊領域（多選：軟體／程式、醫療、法律、財經、學校、遊戲…）→ 領域詞加權，並作為模型的使用者簡介（Zenzai v3 的 profile 前例）；(2) 實際打 10–20 句準備好的測驗句，記錄使用者真正按的注音（和 ㄏㄢˋ／ㄏㄜˊ、一 的本調／變調、輕聲、ㄣ／ㄥ 與 ㄓ／ㄗ 是否混用）→ 讀音變體與模糊音設定；(3) 用字偏好（台／臺、裡／裏、週／周、念／唸、嚐／嘗、妳）→ 異體字預設。
 - 隱私：結果只存本機（R5 規則）；雲端功能要用簡介時另外取得同意，且只送領域標籤。
-- 專利：不做「匯入使用者文件學習」（微軟 US9824085B2，見非目標）；測驗只用專案準備的句子與使用者選的領域。
+- 不做「匯入使用者文件學習」（見非目標）；測驗只用專案準備的句子與使用者選的領域。
 - 驗收（初稿）：有／無簡介在開發集領域子集上的正確率差異；使用者在測驗中的讀音都能被正確轉換。
 - 觀察：使用者的 macOS 注音把 14 個專業詞庫全開，冷僻詞會搶常用詞；測驗挑領域的精準度應優於全開。
 - 領域詞包來源（使用者 2026-10-03 提供）：國家教育研究院「樂詞網」（https://terms.naer.edu.tw/ ），學術名詞約 193 萬則（206 類）、雙語詞彙約 2 萬則，各類可單獨下載（ODS）。
@@ -720,7 +720,6 @@ S3a 不需要外觀參考，可以先做；S3b 等使用者提供 macOS 內建�
 | 疊加層以 CC BY-SA 釋出（share-alike） | 只限 `overlay-add.tsv` 這個檔；程式碼仍是 Apache-2.0；`LICENSES/data.md` 註明署名 |
 | 詞庫補詞過度擬合評測集 | S1 禁止從 `eval/` 挑詞、每筆有來源標籤；保留集由 verifier 量 |
 | 輸入法看得到所有按鍵 | §7 R1–R9 |
-| 專利 | §6；不是法律意見；若改成商業產品要做 FTO |
 | 保留集被看過 | 片 E 的流程規則；每片報告揭露 |
 
 ## 4. 使用者決定（2026-10-03）
@@ -759,9 +758,6 @@ S3a 不需要外觀參考，可以先做；S3b 等使用者提供 macOS 內建�
 
 | 項目 | 結果 | 出處 |
 |---|---|---|
-| Google「Contextual input method」台灣案 TWI475406B | 2016-12-01 未繳費失效 | Google Patents |
-| 同族美國案 US8028230B2 | 未繳費失效（2019） | Google Patents |
-| 微軟依前文調適台灣案 TWI484476B | 2019-02-11 未繳費失效 | Google Patents |
 | Gemma 4 E2B／E4B 授權 | Apache-2.0（另有 prohibited use policy）；HF `gated: False` | HF API＋ai.google.dev |
 | Llama 3 授權 | 禁止以輸出改良其他 LLM；須標示「Built with Meta Llama 3」 | dev.meta.ai |
 | KenLM | LGPL | GitHub LICENSE |
