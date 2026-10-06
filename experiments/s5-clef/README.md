@@ -129,9 +129,9 @@ Verdicts by the pre-registered rules (contract section 3):
 - **vs rank 1**: C-sent-rev is a candidate for H/S6 (net +32, p = 0.0067); C-sent-fwd and C-pos are not.
 - **vs Jev: Clef worse than Jev** (two pairs significantly worse, none better).
 
-Reading (inference, not a separate test): Clef almost never picks the first listed option (first pick 0.316 forward, 0.008 reversed) and changes its answer on 54% of rows when the order is reversed, against 11% for Jev. C-sent-rev passes the rank-1 rule because the reversal puts rank 1 last, where Clef tends to pick; it ties Jev in that order and loses badly in the other. The candidate verdict is therefore position-driven and not a basis for H/S6 without an order-free design.
+Order sensitivity (measured from the per-row picks): the same rank-1 candidate is picked on 31.6% of rows when it is listed first (forward) and on 76.9% when it is listed last (reversed); picks by presented position are 316/280/130/85/58/44/49/38 forward and 8/12/15/18/36/45/97/769 reversed, and 54% of rows change answer between the two orders, against 11% for Jev. This is not a plain preference for the last slot (forward, the last slot gets 3.8%); the mechanism was not tested. Because the C-sent-rev candidate verdict holds in one order and fails badly in the other, it is not a basis for H/S6 without an order-free design.
 
-dev302 and typing76 (recorded only) show the same pattern: C-sent-fwd 72.9% / 73.7%, C-sent-rev 91.1% / 89.5%, C-pos 84.1% / 86.8%, flip 0.42 / 0.36; per-row files and `score.json` are in `results/`.
+dev302 and typing76 (recorded only): C-sent-fwd 72.9% / 73.7% (rank 1: 78.8% / 85.5%), C-sent-rev 91.1% / 89.5%, C-pos 84.1% / 86.8%, flip 0.42 / 0.36. They differ from cvtune in places: on dev302, C-pos beats rank 1 (+16, p = 0.033) where cvtune loses, and C-sent-fwd is not significant (p = 0.13). Per-row files and `score.json` are in `results/`.
 
 ## Limitations
 
