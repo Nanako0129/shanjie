@@ -942,7 +942,7 @@ query time (ms, 1422 position queries, C+score+top64; varies 20-30% between runs
 
 ## 第三片：後繼詞優先、其餘相容字串補在後面（`predict3.py`）
 
-規格是 `docs/contracts/sp3-successor-first.md`。候選集合和第一片的 c 組相同（詞庫裡和查詢相容的全部字串）；**S** 把前文歷史詞 `v` 的後繼詞依分數排在前面，其餘相容字串依分數接在後面。S 的前段就是第二片的 V3。名次一律悲觀，S 第二層的名次加上第一層的個數。樣本、位置、母體與第二片相同，表中的 V3 是第二片 P 模式的結果（同一批樣本重算）。
+規格是 `docs/contracts/sp3-successor-first.md`。候選集合和第一片的 c 組相同（詞庫裡和查詢相容的全部字串）；**S** 把前文歷史詞 `v` 的後繼詞依分數排在前面，其餘相容字串依分數接在後面。S 的前段就是第二片的 V3。名次一律悲觀，S 第二層的名次加上第一層的個數。樣本、位置、母體與第二片相同，完整輸出表中的 V3 欄是第二片的 V3 在該表模式下的結果（P 表只用前綴解讀，PA 表是前綴與縮寫的聯集），同一批樣本重算。
 
 ```
 python3 experiments/sp/test_predict3.py

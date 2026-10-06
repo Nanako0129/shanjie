@@ -98,6 +98,8 @@ def eval_sample(idx, lm, lam, W, syls, v, modes, check=False):
         cands = reference(idx, units, "P")
         sc = scores(cands, lm, lam, v)
         tiers = order_s(cands, sc, succ)
+        if check:
+            check_query(idx, lm, lam, v, units, "P", succ, tiers, cands)
         rk = {"S": rank_s(tiers, W), "c": rank_c(cands, sc, W)}
         tops = {"S": top_of(tiers), "c": P1.det_top(cands, sc)[0] if cands else None}
         for arm in ("S", "c"):
