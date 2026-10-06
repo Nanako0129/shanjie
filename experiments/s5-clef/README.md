@@ -85,7 +85,7 @@ Stdout and stderr carry counts, numbers, HTTP statuses and fixed strings. An une
 
 ## Commands for main
 
-`CF_AI_TOKEN` and `CF_ACCOUNT_ID` are read from the keychain item `cloudflare-workers-ai` (account field = account ID) into that one command's environment.
+`CF_AI_TOKEN` and `CF_ACCOUNT_ID` come from the `env` block of `~/.claude/settings.json` (user decision 2026-10-06; previously the keychain item `cloudflare-workers-ai`). Only main runs paid calls; subagents see the variables too, so their briefs forbid running `clef_run.py`.
 
 ```sh
 cd /Users/nanako/side-project/shanjie-s5c
