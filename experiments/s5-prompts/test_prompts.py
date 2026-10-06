@@ -82,7 +82,6 @@ class Allowlist(unittest.TestCase):  # (a)
         for prov in ("jev", "clef"):
             for sets in (PRIV, "cvtune," + PRIV, "dev302,nope"):
                 with mock.patch.object(P.os, "environ", Poison(os.environ)), \
-                        mock.patch.object(P, "read_key_file", side_effect=AssertionError("key file")), \
                         mock.patch("http.client.HTTPSConnection", side_effect=AssertionError("network")), \
                         mock.patch("socket.socket", side_effect=AssertionError("network")), \
                         mock.patch.object(R, "load_rows", side_effect=AssertionError("input opened")), \
@@ -99,10 +98,9 @@ class Allowlist(unittest.TestCase):  # (a)
             self.assertNotEqual(r.returncode, 0)
             self.assertIn("allowlist", r.stderr)
 
-    def test_key_file_is_read_only_after_env_is_empty(self):
-        with mock.patch.dict(os.environ, {}, clear=True), mock.patch.object(P, "read_key_file", return_value=" k \n") as rk:
+    def test_jev_key_comes_from_the_environment_only(self):
+        with mock.patch.dict(os.environ, {"TYPESAFE_API_KEY": " k \n"}, clear=True):
             c = P.make_client("jev", lambda *a: None, None)
-        rk.assert_called_once()
         self.assertEqual((c.path, c.model, c.headers["Authorization"]), ("/v1/systemone", "jev-1.13.0", "Bearer k"))
 
     def test_clef_uses_s5c_endpoint_and_model(self):
@@ -167,9 +165,8 @@ class ErrorPaths(unittest.TestCase):  # (b)
             self.assertEqual(code, "s5p: stop: no per-option probabilities in the response")
 
     def test_missing_key_is_a_fixed_message(self):
-        with mock.patch.object(P, "read_key_file", side_effect=FileNotFoundError(KEY)):
-            code, _, _ = run(ARGS("jev"), reply(choice(0)), "jev", env={})
-        self.assertEqual(code, "s5p: TYPESAFE_API_KEY is not set and the key file is not readable")
+        code, _, _ = run(ARGS("jev"), reply(choice(0)), "jev", env={})
+        self.assertEqual(code, "s5p: TYPESAFE_API_KEY must be set in the environment")
         code, _, _ = run(ARGS("clef"), reply(choice(0)), "clef", env={})
         self.assertEqual(code, "s5p: CF_AI_TOKEN and CF_ACCOUNT_ID must be set in the environment")
 
