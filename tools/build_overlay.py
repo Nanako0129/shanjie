@@ -25,6 +25,7 @@ import readings  # noqa: E402  萌典路徑
 BASE = os.path.join(ROOT, "data", "lexicon", "mcbpmf-data.txt")
 OUT = os.path.join(ROOT, "data", "lexicon", "overlay-add.tsv")
 REMOVED = os.path.join(ROOT, "experiments", "s2n", "overlay-removed.tsv")   # S2n：被拿掉的簡體寫法（詞、轉換後的寫法、讀音）
+VARIANT_REMOVED = os.path.join(ROOT, "experiments", "s2f", "overlay-variant-removed.tsv")   # S2f §2.5：被拿掉的異體寫法（詞、基底寫法、讀音）
 CACHE = os.path.expanduser("~/.cache/shanjie/sources")
 DUMPS = "https://dumps.wikimedia.org"
 SOURCES = {  # 檔名: (網址, SHA-256)；Wikimedia 2026-10-01 dump 的 sha1 已和官方 sha1sums.txt 比對過
@@ -34,8 +35,6 @@ SOURCES = {  # 檔名: (網址, SHA-256)；Wikimedia 2026-10-01 dump 的 sha1 �
                      "1c840da0ddb78eed78e6f1b6fe613c1a2eced952801fd7d676f4dac9e581d4fd"),
     "zhwiktionary": (f"{DUMPS}/zhwiktionary/20261001/zhwiktionary-20261001-all-titles-in-ns0.gz",
                      "95e915cd85992b4fe990187dca845ea85e257deba39d8054b014781015d3f7f0"),
-    "STCharacters": ("https://raw.githubusercontent.com/BYVoid/OpenCC/3ac34aa439a9908dd49fa92b5174b46314787ac2/data/dictionary/STCharacters.txt",
-                     "a0ca1601c70648cf48b33c3c6210ccbecc5c7eead4b4c3daf76587ba2c03582b"),
 }
 SCORE = {2: -7.17149945, 3: -7.04116568, 4: -6.60980192}   # 基底同字數詞條分數的第 25 百分位；build() 會重算核對
 # 變調列的分數＝主要列 − 這個值（log10，約 1/3）。變調列常和別的詞共用讀音（同一成語的異體寫法、罕見詞），
@@ -103,11 +102,8 @@ def build():
     for n, want in SCORE.items():
         got = sorted(s for syls, ents in base.by_reading.items() if len(syls) == n for _, s in ents)
         assert got[len(got) // 4] == want, (n, got[len(got) // 4])
-    simp_only = set()                               # 簡體字，且它的繁體對應裡不含自己（例：「干」對應含「干」，不算）
-    for line in open(fetch("STCharacters"), encoding="utf-8"):
-        p = line.rstrip("\n").split("\t")
-        if len(p) == 2 and p[0] not in p[1].split(" "):
-            simp_only.add(p[0])
+    conv = bc.load_conv()
+    simp_only = bc.TRAD_SIMP_ONLY                   # S2f §2.2：和繁體句同一個縮小後的簡體專用字集合（不含台灣字形：床 灶 粽 秘 庄…）
 
     def titles(name):
         out = set()
@@ -120,10 +116,11 @@ def build():
 
     wikt = titles("enwiktionary") | titles("zhwiktionary")
     compounds = {t for t in titles("zhwiki") if t[:-1] in multi or t[1:] in multi}
-    rows, removed = [], []
+    rows, removed, variant_removed = [], [], []
     cand = wikt | compounds
     moe = moe_titles()
-    conv = bc.load_conv()
+    fold = {**bc.MERGE, **bc.TW_VARIANTS}           # S2f §2.5：套到兩邊後字串相同，就是同一個詞的異體寫法
+    fold_w = lambda t: "".join(fold.get(c, c) for c in t)
     # 第一輪：哪些詞條符合 (i)(iii)，目標寫法是什麼；第二輪：目標在基底，或在疊加層而且自己沒被拿掉，才真的拿（避免 A→B、B→C 連鎖後 B 不在了）
     target = {}
     for w in cand:
@@ -142,6 +139,10 @@ def build():
         if w2 and (w2 in words or (w2 in cand and w2 not in target)):
             removed.append(f"{w}\t{w2}\t{'-'.join(syls)}\n")
             continue
+        twin = next((b for b, _ in base.by_reading[tuple(syls)] if fold_w(b) == fold_w(w)), None)   # 同讀音的基底詞
+        if twin:                                    # S2f §2.5：疊加層只是基底詞的異體寫法（尿牀 vs 尿床）就拿掉，不然合併後它的寫法會勝出
+            variant_removed.append(f"{w}\t{twin}\t{'-'.join(syls)}\n")
+            continue
         src = "wikt" if w in wikt else "zhwiki"
         rows.append(f"{'-'.join(syls)}\t{w}\t{SCORE[len(w)]!r}\t{src}\n")
         var = sandhi_variant(w, syls)
@@ -149,23 +150,25 @@ def build():
             rows.append(f"{'-'.join(var)}\t{w}\t{round(SCORE[len(w)] - VARIANT_PENALTY, 8)!r}\t{src}\n")
     assert not {r.split("\t")[1] for r in rows} & words   # 疊加層和基底的詞表交集必須是 0
     assert not {r.split("\t")[0] for r in removed} & {r.split("\t")[1] for r in removed}   # 新寫法本身不能也被拿掉
-    return rows, removed
+    assert not {r.split("\t")[0] for r in variant_removed} & words
+    return rows, removed, variant_removed
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--check", action="store_true")
-    rows, removed = build()
+    rows, removed, variant_removed = build()
     if ap.parse_args().check:
-        same = open(OUT, encoding="utf-8").readlines() == rows and open(REMOVED, encoding="utf-8").readlines() == removed
-        print(f"{len(rows)} rows, {len(removed)} removed; {'matches' if same else 'DIFFERS FROM'} {os.path.relpath(OUT, ROOT)} and {os.path.relpath(REMOVED, ROOT)}")
+        same = (open(OUT, encoding="utf-8").readlines() == rows and open(REMOVED, encoding="utf-8").readlines() == removed
+                and open(VARIANT_REMOVED, encoding="utf-8").readlines() == variant_removed)
+        print(f"{len(rows)} rows, {len(removed)} removed, {len(variant_removed)} variant-removed; {'matches' if same else 'DIFFERS FROM'} the files in the repo")
         sys.exit(0 if same else 1)
-    os.makedirs(os.path.dirname(REMOVED), exist_ok=True)
-    for path, lines in ((OUT, rows), (REMOVED, removed)):
+    os.makedirs(os.path.dirname(VARIANT_REMOVED), exist_ok=True)
+    for path, lines in ((OUT, rows), (REMOVED, removed), (VARIANT_REMOVED, variant_removed)):
         with open(path + ".tmp", "w", encoding="utf-8") as f:
             f.writelines(lines)
         os.replace(path + ".tmp", path)
-    print(f"wrote {len(rows)} rows to {os.path.relpath(OUT, ROOT)}, {len(removed)} removed rows to {os.path.relpath(REMOVED, ROOT)}")
+    print(f"wrote {len(rows)} rows to {os.path.relpath(OUT, ROOT)}, {len(removed)} removed rows to {os.path.relpath(REMOVED, ROOT)}, {len(variant_removed)} variant-removed rows to {os.path.relpath(VARIANT_REMOVED, ROOT)}")
 
 
 if __name__ == "__main__":
