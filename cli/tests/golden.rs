@@ -74,6 +74,20 @@ fn lm_mode_matches_golden_byte_for_byte() {
     assert_eq!(got, golden("s2-lm.txt"));
 }
 
+/// S2h acceptance 1: `--context` summary lines (Python reference output), both profiles.
+#[test]
+fn lm_context_mode_matches_golden_byte_for_byte() {
+    let (lm, root) = (lm_path(), concat!(env!("CARGO_MANIFEST_DIR"), "/.."));
+    let mut got = String::new();
+    for p in ["chat", "formal"] {
+        got += &run(&["--lm", &lm, "--profile", p, "--dev", "302", "--context"]);
+        for (f, name) in [("user-typing", "typing76"), ("user-reported", "user-reported")] {
+            got += &run(&["--lm", &lm, "--profile", p, "--rows", &format!("{root}/eval/dev/{f}.txt"), "--name", name, "--context"]);
+        }
+    }
+    assert_eq!(got, golden("s2h-lm-context.txt"));
+}
+
 /// S2c acceptance 2, second half: the top1 file's columns hash to the summary lines' top1_sha256.
 #[test]
 fn lm_top1_tsv_hashes_match_summary_lines() {
