@@ -8,7 +8,7 @@
 
 - 端點：`POST https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/run/@cf/cloudflare/clef-flash`，body 帶 `"model": "clef-flash"`。
 - Workers AI 沒有提供版本釘選。報告記下執行日期與回應裡的 `model` 欄位；同一次完整執行不換模型。
-- API token 與帳號 ID 放在 `~/.claude/settings.json` 的 `env`（`CF_AI_TOKEN`、`CF_ACCOUNT_ID`；使用者 2026-10-06 決定，取代原本的鑰匙圈項目 `cloudflare-workers-ai`）。不印出、不另外寫檔、不放進指令列（全域規則）。
+- API token 與帳號 ID 從環境變數 `CF_AI_TOKEN`、`CF_ACCOUNT_ID` 讀。不印出、不寫檔、不放進指令列。
 - 只用 `clef-flash`，不用完整版 Clef（參數量未公開，延遲 209 ms）。
 
 ## 2. 題目與集合（和 S5j 的 Jev 完全相同，可逐列配對）
@@ -72,7 +72,7 @@
 
 ## 6. 負責人、執行與預算
 
-- **只有 main 執行付費呼叫**。驅動程式從環境變數 `CF_AI_TOKEN`、`CF_ACCOUNT_ID` 取得 token 與帳號 ID，兩者由 settings.json 帶進每個行程的環境，所以 subagent 也看得到：brief 一律寫明 agent 不執行 `clef_run.py`、不用這把 token。變數不在時，main 停下回報。
+- **只有 main 執行付費呼叫**。驅動程式從環境變數 `CF_AI_TOKEN`、`CF_ACCOUNT_ID` 取得 token 與帳號 ID；agent 的 brief 一律寫明不執行 `clef_run.py`、不用 token。變數不在時，main 停下回報。
 - `pilotfish:executor` 實作，**不連網、不用真的 token**，回報：
   - (a) `--sets discordtune` 在讀環境變數與連網之前就以非 0 結束；
   - (b) 用注入的假 HTTP 層（不連網）測錯誤路徑：401、429、5xx、逾時、回應沒有逐選項機率。輸出都不含句子內容、token 與帳號 ID（請求網址含帳號 ID，錯誤訊息不得印出網址）；
@@ -82,7 +82,7 @@
 - **main 跑真的冒煙測試**：dev302 前 20 列，每個條件都跑到。冒煙測試的所有輸出一律寫進 `~/.cache/shanjie/work/s5-clef/dev302-n20/`，不進 repo；完整執行不沿用這些列。跑完後 worktree 的 `git status --porcelain` 不得出現含 `-n20` 的路徑。回報逐選項機率的鍵名、C-sent-fwd 與 C-sent-rev 各自挑第 1 個的比例和翻轉率；另用一個錯的 token 確認 401 路徑。
 - 完整執行由 main 跑：約 400 次請求（和 S5j 的 Jev 相同），費用估計不到 0.1 美元，不吃本機資源。
 - **使用者同意與預算**：使用者 2026-10-05 選了「雲端對照 Jev（公開集合）」，預算上限 1 美元。Cloudflare 的部落格寫「不讀、不存、不拿請求訓練」；Workers AI 文件頁沒有資料保留的說明，這點未核對。送出的只有 CC0 與 CC BY 的公開句子。
-- 不另做 security-reviewer：只送公開資料；token 放在 settings.json 的 `env`，和 S5j 用的 Jev 金鑰（`TYPESAFE_API_KEY`）同樣放法，付費呼叫只由 main 執行，agent 的 brief 禁止使用（2026-10-06 改，原本是鑰匙圈加 main 的單一指令環境）。
+- 不另做 security-reviewer：只送公開資料；token 只經由環境變數提供，和 S5j 的 Jev 金鑰（`TYPESAFE_API_KEY`）相同，付費呼叫只由 main 執行，agent 的 brief 禁止使用。
 - 預算：executor 1 回合加 1 次修正。
 
 ## 7. 停止條件
