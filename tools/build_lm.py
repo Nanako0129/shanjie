@@ -36,31 +36,32 @@ LEXDIR = os.path.join(ROOT, "data", "lexicon")
 
 
 def variant_classes(by_reading):
-    """S2f §2.4：同一個讀音、把 MERGE（build_counts.MERGE）套到兩邊後字串相同的詞併成一類（union-find，跨讀音傳遞）。
-    by_reading：讀音 → [(詞, 分數)]（ime.Lexicon.by_reading，基底加疊加層）。回傳 詞 → 類的成員 tuple，只含成員數 >= 2 的類。"""
+    """S2f §2.4 與修訂一：MERGE（build_counts.MERGE）套到兩邊後字串相同、而且在詞庫裡的讀音集合完全相同的詞併成一類
+    （占 另有 ㄓㄢ，就不和 佔 併）。by_reading：讀音 → [(詞, 分數)]（ime.Lexicon.by_reading，基底加疊加層）。
+    回傳 詞 → 類的成員 tuple，第一個是代表成員（詞庫最高分最大、再來是 MERGE 正規形、再來 code point 最小），只含成員數 >= 2 的類。"""
     import build_counts as bc
-    parent = {}
-
-    def find(x):
-        while parent.setdefault(x, x) != x:
-            parent[x] = parent[parent[x]]; x = parent[x]
-        return x
-    for ents in by_reading.values():
-        first = {}
-        for w, _ in ents:
-            f = first.setdefault("".join(bc.MERGE.get(c, c) for c in w), w)
-            if f != w:
-                parent[find(w)] = find(f)
+    fold = lambda w: "".join(bc.MERGE.get(c, c) for c in w)
+    reads, best = {}, {}
+    for r, ents in by_reading.items():
+        for w, lp in ents:
+            reads.setdefault(w, set()).add(r)
+            best[w] = max(best.get(w, lp), lp)
     groups = {}
-    for w in parent:
-        groups.setdefault(find(w), []).append(w)
-    return {w: tuple(sorted(g)) for g in groups.values() if len(g) > 1 for w in g}
+    for w, rs in reads.items():
+        groups.setdefault((fold(w), frozenset(rs)), []).append(w)
+    out = {}
+    for g in groups.values():
+        if len(g) > 1:
+            rep = min(g, key=lambda w: (-best[w], fold(w) != w, w))
+            out.update(dict.fromkeys(g, (rep,) + tuple(sorted(x for x in g if x != rep))))
+    return out
 
 
 def merge_variants(uni, bi, cls):
-    """各語料加權、四捨五入之後做（uni、bi 是整數 dict）：unigram 與 bigram 以（類, 類）為 key 加總，再寫回類裡每個成員，
-    所以同類成員的次數相同。每個前文的總數在寫回之後才算（build() 後半），否則回退權重會變負。"""
-    rep = lambda w: cls.get(w, (w,))[0]
+    """各語料加權、四捨五入之後做（uni、bi 是整數 dict）。unigram 以類加總後寫回每個成員（每個寫法都要在詞彙表裡、能當前文）；
+    二元組以（類, 類）加總，「後一個詞」只放在代表成員上，前文則寫給類裡每個成員（條目相同）。這樣每個前文的總數 t 只算類一次
+    （修訂一 6.2.3；寫回每個成員會把 k 個成員的類算 k 次）。"""
+    rep = lambda w: cls[w][0] if w in cls else w
     u, b = {}, {}
     for w in [w for w in uni if w in cls]:
         u[rep(w)] = u.get(rep(w), 0) + uni.pop(w)
@@ -70,7 +71,7 @@ def merge_variants(uni, bi, cls):
     for w, c in u.items():
         uni.update(dict.fromkeys(cls[w], c))
     for (v, w), c in b.items():
-        bi.update(dict.fromkeys(((mv, mw) for mv in cls.get(v, (v,)) for mw in cls.get(w, (w,))), c))
+        bi.update(dict.fromkeys(((mv, w) for mv in cls.get(v, (v,))), c))
     return uni, bi
 
 

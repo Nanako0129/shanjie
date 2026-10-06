@@ -22,7 +22,7 @@ sys.path.insert(0, os.path.join(ROOT, "experiments", "s2"))
 import build_counts as new  # noqa: E402
 import build_tune as bt  # noqa: E402
 
-OLD_REF = "dd7d2bf"
+OLD_REF = "ae01597"   # main 上 S2f 之前的最後一個提交；build_counts.py 和 rebase 前的起點相同
 CVTUNE = os.path.expanduser("~/.cache/shanjie/work/s2n/tune/cvtune.txt")
 CVTUNE_SHA = "7f9b35e6deba78c84c9c9c4786d217c054f45718cb8b43c902faf4062c46bbb4"
 

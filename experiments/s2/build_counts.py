@@ -48,7 +48,7 @@ def _load_tw_variants():
     return out
 
 
-TW_VARIANTS = _load_tw_variants()   # 定義一次；build_overlay.py、build_tune.py（經 build_counts）與之後的 S2w 都用這一個
+TW_VARIANTS = {}   # load_conv() 填（S2f 修訂一：import 不讀檔）；build_overlay.py、build_tune.py（經 build_counts）與之後的 S2w 都用這一個
 # 繁體句的簡體專用字要再扣掉的字：OpenCC 沒有換回、但基底詞庫有 5 條以上用到（S2f 契約 §2.2）
 TRAD_KEEP = set("秘庄晒霉虱么肴洒痒")
 
@@ -59,6 +59,7 @@ def load_conv():
     S2n：同時填好「簡體句」用的全域表（SIMP_*、MARKERS、TRAD_ONLY），見 convert()。"""
     simp_only, phrase, char = set(), {}, {}
     keys, vals, first_char, simp_phrase = set(), set(), {}, {}
+    TW_VARIANTS.clear(); TW_VARIANTS.update(_load_tw_variants())
     for line in open(_checked("STCharacters.txt", "a0ca1601c70648cf48b33c3c6210ccbecc5c7eead4b4c3daf76587ba2c03582b"), encoding="utf-8"):
         p = line.rstrip("\n").split("\t")
         if len(p) == 2 and not line.startswith("#"):   # 檔頭的 `# Format: key<TAB>value(s)` 不是對照
@@ -70,7 +71,7 @@ def load_conv():
     for c in trad_simp_only:
         char[c] = first_char[c]
     for f in ["STPhrases.txt", "TWPhrases.txt"]:
-        for line in open(os.path.join(SRC, "opencc", f), encoding="utf-8"):
+        for line in open(_checked(f, PHRASE_SHA[f]), encoding="utf-8"):
             if line.startswith("#") or "\t" not in line:
                 continue
             k, v = line.rstrip("\n").split("\t")
@@ -80,7 +81,7 @@ def load_conv():
                 simp_phrase[k] = v.split(" ")[0]
                 if any(c in trad_simp_only for c in k):
                     phrase[k] = v.split(" ")[0]
-    char.update(VARIANTS)
+    # S2f 修訂一：繁體句的字表只剩縮小後的簡體專用字；VARIANTS 全部交給最後一層（TWPhrases 之後）
     SIMP_PHRASE.clear(); SIMP_PHRASE.update(simp_phrase)
     SIMP_CHAR.clear(); SIMP_CHAR.update({c: (c if c in TAIWAN_KEEP else v) for c, v in first_char.items()})
     MARKERS.clear(); MARKERS.update(c for c, v in first_char.items() if c != v)   # 標記字：第一個對照不是自己（含 后、于、里 這類）
@@ -89,6 +90,14 @@ def load_conv():
     TRAD_ONLY.clear(); TRAD_ONLY.update(first_char[c] for c in MARKERS)            # 繁體專用字：標記字的第一個對照（像、待、座 不在其中）
     SIMP_MAXP[0] = max(map(len, simp_phrase))
     TW_MAXP[0] = max(map(len, TW_PHRASE), default=1)
+    POST_SIMP.clear(); POST_SIMP.update({**TW_VARIANTS, **TW_CHAR})
+    POST_TRAD.clear(); POST_TRAD.update({**TW_VARIANTS, **VARIANTS})
+    # S2f 修訂一 6.2.1：保護詞只看基底詞庫（成員與「不在詞庫」都是）；疊加層本身用到轉換，讀它會循環。
+    # ponytail: 「三棱鏡」裡的「三棱」也被保護（詞庫是「三稜鏡」）；要逐詞反查再說。
+    base = set(ime.Lexicon(os.path.join(ROOT, "data", "lexicon", "mcbpmf-data.txt")).by_word)
+    PROTECT.clear()
+    PROTECT.update({w: w for w in base if any(c in POST_TRAD for c in w) and "".join(POST_TRAD.get(c, c) for c in w) not in base})
+    PROTECT_MAXP[0] = max(map(len, PROTECT), default=1)
     return phrase, char, max(map(len, phrase))
 
 
@@ -106,10 +115,12 @@ TRAD_SIMP_ONLY = set()
 TAIWAN_KEEP = set("吃皂唇岩岳咸秘")   # S2f：加 秘（簡體句保留，秘／祕 由 build_lm 的合併與詞庫分數決定）
 # S2f §2.4：build_lm 合併同讀音異體寫法的字表（週／周、唸／念、嚐／嘗、它／牠、妳 台灣用法有分工，不在其中）；build_overlay 的 §2.5 也用（再加 TW_VARIANTS）
 MERGE = {**VARIANTS, "佔": "占", "佈": "布", "祕": "秘", "臺": "台", "牀": "床", "汙": "污"}
-TW_CHAR = {**VARIANTS, "臺": "台"}   # 簡體句轉完後整句套一遍的台灣用字
+TW_CHAR = {**VARIANTS, "臺": "台"}   # 簡體句的台灣用字（併進 POST_SIMP）
 # S2f §2.3：全部轉換完（含 TWPhrases）之後再套一層；兩種句子各一張表（繁體句不套 臺→台）。重疊的 9 條方向相同（test_convert 檢查）
-POST_SIMP = {**TW_VARIANTS, **TW_CHAR}
-POST_TRAD = {**TW_VARIANTS, **VARIANTS}
+# load_conv() 填；PROTECT 裡的詞在這一層原樣保留（修訂一 6.2.1）。
+POST_SIMP, POST_TRAD, PROTECT, PROTECT_MAXP = {}, {}, {}, [1]
+PHRASE_SHA = {"STPhrases.txt": "f6eab5e5c6dd7640597878d3dfc6599ee1279d2bc91561eadd8e114194e2925a",
+              "TWPhrases.txt": "bcb435b744ee3e522beb9b18fcc5486a36ed4763c6aa642ce18112fb5d604e31"}
 
 
 TW_PHRASE, TW_MAXP = {}, [1]   # 台灣用詞（TWPhrases，鍵是繁體詞組），在簡轉繁之後第二遍套用
@@ -145,17 +156,15 @@ def is_simplified(text):
 
 
 def convert(text, phrase, char, maxp):
-    """簡體句（S2n）：全部 STPhrases 最長優先，沒蓋到的字用 STCharacters 第一個對照，整句再套台灣用字（VARIANTS、臺→台）。
-    其他句（繁體句，含簡繁夾雜）：只轉縮小後的簡體專用字（S2f）。兩種都再套台灣用詞，最後套台灣字形表（S2f §2.3）。"""
+    """簡體句（S2n）：全部 STPhrases 最長優先，沒蓋到的字用 STCharacters 第一個對照。
+    其他句（繁體句，含簡繁夾雜）：只轉縮小後的簡體專用字（S2f）。兩種都再套台灣用詞（TWPhrases），
+    最後一層保護詞原樣保留、其餘逐字套台灣字形表（簡體句另含 臺→台；S2f §2.3 與修訂一）。"""
     simp = is_simplified(text)
-    if simp:
-        text = "".join(TW_CHAR.get(c, c) for c in _longest(text, SIMP_PHRASE, SIMP_MAXP[0], SIMP_CHAR))
-    else:
-        # 第三次重建：詞組輸出與字表輸出（为→爲）都還帶著 STCharacters 的寫法，整句輸出再套一遍 VARIANTS（不含 臺→台）
-        text = "".join(VARIANTS.get(c, c) for c in _longest(text, phrase, maxp, char))
+    # S2f 修訂一 6.2.2：TWPhrases 之前不套台灣字形或 VARIANTS（OpenCC 的順序），鍵寫成 OpenCC 字形的台灣用詞才對得到
+    text = _longest(text, SIMP_PHRASE, SIMP_MAXP[0], SIMP_CHAR) if simp else _longest(text, phrase, maxp, char)
     text = _longest(text, TW_PHRASE, TW_MAXP[0]) if TW_PHRASE else text
     table = POST_SIMP if simp else POST_TRAD   # 喫→吃 也在 TW_VARIANTS 裡，S2n 的「輸入有喫就保留」規則拿掉
-    return "".join(table.get(c, c) for c in text)
+    return _longest(text, PROTECT, PROTECT_MAXP[0], table)   # 保護詞原樣保留，其餘逐字套表
 
 
 MARKUP = [

@@ -128,18 +128,23 @@ def build():
             w2 = bc.convert(w, *conv)
             if w2 != w:
                 target[w] = w2
-    for w in sorted(cand):                          # 依詞的 code point 排序；核心照檔案順序接在基底後面
+    info = {}                                       # 詞 → (讀音, 同讀音的基底異體詞)；第二輪要知道目標會不會被 §2.5 拿掉
+    for w in sorted(cand):
         syls = base.to_syllables(w)
-        if syls is None:
+        if syls is not None:
+            syls = normalize(w, syls)
+            info[w] = (syls, next((b for b, _ in base.by_reading[tuple(syls)] if fold_w(b) == fold_w(w)), None))
+    for w in sorted(cand):                          # 依詞的 code point 排序；核心照檔案順序接在基底後面
+        if w not in info:
             continue
-        syls = normalize(w, syls)
+        syls, twin = info[w]
         # S2n §2.2：簡體寫法拿掉。三點都成立才拿：簡體句轉換會變成另一個寫法、新寫法已在基底或疊加層、本身不在基底也不是萌典詞目
-        # （基底的情形 titles() 已排除；後兩點仍明寫，萌典詞目才擋得到「里程」這類）
+        # （基底的情形 titles() 已排除；後兩點仍明寫，萌典詞目才擋得到「里程」這類）。
+        # 「已在疊加層」＝目標本身會留下：有讀音、不是簡體寫法、也不會被 §2.5 拿掉（S2f 修訂一：避免 A→B 而 B 不在了）
         w2 = target.get(w)
-        if w2 and (w2 in words or (w2 in cand and w2 not in target)):
+        if w2 and (w2 in words or (w2 in info and w2 not in target and not info[w2][1])):
             removed.append(f"{w}\t{w2}\t{'-'.join(syls)}\n")
             continue
-        twin = next((b for b, _ in base.by_reading[tuple(syls)] if fold_w(b) == fold_w(w)), None)   # 同讀音的基底詞
         if twin:                                    # S2f §2.5：疊加層只是基底詞的異體寫法（尿牀 vs 尿床）就拿掉，不然合併後它的寫法會勝出
             variant_removed.append(f"{w}\t{twin}\t{'-'.join(syls)}\n")
             continue
@@ -148,9 +153,9 @@ def build():
         var = sandhi_variant(w, syls)
         if var:                                     # 主要列在前，變調列緊接其後（同來源，分數 − VARIANT_PENALTY）
             rows.append(f"{'-'.join(var)}\t{w}\t{round(SCORE[len(w)] - VARIANT_PENALTY, 8)!r}\t{src}\n")
-    assert not {r.split("\t")[1] for r in rows} & words   # 疊加層和基底的詞表交集必須是 0
-    assert not {r.split("\t")[0] for r in removed} & {r.split("\t")[1] for r in removed}   # 新寫法本身不能也被拿掉
-    assert not {r.split("\t")[0] for r in variant_removed} & words
+    kept = {r.split("\t")[1] for r in rows}
+    assert not kept & words                         # 疊加層和基底的詞表交集必須是 0
+    assert all(r.split("\t")[1] in words | kept for r in removed)   # 被拿掉的簡體寫法，新寫法一定在基底或疊加層
     return rows, removed, variant_removed
 
 
