@@ -32,7 +32,7 @@ JEV_MODEL, JEV_HOST, JEV_PATH = "jev-1.13.0", "api.typesafe.ai", "/v1/systemone"
 JEV_USD_PER_Q = 0.004 / 300  # S5j's billed J1 (300 questions, about US$0.004); reporting estimate only
 JEV_KEY_FILE = "~/.config/typesafe/api_key"
 # contract section 12: SHA-256 of ~/.cache/shanjie/work/s5-clef/cvtune/clef-sent-fwd.jsonl. None until main fills it in.
-CLEF_V0_SHA = None
+CLEF_V0_SHA = "fa53ba7ccc67d217c5019896539a2dceced13f4be72d7d0fec54926ed834e074"  # recorded 2026-10-06
 CLEF_V0_PATH = os.path.join(R.C_CACHE, "cvtune", "clef-sent-fwd.jsonl")
 VARIANTS = {"v1": ["v1"], "v2": ["v2f", "v2r"], "v3": ["v3"], "v4": ["v4f", "v4r"]}
 
