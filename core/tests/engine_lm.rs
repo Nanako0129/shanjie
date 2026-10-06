@@ -493,3 +493,62 @@ fn overlay_sandhi_rows_load_and_cap() {
     assert!(cv <= cp && cp - cv <= 0.5 + 1e-9, "capped variant is at most the penalty below the primary ({cp} vs {cv})");
     assert!(cp < raw, "the cap lowers the raw overlay score {raw} (got {cp})");
 }
+
+// ---------- S2h: left context conditions the first word ----------
+
+/// dev302 rows with their context text (the file's first column), same selection as `dev302()`.
+fn dev302_ctx() -> Vec<String> {
+    let lex = &shared().lex;
+    let mut files: Vec<PathBuf> = std::fs::read_dir(root().join("eval/dev"))
+        .unwrap()
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| p.extension().is_some_and(|x| x == "txt"))
+        .collect();
+    files.sort();
+    let mut rows = Vec::new();
+    for f in files {
+        rows.extend(parse_rows(&std::fs::read_to_string(f).unwrap()).unwrap());
+    }
+    usable(lex, rows).into_iter().take(302).map(|r| r.ctx).collect()
+}
+
+/// `top1_sha256` of a summary line of eval/golden/s2h-lm-context.txt (Python output, equal to `cli --context`).
+fn context_golden_sha(profile: &str) -> String {
+    let t = std::fs::read_to_string(root().join("eval/golden/s2h-lm-context.txt")).unwrap();
+    let line = t.lines().find(|l| l.starts_with(&format!("## dev302  lm-{profile}+ctx  "))).unwrap();
+    line.split("'top1_sha256': '").nth(1).unwrap().trim_end_matches("'}").to_string()
+}
+
+/// S2h acceptance 1: replaying dev302 with `set_left_context(context)` before each row commits the same
+/// first names as `cli --context` (compared by `top1_sha256`), both profiles.
+#[test]
+fn replay_with_left_context_matches_cli_context() {
+    for (profile, name) in [(Profile::Chat, "chat"), (Profile::Formal, "formal")] {
+        let mut e = engine(Layout::Standard, profile);
+        let mut got = Vec::new();
+        for ((_, syls), ctx) in dev302().into_iter().zip(dev302_ctx()) {
+            e.set_left_context(&ctx);
+            let mut keys: Vec<Key> = syls.iter().flat_map(|s| keys_of(Layout::Standard, s)).collect();
+            keys.push(Key::new(KeyKind::Enter));
+            let mut s = String::new();
+            for key in keys {
+                s.push_str(&e.key(key).unwrap().commit);
+            }
+            got.push(s);
+        }
+        assert_eq!(core::eval::sha256_hex(got.join("\n").as_bytes()), context_golden_sha(name), "{name}");
+    }
+}
+
+/// S2h acceptance 7: after 好 a lone ㄅㄚ˙ is 吧; without a left context it stays 巴 (current behavior).
+#[test]
+fn left_context_turns_ba_into_the_particle() {
+    let ba: Syls = vec!["ㄅㄚ˙".to_string()];
+    for profile in [Profile::Chat, Profile::Formal] {
+        let mut e = engine(Layout::Standard, profile);
+        e.set_left_context("好");
+        assert_eq!(type_row(&mut e, Layout::Standard, &ba).preedit, "吧");
+        e.reset(ResetMode::Discard);
+        assert_eq!(type_row(&mut e, Layout::Standard, &ba).preedit, "巴");
+    }
+}
