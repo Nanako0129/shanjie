@@ -210,6 +210,7 @@ context_key(prefix: &str) -> Key
     - 組字期間不再呼叫讀取 API；
     - gate 擋時不讀；
     - 假 client 照 NSTextInputClient 的語意，沒有 marked text 時 `markedRange` 回 `{NSNotFound, 0}`：`ab\t中` 傳進核心的是 `中`；
+    - 實機量到的空範圍（2026-10-06）：`markedRange` 是 `{插入點, 0}`、`{0, 0}` 或 `{NSNotFound, NSNotFound}` 時照樣讀（`testEmptyMarkedRangeAnywhereStillReadsTheContext`）；
     - client 帶著殘留的 marked text 時，傳 NULL。
 12. **R3**：
     - gate 單元測試，安全輸入、denylist（用其中一個密碼管理器 bundle ID）、判斷不了，三種都暫停、0 筆；
