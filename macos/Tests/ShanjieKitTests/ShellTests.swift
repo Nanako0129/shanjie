@@ -431,6 +431,45 @@ final class ShellTests: XCTestCase {
         XCTAssertEqual(c.client.marked, Self.standardProbe)
     }
 
+    /// sw (docs/contracts/sw-sensitive-demote.md section 3): the menu item is checked by default, flips the
+    /// core's setting (the user report ㄍㄠˇ ㄨㄢˊ ㄓㄜˋ ㄅㄛ), is stored, and a new shell reads the stored
+    /// choice (a stored off survives a restart and a layout switch rebuild).
+    func testDemoteMenuItemTogglesStoresAndSurvivesRestart() {
+        let report = Layouts.keys("ㄍㄠˇ ㄨㄢˊ ㄓㄜˋ ㄅㄛ", eten: false)
+        let store = MemoryDemoteStore()
+        let shell = Shell(resources: resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(),
+                          learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: store)
+        let c = Controller(shell)
+        c.session.activate()
+        let item = { c.session.menu.first { $0.action == .toggleDemote } }
+        XCTAssertEqual(item()?.title, "避免把敏感字詞排在前面")
+        XCTAssertEqual(item()?.checked, true, "default on")
+        c.type(report)
+        XCTAssertEqual(c.client.marked, "搞完這波")
+        c.press(Keys.esc)
+        c.session.perform(.toggleDemote)
+        XCTAssertEqual(store.demote, false)
+        XCTAssertEqual(item()?.checked, false)
+        c.type(report)
+        XCTAssertEqual(c.client.marked, "睪丸這波")
+        c.press(Keys.esc)
+        c.session.selectLayout(.eten)      // the rebuilt engine gets the stored setting too
+        c.session.selectLayout(.standard)
+        c.type(report)
+        XCTAssertEqual(c.client.marked, "睪丸這波")
+        c.press(Keys.esc)
+        let again = Controller(Shell(resources: resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(),
+                                     learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: store))
+        again.session.activate()
+        again.type(report)
+        XCTAssertEqual(again.client.marked, "睪丸這波", "a new shell reads the stored off")
+        again.press(Keys.esc)
+        again.session.perform(.toggleDemote)
+        XCTAssertEqual(store.demote, true)
+        again.type(report)
+        XCTAssertEqual(again.client.marked, "搞完這波")
+    }
+
     func testSwitchingLayoutCommitsThenUsesTheNewLayout() {
         let c = Controller(makeShell())
         c.session.activate()

@@ -124,6 +124,12 @@ static int run_lm(const char *dir, const char *lm, const char *missing) {
   /* Out-of-range profile: code 2, *out NULL, nothing changes. */
   o = &dummy;
   CHECK(311, shanjie_engine_set_profile(e, 7, &o) == 2 && o == 0);
+  /* set_demote (docs/contracts/sw-sensitive-demote.md): 0 or 1, else 2; NULL engine 1. ROW10 has no
+   * demoted word, so the display is the same either way. */
+  CHECK(701, shanjie_engine_set_demote(0, 1) == 1);
+  CHECK(702, shanjie_engine_set_demote(e, 2) == 2);
+  CHECK(703, shanjie_engine_set_demote(e, 0) == 0 && row_shows(e, FORMAL) && enter_commits(e, FORMAL));
+  CHECK(704, shanjie_engine_set_demote(e, 1) == 0 && row_shows(e, FORMAL) && enter_commits(e, FORMAL));
   /* Reset (both modes) keeps the LM and the formal profile. */
   for (mode = 0; mode <= 1; mode++) {
     int b = 312 + (int)mode * 3;

@@ -56,6 +56,9 @@ final class CoreEngine {
         return text.withCString { shanjie_engine_set_left_context(handle, $0) }
     }
 
+    /// sw: whether the demotion table applies; 0 on success (the core's default is on).
+    func setDemote(_ on: Bool) -> Int32 { shanjie_engine_set_demote(handle, on ? 1 : 0) }
+
     func setLearning(_ enabled: Bool) -> Int32 { shanjie_engine_set_learning(handle, enabled ? 1 : 0) }
 
     func learningOpen(dir: String) -> Int32 { shanjie_engine_learning_open(handle, dir) }

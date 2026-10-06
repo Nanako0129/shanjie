@@ -107,7 +107,34 @@ def history(left, lm):
     return "<s>"
 
 
-def decode(lex, syls, lm, profile, beam=64, start="<s>"):
+def load_demote(path):
+    """降權表（docs/contracts/sw-sensitive-demote.md §2）：{(讀音, 詞): δ}，讀音以 "-" 相接，"*" 是所有讀音。
+    格式錯、δ 不是有限正數、重複的鍵就丟 ValueError（核心同樣讓引擎建立失敗）。空行與 # 行略過。"""
+    out = {}
+    for line in open(path, encoding="utf-8"):
+        line = line.rstrip("\n")
+        if not line or line[0] == "#":
+            continue
+        f = line.split("\t")
+        if len(f) != 5 or not f[0] or not f[1]:
+            raise ValueError("bad demote row")
+        d = float(f[2])
+        if not (math.isfinite(d) and d > 0) or (f[0], f[1]) in out:
+            raise ValueError("bad demote row")
+        out[(f[0], f[1])] = d
+    return out
+
+
+def demote_delta(demote, reading, word):
+    """特定讀音優先於 "*"；沒有就 0.0。demote 為 None 或空表時永遠是 0.0。"""
+    if not demote:
+        return 0.0
+    d = demote.get((reading, word))
+    return d if d is not None else demote.get(("*", word), 0.0)
+
+
+def decode(lex, syls, lm, profile, beam=64, start="<s>", demote=None):
+    """demote：load_demote 的結果或 None（不降權）。詞項分數 = lm.word(...) − δ；要試哪些詞條仍依原本的分數。"""
     lam = PROFILES[profile]
     syls = tuple(syls); n = len(syls)
     hyps = [[] for _ in range(n + 1)]; hyps[0] = [(0.0, ())]
@@ -118,9 +145,11 @@ def decode(lex, syls, lm, profile, beam=64, start="<s>"):
             entries = lex.by_reading.get(key)
             if not entries or not hyps[i - L]:
                 continue
+            reading = "-".join(key) if demote else None
             for word, lp in entries[:ime.PER_KEY]:
+                d = demote_delta(demote, reading, word)
                 for s, ws in hyps[i - L]:
-                    sc = s + lm.word(lam, ws[-1] if ws else start, word, lp)
+                    sc = s + (lm.word(lam, ws[-1] if ws else start, word, lp) - d)
                     surface = "".join(ws) + word
                     if surface not in cand or sc > cand[surface][0]:
                         cand[surface] = (sc, ws + (word,))
