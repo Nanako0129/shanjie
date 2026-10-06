@@ -42,6 +42,9 @@ def build():
             uni[k] = uni.get(k, 0) + v * w
         for k, v in c["bi"].items():
             bi[k] = bi.get(k, 0) + v * w
+    # S2n 契約 §6.2：期望次數是小數；加權相加後每一筆四捨五入成整數、去掉 0。整數輸入不受影響（round(int) 不變）。
+    uni = {k: r for k, v in uni.items() if (r := round(v))}
+    bi = {k: r for k, v in bi.items() if (r := round(v))}
     words = sorted(uni, key=lambda s: s.encode("utf-8"))
     vocab = ["<s>", "</s>"] + words
     ids = {w: i for i, w in enumerate(vocab)}
