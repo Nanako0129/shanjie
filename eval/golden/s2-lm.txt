@@ -1,4 +1,4 @@
-## dev302  lm-chat  {'n': 302, 'top1': 238, 'oracle@64': 300, 'top1_sha256': 'fbabaaab72cc9cd787de68f420c7acf9e79c72bf13a9666086f1e9674d38f476'}
-## typing76  lm-chat  {'n': 76, 'top1': 65, 'oracle@64': 75, 'top1_sha256': 'e0b9fe10862f6231733002cbc81fea1821d8236306e4021ac33ee65273eb824a'}
-## dev302  lm-formal  {'n': 302, 'top1': 237, 'oracle@64': 300, 'top1_sha256': '49102eb379b975466c49e2f802263262c030ca7fb703da6f27ff7eacc8fb2579'}
-## typing76  lm-formal  {'n': 76, 'top1': 65, 'oracle@64': 75, 'top1_sha256': '4bcfaaa6ac07213e26f19bd98fa750067cba7202f5adde1915d38f5f832154d4'}
+## dev302  lm-chat  {'n': 302, 'top1': 234, 'oracle@64': 300, 'top1_sha256': '14b42657b83cdfff28e06b8a3197d52d351134b4919f59db9c363301ee2acf13'}
+## typing76  lm-chat  {'n': 76, 'top1': 66, 'oracle@64': 76, 'top1_sha256': 'd039204a4b8e978d507ae7ffd1f7c9a530b95ccdf8965632d3baa4dd7e0fcf89'}
+## dev302  lm-formal  {'n': 302, 'top1': 240, 'oracle@64': 300, 'top1_sha256': 'ffe3a0b0e95b7f74f246b4a742cc531746ba1a92240f16de7f0b68c035eddc10'}
+## typing76  lm-formal  {'n': 76, 'top1': 66, 'oracle@64': 76, 'top1_sha256': '0d94f359d320c14d40ac90bf41bca5efe302d98aa333879fe03944c833829943'}

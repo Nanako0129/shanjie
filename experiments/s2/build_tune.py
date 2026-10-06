@@ -20,8 +20,8 @@ ROOT = os.path.dirname(os.path.dirname(HERE))
 sys.path.insert(0, HERE)
 import build_counts as bc  # noqa: E402
 
-SRC = os.path.expanduser("~/.cache/shanjie/sources/colloquial")
-OUT = os.path.expanduser("~/.cache/shanjie/work/s2/tune")
+SRC = os.path.join(bc.SRC, "colloquial")
+OUT = os.path.join(bc.OUT, "tune")   # 跟著 build_counts 的 S2_WORK
 HAN = re.compile(r"[一-鿿]{4,30}")
 
 
@@ -31,13 +31,13 @@ def is_tune(s):
 
 def readings(rows, name):
     src, dst = os.path.join(OUT, f"{name}.in"), os.path.join(OUT, f"{name}.all")
-    open(src, "w", encoding="utf-8").write("".join(f"|{s}\n" for s in rows))
-    r = subprocess.run(["python3", os.path.join(ROOT, "tools", "readings.py"), src, dst], capture_output=True, text=True)
+    open(src, "w", encoding="utf-8", newline="\n").write("".join(f"|{s}\n" for s in rows))
+    r = subprocess.run([sys.executable, os.path.join(ROOT, "tools", "readings.py"), src, dst], capture_output=True, text=True, encoding="utf-8")
     if r.returncode != 0:
         sys.exit(f"readings.py failed on {name}")
     check = {l.split("\t")[1] for l in r.stderr.splitlines() if l.startswith("CHECK\t")}
     kept = [l for l in open(dst, encoding="utf-8") if l.split("|")[1] not in check]
-    open(os.path.join(OUT, f"{name}.txt"), "w", encoding="utf-8").write("".join(kept))
+    open(os.path.join(OUT, f"{name}.txt"), "w", encoding="utf-8", newline="\n").write("".join(kept))
     print(f"{name}: {len(rows)} clauses → {len(kept)} rows (dropped {len(rows) - len(kept)} CHECK/unreadable)")
 
 
@@ -45,6 +45,9 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--cv-rows", type=int, default=4000)
     ap.add_argument("--wiki-rows", type=int, default=3000)
+    ap.add_argument("--part", choices=["all", "cv", "wiki"], default="all",
+                    help="cv：只做 Common Voice／Tatoeba（colloquial-train、cvtune，幾分鐘）；wiki：只做 wikitune（要讀 30 萬篇，約 20 分鐘）。"
+                         "wiki 會重算 cv 的取樣來接上同一個亂數狀態，結果和 all 逐位元組相同")
     a = ap.parse_args()
     os.makedirs(OUT, exist_ok=True)
     phrase, char, maxp = bc.load_conv()
@@ -59,9 +62,14 @@ def main():
                 tune.update(HAN.findall(s))
             else:
                 train.append(s)
-    open(os.path.join(OUT, "colloquial-train.txt"), "w", encoding="utf-8").write("\n".join(train) + "\n")
     rnd = random.Random(20261003)
-    readings(rnd.sample(sorted(tune), min(a.cv_rows, len(tune))), "cvtune")
+    cv = rnd.sample(sorted(tune), min(a.cv_rows, len(tune)))
+    if a.part != "wiki":
+        open(os.path.join(OUT, "colloquial-train.txt"), "w", encoding="utf-8", newline="\n").write("\n".join(train) + "\n")
+        readings(cv, "cvtune")
+        print(f"colloquial-train: {len(train)} sentences")
+    if a.part == "cv":
+        return
     wiki = []
     for i, raw in enumerate(bc.articles(305_000)):
         if i < 300_000:
@@ -74,7 +82,6 @@ def main():
         for s in bc.SENT.findall(t):
             wiki.extend(HAN.findall(bc.convert(s, phrase, char, maxp)))
     readings(rnd.sample(sorted(set(wiki)), min(a.wiki_rows, len(set(wiki)))), "wikitune")
-    print(f"colloquial-train: {len(train)} sentences")
 
 
 if __name__ == "__main__":

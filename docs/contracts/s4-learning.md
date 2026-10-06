@@ -82,7 +82,7 @@ context_key(prefix: &str) -> Key
 ## 2. 前文讀取（R4，Swift 殼）
 
 - **讀一次**：每次組字開始、第一次 `setMarkedText` 之前讀。這時 client 還沒有 marked text。組字期間與送出前不再讀。
-- **什麼時候算沒有前文**：`selectedRange` 是 `NSNotFound`；或 `markedRange` **不是** `NSNotFound`（client 已經有 marked text，表示上一段組字還沒結束）；或讀取回傳 nil。沒有 marked text 時 `markedRange` 本來就是 `{NSNotFound, 0}`，這是正常情況，照樣讀。
+- **什麼時候算沒有前文**：`selectedRange` 是 `NSNotFound`；或 client 還有 marked text，也就是 `markedRange` 的**長度大於 0**（而且位置不是 `NSNotFound`），表示上一段組字還沒結束；或讀取回傳 nil。長度是 0 時不論位置都算沒有 marked text，照樣讀：NSTextInputClient 文件寫的是 `{NSNotFound, 0}`，但 2026-10-06 實機量到 VS Code、Chrome、Finder 搜尋框等回 `{插入點, 0}`、有一個回 `{NSNotFound, NSNotFound}`（原本只看位置，這些 App 都讀不到前文）。
 - **範圍有上限**：
   - 只請求插入點前最多 32 個 UTF-16 單位（具名常數）：`NSRange(location: max(0, ins − 32), length: ins − max(0, ins − 32))`。
   - 範圍被截過時，丟掉第一個 grapheme，避免切到代理對或 grapheme 中間。
@@ -210,6 +210,7 @@ context_key(prefix: &str) -> Key
     - 組字期間不再呼叫讀取 API；
     - gate 擋時不讀；
     - 假 client 照 NSTextInputClient 的語意，沒有 marked text 時 `markedRange` 回 `{NSNotFound, 0}`：`ab\t中` 傳進核心的是 `中`；
+    - 實機量到的空範圍（2026-10-06）：`markedRange` 是 `{插入點, 0}`、`{0, 0}` 或 `{NSNotFound, NSNotFound}` 時照樣讀（`testEmptyMarkedRangeAnywhereStillReadsTheContext`）；
     - client 帶著殘留的 marked text 時，傳 NULL。
 12. **R3**：
     - gate 單元測試，安全輸入、denylist（用其中一個密碼管理器 bundle ID）、判斷不了，三種都暫停、0 筆；
@@ -436,7 +437,7 @@ PLAN §7 要同步：R5 欄位加上「讀音」；R2 改成「學習檔除了 �
 - **結果表**：ε_global ∈ {0.5, 1.0, 1.5, 2.0}，加上舊的 6.0 作對照，每個值報「全域學會率」與「全域污染測試的退步數」。ε_global 取全域污染 0 退步、而且全域學會率不是 0 的最小值。若 6.0 和其他值的退步數相同，表上註明「這個測試分不出各值」。
 - **單字不全域化**：同一個單字在 3 種前文學過後，全域紀錄是 0 筆；同樣情況下 2 個字的詞會產生全域紀錄。
 - **既有紀錄**：一個含單字全域紀錄或單字「^」紀錄的學習檔，載入後這些紀錄不在記憶體裡、解碼不受影響；觸發一次完整重寫後，檔案裡沒有這些行。
-- **A2**：鏡像測試學會率（現行 9／10）不得下降；常用詞句 0 退步照舊。ε_global 的四個值都跑，結果寫進本節。
+- **A2**：鏡像測試學會率（2026-10-05 實測 9／10）≥ 80%，可學的組（模型本來沒有給出教學句的組）至少 8 組、測試以此為下限（S2n 第三次重建後 8／9，戰機／戰績 本來就對）；常用詞句 0 退步照舊。ε_global 的四個值都跑，結果寫進本節。
 - §6 原有的測試全過；改到的測試要說明為什麼改。
 - 使用者實機：把現在的學習檔留著（裡面有「再」的全域紀錄），裝新版後打「另外現在在做」，應該打出「現在在做」。
 

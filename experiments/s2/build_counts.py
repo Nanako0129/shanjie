@@ -7,6 +7,7 @@
 import argparse
 import bz2
 import collections
+import math
 import os
 import pickle
 import re
@@ -17,18 +18,22 @@ sys.path.insert(0, os.path.join(ROOT, "reference", "proto"))
 import ime  # noqa: E402
 
 SRC = os.path.expanduser("~/.cache/shanjie/sources")
-OUT = os.path.expanduser("~/.cache/shanjie/work/s2")
+OUT = os.environ.get("S2_WORK") or os.path.expanduser("~/.cache/shanjie/work/s2")   # S2_WORK：寫到別處（S2n 重建時不蓋掉舊的計數）
 DUMP = os.path.join(SRC, "zhwiki-20261001-pages-articles.xml.bz2")
 
 
 def load_conv():
-    """回傳 (詞組表, 字表, 最長詞組)。只收「簡體專用字」：本身也是正確繁體的字（例：吃、后、里、游）不轉，
-    否則會把原本正確的繁體字改掉（2026-10-03 的 bug：吃→喫、后→後、里→裏）。詞組只在含簡體專用字時才收。"""
+    """回傳 (詞組表, 字表, 最長詞組)，給「繁體句」用。只收「簡體專用字」：本身也是正確繁體的字（例：吃、后、里、游）不轉，
+    否則會把原本正確的繁體字改掉（2026-10-03 的 bug：吃→喫、后→後、里→裏）。詞組只在含簡體專用字時才收。
+    S2n：同時填好「簡體句」用的全域表（SIMP_*、MARKERS、TRAD_ONLY），見 convert()。"""
     simp_only, phrase, char = set(), {}, {}
+    keys, vals, first_char, simp_phrase = set(), set(), {}, {}
     for line in open(os.path.join(SRC, "opencc", "STCharacters.txt"), encoding="utf-8"):
         p = line.rstrip("\n").split("\t")
-        if len(p) == 2 and p[0] not in p[1].split(" "):
-            simp_only.add(p[0]); char[p[0]] = p[1].split(" ")[0]
+        if len(p) == 2 and not line.startswith("#"):   # 檔頭的 `# Format: key<TAB>value(s)` 不是對照
+            keys.add(p[0]); vals.update("".join(p[1].split(" "))); first_char[p[0]] = p[1].split(" ")[0]
+            if p[0] not in p[1].split(" "):
+                simp_only.add(p[0]); char[p[0]] = p[1].split(" ")[0]
     for f in ["STPhrases.txt", "TWPhrases.txt"]:
         for line in open(os.path.join(SRC, "opencc", f), encoding="utf-8"):
             if line.startswith("#") or "\t" not in line:
@@ -36,23 +41,52 @@ def load_conv():
             k, v = line.rstrip("\n").split("\t")
             if f == "TWPhrases.txt":
                 TW_PHRASE[k] = v.split(" ")[0]
-            elif any(c in simp_only for c in k):
-                phrase[k] = v.split(" ")[0]
+            else:
+                simp_phrase[k] = v.split(" ")[0]
+                if any(c in simp_only for c in k):
+                    phrase[k] = v.split(" ")[0]
     char.update(VARIANTS)
+    SIMP_PHRASE.clear(); SIMP_PHRASE.update(simp_phrase)
+    SIMP_CHAR.clear(); SIMP_CHAR.update({c: (c if c in TAIWAN_KEEP else v) for c, v in first_char.items()})
+    MARKERS.clear(); MARKERS.update(c for c, v in first_char.items() if c != v)   # 標記字：第一個對照不是自己（含 后、于、里 這類）
+    SIMP_ONLY.clear(); SIMP_ONLY.update(simp_only)                                 # 簡體專用字：對照裡不含自己
+    TRAD_ONLY.clear(); TRAD_ONLY.update(first_char[c] for c in MARKERS)            # 繁體專用字：標記字的第一個對照（像、待、座 不在其中）
+    SIMP_MAXP[0] = max(map(len, simp_phrase))
+    TW_MAXP[0] = max(map(len, TW_PHRASE), default=1)
     return phrase, char, max(map(len, phrase))
 
 
 # OpenCC 只轉簡體；維基常見的繁體異體字另外換成台灣用字
-VARIANTS = {"爲": "為", "衆": "眾", "綫": "線", "麪": "麵", "僞": "偽", "裏": "裡", "峯": "峰", "羣": "群", "啓": "啟", "敎": "教"}
+VARIANTS = {"爲": "為", "衆": "眾", "綫": "線", "麪": "麵", "僞": "偽", "裏": "裡", "峯": "峰", "羣": "群", "啓": "啟", "敎": "教", "着": "著", "説": "說"}
 
 
-TW_PHRASE = {}   # 台灣用詞（TWPhrases，鍵是繁體詞組），在簡轉繁之後第二遍套用
+# S2n 簡體句用的表（load_conv 填）：全部 STPhrases、STCharacters 第一個對照、簡體專用字、繁體專用字
+SIMP_PHRASE, SIMP_CHAR, MARKERS, SIMP_ONLY, TRAD_ONLY, SIMP_MAXP = {}, {}, set(), set(), set(), [0]
+# 台灣用字例外（S2n 契約 §2.1）：簡體句的字表這一步保留原字，不換成 STCharacters 的第一個對照（吃→喫、岩→巖 在台灣不是正確用字）。
+# 挑法：2026-10-05 在維基前 25,000 篇被判為繁體句的句子裡，原字出現次數 >= 3 倍第一個對照、且原字 >= 30 次；
+# 比例 吃 28.8、皂 78.5、唇 12.2、岩 9.1、岳 5.0、咸 3.4（experiments/s2n/pick_exceptions.py，輸出在契約 §2.1）。
+# 后 于 里 台 干 余 不在此列：契約表明定要轉。詞組那一步照舊，所以 岩石、范围 這類由詞組決定。
+TAIWAN_KEEP = set("吃皂唇岩岳咸")
+TW_CHAR = {**VARIANTS, "臺": "台"}   # 簡體句轉完後整句套一遍的台灣用字
+
+
+TW_PHRASE, TW_MAXP = {}, [1]   # 台灣用詞（TWPhrases，鍵是繁體詞組），在簡轉繁之後第二遍套用
+
+
+_FIRST = {}   # (id(table), len(table)) → {首字: 該首字開頭的最長鍵}，讓沒有詞組可比對的位置不必切片查表（輸出和逐長度試完全相同）
 
 
 def _longest(text, table, maxp, char=None):
+    first = _FIRST.get((id(table), len(table)))
+    if first is None:
+        first = {}
+        for k in table:
+            if len(k) > first.get(k[0], 0):
+                first[k[0]] = len(k)
+        _FIRST[(id(table), len(table))] = first
     out, i, n = [], 0, len(text)
     while i < n:
-        for L in range(min(maxp, n - i), 1, -1):
+        for L in range(min(first.get(text[i], 0), maxp, n - i), 1, -1):
             w = table.get(text[i:i + L])
             if w:
                 out.append(w); i += L; break
@@ -61,10 +95,25 @@ def _longest(text, table, maxp, char=None):
     return "".join(out)
 
 
+def is_simplified(text):
+    """簡體句（S2n 契約 §2.1）：(i) 有標記字而且沒有繁體專用字，或 (ii) 簡體專用字比繁體專用字多。"""
+    m = sum(c in MARKERS for c in text)
+    t = sum(c in TRAD_ONLY for c in text)
+    return (m > 0 and t == 0) or sum(c in SIMP_ONLY for c in text) > t
+
+
 def convert(text, phrase, char, maxp):
-    """兩段：簡轉繁（詞組＋簡體專用字），再套台灣用詞。"""
-    text = _longest(text, phrase, maxp, char)
-    return _longest(text, TW_PHRASE, max(map(len, TW_PHRASE), default=1)) if TW_PHRASE else text
+    """簡體句（S2n）：全部 STPhrases 最長優先，沒蓋到的字用 STCharacters 第一個對照，整句再套台灣用字（VARIANTS、臺→台）。
+    其他句（繁體句，含簡繁夾雜）：只轉簡體專用字。兩種都再套台灣用詞。"""
+    src = text
+    if is_simplified(text):
+        text = "".join(TW_CHAR.get(c, c) for c in _longest(text, SIMP_PHRASE, SIMP_MAXP[0], SIMP_CHAR))
+    else:
+        # 第三次重建：詞組輸出與字表輸出（为→爲）都還帶著 STCharacters 的寫法，整句輸出再套一遍 VARIANTS（不含 臺→台）
+        text = "".join(VARIANTS.get(c, c) for c in _longest(text, phrase, maxp, char))
+    text = _longest(text, TW_PHRASE, TW_MAXP[0]) if TW_PHRASE else text
+    # 喫：STPhrases 的「吃了」「吃不出来」等詞組輸出喫；輸入句本來沒有喫就換回吃
+    return text if "喫" in src else text.replace("喫", "吃")
 
 
 MARKUP = [
@@ -119,11 +168,75 @@ def segment(lex, text):
     return out[::-1]
 
 
+EXPECTED_MIN = 0.01   # --expected：單一段落裡期望次數低於這個值的詞與二元組不記（S2n 契約 §6.2；事先寫死，用來控制記憶體）
+
+
+def _lse10(terms):
+    m = max(terms)
+    return m + math.log10(sum(10 ** (t - m) for t in terms))
+
+
+def forward_backward(lex, text):
+    """詞圖（和 segment() 同一張：每個在 lex.by_word 裡、長度 <= lex.max_len 的子字串是一條邊，分數用 by_word 的 log10p）
+    上的前向後向，log10 空間。回傳 (n, ends, starts, alpha, beta)；ends[j]=[(i, w, lp)]、starts[i]=[(j, w, lp)]；沒有任何切法回 None。
+    alpha[0]=0、beta[n]=0，Z = beta[0]。"""
+    n = len(text)
+    ends, starts = [[] for _ in range(n + 1)], [[] for _ in range(n + 1)]
+    for j in range(1, n + 1):
+        for L in range(1, min(lex.max_len, j) + 1):
+            w = lex.by_word.get(text[j - L:j])
+            if w:
+                ends[j].append((j - L, text[j - L:j], w[1])); starts[j - L].append((j, text[j - L:j], w[1]))
+    NEG = -math.inf
+    alpha, beta = [NEG] * (n + 1), [NEG] * (n + 1)
+    alpha[0] = beta[n] = 0.0
+    for j in range(1, n + 1):
+        t = [alpha[i] + lp for i, _, lp in ends[j] if alpha[i] > NEG]
+        if t:
+            alpha[j] = _lse10(t)
+    for i in range(n - 1, -1, -1):
+        t = [lp + beta[j] for j, _, lp in starts[i] if beta[j] > NEG]
+        if t:
+            beta[i] = _lse10(t)
+    if beta[0] == NEG:
+        return None
+    return n, ends, starts, alpha, beta
+
+
+def expected_counts(lex, text, min_count=EXPECTED_MIN):
+    """S2n 契約 §6.2：一段連續漢字的期望詞數與期望二元組數（含 <s>、</s> 配對）。回傳 (uni, bi) 兩個 dict；沒有切法回 None。
+    詞 w 在 i..j：10^(alpha[i]+lp+beta[j]-Z)；相鄰 a(i..j)、b(j..k)：10^(alpha[i]+lpa+lpb+beta[k]-Z)；小於 min_count 的不記。"""
+    fb = forward_backward(lex, text)
+    if fb is None:
+        return None
+    n, ends, starts, alpha, beta = fb
+    Z, NEG = beta[0], -math.inf
+    lmin = math.log10(min_count) if min_count > 0 else NEG
+    uni, bi = collections.defaultdict(float), collections.defaultdict(float)
+    for j in range(1, n + 1):
+        for i, a, lpa in ends[j]:
+            la = alpha[i] + lpa + beta[j] - Z      # 詞 a 的對數期望次數；alpha 或 beta 是 -inf 時也是 -inf，下面的比較會濾掉
+            if la < lmin or la == NEG:
+                continue
+            e = 10 ** la
+            uni[a] += e
+            if i == 0:
+                bi[("<s>", a)] += e
+            if j == n:
+                bi[(a, "</s>")] += e
+            for k, b, lpb in starts[j]:            # 二元組不會大於 a 或 b 的期望次數，所以 la 已經過門檻才需要往下看
+                lb = alpha[i] + lpa + lpb + beta[k] - Z
+                if lb >= lmin and lb > NEG:
+                    bi[(a, b)] += 10 ** lb
+    return uni, bi
+
+
 _W = {}
 
 
-def _init(trigram=False):
+def _init(trigram=False, expected=False):
     _W["trigram"] = trigram
+    _W["expected"] = expected
     _W["lex"] = ime.Lexicon(os.path.join(ROOT, "data", "lexicon", "mcbpmf-data.txt"),
                             overlay=os.path.join(ROOT, "data", "lexicon", "overlay-add.tsv"))
     _W["conv"] = load_conv()
@@ -141,6 +254,16 @@ def count_batch(texts):
         for s in SENT.findall(t):
             for run in HAN.findall(convert(s, phrase, char, maxp)):
                 if len(run) < 2:
+                    continue
+                if _W["expected"]:
+                    r = expected_counts(lex, run)
+                    if r is None:
+                        continue
+                    sents += 1
+                    for w, e in r[0].items():
+                        uni[w] += e
+                    for k, e in r[1].items():
+                        bi[k] += e
                     continue
                 ws = segment(lex, run)
                 if not ws:
@@ -173,11 +296,14 @@ def main():
     ap.add_argument("--articles", type=int, default=50_000)
     ap.add_argument("--procs", type=int, default=max(1, os.cpu_count() - 2))
     ap.add_argument("--trigram", action="store_true", help="也算 trigram（記憶體用量大，請搭配較少的篇數）")
+    ap.add_argument("--expected", action="store_true", help="詞圖上的期望次數（S2n 契約 §6.2），取代最高分切分；不算 trigram")
     a = ap.parse_args()
+    if a.expected and a.trigram:
+        ap.error("--expected 不算 trigram")
     os.makedirs(OUT, exist_ok=True)
     uni, bi, tri = collections.Counter(), collections.Counter(), collections.Counter()
     sents = arts = 0
-    with mp.Pool(a.procs, initializer=_init, initargs=(a.trigram,)) as pool:
+    with mp.Pool(a.procs, initializer=_init, initargs=(a.trigram, a.expected)) as pool:
         for u, b, t, s_ in pool.imap_unordered(count_batch, batches(articles(a.articles))):
             uni.update(u); bi.update(b); tri.update(t); sents += s_; arts += 200
             if arts % 10000 == 0:

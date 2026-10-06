@@ -21,14 +21,25 @@ def lines(path):
 
 
 def main():
-    out, paths = sys.argv[1], sys.argv[2:]
-    bc._init()
+    expected = "--expected" in sys.argv   # 詞圖上的期望次數（S2n 契約 §6.2）；不算 trigram
+    out, paths = [a for a in sys.argv[1:] if a != "--expected"][0], [a for a in sys.argv[1:] if a != "--expected"][1:]
+    bc._init(False, expected)
     lex, (phrase, char, maxp) = bc._W["lex"], bc._W["conv"]
     uni, bi, tri, runs = collections.Counter(), collections.Counter(), collections.Counter(), 0
     for p in paths:
         for s in lines(p):
             for run in bc.HAN.findall(bc.convert(s, phrase, char, maxp)):
                 if len(run) < 2:
+                    continue
+                if expected:
+                    r = bc.expected_counts(lex, run)
+                    if r is None:
+                        continue
+                    runs += 1
+                    for w, e in r[0].items():
+                        uni[w] += e
+                    for k, e in r[1].items():
+                        bi[k] += e
                     continue
                 ws = bc.segment(lex, run)
                 if not ws:

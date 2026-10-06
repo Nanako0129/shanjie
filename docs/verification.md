@@ -1,6 +1,6 @@
 # 驗證流程
 
-本機與 CI 的檢查各自在哪裡跑、怎麼跑。流程仿 syrtis 的 `Makefile` 與 `docs/knowledge/verification.md`。所有指令都在 repo 根目錄執行；需要 `data/lm/bigram.sjlm`（`gh release download model-v1 -R Nanako0129/shanjie -p bigram.sjlm -D data/lm`，雜湊以 `data/bigram.sjlm.sha256` 為準）。
+本機與 CI 的檢查各自在哪裡跑、怎麼跑。流程仿 syrtis 的 `Makefile` 與 `docs/knowledge/verification.md`。所有指令都在 repo 根目錄執行；需要 `data/lm/bigram.sjlm`（`gh release download model-v2 -R Nanako0129/shanjie -p bigram.sjlm -D data/lm`，雜湊以 `data/bigram.sjlm.sha256` 為準）。
 
 ## 本機關卡
 
@@ -17,6 +17,15 @@
 | S2v 寬鬆比對一致性 | 指令照 `.github/workflows/ci.yml` 的「Lenient comparison parity」步驟 |
 
 `make build` 只建置（debug），不跑測試。SwiftPM 不一定把 `target/release/libcore.a` 與 `core/include/shanjie.h` 當成相依，所以 Makefile 在建置前先檢查：靜態庫比執行檔新就刪掉執行檔重新連結；標頭比執行檔新就刪掉模組快取和匯入它的 target 產物。2026-10-03 用 Swift 6.4 實測，靜態庫變動時 SwiftPM 本來就會重新連結，這個檢查只是換工具鏈時的保險；標頭內容變動的情況沒辦法在不改 `core/` 的前提下實測。
+
+## 跨版本基準測試（S-bench，`docs/contracts/sbench.md`）
+
+| 指令 | 什麼時候 | 內容 |
+|---|---|---|
+| `tools/bench.py run <新版 commit> --private-root ~/side-project/shanjie-private` | 發版前 | 套件 v1 的準確率與速度，結果寫 `eval/bench/results/<label>.json`；再請 fresh verifier 在該版 tag 的 worktree 量保留集，填進同一個 JSON。兩者隨發版前的 PR 進 repo |
+| `tools/bench.py reference --private-root ~/side-project/shanjie-private` | commit 或指紋改變時 | 「小麥資料基準」列（`--no-overlay`、不帶 `--lm` 的 unigram） |
+| `tools/bench.py check-static` | 改動 `eval/bench/static/typing-test.json` 或 `docs/typing-test.md` 時 | 實打對照表逐格對照原文 |
+| `tools/bench.py table` | 上面任一個之後 | 重產 `docs/benchmark.md`，不手改 |
 
 ## bundled selftest 的 bundle ID
 
