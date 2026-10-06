@@ -671,8 +671,13 @@ fn rows9_to_14_pending_syllable() {
     assert!(k(&mut e, plain('u')).preedit == "ㄋㄧ"); // 9
     assert!(k(&mut e, plain('c')).preedit == "ㄏㄧ"); // initial column replaced
     assert!(k(&mut e, plain('s')).preedit == "ㄋㄧ");
-    // 11: removes the last placed symbol (the replaced initial counts as last)
-    assert!(kk(&mut e, KeyKind::Backspace).preedit == "ㄧ");
+    // 11: removes the last symbol in display order, not the last placed one (the replaced initial stays)
+    assert!(kk(&mut e, KeyKind::Backspace).preedit == "ㄋ");
+    assert!(kk(&mut e, KeyKind::Backspace).preedit.is_empty());
+    // Apple Zhuyin and McBopomofo, measured 2026-10-06: ㄉㄨㄟ, ㄅ replaces ㄉ, Backspace gives ㄅㄨ then ㄅ.
+    assert!(typ(&mut e, "2jo1").preedit == "ㄅㄨㄟ");
+    assert!(kk(&mut e, KeyKind::Backspace).preedit == "ㄅㄨ");
+    assert!(kk(&mut e, KeyKind::Backspace).preedit == "ㄅ");
     assert!(kk(&mut e, KeyKind::Backspace).preedit.is_empty());
     // 13: other keys are handled and ignored
     typ(&mut e, "s");
