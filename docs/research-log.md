@@ -741,3 +741,32 @@ Willseed 在 Discord 分享命名實體辨識（NER）的入門文章（iThome �
 
 - **重現**（出貨模型，參考解碼器，不帶前文）：兩種設定都是「信貸／岳父／金」；「信貸／月／付／金」聊天排第 3（−16.43 對 −15.73）、書面排第 4。單獨打 ㄩㄝˋ ㄈㄨˋ 兩種設定都是「岳父」。
 - **原因**：詞庫沒有「月付」「月付金」，「岳父」是常用詞。這是缺詞，歸 #47 的補詞庫（實驗 B）與詞庫完整確認；前文接進 n-gram 幫不上。
+
+## 2026-10-06：S2h 第一輪（前文接進 n-gram）停在停止條件
+
+契約 `docs/contracts/s2h-left-context.md`（在分支 `feat/s2h-left-context`，還沒合併）。executor 照契約實作，量測如下，沒有 commit。
+
+- **目標情境過關，幅度很大**（切尾集：正解句切成「前段＋最後一個詞」，只解碼最後一個詞，比「歷史詞＝句首」與「歷史詞＝前文」）：
+
+  | 集合 | 設定 | n | 句首 | 用前文 | 修好 | 弄壞 | p |
+  |---|---|---|---|---|---|---|---|
+  | cvtune 切尾 | chat | 3,649 | 3,247 | 3,496 | 274 | 25 | 3.9e-54 |
+  | cvtune 切尾 | formal | 3,649 | 3,245 | 3,509 | 296 | 32 | 1.1e-54 |
+  | wikitune 切尾 | chat | 2,705 | 2,374 | 2,479 | 143 | 38 | 1.6e-15 |
+  | wikitune 切尾 | formal | 2,705 | 2,379 | 2,474 | 163 | 68 | 3.5e-10 |
+
+- **守門沒有否決**：dev302、typing76 的第一名完全不變（有前文的 70／58 列都沒變），錯字回報 +1。
+- **停止條件一**：「好」之後打 ㄅㄚ˙ 變成「爸」，不是「吧」（「走吧」「對吧」都對）。原因和「後道」相同：詞庫有「好吧」（訓練語料出現 509 次，被切成一個詞），所以 c(好,吧) = 0，c(好,爸) = 23。
+- **停止條件二**：S4 的兩個測試（`empty_learner_matches_goldens`、`global_eps_table`）原本就先設前文再解碼，規則改變了它們的結果；契約規定不得修改，所以停下。
+- 其他回報形狀：「我昨天」之後的「試了一下」修好；「我們／不如」之後的「照建議」聊天都對、書面「我們」對、「不如」仍是「趙建議」；「我」之後的「試了」變成「事了」。
+- **決定（使用者）**：先不合併，等修切分的新 n-gram 模型做出來再用新模型重測；修切分要找能一次解決這一類問題的方法。實作留在 worktree `shanjie-s2h`，沒有 commit。
+
+## 2026-10-06：雲端 log-likelihood 的供應商
+
+研究 agent 查文件（原文在本機 `~/.cache/shanjie/work/research/cloud-logprob-providers-agent-2026-10-06.md`），main 實測一家：
+
+- 要的是「給定文字」每個 token 的對數機率（像 S5k 本機的做法），不是模型生成的 token。
+- 文件寫明支援：Together AI（`/completions` 的 `echo` 加 `logprobs`）。可能支援但沒寫清楚：DeepInfra。一定可以但要自己開 GPU：Fireworks（`echo_last`）。
+- 不支援：Cloudflare Workers AI、OpenRouter、Groq、Gemini、阿里雲（只有生成 token）、Friendli serverless（文件沒有 `echo`）、OpenAI（echo 加 logprobs 已停用）。
+- **Cerebras 實測**（main，一次請求，8 個 token）：`/v1/completions` 加 `echo: true, logprobs: 1, max_tokens: 1`，回應把輸入原樣帶回來，但 `tokens` 只有生成的 1 個 token，輸入的 7 個 token 沒有對數機率。所以 Cerebras 不能用。
+- 決定：先在 188 的 GPU 上跑較大的本機模型；雲端要等開 Together 或 DeepInfra 的帳號。
