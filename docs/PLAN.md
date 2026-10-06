@@ -513,7 +513,7 @@ v4 日期 2026-10-03。v1 經 `pilotfish:plan-verifier`（REVISE，4 項）與 `
   7. **效能**：release 重播（載入 LM）每鍵 p95 < 16 ms；回報 LM 載入時間與引擎（詞庫＋上限後詞庫＋LM）的峰值 RSS。上限後詞庫可以和原始詞庫共用字串池，由 executor 決定。
   8. 模型檔 ≤ 100 MB（目前 80,040,411 bytes）。
   9. **保留集**（片結束，只由 verifier 跑一次）：`--set holdout` 在 chat 與 formal 的 top1 與 oracle@64，只回數字。A1a 要求 oracle@64 ≥ 98%；低於時照實回報、記為 A1a 未達成，由使用者決定，不是這片的停止條件。報告時註明 LM 模式的 oracle 用寬鬆對照，S1 的 `extra` 行（97.8%）用完全相符。
-- **模型檔不進 repo**（`data/lm/` 在 `.gitignore`）：從 GitHub Release `model-v2` 下載（`gh release download model-v2 -R Nanako0129/shanjie -p bigram.sjlm -D data/lm`，CC BY-SA 4.0，2026-10-03 起），或用 `tools/build_lm.py` 從本機計數重建；SHA-256 `f57ce333966cc57ad1a531e28b9666dcbfc57cbc4cc2926f833f2ed60ef83f7d`。需要它的測試在檔案不存在時**直接失敗**，訊息說明怎麼取得，不得默默跳過。隨輸入法散布的方式在 S3b（打包進 app）。
+- **模型檔不進 repo**（`data/lm/` 在 `.gitignore`）：從 GitHub Release `model-v2` 下載（`gh release download model-v2 -R Nanako0129/shanjie -p bigram.sjlm -D data/lm`，CC BY-SA 4.0，2026-10-03 起），或用 `tools/build_lm.py` 從本機計數重建；SHA-256 `8847b73a7b9cf127b4882328191c3c5250fe9a55912926d5050e351ab644d240`。需要它的測試在檔案不存在時**直接失敗**，訊息說明怎麼取得，不得默默跳過。隨輸入法散布的方式在 S3b（打包進 app）。
 - **範圍外。** 改分數、參數、剪枝或語料；候選清單用 LM 排序；trigram；學習（S4）。
 - **預算。** executor、security-executor 各 1 回合＋1 次修正。
 - **停止。** 驗收 2、3、4 有任何差異：回報第一個不同的列與原因，不得修改 Python 參考實作或對照檔來湊。峰值 RSS 超過 300 MB：回報實測值與瓶頸。

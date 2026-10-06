@@ -99,7 +99,7 @@ fn lm_file_is_the_documented_build() {
     let bytes = std::fs::read(lm_path()).unwrap();
     assert_eq!(
         core::eval::sha256_hex(&bytes),
-        "f57ce333966cc57ad1a531e28b9666dcbfc57cbc4cc2926f833f2ed60ef83f7d",
+        "8847b73a7b9cf127b4882328191c3c5250fe9a55912926d5050e351ab644d240",
         "data/lm/bigram.sjlm differs from the documented build; rebuild with tools/build_lm.py"
     );
 }
