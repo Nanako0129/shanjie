@@ -96,8 +96,10 @@ def build(cls=None):
     words = sorted(uni, key=lambda s: s.encode("utf-8"))
     vocab = ["<s>", "</s>"] + words
     ids = {w: i for i, w in enumerate(vocab)}
-    N = sum(uni.values())
-    eos_total = sum(c for (v, w), c in bi.items() if w == "</s>")
+    # S2f 修訂二 7.2.2：類只算一次（只算代表成員的 unigram 與代表成員前文的 </s>）；影響約 0.006 log10
+    once = lambda w: w not in cls or cls[w][0] == w
+    N = sum(c for w, c in uni.items() if once(w))
+    eos_total = sum(c for (v, w), c in bi.items() if w == "</s>" and once(v))
     total, kept = {}, {}
     for (v, w), c in bi.items():
         total[ids[v]] = total.get(ids[v], 0) + c
