@@ -2,19 +2,28 @@
 """S-bench: cross-version benchmark (docs/contracts/sbench.md).
 
   tools/bench.py run <ref>... [--label L] [--base REF] [--lm FILE] [--private-root DIR]
+  tools/bench.py reference [--private-root DIR]
+  tools/bench.py check-static [--json FILE] [--md FILE]
   tools/bench.py table
 
 `run` exports each ref with `git archive`, builds its CLI and the key replay, scores the frozen suite with that
 version's own CLI (always `--rows`, never `--dev`), compares with the previous row and writes
-eval/bench/results/<label>.json. `table` regenerates docs/benchmark.md from every results JSON.
+eval/bench/results/<label>.json. `reference` (sbench 7.1) scores the CURRENT checkout's unigram decoder on the base
+lexicon only (`--no-overlay`, no --lm) into eval/bench/results/reference-mcbpmf.json, recomputing only when the commit or a
+fingerprint changed. `check-static` verifies eval/bench/static/typing-test.json against docs/typing-test.md by cell position.
+`table` regenerates docs/benchmark.md from every results JSON (version rows), the reference row and the static section.
 Never reads eval/holdout/. Every private path is derived from --private-root.
 """
-import argparse, datetime, functools, hashlib, json, math, os, platform, shutil, statistics, subprocess, sys, tempfile
+import argparse, datetime, functools, hashlib, json, math, os, platform, re, shutil, statistics, subprocess, sys, tempfile
 from concurrent.futures import ThreadPoolExecutor
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SUITE = os.path.join(ROOT, "eval/bench/suite-v1")
 RESULTS = os.path.join(ROOT, "eval/bench/results")
+REFERENCE = "reference-mcbpmf.json"  # not a version file: `run` bookkeeping and the version rows skip it
+STATIC = os.path.join(ROOT, "eval/bench/static/typing-test.json")
+TYPING_MD = os.path.join(ROOT, "docs/typing-test.md")
+BASE_LEXICON = os.path.join(ROOT, "data/lexicon/mcbpmf-data.txt")
 CACHE = os.path.expanduser("~/.cache/shanjie/bench")
 TUNE = os.path.expanduser("~/.cache/shanjie/work/s2/tune")
 DEFAULT_PRIVATE = "~/side-project/shanjie-private"
@@ -217,7 +226,7 @@ class Ctx:
     pass
 
 
-def preflight(args):
+def preflight(args, need_lm=True):
     ctx = Ctx()
     if sha_file(VARIANTS) != VARIANTS_SHA:
         die("suite variants.tsv does not match its pinned SHA-256 (the suite changed; bump the suite version)")
@@ -235,6 +244,8 @@ def preflight(args):
         if want and got != want:
             die(f"{name}: SHA-256 of {f} does not match the pinned value")
         ctx.files[name], ctx.fp[name] = f, got
+    if not need_lm:
+        return ctx
     ctx.lm = next((p for p in ([args.lm] if args.lm else DEFAULT_LM) if os.path.isfile(p)), None)
     if not ctx.lm:
         die("model file not found; pass --lm <absolute path to bigram.sjlm>")
@@ -248,7 +259,7 @@ def preflight(args):
 def known_from_results():
     k = {}
     for f in sorted(os.listdir(RESULTS)) if os.path.isdir(RESULTS) else []:
-        if f.endswith(".json"):
+        if f.endswith(".json") and f != REFERENCE:
             j = json.load(open(os.path.join(RESULTS, f), encoding="utf-8"))
             for v in j["versions"]:  # per cell, the latest file that actually measured it wins
                 for cell, r in v.get("accuracy", {}).items():
@@ -396,6 +407,148 @@ def cmd_run(args):
 
 
 
+# ---------- reference row (sbench 7.1): the current checkout's unigram decoder on the McBopomofo base lexicon ----------
+def head_sha():
+    return sh(["git", "-C", ROOT, "rev-parse", "HEAD"]).strip()
+
+
+def tree_dirty():
+    return bool(sh(["git", "-C", ROOT, "status", "--porcelain", "--", "core", "cli", "data", "Cargo.toml", "Cargo.lock"]).strip())
+
+
+def reference_cmd(cli, rows, dump):
+    """Unigram path: base lexicon only, no --lm, no --profile."""
+    return [cli, "--no-overlay", "--rows", rows, "--dump", dump]
+
+
+def reference_fingerprints(ctx):
+    return {"sets": dict(ctx.fp), "variants": VARIANTS_SHA, "lexicon": sha_file(BASE_LEXICON)}
+
+
+def reference_stale(old, sha, fp):
+    """-> reason to recompute, or None when the recorded result is current."""
+    if not old:
+        return "no recorded reference result"
+    if old.get("commit") != sha:
+        return f"commit changed ({str(old.get('commit'))[:7]} -> {sha[:7]})"
+    if old.get("fingerprints") != fp:
+        return "a fingerprint (set, variants.tsv or base lexicon) changed or a private set appeared/disappeared"
+    return None
+
+
+def cmd_reference(args):
+    ctx = preflight(args, need_lm=False)
+    sha = head_sha()
+    fp = reference_fingerprints(ctx)
+    path = os.path.join(RESULTS, REFERENCE)
+    old = json.load(open(path, encoding="utf-8")) if os.path.isfile(path) else None
+    why = reference_stale(old, sha, fp)
+    if not why:
+        print(f"bench: reference is current at {sha[:7]}, nothing to do", file=sys.stderr)
+        return
+    if tree_dirty():
+        die("core/cli/data have uncommitted changes; the recorded commit SHA must be the one that produced the result")
+    print(f"bench: recomputing the reference row: {why}", file=sys.stderr)
+    sh(["cargo", "build", "--release", "-p", "cli"], cwd=ROOT)
+    cli = os.path.join(ROOT, "target/release/shanjie-eval")
+    acc, failed = {}, False
+    for name in SETS:
+        if name not in ctx.files:
+            acc[name] = {"missing": True}
+            continue
+        base = os.path.join(ctx.private_root, "bench/reference") if SETS[name][3] else os.path.join(CACHE, "reference")
+        os.makedirs(base, exist_ok=True)
+        dump = os.path.join(base, f"{sha}.{name}.tsv")
+        try:
+            out = sh(reference_cmd(cli, ctx.files[name], dump), cwd=ROOT, env={**os.environ, "SHANJIE_VARIANTS": VARIANTS})
+            res, _ = score(ctx.files[name], dump)
+            want = f"{{'n': {res['n']}, 'top1': {res['top1']}, 'oracle@64': {res['oracle64']}, 'top1_sha256': '{res['top1_sha256']}'}}"
+            if want not in out:
+                raise RuntimeError(f"tool score differs from the CLI summary: {out.strip()[-200:]}")
+            acc[name] = res
+        except Exception as e:
+            acc[name] = {"error": str(e)[-400:]}
+            failed = True
+            print(f"bench: reference {name}: {e}", file=sys.stderr)
+    result = {"label": "reference-mcbpmf", "suite": "v1", "date": datetime.date.today().isoformat(), "commit": sha,
+              "fingerprints": fp, "accuracy": acc}
+    os.makedirs(RESULTS, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(result, f, ensure_ascii=False, indent=1)
+        f.write("\n")
+    if failed:
+        sys.exit(1)
+
+
+# ---------- static hand-typed table (sbench 7.2) ----------
+def _cells(md_line):
+    """Table cells of a markdown row split on `|` (outer pipes dropped, cells stripped)."""
+    parts = md_line.strip().split("|")
+    if parts and parts[0] == "":
+        parts = parts[1:]
+    if parts and parts[-1] == "":
+        parts = parts[:-1]
+    return [c.strip() for c in parts]
+
+
+def _refs(node, path=""):
+    """Every dict that carries a "value" is one cell reference."""
+    if isinstance(node, dict):
+        if "value" in node:
+            yield path, node
+        else:
+            for k, v in node.items():
+                yield from _refs(v, f"{path}/{k}")
+    elif isinstance(node, list):
+        for i, v in enumerate(node):
+            yield from _refs(v, f"{path}[{i}]")
+
+
+def check_static(json_path=STATIC, md_path=TYPING_MD):
+    """Compare each referenced cell of docs/typing-test.md by position: line (1-based), column (0-based after
+    splitting on `|`), part (0-based after splitting on `／`, required when the cell has one). -> list of problems."""
+    with open(json_path, encoding="utf-8") as f:
+        data = json.load(f)
+    with open(md_path, encoding="utf-8") as f:
+        md = f.read().split("\n")
+    errs, n = [], 0
+    for path, ref in _refs(data):
+        n += 1
+        if not all(isinstance(ref.get(k), int) for k in ("line", "col", "value")):
+            errs.append(f"{path}: needs integer line, col and value")
+            continue
+        if not 1 <= ref["line"] <= len(md):
+            errs.append(f"{path}: line {ref['line']} is outside the file")
+            continue
+        cells = _cells(md[ref["line"] - 1])
+        if not 0 <= ref["col"] < len(cells):
+            errs.append(f"{path}: line {ref['line']} has {len(cells)} columns, no column {ref['col']}")
+            continue
+        cell, part = cells[ref["col"]], ref.get("part")
+        pieces = cell.split("／")
+        if part is None and len(pieces) > 1:
+            errs.append(f"{path}: line {ref['line']} column {ref['col']} is \"{cell}\" and needs a part")
+            continue
+        if part is not None and not 0 <= part < len(pieces):
+            errs.append(f"{path}: line {ref['line']} column {ref['col']} \"{cell}\" has no part {part}")
+            continue
+        m = re.search(r"\d[\d,]*", pieces[part or 0])
+        got = int(m.group().replace(",", "")) if m else None
+        if got != ref["value"]:
+            errs.append(f"{path}: line {ref['line']} column {ref['col']} part {part} is {got} in docs/typing-test.md, JSON says {ref['value']}")
+    if n == 0:
+        errs.append("no cell references found")
+    return errs
+
+
+def cmd_check_static(args):
+    errs = check_static(args.json, args.md)
+    for e in errs:
+        print(f"bench: static: {e}", file=sys.stderr)
+    print(f"bench: static table check {'FAILED' if errs else 'passed'}", file=sys.stderr)
+    sys.exit(1 if errs else 0)
+
+
 # ---------- docs/benchmark.md ----------
 def pct(r):
     if "error" in r:
@@ -415,12 +568,36 @@ def cell_text(rec, cell):
     return t
 
 
-def cmd_table(_):
-    results = [json.load(open(os.path.join(RESULTS, f), encoding="utf-8")) for f in sorted(os.listdir(RESULTS)) if f.endswith(".json")]
+REF_NOTE = "善解的 unigram 解碼器加小麥的基底詞庫，近似小麥的資料；不是小麥本身的解碼器（小麥現在有沒有用 bigram 沒有核對）"
+
+
+def reference_row(ref, cells):
+    """First row of the main table: not a version, no fixed/broken. unigram has no profile, so chat and formal show the same number."""
+    acc = ref["accuracy"]
+    rec = {"accuracy": {c: acc.get(c.split("/")[0], {"missing": True}) for c in cells}}  # no vs_prev: nothing to compare with
+    return f"| 小麥資料基準<br>`{ref['commit'][:7]}`<br>{REF_NOTE} | " + " | ".join(cell_text(rec, c) for c in cells) + " |"
+
+
+def static_section(st):
+    L = ["", f"## 實打對照（靜態，{st['date']}）", "",
+         "從 `eval/bench/static/typing-test.json` 產生，數字逐格抄自 `docs/typing-test.md`（行號與欄位位置見 JSON，`tools/bench.py check-static` 核對）。"
+         "實打是當天的產品快照；蘋果注音在測驗中會學習（`docs/typing-test.md` 第 202 行）；條件和上面的版本列不同，不做統計比較。"]
+    for g in st["groups"]:
+        n = g.get("n", {}).get("value")
+        L += ["", f"### {g['name']}" + (f"（{n} 句）" if n is not None else ""), "", "| 輸入法 | 錯的句數 | 錯字數 | 來源行 |", "|---|---|---|---|"]
+        for ime, r in g["ime"].items():
+            lines = sorted({c["line"] for c in r.values()})
+            L.append(f"| {ime} | {r['sentences']['value'] if 'sentences' in r else '—'} | {r['chars']['value'] if 'chars' in r else '—'} | {'、'.join(map(str, lines))} |")
+    return L
+
+
+def render_table(results, ref=None, static=None):
     cells = [f"{n}/{p}" for n, (_, _, ps, _) in SETS.items() for p in ps]
     L = ["# 跨版本基準測試", "", "由 `tools/bench.py table` 從 `eval/bench/results/*.json` 產生，請勿手改。契約：`docs/contracts/sbench.md`。", "",
          "## 準確率（top1，寬鬆對照）", "", "每格：top1%、答對／列數、和上一列比的「修好 / 弄壞，McNemar 雙尾精確 p」。", "",
          "| 版本 | " + " | ".join(cells) + " |", "|---|" + "---|" * len(cells)]
+    if ref:
+        L.append(reference_row(ref, cells))
     for res in results:
         for rec in res["versions"]:
             row = rec["ref"] + f"<br>`{rec['sha'][:7]}`"
@@ -448,6 +625,8 @@ def cmd_table(_):
                 L.append(head + " 失敗：" + s["error"].replace("|", "/")[:300] + " | | | | | |")
             else:
                 L.append(head + f" {s['p95_us'] / 1000:.3f} ms | {s['max_us'] / 1000:.2f} ms | {s['load_ms']:.0f} ms | {s['rss_mb']:.0f} MB | {s['keys']} | {s['rows_match']} |")
+    if static:
+        L += static_section(static)
     L += ["", "## 量測規則", "",
           "- 版本只決定程式與詞庫；集合一律來自套件 v1（`eval/bench/suite-v1/`，SHA-256 寫死在工具裡），所有版本讀同一份，一律用 `--rows`。",
           "- 計分只有一套：套件的 `variants.tsv` 寬鬆對照，top1 與 oracle@64 由工具從逐列輸出算出，CLI 摘要行只做交叉檢查。",
@@ -455,8 +634,16 @@ def cmd_table(_):
           "- cvtune、wikitune、discordtune 在調參數時被看過，不是未見資料；唯一沒被看過的是保留集。",
           "- 保留集不由工具跑（main 不看內容），由 verifier 量好填入。",
           "- 速度不設門檻，只在同場比較。",
-          "- 重跑：`tools/bench.py run <ref>... --label <名稱>`，再 `tools/bench.py table`。模型換了就是新的套件版本。", ""]
-    open(os.path.join(ROOT, "docs/benchmark.md"), "w", encoding="utf-8").write("\n".join(L))
+          "- 重跑：`tools/bench.py run <ref>... --label <名稱>`，再 `tools/bench.py table`。模型換了就是新的套件版本。",
+          "- 「小麥資料基準」列不是版本：用目前 checkout 的 CLI（`--no-overlay`，不帶 `--lm`）量基底詞庫的 unigram。重跑：`tools/bench.py reference --private-root <目錄>`，commit 或任一指紋（集合、`variants.tsv`、基底詞庫）和 `reference-mcbpmf.json` 不同時才重算並在 stderr 說明原因；rebase 或改到 `core/`、`cli/`、`data/` 之後要重跑，再 `tools/bench.py table`。",
+          "- 實打對照表是靜態的：新增或更新後跑 `tools/bench.py check-static`，每格依 `docs/typing-test.md` 的行號與欄位位置比對。", ""]
+    return "\n".join(L)
+
+
+def cmd_table(_):
+    results = [json.load(open(os.path.join(RESULTS, f), encoding="utf-8")) for f in sorted(os.listdir(RESULTS)) if f.endswith(".json") and f != REFERENCE]
+    load = lambda p: json.load(open(p, encoding="utf-8")) if os.path.isfile(p) else None
+    open(os.path.join(ROOT, "docs/benchmark.md"), "w", encoding="utf-8").write(render_table(results, load(os.path.join(RESULTS, REFERENCE)), load(STATIC)))
 
 
 def main():
@@ -469,10 +656,19 @@ def main():
     r.add_argument("--lm")
     r.add_argument("--private-root", default=DEFAULT_PRIVATE)
     sub.add_parser("table")
+    rf = sub.add_parser("reference")
+    rf.add_argument("--private-root", default=DEFAULT_PRIVATE)
+    cs = sub.add_parser("check-static")
+    cs.add_argument("--json", default=STATIC)
+    cs.add_argument("--md", default=TYPING_MD)
     a = ap.parse_args()
     if a.cmd == "run":
         a.label = a.label or "+".join(x.replace("/", "_") for x in a.refs)
         cmd_run(a)
+    elif a.cmd == "reference":
+        cmd_reference(a)
+    elif a.cmd == "check-static":
+        cmd_check_static(a)
     else:
         cmd_table(a)
 
