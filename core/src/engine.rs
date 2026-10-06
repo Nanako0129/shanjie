@@ -258,8 +258,6 @@ pub struct Engine {
     syls: Vec<String>,
     cursor: usize,
     pend: [Option<char>; 3],
-    /// Columns in the order their symbols were placed (for Backspace).
-    order: Vec<usize>,
     fixed: Vec<Fixed>,
     display: String,
     cands: Option<Cands>,
@@ -333,7 +331,6 @@ impl Engine {
             syls: Vec::new(),
             cursor: 0,
             pend: [None; 3],
-            order: Vec::new(),
             fixed: Vec::new(),
             display: String::new(),
             cands: None,
@@ -613,7 +610,6 @@ impl Engine {
         self.syls.clear();
         self.cursor = 0;
         self.pend = [None; 3];
-        self.order.clear();
         self.fixed.clear();
         self.display.clear();
         self.path.clear();
@@ -763,7 +759,6 @@ impl Engine {
         if let Some(p) = punct {
             // s3d §1: into the composition at the cursor, not committed.
             self.pend = [None; 3];
-            self.order.clear();
             self.cands = None;
             return self.insert_token(format!("{PUNCT_PREFIX}{p}"), Some(p.to_string()));
         }
@@ -778,29 +773,27 @@ impl Engine {
             KeyKind::Char if plain => self.layout.tone_of(k.ch),
             _ => None,
         };
-        let has_pending = !self.order.is_empty();
+        let has_pending = self.pend.iter().any(Option::is_some);
         if has_pending {
             // 9-13
             if let Some((col, sym)) = zy {
-                self.order.retain(|&c| c != col);
-                self.order.push(col);
                 self.pend[col] = Some(sym);
             } else if let Some(t) = tone {
                 return self.finish_syllable(t);
             } else if k.kind == KeyKind::Backspace {
-                if let Some(col) = self.order.pop() {
+                // Row 11: the last symbol in display order (final, then medial, then initial), as Apple Zhuyin and
+                // McBopomofo do (measured 2026-10-06: ㄉㄨㄟ, ㄅ replaces ㄉ, then Backspace gives ㄅㄨ, then ㄅ).
+                if let Some(col) = (0..3).rev().find(|&c| self.pend[c].is_some()) {
                     self.pend[col] = None;
                 }
             } else if k.kind == KeyKind::Esc {
                 self.pend = [None; 3];
-                self.order.clear();
             }
             return self.handled();
         }
         // 14
         if let Some((col, sym)) = zy {
             self.pend[col] = Some(sym);
-            self.order.push(col);
             return self.handled();
         }
         if self.syls.is_empty() {
@@ -937,7 +930,6 @@ impl Engine {
             return self.handled();
         }
         self.pend = [None; 3];
-        self.order.clear();
         self.insert_token(syl, None)
     }
 
