@@ -26,6 +26,7 @@ import s5  # noqa: E402  constants and pure functions only: INSTR, POS_INSTR, BA
 ALLOW = ("cvtune", "dev302", "typing76")  # contract section 4; discordtune never reaches the key or the network
 HOST = "api.cloudflare.com"
 MODEL = "clef-flash"
+GATEWAY = "default"  # AI Gateway id; Workers AI billing there is set to Unified billing (2026-10-06)
 PRICE_PER_TOKEN = 0.09 / 1e6
 # contract section 10: --model clef is the 27B; its files carry the clef27- prefix so flash's stay untouched
 PRICE_27B = 0.24 / 1e6
@@ -108,9 +109,11 @@ def default_post(path, headers, body):
 class Client:
     """post(path, headers, body) -> (status, bytes) is injectable; timeouts and socket errors raise OSError."""
 
-    def __init__(self, token, account, post=default_post, sleep=time.sleep, model=MODEL):
+    def __init__(self, token, account, post=default_post, sleep=time.sleep, model=MODEL, gateway=None):
         self.path = f"/client/v4/accounts/{account}/ai/run/@cf/cloudflare/{model}"
         self.headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+        if gateway:  # route through AI Gateway so prepaid Unified Billing credits pay once the free allocation is used up
+            self.headers["cf-aig-gateway-id"] = gateway
         self.post, self.sleep = post, sleep
         self.model = model  # S5p overrides model, path and headers to reuse this retry/parse path for Jev
 
@@ -289,7 +292,7 @@ def main(argv=None, post=default_post, sleep=time.sleep, rows_for=load_rows, out
     if not token or not account:
         die("CF_AI_TOKEN and CF_ACCOUNT_ID must be set in the environment")
     prefix, price = MODELS[a.model]
-    client = Client(token, account, post, sleep, a.model)
+    client = Client(token, account, post, sleep, a.model, gateway=GATEWAY)
     for s in sets:
         d = out_for(s, a.limit)
         run_set(s, rows[s][:a.limit or None], d, client, dirs_for(), prefix, price)

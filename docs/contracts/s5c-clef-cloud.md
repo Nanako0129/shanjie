@@ -9,6 +9,7 @@
 - 端點：`POST https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/run/@cf/cloudflare/clef-flash`，body 帶 `"model": "clef-flash"`。
 - Workers AI 沒有提供版本釘選。報告記下執行日期與回應裡的 `model` 欄位；同一次完整執行不換模型。
 - API token 與帳號 ID 從環境變數 `CF_AI_TOKEN`、`CF_ACCOUNT_ID` 讀。不印出、不寫檔、不放進指令列。
+- **2026-10-06 起經 AI Gateway**：請求帶 `cf-aig-gateway-id: default`。帳號的每日免費額度（10,000 neurons）用完後，由 Gateway 的預付額度（Unified Billing）支付；Jev 的請求不帶這個標頭。
 - 只用 `clef-flash`，不用完整版 Clef（參數量未公開，延遲 209 ms）。
 
 ## 2. 題目與集合（和 S5j 的 Jev 完全相同，可逐列配對）
