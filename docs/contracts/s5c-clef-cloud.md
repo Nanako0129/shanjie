@@ -8,7 +8,7 @@
 
 - 端點：`POST https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/run/@cf/cloudflare/clef-flash`，body 帶 `"model": "clef-flash"`。
 - Workers AI 沒有提供版本釘選。報告記下執行日期與回應裡的 `model` 欄位；同一次完整執行不換模型。
-- API token 只放在使用者的登入鑰匙圈，項目 `cloudflare-workers-ai`，account 欄是 Cloudflare 帳號 ID。每次執行時才讀進行程的環境，不印出、不寫檔、不放進指令列（全域規則）。
+- API token 與帳號 ID 放在 `~/.claude/settings.json` 的 `env`（`CF_AI_TOKEN`、`CF_ACCOUNT_ID`；使用者 2026-10-06 決定，取代原本的鑰匙圈項目 `cloudflare-workers-ai`）。不印出、不另外寫檔、不放進指令列（全域規則）。
 - 只用 `clef-flash`，不用完整版 Clef（參數量未公開，延遲 209 ms）。
 
 ## 2. 題目與集合（和 S5j 的 Jev 完全相同，可逐列配對）
@@ -72,7 +72,7 @@
 
 ## 6. 負責人、執行與預算
 
-- **金鑰只由 main 讀**（repo 規則：agent 一律不碰鑰匙圈）。驅動程式從環境變數 `CF_AI_TOKEN`、`CF_ACCOUNT_ID` 取得 token 與帳號 ID；main 每次執行時才從鑰匙圈讀進那一個指令的環境。鑰匙圈沒有 `cloudflare-workers-ai` 項目時，main 停下回報。
+- **只有 main 執行付費呼叫**。驅動程式從環境變數 `CF_AI_TOKEN`、`CF_ACCOUNT_ID` 取得 token 與帳號 ID，兩者由 settings.json 帶進每個行程的環境，所以 subagent 也看得到：brief 一律寫明 agent 不執行 `clef_run.py`、不用這把 token。變數不在時，main 停下回報。
 - `pilotfish:executor` 實作，**不連網、不用真的 token**，回報：
   - (a) `--sets discordtune` 在讀環境變數與連網之前就以非 0 結束；
   - (b) 用注入的假 HTTP 層（不連網）測錯誤路徑：401、429、5xx、逾時、回應沒有逐選項機率。輸出都不含句子內容、token 與帳號 ID（請求網址含帳號 ID，錯誤訊息不得印出網址）；
