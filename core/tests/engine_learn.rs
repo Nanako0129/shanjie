@@ -1744,8 +1744,8 @@ const SWEEP_TAUGHT: [&str; 2] = ["佝", SENTINEL];
 const THIRD: &str = "我們";
 
 /// §12 global learning and global pollution tests at global ε `eps`. Per cases.tsv group whose taught
-/// word x (the pair word the span does not show by default) has 2+ characters: teach it under 可以 and
-/// ^, which makes a global record; then the group's non-teach rows (decoded after 我們) and the dev302
+/// word x (the pair word the span does not show by default) has 2+ characters: teach it under each key of
+/// `SWEEP_TAUGHT` (佝 and ^), which makes a global record; then the group's non-teach rows (decoded after 我們) and the dev302
 /// rows that contain the span (with their own 前文) are replayed. Learning rows are the group rows that
 /// want x (judged by x being present and y absent: unrelated misreads elsewhere in the sentence do not
 /// count). Pollution rows are the group rows that want the other word y (kind=common when x is the
