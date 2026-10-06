@@ -77,8 +77,15 @@ def noteta_refs(text, mw):
     return gs, rs
 
 
+_COMMENT = re.compile(r"<!--.*?-->", re.S)
+
+
 def _flat(rule):
-    return re.sub(r"\s+", " ", rule).strip()
+    """一條規則：去掉 HTML 註解、合併空白，丟掉以 => 開頭（來源是空的）的段落。
+    zhconv-rs 0.4.2 遇到這種段落會 panic（rule.rs:313 的 assert），MediaWiki 會略過；2026-10-06 在
+    維基前 20 萬篇找到 4 篇，都是 NoteTA 數字參數裡的筆誤（「zh:珠穆朗瑪峰;=>zh-cn:…」）。"""
+    rule = re.sub(r"\s+", " ", _COMMENT.sub("", rule)).strip()
+    return ";".join(seg for seg in rule.split(";") if not seg.strip().startswith("=>"))
 
 
 def prefix(text, mw, groups=True, site=True):
@@ -88,7 +95,7 @@ def prefix(text, mw, groups=True, site=True):
     out = [mw["_site"]] if site else []
     if groups:
         for g in dict.fromkeys(gs):
-            out += [f"-{{H|{r}}}-" for r in group_rules(mw, g) or ()]
+            out += [f"-{{H|{_flat(r)}}}-" for r in group_rules(mw, g) or ()]
     out += [f"-{{H|{_flat(r)}}}-" for r in rs if "{" not in r and "}" not in r]
     return "".join(out)
 
@@ -109,4 +116,12 @@ def tw_forms():
 def convert(text, mw, groups=True, site=True):
     """text 已還原 HTML 實體。回傳 zhconv-rs 轉完、再換成台灣字形（§7）的全文（尚未刪模板與標記）。"""
     import zhconv_rs
-    return zhconv_rs.zhconv(prefix(text, mw, groups, site) + text, "zh-tw", True).translate(tw_forms())
+    try:
+        out = zhconv_rs.zhconv(prefix(text, mw, groups, site) + text, "zh-tw", True)
+    except (KeyboardInterrupt, SystemExit):
+        raise
+    except BaseException:
+        # pyo3 的 PanicException 不是 Exception：multiprocessing 的 worker 接不住，整批 200 篇默默消失、主程序最後卡住
+        #（2026-10-06 在 188 上發生）。改成一般的錯誤，讓整批明確失敗。
+        raise RuntimeError("zhconv-rs panicked on an article") from None
+    return out.translate(tw_forms())
