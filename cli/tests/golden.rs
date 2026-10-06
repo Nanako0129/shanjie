@@ -103,3 +103,21 @@ fn lm_file_is_the_documented_build() {
         "data/lm/bigram.sjlm differs from the documented build; rebuild with tools/build_lm.py"
     );
 }
+
+/// S-bench 7.1: the unigram row mode (`--no-overlay --rows --dump`, no `--lm`) equals the golden written by
+/// `reference/proto/unigram_eval.py` (summary line, then the full top-64 dump), byte for byte.
+/// Regenerate: see the docstring of reference/proto/unigram_eval.py.
+#[test]
+fn unigram_rows_mode_matches_python_golden_byte_for_byte() {
+    let root = concat!(env!("CARGO_MANIFEST_DIR"), "/..");
+    let dump = std::env::temp_dir().join(format!("shanjie-unigram-dump-{}.tsv", std::process::id()));
+    let out = Command::new(env!("CARGO_BIN_EXE_shanjie-eval"))
+        .env("SHANJIE_VARIANTS", format!("{root}/eval/bench/suite-v1/variants.tsv"))
+        .args(["--no-overlay", "--rows", &format!("{root}/eval/bench/suite-v1/typing76.txt"), "--dump", dump.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let got = String::from_utf8(out.stdout).unwrap() + &std::fs::read_to_string(&dump).unwrap();
+    std::fs::remove_file(&dump).unwrap();
+    assert_eq!(got, golden("sbench-unigram-typing76.txt"));
+}

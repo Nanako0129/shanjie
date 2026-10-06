@@ -165,6 +165,39 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     Ok(())
 }
 
+/// S-bench 7.1: the unigram path over a `前文|句子|讀音` rows file, same output as lm_eval.py's dump and summary
+/// (reference/proto/unigram_eval.py): top 64 per row as `列號\t名次\tsurface\t分數`, summary profile `unigram`.
+fn run_unigram_rows(lex: &Lexicon, len: &Lenient, rows_file: String, dump: Option<String>) -> Result<(), String> {
+    let text = fs::read_to_string(&rows_file).map_err(|e| format!("cannot read file ({:?})", e.kind()))?;
+    let rows = three_field_rows(&text);
+    let mut dump = match dump {
+        Some(f) => Some(std::io::BufWriter::new(fs::File::create(f).map_err(|e| format!("cannot create dump ({:?})", e.kind()))?)),
+        None => None,
+    };
+    let (mut top1, mut o64, mut firsts) = (0usize, 0usize, Vec::new());
+    for (i, (truth, syls)) in rows.iter().enumerate() {
+        let nb = decode_beam(lex, syls, &mut NoLearning, BEAM_S1).map_err(|e| e.to_string())?;
+        let surf: Vec<String> = nb.iter().take(64).map(|(_, ws)| ws.concat()).collect();
+        let first = surf.first().ok_or("no candidates for a row")?.clone();
+        let t = len.apply(truth);
+        top1 += (len.apply(&first) == t) as usize;
+        o64 += surf.iter().any(|s| len.apply(s) == t) as usize;
+        if let Some(d) = dump.as_mut() {
+            for (r, ((sc, _), s)) in nb.iter().zip(&surf).enumerate() {
+                writeln!(d, "{}\t{}\t{s}\t{sc:?}", i + 1, r + 1).map_err(|_| "cannot write dump".to_string())?;
+            }
+        }
+        firsts.push(first);
+    }
+    if let Some(mut d) = dump {
+        d.flush().map_err(|_| "cannot write dump".to_string())?;
+    }
+    let name = Path::new(&rows_file).file_stem().map_or(String::new(), |s| s.to_string_lossy().into_owned());
+    let sha = sha256_hex(firsts.join("\n").as_bytes());
+    println!("## {name}  unigram  {{'n': {}, 'top1': {top1}, 'oracle@64': {o64}, 'top1_sha256': '{sha}'}}", rows.len());
+    Ok(())
+}
+
 fn run() -> Result<(), String> {
     let len = load_lenient()?;
     let all: Vec<String> = std::env::args().skip(1).collect();
@@ -182,9 +215,20 @@ fn run() -> Result<(), String> {
             return Ok(());
         }
     }
+    // S-bench 7.1: `--rows <file>` / `--dump <file>` switch the unigram path to row mode (see run_unigram_rows).
+    let (mut rows_file, mut dump_file) = (None::<String>, None::<String>);
+    let mut rest = Vec::new();
+    let mut it = std::env::args().skip(1);
+    while let Some(a) = it.next() {
+        match a.as_str() {
+            "--rows" => rows_file = Some(it.next().ok_or("missing option value")?),
+            "--dump" => dump_file = Some(it.next().ok_or("missing option value")?),
+            _ => rest.push(a),
+        }
+    }
     let (mut sets, mut learn, mut check, mut bench) = (Vec::new(), false, false, false);
     let (mut in_set, mut no_overlay, mut limit, mut in_limit) = (false, false, None::<usize>, false);
-    for a in std::env::args().skip(1) {
+    for a in rest {
         match a.as_str() {
             "--set" => in_set = true,
             "--no-overlay" => (no_overlay, in_set, in_limit) = (true, false, false),
@@ -200,7 +244,8 @@ fn run() -> Result<(), String> {
             _ => return Err("unknown argument".into()),
         }
     }
-    if sets.is_empty() {
+    let row_mode = rows_file.is_some() || dump_file.is_some();
+    if sets.is_empty() && !row_mode {
         sets = ["trap", "daily", "moedict"].map(String::from).to_vec();
     }
     // The shipped lexicon is the engine's load_lexicon (base + overlay-add.tsv + sandhi-add.tsv, S2r);
@@ -214,6 +259,13 @@ fn run() -> Result<(), String> {
         load_lexicon(&root().join("data/lexicon")).map_err(|_| "cannot load lexicon".to_string())?
     };
     let load_time = t_load.elapsed();
+
+    if row_mode {
+        if !(sets.is_empty() && !learn && !check && !bench && limit.is_none()) {
+            return Err("--rows/--dump cannot be combined with --set, --limit, --learn-sim, --check-readings or --bench".into());
+        }
+        return run_unigram_rows(&lex, &len, rows_file.ok_or("--dump needs --rows")?, dump_file);
+    }
 
     let mut loaded = Vec::new();
     for s in &sets {
