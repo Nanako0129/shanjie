@@ -9,6 +9,8 @@ Spec: `docs/contracts/s5k-local-scorers.md`. This directory holds the tooling an
 | `s5k.py` | shared: SHA-256 table (contract §2), hash-checked row loading, output paths, tie-break pick, degeneracy check. Forces `HF_HUB_OFFLINE=1`, `TRANSFORMERS_OFFLINE=1` |
 | `run_laya.py` | L-noul, L-choice-fwd, L-choice-rev, L-pos (venv A) |
 | `run_ll.py` | Q-ll (venv A), B1-ll / B4-ll (venv B) |
+| `run_ll_cuda.py` | Q8-ll: Qwen3-8B 4-bit (bitsandbytes nf4) on CUDA, for 188 (contract §11); pure scoring functions import without torch |
+| `test_run_ll_cuda.py` | offline tests for `run_ll_cuda.py` (`python3 -m unittest test_run_ll_cuda`, no torch) |
 | `score.py` | metrics, tau, pairing with S5j (any Python) |
 | `selftest.py` | error-path checks: prefix-only scorer trips the stop (exit 3); wrong hash exits non-zero |
 
@@ -188,3 +190,47 @@ In this table, fixed/broken are against rank 1. "vs A-fwd" and "vs J-sent-fwd" a
 - Shorter prompts or fewer candidates for latency (8 candidates per row now).
 - Qwen3 4B 4-bit as the next size up.
 - Prompt changes for the cloud judges, including Jev, are a separate tuning round.
+
+## Q8-ll on 188 (contract §11; main runs it, nothing here is executed on the Mac)
+
+`run_ll_cuda.py` takes the same `--set`, `--limit`, `--ctx none|real|synth`, `--idle` as `run_ll.py` and writes the same `Q8-ll.<noctx|ctx>.jsonl` records (`k`, `scores`, `ms`) into the same output directories. Its meta goes to `meta-188.jsonl` (run_ll's keys plus torch, transformers, bitsandbytes, GPU, quant, compute dtype, `kv_reuse`, `bos_token_id`), never to `meta.jsonl`. No KV reuse: one full forward per candidate (`kv_reuse=false`). The tokenizer adds only its default special tokens; Qwen3 has no BOS, which `bos_token_id` records. Compute dtype is bfloat16, quant nf4.
+
+Layout on 188 (`~` is `%USERPROFILE%`): repo copy `%USERPROFILE%\s5k-188\repo\` (with `experiments/s5-local/`, `experiments/s5-judges/s5.py`, `reference/proto/`, the dev302/typing76 `rows.jsonl`), cvtune `rows.jsonl` at `%USERPROFILE%\.cache\shanjie\work\s5-judges\cvtune\`, discordtune `rows.jsonl` at `%USERPROFILE%\s5k-188\private\s5-judges\discordtune\`, model at `%USERPROFILE%\models\Qwen3-8B`. Interpreter: `%USERPROFILE%\ime-research\proto\.venv\Scripts\python.exe`. One program at a time, pinned to the P-cores.
+
+```
+cd /d %USERPROFILE%\s5k-188\repo\experiments\s5-local
+set HF_HUB_OFFLINE=1
+set TRANSFORMERS_OFFLINE=1
+set SHANJIE_PRIVATE=%USERPROFILE%\s5k-188\private
+set PY=%USERPROFILE%\ime-research\proto\.venv\Scripts\python.exe
+
+rem smoke: first 20 rows of dev302, then check the five numbers with the same score checks as §8.2 (d)(h)
+start "" /b /wait /affinity FFF %PY% run_ll_cuda.py --set dev302 --limit 20 --ctx none
+start "" /b /wait /affinity FFF %PY% run_ll_cuda.py --set dev302 --limit 20 --ctx synth
+
+rem full runs, only after the smoke is clean (each command resumes where it stopped)
+for %S in (discordtune cvtune dev302 typing76) do start "" /b /wait /affinity FFF %PY% run_ll_cuda.py --set %S --ctx none
+start "" /b /wait /affinity FFF %PY% run_ll_cuda.py --set discordtune --ctx real
+```
+
+(In a `.bat` file write `%%S`.) Exit 3 on a smoke run means the degeneracy stop fired; `s5k: STOP ...` or `s5k: INPUT ...` are the other stops. The private directory is deleted afterwards whatever the result (`rmdir /s /q %USERPROFILE%\s5k-188\private`, then `dir` to confirm), and only `Q8-ll.*.jsonl` and `meta-188.jsonl` are copied back, per §11.
+
+`score.py` lists `Q8-ll` among the base conditions (paired with A-fwd and J-sent-fwd) and adds `vs_Q-ll=n=... fixed=... broken=... p=...` for every Q8-ll condition (`Q8-ll`, `+ctx`, `+ctxall` and their `@tau` variants): Q8-ll against Q-ll (1.7B), same condition, report only.
+
+### Q8-ll results (run 2026-10-06 on 188, scored on the Mac)
+
+Qwen3-8B (HF commit b968826d), nf4 with bf16 compute, RTX 3070. All sets ran `--ctx none`; discordtune also `--ctx real` (457 rows with a context). Boundary mismatches 0 everywhere. The batch stopped once after dev302 when its ssh session dropped (the next `echo` had no stdout); typing76 and discordtune `real` were rerun with output to a file. dev302 therefore has no `meta-188.jsonl`. Latency per row on discordtune: p50 491 ms, p95 508 ms without context; p50 629 ms with context.
+
+| Condition (discordtune) | All 1,000 rows: acc, fixed/broken, p | Half B: acc, fixed/broken, p | vs Q-ll (1.7B), same condition, all rows |
+|---|---|---|---|
+| Q8-ll | 82.1%, 82/96, p = 0.33 | 82.0%, 37/49 | 66/63 (p = 0.86) |
+| Q8-ll+ctxall | 85.3%, 89/71, p = 0.18 | 85.2%, 40/36 | 62/51 (p = 0.35) |
+| Q8-ll@tau (τ = 0.6309) | 86.3%, 70/42 | 85.8%, 31/24, p = 0.42 | 29/29 (p = 1.0) |
+| **Q8-ll+ctxall@tau** | 88.3%, 76/28 | **87.6%, 34/18, p = 0.037** | 32/21 (p = 0.17); half B 17/15 (p = 0.86) |
+
+Rank-1 baseline: 83.5% on all rows, 84.4% on half B. cvtune (guard): Q8-ll 88.4% (+33, p = 0.0035), Q8-ll@tau 89.5% (+44, p < 0.001); no veto. dev302 92.4% (+41), typing76 88.2% (+2), recorded only.
+
+- **Pre-registered decision (§5):** Q8-ll+ctxall@tau is an S5 candidate (half B p < 0.05 with a positive net, cvtune not vetoed). It is the first condition in S5k to pass. No other Q8-ll setting passes.
+- **Caveats:** about 14 settings are tested at p < 0.05 without correction, so one pass by chance is plausible. Against the 1.7B model under the same condition the 8B is not significantly better (half B 17/15, p = 0.86); Q-ll+ctxall@tau had p = 0.081 on half B, so passing versus not passing is within noise.
+- **Context helps (report only):** on the 457 rows with a context, adding it to Q8-ll fixed 38 and broke 6 (p < 0.0001); 1.7B 32/8.
+- **Cost:** about 0.5–0.6 s per row on a desktop GPU; not usable inside the input method as is.

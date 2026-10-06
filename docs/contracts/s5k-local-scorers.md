@@ -150,3 +150,20 @@
 - 不得讀 `eval/holdout/`；不得把 discordtune 的任何內容印到終端機或寫進 repo；冒煙測試不用 discordtune。
 - 不得安裝軟體、下載模型、開 GUI App、碰鑰匙圈、改系統設定，也不得執行 `.app` 內的二進位。
 - 不得自己跑完整實驗（超過冒煙測試的量）；回報指令給 main。
+
+## 11. 修訂（2026-10-06）：188 上的 Qwen3-8B 4-bit（Q8-ll）
+
+- **起因**：S5k 最好的是 Qwen3-1.7B 的 Q-ll 加前文（discordtune B 半淨 +14，p = 0.081，沒過 §5）。使用者 2026-10-06 決定用較大的模型再量一次 log-likelihood，先在 188 上做（雲端供應商拿不到輸入文字的對數機率，研究紀錄同日）。
+- **模型與環境**：`Qwen/Qwen3-8B`（Apache-2.0，釘 Hugging Face commit），在 188（RTX 3070 8 GB）用既有 venv `%USERPROFILE%\ime-research\proto\.venv`（torch、transformers、bitsandbytes，版本照實記錄）以 bitsandbytes 4-bit（nf4，計算型別 bfloat16 或 float16，照實記錄）載入。**不安裝任何套件**；venv 缺東西就停下回報。模型由 main 在 Mac 下載（固定 commit），再用 `scp` 傳到 188 的 `%USERPROFILE%\models\Qwen3-8B`（記憶「188 跑模型」：Mac 下載再傳較快）。執行時設 `HF_HUB_OFFLINE=1`、`TRANSFORMERS_OFFLINE=1`。
+- **條件 Q8-ll**：和 §3 的 Q-ll 完全相同：同一個前綴、分數 = log P(前綴＋候選) − log P(前綴)、切詞邊界檢查（超過 1% 不相等就停）、不做長度正規化、同分取名次前者、有前文與無前文兩種、同一份 S5j prep 檔（雜湊檢查）。差別只有模型與執行環境。前綴不加聊天範本，只加分詞器預設的 BOS（Qwen3 沒有 BOS 時照實記錄）。
+- **判斷規則**：§3 的門檻選法與 §5 的判斷規則原樣套用到 Q8-ll。另報 Q8-ll 與 Q-ll（1.7B）同條件的逐列配對（修好／弄壞／McNemar），只報告。
+- **資料流**（188 的 repo 副本放在 `%USERPROFILE%\s5k-188\repo\`，`~` 在 188 是 `%USERPROFILE%`，所以 `s5k.py` 的相對位置不變）：
+  - **傳到 188**：`experiments/s5-local/`、`experiments/s5-judges/s5.py` 與 `reference/proto/` 的程式；dev302、typing76 的 prep 檔（`experiments/s5-judges/results/<set>/rows.jsonl`，跟 repo 副本走）；cvtune 的 `~/.cache/shanjie/work/s5-judges/cvtune/rows.jsonl`；discordtune 的 `rows.jsonl`，放到 `%USERPROFILE%\s5k-188\private\s5-judges\discordtune\rows.jsonl`，執行時設 `SHANJIE_PRIVATE=%USERPROFILE%\s5k-188\private`。全部照 `s5k.py` 的雜湊檢查。
+  - **傳回 Mac**：每個集合**只**拷回 `Q8-ll.*.jsonl`，放進 Mac 上該集合原本的輸出目錄（discordtune：`~/side-project/shanjie-private/s5-local/discordtune/`；cvtune：`~/.cache/shanjie/work/s5-local/cvtune/`；dev302、typing76：`experiments/s5-local/results/<set>/`）。188 的 meta 寫成同目錄的 `meta-188.jsonl`，不碰原本的 `meta.jsonl`。拷回前後記錄這些目錄裡既有檔案的 SHA-256，必須逐位元組相同。`score.json`、`tau.json` 在 Mac 上用 `score.py` 重產。
+- **私有資料**（使用者 2026-10-06 同意）：discordtune 只在 dev302 冒煙通過之後才傳到 188，只供這次執行使用。逐列輸出只有列號、分數、挑選與數字，不含句子；所有 stdout、stderr 不含句子。**不論結果**（成功、任何停止條件、放棄），結束時都刪除 188 上的 `%USERPROFILE%\s5k-188\private\` 整個目錄並用 `dir` 確認不存在；要接著續跑時，最多保留到同一天結束或使用者另外決定。刪除與確認的結果寫進研究紀錄。
+- **工具**：`experiments/s5-local/run_ll_cuda.py`，邏輯照 `run_ll.py`（同樣的參數 `--set`、`--limit`、`--ctx none|real|synth`，同樣的輸出檔格式與位置規則，讓 `score.py` 直接讀），模型呼叫改成 transformers。前綴的 KV 能重用就重用，不行就逐個算，照實記錄。
+- **executor 的交付**（離線，在 Mac 上）：(0) 把 `Q8-ll` 加進 `s5k.CONDS` 與 `score.py` 的 `BASE_CONDS`，並加上 Q8-ll 對 Q-ll 同條件的逐列配對（修好／弄壞／McNemar，只報告）；在 `experiments/s5-local/results/dev302-n20/` 放用完即丟的 fixture：`Q8-ll.noctx.jsonl`、`Q8-ll.ctx.jsonl`，以及讓配對有對象的 `Q-ll.noctx.jsonl`、`Q-ll.ctx.jsonl`。`score.py --set dev302 --limit 20 --tau-self` 要在 Q8-ll、Q8-ll＋ctx 與門檻（`@tau`）列印出對 A-fwd、J-sent-fwd 與非空的 `vs_Q-ll=n=… fixed=… broken=… p=…` 欄位，輸出不含句子。檢查完刪掉整個 `dev302-n20/`（含產生的 `score.json`），`git status` 不得出現它，不 commit；(a) 把「token 對數機率 → 候選分數、邊界檢查、挑選」寫成不依賴 torch 的純函式，用假的 logits 測：分數等於手算、邊界不符時跳過並計數、同分取前者；(b) 刻意改成「只算前綴」的錯誤實作，退化檢查要觸發停止；(c) 輸出 JSON 的欄位與 `run_ll.py` 相同（同一個 fixture 比對鍵名）；(d) 錯誤路徑與 stdout 不含句子（用含句子的 fixture 檢查）。executor 不連 188、不下載模型、不讀私有資料。
+- **main 的執行**：在 188 先用 dev302 前 20 列冒煙（有前文用 §8 的合成前文），報全同分列數、挑第 1 名比例、有無前文分數不同的列數、每列延遲、GPU 記憶體峰值；全部正常才跑 discordtune、cvtune、dev302、typing76。188 一次只跑一個程式，綁 P-core（`start "" /b /wait /affinity FFF`）。
+- **停止條件**：§9 全部照舊，另加：8 GB 顯示卡記憶體不夠（OOM）、模型無法以 4-bit 載入、venv 缺套件、任何輸出含句子、刪除私有目錄失敗。
+- **延遲**：188 的 GPU 延遲只報告，不和 Mac 的數字比，也不拿來決定能不能進輸入法。
+- **預算**：executor 1 回合加 1 次修正；188 上的完整執行以冒煙測試的速度換算後回報使用者再跑。
