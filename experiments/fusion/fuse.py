@@ -220,7 +220,9 @@ def load_jev(name, rows):
     got = {}
     for fn, rev in (("jev-sent-fwd", False), ("jev-sent-rev", True)):
         by = {}
-        for rec in read_jsonl(f"{d}/{fn}.jsonl"):
+        recs = ([json.loads(l) for l in s5k.read_verified(name, f"{fn}.jsonl").splitlines() if l.strip()]
+                if (name, f"{fn}.jsonl") in s5k.HASHES else read_jsonl(f"{d}/{fn}.jsonl"))   # S5k 有雜湊的就核對
+        for rec in recs:
             for key, ans in zip(rec["keys"], rec["answers"]):
                 k = int(key)
                 if k in by or k >= len(rows):
@@ -307,6 +309,8 @@ def report(name, judge, rows, flip):
 
 def repro(name, judge, rows, tau_given):
     """S5k 的格點（全部列的 margin）、τ 選在 A 半；印第 1、2、3 組在全部列與 B 半的數字。"""
+    if tau_given is None and name != "discordtune":   # S5k 的 τ 選在 discordtune；其他集合不給 τ 就沒有第 3 組可比
+        die(f"--repro --set {name} needs --tau (S5k chose τ on discordtune half A)")
     p = select_params(rows, grid_rows=rows)
     tau = p["tau"] if tau_given is None else tau_given
     print(f"repro set={name} judge={judge} tau={tau:.4f} ({'given' if tau_given is not None else 'chosen on A, grid = all rows'})")
