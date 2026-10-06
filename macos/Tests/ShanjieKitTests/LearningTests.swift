@@ -61,6 +61,18 @@ final class LearningTests: XCTestCase {
         XCTAssertEqual(c.client.requested, [], "nothing read in either case")
     }
 
+    /// Clients measured on device (2026-10-06) report no marked text as an empty range at the
+    /// insertion point, or as {NSNotFound, NSNotFound}; both still mean no marked text.
+    func testEmptyMarkedRangeAnywhereStillReadsTheContext() {
+        let c = Controller(makeShell())
+        c.client.before = "ab\t中"
+        for marked in [NSRange(location: 4, length: 0), NSRange(location: 0, length: 0),
+                       NSRange(location: NSNotFound, length: NSNotFound)] {
+            c.client.markedOverride = marked
+            XCTAssertEqual(c.session.leftContext(), "中", "\(marked)")
+        }
+    }
+
     func testReadOncePerCompositionAndNeverDuringIt() {
         let c = Controller(makeShell())
         c.client.before = "今天"

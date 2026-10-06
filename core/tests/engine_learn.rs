@@ -550,8 +550,10 @@ fn commit_syls(e: &mut Engine, s: &Syls) -> String {
     commit_of(e, &s.join(" "))
 }
 
-/// Learning on with a left context but an empty learner reproduces the committed goldens (dev302 chat,
-/// and the 76-row probe) row for row.
+/// Learning on with an empty learner and no left context reproduces the committed goldens (dev302 chat,
+/// and the 76-row probe) row for row (S2h §5.2: an empty left context leaves decoding as it was). Under
+/// the left context "好他", which S2h now lets condition the first word, the learning-on engine with an
+/// empty learner and a learning-off engine commit the same dev302 rows: learning alone changes nothing.
 #[test]
 fn empty_learner_matches_goldens() {
     let gold: Vec<String> = std::fs::read_to_string(root().join("eval/golden/s2-lm-dev302-top1.tsv"))
@@ -565,7 +567,7 @@ fn empty_learner_matches_goldens() {
         .iter()
         .enumerate()
         .filter(|(i, s)| {
-            e.set_left_context("好他");
+            e.set_left_context("");
             commit_syls(&mut e, s) != gold[*i]
         })
         .map(|(i, _)| i + 1)
@@ -581,6 +583,19 @@ fn empty_learner_matches_goldens() {
     assert_eq!(rows.len(), want.len());
     let diff: Vec<usize> = (0..rows.len()).filter(|&i| commit_syls(&mut e, &rows[i].1) != want[i]).map(|i| i + 1).collect();
     assert!(diff.is_empty(), "probe differs at {diff:?}");
+    let mut off = engine();
+    off.set_learning(false);
+    let diff: Vec<usize> = dev302()
+        .iter()
+        .enumerate()
+        .filter(|(_, s)| {
+            e.set_left_context("好他");
+            off.set_left_context("好他");
+            commit_syls(&mut e, s) != commit_syls(&mut off, s)
+        })
+        .map(|(i, _)| i + 1)
+        .collect();
+    assert!(diff.is_empty(), "dev302 under 好他: learning on differs from off at {diff:?}");
     assert!(e.learner().records().is_empty());
 }
 
@@ -1721,13 +1736,16 @@ struct Sweep {
     unaligned: usize,
     groups: usize,
 }
-const SWEEP_TAUGHT: [&str; 2] = ["可以", SENTINEL];
+/// S2h: a taught context conditions the first word (`lm::history`), so "可以" (history 以) changed which
+/// word the span showed and the pick under it was no re-pick. 佝 has no bigram history in the model, so
+/// its history is `<s>`: the decode under it equals the decode under ^, and the two stay distinct keys.
+const SWEEP_TAUGHT: [&str; 2] = ["佝", SENTINEL];
 /// Third context: no record of the two taught keys reaches it at the exact or 1-character level.
 const THIRD: &str = "我們";
 
 /// §12 global learning and global pollution tests at global ε `eps`. Per cases.tsv group whose taught
-/// word x (the pair word the span does not show by default) has 2+ characters: teach it under 可以 and
-/// ^, which makes a global record; then the group's non-teach rows (decoded after 我們) and the dev302
+/// word x (the pair word the span does not show by default) has 2+ characters: teach it under each key of
+/// `SWEEP_TAUGHT` (佝 and ^), which makes a global record; then the group's non-teach rows (decoded after 我們) and the dev302
 /// rows that contain the span (with their own 前文) are replayed. Learning rows are the group rows that
 /// want x (judged by x being present and y absent: unrelated misreads elsewhere in the sentence do not
 /// count). Pollution rows are the group rows that want the other word y (kind=common when x is the
@@ -1761,8 +1779,8 @@ fn global_sweep(eps: f64) -> Sweep {
         let before: Vec<String> = rows.iter().map(|r| decode(&mut e, THIRD, &rd(r))).collect();
         let dev_rows: Vec<&(String, String, Syls)> = dev.iter().filter(|r| has_span(&r.2, &span)).collect();
         let dev_before: Vec<String> = dev_rows.iter().map(|r| decode(&mut e, &r.0, &r.2)).collect();
-        for c in ["可以", ""] {
-            e.set_left_context(c);
+        for c in SWEEP_TAUGHT {
+            e.set_left_context(if c == SENTINEL { "" } else { c });
             type_syls(&mut e, &span.join(" "));
             pick(&mut e, span.len(), span.len(), x);
             e.key(k(KeyKind::Enter)).unwrap();

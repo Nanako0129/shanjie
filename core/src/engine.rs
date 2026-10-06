@@ -3,7 +3,7 @@
 
 use crate::learn::{context_key, local_day, Learner, Record};
 use crate::learn_store::{LearnStore, Opened, StoreError, JOURNAL_MAX};
-use crate::lm::{decode_segment_learned, CappedLexicon, End, Learn, Lm, Profile};
+use crate::lm::{decode_segment_learned, history, CappedLexicon, End, Learn, Lm, Profile};
 use crate::{decode_beam, Lexicon, NoLearning, BEAM_S1};
 use std::collections::{HashMap, HashSet};
 use std::panic::{catch_unwind, AssertUnwindSafe};
@@ -572,22 +572,23 @@ impl Engine {
     pub fn total_score(&self) -> Option<f64> {
         let st = self.lm.as_ref()?;
         let lam = self.profile.lambda();
-        let mut prev = "<s>";
+        // S2h §1: the first sentence starts from the history word of the left context; `open` is whether
+        // the current sentence has a word (the history word is not one, and its own eos is not scored).
+        let mut prev = history(&self.left, &st.lm);
         let mut total = 0.0;
-        let mut any = false;
+        let (mut any, mut open) = (false, false);
         for (w, lp, is_punct) in &self.path {
             if *is_punct {
-                if prev != "<s>" {
+                if open {
                     total += st.lm.eos(lam, prev);
                 }
-                prev = "<s>";
+                (prev, open) = ("<s>", false);
                 continue;
             }
             total += st.lm.word(lam, prev, w, *lp);
-            prev = w;
-            any = true;
+            (prev, any, open) = (w, true, true);
         }
-        any.then(|| if prev == "<s>" { total } else { total + st.lm.eos(lam, prev) })
+        any.then(|| if open { total + st.lm.eos(lam, prev) } else { total })
     }
 
     /// §6 reset: Commit returns the display string (pending syllable dropped); both clear everything.
@@ -690,9 +691,11 @@ impl Engine {
             let to = right.map_or(self.syls.len(), |f| f.start);
             if from < to {
                 // Punctuation is a sentence boundary, as in the counts the model was built from (s3d §4).
+                // The first stretch (no fixed word on its left) starts from the left context (S2h §1).
                 let prev = match gap.checked_sub(1).map(|g| &self.fixed[g]) {
                     Some(f) if !self.is_punct(f.start) => f.word.as_str(),
-                    _ => "<s>",
+                    Some(_) => "<s>",
+                    None => history(&self.left, &st.lm),
                 };
                 let end = match right {
                     Some(f) if !self.is_punct(f.start) => End::Next { word: &f.word, lp: lp_fixed[gap] },
