@@ -93,7 +93,8 @@ def pct_cost(provider, rs, nrows):
 
 
 def test(rows, L, chosen):
-    """The 5 tests of section 5 item 5, on the B half. chosen = {'jev': 'v2', 'clef': 'v3'}."""
+    """The pre-named tests on the B half: 5 with Jev and flash (section 5 item 5), 8 with the 27B too (section 13).
+    chosen = {'jev': 'v4', 'clef': 'v4', 'clef27': 'v2'}."""
     ks = half(rows, "B")
     ok, out = {}, {}
     for prov, base in chosen.items():
