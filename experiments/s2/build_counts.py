@@ -93,10 +93,11 @@ def load_conv():
     POST_SIMP.clear(); POST_SIMP.update({**TW_VARIANTS, **TW_CHAR})
     POST_TRAD.clear(); POST_TRAD.update({**TW_VARIANTS, **VARIANTS})
     # S2f 修訂一 6.2.1：保護詞只看基底詞庫（成員與「不在詞庫」都是）；疊加層本身用到轉換，讀它會循環。
+    # 修訂二 7.2.1：只收含 PROTECT_KEYS 的詞；VARIANTS 鍵（裏 羣 啓）與 喫、竈 照常轉換，否則兩字保護詞會在無關文字裡命中（痛苦里→痛苦裏）。
     # ponytail: 「三棱鏡」裡的「三棱」也被保護（詞庫是「三稜鏡」）；要逐詞反查再說。
     base = set(ime.Lexicon(os.path.join(ROOT, "data", "lexicon", "mcbpmf-data.txt")).by_word)
     PROTECT.clear()
-    PROTECT.update({w: w for w in base if any(c in POST_TRAD for c in w) and "".join(POST_TRAD.get(c, c) for c in w) not in base})
+    PROTECT.update({w: w for w in base if any(c in PROTECT_KEYS for c in w) and "".join(POST_TRAD.get(c, c) for c in w) not in base})
     PROTECT_MAXP[0] = max(map(len, PROTECT), default=1)
     return phrase, char, max(map(len, phrase))
 
@@ -119,6 +120,7 @@ TW_CHAR = {**VARIANTS, "臺": "台"}   # 簡體句的台灣用字（併進 POST_
 # S2f §2.3：全部轉換完（含 TWPhrases）之後再套一層；兩種句子各一張表（繁體句不套 臺→台）。重疊的 9 條方向相同（test_convert 檢查）
 # load_conv() 填；PROTECT 裡的詞在這一層原樣保留（修訂一 6.2.1）。
 POST_SIMP, POST_TRAD, PROTECT, PROTECT_MAXP = {}, {}, {}, [1]
+PROTECT_KEYS = set("脣泄棱覈齶")   # 修訂二：TWVariants 獨有、而且會改壞基底詞的鍵（排泄、棱錐、泄殖腔…）
 PHRASE_SHA = {"STPhrases.txt": "f6eab5e5c6dd7640597878d3dfc6599ee1279d2bc91561eadd8e114194e2925a",
               "TWPhrases.txt": "bcb435b744ee3e522beb9b18fcc5486a36ed4763c6aa642ce18112fb5d604e31"}
 

@@ -50,7 +50,9 @@ S2F = [
 # S2f 修訂一 6.3：保護詞（基底詞換字後不在基底詞庫就原樣保留）、TWPhrases 之前不套字表（兩條路徑）。
 PROTECT_ROWS = [("排泄物很臭", False, "排泄物很臭"), ("嘴脣很紅", False, "嘴唇很紅")]
 ORDER_SIMP = [("大众汽车很好", True, "福斯汽車很好"), ("台式机坏了", True, "桌上型電腦壞了")]
-ORDER_TRAD = [("這個集羣很大", False, "這個叢集很大"), ("他寫的是皮裏陽秋的筆法", False, "他寫的是皮裏陽秋的筆法")]
+ORDER_TRAD = [("這個集羣很大", False, "這個叢集很大"), ("他寫的是皮裏陽秋的筆法", False, "他寫的是皮裡陽秋的筆法")]   # 修訂二：裏 不再保護
+# 修訂二 7.3：保護詞只看 PROTECT_KEYS，兩字保護詞不再在無關文字裡命中
+PROTECT_SCOPE = [("他在痛苦里挣扎", True, "他在痛苦裡掙扎"), ("我们在灶门口", True, "我們在灶門口"), ("在困苦裏生活", False, "在困苦裡生活")]
 
 
 def check(fn, rows):
@@ -62,11 +64,11 @@ for src, want in SIMPLIFIED + TRADITIONAL + MIXED + KEEP:
 assert bc.is_simplified("之后") and not bc.is_simplified("台灣") and not bc.is_simplified("皇后說")
 assert not check(c, S2F), check(c, S2F)
 assert not check(c, THIRD), check(c, THIRD)
-for rows in (PROTECT_ROWS, ORDER_SIMP, ORDER_TRAD):
+for rows in (PROTECT_ROWS, ORDER_SIMP, ORDER_TRAD, PROTECT_SCOPE):
     assert not check(c, rows), check(c, rows)
 assert all(bc.TW_VARIANTS[k] == v for k, v in bc.VARIANTS.items() if k in bc.TW_VARIANTS)   # 兩表重疊的 9 條方向相同
 assert not set(bc.TW_VARIANTS) & set("污癡樑蔘")                                              # §2.1 的四條排除
-assert "排泄" in bc.PROTECT and all(len(w) >= 2 for w in bc.PROTECT)   # _longest 只比對兩字以上，保護詞剛好沒有單字
+assert "排泄" in bc.PROTECT and all(len(w) >= 2 for w in bc.PROTECT) and all(any(c in bc.PROTECT_KEYS for c in w) for w in bc.PROTECT)   # _longest 只比對兩字以上，保護詞剛好沒有單字
 
 
 # 突變（每個都要讓對應的列失敗；改的是函式或表的副本，不動模組本身）
@@ -97,6 +99,15 @@ def simp_prepass(text):       # 修訂一：簡體句放回 TWPhrases 之前的 
     return bc._longest(t, bc.PROTECT, bc.PROTECT_MAXP[0], bc.POST_SIMP)
 
 
+def protect_all_keys(text):   # 修訂二：保護詞改回看全部 POST_TRAD 的鍵
+    base = set(bc.ime.Lexicon(os.path.join(bc.ROOT, "data", "lexicon", "mcbpmf-data.txt")).by_word)
+    wide = {w: w for w in base if any(c in bc.POST_TRAD for c in w) and "".join(bc.POST_TRAD.get(c, c) for c in w) not in base}
+    simp = bc.is_simplified(text)
+    t = bc._longest(text, bc.SIMP_PHRASE, bc.SIMP_MAXP[0], bc.SIMP_CHAR) if simp else bc._longest(text, conv[0], conv[2], conv[1])
+    t = bc._longest(t, bc.TW_PHRASE, bc.TW_MAXP[0])
+    return bc._longest(t, wide, max(map(len, wide)), bc.POST_SIMP if simp else bc.POST_TRAD)
+
+
 def trad_char_variants(text):  # 修訂一：繁體句的字表放回 VARIANTS
     return bc.convert(text, conv[0], {**conv[1], **bc.VARIANTS}, conv[2])
 
@@ -106,10 +117,11 @@ MUTANTS = [  # (突變, 列, 必須失敗的來源句)
     (full_simp_only, S2F, {"南庄鄉"}),
     (no_protect, PROTECT_ROWS, {"排泄物很臭"}),
     (simp_prepass, ORDER_SIMP, {"大众汽车很好", "台式机坏了"}),
-    (trad_char_variants, ORDER_TRAD, {"這個集羣很大", "他寫的是皮裏陽秋的筆法"}),
+    (trad_char_variants, ORDER_TRAD, {"這個集羣很大"}),   # 修訂二：放回之後 裏 在 TWPhrases 前就換成 裡，皮裡陽秋 那列不再失敗
+    (protect_all_keys, PROTECT_SCOPE, {"他在痛苦里挣扎"}),
 ]
 for fn, rows, must in MUTANTS:
     bad = {r[0] for r in check(fn, rows)}
     assert must <= bad, (fn.__name__, sorted(bad))
 print(f"mutations: {len(MUTANTS)} killed; protect words: {len(bc.PROTECT)}")
-print(f"ok: {len(SIMPLIFIED) + len(TRADITIONAL) + len(MIXED) + len(KEEP) + len(THIRD) + len(S2F) + 6} conversion checks")
+print(f"ok: {len(SIMPLIFIED) + len(TRADITIONAL) + len(MIXED) + len(KEEP) + len(THIRD) + len(S2F) + 9} conversion checks")

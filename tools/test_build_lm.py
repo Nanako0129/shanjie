@@ -77,6 +77,11 @@ class BuildLm(unittest.TestCase):
             self.assertGreaterEqual(t, sum(entries.values()), self.lm.vocab[v])
         self.assertEqual(self.lm.ctx[self.lm.ids["他"]][0], 11)   # 原始：1 + 3 + 2 + 口語 1×5（寫回每個成員會變 22）
 
+    def test_totals_count_class_once(self):
+        """修訂二 7.2.2：N 與 eos_total 每類只算一次（代表成員）。手算：起床類 19、佔 5、占 10、他 30 → 64；</s>：起床類 14。"""
+        self.assertEqual(self.lm.N, 64)
+        self.assertEqual(round(self.lm.p_eos * self.lm.N), 14)
+
     def test_real_lexicon_ties_pick_normal_form(self):
         """真實詞庫（基底＋疊加層）：最高分同分、而且類裡有 MERGE 正規形的，代表一律是正規形（修訂一 6.3 的同分列）。"""
         import build_counts as bc
@@ -95,7 +100,7 @@ class BuildLm(unittest.TestCase):
             if normal and sum(best[w] == top for w in g) > 1:
                 tied += 1
                 self.assertEqual(fold(g[0]), g[0], g)
-        self.assertGreater(tied, 1000)   # 疊加層大多同分（修訂一 6.1：1,656 類）
+        self.assertGreater(tied, 10)     # 修訂二的延伸規則拿掉多數疊加層舊字形後，同分而有正規形的類量到 23 個（修訂一時約 1,656）
 
     def test_rust_loads(self):
         rows = os.path.join(self.tmp.name, "rows.txt")

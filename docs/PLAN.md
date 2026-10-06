@@ -294,6 +294,8 @@ v4 日期 2026-10-03。v1 經 `pilotfish:plan-verifier`（REVISE，4 項）與 `
     | `wikt` | `https://dumps.wikimedia.org/zhwiktionary/20261001/zhwiktionary-20261001-all-titles-in-ns0.gz` | `95e915cd85992b4fe990187dca845ea85e257deba39d8054b014781015d3f7f0` | CC BY-SA 4.0 | 詞 |
     | — | OpenCC `data/dictionary/STCharacters.txt`，commit `3ac34aa439a9908dd49fa92b5174b46314787ac2` | `a0ca1601c70648cf48b33c3c6210ccbecc5c7eead4b4c3daf76587ba2c03582b` | Apache-2.0 | 只用來過濾，不進疊加層 |
     | — | OpenCC `data/dictionary/TWVariants.txt`，同一個 commit `3ac34aa439a9908dd49fa92b5174b46314787ac2`（S2f） | `245b94eb5842957e735dd44b7e7d4ff469a3643126cc8fa511adda5281e9cb86` | Apache-2.0 | 台灣字形表 `TW_VARIANTS`（`experiments/s2/build_counts.py` 讀之前核對 SHA-256），不進疊加層 |
+    | — | OpenCC `data/dictionary/STPhrases.txt`，同一個 commit（S2f 起核對） | `f6eab5e5c6dd7640597878d3dfc6599ee1279d2bc91561eadd8e114194e2925a` | Apache-2.0 | 簡體句的詞組轉換，不進疊加層 |
+    | — | OpenCC `data/dictionary/TWPhrases.txt`，同一個 commit（S2f 起核對） | `bcb435b744ee3e522beb9b18fcc5486a36ed4763c6aa642ce18112fb5d604e31` | Apache-2.0 | 台灣用詞（TWPhrases），不進疊加層 |
 
     三個 dump 的 sha1 已和 Wikimedia 官方的 `sha1sums.txt` 比對相符。來源檔不進 repo，因為合計 55 MB。`tools/build_overlay.py` 下載到 `~/.cache/shanjie/sources/` 後驗證 SHA-256，不符就中止。
   - **篩選。** 由 `tools/build_overlay.py` 依序做，不得手動加減。這支腳本就是本契約的參考實作，下列文字和腳本不一致時以腳本為準：

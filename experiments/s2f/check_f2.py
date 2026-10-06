@@ -1,5 +1,5 @@
 """S2f 修訂一 6.3 的模型層檢查（只讀模型與詞庫，印統計）。用法：python3 experiments/s2f/check_f2.py <模型.sjlm>
-(1) 被字形表改壞過的基底詞有次數；(2) 每個前文裡，同一類作為「後一個詞」最多一個成員有條目；(3) 占、佔 沒有合併。不過就 exit 1。"""
+(1) 被字形表改壞過的基底詞有次數；(2) 每個前文裡，同一類作為「後一個詞」最多一個成員有條目；(3) 占、佔 沒有合併；(4) N 每類只算一次（修訂二）。不過就 exit 1。"""
 import os
 import sys
 
@@ -32,6 +32,9 @@ def main():
                 seen[g] = True
     print(f"contexts {len(lm.ctx)}; classes {len(set(cls.values()))}; contexts with two members of one class as next word: {dup}")
     ok &= dup == 0
+    once = sum(c for w, c in zip(lm.vocab[2:], lm.uni[2:]) if w not in cls or cls[w][0] == w)
+    print(f"N = {lm.N}, sum of unigrams counting each class once = {once}")   # 修訂二 7.2.2
+    ok &= lm.N == once
     print(f"count 占 = {lm.count('占')}, 佔 = {lm.count('佔')}")
     ok &= lm.count("占") != lm.count("佔")
     print("PASS" if ok else "FAIL")
