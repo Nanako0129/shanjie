@@ -1,0 +1,1 @@
+{"runner": "run_ll", "model": "Q8-ll", "ctx": "none", "load_s": 29.465, "peak_mb": 6192.2, "load_note": "load unknown", "torch": "2.11.0+cu128", "transformers": "5.18.0", "bitsandbytes": "0.50.2", "gpu": "NVIDIA GeForce RTX 3070", "quant": "nf4", "compute_dtype": "bfloat16", "kv_reuse": false, "bos_token_id": null}
