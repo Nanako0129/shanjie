@@ -69,6 +69,7 @@ final class ShanjieInputController: IMKInputController {
         case .layout(.eten): #selector(selectEtenLayout(_:))
         case .clear: #selector(clearLearning(_:))
         case .toggleBackup: #selector(toggleLearningBackup(_:))
+        case .toggleDemote: #selector(toggleDemote(_:))
         }
     }
 
@@ -80,6 +81,7 @@ final class ShanjieInputController: IMKInputController {
     @objc func selectEtenLayout(_ sender: Any?) { perform(.layout(.eten)) }
     @objc func clearLearning(_ sender: Any?) { perform(.clear) }
     @objc func toggleLearningBackup(_ sender: Any?) { perform(.toggleBackup) }
+    @objc func toggleDemote(_ sender: Any?) { perform(.toggleDemote) }
 }
 
 /// The controller's current IMKTextInput client.

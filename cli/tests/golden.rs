@@ -135,3 +135,37 @@ fn unigram_rows_mode_matches_python_golden_byte_for_byte() {
     std::fs::remove_file(&dump).unwrap();
     assert_eq!(got, golden("sbench-unigram-typing76.txt"));
 }
+
+/// SW first slice (docs/contracts/sw-sensitive-demote.md section 4.2): the frozen probe, both profiles, with
+/// and without `--context`, demotion on and off: the summary line, then each row's first candidate with
+/// its score. Python output (lm_eval.py); the Rust scores equal it bit for bit. Regenerate by running the
+/// same loop with `python3 reference/proto/lm_eval.py` instead of this binary:
+/// for each ctx in ("", --context), profile in (chat, formal), d in (on, off) run
+/// `--profile P --rows experiments/sw/sensitive-reading.txt --name sw-probe-D [ctx] [--no-demote when off]
+/// --dump F` and keep the summary line and the dump lines whose second column is 1.
+#[test]
+fn sw_probe_matches_python_golden_byte_for_byte() {
+    let (lm, root) = (lm_path(), concat!(env!("CARGO_MANIFEST_DIR"), "/.."));
+    let probe = format!("{root}/experiments/sw/sensitive-reading.txt");
+    let dump = std::env::temp_dir().join(format!("shanjie-sw-probe-{}.tsv", std::process::id()));
+    let mut got = String::new();
+    for ctx in [None, Some("--context")] {
+        for p in ["chat", "formal"] {
+            for d in ["on", "off"] {
+                let name = format!("sw-probe-{d}");
+                let mut args = vec!["--lm", &lm, "--profile", p, "--rows", &probe, "--name", &name, "--dump", dump.to_str().unwrap()];
+                args.extend(ctx);
+                if d == "off" {
+                    args.push("--no-demote");
+                }
+                got += &run(&args);
+                for l in std::fs::read_to_string(&dump).unwrap().lines().filter(|l| l.split('\t').nth(1) == Some("1")) {
+                    got += l;
+                    got += "\n";
+                }
+            }
+        }
+    }
+    std::fs::remove_file(&dump).unwrap();
+    assert_eq!(got, golden("sw-probe.txt"));
+}
