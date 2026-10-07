@@ -280,18 +280,108 @@ fn word_term(lam: f64, p: f64, lp: f64) -> f64 {
     lam * p.log10() + (1.0 - lam) * lp
 }
 
+/// Demotion table (docs/contracts/sw-sensitive-demote.md section 2): `reading<TAB>word<TAB>delta<TAB>
+/// category<TAB>source` rows. A word under a reading (syllables joined by `-`), or under `*` (every
+/// reading), loses `delta` from its term score in decoding. A specific reading wins over `*`.
+/// Only the format is checked here; `CappedLexicon::new` and `Demote::check` also require every row to
+/// name an entry of the lexicon. The strict rules are mirrored by `load_demote` in reference/proto/lm.py.
+#[derive(Clone, Default)]
+pub struct Demote {
+    /// (reading or "*", word, delta), in file order.
+    rows: Vec<(String, String, f64)>,
+}
+
+/// Characters a field may not start or end with (the same set in lm.py): no stray whitespace.
+const DEMOTE_EDGE: [char; 6] = [' ', '\t', '\r', '\x0b', '\x0c', '\u{a0}'];
+
+/// `[0-9]+` or `[0-9]+.[0-9]+`, ASCII only (Python's `float` would also take `2_0`, other scripts' digits, ` 2`, `1e1`).
+fn plain_decimal(s: &str) -> bool {
+    let digits = |t: &str| !t.is_empty() && t.bytes().all(|b| b.is_ascii_digit());
+    match s.split_once('.') {
+        Some((a, b)) => digits(a) && digits(b),
+        None => digits(s),
+    }
+}
+
+impl Demote {
+    /// `None` on a malformed row: not 5 non-empty fields, a field with surrounding whitespace, delta not
+    /// a plain decimal that is finite and positive, a repeated (reading, word) key. Lines end at `\n`
+    /// with an optional `\r` before it; empty lines and `#` lines are skipped.
+    pub fn parse(text: &str) -> Option<Demote> {
+        let mut rows: Vec<(String, String, f64)> = Vec::new();
+        for line in text.lines().filter(|l| !l.is_empty() && !l.starts_with('#')) {
+            let f: Vec<&str> = line.split('\t').collect();
+            let [reading, word, delta, category, source] = f[..] else { return None };
+            let edge = |s: &str| s.is_empty() || s.starts_with(DEMOTE_EDGE) || s.ends_with(DEMOTE_EDGE);
+            if [reading, word, delta, category, source].into_iter().any(edge) || !plain_decimal(delta) {
+                return None;
+            }
+            let delta: f64 = delta.parse().ok().filter(|d: &f64| d.is_finite() && *d > 0.0)?;
+            if rows.iter().any(|(r, w, _)| r == reading && w == word) {
+                return None;
+            }
+            rows.push((reading.to_string(), word.to_string(), delta));
+        }
+        Some(Demote { rows })
+    }
+
+    /// The table's rows as positions of `ents` (which must be laid out like `base`): `(position, delta)`
+    /// sorted by position, a specific reading overriding `*`. `None` when a row names no entry: a
+    /// reading the lexicon lacks, or a word absent under it (for `*`: absent under every reading).
+    fn resolve(&self, base: &Lexicon, ents: &[crate::Ent]) -> Option<Vec<(usize, f64)>> {
+        let word_of = |e: &crate::Ent| &base.words[e.off as usize..(e.off + e.len) as usize];
+        let mut at: std::collections::BTreeMap<usize, f64> = std::collections::BTreeMap::new();
+        let stars: HashMap<&str, f64> =
+            self.rows.iter().filter(|(r, _, _)| r == "*").map(|(_, w, d)| (w.as_str(), *d)).collect();
+        if !stars.is_empty() {
+            let mut seen: HashSet<&str> = HashSet::new();
+            for (p, e) in ents.iter().enumerate() {
+                if let Some((&w, &d)) = stars.get_key_value(word_of(e)) {
+                    at.insert(p, d);
+                    seen.insert(w);
+                }
+            }
+            if seen.len() != stars.len() {
+                return None;
+            }
+        }
+        for (reading, word, d) in self.rows.iter().filter(|(r, _, _)| r != "*") {
+            let syls: Vec<String> = reading.split('-').map(str::to_string).collect();
+            let r = base.find(&base.ids(&syls))?;
+            let mut found = false;
+            for p in base.range(r) {
+                if word_of(&ents[p]) == word {
+                    at.insert(p, *d);
+                    found = true;
+                }
+            }
+            if !found {
+                return None;
+            }
+        }
+        Some(at.into_iter().collect())
+    }
+
+    /// Whether every row names an entry of `lex` (what `Engine::new` requires of demote.tsv).
+    pub fn check(&self, lex: &Lexicon) -> bool {
+        self.resolve(lex, &lex.ents).is_some()
+    }
+}
+
 /// The lexicon as decoding sees it: same readings and string pool as the original (shared), with the
 /// overlay cap applied to scores and every reading re-sorted (cap_overlay in lm.py). Decoding only;
 /// syllable generation and candidate lists keep using the original lexicon.
 pub struct CappedLexicon {
     base: Arc<Lexicon>,
     ents: Vec<crate::Ent>,
+    /// Demotion resolved once per entry: `(position in ents, delta)` sorted by position; empty without a table.
+    deltas: Vec<(usize, f64)>,
 }
 
 impl CappedLexicon {
     /// The single constructor. `overlay` is the text of overlay-add.tsv; every word in its second
     /// column (whether the entry came from the base or the overlay) is capped at its corpus frequency.
-    pub fn new(base: Arc<Lexicon>, overlay: &str, lm: &Lm) -> CappedLexicon {
+    pub fn new(base: Arc<Lexicon>, overlay: &str, lm: &Lm, demote: Option<&Demote>) -> Option<CappedLexicon> {
         let words: HashSet<&str> = overlay.lines().filter_map(|l| l.split('\t').nth(1)).collect();
         let mut ents = base.ents.clone();
         for i in 0..base.readings.len() {
@@ -309,7 +399,34 @@ impl CappedLexicon {
             }
             ents[range].sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
         }
-        CappedLexicon { base, ents }
+        let deltas = match demote {
+            Some(d) => d.resolve(&base, &ents)?,
+            None => Vec::new(),
+        };
+        Some(CappedLexicon { base, ents, deltas })
+    }
+
+    /// Demotion deltas of the entries at positions `range` (usually none): `(position, delta)`.
+    fn deltas_in(&self, range: &std::ops::Range<usize>) -> &[(usize, f64)] {
+        let lo = self.deltas.partition_point(|&(p, _)| p < range.start);
+        let hi = self.deltas.partition_point(|&(p, _)| p < range.end);
+        &self.deltas[lo..hi]
+    }
+
+    /// Highest capped score of `word` under the reading `key` together with that entry's demotion delta
+    /// (0.0 when the table has none; callers apply the on/off flag).
+    pub fn best_lp_delta(&self, key: &[String], word: &str) -> Option<(f64, f64)> {
+        let r = self.base.find(&self.base.ids(key))?;
+        let range = self.base.range(r);
+        let dl = self.deltas_in(&range);
+        let mut best: Option<(f64, f64)> = None;
+        for p in range {
+            let e = &self.ents[p];
+            if self.word_of(e) == word && best.is_none_or(|(b, _)| e.score > b) {
+                best = Some((e.score, dl.iter().find(|&&(q, _)| q == p).map_or(0.0, |x| x.1)));
+            }
+        }
+        best
     }
 
     pub fn base(&self) -> &Arc<Lexicon> {
@@ -351,16 +468,17 @@ impl CappedLexicon {
 /// How a decoded segment ends: the sentence end, or the transition into a fixed word on its right.
 pub enum End<'a> {
     Eos,
-    Next { word: &'a str, lp: f64 },
+    /// `delta` is the fixed word's demotion (0.0 for none).
+    Next { word: &'a str, lp: f64, delta: f64 },
 }
 
-/// A path: total score and its words with the lp each was scored with.
-pub type Scored<'a> = (f64, Vec<(&'a str, f64)>);
+/// A path: total score and its words with the lp each was scored with and its demotion delta.
+pub type Scored<'a> = (f64, Vec<(&'a str, f64, f64)>);
 
 struct Hyp<'a> {
     score: f64,
     surface: String,
-    words: Vec<(&'a str, f64)>,
+    words: Vec<(&'a str, f64, f64)>,
     last: Option<u32>,
     ctx: Option<usize>,
 }
@@ -405,11 +523,13 @@ pub fn decode_segment<'a>(
     end: End<'_>,
     beam: usize,
 ) -> Result<Vec<Scored<'a>>, Error> {
-    decode_segment_learned(lex, syls, lm, lam, start, end, beam, None)
+    decode_segment_learned(lex, syls, lm, lam, start, end, beam, None, true)
 }
 
 /// `decode_segment` with learning (S4 §1.4). With `learn` `None`, or a learner without a record for a
-/// span's reading, the arithmetic is exactly that of the unlearned decoder.
+/// span's reading, the arithmetic is exactly that of the unlearned decoder. `demote` switches the
+/// lexicon's demotion table on (a delta is subtracted from the word's term, after learning; lp, the
+/// backoff and the entries tried are unchanged) or off (bit-identical to a lexicon without the table).
 #[allow(clippy::too_many_arguments)]
 pub fn decode_segment_learned<'a>(
     lex: &'a CappedLexicon,
@@ -420,6 +540,7 @@ pub fn decode_segment_learned<'a>(
     end: End<'_>,
     beam: usize,
     learn: Option<&Learn<'_>>,
+    demote: bool,
 ) -> Result<Vec<Scored<'a>>, Error> {
     let base = &*lex.base;
     let n = syls.len();
@@ -443,6 +564,7 @@ pub fn decode_segment_learned<'a>(
             let learned = learn.filter(|ln| ln.learner.has_reading(span));
             let range = base.range(r);
             let best = lex.ents[range.start].score;
+            let dl = if demote { lex.deltas_in(&range) } else { &[] };
             // Entries to try: the top PER_KEY, plus learned words ranked below it (`extra`: only
             // usable on a path whose context has a learned record for them).
             let mut entries: Vec<(usize, bool)> = range.clone().take(PER_KEY).map(|p| (p, false)).collect();
@@ -479,6 +601,7 @@ pub fn decode_segment_learned<'a>(
                 let e = &lex.ents[p];
                 let (word, lp0) = (lex.word_of(e), e.score);
                 let (wid, pb0) = (lm.word_id(word), pow10(lp0));
+                let delta = dl.iter().find(|&&(q, _)| q == p).map_or(0.0, |x| x.1);
                 for (hi, h) in hyps[i - l].iter().enumerate() {
                     let (mut lp, mut pb) = (lp0, pb0);
                     if let Some(ln) = learned {
@@ -498,13 +621,13 @@ pub fn decode_segment_learned<'a>(
                             _ => {}
                         }
                     }
-                    let sc = h.score + word_term(lam, lm.prob_c(h.ctx, wid, pb), lp);
+                    let sc = h.score + (word_term(lam, lm.prob_c(h.ctx, wid, pb), lp) - delta);
                     let surface = format!("{}{word}", h.surface);
                     match idx.get(&surface) {
                         Some(&q) if !(sc > cand[q].score) => {}
                         found => {
                             let mut words = h.words.clone();
-                            words.push((word, lp));
+                            words.push((word, lp, delta));
                             let nh = Hyp { score: sc, surface, words, last: wid, ctx: None };
                             match found {
                                 Some(&q) => cand[q] = nh,
@@ -528,14 +651,14 @@ pub fn decode_segment_learned<'a>(
     let last = std::mem::take(&mut hyps[n]);
     let closing = match end {
         End::Eos => None,
-        End::Next { word, lp } => Some((lm.word_id(word), pow10(lp), lp)),
+        End::Next { word, lp, delta } => Some((lm.word_id(word), pow10(lp), lp, delta)),
     };
     let mut out: Vec<Scored<'a>> = last
         .into_iter()
         .map(|h| {
             let term = match closing {
                 None => lam * lm.prob_c(h.ctx, Some(1), lm.p_eos).log10(),
-                Some((wid, pb, lp)) => word_term(lam, lm.prob_c(h.ctx, wid, pb), lp),
+                Some((wid, pb, lp, delta)) => word_term(lam, lm.prob_c(h.ctx, wid, pb), lp) - delta,
             };
             (h.score + term, h.words)
         })
@@ -567,10 +690,11 @@ pub fn decode(
     profile: Profile,
     beam: usize,
 ) -> Result<Vec<(f64, Vec<String>)>, Error> {
-    decode_from(lex, syls, lm, profile, beam, "<s>")
+    decode_from(lex, syls, lm, profile, beam, "<s>", true)
 }
 
-/// `decode` with the first word conditioned on `start` (lm.py `decode(..., start=)`).
+/// `decode` with the first word conditioned on `start` (lm.py `decode(..., start=)`) and the demotion
+/// table on or off (`demote`).
 pub fn decode_from(
     lex: &CappedLexicon,
     syls: &[String],
@@ -578,16 +702,18 @@ pub fn decode_from(
     profile: Profile,
     beam: usize,
     start: &str,
+    demote: bool,
 ) -> Result<Vec<(f64, Vec<String>)>, Error> {
-    Ok(decode_segment(lex, syls, lm, profile.lambda(), start, End::Eos, beam)?
+    Ok(decode_segment_learned(lex, syls, lm, profile.lambda(), start, End::Eos, beam, None, demote)?
         .into_iter()
-        .map(|(s, ws)| (s, ws.into_iter().map(|(w, _)| w.to_string()).collect()))
+        .map(|(s, ws)| (s, ws.into_iter().map(|(w, _, _)| w.to_string()).collect()))
         .collect())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Lexicon;
 
     /// Vocab `<s> </s> a b`; contexts `<s>` (total 5: a 3, b 2) and `a` (total 4: `</s>` 2).
     fn tiny() -> Vec<u8> {
@@ -648,6 +774,107 @@ mod tests {
         assert_eq!(history("ab", &lm), "<s>");
         assert_eq!(history("b", &lm), "<s>");
         assert_eq!(history("zz", &lm), "<s>");
+    }
+
+    const TINY_LEX: &str = "ㄅ a -1.0\nㄆ a -1.0\nㄅ b -2.0\nㄆ b -2.0\n";
+
+    /// Word "a" under two readings, word "b" under both too; "a" is the better word everywhere.
+    fn capped_with(table: &str, lm: &Lm) -> Option<CappedLexicon> {
+        let lex = Arc::new(Lexicon::parse(TINY_LEX).unwrap());
+        CappedLexicon::new(lex, "", lm, Some(&Demote::parse(table).unwrap()))
+    }
+
+    fn scores(lex: &CappedLexicon, lm: &Lm, reading: &str, demote: bool) -> Vec<(String, f64)> {
+        let syls = [reading.to_string()];
+        decode_segment_learned(lex, &syls, lm, 0.5, "<s>", End::Eos, 64, None, demote)
+            .unwrap()
+            .into_iter()
+            .map(|(s, ws)| (ws.iter().map(|w| w.0).collect(), s))
+            .collect()
+    }
+
+    fn score_of(v: &[(String, f64)], w: &str) -> f64 {
+        v.iter().find(|(x, _)| x == w).unwrap().1
+    }
+
+    /// Contract sw-sensitive-demote section 4 (a): delta applies only under the listed reading (the same
+    /// word under another reading keeps its score, bit for bit); `*` applies under every reading; a
+    /// specific reading wins over `*`; the unlisted word is untouched.
+    #[test]
+    fn delta_applies_only_under_the_listed_reading() {
+        let lm = Lm::parse(&tiny()).unwrap();
+        let lex = capped_with("ㄅ\ta\t5.0\treading\tt\n*\tb\t0.25\treading\tt\nㄅ\tb\t1.0\treading\tt\n", &lm).unwrap();
+        let (on_b, off_b) = (scores(&lex, &lm, "ㄅ", true), scores(&lex, &lm, "ㄅ", false));
+        let (on_p, off_p) = (scores(&lex, &lm, "ㄆ", true), scores(&lex, &lm, "ㄆ", false));
+        // The standard reading ㄆ of "a" is not charged.
+        assert_eq!(score_of(&on_p, "a").to_bits(), score_of(&off_p, "a").to_bits());
+        // ㄅ: "a" loses 5.0, "b" loses the specific 1.0 (not the `*` 0.25).
+        assert!((score_of(&off_b, "a") - score_of(&on_b, "a") - 5.0).abs() < 1e-12);
+        assert!((score_of(&off_b, "b") - score_of(&on_b, "b") - 1.0).abs() < 1e-12);
+        // ㄆ: "b" has only the `*` row.
+        assert!((score_of(&off_p, "b") - score_of(&on_p, "b") - 0.25).abs() < 1e-12);
+        assert_eq!(on_b[0].0, "b", "demoted 'a' no longer first under ㄅ");
+        assert_eq!(on_p[0].0, "a", "still first under ㄆ");
+        // A fixed word finds its delta from the same entry.
+        let key = |s: &str| [s.to_string()];
+        assert_eq!(lex.best_lp_delta(&key("ㄅ"), "a"), Some((-1.0, 5.0)));
+        assert_eq!(lex.best_lp_delta(&key("ㄆ"), "a"), Some((-1.0, 0.0)));
+        assert_eq!(lex.best_lp_delta(&key("ㄆ"), "b"), Some((-2.0, 0.25)));
+        assert_eq!(lex.best_lp_delta(&key("ㄆ"), "zz"), None);
+    }
+
+    /// Contract section 2: a row naming no lexicon entry fails the load (a reading typed with a space
+    /// instead of `-`, a reading the lexicon lacks, a word absent under that reading, a `*` word the
+    /// lexicon lacks), and `Demote::check` (what `Engine::new` runs) says the same.
+    #[test]
+    fn rows_must_name_a_lexicon_entry() {
+        let lm = Lm::parse(&tiny()).unwrap();
+        let lex = Arc::new(Lexicon::parse("ㄅ-ㄆ ab -1.0\nㄅ a -1.0\n").unwrap());
+        let new = |t: &str| {
+            let d = Demote::parse(t).unwrap();
+            let (built, checked) = (CappedLexicon::new(lex.clone(), "", &lm, Some(&d)).is_some(), d.check(&lex));
+            assert_eq!(built, checked);
+            built
+        };
+        assert!(new("ㄅ-ㄆ\tab\t1\treading\ts\n"));
+        assert!(new("*\tab\t1\treading\ts\n"));
+        assert!(!new("ㄅ ㄆ\tab\t1\treading\ts\n"), "a mistyped reading");
+        assert!(!new("ㄆ-ㄆ\tab\t1\treading\ts\n"), "a reading the lexicon lacks");
+        assert!(!new("ㄅ\tab\t1\treading\ts\n"), "a word absent under that reading");
+        assert!(!new("*\tzz\t1\treading\ts\n"), "a `*` word the lexicon lacks");
+        assert!(new(""));
+    }
+
+    #[test]
+    fn demote_table_parsing() {
+        assert!(Demote::parse("# c\n\nㄅ-ㄆ\tab\t2.5\treading\ts\n*\tab\t0.5\treading\ts\n").is_some());
+        assert!(Demote::parse("ㄅ\ta\t2\treading\ts\r\n\r\n").is_some(), "CRLF and a blank line");
+        for bad in [
+            "ㄅ\ta\t1\treading\n",
+            "ㄅ\ta\t1\treading\ts\textra\n",
+            "ㄅ\ta\t0\treading\ts\n",
+            "ㄅ\ta\t0.0\treading\ts\n",
+            "ㄅ\ta\t-1\treading\ts\n",
+            "ㄅ\ta\tinf\treading\ts\n",
+            "ㄅ\ta\tnan\treading\ts\n",
+            "ㄅ\ta\tx\treading\ts\n",
+            "ㄅ\ta\t2_0\treading\ts\n",
+            "ㄅ\ta\t 2\treading\ts\n",
+            "ㄅ\ta\t2 \treading\ts\n",
+            "ㄅ\ta\t+2\treading\ts\n",
+            "ㄅ\ta\t1e1\treading\ts\n",
+            "ㄅ\ta\t.5\treading\ts\n",
+            "ㄅ\ta\t2.\treading\ts\n",
+            "ㄅ\ta\t２\treading\ts\n",
+            "ㄅ\ta\t٢\treading\ts\n",
+            " ㄅ\ta\t1\treading\ts\n",
+            "ㄅ\ta \t1\treading\ts\n",
+            "ㄅ\ta\t1\t\ts\n",
+            "ㄅ\ta\t1\treading\ts \n",
+            "ㄅ\ta\t1\treading\ts\nㄅ\ta\t2\treading\ts\n",
+        ] {
+            assert!(Demote::parse(bad).is_none(), "{bad:?}");
+        }
     }
 
     #[test]

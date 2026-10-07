@@ -32,9 +32,50 @@ WORK = os.environ.get("S2_WORK") or os.path.expanduser("~/.cache/shanjie/work/s2
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CORPORA = [("counts-200000.pkl", 1), ("counts-colloquial3.pkl", 5)]   # 維基 20 萬篇 ×1、口語（訓練部分＋合成句）×5
 PRUNE, D = 2, 0.75
+LEXDIR = os.path.join(ROOT, "data", "lexicon")
 
 
-def build():
+def variant_classes(by_reading):
+    """S2f §2.4 與修訂一：MERGE（build_counts.MERGE）套到兩邊後字串相同、而且在詞庫裡的讀音集合完全相同的詞併成一類
+    （占 另有 ㄓㄢ，就不和 佔 併）。by_reading：讀音 → [(詞, 分數)]（ime.Lexicon.by_reading，基底加疊加層）。
+    回傳 詞 → 類的成員 tuple，第一個是代表成員（詞庫最高分最大、再來是 MERGE 正規形、再來 code point 最小），只含成員數 >= 2 的類。"""
+    import build_counts as bc
+    fold = lambda w: "".join(bc.MERGE.get(c, c) for c in w)
+    reads, best = {}, {}
+    for r, ents in by_reading.items():
+        for w, lp in ents:
+            reads.setdefault(w, set()).add(r)
+            best[w] = max(best.get(w, lp), lp)
+    groups = {}
+    for w, rs in reads.items():
+        groups.setdefault((fold(w), frozenset(rs)), []).append(w)
+    out = {}
+    for g in groups.values():
+        if len(g) > 1:
+            rep = min(g, key=lambda w: (-best[w], fold(w) != w, w))
+            out.update(dict.fromkeys(g, (rep,) + tuple(sorted(x for x in g if x != rep))))
+    return out
+
+
+def merge_variants(uni, bi, cls):
+    """各語料加權、四捨五入之後做（uni、bi 是整數 dict）。unigram 以類加總後寫回每個成員（每個寫法都要在詞彙表裡、能當前文）；
+    二元組以（類, 類）加總，「後一個詞」只放在代表成員上，前文則寫給類裡每個成員（條目相同）。這樣每個前文的總數 t 只算類一次
+    （修訂一 6.2.3；寫回每個成員會把 k 個成員的類算 k 次）。"""
+    rep = lambda w: cls[w][0] if w in cls else w
+    u, b = {}, {}
+    for w in [w for w in uni if w in cls]:
+        u[rep(w)] = u.get(rep(w), 0) + uni.pop(w)
+    for k in [k for k in bi if k[0] in cls or k[1] in cls]:
+        r = (rep(k[0]), rep(k[1]))
+        b[r] = b.get(r, 0) + bi.pop(k)
+    for w, c in u.items():
+        uni.update(dict.fromkeys(cls[w], c))
+    for (v, w), c in b.items():
+        bi.update(dict.fromkeys(((mv, w) for mv in cls.get(v, (v,))), c))
+    return uni, bi
+
+
+def build(cls=None):
     uni, bi = {}, {}
     for name, w in CORPORA:
         c = pickle.load(open(os.path.join(WORK, name), "rb"))
@@ -45,11 +86,20 @@ def build():
     # S2n 契約 §6.2：期望次數是小數；加權相加後每一筆四捨五入成整數、去掉 0。整數輸入不受影響（round(int) 不變）。
     uni = {k: r for k, v in uni.items() if (r := round(v))}
     bi = {k: r for k, v in bi.items() if (r := round(v))}
+    if cls is None:
+        sys.path.insert(0, os.path.join(ROOT, "reference", "proto"))
+        sys.path.insert(0, os.path.join(ROOT, "experiments", "s2"))
+        import ime
+        lex = ime.Lexicon(os.path.join(LEXDIR, "mcbpmf-data.txt"), overlay=ime.OVERLAYS)
+        cls = variant_classes(lex.by_reading)
+    uni, bi = merge_variants(uni, bi, cls)
     words = sorted(uni, key=lambda s: s.encode("utf-8"))
     vocab = ["<s>", "</s>"] + words
     ids = {w: i for i, w in enumerate(vocab)}
-    N = sum(uni.values())
-    eos_total = sum(c for (v, w), c in bi.items() if w == "</s>")
+    # S2f 修訂二 7.2.2：類只算一次（只算代表成員的 unigram 與代表成員前文的 </s>）；影響約 0.006 log10
+    once = lambda w: w not in cls or cls[w][0] == w
+    N = sum(c for w, c in uni.items() if once(w))
+    eos_total = sum(c for (v, w), c in bi.items() if w == "</s>" and once(v))
     total, kept = {}, {}
     for (v, w), c in bi.items():
         total[ids[v]] = total.get(ids[v], 0) + c
