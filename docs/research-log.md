@@ -1039,3 +1039,13 @@ S2h 實機驗收時，使用者在終端機、Discord、VS Code、Chrome 網址�
 - **縮寫（A1）**：沒有顯著差別（discordtune 81.0% 對 81.3%）。省鍵率 KS(9) 與第一名翻轉率和 c 相差都在 2.5 個百分點以內。
 - **檢查**：單元測試 3 項、兩個突變各自失敗；typing76 兩種設定的一致性 0 不符；查詢 p95 公開集合最高 105 ms、discordtune 73 ms。
 - 結論給介面契約與核心契約用：出貨的排序用 S。
+
+## 2026-10-07：V3 核心的預測函式（Rust，第一片，#44）
+
+契約 `docs/contracts/v3-core-predict.md`。`core/src/predict.rs`：單位、相容（P 前綴、PA 聯集）、依第一個音節字元前綴分桶的索引、後繼詞優先的 S 順序；`shanjie-eval --predict <查詢檔> --lm … --profile chat [--predict-time]`；golden 由 `experiments/sp/golden_predict.py` 用 `predict3.reference`／`order_s` 產生（`eval/golden/sp-predict.txt`，2932 個查詢：typing76 的 P1–P4、A1、A2，P 模式也查 A1、A2 的單位序列，加 3 個手造查詢）。
+
+- **逐位元一致**：release 的 `--predict` 輸出和 golden 的候選行逐位元組相同；`cli/tests/golden.rs` 的 `predict_matches_python_golden` 比字串、順序、後繼詞旗標，分數解析成 `f64` 比位元；CLI 也檢查有按鍵的查詢，`units_of(按鍵)` 要等於檔裡的單位序列。
+- **突變**（release，每項只跑這個測試，exit 101，是斷言失敗不是編譯錯誤，改完用備份還原並確認 `diff` 無差異）：(a) 不分後繼詞層，`candidate order or successor flag differs`；(b) P 模式用聯集，輸出行數 27882 對 golden，不符；(c) `lp_max` 取全部讀音的最高分，typing76 的查詢就會失敗（`從` 對 `怎麼`），不需要手造查詢。
+- **時間**（release，一次 `predict` 呼叫的牆鐘，不含載入、`CappedLexicon`、索引；2932 個查詢；測量時機器負載很高，load average 約 27／10 核）：三次 p50 0.21／0.21／0.24 ms，p95 7.2／8.4／8.7 ms，最大 63／140／172 ms；p95 在 20 ms 以內。對照 SP3 的 Python p95 最高 105 ms。第一版（逐候選查詞表、`HashSet<&str>`）在同樣的負載下 p95 是 30–50 ms，改成索引建立時查好詞 id、去重用密集 id 的陣列、後繼詞用 id 的二分搜尋後降到上面的數字（輸出不變）。
+- **索引**：建立時間 1.4–1.9 s（同樣在高負載下量，無負載下的一次舊版是 0.28 s，新版多了詞 id 查詢，沒有在安靜的機器上重量）。記憶體：`/usr/bin/time -l` 的最大常駐集 `--predict`（建索引）約 424 MB，同樣載入模型與詞庫但不建索引的 `--lm … --dev 1` 約 249 MB，三次都一樣，差約 175 MB（含建索引時的暫時配置；`ps` 取的穩態增量在 68–175 MB 之間飄，不可靠，不採用）。
+- **反查表沒有建**：`lp_max` 就是詞在桶內（已依分數排序）第一個相容條目的分數，不需要詞到讀音的反查表；Python 只在 `check_query` 用它做獨立驗算。所以沒有反查表的建立時間與記憶體，golden 逐位元一致就是這個推導的驗證。突變 (c) 的測試版本臨時建了一個詞到最高分的表。

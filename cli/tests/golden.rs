@@ -135,3 +135,26 @@ fn unigram_rows_mode_matches_python_golden_byte_for_byte() {
     std::fs::remove_file(&dump).unwrap();
     assert_eq!(got, golden("sbench-unigram-typing76.txt"));
 }
+
+/// V3 core: `--predict` over the golden's own query lines. Candidate order, strings and successor flags equal the
+/// Python reference (experiments/sp/golden_predict.py); scores are compared as f64 bit patterns.
+#[test]
+fn predict_matches_python_golden() {
+    let path = format!("{}/../eval/golden/sp-predict.txt", env!("CARGO_MANIFEST_DIR"));
+    let want = golden("sp-predict.txt");
+    let got = run(&["--predict", &path, "--lm", &lm_path(), "--profile", "chat"]);
+    let rows = |t: &str| t.lines().filter(|l| !l.starts_with("# ")).map(String::from).collect::<Vec<_>>();
+    let (want, got) = (rows(&want), rows(&got));
+    assert_eq!(got.len(), want.len());
+    assert!(want.iter().filter(|l| l.starts_with("## ")).count() > 2000);
+    for (g, w) in got.iter().zip(&want) {
+        let (g, w): (Vec<&str>, Vec<&str>) = (g.split('\t').collect(), w.split('\t').collect());
+        assert_eq!(g.len(), w.len());
+        if w[0] == "## P" || w[0] == "## PA" {
+            assert_eq!(g, w);
+        } else {
+            assert_eq!((g[0], g[2]), (w[0], w[2]), "candidate order or successor flag differs");
+            assert_eq!(g[1].parse::<f64>().unwrap().to_bits(), w[1].parse::<f64>().unwrap().to_bits(), "score differs for {}", w[0]);
+        }
+    }
+}
