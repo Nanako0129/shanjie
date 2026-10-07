@@ -82,8 +82,9 @@ final class CoreEngine {
         return Self.take(shanjie_engine_key(handle, key, &out), out)
     }
 
-    /// s3b2 section 8.2 mouse pick: `index` is a position in the last output's candidates. Code 2
-    /// when the candidates are closed or `index` is outside that output (state unchanged).
+    /// s3b2 section 8.2 mouse pick: `index` is a position in the last output's candidates. With the
+    /// candidate window closed and a prediction row showing (entered or not), it selects that row's item
+    /// (v3-engine section 4). Code 2 when neither is showing or `index` is outside that output (state unchanged).
     func pick(_ index: UInt32) -> CoreResult {
         var out: UnsafeMutablePointer<ShanjieOutput>?
         return Self.take(shanjie_engine_pick(handle, index, &out), out)
