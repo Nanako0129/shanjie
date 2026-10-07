@@ -2,6 +2,7 @@ use core::engine::load_lexicon;
 use core::eval::*;
 use core::learn::{context_key, SENTINEL};
 use core::lm::{decode_from, history, CappedLexicon, Lm, Profile};
+use core::predict::{parse_units, predict, units_of, units_str, Index, Mode};
 use core::{decode_beam, Error, Lexicon, NoLearning, Syls, BEAM_S1};
 use std::fs;
 use std::io::Write;
@@ -204,9 +205,88 @@ fn run_unigram_rows(lex: &Lexicon, len: &Lenient, rows_file: String, dump: Optio
     Ok(())
 }
 
+/// Resident set size in KiB (ps), for the index memory measurement.
+fn rss_kb() -> Option<u64> {
+    let out = std::process::Command::new("ps").args(["-o", "rss=", "-p", &std::process::id().to_string()]).output().ok()?;
+    String::from_utf8(out.stdout).ok()?.trim().parse().ok()
+}
+
+/// V3 core (docs/contracts/v3-core-predict.md): `--predict <file> --lm <file> --profile chat|formal [--predict-time]`.
+/// The file is eval/golden/sp-predict.txt (only its `## ` query lines are read); output has the same format.
+/// `--predict-time` prints p50/p95/max of the predict calls (index build excluded) and the index cost on stderr.
+fn run_predict(args: &[String]) -> Result<(), String> {
+    let (mut file, mut lm_path, mut profile, mut time) = (None, None, None, false);
+    let mut it = args.iter();
+    while let Some(a) = it.next() {
+        let mut val = || it.next().cloned().ok_or_else(|| "missing option value".to_string());
+        match a.as_str() {
+            "--predict" => file = Some(val()?),
+            "--lm" => lm_path = Some(val()?),
+            "--profile" => profile = Some(val()?),
+            "--predict-time" => time = true,
+            _ => return Err("unknown argument".into()),
+        }
+    }
+    let lam = match profile.ok_or("--profile is required")?.as_str() {
+        "chat" => Profile::Chat,
+        "formal" => Profile::Formal,
+        _ => return Err("--profile must be chat or formal".into()),
+    }
+    .lambda();
+    let lm = Lm::load(Path::new(&lm_path.ok_or("--lm is required")?)).map_err(|e| e.to_string())?;
+    let dir = root().join("data/lexicon");
+    let lex = load_lexicon(&dir).map_err(|_| "cannot load lexicon".to_string())?;
+    let overlay = fs::read_to_string(dir.join("overlay-add.tsv")).map_err(|e| format!("cannot read overlay ({:?})", e.kind()))?;
+    let capped = CappedLexicon::new(lex.clone(), &overlay, &lm);
+    let text = fs::read_to_string(file.ok_or("--predict is required")?).map_err(|e| format!("cannot read file ({:?})", e.kind()))?;
+    let (rss0, t_idx) = (rss_kb(), Instant::now());
+    let idx = Index::new(&capped, &lm);
+    let (idx_time, rss1) = (t_idx.elapsed(), rss_kb());
+    let (mut out, mut lat) = (String::new(), Vec::new());
+    for line in text.lines().filter_map(|l| l.strip_prefix("## ")) {
+        let f: Vec<&str> = line.split('\t').collect();
+        let [mode, v, keys, units] = f[..] else { return Err("bad query line".into()) };
+        let mode = match mode {
+            "P" => Mode::P,
+            "PA" => Mode::PA,
+            _ => return Err("bad mode".into()),
+        };
+        let u = parse_units(units).ok_or("bad unit sequence")?;
+        if keys != "-" && units_str(&units_of(keys)) != units {
+            return Err("units_of differs from the query's unit sequence".into());
+        }
+        let t = Instant::now();
+        let cands = predict(&idx, &lm, lam, v, &u, mode, 9);
+        lat.push(t.elapsed());
+        out += &format!("## {}\t{v}\t{keys}\t{units}\n", if mode == Mode::P { "P" } else { "PA" });
+        for (w, s, succ) in cands {
+            out += &format!("{w}\t{s:?}\t{}\n", succ as u8);
+        }
+    }
+    std::io::stdout().write_all(out.as_bytes()).map_err(|_| "cannot write output".to_string())?;
+    if time && !lat.is_empty() {
+        lat.sort();
+        let ms = |d: Duration| d.as_secs_f64() * 1000.0;
+        eprintln!(
+            "predict: n={} p50={:.3} ms p95={:.3} ms max={:.3} ms; index build {:.0} ms, rss {:?} -> {:?} KiB",
+            lat.len(),
+            ms(lat[lat.len() / 2]),
+            ms(lat[(lat.len() as f64 * 0.95) as usize]),
+            ms(lat[lat.len() - 1]),
+            ms(idx_time),
+            rss0,
+            rss1
+        );
+    }
+    Ok(())
+}
+
 fn run() -> Result<(), String> {
     let len = load_lenient()?;
     let all: Vec<String> = std::env::args().skip(1).collect();
+    if all.iter().any(|a| a == "--predict") {
+        return run_predict(&all);
+    }
     if all.iter().any(|a| a == "--lm") {
         return run_lm(&all, &len);
     }
