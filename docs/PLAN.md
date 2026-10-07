@@ -116,7 +116,7 @@ v4 日期 2026-10-03。v1 經 `pilotfish:plan-verifier`（REVISE，4 項）與 `
   - 從保留所有權利的網頁原文算出的次數，能不能放進 CC BY-SA 的模型檔，是法律判斷，這裡不構成法律意見。使用者允許先做實驗評估；要不要散布另外決定。
   - 候選是 `taiwan-corpora/twngrams`：CC0，來源是 HPLT 3.0 的 `cmn_Hant` 網頁，約 2.85 億 token。計數單位是網站數，出現在不到 40 個網站的 n-gram 不收。這是 2026-08 才出現的單人專案，要先驗證。
 - **S2n 收尾**：「十分鐘後道」由修訂四的期望次數修好（研究紀錄 2026-10-06），GitHub Release `model-v2` 已建；剩合併關卡（含保留集）。
-- **S2f 字形修正**（使用者 2026-10-07 回報「起牀」，契約 `docs/contracts/s2f-variant-forms.md`）：台灣字形不再被當成簡體字，同讀音的異體寫法合併計數。經三次修訂，模型 F4 驗收通過（字形探針 16/16、守門不否決、「竈門」回來）；合併關卡之後，經使用者同意建 GitHub Release `model-v3`，成為 v0.3.0 的模型（S2w 之後疊在它上面重建再比較）。
+- **S2f 字形修正**（使用者 2026-10-07 回報「起牀」，契約 `docs/contracts/s2f-variant-forms.md`）：台灣字形不再被當成簡體字，同讀音的異體寫法合併計數。經三次修訂，模型 F4 驗收通過（字形探針 16/16、守門不否決、「竈門」回來）；GitHub Release `model-v3` 已建（使用者 2026-10-08 同意，下載比對雜湊相符），成為 v0.3.0 的模型（S2w 之後疊在它上面重建再比較）。
 - **S5 本機重排的下一個實驗**（使用者 2026-10-05 排進下一版；同日稍晚決定先和 S2n 第三次重建並行，契約 `docs/contracts/s5k-local-scorers.md`：Laya 優先，1-bit Bonsai 次之，Qwen3-1.7B 4-bit 對照）。
   - S5j 的結論是「從 8 句裡挑一句」的題型不能用。下一步改成每個候選分別打分數，或每個字位各出一題。
   - 量 Apple 端上模型與本機小模型（Qwen3-1.7B、Gemma 4 E2B，MLX），在使用者沒在用電腦時量。
@@ -519,7 +519,7 @@ v4 日期 2026-10-03。v1 經 `pilotfish:plan-verifier`（REVISE，4 項）與 `
   7. **效能**：release 重播（載入 LM）每鍵 p95 < 16 ms；回報 LM 載入時間與引擎（詞庫＋上限後詞庫＋LM）的峰值 RSS。上限後詞庫可以和原始詞庫共用字串池，由 executor 決定。
   8. 模型檔 ≤ 100 MB（目前 80,040,411 bytes）。
   9. **保留集**（片結束，只由 verifier 跑一次）：`--set holdout` 在 chat 與 formal 的 top1 與 oracle@64，只回數字。A1a 要求 oracle@64 ≥ 98%；低於時照實回報、記為 A1a 未達成，由使用者決定，不是這片的停止條件。報告時註明 LM 模式的 oracle 用寬鬆對照，S1 的 `extra` 行（97.8%）用完全相符。
-- **模型檔不進 repo**（`data/lm/` 在 `.gitignore`）：從 GitHub Release `model-v2` 下載（`gh release download model-v2 -R Nanako0129/shanjie -p bigram.sjlm -D data/lm`，CC BY-SA 4.0，2026-10-03 起），或用 `tools/build_lm.py` 從本機計數重建；SHA-256 `8847b73a7b9cf127b4882328191c3c5250fe9a55912926d5050e351ab644d240`。需要它的測試在檔案不存在時**直接失敗**，訊息說明怎麼取得，不得默默跳過。隨輸入法散布的方式在 S3b（打包進 app）。
+- **模型檔不進 repo**（`data/lm/` 在 `.gitignore`）：從 GitHub Release `model-v3` 下載（`gh release download model-v3 -R Nanako0129/shanjie -p bigram.sjlm -D data/lm`，CC BY-SA 4.0，2026-10-03 起），或用 `tools/build_lm.py` 從本機計數重建；SHA-256 `5c7d5a94f762e7c5d87e14e47b03c1138222df4ea194e70e503bdd9a71ab5a48`。需要它的測試在檔案不存在時**直接失敗**，訊息說明怎麼取得，不得默默跳過。隨輸入法散布的方式在 S3b（打包進 app）。
 - **範圍外。** 改分數、參數、剪枝或語料；候選清單用 LM 排序；trigram；學習（S4）。
 - **預算。** executor、security-executor 各 1 回合＋1 次修正。
 - **停止。** 驗收 2、3、4 有任何差異：回報第一個不同的列與原因，不得修改 Python 參考實作或對照檔來湊。峰值 RSS 超過 300 MB：回報實測值與瓶頸。
