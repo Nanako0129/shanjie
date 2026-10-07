@@ -167,6 +167,22 @@ static int run_lm(const char *dir, const char *lm, const char *missing) {
     o = 0;
     CHECK(b + 2, row_shows(e, FORMAL) && enter_commits(e, FORMAL));
   }
+  /* V3 (docs/contracts/v3-engine.md section 4): the first key shows the prediction row in the candidate
+   * fields, not entered (selected -1, one row); pick selects from it; with no row pick is 2. */
+  o = type_last(e, "s"); /* ㄋ */
+  CHECK(801, o != 0 && o->candidate_count >= 1 && o->candidate_count <= 9 && o->candidates != 0);
+  CHECK(802, o->candidate_selected == -1 && o->candidate_columns == 0 && o->candidate_first == 0);
+  CHECK(803, o->candidate_total == o->candidate_count);
+  shanjie_output_free(o);
+  o = 0;
+  CHECK(804, shanjie_engine_pick(e, 0u, &o) == 0 && o != 0 && o->handled == 1);
+  CHECK(805, o->candidate_count == 0 && str_eq(o->commit, "") && !str_eq(o->preedit, ""));
+  shanjie_output_free(o);
+  o = &dummy;
+  CHECK(806, shanjie_engine_pick(e, 0u, &o) == 2 && o == 0);
+  o = 0;
+  CHECK(807, shanjie_engine_reset(e, 1, &o) == 0 && o != 0);
+  shanjie_output_free(o);
   shanjie_engine_free(e);
   return 0;
 }

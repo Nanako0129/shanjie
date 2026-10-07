@@ -1158,3 +1158,13 @@ S2h 實機驗收時，使用者在終端機、Discord、VS Code、Chrome 網址�
 | 有個問題，｜沒按繼續 | 沒案繼續 | 梅案繼續 |
 
 三列（連結、提示、沒按）與聊天的「市佔」仍錯，留給之後的模型與詞庫工作；沒有一列靠調參數修。
+
+## 2026-10-08：V3 預測接進引擎（第一片）的時間與記憶體
+
+契約 `docs/contracts/v3-engine.md` §1–§5、§7。量測程式是 `core/tests/engine_predict.rs` 的 `timing_typing76_keys`（`#[ignore]`，release：`cargo test --release --offline --locked --test engine_predict timing -- --ignored --nocapture`）。輸入是 `eval/dev/user-typing.txt`（typing76）每一列的完整按鍵序列（標準鍵盤、聊天設定、帶那一列的前文、每列結尾按 Enter），逐鍵送進 `Engine::key`，每次呼叫計時，含最多 3 次 `predict`。模型是 model-v3。
+
+- **機器與負載**：10 核；三次量測前後的 `uptime` load average 是 6.4／7.3／7.9（第一次前）、8.9／7.8／8.1（第三次後），低於核心數 10。
+- **每鍵時間**（三次，各 76 列、2,483 鍵）：p50 0.575／0.619／0.584 ms；p95 1.968／2.088／1.973 ms；最大 3.498／5.101／3.332 ms。p95 < 16 ms。
+- **索引**：建立 243–297 ms（三次：254／297／243 ms）。常駐記憶體（`ps` 的 RSS）建索引前 233.3 MB、建完 276.3–276.4 MB，增加約 43 MB；打完 76 列之後 282.1–282.8 MB。`Engine::load_lm` 現在在載入時就建索引，`engine_lm` 的 production path 測試印出 `engine new + load_lm` 653 ms（該次 load average 約 8–11，沒有和改動前同條件比較）。
+- **既有重播**：`engine_lm` 的 dev302 production 重播（release，8,336 鍵，現在每鍵含預測）p95 2.46 ms，最大 36.2 ms（同上負載；沒有量改動前的最大值，所以不知道 36 ms 是不是預測造成的）；dev302 逐句第一名與 golden 相同（`check_replay` 通過）。
+- **不變**：`eval/golden/` 沒有任何檔案改動；`cargo test` debug 與 release 的既有 golden 與重播測試全過；預測只加輸出欄位。

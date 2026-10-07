@@ -81,6 +81,11 @@ fn parse_syl(s: &str) -> Option<Syl> {
     (!chars.is_empty()).then_some(Syl { chars, tone })
 }
 
+/// A completed unit for a typed syllable text such as `ㄋㄧˇ` or `˙ㄅㄚ`; None when it has no zhuyin character.
+pub fn unit_of_syllable(s: &str) -> Option<Unit> {
+    parse_syl(s).map(|y| Unit { chars: y.chars, done: true, tone: y.tone })
+}
+
 fn unit_ok(u: &Unit, s: &Syl) -> bool {
     if u.done {
         s.chars == u.chars && s.tone == u.tone
@@ -115,6 +120,8 @@ pub struct Index<'a> {
     ents: Vec<Ent<'a>>,
     /// Distinct syllables, numbered in text order. Reading `r` is `pool[off[r]..off[r + 1]]`.
     syls: Vec<Syl>,
+    /// Text of each syllable in `syls`, same numbering.
+    names: Vec<&'a str>,
     pool: Vec<u32>,
     off: Vec<u32>,
     by_prefix: HashMap<Vec<char>, Vec<u32>>,
@@ -155,6 +162,7 @@ impl<'a> Index<'a> {
             new_id[i as usize] = k as u32;
         }
         let syls: Vec<Syl> = by_name.iter().map(|&i| parsed[i as usize].take().unwrap_or(Syl { chars: Vec::new(), tone: None })).collect();
+        let names: Vec<&str> = by_name.iter().map(|&i| names[i as usize]).collect();
         for p in &mut pool {
             *p = new_id[*p as usize];
         }
@@ -191,15 +199,16 @@ impl<'a> Index<'a> {
                 by_prefix.entry(c0[..j].to_vec()).or_default().push(i as u32);
             }
         }
-        Index { ents, syls, pool, off, by_prefix }
+        Index { ents, syls, names, pool, off, by_prefix }
     }
 }
 
-/// Candidates of `units` in order S, at most `limit`: (word, score, is a successor of `v`). `v` is the history word
+/// Candidates of `units` in order S, at most `limit`: (word, score, is a successor of `v`, reading). The reading is the
+/// syllable texts of the compatible reading that reached the word's `lp_max` (the one the order uses). `v` is the history word
 /// (`lm::history`, maybe `<s>`). Tier one holds the words listed after `v`, tier two the rest; each tier is ordered by
 /// (-score, word length, reading, word), where the reading is the smallest compatible one reaching the word's best
 /// compatible score. That score (`lp_max`) is the first compatible entry of the word in bucket order.
-pub fn predict(idx: &Index, lm: &Lm, lam: f64, v: &str, units: &[Unit], mode: Mode, limit: usize) -> Vec<(String, f64, bool)> {
+pub fn predict(idx: &Index, lm: &Lm, lam: f64, v: &str, units: &[Unit], mode: Mode, limit: usize) -> Vec<(String, f64, bool, Vec<String>)> {
     let Some(bucket) = units.first().and_then(|u| idx.by_prefix.get(u.chars.as_slice())) else { return Vec::new() };
     let (succ, ctx) = (lm.successor_ids(v), lm.context_of(v));
     let mut seen = HashSet::new();
@@ -222,7 +231,10 @@ pub fn predict(idx: &Index, lm: &Lm, lam: f64, v: &str, units: &[Unit], mode: Mo
             tier.truncate(limit);
         }
         tier.sort_by(order);
-        out.extend(tier.iter().map(|&(s, e)| (e.word.to_string(), s, t == 0)));
+        out.extend(tier.iter().map(|&(s, e)| {
+            let r = &idx.pool[idx.off[e.rd as usize] as usize..idx.off[e.rd as usize + 1] as usize];
+            (e.word.to_string(), s, t == 0, r.iter().map(|&i| idx.names[i as usize].to_string()).collect())
+        }));
     }
     out.truncate(limit);
     out

@@ -7,7 +7,7 @@ use crate::{Error, Lexicon, PER_KEY};
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 pub const LAMBDA_CHAT: f64 = 0.5;
 pub const LAMBDA_FORMAL: f64 = 0.7;
@@ -376,9 +376,21 @@ pub struct CappedLexicon {
     ents: Vec<crate::Ent>,
     /// Demotion resolved once per entry: `(position in ents, delta)` sorted by position; empty without a table.
     deltas: Vec<(usize, f64)>,
+    /// V3 prediction index, built on first use. Its `&str`s point into `base`'s heap strings.
+    index: OnceLock<crate::predict::Index<'static>>,
 }
 
 impl CappedLexicon {
+    /// The prediction index (V3), built from this lexicon and `lm` the first time (hundreds of ms, tens of MB).
+    pub fn predict_index(&self, lm: &Lm) -> &crate::predict::Index<'_> {
+        self.index.get_or_init(|| {
+            let idx = crate::predict::Index::new(self, lm);
+            // SAFETY: the index only borrows strings owned by `self.base` (an Arc whose heap strings never move
+            // or drop while `self` lives), and it is handed out only for the lifetime of `&self`.
+            unsafe { std::mem::transmute::<crate::predict::Index<'_>, crate::predict::Index<'static>>(idx) }
+        })
+    }
+
     /// The single constructor. `overlay` is the text of overlay-add.tsv; every word in its second
     /// column (whether the entry came from the base or the overlay) is capped at its corpus frequency.
     pub fn new(base: Arc<Lexicon>, overlay: &str, lm: &Lm, demote: Option<&Demote>) -> Option<CappedLexicon> {
@@ -403,7 +415,7 @@ impl CappedLexicon {
             Some(d) => d.resolve(&base, &ents)?,
             None => Vec::new(),
         };
-        Some(CappedLexicon { base, ents, deltas })
+        Some(CappedLexicon { base, ents, deltas, index: OnceLock::new() })
     }
 
     /// Demotion deltas of the entries at positions `range` (usually none): `(position, delta)`.
