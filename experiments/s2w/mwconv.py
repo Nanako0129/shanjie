@@ -100,21 +100,33 @@ def prefix(text, mw, groups=True, site=True):
     return "".join(out)
 
 
-_TW_FORMS = []
+_BC = []
 
 
-def tw_forms():
-    """契約 §7：build_counts.VARIANTS（爲→為、裏→裡、説→說…）的轉換表，同一個常數、不另抄；不含 臺→台。"""
-    if not _TW_FORMS:
+def _bc():
+    """契約 §8.1：build_counts 以腳本執行時模組名是 __main__（spawn 時 __mp_main__），這裡 import 的是另一份模組，
+    _init 填的表到不了這裡。所以對這份模組自己呼叫 load_conv()（每個程序一次），表是空的就報錯，不默默不換。"""
+    if not _BC:
         import sys
         sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "s2"))
         import build_counts
-        _TW_FORMS.append(str.maketrans(build_counts.VARIANTS))
-    return _TW_FORMS[0]
+        if not build_counts.POST_TRAD:
+            build_counts.load_conv()
+        if not (build_counts.POST_TRAD and build_counts.PROTECT_TRAD):
+            raise RuntimeError("build_counts tables are empty after load_conv()")
+        _BC.append(build_counts)
+    return _BC[0]
+
+
+def tw_layer(text):
+    """契約 §8.1：S2f 繁體句的最後一層。PROTECT_TRAD 最長比對保留原字，其餘逐字套 POST_TRAD（TW_VARIANTS ∪ VARIANTS）；
+    和 build_counts.convert 同一份表與 _longest，不另抄；不套 臺→台。"""
+    bc = _bc()
+    return bc._longest(text, bc.PROTECT_TRAD, bc.PROTECT_MAXP[0], bc.POST_TRAD)
 
 
 def convert(text, mw, groups=True, site=True):
-    """text 已還原 HTML 實體。回傳 zhconv-rs 轉完、再換成台灣字形（§7）的全文（尚未刪模板與標記）。"""
+    """text 已還原 HTML 實體。回傳 zhconv-rs 轉完、再套台灣字形層（§8.1，取代 §7 只套 VARIANTS）的全文（尚未刪模板與標記）。"""
     import zhconv_rs
     try:
         out = zhconv_rs.zhconv(prefix(text, mw, groups, site) + text, "zh-tw", True)
@@ -124,4 +136,4 @@ def convert(text, mw, groups=True, site=True):
         # pyo3 的 PanicException 不是 Exception：multiprocessing 的 worker 接不住，整批 200 篇默默消失、主程序最後卡住
         #（2026-10-06 在 188 上發生）。改成一般的錯誤，讓整批明確失敗。
         raise RuntimeError("zhconv-rs panicked on an article") from None
-    return out.translate(tw_forms())
+    return tw_layer(out)

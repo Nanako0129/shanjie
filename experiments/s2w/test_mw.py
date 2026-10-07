@@ -94,9 +94,39 @@ def test_count_batch_mw():
 
 
 def test_tw_forms():
-    """契約 §7：MW 轉完再換台灣字形；臺 保留。突變：convert() 不套 tw_forms()，第一條失敗（main 2026-10-06 跑過）。"""
+    """契約 §7（修訂二 §8.1 起由 S2f 的最後一層做）：MW 轉完再換台灣字形；臺 保留。"""
     assert mwconv.convert("这是爲了説明裏面", mw()) == "這是為了說明裡面"
     assert mwconv.convert("臺北", mw()) == "臺北"
+
+
+def _raw(x):
+    import zhconv_rs
+    return zhconv_rs.zhconv(x, "zh-tw", True)
+
+
+def test_tw_variants():
+    """§8.2：TWVariants 的字換成台灣字形。前提：zhconv-rs 的原始輸出還留著「牀」。突變：改回只套 VARIANTS，這條失敗。"""
+    assert "牀" in _raw("起牀"), _raw("起牀")
+    assert mwconv.convert("起牀", mw()) == "起床"
+
+
+def test_protected_words():
+    """§8.2：保護詞保留（繁體句的 PROTECT_TRAD）。前提：原始輸出留著「泄」「竈」。突變：清空 PROTECT_TRAD，排泄物 那條失敗。"""
+    assert "泄" in _raw("排泄物") and "竈" in _raw("竈門炭治郎")
+    assert mwconv.convert("排泄物", mw()) == "排泄物"
+    assert mwconv.convert("竈門炭治郎", mw()) == "竈門炭治郎"
+
+
+def test_fresh_process_loads_tables():
+    """§8.2：全新的程序只 import mwconv、不先呼叫 load_conv()，仍要換字形（抓 build_counts 以 __main__ 執行時的模組重複）。
+    突變：拿掉 mwconv._bc() 裡的 load_conv()，這條失敗。"""
+    import subprocess
+    p = os.path.join(tempfile.mkdtemp(), "mwdata.json")
+    json.dump(MW, open(p, "w", encoding="utf-8"), ensure_ascii=False)
+    code = ("import sys; sys.path[:0] = [%r, %r]; import mwconv; "
+            "print(mwconv.convert('起牀', mwconv.load(%r)))") % (HERE, os.path.join(ROOT, "experiments", "s2"), p)
+    r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+    assert r.returncode == 0 and r.stdout.strip() == "起床", (r.returncode, r.stdout, r.stderr[-300:])
 
 
 def test_bad_rule_segments_do_not_panic():
