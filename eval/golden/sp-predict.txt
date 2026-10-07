@@ -1,4 +1,4 @@
-# V3 核心預測 golden（experiments/sp/golden_predict.py 產生，chat 設定，lambda 0.5，依賴 model-v2）
+# V3 核心預測 golden（experiments/sp/golden_predict.py 產生，chat 設定，lambda 0.5，依賴 data/lm/bigram.sjlm，雜湊見 data/bigram.sjlm.sha256；換模型時重產）
 # 查詢行：`## <模式>\t<歷史詞>\t<按鍵（縮寫單位序列是 -）>\t<單位序列>`。單位序列：空白分隔的 `字元/完成旗標/聲調`（聲調空白是一聲）。
 # 候選行：`詞\t分數(Python repr)\t是否後繼詞(1/0)`，依 S 順序的前 9 個。
 ## P	<s>	ㄇ	ㄇ/0/
