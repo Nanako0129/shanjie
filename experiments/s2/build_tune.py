@@ -48,6 +48,7 @@ def main():
     ap.add_argument("--part", choices=["all", "cv", "wiki"], default="all",
                     help="cv：只做 Common Voice／Tatoeba（colloquial-train、cvtune，幾分鐘）；wiki：只做 wikitune（要讀 30 萬篇，約 20 分鐘）。"
                          "wiki 會重算 cv 的取樣來接上同一個亂數狀態，結果和 all 逐位元組相同")
+    ap.add_argument("--mw", action="store_true", help="S2w：wikitune 的參考句改用 MediaWiki 的 zh-tw 轉換（只影響 --part wiki；cvtune 與 colloquial-train 不變）")
     a = ap.parse_args()
     os.makedirs(OUT, exist_ok=True)
     phrase, char, maxp = bc.load_conv()
@@ -71,16 +72,22 @@ def main():
     if a.part == "cv":
         return
     wiki = []
+    if a.mw:
+        sys.path.insert(0, os.path.join(ROOT, "experiments", "s2w"))
+        import mwconv
+        mw = mwconv.load()
     for i, raw in enumerate(bc.articles(305_000)):
         if i < 300_000:
             continue
         t = raw
+        if a.mw:
+            t = mwconv.convert(mwconv.unescape(t), mw)
         for _ in range(3):
             t = bc.TEMPLATE.sub("", t)
         for pat, rep in bc.MARKUP:
             t = pat.sub(rep, t)
         for s in bc.SENT.findall(t):
-            wiki.extend(HAN.findall(bc.convert(s, phrase, char, maxp)))
+            wiki.extend(HAN.findall(s if a.mw else bc.convert(s, phrase, char, maxp)))
     readings(rnd.sample(sorted(set(wiki)), min(a.wiki_rows, len(set(wiki)))), "wikitune")
 
 
