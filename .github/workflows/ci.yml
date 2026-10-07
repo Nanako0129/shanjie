@@ -151,6 +151,7 @@ jobs:
           python3 tools/build_sandhi.py --check
           python3 experiments/s2/build_probe.py --check
           python3 reference/proto/check_unigram_overlay.py
+          python3 reference/proto/test_demote.py
 
   # The Swift input method (docs/contracts/s3b.md section 3): build the ad-hoc
   # app, the Swift tests through the real core and model, the bundled
