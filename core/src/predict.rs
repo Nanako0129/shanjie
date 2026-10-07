@@ -221,7 +221,7 @@ pub fn predict(idx: &Index, lm: &Lm, lam: f64, v: &str, units: &[Unit], mode: Mo
             tiers[if wid.is_some_and(|w| succ.binary_search(&w).is_ok()) { 0 } else { 1 }].push((lm.word_by_id(lam, ctx, wid, e.lp), e));
         }
     }
-    let mut out = Vec::new();
+    let mut out: Vec<(&Ent, f64, bool)> = Vec::new();
     for (t, tier) in tiers.iter_mut().enumerate() {
         let order = |a: &(f64, &Ent), b: &(f64, &Ent)| {
             b.0.partial_cmp(&a.0).unwrap_or(Ordering::Equal).then(a.1.wlen.cmp(&b.1.wlen)).then(a.1.rd.cmp(&b.1.rd)).then(a.1.word.cmp(b.1.word))
@@ -231,11 +231,13 @@ pub fn predict(idx: &Index, lm: &Lm, lam: f64, v: &str, units: &[Unit], mode: Mo
             tier.truncate(limit);
         }
         tier.sort_by(order);
-        out.extend(tier.iter().map(|&(s, e)| {
-            let r = &idx.pool[idx.off[e.rd as usize] as usize..idx.off[e.rd as usize + 1] as usize];
-            (e.word.to_string(), s, t == 0, r.iter().map(|&i| idx.names[i as usize].to_string()).collect())
-        }));
+        out.extend(tier.iter().map(|&(s, e)| (e, s, t == 0)));
     }
     out.truncate(limit);
-    out
+    out.into_iter()
+        .map(|(e, s, succ)| {
+            let r = &idx.pool[idx.off[e.rd as usize] as usize..idx.off[e.rd as usize + 1] as usize];
+            (e.word.to_string(), s, succ, r.iter().map(|&i| idx.names[i as usize].to_string()).collect())
+        })
+        .collect()
 }

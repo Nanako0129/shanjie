@@ -1168,3 +1168,15 @@ S2h 實機驗收時，使用者在終端機、Discord、VS Code、Chrome 網址�
 - **索引**：建立 243–297 ms（三次：254／297／243 ms）。常駐記憶體（`ps` 的 RSS）建索引前 233.3 MB、建完 276.3–276.4 MB，增加約 43 MB；打完 76 列之後 282.1–282.8 MB。`Engine::load_lm` 現在在載入時就建索引，`engine_lm` 的 production path 測試印出 `engine new + load_lm` 653 ms（該次 load average 約 8–11，沒有和改動前同條件比較）。
 - **既有重播**：`engine_lm` 的 dev302 production 重播（release，8,336 鍵，現在每鍵含預測）p95 2.46 ms，最大 36.2 ms（同上負載；沒有量改動前的最大值，所以不知道 36 ms 是不是預測造成的）；dev302 逐句第一名與 golden 相同（`check_replay` 通過）。
 - **不變**：`eval/golden/` 沒有任何檔案改動；`cargo test` debug 與 release 的既有 golden 與重播測試全過；預測只加輸出欄位。
+
+### 補量：dev302 重播的最大值與 `load_lm` 時間（同日，修正輪）
+
+上面 dev302 重播的最大值 36.2 ms 沒有對照，重量：同一個測試（`engine_lm` 的 `replay_standard_chat_production_path`，release，8,336 鍵，標準鍵盤、聊天設定），改動前（`git archive` 取 e9abb0b 的上一個 commit，獨立的 `CARGO_TARGET_DIR`）與目前的樹交錯各跑三次；每次執行前後 `uptime` 的 1 分鐘 load average 是 9.45、9.15、8.50（10 核）。
+
+| | `Engine::new` + `load_lm` | 每鍵 p50 | p95 | 最大 |
+|---|---|---|---|---|
+| 改動前 第 1/2/3 次 | 280／263／271 ms | 0.25 µs／0.25 µs／0.25 µs | 0.818／0.810／0.818 ms | 4.78／5.43／5.36 ms |
+| 預測接進引擎後 第 1/2/3 次 | 531／492／506 ms | 495.6／495.2／504 µs | 1.805／1.795／1.861 ms | 5.14／4.91／4.93 ms |
+
+- 最大值在兩邊都約 5 ms，三次裡沒有重現 36 ms；那一次是 load average 8–11 時的單次離群值（原因沒有查，沒有重現）。預測讓每鍵 p50 從 0.25 µs 升到約 0.5 ms、p95 從約 0.8 ms 升到約 1.8 ms。
+- `load_lm` 因為同步建索引多了約 230–240 ms（三次平均 267 ms → 510 ms），在載入與切換鍵盤排列時發生；這一片不移到背景執行緒。

@@ -1003,6 +1003,7 @@ impl Engine {
             KeyKind::Space | KeyKind::Down => self.open_candidates(),
             KeyKind::Up => self.pred = old,
             KeyKind::Char if tone.is_some() => self.pred = old,
+            KeyKind::Right | KeyKind::End if self.cursor == n => self.pred = old, // nothing moves
             KeyKind::Left => self.cursor = self.cursor.saturating_sub(1),
             KeyKind::Right => self.cursor = (self.cursor + 1).min(n),
             KeyKind::Home => self.cursor = 0,
@@ -1097,8 +1098,9 @@ impl Engine {
         Ok(true)
     }
 
-    /// s3b2 §8.2 mouse pick: `index` is a position in the last output's `candidates`. `Ok(None)` when
-    /// the candidates are closed or `index` is outside that output (state unchanged).
+    /// s3b2 §8.2 mouse pick: `index` is a position in the last output's `candidates`: the candidate window's, or, with
+    /// the window closed, the V3 prediction row's (entered or not). `Ok(None)` when there is neither or `index` is
+    /// outside that output (state unchanged).
     pub fn pick(&mut self, index: usize) -> Result<Option<Output>, EngineError> {
         let Some(c) = &self.cands else {
             // V3 section 4: a click on the prediction row selects at once, entered or not.

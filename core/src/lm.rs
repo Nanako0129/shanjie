@@ -108,6 +108,11 @@ impl<'a> Rd<'a> {
 }
 
 impl Lm {
+    /// Cheap fingerprint of the loaded model (sizes of its tables), to tell two models apart.
+    pub fn identity(&self) -> (u64, usize, usize) {
+        (self.n, self.voff.len(), self.nxt.len())
+    }
+
     pub fn load(path: &Path) -> Result<Lm, LmError> {
         Lm::parse(&std::fs::read(path).map_err(|_| LmError::Io)?)
     }
@@ -372,23 +377,30 @@ impl Demote {
 /// overlay cap applied to scores and every reading re-sorted (cap_overlay in lm.py). Decoding only;
 /// syllable generation and candidate lists keep using the original lexicon.
 pub struct CappedLexicon {
+    /// V3 prediction index, built on first use, with the identity of the model that built it. Its `&str`s point into
+    /// `base`'s heap strings, so this field MUST stay declared before `base`: fields drop in declaration order, and the
+    /// index has to go before the strings it borrows.
+    index: OnceLock<(crate::predict::Index<'static>, (u64, usize, usize))>,
     base: Arc<Lexicon>,
     ents: Vec<crate::Ent>,
     /// Demotion resolved once per entry: `(position in ents, delta)` sorted by position; empty without a table.
     deltas: Vec<(usize, f64)>,
-    /// V3 prediction index, built on first use. Its `&str`s point into `base`'s heap strings.
-    index: OnceLock<crate::predict::Index<'static>>,
 }
 
 impl CappedLexicon {
-    /// The prediction index (V3), built from this lexicon and `lm` the first time (hundreds of ms, tens of MB).
+    /// The prediction index (V3), built from this lexicon and `lm` the first time (hundreds of ms, tens of MB). Later
+    /// calls must pass the same model (checked in debug builds by `Lm::identity`); the index holds its word ids.
     pub fn predict_index(&self, lm: &Lm) -> &crate::predict::Index<'_> {
-        self.index.get_or_init(|| {
+        let (idx, built_for) = self.index.get_or_init(|| {
             let idx = crate::predict::Index::new(self, lm);
-            // SAFETY: the index only borrows strings owned by `self.base` (an Arc whose heap strings never move
-            // or drop while `self` lives), and it is handed out only for the lifetime of `&self`.
-            unsafe { std::mem::transmute::<crate::predict::Index<'_>, crate::predict::Index<'static>>(idx) }
-        })
+            // SAFETY: the index only borrows strings owned by `self.base` (an Arc whose heap strings never move while
+            // `self` lives). `index` is declared before `base`, so it drops first and nothing dangles during drop. It is
+            // handed out only for the lifetime of `&self`.
+            let idx = unsafe { std::mem::transmute::<crate::predict::Index<'_>, crate::predict::Index<'static>>(idx) };
+            (idx, lm.identity())
+        });
+        debug_assert!(*built_for == lm.identity(), "the prediction index was built for another model");
+        idx
     }
 
     /// The single constructor. `overlay` is the text of overlay-add.tsv; every word in its second
@@ -415,7 +427,7 @@ impl CappedLexicon {
             Some(d) => d.resolve(&base, &ents)?,
             None => Vec::new(),
         };
-        Some(CappedLexicon { base, ents, deltas, index: OnceLock::new() })
+        Some(CappedLexicon { index: OnceLock::new(), base, ents, deltas })
     }
 
     /// Demotion deltas of the entries at positions `range` (usually none): `(position, delta)`.

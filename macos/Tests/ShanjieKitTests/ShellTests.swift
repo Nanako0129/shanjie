@@ -311,6 +311,7 @@ final class ShellTests: XCTestCase {
         a.session.activate()
         a.type("su3 ")
         XCTAssertTrue(a.panel.visible)
+        let aCandidates = a.panel.items
         b.type("c")  // ㄏ
         XCTAssertEqual(a.client.text, "你")
         XCTAssertEqual(a.client.marked, "")
@@ -318,6 +319,13 @@ final class ShellTests: XCTestCase {
         // prediction row for ㄏ (V3), not A's candidates.
         XCTAssertEqual(a.panel.selected, -1)
         XCTAssertTrue(b.panel.visible)
+        XCTAssertFalse(b.panel.items.isEmpty)
+        XCTAssertNotEqual(b.panel.items, aCandidates, "A's candidates must not leak into the shared panel")
+        // B's row is what a fresh shell shows for ㄏ alone.
+        let fresh = Controller(makeShell())
+        fresh.session.activate()
+        fresh.type("c")
+        XCTAssertEqual(b.panel.items, fresh.panel.items)
         XCTAssertEqual(b.client.marked, "ㄏ")
         XCTAssertFalse(b.client.calls.contains { if case .insert = $0 { true } else { false } })
         b.type("l3")
