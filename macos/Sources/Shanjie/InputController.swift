@@ -70,6 +70,7 @@ final class ShanjieInputController: IMKInputController {
         case .clear: #selector(clearLearning(_:))
         case .toggleBackup: #selector(toggleLearningBackup(_:))
         case .toggleDemote: #selector(toggleDemote(_:))
+        case .togglePrediction: #selector(togglePrediction(_:))
         }
     }
 
@@ -82,6 +83,7 @@ final class ShanjieInputController: IMKInputController {
     @objc func clearLearning(_ sender: Any?) { perform(.clear) }
     @objc func toggleLearningBackup(_ sender: Any?) { perform(.toggleBackup) }
     @objc func toggleDemote(_ sender: Any?) { perform(.toggleDemote) }
+    @objc func togglePrediction(_ sender: Any?) { perform(.togglePrediction) }
 }
 
 /// The controller's current IMKTextInput client.

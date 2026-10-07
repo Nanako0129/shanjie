@@ -50,7 +50,7 @@
 
 | # | 狀態 | 按鍵 | 行為 |
 |---|---|---|---|
-| 0 | 預測列已進入 | ⌘⌫ | 吃掉（已處理），不動作；判斷在第 1 條之前（V3，`v3-engine.md` §3） |
+| 0 | 預測列已進入 | ⌘⌫ | 遺忘選取的那一項：丟掉同一個（詞、讀音）的待學記錄，`learner.forget` 並照候選窗 ⌘⌫ 的規則改寫學習檔（學習暫停時也可以），重算預測列，仍是已進入、選取移到那個詞的新位置（不在列中是 0）；判斷在第 1 條之前（V3，`v3-engine.md` §10.3；修訂一取代原本的「吃掉、不動作」）。未進入時照第 1 條直通 |
 | 1 | 任何 | 帶 COMMAND、OPTION、CAPSLOCK，或帶 CONTROL 但不是 Ctrl+\ | 不處理（直通），**不改任何狀態** |
 | 1a | 預測列已進入 | 1–9 | 選預測列的第 n 個（超過個數就吃掉、不動作）；選取見 `v3-engine.md` §2 |
 | 1b | 預測列已進入 | ←→、Tab（無修飾鍵） | 移動選取（Tab 往後，到最後一個停住） |
@@ -81,7 +81,7 @@
 | 22a | 組字區空 | 聲調鍵（空白鍵以外） | 把該聲調符號（ˊ ˇ ˋ ˙）放進組字區，和第 2 條的標點相同（2026-10-05 起；蘋果注音實測按 3 打出「ˇ」但立刻送出，使用者選擇留在組字區，Backspace 可刪、Enter 才送出；原本直通成數字） |
 | 22 | 組字區空 | 其他鍵 | 不處理（直通） |
 
-- **預測列（V3，`docs/contracts/v3-engine.md`）**：有載入語言模型、游標在組字區尾端、候選窗關閉時，第 9、10、11、14 條處理完之後重算（第 10 條遇到詞庫沒有的音節而不完成時不變）；其他所有狀態變化都清掉（標點、22a、開候選窗與候選窗內的鍵、游標移動、刪音節、送出、Esc、`reset`、`set_profile`／`set_demote`、`pick`、選了預測、回傳碼 4）；什麼都沒改的鍵（↑、不起作用的聲調鍵、游標在邊界的 Backspace／Delete、有未完成音節時的其他鍵、第 1 條的直通）保留預測列。預測列透過候選欄位輸出（§6）。
+- **預測列（V3，`docs/contracts/v3-engine.md`）**：有載入語言模型、游標在組字區尾端、候選窗關閉時，第 9、10、11、14 條處理完之後重算（第 10 條遇到詞庫沒有的音節而不完成時不變）；其他所有狀態變化都清掉（標點、22a、開候選窗與候選窗內的鍵、游標移動、刪音節、送出、Esc、`reset`、`set_profile`／`set_demote`／`set_prediction`（關閉時；開啟時重算）、`pick`、選了預測、回傳碼 4）；什麼都沒改的鍵（↑、不起作用的聲調鍵、游標在邊界的 Backspace／Delete、有未完成音節時的其他鍵、第 1 條的直通）保留預測列。預測列透過候選欄位輸出（§6）。
 - 「注音鍵」與「聲調鍵」指 §1 表中的鍵、且沒按 Shift。
 - 第 1 條的直通不改任何狀態：一段組字中間插入任意個第 1 條的鍵，之後的輸出必須和沒按過時逐欄位相同。
 - 中英切換：用系統的「使用大寫鎖定鍵切換輸入方式」（使用者 2026-10-03 選 Caps Lock），切換時系統停用本輸入法；殼不保留中英狀態，原本寫的 Shift 單按切換不做（見 `docs/contracts/s3b.md` §6）。
@@ -150,7 +150,7 @@ int32_t shanjie_engine_key(ShanjieEngine *engine, ShanjieKey key, ShanjieOutput 
 int32_t shanjie_engine_reset(ShanjieEngine *engine, uint32_t mode, ShanjieOutput **out); // mode 0 送出後清空、1 丟棄
 void    shanjie_output_free(ShanjieOutput *output);
 // s3b2 §8.2 新增：滑鼠點選。index 是這次輸出 candidates 裡的位置；核心選 candidate_first + index，走和 Enter 同一個 choose()。
-// V3：候選窗關閉但有預測列（進入或未進入）時，選預測列的第 index 個（點擊是明確的選取；不學習）。
+// V3：候選窗關閉但有預測列（進入或未進入）時，選預測列的第 index 個（點擊是明確的選取；學習開著時照改選學，v3-engine.md §10.1）。
 // 1 = engine 或 out 為 NULL；2 = 候選窗和預測列都沒有，或 index 超出這次輸出（狀態不變）；4 = 內部錯誤（核心丟棄組字）；非 0 時 *out 是 NULL
 int32_t shanjie_engine_pick(ShanjieEngine *engine, uint32_t index, ShanjieOutput **out);
 // S2c 新增（docs/PLAN.md §S2c）

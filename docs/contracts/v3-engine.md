@@ -77,7 +77,7 @@ Fable 在 typing76 聊天設定量到的 hit@9，限兩字以上的詞、前面�
 - 丟掉未完成音節。
 - 把 `syls[s..cursor]` 換成 R；R 比原本多的音節插在游標處。游標在尾端，右邊沒有固定詞。
 - 移除和 `[s, cursor)` 重疊的固定詞，做法和 `choose()` 相同。
-- 加固定詞 `Fixed { start: s, end: s + m, word: W, pre: None }`。`pre: None` 讓 `learn_commit` 不記錄它：預測選取不是改選，不學。之後在候選窗改選這一段，照常學。
+- 加固定詞 `Fixed { start: s, end: s + m, word: W, pre: None }`。`pre: None` 讓 `learn_commit` 不記錄它：預測選取不是改選，不學。之後在候選窗改選這一段，照常學。（修訂一把這一點改了：預測選取也學，見 §10.1。）
 - 游標移到 `s + m`，重算顯示，清掉預測列。
 - 音節數達到 40 時照 `insert_token` 自動送出。
 
