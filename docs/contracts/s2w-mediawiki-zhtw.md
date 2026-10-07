@@ -141,7 +141,7 @@
    - 最後一層：`PROTECT_TRAD` 最長比對保留原字，其餘逐字套 `POST_TRAD`（`TW_VARIANTS` ∪ `VARIANTS`）。
    - 用 `build_counts` 的同一份表與 `_longest`，不另抄。
    - 仍然不套 臺→台（`POST_TRAD` 本來就沒有）。
-   - `--mw` 路徑的 worker 要先呼叫 `load_conv()`，表才有內容。
+   - **表的載入在 mwconv 裡做**：`build_counts.py` 以腳本執行時模組名是 `__main__`（spawn 時是 `__mp_main__`），mwconv 自己 `import build_counts` 會載入另一份模組，`_init` 填的表到不了那裡。所以 mwconv 對它自己 import 的那份模組呼叫 `load_conv()`（每個程序第一次用到時一次），之後確認 `POST_TRAD` 與 `PROTECT_TRAD` 都不是空的；是空的就丟錯誤，不能默默不換。
 2. **其餘不變**，直接用 main（含 S2f）的程式：
    - 口語計數、`build_tune.py --part cv`、疊加層、`tools/build_lm.py`（異體合併）都照 main。
    - 只有維基計數與 wikitune-mw 走 `--mw`。
@@ -155,20 +155,28 @@
 
 - **單元檢查**（`experiments/s2w/test_mw.py`）：
   - §7 的列照舊：「这是爲了説明裏面」→「這是為了說明裡面」；「臺北」保留。
-  - 新增：zhconv-rs 輸出裡的 `TW_VARIANTS` 字被換成台灣字形（例如「起牀」→「起床」）。
-  - 新增：保護詞保留（「排泄物」不變；繁體的「竈門炭治郎」不變）。
-  - 突變：改回只套 `VARIANTS`，「起牀」那列要失敗。
+  - 新增三列，每列先斷言前提（zhconv-rs 的原始輸出 `zhconv_rs.zhconv(x, "zh-tw", True)` 裡確實還有那個字；前提不成立就換一個成立的例子，寫進測試註解）：
+    - `TW_VARIANTS` 的字被換成台灣字形（例如「起牀」→「起床」，前提：原始輸出含「牀」）；
+    - 保護詞保留：「排泄物」不變（前提：原始輸出含「泄」）；繁體的「竈門炭治郎」不變（前提：原始輸出含「竈」）。
+  - **新的程序**：用 subprocess 在全新的 Python 程序裡只 import mwconv 並呼叫 `convert()`（不先呼叫 `load_conv()`），「起牀」那列仍要換成「起床」。這一項抓第 8.1 節第 1 點的模組重複問題。
+  - 突變（各自讓指定的列 exit 1）：
+    - 改回只套 `VARIANTS`：「起牀」那列失敗；
+    - 清空 `PROTECT_TRAD`：「排泄物」那列失敗；
+    - 拿掉 mwconv 裡的 `load_conv()` 呼叫：新程序那一項失敗。
 - **S2f 的檢查**，在 W2 上全部要過，聊天與書面：
   - `experiments/s2f/check_f2.py`；
   - 字形探針 16/16、同分探針「世界線」、竈門探針；
   - 「大概十分鐘後到」、「好」＋ㄅㄚ˙ 是「吧」。
 
   任一不過是停止條件。
-- **守門（否決，對 model-v3）**：dev302、typing76、cvtune-native（S2f 的定義，`~/.cache/shanjie/work/s2f/cvtune-native.txt`，2,117 列），聊天與書面，`--context`，配對比較。任何一格淨值為負且 p < 0.05 就否決。
+- **守門（否決，對 model-v3）**：dev302、typing76、cvtune-native，聊天與書面，`--context`，配對比較。任何一格淨值為負且 p < 0.05 就否決。
+  - **這一次的 cvtune-native**：S2f 的定義（兩種 OpenCC 轉換都不改的原句）再加一個條件：`mwconv.convert(raw) == raw`（zhconv-rs 加新的最後一層，不用 NoteTA，站上轉換表照用）。子句規則照 `cv_native.py`。這樣參考句不依賴三種轉換的任何一種。
+  - `cv_native.py` 印出 S2f 的列數（2,117）、加了條件後的列數，以及這份檔的 SHA-256，寫進研究紀錄；守門只用加了條件的檔。少於 1,000 列是停止條件（同 §4.3）。
 - **只報告**：
   - 錯字回報（含「的市佔這麼低了嗎」那列，模型 W 打成「的士站」）。
   - 完整 cvtune。
   - 舊 wikitune 與 wikitune-mw，各有方向偏誤；同一種設定兩組都淨值為負而且 p < 0.05 就否決（同 §4.3）。
+    - 「舊 wikitune」指 model-v3 重建時產生的那份：188 的 `%USERPROFILE%\.cache\shanjie\work\s2f4\tune\wikitune.txt`，SHA-256 `8dcfe40c74cce73e0a070b49e166636580ef955da8555ea9ffbd65af20c998f2`，讀之前核對；驗收報告記下用到的雜湊。
 - **次數報告**（對 model-v3）：
   - 七個殘留詞（超過 6,282 是停止條件）；「喫」「着」「爲」「説」「裏」每百萬漢字（任一超過 5 是停止條件）。
   - S2f 的字對（床／牀、秘／祕、灶／竈、粽／糉、庄／莊、痴／癡），以及 佔／占、佈／布。
