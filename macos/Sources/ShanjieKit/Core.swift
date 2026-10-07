@@ -63,6 +63,12 @@ final class CoreEngine {
         return Self.take(shanjie_engine_set_demote(handle, on ? 1 : 0, &out), out)
     }
 
+    /// V3: whether the prediction row is computed (the core's default is on); returns the snapshot, like `setDemote`.
+    func setPrediction(_ on: Bool) -> CoreResult {
+        var out: UnsafeMutablePointer<ShanjieOutput>?
+        return Self.take(shanjie_engine_set_prediction(handle, on ? 1 : 0, &out), out)
+    }
+
     func setLearning(_ enabled: Bool) -> Int32 { shanjie_engine_set_learning(handle, enabled ? 1 : 0) }
 
     func learningOpen(dir: String) -> Int32 { shanjie_engine_learning_open(handle, dir) }
