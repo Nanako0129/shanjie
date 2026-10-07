@@ -1,0 +1,74 @@
+dev302     chat   n=302 base=238 class=250 fixed=15 broke=3 net=+12 p=0.00754  decode_s base=1.3 class=3.1
+   [dev302/chat] fixed: 我想參考蘋果原生的介面  base=我想參考蘋果園生的介面  class=我想參考蘋果原生的介面
+   [dev302/chat] fixed: 這個人做事太功利了  base=這個人做事太公立了  class=這個人做事太功利了
+   [dev302/chat] fixed: 期中報告明天要交  base=其中報告明天要交  class=期中報告明天要交
+   [dev302/chat] fixed: 店員問我要不要電子發票  base=電源問我要不要電子發票  class=店員問我要不要電子發票
+   [dev302/chat] fixed: 生為台灣人我覺得很驕傲  base=升為台灣人我覺得很驕傲  class=生為台灣人我覺得很驕傲
+   [dev302/chat] fixed: 他上個月升為經理  base=他上個躍升為經理  class=他上個月升為經理
+   [dev302/chat] fixed: 空軍的戰機飛過天空  base=空軍的戰績飛過天空  class=空軍的戰機飛過天空
+   [dev302/chat] fixed: 這款是公司的旗艦手機  base=這款式公司的旗艦手機  class=這款是公司的旗艦手機
+   [dev302/chat] broke: 把充電線接上手機就好  base=把充電線接上手機就好  class=把充電線街上手機就好
+   [dev302/chat] broke: 下雨天我們改在室內打球  base=下雨天我們改在室內打球  class=下雨天我們改在市內打球
+   [dev302/chat] broke: 我等一下再過去  base=我等一下再過去  class=我等一下在過去
+dev302     formal n=302 base=237 class=254 fixed=22 broke=5 net=+17 p=0.00151  decode_s base=1.4 class=1.7
+   [dev302/formal] fixed: 下雨天要帶摺疊傘  base=下雨天要代摺疊傘  class=下雨天要帶摺疊傘
+   [dev302/formal] fixed: 空軍的戰機飛過天空  base=空軍的戰績飛過天空  class=空軍的戰機飛過天空
+   [dev302/formal] fixed: 這家店太好吃我想再來  base=這家店太好吃我想在來  class=這家店太好吃我想再來
+   [dev302/formal] fixed: 生為台灣人我覺得很驕傲  base=升為台灣人我覺得很驕傲  class=生為台灣人我覺得很驕傲
+   [dev302/formal] fixed: 這家店的排骨酥很好吃  base=這家店的排骨蘇很好吃  class=這家店的排骨酥很好吃
+   [dev302/formal] fixed: 我想參考蘋果原生的介面  base=我想參考蘋果園生的介面  class=我想參考蘋果原生的介面
+   [dev302/formal] fixed: 我弟弟念公立的高中  base=我弟弟念功利的高中  class=我弟弟念公立的高中
+   [dev302/formal] fixed: 這個人做事太功利了  base=這個人做事太公立了  class=這個人做事太功利了
+   [dev302/formal] broke: 這裡不乏好吃的小店  base=這裡不乏好吃的小店  class=這裡不罰好吃的小店
+   [dev302/formal] broke: 把充電線接上手機就好  base=把充電線接上手機就好  class=把充電線街上手機就好
+   [dev302/formal] broke: 下雨天我們改在室內打球  base=下雨天我們改在室內打球  class=下雨天我們改在市內打球
+   [dev302/formal] broke: 他假日常在家裡打電動  base=他假日常在家裡打電動  class=她嫁日常在家裡打電動
+   [dev302/formal] broke: 下週就是期中考  base=下週就是期中考  class=下週就是其中考
+typing76   chat   n=76 base=65 class=66 fixed=3 broke=2 net=+1 p=1  decode_s base=0.6 class=0.7
+   [typing76/chat] fixed: 我再把分支合併回主線  base=我再把分之合併回主線  class=我再把分支合併回主線
+   [typing76/chat] fixed: 她把報告做得很仔細  base=他把報告做的很仔細  class=他把報告做得很仔細
+   [typing76/chat] fixed: 我昨天叫智慧代理幫我整理信件  base=我昨天較智慧代理幫我整理信件  class=我昨天叫智慧代理幫我整理信件
+   [typing76/chat] broke: 這個價錢真的有點盤  base=這個價錢真的有點盤  class=這個價錢真的有點胖
+   [typing76/chat] broke: 等週年慶再買比較划算啦  base=等週年慶再買比較划算啦  class=等週年慶在買比較划算啦
+typing76   formal n=76 base=65 class=69 fixed=4 broke=0 net=+4 p=0.125  decode_s base=0.4 class=0.6
+reported17 chat   n=17 base=4 class=7 fixed=3 broke=0 net=+3 p=0.25  decode_s base=0.1 class=0.1
+   [reported17/chat] fixed: 我想參考蘋果原生的介面  base=我想參考蘋果園生的介面  class=我想參考蘋果原生的介面
+   [reported17/chat] fixed: 這家速度很快你看一下  base=這加速度很快你看一下  class=這家速度很快你看一下
+   [reported17/chat] fixed: 我好奇其他競品記憶體都佔多少  base=我好奇其他競品記憶體都戰多少  class=我好奇其他競品記憶體都佔多少
+reported17 formal n=17 base=5 class=7 fixed=2 broke=0 net=+2 p=0.5  decode_s base=0.1 class=0.1
+cvtune     chat   n=3677 base=3121 class=3161 fixed=77 broke=37 net=+40 p=0.000227  decode_s base=15.9 class=21.2
+   [cvtune/chat] fixed: 皆顯示出資格  base=接顯示出資格  class=皆顯示出資格
+   [cvtune/chat] fixed: 鐵杉花像潔白的星星一樣閃耀  base=鐵杉花巷潔白的星星一樣閃耀  class=鐵杉花像潔白的星星一樣閃耀
+   [cvtune/chat] fixed: 我沒答覆  base=我沒答復  class=我沒答覆
+   [cvtune/chat] fixed: 托馬斯說他從來沒有吃過洋薊  base=托馬斯說他從來沒有吃過楊繼  class=托馬斯說他從來沒有吃過洋薊
+   [cvtune/chat] fixed: 伊文思家有六個孩子  base=伊文思加有六個孩子  class=伊文思家有六個孩子
+   [cvtune/chat] fixed: 你想做我的朋友嗎  base=你想作我的朋友嗎  class=你想做我的朋友嗎
+   [cvtune/chat] fixed: 也不是橙色  base=也不是成色  class=也不是橙色
+   [cvtune/chat] fixed: 人很帶勁  base=人很殆盡  class=人很帶勁
+   [cvtune/chat] broke: 就連小鳥也被銬在天空中  base=就連小鳥也被銬在天空中  class=就連小鳥也被靠在天空中
+   [cvtune/chat] broke: 我可以賣給你十元六斤  base=我可以賣給你十元六斤  class=我可以賣給你十元六金
+   [cvtune/chat] broke: 我這操蛋的人生  base=我這操蛋的人生  class=我這糙蛋的人生
+   [cvtune/chat] broke: 多得不如現得  base=多得不如現得  class=多得不如縣得
+   [cvtune/chat] broke: 在那年一位將軍發動了兵諫  base=在那年一位將軍發動了兵諫  class=在那年一位將軍發動了兵艦
+   [cvtune/chat] broke: 我們昨天下午一點鐘在麥當勞吃了午飯  base=我們昨天下午一點鐘在麥當勞吃了午飯  class=我們昨天下午一點中在麥當勞吃了午飯
+   [cvtune/chat] broke: 就看那個糖醋汁能不能均勻裹住每一塊雞丁  base=就看那個糖醋汁能不能均勻裹住每一塊雞丁  class=就看那個糖醋之能不能均勻裹住每一塊雞丁
+   [cvtune/chat] broke: 山坡讓滔滔的洪水往西流  base=山坡讓滔滔的洪水往西流  class=山坡讓滔滔地洪水往西流
+cvtune     formal n=3677 base=3147 class=3179 fixed=85 broke=53 net=+32 p=0.00808  decode_s base=13.4 class=21.4
+wikitune   chat   n=2733 base=1860 class=1944 fixed=101 broke=17 net=+84 p=1.01e-15  decode_s base=22.9 class=20.6
+   [wikitune/chat] fixed: 皆有惠政  base=皆有會正  class=皆有惠政
+   [wikitune/chat] fixed: 另有附設雙語教學的國民小學部  base=另有復設雙語教學的國民小學部  class=另有附設雙語教學的國民小學部
+   [wikitune/chat] fixed: 銅鑼圈莊  base=銅鑼圈裝  class=銅鑼圈莊
+   [wikitune/chat] fixed: 月向下游的遷移時成羣巡遊  base=月向下游的遷移時成群巡遊  class=月向下游的遷移時成羣巡遊
+   [wikitune/chat] fixed: 皇上震悼  base=皇上震到  class=皇上震悼
+   [wikitune/chat] fixed: 黑江奈緒子  base=黑將奈緒子  class=黑江奈緒子
+   [wikitune/chat] fixed: 又名哈里湖  base=又名哈理湖  class=又名哈里湖
+   [wikitune/chat] fixed: 狀告羊城體育  base=狀告陽成體育  class=狀告羊城體育
+   [wikitune/chat] broke: 康卡斯特上調收購英國天空公司  base=康卡斯特上調收購英國天空公司  class=康卡斯特上條收購英國天空公司
+   [wikitune/chat] broke: 上古茫昧無稽考  base=上古茫昧無稽考  class=上古奀妹無稽考
+   [wikitune/chat] broke: 熊谷直盛等人把城池獻給東軍  base=熊谷直盛等人把城池獻給東軍  class=熊谷直盛等人把城池獻給東君
+   [wikitune/chat] broke: 烏山戰役開打  base=烏山戰役開打  class=巫山戰役開打
+   [wikitune/chat] broke: 日桂林軍管會接管合山煤礦公司  base=日桂林軍管會接管合山煤礦公司  class=日桂林軍管會接管和山煤礦公司
+   [wikitune/chat] broke: 個月的利福平療程與為期  base=個月的利福平療程與為期  class=個月的利福平療程與圍棋
+   [wikitune/chat] broke: 由集集經過八通關  base=由集集經過八通關  class=游擊及經過八通關
+   [wikitune/chat] broke: 而在分子反應動態學界掀起了產物速度映像的研究熱潮  base=而在分子反應動態學界掀起了產物速度映像的研究熱潮  class=而在分子反應動態學界掀起了產物速度映象的研究熱潮
+wikitune   formal n=2733 base=1903 class=1991 fixed=124 broke=36 net=+88 p=1.61e-12  decode_s base=14.0 class=20.2
