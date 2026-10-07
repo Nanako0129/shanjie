@@ -1113,6 +1113,8 @@ S2h 實機驗收時，使用者在終端機、Discord、VS Code、Chrome 網址�
 
 ## 2026-10-07：V3 核心的預測函式（Rust，第一片，#44）
 
+**模型**：下面的突變行數、掃描結果、時間與記憶體都是在 model-v2 上量的（合併 model-v3 之前）。合併 main 之後，golden 用 model-v3 重產（2,938 個查詢、共 23,775 行），Rust 仍逐位元一致；兩個同分排序的突變（拿掉層內字數鍵、拿掉索引的讀音鍵）在 model-v3 的 golden 上仍會失敗（2026-10-08 main 重跑，exit 101）。時間與記憶體沒有在 model-v3 上重量。
+
 契約 `docs/contracts/v3-core-predict.md`。`core/src/predict.rs`：單位、相容（P 前綴、PA 聯集）、依第一個音節字元前綴分桶的索引、後繼詞優先的 S 順序；`shanjie-eval --predict <查詢檔> --lm … --profile chat [--predict-time]`；golden 由 `experiments/sp/golden_predict.py` 用 `predict3.reference`／`order_s` 產生（`eval/golden/sp-predict.txt`，2938 個查詢：typing76 的 P1–P4、A1、A2，P 模式也查 A1、A2 的單位序列，加 9 個手造查詢，說明見下）。
 
 - **逐位元一致**：release 的 `--predict` 輸出和 golden 的候選行逐位元組相同；`cli/tests/golden.rs` 的 `predict_matches_python_golden` 比字串、順序、後繼詞旗標，分數解析成 `f64` 比位元；CLI 也檢查有按鍵的查詢，`units_of(按鍵)` 要等於檔裡的單位序列。
