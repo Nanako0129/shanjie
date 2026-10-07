@@ -291,7 +291,13 @@ def expected_counts(lex, text, min_count=EXPECTED_MIN):
 _W = {}
 
 
-def _init(trigram=False, expected=False):
+def _init(trigram=False, expected=False, mw=False):
+    _W["mw"] = None
+    if mw:   # S2w：每個 worker 載一次 mwdata.json（契約 §3.2）
+        sys.path.insert(0, os.path.join(ROOT, "experiments", "s2w"))
+        import mwconv
+        _W["mw"] = mwconv.load()
+        _W["mwconv"] = mwconv
     _W["trigram"] = trigram
     _W["expected"] = expected
     _W["lex"] = ime.Lexicon(os.path.join(ROOT, "data", "lexicon", "mcbpmf-data.txt"),
@@ -304,12 +310,14 @@ def count_batch(texts):
     uni, bi, tri, sents = collections.Counter(), collections.Counter(), collections.Counter(), 0
     for raw in texts:
         t = raw.replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&").replace("&quot;", '"')
+        if _W["mw"]:   # S2w：整篇先交給 MediaWiki 的 zh-tw 轉換（站上轉換表、NoteTA 群組、條目規則），之後的句子不再呼叫 convert()
+            t = _W["mwconv"].convert(t, _W["mw"])
         for _ in range(3):
             t = TEMPLATE.sub("", t)
         for pat, rep in MARKUP:
             t = pat.sub(rep, t)
         for s in SENT.findall(t):
-            for run in HAN.findall(convert(s, phrase, char, maxp)):
+            for run in HAN.findall(s if _W["mw"] else convert(s, phrase, char, maxp)):
                 if len(run) < 2:
                     continue
                 if _W["expected"]:
@@ -354,13 +362,14 @@ def main():
     ap.add_argument("--procs", type=int, default=max(1, os.cpu_count() - 2))
     ap.add_argument("--trigram", action="store_true", help="也算 trigram（記憶體用量大，請搭配較少的篇數）")
     ap.add_argument("--expected", action="store_true", help="詞圖上的期望次數（S2n 契約 §6.2），取代最高分切分；不算 trigram")
+    ap.add_argument("--mw", action="store_true", help="S2w：用 MediaWiki 的 zh-tw 轉換（zhconv-rs ＋ $S2_WORK/mwdata.json），取代 convert()")
     a = ap.parse_args()
     if a.expected and a.trigram:
         ap.error("--expected 不算 trigram")
     os.makedirs(OUT, exist_ok=True)
     uni, bi, tri = collections.Counter(), collections.Counter(), collections.Counter()
     sents = arts = 0
-    with mp.Pool(a.procs, initializer=_init, initargs=(a.trigram, a.expected)) as pool:
+    with mp.Pool(a.procs, initializer=_init, initargs=(a.trigram, a.expected, a.mw)) as pool:
         for u, b, t, s_ in pool.imap_unordered(count_batch, batches(articles(a.articles))):
             uni.update(u); bi.update(b); tri.update(t); sents += s_; arts += 200
             if arts % 10000 == 0:
