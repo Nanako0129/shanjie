@@ -116,6 +116,7 @@ v4 日期 2026-10-03。v1 經 `pilotfish:plan-verifier`（REVISE，4 項）與 `
   - 從保留所有權利的網頁原文算出的次數，能不能放進 CC BY-SA 的模型檔，是法律判斷，這裡不構成法律意見。使用者允許先做實驗評估；要不要散布另外決定。
   - 候選是 `taiwan-corpora/twngrams`：CC0，來源是 HPLT 3.0 的 `cmn_Hant` 網頁，約 2.85 億 token。計數單位是網站數，出現在不到 40 個網站的 n-gram 不收。這是 2026-08 才出現的單人專案，要先驗證。
 - **S2n 收尾**：「十分鐘後道」由修訂四的期望次數修好（研究紀錄 2026-10-06），GitHub Release `model-v2` 已建；剩合併關卡（含保留集）。
+- **S2f 字形修正**（使用者 2026-10-07 回報「起牀」，契約 `docs/contracts/s2f-variant-forms.md`）：台灣字形不再被當成簡體字，同讀音的異體寫法合併計數。經三次修訂，模型 F4 驗收通過（字形探針 16/16、守門不否決、「竈門」回來）；GitHub Release `model-v3` 已建（使用者 2026-10-08 同意，下載比對雜湊相符），成為 v0.3.0 的模型（S2w 之後疊在它上面重建再比較）。
 - **S5 本機重排的下一個實驗**（使用者 2026-10-05 排進下一版；同日稍晚決定先和 S2n 第三次重建並行，契約 `docs/contracts/s5k-local-scorers.md`：Laya 優先，1-bit Bonsai 次之，Qwen3-1.7B 4-bit 對照）。
   - S5j 的結論是「從 8 句裡挑一句」的題型不能用。下一步改成每個候選分別打分數，或每個字位各出一題。
   - 量 Apple 端上模型與本機小模型（Qwen3-1.7B、Gemma 4 E2B，MLX），在使用者沒在用電腦時量。
@@ -302,13 +303,16 @@ v4 日期 2026-10-03。v1 經 `pilotfish:plan-verifier`（REVISE，4 項）與 `
     | `wikt` | `https://dumps.wikimedia.org/enwiktionary/20261001/enwiktionary-20261001-all-titles-in-ns0.gz` | `1c840da0ddb78eed78e6f1b6fe613c1a2eced952801fd7d676f4dac9e581d4fd` | CC BY-SA 4.0 | 詞 |
     | `wikt` | `https://dumps.wikimedia.org/zhwiktionary/20261001/zhwiktionary-20261001-all-titles-in-ns0.gz` | `95e915cd85992b4fe990187dca845ea85e257deba39d8054b014781015d3f7f0` | CC BY-SA 4.0 | 詞 |
     | — | OpenCC `data/dictionary/STCharacters.txt`，commit `3ac34aa439a9908dd49fa92b5174b46314787ac2` | `a0ca1601c70648cf48b33c3c6210ccbecc5c7eead4b4c3daf76587ba2c03582b` | Apache-2.0 | 只用來過濾，不進疊加層 |
+    | — | OpenCC `data/dictionary/TWVariants.txt`，同一個 commit `3ac34aa439a9908dd49fa92b5174b46314787ac2`（S2f） | `245b94eb5842957e735dd44b7e7d4ff469a3643126cc8fa511adda5281e9cb86` | Apache-2.0 | 台灣字形表 `TW_VARIANTS`（`experiments/s2/build_counts.py` 讀之前核對 SHA-256），不進疊加層 |
+    | — | OpenCC `data/dictionary/STPhrases.txt`，同一個 commit（S2f 起核對） | `f6eab5e5c6dd7640597878d3dfc6599ee1279d2bc91561eadd8e114194e2925a` | Apache-2.0 | 簡體句的詞組轉換，不進疊加層 |
+    | — | OpenCC `data/dictionary/TWPhrases.txt`，同一個 commit（S2f 起核對） | `bcb435b744ee3e522beb9b18fcc5486a36ed4763c6aa642ce18112fb5d604e31` | Apache-2.0 | 台灣用詞（TWPhrases），不進疊加層 |
 
     三個 dump 的 sha1 已和 Wikimedia 官方的 `sha1sums.txt` 比對相符。來源檔不進 repo，因為合計 55 MB。`tools/build_overlay.py` 下載到 `~/.cache/shanjie/sources/` 後驗證 SHA-256，不符就中止。
   - **篩選。** 由 `tools/build_overlay.py` 依序做，不得手動加減。這支腳本就是本契約的參考實作，下列文字和腳本不一致時以腳本為準：
     1. 純漢字 2–4 字（U+4E00–U+9FFF）。
     2. 不在基底的詞表裡。基底詞表是照 S0 規則解析後 `by_word` 的鍵。
     3. 每個字都是基底的單字詞條。
-    4. 不含簡體專用字：在 STCharacters 中，繁體對應清單裡不含它自己的字。例如「干」的對應清單含「干」，所以不算。
+    4. 不含簡體專用字：在 STCharacters 中，繁體對應清單裡不含它自己的字。例如「干」的對應清單含「干」，所以不算。S2f 起用縮小後的集合（`build_counts.TRAD_SIMP_ONLY`：扣掉 TWVariants 的目標字，以及 秘 庄 晒 霉 虱 么 肴 洒 痒），所以含 床、灶、粽 等台灣字形的標題可以進疊加層；之後 S2f §2.5 再拿掉只是基底詞異體寫法的詞（`experiments/s2f/overlay-variant-removed.tsv`）。
     5. 維基詞典（英、中）的標題全收。中文維基的標題只收「複合詞」：去掉第一個字或最後一個字之後，剩下的是基底裡的多字詞。
 
     複合詞規則是 main 看過開發集 OOV 詞（收納盒、防滑墊…）之後定的。它是一般的構詞規則，不是逐詞挑選，但仍有偏向開發集的風險，由保留集把關，報告時要揭露。**禁止從 `eval/` 的句子挑詞加入**。
@@ -524,7 +528,7 @@ v4 日期 2026-10-03。v1 經 `pilotfish:plan-verifier`（REVISE，4 項）與 `
   7. **效能**：release 重播（載入 LM）每鍵 p95 < 16 ms；回報 LM 載入時間與引擎（詞庫＋上限後詞庫＋LM）的峰值 RSS。上限後詞庫可以和原始詞庫共用字串池，由 executor 決定。
   8. 模型檔 ≤ 100 MB（目前 80,040,411 bytes）。
   9. **保留集**（片結束，只由 verifier 跑一次）：`--set holdout` 在 chat 與 formal 的 top1 與 oracle@64，只回數字。A1a 要求 oracle@64 ≥ 98%；低於時照實回報、記為 A1a 未達成，由使用者決定，不是這片的停止條件。報告時註明 LM 模式的 oracle 用寬鬆對照，S1 的 `extra` 行（97.8%）用完全相符。
-- **模型檔不進 repo**（`data/lm/` 在 `.gitignore`）：從 GitHub Release `model-v2` 下載（`gh release download model-v2 -R Nanako0129/shanjie -p bigram.sjlm -D data/lm`，CC BY-SA 4.0，2026-10-03 起），或用 `tools/build_lm.py` 從本機計數重建；SHA-256 `8847b73a7b9cf127b4882328191c3c5250fe9a55912926d5050e351ab644d240`。需要它的測試在檔案不存在時**直接失敗**，訊息說明怎麼取得，不得默默跳過。隨輸入法散布的方式在 S3b（打包進 app）。
+- **模型檔不進 repo**（`data/lm/` 在 `.gitignore`）：從 GitHub Release `model-v3` 下載（`gh release download model-v3 -R Nanako0129/shanjie -p bigram.sjlm -D data/lm`，CC BY-SA 4.0，2026-10-03 起），或用 `tools/build_lm.py` 從本機計數重建；SHA-256 `5c7d5a94f762e7c5d87e14e47b03c1138222df4ea194e70e503bdd9a71ab5a48`。需要它的測試在檔案不存在時**直接失敗**，訊息說明怎麼取得，不得默默跳過。隨輸入法散布的方式在 S3b（打包進 app）。
 - **範圍外。** 改分數、參數、剪枝或語料；候選清單用 LM 排序；trigram；學習（S4）。
 - **預算。** executor、security-executor 各 1 回合＋1 次修正。
 - **停止。** 驗收 2、3、4 有任何差異：回報第一個不同的列與原因，不得修改 Python 參考實作或對照檔來湊。峰值 RSS 超過 300 MB：回報實測值與瓶頸。

@@ -3,7 +3,7 @@
   none：改前的轉換（沒有簡體句路徑）　real：這一片的轉換
   (a) 簡體句輸出的 後 改回 后：殘留 5% 門檻必須不過
   (b) 簡體句輸出的 後 改成 候：殘留下降但七個詞合計的正確寫法比例必須掉到 80% 以下
-  (c) 簡體句輸出不做 裏→裡（TW_CHAR 拿掉它）：哪里→哪裡 單獨的比例必須掉到 80% 以下
+  (c) 簡體句輸出不做 裏→裡（POST_SIMP 拿掉它）：哪里→哪裡 單獨的比例必須掉到 80% 以下
 用法：python3 experiments/s2n/mutations.py
 """
 import bz2
@@ -30,15 +30,15 @@ simp = bc.is_simplified
 
 
 def run(label, post=None, drop_li=False, off=False):
-    tw = dict(bc.TW_CHAR)
+    tw = dict(bc.POST_SIMP)                          # S2f：簡體句的台灣用字在最後一層 POST_SIMP（convert 不再讀 TW_CHAR）
     if drop_li:
-        bc.TW_CHAR.pop("裏")
+        bc.POST_SIMP.pop("裏")
     bc.is_simplified = (lambda s: False) if off else simp
     out = []
     for s in sents:
         c = bc.convert(s, *conv)
         out.append(post(c) if post and simp(s) else c)
-    bc.TW_CHAR.clear(); bc.TW_CHAR.update(tw)
+    bc.POST_SIMP.clear(); bc.POST_SIMP.update(tw)
     return "".join(out)
 
 
