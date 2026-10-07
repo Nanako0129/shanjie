@@ -25,6 +25,7 @@ import readings  # noqa: E402  萌典路徑
 BASE = os.path.join(ROOT, "data", "lexicon", "mcbpmf-data.txt")
 OUT = os.path.join(ROOT, "data", "lexicon", "overlay-add.tsv")
 REMOVED = os.path.join(ROOT, "experiments", "s2n", "overlay-removed.tsv")   # S2n：被拿掉的簡體寫法（詞、轉換後的寫法、讀音）
+VARIANT_REMOVED = os.path.join(ROOT, "experiments", "s2f", "overlay-variant-removed.tsv")   # S2f §2.5：被拿掉的異體寫法（詞、基底寫法、讀音）
 CACHE = os.path.expanduser("~/.cache/shanjie/sources")
 DUMPS = "https://dumps.wikimedia.org"
 SOURCES = {  # 檔名: (網址, SHA-256)；Wikimedia 2026-10-01 dump 的 sha1 已和官方 sha1sums.txt 比對過
@@ -34,8 +35,6 @@ SOURCES = {  # 檔名: (網址, SHA-256)；Wikimedia 2026-10-01 dump 的 sha1 �
                      "1c840da0ddb78eed78e6f1b6fe613c1a2eced952801fd7d676f4dac9e581d4fd"),
     "zhwiktionary": (f"{DUMPS}/zhwiktionary/20261001/zhwiktionary-20261001-all-titles-in-ns0.gz",
                      "95e915cd85992b4fe990187dca845ea85e257deba39d8054b014781015d3f7f0"),
-    "STCharacters": ("https://raw.githubusercontent.com/BYVoid/OpenCC/3ac34aa439a9908dd49fa92b5174b46314787ac2/data/dictionary/STCharacters.txt",
-                     "a0ca1601c70648cf48b33c3c6210ccbecc5c7eead4b4c3daf76587ba2c03582b"),
 }
 SCORE = {2: -7.17149945, 3: -7.04116568, 4: -6.60980192}   # 基底同字數詞條分數的第 25 百分位；build() 會重算核對
 # 變調列的分數＝主要列 − 這個值（log10，約 1/3）。變調列常和別的詞共用讀音（同一成語的異體寫法、罕見詞），
@@ -103,11 +102,8 @@ def build():
     for n, want in SCORE.items():
         got = sorted(s for syls, ents in base.by_reading.items() if len(syls) == n for _, s in ents)
         assert got[len(got) // 4] == want, (n, got[len(got) // 4])
-    simp_only = set()                               # 簡體字，且它的繁體對應裡不含自己（例：「干」對應含「干」，不算）
-    for line in open(fetch("STCharacters"), encoding="utf-8"):
-        p = line.rstrip("\n").split("\t")
-        if len(p) == 2 and p[0] not in p[1].split(" "):
-            simp_only.add(p[0])
+    conv = bc.load_conv()
+    simp_only = bc.TRAD_SIMP_ONLY                   # S2f §2.2：和繁體句同一個縮小後的簡體專用字集合（不含台灣字形：床 灶 粽 秘 庄…）
 
     def titles(name):
         out = set()
@@ -120,27 +116,63 @@ def build():
 
     wikt = titles("enwiktionary") | titles("zhwiktionary")
     compounds = {t for t in titles("zhwiki") if t[:-1] in multi or t[1:] in multi}
-    rows, removed = [], []
+    rows, removed, variant_removed = [], [], []
     cand = wikt | compounds
     moe = moe_titles()
-    conv = bc.load_conv()
-    # 第一輪：哪些詞條符合 (i)(iii)，目標寫法是什麼；第二輪：目標在基底，或在疊加層而且自己沒被拿掉，才真的拿（避免 A→B、B→C 連鎖後 B 不在了）
+    fold = {**bc.MERGE, **bc.TW_VARIANTS}           # S2f §2.5：套到兩邊後字串相同，就是同一個詞的異體寫法
+    fold_w = lambda t: "".join(fold.get(c, c) for c in t)
+    # 第一輪：哪些詞條符合 (i)(iii)，目標寫法是什麼；第二輪由落點決定（修訂二 7.2.4：避免 A→B 而 B 不在了）
     target = {}
     for w in cand:
         if bc.is_simplified(w) and w not in words and w not in moe:
             w2 = bc.convert(w, *conv)
             if w2 != w:
                 target[w] = w2
-    for w in sorted(cand):                          # 依詞的 code point 排序；核心照檔案順序接在基底後面
+    info = {}                                       # 詞 → (讀音, 同讀音的基底異體詞)
+    for w in sorted(cand):
         syls = base.to_syllables(w)
-        if syls is None:
+        if syls is not None:
+            syls = normalize(w, syls)
+            info[w] = (syls, next((b for b, _ in base.by_reading[tuple(syls)] if fold_w(b) == fold_w(w)), None))
+    # S2f 修訂二 7.2.3／7.2.4，分兩階段（S2n 與延伸規則可能方向相反：占中 經簡體句轉換是 佔中，佔中 的 fold 是 占中，
+    # 互相指向會繞圈）：第一階段只用 S2n 與原 §2.5 決定拿掉誰；第二階段對留下的詞套延伸規則；落點最後照完整的規則算。
+    def first(x):
+        """第一階段：('s2n'|'twin'|None)。S2n 在目標有落點時成立：目標在基底，或有讀音（有讀音的詞不論留下或被拿掉都有落點）。"""
+        if x in target and (target[x] in words or target[x] in info):
+            return "s2n"
+        return "twin" if info[x][1] else None
+
+    why = {x: first(x) for x in info}
+    kept1 = {x for x, y in why.items() if y is None}
+    for x in sorted(kept1):
+        f = fold_w(x)
+        if f != x and (any(b == f for b, _ in base.by_reading[tuple(info[x][0])]) or (f in kept1 and info[f][0] == info[x][0])):
+            why[x] = "fold"
+    memo = {}
+
+    def landing(x, busy=frozenset()):
+        """落點：基底或留下→自己；S2n→目標的落點；原 §2.5→基底異體詞；延伸→fold 的落點。"""
+        if x in words or why.get(x) is None:
+            return x
+        if x in memo:
+            return memo[x]
+        assert x not in busy, x                     # 落點不能繞圈
+        y = why[x]
+        to = info[x][1] if y == "twin" else landing(target[x] if y == "s2n" else fold_w(x), busy | {x})
+        memo[x] = to
+        return to
+
+    for w in sorted(cand):                          # 依詞的 code point 排序；核心照檔案順序接在基底後面
+        if w not in info:
             continue
-        syls = normalize(w, syls)
-        # S2n §2.2：簡體寫法拿掉。三點都成立才拿：簡體句轉換會變成另一個寫法、新寫法已在基底或疊加層、本身不在基底也不是萌典詞目
-        # （基底的情形 titles() 已排除；後兩點仍明寫，萌典詞目才擋得到「里程」這類）
-        w2 = target.get(w)
-        if w2 and (w2 in words or (w2 in cand and w2 not in target)):
-            removed.append(f"{w}\t{w2}\t{'-'.join(syls)}\n")
+        syls = info[w][0]
+        y, to = why[w], landing(w)
+        # S2n §2.2：簡體寫法拿掉（簡體句轉換會變成另一個寫法、本身不在基底也不是萌典詞目），替代寫法記目標的落點
+        if y == "s2n":
+            removed.append(f"{w}\t{to}\t{'-'.join(syls)}\n")
+            continue
+        if y:                                       # S2f §2.5 與修訂二的延伸：只是基底詞或留下的疊加層詞的異體寫法，就拿掉
+            variant_removed.append(f"{w}\t{to}\t{'-'.join(syls)}\n")
             continue
         src = "wikt" if w in wikt else "zhwiki"
         rows.append(f"{'-'.join(syls)}\t{w}\t{SCORE[len(w)]!r}\t{src}\n")
@@ -148,24 +180,24 @@ def build():
         if var:                                     # 主要列在前，變調列緊接其後（同來源，分數 − VARIANT_PENALTY）
             rows.append(f"{'-'.join(var)}\t{w}\t{round(SCORE[len(w)] - VARIANT_PENALTY, 8)!r}\t{src}\n")
     assert not {r.split("\t")[1] for r in rows} & words   # 疊加層和基底的詞表交集必須是 0
-    assert not {r.split("\t")[0] for r in removed} & {r.split("\t")[1] for r in removed}   # 新寫法本身不能也被拿掉
-    return rows, removed
+    return rows, removed, variant_removed
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--check", action="store_true")
-    rows, removed = build()
+    rows, removed, variant_removed = build()
     if ap.parse_args().check:
-        same = open(OUT, encoding="utf-8").readlines() == rows and open(REMOVED, encoding="utf-8").readlines() == removed
-        print(f"{len(rows)} rows, {len(removed)} removed; {'matches' if same else 'DIFFERS FROM'} {os.path.relpath(OUT, ROOT)} and {os.path.relpath(REMOVED, ROOT)}")
+        same = (open(OUT, encoding="utf-8").readlines() == rows and open(REMOVED, encoding="utf-8").readlines() == removed
+                and open(VARIANT_REMOVED, encoding="utf-8").readlines() == variant_removed)
+        print(f"{len(rows)} rows, {len(removed)} removed, {len(variant_removed)} variant-removed; {'matches' if same else 'DIFFERS FROM'} the files in the repo")
         sys.exit(0 if same else 1)
-    os.makedirs(os.path.dirname(REMOVED), exist_ok=True)
-    for path, lines in ((OUT, rows), (REMOVED, removed)):
+    os.makedirs(os.path.dirname(VARIANT_REMOVED), exist_ok=True)
+    for path, lines in ((OUT, rows), (REMOVED, removed), (VARIANT_REMOVED, variant_removed)):
         with open(path + ".tmp", "w", encoding="utf-8") as f:
             f.writelines(lines)
         os.replace(path + ".tmp", path)
-    print(f"wrote {len(rows)} rows to {os.path.relpath(OUT, ROOT)}, {len(removed)} removed rows to {os.path.relpath(REMOVED, ROOT)}")
+    print(f"wrote {len(rows)} rows to {os.path.relpath(OUT, ROOT)}, {len(removed)} removed rows to {os.path.relpath(REMOVED, ROOT)}, {len(variant_removed)} variant-removed rows to {os.path.relpath(VARIANT_REMOVED, ROOT)}")
 
 
 if __name__ == "__main__":

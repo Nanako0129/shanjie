@@ -53,7 +53,7 @@ fn lenient_dump_uses_the_variant_table() {
     assert_ne!(lines[2], lines[3], "散佈 has no dictionary entry, so it is not a listed variant");
 }
 
-const LM_MISSING: &str = "data/lm/bigram.sjlm is missing: download it with `gh release download model-v2 -R Nanako0129/shanjie -p bigram.sjlm -D data/lm` (or rebuild with tools/build_lm.py; see docs/PLAN.md S2c)";
+const LM_MISSING: &str = "data/lm/bigram.sjlm is missing: download it with `gh release download model-v3 -R Nanako0129/shanjie -p bigram.sjlm -D data/lm` (or rebuild with tools/build_lm.py; see docs/PLAN.md S2c)";
 
 fn lm_path() -> String {
     let p = format!("{}/../data/lm/bigram.sjlm", env!("CARGO_MANIFEST_DIR"));
@@ -113,7 +113,7 @@ fn lm_file_is_the_documented_build() {
     let bytes = std::fs::read(lm_path()).unwrap();
     assert_eq!(
         core::eval::sha256_hex(&bytes),
-        "8847b73a7b9cf127b4882328191c3c5250fe9a55912926d5050e351ab644d240",
+        "5c7d5a94f762e7c5d87e14e47b03c1138222df4ea194e70e503bdd9a71ab5a48",
         "data/lm/bigram.sjlm differs from the documented build; rebuild with tools/build_lm.py"
     );
 }
@@ -134,4 +134,38 @@ fn unigram_rows_mode_matches_python_golden_byte_for_byte() {
     let got = String::from_utf8(out.stdout).unwrap() + &std::fs::read_to_string(&dump).unwrap();
     std::fs::remove_file(&dump).unwrap();
     assert_eq!(got, golden("sbench-unigram-typing76.txt"));
+}
+
+/// SW first slice (docs/contracts/sw-sensitive-demote.md section 4.2): the frozen probe, both profiles, with
+/// and without `--context`, demotion on and off: the summary line, then each row's first candidate with
+/// its score. Python output (lm_eval.py); the Rust scores equal it bit for bit. Regenerate by running the
+/// same loop with `python3 reference/proto/lm_eval.py` instead of this binary:
+/// for each ctx in ("", --context), profile in (chat, formal), d in (on, off) run
+/// `--profile P --rows experiments/sw/sensitive-reading.txt --name sw-probe-D [ctx] [--no-demote when off]
+/// --dump F` and keep the summary line and the dump lines whose second column is 1.
+#[test]
+fn sw_probe_matches_python_golden_byte_for_byte() {
+    let (lm, root) = (lm_path(), concat!(env!("CARGO_MANIFEST_DIR"), "/.."));
+    let probe = format!("{root}/experiments/sw/sensitive-reading.txt");
+    let dump = std::env::temp_dir().join(format!("shanjie-sw-probe-{}.tsv", std::process::id()));
+    let mut got = String::new();
+    for ctx in [None, Some("--context")] {
+        for p in ["chat", "formal"] {
+            for d in ["on", "off"] {
+                let name = format!("sw-probe-{d}");
+                let mut args = vec!["--lm", &lm, "--profile", p, "--rows", &probe, "--name", &name, "--dump", dump.to_str().unwrap()];
+                args.extend(ctx);
+                if d == "off" {
+                    args.push("--no-demote");
+                }
+                got += &run(&args);
+                for l in std::fs::read_to_string(&dump).unwrap().lines().filter(|l| l.split('\t').nth(1) == Some("1")) {
+                    got += l;
+                    got += "\n";
+                }
+            }
+        }
+    }
+    std::fs::remove_file(&dump).unwrap();
+    assert_eq!(got, golden("sw-probe.txt"));
 }

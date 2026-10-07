@@ -55,6 +55,16 @@ final class DefaultsLayoutStore: LayoutStore {
     }
 }
 
+/// The "avoid ranking sensitive words first" switch (docs/contracts/sw-sensitive-demote.md section 3),
+/// key `demoteSensitive` in the same domain; absent means on. Only the running input method creates this.
+@MainActor
+final class DefaultsDemoteStore: DemoteStore {
+    var demote: Bool? {
+        get { UserDefaults.standard.object(forKey: "demoteSensitive") as? Bool }
+        set { UserDefaults.standard.set(newValue, forKey: "demoteSensitive") }
+    }
+}
+
 @MainActor
 func runServer() -> Never {
     guard let bundleID = Bundle.main.bundleIdentifier,
@@ -73,7 +83,7 @@ func runServer() -> Never {
     App.shell = Shell(
         resources: resources.absoluteURL, panel: CandidatePanelAdapter(),
         isSecureInput: { IsSecureEventInputEnabled() }, layoutStore: DefaultsLayoutStore(),
-        learningDirectory: Shell.learningURL(), dialogs: AlertDialogs())
+        learningDirectory: Shell.learningURL(), dialogs: AlertDialogs(), demoteStore: DefaultsDemoteStore())
     withExtendedLifetime(server) { app.run() }
     exit(0)
 }

@@ -15,6 +15,7 @@ enum TestData {
         ("mcbpmf-data.txt", "data/lexicon/mcbpmf-data.txt"),
         ("overlay-add.tsv", "data/lexicon/overlay-add.tsv"),
         ("sandhi-add.tsv", "data/lexicon/sandhi-add.tsv"),
+        ("demote.tsv", "data/lexicon/demote.tsv"),
         ("bigram.sjlm", "data/lm/bigram.sjlm"),
     ]
 
@@ -28,8 +29,8 @@ enum TestData {
             let src = repo.appendingPathComponent(f.source)
             guard FileManager.default.fileExists(atPath: src.path) else {
                 XCTFail("""
-                    \(f.source) is missing. The lexicon is in git; the model is the model-v2 release asset: \
-                    gh release download model-v2 -R Nanako0129/shanjie -p bigram.sjlm -D data/lm
+                    \(f.source) is missing. The lexicon is in git; the model is the model-v3 release asset: \
+                    gh release download model-v3 -R Nanako0129/shanjie -p bigram.sjlm -D data/lm
                     """, file: file, line: line)
                 return nil
             }

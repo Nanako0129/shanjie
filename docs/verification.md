@@ -1,6 +1,6 @@
 # 驗證流程
 
-本機與 CI 的檢查各自在哪裡跑、怎麼跑。流程仿 syrtis 的 `Makefile` 與 `docs/knowledge/verification.md`。所有指令都在 repo 根目錄執行；需要 `data/lm/bigram.sjlm`（`gh release download model-v2 -R Nanako0129/shanjie -p bigram.sjlm -D data/lm`，雜湊以 `data/bigram.sjlm.sha256` 為準）。
+本機與 CI 的檢查各自在哪裡跑、怎麼跑。流程仿 syrtis 的 `Makefile` 與 `docs/knowledge/verification.md`。所有指令都在 repo 根目錄執行；需要 `data/lm/bigram.sjlm`（`gh release download model-v3 -R Nanako0129/shanjie -p bigram.sjlm -D data/lm`，雜湊以 `data/bigram.sjlm.sha256` 為準）。
 
 ## 本機關卡
 
