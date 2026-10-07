@@ -29,7 +29,7 @@ fn shared() -> &'static Shared {
         let lex = load_lexicon(&root().join("data/lexicon")).unwrap();
         let lm = Lm::load(&lm_path()).unwrap();
         let overlay = std::fs::read_to_string(root().join("data/lexicon/overlay-add.tsv")).unwrap();
-        let capped = Arc::new(CappedLexicon::new(lex.clone(), &overlay, &lm));
+        let capped = Arc::new(CappedLexicon::new(lex.clone(), &overlay, &lm, None).unwrap());
         Shared { lex, lm: Arc::new(lm), capped }
     })
 }
@@ -258,7 +258,7 @@ fn right_fixed_word_transition_changes_left_choice() {
             let r = decode_segment(&s.capped, &syls[..a], &s.lm, lam, "<s>", end, 64).unwrap();
             r[0].1.iter().map(|x| x.0).collect::<String>()
         };
-        assert_eq!(top(End::Next { word, lp }), with_t);
+        assert_eq!(top(End::Next { word, lp, delta: 0.0 }), with_t);
         assert_eq!(top(End::Eos), with_eos);
         let mut e = engine(Layout::Standard, profile);
         let o = fix_word(&mut e, Layout::Standard, &syls, b, word);
@@ -365,7 +365,7 @@ fn punctuation_is_a_sentence_boundary() {
         best[0].1.iter().map(|w| w.0).collect::<String>()
     };
     assert_eq!(top(&x, "<s>", End::Eos), "他長");
-    assert_eq!(top(&x, "<s>", End::Next { word: "，", lp: 0.0 }), "他常");
+    assert_eq!(top(&x, "<s>", End::Next { word: "，", lp: 0.0, delta: 0.0 }), "他常");
     assert_eq!(top(&y, "<s>", End::Eos), "在換");
     assert_eq!(top(&y, "，", End::Eos), "再換");
 

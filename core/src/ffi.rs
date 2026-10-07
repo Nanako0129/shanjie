@@ -423,6 +423,44 @@ pub unsafe extern "C" fn shanjie_engine_set_learning(engine: *mut ShanjieEngine,
     })
 }
 
+/// sw. `enabled` 0 or 1 (default 1): whether demote.tsv applies. Recomputes the composition and returns
+/// its snapshot like `set_profile`; any other value changes nothing and returns 2.
+///
+/// # Safety
+/// `engine` is NULL or a live handle; `out` is NULL or valid for one pointer write.
+#[no_mangle]
+pub unsafe extern "C" fn shanjie_engine_set_demote(
+    engine: *mut ShanjieEngine,
+    enabled: u32,
+    out: *mut *mut ShanjieOutput,
+) -> i32 {
+    let rc = guard(|| {
+        // SAFETY: forwarded caller contract.
+        if !unsafe { clear_out(out) } || engine.is_null() {
+            return SHANJIE_ERR_NULL;
+        }
+        if enabled > 1 {
+            return SHANJIE_ERR_INVALID;
+        }
+        // SAFETY: live handle, single-threaded use (§6).
+        let e = unsafe { &mut (*engine).0 };
+        match e.set_demote(enabled == 1) {
+            Ok(o) => {
+                #[cfg(test)]
+                tests::inject(&o);
+                // SAFETY: `out` checked non-NULL above.
+                unsafe { emit(o, out) }
+            }
+            Err(_) => SHANJIE_ERR_INTERNAL,
+        }
+    });
+    if rc == SHANJIE_ERR_INTERNAL {
+        // SAFETY: forwarded caller contract.
+        unsafe { discard(engine) };
+    }
+    rc
+}
+
 /// # Safety
 /// `engine` is NULL or a live handle; `dir` is NULL or a NUL-terminated string.
 #[no_mangle]
@@ -552,6 +590,7 @@ mod tests {
         std::fs::write(d.join("mcbpmf-data.txt"), base).unwrap();
         std::fs::write(d.join("overlay-add.tsv"), "").unwrap();
         std::fs::write(d.join("sandhi-add.tsv"), "").unwrap();
+        std::fs::write(d.join("demote.tsv"), "").unwrap();
         d
     }
 
@@ -754,10 +793,41 @@ mod tests {
         e = sentinel();
         assert!(unsafe { shanjie_engine_new(dir_c.as_ptr(), 0, &mut e) } == 3 && e.is_null(), "new missing sandhi-add.tsv");
         std::fs::write(dir.join("sandhi-add.tsv"), "").unwrap();
+        // demote.tsv is required like the other lexicon files, and a malformed one fails the same way.
+        std::fs::remove_file(dir.join("demote.tsv")).unwrap();
+        e = sentinel();
+        assert!(unsafe { shanjie_engine_new(dir_c.as_ptr(), 0, &mut e) } == 3 && e.is_null(), "new missing demote.tsv");
+        // Malformed rows, and a well-formed row that names no lexicon entry, fail the same way.
+        for bad in [
+            "a\tb\t2.0\treading\n",
+            "ㄍ\t睪\t0\treading\tx\n",
+            "ㄍ\t睪\tnan\treading\tx\n",
+            "ㄍ\t睪\t1\treading\tx\nㄍ\t睪\t2\treading\tx\n",
+            "ㄍ\t睪\t1\treading\tx\n",
+        ] {
+            std::fs::write(dir.join("demote.tsv"), bad).unwrap();
+            e = sentinel();
+            assert!(unsafe { shanjie_engine_new(dir_c.as_ptr(), 0, &mut e) } == 3 && e.is_null(), "new bad demote.tsv");
+        }
+        std::fs::write(dir.join("demote.tsv"), "").unwrap();
         let e = new_engine(&dir, 0);
 
-        // engine_key
+        // engine_set_demote (contract sw-sensitive-demote section 4 (d)): codes like set_profile.
         let mut o: *mut ShanjieOutput = sentinel();
+        assert!(unsafe { shanjie_engine_set_demote(e, 1, ptr::null_mut()) } == 1, "set_demote out NULL");
+        assert!(unsafe { shanjie_engine_set_demote(ptr::null_mut(), 1, &mut o) } == 1 && o.is_null(), "set_demote engine NULL");
+        for v in [2, u32::MAX] {
+            o = sentinel();
+            assert!(unsafe { shanjie_engine_set_demote(e, v, &mut o) } == 2 && o.is_null(), "set_demote out of range");
+        }
+        for v in [0, 1] {
+            o = sentinel();
+            assert!(unsafe { shanjie_engine_set_demote(e, v, &mut o) } == 0 && !o.is_null(), "set_demote 0/1");
+            unsafe { shanjie_output_free(o) };
+        }
+
+        // engine_key
+        o = sentinel();
         assert!(unsafe { shanjie_engine_key(e, key(ESC, '\0'), ptr::null_mut()) } == 1, "key out NULL");
         assert!(unsafe { shanjie_engine_key(ptr::null_mut(), key(ESC, '\0'), &mut o) } == 1 && o.is_null(), "key engine NULL");
         for (kind, ch) in [(0, 0x61), (14, 0x61), (CHAR, 0xD800), (CHAR, 0x110000)] {
