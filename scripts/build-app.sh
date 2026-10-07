@@ -22,10 +22,10 @@ cd "$ROOT"
 fail() { echo "error: $*" >&2; exit 1; }
 
 # The model is not in git (docs/PLAN.md S2c); check it before spending time on the build.
-[ -f data/lm/bigram.sjlm ] || fail "data/lm/bigram.sjlm is missing. Download the model-v2 release asset:
-  gh release download model-v2 -R Nanako0129/shanjie -p bigram.sjlm -D data/lm"
+[ -f data/lm/bigram.sjlm ] || fail "data/lm/bigram.sjlm is missing. Download the model-v3 release asset:
+  gh release download model-v3 -R Nanako0129/shanjie -p bigram.sjlm -D data/lm"
 shasum -a 256 -c data/bigram.sjlm.sha256 >/dev/null \
-  || fail "data/lm/bigram.sjlm does not match data/bigram.sjlm.sha256; download model-v2 again"
+  || fail "data/lm/bigram.sjlm does not match data/bigram.sjlm.sha256; download model-v3 again"
 for f in data/lexicon/mcbpmf-data.txt data/lexicon/overlay-add.tsv data/lexicon/sandhi-add.tsv LICENSE LICENSES/McBopomofo-MIT.txt LICENSES/data.md; do
   [ -f "$f" ] || fail "$f is missing"
 done
