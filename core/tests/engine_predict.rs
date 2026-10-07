@@ -623,6 +623,37 @@ fn the_row_is_empty_when_the_cursor_is_not_at_the_end() {
     assert_no_row(&o);
 }
 
+#[test]
+fn right_and_end_at_the_end_keep_the_row() {
+    let (mut e, o) = build("我想", &[Syl("ㄋㄧˇ")], "");
+    let r = row(&o);
+    assert_passive(&o);
+    for k in [KeyKind::Right, KeyKind::End] {
+        let o = e.key(kind(k)).unwrap();
+        assert!(o.handled);
+        assert_eq!((row(&o), o.selected), (r.clone(), None), "{}: nothing moved, the row stays", k as u32);
+    }
+    // Left does move the cursor and clears it.
+    assert_no_row(&e.key(kind(KeyKind::Left)).unwrap());
+}
+
+/// The production path: `Engine::new` (demotion table loaded) and `load_lm` (index built eagerly).
+#[test]
+fn production_path_shows_milk_tea_and_equals_the_oracle() {
+    let mut e = Engine::new(&root().join("data/lexicon"), L).unwrap();
+    e.load_lm(&lm_path()).unwrap();
+    e.set_left_context(A.0);
+    let o = typ(&mut e, &[], "ㄋ");
+    assert!(row(&o).contains(&"奶茶".to_string()), "{:?}", row(&o));
+    assert_passive(&o);
+    assert_eq!(row(&o), words(&oracle(A.0, A.1, A.2)));
+    // and a state with long starts, through the same engine
+    e.reset(ResetMode::Discard);
+    e.set_left_context(F.0);
+    let o = typ(&mut e, &["ㄏㄨㄟˊ", "ㄌㄞˊ", "ㄗㄞˋ"], "ㄕ");
+    assert_eq!(row(&o), words(&oracle(F.0, F.1, F.2)));
+}
+
 // ---------- timing (contract section 7.4; `cargo test --release -- --ignored --nocapture timing`) ----------
 
 fn rss_kb() -> u64 {

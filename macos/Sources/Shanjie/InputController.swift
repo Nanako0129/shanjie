@@ -296,8 +296,6 @@ final class CandidatePanelAdapter: CandidatePanel {
     func show(_ candidates: [String], notes: [String?], selected: Int, columns: Int, first: Int, total: Int,
               lineRect: NSRect?) {
         let grid = columns > 0
-        let selectedRow = grid ? selected / columns : 0
-        func showsNumber(_ i: Int) -> Bool { selected >= 0 && (!grid || i / columns == selectedRow) }
 
         // Only the selection moved (section 8.7): keep the cells, change which one is selected and which
         // row shows numbers. The glass's content view is never replaced either way.

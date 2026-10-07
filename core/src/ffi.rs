@@ -224,7 +224,8 @@ pub unsafe extern "C" fn shanjie_engine_key(
 }
 
 /// s3b2 §8.2 mouse pick: chooses `candidate_first + index` of the last output through the same
-/// `choose()` as Enter. 2 when the candidates are closed or `index` is outside that output (state
+/// `choose()` as Enter; with the candidate window closed it selects from the V3 prediction row instead. 2 when
+/// there is neither a window nor a row, or `index` is outside that output (state
 /// unchanged).
 ///
 /// # Safety
