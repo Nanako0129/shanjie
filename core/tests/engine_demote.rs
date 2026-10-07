@@ -142,8 +142,8 @@ fn fixed_demoted_word_total_equals_top1() {
         let plain = decode(&s.off, &r, &s.lm, profile, 64).unwrap().swap_remove(0).0;
         assert!((plain - score - 2.0).abs() < 1e-9, "{plain} vs {score}");
         let mut e = engine(&s.on, profile);
-        let mut o = type_syls(&mut e, &r);
-        o = e.key(Key::new(KeyKind::Space)).unwrap();
+        type_syls(&mut e, &r);
+        let mut o = e.key(Key::new(KeyKind::Space)).unwrap();
         // The cursor is at the end: the candidates are the words ending there; walk to 睪丸.
         let mut found = false;
         for _ in 0..5000 {
@@ -220,12 +220,12 @@ fn measure_repick_of_the_demoted_word() {
         e.set_learning(true);
         let r = syls(reading);
         e.set_left_context(ctx);
-        let mut o = type_syls(&mut e, &r);
+        type_syls(&mut e, &r);
         // Teach: open the candidates of the span ending at the first two syllables, choose 睪丸, commit.
         for _ in 0..r.len() - 2 {
             e.key(Key::new(KeyKind::Left)).unwrap();
         }
-        o = e.key(Key::new(KeyKind::Space)).unwrap();
+        let mut o = e.key(Key::new(KeyKind::Space)).unwrap();
         for _ in 0..5000 {
             if o.candidates[o.selected.unwrap()] == "睪丸" {
                 break;
