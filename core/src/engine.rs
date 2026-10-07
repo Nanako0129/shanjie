@@ -3,6 +3,7 @@
 
 use crate::learn::{context_key, local_day, Learner, Record};
 use crate::learn_store::{LearnStore, Opened, StoreError, JOURNAL_MAX};
+use crate::predict::{predict, unit_of_syllable, Mode, Unit};
 use crate::lm::{decode_segment_learned, history, CappedLexicon, Demote, End, Learn, Lm, Profile};
 use crate::{decode_beam, Lexicon, NoLearning, BEAM_S1};
 use std::collections::{HashMap, HashSet};
@@ -19,6 +20,12 @@ pub const MAX_SYLLABLES: usize = 40;
 pub const PAGE_SIZE: usize = 9;
 /// Rows visible in the expanded grid (a-4: five, with a scroll bar).
 pub const GRID_ROWS: usize = 5;
+/// V3 engine contract section 1.2: at most this many items from the two long starts (last decoded word, the one before)
+/// go ahead of the cursor start's items; the rest of them follow. Chosen by the user from a measured trade-off
+/// (research log 2026-10-07): the first key keeps its own candidates, the second syllable still finds the long word.
+pub const PREDICT_LONG_CAP: usize = 3;
+/// Items in the prediction row.
+pub const PREDICT_MAX: usize = PAGE_SIZE;
 
 /// Initial (21), medial (3), final (13) symbols in the contract's column order.
 const SYMBOLS: &str = "ㄅㄆㄇㄈㄉㄊㄋㄌㄍㄎㄏㄐㄑㄒㄓㄔㄕㄖㄗㄘㄙㄧㄨㄩㄚㄛㄜㄝㄞㄟㄠㄡㄢㄣㄤㄥㄦ";
@@ -199,6 +206,14 @@ struct Fixed {
     pre: Option<String>,
 }
 
+/// One item of the prediction row: the word, the compatible reading that scored it, and the syllable index where
+/// the word starts.
+struct Pred {
+    word: String,
+    reading: Vec<String>,
+    start: usize,
+}
+
 struct Cands {
     /// (word, length in syllables)
     list: Vec<(String, usize)>,
@@ -263,6 +278,11 @@ pub struct Engine {
     fixed: Vec<Fixed>,
     display: String,
     cands: Option<Cands>,
+    /// V3: the passive prediction row (empty = none) and, once Tab entered it, the selected item.
+    pred: Vec<Pred>,
+    pred_sel: Option<usize>,
+    /// Set by the key rules that recompute the row (section 1.1); `key` recomputes after the rule ran.
+    pred_dirty: bool,
     /// S4: the Han tail (≤ 2 chars) of the text before the insertion point, from `set_left_context`.
     left: String,
     learning: bool,
@@ -343,6 +363,9 @@ impl Engine {
             fixed: Vec::new(),
             display: String::new(),
             cands: None,
+            pred: Vec::new(),
+            pred_sel: None,
+            pred_dirty: false,
             left: String::new(),
             learning: false,
             eps_global: crate::lm::LEARN_EPS_GLOBAL,
@@ -521,6 +544,8 @@ impl Engine {
         let demote = Demote::parse(&demote).ok_or(EngineError::LoadFailed)?;
         let lm = Lm::load(path).map_err(|_| EngineError::LoadFailed)?;
         let capped = CappedLexicon::new(self.lex.clone(), &overlay, &lm, Some(&demote)).ok_or(EngineError::LoadFailed)?;
+        // Built now, not at the first key: the index takes hundreds of ms (V3 engine contract section 1.2).
+        capped.predict_index(&lm);
         self.lm = Some(LmState { lm: Arc::new(lm), capped: Arc::new(capped) });
         Ok(())
     }
@@ -570,6 +595,7 @@ impl Engine {
     /// engine resets itself.
     pub fn set_demote(&mut self, on: bool) -> Result<Output, EngineError> {
         self.demote = on;
+        self.clear_pred();
         if let Err(e) = self.refresh() {
             self.clear_all();
             return Err(e);
@@ -581,6 +607,7 @@ impl Engine {
     /// composition and return the snapshot. On a decode failure the engine resets itself.
     pub fn set_profile(&mut self, profile: Profile) -> Result<Output, EngineError> {
         self.profile = profile;
+        self.clear_pred();
         if let Err(e) = self.refresh() {
             self.clear_all();
             return Err(e);
@@ -622,11 +649,104 @@ impl Engine {
     }
 
     pub fn key(&mut self, k: Key) -> Result<Output, EngineError> {
-        let r = self.dispatch(k);
-        if r.is_err() {
-            self.clear_all();
+        self.pred_dirty = false;
+        let mut r = self.dispatch(k);
+        match &mut r {
+            Err(_) => self.clear_all(),
+            Ok(o) if std::mem::take(&mut self.pred_dirty) => {
+                self.recompute_pred();
+                (o.candidates, o.selected, o.total) = self.pred_view();
+            }
+            Ok(_) => {}
         }
         r
+    }
+
+    fn clear_pred(&mut self) {
+        self.pred.clear();
+        self.pred_sel = None;
+    }
+
+    /// The row as output fields (candidates, selected, total); `columns` and `first` stay 0.
+    fn pred_view(&self) -> (Vec<String>, Option<usize>, u32) {
+        (self.pred.iter().map(|p| p.word.clone()).collect(), self.pred_sel, self.pred.len() as u32)
+    }
+
+    /// V3 engine contract section 1.2: one `predict` per word start, merged. Empty without a model, when the cursor
+    /// is not at the end or the candidate window is open.
+    fn recompute_pred(&mut self) {
+        self.clear_pred();
+        let n = self.syls.len();
+        let (Some(st), true) = (self.lm.clone(), self.cursor == n && self.cands.is_none()) else { return };
+        let idx = st.capped.predict_index(&st.lm);
+        let lam = self.profile.lambda();
+        let pending: Vec<char> = self.pend.iter().flatten().copied().collect();
+        let mut long_starts = Vec::new();
+        let mut pos = n;
+        for (w, _, is_punct, _) in self.path.iter().rev().take(2) {
+            pos = pos.saturating_sub(if *is_punct { 1 } else { w.chars().count() });
+            long_starts.push(pos);
+        }
+        long_starts.reverse(); // far to near
+        let disp: Vec<char> = self.display.chars().collect();
+        let off = |i: usize| (0..i).map(|j| self.token_width(j)).sum::<usize>().min(disp.len());
+        let query = |s: usize| -> Vec<Pred> {
+            if (s..n).any(|i| self.is_punct(i)) {
+                return Vec::new();
+            }
+            let mut units: Vec<Unit> = self.syls[s..n].iter().filter_map(|y| unit_of_syllable(y)).collect();
+            if units.len() != n - s {
+                return Vec::new();
+            }
+            if !pending.is_empty() {
+                units.push(Unit { chars: pending.clone(), done: false, tone: None });
+            }
+            if units.is_empty() {
+                return Vec::new();
+            }
+            let before: String = disp[..off(s)].iter().collect();
+            let key = context_key(&format!("{}{before}", self.left));
+            let v = history(if key == crate::learn::SENTINEL { "" } else { &key }, &st.lm);
+            let shown: String = disp[off(s)..off(n)].iter().collect();
+            predict(idx, &st.lm, lam, v, &units, Mode::P, PREDICT_MAX)
+                .into_iter()
+                .filter(|(w, ..)| *w != shown)
+                .map(|(word, _, _, reading)| Pred { word, reading, start: s })
+                .collect()
+        };
+        let mut long = Vec::new();
+        let mut seen = HashSet::new();
+        for s in long_starts {
+            if seen.insert(s) {
+                long.extend(query(s));
+            }
+        }
+        let mut words = HashSet::new();
+        long.retain(|p| words.insert(p.word.clone()));
+        let rest = long.split_off(PREDICT_LONG_CAP.min(long.len()));
+        let cursor_items = if pending.is_empty() { Vec::new() } else { query(n) };
+        let mut words = HashSet::new();
+        self.pred = long.into_iter().chain(cursor_items).chain(rest).filter(|p| words.insert(p.word.clone())).take(PREDICT_MAX).collect();
+    }
+
+    /// Section 2: replace `syls[start..cursor]` by the item's reading, fix the word over it, move the cursor behind
+    /// it. `pre` stays `None`: a prediction is not a re-pick, so nothing is learned from it.
+    fn choose_pred(&mut self, i: usize) -> Result<Output, EngineError> {
+        let Pred { word, reading, start } = self.pred.swap_remove(i);
+        self.clear_pred();
+        self.pend = [None; 3];
+        let (m, end) = (reading.len(), self.cursor);
+        self.fixed.retain(|f| !(f.start < end && start < f.end));
+        self.syls.splice(start..end, reading);
+        self.fixed.push(Fixed { start, end: start + m, word, pre: None });
+        self.fixed.sort_by_key(|f| f.start);
+        self.cursor = start + m;
+        self.refresh()?;
+        if self.syls.len() >= MAX_SYLLABLES {
+            let commit = self.take_commit();
+            return Ok(self.view(true, commit));
+        }
+        self.handled()
     }
 
     fn clear_all(&mut self) {
@@ -638,6 +758,7 @@ impl Engine {
         self.display.clear();
         self.path.clear();
         self.cands = None;
+        self.clear_pred();
     }
 
     fn pending(&self) -> String {
@@ -661,7 +782,10 @@ impl Engine {
                 let columns = if c.expanded { PAGE_SIZE as u32 } else { 0 };
                 (list, Some(c.sel - first), columns, first as u32, c.list.len() as u32)
             }
-            None => (Vec::new(), None, 0, 0, 0),
+            None => {
+                let (list, sel, total) = self.pred_view();
+                (list, sel, 0, 0, total)
+            }
         };
         Output { handled, commit, preedit, cursor_utf16, candidates, selected, columns, first, total }
     }
@@ -765,6 +889,10 @@ impl Engine {
     fn dispatch(&mut self, k: Key) -> Result<Output, EngineError> {
         let m = k.modifiers;
         let is_char = k.kind == KeyKind::Char;
+        // V3 section 3: ⌘⌫ while the prediction row is entered is swallowed, before rule 1 passes ⌘ keys on.
+        if k.kind == KeyKind::Backspace && m & MOD_COMMAND != 0 && self.pred_sel.is_some() {
+            return self.handled();
+        }
         // §1.5: ⌘⌫ with candidates open forgets the highlighted word (before rule 1 passes ⌘ keys on).
         if k.kind == KeyKind::Backspace && m & MOD_COMMAND != 0 && self.cands.is_some() {
             self.forget_highlighted()?;
@@ -774,6 +902,35 @@ impl Engine {
         // 1: pass through, no state change.
         if m & (MOD_OPTION | MOD_COMMAND | MOD_CAPSLOCK) != 0 || (m & MOD_CONTROL != 0 && !ctrl_bs) {
             return self.passthrough(String::new());
+        }
+        // V3 section 3: the entered prediction row, between rules 1 and 2. Any other key leaves it and goes on.
+        if let Some(sel) = self.pred_sel {
+            let len = self.pred.len();
+            let digit = (is_char && m == 0 && ('1'..='9').contains(&k.ch)).then(|| k.ch as usize - '1' as usize);
+            match (k.kind, digit) {
+                (KeyKind::Char, Some(d)) => {
+                    if d < len {
+                        return self.choose_pred(d);
+                    }
+                    return self.handled();
+                }
+                (KeyKind::Left, _) => self.pred_sel = Some(sel.saturating_sub(1)),
+                (KeyKind::Right, _) => self.pred_sel = Some((sel + 1).min(len - 1)),
+                (KeyKind::Tab, _) if m & MOD_SHIFT == 0 => self.pred_sel = Some((sel + 1).min(len - 1)),
+                (KeyKind::Tab, _) | (KeyKind::Esc, _) => self.pred_sel = None,
+                (KeyKind::Enter, _) => return self.choose_pred(sel),
+                _ => self.pred_sel = None,
+            }
+            if matches!(k.kind, KeyKind::Left | KeyKind::Right | KeyKind::Tab | KeyKind::Esc) {
+                return self.handled();
+            }
+        }
+        // Section 1.1: every other change clears the row; the rules below that recompute or keep it say so.
+        let old = std::mem::take(&mut self.pred);
+        if k.kind == KeyKind::Tab && m == 0 && !old.is_empty() && self.cands.is_none() {
+            self.pred = old;
+            self.pred_sel = Some(0);
+            return self.handled();
         }
         // 2: punctuation.
         let punct = if ctrl_bs {
@@ -807,22 +964,27 @@ impl Engine {
             // 9-13
             if let Some((col, sym)) = zy {
                 self.pend[col] = Some(sym);
+                self.pred_dirty = true;
             } else if let Some(t) = tone {
-                return self.finish_syllable(t);
+                return self.finish_syllable(t, old);
             } else if k.kind == KeyKind::Backspace {
                 // Row 11: the last symbol in display order (final, then medial, then initial), as Apple Zhuyin and
                 // McBopomofo do (measured 2026-10-06: ㄉㄨㄟ, ㄅ replaces ㄉ, then Backspace gives ㄅㄨ, then ㄅ).
                 if let Some(col) = (0..3).rev().find(|&c| self.pend[c].is_some()) {
                     self.pend[col] = None;
                 }
+                self.pred_dirty = true;
             } else if k.kind == KeyKind::Esc {
                 self.pend = [None; 3];
+            } else {
+                self.pred = old; // the key does nothing
             }
             return self.handled();
         }
         // 14
         if let Some((col, sym)) = zy {
             self.pend[col] = Some(sym);
+            self.pred_dirty = true;
             return self.handled();
         }
         if self.syls.is_empty() {
@@ -839,8 +1001,8 @@ impl Engine {
         let n = self.syls.len();
         match k.kind {
             KeyKind::Space | KeyKind::Down => self.open_candidates(),
-            KeyKind::Up => {}
-            KeyKind::Char if tone.is_some() => {}
+            KeyKind::Up => self.pred = old,
+            KeyKind::Char if tone.is_some() => self.pred = old,
             KeyKind::Left => self.cursor = self.cursor.saturating_sub(1),
             KeyKind::Right => self.cursor = (self.cursor + 1).min(n),
             KeyKind::Home => self.cursor = 0,
@@ -850,7 +1012,7 @@ impl Engine {
                 self.remove_syllable(self.cursor)?;
             }
             KeyKind::Delete if self.cursor < n => self.remove_syllable(self.cursor)?,
-            KeyKind::Backspace | KeyKind::Delete => {}
+            KeyKind::Backspace | KeyKind::Delete => self.pred = old,
             KeyKind::Enter => {
                 let commit = self.take_commit();
                 return Ok(self.view(true, commit));
@@ -938,7 +1100,17 @@ impl Engine {
     /// s3b2 §8.2 mouse pick: `index` is a position in the last output's `candidates`. `Ok(None)` when
     /// the candidates are closed or `index` is outside that output (state unchanged).
     pub fn pick(&mut self, index: usize) -> Result<Option<Output>, EngineError> {
-        let Some(c) = &self.cands else { return Ok(None) };
+        let Some(c) = &self.cands else {
+            // V3 section 4: a click on the prediction row selects at once, entered or not.
+            if index >= self.pred.len() {
+                return Ok(None);
+            }
+            let r = self.choose_pred(index);
+            if r.is_err() {
+                self.clear_all();
+            }
+            return r.map(Some);
+        };
         let (first, n) = c.window();
         if index >= n {
             return Ok(None);
@@ -951,14 +1123,16 @@ impl Engine {
     }
 
     /// §2: complete the pending syllable with tone 0..=4 (0 = space = tone 1).
-    fn finish_syllable(&mut self, tone: usize) -> Result<Output, EngineError> {
+    fn finish_syllable(&mut self, tone: usize, old: Vec<Pred>) -> Result<Output, EngineError> {
         let mut syl = self.pending();
         // tone index 1..=4 -> marks[1..=4]; space (0) -> unmarked tone 1
         syl.push_str(TONE_MARKS[tone]);
         if self.lex.entries(std::slice::from_ref(&syl)).is_empty() {
+            self.pred = old; // section 1.1: a syllable the lexicon lacks changes nothing
             return self.handled();
         }
         self.pend = [None; 3];
+        self.pred_dirty = true;
         self.insert_token(syl, None)
     }
 

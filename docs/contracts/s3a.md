@@ -50,7 +50,13 @@
 
 | # | 狀態 | 按鍵 | 行為 |
 |---|---|---|---|
+| 0 | 預測列已進入 | ⌘⌫ | 吃掉（已處理），不動作；判斷在第 1 條之前（V3，`v3-engine.md` §3） |
 | 1 | 任何 | 帶 COMMAND、OPTION、CAPSLOCK，或帶 CONTROL 但不是 Ctrl+\ | 不處理（直通），**不改任何狀態** |
+| 1a | 預測列已進入 | 1–9 | 選預測列的第 n 個（超過個數就吃掉、不動作）；選取見 `v3-engine.md` §2 |
+| 1b | 預測列已進入 | ←→、Tab（無修飾鍵） | 移動選取（Tab 往後，到最後一個停住） |
+| 1c | 預測列已進入 | Shift+Tab、Esc | 退回未進入（預測列保留） |
+| 1d | 預測列已進入 | Enter | 選目前選取的 |
+| 1e | 預測列已進入 | 其他鍵（含 Backspace） | 退回未進入，再從第 2 條起處理這個鍵。Backspace 有未完成音節時照第 11 條刪最後一個符號並重算預測列（和第 7 條不同，使用者選擇）；沒有未完成音節時照第 18 條 |
 | 2 | 任何 | §4 的標點鍵（Shift 表與單按表）、Ctrl+\ | 丟掉未完成音節、關閉候選，**把標點插入組字區的游標處**（不送出；2026-10-04 起，見 `docs/contracts/s3d-punctuation.md`；原本是「送出組字區，再送出標點」） |
 | 3 | 候選開啟 | 1–9 | 收合：選目前頁的第 n 個（超出本頁則忽略），關閉候選。展開：選選取所在那一排的第 n 個（每排 9 個；最後一排不足 n 個則吃掉、不動作，s3b2 §8.2、§9） |
 | 4 | 候選開啟 | ↑↓、←→ | 收合：↑←上一個、→下一個（跨頁），↓ 展開成網格（選取不動）。展開（一律 9 欄，一排是一頁，展開時選取所在的那一頁在最上面，s3b2 §9）：↓ 下一排同一個位置（最後一排較短時到該排最後一個，已在最後一排時不動）、↑ 上一排（在最上面那排但不是整份清單的第 0 排時往上捲一排；只有第 0 排才收回，選取不變）、←→ 上／下一個（跨列）。←→ 和系統注音一樣逐一移動（2026-10-04 使用者實測後改；原本是翻頁；2026-10-05 起 ↓ 改為展開，s3b2 §8.2） |
@@ -58,6 +64,7 @@
 | 6 | 候選開啟 | Enter | 選目前選取的，關閉候選 |
 | 7 | 候選開啟 | Esc、Backspace | 關閉候選，不改變 |
 | 8 | 候選開啟 | 其他鍵 | 關閉候選（不改變），再從第 9 條起處理這個鍵 |
+| 8a | 預測列未進入且不是空的（候選窗關閉） | Tab（無修飾鍵） | 進入預測列，選取第 0 個（插在第 9 條之前）；預測列是空的時照第 13、21 條 |
 | 9 | 有未完成音節 | 注音鍵 | 放進對應欄位 |
 | 10 | 有未完成音節 | 聲調鍵、空白鍵 | 完成音節（§2） |
 | 11 | 有未完成音節 | Backspace | 刪掉顯示位置最後的符號（韻母→介音→聲母；2026-10-06 實測蘋果注音與小麥注音） |
@@ -74,6 +81,7 @@
 | 22a | 組字區空 | 聲調鍵（空白鍵以外） | 把該聲調符號（ˊ ˇ ˋ ˙）放進組字區，和第 2 條的標點相同（2026-10-05 起；蘋果注音實測按 3 打出「ˇ」但立刻送出，使用者選擇留在組字區，Backspace 可刪、Enter 才送出；原本直通成數字） |
 | 22 | 組字區空 | 其他鍵 | 不處理（直通） |
 
+- **預測列（V3，`docs/contracts/v3-engine.md`）**：有載入語言模型、游標在組字區尾端、候選窗關閉時，第 9、10、11、14 條處理完之後重算（第 10 條遇到詞庫沒有的音節而不完成時不變）；其他所有狀態變化都清掉（標點、22a、開候選窗與候選窗內的鍵、游標移動、刪音節、送出、Esc、`reset`、`set_profile`／`set_demote`、`pick`、選了預測、回傳碼 4）；什麼都沒改的鍵（↑、不起作用的聲調鍵、游標在邊界的 Backspace／Delete、有未完成音節時的其他鍵、第 1 條的直通）保留預測列。預測列透過候選欄位輸出（§6）。
 - 「注音鍵」與「聲調鍵」指 §1 表中的鍵、且沒按 Shift。
 - 第 1 條的直通不改任何狀態：一段組字中間插入任意個第 1 條的鍵，之後的輸出必須和沒按過時逐欄位相同。
 - 中英切換：用系統的「使用大寫鎖定鍵切換輸入方式」（使用者 2026-10-03 選 Caps Lock），切換時系統停用本輸入法；殼不保留中英狀態，原本寫的 Shift 單按切換不做（見 `docs/contracts/s3b.md` §6）。
@@ -129,7 +137,7 @@ typedef struct {
   uint32_t cursor_utf16;      // 游標在 preedit 中的位置，單位是 UTF-16 code unit（給 NSRange 用）；在未完成音節之後
   uint32_t candidate_count;   // 這次輸出的候選數：收合時是目前這一頁（0–9），展開時是可見的排（最多 5 × 9）
   const char *const *candidates; // candidate_count 為 0 時是 NULL
-  int32_t candidate_selected; // 在這次輸出的 candidates 裡的選取位置；沒開候選時為 -1
+  int32_t candidate_selected; // 在這次輸出的 candidates 裡的選取位置；沒開候選時為 -1。V3：-1 而 candidate_count > 0 是未進入的預測列（不顯示數字與選取；columns 0、first 0、total = count）；>= 0 是候選窗或已進入的預測列
   uint32_t candidate_columns; // s3b2 §8.2：0 = 收合的一列；展開時一律 9（一排一頁，s3b2 §9）
   uint32_t candidate_first;   // candidates[0] 在整份候選清單的位置；沒開候選時為 0
   uint32_t candidate_total;   // 整份候選清單的數量；沒開候選時為 0
@@ -142,7 +150,8 @@ int32_t shanjie_engine_key(ShanjieEngine *engine, ShanjieKey key, ShanjieOutput 
 int32_t shanjie_engine_reset(ShanjieEngine *engine, uint32_t mode, ShanjieOutput **out); // mode 0 送出後清空、1 丟棄
 void    shanjie_output_free(ShanjieOutput *output);
 // s3b2 §8.2 新增：滑鼠點選。index 是這次輸出 candidates 裡的位置；核心選 candidate_first + index，走和 Enter 同一個 choose()。
-// 1 = engine 或 out 為 NULL；2 = 候選沒開或 index 超出這次輸出（狀態不變）；4 = 內部錯誤（核心丟棄組字）；非 0 時 *out 是 NULL
+// V3：候選窗關閉但有預測列（進入或未進入）時，選預測列的第 index 個（點擊是明確的選取；不學習）。
+// 1 = engine 或 out 為 NULL；2 = 候選窗和預測列都沒有，或 index 超出這次輸出（狀態不變）；4 = 內部錯誤（核心丟棄組字）；非 0 時 *out 是 NULL
 int32_t shanjie_engine_pick(ShanjieEngine *engine, uint32_t index, ShanjieOutput **out);
 // S2c 新增（docs/PLAN.md §S2c）
 int32_t shanjie_engine_load_lm(ShanjieEngine *engine, const char *path);               // 不改目前的組字區顯示

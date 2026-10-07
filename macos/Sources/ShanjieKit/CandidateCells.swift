@@ -158,7 +158,7 @@ public final class CandidateCells {
         var kept = Set<ObjectIdentifier>()
         for (i, text) in candidates.enumerated() {
             let numberText = String(grid ? i % newColumns + 1 : i + 1)
-            let shows = !grid || i / newColumns == selectedRow
+            let shows = selected >= 0 && (!grid || i / newColumns == selectedRow)
             let old = newFirst + i - first
             if sameMode, cells.indices.contains(old), cells[old].text == text, cells[old].note == notes[i],
                cells[old].numberText == numberText {

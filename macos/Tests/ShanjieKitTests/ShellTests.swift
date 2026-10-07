@@ -50,6 +50,27 @@ final class ShellTests: XCTestCase {
         XCTAssertEqual(c.client.text, "")
     }
 
+    /// V3 (docs/contracts/v3-engine.md section 5): the first key shows the prediction row with no selection and no
+    /// numbers; Tab enters it, selects the first item and shows the numbers.
+    func testPredictionRowShowsNoNumbersUntilTabEnters() throws {
+        let c = Controller(makeShell())
+        c.session.activate()
+        c.type("s")  // ㄋ
+        XCTAssertTrue(c.panel.visible)
+        XCTAssertEqual(c.panel.selected, -1)
+        XCTAssertFalse(c.panel.items.isEmpty)
+        let passive = CandidateCells()
+        let before = passive.update(candidates: c.panel.items, notes: c.panel.items.map { _ in nil },
+                                    selected: c.panel.selected, first: c.panel.first, columns: c.panel.columns)
+        XCTAssertTrue(before.cells.allSatisfy { !$0.showsNumber }, "no number on the not-entered row")
+        XCTAssertTrue(c.press(48))  // Tab
+        XCTAssertEqual(c.panel.selected, 0)
+        let entered = CandidateCells()
+        let after = entered.update(candidates: c.panel.items, notes: c.panel.items.map { _ in nil },
+                                   selected: c.panel.selected, first: c.panel.first, columns: c.panel.columns)
+        XCTAssertTrue(after.cells.allSatisfy(\.showsNumber), "numbers show once entered")
+    }
+
     func testLineRectReachesThePanel() {
         let c = Controller(makeShell())
         c.session.activate()
@@ -73,14 +94,17 @@ final class ShellTests: XCTestCase {
         let c = Controller(makeShell())
         c.session.activate()
         c.type("su3 ")
-        XCTAssertEqual(c.client.lineAsks, 1)
+        // V3: every key of the composition shows or updates the prediction row, so each of them asked once
+        // (s, su, su3); the space only opens the candidate window over the same preedit and cursor.
+        let asked = c.client.lineAsks
+        XCTAssertEqual(asked, 3)
         XCTAssertTrue(c.press(125))  // ↓ expands
         XCTAssertTrue(c.press(125))  // ↓ one row
         XCTAssertTrue(c.press(124))  // → one cell
-        XCTAssertEqual(c.client.lineAsks, 1, "selection moves must not ask the client again")
+        XCTAssertEqual(c.client.lineAsks, asked, "selection moves must not ask the client again")
         XCTAssertEqual(c.panel.lineRect, c.client.line)
         c.type("cl3 ")
-        XCTAssertGreaterThan(c.client.lineAsks, 1, "a new composition asks again")
+        XCTAssertGreaterThan(c.client.lineAsks, asked, "a new composition asks again")
     }
 
     /// s3b2 section 8: down expands (the panel is told the columns, first and total); a click on a
@@ -290,7 +314,10 @@ final class ShellTests: XCTestCase {
         b.type("c")  // ㄏ
         XCTAssertEqual(a.client.text, "你")
         XCTAssertEqual(a.client.marked, "")
-        XCTAssertFalse(a.panel.visible)
+        // The panel is the shell's one panel: A's candidate window is gone (selection -1) and it now shows B's
+        // prediction row for ㄏ (V3), not A's candidates.
+        XCTAssertEqual(a.panel.selected, -1)
+        XCTAssertTrue(b.panel.visible)
         XCTAssertEqual(b.client.marked, "ㄏ")
         XCTAssertFalse(b.client.calls.contains { if case .insert = $0 { true } else { false } })
         b.type("l3")
