@@ -28,7 +28,7 @@ fn shared() -> &'static Shared {
         let lex = load_lexicon(&root().join("data/lexicon")).unwrap();
         let lm = Lm::load(&lm_path()).unwrap();
         let overlay = std::fs::read_to_string(root().join("data/lexicon/overlay-add.tsv")).unwrap();
-        let capped = Arc::new(CappedLexicon::new(lex.clone(), &overlay, &lm));
+        let capped = Arc::new(CappedLexicon::new(lex.clone(), &overlay, &lm, None).unwrap());
         Shared { lex, lm: Arc::new(lm), capped }
     })
 }
@@ -50,7 +50,7 @@ fn tiny(engine_text: &str, capped_text: &str) -> Engine {
     let s = shared();
     let lex = Arc::new(Lexicon::parse(engine_text).unwrap());
     let cl = Arc::new(Lexicon::parse(capped_text).unwrap());
-    let capped = Arc::new(CappedLexicon::new(cl, "", &s.lm));
+    let capped = Arc::new(CappedLexicon::new(cl, "", &s.lm, None).unwrap());
     let mut e = Engine::with_lexicon(lex, L);
     e.set_lm(s.lm.clone(), capped);
     e.set_today(Some(DAY));

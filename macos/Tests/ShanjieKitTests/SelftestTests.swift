@@ -11,7 +11,7 @@ final class SelftestTests: XCTestCase {
     }
 
     func testFailsWithoutTheModel() throws {
-        let res = try XCTUnwrap(TestData.resources(only: ["mcbpmf-data.txt", "overlay-add.tsv", "sandhi-add.tsv"]))
+        let res = try XCTUnwrap(TestData.resources(only: ["mcbpmf-data.txt", "overlay-add.tsv", "sandhi-add.tsv", "demote.tsv"]))
         XCTAssertNotEqual(Selftest.run(resources: res), 0)
     }
 
@@ -21,7 +21,7 @@ final class SelftestTests: XCTestCase {
     }
 
     func testFailsWithAModelThatIsNotOne() throws {
-        let res = try XCTUnwrap(TestData.resources(only: ["mcbpmf-data.txt", "overlay-add.tsv", "sandhi-add.tsv"]))
+        let res = try XCTUnwrap(TestData.resources(only: ["mcbpmf-data.txt", "overlay-add.tsv", "sandhi-add.tsv", "demote.tsv"]))
         try Data("not a model".utf8).write(to: res.appendingPathComponent("bigram.sjlm"))
         XCTAssertNotEqual(Selftest.run(resources: res), 0)
     }

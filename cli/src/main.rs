@@ -1,7 +1,7 @@
 use core::engine::load_lexicon;
 use core::eval::*;
 use core::learn::{context_key, SENTINEL};
-use core::lm::{decode_from, history, CappedLexicon, Lm, Profile};
+use core::lm::{decode_from, history, CappedLexicon, Demote, Lm, Profile};
 use core::{decode_beam, Error, Lexicon, NoLearning, Syls, BEAM_S1};
 use std::fs;
 use std::io::Write;
@@ -73,7 +73,7 @@ fn three_field_rows(text: &str) -> Vec<(String, Syls, String)> {
 /// S2c LM mode (docs/PLAN.md S2c): the one summary line of lm_eval.py, plus the optional `--dump`.
 fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     let (mut lm_path, mut profile, mut name, mut dev, mut rows_file) = (None, None, None, None, None);
-    let (mut limit, mut set, mut dump, mut ctx_mode) = (None::<usize>, None, None, false);
+    let (mut limit, mut set, mut dump, mut ctx_mode, mut demote) = (None::<usize>, None, None, false, true);
     let mut it = args.iter();
     while let Some(a) = it.next() {
         let mut val = || it.next().cloned().ok_or_else(|| "missing option value".to_string());
@@ -88,6 +88,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
             "--set" => set = Some(val()?),
             "--dump" => dump = Some(val()?),
             "--context" => ctx_mode = true,
+            "--no-demote" => demote = false,
             _ => return Err("unknown argument".into()),
         }
     }
@@ -101,7 +102,10 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     let dir = root().join("data/lexicon");
     let lex = load_lexicon(&dir).map_err(|_| "cannot load lexicon".to_string())?;
     let overlay = fs::read_to_string(dir.join("overlay-add.tsv")).map_err(|e| format!("cannot read overlay ({:?})", e.kind()))?;
-    let capped = CappedLexicon::new(lex.clone(), &overlay, &lm);
+    let demote_rows = fs::read_to_string(dir.join("demote.tsv")).map_err(|e| format!("cannot read demote.tsv ({:?})", e.kind()))?;
+    let table = Demote::parse(&demote_rows).filter(|d| d.check(&lex)).ok_or("bad demote.tsv")?;
+    // The table is always loaded, so a malformed one stops the run even with --no-demote.
+    let capped = CappedLexicon::new(lex.clone(), &overlay, &lm, Some(&table)).ok_or("bad demote.tsv")?;
 
     let read = |p: &Path| fs::read_to_string(p).map_err(|e| format!("cannot read file ({:?})", e.kind()));
     // (display name, [(truth, reading)])
@@ -151,7 +155,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
         // S2h: the first word is conditioned on the row's context, cut like the engine cuts it.
         let left = if ctx_mode { Some(context_key(ctx)) } else { None };
         let start = left.as_deref().filter(|k| *k != SENTINEL).map_or("<s>", |k| history(k, &lm));
-        let nb = decode_from(&capped, syls, &lm, prof, BEAM_S1, start).map_err(|e| e.to_string())?;
+        let nb = decode_from(&capped, syls, &lm, prof, BEAM_S1, start, demote).map_err(|e| e.to_string())?;
         let mut surf: Vec<String> = nb.iter().map(|(_, ws)| ws.concat()).collect();
         let t = len.apply(truth);
         top1 += (len.apply(&surf[0]) == t) as usize;
@@ -167,7 +171,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
         d.flush().map_err(|_| "cannot write dump".to_string())?;
     }
     let sha = sha256_hex(firsts.join("\n").as_bytes());
-    println!("## {name}  lm-{profile_name}{}  {{'n': {}, 'top1': {top1}, 'oracle@64': {o64}, 'top1_sha256': '{sha}'}}", if ctx_mode { "+ctx" } else { "" }, rows.len());
+    println!("## {name}  lm-{profile_name}{}{}  {{'n': {}, 'top1': {top1}, 'oracle@64': {o64}, 'top1_sha256': '{sha}'}}", if ctx_mode { "+ctx" } else { "" }, if demote { "" } else { "-nodemote" }, rows.len());
     Ok(())
 }
 

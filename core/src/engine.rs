@@ -3,7 +3,7 @@
 
 use crate::learn::{context_key, local_day, Learner, Record};
 use crate::learn_store::{LearnStore, Opened, StoreError, JOURNAL_MAX};
-use crate::lm::{decode_segment_learned, history, CappedLexicon, End, Learn, Lm, Profile};
+use crate::lm::{decode_segment_learned, history, CappedLexicon, Demote, End, Learn, Lm, Profile};
 use crate::{decode_beam, Lexicon, NoLearning, BEAM_S1};
 use std::collections::{HashMap, HashSet};
 use std::panic::{catch_unwind, AssertUnwindSafe};
@@ -249,9 +249,11 @@ pub struct Engine {
     data_dir: Option<PathBuf>,
     lm: Option<LmState>,
     profile: Profile,
-    /// Words of the current best path with the lp each was scored with, and whether the word is a
-    /// punctuation token (LM mode only).
-    path: Vec<(String, f64, bool)>,
+    /// Whether the table applies (default on; `set_demote`).
+    demote: bool,
+    /// Words of the current best path with the lp each was scored with, whether the word is a
+    /// punctuation token, and its demotion delta (LM mode only).
+    path: Vec<(String, f64, bool, f64)>,
     /// s3e: punctuation mark -> its alternatives (built-in default until `set_punctuation`).
     punct: HashMap<char, Vec<String>>,
     layout: Layout,
@@ -314,6 +316,12 @@ fn join_overlays(mut overlay: String, sandhi: &str) -> String {
 impl Engine {
     pub fn new(data_dir: &Path, layout: Layout) -> Result<Engine, EngineError> {
         let mut e = Engine::with_lexicon(load_lexicon(data_dir)?, layout);
+        // Required like the other data files, and every row must name an entry of the lexicon (contract
+        // sw-sensitive-demote section 2); `load_lm` reads it again to resolve it against the capped lexicon.
+        let demote = std::fs::read_to_string(data_dir.join("demote.tsv")).map_err(|_| EngineError::LoadFailed)?;
+        if !Demote::parse(&demote).is_some_and(|d| d.check(&e.lex)) {
+            return Err(EngineError::LoadFailed);
+        }
         e.data_dir = Some(data_dir.to_path_buf());
         Ok(e)
     }
@@ -325,6 +333,7 @@ impl Engine {
             data_dir: None,
             lm: None,
             profile: Profile::Chat,
+            demote: true,
             path: Vec::new(),
             punct: default_punct(),
             layout,
@@ -508,8 +517,10 @@ impl Engine {
     pub fn load_lm(&mut self, path: &Path) -> Result<(), EngineError> {
         let dir = self.data_dir.as_ref().ok_or(EngineError::LoadFailed)?;
         let overlay = std::fs::read_to_string(dir.join("overlay-add.tsv")).map_err(|_| EngineError::LoadFailed)?;
+        let demote = std::fs::read_to_string(dir.join("demote.tsv")).map_err(|_| EngineError::LoadFailed)?;
+        let demote = Demote::parse(&demote).ok_or(EngineError::LoadFailed)?;
         let lm = Lm::load(path).map_err(|_| EngineError::LoadFailed)?;
-        let capped = CappedLexicon::new(self.lex.clone(), &overlay, &lm);
+        let capped = CappedLexicon::new(self.lex.clone(), &overlay, &lm, Some(&demote)).ok_or(EngineError::LoadFailed)?;
         self.lm = Some(LmState { lm: Arc::new(lm), capped: Arc::new(capped) });
         Ok(())
     }
@@ -554,6 +565,18 @@ impl Engine {
         self.lm = Some(LmState { lm, capped });
     }
 
+    /// Whether the demotion table applies (default on, remembered even before a model is loaded);
+    /// recomputes the composition and returns the snapshot, like `set_profile`. On a decode failure the
+    /// engine resets itself.
+    pub fn set_demote(&mut self, on: bool) -> Result<Output, EngineError> {
+        self.demote = on;
+        if let Err(e) = self.refresh() {
+            self.clear_all();
+            return Err(e);
+        }
+        self.handled()
+    }
+
     /// Switch the profile (default chat; remembered even before a model is loaded), recompute the
     /// composition and return the snapshot. On a decode failure the engine resets itself.
     pub fn set_profile(&mut self, profile: Profile) -> Result<Output, EngineError> {
@@ -566,7 +589,7 @@ impl Engine {
     }
 
     /// Total score of the current best path as `lm.decode` scores one: every word (fixed words with
-    /// their capped `lp_F`) adds `word(λ, previous, w, lp)`, then `eos` of the last word. Punctuation
+    /// their capped `lp_F`) adds `word(λ, previous, w, lp) − δ` (δ: the demotion of the entry, 0 when demotion is off), then `eos` of the last word. Punctuation
     /// splits it into sentences (s3d §4): the stretch before it closes with `eos`, the next starts from
     /// `<s>`, and the punctuation itself scores nothing. `None` without a model or without words.
     pub fn total_score(&self) -> Option<f64> {
@@ -577,7 +600,7 @@ impl Engine {
         let mut prev = history(&self.left, &st.lm);
         let mut total = 0.0;
         let (mut any, mut open) = (false, false);
-        for (w, lp, is_punct) in &self.path {
+        for (w, lp, is_punct, delta) in &self.path {
             if *is_punct {
                 if open {
                     total += st.lm.eos(lam, prev);
@@ -585,7 +608,7 @@ impl Engine {
                 (prev, open) = ("<s>", false);
                 continue;
             }
-            total += st.lm.word(lam, prev, w, *lp);
+            total += st.lm.word(lam, prev, w, *lp) - delta;
             (prev, any, open) = (w, true, true);
         }
         any.then(|| if open { total + st.lm.eos(lam, prev) } else { total })
@@ -676,13 +699,16 @@ impl Engine {
         // The clock (a libc time conversion) is read only when a record could use it.
         let today = if self.learner.is_empty() { 0 } else { self.today() };
         let mut lp_fixed = Vec::with_capacity(self.fixed.len());
+        let mut delta_fixed = Vec::with_capacity(self.fixed.len());
         for f in &self.fixed {
             // Punctuation has no reading in the lexicon; 0.0 only keeps `path` aligned (s3d §4).
-            lp_fixed.push(if self.is_punct(f.start) {
-                0.0
+            let (lp, delta) = if self.is_punct(f.start) {
+                (0.0, 0.0)
             } else {
-                st.capped.best_lp(&self.syls[f.start..f.end], &f.word).ok_or(EngineError::Internal)?
-            });
+                st.capped.best_lp_delta(&self.syls[f.start..f.end], &f.word).ok_or(EngineError::Internal)?
+            };
+            lp_fixed.push(lp);
+            delta_fixed.push(if self.demote { delta } else { 0.0 });
         }
         let (mut out, mut path) = (String::new(), Vec::new());
         for gap in 0..=self.fixed.len() {
@@ -698,23 +724,23 @@ impl Engine {
                     None => history(&self.left, &st.lm),
                 };
                 let end = match right {
-                    Some(f) if !self.is_punct(f.start) => End::Next { word: &f.word, lp: lp_fixed[gap] },
+                    Some(f) if !self.is_punct(f.start) => End::Next { word: &f.word, lp: lp_fixed[gap], delta: delta_fixed[gap] },
                     _ => End::Eos,
                 };
                 let before = format!("{}{out}", self.left);
                 let learn = (!self.learner.is_empty()).then(|| Learn { learner: &self.learner, before: &before, today, eps_global: self.eps_global });
                 let best = decode_segment_learned(
-                    &st.capped, &self.syls[from..to], &st.lm, lam, prev, end, BEAM_S1, learn.as_ref(),
+                    &st.capped, &self.syls[from..to], &st.lm, lam, prev, end, BEAM_S1, learn.as_ref(), self.demote,
                 )
                 .map_err(|_| EngineError::Internal)?;
-                for (w, lp) in &best.first().ok_or(EngineError::Internal)?.1 {
+                for (w, lp, delta) in &best.first().ok_or(EngineError::Internal)?.1 {
                     out.push_str(w);
-                    path.push((w.to_string(), *lp, false));
+                    path.push((w.to_string(), *lp, false, *delta));
                 }
             }
             if let Some(f) = right {
                 out.push_str(&f.word);
-                path.push((f.word.clone(), lp_fixed[gap], self.is_punct(f.start)));
+                path.push((f.word.clone(), lp_fixed[gap], self.is_punct(f.start), delta_fixed[gap]));
             }
         }
         self.display = out;

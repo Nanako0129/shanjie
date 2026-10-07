@@ -31,43 +31,117 @@ MIXED = [   # 簡體專用字比繁體專用字多：整句當簡體句；像、
 # 第三次重建（契約 §2.1）：喫→吃、VARIANTS 加 着→著 説→說、繁體句完整輸出再套 VARIANTS。每組 (句子, 是否簡體句, 預期)。
 # 「關係著」「吃不出來」走詞組表（STPhrases 有 关系着→關係着、吃不出来→喫不出來）；「認為」走字表（认为 不在 STPhrases，为→爲 再由 VARIANTS 換成 為）。
 THIRD = [
-    ("我吃了饭", True, "我吃了飯"), ("我们都喫了饭", True, "我們都喫了飯"),
+    ("我吃了饭", True, "我吃了飯"), ("我们都喫了饭", True, "我們都吃了飯"),   # S2f §2.3：TWVariants 的 喫→吃，S2n 的「輸入有喫就保留」拿掉
+    
     ("這個國家的經濟發展关系着我們", False, "這個國家的經濟發展關係著我們"), ("這些東西我們吃不出来", False, "這些東西我們吃不出來"),
     ("這些國家都认为這樣不對", False, "這些國家都認為這樣不對"), ("隨着時間他説", False, "隨著時間他說"),
     ("臺北市隨着發展", False, "臺北市隨著發展"),
 ]
 
 
+# S2f（契約 §3.1）：台灣字形。每列 (句子, 是否簡體句, 預期)，先斷言 is_simplified 再斷言輸出。
+# 簡體句的 床、灶、粽 在 SIMP_CHAR 先被換成 牀、竈、糉，由 §2.3 的整句字表換回；繁體句的 庄、秘 靠 §2.2 的縮小集合不被轉。
+S2F = [
+    ("南庄鄉", False, "南庄鄉"), ("秘書說了", False, "秘書說了"), ("他說什么", False, "他說什么"),   # 什么 不轉：§2.2 (b) 的已知代價
+    ("貪污的國家", False, "貪污的國家"),                                                       # 污→汙 在排除名單
+    ("台湾的", True, "台灣的"), ("他在床上", True, "他在床上"), ("秘书", True, "秘書"), ("什么", True, "什麼"),
+    ("我们吃饭", True, "我們吃飯"), ("我们喫饭", True, "我們吃飯"), ("病灶", True, "病灶"), ("肉粽", True, "肉粽"),
+]
+# S2f 修訂一 6.3：保護詞（基底詞換字後不在基底詞庫就原樣保留）、TWPhrases 之前不套字表（兩條路徑）。
+PROTECT_ROWS = [("排泄物很臭", False, "排泄物很臭"), ("嘴脣很紅", False, "嘴唇很紅")]
+ORDER_SIMP = [("大众汽车很好", True, "福斯汽車很好"), ("台式机坏了", True, "桌上型電腦壞了")]
+ORDER_TRAD = [("這個集羣很大", False, "這個叢集很大"), ("他寫的是皮裏陽秋的筆法", False, "他寫的是皮裡陽秋的筆法")]   # 修訂二：裏 不再保護
+# 修訂二 7.3：保護詞只看 PROTECT_KEYS，兩字保護詞不再在無關文字裡命中
+PROTECT_SCOPE = [("他在痛苦里挣扎", True, "他在痛苦裡掙扎"), ("我们在灶门口", True, "我們在灶門口"), ("在困苦裏生活", False, "在困苦裡生活")]
+# 修訂三 8.3：竈 只在繁體句保護（第二列是已知代價：繁體句的一般名詞 竈門 也保留）
+PROTECT_TRAD_ROWS = [("竈門炭治郎", False, "竈門炭治郎"), ("他敲了敲竈門", False, "他敲了敲竈門")]
+
+
 def check(fn, rows):
     return [(src, fn(src), want) for src, simp, want in rows if bc.is_simplified(src) != simp or fn(src) != want]
-
-
-def mutant_d(text):   # 只在 VARIANTS 加字，繁體句不做完整輸出那一遍
-    if bc.is_simplified(text):
-        return c(text)
-    t = bc._longest(text, conv[0], conv[2], conv[1])
-    t = bc._longest(t, bc.TW_PHRASE, bc.TW_MAXP[0])
-    return t if "喫" in text else t.replace("喫", "吃")
-
-
-def mutant_e(text):   # 喫 的規則只用在簡體句
-    if not bc.is_simplified(text):
-        return _trad_no_kiss(text)
-    return c(text)
-
-
-def _trad_no_kiss(text):
-    t = "".join(bc.VARIANTS.get(x, x) for x in bc._longest(text, conv[0], conv[2], conv[1]))
-    return bc._longest(t, bc.TW_PHRASE, bc.TW_MAXP[0])
 
 
 for src, want in SIMPLIFIED + TRADITIONAL + MIXED + KEEP:
     assert c(src) == want, (src, c(src), want)
 assert bc.is_simplified("之后") and not bc.is_simplified("台灣") and not bc.is_simplified("皇后說")
+assert not check(c, S2F), check(c, S2F)
 assert not check(c, THIRD), check(c, THIRD)
-bad_d = {r[0] for r in check(mutant_d, THIRD)}
-bad_e = {r[0] for r in check(mutant_e, THIRD)}
-assert {"這個國家的經濟發展关系着我們", "這些國家都认为這樣不對"} <= bad_d, bad_d   # 突變 (d)
-assert "這些東西我們吃不出来" in bad_e, bad_e                                          # 突變 (e)
-print(f"mutation (d) fails {sorted(bad_d)}; mutation (e) fails {sorted(bad_e)}")
-print(f"ok: {len(SIMPLIFIED) + len(TRADITIONAL) + len(MIXED) + len(KEEP) + len(THIRD)} conversion checks")
+for rows in (PROTECT_ROWS, ORDER_SIMP, ORDER_TRAD, PROTECT_SCOPE, PROTECT_TRAD_ROWS):
+    assert not check(c, rows), check(c, rows)
+assert all(bc.TW_VARIANTS[k] == v for k, v in bc.VARIANTS.items() if k in bc.TW_VARIANTS)   # 兩表重疊的 9 條方向相同
+assert not set(bc.TW_VARIANTS) & set("污癡樑蔘")                                              # §2.1 的四條排除
+assert set(bc.PROTECT_TRAD) - set(bc.PROTECT) == {"竈門"} and set(bc.PROTECT) <= set(bc.PROTECT_TRAD)
+assert "排泄" in bc.PROTECT and all(len(w) >= 2 for w in bc.PROTECT) and all(any(c in bc.PROTECT_KEYS for c in w) for w in bc.PROTECT)   # _longest 只比對兩字以上，保護詞剛好沒有單字
+
+
+# 突變（每個都要讓對應的列失敗；改的是函式或表的副本，不動模組本身）
+def no_post(text):            # (i) 拿掉 §2.3 最後一層
+    simp = bc.is_simplified(text)
+    t = bc._longest(text, bc.SIMP_PHRASE, bc.SIMP_MAXP[0], bc.SIMP_CHAR) if simp else bc._longest(text, conv[0], conv[2], conv[1])
+    return bc._longest(t, bc.TW_PHRASE, bc.TW_MAXP[0])
+
+
+def full_simp_only(text):     # (ii) 繁體句改用完整的簡體專用字集合（拿掉 §2.2 的扣除）
+    return bc.convert(text, conv[0], {k: bc.SIMP_CHAR[k] for k in bc.SIMP_ONLY}, conv[2])
+
+
+def no_protect(text):         # 修訂一：保護詞清空（兩條路徑）
+    saved = dict(bc.PROTECT), dict(bc.PROTECT_TRAD)
+    bc.PROTECT.clear(); bc.PROTECT_TRAD.clear()
+    try:
+        return c(text)
+    finally:
+        bc.PROTECT.update(saved[0]); bc.PROTECT_TRAD.update(saved[1])
+
+
+def _swap_protect(text, simp_table, trad_table):
+    simp = bc.is_simplified(text)
+    t = bc._longest(text, bc.SIMP_PHRASE, bc.SIMP_MAXP[0], bc.SIMP_CHAR) if simp else bc._longest(text, conv[0], conv[2], conv[1])
+    t = bc._longest(t, bc.TW_PHRASE, bc.TW_MAXP[0])
+    return bc._longest(t, simp_table if simp else trad_table, bc.PROTECT_MAXP[0], bc.POST_SIMP if simp else bc.POST_TRAD)
+
+
+def trad_uses_protect(text):  # 修訂三 (i)：繁體句改用 PROTECT
+    return _swap_protect(text, bc.PROTECT, bc.PROTECT)
+
+
+def simp_uses_protect_trad(text):  # 修訂三 (ii)：簡體句改用 PROTECT_TRAD
+    return _swap_protect(text, bc.PROTECT_TRAD, bc.PROTECT_TRAD)
+
+
+def simp_prepass(text):       # 修訂一：簡體句放回 TWPhrases 之前的 TW_CHAR
+    if not bc.is_simplified(text):
+        return c(text)
+    t = "".join(bc.TW_CHAR.get(x, x) for x in bc._longest(text, bc.SIMP_PHRASE, bc.SIMP_MAXP[0], bc.SIMP_CHAR))
+    t = bc._longest(t, bc.TW_PHRASE, bc.TW_MAXP[0])
+    return bc._longest(t, bc.PROTECT, bc.PROTECT_MAXP[0], bc.POST_SIMP)
+
+
+def protect_all_keys(text):   # 修訂二：保護詞改回看全部 POST_TRAD 的鍵
+    base = set(bc.ime.Lexicon(os.path.join(bc.ROOT, "data", "lexicon", "mcbpmf-data.txt")).by_word)
+    wide = {w: w for w in base if any(c in bc.POST_TRAD for c in w) and "".join(bc.POST_TRAD.get(c, c) for c in w) not in base}
+    simp = bc.is_simplified(text)
+    t = bc._longest(text, bc.SIMP_PHRASE, bc.SIMP_MAXP[0], bc.SIMP_CHAR) if simp else bc._longest(text, conv[0], conv[2], conv[1])
+    t = bc._longest(t, bc.TW_PHRASE, bc.TW_MAXP[0])
+    return bc._longest(t, wide, max(map(len, wide)), bc.POST_SIMP if simp else bc.POST_TRAD)
+
+
+def trad_char_variants(text):  # 修訂一：繁體句的字表放回 VARIANTS
+    return bc.convert(text, conv[0], {**conv[1], **bc.VARIANTS}, conv[2])
+
+
+MUTANTS = [  # (突變, 列, 必須失敗的來源句)
+    (no_post, S2F, {"他在床上", "我们喫饭", "病灶", "肉粽"}),
+    (full_simp_only, S2F, {"南庄鄉"}),
+    (no_protect, PROTECT_ROWS, {"排泄物很臭"}),
+    (simp_prepass, ORDER_SIMP, {"大众汽车很好", "台式机坏了"}),
+    (trad_char_variants, ORDER_TRAD, {"這個集羣很大"}),   # 修訂二：放回之後 裏 在 TWPhrases 前就換成 裡，皮裡陽秋 那列不再失敗
+    (protect_all_keys, PROTECT_SCOPE, {"他在痛苦里挣扎"}),
+    (trad_uses_protect, PROTECT_TRAD_ROWS, {"竈門炭治郎"}),
+    (simp_uses_protect_trad, PROTECT_SCOPE, {"我们在灶门口"}),
+]
+for fn, rows, must in MUTANTS:
+    bad = {r[0] for r in check(fn, rows)}
+    assert must <= bad, (fn.__name__, sorted(bad))
+print(f"mutations: {len(MUTANTS)} killed; protect words: {len(bc.PROTECT)} (traditional sentences: {len(bc.PROTECT_TRAD)})")
+print(f"ok: {len(SIMPLIFIED) + len(TRADITIONAL) + len(MIXED) + len(KEEP) + len(THIRD) + len(S2F) + len(PROTECT_ROWS + ORDER_SIMP + ORDER_TRAD + PROTECT_SCOPE + PROTECT_TRAD_ROWS)} conversion checks")

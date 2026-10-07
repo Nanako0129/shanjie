@@ -8,7 +8,7 @@ v5（2026-10-03，N0 之後）。S0、E 完成；N0 未過門檻（§2 N0 結果
   - S1 寫成完整的可執行片；S5、S6、S7 依實測改寫。
 - 審查：v5 送 fresh `pilotfish:plan-verifier` 審 envelope 與 S1。
 
-v4 日期 2026-10-03。v1 經 `pilotfish:plan-verifier`（REVISE，4 項）與 `pilotfish:security-reviewer`（P1×3、P2×5、P3×1）審查；v2 經 fresh `pilotfish:plan-verifier`（REVISE，2 項）審查；v3 經最後一次收尾審查（REVISE，1 項），審查次數已達上限，v4 的修正**未再經審查**，交使用者決定。處置見 §7。研究依據：`~/side-project/ime-research/README.md`、本目錄 `patents.out`、`methods.out`（grok，二手），以及 main 親自核對的事實（§6）。
+v4 日期 2026-10-03。v1 經 `pilotfish:plan-verifier`（REVISE，4 項）與 `pilotfish:security-reviewer`（P1×3、P2×5、P3×1）審查；v2 經 fresh `pilotfish:plan-verifier`（REVISE，2 項）審查；v3 經最後一次收尾審查（REVISE，1 項），審查次數已達上限，v4 的修正**未再經審查**，交使用者決定。處置見 §7。研究依據：`~/side-project/ime-research/README.md`、本目錄 `methods.out`（grok，二手），以及 main 親自核對的事實（§6）。
 
 ## 1. Envelope
 
@@ -28,7 +28,7 @@ v4 日期 2026-10-03。v1 經 `pilotfish:plan-verifier`（REVISE，4 項）與 `
 | A5 | 隱私：見 §7 的 R1–R9；其中可自動測的全部有測試，需人眼的交給使用者 | 自動測試＋使用者實測清單 |
 | A6 | 授權：每份資料、模型都有授權清單，且可合法再散布，或在執行期另行下載並顯示授權 | `LICENSES/` 清單審查 |
 
-**非目標（v1）。** iOS、Windows；拼音、倉頡；縮寫打字／首碼快打（中研院 US8364468B2 有效到 2029、訴訟中）；從使用者指定的檔案或資料夾學習（微軟 US9824085B2 有效到 2032）；下一詞預測；帳號同步；自動更新；中國大陸散布的專利評估；雲端或模型回傳的自由文字。
+**非目標（v1）。** iOS、Windows；拼音、倉頡；從使用者指定的檔案或資料夾學習；下一詞預測；帳號同步；自動更新；雲端或模型回傳的自由文字。（縮寫打字與首碼快打原本列在這裡，使用者 2026-10-07 改為要做，契約待補。）
 
 **已定的架構決策。**
 
@@ -117,6 +117,7 @@ v4 日期 2026-10-03。v1 經 `pilotfish:plan-verifier`（REVISE，4 項）與 `
   - 從保留所有權利的網頁原文算出的次數，能不能放進 CC BY-SA 的模型檔，是法律判斷，這裡不構成法律意見。使用者允許先做實驗評估；要不要散布另外決定。
   - 候選是 `taiwan-corpora/twngrams`：CC0，來源是 HPLT 3.0 的 `cmn_Hant` 網頁，約 2.85 億 token。計數單位是網站數，出現在不到 40 個網站的 n-gram 不收。這是 2026-08 才出現的單人專案，要先驗證。
 - **S2n 收尾**：「十分鐘後道」由修訂四的期望次數修好（研究紀錄 2026-10-06），GitHub Release `model-v2` 已建；剩合併關卡（含保留集）。
+- **S2f 字形修正**（使用者 2026-10-07 回報「起牀」，契約 `docs/contracts/s2f-variant-forms.md`）：台灣字形不再被當成簡體字，同讀音的異體寫法合併計數。經三次修訂，模型 F4 驗收通過（字形探針 16/16、守門不否決、「竈門」回來）；GitHub Release `model-v3` 已建（使用者 2026-10-08 同意，下載比對雜湊相符），成為 v0.3.0 的模型（S2w 之後疊在它上面重建再比較）。
 - **S5 本機重排的下一個實驗**（使用者 2026-10-05 排進下一版；同日稍晚決定先和 S2n 第三次重建並行，契約 `docs/contracts/s5k-local-scorers.md`：Laya 優先，1-bit Bonsai 次之，Qwen3-1.7B 4-bit 對照）。
   - S5j 的結論是「從 8 句裡挑一句」的題型不能用。下一步改成每個候選分別打分數，或每個字位各出一題。
   - 量 Apple 端上模型與本機小模型（Qwen3-1.7B、Gemma 4 E2B，MLX），在使用者沒在用電腦時量。
@@ -146,15 +147,24 @@ v4 日期 2026-10-03。v1 經 `pilotfish:plan-verifier`（REVISE，4 項）與 `
     - 隱私不變：前文的來源、長度與只存在記憶體的規則照 R4。
     - **狀態（2026-10-06）**：S2h 契約（分支 `feat/s2h-left-context`）第一輪的切尾集四格都大幅過關，但停在兩個停止條件：「好」之後的 ㄅㄚ˙ 變「爸」（詞庫有「好吧」，模型中 c(好,吧) = 0，和「後道」同一個根因），以及兩個 S4 測試的結果改變。使用者決定先不合併，等修切分的新模型做出來再重測：S2n 契約修訂四（分支 `fix/simplified-residue` 的 §6，詞圖上的期望次數，審查中）。
     - **狀態（2026-10-06，第二輪）**：整合 main（S2n 模型 E）後重量，切尾集四格全過、守門未否決、「好」＋ㄅㄚ˙ 是「吧」；兩個 S4 測試依契約 §10.3 修改後通過。數字見研究紀錄「S2h 第二輪」；保留集與實機驗收待做。
+  - **前文＋半截注音的即時預測（SP，issue #44 的原始需求）**：音節還沒打完，就依前文與已打的注音預測完整的詞，每一鍵更新。
+    - **第一片（2026-10-07，離線）**：建立「半截注音＋現有 n-gram」的基準，契約 `docs/contracts/sp-partial-zhuyin.md`，數字在 `experiments/sp/README.md` 與研究紀錄同日。前文讓兩字以上的詞在第一鍵進前 9 名的比例從 2–10% 提高到 19–33%；正解是前文後繼詞的比例 49–67%。
+    - **第二片（2026-10-07，離線）**：候選只由前文歷史詞的後繼詞產生、注音只過濾（V3），契約 `docs/contracts/sp2-successor-prediction.md`。第一鍵和全部相容詞持平；第一個音節打完後明顯較差（discordtune hit@9 43.5% 對 64.4%）。
+    - **第三片（2026-10-07，離線）**：後繼詞優先、其餘相容字串補在後面（S），契約 `docs/contracts/sp3-successor-first.md`。沒有一格顯著比全部相容詞差，第一鍵在 4／8 個公開格與 discordtune 較好，第一個音節打完後補回 V3 的缺口（discordtune 63.9%）。出貨的排序用 S。
+    - **下一步**：介面契約（顯示位置、何時顯示、選取鍵、縮寫設定放哪裡，使用者決定）與核心契約（`docs/contracts/v3-core-predict.md`）；v0.3.0 前綴補完預設開、縮寫做成設定預設關。
   - **判斷器與語言模型的貝氏融合（成本最低，接在前文之後）**：
-    - 把 n-gram 對 k 個候選的分數換成先驗：softmax，溫度在調整半上擬合。判斷器的機率當似然，可以是 Qwen3 的逐候選對數機率、Jev／Clef 的選項機率。用後驗挑候選，取代現在「分差 < τ 才採用」的粗門檻。
+    - 兩條路線分開定義（#44 第四則留言）：
+      - **加權分數融合**：n-gram 分數、Qwen3 的逐候選對數分數、Jev／Clef 選項機率的對數當特徵。
+      - **判斷器觀測模型的 Bayes 更新**：n-gram 對 k 個候選的分數用 softmax 換成先驗（溫度在調整半上擬合），似然是「第 i 名正確時，判斷器推薦第 j 名」的機率 P(J=j | H_i, B)。
+      - 用後驗或融合分數挑候選，取代現在「分差 < τ 才採用」的粗門檻。
     - 不用再跑模型：直接用 S5k、S5j、S5p 已存的逐列分數離線算。
     - 照原本的切法：Discord 調參集在 A 半擬合、B 半檢定；cvtune 守門。
     - 和 τ 門檻配對比較，也報校準程度（可靠度曲線、ECE）。
     - 實驗設計依 issue #44（charliie-dev）與 2026-10-06 的文獻調查（研究紀錄同日）：
       - 至少比四種：加權 log-linear；校準過的 n-gram 機率乘判斷器混淆矩陣（Kerrigan 2021 的 P+L）；單參數混淆矩陣；#44 的名次分組先驗。
       - 加一個「八個都不對」的假設，機率由調整半的覆蓋率估。擬合只用正解在候選內的列，評測用全部列。
-      - Jev／Clef 先把正序、反序的結果平均，消掉位置偏誤，再拿去融合。
+      - Jev／Clef 先把正序、反序的結果平均，嘗試降低位置偏誤：先對齊候選身分再平均，並報平均後剩下的順序敏感性。
+      - 契約要先定義（#44 第四則留言）：所有組用同一版解碼器、同一份前文、同一批候選與原始分數；「八個都不對」只用來評估信心，還是參與決策、判定都不對時怎麼做；權重、門檻網格、平滑與校準參數只由 A 半決定（含網格本身）；本機與雲端各自的資料切分；樣本數與停止規則事先固定。
       - 加一組硬門檻（n-gram 分差很大時不改第一名）當第六組。
       - **檢定力**：分歧率約 6% 時，要分辨 2 個百分點約需 1,100 列（水杉的估算）。S5k、S5p 的 B 半只有 500 列，p = 0.08、0.064 可能只是樣本不夠。融合實驗要先算樣本數，必要時加大 Discord 抽樣。
   - **貝氏 n-gram 平滑（Pitman–Yor）**：
@@ -294,13 +304,16 @@ v4 日期 2026-10-03。v1 經 `pilotfish:plan-verifier`（REVISE，4 項）與 `
     | `wikt` | `https://dumps.wikimedia.org/enwiktionary/20261001/enwiktionary-20261001-all-titles-in-ns0.gz` | `1c840da0ddb78eed78e6f1b6fe613c1a2eced952801fd7d676f4dac9e581d4fd` | CC BY-SA 4.0 | 詞 |
     | `wikt` | `https://dumps.wikimedia.org/zhwiktionary/20261001/zhwiktionary-20261001-all-titles-in-ns0.gz` | `95e915cd85992b4fe990187dca845ea85e257deba39d8054b014781015d3f7f0` | CC BY-SA 4.0 | 詞 |
     | — | OpenCC `data/dictionary/STCharacters.txt`，commit `3ac34aa439a9908dd49fa92b5174b46314787ac2` | `a0ca1601c70648cf48b33c3c6210ccbecc5c7eead4b4c3daf76587ba2c03582b` | Apache-2.0 | 只用來過濾，不進疊加層 |
+    | — | OpenCC `data/dictionary/TWVariants.txt`，同一個 commit `3ac34aa439a9908dd49fa92b5174b46314787ac2`（S2f） | `245b94eb5842957e735dd44b7e7d4ff469a3643126cc8fa511adda5281e9cb86` | Apache-2.0 | 台灣字形表 `TW_VARIANTS`（`experiments/s2/build_counts.py` 讀之前核對 SHA-256），不進疊加層 |
+    | — | OpenCC `data/dictionary/STPhrases.txt`，同一個 commit（S2f 起核對） | `f6eab5e5c6dd7640597878d3dfc6599ee1279d2bc91561eadd8e114194e2925a` | Apache-2.0 | 簡體句的詞組轉換，不進疊加層 |
+    | — | OpenCC `data/dictionary/TWPhrases.txt`，同一個 commit（S2f 起核對） | `bcb435b744ee3e522beb9b18fcc5486a36ed4763c6aa642ce18112fb5d604e31` | Apache-2.0 | 台灣用詞（TWPhrases），不進疊加層 |
 
     三個 dump 的 sha1 已和 Wikimedia 官方的 `sha1sums.txt` 比對相符。來源檔不進 repo，因為合計 55 MB。`tools/build_overlay.py` 下載到 `~/.cache/shanjie/sources/` 後驗證 SHA-256，不符就中止。
   - **篩選。** 由 `tools/build_overlay.py` 依序做，不得手動加減。這支腳本就是本契約的參考實作，下列文字和腳本不一致時以腳本為準：
     1. 純漢字 2–4 字（U+4E00–U+9FFF）。
     2. 不在基底的詞表裡。基底詞表是照 S0 規則解析後 `by_word` 的鍵。
     3. 每個字都是基底的單字詞條。
-    4. 不含簡體專用字：在 STCharacters 中，繁體對應清單裡不含它自己的字。例如「干」的對應清單含「干」，所以不算。
+    4. 不含簡體專用字：在 STCharacters 中，繁體對應清單裡不含它自己的字。例如「干」的對應清單含「干」，所以不算。S2f 起用縮小後的集合（`build_counts.TRAD_SIMP_ONLY`：扣掉 TWVariants 的目標字，以及 秘 庄 晒 霉 虱 么 肴 洒 痒），所以含 床、灶、粽 等台灣字形的標題可以進疊加層；之後 S2f §2.5 再拿掉只是基底詞異體寫法的詞（`experiments/s2f/overlay-variant-removed.tsv`）。
     5. 維基詞典（英、中）的標題全收。中文維基的標題只收「複合詞」：去掉第一個字或最後一個字之後，剩下的是基底裡的多字詞。
 
     複合詞規則是 main 看過開發集 OOV 詞（收納盒、防滑墊…）之後定的。它是一般的構詞規則，不是逐詞挑選，但仍有偏向開發集的風險，由保留集把關，報告時要揭露。**禁止從 `eval/` 的句子挑詞加入**。
@@ -516,7 +529,7 @@ v4 日期 2026-10-03。v1 經 `pilotfish:plan-verifier`（REVISE，4 項）與 `
   7. **效能**：release 重播（載入 LM）每鍵 p95 < 16 ms；回報 LM 載入時間與引擎（詞庫＋上限後詞庫＋LM）的峰值 RSS。上限後詞庫可以和原始詞庫共用字串池，由 executor 決定。
   8. 模型檔 ≤ 100 MB（目前 80,040,411 bytes）。
   9. **保留集**（片結束，只由 verifier 跑一次）：`--set holdout` 在 chat 與 formal 的 top1 與 oracle@64，只回數字。A1a 要求 oracle@64 ≥ 98%；低於時照實回報、記為 A1a 未達成，由使用者決定，不是這片的停止條件。報告時註明 LM 模式的 oracle 用寬鬆對照，S1 的 `extra` 行（97.8%）用完全相符。
-- **模型檔不進 repo**（`data/lm/` 在 `.gitignore`）：從 GitHub Release `model-v2` 下載（`gh release download model-v2 -R Nanako0129/shanjie -p bigram.sjlm -D data/lm`，CC BY-SA 4.0，2026-10-03 起），或用 `tools/build_lm.py` 從本機計數重建；SHA-256 `8847b73a7b9cf127b4882328191c3c5250fe9a55912926d5050e351ab644d240`。需要它的測試在檔案不存在時**直接失敗**，訊息說明怎麼取得，不得默默跳過。隨輸入法散布的方式在 S3b（打包進 app）。
+- **模型檔不進 repo**（`data/lm/` 在 `.gitignore`）：從 GitHub Release `model-v3` 下載（`gh release download model-v3 -R Nanako0129/shanjie -p bigram.sjlm -D data/lm`，CC BY-SA 4.0，2026-10-03 起），或用 `tools/build_lm.py` 從本機計數重建；SHA-256 `5c7d5a94f762e7c5d87e14e47b03c1138222df4ea194e70e503bdd9a71ab5a48`。需要它的測試在檔案不存在時**直接失敗**，訊息說明怎麼取得，不得默默跳過。隨輸入法散布的方式在 S3b（打包進 app）。
 - **範圍外。** 改分數、參數、剪枝或語料；候選清單用 LM 排序；trigram；學習（S4）。
 - **預算。** executor、security-executor 各 1 回合＋1 次修正。
 - **停止。** 驗收 2、3、4 有任何差異：回報第一個不同的列與原因，不得修改 Python 參考實作或對照檔來湊。峰值 RSS 超過 300 MB：回報實測值與瓶頸。
@@ -548,7 +561,7 @@ v4 日期 2026-10-03。v1 經 `pilotfish:plan-verifier`（REVISE，4 項）與 `
 **Q 新手測驗與使用者設定檔（新切片，S3 之後、與 S4 並行）。** 第一次啟用時做簡易測驗，了解使用者常聊的領域與打字習慣。
 - 三段：(1) 常聊領域（多選：軟體／程式、醫療、法律、財經、學校、遊戲…）→ 領域詞加權，並作為模型的使用者簡介（Zenzai v3 的 profile 前例）；(2) 實際打 10–20 句準備好的測驗句，記錄使用者真正按的注音（和 ㄏㄢˋ／ㄏㄜˊ、一 的本調／變調、輕聲、ㄣ／ㄥ 與 ㄓ／ㄗ 是否混用）→ 讀音變體與模糊音設定；(3) 用字偏好（台／臺、裡／裏、週／周、念／唸、嚐／嘗、妳）→ 異體字預設。
 - 隱私：結果只存本機（R5 規則）；雲端功能要用簡介時另外取得同意，且只送領域標籤。
-- 專利：不做「匯入使用者文件學習」（微軟 US9824085B2，見非目標）；測驗只用專案準備的句子與使用者選的領域。
+- 不做「匯入使用者文件學習」（見非目標）；測驗只用專案準備的句子與使用者選的領域。
 - 驗收（初稿）：有／無簡介在開發集領域子集上的正確率差異；使用者在測驗中的讀音都能被正確轉換。
 - 觀察：使用者的 macOS 注音把 14 個專業詞庫全開，冷僻詞會搶常用詞；測驗挑領域的精準度應優於全開。
 - 領域詞包來源（使用者 2026-10-03 提供）：國家教育研究院「樂詞網」（https://terms.naer.edu.tw/ ），學術名詞約 193 萬則（206 類）、雙語詞彙約 2 萬則，各類可單獨下載（ODS）。
@@ -700,6 +713,12 @@ S3a 不需要外觀參考，可以先做；S3b 等使用者提供 macOS 內建�
 
 ### 待排入（使用者實測 2026-10-04，見 research-log 同日）
 
+- **非標準讀音降權（SW 第一片，契約 `docs/contracts/sw-sensitive-demote.md`）**：`data/lexicon/demote.tsv` 的 `reading` 類收錄規則，三個條件都成立才收：
+  - 教育部辭典有這個詞，但沒有這個讀音。
+  - 差別不是輕聲或變調（基底詞庫裡這類多字條目有 5,817 個，是使用者實際的打法，不能整批降權）。
+  - 有使用者回報或探針證據，顯示它擋到同音的一般詞。
+
+  它和下面的「讀音條件權重」是兩個機制：這裡是對（讀音, 詞）直接扣固定的 δ；讀音條件權重處理的是教育部收錄、但罕用的讀音（「雀」ㄑㄧㄠˇ）拿到常用讀音的語料加分，不屬於 `reading` 類。粗話與歧視用語類、候選窗排序、學過就不扣、即時預測排除是第二片。
 - **讀音條件權重**：罕用讀音（如「雀」唸 ㄑㄧㄠˇ）不該拿到常用讀音語料的 bigram 加分；把詞庫的讀音權重和語言模型一起放進解碼分數。驗收：dev302、保留集不退步，`ㄑㄧㄠˇ ㄎㄜ` 不再出「雀科」。
 - **建置產物被 LaunchServices 登記**：`scripts/check-app.sh` 第 6 項執行 bundle 裡的 `--selftest`，執行 .app 內的二進位會讓系統登記那個 bundle（`.metadata_never_index` 擋不住）。2026-10-04 在使用者機器上查到 `build/shanjie.app`（00:40 的兩模式舊版、bundle ID 與正式版相同）仍在登記中，用 `make clean-bundle` 清掉。待辦：自測跑完立刻對該 bundle `lsregister -u`，並在 `docs/verification.md` 的殘留檢查加 `lsregister -dump`。
 - **聲調容錯**：讀音完全對不上時，把只差一個聲調的常用詞放進候選尾端。先量準確度與延遲。
@@ -721,7 +740,6 @@ S3a 不需要外觀參考，可以先做；S3b 等使用者提供 macOS 內建�
 | 疊加層以 CC BY-SA 釋出（share-alike） | 只限 `overlay-add.tsv` 這個檔；程式碼仍是 Apache-2.0；`LICENSES/data.md` 註明署名 |
 | 詞庫補詞過度擬合評測集 | S1 禁止從 `eval/` 挑詞、每筆有來源標籤；保留集由 verifier 量 |
 | 輸入法看得到所有按鍵 | §7 R1–R9 |
-| 專利 | §6；不是法律意見；若改成商業產品要做 FTO |
 | 保留集被看過 | 片 E 的流程規則；每片報告揭露 |
 
 ## 4. 使用者決定（2026-10-03）
@@ -760,9 +778,6 @@ S3a 不需要外觀參考，可以先做；S3b 等使用者提供 macOS 內建�
 
 | 項目 | 結果 | 出處 |
 |---|---|---|
-| Google「Contextual input method」台灣案 TWI475406B | 2016-12-01 未繳費失效 | Google Patents |
-| 同族美國案 US8028230B2 | 未繳費失效（2019） | Google Patents |
-| 微軟依前文調適台灣案 TWI484476B | 2019-02-11 未繳費失效 | Google Patents |
 | Gemma 4 E2B／E4B 授權 | Apache-2.0（另有 prohibited use policy）；HF `gated: False` | HF API＋ai.google.dev |
 | Llama 3 授權 | 禁止以輸出改良其他 LLM；須標示「Built with Meta Llama 3」 | dev.meta.ai |
 | KenLM | LGPL | GitHub LICENSE |
