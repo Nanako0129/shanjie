@@ -24,30 +24,32 @@
 
 ### 1.1 資料與分群
 
-- **計數**：model-v3 的加權計數，188 的 `work/s2f4`：
-  - `counts-200000.pkl` ×1；
-  - `counts-colloquial3.pkl` ×5。
+- **計數**：model-v3 的加權計數，188 的 `work/s2f4`，讀之前核對 SHA-256：
+  - `counts-200000.pkl` ×1，`ca2f1361a8b9a8fba403785b7a85dd259fb5ba14220d885c93b1bcd84edaa3cf`；
+  - `counts-colloquial3.pkl` ×5，`13d0ab5bf8a89c715254234e28beffe287726960245787ab0fe2d3fcfbef97ef`。
 - **分群**：`experiments/s2-classes/cluster.py`，參數 N = 40,000、K = 512、12 輪，在 188 上跑。
   - 輸出 `edges.npz` 與 `cls-40000-512.npz`，複製回 Mac 時核對雜湊。
   - 用環境變數 `S2K_COUNTS`、`S2K_OUT` 指定目錄。
 - **語言模型**：`classlm.py` 讀 model-v3（`data/lm/bigram.sjlm`，SHA-256 `5c7d5a94…5a48`）。
   - 類別項只在回退分支混入，方法和 2026-10-05 的實驗相同。
   - 有保留條目的 bigram、詞庫分數、λ、beam、疊加層都不變。
+- **一律用前文解碼**：`classlm.py` 的 `rows_of` 保留每列的前文，`run` 用 `start = L.history(L.context_key(前文), lm)` 解碼，和 `lm_eval.py --context` 相同。調參（§1.2）、評測（§1.3）、探針（§1.4.3）、保留集（§1.4.4，入口是 `aggregate.py`，開前文）都走這一條路。
+- **核對**：μ = 0 時，這條路在 dev302 聊天與書面的第一名數，要等於 `lm_eval.py --lm <model-v3> --context` 的結果（235／240）；不相等是停止條件。
 
 ### 1.2 調參（只用調參集）
 
 - **調參集**：
-  - cvtune：model-v3 重建時產生的那份，188 的 `work/s2f4/tune/cvtune.txt`，複製時核對雜湊。
-  - wikitune：同一次重建的那份，`8dcfe40c…`。
+  - cvtune-tune：model-v3 重建時產生的 cvtune（188 的 `work/s2f4/tune/cvtune.txt`，SHA-256 `31de456d66ece98eb5d00154a31c3f7e9c9b38240690f7f76203485ca82acc51`），**扣掉和 cvtune-native 參考句相同的列**，避免調參和否決用到同一批句子。列數在執行時算出，寫進 README。
+  - wikitune：同一次重建的那份（`work/s2f4/tune/wikitune.txt`，SHA-256 `8dcfe40c74cce73e0a070b49e166636580ef955da8555ea9ffbd65af20c998f2`，2,827 列）。
 - **候選**：μ ∈ {0.8, 0.9, 0.95, 0.98}，聊天與書面兩種設定，對 model-v3 配對比較。
 - **選擇規則**（事先寫死）：
-  - 四格（cvtune、wikitune × 聊天、書面）淨修好的總和最大；
+  - 四格（cvtune-tune、wikitune × 聊天、書面）淨修好的總和最大；
   - 同分取弄壞總數較少的；
   - 再同分取較小的 μ。
 
 ### 1.3 評測（不調參，對 model-v3）
 
-- **集合**：dev302、typing76、錯字回報（評測當時 main 上的全部列）、cvtune-native（S2f 的 2,117 列）。
+- **集合**：dev302、typing76、錯字回報（評測當時 main 上的全部列）、cvtune-native（`~/.cache/shanjie/work/s2f/cvtune-native.txt`，2,117 列，SHA-256 `8300f2a0e827865d7749ab803255e81e516d02a5d81698be3b58686175c52509`）。
 - **條件**：聊天與書面，`--context`，McNemar 精確檢定。
 
 ### 1.4 判定規則（事先寫死）
@@ -56,7 +58,12 @@
 
 1. **守門不否決**：dev302、typing76、cvtune-native 沒有任何一格淨值為負而且 p < 0.05。
 2. **dev302 兩種設定淨值都 ≥ 0**。
-3. **既有的檢查都過**（S2f 的字形探針 16/16、同分探針「世界線」、竈門、「大概十分鐘後到」、「好吧」）：用類別模型與選定的 μ 跑。
+3. **既有的檢查都過**：用 ClassLM、選定的 μ、前文，聊天與書面都要。第一名要和期望字串**逐字相同**，不用寬鬆比對（寬鬆比對會把異體字當成相同）。
+   - `experiments/s2f/probe.txt`（16 列，第二欄是期望字串）、`probe-tie.txt`（世界線）、`probe-zao.txt`（竈門）；
+   - `|大概十分鐘後到|ㄉㄚˋ ㄍㄞˋ ㄕˊ ㄈㄣ ㄓㄨㄥ ㄏㄡˋ ㄉㄠˋ`；
+   - `好|吧|ㄅㄚ˙`。
+
+   README 附逐列的表（期望字串、ClassLM 第一名、兩種設定）。用同樣的檢查跑 μ = 0，要重現 S2f 的 16/16、世界線、竈門。
 4. **保留集**：由 fresh verifier 跑一次，只回數字；兩種設定都不能顯著變差（淨值為負而且 p < 0.05 就不過）。
 
 ### 1.5 記錄
@@ -87,6 +94,8 @@
 - **停止條件**：
   - §1.4 任一項不成立；
   - 分群在 188 超過 3 小時，或記憶體超過 48 GB；
+  - 任何輸入檔的雜湊或列數不符；
+  - μ = 0 的核對和 `lm_eval.py --context` 不相等；
   - 需要改模型檔格式。這只限第一段：第一段不改產品。
 - **預算**：第一段 main 執行。188 分群一次；Mac 調參與評測一次。
 - **限制**：
