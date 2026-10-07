@@ -66,6 +66,21 @@ public final class MemoryLayoutStore: LayoutStore {
     public init(_ layout: String? = nil) { self.layout = layout }
 }
 
+/// Where the "avoid ranking sensitive words first" switch is kept (docs/contracts/sw-sensitive-demote.md
+/// section 3): `nil` means never chosen, which is on. The app keeps it in its own UserDefaults; ShanjieKit
+/// and the tests only have the in-memory store, so a test can never write the real preference.
+@MainActor
+public protocol DemoteStore: AnyObject {
+    var demote: Bool? { get set }
+}
+
+/// The in-memory DemoteStore.
+@MainActor
+public final class MemoryDemoteStore: DemoteStore {
+    public var demote: Bool?
+    public init(_ demote: Bool? = nil) { self.demote = demote }
+}
+
 /// Process-wide state: the single engine (about 240 MB each, so never two at once), the single
 /// candidate panel and the page it shows, and which session owns the composition (section 5).
 /// All calls happen on the main thread.
@@ -85,6 +100,9 @@ public final class Shell {
     /// s3f: Apple's punctuation names; empty when unavailable (candidates show without names).
     private let names: [String: String]
     private let layoutStore: LayoutStore
+    private let demoteStore: DemoteStore
+    /// sw: whether the core's demotion table applies (default on); sent to every engine `build()` makes.
+    private(set) var demoteOn = true
     let panel: CandidatePanel
     let isSecureInput: () -> Bool
     private(set) var engine: CoreEngine?
@@ -119,10 +137,13 @@ public final class Shell {
     /// can reach the real Application Support by omission.
     /// `dialogs`: the clear's windows (`AlertDialogs` in the app; tests answer for the user). Required,
     /// so a build cannot ship a clear that silently does nothing.
+    /// `demoteStore`: the demotion switch (sw). Required, with no default, like `layoutStore`: the app passes
+    /// its UserDefaults-backed store, tests the in-memory one.
     /// `punctuationTable`: Apple's punctuation candidate table (s3e); tests pass another path.
     /// `punctuationNames`: Apple's punctuation names (s3f); tests pass another path.
     public init(resources: URL, panel: CandidatePanel, isSecureInput: @escaping () -> Bool,
                 layoutStore: LayoutStore, learningDirectory: URL?, dialogs: LearningDialogs,
+                demoteStore: DemoteStore,
                 punctuationTable: URL = PunctuationTable.systemURL,
                 punctuationNames: URL = PunctuationNames.systemURL) {
         self.resources = resources
@@ -141,6 +162,8 @@ public final class Shell {
         self.panel = panel
         self.isSecureInput = isSecureInput
         self.layoutStore = layoutStore
+        self.demoteStore = demoteStore
+        demoteOn = demoteStore.demote ?? true
         // The preference is read before the one engine is built (about 240 MB): building first
         // and switching after would build twice.
         mode = layoutStore.layout.flatMap(InputMode.init(rawValue:)) ?? .standard
@@ -158,6 +181,14 @@ public final class Shell {
         layoutStore.layout = newMode.rawValue
     }
 
+    /// The menu's choice (sw): stored, and sent to the engine, which recomputes the composition; the
+    /// snapshot is for the caller to show (like `setProfile`).
+    func setDemote(_ on: Bool) -> CoreResult? {
+        demoteOn = on
+        demoteStore.demote = on
+        return engine?.setDemote(on)
+    }
+
     /// Creates the engine for the current mode, then loads the LM and the current profile. A
     /// failure leaves an engine without the LM (still usable) or no engine (every key passes).
     private func build() {
@@ -169,6 +200,9 @@ public final class Shell {
         }
         let lm = e.loadLM(path: resources.appendingPathComponent("bigram.sjlm").path)
         if lm != 0 { Log.shell.error("shanjie_engine_load_lm failed, code \(lm)") }
+        if case .failed(let c) = e.setDemote(demoteOn) {
+            Log.shell.error("shanjie_engine_set_demote failed, code \(c)")
+        }
         if case .failed(let c) = e.setProfile(profile) {
             Log.shell.error("shanjie_engine_set_profile failed, code \(c)")
         }
@@ -311,6 +345,16 @@ public final class Session {
         }
         shell.owner = self
         return true
+    }
+
+    /// The menu's demotion switch: the core recomputes the composition and the snapshot is shown, if this
+    /// session owns the composition (a toggle mid-composition visibly re-ranks).
+    func applyDemote(_ on: Bool) {
+        switch shell.setDemote(on) {
+        case .ok(let o)? where shell.owner === self: apply(o)
+        case .failed(let c)?: _ = fail(c)
+        default: break
+        }
     }
 
     /// The profile for this client's app, from its bundle ID (looked up, never kept).

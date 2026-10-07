@@ -15,6 +15,7 @@ enum TestData {
         ("mcbpmf-data.txt", "data/lexicon/mcbpmf-data.txt"),
         ("overlay-add.tsv", "data/lexicon/overlay-add.tsv"),
         ("sandhi-add.tsv", "data/lexicon/sandhi-add.tsv"),
+        ("demote.tsv", "data/lexicon/demote.tsv"),
         ("bigram.sjlm", "data/lm/bigram.sjlm"),
     ]
 
