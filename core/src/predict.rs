@@ -3,7 +3,7 @@
 //! the Python code is ground truth, scores come from `Lm::word` unchanged.
 
 use crate::lm::{CappedLexicon, Lm};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::cmp::Ordering;
 
 const TONES: [char; 4] = ['ˊ', 'ˇ', 'ˋ', '˙'];
@@ -89,18 +89,19 @@ fn unit_ok(u: &Unit, s: &Syl) -> bool {
     }
 }
 
-fn compat_prefix(units: &[Unit], syls: &[Syl]) -> bool {
+fn compat_prefix(units: &[Unit], syls: &[u32], table: &[Syl]) -> bool {
     let Some((_, init)) = units.split_last() else { return false };
-    syls.len() >= units.len() && init.iter().all(|u| u.done) && units.iter().zip(syls).all(|(u, s)| unit_ok(u, s))
+    syls.len() >= units.len() && init.iter().all(|u| u.done) && units.iter().zip(syls).all(|(u, &s)| unit_ok(u, &table[s as usize]))
 }
 
-fn compat_abbr(units: &[Unit], syls: &[Syl]) -> bool {
-    !units.is_empty() && syls.len() == units.len() && units.iter().all(|u| !u.done) && units.iter().zip(syls).all(|(u, s)| unit_ok(u, s))
+fn compat_abbr(units: &[Unit], syls: &[u32], table: &[Syl]) -> bool {
+    !units.is_empty() && syls.len() == units.len() && units.iter().all(|u| !u.done) && units.iter().zip(syls).all(|(u, &s)| unit_ok(u, &table[s as usize]))
 }
 
 struct Ent<'a> {
     word: &'a str,
     lp: f64,
+    /// Reading number; readings are numbered in the order of their `-`-joined text, so it is also the reading's sort rank.
     rd: u32,
     wlen: u32,
     /// Id in the language model (u32::MAX: not in it) and a dense id per distinct word, for dedupe.
@@ -112,36 +113,85 @@ struct Ent<'a> {
 /// characters (predict.py `Index`). Entries with a syllable that has no zhuyin character are left out.
 pub struct Index<'a> {
     ents: Vec<Ent<'a>>,
-    /// Per reading: parsed syllables and the `-`-joined text.
-    rds: Vec<(Vec<Syl>, String)>,
+    /// Distinct syllables, numbered in text order. Reading `r` is `pool[off[r]..off[r + 1]]`.
+    syls: Vec<Syl>,
+    pool: Vec<u32>,
+    off: Vec<u32>,
     by_prefix: HashMap<Vec<char>, Vec<u32>>,
-    nwords: usize,
 }
 
 impl<'a> Index<'a> {
     pub fn new(lex: &'a CappedLexicon, lm: &Lm) -> Index<'a> {
-        let (mut ents, mut rds, mut wix) = (Vec::new(), Vec::new(), HashMap::new());
+        // Syllables get first-seen ids while scanning, then are renumbered in text order. Joined text compares like the
+        // syllable sequence because `-` sorts below every syllable character.
+        let (mut names, mut seen, mut parsed): (Vec<&str>, HashMap<&str, u32>, Vec<Option<Syl>>) = Default::default();
+        let (mut pool, mut off, mut ents) = (Vec::new(), vec![0u32], Vec::new());
         for (key, words) in lex.readings() {
-            let Some(syls) = key.iter().map(|s| parse_syl(s)).collect::<Option<Vec<_>>>() else { continue };
-            rds.push((syls, key.join("-")));
+            let ids: Vec<u32> = key
+                .iter()
+                .map(|&s| {
+                    *seen.entry(s).or_insert_with(|| {
+                        names.push(s);
+                        parsed.push(parse_syl(s));
+                        names.len() as u32 - 1
+                    })
+                })
+                .collect();
+            if ids.iter().any(|&i| parsed[i as usize].is_none()) {
+                continue;
+            }
+            pool.extend(ids);
+            off.push(pool.len() as u32);
+            let rd = off.len() as u32 - 2;
             for (word, lp) in words {
-                let next = wix.len() as u32;
-                let wix = *wix.entry(word).or_insert(next);
-                let (rd, wlen, wid) = (rds.len() as u32 - 1, word.chars().count() as u32, lm.word_id(word).unwrap_or(u32::MAX));
-                ents.push(Ent { word, lp, rd, wlen, wid, wix });
+                let (wlen, wid) = (word.chars().count() as u32, lm.word_id(word).unwrap_or(u32::MAX));
+                ents.push(Ent { word, lp, rd, wlen, wid, wix: 0 });
             }
         }
-        ents.sort_by(|a, b| {
-            b.lp.partial_cmp(&a.lp).unwrap_or(Ordering::Equal).then(a.wlen.cmp(&b.wlen)).then_with(|| rds[a.rd as usize].1.cmp(&rds[b.rd as usize].1)).then(a.word.cmp(b.word))
-        });
+        let mut by_name: Vec<u32> = (0..names.len() as u32).collect();
+        by_name.sort_unstable_by_key(|&i| names[i as usize]);
+        let mut new_id = vec![0u32; names.len()];
+        for (k, &i) in by_name.iter().enumerate() {
+            new_id[i as usize] = k as u32;
+        }
+        let syls: Vec<Syl> = by_name.iter().map(|&i| parsed[i as usize].take().unwrap_or(Syl { chars: Vec::new(), tone: None })).collect();
+        for p in &mut pool {
+            *p = new_id[*p as usize];
+        }
+        // Renumber readings in text order.
+        let slice = |r: u32| &pool[off[r as usize] as usize..off[r as usize + 1] as usize];
+        let mut by_text: Vec<u32> = (0..off.len() as u32 - 1).collect();
+        by_text.sort_unstable_by(|&a, &b| slice(a).cmp(slice(b)));
+        let (mut new_pool, mut new_off, mut rank) = (Vec::with_capacity(pool.len()), vec![0u32], vec![0u32; by_text.len()]);
+        for (k, &r) in by_text.iter().enumerate() {
+            rank[r as usize] = k as u32;
+            new_pool.extend_from_slice(slice(r));
+            new_off.push(new_pool.len() as u32);
+        }
+        let (pool, off) = (new_pool, new_off);
+        for e in &mut ents {
+            e.rd = rank[e.rd as usize];
+        }
+        // Dense word ids by sorting.
+        let mut by_word: Vec<u32> = (0..ents.len() as u32).collect();
+        by_word.sort_unstable_by(|&a, &b| ents[a as usize].word.cmp(ents[b as usize].word));
+        let (mut next, mut prev) = (0u32, None);
+        for &i in &by_word {
+            let w = ents[i as usize].word;
+            next += (prev.is_some_and(|p| p != w)) as u32;
+            prev = Some(w);
+            ents[i as usize].wix = next;
+        }
+        drop(by_word);
+        ents.sort_by(|a, b| b.lp.partial_cmp(&a.lp).unwrap_or(Ordering::Equal).then(a.wlen.cmp(&b.wlen)).then(a.rd.cmp(&b.rd)).then(a.word.cmp(b.word)));
         let mut by_prefix: HashMap<Vec<char>, Vec<u32>> = HashMap::new();
         for (i, e) in ents.iter().enumerate() {
-            let c0 = &rds[e.rd as usize].0[0].chars;
+            let c0 = &syls[pool[off[e.rd as usize] as usize] as usize].chars;
             for j in 1..=c0.len() {
                 by_prefix.entry(c0[..j].to_vec()).or_default().push(i as u32);
             }
         }
-        Index { ents, rds, by_prefix, nwords: wix.len() }
+        Index { ents, syls, pool, off, by_prefix }
     }
 }
 
@@ -152,12 +202,12 @@ impl<'a> Index<'a> {
 pub fn predict(idx: &Index, lm: &Lm, lam: f64, v: &str, units: &[Unit], mode: Mode, limit: usize) -> Vec<(String, f64, bool)> {
     let Some(bucket) = units.first().and_then(|u| idx.by_prefix.get(u.chars.as_slice())) else { return Vec::new() };
     let (succ, ctx) = (lm.successor_ids(v), lm.context_of(v));
-    let mut seen = vec![false; idx.nwords];
+    let mut seen = HashSet::new();
     let mut tiers: [Vec<(f64, &Ent)>; 2] = Default::default();
     for &i in bucket {
         let e = &idx.ents[i as usize];
-        let syls = &idx.rds[e.rd as usize].0;
-        if (compat_prefix(units, syls) || (mode == Mode::PA && compat_abbr(units, syls))) && !std::mem::replace(&mut seen[e.wix as usize], true) {
+        let syls = &idx.pool[idx.off[e.rd as usize] as usize..idx.off[e.rd as usize + 1] as usize];
+        if (compat_prefix(units, syls, &idx.syls) || (mode == Mode::PA && compat_abbr(units, syls, &idx.syls))) && seen.insert(e.wix) {
             let wid = (e.wid != u32::MAX).then_some(e.wid);
             tiers[if wid.is_some_and(|w| succ.binary_search(&w).is_ok()) { 0 } else { 1 }].push((lm.word_by_id(lam, ctx, wid, e.lp), e));
         }
@@ -165,7 +215,7 @@ pub fn predict(idx: &Index, lm: &Lm, lam: f64, v: &str, units: &[Unit], mode: Mo
     let mut out = Vec::new();
     for (t, tier) in tiers.iter_mut().enumerate() {
         let order = |a: &(f64, &Ent), b: &(f64, &Ent)| {
-            b.0.partial_cmp(&a.0).unwrap_or(Ordering::Equal).then(a.1.wlen.cmp(&b.1.wlen)).then_with(|| idx.rds[a.1.rd as usize].1.cmp(&idx.rds[b.1.rd as usize].1)).then(a.1.word.cmp(b.1.word))
+            b.0.partial_cmp(&a.0).unwrap_or(Ordering::Equal).then(a.1.wlen.cmp(&b.1.wlen)).then(a.1.rd.cmp(&b.1.rd)).then(a.1.word.cmp(b.1.word))
         };
         if tier.len() > limit && limit > 0 {
             tier.select_nth_unstable_by(limit - 1, order);
