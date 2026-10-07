@@ -213,7 +213,8 @@ fn rss_kb() -> Option<u64> {
 
 /// V3 core (docs/contracts/v3-core-predict.md): `--predict <file> --lm <file> --profile chat|formal [--predict-time]`.
 /// The file is eval/golden/sp-predict.txt (only its `## ` query lines are read); output has the same format.
-/// `--predict-time` prints p50/p95/max of the predict calls (index build excluded) and the index cost on stderr.
+/// `--predict-time` prints p50/p95/max of the predict calls (index build excluded) and the index cost on stderr
+/// (RSS before and after one index, and after a second one).
 fn run_predict(args: &[String]) -> Result<(), String> {
     let (mut file, mut lm_path, mut profile, mut time) = (None, None, None, false);
     let mut it = args.iter();
@@ -264,6 +265,12 @@ fn run_predict(args: &[String]) -> Result<(), String> {
         }
     }
     std::io::stdout().write_all(out.as_bytes()).map_err(|_| "cannot write output".to_string())?;
+    if time {
+        // A second index shows what one index keeps resident once the build temporaries are freed.
+        let second = Index::new(&capped, &lm);
+        eprintln!("rss after the second index: {:?} KiB", rss_kb());
+        drop(second);
+    }
     if time && !lat.is_empty() {
         lat.sort();
         let ms = |d: Duration| d.as_secs_f64() * 1000.0;
