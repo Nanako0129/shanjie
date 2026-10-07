@@ -253,6 +253,21 @@ impl Lm {
     pub fn total(&self) -> u64 {
         self.n
     }
+
+    /// Ids of the words listed after `v` in the model, ascending; empty when `v` has no context entry.
+    pub fn successor_ids(&self, v: &str) -> &[u32] {
+        let range = self.ctx_of(self.word_id(v)).map_or(0..0, |i| self.off[i] as usize..self.off[i + 1] as usize);
+        &self.nxt[range]
+    }
+
+    /// `word` for a caller that looked the ids up once: `ctx` from `context_of(v)`, `w` from `word_id`.
+    pub fn word_by_id(&self, lam: f64, ctx: Option<usize>, w: Option<u32>, lp: f64) -> f64 {
+        word_term(lam, self.prob_c(ctx, w, pow10(lp)), lp)
+    }
+
+    pub fn context_of(&self, v: &str) -> Option<usize> {
+        self.ctx_of(self.word_id(v))
+    }
 }
 
 /// Python `10 ** lp` is libm `pow`. With a constant base LLVM rewrites `powf` to `exp10`, which rounds
@@ -428,6 +443,14 @@ impl CappedLexicon {
             Some(r) => self.base.range(r).map(|p| (self.word_of(&self.ents[p]), self.ents[p].score)).collect(),
             None => Vec::new(),
         }
+    }
+
+    /// Every reading with its capped (word, score) list, best first (build-time use, allocates).
+    pub fn readings(&self) -> impl Iterator<Item = (Vec<&str>, Vec<(&str, f64)>)> + '_ {
+        (0..self.base.readings.len()).map(|r| {
+            let key = self.base.key_of(&self.base.readings[r]).iter().map(|&i| self.base.syl_names[i as usize].as_str());
+            (key.collect(), self.base.range(r).map(|p| (self.word_of(&self.ents[p]), self.ents[p].score)).collect())
+        })
     }
 
     /// Highest capped score of `word` under the reading `key` (duplicate entries: the maximum).
