@@ -14,8 +14,11 @@ func say(_ message: StaticString) {
 
 /// docs/contracts/s3b.md section 13.3, through ShanjieInstall (shared with the installer). Run on
 /// the installed copy, by scripts/install-ime.sh or by the user after `brew install`. Exit 3 means
-/// the mode is not listed yet or the input method is not accepted yet (log out and log in, then
-/// run it again); 1 is any other failure.
+/// the mode is not listed yet or the input method is not accepted yet (add it in System Settings >
+/// Keyboard > Input Sources); 1 is any other failure. installer-v2.md section 9: registration runs
+/// only when the system does not know the mode yet or an earlier version's mode is enabled. When
+/// it is skipped as not accepted, this waits up to 5 s for the system to take the input method
+/// (calling nothing that changes TIS state) before giving up with 3.
 func install() -> Int32 {
     guard let bundleID = Bundle.main.bundleIdentifier else {
         say("install: no bundle identifier")
@@ -26,6 +29,7 @@ func install() -> Int32 {
     switch result.outcome {
     case .modeNotListed:
         say("install: the input mode is not listed yet")
+        say("install: open System Settings > Keyboard > Input Sources, press +, choose Shanjie under Chinese (Traditional) and press Add")
         return 3
     case .registrationFailed:
         say("install: registration failed and the input mode is not listed")
@@ -34,8 +38,16 @@ func install() -> Int32 {
         say("install: TISEnableInputSource failed")
         return 1
     case .notAccepted:
+        if Registration.waitUntilAccepted(result, isAccepted: { Registration.isAccepted(bundleID: bundleID) }) {
+            say("install: already enabled; registration skipped")
+            return 0
+        }
         say("install: the system has not accepted the input method yet")
+        say("install: open System Settings > Keyboard > Input Sources, press +, choose Shanjie under Chinese (Traditional) and press Add")
         return 3
+    case .done where result.skipped:
+        say("install: already enabled; registration skipped")
+        return 0
     case .done:
         if result.legacyDisableFailed {
             say("install: warning: TISDisableInputSource failed for an input mode of an earlier version")

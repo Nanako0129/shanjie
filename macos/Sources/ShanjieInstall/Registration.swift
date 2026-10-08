@@ -3,7 +3,10 @@ import Foundation
 
 // docs/contracts/s3b.md section 13.3 and s3c-installer.md section 2.3: register the input method
 // bundle, enable the input method and its one mode, check that the system took it, then disable
-// the two modes of earlier versions. Shared by `shanjie install` (its own bundle) and the
+// the two modes of earlier versions. Amended by installer-v2.md section 9: that sequence runs only
+// when the system does not know the mode yet or an earlier version's mode is still enabled; with
+// the input method already accepted, or known but not accepted, nothing is changed (a register or
+// enable call then has no effect, measured, and breaks the Caps Lock switch). Shared by `shanjie install` (its own bundle) and the
 // installer (the installed copy, never a path inside the installer: under App Translocation that
 // is a random read-only path).
 
@@ -13,8 +16,9 @@ public enum Registration {
         case done
         /// The mode is not listed after registering (the system has not loaded the bundle yet).
         case modeNotListed
-        /// Enabled without an error, but the input method is not in the enabled list yet. Measured
-        /// 2026-10-04: usual right after the first registration, until a log out and log in.
+        /// The input method is not in the enabled list. Either the enable calls ran and the system
+        /// has not taken it (measured: until the user adds it in System Settings > Keyboard >
+        /// Input Sources), or, with `skipped`, nothing was called and the caller may wait.
         case notAccepted
         /// Registration failed and the mode is not listed.
         case registrationFailed
@@ -28,13 +32,87 @@ public enum Registration {
         public var registerFailed = false
         /// Disabling a mode of an earlier version failed (does not change the outcome).
         public var legacyDisableFailed = false
+        /// installer-v2.md section 9.2: only the state was read, no TIS call changed anything.
+        public var skipped = false
+
+        public init(outcome: Outcome, registerFailed: Bool = false, legacyDisableFailed: Bool = false, skipped: Bool = false) {
+            self.outcome = outcome
+            self.registerFailed = registerFailed
+            self.legacyDisableFailed = legacyDisableFailed
+            self.skipped = skipped
+        }
+    }
+
+    public enum Decision: Equatable, Sendable {
+        case skipDone, skipNotAccepted, fullFlow
+    }
+
+    /// What `run` reads before it changes anything.
+    public struct State: Equatable, Sendable {
+        public var modeListed: Bool
+        public var accepted: Bool
+        public var legacyEnabled: Bool
+        public init(modeListed: Bool, accepted: Bool, legacyEnabled: Bool) {
+            self.modeListed = modeListed
+            self.accepted = accepted
+            self.legacyEnabled = legacyEnabled
+        }
+    }
+
+    /// installer-v2.md section 9.2 item 1. An unknown mode (first install) or an enabled mode of an
+    /// earlier version needs the whole sequence; otherwise nothing is changed.
+    public static func decide(modeListed: Bool, accepted: Bool, legacyEnabled: Bool) -> Decision {
+        if !modeListed || legacyEnabled { return .fullFlow }
+        return accepted ? .skipDone : .skipNotAccepted
+    }
+
+    static func readState(bundleID: String) -> State {
+        let all = inputSources(bundleID: bundleID, includeAllInstalled: true)
+        let legacy: Set<String> = ["\(bundleID).standard", "\(bundleID).eten"]
+        return State(
+            modeListed: all.contains { inputModeID($0) == "\(bundleID).zhuyin" },
+            accepted: isAccepted(bundleID: bundleID),
+            legacyEnabled: all.contains { inputModeID($0).map(legacy.contains) ?? false && isEnabled($0) })
     }
 
     /// Runs the whole sequence. `defaults` is the input method's own domain: `shanjie install`
     /// passes `UserDefaults.standard` (it runs as the input method), the installer passes
     /// `UserDefaults(suiteName: <bundle ID>)`.
-    public static func run(bundleURL: URL, bundleID: String, defaults: UserDefaults) -> Result {
-        // Always registered: a bundle ID TIS already knows may still carry the old two-mode list.
+    /// Reads the state first and changes nothing unless `decide` says `fullFlow`. `readState` and
+    /// `fullFlow` are injected only by tests, to count the calls that would change something.
+    public static func run(
+        bundleURL: URL, bundleID: String, defaults: UserDefaults,
+        readState: ((String) -> State)? = nil,
+        fullFlow: ((URL, String, UserDefaults) -> Result)? = nil
+    ) -> Result {
+        let state = (readState ?? Self.readState(bundleID:))(bundleID)
+        switch decide(modeListed: state.modeListed, accepted: state.accepted, legacyEnabled: state.legacyEnabled) {
+        case .skipDone: return Result(outcome: .done, skipped: true)
+        case .skipNotAccepted: return Result(outcome: .notAccepted, skipped: true)
+        case .fullFlow: return (fullFlow ?? Self.fullFlow(bundleURL:bundleID:defaults:))(bundleURL, bundleID, defaults)
+        }
+    }
+
+    /// Waits, without calling anything that changes TIS state, for the system to take a skipped
+    /// `notAccepted` (right after the files are swapped it may list the input method as disabled
+    /// for a moment). True when the result is done or the input method became accepted in time.
+    public static func waitUntilAccepted(
+        _ result: Result, interval: TimeInterval = 0.5, limit: TimeInterval = 5,
+        isAccepted: () -> Bool, sleep: (TimeInterval) -> Void = Thread.sleep(forTimeInterval:)
+    ) -> Bool {
+        if result.outcome == .done { return true }
+        guard result.outcome == .notAccepted, result.skipped else { return false }
+        var waited: TimeInterval = 0
+        while waited < limit {
+            sleep(interval)
+            waited += interval
+            if isAccepted() { return true }
+        }
+        return false
+    }
+
+    static func fullFlow(bundleURL: URL, bundleID: String, defaults: UserDefaults) -> Result {
+        // Registered here: a bundle ID TIS already knows may still carry the old two-mode list.
         // Whether an already registered bundle reports an error here is not measured; it only
         // decides between registrationFailed and modeNotListed below.
         let registered = TISRegisterInputSource(bundleURL as CFURL) == noErr
