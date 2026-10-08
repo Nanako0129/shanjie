@@ -591,6 +591,24 @@ final class ShellTests: XCTestCase {
         XCTAssertEqual(again.client.marked, "碇源堂")
     }
 
+    /// A pack that fails to load (default on) must not leave the user with no engine: the shell falls back to
+    /// building without the pack, keeps the stored choice, and typing works.
+    func testCorruptPackFallsBackToAnEngineWithoutIt() throws {
+        let packs = resources.appendingPathComponent("packs")
+        try FileManager.default.createDirectory(at: packs, withIntermediateDirectories: true)
+        try "not a row\n".write(to: packs.appendingPathComponent("acg-add.tsv"), atomically: true, encoding: .utf8)
+        XCTAssertNotEqual(CoreEngine.make(dataDir: resources.path, layout: 0, packsDir: packs.path, acgPack: true).1, 0, "the fixture is a pack that cannot load")
+        let store = MemoryAcgPackStore()
+        let shell = Shell(resources: resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(),
+                          learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), acgPackStore: store)
+        XCTAssertNotNil(shell.engine)
+        XCTAssertNil(store.acgPack, "the preference is left as it was")
+        let c = Controller(shell)
+        c.session.activate()
+        XCTAssertEqual(c.type("su3cl3"), Array(repeating: true, count: 6))
+        XCTAssertEqual(c.client.marked, "你好")
+    }
+
     func testSwitchingLayoutCommitsThenUsesTheNewLayout() {
         let c = Controller(makeShell())
         c.session.activate()
