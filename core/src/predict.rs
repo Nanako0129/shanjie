@@ -81,12 +81,29 @@ fn parse_syl(s: &str) -> Option<Syl> {
     (!chars.is_empty()).then_some(Syl { chars, tone })
 }
 
+/// A completed unit for a typed syllable text such as `ㄋㄧˇ` or `˙ㄅㄚ`; None when it has no zhuyin character.
+pub fn unit_of_syllable(s: &str) -> Option<Unit> {
+    parse_syl(s).map(|y| Unit { chars: y.chars, done: true, tone: y.tone })
+}
+
 fn unit_ok(u: &Unit, s: &Syl) -> bool {
     if u.done {
         s.chars == u.chars && s.tone == u.tone
     } else {
         s.chars.starts_with(&u.chars)
     }
+}
+
+/// Whether `predict` in prefix mode could return a word read `reading` for `units`: a cheap string test on the first
+/// syllable first, then the same compatibility test as the scan. Never false for a reading `predict` would return.
+pub fn reading_matches(units: &[Unit], reading: &[String]) -> bool {
+    let Some(first) = units.first() else { return false };
+    let head: String = first.chars.iter().collect();
+    if reading.len() < units.len() || !reading[0].trim_start_matches('˙').starts_with(&head) {
+        return false;
+    }
+    let Some((_, init)) = units.split_last() else { return false };
+    init.iter().all(|u| u.done) && units.iter().zip(reading).all(|(u, y)| parse_syl(y).is_some_and(|s| unit_ok(u, &s)))
 }
 
 fn compat_prefix(units: &[Unit], syls: &[u32], table: &[Syl]) -> bool {
@@ -115,6 +132,8 @@ pub struct Index<'a> {
     ents: Vec<Ent<'a>>,
     /// Distinct syllables, numbered in text order. Reading `r` is `pool[off[r]..off[r + 1]]`.
     syls: Vec<Syl>,
+    /// Text of each syllable in `syls`, same numbering.
+    names: Vec<&'a str>,
     pool: Vec<u32>,
     off: Vec<u32>,
     by_prefix: HashMap<Vec<char>, Vec<u32>>,
@@ -155,6 +174,7 @@ impl<'a> Index<'a> {
             new_id[i as usize] = k as u32;
         }
         let syls: Vec<Syl> = by_name.iter().map(|&i| parsed[i as usize].take().unwrap_or(Syl { chars: Vec::new(), tone: None })).collect();
+        let names: Vec<&str> = by_name.iter().map(|&i| names[i as usize]).collect();
         for p in &mut pool {
             *p = new_id[*p as usize];
         }
@@ -191,15 +211,16 @@ impl<'a> Index<'a> {
                 by_prefix.entry(c0[..j].to_vec()).or_default().push(i as u32);
             }
         }
-        Index { ents, syls, pool, off, by_prefix }
+        Index { ents, syls, names, pool, off, by_prefix }
     }
 }
 
-/// Candidates of `units` in order S, at most `limit`: (word, score, is a successor of `v`). `v` is the history word
+/// Candidates of `units` in order S, at most `limit`: (word, score, is a successor of `v`, reading). The reading is the
+/// syllable texts of the compatible reading that reached the word's `lp_max` (the one the order uses). `v` is the history word
 /// (`lm::history`, maybe `<s>`). Tier one holds the words listed after `v`, tier two the rest; each tier is ordered by
 /// (-score, word length, reading, word), where the reading is the smallest compatible one reaching the word's best
 /// compatible score. That score (`lp_max`) is the first compatible entry of the word in bucket order.
-pub fn predict(idx: &Index, lm: &Lm, lam: f64, v: &str, units: &[Unit], mode: Mode, limit: usize) -> Vec<(String, f64, bool)> {
+pub fn predict(idx: &Index, lm: &Lm, lam: f64, v: &str, units: &[Unit], mode: Mode, limit: usize) -> Vec<(String, f64, bool, Vec<String>)> {
     let Some(bucket) = units.first().and_then(|u| idx.by_prefix.get(u.chars.as_slice())) else { return Vec::new() };
     let (succ, ctx) = (lm.successor_ids(v), lm.context_of(v));
     let mut seen = HashSet::new();
@@ -212,7 +233,7 @@ pub fn predict(idx: &Index, lm: &Lm, lam: f64, v: &str, units: &[Unit], mode: Mo
             tiers[if wid.is_some_and(|w| succ.binary_search(&w).is_ok()) { 0 } else { 1 }].push((lm.word_by_id(lam, ctx, wid, e.lp), e));
         }
     }
-    let mut out = Vec::new();
+    let mut out: Vec<(&Ent, f64, bool)> = Vec::new();
     for (t, tier) in tiers.iter_mut().enumerate() {
         let order = |a: &(f64, &Ent), b: &(f64, &Ent)| {
             b.0.partial_cmp(&a.0).unwrap_or(Ordering::Equal).then(a.1.wlen.cmp(&b.1.wlen)).then(a.1.rd.cmp(&b.1.rd)).then(a.1.word.cmp(b.1.word))
@@ -222,8 +243,13 @@ pub fn predict(idx: &Index, lm: &Lm, lam: f64, v: &str, units: &[Unit], mode: Mo
             tier.truncate(limit);
         }
         tier.sort_by(order);
-        out.extend(tier.iter().map(|&(s, e)| (e.word.to_string(), s, t == 0)));
+        out.extend(tier.iter().map(|&(s, e)| (e, s, t == 0)));
     }
     out.truncate(limit);
-    out
+    out.into_iter()
+        .map(|(e, s, succ)| {
+            let r = &idx.pool[idx.off[e.rd as usize] as usize..idx.off[e.rd as usize + 1] as usize];
+            (e.word.to_string(), s, succ, r.iter().map(|&i| idx.names[i as usize].to_string()).collect())
+        })
+        .collect()
 }

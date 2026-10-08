@@ -644,7 +644,7 @@ S3a 不需要外觀參考，可以先做；S3b 等使用者提供 macOS 內建�
 - **從 S3b 移來（2026-10-03）**：`privacyGate`（R3：`IsSecureEventInputEnabled()` 或 denylist 時停學習、停雲端、不讀左文；判斷不了就擋；選單顯示暫停狀態）、gate 單元測試、gate 轉為生效時 `reset`；左文讀取與 R4。
 
 - 左文由殼讀取、經 C ABI 傳入，R4（最後換行截斷、計數單位與上限、只活在記憶體、多行與 emoji 邊界測試）在這片實作。
-- 前文 key 用字（≤ 2 字，不用切詞結果）、天級衰減、2 字以上的詞跨 ≥ 2 種前文才全域化（單字不全域化，也只在完整前文相同且非「^」時學與加分；契約 §12）、`max(系統分, 混合分)`、只有打開候選窗改選才學、候選窗一鍵忘記、改選走時舊紀錄減半；儲存依 R5。
+- 前文 key 用字（≤ 2 字，不用切詞結果）、天級衰減、2 字以上的詞跨 ≥ 2 種前文才全域化（單字不全域化，也只在完整前文相同且非「^」時學與加分；契約 §12）、`max(系統分, 混合分)`、只有打開候選窗改選才學（V3 修訂一起，從預測列選取的詞也學）、候選窗與預測列都能一鍵忘記、改選走時舊紀錄減半；儲存依 R5。
 - 驗收：A2；gate 生效時 0 筆學習；R5 的清除測試；重播標記字串後學習檔不含該標記（R2）。
 - 擁有者：`pilotfish:executor`；儲存與清除由 `pilotfish:security-executor`。
 
@@ -818,8 +818,8 @@ S3a 不需要外觀參考，可以先做；S3b 等使用者提供 macOS 內建�
 | ID | 等級 | 設計規則／測試 | 處置 | 落在哪片 |
 |---|---|---|---|---|
 | R1 | P1 | 雲端與端上重排都只回本機 N-best 的索引（v5：S5 改回 N-best 重排，字級規則不再需要）；其他一律丟棄；回應綁定組字 session ID，client 或 bundle 換了就丟；mock 測試：含 `\n`、索引越界、遲到回應 → 只送本機結果 | 採納；自由文字列為非目標 | S5、S6 |
-| R2 | P1 | 組字、候選、前文、payload 不進任何 log／panic／fatalError；Swift 用 `Logger`，只記靜態字串與 C ABI 回傳碼，不內插任何其他值、不用 `.public`（2026-10-03 S3b 審查後收緊，見 s3b §9）；FFI `catch_unwind`；行為測試：重播標記字串 → `log stream --level debug` 擷取與學習檔都找不到；學習檔除了 ≤ 2 字的漢字前文，不含沒被改選的內容 | 採納 | S0（核心錯誤訊息規則＋測試，驗收 5）、S3（`catch_unwind`、FFI panic 測試、日誌行為測試）、S4（學習檔不含標記） |
-| R3 | P1 | `privacyGate(bundleID)`：`IsSecureEventInputEnabled()` 或 denylist 就停學習、停雲端、不讀左文；判斷不了就擋；選單顯示暫停狀態；使用者實測 Safari 密碼欄、Terminal 開 Secure Keyboard Entry、Terminal `sudo` | 部分採納（S4：前文只收漢字）：終端機與密碼管理器預設在**雲端** denylist；**學習**在終端機預設開。理由：使用者大量在終端機打中文；只學「注音模式下打開候選窗改選的中文詞」，英數直通（密碼、sudo）不暫存也不學。使用者可改（§4.4） | S4、S6（S3b 沒有學習、雲端、左文，延到 S4） |
+| R2 | P1 | 組字、候選、前文、payload 不進任何 log／panic／fatalError；Swift 用 `Logger`，只記靜態字串與 C ABI 回傳碼，不內插任何其他值、不用 `.public`（2026-10-03 S3b 審查後收緊，見 s3b §9）；FFI `catch_unwind`；行為測試：重播標記字串 → `log stream --level debug` 擷取與學習檔都找不到；學習檔除了 ≤ 2 字的漢字前文，不含沒被改選、也沒從預測列選過的內容 | 採納 | S0（核心錯誤訊息規則＋測試，驗收 5）、S3（`catch_unwind`、FFI panic 測試、日誌行為測試）、S4（學習檔不含標記） |
+| R3 | P1 | `privacyGate(bundleID)`：`IsSecureEventInputEnabled()` 或 denylist 就停學習、停雲端、不讀左文；判斷不了就擋；選單顯示暫停狀態；使用者實測 Safari 密碼欄、Terminal 開 Secure Keyboard Entry、Terminal `sudo` | 部分採納（S4：前文只收漢字）：終端機與密碼管理器預設在**雲端** denylist；**學習**在終端機預設開。理由：使用者大量在終端機打中文；只學「注音模式下在候選窗改選、或從預測列選取的中文詞」（預測列的部分自 V3 修訂一），英數直通（密碼、sudo）不暫存也不學。使用者可改（§4.4） | S4、S6（S3b 沒有學習、雲端、左文，延到 S4） |
 | R4 | P2 | 左文在最後換行截斷、grapheme 計數、只活在記憶體；多行與 emoji 邊界測試 | 採納 | 第一個讀左文的切片（目前是 S4；2026-10-03 從 S3 移出）；S6 只沿用 |
 | R5 | P2 | 學習檔放 `~/Library/Application Support/shanjie/`，權限 0600，只存「前文 ≤ 2 個漢字、讀音、詞、權重、日期」；一鍵清除含記憶體與附屬檔（暫存檔、`.corrupt`；S4 不用 SQLite）；靠 FileVault 不另加密；設定頁揭露 Time Machine 並提供排除備份 | 採納 | S4 |
 | R6 | P2 | Keychain：service＝bundle ID、`SecItemUpdate` 並檢查狀態、key 不進 URL／log／錯誤訊息；agent 測試用記憶體 store；真 Keychain 交給使用者實測；預告 ad-hoc 簽章可能跳授權提示 | 採納 | S6 |
