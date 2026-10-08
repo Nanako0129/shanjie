@@ -23,7 +23,7 @@
 - **檢查的位置**（review 後補）：說明檔的檢查放在 gate 的「等 CI」之前，缺檔一秒就失敗。
 - 其他步驟不動。
 
-## 3. 規則（寫進 repo 根目錄 `CLAUDE.md`「發版」與 `docs/releases/README.md`）
+## 3. 規則（寫在 `docs/releases/README.md`；repo 根目錄 `CLAUDE.md`「發版」只放一句摘要與指標）
 
 - 推 `v*` tag 之前，`docs/releases/<tag>.md` 要先寫好、經 PR 合併到 main；推 tag 仍要使用者當下同意。
 - 資料類 Release（`model-v…`、`classes-v…`）照樣手動建，一律 `gh release create <tag> <檔案> --notes-file docs/releases/<tag>.md --latest=false`；說明檔同樣先進 main。
