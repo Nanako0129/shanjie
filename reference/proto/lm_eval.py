@@ -57,6 +57,8 @@ def main():
     lex = L.cap_overlay(base, ov, lm)
     top1, o64, firsts, rs = 0, 0, [], []
     dump = open(a.dump, "w", encoding="utf-8") if a.dump else None
+    # Opened before decoding, like the CLI: an unwritable path fails now, not after the whole run.
+    rsf = open(a.rowstats, "w", encoding="utf-8", newline="") if a.rowstats else None
     for i, (t, syls, ctx) in enumerate(rows, 1):
         nb = L.decode(lex, syls, lm, a.profile, start=L.history(L.context_key(ctx), lm) if a.context else "<s>", demote=not a.no_demote)
         surf = ["".join(ws) for _, ws in nb]
@@ -68,9 +70,9 @@ def main():
         if dump:
             for r, (sc, ws) in enumerate(nb, 1):
                 dump.write(f"{i}\t{r}\t{''.join(ws)}\t{sc!r}\n")
-    if a.rowstats:
-        with open(a.rowstats, "w", encoding="utf-8", newline="") as f:
-            f.write(format_rowstats(rs))
+    if rsf:
+        with rsf:
+            rsf.write(format_rowstats(rs))
     sha = hashlib.sha256("\n".join(firsts).encode("utf-8")).hexdigest()
     print(f"## {name}  lm-{a.profile}{'+ctx' if a.context else ''}{'-nodemote' if a.no_demote else ''}  {{'n': {len(rows)}, 'top1': {top1}, 'oracle@64': {o64}, 'top1_sha256': '{sha}'}}")
 

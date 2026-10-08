@@ -28,7 +28,7 @@
 - **保留集** `eval/holdout/`：只在一片收尾時由 fresh verifier 跑一次、只回數字：基準與新版各跑一次 `--set holdout --rowstats`（寫到它自己的暫存目錄、檔內只能有 `[0-9\t\n]`），再跑 `tools/evalstats.py compare`，只回那一行表格，然後刪掉兩個 rowstats。其他時候不讀、不用來調參數。
 - **私有資料**（使用者的 Discord 調參集、學習檔、聊天紀錄）放在 repo 外，只報統計數字。讀個人資料前先問；agent 一律不讀。
 - **使用者回報的錯字**：加到 `eval/dev/user-reported.txt` 的**最後面**（使用者 2026-10-03 同意以 CC0 釋出），格式 `前文|句子|讀音`。加在最後，`--dev 302` 的前 302 列才不會變。
-- 改到選字結果的改動（使用者 2026-10-08 決定，從下一片開始），dev302、打字測驗、錯字回報檔在聊天與書面兩種設定各報一行同一張表：n、top1 基準／新、改對／改壞、精確 McNemar p、CER（字元錯誤率）基準／新、Δtop1 與 ΔCER 的配對 bootstrap 95% 區間。做法：基準與新版各跑 `lm … --rowstats FILE`（CLI 或 `reference/proto/lm_eval.py`），再 `python3 tools/evalstats.py compare BASE CAND --label 名稱`；契約 `docs/contracts/eval-stats.md`。Discord 調參集由 main 在本機跑、只貼表格數字。調參數用 cvtune、wikitune，不用 dev302；調參的前後比較也用同一張表。
+- 改到選字結果的改動（使用者 2026-10-08 決定，從下一片開始），dev302、打字測驗、錯字回報檔在聊天與書面兩種設定各報一行同一張表：n、top1 基準／新、改對／改壞、精確 McNemar p、CER（字元錯誤率）基準／新、Δtop1 與 ΔCER 的配對 bootstrap 95% 區間。做法：基準與新版各跑 `cargo run --release -q -p cli -- --lm data/lm/bigram.sjlm --profile chat … --rowstats FILE`（或 `reference/proto/lm_eval.py` 同樣的選項），再 `python3 tools/evalstats.py compare BASE CAND --label 名稱`；契約 `docs/contracts/eval-stats.md`。Discord 調參集由 main 在本機跑、只貼表格數字。調參數用 cvtune、wikitune，不用 dev302；調參的前後比較也用同一張表。
 
 ## 實機測試（`tools/imeshot.swift`）
 
