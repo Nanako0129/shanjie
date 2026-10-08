@@ -1,0 +1,193 @@
+# 區段	組名	模組	收錄	類別或理由
+綜合	日本动画	Anime	include	日本動畫
+綜合	卡通	Cartoon	include	卡通
+綜合	美國漫畫	USComic	include	漫畫
+綜合	电子游戏	Games	include	遊戲
+綜合	中文電子遊戲業	Games-zh	include	遊戲
+綜合	电子竞技	Esports	exclude	影視、音樂、攝影、電競等非 ACG
+綜合	电影术语	Film Ferm	exclude	影視、音樂、攝影、電競等非 ACG
+綜合	歐美電影	Movie	exclude	影視、音樂、攝影、電競等非 ACG
+綜合	歐美電視	TV	exclude	影視、音樂、攝影、電競等非 ACG
+綜合	日本影視	JP Show	exclude	影視、音樂、攝影、電競等非 ACG
+綜合	韓國電影	KO Movie	exclude	影視、音樂、攝影、電競等非 ACG
+綜合	韓劇	KO TV Show	exclude	影視、音樂、攝影、電競等非 ACG
+綜合	泰國電影	TH Movie	exclude	影視、音樂、攝影、電競等非 ACG
+綜合	印度電影	IN Movie	exclude	影視、音樂、攝影、電競等非 ACG
+綜合	華語影視	ZH Show	exclude	影視、音樂、攝影、電競等非 ACG
+綜合	音樂	Music	exclude	影視、音樂、攝影、電競等非 ACG
+綜合	音樂劇	Musical	exclude	影視、音樂、攝影、電競等非 ACG
+綜合	攝影	Photography	exclude	影視、音樂、攝影、電競等非 ACG
+藝人	歐美藝人	Entertainer	exclude	歌手、藝人
+藝人	南韓藝人	KO Show	exclude	歌手、藝人
+藝人	Apink	Apink	exclude	歌手、藝人
+藝人	爱莉安娜·格兰德	Ariana Grande	exclude	歌手、藝人
+藝人	艾薇儿·拉维尼	Avril Lavigne	exclude	歌手、藝人
+藝人	披頭四	TheBeatles	exclude	歌手、藝人
+藝人	布蘭妮·斯皮爾斯	Britney Spears	exclude	歌手、藝人
+藝人	查理·卓别林	Charlie Chaplin	exclude	歌手、藝人
+藝人	宇多田光	Hikaru Utada	exclude	歌手、藝人
+藝人	贾斯汀·比伯	Justin Bieber	exclude	歌手、藝人
+藝人	嘎嘎小姐	Lady Gaga	exclude	歌手、藝人
+藝人	拉娜·德雷	Lana Del Rey	exclude	歌手、藝人
+藝人	聯合公園	Linkin Park	exclude	歌手、藝人
+藝人	麦莉·赛勒斯	Miley Cyrus	exclude	歌手、藝人
+藝人	蕾哈娜	Rihanna	exclude	歌手、藝人
+藝人	泰勒·斯威夫特	Taylor Swift	exclude	歌手、藝人
+作品	24 (電視劇)	24	exclude	真人影集
+作品	魔法禁書目錄	A Certain Magical Index	include	動畫
+作品	冰與火之歌	A Song of Ice and Fire	exclude	小說
+作品	探險活寶	Adventure Time	include	卡通
+作品	Aikatsu！偶像活動！	Aikatsu	include	動畫
+作品	進擊的巨人	Attack on Titan	include	動畫
+作品	阿凡達	Avatar	exclude	電影
+作品	降世神通	Avatar: The Last Airbender	include	卡通
+作品	機甲巴打	BUDDYCOMPLEX	include	動畫
+作品	爆丸	Bakugan Battle Brawlers	include	動畫
+作品	爆漫王	Bakuman	include	動畫
+作品	四驅兄弟	Bakusou Kyoudai Let's & Go!!	include	動畫
+作品	BLEACH	BLEACH	include	動畫
+作品	蔚藍檔案	BlueArchive	include	遊戲
+作品	Battle Spirits	Battle Spirits	include	動畫
+作品	黑執事	Black Butler	include	動畫
+作品	黑镜	Black Mirror	exclude	真人影集
+作品	CANAAN迦南	CANAAN	include	動畫
+作品	黑色代碼	Code Black	exclude	真人影集
+作品	反叛的魯路修	Code Geass	include	動畫
+作品	至Net奇兵	CodeLyoko	include	卡通
+作品	終極動員令系列	Command & Conquer	include	遊戲
+作品	絕對武力	Counter-Strike	include	遊戲
+作品	蠟筆小新	Crayon Shin-chan	include	動畫
+作品	跑跑卡丁車	Crazyracing Kartrider	include	遊戲
+作品	閃電霹靂車	Cyber Formula	include	動畫
+作品	赛博朋克系列	Cyberpunk	include	遊戲
+作品	紙箱戰機	Danball Senki	include	動畫
+作品	闇	Dark	exclude	真人影集
+作品	DC漫畫作品	DCComics	include	漫畫
+作品	死亡筆記	Death Note	include	動畫
+作品	名侦探柯南	Detective Conan	include	動畫
+作品	暗黑破壞神系列	Diablo	include	遊戲
+作品	白玫瑰	Die Weiße Rose	exclude	電影
+作品	数码宝贝	Digimon	include	動畫
+作品	迪士尼	Disney	include	卡通
+作品	神秘博士	Doctor Who	exclude	真人影集
+作品	哆啦A夢	Doraemon	include	動畫
+作品	七龍珠	DragonBall	include	動畫
+作品	英雄傳說	英雄伝説シリーズ	include	遊戲
+作品	菁英殺機	Élite	exclude	真人影集
+作品	光速蒙面俠21	Eyeshield21	include	動畫
+作品	童話槍手小紅帽	Fairy Musketeers	include	動畫
+作品	居家男人	Family Guy	include	卡通
+作品	六人行	Friends	exclude	真人影集
+作品	葬送的芙莉蓮	Frieren	include	動畫
+作品	危機邊緣	Fringe	exclude	真人影集
+作品	冰雪奇缘	Frozen	include	卡通
+作品	乃出個未來	Futurama	include	卡通
+作品	鋼之鍊金術師	FullmetalAlchemist	include	動畫
+作品	冰與火之歌：權力遊戲	Game of Thrones	exclude	真人影集
+作品	吉卜力工作室	Ghibli	include	動畫
+作品	三一萬能俠	Getter Robo	include	動畫
+作品	Glee	Glee	exclude	真人影集
+作品	GOSICK	GOSICK	include	動畫
+作品	绯闻女孩	GossipGirl	exclude	真人影集
+作品	貓頭鷹守護神 (小說)	Guardians of Ga'Hoole	exclude	小說
+作品	機動戰士GUNDAM 00	Gundam00	include	動畫
+作品	機動戰士GUNDAM AGE	GundamAGE	include	動畫
+作品	GUNDAM創戰者	Gundam Build Fighters	include	動畫
+作品	機動武鬥傳G GUNDAM	GGundam	include	動畫
+作品	機動戰士GUNDAM 鐵血孤兒	GundamIBO	include	動畫
+作品	機動戰士GUNDAM SEED	GundamSeed	include	動畫
+作品	機動戰士GUNDAM 水星的魔女	GundamTWFM	include	動畫
+作品	機動戰士GUNDAM（宇宙世紀）	GundamUC	include	動畫
+作品	新機動戰記GUNDAM W	GundamW	include	動畫
+作品	戰慄時空系列	Half-Life	include	遊戲
+作品	漢尼拔·萊克特	Hannibal Lecter	exclude	小說與電影
+作品	哈利波特	HarryPotter	exclude	小說與電影
+作品	天堂执法者	Hawaii Five-0	exclude	真人影集
+作品	旋風管家	Hayate the Combat Butler	include	動畫
+作品	風暴英雄	Heroes of the Storm	include	遊戲
+作品	醫神	House	exclude	真人影集
+作品	逍遙法外 (電視劇)	How to Get Away with Murder	exclude	真人影集
+作品	HUNTER×HUNTER	HUNTER×HUNTER	include	動畫
+作品	閃電十一人	Inazuma Eleven	include	動畫
+作品	詹姆士·龐德	James Bond	exclude	電影
+作品	寶石寵物	Jewelpet	include	動畫
+作品	假面騎士	KamenRider	include	特攝
+作品	花王	Kao	exclude	公司
+作品	拳皇	KingOfFighters	include	遊戲
+作品	紙房子	La casa de papel	exclude	真人影集
+作品	英雄聯盟	League of Legends	include	遊戲
+作品	愛天使傳說	Legend of Love Angel Wedding Peach	include	動畫
+作品	貓頭鷹守護神	Legend of the Guardians	exclude	電影（動畫電影，但組內以小說名為主，先不收）
+作品	樂高	LEGO	exclude	玩具
+作品	悲惨世界	LesMisérables	exclude	小說
+作品	瑪奇	Mabinogi	include	遊戲
+作品	楓之谷	MapleStory	include	遊戲
+作品	小魔女DoReMi	Magical DoReMi	include	動畫
+作品	新黑色电影	neo-noir	exclude	電影類型
+作品	任天堂	Nintendo	include	遊戲
+作品	漫威Netflix系列電視劇	MarvelNetflix	exclude	真人影集
+作品	鐵甲萬能俠系列	Mazinger	include	動畫
+作品	戰鬥陀螺 鋼鐵奇兵	Metal Fight Beyblade	include	動畫
+作品	魔法門	Might&Magic	include	遊戲
+作品	米哈遊	miHoYo	include	遊戲
+作品	我的世界	Minecraft	include	遊戲
+作品	魔法咪路咪路	Mirumo!	include	動畫
+作品	彩虹小馬	My Little Pony	include	卡通
+作品	我的英雄學院	MyHeroAcademia	include	動畫
+作品	火影忍者	NARUTO	include	動畫
+作品	1世代	One Direction	exclude	音樂
+作品	航海王	OnePiece	include	動畫
+作品	【我推的孩子】	OshinoKo	include	動畫
+作品	寶僑	P&G	exclude	公司
+作品	潘朵拉之心	Pandora Hearts	include	動畫
+作品	小猪佩奇	PeppaPig	include	卡通
+作品	波西傑克森	Percy Jackson	exclude	小說
+作品	皮克斯	Pixar	include	卡通
+作品	真珠美人魚	Pichi Pichi Pitch	include	動畫
+作品	精靈寶可夢	Pokémon	include	動畫
+作品	金剛戰士	Power Rangers	include	特攝
+作品	星光少女	Pretty Rhythm	include	動畫
+作品	越獄風雲	PrisonBreak	exclude	真人影集
+作品	家庭教師HITMAN REBORN!	家庭教師ヒットマンREBORN!	include	動畫
+作品	生化危機	ResidentEvil	include	遊戲
+作品	美少女戰士	Sailor Moon	include	動畫
+作品	守護甜心	Shugo Chara!	include	動畫
+作品	模擬系列遊戲	Sim	include	遊戲
+作品	辛普森一家	Simpsons	include	卡通
+作品	少女時代	SNSD	exclude	音樂
+作品	我獨自升級	Solo Leveling	include	動畫
+作品	南方四賤客	SouthPark	include	卡通
+作品	海绵宝宝	SpongeBob SquarePants	include	卡通
+作品	SPY×FAMILY	SPY×FAMILY	include	動畫
+作品	史克威爾艾尼克斯	Square Enix	include	遊戲
+作品	星際爭霸	StarCraft	include	遊戲
+作品	星際爭霸2	StarCraft2	include	遊戲
+作品	星空奇遇記	StarTrek	exclude	真人影集
+作品	星球大战	StarWars	exclude	電影
+作品	史蒂芬·金	StephenKing	exclude	小說
+作品	怪奇物語	Stranger Things	exclude	真人影集
+作品	刀劍神域	Sword Art Online	include	動畫
+作品	传说系列	Tales	include	遊戲
+作品	黑塔系列	The Dark Tower	exclude	小說
+作品	打工吧！魔王大人	The Devil is a Part-Timer!	include	動畫
+作品	魔戒	The Lord of the Rings	exclude	小說與電影
+作品	涼宮春日的憂鬱	The Melancholy of Haruhi Suzumiya	include	動畫
+作品	花生漫畫	ThePeanuts	include	漫畫
+作品	约定的梦幻岛	The Promised Neverland	include	動畫
+作品	声临其境	The Sound	exclude	綜藝
+作品	獵魔士	The Witcher	include	遊戲
+作品	只有神知道的世界	The World God Only Knows	include	動畫
+作品	變形金剛	Transformers	include	卡通
+作品	暮光之城	Twilight	exclude	小說
+作品	超人力霸王	Ultraman	include	特攝
+作品	戰場女武神	Valkyria	include	遊戲
+作品	魔獸系列	Warcraft	include	遊戲
+作品	戰錘40000	Warhammer	include	遊戲
+作品	貓戰士	Warriors	exclude	小說
+作品	巡者系列	Watch	exclude	小說
+作品	星期三	Wednesday	exclude	真人影集
+作品	迷糊餐厅	WORKING!!	include	動畫
+作品	魔獸世界	Wow	include	遊戲
+作品	Yes! 光之美少女5	Yes! Pretty Cure 5	include	動畫
+作品	妖怪手錶	Yo-kai Watch	include	動畫
+作品	開闊天空！光之美少女	（模組名待查：Template:CGroup/list 上這一列沒有模組連結）	include	動畫
