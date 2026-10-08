@@ -5,7 +5,7 @@ import Foundation
 /// installer.
 public enum InstallerScreen: Equatable, Sendable {
     case tryIt
-    /// The system needs a log out before it lists the input method.
+    /// The system has not listed or accepted the input method: the user adds it in System Settings.
     case activate
     /// A status of the install screen while polling, not a screen of its own.
     case waiting
