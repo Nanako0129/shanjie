@@ -1274,6 +1274,16 @@ S2h 實機驗收時，使用者在終端機、Discord、VS Code、Chrome 網址�
 - **修訂一實機**：選「牛奶」送出後，再打同樣情境「牛奶」排第一；已進入時對它按 ⌘⌫ 回到原本順序；選單「即時預測」關掉後不顯示預測列、打開恢復。三項使用者都確認正常。
 - 前一次看到的順序變化（奶茶排第一）是書面設定（TextEdit）下奶茶 −2.713、牛奶 −2.723 只差 0.01，不是學習造成的。
 
+## 2026-10-08：S2k 詞類回退在 model-v3 上重跑（進 v0.3.0 的第一段）
+
+使用者實機回報「…在做的事什麼事情」「詞態→磁態」等，問「是不是少了句構分析和詞態排列的分析」，決定把詞類模型放進 v0.3.0。契約 `docs/contracts/s2k-word-classes.md`（plan-verifier REVISE 一次後 READY，判定規則事先寫死）。數字在 `experiments/s2-classes/README.md`。
+
+- 在 model-v3 的計數上重新分群（K = 512，188 約 12 分鐘）；調參集扣掉和否決集重疊的列；μ = 0.8 由事先寫死的規則選出。
+- 對 model-v3：dev302 +6／+8、typing76 0／+4、錯字回報 +3／+3（都不顯著），cvtune-native +21／+26（p = 0.002）；守門沒有否決；保留集聊天 +2、書面 0。
+- 探針唯一不符的是「市占率」→「市佔率」；使用者同意接受（那是使用者自己的寫法）。
+- 改變的列多半是「同音、前後文沒出現過」的情況（期中／其中、戰機／戰績、店員／電源），弄壞的集中在「再／在」與幾個同音動詞（接上／街上、祭出／寄出）。這和 bigram 只看相鄰兩詞的限制一致：類別項補的是「這類詞後面常接哪類詞」，不是整句結構；整句結構（例如「的是…什麼」）仍要更長的上下文。（推論，未另外量。）
+- 下一步：第二段契約，把類別表做成單獨檔案，Python 參考實作與 Rust 逐位元相同。
+
 ## 2026-10-08：候選窗的黑邊＝沒有跟著 App 的淺色外觀
 
 使用者在淺色網頁上看到候選窗有一圈黑邊。系統是深色模式。用 `imeshot` 對照蘋果注音（契約 `docs/contracts/s3b2-glass-panel.md` §10）：
@@ -1283,6 +1293,56 @@ S2h 實機驗收時，使用者在終端機、Discord、VS Code、Chrome 網址�
 - 修好後實機重拍，和同情境的蘋果注音截圖並排看：淺色 App 裡兩者都是淺色玻璃、深色字、淺色邊；深色 App 白底兩者都是灰玻璃、白字、深色邊。只比對了顏色與邊，沒有逐像素量。
 - 本地 code review 後改成只在顯示候選窗時查外觀（不是每個按鍵），呼叫前先確認方法的型別編碼。
 - 第一次這樣改，實機上又變回深色：`object_getClass` 拿到的是 IMK 的轉送追蹤物件 `IMKTracingTextInput`，它自己沒有這兩個方法，型別檢查失敗就退回系統外觀。單元測試用假的 client，抓不到這件事。改用 `type(of:)`（`-class` 回報被轉送的 `_IPMDServerClientWrapperLegacy`），實機重拍淺色、深色 App 都和蘋果相同。
+
+## 2026-10-08：S2k 第二段，詞類項做進 Python 參考實作與 Rust 核心
+
+契約 `docs/contracts/s2k-word-classes.md` §4。類別表單獨存成 `data/lm/classes.sjc`（5,443,546 bytes，SHA-256 `80dbaa08…49a8a`，不進 git），`tools/build_classes.py` 從第一段的 `edges.npz`（`ea772a02…`）、`cls-40000-512.npz`（`5fee9a50…`）與 `bigram.sjlm`（`5c7d5a94…`）建出。類別項只在 `reference/proto/lm.py` 的 `BigramLM.prob` 與 `core/src/lm.rs` 的 `prob_c` 一處；解碼、固定詞接續、句尾、`Lm::word`／`eos`、預測列的 `word_by_id` 都經過它。`rg 'prob_c|word_by_id|\.word\(|\.eos\('` 在 `core/src` 只剩這些呼叫，沒有繞過。
+
+- **對應完整性（契約原先寫錯，已更正）**：`edges.npz` 341,333 詞、模型 332,169 詞。有類別但沒有模型 id 的詞有 9,187 個，**全部**詞庫產得出（模型裡計數為 0、被剪掉的罕見詞），不是原本寫的「詞庫產不出」。第一段的 `ClassLM` 依字串查，會對它們套類別項；產品依模型 id 查，對它們退回 `back × pb`。量測：第一段語意與只依 id 兩種查法，在 dev302、typing76、錯字回報、cvtune-native（2,117 列）的聊天與書面，第一名逐列相同（不同的列數 0）。其他輸入（第二名以後、預測列）沒有量。`build_classes.py` 改成記錄這兩個數目（9,187／9,187），契約 §4.1 照使用者決定更正。
+- **第一名數等於第一段**（`lm_eval.py --context`，Python）：dev302 241／248、typing76 66／69、錯字回報 14／16、cvtune-native 1,853／1,863（聊天／書面）。
+- **對齊**：`eval/golden/` 的 `s2-lm.txt`、`s2-lm-dev302-top1.tsv`、`s2r-probe-top1.tsv`、`s2h-lm-context.txt`、`sw-probe.txt`、`sp-predict.txt` 全部用 Python 重產（類別模型），Rust 的 `cargo test` 逐位元組相同（`cli/tests/golden.rs` 14 項）。每個變動追得到類別項：同一批 golden 用 `--no-classes`（`sp-predict` 用不載入類別的 `BigramLM`）重產，逐位元組等於重產前的檔案（`s2-lm`、`s2h`、`sp-predict`、兩個 top1、`sw-probe` 除了摘要行多出的 `-noclasses`）。新的 `s2-lm.txt` 無前文：dev302 242／249、typing76 66／69（聊天／書面）。
+- **既有探針**（Python 與 Rust CLI 的第一名逐列相同，聊天與書面）：字形 16 列、同分、竈門、「大概十分鐘後到」、「好吧」共 20 列，只有「市占率」→「市佔率」不符（使用者同意的例外）；SW 探針四種組合（聊天／書面 × 有／無前文）第 1 列開＝搞完這波、關＝睪丸這波，第 6–11 列開關相同。
+- **突變**（臨時改程式、跑 `cargo test --release --no-fail-fast`，每項都是斷言失敗，編譯成功）：類別項套到有保留條目的 bigram（22 個測試失敗，含 `lm::tests::class_term_applies_to_unkept_pairs_only`）；μ 改 0（10，含同一個測試與 `lm_mode_matches_golden_byte_for_byte`）；v 沒有前文條目時不套（8，含同一個測試）；不檢查模型雜湊（1，`lm::tests::class_file_must_match_the_model`）；`Lm::eos` 不套（3，含 `lm::tests::class_term_applies_to_unkept_pairs_only`）；解碼器句尾項不套（2，`lm::tests::decoder_goes_through_the_class_term`、`fixed_overlay_word_total_equals_whole_sentence_top1`）；`End::Next` 不套（1，`lm::tests::decoder_goes_through_the_class_term`）；`word_by_id` 不套（2，`predict_matches_python_golden`、`class_term_applies_to_unkept_pairs_only`）；`Lm::word`（`total_score` 用）不套（4，含 `fixed_word_total_equals_top1_on_first_rows`）；引擎 `load_lm` 建出沒有類別的 `Lm`（3，`replay_standard_chat_production_path`、`sandhi_probe_production_path`、`ffi::tests::load_lm_and_set_profile_codes`）。
+- **效能**（release，`timing_typing76_keys`，76 列 2,483 鍵含前文）：p50 1.309 ms、p95 **4.765 ms**、最大 13.284 ms，超過 16 ms 的鍵 0。dev302 重播（8,336 鍵）p50 1.03 ms、p95 3.96 ms。**量測時 load average 約 9.6–10.4（核心數 10），不是「低於核心數」**，其他 session 同時在跑；數字是上限的參考，不是契約要求的條件。補量（review 修正後，load average 9.05 → 8.96，低於核心數 10）：p50 0.986 ms、p95 **3.597 ms**、最大 7.823 ms，超過 16 ms 的鍵 0。預測索引建立 383 ms，RSS 322 → 358 MB。
+- **載入時間與常駐記憶體**（`shanjie-eval --lm … --rows … --limit 1` 整個程序，release，各三次）：有類別 0.89–1.19 s、255–257 MB（最大常駐）；`--no-classes` 0.51–0.55 s、248–252 MB。增量約 +0.4–0.6 s、約 +5 MB（類別檔 5.4 MB）。時間增加幾乎都是模型的 SHA-256 檢查（81 MB，`sha256_hex`，每次載入算一次）；第一版的 `sha256_hex` 會複製整份輸入，常駐記憶體多了約 87 MB（336 MB），已改成不複製。要縮短載入時間可以改用更快的雜湊實作，沒有做。
+- **測試其他改動**：所有用真實模型的 Rust 測試斷言 `classes.sjc` 存在（訊息寫 `classes-v1` 的下載指令）；`ffi` 的 `load_lm` 測試加「只有模型沒有 `classes.sjc` 回傳碼 3」。第 10 列（期中報告）在類別項下聊天也選對了，原本「聊天、書面、單字三者第一名不同」的測試與 C 冒煙測試、App 的 `--selftest` 改用 dev302 第 226 列（即時趕到：單字「即時感到」、聊天「及時趕到」、書面「即時趕到」）；`t5_a_global_record_does_not_move_the_row` 的第三個前文從「我想睡覺」換成「請問你」（能夠在前九名的位置 7 不變）。
+
+- **保留集**（fresh verifier 跑一次，只回數字；檔案雜湊與 `eval/README.md` 相符）：有類別，聊天 180、書面 184（227 句；第一段研究版是 179、183）。第一段記的「沒有類別 177、183」是當時的程式；評測統計片的 verifier 量到現在的 main（model-v3、沒有類別）是 178、184，所以對現在的 main 是聊天 +2、書面 0。和第一段不同（各多 1），是契約 §4.7 的停止條件；使用者選擇接受。推論（未量）：差在依模型 id 查類別（9,187 詞不套類別項），四組評測集兩種查法逐列相同，保留集上沒有比對，也不會為此重跑。
+
+- **配對報表**（評測統計片合併後補量，第一次用 `tools/evalstats.py`；基準＝main a53992f、新＝本分支，Python `lm_eval.py --context`）：
+
+  | 集合 | n | top1 基準 | top1 新 | 改對 | 改壞 | p | CER 基準 | CER 新 | Δtop1 95%（列） | ΔCER 95%（百分點） |
+  |---|---|---|---|---|---|---|---|---|---|---|
+  | dev302-chat | 302 | 235 | 241 | 10 | 4 | 0.1796 | 3.48% | 3.17% | [-1, 13] | [-0.73, 0.08] |
+  | dev302-formal | 302 | 240 | 248 | 14 | 6 | 0.1153 | 3.28% | 3.01% | [-1, 17] | [-0.74, 0.19] |
+  | typing76-chat | 76 | 66 | 66 | 3 | 3 | 1.0000 | 1.59% | 1.72% | [-5, 5] | [-0.62, 0.97] |
+  | typing76-formal | 76 | 65 | 69 | 5 | 1 | 0.2188 | 1.99% | 1.32% | [0, 9] | [-1.61, 0.27] |
+  | reported-chat | 40 | 11 | 14 | 3 | 0 | 0.2500 | 12.17% | 10.53% | [0, 7] | [-4.14, 0.39] |
+  | reported-formal | 40 | 13 | 16 | 3 | 0 | 0.2500 | 11.18% | 10.20% | [0, 7] | [-3.06, 0.83] |
+
+  方向多半變好（6 組裡 5 組 CER 下降），但每一組單獨看都不顯著、區間都跨過 0；S2k 有顯著證據的仍是第一段的 cvtune-native（+21／+26，p ≈ 0.002）。
+
+- **出貨**：使用者選獨立的 Release（不併進 `model-v3`，也不改名成 `model-v3-classes`）。GitHub Release `classes-v1` 已建，附 `classes.sjc`；下載回來 SHA-256 `80dbaa08…49a8a`，和本機逐位元組相同。標成非最新（`--latest=false`）。`data/classes.sjc.sha256` 是唯一的雜湊來源，CI、`release.yml`、`build-app.sh` 都比對它，`cli/tests/golden.rs` 釘同一個值。兩個檔案的關係、下載與換版規則寫在 `docs/data-files.md`（使用者要求 README 或文件講清楚）。
+
+- **實機**（契約 §4.5 第 9 項）：本分支建置（含 classes.sjc 與候選窗外觀修正）裝在使用者的機器上，使用者平常打字後回報「打字沒什麼問題」；沒有提到啟動或切換鍵盤配置變慢（載入多算一次模型 SHA-256，估計多約 0.5 秒，未在實機量）。
+
+**和選字記憶的交互作用（main 量測，使用者 2026-10-08 決定）**：`core/tests/engine_learn.rs` 有兩個測試在類別項下失敗，關掉類別項就通過。
+- **同前文學會率 3／5**（`a2_candidate_pick_learning_on_cases_tsv`）：沒學會的「戰機」「喉嚨發炎」兩組，類別模型已經把教學句打對，沒有改選、沒有紀錄；測試把它們列為「沒得教」（moot），卻仍把同前文句算進分母。這是測試的不一致：沒有紀錄的組不能說明紀錄會不會傳到同前文，契約 §6.2 也以鏡像測試為主要數字。改成不計 moot 組的同前文句之後是 3／3（main 上是 4／5、可達 4／4）。鏡像測試 7／8，學不會的是「檢察／檢查」（在「^」教），main 上同樣是 7／8、同一組。
+- **全域污染**（`global_eps_table`，release）：
+
+  | ε_global | 全域學會 | 全域污染退步 |
+  |---|---|---|
+  | 0 | 0／8 | 0 |
+  | 0.1 | 3／8 | 1 |
+  | 0.5 | 4／8 | 3 |
+  | 1.0 | 6／8 | 4 |
+  | 1.5 | 7／8 | 7 |
+  | 2.0 | 8／8 | 9 |
+  | 6.0 | 8／8 | 29 |
+
+  main（沒有類別項）是 0.5 → 8／9、0 退步。0.5 的退步：「我弟弟念公立的高中」→「功力」（組內一列、dev302 一列）、「權力使人腐化」→「全力」。
+- 先試過兩種讓學習繞過類別項的算法，都沒有用：學到的詞不套類別項（`back × 抬高後的 pb`）時 0.5 → 6／8、3 列退步；用類別估計乘上抬高的倍數時 0.5 → 6／8、6 列退步；兩者同前文仍是 3／5。所以原因不是「類別項稀釋了學習」（實作時的推論不成立），而是類別模型讓這幾句變成接近平手，任何大於 0 的全域加分都會翻掉它們。（推論：全域層原本的設計是「只打破接近的平手」，類別模型自己判對了更多平手，盲目的全域加分現在翻掉對的比錯的多。）
+- **決定**：使用者選全域這一層先關（`LEARN_EPS_GLOBAL` = 0），完整前文與 1 字比對兩層照舊；全域紀錄與檔案格式不變。代價是在兩種以上前文改選過的詞不再傳到第三種前文。契約 `s4-learning.md` §13；`global_eps_table` 的表多量 0.1，照印各值，供之後重新研究全域層。
 
 ## 2026-10-08：評測統計改成配對比較、CER 與區間
 

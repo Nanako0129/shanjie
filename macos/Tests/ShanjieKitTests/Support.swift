@@ -17,6 +17,7 @@ enum TestData {
         ("sandhi-add.tsv", "data/lexicon/sandhi-add.tsv"),
         ("demote.tsv", "data/lexicon/demote.tsv"),
         ("bigram.sjlm", "data/lm/bigram.sjlm"),
+        ("classes.sjc", "data/lm/classes.sjc"),
     ]
 
     /// Builds a Resources-like directory with the given files; nil (after failing the test) when a
@@ -31,6 +32,7 @@ enum TestData {
                 XCTFail("""
                     \(f.source) is missing. The lexicon is in git; the model is the model-v3 release asset: \
                     gh release download model-v3 -R Nanako0129/shanjie -p bigram.sjlm -D data/lm
+                    classes.sjc: gh release download classes-v1 -R Nanako0129/shanjie -p classes.sjc -D data/lm
                     """, file: file, line: line)
                 return nil
             }
@@ -232,12 +234,12 @@ enum Layouts {
     }
 }
 
-/// dev302 row 10 (docs/contracts/s3b.md section 9).
-enum Row10 {
-    static let zhuyin = "ㄑㄧˊ ㄓㄨㄥ ㄅㄠˋ ㄍㄠˋ ㄇㄧㄥˊ ㄊㄧㄢ ㄧㄠˋ ㄐㄧㄠ"
+/// dev302 row 226 (docs/contracts/s3b.md section 9; row 10 before S2k, see Selftest.swift).
+enum Row226 {
+    static let zhuyin = "ㄒㄧㄥˋ ㄏㄠˇ ㄐㄧㄡˋ ㄏㄨˋ ㄔㄜ ㄐㄧˊ ㄕˊ ㄍㄢˇ ㄉㄠˋ"
     static let standardKeys = Layouts.keys(zhuyin, eten: false)
-    static let chat = "其中報告明天要交"
-    static let formal = "期中報告明天要交"
+    static let chat = "幸好救護車及時趕到"
+    static let formal = "幸好救護車即時趕到"
 }
 
 /// A temporary learning directory (S4 section 4); never the real Application Support.

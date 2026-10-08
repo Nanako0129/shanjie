@@ -13,6 +13,7 @@ fn root() -> PathBuf {
 }
 fn lm_path() -> PathBuf {
     let p = root().join("data/lm/bigram.sjlm");
+    assert!(root().join("data/lm/classes.sjc").exists(), "data/lm/classes.sjc is missing: download it with `gh release download classes-v1 -R Nanako0129/shanjie -p classes.sjc -D data/lm` (or build it with tools/build_classes.py)");
     assert!(p.exists(), "data/lm/bigram.sjlm is missing: download it with `gh release download model-v3 -R Nanako0129/shanjie -p bigram.sjlm -D data/lm` (or rebuild with tools/build_lm.py; see docs/PLAN.md S2c)");
     p
 }
@@ -279,33 +280,34 @@ fn type_row(e: &mut Engine, layout: Layout, syls: &Syls) -> Output {
     last.unwrap()
 }
 
-/// Acceptance 6 sentence (dev302 row 10): unigram, chat and formal top-1 are pairwise different.
+/// Acceptance 6 sentence (dev302 row 226): unigram, chat and formal top-1 are pairwise different. It was row 10 before the
+/// word-class term (S2k): the class term makes chat pick 期中報告 as formal does, so row 10 no longer tells the profiles apart.
 #[test]
 fn acceptance6_sentence_has_three_different_top1() {
-    let (truth, syls) = row(10);
+    let (truth, syls) = row(226);
     let uni = type_row(&mut Engine::with_lexicon(shared().lex.clone(), Layout::Standard), Layout::Standard, &syls).preedit;
     let chat = type_row(&mut engine(Layout::Standard, Profile::Chat), Layout::Standard, &syls).preedit;
     let formal = type_row(&mut engine(Layout::Standard, Profile::Formal), Layout::Standard, &syls).preedit;
-    assert_eq!((uni.as_str(), chat.as_str(), formal.as_str()), ("其中報告明天要教", "其中報告明天要交", "期中報告明天要交"));
-    assert!(formal == truth);
-    assert!(chat == golden_top1(0)[9] && formal == golden_top1(1)[9]);
+    assert_eq!((uni.as_str(), chat.as_str(), formal.as_str()), ("幸好救護車即時感到", "幸好救護車及時趕到", "幸好救護車即時趕到"));
+    assert!(chat == truth);
+    assert!(chat == golden_top1(0)[225] && formal == golden_top1(1)[225]);
 }
 
 /// set_profile recomputes the composition and returns the snapshot; reset keeps the model and the profile.
 #[test]
 fn set_profile_snapshot_and_reset_keeps_lm_and_profile() {
-    let (_, syls) = row(10);
+    let (_, syls) = row(226);
     let mut e = engine(Layout::Standard, Profile::Chat);
-    assert!(type_row(&mut e, Layout::Standard, &syls).preedit == "其中報告明天要交");
+    assert!(type_row(&mut e, Layout::Standard, &syls).preedit == "幸好救護車及時趕到");
     let o = e.set_profile(Profile::Formal).unwrap();
-    assert!(o.handled && o.commit.is_empty() && o.preedit == "期中報告明天要交");
-    assert!(e.key(Key::new(KeyKind::Enter)).unwrap().commit == "期中報告明天要交");
+    assert!(o.handled && o.commit.is_empty() && o.preedit == "幸好救護車即時趕到");
+    assert!(e.key(Key::new(KeyKind::Enter)).unwrap().commit == "幸好救護車即時趕到");
     for mode in [ResetMode::Commit, ResetMode::Discard] {
         type_row(&mut e, Layout::Standard, &syls);
         e.reset(mode);
         // Same output as a fresh engine with the same model and profile.
         let o = type_row(&mut e, Layout::Standard, &syls);
-        assert!(o.preedit == "期中報告明天要交", "reset must keep the model and the profile");
+        assert!(o.preedit == "幸好救護車即時趕到", "reset must keep the model and the profile");
         assert!(e.total_score().is_some());
         e.reset(ResetMode::Discard);
         assert!(e.total_score().is_none());

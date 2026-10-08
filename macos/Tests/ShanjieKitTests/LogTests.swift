@@ -83,9 +83,9 @@ final class LogTests: XCTestCase {
         let c = Controller(shell, bundle: bundleMarker)
         c.client.before = "ab\t\(Self.contextMarker)"
         c.session.activate()                            // profile from a marked bundle ID
-        c.type(Row10.standardKeys)
+        c.type(Row226.standardKeys)
         c.press(Keys.enter)                             // commits the marker sentence
-        XCTAssertEqual(c.client.text, Row10.formal, "the typing path did not commit row 10")
+        XCTAssertEqual(c.client.text, Row226.formal, "the typing path did not commit row 226")
         c.type("su3 ")
         let first = c.panel.items.first                 // optional, not XCTUnwrap: no throw while captured
         XCTAssertNotNil(first, "no candidate was shown for the mouse-selection path")
@@ -131,8 +131,8 @@ final class LogTests: XCTestCase {
                       "the punctuation fallback did not log its fixed line")
 
         let negatives = [
-            Row10.formal, Row10.chat, "你好", Row10.zhuyin, "ㄑㄧ", "ㄋㄧ",
-            Row10.standardKeys, String(Row10.standardKeys.prefix(6)), "su3cl3",
+            Row226.formal, Row226.chat, "你好", Row226.zhuyin, "ㄑㄧ", "ㄋㄧ",
+            Row226.standardKeys, String(Row226.standardKeys.prefix(6)), "su3cl3",
             bundleMarker, pathMarker, Self.contextMarker,
         ]
         for marker in negatives {

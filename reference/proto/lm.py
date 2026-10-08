@@ -6,10 +6,14 @@
            = 10^lp                                  若 v 沒有保留條目
   back(v)  = 1 − Σ_保留條目 (c − D) / t(v)，Σ 依檔案中 next_id 遞增的順序逐項累加（浮點順序固定）
   句尾     = λ·log10 P(</s> | 最後一詞)，回退分布用 p_eos = eos_total / N
+類別項（docs/contracts/s2k-word-classes.md §4.2，classes.sjc，格式見 tools/build_classes.py）：沒有保留條目的 (v, w)——包含 v 沒有前文條目——
+  P(w | v) = back · ((1−μ)·pb + μ·Pc[c(v), c(w)]·emit(w))      v 或 w 沒有類別時維持 back · pb
+  運算順序寫死：(1−μ)·pb + (μ·Pc)·emit，再乘 back；Rust 的 prob_c 必須逐位元相同。有保留條目的 bigram 不動。
 解碼和 ime.decode 相同（每個位置保留 beam 個、依分數穩定排序、同一 surface 只在分數嚴格較高時取代），
 v 是前一個詞（句首為 "<s>"）；走完後每條路徑加句尾項再穩定排序一次。
 """
 import collections
+import hashlib
 import math
 import os
 import re
@@ -21,8 +25,13 @@ PROFILES = {"chat": 0.5, "formal": 0.7}
 UNSEEN_OVERLAY_PENALTY = 1.0
 
 
+CLASS_MAGIC = b"SJCL0001"
+NO_CLASS = 0xFFFF
+
+
 class BigramLM:
-    def __init__(self, path):
+    def __init__(self, path, classes=True):
+        """classes=True 讀同一個目錄的 classes.sjc（不存在、魔數、長度、模型雜湊不符都丟錯誤）；False 是明確不用類別項（--no-classes）。"""
         b = open(path, "rb").read()
         assert b[:8] == b"SJLM0001", "bad magic"
         V, self.N, self.eos_total, self.D = struct.unpack_from("<IQQd", b, 8)
@@ -49,14 +58,50 @@ class BigramLM:
                 entries[nxt[j]] = cnt[j]
                 kept_sum += cnt[j] - self.D
             self.ctx[v] = (t, 1.0 - kept_sum / t, entries)
+        self.cls = None
+        if classes:
+            self._load_classes(os.path.join(os.path.dirname(os.path.abspath(path)), "classes.sjc"), hashlib.sha256(b).digest())
+
+    def _load_classes(self, path, model_sha):
+        with open(path, "rb") as f:
+            b = f.read()
+        # 檢查和 Rust 的 Lm::parse_with_classes 相同；用 ValueError 而不是 assert，python3 -O 也照樣擋。
+        def bad(why):
+            raise ValueError(f"{path}: {why}")
+        if len(b) < 56 or b[:8] != CLASS_MAGIC:
+            bad("bad classes magic")
+        if b[8:40] != model_sha:
+            bad("classes.sjc was built for another model")
+        K, self.mu, V = struct.unpack_from("<IdI", b, 40)
+        K3 = K + 3
+        if V != len(self.vocab):
+            bad("classes.sjc vocabulary size differs from the model")
+        p = 40 + struct.calcsize("<IdI")
+        if len(b) != p + V * 10 + K3 * K3 * 8:
+            bad("bad classes length")
+        self.cls = struct.unpack_from(f"<{V}H", b, p); p += 2 * V
+        self.emit = struct.unpack_from(f"<{V}d", b, p); p += 8 * V
+        self.Pc = struct.unpack_from(f"<{K3 * K3}d", b, p)
+        self.K3 = K3
+        if not 0.0 <= self.mu <= 1.0 or any(c != 0xFFFF and c >= K3 for c in self.cls) \
+                or not all(0.0 <= x <= 1.0 for x in self.emit) or not all(0.0 <= x <= 1.0 for x in self.Pc):
+            bad("classes.sjc has a value out of range")
 
     def prob(self, v, w, pb):
-        c = self.ctx.get(self.ids.get(v, -1))
+        vi, wi = self.ids.get(v, -1), self.ids.get(w, -1)
+        c = self.ctx.get(vi)
         if c is None:
-            return pb
-        t, back, entries = c
-        k = entries.get(self.ids.get(w, -1), 0)
-        return (k - self.D) / t + back * pb if k else back * pb
+            back = 1.0
+        else:
+            t, back, entries = c
+            k = entries.get(wi, 0)
+            if k:
+                return (k - self.D) / t + back * pb
+        if self.cls is not None and vi >= 0 and wi >= 0:
+            cv, cw = self.cls[vi], self.cls[wi]
+            if cv != NO_CLASS and cw != NO_CLASS:
+                return back * ((1 - self.mu) * pb + self.mu * self.Pc[cv * self.K3 + cw] * self.emit[wi])
+        return back * pb
 
     def word(self, lam, v, w, lp):
         return lam * math.log10(self.prob(v, w, 10 ** lp)) + (1 - lam) * lp
@@ -108,7 +153,8 @@ def context_key(prefix):
 
 def history(left, lm):
     """S2h §1：前文 left（context_key 的結果）決定第一個詞的歷史詞。依序試整段、最後 1 字，
-    第一個在模型裡有 bigram 歷史紀錄的就是；都沒有（或 left 為空）是 "<s>"。"""
+    第一個在模型裡有 bigram 歷史紀錄的就是；都沒有（或 left 為空）是 "<s>"。沒有歷史紀錄的詞仍有類別
+    （S2k），本來可以經類別項影響下一個詞；不用它，因為 S2k 第一段是照這條規則量的，改了是新實驗。"""
     for x in (left, left[-1:]):
         if x and lm.ctx.get(lm.ids.get(x, -1)) is not None:
             return x
