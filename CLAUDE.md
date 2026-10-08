@@ -59,4 +59,4 @@
   - 判斷法：切到別的 App 再查。PID 跟著前景變，就是背景程式；PID 不變，才是那個 App。
   - 請使用者讓那個程式離開密碼欄或重開它；不要替使用者結束程式。重現用 `tools/secure-input.swift`。
 
-- **Caps Lock 切換輸入法偶爾失效**（任何輸入法都切不動、Ctrl+Space 正常）：是 macOS 的問題，不是善解。安裝後不需要做任何步驟。使用者回報時，請使用者在「系統設定 → 輔助使用 → 鍵盤」打開慢速按鍵、按一次 Caps Lock、再關掉。用指令自動化試過都無效（`hidutil` 的 `SlowKeysDelay` 設不進去；`defaults write` 寫得進去但系統不會即時套用；程式送的 Caps Lock 不會觸發切換），詳見 `docs/research-log.md`。
+- **Caps Lock 切換輸入法失效**（任何輸入法都切不動、Ctrl+Space 正常）：**善解的更新會觸發**（2026-10-09 實測更正 10-05 的「不是善解」）：bundle 換過之後再呼叫註冊／啟用（`shanjie install`、安裝程式、`install-ime.sh` 最後一步）就會壞；只換檔案、只結束程序、只 `lsregister`、只註冊（bundle 沒換）都不會。修法見 `docs/contracts/installer-v2.md` §9。遠端桌面（RustDesk）等其他觸發條件仍可能存在。使用者回報時，請使用者在「系統設定 → 輔助使用 → 鍵盤」打開慢速按鍵、按一次 Caps Lock、再關掉。用指令自動化試過都無效（`hidutil` 的 `SlowKeysDelay` 設不進去；`defaults write` 寫得進去但系統不會即時套用；程式送的 Caps Lock 不會觸發切換），詳見 `docs/research-log.md`。

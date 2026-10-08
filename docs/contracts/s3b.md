@@ -62,8 +62,8 @@
 - `scripts/install-ime.sh <善解輸入法.app 的路徑>`（通常是解壓後的 Release 附件；也接受 `build/善解輸入法.app` 自己建的 ad-hoc 版）：
   - `#!/bin/bash`、`set -euo pipefail`；`$HOME` 為空就中止；不用 sudo（R9）。
   - 目的地固定為字面路徑 `"$HOME/Library/Input Methods/善解輸入法.app"`。腳本只刪除或搬移 `~/Library/Input Methods` 裡的四個位置（§13.3）：這個目的地、舊名稱 `shanjie.app`、這次執行用 `mktemp` 建的暫存資料夾、保留上一版的 `.shanjie-previous`。輔助資料夾的名稱不是 `.app`（暫存資料夾在複製期間裡面有一個 `善解輸入法.app`）。不要同時執行兩次安裝（未加鎖）；被直接砍掉的執行可能留下 `.shanjie-staging-*`，不會自動清（同時執行的另一份看起來一樣），要手動刪。**HOME 不是這個帳號真正的家目錄時，除非設了 `SHANJIE_INSTALL_FILES_ONLY=1`，腳本一開始就拒絕執行**；files-only 模式完全不呼叫 lsregister、pkill 或註冊。
-  - 順序（修訂 13 與 PR #5 審查後）：`ditto` 到暫存資料夾（複製失敗時什麼都不放上去）→ 刪掉更早保留的 `.shanjie-previous`（先 `chmod -R u+w`）→ 舊版（`善解輸入法.app`，沒有時是舊名稱 `shanjie.app`）**先改名**為 `.shanjie-previous`、成功後才 `lsregister -u`（改名失敗時舊版仍維持登記）→ 新版改名就位 → 新舊名稱並存時刪除舊名稱那份（失敗只警告）→ 新版 `lsregister -f` → 結束舊行程並等它退出 → 執行已安裝那一份的 `install`（一律重新註冊，見 §13.3）。`trap` 只在舊版**確實已改名移開**之後、新版就位之前被中斷時，才把新版放上去，並印出只重跑 `lsregister -f` 與 `install` 的指令（不要重跑整個腳本）。其餘描述（HOME 檢查、files-only、測試、未實測項目）見 §13.3 與 §11。
-  - 最後印出下一步：到「系統設定 → 鍵盤 → 輸入方式」確認「善解」已出現；沒出現就登出再登入。
+  - 順序（修訂 13 與 PR #5 審查後）：`ditto` 到暫存資料夾（複製失敗時什麼都不放上去）→ 刪掉更早保留的 `.shanjie-previous`（先 `chmod -R u+w`）→ 舊版（`善解輸入法.app`，沒有時是舊名稱 `shanjie.app`）**先改名**為 `.shanjie-previous`、成功後才 `lsregister -u`（改名失敗時舊版仍維持登記）→ 新版改名就位 → 新舊名稱並存時刪除舊名稱那份（失敗只警告）→ 新版 `lsregister -f` → 結束舊行程並等它退出 → 執行已安裝那一份的 `install`（**2026-10-09 起只在系統還不認得或有舊模式時註冊**，見 `installer-v2.md` §9；原文：一律重新註冊，見 §13.3）。`trap` 只在舊版**確實已改名移開**之後、新版就位之前被中斷時，才把新版放上去，並印出只重跑 `lsregister -f` 與 `install` 的指令（不要重跑整個腳本）。其餘描述（HOME 檢查、files-only、測試、未實測項目）見 §13.3 與 §11。
+  - 最後印出下一步：到「系統設定 → 鍵盤 → 輸入方式」確認「善解」已出現；沒出現就在那裡按「+」加入（2026-10-09 起，見 `installer-v2.md` §9；原本寫「沒出現就登出再登入」）。
 - **agent 不得對真實的 HOME 執行 `install-ime.sh`、執行 `shanjie install`、或啟動 app**；agent 與 CI 只能透過 `scripts/test-install-ime.sh`（暫存 HOME、假 app、`SHANJIE_INSTALL_FILES_ONLY=1`）執行它。真正的安裝只由使用者執行。
 
 ## 5. 行程、引擎與組字擁有者
@@ -182,7 +182,7 @@
   - **偏好**：`LayoutStore` 協定只有一個 `layout: String?`（存 `InputMode` 的 raw value）。`ShanjieKit` 只有記憶體版 `MemoryLayoutStore`；UserDefaults 版 `DefaultsLayoutStore` 在 `Shanjie` target 的 `main.swift`，用 `UserDefaults.standard`（由 IMK 行程讀時就是 app 自己的網域，即 bundle ID），鍵 `layout`。`Shell.init` 的 `layoutStore` 沒有預設值；先讀偏好算出排列、再呼叫唯一一次 `build()`。值不存在、空字串、大小寫不同（`ETEN`）、`zhuyin` 或完整模式 ID 都視為不合法 → 標準。
   - **選單**：`menu()` 每次呼叫都重建一個 `NSMenu`，兩個項目「標準鍵盤」「倚天鍵盤」，目前的排列 `state = .on`；action 分別是 `selectStandardLayout(_:)`、`selectEtenLayout(_:)`，不設 target、不看 `sender`（仿小麥注音，由 IMK 轉給 controller）。選了就呼叫 `Shell.selectLayout`：先走既有的 `switchMode`（組字送回擁有者、重建引擎、重載 LM 與設定），再存偏好；選目前的排列時不重建，但仍寫一次偏好。選單動作不改變組字擁有者。**未驗證**：IMK 實際如何呼叫這兩個 action、打勾是否顯示，沒有啟動輸入法實測（契約禁止），由使用者實測（§13.4 第 5 項）確認。
   - **`setValue`**：殼不覆寫（`InputController.swift` 有註解說明），`InputMode(modeID:)` 與 `Session.setInputMode` 已刪除；任何模式 ID，包括還沒被停用的舊 `.standard`／`.eten`，都不會改變排列（§13.3）。
-  - **`shanjie install`**：`TISRegisterInputSource` 一律呼叫；它回傳錯誤時只印警告、繼續查清單（契約沒寫註冊失敗怎麼處理；已登記過的 bundle 再註冊是否回錯誤沒有量測），由「列不到 `.zhuyin` → exit 3」決定結果（v0.1.1 起另有「已啟用清單裡沒有輸入法本體 → exit 3」，見 §13.3）。模式以 `kTISPropertyInputModeID` 比對（沿用原本的做法）。停用舊模式失敗時印一行固定的警告，不影響 exit 0。
+  - **`shanjie install`**（**已由 `installer-v2.md` §9 修訂：系統已接受、或認得但未接受時都不呼叫任何 TIS 修改函式**）：`TISRegisterInputSource` 一律呼叫；它回傳錯誤時只印警告、繼續查清單（契約沒寫註冊失敗怎麼處理；已登記過的 bundle 再註冊是否回錯誤沒有量測），由「列不到 `.zhuyin` → exit 3」決定結果（v0.1.1 起另有「已啟用清單裡沒有輸入法本體 → exit 3」，見 §13.3）。模式以 `kTISPropertyInputModeID` 比對（沿用原本的做法）。停用舊模式失敗時印一行固定的警告，不影響 exit 0。
   - **`install-ime.sh`**：目的地、舊名稱、上一版三個字面路徑放在 `DEST`／`LEGACY`／`PREV` 變數；`lsregister -u` 集中在 `unregister()`，files-only 時不呼叫。上一版的選擇：有 `善解輸入法.app` 就是它，否則是舊的 `shanjie.app`；新版就位後若舊名稱還在（兩者並存），`lsregister -u` 後先 `chmod -R u+w` 再刪除。`SHANJIE_TEST_LSREGISTER` 只在 files-only 分支讀取。exit 3 的訊息照契約的文字，但路徑寫成 `~/Library/Input\ Methods/…`，讓使用者可以直接貼上執行。`pkill`／`pgrep` 的正規表示式是 `^<跳脫後的 HOME>/Library/Input Methods/(善解輸入法|shanjie)\.app/Contents/MacOS/shanjie( |$)`；用 `grep -E` 對含 `.`、空白與括號的 HOME 量過（命中兩個名稱、不命中 `.shanjie-previous` 與 `.` 被換掉的路徑），`pkill` 本身沒有在真實系統跑過。
   - **`test-install-ime.sh`**：lsregister、`pkill`、`pgrep` 的替身只把呼叫寫進一個紀錄檔；每個情況結束都斷言紀錄檔不存在。拒絕執行的情況用 `chmod 500` 的 HOME，並比對錯誤訊息是 HOME 檢查的那一句。新增只有舊名稱、新舊並存（舊名稱唯讀、另有更早的 `.shanjie-previous`）兩種升級。2026-10-04 實測：把 `unregister()` 的 files-only 判斷拿掉，測試以「overwrite: the system was called: lsregister -u …」失敗（呼叫的是替身）。
   - **`check-app.sh`**：模式清單只取 PlistBuddy 輸出中一層縮排的鍵，必須恰好是 `.zhuyin`（另以兩個模式的 plist 副本確認會列出兩行）；另查資料夾名稱、`CFBundleDevelopmentRegion = en`、`CFBundleName = Shanjie`、`LSHasLocalizedDisplayName`，以及 `zh-Hant`／`en` 兩份 `InfoPlist.strings` 的 `CFBundleName`、`CFBundleDisplayName` 與模式名稱。
@@ -214,6 +214,8 @@
 - **偏好**：介面 `LayoutStore`（讀／寫 `standard`／`eten`）是 `Shell.init` 的**必要參數、不給預設值**；UserDefaults 版（app 自己的網域，鍵 `layout`）只放在 `Shanjie` target，`ShanjieKit` 與測試用記憶體版，所以測試不可能寫到真正的偏好。值不存在或不合法時用標準排列。**`Shell.init` 先讀偏好、再建引擎，只建一次**（約 240 MB）。
 
 ### 13.3 註冊與升級
+
+> **2026-10-09 修訂（`installer-v2.md` §9）**：本節下面的「一律呼叫 `TISRegisterInputSource`」、exit 3 的「登出再登入後再執行一次」、`install-ime.sh` 回傳 3 時的訊息，都已被取代。現在的規則：`Registration.decide` 只在系統還不認得 `.zhuyin` 模式，或有已啟用的舊模式時，才呼叫註冊與啟用；已接受時印 `already enabled; registration skipped` 並 exit 0；認得但未接受時不改任何東西，最多等 5 秒，等不到就 exit 3，請使用者到「系統設定 → 鍵盤 → 輸入方式」加入。原因：bundle 換過之後再註冊或啟用，會讓系統的 Caps Lock 切換壞掉；而且對還沒接受的輸入法，程式化啟用實測沒有效果（研究紀錄 2026-10-09）。下面保留原文，作為 0.1.x 的紀錄。
 
 - `shanjie install` 依序：一律呼叫 `TISRegisterInputSource(Bundle.main.bundleURL)`（不再在 bundle ID 已知時略過）→ 在 `TISCreateInputSourceList` 找 `<BUNDLE_ID>.zhuyin`：
   - 列不到 → **exit 3**（和其他失敗區分；main.swift 的回傳碼是 0、1、3、64）。
@@ -270,7 +272,7 @@
     - 就算改成 `base: :home` 讓沙盒放行讀取，`TISRegisterInputSource` 在沙盒裡能不能成功也沒有量過。
   - `uninstall on_upgrade: :signal, signal: ["TERM", "com.nyanako.inputmethod.shanjie"]`：解除安裝和升級時都結束執行中的行程，系統下次就會啟動新版。Homebrew 預設在升級時略過 `signal`（`UPGRADE_REINSTALL_SKIP_DIRECTIVES`），所以要加 `on_upgrade`。Homebrew 用 `launchctl list` 的標籤找行程；2026-10-04 在本機看到其他輸入法的標籤是 `application.<bundle ID>.<數字>.<數字>`，符合它的比對規則。**已由 §15（修訂四）取代**：0.3.0 實測升級後舊版仍在跑，改成 `postflight_steps` 在新版就位後結束行程，`uninstall` 只留 `signal`。
   - `zap trash: "~/Library/Preferences/com.nyanako.inputmethod.shanjie.plist"`：目前唯一的使用者資料，也就是 `layout` 偏好。
-  - `caveats`：第一次安裝後執行 `"$HOME/Library/Input Methods/善解輸入法.app/Contents/MacOS/shanjie" install`，由它註冊並啟用輸入方式；第一次安裝通常要登出再登入：它結束碼是 3 時，登出、再登入，然後再執行一次（修訂三）。caveats 不提升級；升級後由 §15 的 postflight 接手。
+  - `caveats`：第一次安裝後執行 `"$HOME/Library/Input Methods/善解輸入法.app/Contents/MacOS/shanjie" install`，由它註冊並啟用輸入方式；第一次安裝通常要登出再登入：它結束碼是 3 時，登出、再登入，然後再執行一次（修訂三）。caveats 不提升級；升級後由 §15 的 postflight 接手。**2026-10-09 修訂（`installer-v2.md` §9）**：「登出、再登入再執行一次」已取代，現在 caveats 寫「結束碼是 3 時，到系統設定 → 鍵盤 → 輸入方式加入」。
 - **未驗證**（由使用者實測，見 14.5，停止條件見 14.7）：
   - 從 Homebrew 下載的 app 帶有 quarantine（已公證、已 staple）：在終端機執行 caveats 的 `install` 時，以及系統啟動輸入法時，會不會跳出確認視窗；
   - `on_upgrade` 送出的 TERM 是否確實讓新版接手（要到第二次發版才測得到）。**結果**（2026-10-08，升級到 0.3.0）：沒有，見 §15。
@@ -352,7 +354,7 @@
 ### 14.7 停止條件與回滾
 
 - **停止條件**（使用者實測 v0.1.0 之後判斷）：
-  - `brew install` 加上 caveats 的 `install` 之後（必要時登出再登入），「善解輸入法」出現在輸入方式清單、加入後可以打字 → 通過。
+  - `brew install` 加上 caveats 的 `install` 之後（必要時登出再登入；2026-10-09 起改為到系統設定加入，見 `installer-v2.md` §9），「善解輸入法」出現在輸入方式清單、加入後可以打字 → 通過。
   - 跳出 Gatekeeper 視窗，但按「打開」之後一切正常 → 通過，並在 README 註明這個視窗。
   - 以下任一種 → 停止推薦 brew：
     - 輸入方式加不進去或無法打字；
@@ -481,4 +483,4 @@
   - Homebrew 換版時，bundle 不在的那段時間，系統本來就會暫時把善解本體標成「未啟用」，新版回來後自動恢復。這和本修訂無關：沒有 postflight 的公開 cask 也一樣。
   - 這兩次重現裡，postflight 沒有造成消失。
   - 第一次為什麼沒恢復，**原因未解**。差異有兩點：那次 bundle 空了約 2.9 秒（重現時 1.1 到 1.8 秒）；系統是 macOS 27（虛擬機是 26.6）。兩者都沒有證據指向原因。
-- **處置**：caveats 與 README 的第一次安裝說明加上「登出再登入後仍是 3，就到系統設定 → 鍵盤 → 輸入方式加入」（虛擬機量到全新安裝、重開機後 `install` 仍是 3）。README 在升級說明加一句：升級後選單裡找不到善解時，到「系統設定 → 鍵盤 → 輸入方式」加回來。程式化的重新啟用（`shanjie install`）在這種狀態下無效，這點交給安裝程式第二版的「啟用」步驟處理（`docs/contracts/installer-v2.md`）。
+- **處置**：caveats 與 README 的第一次安裝說明加上「登出再登入後仍是 3，就到系統設定 → 鍵盤 → 輸入方式加入」（虛擬機量到全新安裝、重開機後 `install` 仍是 3）。README 在升級說明加一句：升級後選單裡找不到善解時，到「系統設定 → 鍵盤 → 輸入方式」加回來。程式化的重新啟用（`shanjie install`）在這種狀態下無效，這點交給安裝程式第二版的「啟用」步驟處理（`docs/contracts/installer-v2.md`）。**已實作（`installer-v2.md` §9）**：caveats 與 README 現在不再寫「登出再登入再執行一次」，結束碼 3 直接到系統設定加入。
