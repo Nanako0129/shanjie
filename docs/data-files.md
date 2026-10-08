@@ -30,7 +30,7 @@ shasum -a 256 -c data/bigram.sjlm.sha256 data/classes.sjc.sha256
 | 語料、計數或模型格式（重建 `bigram.sjlm`） | `model-v5`，而且詞類表也要重建：`classes-v3`（舊的詞類表綁的是舊模型的雜湊，配新模型會載入失敗） |
 | 只重新分群（類別數、μ、分群用的資料） | `classes-v3`，模型不變 |
 
-舊的 Release 保留，可以回到那一版；例外是 model-v3 與 classes-v1，在 model-v4 發佈後移除（`docs/contracts/model-v4.md`）。換版時同一個 PR 更新雜湊檔、CI 與 `release.yml` 的下載、`cli/tests/golden.rs` 的雜湊、`scripts/build-app.sh` 的提示，以及這份文件。
+舊的 Release 保留，可以回到那一版；例外是 model-v3 與 classes-v1，在 `docs/contracts/model-v4.md` §4 第 4 步的條件成立後移除。下一次重建模型時，發佈的檔案要先加上指紋條目再算雜湊，詞類表也對加過的檔案建。換版時同一個 PR 更新雜湊檔、CI 與 `release.yml` 的下載、`cli/tests/golden.rs` 的雜湊、`scripts/build-app.sh` 的提示，以及這份文件。
 
 ## 怎麼產生
 
