@@ -102,6 +102,7 @@ PR 需要：
     cargo run --release -q -p cli -- --lm data/lm/bigram.sjlm --profile chat --rows eval/dev/user-reported.txt
     ```
 
+  - 前後比較用逐列統計：基準與新版各加 `--rowstats before.rs`／`--rowstats after.rs`（`--dev 302` 與 `--rows` 檔都可以），再跑 `python3 tools/evalstats.py compare before.rs after.rs --label dev302-chat`，把那一行表格貼進 PR（改對／改壞、McNemar p、CER、95% 區間）；dev302、錯字回報檔在聊天與書面各一行；
   - 只要求不退步；
   - 有進步的話寫出是哪幾句。
 - **對應的文件一起更新**：契約、`docs/PLAN.md`、README。
@@ -123,7 +124,7 @@ git worktree remove <worktree 路徑>   # 有用 worktree 的話
 - 請不要讀它的內容來找錯字或調參數；
 - 也不要把它的句子加進其他地方。
 
-你的 PR 只需要附開發集的數字；保留集由維護者在那一片收尾時跑。
+你的 PR 只需要附開發集的數字（上面那張表）；保留集由維護者在那一片收尾時跑。
 
 ## DCO 簽署
 
