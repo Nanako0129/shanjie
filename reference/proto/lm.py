@@ -65,17 +65,27 @@ class BigramLM:
     def _load_classes(self, path, model_sha):
         with open(path, "rb") as f:
             b = f.read()
-        assert b[:8] == CLASS_MAGIC, "bad classes magic"
-        assert b[8:40] == model_sha, "classes.sjc was built for another model"
+        # 檢查和 Rust 的 Lm::parse_with_classes 相同；用 ValueError 而不是 assert，python3 -O 也照樣擋。
+        def bad(why):
+            raise ValueError(f"{path}: {why}")
+        if len(b) < 56 or b[:8] != CLASS_MAGIC:
+            bad("bad classes magic")
+        if b[8:40] != model_sha:
+            bad("classes.sjc was built for another model")
         K, self.mu, V = struct.unpack_from("<IdI", b, 40)
         K3 = K + 3
-        assert V == len(self.vocab), "classes.sjc vocabulary size differs from the model"
+        if V != len(self.vocab):
+            bad("classes.sjc vocabulary size differs from the model")
         p = 40 + struct.calcsize("<IdI")
-        assert len(b) == p + V * 10 + K3 * K3 * 8, "bad classes length"
+        if len(b) != p + V * 10 + K3 * K3 * 8:
+            bad("bad classes length")
         self.cls = struct.unpack_from(f"<{V}H", b, p); p += 2 * V
         self.emit = struct.unpack_from(f"<{V}d", b, p); p += 8 * V
         self.Pc = struct.unpack_from(f"<{K3 * K3}d", b, p)
         self.K3 = K3
+        if not 0.0 <= self.mu <= 1.0 or any(c != 0xFFFF and c >= K3 for c in self.cls) \
+                or not all(0.0 <= x <= 1.0 for x in self.emit) or not all(0.0 <= x <= 1.0 for x in self.Pc):
+            bad("classes.sjc has a value out of range")
 
     def prob(self, v, w, pb):
         vi, wi = self.ids.get(v, -1), self.ids.get(w, -1)
@@ -143,7 +153,8 @@ def context_key(prefix):
 
 def history(left, lm):
     """S2h §1：前文 left（context_key 的結果）決定第一個詞的歷史詞。依序試整段、最後 1 字，
-    第一個在模型裡有 bigram 歷史紀錄的就是；都沒有（或 left 為空）是 "<s>"。"""
+    第一個在模型裡有 bigram 歷史紀錄的就是；都沒有（或 left 為空）是 "<s>"。沒有歷史紀錄的詞仍有類別
+    （S2k），本來可以經類別項影響下一個詞；不用它，因為 S2k 第一段是照這條規則量的，改了是新實驗。"""
     for x in (left, left[-1:]):
         if x and lm.ctx.get(lm.ids.get(x, -1)) is not None:
             return x

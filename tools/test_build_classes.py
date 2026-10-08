@@ -74,9 +74,12 @@ class Classes(unittest.TestCase):
         other = hashlib.sha256(b"another model").digest()
         for name, blob in (("magic", b"SJCL0002" + self.good()[8:]), ("model hash", self.good(model_sha=other)),
                            ("short", self.good()[:-1]), ("trailing", self.good() + b"\0"),
-                           ("vocabulary size", self.good(cls=self.cls[:-1], emit=self.emit[:-1]))):
+                           ("vocabulary size", self.good(cls=self.cls[:-1], emit=self.emit[:-1])),
+                           ("mu 1.5", self.good(mu=1.5)), ("negative emit", self.good(emit=[-0.1] + self.emit[1:])),
+                           ("NaN in Pc", self.good(Pc=self.Pc[:-1] + [float("nan")])),
+                           ("class out of range", self.good(cls=[self.K + 3] + self.cls[1:]))):
             self.write(blob)
-            with self.assertRaises(AssertionError, msg=name):
+            with self.assertRaises(ValueError, msg=name):
                 L.BigramLM(T.BuildLm.path)
 
 

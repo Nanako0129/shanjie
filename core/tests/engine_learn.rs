@@ -318,6 +318,8 @@ fn a2_candidate_pick_learning_on_cases_tsv() {
     println!("moot groups (the default already shows the taught word, nothing to pick): {moot:?}");
     assert!(failed.is_empty(), "groups with a wrong default but no record: {failed:?}");
     assert!(regress.is_empty(), "non-colliding common sentences regress: {regress:?}");
+    // Moot groups are not counted (s4-learning §13), so keep a floor on what is: 3 with model-v3 + classes.
+    assert!(wrong_reach >= 3, "fewer than 3 countable same-context rows ({wrong_reach}): the rate would not mean anything");
     assert!(learned_reach * 100 >= wrong_reach * 80, "same-context learn rate under 80%");
 
     // Informational: all 14 groups taught on one learner, then every common row.
@@ -1868,6 +1870,8 @@ fn global_eps_table() {
     assert_eq!(res[0].1.learned, 0, "eps_global 0: the global level has no effect");
     let chosen = res.iter().find(|r| r.0 == lm::LEARN_EPS_GLOBAL).expect("chosen value is in the table");
     assert_eq!(chosen.1.regress, 0, "chosen eps_global: 0 global pollution");
+    // The level still works when switched on (so the table means something for the next study of it).
+    assert!(res.iter().any(|r| r.0 > 0.0 && r.1.learned > 0), "no eps_global above 0 learns anything");
     // s4-learning §13: with the class term no value above 0 has 0 pollution, so the level is off; the table
     // still prints the learn rate and pollution of each value for the next study of the global level.
     for r in &res {

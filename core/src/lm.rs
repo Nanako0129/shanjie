@@ -173,14 +173,17 @@ impl Lm {
         }
         let want: String = r.take(32)?.iter().map(|b| format!("{b:02x}")).collect();
         let (k, mu, v) = (r.u32()? as usize, r.f64()?, r.u32()? as usize);
-        if want != sha || v != lm.uni.len() || !mu.is_finite() {
+        if want != sha || v != lm.uni.len() || !(0.0..=1.0).contains(&mu) {
             return Err(LmError::Format);
         }
         let k3 = k.checked_add(3).ok_or(LmError::Format)?;
         let cls = r.vec(v, 2, |c| u16::from_le_bytes([c[0], c[1]]))?;
         let emit = r.vec(v, 8, |c| f64::from_le_bytes([c[0], c[1], c[2], c[3], c[4], c[5], c[6], c[7]]))?;
         let pc = r.vec(k3.checked_mul(k3).ok_or(LmError::Format)?, 8, |c| f64::from_le_bytes([c[0], c[1], c[2], c[3], c[4], c[5], c[6], c[7]]))?;
-        if !r.0.is_empty() || cls.iter().any(|&c| c != NO_CLASS && c as usize >= k3) {
+        // The model hash binds the file to the model, not its numbers: a probability outside [0, 1] or a
+        // class id out of range is a malformed file, never a silently wrong ranking.
+        let prob_ok = |x: &f64| (0.0..=1.0).contains(x);
+        if !r.0.is_empty() || cls.iter().any(|&c| c != NO_CLASS && c as usize >= k3) || !emit.iter().all(prob_ok) || !pc.iter().all(prob_ok) {
             return Err(LmError::Format);
         }
         lm.classes = Some(Classes { k3, mu, cls, emit, pc });
@@ -781,8 +784,9 @@ pub fn decode_segment_learned<'a>(
 
 /// S2h §1: the word that conditions the first word of a composition with no fixed word on its left.
 /// `left` is the stored context (`context_key` result, at most 2 Han characters, "" for none). Tries
-/// the whole of `left`, then its last character; the first one with bigram history in the model wins
-/// (a word without history makes `prob` ignore it, so it would be no condition at all). None: `<s>`.
+/// the whole of `left`, then its last character; the first one with bigram history in the model wins.
+/// None: `<s>`. A word without history still has a class (S2k), so it could condition through the class
+/// term; it is not used, because S2k phase one was measured with this rule (a change is a new experiment).
 pub fn history<'a>(left: &'a str, lm: &Lm) -> &'a str {
     let last = left.char_indices().next_back().map_or(0, |(i, _)| i);
     [left, &left[last..]]
@@ -947,7 +951,16 @@ mod tests {
         let mut bad_class = good.clone();
         let at = 8 + 32 + 4 + 8 + 4;
         bad_class[at..at + 2].copy_from_slice(&5u16.to_le_bytes()); // class 5 is outside K + 3
-        for (name, bytes) in [("magic", &magic), ("trailing byte", &trailing), ("short", &good[..good.len() - 1].to_vec()), ("class out of range", &bad_class), ("empty", &vec![])] {
+        // Numbers the hash cannot vouch for: mu outside [0, 1], a negative emission, a NaN in P(d|c).
+        let v = u32::from_le_bytes(good[52..56].try_into().unwrap()) as usize;
+        let mut bad_mu = good.clone();
+        bad_mu[44..52].copy_from_slice(&1.5f64.to_le_bytes());
+        let mut bad_emit = good.clone();
+        bad_emit[56 + 2 * v..56 + 2 * v + 8].copy_from_slice(&(-0.1f64).to_le_bytes());
+        let mut bad_pc = good.clone();
+        let n = bad_pc.len();
+        bad_pc[n - 8..].copy_from_slice(&f64::NAN.to_le_bytes());
+        for (name, bytes) in [("magic", &magic), ("trailing byte", &trailing), ("short", &good[..good.len() - 1].to_vec()), ("class out of range", &bad_class), ("empty", &vec![]), ("mu 1.5", &bad_mu), ("negative emit", &bad_emit), ("NaN in Pc", &bad_pc)] {
             assert_eq!(Lm::parse_with_classes(&model, bytes).err(), Some(LmError::Format), "{name}");
         }
     }
