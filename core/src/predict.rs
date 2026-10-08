@@ -94,6 +94,18 @@ fn unit_ok(u: &Unit, s: &Syl) -> bool {
     }
 }
 
+/// Whether `predict` in prefix mode could return a word read `reading` for `units`: a cheap string test on the first
+/// syllable first, then the same compatibility test as the scan. Never false for a reading `predict` would return.
+pub fn reading_matches(units: &[Unit], reading: &[String]) -> bool {
+    let Some(first) = units.first() else { return false };
+    let head: String = first.chars.iter().collect();
+    if reading.len() < units.len() || !reading[0].trim_start_matches('˙').starts_with(&head) {
+        return false;
+    }
+    let Some((_, init)) = units.split_last() else { return false };
+    init.iter().all(|u| u.done) && units.iter().zip(reading).all(|(u, y)| parse_syl(y).is_some_and(|s| unit_ok(u, &s)))
+}
+
 fn compat_prefix(units: &[Unit], syls: &[u32], table: &[Syl]) -> bool {
     let Some((_, init)) = units.split_last() else { return false };
     syls.len() >= units.len() && init.iter().all(|u| u.done) && units.iter().zip(syls).all(|(u, &s)| unit_ok(u, &table[s as usize]))

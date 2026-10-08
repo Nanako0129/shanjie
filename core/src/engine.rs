@@ -3,7 +3,7 @@
 
 use crate::learn::{context_key, local_day, Learner, Level, Record};
 use crate::learn_store::{LearnStore, Opened, StoreError, JOURNAL_MAX};
-use crate::predict::{predict, unit_of_syllable, Mode, Unit};
+use crate::predict::{predict, reading_matches, unit_of_syllable, Mode, Unit};
 use crate::lm::{decode_segment_learned, history, CappedLexicon, Demote, End, Learn, Lm, Profile};
 use crate::{decode_beam, Lexicon, NoLearning, BEAM_S1};
 use std::collections::{HashMap, HashSet};
@@ -26,9 +26,10 @@ pub const GRID_ROWS: usize = 5;
 pub const PREDICT_LONG_CAP: usize = 3;
 /// Items in the prediction row.
 pub const PREDICT_MAX: usize = PAGE_SIZE;
-/// Items asked of `predict` per start once the learner has records (V3 engine contract section 10.2 step 1). A taught
-/// situation's items sit in the first `PREDICT_MAX`, a variant of it up to this far; measured: no extra time. An empty
-/// learner asks for `PREDICT_MAX` only, so the row stays the slice-1 row bit for bit.
+/// Items asked of `predict` for a start that some learned record could match (V3 engine contract section 10.2 step 1).
+/// A taught situation's items sit in the first `PREDICT_MAX`, a variant of it up to this far. Any other start asks for
+/// `PREDICT_MAX` only, so with an empty learner the row is the slice-1 row bit for bit. The added time of 27 over 9
+/// is only measured as part of the whole row with a 50,000-record store (research log 2026-10-08), not by itself.
 pub const PREDICT_SCAN: usize = 27;
 
 /// Initial (21), medial (3), final (13) symbols in the contract's column order.
@@ -209,6 +210,9 @@ struct Fixed {
     /// (chosen while learning was on, not punctuation). Learned at commit if still on and different.
     /// `Some("")` is a prediction pick (V3 section 10.1): nothing was displaced, so nothing halves.
     pre: Option<String>,
+    /// The context key a prediction pick is recorded under, fixed when the row was built: re-decoding after the pick can
+    /// change the text before the start, so the commit must not recompute it (section 10.1). `None` for candidate picks.
+    key: Option<String>,
 }
 
 /// One item of the prediction row: the word, the compatible reading that scored it, and the syllable index where
@@ -217,6 +221,8 @@ struct Pred {
     word: String,
     reading: Vec<String>,
     start: usize,
+    /// The start's context key (`context_key` of the left context and the display before the start).
+    key: String,
     /// Decayed weight of the learned (key, reading, word) record at the start's context (0: not learned).
     weight: f64,
 }
@@ -290,6 +296,8 @@ pub struct Engine {
     pred_sel: Option<usize>,
     /// Whether the row is computed at all (default on; `set_prediction`).
     predict_on: bool,
+    /// Test hook: false queries `PREDICT_SCAN` at every start once the learner has records (no gate).
+    scan_gate: bool,
     /// Set by the key rules that recompute the row (section 1.1); `key` recomputes after the rule ran.
     pred_dirty: bool,
     /// S4: the Han tail (≤ 2 chars) of the text before the insertion point, from `set_left_context`.
@@ -375,6 +383,7 @@ impl Engine {
             pred: Vec::new(),
             pred_sel: None,
             predict_on: true,
+            scan_gate: true,
             pred_dirty: false,
             left: String::new(),
             learning: false,
@@ -447,6 +456,11 @@ impl Engine {
 
     pub fn learner(&self) -> &Learner {
         &self.learner
+    }
+
+    /// Test hook (V3 section 10.2 step 1): false turns the "could a record match" gate off.
+    pub fn set_scan_gate(&mut self, on: bool) {
+        self.scan_gate = on;
     }
 
     /// Test hook (§12): ε of the global level.
@@ -526,7 +540,7 @@ impl Engine {
                     let pre = f.pre.as_ref().filter(|p| **p != f.word && !self.is_punct(f.start))?;
                     let off: usize = (0..f.start).map(|i| self.token_width(i)).sum();
                     let before: String = display.chars().take(off).collect();
-                    let ctx = context_key(&format!("{}{before}", self.left));
+                    let ctx = f.key.clone().unwrap_or_else(|| context_key(&format!("{}{before}", self.left)));
                     Some((ctx, self.syls[f.start..f.end].to_vec(), f.word.clone(), pre.clone()))
                 })
                 .collect();
@@ -708,8 +722,7 @@ impl Engine {
         long_starts.reverse(); // far to near
         let disp: Vec<char> = self.display.chars().collect();
         let off = |i: usize| (0..i).map(|j| self.token_width(j)).sum::<usize>().min(disp.len());
-        let learned = !self.learner.is_empty();
-        let (limit, today) = (if learned { PREDICT_SCAN } else { PREDICT_MAX }, self.today());
+        let (learned, today) = (!self.learner.is_empty(), self.today());
         let query = |s: usize| -> Vec<Pred> {
             if (s..n).any(|i| self.is_punct(i)) {
                 return Vec::new();
@@ -728,13 +741,15 @@ impl Engine {
             let key = context_key(&format!("{}{before}", self.left));
             let v = history(if key == crate::learn::SENTINEL { "" } else { &key }, &st.lm);
             let shown: String = disp[off(s)..off(n)].iter().collect();
-            predict(idx, &st.lm, lam, v, &units, Mode::P, limit)
+            // A start no record can match scans 9 and weighs nothing: its row is the slice-1 one, cheaper.
+            let gate = learned && (!self.scan_gate || self.learner.records().iter().any(|r| reading_matches(&units, &r.reading)));
+            predict(idx, &st.lm, lam, v, &units, Mode::P, if gate { PREDICT_SCAN } else { PREDICT_MAX })
                 .into_iter()
                 .enumerate()
                 .filter_map(|(i, (word, _, _, reading))| {
                     // Step 2: keep the slice-1 window and anything learned; the index counts before step 3 filters.
-                    let weight = if learned { self.learned_weight(&key, &reading, &word, today) } else { 0.0 };
-                    (i < PREDICT_MAX || weight > 0.0).then_some(Pred { word, reading, start: s, weight })
+                    let weight = if gate { self.learned_weight(&key, &reading, &word, today) } else { 0.0 };
+                    (i < PREDICT_MAX || weight > 0.0).then_some(Pred { word, reading, start: s, key: key.clone(), weight })
                 })
                 .filter(|p| p.word != shown)
                 .collect()
@@ -746,23 +761,21 @@ impl Engine {
                 long.extend(query(s));
             }
         }
-        let mut words = HashSet::new();
-        long.retain(|p| words.insert(p.word.clone())); // step 4: L
-        // Step 5: learned items are exempt from the cap of 3 positions; unlearned ones keep the slice-1 order.
-        let (mut head, mut tail) = (Vec::new(), Vec::new());
-        let mut capped = Vec::new();
-        for (i, p) in long.into_iter().enumerate() {
-            if p.weight > 0.0 {
-                head.push(p);
-            } else if i < PREDICT_LONG_CAP {
-                capped.push(p);
-            } else {
-                tail.push(p);
-            }
+        // Step 4: L keeps the first position of a word and the largest weight of its copies.
+        let mut best: HashMap<String, f64> = HashMap::new();
+        for p in &long {
+            let w = best.entry(p.word.clone()).or_insert(0.0);
+            *w = w.max(p.weight);
         }
-        head.extend(capped);
+        let mut words = HashSet::new();
+        long.retain(|p| words.insert(p.word.clone()));
+        long.iter_mut().for_each(|p| p.weight = best[&p.word]);
+        // Step 5: learned items are exempt from the cap of 3 positions; the order inside head and tail is L's, and the
+        // stable sort below puts the learned ones first, so a partition gives the same row as "learned, then L[0..3]".
+        let (head, tail): (Vec<_>, Vec<_>) = long.into_iter().enumerate().partition(|(i, p)| p.weight > 0.0 || *i < PREDICT_LONG_CAP);
+        let (head, tail) = (head.into_iter().map(|x| x.1), tail.into_iter().map(|x| x.1));
         let cursor_items = if pending.is_empty() { Vec::new() } else { query(n) };
-        let mut all: Vec<Pred> = head.into_iter().chain(cursor_items).chain(tail).collect();
+        let mut all: Vec<Pred> = head.chain(cursor_items).chain(tail).collect();
         all.sort_by(|a, b| b.weight.total_cmp(&a.weight)); // step 6: stable
         let mut words = HashSet::new();
         all.retain(|p| words.insert(p.word.clone())); // step 7
@@ -782,14 +795,15 @@ impl Engine {
     /// Section 2: replace `syls[start..cursor]` by the item's reading, fix the word over it, move the cursor behind
     /// it. With learning on `pre` is `Some("")` (section 10.1): taught at commit like a re-pick, with nothing displaced.
     fn choose_pred(&mut self, i: usize) -> Result<Output, EngineError> {
-        let Pred { word, reading, start, .. } = self.pred.swap_remove(i);
+        let Pred { word, reading, start, key, .. } = self.pred.swap_remove(i);
         let pre = self.learning.then(String::new);
         self.clear_pred();
         self.pend = [None; 3];
         let (m, end) = (reading.len(), self.cursor);
         self.fixed.retain(|f| !(f.start < end && start < f.end));
         self.syls.splice(start..end, reading);
-        self.fixed.push(Fixed { start, end: start + m, word, pre });
+        let key = pre.is_some().then_some(key);
+        self.fixed.push(Fixed { start, end: start + m, word, pre, key });
         self.fixed.sort_by_key(|f| f.start);
         self.cursor = start + m;
         self.refresh()?;
@@ -942,9 +956,10 @@ impl Engine {
         let is_char = k.kind == KeyKind::Char;
         // V3 section 10.3: ⌘⌫ while the prediction row is entered forgets the selected item (before rule 1).
         if let (KeyKind::Backspace, true, Some(sel)) = (k.kind, m & MOD_COMMAND != 0, self.pred_sel) {
-            let Some(Pred { word, reading, .. }) = self.pred.get(sel) else { return self.handled() };
+            let Pred { word, reading, .. } = &self.pred[sel];
             let (word, reading) = (word.clone(), reading.clone());
             self.forget_entry(&reading, &word);
+            self.refresh()?; // the free segments decode without the forgotten record, as after the candidate window's ⌘⌫
             self.recompute_pred();
             if !self.pred.is_empty() {
                 self.pred_sel = Some(self.pred.iter().position(|p| p.word == word).unwrap_or(0));
@@ -1213,7 +1228,7 @@ impl Engine {
         });
         self.syls.insert(c, reading);
         if let Some(word) = fixed_word {
-            self.fixed.push(Fixed { start: c, end: c + 1, word, pre: None });
+            self.fixed.push(Fixed { start: c, end: c + 1, word, pre: None, key: None });
             self.fixed.sort_by_key(|f| f.start);
         }
         self.cursor += 1;
@@ -1341,9 +1356,14 @@ impl Engine {
         let Some(c) = self.cands.take() else { return Ok(()) };
         let Some((word, l)) = c.list.get(idx).cloned() else { return Ok(()) };
         let (start, end) = if self.cursor == 0 { (0, l) } else { (self.cursor - l, self.cursor) };
-        let pre = self.learning.then(|| self.pre_pick(start, end)).flatten();
+        // Choosing again the word a prediction pick fixed over this exact span keeps that pending learn (section 10.1).
+        let again = self.fixed.iter().find(|f| f.start == start && f.end == end && f.word == word && f.pre.as_deref() == Some(""));
+        let (pre, key) = match again {
+            Some(f) if self.learning => (f.pre.clone(), f.key.clone()),
+            _ => (self.learning.then(|| self.pre_pick(start, end)).flatten(), None),
+        };
         self.fixed.retain(|f| !(f.start < end && start < f.end));
-        self.fixed.push(Fixed { start, end, word, pre });
+        self.fixed.push(Fixed { start, end, word, pre, key });
         self.fixed.sort_by_key(|f| f.start);
         self.refresh()
     }
