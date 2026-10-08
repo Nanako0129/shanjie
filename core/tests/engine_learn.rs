@@ -13,7 +13,7 @@ fn root() -> PathBuf {
 }
 fn lm_path() -> PathBuf {
     let p = root().join("data/lm/bigram.sjlm");
-    assert!(root().join("data/lm/classes.sjc").exists(), "data/lm/classes.sjc is missing: download it with `gh release download classes-v1 -R Nanako0129/shanjie -p classes.sjc -D data/lm` (or build it with tools/build_classes.py)");
+    assert!(root().join("data/lm/classes.sjc").exists(), "data/lm/classes.sjc is missing: download it with `gh release download classes-v2 -R Nanako0129/shanjie -p classes.sjc -D data/lm` (or build it with tools/build_classes.py)");
     assert!(p.exists(), "data/lm/bigram.sjlm is missing (see engine_lm.rs)");
     p
 }
@@ -318,7 +318,7 @@ fn a2_candidate_pick_learning_on_cases_tsv() {
     println!("moot groups (the default already shows the taught word, nothing to pick): {moot:?}");
     assert!(failed.is_empty(), "groups with a wrong default but no record: {failed:?}");
     assert!(regress.is_empty(), "non-colliding common sentences regress: {regress:?}");
-    // Moot groups are not counted (s4-learning §13), so keep a floor on what is: 3 with model-v3 + classes.
+    // Moot groups are not counted (s4-learning §13), so keep a floor on what is: 3 with the released model and classes.
     assert!(wrong_reach >= 3, "fewer than 3 countable same-context rows ({wrong_reach}): the rate would not mean anything");
     assert!(learned_reach * 100 >= wrong_reach * 80, "same-context learn rate under 80%");
 
