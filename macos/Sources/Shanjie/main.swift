@@ -60,7 +60,7 @@ final class DefaultsPredictionStore: PredictionStore {
     }
 }
 
-/// The "動漫與遊戲詞" switch (docs/contracts/acg-pack.md A.2), key `acgPack` in the same domain; absent means off.
+/// The "動漫與遊戲詞" switch (docs/contracts/acg-pack.md A.2), key `acgPack` in the same domain; absent means on (user decision 2026-10-09).
 @MainActor
 final class DefaultsAcgPackStore: AcgPackStore {
     var acgPack: Bool? {
