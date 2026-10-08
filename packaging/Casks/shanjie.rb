@@ -33,9 +33,8 @@ cask "shanjie" do
   caveats <<~EOS
     After the first install, register and enable the input method:
       "$HOME/Library/Input Methods/善解輸入法.app/Contents/MacOS/shanjie" install
-    The first install usually needs a log out and log in before macOS accepts
-    the input method: if the command exits with 3, log out, log back in, and
-    run it again. If it still exits with 3, add 善解輸入法 in System Settings >
-    Keyboard > Input Sources.
+    If the command exits with 3, macOS has not accepted the input method yet:
+    add 善解輸入法 in System Settings > Keyboard > Input Sources (+ → 繁體中文 →
+    善解輸入法 → Add).
   EOS
 end

@@ -8,7 +8,7 @@ import ShanjieKit
 // `install`, or exactly `--selftest`. Anything else exits non-zero before touching anything.
 // Output is fixed text only (R2): no paths, bundle IDs or input.
 
-func say(_ message: StaticString) {
+func say(_ message: String) {
     FileHandle.standardError.write(Data("\(message)\n".utf8))
 }
 
@@ -25,36 +25,10 @@ func install() -> Int32 {
         return 1
     }
     let result = Registration.run(bundleURL: Bundle.main.bundleURL, bundleID: bundleID, defaults: .standard)
-    if result.registerFailed { say("install: warning: TISRegisterInputSource failed") }
-    switch result.outcome {
-    case .modeNotListed:
-        say("install: the input mode is not listed yet")
-        say("install: open System Settings > Keyboard > Input Sources, press +, choose Shanjie under Chinese (Traditional) and press Add")
-        return 3
-    case .registrationFailed:
-        say("install: registration failed and the input mode is not listed")
-        return 1
-    case .enableFailed:
-        say("install: TISEnableInputSource failed")
-        return 1
-    case .notAccepted:
-        if Registration.waitUntilAccepted(result, isAccepted: { Registration.isAccepted(bundleID: bundleID) }) {
-            say("install: already enabled; registration skipped")
-            return 0
-        }
-        say("install: the system has not accepted the input method yet")
-        say("install: open System Settings > Keyboard > Input Sources, press +, choose Shanjie under Chinese (Traditional) and press Add")
-        return 3
-    case .done where result.skipped:
-        say("install: already enabled; registration skipped")
-        return 0
-    case .done:
-        if result.legacyDisableFailed {
-            say("install: warning: TISDisableInputSource failed for an input mode of an earlier version")
-        }
-        say("install: registered and enabled")
-        return 0
-    }
+    let accepted = Registration.waitUntilAccepted(result, isAccepted: { Registration.isAccepted(bundleID: bundleID) })
+    let report = InstallCommand.report(result, acceptedAfterWait: accepted)
+    for line in report.messages { say(line) }
+    return report.exitCode
 }
 
 /// The chosen keyboard layout, in the app's own UserDefaults domain (its bundle ID), key `layout`

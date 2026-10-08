@@ -99,6 +99,27 @@ enum Look {
     static let smallFont = NSFont.systemFont(ofSize: 11)
     static let tryFont = NSFont.systemFont(ofSize: 17)
     static let dotSize: CGFloat = 8
+    // Spacing values are first-round choices (no reference screen); the user judges them in the
+    // render-steps rounds. Each one is named for what it separates.
+    /// Between the step indicator's items.
+    static let indicatorSpacing: CGFloat = 18
+    /// Between a dot and its label.
+    static let dotLabelSpacing: CGFloat = 6
+    /// Dot ring: inset from the bounds and line width, so the 1.5 pt ring stays inside the 8 pt box.
+    static let dotRingInset: CGFloat = 0.75
+    static let dotRingWidth: CGFloat = 1.5
+    /// Between the seal and the title.
+    static let headerSpacing: CGFloat = 14
+    /// Between the screen's rows.
+    static let rowSpacing: CGFloat = 14
+    /// Extra room under the step indicator, to separate it from the content.
+    static let afterIndicatorSpacing: CGFloat = 24
+    /// Between the disclosure triangle and its label (the system's own gap is wider than looks right).
+    static let disclosureSpacing: CGFloat = 2
+    /// Top and bottom of the content column.
+    static let verticalInset: CGFloat = 20
+    /// The error detail box: about six lines of the 11 pt monospaced text.
+    static let detailHeight: CGFloat = 90
     static let seal = NSColor(name: nil) { appearance in
         appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
             ? NSColor(srgbRed: 0xD4 / 255, green: 0x55 / 255, blue: 0x3F / 255, alpha: 1)
@@ -144,14 +165,14 @@ final class StepIndicator: NSStackView {
     convenience init(titles: [String]) {
         self.init(frame: .zero)
         orientation = .horizontal
-        spacing = 18
+        spacing = Look.indicatorSpacing
         var items: [NSView] = []
         for title in titles {
             let dot = DotView()
             let label = NSTextField(labelWithString: title)
             label.font = Look.smallFont
             let item = NSStackView(views: [dot, label])
-            item.spacing = 6
+            item.spacing = Look.dotLabelSpacing
             items.append(item)
             dots.append(dot)
             labels.append(label)
@@ -176,11 +197,11 @@ final class StepIndicator: NSStackView {
         var state = State.todo { didSet { needsDisplay = true } }
         override var intrinsicContentSize: NSSize { NSSize(width: Look.dotSize, height: Look.dotSize) }
         override func draw(_ dirtyRect: NSRect) {
-            let circle = NSBezierPath(ovalIn: bounds.insetBy(dx: 0.75, dy: 0.75))
+            let circle = NSBezierPath(ovalIn: bounds.insetBy(dx: Look.dotRingInset, dy: Look.dotRingInset))
             switch state {
             case .current: Look.seal.setFill(); circle.fill()
             case .done: NSColor.tertiaryLabelColor.setFill(); circle.fill()
-            case .todo: circle.lineWidth = 1.5; NSColor.tertiaryLabelColor.setStroke(); circle.stroke()
+            case .todo: circle.lineWidth = Look.dotRingWidth; NSColor.tertiaryLabelColor.setStroke(); circle.stroke()
             }
         }
     }
@@ -224,9 +245,9 @@ enum Screens {
         case .update:
             line = L("會從 \(installed ?? "") 更新到 \(bundled)。", "Updates \(installed ?? "") to \(bundled). ") + account
             primary = L("更新", "Update")
-        case .enableSame:
-            line = L("這個版本已經裝好了。按「啟用」讓系統開始使用它；從系統設定加入後回到這裡，也是按這個。",
-                     "This version is already installed. Choose Enable to let the system use it, also after adding it in System Settings.")
+        case .enableSame:  // s3c-installer.md section 2.1: the note beside 重新安裝
+            line = L("這個版本已經裝好了。按「啟用」讓系統開始使用它；從系統設定加入後回到這裡，也是按這個。\n「重新安裝」會把目前這份當成上一版保留，取代原本保留的上一版。",
+                     "This version is already installed. Choose Enable to let the system use it, also after adding it in System Settings.\nReinstall keeps the current copy as the previous version, replacing the one kept before.")
             primary = L("啟用", "Enable")
             secondary = L("重新安裝", "Reinstall")
         case .enableNewer:
@@ -313,7 +334,7 @@ final class StepView: NSView {
         detailsBody = NSStackView(views: [detailsLabel, licenses])
         let toggle = NSStackView(views: [disclosure, disclosureLabel])
         detailsRow = NSStackView(views: [toggle, detailsBody])
-        tryRow = NSStackView(views: [tryField, NSStackView(views: [switchButton, switchNote])])
+        tryRow = NSStackView(views: [tryField, switchButton, switchNote])
         super.init(frame: frame)
 
         title.font = Look.titleFont
@@ -341,7 +362,7 @@ final class StepView: NSView {
 
         disclosure.setButtonType(.pushOnPushOff)
         disclosure.bezelStyle = .disclosure
-        toggle.spacing = 2
+        toggle.spacing = Look.disclosureSpacing
         for column in [detailRow, detailsBody, detailsRow, tryRow] {
             column.orientation = .vertical
             column.alignment = .leading
@@ -349,20 +370,19 @@ final class StepView: NSView {
 
         tryField.font = Look.tryFont
         tryField.placeholderString = L("在這裡打字", "Type here")
-        primary.keyEquivalent = "\r"
         for button in [primary, secondary, close, copyDetail, licenses, switchButton] { button.bezelStyle = .push }
         licenses.controlSize = .small
 
         let header = NSStackView(views: [seal, title])
-        header.spacing = 14
+        header.spacing = Look.headerSpacing
         let buttons = NSStackView(views: [NSView(), close, secondary, primary])
         let stack = NSStackView(views: [indicator, header, body, statusRow, detailRow, detailsRow, tryRow, NSView(), buttons])
         stack.orientation = .vertical
         stack.alignment = .leading
-        stack.spacing = 14
-        stack.setCustomSpacing(24, after: indicator)
+        stack.spacing = Look.rowSpacing
+        stack.setCustomSpacing(Look.afterIndicatorSpacing, after: indicator)
         stack.detachesHiddenViews = true
-        stack.edgeInsets = NSEdgeInsets(top: 20, left: Look.margin, bottom: 20, right: Look.margin)
+        stack.edgeInsets = NSEdgeInsets(top: Look.verticalInset, left: Look.margin, bottom: Look.verticalInset, right: Look.margin)
         stack.translatesAutoresizingMaskIntoConstraints = false
         addSubview(stack)
         NSLayoutConstraint.activate([
@@ -370,7 +390,7 @@ final class StepView: NSView {
             stack.topAnchor.constraint(equalTo: topAnchor), stack.bottomAnchor.constraint(equalTo: bottomAnchor),
             buttons.widthAnchor.constraint(equalToConstant: width),
             detailScroll.widthAnchor.constraint(equalToConstant: width),
-            detailScroll.heightAnchor.constraint(equalToConstant: 90),
+            detailScroll.heightAnchor.constraint(equalToConstant: Look.detailHeight),
             tryField.widthAnchor.constraint(equalToConstant: width),
         ])
         disclosure.target = self
@@ -403,6 +423,8 @@ final class StepView: NSView {
         detailsBody.isHidden = true
         tryRow.isHidden = !screen.tryIt
         switchNote.stringValue = ""
+        // Return is the default key everywhere except the try page, where it belongs to the field.
+        primary.keyEquivalent = screen.tryIt ? "" : "\r"
         for (button, label) in [(primary, screen.primary), (secondary, screen.secondary), (close, screen.close)] {
             button.title = label ?? ""
             button.isHidden = label == nil
@@ -542,7 +564,7 @@ final class Controller: NSObject, NSApplicationDelegate, NSWindowDelegate {
         show(Screens.welcome(plan: plan, installed: installed, bundled: Paths.bundledVersion),
              primary: { [weak self] in
                  guard let self else { return }
-                 if self.plan.copiesFiles { self.copyThenEnable() } else { self.enable() }
+                 if self.plan.copiesFiles { self.copyThenEnable() } else { self.enable(afterCopy: false) }
              },
              secondary: { [weak self] in self?.copyThenEnable() })
         // Only copying needs the bundled zip and script; enabling an installed copy does not.
@@ -557,13 +579,15 @@ final class Controller: NSObject, NSApplicationDelegate, NSWindowDelegate {
         DispatchQueue.global(qos: .userInitiated).async {
             let failure = copyFiles()
             DispatchQueue.main.async {
-                if let failure { self.fail(failure) } else { self.enable() }
+                if let failure { self.fail(failure) } else { self.enable(afterCopy: true) }
             }
         }
     }
 
     /// s3c section 2.3: against the installed copy, with its own bundle ID and preference domain.
-    private func enable() {
+    /// Installer-v2 section 9.2 item 2: only after a copy can the system's "not accepted" be a
+    /// moment that passes, so only then is it polled; without a copy it goes straight to activate.
+    private func enable(afterCopy: Bool) {
         show(Screens.working(Screens.enabling))
         guard let bundleID = Bundle(url: Paths.installed)?.bundleIdentifier,
               let defaults = UserDefaults(suiteName: bundleID) else {
@@ -574,7 +598,7 @@ final class Controller: NSObject, NSApplicationDelegate, NSWindowDelegate {
         switch InstallerFlow.next(after: result.outcome) {
         case .tryIt: showTry(note: result.legacyDisableFailed ? Screens.legacyNote : nil)
         case .activate: showActivate()
-        case .waiting: poll(bundleID: bundleID)
+        case .waiting: if afterCopy { poll(bundleID: bundleID) } else { showActivate() }
         case .failed:
             fail(Failure(message: L("系統沒有接受這個輸入法。可以到「系統設定 → 鍵盤 → 輸入方式」手動加入「善解輸入法」。",
                                     "The system did not accept the input method. Add Shanjie in System Settings > Keyboard > Input Sources.")))
@@ -587,12 +611,18 @@ final class Controller: NSObject, NSApplicationDelegate, NSWindowDelegate {
              secondary: { [weak self] in self?.recheck() })
     }
 
-    /// Installer-v2 section 9.2 item 3: not accepted yet changes nothing (Registration.run skips
-    /// it), so this stays on the activate screen.
+    /// Installer-v2 section 9.2 item 3: reads whether the system accepted it first, and only an
+    /// accepted input method goes on to `Registration.run` (which then skips, or cleans up the
+    /// modes of earlier versions). Not accepted never reaches a TIS call that changes anything,
+    /// whatever `run` would have decided.
     private func recheck() {
         guard let bundleID = Bundle(url: Paths.installed)?.bundleIdentifier,
               let defaults = UserDefaults(suiteName: bundleID) else {
             fail(Failure(message: L("找不到已安裝的善解輸入法。", "The installed input method was not found.")))
+            return
+        }
+        guard Registration.isAccepted(bundleID: bundleID) else {
+            showActivate(note: Screens.notDetected)
             return
         }
         let result = Registration.run(bundleURL: Paths.installed, bundleID: bundleID, defaults: defaults)

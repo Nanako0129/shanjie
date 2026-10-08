@@ -5,8 +5,11 @@ import Foundation
 // bundle, enable the input method and its one mode, check that the system took it, then disable
 // the two modes of earlier versions. Amended by installer-v2.md section 9: that sequence runs only
 // when the system does not know the mode yet or an earlier version's mode is still enabled; with
-// the input method already accepted, or known but not accepted, nothing is changed (a register or
-// enable call then has no effect, measured, and breaks the Caps Lock switch). Shared by `shanjie install` (its own bundle) and the
+// the input method already accepted, or known but not accepted, nothing is changed. Measured
+// 2026-10-09 (research-log): calling register or enable after the bundle was swapped broke the Caps
+// Lock switch, while the same calls without a swap did not; and for a known but not accepted input
+// method an enable call returned noErr and changed nothing. Which of register and enable is the
+// trigger was not separated. Shared by `shanjie install` (its own bundle) and the
 // installer (the installed copy, never a path inside the installer: under App Translocation that
 // is a random read-only path).
 
@@ -50,6 +53,7 @@ public enum Registration {
     /// What `run` reads before it changes anything.
     public struct State: Equatable, Sendable {
         public var modeListed: Bool
+        /// Parent and `.zhuyin` mode both enabled (`isAccepted`).
         public var accepted: Bool
         public var legacyEnabled: Bool
         public init(modeListed: Bool, accepted: Bool, legacyEnabled: Bool) {
@@ -75,17 +79,42 @@ public enum Registration {
             legacyEnabled: all.contains { inputModeID($0).map(legacy.contains) ?? false && isEnabled($0) })
     }
 
+    /// How long `run` re-reads a mode that is not listed, before taking it for a first install.
+    static let listedRecheckInterval: TimeInterval = 0.25
+    static let listedRecheckLimit: TimeInterval = 2
+
+    /// Waits on the run loop, which the installer's main thread needs to stay responsive. A one-shot
+    /// timer keeps the loop from returning at once when the thread has no other source (the
+    /// command line tool).
+    public static func pause(_ seconds: TimeInterval) {
+        let end = Date(timeIntervalSinceNow: seconds)
+        let timer = Timer(fire: end, interval: 0, repeats: false) { _ in }
+        RunLoop.current.add(timer, forMode: .default)
+        while Date() < end { RunLoop.current.run(mode: .default, before: end) }
+        timer.invalidate()
+    }
+
     /// Runs the whole sequence. `defaults` is the input method's own domain: `shanjie install`
     /// passes `UserDefaults.standard` (it runs as the input method), the installer passes
     /// `UserDefaults(suiteName: <bundle ID>)`.
     /// Reads the state first and changes nothing unless `decide` says `fullFlow`. `readState` and
     /// `fullFlow` are injected only by tests, to count the calls that would change something.
+    /// A mode that is not listed is re-read for up to 2 s first (the system may list it a moment
+    /// late right after the files were swapped; not measured), so a first install waits that long.
     public static func run(
         bundleURL: URL, bundleID: String, defaults: UserDefaults,
         readState: ((String) -> State)? = nil,
-        fullFlow: ((URL, String, UserDefaults) -> Result)? = nil
+        fullFlow: ((URL, String, UserDefaults) -> Result)? = nil,
+        pause: (TimeInterval) -> Void = Registration.pause
     ) -> Result {
-        let state = (readState ?? Self.readState(bundleID:))(bundleID)
+        let read = readState ?? Self.readState(bundleID:)
+        var state = read(bundleID)
+        var waited: TimeInterval = 0
+        while !state.modeListed, waited < listedRecheckLimit {
+            pause(listedRecheckInterval)
+            waited += listedRecheckInterval
+            state = read(bundleID)
+        }
         switch decide(modeListed: state.modeListed, accepted: state.accepted, legacyEnabled: state.legacyEnabled) {
         case .skipDone: return Result(outcome: .done, skipped: true)
         case .skipNotAccepted: return Result(outcome: .notAccepted, skipped: true)
@@ -98,7 +127,7 @@ public enum Registration {
     /// for a moment). True when the result is done or the input method became accepted in time.
     public static func waitUntilAccepted(
         _ result: Result, interval: TimeInterval = 0.5, limit: TimeInterval = 5,
-        isAccepted: () -> Bool, sleep: (TimeInterval) -> Void = Thread.sleep(forTimeInterval:)
+        isAccepted: () -> Bool, sleep: (TimeInterval) -> Void = Registration.pause
     ) -> Bool {
         if result.outcome == .done { return true }
         guard result.outcome == .notAccepted, result.skipped else { return false }
@@ -150,9 +179,15 @@ public enum Registration {
 
     /// Measured 2026-10-04: before the first log out after registration, both enable calls return
     /// noErr and this process's enabled list shows the mode, but not the input method itself,
-    /// which stays disabled. Only the input method appearing in the enabled list counts.
+    /// which stays disabled. Accepted means both the input method (no mode ID) and its `.zhuyin`
+    /// mode are in the enabled list; the parent alone is "known, not accepted".
     public static func isAccepted(bundleID: String) -> Bool {
-        inputSources(bundleID: bundleID, includeAllInstalled: false).contains { inputModeID($0) == nil }
+        accepted(enabledModeIDs: inputSources(bundleID: bundleID, includeAllInstalled: false).map(inputModeID), bundleID: bundleID)
+    }
+
+    /// `isAccepted` on the mode IDs of the enabled sources (nil for the input method itself).
+    public static func accepted(enabledModeIDs: [String?], bundleID: String) -> Bool {
+        enabledModeIDs.contains { $0 == nil } && enabledModeIDs.contains { $0 == "\(bundleID).zhuyin" }
     }
 
     /// docs/contracts/installer-v2.md section 1.2: selects the input method's one mode among the
