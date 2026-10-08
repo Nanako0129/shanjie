@@ -1397,6 +1397,40 @@ S2h 實機驗收時，使用者在終端機、Discord、VS Code、Chrome 網址�
 - 決定（使用者 2026-10-08）：v0.3.0 不放改選固定；下一片先做新詞 B（從改選記住新詞組），先量錯字回報裡幾列是缺詞、幾列是排序錯；之後再看改選固定還需不需要，要的話照蘋果實測（含改選後連續打字、右邊合併後 Backspace）重寫。分支保留，結論寫進文件後再問要不要刪。
 - 方法上的教訓寫進 `docs/methodology.md`。
 
+## 2026-10-08：brew 升級後舊版還在跑（s3b 修訂四）
+
+- **回報**（Discord，brew 使用者）：`brew upgrade` 之後 bundle 已經是 0.3.0，選單還是舊版（沒有「即時預測」），手動 `pkill -f` 之後才換成新版。s3b §14.1 留給「第二次發版」的未驗證項目（`on_upgrade` 的 TERM 讓新版接手）因此不成立。
+- **讀 Homebrew 7.0.7 原始碼**：升級時舊 cask 的 `uninstall`（送 TERM）排在搬走舊 bundle 之前，新 bundle 最後才搬進來。先推論是「TERM 送出後、新版就位前，系統又把舊版叫起來」。
+- **實測推翻那個推論**（這台機器的 brew 紀錄是 0.1.2，本機 tap 暫時換成新 cask，`brew upgrade --verbose --debug`，每 0.2 秒記錄 PID）：舊 receipt 的 TERM 根本沒送出。Homebrew 從 `INSTALL_RECEIPT.json` 讀回已安裝那一版的解除安裝步驟時，`on_upgrade` 是字串 `"signal"`，`uninstall_phase` 只認 Symbol 或 Array，於是 `signal` 照升級規則被略過。log 裡沒有 `launchctl list` 也沒有 `Signalling`，舊行程撐過整段搬移。charliie 那次多半是同一個原因（推論：他的 receipt 也是 Homebrew 7 寫的）。
+- **做法**（s3b §15）：cask 加 `postflight_steps` 的 `terminate_process`（Homebrew 執行 `pkill -f`），在新 bundle 就位後才結束舊行程；`uninstall` 拿掉 `on_upgrade`。pattern 只認「命令列就是輸入法執行檔」的行程（系統啟動輸入法不帶參數，本機 `ps` 確認）。測試用 Homebrew 自己的載入器確認這一步在 postflight、帶 `match: :full`，再用替身行程測 pattern；8 種改壞的寫法（放寬、變窄、拿掉 `match`、改成 preflight）都會讓測試失敗。從升級到含這個修訂的版本那次起生效。
+- **新 cask 的實測**（同一次升級）：notice「Restarting the input method so the new version takes over」印出後 0.03 秒內舊 PID 消失（前 0.21 秒的取樣還在）；之後系統啟動的新行程執行的是新 bundle，cdhash 與 Release 相同。`/usr/bin/pkill` 那一行沒有印出（verbose 與 debug 沒傳進沙盒子行程），所以契約改用 notice 判讀。還原 tap 後本機 tap 落後成 0.1.2、brew 誤以為可升級，用 `git pull --ff-only` 對齊遠端。
+- **最終版**（本機 review 後：pattern 開頭改成 `^[^ ]*` 涵蓋系統層的 `/Library/Input Methods`，notice 改成「如果有就停止」，因為第一次安裝也會印）再跑一次 `brew reinstall`：reinstall 會略過 `signal`，只剩 postflight 結束行程；舊 PID 撐到 notice，0.01 秒內消失。
+- **以後可以考慮**（review 提出，延後）：結束舊行程的 pattern 現在有 `install-ime.sh` 與 cask 兩套（README 的手動指令照 cask）。更根本的做法是讓輸入法自己發現 bundle 被換掉（比對磁碟上的版本或執行檔），發現就結束自己，所有升級路徑共用一個機制。
+- **設計上的錯**：同一天第一份安裝流程契約（`docs/contracts/installer-v2.md` 的第一版，在 `feat/installer-v2` 分支）又寫了「brew postflight 自動註冊」，這是 2026-10-04 讀 Homebrew 原始碼就判斷走不通、記下來的路（沙盒讀不到家目錄；沒有實測）。plan-verifier 抓到，範圍縮回只改安裝程式，教訓寫進方法論。
+
+## 2026-10-09：使用者回報的三列錯字
+
+`eval/dev/user-reported.txt` 最後加三列（49 列），`eval/golden/s2h-lm-context.txt` 重產（只有 user-reported 兩行摘要變動：n、oracle@64、top1_sha256；top1 不變，聊天 15、書面 17，三列在兩種設定都錯）。用 model-v4（`data/lm/bigram.sjlm`，聊天與書面、加不加 `--context`，共四種設定）解碼的第一名，四種設定結果相同：
+
+| 前文｜句子 | 聊天 | 書面 |
+|---|---|---|
+| ｜我把他加回來了 | 我把他家回來了 | 同左 |
+| 分類一下同步進行，｜手上可以先開始派工下去的可以先做 | 手上可以先開始派攻下去的可以先做 | 同左 |
+| ｜然後語料包另外做 | 然後語料包另外作 | 同左 |
+
+- 使用者用善解打出這三句並標出錯字（「加」→「家」、「派工」→「派攻」、「另外做」→「另外作」）。
+- 第二列照打字測驗的切法，在標點處切：前文是逗號前的子句「分類一下同步進行，」，句子是逗號後整個子句（整句含全形逗號時 `tools/readings.py` 拼不出）。
+- 讀音由 `tools/readings.py` 產生（0 列 CHECK），不是使用者實際按鍵的紀錄；第一、三列沒有前文，是假設那則訊息是單獨一次輸入（在 Claude Code 的輸入框打的，有沒有把前文交給輸入法沒有驗證）。
+- 同批另一則「裝裝看」（被打成「莊莊看」）在四種設定都解成「裝裝看」，沒有加；可能是使用者的選字記憶或別的前文，沒有查。
+- 沒有一列靠調參數修。
+
+## 2026-10-09：brew 升級後善解從選單消失（未解）
+
+- 兩次 brew 實機實測後，使用者發現選單沒有善解：注音模式「已啟用」、善解本體「未啟用」。`shanjie install` 回報成功但沒效果，從系統設定手動加回才恢復。
+- 虛擬機（macOS 26.6.2）照 Homebrew 的換檔方式試了 6 種組合（含 pkill、隔離屬性、空 3 秒），都沒有消失。本機（macOS 27）用真的 brew 各跑一次公開 cask 與新 cask，每 0.5 秒記 TIS 狀態：bundle 被移走期間本體都會短暫變「未啟用」，新版搬入後 0.07–0.12 秒內自動恢復，兩次最後都是「已啟用」。所以短暫失效是 Homebrew 換版本身的現象，和新 cask 的 postflight 無關；第一次沒恢復的原因未解（那次空檔約 2.9 秒，重現時 1.1–1.8 秒）。細節在 s3b §15.6。
+- 量法更正：`defaults read com.apple.HIToolbox AppleEnabledInputSources` 不能拿來判斷啟用狀態（虛擬機裡已啟用也讀到 0 筆）；只採信 TIS 回報。
+- 另一個量到的事（影響安裝程式）：程式化啟用（`TISEnableInputSource`）在這兩種狀態下對善解本體都無效：本機消失後重新啟用、虛擬機全新安裝並重開機後啟用。兩次都要使用者從系統設定加入才生效。這和 2026-10-04「登出再登入後 `install` 就能啟用」的紀錄不同（當時是 0.1.0、較早的 macOS；差在哪裡未查）。
+
 ## 2026-10-09：Caps Lock 切換失效是更新觸發的（更正 2026-10-05）
 
 使用者：「目前已知的是你每次幫我更新完都會故障」。2026-10-05 的紀錄寫「同一天裝了多次新版，Caps Lock 都正常，安裝會觸發不成立」，這個結論錯了。當晚在使用者電腦上逐項對照，每一步之後由使用者按 Caps Lock 回報能不能切換，壞了就用慢速按鍵修好再做下一步。bundle 一律換成同一份正式版 0.3.0（cdhash 9b817ae5…），所以內容沒有變：
