@@ -69,12 +69,13 @@ def make_lex(lm):
 
 
 def rows_of(paths):
+    """(正解, 讀音, 前文)。S2k §1.1：保留前文，和 lm_eval.py 的 rows_of 相同。"""
     out = []
     for f in paths:
         for line in open(f, encoding="utf-8"):
             p = line.rstrip("\n").split("|")
             if len(p) == 3:
-                out.append((p[1], p[2].split()))
+                out.append((p[1], p[2].split(), p[0]))
     return out
 
 
@@ -83,12 +84,12 @@ def dev302():
 
 
 def run(lex, lm, rows, profile):
-    """每列第一名 surface（不套寬鬆）。"""
-    return ["".join(ws) for ws in (L.decode(lex, s, lm, profile)[0][1] for _, s in rows)]
+    """每列第一名 surface（不套寬鬆）。S2k §1.1：一律用前文解碼，和 lm_eval.py --context 相同。"""
+    return ["".join(L.decode(lex, s, lm, profile, start=L.history(L.context_key(ctx), lm))[0][1]) for _, s, ctx in rows]
 
 
 def ok_of(rows, tops):
-    return [lenient(t) == lenient(p) for (t, _), p in zip(rows, tops)]
+    return [lenient(r[0]) == lenient(p) for r, p in zip(rows, tops)]
 
 
 def mcnemar(b, c):
