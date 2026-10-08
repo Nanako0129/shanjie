@@ -141,8 +141,9 @@ fi
 rc=0
 "$DEST/Contents/MacOS/shanjie" install || rc=$?
 if [ "$rc" -eq 3 ]; then
-  # Rerunning the whole script would keep the version just installed as the previous one and
-  # delete the real previous version, so only `install` is to be run again.
+  # Not accepted yet is fixed in System Settings, not by running anything again; rerunning the
+  # whole script would keep the version just installed as the previous one and delete the real
+  # previous version.
   echo "系統還沒接受新的輸入法：請打開「系統設定 → 鍵盤 → 輸入方式」，按「+」，選「繁體中文」裡的「善解輸入法」，按「加入」。" >&2
   exit 3
 fi
