@@ -91,6 +91,21 @@ class Compare(unittest.TestCase):
         with self.assertRaises(ValueError):
             E.compare(self.good(), write(self.d, "n", "1\t1\t0\t3\n2\t0\tx\t4\n"))
 
+    def test_non_ascii_digits(self):
+        # str.isdigit() takes fullwidth and Arabic-Indic digits; rowstats are ASCII only.
+        for bad in ("1\t1\t0\t3\n2\t0\t２\t4\n", "1\t1\t0\t3\n2\t0\t٢\t4\n"):
+            with self.assertRaises(ValueError):
+                E.compare(self.good(), write(self.d, "u", bad))
+
+    def test_empty_files(self):
+        with self.assertRaises(ValueError):
+            E.compare(write(self.d, "e1", ""), write(self.d, "e2", ""))
+
+    def test_label_pipe_is_escaped(self):
+        out = E.compare(self.good("a"), self.good("b"), "dev302|chat", resamples=100)
+        self.assertIn("dev302\\|chat", out)
+        self.assertEqual(out.splitlines()[-1].count("|") - out.count("\\|"), out.splitlines()[0].count("|"))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -103,7 +103,7 @@ fn format_rowstats(rows: &[(bool, String, String)]) -> String {
 
 /// Option combinations of `lm`, checked before any file is read. The holdout never prints its sentences, so
 /// `--dump` is refused there; `--rowstats` holds numbers only and is allowed.
-fn check_lm_opts(set: Option<&str>, dump: bool, _rowstats: bool) -> Result<(), String> {
+fn check_lm_opts(set: Option<&str>, dump: bool) -> Result<(), String> {
     if set == Some("holdout") && dump {
         return Err("--dump is not allowed with --set holdout".into());
     }
@@ -134,7 +134,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
             _ => return Err("unknown argument".into()),
         }
     }
-    check_lm_opts(set.as_deref(), dump.is_some(), rowstats.is_some())?;
+    check_lm_opts(set.as_deref(), dump.is_some())?;
     let profile_name = profile.ok_or("--profile is required")?;
     let prof = match profile_name.as_str() {
         "chat" => Profile::Chat,
@@ -190,6 +190,11 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
         Some(f) => Some(std::io::BufWriter::new(fs::File::create(f).map_err(|e| format!("cannot create dump ({:?})", e.kind()))?)),
         None => None,
     };
+    // Opened before decoding, like the dump: an unwritable path fails now, not after a whole (holdout) run.
+    let rowstats = match rowstats {
+        Some(f) => Some(fs::File::create(f).map_err(|e| format!("cannot create rowstats ({:?})", e.kind()))?),
+        None => None,
+    };
     let (mut top1, mut o64, mut firsts, mut rs) = (0usize, 0usize, Vec::new(), Vec::new());
     for (i, (truth, syls, ctx)) in rows.iter().enumerate() {
         // S2h: the first word is conditioned on the row's context, cut like the engine cuts it.
@@ -212,8 +217,8 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     if let Some(mut d) = dump {
         d.flush().map_err(|_| "cannot write dump".to_string())?;
     }
-    if let Some(f) = rowstats {
-        fs::write(f, format_rowstats(&rs)).map_err(|e| format!("cannot write rowstats ({:?})", e.kind()))?;
+    if let Some(mut f) = rowstats {
+        f.write_all(format_rowstats(&rs).as_bytes()).map_err(|e| format!("cannot write rowstats ({:?})", e.kind()))?;
     }
     let sha = sha256_hex(firsts.join("\n").as_bytes());
     println!("## {name}  lm-{profile_name}{}{}  {{'n': {}, 'top1': {top1}, 'oracle@64': {o64}, 'top1_sha256': '{sha}'}}", if ctx_mode { "+ctx" } else { "" }, if demote { "" } else { "-nodemote" }, rows.len());
@@ -506,9 +511,9 @@ mod tests {
 
     #[test]
     fn lm_opts_holdout_allows_rowstats_not_dump() {
-        assert!(check_lm_opts(Some("holdout"), false, true).is_ok());
-        assert!(check_lm_opts(Some("holdout"), true, false).is_err());
-        assert!(check_lm_opts(Some("holdout"), true, true).is_err());
-        assert!(check_lm_opts(None, true, false).is_ok());
+        // --rowstats is not an argument: it is allowed everywhere, holdout included.
+        assert!(check_lm_opts(Some("holdout"), false).is_ok());
+        assert!(check_lm_opts(Some("holdout"), true).is_err());
+        assert!(check_lm_opts(None, true).is_ok());
     }
 }
