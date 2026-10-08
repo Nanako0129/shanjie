@@ -356,7 +356,10 @@ jobs:
           else
             # Latest only for the newest version line: a fix tagged for an older line (v0.2.2 after
             # v0.3.0) must not take it from the newest. v* tags are plain X.Y.Z (no pre-releases).
-            NEWEST=$( { gh release list --repo "$GITHUB_REPOSITORY" --limit 200 --json tagName -q '.[].tagName' | grep '^v'; echo "$GITHUB_REF_NAME"; } | sort -V | tail -n 1)
+            # A plain assignment, so errexit stops the step if the listing fails (inside a pipeline in
+            # a command substitution it would not, and the tag would be marked Latest by default).
+            TAGS=$(gh release list --repo "$GITHUB_REPOSITORY" --limit 200 --json tagName -q '.[].tagName')
+            NEWEST=$(printf '%s\n' "$TAGS" "$GITHUB_REF_NAME" | grep '^v' | sort -V | tail -n 1)
             LATEST=false
             [ "$NEWEST" = "$GITHUB_REF_NAME" ] && LATEST=true
             gh release create "$GITHUB_REF_NAME" \
