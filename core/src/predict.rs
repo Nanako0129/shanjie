@@ -99,8 +99,9 @@ fn unit_ok(u: &Unit, s: &Syl) -> bool {
 pub fn reading_matches(units: &[Unit], reading: &[String]) -> bool {
     let Some(first) = units.first() else { return false };
     // Runs per learned record and start (up to 50,000 records): compare chars, allocate nothing.
-    let head = || reading[0].trim_start_matches('˙').chars().take(first.chars.len());
-    if reading.len() < units.len() || !first.chars.iter().copied().eq(head()) {
+    if reading.len() < units.len()
+        || !first.chars.iter().copied().eq(reading[0].trim_start_matches('˙').chars().take(first.chars.len()))
+    {
         return false;
     }
     let Some((_, init)) = units.split_last() else { return false };
