@@ -123,7 +123,7 @@
 
 `data_dir` 裡必須有 `mcbpmf-data.txt`、`overlay-add.tsv` 與 `sandhi-add.tsv`（S2r 加入），用 `Lexicon::parse_with(基底, Some(疊加層))` 載入，疊加層是 `overlay-add.tsv` 接著 `sandhi-add.tsv`（`engine::join_overlays`，前一份沒有結尾換行就補一個），和評測 CLI 預設相同。任一個不存在或解析失敗，回傳碼 3。
 
-詞包（acg-pack 契約 A.2）：`Engine::new_with_packs(data_dir, layout, Some((packs_dir, mask)))` 把啟用的詞包檔（`PACK_ACG` → `packs_dir/acg-add.tsv`）接在 `sandhi-add.tsv` 後面一起解析；`load_lm` 把同一份檔接在 `overlay-add.tsv` 後面交給 `CappedLexicon::new`，所以詞包的詞也依語料頻率封頂（沒看過的減 1.0）。沒有啟用的位元、或檔案不存在，就不讀任何詞包，引擎和 `Engine::new` 完全相同（`core/tests/engine_pack.rs` 逐位元比對解碼、候選清單與 V3 預測列）。未定義的位元是 `LoadFailed`。評測 CLI 的 `--packs acg [--packs-dir DIR]` 走同一組函式（`load_lexicon_packs`、`read_packs`）。
+詞包（acg-pack 契約 A.2）：`Engine::new_with_packs(data_dir, layout, Some((packs_dir, mask)))` 把啟用的詞包檔（`PACK_ACG` → `packs_dir/acg-add.tsv`）接在 `sandhi-add.tsv` 後面一起解析；`load_lm` 用建構時讀到的疊加層文字（`overlay-add.tsv` 後面接同一份詞包檔，`load_lexicon_packs` 與詞庫同一次讀檔給出，不再重讀）交給 `CappedLexicon::new`，所以詞包的詞也依語料頻率封頂（沒看過的減 1.0）。沒有啟用的位元、或檔案不存在，就不讀任何詞包，引擎和 `Engine::new` 完全相同（`core/tests/engine_pack.rs` 逐位元比對解碼、候選清單與 V3 預測列）。未定義的位元是 `LoadFailed`。評測 CLI 的 `--packs acg [--packs-dir DIR]` 走同一組函式（`load_lexicon_packs`、`read_packs`）。
 
 ## 6. C ABI（`core/include/shanjie.h`）
 
@@ -160,7 +160,7 @@ int32_t shanjie_engine_load_lm(ShanjieEngine *engine, const char *path);        
 int32_t shanjie_engine_set_profile(ShanjieEngine *engine, uint32_t profile, ShanjieOutput **out); // 0 chat（預設）、1 formal；重算組字區並回傳快照
 // acg-pack 新增（docs/contracts/acg-pack.md A.2）：詞包。packs 是位元遮罩（bit0 = ACG，檔案 packs_dir/acg-add.tsv）；
 // 詞包的列在建立時併入詞庫，所以開關在引擎生命期內固定，殼要換就釋放再建一個（和換排列相同）。packs 為 0 時不看 packs_dir（可為 NULL），
-// 等同 shanjie_engine_new；檔案不存在就什麼都不加（引擎和沒有詞包時逐位元相同）。遮罩有未定義的位元或 layout 超出範圍回 2；
+// 等同 shanjie_engine_new；檔案不存在就什麼都不加（引擎和沒有詞包時逐位元相同）。遮罩有未定義的位元或 layout 超出範圍或 data_dir、packs_dir 不是 UTF-8 回 2；
 // packs 非 0 而 packs_dir 為 NULL 回 1；檔案存在卻讀不了或解析失敗回 3。詞包的詞在 load_lm 時和 overlay-add.tsv 的詞一樣依語料頻率封頂。
 int32_t shanjie_engine_new_packs(const char *data_dir, uint32_t layout, const char *packs_dir, uint32_t packs, ShanjieEngine **out);
 // s3e 新增（docs/contracts/s3e-punctuation-candidates.md）

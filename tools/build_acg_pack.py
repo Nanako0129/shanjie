@@ -1,6 +1,6 @@
 """ACG 詞包建置工具（契約 docs/contracts/acg-pack.md A.1）：由中文維基公共轉換組、作品條目標題與條目人物，
 產生 data/packs/acg-add.tsv（疊加層格式）、acg-sources.tsv、acg.json，並把同音衝突列進 collisions.txt。
-輸出以 CC BY-SA 4.0 釋出（LICENSES/data.md）。同一份快取跑兩次，輸出逐位元相同；版號取來源裡最新的 revision 時間。
+輸出以 CC BY-SA 4.0 釋出（LICENSES/data.md）。同一份快取跑兩次，輸出逐位元相同；版號是最新來源頁的日期加 acg-add.tsv 的雜湊前 8 碼。
 
 用法：python3 tools/build_acg_pack.py                  抓取（有快取就用快取）並寫入 data/packs/
       python3 tools/build_acg_pack.py --offline        只用快取，缺了就中止
@@ -60,10 +60,14 @@ class Api:
         return hashlib.sha1(urllib.parse.urlencode(sorted(params.items())).encode()).hexdigest()
 
     def _get(self, key, url):
+        """快取命中就用；回應含 error 時丟 RuntimeError(error)。"""
         path = os.path.join(self.cache, key + ".json")
         if os.path.exists(path):
             with open(path, encoding="utf-8") as f:
-                return json.load(f)
+                data = json.load(f)
+            if isinstance(data, dict) and "error" in data:     # 快取的 missingtitle 回應：兩種模式都照樣丟出
+                raise RuntimeError(data["error"])
+            return data
         if self.offline:
             raise SystemExit(f"--offline: not cached: {url[:120]}")
         for attempt in range(6):
@@ -76,11 +80,13 @@ class Api:
             if isinstance(data, dict) and data.get("error", {}).get("code") == "maxlag":
                 time.sleep(5 * (attempt + 1))
                 continue
-            if isinstance(data, dict) and "error" in data:
-                raise RuntimeError(data["error"])
+            if isinstance(data, dict) and "error" in data and data["error"].get("code") != "missingtitle":
+                raise RuntimeError(data["error"])               # 其他錯誤可能是暫時的，不快取；missingtitle 是確定的，快取起來，--offline 才跑得完
             with open(path + ".part", "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False)
             os.replace(path + ".part", path)
+            if "error" in data:
+                raise RuntimeError(data["error"])
             return data
         raise RuntimeError("maxlag did not clear")
 
@@ -106,18 +112,6 @@ def pages(api, titles):
             p = pg.get(red.get(norm.get(t, t), norm.get(t, t)))
             rev = p["revisions"][0] if p and p.get("revisions") else None
             out[t] = {"title": p["title"], "revid": rev["revid"], "ts": rev["timestamp"], "text": rev["slots"]["main"]["content"]} if rev else None
-    return out
-
-
-def revisions(api, titles):
-    """已解析的標題 → (revid, ts)。每批 50 個。"""
-    out = {}
-    for i in range(0, len(titles), 50):
-        b = titles[i:i + 50]
-        q = api.wiki(action="query", prop="revisions", rvprop="ids|timestamp", redirects="1", titles="|".join(b))["query"]
-        for p in q["pages"]:
-            if p.get("revisions"):
-                out[p["title"]] = (p["revisions"][0]["revid"], p["revisions"][0]["timestamp"])
     return out
 
 
@@ -196,26 +190,43 @@ def wiki_items(x):
 LANG = re.compile(r"^\s*(?:(.*?)=>)?\s*(zh-[a-z]+)\s*:(.*)$", re.S)
 
 
+NAMED = re.compile(r"^\s*[A-Za-z_]\w*\s*=(?!>)")
+
+
+def params(rule):
+    """模板內容照最外層的 | 拆成參數（{{ }}、[[ ]] 裡的 | 不拆）；具名參數（original=、desc= 等）丟掉，只留語言轉換那幾個。"""
+    out, depth, cur = [], 0, []
+    for tok in re.split(r"(\{\{|\}\}|\[\[|\]\]|\|)", rule):
+        if tok in ("{{", "[["):
+            depth += 1
+        elif tok in ("}}", "]]"):
+            depth -= 1
+        elif tok == "|" and depth <= 0:
+            out.append("".join(cur))
+            cur = []
+            continue
+        cur.append(tok)
+    out.append("".join(cur))
+    return [p for p in out if not NAMED.match(p)]
+
+
 def tw_values(rule):
     """一條規則的 zh-tw 值（含 X=>zh-tw:Y 單向規則）；沒有 zh-tw 才退回 zh-hant。回傳 [(詞, 'zh-tw'|'zh-hant')]，已拆 / 、去《》、只留 2–10 個漢字。"""
     rule = re.sub(r"-\{|\}-", "", rule)
-    rule = re.sub(r"original=[^|]*\|?", "", rule)
-    cl = [(m.group(2), m.group(3).strip()) for m in (LANG.match(c) for c in rule.split(";")) if m]
-    tw = [c for c in cl if c[0] == "zh-tw"]
-    use, src = (tw, "zh-tw") if tw else ([c for c in cl if c[0] == "zh-hant"], "zh-hant")
     out = []
-    for _, v in use:
-        v = re.sub(r"^《(.*)》$", r"\1", v.strip())
-        out += [(p.strip(), src) for p in v.split("/") if HAN.match(p.strip())]
+    for prm in params(rule):
+        cl = [(m.group(2), m.group(3).strip()) for m in (LANG.match(c) for c in prm.split(";")) if m]
+        tw = [c for c in cl if c[0] == "zh-tw"]
+        use, src = (tw, "zh-tw") if tw else ([c for c in cl if c[0] == "zh-hant"], "zh-hant")
+        for _, v in use:
+            v = re.sub(r"^《(.*)》$", r"\1", v.strip())
+            out += [(q.strip(), src) for q in v.split("/") if HAN.match(q.strip())]
     return out
 
 
 def group_rules(text):
-    rules = list(wiki_items(text)) if "{{C" in text else []
-    if not rules:
-        rules = [a[-1] for a in lua_items(text) if a]
-        rules += [m.group(2) for m in re.finditer(r"\brule\s*=\s*(['\"])(.*?)\1", text)]
-    return rules
+    """頁面裡的規則：{{CItem…}} 模板、Lua 的 Item( 呼叫與 rule = 欄位，同一頁兩種都解析（例如 Module:CGroup/閃電十一人）。"""
+    return list(wiki_items(text)) + [a[-1] for a in lua_items(text) if a] + [m.group(2) for m in re.finditer(r"\brule\s*=\s*(['\"])(.*?)\1", text)]
 
 
 def resolve_groups(api, rows, items):
@@ -453,19 +464,21 @@ def pack_rows(order, reading, sc):
 
 # ---------------------------------------------------------------- 同音衝突（契約 A.1）
 
+@functools.lru_cache(maxsize=1)
 def eval_bin():
-    p = os.environ.get("SHANJIE_EVAL") or os.path.join(ROOT, "target", "release", "shanjie-eval")
-    if not os.path.exists(p):
-        subprocess.run(["cargo", "build", "--release", "--locked", "-q", "-p", "cli"], cwd=ROOT, check=True)
-    return p
+    """每次建置前先 cargo build（已是最新就很快），不用過期的執行檔；SHANJIE_EVAL 指定的照用。"""
+    if os.environ.get("SHANJIE_EVAL"):
+        return os.environ["SHANJIE_EVAL"]
+    subprocess.run(["cargo", "build", "--release", "--locked", "-q", "-p", "cli"], cwd=ROOT, check=True)
+    return os.path.join(ROOT, "target", "release", "shanjie-eval")
 
 
-def top1(words, reading, profile, packs_dir=None):
-    """評測 CLI 解碼每個詞的讀音，回傳第一名。packs_dir 給了就開詞包（`--packs acg`）。"""
+def top1(pairs, profile, packs_dir=None):
+    """評測 CLI 解碼每個 (詞, 讀音音節串)，回傳第一名。packs_dir 給了就開詞包（`--packs acg`）。"""
     with tempfile.TemporaryDirectory() as d:
         rows, dump = os.path.join(d, "rows.txt"), os.path.join(d, "dump.txt")
         with open(rows, "w", encoding="utf-8") as f:
-            f.writelines(f"|{w}|{' '.join(reading[w])}\n" for w in words)
+            f.writelines(f"|{w}|{' '.join(syls)}\n" for w, syls in pairs)
         cmd = [eval_bin(), "--lm", LM, "--profile", profile, "--rows", rows, "--dump", dump]
         if packs_dir:
             cmd += ["--packs", "acg", "--packs-dir", packs_dir]
@@ -475,23 +488,29 @@ def top1(words, reading, profile, packs_dir=None):
             r, k, s, _ = l.rstrip("\n").split("\t")
             if k == "1":
                 first[int(r)] = s
-        assert len(first) == len(words), "the evaluation CLI skipped rows"
-        return [first[i + 1] for i in range(len(words))]
+        assert len(first) == len(pairs), "the evaluation CLI skipped rows"
+        return [first[i + 1] for i in range(len(pairs))]
 
 
 def detect_collisions(words, reading, rows, ref, decode=top1):
-    """對每個詞包詞 w 的讀音，各解碼兩次（不開／開詞包；聊天與書面）。符合其一就列出：
+    """對每個詞包詞 w 的讀音（含「一」「不」變調列的讀音），各解碼兩次（不開／開詞包；聊天與書面）。符合其一就列出：
     (a) 開了之後第一名是另一個詞包詞；(b) 不開時第一名不是 w，而且在參考名單 ref 裡。回傳 {讀音: [(w, 條件, 設定, 不開第一名, 開第一名)]}。"""
     with tempfile.TemporaryDirectory() as d:
         with open(os.path.join(d, "acg-add.tsv"), "w", encoding="utf-8") as f:
             f.writelines(rows)
         inpack, found = set(words), collections.defaultdict(list)
+        pairs = []
+        for w in words:
+            pairs.append((w, reading[w]))
+            var = bo.sandhi_variant(w, reading[w])
+            if var:
+                pairs.append((w, var))
         for prof in ("chat", "formal"):
-            off, on = decode(words, reading, prof), decode(words, reading, prof, d)
-            for w, o, n in zip(words, off, on):
+            off, on = decode(pairs, prof), decode(pairs, prof, d)
+            for (w, syls), o, n in zip(pairs, off, on):
                 for cond, hit in (("a", n != w and n in inpack), ("b", o != w and o in ref)):
                     if hit:
-                        found[" ".join(reading[w])].append((w, cond, prof, o, n))
+                        found[" ".join(syls)].append((w, cond, prof, o, n))
     return dict(found)
 
 
@@ -538,13 +557,13 @@ def build(api, groups_tsv=os.path.join(PACKS, "acg-groups.tsv"), collisions_tsv=
     # 作品與條目
     b = api.sparql(SPARQL)["results"]["bindings"]
     ws = sorted({x["w"]["value"].rsplit("/", 1)[1]: (x["w"]["value"].rsplit("/", 1)[1], urllib.parse.unquote(x["art"]["value"].rsplit("/", 1)[1]), int(x["sl"]["value"])) for x in b}.values(), key=lambda t: (-t[2], t[0]))[:WORKS]
-    arts, seen, queued, missing = [], set(), set(), []
+    arts, art_rev, seen, queued, missing = [], {}, set(), set(), []
     title_src, name_src, name_info = {}, collections.defaultdict(set), {}
     todo = [(w[1], True) for w in ws]                     # (條目, 是不是作品)；作品條目連到的角色列表接在後面
     while todo:
         t, is_work = todo.pop(0)
         try:
-            d = api.wiki(action="parse", page=t, variant="zh-tw", redirects="1", prop="text|displaytitle|links|sections")["parse"]
+            d = api.wiki(action="parse", page=t, variant="zh-tw", redirects="1", prop="text|revid|displaytitle|links|sections")["parse"]
         except RuntimeError as e:
             if e.args[0].get("code") != "missingtitle":      # Wikidata 的 sitelink 指向已刪除或移走的條目：略過，記在報告裡
                 raise
@@ -555,6 +574,7 @@ def build(api, groups_tsv=os.path.join(PACKS, "acg-groups.tsv"), collisions_tsv=
             continue
         seen.add(d["title"])
         arts.append(d["title"])
+        art_rev[d["title"]] = d["revid"]
         if is_work:
             disp = re.sub(r"\s*[\(（][^)）]*[\)）]\s*$", "", re.sub("<[^>]+>", "", d["displaytitle"]).strip())
             if HAN.match(disp):
@@ -566,22 +586,19 @@ def build(api, groups_tsv=os.path.join(PACKS, "acg-groups.tsv"), collisions_tsv=
         for n, kind, snip in names_of(d["text"]):
             name_info.setdefault(n, (kind, snip))
             name_src[n].add(d["title"])
-    ar = revisions(api, sorted(arts))
-    for t, (rid, stamp) in ar.items():
-        ts.append(stamp)
-        revs.append(rid)
+    revs += art_rev.values()
     log("works", len(ws), "articles", len(arts), "titles", len(title_src), "names", len(name_info))
 
     base, have = base_lexicon(), lexicon_words()
     chars = {n for n, (k, s) in name_info.items() if strict_ok(n, k, s, have)}
-    ref |= set(title_src) | chars
+    ref |= set(title_src) | set(name_info)               # 契約：參考名單含所有抽出來的人名，在嚴格過濾與去重之前
     src = collections.defaultdict(lambda: collections.defaultdict(set))   # 詞 → 種類 → 出處
     for v, s in cg_src.items():
         src[v]["cgroup"] |= s
     for v, s in title_src.items():
-        src[v]["title"] |= {f"{t}@{ar[t][0]}" for t in s if t in ar}
+        src[v]["title"] |= {f"{t}@{art_rev[t]}" for t in s}
     for n in chars:
-        src[n]["char"] |= {f"{t}@{ar[t][0]}" for t in name_src[n] if t in ar}
+        src[n]["char"] |= {f"{t}@{art_rev[t]}" for t in name_src[n]}
     for w, work, *_ in read_tsv(manual_tsv):            # 維護者手動加的詞（欄位：詞、作品、備註）：同樣去重、定讀音、算分數、偵測衝突
         assert HAN.match(w), w
         src[w]["manual"].add(work)
@@ -600,7 +617,7 @@ def build(api, groups_tsv=os.path.join(PACKS, "acg-groups.tsv"), collisions_tsv=
     col = detect_collisions(words, reading, rows, ref, decode)
     ts_max = max(ts)
     manifest = {
-        "version": ts_max[:10].replace("-", ""),
+        "version": ts_max[:10].replace("-", "") + "-" + hashlib.sha256("".join(rows).encode()).hexdigest()[:8],   # 最新的有時間戳的來源頁日期＋詞包內容雜湊：內容變了版號一定變
         "latest_source_revision": ts_max,
         "words": len(words),
         "rows": len(rows),

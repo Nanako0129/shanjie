@@ -35,6 +35,17 @@ class Rules(unittest.TestCase):
         self.assertEqual(B.tw_values("zh-tw:A; zh-hant:鋼彈"), [])                       # 有 zh-tw 就不退回；非漢字與單字不收
         self.assertEqual(B.tw_values("zh-tw:魯"), [])
 
+    def test_named_template_parameters_do_not_stick_to_the_language_values(self):
+        self.assertEqual(B.tw_values("zh-cn:; zh-hk:冰雪仙姬; zh-tw:冰雪竹姬|original="), [("冰雪竹姬", "zh-tw")])
+        self.assertEqual(B.tw_values("zh-tw:冰雪竹姬; zh-hk:冰雪仙姬|desc=轉換說明|original=冰雪仙子"), [("冰雪竹姬", "zh-tw")])
+        self.assertEqual(B.tw_values("zh-tw:甲乙{{x|a}}丙|original=甲"), [])               # {{ }} 裡的 | 不拆；含非漢字就不收
+        self.assertEqual(B.tw_values("zh-hant:鋼彈戰士|desc=zh-tw:不要這個"), [("鋼彈戰士", "zh-hant")])   # 具名參數整個丟掉
+
+    def test_group_rules_read_template_items_and_lua_items_from_the_same_page(self):
+        page = "{{CItem|zh-tw:甲甲甲}}\n{ type = 'item', original = '', rule = 'zh-tw:乙乙乙;zh-hk:丙丙丙;', description = 'x' },\nItem('x', 'zh-tw:丁丁丁')\n"
+        got = sorted(v for r in B.group_rules(page) for v, _ in B.tw_values(r))
+        self.assertEqual(got, ["丁丁丁", "乙乙乙", "甲甲甲"])
+
     def test_strict_name_filter(self):
         base = {"小明"}
         ok = lambda n, s, kind="li": B.strict_ok(n, kind, s, base)
@@ -88,6 +99,7 @@ PAGES = {
     "風之谷角色列表": (6, "2026-10-03T00:00:00Z", ""),
 }
 ARTICLE = ("<h2>登場人物</h2><ul><li>阿庫雷特（アクレット）</li><li>朋友（ともだち）</li><li>米卡莎的母親（ママ）</li></ul>")
+REVID = {"風之谷": 5, "風之谷角色列表": 6}
 PARSES = {
     "風之谷": {"title": "風之谷 (電影)", "displaytitle": "<span>風之谷 (電影)</span>", "text": ARTICLE, "links": [
         {"ns": 0, "title": "風之谷角色列表", "exists": True}, {"ns": 0, "title": "不存在角色列表", "exists": False}]},
@@ -98,7 +110,10 @@ PARSES = {
 class FakeApi:
     def wiki(self, **p):
         if p["action"] == "parse":
-            return {"parse": PARSES[p["page"]]}
+            if p["page"] not in PARSES:
+                raise RuntimeError({"code": "missingtitle"})
+            assert "revid" in p["prop"]
+            return {"parse": dict(PARSES[p["page"]], revid=REVID[p["page"]])}
         out = []
         for t in p["titles"].split("|"):
             if t not in PAGES:
@@ -150,15 +165,34 @@ class Build(unittest.TestCase):
         self.assertNotIn("楓之谷", words)              # acg-collisions.tsv 排除
         self.assertIn("怪獸電力公司", ref)             # 但在參考名單裡
         self.assertIn("楓之谷", ref)
-        self.assertNotIn("米卡莎的母親", ref)          # 嚴格過濾（關係詞組）
+        self.assertIn("米卡莎的母親", ref)             # 參考名單含所有抽出來的人名，在嚴格過濾之前
+        self.assertNotIn("米卡莎的母親", words)
         self.assertEqual(manifest["unclassified_groups"], ["新作 (NewWork)"])
-        self.assertEqual(manifest["version"], "20261008")   # 來源裡最新的 revision 時間，不是建置日期
+        self.assertEqual(manifest["version"], "20261008-" + hashlib.sha256(files["acg-add.tsv"].encode()).hexdigest()[:8])   # 最新來源頁的日期（不是建置日期）加內容雜湊
+        self.assertEqual(manifest["revision_ids"], {"min": 1, "max": 6, "pages": 6})            # 條目的 revid 來自 parse 同一次回應
         self.assertEqual(manifest["sources"], {"cgroup": 3, "char": 1, "title": 1, "manual": 1})
         self.assertEqual(col, {})
         self.assertEqual(unread, ["碇真次郎"])         # 角色列表條目裡的名字通過過濾，但讀音拼不出（夾具沒給）就丟掉
         for line in files["acg-add.tsv"].splitlines():
             self.assertEqual(len(line.split("\t")), 4)
             self.assertTrue(line.endswith("\tacg"))
+
+    def test_a_changed_pack_changes_the_version(self):
+        manual = os.path.join(self.tmp, "manual2.tsv")
+        open(manual, "w", encoding="utf-8").write(open(self.manual, encoding="utf-8").read() + "艾倫葉卡\t某作品\t角色\n")
+        more = B.build(FakeApi(), self.groups, self.excl, manual, readings=lambda w: fake_readings(w) | {"艾倫葉卡": (["ㄞˋ", "ㄌㄨㄣˊ", "ㄧㄝˋ", "ㄎㄚˇ"], False)})[1]
+        base = self.build(self.excl)[1]
+        self.assertEqual(more["version"][:8], base["version"][:8])            # 來源頁沒變，日期一樣
+        self.assertNotEqual(more["version"], base["version"])                 # 內容變了，版號就變
+
+    def test_cached_missingtitle_is_replayed_offline(self):
+        d = tempfile.mkdtemp()
+        api = B.Api(d, offline=True)
+        key = B.Api.key(dict(action="parse", page="已刪除", format="json", formatversion="2", maxlag="5"))
+        open(os.path.join(d, key + ".json"), "w").write('{"error": {"code": "missingtitle"}}')
+        with self.assertRaises(RuntimeError) as c:
+            api.wiki(action="parse", page="已刪除")
+        self.assertEqual(c.exception.args[0]["code"], "missingtitle")
 
     def test_manual_words_carry_their_own_source_tag(self):
         files, *_ = self.build(self.excl)

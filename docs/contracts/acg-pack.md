@@ -39,12 +39,13 @@
 
 ### A.1 建置工具 `tools/build_acg_pack.py`
 
-- **抓取**：只連 `zh.wikipedia.org/w/api.php` 與 `query.wikidata.org/sparql`。依序送出請求，每秒不超過 1 個，帶上描述用途的 User-Agent 與 `maxlag=5`。快取放在 `~/.cache/shanjie/sources/acg/`，每次抓取記下 revision ID。
+- **抓取**：只連 `zh.wikipedia.org/w/api.php` 與 `query.wikidata.org/sparql`。依序送出請求，每秒不超過 1 個，帶上描述用途的 User-Agent 與 `maxlag=5`。快取放在 `~/.cache/shanjie/sources/acg/`，每次抓取記下 revision ID。條目的 revision ID 取自 `action=parse` 同一次回應（`prop` 含 `revid`），與取內容的是同一個版本；轉換組頁與清單頁取自取內容的 `action=query` 回應。API 的 `missingtitle` 回應也快取，兩種模式都當成「略過，記在 `articles_missing`」，所以 `--offline` 跑得完；其他錯誤不快取。
 - **轉換組只收 ACG**：哪些組要收，由 `data/packs/acg-groups.tsv` 決定。每個組一列，五欄：區段、組名、模組或模板名、`include`／`exclude`、類別或理由。
   - 第一版由 main 依 `Template:CGroup/list` 分類一次，送審時附上。
   - `Template:CGroup/list` 的「影視與 ACG 作品」段共 159 組，裡面混著電影、電視和動畫，所以不能整段收；電影、電視、音樂、藝人一律排除。
   - 清單上沒有的新組，工具一律不收，並在輸出裡列出來（給 B 片的 PR 看）。
 - **規則解析**：
+  - 模板規則（`{{CItem|…}}`）照最外層的 `|` 拆成參數，具名參數（`original=`、`desc=` 等）丟掉，只讀語言轉換那幾個；Lua 模組的 `Item(` 與 `rule =` 欄位也解析；同一頁兩種都有時（例如 `Module:CGroup/閃電十一人`）取聯集。
   - 取每條規則的 zh-tw 值，包括 `X=>zh-tw:Y` 這種單向規則；沒有 zh-tw 才退回 zh-hant，並標記；
   - 多值依 `/` 拆開，去掉《》；
   - 只留 2–10 個漢字的詞。
@@ -70,8 +71,8 @@
   - **參考名單**：建置時抓過的所有來源名稱，不是評測集。包括：
     - 400 部作品條目的 zh-tw 顯示標題，去掉消歧義括號，例如「風之谷 (電影)」→「風之谷」；
     - 所有轉換組的 zh-tw 值，**連被排除的組也算**，所以電影、電視、藝人的名稱也在內；
-    - 抽出來的人名。
-  - **衝突的定義**：建置時，工具對每個詞包詞 w 的讀音，各用同一個模型解碼兩次，一次不開詞包、一次開，聊天與書面兩種設定都做。只要任一種設定符合下面兩條之一，就列進 `collisions.txt`：
+    - 抽出來的人名：條目裡抽到的每個名字，在嚴格過濾與去重**之前**就列入（包括基底、`overlay-add.tsv` 裡已有的）。
+  - **衝突的定義**：建置時，工具對每個詞包詞 w 的讀音（含「一」「不」變調列的讀音），各用同一個模型解碼兩次（用評測 CLI，每次建置前先 `cargo build --release`，不用過期的執行檔），一次不開詞包、一次開，聊天與書面兩種設定都做。只要任一種設定符合下面兩條之一，就列進 `collisions.txt`：
     - (a) 開了之後，第一名是另一個詞包詞，不是 w：詞包內同音。
     - (b) 不開時的第一名不是 w，而且那個字串在參考名單裡：搶走了拼出來的名字。「楓之谷」的讀音不開時是「風之谷」，「風之谷」是作品條目標題，所以會被列出；「碇源堂」不開時是「定元堂」、「螢火蟲之墓」不開時是「螢火蟲之目」，都不在參考名單裡，所以不列。
   - 作品條目的顯示標題本身也收進詞包（同樣去重），所以像「風之谷」這種名字，同時也是 (a) 的詞包內同音。
@@ -80,20 +81,22 @@
 - **輸出**：
   - `data/packs/acg-add.tsv`：疊加層格式 `讀音	詞	分數	來源標籤`，來源標籤是 `acg`；
   - `data/packs/acg-sources.tsv`：每個詞的來源；
-  - `data/packs/acg.json`：清單檔，含版號（日期）、各來源數量、每個檔的 SHA-256、所用的 revision ID 範圍。
-- **可重現**：同一份快取跑兩次，輸出要逐位元相同。清單檔的版號取來源裡最新的 revision 時間，不取建置日期。
+  - `data/packs/acg.json`：清單檔，含版號（`<最新來源頁的日期>-<acg-add.tsv 的 SHA-256 前 8 碼>`）、各來源數量、每個檔的 SHA-256、所用的 revision ID 範圍。
+- **可重現**：同一份快取跑兩次，輸出要逐位元相同。清單檔的版號是 `<最新來源頁的日期>-<acg-add.tsv 的 SHA-256 前 8 碼>`，不取建置日期：日期取自清單頁與轉換組頁的 revision 時間（`parse` 不回時間戳，條目不算在內），雜湊讓詞包內容一變、版號就跟著變（2026-10-09 實作審查：只用日期時，條目變了版號不變）。
 - App 內附的 `CC-BY-SA-4.0-attribution.txt`（`scripts/build-app.sh`）加上 `acg-add.tsv`。
 
 ### A.2 引擎
 
 - 核心載入時，`data/packs/acg-add.tsv` 存在就當成第二個疊加層併入，規則和 `overlay-add.tsv` 相同（`CappedLexicon` 依語料頻率封頂、沒看過的減 1.0）。
 - 檔案不存在，或開關關閉時，詞庫和現在完全相同。
-- CLI：`shanjie-eval --packs acg` 才載入詞包，預設不載入。A.3 的基準就是不加這個選項，所以兩邊的指令可以照抄重跑。
+- CLI：`shanjie-eval --packs acg` 才載入詞包，預設不載入。要求詞包時檔案不在就結束並報錯、訊息含路徑；單用 `--packs-dir` 沒有 `--packs` 也是錯誤。詞庫與封頂用的疊加層文字由 `engine::load_lexicon_packs` 一次讀檔後同時給出，引擎與 CLI 共用，引擎把建構時讀到的文字留給 `load_lm`。A.3 的基準就是不加這個選項，所以兩邊的指令可以照抄重跑。
 - 開關：
   - 新增 C ABI `shanjie_engine_set_packs(engine, mask)`，或照「切換排列會重建引擎」的做法重建。實作時選較小的改法，並在契約更新。
   - **實作選了重建**（2026-10-09）：詞包的列併入詞庫，`Lexicon` 建好之後是不可變的（讀音表與詞條陣列排序在一起），原地加減要重建整份詞庫，記憶體會同時有兩份。所以新增 `shanjie_engine_new_packs(data_dir, layout, packs_dir, packs, out)`（遮罩 0 等同 `shanjie_engine_new`），殼的選單切換時提交組字、釋放引擎、再建一個，和切換排列相同；詳見 `docs/contracts/s3a.md` §5、§6。詞包檔在 `Resources/packs/`，建置輸入（`acg-groups.tsv`、`acg-collisions.tsv`）不進 App。
+  - 殼建引擎時詞包載入失敗（預設開，檔壞或解析不了）：記一行含 `shanjie_engine_new_packs` 與錯誤碼的日誌，退回不帶詞包的引擎，偏好不動、不跳錯誤。
   - 殼的選單加一項「動漫與遊戲詞」，偏好鍵 `acgPack`；設定方式比照「即時預測」的 `PredictionStore`。
   - **預設值：開**（使用者 2026-10-09 決定，看過 A.3 的數字後）。偏好鍵沒設過（`nil`）就當成開；使用者在選單關掉後寫入 `false`，之後照存的值。
+- 自測：`shanjie --selftest` 另用 `Resources/packs` 建帶詞包的引擎並要求打出「碇源堂」，所以詞包缺檔或壞檔會讓 `make selftest-bundled` 與 `check-app.sh` 失敗。
 - App 打包：`scripts/build-app.sh` 把 `data/packs/` 放進 `Resources/`；`check-app.sh` 檢查清單檔裡的 SHA-256 和實際檔案相符。
 
 ### A.3 評測

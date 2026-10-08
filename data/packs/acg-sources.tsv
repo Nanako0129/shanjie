@@ -23,11 +23,14 @@ word	source_kind	sources (page@revision)	note
 克莉絲	char	為美好的世界獻上祝福！角色列表@94474307; 異世界四重奏@93605298; 遊戲王系列角色列表@94649313	
 八神光	char	数码宝贝大冒险02角色列表@94744398; 数码宝贝大冒险tri.角色列表@94265439; 数码宝贝大冒险角色列表@94744369; 数码宝贝大冒险：角色列表@94538377; 數碼暴龍 LAST EVOLUTION 絆@94708497	
 冬月耕造	char	新世纪福音战士@94702846; 福音戰士新劇場版：Q@94407034; 福音戰士新劇場版：序@94682484; 福音戰士新劇場版：破@94719358; 福音戰士新劇場版：終@94465621	
+凱特	cgroup	Template:CGroup/Code Geass@70270136; Template:CGroup/GundamUC@94693163; Template:CGroup/HUNTER@80241645; Template:CGroup/Pichi Pichi Pitch@94608266; Template:CGroup/潘朵拉之心@39382393	
 妮妮	cgroup	Module:CGroup/Pixar@93247177; Template:CGroup/CANAAN@79863889	
 妮妮	char	CANAAN@94727525; 小魔女DoReMi@94721174; 爆丸@90775249	
 文森	cgroup	Module:CGroup/Pixar@93247177; Template:CGroup/GundamUC@94693163; Template:CGroup/潘朵拉之心@39382393; Template:CGroup/黑執事@49361116	
 文森	char	SPY×FAMILY間諜家家酒角色列表@94041877	
 日向誠	char	新世纪福音战士@94702846; 福音戰士新劇場版：Q@94407034; 福音戰士新劇場版：序@94682484; 福音戰士新劇場版：破@94719358; 福音戰士新劇場版：終@94465621	
+札克	cgroup	Module:CGroup/LOL@93322985; Module:CGroup/Pixar@93247177; Module:CGroup/The Promised Neverland@83209401; Module:CGroup/閃電十一人@68657168	zh-hant
+札克	char	可塑性記憶@94399638	
 武之內空	char	数码宝贝大冒险02角色列表@94744398; 数码宝贝大冒险tri.角色列表@94265439; 数码宝贝大冒险角色列表@94744369; 数码宝贝大冒险：角色列表@94538377; 數碼暴龍 LAST EVOLUTION 絆@94708497	
 泉光子郎	char	数码宝贝大冒险02角色列表@94744398; 数码宝贝大冒险tri.角色列表@94265439; 数码宝贝大冒险角色列表@94744369; 数码宝贝大冒险：角色列表@94538377; 數碼暴龍 LAST EVOLUTION 絆@94708497	
 渚薰	char	新世纪福音战士@94702846; 福音戰士新劇場版：Q@94407034; 福音戰士新劇場版：序@94682484; 福音戰士新劇場版：破@94719358; 福音戰士新劇場版：終@94465621	
@@ -45,7 +48,6 @@ word	source_kind	sources (page@revision)	note
 一角獸	char	数码宝贝大冒险tri.角色列表@94265439; 数码宝贝大冒险：角色列表@94538377; 數碼寶貝覺醒節拍角色列表@94712797; 數碼暴龍 LAST EVOLUTION 絆@94708497	
 井上京	char	数码宝贝大冒险02角色列表@94744398; 数码宝贝大冒险tri.角色列表@94265439; 数码宝贝大冒险角色列表@94744369; 數碼暴龍 LAST EVOLUTION 絆@94708497	
 企鵝獸	char	数码宝贝大冒险：角色列表@94538377; 数码宝贝幽灵游戏角色列表@94560916; 數碼寶貝04無限地帶角色列表@94744460; 數碼寶貝覺醒節拍角色列表@94712797	
-凱特	cgroup	Template:CGroup/Code Geass@70270136; Template:CGroup/GundamUC@94693163; Template:CGroup/HUNTER@80241645; Template:CGroup/潘朵拉之心@39382393	
 加支獸	char	数码宝贝大冒险角色列表@94744369; 数码宝贝大冒险：角色列表@94538377; 数码宝贝幽灵游戏角色列表@94560916; 數碼寶貝覺醒節拍角色列表@94712797	
 加魯魯獸	char	数码宝贝大冒险tri.角色列表@94265439; 数码宝贝大冒险角色列表@94744369; 数码宝贝大冒险：角色列表@94538377; 數碼暴龍 LAST EVOLUTION 絆@94708497	
 南瓜獸	char	数码宝贝大冒险角色列表@94744369; 数码宝贝幽灵游戏角色列表@94560916; 數碼寶貝拯救隊角色列表@94177566; 數碼暴龍 LAST EVOLUTION 絆@94708497	
@@ -58,8 +60,6 @@ word	source_kind	sources (page@revision)	note
 戰鬥暴龍獸	char	数码宝贝大冒险tri.角色列表@94265439; 数码宝贝大冒险角色列表@94744369; 数码宝贝大冒险：角色列表@94538377; 數碼暴龍App世代角色列表@94177588	
 拉布拉獸	char	数码宝贝03驯兽师之王角色列表@94744434; 数码宝贝大冒险：角色列表@94538377; 数码宝贝幽灵游戏角色列表@94560916; 數碼寶貝03馴獸師之王@94757540	
 本宮大輔	char	数码宝贝合体战争角色列表@94717250; 数码宝贝大冒险02角色列表@94744398; 数码宝贝大冒险tri.角色列表@94265439; 數碼暴龍 LAST EVOLUTION 絆@94708497	
-札克	cgroup	Module:CGroup/LOL@93322985; Module:CGroup/Pixar@93247177; Module:CGroup/The Promised Neverland@83209401	zh-hant
-札克	char	可塑性記憶@94399638	
 桃樂絲	cgroup	Template:CGroup/ED@94768974	zh-hant
 桃樂絲	char	大欺诈师@90518284; 愛的小婦人物語@94856165; 魔法使光之美少女！@94758670	
 機械暴龍獸	cgroup	Template:CGroup/Digimon@94687201	
@@ -73,6 +73,8 @@ word	source_kind	sources (page@revision)	note
 祖頓獸	char	数码宝贝大冒险tri.角色列表@94265439; 数码宝贝大冒险角色列表@94744369; 数码宝贝大冒险：角色列表@94538377; 數碼寶貝拯救隊角色列表@94177566	
 秋山遼	char	数码宝贝03驯兽师之王角色列表@94744434; 数码宝贝大冒险02角色列表@94744398; 数码宝贝大冒险tri.角色列表@94265439; 数码宝贝大冒险角色列表@94744369	
 美美	cgroup	Module:CGroup/OshinoKo@84428949; Module:CGroup/Pixar@93247177; Template:CGroup/Yes! 光之美少女5@89217113; Template:CGroup/魔法咪路咪路@26972197	
+艾爾	cgroup	Module:CGroup/Pixar@93247177; Template:CGroup/Adventure Time@90284406; Template:CGroup/GundamAGE@51366593	
+艾爾	char	少女與戰車角色列表@93320972	
 蘑菇獸	char	数码宝贝大冒险角色列表@94744369; 数码宝贝大冒险：角色列表@94538377; 数码宝贝幽灵游戏角色列表@94560916; 數碼寶貝覺醒節拍角色列表@94712797	
 辛普森家庭	cgroup	Module:CGroup/Cartoon@93410586; Module:CGroup/Simpsons@84869408; Template:CGroup/Futurama@34999934; Template:CGroup/SouthPark@86964006	
 金剛戰神	cgroup	Module:CGroup/Anime@94680982; Template:CGroup/Mazinger@84157445; Template:CGroup/Power Rangers@27638544	zh-hant
@@ -93,6 +95,7 @@ word	source_kind	sources (page@revision)	note
 伽樓達獸	char	数码宝贝大冒险角色列表@94744369; 數碼寶貝拯救隊角色列表@94177566	
 使魔獸	char	数码宝贝大冒险：角色列表@94538377; 数码宝贝幽灵游戏角色列表@94560916; 數碼寶貝覺醒節拍角色列表@94712797	
 倉橋	char	刀劍神域劇場版：序列爭戰@94170207; 刀劍神域角色列表@94550774; 東京殘響@90132994	
+傑爾	cgroup	Module:CGroup/Square Enix@93012351; Module:CGroup/閃電十一人@68657168; Template:CGroup/進擊的巨人@76977335	
 凱莉根	cgroup	Template:CGroup/Heroes of the Storm@49727842; Template:CGroup/StarCraft2@39914602; Template:CGroup/StarCraft@73588136	
 凱西	cgroup	Module:CGroup/美国漫画@94638375; Template:CGroup/Pokemon@85444397	CHECK
 凱西	char	遊戲王ZEXAL@93180378	CHECK
@@ -131,6 +134,8 @@ word	source_kind	sources (page@revision)	note
 小熊獸	char	数码宝贝大冒险tri.角色列表@94265439; 数码宝贝大冒险：角色列表@94538377; 数码宝贝幽灵游戏角色列表@94560916	
 小猴獸	char	数码宝贝大冒险：角色列表@94538377; 数码宝贝幽灵游戏角色列表@94560916; 數碼寶貝覺醒節拍角色列表@94712797	
 小田切敏郎	char	名侦探柯南：天空的遇难船@94562607; 名侦探柯南：沉默的15分钟@94454904; 名偵探柯南：瞳孔中的暗殺者@94403739	
+小莉	cgroup	Module:CGroup/Simpsons@84869408; Template:CGroup/Family Guy@79259281	
+小莉	char	哆啦A梦角色列表@94533440	
 尼爾	cgroup	Template:CGroup/DragonBall@92325756; Template:CGroup/GundamTWFM@82129397	
 尼爾	char	森林王子 少年毛克利@94715809	
 巨人獸	char	数码宝贝大冒险：角色列表@94538377; 数码宝贝幽灵游戏角色列表@94560916; 數碼寶貝覺醒節拍角色列表@94712797	
@@ -203,6 +208,7 @@ word	source_kind	sources (page@revision)	note
 熾天使獸	char	数码宝贝大冒险tri.角色列表@94265439; 数码宝贝大冒险：角色列表@94538377; 數碼寶貝04無限地帶角色列表@94744460	
 爛泥獸	char	数码宝贝大冒险角色列表@94744369; 数码宝贝大冒险：角色列表@94538377; 數碼寶貝覺醒節拍角色列表@94712797	
 犄角獸	char	数码宝贝大冒险tri.角色列表@94265439; 数码宝贝大冒险：角色列表@94538377; 數碼暴龍 LAST EVOLUTION 絆@94708497	
+狩魔獵人	cgroup	Template:CGroup/Diablo@94495831; Template:CGroup/Heroes of the Storm@49727842; Template:CGroup/Warcraft@92164655	zh-hant
 獠牙獸	char	数码宝贝大冒险：角色列表@94538377; 数码宝贝幽灵游戏角色列表@94560916; 數碼寶貝覺醒節拍角色列表@94712797	
 獨角仙獸	char	数码宝贝大冒险tri.角色列表@94265439; 数码宝贝大冒险：角色列表@94538377; 數碼暴龍 LAST EVOLUTION 絆@94708497	
 瑪法里恩	cgroup	Module:CGroup/Wow@94351016; Template:CGroup/Heroes of the Storm@49727842; Template:CGroup/Warcraft@92164655	zh-hant
@@ -219,8 +225,6 @@ word	source_kind	sources (page@revision)	note
 老爺怪蛙獸	char	数码宝贝大冒险角色列表@94744369; 数码宝贝大冒险：角色列表@94538377; 数码宝贝幽灵游戏角色列表@94560916	
 肯尼	cgroup	Module:CGroup/Disney@93925402; Module:CGroup/Pixar@93247177; Template:CGroup/進擊的巨人@76977335	
 腕龍獸	char	数码宝贝大冒险：角色列表@94538377; 数码宝贝幽灵游戏角色列表@94560916; 數碼寶貝覺醒節拍角色列表@94712797	
-艾爾	cgroup	Module:CGroup/Pixar@93247177; Template:CGroup/GundamAGE@51366593	
-艾爾	char	少女與戰車角色列表@93320972	
 艾瑞克	cgroup	Module:CGroup/Disney@93925402; Module:CGroup/美国漫画@94638375	
 艾瑞克	char	長腿叔叔 (動畫)@94856329	
 艾蓮娜	cgroup	Template:CGroup/HUNTER@80241645	CHECK
@@ -229,7 +233,9 @@ word	source_kind	sources (page@revision)	note
 英格麗特	char	小魔女DoReMi@94721174	CHECK
 莉佳	cgroup	Module:CGroup/OnePiece@83858889; Template:CGroup/Pokemon@85444397	
 莉佳	char	劇場版 寶可夢 就決定是你了！@90262215	
+葛屁	cgroup	Module:CGroup/Simpsons@84869408; Template:CGroup/Family Guy@79259281; Template:CGroup/SouthPark@86964006	
 葛雷邁恩	cgroup	Module:CGroup/Wow@94351016; Template:CGroup/Heroes of the Storm@49727842; Template:CGroup/Warcraft@92164655	zh-hant
+蓋亞	cgroup	Module:CGroup/閃電十一人@68657168; Template:CGroup/Crazyracing Kartrider@60141039; Template:CGroup/Ultraman@94663541	
 蓋酷家庭	cgroup	Module:CGroup/Cartoon@93410586; Module:CGroup/Simpsons@84869408; Template:CGroup/Family Guy@79259281	
 蕾蒂	cgroup	Template:CGroup/GundamW@87064245	
 蕾蒂	char	哈尔的移动城堡@94539471; 惡魔獵人系列角色列表@92426452	
@@ -308,6 +314,7 @@ word	source_kind	sources (page@revision)	note
 來自繽紛世界的明日	title	來自繽紛世界的明日@94729384	
 來自風平浪靜的明日	cgroup	Module:CGroup/Anime@94680982	
 來自風平浪靜的明日	title	来自风平浪静的明天@94727749	
+來西	cgroup	Module:CGroup/Simpsons@84869408; Template:CGroup/Family Guy@79259281	CHECK
 保政良	cgroup	Template:CGroup/GundamUC@94693163	
 保政良	char	機動戰士GUNDAM@94721023	
 借物少女艾莉緹	cgroup	Module:CGroup/Anime@94680982	
@@ -315,7 +322,6 @@ word	source_kind	sources (page@revision)	note
 傑克斯	cgroup	Module:CGroup/OnePiece@83858889; Template:CGroup/GundamW@87064245	
 傑斯	cgroup	Module:CGroup/SAO@89298185; Template:CGroup/Ultraman@94663541	
 傑斯獸	char	数码宝贝大冒险tri.角色列表@94265439; 數碼寶貝拯救隊角色列表@94177566	
-傑爾	cgroup	Module:CGroup/Square Enix@93012351; Template:CGroup/進擊的巨人@76977335	
 傑特	cgroup	Template:CGroup/GundamUC@94693163; Template:CGroup/Ultraman@94663541	
 光明獸	char	数码宝贝幽灵游戏角色列表@94560916; 數碼寶貝04無限地帶角色列表@94744460	
 光束加農	cgroup	Template:CGroup/GundamSeed@92969101; Template:CGroup/GundamUC@94693163	
@@ -522,8 +528,6 @@ word	source_kind	sources (page@revision)	note
 小芳	char	七龍珠GT@94711068	
 小英的故事	cgroup	Module:CGroup/Anime@94680982	
 小英的故事	title	佩琳物語@94719893	
-小莉	cgroup	Module:CGroup/Simpsons@84869408	
-小莉	char	哆啦A梦角色列表@94533440	
 小象寶寶	cgroup	Template:CGroup/小魔女DoReMi@65858319	
 小象寶寶	char	小魔女DoReMi@94721174	
 小鍬形蟲獸	char	数码宝贝大冒险：角色列表@94538377; 数码宝贝幽灵游戏角色列表@94560916	
@@ -546,6 +550,7 @@ word	source_kind	sources (page@revision)	note
 工蟲	cgroup	Template:CGroup/StarCraft2@39914602; Template:CGroup/StarCraft@73588136	
 巧克力獸	char	数码宝贝幽灵游戏角色列表@94560916; 數碼寶貝大冒險02@94757504	
 巧洛獸	char	数码宝贝大冒险：角色列表@94538377; 數碼寶貝覺醒節拍角色列表@94712797	
+巨人之壁	cgroup	Module:CGroup/Danball Senki@81863967; Module:CGroup/閃電十一人@68657168	
 巨雞獸	char	数码宝贝大冒险角色列表@94744369; 數碼寶貝拯救隊角色列表@94177566	
 巨鯨獸	char	数码宝贝大冒险角色列表@94744369; 数码宝贝大冒险：角色列表@94538377	
 巨龍獸	char	数码宝贝大冒险角色列表@94744369; 数码宝贝大冒险：角色列表@94538377	
@@ -583,6 +588,7 @@ word	source_kind	sources (page@revision)	note
 幻蜂獸	char	数码宝贝大冒险：角色列表@94538377; 數碼寶貝覺醒節拍角色列表@94712797	
 幼龍獸	char	数码宝贝幽灵游戏角色列表@94560916; 數碼寶貝覺醒節拍角色列表@94712797	
 幾維鳥獸	char	数码宝贝大冒险：角色列表@94538377; 数码宝贝幽灵游戏角色列表@94560916	
+庫卡	cgroup	Module:CGroup/Counter-Strike@85677571; Module:CGroup/閃電十一人@68657168	zh-hant
 引爆摩天樓	cgroup	Module:CGroup/Anime@94680982; Template:CGroup/名偵探柯南@93449521	
 弗瑞德	cgroup	Template:CGroup/Mazinger@84157445; Template:CGroup/黑執事@49361116	
 強盜的女兒	cgroup	Module:CGroup/Anime@94680982	
@@ -691,6 +697,7 @@ word	source_kind	sources (page@revision)	note
 杜賓犬獸	char	数码宝贝03驯兽师之王角色列表@94744434; 数码宝贝大冒险：角色列表@94538377	
 松田啟人	char	数码宝贝03驯兽师之王角色列表@94744434; 数码宝贝合体战争角色列表@94717250	
 柏納	cgroup	Module:CGroup/Solo Leveling@86308871; Template:CGroup/進擊的巨人@76977335	
+柯倫	cgroup	Template:CGroup/Mabinogi@50754648; Template:CGroup/名偵探柯南@93449521	
 根首	char	半妖的夜叉姬@87932716; 犬夜叉角色列表@94790447	
 格鬥天王	cgroup	Module:CGroup/Games@94658856; Module:CGroup/KingOfFighters@91481321	
 格魯米斯王	cgroup	Template:CGroup/DragonBall@92325756	
@@ -754,6 +761,8 @@ word	source_kind	sources (page@revision)	note
 海底兩萬哩	title	冒險少女娜汀亞@94740490	
 海潮之聲	cgroup	Module:CGroup/Anime@94680982	
 海潮之聲	title	海潮之声@94677880	
+海王滿	cgroup	Template:CGroup/Sailor Moon@93051346	
+海王滿	char	美少女戰士角色列表@94852109	
 海王龍獸	char	数码宝贝大冒险：角色列表@94538377; 數碼寶貝覺醒節拍角色列表@94712797	
 海美	char	給小桃的信@94607052; 萬里尋親記@94719791	
 海萊恩	cgroup	Module:CGroup/Wow@94351016; Template:CGroup/Warcraft@92164655	zh-hant
@@ -771,6 +780,8 @@ word	source_kind	sources (page@revision)	note
 潘朵拉	cgroup	Module:CGroup/Games@94658856; Template:CGroup/潘朵拉之心@39382393	
 火神獸	cgroup	Template:CGroup/Digimon@94687201	
 火神獸	char	數碼寶貝04無限地帶角色列表@94744460	
+火野麗	cgroup	Template:CGroup/Sailor Moon@93051346	CHECK
+火野麗	char	美少女戰士角色列表@94852109	CHECK
 火龍獸	cgroup	Template:CGroup/Digimon@94687201	
 火龍獸	char	數碼寶貝04無限地帶角色列表@94744460	
 灰熊獸	char	数码宝贝大冒险：角色列表@94538377; 数码宝贝幽灵游戏角色列表@94560916	
@@ -797,7 +808,6 @@ word	source_kind	sources (page@revision)	note
 狙擊獸	char	数码宝贝大冒险：角色列表@94538377; 數碼寶貝覺醒節拍角色列表@94712797	
 狡猾飛天德	cgroup	Module:CGroup/Cartoon@93410586; Module:CGroup/Disney@93925402	
 狡詐獸	char	数码宝贝大冒险：角色列表@94538377; 數碼寶貝覺醒節拍角色列表@94712797	
-狩魔獵人	cgroup	Template:CGroup/Diablo@94495831; Template:CGroup/Warcraft@92164655	zh-hant
 猞猁獸	char	数码宝贝幽灵游戏角色列表@94560916; 數碼寶貝覺醒節拍角色列表@94712797	
 猿猴獸	char	数码宝贝大冒险tri.角色列表@94265439; 数码宝贝大冒险：角色列表@94538377	
 玉兔獸	cgroup	Template:CGroup/Digimon@94687201	
@@ -810,6 +820,7 @@ word	source_kind	sources (page@revision)	note
 瑪翼夫	cgroup	Module:CGroup/Wow@94351016; Template:CGroup/Warcraft@92164655	zh-hant
 瑪莉安妮	cgroup	Template:CGroup/小魔女DoReMi@65858319	
 瑪莉安妮	char	小魔女DoReMi@94721174	
+瑪裘亞	cgroup	Module:CGroup/KingOfFighters@91481321; Module:CGroup/閃電十一人@68657168	
 瑪麗娜	cgroup	Module:CGroup/BlueArchive@93972468	CHECK,zh-hant
 瑪麗娜	char	寶可夢動畫角色列表@93411809	CHECK
 瑪麗與魔女之花	cgroup	Module:CGroup/Anime@94680982	
@@ -829,6 +840,7 @@ word	source_kind	sources (page@revision)	note
 畫家獸	char	数码宝贝大冒险：角色列表@94538377; 数码宝贝幽灵游戏角色列表@94560916	
 異世界自殺突擊隊	cgroup	Module:CGroup/Anime@94680982; Module:CGroup/美国漫画@94638375	
 異域神兵	cgroup	Module:CGroup/Games@94658856; Module:CGroup/Square Enix@93012351	
+痞德	cgroup	Module:CGroup/Simpsons@84869408; Template:CGroup/Family Guy@79259281	
 百合獸	char	数码宝贝大冒险tri.角色列表@94265439; 数码宝贝大冒险：角色列表@94538377	
 百萬龍獸	char	数码宝贝大冒险tri.角色列表@94265439; 数码宝贝大冒险：角色列表@94538377	
 百變金剛	cgroup	Module:CGroup/Cartoon@93410586; Template:CGroup/Transformers@87179168	
@@ -837,6 +849,7 @@ word	source_kind	sources (page@revision)	note
 皮耶爾	cgroup	Module:CGroup/OnePiece@83858889	
 皮耶爾	char	阿爾卑斯物語 我的安妮特@94720095	
 皮諾	char	我的英雄学院角色列表@94403792; 死亡代理人@93463069	
+盧拉拉	cgroup	Module:CGroup/Simpsons@84869408; Template:CGroup/Family Guy@79259281	
 目標軟件	cgroup	Module:CGroup/Games-zh@90861641; Module:CGroup/Games@94658856	zh-hant
 盾神京谷	cgroup	Template:CGroup/戰鬥陀螺 鋼鐵奇兵@68490308	
 盾神京谷	char	戰鬥陀螺 鋼鐵奇兵角色列表@94643342	
@@ -860,6 +873,8 @@ word	source_kind	sources (page@revision)	note
 章魚獸	char	数码宝贝幽灵游戏角色列表@94560916; 數碼寶貝覺醒節拍角色列表@94712797	
 童話槍手小紅帽	cgroup	Module:CGroup/Anime@94680982; Template:CGroup/童話槍手小紅帽@22981301	
 米克羅斯	char	大雄與鐵人兵團@93724405; 新·大雄與鐵人兵團@94468775	
+米凱爾	cgroup	Template:CGroup/Pichi Pichi Pitch@94608266	
+米凱爾	char	阿爾卑斯物語 我的安妮特@94720095	
 米卡	char	Lycoris Recoil 莉可麗絲@94031169; 少女與戰車角色列表@93320972	
 米妮瓦	cgroup	Module:CGroup/Danball Senki@81863967; Template:CGroup/GundamUC@94693163	
 米格爾	char	劇場版 咒術迴戰 0@94201844; 萬里尋親記@94719791	
@@ -891,6 +906,7 @@ word	source_kind	sources (page@revision)	note
 羅密歐的藍天	cgroup	Module:CGroup/Anime@94680982	
 羅密歐的藍天	title	羅密歐的藍天@91519228	
 羅根	cgroup	Module:CGroup/美国漫画@94638375; Template:CGroup/GBF@82201572	
+羅登	cgroup	Module:CGroup/閃電十一人@68657168; Template:CGroup/GundamAGE@51366593	
 羅貝	cgroup	Module:CGroup/Pixar@93247177; Template:CGroup/Cyber Formula@68486475	
 羅迪	cgroup	Template:CGroup/GundamAGE@51366593	
 羅迪	char	凱洛與塔斯黛@92015221	
@@ -958,19 +974,20 @@ word	source_kind	sources (page@revision)	note
 萬花筒之星	title	百变之星@94316722	
 萬里尋母	cgroup	Module:CGroup/Anime@94680982	
 萬里尋母	title	萬里尋親記@94719791	
-葛屁	cgroup	Module:CGroup/Simpsons@84869408; Template:CGroup/SouthPark@86964006	
 葛拉克朗	cgroup	Module:CGroup/Wow@94351016; Template:CGroup/Warcraft@92164655	zh-hant
 葛拉文	cgroup	Template:CGroup/StarCraft2@39914602; Template:CGroup/StarCraft@73588136	
 葛拉漢	cgroup	Module:CGroup/ResidentEvil@94612703; Template:CGroup/Gundam00@70972545	
+葛痞德	cgroup	Module:CGroup/Simpsons@84869408; Template:CGroup/Family Guy@79259281	
 葛羅	cgroup	Module:CGroup/Wow@94351016; Template:CGroup/Warcraft@92164655	zh-hant
 葛羅瑪許	cgroup	Module:CGroup/Wow@94351016; Template:CGroup/Warcraft@92164655	zh-hant
+葛莉	cgroup	Module:CGroup/Simpsons@84869408; Template:CGroup/Family Guy@79259281	
 葛雷米	cgroup	Module:CGroup/BLEACH@81833737; Template:CGroup/GundamUC@94693163	
+葛馬藍	cgroup	Module:CGroup/Simpsons@84869408; Template:CGroup/Family Guy@79259281	
 蒙面俠蘇洛傳	cgroup	Module:CGroup/Anime@94680982	
 蒙面俠蘇洛傳	title	蒙面俠蘇洛傳 (日本動畫)@90157303	
 蒼雷	char	数码宝贝03驯兽师之王角色列表@94744434; 数码宝贝大冒险02角色列表@94744398	
 蒼鷺與少年	cgroup	Module:CGroup/Anime@94680982	zh-hant
 蒼鷺與少年	title	蒼鷺與少年@94140876	
-蓋亞	cgroup	Template:CGroup/Crazyracing Kartrider@60141039; Template:CGroup/Ultraman@94663541	
 蓋布瑞	cgroup	Template:CGroup/StarCraft2@39914602; Template:CGroup/StarCraft@73588136	
 蓋洛	cgroup	Template:CGroup/DragonBall@92325756; Template:CGroup/GOSICK@62514366	
 蓋特機器人	cgroup	Module:CGroup/Anime@94680982; Template:CGroup/Getter Robo@89726924	
@@ -1118,6 +1135,7 @@ word	source_kind	sources (page@revision)	note
 雜草獸	char	数码宝贝大冒险：角色列表@94538377; 数码宝贝幽灵游戏角色列表@94560916	
 雪曼	cgroup	Module:CGroup/Pixar@93247177; Template:CGroup/Gundam00@70972545	
 雲黑齋的野心	cgroup	Module:CGroup/Anime@94680982; Module:CGroup/蠟筆小新@93760288	
+雷傑	cgroup	Module:CGroup/閃電十一人@68657168; Template:CGroup/Ultraman@94663541	
 雷恩哈特	cgroup	Module:CGroup/Square Enix@93012351	
 雷恩哈特	char	名偵探柯南：黑鐵的魚影@94777147	
 雷歐斯	cgroup	Template:CGroup/GundamW@87064245; Template:CGroup/Ultraman@94663541	
@@ -1151,6 +1169,7 @@ word	source_kind	sources (page@revision)	note
 飛螳	cgroup	Template:CGroup/StarCraft2@39914602; Template:CGroup/StarCraft@73588136	
 飛龍獸	char	数码宝贝大冒险02角色列表@94744398; 数码宝贝幽灵游戏角色列表@94560916	
 飽嗝獸	char	数码宝贝大冒险：角色列表@94538377; 數碼寶貝覺醒節拍角色列表@94712797	
+香堤	cgroup	Template:CGroup/GundamTWFM@82129397; Template:CGroup/名偵探柯南@93449521	
 駝鹿獸	char	数码宝贝幽灵游戏角色列表@94560916; 數碼寶貝覺醒節拍角色列表@94712797	
 騎士獸	char	数码宝贝大冒险02角色列表@94744398; 数码宝贝大冒险：角色列表@94538377	
 高力獸	cgroup	Template:CGroup/Digimon@94687201	
@@ -1292,6 +1311,7 @@ word	source_kind	sources (page@revision)	note
 三輪直美	char	夏日大作戰@94786998	
 三重加農砲	cgroup	Module:CGroup/Danball Senki@81863967	
 三重小調曲爆彈	char	Suite 光之美少女♪@92951168	
+三重爆發力	cgroup	Module:CGroup/閃電十一人@68657168	
 三頭狼	char	犬夜叉角色列表@94790447	
 三頭龍獸	char	数码宝贝大冒险02角色列表@94744398	
 上一代光之美少女公主	char	Go Princess 光之美少女@94065409	
@@ -1415,6 +1435,7 @@ word	source_kind	sources (page@revision)	note
 主魔鋼彈	cgroup	Template:CGroup/GundamIBO@91631774	
 乃乃	cgroup	Template:CGroup/Aikatsu@68312381	
 乃乃親	cgroup	Template:CGroup/Aikatsu@68312381	
+乃哥	cgroup	Template:CGroup/Family Guy@79259281	
 乃愛	cgroup	Module:CGroup/BlueArchive@93972468	zh-hant
 乃木園子	char	結城友奈是勇者@91244822	
 乃納	cgroup	Template:CGroup/NARUTO@86143617	
@@ -1496,6 +1517,7 @@ word	source_kind	sources (page@revision)	note
 亞凱	cgroup	Template:CGroup/GundamUC@94693163	
 亞刃	char	地海傳說@94685926	
 亞列克斯	cgroup	Template:CGroup/GundamUC@94693163	
+亞利歐斯	cgroup	Template:CGroup/Sailor Moon@93051346	
 亞卡布	char	Vivy -Fluorite Eye's Song-@93702039	
 亞哈	cgroup	Template:CGroup/GundamIBO@91631774	
 亞哈反應爐	cgroup	Template:CGroup/GundamIBO@91631774	
@@ -1582,6 +1604,7 @@ word	source_kind	sources (page@revision)	note
 亞露比娜	cgroup	Module:CGroup/Jewelpet@81833309	CHECK
 亞馬喬	cgroup	Template:CGroup/GundamUC@94693163	
 亞馬基	cgroup	Template:CGroup/GundamIBO@91631774	
+亞馬遜潮洪	cgroup	Module:CGroup/閃電十一人@68657168	
 亞馬遜百合	cgroup	Module:CGroup/OnePiece@83858889	
 亞魯加河	cgroup	Template:CGroup/The Witcher@86825096	
 亞魯戈	cgroup	Module:CGroup/SAO@89298185	
@@ -1615,6 +1638,7 @@ word	source_kind	sources (page@revision)	note
 人生大冒險	cgroup	Template:CGroup/Sim@37867988	
 人生差一點	cgroup	Module:CGroup/Cartoon@93410586	
 人肉巨蛋	cgroup	Template:CGroup/Eyeshield21@86998850	
+人肉盾牌	cgroup	Module:CGroup/閃電十一人@68657168	
 人間炸彈	cgroup	Template:CGroup/Reborn@29403199	
 人面戰鷹獸	cgroup	Template:CGroup/Digimon@94687201	
 人面肚皮鳥	cgroup	Template:CGroup/妖怪手錶@75937932	
@@ -1672,6 +1696,7 @@ word	source_kind	sources (page@revision)	note
 伊基	char	死亡代理人@93463069	
 伊士達	char	太陽之子 (日法合作動畫)@94098493	
 伊士麥	cgroup	Template:CGroup/Gundam00@70972545	
+伊姿爾	cgroup	Template:CGroup/Pichi Pichi Pitch@94608266	
 伊娃柯夫	cgroup	Module:CGroup/OnePiece@83858889	
 伊布	cgroup	Template:CGroup/Pokemon@85444397	
 伊布拉欽	cgroup	Template:CGroup/Gundam00@70972545	
@@ -1842,6 +1867,7 @@ word	source_kind	sources (page@revision)	note
 佛格森夫人	char	湯姆歷險記 (動畫)@94720074	
 佛特斯特	cgroup	Template:CGroup/The Witcher@86825096	
 佛瑞	cgroup	Template:CGroup/GundamSeed@92969101	
+佛瑞哲	cgroup	Template:CGroup/Mabinogi@50754648	
 佛締岡	cgroup	Module:CGroup/Half-Life@94355597	
 佛羅星	cgroup	Module:CGroup/Pixar@93247177	
 佛萊格	cgroup	Module:CGroup/美国漫画@94638375	
@@ -1877,7 +1903,6 @@ word	source_kind	sources (page@revision)	note
 來海桃香	char	Heartcatch 光之美少女！@94574540	
 來海櫻	char	Heartcatch 光之美少女！@94574540	
 來海流之助	char	Heartcatch 光之美少女！@94574540	
-來西	cgroup	Module:CGroup/Simpsons@84869408	CHECK
 來谷唯湖	char	Little Busters!角色列表@91842236	CHECK
 侍魂無雙	cgroup	Module:CGroup/Games@94658856	
 侑那	char	甲鐵城的卡巴內里@93830519	
@@ -1892,6 +1917,7 @@ word	source_kind	sources (page@revision)	note
 依米倫	cgroup	Module:CGroup/Wow@94351016	
 依羅	char	星之卡比 (動畫)@94160462	
 侯陪襯	cgroup	Module:CGroup/Simpsons@84869408	
+侵略性脈動	cgroup	Module:CGroup/閃電十一人@68657168	
 侵略鋼彈	cgroup	Template:CGroup/GundamSeed@92969101	
 俄特加德之巔	cgroup	Module:CGroup/Wow@94351016	CHECK
 俄特加德要塞	cgroup	Module:CGroup/Wow@94351016	CHECK
@@ -2058,6 +2084,7 @@ word	source_kind	sources (page@revision)	note
 傳輸稜鏡	cgroup	Template:CGroup/StarCraft2@39914602	
 傻傻	cgroup	Module:CGroup/Cyberpunk@85139581	
 傻瓜頭巾	cgroup	Template:CGroup/妖怪手錶@75937932	
+傾聽神諭	cgroup	Module:CGroup/閃電十一人@68657168	
 僅限跟班	cgroup	Module:CGroup/My Little Pony@91388064	
 像素軟件	cgroup	Module:CGroup/Games-zh@90861641	zh-hant
 僵硬型	cgroup	Template:CGroup/GundamAGE@51366593	
@@ -2073,6 +2100,7 @@ word	source_kind	sources (page@revision)	note
 儲物箱	cgroup	Module:CGroup/Minecraft@94388709	
 儲物箱竹筏	cgroup	Module:CGroup/Minecraft@94388709	
 儲物箱船	cgroup	Module:CGroup/Minecraft@94388709	
+儲能陀螺	cgroup	Module:CGroup/閃電十一人@68657168	
 儲藏槽	cgroup	Template:CGroup/Gundam00@70972545	
 兀兒德	cgroup	Module:CGroup/SAO@89298185	
 元帥獸	cgroup	Template:CGroup/Digimon@94687201	
@@ -2122,6 +2150,7 @@ word	source_kind	sources (page@revision)	note
 光輝型	cgroup	Template:CGroup/GundamAGE@51366593	
 光輝巨蟒獸	char	數碼寶貝覺醒節拍角色列表@94712797	
 光輝軟件	cgroup	Module:CGroup/Games-zh@90861641	zh-hant
+光輪之矢	cgroup	Module:CGroup/閃電十一人@68657168	
 光逝去的夏天	cgroup	Module:CGroup/Anime@94680982	
 克伊娜	cgroup	Module:CGroup/OnePiece@83858889	CHECK
 克休里納達	cgroup	Template:CGroup/GundamW@87064245	
@@ -2252,6 +2281,7 @@ word	source_kind	sources (page@revision)	note
 全裝甲型獨角獸	cgroup	Template:CGroup/GundamUC@94693163	
 全裝甲型鋼彈	cgroup	Template:CGroup/GundamUC@94693163	
 全軍破敵	cgroup	Module:CGroup/Games@94658856	
+兩人三腳	cgroup	Module:CGroup/閃電十一人@68657168	
 兩棲型	cgroup	Template:CGroup/Digimon@94687201	
 兩面宿儺	char	咒術迴戰角色列表@94830133	
 八九寺真宵	char	魔法少女小圓角色列表@94590242	
@@ -2310,6 +2340,7 @@ word	source_kind	sources (page@revision)	note
 冥王計劃傑歐萊馬	cgroup	Module:CGroup/Anime@94680982	
 冥黑王	cgroup	Template:CGroup/KamenRider@94225985	
 冬之靈	cgroup	Module:CGroup/My Little Pony@91388064	zh-hant
+冬季三角之網	cgroup	Module:CGroup/閃電十一人@68657168	
 冬季派對組合	cgroup	Template:CGroup/Sim@37867988	
 冬季賽	cgroup	Module:CGroup/LOL@93322985	
 冬嵐	char	犬夜叉角色列表@94790447	
@@ -2321,10 +2352,12 @@ word	source_kind	sources (page@revision)	note
 冰冷眼瞳所映照之物	cgroup	Template:CGroup/GundamTWFM@82129397	
 冰凍之心	cgroup	Module:CGroup/Frozen@82365390	
 冰凍之鍊金術師	cgroup	Template:CGroup/FullmetalAlchemist@48481493	
+冰凍抄截	cgroup	Module:CGroup/閃電十一人@68657168	
 冰凍暴風雪	char	光之美少女@94825358	
 冰原雪域	cgroup	Template:CGroup/MapleStory@57794822	
 冰天使	cgroup	Template:CGroup/Yes! 光之美少女5@89217113	
 冰室弦馬	char	獸兵衛忍風帖@94218789	
+冰封射門	cgroup	Module:CGroup/閃電十一人@68657168	
 冰山企鵝戰士	cgroup	Template:CGroup/Crazyracing Kartrider@60141039	
 冰山恐懼之峰	cgroup	Template:CGroup/Crazyracing Kartrider@60141039	
 冰川尚吾	char	名侦探柯南：沉默的15分钟@94454904	
@@ -2339,6 +2372,8 @@ word	source_kind	sources (page@revision)	note
 冰石獸	char	数码宝贝幽灵游戏角色列表@94560916	
 冰空防護罩	cgroup	Template:CGroup/Yes! 光之美少女5@89217113	
 冰象獸	char	数码宝贝幽灵游戏角色列表@94560916	
+冰雪竹姬	cgroup	Template:CGroup/Sailor Moon@93051346	
+冰霸后	cgroup	Template:CGroup/Adventure Time@90284406	
 冰風之谷	cgroup	Module:CGroup/Games@94658856	
 冰魔	char	戰鬥陀螺 鋼鐵奇兵角色列表@94643342	
 冴島清美	char	偶像大師 灰姑娘女孩角色列表@91786822	
@@ -2368,7 +2403,9 @@ word	source_kind	sources (page@revision)	note
 凡格爾堡	cgroup	Template:CGroup/The Witcher@86825096	
 凡格爾堡的葉妮芙	cgroup	Template:CGroup/The Witcher@86825096	
 凱伊	char	少女與戰車角色列表@93320972	
+凱伊爾	cgroup	Module:CGroup/閃電十一人@68657168	
 凱倫	cgroup	Module:CGroup/Pixar@93247177	
+凱凱	cgroup	Template:CGroup/Family Guy@79259281	
 凱南吉	cgroup	Template:CGroup/GundamTWFM@82129397	
 凱因	cgroup	Template:CGroup/FullmetalAlchemist@48481493	
 凱坦澤	cgroup	Module:CGroup/BlueArchive@93972468	zh-hant
@@ -2378,6 +2415,7 @@ word	source_kind	sources (page@revision)	note
 凱恩	cgroup	Template:CGroup/GundamUC@94693163	
 凱拉	cgroup	Template:CGroup/GundamUC@94693163	
 凱拉克	cgroup	Template:CGroup/StarCraft@73588136	
+凱拉克西亞	cgroup	Template:CGroup/Sailor Moon@93051346	
 凱撒寶劍	cgroup	Template:CGroup/Mazinger@84157445	
 凱撒指揮艇	cgroup	Template:CGroup/Mazinger@84157445	
 凱撒新星	cgroup	Template:CGroup/Mazinger@84157445	
@@ -2431,6 +2469,7 @@ word	source_kind	sources (page@revision)	note
 分子獸	char	数码宝贝大冒险角色列表@94744369	
 分歧的道路	cgroup	Template:CGroup/Warcraft@92164655	zh-hant
 分解武器	cgroup	Module:CGroup/Counter-Strike@85677571	zh-hant
+分身欺敵之術	cgroup	Module:CGroup/閃電十一人@68657168	
 分鐘小姐	cgroup	Module:CGroup/美国漫画@94638375	
 切割流星鎚	cgroup	Template:CGroup/GundamIBO@91631774	
 切拉姆	cgroup	Module:CGroup/Square Enix@93012351	
@@ -2505,6 +2544,7 @@ word	source_kind	sources (page@revision)	note
 前輩有夠煩	cgroup	Module:CGroup/Anime@94680982	zh-hant
 前進大都會	cgroup	Module:CGroup/My Little Pony@91388064	
 前進梅利號	cgroup	Module:CGroup/OnePiece@83858889	
+剎那爆射	cgroup	Module:CGroup/閃電十一人@68657168	
 剛力步	char	奇巧計程車@89552760	
 剛彈勇士	cgroup	Template:CGroup/GundamUC@94693163	
 剛德拉克	cgroup	Module:CGroup/Wow@94351016	
@@ -2553,6 +2593,7 @@ word	source_kind	sources (page@revision)	note
 力克德姆	cgroup	Template:CGroup/GundamUC@94693163	
 力克迪亞斯	cgroup	Template:CGroup/GundamUC@94693163	
 力克迪傑	cgroup	Template:CGroup/GundamUC@94693163	
+力士踏地	cgroup	Module:CGroup/閃電十一人@68657168	
 力天使鋼彈	cgroup	Template:CGroup/Gundam00@70972545	
 力奇	char	功夫貓黨@94855681	
 力石戰士	cgroup	Module:CGroup/Games@94658856	
@@ -2577,6 +2618,7 @@ word	source_kind	sources (page@revision)	note
 加索姆	cgroup	Template:CGroup/GundamUC@94693163	
 加茂劉芳	char	K (動畫)@93234659	
 加茲伍特	cgroup	Template:CGroup/GundamSeed@92969101	CHECK
+加茲星人	cgroup	Template:CGroup/Ultraman@94663541	CHECK,zh-hant
 加菲爾	char	異世界四重奏@93605298	
 加藤先生	char	爆丸@90775249	
 加藤孝一	char	妖怪手錶系列@93337229	
@@ -2612,6 +2654,7 @@ word	source_kind	sources (page@revision)	note
 勇士試煉	cgroup	Module:CGroup/Wow@94351016	
 勇敢傳說	cgroup	Module:CGroup/Pixar@93247177	
 勇武之環	cgroup	Module:CGroup/Wow@94351016	
+勇氣勁射	cgroup	Module:CGroup/閃電十一人@68657168	
 勇氣精靈	char	光之美少女@94825358	
 勇猛的致命劍	cgroup	Template:CGroup/愛天使傳說@43103330	
 勇者式	cgroup	Template:CGroup/Gundam00@70972545	
@@ -2653,6 +2696,7 @@ word	source_kind	sources (page@revision)	note
 化工集團案	cgroup	Module:CGroup/美国漫画@94638375	
 化石病	cgroup	Template:CGroup/FullmetalAlchemist@48481493	
 化石翼龍	cgroup	Template:CGroup/Pokemon@85444397	
+化身武裝	cgroup	Module:CGroup/閃電十一人@68657168	
 北佳魯特	cgroup	Template:CGroup/童話槍手小紅帽@22981301	
 北境之怒	cgroup	Module:CGroup/LOL@93322985	
 北境之王	cgroup	Template:CGroup/Might&Magic@42603917	
@@ -2691,6 +2735,7 @@ word	source_kind	sources (page@revision)	note
 十字光盾劍	cgroup	Template:CGroup/爆丸@31893398	
 十字獸	char	数码宝贝大冒险：角色列表@94538377	
 十字神名	cgroup	Module:CGroup/BlueArchive@93972468	zh-hant
+十字衝擊	cgroup	Module:CGroup/閃電十一人@68657168	
 十字軍的呼喚	cgroup	Module:CGroup/Wow@94351016	
 十字輪迴	cgroup	Module:CGroup/Counter-Strike@85677571	zh-hant
 十年後火箭筒	cgroup	Template:CGroup/Reborn@29403199	
@@ -2764,6 +2809,7 @@ word	source_kind	sources (page@revision)	note
 南瓜梗	cgroup	Module:CGroup/Minecraft@94388709	
 南瓜炸彈	cgroup	Module:CGroup/Counter-Strike@85677571	zh-hant
 南繪里	char	女神异闻录4角色列表@94633370	
+南美王者	cgroup	Module:CGroup/閃電十一人@68657168	
 南翠遊悟	char	爆旋陀螺Burst@94644099	
 南茜	cgroup	Module:CGroup/Disney@93925402	
 博亞基	cgroup	Template:CGroup/GundamAGE@51366593	
@@ -2780,6 +2826,7 @@ word	source_kind	sources (page@revision)	note
 卡佳里	cgroup	Template:CGroup/GundamSeed@92969101	
 卡修斯	cgroup	Template:CGroup/GundamUC@94693163	
 卡克利肯	cgroup	Template:CGroup/GundamUC@94693163	
+卡克特	cgroup	Template:CGroup/Pichi Pichi Pitch@94608266	
 卡利塔	cgroup	Module:CGroup/SAO@89298185	
 卡利麥羅	title	卡利麥羅@90671442	
 卡力斯	cgroup	Module:CGroup/LOL@93322985	
@@ -3038,6 +3085,7 @@ word	source_kind	sources (page@revision)	note
 古雷達	cgroup	Template:CGroup/FullmetalAlchemist@48481493	
 古霸	cgroup	Module:CGroup/My Little Pony@91388064	
 古靈夏	cgroup	Template:CGroup/KamenRider@94225985	
+古頓	cgroup	Template:CGroup/Ultraman@94663541	zh-hant
 古魯明	cgroup	Template:CGroup/GundamIBO@91631774	
 另類實境遊戲	cgroup	Module:CGroup/Games@94658856	
 只想告訴你	cgroup	Module:CGroup/Anime@94680982	
@@ -3224,6 +3272,7 @@ word	source_kind	sources (page@revision)	note
 吉翁號	cgroup	Template:CGroup/GundamUC@94693163	
 吉胖小石	cgroup	Template:CGroup/妖怪手錶@75937932	
 吉良手鞠	char	魔法少女小圓角色列表@94590242	
+吉良浩人	cgroup	Module:CGroup/閃電十一人@68657168	
 吉茵珂絲	cgroup	Module:CGroup/LOL@93322985	
 吉莉安	cgroup	Module:CGroup/The Promised Neverland@83209401	zh-hant
 吉谷	char	龍與雀斑公主@94650173	
@@ -3398,6 +3447,7 @@ word	source_kind	sources (page@revision)	note
 哥德夫利	cgroup	Module:CGroup/SAO@89298185	
 哥德巴爾德	cgroup	Template:CGroup/Code Geass@70270136	CHECK
 哥拉斯	char	ONE PIECE 黃金島大冒險@93015050	
+哥摩拉	cgroup	Template:CGroup/Ultraman@94663541	zh-hant
 哥梅利	cgroup	Template:CGroup/Eyeshield21@86998850	
 哥梅爾	cgroup	Template:CGroup/GundamAGE@51366593	
 哥爾茲	char	終末的伊澤塔@91239289	CHECK
@@ -3461,6 +3511,7 @@ word	source_kind	sources (page@revision)	note
 喬治勳爵	char	名偵探福爾摩斯@94071005	
 喬治歐	char	萬里尋親記@94719791	
 喬爾	cgroup	Template:CGroup/GundamSeed@92969101	
+喬王	cgroup	Template:CGroup/Family Guy@79259281	
 喬瑟	char	喬瑟與虎與魚群動畫版@94591558	
 喬瑟琳	cgroup	Template:CGroup/Mabinogi@50754648	
 喬納	cgroup	Module:CGroup/美国漫画@94638375	
@@ -3493,6 +3544,8 @@ word	source_kind	sources (page@revision)	note
 噴射拖線	cgroup	Module:CGroup/Pixar@93247177	
 噴射指揮艇	cgroup	Template:CGroup/Mazinger@84157445	
 噴射木桶賽	cgroup	Module:CGroup/Nintendo@94745610	
+噴射氣流	cgroup	Module:CGroup/閃電十一人@68657168	
+噴射玫瑰	cgroup	Module:CGroup/閃電十一人@68657168	
 嚴靈丸	char	BLEACH角色列表@94571323	
 四十萬緣	char	花開物語@94760130	
 四十萬翠	char	花開物語@94760130	
@@ -3603,6 +3656,7 @@ word	source_kind	sources (page@revision)	note
 地獄幽靈	cgroup	Module:CGroup/Minecraft@94388709	
 地獄旅館	cgroup	Module:CGroup/Cartoon@93410586	
 地獄棧道	cgroup	Module:CGroup/Games@94658856	
+地獄業火	cgroup	Module:CGroup/閃電十一人@68657168	
 地獄火壁壘	cgroup	Module:CGroup/Wow@94351016	
 地獄的統治者們	cgroup	Module:CGroup/SAO@89298185	CHECK
 地獄石	cgroup	Module:CGroup/Minecraft@94388709	
@@ -3610,6 +3664,7 @@ word	source_kind	sources (page@revision)	note
 地獄荒原	cgroup	Module:CGroup/Minecraft@94388709	
 地獄騎士	cgroup	Module:CGroup/Counter-Strike@85677571	zh-hant
 地球三式	cgroup	Template:CGroup/GBF@82201572	
+地球之歌	cgroup	Module:CGroup/閃電十一人@68657168	
 地球圖書館	cgroup	Template:CGroup/KamenRider@94225985	
 地球特派員	cgroup	Module:CGroup/Pixar@93247177	
 地球解放戰線	cgroup	Template:CGroup/GundamIBO@91631774	
@@ -3655,6 +3710,7 @@ word	source_kind	sources (page@revision)	note
 埃基特	char	魔法少女奈葉系列角色列表@93877995	
 埃塞克斯	cgroup	Module:CGroup/美国漫画@94638375	
 埃德爾斯坦島	cgroup	Template:CGroup/MapleStory@57794822	
+埃爾多拉特	cgroup	Module:CGroup/閃電十一人@68657168	
 埃爾文	cgroup	Module:CGroup/LOL@93322985	
 埃爾諾拉	cgroup	Template:CGroup/GundamTWFM@82129397	
 埃雷波尼亞帝國	cgroup	Template:CGroup/ED@94768974	zh-hant
@@ -3893,6 +3949,7 @@ word	source_kind	sources (page@revision)	note
 多爾傑夫	cgroup	Template:CGroup/BUDDYCOMPLEX@77221119	
 多爾吉	char	Little Busters!角色列表@91842236	
 多爾托欽斯	cgroup	Module:CGroup/Danball Senki@81863967	
+多爾芬	cgroup	Module:CGroup/閃電十一人@68657168	
 多爾頓	cgroup	Module:CGroup/OnePiece@83858889	
 多琳	cgroup	Template:CGroup/Mabinogi@50754648	
 多瑪佐	cgroup	Template:CGroup/Reborn@29403199	
@@ -3911,8 +3968,10 @@ word	source_kind	sources (page@revision)	note
 多螢幕	cgroup	Module:CGroup/Games@94658856	
 多話蛇	cgroup	Template:CGroup/妖怪手錶@75937932	
 多諾明哥	cgroup	Template:CGroup/GundamIBO@91631774	
+多路耶	cgroup	Module:CGroup/閃電十一人@68657168	
 多那多那	cgroup	Module:CGroup/Jewelpet@81833309	
 多部田美幸	char	名侦探柯南：第11位前锋@94749116	
+多重反彈射擊	cgroup	Module:CGroup/閃電十一人@68657168	
 多重宇宙	cgroup	Module:CGroup/美国漫画@94638375	
 多重機構背包	cgroup	Module:CGroup/Danball Senki@81863967	
 多雷斯羅薩	cgroup	Module:CGroup/OnePiece@83858889	
@@ -3970,6 +4029,7 @@ word	source_kind	sources (page@revision)	note
 夢柔	char	ONE PIECE STAMPEDE@94401180	
 夢與瘋狂的王國	cgroup	Module:CGroup/Anime@94680982	
 夢色蛋糕師	cgroup	Module:CGroup/Anime@94680982	
+夢蝶凌舞	cgroup	Module:CGroup/閃電十一人@68657168	
 夢見璃亞夢	char	偶像大師 灰姑娘女孩角色列表@91786822	
 夢魘之夜	cgroup	Module:CGroup/My Little Pony@91388064	
 大久保瑠美	cgroup	Module:CGroup/BlueArchive@93972468	zh-hant
@@ -4008,6 +4068,8 @@ word	source_kind	sources (page@revision)	note
 大寶寶	cgroup	Module:CGroup/Pixar@93247177	
 大山可南子	char	妖怪手錶系列@93337229	
 大山猩猩惡靈	char	吊带袜天使@94456883	
+大岩壁	cgroup	Module:CGroup/閃電十一人@68657168	
+大岩山	cgroup	Module:CGroup/閃電十一人@68657168	
 大岩清正	char	回憶中的瑪妮@94615795	
 大岩節	char	回憶中的瑪妮@94615795	
 大怪獸惡靈	char	吊带袜天使@94456883	
@@ -4030,6 +4092,7 @@ word	source_kind	sources (page@revision)	note
 大澤瑞惠	char	刀劍神域角色列表@94550774	
 大澤祥惠	char	刀劍神域角色列表@94550774	
 大灰熊與小旅鼠	cgroup	Module:CGroup/Cartoon@93410586	
+大爆發相撲推手	cgroup	Module:CGroup/閃電十一人@68657168	
 大牡蠣生氣了	cgroup	Module:CGroup/SpongeBob SquarePants@91129493	
 大獄丸	char	犬夜叉角色列表@94790447	
 大王猿猴獸	char	数码宝贝大冒险tri.角色列表@94265439	
@@ -4116,6 +4179,7 @@ word	source_kind	sources (page@revision)	note
 天啟魔	cgroup	Module:CGroup/美国漫画@94638375	
 天城快斗	char	遊戲王ZEXAL@93180378	
 天城晴人	char	遊戲王ZEXAL@93180378	
+天堂時刻	cgroup	Module:CGroup/閃電十一人@68657168	
 天外奇蹟	cgroup	Module:CGroup/Pixar@93247177	
 天天送禮	cgroup	Template:CGroup/Mabinogi@50754648	
 天宮旋	cgroup	Template:CGroup/Pretty Rhythm@77221109	zh-hant
@@ -4141,9 +4205,11 @@ word	source_kind	sources (page@revision)	note
 天王星七式	cgroup	Template:CGroup/GBF@82201572	
 天田士郎	cgroup	Template:CGroup/GundamUC@94693163	
 天空之島	cgroup	Module:CGroup/開闊天空！光之美少女@83218661	
+天空墜擊	cgroup	Module:CGroup/閃電十一人@68657168	
 天空夢幻魔法棒	cgroup	Module:CGroup/開闊天空！光之美少女@83218661	
 天空籽市	cgroup	Module:CGroup/開闊天空！光之美少女@83218661	
 天空羽毛筆	cgroup	Module:CGroup/開闊天空！光之美少女@83218661	
+天空道路	cgroup	Module:CGroup/閃電十一人@68657168	
 天空騎士	cgroup	Module:CGroup/OnePiece@83858889	
 天童遊	char	戰鬥陀螺 鋼鐵奇兵角色列表@94643342	
 天罰術式	cgroup	Template:CGroup/Toaru@89726592	
@@ -4165,7 +4231,9 @@ word	source_kind	sources (page@revision)	note
 天馬明日	char	數碼寶貝覺醒節拍角色列表@94712797	
 天馬無畏	cgroup	Module:CGroup/My Little Pony@91388064	
 天馬獸	char	数码宝贝大冒险：角色列表@94538377	
+天馬隊	cgroup	Module:CGroup/閃電十一人@68657168	
 天馬飛鳥	char	數碼寶貝覺醒節拍角色列表@94712797	
+天體爆裂射門	cgroup	Module:CGroup/閃電十一人@68657168	
 天鳥美馬	char	甲鐵城的卡巴內里@93830519	
 天鷹獸	char	數碼暴龍 LAST EVOLUTION 絆@94708497	
 天龍獸	cgroup	Template:CGroup/Digimon@94687201	
@@ -4178,6 +4246,7 @@ word	source_kind	sources (page@revision)	note
 太田健太郎	char	妖怪手錶系列@93337229	
 太田優	char	偶像大師 灰姑娘女孩角色列表@91786822	
 太田千秋	char	名侦探柯南：天空的遇难船@94562607	
+太空企鵝	cgroup	Module:CGroup/閃電十一人@68657168	
 太空历奇	cgroup	Template:CGroup/Ultraman@94663541	zh-hant
 太空宇宙船賽道	cgroup	Template:CGroup/Crazyracing Kartrider@60141039	
 太空工程車	cgroup	Template:CGroup/StarCraft2@39914602	
@@ -4194,6 +4263,7 @@ word	source_kind	sources (page@revision)	note
 太空驛站	cgroup	Template:CGroup/Crazyracing Kartrider@60141039	
 太金	char	BLEACH角色列表@94571323	
 太陽之子	title	太陽之子 (日法合作動畫)@94098493	
+太陽火焰	cgroup	Module:CGroup/閃電十一人@68657168	
 太陽獅身人面	cgroup	Template:CGroup/Eyeshield21@86998850	
 太陽矢	char	数码宝贝03驯兽师之王角色列表@94744434	
 太陽紋	cgroup	Template:CGroup/Transformers@87179168	
@@ -4214,6 +4284,7 @@ word	source_kind	sources (page@revision)	note
 奇奇與蒂蒂	cgroup	Module:CGroup/Disney@93925402	
 奇奧水晶	cgroup	Template:CGroup/Power Rangers@27638544	zh-hant
 奇妙人生	cgroup	Module:CGroup/Games@94658856	
+奇妙陷阱	cgroup	Module:CGroup/閃電十一人@68657168	
 奇巧計程車	title	奇巧計程車@89552760	
 奇希莉卡	manual	無職轉生	
 奇希里斯	manual	無職轉生	
@@ -4311,6 +4382,7 @@ word	source_kind	sources (page@revision)	note
 奧斯金銀行	cgroup	Template:CGroup/Mabinogi@50754648	
 奧本	char	龍與雀斑公主@94650173	
 奧杜亞	cgroup	Module:CGroup/Wow@94351016	
+奧林帕斯合奏	cgroup	Module:CGroup/閃電十一人@68657168	
 奧核之心	cgroup	Module:CGroup/Wow@94351016	
 奧核之戰	cgroup	Module:CGroup/Wow@94351016	
 奧核之眼	cgroup	Module:CGroup/Wow@94351016	
@@ -4326,6 +4398,7 @@ word	source_kind	sources (page@revision)	note
 奧瓦爾	char	光之美少女@94825358	
 奧科耶	cgroup	Module:CGroup/美国漫画@94638375	
 奧米加	cgroup	Template:CGroup/Transformers@87179168	
+奧美迦協定隊	cgroup	Module:CGroup/閃電十一人@68657168	
 奧菲斯	cgroup	Template:CGroup/Code Geass@70270136	
 奧萊優夫人	char	DARKER THAN BLACK@93233512	
 奧術	cgroup	Module:CGroup/LOL@93322985	
@@ -4355,6 +4428,7 @@ word	source_kind	sources (page@revision)	note
 女浩克	cgroup	Module:CGroup/美国漫画@94638375	
 女獵戶	cgroup	Template:CGroup/Warcraft@92164655	zh-hant
 女王之刃	cgroup	Template:CGroup/Might&Magic@42603917	
+女王騎士	cgroup	Module:CGroup/閃電十一人@68657168	
 女王騎士劍	cgroup	Module:CGroup/SAO@89298185	
 女神戰記	cgroup	Module:CGroup/Square Enix@93012351	
 女神熊獸	char	數碼寶貝覺醒節拍角色列表@94712797	
@@ -4369,6 +4443,7 @@ word	source_kind	sources (page@revision)	note
 好友和精英	cgroup	Module:CGroup/My Little Pony@91388064	
 好奇猴喬治	cgroup	Module:CGroup/Cartoon@93410586	
 好威鐵鎚	cgroup	Module:CGroup/Counter-Strike@85677571	zh-hant
+好市長	cgroup	Template:CGroup/Family Guy@79259281	
 好玩的箱子	cgroup	Module:CGroup/SpongeBob SquarePants@91129493	
 如月峰水	char	名偵探柯南：往天國的倒數計時@94658929	
 如月廣美	cgroup	Template:CGroup/Eyeshield21@86998850	
@@ -4400,6 +4475,7 @@ word	source_kind	sources (page@revision)	note
 妮妮與安安	title	阿爾卑斯物語 我的安妮特@94720095	
 妮拉	cgroup	Module:CGroup/閃電十一人@68657168	
 妮翁	cgroup	Template:CGroup/HUNTER@80241645	
+妮黑蕾亞	cgroup	Template:CGroup/Sailor Moon@93051346	
 妲拉	cgroup	Module:CGroup/Pixar@93247177	
 妲莉雅	cgroup	Template:CGroup/GundamSeed@92969101	
 妲西	cgroup	Template:CGroup/Transformers@87179168	CHECK
@@ -4442,6 +4518,7 @@ word	source_kind	sources (page@revision)	note
 威勒利	cgroup	Template:CGroup/爆丸@31893398	CHECK
 威嚴驅動器	cgroup	Template:CGroup/KamenRider@94225985	
 威士忌山	cgroup	Module:CGroup/OnePiece@83858889	
+威士頓	cgroup	Template:CGroup/黑執事@49361116	
 威夏斯	char	星際牛仔@94702998	
 威寇茲	cgroup	Module:CGroup/LOL@93322985	CHECK
 威尼斯驚魂	cgroup	Module:CGroup/Counter-Strike@85677571	zh-hant
@@ -4499,6 +4576,7 @@ word	source_kind	sources (page@revision)	note
 媽媽象	cgroup	Module:CGroup/PeppaPig@87025478	
 嫉妒的感覺	cgroup	Module:CGroup/My Little Pony@91388064	
 嫦娥獸	cgroup	Template:CGroup/Digimon@94687201	
+嫻慧	cgroup	Template:CGroup/Family Guy@79259281	
 嬉皮笑園	cgroup	Module:CGroup/Anime@94680982	
 孔提歐	cgroup	Template:CGroup/GundamUC@94693163	
 孔雀獸	char	数码宝贝大冒险角色列表@94744369	
@@ -4538,6 +4616,7 @@ word	source_kind	sources (page@revision)	note
 宇宙戰艦大和號	title	宇宙戰艦大和號@94773123	
 宇宙浪子	cgroup	Module:CGroup/Anime@94680982	
 宇宙海賊哈洛克	title	宇宙海賊哈洛克@94585549	
+宇宙炸裂衝擊波	cgroup	Module:CGroup/閃電十一人@68657168	
 宇宙男孩	cgroup	Module:CGroup/Jewelpet@81833309	
 宇宙破壞屋	char	七龍珠Z 地球超級大決戰@93733641	
 宇宙超天王	cgroup	Template:CGroup/Battle Spirits@29023902	
@@ -4597,6 +4676,8 @@ word	source_kind	sources (page@revision)	note
 安曇小太郎	char	月色真美@90814427	
 安曇淳子	char	月色真美@90814427	
 安曇龍之介	char	月色真美@90814427	
+安東拉	cgroup	Template:CGroup/Ultraman@94663541	zh-hant
+安格妮絲	cgroup	Template:CGroup/Mabinogi@50754648	
 安格納	cgroup	Module:CGroup/Frozen@82365390	
 安格魯	char	七龍珠Z 燃燒吧!!熱戰·烈戰·超激戰@93733652	
 安比薩	cgroup	Module:CGroup/LOL@93322985	
@@ -4616,6 +4697,7 @@ word	source_kind	sources (page@revision)	note
 安裘拉斯	char	悲慘世界 少女珂賽特@94720109	
 安赫爾	char	萬里尋親記@94719791	
 安迪米昂	cgroup	Template:CGroup/Toaru@89726592	
+安迪米歐	cgroup	Template:CGroup/Sailor Moon@93051346	
 安迪魯爾	char	BLEACH角色列表@94571323	
 安達利爾	cgroup	Template:CGroup/Diablo@94495831	
 安達拉西亞	cgroup	Module:CGroup/Disney@93925402	
@@ -4628,6 +4710,7 @@ word	source_kind	sources (page@revision)	note
 宋致烈	cgroup	Module:CGroup/Solo Leveling@86308871	
 完全導讀手冊	cgroup	Template:CGroup/FullmetalAlchemist@48481493	
 完全收藏輯	cgroup	Module:CGroup/Square Enix@93012351	
+完美聯合	cgroup	Module:CGroup/閃電十一人@68657168	
 宍戶永明	char	名偵探柯南：第14號獵物@94562556	CHECK
 宗像大司	char	K (動畫)@93234659	
 宗像禮司	char	K (動畫)@93234659	
@@ -4745,6 +4828,7 @@ word	source_kind	sources (page@revision)	note
 寶可夢系列	title	寶可夢系列 (動畫)@90839217	CHECK
 寶可覽	char	劇場版 寶可夢 我們的故事@86542622	CHECK
 寶多金男	char	KILL la KILL@94827565	CHECK
+寶妹	cgroup	Template:CGroup/Adventure Time@90284406	CHECK
 寶拉	cgroup	Template:CGroup/黑執事@49361116	CHECK
 寶斧	char	数码宝贝03驯兽师之王角色列表@94744434	CHECK
 寶物箱	cgroup	Module:CGroup/Counter-Strike@85677571	zh-hant
@@ -4767,8 +4851,10 @@ word	source_kind	sources (page@revision)	note
 寺尾昇	char	星之聲@92143926	
 寺本富子	char	少女與戰車角色列表@93320972	
 寺田瑠奈	char	Smile 光之美少女！@93787006	
+寺端	cgroup	Template:CGroup/Family Guy@79259281	
 寺野	char	哆啦A梦角色列表@94533440	
 射擊獸	char	數碼暴龍App世代角色列表@94177588	
+射門攔截	cgroup	Module:CGroup/閃電十一人@68657168	
 將國戡亂記	cgroup	Module:CGroup/Anime@94680982	
 尋找使命	cgroup	Module:CGroup/My Little Pony@91388064	
 尋找棲所	cgroup	Module:CGroup/Anime@94680982	
@@ -4812,7 +4898,9 @@ word	source_kind	sources (page@revision)	note
 小山柚子	char	少女與戰車角色列表@93320972	
 小山裕子	char	小魔女DoReMi@94721174	
 小島惠美	char	少女與戰車角色列表@93320972	
+小嶋元太	cgroup	Template:CGroup/名偵探柯南@93449521	
 小川莉莉卡	char	小魔女DoReMi@94721174	
+小巨人隊	cgroup	Module:CGroup/閃電十一人@68657168	
 小幽靈	cgroup	Module:CGroup/Minecraft@94388709	
 小彩羽	char	魔法少女小圓角色列表@94590242	
 小快拍	cgroup	Module:CGroup/Pixar@93247177	
@@ -4925,6 +5013,7 @@ word	source_kind	sources (page@revision)	note
 小駿	cgroup	Template:CGroup/爆丸@31893398	
 小鴨宿舍	cgroup	Module:CGroup/Danball Senki@81863967	
 小鷸初登場	cgroup	Module:CGroup/Pixar@93247177	
+小麗	cgroup	Template:CGroup/Sailor Moon@93051346	CHECK
 小麥葛	cgroup	Module:CGroup/Pixar@93247177	
 小麥金	cgroup	Module:CGroup/Pixar@93247177	
 小黑爵	cgroup	Template:CGroup/Crazyracing Kartrider@60141039	
@@ -4933,6 +5022,7 @@ word	source_kind	sources (page@revision)	note
 少女與戰車	title	少女与战车@93117389	
 少女革命	title	少女革命@93843108	
 少年劍道王直角	cgroup	Module:CGroup/Anime@94680982	
+少年啪	cgroup	Template:CGroup/Adventure Time@90284406	
 少年犯罪檔案	cgroup	Module:CGroup/Anime@94680982	
 少年球棒	char	妄想代理人@91610420	
 少根筋小鬼	cgroup	Template:CGroup/妖怪手錶@75937932	
@@ -5118,6 +5208,7 @@ word	source_kind	sources (page@revision)	note
 崔尼提	cgroup	Template:CGroup/Gundam00@70972545	
 崔弗	cgroup	Template:CGroup/Mabinogi@50754648	
 崔弟與傻大貓	cgroup	Module:CGroup/Cartoon@93410586	CHECK
+崔正秀	cgroup	Module:CGroup/閃電十一人@68657168	
 崔瓦因	cgroup	Module:CGroup/Danball Senki@81863967	
 崔絲塔娜	char	少女與戰車角色列表@93320972	CHECK
 崔西	cgroup	Module:CGroup/My Little Pony@91388064	CHECK
@@ -5159,7 +5250,6 @@ word	source_kind	sources (page@revision)	note
 左輪獸	char	数码宝贝大冒险：角色列表@94538377	
 巧克力漩渦	char	光之美少女：食尚甜心@92951245	
 巧克力雲	cgroup	Template:CGroup/魔法咪路咪路@26972197	
-巨人之壁	cgroup	Module:CGroup/Danball Senki@81863967	
 巨人之盾	cgroup	Module:CGroup/Danball Senki@81863967	
 巨人網絡	cgroup	Module:CGroup/Games-zh@90861641	zh-hant
 巨劍刃	cgroup	Template:CGroup/GundamSeed@92969101	
@@ -5169,6 +5259,7 @@ word	source_kind	sources (page@revision)	note
 巨劍型攻擊鋼彈	cgroup	Template:CGroup/GundamSeed@92969101	
 巨劍型脈衝鋼彈	cgroup	Template:CGroup/GundamSeed@92969101	
 巨劍魔像	cgroup	Module:CGroup/SAO@89298185	
+巨型石牢	cgroup	Module:CGroup/閃電十一人@68657168	
 巨型螺旋塔	cgroup	Template:CGroup/StarCraft@73588136	
 巨型貓妖	char	半妖的夜叉姬@87932716	
 巨型鏈錨	cgroup	Template:CGroup/GundamIBO@91631774	
@@ -5184,6 +5275,7 @@ word	source_kind	sources (page@revision)	note
 巨獸禮物箱	cgroup	Module:CGroup/Counter-Strike@85677571	zh-hant
 巨獸雷比亞的採樣	cgroup	Module:CGroup/Counter-Strike@85677571	zh-hant
 巨石峰	cgroup	Module:CGroup/LOL@93322985	
+巨石達摩	cgroup	Module:CGroup/閃電十一人@68657168	
 巨神兵現身東京	cgroup	Module:CGroup/Anime@94680982	
 巨神大杉	cgroup	Module:CGroup/SAO@89298185	
 巨花獸	char	数码宝贝大冒险：角色列表@94538377	
@@ -5265,6 +5357,7 @@ word	source_kind	sources (page@revision)	note
 巴爾獸	char	数码宝贝幽灵游戏角色列表@94560916	CHECK
 巴爾貝羅	char	91Days@89878470	CHECK
 巴特斯	cgroup	Template:CGroup/Mazinger@84157445	CHECK
+巴特普	cgroup	Module:CGroup/閃電十一人@68657168	CHECK
 巴特洛馬	cgroup	Module:CGroup/OnePiece@83858889	CHECK
 巴特獸	cgroup	Template:CGroup/Digimon@94687201	CHECK
 巴索羅繆	cgroup	Module:CGroup/OnePiece@83858889	CHECK
@@ -5410,6 +5503,8 @@ word	source_kind	sources (page@revision)	note
 帕卡多	cgroup	Template:CGroup/GundamUC@94693163	
 帕卡尼亞	cgroup	Template:CGroup/FullmetalAlchemist@48481493	
 帕古洛	cgroup	Module:CGroup/Pixar@93247177	
+帕噠拉薩	cgroup	Template:CGroup/Pichi Pichi Pitch@94608266	
+帕奇納斯	cgroup	Module:CGroup/閃電十一人@68657168	
 帕妮孃	cgroup	Template:CGroup/FullmetalAlchemist@48481493	
 帕娜	cgroup	Module:CGroup/Cyberpunk@85139581	CHECK
 帕布津	char	七龍珠Z：一夫當關的最終決戰～向弗利沙挑戰的Z戰士 孫悟空之父～@93733662	
@@ -5496,6 +5591,7 @@ word	source_kind	sources (page@revision)	note
 幸運草之牆	char	DokiDoki! 光之美少女@93549956	
 幸運草氣球	char	DokiDoki! 光之美少女@93549956	
 幸運超人	cgroup	Module:CGroup/Anime@94680982	
+幻之銀水晶	cgroup	Template:CGroup/Sailor Moon@93051346	
 幻形女王	cgroup	Module:CGroup/My Little Pony@91388064	zh-hant
 幻形好友	cgroup	Module:CGroup/My Little Pony@91388064	
 幻形族的反擊	cgroup	Module:CGroup/My Little Pony@91388064	
@@ -5548,7 +5644,6 @@ word	source_kind	sources (page@revision)	note
 庫克羅斯	cgroup	Template:CGroup/GundamUC@94693163	
 庫力凱	cgroup	Module:CGroup/OnePiece@83858889	
 庫加	cgroup	Module:CGroup/Square Enix@93012351	
-庫卡	cgroup	Module:CGroup/Counter-Strike@85677571	zh-hant
 庫可薇達	cgroup	Template:CGroup/GundamIBO@91631774	
 庫嗶	cgroup	Template:CGroup/HUNTER@80241645	
 庫坦參型	cgroup	Template:CGroup/GundamIBO@91631774	
@@ -5643,6 +5738,7 @@ word	source_kind	sources (page@revision)	note
 弗拉納岡機關	cgroup	Template:CGroup/GundamUC@94693163	
 弗拉迪米爾	cgroup	Module:CGroup/LOL@93322985	
 弗拉達利	char	寶可夢動畫角色列表@93411809	
+弗摩斯	cgroup	Template:CGroup/Sailor Moon@93051346	
 弗朗基	cgroup	Module:CGroup/SPY×FAMILY@86080268	
 弗朗西斯科	char	羅密歐×茱麗葉@78678859	CHECK
 弗洛伊	cgroup	Template:CGroup/GundamAGE@51366593	
@@ -5653,6 +5749,7 @@ word	source_kind	sources (page@revision)	note
 弗瑞迪	cgroup	Module:CGroup/PeppaPig@87025478	zh-hant
 弗羅利安	cgroup	Template:CGroup/進擊的巨人@76977335	
 弗萊特	char	Suite 光之美少女♪@92951168	
+弗萊迪	cgroup	Module:CGroup/閃電十一人@68657168	
 弗蕾亞	cgroup	Module:CGroup/SAO@89298185	
 弗蘭	cgroup	Template:CGroup/Reborn@29403199	
 弗蘭波瓦	cgroup	Template:CGroup/BUDDYCOMPLEX@77221119	
@@ -5666,6 +5763,7 @@ word	source_kind	sources (page@revision)	note
 弱點分析器	cgroup	Module:CGroup/Counter-Strike@85677571	zh-hant
 張瑞秋	char	名偵探柯南：紺青之拳@94666047	
 張麗	char	爆丸@90775249	CHECK
+強力能量防護罩	cgroup	Module:CGroup/閃電十一人@68657168	
 強化人士	cgroup	Template:CGroup/GundamTWFM@82129397	
 強化採集道具	cgroup	Module:CGroup/Counter-Strike@85677571	zh-hant
 強化系	cgroup	Template:CGroup/HUNTER@80241645	zh-hant
@@ -5677,6 +5775,7 @@ word	source_kind	sources (page@revision)	note
 強棒音速	cgroup	Template:CGroup/四驅兄弟@86987120	
 強納森	cgroup	Module:CGroup/Frozen@82365390	
 強襲射門	cgroup	Module:CGroup/Counter-Strike@85677571	zh-hant
+強襲森巴	cgroup	Module:CGroup/閃電十一人@68657168	
 強襲航空艦	cgroup	Template:CGroup/BUDDYCOMPLEX@77221119	
 強襲裝載運輸機	cgroup	Template:CGroup/Gundam00@70972545	
 強霸博士卓奇霸	char	星際寶貝：神奇大冒險@94779708	
@@ -5687,10 +5786,13 @@ word	source_kind	sources (page@revision)	note
 彈正	char	BORUTO-火影新世代-NARUTO NEXT GENERATIONS-角色列表@94842050	
 彈爵	cgroup	Module:CGroup/Games@94658856	
 彈簧狗	cgroup	Module:CGroup/Pixar@93247177	
+彈躍之兔	cgroup	Module:CGroup/閃電十一人@68657168	
 彌托	cgroup	Template:CGroup/NARUTO@86143617	
 彌涅兒娃	cgroup	Template:CGroup/The World God Only Knows@50754307	
 彌香	cgroup	Module:CGroup/BlueArchive@93972468	zh-hant
 彌麥恩	char	死亡遊行@91275771	
+彎月神杖	cgroup	Template:CGroup/Sailor Moon@93051346	
+彗星撞擊	cgroup	Module:CGroup/閃電十一人@68657168	
 彗星獸	char	數碼暴龍App世代角色列表@94177588	
 彗星走法	char	Fate/Apocrypha@90728159	
 彩奈小編	cgroup	Module:CGroup/BlueArchive@93972468	zh-hant
@@ -5698,8 +5800,10 @@ word	source_kind	sources (page@revision)	note
 彩海	cgroup	Template:CGroup/Pretty Rhythm@77221109	zh-hant
 彩瀨鳴	cgroup	Template:CGroup/Pretty Rhythm@77221109	
 彩虹奇幻拱門	cgroup	Template:CGroup/Pretty Rhythm@77221109	
+彩虹姊姊	cgroup	Template:CGroup/Adventure Time@90284406	CHECK
 彩虹小馬大電影	cgroup	Module:CGroup/My Little Pony@91388064	
 彩虹市	cgroup	Template:CGroup/Pokemon@85444397	
+彩虹弧光	cgroup	Module:CGroup/閃電十一人@68657168	
 彩虹搖滾	cgroup	Module:CGroup/My Little Pony@91388064	zh-hant
 彩虹紅光號	cgroup	Template:CGroup/四驅兄弟@86987120	
 彩虹舞台	cgroup	Template:CGroup/Pretty Rhythm@77221109	zh-hant
@@ -5713,6 +5817,7 @@ word	source_kind	sources (page@revision)	note
 彭梅西	char	悲慘世界 少女珂賽特@94720109	CHECK
 彭絲	cgroup	Template:CGroup/HUNTER@80241645	
 影多	cgroup	Module:CGroup/Danball Senki@81863967	
+影子搶奪之術	cgroup	Module:CGroup/閃電十一人@68657168	
 影子籃球員	cgroup	Module:CGroup/Anime@94680982	
 影子飛鏢	cgroup	Template:CGroup/爆丸@31893398	
 影平路易	char	你的顏色@90891573	
@@ -5921,6 +6026,7 @@ word	source_kind	sources (page@revision)	note
 悠咪	cgroup	Module:CGroup/LOL@93322985	
 悠悠哉哉少女日和	cgroup	Module:CGroup/Anime@94680982	
 悠游糖	cgroup	Module:CGroup/Jewelpet@81833309	
+悠莉	cgroup	Template:CGroup/Pichi Pichi Pitch@94608266	
 悠遊模式	cgroup	Module:CGroup/Counter-Strike@85677571	zh-hant
 您的老鼠好友	cgroup	Module:CGroup/Pixar@93247177	
 悲傷木乃伊的孤獨詛咒	cgroup	Module:CGroup/LOL@93322985	
@@ -5959,6 +6065,7 @@ word	source_kind	sources (page@revision)	note
 惡魔十字架	cgroup	Template:CGroup/Eyeshield21@86998850	
 惡魔四度空間	cgroup	Template:CGroup/Eyeshield21@86998850	
 惡魔奶爸	cgroup	Module:CGroup/Anime@94680982	
+惡魔炸裂	cgroup	Module:CGroup/閃電十一人@68657168	
 惡魔短刀	cgroup	Module:CGroup/Danball Senki@81863967	
 惡魔蝙蝠俯衝	cgroup	Template:CGroup/Eyeshield21@86998850	
 惡魔蝙蝠鬼影	cgroup	Template:CGroup/Eyeshield21@86998850	
@@ -5978,6 +6085,7 @@ word	source_kind	sources (page@revision)	note
 愚人眾	cgroup	Module:CGroup/miHoYo@93804723	zh-hant
 愛之女神	cgroup	Template:CGroup/Code Geass@70270136	
 愛之羽	cgroup	Template:CGroup/Crazyracing Kartrider@60141039	
+愛國者飛彈射門	cgroup	Module:CGroup/閃電十一人@68657168	
 愛在雨過天晴時	cgroup	Module:CGroup/Anime@94680982	
 愛塔尼亞	cgroup	Template:CGroup/GBF@82201572	
 愛天使傳說	cgroup	Module:CGroup/Anime@94680982	
@@ -6005,6 +6113,7 @@ word	source_kind	sources (page@revision)	note
 愛芙羅黛蒂	char	Suite 光之美少女♪@92951168	
 愛莉卡	cgroup	Template:CGroup/GundamSeed@92969101	
 愛莉娜	cgroup	Module:CGroup/Jewelpet@81833309	CHECK
+愛莉爾	cgroup	Template:CGroup/Pichi Pichi Pitch@94608266	
 愛蜜莉雅	char	異世界四重奏@93605298	
 愛要說出口	cgroup	Module:CGroup/Frozen@82365390	
 愛酷一族	cgroup	Module:CGroup/Cartoon@93410586	
@@ -6158,6 +6267,7 @@ word	source_kind	sources (page@revision)	note
 戴瑪	cgroup	Template:CGroup/GundamIBO@91631774	
 戴莉婭	char	凱洛與塔斯黛@92015221	
 戴蒙	cgroup	Module:CGroup/KingOfFighters@91481321	
+戴蒙尼歐	cgroup	Module:CGroup/閃電十一人@68657168	
 戴馬溫	cgroup	Template:CGroup/The Witcher@86825096	
 戴魯斯通	cgroup	Module:CGroup/OnePiece@83858889	
 戶張蓮	char	数码宝贝合体战争角色列表@94717250	
@@ -6166,6 +6276,7 @@ word	source_kind	sources (page@revision)	note
 所有奇蹟的起點	cgroup	Module:CGroup/BlueArchive@93972468	zh-hant
 扇喜碧	cgroup	Module:CGroup/BlueArchive@93972468	zh-hant
 扇谷柊彈正	char	半妖的夜叉姬@87932716	
+手榴彈射門	cgroup	Module:CGroup/閃電十一人@68657168	
 手榴彈激鬥模式	cgroup	Module:CGroup/Counter-Strike@85677571	zh-hant
 手槍設計圖	cgroup	Module:CGroup/Counter-Strike@85677571	zh-hant
 手槍類	cgroup	Module:CGroup/Counter-Strike@85677571	zh-hant
@@ -6173,8 +6284,10 @@ word	source_kind	sources (page@revision)	note
 手錶獸	char	數碼暴龍App世代角色列表@94177588	
 才羽桃井	cgroup	Module:CGroup/BlueArchive@93972468	zh-hant
 扎納克	cgroup	Module:CGroup/閃電十一人@68657168	
+扎納克領域	cgroup	Module:CGroup/閃電十一人@68657168	
 扎迦拉	cgroup	Template:CGroup/Heroes of the Storm@49727842	
 打倒魅魔的	cgroup	Template:CGroup/Mabinogi@50754648	
+打入地獄	cgroup	Module:CGroup/閃電十一人@68657168	
 托利里安特	char	光之美少女@94825358	
 托塔獸	cgroup	Template:CGroup/Digimon@94687201	
 托恩	cgroup	Module:CGroup/Frieren@82010966	
@@ -6252,6 +6365,7 @@ word	source_kind	sources (page@revision)	note
 拉弗雷西亞	cgroup	Template:CGroup/GundamUC@94693163	
 拉捷特與克拉克	cgroup	Module:CGroup/Games@94658856	
 拉提努斯	char	能量獸之戰獸旋戰鬥@93872390	
+拉斐葉	cgroup	Module:CGroup/閃電十一人@68657168	
 拉斯多	cgroup	Template:CGroup/FullmetalAlchemist@48481493	
 拉斯普廷	cgroup	Module:CGroup/美国漫画@94638375	
 拉斯納利歐	cgroup	Module:CGroup/SAO@89298185	
@@ -6519,6 +6633,7 @@ word	source_kind	sources (page@revision)	note
 斬魂刀	char	BLEACH角色列表@94571323	
 斬魄刀	char	BLEACH角色列表@94571323	
 斯凱依	cgroup	Template:CGroup/ED@94768974	zh-hant
+斯列特	cgroup	Module:CGroup/閃電十一人@68657168	
 斯卡蒙	cgroup	Template:CGroup/Mazinger@84157445	
 斯卡蒙月球	cgroup	Template:CGroup/Mazinger@84157445	
 斯吉普	char	凱洛與塔斯黛@92015221	
@@ -6536,6 +6651,7 @@ word	source_kind	sources (page@revision)	note
 斯托普	char	Go Princess 光之美少女@94065409	
 斯托洛貝里	cgroup	Module:CGroup/OnePiece@83858889	
 斯托莉亞	char	翠星上的加爾岡緹亞@91223485	
+斯拉達	cgroup	Module:CGroup/閃電十一人@68657168	
 斯摩格	cgroup	Module:CGroup/OnePiece@83858889	
 斯昆提亞	cgroup	Module:CGroup/Square Enix@93012351	
 斯普軟件	cgroup	Module:CGroup/Games-zh@90861641	zh-hant
@@ -6574,6 +6690,7 @@ word	source_kind	sources (page@revision)	note
 新海軍	cgroup	Module:CGroup/OnePiece@83858889	
 新海遙	char	數碼暴龍App世代角色列表@94177588	
 新湯姆與傑利	cgroup	Module:CGroup/Cartoon@93410586	
+新生日本隊	cgroup	Module:CGroup/閃電十一人@68657168	
 新生艾奧傑亞	cgroup	Module:CGroup/Square Enix@93012351	
 新生艾恩葛朗特	cgroup	Module:CGroup/SAO@89298185	
 新田美波	char	偶像大師 灰姑娘女孩角色列表@91786822	
@@ -6603,7 +6720,10 @@ word	source_kind	sources (page@revision)	note
 旋繞於心的想法	cgroup	Template:CGroup/GundamTWFM@82129397	
 旋膛加農砲	cgroup	Template:CGroup/GundamIBO@91631774	
 旋轉木馬精品屋	cgroup	Module:CGroup/My Little Pony@91388064	zh-hant
+旋風上升	cgroup	Module:CGroup/閃電十一人@68657168	
+旋風之術	cgroup	Module:CGroup/閃電十一人@68657168	
 旋風使者	cgroup	Module:CGroup/Minecraft@94388709	
+旋風墜擊	cgroup	Module:CGroup/閃電十一人@68657168	
 旋風小飛俠	cgroup	Module:CGroup/Anime@94680982	
 旋風擺蓮腿	cgroup	Template:CGroup/Mabinogi@50754648	
 旋風斬奸	char	KILL la KILL@94827565	
@@ -6649,6 +6769,7 @@ word	source_kind	sources (page@revision)	note
 日渡謙治	char	花開物語@94760130	
 日置順子	char	高校艦隊@93341996	
 日輪呀	char	Fate/Apocrypha@90728159	CHECK
+日輪聖劍	cgroup	Module:CGroup/閃電十一人@68657168	
 日野元氣	char	Smile 光之美少女！@93787006	
 日野茜	char	偶像大師 灰姑娘女孩角色列表@91786822	
 日高曉	char	K (動畫)@93234659	
@@ -6672,6 +6793,7 @@ word	source_kind	sources (page@revision)	note
 明堂院皋	char	Heartcatch 光之美少女！@94574540	
 明天加油女孩	cgroup	Template:CGroup/妖怪手錶@75937932	
 明斯理	cgroup	Template:CGroup/GundamAGE@51366593	
+明日之星足球大賽	cgroup	Module:CGroup/閃電十一人@68657168	
 明日之槍	cgroup	Module:CGroup/Danball Senki@81863967	
 明日野	cgroup	Template:CGroup/GundamAGE@51366593	
 明星花鈴	char	Go Princess 光之美少女@94065409	
@@ -6751,9 +6873,11 @@ word	source_kind	sources (page@revision)	note
 是露	char	半妖的夜叉姬@87932716	
 時光布	cgroup	Module:CGroup/Doraemon@88509940	
 時尚生活組合	cgroup	Template:CGroup/Sim@37867988	
+時空之石	cgroup	Module:CGroup/閃電十一人@68657168	
 時空大冒險	cgroup	Module:CGroup/蠟筆小新@93760288	
 時空幻境	cgroup	Module:CGroup/Tales@54832633	
 時空悍將	cgroup	Module:CGroup/Games@94658856	
+時空障壁	cgroup	Module:CGroup/閃電十一人@68657168	
 時籠百合	char	回转企鹅罐@94635162	
 時鐘獸	char	数码宝贝幽灵游戏角色列表@94560916	
 時間困境	cgroup	Module:CGroup/美国漫画@94638375	
@@ -6824,9 +6948,12 @@ word	source_kind	sources (page@revision)	note
 暗影獵人	cgroup	Template:CGroup/Warcraft@92164655	zh-hant
 暗影神偷	cgroup	Template:CGroup/MapleStory@57794822	
 暗影老師	cgroup	Template:CGroup/妖怪手錶@75937932	
+暗影龍捲風	cgroup	Module:CGroup/閃電十一人@68657168	
 暗德谷	cgroup	Module:CGroup/開闊天空！光之美少女@83218661	
 暗森	char	灰羽連盟@94642936	
+暗黑帝王隊	cgroup	Module:CGroup/閃電十一人@68657168	
 暗黑戰狼	cgroup	Template:CGroup/戰鬥陀螺 鋼鐵奇兵@68490308	
+暗黑死光	cgroup	Module:CGroup/閃電十一人@68657168	
 暗黑爆丸	cgroup	Template:CGroup/爆丸@31893398	
 暗黑爆丸毀滅神	cgroup	Template:CGroup/爆丸@31893398	
 暗黑獸	cgroup	Template:CGroup/Digimon@94687201	
@@ -6858,6 +6985,7 @@ word	source_kind	sources (page@revision)	note
 暴風艦	cgroup	Template:CGroup/StarCraft2@39914602	
 暴風魔羯	cgroup	Template:CGroup/戰鬥陀螺 鋼鐵奇兵@68490308	
 暴鯉龍	cgroup	Template:CGroup/Pokemon@85444397	
+暴龍屠殺斬	cgroup	Module:CGroup/閃電十一人@68657168	
 暴龍金剛	cgroup	Template:CGroup/Transformers@87179168	
 暴龍魔爪	cgroup	Module:CGroup/Counter-Strike@85677571	zh-hant
 曉數碼	cgroup	Module:CGroup/Games-zh@90861641	zh-hant
@@ -6898,6 +7026,7 @@ word	source_kind	sources (page@revision)	note
 最終的絕望	cgroup	Module:CGroup/Counter-Strike@85677571	zh-hant
 最終的線索	cgroup	Module:CGroup/Counter-Strike@85677571	zh-hant
 最終騎士	cgroup	Template:CGroup/Transformers@87179168	
+會移動的球門	cgroup	Module:CGroup/閃電十一人@68657168	
 月不落城	cgroup	Template:CGroup/Crazyracing Kartrider@60141039	
 月之女神鋼彈	cgroup	Template:CGroup/Gundam00@70972545	
 月之橋	cgroup	Template:CGroup/MapleStory@57794822	
@@ -6988,6 +7117,7 @@ word	source_kind	sources (page@revision)	note
 木蘭號	cgroup	Template:CGroup/Mazinger@84157445	
 木蘭飛彈	cgroup	Template:CGroup/Mazinger@84157445	
 木蘭飛翼	cgroup	Template:CGroup/Mazinger@84157445	
+木衞三磁場風暴	cgroup	Module:CGroup/閃電十一人@68657168	
 木谷友美	char	名偵探柯南：漆黑的追跡者@94634868	
 木酉	char	異邦人 無皇刃譚@86100576	
 木野真琴	char	美少女戰士角色列表@94852109	
@@ -7213,7 +7343,6 @@ word	source_kind	sources (page@revision)	note
 查米	char	音速小子X@94737938	
 查米山田	char	IQ博士角色列表@92724875	
 柯修巴	char	悲慘世界 少女珂賽特@94720109	CHECK
-柯倫	cgroup	Template:CGroup/Mabinogi@50754648	
 柯克夫人	char	愛的小婦人物語@94856165	
 柯內弗	cgroup	Template:CGroup/BUDDYCOMPLEX@77221119	
 柯列佛	cgroup	Module:CGroup/OnePiece@83858889	
@@ -7336,6 +7465,7 @@ word	source_kind	sources (page@revision)	note
 桃山平太	char	BLEACH角色列表@94571323	
 桃果人	char	犬夜叉角色列表@94790447	
 桃花仙境	cgroup	Template:CGroup/MapleStory@57794822	
+桌上足球戰法	cgroup	Module:CGroup/閃電十一人@68657168	
 桌遊歷險	cgroup	Module:CGroup/My Little Pony@91388064	
 桐嶋夏也	char	Free!@93607624	
 桐嶋郁彌	char	Free!@93607624	
@@ -7364,6 +7494,7 @@ word	source_kind	sources (page@revision)	note
 桑雅	cgroup	Template:CGroup/Heroes of the Storm@49727842	
 桔梗屋利兵衛	char	機靈小和尚@92445221	
 桔梗屋彌生	char	機靈小和尚@92445221	
+桶峽間防壁	cgroup	Module:CGroup/閃電十一人@68657168	
 梁琪	char	CANAAN@94727525	
 梅亞	cgroup	Template:CGroup/打工吧！魔王大人@40273238	
 梅仁愛	cgroup	Module:CGroup/Pixar@93247177	
@@ -7485,16 +7616,22 @@ word	source_kind	sources (page@revision)	note
 極地區	cgroup	Module:CGroup/Disney@93925402	
 極地戰嚎	cgroup	Module:CGroup/Games@94658856	
 極地死鬥	cgroup	Module:CGroup/Counter-Strike@85677571	zh-hant
+極地衝擊	cgroup	Module:CGroup/閃電十一人@68657168	
+極寒颶風	cgroup	Module:CGroup/閃電十一人@68657168	
+極強音律射門	cgroup	Module:CGroup/閃電十一人@68657168	
 極樂大作戰	cgroup	Module:CGroup/Anime@94680982	
+極致胸膛	cgroup	Module:CGroup/閃電十一人@68657168	
 極訓育師	cgroup	Template:CGroup/Digimon@94687201	
 極速飆風	cgroup	Module:CGroup/Counter-Strike@85677571	zh-hant
 極道狂徒	cgroup	Module:CGroup/Counter-Strike@85677571	zh-hant
 極道雙刃	cgroup	Module:CGroup/Counter-Strike@85677571	zh-hant
 極限共和國	cgroup	Module:CGroup/Games@94658856	
 極限動物	cgroup	Template:CGroup/Transformers@87179168	
+極限合體	cgroup	Module:CGroup/閃電十一人@68657168	
 極限戰士	cgroup	Module:CGroup/Anime@94680982	
 極限生死戰	cgroup	Module:CGroup/Counter-Strike@85677571	zh-hant
 極限超載	cgroup	Module:CGroup/美国漫画@94638375	
+極限零度	cgroup	Module:CGroup/閃電十一人@68657168	
 極靈	cgroup	Module:CGroup/LOL@93322985	
 概影	cgroup	Module:CGroup/LOL@93322985	
 榊兵部	char	獸兵衛忍風帖@94218789	
@@ -7558,6 +7695,7 @@ word	source_kind	sources (page@revision)	note
 橘真琴	char	Free!@93607624	
 橘真由美	char	Heartcatch 光之美少女！@94574540	
 橘讓	char	漂流家園@87146899	
+橙色真珠音調	cgroup	Template:CGroup/Pichi Pichi Pitch@94608266	
 橙黃白毫	char	少女與戰車角色列表@93320972	
 機動戰士鋼彈	title	機動戰士GUNDAM@94721023	
 機器人學校七大怪談	cgroup	Module:CGroup/Doraemon@88509940	
@@ -7596,6 +7734,7 @@ word	source_kind	sources (page@revision)	note
 橫山千佳	char	偶像大師 灰姑娘女孩角色列表@91786822	
 橫川信子	char	小魔女DoReMi@94721174	
 橫川龍太	char	光之美少女：食尚甜心@92951245	
+檔案夾空間	cgroup	Module:CGroup/閃電十一人@68657168	
 檔案島	cgroup	Template:CGroup/Digimon@94687201	
 檜原光	char	名偵探柯南角色列表@94461808	
 檢定比賽	cgroup	Module:CGroup/SAO@89298185	
@@ -7622,7 +7761,9 @@ word	source_kind	sources (page@revision)	note
 權力點	cgroup	Module:CGroup/LOL@93322985	
 權天使鋼彈	cgroup	Template:CGroup/Gundam00@70972545	
 權現坂昇	char	遊戲王ARC-V@93483654	
+次世代少年	cgroup	Module:CGroup/閃電十一人@68657168	
 次代鋼彈	cgroup	Template:CGroup/GundamW@87064245	
+次元口袋	cgroup	Module:CGroup/閃電十一人@68657168	
 次元艦隊	cgroup	Module:CGroup/Anime@94680982	
 次郎丸太郎	char	花開物語@94760130	
 歇士達	char	聖天空戰記@94720493	
@@ -7694,6 +7835,7 @@ word	source_kind	sources (page@revision)	note
 正義女神鋼彈	cgroup	Template:CGroup/Gundam00@70972545	
 正義戰士	cgroup	Module:CGroup/Cartoon@93410586	
 正義海盜船長	cgroup	Template:CGroup/Crazyracing Kartrider@60141039	
+正義的鐵拳	cgroup	Module:CGroup/閃電十一人@68657168	
 正義聯盟	cgroup	Module:CGroup/美国漫画@94638375	zh-hant
 正義聯盟大戰少年悍將	cgroup	Module:CGroup/美国漫画@94638375	
 正義聯盟大戰末日軍團	cgroup	Module:CGroup/美国漫画@94638375	
@@ -7721,6 +7863,7 @@ word	source_kind	sources (page@revision)	note
 武裝進化	cgroup	Template:CGroup/Digimon@94687201	
 武部沙織	char	少女與戰車角色列表@93320972	
 武陵桃園	cgroup	Template:CGroup/MapleStory@57794822	
+歪曲空間	cgroup	Module:CGroup/閃電十一人@68657168	
 歸來的超人	cgroup	Template:CGroup/Ultraman@94663541	
 歸來的超人力霸王	cgroup	Template:CGroup/Ultraman@94663541	
 死亡代理人	title	死亡代理人@93463069	
@@ -7732,10 +7875,12 @@ word	source_kind	sources (page@revision)	note
 死亡燃燒獸	char	數碼寶貝覺醒節拍角色列表@94712797	
 死亡獸	char	数码宝贝大冒险：角色列表@94538377	
 死亡礦坑	cgroup	Module:CGroup/Wow@94351016	
+死亡終結	cgroup	Module:CGroup/閃電十一人@68657168	
 死亡羽蛇	cgroup	Template:CGroup/戰鬥陀螺 鋼鐵奇兵@68490308	
 死亡華爾茲兄弟	cgroup	Module:CGroup/Danball Senki@81863967	
 死亡遊行	title	死亡遊行@91275771	
 死亡金屬大叔	char	佐賀偶像是傳奇@94005232	
+死亡領域	cgroup	Module:CGroup/閃電十一人@68657168	
 死亡騎士	char	異世界四重奏@93605298	
 死亡鷲獅	cgroup	Module:CGroup/Danball Senki@81863967	
 死侍	cgroup	Module:CGroup/美国漫画@94638375	
@@ -7805,6 +7950,8 @@ word	source_kind	sources (page@revision)	note
 毀滅手榴彈	cgroup	Module:CGroup/Counter-Strike@85677571	zh-hant
 毀滅時鐘	cgroup	Template:CGroup/戰鬥陀螺 鋼鐵奇兵@68490308	
 毀滅模式	cgroup	Template:CGroup/GundamUC@94693163	
+毀滅行動	cgroup	Template:CGroup/Transformers@87179168	zh-hant
+毀滅風暴	cgroup	Module:CGroup/閃電十一人@68657168	
 毁魔鋼彈	cgroup	Template:CGroup/GundamIBO@91631774	
 母親和孤兒	char	高譚角色列表@92146409	
 每日任務	cgroup	Module:CGroup/Counter-Strike@85677571	zh-hant
@@ -7835,6 +7982,7 @@ word	source_kind	sources (page@revision)	note
 比爾朵	cgroup	Template:CGroup/GundamIBO@91631774	
 比琪	char	能量獸之戰獸旋戰鬥@93872390	
 比盧海魯姆	cgroup	Template:CGroup/BUDDYCOMPLEX@77221119	
+比翁	cgroup	Module:CGroup/閃電十一人@68657168	
 比良平千咲	char	来自风平浪静的明天@94727749	
 比良拓海	char	月色真美@90814427	CHECK
 比茲獸	char	數碼寶貝覺醒節拍角色列表@94712797	CHECK
@@ -7866,10 +8014,21 @@ word	source_kind	sources (page@revision)	note
 水島綾	char	Heartcatch 光之美少女！@94574540	
 水嶌光良	char	光之美少女：食尚甜心@92951245	
 水川正輝	char	名侦探柯南：天空的遇难船@94562607	
+水幕爆破	cgroup	Module:CGroup/閃電十一人@68657168	
 水平四方斬	cgroup	Module:CGroup/SAO@89298185	
+水手冥王星	cgroup	Template:CGroup/Sailor Moon@93051346	
+水手土星	cgroup	Template:CGroup/Sailor Moon@93051346	
+水手天王星	cgroup	Template:CGroup/Sailor Moon@93051346	
+水手小月亮	cgroup	Template:CGroup/Sailor Moon@93051346	
+水手月亮	cgroup	Template:CGroup/Sailor Moon@93051346	
+水手木星	cgroup	Template:CGroup/Sailor Moon@93051346	
+水手水星	cgroup	Template:CGroup/Sailor Moon@93051346	
+水手海王星	cgroup	Template:CGroup/Sailor Moon@93051346	
+水手火星	cgroup	Template:CGroup/Sailor Moon@93051346	
 水手號合作社	cgroup	Template:CGroup/GundamIBO@91631774	
 水手號商會	cgroup	Template:CGroup/GundamIBO@91631774	
 水手號市	cgroup	Template:CGroup/GundamIBO@91631774	
+水手金星	cgroup	Template:CGroup/Sailor Moon@93051346	
 水族部落	cgroup	Template:CGroup/降世神通@43998034	
 水星一式	cgroup	Template:CGroup/GBF@82201572	
 水晶之歌森林	cgroup	Module:CGroup/Wow@94351016	
@@ -7890,6 +8049,7 @@ word	source_kind	sources (page@revision)	note
 水無瀨佳織	char	PSYCHO-PASS角色列表@93403235	
 水牛和蘋果樹	cgroup	Module:CGroup/My Little Pony@91388064	
 水田加奈	char	名侦探柯南：沉默的15分钟@94454904	
+水色真珠音調	cgroup	Template:CGroup/Pichi Pichi Pitch@94608266	
 水虎魚獸	char	數碼寶貝覺醒節拍角色列表@94712797	CHECK
 水蠆式	cgroup	Template:CGroup/Gundam00@70972545	
 水谷浩介	char	名偵探柯南：漆黑的追跡者@94634868	
@@ -7909,6 +8069,7 @@ word	source_kind	sources (page@revision)	note
 永原翔	char	月色真美@90814427	
 永恆之闇	cgroup	Module:CGroup/Games@94658856	
 永恆傳奇	cgroup	Module:CGroup/Tales@54832633	
+永恆暴風雪	cgroup	Module:CGroup/閃電十一人@68657168	
 永恆精靈	char	光之美少女@94825358	
 永恆系統	cgroup	Template:CGroup/ED@94768974	zh-hant
 永恆紀元	cgroup	Module:CGroup/Games@94658856	
@@ -7990,6 +8151,7 @@ word	source_kind	sources (page@revision)	note
 沙地蜻蜓獸	char	数码宝贝大冒险：角色列表@94538377	
 沙地龍獸	char	數碼寶貝覺醒節拍角色列表@94712797	
 沙坎	cgroup	Module:CGroup/Jewelpet@81833309	
+沙塵切割	cgroup	Module:CGroup/閃電十一人@68657168	
 沙多克里夫	cgroup	Template:CGroup/黑執事@49361116	
 沙德威斯坦	cgroup	Module:CGroup/Cyberpunk@85139581	
 沙悟獸	char	數碼寶貝覺醒節拍角色列表@94712797	
@@ -7997,6 +8159,7 @@ word	source_kind	sources (page@revision)	note
 沙曼	char	高譚角色列表@92146409	
 沙梁	char	甲鐵城的卡巴內里@93830519	
 沙海穗香	char	數碼寶貝覺醒節拍角色列表@94712797	
+沙漠之獅隊	cgroup	Module:CGroup/閃電十一人@68657168	
 沙漠區	cgroup	Module:CGroup/Disney@93925402	
 沙漠強襲	cgroup	Module:CGroup/Counter-Strike@85677571	zh-hant
 沙漠惡魔	char	Heartcatch 光之美少女！@94574540	
@@ -8056,6 +8219,7 @@ word	source_kind	sources (page@revision)	note
 法里德	cgroup	Template:CGroup/GundamIBO@91631774	
 泛用語	cgroup	Module:CGroup/SAO@89298185	
 泡泡先生	cgroup	Module:CGroup/Cartoon@93410586	
+泡泡王子	cgroup	Template:CGroup/Adventure Time@90284406	
 泡芙阿姨	cgroup	Module:CGroup/SpongeBob SquarePants@91129493	
 泡芙阿姨失業了	cgroup	Module:CGroup/SpongeBob SquarePants@91129493	
 波佐間光	char	戰鬥陀螺 鋼鐵奇兵角色列表@94643342	
@@ -8107,6 +8271,7 @@ word	source_kind	sources (page@revision)	note
 泰利	char	長腿叔叔 (動畫)@94856329	
 泰利特	char	高立的未來世界@90116301	
 泰坦巨劍	cgroup	Module:CGroup/Counter-Strike@85677571	zh-hant
+泰山神踢	cgroup	Module:CGroup/閃電十一人@68657168	
 泰德	char	湯姆歷險記 (動畫)@94720074	
 泰拉	char	高立的未來世界@90116301	
 泰晤士伯爵	char	航海王電影：GOLD@93412929	
@@ -8119,6 +8284,7 @@ word	source_kind	sources (page@revision)	note
 泰迪老爹	cgroup	Template:CGroup/GundamIBO@91631774	
 泳魚獸	char	数码宝贝大冒险：角色列表@94538377	
 洗澡囉	cgroup	Module:CGroup/SpongeBob SquarePants@91129493	CHECK
+洗牌同盟	cgroup	Template:CGroup/GGundam@85035825	
 洛伊	cgroup	Template:CGroup/小魔女DoReMi@65858319	
 洛克斯塔	cgroup	Module:CGroup/閃電十一人@68657168	
 洛克斯達	cgroup	Module:CGroup/OnePiece@83858889	
@@ -8154,9 +8320,12 @@ word	source_kind	sources (page@revision)	note
 派拉斯	cgroup	Template:CGroup/Pokemon@85444397	
 派拉斯特	cgroup	Template:CGroup/Pokemon@85444397	
 派瑞克	cgroup	Template:CGroup/Mabinogi@50754648	
+派翠克夫	cgroup	Template:CGroup/Adventure Time@90284406	
 派葛亞	cgroup	Module:CGroup/OnePiece@83858889	
 派蒂和道格	char	高譚角色列表@92146409	
 流刃若火	char	BLEACH角色列表@94571323	
+流星之刃	cgroup	Module:CGroup/閃電十一人@68657168	
+流星射手	cgroup	Module:CGroup/閃電十一人@68657168	
 流星花園	cgroup	Module:CGroup/Anime@94680982	
 流氓喵	cgroup	Template:CGroup/妖怪手錶@75937932	
 流氓熊貓	cgroup	Template:CGroup/Pokemon@85444397	
@@ -8188,6 +8357,7 @@ word	source_kind	sources (page@revision)	note
 海加	cgroup	Template:CGroup/GundamTWFM@82129397	
 海加爾山	cgroup	Module:CGroup/Wow@94351016	
 海咪	cgroup	Module:CGroup/OnePiece@83858889	
+海嘯障壁	cgroup	Module:CGroup/閃電十一人@68657168	
 海因凱爾	cgroup	Template:CGroup/FullmetalAlchemist@48481493	
 海因德里	cgroup	Template:CGroup/GundamTWFM@82129397	
 海塔	cgroup	Module:CGroup/Frieren@82010966	
@@ -8205,6 +8375,7 @@ word	source_kind	sources (page@revision)	note
 海格拉斯	cgroup	Module:CGroup/OnePiece@83858889	
 海江田藤伍	char	名偵探柯南：唐紅的戀歌@94765694	
 海洋奇緣	cgroup	Module:CGroup/Disney@93925402	
+海洋颶風	cgroup	Module:CGroup/閃電十一人@68657168	
 海渡	cgroup	Template:CGroup/GundamSeed@92969101	
 海潮王座	cgroup	Module:CGroup/Wow@94351016	
 海灣觀察者	char	吊带袜天使@94456883	
@@ -8214,7 +8385,6 @@ word	source_kind	sources (page@revision)	note
 海特	cgroup	Module:CGroup/Pixar@93247177	
 海獸之子	cgroup	Module:CGroup/Anime@94680982	
 海王星八式	cgroup	Template:CGroup/GBF@82201572	
-海王滿	char	美少女戰士角色列表@94852109	
 海瓦茲	cgroup	Template:CGroup/ED@94768974	CHECK,zh-hant
 海盜危機大逃亡	cgroup	Template:CGroup/Crazyracing Kartrider@60141039	
 海盜懸崖上的決鬥	cgroup	Template:CGroup/Crazyracing Kartrider@60141039	
@@ -8298,6 +8468,9 @@ word	source_kind	sources (page@revision)	note
 混沌之體	cgroup	Template:CGroup/Mabinogi@50754648	
 混沌慾望怪	char	魔法使光之美少女！@94758670	
 混沌武士	title	混沌武士@93915699	
+混沌炸裂	cgroup	Module:CGroup/閃電十一人@68657168	
+混沌爆烈	cgroup	Module:CGroup/閃電十一人@68657168	
+混沌紀元	cgroup	Module:CGroup/閃電十一人@68657168	
 混沌超人	cgroup	Template:CGroup/Ultraman@94663541	
 混混妖	cgroup	Template:CGroup/妖怪手錶@75937932	
 混源體	cgroup	Template:CGroup/StarCraft@73588136	
@@ -8360,6 +8533,7 @@ word	source_kind	sources (page@revision)	note
 湯瑪士小火車	cgroup	Module:CGroup/Cartoon@93410586	
 源八	char	獸兵衛忍風帖@94218789	
 源櫻	char	佐賀偶像是傳奇@94005232	
+源種	cgroup	Module:CGroup/閃電十一人@68657168	
 源義經	char	名偵探柯南：迷宮的十字路@94462568	
 源輝二	char	數碼寶貝04無限地帶角色列表@94744460	
 源造	cgroup	Module:CGroup/OnePiece@83858889	
@@ -8390,6 +8564,7 @@ word	source_kind	sources (page@revision)	note
 漁野大	char	Free!@93607624	
 漂泊遊子	cgroup	Template:CGroup/Heroes of the Storm@49727842	
 漆黑的反叛者	cgroup	Module:CGroup/Square Enix@93012351	
+演奏者馬耶斯特羅	cgroup	Module:CGroup/閃電十一人@68657168	
 漢凱格	cgroup	Template:CGroup/GundamUC@94693163	
 漢妮根	cgroup	Module:CGroup/ResidentEvil@94612703	
 漢尼斯	cgroup	Template:CGroup/進擊的巨人@76977335	
@@ -8509,11 +8684,14 @@ word	source_kind	sources (page@revision)	note
 火影顏岩	cgroup	Template:CGroup/NARUTO@86143617	
 火星四式	cgroup	Template:CGroup/GBF@82201572	
 火村	cgroup	Module:CGroup/OshinoKo@84428949	
+火槍彈丸	cgroup	Module:CGroup/閃電十一人@68657168	
 火浦元	char	東之伊甸@92226285	
 火源之界	cgroup	Module:CGroup/Wow@94351016	
 火源的怒焰	cgroup	Module:CGroup/Wow@94351016	
+火焰之舞	cgroup	Module:CGroup/閃電十一人@68657168	
 火焰兄弟	char	凱洛與塔斯黛@92015221	
 火焰獸	char	数码宝贝大冒险角色列表@94744369	
+火焰神龍隊	cgroup	Module:CGroup/閃電十一人@68657168	
 火焰英雄	cgroup	Template:CGroup/MyHeroAcademia@87565804	
 火焰魔君	cgroup	Template:CGroup/Warcraft@92164655	zh-hant
 火焰鳥	cgroup	Template:CGroup/Pokemon@85444397	
@@ -8532,7 +8710,6 @@ word	source_kind	sources (page@revision)	note
 火線登陸	cgroup	Module:CGroup/Wow@94351016	
 火美	char	蒼鷺與少年@94140876	
 火車車庫	cgroup	Module:CGroup/Counter-Strike@85677571	zh-hant
-火野麗	char	美少女戰士角色列表@94852109	CHECK
 灰刃坊	char	犬夜叉角色列表@94790447	
 灰塵精靈	char	龙猫@93245446	
 灰嶋羅登	char	爆旋陀螺Burst@94644099	
@@ -8550,10 +8727,12 @@ word	source_kind	sources (page@revision)	note
 災厄之第三章	cgroup	Module:CGroup/Counter-Strike@85677571	zh-hant
 災厄之第二章	cgroup	Module:CGroup/Counter-Strike@85677571	zh-hant
 災厄復仇者	cgroup	Module:CGroup/Counter-Strike@85677571	zh-hant
+災厄爆破	cgroup	Module:CGroup/閃電十一人@68657168	
 災厄軍團戰	cgroup	Module:CGroup/Counter-Strike@85677571	zh-hant
 災厄降臨	cgroup	Module:CGroup/Counter-Strike@85677571	zh-hant
 災禍驅動擊	cgroup	Module:CGroup/Danball Senki@81863967	
 災骸魔神	cgroup	Module:CGroup/Counter-Strike@85677571	zh-hant
+炎之風向雞	cgroup	Module:CGroup/閃電十一人@68657168	
 炎凪	char	舞-HiME角色列表@91610502	
 炎咒	char	B傳說！戰鬥彈珠人@94175384	
 炎天使獸	cgroup	Template:CGroup/Digimon@94687201	
@@ -8572,10 +8751,13 @@ word	source_kind	sources (page@revision)	note
 為誰辛苦為誰忙	cgroup	Module:CGroup/My Little Pony@91388064	
 烈子	char	衝吧烈子@91183058	
 烈火之炎	cgroup	Module:CGroup/Anime@94680982	
+烈火冰風暴	cgroup	Module:CGroup/閃電十一人@68657168	
 烈火國	cgroup	Template:CGroup/降世神通@43998034	
+烈火巨炎	cgroup	Module:CGroup/閃電十一人@68657168	
 烈火戰狼	cgroup	Template:CGroup/戰鬥陀螺 鋼鐵奇兵@68490308	
 烈火獨角龍	char	爆丸5星域爭霸@90756067	
 烈火王	cgroup	Template:CGroup/降世神通@43998034	
+烈火衝撞	cgroup	Module:CGroup/閃電十一人@68657168	
 烈火騎士	char	爆丸5星域爭霸@90756067	
 烈火鳳凰	cgroup	Template:CGroup/戰鬥陀螺 鋼鐵奇兵@68490308	
 烈焰使者	cgroup	Module:CGroup/Minecraft@94388709	
@@ -8587,11 +8769,14 @@ word	source_kind	sources (page@revision)	note
 烈焰火球	cgroup	Template:CGroup/Yes! 光之美少女5@89217113	
 烈焰猛蜥	char	爆丸5星域爭霸@90756067	
 烈焰獸	cgroup	Template:CGroup/Digimon@94687201	
+烈焰鳳凰	cgroup	Module:CGroup/閃電十一人@68657168	
+烈焰龍捲風	cgroup	Module:CGroup/閃電十一人@68657168	
 烈燄競賽	cgroup	Module:CGroup/My Little Pony@91388064	
 烈雀	cgroup	Template:CGroup/Pokemon@85444397	
 烈風山羊	cgroup	Template:CGroup/戰鬥陀螺 鋼鐵奇兵@68490308	
 烏丸美穗	char	禁獵魔女@94041811	
 烏亥	cgroup	Template:CGroup/GundamIBO@91631774	
+烏兒碧妲	cgroup	Module:CGroup/閃電十一人@68657168	
 烏南	char	ONE PIECE 黃金島大冒險@93015050	
 烏卡比	cgroup	Module:CGroup/美国漫画@94638375	
 烏巴	cgroup	Template:CGroup/DragonBall@92325756	CHECK
@@ -8617,6 +8802,7 @@ word	source_kind	sources (page@revision)	note
 無幻	char	混沌武士@93915699	
 無序的嫉妒	cgroup	Module:CGroup/My Little Pony@91388064	
 無形女俠	cgroup	Template:CGroup/MyHeroAcademia@87565804	
+無懈可擊的騎士團	cgroup	Module:CGroup/閃電十一人@68657168	
 無懼的勇士	cgroup	Module:CGroup/LOL@93322985	
 無懼選角	cgroup	Module:CGroup/LOL@93322985	
 無我極境	cgroup	Template:CGroup/DragonBall@92325756	
@@ -8629,12 +8815,14 @@ word	source_kind	sources (page@revision)	note
 無敵隊	cgroup	Template:CGroup/KamenRider@94225985	
 無敵龍捲風	cgroup	Module:CGroup/Anime@94680982	
 無星夜的詠嘆調	cgroup	Module:CGroup/SAO@89298185	
+無死角區域壓制	cgroup	Module:CGroup/閃電十一人@68657168	
 無法盜取的寶石	cgroup	Module:CGroup/Square Enix@93012351	
 無界煉獄	cgroup	Module:CGroup/Counter-Strike@85677571	zh-hant
 無畏惡魔	cgroup	Template:CGroup/妖怪手錶@75937932	
 無畏狂戰	cgroup	Module:CGroup/Counter-Strike@85677571	zh-hant
 無盡傳奇	cgroup	Module:CGroup/Tales@54832633	
 無臉男	char	千与千寻@94787677	
+無賴神掌	cgroup	Module:CGroup/閃電十一人@68657168	
 無間特攻	cgroup	Module:CGroup/Games@94658856	
 無限劍製	cgroup	Module:CGroup/Anime@94680982	zh-hant
 無限加魯魯	cgroup	Template:CGroup/Digimon@94687201	
@@ -8680,6 +8868,7 @@ word	source_kind	sources (page@revision)	note
 熊貓釀酒師	cgroup	Template:CGroup/Warcraft@92164655	zh-hant
 熊魔王傳說	cgroup	Module:CGroup/Pixar@93247177	
 熔岩冥王	cgroup	Template:CGroup/戰鬥陀螺 鋼鐵奇兵@68490308	
+熔岩斷層	cgroup	Module:CGroup/閃電十一人@68657168	
 熱力追緝	cgroup	Module:CGroup/Games@94658856	
 熱區	cgroup	Template:CGroup/Transformers@87179168	
 熱帶代表隊	cgroup	Template:CGroup/四驅兄弟@86987120	
@@ -8691,6 +8880,7 @@ word	source_kind	sources (page@revision)	note
 熱拳本色	cgroup	Module:CGroup/Anime@94680982	
 熱流雙魚	cgroup	Template:CGroup/戰鬥陀螺 鋼鐵奇兵@68490308	
 熱舞男	char	飛天小女警Z@94716201	
+熱血之拳	cgroup	Module:CGroup/閃電十一人@68657168	
 熱血獅	cgroup	Template:CGroup/妖怪手錶@75937932	
 熱血足球	cgroup	Module:CGroup/Counter-Strike@85677571	zh-hant
 熾焰先鋒	cgroup	Template:CGroup/四驅兄弟@86987120	
@@ -8703,6 +8893,7 @@ word	source_kind	sources (page@revision)	note
 燒錄卡	cgroup	Module:CGroup/Games@94658856	zh-hant
 燕之塔	cgroup	Template:CGroup/The Witcher@86825096	
 燕子咖啡廳	cgroup	Module:CGroup/Danball Senki@81863967	
+燕尾服蒙面俠	cgroup	Template:CGroup/Sailor Moon@93051346	
 燕式	cgroup	Template:CGroup/GundamIBO@91631774	
 燕式格雷茲	cgroup	Template:CGroup/GundamIBO@91631774	CHECK
 燦爛之光	cgroup	Module:CGroup/SAO@89298185	
@@ -8711,9 +8902,11 @@ word	source_kind	sources (page@revision)	note
 爆丸超時空	cgroup	Template:CGroup/爆丸@31893398	
 爆庫兒	cgroup	Template:CGroup/HUNTER@80241645	
 爆拳槍神	cgroup	Template:CGroup/MapleStory@57794822	
+爆炎風暴	cgroup	Module:CGroup/閃電十一人@68657168	
 爆破者	cgroup	Template:CGroup/Transformers@87179168	
 爆神魔蠅	cgroup	Template:CGroup/戰鬥陀螺 鋼鐵奇兵@68490308	
 爆能脈衝	cgroup	Module:CGroup/Counter-Strike@85677571	zh-hant
+爆裂之拳	cgroup	Module:CGroup/閃電十一人@68657168	
 爆裂天馬	cgroup	Template:CGroup/戰鬥陀螺 鋼鐵奇兵@68490308	
 爆裂寒冰	char	数码宝贝03驯兽师之王角色列表@94744434	
 爆裂模式發動	cgroup	Template:CGroup/Digimon@94687201	
@@ -8783,6 +8976,7 @@ word	source_kind	sources (page@revision)	note
 特質系	cgroup	Template:CGroup/HUNTER@80241645	zh-hant
 特里普大佐	char	爆丸5星域爭霸@90756067	
 特里歐納	cgroup	Template:CGroup/Mabinogi@50754648	
+特雷司	cgroup	Module:CGroup/閃電十一人@68657168	
 特雷基亞	cgroup	Template:CGroup/Ultraman@94663541	zh-hant
 特雷恩	char	能量獸之戰獸旋戰鬥@93872390	
 特馬里亞	cgroup	Template:CGroup/The Witcher@86825096	
@@ -8848,6 +9042,7 @@ word	source_kind	sources (page@revision)	note
 狙殺功能	cgroup	Module:CGroup/Counter-Strike@85677571	zh-hant
 狙獵鋼彈	cgroup	Template:CGroup/GBF@82201572	
 狡嚙慎也	char	PSYCHO-PASS角色列表@93403235	
+狩獵之矛	cgroup	Module:CGroup/閃電十一人@68657168	
 狩獵型	cgroup	Template:CGroup/GundamAGE@51366593	
 狩真啟	cgroup	Template:CGroup/GBF@82201572	
 狩矢神	char	BLEACH角色列表@94571323	
@@ -8858,6 +9053,7 @@ word	source_kind	sources (page@revision)	note
 狸想世界	cgroup	Module:CGroup/Pixar@93247177	
 狸狽多	cgroup	Template:CGroup/HUNTER@80241645	
 狹山旬	char	来自风平浪静的明天@94727749	
+狼人傳奇	cgroup	Module:CGroup/閃電十一人@68657168	
 狼倫	char	Smile 光之美少女！@93787006	
 狼爪	char	狼雨@93653337	
 狼牙風風拳	cgroup	Template:CGroup/DragonBall@92325756	
@@ -8876,12 +9072,14 @@ word	source_kind	sources (page@revision)	note
 猛爪督依德	cgroup	Template:CGroup/Warcraft@92164655	zh-hant
 猛獁獸	char	数码宝贝大冒险：角色列表@94538377	
 猛禽小隊	cgroup	Module:CGroup/美国漫画@94638375	
+猛虎勁馳	cgroup	Module:CGroup/閃電十一人@68657168	
 猛鬼獸	char	数码宝贝大冒险角色列表@94744369	
 猛鬼獸牧師	char	数码宝贝大冒险角色列表@94744369	
 猛鬼獸牧師軍隊	char	数码宝贝大冒险角色列表@94744369	
 猩猩獸	char	数码宝贝大冒险02角色列表@94744398	
 猴人	cgroup	Module:CGroup/Wow@94351016	
 猴子喵	cgroup	Template:CGroup/妖怪手錶@75937932	
+猴子迴轉	cgroup	Module:CGroup/閃電十一人@68657168	
 猴王五九	cgroup	Module:CGroup/Anime@94680982	
 猴王大戰七超人	cgroup	Template:CGroup/Ultraman@94663541	
 猶大之約	cgroup	Module:CGroup/美国漫画@94638375	
@@ -8941,6 +9139,7 @@ word	source_kind	sources (page@revision)	note
 玉王中室	cgroup	Module:CGroup/蠟筆小新@93760288	
 玉田環	char	少女與戰車角色列表@93320972	
 玉蛟寺	cgroup	Module:CGroup/Wow@94351016	
+王之劍	cgroup	Module:CGroup/閃電十一人@68657168	
 王位爭奪戰	cgroup	Template:CGroup/Might&Magic@42603917	
 王侯大帝	cgroup	Template:CGroup/Transformers@87179168	
 王后羿	char	爆旋陀螺Burst@94644099	
@@ -8961,6 +9160,7 @@ word	source_kind	sources (page@revision)	note
 王立宇宙軍	title	王立宇宙軍@88092927	
 王翊碁	char	大欺诈师@90518284	CHECK
 王耀	char	義呆利 Axis Powers@92992888	
+王者之劍	cgroup	Module:CGroup/閃電十一人@68657168	
 王者之劍隊	cgroup	Template:CGroup/戰鬥陀螺 鋼鐵奇兵@68490308	
 王者之怒	cgroup	Module:CGroup/Counter-Strike@85677571	zh-hant
 王者之龍	cgroup	Module:CGroup/閃電十一人@68657168	
@@ -9022,6 +9222,7 @@ word	source_kind	sources (page@revision)	note
 現在認戀	cgroup	Module:CGroup/OshinoKo@84428949	
 現夢十郎	char	獸兵衛忍風帖@94218789	
 現實寶石	cgroup	Module:CGroup/美国漫画@94638375	
+球場殺戮者	cgroup	Module:CGroup/閃電十一人@68657168	
 球球	cgroup	Module:CGroup/Hayate the Combat Butler@81833661	
 球蓋姆	cgroup	Module:CGroup/Nintendo@94745610	
 理夏爾神父	char	悲慘世界 少女珂賽特@94720109	
@@ -9122,7 +9323,6 @@ word	source_kind	sources (page@revision)	note
 瑪莉蓓爾	cgroup	Template:CGroup/Code Geass@70270136	
 瑪莉蓮舔舔獸	char	數碼暴龍App世代角色列表@94177588	
 瑪葛	char	BORUTO-火影新世代-NARUTO NEXT GENERATIONS-角色列表@94842050	
-瑪裘亞	cgroup	Module:CGroup/KingOfFighters@91481321	
 瑪西	cgroup	Template:CGroup/ThePeanuts@54446337	CHECK
 瑪西亞孤兒院	cgroup	Template:CGroup/ED@94768974	zh-hant
 瑪貝特	cgroup	Template:CGroup/GundamUC@94693163	
@@ -9208,6 +9408,7 @@ word	source_kind	sources (page@revision)	note
 生化超人卡撒	cgroup	Module:CGroup/Anime@94680982	
 生命獸	char	數碼暴龍App世代角色列表@94177588	
 生命球	cgroup	Template:CGroup/DragonBall@92325756	
+生命起源	cgroup	Module:CGroup/閃電十一人@68657168	
 生存形態	cgroup	Template:CGroup/KamenRider@94225985	
 生得術式	char	咒術迴戰角色列表@94830133	
 生怪蛋	cgroup	Module:CGroup/Minecraft@94388709	
@@ -9218,6 +9419,7 @@ word	source_kind	sources (page@revision)	note
 生髮彈	cgroup	Template:CGroup/Reborn@29403199	
 產子救世錄	cgroup	Module:CGroup/Anime@94680982	zh-hant
 産絹彥檷	char	BLEACH角色列表@94571323	CHECK
+用毅力揮棒	cgroup	Module:CGroup/閃電十一人@68657168	
 甩輪	cgroup	Template:CGroup/Transformers@87179168	
 田中一	char	奇巧計程車@89552760	
 田中健三	cgroup	Module:CGroup/Solo Leveling@86308871	
@@ -9267,8 +9469,10 @@ word	source_kind	sources (page@revision)	note
 異域系列	cgroup	Module:CGroup/Games@94658856	
 異域霸者	cgroup	Template:CGroup/KamenRider@94225985	
 異度神劍	cgroup	Module:CGroup/Games@94658856	
+異形之石	cgroup	Module:CGroup/閃電十一人@68657168	
 異攻隊	cgroup	Module:CGroup/美国漫画@94638375	
 異星戰士	cgroup	Template:CGroup/Power Rangers@27638544	zh-hant
+異次元魔手	cgroup	Module:CGroup/閃電十一人@68657168	
 異特龍獸	char	数码宝贝大冒险：角色列表@94538377	
 異端巫醫	cgroup	Template:CGroup/Heroes of the Storm@49727842	
 異端鋼彈	cgroup	Template:CGroup/GundamSeed@92969101	
@@ -9300,13 +9504,13 @@ word	source_kind	sources (page@revision)	note
 疾風蜘蛛	char	爆丸5星域爭霸@90756067	
 疾風蝙蝠	char	爆丸5星域爭霸@90756067	
 疾風螳螂	char	爆丸5星域爭霸@90756067	
+疾風衝刺	cgroup	Module:CGroup/閃電十一人@68657168	
 疾風陸龜	char	爆丸5星域爭霸@90756067	
 疾風魔根	char	爆丸5星域爭霸@90756067	
 疾鬥	cgroup	Template:CGroup/HUNTER@80241645	
 病毒獸	char	數碼暴龍App世代角色列表@94177588	
 痞子妹	cgroup	Template:CGroup/Crazyracing Kartrider@60141039	CHECK
 痞子妹必殺技	cgroup	Template:CGroup/Crazyracing Kartrider@60141039	CHECK
-痞德	cgroup	Module:CGroup/Simpsons@84869408	
 瘋子幫	char	高譚角色列表@92146409	
 瘋狂基因藥水	cgroup	Module:CGroup/Counter-Strike@85677571	zh-hant
 瘋狂計程車	cgroup	Module:CGroup/Games@94658856	
@@ -9329,6 +9533,7 @@ word	source_kind	sources (page@revision)	note
 白拋拋千金	cgroup	Template:CGroup/妖怪手錶@75937932	
 白斯勒	char	爆丸5星域爭霸@90756067	CHECK
 白木忠直	char	玉子市場@93415198	
+白杯杯	cgroup	Template:CGroup/Family Guy@79259281	
 白柳弓	char	Charlotte (動畫)@94727945	
 白獅獸	char	數碼寶貝覺醒節拍角色列表@94712797	
 白皇三人娘	cgroup	Module:CGroup/Hayate the Combat Butler@81833661	CHECK
@@ -9376,11 +9581,14 @@ word	source_kind	sources (page@revision)	note
 百江渚	char	魔法少女小圓角色列表@94590242	
 百瀨勇	char	白箱@94727899	
 百瀨多希	char	少女與戰車角色列表@93320972	
+百烈踢	cgroup	Module:CGroup/閃電十一人@68657168	
 百生獸	cgroup	Template:CGroup/StarCraft2@39914602	
 百秋坊	char	怪物的孩子@93936285	
 百舌昌子	char	妖怪手錶系列@93337229	
+百萬噸頭鎚	cgroup	Module:CGroup/閃電十一人@68657168	
 百萬格鬥儀	cgroup	Template:CGroup/Ultraman@94663541	zh-hant
 百萬海龍獸	char	数码宝贝大冒险：角色列表@94538377	
+百萬神掌	cgroup	Module:CGroup/閃電十一人@68657168	
 百萬黑暗騎士獸	char	数码宝贝大冒险：角色列表@94538377	
 百變步槍	cgroup	Template:CGroup/GBF@82201572	
 百足妖婦	char	犬夜叉角色列表@94790447	
@@ -9415,10 +9623,12 @@ word	source_kind	sources (page@revision)	note
 皮塔里亞	cgroup	Template:CGroup/Cyber Formula@68486475	
 皮姆	cgroup	Module:CGroup/美国漫画@94638375	
 皮姆粒子	cgroup	Module:CGroup/美国漫画@94638375	
+皮姊	cgroup	Template:CGroup/Adventure Time@90284406	
 皮尼歐	char	翠星上的加爾岡緹亞@91223485	
 皮朋尼提	cgroup	Template:CGroup/GundamUC@94693163	
 皮爾托福	cgroup	Module:CGroup/LOL@93322985	
 皮特洛	cgroup	Module:CGroup/美国漫画@94638375	
+皮老爹	cgroup	Template:CGroup/Adventure Time@90284406	
 皮耶勇酷雞	cgroup	Module:CGroup/OshinoKo@84428949	
 皮耶勇開機舞	cgroup	Module:CGroup/OshinoKo@84428949	
 皮耶羅	char	Smile 光之美少女！@93787006	
@@ -9432,13 +9642,14 @@ word	source_kind	sources (page@revision)	note
 盛大互動娛樂	cgroup	Module:CGroup/Games-zh@90861641	zh-hant
 盛大網絡	cgroup	Module:CGroup/Games-zh@90861641	zh-hant
 盜夢偵探	title	盜夢偵探 (電影)@91173763	
+盜火之賊	cgroup	Module:CGroup/閃電十一人@68657168	
 監察王蟲	cgroup	Template:CGroup/StarCraft2@39914602	
 監視者座天使	cgroup	Template:CGroup/Gundam00@70972545	
 盤牙蓄湖	cgroup	Module:CGroup/Wow@94351016	
 盧到	cgroup	Module:CGroup/Simpsons@84869408	
 盧吉	cgroup	Template:CGroup/GundamTWFM@82129397	
 盧奇	cgroup	Template:CGroup/四驅兄弟@86987120	
-盧拉拉	cgroup	Module:CGroup/Simpsons@84869408	
+盧小小	cgroup	Template:CGroup/Family Guy@79259281	
 盧提魯德夫	char	異世界四重奏@93605298	
 盧柯	char	DARKER THAN BLACK@93233512	
 盧格溫	cgroup	Template:CGroup/The Witcher@86825096	
@@ -9488,6 +9699,8 @@ word	source_kind	sources (page@revision)	note
 真枝若菜	char	星之聲@92143926	
 真柴智	char	電影版 聲之形@93974890	
 真正的朋友	cgroup	Module:CGroup/My Little Pony@91388064	
+真珠皮亞利	cgroup	Template:CGroup/Pichi Pichi Pitch@94608266	
+真珠美人魚	cgroup	Template:CGroup/Pichi Pichi Pitch@94608266	
 真田紫子	char	舞-HiME角色列表@91610502	
 真白愛麗絲	char	數碼暴龍App世代角色列表@94177588	
 真紅蓮	cgroup	Template:CGroup/Digimon@94687201	
@@ -9526,6 +9739,7 @@ word	source_kind	sources (page@revision)	note
 知念美雪	char	FRESH光之美少女！@93922959	
 知無領域	cgroup	Module:CGroup/美国漫画@94638375	
 知道天空有多藍的人啊	cgroup	Module:CGroup/Anime@94680982	
+短劍飛射	cgroup	Module:CGroup/閃電十一人@68657168	
 短片研究部	cgroup	Module:CGroup/Hayate the Combat Butler@81833661	
 矮人山王	cgroup	Template:CGroup/Warcraft@92164655	zh-hant
 石上亘	char	舞-HiME角色列表@91610502	CHECK
@@ -9584,10 +9798,13 @@ word	source_kind	sources (page@revision)	note
 破邪	char	B傳說！戰鬥彈珠人@94175384	
 破銅爛鐵島	cgroup	Module:CGroup/OnePiece@83858889	
 破風使者	cgroup	Template:CGroup/MapleStory@57794822	
+砸不停	cgroup	Template:CGroup/Adventure Time@90284406	
 硫磺立方怪	cgroup	Module:CGroup/Minecraft@94388709	
 硬質化	cgroup	Template:CGroup/進擊的巨人@76977335	
 碎之星	title	Fractale@90968404	
+碎地震盪	cgroup	Module:CGroup/閃電十一人@68657168	
 碎峰嶺	cgroup	Template:CGroup/Diablo@94495831	
+碎形之屋	cgroup	Module:CGroup/閃電十一人@68657168	
 碎骨	cgroup	Module:CGroup/Cyberpunk@85139581	
 碎骨機	cgroup	Template:CGroup/Transformers@87179168	
 碎骨銀狼	cgroup	Module:CGroup/Counter-Strike@85677571	zh-hant
@@ -9607,6 +9824,7 @@ word	source_kind	sources (page@revision)	note
 碧琪預感	cgroup	Module:CGroup/My Little Pony@91388064	
 碧絲蒂爾	cgroup	Template:CGroup/愛天使傳說@43103330	
 碧翠絲	char	異世界四重奏@93605298	
+碧色真珠音調	cgroup	Template:CGroup/Pichi Pichi Pitch@94608266	
 碧血狂殺	cgroup	Module:CGroup/Games@94658856	
 碧血狂殺系列	cgroup	Module:CGroup/Games@94658856	
 碧雅翠絲	char	悲慘世界 少女珂賽特@94720109	
@@ -9637,7 +9855,9 @@ word	source_kind	sources (page@revision)	note
 祖爾德拉克	cgroup	Module:CGroup/Wow@94351016	
 祖爾文	cgroup	Template:CGroup/StarCraft@73588136	
 祖瑪	char	天元突破 紅蓮螺巖@93776700	
+神之伊甸	cgroup	Module:CGroup/閃電十一人@68657168	
 神代凌牙	char	遊戲王ZEXAL@93180378	
+神偷怪盜	cgroup	Template:CGroup/名偵探柯南@93449521	
 神兵泰坦	cgroup	Module:CGroup/Games@94658856	
 神劍傳奇	cgroup	Module:CGroup/Cartoon@93410586	
 神劍號	cgroup	Template:CGroup/四驅兄弟@86987120	
@@ -9671,6 +9891,7 @@ word	source_kind	sources (page@revision)	note
 神奈備命	char	AIR角色列表@90228621	
 神威加農砲	cgroup	Module:CGroup/閃電十一人@68657168	
 神威巨人	cgroup	Template:CGroup/爆丸@31893398	
+神威炸裂	cgroup	Module:CGroup/閃電十一人@68657168	
 神娃之伊莎莉亞戰記	cgroup	Module:CGroup/Cartoon@93410586	
 神尾晴子	char	AIR角色列表@90228621	
 神尾觀鈴	char	AIR角色列表@90228621	
@@ -9696,6 +9917,7 @@ word	source_kind	sources (page@revision)	note
 神火源	cgroup	Template:CGroup/Transformers@87179168	
 神獸師	cgroup	Template:CGroup/Warcraft@92164655	zh-hant
 神田陽子	char	Go Princess 光之美少女@94065409	
+神的指揮棒	cgroup	Module:CGroup/閃電十一人@68657168	
 神盾騎士鋼彈	cgroup	Template:CGroup/GBF@82201572	
 神祕果實	cgroup	Module:CGroup/Games@94658856	
 神祕甜心變身	cgroup	Template:CGroup/Shugo Chara!@81936822	
@@ -9744,6 +9966,7 @@ word	source_kind	sources (page@revision)	note
 福井柚嬉	char	名偵探柯南角色列表@94461808	
 福內典子	char	高校艦隊@93341996	
 福卡斯先生	char	名偵探福爾摩斯@94071005	
+福嫂	cgroup	Module:CGroup/閃電十一人@68657168	CHECK
 福山舞	char	偶像大師 灰姑娘女孩角色列表@91786822	
 福拉卡	cgroup	Template:CGroup/GundamSeed@92969101	
 福斯丁尼	char	萬里尋親記@94719791	
@@ -9761,7 +9984,9 @@ word	source_kind	sources (page@revision)	note
 禹鎮澈	cgroup	Module:CGroup/Solo Leveling@86308871	
 禾姆	char	翠星上的加爾岡緹亞@91223485	
 禿鷲獸	char	數碼寶貝覺醒節拍角色列表@94712797	
+禿鷹俯衝	cgroup	Module:CGroup/閃電十一人@68657168	
 秀念	char	機靈小和尚@92445221	
+秀秀	cgroup	Template:CGroup/Pichi Pichi Pitch@94608266	
 秀逗泰山	cgroup	Module:CGroup/Anime@94680982	
 秀逗魔導士	cgroup	Module:CGroup/Anime@94680982	
 私人時間	cgroup	Module:CGroup/OshinoKo@84428949	
@@ -9793,6 +10018,7 @@ word	source_kind	sources (page@revision)	note
 科技巴特	cgroup	Template:CGroup/Transformers@87179168	CHECK
 科欽博士	char	七龍珠Z 世界最強的高手@93733633	
 科爾蘇加德	cgroup	Template:CGroup/Warcraft@92164655	zh-hant
+科特亞魯	cgroup	Module:CGroup/閃電十一人@68657168	
 科特尼泰勒	cgroup	Template:CGroup/C&C@83793789	
 科納	cgroup	Template:CGroup/Gundam00@70972545	
 科索沃紅色貝雷帽部隊	cgroup	Module:CGroup/Counter-Strike@85677571	zh-hant
@@ -9813,6 +10039,7 @@ word	source_kind	sources (page@revision)	note
 移動城堡	char	哈尔的移动城堡@94539471	
 稜鏡天使	cgroup	Module:CGroup/開闊天空！光之美少女@83218661	
 種村孝一	char	花開物語@94760130	
+稻光衝刺	cgroup	Module:CGroup/閃電十一人@68657168	
 稻富響	char	少女與戰車角色列表@93320972	
 稻浪良和	char	白箱@94727899	
 稻草人獸	char	数码宝贝大冒险：角色列表@94538377	
@@ -9826,6 +10053,7 @@ word	source_kind	sources (page@revision)	note
 穆蓋特	cgroup	Template:CGroup/Reborn@29403199	
 穆達	cgroup	Template:CGroup/GundamSeed@92969101	
 積分對戰	cgroup	Module:CGroup/LOL@93322985	
+積頓	cgroup	Template:CGroup/Ultraman@94663541	
 穗龍	cgroup	Module:CGroup/My Little Pony@91388064	zh-hant
 穗龍任您差遣	cgroup	Module:CGroup/My Little Pony@91388064	
 穗龍公主	cgroup	Module:CGroup/My Little Pony@91388064	
@@ -9836,7 +10064,10 @@ word	source_kind	sources (page@revision)	note
 究極格鬥	cgroup	Template:CGroup/Digimon@94687201	
 究極武裝進化	cgroup	Template:CGroup/Digimon@94687201	
 究極毀滅砲	cgroup	Template:CGroup/爆丸@31893398	
+究極閃電	cgroup	Module:CGroup/閃電十一人@68657168	
 空中殺手	cgroup	Module:CGroup/Anime@94680982	
+空中滑行	cgroup	Module:CGroup/閃電十一人@68657168	
+空中行者	cgroup	Module:CGroup/閃電十一人@68657168	
 空中霸者	cgroup	Template:CGroup/GundamSeed@92969101	
 空井咲希	cgroup	Module:CGroup/BlueArchive@93972468	zh-hant
 空島寶貝龍學院	cgroup	Module:CGroup/Cartoon@93410586	zh-hant
@@ -9850,6 +10081,7 @@ word	source_kind	sources (page@revision)	note
 空穗夏希	char	魔法少女小圓角色列表@94590242	
 空腹爺爺	cgroup	Template:CGroup/妖怪手錶@75937932	
 空間之門	cgroup	Template:CGroup/StarCraft2@39914602	
+空間傳送	cgroup	Module:CGroup/閃電十一人@68657168	
 空間寶石	cgroup	Module:CGroup/美国漫画@94638375	
 空間跳躍門	cgroup	Template:CGroup/MyHeroAcademia@87565804	
 空間躍動	cgroup	Module:CGroup/Counter-Strike@85677571	zh-hant
@@ -9907,6 +10139,7 @@ word	source_kind	sources (page@revision)	note
 第二代寶仙鬼	char	半妖的夜叉姬@87932716	CHECK
 第二國度	cgroup	Module:CGroup/Anime@94680982	zh-hant
 第二賽季	cgroup	Module:CGroup/LOL@93322985	
+第五院	cgroup	Module:CGroup/閃電十一人@68657168	
 笹浦洋介	char	名偵探柯南：絕海的偵探@94596266	
 笹瀨川佐佐美	char	Little Busters!角色列表@91842236	
 笹部吾朗	char	Free!@93607624	
@@ -9921,6 +10154,7 @@ word	source_kind	sources (page@revision)	note
 筧菫	cgroup	Template:CGroup/NARUTO@86143617	
 箕宿三伽馬獸	char	数码宝贝幽灵游戏角色列表@94560916	
 管家薩凱那	char	光之美少女@94825358	
+管浪衝	cgroup	Module:CGroup/閃電十一人@68657168	
 管狐獸	char	數碼寶貝拯救隊角色列表@94177566	
 管理人伯伯	cgroup	Template:CGroup/涼宮春日的憂鬱@71080538	
 節慶營運管理部	cgroup	Module:CGroup/BlueArchive@93972468	zh-hant
@@ -9944,8 +10178,8 @@ word	source_kind	sources (page@revision)	note
 米中尉	cgroup	Template:CGroup/Gundam00@70972545	
 米克斯塔	cgroup	Template:CGroup/GundamIBO@91631774	
 米克爾	cgroup	Template:CGroup/GundamUC@94693163	
+米兒	cgroup	Template:CGroup/Pichi Pichi Pitch@94608266	
 米凱洛	cgroup	Template:CGroup/GGundam@85035825	
-米凱爾	char	阿爾卑斯物語 我的安妮特@94720095	
 米利亞爾特	cgroup	Template:CGroup/GundamW@87064245	
 米利塔利亞	cgroup	Template:CGroup/Eyeshield21@86998850	
 米力伍斯	cgroup	Template:CGroup/進擊的巨人@76977335	
@@ -10001,6 +10235,7 @@ word	source_kind	sources (page@revision)	note
 粉碎者	char	星之卡比 (動畫)@94160462	
 粉紅先生	cgroup	Module:CGroup/OnePiece@83858889	
 粉紅女俠	cgroup	Template:CGroup/MyHeroAcademia@87565804	
+粉色真珠音調	cgroup	Template:CGroup/Pichi Pichi Pitch@94608266	
 粗暴小子	char	飛天小女警Z@94716201	
 粗皮雄	cgroup	Module:CGroup/Simpsons@84869408	
 粗魯男	char	異世界四重奏@93605298	
@@ -10078,6 +10313,7 @@ word	source_kind	sources (page@revision)	note
 納葛蘭	cgroup	Module:CGroup/Wow@94351016	
 納蘭卡	cgroup	Template:CGroup/GundamTWFM@82129397	
 納西索	char	萬里尋親記@94719791	CHECK
+納賽	cgroup	Module:CGroup/閃電十一人@68657168	
 納迦	cgroup	Module:CGroup/Wow@94351016	
 納迦海巫	cgroup	Template:CGroup/Warcraft@92164655	zh-hant
 納迪	cgroup	Template:CGroup/GundamIBO@91631774	
@@ -10131,6 +10367,7 @@ word	source_kind	sources (page@revision)	note
 紫津	char	犬夜叉角色列表@94790447	
 紫羅蘭堡	cgroup	Module:CGroup/Wow@94351016	
 紫色機動車	char	DokiDoki! 光之美少女@93549956	
+紫色真珠音調	cgroup	Template:CGroup/Pichi Pichi Pitch@94608266	
 紫雲寺家的兄弟姊妹	cgroup	Module:CGroup/Anime@94680982	CHECK
 紮諾	cgroup	Module:CGroup/閃電十一人@68657168	
 細寬	cgroup	Template:CGroup/HUNTER@80241645	
@@ -10197,12 +10434,14 @@ word	source_kind	sources (page@revision)	note
 絕命沙堡	cgroup	Module:CGroup/Counter-Strike@85677571	zh-hant
 絕命異次元	cgroup	Module:CGroup/Games@94658856	
 絕命終結站	cgroup	Module:CGroup/Counter-Strike@85677571	zh-hant
+絕對安全護衞	cgroup	Module:CGroup/閃電十一人@68657168	
 絕對服從	char	KILL la KILL@94827565	
 絕望堡	char	Go Princess 光之美少女@94065409	
 絕茲絕拉	cgroup	Template:CGroup/HUNTER@80241645	CHECK
 絕跡重生	cgroup	Template:CGroup/Transformers@87179168	
 絢香	char	寶可夢動畫角色列表@93411809	
 給不滅的你	cgroup	Module:CGroup/Anime@94680982	
+給斯拉	cgroup	Template:CGroup/Ultraman@94663541	zh-hant
 絨絨博士	cgroup	Module:CGroup/Disney@93925402	
 統御式	cgroup	Template:CGroup/Gundam00@70972545	
 絲卡	cgroup	Template:CGroup/愛天使傳說@43103330	
@@ -10327,6 +10566,7 @@ word	source_kind	sources (page@revision)	note
 繽紛甜點食尚甜心	char	光之美少女：食尚甜心@92951245	
 繽紛瘋兔衝鋒槍	cgroup	Module:CGroup/Counter-Strike@85677571	zh-hant
 纏流子	char	KILL la KILL@94827565	
+罩豎海	cgroup	Template:CGroup/Family Guy@79259281	
 罪惡之源	cgroup	Template:CGroup/Diablo@94495831	
 罪惡城市	cgroup	Module:CGroup/Games@94658856	
 羅亞	cgroup	Template:CGroup/FullmetalAlchemist@48481493	
@@ -10349,6 +10589,7 @@ word	source_kind	sources (page@revision)	note
 羅姆菲拉	cgroup	Template:CGroup/GundamW@87064245	
 羅宇治	cgroup	Template:CGroup/Reborn@29403199	
 羅安那克	cgroup	Template:CGroup/GundamSeed@92969101	
+羅尼喬	cgroup	Module:CGroup/閃電十一人@68657168	
 羅希南特	cgroup	Module:CGroup/OnePiece@83858889	
 羅希達	char	萬里尋親記@94719791	
 羅德星	cgroup	Template:CGroup/爆丸@31893398	
@@ -10364,7 +10605,6 @@ word	source_kind	sources (page@revision)	note
 羅珊	cgroup	Template:CGroup/GOSICK@62514366	
 羅瑟瑞	cgroup	Template:CGroup/GundamIBO@91631774	
 羅甯	cgroup	Template:CGroup/Warcraft@92164655	CHECK,zh-hant
-羅登	cgroup	Template:CGroup/GundamAGE@51366593	
 羅米羅	cgroup	Template:CGroup/Shugo Chara!@81936822	
 羅米路	cgroup	Template:CGroup/GundamUC@94693163	
 羅納多	char	91Days@89878470	
@@ -10390,6 +10630,7 @@ word	source_kind	sources (page@revision)	note
 羊角魔爪	cgroup	Module:CGroup/Counter-Strike@85677571	zh-hant
 羊蹄山戰鬼	cgroup	Module:CGroup/Games@94658856	
 美亞	char	爆丸5星域爭霸@90756067	
+美人魚公主	cgroup	Template:CGroup/Pichi Pichi Pitch@94608266	
 美凪紗紗蘿	char	魔法少女小圓角色列表@94590242	
 美味盛宴	cgroup	Module:CGroup/Disney@93925402	
 美味蟹堡	cgroup	Module:CGroup/SpongeBob SquarePants@91129493	
@@ -10424,6 +10665,7 @@ word	source_kind	sources (page@revision)	note
 美波一輝	char	Free!@93607624	
 美洛耶塔的閃亮音樂會	cgroup	Template:CGroup/Pokemon@85444397	
 美津芽	cgroup	Template:CGroup/KamenRider@94225985	
+美特隆星人	cgroup	Template:CGroup/Ultraman@94663541	zh-hant
 美玲	cgroup	Template:CGroup/GundamSeed@92969101	
 美美月夢	char	Go Princess 光之美少女@94065409	
 美聲天籟	cgroup	Module:CGroup/My Little Pony@91388064	
@@ -10465,6 +10707,7 @@ word	source_kind	sources (page@revision)	note
 羽賀響輔	char	名偵探柯南角色列表@94461808	
 羽間	cgroup	Template:CGroup/HUNTER@80241645	
 羽馬令依菜	char	漂流家園@87146899	
+翁迦明	cgroup	Template:CGroup/Family Guy@79259281	
 翔光戰將	cgroup	Template:CGroup/爆丸@31893398	
 翔翼型威達	cgroup	Template:CGroup/GundamSeed@92969101	
 翔翼型攻擊	cgroup	Template:CGroup/GundamSeed@92969101	
@@ -10479,17 +10722,22 @@ word	source_kind	sources (page@revision)	note
 翠龍巴沙拿	char	爆旋陀螺Burst@94644099	CHECK
 翡翠宙斯	cgroup	Template:CGroup/戰鬥陀螺 鋼鐵奇兵@68490308	
 翱銳龍獸	cgroup	Module:CGroup/LOL@93322985	
+翻桌大法	cgroup	Module:CGroup/閃電十一人@68657168	
 翻滾海賊團	cgroup	Module:CGroup/OnePiece@83858889	
+翻滾滑鏟	cgroup	Module:CGroup/閃電十一人@68657168	
 翻譯蒟蒻	cgroup	Module:CGroup/Doraemon@88509940	
 翻車星	cgroup	Module:CGroup/OnePiece@83858889	
 翻車魚獸	char	数码宝贝大冒险：角色列表@94538377	
 翼狀感應炮	cgroup	Template:CGroup/GundamUC@94693163	
 翼王模式	cgroup	Template:CGroup/KamenRider@94225985	
 翼魔鋼彈	cgroup	Template:CGroup/GundamIBO@91631774	
+翼龍怒吼	cgroup	Module:CGroup/閃電十一人@68657168	
+翼龍暴風雪	cgroup	Module:CGroup/閃電十一人@68657168	
 翼龍爪	cgroup	Template:CGroup/Eyeshield21@86998850	
 耀獅獸	char	數碼寶貝覺醒節拍角色列表@94712797	
 老大妖	cgroup	Template:CGroup/妖怪手錶@75937932	
 老奈	cgroup	Module:CGroup/Disney@93925402	
+老皮	cgroup	Template:CGroup/Adventure Time@90284406	
 老蔡	char	大欺诈师@90518284	
 老蕨	cgroup	Module:CGroup/Pixar@93247177	
 老頭阿迪	cgroup	Template:CGroup/小魔女DoReMi@65858319	
@@ -10515,6 +10763,7 @@ word	source_kind	sources (page@revision)	note
 聖亞	cgroup	Module:CGroup/BlueArchive@93972468	zh-hant
 聖代星光	char	光之美少女：食尚甜心@92951245	
 聖休亞瑞	cgroup	Template:CGroup/Diablo@94495831	
+聖光之路	cgroup	Module:CGroup/閃電十一人@68657168	
 聖光之鎚	cgroup	Module:CGroup/Counter-Strike@85677571	zh-hant
 聖光亞巴頓	char	爆丸5星域爭霸@90756067	
 聖光人馬	char	爆丸5星域爭霸@90756067	
@@ -10525,11 +10774,13 @@ word	source_kind	sources (page@revision)	note
 聖光長毛象	char	爆丸5星域爭霸@90756067	
 聖光雷擊	char	数码宝贝03驯兽师之王角色列表@94744434	
 聖劍颶風	char	DokiDoki! 光之美少女@93549956	
+聖十字火焰	cgroup	Module:CGroup/閃電十一人@68657168	
 聖堂文庫	cgroup	Template:CGroup/StarCraft2@39914602	
 聖多拉	cgroup	Template:CGroup/愛天使傳說@43103330	
 聖天空戰記	title	聖天空戰記@94720493	
 聖天空龍	char	爆丸5星域爭霸@90756067	
 聖女密碼	cgroup	Module:CGroup/ResidentEvil@94612703	
+聖女烈火	cgroup	Module:CGroup/閃電十一人@68657168	
 聖女魔力無所不能	cgroup	Module:CGroup/Anime@94680982	
 聖奶奶	cgroup	Template:CGroup/妖怪手錶@75937932	
 聖娜	cgroup	Module:CGroup/美国漫画@94638375	CHECK
@@ -10561,6 +10812,7 @@ word	source_kind	sources (page@revision)	note
 聖鏡	cgroup	Template:CGroup/愛天使傳說@43103330	
 聖騎士之戰	cgroup	Module:CGroup/Games@94658856	
 聖騎士之路	cgroup	Template:CGroup/Mabinogi@50754648	
+聖騎士強襲	cgroup	Module:CGroup/閃電十一人@68657168	
 聖騎戰史	cgroup	Module:CGroup/Games@94658856	
 聖魂劍士	cgroup	Template:CGroup/MapleStory@57794822	
 聖龍聯合	cgroup	Module:CGroup/SAO@89298185	
@@ -10596,6 +10848,7 @@ word	source_kind	sources (page@revision)	note
 肯尼希	char	異世界四重奏@93605298	
 肯尼洋	cgroup	Template:CGroup/Pokemon@85444397	
 肯恩之怒	cgroup	Module:CGroup/Games@94658856	
+肯林	cgroup	Module:CGroup/閃電十一人@68657168	
 肯泰羅	cgroup	Template:CGroup/Pokemon@85444397	
 肯特基	cgroup	Template:CGroup/打工吧！魔王大人@40273238	
 肯特妮普	cgroup	Module:CGroup/BLEACH@81833737	
@@ -10618,6 +10871,7 @@ word	source_kind	sources (page@revision)	note
 能源方塊	cgroup	Template:CGroup/Crazyracing Kartrider@60141039	
 能源方塊結晶	cgroup	Template:CGroup/Crazyracing Kartrider@60141039	
 能量獸之戰獸旋戰鬥	title	能量獸之戰獸旋戰鬥@93872390	
+能量防護罩	cgroup	Module:CGroup/閃電十一人@68657168	
 脇山珠美	char	偶像大師 灰姑娘女孩角色列表@91786822	CHECK
 脈衝槍	cgroup	Module:CGroup/Half-Life@94355597	
 脈衝鋼彈	cgroup	Template:CGroup/GundamSeed@92969101	
@@ -10630,6 +10884,7 @@ word	source_kind	sources (page@revision)	note
 腔棘魚獸	char	数码宝贝大冒险：角色列表@94538377	
 腦波傳導型薩克	cgroup	Template:CGroup/GundamUC@94693163	
 腦波增幅器	cgroup	Module:CGroup/美国漫画@94638375	
+腫泡泡公主	cgroup	Template:CGroup/Adventure Time@90284406	
 腰痠背痛工頭	cgroup	Template:CGroup/妖怪手錶@75937932	
 腳跟貫釘	cgroup	Template:CGroup/GundamIBO@91631774	
 膝撞	cgroup	Template:CGroup/GundamAGE@51366593	
@@ -10677,6 +10932,7 @@ word	source_kind	sources (page@revision)	note
 舔舔獸	char	數碼暴龍App世代角色列表@94177588	
 舞劍靈使	cgroup	Module:CGroup/LOL@93322985	
 舞動瓦利歐製造	cgroup	Module:CGroup/Nintendo@94745610	
+舞動脫逃球	cgroup	Module:CGroup/閃電十一人@68657168	
 舞台首秀篇	cgroup	Module:CGroup/OshinoKo@84428949	
 舞茸蘑菇	char	白箱@94727899	CHECK
 航空巴特	cgroup	Template:CGroup/Transformers@87179168	CHECK
@@ -10731,9 +10987,11 @@ word	source_kind	sources (page@revision)	note
 艾布勞	cgroup	Template:CGroup/GundamIBO@91631774	
 艾希莉	cgroup	Module:CGroup/My Little Pony@91388064	
 艾德	char	名偵探柯南：黑鐵的魚影@94777147	
+艾德卡	cgroup	Module:CGroup/閃電十一人@68657168	
 艾德嘉	char	SPY×FAMILY間諜家家酒角色列表@94041877	
 艾德拉哥	char	ONE PIECE 黃金島大冒險@93015050	
 艾德海蒂	cgroup	Template:CGroup/Reborn@29403199	
+艾德翰	cgroup	Template:CGroup/Mabinogi@50754648	
 艾恩葛朗特	cgroup	Module:CGroup/SAO@89298185	
 艾提恩	cgroup	Module:CGroup/SAO@89298185	
 艾文	cgroup	Template:CGroup/Valkyria@77221191	
@@ -10805,6 +11063,7 @@ word	source_kind	sources (page@revision)	note
 艾莉亞	cgroup	Template:CGroup/Code Geass@70270136	
 艾莉克娜	cgroup	Template:CGroup/Mabinogi@50754648	CHECK
 艾莉可	cgroup	Template:CGroup/GundamUC@94693163	
+艾莉娜	cgroup	Template:CGroup/Mabinogi@50754648	CHECK
 艾莉的異想世界	cgroup	Module:CGroup/Disney@93925402	
 艾莉紗	cgroup	Template:CGroup/Toaru@89726592	
 艾莉緹	char	借物少女艾莉緹@89682636	
@@ -10815,6 +11074,7 @@ word	source_kind	sources (page@revision)	note
 艾蕾特	cgroup	Template:CGroup/GundamUC@94693163	
 艾薇	cgroup	Template:CGroup/GundamIBO@91631774	
 艾薇兒	cgroup	Template:CGroup/GOSICK@62514366	
+艾薇爾	cgroup	Template:CGroup/Adventure Time@90284406	
 艾蘭德	cgroup	Template:CGroup/The Witcher@86825096	
 艾裘	cgroup	Template:CGroup/GundamUC@94693163	
 艾諾亞	cgroup	Template:CGroup/GundamAGE@51366593	
@@ -10913,6 +11173,7 @@ word	source_kind	sources (page@revision)	note
 英澤	cgroup	Template:CGroup/魔法咪路咪路@26972197	
 英雄之戰	cgroup	Template:CGroup/Might&Magic@42603917	
 英雄傳奇	cgroup	Module:CGroup/Tales@54832633	
+英雄傳說	cgroup	Template:CGroup/ED@94768974	zh-hant
 英雄崛起	cgroup	Module:CGroup/美国漫画@94638375	zh-hant
 英雄戰擊	cgroup	Module:CGroup/Counter-Strike@85677571	zh-hant
 英雄誌	cgroup	Template:CGroup/Might&Magic@42603917	
@@ -10958,6 +11219,7 @@ word	source_kind	sources (page@revision)	note
 草薙翔一	char	遊戲王VRAINS@92292355	
 草野薰	char	名偵探柯南角色列表@94461808	
 草間花音	char	罪惡王冠@87767894	
+草阿寶	cgroup	Template:CGroup/Adventure Time@90284406	
 荒原之軍	cgroup	Template:CGroup/Might&Magic@42603917	
 荒島歷險記	cgroup	Template:CGroup/Sim@37867988	
 荒木剛	char	富豪刑事 Balance:UNLIMITED@93288613	
@@ -11143,6 +11405,7 @@ word	source_kind	sources (page@revision)	note
 落日飆神	cgroup	Module:CGroup/Games@94658856	
 落落長鼻	cgroup	Template:CGroup/妖怪手錶@75937932	
 落陽關	cgroup	Module:CGroup/Wow@94351016	
+落雷高塔	cgroup	Module:CGroup/閃電十一人@68657168	
 葉加	char	SPY×FAMILY間諜家家酒角色列表@94041877	
 葉妮芙	cgroup	Template:CGroup/The Witcher@86825096	
 葉拉娜	cgroup	Module:CGroup/Frozen@82365390	CHECK
@@ -11172,12 +11435,10 @@ word	source_kind	sources (page@revision)	note
 葛洛夫	cgroup	Module:CGroup/Frozen@82365390	
 葛瑞斯	cgroup	Template:CGroup/Gundam00@70972545	
 葛瑞絲派克	cgroup	Template:CGroup/C&C@83793789	
-葛痞德	cgroup	Module:CGroup/Simpsons@84869408	
 葛納烏	cgroup	Module:CGroup/Frieren@82010966	
 葛索	cgroup	Module:CGroup/Disney@93925402	
 葛索媽媽	cgroup	Module:CGroup/Disney@93925402	
 葛若西亞	cgroup	Module:CGroup/KingOfFighters@91481321	
-葛莉	cgroup	Module:CGroup/Simpsons@84869408	
 葛莉賽達	cgroup	Module:CGroup/SAO@89298185	
 葛萊斯	cgroup	Template:CGroup/進擊的巨人@76977335	
 葛葉獸	char	数码宝贝幽灵游戏角色列表@94560916	
@@ -11198,9 +11459,9 @@ word	source_kind	sources (page@revision)	note
 葛雷果里	char	湯姆歷險記 (動畫)@94720074	
 葛雷果里歐	char	萬里尋親記@94719791	
 葛雷森	cgroup	Template:CGroup/Cyber Formula@68486475	
+葛雷特神掌	cgroup	Module:CGroup/閃電十一人@68657168	
 葛雷維席格	cgroup	Template:CGroup/The Witcher@86825096	
 葛雷里歐	cgroup	Module:CGroup/Danball Senki@81863967	
-葛馬藍	cgroup	Module:CGroup/Simpsons@84869408	
 葛麗特	cgroup	Template:CGroup/童話槍手小紅帽@22981301	CHECK
 葵唯翔	char	來自繽紛世界的明日@94729384	CHECK
 葵恩	cgroup	Module:CGroup/LOL@93322985	
@@ -11276,6 +11537,7 @@ word	source_kind	sources (page@revision)	note
 蓮花挑戰	cgroup	Template:CGroup/GBF@82201572	
 蔑視時代	cgroup	Template:CGroup/The Witcher@86825096	
 蔓越梅	char	少女與戰車角色列表@93320972	
+蔚藍巨浪隊	cgroup	Module:CGroup/閃電十一人@68657168	
 蔬果店阿姨	char	名偵探福爾摩斯@94071005	
 蔬菜怪	char	飛天小女警Z@94716201	
 蔽魔鋼彈	cgroup	Template:CGroup/GundamIBO@91631774	
@@ -11390,6 +11652,7 @@ word	source_kind	sources (page@revision)	note
 藍色惡靈	cgroup	Template:CGroup/降世神通@43998034	
 藍色燃燒獸	char	數碼寶貝覺醒節拍角色列表@94712797	
 藍色玫瑰風暴	cgroup	Template:CGroup/Yes! 光之美少女5@89217113	
+藍色真珠音調	cgroup	Template:CGroup/Pichi Pichi Pitch@94608266	
 藍色鷲獅	cgroup	Module:CGroup/Danball Senki@81863967	
 藍艾蘇	cgroup	Template:CGroup/Diablo@94495831	
 藍薔薇之劍	cgroup	Module:CGroup/SAO@89298185	
@@ -11432,6 +11695,7 @@ word	source_kind	sources (page@revision)	note
 藥師少女的獨語	cgroup	Module:CGroup/Anime@94680982	
 藥水製作	cgroup	Template:CGroup/Mabinogi@50754648	
 蘇坦	cgroup	Module:CGroup/閃電十一人@68657168	
+蘇娜	cgroup	Template:CGroup/Mabinogi@50754648	CHECK
 蘇州古城	cgroup	Module:CGroup/Counter-Strike@85677571	zh-hant
 蘇汶	char	龍與雀斑公主@94650173	
 蘇爾特	cgroup	Module:CGroup/美国漫画@94638375	
@@ -11447,6 +11711,7 @@ word	source_kind	sources (page@revision)	note
 蘋果嘉兒	cgroup	Module:CGroup/My Little Pony@91388064	
 蘋果家的團聚	cgroup	Module:CGroup/My Little Pony@91388064	
 蘋果核戰	cgroup	Module:CGroup/Anime@94680982	
+蘋果白蘭地	cgroup	Template:CGroup/名偵探柯南@93449521	
 蘋果的憂愁	cgroup	Module:CGroup/My Little Pony@91388064	
 蘋果麗麗	cgroup	Module:CGroup/My Little Pony@91388064	CHECK
 蘋裹龍	cgroup	Template:CGroup/Pokemon@85444397	CHECK
@@ -11491,6 +11756,7 @@ word	source_kind	sources (page@revision)	note
 蛇形族	cgroup	Template:CGroup/妖怪手錶@75937932	
 蛇英雄	cgroup	Template:CGroup/MyHeroAcademia@87565804	
 蛇蠍社	cgroup	Module:CGroup/Pixar@93247177	
+蛇行射門	cgroup	Module:CGroup/閃電十一人@68657168	
 蛇雞獸	char	数码宝贝幽灵游戏角色列表@94560916	
 蛇頸龍型	cgroup	Template:CGroup/Digimon@94687201	
 蛇髮魔女三姐妹	cgroup	Module:CGroup/OnePiece@83858889	
@@ -11508,6 +11774,7 @@ word	source_kind	sources (page@revision)	note
 蜂蜜幸運草	cgroup	Module:CGroup/Anime@94680982	
 蜂蜜派	cgroup	Module:CGroup/SAO@89298185	
 蜘蛛人驚奇再起系列	cgroup	Module:CGroup/美国漫画@94638375	
+蜘蛛吐絲	cgroup	Module:CGroup/閃電十一人@68657168	
 蜘蛛獸	char	数码宝贝大冒险角色列表@94744369	
 蜘蛛高塔	cgroup	Template:CGroup/Warcraft@92164655	zh-hant
 蜜娜	cgroup	Template:CGroup/GundamSeed@92969101	CHECK
@@ -11526,6 +11793,7 @@ word	source_kind	sources (page@revision)	note
 蝙蝠俠大戰急凍人	cgroup	Module:CGroup/美国漫画@94638375	
 蝙蝠俠大顯神威	cgroup	Module:CGroup/美国漫画@94638375	
 蝙蝠女孩	cgroup	Module:CGroup/美国漫画@94638375	
+蝙蝠小姐	cgroup	Template:CGroup/Pichi Pichi Pitch@94608266	
 蝙蝠機車	cgroup	Module:CGroup/美国漫画@94638375	
 蝠鱝獸	char	数码宝贝大冒险：角色列表@94538377	
 蝦蝦	cgroup	Module:CGroup/Pixar@93247177	CHECK
@@ -11547,17 +11815,21 @@ word	source_kind	sources (page@revision)	note
 螳螂荒原	cgroup	Module:CGroup/Wow@94351016	
 螺旋丸	cgroup	Template:CGroup/NARUTO@86143617	
 螺旋亂丸	cgroup	Template:CGroup/NARUTO@86143617	
+螺旋剪刀腳	cgroup	Module:CGroup/閃電十一人@68657168	
 螺旋吸丸	cgroup	Template:CGroup/NARUTO@86143617	
 螺旋咬	cgroup	Template:CGroup/Eyeshield21@86998850	
 螺旋多連丸	cgroup	Template:CGroup/NARUTO@86143617	
+螺旋射門	cgroup	Module:CGroup/閃電十一人@68657168	
 螺旋手裡劍	cgroup	Template:CGroup/NARUTO@86143617	
 螺旋摩羯	cgroup	Template:CGroup/戰鬥陀螺 鋼鐵奇兵@68490308	
+螺旋槳風暴	cgroup	Module:CGroup/閃電十一人@68657168	
 螺旋牙	cgroup	Module:CGroup/Counter-Strike@85677571	zh-hant
 螺旋粉碎飛拳	cgroup	Template:CGroup/Mazinger@84157445	
 螺旋超多連丸	cgroup	Template:CGroup/NARUTO@86143617	
 螺旋輪虞	cgroup	Template:CGroup/NARUTO@86143617	
 螺旋連丸	cgroup	Template:CGroup/NARUTO@86143617	
 螺旋金剛飛拳	cgroup	Template:CGroup/Mazinger@84157445	
+螺旋鑽射	cgroup	Module:CGroup/閃電十一人@68657168	
 螺栓獸	char	数码宝贝大冒险：角色列表@94538377	
 螺門	cgroup	Template:CGroup/KamenRider@94225985	
 蟇郡苛	char	KILL la KILL@94827565	CHECK
@@ -11735,6 +12007,7 @@ word	source_kind	sources (page@revision)	note
 西莉亞	char	長腿叔叔 (動畫)@94856329	CHECK
 西莉卡	cgroup	Module:CGroup/SAO@89298185	CHECK
 西蓋爾	cgroup	Template:CGroup/GundamSeed@92969101	CHECK
+西蕾妮蒂	cgroup	Template:CGroup/Sailor Moon@93051346	CHECK
 西蘇	cgroup	Module:CGroup/Disney@93925402	CHECK
 西諾	cgroup	Template:CGroup/GundamIBO@91631774	CHECK
 西谷霞	char	名侦探柯南：天空的遇难船@94562607	CHECK
@@ -11821,6 +12094,7 @@ word	source_kind	sources (page@revision)	note
 諸星登志夫	char	名偵探柯南：貝克街的亡靈@94782563	
 諸星秀樹	char	名偵探柯南：貝克街的亡靈@94782563	
 諸神之地祖阿曼	cgroup	Module:CGroup/Wow@94351016	
+諸神黃昏	cgroup	Module:CGroup/閃電十一人@68657168	
 諸神黃昏模式	cgroup	Module:CGroup/Danball Senki@81863967	
 諸葉	char	半妖的夜叉姬@87932716	
 諾伊托拉	cgroup	Module:CGroup/BLEACH@81833737	
@@ -11846,6 +12120,7 @@ word	source_kind	sources (page@revision)	note
 諾瓦廣場	cgroup	Module:CGroup/Half-Life@94355597	
 諾艾兒	cgroup	Template:CGroup/ED@94768974	zh-hant
 諾艾爾	cgroup	Template:CGroup/Aikatsu@68312381	
+諾葳爾	cgroup	Template:CGroup/Pichi Pichi Pitch@94608266	
 諾蕾雅	cgroup	Template:CGroup/GundamTWFM@82129397	
 諾蘭卡魯斯	cgroup	Module:CGroup/SAO@89298185	
 諾貝爾鋼彈	cgroup	Template:CGroup/GGundam@85035825	
@@ -11960,6 +12235,7 @@ word	source_kind	sources (page@revision)	note
 貝殼鼻涕獸	char	数码宝贝大冒险：角色列表@94538377	
 貝洛絲	char	我的英雄学院角色列表@94403792	
 貝洛茲	char	翠星上的加爾岡緹亞@91223485	CHECK
+貝漢	cgroup	Module:CGroup/閃電十一人@68657168	
 貝爾塔	char	DARKER THAN BLACK@93233512	
 貝爾席歐	cgroup	Template:CGroup/FullmetalAlchemist@48481493	
 貝爾庫利	cgroup	Module:CGroup/SAO@89298185	
@@ -12028,6 +12304,7 @@ word	source_kind	sources (page@revision)	note
 費洛帕	cgroup	Module:CGroup/Half-Life@94355597	
 費爾姐妹的姐妹櫥柜	cgroup	Template:CGroup/GOSICK@62514366	CHECK
 費爾米	cgroup	Template:CGroup/BUDDYCOMPLEX@77221119	
+費狄歐	cgroup	Module:CGroup/閃電十一人@68657168	
 費班克	cgroup	Template:CGroup/GundamIBO@91631774	
 費賽爾	cgroup	Module:CGroup/SAO@89298185	
 費迪南多	char	萬里尋親記@94719791	
@@ -12052,6 +12329,7 @@ word	source_kind	sources (page@revision)	note
 賈方復仇記	cgroup	Module:CGroup/Disney@93925402	
 賈桂琳	cgroup	Template:CGroup/GOSICK@62514366	
 賈洛尼	char	萬里尋親記@94719791	
+賈爾席多	cgroup	Module:CGroup/閃電十一人@68657168	
 賈爾迪諾	cgroup	Module:CGroup/OnePiece@83858889	
 賈米托夫	cgroup	Template:CGroup/GundamUC@94693163	
 賈維爾	char	悲慘世界 少女珂賽特@94720109	
@@ -12067,6 +12345,7 @@ word	source_kind	sources (page@revision)	note
 賣岔	cgroup	Module:CGroup/Disney@93925402	
 賣藥人	char	湯姆歷險記 (動畫)@94720074	
 賭城風雲	cgroup	Module:CGroup/Counter-Strike@85677571	zh-hant
+賴人醫	cgroup	Template:CGroup/Family Guy@79259281	
 購買固定型機關槍子彈	cgroup	Module:CGroup/Counter-Strike@85677571	zh-hant
 賽亞	cgroup	Template:CGroup/DragonBall@92325756	
 賽伊	cgroup	Template:CGroup/GundamSeed@92969101	
@@ -12107,6 +12386,7 @@ word	source_kind	sources (page@revision)	note
 賽遊科技	cgroup	Module:CGroup/Games-zh@90861641	zh-hant
 賽達斯	cgroup	Template:CGroup/GundamAGE@51366593	
 賽采之	cgroup	Template:CGroup/GGundam@85035825	
+賽門	cgroup	Template:CGroup/Adventure Time@90284406	
 賽魯	cgroup	Template:CGroup/DragonBall@92325756	
 賽魯卡	cgroup	Module:CGroup/SAO@89298185	
 賽魯少年	cgroup	Template:CGroup/DragonBall@92325756	
@@ -12252,6 +12532,7 @@ word	source_kind	sources (page@revision)	note
 超級快跑鴨	cgroup	Module:CGroup/OnePiece@83858889	
 超級手指喬	cgroup	Module:CGroup/蠟筆小新@93760288	
 超級最前線	cgroup	Module:CGroup/美国漫画@94638375	
+超級海嘯	cgroup	Module:CGroup/閃電十一人@68657168	
 超級烈空坐	char	Pokemon the movie XY 光環的超魔神 胡帕@93394331	
 超級無敵切割怪	char	星之卡比 (動畫)@94160462	
 超級無敵厲害撲克牌	cgroup	Module:CGroup/蠟筆小新@93760288	
@@ -12279,6 +12560,7 @@ word	source_kind	sources (page@revision)	note
 超載境界	cgroup	Module:CGroup/Danball Senki@81863967	
 超轉速領域	cgroup	Module:CGroup/Counter-Strike@85677571	zh-hant
 超酷大樂團	cgroup	Module:CGroup/SpongeBob SquarePants@91129493	
+超量企鵝	cgroup	Module:CGroup/閃電十一人@68657168	CHECK
 超限旗幟式	cgroup	Template:CGroup/Gundam00@70972545	
 超限旗幟部隊	cgroup	Template:CGroup/Gundam00@70972545	
 超電磁砲	cgroup	Module:CGroup/Counter-Strike@85677571	zh-hant
@@ -12289,7 +12571,10 @@ word	source_kind	sources (page@revision)	note
 越野夏子	char	光之美少女@94825358	
 越野菁英賽	cgroup	Module:CGroup/Games@94658856	
 趙奎奐	cgroup	Module:CGroup/Solo Leveling@86308871	
+趙鐘秀	cgroup	Module:CGroup/閃電十一人@68657168	
 趣怪守護仙	cgroup	Module:CGroup/Cartoon@93410586	
+足球帝國	cgroup	Module:CGroup/閃電十一人@68657168	
+足球禁止令	cgroup	Module:CGroup/閃電十一人@68657168	
 趾鹹	cgroup	Module:CGroup/Simpsons@84869408	
 跑跑飛天車	cgroup	Template:CGroup/Crazyracing Kartrider@60141039	
 跑車浪漫旅	cgroup	Module:CGroup/Games@94658856	
@@ -12298,6 +12583,7 @@ word	source_kind	sources (page@revision)	note
 跟隨者	cgroup	Template:CGroup/MapleStory@57794822	
 路克西雷	char	最终幻想VII系列角色列表@92525651	CHECK
 路卡利歐	cgroup	Template:CGroup/Pokemon@85444397	
+路卡斯	cgroup	Template:CGroup/Mabinogi@50754648	
 路卡爾	cgroup	Module:CGroup/KingOfFighters@91481321	
 路卡的啟程	cgroup	Module:CGroup/Square Enix@93012351	
 路卡的夏天	cgroup	Module:CGroup/Pixar@93247177	
@@ -12325,7 +12611,9 @@ word	source_kind	sources (page@revision)	note
 踢蝗	cgroup	Template:CGroup/KamenRider@94225985	
 踢踢獸	char	數碼寶貝覺醒節拍角色列表@94712797	
 蹂躪者	cgroup	Template:CGroup/Transformers@87179168	
+蹦極衝刺	cgroup	Module:CGroup/閃電十一人@68657168	
 躍動衝鋒	cgroup	Template:CGroup/四驅兄弟@86987120	
+躍者之兔	cgroup	Module:CGroup/閃電十一人@68657168	
 車海印	cgroup	Module:CGroup/Solo Leveling@86308871	
 車站站員	char	喬瑟與虎與魚群動畫版@94591558	
 車諾比之影	cgroup	Module:CGroup/Games@94658856	
@@ -12391,6 +12679,8 @@ word	source_kind	sources (page@revision)	note
 达尔默	cgroup	Template:CGroup/MapleStory@57794822	CHECK
 迅遊科技	cgroup	Module:CGroup/Games-zh@90861641	zh-hant
 迅雷先鋒	cgroup	Module:CGroup/Games@94658856	
+迅雷猛獸	cgroup	Module:CGroup/閃電十一人@68657168	
+迎風吹雪	cgroup	Module:CGroup/閃電十一人@68657168	
 近戰武器組合包	cgroup	Module:CGroup/Counter-Strike@85677571	zh-hant
 近戰武器設計圖	cgroup	Module:CGroup/Counter-Strike@85677571	zh-hant
 近戰武器類	cgroup	Module:CGroup/Counter-Strike@85677571	zh-hant
@@ -12404,6 +12694,7 @@ word	source_kind	sources (page@revision)	note
 迦奧迦獸	char	數碼寶貝拯救隊角色列表@94177566	
 迦拉	cgroup	Template:CGroup/GundamAGE@51366593	
 迦迪斯	char	聖天空戰記@94720493	
+迪亞	cgroup	Module:CGroup/閃電十一人@68657168	
 迪亞貝爾	cgroup	Module:CGroup/SAO@89298185	
 迪克斯	char	高譚角色列表@92146409	
 迪凡斯	cgroup	Template:CGroup/GundamAGE@51366593	
@@ -12440,6 +12731,7 @@ word	source_kind	sources (page@revision)	note
 迪米馬鎧機	cgroup	Template:CGroup/GundamTWFM@82129397	
 迪索爾巴德	cgroup	Module:CGroup/SAO@89298185	CHECK
 迪絲比婭	char	Go Princess 光之美少女@94065409	
+迪藍	cgroup	Module:CGroup/閃電十一人@68657168	
 迪蘭薩	cgroup	Template:CGroup/GundamTWFM@82129397	
 迪諾	cgroup	Module:CGroup/Cyberpunk@85139581	
 迪金	cgroup	Template:CGroup/GundamUC@94693163	
@@ -12447,6 +12739,7 @@ word	source_kind	sources (page@revision)	note
 迫水開治	char	舞-HiME角色列表@91610502	
 迭斯德畢尼岡德	cgroup	Template:CGroup/童話槍手小紅帽@22981301	
 迴旋指揮艇	cgroup	Template:CGroup/Mazinger@84157445	
+迴旋踢	cgroup	Module:CGroup/閃電十一人@68657168	
 迴旋鏢隊長	cgroup	Module:CGroup/美国漫画@94638375	
 迷你卡爾波	char	星之卡比 (動畫)@94160462	
 迷你哆啦	cgroup	Module:CGroup/Doraemon@88509940	
@@ -12462,6 +12755,7 @@ word	source_kind	sources (page@revision)	note
 迷惑深丘	cgroup	Module:CGroup/Counter-Strike@85677571	zh-hant
 迷糊天使	cgroup	Module:CGroup/Anime@94680982	
 迷糊餐廳	cgroup	Template:CGroup/WORKING!!@28976859	
+迷走電擊	cgroup	Module:CGroup/閃電十一人@68657168	
 迷途之蝶	cgroup	Module:CGroup/Anime@94680982	
 迷霧前夕	cgroup	Module:CGroup/Wow@94351016	
 迷霧森林	cgroup	Template:CGroup/MapleStory@57794822	
@@ -12498,6 +12792,7 @@ word	source_kind	sources (page@revision)	note
 連袂出擊	cgroup	Module:CGroup/Games@94658856	
 連邦軟件	cgroup	Module:CGroup/Games-zh@90861641	zh-hant
 進入永恆之地	cgroup	Template:CGroup/Warcraft@92164655	zh-hant
+進化世代	cgroup	Module:CGroup/閃電十一人@68657168	
 進化管理者	cgroup	Template:CGroup/Heroes of the Storm@49727842	
 進擊的巨人	title	進擊的巨人 (動畫)@94769602	
 進藤玲子	char	名偵探柯南：銀翼的奇術師@94771896	
@@ -12580,6 +12875,7 @@ word	source_kind	sources (page@revision)	note
 達雷斯	cgroup	Template:CGroup/黑執事@49361116	
 遙控器不見妖	cgroup	Template:CGroup/妖怪手錶@75937932	
 遙控桿	cgroup	Module:CGroup/Games@94658856	zh-hant
+遙控車射門	cgroup	Module:CGroup/閃電十一人@68657168	
 遙香	cgroup	Module:CGroup/BlueArchive@93972468	zh-hant
 遜五郎	char	B傳說！戰鬥彈珠人@94175384	
 遠坂凜	char	Fate/stay night角色列表@94041607	
@@ -12595,6 +12891,7 @@ word	source_kind	sources (page@revision)	note
 遠野貴樹	char	秒速5公分@94405277	
 遺落邊境	cgroup	Module:CGroup/Counter-Strike@85677571	zh-hant
 遺跡傳奇	cgroup	Module:CGroup/Tales@54832633	
+邁可恩	cgroup	Module:CGroup/閃電十一人@68657168	
 邁塔	char	翠星上的加爾岡緹亞@91223485	
 邁威爾	cgroup	Module:CGroup/美国漫画@94638375	
 邁爵士	cgroup	Module:CGroup/Pixar@93247177	
@@ -12611,6 +12908,7 @@ word	source_kind	sources (page@revision)	note
 那迦	cgroup	Template:CGroup/Warcraft@92164655	zh-hant
 那迦的興起	cgroup	Template:CGroup/Warcraft@92164655	zh-hant
 邦妮	cgroup	Module:CGroup/Pixar@93247177	
+邦頓	cgroup	Template:CGroup/Ultraman@94663541	zh-hant
 邪惡先生	cgroup	Module:CGroup/美国漫画@94638375	
 邪惡迪卡	cgroup	Template:CGroup/Ultraman@94663541	
 邪神降臨	cgroup	Module:CGroup/Games@94658856	
@@ -12626,6 +12924,7 @@ word	source_kind	sources (page@revision)	note
 郁乃	char	DARLING in the FRANXX@94203497	
 郊普與洙賢	char	戰鬥陀螺 鋼鐵奇兵角色列表@94643342	
 郝刻薄	cgroup	Module:CGroup/Pixar@93247177	
+郝梅亞	cgroup	Template:CGroup/GundamSeed@92969101	
 郝莉莉	cgroup	Module:CGroup/Pixar@93247177	
 郝萊特	cgroup	Module:CGroup/Jewelpet@81833309	
 郝融冰	cgroup	Module:CGroup/Simpsons@84869408	
@@ -12715,6 +13014,7 @@ word	source_kind	sources (page@revision)	note
 重裝高出力型吉姆	cgroup	Template:CGroup/GBF@82201572	
 重裝黑騎士	cgroup	Template:CGroup/戰鬥陀螺 鋼鐵奇兵@68490308	
 重要的事物	cgroup	Template:CGroup/GundamTWFM@82129397	
+重量級相撲	cgroup	Module:CGroup/閃電十一人@68657168	
 重錘沃克	cgroup	Module:CGroup/Counter-Strike@85677571	CHECK,zh-hant
 重鍛型卡爾巴迪	cgroup	Template:CGroup/GBF@82201572	CHECK
 重鍛型智魔	cgroup	Template:CGroup/GundamIBO@91631774	CHECK
@@ -12740,6 +13040,7 @@ word	source_kind	sources (page@revision)	note
 野火獸	char	數碼寶貝04無限地帶角色列表@94744460	
 野牛衝鋒槍	cgroup	Module:CGroup/Counter-Strike@85677571	zh-hant
 野狗小黑	char	哆啦A梦角色列表@94533440	
+野獸魔牙	cgroup	Module:CGroup/閃電十一人@68657168	
 野球長打王	cgroup	Module:CGroup/Anime@94680982	
 野菜獸	char	数码宝贝大冒险：角色列表@94538377	
 野蠻之星	cgroup	Template:CGroup/MapleStory@57794822	
@@ -12942,6 +13243,7 @@ word	source_kind	sources (page@revision)	note
 鎮魂犬鋼彈	cgroup	Template:CGroup/Gundam00@70972545	
 鏈鋸人	cgroup	Module:CGroup/Anime@94680982	
 鏑木美波	char	高校艦隊@93341996	
+鏟球殺手	cgroup	Module:CGroup/閃電十一人@68657168	
 鏡子任務	cgroup	Template:CGroup/GBF@82201572	
 鏡子超人	cgroup	Template:CGroup/Ultraman@94663541	
 鏡子鬼	char	學校怪談 (動畫)@92145862	
@@ -12970,8 +13272,10 @@ word	source_kind	sources (page@revision)	note
 鐵黑幹次郎	char	可塑性記憶@94399638	
 鐵齋	char	獸兵衛忍風帖@94218789	
 鑰匙天使獸	cgroup	Template:CGroup/Digimon@94687201	
+鑽石冰晶	cgroup	Module:CGroup/閃電十一人@68657168	
 鑽石漩渦	char	DokiDoki! 光之美少女@93549956	
 鑽石閃光	char	DokiDoki! 光之美少女@93549956	
+鑽頭毀滅者	cgroup	Module:CGroup/閃電十一人@68657168	
 鑽頭鼴鼠獸	char	数码宝贝大冒险：角色列表@94538377	
 長刃	cgroup	Template:CGroup/GundamSeed@92969101	
 長刺喵	cgroup	Template:CGroup/妖怪手錶@75937932	
@@ -13003,26 +13307,34 @@ word	source_kind	sources (page@revision)	note
 閃亮金色唱盤	cgroup	Template:CGroup/Pretty Rhythm@77221109	
 閃亮閃亮推特	cgroup	Template:CGroup/Aikatsu@68312381	
 閃光之哈薩維	cgroup	Template:CGroup/GundamUC@94693163	
+閃光加速	cgroup	Module:CGroup/閃電十一人@68657168	
 閃光射手	cgroup	Template:CGroup/戰鬥陀螺 鋼鐵奇兵@68490308	
 閃光暴龍獸	char	數碼寶貝拯救隊角色列表@94177566	
 閃擊點行動	cgroup	Module:CGroup/Games@94658856	
 閃耀上升氣流	cgroup	Module:CGroup/開闊天空！光之美少女@83218661	
+閃耀之力	cgroup	Module:CGroup/閃電十一人@68657168	
 閃耀巨星	cgroup	Module:CGroup/LOL@93322985	
 閃耀愛情邱比特	cgroup	Template:CGroup/Pretty Rhythm@77221109	zh-hant
 閃耀於終焉之槍	char	Fate/stay night角色列表@94041607	
 閃耀盔甲	cgroup	Module:CGroup/My Little Pony@91388064	zh-hant
 閃耀飛龍	char	魔法使光之美少女！@94758670	
 閃耀魔眼	cgroup	Module:CGroup/SAO@89298185	
+閃閃亮亮幻象	cgroup	Module:CGroup/閃電十一人@68657168	
 閃閃亮晶晶	cgroup	Module:CGroup/Jewelpet@81833309	
 閃雷悍將	cgroup	Template:CGroup/MapleStory@57794822	
+閃電一號射門	cgroup	Module:CGroup/閃電十一人@68657168	
 閃電光點	cgroup	Template:CGroup/Pretty Rhythm@77221109	
+閃電大蓬車	cgroup	Module:CGroup/閃電十一人@68657168	
 閃電急擊	cgroup	Module:CGroup/LOL@93322985	
 閃電怪馬	cgroup	Module:CGroup/Anime@94680982	
+閃電日本	cgroup	Module:CGroup/閃電十一人@68657168	
 閃電暴風	cgroup	Template:CGroup/GundamSeed@92969101	
+閃電爆破	cgroup	Module:CGroup/閃電十一人@68657168	
 閃電麥坤	cgroup	Module:CGroup/Pixar@93247177	
 閃靈悍將	cgroup	Module:CGroup/美国漫画@94638375	
 閃靈獵手	cgroup	Module:CGroup/Counter-Strike@85677571	zh-hant
 閉鎖空間	cgroup	Template:CGroup/涼宮春日的憂鬱@71080538	
+閉鎖鐵盒作戰	cgroup	Module:CGroup/閃電十一人@68657168	
 開店達人	cgroup	Template:CGroup/Sim@37867988	
 開機獸	char	數碼暴龍App世代角色列表@94177588	
 開演之時已到	char	Fate/Apocrypha@90728159	
@@ -13082,6 +13394,7 @@ word	source_kind	sources (page@revision)	note
 阪口桂利奈	char	少女與戰車角色列表@93320972	
 阪木	cgroup	Template:CGroup/Pokemon@85444397	
 防禦力場	cgroup	Module:CGroup/Counter-Strike@85677571	zh-hant
+防禦射線	cgroup	Module:CGroup/閃電十一人@68657168	
 阿什弗德	cgroup	Template:CGroup/Code Geass@70270136	
 阿仁	char	東京教父@92832083	
 阿伽門農級	cgroup	Template:CGroup/GundamSeed@92969101	
@@ -13142,6 +13455,7 @@ word	source_kind	sources (page@revision)	note
 阿廣	cgroup	Module:CGroup/Disney@93925402	
 阿強	cgroup	Template:CGroup/Mazinger@84157445	
 阿強一號	cgroup	Template:CGroup/Mazinger@84157445	
+阿德納	cgroup	Module:CGroup/閃電十一人@68657168	
 阿德莫斯	cgroup	Template:CGroup/GundamIBO@91631774	
 阿悟	cgroup	Template:CGroup/魔法咪路咪路@26972197	
 阿慈谷	cgroup	Module:CGroup/BlueArchive@93972468	zh-hant
@@ -13163,6 +13477,7 @@ word	source_kind	sources (page@revision)	note
 阿斯金	cgroup	Module:CGroup/BLEACH@81833737	
 阿斯頓	cgroup	Template:CGroup/GundamIBO@91631774	
 阿春	char	借物少女艾莉緹@89682636	
+阿普多拉	cgroup	Module:CGroup/閃電十一人@68657168	
 阿曼達	cgroup	Module:CGroup/美国漫画@94638375	
 阿本	cgroup	Module:CGroup/Pixar@93247177	
 阿本加聶	cgroup	Template:CGroup/HUNTER@80241645	
@@ -13251,6 +13566,7 @@ word	source_kind	sources (page@revision)	note
 阿薰	char	FRESH光之美少女！@93922959	
 阿虫	cgroup	Module:CGroup/Disney@93925402	CHECK
 阿蜜達	cgroup	Template:CGroup/GundamIBO@91631774	
+阿衛	cgroup	Template:CGroup/Sailor Moon@93051346	
 阿袋	cgroup	Module:CGroup/蠟筆小新@93760288	
 阿裘拉司	char	B傳說！戰鬥彈珠人@94175384	
 阿西瑪	cgroup	Template:CGroup/GundamUC@94693163	CHECK
@@ -13280,6 +13596,7 @@ word	source_kind	sources (page@revision)	note
 阿魯魯耶里	cgroup	Module:CGroup/BLEACH@81833737	
 阿魷小姐	char	小魔女DoReMi@94721174	
 阿鳴溝	cgroup	Module:CGroup/Simpsons@84869408	
+阿鵝	cgroup	Template:CGroup/Adventure Time@90284406	
 阿麗安蘿德	cgroup	Template:CGroup/GundamIBO@91631774	CHECK
 阿默	cgroup	Template:CGroup/魔法咪路咪路@26972197	
 阿鼠	cgroup	Template:CGroup/KamenRider@94225985	
@@ -13341,14 +13658,17 @@ word	source_kind	sources (page@revision)	note
 陸行鳥大賽車	cgroup	Module:CGroup/Square Enix@93012351	
 陸馬	cgroup	Module:CGroup/My Little Pony@91388064	zh-hant
 陸龜獸	char	数码宝贝大冒险：角色列表@94538377	
+陽光閃耀	cgroup	Module:CGroup/閃電十一人@68657168	
 陽奈	cgroup	Module:CGroup/BlueArchive@93972468	zh-hant
 陽奈委員長的暑假	cgroup	Module:CGroup/BlueArchive@93972468	zh-hant
 陽葵	cgroup	Module:CGroup/BlueArchive@93972468	zh-hant
 隆多尼亞	cgroup	Module:CGroup/Danball Senki@81863967	
+隆起山丘的摩艾	cgroup	Module:CGroup/閃電十一人@68657168	
 隈取	cgroup	Module:CGroup/OnePiece@83858889	
 隊伍治癒	cgroup	Template:CGroup/Mabinogi@50754648	
 階戶雪	char	花開物語@94760130	
 隕石天龍	cgroup	Template:CGroup/戰鬥陀螺 鋼鐵奇兵@68490308	
+障礙馬戲團	cgroup	Module:CGroup/閃電十一人@68657168	
 隨侍練士	cgroup	Module:CGroup/SAO@89298185	
 隨機單中	cgroup	Module:CGroup/LOL@93322985	
 隨機阿福快打	cgroup	Module:CGroup/LOL@93322985	
@@ -13361,6 +13681,7 @@ word	source_kind	sources (page@revision)	note
 雀莉	char	高譚角色列表@92146409	
 雄英高校	cgroup	Template:CGroup/MyHeroAcademia@87565804	
 雅兒貝德	char	異世界四重奏@93605298	
+雅典娜逆襲	cgroup	Module:CGroup/閃電十一人@68657168	
 雅各波	char	萬里尋親記@94719791	
 雅帕帕	char	光之美少女：食尚甜心@92951245	
 雅戈	cgroup	Template:CGroup/Mabinogi@50754648	
@@ -13378,12 +13699,16 @@ word	source_kind	sources (page@revision)	note
 雉田	char	午睡公主～不為人知的故事～@94260985	
 雉雞喵	cgroup	Template:CGroup/妖怪手錶@75937932	
 雕紋	cgroup	Module:CGroup/Wow@94351016	
+雙人狙擊	cgroup	Module:CGroup/閃電十一人@68657168	
+雙倍手榴彈	cgroup	Module:CGroup/閃電十一人@68657168	
 雙刃型	cgroup	Template:CGroup/GundamAGE@51366593	
 雙刃娜吉	cgroup	Module:CGroup/Counter-Strike@85677571	CHECK,zh-hant
 雙刃王座	cgroup	Module:CGroup/Games@94658856	
 雙塔剛弓	cgroup	Template:CGroup/Eyeshield21@86998850	
+雙子星風暴	cgroup	Module:CGroup/閃電十一人@68657168	
 雙子銀狼	cgroup	Module:CGroup/Counter-Strike@85677571	zh-hant
 雙彈瓦斯	cgroup	Template:CGroup/Pokemon@85444397	
+雙拳火箭炮	cgroup	Module:CGroup/閃電十一人@68657168	
 雙持夜鷹	cgroup	Module:CGroup/Counter-Strike@85677571	zh-hant
 雙持白銀烏茲	cgroup	Module:CGroup/Counter-Strike@85677571	CHECK,zh-hant
 雙砲型	cgroup	Template:CGroup/GundamAGE@51366593	
@@ -13399,13 +13724,17 @@ word	source_kind	sources (page@revision)	note
 雙道寒	cgroup	Template:CGroup/戰鬥陀螺 鋼鐵奇兵@68490308	
 雙道炎	cgroup	Template:CGroup/戰鬥陀螺 鋼鐵奇兵@68490308	
 雙重光之美少女拳擊	char	Heartcatch 光之美少女！@94574540	
+雙重噴射	cgroup	Module:CGroup/閃電十一人@68657168	
 雙重天王	cgroup	Template:CGroup/戰鬥陀螺 鋼鐵奇兵@68490308	
+雙重射擊	cgroup	Module:CGroup/閃電十一人@68657168	
+雙重射門	cgroup	Module:CGroup/閃電十一人@68657168	
 雙重衝刺	cgroup	Module:CGroup/Nintendo@94745610	
 雙重龍捲風系統	cgroup	Module:CGroup/Danball Senki@81863967	
 雙雄爭鋒	cgroup	Module:CGroup/Games@94658856	
 雙頭犬	cgroup	Template:CGroup/妖怪手錶@75937932	
 雙頭獸	cgroup	Template:CGroup/Warcraft@92164655	zh-hant
 雙頭長槍	cgroup	Module:CGroup/Danball Senki@81863967	
+雙颱聯防	cgroup	Module:CGroup/閃電十一人@68657168	
 雙魚理	char	BLEACH角色列表@94571323	
 雛希	cgroup	Template:CGroup/Aikatsu@68312381	
 雛河翔	char	PSYCHO-PASS角色列表@93403235	
@@ -13477,7 +13806,6 @@ word	source_kind	sources (page@revision)	note
 雷丘	cgroup	Template:CGroup/Pokemon@85444397	
 雷伊	cgroup	Module:CGroup/閃電十一人@68657168	
 雷伯力茲	cgroup	Template:CGroup/打工吧！魔王大人@40273238	CHECK
-雷傑	cgroup	Template:CGroup/Ultraman@94663541	
 雷光大廳	cgroup	Module:CGroup/Wow@94351016	
 雷光歸來	cgroup	Module:CGroup/Games@94658856	
 雷光獸	char	數碼寶貝04無限地帶角色列表@94744460	
@@ -13532,6 +13860,7 @@ word	source_kind	sources (page@revision)	note
 雷瑟	cgroup	Template:CGroup/Gundam00@70972545	
 雷矢	cgroup	Template:CGroup/Mabinogi@50754648	
 雷神之戰	cgroup	Module:CGroup/Games@94658856	
+雷神截殺	cgroup	Module:CGroup/閃電十一人@68657168	
 雷神激光破	cgroup	Module:CGroup/Counter-Strike@85677571	zh-hant
 雷神獸	cgroup	Template:CGroup/StarCraft@73588136	
 雷神王	cgroup	Module:CGroup/Anime@94680982	
@@ -13553,6 +13882,7 @@ word	source_kind	sources (page@revision)	note
 雷賽布斯	cgroup	Template:CGroup/GundamSeed@92969101	
 雷迪耶	cgroup	Template:CGroup/KamenRider@94225985	
 雷達尼亞	cgroup	Template:CGroup/The Witcher@86825096	
+雷門足球隊	cgroup	Module:CGroup/閃電十一人@68657168	
 雷門電氣	cgroup	Template:CGroup/NARUTO@86143617	
 雷電領域	cgroup	Module:CGroup/Counter-Strike@85677571	zh-hant
 雷霆之眼	cgroup	Module:CGroup/Counter-Strike@85677571	zh-hant
@@ -13593,6 +13923,7 @@ word	source_kind	sources (page@revision)	note
 電波小鬼	cgroup	Template:CGroup/妖怪手錶@75937932	
 電波怪	char	飛天小女警Z@94716201	
 電波神	cgroup	Template:CGroup/妖怪手錶@75937932	
+電漿射門	cgroup	Module:CGroup/閃電十一人@68657168	
 電漿手榴彈	cgroup	Module:CGroup/Counter-Strike@85677571	zh-hant
 電漿爐	cgroup	Template:CGroup/Getter Robo@89726924	
 電熱叉	cgroup	Template:CGroup/GundamAGE@51366593	
@@ -13649,6 +13980,7 @@ word	source_kind	sources (page@revision)	note
 霰彈槍設計圖	cgroup	Module:CGroup/Counter-Strike@85677571	zh-hant
 霰彈槍類	cgroup	Module:CGroup/Counter-Strike@85677571	zh-hant
 霰彈模式	cgroup	Module:CGroup/Counter-Strike@85677571	zh-hant
+露亞	cgroup	Template:CGroup/Pichi Pichi Pitch@94608266	
 露克萊爾	char	Vivy -Fluorite Eye's Song-@93702039	
 露娜	char	美少女戰士角色列表@94852109	CHECK
 露娜瑪莉亞	cgroup	Template:CGroup/GundamSeed@92969101	CHECK
@@ -13668,6 +14000,7 @@ word	source_kind	sources (page@revision)	note
 霸新塞	cgroup	Template:CGroup/降世神通@43998034	
 霸權爭奪	cgroup	Module:CGroup/LOL@93322985	
 霸王爪	cgroup	Template:CGroup/GundamIBO@91631774	
+霸者的聖典	cgroup	Module:CGroup/閃電十一人@68657168	
 霸體	cgroup	Module:CGroup/Counter-Strike@85677571	zh-hant
 霸體裝甲	cgroup	Module:CGroup/Counter-Strike@85677571	zh-hant
 霹拉	cgroup	Module:CGroup/Cyberpunk@85139581	
@@ -13715,6 +14048,7 @@ word	source_kind	sources (page@revision)	note
 青銅炮	char	数码宝贝03驯兽师之王角色列表@94744434	
 青雉	cgroup	Module:CGroup/OnePiece@83858889	
 青龍三郎	char	KILL la KILL@94827565	
+青龍咆哮	cgroup	Module:CGroup/閃電十一人@68657168	
 靚影特務	cgroup	Module:CGroup/Games@94658856	
 靜海木葉	char	魔法少女小圓角色列表@94590242	
 非凡之地	cgroup	Module:CGroup/Disney@93925402	
@@ -13796,6 +14130,7 @@ word	source_kind	sources (page@revision)	note
 風之彩	cgroup	Module:CGroup/Disney@93925402	
 風之律動	cgroup	Module:CGroup/Games@94658856	
 風之谷	title	風之谷 (電影)@94844860	
+風伯斯	cgroup	Template:CGroup/Sailor Moon@93051346	
 風倉萌	cgroup	Module:CGroup/BlueArchive@93972468	zh-hant
 風午	char	異邦人 無皇刃譚@86100576	
 風堇	cgroup	Module:CGroup/miHoYo@93804723	
@@ -13804,6 +14139,7 @@ word	source_kind	sources (page@revision)	note
 風暴女神	cgroup	Module:CGroup/LOL@93322985	
 風暴季節	cgroup	Template:CGroup/The Witcher@86825096	
 風暴巡曳號	cgroup	Template:CGroup/四驅兄弟@86987120	
+風暴征服者	cgroup	Module:CGroup/閃電十一人@68657168	
 風暴烈酒酒坊	cgroup	Module:CGroup/Wow@94351016	
 風暴王	cgroup	Module:CGroup/My Little Pony@91388064	
 風暴破壞者	cgroup	Module:CGroup/美国漫画@94638375	
@@ -13848,6 +14184,7 @@ word	source_kind	sources (page@revision)	note
 飛彈砲台	cgroup	Template:CGroup/StarCraft2@39914602	
 飛斯	cgroup	Module:CGroup/LOL@93322985	
 飛梅	char	BLEACH角色列表@94571323	
+飛燕斬	cgroup	Module:CGroup/閃電十一人@68657168	
 飛索鉤爪	cgroup	Template:CGroup/GundamIBO@91631774	
 飛翔火	cgroup	Template:CGroup/Transformers@87179168	
 飛腿郎	cgroup	Template:CGroup/Pokemon@85444397	
@@ -13868,6 +14205,7 @@ word	source_kind	sources (page@revision)	note
 飛那魯	char	罪惡王冠@87767894	
 飛鋸	cgroup	Module:CGroup/Half-Life@94355597	
 飛頭根	char	半妖的夜叉姬@87932716	
+飛馬三重奏	cgroup	Module:CGroup/閃電十一人@68657168	
 飛馬級	cgroup	Template:CGroup/GundamUC@94693163	
 飛馬號	cgroup	Template:CGroup/GundamUC@94693163	
 飛魚數位	cgroup	Module:CGroup/Games-zh@90861641	zh-hant
@@ -13879,6 +14217,7 @@ word	source_kind	sources (page@revision)	note
 飛龍戰記	cgroup	Template:CGroup/Might&Magic@42603917	
 食人妖獵頭族	cgroup	Template:CGroup/Warcraft@92164655	zh-hant
 食人妖蝠騎士	cgroup	Template:CGroup/Warcraft@92164655	zh-hant
+食人鬼之刃	cgroup	Module:CGroup/閃電十一人@68657168	
 食夢獸	cgroup	Template:CGroup/Digimon@94687201	
 食腦蟲	cgroup	Module:CGroup/Half-Life@94355597	
 飢餓遊戲	cgroup	Module:CGroup/Counter-Strike@85677571	zh-hant
@@ -13894,12 +14233,13 @@ word	source_kind	sources (page@revision)	note
 首藤葵	char	偶像大師 灰姑娘女孩角色列表@91786822	
 首領卡洛斯	char	萬里尋親記@94719791	
 香坂夏美	char	名侦探柯南：世纪末的魔术师@94403742	
-香堤	cgroup	Template:CGroup/GundamTWFM@82129397	
 香子	char	飛天小女警Z@94716201	
 香春優奈	char	魔法少女小圓角色列表@94590242	
 香朵拉	cgroup	Module:CGroup/OnePiece@83858889	
 香狄亞	cgroup	Module:CGroup/OnePiece@83858889	
 香田薰	char	名侦探柯南：第11位前锋@94749116	
+香蓮	cgroup	Template:CGroup/Pichi Pichi Pitch@94608266	
+香蕉射門	cgroup	Module:CGroup/閃電十一人@68657168	
 馬他哆啦	cgroup	Module:CGroup/Doraemon@88509940	
 馬修瑪	cgroup	Template:CGroup/GundamUC@94693163	
 馬倫	cgroup	Template:CGroup/DragonBall@92325756	
@@ -13916,6 +14256,7 @@ word	source_kind	sources (page@revision)	note
 馬卡歐	cgroup	Module:CGroup/蠟筆小新@93760288	
 馬卡隆	cgroup	Module:CGroup/BLEACH@81833737	
 馬卡龍利爪	char	光之美少女：食尚甜心@92951245	
+馬古	cgroup	Module:CGroup/閃電十一人@68657168	
 馬古瓦爾	cgroup	Template:CGroup/FullmetalAlchemist@48481493	
 馬可度加魯	cgroup	Template:CGroup/FullmetalAlchemist@48481493	
 馬吉利夫	cgroup	Template:CGroup/Gundam00@70972545	
@@ -14026,6 +14367,7 @@ word	source_kind	sources (page@revision)	note
 驚喜派對	cgroup	Module:CGroup/My Little Pony@91388064	
 驚嚇大師	cgroup	Module:CGroup/My Little Pony@91388064	
 驚嚇鱷	cgroup	Template:CGroup/妖怪手錶@75937932	
+驚天鐵拳	cgroup	Module:CGroup/閃電十一人@68657168	
 驚奇先生	cgroup	Module:CGroup/美国漫画@94638375	
 驚奇再起系列	cgroup	Module:CGroup/美国漫画@94638375	
 驚奇城堡	cgroup	Template:CGroup/Crazyracing Kartrider@60141039	
@@ -14097,6 +14439,7 @@ word	source_kind	sources (page@revision)	note
 高田麗娜	cgroup	Module:CGroup/Jewelpet@81833309	CHECK
 高登威爾	char	湯姆歷險記 (動畫)@94720074	
 高科技強力磁鐵	cgroup	Template:CGroup/Crazyracing Kartrider@60141039	
+高空落雷一號	cgroup	Module:CGroup/閃電十一人@68657168	
 高等短劍	cgroup	Module:CGroup/Solo Leveling@86308871	
 高等突擊龍獸	char	數碼寶貝覺醒節拍角色列表@94712797	
 高級治療券	cgroup	Module:CGroup/Counter-Strike@85677571	zh-hant
@@ -14132,6 +14475,7 @@ word	source_kind	sources (page@revision)	note
 鬼迷藏模式	cgroup	Module:CGroup/Counter-Strike@85677571	zh-hant
 鬼頭明里	cgroup	Module:CGroup/BlueArchive@93972468	zh-hant
 鬼魂之地	cgroup	Module:CGroup/Wow@94351016	
+鬼魂定身術	cgroup	Module:CGroup/閃電十一人@68657168	
 鬼魂獸	char	数码宝贝大冒险：角色列表@94538377	
 鬼龍院皐月	char	KILL la KILL@94827565	CHECK
 鬼龍院羅曉	char	KILL la KILL@94827565	
@@ -14142,6 +14486,7 @@ word	source_kind	sources (page@revision)	note
 魅惑女巫	cgroup	Module:CGroup/美国漫画@94638375	
 魅音	cgroup	Module:CGroup/Cyberpunk@85139581	
 魅魔鋼彈	cgroup	Template:CGroup/GundamIBO@91631774	
+魏得剩	cgroup	Template:CGroup/Family Guy@79259281	
 魏瓦奇	cgroup	Template:CGroup/Transformers@87179168	
 魔二代	char	七龍珠 (動畫)@94701288	
 魔人偵探腦嚙涅羅	cgroup	Module:CGroup/Anime@94680982	
@@ -14183,13 +14528,16 @@ word	source_kind	sources (page@revision)	note
 魔導碧晶獸	cgroup	Template:CGroup/Digimon@94687201	
 魔尼尼	char	神奇寶貝劇場版：夢幻與波導的勇者 路卡利歐@93329037	
 魔帝海德拉	char	爆丸5星域爭霸@90756067	
+魔幻之球	cgroup	Module:CGroup/閃電十一人@68657168	
 魔幻天狗	cgroup	Template:CGroup/爆丸@31893398	
 魔幻空間模式	cgroup	Module:CGroup/Counter-Strike@85677571	zh-hant
 魔幻終結斬擊	cgroup	Module:CGroup/開闊天空！光之美少女@83218661	
 魔幻舞台	cgroup	Template:CGroup/小魔女DoReMi@65858319	
 魔幻飛翼	cgroup	Template:CGroup/爆丸@31893398	
+魔幻魅影踢	cgroup	Module:CGroup/閃電十一人@68657168	
 魔彈獸	cgroup	Template:CGroup/Digimon@94687201	
 魔形女	cgroup	Module:CGroup/美国漫画@94638375	
+魔戰士潘德拉剛	cgroup	Module:CGroup/閃電十一人@68657168	
 魔晶塔	cgroup	Module:CGroup/Counter-Strike@85677571	zh-hant
 魔晶塔控制儀	cgroup	Module:CGroup/Counter-Strike@85677571	zh-hant
 魔晶碎片	cgroup	Module:CGroup/Counter-Strike@85677571	zh-hant
@@ -14230,10 +14578,14 @@ word	source_kind	sources (page@revision)	note
 魔獸成群	cgroup	Module:CGroup/LOL@93322985	
 魔獸爭霸	cgroup	Template:CGroup/Heroes of the Storm@49727842	
 魔王模式	cgroup	Template:CGroup/Crazyracing Kartrider@60141039	
+魔王的巨掌	cgroup	Module:CGroup/閃電十一人@68657168	
 魔王鐮刀	cgroup	Template:CGroup/爆丸@31893398	
 魔王骷髏鋼彈	cgroup	Template:CGroup/GBF@82201572	
 魔甘娜	cgroup	Module:CGroup/LOL@93322985	CHECK
 魔神五頭龍	char	爆丸5星域爭霸@90756067	
+魔神亞古佩加沙斯	cgroup	Module:CGroup/閃電十一人@68657168	
+魔神佩加沙斯	cgroup	Module:CGroup/閃電十一人@68657168	
+魔神的右手	cgroup	Module:CGroup/閃電十一人@68657168	
 魔神腦的攻擊	cgroup	Module:CGroup/美国漫画@94638375	
 魔美	cgroup	Template:CGroup/Battle Spirits@29023902	
 魔術士歐菲	cgroup	Module:CGroup/Anime@94680982	
@@ -14301,6 +14653,7 @@ word	source_kind	sources (page@revision)	note
 鳩谷蜜琪	cgroup	Module:CGroup/蠟筆小新@93760288	
 鳩達	cgroup	Template:CGroup/GundamIBO@91631774	
 鳳凰丸禮	char	KILL la KILL@94827565	
+鳳凰展翅	cgroup	Module:CGroup/閃電十一人@68657168	
 鳳凰戰機	cgroup	Template:CGroup/StarCraft2@39914602	
 鳳凰毒牙	cgroup	Template:CGroup/四驅兄弟@86987120	
 鳳凰飛翼鋼彈	cgroup	Template:CGroup/GBF@82201572	
@@ -14325,6 +14678,7 @@ word	source_kind	sources (page@revision)	note
 鷲美	char	衝吧烈子@91183058	
 鷹之介	char	功夫貓黨@94855681	
 鷹富士茄子	char	偶像大師 灰姑娘女孩角色列表@91786822	
+鷹式衝撞	cgroup	Module:CGroup/閃電十一人@68657168	
 鷹獅石失落的寶藏	cgroup	Module:CGroup/My Little Pony@91388064	
 鷹角網絡	cgroup	Module:CGroup/Games-zh@90861641	zh-hant
 鷺月子	char	妄想代理人@91610420	
@@ -14388,6 +14742,7 @@ word	source_kind	sources (page@revision)	note
 麻利亞	cgroup	Template:CGroup/Aikatsu@68312381	
 麻生亞子	cgroup	Module:CGroup/Counter-Strike@85677571	zh-hant
 麻白	cgroup	Module:CGroup/BlueArchive@93972468	zh-hant
+麻糬螺旋漿	cgroup	Module:CGroup/閃電十一人@68657168	CHECK
 麻酥酥海帶	cgroup	Module:CGroup/Jewelpet@81833309	
 黃土樹妖	cgroup	Template:CGroup/爆丸@31893398	
 黃昏公主	cgroup	Module:CGroup/Nintendo@94745610	
@@ -14395,6 +14750,7 @@ word	source_kind	sources (page@revision)	note
 黃東秀	cgroup	Module:CGroup/Solo Leveling@86308871	
 黃林艾雷娜	char	數碼暴龍App世代角色列表@94177588	CHECK
 黃綠久遠	char	爆旋陀螺Burst@94644099	
+黃色真珠音調	cgroup	Template:CGroup/Pichi Pichi Pitch@94608266	
 黃金之鄉	cgroup	Module:CGroup/OnePiece@83858889	
 黃金兵蜂	cgroup	Module:CGroup/Counter-Strike@85677571	zh-hant
 黃金噬血榴炮	cgroup	Module:CGroup/Counter-Strike@85677571	zh-hant
@@ -14418,6 +14774,7 @@ word	source_kind	sources (page@revision)	note
 黃金殲滅者	cgroup	Module:CGroup/Counter-Strike@85677571	zh-hant
 黃金疾風獵鷹	cgroup	Module:CGroup/Counter-Strike@85677571	zh-hant
 黃金眼鏡蛇	cgroup	Module:CGroup/Counter-Strike@85677571	zh-hant
+黃金神掌	cgroup	Module:CGroup/閃電十一人@68657168	
 黃金神的鐵拳	cgroup	Template:CGroup/Crazyracing Kartrider@60141039	
 黃金肥肥	cgroup	Template:CGroup/Crazyracing Kartrider@60141039	
 黃金鋼鐵之心	cgroup	Module:CGroup/Counter-Strike@85677571	zh-hant
@@ -14430,6 +14787,7 @@ word	source_kind	sources (page@revision)	note
 黃金黑暗騎士	cgroup	Module:CGroup/Counter-Strike@85677571	zh-hant
 黃金鼻涕獸	char	數碼寶貝覺醒節拍角色列表@94712797	
 黃長瀨紬	char	KILL la KILL@94827565	
+黏呼呼麻糬	cgroup	Module:CGroup/閃電十一人@68657168	
 黏答答的姊姊	cgroup	Module:CGroup/My Little Pony@91388064	CHECK
 黑井戶瀧次	char	KILL la KILL@94827565	
 黑先生	char	能量獸之戰獸旋戰鬥@93872390	
@@ -14455,10 +14813,12 @@ word	source_kind	sources (page@revision)	note
 黑暗光速砲	cgroup	Template:CGroup/爆丸@31893398	
 黑暗公爵	cgroup	Template:CGroup/爆丸@31893398	
 黑暗天使	char	Heartcatch 光之美少女！@94574540	
+黑暗天使隊	cgroup	Module:CGroup/閃電十一人@68657168	
 黑暗強力音波	char	Heartcatch 光之美少女！@94574540	
 黑暗戰鬥暴龍獸	char	数码宝贝大冒险02角色列表@94744398	
 黑暗教長	cgroup	Template:CGroup/Heroes of the Storm@49727842	
 黑暗游騎兵	cgroup	Template:CGroup/Warcraft@92164655	zh-hant
+黑暗火鳳凰	cgroup	Module:CGroup/閃電十一人@68657168	
 黑暗物質	cgroup	Template:CGroup/GBF@82201572	
 黑暗物質型能天使鋼彈	cgroup	Template:CGroup/GBF@82201572	
 黑暗神廟	cgroup	Module:CGroup/Wow@94351016	
@@ -14479,8 +14839,10 @@ word	source_kind	sources (page@revision)	note
 黑桃海賊團	cgroup	Module:CGroup/OnePiece@83858889	
 黑歐克	char	音速小子X@94737938	
 黑比	cgroup	Module:CGroup/KingOfFighters@91481321	
+黑洞吞噬	cgroup	Module:CGroup/閃電十一人@68657168	
 黑洞星人	char	宇宙巡警露露子@90128048	
 黑潮總司	char	數碼寶貝覺醒節拍角色列表@94712797	
+黑潮駕馭	cgroup	Module:CGroup/閃電十一人@68657168	
 黑煙龍	char	七龍珠GT@94711068	
 黑熾天使獸	char	数码宝贝大冒险：角色列表@94538377	
 黑獅獸	char	數碼寶貝04無限地帶角色列表@94744460	
@@ -14506,6 +14868,7 @@ word	source_kind	sources (page@revision)	note
 黑色旋風	cgroup	Module:CGroup/Counter-Strike@85677571	zh-hant
 黑色翅膀	cgroup	Template:CGroup/MapleStory@57794822	
 黑色西裝人	cgroup	Module:CGroup/BlueArchive@93972468	zh-hant
+黑色閃電	cgroup	Module:CGroup/閃電十一人@68657168	
 黑色鞭痕	cgroup	Module:CGroup/SAO@89298185	
 黑色高地	cgroup	Module:CGroup/Half-Life@94355597	
 黑色高地實驗室	cgroup	Module:CGroup/Half-Life@94355597	
@@ -14547,6 +14910,7 @@ word	source_kind	sources (page@revision)	note
 鼠膽妙算	cgroup	Module:CGroup/Disney@93925402	
 鼠輩小城	cgroup	Module:CGroup/Disney@93925402	
 鼠輩怪盜	cgroup	Module:CGroup/Anime@94680982	
+鼴鼠鑽地術	cgroup	Module:CGroup/閃電十一人@68657168	
 鼻屎獸	char	数码宝贝大冒险角色列表@94744369	
 齊勒斯	cgroup	Module:CGroup/LOL@93322985	CHECK
 齊天悟空獸	char	數碼寶貝覺醒節拍角色列表@94712797	
@@ -14560,9 +14924,11 @@ word	source_kind	sources (page@revision)	note
 齊藤洋子	char	偶像大師 灰姑娘女孩角色列表@91786822	
 齊魯德	cgroup	Template:CGroup/DragonBall@92325756	
 齒輪系列	cgroup	Module:CGroup/Counter-Strike@85677571	zh-hant
+齒輪驅動	cgroup	Module:CGroup/閃電十一人@68657168	
 龍人	char	犬夜叉角色列表@94790447	
 龍仔獸	char	数码宝贝大冒险：角色列表@94538377	CHECK
 龍圓	char	名偵探柯南：迷宮的十字路@94462568	
+龍型龍捲風	cgroup	Module:CGroup/閃電十一人@68657168	
 龍城明日香	char	魔法少女小圓角色列表@94590242	
 龍太洛斯	cgroup	Template:CGroup/KamenRider@94225985	
 龍奇	char	BORUTO-火影新世代-NARUTO NEXT GENERATIONS-角色列表@94842050	
