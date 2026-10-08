@@ -1,0 +1,53 @@
+base ('cvtune', 'chat') 3121 / 3677
+base ('cvtune', 'formal') 3147 / 3677
+base ('wikitune', 'chat') 1860 / 2733
+base ('wikitune', 'formal') 1903 / 2733
+K	mu	set	profile	top1	fixed	broke	net	p	sec
+256	0.5	cvtune	chat	3152	46	15	+31	8.84e-05	99
+256	0.5	cvtune	formal	3182	57	22	+35	0.000103	60
+256	0.5	wikitune	chat	1915	68	13	+55	3.81e-10	67
+256	0.5	wikitune	formal	1959	70	14	+56	4.07e-10	46
+256	0.8	cvtune	chat	3158	63	26	+37	0.00011	30
+256	0.8	cvtune	formal	3185	75	37	+38	0.000421	33
+256	0.8	wikitune	chat	1923	82	19	+63	1.66e-10	39
+256	0.8	wikitune	formal	1964	87	26	+61	7.12e-09	64
+256	0.9	cvtune	chat	3164	74	31	+43	3.28e-05	27
+256	0.9	cvtune	formal	3189	86	44	+42	0.00029	23
+256	0.9	wikitune	chat	1927	89	22	+67	9.63e-11	23
+256	0.9	wikitune	formal	1971	99	31	+68	1.78e-09	22
+256	0.95	cvtune	chat	3162	77	36	+41	0.000144	31
+256	0.95	cvtune	formal	3185	86	48	+38	0.0013	45
+256	0.95	wikitune	chat	1933	97	24	+73	1.34e-11	26
+256	0.95	wikitune	formal	1977	108	34	+74	3.57e-10	57
+256	0.98	cvtune	chat	3162	81	40	+41	0.000244	77
+256	0.98	cvtune	formal	3177	87	57	+30	0.0154	27
+256	0.98	wikitune	chat	1939	102	23	+79	4.57e-13	24
+256	0.98	wikitune	formal	1976	110	37	+73	1.32e-09	41
+256	0.99	cvtune	chat	3165	84	40	+44	9.65e-05	26
+256	0.99	cvtune	formal	3176	87	58	+29	0.0197	43
+256	0.99	wikitune	chat	1941	104	23	+81	1.7e-13	32
+256	0.99	wikitune	formal	1978	112	37	+75	5.79e-10	32
+512	0.5	cvtune	chat	3152	43	12	+31	3.31e-05	46
+512	0.5	cvtune	formal	3179	57	25	+32	0.000535	56
+512	0.5	wikitune	chat	1922	72	10	+62	1.02e-12	52
+512	0.5	wikitune	formal	1964	76	15	+61	5.48e-11	26
+512	0.8	cvtune	chat	3157	61	25	+36	0.00013	27
+512	0.8	cvtune	formal	3181	72	38	+34	0.00153	28
+512	0.8	wikitune	chat	1930	88	18	+70	2.97e-12	35
+512	0.8	wikitune	formal	1978	102	27	+75	1.88e-11	32
+512	0.9	cvtune	chat	3158	69	32	+37	0.000296	31
+512	0.9	cvtune	formal	3181	81	47	+34	0.00337	21
+512	0.9	wikitune	chat	1941	98	17	+81	5.06e-15	28
+512	0.9	wikitune	formal	1988	117	32	+85	1.39e-12	38
+512	0.95	cvtune	chat	3161	77	37	+40	0.000227	39
+512	0.95	cvtune	formal	3179	85	53	+32	0.00808	26
+512	0.95	wikitune	chat	1944	101	17	+84	1.01e-15	47
+512	0.95	wikitune	formal	1991	124	36	+88	1.61e-12	42
+512	0.98	cvtune	chat	3163	80	38	+42	0.000138	38
+512	0.98	cvtune	formal	3178	87	56	+31	0.0118	33
+512	0.98	wikitune	chat	1948	106	18	+88	2.31e-16	38
+512	0.98	wikitune	formal	1990	126	39	+87	6.88e-12	43
+512	0.99	cvtune	chat	3163	82	40	+42	0.00018	23
+512	0.99	cvtune	formal	3177	88	58	+30	0.0161	27
+512	0.99	wikitune	chat	1949	108	19	+89	2.65e-16	31
+512	0.99	wikitune	formal	1988	129	44	+85	7e-11	25

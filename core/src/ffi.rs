@@ -1067,6 +1067,7 @@ mod tests {
         let dir = tiny_dir("lm", "ㄒㄧㄣ 鑫 -1.0\nㄒㄧㄣ 心 -4.0\n".as_bytes());
         let lm_path = dir.join("tiny.sjlm");
         std::fs::write(&lm_path, tiny_lm()).unwrap();
+        let classes_path = dir.join("classes.sjc");
         let garbage = dir.join("garbage.sjlm");
         std::fs::write(&garbage, b"SJLM0001 not a model").unwrap();
         let c = |p: &Path| CString::new(p.to_str().unwrap()).unwrap();
@@ -1088,6 +1089,12 @@ mod tests {
         assert!(unsafe { shanjie_engine_load_lm(e, bad_utf8.as_ptr()) } == 2, "load non-UTF-8");
         assert!(unsafe { shanjie_engine_load_lm(e, missing_c.as_ptr()) } == 3, "load missing file");
         assert!(unsafe { shanjie_engine_load_lm(e, garbage_c.as_ptr()) } == 3, "load garbage file");
+        // S2k: a directory with the model but no classes.sjc is a failed load, never a silent class-less model.
+        assert!(unsafe { shanjie_engine_load_lm(e, lm_c.as_ptr()) } == 3, "load without classes.sjc");
+        // K 0: classes 1 and 2 are <s> and </s>; the two words have none, so the tiny model's numbers stay as they are.
+        let tiny = tiny_lm();
+        let (cls, emit) = ([1u16, 2, 0xFFFF, 0xFFFF], [1.0, 1.0, 0.0, 0.0]);
+        std::fs::write(&classes_path, crate::lm::test_classes(&tiny, 0, 0.8, &cls, &emit, &[0.1; 9])).unwrap();
         // An engine without data_dir is not reachable through the ABI (only `new` creates engines);
         // the closest case is the overlay vanishing from data_dir after `new`.
         std::fs::rename(dir.join("overlay-add.tsv"), dir.join("overlay.bak")).unwrap();

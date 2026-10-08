@@ -15,8 +15,14 @@ final class SelftestTests: XCTestCase {
         XCTAssertNotEqual(Selftest.run(resources: res), 0)
     }
 
+    /// S2k: the class file is part of the model; without it the model does not load (no silent fallback).
+    func testFailsWithoutTheClasses() throws {
+        let res = try XCTUnwrap(TestData.resources(only: ["mcbpmf-data.txt", "overlay-add.tsv", "sandhi-add.tsv", "demote.tsv", "bigram.sjlm"]))
+        XCTAssertNotEqual(Selftest.run(resources: res), 0)
+    }
+
     func testFailsWithoutTheLexicon() throws {
-        let res = try XCTUnwrap(TestData.resources(only: ["overlay-add.tsv", "bigram.sjlm"]))
+        let res = try XCTUnwrap(TestData.resources(only: ["overlay-add.tsv", "bigram.sjlm", "classes.sjc"]))
         XCTAssertNotEqual(Selftest.run(resources: res), 0)
     }
 

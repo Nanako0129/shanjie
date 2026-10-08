@@ -67,7 +67,7 @@ jobs:
         with:
           toolchain: 1.97.1
 
-      # Before build-app.sh, against the one tracked hash (data/bigram.sjlm.sha256, as ci.yml).
+      # Before build-app.sh, against the tracked hashes (data/bigram.sjlm.sha256 and data/classes.sjc.sha256, as ci.yml).
       - name: Fetch the language model
         env:
           GH_TOKEN: ${{ github.token }}
@@ -75,6 +75,8 @@ jobs:
           set -euo pipefail
           gh release download model-v3 --repo "$GITHUB_REPOSITORY" -p bigram.sjlm -D data/lm
           shasum -a 256 -c data/bigram.sjlm.sha256
+          gh release download classes-v1 --repo "$GITHUB_REPOSITORY" -p classes.sjc -D data/lm
+          shasum -a 256 -c data/classes.sjc.sha256
 
       - name: Version
         id: version

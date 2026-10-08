@@ -51,7 +51,7 @@ brew install --cask nanako0129/tap/shanjie
 
 **手動**
 
-從 [Releases](https://github.com/Nanako0129/shanjie/releases) 下載 `shanjie-<版本>.zip`，用 Finder 解壓，然後在這個 repo 的根目錄執行：
+從 [Releases](https://github.com/Nanako0129/shanjie/releases) 下載 `shanjie-<版本>.zip`（`v` 開頭的那幾個；`model-v…`、`classes-v…` 是語言模型與詞類表，已經包在 App 裡，不用另外下載，說明見 `docs/data-files.md`），用 Finder 解壓，然後在這個 repo 的根目錄執行：
 
 ```sh
 scripts/install-ime.sh <解壓出來的 善解輸入法.app 路徑>

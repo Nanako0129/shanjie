@@ -44,7 +44,7 @@ for lp in "zh-Hant 善解輸入法" "en Shanjie"; do
     [ "$(pb "$k" "$S")" = "$name" ] || fail "$l InfoPlist.strings: $k"
   done
 done
-for f in mcbpmf-data.txt overlay-add.tsv sandhi-add.tsv demote.tsv bigram.sjlm shanjie.tiff \
+for f in mcbpmf-data.txt overlay-add.tsv sandhi-add.tsv demote.tsv bigram.sjlm classes.sjc shanjie.tiff \
          LICENSES/LICENSE LICENSES/McBopomofo-MIT.txt LICENSES/data.md LICENSES/CC-BY-SA-4.0-attribution.txt; do
   [ -s "$R/$f" ] || fail "Resources/$f is missing or empty"
 done

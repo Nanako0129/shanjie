@@ -55,9 +55,12 @@ fn lenient_dump_uses_the_variant_table() {
 
 const LM_MISSING: &str = "data/lm/bigram.sjlm is missing: download it with `gh release download model-v3 -R Nanako0129/shanjie -p bigram.sjlm -D data/lm` (or rebuild with tools/build_lm.py; see docs/PLAN.md S2c)";
 
+const CLASSES_MISSING: &str = "data/lm/classes.sjc is missing: download it with `gh release download classes-v1 -R Nanako0129/shanjie -p classes.sjc -D data/lm` (or build it with tools/build_classes.py)";
+
 fn lm_path() -> String {
     let p = format!("{}/../data/lm/bigram.sjlm", env!("CARGO_MANIFEST_DIR"));
     assert!(std::path::Path::new(&p).exists(), "{LM_MISSING}");
+    assert!(std::path::Path::new(&format!("{}/../data/lm/classes.sjc", env!("CARGO_MANIFEST_DIR"))).exists(), "{CLASSES_MISSING}");
     p
 }
 
@@ -115,6 +118,18 @@ fn lm_file_is_the_documented_build() {
         core::eval::sha256_hex(&bytes),
         "5c7d5a94f762e7c5d87e14e47b03c1138222df4ea194e70e503bdd9a71ab5a48",
         "data/lm/bigram.sjlm differs from the documented build; rebuild with tools/build_lm.py"
+    );
+}
+
+/// S2k section 4.4: the class table is the classes-v1 release asset (data/classes.sjc.sha256).
+#[test]
+fn classes_file_is_the_released_build() {
+    let p = std::path::Path::new(&lm_path()).with_file_name("classes.sjc");
+    let bytes = std::fs::read(&p).unwrap_or_else(|_| panic!("{} is missing: gh release download classes-v1 -R Nanako0129/shanjie -p classes.sjc -D data/lm", p.display()));
+    assert_eq!(
+        core::eval::sha256_hex(&bytes),
+        "80dbaa0898fff16f90d290fbc6ebf29edb30d917c95dbef1b72649183dd49a8a",
+        "data/lm/classes.sjc differs from the classes-v1 release; download it again or rebuild with tools/build_classes.py"
     );
 }
 
@@ -191,6 +206,22 @@ fn sw_probe_matches_python_golden_byte_for_byte() {
     }
     std::fs::remove_file(&dump).unwrap();
     assert_eq!(got, golden("sw-probe.txt"));
+}
+
+/// S2k acceptance 3: `--no-classes` is the arithmetic before the word-class term. The two summary lines are the
+/// ones main's s2h-lm-context.txt held before S2k (dev302, `--context`), and the Python `lm_eval.py --no-classes` prints them too.
+#[test]
+fn no_classes_flag_restores_the_pre_s2k_numbers() {
+    let lm = lm_path();
+    let line = |p: &str| run(&["--lm", &lm, "--no-classes", "--profile", p, "--dev", "302", "--context"]);
+    assert_eq!(
+        line("chat"),
+        "## dev302  lm-chat+ctx-noclasses  {'n': 302, 'top1': 235, 'oracle@64': 300, 'top1_sha256': 'fb9e1f2a8bdd27922f74a80ca479d55cb55e068194a955204f4b7a01c070c5b4'}\n"
+    );
+    assert_eq!(
+        line("formal"),
+        "## dev302  lm-formal+ctx-noclasses  {'n': 302, 'top1': 240, 'oracle@64': 300, 'top1_sha256': '4f24d0f8a5bf3b188525b54444f92939ae7c5e3bac04bee799c27a6721a427bf'}\n"
+    );
 }
 
 /// eval-stats §4.2: `--rowstats` is byte-identical to the file lm_eval.py wrote (eval/golden/*.rowstats), holds only
