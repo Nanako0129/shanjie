@@ -404,7 +404,7 @@
      - 不能符合：`shanjie install`；`/usr/bin/editor <路徑>`；`install-ime.sh` 保留的上一版（整個 bundle 改名成 `.shanjie-previous`，執行檔在 `.shanjie-previous/Contents/MacOS/shanjie`）。
    - 替身行程沒有在 5 秒內啟動、或 pattern 什麼都比不到時，測試也要印出原因再失敗。
    - 渲染出來的 cask 跑 `brew style`，不能有違規。
-2. 突變（本機）：8 種改法，第 1 項都要失敗，而且失敗訊息要指出原因或是哪一個替身行程。改法是：拿掉 `match: :full`；`postflight_steps` 改成 `preflight_steps`；拿掉開頭的 `^[^ ]*`（放寬）；拿掉結尾的 `$`（放寬）；bundle 名稱換成 `[^/]*`（放寬，會比對到上一版）；拿掉舊名（變窄）；開頭改回 `^/[^ ]*`（變窄，漏掉系統層）；pattern 換成什麼都比不到的字串。
+2. 突變（本機）：8 種改法，第 1 項都要失敗，而且失敗訊息要指出原因或是哪一個替身行程。改法是：拿掉 `match: :full`；`postflight_steps` 改成 `preflight_steps`；拿掉開頭的 `^[^ ]*`（放寬）；拿掉結尾的 `$`（放寬）；`(善解輸入法|shanjie)\.app` 整段換成 `[^/]*`（放寬，會比對到上一版）；拿掉舊名（變窄）；開頭改回 `^/[^ ]*`（變窄，漏掉系統層）；pattern 換成什麼都比不到的字串。
 3. **實機**（main 執行，**做之前先問使用者**；使用者 2026-10-08 同意）：
    - 起始狀態：這台機器上 brew 的紀錄是 0.1.2，它的 receipt 裡有 `on_upgrade` 的 signal。bundle 本身已經被安裝程式換成 0.3.0（Developer ID 簽章，Team 2LJ882GPY8，cdhash 和 Release 的 zip 相同）。
    - 怎麼看到那一步：brew 一律加 `--verbose --debug` 執行，這時 Homebrew 會印出它執行的每個指令（`system_command.rb`，verbose 與 debug 都開才印）。輸出每一行用 perl 加上時間戳記，存成 `brew.log`。同時在背景每 0.2 秒記錄一次符合 pattern 的行程 PID，也帶時間戳記，存成 `pids.log`。這一步在 Homebrew 沙盒裡的子行程執行，verbose 與 debug 會不會傳進子行程沒有確認過；所以這一步另外帶一個 `notices:`，Homebrew 會在第一次嘗試之前用 `ohai` 印出來（`run_terminate_process`），一般使用者升級時也會看到。下面說的「pkill 那一刻」，指的是 `brew.log` 裡這行 notice 的時間；有印出 `/usr/bin/pkill -f <pattern>` 那一行的話，用那一行。
@@ -432,7 +432,7 @@
      - `brew info` 是 0.3.0，bundle 的 cdhash 和 Release 相同。
      - tap 用 `git checkout` 還原後，本機 tap 落後成 0.1.2，brew 把它當成「可升級」。所以 main 再 `git pull --ff-only` 到遠端的 0.3.0，`brew outdated` 不再列出善解。
      - `/usr/bin/pkill -f` 那一行沒有印出來：verbose 與 debug 沒有傳進沙盒裡的子行程，所以用 notice 判讀。
-   - **最終版再跑一次**（2026-10-09，review 之後 pattern 開頭改成 `^[^ ]*`、notice 改了措辭）：用上面的第二次做法跑 `brew reinstall`。
+   - **最終版再跑一次**（2026-10-09，review 之後 pattern 開頭改成 `^[^ ]*`、notice 改了措辭）：用上面的第二次做法跑 `brew reinstall`。那次的 notice 是 8853a3e 的文字；424eda6 只再把 notice 縮短（`brew style` 行長），pattern 與 `match` 不變。
      - receipt 已經是新版 cask，log 裡沒有 `Signalling`，也沒有 `launchctl list`：reinstall 照規則略過 `signal`。
      - 舊行程 PID 9892 撐過解除安裝、移除、搬進新版，notice 前 0.27 秒還在，notice 後 0.01 秒內消失。所以這次結束它的只有 postflight。
      - 跑完後 tap 用 `git checkout` 還原（本機 tap 停在 0.3.0 的 0960ea0），`brew outdated` 沒有列出善解，bundle 的 cdhash 和 Release 相同。
