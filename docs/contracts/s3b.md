@@ -381,13 +381,13 @@
 
 ### 15.2 做法
 
-- cask 加上 `postflight_steps`，裡面放一步 `terminate_process '<pattern>', match: :full`，並帶一句 `notices:`（「Restarting the input method so the new version takes over」），讓使用者知道打字為什麼會頓一下，也讓 §15.3 第 3 項看得到這一步。
+- cask 加上 `postflight_steps`，裡面放一步 `terminate_process '<pattern>', match: :full`，並帶一句 `notices:`（「Stopping a running copy of the input method, if any, so the system starts this version」），讓使用者知道打字為什麼會頓一下，也讓 §15.3 第 3 項看得到這一步。
   - Homebrew 會執行 `/usr/bin/pkill -f <pattern>`（`install_steps.rb` 的 `run_terminate_process`）。沒有符合的行程時 pkill 失敗，而 `terminate_process` 預設忽略失敗。
   - postflight 是安裝階段的最後一步，新 bundle 已經就位，所以系統之後啟動的一定是新版。
-  - install、reinstall、upgrade 都會跑這一步。第一次安裝時沒有行程在跑，這一步什麼都不做。
-- pattern 是 `^/[^ ]*/Library/Input Methods/(善解輸入法|shanjie)\.app/Contents/MacOS/shanjie$`：
+  - install、reinstall、upgrade 都會跑這一步。notice 在 pkill 之前一定會印出（`run_terminate_process` 的 `ohai`），所以第一次安裝時也看得到這一行；那時沒有行程在跑，pkill 找不到行程，結果被忽略。notice 的措辭因此寫成「如果有就停止」。
+- pattern 是 `^[^ ]*/Library/Input Methods/(善解輸入法|shanjie)\.app/Contents/MacOS/shanjie$`：
   - 結尾錨定 `shanjie$`：系統啟動輸入法時不帶參數（2026-10-08 本機 `ps`：命令列就是 bundle 裡執行檔的路徑），所以 `shanjie install` 不會被結束。
-  - 開頭 `^/[^ ]*`：命令列要從絕對路徑開始，到 `/Library/Input Methods/` 之前不能有空白。別的程式只是在參數裡提到這個路徑時，就不會符合。代價是家目錄路徑含空白的帳號不會被結束，這種帳號維持修訂前的行為：要手動結束舊行程或登出。
+  - 開頭 `^[^ ]*`：命令列開頭到 `/Library/Input Methods/` 之前不能有空白。別的程式只是在參數裡提到這個路徑時（命令列先是那個程式自己的路徑和空白），就不會符合。前綴可以是空的，所以裝在系統層 `/Library/Input Methods`（`--input-methoddir`）的也符合（本機 review 指出，原本的 `^/[^ ]*` 漏掉這種）。代價是家目錄路徑含空白的帳號不會被結束，這種帳號維持修訂前的行為：要手動結束舊行程或登出。
   - `shanjie.app` 是 §13 改名前的名稱，寫法和 `install-ime.sh` 相同。
   - pattern 不錨定家目錄，這點和 `install-ime.sh` 不同。原因：postflight 在 Homebrew 的沙盒裡執行，HOME 是暫存資料夾，cask 也沒有家目錄的 token（`{{user}}` 只是帳號名稱）。pkill 本來就只能結束自己帳號的行程。
   - 沙盒：`extend/os/mac/sandbox.rb` 的設定是 `(allow default)`，再擋掉讀家目錄、網路和部分寫入，沒有擋送訊號。pkill 也不讀家目錄。這一步在沙盒裡實際有沒有效，由 §15.3 的第 3 項量。
@@ -397,11 +397,14 @@
 
 ### 15.3 驗收
 
-1. `scripts/test-render-cask.sh`（CI 的 cask 步驟會跑）用 5 個替身行程測 pattern。替身行程是 `cat` 接在 pipe 上，用 `exec -a` 設定命令列，再透過 `pgrep -f` 比對，它和 pkill 的比對方式相同：
-   - 要符合：善解輸入法.app 的執行檔；舊名 shanjie.app 的執行檔。
-   - 不能符合：`shanjie install`；`/usr/bin/editor <路徑>`；`.shanjie-previous` 裡的副本。
+1. `scripts/test-render-cask.sh`（CI 的 cask 步驟會跑）：
+   - 用 Homebrew 自己的載入器（`brew ruby` 加 `Cask::CaskLoader::FromContentLoader`）讀渲染出來的 cask：`postflight_steps` 裡要剛好有一個 `terminate_process`，`match` 是 `full`（少了它，Homebrew 會改跑 `killall`，什麼都比不到）。pattern 也從這裡取，不從原始碼文字抓。
+   - 用 6 個替身行程測 pattern。替身行程是 `cat` 接在 pipe 上，用 `exec -a` 設定命令列，再透過 `pgrep -f` 比對，它和 pkill 的比對方式相同：
+     - 要符合：善解輸入法.app 的執行檔；舊名 shanjie.app 的執行檔；系統層 `/Library/Input Methods` 的執行檔。
+     - 不能符合：`shanjie install`；`/usr/bin/editor <路徑>`；`install-ime.sh` 保留的上一版（整個 bundle 改名成 `.shanjie-previous`，執行檔在 `.shanjie-previous/Contents/MacOS/shanjie`）。
+   - 替身行程沒有在 5 秒內啟動、或 pattern 什麼都比不到時，測試也要印出原因再失敗。
    - 渲染出來的 cask 跑 `brew style`，不能有違規。
-2. 突變（本機）：把 pattern 換成三種較寬的版本，第 1 項都要失敗，而且失敗訊息要指出是哪一個替身行程。三種版本分別是：拿掉開頭的 `^/[^ ]*`、拿掉結尾的 `$`、拿掉舊名。
+2. 突變（本機）：8 種改法，第 1 項都要失敗，而且失敗訊息要指出原因或是哪一個替身行程。改法是：拿掉 `match: :full`；`postflight_steps` 改成 `preflight_steps`；拿掉開頭的 `^[^ ]*`（放寬）；拿掉結尾的 `$`（放寬）；bundle 名稱換成 `[^/]*`（放寬，會比對到上一版）；拿掉舊名（變窄）；開頭改回 `^/[^ ]*`（變窄，漏掉系統層）；pattern 換成什麼都比不到的字串。
 3. **實機**（main 執行，**做之前先問使用者**；使用者 2026-10-08 同意）：
    - 起始狀態：這台機器上 brew 的紀錄是 0.1.2，它的 receipt 裡有 `on_upgrade` 的 signal。bundle 本身已經被安裝程式換成 0.3.0（Developer ID 簽章，Team 2LJ882GPY8，cdhash 和 Release 的 zip 相同）。
    - 怎麼看到那一步：brew 一律加 `--verbose --debug` 執行，這時 Homebrew 會印出它執行的每個指令（`system_command.rb`，verbose 與 debug 都開才印）。輸出每一行用 perl 加上時間戳記，存成 `brew.log`。同時在背景每 0.2 秒記錄一次符合 pattern 的行程 PID，也帶時間戳記，存成 `pids.log`。這一步在 Homebrew 沙盒裡的子行程執行，verbose 與 debug 會不會傳進子行程沒有確認過；所以這一步另外帶一個 `notices:`，Homebrew 會在第一次嘗試之前用 `ohai` 印出來（`run_terminate_process`），一般使用者升級時也會看到。下面說的「pkill 那一刻」，指的是 `brew.log` 裡這行 notice 的時間；有印出 `/usr/bin/pkill -f <pattern>` 那一行的話，用那一行。
@@ -429,6 +432,10 @@
      - `brew info` 是 0.3.0，bundle 的 cdhash 和 Release 相同。
      - tap 用 `git checkout` 還原後，本機 tap 落後成 0.1.2，brew 把它當成「可升級」。所以 main 再 `git pull --ff-only` 到遠端的 0.3.0，`brew outdated` 不再列出善解。
      - `/usr/bin/pkill -f` 那一行沒有印出來：verbose 與 debug 沒有傳進沙盒裡的子行程，所以用 notice 判讀。
+   - **最終版再跑一次**（2026-10-09，review 之後 pattern 開頭改成 `^[^ ]*`、notice 改了措辭）：用上面的第二次做法跑 `brew reinstall`。
+     - receipt 已經是新版 cask，log 裡沒有 `Signalling`，也沒有 `launchctl list`：reinstall 照規則略過 `signal`。
+     - 舊行程 PID 9892 撐過解除安裝、移除、搬進新版，notice 前 0.27 秒還在，notice 後 0.01 秒內消失。所以這次結束它的只有 postflight。
+     - 跑完後 tap 用 `git checkout` 還原（本機 tap 停在 0.3.0 的 0960ea0），`brew outdated` 沒有列出善解，bundle 的 cdhash 和 Release 相同。
 4. README 的 Homebrew 段落加上升級說明（`brew update` 只更新清單；升級要用 `brew upgrade --cask shanjie`），還有 15.2 的生效時間。`docs/verification.md` 更新 `test-render-cask.sh` 那一列。研究紀錄寫下起因、原因、實測結果。
 
 ### 15.4 停止條件、回滾、範圍外

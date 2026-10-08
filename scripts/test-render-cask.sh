@@ -45,27 +45,43 @@ refuses "template without version" env SHANJIE_CASK_TEMPLATE="$T/no-version.rb" 
 refuses "template with two sha256 lines" env SHANJIE_CASK_TEMPLATE="$T/two-sha.rb" "$R" 1.2.3 "$SHA"
 refuses "missing template" env SHANJIE_CASK_TEMPLATE="$T/none.rb" "$R" 1.2.3 "$SHA"
 
-# The postflight's process pattern (section 15), through pgrep, which matches like the pkill that
-# terminate_process runs: stand-in processes (cat on a pipe, command line set with exec -a) that
-# look like the running input method match; ones that only mention its path do not.
-PAT="$(sed -n "s/^ *terminate_process '\(.*\)',\$/\1/p" "$ROOT/packaging/Casks/shanjie.rb")"
-[ -n "$PAT" ] || fail "no terminate_process pattern in the cask template"
+# The postflight step (section 15) as Homebrew itself parses the rendered cask: exactly one
+# terminate_process, in postflight_steps (after the new bundle is in place) and with match "full"
+# (without it Homebrew runs killall, which matches nothing).
+"$R" 0.0.0 "$(printf '0%.0s' $(seq 64))" > "$T/cask.rb"
+PAT="$(HOMEBREW_NO_AUTO_UPDATE=1 brew ruby -e '
+  cask = Cask::CaskLoader::FromContentLoader.new(File.read(ARGV[0])).load(config: nil)
+  kills = cask.artifacts.grep(Cask::Artifact::PostflightSteps).flat_map(&:steps)
+              .select { |step| step["type"] == "terminate_process" }
+  abort "expected one terminate_process in postflight_steps, found #{kills.size}" unless kills.size == 1
+  abort "terminate_process must use match: :full" unless kills.first["match"] == "full"
+  puts kills.first["name"]' "$T/cask.rb")" || fail "the cask's postflight step (message above)"
+
+# Its pattern, through pgrep, which matches like the pkill Homebrew runs: stand-in processes (cat on
+# a pipe, command line set with exec -a) that look like a running input method match, including a
+# system-wide one (--input-methoddir=/Library/Input Methods); ones that only mention its path, the
+# install subcommand and the previous copy kept by install-ime.sh (the renamed bundle) do not.
 IM="$T/Library/Input Methods"
 cases=("yes|$IM/善解輸入法.app/Contents/MacOS/shanjie"
        "yes|$IM/shanjie.app/Contents/MacOS/shanjie"
+       "yes|/Library/Input Methods/善解輸入法.app/Contents/MacOS/shanjie"
        "no|$IM/善解輸入法.app/Contents/MacOS/shanjie install"
        "no|/usr/bin/editor $IM/善解輸入法.app/Contents/MacOS/shanjie"
-       "no|$IM/.shanjie-previous/善解輸入法.app/Contents/MacOS/shanjie")
+       "no|$IM/.shanjie-previous/Contents/MacOS/shanjie")
 pids=()
 for c in "${cases[@]}"; do
-  sleep 30 | (exec -a "${c#*|}" cat) &
+  sleep 30 2>/dev/null | (exec -a "${c#*|}" cat) &
   pids+=("$!")
 done
-trap 'kill "${pids[@]}" 2>/dev/null; rm -rf "$T"' EXIT
-for i in "${!cases[@]}"; do  # wait until each stand-in has exec'd
-  for _ in $(seq 50); do [ "$(ps -o command= -p "${pids[$i]}")" = "${cases[$i]#*|}" ] && break; sleep 0.1; done
+trap 'kill "${pids[@]}" 2>/dev/null || true; rm -rf "$T"' EXIT
+for i in "${!cases[@]}"; do  # wait until each stand-in has exec'd (UTF-8, or ps escapes the name)
+  for _ in $(seq 50); do
+    [ "$(LC_ALL=en_US.UTF-8 ps -o command= -p "${pids[$i]}")" = "${cases[$i]#*|}" ] && continue 2
+    sleep 0.1
+  done
+  fail "stand-in '${cases[$i]#*|}' did not start"
 done
-found=" $(pgrep -f "$PAT" | tr '\n' ' ')"
+found=" $(pgrep -f "$PAT" | tr '\n' ' ' || true)"
 for i in "${!cases[@]}"; do
   want="${cases[$i]%%|*}"; got=no
   [ "${found/ ${pids[$i]} /}" = "$found" ] || got=yes

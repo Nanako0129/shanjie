@@ -54,7 +54,7 @@ brew install --cask nanako0129/tap/shanjie
 升級用 `brew upgrade --cask nanako0129/tap/shanjie`（`brew update` 只更新清單，不會換掉輸入法）。升級到 0.3.0 之後的版本時，brew 會在新版放好後結束舊的輸入法，系統下次啟動的就是新版。升級到 0.3.0 或更早的版本時，舊的還會繼續跑，要再執行：
 
 ```sh
-pkill -f "Input Methods/善解輸入法.app/Contents/MacOS/shanjie"
+pkill -f '^[^ ]*/Library/Input Methods/(善解輸入法|shanjie)\.app/Contents/MacOS/shanjie$'
 ```
 
 **手動**

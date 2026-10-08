@@ -18,11 +18,12 @@ cask "shanjie" do
   # not take effect when the installed cask was read back from its receipt (measured 2026-10-08,
   # Homebrew 7.0.7; docs/contracts/s3b.md section 15). The system starts the input method with no
   # arguments; `[^ ]*` keeps a command that merely names this path as an argument from matching
-  # (a home directory containing a space is not matched either).
+  # (a home directory containing a space is not matched either). An empty prefix covers a
+  # system-wide /Library/Input Methods install.
   postflight_steps do
-    terminate_process '^/[^ ]*/Library/Input Methods/(善解輸入法|shanjie)\.app/Contents/MacOS/shanjie$',
+    terminate_process '^[^ ]*/Library/Input Methods/(善解輸入法|shanjie)\.app/Contents/MacOS/shanjie$',
                       match:   :full,
-                      notices: ["Restarting the input method so the new version takes over"]
+                      notices: ["Stopping a running copy of the input method, if any, so the system starts this version"]
   end
 
   uninstall signal: ["TERM", "com.nyanako.inputmethod.shanjie"]
