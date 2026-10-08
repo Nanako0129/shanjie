@@ -70,6 +70,7 @@ final class ShanjieInputController: IMKInputController {
         case .clear: #selector(clearLearning(_:))
         case .toggleBackup: #selector(toggleLearningBackup(_:))
         case .toggleDemote: #selector(toggleDemote(_:))
+        case .togglePrediction: #selector(togglePrediction(_:))
         }
     }
 
@@ -82,6 +83,7 @@ final class ShanjieInputController: IMKInputController {
     @objc func clearLearning(_ sender: Any?) { perform(.clear) }
     @objc func toggleLearningBackup(_ sender: Any?) { perform(.toggleBackup) }
     @objc func toggleDemote(_ sender: Any?) { perform(.toggleDemote) }
+    @objc func togglePrediction(_ sender: Any?) { perform(.togglePrediction) }
 }
 
 /// The controller's current IMKTextInput client.
@@ -296,8 +298,6 @@ final class CandidatePanelAdapter: CandidatePanel {
     func show(_ candidates: [String], notes: [String?], selected: Int, columns: Int, first: Int, total: Int,
               lineRect: NSRect?) {
         let grid = columns > 0
-        let selectedRow = grid ? selected / columns : 0
-        func showsNumber(_ i: Int) -> Bool { !grid || i / columns == selectedRow }
 
         // Only the selection moved (section 8.7): keep the cells, change which one is selected and which
         // row shows numbers. The glass's content view is never replaced either way.

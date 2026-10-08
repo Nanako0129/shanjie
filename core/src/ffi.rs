@@ -224,7 +224,8 @@ pub unsafe extern "C" fn shanjie_engine_key(
 }
 
 /// s3b2 §8.2 mouse pick: chooses `candidate_first + index` of the last output through the same
-/// `choose()` as Enter. 2 when the candidates are closed or `index` is outside that output (state
+/// `choose()` as Enter; with the candidate window closed it selects from the V3 prediction row instead. 2 when
+/// there is neither a window nor a row, or `index` is outside that output (state
 /// unchanged).
 ///
 /// # Safety
@@ -445,6 +446,44 @@ pub unsafe extern "C" fn shanjie_engine_set_demote(
         // SAFETY: live handle, single-threaded use (§6).
         let e = unsafe { &mut (*engine).0 };
         match e.set_demote(enabled == 1) {
+            Ok(o) => {
+                #[cfg(test)]
+                tests::inject(&o);
+                // SAFETY: `out` checked non-NULL above.
+                unsafe { emit(o, out) }
+            }
+            Err(_) => SHANJIE_ERR_INTERNAL,
+        }
+    });
+    if rc == SHANJIE_ERR_INTERNAL {
+        // SAFETY: forwarded caller contract.
+        unsafe { discard(engine) };
+    }
+    rc
+}
+
+/// V3 engine contract section 10.5. `enabled` 0 or 1 (default 1): whether the prediction row is computed. Returns the
+/// snapshot like `set_demote`; any other value changes nothing and returns 2.
+///
+/// # Safety
+/// `engine` is NULL or a live handle; `out` is NULL or valid for one pointer write.
+#[no_mangle]
+pub unsafe extern "C" fn shanjie_engine_set_prediction(
+    engine: *mut ShanjieEngine,
+    enabled: u32,
+    out: *mut *mut ShanjieOutput,
+) -> i32 {
+    let rc = guard(|| {
+        // SAFETY: forwarded caller contract.
+        if !unsafe { clear_out(out) } || engine.is_null() {
+            return SHANJIE_ERR_NULL;
+        }
+        if enabled > 1 {
+            return SHANJIE_ERR_INVALID;
+        }
+        // SAFETY: live handle, single-threaded use (§6).
+        let e = unsafe { &mut (*engine).0 };
+        match e.set_prediction(enabled == 1) {
             Ok(o) => {
                 #[cfg(test)]
                 tests::inject(&o);
@@ -823,6 +862,20 @@ mod tests {
         for v in [0, 1] {
             o = sentinel();
             assert!(unsafe { shanjie_engine_set_demote(e, v, &mut o) } == 0 && !o.is_null(), "set_demote 0/1");
+            unsafe { shanjie_output_free(o) };
+        }
+
+        // engine_set_prediction (V3 engine contract section 10.5): codes like set_demote.
+        o = sentinel();
+        assert!(unsafe { shanjie_engine_set_prediction(e, 1, ptr::null_mut()) } == 1, "set_prediction out NULL");
+        assert!(unsafe { shanjie_engine_set_prediction(ptr::null_mut(), 1, &mut o) } == 1 && o.is_null(), "set_prediction engine NULL");
+        for v in [2, u32::MAX] {
+            o = sentinel();
+            assert!(unsafe { shanjie_engine_set_prediction(e, v, &mut o) } == 2 && o.is_null(), "set_prediction out of range");
+        }
+        for v in [0, 1] {
+            o = sentinel();
+            assert!(unsafe { shanjie_engine_set_prediction(e, v, &mut o) } == 0 && !o.is_null(), "set_prediction 0/1");
             unsafe { shanjie_output_free(o) };
         }
 
