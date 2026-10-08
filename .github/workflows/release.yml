@@ -45,12 +45,9 @@ jobs:
           sparse-checkout: |
             scripts
             docs/releases
-      - name: Require green CI for this commit
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: scripts/check-ci-gate.sh "$GITHUB_SHA"
       # docs/contracts/release-notes.md: a tag is published only with its hand-written notes in the
-      # repo. The dry run on main publishes nothing, so it is not checked.
+      # repo. The dry run on main publishes nothing, so it is not checked. Before the CI gate, which
+      # can wait for ci.yml for half an hour: a missing file fails in a second.
       - name: Require the release notes
         run: |
           set -euo pipefail
@@ -58,6 +55,10 @@ jobs:
           f="docs/releases/$GITHUB_REF_NAME.md"
           [ -f "$f" ] || { echo "error: $f is missing; write the release notes and merge them before tagging" >&2; exit 1; }
           grep -q '[^[:space:]]' "$f" || { echo "error: $f is empty" >&2; exit 1; }
+      - name: Require green CI for this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: scripts/check-ci-gate.sh "$GITHUB_SHA"
 
   # Ad-hoc build, exactly as CI builds it. No Environment, read-only token.
   build:
@@ -348,11 +349,20 @@ jobs:
                 || { echo "error: release $GITHUB_REF_NAME has a different $z.sha256" >&2; exit 1; }
             done
             echo "release $GITHUB_REF_NAME already published with these zips; not creating it again"
+            # The repo is the source of truth for the notes (docs/releases/README.md): say so when they differ.
+            BODY=$(gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json body -q .body)
+            [ "$BODY" = "$(cat "$GITHUB_WORKSPACE/docs/releases/$GITHUB_REF_NAME.md")" ] \
+              || echo "::warning::release $GITHUB_REF_NAME notes differ from docs/releases/$GITHUB_REF_NAME.md; update one of them"
           else
+            # Latest only for the newest version line: a fix tagged for an older line (v0.2.2 after
+            # v0.3.0) must not take it from the newest. v* tags are plain X.Y.Z (no pre-releases).
+            NEWEST=$( { gh release list --repo "$GITHUB_REPOSITORY" --limit 200 --json tagName -q '.[].tagName' | grep '^v'; echo "$GITHUB_REF_NAME"; } | sort -V | tail -n 1)
+            LATEST=false
+            [ "$NEWEST" = "$GITHUB_REF_NAME" ] && LATEST=true
             gh release create "$GITHUB_REF_NAME" \
               "${ZIPS[0]}" "${ZIPS[0]}.sha256" "${ZIPS[1]}" "${ZIPS[1]}.sha256" \
               --repo "$GITHUB_REPOSITORY" --title "善解 $VERSION" \
-              --notes-file "$GITHUB_WORKSPACE/docs/releases/$GITHUB_REF_NAME.md" --latest
+              --notes-file "$GITHUB_WORKSPACE/docs/releases/$GITHUB_REF_NAME.md" --latest="$LATEST"
           fi
 
       # No secret in scope while repository scripts run. The hash is the first field of the
