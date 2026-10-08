@@ -255,19 +255,32 @@ fn forget_without_records_keeps_the_frozen_words() {
     assert_eq!(o.preedit, "版控");
 }
 
-/// Section 7.2: ⌘⌫ on the prediction row never touches fixed words.
+/// Prediction pick of 控制 after typing ㄎㄨㄥˋ and ㄓ with no left text: one record that does not touch 要進 + 版控.
+fn teach_kongzhi(e: &mut Engine) {
+    shown(e, "ㄎㄨㄥˋ", "");
+    e.key(Key::ch(L.key_of_symbol('ㄓ').unwrap(), 0)).unwrap();
+    let o = e.key(k(KeyKind::Tab)).unwrap();
+    assert_eq!(o.candidates[o.selected.unwrap()], "控制");
+    e.key(k(KeyKind::Enter)).unwrap();
+    assert_eq!(commit(e), "控制");
+    assert_eq!(e.learner().records().len(), 1);
+}
+
+/// Sections 7.2 and 8: ⌘⌫ on the prediction row forgets an item that has a record (records 1 -> 0) and never touches
+/// fixed words: 控 stays frozen (freely it decodes to 空 after the picked 版).
 #[test]
 fn prediction_row_forget_keeps_the_frozen_words() {
     let mut e = engine();
+    teach_kongzhi(&mut e);
     shown(&mut e, "ㄅㄢˇ ㄎㄨㄥˋ", "要進");
     assert_eq!(repick(&mut e, 1, "版").preedit, "版控");
     e.key(k(KeyKind::End)).unwrap();
-    // The row shows from the first key of the next syllable (V3); ㄓ is a common start.
-    let o = e.key(Key::ch(L.key_of_symbol('ㄓ').unwrap(), 0)).unwrap();
-    println!("prediction row after 版控 + ㄓ: {:?}", o.candidates);
-    assert!(!o.candidates.is_empty(), "the example needs a prediction row");
-    e.key(k(KeyKind::Tab)).unwrap();
+    // The row shows from the first key of the next syllable (V3).
+    e.key(Key::ch(L.key_of_symbol('ㄓ').unwrap(), 0)).unwrap();
+    let o = e.key(k(KeyKind::Tab)).unwrap();
+    assert_eq!(o.candidates[o.selected.unwrap()], "控制");
     let o = e.key(FORGET).unwrap();
+    assert_eq!(e.learner().records().len(), 0);
     assert!(o.preedit.starts_with("版控"), "{}", o.preedit);
 }
 
@@ -289,10 +302,10 @@ fn insert_inside_a_frozen_word_keeps_both_halves() {
     // measured: 在也由年於再也, 在也由首於再也, 在也由介於再也
 }
 
-/// Section 7.1 lifetime (a): after a release, a candidate pick or a prediction pick clears the list, so deleting the
-/// old trigger brings nothing back and the engine stays consistent.
+/// Section 7.1 lifetime (a), with section 8: after a release, a candidate pick clears the list, so deleting the old
+/// trigger brings nothing back; a prediction pick keeps the records wholly left of the span it replaces.
 #[test]
-fn a_pick_clears_the_released_list() {
+fn a_candidate_pick_clears_and_a_prediction_pick_keeps_left_records() {
     // candidate pick
     let mut e = engine();
     shown(&mut e, "ㄅㄢˇ ㄎㄨㄥˋ", "要進");
@@ -322,11 +335,11 @@ fn a_pick_clears_the_released_list() {
         e.key(k(KeyKind::Home)).unwrap();
         e.key(k(KeyKind::Right)).unwrap();
         e.key(k(KeyKind::Right)).unwrap();
-        // The prediction pick cleared the list (section 7.1): deleting the old trigger restores nothing, and 控 decodes
-        // freely again (measured: 版空中).
+        // The pick replaced the span after the cursor only (section 8): 控's record (link 1..3) holds, so deleting the
+        // trigger fixes 控 again (aa8456c cleared the list and gave 版空中).
         let o = e.key(k(KeyKind::Backspace)).unwrap();
         assert!(o.handled);
-        assert_eq!(o.preedit, "版空中");
+        assert_eq!(o.preedit, "版控中");
     }
 }
 
@@ -346,3 +359,48 @@ fn an_insert_inside_a_released_word_drops_its_record() {
     assert!(o.handled);
     assert_eq!(o.preedit, "她是的界", "nothing restored over the changed span");
 }
+
+
+/// Section 8, measured: 她是 + ㄐㄧㄝˋ gives 她世界 (是 released, trigger 2, link 1..3). Another ㄐㄧㄝˋ typed between
+/// 世 and 界 is inside the link: the record goes, so deleting the original trigger (now 3) does not fix 是 again.
+#[test]
+fn an_insert_between_a_released_word_and_its_trigger_drops_its_record() {
+    let mut e = engine();
+    shown(&mut e, "ㄊㄚ ㄕˋ", "");
+    assert_eq!(repick(&mut e, 1, "她").preedit, "她是");
+    assert_eq!(insert_at(&mut e, 2, "ㄐㄧㄝˋ"), "她世界");
+    assert_eq!(insert_at(&mut e, 2, "ㄐㄧㄝˋ"), "她世界界");
+    e.key(k(KeyKind::End)).unwrap();
+    let o = e.key(k(KeyKind::Backspace)).unwrap();
+    assert!(o.handled);
+    assert_eq!(o.preedit, "她世界");
+}
+
+/// Section 8: the candidate window's ⌘⌫ that removes records also drops the release records over its span. 空 is
+/// taught for ㄎㄨㄥˋ after 遙 (a one-character word has the exact-context level only, so 要進 + 板控 is unchanged; with
+/// no left text it is not learned at all, s4-learning section 12); 控 is released
+/// by 監; forgetting 空 on 控's span (records 1 -> 0) drops that record, so deleting 監 leaves 控 to the decoder.
+#[test]
+fn candidate_forget_drops_the_release_records_over_its_span() {
+    let mut e = engine();
+    assert_eq!(shown(&mut e, "ㄎㄨㄥˋ", "遙"), "控");
+    assert_eq!(repick(&mut e, 1, "空").preedit, "空");
+    assert_eq!(commit(&mut e), "空");
+    assert_eq!(e.learner().records().len(), 1);
+    assert_eq!(shown(&mut e, "ㄅㄢˇ ㄎㄨㄥˋ", "要進"), "板控");
+    assert_eq!(repick(&mut e, 1, "版").preedit, "版控");
+    assert_eq!(type_syls(&mut e, "ㄐㄧㄢ").preedit, "版監控");
+    e.key(k(KeyKind::End)).unwrap();
+    let o = e.key(k(KeyKind::Space)).unwrap();
+    highlight(&mut e, o, "空");
+    e.key(FORGET).unwrap();
+    assert_eq!(e.learner().records().len(), 0);
+    e.key(k(KeyKind::Esc)).unwrap();
+    e.key(k(KeyKind::Home)).unwrap();
+    e.key(k(KeyKind::Right)).unwrap();
+    e.key(k(KeyKind::Right)).unwrap();
+    let o = e.key(k(KeyKind::Backspace)).unwrap();
+    assert!(o.handled);
+    assert_eq!(o.preedit, "版空", "measured; without the drop 控 is fixed again (版控)");
+}
+

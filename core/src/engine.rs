@@ -237,6 +237,13 @@ struct Released {
     trigger: usize,
 }
 
+impl Released {
+    /// Section 8: the word's syllables plus the trigger, adjacent when the record was made.
+    fn link(&self) -> (usize, usize) {
+        (self.fixed.start.min(self.trigger), self.fixed.end.max(self.trigger + 1))
+    }
+}
+
 /// One item of the prediction row: the word, the compatible reading that scored it, and the syllable index where
 /// the word starts.
 struct Pred {
@@ -311,8 +318,9 @@ pub struct Engine {
     cursor: usize,
     pend: [Option<char>; 3],
     fixed: Vec<Fixed>,
-    /// repick-freeze section 7.1: frozen words released by a merge, until their trigger is deleted or the list is
-    /// cleared (candidate or prediction pick, commit, clear).
+    /// repick-freeze sections 7.1 and 8: frozen words released by a merge, until their trigger is deleted, an edit
+    /// cuts or covers them (insertion inside the link, prediction pick, forget), or the list is cleared (candidate
+    /// pick, commit, clear).
     released: Vec<Released>,
     display: String,
     cands: Option<Cands>,
@@ -822,7 +830,8 @@ impl Engine {
     /// it. With learning on `pre` is `Some("")` (section 10.1): taught at commit like a re-pick, with nothing displaced.
     fn choose_pred(&mut self, i: usize) -> Result<Output, EngineError> {
         let Pred { word, reading, start, key, .. } = self.pred.swap_remove(i);
-        self.released.clear(); // repick-freeze section 7.1: not a single-syllable edit
+        // repick-freeze section 8: the pick replaces [start, cursor); records wholly left of it still hold.
+        self.released.retain(|r| r.link().1 <= start);
         let pre = self.learning.then(String::new);
         self.clear_pred();
         self.pend = [None; 3];
@@ -987,7 +996,9 @@ impl Engine {
             let Pred { word, reading, .. } = &self.pred[sel];
             let (word, reading) = (word.clone(), reading.clone());
             self.forget_entry(&reading, &word);
-            self.refresh()?; // the free segments decode without the forgotten record, as after the candidate window's ⌘⌫
+            // The free segments decode without the forgotten record; unlike the candidate window's ⌘⌫ no frozen word
+            // is freed (repick-freeze section 7.2).
+            self.refresh()?;
             self.recompute_pred();
             if !self.pred.is_empty() {
                 self.pred_sel = Some(self.pred.iter().position(|p| p.word == word).unwrap_or(0));
@@ -1257,16 +1268,15 @@ impl Engine {
                 false
             }
         });
-        // Section 7.1: records follow the shift; one whose word the insertion cuts is dropped.
+        // Section 8: records follow the shift; one whose link (word plus trigger) the insertion cuts is dropped.
         self.released.retain_mut(|r| {
-            if r.fixed.start < c && c < r.fixed.end {
+            let (a, b) = r.link();
+            if a < c && c < b {
                 return false;
             }
-            if r.fixed.start >= c {
+            if c <= a {
                 r.fixed.start += 1;
                 r.fixed.end += 1;
-            }
-            if r.trigger >= c {
                 r.trigger += 1;
             }
             true
@@ -1331,6 +1341,9 @@ impl Engine {
     /// as single-character frozen words, in post-shift indices, where the word has one character per syllable and the
     /// syllable has that character as an entry; the rest is left to the decoder.
     fn split_frozen_at(&mut self, c: usize) -> Vec<Fixed> {
+        if !self.fixed.iter().any(|f| f.frozen && f.start < c && c < f.end) {
+            return Vec::new();
+        }
         let Some(st) = self.lm.clone() else { return Vec::new() };
         let mut pieces = Vec::new();
         let mut keep = Vec::new();
@@ -1358,22 +1371,21 @@ impl Engine {
         // released word drops the record; other records shift with the fixed words.
         let mut restore = Vec::new();
         for mut r in std::mem::take(&mut self.released) {
-            if r.trigger == i {
-                if r.fixed.start > i {
-                    r.fixed.start -= 1;
-                    r.fixed.end -= 1;
-                }
-                restore.push(r.fixed);
-            } else if !(r.fixed.start <= i && i < r.fixed.end) {
-                if r.fixed.start > i {
-                    r.fixed.start -= 1;
-                    r.fixed.end -= 1;
-                }
-                if r.trigger > i {
-                    r.trigger -= 1;
-                }
-                self.released.push(r);
+            if r.trigger != i && r.fixed.start <= i && i < r.fixed.end {
+                continue;
             }
+            if r.fixed.start > i {
+                r.fixed.start -= 1;
+                r.fixed.end -= 1;
+            }
+            if r.trigger == i {
+                restore.push(r.fixed);
+                continue;
+            }
+            if r.trigger > i {
+                r.trigger -= 1;
+            }
+            self.released.push(r);
         }
         self.syls.remove(i);
         self.fixed.retain_mut(|f| {
@@ -1390,7 +1402,7 @@ impl Engine {
         });
         // A restored word never overrides what is fixed now (a pick or another restore over the same syllables).
         for f in restore {
-            if f.end <= self.syls.len() && !self.fixed.iter().any(|g| g.start < f.end && f.start < g.end) {
+            if !self.fixed.iter().any(|g| g.start < f.end && f.start < g.end) {
                 self.fixed.push(f);
             }
         }
@@ -1470,9 +1482,11 @@ impl Engine {
         let reading = self.syls[start..end].to_vec();
         let before = self.learner.records().len();
         self.forget_entry(&reading, &word);
-        // repick-freeze section 7.2: only when records went, the frozen words over this span decode again without them.
+        // repick-freeze sections 7.2 and 8: only when records went, the frozen words over this span decode again
+        // without them, and a released word over it is not fixed again by deleting its trigger.
         if self.learner.records().len() < before {
             self.fixed.retain(|f| !(f.frozen && f.start < end && start < f.end));
+            self.released.retain(|r| !(r.fixed.start < end && start < r.fixed.end));
         }
         self.refresh()
     }
