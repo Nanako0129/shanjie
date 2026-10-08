@@ -102,7 +102,7 @@ PR 需要：
     cargo run --release -q -p cli -- --lm data/lm/bigram.sjlm --profile chat --rows eval/dev/user-reported.txt
     ```
 
-  - 前後比較用逐列統計：基準與新版各加 `--rowstats before.rs`／`--rowstats after.rs`（`--dev 302` 與 `--rows` 檔都可以），再跑 `python3 tools/evalstats.py compare before.rs after.rs --label dev302-chat`，把那一行表格貼進 PR（改對／改壞、McNemar p、CER、95% 區間）；dev302、錯字回報檔在聊天與書面各一行；
+  - 前後比較用逐列統計：基準與新版各加 `--rowstats "$TMPDIR/before.rowstats"`／`--rowstats "$TMPDIR/after.rowstats"`（`--dev 302` 與 `--rows` 檔都可以），再跑 `python3 tools/evalstats.py compare "$TMPDIR/before.rowstats" "$TMPDIR/after.rowstats" --label dev302-chat`，把那一行表格貼進 PR（改對／改壞、McNemar p、CER、95% 區間）；dev302、打字測驗（`eval/dev/user-typing.txt`）、錯字回報檔在聊天與書面各一行；
   - 只要求不退步；
   - 有進步的話寫出是哪幾句。
 - **對應的文件一起更新**：契約、`docs/PLAN.md`、README。
