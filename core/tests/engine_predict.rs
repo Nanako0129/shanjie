@@ -1273,6 +1273,33 @@ fn t16_a_prediction_pick_is_recorded_under_the_key_of_the_pick() {
 }
 
 #[test]
+fn t16b_the_users_own_edit_before_the_pick_moves_the_record_to_the_commit_key() {
+    // As in T16 the row is built under 以備. The user then changes the character before 時 in the candidate window
+    // (倍 for ㄅㄟˋ): the text before 時 is the user's own choice now, so the record goes under the key at the commit.
+    let mut e = learner_engine(Profile::Chat, None);
+    typ(&mut e, &["ㄧˇ", "ㄅㄟˋ"], "ㄕ");
+    pick_word(&mut e, "時");
+    e.key(kind(KeyKind::Left)).unwrap();
+    let mut o = e.key(kind(KeyKind::Space)).unwrap();
+    for _ in 0..60 {
+        if o.candidates[o.selected.unwrap()] == "倍" {
+            break;
+        }
+        o = e.key(kind(KeyKind::Right)).unwrap();
+    }
+    assert_eq!(o.candidates[o.selected.unwrap()], "倍", "precondition: 倍 is in the window");
+    e.key(kind(KeyKind::Enter)).unwrap();
+    e.key(kind(KeyKind::End)).unwrap();
+    let commit = e.key(kind(KeyKind::Enter)).unwrap().commit;
+    assert!(commit.ends_with("倍時"), "{commit}");
+    let before: String = commit.chars().rev().skip(1).take(2).collect::<Vec<_>>().into_iter().rev().collect();
+    assert_ne!(before, "以備", "precondition: the user's edit changed the text before 時");
+    let r = e.learner().records();
+    let pred = r.iter().find(|x| x.word == "時").expect("the prediction pick is learned");
+    assert_eq!(pred.context, before, "records: {:?}", r.iter().map(|x| (&x.context, &x.word)).collect::<Vec<_>>());
+}
+
+#[test]
 fn t17_choosing_the_same_word_again_in_the_window_keeps_the_prediction_learn() {
     let mut e = learner_engine(Profile::Formal, None);
     e.set_left_context("我想喝一杯");

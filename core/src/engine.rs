@@ -1221,6 +1221,7 @@ impl Engine {
             } else if f.start >= c {
                 f.start += 1;
                 f.end += 1;
+                f.key = None; // the user changed the text before it: record under the key at the commit (section 10.1)
                 true
             } else {
                 false
@@ -1248,6 +1249,7 @@ impl Engine {
             } else if f.start > i {
                 f.start -= 1;
                 f.end -= 1;
+                f.key = None; // the user changed the text before it (section 10.1)
                 true
             } else {
                 false
@@ -1363,6 +1365,11 @@ impl Engine {
             _ => (self.learning.then(|| self.pre_pick(start, end)).flatten(), None),
         };
         self.fixed.retain(|f| !(f.start < end && start < f.end));
+        // A candidate pick changes the text before every fixed word to its right: their prediction keys no longer
+        // describe what the user sees, so those records fall back to the key at the commit (section 10.1).
+        for f in self.fixed.iter_mut().filter(|f| f.start >= end) {
+            f.key = None;
+        }
         self.fixed.push(Fixed { start, end, word, pre, key });
         self.fixed.sort_by_key(|f| f.start);
         self.refresh()
