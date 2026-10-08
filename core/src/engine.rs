@@ -213,6 +213,9 @@ struct Fixed {
     /// The context key a prediction pick is recorded under, fixed when the row was built: re-decoding after the pick can
     /// change the text before the start, so the commit must not recompute it (section 10.1). `None` for candidate picks.
     key: Option<String>,
+    /// Fixed by a candidate re-pick of another span (repick-freeze), not chosen by the user: never learned, and
+    /// forgotten together with its (reading, word).
+    frozen: bool,
 }
 
 /// One item of the prediction row: the word, the compatible reading that scored it, and the syllable index where
@@ -281,7 +284,7 @@ pub struct Engine {
     demote: bool,
     /// Words of the current best path with the lp each was scored with, whether the word is a
     /// punctuation token, and its demotion delta (LM mode only).
-    path: Vec<(String, f64, bool, f64)>,
+    path: Vec<(String, f64, bool, f64, usize)>,
     /// s3e: punctuation mark -> its alternatives (built-in default until `set_punctuation`).
     punct: HashMap<char, Vec<String>>,
     layout: Layout,
@@ -659,7 +662,7 @@ impl Engine {
         let mut prev = history(&self.left, &st.lm);
         let mut total = 0.0;
         let (mut any, mut open) = (false, false);
-        for (w, lp, is_punct, delta) in &self.path {
+        for (w, lp, is_punct, delta, _) in &self.path {
             if *is_punct {
                 if open {
                     total += st.lm.eos(lam, prev);
@@ -715,8 +718,8 @@ impl Engine {
         let pending: Vec<char> = self.pend.iter().flatten().copied().collect();
         let mut long_starts = Vec::new();
         let mut pos = n;
-        for (w, _, is_punct, _) in self.path.iter().rev().take(2) {
-            pos = pos.saturating_sub(if *is_punct { 1 } else { w.chars().count() });
+        for (.., syllables) in self.path.iter().rev().take(2) {
+            pos = pos.saturating_sub(*syllables);
             long_starts.push(pos);
         }
         long_starts.reverse(); // far to near
@@ -803,7 +806,7 @@ impl Engine {
         self.fixed.retain(|f| !(f.start < end && start < f.end));
         self.syls.splice(start..end, reading);
         let key = pre.is_some().then_some(key);
-        self.fixed.push(Fixed { start, end: start + m, word, pre, key });
+        self.fixed.push(Fixed { start, end: start + m, word, pre, key, frozen: false });
         self.fixed.sort_by_key(|f| f.start);
         self.cursor = start + m;
         self.refresh()?;
@@ -922,14 +925,14 @@ impl Engine {
                     &st.capped, &self.syls[from..to], &st.lm, lam, prev, end, BEAM_S1, learn.as_ref(), self.demote,
                 )
                 .map_err(|_| EngineError::Internal)?;
-                for (w, lp, delta) in &best.first().ok_or(EngineError::Internal)?.1 {
+                for (w, lp, delta, l) in &best.first().ok_or(EngineError::Internal)?.1 {
                     out.push_str(w);
-                    path.push((w.to_string(), *lp, false, *delta));
+                    path.push((w.to_string(), *lp, false, *delta, *l));
                 }
             }
             if let Some(f) = right {
                 out.push_str(&f.word);
-                path.push((f.word.clone(), lp_fixed[gap], self.is_punct(f.start), delta_fixed[gap]));
+                path.push((f.word.clone(), lp_fixed[gap], self.is_punct(f.start), delta_fixed[gap], f.end - f.start));
             }
         }
         self.display = out;
@@ -1229,7 +1232,7 @@ impl Engine {
         });
         self.syls.insert(c, reading);
         if let Some(word) = fixed_word {
-            self.fixed.push(Fixed { start: c, end: c + 1, word, pre: None, key: None });
+            self.fixed.push(Fixed { start: c, end: c + 1, word, pre: None, key: None, frozen: false });
             self.fixed.sort_by_key(|f| f.start);
         }
         self.cursor += 1;
@@ -1341,6 +1344,8 @@ impl Engine {
         // A pending learn of the same word would teach it again at the next commit and append it
         // back (§1.5), as learning_clear's pending-learn drop prevents for clear.
         let syls = &self.syls;
+        // repick-freeze: a frozen copy of the same (reading, word) goes, so its syllables re-decode without the record.
+        self.fixed.retain(|f| !(f.frozen && f.word == word && syls[f.start..f.end] == *reading));
         for f in self.fixed.iter_mut() {
             if f.word == word && syls[f.start..f.end] == *reading {
                 f.pre = None;
@@ -1351,6 +1356,36 @@ impl Engine {
             panic!("injected forget panic");
         }
         self.rewrite(true);
+    }
+
+    /// repick-freeze: from the path displayed before a pick over `[start, end)`, the words outside it (whole ones, and
+    /// the outside syllables of a word the range cuts, when that syllable has the shown character as a single-character
+    /// entry) as frozen fixed words. Without a model there is no path and nothing freezes.
+    fn freeze_outside(&self, start: usize, end: usize) -> Vec<Fixed> {
+        let Some(st) = &self.lm else { return Vec::new() };
+        if self.path.iter().map(|p| p.4).sum::<usize>() != self.syls.len() {
+            return Vec::new();
+        }
+        let mut out = Vec::new();
+        let mut p = 0;
+        for (word, _, _, _, len) in &self.path {
+            let q = p + len;
+            if q <= start || p >= end {
+                if !self.fixed.iter().any(|f| f.start == p && f.end == q) {
+                    out.push(Fixed { start: p, end: q, word: word.clone(), pre: None, key: None, frozen: true });
+                }
+            } else if word.chars().count() == *len {
+                // A word with another character count than syllables has no per-syllable characters: left to the decoder.
+                for (i, ch) in (p..q).zip(word.chars()).filter(|(i, _)| !(start..end).contains(i)) {
+                    let ch = ch.to_string();
+                    if st.capped.best_lp_delta(&self.syls[i..=i], &ch).is_some() {
+                        out.push(Fixed { start: i, end: i + 1, word: ch, pre: None, key: None, frozen: true });
+                    }
+                }
+            }
+            p = q;
+        }
+        out
     }
 
     /// Fix candidate `idx` over its range, close candidates, recompute.
@@ -1364,13 +1399,15 @@ impl Engine {
             Some(f) if self.learning => (f.pre.clone(), f.key.clone()),
             _ => (self.learning.then(|| self.pre_pick(start, end)).flatten(), None),
         };
+        let frozen = self.freeze_outside(start, end);
         self.fixed.retain(|f| !(f.start < end && start < f.end));
+        self.fixed.extend(frozen);
         // A candidate pick changes the text before every fixed word to its right: their prediction keys no longer
         // describe what the user sees, so those records fall back to the key at the commit (section 10.1).
         for f in self.fixed.iter_mut().filter(|f| f.start >= end) {
             f.key = None;
         }
-        self.fixed.push(Fixed { start, end, word, pre, key });
+        self.fixed.push(Fixed { start, end, word, pre, key, frozen: false });
         self.fixed.sort_by_key(|f| f.start);
         self.refresh()
     }

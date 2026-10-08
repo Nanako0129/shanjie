@@ -584,12 +584,13 @@ pub enum End<'a> {
 }
 
 /// A path: total score and its words with the lp each was scored with and its demotion delta.
-pub type Scored<'a> = (f64, Vec<(&'a str, f64, f64)>);
+/// The last number of a word is the count of syllables it covers.
+pub type Scored<'a> = (f64, Vec<(&'a str, f64, f64, usize)>);
 
 struct Hyp<'a> {
     score: f64,
     surface: String,
-    words: Vec<(&'a str, f64, f64)>,
+    words: Vec<(&'a str, f64, f64, usize)>,
     last: Option<u32>,
     ctx: Ctx,
 }
@@ -739,7 +740,7 @@ pub fn decode_segment_learned<'a>(
                         Some(&q) if !(sc > cand[q].score) => {}
                         found => {
                             let mut words = h.words.clone();
-                            words.push((word, lp, delta));
+                            words.push((word, lp, delta, l));
                             let nh = Hyp { score: sc, surface, words, last: wid, ctx: lm.ctx_of(None) };
                             match found {
                                 Some(&q) => cand[q] = nh,
@@ -819,7 +820,7 @@ pub fn decode_from(
 ) -> Result<Vec<(f64, Vec<String>)>, Error> {
     Ok(decode_segment_learned(lex, syls, lm, profile.lambda(), start, End::Eos, beam, None, demote)?
         .into_iter()
-        .map(|(s, ws)| (s, ws.into_iter().map(|(w, _, _)| w.to_string()).collect()))
+        .map(|(s, ws)| (s, ws.into_iter().map(|(w, ..)| w.to_string()).collect()))
         .collect())
 }
 
@@ -924,7 +925,7 @@ mod tests {
         let capped = CappedLexicon::new(lex, "", &lm, Some(&Demote::parse("").unwrap())).unwrap();
         let syls = ["ㄅ".to_string()];
         let run = |end| decode_segment_learned(&capped, &syls, &lm, 0.5, "<s>", end, 64, None, true).unwrap();
-        let score = |v: &[(f64, Vec<(&str, f64, f64)>)], w: &str| v.iter().find(|(_, ws)| ws[0].0 == w).unwrap().0;
+        let score = |v: &[Scored], w: &str| v.iter().find(|(_, ws)| ws[0].0 == w).unwrap().0;
         let eos = run(End::Eos);
         assert_eq!(score(&eos, "b"), lm.word(0.5, "<s>", "b", -2.0) + lm.eos(0.5, "b"));
         assert_eq!(score(&eos, "a"), lm.word(0.5, "<s>", "a", -1.0) + lm.eos(0.5, "a"));

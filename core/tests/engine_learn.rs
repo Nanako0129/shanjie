@@ -1882,3 +1882,46 @@ fn global_eps_table() {
         assert!(r.2 * 100 >= r.3 * 80, "mirror learn rate below 80%: {}/{} at eps {}", r.2, r.3, r.0);
     }
 }
+
+// ---------- repick-freeze: forgetting a frozen word (s4-learning section 1.5, repick-freeze section 2) ----------
+
+/// Two words A+B. A is taught (警官 over the default 景觀), B is re-picked so A is frozen, then ⌘⌫ on A's learned word.
+/// Expected display: A's syllables decoded alone without the record (`lm::decode_segment`, same profile, same start,
+/// closing into the picked B), then B. Measured: A reads 景觀 again, B stays the picked 公座.
+#[test]
+fn forget_a_frozen_word_redecodes_it_without_the_record() {
+    let (a_reading, b_reading) = ("ㄐㄧㄥˇ ㄍㄨㄢ", "ㄍㄨㄥ ㄗㄨㄛˋ");
+    let (a_taught, b_picked) = ("警官", "公座");
+    let s = shared();
+    let mut e = engine();
+    // teach A: type, re-pick A's span, commit
+    type_syls(&mut e, a_reading);
+    pick(&mut e, 2, 2, a_taught);
+    e.key(k(KeyKind::Enter)).unwrap();
+    assert!(e.learner().records().iter().any(|r| r.word == a_taught), "A is taught");
+    // A+B: A shows the learned word; re-pick B so A is frozen
+    let o = type_syls(&mut e, &format!("{a_reading} {b_reading}"));
+    assert!(o.preedit.starts_with(a_taught), "learned A shown: {}", o.preedit);
+    pick(&mut e, 4, 4, b_picked);
+    // ⌘⌫ on A's learned word
+    e.key(k(KeyKind::Home)).unwrap();
+    e.key(k(KeyKind::Right)).unwrap();
+    e.key(k(KeyKind::Right)).unwrap();
+    let o = e.key(k(KeyKind::Space)).unwrap();
+    highlight(&mut e, o, a_taught);
+    let o = e.key(Key { kind: KeyKind::Backspace, ch: '\0', modifiers: MOD_COMMAND }).unwrap();
+    assert!(e.learner().records().iter().all(|r| r.word != a_taught));
+    let a_syls = syls(a_reading);
+    let (lp, delta) = s.capped.best_lp_delta(&syls(b_reading), b_picked).unwrap();
+    let want = lm::decode_segment(
+        &s.capped, &a_syls, &s.lm, lm::Profile::Chat.lambda(), "<s>", lm::End::Next { word: b_picked, lp, delta }, 64,
+    )
+    .unwrap()[0]
+        .1
+        .iter()
+        .map(|w| w.0)
+        .collect::<String>();
+    assert_ne!(want, a_taught, "the unlearned decode differs from the taught word");
+    println!("forget on frozen A: {} (taught {a_taught}, unlearned {want})", o.preedit);
+    assert_eq!(o.preedit, format!("{want}{b_picked}"));
+}

@@ -162,7 +162,7 @@ fn ref_path(left: &str, toks: &[Tok]) -> Vec<(String, usize, bool)> {
     let flush = |seg: &mut Vec<String>, prev: &str, path: &mut Vec<(String, usize, bool)>| {
         if !seg.is_empty() {
             let best = decode_segment(&s.capped, seg, &s.lm, lam, prev, End::Eos, 64).unwrap();
-            for (w, _, _) in &best[0].1 {
+            for (w, ..) in &best[0].1 {
                 path.push((w.to_string(), w.chars().count(), false));
             }
             seg.clear();
