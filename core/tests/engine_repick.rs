@@ -226,3 +226,123 @@ fn insert_with_a_frozen_word_on_each_side() {
     assert_eq!(run("ㄐㄧㄝˋ"), "在也借由於再也", "partial merge of 由於 keeps it whole");
     assert_eq!(run("ㄋㄧㄢˊ"), "在也年由於再也", "no merge on either side");
 }
+
+const FORGET: Key = Key { kind: KeyKind::Backspace, ch: '\0', modifiers: MOD_COMMAND };
+
+/// Section 7.1, measured: 要進 + ㄅㄢˇ ㄎㄨㄥˋ re-picked to 版控 (the cursor stays after 版); ㄐㄧㄢ typed there merges
+/// with 控 into 監控, so 控 is released; Backspace deletes that syllable and fixes 控 again (d36a7c0 gave 版空).
+#[test]
+fn backspace_after_a_merge_fixes_the_word_again() {
+    let mut e = engine();
+    shown(&mut e, "ㄅㄢˇ ㄎㄨㄥˋ", "要進");
+    assert_eq!(repick(&mut e, 1, "版").preedit, "版控");
+    assert_eq!(type_syls(&mut e, "ㄐㄧㄢ").preedit, "版監控");
+    assert_eq!(e.key(k(KeyKind::Backspace)).unwrap().preedit, "版控");
+}
+
+/// Section 7.2, measured: ⌘⌫ on a word with no record forgets nothing, so the frozen words stay (d36a7c0 gave 版空).
+#[test]
+fn forget_without_records_keeps_the_frozen_words() {
+    let mut e = engine();
+    shown(&mut e, "ㄅㄢˇ ㄎㄨㄥˋ", "要進");
+    assert_eq!(repick(&mut e, 1, "版").preedit, "版控");
+    e.key(k(KeyKind::End)).unwrap();
+    let o = e.key(k(KeyKind::Space)).unwrap();
+    highlight(&mut e, o, "控");
+    let before = e.learner().records().len();
+    let o = e.key(FORGET).unwrap();
+    assert_eq!(e.learner().records().len(), before);
+    assert_eq!(o.preedit, "版控");
+}
+
+/// Section 7.2: ⌘⌫ on the prediction row never touches fixed words.
+#[test]
+fn prediction_row_forget_keeps_the_frozen_words() {
+    let mut e = engine();
+    shown(&mut e, "ㄅㄢˇ ㄎㄨㄥˋ", "要進");
+    assert_eq!(repick(&mut e, 1, "版").preedit, "版控");
+    e.key(k(KeyKind::End)).unwrap();
+    // The row shows from the first key of the next syllable (V3); ㄓ is a common start.
+    let o = e.key(Key::ch(L.key_of_symbol('ㄓ').unwrap(), 0)).unwrap();
+    println!("prediction row after 版控 + ㄓ: {:?}", o.candidates);
+    assert!(!o.candidates.is_empty(), "the example needs a prediction row");
+    e.key(k(KeyKind::Tab)).unwrap();
+    let o = e.key(FORGET).unwrap();
+    assert!(o.preedit.starts_with("版控"), "{}", o.preedit);
+}
+
+/// Section 7.3: inserting between the syllables of a frozen two-syllable word keeps both characters (they are not
+/// release candidates for this insertion).
+#[test]
+fn insert_inside_a_frozen_word_keeps_both_halves() {
+    let mut e = engine();
+    assert_eq!(shown(&mut e, "ㄗㄞˋ ㄧㄝˇ ㄧㄡˊ ㄩˊ ㄗㄞˋ ㄧㄝˇ", ""), "在也由於在野");
+    assert_eq!(repick(&mut e, 6, "再也").preedit, "再也由於再也".replacen("再也", "在也", 1));
+    for syl in ["ㄋㄧㄢˊ", "ㄕㄡˇ", "ㄐㄧㄝˋ"] {
+        let mut e = engine();
+        shown(&mut e, "ㄗㄞˋ ㄧㄝˇ ㄧㄡˊ ㄩˊ ㄗㄞˋ ㄧㄝˇ", "");
+        repick(&mut e, 6, "再也");
+        let got = insert_at(&mut e, 3, syl);
+        let ch: Vec<char> = got.chars().collect();
+        assert_eq!((ch[2], ch[4]), ('由', '於'), "{got}");
+    }
+    // measured: 在也由年於再也, 在也由首於再也, 在也由介於再也
+}
+
+/// Section 7.1 lifetime (a): after a release, a candidate pick or a prediction pick clears the list, so deleting the
+/// old trigger brings nothing back and the engine stays consistent.
+#[test]
+fn a_pick_clears_the_released_list() {
+    // candidate pick
+    let mut e = engine();
+    shown(&mut e, "ㄅㄢˇ ㄎㄨㄥˋ", "要進");
+    repick(&mut e, 1, "版");
+    let merged = type_syls(&mut e, "ㄐㄧㄢ").preedit;
+    let o = e.key(k(KeyKind::Space)).unwrap(); // candidates for the syllable before the cursor (the trigger)
+    let first = o.candidates[0].clone();
+    let o = e.key(k(KeyKind::Enter)).unwrap();
+    assert_eq!((merged.as_str(), first.as_str(), o.preedit.as_str()), ("版監控", "間", "版間控"));
+    // The pick froze 控 anew (section 1); the released list was cleared, so this is not a restore.
+    let o = e.key(k(KeyKind::Backspace)).unwrap();
+    assert!(o.handled);
+    assert_eq!(o.preedit, "版控");
+    // prediction pick
+    let mut e = engine();
+    shown(&mut e, "ㄅㄢˇ ㄎㄨㄥˋ", "要進");
+    repick(&mut e, 1, "版");
+    type_syls(&mut e, "ㄐㄧㄢ");
+    e.key(k(KeyKind::End)).unwrap();
+    let o = e.key(Key::ch(L.key_of_symbol('ㄓ').unwrap(), 0)).unwrap();
+    println!("prediction row after the merge + ㄓ: {:?}", o.candidates);
+    assert!(!o.candidates.is_empty(), "the example needs a prediction row");
+    {
+        e.key(k(KeyKind::Tab)).unwrap();
+        let o = e.key(k(KeyKind::Enter)).unwrap();
+        assert_eq!(o.preedit, "版監控中");
+        e.key(k(KeyKind::Home)).unwrap();
+        e.key(k(KeyKind::Right)).unwrap();
+        e.key(k(KeyKind::Right)).unwrap();
+        // The prediction pick cleared the list (section 7.1): deleting the old trigger restores nothing, and 控 decodes
+        // freely again (measured: 版空中).
+        let o = e.key(k(KeyKind::Backspace)).unwrap();
+        assert!(o.handled);
+        assert_eq!(o.preedit, "版空中");
+    }
+}
+
+/// Section 7.1 lifetime (b): a released two-syllable word, then a syllable inserted inside it, then the trigger
+/// deleted: the record was dropped, nothing comes back over the changed span.
+#[test]
+fn an_insert_inside_a_released_word_drops_its_record() {
+    let mut e = engine();
+    assert_eq!(shown(&mut e, "ㄊㄚ ㄕˋ ㄐㄧㄝˋ", ""), "他世界");
+    assert_eq!(repick(&mut e, 1, "她").preedit, "她世界");
+    assert_eq!(type_syls(&mut e, "ㄑㄩㄢˊ").preedit, "她全世界", "at 1: merges with the frozen 世界, released");
+    assert_eq!(insert_at(&mut e, 3, "ㄉㄜ˙"), "她詮釋的界", "inside the released 世界 (now 2..4): its record goes");
+    e.key(k(KeyKind::Home)).unwrap();
+    e.key(k(KeyKind::Right)).unwrap();
+    e.key(k(KeyKind::Right)).unwrap();
+    let o = e.key(k(KeyKind::Backspace)).unwrap(); // the old trigger ㄑㄩㄢˊ
+    assert!(o.handled);
+    assert_eq!(o.preedit, "她是的界", "nothing restored over the changed span");
+}

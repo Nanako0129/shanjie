@@ -1926,8 +1926,9 @@ fn forget_a_frozen_word_redecodes_it_without_the_record() {
     assert_eq!(o.preedit, format!("{want}{b_picked}"));
 }
 
-/// Repick-freeze section 6.2: a re-pick cuts the learned word 警官 (井 over the first syllable); the left-over 官 is
-/// frozen. ⌘⌫ on 警官 re-decodes with only the user's 井 fixed, as an engine that never learned 警官 does.
+/// Repick-freeze section 7.2: a re-pick cuts the learned word 警官 (井 over the first syllable); the left-over 官 and
+/// 工作 are frozen. ⌘⌫ on 警官 (records go) frees the frozen words over its span (官) only: ㄍㄨㄢ decodes again between
+/// the user's 井 and the still frozen 工作, without the record.
 #[test]
 fn forget_a_cut_learned_word_leaves_no_pieces() {
     let reading = "ㄐㄧㄥˇ ㄍㄨㄢ ㄍㄨㄥ ㄗㄨㄛˋ";
@@ -1943,11 +1944,17 @@ fn forget_a_cut_learned_word_leaves_no_pieces() {
     let o = e.key(k(KeyKind::Space)).unwrap();
     highlight(&mut e, o, "警官");
     let got = e.key(Key { kind: KeyKind::Backspace, ch: '\0', modifiers: MOD_COMMAND }).unwrap().preedit;
-    // reference: never learned, only the user's 井 fixed (typed first, so nothing else is frozen)
-    let mut r = engine();
-    type_syls(&mut r, "ㄐㄧㄥˇ");
-    pick(&mut r, 1, 1, "井");
-    let want = type_syls(&mut r, "ㄍㄨㄢ ㄍㄨㄥ ㄗㄨㄛˋ").preedit;
+    assert!(e.learner().records().iter().all(|r| r.word != "警官"));
+    let s = shared();
+    let (lp, delta) = s.capped.best_lp_delta(&syls("ㄍㄨㄥ ㄗㄨㄛˋ"), "工作").unwrap();
+    let mid = lm::decode_segment(
+        &s.capped, &syls("ㄍㄨㄢ"), &s.lm, lm::Profile::Chat.lambda(), "井", lm::End::Next { word: "工作", lp, delta }, 64,
+    )
+    .unwrap()[0]
+        .1
+        .iter()
+        .map(|w| w.0)
+        .collect::<String>();
     println!("cut learned word, forgotten: {got} (shown with the record: 井官工作)");
-    assert_eq!(got, want);
+    assert_eq!(got, format!("井{mid}工作"));
 }
