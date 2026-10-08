@@ -118,13 +118,13 @@ v4 日期 2026-10-03。v1 經 `pilotfish:plan-verifier`（REVISE，4 項）與 `
   - 候選工具 zhconv-rs（`mediawiki=True`）。程式碼是 MIT／Apache-2.0，轉換表是 GPL-2.0+，只當建置工具、不放進模型檔。
   - 2026-10-06 查證：zhconv-rs 不展開 NoteTA 的公共轉換組，要自己從 dump 讀出群組規則，寫成 `-{H|…}-` 加在文章開頭（研究紀錄同日）。使用者選定 PyPI 的 0.4.2，契約 `docs/contracts/s2w-mediawiki-zhtw.md`；先在 Mac 用 2,000 篇判讀轉換差異，過了才上 188 重建。
   - **狀態（2026-10-07）**：第一關通過（MW 對 69、S2n 對 16）；模型 W 的契約驗收全過，但打字準確率沒有可見進步，又會改變預設字形（佔→占、佈→布、祕→秘）並留下「的士」這類大陸用語。使用者決定先不出貨，先定字形政策（研究紀錄 2026-10-07）。
-  - **狀態（2026-10-08）**：字形政策由 S2f 定案（model-v3）後，修訂二把 MW 轉換疊在 S2f 上重建模型 W2：對 model-v3 守門不否決、保留集聊天 −2／書面 +1（都不顯著），但使用者回報的「的市佔這麼低了嗎」變成「的士站」。使用者決定 v0.3.0 維持 model-v3，W2 不出貨（`experiments/s2w/README.md`、研究紀錄同日）。
+  - **狀態（2026-10-08）**：字形政策由 S2f 定案（model-v3）後，修訂二把 MW 轉換疊在 S2f 上重建模型 W2：對 model-v3 守門不否決、保留集聊天 −2／書面 +1（都不顯著），但使用者回報的「的市佔這麼低了嗎」變成「的士站」。使用者決定 v0.3.0 維持 model-v3，W2 不出貨（`experiments/s2w/README.md`、研究紀錄同日）。〔更正，2026-10-08〕v0.3.0 出貨的是 model-v4（model-v3 加指紋條目，`docs/contracts/model-v4.md`）。
   - 驗收：和 S2n 的模型對照 dev302、cvtune、wikitune、錯字回報檔，聊天與書面兩種設定都量。
 - **網頁 n-gram 的評估**（使用者 2026-10-05：可以評估）。
   - 從保留所有權利的網頁原文算出的次數，能不能放進 CC BY-SA 的模型檔，是法律判斷，這裡不構成法律意見。使用者允許先做實驗評估；要不要散布另外決定。
   - 候選是 `taiwan-corpora/twngrams`：CC0，來源是 HPLT 3.0 的 `cmn_Hant` 網頁，約 2.85 億 token。計數單位是網站數，出現在不到 40 個網站的 n-gram 不收。這是 2026-08 才出現的單人專案，要先驗證。
 - **S2n 收尾**：「十分鐘後道」由修訂四的期望次數修好（研究紀錄 2026-10-06），GitHub Release `model-v2` 已建；剩合併關卡（含保留集）。
-- **S2f 字形修正**（使用者 2026-10-07 回報「起牀」，契約 `docs/contracts/s2f-variant-forms.md`）：台灣字形不再被當成簡體字，同讀音的異體寫法合併計數。經三次修訂，模型 F4 驗收通過（字形探針 16/16、守門不否決、「竈門」回來）；GitHub Release `model-v3` 已建（使用者 2026-10-08 同意，下載比對雜湊相符），成為 v0.3.0 的模型（S2w 疊在它上面重建的 W2 比較後不出貨，見上）。
+- **S2f 字形修正**（使用者 2026-10-07 回報「起牀」，契約 `docs/contracts/s2f-variant-forms.md`）：台灣字形不再被當成簡體字，同讀音的異體寫法合併計數。經三次修訂，模型 F4 驗收通過（字形探針 16/16、守門不否決、「竈門」回來）；GitHub Release `model-v3` 已建（使用者 2026-10-08 同意，下載比對雜湊相符），成為 v0.3.0 的模型（S2w 疊在它上面重建的 W2 比較後不出貨，見上）。〔更正，2026-10-08〕v0.3.0 用的是 model-v4（model-v3 加指紋條目），同一批計數。
 - **S5 本機重排的下一個實驗**（使用者 2026-10-05 排進下一版；同日稍晚決定先和 S2n 第三次重建並行，契約 `docs/contracts/s5k-local-scorers.md`：Laya 優先，1-bit Bonsai 次之，Qwen3-1.7B 4-bit 對照）。
   - S5j 的結論是「從 8 句裡挑一句」的題型不能用。下一步改成每個候選分別打分數，或每個字位各出一題。
   - 量 Apple 端上模型與本機小模型（Qwen3-1.7B、Gemma 4 E2B，MLX），在使用者沒在用電腦時量。
@@ -186,7 +186,7 @@ v4 日期 2026-10-03。v1 經 `pilotfish:plan-verifier`（REVISE，4 項）與 `
 - 組字區上限改成可設定（使用者 2026-10-05），預設對照蘋果注音或小麥注音。目前是 40 個音節。
 - 真正的句首判斷（issue #30）。
 - 詞類回退實驗（`exp/word-classes`，Brown 分群 K=512）：dev302 chat 238 → 250、formal 237 → 254。要在 S2n 的乾淨計數上重跑，再決定要不要成片。
-  - 已在 model-v3 上重跑並做進 Python 參考實作與 Rust 核心（`docs/contracts/s2k-word-classes.md`，結果見 `docs/research-log.md` 2026-10-08）；GitHub Release `classes-v1` 已建（使用者 2026-10-08 同意，獨立的 Release；下載比對雜湊相符），CI、`release.yml`、`build-app.sh` 與 golden 測試都釘它的雜湊（`data/classes.sjc.sha256`），說明在 `docs/data-files.md`。
+  - 已在 model-v3 上重跑並做進 Python 參考實作與 Rust 核心（`docs/contracts/s2k-word-classes.md`，結果見 `docs/research-log.md` 2026-10-08）；GitHub Release `classes-v1` 已建（使用者 2026-10-08 同意，獨立的 Release；下載比對雜湊相符），CI、`release.yml`、`build-app.sh` 與 golden 測試都釘它的雜湊（`data/classes.sjc.sha256`），說明在 `docs/data-files.md`。〔更正，2026-10-08〕現在釘的是 classes-v2（配 model-v4，`docs/contracts/model-v4.md`）。
   - 選字記憶的全域層因此先關（`s4-learning.md` §13）。v0.3.0 之後重新研究全域層：要能分辨「使用者想翻的平手」和「模型已經判對的平手」，再用 `global_eps_table` 量。
 - **訓練切分與詞庫擴充**（issue #47，Willseed；2026-10-06 的覆蓋量測與文獻調查見研究紀錄同日）。排在前文接進 n-gram、S2n 計數重建之後，寫契約、過 plan-verifier。
   - 覆蓋：dev302 正解在前 8 名約 98%，前 64 名缺的 2 句都是「拭鏡布」。這組集合的主要錯誤是排序，B 的效果要另外找「組不出來的新詞」量。
@@ -548,7 +548,7 @@ v4 日期 2026-10-03。v1 經 `pilotfish:plan-verifier`（REVISE，4 項）與 `
   7. **效能**：release 重播（載入 LM）每鍵 p95 < 16 ms；回報 LM 載入時間與引擎（詞庫＋上限後詞庫＋LM）的峰值 RSS。上限後詞庫可以和原始詞庫共用字串池，由 executor 決定。
   8. 模型檔 ≤ 100 MB（目前 80,040,411 bytes）。
   9. **保留集**（片結束，只由 verifier 跑一次）：`--set holdout` 在 chat 與 formal 的 top1 與 oracle@64，只回數字。A1a 要求 oracle@64 ≥ 98%；低於時照實回報、記為 A1a 未達成，由使用者決定，不是這片的停止條件。報告時註明 LM 模式的 oracle 用寬鬆對照，S1 的 `extra` 行（97.8%）用完全相符。
-- **模型檔不進 repo**（`data/lm/` 在 `.gitignore`）：從 GitHub Release `model-v3` 下載（`gh release download model-v3 -R Nanako0129/shanjie -p bigram.sjlm -D data/lm`，CC BY-SA 4.0，2026-10-03 起），或用 `tools/build_lm.py` 從本機計數重建；SHA-256 `5c7d5a94f762e7c5d87e14e47b03c1138222df4ea194e70e503bdd9a71ab5a48`。需要它的測試在檔案不存在時**直接失敗**，訊息說明怎麼取得，不得默默跳過。隨輸入法散布的方式在 S3b（打包進 app）。
+- **模型檔不進 repo**（`data/lm/` 在 `.gitignore`）：從 GitHub Release `model-v4` 下載（`gh release download model-v4 -R Nanako0129/shanjie -p bigram.sjlm -D data/lm`，CC BY-SA 4.0，model-v4 自 2026-10-08 起）；SHA-256 `06768f2949cf8b135d1f591056ffb16f3ae3f6d70aef5911ffd55de134250322`。需要它的測試在檔案不存在時**直接失敗**，訊息說明怎麼取得，不得默默跳過。隨輸入法散布的方式在 S3b（打包進 app）。
 - **範圍外。** 改分數、參數、剪枝或語料；候選清單用 LM 排序；trigram；學習（S4）。
 - **預算。** executor、security-executor 各 1 回合＋1 次修正。
 - **停止。** 驗收 2、3、4 有任何差異：回報第一個不同的列與原因，不得修改 Python 參考實作或對照檔來湊。峰值 RSS 超過 300 MB：回報實測值與瓶頸。
