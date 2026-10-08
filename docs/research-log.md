@@ -1291,3 +1291,9 @@ S2h 實機驗收時，使用者在終端機、Discord、VS Code、Chrome 網址�
 - **保留集格式檢查**（fresh verifier 跑一次，只回數字）：聊天與書面的 rowstats 各 227 行、只有 `[0-9\t\n]`、對錯欄加總等於摘要行。這也是目前 main（model-v3、沒有詞類）的保留集基準：第一名聊天 178、書面 184，CER 2.91%、2.55%。
 - **驗證**：Python 與 CLI 的 dev302 rowstats（聊天、書面）逐位元組相同（`eval/golden/s2-lm-dev302-{chat,formal}.rowstats`，`cli/tests/golden.rs`）；契約 §4 的 8 項突變都以斷言失敗。
 - **沒做**：`tools/bench.py` 的 CER 與區間（它的比較只在 `run` 裡算，這一片驗不到），排在 v0.3.0 基準量測之前；D（擴大或輪替保留集）與 Discord 調參集挑長句，記在 `docs/PLAN.md`。
+
+## 2026-10-08：Releases 頁的 Latest 與 Release 說明進版控
+
+- `model-v3` 被 GitHub 自動標成 Latest（`gh release create` 沒指定時依日期與版本自動判斷），Releases 頁的「最新」指到模型檔。使用者同意後手動把 v0.2.1 改回 Latest；`release.yml` 建 App 版時改帶 `--latest`，資料類 Release 一律 `--latest=false`（`CLAUDE.md`「發版」）。
+- 使用者要求 Release 說明進版控、每次手寫：說明本文改放 `docs/releases/<tag>.md`，`release.yml` 的 gate 沒有這個檔（或只有空白）就不發版，publish 用 `--notes-file`。現有 9 個 Release 的說明照 GitHub 上的本文逐位元組抄進來（比對時去掉結尾換行），沒有改寫。契約 `docs/contracts/release-notes.md`。
+- 驗證：9 個檔和 `gh release view <tag> --json body` 相同；從 `release.yml` 抽出的 gate 步驟在本機跑四種情況（缺檔、只有空白、有內容、`workflow_dispatch`）結束碼分別是 1、1、0、0。實際發版的路徑要到下一次推 `v*` tag 才會跑到。

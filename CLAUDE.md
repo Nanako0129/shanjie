@@ -50,6 +50,7 @@
 
 - 推 `v*` tag 觸發簽章、公證與發佈，**每次都要使用者當下同意**。
 - Releases 頁的「Latest」永遠是輸入法的最新版：`release.yml` 建 App 版時帶 `--latest`；資料類的 Release（`model-v…`、`classes-v…`）一律用 `--latest=false` 建（使用者 2026-10-08：`model-v3` 曾被 GitHub 自動標成 Latest）。
+- **Release 說明進版控、每次手寫**（使用者 2026-10-08）：說明本文是 `docs/releases/<tag>.md`，中文、手寫、不用自動產生；推 `v*` tag 前先寫好並合併到 main，`release.yml` 沒有這個檔就不發版。資料類 Release 手動建時用 `--notes-file docs/releases/<tag>.md`。規則見 `docs/releases/README.md`。
 - 網站（shanjie.nyanako.com）手動部署，部署前先問；網站不放下載連結，直到使用者決定公開。
 
 ## 已知的系統問題
