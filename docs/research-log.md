@@ -1396,3 +1396,12 @@ S2h 實機驗收時，使用者在終端機、Discord、VS Code、Chrome 網址�
 
 - 決定（使用者 2026-10-08）：v0.3.0 不放改選固定；下一片先做新詞 B（從改選記住新詞組），先量錯字回報裡幾列是缺詞、幾列是排序錯；之後再看改選固定還需不需要，要的話照蘋果實測（含改選後連續打字、右邊合併後 Backspace）重寫。分支保留，結論寫進文件後再問要不要刪。
 - 方法上的教訓寫進 `docs/methodology.md`。
+
+## 2026-10-08：brew 升級後舊版還在跑（s3b 修訂四）
+
+- **回報**（Discord，brew 使用者）：`brew upgrade` 之後 bundle 已經是 0.3.0，選單還是舊版（沒有「即時預測」），手動 `pkill -f` 之後才換成新版。s3b §14.1 留給「第二次發版」的未驗證項目（`on_upgrade` 的 TERM 讓新版接手）因此不成立。
+- **讀 Homebrew 7.0.7 原始碼**：升級時舊 cask 的 `uninstall`（送 TERM）排在搬走舊 bundle 之前，新 bundle 最後才搬進來。先推論是「TERM 送出後、新版就位前，系統又把舊版叫起來」。
+- **實測推翻那個推論**（這台機器的 brew 紀錄是 0.1.2，本機 tap 暫時換成新 cask，`brew upgrade --verbose --debug`，每 0.2 秒記錄 PID）：舊 receipt 的 TERM 根本沒送出。Homebrew 從 `INSTALL_RECEIPT.json` 讀回已安裝那一版的解除安裝步驟時，`on_upgrade` 是字串 `"signal"`，`uninstall_phase` 只認 Symbol 或 Array，於是 `signal` 照升級規則被略過。log 裡沒有 `launchctl list` 也沒有 `Signalling`，舊行程撐過整段搬移。charliie 那次多半是同一個原因（推論：他的 receipt 也是 Homebrew 7 寫的）。
+- **做法**（s3b §15）：cask 加 `postflight_steps` 的 `terminate_process`（Homebrew 執行 `pkill -f`），在新 bundle 就位後才結束舊行程；`uninstall` 拿掉 `on_upgrade`。pattern 只認「命令列就是輸入法執行檔」的行程（系統啟動輸入法不帶參數，本機 `ps` 確認），用替身行程測過，三種放寬的寫法都會讓測試失敗。從升級到含這個修訂的版本那次起生效。
+- **新 cask 的實測**（同一次升級）：notice「Restarting the input method so the new version takes over」印出後 0.03 秒內舊 PID 消失（前 0.21 秒的取樣還在）；之後系統啟動的新行程執行的是新 bundle，cdhash 與 Release 相同。`/usr/bin/pkill` 那一行沒有印出（verbose 與 debug 沒傳進沙盒子行程），所以契約改用 notice 判讀。還原 tap 後本機 tap 落後成 0.1.2、brew 誤以為可升級，用 `git pull --ff-only` 對齊遠端。
+- **設計上的錯**：同一天第一份安裝流程契約又寫了「brew postflight 自動註冊」，這是 2026-10-04 讀 Homebrew 原始碼就判斷走不通、記下來的路（沙盒讀不到家目錄；沒有實測）。plan-verifier 抓到，範圍縮回只改安裝程式，教訓寫進方法論。

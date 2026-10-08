@@ -268,12 +268,12 @@
     - Ruby 的 `postflight do` 會被目前的 `brew style` 判為違規（Cask/InstallSteps），規則要求改用 `postflight_steps`。
     - `postflight_steps` 在 Homebrew 的沙盒裡執行（`cask/artifact/abstract_artifact.rb` 把 `HOME` 設成暫存資料夾，`sandbox.rb` 的 `deny_read_home` 擋住讀取真正的家目錄），`~` 開頭的指令路徑也不會展開（`install_steps.rb` 的 `resolve_command`）。這樣寫出來的步驟找不到執行檔；加上 `must_succeed: false`，安裝仍然顯示成功，等於「靜靜地沒做」。
     - 就算改成 `base: :home` 讓沙盒放行讀取，`TISRegisterInputSource` 在沙盒裡能不能成功也沒有量過。
-  - `uninstall on_upgrade: :signal, signal: ["TERM", "com.nyanako.inputmethod.shanjie"]`：解除安裝和升級時都結束執行中的行程，系統下次就會啟動新版。Homebrew 預設在升級時略過 `signal`（`UPGRADE_REINSTALL_SKIP_DIRECTIVES`），所以要加 `on_upgrade`。Homebrew 用 `launchctl list` 的標籤找行程；2026-10-04 在本機看到其他輸入法的標籤是 `application.<bundle ID>.<數字>.<數字>`，符合它的比對規則。
+  - `uninstall on_upgrade: :signal, signal: ["TERM", "com.nyanako.inputmethod.shanjie"]`：解除安裝和升級時都結束執行中的行程，系統下次就會啟動新版。Homebrew 預設在升級時略過 `signal`（`UPGRADE_REINSTALL_SKIP_DIRECTIVES`），所以要加 `on_upgrade`。Homebrew 用 `launchctl list` 的標籤找行程；2026-10-04 在本機看到其他輸入法的標籤是 `application.<bundle ID>.<數字>.<數字>`，符合它的比對規則。**已由 §15（修訂四）取代**：0.3.0 實測升級後舊版仍在跑，改成 `postflight_steps` 在新版就位後結束行程，`uninstall` 只留 `signal`。
   - `zap trash: "~/Library/Preferences/com.nyanako.inputmethod.shanjie.plist"`：目前唯一的使用者資料，也就是 `layout` 偏好。
-  - `caveats`：第一次安裝後執行 `"$HOME/Library/Input Methods/善解輸入法.app/Contents/MacOS/shanjie" install`，由它註冊並啟用輸入方式；第一次安裝通常要登出再登入：它結束碼是 3 時，登出、再登入，然後再執行一次（修訂三）。caveats 不提升級；升級後要不要再做什麼，屬於下面 `on_upgrade` 那個未驗證項目，實測後再補。
+  - `caveats`：第一次安裝後執行 `"$HOME/Library/Input Methods/善解輸入法.app/Contents/MacOS/shanjie" install`，由它註冊並啟用輸入方式；第一次安裝通常要登出再登入：它結束碼是 3 時，登出、再登入，然後再執行一次（修訂三）。caveats 不提升級；升級後由 §15 的 postflight 接手。
 - **未驗證**（由使用者實測，見 14.5，停止條件見 14.7）：
   - 從 Homebrew 下載的 app 帶有 quarantine（已公證、已 staple）：在終端機執行 caveats 的 `install` 時，以及系統啟動輸入法時，會不會跳出確認視窗；
-  - `on_upgrade` 送出的 TERM 是否確實讓新版接手（要到第二次發版才測得到）。
+  - `on_upgrade` 送出的 TERM 是否確實讓新版接手（要到第二次發版才測得到）。**結果**（2026-10-08，升級到 0.3.0）：沒有，見 §15。
 - README 加「安裝」一節，內容包括：
   - brew 指令與 caveats 的內容；
   - 從 Release 下載 zip，用 Finder 解壓後執行 `scripts/install-ime.sh`；
@@ -359,9 +359,99 @@
     - Gatekeeper 擋住而且無法放行；
     - caveats 沒有印出。
     - 停止推薦的做法：開一個後續 PR，刪掉 README 的 brew 說明；cask 依下面的回滾移除，或修正後再發版。手動安裝（zip 加上 `install-ime.sh`）不受影響。
-  - 升級（`on_upgrade` 的 TERM）要到第二次發版才測得到。如果舊版還在服務，caveats 加一句「升級後登出再登入」，不擋 v0.1.0。
+  - 升級（`on_upgrade` 的 TERM）要到第二次發版才測得到。如果舊版還在服務，caveats 加一句「升級後登出再登入」，不擋 v0.1.0。**已由 §15 取代**：0.3.0 實測舊版還在服務，處理方式改成 §15 的 postflight，不在 caveats 加這一句。
 - **回滾**（每一步都是外部動作，執行前要使用者當次同意）：
   - deploy key：用 `gh repo deploy-key list --repo Nanako0129/homebrew-tap` 找到 `shanjie release (environment)` 的 ID，再 `gh repo deploy-key delete <ID> --repo Nanako0129/homebrew-tap`。
   - secret：`gh secret delete HOMEBREW_TAP_DEPLOY_KEY --env release --repo Nanako0129/shanjie`。
   - cask：在 tap 開一個 commit，`git rm Casks/shanjie.rb`（用使用者自己的 gh 身分）。
   - `release.yml` 與 repo 內的檔案：revert 本片的 merge commit。
+
+## 15. 修訂四：升級後由新版接手（使用者 2026-10-08）
+
+### 15.1 起因與原因
+
+- **量到的**：v0.3.0 發佈當天，一位用 brew 的使用者在 Discord 回報：`brew upgrade` 之後 bundle 已經是 0.3.0（他自己確認），選單卻還是舊版（沒有「即時預測」），手動 `pkill` 之後才換成新版。§14.1 的未驗證項目「`on_upgrade` 的 TERM 讓新版接手」因此不成立。使用者：「那就在 cask 再加一下」。
+- **Homebrew 的順序**（讀本機 Homebrew 7.0.7 原始碼）：升級時先跑舊 cask 的解除安裝步驟，順序照 `cask/artifact/abstract_artifact.rb` 的 `sort_order`：`Uninstall`（我們的 TERM）排在 `InputMethod`（把舊 bundle 搬走）前面，新 bundle 更晚才搬進來。送完訊號後 `uninstall_signal` 會等 3 秒。找行程用的 `launchctl list` 標籤符合它的規則（§14.1；2026-10-08 本機再看一次：`application.com.nyanako.inputmethod.shanjie.<數字>.<數字>`），所以不是找不到行程。
+- 原本的**推論**：訊號送出時，舊 bundle 還在原路徑，系統在這段空檔重新啟動輸入法，啟動的就是舊版。**實測推翻**（§15.3 第 3 項，2026-10-08）：那一次 TERM 根本沒有送出。
+- **量到的原因**：
+  - 升級時，Homebrew 從 `INSTALL_RECEIPT.json` 讀已安裝那一版的解除安裝步驟，`on_upgrade` 在 JSON 裡是字串 `"signal"`。`brew --debug` 印出的 artifact 是 `@directives={on_upgrade: "signal", …}`，是字串，不是 symbol。
+  - `cask/artifact/uninstall.rb` 的 `uninstall_phase` 只認 Symbol 或 Array，字串會落到 `else []`。於是 `signal` 照 `UPGRADE_REINSTALL_SKIP_DIRECTIVES` 被略過。
+  - 實測的 log 裡看不到 `/bin/launchctl list`（brew 在 verbose 加 debug 時會印出它執行的指令，同一份 log 裡 curl 就有印），也看不到 `Signalling`。舊行程在「解除安裝 → 搬走 → 搬進新版」整段都還活著。
+  - 所以 `on_upgrade` 從第一版起，只要已安裝的那一版是從 receipt 讀回來的，就不會生效。這是 Homebrew 7.0.7 的行為；回報給 Homebrew 是外部動作，要使用者決定。
+
+### 15.2 做法
+
+- cask 加上 `postflight_steps`，裡面放一步 `terminate_process '<pattern>', match: :full`，並帶一句 `notices:`（「Restarting the input method so the new version takes over」），讓使用者知道打字為什麼會頓一下，也讓 §15.3 第 3 項看得到這一步。
+  - Homebrew 會執行 `/usr/bin/pkill -f <pattern>`（`install_steps.rb` 的 `run_terminate_process`）。沒有符合的行程時 pkill 失敗，而 `terminate_process` 預設忽略失敗。
+  - postflight 是安裝階段的最後一步，新 bundle 已經就位，所以系統之後啟動的一定是新版。
+  - install、reinstall、upgrade 都會跑這一步。第一次安裝時沒有行程在跑，這一步什麼都不做。
+- pattern 是 `^/[^ ]*/Library/Input Methods/(善解輸入法|shanjie)\.app/Contents/MacOS/shanjie$`：
+  - 結尾錨定 `shanjie$`：系統啟動輸入法時不帶參數（2026-10-08 本機 `ps`：命令列就是 bundle 裡執行檔的路徑），所以 `shanjie install` 不會被結束。
+  - 開頭 `^/[^ ]*`：命令列要從絕對路徑開始，到 `/Library/Input Methods/` 之前不能有空白。別的程式只是在參數裡提到這個路徑時，就不會符合。代價是家目錄路徑含空白的帳號不會被結束，這種帳號維持修訂前的行為：要手動結束舊行程或登出。
+  - `shanjie.app` 是 §13 改名前的名稱，寫法和 `install-ime.sh` 相同。
+  - pattern 不錨定家目錄，這點和 `install-ime.sh` 不同。原因：postflight 在 Homebrew 的沙盒裡執行，HOME 是暫存資料夾，cask 也沒有家目錄的 token（`{{user}}` 只是帳號名稱）。pkill 本來就只能結束自己帳號的行程。
+  - 沙盒：`extend/os/mac/sandbox.rb` 的設定是 `(allow default)`，再擋掉讀家目錄、網路和部分寫入，沒有擋送訊號。pkill 也不讀家目錄。這一步在沙盒裡實際有沒有效，由 §15.3 的第 3 項量。
+- `uninstall` 只留 `signal`，拿掉 `on_upgrade`。理由有兩個：從 receipt 讀回時它本來就不生效（§15.1）；就算 Homebrew 修好了，它也在新 bundle 就位前送出 TERM（照 `sort_order`），只會讓舊版有機會被重新啟動。升級已經由 postflight 處理。解除安裝時照樣結束執行中的行程。
+- 這不是 §14.1 拒絕的「在 cask 裡執行 `install`」：`terminate_process` 不讀家目錄，也不呼叫 TIS。註冊照舊由 caveats 請使用者執行，§14.1 列的原因沒有改變。
+- **什麼時候生效**：postflight 屬於新版的 cask，所以從「升級到含本修訂的版本」那一次開始生效。升級到 0.3.0 或更早的版本，仍然要手動結束舊行程。README 寫明這一點，並在實測（§15.3 第 3 項）之後才寫「之後的版本會自動接手」。
+
+### 15.3 驗收
+
+1. `scripts/test-render-cask.sh`（CI 的 cask 步驟會跑）用 5 個替身行程測 pattern。替身行程是 `cat` 接在 pipe 上，用 `exec -a` 設定命令列，再透過 `pgrep -f` 比對，它和 pkill 的比對方式相同：
+   - 要符合：善解輸入法.app 的執行檔；舊名 shanjie.app 的執行檔。
+   - 不能符合：`shanjie install`；`/usr/bin/editor <路徑>`；`.shanjie-previous` 裡的副本。
+   - 渲染出來的 cask 跑 `brew style`，不能有違規。
+2. 突變（本機）：把 pattern 換成三種較寬的版本，第 1 項都要失敗，而且失敗訊息要指出是哪一個替身行程。三種版本分別是：拿掉開頭的 `^/[^ ]*`、拿掉結尾的 `$`、拿掉舊名。
+3. **實機**（main 執行，**做之前先問使用者**；使用者 2026-10-08 同意）：
+   - 起始狀態：這台機器上 brew 的紀錄是 0.1.2，它的 receipt 裡有 `on_upgrade` 的 signal。bundle 本身已經被安裝程式換成 0.3.0（Developer ID 簽章，Team 2LJ882GPY8，cdhash 和 Release 的 zip 相同）。
+   - 怎麼看到那一步：brew 一律加 `--verbose --debug` 執行，這時 Homebrew 會印出它執行的每個指令（`system_command.rb`，verbose 與 debug 都開才印）。輸出每一行用 perl 加上時間戳記，存成 `brew.log`。同時在背景每 0.2 秒記錄一次符合 pattern 的行程 PID，也帶時間戳記，存成 `pids.log`。這一步在 Homebrew 沙盒裡的子行程執行，verbose 與 debug 會不會傳進子行程沒有確認過；所以這一步另外帶一個 `notices:`，Homebrew 會在第一次嘗試之前用 `ohai` 印出來（`run_terminate_process`），一般使用者升級時也會看到。下面說的「pkill 那一刻」，指的是 `brew.log` 裡這行 notice 的時間；有印出 `/usr/bin/pkill -f <pattern>` 那一行的話，用那一行。
+   - **第一次：升級**（0.1.2 → 0.3.0）：
+     1. 在本機的 tap checkout（`$(brew --repository)/Library/Taps/nanako0129/homebrew-tap`，不推送）裡，把 `Casks/shanjie.rb` 換成本修訂的範本，用 0.3.0 的版本與 Release 的 sha256 渲染。
+     2. 執行 `HOMEBREW_NO_AUTO_UPDATE=1 brew upgrade --cask --verbose --debug nanako0129/tap/shanjie`。
+     3. 判讀：
+        - 如果 pkill 那一刻有符合的 PID 活著，而且之後消失，就算 postflight 接手成功。
+        - 舊 receipt 的 TERM 會先送一次，可能已經把行程結束了。如果 pkill 那一刻沒有符合的 PID，這次對 postflight 不算數（inconclusive），改看第二次。
+        - 舊 TERM 有沒有送出、送出後 3 秒內有沒有出現新的 PID，記錄下來，用來驗證 §15.1 的推論。
+   - **第二次：重新安裝**（這次 postflight 是唯一會結束行程的步驟）：
+     - 第一次跑完後，receipt 已經是新版 cask，裡面沒有 `on_upgrade`；Homebrew 在 reinstall 時會略過 `signal`（`uninstall.rb` 的 `UPGRADE_REINSTALL_SKIP_DIRECTIVES`）。
+     - 先確認有一個符合的行程在跑。沒有的話，請使用者在任一 App 打一個字，讓系統啟動輸入法。
+     - 然後在 tap 仍是新版 cask 的狀態下，執行 `HOMEBREW_NO_AUTO_UPDATE=1 brew reinstall --cask --verbose --debug nanako0129/tap/shanjie`。
+     - 通過：pkill 那一刻那個 PID 活著，之後消失；`brew.log` 裡沒有對這個 PID 送 TERM 的 signal 步驟。
+   - 兩次都結束之後：用 `git -C <tap> checkout -- Casks/shanjie.rb` 還原 tap。確認 `brew info` 是 0.3.0，bundle 的 cdhash 和 Release 相同。系統之後啟動的輸入法行程，啟動時間要晚於最後一次 pkill，必要時等使用者下一次打字後再查。
+   - 結束狀態：bundle 是同一個 0.3.0 Release，brew 紀錄是 0.3.0。學習資料與偏好設定都不動（沒有跑 zap）。
+   - 出錯時的還原：從 Release 下載 `shanjie-0.3.0.zip`，對照 `.sha256` 確認，再用 `scripts/install-ime.sh` 裝回去。
+   - 研究紀錄寫明是哪一次證明了接手。
+   - **結果**（2026-10-08，Homebrew 7.0.7，使用者同意後由 main 執行）：第一次（升級）就判定成功，所以沒有跑第二次。
+     - 舊行程 PID 93082 在解除安裝、搬走、搬進新版的整段都還活著。0.2 秒取樣的紀錄：notice 前 0.21 秒還在。
+     - notice 印出後 0.03 秒內，這個 PID 就消失了。
+     - 舊 receipt 的 `on_upgrade` signal 沒有執行，原因見 §15.1。
+     - 之後系統啟動的新行程，啟動時間晚於 notice 約 8 秒，`lsof` 看到它執行的是新搬進來的 bundle。
+     - `brew info` 是 0.3.0，bundle 的 cdhash 和 Release 相同。
+     - tap 用 `git checkout` 還原後，本機 tap 落後成 0.1.2，brew 把它當成「可升級」。所以 main 再 `git pull --ff-only` 到遠端的 0.3.0，`brew outdated` 不再列出善解。
+     - `/usr/bin/pkill -f` 那一行沒有印出來：verbose 與 debug 沒有傳進沙盒裡的子行程，所以用 notice 判讀。
+4. README 的 Homebrew 段落加上升級說明（`brew update` 只更新清單；升級要用 `brew upgrade --cask shanjie`），還有 15.2 的生效時間。`docs/verification.md` 更新 `test-render-cask.sh` 那一列。研究紀錄寫下起因、原因、實測結果。
+
+### 15.4 停止條件、回滾、範圍外
+
+- **停止條件**（出現任何一項就不合併）：
+  - 第 3 項用來判定的那一次（升級，或升級不算數時的重新安裝）的 `brew.log` 沒有 notice 那一行，或 pkill 之後那個 PID 還在；
+  - pattern 符合了不是善解的行程（第 1 項或實機的 pgrep 紀錄）；
+  - `brew style` 不過。
+- **回滾**：發佈後如果出問題，有兩步。
+  - 在 tap 開一個 commit，把 `Casks/shanjie.rb` 換回上一版的內容。用使用者的 gh 身分，這是外部動作，要先問。
+  - revert 本片的 merge commit。
+  - 已經跑過 postflight 的使用者沒有殘留：這一步只結束行程，不寫任何檔案。
+- **範圍外**：
+  - 第一次安裝時自動註冊。§14.1 的原因仍然成立，TIS 在 Homebrew 沙盒裡能不能註冊也沒有量過。
+  - `zap` 加入學習資料：交給 App 沙盒那一片，因為資料位置會變。
+
+### 15.5 安全審查
+
+`pilotfish:security-reviewer`（2026-10-08，讀本機 Homebrew 原始碼與本片的改動，沒有執行任何指令）：沒有 P0–P2，四項 P4 全部 ACCEPT。
+
+- **A-1**：別的帳號如果跑著命令列相同的行程，pkill 會比對到它，但 `kill` 回 EPERM，brew 的輸出多一行警告，對方不受影響。Homebrew 拒絕以 root 執行，所以 pkill 用的是本人的 uid。`terminate_process` 沒有 `-U` 選項；把 `{{user}}` 放進 pattern 又會漏掉家目錄不在 `/Users/<帳號>` 的帳號，不值得。
+- **A-2**：只有「命令列只有一段絕對路徑、結尾是善解執行檔」的本人行程會收到 TERM。外接碟或備份裡跑著的善解也算在內。brew 自己、`sandbox-exec`、編輯器這類帶參數的行程都不會符合。
+- **A-3**：TERM 時輸入法沒有自己的訊號處理，但學習檔是先寫暫存檔再 rename，原檔不會壞。這和既有的 `uninstall signal`、`install-ime.sh` 相同，不是新風險。
+- **A-4**：tap 是共用的，deploy key 對整個 tap 有寫入權限。能改 tap 的人本來就能在 cask 裡執行任意程式，這次沒有擴大攻擊面。
+
+實機（§15.3 第 3 項）時另外確認 pgrep 紀錄裡只有原本的 PID 消失。測試只用 `pgrep`、不跑 `pkill`，在維護者機器上跑也不會結束真的輸入法，這點要保留。
