@@ -1,6 +1,6 @@
 # 契約：動漫與遊戲詞包（ACG 詞包）
 
-狀態：草稿（2026-10-09）。
+狀態：A 片實作中（2026-10-09，分支 `feat/acg-pack`）；B、C 片待補。
 
 使用者 2026-10-09 的要求，依時間：
 1. 「可以補充一些動漫角色和動漫名稱的字詞嗎」。
@@ -89,6 +89,7 @@
 - CLI：`shanjie-eval --packs acg` 才載入詞包，預設不載入。A.3 的基準就是不加這個選項，所以兩邊的指令可以照抄重跑。
 - 開關：
   - 新增 C ABI `shanjie_engine_set_packs(engine, mask)`，或照「切換排列會重建引擎」的做法重建。實作時選較小的改法，並在契約更新。
+  - **實作選了重建**（2026-10-09）：詞包的列併入詞庫，`Lexicon` 建好之後是不可變的（讀音表與詞條陣列排序在一起），原地加減要重建整份詞庫，記憶體會同時有兩份。所以新增 `shanjie_engine_new_packs(data_dir, layout, packs_dir, packs, out)`（遮罩 0 等同 `shanjie_engine_new`），殼的選單切換時提交組字、釋放引擎、再建一個，和切換排列相同；詳見 `docs/contracts/s3a.md` §5、§6。詞包檔在 `Resources/packs/`，建置輸入（`acg-groups.tsv`、`acg-collisions.tsv`）不進 App。
   - 殼的選單加一項「動漫與遊戲詞」，偏好鍵 `acgPack`；設定方式比照「即時預測」的 `PredictionStore`。
   - **預設值由使用者在 A.5 的數字出來後決定**，契約先不寫死。
 - App 打包：`scripts/build-app.sh` 把 `data/packs/` 放進 `Resources/`；`check-app.sh` 檢查清單檔裡的 SHA-256 和實際檔案相符。
