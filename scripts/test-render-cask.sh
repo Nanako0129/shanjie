@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Checks scripts/render-cask.sh (docs/contracts/s3b.md section 14.5, acceptance 2): good arguments
 # change only the version and sha256 lines; every bad argument or template exits 1 with no output.
+# Then (section 15.3) the cask's postflight step as Homebrew parses it, and its process pattern.
 #
 #   scripts/test-render-cask.sh
 set -euo pipefail

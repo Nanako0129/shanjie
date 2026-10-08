@@ -23,7 +23,7 @@ cask "shanjie" do
   postflight_steps do
     terminate_process '^[^ ]*/Library/Input Methods/(善解輸入法|shanjie)\.app/Contents/MacOS/shanjie$',
                       match:   :full,
-                      notices: ["Stopping a running copy of the input method, if any, so the system starts this version"]
+                      notices: ["Stopping any running copy of the input method so the new version is used"]
   end
 
   uninstall signal: ["TERM", "com.nyanako.inputmethod.shanjie"]
@@ -35,6 +35,7 @@ cask "shanjie" do
       "$HOME/Library/Input Methods/善解輸入法.app/Contents/MacOS/shanjie" install
     The first install usually needs a log out and log in before macOS accepts
     the input method: if the command exits with 3, log out, log back in, and
-    run it again.
+    run it again. If it still exits with 3, add 善解輸入法 in System Settings >
+    Keyboard > Input Sources.
   EOS
 end

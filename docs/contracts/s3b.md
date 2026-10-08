@@ -381,10 +381,10 @@
 
 ### 15.2 做法
 
-- cask 加上 `postflight_steps`，裡面放一步 `terminate_process '<pattern>', match: :full`，並帶一句 `notices:`（「Stopping a running copy of the input method, if any, so the system starts this version」），讓使用者知道打字為什麼會頓一下，也讓 §15.3 第 3 項看得到這一步。
+- cask 加上 `postflight_steps`，裡面放一步 `terminate_process '<pattern>', match: :full`，並帶一句 `notices:`（「Stopping any running copy of the input method so the new version is used」；`brew style` 限每行 118 字，原本較長的句子超過，verifier 抓到），讓使用者知道打字為什麼會頓一下，也讓 §15.3 第 3 項看得到這一步。
   - Homebrew 會執行 `/usr/bin/pkill -f <pattern>`（`install_steps.rb` 的 `run_terminate_process`）。沒有符合的行程時 pkill 失敗，而 `terminate_process` 預設忽略失敗。
   - postflight 是安裝階段的最後一步，新 bundle 已經就位，所以系統之後啟動的一定是新版。
-  - install、reinstall、upgrade 都會跑這一步。notice 在 pkill 之前一定會印出（`run_terminate_process` 的 `ohai`），所以第一次安裝時也看得到這一行；那時沒有行程在跑，pkill 找不到行程，結果被忽略。notice 的措辭因此寫成「如果有就停止」。
+  - install、reinstall、upgrade 都會跑這一步。notice 在 pkill 之前一定會印出（`run_terminate_process` 的 `ohai`），所以第一次安裝時也看得到這一行；那時沒有行程在跑，pkill 找不到行程，結果被忽略。notice 的措辭因此寫成「停止任何執行中的那一份」，不說「重新啟動」。
 - pattern 是 `^[^ ]*/Library/Input Methods/(善解輸入法|shanjie)\.app/Contents/MacOS/shanjie$`：
   - 結尾錨定 `shanjie$`：系統啟動輸入法時不帶參數（2026-10-08 本機 `ps`：命令列就是 bundle 裡執行檔的路徑），所以 `shanjie install` 不會被結束。
   - 開頭 `^[^ ]*`：命令列開頭到 `/Library/Input Methods/` 之前不能有空白。別的程式只是在參數裡提到這個路徑時（命令列先是那個程式自己的路徑和空白），就不會符合。前綴可以是空的，所以裝在系統層 `/Library/Input Methods`（`--input-methoddir`）的也符合（本機 review 指出，原本的 `^/[^ ]*` 漏掉這種）。代價是家目錄路徑含空白的帳號不會被結束，這種帳號維持修訂前的行為：要手動結束舊行程或登出。
@@ -436,6 +436,7 @@
      - receipt 已經是新版 cask，log 裡沒有 `Signalling`，也沒有 `launchctl list`：reinstall 照規則略過 `signal`。
      - 舊行程 PID 9892 撐過解除安裝、移除、搬進新版，notice 前 0.27 秒還在，notice 後 0.01 秒內消失。所以這次結束它的只有 postflight。
      - 跑完後 tap 用 `git checkout` 還原（本機 tap 停在 0.3.0 的 0960ea0），`brew outdated` 沒有列出善解，bundle 的 cdhash 和 Release 相同。
+     - 之後系統啟動的新行程 PID 21110，啟動時間 00:00:35，比 notice 晚約 20 秒（使用者下一次打字時）。
 4. README 的 Homebrew 段落加上升級說明（`brew update` 只更新清單；升級要用 `brew upgrade --cask shanjie`），還有 15.2 的生效時間。`docs/verification.md` 更新 `test-render-cask.sh` 那一列。研究紀錄寫下起因、原因、實測結果。
 
 ### 15.4 停止條件、回滾、範圍外
@@ -462,3 +463,22 @@
 - **A-4**：tap 是共用的，deploy key 對整個 tap 有寫入權限。能改 tap 的人本來就能在 cask 裡執行任意程式，這次沒有擴大攻擊面。
 
 實機（§15.3 第 3 項）時另外確認 pgrep 紀錄裡只有原本的 PID 消失。測試只用 `pgrep`、不跑 `pkill`，在維護者機器上跑也不會結束真的輸入法，這點要保留。
+
+### 15.6 實測：升級後善解從選單消失（2026-10-09）
+
+- **發生的事**：上面兩次實機跑完後，使用者發現選單裡沒有善解。`tools/tis.swift` 量到注音模式是「已啟用」，善解本體是「未啟用」，所以選單不列。這時用 `shanjie install` 重新啟用，它回報成功（結束碼 0），本體卻仍是「未啟用」。使用者從「系統設定 → 鍵盤 → 輸入方式」手動加回後才恢復。消失發生在 23:37 升級到 00:07 之間，哪一刻沒有紀錄。
+  - 當時用 `defaults read com.apple.HIToolbox AppleEnabledInputSources` 判斷啟用狀態，後來在虛擬機證實這個方法不可靠：善解明明已啟用，結果也是 0 筆。所以只採信 TIS 本身回報的狀態。
+- **虛擬機**（tart，macOS 26.6.2，正式版 0.3.0，在虛擬機的系統設定手動加入後才開始量）：照 Homebrew 7.0.7 `moved.rb` 的做法換 bundle，也就是刪掉目標的子項目、搬入新的子項目、保留 bundle 資料夾。試了 6 種組合，善解本體一直是「已啟用」，新行程照常接手。
+  - 6 種組合：只換；換完 0.5 秒後 pkill；pkill 後讓系統叫起新版；再加 Homebrew 的隔離屬性；bundle 空著 3 秒再搬入；空 3 秒加隔離屬性、pkill、叫起新版。
+- **本機重現**（使用者同意；每 0.5 秒記錄 TIS 狀態，跑 `brew reinstall --verbose --debug`）：
+
+| cask | bundle 被移走期間 | 搬入新版之後 | 20 秒後 |
+|---|---|---|---|
+| 公開的 0.3.0（沒有 postflight） | 本體「未啟用」（移走後 0.19 秒） | 0.07 秒內回到「已啟用」，舊行程繼續跑 | 已啟用 |
+| 本修訂（有 postflight） | 本體「未啟用」（移走後 0.09 秒） | 0.12 秒內回到「已啟用」；舊行程在 notice 後結束，系統 6 秒後叫起新版 | 已啟用 |
+
+- **結論**：
+  - Homebrew 換版時，bundle 不在的那段時間，系統本來就會暫時把善解本體標成「未啟用」，新版回來後自動恢復。這和本修訂無關：沒有 postflight 的公開 cask 也一樣。
+  - 這兩次重現裡，postflight 沒有造成消失。
+  - 第一次為什麼沒恢復，**原因未解**。差異有兩點：那次 bundle 空了約 2.9 秒（重現時 1.1 到 1.8 秒）；系統是 macOS 27（虛擬機是 26.6）。兩者都沒有證據指向原因。
+- **處置**：caveats 與 README 的第一次安裝說明加上「登出再登入後仍是 3，就到系統設定 → 鍵盤 → 輸入方式加入」（虛擬機量到全新安裝、重開機後 `install` 仍是 3）。README 在升級說明加一句：升級後選單裡找不到善解時，到「系統設定 → 鍵盤 → 輸入方式」加回來。程式化的重新啟用（`shanjie install`）在這種狀態下無效，這點交給安裝程式第二版的「啟用」步驟處理（`docs/contracts/installer-v2.md`）。
