@@ -1454,3 +1454,12 @@ S2h 實機驗收時，使用者在終端機、Discord、VS Code、Chrome 網址�
 - 這解釋了「每次更新都壞」：`install-ime.sh` 最後會跑 `shanjie install`，安裝程式會在自己的行程註冊，brew 的 caveats 也叫使用者跑 `install`。當晚 brew 實測後 main 跑的 `shanjie install` 也是同一個情況。
 - **修法**（`docs/contracts/installer-v2.md` §9）：已經啟用時，註冊整段跳過，不呼叫任何會改動輸入方式清單的 TIS 函式。第一次安裝仍要註冊。第一次安裝後，使用者本來就要登出或從系統設定加入；這一步能不能讓 Caps Lock 恢復，沒有量過。
 - 同晚另一個量到的事：程式化啟用對「系統還沒接受」的善解本體無效，`TISEnableInputSource` 回 noErr 但本體仍是未啟用。發生在兩種狀態：本機 brew 換版後被移出已啟用清單、虛擬機全新安裝並重開機後。兩次都是使用者從「系統設定 → 鍵盤 → 輸入方式」加入才生效。這和 2026-10-04「登出再登入後 `install` 就能啟用」的紀錄不同（當時 0.1.0、較早的 macOS，差在哪裡未查）。
+
+## 2026-10-09：安裝程式第二版的實機驗證（Caps Lock、全新安裝）
+
+- **更新不再註冊**（installer-v2 §9，本機，使用者按 Caps Lock 回報）：
+  - 用新安裝程式（內附正式版 0.3.0）「重新安裝」：善解從頭到尾都是已啟用，Caps Lock 正常。用 §9 第一版實作試過一次，第 2 輪修正後又試一次，兩次都正常。
+  - 用 `scripts/install-ime.sh` 裝這個分支 `make bundle` 出來的本機版：輸出 `install: already enabled; registration skipped`，結束碼 0，Caps Lock 正常。同樣兩版各一次。
+  - 同一晚稍早，修正前的安裝程式與 `install-ime.sh` 都讓 Caps Lock 壞掉，所以這是修正前後的對照。
+- **全新安裝**（tart 虛擬機，macOS 26.6.2，從沒裝過善解的帳號，安裝程式放在桌面）：使用者照新流程走完「安裝 → 帶去系統設定加入 → 重新檢查 → 試打」。之後讀 TIS：善解本體與注音模式都已啟用，目前的輸入方式是善解，善解程序在跑。
+- **虛擬機測不了 Caps Lock**：在這台虛擬機裡，連系統內建的注音按 Caps Lock 都只會切大小寫，不切換輸入方式（使用者實測）。所以第一次安裝那一次必要的註冊，會不會讓 Caps Lock 壞掉，仍然沒量到（§9.5 範圍外）。另外量到：程式化啟用系統內建注音（`TISEnableInputSource`）在虛擬機裡也回 noErr 卻沒有效果，要在系統設定加入。
