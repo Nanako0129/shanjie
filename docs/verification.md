@@ -37,7 +37,7 @@
 |---|---|---|
 | `ci.yml` core | 每個 PR、每次推到 main | 下載並比對模型、`cargo test`（debug 與 release）、C 標頭冒煙測試、寬鬆比對一致性 |
 | `ci.yml` shell | 同上 | `make bundle`、`scripts/test-install-ime.sh`、`swift test`、`make selftest-bundled SELFTEST_BUNDLE_ID=`、`scripts/check-app.sh` |
-| `release.yml` | 推 `v*` tag；或在 main 手動觸發（演練） | gate（這個 commit 在 main 的 ci.yml 必須全綠）→ build → 在 `release` environment 用一次性鑰匙圈以 Developer ID 簽章、公證、staple、驗證 → 只有 tag 才發布 Release |
+| `release.yml` | 推 `v*` tag；或在 main 手動觸發（演練） | gate（這個 commit 在 main 的 ci.yml 必須全綠）→ build → 在 `release` environment 用一次性鑰匙圈以 Developer ID 簽章、公證、staple、驗證 → 只有 tag 才發布 Release。推 tag 時 `docs/releases/<tag>.md` 必須存在而且有內容（在等 CI 之前檢查），發布用它當說明；版本號最大時標成 Latest（`docs/releases/README.md`） |
 
 ## build/ 的 bundle
 
