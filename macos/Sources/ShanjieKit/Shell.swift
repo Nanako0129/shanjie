@@ -24,6 +24,8 @@ public protocol TextClient: AnyObject {
     /// client reports none.
     /// `cursor`: the composition cursor in UTF-16 units within the marked text.
     func lineRect(cursor: Int) -> NSRect?
+    /// s3b2 section 10: the light or dark appearance of the view being typed into, `nil` if unknown.
+    var appearance: NSAppearance? { get }
 }
 
 /// A display-only candidate list (an NSPanel in the app). It never receives keys.
@@ -34,8 +36,9 @@ public protocol CandidatePanel: AnyObject {
     /// `first`, `total`: the position of `candidates[0]` in the whole list and the list's length
     /// (the scroll indicator).
     /// `lineRect`: where the composition's line is (s3b2 section 2.3), `nil` if unknown.
+    /// `appearance`: the client's (s3b2 section 10), `nil` for the system's.
     func show(_ candidates: [String], notes: [String?], selected: Int, columns: Int, first: Int, total: Int,
-              lineRect: NSRect?)
+              lineRect: NSRect?, appearance: NSAppearance?)
     func hide()
     /// A mouse click on a cell, by position in what `show` last received.
     var onSelect: ((Int) -> Void)? { get set }
@@ -267,11 +270,12 @@ public final class Shell {
         return engine?.setProfile(p)
     }
 
-    func showCandidates(_ list: [String], selected: Int, columns: Int, first: Int, total: Int, lineRect: NSRect?) {
+    func showCandidates(_ list: [String], selected: Int, columns: Int, first: Int, total: Int, lineRect: NSRect?,
+                        appearance: NSAppearance?) {
         // Only an exact punctuation mark has a name: a word candidate is never a key of the table.
         let notes = list.map { names[$0] }
         panel.show(list, notes: notes, selected: selected, columns: columns, first: first, total: total,
-                   lineRect: lineRect)
+                   lineRect: lineRect, appearance: appearance)
     }
 
     func hideCandidates() {
@@ -465,7 +469,7 @@ public final class Session {
                 shell.lineCache = (o.preedit, cursor, rect)
             }
             shell.showCandidates(o.candidates, selected: o.selected, columns: o.columns, first: o.first, total: o.total,
-                                 lineRect: rect)
+                                 lineRect: rect, appearance: client.appearance)
         }
     }
 
