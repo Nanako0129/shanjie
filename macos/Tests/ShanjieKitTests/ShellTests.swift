@@ -553,9 +553,9 @@ final class ShellTests: XCTestCase {
         XCTAssertEqual(again.session.menu.first { $0.action == .togglePrediction }?.checked, false)
     }
 
-    /// acg-pack (docs/contracts/acg-pack.md A.2): the "動漫與遊戲詞" item is unchecked by default, a toggle rebuilds the engine
-    /// with the pack (the fixture pack spells 碇源堂, which the base lexicon cannot), the choice is stored, and a new shell
-    /// reads it. Off again: back to the engine without the pack.
+    /// acg-pack (docs/contracts/acg-pack.md A.2): the "動漫與遊戲詞" item is checked by default (user decision 2026-10-09), a toggle rebuilds the engine
+    /// without the pack (the fixture pack spells 碇源堂, which the base lexicon cannot), the choice is stored, and a new shell
+    /// reads it. On again: back to the engine with the pack.
     func testAcgPackMenuItemTogglesStoresAndSurvivesRestart() throws {
         let packs = resources.appendingPathComponent("packs")
         try FileManager.default.createDirectory(at: packs, withIntermediateDirectories: true)
@@ -570,25 +570,25 @@ final class ShellTests: XCTestCase {
         c.session.activate()
         let item = { c.session.menu.first { $0.action == .toggleAcgPack } }
         XCTAssertEqual(item()?.title, "動漫與遊戲詞")
-        XCTAssertEqual(item()?.checked, false, "default off")
-        c.type(name)
-        XCTAssertNotEqual(c.client.marked, "碇源堂")
-        c.press(Keys.esc)
-        c.session.perform(.toggleAcgPack)
-        XCTAssertEqual(store.acgPack, true)
-        XCTAssertEqual(item()?.checked, true)
+        XCTAssertEqual(item()?.checked, true, "default on")
         c.type(name)
         XCTAssertEqual(c.client.marked, "碇源堂")
+        c.press(Keys.esc)
+        c.session.perform(.toggleAcgPack)
+        XCTAssertEqual(store.acgPack, false)
+        XCTAssertEqual(item()?.checked, false)
+        c.type(name)
+        XCTAssertNotEqual(c.client.marked, "碇源堂")
         c.press(Keys.esc)
         let again = Controller(make(), bundle: "com.hnc.Discord")
         again.session.activate()
         again.type(name)
-        XCTAssertEqual(again.client.marked, "碇源堂", "a new shell reads the stored on")
+        XCTAssertNotEqual(again.client.marked, "碇源堂", "a new shell reads the stored off")
         again.press(Keys.esc)
         again.session.perform(.toggleAcgPack)
-        XCTAssertEqual(store.acgPack, false)
+        XCTAssertEqual(store.acgPack, true)
         again.type(name)
-        XCTAssertNotEqual(again.client.marked, "碇源堂")
+        XCTAssertEqual(again.client.marked, "碇源堂")
     }
 
     func testSwitchingLayoutCommitsThenUsesTheNewLayout() {

@@ -98,8 +98,8 @@ public final class MemoryPredictionStore: PredictionStore {
     public init(_ prediction: Bool? = nil) { self.prediction = prediction }
 }
 
-/// Where the "動漫與遊戲詞" switch is kept (docs/contracts/acg-pack.md A.2): `nil` means never chosen, which is off
-/// (the default is the user's decision after the numbers). Same arrangement as `PredictionStore`.
+/// Where the "動漫與遊戲詞" switch is kept (docs/contracts/acg-pack.md A.2): `nil` means never chosen, which is on
+/// (user decision 2026-10-09, after the A.3 numbers). Same arrangement as `PredictionStore`.
 @MainActor
 public protocol AcgPackStore: AnyObject {
     var acgPack: Bool? { get set }
@@ -138,8 +138,8 @@ public final class Shell {
     /// V3: whether the prediction row is computed (default on); sent to every engine `build()` makes.
     private(set) var predictionOn = true
     private let acgPackStore: AcgPackStore
-    /// The ACG word pack (default off): parsed into the lexicon, so a change rebuilds the engine like a layout change.
-    private(set) var acgPackOn = false
+    /// The ACG word pack (default on, user decision 2026-10-09): parsed into the lexicon, so a change rebuilds the engine like a layout change.
+    private(set) var acgPackOn = true
     let panel: CandidatePanel
     let isSecureInput: () -> Bool
     private(set) var engine: CoreEngine?
@@ -206,7 +206,7 @@ public final class Shell {
         self.predictionStore = predictionStore
         predictionOn = predictionStore.prediction ?? true
         self.acgPackStore = acgPackStore
-        acgPackOn = acgPackStore.acgPack ?? false
+        acgPackOn = acgPackStore.acgPack ?? true
         // The preference is read before the one engine is built (about 240 MB): building first
         // and switching after would build twice.
         mode = layoutStore.layout.flatMap(InputMode.init(rawValue:)) ?? .standard
