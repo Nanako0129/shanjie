@@ -677,11 +677,75 @@ fn timing_typing76_keys() {
     time_typing76(None);
 }
 
-/// The same with a learning file of 50,000 records (the capacity) on the readings the samples type: prefixes of the
-/// samples' syllables under varied two-character keys, so every lookup scans a long bucket.
+/// Real picks from the typing76 rows: for each sample, two short sessions (after the first key of the first
+/// syllable, and after the first key of the second) pick the row's second item, then commit, so the store holds
+/// records that match the situations the timed pass visits and the promotion and sorting run on them.
+fn teach_typing76_picks(dir: &Path) -> usize {
+    let text = std::fs::read_to_string(root().join("eval/dev/user-typing.txt")).unwrap();
+    let mut e = engine();
+    e.set_learning(true);
+    e.learning_open(dir).unwrap();
+    let mut checks: Vec<(String, String, String)> = Vec::new();
+    for line in text.lines().filter(|l| !l.is_empty()) {
+        let f: Vec<&str> = line.split('|').collect();
+        let syls: Vec<&str> = f[2].split(' ').collect();
+        for upto in 0..syls.len().min(2) {
+            e.set_left_context(f[0]);
+            let mut keys: Vec<Key> = syls[..upto].iter().flat_map(|y| syl_keys(y)).collect();
+            keys.extend(syl_keys(syls[upto]).into_iter().take(1));
+            let o = send(&mut e, keys);
+            if o.candidates.len() > 1 {
+                e.key(kind(KeyKind::Tab)).unwrap();
+                e.key(kind(KeyKind::Right)).unwrap();
+                e.key(kind(KeyKind::Enter)).unwrap();
+                e.key(kind(KeyKind::Enter)).unwrap();
+                // Not every pick is read back (a later pick under the same key can outrank it); one is checked below.
+                if upto == 0 && checks.len() < 5 {
+                    checks.push((f[0].to_string(), syls[0].to_string(), o.candidates[1].clone()));
+                }
+            } else {
+                e.reset(ResetMode::Discard);
+            }
+        }
+    }
+    // The store is read back: in the situation of the first keys of several samples the taught item is now first.
+    let mut first = 0;
+    for (left, syl, word) in &checks {
+        e.set_left_context(left);
+        let o = send(&mut e, syl_keys(syl).into_iter().take(1).collect());
+        first += (o.candidates.first() == Some(word)) as usize;
+        e.reset(ResetMode::Discard);
+    }
+    println!("read back: {first} of {} checked picks are first", checks.len());
+    assert!(first > 0, "the taught picks must show up in the rows the timed pass visits");
+    e.learner().records().len()
+}
+
+/// Taught picks only (the store the timed rows really hit).
 #[test]
 #[ignore]
-fn timing_typing76_keys_with_50k_records() {
+fn timing_typing76_keys_with_taught_picks() {
+    let dir = tmp_dir("timing-taught");
+    println!("taught records: {}", teach_typing76_picks(&dir));
+    time_typing76(Some(&dir));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Taught picks plus synthetic records up to the capacity: matching records are in long buckets.
+#[test]
+#[ignore]
+fn timing_typing76_keys_with_taught_picks_and_50k() {
+    let dir = tmp_dir("timing-taught50k");
+    let taught = teach_typing76_picks(&dir);
+    let (store, mut records, _) = LearnStore::open(&dir).unwrap();
+    records.extend(synthetic_records(core::learn::CAPACITY - taught));
+    store.save(&records).unwrap();
+    println!("taught records: {taught}, total {}", records.len());
+    time_typing76(Some(&dir));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+fn synthetic_records(count: usize) -> Vec<Record> {
     let text = std::fs::read_to_string(root().join("eval/dev/user-typing.txt")).unwrap();
     let mut readings: Vec<Vec<String>> = Vec::new();
     for line in text.lines().filter(|l| !l.is_empty()) {
@@ -695,12 +759,17 @@ fn timing_typing76_keys_with_50k_records() {
         }
     }
     let keys: Vec<String> = "我你他想要去吃喝一杯這那有是不了的們".chars().flat_map(|a| "我你他想要去吃喝一杯這那".chars().map(move |b| format!("{a}{b}"))).collect();
-    let records: Vec<Record> = (0..core::learn::CAPACITY)
-        .map(|i| rec(&keys[i % keys.len()], &readings[i % readings.len()], &format!("測{i}")))
-        .collect();
-    println!("seeded {} records on {} readings, {} keys", records.len(), readings.len(), keys.len());
+    println!("synthetic: {count} records on {} readings, {} keys", readings.len(), keys.len());
+    (0..count).map(|i| rec(&keys[i % keys.len()], &readings[i % readings.len()], &format!("測{i}"))).collect()
+}
+
+/// A learning file of 50,000 synthetic records (the capacity) on the readings the samples type: prefixes of the
+/// samples' syllables under varied two-character keys, so every lookup scans a long bucket and none matches an item.
+#[test]
+#[ignore]
+fn timing_typing76_keys_with_50k_records() {
     let dir = tmp_dir("timing");
-    seed(&dir, &records);
+    seed(&dir, &synthetic_records(core::learn::CAPACITY));
     time_typing76(Some(&dir));
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -713,6 +782,7 @@ fn time_typing76(dir: Option<&Path>) {
     println!("index build {:?}; rss {} -> {} KiB", t.elapsed(), rss0, rss_kb());
     let text = std::fs::read_to_string(root().join("eval/dev/user-typing.txt")).unwrap();
     let mut times: Vec<Duration> = Vec::new();
+    let mut slow: Vec<(Duration, usize, usize)> = Vec::new();
     let mut rows = 0;
     for line in text.lines().filter(|l| !l.is_empty()) {
         let f: Vec<&str> = line.split('|').collect();
@@ -721,23 +791,29 @@ fn time_typing76(dir: Option<&Path>) {
         if let Some(d) = dir {
             e.set_learning(true);
             e.learning_open(d).unwrap();
-            assert_eq!(e.learner().records().len(), core::learn::CAPACITY);
         }
         e.set_left_context(left);
         let mut keys: Vec<Key> = reading.split(' ').flat_map(syl_keys).collect();
         keys.push(kind(KeyKind::Enter));
-        for k in keys {
+        for (ki, k) in keys.into_iter().enumerate() {
             let t = Instant::now();
             e.key(k).unwrap();
-            times.push(t.elapsed());
+            let d = t.elapsed();
+            times.push(d);
+            slow.push((d, rows, ki));
         }
         rows += 1;
     }
     times.sort();
     let ms = |d: Duration| d.as_secs_f64() * 1000.0;
+    slow.sort();
+    for (d, r, k) in slow.iter().rev().take(3) {
+        println!("slowest: {:.3} ms at row {r} key {k}", ms(*d));
+    }
+    println!("keys over 16 ms: {}", times.iter().filter(|d| **d > Duration::from_millis(16)).count());
     println!(
         "typing76{}: rows {rows} keys {} p50 {:.3} ms p95 {:.3} ms max {:.3} ms",
-        if dir.is_some() { " + 50k records" } else { "" },
+        if dir.is_some() { " + store" } else { "" },
         times.len(),
         ms(times[times.len() / 2]),
         ms(times[times.len() * 95 / 100]),
@@ -896,13 +972,40 @@ fn t3_a_single_character_needs_a_han_context() {
     assert_eq!(row(&typ(&mut e, &[], "ㄋ")), other, "another key is untouched");
 }
 
+/// Index of `word` in `predict(..., 27)` for the situation "after `left`, `pending` typed", chat profile.
+fn reach(left: &str, pending: &str, word: &str) -> Option<usize> {
+    let s = shared();
+    let key = context_key(left);
+    predict(s.capped.predict_index(&s.lm), &s.lm, Profile::Chat.lambda(), history(if key == "^" { "" } else { &key }, &s.lm), &units_of(pending), Mode::P, 27)
+        .iter()
+        .position(|x| x.0 == word)
+}
+
 #[test]
 fn t4_another_context_is_untouched() {
-    let other = fresh_row(Profile::Formal, "我想喝這杯", "ㄋ");
-    let mut e = learner_engine(Profile::Formal, None);
-    teach(&mut e, "我想喝一杯", "ㄋ", "牛奶");
-    e.set_left_context("我想喝這杯");
+    // 牛奶 taught after 喝熱. After 想買 neither character matches (no exact, no last-character level), yet 牛奶 is
+    // reachable there (index 14 of 27), so a lookup that ignored the key would move it.
+    let i = reach("我想買", "ㄋ", "牛奶").expect("reachable");
+    assert!(i >= 9, "precondition: 牛奶 is outside the first slice's nine at index {i}");
+    let other = fresh_row(Profile::Chat, "我想買", "ㄋ");
+    let (mut e, dir) = seeded("t4", &[rec("喝熱", &milk_reading(), "牛奶")]);
+    e.set_left_context("我想買");
     assert_eq!(row(&typ(&mut e, &[], "ㄋ")), other);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn t4b_a_context_sharing_the_last_character_is_promoted() {
+    // 喝熱 taught; after 杯熱 only the last character matches (the last-character level of s4-learning section 1.1).
+    let i = reach("一杯熱", "ㄋ", "牛奶").expect("reachable");
+    assert!(i >= 9, "precondition: 牛奶 is outside the first slice's nine at index {i}");
+    let base = fresh_row(Profile::Chat, "一杯熱", "ㄋ");
+    let (mut e, dir) = seeded("t4b", &[rec("喝熱", &milk_reading(), "牛奶")]);
+    e.set_left_context("一杯熱");
+    let got = row(&typ(&mut e, &[], "ㄋ"));
+    assert_eq!(got[0], "牛奶");
+    assert_eq!(without(&got, "牛奶"), base[..8].to_vec());
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -1096,7 +1199,8 @@ fn t12_records_that_match_nothing_leave_a_short_row_short() {
     let key = context_key("我想");
     let at_start = predict(s.capped.predict_index(&s.lm), &s.lm, Profile::Chat.lambda(), history(&key, &s.lm), &units_of(&units_keys("ㄋㄧˇ")), Mode::P, 27);
     assert!(base.len() < 9 && at_start.len() > 9, "precondition: row {} and predict(27) {}", base.len(), at_start.len());
-    let (e, dir) = seeded("t12", &[rec("我想", &["ㄇㄧㄥˊ".to_string(), "ㄊㄧㄢ".to_string()], "明天")]);
+    // The record's reading is compatible with the typed ㄋㄧˇ (so the start asks 27), its word is none of the items.
+    let (e, dir) = seeded("t12", &[rec("我想", &["ㄋㄧˇ".to_string(), "ㄇㄣˊ".to_string()], "你門")]);
     assert_eq!(row_of(e, st), base);
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -1151,4 +1255,115 @@ fn t15_a_word_found_from_two_starts_is_listed_once() {
     assert_eq!(got.iter().filter(|w| *w == "牛奶").count(), 1, "{got:?}");
     assert_eq!(got.iter().collect::<std::collections::HashSet<_>>().len(), got.len(), "{got:?}");
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn t16_a_prediction_pick_is_recorded_under_the_key_of_the_pick() {
+    // ㄧˇ ㄅㄟˋ decode to 以備; picking 時 for the pending ㄕ re-decodes the free syllables to 已被. The record must carry
+    // the key the row was built with (以備), not the one the display has at the commit (已被).
+    let mut e = learner_engine(Profile::Chat, None);
+    typ(&mut e, &["ㄧˇ", "ㄅㄟˋ"], "ㄕ");
+    let o = pick_word(&mut e, "時");
+    assert!(o.preedit.starts_with("已被"), "precondition: the pick changed the text before it: {}", o.preedit);
+    assert_eq!(e.key(kind(KeyKind::Enter)).unwrap().commit, "已被時");
+    let r = e.learner().records();
+    assert_eq!((r.len(), r[0].context.as_str(), r[0].word.as_str()), (1, "以備", "時"));
+    let o = typ(&mut e, &["ㄧˇ", "ㄅㄟˋ"], "ㄕ");
+    assert_eq!(row(&o)[0], "時", "the taught item is first in the same situation: {:?}", row(&o));
+}
+
+#[test]
+fn t17_choosing_the_same_word_again_in_the_window_keeps_the_prediction_learn() {
+    let mut e = learner_engine(Profile::Formal, None);
+    e.set_left_context("我想喝一杯");
+    typ(&mut e, &[], "ㄋ");
+    let o = pick_word(&mut e, "牛奶");
+    assert_eq!(o.preedit, "牛奶");
+    let mut o = e.key(kind(KeyKind::Space)).unwrap();
+    for _ in 0..30 {
+        if o.candidates[o.selected.unwrap()] == "牛奶" {
+            break;
+        }
+        o = e.key(kind(KeyKind::Right)).unwrap();
+    }
+    assert_eq!(o.candidates[o.selected.unwrap()], "牛奶", "牛奶 is in the window");
+    assert_eq!(e.key(kind(KeyKind::Enter)).unwrap().preedit, "牛奶");
+    assert_eq!(e.key(kind(KeyKind::Enter)).unwrap().commit, "牛奶");
+    let r = e.learner().records();
+    assert_eq!((r.len(), r[0].context.as_str(), r[0].word.as_str()), (1, "一杯", "牛奶"));
+}
+
+#[test]
+fn t18_cmd_backspace_on_the_row_re_decodes_the_composition() {
+    // 她們 taught after 她們: the free syllables ㄊㄚ ㄇㄣˊ decode to 她們 only because of the record. The row (cursor
+    // start ㄊㄚ) lists 她們 first; forgetting it must show 他們 at once.
+    let reading = vec!["ㄊㄚ".to_string(), "ㄇㄣˊ".to_string()];
+    let (mut e, dir) = seeded("t18", &[rec("她們", &reading, "她們")]);
+    e.set_left_context("她們");
+    let o = typ(&mut e, &["ㄊㄚ", "ㄇㄣˊ", "ㄊㄚ"], "");
+    assert!(o.preedit.starts_with("她們"), "precondition: the record decides the display: {}", o.preedit);
+    assert_eq!(row(&o)[0], "她們", "{:?}", row(&o));
+    e.key(kind(KeyKind::Tab)).unwrap();
+    let o = e.key(cmd_bs()).unwrap();
+    assert_eq!(e.learner().records().len(), 0);
+    assert!(o.preedit.starts_with("他們"), "the display is decoded again: {}", o.preedit);
+    assert!(o.selected.is_some(), "still entered");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn t19_a_word_in_two_long_starts_keeps_the_largest_weight() {
+    // Two fixed 爸 (picked in the window) make two long starts: 0 (ㄅㄚˋ ㄅㄚˋ ㄅ) and 1 (ㄅㄚˋ ㄅ). 爸爸爸 is the far
+    // start's only item (weight 0) and the near start has it taught twice; 爸比 is taught once at the near start. The
+    // deduped 爸爸爸 keeps its first position and the weight 2, so it beats 爸比.
+    let r3: Vec<String> = vec!["ㄅㄚˋ".to_string(); 3];
+    let r2 = vec!["ㄅㄚˋ".to_string(), "ㄅㄧˇ".to_string()];
+    let mut learned = rec("想爸", &r3, "爸爸爸");
+    learned.weight = 2.0;
+    let state = |mut e: Engine| {
+        e.set_left_context("我想");
+        for _ in 0..2 {
+            typ(&mut e, &["ㄅㄚˋ"], "");
+            let mut o = e.key(kind(KeyKind::Space)).unwrap();
+            while o.candidates[o.selected.unwrap()].chars().count() != 1 {
+                o = e.key(kind(KeyKind::Right)).unwrap();
+            }
+            e.key(kind(KeyKind::Enter)).unwrap();
+        }
+        let o = send(&mut e, pend_keys("ㄅ"));
+        assert_eq!(o.preedit, "爸爸ㄅ", "precondition: two fixed words");
+        row(&o)
+    };
+    let base = state(learner_engine(Profile::Chat, None));
+    assert_eq!(base[0], "爸爸爸");
+    let s = shared();
+    let near = predict(s.capped.predict_index(&s.lm), &s.lm, Profile::Chat.lambda(), history("想爸", &s.lm), &units_of(&format!("{}ㄅ", units_keys("ㄅㄚˋ"))), Mode::P, 27);
+    assert!(near.iter().any(|x| x.0 == "爸比") && near.iter().any(|x| x.0 == "爸爸爸"), "precondition: both are items of the near start");
+    let (e, dir) = seeded("t19", &[learned, rec("想爸", &r2, "爸比")]);
+    let got = state(e);
+    assert_eq!(&got[..2], &["爸爸爸", "爸比"], "{got:?}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn t20_the_scan_gate_changes_nothing_but_time() {
+    // Same rows with the gate and without it (every start asks 27 once there is any record), over states whose records
+    // match the start, match only another start, or match nothing.
+    let milk = |ctx: &str| rec(ctx, &milk_reading(), "牛奶");
+    let tian = rec("我想", &["ㄇㄧㄥˊ".to_string(), "ㄊㄧㄢ".to_string()], "明天");
+    let cases: Vec<(&str, (&str, &[Tok], &str), Vec<Record>)> = vec![
+        ("a milk", A, vec![milk("一杯")]),
+        ("a unrelated", A, vec![tian.clone()]),
+        ("b", B, vec![milk("想喝"), tian.clone()]),
+        ("d", D, vec![tian.clone()]),
+        ("f", F, vec![tian.clone(), milk("來再")]),
+    ];
+    for (name, st, recs) in cases {
+        let dir = tmp_dir(&format!("t20{}", name.replace(' ', "")));
+        seed(&dir, &recs);
+        let (on, mut off) = (learner_engine(Profile::Chat, Some(&dir)), learner_engine(Profile::Chat, Some(&dir)));
+        off.set_scan_gate(false);
+        assert_eq!(row_of(on, st), row_of(off, st), "state {name}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
