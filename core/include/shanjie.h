@@ -67,7 +67,8 @@ void    shanjie_engine_free(ShanjieEngine *engine);
 int32_t shanjie_engine_key(ShanjieEngine *engine, ShanjieKey key, ShanjieOutput **out);
 // s3b2 (docs/contracts/s3b2-glass-panel.md section 8): mouse pick. index is a position in the last
 //   output's candidates; the core chooses candidate_first + index through the same path as ENTER, so
-//   learning behaves identically. V3 (docs/contracts/v3-engine.md section 4): with the candidate window
+//   learning behaves identically (a candidate pick also keeps the words outside its span as they were shown:
+//   docs/contracts/repick-freeze.md). V3 (docs/contracts/v3-engine.md section 4): with the candidate window
 //   closed and a prediction row showing (entered or not), pick(index) selects that row's item (index
 //   counts from 0 in the row; the click is an explicit choice). Section 10: the pick is learned like a
 //   candidate-window re-pick (nothing displaced) at the commit, when learning is on at the pick and at the commit.

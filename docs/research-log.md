@@ -1351,3 +1351,19 @@ S2h 實機驗收時，使用者在終端機、Discord、VS Code、Chrome 網址�
 - **保留集格式檢查**（fresh verifier 跑一次，只回數字）：聊天與書面的 rowstats 各 227 行、只有 `[0-9\t\n]`、對錯欄加總等於摘要行。這也是目前 main（model-v3、沒有詞類）的保留集基準：第一名聊天 178、書面 184，CER 2.91%、2.55%。
 - **驗證**：Python 與 CLI 的 dev302 rowstats（聊天、書面）逐位元組相同（`eval/golden/s2-lm-dev302-{chat,formal}.rowstats`，`cli/tests/golden.rs`）；契約 §4 的 8 項突變都以斷言失敗。
 - **沒做**：`tools/bench.py` 的 CER 與區間（它的比較只在 `run` 裡算，這一片驗不到），排在 v0.3.0 基準量測之前；D（擴大或輪替保留集）與 Discord 調參集挑長句，記在 `docs/PLAN.md`。
+
+## 2026-10-08：改選後其他字不動（repick-freeze）
+
+起因：「要進」後打 ㄅㄢˇ ㄎㄨㄥˋ 得「板控」，第一字改選「版」變成「版空」，原本對的第二字被重新解碼改錯。契約 `docs/contracts/repick-freeze.md`。
+
+- **改法**：`lm::decode_segment_learned` 的每個詞多帶它佔的音節數；`Engine::path` 存下來；`choose` 在加入改選的固定詞之前，用改選前的 `path` 把範圍外的詞固定成 `frozen` 固定詞（`pre`、`key` 為 `None`）。部分重疊的詞只在字數等於音節數時逐音節看，詞庫（上限後）有該音節的單字才固定。`recompute_pred` 改用這個音節數算起點。遺忘（⌘⌫）移除相同（讀音, 詞）的 `frozen` 固定詞。
+- **第 1 項（回報的情境，書面設定、前文「要進」）**：`core/tests/engine_repick.rs::freeze_reported_case_banhkong`。改動前（base 5cf6a52）同一測試失敗，`left: "版空"`、`right: "版控"`；改動後通過，顯示「版控」。
+- **第 2 項（部分重疊）**：實際解碼 ㄗㄞˋ ㄧㄝˇ 預設「在野」（書面、聊天都是）；第一字改選「再」，改動前是「再也」（`freeze_partial_overlap_keeps_the_second_character` 在 base 失敗：`left: "再也"`），改動後是「再野」。「由於」改選「遊」兩邊都是「遊於」，分不出差別，不當例子。
+- **第 3 項（完全在外）**：「在也由於在野」（ㄗㄞˋ ㄧㄝˇ ㄧㄡˊ ㄩˊ ㄗㄞˋ ㄧㄝˇ）把中間的「由於」改選「魷魚」，改動前變成「在野魷魚再也」（左右都被改），改動後是「在也魷魚在野」（`freeze_words_outside_stay`）。
+- **第 4 項**：疊加條目「巴」佔兩個音節（ㄅㄚ ㄅㄛ），旁邊有一個字（ㄉㄚ）：改選後者，引擎 `Ok`、組字區不清，顯示「巴達」。部分重疊且字數不等於音節數的條目（同一個「巴」）：範圍外的音節不固定，留給解碼，顯示「吧玻」。部分重疊且範圍外音節沒有顯示字的單字條目（疊加「巴波」，ㄅㄛ 只有「玻」）：不固定，顯示「吧玻」。
+- **第 5 項**：改選「版」後送出，學習紀錄只有（ㄅㄢˇ，版）（`freeze_teaches_only_the_picked_span`）。
+- **第 5b 項（遺忘）**：教「警官」（ㄐㄧㄥˇ ㄍㄨㄢ 預設「景觀」），輸入「ㄐㄧㄥˇ ㄍㄨㄢ ㄍㄨㄥ ㄗㄨㄛˋ」顯示「警官工作」，B 改選「公座」讓 A 固定；對 A 的範圍開候選窗、反白「警官」按 ⌘⌫。顯示「景觀公座」，等於 `lm::decode_segment`（A 的音節、前文 `<s>`、`End::Next(公座)`、沒有學習）第一名接上 B（`forget_a_frozen_word_redecodes_it_without_the_record`）。拿掉 `forget_entry` 裡移除 frozen 的那行，測試失敗（`left: "警官公座"`）。
+- **第 5c 項**：既有 V3 測試與 `sp-predict` golden 不變。
+- **第 6 項**：`cargo test --locked`、`cargo test --release --locked`、`make test` 全過；所有 golden 與 `cli/tests/golden.rs` 的評測摘要行不變。沒有為了改選後重算而改既有測試，只有兩處型別跟著改（`Scored` 多一個元素：`core/src/lm.rs` 的 `score` 閉包、`engine_predict.rs` 的解構模式）。
+- **第 6b 項（用改選模擬教學的量測，改動前後各印一次）**：`engine_learn` 的 `a2_candidate_pick_learning_on_cases_tsv`、`a2_mirror_teach_the_other_word`（鏡像 7／8）、`global_eps_table` 整張表、`pollution_zai_taught_under_two_contexts`，與 `engine_predict` 用到 `teach_typing76_picks` 的三個計時測試（教 146 筆、讀回 4／5）：印出的數字（排除耗時與執行緒編號）逐行相同，因此 `s4-learning.md` 的量測段不用改。原因（推論，沒有另外量）：這些測試一次只改選一個詞，沒有別的被固定的字會改變學到的前文 key。
+- **沒做**：第 8 項實機（main 做）。
