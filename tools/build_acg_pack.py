@@ -508,7 +508,7 @@ def read_collisions(path):
 
 # ---------------------------------------------------------------- 主流程
 
-def build(api, groups_tsv=os.path.join(PACKS, "acg-groups.tsv"), collisions_tsv=os.path.join(PACKS, "acg-collisions.tsv"), decode=top1, readings=make_readings):
+def build(api, groups_tsv=os.path.join(PACKS, "acg-groups.tsv"), collisions_tsv=os.path.join(PACKS, "acg-collisions.tsv"), manual_tsv=os.path.join(PACKS, "acg-manual.tsv"), decode=top1, readings=make_readings):
     log = lambda *a: print(*a, file=sys.stderr)
     gr = read_tsv(groups_tsv)
     listing = pages(api, ["Template:CGroup/list"])["Template:CGroup/list"]
@@ -582,6 +582,10 @@ def build(api, groups_tsv=os.path.join(PACKS, "acg-groups.tsv"), collisions_tsv=
         src[v]["title"] |= {f"{t}@{ar[t][0]}" for t in s if t in ar}
     for n in chars:
         src[n]["char"] |= {f"{t}@{ar[t][0]}" for t in name_src[n] if t in ar}
+    for w, work, *_ in read_tsv(manual_tsv):            # 維護者手動加的詞（欄位：詞、作品、備註）：同樣去重、定讀音、算分數、偵測衝突
+        assert HAN.match(w), w
+        src[w]["manual"].add(work)
+        ref.add(w)
     excluded = read_collisions(collisions_tsv)
     cand = [w for w in dedupe(src, have) if w not in excluded]
     log("candidates", len(src), "after dedupe and exclusions", len(cand), "excluded by acg-collisions.tsv", len(excluded))
@@ -600,7 +604,7 @@ def build(api, groups_tsv=os.path.join(PACKS, "acg-groups.tsv"), collisions_tsv=
         "latest_source_revision": ts_max,
         "words": len(words),
         "rows": len(rows),
-        "sources": {k: sum(1 for w in words if k in src[w]) for k in ("cgroup", "title", "char")},
+        "sources": {k: sum(1 for w in words if k in src[w]) for k in ("cgroup", "title", "char", "manual")},
         "revision_ids": {"min": min(revs), "max": max(revs), "pages": len(revs)},
         "groups": {"listed": len(gr), "included": sum(1 for r in gr if r[3] == "include"), "page_missing": unresolved},
         "unclassified_groups": unclassified,
@@ -611,7 +615,7 @@ def build(api, groups_tsv=os.path.join(PACKS, "acg-groups.tsv"), collisions_tsv=
     }
     sources = ["word\tsource_kind\tsources (page@revision)\tnote\n"]
     for w in order:
-        for k in ("cgroup", "title", "char"):
+        for k in ("cgroup", "title", "char", "manual"):
             if k in src[w]:
                 note = ",".join(x for x, on in (("CHECK", rd[w][1]), ("zh-hant", k == "cgroup" and w in cg_hant)) if on)
                 sources.append(f"{w}\t{k}\t{'; '.join(sorted(src[w][k]))}\t{note}\n")
