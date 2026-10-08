@@ -225,8 +225,8 @@ enum Screens {
             line = L("會從 \(installed ?? "") 更新到 \(bundled)。", "Updates \(installed ?? "") to \(bundled). ") + account
             primary = L("更新", "Update")
         case .enableSame:
-            line = L("這個版本已經裝好了。按「啟用」讓系統開始使用它；登出再登入後回到這裡，也是按這個。",
-                     "This version is already installed. Choose Enable to let the system use it, also after logging out and back in.")
+            line = L("這個版本已經裝好了。按「啟用」讓系統開始使用它；從系統設定加入後回到這裡，也是按這個。",
+                     "This version is already installed. Choose Enable to let the system use it, also after adding it in System Settings.")
             primary = L("啟用", "Enable")
             secondary = L("重新安裝", "Reinstall")
         case .enableNewer:
@@ -254,11 +254,18 @@ enum Screens {
         Screen(step: 1, title: L("沒有裝好", "Not installed"), body: failure.message, detail: failure.detail, close: L("完成", "Done"))
     }
 
-    static let activate = Screen(
-        step: 2, title: L("還差一步：登出再登入", "One more step: log out and back in"),
-        body: L("系統要重新登入後，才會接受新的輸入法。\n\n1. 從蘋果選單選「登出」。\n2. 再登入。\n3. 重新打開這個安裝程式，按「啟用」。",
-                "The system accepts a new input method only after you log in again.\n\n1. Choose Log Out from the Apple menu.\n2. Log back in.\n3. Open this installer again and choose Enable."),
-        primary: L("重新檢查", "Check Again"), close: L("完成", "Done"))
+    /// installer-v2.md section 9.2 item 3: the system adds a new input method only when the user
+    /// adds it in System Settings. `note` is the line after a recheck that found nothing.
+    static func activate(note: String? = nil) -> Screen {
+        Screen(step: 2, title: L("還差一步：到系統設定加入", "One more step: add it in System Settings"),
+               body: L("系統要在「輸入方式」裡加入，才會開始使用善解輸入法。\n\n1. 按「打開輸入方式設定」。\n2. 在「輸入方式」按「+」。\n3. 選「繁體中文」裡的「善解輸入法」，按「加入」。",
+                       "The system uses Shanjie only after you add it under Input Sources.\n\n1. Choose Open Input Sources Settings.\n2. Under Input Sources, press +.\n3. Choose Shanjie under Chinese (Traditional) and press Add.")
+                   + (note.map { "\n\n" + $0 } ?? ""),
+               primary: L("打開輸入方式設定", "Open Input Sources Settings"), secondary: L("重新檢查", "Check Again"),
+               close: L("完成", "Done"))
+    }
+
+    static let notDetected = L("還沒偵測到，請照上面三步加入。", "Not detected yet. Please add it with the three steps above.")
 
     static func tryIt(note: String?) -> Screen {
         let hint = L("之後從選單列的輸入法選單，或按 Caps Lock、⌃空白鍵切換到善解。",
@@ -415,7 +422,7 @@ func reviewScreens() -> [(String, Screen)] {
      ("5-installing", Screens.working(Screens.copying)),
      ("6-failed", Screens.failed(Failure(message: L("把輸入法複製到你的帳號時失敗了。", "Copying the input method into your account failed."),
                                          detail: "error: cp: ~/Library/Input Methods/.shanjie-staging-AbC123/善解輸入法.app: No space left on device"))),
-     ("7-activate", Screens.activate),
+     ("7-activate", Screens.activate()),
      ("8-try", Screens.tryIt(note: nil))]
 }
 
@@ -574,8 +581,26 @@ final class Controller: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
     }
 
-    private func showActivate() {
-        show(Screens.activate, primary: { [weak self] in self?.enable() })
+    private func showActivate(note: String? = nil) {
+        show(Screens.activate(note: note),
+             primary: { NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.Keyboard-Settings.extension")!) },
+             secondary: { [weak self] in self?.recheck() })
+    }
+
+    /// Installer-v2 section 9.2 item 3: not accepted yet changes nothing (Registration.run skips
+    /// it), so this stays on the activate screen.
+    private func recheck() {
+        guard let bundleID = Bundle(url: Paths.installed)?.bundleIdentifier,
+              let defaults = UserDefaults(suiteName: bundleID) else {
+            fail(Failure(message: L("找不到已安裝的善解輸入法。", "The installed input method was not found.")))
+            return
+        }
+        let result = Registration.run(bundleURL: Paths.installed, bundleID: bundleID, defaults: defaults)
+        switch InstallerFlow.next(after: result.outcome) {
+        case .tryIt: showTry(note: result.legacyDisableFailed ? Screens.legacyNote : nil)
+        case .activate, .waiting: showActivate(note: Screens.notDetected)
+        case .failed: fail(Failure(message: L("系統沒有接受這個輸入法。", "The system did not accept the input method.")))
+        }
     }
 
     private func showTry(note: String?) {
