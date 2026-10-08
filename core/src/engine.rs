@@ -24,6 +24,10 @@ pub const GRID_ROWS: usize = 5;
 /// go ahead of the cursor start's items; the rest of them follow. Chosen by the user from a measured trade-off
 /// (research log 2026-10-07): the first key keeps its own candidates, the second syllable still finds the long word.
 pub const PREDICT_LONG_CAP: usize = 3;
+/// V3 engine contract section 11: decoded word starts this many syllables back are long starts too, and the positions
+/// inside words this far back are queried last. Five is the user's choice; long names in the ACG pack were measured
+/// at 4, 5 and 6 (research log 2026-10-09).
+pub const PREDICT_BACK: usize = 5;
 /// Items in the prediction row.
 pub const PREDICT_MAX: usize = PAGE_SIZE;
 /// Items asked of `predict` for a start that some learned record could match (V3 engine contract section 10.2 step 1).
@@ -647,6 +651,20 @@ impl Engine {
         self.handled()
     }
 
+    /// Where each token of the current best path starts (a word or a punctuation mark), near the start first. Lets
+    /// tests tell a decoded word's start from a position inside a word (V3 engine contract section 11.4).
+    pub fn path_starts(&self) -> Vec<usize> {
+        let mut pos = 0;
+        self.path
+            .iter()
+            .map(|(w, _, is_punct, _)| {
+                let s = pos;
+                pos += if *is_punct { 1 } else { w.chars().count() };
+                s
+            })
+            .collect()
+    }
+
     /// Total score of the current best path as `lm.decode` scores one: every word (fixed words with
     /// their capped `lp_F`) adds `word(λ, previous, w, lp) − δ` (δ: the demotion of the entry, 0 when demotion is off), then `eos` of the last word. Punctuation
     /// splits it into sentences (s3d §4): the stretch before it closes with `eos`, the next starts from
@@ -713,13 +731,18 @@ impl Engine {
         let idx = st.capped.predict_index(&st.lm);
         let lam = self.profile.lambda();
         let pending: Vec<char> = self.pend.iter().flatten().copied().collect();
+        // Section 11: the last two decoded words' starts, and the start of every earlier word within `PREDICT_BACK`.
         let mut long_starts = Vec::new();
         let mut pos = n;
-        for (w, _, is_punct, _) in self.path.iter().rev().take(2) {
+        for (i, (w, _, is_punct, _)) in self.path.iter().rev().enumerate() {
             pos = pos.saturating_sub(if *is_punct { 1 } else { w.chars().count() });
+            if i >= 2 && pos + PREDICT_BACK < n {
+                break;
+            }
             long_starts.push(pos);
         }
         long_starts.reverse(); // far to near
+        let mid: Vec<usize> = (n.saturating_sub(PREDICT_BACK)..n).filter(|p| !long_starts.contains(p)).collect();
         let disp: Vec<char> = self.display.chars().collect();
         let off = |i: usize| (0..i).map(|j| self.token_width(j)).sum::<usize>().min(disp.len());
         let (learned, today) = (!self.learner.is_empty(), self.today());
@@ -775,7 +798,9 @@ impl Engine {
         let (head, tail): (Vec<_>, Vec<_>) = long.into_iter().enumerate().partition(|(i, p)| p.weight > 0.0 || *i < PREDICT_LONG_CAP);
         let (head, tail) = (head.into_iter().map(|x| x.1), tail.into_iter().map(|x| x.1));
         let cursor_items = if pending.is_empty() { Vec::new() } else { query(n) };
-        let mut all: Vec<Pred> = head.chain(cursor_items).chain(tail).collect();
+        // Section 11: the positions inside words come last, far to near.
+        let mid_items = mid.into_iter().flat_map(&query);
+        let mut all: Vec<Pred> = head.chain(cursor_items).chain(tail).chain(mid_items).collect();
         all.sort_by(|a, b| b.weight.total_cmp(&a.weight)); // step 6: stable
         let mut words = HashSet::new();
         all.retain(|p| words.insert(p.word.clone())); // step 7

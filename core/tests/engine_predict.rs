@@ -3,7 +3,7 @@
 use core::engine::*;
 use core::learn::context_key;
 use core::lm::{decode_segment, history, CappedLexicon, End, Lm, Profile};
-use core::predict::{predict, units_of, Mode};
+use core::predict::{predict, reading_matches, units_of, Mode};
 use core::Lexicon;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
@@ -27,9 +27,22 @@ struct Shared {
 fn shared() -> &'static Shared {
     static S: OnceLock<Shared> = OnceLock::new();
     S.get_or_init(|| {
-        let lex = load_lexicon(&root().join("data/lexicon")).unwrap();
         let lm = Lm::load(&lm_path()).unwrap();
-        let overlay = std::fs::read_to_string(root().join("data/lexicon/overlay-add.tsv")).unwrap();
+        let mut overlay = std::fs::read_to_string(root().join("data/lexicon/overlay-add.tsv")).unwrap();
+        let lex = match std::env::var("ACG_PACK") {
+            Err(_) => load_lexicon(&root().join("data/lexicon")).unwrap(),
+            // Only for `measure_start_range_acg`: the pack's rows after the overlays, as `load_lexicon_packs` on the
+            // word-pack branch adds them (the lexicon after sandhi-add.tsv, the capped lexicon after overlay-add.tsv).
+            Ok(pack) => {
+                let read = |p: PathBuf| std::fs::read_to_string(p).unwrap();
+                let pack = read(PathBuf::from(pack));
+                let sandhi = read(root().join("data/lexicon/sandhi-add.tsv"));
+                let join = |a: &str, b: &str| format!("{}\n{b}", a.trim_end_matches('\n'));
+                let text = join(&join(&overlay, &sandhi), &pack);
+                overlay = join(&overlay, &pack);
+                Arc::new(Lexicon::parse_with(&read(root().join("data/lexicon/mcbpmf-data.txt")), Some(&text)).unwrap())
+            }
+        };
         let capped = Arc::new(CappedLexicon::new(lex.clone(), &overlay, &lm, None).unwrap());
         Shared { lex, lm: Arc::new(lm), capped }
     })
@@ -135,6 +148,9 @@ struct Oracle {
     /// L (contract section 10.2 step 4: the long starts' items far to near, duplicates removed) and the cursor start's.
     long: Vec<(String, Vec<String>, usize)>,
     cursor: Vec<(String, Vec<String>, usize)>,
+    /// Section 11: the decoded words' starts used as long starts, and the positions inside words.
+    word_starts: Vec<usize>,
+    mid_starts: Vec<usize>,
 }
 
 /// Syllable keys for `predict`'s `units_of`: neutral tone goes last.
@@ -183,6 +199,13 @@ fn ref_path(left: &str, toks: &[Tok]) -> Vec<(String, usize, bool)> {
 }
 
 fn oracle(left: &str, toks: &[Tok], pending: &str) -> Oracle {
+    oracle_with(left, toks, pending, PREDICT_BACK, 3)
+}
+
+/// `back`: the start of every decoded word that begins at most that many tokens before the cursor is a long start
+/// too (the last two words always are). `mid`: positions inside words within `back`; 0 none, 1 merged with the word
+/// starts far to near, 2 after all word starts (far to near).
+fn oracle_with(left: &str, toks: &[Tok], pending: &str, back: usize, mid: u8) -> Oracle {
     let s = shared();
     let idx = s.capped.predict_index(&s.lm);
     let lam = Profile::Chat.lambda();
@@ -194,11 +217,23 @@ fn oracle(left: &str, toks: &[Tok], pending: &str) -> Oracle {
     let is_punct = |i: usize| matches!(toks[i], Punct(_));
     let mut long_starts = Vec::new();
     let mut pos = n;
-    for (_, c, _) in path.iter().rev().take(2) {
+    for (i, (_, c, _)) in path.iter().rev().enumerate() {
         pos -= c;
-        long_starts.push(pos);
+        if i < 2 || pos + back >= n {
+            long_starts.push(pos);
+        }
     }
     long_starts.reverse();
+    let extra: Vec<usize> = (n.saturating_sub(back)..n).filter(|p| !long_starts.contains(p)).collect();
+    let (word_starts, mid_starts) = (long_starts.clone(), extra.clone());
+    match mid {
+        1 => {
+            long_starts.extend(extra.iter().copied());
+            long_starts.sort_unstable();
+        }
+        2 => long_starts.extend(extra.iter().copied()),
+        _ => {}
+    }
     let (mut skipped, mut queried, mut filtered) = (Vec::new(), Vec::new(), Vec::new());
     let mut query = |st: usize, skipped: &mut Vec<usize>, queried: &mut Vec<usize>| -> Vec<(String, Vec<String>, usize)> {
         if (st..n).any(is_punct) {
@@ -241,10 +276,15 @@ fn oracle(left: &str, toks: &[Tok], pending: &str) -> Oracle {
     let mut merged: Vec<_> = long.iter().take(3).cloned().collect();
     merged.extend(cursor_items);
     merged.extend(long.iter().skip(3).cloned());
+    if mid == 3 {
+        for st in extra {
+            merged.extend(query(st, &mut skipped, &mut queried));
+        }
+    }
     let mut seen = std::collections::HashSet::new();
     merged.retain(|x| seen.insert(x.0.clone()));
     merged.truncate(9);
-    Oracle { items: merged, queried, skipped, long_total, filtered, long, cursor }
+    Oracle { items: merged, queried, skipped, long_total, filtered, long, cursor, word_starts, mid_starts }
 }
 
 fn words(o: &Oracle) -> Vec<String> {
@@ -303,11 +343,13 @@ fn row_equals_the_independent_computation_in_states_a_to_e() {
     let d = check_state("d", D);
     assert!(d.filtered.iter().any(|w| w == "奶茶"), "d: the filter removed nothing: {:?}", d.filtered);
     assert!(!words(&d).contains(&"奶茶".to_string()));
-    // (e) two long starts plus the cursor start with more than three long items: the cap works.
-    let e = check_state("e", E);
-    assert!(e.long_total > 3 && e.queried.len() == 3, "e: long items {} queried {:?}", e.long_total, e.queried);
-    let f = check_state("f", F);
-    assert!(f.long_total > 3 && f.queried.len() == 3, "f: long items {} queried {:?}", f.long_total, f.queried);
+    // (e) two word starts plus the cursor start with more than three long items: the cap works. Section 11: the
+    // position inside the first word is queried too.
+    for (name, st) in [("e", E), ("f", F)] {
+        let o = check_state(name, st);
+        assert!(o.long_total > 3 && o.word_starts.len() == 2, "{name}: long items {} word starts {:?}", o.long_total, o.word_starts);
+        assert!(!o.mid_starts.is_empty() && o.mid_starts.iter().all(|s| o.queried.contains(s)), "{name}: {:?} {:?}", o.mid_starts, o.queried);
+    }
 }
 
 #[test]
@@ -1423,4 +1465,241 @@ fn t20_the_scan_gate_changes_nothing_but_time() {
         assert_eq!(row_of(on, st), row_of(off, st), "state {name}");
         let _ = std::fs::remove_dir_all(&dir);
     }
+}
+
+// ---------- section 11: starts up to five syllables back ----------
+
+/// A long word decoded as three words: its start is the third word back.
+const G: (&str, &[Tok], &str) = ("", &[Syl("ㄅㄚ"), Syl("ㄐㄧ"), Syl("ㄙ")], "ㄊ");
+/// Five syllables before the cursor, the fourth word back.
+const H: (&str, &[Tok], &str) = ("", &[Syl("ㄅㄚ"), Syl("ㄍㄢ"), Syl("ㄗ˙"), Syl("ㄉㄚˇ"), Syl("ㄅㄨˋ")], "ㄓ");
+/// typing76 「週末本來想在家耍廢」 up to 在: 在 sits inside the last decoded word.
+const I: (&str, &[Tok], &str) = ("", &[Syl("ㄓㄡ"), Syl("ㄇㄛˋ"), Syl("ㄅㄣˇ"), Syl("ㄌㄞˊ"), Syl("ㄒㄧㄤˇ"), Syl("ㄗㄞˋ")], "");
+/// typing76 「我們中午可以…」: a position inside 中午 has items, the cursor start has 可以.
+const J: (&str, &[Tok], &str) =
+    ("明天早上我要先去銀行辦事回來再順便買早餐你如果有空的話", &[Syl("ㄨㄛˇ"), Syl("ㄇㄣ˙"), Syl("ㄓㄨㄥ"), Syl("ㄨˇ")], "ㄎ");
+
+fn has(o: &Oracle, w: &str) -> bool {
+    words(o).iter().any(|x| x == w)
+}
+
+#[test]
+fn a_word_start_three_words_back_is_a_long_start() {
+    let path: Vec<String> = ref_path(G.0, G.1).into_iter().map(|x| x.0).collect();
+    assert_eq!(path, ["巴", "基", "斯"], "precondition: three decoded words");
+    let g = check_state("g", G);
+    assert!(has(&g, "巴基斯坦"), "{:?}", words(&g));
+    assert!(!has(&oracle_with(G.0, G.1, G.2, 0, 0), "巴基斯坦"), "section 1.2 alone already finds it: the state proves nothing");
+}
+
+#[test]
+fn a_word_start_exactly_five_syllables_back_is_a_long_start() {
+    let path = ref_path(H.0, H.1);
+    assert!(path.len() >= 4, "precondition: the start at 0 is the fourth word back or further: {path:?}");
+    let h = check_state("h", H);
+    assert!(has(&h, "八竿子打不著"), "{:?}", words(&h));
+    let h4 = oracle_with(H.0, H.1, H.2, 4, 3);
+    assert!(!has(&h4, "八竿子打不著") && words(&h4) != words(&h), "four back: {:?}", words(&h4));
+}
+
+#[test]
+fn a_position_inside_a_word_adds_its_items_after_the_others() {
+    let path = ref_path(I.0, I.1);
+    let (w, c, _) = path.last().unwrap();
+    assert!(6 - c == 4 && *c >= 2, "precondition: the last word {w} starts at 4 and covers 5: {path:?}");
+    let i = check_state("i", I);
+    assert!(i.mid_starts.contains(&5) && has(&i, "在家"), "{:?} {:?}", i.mid_starts, words(&i));
+    assert!(!has(&oracle_with(I.0, I.1, I.2, PREDICT_BACK, 0), "在家"), "without the positions inside words");
+}
+
+#[test]
+fn positions_inside_words_come_last_so_the_cursor_start_keeps_its_items() {
+    let j = check_state("j", J);
+    assert!(has(&j, "可以"), "{:?}", words(&j));
+    let merged = oracle_with(J.0, J.1, J.2, PREDICT_BACK, 1);
+    assert!(words(&merged) != words(&j) && !has(&merged, "可以"), "merged far to near: {:?}", words(&merged));
+}
+
+#[test]
+fn a_learned_item_of_a_position_inside_a_word_comes_first() {
+    let reading = vec!["ㄗㄞˋ".to_string(), "ㄐㄧㄚ".to_string()];
+    // (b) untaught, 在家 is in the row but not first.
+    let plain = row_of(engine(), I);
+    let at = plain.iter().position(|w| w == "在家").expect("在家 is in the untaught row");
+    assert!(at > 0, "{plain:?}");
+    let (e, dir) = seeded("s11-mid", &[rec("來想", &reading, "在家")]);
+    let (mut e, o) = build_in(e, I.0, I.1, I.2);
+    // (a) in this decode the position of 在 (5) is not a word start, so not a long start; no pending unit, so no cursor
+    // start either.
+    assert!(!e.path_starts().contains(&5), "{:?}", e.path_starts());
+    assert_eq!(row(&o).first().map(String::as_str), Some("在家"), "{:?}", row(&o));
+    // The item is that position's: picking it ends the composition at 5 + 2.
+    let picked = pick_word(&mut e, "在家");
+    assert_eq!(picked.cursor_utf16, 7, "{}", picked.preedit);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn reading_matches_compares_the_first_syllable_as_before() {
+    // Section 11.2: the char comparison against the old `starts_with` on a collected String, with expected values.
+    let old = |units: &[core::predict::Unit], reading: &[String]| {
+        let head: String = units[0].chars.iter().collect();
+        reading.len() >= units.len() && reading[0].trim_start_matches('˙').starts_with(&head)
+    };
+    let r = |s: &str| s.split(' ').map(String::from).collect::<Vec<_>>();
+    // (keys, reading, expected): the same syllable, a prefix, a shorter first syllable, the neutral tone in front,
+    // the last character differing, a different initial, too few syllables.
+    let cases = [
+        ("ㄋㄧㄡˊ", "ㄋㄧㄡˊ ㄋㄞˇ", true),
+        ("ㄋ", "ㄋㄧㄡˊ ㄋㄞˇ", true),
+        ("ㄋㄧㄡ", "ㄋㄧ", false),
+        ("ㄉㄜ", "˙ㄉㄜ", true),
+        ("ㄋㄧㄡ", "ㄋㄧㄠˇ", false),
+        ("ㄇ", "ㄋㄧ", false),
+        ("ㄋㄧㄡˊㄋ", "ㄋㄧㄡˊ", false),
+    ];
+    for (keys, reading, want) in cases {
+        let u = units_of(keys);
+        assert_eq!(reading_matches(&u, &r(reading)), want, "{keys} {reading}");
+        assert!(!want || old(&u, &r(reading)), "the old test agreed: {keys} {reading}");
+    }
+}
+
+// ---------- research: how far back a word start is guessed (amendment two, contract section 11.3) ----------
+
+/// (name, back, mid) for `oracle_with`; "now" is section 1.2, "w5m3" is section 11 (the shipping rule).
+const RULES: [(&str, usize, u8); 7] =
+    [("now", 0, 0), ("w5", 5, 0), ("w4m3", 4, 3), ("w5m3", 5, 3), ("w6m3", 6, 3), ("w5m2", 5, 2), ("w5m1", 5, 1)];
+const SHIPPING: usize = 3;
+
+/// hit@9 of every word of two or more characters (the answer segmented by `segment_words`), at the first key and at
+/// the end of each of its syllables but the last. Chat profile, the row's own left context, the whole sentence in one
+/// composition. `SHOW_CHANGES=1` prints every state where the shipping rule and "now" differ.
+/// `cargo test --release -p core --test engine_predict -- --ignored --nocapture --exact measure_start_range`
+#[test]
+#[ignore]
+fn measure_start_range() {
+    assert!(RULES[SHIPPING].1 == PREDICT_BACK && RULES[SHIPPING].2 == 3);
+    for set in ["user-typing", "user-reported"] {
+        let text = std::fs::read_to_string(root().join(format!("eval/dev/{set}.txt"))).unwrap();
+        let mut table = Table::default();
+        for line in text.lines().filter(|l| !l.is_empty()) {
+            let f: Vec<&str> = line.split('|').collect();
+            let (left, sent) = (f[0], f[1]);
+            let syls = leak_syls(f[2].split(' '));
+            let seg = shared().lex.segment_words(sent).filter(|_| sent.chars().count() == syls.len()).expect("every row segments");
+            let mut a = 0;
+            for (w, _) in seg {
+                let m = w.chars().count();
+                if m >= 2 {
+                    table.word(&format!("{set} {left}|{sent}"), left, &w, &syls[..a + m], a, 0);
+                }
+                a += m;
+            }
+        }
+        table.print(set);
+    }
+}
+
+/// The word pack's names of three or more characters (every 20th), typed alone and after `我最喜歡`, from the second
+/// syllable on. Needs the pack file of the word-pack branch, e.g.
+/// `git show feat/acg-pack:data/packs/acg-add.tsv > /tmp/acg-add.tsv`, then
+/// `ACG_PACK=/tmp/acg-add.tsv cargo test --release -p core --test engine_predict -- --ignored --nocapture --exact measure_start_range_acg`
+#[test]
+#[ignore]
+fn measure_start_range_acg() {
+    let pack = std::env::var("ACG_PACK").expect("set ACG_PACK to the word pack's acg-add.tsv");
+    let text = std::fs::read_to_string(pack).unwrap();
+    let names: Vec<(String, Vec<&'static str>)> = text
+        .lines()
+        .filter(|l| !l.starts_with('#'))
+        .filter_map(|l| {
+            let f: Vec<&str> = l.split('\t').collect();
+            let syls = leak_syls(f[0].split('-'));
+            (f[1].chars().count() >= 3 && f[1].chars().count() == syls.len()).then(|| (f[1].to_string(), syls))
+        })
+        .step_by(20)
+        .collect();
+    let lead = leak_syls(["ㄨㄛˇ", "ㄗㄨㄟˋ", "ㄒㄧˇ", "ㄏㄨㄢ"].into_iter());
+    for (label, pre) in [("alone", Vec::new()), ("after 我最喜歡", lead)] {
+        let mut table = Table::default();
+        for (w, syls) in &names {
+            let all: Vec<&'static str> = pre.iter().chain(syls.iter()).copied().collect();
+            table.word(&format!("{label} {w}"), "", w, &all, pre.len(), 1);
+        }
+        table.print(&format!("acg names ({}) {label}", names.len()));
+    }
+}
+
+fn leak_syls<'a>(it: impl Iterator<Item = &'a str>) -> Vec<&'static str> {
+    it.map(|x| &*Box::leak(x.to_string().into_boxed_str())).collect()
+}
+
+#[derive(Default)]
+struct Table {
+    /// stage -> per state, hit under each rule
+    hits: std::collections::BTreeMap<String, Vec<Vec<bool>>>,
+    queries: [usize; RULES.len()],
+    changed: [usize; RULES.len()],
+    states: usize,
+}
+
+impl Table {
+    /// The word `w` over `syls[a..]` (all of `syls` is typed in one composition after `left`): its states from syllable
+    /// `from` on.
+    fn word(&mut self, label: &str, left: &str, w: &str, syls: &[&'static str], a: usize, from: usize) {
+        let m = syls.len() - a;
+        for k in from..m {
+            for done in [false, true] {
+                if done && k == m - 1 {
+                    continue;
+                }
+                let (upto, pending) = if done {
+                    (a + k + 1, String::new())
+                } else {
+                    (a + k, syls[a + k].chars().find(|c| !is_tone(*c)).unwrap().to_string())
+                };
+                let toks: Vec<Tok> = syls[..upto].iter().map(|y| Syl(y)).collect();
+                let rows: Vec<Oracle> = RULES.iter().map(|&(_, b, md)| oracle_with(left, &toks, &pending, b, md)).collect();
+                let hv: Vec<bool> = rows.iter().map(|o| words(o).iter().any(|x| x == w)).collect();
+                for (i, o) in rows.iter().enumerate() {
+                    self.queries[i] += o.queried.len();
+                    self.changed[i] += (words(o) != words(&rows[0])) as usize;
+                }
+                if std::env::var("SHOW_CHANGES").is_ok() && hv[0] != hv[SHIPPING] {
+                    let tag = if hv[SHIPPING] { "GAIN" } else { "LOSS" };
+                    println!("{tag} {label} {w} upto {upto} pending {pending}\n  now  {:?}\n  ship {:?}", words(&rows[0]), words(&rows[SHIPPING]));
+                }
+                let stage = format!("s{}{}", (k + 1).min(5), if done { " done" } else { " key1" });
+                self.hits.entry(stage).or_default().push(hv);
+                self.states += 1;
+            }
+        }
+    }
+
+    fn print(&self, name: &str) {
+        let per = |v: &[usize]| RULES.iter().zip(v).map(|(r, x)| format!("{} {:.2}", r.0, *x as f64 / self.states as f64)).collect::<Vec<_>>();
+        println!("\n## {name}: states {}", self.states);
+        println!("predict calls per state: {:?}", per(&self.queries));
+        println!("rows that differ from now: {:?}", RULES.iter().zip(&self.changed).map(|(r, c)| format!("{} {c}", r.0)).collect::<Vec<_>>());
+        println!("stage\tn\t{}", RULES.iter().map(|r| format!("{} (+/-)", r.0)).collect::<Vec<_>>().join("\t"));
+        let mut all = Vec::new();
+        for (stage, v) in &self.hits {
+            println!("{stage}\t{}", cells(v));
+            all.extend(v.iter().cloned());
+        }
+        println!("all\t{}", cells(&all));
+    }
+}
+
+/// n, then hit% (gained/lost against "now") for each rule.
+fn cells(v: &[Vec<bool>]) -> String {
+    let c: Vec<String> = (0..RULES.len())
+        .map(|i| {
+            let hit = v.iter().filter(|h| h[i]).count();
+            let (gain, loss) = (v.iter().filter(|h| h[i] && !h[0]).count(), v.iter().filter(|h| !h[i] && h[0]).count());
+            format!("{:.1} (+{gain}/-{loss})", 100.0 * hit as f64 / v.len() as f64)
+        })
+        .collect();
+    format!("{}\t{}", v.len(), c.join("\t"))
 }
