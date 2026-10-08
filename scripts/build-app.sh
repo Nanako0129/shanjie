@@ -28,6 +28,8 @@ shasum -a 256 -c data/bigram.sjlm.sha256 >/dev/null \
   || fail "data/lm/bigram.sjlm does not match data/bigram.sjlm.sha256; download model-v3 again"
 [ -f data/lm/classes.sjc ] || fail "data/lm/classes.sjc is missing (the word-class term of the model, S2k). Download the classes-v1 release asset:
   gh release download classes-v1 -R Nanako0129/shanjie -p classes.sjc -D data/lm"
+shasum -a 256 -c data/classes.sjc.sha256 >/dev/null \
+  || fail "data/lm/classes.sjc does not match data/classes.sjc.sha256; download classes-v1 again"
 for f in data/lexicon/mcbpmf-data.txt data/lexicon/overlay-add.tsv data/lexicon/sandhi-add.tsv data/lexicon/demote.tsv LICENSE LICENSES/McBopomofo-MIT.txt LICENSES/data.md; do
   [ -f "$f" ] || fail "$f is missing"
 done
@@ -69,7 +71,7 @@ swift scripts/make-icon.swift "$RES/shanjie.tiff"
 cp LICENSE "$RES/LICENSES/LICENSE"
 cp LICENSES/McBopomofo-MIT.txt LICENSES/data.md "$RES/LICENSES/"
 cat > "$RES/LICENSES/CC-BY-SA-4.0-attribution.txt" <<'EOF'
-overlay-add.tsv, demote.tsv and bigram.sjlm are licensed under the Creative Commons
+overlay-add.tsv, demote.tsv, bigram.sjlm and classes.sjc are licensed under the Creative Commons
 Attribution-ShareAlike 4.0 International license (CC BY-SA 4.0):
 https://creativecommons.org/licenses/by-sa/4.0/
 
@@ -79,6 +81,8 @@ demote.tsv: written for this project; no third-party data.
 bigram.sjlm: word counts from Wikipedia articles, Mozilla Common Voice
   sentences (CC0), Tatoeba sentences (CC BY 2.0 FR) and synthetic sentences.
   Attribution: Wikipedia contributors, Tatoeba contributors.
+classes.sjc: word classes and class transition probabilities computed from
+  the same counts as bigram.sjlm; same sources and attribution.
 
 The program itself is Apache-2.0 (LICENSE); mcbpmf-data.txt is MIT
 (McBopomofo-MIT.txt). Details: data.md.

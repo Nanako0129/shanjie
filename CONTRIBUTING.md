@@ -28,16 +28,18 @@
 | macOS | 26 以上，Apple 晶片 |
 | Xcode | 27（CI 用 `xcode-27`） |
 | Rust | 1.97.1（和 CI 相同；評測的 golden 檔是用這一版產生的） |
-| GitHub CLI（已 `gh auth login`）或 curl | 下載語言模型 |
+| GitHub CLI（已 `gh auth login`）或 curl | 下載語言模型與詞類表 |
 
 步驟：
 
 ```sh
-# 語言模型不在 repo 裡，從 Release 下載（CC BY-SA 4.0）
+# 語言模型與詞類表不在 repo 裡，從 Release 下載（CC BY-SA 4.0；兩個都要，說明見 docs/data-files.md）
 gh release download model-v3 -R Nanako0129/shanjie -p bigram.sjlm -D data/lm
+gh release download classes-v1 -R Nanako0129/shanjie -p classes.sjc -D data/lm
 # 沒有登入 gh 的話改用：
 # curl -L --create-dirs -o data/lm/bigram.sjlm https://github.com/Nanako0129/shanjie/releases/download/model-v3/bigram.sjlm
-shasum -a 256 data/lm/bigram.sjlm   # 要和 data/bigram.sjlm.sha256 相同
+# curl -L --create-dirs -o data/lm/classes.sjc https://github.com/Nanako0129/shanjie/releases/download/classes-v1/classes.sjc
+shasum -a 256 -c data/bigram.sjlm.sha256 data/classes.sjc.sha256
 
 make test      # Rust 核心測試，再跑 Swift 殼的測試
 make bundle    # 組出 build/善解輸入法.app

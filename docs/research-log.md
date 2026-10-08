@@ -1322,6 +1322,8 @@ S2h 實機驗收時，使用者在終端機、Discord、VS Code、Chrome 網址�
 
   方向多半變好（6 組裡 5 組 CER 下降），但每一組單獨看都不顯著、區間都跨過 0；S2k 有顯著證據的仍是第一段的 cvtune-native（+21／+26，p ≈ 0.002）。
 
+- **出貨**：使用者選獨立的 Release（不併進 `model-v3`，也不改名成 `model-v3-classes`）。GitHub Release `classes-v1` 已建，附 `classes.sjc`；下載回來 SHA-256 `80dbaa08…49a8a`，和本機逐位元組相同。標成非最新（`--latest=false`）。`data/classes.sjc.sha256` 是唯一的雜湊來源，CI、`release.yml`、`build-app.sh` 都比對它，`cli/tests/golden.rs` 釘同一個值。兩個檔案的關係、下載與換版規則寫在 `docs/data-files.md`（使用者要求 README 或文件講清楚）。
+
 **和選字記憶的交互作用（main 量測，使用者 2026-10-08 決定）**：`core/tests/engine_learn.rs` 有兩個測試在類別項下失敗，關掉類別項就通過。
 - **同前文學會率 3／5**（`a2_candidate_pick_learning_on_cases_tsv`）：沒學會的「戰機」「喉嚨發炎」兩組，類別模型已經把教學句打對，沒有改選、沒有紀錄；測試把它們列為「沒得教」（moot），卻仍把同前文句算進分母。這是測試的不一致：沒有紀錄的組不能說明紀錄會不會傳到同前文，契約 §6.2 也以鏡像測試為主要數字。改成不計 moot 組的同前文句之後是 3／3（main 上是 4／5、可達 4／4）。鏡像測試 7／8，學不會的是「檢察／檢查」（在「^」教），main 上同樣是 7／8、同一組。
 - **全域污染**（`global_eps_table`，release）：

@@ -121,6 +121,18 @@ fn lm_file_is_the_documented_build() {
     );
 }
 
+/// S2k section 4.4: the class table is the classes-v1 release asset (data/classes.sjc.sha256).
+#[test]
+fn classes_file_is_the_released_build() {
+    let p = std::path::Path::new(&lm_path()).with_file_name("classes.sjc");
+    let bytes = std::fs::read(&p).unwrap_or_else(|_| panic!("{} is missing: gh release download classes-v1 -R Nanako0129/shanjie -p classes.sjc -D data/lm", p.display()));
+    assert_eq!(
+        core::eval::sha256_hex(&bytes),
+        "80dbaa0898fff16f90d290fbc6ebf29edb30d917c95dbef1b72649183dd49a8a",
+        "data/lm/classes.sjc differs from the classes-v1 release; download it again or rebuild with tools/build_classes.py"
+    );
+}
+
 /// S-bench 7.1: the unigram row mode (`--no-overlay --rows --dump`, no `--lm`) equals the golden written by
 /// `reference/proto/unigram_eval.py` (summary line, then the full top-64 dump), byte for byte.
 /// Regenerate: see the docstring of reference/proto/unigram_eval.py.

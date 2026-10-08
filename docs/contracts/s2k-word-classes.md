@@ -148,6 +148,7 @@
 ### 4.4 出貨
 
 - 本機建好並全部驗收之後，先問使用者是否建立 GitHub Release `classes-v1`（附 `classes.sjc`），這是對外動作。
+  - **已建（2026-10-08）**：使用者選獨立的 Release（不併進 `model-v3`），並要求 README 或文件講清楚；說明寫在 `docs/data-files.md`，README 的安裝段指過去。
 - 建好、下載回來比對雜湊相符之後，才做這些：
   - 加 `data/classes.sjc.sha256`；
   - CI（`ci.yml`、`release.yml`）下載它；
