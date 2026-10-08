@@ -1407,3 +1407,10 @@ S2h 實機驗收時，使用者在終端機、Discord、VS Code、Chrome 網址�
 - **最終版**（本機 review 後：pattern 開頭改成 `^[^ ]*` 涵蓋系統層的 `/Library/Input Methods`，notice 改成「如果有就停止」，因為第一次安裝也會印）再跑一次 `brew reinstall`：reinstall 會略過 `signal`，只剩 postflight 結束行程；舊 PID 撐到 notice，0.01 秒內消失。
 - **以後可以考慮**（review 提出，延後）：結束舊行程的 pattern 現在有 `install-ime.sh` 與 cask 兩套（README 的手動指令照 cask）。更根本的做法是讓輸入法自己發現 bundle 被換掉（比對磁碟上的版本或執行檔），發現就結束自己，所有升級路徑共用一個機制。
 - **設計上的錯**：同一天第一份安裝流程契約（`docs/contracts/installer-v2.md` 的第一版，在 `feat/installer-v2` 分支）又寫了「brew postflight 自動註冊」，這是 2026-10-04 讀 Homebrew 原始碼就判斷走不通、記下來的路（沙盒讀不到家目錄；沒有實測）。plan-verifier 抓到，範圍縮回只改安裝程式，教訓寫進方法論。
+
+## 2026-10-09：brew 升級後善解從選單消失（未解）
+
+- 兩次 brew 實機實測後，使用者發現選單沒有善解：注音模式「已啟用」、善解本體「未啟用」。`shanjie install` 回報成功但沒效果，從系統設定手動加回才恢復。
+- 虛擬機（macOS 26.6.2）照 Homebrew 的換檔方式試了 6 種組合（含 pkill、隔離屬性、空 3 秒），都沒有消失。本機（macOS 27）用真的 brew 各跑一次公開 cask 與新 cask，每 0.5 秒記 TIS 狀態：bundle 被移走期間本體都會短暫變「未啟用」，新版搬入後 0.07–0.12 秒內自動恢復，兩次最後都是「已啟用」。所以短暫失效是 Homebrew 換版本身的現象，和新 cask 的 postflight 無關；第一次沒恢復的原因未解（那次空檔約 2.9 秒，重現時 1.1–1.8 秒）。細節在 s3b §15.6。
+- 量法更正：`defaults read com.apple.HIToolbox AppleEnabledInputSources` 不能拿來判斷啟用狀態（虛擬機裡已啟用也讀到 0 筆）；只採信 TIS 回報。
+- 另一個量到的事（影響安裝程式）：程式化啟用（`TISEnableInputSource`）在這兩種狀態下對善解本體都無效：本機消失後重新啟用、虛擬機全新安裝並重開機後啟用。兩次都要使用者從系統設定加入才生效。這和 2026-10-04「登出再登入後 `install` 就能啟用」的紀錄不同（當時是 0.1.0、較早的 macOS；差在哪裡未查）。
