@@ -181,3 +181,48 @@ fn freeze_partial_overlap_of_a_mismatched_word_is_left_to_the_decoder() {
     assert!(o.handled);
     assert_eq!(o.preedit, "吧玻");
 }
+
+/// Type `syl` with the cursor after `at` syllables.
+fn insert_at(e: &mut Engine, at: usize, syl: &str) -> String {
+    e.key(k(KeyKind::Home)).unwrap();
+    for _ in 0..at {
+        e.key(k(KeyKind::Right)).unwrap();
+    }
+    type_syls(e, syl).preedit
+}
+
+/// Section 6.1, measured: 他是 shows after the re-pick 她是; the new syllable merges with 是 into 世界 (Apple Zhuyin:
+/// 她世界). The previous commit gave 她是界.
+#[test]
+fn insert_after_repick_merges_with_the_frozen_neighbour() {
+    let mut e = engine();
+    assert_eq!(shown(&mut e, "ㄊㄚ ㄕˋ", ""), "他是");
+    assert_eq!(repick(&mut e, 1, "她").preedit, "她是");
+    assert_eq!(insert_at(&mut e, 2, "ㄐㄧㄝˋ"), "她世界");
+}
+
+/// 板控 re-picked to 版控; ㄐㄧㄢ does not form a word with 控, so 控 stays.
+#[test]
+fn insert_that_does_not_merge_keeps_the_frozen_word() {
+    let mut e = engine();
+    shown(&mut e, "ㄅㄢˇ ㄎㄨㄥˋ", "要進");
+    assert_eq!(repick(&mut e, 1, "版").preedit, "版控");
+    assert_eq!(insert_at(&mut e, 2, "ㄐㄧㄢ"), "版控間");
+}
+
+/// 在也由於在野, the last word re-picked to 再也: frozen 在, 也 and 由於 (3-5) on the left of the pick.
+/// Inserting at 2 (between 也 and 由於): ㄕㄡˇ merges with 也 only (野手): 由於 stays. ㄐㄧㄝˋ merges with 由 of the
+/// two-syllable 由於 (the free decode reads 藉由), not with all of it: 由於 stays whole and the gap decodes as 借.
+#[test]
+fn insert_with_a_frozen_word_on_each_side() {
+    let base = "ㄗㄞˋ ㄧㄝˇ ㄧㄡˊ ㄩˊ ㄗㄞˋ ㄧㄝˇ";
+    let run = |syl: &str| {
+        let mut e = engine();
+        assert_eq!(shown(&mut e, base, ""), "在也由於在野");
+        assert_eq!(repick(&mut e, 6, "再也").preedit, "在也由於再也");
+        insert_at(&mut e, 2, syl)
+    };
+    assert_eq!(run("ㄕㄡˇ"), "在野手由於再也", "left merges, right word unchanged");
+    assert_eq!(run("ㄐㄧㄝˋ"), "在也借由於再也", "partial merge of 由於 keeps it whole");
+    assert_eq!(run("ㄋㄧㄢˊ"), "在也年由於再也", "no merge on either side");
+}

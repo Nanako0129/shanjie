@@ -202,6 +202,16 @@ pub struct Output {
     pub total: u32,
 }
 
+/// One word of the displayed best path.
+struct PathWord {
+    word: String,
+    lp: f64,
+    is_punct: bool,
+    delta: f64,
+    /// Syllables the word covers (punctuation is 1).
+    syllables: usize,
+}
+
 struct Fixed {
     start: usize,
     end: usize,
@@ -284,7 +294,7 @@ pub struct Engine {
     demote: bool,
     /// Words of the current best path with the lp each was scored with, whether the word is a
     /// punctuation token, and its demotion delta (LM mode only).
-    path: Vec<(String, f64, bool, f64, usize)>,
+    path: Vec<PathWord>,
     /// s3e: punctuation mark -> its alternatives (built-in default until `set_punctuation`).
     punct: HashMap<char, Vec<String>>,
     layout: Layout,
@@ -662,7 +672,7 @@ impl Engine {
         let mut prev = history(&self.left, &st.lm);
         let mut total = 0.0;
         let (mut any, mut open) = (false, false);
-        for (w, lp, is_punct, delta, _) in &self.path {
+        for PathWord { word: w, lp, is_punct, delta, .. } in &self.path {
             if *is_punct {
                 if open {
                     total += st.lm.eos(lam, prev);
@@ -718,8 +728,8 @@ impl Engine {
         let pending: Vec<char> = self.pend.iter().flatten().copied().collect();
         let mut long_starts = Vec::new();
         let mut pos = n;
-        for (.., syllables) in self.path.iter().rev().take(2) {
-            pos = pos.saturating_sub(*syllables);
+        for pw in self.path.iter().rev().take(2) {
+            pos = pos.saturating_sub(pw.syllables);
             long_starts.push(pos);
         }
         long_starts.reverse(); // far to near
@@ -927,12 +937,12 @@ impl Engine {
                 .map_err(|_| EngineError::Internal)?;
                 for (w, lp, delta, l) in &best.first().ok_or(EngineError::Internal)?.1 {
                     out.push_str(w);
-                    path.push((w.to_string(), *lp, false, *delta, *l));
+                    path.push(PathWord { word: w.to_string(), lp: *lp, is_punct: false, delta: *delta, syllables: *l });
                 }
             }
             if let Some(f) = right {
                 out.push_str(&f.word);
-                path.push((f.word.clone(), lp_fixed[gap], self.is_punct(f.start), delta_fixed[gap], f.end - f.start));
+                path.push(PathWord { word: f.word.clone(), lp: lp_fixed[gap], is_punct: self.is_punct(f.start), delta: delta_fixed[gap], syllables: f.end - f.start });
             }
         }
         self.display = out;
@@ -1236,12 +1246,44 @@ impl Engine {
             self.fixed.sort_by_key(|f| f.start);
         }
         self.cursor += 1;
-        self.refresh()?;
+        self.release_frozen(c)?;
         if self.syls.len() >= MAX_SYLLABLES {
             let commit = self.take_commit();
             return Ok(self.view(true, commit));
         }
         self.handled()
+    }
+
+    /// repick-freeze section 6.1: after a syllable was inserted at `c`, decode (and set `display`/`path`). A frozen
+    /// neighbour (left one ending at `c`, right one starting at `c + 1`; not punctuation) stays fixed unless a word of
+    /// the decode without them covers all its syllables plus the new one.
+    fn release_frozen(&mut self, c: usize) -> Result<(), EngineError> {
+        let is_cand = |s: &Self, f: &Fixed| f.frozen && !s.is_punct(f.start) && (f.end == c || f.start == c + 1) && !s.is_punct(c);
+        if !self.fixed.iter().any(|f| is_cand(self, f)) {
+            return self.refresh();
+        }
+        let (cands, rest): (Vec<Fixed>, Vec<Fixed>) = std::mem::take(&mut self.fixed).into_iter().partition(|f| is_cand(self, f));
+        self.fixed = rest;
+        self.refresh()?; // tentative decode
+        let mut spans = Vec::new();
+        let mut pos = 0;
+        for w in &self.path {
+            spans.push((pos, pos + w.syllables));
+            pos += w.syllables;
+        }
+        let mut kept = Vec::new();
+        for f in cands {
+            let (from, to) = if f.end == c { (f.start, c + 1) } else { (c, f.end) };
+            if !spans.iter().any(|&(a, b)| a <= from && to <= b) {
+                kept.push(f);
+            }
+        }
+        if kept.is_empty() {
+            return Ok(());
+        }
+        self.fixed.extend(kept);
+        self.fixed.sort_by_key(|f| f.start);
+        self.refresh()
     }
 
     fn remove_syllable(&mut self, i: usize) -> Result<(), EngineError> {
@@ -1344,8 +1386,9 @@ impl Engine {
         // A pending learn of the same word would teach it again at the next commit and append it
         // back (§1.5), as learning_clear's pending-learn drop prevents for clear.
         let syls = &self.syls;
-        // repick-freeze: a frozen copy of the same (reading, word) goes, so its syllables re-decode without the record.
-        self.fixed.retain(|f| !(f.frozen && f.word == word && syls[f.start..f.end] == *reading));
+        // repick-freeze section 6.2: every frozen word goes, so the composition re-decodes without the record around
+        // the user's own picks only.
+        self.fixed.retain(|f| !f.frozen);
         for f in self.fixed.iter_mut() {
             if f.word == word && syls[f.start..f.end] == *reading {
                 f.pre = None;
@@ -1363,12 +1406,12 @@ impl Engine {
     /// entry) as frozen fixed words. Without a model there is no path and nothing freezes.
     fn freeze_outside(&self, start: usize, end: usize) -> Vec<Fixed> {
         let Some(st) = &self.lm else { return Vec::new() };
-        if self.path.iter().map(|p| p.4).sum::<usize>() != self.syls.len() {
+        if self.path.iter().map(|p| p.syllables).sum::<usize>() != self.syls.len() {
             return Vec::new();
         }
         let mut out = Vec::new();
         let mut p = 0;
-        for (word, _, _, _, len) in &self.path {
+        for PathWord { word, syllables: len, .. } in &self.path {
             let q = p + len;
             if q <= start || p >= end {
                 if !self.fixed.iter().any(|f| f.start == p && f.end == q) {

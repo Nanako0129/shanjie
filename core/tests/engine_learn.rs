@@ -1925,3 +1925,29 @@ fn forget_a_frozen_word_redecodes_it_without_the_record() {
     println!("forget on frozen A: {} (taught {a_taught}, unlearned {want})", o.preedit);
     assert_eq!(o.preedit, format!("{want}{b_picked}"));
 }
+
+/// Repick-freeze section 6.2: a re-pick cuts the learned word 警官 (井 over the first syllable); the left-over 官 is
+/// frozen. ⌘⌫ on 警官 re-decodes with only the user's 井 fixed, as an engine that never learned 警官 does.
+#[test]
+fn forget_a_cut_learned_word_leaves_no_pieces() {
+    let reading = "ㄐㄧㄥˇ ㄍㄨㄢ ㄍㄨㄥ ㄗㄨㄛˋ";
+    let mut e = engine();
+    type_syls(&mut e, "ㄐㄧㄥˇ ㄍㄨㄢ");
+    pick(&mut e, 2, 2, "警官");
+    e.key(k(KeyKind::Enter)).unwrap();
+    assert!(type_syls(&mut e, reading).preedit.starts_with("警官"));
+    pick(&mut e, 4, 1, "井");
+    e.key(k(KeyKind::Home)).unwrap();
+    e.key(k(KeyKind::Right)).unwrap();
+    e.key(k(KeyKind::Right)).unwrap();
+    let o = e.key(k(KeyKind::Space)).unwrap();
+    highlight(&mut e, o, "警官");
+    let got = e.key(Key { kind: KeyKind::Backspace, ch: '\0', modifiers: MOD_COMMAND }).unwrap().preedit;
+    // reference: never learned, only the user's 井 fixed (typed first, so nothing else is frozen)
+    let mut r = engine();
+    type_syls(&mut r, "ㄐㄧㄥˇ");
+    pick(&mut r, 1, 1, "井");
+    let want = type_syls(&mut r, "ㄍㄨㄢ ㄍㄨㄥ ㄗㄨㄛˋ").preedit;
+    println!("cut learned word, forgotten: {got} (shown with the record: 井官工作)");
+    assert_eq!(got, want);
+}
