@@ -92,19 +92,21 @@
   :root { --dot: 16px; --rail: 2px; --item-indent: 32px; }  /* 圓點與縱線：和內文 16px 同尺度，縮排留給圓點加間距 */
   .stages { display: grid; gap: 12px; }
   .stage { border: 1px solid var(--line); border-radius: 12px; padding: 0; }
-  .stage > summary { list-style: none; display: grid; grid-template-columns: auto 1fr auto; gap: 2px 14px; align-items: baseline;
-                     padding: 16px 18px; border-radius: 12px; }
+  .stage > summary { list-style: none; display: grid; grid-template-columns: auto 1fr auto auto; gap: 2px 14px; align-items: center;
+                     padding: 16px 18px; border-radius: 12px; cursor: pointer; }
   .stage > summary::-webkit-details-marker { display: none; }
   .stage[open] > summary { border-bottom: 1px solid var(--line); border-radius: 12px 12px 0 0; background: var(--paper-2); }
   .stage .ver { font: 900 22px/1.3 var(--serif); min-width: 3.2em; }
   .stage .st-title { font: 900 19px/1.4 var(--serif); }
   .stage .meta { grid-column: 2 / -1; font-size: 14px; color: var(--ink-2); }
-  .stage > summary::after { content: "展開"; grid-column: 3; grid-row: 1; font-size: 13px; color: var(--ink-2); }
-  .stage[open] > summary::after { content: "收合"; }
+  /* 展開提示：小箭頭佔自己的一欄，不和狀態標籤搶位置（手機上曾疊在一起，2026-10-08 使用者截圖） */
+  .stage > summary::after { content: ""; grid-column: 4; grid-row: 1; width: 8px; height: 8px; margin: 0 4px 4px;
+                            border-right: 2px solid var(--ink-2); border-bottom: 2px solid var(--ink-2); transform: rotate(45deg); }
+  .stage[open] > summary::after { transform: rotate(-135deg); margin: 4px 4px 0; }
   .tag { font: 500 13px/1.6 var(--sans); padding: 0 9px; border-radius: 999px; border: 1px solid var(--line); color: var(--ink-2); white-space: nowrap; }
   .tag.done { color: var(--ok); border-color: currentColor; }
   .tag.wip { color: var(--wip); border-color: currentColor; }
-  .stage > summary .tag { grid-column: 3; grid-row: 2; justify-self: end; }
+  .stage > summary .tag { grid-column: 3; grid-row: 1; justify-self: end; }
   .items { list-style: none; margin: 0; padding: 18px 18px 2px; }
   .items li { position: relative; padding: 0 0 22px var(--item-indent); }
   .items li::before { content: ""; position: absolute; left: calc(var(--dot) / 2 - var(--rail) / 2); top: 12px; bottom: -10px; width: var(--rail); background: var(--line); }
@@ -124,8 +126,9 @@
   .legend .l-done { background: var(--seal); border-color: var(--seal); }
   .legend .l-wip { border-color: var(--seal); box-shadow: inset 0 0 0 2px var(--paper), inset 0 0 0 6px var(--seal); }
   .legend .l-res { border-radius: 2px; transform: rotate(45deg) scale(.82); border-color: var(--ink-2); }
-  @media (max-width: 520px) { .stage > summary { grid-template-columns: 1fr auto; } .stage .ver { grid-column: 1; } .stage .st-title { grid-column: 1 / -1; grid-row: 2; }
-    .stage .meta { grid-column: 1 / -1; } .stage > summary::after { grid-column: 2; grid-row: 1; } .stage > summary .tag { grid-column: 2; grid-row: 1; justify-self: end; margin-right: 3.2em; } }
+  @media (max-width: 520px) { .stage > summary { grid-template-columns: 1fr auto auto; } .stage .ver { grid-column: 1; grid-row: 1; }
+    .stage .st-title { grid-column: 1 / -1; grid-row: 2; } .stage .meta { grid-column: 1 / -1; grid-row: 3; }
+    .stage > summary .tag { grid-column: 2; grid-row: 1; } .stage > summary::after { grid-column: 3; grid-row: 1; } }
 
   /* 詳細 */
   details { border-top: 1px solid var(--line); padding: 12px 0; }
