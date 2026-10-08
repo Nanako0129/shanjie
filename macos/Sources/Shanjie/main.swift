@@ -8,41 +8,27 @@ import ShanjieKit
 // `install`, or exactly `--selftest`. Anything else exits non-zero before touching anything.
 // Output is fixed text only (R2): no paths, bundle IDs or input.
 
-func say(_ message: StaticString) {
+func say(_ message: String) {
     FileHandle.standardError.write(Data("\(message)\n".utf8))
 }
 
 /// docs/contracts/s3b.md section 13.3, through ShanjieInstall (shared with the installer). Run on
 /// the installed copy, by scripts/install-ime.sh or by the user after `brew install`. Exit 3 means
-/// the mode is not listed yet or the input method is not accepted yet (log out and log in, then
-/// run it again); 1 is any other failure.
+/// the mode is not listed yet or the input method is not accepted yet (add it in System Settings >
+/// Keyboard > Input Sources); 1 is any other failure. installer-v2.md section 9: registration runs
+/// only when the system does not know the mode yet or an earlier version's mode is enabled. When
+/// it is skipped as not accepted, this waits up to 5 s for the system to take the input method
+/// (calling nothing that changes TIS state) before giving up with 3.
 func install() -> Int32 {
     guard let bundleID = Bundle.main.bundleIdentifier else {
         say("install: no bundle identifier")
         return 1
     }
     let result = Registration.run(bundleURL: Bundle.main.bundleURL, bundleID: bundleID, defaults: .standard)
-    if result.registerFailed { say("install: warning: TISRegisterInputSource failed") }
-    switch result.outcome {
-    case .modeNotListed:
-        say("install: the input mode is not listed yet")
-        return 3
-    case .registrationFailed:
-        say("install: registration failed and the input mode is not listed")
-        return 1
-    case .enableFailed:
-        say("install: TISEnableInputSource failed")
-        return 1
-    case .notAccepted:
-        say("install: the system has not accepted the input method yet")
-        return 3
-    case .done:
-        if result.legacyDisableFailed {
-            say("install: warning: TISDisableInputSource failed for an input mode of an earlier version")
-        }
-        say("install: registered and enabled")
-        return 0
-    }
+    let accepted = Registration.waitUntilAccepted(result, isAccepted: { Registration.isAccepted(bundleID: bundleID) })
+    let report = InstallCommand.report(result, acceptedAfterWait: accepted)
+    for line in report.messages { say(line) }
+    return report.exitCode
 }
 
 /// The chosen keyboard layout, in the app's own UserDefaults domain (its bundle ID), key `layout`
