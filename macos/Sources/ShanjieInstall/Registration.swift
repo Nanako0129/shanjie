@@ -77,6 +77,20 @@ public enum Registration {
         inputSources(bundleID: bundleID, includeAllInstalled: false).contains { inputModeID($0) == nil }
     }
 
+    /// docs/contracts/installer-v2.md section 1.2: selects the input method's one mode among the
+    /// enabled sources. False when it is not listed, not selectable or the call fails; whether the
+    /// switch took is checked separately with `isCurrentMode` (it can return noErr and not switch).
+    public static func selectMode(bundleID: String) -> Bool {
+        let sources = inputSources(bundleID: bundleID, includeAllInstalled: false)
+        let listed = sources.map { (modeID: inputModeID($0), selectable: isSelectCapable($0)) }
+        guard let index = InstallerFlow.modeIndex(listed, bundleID: bundleID) else { return false }
+        return TISSelectInputSource(sources[index]) == noErr
+    }
+
+    public static func isCurrentMode(bundleID: String) -> Bool {
+        inputModeID(TISCopyCurrentKeyboardInputSource().takeRetainedValue()) == "\(bundleID).zhuyin"
+    }
+
     static func inputSources(bundleID: String, includeAllInstalled: Bool) -> [TISInputSource] {
         let filter = [kTISPropertyBundleID as String: bundleID] as CFDictionary
         return TISCreateInputSourceList(filter, includeAllInstalled)?.takeRetainedValue() as? [TISInputSource] ?? []
@@ -88,7 +102,15 @@ public enum Registration {
     }
 
     static func isEnabled(_ source: TISInputSource) -> Bool {
-        guard let p = TISGetInputSourceProperty(source, kTISPropertyInputSourceIsEnabled) else { return false }
+        boolProperty(source, kTISPropertyInputSourceIsEnabled)
+    }
+
+    static func isSelectCapable(_ source: TISInputSource) -> Bool {
+        boolProperty(source, kTISPropertyInputSourceIsSelectCapable)
+    }
+
+    private static func boolProperty(_ source: TISInputSource, _ key: CFString) -> Bool {
+        guard let p = TISGetInputSourceProperty(source, key) else { return false }
         return CFBooleanGetValue(Unmanaged<CFBoolean>.fromOpaque(p).takeUnretainedValue())
     }
 }
