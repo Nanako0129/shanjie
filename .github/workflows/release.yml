@@ -42,11 +42,22 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           persist-credentials: false
-          sparse-checkout: scripts
+          sparse-checkout: |
+            scripts
+            docs/releases
       - name: Require green CI for this commit
         env:
           GH_TOKEN: ${{ github.token }}
         run: scripts/check-ci-gate.sh "$GITHUB_SHA"
+      # docs/contracts/release-notes.md: a tag is published only with its hand-written notes in the
+      # repo. The dry run on main publishes nothing, so it is not checked.
+      - name: Require the release notes
+        run: |
+          set -euo pipefail
+          [ "$GITHUB_EVENT_NAME" = push ] || exit 0
+          f="docs/releases/$GITHUB_REF_NAME.md"
+          [ -f "$f" ] || { echo "error: $f is missing; write the release notes and merge them before tagging" >&2; exit 1; }
+          grep -q '[^[:space:]]' "$f" || { echo "error: $f is empty" >&2; exit 1; }
 
   # Ad-hoc build, exactly as CI builds it. No Environment, read-only token.
   build:
@@ -300,13 +311,14 @@ jobs:
           HOMEBREW_TAP_DEPLOY_KEY: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
         run: '[ -n "$HOMEBREW_TAP_DEPLOY_KEY" ] || { echo "error: HOMEBREW_TAP_DEPLOY_KEY is empty in the release Environment" >&2; exit 1; }'
 
-      # For scripts/render-cask.sh and its template.
+      # For scripts/render-cask.sh and its template, and the release notes.
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           persist-credentials: false
           sparse-checkout: |
             scripts
             packaging
+            docs/releases
 
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -339,7 +351,8 @@ jobs:
           else
             gh release create "$GITHUB_REF_NAME" \
               "${ZIPS[0]}" "${ZIPS[0]}.sha256" "${ZIPS[1]}" "${ZIPS[1]}.sha256" \
-              --repo "$GITHUB_REPOSITORY" --title "善解 $VERSION" --generate-notes --latest
+              --repo "$GITHUB_REPOSITORY" --title "善解 $VERSION" \
+              --notes-file "$GITHUB_WORKSPACE/docs/releases/$GITHUB_REF_NAME.md" --latest
           fi
 
       # No secret in scope while repository scripts run. The hash is the first field of the
