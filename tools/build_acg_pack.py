@@ -494,7 +494,9 @@ def top1(pairs, profile, packs_dir=None):
 
 def detect_collisions(words, reading, rows, ref, decode=top1):
     """對每個詞包詞 w 的讀音（含「一」「不」變調列的讀音），各解碼兩次（不開／開詞包；聊天與書面）。符合其一就列出：
-    (a) 開了之後第一名是另一個詞包詞；(b) 不開時第一名不是 w，而且在參考名單 ref 裡。回傳 {讀音: [(w, 條件, 設定, 不開第一名, 開第一名)]}。"""
+    (a) 開了之後第一名是另一個詞包詞；(b) 不開時第一名不是 w，而且在參考名單 ref 裡。兩者都只在開了之後第一名有改變時才算：
+    第一名沒變的，詞包的寫法只多一個候選，不改變打出來的結果（使用者 2026-10-09 決定這類留做候選、不必人工處置）。
+    回傳 {讀音: [(w, 條件, 設定, 不開第一名, 開第一名)]}。"""
     with tempfile.TemporaryDirectory() as d:
         with open(os.path.join(d, "acg-add.tsv"), "w", encoding="utf-8") as f:
             f.writelines(rows)
@@ -508,6 +510,8 @@ def detect_collisions(words, reading, rows, ref, decode=top1):
         for prof in ("chat", "formal"):
             off, on = decode(pairs, prof), decode(pairs, prof, d)
             for (w, syls), o, n in zip(pairs, off, on):
+                if n == o:
+                    continue
                 for cond, hit in (("a", n != w and n in inpack), ("b", o != w and o in ref)):
                     if hit:
                         found[" ".join(syls)].append((w, cond, prof, o, n))
@@ -515,14 +519,17 @@ def detect_collisions(words, reading, rows, ref, decode=top1):
 
 
 def read_collisions(path):
-    """acg-collisions.tsv：讀音、保留的詞、排除的詞、理由。回傳 {排除的詞: 讀音}。"""
+    """acg-collisions.tsv：讀音、保留的詞、排除的詞、理由。排除的詞寫 `-` 表示兩個都留（使用者決定的處置，排序照來源數）。
+    回傳 ({排除的詞: 讀音}, {已處置的讀音})。"""
     if not os.path.exists(path):
-        return {}
-    out = {}
+        return {}, set()
+    out, decided = {}, set()
     for r in read_tsv(path):
         assert len(r) == 4 and r[2], f"bad collision row: {r}"
-        out[r[2]] = r[0]
-    return out
+        decided.add(r[0])
+        if r[2] != "-":
+            out[r[2]] = r[0]
+    return out, decided
 
 
 # ---------------------------------------------------------------- 主流程
@@ -603,7 +610,7 @@ def build(api, groups_tsv=os.path.join(PACKS, "acg-groups.tsv"), collisions_tsv=
         assert HAN.match(w), w
         src[w]["manual"].add(work)
         ref.add(w)
-    excluded = read_collisions(collisions_tsv)
+    excluded, decided = read_collisions(collisions_tsv)
     cand = [w for w in dedupe(src, have) if w not in excluded]
     log("candidates", len(src), "after dedupe and exclusions", len(cand), "excluded by acg-collisions.tsv", len(excluded))
 
@@ -614,7 +621,7 @@ def build(api, groups_tsv=os.path.join(PACKS, "acg-groups.tsv"), collisions_tsv=
     sc = scores(base)
     order = ordered(words, lambda w: sum(len(s) for s in src[w].values()))
     rows = pack_rows(order, reading, sc)
-    col = detect_collisions(words, reading, rows, ref, decode)
+    col = {r: v for r, v in detect_collisions(words, reading, rows, ref, decode).items() if r not in decided}
     ts_max = max(ts)
     manifest = {
         "version": ts_max[:10].replace("-", "") + "-" + hashlib.sha256("".join(rows).encode()).hexdigest()[:8],   # 最新的有時間戳的來源頁日期＋詞包內容雜湊：內容變了版號一定變

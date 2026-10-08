@@ -215,19 +215,37 @@ class Build(unittest.TestCase):
 
     def test_collisions_are_listed_without_a_disposition(self):
         _, manifest, col, _, _ = self.build(self.none)
-        self.assertIn("ㄈㄥ ㄓ ㄍㄨˇ", col)                           # 楓之谷 對 風之谷
-        self.assertEqual({w for w, *_ in col["ㄈㄥ ㄓ ㄍㄨˇ"]} <= {"楓之谷", "風之谷"}, True)
-        self.assertIn("楓之谷", {w for w, *_ in col["ㄈㄥ ㄓ ㄍㄨˇ"]})
+        # 夾具裡 風之谷 是作品標題、本身也在詞包，開了詞包第一名仍是 風之谷，所以 楓之谷 只多一個候選、不列
+        # （第一名真的被換掉時會列出，見 test_a_collision_counts_only_when_the_pack_changes_the_top1）。
+        self.assertNotIn("ㄈㄥ ㄓ ㄍㄨˇ", col)
         self.assertNotIn("ㄉㄧㄥˋ ㄩㄢˊ ㄊㄤˊ", col)                   # 碇源堂：不開是 定元堂，不在參考名單
         self.assertNotIn("ㄧㄥˊ ㄏㄨㄛˇ ㄔㄨㄥˊ ㄓ ㄇㄨˋ", col)         # 螢火蟲之墓：不開是 螢火蟲之目
-        self.assertEqual(manifest["unresolved_collision_readings"], 1)
+        self.assertEqual(manifest["unresolved_collision_readings"], 0)
+
+    def test_a_collision_counts_only_when_the_pack_changes_the_top1(self):
+        # 使用者 2026-10-09：開了詞包第一名沒變的（只多一個候選），不列為衝突；第一名被換掉的才列。
+        reading = {"芭芭": ("ㄅㄚ", "ㄅㄚ"), "楓之谷": ("ㄈㄥ", "ㄓ", "ㄍㄨˇ")}
+        def decode(pairs, prof, packs=None):
+            out = []
+            for w, _ in pairs:
+                if w == "芭芭":
+                    out.append("巴巴")                         # 開不開都是 巴巴
+                else:
+                    out.append("楓之谷" if packs else "風之谷")  # 開了被換掉
+            return out
+        col = B.detect_collisions(["芭芭", "楓之谷"], reading, [], {"巴巴", "風之谷"}, decode=decode)
+        self.assertNotIn("ㄅㄚ ㄅㄚ", col)
+        self.assertIn("ㄈㄥ ㄓ ㄍㄨˇ", col)
 
     def test_the_committed_dispositions_are_applied_to_the_committed_pack(self):
         pack = second_column(os.path.join(B.PACKS, "acg-add.tsv"))
         rows = B.read_tsv(os.path.join(B.PACKS, "acg-collisions.tsv"))
         self.assertGreater(len(rows), 100)
         for reading, keep, exclude, why in rows:
-            self.assertNotIn(exclude, pack, exclude)
+            if exclude == "-":                         # 兩個都留
+                self.assertIn(keep, pack, keep)
+            else:
+                self.assertNotIn(exclude, pack, exclude)
             self.assertTrue(why)
         self.assertIn("風之谷", pack)
         self.assertNotIn("楓之谷", pack)
