@@ -1486,7 +1486,7 @@ App 沙盒那一片寫契約之前，先量契約要依賴的系統行為。
 
 **做法**：
 - 環境：tart 虛擬機 `shanjie-exp`，macOS 26.6.2，帳號 admin。指令用 `launchctl asuser 501` 在登入的 GUI session 裡執行。
-- 組建：這個分支（main 7f1df7c）用 `BUNDLE_ID=com.nyanako.inputmethod.shanjie.sbx1` 跑 `scripts/build-app.sh`。之後在暫存區手動加上兩樣東西，再用 ad-hoc 重簽：
+- 組建：main 7f1df7c，用 `BUNDLE_ID=com.nyanako.inputmethod.shanjie.sbx1` 跑 `scripts/build-app.sh`。之後在暫存區手動加上兩樣東西，再用 ad-hoc 重簽：
   - entitlements：`com.apple.security.app-sandbox` 與 `com.apple.security.temporary-exception.mach-register.global-name = [<ID>_Connection]`；
   - `Contents/Resources/container-migration.plist`：`Move = [${ApplicationSupport}/shanjie]`。
 - bundle 放在 `~/Library/Input Methods/善解沙盒測試.app`。
@@ -1494,6 +1494,7 @@ App 沙盒那一片寫契約之前，先量契約要依賴的系統行為。
   - `~/Library/Application Support/shanjie/`（0700），裡面有 `learning.tsv`（一筆記錄）與 `learning.tsv.corrupt`（都是 0600）；
   - 用 `tmutil addexclusion` 設成不備份；
   - 拋棄式 ID 的偏好設定 `layout = eten`。
+- 順序：先跑 `--selftest`，再看檔案（`Selftest.swift` 不碰檔案與偏好設定），最後才做註冊與啟動輸入法的兩項。所以下面的權限、旗標，是移轉之後、程式還沒開過學習檔時的狀態。
 
 **量到的**（每項各一次）：
 - `shanjie --selftest`：在沙盒裡，結束碼 0。log 有 `AppSandbox request successful`，container 也建好了。
@@ -1502,21 +1503,34 @@ App 沙盒那一片寫契約之前，先量契約要依賴的系統行為。
   - 檔案內容相同，權限 0700／0600 保留，不備份的旗標（`com.apple.metadata:com_apple_backup_excludeItem`，`tmutil isexcluded` 回 Excluded）也保留。
   - 系統在資料夾上加了 `com.apple.quarantine`（`…;com.apple.ContainerMigrationService;`）。
 - **偏好設定**：清單裡沒寫，系統也把 `~/Library/Preferences/<ID>.plist` 移進 container 的 `Data/Library/Preferences/`，原檔不見，`layout = eten` 保留。蘋果的移轉文件沒有提到這一點。
-- **container 的擁有者**：記錄成這個簽章，container 的 metadata 是 `signingIdentifier` = ID、`validationCategory` = none。secinitd 的 log 寫 `signer:none`。之後換成 Developer ID 簽章的同一個 ID 啟動時會怎樣，沒有量。
-- **註冊**：沙盒裡的 `shanjie install` 呼叫 TIS 註冊成功，注音模式出現在輸入方式清單裡。結束碼 3，因為系統還沒接受，照 installer-v2 §9 的規則要到系統設定加入；這和沒有沙盒時一樣。
-- **IMK 的連線名稱**：不帶參數啟動執行檔（系統啟動輸入法的方式）5 秒後，`launchctl print gui/501` 裡看得到 `<ID>_Connection`，由這個程序登記。log 裡沒有善解的沙盒拒絕，只有其他系統程序的。
+- **container 的擁有者**：記錄成這個簽章，container 的 metadata 是 `signingIdentifier` = ID、`validationCategory` = none。secinitd 的 log 寫 `signer:none`。
+- **註冊**：沙盒裡的 `shanjie install` 呼叫 TIS 註冊成功，注音模式出現在輸入方式清單裡。結束碼 3（系統還沒接受，要到系統設定加入）。這和 installer-v2 §9 記錄的、沒有沙盒時的結果相同；這次沒有跑沒有沙盒的對照組。
+- **IMK 的連線名稱**：用 `launchctl asuser` 不帶參數啟動執行檔，5 秒後 `launchctl print gui/501` 裡看得到 `<ID>_Connection`，由這個程序登記。log 裡沒有善解的沙盒拒絕，只有其他系統程序的。
+  - 系統由 LaunchServices 啟動輸入法時，程序環境可能不同。把這次的啟動當成等價情況是推論。
 
 **沒量到的**：
 - 在沙盒裡實際打字：要在系統設定加入輸入方式，需要人操作。
+- 由系統（LaunchServices）啟動沙盒裡的輸入法。
 - 沙盒裡 `IsSecureEventInputEnabled` 準不準。
 - Caps Lock：虛擬機測不了。
-- 第一次由 Developer ID 版建立 container 的情況。
-- Developer ID 版接手 ad-hoc 建立的 container。
+- 同一個 ID 重新 ad-hoc 組建（簽章每次都不同）之後，能不能繼續用前一次建立的 container。本機開發每次組建都是這種情況。
+- 第一次由 Developer ID 版建立 container，以及 Developer ID 版接手 ad-hoc 建立的 container。
+- macOS 26.6.2 以外的版本，例如本機的 macOS 27。移轉與 container 的行為可能隨版本改變。
 
 **對契約的影響**（推論）：
-- 移轉清單的路徑和 bundle ID 無關。任何 ID 的沙盒組建，第一次啟動都會把真正的 `~/Library/Application Support/shanjie` 搬走，而且只搬一次。安全審查的 N1 因此確認是 P0。
-  - 拋棄式 ID 要改用兩個元素的寫法 `[${ApplicationSupport}/${BundleId}, ${ApplicationSupport}/shanjie]`：來源是那個 ID 自己的資料夾，目的地是 container 裡程式讀的位置。蘋果文件允許這種寫法，也有 `${BundleId}` 變數；這種寫法還沒實測。
-- 偏好設定不用寫進清單；這個行為要在 CI 的移轉測試裡一起斷言，系統改了才看得出來。
+- **任何 ID 的沙盒組建都會搬走真正的資料**：移轉清單的路徑和 bundle ID 無關。任何 ID 的沙盒組建第一次啟動，都會把真正的 `~/Library/Application Support/shanjie` 搬進它自己的 container，而且只搬一次。
+  - 會觸發的現成路徑：`make selftest-bundled`。它在本機用拋棄式 ID `…shanjie.selftest` 對 bundle 跑 `--selftest`。
+  - `check-app.sh` 的偏好設定快照，在偏好設定被移走後也可能不符。
+  - Makefile 的註解與 s3b §9「selftest 不寫任何檔案或偏好設定」，在 bundle 有 entitlement 與移轉清單之後就不成立。
+  - 安全審查（還沒進 repo）把這一項列為最嚴重的一級。
+  - 只改用另一個 bundle ID 擋不住這件事，PLAN 的寫法因此更正。
+- **最簡單的擋法**：只有正式 ID 的組建放移轉清單，其他 ID 不放（沒有清單就不搬）。另一種是兩個元素的寫法 `[${ApplicationSupport}/${BundleId}, ${ApplicationSupport}/shanjie]`，蘋果文件允許、但還沒實測，而且來源資料夾平常不存在，等於多一個機制。
+- **移轉是「搬」**：
+  - 降回沒有沙盒的版本時，原位置的學習資料與偏好設定都已經不在，舊版看到的是空的。
+  - 照蘋果文件的測試步驟「刪掉 container 再啟動」，會連唯一的那份資料一起刪掉。
+  - 契約要寫退回的做法。
+- **偏好設定不用寫進清單**：這個行為要在 CI 的移轉測試裡一起斷言，系統改了才看得出來。
+- **註冊不需要另外的輔助程式**：註冊在沙盒裡做得到（量到一次），所以 PLAN 的「做不到才移到輔助程式」暫時不需要。
 
 ## 2026-10-09：錯字是缺詞還是排序錯（新詞 B 的前置量測）
 
@@ -1544,7 +1558,7 @@ App 沙盒那一片寫契約之前，先量契約要依賴的系統行為。
 | typing76 | 聊天、聊天＋前文 | 10 | 0 | 9 | 1 | 0 |
 | | 書面、書面＋前文 | 7 | 0 | 7 | 0 | 0 |
 
-- **R 的正解都很近**：user-reported 的 R 列，正解在前 64 名的名次中位數是 2，19–23 列在前 4 名，最差第 6 名；和第一名的分數差中位數約 0.45–0.55。typing76 的 R 列大多也在第 2–6 名，只有「找得到」排在第 15–38 名。
+- **R 的正解句都很近**：user-reported 的 R 列，正解句在整句前 64 名的名次中位數是 2，19–23 列在前 4 名，最差第 6 名；和第一名的分數差中位數約 0.45–0.55。typing76 的 R 列大多也在第 2–6 名，只有「找得到」排在第 15–38 名。
 - **缺的詞**（user-reported）：
   - 版控、反灰、落檔：口語縮寫或口語；
   - 月付金、派工：專業用語；
@@ -1552,12 +1566,19 @@ App 沙盒那一片寫契約之前，先量契約要依賴的系統行為。
   - 詞態：語言學術語；
   - 概想：可能是使用者自己的用法，推論。
 - **「哇靠」**（第 25 列）：詞庫有這個詞，但只有 ㄨㄚ ㄎㄠˋ，沒有使用者打的輕聲 ㄨㄚ˙，所以歸 O。這是缺讀音，不是缺詞。
-- **正解完全不在前 64 名的**：只有拭鏡布（M）與哇靠（O）兩列。其他 M 列的正解都在前 8 名，改選一次就選得到。
-- **中文維基標題**：這 8 個缺詞都沒有完全相同的標題（用本機快取的標題清單比對繁體寫法；清單多為簡體，所以「沒有」只代表比對不到）。
-- **口語語料**：本機快取的 Common Voice 口語句裡，這 8 個詞都是 0 次。
-- 第 17、34 列是同一句「已送出」，上面的數字重複算了一次。
+- **正解句不在整句前 64 名的**：只有拭鏡布（M）與哇靠（O）兩列。其他 M 列的正解句在整句前 8 名。
+  - 這是整句的名次，不是候選窗：候選窗只列詞庫裡讀音相符的詞（s3a §3.1），缺的詞不會整個出現。
+  - 使用者要逐字改選，例如「信貸月付金」解成「信貸岳父金」，月、付兩個字都要改。
+  - 「拭鏡布」解成「試鏡不」，要改「拭」「布」兩個字。
+- **中文維基標題**：這 8 個缺詞都沒有完全相同的標題。用本機快取的標題清單比對繁體寫法，清單多為簡體，所以落檔（落档）、拭鏡布（拭镜布）、詞態（词态）這類繁簡不同的詞，本來就比對不到。
+- **口語語料**：只查了本機快取的 Common Voice 句子，這 8 個詞都是 0 次。
+- 第 17、34 列在沒有前文的兩種設定是同一個輸入（「已送出」），那兩種設定的數字重複算了一次；加前文的兩種設定裡，第 34 列有前文「可以讀」，是不同的輸入。
 
 **推論**：
-- typing76 沒有缺詞，新詞 B 對它沒有幫助。它的錯誤是「再／在」這類單字同音選擇，要靠排序（前文、學習）改善。
-- user-reported 的缺詞約佔錯誤的四分之一。從語料找詞（新詞 A）或維基標題補不到這些詞，從改選學詞組（B）與手動加詞（C）才補得到。
-- B 要能處理一次改選好幾個字的情況，才補得到「拭鏡布」這種三個單字都要改的詞。
+- typing76 沒有缺詞，錯誤以排序為主：
+  - 「再／在」這類單字同音；
+  - 多字的組合：「半糖少冰」解成「辦唐少兵」，半糖、少冰都在詞庫；「賣家說」解成「麥加說」。
+  - 從改選學詞組（B）如果記得住這種組合，也幫得上 typing76，不只是缺詞。
+- user-reported 的缺詞約佔錯誤的四分之一（7–9／32–34）。手動加詞（C）與 B 補得到這些詞。
+- 這次的兩個來源（簡體為主的維基標題、一份口語語料）找不到它們，但比對與語料範圍都有限，不足以排除從語料找詞（新詞 A）。
+- B 要能處理一次改選好幾個字，才記得住「月付金」「拭鏡布」這類詞。
