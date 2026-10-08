@@ -1479,3 +1479,85 @@ S2h 實機驗收時，使用者在終端機、Discord、VS Code、Chrome 網址�
 - 第一列如果使用者是在「切大小寫」之後先送出、再打「沒切語言」，前文就是以漢字結尾的「…切大小寫」。這個情況另外量了：四種設定的第一名仍是「梅切語言」，所以不論是不是一次打完，結論相同。
 - 讀音由 `tools/readings.py` 產生（0 列 CHECK），但第二列「兩個」的「個」手動改成 ㄍㄜˋ：同一檔第 20 列（使用者實際按鍵的紀錄）打的是 ㄍㄜˋ。`readings.py` 給輕聲 ㄍㄜ˙，因為詞庫的「兩個」只有輕聲讀音，而 `tools/reading_overrides.tsv` 只接受詞庫裡的讀音。改成 ㄍㄜˋ 之後第一名仍是「兩個都流」。
 - 沒有一列靠調參數修。
+
+## 2026-10-09：App 沙盒的可行性（虛擬機，拋棄式 bundle ID）
+
+App 沙盒那一片寫契約之前，先量契約要依賴的系統行為。
+
+**做法**：
+- 環境：tart 虛擬機 `shanjie-exp`，macOS 26.6.2，帳號 admin。指令用 `launchctl asuser 501` 在登入的 GUI session 裡執行。
+- 組建：這個分支（main 7f1df7c）用 `BUNDLE_ID=com.nyanako.inputmethod.shanjie.sbx1` 跑 `scripts/build-app.sh`。之後在暫存區手動加上兩樣東西，再用 ad-hoc 重簽：
+  - entitlements：`com.apple.security.app-sandbox` 與 `com.apple.security.temporary-exception.mach-register.global-name = [<ID>_Connection]`；
+  - `Contents/Resources/container-migration.plist`：`Move = [${ApplicationSupport}/shanjie]`。
+- bundle 放在 `~/Library/Input Methods/善解沙盒測試.app`。
+- 事前放好的資料：
+  - `~/Library/Application Support/shanjie/`（0700），裡面有 `learning.tsv`（一筆記錄）與 `learning.tsv.corrupt`（都是 0600）；
+  - 用 `tmutil addexclusion` 設成不備份；
+  - 拋棄式 ID 的偏好設定 `layout = eten`。
+
+**量到的**（每項各一次）：
+- `shanjie --selftest`：在沙盒裡，結束碼 0。log 有 `AppSandbox request successful`，container 也建好了。
+- **學習資料**：
+  - 整個資料夾移進 `~/Library/Containers/<ID>/Data/Library/Application Support/shanjie/`，原位置的資料夾不見了。蘋果文件寫的是「copy」，實測原檔被移走。
+  - 檔案內容相同，權限 0700／0600 保留，不備份的旗標（`com.apple.metadata:com_apple_backup_excludeItem`，`tmutil isexcluded` 回 Excluded）也保留。
+  - 系統在資料夾上加了 `com.apple.quarantine`（`…;com.apple.ContainerMigrationService;`）。
+- **偏好設定**：清單裡沒寫，系統也把 `~/Library/Preferences/<ID>.plist` 移進 container 的 `Data/Library/Preferences/`，原檔不見，`layout = eten` 保留。蘋果的移轉文件沒有提到這一點。
+- **container 的擁有者**：記錄成這個簽章，container 的 metadata 是 `signingIdentifier` = ID、`validationCategory` = none。secinitd 的 log 寫 `signer:none`。之後換成 Developer ID 簽章的同一個 ID 啟動時會怎樣，沒有量。
+- **註冊**：沙盒裡的 `shanjie install` 呼叫 TIS 註冊成功，注音模式出現在輸入方式清單裡。結束碼 3，因為系統還沒接受，照 installer-v2 §9 的規則要到系統設定加入；這和沒有沙盒時一樣。
+- **IMK 的連線名稱**：不帶參數啟動執行檔（系統啟動輸入法的方式）5 秒後，`launchctl print gui/501` 裡看得到 `<ID>_Connection`，由這個程序登記。log 裡沒有善解的沙盒拒絕，只有其他系統程序的。
+
+**沒量到的**：
+- 在沙盒裡實際打字：要在系統設定加入輸入方式，需要人操作。
+- 沙盒裡 `IsSecureEventInputEnabled` 準不準。
+- Caps Lock：虛擬機測不了。
+- 第一次由 Developer ID 版建立 container 的情況。
+- Developer ID 版接手 ad-hoc 建立的 container。
+
+**對契約的影響**（推論）：
+- 移轉清單的路徑和 bundle ID 無關。任何 ID 的沙盒組建，第一次啟動都會把真正的 `~/Library/Application Support/shanjie` 搬走，而且只搬一次。安全審查的 N1 因此確認是 P0。
+  - 拋棄式 ID 要改用兩個元素的寫法 `[${ApplicationSupport}/${BundleId}, ${ApplicationSupport}/shanjie]`：來源是那個 ID 自己的資料夾，目的地是 container 裡程式讀的位置。蘋果文件允許這種寫法，也有 `${BundleId}` 變數；這種寫法還沒實測。
+- 偏好設定不用寫進清單；這個行為要在 CI 的移轉測試裡一起斷言，系統改了才看得出來。
+
+## 2026-10-09：錯字是缺詞還是排序錯（新詞 B 的前置量測）
+
+新詞 B（從改選學詞組，`docs/PLAN.md`「v0.3.0 之後」）開工前，先量現在的錯字有多少是詞庫缺詞、多少是詞都在但排錯。
+
+**做法**：
+- 集合：`eval/dev/user-reported.txt`（49 列，同日第二批三列加入之前）與 typing76。
+- 設定：聊天、書面，各加不加 `--context`，模型 model-v4。
+- 用 `shanjie-eval --dump` 取前 64 名；寬鬆比對（字形對照與 `eval/variants.tsv`）重現 CLI 的 top1：user-reported 17、15、16、17，typing76 66、66、69、69。
+- 每個錯的列對齊正解與輸出，判斷正解那一段「自然的詞」在不在詞庫（基本詞庫＋overlay＋sandhi）。分四類：
+  - M（缺詞）；
+  - R（詞都在，解碼選了別條路）；
+  - V（異體或寬鬆比對的差異）；
+  - O（其他）。
+- 「自然的詞」是人工判斷，是推論。
+
+**結果**：
+
+| 集合 | 設定 | 錯的列 | M | R | V | O |
+|---|---|---|---|---|---|---|
+| user-reported | 聊天 | 32 | 7 | 24 | 0 | 1 |
+| | 聊天＋前文 | 34 | 8 | 25 | 0 | 1 |
+| | 書面 | 33 | 9 | 23 | 0 | 1 |
+| | 書面＋前文 | 32 | 9 | 22 | 0 | 1 |
+| typing76 | 聊天、聊天＋前文 | 10 | 0 | 9 | 1 | 0 |
+| | 書面、書面＋前文 | 7 | 0 | 7 | 0 | 0 |
+
+- **R 的正解都很近**：user-reported 的 R 列，正解在前 64 名的名次中位數是 2，19–23 列在前 4 名，最差第 6 名；和第一名的分數差中位數約 0.45–0.55。typing76 的 R 列大多也在第 2–6 名，只有「找得到」排在第 15–38 名。
+- **缺的詞**（user-reported）：
+  - 版控、反灰、落檔：口語縮寫或口語；
+  - 月付金、派工：專業用語；
+  - 拭鏡布：一般複合名詞；
+  - 詞態：語言學術語；
+  - 概想：可能是使用者自己的用法，推論。
+- **「哇靠」**（第 25 列）：詞庫有這個詞，但只有 ㄨㄚ ㄎㄠˋ，沒有使用者打的輕聲 ㄨㄚ˙，所以歸 O。這是缺讀音，不是缺詞。
+- **正解完全不在前 64 名的**：只有拭鏡布（M）與哇靠（O）兩列。其他 M 列的正解都在前 8 名，改選一次就選得到。
+- **中文維基標題**：這 8 個缺詞都沒有完全相同的標題（用本機快取的標題清單比對繁體寫法；清單多為簡體，所以「沒有」只代表比對不到）。
+- **口語語料**：本機快取的 Common Voice 口語句裡，這 8 個詞都是 0 次。
+- 第 17、34 列是同一句「已送出」，上面的數字重複算了一次。
+
+**推論**：
+- typing76 沒有缺詞，新詞 B 對它沒有幫助。它的錯誤是「再／在」這類單字同音選擇，要靠排序（前文、學習）改善。
+- user-reported 的缺詞約佔錯誤的四分之一。從語料找詞（新詞 A）或維基標題補不到這些詞，從改選學詞組（B）與手動加詞（C）才補得到。
+- B 要能處理一次改選好幾個字的情況，才補得到「拭鏡布」這種三個單字都要改的詞。
