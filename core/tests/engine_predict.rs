@@ -1299,6 +1299,35 @@ fn t16b_the_users_own_edit_before_the_pick_moves_the_record_to_the_commit_key() 
     assert_eq!(pred.context, before, "records: {:?}", r.iter().map(|x| (&x.context, &x.word)).collect::<Vec<_>>());
 }
 
+/// The two characters before the last character of `commit` (the context a record for that last word must carry).
+fn key_before_last(commit: &str) -> String {
+    let c: Vec<char> = commit.chars().collect();
+    c[c.len().saturating_sub(3)..c.len() - 1].iter().collect()
+}
+
+#[test]
+fn t16c_inserting_or_removing_a_syllable_before_the_pick_moves_the_record_to_the_commit_key() {
+    for insert in [true, false] {
+        let mut e = learner_engine(Profile::Chat, None);
+        typ(&mut e, &["ㄧˇ", "ㄅㄟˋ"], "ㄕ");
+        pick_word(&mut e, "時");
+        e.key(kind(KeyKind::Left)).unwrap();
+        if insert {
+            typ(&mut e, &["ㄉㄚˋ"], ""); // a syllable typed just before 時
+        } else {
+            e.key(kind(KeyKind::Backspace)).unwrap(); // the syllable just before 時 removed
+        }
+        e.key(kind(KeyKind::End)).unwrap();
+        let commit = e.key(kind(KeyKind::Enter)).unwrap().commit;
+        assert!(commit.ends_with('時'), "{commit}");
+        let before = key_before_last(&commit);
+        assert_ne!(before, "以備", "precondition: the edit changed the text before 時 ({commit})");
+        let r = e.learner().records();
+        let pred = r.iter().find(|x| x.word == "時").expect("the prediction pick is learned");
+        assert_eq!(pred.context, before, "insert={insert}: records {:?}", r.iter().map(|x| (&x.context, &x.word)).collect::<Vec<_>>());
+    }
+}
+
 #[test]
 fn t17_choosing_the_same_word_again_in_the_window_keeps_the_prediction_learn() {
     let mut e = learner_engine(Profile::Formal, None);
