@@ -105,7 +105,7 @@ class BuildLm(unittest.TestCase):
     def test_rust_loads(self):
         rows = os.path.join(self.tmp.name, "rows.txt")
         open(rows, "w", encoding="utf-8").write("|起床|ㄑㄧˇ ㄔㄨㄤˊ\n")
-        r = subprocess.run(["cargo", "run", "--locked", "-q", "-p", "cli", "--bin", "shanjie-eval", "--", "--lm", self.path, "--profile", "chat", "--rows", rows],
+        r = subprocess.run(["cargo", "run", "--locked", "-q", "-p", "cli", "--bin", "shanjie-eval", "--", "--lm", self.path, "--no-classes", "--profile", "chat", "--rows", rows],
                            cwd=ROOT, capture_output=True, text=True, encoding="utf-8")
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("'n': 1", r.stdout)

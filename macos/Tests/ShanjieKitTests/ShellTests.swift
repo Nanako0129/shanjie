@@ -279,16 +279,16 @@ final class ShellTests: XCTestCase {
         let shell = makeShell()
         let discord = Controller(shell, bundle: "com.hnc.Discord")
         discord.session.activate()
-        discord.type(Row10.standardKeys)
+        discord.type(Row226.standardKeys)
         discord.press(Keys.enter)
         let textEdit = Controller(shell, bundle: "com.apple.TextEdit")
         textEdit.session.activate()
-        textEdit.type(Row10.standardKeys)
+        textEdit.type(Row226.standardKeys)
         textEdit.press(Keys.enter)
-        XCTAssertEqual(discord.client.text, Row10.chat)
-        XCTAssertEqual(textEdit.client.text, Row10.formal)
+        XCTAssertEqual(discord.client.text, Row226.chat)
+        XCTAssertEqual(textEdit.client.text, Row226.formal)
         XCTAssertNotEqual(discord.client.text, textEdit.client.text)
-        XCTAssertEqual(Row10.standardKeys, Selftest.row10Standard)
+        XCTAssertEqual(Row226.standardKeys, Selftest.row226Standard)
     }
 
     func testEveryChatAppGetsTheChatProfile() {
@@ -296,9 +296,9 @@ final class ShellTests: XCTestCase {
         for app in Shell.chatApps.sorted() + ["com.apple.TextEdit", "com.apple.Notes"] {
             let c = Controller(shell, bundle: app)
             c.session.activate()
-            c.type(Row10.standardKeys)
+            c.type(Row226.standardKeys)
             c.press(Keys.enter)
-            XCTAssertEqual(c.client.text, Shell.chatApps.contains(app) ? Row10.chat : Row10.formal)
+            XCTAssertEqual(c.client.text, Shell.chatApps.contains(app) ? Row226.chat : Row226.formal)
         }
     }
 
@@ -411,15 +411,15 @@ final class ShellTests: XCTestCase {
         let a = Controller(shell, bundle: "com.hnc.Discord"), b = Controller(shell, bundle: "com.apple.TextEdit")
         a.session.activate()
         a.type("su3")
-        b.type(Row10.standardKeys)
+        b.type(Row226.standardKeys)
         b.press(Keys.enter)
-        XCTAssertEqual(b.client.text, Row10.formal)
+        XCTAssertEqual(b.client.text, Row226.formal)
         XCTAssertEqual(a.client.text, "你")
         // S2h §11: without a left context, as before S2h; 你 as history would make chat pick 期中 like formal.
         a.client.selectedOverride = NSRange(location: NSNotFound, length: 0)
-        a.type(Row10.standardKeys)  // and back: Discord's chat profile again
+        a.type(Row226.standardKeys)  // and back: Discord's chat profile again
         a.press(Keys.enter)
-        XCTAssertEqual(a.client.text, "你" + Row10.chat)
+        XCTAssertEqual(a.client.text, "你" + Row226.chat)
     }
 
     // MARK: keyboard layout (section 13.2)
@@ -559,8 +559,8 @@ final class ShellTests: XCTestCase {
         c.press(Keys.enter)
         XCTAssertEqual(c.client.text, "你你好你好")
         // The rebuilt engine keeps the profile (TextEdit: formal).
-        c.type(Row10.standardKeys)
+        c.type(Row226.standardKeys)
         c.press(Keys.enter)
-        XCTAssertTrue(c.client.text.hasSuffix(Row10.formal))
+        XCTAssertTrue(c.client.text.hasSuffix(Row226.formal))
     }
 }

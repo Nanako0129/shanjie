@@ -2,15 +2,16 @@ import CShanjie
 import Foundation
 
 /// `shanjie --selftest` (docs/contracts/s3b.md section 9): build the engine from Resources, load
-/// the LM, type dev302 row 10 with the standard layout and require the chat and formal top-1
+/// the LM, type dev302 row 226 with the standard layout and require the chat and formal top-1
 /// sentences. Returns the exit status. Writes nothing but a fixed message and a return code to
 /// stderr; touches no file, UserDefaults, TIS, NSApplication or IMK server.
 @MainActor
 public enum Selftest {
-    /// Row 10 `ㄑㄧˊ ㄓㄨㄥ ㄅㄠˋ ㄍㄠˋ ㄇㄧㄥˊ ㄊㄧㄢ ㄧㄠˋ ㄐㄧㄠ` on the standard layout (s3a section 1);
+    /// Row 226 `ㄒㄧㄥˋ ㄏㄠˇ ㄐㄧㄡˋ ㄏㄨˋ ㄔㄜ ㄐㄧˊ ㄕˊ ㄍㄢˇ ㄉㄠˋ` on the standard layout (s3a section 1);
+    /// it was row 10 before S2k, whose chat and formal answers the word-class term made equal;
     /// a space is the first tone. The tests derive the same keys from the zhuyin independently.
-    static let row10Standard = "fu65j/ 1l4el4au/6wu0 ul4rul "
-    static let expected: [(profile: UInt32, text: String)] = [(0, "其中報告明天要交"), (1, "期中報告明天要交")]
+    static let row226Standard = "vu/4cl3ru.4cj4tk ru6g6e032l4"
+    static let expected: [(profile: UInt32, text: String)] = [(0, "幸好救護車及時趕到"), (1, "幸好救護車即時趕到")]
 
     public static func run(resources: URL) -> Int32 {
         let (made, code) = CoreEngine.make(dataDir: resources.path, layout: 0)
@@ -21,7 +22,7 @@ public enum Selftest {
             if case .failed(let c) = engine.setProfile(profile) {
                 return fail("selftest: shanjie_engine_set_profile failed, code", c)
             }
-            var keys = row10Standard.unicodeScalars.map {
+            var keys = row226Standard.unicodeScalars.map {
                 $0 == " " ? ShanjieKey(kind: KeyMap.space, ch: 0, modifiers: 0)
                           : ShanjieKey(kind: KeyMap.char, ch: $0.value, modifiers: 0)
             }

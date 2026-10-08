@@ -67,6 +67,43 @@ pub struct Lm {
     off: Vec<u32>,
     nxt: Vec<u32>,
     cnt: Vec<u32>,
+    /// S2k word-class term (classes.sjc); `None` only for the explicit class-less constructors.
+    classes: Option<Classes>,
+}
+
+/// classes.sjc (format in tools/build_classes.py), indexed by model word id.
+struct Classes {
+    k3: usize,
+    mu: f64,
+    cls: Vec<u16>,
+    emit: Vec<f64>,
+    pc: Vec<f64>,
+}
+
+const CLASS_MAGIC: &[u8; 8] = b"SJCL0001";
+const NO_CLASS: u16 = 0xFFFF;
+
+/// classes.sjc bytes for `model` (tests only; the real file is written by tools/build_classes.py).
+#[cfg(test)]
+pub(crate) fn test_classes(model: &[u8], k: u32, mu: f64, cls: &[u16], emit: &[f64], pc: &[f64]) -> Vec<u8> {
+    let sha = crate::eval::sha256_hex(model);
+    let mut b = CLASS_MAGIC.to_vec();
+    b.extend((0..32).map(|i| u8::from_str_radix(&sha[2 * i..2 * i + 2], 16).unwrap()));
+    b.extend(k.to_le_bytes());
+    b.extend(mu.to_le_bytes());
+    b.extend((cls.len() as u32).to_le_bytes());
+    b.extend(cls.iter().flat_map(|c| c.to_le_bytes()));
+    b.extend(emit.iter().flat_map(|c| c.to_le_bytes()));
+    b.extend(pc.iter().flat_map(|c| c.to_le_bytes()));
+    b
+}
+
+/// A previous word as the probability function needs it: its vocabulary id (for the class term) and its
+/// bigram context row, if it has one.
+#[derive(Clone, Copy)]
+pub struct Ctx {
+    id: Option<u32>,
+    idx: Option<usize>,
 }
 
 struct Rd<'a>(&'a [u8]);
@@ -113,8 +150,41 @@ impl Lm {
         (self.n, self.voff.len(), self.nxt.len())
     }
 
+    /// The model at `path` and the `classes.sjc` beside it (S2k section 4.3). A missing or mismatching class
+    /// file is an error, never a silent fallback.
     pub fn load(path: &Path) -> Result<Lm, LmError> {
+        let model = std::fs::read(path).map_err(|_| LmError::Io)?;
+        let classes = std::fs::read(path.with_file_name("classes.sjc")).map_err(|_| LmError::Io)?;
+        Lm::parse_with_classes(&model, &classes)
+    }
+
+    /// The model alone, explicitly without the class term (`--no-classes`).
+    pub fn load_without_classes(path: &Path) -> Result<Lm, LmError> {
         Lm::parse(&std::fs::read(path).map_err(|_| LmError::Io)?)
+    }
+
+    /// Model bytes plus classes.sjc bytes: magic, the model's SHA-256, the vocabulary size and the exact length must match.
+    pub fn parse_with_classes(model: &[u8], classes: &[u8]) -> Result<Lm, LmError> {
+        let mut lm = Lm::parse(model)?;
+        let sha = crate::eval::sha256_hex(model);
+        let mut r = Rd(classes);
+        if r.take(8)? != CLASS_MAGIC {
+            return Err(LmError::Format);
+        }
+        let want: String = r.take(32)?.iter().map(|b| format!("{b:02x}")).collect();
+        let (k, mu, v) = (r.u32()? as usize, r.f64()?, r.u32()? as usize);
+        if want != sha || v != lm.uni.len() || !mu.is_finite() {
+            return Err(LmError::Format);
+        }
+        let k3 = k.checked_add(3).ok_or(LmError::Format)?;
+        let cls = r.vec(v, 2, |c| u16::from_le_bytes([c[0], c[1]]))?;
+        let emit = r.vec(v, 8, |c| f64::from_le_bytes([c[0], c[1], c[2], c[3], c[4], c[5], c[6], c[7]]))?;
+        let pc = r.vec(k3.checked_mul(k3).ok_or(LmError::Format)?, 8, |c| f64::from_le_bytes([c[0], c[1], c[2], c[3], c[4], c[5], c[6], c[7]]))?;
+        if !r.0.is_empty() || cls.iter().any(|&c| c != NO_CLASS && c as usize >= k3) {
+            return Err(LmError::Format);
+        }
+        lm.classes = Some(Classes { k3, mu, cls, emit, pc });
+        Ok(lm)
     }
 
     /// Format in tools/build_lm.py. Beyond magic, sizes and trailing bytes, the invariants the lookups
@@ -193,6 +263,7 @@ impl Lm {
             off,
             nxt,
             cnt,
+            classes: None,
         })
     }
 
@@ -219,20 +290,33 @@ impl Lm {
         None
     }
 
-    fn ctx_of(&self, id: Option<u32>) -> Option<usize> {
-        self.ctx_id.binary_search(&id?).ok()
+    fn ctx_of(&self, id: Option<u32>) -> Ctx {
+        Ctx { id, idx: id.and_then(|id| self.ctx_id.binary_search(&id).ok()) }
     }
 
-    /// P(w | context) with the backoff distribution value `pb` (lm.py `prob`).
-    fn prob_c(&self, ctx: Option<usize>, w: Option<u32>, pb: f64) -> f64 {
-        let Some(i) = ctx else { return pb };
-        let back = self.ctx_back[i];
-        let range = self.off[i] as usize..self.off[i + 1] as usize;
-        let found = w.and_then(|w| self.nxt[range.clone()].binary_search(&w).ok());
-        match found.map(|j| self.cnt[range.start + j]) {
-            Some(k) if k != 0 => (k as f64 - self.d) / self.ctx_total[i] + back * pb,
-            _ => back * pb,
+    /// P(w | context) with the backoff distribution value `pb` (lm.py `prob`): the one probability function every
+    /// caller goes through. A kept bigram is unchanged; every other pair (also a context without entries,
+    /// `back` = 1) gets `back * ((1 - mu) * pb + mu * Pc[c(v), c(w)] * emit(w))` when both words have a class
+    /// (S2k section 4.2; the operation order is the Python one), else `back * pb`.
+    fn prob_c(&self, ctx: Ctx, w: Option<u32>, pb: f64) -> f64 {
+        let back = match ctx.idx {
+            None => 1.0,
+            Some(i) => {
+                let range = self.off[i] as usize..self.off[i + 1] as usize;
+                let found = w.and_then(|w| self.nxt[range.clone()].binary_search(&w).ok());
+                if let Some(k) = found.map(|j| self.cnt[range.start + j]).filter(|&k| k != 0) {
+                    return (k as f64 - self.d) / self.ctx_total[i] + self.ctx_back[i] * pb;
+                }
+                self.ctx_back[i]
+            }
+        };
+        if let (Some(c), Some(v), Some(w)) = (&self.classes, ctx.id, w) {
+            let (cv, cw) = (c.cls[v as usize], c.cls[w as usize]);
+            if cv != NO_CLASS && cw != NO_CLASS {
+                return back * ((1.0 - c.mu) * pb + c.mu * c.pc[cv as usize * c.k3 + cw as usize] * c.emit[w as usize]);
+            }
         }
+        back * pb
     }
 
     pub fn prob(&self, v: &str, w: &str, pb: f64) -> f64 {
@@ -261,16 +345,16 @@ impl Lm {
 
     /// Ids of the words listed after `v` in the model, ascending; empty when `v` has no context entry.
     pub fn successor_ids(&self, v: &str) -> &[u32] {
-        let range = self.ctx_of(self.word_id(v)).map_or(0..0, |i| self.off[i] as usize..self.off[i + 1] as usize);
+        let range = self.ctx_of(self.word_id(v)).idx.map_or(0..0, |i| self.off[i] as usize..self.off[i + 1] as usize);
         &self.nxt[range]
     }
 
     /// `word` for a caller that looked the ids up once: `ctx` from `context_of(v)`, `w` from `word_id`.
-    pub fn word_by_id(&self, lam: f64, ctx: Option<usize>, w: Option<u32>, lp: f64) -> f64 {
+    pub fn word_by_id(&self, lam: f64, ctx: Ctx, w: Option<u32>, lp: f64) -> f64 {
         word_term(lam, self.prob_c(ctx, w, pow10(lp)), lp)
     }
 
-    pub fn context_of(&self, v: &str) -> Option<usize> {
+    pub fn context_of(&self, v: &str) -> Ctx {
         self.ctx_of(self.word_id(v))
     }
 }
@@ -504,13 +588,13 @@ struct Hyp<'a> {
     surface: String,
     words: Vec<(&'a str, f64, f64)>,
     last: Option<u32>,
-    ctx: Option<usize>,
+    ctx: Ctx,
 }
 
 /// Learned boost (S4 §1.4, §12): which records may boost is decided by `Learner::lookup` (single
 /// characters only at the exact full key and never under "^"). A learned word scores
 /// `best of its reading + eps * w / (w + 1)`, eps being `LEARN_EPS` (6.0) at the exact and last-character
-/// levels and `LEARN_EPS_GLOBAL` (0.5, `Learn::eps_global`) at the global level, for weight `w`
+/// levels and `LEARN_EPS_GLOBAL` (0, `Learn::eps_global`) at the global level, for weight `w`
 /// (so a heavier record outranks a lighter one: a re-pick halves the displaced word), never
 /// less than its own score. The boost enters the score only through `(1 - lambda) * lp` and the
 /// backoff term, so the bigram's liking for the common word survives a small value. Measured on the
@@ -520,9 +604,10 @@ struct Hyp<'a> {
 /// remainder is a 3-syllable word winning over the taught 2-syllable one.
 pub const LEARN_EPS: f64 = 6.0;
 /// Boost size for the global level only (§12): enough to break a near tie, not to override a confident
-/// language model. Chosen from the table in the contract §12 (smallest value with 0 global pollution
-/// and a non-zero global learn rate).
-pub const LEARN_EPS_GLOBAL: f64 = 0.5;
+/// language model. 0 switches the level off (s4-learning §13, user decision 2026-10-08): with the word-class
+/// term (S2k) every value tried from 0.1 to 0.5 turned at least one correct common sentence wrong, because
+/// the class model leaves some of them near ties (`global_eps_table`). Global records are still written.
+pub const LEARN_EPS_GLOBAL: f64 = 0.0;
 
 /// What decoding needs to apply learning: the learner, the text just before the segment (only its
 /// last two characters matter) and today's day number.
@@ -652,7 +737,7 @@ pub fn decode_segment_learned<'a>(
                         found => {
                             let mut words = h.words.clone();
                             words.push((word, lp, delta));
-                            let nh = Hyp { score: sc, surface, words, last: wid, ctx: None };
+                            let nh = Hyp { score: sc, surface, words, last: wid, ctx: lm.ctx_of(None) };
                             match found {
                                 Some(&q) => cand[q] = nh,
                                 None => {
@@ -702,7 +787,7 @@ pub fn history<'a>(left: &'a str, lm: &Lm) -> &'a str {
     let last = left.char_indices().next_back().map_or(0, |(i, _)| i);
     [left, &left[last..]]
         .into_iter()
-        .find(|w| !w.is_empty() && lm.ctx_of(lm.word_id(w)).is_some())
+        .find(|w| !w.is_empty() && lm.ctx_of(lm.word_id(w)).idx.is_some())
         .unwrap_or("<s>")
 }
 
@@ -786,6 +871,99 @@ mod tests {
         assert_eq!(lm.eos(0.5, "a"), 0.5 * ((2.0 - 0.75) / 4.0 + (1.0 - (2.0 - 0.75) / 4.0) * p_eos).log10());
         assert_eq!(lm.eos(0.5, "b"), 0.5 * p_eos.log10());
         assert_eq!((lm.count("a"), lm.count("<s>"), lm.count("zzz"), lm.total()), (6, 0, 0, 10));
+    }
+
+    /// Classes of the tiny model (K 2, so 5 classes; `<s>` is 3 and `</s>` is 4): a 0, b 1. Emission a 0.6, b 0.4.
+    const MU: f64 = 0.75;
+    fn pc() -> Vec<f64> {
+        (0..25).map(|i| 0.01 * (i + 1) as f64).collect()
+    }
+    fn tiny_classes(model: &[u8]) -> Vec<u8> {
+        test_classes(model, 2, MU, &[3, 4, 0, 1], &[1.0, 1.0, 0.6, 0.4], &pc())
+    }
+    fn classed() -> Lm {
+        Lm::parse_with_classes(&tiny(), &tiny_classes(&tiny())).unwrap()
+    }
+    /// The class term as the contract writes it, with the operation order of lm.py.
+    fn class_p(back: f64, pb: f64, cv: usize, cw: usize, emit: f64) -> f64 {
+        back * ((1.0 - MU) * pb + MU * pc()[cv * 5 + cw] * emit)
+    }
+
+    /// S2k 4.2 on the tiny model: kept bigrams are untouched; every other pair (also `b`, which has no
+    /// context entry) gets the class term, `back` being 1 there; a word without a class or without an id keeps `back * pb`.
+    #[test]
+    fn class_term_applies_to_unkept_pairs_only() {
+        let lm = classed();
+        let back_a = 1.0 - (2.0 - 0.75) / 4.0;
+        assert_eq!(lm.prob("<s>", "a", 0.1), (3.0 - 0.75) / 5.0 + (1.0 - (3.0 - 0.75 + 2.0 - 0.75) / 5.0) * 0.1, "kept bigram unchanged");
+        assert_eq!(lm.prob("a", "b", 0.1), class_p(back_a, 0.1, 0, 1, 0.4), "context without this entry: back * class mix");
+        assert_eq!(lm.prob("b", "a", 0.1), class_p(1.0, 0.1, 1, 0, 0.6), "context without entries: back is 1");
+        assert_ne!(lm.prob("b", "a", 0.1), 0.1);
+        assert_eq!(lm.prob("zzz", "a", 0.1), 0.1, "unknown previous word");
+        assert_eq!(lm.prob("b", "qqq", 0.1), 0.1, "unknown word");
+        let p_eos: f64 = 4.0 / 10.0;
+        assert_eq!(lm.eos(0.5, "a"), 0.5 * ((2.0 - 0.75) / 4.0 + back_a * p_eos).log10(), "kept </s> unchanged");
+        assert_eq!(lm.eos(0.5, "b"), 0.5 * class_p(1.0, p_eos, 1, 4, 1.0).log10(), "eos goes through the class term");
+        assert_eq!(lm.word(0.5, "b", "a", -1.0), 0.5 * class_p(1.0, 10f64.powf(-1.0), 1, 0, 0.6).log10() + 0.5 * -1.0);
+        let c = lm.context_of("b");
+        assert_eq!(lm.word_by_id(0.5, c, lm.word_id("a"), -1.0), lm.word(0.5, "b", "a", -1.0), "word_by_id is the same function");
+        // A model without classes is the old arithmetic (--no-classes).
+        let plain = Lm::parse(&tiny()).unwrap();
+        assert_eq!(plain.prob("b", "a", 0.1), 0.1);
+    }
+
+    /// The decoder's word terms and both closing terms (sentence end, a fixed next word) use the class term.
+    #[test]
+    fn decoder_goes_through_the_class_term() {
+        let lm = classed();
+        let lex = Arc::new(Lexicon::parse(TINY_LEX).unwrap());
+        let capped = CappedLexicon::new(lex, "", &lm, Some(&Demote::parse("").unwrap())).unwrap();
+        let syls = ["ㄅ".to_string()];
+        let run = |end| decode_segment_learned(&capped, &syls, &lm, 0.5, "<s>", end, 64, None, true).unwrap();
+        let score = |v: &[(f64, Vec<(&str, f64, f64)>)], w: &str| v.iter().find(|(_, ws)| ws[0].0 == w).unwrap().0;
+        let eos = run(End::Eos);
+        assert_eq!(score(&eos, "b"), lm.word(0.5, "<s>", "b", -2.0) + lm.eos(0.5, "b"));
+        assert_eq!(score(&eos, "a"), lm.word(0.5, "<s>", "a", -1.0) + lm.eos(0.5, "a"));
+        let next = run(End::Next { word: "a", lp: -1.0, delta: 0.0 });
+        assert_eq!(score(&next, "b"), lm.word(0.5, "<s>", "b", -2.0) + lm.word(0.5, "b", "a", -1.0));
+        // Starting from `b` (no context entry): the first word itself is class-scored.
+        let from_b = decode_segment_learned(&capped, &syls, &lm, 0.5, "b", End::Eos, 64, None, true).unwrap();
+        assert_eq!(score(&from_b, "a"), lm.word(0.5, "b", "a", -1.0) + lm.eos(0.5, "a"));
+    }
+
+    /// 4.3: classes.sjc must be this model's (SHA-256), with the right magic and exact length; the parse never panics.
+    #[test]
+    fn class_file_must_match_the_model() {
+        let model = tiny();
+        let good = tiny_classes(&model);
+        assert!(Lm::parse_with_classes(&model, &good).is_ok());
+        let mut other = model.clone();
+        other[8] = 5; // another vocabulary size: another model, same everything else
+        assert_eq!(Lm::parse_with_classes(&model, &tiny_classes(&other)).err(), Some(LmError::Format), "another model's hash");
+        let mut magic = good.clone();
+        magic[7] = b'2';
+        let mut trailing = good.clone();
+        trailing.push(0);
+        let mut bad_class = good.clone();
+        let at = 8 + 32 + 4 + 8 + 4;
+        bad_class[at..at + 2].copy_from_slice(&5u16.to_le_bytes()); // class 5 is outside K + 3
+        for (name, bytes) in [("magic", &magic), ("trailing byte", &trailing), ("short", &good[..good.len() - 1].to_vec()), ("class out of range", &bad_class), ("empty", &vec![])] {
+            assert_eq!(Lm::parse_with_classes(&model, bytes).err(), Some(LmError::Format), "{name}");
+        }
+    }
+
+    /// 4.3 on disk: `Lm::load` needs classes.sjc beside the model; `load_without_classes` does not.
+    #[test]
+    fn load_needs_the_class_file_beside_the_model() {
+        let dir = std::env::temp_dir().join(format!("shanjie-lm-classes-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let (m, c) = (dir.join("tiny.sjlm"), dir.join("classes.sjc"));
+        std::fs::write(&m, tiny()).unwrap();
+        assert_eq!(Lm::load(&m).err(), Some(LmError::Io), "no classes.sjc");
+        assert!(Lm::load_without_classes(&m).is_ok());
+        std::fs::write(&c, tiny_classes(&tiny())).unwrap();
+        assert_eq!(Lm::load(&m).unwrap().prob("b", "a", 0.1), classed().prob("b", "a", 0.1), "file round trip");
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     /// S2h §1 on the tiny model (history only for `<s>` and `a`): whole, then last character, else `<s>`.

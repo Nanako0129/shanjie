@@ -14,6 +14,7 @@ fn root() -> PathBuf {
 }
 fn lm_path() -> PathBuf {
     let p = root().join("data/lm/bigram.sjlm");
+    assert!(root().join("data/lm/classes.sjc").exists(), "data/lm/classes.sjc is missing: download it with `gh release download classes-v1 -R Nanako0129/shanjie -p classes.sjc -D data/lm` (or build it with tools/build_classes.py)");
     assert!(p.exists(), "data/lm/bigram.sjlm is missing: gh release download model-v3 -R Nanako0129/shanjie -p bigram.sjlm -D data/lm");
     p
 }
@@ -1010,14 +1011,14 @@ fn t4b_a_context_sharing_the_last_character_is_promoted() {
 
 #[test]
 fn t5_a_global_record_does_not_move_the_row() {
-    // 能夠 is in the row after 這杯, 學校 and (at position 7) 睡覺, a third key with no last character in common.
-    let third = fresh_row(Profile::Chat, "我想睡覺", "ㄋ");
+    // 能夠 is in the row after 這杯, 學校 and (at position 7) 請問你, a third key with no last character in common.
+    let third = fresh_row(Profile::Chat, "請問你", "ㄋ");
     assert_eq!(third.iter().position(|w| w == "能夠"), Some(7), "precondition: {third:?}");
     let mut e = learner_engine(Profile::Chat, None);
     teach(&mut e, "我想喝這杯", "ㄋ", "能夠");
     teach(&mut e, "我想去學校", "ㄋ", "能夠");
     assert!(e.learner().records().iter().any(|r| r.context == "" && r.word == "能夠"), "precondition: the two keys made a global record");
-    e.set_left_context("我想睡覺");
+    e.set_left_context("請問你");
     assert_eq!(row(&typ(&mut e, &[], "ㄋ")), third);
 }
 

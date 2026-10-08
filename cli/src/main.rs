@@ -75,6 +75,7 @@ fn three_field_rows(text: &str) -> Vec<(String, Syls, String)> {
 fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     let (mut lm_path, mut profile, mut name, mut dev, mut rows_file) = (None, None, None, None, None);
     let (mut limit, mut set, mut dump, mut ctx_mode, mut demote) = (None::<usize>, None, None, false, true);
+    let mut classes = true;
     let mut it = args.iter();
     while let Some(a) = it.next() {
         let mut val = || it.next().cloned().ok_or_else(|| "missing option value".to_string());
@@ -90,6 +91,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
             "--dump" => dump = Some(val()?),
             "--context" => ctx_mode = true,
             "--no-demote" => demote = false,
+            "--no-classes" => classes = false,
             _ => return Err("unknown argument".into()),
         }
     }
@@ -99,7 +101,10 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
         "formal" => Profile::Formal,
         _ => return Err("--profile must be chat or formal".into()),
     };
-    let lm = Lm::load(std::path::Path::new(&lm_path.ok_or("--lm is required")?)).map_err(|e| e.to_string())?;
+    let lm_path = lm_path.ok_or("--lm is required")?;
+    // S2k: the class term is part of the model; classes.sjc beside it is required unless --no-classes.
+    let lm = if classes { Lm::load(std::path::Path::new(&lm_path)) } else { Lm::load_without_classes(std::path::Path::new(&lm_path)) }
+        .map_err(|e| e.to_string())?;
     let dir = root().join("data/lexicon");
     let lex = load_lexicon(&dir).map_err(|_| "cannot load lexicon".to_string())?;
     let overlay = fs::read_to_string(dir.join("overlay-add.tsv")).map_err(|e| format!("cannot read overlay ({:?})", e.kind()))?;
@@ -172,7 +177,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
         d.flush().map_err(|_| "cannot write dump".to_string())?;
     }
     let sha = sha256_hex(firsts.join("\n").as_bytes());
-    println!("## {name}  lm-{profile_name}{}{}  {{'n': {}, 'top1': {top1}, 'oracle@64': {o64}, 'top1_sha256': '{sha}'}}", if ctx_mode { "+ctx" } else { "" }, if demote { "" } else { "-nodemote" }, rows.len());
+    println!("## {name}  lm-{profile_name}{}{}{}  {{'n': {}, 'top1': {top1}, 'oracle@64': {o64}, 'top1_sha256': '{sha}'}}", if ctx_mode { "+ctx" } else { "" }, if demote { "" } else { "-nodemote" }, if classes { "" } else { "-noclasses" }, rows.len());
     Ok(())
 }
 
