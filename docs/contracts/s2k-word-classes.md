@@ -102,3 +102,88 @@
   - 不讀 `eval/holdout/`（只有收尾的 verifier 跑）；
   - 不讀私有資料；
   - 第一段不改 `core/`、`macos/`、`data/`。
+
+## 4. 第二段：做進產品（2026-10-08，第一段判定通過後）
+
+第一段通過（`experiments/s2-classes/README.md`「model-v3 重跑」）。使用者決定類別表做成單獨檔案，並放上新的 Release 資產。
+
+### 4.1 類別檔 `classes.sjc`
+
+- **產生**：`tools/build_classes.py` 讀三樣東西，寫 `data/lm/classes.sjc`（不進 git，和模型一樣從 Release 下載）：
+  - 第一段的 `edges.npz` 與 `cls-40000-512.npz`（雜湊同第一段 README）；
+  - 模型 `data/lm/bigram.sjlm`。
+- **內容**（小端序）：
+  - 魔數 `SJCL0001`；
+  - 模型的 SHA-256（32 bytes）；
+  - K、μ（f64，0.8）、模型詞彙數 V；
+  - 每個模型詞 id 的類別（u16，`0xFFFF` 表示沒有類別）與發射機率（f64，`uni(w)/類別總和`）；
+  - `<s>`、`</s>` 的類別；
+  - 類別 bigram 表 P(d|c)（(K+3)² 個 f64，平滑 ε = 0.1，和 `classlm.py` 相同）。
+- **數值一律預先算好存檔**：Python 與 Rust 讀同一份數字，只做相同的乘加，才能逐位元相同；不在載入時各自重算。
+- **檔案格式說明**寫在 `tools/build_classes.py` 開頭。
+
+### 4.2 機率（Python `reference/proto/lm.py`、Rust `core/src/lm.rs`，逐位元相同）
+
+- `prob(v, w, pb)`：有保留條目的 bigram 照舊。其餘情況（包含 v 沒有前文條目）是：
+  - `back × ((1−μ)·pb + μ·P(c(w)|c(v))·emit(w))`；
+  - v 沒有前文條目時 `back = 1`；
+  - v 或 w 沒有類別時，退回原本的 `back × pb`。
+  - 和 `classlm.py` 的 `ClassLM.prob` 相同。
+- 用到 `prob` 的地方全部一致套用：解碼（含固定詞的接續）、`total_score`、句尾 `eos`、預測的 `word`／`word_by_id`。
+- 運算順序寫死，Python 與 Rust 相同。
+
+### 4.3 載入與設定
+
+- **Rust**：`Lm` 在載入模型後讀同一個目錄的 `classes.sjc`。
+  - 魔數、長度、模型雜湊任一不符，就是載入失敗（`load_lm` 回傳碼 3），不靜靜不用。
+  - 測試用的建構子可以明確不載入。
+- **CLI 與 Python**：`shanjie-eval` 與 `lm_eval.py` 預設載入 `data/lm/classes.sjc`，檔案不存在就報錯。加 `--no-classes` 明確關掉。摘要行在關掉時加 `-noclasses`，比照 `-nodemote`。
+- **殼層**：不加設定（類別項是模型的一部分）。`scripts/build-app.sh` 把 `classes.sjc` 放進 App；`scripts/check-app.sh` 檢查它存在。
+
+### 4.4 出貨
+
+- 本機建好並全部驗收之後，先問使用者是否建立 GitHub Release `classes-v1`（附 `classes.sjc`），這是對外動作。
+- 建好、下載回來比對雜湊相符之後，才做這些：
+  - 加 `data/classes.sjc.sha256`；
+  - CI（`ci.yml`、`release.yml`）下載它；
+  - golden 測試釘它的雜湊；
+  - CONTRIBUTING、LICENSES 更新說明。
+
+### 4.5 驗收
+
+1. **對齊**：依賴模型的 golden 全部用類別模型由 Python 重產，Rust 逐位元組相同。範圍是 `s2-lm.txt`、`s2-lm-dev302-top1.tsv`、`s2r-probe-top1.tsv`、`s2h-lm-context.txt`、`sw-probe.txt`、`sp-predict.txt`。每個變動要能追到類別項。
+2. **數字等於第一段**：`lm_eval.py --context` 在 dev302、typing76、錯字回報、cvtune-native 的第一名數，等於第一段 README 的類別欄（241／248、66／69、14／16、1,853／1,863）。不等就是停止條件。
+3. **單元檢查**：
+   - 類別檔的讀寫來回；
+   - 魔數、模型雜湊、長度錯誤時載入失敗（Python 丟錯誤、Rust 回傳碼 3）；
+   - `--no-classes` 時結果和沒有類別項逐位元相同。
+4. **突變**（每一項都要讓某個測試失敗）：
+   - 類別項套到有保留條目的 bigram；
+   - μ 改成 0；
+   - v 沒有前文條目時不套類別項；
+   - 不檢查模型雜湊；
+   - `eos` 不套類別項。
+5. **既有探針**：
+   - 字形探針 16 列裡，「市占率」接受「市佔率」（使用者同意的例外），其餘逐字相同；
+   - 同分探針、竈門、「大概十分鐘後到」、「好吧」；
+   - SW 探針的降權條件（第 1 列開＝搞完這波、關＝睪丸這波；第 6–11 列開關相同）。
+6. **效能**：
+   - 每鍵 p95 < 16 ms：typing76 的按鍵序列，含前文，release，`uptime` 負載低於核心數時量；
+   - 載入時間與常駐記憶體的增加量，寫進研究紀錄。
+7. `cargo test`（debug、release）、`swift test`、C 冒煙測試全綠（本機有 `classes.sjc`）。
+8. **保留集**：由 fresh verifier 收尾時跑一次，只回數字，第一名數要等於第一段（179／183）。
+9. **實機**：使用者在實機打幾句。這一項需要使用者。
+
+### 4.6 停止條件、預算、限制
+
+- **停止條件**：
+  - 對齊不符；
+  - 數字和第一段不同；
+  - p95 ≥ 16 ms；
+  - 需要改模型檔 `bigram.sjlm` 的格式。
+- **預算**：executor 1 回合加 1 次修正。
+- **executor 不可以做的事**：
+  - 不連網；
+  - 不讀 `eval/holdout/`、私有資料、學習檔、聊天紀錄；
+  - 不安裝、不啟動 App，不執行 `.app` 裡的程式，不呼叫 TIS 或 lsregister，不碰 `~/Library` 與鑰匙圈；
+  - 不 push、不開 PR、不建 Release，不碰其他 worktree。
