@@ -192,3 +192,22 @@ fn sw_probe_matches_python_golden_byte_for_byte() {
     std::fs::remove_file(&dump).unwrap();
     assert_eq!(got, golden("sw-probe.txt"));
 }
+
+/// eval-stats §4.2: `--rowstats` is byte-identical to the file lm_eval.py wrote (eval/golden/*.rowstats), holds only
+/// digits, tabs and newlines, and its ok column sums to the summary line's top1.
+#[test]
+fn lm_rowstats_match_python_byte_for_byte() {
+    let lm = lm_path();
+    let dir = std::env::temp_dir().join(format!("shanjie-rowstats-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    for p in ["chat", "formal"] {
+        let out = dir.join(format!("{p}.rowstats"));
+        let summary = run(&["--lm", &lm, "--profile", p, "--dev", "302", "--rowstats", out.to_str().unwrap()]);
+        let got = std::fs::read_to_string(&out).unwrap();
+        assert_eq!(got, golden(&format!("s2-lm-dev302-{p}.rowstats")), "{p}");
+        assert!(got.chars().all(|c| c.is_ascii_digit() || c == '\t' || c == '\n'));
+        let ok: usize = got.lines().map(|l| l.split('\t').nth(1).unwrap().parse::<usize>().unwrap()).sum();
+        assert!(summary.contains(&format!("'top1': {ok},")), "{p}: {summary}");
+    }
+    std::fs::remove_dir_all(&dir).unwrap();
+}

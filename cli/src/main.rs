@@ -71,10 +71,50 @@ fn three_field_rows(text: &str) -> Vec<(String, Syls, String)> {
         .collect()
 }
 
-/// S2c LM mode (docs/PLAN.md S2c): the one summary line of lm_eval.py, plus the optional `--dump`.
+/// Levenshtein distance over Unicode scalar values.
+fn levenshtein(a: &str, b: &str) -> u32 {
+    let b: Vec<char> = b.chars().collect();
+    let mut prev: Vec<u32> = (0..=b.len() as u32).collect();
+    for (i, x) in a.chars().enumerate() {
+        let mut cur = vec![i as u32 + 1];
+        for (j, y) in b.iter().enumerate() {
+            cur.push((prev[j + 1] + 1).min(cur[j] + 1).min(prev[j] + (x != *y) as u32));
+        }
+        prev = cur;
+    }
+    prev[b.len()]
+}
+
+/// (errors, gold length) of one row (docs/contracts/eval-stats.md §1). `ok` is the lenient top-1 judgment made by the
+/// caller; a row that is ok has 0 errors even when the first candidate differs from the gold text.
+fn row_stats(top1: &str, gold: &str, ok: bool) -> (u32, u32) {
+    (if ok { 0 } else { levenshtein(top1, gold) }, gold.chars().count() as u32)
+}
+
+/// The one writer of a rowstats file: `row\tok\terrors\tgold_len` per row, rows counted from 1. Digits only.
+fn format_rowstats(rows: &[(bool, String, String)]) -> String {
+    let mut out = String::new();
+    for (i, (ok, top1, gold)) in rows.iter().enumerate() {
+        let (e, n) = row_stats(top1, gold, *ok);
+        out += &format!("{}\t{}\t{e}\t{n}\n", i + 1, *ok as u8);
+    }
+    out
+}
+
+/// Option combinations of `lm`, checked before any file is read. The holdout never prints its sentences, so
+/// `--dump` is refused there; `--rowstats` holds numbers only and is allowed.
+fn check_lm_opts(set: Option<&str>, dump: bool) -> Result<(), String> {
+    if set == Some("holdout") && dump {
+        return Err("--dump is not allowed with --set holdout".into());
+    }
+    Ok(())
+}
+
+/// S2c LM mode (docs/PLAN.md S2c): the one summary line of lm_eval.py, plus the optional `--dump` and `--rowstats`.
 fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     let (mut lm_path, mut profile, mut name, mut dev, mut rows_file) = (None, None, None, None, None);
     let (mut limit, mut set, mut dump, mut ctx_mode, mut demote) = (None::<usize>, None, None, false, true);
+    let mut rowstats = None::<String>;
     let mut it = args.iter();
     while let Some(a) = it.next() {
         let mut val = || it.next().cloned().ok_or_else(|| "missing option value".to_string());
@@ -88,11 +128,13 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
             "--limit" => limit = Some(num(val()?)?),
             "--set" => set = Some(val()?),
             "--dump" => dump = Some(val()?),
+            "--rowstats" => rowstats = Some(val()?),
             "--context" => ctx_mode = true,
             "--no-demote" => demote = false,
             _ => return Err("unknown argument".into()),
         }
     }
+    check_lm_opts(set.as_deref(), dump.is_some())?;
     let profile_name = profile.ok_or("--profile is required")?;
     let prof = match profile_name.as_str() {
         "chat" => Profile::Chat,
@@ -133,10 +175,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
             (Path::new(&f).file_name().map_or(String::new(), |s| s.to_string_lossy().into_owned()), rows)
         }
         (None, None, Some("holdout")) => {
-            // Summary line only: the sentences must never reach the output.
-            if dump.is_some() {
-                return Err("--dump is not allowed with --set holdout".into());
-            }
+            // Summary line and numbers-only rowstats: the sentences must never reach the output.
             let (_, rows) = load_set(&lex, "holdout")?;
             let rows = rows
                 .iter()
@@ -151,7 +190,12 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
         Some(f) => Some(std::io::BufWriter::new(fs::File::create(f).map_err(|e| format!("cannot create dump ({:?})", e.kind()))?)),
         None => None,
     };
-    let (mut top1, mut o64, mut firsts) = (0usize, 0usize, Vec::new());
+    // Opened before decoding, like the dump: an unwritable path fails now, not after a whole (holdout) run.
+    let rowstats = match rowstats {
+        Some(f) => Some(fs::File::create(f).map_err(|e| format!("cannot create rowstats ({:?})", e.kind()))?),
+        None => None,
+    };
+    let (mut top1, mut o64, mut firsts, mut rs) = (0usize, 0usize, Vec::new(), Vec::new());
     for (i, (truth, syls, ctx)) in rows.iter().enumerate() {
         // S2h: the first word is conditioned on the row's context, cut like the engine cuts it.
         let left = if ctx_mode { Some(context_key(ctx)) } else { None };
@@ -159,7 +203,9 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
         let nb = decode_from(&capped, syls, &lm, prof, BEAM_S1, start, demote).map_err(|e| e.to_string())?;
         let mut surf: Vec<String> = nb.iter().map(|(_, ws)| ws.concat()).collect();
         let t = len.apply(truth);
-        top1 += (len.apply(&surf[0]) == t) as usize;
+        let ok = len.apply(&surf[0]) == t;
+        top1 += ok as usize;
+        rs.push((ok, surf[0].clone(), truth.clone()));
         o64 += surf.iter().any(|s| len.apply(s) == t) as usize;
         if let Some(d) = dump.as_mut() {
             for (r, ((sc, _), s)) in nb.iter().zip(&surf).enumerate() {
@@ -170,6 +216,9 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     }
     if let Some(mut d) = dump {
         d.flush().map_err(|_| "cannot write dump".to_string())?;
+    }
+    if let Some(mut f) = rowstats {
+        f.write_all(format_rowstats(&rs).as_bytes()).map_err(|e| format!("cannot write rowstats ({:?})", e.kind()))?;
     }
     let sha = sha256_hex(firsts.join("\n").as_bytes());
     println!("## {name}  lm-{profile_name}{}{}  {{'n': {}, 'top1': {top1}, 'oracle@64': {o64}, 'top1_sha256': '{sha}'}}", if ctx_mode { "+ctx" } else { "" }, if demote { "" } else { "-nodemote" }, rows.len());
@@ -441,5 +490,30 @@ fn main() {
     if let Err(e) = run() {
         eprintln!("error: {e}");
         std::process::exit(1);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn row_stats_zero_for_ok_rows() {
+        assert_eq!(row_stats("他很好", "她很好", true), (0, 3));
+        assert_eq!(row_stats("他很好", "她很好", false), (1, 3));
+        assert_eq!(row_stats("", "𠮷野家", false), (3, 3));
+    }
+
+    #[test]
+    fn rowstats_rows_count_from_one() {
+        assert_eq!(format_rowstats(&[(true, "a".into(), "a".into()), (false, "ab".into(), "ac".into())]), "1\t1\t0\t1\n2\t0\t1\t2\n");
+    }
+
+    #[test]
+    fn lm_opts_holdout_allows_rowstats_not_dump() {
+        // --rowstats is not an argument: it is allowed everywhere, holdout included.
+        assert!(check_lm_opts(Some("holdout"), false).is_ok());
+        assert!(check_lm_opts(Some("holdout"), true).is_err());
+        assert!(check_lm_opts(None, true).is_ok());
     }
 }
