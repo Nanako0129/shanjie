@@ -78,6 +78,15 @@ final class ShellTests: XCTestCase {
         XCTAssertEqual(c.panel.lineRect, c.client.line)
     }
 
+    /// s3b2 section 10: the panel takes the client's light or dark appearance.
+    func testAppearanceReachesThePanel() {
+        let c = Controller(makeShell())
+        c.client.appearance = NSAppearance(named: .aqua)
+        c.session.activate()
+        c.type("su3 ")
+        XCTAssertEqual(c.panel.appearance?.name, .aqua)
+    }
+
     /// s3b2 section 2.2: the rectangle is asked for at the composition cursor, not at the end.
     func testLineRectIsAskedAtTheCursor() {
         let c = Controller(makeShell())
