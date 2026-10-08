@@ -30,6 +30,7 @@
 - **用**：
   - 中文維基百科的公共轉換組 `Module:CGroup/*`，以及動畫條目裡的登場人物段落，取 zh-tw 轉換後的文字。兩者都是 CC BY-SA 4.0，和現有的 `overlay-add.tsv` 同授權。
   - Wikidata 的 zh-tw 標籤，CC0。
+  - `data/packs/acg-manual.tsv`：維護者自己手動加的詞，授權 CC0（維護者自己的清單）。
 - **不用**：萌娘百科。它是 CC BY-NC-SA 3.0 CN，和 BY-SA 不相容，站方也禁止商業使用、擋爬蟲；而且以大陸譯名為主。
 - 署名：每個詞記錄出處（模組名或條目名），連同抓取時的 revision ID，放在 `data/packs/acg-sources.tsv`。`LICENSES/data.md` 加一列，比照 `overlay-add.tsv` 的寫法。
 - 授權不改：程式維持 Apache-2.0，資料維持 CC BY-SA 4.0。
@@ -47,6 +48,7 @@
   - 取每條規則的 zh-tw 值，包括 `X=>zh-tw:Y` 這種單向規則；沒有 zh-tw 才退回 zh-hant，並標記；
   - 多值依 `/` 拆開，去掉《》；
   - 只留 2–10 個漢字的詞。
+- **手動詞**（使用者 2026-10-09）：`data/packs/acg-manual.tsv`，三欄：詞、作品、備註，`#` 開頭為註解。建置工具把它當成多一個來源，來源標籤 `manual`，出處欄寫作品名；去重、讀音、分數、同音衝突偵測（含 `acg-collisions.tsv` 處置）都和其他來源相同，詞也列入參考名單。第一版：奇希莉卡、奇希里斯（無職轉生，角色奇希莉卡·奇希里斯）。
 - **作品標題**：上述 400 部作品條目的 zh-tw 顯示標題，去掉消歧義括號，只留 2–10 個漢字的，也收進詞包。
 - **條目人物**：
   - 作品清單：Wikidata 上有中文維基條目的動畫影集與動畫電影，取 sitelink 數最多的 400 部。
@@ -91,7 +93,7 @@
   - 新增 C ABI `shanjie_engine_set_packs(engine, mask)`，或照「切換排列會重建引擎」的做法重建。實作時選較小的改法，並在契約更新。
   - **實作選了重建**（2026-10-09）：詞包的列併入詞庫，`Lexicon` 建好之後是不可變的（讀音表與詞條陣列排序在一起），原地加減要重建整份詞庫，記憶體會同時有兩份。所以新增 `shanjie_engine_new_packs(data_dir, layout, packs_dir, packs, out)`（遮罩 0 等同 `shanjie_engine_new`），殼的選單切換時提交組字、釋放引擎、再建一個，和切換排列相同；詳見 `docs/contracts/s3a.md` §5、§6。詞包檔在 `Resources/packs/`，建置輸入（`acg-groups.tsv`、`acg-collisions.tsv`）不進 App。
   - 殼的選單加一項「動漫與遊戲詞」，偏好鍵 `acgPack`；設定方式比照「即時預測」的 `PredictionStore`。
-  - **預設值由使用者在 A.5 的數字出來後決定**，契約先不寫死。
+  - **預設值：開**（使用者 2026-10-09 決定，看過 A.3 的數字後）。偏好鍵沒設過（`nil`）就當成開；使用者在選單關掉後寫入 `false`，之後照存的值。
 - App 打包：`scripts/build-app.sh` 把 `data/packs/` 放進 `Resources/`；`check-app.sh` 檢查清單檔裡的 SHA-256 和實際檔案相符。
 
 ### A.3 評測
@@ -172,7 +174,7 @@
 
 ## 回滾
 
-- A：revert 本片的 merge commit；詞包檔是新增的，刪掉就回到原狀。開關預設關的話，使用者端不受影響。
+- A：revert 本片的 merge commit；詞包檔是新增的，刪掉就回到原狀。預設開，所以 revert 後使用者端會回到沒有詞包的選字；選單那一項消失，偏好鍵留著無害。
 - B：停用 workflow；已發的詞包 Release 由使用者決定要不要刪（外部動作，要先問）。
 - C：撤下 cask；輸入法會退回 App 內附的那一份。
 

@@ -118,7 +118,7 @@ class FakeApi:
 
 READINGS = {  # tools/readings.py needs the MOE dictionary; the fixture fixes the readings instead
     "碇源堂": "ㄉㄧㄥˋ ㄩㄢˊ ㄊㄤˊ", "螢火蟲之墓": "ㄧㄥˊ ㄏㄨㄛˇ ㄔㄨㄥˊ ㄓ ㄇㄨˋ", "風之谷": "ㄈㄥ ㄓ ㄍㄨˇ",
-    "楓之谷": "ㄈㄥ ㄓ ㄍㄨˇ", "阿庫雷特": "ㄚ ㄎㄨˋ ㄌㄟˊ ㄊㄜˋ",
+    "楓之谷": "ㄈㄥ ㄓ ㄍㄨˇ", "阿庫雷特": "ㄚ ㄎㄨˋ ㄌㄟˊ ㄊㄜˋ", "奇希莉卡": "ㄑㄧˊ ㄒㄧ ㄌㄧˋ ㄎㄚˇ",
 }
 
 
@@ -132,17 +132,19 @@ class Build(unittest.TestCase):
         cls.tmp = tempfile.mkdtemp()
         cls.groups = os.path.join(cls.tmp, "groups.tsv")
         open(cls.groups, "w", encoding="utf-8").write(GROUPS)
+        cls.manual = os.path.join(cls.tmp, "manual.tsv")
+        open(cls.manual, "w", encoding="utf-8").write("# m\n奇希莉卡\t無職轉生\t角色\n朋友\t基底已有\t去重\n")
         cls.none = os.path.join(cls.tmp, "none.tsv")                       # 沒有處置檔
         cls.excl = os.path.join(cls.tmp, "collisions.tsv")
         open(cls.excl, "w", encoding="utf-8").write("# c\nㄈㄥ ㄓ ㄍㄨˇ\t風之谷\t楓之谷\t保留既有的名字\n")
 
     def build(self, collisions):
-        return B.build(FakeApi(), self.groups, collisions, readings=fake_readings)
+        return B.build(FakeApi(), self.groups, collisions, self.manual, readings=fake_readings)
 
     def test_pack_content_and_filters(self):
         files, manifest, col, unread, ref = self.build(self.excl)
         words = {l.split("\t")[1] for l in files["acg-add.tsv"].splitlines()}
-        self.assertEqual(words, {"碇源堂", "螢火蟲之墓", "風之谷", "阿庫雷特"})
+        self.assertEqual(words, {"碇源堂", "螢火蟲之墓", "風之谷", "阿庫雷特", "奇希莉卡"})   # 奇希莉卡 來自手動清單；手動的 朋友 被去重丟掉
         self.assertNotIn("怪獸電力公司", words)        # 排除的組
         self.assertNotIn("朋友", words)                # 基底已有（轉換組與人物都一樣）
         self.assertNotIn("楓之谷", words)              # acg-collisions.tsv 排除
@@ -151,12 +153,16 @@ class Build(unittest.TestCase):
         self.assertNotIn("米卡莎的母親", ref)          # 嚴格過濾（關係詞組）
         self.assertEqual(manifest["unclassified_groups"], ["新作 (NewWork)"])
         self.assertEqual(manifest["version"], "20261008")   # 來源裡最新的 revision 時間，不是建置日期
-        self.assertEqual(manifest["sources"], {"cgroup": 3, "char": 1, "title": 1})
+        self.assertEqual(manifest["sources"], {"cgroup": 3, "char": 1, "title": 1, "manual": 1})
         self.assertEqual(col, {})
         self.assertEqual(unread, ["碇真次郎"])         # 角色列表條目裡的名字通過過濾，但讀音拼不出（夾具沒給）就丟掉
         for line in files["acg-add.tsv"].splitlines():
             self.assertEqual(len(line.split("\t")), 4)
             self.assertTrue(line.endswith("\tacg"))
+
+    def test_manual_words_carry_their_own_source_tag(self):
+        files, *_ = self.build(self.excl)
+        self.assertIn("奇希莉卡\tmanual\t無職轉生\t", files["acg-sources.tsv"])
 
     def test_same_cache_twice_is_identical(self):
         a = self.build(self.excl)
