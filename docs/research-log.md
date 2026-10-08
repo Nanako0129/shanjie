@@ -1362,7 +1362,6 @@ S2h 實機驗收時，使用者在終端機、Discord、VS Code、Chrome 網址�
 
 使用者決定發佈的模型加入用來辨識來源的指紋條目，只公開「含有指紋條目」，不公開是哪些、怎麼放；趕在 v0.3.0。契約 `docs/contracts/model-v4.md`（plan-verifier 兩次 REVISE 後收尾 READY，本地 code review 後再修）。
 
-- **量測**（model-v3 對 model-v4，PR #80 的 fresh verifier 重跑）：dev302、打字測驗、錯字回報在聊天與書面、有無 `--context` 共 12 組，rowstats 與摘要行逐位元組相同；即時預測 golden（2,938 個查詢）逐位元相同；`cargo test` 只有兩個雜湊釘選不同，`swift test` 95 個全過；保留集聊天 180／180、書面 184／184，改對 0、改壞 0。另有一項私有、只報數字的比對（main 跑）沒有任何差異。
+- **量測**（model-v3 對 model-v4，PR #80 的 fresh verifier 重跑）：dev302、打字測驗、錯字回報在聊天與書面、有無 `--context` 共 12 組，rowstats 與摘要行逐位元組相同；即時預測 golden（2,938 個查詢）逐位元相同；`cargo test` 只有兩個雜湊釘選不同，`swift test` 100 個（ShanjieKitTests 95、ShanjieInstallTests 5），0 失敗，1 個要 `SHANJIE_BENCH=1` 才跑的效能測試略過；保留集聊天 180／180、書面 184／184，改對 0、改壞 0。另有一項私有、只報數字的比對（main 跑）沒有任何差異。
 - **Release**：`model-v4`、`classes-v2` 已建（說明檔先經 PR #80 進 main），下載回來雜湊相符。classes-v2 和 classes-v1 只差檔頭的模型 SHA-256。
-- **取捨**（使用者知情後決定今天發）：model-v3 從 10-07 起公開可下載，兩個檔案可以直接比對。之後依契約 §4 第 4 步移除 model-v3 與 classes-v1；移除後，採用 model-v3 到這次改引用之間的 commit 要用本機副本才能重跑測試。
-- **更正**：PR #80 第一版 commit 的契約寫了比「含有指紋條目」更多的細節（我整理 commit 時漏了 `git add`，推上去的是舊文字），已用改寫版強制推送取代。
+- **之後**：model-v3 與 classes-v1 依契約 §4 第 4 步的條件成立後移除（使用者同意）；移除後，採用 model-v3 到這次改引用之間的 commit 要用本機副本才能重跑測試。

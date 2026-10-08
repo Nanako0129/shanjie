@@ -24,7 +24,7 @@ fn shared() -> &'static Shared {
         let dir = root().join("data/lexicon");
         let lex = load_lexicon(&dir).unwrap();
         let lm_file = root().join("data/lm/bigram.sjlm");
-        assert!(lm_file.exists(), "data/lm/bigram.sjlm is missing: download it with `gh release download model-v2 -R Nanako0129/shanjie -p bigram.sjlm -D data/lm`");
+        assert!(lm_file.exists(), "data/lm/bigram.sjlm is missing: download it with `gh release download model-v4 -R Nanako0129/shanjie -p bigram.sjlm -D data/lm`");
         assert!(root().join("data/lm/classes.sjc").exists(), "data/lm/classes.sjc is missing: download it with `gh release download classes-v2 -R Nanako0129/shanjie -p classes.sjc -D data/lm` (or build it with tools/build_classes.py)");
         let lm = Lm::load(&lm_file).unwrap();
         let overlay = std::fs::read_to_string(dir.join("overlay-add.tsv")).unwrap();
