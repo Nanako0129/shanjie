@@ -25,7 +25,7 @@ S2k 的保留集只回總數（聊天 180、書面 184，對第一段的 179、1
 - 錯字數：對的列是 0（寬鬆對照算對、但原字不同的列也是 0，例如正解「她」、第一名「他」）；錯的列是第一名 surface 與正解句子的 Levenshtein 距離，以 Unicode 純量值為單位。正解字數是正解句子的 Unicode 純量值個數。
 - 每一行由一個純函式算出：Rust `row_stats(top1, gold, ok) -> (u32, u32)`、Python `row_stats(top1, gold, ok)`；寫檔也各只有一個函式（Python 的 `format_rowstats(rows)` 回傳整個檔的字串），`--set holdout` 與其他集合共用。
 - 產生：
-  - Rust CLI：`shanjie-eval lm … --rowstats FILE`，可以和 `--dev`、`--rows`、`--set holdout` 一起用（`--dump` 對保留集仍然禁止）。選項組合的檢查抽成純函式 `fn check_lm_opts(set: Option<&str>, dump: bool) -> Result<(), String>`（`--rowstats` 在任何集合都允許，所以不是參數；review 後拿掉沒用到的 `rowstats` 參數），在讀任何檔案之前呼叫。
+  - Rust CLI：`shanjie-eval --lm … --rowstats FILE`（`--lm` 就是 LM 模式，沒有 `lm` 子命令），可以和 `--dev`、`--rows`、`--set holdout` 一起用（`--dump` 對保留集仍然禁止）。選項組合的檢查抽成純函式 `fn check_lm_opts(set: Option<&str>, dump: bool) -> Result<(), String>`（`--rowstats` 在任何集合都允許，所以不是參數；review 後拿掉沒用到的 `rowstats` 參數），在讀任何檔案之前呼叫。
   - Python：`reference/proto/lm_eval.py … --rowstats FILE`，同樣的位元組。
   - 摘要行不變。
 
