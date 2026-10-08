@@ -71,6 +71,7 @@ final class ShanjieInputController: IMKInputController {
         case .toggleBackup: #selector(toggleLearningBackup(_:))
         case .toggleDemote: #selector(toggleDemote(_:))
         case .togglePrediction: #selector(togglePrediction(_:))
+        case .toggleAcgPack: #selector(toggleAcgPack(_:))
         }
     }
 
@@ -84,6 +85,7 @@ final class ShanjieInputController: IMKInputController {
     @objc func toggleLearningBackup(_ sender: Any?) { perform(.toggleBackup) }
     @objc func toggleDemote(_ sender: Any?) { perform(.toggleDemote) }
     @objc func togglePrediction(_ sender: Any?) { perform(.togglePrediction) }
+    @objc func toggleAcgPack(_ sender: Any?) { perform(.toggleAcgPack) }
 }
 
 /// The controller's current IMKTextInput client.

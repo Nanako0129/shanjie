@@ -34,9 +34,16 @@ final class CoreEngine {
     private init(handle: OpaquePointer) { self.handle = handle }
 
     /// `shanjie_engine_new`; on failure returns the code and nothing is allocated.
-    static func make(dataDir: String, layout: UInt32) -> (CoreEngine?, Int32) {
+    /// `packsDir` holds the word pack files; `acgPack` enables the ACG pack (acg-pack contract A.2). Off is
+    /// `shanjie_engine_new`, so the engine is the one the app had before the pack existed.
+    static func make(dataDir: String, layout: UInt32, packsDir: String? = nil, acgPack: Bool = false) -> (CoreEngine?, Int32) {
         var out: OpaquePointer?
-        let code = shanjie_engine_new(dataDir, layout, &out)
+        let code: Int32
+        if acgPack, let packsDir {
+            code = shanjie_engine_new_packs(dataDir, layout, packsDir, 1, &out)
+        } else {
+            code = shanjie_engine_new(dataDir, layout, &out)
+        }
         guard code == 0, let out else { return (nil, code == 0 ? 4 : code) }
         return (CoreEngine(handle: out), 0)
     }
