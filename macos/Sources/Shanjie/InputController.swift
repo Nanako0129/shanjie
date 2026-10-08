@@ -132,6 +132,27 @@ final class ClientAdapter: TextClient {
         }
         return rect.origin == .zero ? nil : rect
     }
+
+    /// s3b2 section 10: Apple Zhuyin's panel follows the light or dark appearance of the view being
+    /// typed into. IMK has no public call for it; its client object has the private
+    /// `viewEffectiveAppearance` and `windowEffectiveAppearance` (runtime scan of InputMethodKit,
+    /// 2026-10-08: both take no argument and return an object, type encoding `@16@0:8`). Each is used
+    /// only while it still has that shape, so a change in a later macOS falls back to the system's
+    /// appearance instead of misreading the result. The shape is read from `type(of:)`, not
+    /// object_getClass: the client is a forwarding tracer (IMKTracingTextInput, measured 2026-10-08)
+    /// whose own class has neither method, while `-class` reports the wrapper it forwards to.
+    var appearance: NSAppearance? {
+        guard let client = controller?.client() as? NSObject else { return nil }
+        let cls: AnyClass = type(of: client)
+        for name in ["viewEffectiveAppearance", "windowEffectiveAppearance"] {
+            let sel = NSSelectorFromString(name)
+            guard let m = class_getInstanceMethod(cls, sel),
+                  String(cString: method_getTypeEncoding(m)!).hasPrefix("@16@0:8"),
+                  client.responds(to: sel) else { continue }
+            if let a = client.perform(sel)?.takeUnretainedValue() as? NSAppearance { return a }
+        }
+        return nil
+    }
 }
 
 /// The panel that cannot take focus: keys and clicks never make it key or main (s3b2 section 2.1).
@@ -296,8 +317,9 @@ final class CandidatePanelAdapter: CandidatePanel {
     }
 
     func show(_ candidates: [String], notes: [String?], selected: Int, columns: Int, first: Int, total: Int,
-              lineRect: NSRect?) {
+              lineRect: NSRect?, appearance: NSAppearance?) {
         let grid = columns > 0
+        if window.appearance?.name != appearance?.name { window.appearance = appearance }
 
         // Only the selection moved (section 8.7): keep the cells, change which one is selected and which
         // row shows numbers. The glass's content view is never replaced either way.
