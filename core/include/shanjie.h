@@ -67,7 +67,7 @@ int32_t shanjie_engine_new(const char *data_dir, uint32_t layout, ShanjieEngine 
 //   the rows are parsed into the lexicon, so the set is fixed for the engine's life: the shell turns a pack on or
 //   off by freeing the engine and creating another, like a layout change. packs 0 ignores packs_dir (may be NULL)
 //   and is exactly shanjie_engine_new; a missing pack file contributes nothing (same engine as without it).
-//   2 for a bit outside the mask, 1 for a NULL packs_dir with a non-zero mask, 3 when a pack file exists but cannot
+//   2 for a bit outside the mask or a non-UTF-8 data_dir or packs_dir, 1 for a NULL packs_dir with a non-zero mask, 3 when a pack file exists but cannot
 //   be read or parsed. The pack's words are capped like overlay-add.tsv's when the LM is loaded.
 int32_t shanjie_engine_new_packs(const char *data_dir, uint32_t layout, const char *packs_dir, uint32_t packs, ShanjieEngine **out);
 void    shanjie_engine_free(ShanjieEngine *engine);

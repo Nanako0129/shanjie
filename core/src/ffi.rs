@@ -5,7 +5,7 @@
 #[cfg(panic = "abort")]
 compile_error!("C ABI requires panic=unwind");
 
-use crate::engine::{Engine, EngineError, Key, KeyKind, Layout, Output, ResetMode, PACK_ACG};
+use crate::engine::{Engine, EngineError, Key, KeyKind, Layout, Output, ResetMode, PACK_ALL};
 use crate::lm::Profile;
 use std::ffi::{c_char, CStr, CString};
 use std::panic::{catch_unwind, AssertUnwindSafe};
@@ -151,30 +151,8 @@ pub unsafe extern "C" fn shanjie_engine_new(
     layout: u32,
     out: *mut *mut ShanjieEngine,
 ) -> i32 {
-    guard(|| {
-        // SAFETY: forwarded caller contract.
-        if !unsafe { clear_out(out) } || data_dir.is_null() {
-            return SHANJIE_ERR_NULL;
-        }
-        let layout = match layout {
-            0 => Layout::Standard,
-            1 => Layout::Eten,
-            _ => return SHANJIE_ERR_INVALID,
-        };
-        // SAFETY: non-NULL, NUL-terminated per the caller contract.
-        let Ok(dir) = unsafe { CStr::from_ptr(data_dir) }.to_str() else {
-            return SHANJIE_ERR_INVALID;
-        };
-        match Engine::new(Path::new(dir), layout) {
-            Ok(e) => {
-                // SAFETY: `out` checked non-NULL above.
-                unsafe { *out = Box::into_raw(Box::new(ShanjieEngine(e))) };
-                SHANJIE_OK
-            }
-            Err(EngineError::LoadFailed) => SHANJIE_ERR_LOAD,
-            Err(EngineError::Internal) => SHANJIE_ERR_INTERNAL,
-        }
-    })
+    // SAFETY: forwarded caller contract; mask 0 ignores the NULL packs_dir.
+    unsafe { shanjie_engine_new_packs(data_dir, layout, std::ptr::null(), 0, out) }
 }
 
 /// Like `shanjie_engine_new`, with word packs (docs/contracts/acg-pack.md A.2): `packs_dir` holds the pack
@@ -203,7 +181,7 @@ pub unsafe extern "C" fn shanjie_engine_new_packs(
             1 => Layout::Eten,
             _ => return SHANJIE_ERR_INVALID,
         };
-        if packs & !PACK_ACG != 0 {
+        if packs & !PACK_ALL != 0 {
             return SHANJIE_ERR_INVALID;
         }
         // SAFETY: non-NULL, NUL-terminated per the caller contract.
@@ -1150,10 +1128,11 @@ mod tests {
         let (cls, emit) = ([1u16, 2, 0xFFFF, 0xFFFF], [1.0, 1.0, 0.0, 0.0]);
         std::fs::write(&classes_path, crate::lm::test_classes(&tiny, 0, 0.8, &cls, &emit, &[0.1; 9])).unwrap();
         // An engine without data_dir is not reachable through the ABI (only `new` creates engines);
-        // the closest case is the overlay vanishing from data_dir after `new`.
-        std::fs::rename(dir.join("overlay-add.tsv"), dir.join("overlay.bak")).unwrap();
-        assert!(unsafe { shanjie_engine_load_lm(e, lm_c.as_ptr()) } == 3, "load without overlay");
-        std::fs::rename(dir.join("overlay.bak"), dir.join("overlay-add.tsv")).unwrap();
+        // the closest case is demote.tsv vanishing from data_dir after `new` (the capping overlay is
+        // kept from `new`, so only demote.tsv is read again).
+        std::fs::rename(dir.join("demote.tsv"), dir.join("demote.bak")).unwrap();
+        assert!(unsafe { shanjie_engine_load_lm(e, lm_c.as_ptr()) } == 3, "load without demote.tsv");
+        std::fs::rename(dir.join("demote.bak"), dir.join("demote.tsv")).unwrap();
         assert!(type_xin(e) == "鑫" && profile(e, 1).3 == "鑫", "failed loads left no LM");
         assert!(profile(e, 0).0 == 0 && enter(e) == "鑫", "still unigram");
 

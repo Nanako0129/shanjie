@@ -1,4 +1,4 @@
-use core::engine::{load_lexicon, load_lexicon_packs, read_packs, PACK_ACG};
+use core::engine::{load_lexicon, load_lexicon_packs, PACK_ACG};
 use core::eval::*;
 use core::learn::{context_key, SENTINEL};
 use core::lm::{decode_from, history, CappedLexicon, Demote, Lm, Profile};
@@ -155,13 +155,17 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     let lm = if classes { Lm::load(std::path::Path::new(&lm_path)) } else { Lm::load_without_classes(std::path::Path::new(&lm_path)) }
         .map_err(|e| e.to_string())?;
     let dir = root().join("data/lexicon");
-    let pdir = packs_dir.map_or_else(|| root().join("data/packs"), PathBuf::from);
-    let lex = load_lexicon_packs(&dir, Some((&pdir, packs))).map_err(|_| "cannot load lexicon".to_string())?;
-    let mut overlay = fs::read_to_string(dir.join("overlay-add.tsv")).map_err(|e| format!("cannot read overlay ({:?})", e.kind()))?;
-    if packs != 0 {
-        overlay.push('\n');
-        overlay.push_str(&read_packs(&pdir, packs).map_err(|_| "cannot read the pack".to_string())?);
+    if packs == 0 && packs_dir.is_some() {
+        return Err("--packs-dir needs --packs".into());
     }
+    let pdir = packs_dir.map_or_else(|| root().join("data/packs"), PathBuf::from);
+    // The engine tolerates a missing pack file; a run that asked for one must not silently measure without it.
+    let acg = pdir.join("acg-add.tsv");
+    if packs & PACK_ACG != 0 && !acg.is_file() {
+        return Err(format!("--packs acg: pack file not found: {}", acg.display()));
+    }
+    // The same helper as the engine: the lexicon and the capping overlay text come from one read of each file.
+    let (lex, overlay) = load_lexicon_packs(&dir, Some((&pdir, packs))).map_err(|_| "cannot load lexicon".to_string())?;
     let demote_rows = fs::read_to_string(dir.join("demote.tsv")).map_err(|e| format!("cannot read demote.tsv ({:?})", e.kind()))?;
     let table = Demote::parse(&demote_rows).filter(|d| d.check(&lex)).ok_or("bad demote.tsv")?;
     // The table is always loaded, so a malformed one stops the run even with --no-demote.
