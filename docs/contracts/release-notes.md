@@ -18,7 +18,9 @@
 - **gate**（不碰任何 secret）：checkout 的 sparse 路徑加上 `docs/releases`；新步驟「Require the release notes」：
   - `push` 一個 `v*` tag 時，`docs/releases/$GITHUB_REF_NAME.md` 必須存在而且不是空的（去掉空白後仍有內容），否則以錯誤結束、訊息寫出要補哪個檔；
   - `workflow_dispatch`（main 上的試跑，不發佈）不檢查。
-- **publish**：checkout 的 sparse 路徑加上 `docs/releases`；`gh release create` 把 `--generate-notes` 換成 `--notes-file "$GITHUB_WORKSPACE/docs/releases/$GITHUB_REF_NAME.md"`，保留 `--latest`。Release 已經存在、重跑這個 job 的路徑不變（不改說明）。
+- **publish**：checkout 的 sparse 路徑加上 `docs/releases`；`gh release create` 把 `--generate-notes` 換成 `--notes-file "$GITHUB_WORKSPACE/docs/releases/$GITHUB_REF_NAME.md"`。Release 已經存在、重跑這個 job 的路徑不改說明，但說明和檔案不同時印警告。
+- **Latest**（review 後補，2026-10-08）：新 tag 是所有 `v*` Release 裡版本號最大的（`sort -V`）才 `--latest=true`，否則 `--latest=false`，替舊版本線補發的修正版不搶 Latest。
+- **檢查的位置**（review 後補）：說明檔的檢查放在 gate 的「等 CI」之前，缺檔一秒就失敗。
 - 其他步驟不動。
 
 ## 3. 規則（寫進 repo 根目錄 `CLAUDE.md`「發版」與 `docs/releases/README.md`）
