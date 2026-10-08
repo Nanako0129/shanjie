@@ -3,8 +3,11 @@ import AppKit
 /// docs/contracts/s3b2-glass-panel.md section 2.3: where the candidate bar goes. Pure, so it is
 /// testable without a screen. Coordinates are AppKit's (origin bottom-left, y up).
 public enum PanelPlacement {
-    /// Gap between the line and the bar (section 2.3; McBopomofo uses the same 4 pt).
-    public static let gap: CGFloat = 4
+    /// Gap between the line and the bar (section 2.3). Was 4 (McBopomofo's value); measured 2026-10-08
+    /// with imeshot in light and dark windows at 1 px = 1 pt, our bar (barHeight 28) sat 2 pt higher than
+    /// Apple Zhuyin's under the same composing line (rim and capsule both), so 6 lines it up. The gap
+    /// above the line (no room below) uses the same value; Apple's there is not measured.
+    public static let gap: CGFloat = 6
 
     /// The bar's top-left corner.
     /// - `lineRect`: the text line (origin bottom-left); `nil` reuses `lastOrigin`, and with none
