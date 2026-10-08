@@ -45,4 +45,31 @@ refuses "template without version" env SHANJIE_CASK_TEMPLATE="$T/no-version.rb" 
 refuses "template with two sha256 lines" env SHANJIE_CASK_TEMPLATE="$T/two-sha.rb" "$R" 1.2.3 "$SHA"
 refuses "missing template" env SHANJIE_CASK_TEMPLATE="$T/none.rb" "$R" 1.2.3 "$SHA"
 
+# The postflight's process pattern (section 15), through pgrep, which matches like the pkill that
+# terminate_process runs: stand-in processes (cat on a pipe, command line set with exec -a) that
+# look like the running input method match; ones that only mention its path do not.
+PAT="$(sed -n "s/^ *terminate_process '\(.*\)',\$/\1/p" "$ROOT/packaging/Casks/shanjie.rb")"
+[ -n "$PAT" ] || fail "no terminate_process pattern in the cask template"
+IM="$T/Library/Input Methods"
+cases=("yes|$IM/善解輸入法.app/Contents/MacOS/shanjie"
+       "yes|$IM/shanjie.app/Contents/MacOS/shanjie"
+       "no|$IM/善解輸入法.app/Contents/MacOS/shanjie install"
+       "no|/usr/bin/editor $IM/善解輸入法.app/Contents/MacOS/shanjie"
+       "no|$IM/.shanjie-previous/善解輸入法.app/Contents/MacOS/shanjie")
+pids=()
+for c in "${cases[@]}"; do
+  sleep 30 | (exec -a "${c#*|}" cat) &
+  pids+=("$!")
+done
+trap 'kill "${pids[@]}" 2>/dev/null; rm -rf "$T"' EXIT
+for i in "${!cases[@]}"; do  # wait until each stand-in has exec'd
+  for _ in $(seq 50); do [ "$(ps -o command= -p "${pids[$i]}")" = "${cases[$i]#*|}" ] && break; sleep 0.1; done
+done
+found=" $(pgrep -f "$PAT" | tr '\n' ' ')"
+for i in "${!cases[@]}"; do
+  want="${cases[$i]%%|*}"; got=no
+  [ "${found/ ${pids[$i]} /}" = "$found" ] || got=yes
+  [ "$got" = "$want" ] || fail "pattern match for '${cases[$i]#*|}': $got, expected $want"
+done
+
 echo "render-cask.sh: ok"

@@ -51,6 +51,12 @@ brew install --cask nanako0129/tap/shanjie
 
 第二行註冊並啟用輸入方式。第一次安裝通常要登出再登入，系統才會接受新的輸入法：第二行結束碼是 3 時，登出、再登入，然後再執行一次。
 
+升級用 `brew upgrade --cask nanako0129/tap/shanjie`（`brew update` 只更新清單，不會換掉輸入法）。升級到 0.3.0 之後的版本時，brew 會在新版放好後結束舊的輸入法，系統下次啟動的就是新版。升級到 0.3.0 或更早的版本時，舊的還會繼續跑，要再執行：
+
+```sh
+pkill -f "Input Methods/善解輸入法.app/Contents/MacOS/shanjie"
+```
+
 **手動**
 
 從 [Releases](https://github.com/Nanako0129/shanjie/releases) 下載 `shanjie-<版本>.zip`（`v` 開頭的那幾個；`model-v…`、`classes-v…` 是語言模型與詞類表，已經包在 App 裡，不用另外下載，說明見 `docs/data-files.md`），用 Finder 解壓，然後在這個 repo 的根目錄執行：
