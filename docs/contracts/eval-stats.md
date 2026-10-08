@@ -22,9 +22,10 @@ S2k 的保留集只回總數（聊天 180、書面 184，對第一段的 179、1
 
 - 格式：每列一行 `列號\t對錯\t錯字數\t正解字數`，列號從 1 開始依評測檔順序，對錯是 `0` 或 `1`，後兩欄是非負整數。檔案裡只有數字、tab、換行。
 - 對錯：和現在的 top1 相同（寬鬆對照）。
-- 錯字數：對的列是 0；錯的列是第一名 surface 與正解句子的 Levenshtein 距離，以 Unicode 純量值為單位。正解字數是正解句子的 Unicode 純量值個數。
+- 錯字數：對的列是 0（寬鬆對照算對、但原字不同的列也是 0，例如正解「她」、第一名「他」）；錯的列是第一名 surface 與正解句子的 Levenshtein 距離，以 Unicode 純量值為單位。正解字數是正解句子的 Unicode 純量值個數。
+- 每一行由一個純函式算出：Rust `row_stats(top1, gold, ok) -> (u32, u32)`、Python `row_stats(top1, gold, ok)`；寫檔也各只有一個函式（Python 的 `format_rowstats(rows)` 回傳整個檔的字串），`--set holdout` 與其他集合共用。
 - 產生：
-  - Rust CLI：`shanjie-eval lm … --rowstats FILE`，可以和 `--dev`、`--rows`、`--set holdout` 一起用（`--dump` 對保留集仍然禁止）。
+  - Rust CLI：`shanjie-eval lm … --rowstats FILE`，可以和 `--dev`、`--rows`、`--set holdout` 一起用（`--dump` 對保留集仍然禁止）。選項組合的檢查抽成純函式 `fn check_lm_opts(set: Option<&str>, dump: bool, rowstats: bool) -> Result<(), String>`，在讀任何檔案之前呼叫。
   - Python：`reference/proto/lm_eval.py … --rowstats FILE`，同樣的位元組。
   - 摘要行不變。
 
@@ -39,7 +40,10 @@ S2k 的保留集只回總數（聊天 180、書面 184，對第一段的 179、1
 
 - **一般改動**：PR 與研究紀錄裡，dev302、typing76、錯字回報在聊天與書面各一行（基準＝main）；調參數時 cvtune、wikitune 也照這個報。repo 根目錄 `CLAUDE.md`「評測與資料」那一條改成這個報法。
 - **Discord 調參集**（私有）：main 在本機跑，只貼表格的數字。
-- **`tools/bench.py`**：跨版本比較的每一格，除了現在的改對／改壞與 p，加上兩個版本的 CER 與 Δtop1、ΔCER 的 95% 區間；`docs/benchmark.md` 的表格跟著改。CER 從現有的 dump 算，不必重跑。
+- **`tools/bench.py`**：
+  - `run` 在算 `vs_prev` 的地方（現在算改對／改壞與 p 的同一處），從兩個版本的 dump 用 `row_stats` 算出每列統計，另外把這一格的 CER（`cer`）寫進該格、把 Δtop1 與 ΔCER 的 95% 區間（`ci_top1`、`ci_cer`）寫進 `vs_prev`；`mcnemar` 改 import `evalstats.mcnemar_exact`。
+  - `table` 只讀 results JSON（照舊），有這些欄位就顯示，沒有就顯示「—」。現有的 results JSON 都沒有，所以要等 main 下一次 `bench.py run`（v0.3.0 的基準量測，含私有的 discordtune）才會有數字。
+  - `docs/benchmark.md` 由 `table` 重產。
 - **保留集**：片結束時的 fresh verifier 對基準與新版各跑一次 `--set holdout --rowstats`（寫到它自己的暫存目錄），再跑 `evalstats.py compare`，只回報那一行表格，然後刪掉兩個 rowstats。基準由 main 在 brief 裡指定（通常是 main 的 HEAD）。`docs/methodology.md` 與 `eval/README.md` 的保留集規則跟著改。
 
 ## 4. 驗收
@@ -52,10 +56,23 @@ S2k 的保留集只回總數（聊天 180、書面 184，對第一段的 179、1
 2. rowstats 一致：dev302 聊天與書面，`lm_eval.py --rowstats` 與 CLI `--rowstats` 逐位元組相同（`cli/tests/golden.rs` 新增一項，比對 Python 事先產生、放進 `eval/golden/` 的檔）；對錯欄加總等於摘要行的 top1。
 3. 保留集的檔沒有文字：
    - rowstats 只由一個寫出函式產生，`--set holdout` 與其他集合共用；CLI 測試對 dev302 的 rowstats 檢查只含 `[0-9\t\n]`。
-   - CLI 的參數檢查接受 `--set holdout --rowstats FILE`、仍拒絕 `--set holdout --dump FILE`（測試只檢查參數，不讀保留集；repo 現在沒有讀保留集的自動測試，這一片也不加）。
+   - `check_lm_opts` 的單元測試：holdout＋rowstats → Ok、holdout＋dump → Err。沒有任何測試用 `--set holdout` 執行 CLI（repo 現在沒有讀保留集的自動測試，這一片也不加）；驗收時 `rg '"holdout"' cli/tests core/tests tools/test_*.py` 只出現在對 `check_lm_opts` 的呼叫裡。
    - 片結束的 fresh verifier 實際跑保留集時，對兩個 rowstats 再檢查一次只含 `[0-9\t\n]`。
-4. `bench.py`：`table` 重產後，`docs/benchmark.md` 每一格有 CER 與兩個區間；舊的 results JSON 沒有 CER 時顯示「—」，不報錯。
-5. 突變（每一項要讓指名的測試以斷言失敗）：McNemar 改成單尾；Levenshtein 的替換成本改成 2；bootstrap 不用 seed；CLI 的錯字數在對的列不歸零；rowstats 的列號從 0 開始。
+4. `bench.py`：
+   - 對現有的 results JSON 跑 `python3 tools/bench.py table` 不報錯，新欄位都顯示「—」，其他內容和改動前的 `docs/benchmark.md` 相同；
+   - 單元測試（`tools/test_evalstats.py` 或新的 `tools/test_bench.py`）用一筆合成的 record（含 `cer`、`ci_top1`、`ci_cer`）呼叫格子的格式化函式，檢查數字照格式顯示；一筆沒有這些欄位的 record 顯示「—」。
+5. 突變（每一項要讓指名的測試以斷言失敗，不是編譯錯誤）：
+
+   | 突變 | 抓到的測試 |
+   |---|---|
+   | `mcnemar_exact` 改成單尾 | `tools/test_evalstats.py` 的 McNemar 已知值測試 |
+   | `levenshtein` 替換成本改成 2 | `tools/test_evalstats.py` 的 Levenshtein 測試 |
+   | `paired_bootstrap` 不用 seed | `tools/test_evalstats.py` 的「固定 seed 兩次相同」測試 |
+   | Rust `row_stats` 在對的列不歸零 | CLI 的單元測試：`row_stats("他很好", "她很好", true) == (0, 3)` |
+   | Python `row_stats` 在對的列不歸零 | `tools/test_evalstats.py`：同一組輸入得 `(0, 3)` |
+   | CLI 寫檔的列號從 0 開始 | `cli/tests/golden.rs` 的 rowstats 逐位元組比對（golden 由 Python 產生） |
+   | Python `format_rowstats` 的列號從 0 開始 | `tools/test_evalstats.py`：兩列合成資料的輸出第一欄是 1、2 |
+   | `check_lm_opts` 接受 `--set holdout --dump` | CLI 的單元測試：holdout＋dump → Err、holdout＋rowstats → Ok |
 6. `cargo test`（debug、release）、`swift test`、上面的 Python 測試全綠。
 7. 文件：`CLAUDE.md`、`docs/methodology.md`、`eval/README.md`、`CONTRIBUTING.md`（若提到怎麼報數字）一致；研究紀錄記下這次的改法與理由。
 
