@@ -66,7 +66,7 @@
 - 不執行從網路下載的東西：輸入法本體來自自己的 `Resources/`，由外層簽章封住。Gatekeeper 只在第一次啟動時檢查封印，之後同一個使用者的行程理論上能改 bundle；那樣的行程本來就能直接寫 `~/Library/Input Methods`，不多給權限，接受（不加啟動時的 `SecStaticCodeCheckValidity`）。
 - 被 Gatekeeper 隨機搬移（App Translocation）時，`Resources/` 是唯讀的隨機路徑；安裝程式只從那裡讀 zip，註冊用的一律是已安裝的路徑。**未驗證**：translocation 下的實際行為，§7 記錄。
 - 2026-10-04 量測：brew 安裝的那份帶 quarantine（旗標含使用者已核准；推測是使用者在終端機執行過它，未驗證），執行中的輸入法 `lsof` 顯示的是 `~/Library/Input Methods/善解輸入法.app` 本身，沒有被搬到隨機路徑。安裝程式路徑用 `--noqtn`，不依賴這個核准旗標。
-- **agent 與 CI 都不啟動安裝程式**、不執行它的執行檔（契約與 brief 明寫）；它只能由使用者在真實帳號上點開。CI 只檢查 bundle 結構與簽章。
+- **agent 與 CI 都不啟動安裝程式**、不執行它的執行檔（契約與 brief 明寫）；它只能由使用者在真實帳號上點開。CI 只檢查 bundle 結構與簽章。唯一例外是 `installer-v2.md` §1.4 的畫面輸出：只由 main 執行 `swift build` 出來的裸執行檔，參數只有 `--render-steps`，只寫指定資料夾裡的 PNG。
 
 ## 6. 驗收（agent 可做的部分）
 
