@@ -39,7 +39,7 @@ class BuildLm(unittest.TestCase):
         data = build_lm.build(cls.cls)[0]
         cls.path = os.path.join(cls.tmp.name, "tiny.sjlm")
         open(cls.path, "wb").write(data)
-        cls.lm = L.BigramLM(cls.path)
+        cls.lm = L.BigramLM(cls.path, classes=False)
 
     @classmethod
     def tearDownClass(cls):

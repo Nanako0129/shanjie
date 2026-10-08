@@ -27,7 +27,7 @@ LM_PATH = os.path.join(OUT, "bigram.sjlm")
 
 class ClassLM(L.BigramLM):
     def __init__(self, path, N=40000, K=256, mu=0.0):
-        super().__init__(path)
+        super().__init__(path, classes=False)  # 自己的 prob 用字串查類別（第一段）；產品的類別項在 lm.py
         self.mu = mu
         if mu:
             self._load(N, K)
