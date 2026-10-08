@@ -1,0 +1,197 @@
+"""Tests for tools/build_acg_pack.py (docs/contracts/acg-pack.md A.5). Run: python3 -m unittest tools.test_build_acg_pack   (from the repo root).
+No network: the build runs against a fake API. It needs the repo's data (data/lexicon, data/lm/bigram.sjlm) and the evaluation CLI
+(built on demand with cargo) for the collision detection; it fails loudly without them, never skips."""
+import hashlib
+import json
+import os
+import sys
+import tempfile
+import unittest
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import build_acg_pack as B  # noqa: E402
+
+
+def second_column(path):
+    return {l.split("\t")[1] for l in open(path, encoding="utf-8") if l.strip()}
+
+
+def lexicon_words():
+    words = set()
+    for l in open(B.bo.BASE, encoding="utf-8"):
+        f = l.split()
+        if len(f) == 3 and l[0] not in "#_":
+            words.add(f[1])
+    for f in ("overlay-add.tsv", "sandhi-add.tsv"):
+        words |= second_column(os.path.join(B.LEX, f))
+    return words
+
+
+class Rules(unittest.TestCase):
+    def test_zh_tw_values(self):
+        self.assertEqual(B.tw_values("zh-cn:路飞; zh-tw:魯夫/路飛; zh-hk:路飛"), [("魯夫", "zh-tw"), ("路飛", "zh-tw")])
+        self.assertEqual(B.tw_values("魯夫=>zh-tw:路飛"), [("路飛", "zh-tw")])           # 單向規則
+        self.assertEqual(B.tw_values("zh-hant:《進擊的巨人》; zh-cn:进击的巨人"), [("進擊的巨人", "zh-hant")])   # 沒有 zh-tw 才退回 zh-hant
+        self.assertEqual(B.tw_values("zh-tw:A; zh-hant:鋼彈"), [])                       # 有 zh-tw 就不退回；非漢字與單字不收
+        self.assertEqual(B.tw_values("zh-tw:魯"), [])
+
+    def test_strict_name_filter(self):
+        base = {"小明"}
+        ok = lambda n, s, kind="li": B.strict_ok(n, kind, s, base)
+        self.assertTrue(ok("阿庫雷特", "阿庫雷特（アクレット）"))
+        self.assertFalse(ok("小明", "小明（シャオミン）"))                    # 在基底
+        self.assertFalse(ok("阿庫雷特", "阿庫雷特（アクレット）", "heading"))  # 小標題
+        self.assertFalse(ok("阿庫雷特的母親", "阿庫雷特的母親（ママ）"))      # 關係詞組
+        self.assertFalse(ok("阿庫雷特社團", "阿庫雷特社團（クラブ）"))        # 泛稱
+        self.assertFalse(ok("阿庫雷特", "阿庫雷特，主角"))                    # 旁邊沒有原名
+        self.assertFalse(ok("阿庫雷特", "主角阿庫雷特（アクレット）"))        # 摘要不是以名字開頭
+
+
+class Dedupe(unittest.TestCase):
+    def test_words_already_in_the_lexicon_are_dropped(self):
+        self.assertEqual(B.dedupe(["悲慘世界", "碇源堂", "碇源堂"], {"悲慘世界"}), ["碇源堂"])
+
+    def test_the_committed_pack_shares_no_string_with_base_overlay_or_sandhi(self):
+        pack = second_column(os.path.join(B.PACKS, "acg-add.tsv"))
+        self.assertGreater(len(pack), 10000)
+        self.assertEqual(pack & lexicon_words(), set())
+
+
+class Ordering(unittest.TestCase):
+    def test_more_sources_first_then_by_string(self):
+        n = {"乙乙": 1, "甲甲": 1, "丙丙": 3}
+        self.assertEqual(B.ordered(["乙乙", "甲甲", "丙丙"], n.get), ["丙丙"] + sorted(["乙乙", "甲甲"]))
+        self.assertEqual(B.ordered(["丙丙", "甲甲", "乙乙"], n.get), B.ordered(["乙乙", "丙丙", "甲甲"], n.get))
+
+
+# ---- a fake API serving a small, fixed corner of Wikipedia
+
+GROUPS = """# 區段\t組名\t模組\t收錄\t類別或理由
+作品\t碇系\tEVA\tinclude\t動畫
+作品\t遊戲系\tGames\tinclude\t遊戲
+作品\t某電影\tMovie\texclude\t電影
+"""
+LIST = """{| class="wikitable"
+| colspan=4 div style="text-align: center;" | 艺术、影视与ACG（三）：作品
+{{CGroup/list/item|碇系|EVA|--|x}}
+{{CGroup/list/item|遊戲系|Games|--|x}}
+{{CGroup/list/item|某電影|Movie|--|x}}
+{{CGroup/list/item|新作|NewWork|--|x}}
+"""
+TS = {"list": "2026-10-01T00:00:00Z", "eva": "2026-10-05T00:00:00Z", "games": "2026-10-08T12:00:00Z", "movie": "2026-09-01T00:00:00Z"}
+PAGES = {
+    "Template:CGroup/list": (1, TS["list"], LIST),
+    "Template:CGroup/EVA": (2, TS["eva"], "{{CItem|zh-tw:碇源堂; zh-cn:碇源堂}}\n{{CItem|zh-tw:朋友}}\n{{CItem|zh-hant:螢火蟲之墓}}"),
+    "Template:CGroup/Games": (3, TS["games"], "{{CItem|zh-tw:楓之谷}}\n{{CItem|zh-tw:阿庫雷特}}"),
+    "Template:CGroup/Movie": (4, TS["movie"], "{{CItem|zh-tw:怪獸電力公司}}"),
+    "風之谷 (電影)": (5, "2026-10-02T00:00:00Z", ""),
+    "風之谷角色列表": (6, "2026-10-03T00:00:00Z", ""),
+}
+ARTICLE = ("<h2>登場人物</h2><ul><li>阿庫雷特（アクレット）</li><li>朋友（ともだち）</li><li>米卡莎的母親（ママ）</li></ul>")
+PARSES = {
+    "風之谷": {"title": "風之谷 (電影)", "displaytitle": "<span>風之谷 (電影)</span>", "text": ARTICLE, "links": [
+        {"ns": 0, "title": "風之谷角色列表", "exists": True}, {"ns": 0, "title": "不存在角色列表", "exists": False}]},
+    "風之谷角色列表": {"title": "風之谷角色列表", "displaytitle": "風之谷角色列表", "text": "<h2>人物</h2><ul><li>碇真次郎（シンジロウ）</li></ul>", "links": []},
+}
+
+
+class FakeApi:
+    def wiki(self, **p):
+        if p["action"] == "parse":
+            return {"parse": PARSES[p["page"]]}
+        out = []
+        for t in p["titles"].split("|"):
+            if t not in PAGES:
+                out.append({"title": t, "missing": True})
+                continue
+            rid, ts, text = PAGES[t]
+            rev = {"revid": rid, "timestamp": ts}
+            if "content" in p["rvprop"]:
+                rev["slots"] = {"main": {"content": text}}
+            out.append({"title": t, "revisions": [rev]})
+        return {"query": {"pages": out}}
+
+    def sparql(self, query):
+        return {"results": {"bindings": [{"w": {"value": "http://www.wikidata.org/entity/Q1"}, "sl": {"value": "50"},
+                                          "art": {"value": "https://zh.wikipedia.org/wiki/%E9%A2%A8%E4%B9%8B%E8%B0%B7"}}]}}
+
+
+READINGS = {  # tools/readings.py needs the MOE dictionary; the fixture fixes the readings instead
+    "碇源堂": "ㄉㄧㄥˋ ㄩㄢˊ ㄊㄤˊ", "螢火蟲之墓": "ㄧㄥˊ ㄏㄨㄛˇ ㄔㄨㄥˊ ㄓ ㄇㄨˋ", "風之谷": "ㄈㄥ ㄓ ㄍㄨˇ",
+    "楓之谷": "ㄈㄥ ㄓ ㄍㄨˇ", "阿庫雷特": "ㄚ ㄎㄨˋ ㄌㄟˊ ㄊㄜˋ",
+}
+
+
+def fake_readings(words):
+    return {w: (READINGS[w].split(), False) for w in words if w in READINGS}
+
+
+class Build(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.mkdtemp()
+        cls.groups = os.path.join(cls.tmp, "groups.tsv")
+        open(cls.groups, "w", encoding="utf-8").write(GROUPS)
+        cls.none = os.path.join(cls.tmp, "none.tsv")                       # 沒有處置檔
+        cls.excl = os.path.join(cls.tmp, "collisions.tsv")
+        open(cls.excl, "w", encoding="utf-8").write("# c\nㄈㄥ ㄓ ㄍㄨˇ\t風之谷\t楓之谷\t保留既有的名字\n")
+
+    def build(self, collisions):
+        return B.build(FakeApi(), self.groups, collisions, readings=fake_readings)
+
+    def test_pack_content_and_filters(self):
+        files, manifest, col, unread, ref = self.build(self.excl)
+        words = {l.split("\t")[1] for l in files["acg-add.tsv"].splitlines()}
+        self.assertEqual(words, {"碇源堂", "螢火蟲之墓", "風之谷", "阿庫雷特"})
+        self.assertNotIn("怪獸電力公司", words)        # 排除的組
+        self.assertNotIn("朋友", words)                # 基底已有（轉換組與人物都一樣）
+        self.assertNotIn("楓之谷", words)              # acg-collisions.tsv 排除
+        self.assertIn("怪獸電力公司", ref)             # 但在參考名單裡
+        self.assertIn("楓之谷", ref)
+        self.assertNotIn("米卡莎的母親", ref)          # 嚴格過濾（關係詞組）
+        self.assertEqual(manifest["unclassified_groups"], ["新作 (NewWork)"])
+        self.assertEqual(manifest["version"], "20261008")   # 來源裡最新的 revision 時間，不是建置日期
+        self.assertEqual(manifest["sources"], {"cgroup": 3, "char": 1, "title": 1})
+        self.assertEqual(col, {})
+        self.assertEqual(unread, ["碇真次郎"])         # 角色列表條目裡的名字通過過濾，但讀音拼不出（夾具沒給）就丟掉
+        for line in files["acg-add.tsv"].splitlines():
+            self.assertEqual(len(line.split("\t")), 4)
+            self.assertTrue(line.endswith("\tacg"))
+
+    def test_same_cache_twice_is_identical(self):
+        a = self.build(self.excl)
+        b = self.build(self.excl)
+        self.assertEqual(a[0], b[0])
+        self.assertEqual(a[1], b[1])
+        self.assertEqual(B.collisions_text(a[2], a[1]), B.collisions_text(b[2], b[1]))
+        out = [tempfile.mkdtemp(), tempfile.mkdtemp()]
+        for d, r in zip(out, (a, b)):
+            B.write_all(r[0], r[1], d)
+        for name in ("acg-add.tsv", "acg-sources.tsv", "acg.json"):
+            self.assertEqual(open(os.path.join(out[0], name), "rb").read(), open(os.path.join(out[1], name), "rb").read())
+        m = json.load(open(os.path.join(out[0], "acg.json"), encoding="utf-8"))
+        for name, meta in m["files"].items():
+            self.assertEqual(hashlib.sha256(open(os.path.join(out[0], name), "rb").read()).hexdigest(), meta["sha256"])
+
+    def test_collisions_are_listed_without_a_disposition(self):
+        _, manifest, col, _, _ = self.build(self.none)
+        self.assertIn("ㄈㄥ ㄓ ㄍㄨˇ", col)                           # 楓之谷 對 風之谷
+        self.assertEqual({w for w, *_ in col["ㄈㄥ ㄓ ㄍㄨˇ"]} <= {"楓之谷", "風之谷"}, True)
+        self.assertIn("楓之谷", {w for w, *_ in col["ㄈㄥ ㄓ ㄍㄨˇ"]})
+        self.assertNotIn("ㄉㄧㄥˋ ㄩㄢˊ ㄊㄤˊ", col)                   # 碇源堂：不開是 定元堂，不在參考名單
+        self.assertNotIn("ㄧㄥˊ ㄏㄨㄛˇ ㄔㄨㄥˊ ㄓ ㄇㄨˋ", col)         # 螢火蟲之墓：不開是 螢火蟲之目
+        self.assertEqual(manifest["unresolved_collision_readings"], 1)
+
+    def test_the_committed_dispositions_are_applied_to_the_committed_pack(self):
+        pack = second_column(os.path.join(B.PACKS, "acg-add.tsv"))
+        rows = B.read_tsv(os.path.join(B.PACKS, "acg-collisions.tsv"))
+        self.assertGreater(len(rows), 100)
+        for reading, keep, exclude, why in rows:
+            self.assertNotIn(exclude, pack, exclude)
+            self.assertTrue(why)
+        self.assertIn("風之谷", pack)
+        self.assertNotIn("楓之谷", pack)
+
+
+if __name__ == "__main__":
+    unittest.main()

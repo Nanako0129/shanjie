@@ -1,0 +1,38 @@
+{
+ "articles_missing": [],
+ "excluded_by_collisions_tsv": 140,
+ "files": {
+  "acg-add.tsv": {
+   "bytes": 910933,
+   "lines": 14451,
+   "sha256": "99848f55ffebf0abfa56fef49092e342acb719cdf44bc0084a6199da5f9c1311"
+  },
+  "acg-sources.tsv": {
+   "bytes": 853289,
+   "lines": 14603,
+   "sha256": "66b5afefdae755bacdef0b1e01d6d059b5825a982f08c1bf1492aae0d9edff72"
+  }
+ },
+ "groups": {
+  "included": 119,
+  "listed": 192,
+  "page_missing": []
+ },
+ "latest_source_revision": "2026-10-08T17:40:10Z",
+ "revision_ids": {
+  "max": 94858953,
+  "min": 22981265,
+  "pages": 661
+ },
+ "rows": 14451,
+ "sources": {
+  "cgroup": 9546,
+  "char": 4904,
+  "title": 152
+ },
+ "unclassified_groups": [],
+ "unreadable_dropped": 15,
+ "unresolved_collision_readings": 0,
+ "version": "20261008",
+ "words": 14357
+}
