@@ -272,7 +272,7 @@
     - 就算改成 `base: :home` 讓沙盒放行讀取，`TISRegisterInputSource` 在沙盒裡能不能成功也沒有量過。
   - `uninstall on_upgrade: :signal, signal: ["TERM", "com.nyanako.inputmethod.shanjie"]`：解除安裝和升級時都結束執行中的行程，系統下次就會啟動新版。Homebrew 預設在升級時略過 `signal`（`UPGRADE_REINSTALL_SKIP_DIRECTIVES`），所以要加 `on_upgrade`。Homebrew 用 `launchctl list` 的標籤找行程；2026-10-04 在本機看到其他輸入法的標籤是 `application.<bundle ID>.<數字>.<數字>`，符合它的比對規則。**已由 §15（修訂四）取代**：0.3.0 實測升級後舊版仍在跑，改成 `postflight_steps` 在新版就位後結束行程，`uninstall` 只留 `signal`。
   - `zap trash: "~/Library/Preferences/com.nyanako.inputmethod.shanjie.plist"`：目前唯一的使用者資料，也就是 `layout` 偏好。
-  - `caveats`：第一次安裝後執行 `"$HOME/Library/Input Methods/善解輸入法.app/Contents/MacOS/shanjie" install`，由它註冊並啟用輸入方式；第一次安裝通常要登出再登入：它結束碼是 3 時，登出、再登入，然後再執行一次（修訂三）。caveats 不提升級；升級後由 §15 的 postflight 接手。
+  - `caveats`：第一次安裝後執行 `"$HOME/Library/Input Methods/善解輸入法.app/Contents/MacOS/shanjie" install`，由它註冊並啟用輸入方式；第一次安裝通常要登出再登入：它結束碼是 3 時，登出、再登入，然後再執行一次（修訂三）。caveats 不提升級；升級後由 §15 的 postflight 接手。**2026-10-09 修訂（`installer-v2.md` §9）**：「登出、再登入再執行一次」已取代，現在 caveats 寫「結束碼是 3 時，到系統設定 → 鍵盤 → 輸入方式加入」。
 - **未驗證**（由使用者實測，見 14.5，停止條件見 14.7）：
   - 從 Homebrew 下載的 app 帶有 quarantine（已公證、已 staple）：在終端機執行 caveats 的 `install` 時，以及系統啟動輸入法時，會不會跳出確認視窗；
   - `on_upgrade` 送出的 TERM 是否確實讓新版接手（要到第二次發版才測得到）。**結果**（2026-10-08，升級到 0.3.0）：沒有，見 §15。
@@ -354,7 +354,7 @@
 ### 14.7 停止條件與回滾
 
 - **停止條件**（使用者實測 v0.1.0 之後判斷）：
-  - `brew install` 加上 caveats 的 `install` 之後（必要時登出再登入），「善解輸入法」出現在輸入方式清單、加入後可以打字 → 通過。
+  - `brew install` 加上 caveats 的 `install` 之後（必要時登出再登入；2026-10-09 起改為到系統設定加入，見 `installer-v2.md` §9），「善解輸入法」出現在輸入方式清單、加入後可以打字 → 通過。
   - 跳出 Gatekeeper 視窗，但按「打開」之後一切正常 → 通過，並在 README 註明這個視窗。
   - 以下任一種 → 停止推薦 brew：
     - 輸入方式加不進去或無法打字；
@@ -483,4 +483,4 @@
   - Homebrew 換版時，bundle 不在的那段時間，系統本來就會暫時把善解本體標成「未啟用」，新版回來後自動恢復。這和本修訂無關：沒有 postflight 的公開 cask 也一樣。
   - 這兩次重現裡，postflight 沒有造成消失。
   - 第一次為什麼沒恢復，**原因未解**。差異有兩點：那次 bundle 空了約 2.9 秒（重現時 1.1 到 1.8 秒）；系統是 macOS 27（虛擬機是 26.6）。兩者都沒有證據指向原因。
-- **處置**：caveats 與 README 的第一次安裝說明加上「登出再登入後仍是 3，就到系統設定 → 鍵盤 → 輸入方式加入」（虛擬機量到全新安裝、重開機後 `install` 仍是 3）。README 在升級說明加一句：升級後選單裡找不到善解時，到「系統設定 → 鍵盤 → 輸入方式」加回來。程式化的重新啟用（`shanjie install`）在這種狀態下無效，這點交給安裝程式第二版的「啟用」步驟處理（`docs/contracts/installer-v2.md`）。
+- **處置**：caveats 與 README 的第一次安裝說明加上「登出再登入後仍是 3，就到系統設定 → 鍵盤 → 輸入方式加入」（虛擬機量到全新安裝、重開機後 `install` 仍是 3）。README 在升級說明加一句：升級後選單裡找不到善解時，到「系統設定 → 鍵盤 → 輸入方式」加回來。程式化的重新啟用（`shanjie install`）在這種狀態下無效，這點交給安裝程式第二版的「啟用」步驟處理（`docs/contracts/installer-v2.md`）。**已實作（`installer-v2.md` §9）**：caveats 與 README 現在不再寫「登出再登入再執行一次」，結束碼 3 直接到系統設定加入。
