@@ -1357,3 +1357,7 @@ S2h 實機驗收時，使用者在終端機、Discord、VS Code、Chrome 網址�
 - `model-v3` 被 GitHub 自動標成 Latest（`gh release create` 沒指定時依日期與版本自動判斷），Releases 頁的「最新」指到模型檔。使用者同意後手動把 v0.2.1 改回 Latest；`release.yml` 建 App 版時改帶 `--latest`，資料類 Release 一律 `--latest=false`（`CLAUDE.md`「發版」）。
 - 使用者要求 Release 說明進版控、每次手寫：說明本文改放 `docs/releases/<tag>.md`，`release.yml` 的 gate 沒有這個檔（或只有空白）就不發版，publish 用 `--notes-file`。現有 9 個 Release 的說明照 GitHub 上的本文逐位元組抄進來（比對時去掉結尾換行），沒有改寫。契約 `docs/contracts/release-notes.md`。
 - 驗證：9 個檔和 `gh release view <tag> --json body` 相同；從 `release.yml` 抽出的 gate 步驟在本機跑四種情況（缺檔、只有空白、有內容、`workflow_dispatch`）結束碼分別是 1、1、0、0。實際發版的路徑要到下一次推 `v*` tag 才會跑到。
+
+## 2026-10-08：候選列比蘋果高 2 pt
+
+使用者覺得善解的候選列比蘋果注音大。用 `imeshot` 在同一個淺色視窗、同一比例量（1 px = 1 pt）：蘋果的候選列上緣到下緣 30 pt，選取膠囊 24 pt、上下各留 3 pt；善解是 32 pt、上下各留 4 pt，膠囊與字一樣大。設定值 `barHeight` 原本是 30（契約 s3b2 §3 照 a-3 抓的「大約 30 pt」），玻璃邊框實際畫在 view 外面各約 1 pt。改成 28 後重量：上緣到下緣 30 pt、膠囊上下各 3 pt，和蘋果相同。整條的位置仍比蘋果高 2 pt（使用者這次只指出大小，沒改）。

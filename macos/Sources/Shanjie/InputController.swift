@@ -165,8 +165,10 @@ private final class PanelWindow: NSPanel {
 /// column was measured on 1x screenshots (1 px = 1 pt) of Apple Zhuyin, kept in main's scratchpad;
 /// these are first values, to be corrected against our own screenshots.
 private enum Metrics {
-    /// Section 3 "candidate bar": about 30 pt tall (a-3, la-3), corner radius half of it.
-    static let barHeight: CGFloat = 30
+    /// Section 3 "candidate bar": corner radius half of it. Apple's bar measures 30 pt rim to rim (a-3, la-3,
+    /// and again 2026-10-08 in a light app, lap-4); at 30 ours drew 32 (msj-6, 4 pt above and below the 24 pt
+    /// capsule against Apple's 3), the glass rim adding about 1 pt outside the view on each side. 28 gives 30.
+    static let barHeight: CGFloat = 28
     /// Section 3 "selection capsule": 24 pt tall (a-3, la-3), centred in the bar. The cell's own
     /// spacing and fonts are `CellMetrics` in ShanjieKit.
     static let capsuleHeight = CellMetrics.capsuleHeight
