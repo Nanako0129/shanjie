@@ -275,6 +275,9 @@ pub struct Engine {
     lex: Arc<Lexicon>,
     /// Where `new` read the data from; `None` for `with_lexicon` engines (they cannot `load_lm`).
     data_dir: Option<PathBuf>,
+    /// Word packs (acg-pack contract A.2): the directory and the enabled `PACK_*` bits; `load_lm` reads
+    /// the same pack files the lexicon was parsed with. Mask 0: no pack is read at all.
+    packs: Option<(PathBuf, u32)>,
     lm: Option<LmState>,
     profile: Profile,
     /// Whether the table applies (default on; `set_demote`).
@@ -331,10 +334,51 @@ pub struct Engine {
 /// `overlay-add.tsv` then `sandhi-add.tsv` (S2r: MOE-standard 一/不 readings derived from the base),
 /// in that fixed order; both are required.
 pub fn load_lexicon(data_dir: &Path) -> Result<Arc<Lexicon>, EngineError> {
+    load_lexicon_packs(data_dir, None)
+}
+
+/// Pack bits of `Engine::new_with_packs` and `shanjie_engine_new_packs` (docs/contracts/acg-pack.md A.2).
+pub const PACK_ACG: u32 = 1;
+const PACK_ALL: u32 = PACK_ACG;
+/// A pack's overlay file inside the packs directory, in the order the packs are appended.
+const PACK_FILES: [(u32, &str); 1] = [(PACK_ACG, "acg-add.tsv")];
+
+/// The enabled packs' overlay rows in `dir`, concatenated; a pack whose file is missing contributes
+/// nothing (the engine is then identical to one without packs). An unreadable file is a load failure.
+pub fn read_packs(dir: &Path, mask: u32) -> Result<String, EngineError> {
+    let mut text = String::new();
+    for (bit, name) in PACK_FILES {
+        if mask & bit == 0 {
+            continue;
+        }
+        match std::fs::read_to_string(dir.join(name)) {
+            Ok(t) => {
+                if !text.is_empty() && !text.ends_with('\n') {
+                    text.push('\n');
+                }
+                text.push_str(&t);
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(_) => return Err(EngineError::LoadFailed),
+        }
+    }
+    Ok(text)
+}
+
+/// `load_lexicon` with the rows of `packs` (`(directory, mask)`, see `read_packs`) after `sandhi-add.tsv`.
+/// `None` or an empty mask is exactly `load_lexicon`.
+pub fn load_lexicon_packs(data_dir: &Path, packs: Option<(&Path, u32)>) -> Result<Arc<Lexicon>, EngineError> {
     let base = std::fs::read_to_string(data_dir.join("mcbpmf-data.txt")).map_err(|_| EngineError::LoadFailed)?;
     let overlay = std::fs::read_to_string(data_dir.join("overlay-add.tsv")).map_err(|_| EngineError::LoadFailed)?;
     let sandhi = std::fs::read_to_string(data_dir.join("sandhi-add.tsv")).map_err(|_| EngineError::LoadFailed)?;
-    Lexicon::parse_with(&base, Some(&join_overlays(overlay, &sandhi))).map(Arc::new).map_err(|_| EngineError::LoadFailed)
+    let mut text = join_overlays(overlay, &sandhi);
+    if let Some((dir, mask)) = packs {
+        let extra = read_packs(dir, mask)?;
+        if !extra.is_empty() {
+            text = join_overlays(text, &extra);
+        }
+    }
+    Lexicon::parse_with(&base, Some(&text)).map(Arc::new).map_err(|_| EngineError::LoadFailed)
 }
 
 /// The overlay text the lexicon is parsed with: `overlay-add.tsv` then `sandhi-add.tsv`, with a line
@@ -352,7 +396,20 @@ fn join_overlays(mut overlay: String, sandhi: &str) -> String {
 
 impl Engine {
     pub fn new(data_dir: &Path, layout: Layout) -> Result<Engine, EngineError> {
-        let mut e = Engine::with_lexicon(load_lexicon(data_dir)?, layout);
+        Engine::new_with_packs(data_dir, layout, None)
+    }
+
+    /// `new` with word packs: `packs` is the packs directory and the `PACK_*` bits to enable (acg-pack
+    /// contract A.2). The pack rows are parsed into the lexicon, so a pack is fixed for the engine's life;
+    /// the shell switches by building a new engine, like a layout change. Bit 0 / `None`: same as `new`.
+    /// An unknown bit is `LoadFailed`.
+    pub fn new_with_packs(data_dir: &Path, layout: Layout, packs: Option<(&Path, u32)>) -> Result<Engine, EngineError> {
+        if packs.is_some_and(|(_, m)| m & !PACK_ALL != 0) {
+            return Err(EngineError::LoadFailed);
+        }
+        let packs = packs.filter(|&(_, m)| m != 0);
+        let mut e = Engine::with_lexicon(load_lexicon_packs(data_dir, packs)?, layout);
+        e.packs = packs.map(|(d, m)| (d.to_path_buf(), m));
         // Required like the other data files, and every row must name an entry of the lexicon (contract
         // sw-sensitive-demote section 2); `load_lm` reads it again to resolve it against the capped lexicon.
         let demote = std::fs::read_to_string(data_dir.join("demote.tsv")).map_err(|_| EngineError::LoadFailed)?;
@@ -368,6 +425,7 @@ impl Engine {
         Engine {
             lex,
             data_dir: None,
+            packs: None,
             lm: None,
             profile: Profile::Chat,
             demote: true,
@@ -563,7 +621,14 @@ impl Engine {
     /// the next change to it decodes with the new model.
     pub fn load_lm(&mut self, path: &Path) -> Result<(), EngineError> {
         let dir = self.data_dir.as_ref().ok_or(EngineError::LoadFailed)?;
-        let overlay = std::fs::read_to_string(dir.join("overlay-add.tsv")).map_err(|_| EngineError::LoadFailed)?;
+        let mut overlay = std::fs::read_to_string(dir.join("overlay-add.tsv")).map_err(|_| EngineError::LoadFailed)?;
+        if let Some((pdir, mask)) = &self.packs {
+            // The packs' words are capped like overlay-add.tsv's (acg-pack contract A.2).
+            let extra = read_packs(pdir, *mask)?;
+            if !extra.is_empty() {
+                overlay = join_overlays(overlay, &extra);
+            }
+        }
         let demote = std::fs::read_to_string(dir.join("demote.tsv")).map_err(|_| EngineError::LoadFailed)?;
         let demote = Demote::parse(&demote).ok_or(EngineError::LoadFailed)?;
         let lm = Lm::load(path).map_err(|_| EngineError::LoadFailed)?;

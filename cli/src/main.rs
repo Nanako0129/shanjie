@@ -1,4 +1,4 @@
-use core::engine::load_lexicon;
+use core::engine::{load_lexicon, load_lexicon_packs, read_packs, PACK_ACG};
 use core::eval::*;
 use core::learn::{context_key, SENTINEL};
 use core::lm::{decode_from, history, CappedLexicon, Demote, Lm, Profile};
@@ -116,6 +116,8 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     let (mut limit, mut set, mut dump, mut ctx_mode, mut demote) = (None::<usize>, None, None, false, true);
     let mut classes = true;
     let mut rowstats = None::<String>;
+    // acg-pack contract A.2: `--packs acg` adds data/packs/acg-add.tsv (or `--packs-dir DIR`'s) to the lexicon and the cap; off by default.
+    let (mut packs, mut packs_dir) = (0u32, None::<String>);
     let mut it = args.iter();
     while let Some(a) = it.next() {
         let mut val = || it.next().cloned().ok_or_else(|| "missing option value".to_string());
@@ -133,6 +135,11 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
             "--context" => ctx_mode = true,
             "--no-demote" => demote = false,
             "--no-classes" => classes = false,
+            "--packs" => match val()?.as_str() {
+                "acg" => packs |= PACK_ACG,
+                _ => return Err("--packs takes acg".into()),
+            },
+            "--packs-dir" => packs_dir = Some(val()?),
             _ => return Err("unknown argument".into()),
         }
     }
@@ -148,8 +155,13 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     let lm = if classes { Lm::load(std::path::Path::new(&lm_path)) } else { Lm::load_without_classes(std::path::Path::new(&lm_path)) }
         .map_err(|e| e.to_string())?;
     let dir = root().join("data/lexicon");
-    let lex = load_lexicon(&dir).map_err(|_| "cannot load lexicon".to_string())?;
-    let overlay = fs::read_to_string(dir.join("overlay-add.tsv")).map_err(|e| format!("cannot read overlay ({:?})", e.kind()))?;
+    let pdir = packs_dir.map_or_else(|| root().join("data/packs"), PathBuf::from);
+    let lex = load_lexicon_packs(&dir, Some((&pdir, packs))).map_err(|_| "cannot load lexicon".to_string())?;
+    let mut overlay = fs::read_to_string(dir.join("overlay-add.tsv")).map_err(|e| format!("cannot read overlay ({:?})", e.kind()))?;
+    if packs != 0 {
+        overlay.push('\n');
+        overlay.push_str(&read_packs(&pdir, packs).map_err(|_| "cannot read the pack".to_string())?);
+    }
     let demote_rows = fs::read_to_string(dir.join("demote.tsv")).map_err(|e| format!("cannot read demote.tsv ({:?})", e.kind()))?;
     let table = Demote::parse(&demote_rows).filter(|d| d.check(&lex)).ok_or("bad demote.tsv")?;
     // The table is always loaded, so a malformed one stops the run even with --no-demote.

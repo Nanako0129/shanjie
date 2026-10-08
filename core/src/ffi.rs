@@ -5,7 +5,7 @@
 #[cfg(panic = "abort")]
 compile_error!("C ABI requires panic=unwind");
 
-use crate::engine::{Engine, EngineError, Key, KeyKind, Layout, Output, ResetMode};
+use crate::engine::{Engine, EngineError, Key, KeyKind, Layout, Output, ResetMode, PACK_ACG};
 use crate::lm::Profile;
 use std::ffi::{c_char, CStr, CString};
 use std::panic::{catch_unwind, AssertUnwindSafe};
@@ -166,6 +166,60 @@ pub unsafe extern "C" fn shanjie_engine_new(
             return SHANJIE_ERR_INVALID;
         };
         match Engine::new(Path::new(dir), layout) {
+            Ok(e) => {
+                // SAFETY: `out` checked non-NULL above.
+                unsafe { *out = Box::into_raw(Box::new(ShanjieEngine(e))) };
+                SHANJIE_OK
+            }
+            Err(EngineError::LoadFailed) => SHANJIE_ERR_LOAD,
+            Err(EngineError::Internal) => SHANJIE_ERR_INTERNAL,
+        }
+    })
+}
+
+/// Like `shanjie_engine_new`, with word packs (docs/contracts/acg-pack.md A.2): `packs_dir` holds the pack
+/// files and `packs` is the bit mask of the packs to enable (bit 0 ACG). Mask 0 ignores `packs_dir` (may be
+/// NULL) and is exactly `shanjie_engine_new`. A pack whose file is missing contributes nothing. A bit outside
+/// the known ones returns 2.
+///
+/// # Safety
+/// `data_dir` is NULL or a NUL-terminated string; `packs_dir` is NULL (mask 0 only) or a NUL-terminated
+/// string; `out` is NULL or valid for one pointer write.
+#[no_mangle]
+pub unsafe extern "C" fn shanjie_engine_new_packs(
+    data_dir: *const c_char,
+    layout: u32,
+    packs_dir: *const c_char,
+    packs: u32,
+    out: *mut *mut ShanjieEngine,
+) -> i32 {
+    guard(|| {
+        // SAFETY: forwarded caller contract.
+        if !unsafe { clear_out(out) } || data_dir.is_null() || (packs != 0 && packs_dir.is_null()) {
+            return SHANJIE_ERR_NULL;
+        }
+        let layout = match layout {
+            0 => Layout::Standard,
+            1 => Layout::Eten,
+            _ => return SHANJIE_ERR_INVALID,
+        };
+        if packs & !PACK_ACG != 0 {
+            return SHANJIE_ERR_INVALID;
+        }
+        // SAFETY: non-NULL, NUL-terminated per the caller contract.
+        let Ok(dir) = unsafe { CStr::from_ptr(data_dir) }.to_str() else {
+            return SHANJIE_ERR_INVALID;
+        };
+        let pdir = if packs == 0 {
+            None
+        } else {
+            // SAFETY: non-NULL (checked above), NUL-terminated per the caller contract.
+            let Ok(p) = unsafe { CStr::from_ptr(packs_dir) }.to_str() else {
+                return SHANJIE_ERR_INVALID;
+            };
+            Some((Path::new(p), packs))
+        };
+        match Engine::new_with_packs(Path::new(dir), layout, pdir) {
             Ok(e) => {
                 // SAFETY: `out` checked non-NULL above.
                 unsafe { *out = Box::into_raw(Box::new(ShanjieEngine(e))) };
