@@ -13,6 +13,7 @@ fn root() -> PathBuf {
 }
 fn lm_path() -> PathBuf {
     let p = root().join("data/lm/bigram.sjlm");
+    assert!(root().join("data/lm/classes.sjc").exists(), "data/lm/classes.sjc is missing: download it with `gh release download classes-v1 -R Nanako0129/shanjie -p classes.sjc -D data/lm` (or build it with tools/build_classes.py)");
     assert!(p.exists(), "data/lm/bigram.sjlm is missing (see engine_lm.rs)");
     p
 }
@@ -273,7 +274,8 @@ fn a2_candidate_pick_learning_on_cases_tsv() {
         let f = |v: &[(bool, bool)]| g.rows.iter().zip(v).map(|(r, b)| format!("{}{}{}", &r.kind[..1], b.0 as u8, b.1 as u8)).collect::<Vec<_>>().join(" ");
         println!("{} | {} -> {} | {n_rec}", g.name, f(&before), f(&after));
         // Nothing to pick when the default already shows the taught word: the group is moot (reported).
-        if n_rec == 0 && before[0].1 {
+        let is_moot = n_rec == 0 && before[0].1;
+        if is_moot {
             moot.push(g.name.clone());
         } else if n_rec == 0 {
             failed.push(g.name.clone());
@@ -290,6 +292,10 @@ fn a2_candidate_pick_learning_on_cases_tsv() {
                 } else if lost {
                     regress.push(r.sent.clone());
                 }
+            } else if r.same == Some(true) && is_moot {
+                // Nothing was taught (the teach sentence is already right, so no re-pick happens): the group says
+                // nothing about passing a record to the same context. The mirror run covers it (contract §6.2).
+                println!("   same-ctx row of a moot group (not counted): {} before {:?}", r.sent, before[i]);
             } else if r.same == Some(true) {
                 if !before[i].1 {
                     wrong += 1;
@@ -1853,7 +1859,7 @@ fn global_sweep(eps: f64) -> Sweep {
 fn global_eps_table() {
     println!("eps_global | global learn (learned/wrong) | global pollution regressions (checked rows, colliding rows, unaligned rows) | mirror learn (reachable) | mirror all");
     let mut res = Vec::new();
-    for eps in [0.0, 0.5, 1.0, 1.5, 2.0, 6.0] {
+    for eps in [0.0, 0.1, 0.5, 1.0, 1.5, 2.0, 6.0] {
         let s = global_sweep(eps);
         let (lr, wr, l, w) = mirror(eps);
         println!("{eps} | {}/{} | {} ({}, {}, {}) | {lr}/{wr} | {l}/{w}  [groups {}]", s.learned, s.wrong, s.regress, s.checked, s.excluded, s.unaligned, s.groups);
@@ -1862,7 +1868,8 @@ fn global_eps_table() {
     assert_eq!(res[0].1.learned, 0, "eps_global 0: the global level has no effect");
     let chosen = res.iter().find(|r| r.0 == lm::LEARN_EPS_GLOBAL).expect("chosen value is in the table");
     assert_eq!(chosen.1.regress, 0, "chosen eps_global: 0 global pollution");
-    assert!(chosen.1.learned > 0, "chosen eps_global: global learn rate not 0");
+    // s4-learning §13: with the class term no value above 0 has 0 pollution, so the level is off; the table
+    // still prints the learn rate and pollution of each value for the next study of the global level.
     for r in &res {
         // PLAN A2: of the learnable mirror cases (the model does not already produce the taught sentence) at least 80% are learned.
         // The learnable count depends on the model (9/10 with model-v1, 8/9 once 戰機/戰績 became right on its own), so the

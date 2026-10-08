@@ -72,18 +72,19 @@ static int run(const char *dir, uint32_t layout, const char *nihao, const char *
   return 0;
 }
 
-/* S2c (docs/PLAN.md S2c acceptance 6): dev302 row 10, reading
- *   ㄑㄧˊ ㄓㄨㄥ ㄅㄠˋ ㄍㄠˋ ㄇㄧㄥˊ ㄊㄧㄢ ㄧㄠˋ ㄐㄧㄠ
- * standard keys `fu6 5j/_ 1l4 el4 au/6 wu0_ ul4 rul_` (_ = space bar). Expected top-1:
- *   no LM (unigram)  其中報告明天要教
- *   chat             其中報告明天要交
- *   formal           期中報告明天要交
- * (chat / formal from eval/golden/s2-lm-dev302-top1.tsv row 10, i.e. lm_eval.py --dump; unigram is what
+/* S2c (docs/PLAN.md S2c acceptance 6), on dev302 row 226 since S2k (the word-class term makes chat pick
+ * 期中報告 as formal does, so the old row 10 no longer tells the profiles apart), reading
+ *   ㄒㄧㄥˋ ㄏㄠˇ ㄐㄧㄡˋ ㄏㄨˋ ㄔㄜ ㄐㄧˊ ㄕˊ ㄍㄢˇ ㄉㄠˋ
+ * standard keys `vu/4cl3ru.4cj4tk_ru6g6e032l4` (_ = space bar). Expected top-1:
+ *   no LM (unigram)  幸好救護車即時感到
+ *   chat             幸好救護車及時趕到
+ *   formal           幸好救護車即時趕到
+ * (chat / formal from eval/golden/s2-lm-dev302-top1.tsv row 226, i.e. lm_eval.py --dump; unigram is what
  * an engine without LM commits, checked by 302 below.) */
-#define ROW10 "fu65j/ 1l4el4au/6wu0 ul4rul "
-#define UNIGRAM "\xe5\x85\xb6\xe4\xb8\xad\xe5\xa0\xb1\xe5\x91\x8a\xe6\x98\x8e\xe5\xa4\xa9\xe8\xa6\x81\xe6\x95\x99"
-#define CHAT "\xe5\x85\xb6\xe4\xb8\xad\xe5\xa0\xb1\xe5\x91\x8a\xe6\x98\x8e\xe5\xa4\xa9\xe8\xa6\x81\xe4\xba\xa4"
-#define FORMAL "\xe6\x9c\x9f\xe4\xb8\xad\xe5\xa0\xb1\xe5\x91\x8a\xe6\x98\x8e\xe5\xa4\xa9\xe8\xa6\x81\xe4\xba\xa4"
+#define ROW226 "vu/4cl3ru.4cj4tk ru6g6e032l4"
+#define UNIGRAM "\xe5\xb9\xb8\xe5\xa5\xbd\xe6\x95\x91\xe8\xad\xb7\xe8\xbb\x8a\xe5\x8d\xb3\xe6\x99\x82\xe6\x84\x9f\xe5\x88\xb0"
+#define CHAT "\xe5\xb9\xb8\xe5\xa5\xbd\xe6\x95\x91\xe8\xad\xb7\xe8\xbb\x8a\xe5\x8f\x8a\xe6\x99\x82\xe8\xb6\x95\xe5\x88\xb0"
+#define FORMAL "\xe5\xb9\xb8\xe5\xa5\xbd\xe6\x95\x91\xe8\xad\xb7\xe8\xbb\x8a\xe5\x8d\xb3\xe6\x99\x82\xe8\xb6\x95\xe5\x88\xb0"
 
 /* Press Enter; 1 when it is handled and commits `want` with an empty preedit. */
 static int enter_commits(ShanjieEngine *e, const char *want) {
@@ -97,7 +98,7 @@ static int enter_commits(ShanjieEngine *e, const char *want) {
 
 /* Type the row; 1 when the preedit after the last key is `want`. */
 static int row_shows(ShanjieEngine *e, const char *want) {
-  ShanjieOutput *o = type_last(e, ROW10);
+  ShanjieOutput *o = type_last(e, ROW226);
   int ok = o != 0 && str_eq(o->preedit, want);
   shanjie_output_free(o);
   return ok;
@@ -161,7 +162,7 @@ static int run_lm(const char *dir, const char *lm, const char *missing) {
   /* Reset (both modes) keeps the LM and the formal profile. */
   for (mode = 0; mode <= 1; mode++) {
     int b = 312 + (int)mode * 3;
-    CHECK(b, type(e, "fu65j/ "));
+    CHECK(b, type(e, "vu/4cl3"));
     CHECK(b + 1, shanjie_engine_reset(e, mode, &o) == 0 && o != 0);
     shanjie_output_free(o);
     o = 0;
