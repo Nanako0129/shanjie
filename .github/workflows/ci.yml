@@ -153,6 +153,19 @@ jobs:
           python3 reference/proto/check_unigram_overlay.py
           python3 reference/proto/test_demote.py
 
+      # docs/contracts/eval-stats.md: the statistics tests, and the Python rowstats of dev302 equal
+      # the golden the Rust CLI is compared with (cli/tests/golden.rs), so both writers are held.
+      - name: Eval statistics (Python)
+        shell: bash
+        run: |
+          set -euo pipefail
+          T="$RUNNER_TEMP"
+          python3 -m unittest tools.test_evalstats
+          for p in chat formal; do
+            python3 reference/proto/lm_eval.py --profile "$p" --dev 302 --rowstats "$T/$p.rowstats" > /dev/null
+            cmp "$T/$p.rowstats" "eval/golden/s2-lm-dev302-$p.rowstats"
+          done
+
   # The Swift input method (docs/contracts/s3b.md section 3): build the ad-hoc
   # app, the Swift tests through the real core and model, the bundled
   # selftest, and acceptance checks 2, 3 and 6 of contract section 10.
