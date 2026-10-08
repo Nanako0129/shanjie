@@ -169,7 +169,8 @@ private enum Metrics {
     /// 2026-10-08 in a light app at 1 px = 1 pt: Apple's bar is 30 pt rim to rim (lap-4; a-3 and la-3 only said
     /// "about 30"); at 30 ours drew 32 (msj-6, 4 pt above and below the 24 pt capsule against Apple's 3), so
     /// something about 1 pt wide shows outside the view on each side (inferred, cause not measured; possibly
-    /// the window shadow). At 28 the same light window measured 30 rim to rim. Dark apps not measured.
+    /// the window shadow). At 28 the same light window measured 30 rim to rim; a dark window (same day, forced
+    /// appearance) matched Apple's height as well.
     static let barHeight: CGFloat = 28
     /// Section 3 "selection capsule": 24 pt tall (a-3, la-3), centred in the bar. The cell's own
     /// spacing and fonts are `CellMetrics` in ShanjieKit.

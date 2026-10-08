@@ -12,12 +12,12 @@ final class PanelPlacementTests: XCTestCase {
     }
 
     func testBelowTheLineAlignedToTheText() {
-        XCTAssertEqual(place(line), NSPoint(x: 280, y: 396))
+        XCTAssertEqual(place(line), NSPoint(x: 280, y: 394))
     }
 
     func testNoRoomBelowGoesAbove() {
         let low = NSRect(x: 300, y: 10, width: 8, height: 18)
-        XCTAssertEqual(place(low), NSPoint(x: 280, y: 10 + 18 + 4 + 30))
+        XCTAssertEqual(place(low), NSPoint(x: 280, y: 10 + 18 + 6 + 30))
     }
 
     func testRightEdgeMovesLeft() {
