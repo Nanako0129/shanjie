@@ -11,7 +11,8 @@
  *
  * Return codes: 0 success, 1 a required pointer is NULL, 2 invalid input (data_dir or LM path not
  * UTF-8, ch not a Unicode scalar, kind / layout / mode / profile out of range), 3 data load failed
- * (including an unreadable or malformed LM file), 4 internal error (caught panic or decode/encode
+ * (including an unreadable or malformed LM file, and since S2k a missing or mismatching classes.sjc beside
+ * it), 4 internal error (caught panic or decode/encode
  * error; the engine has already been reset in discard mode). shanjie_engine_load_lm failing leaves the
  * LM state as it was (no LM, or the previously loaded one).
  *
@@ -26,6 +27,8 @@
  * Language model (S2c):
  *  - The default profile is chat. The shell picks the profile from the frontmost app (S3b); the core
  *    keeps no app identity. A profile set before any LM is loaded is remembered and applies once loaded.
+ *  - shanjie_engine_load_lm needs classes.sjc (the word-class term, docs/contracts/s2k-word-classes.md) in
+ *    the same directory as the model file, built for that model; without it the load fails with 3.
  *  - Load the LM once at startup while the composition is empty: loading does not recompute the
  *    current display; the next change to the composition decodes with the new model.
  *  - shanjie_engine_reset (both modes) and the automatic reset after code 4 clear the composition only;
