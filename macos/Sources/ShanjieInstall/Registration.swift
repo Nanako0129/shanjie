@@ -3,7 +3,13 @@ import Foundation
 
 // docs/contracts/s3b.md section 13.3 and s3c-installer.md section 2.3: register the input method
 // bundle, enable the input method and its one mode, check that the system took it, then disable
-// the two modes of earlier versions. Shared by `shanjie install` (its own bundle) and the
+// the two modes of earlier versions. Amended by installer-v2.md section 9: that sequence runs only
+// when the system does not know the mode yet or an earlier version's mode is still enabled; with
+// the input method already accepted, or known but not accepted, nothing is changed. Measured
+// 2026-10-09 (research-log): calling register or enable after the bundle was swapped broke the Caps
+// Lock switch, while the same calls without a swap did not; and for a known but not accepted input
+// method an enable call returned noErr and changed nothing. Which of register and enable is the
+// trigger was not separated. Shared by `shanjie install` (its own bundle) and the
 // installer (the installed copy, never a path inside the installer: under App Translocation that
 // is a random read-only path).
 
@@ -13,8 +19,9 @@ public enum Registration {
         case done
         /// The mode is not listed after registering (the system has not loaded the bundle yet).
         case modeNotListed
-        /// Enabled without an error, but the input method is not in the enabled list yet. Measured
-        /// 2026-10-04: usual right after the first registration, until a log out and log in.
+        /// The input method is not in the enabled list. Either the enable calls ran and the system
+        /// has not taken it (measured: until the user adds it in System Settings > Keyboard >
+        /// Input Sources), or, with `skipped`, nothing was called and the caller may wait.
         case notAccepted
         /// Registration failed and the mode is not listed.
         case registrationFailed
@@ -28,13 +35,113 @@ public enum Registration {
         public var registerFailed = false
         /// Disabling a mode of an earlier version failed (does not change the outcome).
         public var legacyDisableFailed = false
+        /// installer-v2.md section 9.2: only the state was read, no TIS call changed anything.
+        public var skipped = false
+
+        public init(outcome: Outcome, registerFailed: Bool = false, legacyDisableFailed: Bool = false, skipped: Bool = false) {
+            self.outcome = outcome
+            self.registerFailed = registerFailed
+            self.legacyDisableFailed = legacyDisableFailed
+            self.skipped = skipped
+        }
+    }
+
+    public enum Decision: Equatable, Sendable {
+        case skipDone, skipNotAccepted, fullFlow
+    }
+
+    /// What `run` reads before it changes anything.
+    public struct State: Equatable, Sendable {
+        public var modeListed: Bool
+        /// Parent and `.zhuyin` mode both enabled (`isAccepted`).
+        public var accepted: Bool
+        public var legacyEnabled: Bool
+        public init(modeListed: Bool, accepted: Bool, legacyEnabled: Bool) {
+            self.modeListed = modeListed
+            self.accepted = accepted
+            self.legacyEnabled = legacyEnabled
+        }
+    }
+
+    /// installer-v2.md section 9.2 item 1. An unknown mode (first install) or an enabled mode of an
+    /// earlier version needs the whole sequence; otherwise nothing is changed.
+    public static func decide(modeListed: Bool, accepted: Bool, legacyEnabled: Bool) -> Decision {
+        if !modeListed || legacyEnabled { return .fullFlow }
+        return accepted ? .skipDone : .skipNotAccepted
+    }
+
+    static func readState(bundleID: String) -> State {
+        let all = inputSources(bundleID: bundleID, includeAllInstalled: true)
+        let legacy: Set<String> = ["\(bundleID).standard", "\(bundleID).eten"]
+        return State(
+            modeListed: all.contains { inputModeID($0) == "\(bundleID).zhuyin" },
+            accepted: isAccepted(bundleID: bundleID),
+            legacyEnabled: all.contains { inputModeID($0).map(legacy.contains) ?? false && isEnabled($0) })
+    }
+
+    /// How long `run` re-reads a mode that is not listed, before taking it for a first install.
+    static let listedRecheckInterval: TimeInterval = 0.25
+    static let listedRecheckLimit: TimeInterval = 2
+
+    /// Waits on the run loop, which the installer's main thread needs to stay responsive. A one-shot
+    /// timer keeps the loop from returning at once when the thread has no other source (the
+    /// command line tool).
+    public static func pause(_ seconds: TimeInterval) {
+        let end = Date(timeIntervalSinceNow: seconds)
+        let timer = Timer(fire: end, interval: 0, repeats: false) { _ in }
+        RunLoop.current.add(timer, forMode: .default)
+        while Date() < end { RunLoop.current.run(mode: .default, before: end) }
+        timer.invalidate()
     }
 
     /// Runs the whole sequence. `defaults` is the input method's own domain: `shanjie install`
     /// passes `UserDefaults.standard` (it runs as the input method), the installer passes
     /// `UserDefaults(suiteName: <bundle ID>)`.
-    public static func run(bundleURL: URL, bundleID: String, defaults: UserDefaults) -> Result {
-        // Always registered: a bundle ID TIS already knows may still carry the old two-mode list.
+    /// Reads the state first and changes nothing unless `decide` says `fullFlow`. `readState` and
+    /// `fullFlow` are injected only by tests, to count the calls that would change something.
+    /// A mode that is not listed is re-read for up to 2 s first (the system may list it a moment
+    /// late right after the files were swapped; not measured), so a first install waits that long.
+    public static func run(
+        bundleURL: URL, bundleID: String, defaults: UserDefaults,
+        readState: ((String) -> State)? = nil,
+        fullFlow: ((URL, String, UserDefaults) -> Result)? = nil,
+        pause: (TimeInterval) -> Void = Registration.pause
+    ) -> Result {
+        let read = readState ?? Self.readState(bundleID:)
+        var state = read(bundleID)
+        var waited: TimeInterval = 0
+        while !state.modeListed, waited < listedRecheckLimit {
+            pause(listedRecheckInterval)
+            waited += listedRecheckInterval
+            state = read(bundleID)
+        }
+        switch decide(modeListed: state.modeListed, accepted: state.accepted, legacyEnabled: state.legacyEnabled) {
+        case .skipDone: return Result(outcome: .done, skipped: true)
+        case .skipNotAccepted: return Result(outcome: .notAccepted, skipped: true)
+        case .fullFlow: return (fullFlow ?? Self.fullFlow(bundleURL:bundleID:defaults:))(bundleURL, bundleID, defaults)
+        }
+    }
+
+    /// Waits, without calling anything that changes TIS state, for the system to take a skipped
+    /// `notAccepted` (right after the files are swapped it may list the input method as disabled
+    /// for a moment). True when the result is done or the input method became accepted in time.
+    public static func waitUntilAccepted(
+        _ result: Result, interval: TimeInterval = 0.5, limit: TimeInterval = 5,
+        isAccepted: () -> Bool, sleep: (TimeInterval) -> Void = Registration.pause
+    ) -> Bool {
+        if result.outcome == .done { return true }
+        guard result.outcome == .notAccepted, result.skipped else { return false }
+        var waited: TimeInterval = 0
+        while waited < limit {
+            sleep(interval)
+            waited += interval
+            if isAccepted() { return true }
+        }
+        return false
+    }
+
+    static func fullFlow(bundleURL: URL, bundleID: String, defaults: UserDefaults) -> Result {
+        // Registered here: a bundle ID TIS already knows may still carry the old two-mode list.
         // Whether an already registered bundle reports an error here is not measured; it only
         // decides between registrationFailed and modeNotListed below.
         let registered = TISRegisterInputSource(bundleURL as CFURL) == noErr
@@ -72,9 +179,29 @@ public enum Registration {
 
     /// Measured 2026-10-04: before the first log out after registration, both enable calls return
     /// noErr and this process's enabled list shows the mode, but not the input method itself,
-    /// which stays disabled. Only the input method appearing in the enabled list counts.
+    /// which stays disabled. Accepted means both the input method (no mode ID) and its `.zhuyin`
+    /// mode are in the enabled list; the parent alone is "known, not accepted".
     public static func isAccepted(bundleID: String) -> Bool {
-        inputSources(bundleID: bundleID, includeAllInstalled: false).contains { inputModeID($0) == nil }
+        accepted(enabledModeIDs: inputSources(bundleID: bundleID, includeAllInstalled: false).map(inputModeID), bundleID: bundleID)
+    }
+
+    /// `isAccepted` on the mode IDs of the enabled sources (nil for the input method itself).
+    public static func accepted(enabledModeIDs: [String?], bundleID: String) -> Bool {
+        enabledModeIDs.contains { $0 == nil } && enabledModeIDs.contains { $0 == "\(bundleID).zhuyin" }
+    }
+
+    /// docs/contracts/installer-v2.md section 1.2: selects the input method's one mode among the
+    /// enabled sources. False when it is not listed, not selectable or the call fails; whether the
+    /// switch took is checked separately with `isCurrentMode` (it can return noErr and not switch).
+    public static func selectMode(bundleID: String) -> Bool {
+        let sources = inputSources(bundleID: bundleID, includeAllInstalled: false)
+        let listed = sources.map { (modeID: inputModeID($0), selectable: isSelectCapable($0)) }
+        guard let index = InstallerFlow.modeIndex(listed, bundleID: bundleID) else { return false }
+        return TISSelectInputSource(sources[index]) == noErr
+    }
+
+    public static func isCurrentMode(bundleID: String) -> Bool {
+        inputModeID(TISCopyCurrentKeyboardInputSource().takeRetainedValue()) == "\(bundleID).zhuyin"
     }
 
     static func inputSources(bundleID: String, includeAllInstalled: Bool) -> [TISInputSource] {
@@ -88,7 +215,15 @@ public enum Registration {
     }
 
     static func isEnabled(_ source: TISInputSource) -> Bool {
-        guard let p = TISGetInputSourceProperty(source, kTISPropertyInputSourceIsEnabled) else { return false }
+        boolProperty(source, kTISPropertyInputSourceIsEnabled)
+    }
+
+    static func isSelectCapable(_ source: TISInputSource) -> Bool {
+        boolProperty(source, kTISPropertyInputSourceIsSelectCapable)
+    }
+
+    private static func boolProperty(_ source: TISInputSource, _ key: CFString) -> Bool {
+        guard let p = TISGetInputSourceProperty(source, key) else { return false }
         return CFBooleanGetValue(Unmanaged<CFBoolean>.fromOpaque(p).takeUnretainedValue())
     }
 }
