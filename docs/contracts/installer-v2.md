@@ -235,7 +235,7 @@
    - fresh verifier 讀 `Controller`：每一條在接受後到 `showTry` 的路都經過 `Registration.run`；「重新檢查」在未接受時不會走到任何 TIS 修改函式。
 2. 實機（使用者操作，main 準備）：
    - 用新安裝程式「重新安裝」：試打能打字；回到原本的 App 按 Caps Lock，能切換。
-   - 再用 `scripts/install-ime.sh` 裝一次同一份：Caps Lock 仍能切換；輸出有「registration skipped」。
+   - 再用 `scripts/install-ime.sh` 裝一次：Caps Lock 仍能切換；輸出有「registration skipped」。要裝的 bundle 由本分支 `make bundle` 組出（`build/善解輸入法.app`），不是 0.3.0 正式版，因為 0.3.0 的 `install` 早於 §9，每次都會註冊。
 3. **虛擬機全新安裝**，取代 §3 第 5 項的步驟與通過條件：
    - 安裝後如果走到「啟用」步驟：按「打開輸入方式設定」，照三步加入，再按「重新檢查」。
    - 通過：到試打頁並打出中文，目前的輸入方式是 `com.nyanako.inputmethod.shanjie.zhuyin`。
@@ -252,6 +252,7 @@
 
 - 第一次安裝時 Caps Lock 是否也會被註冊觸發：第一次安裝本來就需要註冊；後面的「從系統設定加入」能不能讓它恢復，由 9.3 第 3 項觀察記錄，不在這片修。
 - 從兩模式舊版（0.1.0）升級時照舊完整註冊，可能觸發 Caps Lock；這是一次性的，不在這片處理，只在研究紀錄註明。
+- 兩模式舊版升級時，如果走完整流程後回 `notAccepted`（倚天延續與停用舊模式都排在接受檢查之後），舊模式的清理要等到下一次更新才會做。只影響從 0.1.x 升上來的人。
 
 ### 9.6 本修訂的審查紀錄與處置
 
