@@ -139,7 +139,8 @@ use Tok::*;
 struct Oracle {
     /// Final row: (word, reading, start).
     items: Vec<(String, Vec<String>, usize)>,
-    /// Start positions that were queried (far to near, cursor start last), and those skipped for punctuation.
+    /// Start positions in the order they were queried (long starts far to near, then the cursor start, then with `mid`
+    /// 3 the positions inside words), and those skipped for punctuation.
     queried: Vec<usize>,
     skipped: Vec<usize>,
     /// Long-start items after step 2 (before the cap), and items that the filter of step 1 removed.
@@ -204,7 +205,8 @@ fn oracle(left: &str, toks: &[Tok], pending: &str) -> Oracle {
 
 /// `back`: the start of every decoded word that begins at most that many tokens before the cursor is a long start
 /// too (the last two words always are). `mid`: positions inside words within `back`; 0 none, 1 merged with the word
-/// starts far to near, 2 after all word starts (far to near).
+/// starts far to near, 2 after all word starts (far to near), 3 after everything (far to near; section 11, what
+/// `oracle` and the engine use). No fixed words: the oracle decodes free text only.
 fn oracle_with(left: &str, toks: &[Tok], pending: &str, back: usize, mid: u8) -> Oracle {
     let s = shared();
     let idx = s.capped.predict_index(&s.lm);
@@ -1540,6 +1542,45 @@ fn a_learned_item_of_a_position_inside_a_word_comes_first() {
 }
 
 #[test]
+fn positions_inside_a_word_the_user_fixed_are_not_starts() {
+    // 我們中午, then ㄎ and Backspace: a recompute with no pending unit. Free, 中午 is a decoded word and the position
+    // of 午 (3) inside it is a start (section 11). Fixed through the candidate window, 中午 is the user's choice: no item
+    // starts inside it (an item from the fixed word's own start replaces it whole, as before section 11).
+    let syls = ["ㄨㄛˇ", "ㄇㄣ˙", "ㄓㄨㄥ", "ㄨˇ"];
+    let state = |fix: bool| {
+        let mut e = engine();
+        typ(&mut e, &syls, "");
+        if fix {
+            let mut o = e.key(kind(KeyKind::Space)).unwrap();
+            while o.candidates[o.selected.unwrap()] != "中午" {
+                o = e.key(kind(KeyKind::Right)).unwrap();
+            }
+            e.key(kind(KeyKind::Enter)).unwrap();
+        }
+        typ(&mut e, &[], "ㄎ");
+        let o = e.key(kind(KeyKind::Backspace)).unwrap();
+        assert_eq!(o.preedit, "我們中午");
+        (e, row(&o))
+    };
+    // Each item's start: picking it leaves the cursor at start + length.
+    let starts = |fix: bool| -> Vec<(String, usize)> {
+        let (_, items) = state(fix);
+        assert!(!items.is_empty(), "fixed {fix}: no row");
+        (0..items.len())
+            .map(|i| {
+                let (mut e, _) = state(fix);
+                let p = e.pick(i).unwrap().unwrap();
+                (items[i].clone(), p.cursor_utf16 as usize - items[i].chars().count())
+            })
+            .collect()
+    };
+    let free = starts(false);
+    assert!(free.iter().any(|x| x.1 == 3), "precondition: free, an item starts at 3: {free:?}");
+    let fixed = starts(true);
+    assert!(fixed.iter().all(|x| x.1 != 3), "an item starts inside the fixed 中午: {fixed:?}");
+}
+
+#[test]
 fn reading_matches_compares_the_first_syllable_as_before() {
     // Section 11.2: the char comparison against the old `starts_with` on a collected String, with expected values.
     let old = |units: &[core::predict::Unit], reading: &[String]| {
@@ -1561,7 +1602,7 @@ fn reading_matches_compares_the_first_syllable_as_before() {
     for (keys, reading, want) in cases {
         let u = units_of(keys);
         assert_eq!(reading_matches(&u, &r(reading)), want, "{keys} {reading}");
-        assert!(!want || old(&u, &r(reading)), "the old test agreed: {keys} {reading}");
+        assert_eq!(old(&u, &r(reading)), want, "the old first-syllable test: {keys} {reading}");
     }
 }
 
@@ -1580,6 +1621,7 @@ const SHIPPING: usize = 3;
 #[ignore]
 fn measure_start_range() {
     assert!(RULES[SHIPPING].1 == PREDICT_BACK && RULES[SHIPPING].2 == 3);
+    assert!(std::env::var("ACG_PACK").is_err(), "ACG_PACK puts the word pack into every test of this binary: unset it");
     for set in ["user-typing", "user-reported"] {
         let text = std::fs::read_to_string(root().join(format!("eval/dev/{set}.txt"))).unwrap();
         let mut table = Table::default();
@@ -1641,6 +1683,8 @@ struct Table {
     hits: std::collections::BTreeMap<String, Vec<Vec<bool>>>,
     queries: [usize; RULES.len()],
     changed: [usize; RULES.len()],
+    /// States whose row is empty under "now" and not under the rule (Tab then enters the row instead of rule 13/21).
+    filled: [usize; RULES.len()],
     states: usize,
 }
 
@@ -1665,6 +1709,7 @@ impl Table {
                 for (i, o) in rows.iter().enumerate() {
                     self.queries[i] += o.queried.len();
                     self.changed[i] += (words(o) != words(&rows[0])) as usize;
+                    self.filled[i] += (words(&rows[0]).is_empty() && !words(o).is_empty()) as usize;
                 }
                 if std::env::var("SHOW_CHANGES").is_ok() && hv[0] != hv[SHIPPING] {
                     let tag = if hv[SHIPPING] { "GAIN" } else { "LOSS" };
@@ -1682,6 +1727,7 @@ impl Table {
         println!("\n## {name}: states {}", self.states);
         println!("predict calls per state: {:?}", per(&self.queries));
         println!("rows that differ from now: {:?}", RULES.iter().zip(&self.changed).map(|(r, c)| format!("{} {c}", r.0)).collect::<Vec<_>>());
+        println!("rows empty under now, not empty under the rule: {:?}", RULES.iter().zip(&self.filled).map(|(r, c)| format!("{} {c}", r.0)).collect::<Vec<_>>());
         println!("stage\tn\t{}", RULES.iter().map(|r| format!("{} (+/-)", r.0)).collect::<Vec<_>>().join("\t"));
         let mut all = Vec::new();
         for (stage, v) in &self.hits {
