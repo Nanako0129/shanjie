@@ -1288,5 +1288,6 @@ S2h 實機驗收時，使用者在終端機、Discord、VS Code、Chrome 網址�
 
 起因：S2k 的保留集只回總數（聊天 180、書面 184，對第一段的 179、183），看不出是改對幾句、改壞幾句；227 句上差 1 句在雜訊內。使用者決定：保留集、dev302、typing76、錯字回報、Discord 調參集都改成同一張表（n、top1、改對／改壞、精確 McNemar p、CER、配對 bootstrap 區間），從下一片開始；這次 S2k 的結果不重跑。
 - **改了什麼**：`shanjie-eval --lm …` 與 `reference/proto/lm_eval.py` 加 `--rowstats FILE`（逐列 `列號\t對錯\t錯字數\t正解字數`，只有數字，對錯沿用既有寬鬆 top-1）；新工具 `tools/evalstats.py compare`；`--set holdout` 允許 `--rowstats`、仍禁止 `--dump`（`check_lm_opts`）。摘要行與既有 golden 沒有改變。
+- **保留集格式檢查**（fresh verifier 跑一次，只回數字）：聊天與書面的 rowstats 各 227 行、只有 `[0-9\t\n]`、對錯欄加總等於摘要行。這也是目前 main（model-v3、沒有詞類）的保留集基準：第一名聊天 178、書面 184，CER 2.91%、2.55%。
 - **驗證**：Python 與 CLI 的 dev302 rowstats（聊天、書面）逐位元組相同（`eval/golden/s2-lm-dev302-{chat,formal}.rowstats`，`cli/tests/golden.rs`）；契約 §4 的 8 項突變都以斷言失敗。
 - **沒做**：`tools/bench.py` 的 CER 與區間（它的比較只在 `run` 裡算，這一片驗不到），排在 v0.3.0 基準量測之前；D（擴大或輪替保留集）與 Discord 調參集挑長句，記在 `docs/PLAN.md`。
