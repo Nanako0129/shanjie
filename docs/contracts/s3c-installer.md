@@ -33,7 +33,9 @@
    - 腳本照現行規則完成檔案交換（暫存、`.shanjie-previous`、舊名稱 `shanjie.app`、`lsregister -f`、結束舊行程），然後**在第 4 步（`shanjie install`）之前結束**，exit 0。
    - 這個變數只在非 files-only 模式下有意義；HOME 檢查照舊（安裝程式由使用者本人執行，HOME 就是帳號的家目錄）。
    - 腳本失敗（非 0）時，安裝程式顯示失敗與腳本的 stderr（固定文字與路徑，沒有使用者輸入），不做後續步驟。
-3. **註冊與啟用在安裝程式自己的行程裡做**（不呼叫 `shanjie install`）：理由是小麥注音的安裝程式註解寫「System Settings now asks the user whether to activate the IME」（`AppDelegate.swift:283`），而 0.1.0 的 `shanjie install` 是一跑完就結束的終端機行程，量到的現象是啟用呼叫都回 noErr、輸入法本體卻沒被系統接受，要登出再登入才生效（s3b §13.3 修訂三）。**未驗證**：有視窗、有 run loop 的行程啟用時，系統是否會跳出確認、確認後是否不必登出。
+3. > 已由 installer-v2 §9 修訂：註冊在已啟用時跳過；還差一步改成帶去系統設定（第 4 點的「登出再登入」不再適用）。
+
+   **註冊與啟用在安裝程式自己的行程裡做**（不呼叫 `shanjie install`）：理由是小麥注音的安裝程式註解寫「System Settings now asks the user whether to activate the IME」（`AppDelegate.swift:283`），而 0.1.0 的 `shanjie install` 是一跑完就結束的終端機行程，量到的現象是啟用呼叫都回 noErr、輸入法本體卻沒被系統接受，要登出再登入才生效（s3b §13.3 修訂三）。**未驗證**：有視窗、有 run loop 的行程啟用時，系統是否會跳出確認、確認後是否不必登出。
    - 邏輯和 v0.1.1 的 `shanjie install` 相同（倚天偏好的延續寫進輸入法自己的網域 `UserDefaults(suiteName: "com.nyanako.inputmethod.shanjie")`，由參數傳入；`shanjie install` 傳 `UserDefaults.standard`，security-reviewer P1-A）：`TISRegisterInputSource` → 啟用輸入法本體 → 啟用 `.zhuyin` 模式 → 停用舊的 `.standard`／`.eten`。
    - 共用程式：把這段 TIS 邏輯從 `macos/Sources/Shanjie/main.swift` 搬到新的 library target `ShanjieInstall`（連結 Carbon），**bundle URL 與 bundle ID 是參數**；`Shanjie` 傳 `Bundle.main.bundleURL`（行為不變），安裝程式傳**已安裝那一份** `~/Library/Input Methods/善解輸入法.app`，絕不傳自己 bundle 裡的路徑（被 App Translocation 時那是隨機的唯讀路徑）。`ShanjieKit` 仍不連結 TIS。
 4. 確認結果：用主執行緒 run loop 上的 `Timer`（不是背景執行緒 sleep；TIS 可能只在 run loop 上收到清單更新，未驗證）每 0.5 秒查一次已啟用清單（`TISCreateInputSourceList(…, false)`）裡有沒有輸入法本體，最多 30 秒，期間視窗顯示「如果系統跳出視窗，請允許『善解輸入法』」。
