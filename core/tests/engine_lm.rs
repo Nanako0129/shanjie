@@ -118,7 +118,7 @@ fn check_replay(got: &[String], want: &[String]) {
 fn p95(mut t: Vec<Duration>) -> Duration {
     t.sort();
     let p = t[t.len() * 95 / 100];
-    println!("keys {} p95 {:?} max {:?}", t.len(), p, t[t.len() - 1]);
+    println!("keys {} p50 {:?} p95 {:?} max {:?}", t.len(), t[t.len() / 2], p, t[t.len() - 1]);
     p
 }
 

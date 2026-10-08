@@ -63,6 +63,12 @@ final class CoreEngine {
         return Self.take(shanjie_engine_set_demote(handle, on ? 1 : 0, &out), out)
     }
 
+    /// V3: whether the prediction row is computed (the core's default is on); returns the snapshot, like `setDemote`.
+    func setPrediction(_ on: Bool) -> CoreResult {
+        var out: UnsafeMutablePointer<ShanjieOutput>?
+        return Self.take(shanjie_engine_set_prediction(handle, on ? 1 : 0, &out), out)
+    }
+
     func setLearning(_ enabled: Bool) -> Int32 { shanjie_engine_set_learning(handle, enabled ? 1 : 0) }
 
     func learningOpen(dir: String) -> Int32 { shanjie_engine_learning_open(handle, dir) }
@@ -82,8 +88,9 @@ final class CoreEngine {
         return Self.take(shanjie_engine_key(handle, key, &out), out)
     }
 
-    /// s3b2 section 8.2 mouse pick: `index` is a position in the last output's candidates. Code 2
-    /// when the candidates are closed or `index` is outside that output (state unchanged).
+    /// s3b2 section 8.2 mouse pick: `index` is a position in the last output's candidates. With the
+    /// candidate window closed and a prediction row showing (entered or not), it selects that row's item
+    /// (v3-engine section 4). Code 2 when neither is showing or `index` is outside that output (state unchanged).
     func pick(_ index: UInt32) -> CoreResult {
         var out: UnsafeMutablePointer<ShanjieOutput>?
         return Self.take(shanjie_engine_pick(handle, index, &out), out)

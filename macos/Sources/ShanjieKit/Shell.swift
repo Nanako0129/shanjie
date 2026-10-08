@@ -81,6 +81,20 @@ public final class MemoryDemoteStore: DemoteStore {
     public init(_ demote: Bool? = nil) { self.demote = demote }
 }
 
+/// Where the "即時預測" switch is kept (docs/contracts/v3-engine.md section 10.5): `nil` means never chosen, which is on.
+/// Same arrangement as `DemoteStore`.
+@MainActor
+public protocol PredictionStore: AnyObject {
+    var prediction: Bool? { get set }
+}
+
+/// The in-memory PredictionStore.
+@MainActor
+public final class MemoryPredictionStore: PredictionStore {
+    public var prediction: Bool?
+    public init(_ prediction: Bool? = nil) { self.prediction = prediction }
+}
+
 /// Process-wide state: the single engine (about 240 MB each, so never two at once), the single
 /// candidate panel and the page it shows, and which session owns the composition (section 5).
 /// All calls happen on the main thread.
@@ -103,6 +117,9 @@ public final class Shell {
     private let demoteStore: DemoteStore
     /// sw: whether the core's demotion table applies (default on); sent to every engine `build()` makes.
     private(set) var demoteOn = true
+    private let predictionStore: PredictionStore
+    /// V3: whether the prediction row is computed (default on); sent to every engine `build()` makes.
+    private(set) var predictionOn = true
     let panel: CandidatePanel
     let isSecureInput: () -> Bool
     private(set) var engine: CoreEngine?
@@ -139,11 +156,12 @@ public final class Shell {
     /// so a build cannot ship a clear that silently does nothing.
     /// `demoteStore`: the demotion switch (sw). Required, with no default, like `layoutStore`: the app passes
     /// its UserDefaults-backed store, tests the in-memory one.
+    /// `predictionStore`: the prediction switch (V3 section 10.5). Required, like `demoteStore`.
     /// `punctuationTable`: Apple's punctuation candidate table (s3e); tests pass another path.
     /// `punctuationNames`: Apple's punctuation names (s3f); tests pass another path.
     public init(resources: URL, panel: CandidatePanel, isSecureInput: @escaping () -> Bool,
                 layoutStore: LayoutStore, learningDirectory: URL?, dialogs: LearningDialogs,
-                demoteStore: DemoteStore,
+                demoteStore: DemoteStore, predictionStore: PredictionStore,
                 punctuationTable: URL = PunctuationTable.systemURL,
                 punctuationNames: URL = PunctuationNames.systemURL) {
         self.resources = resources
@@ -164,6 +182,8 @@ public final class Shell {
         self.layoutStore = layoutStore
         self.demoteStore = demoteStore
         demoteOn = demoteStore.demote ?? true
+        self.predictionStore = predictionStore
+        predictionOn = predictionStore.prediction ?? true
         // The preference is read before the one engine is built (about 240 MB): building first
         // and switching after would build twice.
         mode = layoutStore.layout.flatMap(InputMode.init(rawValue:)) ?? .standard
@@ -189,6 +209,13 @@ public final class Shell {
         return engine?.setDemote(on)
     }
 
+    /// The menu's choice (V3 section 10.5): stored, and sent to the engine; the snapshot is for the caller to show.
+    func setPrediction(_ on: Bool) -> CoreResult? {
+        predictionOn = on
+        predictionStore.prediction = on
+        return engine?.setPrediction(on)
+    }
+
     /// Creates the engine for the current mode, then loads the LM and the current profile. A
     /// failure leaves an engine without the LM (still usable) or no engine (every key passes).
     private func build() {
@@ -202,6 +229,9 @@ public final class Shell {
         if lm != 0 { Log.shell.error("shanjie_engine_load_lm failed, code \(lm)") }
         if case .failed(let c) = e.setDemote(demoteOn) {
             Log.shell.error("shanjie_engine_set_demote failed, code \(c)")
+        }
+        if case .failed(let c) = e.setPrediction(predictionOn) {
+            Log.shell.error("shanjie_engine_set_prediction failed, code \(c)")
         }
         if case .failed(let c) = e.setProfile(profile) {
             Log.shell.error("shanjie_engine_set_profile failed, code \(c)")
@@ -351,6 +381,15 @@ public final class Session {
     /// session owns the composition (a toggle mid-composition visibly re-ranks).
     func applyDemote(_ on: Bool) {
         switch shell.setDemote(on) {
+        case .ok(let o)? where shell.owner === self: apply(o)
+        case .failed(let c)?: _ = fail(c)
+        default: break
+        }
+    }
+
+    /// The menu's prediction switch: the snapshot is shown, if this session owns the composition.
+    func applyPrediction(_ on: Bool) {
+        switch shell.setPrediction(on) {
         case .ok(let o)? where shell.owner === self: apply(o)
         case .failed(let c)?: _ = fail(c)
         default: break
