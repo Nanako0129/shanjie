@@ -1,0 +1,660 @@
+"""ACG 詞包建置工具（契約 docs/contracts/acg-pack.md A.1）：由中文維基公共轉換組、作品條目標題與條目人物，
+產生 data/packs/acg-add.tsv（疊加層格式）、acg-sources.tsv、acg.json，並把同音衝突列進 collisions.txt。
+輸出以 CC BY-SA 4.0 釋出（LICENSES/data.md）。同一份快取跑兩次，輸出逐位元相同；版號取來源裡最新的 revision 時間。
+
+用法：python3 tools/build_acg_pack.py                  抓取（有快取就用快取）並寫入 data/packs/
+      python3 tools/build_acg_pack.py --offline        只用快取，缺了就中止
+      --cache DIR  --out DIR  --report DIR            快取（預設 ~/.cache/shanjie/sources/acg）、輸出、報告（預設 build/acg-pack）
+
+只連 zh.wikipedia.org/w/api.php 與 query.wikidata.org，依序送出、每秒不超過 1 個、帶 User-Agent 與 maxlag=5。
+讀音靠 tools/readings.py（需要萌典與小麥的破音字表，路徑見該檔），同音衝突靠評測 CLI（target/release/shanjie-eval，
+沒有就用 cargo 建）與 data/lm/bigram.sjlm。
+"""
+import argparse
+import collections
+import functools
+import hashlib
+import json
+import os
+import re
+import subprocess
+import sys
+import tempfile
+import time
+import urllib.parse
+import urllib.request
+from html.parser import HTMLParser
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(ROOT, "tools"))
+import build_overlay as bo  # noqa: E402  分數規則、變調列、基底與疊加層的路徑
+import ime  # noqa: E402
+
+PACKS = os.path.join(ROOT, "data", "packs")
+LEX = os.path.join(ROOT, "data", "lexicon")
+LM = os.path.join(ROOT, "data", "lm", "bigram.sjlm")
+CACHE = os.path.expanduser("~/.cache/shanjie/sources/acg")
+UA = "shanjie-acg-pack/1.0 (https://github.com/Nanako0129/shanjie; build tool for an optional word pack; contact via the repository)"
+WORKS = 400                       # 契約 A.1：sitelink 數最多的作品數
+HAN = re.compile(r"^[一-鿿]{2,10}$")
+TAG = "acg"
+SPARQL = """SELECT ?w ?sl ?art ?twl WHERE {
+  VALUES ?cls { wd:Q63952888 wd:Q20650540 }
+  ?w wdt:P31 ?cls ; wikibase:sitelinks ?sl .
+  ?art schema:about ?w ; schema:isPartOf <https://zh.wikipedia.org/> .
+  OPTIONAL { ?w rdfs:label ?twl FILTER(lang(?twl)="zh-tw") }
+} ORDER BY DESC(?sl) LIMIT 450"""
+
+
+# ---------------------------------------------------------------- 抓取與快取
+
+class Api:
+    """快取 + 限速（每秒 ≤ 1 個請求）+ maxlag=5。快取檔名是請求參數的 sha1，內容是回應 JSON。"""
+
+    def __init__(self, cache=CACHE, offline=False):
+        self.cache, self.offline, self.last = cache, offline, 0.0
+        os.makedirs(cache, exist_ok=True)
+
+    @staticmethod
+    def key(params):
+        return hashlib.sha1(urllib.parse.urlencode(sorted(params.items())).encode()).hexdigest()
+
+    def _get(self, key, url):
+        path = os.path.join(self.cache, key + ".json")
+        if os.path.exists(path):
+            with open(path, encoding="utf-8") as f:
+                return json.load(f)
+        if self.offline:
+            raise SystemExit(f"--offline: not cached: {url[:120]}")
+        for attempt in range(6):
+            wait = 1.1 - (time.time() - self.last)
+            if wait > 0:
+                time.sleep(wait)
+            self.last = time.time()
+            req = urllib.request.Request(url, headers={"User-Agent": UA})
+            data = json.loads(urllib.request.urlopen(req, timeout=120).read())
+            if isinstance(data, dict) and data.get("error", {}).get("code") == "maxlag":
+                time.sleep(5 * (attempt + 1))
+                continue
+            if isinstance(data, dict) and "error" in data:
+                raise RuntimeError(data["error"])
+            with open(path + ".part", "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False)
+            os.replace(path + ".part", path)
+            return data
+        raise RuntimeError("maxlag did not clear")
+
+    def wiki(self, **p):
+        p.update(format="json", formatversion="2", maxlag="5")
+        return self._get(self.key(p), "https://zh.wikipedia.org/w/api.php?" + urllib.parse.urlencode(sorted(p.items())))
+
+    def sparql(self, query):
+        p = {"query": query, "format": "json"}
+        return self._get("sparql-" + hashlib.sha1(query.encode()).hexdigest(), "https://query.wikidata.org/sparql?" + urllib.parse.urlencode(p))
+
+
+def pages(api, titles):
+    """標題 → {title, revid, ts, text}（跟著重新導向與正規化），不存在就是 None。每批 10 個。"""
+    out = {}
+    for i in range(0, len(titles), 10):
+        b = titles[i:i + 10]
+        q = api.wiki(action="query", prop="revisions", rvprop="ids|timestamp|content", rvslots="main", redirects="1", titles="|".join(b))["query"]
+        norm = {x["from"]: x["to"] for x in q.get("normalized", [])}
+        red = {x["from"]: x["to"] for x in q.get("redirects", [])}
+        pg = {p["title"]: p for p in q["pages"]}
+        for t in b:
+            p = pg.get(red.get(norm.get(t, t), norm.get(t, t)))
+            rev = p["revisions"][0] if p and p.get("revisions") else None
+            out[t] = {"title": p["title"], "revid": rev["revid"], "ts": rev["timestamp"], "text": rev["slots"]["main"]["content"]} if rev else None
+    return out
+
+
+def revisions(api, titles):
+    """已解析的標題 → (revid, ts)。每批 50 個。"""
+    out = {}
+    for i in range(0, len(titles), 50):
+        b = titles[i:i + 50]
+        q = api.wiki(action="query", prop="revisions", rvprop="ids|timestamp", redirects="1", titles="|".join(b))["query"]
+        for p in q["pages"]:
+            if p.get("revisions"):
+                out[p["title"]] = (p["revisions"][0]["revid"], p["revisions"][0]["timestamp"])
+    return out
+
+
+# ---------------------------------------------------------------- 轉換組
+
+def read_tsv(path):
+    return [l.rstrip("\n").split("\t") for l in open(path, encoding="utf-8") if l.strip() and not l.startswith("#")]
+
+
+LIST_ITEM = re.compile(r"\{\{CGroup/list/item\|([^|}]*)\|([^|}]*)\|([^|}]*)\|")
+ACG_SECTION = re.compile(r"colspan=4[^|]*\|\s*(.*)")
+
+
+def list_items(text):
+    """Template:CGroup/list → [(段名, 中文全稱, 原文全稱, 簡稱)]；只留標題含 ACG 的段。"""
+    sec, out = "", []
+    for line in text.split("\n"):
+        m = ACG_SECTION.search(line)
+        if m:
+            sec = m.group(1).strip()
+        m = LIST_ITEM.match(line)
+        if m and "ACG" in sec:
+            out.append((sec, m.group(1).strip(), m.group(2).strip(), m.group(3).strip()))
+    return out
+
+
+def lua_items(x):
+    """Lua 模組裡每個 Item( 呼叫的引數清單。"""
+    i, n = 0, len(x)
+    while True:
+        j = x.find("Item(", i)
+        if j < 0:
+            return
+        k, args, depth = j + 5, [], 1
+        while k < n and depth > 0:
+            c = x[k]
+            if c in "\"'":
+                e, s = k + 1, []
+                while e < n and x[e] != c:
+                    if x[e] == "\\" and e + 1 < n:
+                        s.append(x[e + 1])
+                        e += 2
+                        continue
+                    s.append(x[e])
+                    e += 1
+                args.append("".join(s))
+                k = e + 1
+                continue
+            if c == "[" and re.match(r"\[=*\[", x[k:k + 6]):
+                m = re.match(r"\[(=*)\[", x[k:])
+                close = "]" + m.group(1) + "]"
+                e = x.find(close, k + len(m.group(0)))
+                args.append(x[k + len(m.group(0)):e])
+                k = e + len(close)
+                continue
+            if c == "-" and x[k:k + 2] == "--":
+                e = x.find("\n", k)
+                k = e if e >= 0 else n
+                continue
+            if c == "(":
+                depth += 1
+            elif c == ")":
+                depth -= 1
+            k += 1
+        i = k
+        yield args
+
+
+def wiki_items(x):
+    for m in re.finditer(r"\{\{\s*(?:CItem|CItemHidden|CItemLan|CI|CNoteA)\s*\|(.*)", x):
+        line = m.group(1)
+        e = line.rfind("}}")
+        yield line[:e] if e >= 0 else line
+
+
+LANG = re.compile(r"^\s*(?:(.*?)=>)?\s*(zh-[a-z]+)\s*:(.*)$", re.S)
+
+
+def tw_values(rule):
+    """一條規則的 zh-tw 值（含 X=>zh-tw:Y 單向規則）；沒有 zh-tw 才退回 zh-hant。回傳 [(詞, 'zh-tw'|'zh-hant')]，已拆 / 、去《》、只留 2–10 個漢字。"""
+    rule = re.sub(r"-\{|\}-", "", rule)
+    rule = re.sub(r"original=[^|]*\|?", "", rule)
+    cl = [(m.group(2), m.group(3).strip()) for m in (LANG.match(c) for c in rule.split(";")) if m]
+    tw = [c for c in cl if c[0] == "zh-tw"]
+    use, src = (tw, "zh-tw") if tw else ([c for c in cl if c[0] == "zh-hant"], "zh-hant")
+    out = []
+    for _, v in use:
+        v = re.sub(r"^《(.*)》$", r"\1", v.strip())
+        out += [(p.strip(), src) for p in v.split("/") if HAN.match(p.strip())]
+    return out
+
+
+def group_rules(text):
+    rules = list(wiki_items(text)) if "{{C" in text else []
+    if not rules:
+        rules = [a[-1] for a in lua_items(text) if a]
+        rules += [m.group(2) for m in re.finditer(r"\brule\s*=\s*(['\"])(.*?)\1", text)]
+    return rules
+
+
+def resolve_groups(api, rows, items):
+    """每個組 → 頁面記錄 {title, revid, ts, text}（Lua 模組只有 require 時，跟到被引用的模組）。回傳 (組 → 記錄或 None, 所有抓到的頁)。"""
+    by_key = {(i[1], i[2]): i for i in items}
+    by_zh = {i[1]: i for i in items}
+    cands = {}
+    for r in rows:
+        it = by_key.get((r[1], r[2])) or by_zh.get(r[1])
+        c = [r[2], it[3] if it else "", r[1], it[2] if it else ""]
+        cands[(r[1], r[2])] = [x for x in dict.fromkeys(c) if x and x != "--" and "待查" not in x] or [r[1]]
+    got, chosen = {}, {}
+    for rank in range(4):
+        todo = [g for g, c in cands.items() if g not in chosen and rank < len(c)]
+        titles = [f"{ns}:CGroup/{cands[g][rank]}" for g in todo for ns in ("Module", "Template")]
+        titles = [t for t in dict.fromkeys(titles) if t not in got]
+        got.update(pages(api, titles))
+        for g in todo:
+            for ns in ("Module", "Template"):
+                if got.get(f"{ns}:CGroup/{cands[g][rank]}"):
+                    chosen[g] = got[f"{ns}:CGroup/{cands[g][rank]}"]
+                    break
+    for _ in range(5):                                   # 短模組只 require 另一個：換成被引用的
+        need = {}
+        for g, p in chosen.items():
+            m = re.search(r"require\(\s*['\"]([^'\"]+)['\"]", p["text"])
+            if len(p["text"]) < 400 and m and not m.group(1).replace("模块:", "Module:").startswith("Module:CGroup/core"):
+                need[g] = m.group(1).replace("模块:", "Module:")
+        if not need:
+            break
+        got.update(pages(api, [t for t in dict.fromkeys(need.values()) if t not in got]))
+        for g, t in need.items():
+            if got.get(t) and got[t]["title"] != chosen[g]["title"]:
+                chosen[g] = got[t]
+    return {g: chosen.get(g) for g in cands}
+
+
+# ---------------------------------------------------------------- 條目人物（原型 extract.py／dom.py／clean.py）
+
+VOID = {"br", "img", "hr", "meta", "link", "input", "wbr", "col"}
+
+
+class N:
+    __slots__ = ("tag", "attrs", "kids", "parent")
+
+    def __init__(s, tag, attrs=None, parent=None):
+        s.tag, s.attrs, s.kids, s.parent = tag, dict(attrs or []), [], parent
+
+    def cls(s):
+        return s.attrs.get("class", "").split()
+
+    def text(s):
+        if s.tag == "#t":
+            return s.attrs["t"]
+        if s.tag in ("sup", "style", "script"):
+            return ""
+        if "reference" in s.cls() or "mw-editsection" in s.cls() or ("noprint" in s.cls() and s.tag != "td"):
+            return ""
+        if s.tag == "br":
+            return "\n"
+        return "".join(k.text() for k in s.kids)
+
+    def walk(s):
+        yield s
+        for k in s.kids:
+            if k.tag != "#t":
+                yield from k.walk()
+
+
+class _P(HTMLParser):
+    def __init__(s):
+        super().__init__(convert_charrefs=True)
+        s.root = s.cur = N("root")
+
+    def handle_starttag(s, tag, attrs):
+        n = N(tag, attrs, s.cur)
+        s.cur.kids.append(n)
+        if tag not in VOID:
+            s.cur = n
+
+    def handle_startendtag(s, tag, attrs):
+        s.cur.kids.append(N(tag, attrs, s.cur))
+
+    def handle_endtag(s, tag):
+        c = s.cur
+        while c is not None and c.tag != tag:
+            c = c.parent
+        if c is not None and c.parent is not None:
+            s.cur = c.parent
+
+    def handle_data(s, d):
+        s.cur.kids.append(N("#t", {"t": d}, s.cur))
+
+
+def dom(html):
+    p = _P()
+    p.feed(html)
+    return p.root
+
+
+CHAR_RE = re.compile(r"(登場|登场)?(人物|角色)|主角|配角|角色介紹|人物介紹|角色簡介|主要登場|登場者|^演員|角色設定")
+CHAR_NEG = re.compile(r"列表$|一覽$|相關|周邊|商品|遊戲|玩具|聲優|配音|演員|製作|聲音|影響|評價|設計|創作|名詞|專有|用語")
+LIST_RE = re.compile(r"(角色|人物)(列表|一覽|一览)$|登場(人物|角色)(列表|一覽|一览)$")   # 契約：連到的角色列表條目（不含機體、用語列表）
+HANX = re.compile(r"^[㐀-䶿一-鿿]+$")
+SEP = re.compile(r"[・·•･ 　/／]")
+CUT = re.compile(r"[（(：:、,，；;〔\[「『【《—–\-~～…→＝=|｜\n]|\s聲|CV|配音|演員|飾演|聲優")
+STOP = set("日本 角色 其他 旁白 香港 台灣 中國大陸 國語 醫生 主角 老師 首領 怪物 播音員 記者 警官 校長 警備員 長老 老婆婆 角色名 角色名稱 登場人物 登場角色 客串角色 次要角色 主要人物 主要角色 原作角色 本作角色 其他人物 其他角色 其他登場人物 必殺技 合體必殺技 主角的家人 傳說神奇寶貝 台灣 中國 美國 韓國 英語 粵語 日語".split())
+STOP_RE = re.compile(r"(角色|人物|登場|列表|一覽|必殺技|聲優|配音|名稱|演員)$|^(主要|次要|其他|原創|登場)")
+KANA, LAT = re.compile(r"[぀-ヿ]"), re.compile(r"[A-Za-z]{2}")
+REL = re.compile(r"的|之(母|父|女|子|妻|夫|弟|兄|姊|姐|妹|友|師|徒|主|王|僕)")
+ROLE_END = re.compile(r"(母親|父親|哥哥|姊姊|姐姐|弟弟|妹妹|爺爺|奶奶|老師|同學|學生|校長|社長|部長|隊長|會長|隊員|成員|一夥|一伙|學園|學院|小隊|軍團|集團|社團|俱樂部|協會|公司|組織|王國|帝國|村落|號|家|們)$")
+ROLE_ANY = re.compile(r"社團|俱樂部|同好會|研究會|委員會|學生會|粉絲|觀眾|路人|店員|店長|護士|警察|刑警|警官|醫生|老闆|客人|居民|村民|士兵|聲優|配音|旁白|廣播")
+
+
+def raw_candidates(root):
+    """條目裡登場人物段落下的 (種類, 文字)。"""
+    stack = []
+    for n in root.walk():
+        if n.tag in ("h2", "h3", "h4", "h5"):
+            lv = int(n.tag[1])
+            while stack and stack[-1][0] >= lv:
+                stack.pop()
+            stack.append((lv, n.text().strip(), n))
+        if not any(CHAR_RE.search(t) and not CHAR_NEG.search(t) for _, t, _ in stack):
+            continue
+        if n.tag == "dt":
+            yield "dt", "".join(k.text() for k in n.kids if k.tag not in ("ul", "ol", "dl", "table", "div"))
+        elif n.tag == "li":
+            if "toclevel-1" not in str(n.attrs):
+                yield "li", "".join(k.text() for k in n.kids if k.tag not in ("ul", "ol", "dl", "table", "div"))
+        elif n.tag == "tr":
+            cells = [k for k in n.kids if k.tag in ("th", "td")]
+            if len(cells) >= 2:
+                for c in cells:
+                    t = c.text().strip()
+                    if t:
+                        yield "tr", t
+                        break
+        elif n.tag == "p":
+            b = [k for k in n.kids if k.tag != "#t"][:1]
+            if b and b[0].tag in ("b", "strong"):
+                yield "p-bold", b[0].text()
+        elif n.tag in ("h3", "h4", "h5") and stack and stack[-1][2] is n:
+            yield "heading", n.text()
+
+
+def names_of(html):
+    """條目 HTML → [(名字, 種類, 原文前 120 字)]，只有單一名字（含 ・／空白的複合寫法不收）。"""
+    out = []
+    for kind, raw in raw_candidates(dom(html)):
+        s = re.sub(r"\[[^\]]*\]", "", raw).strip()
+        m = CUT.search(s)
+        head = (s[:m.start()] if m else s).strip()
+        if head and not SEP.search(head) and HANX.match(head) and 2 <= len(head) <= 10 and head not in STOP and not STOP_RE.search(head):
+            out.append((head, kind, s[:120]))
+    return out
+
+
+def strict_ok(name, kind, snip, base):
+    """嚴格過濾（契約 A.1）：不在基底、不是小標題、不是關係詞組、不是泛稱，摘要開頭就是這個名字而且旁邊有假名或拉丁字母。"""
+    if not HAN.match(name) or name in base or kind == "heading" or REL.search(name) or ROLE_END.search(name) or ROLE_ANY.search(name):
+        return False
+    sn = snip.replace("\n", " ").strip()
+    return sn.startswith(name) and bool(KANA.search(sn) or LAT.search(sn))
+
+
+# ---------------------------------------------------------------- 去重、讀音、分數、排序
+
+@functools.lru_cache(maxsize=1)
+def base_lexicon():
+    return ime.Lexicon(bo.BASE)
+
+
+@functools.lru_cache(maxsize=1)
+def lexicon_words():
+    """基底、overlay-add.tsv、sandhi-add.tsv 的詞（任何讀音下）。"""
+    have = set(base_lexicon().by_word)
+    for f in ("overlay-add.tsv", "sandhi-add.tsv"):
+        have |= {l.split("\t")[1] for l in open(os.path.join(LEX, f), encoding="utf-8")}
+    return frozenset(have)
+
+
+def dedupe(words, have):
+    """任何來源的詞只要字串已在基底、overlay-add.tsv 或 sandhi-add.tsv（任何讀音下）就丟掉。"""
+    return sorted(set(words) - have)
+
+
+def scores(base):
+    """長度 → 基底同字數詞條分數的第 25 百分位；某長度的基底詞條少於 1,000 條就沿用上一個長度（5 字以上才會發生）。"""
+    sc = {}
+    for n in range(2, 11):
+        got = sorted(s for syls, ents in base.by_reading.items() if len(syls) == n for _, s in ents)
+        sc[n] = got[len(got) // 4] if len(got) >= 1000 else sc[n - 1]
+        if n in bo.SCORE:
+            assert sc[n] == bo.SCORE[n], (n, sc[n])
+    return sc
+
+
+def make_readings(words):
+    """tools/readings.py：詞 → (讀音, 是否 CHECK)；UNREADABLE 的不在結果裡。"""
+    with tempfile.TemporaryDirectory() as d:
+        src, dst, err = (os.path.join(d, x) for x in ("in.txt", "out.txt", "err.txt"))
+        with open(src, "w", encoding="utf-8") as f:
+            f.writelines(f"|{w}\n" for w in words)
+        with open(err, "w", encoding="utf-8") as e:
+            subprocess.run([sys.executable, "-B", os.path.join(ROOT, "tools", "readings.py"), src, dst], stderr=e, check=True, env=dict(os.environ, PYTHONDONTWRITEBYTECODE="1"))
+        check, cur = set(), None
+        for l in open(err, encoding="utf-8"):
+            if l.startswith("CHECK\t"):
+                check.add(l.rstrip("\n").split("\t")[1].lstrip("|"))
+        out = {}
+        for l in open(dst, encoding="utf-8"):
+            _, w, rd = l.rstrip("\n").split("|")
+            assert len(rd.split()) == len(w), (w, rd)
+            out[w] = (rd.split(), w in check)
+        return out
+
+
+def ordered(words, nsrc):
+    """同音詞的順序（疊加層同分時看檔案順序）：來源數多的在前，同數依字串排序，所以可以重現。"""
+    return sorted(words, key=lambda w: (-nsrc(w), w))
+
+
+def pack_rows(order, reading, sc):
+    """每個詞一列主要讀音，含「一」「不」的緊接一列變調（和 build_overlay 相同）。"""
+    rows = []
+    for w in order:
+        syls = reading[w]
+        rows.append(f"{'-'.join(syls)}\t{w}\t{sc[len(w)]!r}\t{TAG}\n")
+        var = bo.sandhi_variant(w, syls)
+        if var:
+            rows.append(f"{'-'.join(var)}\t{w}\t{round(sc[len(w)] - bo.VARIANT_PENALTY, 8)!r}\t{TAG}\n")
+    return rows
+
+
+# ---------------------------------------------------------------- 同音衝突（契約 A.1）
+
+def eval_bin():
+    p = os.environ.get("SHANJIE_EVAL") or os.path.join(ROOT, "target", "release", "shanjie-eval")
+    if not os.path.exists(p):
+        subprocess.run(["cargo", "build", "--release", "--locked", "-q", "-p", "cli"], cwd=ROOT, check=True)
+    return p
+
+
+def top1(words, reading, profile, packs_dir=None):
+    """評測 CLI 解碼每個詞的讀音，回傳第一名。packs_dir 給了就開詞包（`--packs acg`）。"""
+    with tempfile.TemporaryDirectory() as d:
+        rows, dump = os.path.join(d, "rows.txt"), os.path.join(d, "dump.txt")
+        with open(rows, "w", encoding="utf-8") as f:
+            f.writelines(f"|{w}|{' '.join(reading[w])}\n" for w in words)
+        cmd = [eval_bin(), "--lm", LM, "--profile", profile, "--rows", rows, "--dump", dump]
+        if packs_dir:
+            cmd += ["--packs", "acg", "--packs-dir", packs_dir]
+        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL)
+        first = {}
+        for l in open(dump, encoding="utf-8"):
+            r, k, s, _ = l.rstrip("\n").split("\t")
+            if k == "1":
+                first[int(r)] = s
+        assert len(first) == len(words), "the evaluation CLI skipped rows"
+        return [first[i + 1] for i in range(len(words))]
+
+
+def detect_collisions(words, reading, rows, ref, decode=top1):
+    """對每個詞包詞 w 的讀音，各解碼兩次（不開／開詞包；聊天與書面）。符合其一就列出：
+    (a) 開了之後第一名是另一個詞包詞；(b) 不開時第一名不是 w，而且在參考名單 ref 裡。回傳 {讀音: [(w, 條件, 設定, 不開第一名, 開第一名)]}。"""
+    with tempfile.TemporaryDirectory() as d:
+        with open(os.path.join(d, "acg-add.tsv"), "w", encoding="utf-8") as f:
+            f.writelines(rows)
+        inpack, found = set(words), collections.defaultdict(list)
+        for prof in ("chat", "formal"):
+            off, on = decode(words, reading, prof), decode(words, reading, prof, d)
+            for w, o, n in zip(words, off, on):
+                for cond, hit in (("a", n != w and n in inpack), ("b", o != w and o in ref)):
+                    if hit:
+                        found[" ".join(reading[w])].append((w, cond, prof, o, n))
+    return dict(found)
+
+
+def read_collisions(path):
+    """acg-collisions.tsv：讀音、保留的詞、排除的詞、理由。回傳 {排除的詞: 讀音}。"""
+    if not os.path.exists(path):
+        return {}
+    out = {}
+    for r in read_tsv(path):
+        assert len(r) == 4 and r[2], f"bad collision row: {r}"
+        out[r[2]] = r[0]
+    return out
+
+
+# ---------------------------------------------------------------- 主流程
+
+def build(api, groups_tsv=os.path.join(PACKS, "acg-groups.tsv"), collisions_tsv=os.path.join(PACKS, "acg-collisions.tsv"), decode=top1, readings=make_readings):
+    log = lambda *a: print(*a, file=sys.stderr)
+    gr = read_tsv(groups_tsv)
+    listing = pages(api, ["Template:CGroup/list"])["Template:CGroup/list"]
+    items = list_items(listing["text"])
+    known = {(r[1], r[2]) for r in gr} | {(r[1], None) for r in gr}
+    unclassified = sorted(f"{i[1]} ({i[2]})" for i in items if (i[1], i[2]) not in known and (i[1], None) not in known)
+    log("groups", len(gr), "unclassified", len(unclassified))
+    resolved = resolve_groups(api, gr, items)
+    ts, revs = [listing["ts"]], [listing["revid"]]
+    ref, cg_src, cg_hant, unresolved = set(), collections.defaultdict(set), set(), []
+    for r in gr:
+        p = resolved[(r[1], r[2])]
+        if not p:
+            unresolved.append(r[1])
+            continue
+        ts.append(p["ts"])
+        revs.append(p["revid"])
+        for rule in group_rules(p["text"]):
+            for v, src in tw_values(rule):
+                ref.add(v)
+                if r[3] == "include":
+                    cg_src[v].add(f"{p['title']}@{p['revid']}")
+                    if src == "zh-hant":
+                        cg_hant.add(v)
+    log("group pages missing:", unresolved)
+
+    # 作品與條目
+    b = api.sparql(SPARQL)["results"]["bindings"]
+    ws = sorted({x["w"]["value"].rsplit("/", 1)[1]: (x["w"]["value"].rsplit("/", 1)[1], urllib.parse.unquote(x["art"]["value"].rsplit("/", 1)[1]), int(x["sl"]["value"])) for x in b}.values(), key=lambda t: (-t[2], t[0]))[:WORKS]
+    arts, seen, queued, missing = [], set(), set(), []
+    title_src, name_src, name_info = {}, collections.defaultdict(set), {}
+    todo = [(w[1], True) for w in ws]                     # (條目, 是不是作品)；作品條目連到的角色列表接在後面
+    while todo:
+        t, is_work = todo.pop(0)
+        try:
+            d = api.wiki(action="parse", page=t, variant="zh-tw", redirects="1", prop="text|displaytitle|links|sections")["parse"]
+        except RuntimeError as e:
+            if e.args[0].get("code") != "missingtitle":      # Wikidata 的 sitelink 指向已刪除或移走的條目：略過，記在報告裡
+                raise
+            log("missing article:", t)
+            missing.append(t)
+            continue
+        if d["title"] in seen:
+            continue
+        seen.add(d["title"])
+        arts.append(d["title"])
+        if is_work:
+            disp = re.sub(r"\s*[\(（][^)）]*[\)）]\s*$", "", re.sub("<[^>]+>", "", d["displaytitle"]).strip())
+            if HAN.match(disp):
+                title_src.setdefault(disp, set()).add(d["title"])
+            for l in d["links"]:
+                if l.get("ns") == 0 and l.get("exists") and LIST_RE.search(l["title"]) and l["title"] not in queued:
+                    queued.add(l["title"])
+                    todo.append((l["title"], False))
+        for n, kind, snip in names_of(d["text"]):
+            name_info.setdefault(n, (kind, snip))
+            name_src[n].add(d["title"])
+    ar = revisions(api, sorted(arts))
+    for t, (rid, stamp) in ar.items():
+        ts.append(stamp)
+        revs.append(rid)
+    log("works", len(ws), "articles", len(arts), "titles", len(title_src), "names", len(name_info))
+
+    base, have = base_lexicon(), lexicon_words()
+    chars = {n for n, (k, s) in name_info.items() if strict_ok(n, k, s, have)}
+    ref |= set(title_src) | chars
+    src = collections.defaultdict(lambda: collections.defaultdict(set))   # 詞 → 種類 → 出處
+    for v, s in cg_src.items():
+        src[v]["cgroup"] |= s
+    for v, s in title_src.items():
+        src[v]["title"] |= {f"{t}@{ar[t][0]}" for t in s if t in ar}
+    for n in chars:
+        src[n]["char"] |= {f"{t}@{ar[t][0]}" for t in name_src[n] if t in ar}
+    excluded = read_collisions(collisions_tsv)
+    cand = [w for w in dedupe(src, have) if w not in excluded]
+    log("candidates", len(src), "after dedupe and exclusions", len(cand), "excluded by acg-collisions.tsv", len(excluded))
+
+    rd = readings(cand)
+    unread = sorted(set(cand) - set(rd))
+    words = [w for w in cand if w in rd]
+    reading = {w: rd[w][0] for w in words}
+    sc = scores(base)
+    order = ordered(words, lambda w: sum(len(s) for s in src[w].values()))
+    rows = pack_rows(order, reading, sc)
+    col = detect_collisions(words, reading, rows, ref, decode)
+    ts_max = max(ts)
+    manifest = {
+        "version": ts_max[:10].replace("-", ""),
+        "latest_source_revision": ts_max,
+        "words": len(words),
+        "rows": len(rows),
+        "sources": {k: sum(1 for w in words if k in src[w]) for k in ("cgroup", "title", "char")},
+        "revision_ids": {"min": min(revs), "max": max(revs), "pages": len(revs)},
+        "groups": {"listed": len(gr), "included": sum(1 for r in gr if r[3] == "include"), "page_missing": unresolved},
+        "unclassified_groups": unclassified,
+        "articles_missing": sorted(missing),
+        "unreadable_dropped": len(unread),
+        "excluded_by_collisions_tsv": len(excluded),
+        "unresolved_collision_readings": len(col),
+    }
+    sources = ["word\tsource_kind\tsources (page@revision)\tnote\n"]
+    for w in order:
+        for k in ("cgroup", "title", "char"):
+            if k in src[w]:
+                note = ",".join(x for x, on in (("CHECK", rd[w][1]), ("zh-hant", k == "cgroup" and w in cg_hant)) if on)
+                sources.append(f"{w}\t{k}\t{'; '.join(sorted(src[w][k]))}\t{note}\n")
+    return {"acg-add.tsv": "".join(rows), "acg-sources.tsv": "".join(sources)}, manifest, col, unread, ref
+
+
+def collisions_text(col, manifest):
+    out = ["# 未處置的同音衝突（契約 A.1）。每列：讀音、詞、條件（a 詞包內同音／b 搶走參考名單的名字）、設定、不開詞包的第一名、開了之後的第一名。\n",
+           "# 處置寫進 data/packs/acg-collisions.tsv（讀音、保留的詞、排除的詞、理由）。\n"]
+    for r in sorted(col):
+        out += [f"{r}\t{w}\t{c}\t{p}\t{o}\t{n}\n" for w, c, p, o, n in sorted(col[r])]
+    out.append("# 未分類的轉換組（不收）：" + "、".join(manifest["unclassified_groups"]) + "\n")
+    return "".join(out)
+
+
+def write_all(files, manifest, out_dir):
+    os.makedirs(out_dir, exist_ok=True)
+    manifest = dict(manifest, files={n: {"sha256": hashlib.sha256(t.encode()).hexdigest(), "bytes": len(t.encode()), "lines": t.count("\n")} for n, t in sorted(files.items())})
+    files = dict(files, **{"acg.json": json.dumps(manifest, ensure_ascii=False, indent=1, sort_keys=True) + "\n"})
+    for n, t in files.items():
+        with open(os.path.join(out_dir, n) + ".tmp", "w", encoding="utf-8", newline="\n") as f:
+            f.write(t)
+        os.replace(os.path.join(out_dir, n) + ".tmp", os.path.join(out_dir, n))
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--cache", default=CACHE)
+    ap.add_argument("--out", default=PACKS)
+    ap.add_argument("--report", default=os.path.join(ROOT, "build", "acg-pack"))
+    ap.add_argument("--offline", action="store_true")
+    a = ap.parse_args()
+    files, manifest, col, unread, ref = build(Api(a.cache, a.offline))
+    write_all(files, manifest, a.out)
+    os.makedirs(a.report, exist_ok=True)
+    with open(os.path.join(a.report, "collisions.txt"), "w", encoding="utf-8") as f:
+        f.write(collisions_text(col, manifest))
+    for name, lines in (("unreadable.txt", unread), ("reference.txt", sorted(ref))):
+        with open(os.path.join(a.report, name), "w", encoding="utf-8") as f:
+            f.write("".join(w + "\n" for w in lines))
+    print(json.dumps({k: v for k, v in manifest.items() if k != "unclassified_groups"}, ensure_ascii=False, sort_keys=True))
+    print(f"unresolved collision readings: {len(col)} (see {os.path.join(a.report, 'collisions.txt')})")
+
+
+if __name__ == "__main__":
+    main()
