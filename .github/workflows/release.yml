@@ -339,7 +339,7 @@ jobs:
           else
             gh release create "$GITHUB_REF_NAME" \
               "${ZIPS[0]}" "${ZIPS[0]}.sha256" "${ZIPS[1]}" "${ZIPS[1]}.sha256" \
-              --repo "$GITHUB_REPOSITORY" --title "善解 $VERSION" --generate-notes
+              --repo "$GITHUB_REPOSITORY" --title "善解 $VERSION" --generate-notes --latest
           fi
 
       # No secret in scope while repository scripts run. The hash is the first field of the
