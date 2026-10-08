@@ -92,8 +92,8 @@ jobs:
         with:
           toolchain: 1.97.1
 
-      # The bigram model is not in git (docs/PLAN.md S2c); it is the model-v3
-      # release asset, and its word-class table (S2k) is the classes-v1 asset.
+      # The bigram model is not in git (docs/PLAN.md S2c); it is the model-v4
+      # release asset, and its word-class table (S2k) is the classes-v2 asset.
       # Checking them here fails the run in seconds with a clear message instead
       # of after the build. Each hash has one source: data/bigram.sjlm.sha256 and
       # data/classes.sjc.sha256 (also read by build-app.sh and release.yml).
@@ -102,9 +102,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          gh release download model-v3 --repo "$GITHUB_REPOSITORY" -p bigram.sjlm -D data/lm
+          gh release download model-v4 --repo "$GITHUB_REPOSITORY" -p bigram.sjlm -D data/lm
           shasum -a 256 -c data/bigram.sjlm.sha256
-          gh release download classes-v1 --repo "$GITHUB_REPOSITORY" -p classes.sjc -D data/lm
+          gh release download classes-v2 --repo "$GITHUB_REPOSITORY" -p classes.sjc -D data/lm
           shasum -a 256 -c data/classes.sjc.sha256
 
       - name: Tests (debug)
@@ -193,9 +193,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          gh release download model-v3 --repo "$GITHUB_REPOSITORY" -p bigram.sjlm -D data/lm
+          gh release download model-v4 --repo "$GITHUB_REPOSITORY" -p bigram.sjlm -D data/lm
           shasum -a 256 -c data/bigram.sjlm.sha256
-          gh release download classes-v1 --repo "$GITHUB_REPOSITORY" -p classes.sjc -D data/lm
+          gh release download classes-v2 --repo "$GITHUB_REPOSITORY" -p classes.sjc -D data/lm
           shasum -a 256 -c data/classes.sjc.sha256
 
       # The local entry points (Makefile, docs/verification.md). cargo test

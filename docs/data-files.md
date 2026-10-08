@@ -6,18 +6,18 @@
 
 | 檔案 | Release | 內容 | 大小 | 雜湊檔 |
 |---|---|---|---|---|
-| `bigram.sjlm` | [`model-v3`](https://github.com/Nanako0129/shanjie/releases/tag/model-v3) | bigram 語言模型：詞與詞相鄰出現的機率 | 81,373,869 bytes | `data/bigram.sjlm.sha256` |
-| `classes.sjc` | [`classes-v1`](https://github.com/Nanako0129/shanjie/releases/tag/classes-v1) | 詞類表（S2k）：512 個詞類、每個詞屬於哪一類、「這類詞後面接那類詞」的機率。兩個詞沒在語料一起出現過時，用它補估計 | 5,443,546 bytes | `data/classes.sjc.sha256` |
+| `bigram.sjlm` | [`model-v4`](https://github.com/Nanako0129/shanjie/releases/tag/model-v4) | bigram 語言模型：詞與詞相鄰出現的機率；含少量用來辨識來源的指紋條目 | 81,373,933 bytes | `data/bigram.sjlm.sha256` |
+| `classes.sjc` | [`classes-v2`](https://github.com/Nanako0129/shanjie/releases/tag/classes-v2) | 詞類表（S2k）：512 個詞類、每個詞屬於哪一類、「這類詞後面接那類詞」的機率。兩個詞沒在語料一起出現過時，用它補估計 | 5,443,546 bytes | `data/classes.sjc.sha256` |
 
-- **兩個一起用，放在同一個資料夾**（`data/lm/`）。`classes.sjc` 不含模型本身，`classes-v1` 這個 Release 也只有這一個檔案。
-- **綁定**：`classes.sjc` 裡記了它是為哪個模型建的（model-v3 的 SHA-256）。缺檔、配到別的模型、或檔案內容不對，載入都會失敗（C ABI 的 `load_lm` 回傳 3），不會靜靜地用錯或不用。
+- **兩個一起用，放在同一個資料夾**（`data/lm/`）。`classes.sjc` 不含模型本身，`classes-v2` 這個 Release 也只有這一個檔案。
+- **綁定**：`classes.sjc` 裡記了它是為哪個模型建的（model-v4 的 SHA-256）。缺檔、配到別的模型、或檔案內容不對，載入都會失敗（C ABI 的 `load_lm` 回傳 3），不會靜靜地用錯或不用。
 - **App 裡**：打包時兩個檔案都放進 `善解輸入法.app/Contents/Resources/`，使用者不用另外下載。
 
 ## 下載
 
 ```sh
-gh release download model-v3 -R Nanako0129/shanjie -p bigram.sjlm -D data/lm
-gh release download classes-v1 -R Nanako0129/shanjie -p classes.sjc -D data/lm
+gh release download model-v4 -R Nanako0129/shanjie -p bigram.sjlm -D data/lm
+gh release download classes-v2 -R Nanako0129/shanjie -p classes.sjc -D data/lm
 shasum -a 256 -c data/bigram.sjlm.sha256 data/classes.sjc.sha256
 ```
 
@@ -27,16 +27,16 @@ shasum -a 256 -c data/bigram.sjlm.sha256 data/classes.sjc.sha256
 
 | 改了什麼 | 要發的新 Release |
 |---|---|
-| 語料、計數或模型格式（重建 `bigram.sjlm`） | `model-v4`，而且詞類表也要重建：`classes-v2`（舊的詞類表綁的是舊模型的雜湊，配新模型會載入失敗） |
-| 只重新分群（類別數、μ、分群用的資料） | `classes-v2`，模型不變 |
+| 語料、計數或模型格式（重建 `bigram.sjlm`） | `model-v5`，而且詞類表也要重建：`classes-v3`（舊的詞類表綁的是舊模型的雜湊，配新模型會載入失敗） |
+| 只重新分群（類別數、μ、分群用的資料） | `classes-v3`，模型不變 |
 
-舊的 Release 一直保留，可以回到任何一版。換版時同一個 PR 更新雜湊檔、CI 與 `release.yml` 的下載、`cli/tests/golden.rs` 的雜湊、`scripts/build-app.sh` 的提示，以及這份文件。
+舊的 Release 保留，可以回到那一版；例外是 model-v3 與 classes-v1，在 model-v4 發佈後移除（`docs/contracts/model-v4.md`）。換版時同一個 PR 更新雜湊檔、CI 與 `release.yml` 的下載、`cli/tests/golden.rs` 的雜湊、`scripts/build-app.sh` 的提示，以及這份文件。
 
 ## 怎麼產生
 
 | 檔案 | 工具 | 規格與量測 |
 |---|---|---|
-| `bigram.sjlm` | `tools/build_lm.py`（格式說明在檔頭） | `docs/contracts/s2f-variant-forms.md`、`experiments/s2f/README.md` |
+| `bigram.sjlm` | `tools/build_lm.py`（格式說明在檔頭）；發佈的檔案另含指紋條目，加的工具不在 repo，所以自己重建的模型雜湊不同 | `docs/contracts/s2f-variant-forms.md`、`experiments/s2f/README.md` |
 | `classes.sjc` | `tools/build_classes.py`（格式說明在檔頭），輸入是第一段的分群結果與模型 | `docs/contracts/s2k-word-classes.md`、`experiments/s2-classes/README.md` |
 
 ## 授權
