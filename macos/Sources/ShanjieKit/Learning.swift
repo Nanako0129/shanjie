@@ -49,6 +49,7 @@ public struct MenuEntry: Equatable, Sendable {
         case clear
         case toggleBackup
         case toggleDemote
+        case togglePrediction
     }
 
     public var title: String
@@ -60,6 +61,7 @@ public struct MenuEntry: Equatable, Sendable {
         public static let pausedSecure = "學習已暫停（安全輸入）"
         public static let pausedApp = "學習已暫停（此 App）"
         public static let demote = "避免把敏感字詞排在前面"
+        public static let prediction = "即時預測"
         public static let clear = "清除選字記憶…"
         public static let excludeBackup = "不要備份選字記憶"
         public static let unavailable = "選字記憶無法存檔"
@@ -82,7 +84,7 @@ public protocol LearningDialogs: AnyObject {
 /// Fixed strings of those windows (R2: no app name, path or count).
 public enum DialogText {
     public static let clearTitle = "要清除選字記憶嗎？"
-    public static let clearMessage = "會刪除這台電腦上記住的改選紀錄，之後要重新學。清除只刪本機檔案；已經進 Time Machine 備份或本機快照的副本不受影響。"
+    public static let clearMessage = "會刪除這台電腦上記住的改選與預測列選取紀錄，之後要重新學。清除只刪本機檔案；已經進 Time Machine 備份或本機快照的副本不受影響。"
     public static let clearButton = "清除"
     public static let cancel = "取消"
     public static let failedTitle = "清除選字記憶失敗"
@@ -181,6 +183,7 @@ extension Session {
         items.append(MenuEntry(title: "標準鍵盤", action: .layout(.standard), checked: layout == .standard))
         items.append(MenuEntry(title: "倚天鍵盤", action: .layout(.eten), checked: layout == .eten))
         items.append(MenuEntry(title: T.demote, action: .toggleDemote, checked: shell.demoteOn))
+        items.append(MenuEntry(title: T.prediction, action: .togglePrediction, checked: shell.predictionOn))
         items.append(MenuEntry(title: T.clear, action: .clear))
         items.append(MenuEntry(title: T.excludeBackup, action: .toggleBackup, checked: shell.backupExcluded))
         if shell.learningUnavailable { items.append(MenuEntry(title: T.unavailable)) }
@@ -199,6 +202,8 @@ extension Session {
             shell.setBackupExcluded(!shell.backupExcluded)
         case .toggleDemote:
             applyDemote(!shell.demoteOn)
+        case .togglePrediction:
+            applyPrediction(!shell.predictionOn)
         }
     }
 }

@@ -50,12 +50,12 @@ typedef struct {
   const char *commit;         // UTF-8 text to insert now; may be "", never NULL
   const char *preedit;        // UTF-8 composition display (pending Zhuyin inserted at the cursor); never NULL
   uint32_t cursor_utf16;      // cursor in preedit, in UTF-16 code units (for NSRange); after the pending syllable
-  uint32_t candidate_count;   // candidates in this output: collapsed one page (0-9), expanded the visible rows (up to 5 x candidate_columns)
+  uint32_t candidate_count;   // candidates in this output: collapsed one page (0-9), expanded the visible rows (up to 5 x candidate_columns); also the prediction row (1-9, see candidate_selected)
   const char *const *candidates; // NULL when candidate_count is 0
-  int32_t candidate_selected; // selection within this output's candidates; -1 when candidates are closed
+  int32_t candidate_selected; // selection within this output's candidates; -1 when candidates are closed. -1 with candidate_count > 0 is the V3 prediction row, not entered (no number, no highlight; columns 0, first 0, total = count); >= 0 is the candidate window or the entered prediction row
   uint32_t candidate_columns; // 0 = collapsed single row; > 0 = expanded, always 9 (one row = one page, the selected page on top; s3b2 9)
-  uint32_t candidate_first;   // position of candidates[0] in the whole list; 0 when closed
-  uint32_t candidate_total;   // length of the whole list; 0 when closed
+  uint32_t candidate_first;   // position of candidates[0] in the whole list; 0 when closed (and for the prediction row)
+  uint32_t candidate_total;   // length of the whole list; 0 when closed (the prediction row: its length)
 } ShanjieOutput;
 typedef struct ShanjieEngine ShanjieEngine;
 
@@ -64,8 +64,12 @@ void    shanjie_engine_free(ShanjieEngine *engine);
 int32_t shanjie_engine_key(ShanjieEngine *engine, ShanjieKey key, ShanjieOutput **out);
 // s3b2 (docs/contracts/s3b2-glass-panel.md section 8): mouse pick. index is a position in the last
 //   output's candidates; the core chooses candidate_first + index through the same path as ENTER, so
-//   learning behaves identically. 1 when engine or out is NULL; 2 when candidates are closed or index
-//   is outside that output (state unchanged); 4 internal (engine reset). *out is NULL on any error.
+//   learning behaves identically. V3 (docs/contracts/v3-engine.md section 4): with the candidate window
+//   closed and a prediction row showing (entered or not), pick(index) selects that row's item (index
+//   counts from 0 in the row; the click is an explicit choice). Section 10: the pick is learned like a
+//   candidate-window re-pick (nothing displaced) at the commit, when learning is on at the pick and at the commit.
+//   1 when engine or out is NULL; 2 when there is neither a candidate window nor a prediction row, or
+//   index is outside that output (state unchanged); 4 internal (engine reset). *out is NULL on any error.
 int32_t shanjie_engine_pick(ShanjieEngine *engine, uint32_t index, ShanjieOutput **out);
 int32_t shanjie_engine_reset(ShanjieEngine *engine, uint32_t mode, ShanjieOutput **out); // mode 0 commit then clear, 1 discard
 void    shanjie_output_free(ShanjieOutput *output);
@@ -82,6 +86,11 @@ int32_t shanjie_engine_set_profile(ShanjieEngine *engine, uint32_t profile, Shan
 //   0 treats every delta as 0, bit-identical to a lexicon without the file. No effect without a loaded
 //   model. The shell wires it to the "avoid ranking sensitive words first" menu item.
 int32_t shanjie_engine_set_demote(ShanjieEngine *engine, uint32_t enabled, ShanjieOutput **out); // 0 or 1; recomputes and returns a snapshot (handled 1, commit "")
+// V3 (docs/contracts/v3-engine.md section 10.5): set_prediction 0 or 1 (2 otherwise, state unchanged), like
+//   set_demote in its codes and its snapshot (handled 1, commit ""); 1 when engine or out is NULL. Default 1.
+//   0 clears the prediction row (an entered row is left) and computes none; 1 recomputes it, so a row that
+//   fits the display conditions shows in the returned snapshot. No effect without a loaded model.
+int32_t shanjie_engine_set_prediction(ShanjieEngine *engine, uint32_t enabled, ShanjieOutput **out); // 0 or 1; returns a snapshot
 // s3e (docs/contracts/s3e-punctuation-candidates.md): punctuation alternatives, UTF-8 lines
 // "mark\talt\talt...", blank lines ignored, a repeated mark overrides; at most 64 KB / 1,000 lines.
 // 2 on any invalid input, keeping the previous table (a built-in default until the first success).
@@ -105,7 +114,9 @@ int32_t shanjie_engine_set_learning(ShanjieEngine *engine, uint32_t enabled);
 int32_t shanjie_engine_learning_open(ShanjieEngine *engine, const char *dir);
 // Forgetting: KEY with COMMAND (bit3) and kind BACKSPACE (4) while candidates are open removes the
 //   highlighted word's learned records for that reading (all contexts) and re-decodes; the output
-//   shows the new composition with the candidates still open. Without candidates the key passes through.
+//   shows the new composition with the candidates still open. Without candidates the key passes through,
+//   except while the V3 prediction row is entered: there it forgets the selected item the same way (and drops a
+//   pending learn of it), recomputes the row, and the row stays entered with the selection on that word.
 //   After a successful learning_open a forget ALWAYS rewrites the whole learning file, even when
 //   memory held no record of the word (a record pruned on load can still be in the file); before any
 //   successful learning_open it changes memory only. A failed rewrite sets status bit0.

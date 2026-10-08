@@ -79,7 +79,7 @@ final class LogTests: XCTestCase {
         try? FileManager.default.createDirectory(at: learning, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: learning) }
         let shell = Shell(resources: resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(),
-                          learningDirectory: learning, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore())
+                          learningDirectory: learning, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore())
         let c = Controller(shell, bundle: bundleMarker)
         c.client.before = "ab\t\(Self.contextMarker)"
         c.session.activate()                            // profile from a marked bundle ID
@@ -102,10 +102,10 @@ final class LogTests: XCTestCase {
         }
         XCTAssertGreaterThan(c.client.reads, 0, "the left-context read did not run")
         let broken = FileManager.default.temporaryDirectory.appendingPathComponent(pathMarker, isDirectory: true)
-        let failed = Shell(resources: broken, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(), learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore())  // engine_new fails on a marked path
+        let failed = Shell(resources: broken, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(), learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore())  // engine_new fails on a marked path
         XCTAssertNil(failed.engine, "the marked data path did not fail engine creation")
         // s3e: no punctuation table at a marked path -> the fixed fallback line (the path never logged).
-        _ = Shell(resources: resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(), learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(),
+        _ = Shell(resources: resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(), learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(),
                   punctuationTable: broken.appendingPathComponent("punct.plist"))
 
         let stdText = std.finish()

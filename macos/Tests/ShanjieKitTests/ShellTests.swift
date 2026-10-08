@@ -15,7 +15,7 @@ final class ShellTests: XCTestCase {
     }
 
     private func makeShell(secure: Bool = false, store: LayoutStore = MemoryLayoutStore()) -> Shell {
-        let shell = Shell(resources: resources, panel: FakePanel(), isSecureInput: { secure }, layoutStore: store, learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore())
+        let shell = Shell(resources: resources, panel: FakePanel(), isSecureInput: { secure }, layoutStore: store, learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore())
         XCTAssertNotNil(shell.engine)
         return shell
     }
@@ -50,6 +50,27 @@ final class ShellTests: XCTestCase {
         XCTAssertEqual(c.client.text, "")
     }
 
+    /// V3 (docs/contracts/v3-engine.md section 5): the first key shows the prediction row with no selection and no
+    /// numbers; Tab enters it, selects the first item and shows the numbers.
+    func testPredictionRowShowsNoNumbersUntilTabEnters() throws {
+        let c = Controller(makeShell())
+        c.session.activate()
+        c.type("s")  // ㄋ
+        XCTAssertTrue(c.panel.visible)
+        XCTAssertEqual(c.panel.selected, -1)
+        XCTAssertFalse(c.panel.items.isEmpty)
+        let passive = CandidateCells()
+        let before = passive.update(candidates: c.panel.items, notes: c.panel.items.map { _ in nil },
+                                    selected: c.panel.selected, first: c.panel.first, columns: c.panel.columns)
+        XCTAssertTrue(before.cells.allSatisfy { !$0.showsNumber }, "no number on the not-entered row")
+        XCTAssertTrue(c.press(48))  // Tab
+        XCTAssertEqual(c.panel.selected, 0)
+        let entered = CandidateCells()
+        let after = entered.update(candidates: c.panel.items, notes: c.panel.items.map { _ in nil },
+                                   selected: c.panel.selected, first: c.panel.first, columns: c.panel.columns)
+        XCTAssertTrue(after.cells.allSatisfy(\.showsNumber), "numbers show once entered")
+    }
+
     func testLineRectReachesThePanel() {
         let c = Controller(makeShell())
         c.session.activate()
@@ -73,14 +94,17 @@ final class ShellTests: XCTestCase {
         let c = Controller(makeShell())
         c.session.activate()
         c.type("su3 ")
-        XCTAssertEqual(c.client.lineAsks, 1)
+        // V3: every key of the composition shows or updates the prediction row, so each of them asked once
+        // (s, su, su3); the space only opens the candidate window over the same preedit and cursor.
+        let asked = c.client.lineAsks
+        XCTAssertEqual(asked, 3)
         XCTAssertTrue(c.press(125))  // ↓ expands
         XCTAssertTrue(c.press(125))  // ↓ one row
         XCTAssertTrue(c.press(124))  // → one cell
-        XCTAssertEqual(c.client.lineAsks, 1, "selection moves must not ask the client again")
+        XCTAssertEqual(c.client.lineAsks, asked, "selection moves must not ask the client again")
         XCTAssertEqual(c.panel.lineRect, c.client.line)
         c.type("cl3 ")
-        XCTAssertGreaterThan(c.client.lineAsks, 1, "a new composition asks again")
+        XCTAssertGreaterThan(c.client.lineAsks, asked, "a new composition asks again")
     }
 
     /// s3b2 section 8: down expands (the panel is told the columns, first and total); a click on a
@@ -241,7 +265,7 @@ final class ShellTests: XCTestCase {
     }
 
     func testEngineThatCannotBeBuiltPassesEveryKey() {
-        let shell = Shell(resources: resources.appendingPathComponent("missing"), panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(), learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore())
+        let shell = Shell(resources: resources.appendingPathComponent("missing"), panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(), learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore())
         XCTAssertNil(shell.engine)
         let c = Controller(shell)
         c.session.activate()
@@ -287,10 +311,21 @@ final class ShellTests: XCTestCase {
         a.session.activate()
         a.type("su3 ")
         XCTAssertTrue(a.panel.visible)
+        let aCandidates = a.panel.items
         b.type("c")  // ㄏ
         XCTAssertEqual(a.client.text, "你")
         XCTAssertEqual(a.client.marked, "")
-        XCTAssertFalse(a.panel.visible)
+        // The panel is the shell's one panel: A's candidate window is gone (selection -1) and it now shows B's
+        // prediction row for ㄏ (V3), not A's candidates.
+        XCTAssertEqual(a.panel.selected, -1)
+        XCTAssertTrue(b.panel.visible)
+        XCTAssertFalse(b.panel.items.isEmpty)
+        XCTAssertNotEqual(b.panel.items, aCandidates, "A's candidates must not leak into the shared panel")
+        // B's row is what a fresh shell shows for ㄏ alone.
+        let fresh = Controller(makeShell())
+        fresh.session.activate()
+        fresh.type("c")
+        XCTAssertEqual(b.panel.items, fresh.panel.items)
         XCTAssertEqual(b.client.marked, "ㄏ")
         XCTAssertFalse(b.client.calls.contains { if case .insert = $0 { true } else { false } })
         b.type("l3")
@@ -438,7 +473,7 @@ final class ShellTests: XCTestCase {
         let report = Layouts.keys("ㄍㄠˇ ㄨㄢˊ ㄓㄜˋ ㄅㄛ", eten: false)
         let store = MemoryDemoteStore()
         let shell = Shell(resources: resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(),
-                          learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: store)
+                          learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: store, predictionStore: MemoryPredictionStore())
         let c = Controller(shell)
         c.session.activate()
         let item = { c.session.menu.first { $0.action == .toggleDemote } }
@@ -464,7 +499,7 @@ final class ShellTests: XCTestCase {
         XCTAssertEqual(c.client.marked, "睪丸這波")
         c.press(Keys.esc)
         let again = Controller(Shell(resources: resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(),
-                                     learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: store))
+                                     learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: store, predictionStore: MemoryPredictionStore()))
         again.session.activate()
         again.type(report)
         XCTAssertEqual(again.client.marked, "睪丸這波", "a new shell reads the stored off")
@@ -473,6 +508,40 @@ final class ShellTests: XCTestCase {
         XCTAssertEqual(store.demote, true)
         again.type(report)
         XCTAssertEqual(again.client.marked, "搞完這波")
+    }
+
+    /// V3 (docs/contracts/v3-engine.md section 10.5): the "即時預測" item is checked by default, switches the row off
+    /// and on (shown at once mid-composition), is stored, and a new shell reads the stored off.
+    func testPredictionMenuItemTogglesStoresAndSurvivesRestart() {
+        let store = MemoryPredictionStore()
+        let make = {
+            Shell(resources: self.resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(),
+                  learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: store)
+        }
+        let c = Controller(make())
+        c.session.activate()
+        let item = { c.session.menu.first { $0.action == .togglePrediction } }
+        XCTAssertEqual(item()?.title, "即時預測")
+        XCTAssertEqual(item()?.checked, true, "default on")
+        c.type("s")  // ㄋ
+        XCTAssertTrue(c.panel.visible)
+        c.session.perform(.togglePrediction)  // mid-composition: the snapshot hides the row at once
+        XCTAssertEqual(store.prediction, false)
+        XCTAssertEqual(item()?.checked, false)
+        XCTAssertFalse(c.panel.visible)
+        c.press(Keys.esc)
+        c.type("s")
+        XCTAssertFalse(c.panel.visible, "off: no row on the first key")
+        c.session.perform(.togglePrediction)  // back on: the row for the pending ㄋ shows at once
+        XCTAssertEqual(store.prediction, true)
+        XCTAssertTrue(c.panel.visible)
+        c.session.perform(.togglePrediction)
+        c.press(Keys.esc)
+        let again = Controller(make())
+        again.session.activate()
+        again.type("s")
+        XCTAssertFalse(again.panel.visible, "a new shell reads the stored off")
+        XCTAssertEqual(again.session.menu.first { $0.action == .togglePrediction }?.checked, false)
     }
 
     func testSwitchingLayoutCommitsThenUsesTheNewLayout() {

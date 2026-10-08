@@ -265,7 +265,7 @@ fn run_predict(args: &[String]) -> Result<(), String> {
         let cands = predict(&idx, &lm, lam, v, &u, mode, 9);
         lat.push(t.elapsed());
         out += &format!("## {}\t{v}\t{keys}\t{units}\n", if mode == Mode::P { "P" } else { "PA" });
-        for (w, s, succ) in cands {
+        for (w, s, succ, _) in cands {
             out += &format!("{w}\t{s:?}\t{}\n", succ as u8);
         }
     }
