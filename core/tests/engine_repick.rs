@@ -229,8 +229,8 @@ fn insert_with_a_frozen_word_on_each_side() {
 
 const FORGET: Key = Key { kind: KeyKind::Backspace, ch: '\0', modifiers: MOD_COMMAND };
 
-/// Section 7.1, measured: 要進 + ㄅㄢˇ ㄎㄨㄥˋ re-picked to 版控 (the cursor stays after 版); ㄐㄧㄢ typed there merges
-/// with 控 into 監控, so 控 is released; Backspace deletes that syllable and fixes 控 again (d36a7c0 gave 版空).
+/// Sections 6.1 and 9, measured: 要進 + ㄅㄢˇ ㄎㄨㄥˋ re-picked to 版控 (the cursor stays after 版); ㄐㄧㄢ typed there
+/// merges with 控 into 監控, which is frozen in its place; Backspace deletes 監 and keeps 控 (d36a7c0 gave 版空).
 #[test]
 fn backspace_after_a_merge_fixes_the_word_again() {
     let mut e = engine();
@@ -302,8 +302,8 @@ fn insert_inside_a_frozen_word_keeps_both_halves() {
     // measured: 在也由年於再也, 在也由首於再也, 在也由介於再也
 }
 
-/// Section 7.1 lifetime (a), with section 8: after a release, a candidate pick clears the list, so deleting the old
-/// trigger brings nothing back; a prediction pick keeps the records wholly left of the span it replaces.
+/// Section 9: after a merge (監控 frozen), a candidate pick over 監 freezes 控 again, and a prediction pick after the
+/// word leaves 監控 alone; either way deleting 監 keeps 控. (Name kept from amendment three; there is no list now.)
 #[test]
 fn a_candidate_pick_clears_and_a_prediction_pick_keeps_left_records() {
     // candidate pick
@@ -315,7 +315,7 @@ fn a_candidate_pick_clears_and_a_prediction_pick_keeps_left_records() {
     let first = o.candidates[0].clone();
     let o = e.key(k(KeyKind::Enter)).unwrap();
     assert_eq!((merged.as_str(), first.as_str(), o.preedit.as_str()), ("版監控", "間", "版間控"));
-    // The pick froze 控 anew (section 1); the released list was cleared, so this is not a restore.
+    // The pick froze 控 anew (section 1).
     let o = e.key(k(KeyKind::Backspace)).unwrap();
     assert!(o.handled);
     assert_eq!(o.preedit, "版控");
@@ -335,53 +335,53 @@ fn a_candidate_pick_clears_and_a_prediction_pick_keeps_left_records() {
         e.key(k(KeyKind::Home)).unwrap();
         e.key(k(KeyKind::Right)).unwrap();
         e.key(k(KeyKind::Right)).unwrap();
-        // The pick replaced the span after the cursor only (section 8): 控's record (link 1..3) holds, so deleting the
-        // trigger fixes 控 again (aa8456c cleared the list and gave 版空中).
+        // The pick replaced only the span after the cursor; deleting 監 splits the frozen 監控 and keeps 控 (aa8456c
+        // gave 版空中).
         let o = e.key(k(KeyKind::Backspace)).unwrap();
         assert!(o.handled);
         assert_eq!(o.preedit, "版控中");
     }
 }
 
-/// Section 7.1 lifetime (b): a released two-syllable word, then a syllable inserted inside it, then the trigger
-/// deleted: the record was dropped, nothing comes back over the changed span.
+/// Section 9, measured: 世界 merges with ㄑㄩㄢˊ into 全世界, frozen in its place; ㄉㄜ˙ inserted inside it keeps each
+/// character (section 7.3), and deleting 全 keeps the rest.
 #[test]
-fn an_insert_inside_a_released_word_drops_its_record() {
+fn an_insert_inside_a_merged_word_keeps_its_characters() {
     let mut e = engine();
     assert_eq!(shown(&mut e, "ㄊㄚ ㄕˋ ㄐㄧㄝˋ", ""), "他世界");
     assert_eq!(repick(&mut e, 1, "她").preedit, "她世界");
-    assert_eq!(type_syls(&mut e, "ㄑㄩㄢˊ").preedit, "她全世界", "at 1: merges with the frozen 世界, released");
-    assert_eq!(insert_at(&mut e, 3, "ㄉㄜ˙"), "她詮釋的界", "inside the released 世界 (now 2..4): its record goes");
+    assert_eq!(type_syls(&mut e, "ㄑㄩㄢˊ").preedit, "她全世界");
+    assert_eq!(insert_at(&mut e, 3, "ㄉㄜ˙"), "她全世的界");
     e.key(k(KeyKind::Home)).unwrap();
     e.key(k(KeyKind::Right)).unwrap();
     e.key(k(KeyKind::Right)).unwrap();
-    let o = e.key(k(KeyKind::Backspace)).unwrap(); // the old trigger ㄑㄩㄢˊ
+    let o = e.key(k(KeyKind::Backspace)).unwrap();
     assert!(o.handled);
-    assert_eq!(o.preedit, "她是的界", "nothing restored over the changed span");
+    assert_eq!(o.preedit, "她世的界");
 }
 
 
-/// Section 8, measured: 她是 + ㄐㄧㄝˋ gives 她世界 (是 released, trigger 2, link 1..3). Another ㄐㄧㄝˋ typed between
-/// 世 and 界 is inside the link: the record goes, so deleting the original trigger (now 3) does not fix 是 again.
+/// Section 9, measured: 她是 + ㄐㄧㄝˋ gives 她世界 (世界 frozen). Another ㄐㄧㄝˋ typed between 世 and 界 splits it, the
+/// new syllable decodes freely (介); deleting the last syllable leaves 她世介.
 #[test]
-fn an_insert_between_a_released_word_and_its_trigger_drops_its_record() {
+fn an_insert_inside_a_merged_word_splits_it() {
     let mut e = engine();
     shown(&mut e, "ㄊㄚ ㄕˋ", "");
     assert_eq!(repick(&mut e, 1, "她").preedit, "她是");
     assert_eq!(insert_at(&mut e, 2, "ㄐㄧㄝˋ"), "她世界");
-    assert_eq!(insert_at(&mut e, 2, "ㄐㄧㄝˋ"), "她世界界");
+    assert_eq!(insert_at(&mut e, 2, "ㄐㄧㄝˋ"), "她世介界");
     e.key(k(KeyKind::End)).unwrap();
     let o = e.key(k(KeyKind::Backspace)).unwrap();
     assert!(o.handled);
-    assert_eq!(o.preedit, "她世界");
+    assert_eq!(o.preedit, "她世介");
 }
 
-/// Section 8: the candidate window's ⌘⌫ that removes records also drops the release records over its span. 空 is
-/// taught for ㄎㄨㄥˋ after 遙 (a one-character word has the exact-context level only, so 要進 + 板控 is unchanged; with
-/// no left text it is not learned at all, s4-learning section 12); 控 is released
-/// by 監; forgetting 空 on 控's span (records 1 -> 0) drops that record, so deleting 監 leaves 控 to the decoder.
+/// Section 9: the candidate window's ⌘⌫ frees frozen words only for an entry in effect over the span. 空 is taught for
+/// ㄎㄨㄥˋ after 遙 (a one-character word has the exact-context level only; with no left text it is not learned at all,
+/// s4-learning section 12), so it is not in effect for 要進 + 版監控: forgetting it (records 1 -> 0) changes nothing,
+/// and deleting 監 still keeps 控 (fa0ae06 gave 版空).
 #[test]
-fn candidate_forget_drops_the_release_records_over_its_span() {
+fn candidate_forget_of_an_entry_not_in_effect_keeps_the_frozen_words() {
     let mut e = engine();
     assert_eq!(shown(&mut e, "ㄎㄨㄥˋ", "遙"), "控");
     assert_eq!(repick(&mut e, 1, "空").preedit, "空");
@@ -393,14 +393,90 @@ fn candidate_forget_drops_the_release_records_over_its_span() {
     e.key(k(KeyKind::End)).unwrap();
     let o = e.key(k(KeyKind::Space)).unwrap();
     highlight(&mut e, o, "空");
-    e.key(FORGET).unwrap();
+    let o = e.key(FORGET).unwrap();
     assert_eq!(e.learner().records().len(), 0);
+    assert_eq!(o.preedit, "版監控");
     e.key(k(KeyKind::Esc)).unwrap();
     e.key(k(KeyKind::Home)).unwrap();
     e.key(k(KeyKind::Right)).unwrap();
     e.key(k(KeyKind::Right)).unwrap();
     let o = e.key(k(KeyKind::Backspace)).unwrap();
     assert!(o.handled);
-    assert_eq!(o.preedit, "版空", "measured; without the drop 控 is fixed again (版控)");
+    assert_eq!(o.preedit, "版控");
 }
+
+/// Section 9: 她 is taught for ㄊㄚ after 我 (records: that one), so the next 我 + ㄊㄚ ㄕˋ shows 她是; re-picking 是 freezes
+/// 她. ⌘⌫ on 她 forgets an entry in effect there (exact level under 我), so 她 decodes again without it: 他是.
+#[test]
+fn candidate_forget_of_an_entry_in_effect_frees_the_frozen_word() {
+    let mut e = engine();
+    assert_eq!(shown(&mut e, "ㄊㄚ ㄕˋ", "我"), "他是");
+    repick(&mut e, 1, "她");
+    assert_eq!(commit(&mut e), "她是");
+    assert_eq!(records(&e), vec![("我".to_string(), "ㄊㄚ".to_string(), "她".to_string())]);
+    assert_eq!(shown(&mut e, "ㄊㄚ ㄕˋ", "我"), "她是");
+    assert_eq!(repick(&mut e, 2, "是").preedit, "她是");
+    e.key(k(KeyKind::Home)).unwrap();
+    e.key(k(KeyKind::Right)).unwrap();
+    let o = e.key(k(KeyKind::Space)).unwrap();
+    highlight(&mut e, o, "她");
+    let o = e.key(FORGET).unwrap();
+    assert_eq!(e.learner().records().len(), 0);
+    assert_eq!(o.preedit, "他是");
+}
+
+fn backspace(e: &mut Engine) -> String {
+    let o = e.key(k(KeyKind::Backspace)).unwrap();
+    assert!(o.handled);
+    o.preedit
+}
+
+/// Review finding 1 (fa0ae06): after the merge 監控, typing on and deleting back used to lose 控 (版空). The merged word is
+/// frozen now, so two Backspaces give 版控 whatever the extra syllable was.
+#[test]
+fn typing_on_after_a_merge_then_deleting_back_keeps_the_word() {
+    for (syl, typed) in [("ㄉㄨ", "版監督控"), ("ㄕˋ", "版監是控"), ("ㄧㄡˇ", "版監有控")] {
+        let mut e = engine();
+        shown(&mut e, "ㄅㄢˇ ㄎㄨㄥˋ", "要進");
+        repick(&mut e, 1, "版");
+        assert_eq!(type_syls(&mut e, "ㄐㄧㄢ").preedit, "版監控");
+        assert_eq!(type_syls(&mut e, syl).preedit, typed);
+        assert_eq!(backspace(&mut e), "版監控");
+        assert_eq!(backspace(&mut e), "版控");
+    }
+}
+
+/// Review finding 2: deleting a syllable inside a frozen multi-syllable word keeps its other characters (fa0ae06 gave
+/// 版空 and 版間).
+#[test]
+fn deleting_inside_a_frozen_word_keeps_the_rest() {
+    for (del, want) in [(2, "版控"), (3, "版監")] {
+        let mut e = engine();
+        assert_eq!(shown(&mut e, "ㄅㄢˇ ㄐㄧㄢ ㄎㄨㄥˋ", "要進"), "板監控");
+        assert_eq!(repick(&mut e, 1, "版").preedit, "版監控");
+        e.key(k(KeyKind::Home)).unwrap();
+        for _ in 0..del {
+            e.key(k(KeyKind::Right)).unwrap();
+        }
+        assert_eq!(backspace(&mut e), want);
+    }
+}
+
+/// Apple Zhuyin, measured with imeshot (section 9): 他是 re-picked to 她是, ㄐㄧㄝˋ at the end gives 她世界, Backspace gives
+/// 她世 (not 她是); 他世界 with the first character re-picked, Backspace at the end keeps 世.
+#[test]
+fn backspace_in_a_merged_or_frozen_word_like_apple() {
+    let mut e = engine();
+    shown(&mut e, "ㄊㄚ ㄕˋ", "");
+    repick(&mut e, 1, "她");
+    e.key(k(KeyKind::End)).unwrap();
+    assert_eq!(type_syls(&mut e, "ㄐㄧㄝˋ").preedit, "她世界");
+    assert_eq!(backspace(&mut e), "她世");
+    let mut e = engine();
+    assert_eq!(shown(&mut e, "ㄊㄚ ㄕˋ ㄐㄧㄝˋ", ""), "他世界");
+    assert_eq!(repick(&mut e, 1, "她").preedit, "她世界");
+    e.key(k(KeyKind::End)).unwrap();
+    assert_eq!(backspace(&mut e), "她世");
+}
+
 

@@ -225,24 +225,11 @@ struct Fixed {
     /// change the text before the start, so the commit must not recompute it (section 10.1). `None` for candidate picks.
     key: Option<String>,
     /// Fixed by a candidate re-pick of another span (repick-freeze), not chosen by the user: never learned. Released
-    /// when a newly typed syllable merges with it (section 6.1, undone by deleting that syllable, section 7.1) and
-    /// when the candidate window's ⌘⌫ forgets records over a span it overlaps (section 7.2).
+    /// when a newly typed syllable merges with it (section 6.1; the merged word is then frozen in its place, section
+    /// 9) and when the candidate window's ⌘⌫ forgets an entry in effect over a span it overlaps (sections 7.2, 9).
     frozen: bool,
 }
 
-/// repick-freeze section 7.1: a frozen word released by the syllable typed at `trigger`; deleting that syllable fixes
-/// the word again.
-struct Released {
-    fixed: Fixed,
-    trigger: usize,
-}
-
-impl Released {
-    /// Section 8: the word's syllables plus the trigger, adjacent when the record was made.
-    fn link(&self) -> (usize, usize) {
-        (self.fixed.start.min(self.trigger), self.fixed.end.max(self.trigger + 1))
-    }
-}
 
 /// One item of the prediction row: the word, the compatible reading that scored it, and the syllable index where
 /// the word starts.
@@ -318,10 +305,6 @@ pub struct Engine {
     cursor: usize,
     pend: [Option<char>; 3],
     fixed: Vec<Fixed>,
-    /// repick-freeze sections 7.1 and 8: frozen words released by a merge, until their trigger is deleted, an edit
-    /// cuts or covers them (insertion inside the link, prediction pick, forget), or the list is cleared (candidate
-    /// pick, commit, clear).
-    released: Vec<Released>,
     display: String,
     cands: Option<Cands>,
     /// V3: the passive prediction row (empty = none) and, once Tab entered it, the selected item.
@@ -411,7 +394,6 @@ impl Engine {
             cursor: 0,
             pend: [None; 3],
             fixed: Vec::new(),
-            released: Vec::new(),
             display: String::new(),
             cands: None,
             pred: Vec::new(),
@@ -830,8 +812,6 @@ impl Engine {
     /// it. With learning on `pre` is `Some("")` (section 10.1): taught at commit like a re-pick, with nothing displaced.
     fn choose_pred(&mut self, i: usize) -> Result<Output, EngineError> {
         let Pred { word, reading, start, key, .. } = self.pred.swap_remove(i);
-        // repick-freeze section 8: the pick replaces [start, cursor); records wholly left of it still hold.
-        self.released.retain(|r| r.link().1 <= start);
         let pre = self.learning.then(String::new);
         self.clear_pred();
         self.pend = [None; 3];
@@ -856,7 +836,6 @@ impl Engine {
         self.cursor = 0;
         self.pend = [None; 3];
         self.fixed.clear();
-        self.released.clear();
         self.display.clear();
         self.path.clear();
         self.cands = None;
@@ -1254,8 +1233,8 @@ impl Engine {
     /// fixed words on its right, recompute; at MAX_SYLLABLES tokens commit everything (s3d §1).
     fn insert_token(&mut self, reading: String, fixed_word: Option<String>) -> Result<Output, EngineError> {
         let c = self.cursor;
-        // repick-freeze section 7.3: a frozen word the insertion cuts is kept per syllable (before the shift below).
-        let pieces = self.split_frozen_at(c);
+        // repick-freeze section 7.3: a frozen word the insertion cuts is kept per syllable (shifted below like the rest).
+        let pieces = self.split_frozen(|f| f.start < c && c < f.end);
         self.fixed.retain_mut(|f| {
             if f.end <= c {
                 true
@@ -1268,22 +1247,7 @@ impl Engine {
                 false
             }
         });
-        // Section 8: records follow the shift; one whose link (word plus trigger) the insertion cuts is dropped.
-        self.released.retain_mut(|r| {
-            let (a, b) = r.link();
-            if a < c && c < b {
-                return false;
-            }
-            if c <= a {
-                r.fixed.start += 1;
-                r.fixed.end += 1;
-                r.trigger += 1;
-            }
-            true
-        });
-        let excluded: Vec<usize> = pieces.iter().map(|f| f.start).collect();
-        self.fixed.extend(pieces);
-        self.fixed.sort_by_key(|f| f.start);
+        let excluded: Vec<usize> = pieces.iter().map(|&s| if s >= c { s + 1 } else { s }).collect();
         self.syls.insert(c, reading);
         if let Some(word) = fixed_word {
             self.fixed.push(Fixed { start: c, end: c + 1, word, pre: None, key: None, frozen: false });
@@ -1301,7 +1265,8 @@ impl Engine {
     /// repick-freeze sections 6.1 and 7.4: after a syllable was inserted at `c`, decode (and set `display`/`path`). A
     /// frozen neighbour (left one ending at `c`, right one starting at `c + 1`; not punctuation, not a piece split off
     /// by this insertion, whose post-shift start is in `excluded`) stays fixed unless a word of the decode without it
-    /// covers all its syllables plus the new one. Words still released after the final decode are recorded (7.1).
+    /// covers all its syllables plus the new one. Section 9: the words of the final decode that cover a released word
+    /// are frozen in its place, so what is shown stays put after the merge.
     fn release_frozen(&mut self, c: usize, excluded: &[usize]) -> Result<(), EngineError> {
         let is_cand = |s: &Self, f: &Fixed| {
             f.frozen && !s.is_punct(f.start) && !s.is_punct(c) && !excluded.contains(&f.start) && (f.end == c || f.start == c + 1)
@@ -1322,71 +1287,69 @@ impl Engine {
             released = still;
             kept = lost;
         }
-        self.released.extend(released.into_iter().map(|fixed| Released { fixed, trigger: c }));
+        let mut merged: Vec<Fixed> = Vec::new();
+        for f in &released {
+            let (start, end, word) = self.covering(f, c).ok_or(EngineError::Internal)?;
+            if !merged.iter().any(|m| m.start == start) {
+                merged.push(Fixed { start, end, word, pre: None, key: None, frozen: true });
+            }
+        }
+        if merged.is_empty() {
+            return Ok(());
+        }
+        let shown = self.display.clone();
+        self.fixed.append(&mut merged);
+        self.fixed.sort_by_key(|f| f.start);
+        self.refresh()?;
+        // Fixing words of the best path does not change the decode (the assumption section 1 also rests on).
+        debug_assert_eq!(self.display, shown);
         Ok(())
     }
 
     /// Section 6.1: a word of the current path covers all of `f`'s syllables plus the new one at `c`.
     fn merged(&self, f: &Fixed, c: usize) -> bool {
+        self.covering(f, c).is_some()
+    }
+
+    /// The word of the current path (start, end, word) that covers all of `f`'s syllables plus the new one at `c`.
+    fn covering(&self, f: &Fixed, c: usize) -> Option<(usize, usize, String)> {
         let (from, to) = if f.end == c { (f.start, c + 1) } else { (c, f.end) };
         let mut pos = 0;
-        self.path.iter().any(|w| {
+        self.path.iter().find_map(|w| {
             let (a, b) = (pos, pos + w.syllables);
             pos = b;
-            a <= from && to <= b
+            (a <= from && to <= b).then(|| (a, b, w.word.clone()))
         })
     }
 
-    /// Section 7.3: before an insertion at `c`, take out the frozen words that straddle it and return their syllables
-    /// as single-character frozen words, in post-shift indices, where the word has one character per syllable and the
-    /// syllable has that character as an entry; the rest is left to the decoder.
-    fn split_frozen_at(&mut self, c: usize) -> Vec<Fixed> {
-        if !self.fixed.iter().any(|f| f.frozen && f.start < c && c < f.end) {
-            return Vec::new();
-        }
+    /// Sections 7.3 and 9: replace each frozen word `cut` selects by its syllables as single-character frozen words, in
+    /// place (before the edit's shift), where the word has one character per syllable and the syllable has that character
+    /// as an entry; the rest is left to the decoder. Returns the pieces' starts.
+    fn split_frozen(&mut self, cut: impl Fn(&Fixed) -> bool) -> Vec<usize> {
         let Some(st) = self.lm.clone() else { return Vec::new() };
-        let mut pieces = Vec::new();
-        let mut keep = Vec::new();
+        let mut starts = Vec::new();
         for f in std::mem::take(&mut self.fixed) {
-            if !(f.frozen && f.start < c && c < f.end) {
-                keep.push(f);
+            if !(f.frozen && cut(&f)) {
+                self.fixed.push(f);
                 continue;
             }
             if f.word.chars().count() == f.end - f.start {
                 for (i, ch) in (f.start..f.end).zip(f.word.chars()) {
                     let ch = ch.to_string();
                     if st.capped.best_lp_delta(&self.syls[i..=i], &ch).is_some() {
-                        let at = if i >= c { i + 1 } else { i };
-                        pieces.push(Fixed { start: at, end: at + 1, word: ch, pre: None, key: None, frozen: true });
+                        starts.push(i);
+                        self.fixed.push(Fixed { start: i, end: i + 1, word: ch, pre: None, key: None, frozen: true });
                     }
                 }
             }
         }
-        self.fixed = keep;
-        pieces
+        self.fixed.sort_by_key(|f| f.start);
+        starts
     }
 
     fn remove_syllable(&mut self, i: usize) -> Result<(), EngineError> {
-        // repick-freeze section 7.1: deleting a release's trigger fixes the released word again; deleting inside the
-        // released word drops the record; other records shift with the fixed words.
-        let mut restore = Vec::new();
-        for mut r in std::mem::take(&mut self.released) {
-            if r.trigger != i && r.fixed.start <= i && i < r.fixed.end {
-                continue;
-            }
-            if r.fixed.start > i {
-                r.fixed.start -= 1;
-                r.fixed.end -= 1;
-            }
-            if r.trigger == i {
-                restore.push(r.fixed);
-                continue;
-            }
-            if r.trigger > i {
-                r.trigger -= 1;
-            }
-            self.released.push(r);
-        }
+        // repick-freeze section 9: a frozen word the deletion falls in keeps its other syllables (as on insertion).
+        self.split_frozen(|f| f.start <= i && i < f.end && f.end - f.start > 1);
         self.syls.remove(i);
         self.fixed.retain_mut(|f| {
             if f.end <= i {
@@ -1400,13 +1363,6 @@ impl Engine {
                 false
             }
         });
-        // A restored word never overrides what is fixed now (a pick or another restore over the same syllables).
-        for f in restore {
-            if !self.fixed.iter().any(|g| g.start < f.end && f.start < g.end) {
-                self.fixed.push(f);
-            }
-        }
-        self.fixed.sort_by_key(|f| f.start);
         self.refresh()
     }
 
@@ -1480,13 +1436,15 @@ impl Engine {
             return Ok(());
         }
         let reading = self.syls[start..end].to_vec();
-        let before = self.learner.records().len();
+        // repick-freeze section 9: the frozen words over this span decode again only when the forgotten entry is in
+        // effect here (exact or last-character level under this span's context; the global level adds nothing).
+        let off: usize = (0..start).map(|i| self.token_width(i)).sum();
+        let shown_before: String = self.display.chars().take(off).collect();
+        let key = context_key(&format!("{}{shown_before}", self.left));
+        let in_effect = self.learned_weight(&key, &reading, &word, self.today()) > 0.0;
         self.forget_entry(&reading, &word);
-        // repick-freeze sections 7.2 and 8: only when records went, the frozen words over this span decode again
-        // without them, and a released word over it is not fixed again by deleting its trigger.
-        if self.learner.records().len() < before {
+        if in_effect {
             self.fixed.retain(|f| !(f.frozen && f.start < end && start < f.end));
-            self.released.retain(|r| !(r.fixed.start < end && start < r.fixed.end));
         }
         self.refresh()
     }
@@ -1547,7 +1505,6 @@ impl Engine {
         let Some(c) = self.cands.take() else { return Ok(()) };
         let Some((word, l)) = c.list.get(idx).cloned() else { return Ok(()) };
         let (start, end) = if self.cursor == 0 { (0, l) } else { (self.cursor - l, self.cursor) };
-        self.released.clear(); // repick-freeze section 7.1: a pick freezes what is shown again
         // Choosing again the word a prediction pick fixed over this exact span keeps that pending learn (section 10.1).
         let again = self.fixed.iter().find(|f| f.start == start && f.end == end && f.word == word && f.pre.as_deref() == Some(""));
         let (pre, key) = match again {
