@@ -1274,16 +1274,6 @@ S2h 實機驗收時，使用者在終端機、Discord、VS Code、Chrome 網址�
 - **修訂一實機**：選「牛奶」送出後，再打同樣情境「牛奶」排第一；已進入時對它按 ⌘⌫ 回到原本順序；選單「即時預測」關掉後不顯示預測列、打開恢復。三項使用者都確認正常。
 - 前一次看到的順序變化（奶茶排第一）是書面設定（TextEdit）下奶茶 −2.713、牛奶 −2.723 只差 0.01，不是學習造成的。
 
-## 2026-10-08：候選窗的黑邊＝沒有跟著 App 的淺色外觀
-
-使用者在淺色網頁上看到候選窗有一圈黑邊。系統是深色模式。用 `imeshot` 對照蘋果注音（契約 `docs/contracts/s3b2-glass-panel.md` §10）：
-- App 本身深色、只有文字區是白的：蘋果和善解一樣是灰玻璃＋深色邊。所以白底本身不會讓兩者不同。
-- App 本身淺色：蘋果改成淺色玻璃、深色字、淺色邊，善解仍是深色玻璃。黑邊是這個差別。
-- IMK 沒有公開取得 client 外觀的方法。用 Objective-C runtime 列 InputMethodKit 的方法，client 包裝類別（`_IPMDServerClientWrapperModern`）有 `viewEffectiveAppearance`、`windowEffectiveAppearance`。每鍵把候選窗的外觀設成前者；client 不回應時照舊用系統外觀。
-- 修好後實機重拍，和同情境的蘋果注音截圖並排看：淺色 App 裡兩者都是淺色玻璃、深色字、淺色邊；深色 App 白底兩者都是灰玻璃、白字、深色邊。只比對了顏色與邊，沒有逐像素量。
-- 本地 code review 後改成只在顯示候選窗時查外觀（不是每個按鍵），呼叫前先確認方法的型別編碼。
-- 第一次這樣改，實機上又變回深色：`object_getClass` 拿到的是 IMK 的轉送追蹤物件 `IMKTracingTextInput`，它自己沒有這兩個方法，型別檢查失敗就退回系統外觀。單元測試用假的 client，抓不到這件事。改用 `type(of:)`（`-class` 回報被轉送的 `_IPMDServerClientWrapperLegacy`），實機重拍淺色、深色 App 都和蘋果相同。
-
 ## 2026-10-08：S2k 詞類回退在 model-v3 上重跑（進 v0.3.0 的第一段）
 
 使用者實機回報「…在做的事什麼事情」「詞態→磁態」等，問「是不是少了句構分析和詞態排列的分析」，決定把詞類模型放進 v0.3.0。契約 `docs/contracts/s2k-word-classes.md`（plan-verifier REVISE 一次後 READY，判定規則事先寫死）。數字在 `experiments/s2-classes/README.md`。
@@ -1293,6 +1283,16 @@ S2h 實機驗收時，使用者在終端機、Discord、VS Code、Chrome 網址�
 - 探針唯一不符的是「市占率」→「市佔率」；使用者同意接受（那是使用者自己的寫法）。
 - 改變的列多半是「同音、前後文沒出現過」的情況（期中／其中、戰機／戰績、店員／電源），弄壞的集中在「再／在」與幾個同音動詞（接上／街上、祭出／寄出）。這和 bigram 只看相鄰兩詞的限制一致：類別項補的是「這類詞後面常接哪類詞」，不是整句結構；整句結構（例如「的是…什麼」）仍要更長的上下文。（推論，未另外量。）
 - 下一步：第二段契約，把類別表做成單獨檔案，Python 參考實作與 Rust 逐位元相同。
+
+## 2026-10-08：候選窗的黑邊＝沒有跟著 App 的淺色外觀
+
+使用者在淺色網頁上看到候選窗有一圈黑邊。系統是深色模式。用 `imeshot` 對照蘋果注音（契約 `docs/contracts/s3b2-glass-panel.md` §10）：
+- App 本身深色、只有文字區是白的：蘋果和善解一樣是灰玻璃＋深色邊。所以白底本身不會讓兩者不同。
+- App 本身淺色：蘋果改成淺色玻璃、深色字、淺色邊，善解仍是深色玻璃。黑邊是這個差別。
+- IMK 沒有公開取得 client 外觀的方法。用 Objective-C runtime 列 InputMethodKit 的方法，client 包裝類別（`_IPMDServerClientWrapperModern`）有 `viewEffectiveAppearance`、`windowEffectiveAppearance`。每鍵把候選窗的外觀設成前者；client 不回應時照舊用系統外觀。
+- 修好後實機重拍，和同情境的蘋果注音截圖並排看：淺色 App 裡兩者都是淺色玻璃、深色字、淺色邊；深色 App 白底兩者都是灰玻璃、白字、深色邊。只比對了顏色與邊，沒有逐像素量。
+- 本地 code review 後改成只在顯示候選窗時查外觀（不是每個按鍵），呼叫前先確認方法的型別編碼。
+- 第一次這樣改，實機上又變回深色：`object_getClass` 拿到的是 IMK 的轉送追蹤物件 `IMKTracingTextInput`，它自己沒有這兩個方法，型別檢查失敗就退回系統外觀。單元測試用假的 client，抓不到這件事。改用 `type(of:)`（`-class` 回報被轉送的 `_IPMDServerClientWrapperLegacy`），實機重拍淺色、深色 App 都和蘋果相同。
 
 ## 2026-10-08：S2k 第二段，詞類項做進 Python 參考實作與 Rust 核心
 
