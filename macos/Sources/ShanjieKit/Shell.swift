@@ -256,9 +256,15 @@ public final class Shell {
     /// failure leaves an engine without the LM (still usable) or no engine (every key passes).
     private func build() {
         engine = nil  // free the old engine first: only one exists at a time
-        let (e, code) = CoreEngine.make(dataDir: resources.path, layout: mode.layout,
-                                          packsDir: resources.appendingPathComponent("packs").path, acgPack: acgPackOn)
-        guard let e else {
+        let packsDir = resources.appendingPathComponent("packs").path
+        var (made, code) = CoreEngine.make(dataDir: resources.path, layout: mode.layout, packsDir: packsDir, acgPack: acgPackOn)
+        if made == nil && acgPackOn {
+            // A pack that cannot be loaded must not cost the user their typing: build without it (the stored
+            // choice is untouched and nothing is shown); the next rebuild tries the pack again.
+            Log.shell.error("shanjie_engine_new_packs failed, code \(code); building without the pack")
+            (made, code) = CoreEngine.make(dataDir: resources.path, layout: mode.layout)
+        }
+        guard let e = made else {
             Log.shell.error("shanjie_engine_new failed, code \(code)")
             return
         }
