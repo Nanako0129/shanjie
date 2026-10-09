@@ -355,6 +355,21 @@ fn row_equals_the_independent_computation_in_states_a_to_e() {
 }
 
 #[test]
+fn enter_commits_with_a_passive_row_and_selects_with_an_entered_one() {
+    // enter-pending contract §2: with the row passive, Enter is rule 12a (commit what is shown); entered, rule 1d.
+    let (mut e, o) = build(A.0, A.1, A.2);
+    assert_passive(&o);
+    let o = e.key(kind(KeyKind::Enter)).unwrap();
+    assert!(o.handled && o.commit == "ㄋ" && o.preedit.is_empty(), "{}", o.commit);
+    assert_no_row(&o);
+    let (mut e, o) = build(A.0, A.1, A.2);
+    let first = row(&o)[0].clone();
+    e.key(kind(KeyKind::Tab)).unwrap();
+    let o = e.key(kind(KeyKind::Enter)).unwrap();
+    assert!(o.commit.is_empty() && o.preedit == first, "{} {}", o.preedit, first);
+}
+
+#[test]
 fn after_a_cup_the_row_has_milk_tea() {
     let (_, o) = build("我想喝一杯", &[], "ㄋ");
     assert!(row(&o).contains(&"奶茶".to_string()), "{:?}", row(&o));
