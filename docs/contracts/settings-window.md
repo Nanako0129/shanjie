@@ -1,6 +1,6 @@
 # 契約：設定視窗（第一片）
 
-狀態：草稿（2026-10-10），送 plan-verifier。
+狀態：第一次 plan-verifier REVISE 已修（§6），送第二次審查（2026-10-10）。
 
 ## 0. 起因與依據
 
@@ -23,7 +23,7 @@
 - 視窗和選單改的是同一份設定，任一邊改了，另一邊馬上看得到；效果和從選單改相同。
 - **怎麼看到**：
   - 殼層測試（§3）；
-  - 使用者實機：從輸入選單打開設定視窗，視窗跳到最前面、可以直接用滑鼠和鍵盤操作；改每一項都有效果；拉玻璃深淺時，打字中的候選窗跟著變；關掉後焦點回到原本的 App。
+  - 使用者實機：從輸入選單打開設定視窗，視窗跳到最前面、可以直接用滑鼠和鍵盤操作；改每一項都有效果；改了玻璃深淺之後，回到 App 打字，下一次出現的候選窗用新的深淺；關掉後焦點回到原本的 App。
 
 ## 2. 改動
 
@@ -44,35 +44,39 @@
 | 外觀 | 候選窗玻璃深淺（滑桿 0–1，兩端標「透明」「深」） | UserDefaults 鍵 `glassTint`（Double，沒設過是 0） |
 | 選字記憶 | 不要備份選字記憶（開關）、清除選字記憶…（按鈕，走現有的確認視窗） | `Shell` 現有的路徑 |
 
-- 學習暫停（安全輸入、此 App）與「選字記憶無法存檔」這幾行狀態，照選單的規則顯示在「選字記憶」區塊最上面。
+- **狀態列**：「選字記憶」區塊最上面只顯示「學習已暫停（安全輸入）」（`IsSecureEventInputEnabled`，開窗時與每次重新讀取時查）與「選字記憶無法存檔」（`Shell` 的 learningUnavailable）。「學習已暫停（此 App）」取自某一個輸入 session 的 client，設定視窗不屬於任何 session，所以只留在選單，不在視窗顯示。
 - **同步**：`Shell` 在任何設定改變時發一個程序內通知，設定視窗收到就重新讀取。選單每次打開時本來就會重讀，不需要改。
 
 ### 2.3 玻璃深淺
 
-- 候選窗（`CandidatePanelAdapter` 的 `NSGlassEffectView`）在 `glassTint` > 0 時設定色調：
-  - 色調顏色：深色外觀用黑、淺色外觀用白。外觀照現有的規則跟著 App（s3b2 §10）。
-  - 不透明度：clamp(值, 0…1；NaN 當 0) × `GLASS_TINT_MAX`。`GLASS_TINT_MAX`＝0.5，是具名常數，註解寫出處：Syrtis 維護者看實機挑的，沒有對蘋果截圖量過。
-- `glassTint` 是 0 時不設色調，和現在逐位元相同（預設外觀仍是實測的蘋果注音）。
-- 滑桿改值時，開著的候選窗立刻套用。`NSGlassEffectView` 的色調用哪個屬性設，實作時查 SDK；它在 macOS 26 的效果沒有實測（推論），由使用者實機確認。
+- **儲存**：照 `Shell.swift` 現有的模式，`ShanjieKit` 加 `GlassTintStore` 協定與測試用的 `MemoryGlassTintStore`；App 端在 `main.swift` 加 `DefaultsGlassTintStore`，鍵 `glassTint`（Double，沒設過是 0）。`Shell` 持有它，和其他設定一樣有讀取值與 setter。
+- **換算**：`ShanjieKit/GlassTint.swift` 的純函式 `GlassTint.tint(value:dark:) -> GlassTint.Tint?`：
+  - 值先 clamp 到 0…1（NaN 當 0）；結果是 0 時回 `nil`（不設色調）；
+  - 否則回（黑或白, 不透明度）：深色外觀黑、淺色外觀白，不透明度＝值 × `GLASS_TINT_MAX`；
+  - `GLASS_TINT_MAX`＝0.5，具名常數，註解寫出處：Syrtis 維護者看實機挑的，沒有對蘋果截圖量過。
+- **套用**：候選窗（`CandidatePanelAdapter`，App target）每次顯示時，用目前的值與外觀（照現有規則跟著 App，s3b2 §10）呼叫 `GlassTint.tint`，把結果**連 nil 一起**設給 `NSGlassEffectView` 的色調，所以從大於 0 改回 0 會拿掉原本的色調。`glassTint` 是 0 時的外觀和現在逐位元相同（預設仍是實測的蘋果注音）。
+- **什麼時候看得到**：改值之後，下一次出現的候選窗用新的值；還在畫面上的候選窗若有，也立刻更新。推論（沒量過）：點設定視窗會讓輸入法自己的程序到前景，原本的 App 失去焦點、組字被送出、候選窗收起，所以拖滑桿時通常看不到候選窗；由實機確認。
+- `NSGlassEffectView` 的色調用哪個屬性設，實作時查 SDK；它在 macOS 26 的效果沒有實測（推論），由使用者實機確認。
 
 ## 3. 驗收
 
-1. **殼層測試**（`ShanjieKitTests`，不開視窗也能跑的寫在 view model 上）：
+1. **殼層測試**（`ShanjieKitTests`；設定視窗的 view model `SettingsModel` 放在 `ShanjieKit/Settings.swift`，SwiftUI 畫面在 App target 只綁定它）：
    - 每個控制項改的是和選單同一個 store 與 setter：視窗切換「即時預測」後，`Session.menu` 的勾選跟著變；選單切換後，view model 收到通知、值跟著變。
    - 排列選擇器呼叫 `selectLayout`；動漫與遊戲詞開關會重建引擎，和選單相同。
-   - `glassTint` 的讀取：沒設過是 0；NaN、負數、大於 1 都會 clamp。
-   - 候選窗：值 0 時沒有色調；值 1 時色調不透明度是 0.5；深色外觀是黑、淺色是白。
+   - `MemoryGlassTintStore` 沒設過時 `Shell` 讀到 0；`GlassTint.tint`：NaN、負數、大於 1 都會 clamp；值 0 回 nil；值 1 回不透明度 0.5；深色外觀黑、淺色白；同一個呼叫序列從 0.6 改回 0，第二次回 nil。
+   - 狀態列：安全輸入與無法存檔照規則出現；「此 App」那一列在視窗裡永遠不出現（view model 沒有 client）。
    - 選單多一項「善解設定…」，其餘項目與順序不變（既有的選單測試只加這一項）。
-2. **突變**（每一項都要讓某個測試失敗；build error 不算）：
-   - 視窗的開關寫到別的鍵；
+2. **突變**（每一項都要讓某個測試失敗；build error 不算；都在 `ShanjieKitTests` 碰得到的程式裡）：
+   - 視窗的某個開關呼叫的 setter 或 store 和選單不同；
    - 不發同步通知；
-   - 色調不 clamp；
-   - 值 0 時仍設色調。
+   - `GlassTint.tint` 不 clamp；
+   - 值 0 時回非 nil。
 3. `make test`、CI 全綠。
 4. **實機**（使用者，每次 ≤ 15 秒的部分由 `imeshot` 做）：
    - 從選單打開，視窗在最前面、是 key window；
    - 每一項改了都有效果，選單的勾選跟著變；
-   - 拉玻璃深淺，打字中的候選窗跟著變，深色與淺色 App 各看一次；
+   - 改玻璃深淺，回到 App 打字，看候選窗的深淺；深色與淺色 App 各看一次；再改回 0，候選窗回到原本的樣子；
+   - 拖滑桿時候選窗是不是被收起（§2.3 的推論）記下來；
    - 關窗後焦點回到原本的 App。
 
 ## 4. 範圍外
@@ -90,3 +94,9 @@
   - 設定視窗開著時打字或候選窗的行為有任何改變。
 - **預算**：executor 實作 1 次＋修正 1 次；外觀照使用者的實機回饋收斂，每一輪只改指出的地方。
 - **限制**：agent 不安裝、不啟動 App、不呼叫 TIS、不在 .app 裡執行任何東西、不碰 `~/Library` 與鑰匙圈。
+
+## 6. 審查紀錄
+
+| 審查 | 問題 | 處置 |
+|---|---|---|
+| plan-verifier 第 1 次 REVISE（2026-10-10） | 1. 玻璃色調的測試寫不進 `ShanjieKitTests`（候選窗在 App target），沒有 store、換算函式沒有位置，從大於 0 改回 0 沒有規則，兩個突變抓不到；2.「打字中拖滑桿、候選窗跟著變」大概做不到（點設定視窗會讓原本的 App 失去焦點），也沒標成推論；3.「此 App」的學習暫停來自 session 的 client，設定視窗沒有 client | FIX：1 → §2.3 加 `GlassTintStore`、`GlassTint.tint` 純函式、每次套用連 nil 一起設，§3 改測試與突變；2 → §1、§2.3、§3.4 改成「下一次出現的候選窗」並標推論；3 → §2.2 只顯示安全輸入與無法存檔，「此 App」留在選單 |
