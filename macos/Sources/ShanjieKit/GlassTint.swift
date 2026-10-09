@@ -1,4 +1,4 @@
-import Foundation
+import AppKit
 
 /// The candidate panel's glass tint (docs/contracts/settings-window.md section 2.3). One slider value
 /// 0...1 becomes a black (dark appearance) or white (light appearance) overlay on the glass; the
@@ -8,6 +8,12 @@ public enum GlassTint {
     /// real glass on a device (relayed by the user, 2026-10-10); it was not measured against Apple's
     /// screenshots, so treat it as a taste value.
     public static let GLASS_TINT_MAX = 0.5
+
+    /// Whether `appearance` is a dark one: the tint is black over dark, white over light. The candidate
+    /// panel and the settings window's sample bar both ask this, so they cannot disagree.
+    public static func isDark(_ appearance: NSAppearance) -> Bool {
+        appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+    }
 
     public struct Tint: Equatable, Sendable {
         /// Black over dark appearances, white over light ones.

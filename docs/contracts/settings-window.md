@@ -34,6 +34,9 @@
 - **帶到前面**：照現有 `AlertDialogs` 的做法，記下前景 App，`NSApp.activate()` 後 `makeKeyAndOrderFront`；關窗時把焦點還給記下的 App。
   - **修訂（2026-10-10 實機）**：使用者點「善解設定…」看不到視窗。查視窗列表：視窗有開、在畫面上，但層級是一般視窗（layer 0），`activate()` 被系統拒絕，所以被前景 App 蓋住。改成和 `AlertDialogs`（`.modalPanel`）一樣用較高的層級：視窗 `level = .floating`，`makeKeyAndOrderFront` 之後再 `orderFrontRegardless()`（威注音的做法）。視窗會在最前面，但不一定是 key window；使用者點一下就會成為 key。不改成 `.regular`（fcitx5 的做法會在 Dock 多一個圖示）。
   - 實機上仍然帶不到前面時，才照 fcitx5 的做法改：開窗時暫時切成 `.regular`、關掉後切回。改法寫進這份契約再做（§5）。
+- **第一輪實機回饋（2026-10-10）**：
+  - **置中**：視窗出現在螢幕上方（CGWindowList：X=1279、Y=31、420×532），推論是 `center()` 在內容撐出尺寸之前就跑了。改成每次 `show()` 先設內容尺寸（`NSHostingView.fittingSize`）再置中，置中在滑鼠所在的螢幕（使用者剛在那裡點了選單；`NSScreen.main` 是 key window 所在的螢幕，輸入法的程序沒有）。
+  - **視窗背景是 Liquid Glass**（照 Syrtis 的做法）：系統的 `NSGlassEffectView` 放在內容**後面**填滿視窗，SwiftUI 的 `Form` 在它上面、`.scrollContentBackground(.hidden)` 隱藏自己的不透明背景。玻璃不包住內容，否則內容會套 vibrancy、文字變淡。視窗 `isOpaque = false`、背景透明，標題列與關閉鈕維持系統的。只用系統樣式，沒有自訂的模糊或透明度數值。
 - 視窗裡**沒有文字欄位**：只有選擇器、開關、滑桿與按鈕。所以不需要自己裝 Edit 選單，也不會讓善解在自己的視窗裡處理打字。
 - 安全輸入期間選單是反灰的，打不開設定視窗。這是系統行為，照 CLAUDE.md「已知的系統問題」處理，不另外做。
 
@@ -59,6 +62,7 @@
   - `GLASS_TINT_MAX`＝0.5，具名常數，註解寫出處：Syrtis 維護者看實機挑的，沒有對蘋果截圖量過。
 - **套用**：候選窗（`CandidatePanelAdapter`，App target）每次顯示時，用目前的值與外觀（照現有規則跟著 App，s3b2 §10）呼叫 `GlassTint.tint`，把結果**連 nil 一起**設給 `NSGlassEffectView` 的色調，所以從大於 0 改回 0 會拿掉原本的色調。`glassTint` 是 0 時的外觀和現在逐位元相同（預設仍是實測的蘋果注音）。
 - **什麼時候看得到**：改值之後，下一次出現的候選窗用新的值；還在畫面上的候選窗若有，也立刻更新。推論（沒量過）：點設定視窗會讓輸入法自己的程序到前景，原本的 App 失去焦點、組字被送出、候選窗收起，所以拖滑桿時通常看不到候選窗；由實機確認。
+- **預覽（第一輪實機回饋）**：滑桿下面放一條範例候選列（「1 善　2 解　3 輸入法」，第一個被選取）。它是 App target 的 `SampleCandidateBar`，用和真的候選窗一樣的東西：`NSGlassEffectView`、`CandidateCells` 的格子、`Metrics` 的列高與間距與圓角、`GlassTint.Applier`（決定指派什麼，含 nil）、`GlassTint.isDark`（黑或白）。不同處：沒有展開用的箭頭（沒有東西可展開）。拖滑桿時 `SettingsModel.glassTint` 每次變就更新；外觀跟著它自己的 effective appearance（視窗的淺色或深色）。決定放在 ShanjieKit（`isDark`、`Applier`、`tint`）並有測試，玻璃本身的樣子由使用者實機確認。
 - `NSGlassEffectView` 的色調用哪個屬性設，實作時查 SDK；它在 macOS 26 的效果沒有實測（推論），由使用者實機確認。
 
 ## 3. 驗收
@@ -106,3 +110,4 @@
 | plan-verifier 第 2 次 READY（2026-10-10） | READY（第 1 次 REVISE 的三項已處置） | 狀態改為 READY，開始實作 |
 | 實機檢查（2026-10-10） | 使用者點「善解設定…」看不到視窗：視窗有開、層級是一般視窗，`activate()` 被拒絕，被前景 App 蓋住 | 修訂 §2.1：`level = .floating` 加 `orderFrontRegardless()`；§3.4 的「是 key window」改為「在最前面、點一下可操作」 |
 | 本地 /code-review（2026-10-10） | 滑桿不即時作用於已顯示的候選窗；關窗在非作用中時搶焦點；狀態列在成為 key 時不重讀；清除色調的 nil 路徑在 App target 且沒測試；`glassTintStore` 有預設值；`applyDemote`／`applyPrediction` 無 owner 時吞掉 `.failed`；每次按鍵讀 UserDefaults、每次變更讀外部狀態；寬度魔術數字；SDK 註解；重複的程式；無意義的測試 | FIX：`CandidatePanel.setGlassTint` 與 `GlassTint.Applier`（App 只照它的回傳賦值，含 nil）、`NSApp.isActive` 才還焦點、`windowDidBecomeKey` 重讀、`glassTintStore` 必填且 `Shell` 快取、無 owner 時記錄並丟掉組字、`SettingsModel` 延後建立並分成 `refreshSettings`／`refreshExternal`、`Shell.confirmAndClear` 與 `changed()` 合併重複、刪除 `testThereIsNoThisAppRow`。延後：`@Observable` 重構（§2.2） |
+| 第一輪實機回饋（2026-10-10） | 視窗出現在螢幕上方、不在中間；要 Liquid Glass 視窗背景；滑桿下要有即時預覽 | §2.1 置中與玻璃背景、§2.3 預覽；`GlassTint.isDark` 抽到 ShanjieKit 讓候選窗與預覽共用，加測試。玻璃的外觀、置中的位置與預覽的深淺是否和真的候選窗一致，等使用者實機看 |
