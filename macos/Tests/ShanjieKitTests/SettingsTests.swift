@@ -146,6 +146,17 @@ final class SettingsTests: XCTestCase {
         XCTAssertNil(G.tint(value: 0, dark: true))
     }
 
+    /// The panel and the settings window's sample bar both pick black or white through this.
+    func testIsDarkFollowsTheAppearance() throws {
+        XCTAssertTrue(GlassTint.isDark(try XCTUnwrap(NSAppearance(named: .darkAqua))))
+        XCTAssertTrue(GlassTint.isDark(try XCTUnwrap(NSAppearance(named: .vibrantDark))))
+        XCTAssertFalse(GlassTint.isDark(try XCTUnwrap(NSAppearance(named: .aqua))))
+        // the sample bar's tint for a slider value is exactly the panel's: one function, one Applier
+        var a = GlassTint.Applier()
+        XCTAssertEqual(a.update(value: 0.6, dark: GlassTint.isDark(try XCTUnwrap(NSAppearance(named: .darkAqua)))),
+                       .set(try XCTUnwrap(GlassTint.tint(value: 0.6, dark: true))))
+    }
+
     /// Section 2.3: a candidate panel that is up changes when the slider moves, with no key pressed.
     func testSliderReachesAVisiblePanelAtOnce() {
         let r = rig()

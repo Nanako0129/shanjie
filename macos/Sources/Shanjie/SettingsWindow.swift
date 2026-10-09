@@ -12,6 +12,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     /// Built on the first `show()`, so a user who never opens the window pays nothing.
     private var model: SettingsModel?
     private var window: NSWindow?
+    private var host: NSHostingView<SettingsForm>?
     private var previous: NSRunningApplication?
 
     init(shell: Shell) {
@@ -27,6 +28,8 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         m.refreshExternal()
         let w = window ?? makeWindow(m)
         window = w
+        w.setContentSize(host?.fittingSize ?? w.contentLayoutRect.size)
+        center(w)
         NSApp.activate()
         w.makeKeyAndOrderFront(nil)
         // activate() is only a request (cooperative activation, macOS 14+); on the user's machine it was
@@ -36,16 +39,42 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     }
 
     private func makeWindow(_ model: SettingsModel) -> NSWindow {
-        let w = NSWindow(contentViewController: NSHostingController(rootView: SettingsForm(model: model)))
+        // Liquid Glass behind the content, never around it (a wrapped view gets vibrancy and washed-out
+        // text; Syrtis, PR 491): the system glass fills the window, the SwiftUI form sits on top with
+        // its own background hidden.
+        let glass = NSGlassEffectView()
+        let host = NSHostingView(rootView: SettingsForm(model: model))
+        self.host = host
+        let container = NSView()
+        for v in [glass, host] {
+            v.translatesAutoresizingMaskIntoConstraints = false
+            container.addSubview(v)
+            NSLayoutConstraint.activate([
+                v.leadingAnchor.constraint(equalTo: container.leadingAnchor), v.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+                v.topAnchor.constraint(equalTo: container.topAnchor), v.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            ])
+        }
+        let w = NSWindow(contentRect: .zero, styleMask: [.titled, .closable], backing: .buffered, defer: false)
+        w.contentView = container
         w.title = "善解設定"
-        w.styleMask = [.titled, .closable]
+        w.isOpaque = false
+        w.backgroundColor = .clear
         w.isReleasedWhenClosed = false
         // Above ordinary app windows even when the input method is not active, as AlertDialogs does with
         // .modalPanel (contract section 2.1, device check 2026-10-10).
         w.level = .floating
         w.delegate = self
-        w.center()
         return w
+    }
+
+    /// Centred on the screen the mouse is on: the user just clicked the menu there, and `NSScreen.main`
+    /// is the screen of the key window, which an input method's process does not have. Done after the
+    /// content size is set (`center()` before layout put the window at the top, device check 2026-10-10).
+    private func center(_ w: NSWindow) {
+        let mouse = NSEvent.mouseLocation
+        guard let screen = NSScreen.screens.first(where: { NSMouseInRect(mouse, $0.frame, false) }) ?? NSScreen.main else { return }
+        let area = screen.visibleFrame
+        w.setFrameOrigin(NSPoint(x: area.midX - w.frame.width / 2, y: area.midY - w.frame.height / 2))
     }
 
     /// The secure-input and cannot-save rows have no notification, so they are re-read each time the window is key.
@@ -61,7 +90,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 }
 
 /// System controls only. Order follows the menu (section 2.2); each control writes through `SettingsModel`.
-private struct SettingsForm: View {
+struct SettingsForm: View {
     /// Chosen to fit the controls and their labels on one line each; not measured against any reference.
     private static let formWidth: CGFloat = 420
     @ObservedObject var model: SettingsModel
@@ -87,6 +116,12 @@ private struct SettingsForm: View {
                 } maximumValueLabel: {
                     Text("深")
                 }
+                // The real bar's glass, cells and tint decision, so the depth is what typing shows.
+                HStack {
+                    Spacer()
+                    TintPreview(value: model.glassTint)
+                    Spacer()
+                }
             }
             Section("選字記憶") {
                 if model.pausedSecure { Text(MenuEntry.Text.pausedSecure).foregroundStyle(.secondary) }
@@ -96,7 +131,16 @@ private struct SettingsForm: View {
             }
         }
         .formStyle(.grouped)
+        .scrollContentBackground(.hidden)  // the window's glass shows through
         .frame(width: Self.formWidth)
         .fixedSize(horizontal: false, vertical: true)
     }
+}
+
+/// `SampleCandidateBar` in SwiftUI; the slider value goes in on every update, so it follows a drag.
+private struct TintPreview: NSViewRepresentable {
+    let value: Double
+
+    func makeNSView(context: Context) -> SampleCandidateBar { SampleCandidateBar() }
+    func updateNSView(_ bar: SampleCandidateBar, context: Context) { bar.setTint(value) }
 }
