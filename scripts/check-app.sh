@@ -54,10 +54,13 @@ python3 - "$R/packs" <<'PY' || fail "packs/acg.json does not match the pack file
 import hashlib, json, os, sys
 d = sys.argv[1]
 files = json.load(open(os.path.join(d, "acg.json"), encoding="utf-8"))["files"]
-assert "acg-add.tsv" in files, "acg-add.tsv is not in the manifest"
+# Explicit exits, not assert: PYTHONOPTIMIZE strips asserts and the check would pass vacuously.
+if "acg-add.tsv" not in files:
+    sys.exit("acg-add.tsv is not in the manifest")
 for name, meta in files.items():
     data = open(os.path.join(d, name), "rb").read()
-    assert hashlib.sha256(data).hexdigest() == meta["sha256"] and len(data) == meta["bytes"], name
+    if hashlib.sha256(data).hexdigest() != meta["sha256"] or len(data) != meta["bytes"]:
+        sys.exit(name + " does not match the manifest")
 PY
 grep -q 'packs/acg-add.tsv' "$R/LICENSES/CC-BY-SA-4.0-attribution.txt" || fail "the attribution file does not list packs/acg-add.tsv"
 echo "check 2: ok"

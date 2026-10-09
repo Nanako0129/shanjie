@@ -100,14 +100,23 @@ class Api:
 
 
 def pages(api, titles):
-    """標題 → {title, revid, ts, text}（跟著重新導向與正規化），不存在就是 None。每批 10 個。"""
+    """標題 → {title, revid, ts, text}（跟著重新導向與正規化），不存在就是 None。每批 10 個；
+    回應超過內容上限會被截斷（後面的頁沒有 revisions、帶 continue），所以照 continue 一直追到沒有為止。"""
     out = {}
     for i in range(0, len(titles), 10):
         b = titles[i:i + 10]
-        q = api.wiki(action="query", prop="revisions", rvprop="ids|timestamp|content", rvslots="main", redirects="1", titles="|".join(b))["query"]
-        norm = {x["from"]: x["to"] for x in q.get("normalized", [])}
-        red = {x["from"]: x["to"] for x in q.get("redirects", [])}
-        pg = {p["title"]: p for p in q["pages"]}
+        norm, red, pg, cont = {}, {}, {}, {}
+        while True:
+            r = api.wiki(action="query", prop="revisions", rvprop="ids|timestamp|content", rvslots="main", redirects="1", titles="|".join(b), **cont)
+            q = r["query"]
+            norm.update({x["from"]: x["to"] for x in q.get("normalized", [])})
+            red.update({x["from"]: x["to"] for x in q.get("redirects", [])})
+            for p in q["pages"]:
+                if p["title"] not in pg or not pg[p["title"]].get("revisions"):
+                    pg[p["title"]] = p
+            cont = r.get("continue")
+            if not cont:
+                break
         for t in b:
             p = pg.get(red.get(norm.get(t, t), norm.get(t, t)))
             rev = p["revisions"][0] if p and p.get("revisions") else None
@@ -231,8 +240,42 @@ def tw_values(rule):
     return out
 
 
-def group_rules(text):
-    """頁面裡的規則：{{CItem…}} 模板、Lua 的 Item( 呼叫與 rule = 欄位，同一頁兩種都解析（例如 Module:CGroup/閃電十一人）。"""
+def strip_comments(text, lua):
+    """去掉註解再解析：維基文字的 <!-- … -->；Lua 模組另外去掉 -- … 與 --[[ … ]]（字串裡的 -- 不算）。"""
+    text = re.sub(r"<!--.*?(?:-->|\Z)", "", text, flags=re.S)
+    if not lua:
+        return text
+    out, i, n = [], 0, len(text)
+    while i < n:
+        c = text[i]
+        if c in "\"'":
+            e = i + 1
+            while e < n and text[e] != c:
+                e += 2 if text[e] == "\\" else 1
+            out.append(text[i:e + 1])
+            i = e + 1
+        elif c == "[" and (m := re.match(r"\[(=*)\[", text[i:i + 40])):
+            e = text.find("]" + m.group(1) + "]", i + len(m.group(0)))
+            e = n if e < 0 else e + len(m.group(1)) + 2
+            out.append(text[i:e])
+            i = e
+        elif text.startswith("--", i):
+            m = re.match(r"--\[(=*)\[", text[i:i + 40])
+            if m:
+                e = text.find("]" + m.group(1) + "]", i + len(m.group(0)))
+                i = n if e < 0 else e + len(m.group(1)) + 2
+            else:
+                e = text.find("\n", i)
+                i = n if e < 0 else e
+        else:
+            out.append(c)
+            i += 1
+    return "".join(out)
+
+
+def group_rules(text, lua=False):
+    """頁面裡的規則：{{CItem…}} 模板、Lua 的 Item( 呼叫與 rule = 欄位，同一頁兩種都解析（例如 Module:CGroup/閃電十一人）；註解先去掉。lua＝這頁是 Lua 模組。"""
+    text = strip_comments(text, lua)
     return list(wiki_items(text)) + [a[-1] for a in lua_items(text) if a] + [m.group(2) for m in re.finditer(r"\brule\s*=\s*(['\"])(.*?)\1", text)]
 
 
@@ -572,7 +615,7 @@ def build(api, groups_tsv=os.path.join(PACKS, "acg-groups.tsv"), collisions_tsv=
             continue
         ts.append(p["ts"])
         revs.append(p["revid"])
-        for rule in group_rules(p["text"]):
+        for rule in group_rules(p["text"], p["title"].startswith("Module:")):
             for v, src in tw_values(rule):
                 ref.add(v)
                 if r[3] == "include":
@@ -656,7 +699,7 @@ def build(api, groups_tsv=os.path.join(PACKS, "acg-groups.tsv"), collisions_tsv=
         "words": len(words),
         "rows": len(rows),
         "sources": {k: sum(1 for w in words if k in src[w]) for k in ("cgroup", "title", "char", "manual")},
-        "revision_ids": {"min": min(revs), "max": max(revs), "pages": len(revs)},
+        "revision_ids": {"min": min(revs), "max": max(revs), "pages": len(set(revs))},
         "groups": {"listed": len(gr), "included": sum(1 for r in gr if r[3] == "include"), "page_missing": unresolved},
         "unclassified_groups": unclassified,
         "articles_missing": sorted(missing),
