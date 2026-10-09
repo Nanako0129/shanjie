@@ -252,6 +252,8 @@ fn measure_newword() {
     let len = core::eval::Lenient::parse(&std::fs::read_to_string(variants).unwrap()).unwrap();
     let mut e = engine();
     e.set_newword(mode == "new");
+    // Variant B (sub-spans), measured against the contract's rule A.
+    e.set_newword_subspans(var("NEWWORD_SUBSPANS") == "1");
     e.set_profile(profile).unwrap();
     for (ctx, gold, syls) in &teach {
         teach_row(&mut e, ctx, gold, syls);
@@ -736,10 +738,19 @@ fn clear_removes_new_words() {
 /// characters before it. Typing the same marker again without a re-pick adds no line holding any of them.
 #[test]
 fn r2_marker_characters_on_disk() {
+    r2_marker(false);
+}
+/// The same under variant B: sub-spans lie inside the run, so the bound is unchanged.
+#[test]
+fn r2_marker_characters_on_disk_with_subspans() {
+    r2_marker(true);
+}
+fn r2_marker(subspans: bool) {
     let marker = "ㄐㄧㄚˇ 甲 -1.0\nㄐㄧㄚˇ 假 -1.5\nㄧˇ 乙 -1.0\nㄧˇ 以 -1.5\nㄉㄜ˙ 的 -1.0\nㄅㄧㄥˇ 丙 -1.0\nㄅㄧㄥˇ 餅 -1.5\nㄉㄧㄥ 丁 -1.0\nㄉㄧㄥ 叮 -1.5\nㄨˋ 戊 -1.0\nㄨˋ 物 -1.5\nㄌㄜ˙ 了 -1.0\nㄐㄧˇ 己 -1.0\nㄐㄧˇ 幾 -1.5\nㄍㄥ 庚 -1.0\nㄍㄥ 耕 -1.5\n";
     let reading = "ㄐㄧㄚˇ ㄧˇ ㄉㄜ˙ ㄅㄧㄥˇ ㄉㄧㄥ ㄨˋ ㄌㄜ˙ ㄐㄧˇ ㄍㄥ";
-    let dir = tmp_dir("r2");
+    let dir = tmp_dir(if subspans { "r2-b" } else { "r2" });
     let mut e = tiny(marker);
+    e.set_newword_subspans(subspans);
     e.learning_open(&dir).unwrap();
     type_syls(&mut e, reading);
     let at = 4;
@@ -759,6 +770,9 @@ fn r2_marker_characters_on_disk() {
         }
     }
     assert!(text.lines().any(|l| l.starts_with("#\t")), "the run was learned");
+    if subspans {
+        assert!(text.lines().filter(|l| l.starts_with("#\t")).count() >= 2, "variant B learned sub-spans too");
+    }
     let lines_before: Vec<String> = text.lines().map(String::from).collect();
     type_syls(&mut e, reading);
     e.key(k(KeyKind::Enter)).unwrap();
@@ -766,6 +780,44 @@ fn r2_marker_characters_on_disk() {
     let added: Vec<&str> = after.lines().filter(|l| !lines_before.iter().any(|b| b == l)).collect();
     assert!(added.iter().all(|l| !l.chars().any(|ch| distinct.contains(&ch))), "a commit without a re-pick added a marker line");
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+// ---------- the boundary case: 要進 and ㄅㄢˇ ㄎㄨㄥˋ in one composition ----------
+
+/// Type 要進 + ㄅㄢˇ ㄎㄨㄥˋ in ONE composition, re-pick 版 (and 控 if needed), Enter; then type ㄅㄢˇ ㄎㄨㄥˋ after
+/// 記得加入. Returns the new words and the second display.
+fn boundary(subspans: bool) -> (Vec<String>, String) {
+    let mut e = engine();
+    e.set_newword_subspans(subspans);
+    e.set_left_context("");
+    let o = type_syls(&mut e, &format!("ㄧㄠˋ ㄐㄧㄣˋ {BANKONG}"));
+    assert_eq!(o.preedit, "要進板控");
+    pick(&mut e, 4, 3, "版");
+    if !e.key(k(KeyKind::End)).unwrap().preedit.ends_with('控') {
+        pick(&mut e, 4, 4, "控");
+    }
+    assert_eq!(e.key(k(KeyKind::Enter)).unwrap().commit, "要進版控");
+    let learned = new_words(&e);
+    e.set_left_context("記得加入");
+    (learned, type_syls(&mut e, BANKONG).preedit)
+}
+
+/// Rule A (the approved contract): 要 is a function character and 進 is not, so the run is 進版控 and only that is
+/// learned; ㄅㄢˇ ㄎㄨㄥˋ alone never meets it, so 記得加入 + ㄅㄢˇ ㄎㄨㄥˋ stays 板控 (the user's original report).
+#[test]
+fn boundary_rule_a_learns_only_the_whole_run() {
+    let (learned, shown) = boundary(false);
+    assert_eq!(learned, vec!["進版控"]);
+    assert_eq!(shown, "板控");
+}
+
+/// Variant B: the run's sub-spans holding the re-pick whose reading has no lexicon word are learned too (版控 here),
+/// so 記得加入 + ㄅㄢˇ ㄎㄨㄥˋ gives 版控.
+#[test]
+fn boundary_variant_b_learns_the_sub_span() {
+    let (learned, shown) = boundary(true);
+    assert!(learned.contains(&"版控".to_string()) && learned.contains(&"進版控".to_string()), "{learned:?}");
+    assert_eq!(shown, "版控");
 }
 
 // ---------- §3.4 per-key time with 2,000 new words ----------

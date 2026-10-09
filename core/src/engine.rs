@@ -318,6 +318,8 @@ pub struct Engine {
     paused: bool,
     /// Test hook: false turns new-word B's learning off (S4 alone), the baseline of `measure_newword`.
     newword: bool,
+    /// Variant B of new-word learning (`NEWWORD_SUBSPANS`); a test hook switches it for measurement.
+    subspans: bool,
     /// ε of the global learning level (§12); a test hook sweeps it.
     eps_global: f64,
     learner: Learner,
@@ -470,6 +472,7 @@ impl Engine {
             learning: false,
             paused: false,
             newword: true,
+            subspans: crate::learn::NEWWORD_SUBSPANS,
             eps_global: crate::lm::LEARN_EPS_GLOBAL,
             learner: Learner::default(),
             store: None,
@@ -511,6 +514,11 @@ impl Engine {
     /// Test hook: whether new-word B learns (default on). Off is S4 alone (contract §3.1 baseline).
     pub fn set_newword(&mut self, on: bool) {
         self.newword = on;
+    }
+
+    /// Test hook: variant B (`NEWWORD_SUBSPANS`, default off) on or off.
+    pub fn set_newword_subspans(&mut self, on: bool) {
+        self.subspans = on;
     }
 
     /// §4: load `dir/learning.tsv` (memory pruned only; the file is tidied by the first write, which
@@ -710,6 +718,21 @@ impl Engine {
                 let word: String = take.iter().map(|x| x.1).collect();
                 if !self.in_lexicon(&reading, &word) {
                     out.push((reading, word));
+                    // Variant B: the run's shorter pieces holding a re-pick, where the lexicon has no word at all.
+                    for (a, b) in (0..take.len()).flat_map(|a| (a + NEWWORD_MIN..=take.len()).map(move |b| (a, b))) {
+                        let sub = &take[a..b];
+                        if !self.subspans
+                            || sub.len() == take.len()
+                            || !sub.iter().any(|(s, _)| picked.contains(s))
+                            || sub.iter().all(|(_, c)| NEWWORD_DIGITS.contains(*c))
+                        {
+                            continue;
+                        }
+                        let r = self.syls[sub[0].0..sub[sub.len() - 1].0 + 1].to_vec();
+                        if self.lex.entries(&r).is_empty() {
+                            out.push((r, sub.iter().map(|x| x.1).collect()));
+                        }
+                    }
                 }
             }
         };

@@ -16,6 +16,7 @@
 | `eval/probe/s2r-probe.txt` | 由 `experiments/s2/build_probe.py` 從 `eval/dev/` 的句子產生（換「一」「不」的讀音） | CC0 | |
 | `eval/dev/*.txt`、`eval/holdout/*`、`eval/learn/cases.tsv` | 本專案自寫 | CC0 | |
 | `eval/dev/user-reported.txt` | 使用者回報的真實句子 | CC0（使用者 2026-10-03 同意） | |
+| `eval/learn/newword-probe-boundary.txt`、`eval/learn/newword-boundary-teach.txt` | 本專案自寫（新詞 B 邊界情況的探針與教學句；讀音由 `tools/readings.py` 產生） | CC0 | 只用於評測，不用來調參 |
 | `eval/learn/newword-probe.txt` | 本專案自寫（新詞 B 的探針：詞庫沒有的詞出現在新前文；讀音由 `tools/readings.py` 產生） | CC0 | 只用於評測，不用來調參 |
 | `eval/sets/moedict.txt` | 教育部《重編國語辭典修訂本》例句抽樣（經 g0v/moedict-data） | CC BY-ND 3.0 TW | **只用於評測，不得用來建詞庫或改作** |
 | `eval/variants.tsv` | 教育部《重編國語辭典修訂本》釋義中的「也作／亦作」詞對（經 g0v/moedict-data，commit a6dc997） | CC BY-ND 3.0 TW | **只用於評測**。每一欄都是辭典原有的詞條字串，詞對是辭典記載的事實，不含釋義文字；由 `tools/build_variants.py` 產生 |
