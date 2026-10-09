@@ -169,6 +169,11 @@ jobs:
             cmp "$T/$p.rowstats" "eval/golden/s2-lm-dev302-$p.rowstats"
           done
 
+      # docs/contracts/acg-pack.md A.5: the pack builder against a fake API (dedupe, collision dispositions, ordering,
+      # deterministic output) and the committed pack against the lexicon. Builds the evaluation CLI for the collision detection.
+      - name: ACG pack builder (Python)
+        run: python3 -m unittest tools.test_build_acg_pack
+
   # The Swift input method (docs/contracts/s3b.md section 3): build the ad-hoc
   # app, the Swift tests through the real core and model, the bundled
   # selftest, and acceptance checks 2, 3 and 6 of contract section 10.

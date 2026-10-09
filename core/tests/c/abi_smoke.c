@@ -290,6 +290,21 @@ static int run_learn(const char *dir, const char *learn_dir) {
   return 0;
 }
 
+/* acg-pack: argument checks of shanjie_engine_new_packs. The behaviour with a pack is in core/tests/engine_pack.rs. */
+static int run_packs(const char *dir) {
+  ShanjieEngine *e = 0;
+  CHECK(701, shanjie_engine_new_packs(0, 0, 0, 0u, &e) == 1 && e == 0);
+  CHECK(702, shanjie_engine_new_packs(dir, 0, 0, 1u, &e) == 1 && e == 0); /* a pack without a directory */
+  CHECK(703, shanjie_engine_new_packs(dir, 0, dir, 2u, &e) == 2 && e == 0); /* a bit outside the mask */
+  CHECK(704, shanjie_engine_new_packs(dir, 2u, 0, 0u, &e) == 2 && e == 0);   /* layout out of range */
+  CHECK(705, shanjie_engine_new_packs(dir, 0, 0, 0u, &e) == 0 && e != 0);    /* mask 0: packs_dir may be NULL */
+  shanjie_engine_free(e);
+  e = 0;
+  CHECK(706, shanjie_engine_new_packs(dir, 0, "/nonexistent/shanjie-packs", 1u, &e) == 0 && e != 0); /* a missing pack file adds nothing */
+  shanjie_engine_free(e);
+  return 0;
+}
+
 int main(int argc, char **argv) {
   int rc;
   if (argc != 3 && argc != 4) return 2;
@@ -299,6 +314,7 @@ int main(int argc, char **argv) {
   if (rc == 0) rc = run_punct(argv[1]);
   if (rc == 0) rc = run_grid(argv[1]);
   if (rc == 0) rc = run_learn(argv[1], argc == 4 ? argv[3] : 0);
+  if (rc == 0) rc = run_packs(argv[1]);
   shanjie_engine_free(0);
   shanjie_output_free(0);
   if (rc != 0) {

@@ -28,21 +28,12 @@ fn shared() -> &'static Shared {
     static S: OnceLock<Shared> = OnceLock::new();
     S.get_or_init(|| {
         let lm = Lm::load(&lm_path()).unwrap();
-        let mut overlay = std::fs::read_to_string(root().join("data/lexicon/overlay-add.tsv")).unwrap();
-        let lex = match std::env::var("ACG_PACK") {
-            Err(_) => load_lexicon(&root().join("data/lexicon")).unwrap(),
-            // Only for `measure_start_range_acg`: the pack's rows after the overlays, as `load_lexicon_packs` on the
-            // word-pack branch adds them (the lexicon after sandhi-add.tsv, the capped lexicon after overlay-add.tsv).
-            Ok(pack) => {
-                let read = |p: PathBuf| std::fs::read_to_string(p).unwrap();
-                let pack = read(PathBuf::from(pack));
-                let sandhi = read(root().join("data/lexicon/sandhi-add.tsv"));
-                let join = |a: &str, b: &str| format!("{}\n{b}", a.trim_end_matches('\n'));
-                let text = join(&join(&overlay, &sandhi), &pack);
-                overlay = join(&overlay, &pack);
-                Arc::new(Lexicon::parse_with(&read(root().join("data/lexicon/mcbpmf-data.txt")), Some(&text)).unwrap())
-            }
-        };
+        let dir = root().join("data/lexicon");
+        // `ACG_PACK` (only for `measure_start_range_acg`) is the word pack's acg-add.tsv; its directory is the packs dir.
+        let pack = std::env::var("ACG_PACK").ok().map(PathBuf::from);
+        let packs = pack.as_deref().map(|f| (f.parent().unwrap(), PACK_ACG));
+        let (lex, pack_text) = load_lexicon_packs(&dir, packs).unwrap();
+        let overlay = capping_overlay(&dir, &pack_text).unwrap();
         let capped = Arc::new(CappedLexicon::new(lex.clone(), &overlay, &lm, None).unwrap());
         Shared { lex, lm: Arc::new(lm), capped }
     })
@@ -1659,9 +1650,9 @@ fn measure_start_range() {
 }
 
 /// The word pack's names of three or more characters (every 20th), typed alone and after `我最喜歡`, from the second
-/// syllable on. Needs the pack file of the word-pack branch, e.g.
-/// `git show feat/acg-pack:data/packs/acg-add.tsv > /tmp/acg-add.tsv`, then
-/// `ACG_PACK=/tmp/acg-add.tsv cargo test --release -p core --test engine_predict -- --ignored --nocapture --exact measure_start_range_acg`
+/// syllable on. `ACG_PACK` is a pack file named `acg-add.tsv` (its directory is the packs dir `load_lexicon_packs`
+/// reads), e.g. the shipped one:
+/// `ACG_PACK=$PWD/data/packs/acg-add.tsv cargo test --release -p core --test engine_predict -- --ignored --nocapture --exact measure_start_range_acg`
 #[test]
 #[ignore]
 fn measure_start_range_acg() {

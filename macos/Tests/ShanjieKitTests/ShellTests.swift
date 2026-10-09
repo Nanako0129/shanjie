@@ -15,7 +15,7 @@ final class ShellTests: XCTestCase {
     }
 
     private func makeShell(secure: Bool = false, store: LayoutStore = MemoryLayoutStore()) -> Shell {
-        let shell = Shell(resources: resources, panel: FakePanel(), isSecureInput: { secure }, layoutStore: store, learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore())
+        let shell = Shell(resources: resources, panel: FakePanel(), isSecureInput: { secure }, layoutStore: store, learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), acgPackStore: MemoryAcgPackStore())
         XCTAssertNotNil(shell.engine)
         return shell
     }
@@ -292,7 +292,7 @@ final class ShellTests: XCTestCase {
     }
 
     func testEngineThatCannotBeBuiltPassesEveryKey() {
-        let shell = Shell(resources: resources.appendingPathComponent("missing"), panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(), learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore())
+        let shell = Shell(resources: resources.appendingPathComponent("missing"), panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(), learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), acgPackStore: MemoryAcgPackStore())
         XCTAssertNil(shell.engine)
         let c = Controller(shell)
         c.session.activate()
@@ -500,7 +500,7 @@ final class ShellTests: XCTestCase {
         let report = Layouts.keys("ㄍㄠˇ ㄨㄢˊ ㄓㄜˋ ㄅㄛ", eten: false)
         let store = MemoryDemoteStore()
         let shell = Shell(resources: resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(),
-                          learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: store, predictionStore: MemoryPredictionStore())
+                          learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: store, predictionStore: MemoryPredictionStore(), acgPackStore: MemoryAcgPackStore())
         let c = Controller(shell)
         c.session.activate()
         let item = { c.session.menu.first { $0.action == .toggleDemote } }
@@ -526,7 +526,7 @@ final class ShellTests: XCTestCase {
         XCTAssertEqual(c.client.marked, "睪丸這波")
         c.press(Keys.esc)
         let again = Controller(Shell(resources: resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(),
-                                     learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: store, predictionStore: MemoryPredictionStore()))
+                                     learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: store, predictionStore: MemoryPredictionStore(), acgPackStore: MemoryAcgPackStore()))
         again.session.activate()
         again.type(report)
         XCTAssertEqual(again.client.marked, "睪丸這波", "a new shell reads the stored off")
@@ -543,7 +543,7 @@ final class ShellTests: XCTestCase {
         let store = MemoryPredictionStore()
         let make = {
             Shell(resources: self.resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(),
-                  learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: store)
+                  learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: store, acgPackStore: MemoryAcgPackStore())
         }
         let c = Controller(make())
         c.session.activate()
@@ -569,6 +569,62 @@ final class ShellTests: XCTestCase {
         again.type("s")
         XCTAssertFalse(again.panel.visible, "a new shell reads the stored off")
         XCTAssertEqual(again.session.menu.first { $0.action == .togglePrediction }?.checked, false)
+    }
+
+    /// acg-pack (docs/contracts/acg-pack.md A.2): the "動漫與遊戲詞" item is checked by default (user decision 2026-10-09), a toggle rebuilds the engine
+    /// without the pack (the fixture pack spells 碇源堂, which the base lexicon cannot), the choice is stored, and a new shell
+    /// reads it. On again: back to the engine with the pack.
+    func testAcgPackMenuItemTogglesStoresAndSurvivesRestart() throws {
+        let packs = resources.appendingPathComponent("packs")
+        try FileManager.default.createDirectory(at: packs, withIntermediateDirectories: true)
+        try "ㄉㄧㄥˋ-ㄩㄢˊ-ㄊㄤˊ\t碇源堂\t-7.04116568\tacg\n".write(to: packs.appendingPathComponent("acg-add.tsv"), atomically: true, encoding: .utf8)
+        let store = MemoryAcgPackStore()
+        let make = {
+            Shell(resources: self.resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(),
+                  learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), acgPackStore: store)
+        }
+        let name = "2u/4m06w;6"  // ㄉㄧㄥˋ ㄩㄢˊ ㄊㄤˊ; the chat profile spells it 定元堂 without the pack (formal already gets it right)
+        let c = Controller(make(), bundle: "com.hnc.Discord")
+        c.session.activate()
+        let item = { c.session.menu.first { $0.action == .toggleAcgPack } }
+        XCTAssertEqual(item()?.title, "動漫與遊戲詞")
+        XCTAssertEqual(item()?.checked, true, "default on")
+        c.type(name)
+        XCTAssertEqual(c.client.marked, "碇源堂")
+        c.press(Keys.esc)
+        c.session.perform(.toggleAcgPack)
+        XCTAssertEqual(store.acgPack, false)
+        XCTAssertEqual(item()?.checked, false)
+        c.type(name)
+        XCTAssertNotEqual(c.client.marked, "碇源堂")
+        c.press(Keys.esc)
+        let again = Controller(make(), bundle: "com.hnc.Discord")
+        again.session.activate()
+        again.type(name)
+        XCTAssertNotEqual(again.client.marked, "碇源堂", "a new shell reads the stored off")
+        again.press(Keys.esc)
+        again.session.perform(.toggleAcgPack)
+        XCTAssertEqual(store.acgPack, true)
+        again.type(name)
+        XCTAssertEqual(again.client.marked, "碇源堂")
+    }
+
+    /// A pack that fails to load (default on) must not leave the user with no engine: the shell falls back to
+    /// building without the pack, keeps the stored choice, and typing works.
+    func testCorruptPackFallsBackToAnEngineWithoutIt() throws {
+        let packs = resources.appendingPathComponent("packs")
+        try FileManager.default.createDirectory(at: packs, withIntermediateDirectories: true)
+        try "not a row\n".write(to: packs.appendingPathComponent("acg-add.tsv"), atomically: true, encoding: .utf8)
+        XCTAssertNotEqual(CoreEngine.make(dataDir: resources.path, layout: 0, packsDir: packs.path).1, 0, "the fixture is a pack that cannot load")
+        let store = MemoryAcgPackStore()
+        let shell = Shell(resources: resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(),
+                          learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), acgPackStore: store)
+        XCTAssertNotNil(shell.engine)
+        XCTAssertNil(store.acgPack, "the preference is left as it was")
+        let c = Controller(shell)
+        c.session.activate()
+        XCTAssertEqual(c.type("su3cl3"), Array(repeating: true, count: 6))
+        XCTAssertEqual(c.client.marked, "你好")
     }
 
     func testSwitchingLayoutCommitsThenUsesTheNewLayout() {
