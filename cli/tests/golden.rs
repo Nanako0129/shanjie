@@ -263,3 +263,25 @@ fn packs_options_fail_loudly() {
     assert!(fail(&["--packs-dir", missing.to_str().unwrap()]).contains("--packs-dir needs --packs"));
     std::fs::remove_file(&rows).unwrap();
 }
+
+/// acg-pack A2.5: a pack file that exists but cannot be read is named with its path and ErrorKind, not "cannot load lexicon".
+#[cfg(unix)]
+#[test]
+fn unreadable_pack_file_names_the_path_and_kind() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = std::env::temp_dir().join(format!("shanjie-packs-unreadable-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let pack = dir.join("acg-add.tsv");
+    std::fs::write(&pack, "").unwrap();
+    std::fs::set_permissions(&pack, std::fs::Permissions::from_mode(0o000)).unwrap();
+    let rows = dir.join("rows.txt");
+    std::fs::write(&rows, "|風之谷|ㄈㄥ ㄓ ㄍㄨˇ\n").unwrap();
+    let out = Command::new(env!("CARGO_BIN_EXE_shanjie-eval"))
+        .args(["--lm", &lm_path(), "--profile", "chat", "--rows", rows.to_str().unwrap(), "--packs", "acg", "--packs-dir", dir.to_str().unwrap()])
+        .output()
+        .unwrap();
+    std::fs::set_permissions(&pack, std::fs::Permissions::from_mode(0o644)).unwrap();
+    std::fs::remove_dir_all(&dir).unwrap();
+    let err = String::from_utf8(out.stderr).unwrap();
+    assert!(!out.status.success() && err.contains("acg-add.tsv") && err.contains("PermissionDenied"), "{err}");
+}

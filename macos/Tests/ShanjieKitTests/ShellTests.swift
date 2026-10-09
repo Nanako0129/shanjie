@@ -609,6 +609,31 @@ final class ShellTests: XCTestCase {
         XCTAssertEqual(again.client.marked, "碇源堂")
     }
 
+    /// acg-pack A2.4: the grey line under "動漫與遊戲詞" says how old the data is. The date is the manifest's `latest_source_revision` as a UTC date
+    /// (23:59:59Z must not become the next day in the local zone), the entry has no action, it stays with the pack off, and a missing file or
+    /// field means no line.
+    func testAcgDataDateLineComesFromTheManifest() throws {
+        let packs = resources.appendingPathComponent("packs")
+        try FileManager.default.createDirectory(at: packs, withIntermediateDirectories: true)
+        let manifest = packs.appendingPathComponent("acg.json")
+        let make = { (store: MemoryAcgPackStore) in
+            Controller(Shell(resources: self.resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(),
+                             learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), acgPackStore: store))
+        }
+        let titles = { (c: Controller) in c.session.menu.map(\.title) }
+        XCTAssertFalse(titles(make(MemoryAcgPackStore())).contains { $0.hasPrefix("資料更新至") }, "no manifest, no line")
+        try #"{"latest_source_revision": "2026-10-06T23:59:59Z", "version": "x"}"#.write(to: manifest, atomically: true, encoding: .utf8)
+        let on = make(MemoryAcgPackStore())
+        let line = "資料更新至 2026-10-06（維基百科）"
+        XCTAssertEqual(titles(on), ["標準鍵盤", "倚天鍵盤", "避免把敏感字詞排在前面", "即時預測", "動漫與遊戲詞", line, "清除選字記憶…", "不要備份選字記憶"])
+        XCTAssertNil(on.session.menu.first { $0.title == line }?.action, "not clickable")
+        XCTAssertTrue(titles(make(MemoryAcgPackStore(false))).contains(line), "shown with the pack off too")
+        try #"{"version": "x"}"#.write(to: manifest, atomically: true, encoding: .utf8)
+        XCTAssertFalse(titles(make(MemoryAcgPackStore())).contains { $0.hasPrefix("資料更新至") }, "no field, no line")
+        try "not json".write(to: manifest, atomically: true, encoding: .utf8)
+        XCTAssertFalse(titles(make(MemoryAcgPackStore())).contains { $0.hasPrefix("資料更新至") }, "unreadable, no line")
+    }
+
     /// A pack that fails to load (default on) must not leave the user with no engine: the shell falls back to
     /// building without the pack, keeps the stored choice, and typing works.
     func testCorruptPackFallsBackToAnEngineWithoutIt() throws {

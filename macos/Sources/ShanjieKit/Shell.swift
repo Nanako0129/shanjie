@@ -140,6 +140,9 @@ public final class Shell {
     private let acgPackStore: AcgPackStore
     /// The ACG word pack (default on, user decision 2026-10-09): parsed into the lexicon, so a change rebuilds the engine like a layout change.
     private(set) var acgPackOn = true
+    /// The pack's source date for the grey menu line (acg-pack contract A2.4): `latest_source_revision` of `Resources/packs/acg.json`
+    /// as a UTC date, read once at init. `nil` (file or field missing or unreadable) means no line.
+    let acgDataDate: String?
     let panel: CandidatePanel
     let isSecureInput: () -> Bool
     private(set) var engine: CoreEngine?
@@ -161,6 +164,19 @@ public final class Shell {
     /// synchronous IPC on the key path, so a pure selection move (same preedit and cursor) reuses it.
     /// Cleared whenever the panel hides: commit, reset, owner change.
     var lineCache: (preedit: String, cursor: Int, rect: NSRect?)?
+
+    /// `latest_source_revision` ("2026-10-06T00:08:14Z") of the manifest at `url` as a UTC "yyyy-MM-dd"; `nil` for anything else.
+    static func readAcgDataDate(_ url: URL) -> String? {
+        guard let data = try? Data(contentsOf: url),
+              let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              let stamp = json["latest_source_revision"] as? String,
+              let date = ISO8601DateFormatter().date(from: stamp) else { return nil }
+        let utc = DateFormatter()
+        utc.locale = Locale(identifier: "en_US_POSIX")
+        utc.timeZone = TimeZone(identifier: "UTC")
+        utc.dateFormat = "yyyy-MM-dd"
+        return utc.string(from: date)
+    }
 
     /// `resources`: the absolute Resources directory holding the lexicon files and bigram.sjlm.
     /// `panel`: the one candidate panel (an NSPanel in the app).
@@ -206,6 +222,7 @@ public final class Shell {
         self.predictionStore = predictionStore
         predictionOn = predictionStore.prediction ?? true
         self.acgPackStore = acgPackStore
+        acgDataDate = Shell.readAcgDataDate(resources.appendingPathComponent("packs/acg.json"))
         acgPackOn = acgPackStore.acgPack ?? true
         // The preference is read before the one engine is built (about 240 MB): building first
         // and switching after would build twice.

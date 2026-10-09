@@ -102,6 +102,31 @@ class Rules(unittest.TestCase):
         self.assertFalse(ok("阿庫雷特社團", "阿庫雷特社團（クラブ）"))        # 泛稱
         self.assertFalse(ok("阿庫雷特", "阿庫雷特，主角"))                    # 旁邊沒有原名
         self.assertFalse(ok("阿庫雷特", "主角阿庫雷特（アクレット）"))        # 摘要不是以名字開頭
+        # 契約 A2.2：原名要在名字緊接的括號裡，不是摘要前 120 字的任何地方
+        self.assertFalse(ok("阿庫雷特", "阿庫雷特，主角（アクレット）"))
+        self.assertFalse(ok("阿庫雷特", "阿庫雷特（主角）；原名 Akuret"))
+        self.assertTrue(ok("阿庫雷特", "阿庫雷特 (Akuret)"))                  # 半形括號、拉丁字母
+        self.assertTrue(ok("阿庫雷特", "阿庫雷特 （アクレット，主角）"))        # 括號前可有空白
+        self.assertFalse(ok("阿庫雷特", "阿庫雷特（A）"))                     # 單一拉丁字母不算原名
+
+    def test_year_list_takes_only_the_links_in_the_title_column(self):
+        got = B.year_works(YEAR_LIST)
+        self.assertEqual(got, ["新作動畫 (動畫)", "風之谷", "紅連結作品", "傳統作品"])      # 錨點拿掉、去重；rowspan 的列欄位對得上；紅連結模板、製作公司欄的連結、<ref> 裡的連結都不取
+        with self.assertRaises(SystemExit):                    # 有 wikitable 卻沒有作品名欄：頁面結構變了，停
+            B.year_works('{| class="wikitable"\n|-\n!日期!!名稱\n|-\n|1月||[[甲]]\n|}')
+        with self.assertRaises(SystemExit):
+            B.year_works("沒有表格")
+
+    def test_groups_column_four_must_be_include_or_exclude(self):
+        d = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, d, True)
+        good = os.path.join(d, "g.tsv")
+        open(good, "w", encoding="utf-8").write("# c\n作品\t碇系\tEVA\tinclude\t動畫\n作品\t某電影\tMovie\texclude\t電影\n")
+        self.assertEqual(len(B.read_groups(good)), 2)
+        bad = os.path.join(d, "b.tsv")
+        open(bad, "w", encoding="utf-8").write("作品\t碇系\tEVA\tincluded\t動畫\n")
+        with self.assertRaises(SystemExit):
+            B.read_groups(bad)
 
 
 class Dedupe(unittest.TestCase):
@@ -123,6 +148,33 @@ class Ordering(unittest.TestCase):
 
 # ---- a fake API serving a small, fixed corner of Wikipedia
 
+YEAR_LIST = """{{noteTA|G1=Anime}}
+== 電視動畫 ==
+{| class="wikitable sortable" style="width:100%"
+!style="width:12%"|開始日－結束日!!作品名!!原名!!製作公司!!話數
+|-
+|1月3日<!--22:30--><ref group="冬">[[不要這個]]</ref>－3月26日||[[新作動畫 (動畫)|新作動畫]]||{{lang|ja|しんさく}}||[[某公司]]||12話
+|-
+|rowspan=2|4月4日||{{link-ja|紅連結|あか}}||{{lang|ja|x}}||[[某公司]]||12話
+|-
+|[[風之谷#第2季|風之谷]]（第2期）||{{lang|ja|y}}||z||12話
+|-
+|7月||[[新作動畫 (動畫)#第2季|新作動畫 第2期]]||{{lang|ja|z}}||w||12話
+|-
+|10月||[[紅連結作品]]||{{lang|ja|r}}||w||12話
+|-
+|10月||[[傳統作品]]||{{lang|ja|t}}||w||12話
+|}
+== 劇場版 ==
+{| class="wikitable"
+|-
+!上映日!!作品名!!原名
+|-
+|8月1日
+|[[File:x.jpg]][[:ja:外語連結]]
+|{{lang|ja|a}}
+|}
+"""
 GROUPS = """# 區段\t組名\t模組\t收錄\t類別或理由
 作品\t碇系\tEVA\tinclude\t動畫
 作品\t遊戲系\tGames\tinclude\t遊戲
@@ -142,20 +194,34 @@ PAGES = {
     "Template:CGroup/Games": (3, TS["games"], "{{CItem|zh-tw:楓之谷}}\n{{CItem|zh-tw:阿庫雷特}}"),
     "Template:CGroup/Movie": (4, TS["movie"], "{{CItem|zh-tw:怪獸電力公司}}"),
     "風之谷 (電影)": (5, "2026-10-02T00:00:00Z", ""),
+    "2026年日本動畫列表": (8, "2026-10-09T00:00:00Z", YEAR_LIST),
     "風之谷角色列表": (6, "2026-10-03T00:00:00Z", ""),
 }
 ARTICLE = ("<h2>登場人物</h2><ul><li>阿庫雷特（アクレット）</li><li>朋友（ともだち）</li><li>米卡莎的母親（ママ）</li></ul>")
-REVID = {"風之谷": 5, "風之谷角色列表": 6}
+REVID = {"風之谷": 5, "風之谷角色列表": 6, "新作動畫 (動畫)": 7, "传统作品": 9}
+CONVERTED = {"傳統作品": "传统作品"}      # 簡繁不同的標題：wikitext 的 [[傳統作品]] 找得到，action=parse 要用實際標題
 PARSES = {
     "風之谷": {"title": "風之谷 (電影)", "displaytitle": "<span>風之谷 (電影)</span>", "text": ARTICLE, "links": [
         {"ns": 0, "title": "風之谷角色列表", "exists": True}, {"ns": 0, "title": "不存在角色列表", "exists": False}]},
     "風之谷角色列表": {"title": "風之谷角色列表", "displaytitle": "風之谷角色列表", "text": "<h2>人物</h2><ul><li>碇真次郎（シンジロウ）</li></ul>", "links": []},
+    # 年度清單上的作品：艾蓮娜 第一次出現沒有原名、第二次有（A2.2 所有出現都判斷）；卡羅爾 的原名不在緊接的括號裡（A2.2 相鄰檢查）
+    "新作動畫 (動畫)": {"title": "新作動畫 (動畫)", "displaytitle": "<span>新作動畫 (動畫)</span>", "links": [],
+                        "text": "<h2>登場人物</h2><ul><li>艾蓮娜</li><li>卡羅爾，主角（キャロル）</li></ul><h2>角色介紹</h2><dl><dt>艾蓮娜（エレナ）</dt></dl>"},
+    "传统作品": {"title": "传统作品", "displaytitle": "傳統作品", "text": "", "links": []},
 }
 
 
 class FakeApi:
+    parsed = []
+
     def wiki(self, **p):
+        if p.get("converttitles"):                  # resolve_titles：存在的標題、簡繁轉換、紅連結
+            ts = p["titles"].split("|")
+            gone = lambda t: CONVERTED.get(t, t) not in PARSES and t not in PAGES
+            return {"query": {"converted": [{"from": t, "to": CONVERTED[t]} for t in ts if t in CONVERTED],
+                              "pages": [{"title": CONVERTED.get(t, t), **({"missing": True} if gone(t) else {"pageid": 1})} for t in ts]}}
         if p["action"] == "parse":
+            self.parsed.append(p["page"])
             if p["page"] not in PARSES:
                 raise RuntimeError({"code": "missingtitle"})
             assert "revid" in p["prop"]
@@ -180,6 +246,7 @@ class FakeApi:
 READINGS = {  # tools/readings.py needs the MOE dictionary; the fixture fixes the readings instead
     "碇源堂": "ㄉㄧㄥˋ ㄩㄢˊ ㄊㄤˊ", "螢火蟲之墓": "ㄧㄥˊ ㄏㄨㄛˇ ㄔㄨㄥˊ ㄓ ㄇㄨˋ", "風之谷": "ㄈㄥ ㄓ ㄍㄨˇ",
     "楓之谷": "ㄈㄥ ㄓ ㄍㄨˇ", "阿庫雷特": "ㄚ ㄎㄨˋ ㄌㄟˊ ㄊㄜˋ", "奇希莉卡": "ㄑㄧˊ ㄒㄧ ㄌㄧˋ ㄎㄚˇ",
+    "新作動畫": "ㄒㄧㄣ ㄗㄨㄛˋ ㄉㄨㄥˋ ㄏㄨㄚˋ", "傳統作品": "ㄔㄨㄢˊ ㄊㄨㄥˇ ㄗㄨㄛˋ ㄆㄧㄣˇ", "艾蓮娜": "ㄞˋ ㄌㄧㄢˊ ㄋㄚˋ", "卡羅爾": "ㄎㄚˇ ㄌㄨㄛˊ ㄦˇ",
 }
 
 
@@ -200,9 +267,9 @@ class Build(unittest.TestCase):
         cls.excl = os.path.join(cls.tmp, "collisions.tsv")
         open(cls.excl, "w", encoding="utf-8").write("# c\nㄈㄥ ㄓ ㄍㄨˇ\t風之谷\t楓之谷\t保留既有的名字\n")
 
-    def build(self, collisions, exclude=None, real_decoder=False):
+    def build(self, collisions, exclude=None, real_decoder=False, years=()):
         # 真的解碼器每次建置要跑 4 個 CLI 程序；只有斷言需要真實解碼結果的測試才開（real_decoder=True）。
-        return B.build(FakeApi(), self.groups, collisions, self.manual, readings=fake_readings, exclude_tsv=exclude or self.none,
+        return B.build(FakeApi(), self.groups, collisions, self.manual, readings=fake_readings, exclude_tsv=exclude or self.none, years=years,
                        **({} if real_decoder else {"decode": lambda pairs, prof, packs=None: [w for w, _ in pairs]}))
 
     def test_pack_content_and_filters(self):
@@ -226,10 +293,26 @@ class Build(unittest.TestCase):
             self.assertEqual(len(line.split("\t")), 4)
             self.assertTrue(line.endswith("\tacg"))
 
+    def test_year_list_works_are_built_and_every_name_occurrence_is_judged(self):
+        files, manifest, _, _, ref, _ = self.build(self.excl, years=[2026])
+        words = {l.split("\t")[1] for l in files["acg-add.tsv"].splitlines()}
+        self.assertIn("新作動畫", words)                # 年度清單的作品：顯示標題進詞包
+        self.assertIn("艾蓮娜", words)                  # 第一次出現沒有原名，第二次有：收
+        self.assertIn("卡羅爾", ref)
+        self.assertNotIn("卡羅爾", words)               # 原名不在緊接的括號裡：不收，但仍在參考名單
+        self.assertIn("艾蓮娜\tchar\t新作動畫 (動畫)@7\t", files["acg-sources.tsv"])
+        self.assertIn("傳統作品", words)                # 標題簡繁不同的條目（實際標題 传统作品）也取得到，顯示標題是 zh-tw
+        self.assertEqual(manifest["articles_missing"], ["紅連結作品"])      # 紅連結記下來、不去 parse；製作公司欄的連結沒有被當成條目
+        self.assertNotIn("紅連結作品", FakeApi.parsed)
+        self.assertNotIn("某公司", FakeApi.parsed)
+        self.assertEqual(manifest["yearly_lists"], {"2026": {"title": "2026年日本動畫列表", "revid": 8, "ts": "2026-10-09T00:00:00Z", "links": 4}})
+        self.assertEqual(manifest["latest_source_revision"], "2026-10-09T00:00:00Z")      # 清單頁的時間算進版號的日期
+        self.assertTrue(manifest["version"].startswith("20261009-"))
+
     def test_a_changed_pack_changes_the_version(self):
         manual = os.path.join(self.tmp, "manual2.tsv")
         open(manual, "w", encoding="utf-8").write(open(self.manual, encoding="utf-8").read() + "艾倫葉卡\t某作品\t角色\n")
-        more = B.build(FakeApi(), self.groups, self.excl, manual, readings=lambda w: fake_readings(w) | {"艾倫葉卡": (["ㄞˋ", "ㄌㄨㄣˊ", "ㄧㄝˋ", "ㄎㄚˇ"], False)}, exclude_tsv=self.none,
+        more = B.build(FakeApi(), self.groups, self.excl, manual, readings=lambda w: fake_readings(w) | {"艾倫葉卡": (["ㄞˋ", "ㄌㄨㄣˊ", "ㄧㄝˋ", "ㄎㄚˇ"], False)}, exclude_tsv=self.none, years=(),
                         decode=lambda pairs, prof, packs=None: [w for w, _ in pairs])[1]
         base = self.build(self.excl)[1]
         self.assertEqual(more["version"][:8], base["version"][:8])            # 來源頁沒變，日期一樣
@@ -305,7 +388,7 @@ class Build(unittest.TestCase):
         def decode(pairs, prof, packs=None):       # 阿庫雷特：不開是 朋友；開了而且詞包裡有它就是它自己
             pack = open(os.path.join(packs, "acg-add.tsv"), encoding="utf-8").read() if packs else ""
             return [w if (w != "阿庫雷特" or w in pack) else "朋友" for w, _ in pairs] if packs else ["朋友" if w == "阿庫雷特" else w for w, _ in pairs]
-        files, manifest, col, _, _, dropped = B.build(FakeApi(), self.groups, self.none, self.manual, decode=decode, readings=fake_readings, exclude_tsv=self.none)
+        files, manifest, col, _, _, dropped = B.build(FakeApi(), self.groups, self.none, self.manual, decode=decode, readings=fake_readings, exclude_tsv=self.none, years=())
         self.assertNotIn("阿庫雷特", {l.split("\t")[1] for l in files["acg-add.tsv"].splitlines()})
         self.assertEqual([(w, o) for _, w, o, _ in dropped], [("阿庫雷特", "朋友")])
         self.assertEqual((manifest["dropped_by_lexicon_rule"], manifest["unresolved_collision_readings"]), (1, 0))
@@ -317,7 +400,7 @@ class Build(unittest.TestCase):
         def run(row):
             c = os.path.join(self.tmp, "c.tsv")
             open(c, "w", encoding="utf-8").write(row)
-            return B.build(FakeApi(), self.groups, c, self.manual, decode=decode, readings=fake_readings, exclude_tsv=self.none)[2]
+            return B.build(FakeApi(), self.groups, c, self.manual, decode=decode, readings=fake_readings, exclude_tsv=self.none, years=())[2]
         r = "ㄚ ㄎㄨˋ ㄌㄟˊ ㄊㄜˋ"
         self.assertIn(r, run(f"{r}\t某個舊詞\t+另一個舊詞\t別的詞已處置\n"))   # 同讀音但沒點名 阿庫雷特：新詞照樣列出
         self.assertNotIn(r, run(f"{r}\t阿庫雷特\t+某個舊詞\t點名了\n"))

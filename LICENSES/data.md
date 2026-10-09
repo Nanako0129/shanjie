@@ -12,6 +12,7 @@
 | `data/packs/acg-groups.tsv` | 本專案自寫：把 `Template:CGroup/list` 的 ACG 相關組分成收／不收 | **CC BY-SA 4.0**（和專案其他資料一致） | 建置輸入，不含第三方資料；不隨 App 內附 |
 | `data/packs/acg-collisions.tsv` | 同音衝突的處置：讀音、保留與排除的詞（取自維基百科轉換組與條目的詞）與理由 | **CC BY-SA 4.0**，署名：Wikipedia 貢獻者（https://creativecommons.org/licenses/by-sa/4.0/ ），與 `acg-exclude.tsv` 相同 | 建置輸入，不隨 App 內附 |
 | `eval/dev/acg/*.txt` | Wikidata 的 zh-tw 標籤（作品名、角色、角色名片段，sitelink 數最多者），讀音由 `tools/readings.py` 產生 | CC0（Wikidata 的資料授權） | 只用於評測，不用來調參 |
+| `eval/dev/acg/recent.txt` | 2026 年作品與角色名 23 個（葬送的芙莉蓮、咒術迴戰與其角色列表、判處勇者刑、魔法帽的工作室、日本三國、淡島百景、無職轉生、穹廬下的魔女、BLACK TORCH 闇黑燈火、桃源暗鬼等的中文維基百科條目），逐一對照條目確認；讀音由 `tools/readings.py` 產生 | **CC BY-SA 4.0**，署名：Wikipedia 貢獻者（https://creativecommons.org/licenses/by-sa/4.0/ ），與 `acg-collisions.tsv` 相同 | 只用於評測，不用來調參，不隨 App 內附 |
 | `eval/sets/trap.txt`、`eval/sets/daily.txt` | 本專案自寫 | CC0 | |
 | `eval/probe/s2r-probe.txt` | 由 `experiments/s2/build_probe.py` 從 `eval/dev/` 的句子產生（換「一」「不」的讀音） | CC0 | |
 | `eval/dev/*.txt`、`eval/holdout/*`、`eval/learn/cases.tsv` | 本專案自寫 | CC0 | |

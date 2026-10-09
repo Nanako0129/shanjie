@@ -36,6 +36,8 @@ LM = os.path.join(ROOT, "data", "lm", "bigram.sjlm")
 CACHE = os.path.expanduser("~/.cache/shanjie/sources/acg")
 UA = "shanjie-acg-pack/1.0 (https://github.com/Nanako0129/shanjie; build tool for an optional word pack; contact via the repository)"
 WORKS = 400                       # 契約 A.1：sitelink 數最多的作品數
+LAST_YEAR, YEARS = 2026, 7        # 契約 A2.1：年度動畫清單「N年日本動畫列表」的最後一年與年數（2020–2026）。不看系統日期，同一份快取任何一天重建都相同；CI 要換年份時明確改 LAST_YEAR
+MAX_REQUESTS, MAX_CACHE = 5000, 1_500_000_000   # 契約 A2.7 的停止條件：一次建置的網路請求數、快取位元組數
 HAN = re.compile(r"^[一-鿿]{2,10}$")
 TAG = "acg"
 SPARQL = """SELECT ?w ?sl ?art ?twl WHERE {
@@ -52,8 +54,9 @@ class Api:
     """快取 + 限速（每秒 ≤ 1 個請求）+ maxlag=5。快取檔名是請求參數的 sha1，內容是回應 JSON。"""
 
     def __init__(self, cache=CACHE, offline=False):
-        self.cache, self.offline, self.last = cache, offline, 0.0
+        self.cache, self.offline, self.last, self.requests = cache, offline, 0.0, 0
         os.makedirs(cache, exist_ok=True)
+        self.size = sum(e.stat().st_size for e in os.scandir(cache))
 
     @staticmethod
     def key(params):
@@ -74,6 +77,9 @@ class Api:
             wait = 1.1 - (time.time() - self.last)
             if wait > 0:
                 time.sleep(wait)
+            if self.requests >= MAX_REQUESTS or self.size > MAX_CACHE:
+                raise SystemExit(f"stop (contract A2.7): {self.requests} requests this run, cache {self.size} bytes")
+            self.requests += 1
             self.last = time.time()
             req = urllib.request.Request(url, headers={"User-Agent": UA})
             data = json.loads(urllib.request.urlopen(req, timeout=120).read())
@@ -85,6 +91,7 @@ class Api:
             with open(path + ".part", "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False)
             os.replace(path + ".part", path)
+            self.size += os.path.getsize(path)
             if "error" in data:
                 raise RuntimeError(data["error"])
             return data
@@ -124,10 +131,145 @@ def pages(api, titles):
     return out
 
 
+# ---------------------------------------------------------------- 年度動畫清單（契約 A2.1）
+
+def year_titles(years):
+    return [f"{y}年日本動畫列表" for y in years]
+
+
+TOKEN = re.compile(r"(\{\{|\}\}|\[\[|\]\]|\|\||!!|\|)")
+CELL_ATTR = re.compile(r"^((?:\s*[A-Za-z-]+\s*=\s*(?:\"[^\"]*\"|'[^']*'|[^\s|\"']*))+)\s*$")
+NOT_ARTICLE = re.compile(r"^(?::|(?:File|Image|檔案|文件|Category|分類|Template|模板|Help|Special|Wikipedia|WP|ja|en|zh|ko|w|wikt|d):)", re.I)
+
+
+def table_cells(line):
+    """表格列裡的一行（`|a||b` 或 `!a!!b`）→ 儲存格文字清單，只在最外層（不在 {{ }}、[[ ]] 裡）拆 `||`／`!!`。"""
+    out, cur, depth = [], [], 0
+    for tok in TOKEN.split(line):
+        if tok in ("{{", "[["):
+            depth += 1
+        elif tok in ("}}", "]]"):
+            depth -= 1
+        elif tok in ("||", "!!") and depth <= 0:
+            out.append("".join(cur))
+            cur = []
+            continue
+        cur.append(tok)
+    out.append("".join(cur))
+    return out
+
+
+def cell_attrs(cell):
+    """`rowspan=2|內容`、`style="…"|內容` → (屬性字串, 內容)；[[a|b]] 裡的 | 不是屬性分隔。"""
+    depth = 0
+    for m in TOKEN.finditer(cell):
+        t = m.group(1)
+        depth += (t in ("{{", "[[")) - (t in ("}}", "]]"))
+        if t == "|" and depth <= 0:
+            return (cell[:m.start()], cell[m.end():]) if CELL_ATTR.match(cell[:m.start()]) else ("", cell)
+    return "", cell
+
+
+def table_rows(block):
+    """一個 wikitable 的文字 → (標題列的儲存格, [資料列的儲存格清單])。資料列的 rowspan 往下列延伸（被佔用的欄位補空字串），所以欄位索引與標題對齊。"""
+    head, rows, cur, depth = [], [], [], 0
+    for line in block.split("\n")[1:]:
+        if line.startswith("|}"):
+            break
+        if depth <= 0 and line.startswith("|-"):
+            if cur:
+                rows.append(cur)
+            cur = []
+        elif depth <= 0 and line[:1] in ("|", "!") and not line.startswith("|+"):
+            parts = table_cells(line[1:])
+            if line[0] == "!" and not rows and not cur:
+                head += parts                                   # 第一列之前的 ! 行是標題列
+            else:
+                cur += parts
+        elif cur:
+            cur[-1] += "\n" + line
+        elif head:
+            head[-1] += "\n" + line
+        depth += len(re.findall(r"\{\{|\[\[", line)) - len(re.findall(r"\}\}|\]\]", line))
+    if cur:
+        rows.append(cur)
+    placed, busy = [], {}
+    for cells in rows:
+        row, col = [], 0
+        for c in cells:
+            while busy.get(col, 0) > 0:
+                busy[col] -= 1
+                row.append("")
+                col += 1
+            attrs, text = cell_attrs(c)
+            m = re.search(r"rowspan\s*=\s*\"?(\d+)", attrs)
+            row.append(text)
+            if m and int(m.group(1)) > 1:
+                busy[col] = int(m.group(1)) - 1
+            col += 1
+        placed.append(row)
+    return [cell_attrs(c)[1] for c in head], placed
+
+
+def year_works(text):
+    """年度清單頁（wikitext）→ 作品名欄裡的條目連結（出現順序、去重）。每個 wikitable 的標題列必須有「作品名」欄，只取那一欄的 [[連結]]；
+    沒有這一欄的表格就中止（頁面結構變了，契約 A2.7 的停止條件）。紅連結模板（{{link-ja}}、{{tsl}}）沒有中文條目，不取。"""
+    text = re.sub(r"<ref[^>/]*/>|<ref[^>]*>.*?</ref>", "", strip_comments(text, False), flags=re.S)
+    out, tables = [], 0
+    for block in re.split(r"\n(?=\{\|)", text)[1:]:
+        if "wikitable" not in block.split("\n", 1)[0]:
+            continue
+        head, rows = table_rows(block)
+        names = [re.sub(r"\{\{.*?\}\}|<[^>]+>|\s", "", h) for h in head]
+        if "作品名" not in names:
+            raise SystemExit(f"year list: a wikitable without a 作品名 column: {head[:6]}")
+        i = names.index("作品名")
+        tables += 1
+        for row in rows:
+            cell = row[i] if i < len(row) else ""
+            cell = re.sub(r"\{\{[^{}]*\}\}", "", cell)
+            for m in re.finditer(r"\[\[([^\[\]|]+)(?:\|[^\[\]]*)?\]\]", cell):
+                t = m.group(1).split("#")[0].replace("_", " ").strip()
+                if t and not NOT_ARTICLE.match(t) and t not in out:
+                    out.append(t)
+    if not tables:
+        raise SystemExit("year list: no wikitable found")
+    return out
+
+
+def resolve_titles(api, titles):
+    """年度清單的連結 → {連結: 實際存在的條目標題或 None}。維基百科上不少條目的標題是簡體或另一種寫法（[[淡島百景]] 實際是「淡岛百景」），
+    wikitext 的 [[ ]] 靠語言轉換找得到、`action=parse` 不行，所以先用 `converttitles=1&redirects=1` 每批 50 個查；連結本身就存在的照原樣（快取命中），
+    查不到的（紅連結）是 None。"""
+    out = {}
+    for i in range(0, len(titles), 50):
+        b = titles[i:i + 50]
+        q = api.wiki(action="query", titles="|".join(b), converttitles="1", redirects="1")["query"]
+        step = {x["from"]: x["to"] for k in ("normalized", "converted", "redirects") for x in q.get(k, [])}
+        exists = {p["title"] for p in q["pages"] if not p.get("missing") and not p.get("invalid")}
+        for t in b:
+            c = t
+            for _ in range(5):
+                if c not in step:
+                    break
+                c = step[c]
+            out[t] = None if c not in exists else (t if t in exists or c == t else c)
+    return out
+
+
 # ---------------------------------------------------------------- 轉換組
 
 def read_tsv(path):
     return [l.rstrip("\n").split("\t") for l in open(path, encoding="utf-8") if l.strip() and not l.startswith("#")]
+
+
+def read_groups(path):
+    """acg-groups.tsv：區段、組名、模組、收錄、類別或理由。第四欄只接受 include／exclude（契約 A2.5），拼錯不能靜靜地當成排除。"""
+    rows = read_tsv(path)
+    for r in rows:
+        if len(r) != 5 or r[3] not in ("include", "exclude"):
+            raise SystemExit(f"{path}: bad group row (column 4 must be include or exclude): {r}")
+    return rows
 
 
 LIST_ITEM = re.compile(r"\{\{CGroup/list/item\|([^|}]*)\|([^|}]*)\|([^|}]*)\|")
@@ -436,12 +578,16 @@ def names_of(html):
     return out
 
 
+ORIGINAL = re.compile(r"^\s*[（(]([^）)]*)[）)]")
+
+
 def strict_ok(name, kind, snip, base):
-    """嚴格過濾（契約 A.1）：不在基底、不是小標題、不是關係詞組、不是泛稱，摘要開頭就是這個名字而且旁邊有假名或拉丁字母。"""
+    """嚴格過濾（契約 A.1）：不在基底、不是小標題、不是關係詞組、不是泛稱，而且名字緊接的括號裡有原名（假名或兩個以上拉丁字母；契約 A2.2）。"""
     if not HAN.match(name) or name in base or kind == "heading" or REL.search(name) or ROLE_END.search(name) or ROLE_ANY.search(name):
         return False
     sn = snip.replace("\n", " ").strip()
-    return sn.startswith(name) and bool(KANA.search(sn) or LAT.search(sn))
+    m = ORIGINAL.match(sn[len(name):]) if sn.startswith(name) else None
+    return bool(m and (KANA.search(m.group(1)) or LAT.search(m.group(1))))
 
 
 # ---------------------------------------------------------------- 去重、讀音、分數、排序
@@ -602,9 +748,9 @@ def read_exclude(path):
 
 # ---------------------------------------------------------------- 主流程
 
-def build(api, groups_tsv=os.path.join(PACKS, "acg-groups.tsv"), collisions_tsv=os.path.join(PACKS, "acg-collisions.tsv"), manual_tsv=os.path.join(PACKS, "acg-manual.tsv"), decode=top1, readings=make_readings, exclude_tsv=os.path.join(PACKS, "acg-exclude.tsv")):
+def build(api, groups_tsv=os.path.join(PACKS, "acg-groups.tsv"), collisions_tsv=os.path.join(PACKS, "acg-collisions.tsv"), manual_tsv=os.path.join(PACKS, "acg-manual.tsv"), decode=top1, readings=make_readings, exclude_tsv=os.path.join(PACKS, "acg-exclude.tsv"), years=range(LAST_YEAR - YEARS + 1, LAST_YEAR + 1)):
     log = lambda *a: print(*a, file=sys.stderr)
-    gr = read_tsv(groups_tsv)
+    gr = read_groups(groups_tsv)
     listing = pages(api, ["Template:CGroup/list"])["Template:CGroup/list"]
     items = list_items(listing["text"])
     known = {(r[1], r[2]) for r in gr}
@@ -632,9 +778,25 @@ def build(api, groups_tsv=os.path.join(PACKS, "acg-groups.tsv"), collisions_tsv=
     # 作品與條目
     b = api.sparql(SPARQL)["results"]["bindings"]
     ws = sorted({x["w"]["value"].rsplit("/", 1)[1]: (x["w"]["value"].rsplit("/", 1)[1], wiki_title(x["art"]["value"]), int(x["sl"]["value"])) for x in b}.values(), key=lambda t: (-t[2], t[0]))[:WORKS]
-    arts, art_rev, seen, queued, missing = [], {}, set(), set(), []
-    title_src, name_src, name_info = {}, collections.defaultdict(set), {}
-    todo = [(w[1], True) for w in ws]                     # (條目, 是不是作品)；作品條目連到的角色列表接在後面
+    arts, art_rev, seen, queued = [], {}, set(), set()
+    title_src, name_src, all_names = {}, collections.defaultdict(set), set()
+    base, have = base_lexicon(), lexicon_words()
+    ylists = pages(api, year_titles(years)) if years else {}      # 契約 A2.1：年度動畫清單，只取作品名欄的連結
+    yearly, ywork = {}, []
+    for y, t in zip(years, year_titles(years)):
+        if not ylists[t]:
+            raise SystemExit(f"year list not found: {t}")
+        ts.append(ylists[t]["ts"])
+        revs.append(ylists[t]["revid"])
+        yw = year_works(ylists[t]["text"])
+        ywork += yw
+        yearly[str(y)] = {"title": ylists[t]["title"], "revid": ylists[t]["revid"], "ts": ylists[t]["ts"], "links": len(yw)}
+        log("year", y, "works linked", len(yw))
+    ywork = list(dict.fromkeys(ywork))
+    real = resolve_titles(api, ywork) if ywork else {}
+    missing = [t for t in ywork if real[t] is None]                  # 紅連結：沒有這個條目，不去抓
+    log("year lists: links", len(ywork), "no article", len(missing))
+    todo = [(w[1], True) for w in ws] + [(real[t], True) for t in ywork if real[t]]      # (條目, 是不是作品)；作品條目連到的角色列表接在後面；與前 400 部重複的，下面依標題去重
     while todo:
         t, is_work = todo.pop(0)
         try:
@@ -658,15 +820,15 @@ def build(api, groups_tsv=os.path.join(PACKS, "acg-groups.tsv"), collisions_tsv=
                 if l.get("ns") == 0 and l.get("exists") and LIST_RE.search(l["title"]) and l["title"] not in queued:
                     queued.add(l["title"])
                     todo.append((l["title"], False))
-        for n, kind, snip in names_of(d["text"]):
-            name_info.setdefault(n, (kind, snip))
-            name_src[n].add(d["title"])
+        for n, kind, snip in names_of(d["text"]):             # 契約 A2.2：每一次出現都判斷，有一次通過就收；出處只記通過的條目
+            all_names.add(n)
+            if strict_ok(n, kind, snip, have):
+                name_src[n].add(d["title"])
     revs += art_rev.values()
-    log("works", len(ws), "articles", len(arts), "titles", len(title_src), "names", len(name_info))
+    log("works", len(ws), "articles", len(arts), "titles", len(title_src), "names", len(all_names), "passing", len(name_src))
 
-    base, have = base_lexicon(), lexicon_words()
-    chars = {n for n, (k, s) in name_info.items() if strict_ok(n, k, s, have)}
-    ref |= set(title_src) | set(name_info)               # 契約：參考名單含所有抽出來的人名，在嚴格過濾與去重之前
+    chars = set(name_src)
+    ref |= set(title_src) | all_names               # 契約：參考名單含所有抽出來的人名，在嚴格過濾與去重之前
     src = collections.defaultdict(lambda: collections.defaultdict(set))   # 詞 → 種類 → 出處
     for v, s in cg_src.items():
         src[v]["cgroup"] |= s
@@ -717,6 +879,7 @@ def build(api, groups_tsv=os.path.join(PACKS, "acg-groups.tsv"), collisions_tsv=
         "words": len(words),
         "rows": len(rows),
         "sources": {k: sum(1 for w in words if k in src[w]) for k in ("cgroup", "title", "char", "manual")},
+        "yearly_lists": yearly,
         "revision_ids": {"min": min(revs), "max": max(revs), "pages": len(set(revs))},
         "groups": {"listed": len(gr), "included": sum(1 for r in gr if r[3] == "include"), "page_missing": unresolved},
         "unclassified_groups": unclassified,

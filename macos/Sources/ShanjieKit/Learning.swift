@@ -64,6 +64,7 @@ public struct MenuEntry: Equatable, Sendable {
         public static let demote = "避免把敏感字詞排在前面"
         public static let prediction = "即時預測"
         public static let acgPack = "動漫與遊戲詞"
+        public static func acgDataDate(_ date: String) -> String { "資料更新至 \(date)（維基百科）" }
         public static let clear = "清除選字記憶…"
         public static let excludeBackup = "不要備份選字記憶"
         public static let unavailable = "選字記憶無法存檔"
@@ -187,6 +188,7 @@ extension Session {
         items.append(MenuEntry(title: T.demote, action: .toggleDemote, checked: shell.demoteOn))
         items.append(MenuEntry(title: T.prediction, action: .togglePrediction, checked: shell.predictionOn))
         items.append(MenuEntry(title: T.acgPack, action: .toggleAcgPack, checked: shell.acgPackOn))
+        if let date = shell.acgDataDate { items.append(MenuEntry(title: T.acgDataDate(date))) }   // about the data, so shown with the pack off too
         items.append(MenuEntry(title: T.clear, action: .clear))
         items.append(MenuEntry(title: T.excludeBackup, action: .toggleBackup, checked: shell.backupExcluded))
         if shell.learningUnavailable { items.append(MenuEntry(title: T.unavailable)) }
