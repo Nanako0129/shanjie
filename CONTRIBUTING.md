@@ -42,7 +42,7 @@ gh release download classes-v2 -R Nanako0129/shanjie -p classes.sjc -D data/lm
 shasum -a 256 -c data/bigram.sjlm.sha256 data/classes.sjc.sha256
 
 make test      # Rust 核心測試，再跑 Swift 殼的測試
-make bundle    # 組出 build/善解輸入法.app
+make bundle    # 組出 build/善解（開發版）.app（開發版 bundle ID）
 ```
 
 需要模型的測試，找不到模型時會直接失敗並說明怎麼取得，不會跳過。
@@ -50,11 +50,12 @@ make bundle    # 組出 build/善解輸入法.app
 **想實際裝起來試**：
 
 ```sh
-scripts/install-ime.sh build/善解輸入法.app
+scripts/install-ime.sh "build/善解（開發版）.app"
 ```
 
-- 會覆蓋 `~/Library/Input Methods/` 裡的善解；上一版留在 `.shanjie-previous`。
-- 從 Homebrew 版換成自己建置的版本前，先 `brew uninstall --cask shanjie`，否則之後的 `brew upgrade` 會蓋掉你的建置。
+- 本機組建裝成「善解（開發版）」：`~/Library/Input Methods/善解（開發版）.app`，上一版留在 `.shanjie-dev-previous`。第一次要在「系統設定 → 鍵盤 → 輸入方式」加入一次。
+- 它的 bundle ID 是 `com.nyanako.inputmethod.shanjie.dev`，輸入模式、偏好設定、學習資料（App 沙盒的 container）都和正式版分開，不會覆蓋或搬走已裝好的「善解輸入法」（正式版或 Homebrew 版）。
+- 正式 bundle ID 的組建（`make bundle BUNDLE_ID=com.nyanako.inputmethod.shanjie`）只給 CI 與發版用；不要在自己的機器上執行或安裝：它第一次啟動就會把正式版的學習資料搬進它的 container（`docs/contracts/app-sandbox.md` §2.3）。
 
 各項檢查的細節在 `docs/verification.md`。
 
