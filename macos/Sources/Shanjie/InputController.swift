@@ -235,6 +235,7 @@ final class CandidatePanelAdapter: CandidatePanel {
     var onSelect: ((Int) -> Void)?
     private let window: PanelWindow
     private let glass = NSGlassEffectView()
+    private var tintApplier = GlassTint.Applier()
     /// The glass's one content view, kept for the panel's lifetime: replacing the glass's content,
     /// resizing or re-ordering the window on every selection move made the glass's glow flicker
     /// (user report 2026-10-05). Since 9.1 a move updates the existing cells and a scroll swaps only
@@ -476,15 +477,22 @@ final class CandidatePanelAdapter: CandidatePanel {
     }
 
     /// settings-window section 2.3, on every show and including no tint, so going back to 0 removes it.
-    /// `NSGlassEffectView.tintColor` (AppKit/NSGlassEffectView.h line 34, macOS 26 SDK: "The color the glass
-    /// effect view uses to tint the background and glass effect toward"). It is only assigned when the
-    /// value differs, because needless glass updates flickered (s3b2); with 0 and never tinted nothing is
-    /// assigned, so the default look stays bit-identical. Its effect on macOS 26 is not measured.
+    /// `NSGlassEffectView.tintColor` (AppKit/NSGlassEffectView.h line 34, SDK 27.0 as measured, available
+    /// since macOS 26.0: "The color the glass effect view uses to tint the background and glass effect
+    /// toward"). `tintApplier` decides what to assign (nothing when unchanged, nil to clear); with 0 and
+    /// never tinted nothing is assigned, so the default look stays bit-identical. Its effect on macOS 26
+    /// is not measured.
     private func applyTint(_ value: Double) {
         let dark = window.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-        let color = GlassTint.tint(value: value, dark: dark).map { NSColor(white: $0.black ? 0 : 1, alpha: $0.opacity) }
-        if glass.tintColor != color { glass.tintColor = color }
+        switch tintApplier.update(value: value, dark: dark) {
+        case .set(let t)?: glass.tintColor = NSColor(white: t.black ? 0 : 1, alpha: t.opacity)
+        case .clear?: glass.tintColor = nil
+        case nil: break
+        }
     }
+
+    func setGlassTint(_ glassTint: Double) { applyTint(glassTint) }
+
 
     /// a-3's expand mark at the bar's right end: a separator line and a chevron, both secondary.
     /// Display only: the bar expands with the down arrow; a click on it does nothing.

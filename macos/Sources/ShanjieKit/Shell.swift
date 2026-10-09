@@ -41,6 +41,8 @@ public protocol CandidatePanel: AnyObject {
     func show(_ candidates: [String], notes: [String?], selected: Int, columns: Int, first: Int, total: Int,
               lineRect: NSRect?, appearance: NSAppearance?, glassTint: Double)
     func hide()
+    /// Re-applies the tint to what is on screen now, without a new `show` (the slider moved while the panel is up).
+    func setGlassTint(_ glassTint: Double)
     /// A mouse click on a cell, by position in what `show` last received.
     var onSelect: ((Int) -> Void)? { get set }
 }
@@ -197,13 +199,13 @@ public final class Shell {
     /// its UserDefaults-backed store, tests the in-memory one.
     /// `predictionStore`: the prediction switch (V3 section 10.5). Required, like `demoteStore`.
     /// `acgPackStore`: the ACG word pack switch (acg-pack contract A.2). Required, like `demoteStore`.
-    /// `glassTintStore`: the candidate glass tint (settings-window section 2.3); the app passes its UserDefaults-backed store.
+    /// `glassTintStore`: the candidate glass tint (settings-window section 2.3). Required, like `demoteStore`.
     /// `punctuationTable`: Apple's punctuation candidate table (s3e); tests pass another path.
     /// `punctuationNames`: Apple's punctuation names (s3f); tests pass another path.
     public init(resources: URL, panel: CandidatePanel, isSecureInput: @escaping () -> Bool,
                 layoutStore: LayoutStore, learningDirectory: URL?, dialogs: LearningDialogs,
                 demoteStore: DemoteStore, predictionStore: PredictionStore, acgPackStore: AcgPackStore,
-                glassTintStore: GlassTintStore = MemoryGlassTintStore(),
+                glassTintStore: GlassTintStore,
                 punctuationTable: URL = PunctuationTable.systemURL,
                 punctuationNames: URL = PunctuationNames.systemURL) {
         self.resources = resources
@@ -228,6 +230,7 @@ public final class Shell {
         predictionOn = predictionStore.prediction ?? true
         self.acgPackStore = acgPackStore
         self.glassTintStore = glassTintStore
+        glassTint = glassTintStore.glassTint ?? 0
         acgPackOn = acgPackStore.acgPack ?? true
         // The preference is read before the one engine is built (about 240 MB): building first
         // and switching after would build twice.
@@ -254,20 +257,38 @@ public final class Shell {
     /// The menu's switches, for a caller with no session (the settings window): the owner of the
     /// composition, if any, shows the re-ranked snapshot exactly as for the menu; otherwise just the setter.
     func applyDemote(_ on: Bool) {
-        if let o = owner { o.applyDemote(on) } else { _ = setDemote(on) }
+        if let o = owner { o.applyDemote(on) } else { dropOnFailure(setDemote(on)) }
     }
 
     func applyPrediction(_ on: Bool) {
-        if let o = owner { o.applyPrediction(on) } else { _ = setPrediction(on) }
+        if let o = owner { o.applyPrediction(on) } else { dropOnFailure(setPrediction(on)) }
     }
 
-    private func changed() { NotificationCenter.default.post(name: Shell.didChangeSettings, object: self) }
+    /// No session to ask: a failed core call is logged and the composition dropped, as `Session.fail` does.
+    private func dropOnFailure(_ r: CoreResult?) {
+        guard case .failed(let c)? = r else { return }
+        Log.shell.error("core call failed, code \(c)")
+        discardOrphan()
+    }
 
-    /// The slider value 0...1 (settings-window section 2.3); unset is 0.
-    public var glassTint: Double { glassTintStore.glassTint ?? 0 }
+    /// The clear with its confirmation window (S4 section 4), for the menu and the settings window.
+    /// `done` runs after the answer, cleared or not.
+    func confirmAndClear(done: (@MainActor () -> Void)? = nil) {
+        dialogs.confirmClear { [weak self] clear in
+            if clear { self?.clearLearning() }
+            done?()
+        }
+    }
+
+    func changed() { NotificationCenter.default.post(name: Shell.didChangeSettings, object: self) }
+
+    /// The slider value 0...1 (settings-window section 2.3); unset is 0. Cached like the other settings.
+    public private(set) var glassTint: Double = 0
 
     public func setGlassTint(_ value: Double) {
+        glassTint = value
         glassTintStore.glassTint = value
+        panel.setGlassTint(value)  // section 2.3: a panel that is up changes at once
         changed()
     }
 

@@ -8,43 +8,62 @@ import SwiftUI
 /// frontmost app, `NSApp.activate()`, `makeKeyAndOrderFront`; on close the focus goes back.
 @MainActor
 final class SettingsWindowController: NSObject, NSWindowDelegate {
-    private let model: SettingsModel
+    private let shell: Shell
+    /// Built on the first `show()`, so a user who never opens the window pays nothing.
+    private var model: SettingsModel?
     private var window: NSWindow?
     private var previous: NSRunningApplication?
 
     init(shell: Shell) {
-        model = SettingsModel(shell: shell)
+        self.shell = shell
     }
 
     func show() {
         if let front = NSWorkspace.shared.frontmostApplication, front != NSRunningApplication.current {
             previous = front
         }
-        model.refresh()
-        let w = window ?? makeWindow()
+        let m = model ?? SettingsModel(shell: shell)
+        model = m
+        m.refreshExternal()
+        let w = window ?? makeWindow(m)
         window = w
         NSApp.activate()
         w.makeKeyAndOrderFront(nil)
+        // activate() is only a request (cooperative activation, macOS 14+); on the user's machine it was
+        // refused and the window stayed behind the frontmost app (device check 2026-10-10). Like vChewing,
+        // put it in front regardless; a click on it then activates the input method.
+        w.orderFrontRegardless()
     }
 
-    private func makeWindow() -> NSWindow {
+    private func makeWindow(_ model: SettingsModel) -> NSWindow {
         let w = NSWindow(contentViewController: NSHostingController(rootView: SettingsForm(model: model)))
         w.title = "善解設定"
         w.styleMask = [.titled, .closable]
         w.isReleasedWhenClosed = false
+        // Above ordinary app windows even when the input method is not active, as AlertDialogs does with
+        // .modalPanel (contract section 2.1, device check 2026-10-10).
+        w.level = .floating
         w.delegate = self
         w.center()
         return w
     }
 
+    /// The secure-input and cannot-save rows have no notification, so they are re-read each time the window is key.
+    func windowDidBecomeKey(_ notification: Notification) {
+        model?.refreshExternal()
+    }
+
     func windowWillClose(_ notification: Notification) {
-        previous?.activate()
+        // Only while we are still the active app: otherwise the user has moved on and this would steal focus.
+        if NSApp.isActive { previous?.activate() }
         previous = nil
     }
 }
 
 /// System controls only. Order follows the menu (section 2.2); each control writes through `SettingsModel`.
 private struct SettingsForm: View {
+    /// Chosen to fit the controls and their labels on one line each; not measured against any reference.
+    private static let formWidth: CGFloat = 420
     @ObservedObject var model: SettingsModel
 
     var body: some View {
@@ -77,7 +96,7 @@ private struct SettingsForm: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 420)
+        .frame(width: Self.formWidth)
         .fixedSize(horizontal: false, vertical: true)
     }
 }
