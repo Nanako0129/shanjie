@@ -63,8 +63,21 @@ typedef struct {
 typedef struct ShanjieEngine ShanjieEngine;
 
 int32_t shanjie_engine_new(const char *data_dir, uint32_t layout, ShanjieEngine **out); // layout 0 standard, 1 ETen
+#define SHANJIE_PACK_ACG 1u   // bit0 of the packs mask below
+// acg-pack (docs/contracts/acg-pack.md A.2): word packs. packs is a bit mask (SHANJIE_PACK_ACG = ACG, packs_dir/acg-add.tsv);
+//   the rows are parsed into the lexicon, so the set is fixed for the engine's life: the shell turns a pack on or
+//   off by freeing the engine and creating another, like a layout change. packs 0 ignores packs_dir (may be NULL)
+//   and is exactly shanjie_engine_new; a missing pack file contributes nothing (same engine as without it).
+//   2 for a bit outside the mask or a non-UTF-8 data_dir or packs_dir, 1 for a NULL packs_dir with a non-zero mask, 3 when a pack file exists but cannot
+//   be read or parsed. The pack's words are capped like overlay-add.tsv's when the LM is loaded.
+int32_t shanjie_engine_new_packs(const char *data_dir, uint32_t layout, const char *packs_dir, uint32_t packs, ShanjieEngine **out);
 void    shanjie_engine_free(ShanjieEngine *engine);
 int32_t shanjie_engine_key(ShanjieEngine *engine, ShanjieKey key, ShanjieOutput **out);
+// ENTER (docs/contracts/s3a.md section 3; docs/contracts/enter-pending.md): with the candidate window open or the
+//   prediction row entered, ENTER and SHIFT+ENTER select (rules 6, 1d). Otherwise ENTER commits the composition as
+//   shown, unfinished zhuyin symbols included (rules 12a, 19), and SHIFT+ENTER commits the same and then passes the
+//   key on (handled = 0, commit non-empty; rules 12b, 19a), so the app gets its line break. COMMAND, OPTION and
+//   CONTROL+ENTER pass through unchanged (rule 1).
 // s3b2 (docs/contracts/s3b2-glass-panel.md section 8): mouse pick. index is a position in the last
 //   output's candidates; the core chooses candidate_first + index through the same path as ENTER, so
 //   learning behaves identically. V3 (docs/contracts/v3-engine.md section 4): with the candidate window
@@ -74,7 +87,7 @@ int32_t shanjie_engine_key(ShanjieEngine *engine, ShanjieKey key, ShanjieOutput 
 //   1 when engine or out is NULL; 2 when there is neither a candidate window nor a prediction row, or
 //   index is outside that output (state unchanged); 4 internal (engine reset). *out is NULL on any error.
 int32_t shanjie_engine_pick(ShanjieEngine *engine, uint32_t index, ShanjieOutput **out);
-int32_t shanjie_engine_reset(ShanjieEngine *engine, uint32_t mode, ShanjieOutput **out); // mode 0 commit then clear, 1 discard
+int32_t shanjie_engine_reset(ShanjieEngine *engine, uint32_t mode, ShanjieOutput **out); // mode 0 commit what is shown (unfinished zhuyin included, like ENTER) then clear, 1 discard
 void    shanjie_output_free(ShanjieOutput *output);
 // S2c (docs/PLAN.md S2c)
 int32_t shanjie_engine_load_lm(ShanjieEngine *engine, const char *path);               // does not change the current display

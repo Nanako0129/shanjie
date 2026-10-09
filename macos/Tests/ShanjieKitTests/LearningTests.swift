@@ -19,7 +19,7 @@ final class LearningTests: XCTestCase {
 
     private func makeShell(gate: Gate = Gate(), learning: URL? = nil, dialogs: FakeDialogs = FakeDialogs()) -> Shell {
         let shell = Shell(resources: resources, panel: FakePanel(), isSecureInput: { gate.secure },
-                          layoutStore: MemoryLayoutStore(), learningDirectory: learning, dialogs: dialogs, demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore())
+                          layoutStore: MemoryLayoutStore(), learningDirectory: learning, dialogs: dialogs, demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore())
         XCTAssertNotNil(shell.engine)
         return shell
     }
@@ -149,7 +149,7 @@ final class LearningTests: XCTestCase {
         let dir = TestLearning.directory()
         let dialogs = FakeDialogs()
         let c = Controller(makeShell(learning: dir, dialogs: dialogs))
-        XCTAssertEqual(c.session.menu.map(\.title), ["標準鍵盤", "倚天鍵盤", "避免把敏感字詞排在前面", "即時預測", "清除選字記憶…", "不要備份選字記憶"])
+        XCTAssertEqual(c.session.menu.map(\.title), ["標準鍵盤", "倚天鍵盤", "避免把敏感字詞排在前面", "即時預測", "動漫與遊戲詞", "善解設定…", "清除選字記憶…", "不要備份選字記憶"])
         XCTAssertEqual(c.session.menu.first { $0.title == "清除選字記憶…" }?.action, .clear)
         c.session.activate()
         try repick(c)
@@ -164,7 +164,7 @@ final class LearningTests: XCTestCase {
         XCTAssertEqual(dialogs.asked, 2)
         XCTAssertTrue(TestLearning.records(in: dir).isEmpty, "清除 did not clear")
         XCTAssertEqual(dialogs.failures, 0)
-        XCTAssertEqual(c.session.menu.map(\.title), ["標準鍵盤", "倚天鍵盤", "避免把敏感字詞排在前面", "即時預測", "清除選字記憶…", "不要備份選字記憶"])
+        XCTAssertEqual(c.session.menu.map(\.title), ["標準鍵盤", "倚天鍵盤", "避免把敏感字詞排在前面", "即時預測", "動漫與遊戲詞", "善解設定…", "清除選字記憶…", "不要備份選字記憶"])
     }
 
     /// A clear that does not succeed is shown, never passed off as done (here: no engine at all).
@@ -172,7 +172,7 @@ final class LearningTests: XCTestCase {
         let dialogs = FakeDialogs()
         let shell = Shell(resources: resources.appendingPathComponent("missing"), panel: FakePanel(),
                           isSecureInput: { false }, layoutStore: MemoryLayoutStore(),
-                          learningDirectory: TestLearning.directory(), dialogs: dialogs, demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore())
+                          learningDirectory: TestLearning.directory(), dialogs: dialogs, demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore())
         XCTAssertNil(shell.engine)
         let c = Controller(shell)
         c.session.perform(.clear)

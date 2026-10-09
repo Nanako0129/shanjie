@@ -27,7 +27,7 @@
 - `scripts/build-app.sh`：`cargo build --release --locked -p core` → `swift build -c release`（在 `macos/`）→ 組出 `build/善解輸入法.app` → **ad-hoc 簽章**：`codesign --force --sign - --options runtime`，不給任何 entitlements 檔。本機與 CI 都用這支；agent 執行它不碰任何鑰匙圈。不安裝、不啟動 app。
 - `善解輸入法.app/Contents`：
   - `MacOS/shanjie`
-  - `Resources/`：`mcbpmf-data.txt`、`overlay-add.tsv`、`sandhi-add.tsv`（從 `data/lexicon/` 複製；`sandhi-add.tsv` 是 S2r 加入的）、`bigram.sjlm`（從 `data/lm/` 複製；不存在、或 SHA-256 和 repo 追蹤的 `data/bigram.sjlm.sha256` 不符，就建置失敗，訊息說明可從 `model-v1` Release 下載）、選單列圖示、`zh-Hant.lproj/InfoPlist.strings`。
+  - `Resources/`：`mcbpmf-data.txt`、`overlay-add.tsv`、`sandhi-add.tsv`（從 `data/lexicon/` 複製；`sandhi-add.tsv` 是 S2r 加入的）、`packs/`（動漫與遊戲詞包：`acg-add.tsv`、`acg-sources.tsv`、`acg.json`，從 `data/packs/` 複製，建置輸入不進 App；`docs/contracts/acg-pack.md` A.2）、`bigram.sjlm`（從 `data/lm/` 複製；不存在、或 SHA-256 和 repo 追蹤的 `data/bigram.sjlm.sha256` 不符，就建置失敗，訊息說明可從 `model-v1` Release 下載）、選單列圖示、`zh-Hant.lproj/InfoPlist.strings`。
   - `Resources/LICENSES/`：`LICENSE`（Apache-2.0）、`LICENSES/McBopomofo-MIT.txt`、`LICENSES/data.md`，以及一份 CC BY-SA 4.0 的署名說明（overlay 與模型的來源與授權網址）。小麥的 MIT 要求隨附版權聲明，CC BY-SA 要求署名。
   - `Info.plist`：照小麥的鍵（`InputMethodConnectionName`、`InputMethodServerControllerClass`、`InputMethodServerDelegateClass`、`LSUIElement`、`ComponentInputModeDict`、`tsVisibleInputModeOrderedArrayKey`），bundle ID `com.nyanako.inputmethod.shanjie`，版本號來自 git tag（沒有 tag 時用 `0.0.0`）。
   - **兩個輸入模式**（§13 改為單一模式 `<bundle ID>.zhuyin`，排列改在選單切換）：`com.nyanako.inputmethod.shanjie.standard`（「善解（標準）」）與 `com.nyanako.inputmethod.shanjie.eten`（「善解（倚天）」），`TISIntendedLanguage` 為 `zh-Hant`，`tsInputModeScriptKey` 為 `smTradChinese`。
@@ -62,8 +62,8 @@
 - `scripts/install-ime.sh <善解輸入法.app 的路徑>`（通常是解壓後的 Release 附件；也接受 `build/善解輸入法.app` 自己建的 ad-hoc 版）：
   - `#!/bin/bash`、`set -euo pipefail`；`$HOME` 為空就中止；不用 sudo（R9）。
   - 目的地固定為字面路徑 `"$HOME/Library/Input Methods/善解輸入法.app"`。腳本只刪除或搬移 `~/Library/Input Methods` 裡的四個位置（§13.3）：這個目的地、舊名稱 `shanjie.app`、這次執行用 `mktemp` 建的暫存資料夾、保留上一版的 `.shanjie-previous`。輔助資料夾的名稱不是 `.app`（暫存資料夾在複製期間裡面有一個 `善解輸入法.app`）。不要同時執行兩次安裝（未加鎖）；被直接砍掉的執行可能留下 `.shanjie-staging-*`，不會自動清（同時執行的另一份看起來一樣），要手動刪。**HOME 不是這個帳號真正的家目錄時，除非設了 `SHANJIE_INSTALL_FILES_ONLY=1`，腳本一開始就拒絕執行**；files-only 模式完全不呼叫 lsregister、pkill 或註冊。
-  - 順序（修訂 13 與 PR #5 審查後）：`ditto` 到暫存資料夾（複製失敗時什麼都不放上去）→ 刪掉更早保留的 `.shanjie-previous`（先 `chmod -R u+w`）→ 舊版（`善解輸入法.app`，沒有時是舊名稱 `shanjie.app`）**先改名**為 `.shanjie-previous`、成功後才 `lsregister -u`（改名失敗時舊版仍維持登記）→ 新版改名就位 → 新舊名稱並存時刪除舊名稱那份（失敗只警告）→ 新版 `lsregister -f` → 結束舊行程並等它退出 → 執行已安裝那一份的 `install`（一律重新註冊，見 §13.3）。`trap` 只在舊版**確實已改名移開**之後、新版就位之前被中斷時，才把新版放上去，並印出只重跑 `lsregister -f` 與 `install` 的指令（不要重跑整個腳本）。其餘描述（HOME 檢查、files-only、測試、未實測項目）見 §13.3 與 §11。
-  - 最後印出下一步：到「系統設定 → 鍵盤 → 輸入方式」確認「善解」已出現；沒出現就登出再登入。
+  - 順序（修訂 13 與 PR #5 審查後）：`ditto` 到暫存資料夾（複製失敗時什麼都不放上去）→ 刪掉更早保留的 `.shanjie-previous`（先 `chmod -R u+w`）→ 舊版（`善解輸入法.app`，沒有時是舊名稱 `shanjie.app`）**先改名**為 `.shanjie-previous`、成功後才 `lsregister -u`（改名失敗時舊版仍維持登記）→ 新版改名就位 → 新舊名稱並存時刪除舊名稱那份（失敗只警告）→ 新版 `lsregister -f` → 結束舊行程並等它退出 → 執行已安裝那一份的 `install`（**2026-10-09 起只在系統還不認得或有舊模式時註冊**，見 `installer-v2.md` §9；原文：一律重新註冊，見 §13.3）。`trap` 只在舊版**確實已改名移開**之後、新版就位之前被中斷時，才把新版放上去，並印出只重跑 `lsregister -f` 與 `install` 的指令（不要重跑整個腳本）。其餘描述（HOME 檢查、files-only、測試、未實測項目）見 §13.3 與 §11。
+  - 最後印出下一步：到「系統設定 → 鍵盤 → 輸入方式」確認「善解」已出現；沒出現就在那裡按「+」加入（2026-10-09 起，見 `installer-v2.md` §9；原本寫「沒出現就登出再登入」）。
 - **agent 不得對真實的 HOME 執行 `install-ime.sh`、執行 `shanjie install`、或啟動 app**；agent 與 CI 只能透過 `scripts/test-install-ime.sh`（暫存 HOME、假 app、`SHANJIE_INSTALL_FILES_ONLY=1`）執行它。真正的安裝只由使用者執行。
 
 ## 5. 行程、引擎與組字擁有者
@@ -112,13 +112,14 @@
   - 參數只接受完全相符的 `install` 或 `--selftest`；其他參數一律 exit 非 0、沒有任何副作用。
   - 從 `Resources/` 建引擎並載入 LM；`shanjie_engine_new` 或 `shanjie_engine_load_lm` 回傳非 0 就 exit 非 0（只印錯誤碼）。
   - 用標準排列打 dev302 第 10 列（`ㄑㄧˊ ㄓㄨㄥ ㄅㄠˋ ㄍㄠˋ ㄇㄧㄥˊ ㄊㄧㄢ ㄧㄠˋ ㄐㄧㄠ`），以 `set_profile(0)` 與 `set_profile(1)` 各送出一次：分別等於 `其中報告明天要交`（chat）與 `期中報告明天要交`（formal）才 exit 0。不印任何內容。
+  - 再用 `Resources/packs`（預設就是開）建一個帶詞包的引擎，標準排列、`set_profile(0)` 打 `ㄉㄧㄥˋ ㄩㄢˊ ㄊㄤˊ`，等於 `碇源堂`（不帶詞包時聊天設定是 `定元堂`）才 exit 0；詞包缺檔、壞檔、或沒有生效都 exit 非 0（`acg-pack.md` A.2）。
   - 不得呼叫 TIS、不得寫任何檔案或 UserDefaults、不得建立 NSApplication 或 IMK server。
 
 ## 10. 驗收
 
 **agent 可做的（executor 做、verifier 重做；CI 也跑 1–6）：**
 1. `scripts/build-app.sh` 成功，產出 `build/善解輸入法.app`。
-2. `plutil -lint` 通過；兩個輸入模式、bundle ID、`InputMethodConnectionName`、`InputMethodServerControllerClass` 都在；`Resources/` 有四個資料檔（S2r 加入 `sandhi-add.tsv`）、圖示與 `LICENSES/`（含 Apache-2.0、小麥 MIT、`data.md`、CC BY-SA 署名說明）。
+2. `plutil -lint` 通過；兩個輸入模式、bundle ID、`InputMethodConnectionName`、`InputMethodServerControllerClass` 都在；`Resources/` 有四個資料檔（S2r 加入 `sandhi-add.tsv`）、`packs/`（`acg-add.tsv`、`acg-sources.tsv`、`acg.json`，`acg.json` 裡的 SHA-256 與實際檔案相符）、圖示與 `LICENSES/`（含 Apache-2.0、小麥 MIT、`data.md`、CC BY-SA 署名說明）。
 3. `codesign --verify --strict --deep` 通過；`codesign -d --entitlements - build/善解輸入法.app` 的輸出沒有任何 entitlement；`codesign -dv` 的 flags 含 `runtime`。
 4. Swift 測試（`swift test`，在 `macos/`），全部經由真正的 C 核心（`Resources` 等同的 `data/lexicon` 與 `data/lm/bigram.sjlm`；測試資料目錄由 `Support.swift` 的 `TestData.files` 列出，含 `sandhi-add.tsv`；缺檔就失敗並說明怎麼取得）：
    - 按鍵翻譯：ANSI 表每個鍵、兩種排列的 37 個注音鍵與 5 個聲調鍵、各特殊鍵、修飾鍵位元、`nil` 事件。
@@ -139,7 +140,7 @@
    - 之後**結束標記**：同樣的 Logger 與層級，以 `.public` 記一個**不同的**標記；輪詢到它出現才停止擷取。起始與結束標記都出現，測試才有效。
    - 斷言：擷取結果不含任何負向標記（送出的漢字、它的注音 preedit、按鍵字元序列、bundle ID 標記、路徑標記），而且殼的 subsystem 輸出裡沒有 `<private>`（殼只准記靜態字串與回傳碼）。
    - verifier 在殼的輸出套用路徑暫時加一行 `logger.debug("\(commit, privacy: .public)")` 時，這個測試必須失敗；改成 `.private` 時，`<private>` 斷言必須失敗；改成 `NSLog("%@", commit)` 時也必須失敗。
-6. `make selftest-bundled` 與 `build/善解輸入法.app/Contents/MacOS/shanjie --selftest` 都 exit 0；`make` 的過期防護有效（只動 `core/` 後 `make build`，執行檔會重新連結）；執行前後 `~/Library/Input Methods/`、`~/Library/Preferences/com.nyanako.inputmethod.shanjie.plist`、TIS 的輸入法清單都沒有變化。verifier 把 `build/善解輸入法.app/Contents/Resources/bigram.sjlm` 改名後再跑，必須 exit 非 0；還原後 exit 0。
+6. `make selftest-bundled` 與 `build/善解輸入法.app/Contents/MacOS/shanjie --selftest` 都 exit 0（自測在不帶詞包之外，也用 `Resources/packs` 建一個帶詞包的引擎並要求打出詞包詞「碇源堂」，詞包缺檔或壞檔就失敗）；`make` 的過期防護有效（只動 `core/` 後 `make build`，執行檔會重新連結）；執行前後 `~/Library/Input Methods/`、`~/Library/Preferences/com.nyanako.inputmethod.shanjie.plist`、TIS 的輸入法清單都沒有變化。verifier 把 `build/善解輸入法.app/Contents/Resources/bigram.sjlm` 改名後再跑，必須 exit 非 0；還原後 exit 0。
 7. 核心的 `cargo test` 與 PR #1 的 CI 步驟照舊全綠。
 8. `release.yml`：在 PR 上無法真正簽章，所以 agent 只驗證結構：gate 只等 `ci.yml`；有 `workflow_dispatch` 試跑（不 publish）；build 工作用固定的 Rust 1.97.1，並在 `build-app.sh` 之前下載模型、以 `data/bigram.sjlm.sha256` 比對；sign 工作的 `environment: release`、只接受 `refs/tags/v*`、缺材料就失敗的檢查、一次性鑰匙圈在結束時刪除、驗證步驟齊全。第一次真正的發布由使用者推 tag 觸發（見下）。
 
@@ -182,7 +183,7 @@
   - **偏好**：`LayoutStore` 協定只有一個 `layout: String?`（存 `InputMode` 的 raw value）。`ShanjieKit` 只有記憶體版 `MemoryLayoutStore`；UserDefaults 版 `DefaultsLayoutStore` 在 `Shanjie` target 的 `main.swift`，用 `UserDefaults.standard`（由 IMK 行程讀時就是 app 自己的網域，即 bundle ID），鍵 `layout`。`Shell.init` 的 `layoutStore` 沒有預設值；先讀偏好算出排列、再呼叫唯一一次 `build()`。值不存在、空字串、大小寫不同（`ETEN`）、`zhuyin` 或完整模式 ID 都視為不合法 → 標準。
   - **選單**：`menu()` 每次呼叫都重建一個 `NSMenu`，兩個項目「標準鍵盤」「倚天鍵盤」，目前的排列 `state = .on`；action 分別是 `selectStandardLayout(_:)`、`selectEtenLayout(_:)`，不設 target、不看 `sender`（仿小麥注音，由 IMK 轉給 controller）。選了就呼叫 `Shell.selectLayout`：先走既有的 `switchMode`（組字送回擁有者、重建引擎、重載 LM 與設定），再存偏好；選目前的排列時不重建，但仍寫一次偏好。選單動作不改變組字擁有者。**未驗證**：IMK 實際如何呼叫這兩個 action、打勾是否顯示，沒有啟動輸入法實測（契約禁止），由使用者實測（§13.4 第 5 項）確認。
   - **`setValue`**：殼不覆寫（`InputController.swift` 有註解說明），`InputMode(modeID:)` 與 `Session.setInputMode` 已刪除；任何模式 ID，包括還沒被停用的舊 `.standard`／`.eten`，都不會改變排列（§13.3）。
-  - **`shanjie install`**：`TISRegisterInputSource` 一律呼叫；它回傳錯誤時只印警告、繼續查清單（契約沒寫註冊失敗怎麼處理；已登記過的 bundle 再註冊是否回錯誤沒有量測），由「列不到 `.zhuyin` → exit 3」決定結果（v0.1.1 起另有「已啟用清單裡沒有輸入法本體 → exit 3」，見 §13.3）。模式以 `kTISPropertyInputModeID` 比對（沿用原本的做法）。停用舊模式失敗時印一行固定的警告，不影響 exit 0。
+  - **`shanjie install`**（**已由 `installer-v2.md` §9 修訂：系統已接受、或認得但未接受時都不呼叫任何 TIS 修改函式**）：`TISRegisterInputSource` 一律呼叫；它回傳錯誤時只印警告、繼續查清單（契約沒寫註冊失敗怎麼處理；已登記過的 bundle 再註冊是否回錯誤沒有量測），由「列不到 `.zhuyin` → exit 3」決定結果（v0.1.1 起另有「已啟用清單裡沒有輸入法本體 → exit 3」，見 §13.3）。模式以 `kTISPropertyInputModeID` 比對（沿用原本的做法）。停用舊模式失敗時印一行固定的警告，不影響 exit 0。
   - **`install-ime.sh`**：目的地、舊名稱、上一版三個字面路徑放在 `DEST`／`LEGACY`／`PREV` 變數；`lsregister -u` 集中在 `unregister()`，files-only 時不呼叫。上一版的選擇：有 `善解輸入法.app` 就是它，否則是舊的 `shanjie.app`；新版就位後若舊名稱還在（兩者並存），`lsregister -u` 後先 `chmod -R u+w` 再刪除。`SHANJIE_TEST_LSREGISTER` 只在 files-only 分支讀取。exit 3 的訊息照契約的文字，但路徑寫成 `~/Library/Input\ Methods/…`，讓使用者可以直接貼上執行。`pkill`／`pgrep` 的正規表示式是 `^<跳脫後的 HOME>/Library/Input Methods/(善解輸入法|shanjie)\.app/Contents/MacOS/shanjie( |$)`；用 `grep -E` 對含 `.`、空白與括號的 HOME 量過（命中兩個名稱、不命中 `.shanjie-previous` 與 `.` 被換掉的路徑），`pkill` 本身沒有在真實系統跑過。
   - **`test-install-ime.sh`**：lsregister、`pkill`、`pgrep` 的替身只把呼叫寫進一個紀錄檔；每個情況結束都斷言紀錄檔不存在。拒絕執行的情況用 `chmod 500` 的 HOME，並比對錯誤訊息是 HOME 檢查的那一句。新增只有舊名稱、新舊並存（舊名稱唯讀、另有更早的 `.shanjie-previous`）兩種升級。2026-10-04 實測：把 `unregister()` 的 files-only 判斷拿掉，測試以「overwrite: the system was called: lsregister -u …」失敗（呼叫的是替身）。
   - **`check-app.sh`**：模式清單只取 PlistBuddy 輸出中一層縮排的鍵，必須恰好是 `.zhuyin`（另以兩個模式的 plist 副本確認會列出兩行）；另查資料夾名稱、`CFBundleDevelopmentRegion = en`、`CFBundleName = Shanjie`、`LSHasLocalizedDisplayName`，以及 `zh-Hant`／`en` 兩份 `InfoPlist.strings` 的 `CFBundleName`、`CFBundleDisplayName` 與模式名稱。
@@ -210,10 +211,12 @@
 
 - Info.plist 只有一個模式 `<BUNDLE_ID>.zhuyin`（「善解輸入法」／「Shanjie」，`TISIntendedLanguage` 為 `zh-Hant`，`tsInputModeScriptKey` 為 `smTradChinese`），`tsVisibleInputModeOrderedArrayKey` 只有它；`zh-Hant` 與 `en` 的 `InfoPlist.strings` 都有這個模式 ID 的名稱。
 - `IMKInputController.menu()` 回傳兩個互斥項目「標準鍵盤」「倚天鍵盤」（目前的打勾），**各自用獨立的 selector**（IMK 呼叫時 `sender` 不一定是 `NSMenuItem`）。選了就走既有的切換排列流程（§5：送出組字、重建引擎、重載 LM 與設定），並存下選擇。
-- **「避免把敏感字詞排在前面」**（`docs/contracts/sw-sensitive-demote.md` §3）：選單的第三項，獨立的 selector（`toggleDemote`），預設打勾；每按一次切換並立刻呼叫 `shanjie_engine_set_demote`，也在每次重建引擎（換排列）時再送一次。偏好存在 app 自己的 UserDefaults，鍵 `demoteSensitive`（沒有值就是開）；介面 `DemoteStore` 是 `Shell.init` 的必要參數、不給預設值（和 `LayoutStore` 一樣）；UserDefaults 版只放在 `Shanjie` target，`ShanjieKit` 與測試用記憶體版，所以測試不可能寫到真正的偏好。選單順序因此是：標準鍵盤、倚天鍵盤、避免把敏感字詞排在前面、即時預測（V3 修訂一，`v3-engine.md` §10.5，比照這一項：獨立 selector `togglePrediction`、預設打勾、UserDefaults 鍵 `prediction`、`PredictionStore` 是 `Shell.init` 的必要參數、在 `setDemote` 之後套用）、清除選字記憶…、不要備份選字記憶。`shanjie_engine_set_demote` 比照 `set_profile` 重算目前的組字並回傳快照，擁有組字的 session 立刻把它顯示出來，所以組字到一半切換，preedit 馬上在「搞完這波」與「睪丸這波」之間變。
+- **「避免把敏感字詞排在前面」**（`docs/contracts/sw-sensitive-demote.md` §3）：選單的第三項，獨立的 selector（`toggleDemote`），預設打勾；每按一次切換並立刻呼叫 `shanjie_engine_set_demote`，也在每次重建引擎（換排列）時再送一次。偏好存在 app 自己的 UserDefaults，鍵 `demoteSensitive`（沒有值就是開）；介面 `DemoteStore` 是 `Shell.init` 的必要參數、不給預設值（和 `LayoutStore` 一樣）；UserDefaults 版只放在 `Shanjie` target，`ShanjieKit` 與測試用記憶體版，所以測試不可能寫到真正的偏好。選單順序因此是：標準鍵盤、倚天鍵盤、避免把敏感字詞排在前面、即時預測（V3 修訂一，`v3-engine.md` §10.5，比照這一項：獨立 selector `togglePrediction`、預設打勾、UserDefaults 鍵 `prediction`、`PredictionStore` 是 `Shell.init` 的必要參數、在 `setDemote` 之後套用）、動漫與遊戲詞（`acg-pack.md` A.2：獨立 selector `toggleAcgPack`、預設打勾、鍵 `acgPack`、`AcgPackStore` 是 `Shell.init` 的必要參數；詞包屬於詞庫，所以和切換排列一樣送出組字、重建引擎，詞包載入失敗時退回不帶詞包的引擎，偏好不動）、善解設定…（`settings-window.md`：獨立 selector `openSettings`，開設定視窗，放在清除選字記憶…之前）、清除選字記憶…、不要備份選字記憶。`shanjie_engine_set_demote` 比照 `set_profile` 重算目前的組字並回傳快照，擁有組字的 session 立刻把它顯示出來，所以組字到一半切換，preedit 馬上在「搞完這波」與「睪丸這波」之間變。
 - **偏好**：介面 `LayoutStore`（讀／寫 `standard`／`eten`）是 `Shell.init` 的**必要參數、不給預設值**；UserDefaults 版（app 自己的網域，鍵 `layout`）只放在 `Shanjie` target，`ShanjieKit` 與測試用記憶體版，所以測試不可能寫到真正的偏好。值不存在或不合法時用標準排列。**`Shell.init` 先讀偏好、再建引擎，只建一次**（約 240 MB）。
 
 ### 13.3 註冊與升級
+
+> **2026-10-09 修訂（`installer-v2.md` §9）**：本節下面的「一律呼叫 `TISRegisterInputSource`」、exit 3 的「登出再登入後再執行一次」、`install-ime.sh` 回傳 3 時的訊息，都已被取代。現在的規則：`Registration.decide` 只在系統還不認得 `.zhuyin` 模式，或有已啟用的舊模式時，才呼叫註冊與啟用；已接受時印 `already enabled; registration skipped` 並 exit 0；認得但未接受時不改任何東西，最多等 5 秒，等不到就 exit 3，請使用者到「系統設定 → 鍵盤 → 輸入方式」加入。原因：bundle 換過之後再註冊或啟用，會讓系統的 Caps Lock 切換壞掉；而且對還沒接受的輸入法，程式化啟用實測沒有效果（研究紀錄 2026-10-09）。下面保留原文，作為 0.1.x 的紀錄。
 
 - `shanjie install` 依序：一律呼叫 `TISRegisterInputSource(Bundle.main.bundleURL)`（不再在 bundle ID 已知時略過）→ 在 `TISCreateInputSourceList` 找 `<BUNDLE_ID>.zhuyin`：
   - 列不到 → **exit 3**（和其他失敗區分；main.swift 的回傳碼是 0、1、3、64）。
@@ -250,7 +253,7 @@
 
 ### 13.5 範圍外
 
-注音以外的輸入法（拼音、倉頡等）；選單裡的其他項目（偏好設定、關於）。
+注音以外的輸入法（拼音、倉頡等）；選單裡的其他項目（關於）。偏好設定視窗見 `docs/contracts/settings-window.md`。
 
 ## 14. 修訂二：Homebrew cask（使用者 2026-10-04）
 
@@ -268,12 +271,12 @@
     - Ruby 的 `postflight do` 會被目前的 `brew style` 判為違規（Cask/InstallSteps），規則要求改用 `postflight_steps`。
     - `postflight_steps` 在 Homebrew 的沙盒裡執行（`cask/artifact/abstract_artifact.rb` 把 `HOME` 設成暫存資料夾，`sandbox.rb` 的 `deny_read_home` 擋住讀取真正的家目錄），`~` 開頭的指令路徑也不會展開（`install_steps.rb` 的 `resolve_command`）。這樣寫出來的步驟找不到執行檔；加上 `must_succeed: false`，安裝仍然顯示成功，等於「靜靜地沒做」。
     - 就算改成 `base: :home` 讓沙盒放行讀取，`TISRegisterInputSource` 在沙盒裡能不能成功也沒有量過。
-  - `uninstall on_upgrade: :signal, signal: ["TERM", "com.nyanako.inputmethod.shanjie"]`：解除安裝和升級時都結束執行中的行程，系統下次就會啟動新版。Homebrew 預設在升級時略過 `signal`（`UPGRADE_REINSTALL_SKIP_DIRECTIVES`），所以要加 `on_upgrade`。Homebrew 用 `launchctl list` 的標籤找行程；2026-10-04 在本機看到其他輸入法的標籤是 `application.<bundle ID>.<數字>.<數字>`，符合它的比對規則。
+  - `uninstall on_upgrade: :signal, signal: ["TERM", "com.nyanako.inputmethod.shanjie"]`：解除安裝和升級時都結束執行中的行程，系統下次就會啟動新版。Homebrew 預設在升級時略過 `signal`（`UPGRADE_REINSTALL_SKIP_DIRECTIVES`），所以要加 `on_upgrade`。Homebrew 用 `launchctl list` 的標籤找行程；2026-10-04 在本機看到其他輸入法的標籤是 `application.<bundle ID>.<數字>.<數字>`，符合它的比對規則。**已由 §15（修訂四）取代**：0.3.0 實測升級後舊版仍在跑，改成 `postflight_steps` 在新版就位後結束行程，`uninstall` 只留 `signal`。
   - `zap trash: "~/Library/Preferences/com.nyanako.inputmethod.shanjie.plist"`：目前唯一的使用者資料，也就是 `layout` 偏好。
-  - `caveats`：第一次安裝後執行 `"$HOME/Library/Input Methods/善解輸入法.app/Contents/MacOS/shanjie" install`，由它註冊並啟用輸入方式；第一次安裝通常要登出再登入：它結束碼是 3 時，登出、再登入，然後再執行一次（修訂三）。caveats 不提升級；升級後要不要再做什麼，屬於下面 `on_upgrade` 那個未驗證項目，實測後再補。
+  - `caveats`：第一次安裝後執行 `"$HOME/Library/Input Methods/善解輸入法.app/Contents/MacOS/shanjie" install`，由它註冊並啟用輸入方式；第一次安裝通常要登出再登入：它結束碼是 3 時，登出、再登入，然後再執行一次（修訂三）。caveats 不提升級；升級後由 §15 的 postflight 接手。**2026-10-09 修訂（`installer-v2.md` §9）**：「登出、再登入再執行一次」已取代，現在 caveats 寫「結束碼是 3 時，到系統設定 → 鍵盤 → 輸入方式加入」。
 - **未驗證**（由使用者實測，見 14.5，停止條件見 14.7）：
   - 從 Homebrew 下載的 app 帶有 quarantine（已公證、已 staple）：在終端機執行 caveats 的 `install` 時，以及系統啟動輸入法時，會不會跳出確認視窗；
-  - `on_upgrade` 送出的 TERM 是否確實讓新版接手（要到第二次發版才測得到）。
+  - `on_upgrade` 送出的 TERM 是否確實讓新版接手（要到第二次發版才測得到）。**結果**（2026-10-08，升級到 0.3.0）：沒有，見 §15。
 - README 加「安裝」一節，內容包括：
   - brew 指令與 caveats 的內容；
   - 從 Release 下載 zip，用 Finder 解壓後執行 `scripts/install-ime.sh`；
@@ -352,16 +355,133 @@
 ### 14.7 停止條件與回滾
 
 - **停止條件**（使用者實測 v0.1.0 之後判斷）：
-  - `brew install` 加上 caveats 的 `install` 之後（必要時登出再登入），「善解輸入法」出現在輸入方式清單、加入後可以打字 → 通過。
+  - `brew install` 加上 caveats 的 `install` 之後（必要時登出再登入；2026-10-09 起改為到系統設定加入，見 `installer-v2.md` §9），「善解輸入法」出現在輸入方式清單、加入後可以打字 → 通過。
   - 跳出 Gatekeeper 視窗，但按「打開」之後一切正常 → 通過，並在 README 註明這個視窗。
   - 以下任一種 → 停止推薦 brew：
     - 輸入方式加不進去或無法打字；
     - Gatekeeper 擋住而且無法放行；
     - caveats 沒有印出。
     - 停止推薦的做法：開一個後續 PR，刪掉 README 的 brew 說明；cask 依下面的回滾移除，或修正後再發版。手動安裝（zip 加上 `install-ime.sh`）不受影響。
-  - 升級（`on_upgrade` 的 TERM）要到第二次發版才測得到。如果舊版還在服務，caveats 加一句「升級後登出再登入」，不擋 v0.1.0。
+  - 升級（`on_upgrade` 的 TERM）要到第二次發版才測得到。如果舊版還在服務，caveats 加一句「升級後登出再登入」，不擋 v0.1.0。**已由 §15 取代**：0.3.0 實測舊版還在服務，處理方式改成 §15 的 postflight，不在 caveats 加這一句。
 - **回滾**（每一步都是外部動作，執行前要使用者當次同意）：
   - deploy key：用 `gh repo deploy-key list --repo Nanako0129/homebrew-tap` 找到 `shanjie release (environment)` 的 ID，再 `gh repo deploy-key delete <ID> --repo Nanako0129/homebrew-tap`。
   - secret：`gh secret delete HOMEBREW_TAP_DEPLOY_KEY --env release --repo Nanako0129/shanjie`。
   - cask：在 tap 開一個 commit，`git rm Casks/shanjie.rb`（用使用者自己的 gh 身分）。
   - `release.yml` 與 repo 內的檔案：revert 本片的 merge commit。
+
+## 15. 修訂四：升級後由新版接手（使用者 2026-10-08）
+
+### 15.1 起因與原因
+
+- **量到的**：v0.3.0 發佈當天，一位用 brew 的使用者在 Discord 回報：`brew upgrade` 之後 bundle 已經是 0.3.0（他自己確認），選單卻還是舊版（沒有「即時預測」），手動 `pkill` 之後才換成新版。§14.1 的未驗證項目「`on_upgrade` 的 TERM 讓新版接手」因此不成立。使用者：「那就在 cask 再加一下」。
+- **Homebrew 的順序**（讀本機 Homebrew 7.0.7 原始碼）：升級時先跑舊 cask 的解除安裝步驟，順序照 `cask/artifact/abstract_artifact.rb` 的 `sort_order`：`Uninstall`（我們的 TERM）排在 `InputMethod`（把舊 bundle 搬走）前面，新 bundle 更晚才搬進來。送完訊號後 `uninstall_signal` 會等 3 秒。找行程用的 `launchctl list` 標籤符合它的規則（§14.1；2026-10-08 本機再看一次：`application.com.nyanako.inputmethod.shanjie.<數字>.<數字>`），所以不是找不到行程。
+- 原本的**推論**：訊號送出時，舊 bundle 還在原路徑，系統在這段空檔重新啟動輸入法，啟動的就是舊版。**實測推翻**（§15.3 第 3 項，2026-10-08）：那一次 TERM 根本沒有送出。
+- **量到的原因**：
+  - 升級時，Homebrew 從 `INSTALL_RECEIPT.json` 讀已安裝那一版的解除安裝步驟，`on_upgrade` 在 JSON 裡是字串 `"signal"`。`brew --debug` 印出的 artifact 是 `@directives={on_upgrade: "signal", …}`，是字串，不是 symbol。
+  - `cask/artifact/uninstall.rb` 的 `uninstall_phase` 只認 Symbol 或 Array，字串會落到 `else []`。於是 `signal` 照 `UPGRADE_REINSTALL_SKIP_DIRECTIVES` 被略過。
+  - 實測的 log 裡看不到 `/bin/launchctl list`（brew 在 verbose 加 debug 時會印出它執行的指令，同一份 log 裡 curl 就有印），也看不到 `Signalling`。舊行程在「解除安裝 → 搬走 → 搬進新版」整段都還活著。
+  - 所以 `on_upgrade` 從第一版起，只要已安裝的那一版是從 receipt 讀回來的，就不會生效。這是 Homebrew 7.0.7 的行為；回報給 Homebrew 是外部動作，要使用者決定。
+
+### 15.2 做法
+
+- cask 加上 `postflight_steps`，裡面放一步 `terminate_process '<pattern>', match: :full`，並帶一句 `notices:`（「Stopping any running copy of the input method so the new version is used」；`brew style` 限每行 118 字，原本較長的句子超過，verifier 抓到），讓使用者知道打字為什麼會頓一下，也讓 §15.3 第 3 項看得到這一步。
+  - Homebrew 會執行 `/usr/bin/pkill -f <pattern>`（`install_steps.rb` 的 `run_terminate_process`）。沒有符合的行程時 pkill 失敗，而 `terminate_process` 預設忽略失敗。
+  - postflight 是安裝階段的最後一步，新 bundle 已經就位，所以系統之後啟動的一定是新版。
+  - install、reinstall、upgrade 都會跑這一步。notice 在 pkill 之前一定會印出（`run_terminate_process` 的 `ohai`），所以第一次安裝時也看得到這一行；那時沒有行程在跑，pkill 找不到行程，結果被忽略。notice 的措辭因此寫成「停止任何執行中的那一份」，不說「重新啟動」。
+- pattern 是 `^[^ ]*/Library/Input Methods/(善解輸入法|shanjie)\.app/Contents/MacOS/shanjie$`：
+  - 結尾錨定 `shanjie$`：系統啟動輸入法時不帶參數（2026-10-08 本機 `ps`：命令列就是 bundle 裡執行檔的路徑），所以 `shanjie install` 不會被結束。
+  - 開頭 `^[^ ]*`：命令列開頭到 `/Library/Input Methods/` 之前不能有空白。別的程式只是在參數裡提到這個路徑時（命令列先是那個程式自己的路徑和空白），就不會符合。前綴可以是空的，所以裝在系統層 `/Library/Input Methods`（`--input-methoddir`）的也符合（本機 review 指出，原本的 `^/[^ ]*` 漏掉這種）。代價是家目錄路徑含空白的帳號不會被結束，這種帳號維持修訂前的行為：要手動結束舊行程或登出。
+  - `shanjie.app` 是 §13 改名前的名稱，寫法和 `install-ime.sh` 相同。
+  - pattern 不錨定家目錄，這點和 `install-ime.sh` 不同。原因：postflight 在 Homebrew 的沙盒裡執行，HOME 是暫存資料夾，cask 也沒有家目錄的 token（`{{user}}` 只是帳號名稱）。pkill 本來就只能結束自己帳號的行程。
+  - 沙盒：`extend/os/mac/sandbox.rb` 的設定是 `(allow default)`，再擋掉讀家目錄、網路和部分寫入，沒有擋送訊號。pkill 也不讀家目錄。這一步在沙盒裡實際有沒有效，由 §15.3 的第 3 項量。
+- `uninstall` 只留 `signal`，拿掉 `on_upgrade`。理由有兩個：從 receipt 讀回時它本來就不生效（§15.1）；就算 Homebrew 修好了，它也在新 bundle 就位前送出 TERM（照 `sort_order`），只會讓舊版有機會被重新啟動。升級已經由 postflight 處理。解除安裝時照樣結束執行中的行程。
+- 這不是 §14.1 拒絕的「在 cask 裡執行 `install`」：`terminate_process` 不讀家目錄，也不呼叫 TIS。註冊照舊由 caveats 請使用者執行，§14.1 列的原因沒有改變。
+- **什麼時候生效**：postflight 屬於新版的 cask，所以從「升級到含本修訂的版本」那一次開始生效。升級到 0.3.0 或更早的版本，仍然要手動結束舊行程。README 寫明這一點，並在實測（§15.3 第 3 項）之後才寫「之後的版本會自動接手」。
+
+### 15.3 驗收
+
+1. `scripts/test-render-cask.sh`（CI 的 cask 步驟會跑）：
+   - 用 Homebrew 自己的載入器（`brew ruby` 加 `Cask::CaskLoader::FromContentLoader`）讀渲染出來的 cask：`postflight_steps` 裡要剛好有一個 `terminate_process`，`match` 是 `full`（少了它，Homebrew 會改跑 `killall`，什麼都比不到）。pattern 也從這裡取，不從原始碼文字抓。
+   - 用 6 個替身行程測 pattern。替身行程是 `cat` 接在 pipe 上，用 `exec -a` 設定命令列，再透過 `pgrep -f` 比對，它和 pkill 的比對方式相同：
+     - 要符合：善解輸入法.app 的執行檔；舊名 shanjie.app 的執行檔；系統層 `/Library/Input Methods` 的執行檔。
+     - 不能符合：`shanjie install`；`/usr/bin/editor <路徑>`；`install-ime.sh` 保留的上一版（整個 bundle 改名成 `.shanjie-previous`，執行檔在 `.shanjie-previous/Contents/MacOS/shanjie`）。
+   - 替身行程沒有在 5 秒內啟動、或 pattern 什麼都比不到時，測試也要印出原因再失敗。
+   - 渲染出來的 cask 跑 `brew style`，不能有違規。
+2. 突變（本機）：8 種改法，第 1 項都要失敗，而且失敗訊息要指出原因或是哪一個替身行程。改法是：拿掉 `match: :full`；`postflight_steps` 改成 `preflight_steps`；拿掉開頭的 `^[^ ]*`（放寬）；拿掉結尾的 `$`（放寬）；`(善解輸入法|shanjie)\.app` 整段換成 `[^/]*`（放寬，會比對到上一版）；拿掉舊名（變窄）；開頭改回 `^/[^ ]*`（變窄，漏掉系統層）；pattern 換成什麼都比不到的字串。
+3. **實機**（main 執行，**做之前先問使用者**；使用者 2026-10-08 同意）：
+   - 起始狀態：這台機器上 brew 的紀錄是 0.1.2，它的 receipt 裡有 `on_upgrade` 的 signal。bundle 本身已經被安裝程式換成 0.3.0（Developer ID 簽章，Team 2LJ882GPY8，cdhash 和 Release 的 zip 相同）。
+   - 怎麼看到那一步：brew 一律加 `--verbose --debug` 執行，這時 Homebrew 會印出它執行的每個指令（`system_command.rb`，verbose 與 debug 都開才印）。輸出每一行用 perl 加上時間戳記，存成 `brew.log`。同時在背景每 0.2 秒記錄一次符合 pattern 的行程 PID，也帶時間戳記，存成 `pids.log`。這一步在 Homebrew 沙盒裡的子行程執行，verbose 與 debug 會不會傳進子行程沒有確認過；所以這一步另外帶一個 `notices:`，Homebrew 會在第一次嘗試之前用 `ohai` 印出來（`run_terminate_process`），一般使用者升級時也會看到。下面說的「pkill 那一刻」，指的是 `brew.log` 裡這行 notice 的時間；有印出 `/usr/bin/pkill -f <pattern>` 那一行的話，用那一行。
+   - **第一次：升級**（0.1.2 → 0.3.0）：
+     1. 在本機的 tap checkout（`$(brew --repository)/Library/Taps/nanako0129/homebrew-tap`，不推送）裡，把 `Casks/shanjie.rb` 換成本修訂的範本，用 0.3.0 的版本與 Release 的 sha256 渲染。
+     2. 執行 `HOMEBREW_NO_AUTO_UPDATE=1 brew upgrade --cask --verbose --debug nanako0129/tap/shanjie`。
+     3. 判讀：
+        - 如果 pkill 那一刻有符合的 PID 活著，而且之後消失，就算 postflight 接手成功。
+        - 舊 receipt 的 TERM 會先送一次，可能已經把行程結束了。如果 pkill 那一刻沒有符合的 PID，這次對 postflight 不算數（inconclusive），改看第二次。
+        - 舊 TERM 有沒有送出、送出後 3 秒內有沒有出現新的 PID，記錄下來，用來驗證 §15.1 的推論。
+   - **第二次：重新安裝**（這次 postflight 是唯一會結束行程的步驟）：
+     - 第一次跑完後，receipt 已經是新版 cask，裡面沒有 `on_upgrade`；Homebrew 在 reinstall 時會略過 `signal`（`uninstall.rb` 的 `UPGRADE_REINSTALL_SKIP_DIRECTIVES`）。
+     - 先確認有一個符合的行程在跑。沒有的話，請使用者在任一 App 打一個字，讓系統啟動輸入法。
+     - 然後在 tap 仍是新版 cask 的狀態下，執行 `HOMEBREW_NO_AUTO_UPDATE=1 brew reinstall --cask --verbose --debug nanako0129/tap/shanjie`。
+     - 通過：pkill 那一刻那個 PID 活著，之後消失；`brew.log` 裡沒有對這個 PID 送 TERM 的 signal 步驟。
+   - 兩次都結束之後：用 `git -C <tap> checkout -- Casks/shanjie.rb` 還原 tap。確認 `brew info` 是 0.3.0，bundle 的 cdhash 和 Release 相同。系統之後啟動的輸入法行程，啟動時間要晚於最後一次 pkill，必要時等使用者下一次打字後再查。
+   - 結束狀態：bundle 是同一個 0.3.0 Release，brew 紀錄是 0.3.0。學習資料與偏好設定都不動（沒有跑 zap）。
+   - 出錯時的還原：從 Release 下載 `shanjie-0.3.0.zip`，對照 `.sha256` 確認，再用 `scripts/install-ime.sh` 裝回去。
+   - 研究紀錄寫明是哪一次證明了接手。
+   - **結果**（2026-10-08，Homebrew 7.0.7，使用者同意後由 main 執行）：第一次（升級）就判定成功，所以沒有跑第二次。
+     - 舊行程 PID 93082 在解除安裝、搬走、搬進新版的整段都還活著。0.2 秒取樣的紀錄：notice 前 0.21 秒還在。
+     - notice 印出後 0.03 秒內，這個 PID 就消失了。
+     - 舊 receipt 的 `on_upgrade` signal 沒有執行，原因見 §15.1。
+     - 之後系統啟動的新行程，啟動時間晚於 notice 約 8 秒，`lsof` 看到它執行的是新搬進來的 bundle。
+     - `brew info` 是 0.3.0，bundle 的 cdhash 和 Release 相同。
+     - tap 用 `git checkout` 還原後，本機 tap 落後成 0.1.2，brew 把它當成「可升級」。所以 main 再 `git pull --ff-only` 到遠端的 0.3.0，`brew outdated` 不再列出善解。
+     - `/usr/bin/pkill -f` 那一行沒有印出來：verbose 與 debug 沒有傳進沙盒裡的子行程，所以用 notice 判讀。
+   - **最終版再跑一次**（2026-10-09，review 之後 pattern 開頭改成 `^[^ ]*`、notice 改了措辭）：用上面的第二次做法跑 `brew reinstall`。那次的 notice 是 8853a3e 的文字；424eda6 只再把 notice 縮短（`brew style` 行長），pattern 與 `match` 不變。
+     - receipt 已經是新版 cask，log 裡沒有 `Signalling`，也沒有 `launchctl list`：reinstall 照規則略過 `signal`。
+     - 舊行程 PID 9892 撐過解除安裝、移除、搬進新版，notice 前 0.27 秒還在，notice 後 0.01 秒內消失。所以這次結束它的只有 postflight。
+     - 跑完後 tap 用 `git checkout` 還原（本機 tap 停在 0.3.0 的 0960ea0），`brew outdated` 沒有列出善解，bundle 的 cdhash 和 Release 相同。
+     - 之後系統啟動的新行程 PID 21110，啟動時間 00:00:35，比 notice 晚約 20 秒（使用者下一次打字時）。
+4. README 的 Homebrew 段落加上升級說明（`brew update` 只更新清單；升級要用 `brew upgrade --cask shanjie`），還有 15.2 的生效時間。`docs/verification.md` 更新 `test-render-cask.sh` 那一列。研究紀錄寫下起因、原因、實測結果。
+
+### 15.4 停止條件、回滾、範圍外
+
+- **停止條件**（出現任何一項就不合併）：
+  - 第 3 項用來判定的那一次（升級，或升級不算數時的重新安裝）的 `brew.log` 沒有 notice 那一行，或 pkill 之後那個 PID 還在；
+  - pattern 符合了不是善解的行程（第 1 項或實機的 pgrep 紀錄）；
+  - `brew style` 不過。
+- **回滾**：發佈後如果出問題，有兩步。
+  - 在 tap 開一個 commit，把 `Casks/shanjie.rb` 換回上一版的內容。用使用者的 gh 身分，這是外部動作，要先問。
+  - revert 本片的 merge commit。
+  - 已經跑過 postflight 的使用者沒有殘留：這一步只結束行程，不寫任何檔案。
+- **範圍外**：
+  - 第一次安裝時自動註冊。§14.1 的原因仍然成立，TIS 在 Homebrew 沙盒裡能不能註冊也沒有量過。
+  - `zap` 加入學習資料：交給 App 沙盒那一片，因為資料位置會變。
+
+### 15.5 安全審查
+
+`pilotfish:security-reviewer`（2026-10-08，讀本機 Homebrew 原始碼與本片的改動，沒有執行任何指令）：沒有 P0–P2，四項 P4 全部 ACCEPT。
+
+- **A-1**：別的帳號如果跑著命令列相同的行程，pkill 會比對到它，但 `kill` 回 EPERM，brew 的輸出多一行警告，對方不受影響。Homebrew 拒絕以 root 執行，所以 pkill 用的是本人的 uid。`terminate_process` 沒有 `-U` 選項；把 `{{user}}` 放進 pattern 又會漏掉家目錄不在 `/Users/<帳號>` 的帳號，不值得。
+- **A-2**：只有「命令列只有一段絕對路徑、結尾是善解執行檔」的本人行程會收到 TERM。外接碟或備份裡跑著的善解也算在內。brew 自己、`sandbox-exec`、編輯器這類帶參數的行程都不會符合。
+- **A-3**：TERM 時輸入法沒有自己的訊號處理，但學習檔是先寫暫存檔再 rename，原檔不會壞。這和既有的 `uninstall signal`、`install-ime.sh` 相同，不是新風險。
+- **A-4**：tap 是共用的，deploy key 對整個 tap 有寫入權限。能改 tap 的人本來就能在 cask 裡執行任意程式，這次沒有擴大攻擊面。
+
+實機（§15.3 第 3 項）時另外確認 pgrep 紀錄裡只有原本的 PID 消失。測試只用 `pgrep`、不跑 `pkill`，在維護者機器上跑也不會結束真的輸入法，這點要保留。
+
+### 15.6 實測：升級後善解從選單消失（2026-10-09）
+
+- **發生的事**：上面兩次實機跑完後，使用者發現選單裡沒有善解。`tools/tis.swift` 量到注音模式是「已啟用」，善解本體是「未啟用」，所以選單不列。這時用 `shanjie install` 重新啟用，它回報成功（結束碼 0），本體卻仍是「未啟用」。使用者從「系統設定 → 鍵盤 → 輸入方式」手動加回後才恢復。消失發生在 23:37 升級到 00:07 之間，哪一刻沒有紀錄。
+  - 當時用 `defaults read com.apple.HIToolbox AppleEnabledInputSources` 判斷啟用狀態，後來在虛擬機證實這個方法不可靠：善解明明已啟用，結果也是 0 筆。所以只採信 TIS 本身回報的狀態。
+- **虛擬機**（tart，macOS 26.6.2，正式版 0.3.0，在虛擬機的系統設定手動加入後才開始量）：照 Homebrew 7.0.7 `moved.rb` 的做法換 bundle，也就是刪掉目標的子項目、搬入新的子項目、保留 bundle 資料夾。試了 6 種組合，善解本體一直是「已啟用」，新行程照常接手。
+  - 6 種組合：只換；換完 0.5 秒後 pkill；pkill 後讓系統叫起新版；再加 Homebrew 的隔離屬性；bundle 空著 3 秒再搬入；空 3 秒加隔離屬性、pkill、叫起新版。
+- **本機重現**（使用者同意；每 0.5 秒記錄 TIS 狀態，跑 `brew reinstall --verbose --debug`）：
+
+| cask | bundle 被移走期間 | 搬入新版之後 | 20 秒後 |
+|---|---|---|---|
+| 公開的 0.3.0（沒有 postflight） | 本體「未啟用」（移走後 0.19 秒） | 0.07 秒內回到「已啟用」，舊行程繼續跑 | 已啟用 |
+| 本修訂（有 postflight） | 本體「未啟用」（移走後 0.09 秒） | 0.12 秒內回到「已啟用」；舊行程在 notice 後結束，系統 6 秒後叫起新版 | 已啟用 |
+
+- **結論**：
+  - Homebrew 換版時，bundle 不在的那段時間，系統本來就會暫時把善解本體標成「未啟用」，新版回來後自動恢復。這和本修訂無關：沒有 postflight 的公開 cask 也一樣。
+  - 這兩次重現裡，postflight 沒有造成消失。
+  - 第一次為什麼沒恢復，**原因未解**。差異有兩點：那次 bundle 空了約 2.9 秒（重現時 1.1 到 1.8 秒）；系統是 macOS 27（虛擬機是 26.6）。兩者都沒有證據指向原因。
+- **處置**：caveats 與 README 的第一次安裝說明加上「登出再登入後仍是 3，就到系統設定 → 鍵盤 → 輸入方式加入」（虛擬機量到全新安裝、重開機後 `install` 仍是 3）。README 在升級說明加一句：升級後選單裡找不到善解時，到「系統設定 → 鍵盤 → 輸入方式」加回來。程式化的重新啟用（`shanjie install`）在這種狀態下無效，這點交給安裝程式第二版的「啟用」步驟處理（`docs/contracts/installer-v2.md`）。**已實作（`installer-v2.md` §9）**：caveats 與 README 現在不再寫「登出再登入再執行一次」，結束碼 3 直接到系統設定加入。

@@ -20,6 +20,15 @@ enum TestData {
         ("classes.sjc", "data/lm/classes.sjc"),
     ]
 
+    /// Adds Resources/packs/acg-add.tsv (a symlink to the repo's pack) like the app bundle has it. Opt-in: tests
+    /// that write their own pack file into `packs` must not get a link through which they would overwrite the repo's.
+    static func addBundledPack(to dir: URL) throws {
+        let packs = dir.appendingPathComponent("packs", isDirectory: true)
+        try FileManager.default.createDirectory(at: packs, withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(at: packs.appendingPathComponent("acg-add.tsv"),
+                                                   withDestinationURL: repo.appendingPathComponent("data/packs/acg-add.tsv"))
+    }
+
     /// Builds a Resources-like directory with the given files; nil (after failing the test) when a
     /// source file is missing.
     static func resources(only names: Set<String>? = nil, file: StaticString = #filePath, line: UInt = #line) -> URL? {
@@ -133,10 +142,17 @@ final class FakePanel: CandidatePanel {
     private(set) var columns = 0
     private(set) var first = 0
     private(set) var total = 0
+    /// The glassTint of every show, in order.
+    private(set) var glassTints: [Double] = []
     var onSelect: ((Int) -> Void)?
+    /// The values `setGlassTint` was called with, in order.
+    private(set) var retints: [Double] = []
+
+    func setGlassTint(_ glassTint: Double) { retints.append(glassTint) }
 
     func show(_ candidates: [String], notes: [String?], selected: Int, columns: Int, first: Int, total: Int,
-              lineRect: NSRect?, appearance: NSAppearance?) {
+              lineRect: NSRect?, appearance: NSAppearance?, glassTint: Double) {
+        glassTints.append(glassTint)
         self.lineRect = lineRect
         self.appearance = appearance
         self.columns = columns

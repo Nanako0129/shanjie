@@ -1882,3 +1882,28 @@ fn global_eps_table() {
         assert!(r.2 * 100 >= r.3 * 80, "mirror learn rate below 80%: {}/{} at eps {}", r.2, r.3, r.0);
     }
 }
+
+/// enter-pending contract §3 item 2: an unfinished syllable before a re-picked word, committed by Enter, changes nothing
+/// in what is learned (learn_commit sees the decoded text, not the shown one).
+#[test]
+fn an_unfinished_syllable_committed_by_enter_is_not_learned() {
+    let run = |pending: bool| {
+        let mut e = engine();
+        type_syls(&mut e, "ㄨㄛˇ ㄒㄧㄤˇ ㄏㄜ");
+        pick(&mut e, 3, 3, "呵");
+        if pending {
+            e.key(k(KeyKind::Home)).unwrap();
+            assert!(e.key(Key::ch('1', 0)).unwrap().preedit.starts_with('ㄅ'));
+        }
+        let o = e.key(k(KeyKind::Enter)).unwrap();
+        (o.commit, e.learner().records().to_vec())
+    };
+    let (plain, want) = run(false);
+    let (shown, got) = run(true);
+    assert!(shown == format!("ㄅ{plain}"), "{shown} / {plain}");
+    assert!(!want.is_empty(), "precondition: the re-pick is learned");
+    assert!(got == want, "the unfinished ㄅ changed the records");
+    // The contract's "no zhuyin in the context key", for any symbol, not just the ㄅ typed here.
+    let zhuyin = |c: char| ('\u{3100}'..='\u{312F}').contains(&c) || ('\u{31A0}'..='\u{31BF}').contains(&c) || "ˊˇˋ˙".contains(c);
+    assert!(got.iter().all(|r| !r.context.chars().any(zhuyin)));
+}

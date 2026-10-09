@@ -5,7 +5,7 @@
 #[cfg(panic = "abort")]
 compile_error!("C ABI requires panic=unwind");
 
-use crate::engine::{Engine, EngineError, Key, KeyKind, Layout, Output, ResetMode};
+use crate::engine::{Engine, EngineError, Key, KeyKind, Layout, Output, ResetMode, PACK_ALL};
 use crate::lm::Profile;
 use std::ffi::{c_char, CStr, CString};
 use std::panic::{catch_unwind, AssertUnwindSafe};
@@ -151,9 +151,29 @@ pub unsafe extern "C" fn shanjie_engine_new(
     layout: u32,
     out: *mut *mut ShanjieEngine,
 ) -> i32 {
+    // SAFETY: forwarded caller contract; mask 0 ignores the NULL packs_dir.
+    unsafe { shanjie_engine_new_packs(data_dir, layout, std::ptr::null(), 0, out) }
+}
+
+/// Like `shanjie_engine_new`, with word packs (docs/contracts/acg-pack.md A.2): `packs_dir` holds the pack
+/// files and `packs` is the bit mask of the packs to enable (bit 0 ACG). Mask 0 ignores `packs_dir` (may be
+/// NULL) and is exactly `shanjie_engine_new`. A pack whose file is missing contributes nothing. A bit outside
+/// the known ones returns 2.
+///
+/// # Safety
+/// `data_dir` is NULL or a NUL-terminated string; `packs_dir` is NULL (mask 0 only) or a NUL-terminated
+/// string; `out` is NULL or valid for one pointer write.
+#[no_mangle]
+pub unsafe extern "C" fn shanjie_engine_new_packs(
+    data_dir: *const c_char,
+    layout: u32,
+    packs_dir: *const c_char,
+    packs: u32,
+    out: *mut *mut ShanjieEngine,
+) -> i32 {
     guard(|| {
         // SAFETY: forwarded caller contract.
-        if !unsafe { clear_out(out) } || data_dir.is_null() {
+        if !unsafe { clear_out(out) } || data_dir.is_null() || (packs != 0 && packs_dir.is_null()) {
             return SHANJIE_ERR_NULL;
         }
         let layout = match layout {
@@ -161,11 +181,23 @@ pub unsafe extern "C" fn shanjie_engine_new(
             1 => Layout::Eten,
             _ => return SHANJIE_ERR_INVALID,
         };
+        if packs & !PACK_ALL != 0 {
+            return SHANJIE_ERR_INVALID;
+        }
         // SAFETY: non-NULL, NUL-terminated per the caller contract.
         let Ok(dir) = unsafe { CStr::from_ptr(data_dir) }.to_str() else {
             return SHANJIE_ERR_INVALID;
         };
-        match Engine::new(Path::new(dir), layout) {
+        let pdir = if packs == 0 {
+            None
+        } else {
+            // SAFETY: non-NULL (checked above), NUL-terminated per the caller contract.
+            let Ok(p) = unsafe { CStr::from_ptr(packs_dir) }.to_str() else {
+                return SHANJIE_ERR_INVALID;
+            };
+            Some((Path::new(p), packs))
+        };
+        match Engine::new_with_packs(Path::new(dir), layout, pdir) {
             Ok(e) => {
                 // SAFETY: `out` checked non-NULL above.
                 unsafe { *out = Box::into_raw(Box::new(ShanjieEngine(e))) };
@@ -289,7 +321,7 @@ pub unsafe extern "C" fn shanjie_engine_reset(
     rc
 }
 
-/// S2c. Loads the bigram model at `path` with `data_dir/overlay-add.tsv` of this engine. Does not
+/// S2c. Loads the bigram model at `path`, reading `data_dir/overlay-add.tsv` (and demote.tsv) again. Does not
 /// recompute the composition display. Any failure leaves the previous LM state (none or the old model).
 ///
 /// # Safety
@@ -1096,10 +1128,14 @@ mod tests {
         let (cls, emit) = ([1u16, 2, 0xFFFF, 0xFFFF], [1.0, 1.0, 0.0, 0.0]);
         std::fs::write(&classes_path, crate::lm::test_classes(&tiny, 0, 0.8, &cls, &emit, &[0.1; 9])).unwrap();
         // An engine without data_dir is not reachable through the ABI (only `new` creates engines);
-        // the closest case is the overlay vanishing from data_dir after `new`.
-        std::fs::rename(dir.join("overlay-add.tsv"), dir.join("overlay.bak")).unwrap();
-        assert!(unsafe { shanjie_engine_load_lm(e, lm_c.as_ptr()) } == 3, "load without overlay");
-        std::fs::rename(dir.join("overlay.bak"), dir.join("overlay-add.tsv")).unwrap();
+        // the closest cases are overlay-add.tsv or demote.tsv vanishing from data_dir after `new`:
+        // load_lm reads both again (capping_overlay and demote.tsv), so either one fails with code 3.
+        std::fs::rename(dir.join("overlay-add.tsv"), dir.join("overlay-add.bak")).unwrap();
+        assert!(unsafe { shanjie_engine_load_lm(e, lm_c.as_ptr()) } == 3, "load without overlay-add.tsv");
+        std::fs::rename(dir.join("overlay-add.bak"), dir.join("overlay-add.tsv")).unwrap();
+        std::fs::rename(dir.join("demote.tsv"), dir.join("demote.bak")).unwrap();
+        assert!(unsafe { shanjie_engine_load_lm(e, lm_c.as_ptr()) } == 3, "load without demote.tsv");
+        std::fs::rename(dir.join("demote.bak"), dir.join("demote.tsv")).unwrap();
         assert!(type_xin(e) == "鑫" && profile(e, 1).3 == "鑫", "failed loads left no LM");
         assert!(profile(e, 0).0 == 0 && enter(e) == "鑫", "still unigram");
 

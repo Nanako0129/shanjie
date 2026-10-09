@@ -50,6 +50,8 @@ public struct MenuEntry: Equatable, Sendable {
         case toggleBackup
         case toggleDemote
         case togglePrediction
+        case toggleAcgPack
+        case openSettings
     }
 
     public var title: String
@@ -62,6 +64,8 @@ public struct MenuEntry: Equatable, Sendable {
         public static let pausedApp = "學習已暫停（此 App）"
         public static let demote = "避免把敏感字詞排在前面"
         public static let prediction = "即時預測"
+        public static let acgPack = "動漫與遊戲詞"
+        public static let settings = "善解設定…"
         public static let clear = "清除選字記憶…"
         public static let excludeBackup = "不要備份選字記憶"
         public static let unavailable = "選字記憶無法存檔"
@@ -133,6 +137,7 @@ extension Shell {
         do { try dir.setResourceValues(values) } catch {
             Log.shell.error("learning directory: setting the backup exclusion failed")
         }
+        changed()
     }
 
     /// Section 4: memory, pending learns and the three files; non-zero opens the failure window.
@@ -184,6 +189,8 @@ extension Session {
         items.append(MenuEntry(title: "倚天鍵盤", action: .layout(.eten), checked: layout == .eten))
         items.append(MenuEntry(title: T.demote, action: .toggleDemote, checked: shell.demoteOn))
         items.append(MenuEntry(title: T.prediction, action: .togglePrediction, checked: shell.predictionOn))
+        items.append(MenuEntry(title: T.acgPack, action: .toggleAcgPack, checked: shell.acgPackOn))
+        items.append(MenuEntry(title: T.settings, action: .openSettings))
         items.append(MenuEntry(title: T.clear, action: .clear))
         items.append(MenuEntry(title: T.excludeBackup, action: .toggleBackup, checked: shell.backupExcluded))
         if shell.learningUnavailable { items.append(MenuEntry(title: T.unavailable)) }
@@ -195,15 +202,17 @@ extension Session {
         case .layout(let m):
             shell.selectLayout(m)
         case .clear:
-            shell.dialogs.confirmClear { [weak shell] clear in
-                if clear { shell?.clearLearning() }
-            }
+            shell.confirmAndClear()
         case .toggleBackup:
             shell.setBackupExcluded(!shell.backupExcluded)
         case .toggleDemote:
             applyDemote(!shell.demoteOn)
         case .togglePrediction:
             applyPrediction(!shell.predictionOn)
+        case .toggleAcgPack:
+            shell.setAcgPack(!shell.acgPackOn)
+        case .openSettings:
+            shell.openSettings()
         }
     }
 }
