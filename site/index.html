@@ -224,7 +224,7 @@
       </ul>
     </details>
 
-    <details class="stage" open>
+    <details class="stage">
       <summary><span class="ver">v0.3</span><span class="st-title">選字品質</span><span class="tag done">完成</span>
         <span class="meta">2026-10-08・v0.3.0</span></summary>
       <ul class="items">
@@ -244,13 +244,34 @@
     </details>
 
     <details class="stage" open>
-      <summary><span class="ver">之後</span><span class="st-title">已排定，在 v0.3 之後</span><span class="tag wip">進行中</span>
+      <summary><span class="ver">v0.4</span><span class="st-title">安裝、設定與動漫詞</span><span class="tag wip">進行中</span>
+        <span class="meta">2026-10-09 起・v0.4.0</span></summary>
+      <ul class="items">
+        <li class="done"><span class="mark"></span><h3>新的安裝程式</h3><p>四個步驟：歡迎、安裝、到系統設定加入、試打，每一步用白話說明，裝好可以直接在裡面試打。</p></li>
+        <li class="done"><span class="mark"></span><h3>更新不弄壞 Caps Lock 切換</h3><p>已經裝過的善解再更新時，不再重新註冊輸入法。實測找到原因：更新後再註冊，會讓 Caps Lock 切換輸入法失效。</p></li>
+        <li class="done"><span class="mark"></span><h3>Homebrew 升級直接接手</h3><p><code>brew upgrade</code> 之後由新版接手，不必手動結束舊的程序。</p></li>
+        <li class="done"><span class="mark"></span><h3>Enter 送出未完成的注音</h3><p>只打了注音、還沒選字時按 Enter，照畫面上顯示的送出；Shift+Enter 送出後再換行，和蘋果注音實測相同。</p></li>
+        <li class="done"><span class="mark"></span><h3>即時預測往回找</h3><p>打到詞的中間也會預測，往回找到 5 個音節，例如「巴基斯」再按 ㄊ 就有「巴基斯坦」。</p></li>
+        <li class="done"><span class="mark"></span><h3>設定視窗</h3><p>選單的「善解設定…」打開一個視窗，選單裡的選項都在裡面，還可以調候選窗玻璃的深淺，下面即時預覽。</p></li>
+        <li class="done"><span class="mark"></span><h3>動漫與遊戲詞（第一片）</h3><p>從中文維基百科收錄約 1.5 萬個作品名與角色名，選單可以關掉。同音的名字由維護者逐一決定先後。</p></li>
+        <li class="wip"><span class="mark"></span><h3>動漫與遊戲詞（第二片）</h3><p>加進 2020 年以後的作品與角色，約 3 萬詞；選單下面顯示資料日期。</p></li>
+        <li class="wip"><span class="mark"></span><h3>新的語言模型</h3><p>讓詞包裡的名字也進到語料統計，有真實的機率，不再輸給常用單字的組合（例如「宿儺」打成「素娜」）。</p></li>
+        <li class="research done"><span class="mark"></span><h3><span class="kind">研究</span>詞包的名字為什麼打不出來</h3><p>逐一檢查詞包的每個詞。<b>結論：</b>輸掉的多半輸給常用單字的組合，原因是詞包詞沒有進到語料統計，只有固定的分數；所以重建語言模型，而不是一個一個調分數。</p></li>
+      </ul>
+    </details>
+
+    <details class="stage" open>
+      <summary><span class="ver">之後</span><span class="st-title">已排定，在 v0.4 之後</span><span class="tag wip">進行中</span>
         <span class="meta">順序依實測與回報調整</span></summary>
       <ul class="items">
-        <li class="wip"><span class="mark"></span><h3>從改選記住新詞組</h3><p>改選後送出的片段如果不是詞庫裡的詞（例如「版控」），記成你的詞，下次直接打得出來。先量回報的錯字裡有多少是缺詞。</p></li>
+        <li class="wip"><span class="mark"></span><h3>從改選記住新詞組</h3><p>改選後送出的片段如果不是詞庫裡的詞（例如「版控」），記成你的詞，下次直接打得出來。</p></li>
+        <li class="wip"><span class="mark"></span><h3>預測可省略韻母</h3><p>即時預測的選用設定：每個字只打第一個注音也能找到詞。預設關閉。</p></li>
         <li><span class="mark"></span><h3>App 沙盒</h3><p>輸入法在 macOS 的 App 沙盒裡執行，只拿到需要的權限。</p></li>
+        <li class="research wip"><span class="mark"></span><h3><span class="kind">研究</span>Kneser–Ney 平滑</h3><p>回退時看一個詞接在幾種不同的詞後面，而不是只看它出現幾次，減少「常用單字組合贏過整詞」的錯。先離線量測，有效才做進輸入法。</p></li>
+        <li class="research wip"><span class="mark"></span><h3><span class="kind">研究</span>在／再、作／做</h3><p>回報裡常見的一類同音錯，先量現在錯在哪裡再決定做法。</p></li>
+        <li class="research wip"><span class="mark"></span><h3><span class="kind">研究</span>口語與財經用語</h3><p>語料偏百科，「零股」「月繳」這類日常用語太少；找授權清楚的口語來源。</p></li>
+        <li class="research"><span class="mark"></span><h3><span class="kind">研究</span>貝氏選字記憶</h3><p>把改選記錄當成證據、以語言模型為先驗，取代固定的加分。</p></li>
         <li><span class="mark"></span><h3>更多新詞</h3><p>從語料自動找出詞庫沒收的新詞（例如口語縮寫）；也能手動加詞。</p></li>
-        <li><span class="mark"></span><h3>預測可省略韻母</h3><p>即時預測的選用設定：只打每個字的聲母也能找到詞。預設關閉。</p></li>
         <li><span class="mark"></span><h3>改選後其他字不動（重新評估）</h3><p>新詞做完後，照蘋果注音的實測（含改選後繼續打字）重新評估要不要做、怎麼做。</p></li>
         <li><span class="mark"></span><h3>破音字的搭配</h3><p>同一個字的不同讀音分開計算搭配，例如「空」唸 ㄎㄨㄥˋ 時，不再借用「空間」的搭配而搶走「控」。</p></li>
         <li class="research"><span class="mark"></span><h3><span class="kind">研究</span>中英混打</h3><p>按鍵組不成注音時自動判斷是英文，或依鍵盤上相鄰的鍵校正打錯的注音。</p></li>
