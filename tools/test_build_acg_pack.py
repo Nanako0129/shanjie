@@ -351,12 +351,12 @@ class Build(unittest.TestCase):
 
     def test_collisions_are_listed_without_a_disposition(self):
         _, manifest, col, _, _, _ = self.build(self.none, real_decoder=True)
-        # 夾具裡 風之谷 是作品標題、本身也在詞包，開了詞包第一名仍是 風之谷，所以 楓之谷 只多一個候選、不列
-        # （第一名真的被換掉時會列出，見 test_a_collision_counts_only_when_the_pack_changes_the_top1）。
-        self.assertNotIn("ㄈㄥ ㄓ ㄍㄨˇ", col)
+        # 夾具裡 風之谷（作品標題）與 楓之谷（轉換組）都在詞包、同讀音、來源數相同；同分時依字串排序，楓之谷排在前（pack_rows 的 TIE），
+        # 開了詞包第一名是 楓之谷，所以風之谷被換掉，列為未處置（正式資料由 acg-collisions.tsv 處置）。
+        self.assertIn("ㄈㄥ ㄓ ㄍㄨˇ", col)
         self.assertNotIn("ㄉㄧㄥˋ ㄩㄢˊ ㄊㄤˊ", col)                   # 碇源堂：不開是 定元堂，不在參考名單
         self.assertNotIn("ㄧㄥˊ ㄏㄨㄛˇ ㄔㄨㄥˊ ㄓ ㄇㄨˋ", col)         # 螢火蟲之墓：不開是 螢火蟲之目
-        self.assertEqual(manifest["unresolved_collision_readings"], 0)
+        self.assertEqual(manifest["unresolved_collision_readings"], 1)      # 楓之谷／風之谷 那一個，沒有處置檔
 
     def test_a_collision_counts_only_when_the_pack_changes_the_top1(self):
         # 使用者 2026-10-09：開了詞包第一名沒變的（只多一個候選），不列為衝突；第一名被換掉的才列。
@@ -403,8 +403,9 @@ class Build(unittest.TestCase):
             return B.build(FakeApi(), self.groups, c, self.manual, decode=decode, readings=fake_readings, exclude_tsv=self.none, years=())[2]
         r = "ㄚ ㄎㄨˋ ㄌㄟˊ ㄊㄜˋ"
         self.assertIn(r, run(f"{r}\t某個舊詞\t+另一個舊詞\t別的詞已處置\n"))   # 同讀音但沒點名 阿庫雷特：新詞照樣列出
-        self.assertNotIn(r, run(f"{r}\t阿庫雷特\t+某個舊詞\t點名了\n"))
-        self.assertNotIn(r, run(f"{r}\t某個舊詞\t+阿庫雷特\t兩個都留，點名在第三欄\n"))
+        self.assertIn(r, run(f"{r}\t阿庫雷特\t+某個舊詞\t點名了\n"))           # 點名了阿庫雷特，但開了之後的第一名奇希莉卡沒被點名：新詞搶走第一名，照樣列出
+        self.assertNotIn(r, run(f"{r}\t阿庫雷特\t+奇希莉卡\t兩個都點名\n"))
+        self.assertNotIn(r, run(f"{r}\t某個舊詞\t+阿庫雷特\t點名在第三欄\n{r}\t奇希莉卡\t+某個舊詞\t第一名也點名\n"))
 
     def test_excluded_strings_leave_the_pack_and_the_reference_list(self):
         excl = os.path.join(self.tmp, "exclude.tsv")
@@ -432,11 +433,15 @@ class Build(unittest.TestCase):
     def test_the_committed_dispositions_are_applied_to_the_committed_pack(self):
         pack = second_column(os.path.join(B.PACKS, "acg-add.tsv"))
         rows = B.read_tsv(os.path.join(B.PACKS, "acg-collisions.tsv"))
+        by_reading = {}
+        for l in open(os.path.join(B.PACKS, "acg-add.tsv"), encoding="utf-8"):
+            f = l.split("\t")
+            by_reading.setdefault(f[0].replace("-", " "), set()).add(f[1])
         self.assertGreater(len(rows), 100)
         for reading, keep, exclude, why in rows:
-            if exclude.startswith("+"):                # 兩個都留：兩個詞都在詞包裡
+            if exclude.startswith("+"):                # 兩個都留：兩個詞都在詞包裡；(b) 型只有一個詞包詞時，另一個是不開詞包時拼出來的字串，不在詞包
                 self.assertIn(keep, pack, keep)
-                self.assertIn(exclude[1:], pack, exclude)
+                self.assertTrue(exclude[1:] in pack or len(by_reading[reading]) == 1, exclude)
             else:
                 self.assertNotIn(exclude, pack, exclude)
             self.assertTrue(why)
