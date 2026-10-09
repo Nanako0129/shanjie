@@ -203,6 +203,23 @@ static int run_lm(const char *dir, const char *lm, const char *missing) {
   o = 0;
   CHECK(816, shanjie_engine_reset(e, 1, &o) == 0 && o != 0);
   shanjie_output_free(o);
+  /* set_abbreviation (v3-engine section 12.1): codes like set_prediction; with it on, s then t are two units (preedit ㄋㄔ), and turning it off drops them. */
+  o = 0;
+  CHECK(820, shanjie_engine_set_abbreviation(0, 1, &o) == 1 && o == 0);
+  CHECK(821, shanjie_engine_set_abbreviation(e, 1, 0) == 1);
+  o = &dummy;
+  CHECK(822, shanjie_engine_set_abbreviation(e, 2, &o) == 2 && o == 0);
+  CHECK(823, shanjie_engine_set_abbreviation(e, 1, &o) == 0 && o != 0);
+  shanjie_output_free(o);
+  o = type_last(e, "st");
+  CHECK(824, o != 0 && str_eq(o->preedit, "\xe3\x84\x8b\xe3\x84\x94"));
+  shanjie_output_free(o);
+  o = 0;
+  CHECK(825, shanjie_engine_set_abbreviation(e, 0, &o) == 0 && o != 0 && str_eq(o->preedit, ""));
+  shanjie_output_free(o);
+  o = 0;
+  CHECK(826, shanjie_engine_reset(e, 1, &o) == 0 && o != 0);
+  shanjie_output_free(o);
   shanjie_engine_free(e);
   return 0;
 }

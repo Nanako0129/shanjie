@@ -50,6 +50,7 @@ public struct MenuEntry: Equatable, Sendable {
         case toggleBackup
         case toggleDemote
         case togglePrediction
+        case toggleAbbreviation
         case toggleAcgPack
         case openSettings
     }
@@ -57,6 +58,8 @@ public struct MenuEntry: Equatable, Sendable {
     public var title: String
     public var action: Action?
     public var checked = false
+    /// False: shown greyed (the checkmark still shows the setting). The app drops the action of a disabled entry.
+    public var enabled = true
 
     /// Fixed strings (R2: no app name, path or count).
     public enum Text {
@@ -64,6 +67,7 @@ public struct MenuEntry: Equatable, Sendable {
         public static let pausedApp = "學習已暫停（此 App）"
         public static let demote = "避免把敏感字詞排在前面"
         public static let prediction = "即時預測"
+        public static let abbreviation = "可省略韻母"
         public static let acgPack = "動漫與遊戲詞"
         public static func acgDataDate(_ date: String) -> String { "資料更新至 \(date)（維基百科）" }
         public static let settings = "善解設定…"
@@ -190,6 +194,8 @@ extension Session {
         items.append(MenuEntry(title: "倚天鍵盤", action: .layout(.eten), checked: layout == .eten))
         items.append(MenuEntry(title: T.demote, action: .toggleDemote, checked: shell.demoteOn))
         items.append(MenuEntry(title: T.prediction, action: .togglePrediction, checked: shell.predictionOn))
+        // Greyed while the prediction row is off: the units it makes can only be resolved from the row (section 12.1).
+        items.append(MenuEntry(title: T.abbreviation, action: .toggleAbbreviation, checked: shell.abbreviationOn, enabled: shell.predictionOn))
         items.append(MenuEntry(title: T.acgPack, action: .toggleAcgPack, checked: shell.acgPackOn))
         if let date = shell.acgDataDate { items.append(MenuEntry(title: T.acgDataDate(date))) }   // about the data, so shown with the pack off too
         items.append(MenuEntry(title: T.settings, action: .openSettings))
@@ -211,6 +217,8 @@ extension Session {
             applyDemote(!shell.demoteOn)
         case .togglePrediction:
             applyPrediction(!shell.predictionOn)
+        case .toggleAbbreviation:
+            applyAbbreviation(!shell.abbreviationOn)
         case .toggleAcgPack:
             shell.setAcgPack(!shell.acgPackOn)
         case .openSettings:
