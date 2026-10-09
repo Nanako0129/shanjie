@@ -3,7 +3,7 @@ import Foundation
 
 /// `shanjie --selftest` (docs/contracts/s3b.md section 9): build the engine from Resources, load
 /// the LM, type dev302 row 226 with the standard layout and require the chat and formal top-1
-/// sentences, then build with the bundled ACG pack (Resources/packs) and require one pack word. Returns the exit status. Writes nothing but a fixed message and a return code to
+/// sentences, then build with the bundled ACG pack (Resources/packs), require the same sentences and one pack word. Returns the exit status. Writes nothing but a fixed message and a return code to
 /// stderr; touches no file, UserDefaults, TIS, NSApplication or IMK server.
 @MainActor
 public enum Selftest {
@@ -19,30 +19,42 @@ public enum Selftest {
     static let packWord = "碇源堂"
 
     public static func run(resources: URL) -> Int32 {
-        // The pack off: the engine the app had before the pack existed.
-        let (made, code) = CoreEngine.make(dataDir: resources.path, layout: 0)
-        guard let engine = made else { return fail("selftest: shanjie_engine_new failed, code", code) }
-        let lm = engine.loadLM(path: resources.appendingPathComponent("bigram.sjlm").path)
-        guard lm == 0 else { return fail("selftest: shanjie_engine_load_lm failed, code", lm) }
-        for (profile, text) in expected {
-            if case .failed(let c) = engine.setProfile(profile) {
-                return fail("selftest: shanjie_engine_set_profile failed, code", c)
-            }
-            let (committed, c) = type(row226Standard, engine)
-            guard c == 0 else { return fail("selftest: shanjie_engine_key failed, code", c) }
-            guard committed == text else { return fail("selftest: unexpected sentence for profile", Int32(profile)) }
+        let lmPath = resources.appendingPathComponent("bigram.sjlm").path
+        // The pack off: the engine the app had before the pack existed. Scoped so it is freed before the
+        // second engine exists (only one at a time, like the shell).
+        do {
+            let (made, code) = CoreEngine.make(dataDir: resources.path, layout: 0)
+            guard let engine = made else { return fail("selftest: shanjie_engine_new failed, code", code) }
+            let lm = engine.loadLM(path: lmPath)
+            guard lm == 0 else { return fail("selftest: shanjie_engine_load_lm failed, code", lm) }
+            if let bad = checkSentences(engine) { return bad }
         }
-        // The pack on, as the shell ships it (default on): a missing or corrupt bundled pack must fail here.
+        // The pack on, as the shell ships it (default on): a missing or corrupt bundled pack must fail here,
+        // and the ordinary sentence must still come out the same.
         let (packed, packCode) = CoreEngine.make(dataDir: resources.path, layout: 0,
                                                   packsDir: resources.appendingPathComponent("packs").path, acgPack: true)
         guard let withPack = packed else { return fail("selftest: shanjie_engine_new_packs failed, code", packCode) }
-        let packLM = withPack.loadLM(path: resources.appendingPathComponent("bigram.sjlm").path)
+        let packLM = withPack.loadLM(path: lmPath)
         guard packLM == 0 else { return fail("selftest: shanjie_engine_load_lm (pack) failed, code", packLM) }
+        if let bad = checkSentences(withPack) { return bad }
         if case .failed(let c) = withPack.setProfile(0) { return fail("selftest: shanjie_engine_set_profile (pack) failed, code", c) }
         let (word, c) = type(packWordStandard, withPack)
         guard c == 0 else { return fail("selftest: shanjie_engine_key (pack) failed, code", c) }
         guard word == packWord else { return fail("selftest: the bundled word pack is not in effect, code", 0) }
         return 0
+    }
+
+    /// Row 226 in both profiles; nil when both match, else the exit status.
+    private static func checkSentences(_ engine: CoreEngine) -> Int32? {
+        for (profile, text) in expected {
+            if case .failed(let c) = engine.setProfile(profile) {
+                return fail("selftest: shanjie_engine_set_profile failed, code", c)
+            }
+            let (committed, c) = type(row226Standard, engine)
+            if c != 0 { return fail("selftest: shanjie_engine_key failed, code", c) }
+            if committed != text { return fail("selftest: unexpected sentence for profile", Int32(profile)) }
+        }
+        return nil
     }
 
     /// Types `keys` (a space is the first tone) and Enter; returns the committed text, or a nonzero code.

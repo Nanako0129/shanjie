@@ -243,12 +243,10 @@ public final class Shell {
     /// composition is committed and the engine rebuilt; the choice is stored. Same value: nothing happens.
     func setAcgPack(_ on: Bool) {
         guard on != acgPackOn else { return }
-        if composing {
-            if let o = owner { o.finish(mode: 0) } else { discardOrphan() }
+        commitThenRebuild {
+            acgPackOn = on
+            acgPackStore.acgPack = on
         }
-        acgPackOn = on
-        acgPackStore.acgPack = on
-        build()
         Log.shell.debug("word pack switched")
     }
 
@@ -297,12 +295,18 @@ public final class Shell {
     /// layout, reload the LM and the current profile.
     func switchMode(to newMode: InputMode) {
         guard newMode != mode else { return }
+        commitThenRebuild { mode = newMode }
+        Log.shell.debug("input mode switched")
+    }
+
+    /// What a setting that lives in the engine's construction (layout, word pack) does: commit the
+    /// composition to its owner (or drop an orphan), apply the change, build a new engine.
+    private func commitThenRebuild(_ apply: () -> Void) {
         if composing {
             if let o = owner { o.finish(mode: 0) } else { discardOrphan() }
         }
-        mode = newMode
+        apply()
         build()
-        Log.shell.debug("input mode switched")
     }
 
     func setProfile(_ p: UInt32) -> CoreResult? {
