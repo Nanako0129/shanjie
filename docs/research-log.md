@@ -2053,3 +2053,15 @@ PR #90 的審查意見逐項處理。
   - 詞包的列格式抽成 `tools/build_overlay.py` 的 `overlay_rows()`，`build_overlay.py --check` 與 `pack_rows` 共用；`overlay-add.tsv` 逐位元組不變（`--check` matches）。
   - `shanjie-eval --packs acg` 的檔案檢查移到讀模型之前（golden 用不存在的模型路徑也得到同一個錯誤）；`capping_overlay` 失敗時訊息又帶路徑與 ErrorKind；`CoreEngine.make(packsDir:)` 一個參數（nil＝不開），C 標頭定義 `SHANJIE_PACK_ACG`；`measure_start_range_acg` 改用 `load_lexicon_packs`／`capping_overlay`。
 - **延後到 C 片**（已寫進契約）：退回無詞包建置時選單不可顯示為開；缺檔時上線路徑回錯誤碼；引擎只留封頂需要的 `pack_text`（P3）。
+
+## 2026-10-10：ACG 詞包缺近年作品的原因（A2 片的量測）
+
+使用者回報詞包「還不是最新的，有很多缺的」，並列了 2026 年的 10 部作品與 10 個角色。main 逐一對過維基百科：「東條甚太郎」在條目與全站精確搜尋都找不到，拿掉，換成該作主角「我妻貳郎」；另加使用者回報的「宿儺」「兩面宿儺」，共 23 個名字。用 A 片（0a99fa8）的快取與建置工具的函式，查每個名字在哪一步掉的：
+
+- **作品清單選不到近年作品**：A 片取 Wikidata 動畫影集（Q63952888）與動畫電影（Q20650540）裡 sitelink 前 400 名（第 400 部 14 個 sitelink）。這 10 部的中文條目有 9 部掛在漫畫系列（Q21198342）或輕小說系列（Q104213567）的項目上，sitelink 10–45，根本不在查詢結果；《淡島百景》的條目沒有 Wikidata 項目。只有《劇場版 咒術迴戰 0》在清單裡（第 355 名），所以「咒術迴戰角色列表」有抓到。
+- **只看第一次出現**：「乙骨憂太」第一次出現在《劇場版 咒術迴戰 0》的表格（沒有原名，過濾不通過）；「咒術迴戰角色列表」裡附原名、會通過的那一次沒被判斷。
+- **簡稱**：「宿儺」在角色列表出現 187 次，都不在名字欄。
+- **年度清單**：中文維基百科的「日本動畫列表 (2026年)」連到 410 個條目，10 部作品有 8 部在上面；2020–2026 七頁的連結聯集 1,825 個，含製作公司、電視台、人物。
+- 這些查詢用建置工具的 User-Agent，向 `zh.wikipedia.org/w/api.php` 與 `query.wikidata.org` 送了約 10 個請求，沒有改快取。
+- 結論與修法寫進 `docs/contracts/acg-pack.md` 的 A2 片。
+- **更正**（上一節「ACG 詞包的審查修正」）：那節說 `capping_overlay` 失敗時訊息又帶路徑與 ErrorKind。A 片的 fresh verifier 實測（把 `overlay-add.tsv` 移走再跑）：`engine::load_lexicon_packs` 先讀這個檔，失敗一律變成 `LoadFailed`，CLI 只印 `cannot load lexicon`；帶路徑的訊息只有在兩次讀取之間檔案消失時才會出現。這不是退步（main 原本也印 `cannot load lexicon`），修法在 A2.5。同一位 verifier 也指出「單用 `--packs-dir` 的檢查在讀任何檔案之前」不精確：變體表更早讀；契約 A.2 已改。
