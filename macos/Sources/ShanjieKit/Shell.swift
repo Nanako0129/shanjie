@@ -37,8 +37,9 @@ public protocol CandidatePanel: AnyObject {
     /// (the scroll indicator).
     /// `lineRect`: where the composition's line is (s3b2 section 2.3), `nil` if unknown.
     /// `appearance`: the client's (s3b2 section 10), `nil` for the system's.
+    /// `glassTint`: the 0...1 slider value (settings-window section 2.3), applied on every show, 0 included.
     func show(_ candidates: [String], notes: [String?], selected: Int, columns: Int, first: Int, total: Int,
-              lineRect: NSRect?, appearance: NSAppearance?)
+              lineRect: NSRect?, appearance: NSAppearance?, glassTint: Double)
     func hide()
     /// A mouse click on a cell, by position in what `show` last received.
     var onSelect: ((Int) -> Void)? { get set }
@@ -112,6 +113,20 @@ public final class MemoryAcgPackStore: AcgPackStore {
     public init(_ acgPack: Bool? = nil) { self.acgPack = acgPack }
 }
 
+/// Where the candidate glass tint slider is kept (docs/contracts/settings-window.md section 2.3): 0...1,
+/// `nil` means never set, which is 0 (no tint). Same arrangement as `DemoteStore`.
+@MainActor
+public protocol GlassTintStore: AnyObject {
+    var glassTint: Double? { get set }
+}
+
+/// The in-memory GlassTintStore.
+@MainActor
+public final class MemoryGlassTintStore: GlassTintStore {
+    public var glassTint: Double?
+    public init(_ glassTint: Double? = nil) { self.glassTint = glassTint }
+}
+
 /// Process-wide state: the single engine (about 240 MB each, so never two at once), the single
 /// candidate panel and the page it shows, and which session owns the composition (section 5).
 /// All calls happen on the main thread.
@@ -140,6 +155,10 @@ public final class Shell {
     private let acgPackStore: AcgPackStore
     /// The ACG word pack (default on, user decision 2026-10-09): parsed into the lexicon, so a change rebuilds the engine like a layout change.
     private(set) var acgPackOn = true
+    private let glassTintStore: GlassTintStore
+    /// Posted (object: this shell) after any setting changes, from the menu or the settings window;
+    /// the window's model re-reads on it (settings-window section 2.2).
+    public static let didChangeSettings = Notification.Name("ShanjieShellDidChangeSettings")
     let panel: CandidatePanel
     let isSecureInput: () -> Bool
     private(set) var engine: CoreEngine?
@@ -178,11 +197,13 @@ public final class Shell {
     /// its UserDefaults-backed store, tests the in-memory one.
     /// `predictionStore`: the prediction switch (V3 section 10.5). Required, like `demoteStore`.
     /// `acgPackStore`: the ACG word pack switch (acg-pack contract A.2). Required, like `demoteStore`.
+    /// `glassTintStore`: the candidate glass tint (settings-window section 2.3); the app passes its UserDefaults-backed store.
     /// `punctuationTable`: Apple's punctuation candidate table (s3e); tests pass another path.
     /// `punctuationNames`: Apple's punctuation names (s3f); tests pass another path.
     public init(resources: URL, panel: CandidatePanel, isSecureInput: @escaping () -> Bool,
                 layoutStore: LayoutStore, learningDirectory: URL?, dialogs: LearningDialogs,
                 demoteStore: DemoteStore, predictionStore: PredictionStore, acgPackStore: AcgPackStore,
+                glassTintStore: GlassTintStore = MemoryGlassTintStore(),
                 punctuationTable: URL = PunctuationTable.systemURL,
                 punctuationNames: URL = PunctuationNames.systemURL) {
         self.resources = resources
@@ -206,6 +227,7 @@ public final class Shell {
         self.predictionStore = predictionStore
         predictionOn = predictionStore.prediction ?? true
         self.acgPackStore = acgPackStore
+        self.glassTintStore = glassTintStore
         acgPackOn = acgPackStore.acgPack ?? true
         // The preference is read before the one engine is built (about 240 MB): building first
         // and switching after would build twice.
@@ -222,6 +244,31 @@ public final class Shell {
     public func selectLayout(_ newMode: InputMode) {
         switchMode(to: newMode)
         layoutStore.layout = newMode.rawValue
+        changed()
+    }
+
+    /// Set by the app to show the settings window; the menu's 善解設定… calls it.
+    public var onOpenSettings: (() -> Void)?
+    func openSettings() { onOpenSettings?() }
+
+    /// The menu's switches, for a caller with no session (the settings window): the owner of the
+    /// composition, if any, shows the re-ranked snapshot exactly as for the menu; otherwise just the setter.
+    func applyDemote(_ on: Bool) {
+        if let o = owner { o.applyDemote(on) } else { _ = setDemote(on) }
+    }
+
+    func applyPrediction(_ on: Bool) {
+        if let o = owner { o.applyPrediction(on) } else { _ = setPrediction(on) }
+    }
+
+    private func changed() { NotificationCenter.default.post(name: Shell.didChangeSettings, object: self) }
+
+    /// The slider value 0...1 (settings-window section 2.3); unset is 0.
+    public var glassTint: Double { glassTintStore.glassTint ?? 0 }
+
+    public func setGlassTint(_ value: Double) {
+        glassTintStore.glassTint = value
+        changed()
     }
 
     /// The menu's choice (sw): stored, and sent to the engine, which recomputes the composition; the
@@ -229,6 +276,7 @@ public final class Shell {
     func setDemote(_ on: Bool) -> CoreResult? {
         demoteOn = on
         demoteStore.demote = on
+        defer { changed() }
         return engine?.setDemote(on)
     }
 
@@ -236,6 +284,7 @@ public final class Shell {
     func setPrediction(_ on: Bool) -> CoreResult? {
         predictionOn = on
         predictionStore.prediction = on
+        defer { changed() }
         return engine?.setPrediction(on)
     }
 
@@ -247,6 +296,7 @@ public final class Shell {
             acgPackOn = on
             acgPackStore.acgPack = on
         }
+        changed()
         Log.shell.debug("word pack switched")
     }
 
@@ -321,7 +371,7 @@ public final class Shell {
         // Only an exact punctuation mark has a name: a word candidate is never a key of the table.
         let notes = list.map { names[$0] }
         panel.show(list, notes: notes, selected: selected, columns: columns, first: first, total: total,
-                   lineRect: lineRect, appearance: appearance)
+                   lineRect: lineRect, appearance: appearance, glassTint: glassTint)
     }
 
     func hideCandidates() {

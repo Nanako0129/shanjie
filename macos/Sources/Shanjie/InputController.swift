@@ -72,6 +72,7 @@ final class ShanjieInputController: IMKInputController {
         case .toggleDemote: #selector(toggleDemote(_:))
         case .togglePrediction: #selector(togglePrediction(_:))
         case .toggleAcgPack: #selector(toggleAcgPack(_:))
+        case .openSettings: #selector(openSettings(_:))
         }
     }
 
@@ -86,6 +87,7 @@ final class ShanjieInputController: IMKInputController {
     @objc func toggleDemote(_ sender: Any?) { perform(.toggleDemote) }
     @objc func togglePrediction(_ sender: Any?) { perform(.togglePrediction) }
     @objc func toggleAcgPack(_ sender: Any?) { perform(.toggleAcgPack) }
+    @objc func openSettings(_ sender: Any?) { perform(.openSettings) }
 }
 
 /// The controller's current IMKTextInput client.
@@ -324,9 +326,10 @@ final class CandidatePanelAdapter: CandidatePanel {
     }
 
     func show(_ candidates: [String], notes: [String?], selected: Int, columns: Int, first: Int, total: Int,
-              lineRect: NSRect?, appearance: NSAppearance?) {
+              lineRect: NSRect?, appearance: NSAppearance?, glassTint: Double) {
         let grid = columns > 0
         if window.appearance?.name != appearance?.name { window.appearance = appearance }
+        applyTint(glassTint)
 
         // Only the selection moved (section 8.7): keep the cells, change which one is selected and which
         // row shows numbers. The glass's content view is never replaced either way.
@@ -470,6 +473,17 @@ final class CandidatePanelAdapter: CandidatePanel {
             }
         }
         if !window.isVisible { window.orderFrontRegardless() }
+    }
+
+    /// settings-window section 2.3, on every show and including no tint, so going back to 0 removes it.
+    /// `NSGlassEffectView.tintColor` (AppKit/NSGlassEffectView.h line 34, macOS 26 SDK: "The color the glass
+    /// effect view uses to tint the background and glass effect toward"). It is only assigned when the
+    /// value differs, because needless glass updates flickered (s3b2); with 0 and never tinted nothing is
+    /// assigned, so the default look stays bit-identical. Its effect on macOS 26 is not measured.
+    private func applyTint(_ value: Double) {
+        let dark = window.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        let color = GlassTint.tint(value: value, dark: dark).map { NSColor(white: $0.black ? 0 : 1, alpha: $0.opacity) }
+        if glass.tintColor != color { glass.tintColor = color }
     }
 
     /// a-3's expand mark at the bar's right end: a separator line and a chevron, both secondary.
