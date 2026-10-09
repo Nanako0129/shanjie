@@ -1883,7 +1883,7 @@ fn global_eps_table() {
     }
 }
 
-/// enter-pending contract §3.2: an unfinished syllable before a re-picked word, committed by Enter, changes nothing
+/// enter-pending contract §3 item 2: an unfinished syllable before a re-picked word, committed by Enter, changes nothing
 /// in what is learned (learn_commit sees the decoded text, not the shown one).
 #[test]
 fn an_unfinished_syllable_committed_by_enter_is_not_learned() {
