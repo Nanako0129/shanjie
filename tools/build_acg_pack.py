@@ -614,7 +614,7 @@ def names_of(html):
 # 契約 A2.2：括號裡的原名是假名，或不在這份清單裡的拉丁字母詞；聲優、播出形式這類標註（「（CV：…）」「（OVA）」）不是原名
 NOT_ORIGINAL = {"CV", "OVA", "OAD", "ONA", "TV", "TVA", "SP", "PV", "MV", "DVD", "BD", "CD", "ED", "OP", "OST", "NHK", "TBS", "MBS"}
 LATIN = re.compile(r"[A-Za-z]{2,}")
-CREDIT = re.compile(r"\s*(CV|聲優|声优|配音|演員|飾演|由)")
+CREDIT = re.compile(r"\s*(CV|聲優|声优|配音|演員|飾演|聲\s*[:：]|由[^）)（(]*(配音|飾演|演出))")      # 開頭的「由」不能單獨算：由井、由比 這類姓也以由開頭
 ORIGINAL = re.compile(r"^\s*[（(]([^）)]*)[）)]")
 
 

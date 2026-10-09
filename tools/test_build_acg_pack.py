@@ -108,8 +108,9 @@ class Rules(unittest.TestCase):
         self.assertTrue(ok("阿庫雷特", "阿庫雷特 (Akuret)"))                  # 半形括號、拉丁字母
         self.assertTrue(ok("阿庫雷特", "阿庫雷特 （アクレット，主角）"))        # 括號前可有空白
         self.assertFalse(ok("阿庫雷特", "阿庫雷特（A）"))                     # 單一拉丁字母不算原名
-        for credit in ("阿庫雷特（CV：Akari）", "阿庫雷特（CV：ひかさ）", "阿庫雷特（OVA）", "阿庫雷特（TV）", "阿庫雷特（聲優：Akari）", "阿庫雷特（由 Akari 配音）"):
+        for credit in ("阿庫雷特（CV：Akari）", "阿庫雷特（CV：ひかさ）", "阿庫雷特（OVA）", "阿庫雷特（TV）", "阿庫雷特（聲優：Akari）", "阿庫雷特（由 Akari 配音）", "阿庫雷特（聲：Akari, Mv版）"):
             self.assertFalse(ok("阿庫雷特", credit), credit)               # 聲優、播出形式不是原名
+        self.assertTrue(ok("由井薰", "由井薰（ゆい かおる）"))                   # 姓以「由」開頭的名字不是聲優標註
         self.assertTrue(ok("阿庫雷特", "阿庫雷特（Akuret, CV Akari）"))        # 有原名，後面才有聲優
 
     def test_year_list_takes_only_the_links_in_the_title_column(self):
