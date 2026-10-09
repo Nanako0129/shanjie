@@ -211,7 +211,7 @@
 
 - Info.plist 只有一個模式 `<BUNDLE_ID>.zhuyin`（「善解輸入法」／「Shanjie」，`TISIntendedLanguage` 為 `zh-Hant`，`tsInputModeScriptKey` 為 `smTradChinese`），`tsVisibleInputModeOrderedArrayKey` 只有它；`zh-Hant` 與 `en` 的 `InfoPlist.strings` 都有這個模式 ID 的名稱。
 - `IMKInputController.menu()` 回傳兩個互斥項目「標準鍵盤」「倚天鍵盤」（目前的打勾），**各自用獨立的 selector**（IMK 呼叫時 `sender` 不一定是 `NSMenuItem`）。選了就走既有的切換排列流程（§5：送出組字、重建引擎、重載 LM 與設定），並存下選擇。
-- **「避免把敏感字詞排在前面」**（`docs/contracts/sw-sensitive-demote.md` §3）：選單的第三項，獨立的 selector（`toggleDemote`），預設打勾；每按一次切換並立刻呼叫 `shanjie_engine_set_demote`，也在每次重建引擎（換排列）時再送一次。偏好存在 app 自己的 UserDefaults，鍵 `demoteSensitive`（沒有值就是開）；介面 `DemoteStore` 是 `Shell.init` 的必要參數、不給預設值（和 `LayoutStore` 一樣）；UserDefaults 版只放在 `Shanjie` target，`ShanjieKit` 與測試用記憶體版，所以測試不可能寫到真正的偏好。選單順序因此是：標準鍵盤、倚天鍵盤、避免把敏感字詞排在前面、即時預測（V3 修訂一，`v3-engine.md` §10.5，比照這一項：獨立 selector `togglePrediction`、預設打勾、UserDefaults 鍵 `prediction`、`PredictionStore` 是 `Shell.init` 的必要參數、在 `setDemote` 之後套用）、動漫與遊戲詞（`acg-pack.md` A.2：獨立 selector `toggleAcgPack`、預設打勾、鍵 `acgPack`、`AcgPackStore` 是 `Shell.init` 的必要參數；詞包屬於詞庫，所以和切換排列一樣送出組字、重建引擎，詞包載入失敗時退回不帶詞包的引擎，偏好不動）、清除選字記憶…、不要備份選字記憶。`shanjie_engine_set_demote` 比照 `set_profile` 重算目前的組字並回傳快照，擁有組字的 session 立刻把它顯示出來，所以組字到一半切換，preedit 馬上在「搞完這波」與「睪丸這波」之間變。
+- **「避免把敏感字詞排在前面」**（`docs/contracts/sw-sensitive-demote.md` §3）：選單的第三項，獨立的 selector（`toggleDemote`），預設打勾；每按一次切換並立刻呼叫 `shanjie_engine_set_demote`，也在每次重建引擎（換排列）時再送一次。偏好存在 app 自己的 UserDefaults，鍵 `demoteSensitive`（沒有值就是開）；介面 `DemoteStore` 是 `Shell.init` 的必要參數、不給預設值（和 `LayoutStore` 一樣）；UserDefaults 版只放在 `Shanjie` target，`ShanjieKit` 與測試用記憶體版，所以測試不可能寫到真正的偏好。選單順序因此是：標準鍵盤、倚天鍵盤、避免把敏感字詞排在前面、即時預測（V3 修訂一，`v3-engine.md` §10.5，比照這一項：獨立 selector `togglePrediction`、預設打勾、UserDefaults 鍵 `prediction`、`PredictionStore` 是 `Shell.init` 的必要參數、在 `setDemote` 之後套用）、動漫與遊戲詞（`acg-pack.md` A.2：獨立 selector `toggleAcgPack`、預設打勾、鍵 `acgPack`、`AcgPackStore` 是 `Shell.init` 的必要參數；詞包屬於詞庫，所以和切換排列一樣送出組字、重建引擎，詞包載入失敗時退回不帶詞包的引擎，偏好不動）、善解設定…（`settings-window.md`：獨立 selector `openSettings`，開設定視窗，放在清除選字記憶…之前）、清除選字記憶…、不要備份選字記憶。`shanjie_engine_set_demote` 比照 `set_profile` 重算目前的組字並回傳快照，擁有組字的 session 立刻把它顯示出來，所以組字到一半切換，preedit 馬上在「搞完這波」與「睪丸這波」之間變。
 - **偏好**：介面 `LayoutStore`（讀／寫 `standard`／`eten`）是 `Shell.init` 的**必要參數、不給預設值**；UserDefaults 版（app 自己的網域，鍵 `layout`）只放在 `Shanjie` target，`ShanjieKit` 與測試用記憶體版，所以測試不可能寫到真正的偏好。值不存在或不合法時用標準排列。**`Shell.init` 先讀偏好、再建引擎，只建一次**（約 240 MB）。
 
 ### 13.3 註冊與升級
@@ -253,7 +253,7 @@
 
 ### 13.5 範圍外
 
-注音以外的輸入法（拼音、倉頡等）；選單裡的其他項目（偏好設定、關於）。
+注音以外的輸入法（拼音、倉頡等）；選單裡的其他項目（關於）。偏好設定視窗見 `docs/contracts/settings-window.md`。
 
 ## 14. 修訂二：Homebrew cask（使用者 2026-10-04）
 

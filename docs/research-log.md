@@ -2125,3 +2125,22 @@ PR #90 的審查意見逐項處理。
 | 和「現在」不同的預測列 | 52 | 53 |
 
   結論不變：改對、改壞的數量都沒有動。
+
+## 2026-10-10：設定介面研究（設定視窗第一片的依據）
+
+研究由唯讀的 agent 做，環境是 macOS 27.0.1、SDK 27.0；以下除標明「未確認」的，都是讀文件、讀開源程式或本機觀察，不是實機行為。契約：`docs/contracts/settings-window.md`。
+
+- **現有設定的位置**：選單由 `Session.menu`（`Learning.swift`）建，`InputController.swift` 轉成 `NSMenu`；偏好在 `UserDefaults.standard`（鍵 `layout`、`demoteSensitive`、`prediction`、`acgPack`）；「不要備份」是學習資料夾的 `isExcludedFromBackup`；聊天 App 清單與學習 denylist 寫死在程式裡。
+- **系統設定整合：沒有公開的方法**。
+  - 系統設定的面板是 ExtensionKit 擴充（私有）；蘋果自家輸入法的擴充內含 `Preferences.prefPane`，走私有的擴充點 `com.apple.textinputmethod-services`。
+  - 第三方在輸入法 bundle 內放 `Preferences.prefPane`：10.14 會載入，10.15 起變空白（Gureum issue #604），Gureum 2020 年改回 App 內視窗（PR #713）。
+  - 傳統 `.prefPane` 在 13–15 仍出現在側欄底部（legacyLoader）；**26 以後未確認**。
+- **IMK**：`showPreferences:` 只有在選單放了 action 是 `showPreferences:` 的項目才會被呼叫，預設找 `InputMethodServerPreferencesWindowControllerClass`（小麥 2026-07 仍用）。SwiftUI 的 `Settings` scene 從 macOS 14 起無法從輸入選單打開（macSKK 的註解）；26 的 `openSettings` 有問題（steipete，2025）。
+- **看過的 8 個開源輸入法**：6 個在輸入法自己的程序裡開視窗（小麥、威注音、macSKK〔有開 App 沙盒〕、azooKey、Gureum、fcitx5），Google 日文輸入（mozc）另開一個 App，鼠鬚管（Squirrel）開設定資料夾。
+- **帶到前景**：`NSApp.activate()` 從 14 起只是請求（cooperative activation）；小麥用 `showWindow` ＋ `makeKeyAndOrderFront` ＋ `activate`，威注音用 `orderFrontRegardless` ＋ level `.statusBar`，fcitx5 開窗時暫時切成 `.regular`。視窗裡若有文字欄，輸入法自己的程序要裝 Edit 選單（Cmd+C/V/A）才能複製貼上；安全輸入期間輸入選單是反灰的。
+- **26**：`NSGlassEffectView` 與 `.glassEffect` 都是 26.0 起，最低版本 26，不用判斷。
+- **候選方案**：A 輸入法程序內視窗（工作量低、沙盒最單純）、B 另一個 App（要 App Group 與跨程序）、C `.prefPane`、D bundle 內的 `Preferences.prefPane`（私有，10.15 起壞）、E 維持選單。**使用者選 A**（2026-10-10）。
+- **未確認（要實機）**：LSUIElement 的視窗能否到前景並成為 key；IMK 預設的 `showPreferences` 會不會 activate；C、D 在 26／27 會不會出現。
+- **玻璃深淺的參考（Syrtis，使用者轉來，2026-10-09）**：Syrtis（前 TokenBar）的 PR #491、issue #490。只改玻璃色調（材質固定 `.regular`）；連續滑桿 0–1，不透明度＝clamp(值) × 0.5，0 等於沒有色調；深色疊黑、淺色疊白。上限 0.5 是維護者看實機挑的，沒有對蘋果截圖量過；先前試過永遠疊黑色 0.25，被否決。這是轉述，沒有自己重跑。
+- **連結**：研究原文沒有附網址，上面的 issue／PR 編號是原文的引用，網址沒有逐一核對，所以這裡不寫成連結。
+- **實作時查到的**：`NSGlassEffectView.tintColor`（`AppKit/NSGlassEffectView.h`，SDK 27.0 第 34 行）是色調屬性。它在 26 上的實際效果沒有量測（未確認，由使用者實機看）。
