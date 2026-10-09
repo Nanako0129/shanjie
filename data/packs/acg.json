@@ -45,7 +45,6 @@
   "ROLY POLY PEOPLES",
   "SHIBUYA♡HACHI",
   "THE LENTICULARS",
-  "THE MARGINAL SERVICE",
   "Tales of Luminaria",
   "The Missing 8",
   "Tomica Heroes Jobraver 特裝合體機器人",
@@ -200,7 +199,6 @@
   "週刊輕小說動畫",
   "遊星高校 天文部",
   "遠井同學",
-  "邊緣服務",
   "鋼彈創壞者 對戰風雲錄",
   "鋼彈創鬥元宇宙",
   "鋼管公主!!",
@@ -231,14 +229,14 @@
  "excluded_by_exclude_tsv": 2,
  "files": {
   "acg-add.tsv": {
-   "bytes": 1899704,
-   "lines": 30399,
-   "sha256": "cf9f17198df62a49563a4d1781ba1b76df5955077efcccc180ed7b156e1e9087"
+   "bytes": 1898221,
+   "lines": 30375,
+   "sha256": "bbf39864a8dd7b8e613ade31b7ab0130df16ad72e17e3a9934b3f90bfdd51e10"
   },
   "acg-sources.tsv": {
-   "bytes": 1732401,
-   "lines": 30703,
-   "sha256": "101872cefbe3bafdf9310c4c53e0351d977dc9640d91d5df3bebb7c94d2a6331"
+   "bytes": 1730873,
+   "lines": 30678,
+   "sha256": "1be3caec63a973549002ec25a3102fab34319baec90dda67462bcf4805d24b38"
   }
  },
  "groups": {
@@ -252,18 +250,18 @@
   "min": 22981265,
   "pages": 2189
  },
- "rows": 30399,
+ "rows": 30375,
  "sources": {
   "cgroup": 9872,
-  "char": 20048,
+  "char": 20023,
   "manual": 4,
   "title": 778
  },
  "unclassified_groups": [],
  "unreadable_dropped": 48,
  "unresolved_collision_readings": 0,
- "version": "20261008-cf9f1719",
- "words": 30048,
+ "version": "20261008-bbf39864",
+ "words": 30024,
  "yearly_lists": {
   "2020": {
    "links": 200,
@@ -284,7 +282,7 @@
    "ts": "2026-07-07T04:03:11Z"
   },
   "2023": {
-   "links": 326,
+   "links": 324,
    "revid": 93356362,
    "title": "2023年日本動畫列表",
    "ts": "2026-07-07T14:28:48Z"
