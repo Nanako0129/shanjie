@@ -153,8 +153,8 @@ class Build(unittest.TestCase):
         cls.excl = os.path.join(cls.tmp, "collisions.tsv")
         open(cls.excl, "w", encoding="utf-8").write("# c\nㄈㄥ ㄓ ㄍㄨˇ\t風之谷\t楓之谷\t保留既有的名字\n")
 
-    def build(self, collisions):
-        return B.build(FakeApi(), self.groups, collisions, self.manual, readings=fake_readings)
+    def build(self, collisions, exclude=None):
+        return B.build(FakeApi(), self.groups, collisions, self.manual, readings=fake_readings, exclude_tsv=exclude or self.none)
 
     def test_pack_content_and_filters(self):
         files, manifest, col, unread, ref = self.build(self.excl)
@@ -180,7 +180,7 @@ class Build(unittest.TestCase):
     def test_a_changed_pack_changes_the_version(self):
         manual = os.path.join(self.tmp, "manual2.tsv")
         open(manual, "w", encoding="utf-8").write(open(self.manual, encoding="utf-8").read() + "艾倫葉卡\t某作品\t角色\n")
-        more = B.build(FakeApi(), self.groups, self.excl, manual, readings=lambda w: fake_readings(w) | {"艾倫葉卡": (["ㄞˋ", "ㄌㄨㄣˊ", "ㄧㄝˋ", "ㄎㄚˇ"], False)})[1]
+        more = B.build(FakeApi(), self.groups, self.excl, manual, readings=lambda w: fake_readings(w) | {"艾倫葉卡": (["ㄞˋ", "ㄌㄨㄣˊ", "ㄧㄝˋ", "ㄎㄚˇ"], False)}, exclude_tsv=self.none)[1]
         base = self.build(self.excl)[1]
         self.assertEqual(more["version"][:8], base["version"][:8])            # 來源頁沒變，日期一樣
         self.assertNotEqual(more["version"], base["version"])                 # 內容變了，版號就變
@@ -236,6 +236,29 @@ class Build(unittest.TestCase):
         col = B.detect_collisions(["芭芭", "楓之谷"], reading, [], {"巴巴", "風之谷"}, decode=decode)
         self.assertNotIn("ㄅㄚ ㄅㄚ", col)
         self.assertIn("ㄈㄥ ㄓ ㄍㄨˇ", col)
+
+    def test_excluded_strings_leave_the_pack_and_the_reference_list(self):
+        excl = os.path.join(self.tmp, "exclude.tsv")
+        open(excl, "w", encoding="utf-8").write("# e\n碇源堂\t測試排除\n不在來源裡\t沒抽到的字串不計\n")
+        files, manifest, _, _, ref = self.build(self.excl, excl)
+        words = {l.split("\t")[1] for l in files["acg-add.tsv"].splitlines()}
+        self.assertNotIn("碇源堂", words)
+        self.assertNotIn("碇源堂", ref)
+        self.assertIn("螢火蟲之墓", words)
+        self.assertEqual(manifest["excluded_by_exclude_tsv"], 1)
+        self.assertEqual(self.build(self.excl)[1]["excluded_by_exclude_tsv"], 0)   # 沒有排除檔
+        bad = os.path.join(self.tmp, "bad-exclude.tsv")
+        open(bad, "w", encoding="utf-8").write("碇源堂\n")                    # 少了理由
+        with self.assertRaises(AssertionError):
+            self.build(self.excl, bad)
+
+    def test_the_committed_exclusions_are_applied_to_the_committed_pack(self):
+        pack = second_column(os.path.join(B.PACKS, "acg-add.tsv"))
+        rows = B.read_tsv(os.path.join(B.PACKS, "acg-exclude.tsv"))
+        self.assertGreater(len(rows), 0)
+        for w, why in rows:
+            self.assertNotIn(w, pack, w)
+            self.assertTrue(why)
 
     def test_the_committed_dispositions_are_applied_to_the_committed_pack(self):
         pack = second_column(os.path.join(B.PACKS, "acg-add.tsv"))

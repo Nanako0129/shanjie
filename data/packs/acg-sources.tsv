@@ -1268,7 +1268,6 @@ word	source_kind	sources (page@revision)	note
 七龍珠大魔	title	七龍珠大魔@94711250	
 三一自衛隊	cgroup	Module:CGroup/BlueArchive@93972468	zh-hant
 三不管地帶	cgroup	Module:CGroup/Counter-Strike@85677571	zh-hant
-三人各代表著業界之闇	char	白箱@94727899	
 三人娘	cgroup	Module:CGroup/Hayate the Combat Butler@81833661	CHECK
 三加村	cgroup	Template:CGroup/GGundam@85035825	
 三叉矛	cgroup	Module:CGroup/Danball Senki@81863967	
@@ -1668,7 +1667,6 @@ word	source_kind	sources (page@revision)	note
 仙崎惠磨	char	偶像大師 灰姑娘女孩角色列表@91786822	
 代理帝厲魔	char	数码宝贝03驯兽师之王角色列表@94744434	
 代碼世紀	cgroup	Module:CGroup/Square Enix@93012351	zh-hant
-以下角色資訊及	char	衝吧烈子@91183058	
 仰加印古	cgroup	Module:CGroup/Wow@94351016	
 仲本長介	char	富豪刑事 Balance:UNLIMITED@93288613	
 任天堂樂園	cgroup	Module:CGroup/Nintendo@94745610	
@@ -2535,7 +2533,6 @@ word	source_kind	sources (page@revision)	note
 剁碎手巴利	cgroup	Template:CGroup/FullmetalAlchemist@48481493	CHECK
 剃刀型	cgroup	Template:CGroup/GundamAGE@51366593	
 則卷卡斯拉	char	七龍珠 摩訶不思議大冒險@93733668	
-則卷怪博士與機器娃娃	char	七龍珠 摩訶不思議大冒險@93733668	
 前導軟件	cgroup	Module:CGroup/Games-zh@90861641	zh-hant
 前川佳苗	char	比宇宙更遠的地方@93910432	
 前川未來	char	偶像大師 灰姑娘女孩角色列表@91786822	
@@ -2744,7 +2741,7 @@ word	source_kind	sources (page@revision)	note
 十時愛梨	char	偶像大師 灰姑娘女孩角色列表@91786822	
 十束多多良	char	K (動畫)@93234659	
 十環幫	cgroup	Module:CGroup/美国漫画@94638375	
-十種影法術最著名式神	char	咒術迴戰角色列表@94830133	
+十種影法術	manual	咒術迴戰	
 十萬伏特	cgroup	Module:CGroup/Counter-Strike@85677571	zh-hant
 十里火車	cgroup	Template:CGroup/KamenRider@94225985	
 千古恆久	char	你好世界 (电影)@94020123	
@@ -3628,7 +3625,6 @@ word	source_kind	sources (page@revision)	note
 土著號	cgroup	Template:CGroup/四驅兄弟@86987120	
 土谷瑠果	char	少女革命@93843108	
 在劇場版	char	数码宝贝大冒险角色列表@94744369	
-在官方網站關於	char	数码宝贝大冒险角色列表@94744369	
 在恩	cgroup	Template:CGroup/Pretty Rhythm@77221109	zh-hant
 在灰燼中跋涉	cgroup	Template:CGroup/Warcraft@92164655	zh-hant
 在蹄鳥	cgroup	Module:CGroup/My Little Pony@91388064	
@@ -6533,7 +6529,6 @@ word	source_kind	sources (page@revision)	note
 操作桿	cgroup	Module:CGroup/Games@94658856	zh-hant
 操作系	cgroup	Template:CGroup/HUNTER@80241645	zh-hant
 操冥使徒	cgroup	Template:CGroup/KamenRider@94225985	
-操著一口名古屋腔	char	数码宝贝大冒险02角色列表@94744398	
 操血	cgroup	Template:CGroup/MyHeroAcademia@87565804	
 擎天神鋼彈	cgroup	Template:CGroup/GundamUC@94693163	
 據點攻略戰	cgroup	Module:CGroup/LOL@93322985	
@@ -7021,7 +7016,6 @@ word	source_kind	sources (page@revision)	note
 最後的遺跡	cgroup	Module:CGroup/Square Enix@93012351	
 最後的願望	cgroup	Template:CGroup/The Witcher@86825096	
 最後衝擊	cgroup	Template:CGroup/DragonBall@92325756	
-最早成立五個小隊之一	char	少女與戰車角色列表@93320972	
 最終幻想	cgroup	Module:CGroup/Games@94658856	
 最終的絕望	cgroup	Module:CGroup/Counter-Strike@85677571	zh-hant
 最終的線索	cgroup	Module:CGroup/Counter-Strike@85677571	zh-hant
@@ -9109,7 +9103,6 @@ word	source_kind	sources (page@revision)	note
 獨角馬獸	char	数码宝贝大冒险角色列表@94744369	CHECK
 獵人克萊文	cgroup	Module:CGroup/美国漫画@94638375	
 獵人史多特	char	爆丸5星域爭霸@90756067	
-獵人和阿努比斯	char	高譚角色列表@92146409	
 獵命射手	cgroup	Module:CGroup/Counter-Strike@85677571	zh-hant
 獵殺夜行	cgroup	Module:CGroup/Counter-Strike@85677571	zh-hant
 獵殺電光網	cgroup	Module:CGroup/閃電十一人@68657168	
@@ -10923,7 +10916,6 @@ word	source_kind	sources (page@revision)	note
 致命追擊	cgroup	Module:CGroup/Games@94658856	
 致命重傷	cgroup	Module:CGroup/Counter-Strike@85677571	zh-hant
 與太	char	火影忍者角色列表@94671076	
-與蟲蟲獸合步進化	char	数码宝贝大冒险02角色列表@94744398	
 興津由佳	char	白箱@94727899	
 舊京山	cgroup	Module:CGroup/Disney@93925402	
 舒瓦茲	cgroup	Template:CGroup/GGundam@85035825	CHECK
@@ -11809,7 +11801,6 @@ word	source_kind	sources (page@revision)	note
 螢光石	cgroup	Module:CGroup/Minecraft@94388709	
 螢幕擷取	cgroup	Module:CGroup/Games@94658856	
 螢幕魔人	cgroup	Module:CGroup/Pixar@93247177	
-螢火蟲在漫畫中為男性	char	高譚角色列表@92146409	
 螳螂人	cgroup	Module:CGroup/Wow@94351016	
 螳螂獸	char	数码宝贝大冒险角色列表@94744369	
 螳螂荒原	cgroup	Module:CGroup/Wow@94351016	
@@ -12039,7 +12030,6 @@ word	source_kind	sources (page@revision)	note
 觀鳥令	char	魔法少女小圓角色列表@94590242	
 角古	char	決鬥大師@92994775	
 角屋夫人	char	回憶中的瑪妮@94615795	
-角色出自電子遊戲	char	高譚角色列表@92146409	
 角色導讀	cgroup	Template:CGroup/FullmetalAlchemist@48481493	
 角色扮演獸	char	數碼暴龍App世代角色列表@94177588	
 角谷杏	char	少女與戰車角色列表@93320972	

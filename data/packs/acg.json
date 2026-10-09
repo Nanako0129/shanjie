@@ -1,16 +1,17 @@
 {
  "articles_missing": [],
  "excluded_by_collisions_tsv": 135,
+ "excluded_by_exclude_tsv": 11,
  "files": {
   "acg-add.tsv": {
-   "bytes": 935798,
-   "lines": 14823,
-   "sha256": "6a0e68f4997050c4f65141f1ca4269e1805ccb3fa3b9514391b99b99fbfa12f4"
+   "bytes": 934445,
+   "lines": 14812,
+   "sha256": "f70899207dcf5f3a651c3b425c8a266943672607e520a477d473c5a87d1e84f0"
   },
   "acg-sources.tsv": {
-   "bytes": 876600,
-   "lines": 14976,
-   "sha256": "5576e0ade795be8e9e40d8743ff1c2ad784db2be37d9d75ae996323c0b04c0f7"
+   "bytes": 875905,
+   "lines": 14966,
+   "sha256": "21c7a55b5a47e41c6d549356267721beddeffaf357c4a09d0cb3423ea8f6ad62"
   }
  },
  "groups": {
@@ -24,16 +25,16 @@
   "min": 22981265,
   "pages": 661
  },
- "rows": 14823,
+ "rows": 14812,
  "sources": {
   "cgroup": 9914,
-  "char": 4907,
-  "manual": 2,
+  "char": 4896,
+  "manual": 3,
   "title": 152
  },
  "unclassified_groups": [],
  "unreadable_dropped": 15,
  "unresolved_collision_readings": 0,
- "version": "20261006-6a0e68f4",
- "words": 14727
+ "version": "20261006-f7089920",
+ "words": 14717
 }

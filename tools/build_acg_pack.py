@@ -532,9 +532,20 @@ def read_collisions(path):
     return out, decided
 
 
+def read_exclude(path):
+    """acg-exclude.tsv：詞、理由。抽取時誤當成名字的字串（句子片段、轉換錯誤），不收進詞包，也不算參考名單。"""
+    if not os.path.exists(path):
+        return set()
+    out = set()
+    for r in read_tsv(path):
+        assert len(r) == 2 and HANX.match(r[0]) and r[1], f"bad exclude row: {r}"
+        out.add(r[0])
+    return out
+
+
 # ---------------------------------------------------------------- 主流程
 
-def build(api, groups_tsv=os.path.join(PACKS, "acg-groups.tsv"), collisions_tsv=os.path.join(PACKS, "acg-collisions.tsv"), manual_tsv=os.path.join(PACKS, "acg-manual.tsv"), decode=top1, readings=make_readings):
+def build(api, groups_tsv=os.path.join(PACKS, "acg-groups.tsv"), collisions_tsv=os.path.join(PACKS, "acg-collisions.tsv"), manual_tsv=os.path.join(PACKS, "acg-manual.tsv"), decode=top1, readings=make_readings, exclude_tsv=os.path.join(PACKS, "acg-exclude.tsv")):
     log = lambda *a: print(*a, file=sys.stderr)
     gr = read_tsv(groups_tsv)
     listing = pages(api, ["Template:CGroup/list"])["Template:CGroup/list"]
@@ -610,9 +621,11 @@ def build(api, groups_tsv=os.path.join(PACKS, "acg-groups.tsv"), collisions_tsv=
         assert HAN.match(w), w
         src[w]["manual"].add(work)
         ref.add(w)
+    dropped = read_exclude(exclude_tsv) & set(src)
+    ref -= dropped
     excluded, decided = read_collisions(collisions_tsv)
-    cand = [w for w in dedupe(src, have) if w not in excluded]
-    log("candidates", len(src), "after dedupe and exclusions", len(cand), "excluded by acg-collisions.tsv", len(excluded))
+    cand = [w for w in dedupe(src, have) if w not in excluded and w not in dropped]
+    log("candidates", len(src), "after dedupe and exclusions", len(cand), "excluded by acg-collisions.tsv", len(excluded), "by acg-exclude.tsv", len(dropped))
 
     rd = readings(cand)
     unread = sorted(set(cand) - set(rd))
@@ -635,6 +648,7 @@ def build(api, groups_tsv=os.path.join(PACKS, "acg-groups.tsv"), collisions_tsv=
         "articles_missing": sorted(missing),
         "unreadable_dropped": len(unread),
         "excluded_by_collisions_tsv": len(excluded),
+        "excluded_by_exclude_tsv": len(dropped),
         "unresolved_collision_readings": len(col),
     }
     sources = ["word\tsource_kind\tsources (page@revision)\tnote\n"]
