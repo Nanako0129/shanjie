@@ -45,9 +45,24 @@ for lp in "zh-Hant 善解輸入法" "en Shanjie"; do
   done
 done
 for f in mcbpmf-data.txt overlay-add.tsv sandhi-add.tsv demote.tsv bigram.sjlm classes.sjc shanjie.tiff \
-         LICENSES/LICENSE LICENSES/McBopomofo-MIT.txt LICENSES/data.md LICENSES/CC-BY-SA-4.0-attribution.txt; do
+         packs/acg-add.tsv packs/acg-sources.tsv packs/acg.json LICENSES/LICENSE LICENSES/McBopomofo-MIT.txt LICENSES/data.md LICENSES/CC-BY-SA-4.0-attribution.txt; do
   [ -s "$R/$f" ] || fail "Resources/$f is missing or empty"
 done
+# The word pack manifest (docs/contracts/acg-pack.md A.2): every file it lists is there with the SHA-256 it records,
+# and the attribution file names the pack.
+python3 - "$R/packs" <<'PY' || fail "packs/acg.json does not match the pack files"
+import hashlib, json, os, sys
+d = sys.argv[1]
+files = json.load(open(os.path.join(d, "acg.json"), encoding="utf-8"))["files"]
+# Explicit exits, not assert: PYTHONOPTIMIZE strips asserts and the check would pass vacuously.
+if "acg-add.tsv" not in files:
+    sys.exit("acg-add.tsv is not in the manifest")
+for name, meta in files.items():
+    data = open(os.path.join(d, name), "rb").read()
+    if hashlib.sha256(data).hexdigest() != meta["sha256"] or len(data) != meta["bytes"]:
+        sys.exit(name + " does not match the manifest")
+PY
+grep -q 'packs/acg-add.tsv' "$R/LICENSES/CC-BY-SA-4.0-attribution.txt" || fail "the attribution file does not list packs/acg-add.tsv"
 echo "check 2: ok"
 
 # --- 3: signature: valid, hardened runtime, no entitlements at all

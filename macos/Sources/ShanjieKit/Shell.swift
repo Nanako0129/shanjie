@@ -98,6 +98,20 @@ public final class MemoryPredictionStore: PredictionStore {
     public init(_ prediction: Bool? = nil) { self.prediction = prediction }
 }
 
+/// Where the "動漫與遊戲詞" switch is kept (docs/contracts/acg-pack.md A.2): `nil` means never chosen, which is on
+/// (user decision 2026-10-09, after the A.3 numbers). Same arrangement as `PredictionStore`.
+@MainActor
+public protocol AcgPackStore: AnyObject {
+    var acgPack: Bool? { get set }
+}
+
+/// The in-memory AcgPackStore.
+@MainActor
+public final class MemoryAcgPackStore: AcgPackStore {
+    public var acgPack: Bool?
+    public init(_ acgPack: Bool? = nil) { self.acgPack = acgPack }
+}
+
 /// Process-wide state: the single engine (about 240 MB each, so never two at once), the single
 /// candidate panel and the page it shows, and which session owns the composition (section 5).
 /// All calls happen on the main thread.
@@ -123,6 +137,9 @@ public final class Shell {
     private let predictionStore: PredictionStore
     /// V3: whether the prediction row is computed (default on); sent to every engine `build()` makes.
     private(set) var predictionOn = true
+    private let acgPackStore: AcgPackStore
+    /// The ACG word pack (default on, user decision 2026-10-09): parsed into the lexicon, so a change rebuilds the engine like a layout change.
+    private(set) var acgPackOn = true
     let panel: CandidatePanel
     let isSecureInput: () -> Bool
     private(set) var engine: CoreEngine?
@@ -160,11 +177,12 @@ public final class Shell {
     /// `demoteStore`: the demotion switch (sw). Required, with no default, like `layoutStore`: the app passes
     /// its UserDefaults-backed store, tests the in-memory one.
     /// `predictionStore`: the prediction switch (V3 section 10.5). Required, like `demoteStore`.
+    /// `acgPackStore`: the ACG word pack switch (acg-pack contract A.2). Required, like `demoteStore`.
     /// `punctuationTable`: Apple's punctuation candidate table (s3e); tests pass another path.
     /// `punctuationNames`: Apple's punctuation names (s3f); tests pass another path.
     public init(resources: URL, panel: CandidatePanel, isSecureInput: @escaping () -> Bool,
                 layoutStore: LayoutStore, learningDirectory: URL?, dialogs: LearningDialogs,
-                demoteStore: DemoteStore, predictionStore: PredictionStore,
+                demoteStore: DemoteStore, predictionStore: PredictionStore, acgPackStore: AcgPackStore,
                 punctuationTable: URL = PunctuationTable.systemURL,
                 punctuationNames: URL = PunctuationNames.systemURL) {
         self.resources = resources
@@ -187,6 +205,8 @@ public final class Shell {
         demoteOn = demoteStore.demote ?? true
         self.predictionStore = predictionStore
         predictionOn = predictionStore.prediction ?? true
+        self.acgPackStore = acgPackStore
+        acgPackOn = acgPackStore.acgPack ?? true
         // The preference is read before the one engine is built (about 240 MB): building first
         // and switching after would build twice.
         mode = layoutStore.layout.flatMap(InputMode.init(rawValue:)) ?? .standard
@@ -219,12 +239,32 @@ public final class Shell {
         return engine?.setPrediction(on)
     }
 
+    /// The menu's choice (acg-pack contract A.2): the pack is part of the lexicon, so like a layout change the
+    /// composition is committed and the engine rebuilt; the choice is stored. Same value: nothing happens.
+    func setAcgPack(_ on: Bool) {
+        guard on != acgPackOn else { return }
+        commitThenRebuild {
+            acgPackOn = on
+            acgPackStore.acgPack = on
+        }
+        Log.shell.debug("word pack switched")
+    }
+
     /// Creates the engine for the current mode, then loads the LM and the current profile. A
     /// failure leaves an engine without the LM (still usable) or no engine (every key passes).
     private func build() {
         engine = nil  // free the old engine first: only one exists at a time
-        let (e, code) = CoreEngine.make(dataDir: resources.path, layout: mode.layout)
-        guard let e else {
+        let packsDir = resources.appendingPathComponent("packs").path
+        var (made, code) = CoreEngine.make(dataDir: resources.path, layout: mode.layout, packsDir: acgPackOn ? packsDir : nil)
+        if made == nil && acgPackOn {
+            // Any build failure retries without the pack, so the first code alone does not say whose fault it is:
+            // blame the pack only if the pack-less build works; otherwise the second code is the real cause.
+            // The stored choice is untouched and nothing is shown; the next rebuild tries the pack again.
+            let packCode = code
+            (made, code) = CoreEngine.make(dataDir: resources.path, layout: mode.layout)
+            if made != nil { Log.shell.error("shanjie_engine_new_packs failed, code \(packCode); built without the pack") }
+        }
+        guard let e = made else {
             Log.shell.error("shanjie_engine_new failed, code \(code)")
             return
         }
@@ -257,12 +297,18 @@ public final class Shell {
     /// layout, reload the LM and the current profile.
     func switchMode(to newMode: InputMode) {
         guard newMode != mode else { return }
+        commitThenRebuild { mode = newMode }
+        Log.shell.debug("input mode switched")
+    }
+
+    /// What a setting that lives in the engine's construction (layout, word pack) does: commit the
+    /// composition to its owner (or drop an orphan), apply the change, build a new engine.
+    private func commitThenRebuild(_ apply: () -> Void) {
         if composing {
             if let o = owner { o.finish(mode: 0) } else { discardOrphan() }
         }
-        mode = newMode
+        apply()
         build()
-        Log.shell.debug("input mode switched")
     }
 
     func setProfile(_ p: UInt32) -> CoreResult? {
