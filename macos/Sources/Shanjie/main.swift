@@ -69,6 +69,15 @@ final class DefaultsAcgPackStore: AcgPackStore {
     }
 }
 
+/// The candidate glass tint slider (docs/contracts/settings-window.md section 2.3), key `glassTint` (Double); absent means 0.
+@MainActor
+final class DefaultsGlassTintStore: GlassTintStore {
+    var glassTint: Double? {
+        get { UserDefaults.standard.object(forKey: "glassTint") as? Double }
+        set { UserDefaults.standard.set(newValue, forKey: "glassTint") }
+    }
+}
+
 @MainActor
 func runServer() -> Never {
     guard let bundleID = Bundle.main.bundleIdentifier,
@@ -87,7 +96,10 @@ func runServer() -> Never {
     App.shell = Shell(
         resources: resources.absoluteURL, panel: CandidatePanelAdapter(),
         isSecureInput: { IsSecureEventInputEnabled() }, layoutStore: DefaultsLayoutStore(),
-        learningDirectory: Shell.learningURL(), dialogs: AlertDialogs(), demoteStore: DefaultsDemoteStore(), predictionStore: DefaultsPredictionStore(), acgPackStore: DefaultsAcgPackStore())
+        learningDirectory: Shell.learningURL(), dialogs: AlertDialogs(), demoteStore: DefaultsDemoteStore(), predictionStore: DefaultsPredictionStore(), acgPackStore: DefaultsAcgPackStore(),
+        glassTintStore: DefaultsGlassTintStore())
+    let settings = SettingsWindowController(shell: App.shell)
+    App.shell?.onOpenSettings = { settings.show() }
     withExtendedLifetime(server) { app.run() }
     exit(0)
 }

@@ -142,10 +142,13 @@ final class FakePanel: CandidatePanel {
     private(set) var columns = 0
     private(set) var first = 0
     private(set) var total = 0
+    /// The glassTint of every show, in order.
+    private(set) var glassTints: [Double] = []
     var onSelect: ((Int) -> Void)?
 
     func show(_ candidates: [String], notes: [String?], selected: Int, columns: Int, first: Int, total: Int,
-              lineRect: NSRect?, appearance: NSAppearance?) {
+              lineRect: NSRect?, appearance: NSAppearance?, glassTint: Double) {
+        glassTints.append(glassTint)
         self.lineRect = lineRect
         self.appearance = appearance
         self.columns = columns
