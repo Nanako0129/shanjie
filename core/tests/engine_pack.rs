@@ -87,7 +87,9 @@ fn the_pack_switch_changes_the_result_and_off_is_identical_to_no_pack_file() {
     // Off: bit 0 clear with the file present, and bit 0 set with no file: both are the engine without the pack.
     assert!(run(Some((&with, 0))) == plain, "mask 0 with the pack file present differs from no pack");
     assert!(run(Some((&none, PACK_ACG))) == plain, "a missing pack file changes the engine");
-    // On: the names the base cannot spell are the first candidate, in both profiles.
+    // On: the pack word is the window's first candidate, in both profiles. Without the pack the window's first
+    // candidate is only the last word (元堂, 汁木; measured), also in formal, where the sentence decode alone
+    // already spells both names (chat spells 定元堂 and 螢火蟲之目; measured with shanjie-eval --dump).
     let on = run(Some((&with, PACK_ACG)));
     assert!(on != plain);
     let firsts = |outs: &[Output], word: &str| outs.iter().filter(|o| o.selected == Some(0) && o.candidates.first().map(String::as_str) == Some(word)).count();
