@@ -355,35 +355,30 @@ pub const PACK_ALL: u32 = PACK_ACG;
 /// A pack's overlay file inside the packs directory, in the order the packs are appended.
 const PACK_FILES: [(u32, &str); 1] = [(PACK_ACG, "acg-add.tsv")];
 
-/// Why a lexicon load failed, for messages: the file that could not be read and the `ErrorKind` (both `None` when
-/// the files read fine but did not parse). The C ABI and `EngineError` stay as they were; the plain functions map this to `LoadFailed`.
+/// Why a lexicon load failed, for messages: the file that could not be read and its `ErrorKind`, or the lexicon text
+/// that did not parse (`path` is the data directory the files came from, `detail` the `Lexicon` parse error). The C ABI
+/// and `EngineError` stay as they were; the plain functions map this to `LoadFailed`.
 #[derive(Debug)]
-pub struct LoadError {
-    pub path: Option<PathBuf>,
-    pub kind: Option<std::io::ErrorKind>,
+pub enum LoadError {
+    Read { path: PathBuf, kind: std::io::ErrorKind },
+    Parse { path: PathBuf, detail: String },
 }
 
 impl std::fmt::Display for LoadError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match (&self.path, self.kind) {
-            (Some(p), Some(k)) => write!(f, "cannot read {} ({k:?})", p.display()),
-            _ => write!(f, "cannot load lexicon"),
+        match self {
+            LoadError::Read { path, kind } => write!(f, "cannot read {} ({kind:?})", path.display()),
+            LoadError::Parse { path, detail } => write!(f, "cannot parse the lexicon in {}: {detail}", path.display()),
         }
     }
 }
 
 fn read_file(p: PathBuf) -> Result<String, LoadError> {
-    std::fs::read_to_string(&p).map_err(|e| LoadError { kind: Some(e.kind()), path: Some(p) })
+    std::fs::read_to_string(&p).map_err(|e| LoadError::Read { kind: e.kind(), path: p })
 }
-
-const PARSE_FAILED: LoadError = LoadError { path: None, kind: None };
 
 /// The enabled packs' overlay rows in `dir`, concatenated; a pack whose file is missing contributes
 /// nothing (the engine is then identical to one without packs). An unreadable file is a load failure.
-pub fn read_packs(dir: &Path, mask: u32) -> Result<String, EngineError> {
-    read_packs_detailed(dir, mask).map_err(|_| EngineError::LoadFailed)
-}
-
 pub fn read_packs_detailed(dir: &Path, mask: u32) -> Result<String, LoadError> {
     let mut text = String::new();
     for (bit, name) in PACK_FILES {
@@ -397,14 +392,14 @@ pub fn read_packs_detailed(dir: &Path, mask: u32) -> Result<String, LoadError> {
                 }
                 text.push_str(&t);
             }
-            Err(e) if e.kind == Some(std::io::ErrorKind::NotFound) => {}
+            Err(LoadError::Read { kind: std::io::ErrorKind::NotFound, .. }) => {}
             Err(e) => return Err(e),
         }
     }
     Ok(text)
 }
 
-/// `load_lexicon` with the rows of `packs` (`(directory, mask)`, see `read_packs`) after `sandhi-add.tsv`,
+/// `load_lexicon` with the rows of `packs` (`(directory, mask)`, see `read_packs_detailed`) after `sandhi-add.tsv`,
 /// plus those rows alone (empty with no pack), for `capping_overlay`. `None` or an empty mask: exactly
 /// `load_lexicon`. The engine and the evaluation CLI share this.
 pub fn load_lexicon_packs(data_dir: &Path, packs: Option<(&Path, u32)>) -> Result<(Arc<Lexicon>, String), EngineError> {
@@ -424,7 +419,7 @@ pub fn load_lexicon_packs_detailed(data_dir: &Path, packs: Option<(&Path, u32)>)
     if !extra.is_empty() {
         text = join_overlays(text, &extra);
     }
-    let lex = Lexicon::parse_with(&base, Some(&text)).map_err(|_| PARSE_FAILED)?;
+    let lex = Lexicon::parse_with(&base, Some(&text)).map_err(|e| LoadError::Parse { path: data_dir.to_path_buf(), detail: e.to_string() })?;
     Ok((Arc::new(lex), extra))
 }
 

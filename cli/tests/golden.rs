@@ -285,3 +285,20 @@ fn unreadable_pack_file_names_the_path_and_kind() {
     let err = String::from_utf8(out.stderr).unwrap();
     assert!(!out.status.success() && err.contains("acg-add.tsv") && err.contains("PermissionDenied"), "{err}");
 }
+
+/// acg-pack A2.5: a pack that reads but does not parse is reported as a parse failure naming the data directory.
+#[test]
+fn unparsable_pack_is_a_parse_error() {
+    let dir = std::env::temp_dir().join(format!("shanjie-packs-badrows-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("acg-add.tsv"), "not a row\n").unwrap();
+    let rows = dir.join("rows.txt");
+    std::fs::write(&rows, "|風之谷|ㄈㄥ ㄓ ㄍㄨˇ\n").unwrap();
+    let out = Command::new(env!("CARGO_BIN_EXE_shanjie-eval"))
+        .args(["--lm", &lm_path(), "--profile", "chat", "--rows", rows.to_str().unwrap(), "--packs", "acg", "--packs-dir", dir.to_str().unwrap()])
+        .output()
+        .unwrap();
+    std::fs::remove_dir_all(&dir).unwrap();
+    let err = String::from_utf8(out.stderr).unwrap();
+    assert!(!out.status.success() && err.contains("cannot parse the lexicon in") && err.contains("data/lexicon"), "{err}");
+}

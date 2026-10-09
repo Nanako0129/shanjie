@@ -1,7 +1,7 @@
 # ACG pack audit: the root cause of "pack word loses to a lexicon word" (report only, no rule proposed)
 
 Pack: the pack of commit c84e1ac (version 20261008-cf9f1719, 30,048 words, 30,399 rows; later commits changed a few orderings and removed the credit-bracket names, see the research log). Model: data/lm/bigram.sjlm. 
-Files here: `dropped-c.tsv` (item ii, the 9 words), `analyze.py` and `acg_audit.rs` (the scripts). `losers-pack.tsv` (item i, 16,082 rows, 3.3 MB) and the raw decode dumps are not committed; rerun `analyze.py` to regenerate them. `acg_audit.rs` is a cargo example: copy it to `cli/examples/` and run `cargo build --release -p cli --example acg_audit`. `analyze.py` has the scratch directory of the original run hard-coded (`S`); point it at your own dumps.
+Files here: `dropped-c.tsv` (item ii, the 9 words), `analyze.py` and `acg_audit.rs`. The scripts are kept as a record of how the numbers were produced, not as a rerunnable pipeline: they ran on files in a session scratch directory (paths hard-coded) that is not kept, and `losers-pack.tsv` (item i, 16,082 rows) and the raw decode dumps were not committed. `acg_audit.rs` builds as a cargo example once copied to `cli/examples/`.
 
 ## Root cause, in numbers
 

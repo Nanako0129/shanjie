@@ -663,14 +663,14 @@ final class ShellTests: XCTestCase {
         let manifest = packs.appendingPathComponent("acg.json")
         let make = { (store: MemoryAcgPackStore) in
             Controller(Shell(resources: self.resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(),
-                             learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), acgPackStore: store, glassTintStore: MemoryGlassTintStore()))
+                             learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), acgPackStore: store, glassTintStore: MemoryGlassTintStore()))
         }
         let titles = { (c: Controller) in c.session.menu.map(\.title) }
         XCTAssertFalse(titles(make(MemoryAcgPackStore())).contains { $0.hasPrefix("資料更新至") }, "no manifest, no line")
         try #"{"latest_source_revision": "2026-10-06T23:59:59Z", "version": "x"}"#.write(to: manifest, atomically: true, encoding: .utf8)
         let on = make(MemoryAcgPackStore())
         let line = "資料更新至 2026-10-06（維基百科）"
-        XCTAssertEqual(titles(on), ["標準鍵盤", "倚天鍵盤", "避免把敏感字詞排在前面", "即時預測", "動漫與遊戲詞", line, "善解設定…", "清除選字記憶…", "不要備份選字記憶"])
+        XCTAssertEqual(titles(on), ["標準鍵盤", "倚天鍵盤", "避免把敏感字詞排在前面", "即時預測", "可省略韻母", "動漫與遊戲詞", line, "善解設定…", "清除選字記憶…", "不要備份選字記憶"])
         XCTAssertNil(on.session.menu.first { $0.title == line }?.action, "not clickable")
         XCTAssertTrue(titles(make(MemoryAcgPackStore(false))).contains(line), "shown with the pack off too")
         try #"{"version": "x"}"#.write(to: manifest, atomically: true, encoding: .utf8)
