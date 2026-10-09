@@ -30,8 +30,11 @@ NO_CLASS = 0xFFFF
 
 
 class BigramLM:
-    def __init__(self, path, classes=True):
-        """classes=True 讀同一個目錄的 classes.sjc（不存在、魔數、長度、模型雜湊不符都丟錯誤）；False 是明確不用類別項（--no-classes）。"""
+    def __init__(self, path, classes=True, kn=None, kn_beta=0.0, kn_classes=None):
+        """classes=True 讀同一個目錄的 classes.sjc（不存在、魔數、長度、模型雜湊不符都丟錯誤）；False 是明確不用類別項（--no-classes）。
+        kn=側檔路徑、kn_beta=β：Kneser-Ney 回退分布（docs/contracts/kn-smoothing.md §2.2，離線量測）；id >= 2 的詞 pb = β·N′/ΣN′ + (1−β)·10^lp。
+        異體類的資訊不在側檔裡，由呼叫端用同一個 build_lm.variant_classes 算好傳 kn_classes（詞 -> 成員 tuple，第一個是代表）；
+        ΣN′ 每類只算一次。kn_classes=None 就是沒有類。"""
         b = open(path, "rb").read()
         assert b[:8] == b"SJLM0001", "bad magic"
         V, self.N, self.eos_total, self.D = struct.unpack_from("<IQQd", b, 8)
@@ -58,9 +61,26 @@ class BigramLM:
                 entries[nxt[j]] = cnt[j]
                 kept_sum += cnt[j] - self.D
             self.ctx[v] = (t, 1.0 - kept_sum / t, entries)
+        self.kn = None
+        if kn is not None:
+            self._load_kn(kn, hashlib.sha256(b).digest(), kn_beta, kn_classes or {})
         self.cls = None
         if classes:
             self._load_classes(os.path.join(os.path.dirname(os.path.abspath(path)), "classes.sjc"), hashlib.sha256(b).digest())
+
+    def _load_kn(self, path, model_sha, beta, cls):
+        with open(path, "rb") as f:
+            b = f.read()
+        V = len(self.vocab)
+        if len(b) != 48 + 4 * V or b[:8] != b"SJKN0001":
+            raise ValueError(f"{path}: bad kn side file")
+        if struct.unpack_from("<I", b, 8)[0] != V:
+            raise ValueError(f"{path}: kn side file vocabulary size differs from the model")
+        if b[12:44] != model_sha:
+            raise ValueError(f"{path}: kn side file was built for another model")
+        np1 = [n + 1 for n in struct.unpack_from(f"<{V}I", b, 48)]
+        total = sum(np1[i] for i in range(2, V) if self.vocab[i] not in cls or cls[self.vocab[i]][0] == self.vocab[i])
+        self.kn = (beta, np1, total)
 
     def _load_classes(self, path, model_sha):
         with open(path, "rb") as f:
@@ -104,7 +124,13 @@ class BigramLM:
         return back * pb
 
     def word(self, lam, v, w, lp):
-        return lam * math.log10(self.prob(v, w, 10 ** lp)) + (1 - lam) * lp
+        pb = 10 ** lp
+        if self.kn is not None:
+            wi = self.ids.get(w, -1)
+            if wi >= 2:
+                beta, np1, total = self.kn
+                pb = beta * np1[wi] / total + (1 - beta) * pb
+        return lam * math.log10(self.prob(v, w, pb)) + (1 - lam) * lp
 
     def eos(self, lam, v):
         return lam * math.log10(self.prob(v, "</s>", self.p_eos))

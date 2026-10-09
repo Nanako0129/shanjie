@@ -24,6 +24,7 @@ test: rust
 	@$(call rebuild_if_header_stale,Debug)
 	cargo test --release --locked
 	python3 -m unittest tools/test_build_acg_pack.py
+	python3 -m unittest tools/test_kn_cont.py
 	swift test --package-path macos
 
 # The shipping bundle: build/$(APP_NAME) with the shipping bundle ID.
