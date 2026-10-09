@@ -41,7 +41,7 @@ gh release download classes-v2 -R Nanako0129/shanjie -p classes.sjc -D data/lm
 # curl -L --create-dirs -o data/lm/classes.sjc https://github.com/Nanako0129/shanjie/releases/download/classes-v2/classes.sjc
 shasum -a 256 -c data/bigram.sjlm.sha256 data/classes.sjc.sha256
 
-make test      # Rust 核心測試，再跑 Swift 殼的測試
+make test      # Rust 核心測試，再跑 Swift 殼的測試，以及詞包建置工具的 python3 單元測試（需要 python3、真的模型與 cargo 建出來的 CLI）
 make bundle    # 組出 build/善解（開發版）.app（開發版 bundle ID）
 ```
 

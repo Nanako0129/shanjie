@@ -25,6 +25,7 @@ test: rust
 	@$(call relink_if_stale,Debug)
 	@$(call rebuild_if_header_stale,Debug)
 	cargo test --release --locked
+	python3 -m unittest tools/test_build_acg_pack.py
 	swift test --package-path macos
 
 # build/$(DEV_APP_NAME) with the development bundle ID by default; build/$(APP_NAME) with

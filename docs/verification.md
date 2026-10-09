@@ -8,8 +8,8 @@
 
 | 指令 | 內容 |
 |---|---|
-| `make test` | `cargo test --release --locked`，再跑 `macos/` 的 `swift test`（真核心＋真模型的殼測試、`log stream` 日誌測試、自測嚴格度） |
-| `make selftest-bundled` | 用 release 設定、拋棄式 ID 組出 `build/selftest/善解（開發版）.app`（沙盒、沒有移轉清單），從 bundle 自己的 `Resources/` 跑 `--selftest`。第一次執行會建立那個 ID 的 container |
+| `make test` | `cargo test --release --locked`，再跑 `python3 -m unittest tools/test_build_acg_pack.py`（詞包建置工具；需要 python3、真的模型與 cargo 建出來的評測 CLI），再跑 `macos/` 的 `swift test`（真核心＋真模型的殼測試、`log stream` 日誌測試、自測嚴格度） |
+| `make selftest-bundled` | 用 release 設定、拋棄式 ID 組出 `build/selftest/善解（開發版）.app`（沙盒、沒有移轉清單），從 bundle 自己的 `Resources/` 跑 `--selftest`。（含用 `Resources/packs` 打一個詞包詞）。第一次執行會建立那個 ID 的 container |
 | `scripts/test-install-ime.sh` | 在暫存的 HOME 裡，用執行檔只會 `exit 1` 的假 app 跑 `install-ime.sh` 的檔案處理（`SHANJIE_INSTALL_FILES_ONLY=1`，不結束行程、不註冊）：沒開 files-only 時拒絕執行（唯讀 HOME，確認訊息來自 HOME 檢查）、全新安裝時複製失敗、全新安裝、覆蓋安裝（上一版保留為 `.shanjie-previous`）、從已安裝那份重裝、覆蓋時複製失敗、只有舊名稱 `shanjie.app` 時升級、新舊名稱並存時升級、舊名稱改名失敗時不放上新版、同時設 files-only 與安裝程式用的 skip-register 時仍停在 files-only、已有正式版時安裝開發版（裝到 `善解（開發版）.app`、上一版在 `.shanjie-dev-previous`，正式版、它的上一版與 `shanjie.app` 逐位元組不變）、已有開發版時安裝正式版（照舊裝到 `善解輸入法.app`，開發版不變）、其他 bundle ID 拒絕安裝。lsregister（`SHANJIE_TEST_LSREGISTER`）、`pkill`、`pgrep` 都換成只記錄呼叫的替身，每個情況都斷言沒被呼叫 |
 | `make bundle` ＋ `scripts/check-app.sh` | 不帶參數時組出開發版 `build/善解（開發版）.app`（`com.nyanako.inputmethod.shanjie.dev`）；`make bundle BUNDLE_ID=com.nyanako.inputmethod.shanjie` 組出正式版 `build/善解輸入法.app`（多一份 `container-migration.plist`）。兩者都是 ad-hoc、hardened runtime、App 沙盒的兩個 entitlements（`app-sandbox.md` §2.1–§2.3）。`check-app.sh` 跑 s3b 契約 §10 的檢查 2、3、6（含 §13.4 的單一輸入模式與中英文名稱）；要檢查的 ID 由 `EXPECTED_BUNDLE_ID` 給（預設正式 ID），資料夾與名稱照 ID 比對。CI 以外遇到正式 ID 的組建，第 6 項拒絕執行、結束碼非 0；`SKIP_RUN=1` 只做第 2、3 項、不執行 bundle |
 | `scripts/check-entitlements.sh <app>` | entitlements 經 `plutil` 正規化後必須恰好是 `com.apple.security.app-sandbox` 與 mach-register 例外，名稱等於該 bundle 的 `InputMethodConnectionName`；`check-app.sh` 第 3 項呼叫它。只讀，不執行 bundle |

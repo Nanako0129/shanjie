@@ -94,6 +94,15 @@ def moe_titles():
     return {e["title"] for e in json.load(open(readings.MOEDICT, encoding="utf-8")) if e.get("title")}
 
 
+def overlay_rows(w, syls, score, src):
+    """一個詞的疊加層列：主要列在前，含「一」「不」的變調列緊接其後（同來源，分數 − VARIANT_PENALTY）。build_acg_pack 共用。"""
+    rows = [f"{'-'.join(syls)}\t{w}\t{score!r}\t{src}\n"]
+    var = sandhi_variant(w, syls)
+    if var:
+        rows.append(f"{'-'.join(var)}\t{w}\t{round(score - VARIANT_PENALTY, 8)!r}\t{src}\n")
+    return rows
+
+
 def build():
     base = ime.Lexicon(BASE)
     words = set(base.by_word)                       # 基底詞表＝解析後（套用 S0 的行過濾）的詞，不分讀音
@@ -175,10 +184,7 @@ def build():
             variant_removed.append(f"{w}\t{to}\t{'-'.join(syls)}\n")
             continue
         src = "wikt" if w in wikt else "zhwiki"
-        rows.append(f"{'-'.join(syls)}\t{w}\t{SCORE[len(w)]!r}\t{src}\n")
-        var = sandhi_variant(w, syls)
-        if var:                                     # 主要列在前，變調列緊接其後（同來源，分數 − VARIANT_PENALTY）
-            rows.append(f"{'-'.join(var)}\t{w}\t{round(SCORE[len(w)] - VARIANT_PENALTY, 8)!r}\t{src}\n")
+        rows += overlay_rows(w, syls, SCORE[len(w)], src)
     assert not {r.split("\t")[1] for r in rows} & words   # 疊加層和基底的詞表交集必須是 0
     return rows, removed, variant_removed
 

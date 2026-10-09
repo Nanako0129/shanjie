@@ -60,6 +60,15 @@ final class DefaultsPredictionStore: PredictionStore {
     }
 }
 
+/// The "動漫與遊戲詞" switch (docs/contracts/acg-pack.md A.2), key `acgPack` in the same domain; absent means on (user decision 2026-10-09).
+@MainActor
+final class DefaultsAcgPackStore: AcgPackStore {
+    var acgPack: Bool? {
+        get { UserDefaults.standard.object(forKey: "acgPack") as? Bool }
+        set { UserDefaults.standard.set(newValue, forKey: "acgPack") }
+    }
+}
+
 @MainActor
 func runServer() -> Never {
     guard let bundleID = Bundle.main.bundleIdentifier,
@@ -78,7 +87,7 @@ func runServer() -> Never {
     App.shell = Shell(
         resources: resources.absoluteURL, panel: CandidatePanelAdapter(),
         isSecureInput: { IsSecureEventInputEnabled() }, layoutStore: DefaultsLayoutStore(),
-        learningDirectory: Shell.learningURL(), dialogs: AlertDialogs(), demoteStore: DefaultsDemoteStore(), predictionStore: DefaultsPredictionStore())
+        learningDirectory: Shell.learningURL(), dialogs: AlertDialogs(), demoteStore: DefaultsDemoteStore(), predictionStore: DefaultsPredictionStore(), acgPackStore: DefaultsAcgPackStore())
     withExtendedLifetime(server) { app.run() }
     exit(0)
 }
