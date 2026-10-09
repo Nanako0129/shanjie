@@ -2053,3 +2053,26 @@ PR #90 的審查意見逐項處理。
   - 詞包的列格式抽成 `tools/build_overlay.py` 的 `overlay_rows()`，`build_overlay.py --check` 與 `pack_rows` 共用；`overlay-add.tsv` 逐位元組不變（`--check` matches）。
   - `shanjie-eval --packs acg` 的檔案檢查移到讀模型之前（golden 用不存在的模型路徑也得到同一個錯誤）；`capping_overlay` 失敗時訊息又帶路徑與 ErrorKind；`CoreEngine.make(packsDir:)` 一個參數（nil＝不開），C 標頭定義 `SHANJIE_PACK_ACG`；`measure_start_range_acg` 改用 `load_lexicon_packs`／`capping_overlay`。
 - **延後到 C 片**（已寫進契約）：退回無詞包建置時選單不可顯示為開；缺檔時上線路徑回錯誤碼；引擎只留封頂需要的 `pack_text`（P3）。
+
+## 2026-10-10：使用者回報的一列錯字（盲狙）
+
+`eval/dev/user-reported.txt` 最後再加一列（55 列），`eval/golden/s2h-lm-context.txt` 用 Python 參考實作（`reference/proto/lm_eval.py --context`，兩種設定）重產，Rust CLI 輸出與它逐位元組相同（只有 user-reported 兩行摘要變動：n 54 → 55、oracle@64 52 → 53、top1_sha256；top1 不變，聊天 15、書面 17，這一列在兩種設定都錯）。用 model-v4（`data/lm/bigram.sjlm`，聊天與書面、加不加 `--context`，共四種設定）解碼：
+
+| 前文｜句子 | 第一名（四種設定相同） | 第 2、3 名 |
+|---|---|---|
+| 就這樣，我的喜好聲音上比較喜歡ifi調音，｜其他還要盲狙 | 其他還要忙居 | 聊天：盲居、芒居；書面：芒居、盲居 |
+
+- 缺詞的例子：詞庫裡 ㄇㄤˊ ㄐㄩ 底下一個詞也沒有，「盲狙」只能由單字湊出來，所以排不到前面。這是新詞 B（從改選學詞組）的一個例子。
+- 前文是同一則訊息裡句子前面的子句。它以「，」結尾，`--context` 的歷史詞是 `<s>`，所以加不加 `--context` 結果相同。
+- **即時預測的起點量測**（`measure_start_range`，讀整個 user-reported）在 55 列上重跑：
+
+| | 54 列 | 55 列 |
+|---|---|---|
+| 狀態數 | 441 | 447 |
+| w5m3 第一音節打完 | 51.9 → 56.4（6／0） | 52.6 → 57.0（6／0） |
+| 全部 | 53.5 → 54.9（6／0） | 53.9 → 55.3（6／0） |
+| 和「現在」不同的預測列 | 50 | 51 |
+
+  結論不變：改對、改壞的數量都沒有動，新列只多了 6 個狀態。
+- 讀音由 `tools/readings.py` 產生（0 列 CHECK），不是使用者實際按鍵的紀錄。
+- 沒有一列靠調參數修。
