@@ -1,17 +1,22 @@
 #!/bin/bash
-# Build build/善解輸入法.app (docs/contracts/s3b.md sections 2 and 13): the Rust core, the Swift shell, the
-# bundle with its data, model and licenses, then an ad-hoc signature with the hardened runtime and
-# no entitlements. Used locally and in CI; it never touches a keychain, installs or launches the
-# app. Developer ID signing happens only in .github/workflows/release.yml.
+# Build the input method bundle (docs/contracts/s3b.md sections 2 and 13, app-sandbox.md sections
+# 2.1-2.3): the Rust core, the Swift shell, the bundle with its data, model and licenses, then an
+# ad-hoc signature with the hardened runtime and the two App Sandbox entitlements. Used locally and
+# in CI; it never touches a keychain, installs or launches the app. Developer ID signing happens
+# only in .github/workflows/release.yml, which keeps these entitlements (--preserve-metadata).
 #
 #   scripts/build-app.sh
 #
 # Environment (all optional):
 #   SHANJIE_VERSION  e.g. 0.1.0; otherwise the newest git tag (v0.1.0 -> 0.1.0), otherwise 0.0.0
-#   BUNDLE_ID        default com.nyanako.inputmethod.shanjie, the shipping ID (the one place it is
-#                    spelled for builds; `make selftest-bundled` passes a throwaway one locally).
-#                    The input mode ID and the connection name derive from it.
-#   OUT_DIR          default build, relative to the repository; the app is $OUT_DIR/善解輸入法.app
+#   BUNDLE_ID        default com.nyanako.inputmethod.shanjie.dev, the development ID (app-sandbox.md
+#                    section 2.3). The shipping ID com.nyanako.inputmethod.shanjie is passed
+#                    explicitly (release.yml; `make bundle BUNDLE_ID=...`). The ID alone decides:
+#                      shipping ID  善解輸入法.app, 善解輸入法 / Shanjie, with container-migration.plist
+#                      any other    善解（開發版）.app, 善解（開發版） / Shanjie (Dev), no migration list
+#                    The input mode ID, the connection name, the preferences domain and the sandbox
+#                    container all derive from it.
+#   OUT_DIR          default build, relative to the repository; the app is $OUT_DIR/<folder above>
 #
 # The folder name is the user-facing name; the executable (Contents/MacOS/shanjie), the bundle ID and
 # the release asset (shanjie-<version>.zip) keep the ASCII name.
@@ -34,10 +39,18 @@ for f in data/lexicon/mcbpmf-data.txt data/lexicon/overlay-add.tsv data/lexicon/
   [ -f "$f" ] || fail "$f is missing"
 done
 
-BUNDLE_ID="${BUNDLE_ID:-com.nyanako.inputmethod.shanjie}"
+SHIPPING_ID=com.nyanako.inputmethod.shanjie
+BUNDLE_ID="${BUNDLE_ID:-$SHIPPING_ID.dev}"
 [[ "$BUNDLE_ID" =~ ^[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$ ]] || fail "BUNDLE_ID '$BUNDLE_ID' is not a reverse-DNS identifier"
+# app-sandbox.md section 2.3: the names by ID (scripts/check-app.sh and install-ime.sh use the same
+# table). The base display name must equal the folder name.
+if [ "$BUNDLE_ID" = "$SHIPPING_ID" ]; then
+  NAME_ZH=善解輸入法 NAME_EN=Shanjie
+else
+  NAME_ZH=善解（開發版） NAME_EN="Shanjie (Dev)"
+fi
 OUT_DIR="${OUT_DIR:-build}"
-# rm -rf below acts on $OUT_DIR/善解輸入法.app: keep it inside the repository.
+# rm -rf below acts on $OUT_DIR/<name>.app: keep it inside the repository.
 [[ -n "$OUT_DIR" && "$OUT_DIR" != /* && "/$OUT_DIR/" != */../* ]] || fail "OUT_DIR must be a relative path inside the repository"
 
 VERSION="${SHANJIE_VERSION:-}"
@@ -57,7 +70,7 @@ mkdir -p "$ROOT/$OUT_DIR"
 # Keeps Spotlight and LaunchServices from indexing local bundles, so the system never finds (or
 # launches) a build/ copy of the input method by its bundle ID.
 touch "$ROOT/$OUT_DIR/.metadata_never_index"
-APP="$ROOT/$OUT_DIR/善解輸入法.app"
+APP="$ROOT/$OUT_DIR/$NAME_ZH.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources/zh-Hant.lproj" "$APP/Contents/Resources/en.lproj" \
   "$APP/Contents/Resources/LICENSES"
@@ -97,8 +110,8 @@ strings_for() {  # strings_for <lproj> <name>
 "$MODE" = "$2";
 EOF
 }
-strings_for zh-Hant.lproj 善解輸入法
-strings_for en.lproj Shanjie
+strings_for zh-Hant.lproj "$NAME_ZH"
+strings_for en.lproj "$NAME_EN"
 
 mode() {
   cat <<EOF
@@ -127,10 +140,10 @@ cat > "$APP/Contents/Info.plist" <<EOF
   <key>CFBundleExecutable</key><string>shanjie</string>
   <key>CFBundleIdentifier</key><string>$BUNDLE_ID</string>
   <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
-  <key>CFBundleName</key><string>Shanjie</string>
+  <key>CFBundleName</key><string>$NAME_EN</string>
   <!-- Finder applies the localized names only when this base display name equals the folder name
-       (善解輸入法.app); the English name comes from en.lproj. Unverified on a real system. -->
-  <key>CFBundleDisplayName</key><string>善解輸入法</string>
+       ($NAME_ZH.app); the English name comes from en.lproj. Unverified on a real system. -->
+  <key>CFBundleDisplayName</key><string>$NAME_ZH</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>$VERSION</string>
   <key>CFBundleVersion</key><string>$VERSION</string>
@@ -162,7 +175,46 @@ $(mode "$MODE")
 EOF
 plutil -lint "$APP/Contents/Info.plist" >/dev/null
 
-# Ad-hoc, hardened runtime, and deliberately no --entitlements (R9).
-codesign --force --sign - --options runtime "$APP"
+# app-sandbox.md section 2.2: only the shipping ID carries the migration list. With no list the
+# system is expected not to move the user's data into a development or throwaway build's container
+# (an inference; CI asserts it, scripts/test-sandbox-migration.sh). Preferences are not listed: the
+# system moved them by itself (research log 2026-10-09; the same test asserts it).
+if [ "$BUNDLE_ID" = "$SHIPPING_ID" ]; then
+  cat > "$RES/container-migration.plist" <<'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Move</key>
+  <array>
+    <string>${ApplicationSupport}/shanjie</string>
+  </array>
+</dict>
+</plist>
+EOF
+  plutil -lint "$RES/container-migration.plist" >/dev/null
+fi
+
+# app-sandbox.md section 2.1: exactly two entitlements, the sandbox and the IMK connection name,
+# which must equal InputMethodConnectionName above (scripts/check-entitlements.sh checks both).
+# The file stays next to the app in $OUT_DIR (ignored by git).
+ENTITLEMENTS="$ROOT/$OUT_DIR/.entitlements.plist"
+cat > "$ENTITLEMENTS" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>com.apple.security.app-sandbox</key><true/>
+  <key>com.apple.security.temporary-exception.mach-register.global-name</key>
+  <array>
+    <string>${BUNDLE_ID}_Connection</string>
+  </array>
+</dict>
+</plist>
+EOF
+plutil -lint "$ENTITLEMENTS" >/dev/null
+
+# Ad-hoc, hardened runtime (R9), with the entitlements above.
+codesign --force --sign - --options runtime --entitlements "$ENTITLEMENTS" "$APP"
 codesign --verify --strict --deep "$APP"
 echo "built $APP ($BUNDLE_ID $VERSION, ad-hoc)"

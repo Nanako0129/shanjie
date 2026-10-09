@@ -28,7 +28,13 @@ cask "shanjie" do
 
   uninstall signal: ["TERM", "com.nyanako.inputmethod.shanjie"]
 
-  zap trash: "~/Library/Preferences/com.nyanako.inputmethod.shanjie.plist"
+  # The learning data and preferences: unsandboxed versions keep them in the first and last paths;
+  # the sandboxed version moves them into its container (docs/contracts/app-sandbox.md section 2.5).
+  zap trash: [
+    "~/Library/Application Support/shanjie",
+    "~/Library/Containers/com.nyanako.inputmethod.shanjie",
+    "~/Library/Preferences/com.nyanako.inputmethod.shanjie.plist",
+  ]
 
   caveats <<~EOS
     After the first install, register and enable the input method:
