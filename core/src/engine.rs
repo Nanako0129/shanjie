@@ -279,9 +279,9 @@ pub struct Engine {
     lex: Arc<Lexicon>,
     /// Where `new` read the data from; `None` for `with_lexicon` engines (they cannot `load_lm`).
     data_dir: Option<PathBuf>,
-    /// The capping overlay text `new` read (`overlay-add.tsv` plus the enabled packs' rows, acg-pack
-    /// contract A.2); `load_lm` caps with these bytes, the ones the lexicon was parsed from.
-    cap_overlay: Option<String>,
+    /// The enabled packs' rows `new` read (acg-pack contract A.2), appended to `overlay-add.tsv` when
+    /// `load_lm` caps; `None` with no pack, so a pack-off engine holds nothing extra.
+    pack_text: Option<String>,
     lm: Option<LmState>,
     profile: Profile,
     /// Whether the table applies (default on; `set_demote`).
@@ -370,24 +370,29 @@ pub fn read_packs(dir: &Path, mask: u32) -> Result<String, EngineError> {
 }
 
 /// `load_lexicon` with the rows of `packs` (`(directory, mask)`, see `read_packs`) after `sandhi-add.tsv`,
-/// plus the text `CappedLexicon::new` takes as its overlay (`overlay-add.tsv`, then the packs' rows; no
-/// sandhi rows), both from the same single read of each file. `None` or an empty mask: exactly `load_lexicon`
-/// and `overlay-add.tsv`. The engine and the evaluation CLI share this.
+/// plus those rows alone (empty with no pack), for `capping_overlay`. `None` or an empty mask: exactly
+/// `load_lexicon`. The engine and the evaluation CLI share this.
 pub fn load_lexicon_packs(data_dir: &Path, packs: Option<(&Path, u32)>) -> Result<(Arc<Lexicon>, String), EngineError> {
     let base = std::fs::read_to_string(data_dir.join("mcbpmf-data.txt")).map_err(|_| EngineError::LoadFailed)?;
     let overlay = std::fs::read_to_string(data_dir.join("overlay-add.tsv")).map_err(|_| EngineError::LoadFailed)?;
     let sandhi = std::fs::read_to_string(data_dir.join("sandhi-add.tsv")).map_err(|_| EngineError::LoadFailed)?;
-    let mut text = join_overlays(overlay.clone(), &sandhi);
-    let mut cap = overlay;
-    if let Some((dir, mask)) = packs {
-        let extra = read_packs(dir, mask)?;
-        if !extra.is_empty() {
-            text = join_overlays(text, &extra);
-            cap = join_overlays(cap, &extra);
-        }
+    let mut text = join_overlays(overlay, &sandhi);
+    let extra = match packs {
+        Some((dir, mask)) => read_packs(dir, mask)?,
+        None => String::new(),
+    };
+    if !extra.is_empty() {
+        text = join_overlays(text, &extra);
     }
     let lex = Lexicon::parse_with(&base, Some(&text)).map_err(|_| EngineError::LoadFailed)?;
-    Ok((Arc::new(lex), cap))
+    Ok((Arc::new(lex), extra))
+}
+
+/// The text `CappedLexicon::new` takes as its overlay: `overlay-add.tsv` (read here, as `load_lm` always
+/// did), then the packs' rows `load_lexicon_packs` returned (no sandhi rows).
+pub fn capping_overlay(data_dir: &Path, pack_text: &str) -> Result<String, EngineError> {
+    let overlay = std::fs::read_to_string(data_dir.join("overlay-add.tsv")).map_err(|_| EngineError::LoadFailed)?;
+    Ok(if pack_text.is_empty() { overlay } else { join_overlays(overlay, pack_text) })
 }
 
 /// The overlay text the lexicon is parsed with: `overlay-add.tsv` then `sandhi-add.tsv`, with a line
@@ -417,9 +422,9 @@ impl Engine {
             return Err(EngineError::LoadFailed);
         }
         let packs = packs.filter(|&(_, m)| m != 0);
-        let (lex, cap_overlay) = load_lexicon_packs(data_dir, packs)?;
+        let (lex, pack_text) = load_lexicon_packs(data_dir, packs)?;
         let mut e = Engine::with_lexicon(lex, layout);
-        e.cap_overlay = Some(cap_overlay);
+        e.pack_text = Some(pack_text).filter(|t| !t.is_empty());
         // Required like the other data files, and every row must name an entry of the lexicon (contract
         // sw-sensitive-demote section 2); `load_lm` reads it again to resolve it against the capped lexicon.
         let demote = std::fs::read_to_string(data_dir.join("demote.tsv")).map_err(|_| EngineError::LoadFailed)?;
@@ -435,7 +440,7 @@ impl Engine {
         Engine {
             lex,
             data_dir: None,
-            cap_overlay: None,
+            pack_text: None,
             lm: None,
             profile: Profile::Chat,
             demote: true,
@@ -626,16 +631,16 @@ impl Engine {
         }));
     }
 
-    /// S2c: read the model at `path`, take the capping overlay `new` read (`overlay-add.tsv` and the packs), build the capped lexicon with the
+    /// S2c: read the model at `path` and `data_dir/overlay-add.tsv` (plus the pack rows `new` kept), build the capped lexicon with the
     /// shared constructor. Failure leaves the previous state. The composition display is not recomputed;
     /// the next change to it decodes with the new model.
     pub fn load_lm(&mut self, path: &Path) -> Result<(), EngineError> {
         let dir = self.data_dir.as_ref().ok_or(EngineError::LoadFailed)?;
-        let overlay = self.cap_overlay.as_deref().ok_or(EngineError::LoadFailed)?;
+        let overlay = capping_overlay(dir, self.pack_text.as_deref().unwrap_or(""))?;
         let demote = std::fs::read_to_string(dir.join("demote.tsv")).map_err(|_| EngineError::LoadFailed)?;
         let demote = Demote::parse(&demote).ok_or(EngineError::LoadFailed)?;
         let lm = Lm::load(path).map_err(|_| EngineError::LoadFailed)?;
-        let capped = CappedLexicon::new(self.lex.clone(), overlay, &lm, Some(&demote)).ok_or(EngineError::LoadFailed)?;
+        let capped = CappedLexicon::new(self.lex.clone(), &overlay, &lm, Some(&demote)).ok_or(EngineError::LoadFailed)?;
         // Built now, not at the first key: the index takes hundreds of ms (V3 engine contract section 1.2).
         capped.predict_index(&lm);
         self.lm = Some(LmState { lm: Arc::new(lm), capped: Arc::new(capped) });

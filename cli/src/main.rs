@@ -1,4 +1,4 @@
-use core::engine::{load_lexicon, load_lexicon_packs, PACK_ACG};
+use core::engine::{capping_overlay, load_lexicon, load_lexicon_packs, PACK_ACG};
 use core::eval::*;
 use core::learn::{context_key, SENTINEL};
 use core::lm::{decode_from, history, CappedLexicon, Demote, Lm, Profile};
@@ -164,8 +164,9 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     if packs & PACK_ACG != 0 && !acg.is_file() {
         return Err(format!("--packs acg: pack file not found: {}", acg.display()));
     }
-    // The same helper as the engine: the lexicon and the capping overlay text come from one read of each file.
-    let (lex, overlay) = load_lexicon_packs(&dir, Some((&pdir, packs))).map_err(|_| "cannot load lexicon".to_string())?;
+    // The same helper as the engine: the pack rows are read once for the lexicon and once for the cap.
+    let (lex, pack_text) = load_lexicon_packs(&dir, Some((&pdir, packs))).map_err(|_| "cannot load lexicon".to_string())?;
+    let overlay = capping_overlay(&dir, &pack_text).map_err(|_| "cannot load lexicon".to_string())?;
     let demote_rows = fs::read_to_string(dir.join("demote.tsv")).map_err(|e| format!("cannot read demote.tsv ({:?})", e.kind()))?;
     let table = Demote::parse(&demote_rows).filter(|d| d.check(&lex)).ok_or("bad demote.tsv")?;
     // The table is always loaded, so a malformed one stops the run even with --no-demote.

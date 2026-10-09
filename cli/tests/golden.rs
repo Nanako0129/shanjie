@@ -246,7 +246,7 @@ fn lm_rowstats_match_python_byte_for_byte() {
 /// acg-pack A.2: a run that asks for a pack must fail loudly when the file is missing, and `--packs-dir` alone is an error.
 #[test]
 fn packs_options_fail_loudly() {
-    let rows = std::env::temp_dir().join("shanjie-packs-rows.txt");
+    let rows = std::env::temp_dir().join(format!("shanjie-packs-rows-{}.txt", std::process::id()));
     std::fs::write(&rows, "|風之谷|ㄈㄥ ㄓ ㄍㄨˇ\n").unwrap();
     let fail = |extra: &[&str]| {
         let out = Command::new(env!("CARGO_BIN_EXE_shanjie-eval"))
@@ -261,4 +261,5 @@ fn packs_options_fail_loudly() {
     let err = fail(&["--packs", "acg", "--packs-dir", missing.to_str().unwrap()]);
     assert!(err.contains(missing.join("acg-add.tsv").to_str().unwrap()), "{err}");
     assert!(fail(&["--packs-dir", missing.to_str().unwrap()]).contains("--packs-dir needs --packs"));
+    std::fs::remove_file(&rows).unwrap();
 }
