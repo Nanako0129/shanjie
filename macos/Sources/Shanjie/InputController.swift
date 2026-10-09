@@ -71,6 +71,8 @@ final class ShanjieInputController: IMKInputController {
         case .toggleBackup: #selector(toggleLearningBackup(_:))
         case .toggleDemote: #selector(toggleDemote(_:))
         case .togglePrediction: #selector(togglePrediction(_:))
+        case .toggleAcgPack: #selector(toggleAcgPack(_:))
+        case .openSettings: #selector(openSettings(_:))
         }
     }
 
@@ -84,6 +86,8 @@ final class ShanjieInputController: IMKInputController {
     @objc func toggleLearningBackup(_ sender: Any?) { perform(.toggleBackup) }
     @objc func toggleDemote(_ sender: Any?) { perform(.toggleDemote) }
     @objc func togglePrediction(_ sender: Any?) { perform(.togglePrediction) }
+    @objc func toggleAcgPack(_ sender: Any?) { perform(.toggleAcgPack) }
+    @objc func openSettings(_ sender: Any?) { perform(.openSettings) }
 }
 
 /// The controller's current IMKTextInput client.
@@ -164,7 +168,7 @@ private final class PanelWindow: NSPanel {
 /// Layout values of the candidate bar (docs/contracts/s3b2-glass-panel.md section 3). The "Apple"
 /// column was measured on 1x screenshots (1 px = 1 pt) of Apple Zhuyin, kept in main's scratchpad;
 /// these are first values, to be corrected against our own screenshots.
-private enum Metrics {
+enum Metrics {
     /// Section 3 "candidate bar": the view height (the corner radius is half the panel height). Measured
     /// 2026-10-08 in a light app at 1 px = 1 pt: Apple's bar is 30 pt rim to rim (lap-4; a-3 and la-3 only said
     /// "about 30"); at 30 ours drew 32 (msj-6, 4 pt above and below the 24 pt capsule against Apple's 3), so
@@ -216,6 +220,58 @@ private enum Metrics {
     static let collapseDuration: TimeInterval = 0.25
 }
 
+extension NSGlassEffectView {
+    /// Assigns what `GlassTint.Applier` decided: a colour, nil to remove, or nothing.
+    func apply(_ change: GlassTint.Change?) {
+        switch change {
+        case .set(let t)?: tintColor = NSColor(white: t.black ? 0 : 1, alpha: t.opacity)
+        case .clear?: tintColor = nil
+        case nil: break
+        }
+    }
+}
+
+/// The settings window's sample of the candidate bar (contract settings-window section 2.3): the same
+/// glass, the same cells (`CandidateCells`), the same bar metrics, corner radius and tint decision
+/// (`GlassTint.Applier`) as the real panel's collapsed bar. The real bar's expand chevron is left out
+/// (the sample has nothing to expand). It follows its own effective appearance.
+@MainActor
+final class SampleCandidateBar: NSGlassEffectView {
+    private var applier = GlassTint.Applier()
+    private var value = 0.0
+    private let size: NSSize
+
+    init() {
+        let row = GridView()
+        let update = CandidateCells().update(candidates: ["善", "解", "輸入法"], notes: [nil, nil, nil], selected: 0, first: 0, columns: 0)
+        var x = Metrics.barInset
+        for cell in update.cells {
+            cell.setFrameOrigin(NSPoint(x: x, y: (Metrics.barHeight - Metrics.capsuleHeight) / 2))
+            row.addSubview(cell)
+            x += cell.frame.width + Metrics.cellSpacing
+        }
+        size = NSSize(width: x - Metrics.cellSpacing + Metrics.barInset, height: Metrics.barHeight)
+        row.frame = NSRect(origin: .zero, size: size)
+        super.init(frame: NSRect(origin: .zero, size: size))
+        contentView = row
+        cornerRadius = size.height / 2
+    }
+
+    required init?(coder: NSCoder) { fatalError("not used") }
+
+    override var intrinsicContentSize: NSSize { size }
+
+    func setTint(_ v: Double) {
+        value = v
+        apply(applier.update(value: v, dark: GlassTint.isDark(effectiveAppearance)))
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        apply(applier.update(value: value, dark: GlassTint.isDark(effectiveAppearance)))
+    }
+}
+
 /// The glass's one content view. Flipped, so cells are placed from the top-left and a window that
 /// grows downward leaves the first row where it was.
 private final class GridView: NSView {
@@ -231,6 +287,7 @@ final class CandidatePanelAdapter: CandidatePanel {
     var onSelect: ((Int) -> Void)?
     private let window: PanelWindow
     private let glass = NSGlassEffectView()
+    private var tintApplier = GlassTint.Applier()
     /// The glass's one content view, kept for the panel's lifetime: replacing the glass's content,
     /// resizing or re-ordering the window on every selection move made the glass's glow flicker
     /// (user report 2026-10-05). Since 9.1 a move updates the existing cells and a scroll swaps only
@@ -322,9 +379,10 @@ final class CandidatePanelAdapter: CandidatePanel {
     }
 
     func show(_ candidates: [String], notes: [String?], selected: Int, columns: Int, first: Int, total: Int,
-              lineRect: NSRect?, appearance: NSAppearance?) {
+              lineRect: NSRect?, appearance: NSAppearance?, glassTint: Double) {
         let grid = columns > 0
         if window.appearance?.name != appearance?.name { window.appearance = appearance }
+        applyTint(glassTint)
 
         // Only the selection moved (section 8.7): keep the cells, change which one is selected and which
         // row shows numbers. The glass's content view is never replaced either way.
@@ -469,6 +527,19 @@ final class CandidatePanelAdapter: CandidatePanel {
         }
         if !window.isVisible { window.orderFrontRegardless() }
     }
+
+    /// settings-window section 2.3, on every show and including no tint, so going back to 0 removes it.
+    /// `NSGlassEffectView.tintColor` (AppKit/NSGlassEffectView.h line 34, SDK 27.0 as measured, available
+    /// since macOS 26.0: "The color the glass effect view uses to tint the background and glass effect
+    /// toward"). `tintApplier` decides what to assign (nothing when unchanged, nil to clear); with 0 and
+    /// never tinted nothing is assigned, so the default look stays bit-identical. Its effect on macOS 26
+    /// is not measured.
+    private func applyTint(_ value: Double) {
+        glass.apply(tintApplier.update(value: value, dark: GlassTint.isDark(window.effectiveAppearance)))
+    }
+
+    func setGlassTint(_ glassTint: Double) { applyTint(glassTint) }
+
 
     /// a-3's expand mark at the bar's right end: a separator line and a chevron, both secondary.
     /// Display only: the bar expands with the down arrow; a click on it does nothing.

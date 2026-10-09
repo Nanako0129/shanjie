@@ -6,11 +6,11 @@
 
 | 指令 | 內容 |
 |---|---|
-| `make test` | `cargo test --release --locked`，再跑 `macos/` 的 `swift test`（真核心＋真模型的殼測試、`log stream` 日誌測試、自測嚴格度） |
-| `make selftest-bundled` | 用 release 設定組出 `build/selftest/善解輸入法.app`，從 bundle 自己的 `Resources/` 跑 `--selftest` |
+| `make test` | `cargo test --release --locked`，再跑 `python3 -m unittest tools/test_build_acg_pack.py`（詞包建置工具；需要 python3、真的模型與 cargo 建出來的評測 CLI），再跑 `macos/` 的 `swift test`（真核心＋真模型的殼測試、`log stream` 日誌測試、自測嚴格度） |
+| `make selftest-bundled` | 用 release 設定組出 `build/selftest/善解輸入法.app`，從 bundle 自己的 `Resources/` 跑 `--selftest`（含用 `Resources/packs` 打一個詞包詞） |
 | `scripts/test-install-ime.sh` | 在暫存的 HOME 裡，用執行檔只會 `exit 1` 的假 app 跑 `install-ime.sh` 的檔案處理（`SHANJIE_INSTALL_FILES_ONLY=1`，不結束行程、不註冊）：沒開 files-only 時拒絕執行（唯讀 HOME，確認訊息來自 HOME 檢查）、全新安裝時複製失敗、全新安裝、覆蓋安裝（上一版保留為 `.shanjie-previous`）、從已安裝那份重裝、覆蓋時複製失敗、只有舊名稱 `shanjie.app` 時升級、新舊名稱並存時升級、舊名稱改名失敗時不放上新版、同時設 files-only 與安裝程式用的 skip-register 時仍停在 files-only。lsregister（`SHANJIE_TEST_LSREGISTER`）、`pkill`、`pgrep` 都換成只記錄呼叫的替身，每個情況都斷言沒被呼叫 |
 | `make bundle` ＋ `scripts/check-app.sh` | 組出 `build/善解輸入法.app`（正式 bundle ID、ad-hoc、hardened runtime、沒有 entitlements），再跑 s3b 契約 §10 的檢查 2、3、6（含 §13.4 的單一輸入模式與中英文名稱） |
-| `scripts/test-render-cask.sh` | `render-cask.sh`（s3b §14.2）：正常參數只改 cask 範本的 `version`、`sha256` 兩行；參數格式不對、範本缺行或重複、範本不存在時一律 exit 1 且沒有輸出 |
+| `scripts/test-render-cask.sh` | `render-cask.sh`（s3b §14.2）：正常參數只改 cask 範本的 `version`、`sha256` 兩行；參數格式不對、範本缺行或重複、範本不存在時一律 exit 1 且沒有輸出；用 Homebrew 的載入器確認 cask 的 `postflight_steps` 剛好有一個 `match: :full` 的 `terminate_process`（s3b §15），再用 `pgrep -f` 比對替身行程：像執行中輸入法的（含舊名、系統層 `/Library/Input Methods`）符合，只在參數裡提到路徑的、`shanjie install`、上一版 `.shanjie-previous` 都不符合 |
 | Homebrew cask 樣式 | 指令照 `.github/workflows/ci.yml` 的「Homebrew cask」步驟：用佔位值產生 cask，放在某個 `Casks/` 資料夾下跑 `brew style`（`brew` 只在路徑含 `Casks/` 時套用 cask 規則） |
 | `make installer` ＋ `scripts/check-installer.sh` | 把 `build/善解輸入法.app` 壓成 `build/shanjie-<版本>.zip`，組出 `build/安裝善解輸入法.app`（s3c 契約 §3），檢查結構、bundle ID、內附 zip 與 `install-ime.sh` 逐位元組相同、`Resources/` 沒有展開的 .app、沒有 entitlements、hardened runtime。安裝程式只檢查、不啟動 |
 | C 標頭冒煙測試（s3a §7.4） | 指令照 `.github/workflows/ci.yml` 的「C header smoke test」步驟 |

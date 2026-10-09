@@ -1,4 +1,4 @@
-use core::engine::load_lexicon;
+use core::engine::{capping_overlay, load_lexicon, load_lexicon_packs, PACK_ACG};
 use core::eval::*;
 use core::learn::{context_key, SENTINEL};
 use core::lm::{decode_from, history, CappedLexicon, Demote, Lm, Profile};
@@ -103,11 +103,48 @@ fn format_rowstats(rows: &[(bool, String, String)]) -> String {
 
 /// Option combinations of `lm`, checked before any file is read. The holdout never prints its sentences, so
 /// `--dump` is refused there; `--rowstats` holds numbers only and is allowed.
-fn check_lm_opts(set: Option<&str>, dump: bool) -> Result<(), String> {
+fn check_lm_opts(set: Option<&str>, dump: bool, packs: u32, packs_dir: bool) -> Result<(), String> {
     if set == Some("holdout") && dump {
         return Err("--dump is not allowed with --set holdout".into());
     }
+    if packs == 0 && packs_dir {
+        return Err("--packs-dir needs --packs".into());
+    }
     Ok(())
+}
+
+/// `--packs acg`: sets the pack bit; anything else is refused.
+fn pack_flag(v: &str) -> Result<u32, String> {
+    match v {
+        "acg" => Ok(PACK_ACG),
+        _ => Err("--packs takes acg".into()),
+    }
+}
+
+/// The packs directory (`--packs-dir` or data/packs); a run that asks for a pack must fail loudly when its file is
+/// missing (the engine tolerates it), so this is checked with the other options, before the model is read.
+fn packs_dir_checked(packs: u32, packs_dir: Option<String>) -> Result<PathBuf, String> {
+    let pdir = packs_dir.map_or_else(|| root().join("data/packs"), PathBuf::from);
+    let acg = pdir.join("acg-add.tsv");
+    if packs & PACK_ACG != 0 && !acg.is_file() {
+        return Err(format!("--packs acg: pack file not found: {}", acg.display()));
+    }
+    Ok(pdir)
+}
+
+/// The lexicon with the chosen packs and the overlay text that caps the LM scores (the same helpers as the engine's
+/// `new` and `load_lm`).
+fn load_with_packs(dir: &Path, packs: u32, pdir: &Path) -> Result<(std::sync::Arc<Lexicon>, String), String> {
+    // The pack rows are read once and reused for the cap; overlay-add.tsv is read again by capping_overlay, as load_lm does.
+    let (lex, pack_text) = load_lexicon_packs(dir, Some((pdir, packs))).map_err(|_| "cannot load lexicon".to_string())?;
+    let overlay = capping_overlay(dir, &pack_text).map_err(|_| {
+        let p = dir.join("overlay-add.tsv");
+        match fs::read_to_string(&p) {
+            Err(e) => format!("cannot read {} ({:?})", p.display(), e.kind()),
+            Ok(_) => "cannot load lexicon".to_string(),
+        }
+    })?;
+    Ok((lex, overlay))
 }
 
 /// S2c LM mode (docs/PLAN.md S2c): the one summary line of lm_eval.py, plus the optional `--dump` and `--rowstats`.
@@ -116,6 +153,8 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     let (mut limit, mut set, mut dump, mut ctx_mode, mut demote) = (None::<usize>, None, None, false, true);
     let mut classes = true;
     let mut rowstats = None::<String>;
+    // acg-pack contract A.2: `--packs acg` adds data/packs/acg-add.tsv (or `--packs-dir DIR`'s) to the lexicon and the cap; off by default.
+    let (mut packs, mut packs_dir) = (0u32, None::<String>);
     let mut it = args.iter();
     while let Some(a) = it.next() {
         let mut val = || it.next().cloned().ok_or_else(|| "missing option value".to_string());
@@ -133,10 +172,13 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
             "--context" => ctx_mode = true,
             "--no-demote" => demote = false,
             "--no-classes" => classes = false,
+            "--packs" => packs |= pack_flag(&val()?)?,
+            "--packs-dir" => packs_dir = Some(val()?),
             _ => return Err("unknown argument".into()),
         }
     }
-    check_lm_opts(set.as_deref(), dump.is_some())?;
+    check_lm_opts(set.as_deref(), dump.is_some(), packs, packs_dir.is_some())?;
+    let pdir = packs_dir_checked(packs, packs_dir)?;
     let profile_name = profile.ok_or("--profile is required")?;
     let prof = match profile_name.as_str() {
         "chat" => Profile::Chat,
@@ -148,8 +190,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     let lm = if classes { Lm::load(std::path::Path::new(&lm_path)) } else { Lm::load_without_classes(std::path::Path::new(&lm_path)) }
         .map_err(|e| e.to_string())?;
     let dir = root().join("data/lexicon");
-    let lex = load_lexicon(&dir).map_err(|_| "cannot load lexicon".to_string())?;
-    let overlay = fs::read_to_string(dir.join("overlay-add.tsv")).map_err(|e| format!("cannot read overlay ({:?})", e.kind()))?;
+    let (lex, overlay) = load_with_packs(&dir, packs, &pdir)?;
     let demote_rows = fs::read_to_string(dir.join("demote.tsv")).map_err(|e| format!("cannot read demote.tsv ({:?})", e.kind()))?;
     let table = Demote::parse(&demote_rows).filter(|d| d.check(&lex)).ok_or("bad demote.tsv")?;
     // The table is always loaded, so a malformed one stops the run even with --no-demote.
@@ -226,7 +267,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
         f.write_all(format_rowstats(&rs).as_bytes()).map_err(|e| format!("cannot write rowstats ({:?})", e.kind()))?;
     }
     let sha = sha256_hex(firsts.join("\n").as_bytes());
-    println!("## {name}  lm-{profile_name}{}{}{}  {{'n': {}, 'top1': {top1}, 'oracle@64': {o64}, 'top1_sha256': '{sha}'}}", if ctx_mode { "+ctx" } else { "" }, if demote { "" } else { "-nodemote" }, if classes { "" } else { "-noclasses" }, rows.len());
+    println!("## {name}  lm-{profile_name}{}{}{}{}  {{'n': {}, 'top1': {top1}, 'oracle@64': {o64}, 'top1_sha256': '{sha}'}}", if ctx_mode { "+ctx" } else { "" }, if demote { "" } else { "-nodemote" }, if classes { "" } else { "-noclasses" }, if packs & PACK_ACG != 0 { "+acg" } else { "" }, rows.len());
     Ok(())
 }
 
@@ -271,10 +312,12 @@ fn rss_kb() -> Option<u64> {
 
 /// V3 core (docs/contracts/v3-core-predict.md): `--predict <file> --lm <file> --profile chat|formal [--predict-time]`.
 /// The file is eval/golden/sp-predict.txt (only its `## ` query lines are read); output has the same format.
+/// `--packs acg` / `--packs-dir DIR` as in `lm`: the pack's words join the lexicon and the cap.
 /// `--predict-time` prints p50/p95/max of the predict calls (index build excluded) and the index cost on stderr
 /// (RSS before and after one index, and after a second one).
 fn run_predict(args: &[String]) -> Result<(), String> {
     let (mut file, mut lm_path, mut profile, mut time) = (None, None, None, false);
+    let (mut packs, mut packs_dir) = (0u32, None::<String>);
     let mut it = args.iter();
     while let Some(a) = it.next() {
         let mut val = || it.next().cloned().ok_or_else(|| "missing option value".to_string());
@@ -283,9 +326,13 @@ fn run_predict(args: &[String]) -> Result<(), String> {
             "--lm" => lm_path = Some(val()?),
             "--profile" => profile = Some(val()?),
             "--predict-time" => time = true,
+            "--packs" => packs |= pack_flag(&val()?)?,
+            "--packs-dir" => packs_dir = Some(val()?),
             _ => return Err("unknown argument".into()),
         }
     }
+    check_lm_opts(None, false, packs, packs_dir.is_some())?;
+    let pdir = packs_dir_checked(packs, packs_dir)?;
     let lam = match profile.ok_or("--profile is required")?.as_str() {
         "chat" => Profile::Chat,
         "formal" => Profile::Formal,
@@ -294,8 +341,7 @@ fn run_predict(args: &[String]) -> Result<(), String> {
     .lambda();
     let lm = Lm::load(Path::new(&lm_path.ok_or("--lm is required")?)).map_err(|e| e.to_string())?;
     let dir = root().join("data/lexicon");
-    let lex = load_lexicon(&dir).map_err(|_| "cannot load lexicon".to_string())?;
-    let overlay = fs::read_to_string(dir.join("overlay-add.tsv")).map_err(|e| format!("cannot read overlay ({:?})", e.kind()))?;
+    let (lex, overlay) = load_with_packs(&dir, packs, &pdir)?;
     // Prediction scores use the capped lp only; demotion applies to decoding (sw §3).
     let capped = CappedLexicon::new(lex.clone(), &overlay, &lm, None).ok_or("cannot build the capped lexicon")?;
     let text = fs::read_to_string(file.ok_or("--predict is required")?).map_err(|e| format!("cannot read file ({:?})", e.kind()))?;
@@ -517,8 +563,10 @@ mod tests {
     #[test]
     fn lm_opts_holdout_allows_rowstats_not_dump() {
         // --rowstats is not an argument: it is allowed everywhere, holdout included.
-        assert!(check_lm_opts(Some("holdout"), false).is_ok());
-        assert!(check_lm_opts(Some("holdout"), true).is_err());
-        assert!(check_lm_opts(None, true).is_ok());
+        assert!(check_lm_opts(Some("holdout"), false, 0, false).is_ok());
+        assert!(check_lm_opts(Some("holdout"), true, 0, false).is_err());
+        assert!(check_lm_opts(None, true, 0, false).is_ok());
+        assert!(check_lm_opts(None, false, 0, true).is_err(), "--packs-dir without --packs");
+        assert!(check_lm_opts(None, false, PACK_ACG, true).is_ok());
     }
 }

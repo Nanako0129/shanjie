@@ -8,41 +8,27 @@ import ShanjieKit
 // `install`, or exactly `--selftest`. Anything else exits non-zero before touching anything.
 // Output is fixed text only (R2): no paths, bundle IDs or input.
 
-func say(_ message: StaticString) {
+func say(_ message: String) {
     FileHandle.standardError.write(Data("\(message)\n".utf8))
 }
 
 /// docs/contracts/s3b.md section 13.3, through ShanjieInstall (shared with the installer). Run on
 /// the installed copy, by scripts/install-ime.sh or by the user after `brew install`. Exit 3 means
-/// the mode is not listed yet or the input method is not accepted yet (log out and log in, then
-/// run it again); 1 is any other failure.
+/// the mode is not listed yet or the input method is not accepted yet (add it in System Settings >
+/// Keyboard > Input Sources); 1 is any other failure. installer-v2.md section 9: registration runs
+/// only when the system does not know the mode yet or an earlier version's mode is enabled. When
+/// it is skipped as not accepted, this waits up to 5 s for the system to take the input method
+/// (calling nothing that changes TIS state) before giving up with 3.
 func install() -> Int32 {
     guard let bundleID = Bundle.main.bundleIdentifier else {
         say("install: no bundle identifier")
         return 1
     }
     let result = Registration.run(bundleURL: Bundle.main.bundleURL, bundleID: bundleID, defaults: .standard)
-    if result.registerFailed { say("install: warning: TISRegisterInputSource failed") }
-    switch result.outcome {
-    case .modeNotListed:
-        say("install: the input mode is not listed yet")
-        return 3
-    case .registrationFailed:
-        say("install: registration failed and the input mode is not listed")
-        return 1
-    case .enableFailed:
-        say("install: TISEnableInputSource failed")
-        return 1
-    case .notAccepted:
-        say("install: the system has not accepted the input method yet")
-        return 3
-    case .done:
-        if result.legacyDisableFailed {
-            say("install: warning: TISDisableInputSource failed for an input mode of an earlier version")
-        }
-        say("install: registered and enabled")
-        return 0
-    }
+    let accepted = Registration.waitUntilAccepted(result, isAccepted: { Registration.isAccepted(bundleID: bundleID) })
+    let report = InstallCommand.report(result, acceptedAfterWait: accepted)
+    for line in report.messages { say(line) }
+    return report.exitCode
 }
 
 /// The chosen keyboard layout, in the app's own UserDefaults domain (its bundle ID), key `layout`
@@ -74,6 +60,24 @@ final class DefaultsPredictionStore: PredictionStore {
     }
 }
 
+/// The "動漫與遊戲詞" switch (docs/contracts/acg-pack.md A.2), key `acgPack` in the same domain; absent means on (user decision 2026-10-09).
+@MainActor
+final class DefaultsAcgPackStore: AcgPackStore {
+    var acgPack: Bool? {
+        get { UserDefaults.standard.object(forKey: "acgPack") as? Bool }
+        set { UserDefaults.standard.set(newValue, forKey: "acgPack") }
+    }
+}
+
+/// The candidate glass tint slider (docs/contracts/settings-window.md section 2.3), key `glassTint` (Double); absent means 0.
+@MainActor
+final class DefaultsGlassTintStore: GlassTintStore {
+    var glassTint: Double? {
+        get { UserDefaults.standard.object(forKey: "glassTint") as? Double }
+        set { UserDefaults.standard.set(newValue, forKey: "glassTint") }
+    }
+}
+
 @MainActor
 func runServer() -> Never {
     guard let bundleID = Bundle.main.bundleIdentifier,
@@ -92,7 +96,10 @@ func runServer() -> Never {
     App.shell = Shell(
         resources: resources.absoluteURL, panel: CandidatePanelAdapter(),
         isSecureInput: { IsSecureEventInputEnabled() }, layoutStore: DefaultsLayoutStore(),
-        learningDirectory: Shell.learningURL(), dialogs: AlertDialogs(), demoteStore: DefaultsDemoteStore(), predictionStore: DefaultsPredictionStore())
+        learningDirectory: Shell.learningURL(), dialogs: AlertDialogs(), demoteStore: DefaultsDemoteStore(), predictionStore: DefaultsPredictionStore(), acgPackStore: DefaultsAcgPackStore(),
+        glassTintStore: DefaultsGlassTintStore())
+    let settings = SettingsWindowController(shell: App.shell)
+    App.shell?.onOpenSettings = { settings.show() }
     withExtendedLifetime(server) { app.run() }
     exit(0)
 }

@@ -37,9 +37,12 @@ public protocol CandidatePanel: AnyObject {
     /// (the scroll indicator).
     /// `lineRect`: where the composition's line is (s3b2 section 2.3), `nil` if unknown.
     /// `appearance`: the client's (s3b2 section 10), `nil` for the system's.
+    /// `glassTint`: the 0...1 slider value (settings-window section 2.3), applied on every show, 0 included.
     func show(_ candidates: [String], notes: [String?], selected: Int, columns: Int, first: Int, total: Int,
-              lineRect: NSRect?, appearance: NSAppearance?)
+              lineRect: NSRect?, appearance: NSAppearance?, glassTint: Double)
     func hide()
+    /// Re-applies the tint to what is on screen now, without a new `show` (the slider moved while the panel is up).
+    func setGlassTint(_ glassTint: Double)
     /// A mouse click on a cell, by position in what `show` last received.
     var onSelect: ((Int) -> Void)? { get set }
 }
@@ -98,6 +101,34 @@ public final class MemoryPredictionStore: PredictionStore {
     public init(_ prediction: Bool? = nil) { self.prediction = prediction }
 }
 
+/// Where the "動漫與遊戲詞" switch is kept (docs/contracts/acg-pack.md A.2): `nil` means never chosen, which is on
+/// (user decision 2026-10-09, after the A.3 numbers). Same arrangement as `PredictionStore`.
+@MainActor
+public protocol AcgPackStore: AnyObject {
+    var acgPack: Bool? { get set }
+}
+
+/// The in-memory AcgPackStore.
+@MainActor
+public final class MemoryAcgPackStore: AcgPackStore {
+    public var acgPack: Bool?
+    public init(_ acgPack: Bool? = nil) { self.acgPack = acgPack }
+}
+
+/// Where the candidate glass tint slider is kept (docs/contracts/settings-window.md section 2.3): 0...1,
+/// `nil` means never set, which is 0 (no tint). Same arrangement as `DemoteStore`.
+@MainActor
+public protocol GlassTintStore: AnyObject {
+    var glassTint: Double? { get set }
+}
+
+/// The in-memory GlassTintStore.
+@MainActor
+public final class MemoryGlassTintStore: GlassTintStore {
+    public var glassTint: Double?
+    public init(_ glassTint: Double? = nil) { self.glassTint = glassTint }
+}
+
 /// Process-wide state: the single engine (about 240 MB each, so never two at once), the single
 /// candidate panel and the page it shows, and which session owns the composition (section 5).
 /// All calls happen on the main thread.
@@ -123,6 +154,13 @@ public final class Shell {
     private let predictionStore: PredictionStore
     /// V3: whether the prediction row is computed (default on); sent to every engine `build()` makes.
     private(set) var predictionOn = true
+    private let acgPackStore: AcgPackStore
+    /// The ACG word pack (default on, user decision 2026-10-09): parsed into the lexicon, so a change rebuilds the engine like a layout change.
+    private(set) var acgPackOn = true
+    private let glassTintStore: GlassTintStore
+    /// Posted (object: this shell) after any setting changes, from the menu or the settings window;
+    /// the window's model re-reads on it (settings-window section 2.2).
+    public static let didChangeSettings = Notification.Name("ShanjieShellDidChangeSettings")
     let panel: CandidatePanel
     let isSecureInput: () -> Bool
     private(set) var engine: CoreEngine?
@@ -160,11 +198,14 @@ public final class Shell {
     /// `demoteStore`: the demotion switch (sw). Required, with no default, like `layoutStore`: the app passes
     /// its UserDefaults-backed store, tests the in-memory one.
     /// `predictionStore`: the prediction switch (V3 section 10.5). Required, like `demoteStore`.
+    /// `acgPackStore`: the ACG word pack switch (acg-pack contract A.2). Required, like `demoteStore`.
+    /// `glassTintStore`: the candidate glass tint (settings-window section 2.3). Required, like `demoteStore`.
     /// `punctuationTable`: Apple's punctuation candidate table (s3e); tests pass another path.
     /// `punctuationNames`: Apple's punctuation names (s3f); tests pass another path.
     public init(resources: URL, panel: CandidatePanel, isSecureInput: @escaping () -> Bool,
                 layoutStore: LayoutStore, learningDirectory: URL?, dialogs: LearningDialogs,
-                demoteStore: DemoteStore, predictionStore: PredictionStore,
+                demoteStore: DemoteStore, predictionStore: PredictionStore, acgPackStore: AcgPackStore,
+                glassTintStore: GlassTintStore,
                 punctuationTable: URL = PunctuationTable.systemURL,
                 punctuationNames: URL = PunctuationNames.systemURL) {
         self.resources = resources
@@ -187,6 +228,10 @@ public final class Shell {
         demoteOn = demoteStore.demote ?? true
         self.predictionStore = predictionStore
         predictionOn = predictionStore.prediction ?? true
+        self.acgPackStore = acgPackStore
+        self.glassTintStore = glassTintStore
+        glassTint = glassTintStore.glassTint ?? 0
+        acgPackOn = acgPackStore.acgPack ?? true
         // The preference is read before the one engine is built (about 240 MB): building first
         // and switching after would build twice.
         mode = layoutStore.layout.flatMap(InputMode.init(rawValue:)) ?? .standard
@@ -202,6 +247,49 @@ public final class Shell {
     public func selectLayout(_ newMode: InputMode) {
         switchMode(to: newMode)
         layoutStore.layout = newMode.rawValue
+        changed()
+    }
+
+    /// Set by the app to show the settings window; the menu's 善解設定… calls it.
+    public var onOpenSettings: (() -> Void)?
+    func openSettings() { onOpenSettings?() }
+
+    /// The menu's switches, for a caller with no session (the settings window): the owner of the
+    /// composition, if any, shows the re-ranked snapshot exactly as for the menu; otherwise just the setter.
+    func applyDemote(_ on: Bool) {
+        if let o = owner { o.applyDemote(on) } else { dropOnFailure(setDemote(on)) }
+    }
+
+    func applyPrediction(_ on: Bool) {
+        if let o = owner { o.applyPrediction(on) } else { dropOnFailure(setPrediction(on)) }
+    }
+
+    /// No session to ask: a failed core call is logged and the composition dropped, as `Session.fail` does.
+    private func dropOnFailure(_ r: CoreResult?) {
+        guard case .failed(let c)? = r else { return }
+        Log.shell.error("core call failed, code \(c)")
+        discardOrphan()
+    }
+
+    /// The clear with its confirmation window (S4 section 4), for the menu and the settings window.
+    /// `done` runs after the answer, cleared or not.
+    func confirmAndClear(done: (@MainActor () -> Void)? = nil) {
+        dialogs.confirmClear { [weak self] clear in
+            if clear { self?.clearLearning() }
+            done?()
+        }
+    }
+
+    func changed() { NotificationCenter.default.post(name: Shell.didChangeSettings, object: self) }
+
+    /// The slider value 0...1 (settings-window section 2.3); unset is 0. Cached like the other settings.
+    public private(set) var glassTint: Double = 0
+
+    public func setGlassTint(_ value: Double) {
+        glassTint = value
+        glassTintStore.glassTint = value
+        panel.setGlassTint(value)  // section 2.3: a panel that is up changes at once
+        changed()
     }
 
     /// The menu's choice (sw): stored, and sent to the engine, which recomputes the composition; the
@@ -209,6 +297,7 @@ public final class Shell {
     func setDemote(_ on: Bool) -> CoreResult? {
         demoteOn = on
         demoteStore.demote = on
+        defer { changed() }
         return engine?.setDemote(on)
     }
 
@@ -216,15 +305,37 @@ public final class Shell {
     func setPrediction(_ on: Bool) -> CoreResult? {
         predictionOn = on
         predictionStore.prediction = on
+        defer { changed() }
         return engine?.setPrediction(on)
+    }
+
+    /// The menu's choice (acg-pack contract A.2): the pack is part of the lexicon, so like a layout change the
+    /// composition is committed and the engine rebuilt; the choice is stored. Same value: nothing happens.
+    func setAcgPack(_ on: Bool) {
+        guard on != acgPackOn else { return }
+        commitThenRebuild {
+            acgPackOn = on
+            acgPackStore.acgPack = on
+        }
+        changed()
+        Log.shell.debug("word pack switched")
     }
 
     /// Creates the engine for the current mode, then loads the LM and the current profile. A
     /// failure leaves an engine without the LM (still usable) or no engine (every key passes).
     private func build() {
         engine = nil  // free the old engine first: only one exists at a time
-        let (e, code) = CoreEngine.make(dataDir: resources.path, layout: mode.layout)
-        guard let e else {
+        let packsDir = resources.appendingPathComponent("packs").path
+        var (made, code) = CoreEngine.make(dataDir: resources.path, layout: mode.layout, packsDir: acgPackOn ? packsDir : nil)
+        if made == nil && acgPackOn {
+            // Any build failure retries without the pack, so the first code alone does not say whose fault it is:
+            // blame the pack only if the pack-less build works; otherwise the second code is the real cause.
+            // The stored choice is untouched and nothing is shown; the next rebuild tries the pack again.
+            let packCode = code
+            (made, code) = CoreEngine.make(dataDir: resources.path, layout: mode.layout)
+            if made != nil { Log.shell.error("shanjie_engine_new_packs failed, code \(packCode); built without the pack") }
+        }
+        guard let e = made else {
             Log.shell.error("shanjie_engine_new failed, code \(code)")
             return
         }
@@ -257,12 +368,18 @@ public final class Shell {
     /// layout, reload the LM and the current profile.
     func switchMode(to newMode: InputMode) {
         guard newMode != mode else { return }
+        commitThenRebuild { mode = newMode }
+        Log.shell.debug("input mode switched")
+    }
+
+    /// What a setting that lives in the engine's construction (layout, word pack) does: commit the
+    /// composition to its owner (or drop an orphan), apply the change, build a new engine.
+    private func commitThenRebuild(_ apply: () -> Void) {
         if composing {
             if let o = owner { o.finish(mode: 0) } else { discardOrphan() }
         }
-        mode = newMode
+        apply()
         build()
-        Log.shell.debug("input mode switched")
     }
 
     func setProfile(_ p: UInt32) -> CoreResult? {
@@ -275,7 +392,7 @@ public final class Shell {
         // Only an exact punctuation mark has a name: a word candidate is never a key of the table.
         let notes = list.map { names[$0] }
         panel.show(list, notes: notes, selected: selected, columns: columns, first: first, total: total,
-                   lineRect: lineRect, appearance: appearance)
+                   lineRect: lineRect, appearance: appearance, glassTint: glassTint)
     }
 
     func hideCandidates() {

@@ -7,7 +7,22 @@ import XCTest
 @MainActor
 final class SelftestTests: XCTestCase {
     func testPassesWithTheFullResources() throws {
-        XCTAssertEqual(Selftest.run(resources: try XCTUnwrap(TestData.resources())), 0)
+        let res = try XCTUnwrap(TestData.resources())
+        try TestData.addBundledPack(to: res)
+        XCTAssertEqual(Selftest.run(resources: res), 0)
+    }
+
+    /// The pack ships on by default, so a bundle without it (or with a broken one) must fail the selftest.
+    func testFailsWithoutTheBundledPack() throws {
+        XCTAssertNotEqual(Selftest.run(resources: try XCTUnwrap(TestData.resources())), 0)
+    }
+
+    func testFailsWithACorruptBundledPack() throws {
+        let res = try XCTUnwrap(TestData.resources())
+        let packs = res.appendingPathComponent("packs")
+        try FileManager.default.createDirectory(at: packs, withIntermediateDirectories: true)
+        try "not a row\n".write(to: packs.appendingPathComponent("acg-add.tsv"), atomically: true, encoding: .utf8)
+        XCTAssertNotEqual(Selftest.run(resources: res), 0)
     }
 
     func testFailsWithoutTheModel() throws {

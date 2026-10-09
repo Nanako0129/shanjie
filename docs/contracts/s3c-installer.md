@@ -33,7 +33,9 @@
    - 腳本照現行規則完成檔案交換（暫存、`.shanjie-previous`、舊名稱 `shanjie.app`、`lsregister -f`、結束舊行程），然後**在第 4 步（`shanjie install`）之前結束**，exit 0。
    - 這個變數只在非 files-only 模式下有意義；HOME 檢查照舊（安裝程式由使用者本人執行，HOME 就是帳號的家目錄）。
    - 腳本失敗（非 0）時，安裝程式顯示失敗與腳本的 stderr（固定文字與路徑，沒有使用者輸入），不做後續步驟。
-3. **註冊與啟用在安裝程式自己的行程裡做**（不呼叫 `shanjie install`）：理由是小麥注音的安裝程式註解寫「System Settings now asks the user whether to activate the IME」（`AppDelegate.swift:283`），而 0.1.0 的 `shanjie install` 是一跑完就結束的終端機行程，量到的現象是啟用呼叫都回 noErr、輸入法本體卻沒被系統接受，要登出再登入才生效（s3b §13.3 修訂三）。**未驗證**：有視窗、有 run loop 的行程啟用時，系統是否會跳出確認、確認後是否不必登出。
+3. > 已由 installer-v2 §9 修訂：註冊在已啟用時跳過；還差一步改成帶去系統設定（第 4 點的「登出再登入」不再適用）。
+
+   **註冊與啟用在安裝程式自己的行程裡做**（不呼叫 `shanjie install`）：理由是小麥注音的安裝程式註解寫「System Settings now asks the user whether to activate the IME」（`AppDelegate.swift:283`），而 0.1.0 的 `shanjie install` 是一跑完就結束的終端機行程，量到的現象是啟用呼叫都回 noErr、輸入法本體卻沒被系統接受，要登出再登入才生效（s3b §13.3 修訂三）。**未驗證**：有視窗、有 run loop 的行程啟用時，系統是否會跳出確認、確認後是否不必登出。
    - 邏輯和 v0.1.1 的 `shanjie install` 相同（倚天偏好的延續寫進輸入法自己的網域 `UserDefaults(suiteName: "com.nyanako.inputmethod.shanjie")`，由參數傳入；`shanjie install` 傳 `UserDefaults.standard`，security-reviewer P1-A）：`TISRegisterInputSource` → 啟用輸入法本體 → 啟用 `.zhuyin` 模式 → 停用舊的 `.standard`／`.eten`。
    - 共用程式：把這段 TIS 邏輯從 `macos/Sources/Shanjie/main.swift` 搬到新的 library target `ShanjieInstall`（連結 Carbon），**bundle URL 與 bundle ID 是參數**；`Shanjie` 傳 `Bundle.main.bundleURL`（行為不變），安裝程式傳**已安裝那一份** `~/Library/Input Methods/善解輸入法.app`，絕不傳自己 bundle 裡的路徑（被 App Translocation 時那是隨機的唯讀路徑）。`ShanjieKit` 仍不連結 TIS。
 4. 確認結果：用主執行緒 run loop 上的 `Timer`（不是背景執行緒 sleep；TIS 可能只在 run loop 上收到清單更新，未驗證）每 0.5 秒查一次已啟用清單（`TISCreateInputSourceList(…, false)`）裡有沒有輸入法本體，最多 30 秒，期間視窗顯示「如果系統跳出視窗，請允許『善解輸入法』」。
@@ -66,7 +68,7 @@
 - 不執行從網路下載的東西：輸入法本體來自自己的 `Resources/`，由外層簽章封住。Gatekeeper 只在第一次啟動時檢查封印，之後同一個使用者的行程理論上能改 bundle；那樣的行程本來就能直接寫 `~/Library/Input Methods`，不多給權限，接受（不加啟動時的 `SecStaticCodeCheckValidity`）。
 - 被 Gatekeeper 隨機搬移（App Translocation）時，`Resources/` 是唯讀的隨機路徑；安裝程式只從那裡讀 zip，註冊用的一律是已安裝的路徑。**未驗證**：translocation 下的實際行為，§7 記錄。
 - 2026-10-04 量測：brew 安裝的那份帶 quarantine（旗標含使用者已核准；推測是使用者在終端機執行過它，未驗證），執行中的輸入法 `lsof` 顯示的是 `~/Library/Input Methods/善解輸入法.app` 本身，沒有被搬到隨機路徑。安裝程式路徑用 `--noqtn`，不依賴這個核准旗標。
-- **agent 與 CI 都不啟動安裝程式**、不執行它的執行檔（契約與 brief 明寫）；它只能由使用者在真實帳號上點開。CI 只檢查 bundle 結構與簽章。
+- **agent 與 CI 都不啟動安裝程式**、不執行它的執行檔（契約與 brief 明寫）；它只能由使用者在真實帳號上點開。CI 只檢查 bundle 結構與簽章。唯一例外是 `installer-v2.md` §1.4 的畫面輸出：只由 main 執行 `swift build` 出來的裸執行檔，參數只有 `--render-steps`，只寫指定資料夾裡的 PNG。
 
 ## 6. 驗收（agent 可做的部分）
 

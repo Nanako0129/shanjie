@@ -69,13 +69,16 @@
 | 10 | 有未完成音節 | 聲調鍵、空白鍵 | 完成音節（§2） |
 | 11 | 有未完成音節 | Backspace | 刪掉顯示位置最後的符號（韻母→介音→聲母；2026-10-06 實測蘋果注音與小麥注音） |
 | 12 | 有未完成音節 | Esc | 清掉未完成音節 |
+| 12a | 有未完成音節 | Enter（沒有修飾鍵） | 送出組字區顯示的整串：游標前的顯示文字、未完成音節的符號（照顯示順序）、游標後的顯示文字，然後清空組字區（2026-10-09 起，蘋果注音實測；`docs/contracts/enter-pending.md`；原本是第 13 條的吃掉） |
+| 12b | 有未完成音節 | Shift+Enter | 照第 12a 條送出，然後直通這個鍵（`handled = 0`，App 收到換行；蘋果注音實測） |
 | 13 | 有未完成音節 | 其他鍵 | 已處理，忽略 |
 | 14 | 沒有未完成音節 | 注音鍵 | 開始新的未完成音節 |
 | 15 | 組字區有字 | 空白鍵、↓ | 開啟候選（§3.1） |
 | 16 | 組字區有字 | 聲調鍵（空白鍵以外）、↑ | 已處理，忽略 |
 | 17 | 組字區有字 | ←→、Home、End | 游標在音節之間移動 |
 | 18 | 組字區有字 | Backspace／Delete | 刪掉游標左邊／右邊的音節；游標在邊界時忽略 |
-| 19 | 組字區有字 | Enter | 送出組字區顯示的整句 |
+| 19 | 組字區有字 | Enter（沒有修飾鍵） | 送出組字區顯示的整句 |
+| 19a | 組字區有字 | Shift+Enter | 送出組字區顯示的整句，然後直通這個鍵（2026-10-09 起，蘋果注音實測；原本送出後吃掉，App 收不到換行） |
 | 20 | 組字區有字 | Esc | 清空組字區 |
 | 21 | 組字區有字 | 其他鍵（含 Shift＋非標點、Tab） | 送出組字區，然後直通這個鍵（`handled = 0`、`commit` 非空） |
 | 22a | 組字區空 | 聲調鍵（空白鍵以外） | 把該聲調符號（ˊ ˇ ˋ ˙）放進組字區，和第 2 條的標點相同（2026-10-05 起；蘋果注音實測按 3 打出「ˇ」但立刻送出，使用者選擇留在組字區，Backspace 可刪、Enter 才送出；原本直通成數字） |
@@ -121,7 +124,9 @@
 
 ## 5. 資料載入
 
-`data_dir` 裡必須有 `mcbpmf-data.txt`、`overlay-add.tsv` 與 `sandhi-add.tsv`（S2r 加入），用 `Lexicon::parse_with(基底, Some(疊加層))` 載入，疊加層是 `overlay-add.tsv` 接著 `sandhi-add.tsv`（`engine::join_overlays`，前一份沒有結尾換行就補一個），和評測 CLI 預設相同。任一個不存在或解析失敗，回傳碼 3。
+`data_dir` 裡必須有 `mcbpmf-data.txt`、`overlay-add.tsv` 與 `sandhi-add.tsv`（S2r 加入），用 `Lexicon::parse_with(基底, Some(疊加層))` 載入，疊加層是 `overlay-add.tsv` 接著 `sandhi-add.tsv`（`engine::join_overlays`，前一份沒有結尾換行就補一個），和評測 CLI 預設相同。任一個不存在或解析失敗，回傳碼 3（`load_lm` 重讀 `overlay-add.tsv` 與 `demote.tsv`，建構之後它們被移走也是碼 3）。
+
+詞包（acg-pack 契約 A.2）：`Engine::new_with_packs(data_dir, layout, Some((packs_dir, mask)))` 把啟用的詞包檔（`PACK_ACG` → `packs_dir/acg-add.tsv`）接在 `sandhi-add.tsv` 後面一起解析；`load_lm` 重新讀 `data_dir/overlay-add.tsv`（`engine::capping_overlay`；引擎不為此留一份約 17 MB 的副本），後面接建構時 `load_lexicon_packs` 給出的啟用詞包列（詞包檔不重讀；沒有啟用就沒有），交給 `CappedLexicon::new`，所以詞包的詞也依語料頻率封頂（沒看過的減 1.0）。沒有啟用的位元、或檔案不存在，就不讀任何詞包，引擎和 `Engine::new` 完全相同（`core/tests/engine_pack.rs` 逐位元比對解碼、候選清單與 V3 預測列）。未定義的位元是 `LoadFailed`。評測 CLI 的 `--packs acg [--packs-dir DIR]` 走同一組函式（`load_lexicon_packs`、`read_packs`）。
 
 ## 6. C ABI（`core/include/shanjie.h`）
 
@@ -147,7 +152,7 @@ typedef struct ShanjieEngine ShanjieEngine;
 int32_t shanjie_engine_new(const char *data_dir, uint32_t layout, ShanjieEngine **out); // layout 0 標準、1 倚天
 void    shanjie_engine_free(ShanjieEngine *engine);
 int32_t shanjie_engine_key(ShanjieEngine *engine, ShanjieKey key, ShanjieOutput **out);
-int32_t shanjie_engine_reset(ShanjieEngine *engine, uint32_t mode, ShanjieOutput **out); // mode 0 送出後清空、1 丟棄
+int32_t shanjie_engine_reset(ShanjieEngine *engine, uint32_t mode, ShanjieOutput **out); // mode 0 送出顯示的整串（含未完成的注音，和 Enter 相同）後清空、1 丟棄
 void    shanjie_output_free(ShanjieOutput *output);
 // s3b2 §8.2 新增：滑鼠點選。index 是這次輸出 candidates 裡的位置；核心選 candidate_first + index，走和 Enter 同一個 choose()。
 // V3：候選窗關閉但有預測列（進入或未進入）時，選預測列的第 index 個（點擊是明確的選取；學習開著時照改選學，v3-engine.md §10.1）。
@@ -156,6 +161,11 @@ int32_t shanjie_engine_pick(ShanjieEngine *engine, uint32_t index, ShanjieOutput
 // S2c 新增（docs/PLAN.md §S2c）
 int32_t shanjie_engine_load_lm(ShanjieEngine *engine, const char *path);               // 不改目前的組字區顯示
 int32_t shanjie_engine_set_profile(ShanjieEngine *engine, uint32_t profile, ShanjieOutput **out); // 0 chat（預設）、1 formal；重算組字區並回傳快照
+// acg-pack 新增（docs/contracts/acg-pack.md A.2）：詞包。packs 是位元遮罩（bit0 = ACG，檔案 packs_dir/acg-add.tsv）；
+// 詞包的列在建立時併入詞庫，所以開關在引擎生命期內固定，殼要換就釋放再建一個（和換排列相同）。packs 為 0 時不看 packs_dir（可為 NULL），
+// 等同 shanjie_engine_new；檔案不存在就什麼都不加（引擎和沒有詞包時逐位元相同）。遮罩有未定義的位元或 layout 超出範圍或 data_dir、packs_dir 不是 UTF-8 回 2；
+// packs 非 0 而 packs_dir 為 NULL 回 1；檔案存在卻讀不了或解析失敗回 3。詞包的詞在 load_lm 時和 overlay-add.tsv 的詞一樣依語料頻率封頂。
+int32_t shanjie_engine_new_packs(const char *data_dir, uint32_t layout, const char *packs_dir, uint32_t packs, ShanjieEngine **out);
 // s3e 新增（docs/contracts/s3e-punctuation-candidates.md）
 int32_t shanjie_engine_set_punctuation(ShanjieEngine *engine, const char *table); // 標點候選表；不合法回 2 並保留原表；不改目前顯示
 ```
@@ -202,6 +212,8 @@ int32_t shanjie_engine_set_punctuation(ShanjieEngine *engine, const char *table)
 - **經 C ABI 的重播**：在子行程裡經 C ABI 跑完 §7.2 的前 20 列，結果與 §7.2 相同。子行程的 stdout、stderr 除了 libtest 自己的 harness 行（`running 1 test`、`test … ok`、`test result: …` 與空行）之外沒有其他內容，而且不含這 20 列任何一列的句子或讀音字串。
 - 兩個 free 函式傳 NULL 不崩潰；各種錯誤碼的情境回傳正確的碼且 `*out` 為 NULL。
 - **S2c**：子行程測試 `child_lm`／`load_lm_and_set_profile_codes` 用手工的小 SJLM 檔，涵蓋 load_lm 的碼 1、2、3 與失敗時保留原本的 LM、set_profile 的碼 1、2、4（注入 panic）與成功快照、reset 保留 LM 與設定，並檢查子行程輸出不含暫存路徑。
+
+`core/tests/engine_pack.rs`（acg-pack 契約 A.5）：走出貨的建構子 `new_with_packs`，用會變的輸入（碇源堂、螢火蟲之墓的讀音，聊天與書面）。遮罩 0 且檔案存在、遮罩 1 且檔案不存在，兩者的每一個 `Output`（解碼、候選窗、預測列）都和 `Engine::new` 逐位元相同；遮罩 1 且檔案存在時，兩個名字是第一個候選。把遮罩改成什麼都不做會讓 `on != plain` 的斷言失敗（2026-10-09 實測，exit 101）。
 
 ### 7.4 C 標頭冒煙測試（`core/tests/c/abi_smoke.c`）
 

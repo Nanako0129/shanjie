@@ -20,10 +20,14 @@ pub const MAX_SYLLABLES: usize = 40;
 pub const PAGE_SIZE: usize = 9;
 /// Rows visible in the expanded grid (a-4: five, with a scroll bar).
 pub const GRID_ROWS: usize = 5;
-/// V3 engine contract section 1.2: at most this many items from the two long starts (last decoded word, the one before)
+/// V3 engine contract section 1.2: at most this many items from the long starts (the decoded word starts, section 11)
 /// go ahead of the cursor start's items; the rest of them follow. Chosen by the user from a measured trade-off
 /// (research log 2026-10-07): the first key keeps its own candidates, the second syllable still finds the long word.
 pub const PREDICT_LONG_CAP: usize = 3;
+/// V3 engine contract section 11: decoded word starts this many syllables back are long starts too, and the positions
+/// inside words this far back are queried last. Five is the user's choice; long names in the ACG pack were measured
+/// at 4, 5 and 6 (research log 2026-10-09).
+pub const PREDICT_BACK: usize = 5;
 /// Items in the prediction row.
 pub const PREDICT_MAX: usize = PAGE_SIZE;
 /// Items asked of `predict` for a start that some learned record could match (V3 engine contract section 10.2 step 1).
@@ -275,6 +279,9 @@ pub struct Engine {
     lex: Arc<Lexicon>,
     /// Where `new` read the data from; `None` for `with_lexicon` engines (they cannot `load_lm`).
     data_dir: Option<PathBuf>,
+    /// The enabled packs' rows `new` read (acg-pack contract A.2), appended to `overlay-add.tsv` when
+    /// `load_lm` caps; `None` with no pack, so a pack-off engine holds nothing extra.
+    pack_text: Option<String>,
     lm: Option<LmState>,
     profile: Profile,
     /// Whether the table applies (default on; `set_demote`).
@@ -331,10 +338,61 @@ pub struct Engine {
 /// `overlay-add.tsv` then `sandhi-add.tsv` (S2r: MOE-standard 一/不 readings derived from the base),
 /// in that fixed order; both are required.
 pub fn load_lexicon(data_dir: &Path) -> Result<Arc<Lexicon>, EngineError> {
+    load_lexicon_packs(data_dir, None).map(|(lex, _)| lex)
+}
+
+/// Pack bits of `Engine::new_with_packs` and `shanjie_engine_new_packs` (docs/contracts/acg-pack.md A.2).
+pub const PACK_ACG: u32 = 1;
+pub const PACK_ALL: u32 = PACK_ACG;
+/// A pack's overlay file inside the packs directory, in the order the packs are appended.
+const PACK_FILES: [(u32, &str); 1] = [(PACK_ACG, "acg-add.tsv")];
+
+/// The enabled packs' overlay rows in `dir`, concatenated; a pack whose file is missing contributes
+/// nothing (the engine is then identical to one without packs). An unreadable file is a load failure.
+pub fn read_packs(dir: &Path, mask: u32) -> Result<String, EngineError> {
+    let mut text = String::new();
+    for (bit, name) in PACK_FILES {
+        if mask & bit == 0 {
+            continue;
+        }
+        match std::fs::read_to_string(dir.join(name)) {
+            Ok(t) => {
+                if !text.is_empty() && !text.ends_with('\n') {
+                    text.push('\n');
+                }
+                text.push_str(&t);
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(_) => return Err(EngineError::LoadFailed),
+        }
+    }
+    Ok(text)
+}
+
+/// `load_lexicon` with the rows of `packs` (`(directory, mask)`, see `read_packs`) after `sandhi-add.tsv`,
+/// plus those rows alone (empty with no pack), for `capping_overlay`. `None` or an empty mask: exactly
+/// `load_lexicon`. The engine and the evaluation CLI share this.
+pub fn load_lexicon_packs(data_dir: &Path, packs: Option<(&Path, u32)>) -> Result<(Arc<Lexicon>, String), EngineError> {
     let base = std::fs::read_to_string(data_dir.join("mcbpmf-data.txt")).map_err(|_| EngineError::LoadFailed)?;
     let overlay = std::fs::read_to_string(data_dir.join("overlay-add.tsv")).map_err(|_| EngineError::LoadFailed)?;
     let sandhi = std::fs::read_to_string(data_dir.join("sandhi-add.tsv")).map_err(|_| EngineError::LoadFailed)?;
-    Lexicon::parse_with(&base, Some(&join_overlays(overlay, &sandhi))).map(Arc::new).map_err(|_| EngineError::LoadFailed)
+    let mut text = join_overlays(overlay, &sandhi);
+    let extra = match packs {
+        Some((dir, mask)) => read_packs(dir, mask)?,
+        None => String::new(),
+    };
+    if !extra.is_empty() {
+        text = join_overlays(text, &extra);
+    }
+    let lex = Lexicon::parse_with(&base, Some(&text)).map_err(|_| EngineError::LoadFailed)?;
+    Ok((Arc::new(lex), extra))
+}
+
+/// The text `CappedLexicon::new` takes as its overlay: `overlay-add.tsv` (read here, as `load_lm` always
+/// did), then the packs' rows `load_lexicon_packs` returned (no sandhi rows).
+pub fn capping_overlay(data_dir: &Path, pack_text: &str) -> Result<String, EngineError> {
+    let overlay = std::fs::read_to_string(data_dir.join("overlay-add.tsv")).map_err(|_| EngineError::LoadFailed)?;
+    Ok(if pack_text.is_empty() { overlay } else { join_overlays(overlay, pack_text) })
 }
 
 /// The overlay text the lexicon is parsed with: `overlay-add.tsv` then `sandhi-add.tsv`, with a line
@@ -352,7 +410,21 @@ fn join_overlays(mut overlay: String, sandhi: &str) -> String {
 
 impl Engine {
     pub fn new(data_dir: &Path, layout: Layout) -> Result<Engine, EngineError> {
-        let mut e = Engine::with_lexicon(load_lexicon(data_dir)?, layout);
+        Engine::new_with_packs(data_dir, layout, None)
+    }
+
+    /// `new` with word packs: `packs` is the packs directory and the `PACK_*` bits to enable (acg-pack
+    /// contract A.2). The pack rows are parsed into the lexicon, so a pack is fixed for the engine's life;
+    /// the shell switches by building a new engine, like a layout change. Mask 0 / `None`: same as `new`.
+    /// An unknown bit is `LoadFailed`.
+    pub fn new_with_packs(data_dir: &Path, layout: Layout, packs: Option<(&Path, u32)>) -> Result<Engine, EngineError> {
+        if packs.is_some_and(|(_, m)| m & !PACK_ALL != 0) {
+            return Err(EngineError::LoadFailed);
+        }
+        let packs = packs.filter(|&(_, m)| m != 0);
+        let (lex, pack_text) = load_lexicon_packs(data_dir, packs)?;
+        let mut e = Engine::with_lexicon(lex, layout);
+        e.pack_text = Some(pack_text).filter(|t| !t.is_empty());
         // Required like the other data files, and every row must name an entry of the lexicon (contract
         // sw-sensitive-demote section 2); `load_lm` reads it again to resolve it against the capped lexicon.
         let demote = std::fs::read_to_string(data_dir.join("demote.tsv")).map_err(|_| EngineError::LoadFailed)?;
@@ -368,6 +440,7 @@ impl Engine {
         Engine {
             lex,
             data_dir: None,
+            pack_text: None,
             lm: None,
             profile: Profile::Chat,
             demote: true,
@@ -523,7 +596,8 @@ impl Engine {
     }
 
     /// §1.2: runs after the commit text is known, inside its own `catch_unwind`: whatever fails here
-    /// only costs this learn. `display` is the committed text.
+    /// only costs this learn. `display` is the decoded composition text, without the unfinished symbols that the
+    /// commit itself may carry (s3a rule 12a): the context keys are offsets into it.
     fn learn_commit(&mut self, display: &str) {
         if !self.learning || self.fixed.iter().all(|f| f.pre.is_none()) {
             return;
@@ -558,12 +632,12 @@ impl Engine {
         }));
     }
 
-    /// S2c: read the model at `path` and `data_dir/overlay-add.tsv`, build the capped lexicon with the
+    /// S2c: read the model at `path` and `data_dir/overlay-add.tsv` (plus the pack rows `new` kept), build the capped lexicon with the
     /// shared constructor. Failure leaves the previous state. The composition display is not recomputed;
     /// the next change to it decodes with the new model.
     pub fn load_lm(&mut self, path: &Path) -> Result<(), EngineError> {
         let dir = self.data_dir.as_ref().ok_or(EngineError::LoadFailed)?;
-        let overlay = std::fs::read_to_string(dir.join("overlay-add.tsv")).map_err(|_| EngineError::LoadFailed)?;
+        let overlay = capping_overlay(dir, self.pack_text.as_deref().unwrap_or(""))?;
         let demote = std::fs::read_to_string(dir.join("demote.tsv")).map_err(|_| EngineError::LoadFailed)?;
         let demote = Demote::parse(&demote).ok_or(EngineError::LoadFailed)?;
         let lm = Lm::load(path).map_err(|_| EngineError::LoadFailed)?;
@@ -647,6 +721,21 @@ impl Engine {
         self.handled()
     }
 
+    /// Where each token of the current best path starts (a word or a punctuation mark), from the composition's start.
+    /// `recompute_pred` takes its long starts from it (V3 engine contract section 11); public so tests can tell a
+    /// decoded word's start from a position inside a word.
+    pub fn path_starts(&self) -> Vec<usize> {
+        let mut pos = 0;
+        self.path
+            .iter()
+            .map(|(w, _, is_punct, _)| {
+                let s = pos;
+                pos += if *is_punct { 1 } else { w.chars().count() };
+                s
+            })
+            .collect()
+    }
+
     /// Total score of the current best path as `lm.decode` scores one: every word (fixed words with
     /// their capped `lp_F`) adds `word(λ, previous, w, lp) − δ` (δ: the demotion of the entry, 0 when demotion is off), then `eos` of the last word. Punctuation
     /// splits it into sentences (s3d §4): the stretch before it closes with `eos`, the next starts from
@@ -673,9 +762,10 @@ impl Engine {
         any.then(|| if open { total + st.lm.eos(lam, prev) } else { total })
     }
 
-    /// §6 reset: Commit returns the display string (pending syllable dropped); both clear everything.
+    /// §6 reset: Commit returns the composition as shown, unfinished symbols included, like Enter (enter-pending
+    /// contract §2; no learning here); both clear everything.
     pub fn reset(&mut self, mode: ResetMode) -> Output {
-        let commit = if mode == ResetMode::Commit { std::mem::take(&mut self.display) } else { String::new() };
+        let commit = if mode == ResetMode::Commit { self.shown().0 } else { String::new() };
         self.clear_all();
         self.view(true, commit)
     }
@@ -704,7 +794,8 @@ impl Engine {
         (self.pred.iter().map(|p| p.word.clone()).collect(), self.pred_sel, self.pred.len() as u32)
     }
 
-    /// V3 engine contract section 1.2 and 10.2: one `predict` per word start, merged and reordered by what was learned.
+    /// V3 engine contract sections 1.2, 10.2 and 11: one `predict` per start (decoded word starts, positions inside words,
+    /// the cursor), merged and reordered by what was learned.
     /// Empty while off, without a model, when the cursor is not at the end or the candidate window is open.
     fn recompute_pred(&mut self) {
         self.clear_pred();
@@ -713,13 +804,16 @@ impl Engine {
         let idx = st.capped.predict_index(&st.lm);
         let lam = self.profile.lambda();
         let pending: Vec<char> = self.pend.iter().flatten().copied().collect();
-        let mut long_starts = Vec::new();
-        let mut pos = n;
-        for (w, _, is_punct, _) in self.path.iter().rev().take(2) {
-            pos = pos.saturating_sub(if *is_punct { 1 } else { w.chars().count() });
-            long_starts.push(pos);
-        }
-        long_starts.reverse(); // far to near
+        // Section 11: the last two path tokens' starts, and the start of every earlier one within `PREDICT_BACK`, far to
+        // near. Positions inside words within `PREDICT_BACK` come last, except inside a word the user fixed: choosing
+        // such an item would take the user's choice (and its pending learn) apart.
+        let starts = self.path_starts();
+        let k = starts.len();
+        let long_starts: Vec<usize> =
+            starts.iter().enumerate().filter(|&(i, &s)| i + 2 >= k || s + PREDICT_BACK >= n).map(|(_, &s)| s).collect();
+        let mid: Vec<usize> = (n.saturating_sub(PREDICT_BACK)..n)
+            .filter(|&p| !long_starts.contains(&p) && !self.fixed.iter().any(|f| f.start < p && p < f.end))
+            .collect();
         let disp: Vec<char> = self.display.chars().collect();
         let off = |i: usize| (0..i).map(|j| self.token_width(j)).sum::<usize>().min(disp.len());
         let (learned, today) = (!self.learner.is_empty(), self.today());
@@ -754,13 +848,8 @@ impl Engine {
                 .filter(|p| p.word != shown)
                 .collect()
         };
-        let mut long = Vec::new();
-        let mut seen = HashSet::new();
-        for s in long_starts {
-            if seen.insert(s) {
-                long.extend(query(s));
-            }
-        }
+        // Path starts are strictly increasing (every token is at least one position wide), so no start repeats.
+        let mut long: Vec<Pred> = long_starts.into_iter().flat_map(&query).collect();
         // Step 4: L keeps the first position of a word and the largest weight of its copies.
         let mut best: HashMap<String, f64> = HashMap::new();
         for p in &long {
@@ -775,7 +864,9 @@ impl Engine {
         let (head, tail): (Vec<_>, Vec<_>) = long.into_iter().enumerate().partition(|(i, p)| p.weight > 0.0 || *i < PREDICT_LONG_CAP);
         let (head, tail) = (head.into_iter().map(|x| x.1), tail.into_iter().map(|x| x.1));
         let cursor_items = if pending.is_empty() { Vec::new() } else { query(n) };
-        let mut all: Vec<Pred> = head.chain(cursor_items).chain(tail).collect();
+        // Section 11: the positions inside words come last, far to near.
+        let mid_items = mid.into_iter().flat_map(&query);
+        let mut all: Vec<Pred> = head.chain(cursor_items).chain(tail).chain(mid_items).collect();
         all.sort_by(|a, b| b.weight.total_cmp(&a.weight)); // step 6: stable
         let mut words = HashSet::new();
         all.retain(|p| words.insert(p.word.clone())); // step 7
@@ -830,16 +921,22 @@ impl Engine {
         self.pend.iter().flatten().collect()
     }
 
-    fn view(&self, handled: bool, commit: String) -> Output {
+    /// The composition as shown: the display text with the unfinished symbols at the cursor, and the cursor after
+    /// them in UTF-16 code units.
+    fn shown(&self) -> (String, u32) {
         let chars: Vec<char> = self.display.chars().collect();
         // A syllable shows as one char (lexicon invariant); a punctuation token as its fixed word,
         // which can be longer (⋯⋯, s3e §3). Clamped in case the invariant ever breaks.
         let at = (0..self.cursor).map(|i| self.token_width(i)).sum::<usize>().min(chars.len());
-        let pending = self.pending();
-        let mut preedit: String = chars[..at].iter().collect();
-        preedit.push_str(&pending);
-        let cursor_utf16 = preedit.encode_utf16().count() as u32;
-        preedit.extend(chars[at..].iter());
+        let mut text: String = chars[..at].iter().collect();
+        text.push_str(&self.pending());
+        let cursor_utf16 = text.encode_utf16().count() as u32;
+        text.extend(chars[at..].iter());
+        (text, cursor_utf16)
+    }
+
+    fn view(&self, handled: bool, commit: String) -> Output {
+        let (preedit, cursor_utf16) = self.shown();
         let (candidates, selected, columns, first, total) = match &self.cands {
             Some(c) => {
                 let (first, n) = c.window();
@@ -943,12 +1040,21 @@ impl Engine {
     fn passthrough(&self, commit: String) -> Result<Output, EngineError> {
         Ok(self.view(false, commit))
     }
-    /// Commit the whole composition and clear all state.
+    /// Commit the whole composition as shown, unfinished symbols included (s3a rule 12a), and clear all state. Learning
+    /// sees the decoded text only.
     fn take_commit(&mut self) -> String {
+        let (shown, _) = self.shown();
         let s = std::mem::take(&mut self.display);
         self.learn_commit(&s);
         self.clear_all();
-        s
+        shown
+    }
+
+    /// Rules 12a, 12b, 19, 19a: Enter commits what is shown; Shift+Enter then passes the key on (Apple Zhuyin, measured
+    /// 2026-10-09: it commits and the app gets the line break).
+    fn commit_enter(&mut self, m: u32) -> Result<Output, EngineError> {
+        let commit = self.take_commit();
+        Ok(self.view(m & MOD_SHIFT == 0, commit))
     }
 
     fn dispatch(&mut self, k: Key) -> Result<Output, EngineError> {
@@ -1049,6 +1155,8 @@ impl Engine {
                 self.pred_dirty = true;
             } else if k.kind == KeyKind::Esc {
                 self.pend = [None; 3];
+            } else if k.kind == KeyKind::Enter {
+                return self.commit_enter(m); // 12a, 12b
             } else {
                 self.pred = old; // the key does nothing
             }
@@ -1087,10 +1195,7 @@ impl Engine {
             }
             KeyKind::Delete if self.cursor < n => self.remove_syllable(self.cursor)?,
             KeyKind::Backspace | KeyKind::Delete => self.pred = old,
-            KeyKind::Enter => {
-                let commit = self.take_commit();
-                return Ok(self.view(true, commit));
-            }
+            KeyKind::Enter => return self.commit_enter(m), // 19, 19a
             KeyKind::Esc => self.clear_all(),
             _ => {
                 let commit = self.take_commit(); // 21
