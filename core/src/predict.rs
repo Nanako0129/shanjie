@@ -94,11 +94,6 @@ fn unit_ok(u: &Unit, s: &Syl) -> bool {
     }
 }
 
-/// Whether `predict` in prefix mode could return a word read `reading` for `units` (`reading_matches_in` with `Mode::P`).
-pub fn reading_matches(units: &[Unit], reading: &[String]) -> bool {
-    reading_matches_in(units, reading, Mode::P)
-}
-
 /// Whether `predict` in `mode` could return a word read `reading` for `units`: a cheap string test on the first
 /// syllable first, then the same compatibility test as the scan (the prefix reading, and in `PA` the abbreviation
 /// reading, `compat_prefix` / `compat_abbr`). Never false for a reading `predict` would return.

@@ -3,7 +3,7 @@
 use core::engine::*;
 use core::learn::context_key;
 use core::lm::{decode_segment, history, CappedLexicon, End, Lm, Profile};
-use core::predict::{predict, reading_matches, reading_matches_in, units_of, Mode, Unit};
+use core::predict::{predict, reading_matches_in, units_of, Mode, Unit};
 use core::Lexicon;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
@@ -889,7 +889,7 @@ fn time_typing76_in(dir: Option<&Path>, abbr: bool) {
     println!("index build {:?}; rss {} -> {} KiB", t.elapsed(), rss0, rss_kb());
     let text = std::fs::read_to_string(root().join("eval/dev/user-typing.txt")).unwrap();
     let mut times: Vec<Duration> = Vec::new();
-    let mut slow: Vec<(Duration, usize, usize)> = Vec::new();
+    let mut slow: Vec<(Duration, usize, usize, KeyKind)> = Vec::new();
     let mut rows = 0;
     for line in text.lines().filter(|l| !l.is_empty()) {
         let f: Vec<&str> = line.split('|').collect();
@@ -906,7 +906,7 @@ fn time_typing76_in(dir: Option<&Path>, abbr: bool) {
             let o = e.key(k).unwrap();
             let d = t.elapsed();
             times.push(d);
-            slow.push((d, rows, ki));
+            slow.push((d, rows, ki, k.kind));
             ki += 1;
             o
         };
@@ -922,9 +922,9 @@ fn time_typing76_in(dir: Option<&Path>, abbr: bool) {
     }
     times.sort();
     let ms = |d: Duration| d.as_secs_f64() * 1000.0;
-    slow.sort();
-    for (d, r, k) in slow.iter().rev().take(3) {
-        println!("slowest: {:.3} ms at row {r} key {k}", ms(*d));
+    slow.sort_by_key(|x| x.0);
+    for (d, r, k, kd) in slow.iter().rev().take(3) {
+        println!("slowest: {:.3} ms at row {r} key {k}{}", ms(*d), if *kd == KeyKind::Enter { " (Enter: commit, learning write)" } else { "" });
     }
     println!("keys over 16 ms: {}", times.iter().filter(|d| **d > Duration::from_millis(16)).count());
     println!(
@@ -1673,7 +1673,7 @@ fn reading_matches_compares_the_first_syllable_as_before() {
     ];
     for (keys, reading, want) in cases {
         let u = units_of(keys);
-        assert_eq!(reading_matches(&u, &r(reading)), want, "{keys} {reading}");
+        assert_eq!(reading_matches_in(&u, &r(reading), Mode::P), want, "{keys} {reading}");
         assert_eq!(old(&u, &r(reading)), want, "the old first-syllable test: {keys} {reading}");
     }
 }
@@ -1879,6 +1879,20 @@ fn abbreviation_needs_the_setting_the_row_and_the_end_of_the_composition() {
     e.key(kind(KeyKind::Left)).unwrap();
     let o = send(&mut e, pend_keys("ㄋㄔ"));
     assert!(o.preedit.contains('ㄔ') && !o.preedit.contains('ㄋ'), "{}", o.preedit);
+}
+
+#[test]
+fn abbreviation_needs_a_model_and_stops_at_the_unit_cap() {
+    // No model, so no row to resolve units with: the second key replaces the first although the setting and the row are on.
+    let mut e = Engine::with_lexicon(shared().lex.clone(), L);
+    e.set_abbreviation(true).unwrap();
+    assert_eq!(typ(&mut e, &[], "ㄋㄔ").preedit, "ㄔ");
+    // The cap: ten presses make ten units, the next ones replace the last unit.
+    let mut e = abbr_engine("");
+    let o = send(&mut e, (0..12).map(|_| Key::ch('s', 0)).collect());
+    assert_eq!(o.preedit, "ㄋ".repeat(ABBR_MAX_UNITS));
+    let o = e.key(Key::ch('t', 0)).unwrap();
+    assert_eq!(o.preedit, format!("{}ㄔ", "ㄋ".repeat(ABBR_MAX_UNITS - 1)));
 }
 
 #[test]

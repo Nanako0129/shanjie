@@ -962,13 +962,10 @@ mod tests {
             assert!(unsafe { shanjie_engine_set_abbreviation(e, v, &mut o) } == 0 && !o.is_null(), "set_abbreviation 0/1");
             unsafe { shanjie_output_free(o) };
         }
-        // On (the loop ended with 1): ㄋ then ㄔ are two units, so the preedit has two characters; turning it off drops them.
+        // On (the loop ended with 1), but this engine has no model and so no row to resolve units with: ㄋ then ㄔ replace.
         send(e, key(CHAR, 's'));
-        assert!(send(e, key(CHAR, 't')).1.chars().count() == 2, "two units");
-        o = sentinel();
-        assert!(unsafe { shanjie_engine_set_abbreviation(e, 0, &mut o) } == 0 && !o.is_null(), "set_abbreviation 0 with two units");
-        assert!(unsafe { CStr::from_ptr((*o).preedit) }.to_bytes().is_empty(), "set_abbreviation 0 drops the units");
-        unsafe { shanjie_output_free(o) };
+        assert!(send(e, key(CHAR, 't')).1.chars().count() == 1, "no model: one unit");
+        assert!(send(e, key(ESC, '\0')).0 == 0, "esc");
 
         // engine_key
         o = sentinel();
@@ -1208,6 +1205,17 @@ mod tests {
         let (rc, null, handled, preedit, commit) = profile(e, 1);
         assert!(rc == 0 && !null && handled == 1 && preedit == "心" && commit.is_empty(), "formal snapshot");
         assert!(enter(e) == "心", "formal commit");
+
+        // set_abbreviation with a model: two initials are two units, turning it off drops them (V3 engine section 12.1).
+        let mut o: *mut ShanjieOutput = sentinel();
+        assert!(unsafe { shanjie_engine_set_abbreviation(e, 1, &mut o) } == 0 && !o.is_null(), "abbreviation on");
+        unsafe { shanjie_output_free(o) };
+        assert!(send(e, key(CHAR, 'v')).0 == 0, "typing");
+        assert!(send(e, key(CHAR, 'q')).1.chars().count() == 2, "two units");
+        o = sentinel();
+        assert!(unsafe { shanjie_engine_set_abbreviation(e, 0, &mut o) } == 0 && !o.is_null(), "abbreviation off with two units");
+        assert!(unsafe { CStr::from_ptr((*o).preedit) }.to_bytes().is_empty(), "off drops the units");
+        unsafe { shanjie_output_free(o) };
 
         // A failed load keeps the loaded model.
         assert!(unsafe { shanjie_engine_load_lm(e, garbage_c.as_ptr()) } == 3, "garbage after success");
