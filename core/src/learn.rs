@@ -44,10 +44,10 @@ pub const NEWWORD_DIGITS: &str = "〇零一二三四五六七八九十百千萬�
 /// cvtune and wikitune under contract §3.2, never on the dev sets.
 pub const NEWWORD_S_MIN: f64 = -5.0;
 pub const NEWWORD_S_MAX: f64 = -3.0;
-/// Measured variant B (research log 2026-10-10, pending the user's decision; not in the approved contract): a run
+/// Contract §2.2 item 5 (variant B, chosen by the user on 2026-10-10 after the measurement in the research log): a run
 /// learned under §2.2 also teaches each contiguous sub-span of NEWWORD_MIN..=NEWWORD_MAX characters that holds a
-/// re-picked character, is not all NEWWORD_DIGITS and whose reading has no lexicon word at all. Off: the contract.
-pub const NEWWORD_SUBSPANS: bool = false;
+/// re-picked character, is not all NEWWORD_DIGITS and whose reading has no lexicon word at all. Off: rule A only.
+pub const NEWWORD_SUBSPANS: bool = true;
 
 /// §2.4: the entry score of a new word of decayed weight `w`.
 pub fn newword_score(w: f64) -> f64 {

@@ -252,8 +252,10 @@ fn measure_newword() {
     let len = core::eval::Lenient::parse(&std::fs::read_to_string(variants).unwrap()).unwrap();
     let mut e = engine();
     e.set_newword(mode == "new");
-    // Variant B (sub-spans), measured against the contract's rule A.
-    e.set_newword_subspans(var("NEWWORD_SUBSPANS") == "1");
+    // Sub-spans (contract §2.2 item 5) follow the shipped default; NEWWORD_SUBSPANS=0/1 overrides it to measure rule A.
+    if let Ok(v) = std::env::var("NEWWORD_SUBSPANS") {
+        e.set_newword_subspans(v == "1");
+    }
     e.set_profile(profile).unwrap();
     for (ctx, gold, syls) in &teach {
         teach_row(&mut e, ctx, gold, syls);
@@ -298,9 +300,11 @@ fn tiny(text: &str) -> Engine {
 }
 /// Syllables of T (each one character, two homophones apart from 的 and Ａ).
 const T: &str = "ㄅㄢˇ 板 -1.0\nㄅㄢˇ 版 -1.5\nㄎㄨㄥˋ 控 -1.0\nㄎㄨㄥˋ 空 -1.5\nㄕㄨ 書 -1.0\nㄕㄨ 舒 -1.5\nㄏㄨㄚ 花 -1.0\nㄏㄨㄚ 嘩 -1.5\nㄉㄜ˙ 的 -1.0\nㄟ Ａ -1.0\nㄐㄧˇ 己 -1.0\nㄐㄧˇ 幾 -1.5\n";
-/// Type `reading` on a T engine, re-pick the character at `at`, Enter; the new words learned.
+/// Type `reading` on a T engine, re-pick the character at `at`, Enter; the new words learned. Sub-spans (§2.2 item 5)
+/// are off here: these tests pin the whole-run rules of items 1–4; item 5 has its own tests (`boundary_*`).
 fn learn_t(text: &str, reading: &str, at: usize) -> (Vec<String>, String) {
     let mut e = tiny(text);
+    e.set_newword_subspans(false);
     let n = type_syls(&mut e, reading).preedit.chars().count();
     let shown = repick_char(&mut e, n, at);
     let c = e.key(k(KeyKind::Enter)).unwrap().commit;
