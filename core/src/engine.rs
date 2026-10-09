@@ -1,7 +1,7 @@
 //! S3a key engine (docs/contracts/s3a.md): key events in, preedit / commit / candidates out.
 //! R2: no input text in errors or panics; types holding input text do not derive Debug.
 
-use crate::learn::{context_key, local_day, Learner, Level, Record};
+use crate::learn::{context_key, is_han, local_day, newword_score, Learner, Level, Record, NEWWORD, NEWWORD_BREAK, NEWWORD_DIGITS, NEWWORD_MAX, NEWWORD_MIN};
 use crate::learn_store::{LearnStore, Opened, StoreError, JOURNAL_MAX};
 use crate::predict::{predict, reading_matches, unit_of_syllable, Mode, Unit};
 use crate::lm::{decode_segment_learned, history, CappedLexicon, Demote, End, Learn, Lm, Profile};
@@ -217,6 +217,9 @@ struct Fixed {
     /// The context key a prediction pick is recorded under, fixed when the row was built: re-decoding after the pick can
     /// change the text before the start, so the commit must not recompute it (section 10.1). `None` for candidate picks.
     key: Option<String>,
+    /// New-word B §2.5: the new words (reading, word) of the path this pick displaced, chosen while learning was on;
+    /// each is halved at a commit with learning on.
+    displaced_new: Vec<(Vec<String>, String)>,
 }
 
 /// One item of the prediction row: the word, the compatible reading that scored it, and the syllable index where
@@ -310,6 +313,11 @@ pub struct Engine {
     /// S4: the Han tail (≤ 2 chars) of the text before the insertion point, from `set_left_context`.
     left: String,
     learning: bool,
+    /// New-word B §2.1: learning was turned off at some point of this composition, so its commit learns no new word.
+    /// Set by `set_learning(false)` while composing, cleared with the composition (`clear_all`).
+    paused: bool,
+    /// Test hook: false turns new-word B's learning off (S4 alone), the baseline of `measure_newword`.
+    newword: bool,
     /// ε of the global learning level (§12); a test hook sweeps it.
     eps_global: f64,
     learner: Learner,
@@ -460,6 +468,8 @@ impl Engine {
             pred_dirty: false,
             left: String::new(),
             learning: false,
+            paused: false,
+            newword: true,
             eps_global: crate::lm::LEARN_EPS_GLOBAL,
             learner: Learner::default(),
             store: None,
@@ -483,11 +493,24 @@ impl Engine {
 
     /// §3: off by default. Turning it off drops pending learns; a span is learned only if the flag was
     /// on both when it was chosen and at commit.
+    /// New-word B §2.1: turning it off while composing also marks the composition, so its commit learns no new word
+    /// even when learning is back on by then (text typed during the pause is never stored next to a later re-pick).
     pub fn set_learning(&mut self, on: bool) {
         self.learning = on;
         if !on {
-            self.fixed.iter_mut().for_each(|f| f.pre = None);
+            self.fixed.iter_mut().for_each(|f| {
+                f.pre = None;
+                f.displaced_new.clear();
+            });
+            if !self.syls.is_empty() || self.pend.iter().any(Option::is_some) {
+                self.paused = true;
+            }
         }
+    }
+
+    /// Test hook: whether new-word B learns (default on). Off is S4 alone (contract §3.1 baseline).
+    pub fn set_newword(&mut self, on: bool) {
+        self.newword = on;
     }
 
     /// §4: load `dir/learning.tsv` (memory pruned only; the file is tidied by the first write, which
@@ -511,7 +534,10 @@ impl Engine {
             self.must_rewrite = true;
         }
         self.learner.clear();
-        self.fixed.iter_mut().for_each(|f| f.pre = None);
+        self.fixed.iter_mut().for_each(|f| {
+            f.pre = None;
+            f.displaced_new.clear();
+        });
         let store = self.store.as_ref().ok_or(StoreError::Io)?;
         store.clear()?;
         // The next write starts a new file from the header by the day rule, not by finding none.
@@ -599,7 +625,13 @@ impl Engine {
     /// only costs this learn. `display` is the decoded composition text, without the unfinished symbols that the
     /// commit itself may carry (s3a rule 12a): the context keys are offsets into it.
     fn learn_commit(&mut self, display: &str) {
-        if !self.learning || self.fixed.iter().all(|f| f.pre.is_none()) {
+        if !self.learning {
+            return;
+        }
+        let new_on = self.newword && !self.paused;
+        let today = if new_on && self.learner.has_new_words() { self.today() } else { 0 };
+        let uses = if new_on { self.new_word_uses(today) } else { Vec::new() };
+        if uses.is_empty() && self.fixed.iter().all(|f| f.pre.is_none() && f.displaced_new.is_empty()) {
             return;
         }
         let _ = catch_unwind(AssertUnwindSafe(|| {
@@ -622,14 +654,106 @@ impl Engine {
             for (ctx, reading, word, displaced) in &plans {
                 touched.extend(self.learner.teach(ctx, reading, word, displaced, today));
             }
+            // New-word B: learn (§2.2), halve what re-picks displaced (§2.5), count the uses (§2.5, once a day).
+            let halves: Vec<(Vec<String>, String)> =
+                if self.newword { self.fixed.iter().flat_map(|f| f.displaced_new.clone()).collect() } else { Vec::new() };
+            let learns = if new_on { self.new_word_spans() } else { Vec::new() };
+            for (reading, word) in &learns {
+                touched.push(self.learner.learn_new(reading, word, today));
+            }
+            for (reading, word) in &halves {
+                touched.extend(self.learner.halve_new(reading, word, today));
+            }
+            for (reading, word) in &uses {
+                touched.extend(self.learner.use_new(reading, word, today));
+            }
             // Nothing touched (e.g. a single character under "^", §12): no write, unless a full
             // rewrite is pending (a failed forget or rewrite). It is retried only by commits that reach
-            // this point: learning on and at least one re-pick (the early return above); other commits
-            // leave it pending.
+            // this point: learning on and at least one re-pick, displaced new word, or new word not yet
+            // counted today on the path (the early return above); other commits leave it pending.
             if !touched.is_empty() || self.must_rewrite {
                 self.persist(&touched);
             }
         }));
+    }
+
+    /// Whether the lexicon (base, overlays, packs) has `word` under `reading`.
+    fn in_lexicon(&self, reading: &[String], word: &str) -> bool {
+        self.lex.entries(reading).iter().any(|(w, _)| *w == word)
+    }
+
+    /// New-word B §2.2: the runs of single Han characters on the path at commit (split at punctuation, non-Han and
+    /// `NEWWORD_BREAK`) that hold a character re-picked in the candidate window, are NEWWORD_MIN..=NEWWORD_MAX long,
+    /// are not all `NEWWORD_DIGITS` and are not in the lexicon under their reading: (reading, word) each.
+    fn new_word_spans(&self) -> Vec<(Vec<String>, String)> {
+        // A re-pick of one character (S4 §1.2: chosen in the window, text before it differed); a prediction pick
+        // (`Some("")`) is no re-pick.
+        let picked: HashSet<usize> = self
+            .fixed
+            .iter()
+            .filter(|f| f.end == f.start + 1 && f.word.chars().count() == 1 && !self.is_punct(f.start))
+            .filter(|f| f.pre.as_ref().is_some_and(|p| !p.is_empty() && *p != f.word))
+            .map(|f| f.start)
+            .collect();
+        let mut out = Vec::new();
+        if picked.is_empty() {
+            return out;
+        }
+        let mut run: Vec<(usize, char)> = Vec::new();
+        let mut flush = |run: &mut Vec<(usize, char)>| {
+            let take = std::mem::take(run);
+            if (NEWWORD_MIN..=NEWWORD_MAX).contains(&take.len())
+                && take.iter().any(|(s, _)| picked.contains(s))
+                && !take.iter().all(|(_, c)| NEWWORD_DIGITS.contains(*c))
+            {
+                let reading = self.syls[take[0].0..take[take.len() - 1].0 + 1].to_vec();
+                let word: String = take.iter().map(|x| x.1).collect();
+                if !self.in_lexicon(&reading, &word) {
+                    out.push((reading, word));
+                }
+            }
+        };
+        for ((w, _, is_punct, _), s) in self.path.iter().zip(self.path_starts()) {
+            let mut cs = w.chars();
+            match (cs.next(), cs.next()) {
+                (Some(c), None) if !is_punct && is_han(c) && !NEWWORD_BREAK.contains(c) => run.push((s, c)),
+                _ => flush(&mut run),
+            }
+        }
+        flush(&mut run);
+        out
+    }
+
+    /// New-word B §2.5: the new words on the path (not lexicon words under their reading) whose record is not dated
+    /// `today` yet: each is "used" once by this commit.
+    fn new_word_uses(&self, today: i64) -> Vec<(Vec<String>, String)> {
+        if !self.learner.has_new_words() {
+            return Vec::new();
+        }
+        self.path_new_words()
+            .into_iter()
+            .filter(|(_, _, r, w)| self.learner.new_word_day(r, w).is_some_and(|d| d != today))
+            .map(|(_, _, r, w)| (r, w))
+            .collect()
+    }
+
+    /// The path's tokens that are new words: (start, end, reading, word), with a record and not in the lexicon.
+    fn path_new_words(&self) -> Vec<(usize, usize, Vec<String>, String)> {
+        if !self.learner.has_new_words() {
+            return Vec::new();
+        }
+        let mut out = Vec::new();
+        for ((w, _, is_punct, _), s) in self.path.iter().zip(self.path_starts()) {
+            let n = w.chars().count();
+            if *is_punct || !(NEWWORD_MIN..=NEWWORD_MAX).contains(&n) || s + n > self.syls.len() {
+                continue;
+            }
+            let reading = &self.syls[s..s + n];
+            if self.learner.new_word_day(reading, w).is_some() && !self.in_lexicon(reading, w) {
+                out.push((s, s + n, reading.to_vec(), w.clone()));
+            }
+        }
+        out
     }
 
     /// S2c: read the model at `path` and `data_dir/overlay-add.tsv` (plus the pack rows `new` kept), build the capped lexicon with the
@@ -836,7 +960,10 @@ impl Engine {
             let v = history(if key == crate::learn::SENTINEL { "" } else { &key }, &st.lm);
             let shown: String = disp[off(s)..off(n)].iter().collect();
             // A start no record can match scans 9 and weighs nothing: its row is the slice-1 one, cheaper.
-            let gate = learned && (!self.scan_gate || self.learner.records().iter().any(|r| reading_matches(&units, &r.reading)));
+            // New-word records are no context record (new-word B §2.4): they never open the wider scan.
+            let gate = learned
+                && (!self.scan_gate
+                    || self.learner.records().iter().any(|r| r.context != NEWWORD && reading_matches(&units, &r.reading)));
             predict(idx, &st.lm, lam, v, &units, Mode::P, if gate { PREDICT_SCAN } else { PREDICT_MAX })
                 .into_iter()
                 .enumerate()
@@ -894,7 +1021,7 @@ impl Engine {
         self.fixed.retain(|f| !(f.start < end && start < f.end));
         self.syls.splice(start..end, reading);
         let key = pre.is_some().then_some(key);
-        self.fixed.push(Fixed { start, end: start + m, word, pre, key });
+        self.fixed.push(Fixed { start, end: start + m, word, pre, key, displaced_new: Vec::new() });
         self.fixed.sort_by_key(|f| f.start);
         self.cursor = start + m;
         self.refresh()?;
@@ -915,6 +1042,7 @@ impl Engine {
         self.path.clear();
         self.cands = None;
         self.clear_pred();
+        self.paused = false;
     }
 
     fn pending(&self) -> String {
@@ -984,14 +1112,29 @@ impl Engine {
         let lam = self.profile.lambda();
         // The clock (a libc time conversion) is read only when a record could use it.
         let today = if self.learner.is_empty() { 0 } else { self.today() };
+        // New-word B §2.4: a fixed word the lexicon lacks is a new word picked in the window; once its record is
+        // gone (forgotten, cleared) the span is unfixed and decoded again, never an error.
+        if self.fixed.iter().any(|f| f.end - f.start >= NEWWORD_MIN) {
+            let (syls, learner, lex) = (&self.syls, &self.learner, &self.lex);
+            self.fixed.retain(|f| {
+                let r = &syls[f.start..f.end];
+                syls[f.start].starts_with(PUNCT_PREFIX)
+                    || learner.new_word_day(r, &f.word).is_some()
+                    || lex.entries(r).iter().any(|(w, _)| *w == f.word)
+            });
+        }
         let mut lp_fixed = Vec::with_capacity(self.fixed.len());
         let mut delta_fixed = Vec::with_capacity(self.fixed.len());
         for f in &self.fixed {
             // Punctuation has no reading in the lexicon; 0.0 only keeps `path` aligned (s3d §4).
+            let r = &self.syls[f.start..f.end];
             let (lp, delta) = if self.is_punct(f.start) {
                 (0.0, 0.0)
+            } else if let Some(x) = st.capped.best_lp_delta(r, &f.word) {
+                x
             } else {
-                st.capped.best_lp_delta(&self.syls[f.start..f.end], &f.word).ok_or(EngineError::Internal)?
+                // A fixed new word scores S(w) of its record, below ACTIVE too (new-word B §2.4).
+                (newword_score(self.learner.new_word_weight(r, &f.word, today).ok_or(EngineError::Internal)?), 0.0)
             };
             lp_fixed.push(lp);
             delta_fixed.push(if self.demote { delta } else { 0.0 });
@@ -1334,7 +1477,7 @@ impl Engine {
         });
         self.syls.insert(c, reading);
         if let Some(word) = fixed_word {
-            self.fixed.push(Fixed { start: c, end: c + 1, word, pre: None, key: None });
+            self.fixed.push(Fixed { start: c, end: c + 1, word, pre: None, key: None, displaced_new: Vec::new() });
             self.fixed.sort_by_key(|f| f.start);
         }
         self.cursor += 1;
@@ -1394,9 +1537,18 @@ impl Engine {
             self.cands = Some(Cands::new(list));
             return;
         }
-        for l in (1..=self.lex.max_len.min(avail)).rev() {
+        let today = if self.learner.has_new_words() { self.today() } else { 0 };
+        for l in (1..=self.lex.max_len.max(NEWWORD_MAX).min(avail)).rev() {
             let key = if a == 0 { &self.syls[..l] } else { &self.syls[a - l..a] };
-            for (w, _) in self.lex.entries(key) {
+            let lexicon = self.lex.entries(key);
+            // New-word B §2.4: new words first among the same length, so ⌘⌫ reaches them (any weight: a record
+            // under ACTIVE is still on disk); one the lexicon has is listed where the lexicon puts it.
+            for w in self.learner.new_words_all(key, today) {
+                if !lexicon.iter().any(|(x, _)| *x == w) && seen.insert(w) {
+                    list.push((w.to_string(), l));
+                }
+            }
+            for (w, _) in lexicon {
                 if seen.insert(w) {
                     list.push((w.to_string(), l));
                 }
@@ -1445,9 +1597,14 @@ impl Engine {
         }
         // A pending learn of the same word would teach it again at the next commit and append it
         // back (§1.5), as learning_clear's pending-learn drop prevents for clear.
+        // New-word B §2.6: forgetting a new word also drops the pending re-pick of every fixed span overlapping any
+        // place this reading occurs, or the re-picked character on screen would teach the word again at the Enter.
+        let new = self.learner.new_word_day(reading, word).is_some() || !self.in_lexicon(reading, word);
         let syls = &self.syls;
+        let n = reading.len();
+        let spots: Vec<usize> = if new { (0..(syls.len() + 1).saturating_sub(n)).filter(|&p| syls[p..p + n] == *reading).collect() } else { Vec::new() };
         for f in self.fixed.iter_mut() {
-            if f.word == word && syls[f.start..f.end] == *reading {
+            if (f.word == word && syls[f.start..f.end] == *reading) || spots.iter().any(|&p| f.start < p + n && p < f.end) {
                 f.pre = None;
             }
         }
@@ -1465,17 +1622,34 @@ impl Engine {
         let (start, end) = if self.cursor == 0 { (0, l) } else { (self.cursor - l, self.cursor) };
         // Choosing again the word a prediction pick fixed over this exact span keeps that pending learn (section 10.1).
         let again = self.fixed.iter().find(|f| f.start == start && f.end == end && f.word == word && f.pre.as_deref() == Some(""));
-        let (pre, key) = match again {
+        let (mut pre, key) = match again {
             Some(f) if self.learning => (f.pre.clone(), f.key.clone()),
             _ => (self.learning.then(|| self.pre_pick(start, end)).flatten(), None),
         };
+        // New-word B §2.4: picking a new word is no S4 teach (it is counted as used at the commit, §2.5).
+        if !self.is_punct(start) && !self.in_lexicon(&self.syls[start..end], &word) {
+            pre = None;
+        }
+        // §2.5: new words of the path this pick overlaps are halved at the commit; a re-pick of the same span keeps
+        // what the earlier pick displaced.
+        let mut displaced_new: Vec<(Vec<String>, String)> = Vec::new();
+        if self.learning {
+            if let Some(f) = self.fixed.iter().find(|f| f.start == start && f.end == end) {
+                displaced_new.clone_from(&f.displaced_new);
+            }
+            for (s, e, r, w) in self.path_new_words() {
+                if s < end && start < e && !(s == start && e == end && w == word) && !displaced_new.contains(&(r.clone(), w.clone())) {
+                    displaced_new.push((r, w));
+                }
+            }
+        }
         self.fixed.retain(|f| !(f.start < end && start < f.end));
         // A candidate pick changes the text before every fixed word to its right: their prediction keys no longer
         // describe what the user sees, so those records fall back to the key at the commit (section 10.1).
         for f in self.fixed.iter_mut().filter(|f| f.start >= end) {
             f.key = None;
         }
-        self.fixed.push(Fixed { start, end, word, pre, key });
+        self.fixed.push(Fixed { start, end, word, pre, key, displaced_new });
         self.fixed.sort_by_key(|f| f.start);
         self.refresh()
     }

@@ -2,7 +2,8 @@
 //! passes (`~/Library/Application Support/shanjie/` in the app; a temporary directory in tests).
 //!
 //! Format: the header `#shanjie-learning v1`, then one record per line, five tab-separated fields:
-//! context key, reading (syllables joined by `-`, as in the lexicon), word, weight, day. A record
+//! context key (≤ 2 Han characters, "^", "" for global, or "#" for a new word of new-word B), reading
+//! (syllables joined by `-`, as in the lexicon), word, weight, day. A record
 //! that would not read back as itself (a tab, newline or control character in a field, a `-` or an
 //! empty syllable in the reading, a bad context, weight or day) is never written and is skipped one
 //! line at a time on load. When a (context, reading, word) appears on several lines, the last one
@@ -19,7 +20,7 @@
 //! bad header or an oversized file is renamed to `learning.tsv.corrupt` (0600, one copy). Nothing
 //! here logs: no path and no record ever leaves this module except as data.
 
-use crate::learn::{context_key, is_single, Record, GLOBAL, SENTINEL};
+use crate::learn::{context_key, is_han, is_single, Record, GLOBAL, NEWWORD, NEWWORD_MAX, NEWWORD_MIN, SENTINEL};
 use std::fmt::Write as _;
 use std::fs::{self, DirBuilder, File, OpenOptions, Permissions};
 use std::io::{ErrorKind, Read, Write};
@@ -34,7 +35,8 @@ pub const HEADER: &str = "#shanjie-learning v1";
 pub const MAX_BYTES: u64 = 16 * 1024 * 1024;
 /// Lines appended since the last full rewrite that force the next write to be a full rewrite (§4):
 /// bounds how many superseded lines the file and the load carry. Each re-picked span appends at most
-/// 3 lines (taught, displaced, global); one Enter can carry several spans.
+/// 3 lines (taught, displaced, global), each new word learned, used or halved one (new-word B); one Enter can carry
+/// several.
 pub const JOURNAL_MAX: usize = 1024;
 
 // <fcntl.h> values. std has no names for them and the crate has no libc dependency; the shipping
@@ -118,8 +120,17 @@ fn clean(s: &str) -> bool {
 /// single-character record under "^" or the global key (written before contract §12) is invalid:
 /// skipped at load, so it counts toward nothing (capacity, has_reading, words_of, is_empty) and is
 /// absent after the first full rewrite. The one place that migrates them.
+///
+/// A new-word record (context exactly `NEWWORD`, new-word B §2.3) needs a word of NEWWORD_MIN..=NEWWORD_MAX Han
+/// characters and one syllable per character; the single-character rules above are not relaxed for it.
 fn valid(r: &Record) -> bool {
-    (r.context == GLOBAL || context_key(&r.context) == r.context)
+    let n = r.word.chars().count();
+    let context_ok = if r.context == NEWWORD {
+        (NEWWORD_MIN..=NEWWORD_MAX).contains(&n) && r.word.chars().all(is_han) && r.reading.len() == n
+    } else {
+        r.context == GLOBAL || context_key(&r.context) == r.context
+    };
+    context_ok
         && !((r.context == GLOBAL || r.context == SENTINEL) && is_single(&r.word))
         && !r.reading.is_empty()
         && r.reading.iter().all(|s| clean(s) && !s.contains('-'))

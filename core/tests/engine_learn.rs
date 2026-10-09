@@ -462,9 +462,10 @@ fn context_key_learned_equals_context_key_queried() {
     e.set_left_context("");
     assert_eq!(type_syls(&mut e, "ㄒㄧㄣ").preedit, "鑫");
 }
-/// The context keys of the learner's records, in insertion order.
+/// The context keys of the learner's S4 records, in insertion order. New-word records ("#", new-word B) are no
+/// context: two re-picked single characters next to each other, as in (b), also teach a new word.
 fn keys(e: &Engine) -> Vec<String> {
-    e.learner().records().iter().map(|r| r.context.clone()).collect()
+    e.learner().records().iter().filter(|r| r.context != core::learn::NEWWORD).map(|r| r.context.clone()).collect()
 }
 
 // ---------- 4: sentinel, 1-char match, globalization ----------

@@ -378,3 +378,82 @@ fn append_needs_an_existing_file_with_room() {
     assert_eq!(store.append(&sample()[..1]), Err(StoreError::Io));
     assert_eq!(fs::metadata(dir.join(FILE)).unwrap().len(), MAX_BYTES - 10);
 }
+
+/// New-word B §2.3: a "#" record round-trips when its word is 2-4 Han characters with one syllable each; a 1-character
+/// or 5-character word, a non-Han character or a syllable count that differs from the word's length is never written
+/// and is skipped at load. The single-character rules are unchanged.
+#[test]
+fn new_word_records_need_two_to_four_han_characters_one_syllable_each() {
+    let (_p, dir) = temp();
+    let (store, _, _) = LearnStore::open(&dir).unwrap();
+    let good = vec![
+        rec("#", "ㄅㄢˇ-ㄎㄨㄥˋ", "版控", 1.0, 20_000),
+        rec("#", "ㄩㄝˋ-ㄈㄨˋ-ㄐㄧㄣ", "月付金", 0.5, 20_001),
+        rec("#", "ㄕˋ-ㄐㄧㄥˋ-ㄅㄨˋ-ㄅㄨˋ", "拭鏡布布", 2.0, 20_002),
+    ];
+    let bad = vec![
+        rec("#", "ㄅㄢˇ", "版", 1.0, 20_000),
+        rec("#", "ㄅㄢˇ-ㄎㄨㄥˋ-ㄅㄢˇ-ㄎㄨㄥˋ-ㄅㄢˇ", "版控版控版", 1.0, 20_000),
+        rec("#", "ㄅㄢˇ-ㄎㄨㄥˋ-ㄅㄢˇ", "版控", 1.0, 20_000),
+        rec("#", "ㄅㄢˇ", "版控", 1.0, 20_000),
+        rec("#", "ㄅㄢˇ-ㄟ", "版a", 1.0, 20_000),
+        rec("#", "ㄅㄢˇ-ㄎㄨㄥˋ", "版，", 1.0, 20_000),
+        rec("##", "ㄅㄢˇ-ㄎㄨㄥˋ", "版控", 1.0, 20_000),
+    ];
+    let mut all = bad.clone();
+    all.extend(good.clone());
+    store.save(&all).unwrap();
+    let text = fs::read_to_string(dir.join(FILE)).unwrap();
+    assert_eq!(text.lines().count(), 1 + good.len(), "only the valid new-word records are written");
+    assert!(text.contains("#\tㄅㄢˇ-ㄎㄨㄥˋ\t版控\t1\t20000\n"));
+    let (_, records, opened) = LearnStore::open(&dir).unwrap();
+    assert_eq!(opened, Opened::Loaded { skipped: 0 });
+    assert!(records == good, "new-word records differ (contents not printed: R2)");
+    // The same bad lines written by hand are skipped one by one at load.
+    let lines: String = bad.iter().map(|r| format!("{}\t{}\t{}\t{}\t{}\n", r.context, r.reading.join("-"), r.word, r.weight, r.day)).collect();
+    fs::write(dir.join(FILE), format!("{HEADER}\n{lines}#\tㄅㄢˇ-ㄎㄨㄥˋ\t版控\t1\t20000\n")).unwrap();
+    let (_, records, opened) = LearnStore::open(&dir).unwrap();
+    assert_eq!(opened, Opened::Loaded { skipped: bad.len() });
+    assert!(records == good[..1], "only the valid line loads");
+}
+
+/// New-word B §2.3, old versions: before new-word B, `valid()` accepted a context only when `context_key(context)`
+/// equals it (or it is the global ""). `context_key("#")` is "^", so an older version skips every "#" line at load and
+/// its first full rewrite drops them. The rule as it stood is restated here, since the old code is gone.
+#[test]
+fn old_versions_skip_new_word_lines() {
+    use core::learn::{context_key, GLOBAL, NEWWORD};
+    let old_context_ok = |c: &str| c == GLOBAL || context_key(c) == c;
+    assert_ne!(context_key(NEWWORD), NEWWORD);
+    assert!(!old_context_ok(NEWWORD), "an old version would load a new-word line");
+    assert!(old_context_ok("管把") && old_context_ok("^") && old_context_ok(""), "the old rule itself");
+}
+
+/// New-word B §2.3: new words are capped at NEWWORD_CAP apart from S4's CAPACITY, lowest weight first, and decay and
+/// prune like S4 records.
+#[test]
+fn new_words_have_their_own_cap_and_decay() {
+    use core::learn::{NEWWORD_CAP, PRUNE_FLOOR};
+    let han: Vec<char> = "一二三四五六七八九十甲乙丙丁戊己庚辛壬癸子丑寅卯辰巳午未申酉戌亥天地玄黃宇宙洪荒日月盈昃".chars().collect();
+    let mut records = Vec::new();
+    'fill: for a in &han {
+        for b in &han {
+            for c in &han {
+                let w = (records.len() as f64 + 1.0) / 1000.0 + 0.1; // all live, distinct weights
+                records.push(rec("#", "ㄚ-ㄚ-ㄚ", &format!("{a}{b}{c}"), w, 20_000));
+                if records.len() == NEWWORD_CAP + 5 {
+                    break 'fill;
+                }
+            }
+        }
+    }
+    records.push(rec("管把", "ㄅㄚˇ", "把", 0.06, 20_000));
+    records.push(rec("#", "ㄅㄢˇ-ㄎㄨㄥˋ", "版控", 1.0, 20_000 - 100)); // decayed below PRUNE_FLOOR
+    let mut l = Learner::from_records(records);
+    l.prune(20_000);
+    let new: Vec<&Record> = l.records().iter().filter(|r| r.context == "#").collect();
+    assert_eq!(new.len(), NEWWORD_CAP);
+    assert!(new.iter().all(|r| r.weight > 0.1 + 5.0 / 1000.0), "the five lightest went");
+    assert!(l.records().iter().any(|r| r.word == "把"), "S4 records are not counted against NEWWORD_CAP");
+    assert!(!l.records().iter().any(|r| r.word == "版控"), "decayed below {PRUNE_FLOOR}: pruned");
+}

@@ -19,10 +19,38 @@ pub const ACTIVE: f64 = 0.5;
 /// Records decayed below this are dropped on load and on a full rewrite (§1.3): about 60 days unused, so a
 /// repeated teach still has room to accumulate, while long-dead entries do not linger on disk.
 pub const PRUNE_FLOOR: f64 = 0.05;
-/// At most this many records; the lowest weights go first (§1.3).
+/// At most this many records; the lowest weights go first (§1.3). New words (`NEWWORD`) are counted apart.
 pub const CAPACITY: usize = 50_000;
 
-fn is_han(c: char) -> bool {
+// ---- New-word B (docs/contracts/newword-b.md) ----
+
+/// Context field of a new-word record (§2.3): a sentinel distinct from "^" and the global "". `context_key` never
+/// returns it, so the S4 lookups never match it; versions without new-word B skip these lines at load, because
+/// their `valid()` requires `context_key(context) == context` and `context_key("#")` is "^".
+pub const NEWWORD: &str = "#";
+/// Syllables (= characters) of a learned new word (§2.2).
+pub const NEWWORD_MIN: usize = 2;
+pub const NEWWORD_MAX: usize = 4;
+/// At most this many new-word records, trimmed lowest weight first apart from `CAPACITY` (§2.3).
+pub const NEWWORD_CAP: usize = 2_000;
+/// Characters that split a run of re-picked single characters (§2.2): high-frequency function characters. The
+/// table the pre-study simulation used; it was picked after looking at dev, so main re-chooses it on cvtune and
+/// wikitune (contract §3.2) and records the sweep in the research log.
+pub const NEWWORD_BREAK: &str = "的了是在再嗎呢吧啊喔耶囉啦欸也而就和或與及跟你我他她它們這那有沒要會很都還又給把被讓";
+/// A run made only of these is never learned (§2.2): numbers, codes and amounts.
+pub const NEWWORD_DIGITS: &str = "〇零一二三四五六七八九十百千萬億兩壹貳參肆伍陸柒捌玖拾佰仟";
+/// Entry score (log10) of a new word of decayed weight w: `S_MIN + (S_MAX - S_MIN) * w / (w + 1)` (§2.4).
+/// Provisional values inside the range the pre-study replayed with 0 broken rows (-6 to -1); main tunes both on
+/// cvtune and wikitune under contract §3.2, never on the dev sets.
+pub const NEWWORD_S_MIN: f64 = -5.0;
+pub const NEWWORD_S_MAX: f64 = -3.0;
+
+/// §2.4: the entry score of a new word of decayed weight `w`.
+pub fn newword_score(w: f64) -> f64 {
+    NEWWORD_S_MIN + (NEWWORD_S_MAX - NEWWORD_S_MIN) * (w / (w + 1.0))
+}
+
+pub(crate) fn is_han(c: char) -> bool {
     matches!(c as u32,
         0x3400..=0x4DBF | 0x4E00..=0x9FFF | 0xF900..=0xFAFF | 0x20000..=0x2A6DF | 0x2A700..=0x2EBEF
         | 0x30000..=0x3134F | 0x2F800..=0x2FA1F | 0x3007)
@@ -108,11 +136,13 @@ fn reading_key(reading: &[String]) -> String {
 pub struct Learner {
     records: Vec<Record>,
     index: std::collections::HashMap<String, Vec<usize>>,
+    /// How many records are new words (`NEWWORD`): with none, decoding skips the new-word lookups entirely.
+    new_count: usize,
 }
 
 impl Learner {
     pub fn from_records(records: Vec<Record>) -> Learner {
-        let mut l = Learner { records, index: Default::default() };
+        let mut l = Learner { records, index: Default::default(), new_count: 0 };
         l.reindex();
         l
     }
@@ -121,6 +151,66 @@ impl Learner {
         for (i, r) in self.records.iter().enumerate() {
             self.index.entry(reading_key(&r.reading)).or_default().push(i);
         }
+        self.new_count = self.records.iter().filter(|r| r.context == NEWWORD).count();
+    }
+    /// True when any new-word record exists.
+    pub fn has_new_words(&self) -> bool {
+        self.new_count > 0
+    }
+    /// §2.4: new words of `reading` with decayed weight ≥ `ACTIVE`, heaviest first (ties by word).
+    pub fn new_words(&self, reading: &[String], today: i64) -> Vec<(&str, f64)> {
+        if self.new_count == 0 {
+            return Vec::new();
+        }
+        let mut v: Vec<(&str, f64)> = self.new_records(reading).map(|r| (r.word.as_str(), decayed(r, today))).filter(|x| x.1 >= ACTIVE).collect();
+        v.sort_by(|a, b| b.1.total_cmp(&a.1).then(a.0.cmp(b.0)));
+        v
+    }
+    /// Every new word of `reading` whatever its weight, heaviest first: what the candidate window lists, so ⌘⌫ can
+    /// reach any record still on disk.
+    pub fn new_words_all(&self, reading: &[String], today: i64) -> Vec<&str> {
+        if self.new_count == 0 {
+            return Vec::new();
+        }
+        let mut v: Vec<(&str, f64)> = self.new_records(reading).map(|r| (r.word.as_str(), decayed(r, today))).collect();
+        v.sort_by(|a, b| b.1.total_cmp(&a.1).then(a.0.cmp(b.0)));
+        v.into_iter().map(|x| x.0).collect()
+    }
+    fn new_records(&self, reading: &[String]) -> impl Iterator<Item = &Record> {
+        self.index.get(&reading_key(reading)).into_iter().flatten().map(|&i| &self.records[i]).filter(|r| r.context == NEWWORD)
+    }
+    /// Decayed weight of the new word (reading, word), whatever it is (§2.4: a fixed new word scores from its record
+    /// without the `ACTIVE` threshold); `None` without a record.
+    pub fn new_word_weight(&self, reading: &[String], word: &str, today: i64) -> Option<f64> {
+        if self.new_count == 0 {
+            return None;
+        }
+        self.find(NEWWORD, reading, word).map(|i| decayed(&self.records[i], today))
+    }
+    /// Day of the new word (reading, word)'s record; `None` without one.
+    pub fn new_word_day(&self, reading: &[String], word: &str) -> Option<i64> {
+        if self.new_count == 0 {
+            return None;
+        }
+        self.find(NEWWORD, reading, word).map(|i| self.records[i].day)
+    }
+    /// §2.2 step 4: learn (or strengthen by 1 after decay) the new word (reading, word); returns the record.
+    pub fn learn_new(&mut self, reading: &[String], word: &str, today: i64) -> Record {
+        self.bump(NEWWORD, reading, word, today, 1.0)
+    }
+    /// §2.5 "used": +1 after decay. `None` without a record: a use never creates one. The caller counts a word at
+    /// most once per local day (the engine passes only records not dated today).
+    pub fn use_new(&mut self, reading: &[String], word: &str, today: i64) -> Option<Record> {
+        self.find(NEWWORD, reading, word)?;
+        Some(self.bump(NEWWORD, reading, word, today, 1.0))
+    }
+    /// §2.5 "re-picked away": halve the decayed weight; `None` without a record.
+    pub fn halve_new(&mut self, reading: &[String], word: &str, today: i64) -> Option<Record> {
+        let i = self.find(NEWWORD, reading, word)?;
+        let r = &mut self.records[i];
+        r.weight = decayed(r, today) * 0.5;
+        r.day = today;
+        Some(r.clone())
     }
     pub fn records(&self) -> &[Record] {
         &self.records
@@ -162,6 +252,7 @@ impl Learner {
             }
             None => {
                 self.index.entry(reading_key(reading)).or_default().push(self.records.len());
+                self.new_count += (context == NEWWORD) as usize;
                 let r = Record {
                     context: context.to_string(),
                     reading: reading.to_vec(),
@@ -194,12 +285,13 @@ impl Learner {
         if is_single(word) {
             return touched; // never globalizes (§12 rule 1)
         }
-        // §1.3 globalize: ≥ 2 distinct full keys (SENTINEL counts) with an active record.
+        // §1.3 globalize: ≥ 2 distinct full keys (SENTINEL counts) with an active record. A new-word record is
+        // never a context (new-word B §2.4).
         let Some(ix) = self.index.get(&reading_key(reading)) else { return touched };
         let keys: std::collections::HashSet<&str> = ix
             .iter()
             .map(|&i| &self.records[i])
-            .filter(|r| r.word == word && r.context != GLOBAL && decayed(r, today) >= ACTIVE)
+            .filter(|r| r.word == word && r.context != GLOBAL && r.context != NEWWORD && decayed(r, today) >= ACTIVE)
             .map(|r| r.context.as_str())
             .collect();
         if keys.len() >= 2 {
@@ -258,6 +350,7 @@ impl Learner {
         drop.sort_unstable_by(|a, b| b.cmp(a));
         for i in drop {
             let last = self.records.len() - 1;
+            self.new_count -= (self.records[i].context == NEWWORD) as usize;
             let key = reading_key(&self.records[i].reading);
             let bucket = self.index.get_mut(&key).expect("indexed");
             bucket.retain(|&j| j != i);
@@ -279,20 +372,25 @@ impl Learner {
         self.remove_at(drop);
     }
     /// §1.3: drop below PRUNE_FLOOR once decayed to `today`, then trim to CAPACITY (lowest first;
-    /// among equal weights the later record goes first).
+    /// among equal weights the later record goes first). New words are trimmed to NEWWORD_CAP the same way, apart
+    /// from the S4 records (new-word B §2.3).
     pub fn prune(&mut self, today: i64) {
         let w: Vec<f64> = self.records.iter().map(|r| decayed(r, today)).collect();
-        let (mut live, mut drop): (Vec<usize>, Vec<usize>) = (0..w.len()).partition(|&i| w[i] >= PRUNE_FLOOR);
-        if live.len() > CAPACITY {
-            // A partition, not a sort: on a full store a save trims about one record.
-            live.select_nth_unstable_by(CAPACITY, |&a, &b| w[b].total_cmp(&w[a]).then(a.cmp(&b)));
-            drop.extend_from_slice(&live[CAPACITY..]);
+        let (live, mut drop): (Vec<usize>, Vec<usize>) = (0..w.len()).partition(|&i| w[i] >= PRUNE_FLOOR);
+        let (mut new, mut old): (Vec<usize>, Vec<usize>) = live.into_iter().partition(|&i| self.records[i].context == NEWWORD);
+        for (live, cap) in [(&mut old, CAPACITY), (&mut new, NEWWORD_CAP)] {
+            if live.len() > cap {
+                // A partition, not a sort: on a full store a save trims about one record.
+                live.select_nth_unstable_by(cap, |&a, &b| w[b].total_cmp(&w[a]).then(a.cmp(&b)));
+                drop.extend_from_slice(&live[cap..]);
+            }
         }
         self.remove_at(drop);
     }
     pub fn clear(&mut self) {
         self.records.clear();
         self.index.clear();
+        self.new_count = 0;
     }
 }
 
@@ -312,5 +410,57 @@ mod tests {
         assert_eq!(context_key("好😀"), SENTINEL);
         assert_eq!(context_key("吃飯了。"), SENTINEL);
         assert_ne!(SENTINEL, GLOBAL);
+    }
+
+    fn rd(s: &str) -> Vec<String> {
+        s.split(' ').map(String::from).collect()
+    }
+
+    /// New-word B §2.4: a "#" record answers no S4 lookup level (exact, last character, global) for any context key
+    /// decoding can ask with (`context_key` never returns "#").
+    #[test]
+    fn new_words_never_answer_a_context_lookup() {
+        let mut l = Learner::default();
+        let r = rd("ㄅㄢˇ ㄎㄨㄥˋ");
+        l.learn_new(&r, "版控", 20_000);
+        for ctx in ["要進", "進", SENTINEL, GLOBAL, "加入"] {
+            assert!(l.lookup(ctx, &r, 20_000).1.is_empty(), "{ctx}");
+        }
+        assert_eq!(l.new_words(&r, 20_000), vec![("版控", 1.0)]);
+    }
+
+    /// New-word B §2.4: S4's globalization counts full contexts; "#" is never one, so one S4 teach next to a new-word
+    /// record of the same (reading, word) makes no global record.
+    #[test]
+    fn globalization_does_not_count_the_new_word_record() {
+        let mut l = Learner::default();
+        let r = rd("ㄅㄢˇ ㄎㄨㄥˋ");
+        l.learn_new(&r, "版控", 20_000);
+        l.teach("要進", &r, "版控", "板控", 20_000);
+        assert!(!l.records().iter().any(|x| x.context == GLOBAL), "a global record from one context");
+        l.teach("加入", &r, "版控", "板控", 20_000);
+        assert!(l.records().iter().any(|x| x.context == GLOBAL), "two real contexts still globalize");
+    }
+
+    /// §2.4 threshold, §2.5 once a day and halving.
+    #[test]
+    fn new_word_weights() {
+        let mut l = Learner::default();
+        let r = rd("ㄅㄢˇ ㄎㄨㄥˋ");
+        assert!(l.use_new(&r, "版控", 20_000).is_none(), "a use never creates a record");
+        l.learn_new(&r, "版控", 20_000);
+        assert_eq!(l.new_word_day(&r, "版控"), Some(20_000));
+        let u = l.use_new(&r, "版控", 20_014).unwrap();
+        assert_eq!((u.weight, u.day), (1.5, 20_014), "decayed 14 days, plus one");
+        let h = l.halve_new(&r, "版控", 20_014).unwrap();
+        assert_eq!(h.weight, 0.75);
+        l.halve_new(&r, "版控", 20_014);
+        assert!(l.new_words(&r, 20_014).is_empty(), "under ACTIVE: not enumerated");
+        assert_eq!(l.new_words_all(&r, 20_014), vec!["版控"], "still listed for the window");
+        assert!(l.new_word_weight(&r, "版控", 20_014).is_some());
+        assert_eq!(newword_score(0.0), NEWWORD_S_MIN);
+        assert!(newword_score(1e9) < NEWWORD_S_MAX && newword_score(1.0) == (NEWWORD_S_MIN + NEWWORD_S_MAX) / 2.0);
+        l.forget(&r, "版控");
+        assert!(!l.has_new_words());
     }
 }

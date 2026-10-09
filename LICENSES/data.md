@@ -16,6 +16,7 @@
 | `eval/probe/s2r-probe.txt` | 由 `experiments/s2/build_probe.py` 從 `eval/dev/` 的句子產生（換「一」「不」的讀音） | CC0 | |
 | `eval/dev/*.txt`、`eval/holdout/*`、`eval/learn/cases.tsv` | 本專案自寫 | CC0 | |
 | `eval/dev/user-reported.txt` | 使用者回報的真實句子 | CC0（使用者 2026-10-03 同意） | |
+| `eval/learn/newword-probe.txt` | 本專案自寫（新詞 B 的探針：詞庫沒有的詞出現在新前文；讀音由 `tools/readings.py` 產生） | CC0 | 只用於評測，不用來調參 |
 | `eval/sets/moedict.txt` | 教育部《重編國語辭典修訂本》例句抽樣（經 g0v/moedict-data） | CC BY-ND 3.0 TW | **只用於評測，不得用來建詞庫或改作** |
 | `eval/variants.tsv` | 教育部《重編國語辭典修訂本》釋義中的「也作／亦作」詞對（經 g0v/moedict-data，commit a6dc997） | CC BY-ND 3.0 TW | **只用於評測**。每一欄都是辭典原有的詞條字串，詞對是辭典記載的事實，不含釋義文字；由 `tools/build_variants.py` 產生 |
 | `data/lm/bigram.sjlm`（不在 git；GitHub Release `model-v4` 附件） | 由 `tools/build_lm.py` 從語料詞頻計數產生：中文維基百科 2026-10-01 dump 的 20 萬篇條目、Mozilla Common Voice 繁中（台灣）句子、Tatoeba 中文句子、gpt-oss-120b 產生的台灣口語合成句。發佈的檔案另含少量用來辨識來源的指紋條目 | **CC BY-SA 4.0**（https://creativecommons.org/licenses/by-sa/4.0/ ；維基為 CC BY-SA 4.0；Common Voice 為 CC0；Tatoeba 為 CC BY 2.0 FR；合成句是 gpt-oss-120b 的模型輸出，模型權重本身為 Apache-2.0） | 署名：Wikipedia contributors、Tatoeba contributors。不含任何私人對話資料 |

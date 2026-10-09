@@ -2,7 +2,7 @@
 //! The Python code is ground truth; float operation order is kept on purpose (no fusing or reordering).
 //! R2: errors carry no content; nothing here formats input text.
 
-use crate::learn::{context_key, Learner, Level};
+use crate::learn::{context_key, newword_score, Learner, Level, NEWWORD_MAX};
 use crate::{Error, Lexicon, PER_KEY};
 use std::collections::{HashMap, HashSet};
 use std::fmt;
@@ -613,7 +613,8 @@ pub const LEARN_EPS: f64 = 6.0;
 pub const LEARN_EPS_GLOBAL: f64 = 0.0;
 
 /// What decoding needs to apply learning: the learner, the text just before the segment (only its
-/// last two characters matter) and today's day number.
+/// last two characters matter) and today's day number. The decoded path borrows new words (new-word B) from the
+/// learner, so the learner lives as long as the lexicon borrow of the result.
 pub struct Learn<'a> {
     pub learner: &'a Learner,
     pub before: &'a str,
@@ -639,7 +640,10 @@ pub fn decode_segment<'a>(
 }
 
 /// `decode_segment` with learning (S4 §1.4). With `learn` `None`, or a learner without a record for a
-/// span's reading, the arithmetic is exactly that of the unlearned decoder. `demote` switches the
+/// span's reading, the arithmetic is exactly that of the unlearned decoder. New words (new-word B §2.4) are
+/// enumerated on their reading whatever the context, after the lexicon's entries, scored `newword_score` of their
+/// decayed weight (no S4 boost, no demotion; the model sees them like a pack word it never saw), unless the
+/// lexicon already has that word under that reading. `demote` switches the
 /// lexicon's demotion table on (a delta is subtracted from the word's term, after learning; lp, the
 /// backoff and the entries tried are unchanged) or off (bit-identical to a lexicon without the table).
 #[allow(clippy::too_many_arguments)]
@@ -651,10 +655,13 @@ pub fn decode_segment_learned<'a>(
     start: &str,
     end: End<'_>,
     beam: usize,
-    learn: Option<&Learn<'_>>,
+    learn: Option<&Learn<'a>>,
     demote: bool,
 ) -> Result<Vec<Scored<'a>>, Error> {
     let base = &*lex.base;
+    // New words are 2..=NEWWORD_MAX syllables and their reading may be no lexicon reading at all.
+    let fresh_on = learn.filter(|ln| ln.learner.has_new_words());
+    let max_l = if fresh_on.is_some() { base.max_len.max(NEWWORD_MAX) } else { base.max_len };
     let n = syls.len();
     let ids = base.ids(syls);
     let start_id = lm.word_id(start);
@@ -667,89 +674,95 @@ pub fn decode_segment_learned<'a>(
     for i in 1..=n {
         let mut cand: Vec<Hyp<'a>> = Vec::new();
         let mut idx: HashMap<String, usize> = HashMap::new();
-        for l in 1..=base.max_len.min(i) {
-            let Some(r) = base.find(&ids[i - l..i]) else { continue };
+        for l in 1..=max_l.min(i) {
             if hyps[i - l].is_empty() {
                 continue;
             }
             let span = &syls[i - l..i];
-            let learned = learn.filter(|ln| ln.learner.has_reading(span));
-            let range = base.range(r);
-            let best = lex.ents[range.start].score;
-            let dl = if demote { lex.deltas_in(&range) } else { &[] };
-            // Entries to try: the top PER_KEY, plus learned words ranked below it (`extra`: only
-            // usable on a path whose context has a learned record for them).
-            let mut entries: Vec<(usize, bool)> = range.clone().take(PER_KEY).map(|p| (p, false)).collect();
-            if let Some(ln) = learned {
-                let words = ln.learner.words_of(span);
-                let mut seen: HashSet<&str> = entries.iter().map(|&(p, _)| lex.word_of(&lex.ents[p])).collect();
-                for p in range.clone().skip(PER_KEY) {
-                    let w = lex.word_of(&lex.ents[p]);
-                    if words.binary_search(&w).is_ok() && seen.insert(w) {
-                        entries.push((p, true));
+            let found = base.find(&ids[i - l..i]);
+            // New words of this span the lexicon lacks under it (new-word B §2.4).
+            let fresh: Vec<(&'a str, f64)> = match fresh_on {
+                Some(ln) => ln
+                    .learner
+                    .new_words(span, ln.today)
+                    .into_iter()
+                    .filter(|(w, _)| found.is_none_or(|r| !base.range(r).any(|p| lex.word_of(&lex.ents[p]) == *w)))
+                    .map(|(w, wt)| (w, newword_score(wt)))
+                    .collect(),
+                None => Vec::new(),
+            };
+            if let Some(r) = found {
+                let learned = learn.filter(|ln| ln.learner.has_reading(span));
+                let range = base.range(r);
+                let best = lex.ents[range.start].score;
+                let dl = if demote { lex.deltas_in(&range) } else { &[] };
+                // Entries to try: the top PER_KEY, plus learned words ranked below it (`extra`: only
+                // usable on a path whose context has a learned record for them).
+                let mut entries: Vec<(usize, bool)> = range.clone().take(PER_KEY).map(|p| (p, false)).collect();
+                if let Some(ln) = learned {
+                    let words = ln.learner.words_of(span);
+                    let mut seen: HashSet<&str> = entries.iter().map(|&(p, _)| lex.word_of(&lex.ents[p])).collect();
+                    for p in range.clone().skip(PER_KEY) {
+                        let w = lex.word_of(&lex.ents[p]);
+                        if words.binary_search(&w).is_ok() && seen.insert(w) {
+                            entries.push((p, true));
+                        }
+                    }
+                }
+                // Each hypothesis's learned hits depend only on its context key, not on the entry: look
+                // them up once per hypothesis (shared by key) before trying the entries.
+                let hits_of: Vec<usize>;
+                let mut hits: Vec<(Level, Vec<(&str, f64)>)> = Vec::new();
+                if let Some(ln) = learned {
+                    let mut by_ctx: HashMap<String, usize> = HashMap::new();
+                    hits_of = hyps[i - l]
+                        .iter()
+                        .map(|h| {
+                            let key = context_key(&format!("{before_tail}{}", h.surface));
+                            *by_ctx.entry(key).or_insert_with_key(|k| {
+                                hits.push(ln.learner.lookup(k, span, ln.today));
+                                hits.len() - 1
+                            })
+                        })
+                        .collect();
+                } else {
+                    hits_of = Vec::new();
+                }
+                for (p, extra) in entries {
+                    let e = &lex.ents[p];
+                    let (word, lp0) = (lex.word_of(e), e.score);
+                    let (wid, pb0) = (lm.word_id(word), pow10(lp0));
+                    let delta = dl.iter().find(|&&(q, _)| q == p).map_or(0.0, |x| x.1);
+                    for (hi, h) in hyps[i - l].iter().enumerate() {
+                        let (mut lp, mut pb) = (lp0, pb0);
+                        if let Some(ln) = learned {
+                            let (lv, ws) = &hits[hits_of[hi]];
+                            let eps = if *lv == Level::Global { ln.eps_global } else { LEARN_EPS };
+                            // eps 0 switches the level off, for `extra` entries too: `best + 0` would
+                            // still lift a word to a tie with the top.
+                            match ws.iter().find(|(w, _)| *w == word) {
+                                Some(&(_, w)) if eps > 0.0 => {
+                                    let boosted = best + eps * (w / (w + 1.0));
+                                    if boosted > lp {
+                                        lp = boosted;
+                                        pb = pow10(lp);
+                                    }
+                                }
+                                _ if extra => continue,
+                                _ => {}
+                            }
+                        }
+                        let sc = h.score + (word_term(lam, lm.prob_c(h.ctx, wid, pb), lp) - delta);
+                        extend(&mut cand, &mut idx, h, word, lp, delta, sc, wid, lm);
                     }
                 }
             }
-            // Each hypothesis's learned hits depend only on its context key, not on the entry: look
-            // them up once per hypothesis (shared by key) before trying the entries.
-            let hits_of: Vec<usize>;
-            let mut hits: Vec<(Level, Vec<(&str, f64)>)> = Vec::new();
-            if let Some(ln) = learned {
-                let mut by_ctx: HashMap<String, usize> = HashMap::new();
-                hits_of = hyps[i - l]
-                    .iter()
-                    .map(|h| {
-                        let key = context_key(&format!("{before_tail}{}", h.surface));
-                        *by_ctx.entry(key).or_insert_with_key(|k| {
-                            hits.push(ln.learner.lookup(k, span, ln.today));
-                            hits.len() - 1
-                        })
-                    })
-                    .collect();
-            } else {
-                hits_of = Vec::new();
-            }
-            for (p, extra) in entries {
-                let e = &lex.ents[p];
-                let (word, lp0) = (lex.word_of(e), e.score);
-                let (wid, pb0) = (lm.word_id(word), pow10(lp0));
-                let delta = dl.iter().find(|&&(q, _)| q == p).map_or(0.0, |x| x.1);
-                for (hi, h) in hyps[i - l].iter().enumerate() {
-                    let (mut lp, mut pb) = (lp0, pb0);
-                    if let Some(ln) = learned {
-                        let (lv, ws) = &hits[hits_of[hi]];
-                        let eps = if *lv == Level::Global { ln.eps_global } else { LEARN_EPS };
-                        // eps 0 switches the level off, for `extra` entries too: `best + 0` would
-                        // still lift a word to a tie with the top.
-                        match ws.iter().find(|(w, _)| *w == word) {
-                            Some(&(_, w)) if eps > 0.0 => {
-                                let boosted = best + eps * (w / (w + 1.0));
-                                if boosted > lp {
-                                    lp = boosted;
-                                    pb = pow10(lp);
-                                }
-                            }
-                            _ if extra => continue,
-                            _ => {}
-                        }
-                    }
-                    let sc = h.score + (word_term(lam, lm.prob_c(h.ctx, wid, pb), lp) - delta);
-                    let surface = format!("{}{word}", h.surface);
-                    match idx.get(&surface) {
-                        Some(&q) if !(sc > cand[q].score) => {}
-                        found => {
-                            let mut words = h.words.clone();
-                            words.push((word, lp, delta));
-                            let nh = Hyp { score: sc, surface, words, last: wid, ctx: lm.ctx_of(None) };
-                            match found {
-                                Some(&q) => cand[q] = nh,
-                                None => {
-                                    idx.insert(nh.surface.clone(), cand.len());
-                                    cand.push(nh);
-                                }
-                            }
-                        }
-                    }
+            for &(word, lp) in &fresh {
+                let wid = lm.word_id(word);
+                let pb = pow10(lp);
+                for h in &hyps[i - l] {
+                    let sc = h.score + word_term(lam, lm.prob_c(h.ctx, wid, pb), lp);
+                    extend(&mut cand, &mut idx, h, word, lp, 0.0, sc, wid, lm);
                 }
             }
         }
@@ -780,6 +793,28 @@ pub fn decode_segment_learned<'a>(
     }
     out.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
     Ok(out)
+}
+
+/// One hypothesis `h` extended by `word` with score `sc`: kept unless a hypothesis with the same surface already
+/// scores at least as much.
+#[allow(clippy::too_many_arguments)]
+fn extend<'a>(cand: &mut Vec<Hyp<'a>>, idx: &mut HashMap<String, usize>, h: &Hyp<'a>, word: &'a str, lp: f64, delta: f64, sc: f64, wid: Option<u32>, lm: &Lm) {
+    let surface = format!("{}{word}", h.surface);
+    match idx.get(&surface) {
+        Some(&q) if !(sc > cand[q].score) => {}
+        found => {
+            let mut words = h.words.clone();
+            words.push((word, lp, delta));
+            let nh = Hyp { score: sc, surface, words, last: wid, ctx: lm.ctx_of(None) };
+            match found {
+                Some(&q) => cand[q] = nh,
+                None => {
+                    idx.insert(nh.surface.clone(), cand.len());
+                    cand.push(nh);
+                }
+            }
+        }
+    }
 }
 
 /// S2h §1: the word that conditions the first word of a composition with no fixed word on its left.
