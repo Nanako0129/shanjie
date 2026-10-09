@@ -20,8 +20,6 @@ enum TestData {
         ("classes.sjc", "data/lm/classes.sjc"),
     ]
 
-    /// Builds a Resources-like directory with the given files; nil (after failing the test) when a
-    /// source file is missing.
     /// Adds Resources/packs/acg-add.tsv (a symlink to the repo's pack) like the app bundle has it. Opt-in: tests
     /// that write their own pack file into `packs` must not get a link through which they would overwrite the repo's.
     static func addBundledPack(to dir: URL) throws {
@@ -31,6 +29,8 @@ enum TestData {
                                                    withDestinationURL: repo.appendingPathComponent("data/packs/acg-add.tsv"))
     }
 
+    /// Builds a Resources-like directory with the given files; nil (after failing the test) when a
+    /// source file is missing.
     static func resources(only names: Set<String>? = nil, file: StaticString = #filePath, line: UInt = #line) -> URL? {
         let dir = FileManager.default.temporaryDirectory
             .appendingPathComponent("shanjie-tests-\(UUID().uuidString)", isDirectory: true)

@@ -321,7 +321,7 @@ pub unsafe extern "C" fn shanjie_engine_reset(
     rc
 }
 
-/// S2c. Loads the bigram model at `path` with `data_dir/overlay-add.tsv` of this engine. Does not
+/// S2c. Loads the bigram model at `path`, reading `data_dir/overlay-add.tsv` (and demote.tsv) again. Does not
 /// recompute the composition display. Any failure leaves the previous LM state (none or the old model).
 ///
 /// # Safety
@@ -1128,8 +1128,11 @@ mod tests {
         let (cls, emit) = ([1u16, 2, 0xFFFF, 0xFFFF], [1.0, 1.0, 0.0, 0.0]);
         std::fs::write(&classes_path, crate::lm::test_classes(&tiny, 0, 0.8, &cls, &emit, &[0.1; 9])).unwrap();
         // An engine without data_dir is not reachable through the ABI (only `new` creates engines);
-        // the closest case is demote.tsv vanishing from data_dir after `new` (the capping overlay is
-        // kept from `new`, so only demote.tsv is read again).
+        // the closest cases are overlay-add.tsv or demote.tsv vanishing from data_dir after `new`:
+        // load_lm reads both again (capping_overlay and demote.tsv), so either one fails with code 3.
+        std::fs::rename(dir.join("overlay-add.tsv"), dir.join("overlay-add.bak")).unwrap();
+        assert!(unsafe { shanjie_engine_load_lm(e, lm_c.as_ptr()) } == 3, "load without overlay-add.tsv");
+        std::fs::rename(dir.join("overlay-add.bak"), dir.join("overlay-add.tsv")).unwrap();
         std::fs::rename(dir.join("demote.tsv"), dir.join("demote.bak")).unwrap();
         assert!(unsafe { shanjie_engine_load_lm(e, lm_c.as_ptr()) } == 3, "load without demote.tsv");
         std::fs::rename(dir.join("demote.bak"), dir.join("demote.tsv")).unwrap();

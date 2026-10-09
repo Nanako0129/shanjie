@@ -257,10 +257,12 @@ public final class Shell {
         let packsDir = resources.appendingPathComponent("packs").path
         var (made, code) = CoreEngine.make(dataDir: resources.path, layout: mode.layout, packsDir: packsDir, acgPack: acgPackOn)
         if made == nil && acgPackOn {
-            // A pack that cannot be loaded must not cost the user their typing: build without it (the stored
-            // choice is untouched and nothing is shown); the next rebuild tries the pack again.
-            Log.shell.error("shanjie_engine_new_packs failed, code \(code); building without the pack")
+            // Any build failure retries without the pack, so the first code alone does not say whose fault it is:
+            // blame the pack only if the pack-less build works; otherwise the second code is the real cause.
+            // The stored choice is untouched and nothing is shown; the next rebuild tries the pack again.
+            let packCode = code
             (made, code) = CoreEngine.make(dataDir: resources.path, layout: mode.layout)
+            if made != nil { Log.shell.error("shanjie_engine_new_packs failed, code \(packCode); built without the pack") }
         }
         guard let e = made else {
             Log.shell.error("shanjie_engine_new failed, code \(code)")

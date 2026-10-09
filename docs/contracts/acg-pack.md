@@ -91,7 +91,7 @@
 
 - 核心載入時，`data/packs/acg-add.tsv` 存在就當成第二個疊加層併入，規則和 `overlay-add.tsv` 相同（`CappedLexicon` 依語料頻率封頂、沒看過的減 1.0）。
 - 檔案不存在，或開關關閉時，詞庫和現在完全相同。
-- CLI：`shanjie-eval --packs acg` 才載入詞包，預設不載入。要求詞包時檔案不在就結束並報錯、訊息含路徑；單用 `--packs-dir` 沒有 `--packs` 也是錯誤。詞庫與封頂用的疊加層文字由 `engine::load_lexicon_packs` 一次讀檔後同時給出，引擎與 CLI 共用，引擎把建構時讀到的文字留給 `load_lm`。A.3 的基準就是不加這個選項，所以兩邊的指令可以照抄重跑。
+- CLI：`shanjie-eval --packs acg` 才載入詞包，預設不載入。要求詞包時檔案不在就結束並報錯、訊息含路徑；單用 `--packs-dir` 沒有 `--packs` 也是錯誤。詞包列由 `engine::load_lexicon_packs` 讀一次，同時給詞庫與封頂用；封頂用的 `overlay-add.tsv` 由 `engine::capping_overlay` 讀（`load_lm` 每次載入模型時重讀，引擎不留那份約 17 MB 的副本），引擎與 CLI 共用這兩個函式。單用 `--packs-dir` 的檢查在讀任何檔案之前。`--predict` 也接受 `--packs`／`--packs-dir`，用來量詞包對預測的影響。摘要行在載入詞包時多一個 `+acg` 標記（沒有詞包時一字不變，既有 golden 不動）。A.3 的基準就是不加這個選項，所以兩邊的指令可以照抄重跑。
 - 開關：
   - 新增 C ABI `shanjie_engine_set_packs(engine, mask)`，或照「切換排列會重建引擎」的做法重建。實作時選較小的改法，並在契約更新。
   - **實作選了重建**（2026-10-09）：詞包的列併入詞庫，`Lexicon` 建好之後是不可變的（讀音表與詞條陣列排序在一起），原地加減要重建整份詞庫，記憶體會同時有兩份。所以新增 `shanjie_engine_new_packs(data_dir, layout, packs_dir, packs, out)`（遮罩 0 等同 `shanjie_engine_new`），殼的選單切換時提交組字、釋放引擎、再建一個，和切換排列相同；詳見 `docs/contracts/s3a.md` §5、§6。詞包檔在 `Resources/packs/`，建置輸入（`acg-groups.tsv`、`acg-collisions.tsv`）不進 App。

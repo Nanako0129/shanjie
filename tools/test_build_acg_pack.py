@@ -48,6 +48,33 @@ class Rules(unittest.TestCase):
         got = sorted(v for r in B.group_rules(page) for v, _ in B.tw_values(r))
         self.assertEqual(got, ["丁丁丁", "乙乙乙", "甲甲甲"])
 
+    def test_commented_out_rules_are_not_collected(self):
+        wiki = "{{CItem|zh-tw:甲甲甲}}\n<!-- {{CItem|zh-tw:乙乙乙}} -->\n<!--\n{{CItem|zh-tw:丙丙丙}}\n-->{{CItem|zh-tw:丁丁丁}}"
+        self.assertEqual(sorted(v for r in B.group_rules(wiki) for v, _ in B.tw_values(r)), ["丁丁丁", "甲甲甲"])
+        lua = ("Item('x', 'zh-tw:甲甲甲')\n-- Item('x', 'zh-tw:乙乙乙')\n--[[ Item('x', 'zh-tw:丙丙丙')\nItem('x', 'zh-tw:戊戊戊') ]] Item('x', 'zh-tw:丁丁丁')\n"
+               "--[==[ Item('x', 'zh-tw:己己己') ]==]\nItem('x', 'zh-tw:庚--庚庚') -- Item('x', 'zh-tw:辛辛辛')\n")
+        got = sorted(v for r in B.group_rules(lua, lua=True) for v, _ in B.tw_values(r))
+        self.assertEqual(got, ["丁丁丁", "甲甲甲"])                # 字串裡的 -- 不算註解（庚--庚庚 含非漢字，tw_values 不收，但後面的 辛辛辛 照樣被註解吃掉）
+
+    def test_pages_follows_continue_when_the_response_is_truncated(self):
+        class Truncating:
+            calls = 0
+
+            def wiki(self, **p):
+                self.calls += 1
+                ts = p["titles"].split("|")
+                i = int(p.get("rvcontinue", 0))
+                rev = lambda t: {"title": t, "revisions": [{"revid": 10 + ts.index(t), "timestamp": "2026-10-01T00:00:00Z", "slots": {"main": {"content": t + "內文"}}}]}
+                out = [rev(ts[i])] + [{"title": t} for t in ts[i + 1:]]      # 一次只給一頁的內容，其餘沒有 revisions
+                r = {"query": {"pages": out}}
+                if i + 1 < len(ts):
+                    r["continue"] = {"rvcontinue": str(i + 1), "continue": "||"}
+                return r
+        api = Truncating()
+        got = B.pages(api, ["甲", "乙", "丙"])
+        self.assertEqual({t: v["text"] for t, v in got.items()}, {"甲": "甲內文", "乙": "乙內文", "丙": "丙內文"})
+        self.assertEqual(api.calls, 3)
+
     def test_an_unterminated_long_bracket_ends_the_scan(self):
         got = []
         t = threading.Thread(target=lambda: got.extend(B.lua_items("Item('x', 'zh-tw:甲甲甲')\nItem([[壞掉")), daemon=True)
@@ -168,8 +195,10 @@ class Build(unittest.TestCase):
         cls.excl = os.path.join(cls.tmp, "collisions.tsv")
         open(cls.excl, "w", encoding="utf-8").write("# c\nㄈㄥ ㄓ ㄍㄨˇ\t風之谷\t楓之谷\t保留既有的名字\n")
 
-    def build(self, collisions, exclude=None):
-        return B.build(FakeApi(), self.groups, collisions, self.manual, readings=fake_readings, exclude_tsv=exclude or self.none)
+    def build(self, collisions, exclude=None, real_decoder=False):
+        # 真的解碼器每次建置要跑 4 個 CLI 程序；只有斷言需要真實解碼結果的測試才開（real_decoder=True）。
+        return B.build(FakeApi(), self.groups, collisions, self.manual, readings=fake_readings, exclude_tsv=exclude or self.none,
+                       **({} if real_decoder else {"decode": lambda pairs, prof, packs=None: [w for w, _ in pairs]}))
 
     def test_pack_content_and_filters(self):
         files, manifest, col, unread, ref = self.build(self.excl)
@@ -195,7 +224,8 @@ class Build(unittest.TestCase):
     def test_a_changed_pack_changes_the_version(self):
         manual = os.path.join(self.tmp, "manual2.tsv")
         open(manual, "w", encoding="utf-8").write(open(self.manual, encoding="utf-8").read() + "艾倫葉卡\t某作品\t角色\n")
-        more = B.build(FakeApi(), self.groups, self.excl, manual, readings=lambda w: fake_readings(w) | {"艾倫葉卡": (["ㄞˋ", "ㄌㄨㄣˊ", "ㄧㄝˋ", "ㄎㄚˇ"], False)}, exclude_tsv=self.none)[1]
+        more = B.build(FakeApi(), self.groups, self.excl, manual, readings=lambda w: fake_readings(w) | {"艾倫葉卡": (["ㄞˋ", "ㄌㄨㄣˊ", "ㄧㄝˋ", "ㄎㄚˇ"], False)}, exclude_tsv=self.none,
+                        decode=lambda pairs, prof, packs=None: [w for w, _ in pairs])[1]
         base = self.build(self.excl)[1]
         self.assertEqual(more["version"][:8], base["version"][:8])            # 來源頁沒變，日期一樣
         self.assertNotEqual(more["version"], base["version"])                 # 內容變了，版號就變
@@ -232,7 +262,7 @@ class Build(unittest.TestCase):
             self.assertEqual(hashlib.sha256(open(os.path.join(out[0], name), "rb").read()).hexdigest(), meta["sha256"])
 
     def test_collisions_are_listed_without_a_disposition(self):
-        _, manifest, col, _, _ = self.build(self.none)
+        _, manifest, col, _, _ = self.build(self.none, real_decoder=True)
         # 夾具裡 風之谷 是作品標題、本身也在詞包，開了詞包第一名仍是 風之谷，所以 楓之谷 只多一個候選、不列
         # （第一名真的被換掉時會列出，見 test_a_collision_counts_only_when_the_pack_changes_the_top1）。
         self.assertNotIn("ㄈㄥ ㄓ ㄍㄨˇ", col)
@@ -296,7 +326,8 @@ class Build(unittest.TestCase):
         rows = B.read_tsv(os.path.join(B.PACKS, "acg-collisions.tsv"))
         self.assertGreater(len(rows), 100)
         for reading, keep, exclude, why in rows:
-            if exclude.startswith("+"):                # 兩個都留：另一個詞在詞包裡
+            if exclude.startswith("+"):                # 兩個都留：兩個詞都在詞包裡
+                self.assertIn(keep, pack, keep)
                 self.assertIn(exclude[1:], pack, exclude)
             else:
                 self.assertNotIn(exclude, pack, exclude)
