@@ -43,6 +43,11 @@ class Rules(unittest.TestCase):
         self.assertEqual(B.tw_values("zh-tw:甲乙{{x|a}}丙|original=甲"), [])               # {{ }} 裡的 | 不拆；含非漢字就不收
         self.assertEqual(B.tw_values("zh-hant:鋼彈戰士|desc=zh-tw:不要這個"), [("鋼彈戰士", "zh-hant")])   # 具名參數整個丟掉
 
+    def test_numbered_parameter_is_positional(self):
+        self.assertEqual(B.tw_values("1=zh-tw:魯夫;zh-cn:路飞"), [("魯夫", "zh-tw")])
+        self.assertEqual(B.tw_values("zh-tw:甲甲|2=zh-hk:乙乙"), [("甲甲", "zh-tw")])
+        self.assertEqual(B.tw_values("1=zh-tw:甲甲|original=乙"), [("甲甲", "zh-tw")])
+
     def test_group_rules_read_template_items_and_lua_items_from_the_same_page(self):
         page = "{{CItem|zh-tw:甲甲甲}}\n{ type = 'item', original = '', rule = 'zh-tw:乙乙乙;zh-hk:丙丙丙;', description = 'x' },\nItem('x', 'zh-tw:丁丁丁')\n"
         got = sorted(v for r in B.group_rules(page) for v, _ in B.tw_values(r))
@@ -201,7 +206,7 @@ class Build(unittest.TestCase):
                        **({} if real_decoder else {"decode": lambda pairs, prof, packs=None: [w for w, _ in pairs]}))
 
     def test_pack_content_and_filters(self):
-        files, manifest, col, unread, ref = self.build(self.excl)
+        files, manifest, col, unread, ref, _ = self.build(self.excl)
         words = {l.split("\t")[1] for l in files["acg-add.tsv"].splitlines()}
         self.assertEqual(words, {"碇源堂", "螢火蟲之墓", "風之谷", "阿庫雷特", "奇希莉卡"})   # 奇希莉卡 來自手動清單；手動的 朋友 被去重丟掉
         self.assertNotIn("怪獸電力公司", words)        # 排除的組
@@ -262,7 +267,7 @@ class Build(unittest.TestCase):
             self.assertEqual(hashlib.sha256(open(os.path.join(out[0], name), "rb").read()).hexdigest(), meta["sha256"])
 
     def test_collisions_are_listed_without_a_disposition(self):
-        _, manifest, col, _, _ = self.build(self.none, real_decoder=True)
+        _, manifest, col, _, _, _ = self.build(self.none, real_decoder=True)
         # 夾具裡 風之谷 是作品標題、本身也在詞包，開了詞包第一名仍是 風之谷，所以 楓之谷 只多一個候選、不列
         # （第一名真的被換掉時會列出，見 test_a_collision_counts_only_when_the_pack_changes_the_top1）。
         self.assertNotIn("ㄈㄥ ㄓ ㄍㄨˇ", col)
@@ -285,6 +290,26 @@ class Build(unittest.TestCase):
         self.assertNotIn("ㄅㄚ ㄅㄚ", col)
         self.assertIn("ㄈㄥ ㄓ ㄍㄨˇ", col)
 
+    def test_a_pack_word_that_displaces_an_existing_lexicon_word_is_a_type_c_collision(self):
+        reading = {"歐兜邁": ("ㄡ", "ㄉㄡ", "ㄇㄞˋ"), "甲甲甲": ("ㄅㄚ", "ㄅㄚ", "ㄅㄚ"), "乙乙乙": ("ㄆㄚ", "ㄆㄚ", "ㄆㄚ")}
+        def decode(pairs, prof, packs=None):
+            if not packs:
+                return ["歐兜賣" if w == "歐兜邁" else ("丙丙丙" if w == "甲甲甲" else w) for w, _ in pairs]
+            return [w for w, _ in pairs]                       # 開了之後第一名都是 w 自己
+        # 歐兜賣 是既有詞庫的詞 → c；丙丙丙 不在既有詞庫也不在參考名單 → 不列；乙乙乙 開不開都一樣 → 不列
+        col = B.detect_collisions(["歐兜邁", "甲甲甲", "乙乙乙"], reading, [], set(), decode=decode, existing={"歐兜賣"})
+        self.assertEqual(col, {"ㄡ ㄉㄡ ㄇㄞˋ": [("歐兜邁", "c", "chat", "歐兜賣", "歐兜邁"), ("歐兜邁", "c", "formal", "歐兜賣", "歐兜邁")]})
+
+    def test_type_c_words_are_dropped_by_rule_and_the_rest_is_rerun(self):
+        # 使用者 2026-10-10：詞包詞擠掉既有詞（朋友 在基底）→ 丟掉詞包詞，不需要 acg-collisions.tsv 的列。
+        def decode(pairs, prof, packs=None):       # 阿庫雷特：不開是 朋友；開了而且詞包裡有它就是它自己
+            pack = open(os.path.join(packs, "acg-add.tsv"), encoding="utf-8").read() if packs else ""
+            return [w if (w != "阿庫雷特" or w in pack) else "朋友" for w, _ in pairs] if packs else ["朋友" if w == "阿庫雷特" else w for w, _ in pairs]
+        files, manifest, col, _, _, dropped = B.build(FakeApi(), self.groups, self.none, self.manual, decode=decode, readings=fake_readings, exclude_tsv=self.none)
+        self.assertNotIn("阿庫雷特", {l.split("\t")[1] for l in files["acg-add.tsv"].splitlines()})
+        self.assertEqual([(w, o) for _, w, o, _ in dropped], [("阿庫雷特", "朋友")])
+        self.assertEqual((manifest["dropped_by_lexicon_rule"], manifest["unresolved_collision_readings"]), (1, 0))
+
     def test_a_decision_covers_only_the_words_it_names(self):
         # 夾具：開了詞包，阿庫雷特 的第一名被換成 奇希莉卡（詞包內同音），在 阿庫雷特 的讀音上有一筆衝突。
         def decode(pairs, prof, packs=None):
@@ -301,7 +326,7 @@ class Build(unittest.TestCase):
     def test_excluded_strings_leave_the_pack_and_the_reference_list(self):
         excl = os.path.join(self.tmp, "exclude.tsv")
         open(excl, "w", encoding="utf-8").write("# e\n碇源堂\t測試排除\n不在來源裡\t沒抽到的字串不計\n")
-        files, manifest, _, _, ref = self.build(self.excl, excl)
+        files, manifest, _, _, ref, _ = self.build(self.excl, excl)
         words = {l.split("\t")[1] for l in files["acg-add.tsv"].splitlines()}
         self.assertNotIn("碇源堂", words)
         self.assertNotIn("碇源堂", ref)
@@ -310,7 +335,7 @@ class Build(unittest.TestCase):
         self.assertEqual(self.build(self.excl)[1]["excluded_by_exclude_tsv"], 0)   # 沒有排除檔
         bad = os.path.join(self.tmp, "bad-exclude.tsv")
         open(bad, "w", encoding="utf-8").write("碇源堂\n")                    # 少了理由
-        with self.assertRaises(AssertionError):
+        with self.assertRaises(SystemExit):
             self.build(self.excl, bad)
 
     def test_the_committed_exclusions_are_applied_to_the_committed_pack(self):

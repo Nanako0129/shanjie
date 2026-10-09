@@ -32,7 +32,7 @@ public enum Selftest {
         // The pack on, as the shell ships it (default on): a missing or corrupt bundled pack must fail here,
         // and the ordinary sentence must still come out the same.
         let (packed, packCode) = CoreEngine.make(dataDir: resources.path, layout: 0,
-                                                  packsDir: resources.appendingPathComponent("packs").path, acgPack: true)
+                                                  packsDir: resources.appendingPathComponent("packs").path)
         guard let withPack = packed else { return fail("selftest: shanjie_engine_new_packs failed, code", packCode) }
         let packLM = withPack.loadLM(path: lmPath)
         guard packLM == 0 else { return fail("selftest: shanjie_engine_load_lm (pack) failed, code", packLM) }

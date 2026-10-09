@@ -250,7 +250,7 @@ fn packs_options_fail_loudly() {
     std::fs::write(&rows, "|風之谷|ㄈㄥ ㄓ ㄍㄨˇ\n").unwrap();
     let fail = |extra: &[&str]| {
         let out = Command::new(env!("CARGO_BIN_EXE_shanjie-eval"))
-            .args(["--lm", &lm_path(), "--profile", "chat", "--rows", rows.to_str().unwrap()])
+            .args(["--lm", "/nonexistent/bigram.sjlm", "--profile", "chat", "--rows", rows.to_str().unwrap()]) // option errors come before the model is read
             .args(extra)
             .output()
             .unwrap();
