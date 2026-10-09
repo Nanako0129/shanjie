@@ -107,6 +107,9 @@ struct SettingsForm: View {
                 Toggle(MenuEntry.Text.prediction, isOn: Binding(get: { model.prediction }, set: { model.setPrediction($0) }))
                 Toggle(MenuEntry.Text.demote, isOn: Binding(get: { model.demote }, set: { model.setDemote($0) }))
                 Toggle(MenuEntry.Text.acgPack, isOn: Binding(get: { model.acgPack }, set: { model.setAcgPack($0) }))
+                if let line = model.acgDataLine {
+                    Text(line).font(.caption).foregroundStyle(.secondary)
+                }
             }
             Section("外觀") {
                 Slider(value: Binding(get: { model.glassTint }, set: { model.setGlassTint($0) }), in: 0...1) {

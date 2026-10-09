@@ -78,6 +78,24 @@ final class SettingsTests: XCTestCase {
         XCTAssertTrue(r.model.acgPack, "the model did not follow the menu")
     }
 
+    /// acg-pack A2.4: the window shows the same grey data-date line as the menu, from the same Shell value, also with the pack off.
+    func testAcgDataDateLineIsTheMenusLine() throws {
+        let packs = resources.appendingPathComponent("packs")
+        try FileManager.default.createDirectory(at: packs, withIntermediateDirectories: true)
+        let manifest = packs.appendingPathComponent("acg.json")
+        let make = { (acg: Bool?) -> Rig in
+            let r = self.rig()
+            r.model.setAcgPack(acg ?? true)
+            return r
+        }
+        XCTAssertNil(make(nil).model.acgDataLine, "no manifest, no line")
+        try #"{"latest_source_revision": "2026-10-06T23:59:59Z"}"#.write(to: manifest, atomically: true, encoding: .utf8)
+        let on = make(nil)
+        XCTAssertEqual(on.model.acgDataLine, "資料更新至 2026-10-06（維基百科）")
+        XCTAssertEqual(on.model.acgDataLine, on.controller.session.menu.first { $0.title.hasPrefix("資料更新至") }?.title)
+        XCTAssertEqual(make(false).model.acgDataLine, "資料更新至 2026-10-06（維基百科）", "shown with the pack off too")
+    }
+
     func testBackupSwitchAndClear() throws {
         let dir = TestLearning.directory()
         let r = rig(learning: dir)

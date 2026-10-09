@@ -1,4 +1,4 @@
-use core::engine::{capping_overlay, load_lexicon, load_lexicon_packs, PACK_ACG};
+use core::engine::{capping_overlay_detailed, load_lexicon_packs_detailed, PACK_ACG};
 use core::eval::*;
 use core::learn::{context_key, SENTINEL};
 use core::lm::{decode_from, history, CappedLexicon, Demote, Lm, Profile};
@@ -132,25 +132,12 @@ fn packs_dir_checked(packs: u32, packs_dir: Option<String>) -> Result<PathBuf, S
     Ok(pdir)
 }
 
-/// The engine reports a bare `LoadFailed`; name the file (and the `ErrorKind`) by re-reading what `load_lexicon_packs` reads, in its order.
-/// No `ErrorKind` for a file that reads fine: then the text did not parse.
-fn load_error(dir: &Path, pdir: &Path, packs: u32) -> String {
-    let mut files = vec![dir.join("mcbpmf-data.txt"), dir.join("overlay-add.tsv"), dir.join("sandhi-add.tsv")];
-    if packs & PACK_ACG != 0 {
-        files.push(pdir.join("acg-add.tsv"));
-    }
-    match files.iter().find_map(|p| fs::read_to_string(p).err().map(|e| (p, e))) {
-        Some((p, e)) => format!("cannot read {} ({:?})", p.display(), e.kind()),
-        None => "cannot load lexicon".to_string(),
-    }
-}
-
 /// The lexicon with the chosen packs and the overlay text that caps the LM scores (the same helpers as the engine's
 /// `new` and `load_lm`).
 fn load_with_packs(dir: &Path, packs: u32, pdir: &Path) -> Result<(std::sync::Arc<Lexicon>, String), String> {
     // The pack rows are read once and reused for the cap; overlay-add.tsv is read again by capping_overlay, as load_lm does.
-    let (lex, pack_text) = load_lexicon_packs(dir, Some((pdir, packs))).map_err(|_| load_error(dir, pdir, packs))?;
-    let overlay = capping_overlay(dir, &pack_text).map_err(|_| load_error(dir, pdir, packs))?;
+    let (lex, pack_text) = load_lexicon_packs_detailed(dir, Some((pdir, packs))).map_err(|e| e.to_string())?;
+    let overlay = capping_overlay_detailed(dir, &pack_text).map_err(|e| e.to_string())?;
     Ok((lex, overlay))
 }
 
@@ -461,8 +448,7 @@ fn run() -> Result<(), String> {
             .map_err(|e| format!("cannot read lexicon ({:?})", e.kind()))?;
         std::sync::Arc::new(Lexicon::parse_with(&text, None).map_err(|e: Error| e.to_string())?)
     } else {
-        let dir = root().join("data/lexicon");
-        load_lexicon(&dir).map_err(|_| load_error(&dir, &dir, 0))?
+        load_lexicon_packs_detailed(&root().join("data/lexicon"), None).map(|(lex, _)| lex).map_err(|e| e.to_string())?
     };
     let load_time = t_load.elapsed();
 
