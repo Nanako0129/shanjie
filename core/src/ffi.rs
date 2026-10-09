@@ -532,6 +532,44 @@ pub unsafe extern "C" fn shanjie_engine_set_prediction(
     rc
 }
 
+/// V3 engine contract section 12.1. `enabled` 0 or 1 (default 0): whether a symbol in an occupied column opens a new
+/// unfinished unit. Returns the snapshot like `set_prediction`; any other value changes nothing and returns 2.
+///
+/// # Safety
+/// `engine` is NULL or a live handle; `out` is NULL or valid for one pointer write.
+#[no_mangle]
+pub unsafe extern "C" fn shanjie_engine_set_abbreviation(
+    engine: *mut ShanjieEngine,
+    enabled: u32,
+    out: *mut *mut ShanjieOutput,
+) -> i32 {
+    let rc = guard(|| {
+        // SAFETY: forwarded caller contract.
+        if !unsafe { clear_out(out) } || engine.is_null() {
+            return SHANJIE_ERR_NULL;
+        }
+        if enabled > 1 {
+            return SHANJIE_ERR_INVALID;
+        }
+        // SAFETY: live handle, single-threaded use (§6).
+        let e = unsafe { &mut (*engine).0 };
+        match e.set_abbreviation(enabled == 1) {
+            Ok(o) => {
+                #[cfg(test)]
+                tests::inject(&o);
+                // SAFETY: `out` checked non-NULL above.
+                unsafe { emit(o, out) }
+            }
+            Err(_) => SHANJIE_ERR_INTERNAL,
+        }
+    });
+    if rc == SHANJIE_ERR_INTERNAL {
+        // SAFETY: forwarded caller contract.
+        unsafe { discard(engine) };
+    }
+    rc
+}
+
 /// # Safety
 /// `engine` is NULL or a live handle; `dir` is NULL or a NUL-terminated string.
 #[no_mangle]
@@ -910,6 +948,27 @@ mod tests {
             assert!(unsafe { shanjie_engine_set_prediction(e, v, &mut o) } == 0 && !o.is_null(), "set_prediction 0/1");
             unsafe { shanjie_output_free(o) };
         }
+
+        // engine_set_abbreviation (V3 engine contract section 12.1): codes like set_prediction.
+        o = sentinel();
+        assert!(unsafe { shanjie_engine_set_abbreviation(e, 1, ptr::null_mut()) } == 1, "set_abbreviation out NULL");
+        assert!(unsafe { shanjie_engine_set_abbreviation(ptr::null_mut(), 1, &mut o) } == 1 && o.is_null(), "set_abbreviation engine NULL");
+        for v in [2, u32::MAX] {
+            o = sentinel();
+            assert!(unsafe { shanjie_engine_set_abbreviation(e, v, &mut o) } == 2 && o.is_null(), "set_abbreviation out of range");
+        }
+        for v in [0, 1] {
+            o = sentinel();
+            assert!(unsafe { shanjie_engine_set_abbreviation(e, v, &mut o) } == 0 && !o.is_null(), "set_abbreviation 0/1");
+            unsafe { shanjie_output_free(o) };
+        }
+        // On (the loop ended with 1): ㄋ then ㄔ are two units, so the preedit has two characters; turning it off drops them.
+        send(e, key(CHAR, 's'));
+        assert!(send(e, key(CHAR, 't')).1.chars().count() == 2, "two units");
+        o = sentinel();
+        assert!(unsafe { shanjie_engine_set_abbreviation(e, 0, &mut o) } == 0 && !o.is_null(), "set_abbreviation 0 with two units");
+        assert!(unsafe { CStr::from_ptr((*o).preedit) }.to_bytes().is_empty(), "set_abbreviation 0 drops the units");
+        unsafe { shanjie_output_free(o) };
 
         // engine_key
         o = sentinel();

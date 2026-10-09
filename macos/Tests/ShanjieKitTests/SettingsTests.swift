@@ -17,20 +17,20 @@ final class SettingsTests: XCTestCase {
         var shell: Shell
         var model: SettingsModel
         var controller: Controller
-        var layout: MemoryLayoutStore, demote: MemoryDemoteStore, prediction: MemoryPredictionStore
+        var layout: MemoryLayoutStore, demote: MemoryDemoteStore, prediction: MemoryPredictionStore, abbreviation: MemoryAbbreviationStore
         var acg: MemoryAcgPackStore, tint: MemoryGlassTintStore
         var dialogs: FakeDialogs
     }
 
     private func rig(secure: Bool = false, learning: URL? = nil) -> Rig {
-        let layout = MemoryLayoutStore(), demote = MemoryDemoteStore(), prediction = MemoryPredictionStore()
+        let layout = MemoryLayoutStore(), demote = MemoryDemoteStore(), prediction = MemoryPredictionStore(), abbreviation = MemoryAbbreviationStore()
         let acg = MemoryAcgPackStore(), tint = MemoryGlassTintStore(), dialogs = FakeDialogs()
         let shell = Shell(resources: resources, panel: FakePanel(), isSecureInput: { secure }, layoutStore: layout,
-                          learningDirectory: learning, dialogs: dialogs, demoteStore: demote, predictionStore: prediction,
+                          learningDirectory: learning, dialogs: dialogs, demoteStore: demote, predictionStore: prediction, abbreviationStore: abbreviation,
                           acgPackStore: acg, glassTintStore: tint)
         XCTAssertNotNil(shell.engine)
         return Rig(shell: shell, model: SettingsModel(shell: shell), controller: Controller(shell),
-                   layout: layout, demote: demote, prediction: prediction, acg: acg, tint: tint, dialogs: dialogs)
+                   layout: layout, demote: demote, prediction: prediction, abbreviation: abbreviation, acg: acg, tint: tint, dialogs: dialogs)
     }
 
     private func item(_ r: Rig, _ a: MenuEntry.Action) -> MenuEntry? { r.controller.session.menu.first { $0.action == a } }
@@ -46,6 +46,26 @@ final class SettingsTests: XCTestCase {
         XCTAssertFalse(r.model.prediction)
         r.controller.session.perform(.togglePrediction)  // the menu, then the model follows
         XCTAssertTrue(r.model.prediction, "the model did not follow the menu")
+    }
+
+    /// V3 section 12.1: the window's "可省略韻母" goes through the same setter and store as the menu item, the two stay in sync,
+    /// and the menu item is greyed (checkmark kept) while the prediction row is off, which is what the window's toggle follows.
+    func testAbbreviationFromTheWindowReachesStoreAndMenuAndFollowsPrediction() {
+        let r = rig()
+        XCTAssertFalse(r.model.abbreviation)
+        r.model.setAbbreviation(true)
+        XCTAssertEqual(r.abbreviation.abbreviation, true)
+        XCTAssertEqual(item(r, .toggleAbbreviation)?.checked, true)
+        r.controller.session.perform(.toggleAbbreviation)
+        XCTAssertFalse(r.model.abbreviation, "the model did not follow the menu")
+        r.model.setAbbreviation(true)
+        r.model.setPrediction(false)
+        XCTAssertEqual(item(r, .toggleAbbreviation)?.enabled, false)
+        XCTAssertEqual(item(r, .toggleAbbreviation)?.checked, true, "greyed, still showing the setting")
+        XCTAssertFalse(r.model.prediction)
+        XCTAssertTrue(r.model.abbreviation)
+        r.model.setPrediction(true)
+        XCTAssertEqual(item(r, .toggleAbbreviation)?.enabled, true)
     }
 
     func testDemoteFromTheWindowReachesStoreAndMenu() {
@@ -91,7 +111,7 @@ final class SettingsTests: XCTestCase {
 
     func testMenuHasTheSettingsItemBeforeClear() {
         let r = rig()
-        XCTAssertEqual(r.controller.session.menu.map(\.title), ["標準鍵盤", "倚天鍵盤", "避免把敏感字詞排在前面", "即時預測", "動漫與遊戲詞", "善解設定…", "清除選字記憶…", "不要備份選字記憶"])
+        XCTAssertEqual(r.controller.session.menu.map(\.title), ["標準鍵盤", "倚天鍵盤", "避免把敏感字詞排在前面", "即時預測", "可省略韻母", "動漫與遊戲詞", "善解設定…", "清除選字記憶…", "不要備份選字記憶"])
         var opened = 0
         r.shell.onOpenSettings = { opened += 1 }
         r.controller.session.perform(.openSettings)
@@ -187,7 +207,7 @@ final class SettingsTests: XCTestCase {
         let tint = MemoryGlassTintStore(0.4)
         let shell = Shell(resources: resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(),
                           learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(),
-                          predictionStore: MemoryPredictionStore(), acgPackStore: MemoryAcgPackStore(), glassTintStore: tint)
+                          predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), acgPackStore: MemoryAcgPackStore(), glassTintStore: tint)
         XCTAssertEqual(shell.glassTint, 0.4)
         tint.glassTint = 0.9
         XCTAssertEqual(shell.glassTint, 0.4, "the Shell reads the store only at start and on set")
@@ -198,7 +218,7 @@ final class SettingsTests: XCTestCase {
         var secure = false
         let shell = Shell(resources: resources, panel: FakePanel(), isSecureInput: { secure }, layoutStore: MemoryLayoutStore(),
                           learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(),
-                          predictionStore: MemoryPredictionStore(), acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore())
+                          predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore())
         let model = SettingsModel(shell: shell)
         secure = true
         shell.changed()
