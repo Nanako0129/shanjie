@@ -94,9 +94,10 @@ fn unit_ok(u: &Unit, s: &Syl) -> bool {
     }
 }
 
-/// Whether `predict` in prefix mode could return a word read `reading` for `units`: a cheap string test on the first
-/// syllable first, then the same compatibility test as the scan. Never false for a reading `predict` would return.
-pub fn reading_matches(units: &[Unit], reading: &[String]) -> bool {
+/// Whether `predict` in `mode` could return a word read `reading` for `units`: a cheap string test on the first
+/// syllable first, then the same compatibility test as the scan (the prefix reading, and in `PA` the abbreviation
+/// reading, `compat_prefix` / `compat_abbr`). Never false for a reading `predict` would return.
+pub fn reading_matches_in(units: &[Unit], reading: &[String], mode: Mode) -> bool {
     let Some(first) = units.first() else { return false };
     // Runs per learned record and start (up to 50,000 records): compare chars, allocate nothing.
     if reading.len() < units.len()
@@ -105,7 +106,8 @@ pub fn reading_matches(units: &[Unit], reading: &[String]) -> bool {
         return false;
     }
     let Some((_, init)) = units.split_last() else { return false };
-    init.iter().all(|u| u.done) && units.iter().zip(reading).all(|(u, y)| parse_syl(y).is_some_and(|s| unit_ok(u, &s)))
+    let abbr = mode == Mode::PA && reading.len() == units.len() && units.iter().all(|u| !u.done);
+    (abbr || init.iter().all(|u| u.done)) && units.iter().zip(reading).all(|(u, y)| parse_syl(y).is_some_and(|s| unit_ok(u, &s)))
 }
 
 fn compat_prefix(units: &[Unit], syls: &[u32], table: &[Syl]) -> bool {

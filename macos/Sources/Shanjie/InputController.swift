@@ -56,7 +56,8 @@ final class ShanjieInputController: IMKInputController {
         let entries = MainActor.assumeIsolated { session.menu }
         let menu = NSMenu()
         for entry in entries {
-            let item = NSMenuItem(title: entry.title, action: entry.action.map(Self.selector(for:)), keyEquivalent: "")
+            // A disabled entry keeps its checkmark but has no action, so the menu greys it.
+            let item = NSMenuItem(title: entry.title, action: entry.enabled ? entry.action.map(Self.selector(for:)) : nil, keyEquivalent: "")
             item.state = entry.checked ? .on : .off
             menu.addItem(item)
         }
@@ -71,6 +72,7 @@ final class ShanjieInputController: IMKInputController {
         case .toggleBackup: #selector(toggleLearningBackup(_:))
         case .toggleDemote: #selector(toggleDemote(_:))
         case .togglePrediction: #selector(togglePrediction(_:))
+        case .toggleAbbreviation: #selector(toggleAbbreviation(_:))
         case .toggleAcgPack: #selector(toggleAcgPack(_:))
         case .openSettings: #selector(openSettings(_:))
         }
@@ -86,6 +88,7 @@ final class ShanjieInputController: IMKInputController {
     @objc func toggleLearningBackup(_ sender: Any?) { perform(.toggleBackup) }
     @objc func toggleDemote(_ sender: Any?) { perform(.toggleDemote) }
     @objc func togglePrediction(_ sender: Any?) { perform(.togglePrediction) }
+    @objc func toggleAbbreviation(_ sender: Any?) { perform(.toggleAbbreviation) }
     @objc func toggleAcgPack(_ sender: Any?) { perform(.toggleAcgPack) }
     @objc func openSettings(_ sender: Any?) { perform(.openSettings) }
 }

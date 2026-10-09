@@ -15,7 +15,7 @@ final class ShellTests: XCTestCase {
     }
 
     private func makeShell(secure: Bool = false, store: LayoutStore = MemoryLayoutStore()) -> Shell {
-        let shell = Shell(resources: resources, panel: FakePanel(), isSecureInput: { secure }, layoutStore: store, learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore())
+        let shell = Shell(resources: resources, panel: FakePanel(), isSecureInput: { secure }, layoutStore: store, learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore())
         XCTAssertNotNil(shell.engine)
         return shell
     }
@@ -292,7 +292,7 @@ final class ShellTests: XCTestCase {
     }
 
     func testEngineThatCannotBeBuiltPassesEveryKey() {
-        let shell = Shell(resources: resources.appendingPathComponent("missing"), panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(), learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore())
+        let shell = Shell(resources: resources.appendingPathComponent("missing"), panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(), learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore())
         XCTAssertNil(shell.engine)
         let c = Controller(shell)
         c.session.activate()
@@ -500,7 +500,7 @@ final class ShellTests: XCTestCase {
         let report = Layouts.keys("ㄍㄠˇ ㄨㄢˊ ㄓㄜˋ ㄅㄛ", eten: false)
         let store = MemoryDemoteStore()
         let shell = Shell(resources: resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(),
-                          learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: store, predictionStore: MemoryPredictionStore(), acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore())
+                          learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: store, predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore())
         let c = Controller(shell)
         c.session.activate()
         let item = { c.session.menu.first { $0.action == .toggleDemote } }
@@ -526,7 +526,7 @@ final class ShellTests: XCTestCase {
         XCTAssertEqual(c.client.marked, "睪丸這波")
         c.press(Keys.esc)
         let again = Controller(Shell(resources: resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(),
-                                     learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: store, predictionStore: MemoryPredictionStore(), acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore()))
+                                     learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: store, predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore()))
         again.session.activate()
         again.type(report)
         XCTAssertEqual(again.client.marked, "睪丸這波", "a new shell reads the stored off")
@@ -543,7 +543,7 @@ final class ShellTests: XCTestCase {
         let store = MemoryPredictionStore()
         let make = {
             Shell(resources: self.resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(),
-                  learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: store, acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore())
+                  learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: store, abbreviationStore: MemoryAbbreviationStore(), acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore())
         }
         let c = Controller(make())
         c.session.activate()
@@ -571,6 +571,51 @@ final class ShellTests: XCTestCase {
         XCTAssertEqual(again.session.menu.first { $0.action == .togglePrediction }?.checked, false)
     }
 
+    /// V3 section 12.1: "可省略韻母" sits right after "即時預測", is unchecked by default, is stored, makes ㄋ then ㄔ two units
+    /// (preedit "ㄋㄔ"; off, ㄔ replaces ㄋ), is sent again to the engine a rebuild makes (the word pack switch and a layout switch rebuild it),
+    /// is greyed while the prediction row is off, and a new shell reads the stored on.
+    func testAbbreviationMenuItemTogglesStoresRebuildsAndSurvivesRestart() {
+        let store = MemoryAbbreviationStore()
+        let make = {
+            Shell(resources: self.resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(),
+                  learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), abbreviationStore: store, acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore())
+        }
+        let c = Controller(make())
+        c.session.activate()
+        let item = { c.session.menu.first { $0.action == .toggleAbbreviation } }
+        let titles = c.session.menu.map(\.title)
+        XCTAssertEqual(titles.firstIndex(of: "可省略韻母"), titles.firstIndex(of: "即時預測").map { $0 + 1 })
+        XCTAssertEqual(item()?.checked, false, "default off")
+        c.type("st")  // ㄋ, ㄔ
+        XCTAssertEqual(c.client.marked, "ㄔ", "off: the second key replaces the first")
+        c.press(Keys.esc)
+        c.session.perform(.toggleAbbreviation)
+        XCTAssertEqual(store.abbreviation, true)
+        XCTAssertEqual(item()?.checked, true)
+        c.type("st")
+        XCTAssertEqual(c.client.marked, "ㄋㄔ", "on: two units")
+        c.press(Keys.esc)
+        c.session.perform(.toggleAcgPack)  // rebuilds the engine, whose default is off
+        c.session.perform(.toggleAcgPack)
+        c.type("st")
+        XCTAssertEqual(c.client.marked, "ㄋㄔ", "the rebuilt engine got the setting")
+        c.press(Keys.esc)
+        c.session.perform(.layout(.eten))  // a layout switch rebuilds it too; Eten: n = ㄋ, b = ㄅ
+        c.type("nb")
+        XCTAssertEqual(c.client.marked, "ㄋㄅ", "the engine rebuilt by a layout switch got the setting")
+        c.press(Keys.esc)
+        c.session.perform(.layout(.standard))
+        c.session.perform(.togglePrediction)
+        XCTAssertEqual(item()?.enabled, false, "greyed while the row is off")
+        XCTAssertEqual(item()?.checked, true)
+        c.session.perform(.togglePrediction)
+        XCTAssertEqual(item()?.enabled, true)
+        let again = Controller(make())
+        again.session.activate()
+        again.type("st")
+        XCTAssertEqual(again.client.marked, "ㄋㄔ", "a new shell reads the stored on")
+    }
+
     /// acg-pack (docs/contracts/acg-pack.md A.2): the "動漫與遊戲詞" item is checked by default (user decision 2026-10-09), a toggle rebuilds the engine
     /// without the pack (the fixture pack spells 碇源堂, which the base lexicon cannot), the choice is stored, and a new shell
     /// reads it. On again: back to the engine with the pack.
@@ -581,7 +626,7 @@ final class ShellTests: XCTestCase {
         let store = MemoryAcgPackStore()
         let make = {
             Shell(resources: self.resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(),
-                  learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), acgPackStore: store, glassTintStore: MemoryGlassTintStore())
+                  learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), acgPackStore: store, glassTintStore: MemoryGlassTintStore())
         }
         let name = "2u/4m06w;6"  // ㄉㄧㄥˋ ㄩㄢˊ ㄊㄤˊ; the chat profile spells it 定元堂 without the pack (formal already gets it right)
         let c = Controller(make(), bundle: "com.hnc.Discord")
@@ -618,7 +663,7 @@ final class ShellTests: XCTestCase {
         XCTAssertNotEqual(CoreEngine.make(dataDir: resources.path, layout: 0, packsDir: packs.path).1, 0, "the fixture is a pack that cannot load")
         let store = MemoryAcgPackStore()
         let shell = Shell(resources: resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(),
-                          learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), acgPackStore: store, glassTintStore: MemoryGlassTintStore())
+                          learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), acgPackStore: store, glassTintStore: MemoryGlassTintStore())
         XCTAssertNotNil(shell.engine)
         XCTAssertNil(store.acgPack, "the preference is left as it was")
         let c = Controller(shell)
