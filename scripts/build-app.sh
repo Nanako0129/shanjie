@@ -66,7 +66,7 @@ cp "$BIN" "$APP/Contents/MacOS/shanjie"
 RES="$APP/Contents/Resources"
 cp data/lexicon/mcbpmf-data.txt data/lexicon/overlay-add.tsv data/lexicon/sandhi-add.tsv data/lexicon/demote.tsv "$RES/"
 # The optional word packs (docs/contracts/acg-pack.md A.2): the runtime files only, not the build inputs
-# (acg-groups.tsv, acg-collisions.tsv, acg-manual.tsv). The shell passes Resources/packs to shanjie_engine_new_packs.
+# (acg-groups.tsv, acg-collisions.tsv, acg-exclude.tsv, acg-manual.tsv). The shell passes Resources/packs to shanjie_engine_new_packs.
 mkdir -p "$RES/packs"
 cp data/packs/acg-add.tsv data/packs/acg-sources.tsv data/packs/acg.json "$RES/packs/"
 cp -L data/lm/bigram.sjlm data/lm/classes.sjc "$RES/"   # -L: the worktree's model may be a symlink

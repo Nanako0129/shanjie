@@ -164,6 +164,8 @@ def lua_items(x):
                 m = re.match(r"\[(=*)\[", x[k:])
                 close = "]" + m.group(1) + "]"
                 e = x.find(close, k + len(m.group(0)))
+                if e < 0:                                    # 沒有結尾的 [[：模組壞了，到此為止
+                    return
                 args.append(x[k + len(m.group(0)):e])
                 k = e + len(close)
                 continue
@@ -178,6 +180,11 @@ def lua_items(x):
             k += 1
         i = k
         yield args
+
+
+def wiki_title(url):
+    """SPARQL 回的條目網址 → 條目標題（只拆掉 /wiki/ 前綴，標題裡的 / 如 .hack//SIGN 要留著）。"""
+    return urllib.parse.unquote(url.split("/wiki/", 1)[1])
 
 
 def wiki_items(x):
@@ -520,13 +527,13 @@ def detect_collisions(words, reading, rows, ref, decode=top1):
 
 def read_collisions(path):
     """acg-collisions.tsv：讀音、保留的詞、排除的詞、理由。排除的詞寫 `-` 表示兩個都留（使用者決定的處置，排序照來源數）。
-    回傳 ({排除的詞: 讀音}, {已處置的讀音})。"""
+    回傳 ({排除的詞: 讀音}, {(讀音, 詞)})：處置列裡點名的（保留的詞、排除的詞）才算已處置，同讀音的新詞不算。"""
     if not os.path.exists(path):
         return {}, set()
     out, decided = {}, set()
     for r in read_tsv(path):
         assert len(r) == 4 and r[2], f"bad collision row: {r}"
-        decided.add(r[0])
+        decided |= {(r[0], r[1]), (r[0], r[2])}
         if r[2] != "-":
             out[r[2]] = r[0]
     return out, decided
@@ -574,7 +581,7 @@ def build(api, groups_tsv=os.path.join(PACKS, "acg-groups.tsv"), collisions_tsv=
 
     # 作品與條目
     b = api.sparql(SPARQL)["results"]["bindings"]
-    ws = sorted({x["w"]["value"].rsplit("/", 1)[1]: (x["w"]["value"].rsplit("/", 1)[1], urllib.parse.unquote(x["art"]["value"].rsplit("/", 1)[1]), int(x["sl"]["value"])) for x in b}.values(), key=lambda t: (-t[2], t[0]))[:WORKS]
+    ws = sorted({x["w"]["value"].rsplit("/", 1)[1]: (x["w"]["value"].rsplit("/", 1)[1], wiki_title(x["art"]["value"]), int(x["sl"]["value"])) for x in b}.values(), key=lambda t: (-t[2], t[0]))[:WORKS]
     arts, art_rev, seen, queued, missing = [], {}, set(), set(), []
     title_src, name_src, name_info = {}, collections.defaultdict(set), {}
     todo = [(w[1], True) for w in ws]                     # (條目, 是不是作品)；作品條目連到的角色列表接在後面
@@ -621,8 +628,9 @@ def build(api, groups_tsv=os.path.join(PACKS, "acg-groups.tsv"), collisions_tsv=
         assert HAN.match(w), w
         src[w]["manual"].add(work)
         ref.add(w)
-    dropped = read_exclude(exclude_tsv) & set(src)
-    ref -= dropped
+    exclude = read_exclude(exclude_tsv)
+    dropped = exclude & set(src)                         # 只有計數用；參考名單要扣掉整份排除清單
+    ref -= exclude
     excluded, decided = read_collisions(collisions_tsv)
     cand = [w for w in dedupe(src, have) if w not in excluded and w not in dropped]
     log("candidates", len(src), "after dedupe and exclusions", len(cand), "excluded by acg-collisions.tsv", len(excluded), "by acg-exclude.tsv", len(dropped))
@@ -634,7 +642,11 @@ def build(api, groups_tsv=os.path.join(PACKS, "acg-groups.tsv"), collisions_tsv=
     sc = scores(base)
     order = ordered(words, lambda w: sum(len(s) for s in src[w].values()))
     rows = pack_rows(order, reading, sc)
-    col = {r: v for r, v in detect_collisions(words, reading, rows, ref, decode).items() if r not in decided}
+    col = {}
+    for r, v in detect_collisions(words, reading, rows, ref, decode).items():
+        left = [e for e in v if (r, e[0]) not in decided]       # 詞 e[0] 在這個讀音的處置列裡被點名，才算已處置
+        if left:
+            col[r] = left
     ts_max = max(ts)
     manifest = {
         "version": ts_max[:10].replace("-", "") + "-" + hashlib.sha256("".join(rows).encode()).hexdigest()[:8],   # 最新的有時間戳的來源頁日期＋詞包內容雜湊：內容變了版號一定變

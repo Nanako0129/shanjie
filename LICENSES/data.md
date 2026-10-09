@@ -8,6 +8,7 @@
 | `data/lexicon/demote.tsv` | 本專案自寫（降權表，見 `docs/contracts/sw-sensitive-demote.md`；目前一行，來源是使用者回報與探針 `experiments/sw/sensitive-reading.txt`） | **CC BY-SA 4.0**（和專案其他資料一致，契約 §2 的決定） | 不含任何第三方資料；收錄條件寫在檔頭 |
 | `data/packs/acg-add.tsv`、`data/packs/acg-sources.tsv`、`data/packs/acg.json` | 由 `tools/build_acg_pack.py` 從中文維基百科產生（契約 `docs/contracts/acg-pack.md`）：公共轉換組 `Module:CGroup/*`／`Template:CGroup/*`（ACG 相關的組，取 zh-tw 值）、動畫作品條目的顯示標題、條目與角色列表裡的登場人物。每個詞的出處（頁面與抓取時的 revision ID）在 `acg-sources.tsv`；`acg.json` 記版號、各來源數量與檔案的 SHA-256。萌娘百科不用（CC BY-NC-SA，與 BY-SA 不相容） | **CC BY-SA 4.0**，署名：Wikipedia 貢獻者（https://creativecommons.org/licenses/by-sa/4.0/ ） | 可選的詞包，隨 App 內附、選單可開關（預設開，使用者 2026-10-09 決定）。和 `overlay-add.tsv` 同樣是 share-alike；程式碼仍是 Apache-2.0 |
 | `data/packs/acg-manual.tsv` | 維護者自己手動加的 ACG 詞（詞、作品、備註），由 `tools/build_acg_pack.py` 當成一個來源（標籤 `manual`）併入詞包 | CC0（維護者自己的清單） | 併入 `acg-add.tsv` 之後，隨詞包以 CC BY-SA 4.0 散布；本檔不含第三方資料；建置輸入，不隨 App 內附 |
+| `data/packs/acg-exclude.tsv` | 從條目抽出、但不是名字的字串（句子片段、轉換錯誤）與排除理由，逐一對照中文維基百科後定出；字串本身取自維基百科的條目文字 | **CC BY-SA 4.0**，署名：Wikipedia 貢獻者（https://creativecommons.org/licenses/by-sa/4.0/ ），與其他詞包檔相同 | 建置輸入，不隨 App 內附 |
 | `data/packs/acg-groups.tsv`、`data/packs/acg-collisions.tsv` | 本專案自寫：前者把 `Template:CGroup/list` 的 ACG 相關組分成收／不收，後者記同音衝突的處置 | **CC BY-SA 4.0**（和專案其他資料一致） | 建置輸入，不含第三方資料；不隨 App 內附 |
 | `eval/dev/acg/*.txt` | Wikidata 的 zh-tw 標籤（作品名、角色、角色名片段，sitelink 數最多者），讀音由 `tools/readings.py` 產生 | CC0（Wikidata 的資料授權） | 只用於評測，不用來調參 |
 | `eval/sets/trap.txt`、`eval/sets/daily.txt` | 本專案自寫 | CC0 | |
