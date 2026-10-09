@@ -137,14 +137,12 @@ extension Shell {
         do { try dir.setResourceValues(values) } catch {
             Log.shell.error("learning directory: setting the backup exclusion failed")
         }
-        NotificationCenter.default.post(name: Shell.didChangeSettings, object: self)
+        changed()
     }
 
     /// Section 4: memory, pending learns and the three files; non-zero opens the failure window.
     func clearLearning() {
         let code = engine?.learningClear() ?? 4
-        // The settings window's "cannot save" row may change with the clear.
-        NotificationCenter.default.post(name: Shell.didChangeSettings, object: self)
         guard code != 0 else { return }
         Log.shell.error("shanjie_engine_learning_clear failed, code \(code)")
         dialogs.clearFailed()
@@ -204,9 +202,7 @@ extension Session {
         case .layout(let m):
             shell.selectLayout(m)
         case .clear:
-            shell.dialogs.confirmClear { [weak shell] clear in
-                if clear { shell?.clearLearning() }
-            }
+            shell.confirmAndClear()
         case .toggleBackup:
             shell.setBackupExcluded(!shell.backupExcluded)
         case .toggleDemote:

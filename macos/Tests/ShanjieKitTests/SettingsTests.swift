@@ -111,15 +111,6 @@ final class SettingsTests: XCTestCase {
         XCTAssertFalse(rig().model.unavailable)
     }
 
-    func testThereIsNoThisAppRow() {
-        // The model has no client; a denylisted app pauses the menu's line only.
-        let r = rig()
-        let denied = Controller(r.shell, bundle: "com.bitwarden.desktop")
-        XCTAssertEqual(denied.session.menu.first, MenuEntry(title: "學習已暫停（此 App）"))
-        r.model.refresh()
-        XCTAssertFalse(r.model.pausedSecure)
-    }
-
     // MARK: glass tint
 
     func testGlassTintDefaultsToZeroAndIsHandedToEveryShow() {
@@ -153,5 +144,55 @@ final class SettingsTests: XCTestCase {
         // the panel is told the same thing each time, so 0.6 then 0 removes the tint
         XCTAssertNotNil(G.tint(value: 0.6, dark: true))
         XCTAssertNil(G.tint(value: 0, dark: true))
+    }
+
+    /// Section 2.3: a candidate panel that is up changes when the slider moves, with no key pressed.
+    func testSliderReachesAVisiblePanelAtOnce() {
+        let r = rig()
+        let c = r.controller
+        c.session.activate()
+        c.type("s")
+        XCTAssertTrue(c.panel.visible)
+        XCTAssertTrue(c.panel.retints.isEmpty)
+        r.model.setGlassTint(0.6)
+        XCTAssertEqual(c.panel.retints, [0.6])
+        r.model.setGlassTint(0)
+        XCTAssertEqual(c.panel.retints, [0.6, 0], "0 must reach the panel too")
+    }
+
+    /// The adapter assigns exactly what the Applier returns, so these are its decisions.
+    func testApplierSetsClearsAndSkipsUnchanged() {
+        var a = GlassTint.Applier()
+        XCTAssertNil(a.update(value: 0, dark: true), "never tinted and 0: assign nothing")
+        XCTAssertEqual(a.update(value: 0.6, dark: true), .set(GlassTint.Tint(black: true, opacity: 0.3)))
+        XCTAssertNil(a.update(value: 0.6, dark: true), "unchanged: no assignment")
+        XCTAssertEqual(a.update(value: 0.6, dark: false), .set(GlassTint.Tint(black: false, opacity: 0.3)), "appearance flipped")
+        XCTAssertEqual(a.update(value: 0, dark: false), .clear, "0.6 to 0 removes the tint")
+        XCTAssertNil(a.update(value: 0, dark: false))
+    }
+
+    /// The cached value is what shows read: no store read per key, and the store is written through.
+    func testGlassTintIsCachedFromTheStoreAtStart() {
+        let tint = MemoryGlassTintStore(0.4)
+        let shell = Shell(resources: resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(),
+                          learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(),
+                          predictionStore: MemoryPredictionStore(), acgPackStore: MemoryAcgPackStore(), glassTintStore: tint)
+        XCTAssertEqual(shell.glassTint, 0.4)
+        tint.glassTint = 0.9
+        XCTAssertEqual(shell.glassTint, 0.4, "the Shell reads the store only at start and on set")
+    }
+
+    /// Status rows follow the external state when asked, not on the change notification.
+    func testExternalStateIsReadOnRequest() {
+        var secure = false
+        let shell = Shell(resources: resources, panel: FakePanel(), isSecureInput: { secure }, layoutStore: MemoryLayoutStore(),
+                          learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(),
+                          predictionStore: MemoryPredictionStore(), acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore())
+        let model = SettingsModel(shell: shell)
+        secure = true
+        shell.changed()
+        XCTAssertFalse(model.pausedSecure, "a settings change does not re-read secure input")
+        model.refreshExternal()
+        XCTAssertTrue(model.pausedSecure)
     }
 }

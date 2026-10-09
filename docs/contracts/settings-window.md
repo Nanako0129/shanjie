@@ -31,7 +31,9 @@
 
 - 選單在「清除選字記憶…」之前加一項「善解設定…」（`MenuEntry.Action.openSettings`）。現有的選單項目不動。
 - 在輸入法自己的程序裡開一個 `NSWindow`，內容是 SwiftUI `Form`（`.grouped` 樣式，系統元件、系統預設動畫）。標題「善解設定」。同時只開一個，再點選單就把已開的那個帶到前面。
-- **帶到前面**：照現有 `AlertDialogs` 的做法，記下前景 App，`NSApp.activate()` 後 `makeKeyAndOrderFront`；關窗時把焦點還給記下的 App。實機上帶不到前面時，照 fcitx5 的做法改：開窗時暫時切成 `.regular`、關掉後切回。改法寫進這份契約再做（§5）。
+- **帶到前面**：照現有 `AlertDialogs` 的做法，記下前景 App，`NSApp.activate()` 後 `makeKeyAndOrderFront`；關窗時把焦點還給記下的 App。
+  - **修訂（2026-10-10 實機）**：使用者點「善解設定…」看不到視窗。查視窗列表：視窗有開、在畫面上，但層級是一般視窗（layer 0），`activate()` 被系統拒絕，所以被前景 App 蓋住。改成和 `AlertDialogs`（`.modalPanel`）一樣用較高的層級：視窗 `level = .floating`，`makeKeyAndOrderFront` 之後再 `orderFrontRegardless()`（威注音的做法）。視窗會在最前面，但不一定是 key window；使用者點一下就會成為 key。不改成 `.regular`（fcitx5 的做法會在 Dock 多一個圖示）。
+  - 實機上仍然帶不到前面時，才照 fcitx5 的做法改：開窗時暫時切成 `.regular`、關掉後切回。改法寫進這份契約再做（§5）。
 - 視窗裡**沒有文字欄位**：只有選擇器、開關、滑桿與按鈕。所以不需要自己裝 Edit 選單，也不會讓善解在自己的視窗裡處理打字。
 - 安全輸入期間選單是反灰的，打不開設定視窗。這是系統行為，照 CLAUDE.md「已知的系統問題」處理，不另外做。
 
@@ -45,7 +47,8 @@
 | 選字記憶 | 不要備份選字記憶（開關）、清除選字記憶…（按鈕，走現有的確認視窗） | `Shell` 現有的路徑 |
 
 - **狀態列**：「選字記憶」區塊最上面只顯示「學習已暫停（安全輸入）」（`IsSecureEventInputEnabled`，開窗時與每次重新讀取時查）與「選字記憶無法存檔」（`Shell` 的 learningUnavailable）。「學習已暫停（此 App）」取自某一個輸入 session 的 client，設定視窗不屬於任何 session，所以只留在選單，不在視窗顯示。
-- **同步**：`Shell` 在任何設定改變時發一個程序內通知，設定視窗收到就重新讀取。選單每次打開時本來就會重讀，不需要改。
+- **同步**：`Shell` 在任何設定改變時發一個程序內通知，設定視窗收到就重新讀取 `Shell` 已快取的設定值（排列、三個開關、玻璃深淺）。外部狀態（安全輸入、備份旗標、無法存檔）沒有通知，只在開窗與視窗成為 key window 時讀；視窗自己改備份旗標或清除之後也立刻重讀。選單每次打開時本來就會重讀，不需要改。
+- **之後的重構（不在這一片）**：用 `@Observable` 的 Shell 狀態取代 `SettingsModel` 的鏡像與通知。
 
 ### 2.3 玻璃深淺
 
@@ -64,7 +67,7 @@
    - 每個控制項改的是和選單同一個 store 與 setter：視窗切換「即時預測」後，`Session.menu` 的勾選跟著變；選單切換後，view model 收到通知、值跟著變。
    - 排列選擇器呼叫 `selectLayout`；動漫與遊戲詞開關會重建引擎，和選單相同。
    - `MemoryGlassTintStore` 沒設過時 `Shell` 讀到 0；`GlassTint.tint`：NaN、負數、大於 1 都會 clamp；值 0 回 nil；值 1 回不透明度 0.5；深色外觀黑、淺色白；同一個呼叫序列從 0.6 改回 0，第二次回 nil。
-   - 狀態列：安全輸入與無法存檔照規則出現；「此 App」那一列在視窗裡永遠不出現（view model 沒有 client）。
+   - 狀態列：安全輸入與無法存檔照規則出現；「此 App」那一列在視窗裡不出現，這是結構上的：`SettingsModel` 沒有對應的屬性、`SettingsForm` 也沒有對應的元件，所以不寫測試（沒有東西可以斷言）。
    - 選單多一項「善解設定…」，其餘項目與順序不變（既有的選單測試只加這一項）。
 2. **突變**（每一項都要讓某個測試失敗；build error 不算；都在 `ShanjieKitTests` 碰得到的程式裡）：
    - 視窗的某個開關呼叫的 setter 或 store 和選單不同；
@@ -73,7 +76,7 @@
    - 值 0 時回非 nil。
 3. `make test`、CI 全綠。
 4. **實機**（使用者，每次 ≤ 15 秒的部分由 `imeshot` 做）：
-   - 從選單打開，視窗在最前面、是 key window；
+   - 從選單打開，視窗在最前面；點一下就能操作（是否一打開就是 key window 一併記下）；
    - 每一項改了都有效果，選單的勾選跟著變；
    - 改玻璃深淺，回到 App 打字，看候選窗的深淺；深色與淺色 App 各看一次；再改回 0，候選窗回到原本的樣子；
    - 拖滑桿時候選窗是不是被收起（§2.3 的推論）記下來；
@@ -100,3 +103,6 @@
 | 審查 | 問題 | 處置 |
 |---|---|---|
 | plan-verifier 第 1 次 REVISE（2026-10-10） | 1. 玻璃色調的測試寫不進 `ShanjieKitTests`（候選窗在 App target），沒有 store、換算函式沒有位置，從大於 0 改回 0 沒有規則，兩個突變抓不到；2.「打字中拖滑桿、候選窗跟著變」大概做不到（點設定視窗會讓原本的 App 失去焦點），也沒標成推論；3.「此 App」的學習暫停來自 session 的 client，設定視窗沒有 client | FIX：1 → §2.3 加 `GlassTintStore`、`GlassTint.tint` 純函式、每次套用連 nil 一起設，§3 改測試與突變；2 → §1、§2.3、§3.4 改成「下一次出現的候選窗」並標推論；3 → §2.2 只顯示安全輸入與無法存檔，「此 App」留在選單 |
+| plan-verifier 第 2 次 READY（2026-10-10） | READY（第 1 次 REVISE 的三項已處置） | 狀態改為 READY，開始實作 |
+| 實機檢查（2026-10-10） | 使用者點「善解設定…」看不到視窗：視窗有開、層級是一般視窗，`activate()` 被拒絕，被前景 App 蓋住 | 修訂 §2.1：`level = .floating` 加 `orderFrontRegardless()`；§3.4 的「是 key window」改為「在最前面、點一下可操作」 |
+| 本地 /code-review（2026-10-10） | 滑桿不即時作用於已顯示的候選窗；關窗在非作用中時搶焦點；狀態列在成為 key 時不重讀；清除色調的 nil 路徑在 App target 且沒測試；`glassTintStore` 有預設值；`applyDemote`／`applyPrediction` 無 owner 時吞掉 `.failed`；每次按鍵讀 UserDefaults、每次變更讀外部狀態；寬度魔術數字；SDK 註解；重複的程式；無意義的測試 | FIX：`CandidatePanel.setGlassTint` 與 `GlassTint.Applier`（App 只照它的回傳賦值，含 nil）、`NSApp.isActive` 才還焦點、`windowDidBecomeKey` 重讀、`glassTintStore` 必填且 `Shell` 快取、無 owner 時記錄並丟掉組字、`SettingsModel` 延後建立並分成 `refreshSettings`／`refreshExternal`、`Shell.confirmAndClear` 與 `changed()` 合併重複、刪除 `testThereIsNoThisAppRow`。延後：`@Observable` 重構（§2.2） |

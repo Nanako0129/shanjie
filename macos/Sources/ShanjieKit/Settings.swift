@@ -10,29 +10,22 @@ public final class SettingsModel: ObservableObject {
     private let shell: Shell
     private var observer: NSObjectProtocol?
 
-    @Published public private(set) var layout: InputMode
-    @Published public private(set) var prediction: Bool
-    @Published public private(set) var demote: Bool
-    @Published public private(set) var acgPack: Bool
-    @Published public private(set) var backupExcluded: Bool
-    @Published public private(set) var glassTint: Double
+    @Published public private(set) var layout = InputMode.standard
+    @Published public private(set) var prediction = true
+    @Published public private(set) var demote = true
+    @Published public private(set) var acgPack = true
+    @Published public private(set) var backupExcluded = false
+    @Published public private(set) var glassTint = 0.0
     /// Status rows (section 2.2). There is no "this app" row: it comes from one session's client and
     /// this window belongs to no session.
-    @Published public private(set) var pausedSecure: Bool
-    @Published public private(set) var unavailable: Bool
+    @Published public private(set) var pausedSecure = false
+    @Published public private(set) var unavailable = false
 
     public init(shell: Shell) {
         self.shell = shell
-        layout = shell.layout
-        prediction = shell.predictionOn
-        demote = shell.demoteOn
-        acgPack = shell.acgPackOn
-        backupExcluded = shell.backupExcluded
-        glassTint = shell.glassTint
-        pausedSecure = shell.isSecureInput()
-        unavailable = shell.learningUnavailable
+        refresh()
         observer = NotificationCenter.default.addObserver(forName: Shell.didChangeSettings, object: shell, queue: .main) {
-            [weak self] _ in MainActor.assumeIsolated { self?.refresh() }
+            [weak self] _ in MainActor.assumeIsolated { self?.refreshSettings() }
         }
     }
 
@@ -40,14 +33,24 @@ public final class SettingsModel: ObservableObject {
         if let observer { NotificationCenter.default.removeObserver(observer) }
     }
 
-    /// Re-reads everything; also called when the window opens (the secure-input state has no notification).
     public func refresh() {
+        refreshSettings()
+        refreshExternal()
+    }
+
+    /// Shell's cached values only; this runs on every change notification, a slider drag included.
+    func refreshSettings() {
         layout = shell.layout
         prediction = shell.predictionOn
         demote = shell.demoteOn
         acgPack = shell.acgPackOn
-        backupExcluded = shell.backupExcluded
         glassTint = shell.glassTint
+    }
+
+    /// State the Shell does not announce or caches nowhere: secure input, the backup flag (a
+    /// resourceValues read) and the core's write status. Read when the window opens and becomes key.
+    public func refreshExternal() {
+        backupExcluded = shell.backupExcluded
         pausedSecure = shell.isSecureInput()
         unavailable = shell.learningUnavailable
     }
@@ -56,12 +59,13 @@ public final class SettingsModel: ObservableObject {
     public func setPrediction(_ on: Bool) { shell.applyPrediction(on) }
     public func setDemote(_ on: Bool) { shell.applyDemote(on) }
     public func setAcgPack(_ on: Bool) { shell.setAcgPack(on) }
-    public func setBackupExcluded(_ on: Bool) { shell.setBackupExcluded(on) }
+    public func setBackupExcluded(_ on: Bool) {
+        shell.setBackupExcluded(on)
+        refreshExternal()  // not read on the change notification
+    }
     public func setGlassTint(_ v: Double) { shell.setGlassTint(v) }
     /// The same confirmation window as the menu's.
     public func clear() {
-        shell.dialogs.confirmClear { [weak shell] clear in
-            if clear { shell?.clearLearning() }
-        }
+        shell.confirmAndClear { [weak self] in self?.refreshExternal() }  // the "cannot save" row may change
     }
 }

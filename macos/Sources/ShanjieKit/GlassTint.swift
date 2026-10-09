@@ -22,4 +22,26 @@ public enum GlassTint {
         guard v > 0 else { return nil }
         return Tint(black: dark, opacity: v * GLASS_TINT_MAX)
     }
+
+    /// What the glass must be told to change.
+    public enum Change: Equatable, Sendable {
+        case set(Tint)
+        /// Remove the tint (assign nil): going from a tint back to 0.
+        case clear
+    }
+
+    /// Remembers the last tint applied to the glass, so the adapter assigns only on a change (needless
+    /// glass updates flickered, s3b2) and a return to 0 is never missed. Compares `Tint` values, not NSColor.
+    public struct Applier: Sendable {
+        private var last: Tint?
+        public init() {}
+
+        /// `nil`: nothing to assign.
+        public mutating func update(value: Double, dark: Bool) -> Change? {
+            let t = GlassTint.tint(value: value, dark: dark)
+            guard t != last else { return nil }
+            last = t
+            return t.map(Change.set) ?? .clear
+        }
+    }
 }
