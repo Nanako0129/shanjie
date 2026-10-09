@@ -596,7 +596,8 @@ impl Engine {
     }
 
     /// §1.2: runs after the commit text is known, inside its own `catch_unwind`: whatever fails here
-    /// only costs this learn. `display` is the committed text.
+    /// only costs this learn. `display` is the decoded composition text, without the unfinished symbols that the
+    /// commit itself may carry (s3a rule 12a): the context keys are offsets into it.
     fn learn_commit(&mut self, display: &str) {
         if !self.learning || self.fixed.iter().all(|f| f.pre.is_none()) {
             return;
@@ -761,9 +762,10 @@ impl Engine {
         any.then(|| if open { total + st.lm.eos(lam, prev) } else { total })
     }
 
-    /// §6 reset: Commit returns the display string (pending syllable dropped); both clear everything.
+    /// §6 reset: Commit returns the composition as shown, unfinished symbols included, like Enter (enter-pending
+    /// contract §2; no learning here); both clear everything.
     pub fn reset(&mut self, mode: ResetMode) -> Output {
-        let commit = if mode == ResetMode::Commit { std::mem::take(&mut self.display) } else { String::new() };
+        let commit = if mode == ResetMode::Commit { self.shown().0 } else { String::new() };
         self.clear_all();
         self.view(true, commit)
     }
@@ -919,16 +921,22 @@ impl Engine {
         self.pend.iter().flatten().collect()
     }
 
-    fn view(&self, handled: bool, commit: String) -> Output {
+    /// The composition as shown: the display text with the unfinished symbols at the cursor, and the cursor after
+    /// them in UTF-16 code units.
+    fn shown(&self) -> (String, u32) {
         let chars: Vec<char> = self.display.chars().collect();
         // A syllable shows as one char (lexicon invariant); a punctuation token as its fixed word,
         // which can be longer (⋯⋯, s3e §3). Clamped in case the invariant ever breaks.
         let at = (0..self.cursor).map(|i| self.token_width(i)).sum::<usize>().min(chars.len());
-        let pending = self.pending();
-        let mut preedit: String = chars[..at].iter().collect();
-        preedit.push_str(&pending);
-        let cursor_utf16 = preedit.encode_utf16().count() as u32;
-        preedit.extend(chars[at..].iter());
+        let mut text: String = chars[..at].iter().collect();
+        text.push_str(&self.pending());
+        let cursor_utf16 = text.encode_utf16().count() as u32;
+        text.extend(chars[at..].iter());
+        (text, cursor_utf16)
+    }
+
+    fn view(&self, handled: bool, commit: String) -> Output {
+        let (preedit, cursor_utf16) = self.shown();
         let (candidates, selected, columns, first, total) = match &self.cands {
             Some(c) => {
                 let (first, n) = c.window();
@@ -1032,12 +1040,21 @@ impl Engine {
     fn passthrough(&self, commit: String) -> Result<Output, EngineError> {
         Ok(self.view(false, commit))
     }
-    /// Commit the whole composition and clear all state.
+    /// Commit the whole composition as shown, unfinished symbols included (s3a rule 12a), and clear all state. Learning
+    /// sees the decoded text only.
     fn take_commit(&mut self) -> String {
+        let (shown, _) = self.shown();
         let s = std::mem::take(&mut self.display);
         self.learn_commit(&s);
         self.clear_all();
-        s
+        shown
+    }
+
+    /// Rules 12a, 12b, 19, 19a: Enter commits what is shown; Shift+Enter then passes the key on (Apple Zhuyin, measured
+    /// 2026-10-09: it commits and the app gets the line break).
+    fn commit_enter(&mut self, m: u32) -> Result<Output, EngineError> {
+        let commit = self.take_commit();
+        Ok(self.view(m & MOD_SHIFT == 0, commit))
     }
 
     fn dispatch(&mut self, k: Key) -> Result<Output, EngineError> {
@@ -1138,6 +1155,8 @@ impl Engine {
                 self.pred_dirty = true;
             } else if k.kind == KeyKind::Esc {
                 self.pend = [None; 3];
+            } else if k.kind == KeyKind::Enter {
+                return self.commit_enter(m); // 12a, 12b
             } else {
                 self.pred = old; // the key does nothing
             }
@@ -1176,10 +1195,7 @@ impl Engine {
             }
             KeyKind::Delete if self.cursor < n => self.remove_syllable(self.cursor)?,
             KeyKind::Backspace | KeyKind::Delete => self.pred = old,
-            KeyKind::Enter => {
-                let commit = self.take_commit();
-                return Ok(self.view(true, commit));
-            }
+            KeyKind::Enter => return self.commit_enter(m), // 19, 19a
             KeyKind::Esc => self.clear_all(),
             _ => {
                 let commit = self.take_commit(); // 21
