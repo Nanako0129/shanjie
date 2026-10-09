@@ -207,6 +207,7 @@ LANG = re.compile(r"^\s*(?:(.*?)=>)?\s*(zh-[a-z]+)\s*:(.*)$", re.S)
 
 
 NAMED = re.compile(r"^\s*[A-Za-z_]\w*\s*=(?!>)")
+POS = re.compile(r"^\s*\d+\s*=(?!>)")      # {{CItem|1=zh-tw:X;zh-cn:Y}}：數字開頭的是位置參數，只是明寫編號
 
 
 def params(rule):
@@ -223,7 +224,7 @@ def params(rule):
             continue
         cur.append(tok)
     out.append("".join(cur))
-    return [p for p in out if not NAMED.match(p)]
+    return [POS.sub("", p, count=1) for p in out if not NAMED.match(p)]
 
 
 def tw_values(rule):
@@ -287,7 +288,7 @@ def resolve_groups(api, rows, items):
     for r in rows:
         it = by_key.get((r[1], r[2])) or by_zh.get(r[1])
         c = [r[2], it[3] if it else "", r[1], it[2] if it else ""]
-        cands[(r[1], r[2])] = [x for x in dict.fromkeys(c) if x and x != "--" and "待查" not in x] or [r[1]]
+        cands[(r[1], r[2])] = [x for x in dict.fromkeys(c) if x and x != "--"] or [r[1]]
     got, chosen = {}, {}
     for rank in range(4):
         todo = [g for g, c in cands.items() if g not in chosen and rank < len(c)]
@@ -501,14 +502,10 @@ def ordered(words, nsrc):
 
 
 def pack_rows(order, reading, sc):
-    """每個詞一列主要讀音，含「一」「不」的緊接一列變調（和 build_overlay 相同）。"""
+    """每個詞的列，格式和 build_overlay 共用同一個函式。"""
     rows = []
     for w in order:
-        syls = reading[w]
-        rows.append(f"{'-'.join(syls)}\t{w}\t{sc[len(w)]!r}\t{TAG}\n")
-        var = bo.sandhi_variant(w, syls)
-        if var:
-            rows.append(f"{'-'.join(var)}\t{w}\t{round(sc[len(w)] - bo.VARIANT_PENALTY, 8)!r}\t{TAG}\n")
+        rows += bo.overlay_rows(w, reading[w], sc[len(w)], TAG)
     return rows
 
 
@@ -542,11 +539,17 @@ def top1(pairs, profile, packs_dir=None):
         return [first[i + 1] for i in range(len(pairs))]
 
 
-def detect_collisions(words, reading, rows, ref, decode=top1):
+LEXICON_RULE_ROUNDS = 5      # 類型 c 規則重跑的上限；丟一個詞只會讓少數鄰居改變，實測幾輪就穩
+
+
+def detect_collisions(words, reading, rows, ref, decode=top1, existing=None):
     """對每個詞包詞 w 的讀音（含「一」「不」變調列的讀音），各解碼兩次（不開／開詞包；聊天與書面）。符合其一就列出：
-    (a) 開了之後第一名是另一個詞包詞；(b) 不開時第一名不是 w，而且在參考名單 ref 裡。兩者都只在開了之後第一名有改變時才算：
+    (a) 開了之後第一名是另一個詞包詞；(b) 不開時第一名不是 w，而且在參考名單 ref 裡；
+    (c) 不開時第一名 o 不是 w、是既有詞庫的詞（existing，預設 lexicon_words()），開了之後第一名變成 w（w 把既有詞擠下第一名）。
+    都只在開了之後第一名有改變時才算：
     第一名沒變的，詞包的寫法只多一個候選，不改變打出來的結果（使用者 2026-10-09 決定這類留做候選、不必人工處置）。
     回傳 {讀音: [(w, 條件, 設定, 不開第一名, 開第一名)]}。"""
+    existing = lexicon_words() if existing is None else existing
     with tempfile.TemporaryDirectory() as d:
         with open(os.path.join(d, "acg-add.tsv"), "w", encoding="utf-8") as f:
             f.writelines(rows)
@@ -562,7 +565,7 @@ def detect_collisions(words, reading, rows, ref, decode=top1):
             for (w, syls), o, n in zip(pairs, off, on):
                 if n == o:
                     continue
-                for cond, hit in (("a", n != w and n in inpack), ("b", o != w and o in ref)):
+                for cond, hit in (("a", n != w and n in inpack), ("b", o != w and o in ref), ("c", n == w and o != w and o in existing)):
                     if hit:
                         found[" ".join(syls)].append((w, cond, prof, o, n))
     return dict(found)
@@ -576,7 +579,8 @@ def read_collisions(path):
         return {}, set()
     out, decided = {}, set()
     for r in read_tsv(path):
-        assert len(r) == 4 and r[2].lstrip("+"), f"bad collision row: {r}"
+        if not (len(r) == 4 and r[2].lstrip("+")):
+            raise SystemExit(f"{path}: bad collision row: {r}")
         other = r[2].lstrip("+")
         decided |= {(r[0], r[1]), (r[0], other)}
         if not r[2].startswith("+"):
@@ -590,7 +594,8 @@ def read_exclude(path):
         return set()
     out = set()
     for r in read_tsv(path):
-        assert len(r) == 2 and HANX.match(r[0]) and r[1], f"bad exclude row: {r}"
+        if not (len(r) == 2 and HANX.match(r[0]) and r[1]):
+            raise SystemExit(f"{path}: bad exclude row: {r}")
         out.add(r[0])
     return out
 
@@ -602,8 +607,8 @@ def build(api, groups_tsv=os.path.join(PACKS, "acg-groups.tsv"), collisions_tsv=
     gr = read_tsv(groups_tsv)
     listing = pages(api, ["Template:CGroup/list"])["Template:CGroup/list"]
     items = list_items(listing["text"])
-    known = {(r[1], r[2]) for r in gr} | {(r[1], None) for r in gr}
-    unclassified = sorted(f"{i[1]} ({i[2]})" for i in items if (i[1], i[2]) not in known and (i[1], None) not in known)
+    known = {(r[1], r[2]) for r in gr}
+    unclassified = sorted(f"{i[1]} ({i[2]})" for i in items if (i[1], i[2]) not in known)
     log("groups", len(gr), "unclassified", len(unclassified))
     resolved = resolve_groups(api, gr, items)
     ts, revs = [listing["ts"]], [listing["revid"]]
@@ -670,25 +675,38 @@ def build(api, groups_tsv=os.path.join(PACKS, "acg-groups.tsv"), collisions_tsv=
     for n in chars:
         src[n]["char"] |= {f"{t}@{art_rev[t]}" for t in name_src[n]}
     for w, work, *_ in read_tsv(manual_tsv):            # 維護者手動加的詞（欄位：詞、作品、備註）：同樣去重、定讀音、算分數、偵測衝突
-        assert HAN.match(w), w
+        if not HAN.match(w):
+            raise SystemExit(f"{manual_tsv}: bad manual word: {w!r}")
         src[w]["manual"].add(work)
         ref.add(w)
     exclude = read_exclude(exclude_tsv)
-    dropped = exclude & set(src)                         # 只有計數用；參考名單要扣掉整份排除清單
     ref -= exclude
     excluded, decided = read_collisions(collisions_tsv)
-    cand = [w for w in dedupe(src, have) if w not in excluded and w not in dropped]
-    log("candidates", len(src), "after dedupe and exclusions", len(cand), "excluded by acg-collisions.tsv", len(excluded), "by acg-exclude.tsv", len(dropped))
+    deduped = set(dedupe(src, have))
+    dropped = exclude & deduped                          # 實際從候選拿掉的才算
+    cand = [w for w in sorted(deduped) if w not in excluded and w not in dropped]
+    log("candidates", len(src), "after dedupe and exclusions", len(cand), "excluded by acg-collisions.tsv", len(set(excluded) & deduped), "by acg-exclude.tsv", len(dropped))
 
     rd = readings(cand)
     unread = sorted(set(cand) - set(rd))
     words = [w for w in cand if w in rd]
     reading = {w: rd[w][0] for w in words}
     sc = scores(base)
-    order = ordered(words, lambda w: sum(len(s) for s in src[w].values()))
-    rows = pack_rows(order, reading, sc)
+    # 使用者 2026-10-10 的規則：詞包詞若把既有詞庫的詞擠下第一名（類型 c），既有詞勝、詞包詞丟掉；丟掉之後別的詞的結果可能變，重跑到沒有 c 為止。
+    lexicon_dropped = []
+    for _ in range(LEXICON_RULE_ROUNDS):
+        order = ordered(words, lambda w: sum(len(s) for s in src[w].values()))
+        rows = pack_rows(order, reading, sc)
+        found = detect_collisions(words, reading, rows, ref, decode)
+        hit = {e[0]: (r, e) for r, v in sorted(found.items()) for e in v if e[1] == "c"}
+        if not hit:
+            break
+        lexicon_dropped += [(r, w, o, prof) for w, (r, (_, _, prof, o, _)) in sorted(hit.items())]
+        words = [w for w in words if w not in hit]
+    else:
+        raise SystemExit(f"type (c) collisions not settled after {LEXICON_RULE_ROUNDS} rounds")
     col = {}
-    for r, v in detect_collisions(words, reading, rows, ref, decode).items():
+    for r, v in found.items():
         left = [e for e in v if (r, e[0]) not in decided]       # 詞 e[0] 在這個讀音的處置列裡被點名，才算已處置
         if left:
             col[r] = left
@@ -704,7 +722,8 @@ def build(api, groups_tsv=os.path.join(PACKS, "acg-groups.tsv"), collisions_tsv=
         "unclassified_groups": unclassified,
         "articles_missing": sorted(missing),
         "unreadable_dropped": len(unread),
-        "excluded_by_collisions_tsv": len(excluded),
+        "excluded_by_collisions_tsv": len(set(excluded) & deduped),
+        "dropped_by_lexicon_rule": len(lexicon_dropped),
         "excluded_by_exclude_tsv": len(dropped),
         "unresolved_collision_readings": len(col),
     }
@@ -714,14 +733,16 @@ def build(api, groups_tsv=os.path.join(PACKS, "acg-groups.tsv"), collisions_tsv=
             if k in src[w]:
                 note = ",".join(x for x, on in (("CHECK", rd[w][1]), ("zh-hant", k == "cgroup" and w in cg_hant)) if on)
                 sources.append(f"{w}\t{k}\t{'; '.join(sorted(src[w][k]))}\t{note}\n")
-    return {"acg-add.tsv": "".join(rows), "acg-sources.tsv": "".join(sources)}, manifest, col, unread, ref
+    return {"acg-add.tsv": "".join(rows), "acg-sources.tsv": "".join(sources)}, manifest, col, unread, ref, lexicon_dropped
 
 
-def collisions_text(col, manifest):
+def collisions_text(col, manifest, ldrop=()):
     out = ["# 未處置的同音衝突（契約 A.1）。每列：讀音、詞、條件（a 詞包內同音／b 搶走參考名單的名字）、設定、不開詞包的第一名、開了之後的第一名。\n",
            "# 處置寫進 data/packs/acg-collisions.tsv（讀音、保留的詞、排除的詞、理由）。\n"]
     for r in sorted(col):
         out += [f"{r}\t{w}\t{c}\t{p}\t{o}\t{n}\n" for w, c, p, o, n in sorted(col[r])]
+    out.append("# 依使用者 2026-10-10 的規則丟掉的詞包詞（類型 c：會把既有詞庫的詞擠下第一名）。每列：讀音、丟掉的詞、既有詞庫的詞、設定。\n")
+    out += [f"{r}\t{w}\t{o}\t{prof}\n" for r, w, o, prof in sorted(ldrop)]
     out.append("# 未分類的轉換組（不收）：" + "、".join(manifest["unclassified_groups"]) + "\n")
     return "".join(out)
 
@@ -743,11 +764,11 @@ def main():
     ap.add_argument("--report", default=os.path.join(ROOT, "build", "acg-pack"))
     ap.add_argument("--offline", action="store_true")
     a = ap.parse_args()
-    files, manifest, col, unread, ref = build(Api(a.cache, a.offline))
+    files, manifest, col, unread, ref, ldrop = build(Api(a.cache, a.offline))
     write_all(files, manifest, a.out)
     os.makedirs(a.report, exist_ok=True)
     with open(os.path.join(a.report, "collisions.txt"), "w", encoding="utf-8") as f:
-        f.write(collisions_text(col, manifest))
+        f.write(collisions_text(col, manifest, ldrop))
     for name, lines in (("unreadable.txt", unread), ("reference.txt", sorted(ref))):
         with open(os.path.join(a.report, name), "w", encoding="utf-8") as f:
             f.write("".join(w + "\n" for w in lines))

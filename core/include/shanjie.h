@@ -63,7 +63,8 @@ typedef struct {
 typedef struct ShanjieEngine ShanjieEngine;
 
 int32_t shanjie_engine_new(const char *data_dir, uint32_t layout, ShanjieEngine **out); // layout 0 standard, 1 ETen
-// acg-pack (docs/contracts/acg-pack.md A.2): word packs. packs is a bit mask (bit0 = ACG, packs_dir/acg-add.tsv);
+#define SHANJIE_PACK_ACG 1u   // bit0 of the packs mask below
+// acg-pack (docs/contracts/acg-pack.md A.2): word packs. packs is a bit mask (SHANJIE_PACK_ACG = ACG, packs_dir/acg-add.tsv);
 //   the rows are parsed into the lexicon, so the set is fixed for the engine's life: the shell turns a pack on or
 //   off by freeing the engine and creating another, like a layout change. packs 0 ignores packs_dir (may be NULL)
 //   and is exactly shanjie_engine_new; a missing pack file contributes nothing (same engine as without it).

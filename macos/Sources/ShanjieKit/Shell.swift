@@ -255,7 +255,7 @@ public final class Shell {
     private func build() {
         engine = nil  // free the old engine first: only one exists at a time
         let packsDir = resources.appendingPathComponent("packs").path
-        var (made, code) = CoreEngine.make(dataDir: resources.path, layout: mode.layout, packsDir: packsDir, acgPack: acgPackOn)
+        var (made, code) = CoreEngine.make(dataDir: resources.path, layout: mode.layout, packsDir: acgPackOn ? packsDir : nil)
         if made == nil && acgPackOn {
             // Any build failure retries without the pack, so the first code alone does not say whose fault it is:
             // blame the pack only if the pack-less build works; otherwise the second code is the real cause.

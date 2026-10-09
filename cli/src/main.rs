@@ -121,17 +121,29 @@ fn pack_flag(v: &str) -> Result<u32, String> {
     }
 }
 
-/// The lexicon with the chosen packs and the overlay text that caps the LM scores (the same helpers as the engine's
-/// `new` and `load_lm`). The engine tolerates a missing pack file; a run that asked for one must not silently measure without it.
-fn load_with_packs(dir: &Path, packs: u32, packs_dir: Option<String>) -> Result<(std::sync::Arc<Lexicon>, String), String> {
+/// The packs directory (`--packs-dir` or data/packs); a run that asks for a pack must fail loudly when its file is
+/// missing (the engine tolerates it), so this is checked with the other options, before the model is read.
+fn packs_dir_checked(packs: u32, packs_dir: Option<String>) -> Result<PathBuf, String> {
     let pdir = packs_dir.map_or_else(|| root().join("data/packs"), PathBuf::from);
     let acg = pdir.join("acg-add.tsv");
     if packs & PACK_ACG != 0 && !acg.is_file() {
         return Err(format!("--packs acg: pack file not found: {}", acg.display()));
     }
+    Ok(pdir)
+}
+
+/// The lexicon with the chosen packs and the overlay text that caps the LM scores (the same helpers as the engine's
+/// `new` and `load_lm`).
+fn load_with_packs(dir: &Path, packs: u32, pdir: &Path) -> Result<(std::sync::Arc<Lexicon>, String), String> {
     // The pack rows are read once and reused for the cap; overlay-add.tsv is read again by capping_overlay, as load_lm does.
-    let (lex, pack_text) = load_lexicon_packs(dir, Some((&pdir, packs))).map_err(|_| "cannot load lexicon".to_string())?;
-    let overlay = capping_overlay(dir, &pack_text).map_err(|_| "cannot load lexicon".to_string())?;
+    let (lex, pack_text) = load_lexicon_packs(dir, Some((pdir, packs))).map_err(|_| "cannot load lexicon".to_string())?;
+    let overlay = capping_overlay(dir, &pack_text).map_err(|_| {
+        let p = dir.join("overlay-add.tsv");
+        match fs::read_to_string(&p) {
+            Err(e) => format!("cannot read {} ({:?})", p.display(), e.kind()),
+            Ok(_) => "cannot load lexicon".to_string(),
+        }
+    })?;
     Ok((lex, overlay))
 }
 
@@ -166,6 +178,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
         }
     }
     check_lm_opts(set.as_deref(), dump.is_some(), packs, packs_dir.is_some())?;
+    let pdir = packs_dir_checked(packs, packs_dir)?;
     let profile_name = profile.ok_or("--profile is required")?;
     let prof = match profile_name.as_str() {
         "chat" => Profile::Chat,
@@ -177,7 +190,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     let lm = if classes { Lm::load(std::path::Path::new(&lm_path)) } else { Lm::load_without_classes(std::path::Path::new(&lm_path)) }
         .map_err(|e| e.to_string())?;
     let dir = root().join("data/lexicon");
-    let (lex, overlay) = load_with_packs(&dir, packs, packs_dir)?;
+    let (lex, overlay) = load_with_packs(&dir, packs, &pdir)?;
     let demote_rows = fs::read_to_string(dir.join("demote.tsv")).map_err(|e| format!("cannot read demote.tsv ({:?})", e.kind()))?;
     let table = Demote::parse(&demote_rows).filter(|d| d.check(&lex)).ok_or("bad demote.tsv")?;
     // The table is always loaded, so a malformed one stops the run even with --no-demote.
@@ -319,6 +332,7 @@ fn run_predict(args: &[String]) -> Result<(), String> {
         }
     }
     check_lm_opts(None, false, packs, packs_dir.is_some())?;
+    let pdir = packs_dir_checked(packs, packs_dir)?;
     let lam = match profile.ok_or("--profile is required")?.as_str() {
         "chat" => Profile::Chat,
         "formal" => Profile::Formal,
@@ -327,7 +341,7 @@ fn run_predict(args: &[String]) -> Result<(), String> {
     .lambda();
     let lm = Lm::load(Path::new(&lm_path.ok_or("--lm is required")?)).map_err(|e| e.to_string())?;
     let dir = root().join("data/lexicon");
-    let (lex, overlay) = load_with_packs(&dir, packs, packs_dir)?;
+    let (lex, overlay) = load_with_packs(&dir, packs, &pdir)?;
     // Prediction scores use the capped lp only; demotion applies to decoding (sw §3).
     let capped = CappedLexicon::new(lex.clone(), &overlay, &lm, None).ok_or("cannot build the capped lexicon")?;
     let text = fs::read_to_string(file.ok_or("--predict is required")?).map_err(|e| format!("cannot read file ({:?})", e.kind()))?;
