@@ -105,6 +105,9 @@ struct SettingsForm: View {
             }
             Section("選字") {
                 Toggle(MenuEntry.Text.prediction, isOn: Binding(get: { model.prediction }, set: { model.setPrediction($0) }))
+                // Greyed while the prediction row is off, like the menu item (v3-engine section 12.1).
+                Toggle(MenuEntry.Text.abbreviation, isOn: Binding(get: { model.abbreviation }, set: { model.setAbbreviation($0) }))
+                    .disabled(!model.prediction)
                 Toggle(MenuEntry.Text.demote, isOn: Binding(get: { model.demote }, set: { model.setDemote($0) }))
                 Toggle(MenuEntry.Text.acgPack, isOn: Binding(get: { model.acgPack }, set: { model.setAcgPack($0) }))
                 if let line = model.acgDataLine {
