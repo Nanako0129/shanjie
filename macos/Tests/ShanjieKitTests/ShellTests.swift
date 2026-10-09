@@ -572,7 +572,7 @@ final class ShellTests: XCTestCase {
     }
 
     /// V3 section 12.1: "可省略韻母" sits right after "即時預測", is unchecked by default, is stored, makes ㄋ then ㄔ two units
-    /// (preedit "ㄋㄔ"; off, ㄔ replaces ㄋ), is sent again to the engine a rebuild makes (the word pack switch rebuilds it),
+    /// (preedit "ㄋㄔ"; off, ㄔ replaces ㄋ), is sent again to the engine a rebuild makes (the word pack switch and a layout switch rebuild it),
     /// is greyed while the prediction row is off, and a new shell reads the stored on.
     func testAbbreviationMenuItemTogglesStoresRebuildsAndSurvivesRestart() {
         let store = MemoryAbbreviationStore()
@@ -600,6 +600,11 @@ final class ShellTests: XCTestCase {
         c.type("st")
         XCTAssertEqual(c.client.marked, "ㄋㄔ", "the rebuilt engine got the setting")
         c.press(Keys.esc)
+        c.session.perform(.layout(.eten))  // a layout switch rebuilds it too; Eten: n = ㄋ, b = ㄅ
+        c.type("nb")
+        XCTAssertEqual(c.client.marked, "ㄋㄅ", "the engine rebuilt by a layout switch got the setting")
+        c.press(Keys.esc)
+        c.session.perform(.layout(.standard))
         c.session.perform(.togglePrediction)
         XCTAssertEqual(item()?.enabled, false, "greyed while the row is off")
         XCTAssertEqual(item()?.checked, true)

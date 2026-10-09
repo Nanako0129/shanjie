@@ -28,6 +28,9 @@ pub const PREDICT_LONG_CAP: usize = 3;
 /// inside words this far back are queried last. Five is the user's choice; long names in the ACG pack were measured
 /// at 4, 5 and 6 (research log 2026-10-09).
 pub const PREDICT_BACK: usize = 5;
+/// Most unfinished units the abbreviation composer holds (V3 engine contract section 12.2). The longest names in the ACG pack
+/// are 10 characters and an abbreviation only helps up to the longest word; past this an occupied column replaces (rule 9).
+pub const ABBR_MAX_UNITS: usize = 10;
 /// Items in the prediction row.
 pub const PREDICT_MAX: usize = PAGE_SIZE;
 /// Items asked of `predict` for a start that some learned record could match (V3 engine contract section 10.2 step 1).
@@ -729,7 +732,8 @@ impl Engine {
         self.handled()
     }
 
-    /// Esc on two or more unfinished units: they go, the row with them; the composition, fixed words and cursor stay.
+    /// What `set_prediction(false)` and `set_abbreviation(false)` do with two or more unfinished units: they go, the row
+    /// with them, as with Esc (which goes through `clear_pend`); the composition, fixed words and cursor stay.
     fn drop_units(&mut self) {
         if !self.pend_prev.is_empty() {
             self.clear_pend();
@@ -737,9 +741,16 @@ impl Engine {
         }
     }
 
-    /// Section 12.1: a new unit opens only with the setting on, the row on and the cursor at the end.
+    /// Section 12.1: a new unit opens only with the setting on, the row on (it needs a model to show) and the cursor at
+    /// the end, and only below `ABBR_MAX_UNITS`; the completed syllables plus the units stay within `MAX_SYLLABLES`.
     fn abbr_active(&self) -> bool {
-        self.abbr && self.predict_on && self.cursor == self.syls.len()
+        let units = self.pend_prev.len() + 1;
+        self.abbr
+            && self.predict_on
+            && self.lm.is_some()
+            && self.cursor == self.syls.len()
+            && units < ABBR_MAX_UNITS
+            && self.syls.len() + units < MAX_SYLLABLES
     }
 
     fn clear_pend(&mut self) {
@@ -844,23 +855,25 @@ impl Engine {
         // The unfinished units in order (one without the abbreviation composer); two or more can only read as an abbreviation.
         let pending: Vec<Vec<char>> =
             self.pend_prev.iter().chain([&self.pend]).map(|u| u.iter().flatten().copied().collect::<Vec<_>>()).filter(|u| !u.is_empty()).collect();
-        let (mode, multi) = (if self.abbr { Mode::PA } else { Mode::P }, pending.len() > 1);
+        let multi = pending.len() > 1;
+        // One unit reads the same in both modes; only two or more can be an abbreviation.
+        let mode = if multi { Mode::PA } else { Mode::P };
         // Section 11: the last two path tokens' starts, and the start of every earlier one within `PREDICT_BACK`, far to
         // near. Positions inside words within `PREDICT_BACK` come last, except inside a word the user fixed: choosing
         // such an item would take the user's choice (and its pending learn) apart.
-        let starts = self.path_starts();
+        // Two or more units match nothing that holds a complete syllable (section 12.3): only the cursor start is queried.
+        let starts = if multi { Vec::new() } else { self.path_starts() };
         let k = starts.len();
         let long_starts: Vec<usize> =
             starts.iter().enumerate().filter(|&(i, &s)| i + 2 >= k || s + PREDICT_BACK >= n).map(|(_, &s)| s).collect();
-        let mid: Vec<usize> = (n.saturating_sub(PREDICT_BACK)..n)
+        let mid: Vec<usize> = (n.saturating_sub(PREDICT_BACK)..if multi { 0 } else { n })
             .filter(|&p| !long_starts.contains(&p) && !self.fixed.iter().any(|f| f.start < p && p < f.end))
             .collect();
         let disp: Vec<char> = self.display.chars().collect();
         let off = |i: usize| (0..i).map(|j| self.token_width(j)).sum::<usize>().min(disp.len());
         let (learned, today) = (!self.learner.is_empty(), self.today());
         let query = |s: usize| -> Vec<Pred> {
-            // Section 12.3: complete syllables followed by two or more units match no reading.
-            if (s..n).any(|i| self.is_punct(i)) || (multi && s < n) {
+            if (s..n).any(|i| self.is_punct(i)) {
                 return Vec::new();
             }
             let mut units: Vec<Unit> = self.syls[s..n].iter().filter_map(|y| unit_of_syllable(y)).collect();
@@ -1361,7 +1374,7 @@ impl Engine {
             self.pred = old; // section 1.1: a syllable the lexicon lacks changes nothing
             return self.handled();
         }
-        self.pend = [None; 3];
+        self.clear_pend();
         self.pred_dirty = true;
         self.insert_token(syl, None)
     }
