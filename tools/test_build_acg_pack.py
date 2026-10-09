@@ -4,8 +4,10 @@ No network: the build runs against a fake API. It needs the repo's data (data/le
 import hashlib
 import json
 import os
+import shutil
 import sys
 import tempfile
+import threading
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -45,6 +47,18 @@ class Rules(unittest.TestCase):
         page = "{{CItem|zh-tw:甲甲甲}}\n{ type = 'item', original = '', rule = 'zh-tw:乙乙乙;zh-hk:丙丙丙;', description = 'x' },\nItem('x', 'zh-tw:丁丁丁')\n"
         got = sorted(v for r in B.group_rules(page) for v, _ in B.tw_values(r))
         self.assertEqual(got, ["丁丁丁", "乙乙乙", "甲甲甲"])
+
+    def test_an_unterminated_long_bracket_ends_the_scan(self):
+        got = []
+        t = threading.Thread(target=lambda: got.extend(B.lua_items("Item('x', 'zh-tw:甲甲甲')\nItem([[壞掉")), daemon=True)
+        t.start()
+        t.join(2)
+        self.assertFalse(t.is_alive(), "lua_items loops on an unterminated [[")
+        self.assertEqual(got, [["x", "zh-tw:甲甲甲"]])    # 完整的 Item 照常產出，壞掉的那個停在這裡
+
+    def test_wiki_title_keeps_slashes_and_decodes(self):
+        self.assertEqual(B.wiki_title("https://zh.wikipedia.org/wiki/.hack//SIGN"), ".hack//SIGN")
+        self.assertEqual(B.wiki_title("https://zh.wikipedia.org/wiki/%E9%A2%A8%E4%B9%8B%E8%B0%B7"), "風之谷")
 
     def test_strict_name_filter(self):
         base = {"小明"}
@@ -145,6 +159,7 @@ class Build(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.tmp = tempfile.mkdtemp()
+        cls.addClassCleanup(shutil.rmtree, cls.tmp, True)
         cls.groups = os.path.join(cls.tmp, "groups.tsv")
         open(cls.groups, "w", encoding="utf-8").write(GROUPS)
         cls.manual = os.path.join(cls.tmp, "manual.tsv")
@@ -187,6 +202,7 @@ class Build(unittest.TestCase):
 
     def test_cached_missingtitle_is_replayed_offline(self):
         d = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, d, True)
         api = B.Api(d, offline=True)
         key = B.Api.key(dict(action="parse", page="已刪除", format="json", formatversion="2", maxlag="5"))
         open(os.path.join(d, key + ".json"), "w").write('{"error": {"code": "missingtitle"}}')
@@ -205,6 +221,8 @@ class Build(unittest.TestCase):
         self.assertEqual(a[1], b[1])
         self.assertEqual(B.collisions_text(a[2], a[1]), B.collisions_text(b[2], b[1]))
         out = [tempfile.mkdtemp(), tempfile.mkdtemp()]
+        for d in out:
+            self.addCleanup(shutil.rmtree, d, True)
         for d, r in zip(out, (a, b)):
             B.write_all(r[0], r[1], d)
         for name in ("acg-add.tsv", "acg-sources.tsv", "acg.json"):
@@ -236,6 +254,18 @@ class Build(unittest.TestCase):
         col = B.detect_collisions(["芭芭", "楓之谷"], reading, [], {"巴巴", "風之谷"}, decode=decode)
         self.assertNotIn("ㄅㄚ ㄅㄚ", col)
         self.assertIn("ㄈㄥ ㄓ ㄍㄨˇ", col)
+
+    def test_a_decision_covers_only_the_words_it_names(self):
+        # 夾具：開了詞包，阿庫雷特 的第一名被換成 奇希莉卡（詞包內同音），在 阿庫雷特 的讀音上有一筆衝突。
+        def decode(pairs, prof, packs=None):
+            return ["奇希莉卡" if packs and w == "阿庫雷特" else w for w, _ in pairs]
+        def run(row):
+            c = os.path.join(self.tmp, "c.tsv")
+            open(c, "w", encoding="utf-8").write(row)
+            return B.build(FakeApi(), self.groups, c, self.manual, decode=decode, readings=fake_readings, exclude_tsv=self.none)[2]
+        r = "ㄚ ㄎㄨˋ ㄌㄟˊ ㄊㄜˋ"
+        self.assertIn(r, run(f"{r}\t某個舊詞\t-\t別的詞已處置\n"))      # 同讀音但沒點名 阿庫雷特：新詞照樣列出
+        self.assertNotIn(r, run(f"{r}\t阿庫雷特\t-\t點名了\n"))
 
     def test_excluded_strings_leave_the_pack_and_the_reference_list(self):
         excl = os.path.join(self.tmp, "exclude.tsv")
