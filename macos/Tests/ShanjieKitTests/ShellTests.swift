@@ -35,6 +35,24 @@ final class ShellTests: XCTestCase {
         XCTAssertFalse(c.panel.visible)
     }
 
+    /// enter-pending contract §2: Shift+Enter commits what is shown and passes the key on, so the app gets its line
+    /// break (rules 12b, 19a); Enter with an unfinished syllable commits it as shown (12a).
+    func testShiftEnterCommitsThenPassesTheKeyOn() {
+        let c = Controller(makeShell())
+        c.session.activate()
+        c.type("su3cl3")
+        XCTAssertFalse(c.press(Keys.enter, flags: .shift))
+        XCTAssertEqual(c.client.text, "你好")
+        XCTAssertEqual(c.client.marked, "")
+        c.type("1")
+        XCTAssertEqual(c.client.marked, "ㄅ")
+        XCTAssertFalse(c.press(Keys.enter, flags: .shift))
+        XCTAssertEqual(c.client.text, "你好ㄅ")
+        c.type("su3a")
+        XCTAssertTrue(c.press(Keys.enter))
+        XCTAssertEqual(c.client.text, "你好ㄅ你ㄇ")
+    }
+
     func testCandidatesShowThenNumberSelects() throws {
         let c = Controller(makeShell())
         c.session.activate()
