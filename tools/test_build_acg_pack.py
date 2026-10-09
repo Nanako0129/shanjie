@@ -264,8 +264,9 @@ class Build(unittest.TestCase):
             open(c, "w", encoding="utf-8").write(row)
             return B.build(FakeApi(), self.groups, c, self.manual, decode=decode, readings=fake_readings, exclude_tsv=self.none)[2]
         r = "ㄚ ㄎㄨˋ ㄌㄟˊ ㄊㄜˋ"
-        self.assertIn(r, run(f"{r}\t某個舊詞\t-\t別的詞已處置\n"))      # 同讀音但沒點名 阿庫雷特：新詞照樣列出
-        self.assertNotIn(r, run(f"{r}\t阿庫雷特\t-\t點名了\n"))
+        self.assertIn(r, run(f"{r}\t某個舊詞\t+另一個舊詞\t別的詞已處置\n"))   # 同讀音但沒點名 阿庫雷特：新詞照樣列出
+        self.assertNotIn(r, run(f"{r}\t阿庫雷特\t+某個舊詞\t點名了\n"))
+        self.assertNotIn(r, run(f"{r}\t某個舊詞\t+阿庫雷特\t兩個都留，點名在第三欄\n"))
 
     def test_excluded_strings_leave_the_pack_and_the_reference_list(self):
         excl = os.path.join(self.tmp, "exclude.tsv")
@@ -295,8 +296,8 @@ class Build(unittest.TestCase):
         rows = B.read_tsv(os.path.join(B.PACKS, "acg-collisions.tsv"))
         self.assertGreater(len(rows), 100)
         for reading, keep, exclude, why in rows:
-            if exclude == "-":                         # 兩個都留
-                self.assertIn(keep, pack, keep)
+            if exclude.startswith("+"):                # 兩個都留：另一個詞在詞包裡
+                self.assertIn(exclude[1:], pack, exclude)
             else:
                 self.assertNotIn(exclude, pack, exclude)
             self.assertTrue(why)
