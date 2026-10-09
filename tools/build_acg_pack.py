@@ -647,11 +647,18 @@ def ordered(words, nsrc):
     return sorted(words, key=lambda w: (-nsrc(w), w))
 
 
+TIE = 1e-6      # 同讀音的詞包詞，排在第 k 位的分數減 k × TIE：解碼器遇到同分時的先後與檔案順序無關（2026-10-10 實測），要讓「來源數多的在前」成立只能靠分數
+
+
 def pack_rows(order, reading, sc):
-    """每個詞的列，格式和 build_overlay 共用同一個函式。"""
-    rows = []
+    """每個詞的列，格式和 build_overlay 共用同一個函式；同讀音的列依 order 的先後各減 k × TIE，讓同分的詞有固定的第一名。"""
+    rows, seen = [], collections.Counter()
     for w in order:
-        rows += bo.overlay_rows(w, reading[w], sc[len(w)], TAG)
+        for r in bo.overlay_rows(w, reading[w], sc[len(w)], TAG):
+            key, word, score, tag = r.rstrip("\n").split("\t")
+            k = seen[key]
+            seen[key] += 1
+            rows.append(r if not k else f"{key}\t{word}\t{round(float(score) - k * TIE, 8)!r}\t{tag}\n")
     return rows
 
 
@@ -868,8 +875,12 @@ def build(api, groups_tsv=os.path.join(PACKS, "acg-groups.tsv"), collisions_tsv=
     else:
         raise SystemExit(f"type (c) collisions not settled after {LEXICON_RULE_ROUNDS} rounds")
     col = {}
+    named = collections.defaultdict(set)                        # 讀音 → 處置列裡點名的詞
+    for r, w in decided:
+        named[r].add(w)
     for r, v in found.items():
-        left = [e for e in v if (r, e[0]) not in decided]       # 詞 e[0] 在這個讀音的處置列裡被點名，才算已處置
+        # 詞 e[0] 在這個讀音的處置列裡被點名，而且開了之後的第一名 e[4] 也是處置列點名的詞，才算已處置（2026-10-10：被舊處置蓋住的新詞搶走第一名要列出）
+        left = [e for e in v if (r, e[0]) not in decided or e[4] not in named[r]]
         if left:
             col[r] = left
     ts_max = max(ts)
