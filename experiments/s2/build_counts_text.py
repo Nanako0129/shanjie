@@ -3,6 +3,7 @@
 和 build_counts.py 用同一套轉換、切句與斷詞。
 用法：python3 experiments/s2/build_counts_text.py <out.pkl> <句子檔>...（.tsv 取最後一欄；.bz2 自動解壓）
 """
+import argparse
 import bz2
 import collections
 import os
@@ -20,10 +21,15 @@ def lines(path):
         yield line.split("\t")[-1] if ".tsv" in path else line
 
 
-def main():
-    expected = "--expected" in sys.argv   # 詞圖上的期望次數（S2n 契約 §6.2）；不算 trigram
-    out, paths = [a for a in sys.argv[1:] if a != "--expected"][0], [a for a in sys.argv[1:] if a != "--expected"][1:]
-    bc._init(False, expected)
+def main(argv=None):
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--expected", action="store_true", help="詞圖上的期望次數（S2n 契約 §6.2）；不算 trigram")
+    ap.add_argument("--extra-lexicon", action="append", default=[], metavar="FILE", help="model-v5：疊加層格式的檔加進斷詞詞庫，可給多次")
+    ap.add_argument("out")
+    ap.add_argument("paths", nargs="+")
+    a = ap.parse_args(argv)
+    expected, out, paths = a.expected, a.out, a.paths
+    bc._init(False, expected, extra_lexicons=tuple(os.path.abspath(f) for f in a.extra_lexicon))
     lex, (phrase, char, maxp) = bc._W["lex"], bc._W["conv"]
     uni, bi, tri, runs = collections.Counter(), collections.Counter(), collections.Counter(), 0
     for p in paths:

@@ -291,7 +291,7 @@ def expected_counts(lex, text, min_count=EXPECTED_MIN):
 _W = {}
 
 
-def _init(trigram=False, expected=False, mw=False):
+def _init(trigram=False, expected=False, mw=False, extra_lexicons=()):
     _W["mw"] = None
     if mw:   # S2w：每個 worker 載一次 mwdata.json（契約 §3.2）
         sys.path.insert(0, os.path.join(ROOT, "experiments", "s2w"))
@@ -301,7 +301,7 @@ def _init(trigram=False, expected=False, mw=False):
     _W["trigram"] = trigram
     _W["expected"] = expected
     _W["lex"] = ime.Lexicon(os.path.join(ROOT, "data", "lexicon", "mcbpmf-data.txt"),
-                            overlay=os.path.join(ROOT, "data", "lexicon", "overlay-add.tsv"))
+                            overlay=[os.path.join(ROOT, "data", "lexicon", "overlay-add.tsv"), *extra_lexicons])   # --extra-lexicon：疊加層格式，接在 overlay-add.tsv 後面
     _W["conv"] = load_conv()
 
 
@@ -363,13 +363,14 @@ def main():
     ap.add_argument("--trigram", action="store_true", help="也算 trigram（記憶體用量大，請搭配較少的篇數）")
     ap.add_argument("--expected", action="store_true", help="詞圖上的期望次數（S2n 契約 §6.2），取代最高分切分；不算 trigram")
     ap.add_argument("--mw", action="store_true", help="S2w：用 MediaWiki 的 zh-tw 轉換（zhconv-rs ＋ $S2_WORK/mwdata.json），取代 convert()")
+    ap.add_argument("--extra-lexicon", action="append", default=[], metavar="FILE", help="model-v5：疊加層格式（讀音\\t詞\\t分數\\t來源）的檔加進斷詞詞庫，可給多次")
     a = ap.parse_args()
     if a.expected and a.trigram:
         ap.error("--expected 不算 trigram")
     os.makedirs(OUT, exist_ok=True)
     uni, bi, tri = collections.Counter(), collections.Counter(), collections.Counter()
     sents = arts = 0
-    with mp.Pool(a.procs, initializer=_init, initargs=(a.trigram, a.expected, a.mw)) as pool:
+    with mp.Pool(a.procs, initializer=_init, initargs=(a.trigram, a.expected, a.mw, tuple(os.path.abspath(f) for f in a.extra_lexicon))) as pool:
         for u, b, t, s_ in pool.imap_unordered(count_batch, batches(articles(a.articles))):
             uni.update(u); bi.update(b); tri.update(t); sents += s_; arts += 200
             if arts % 10000 == 0:
