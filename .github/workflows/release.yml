@@ -4,7 +4,8 @@ name: Release
 #   push of a v* tag   gate, build, sign + notarize + verify, publish (GitHub release, then the
 #                      Homebrew cask in Nanako0129/homebrew-tap; section 14.3)
 #   workflow_dispatch  dry run on main: gate, build, sign + notarize + verify; publishes nothing
-#                      (the signed zip stays a one-day artifact)
+#                      (both signed zips, input method and installer, stay a one-day artifact,
+#                      `signed`, for the VM and device checks of app-sandbox.md section 4)
 on:
   push:
     tags: ["v*"]
@@ -98,9 +99,12 @@ jobs:
           [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "error: tag $GITHUB_REF_NAME is not vMAJOR.MINOR.PATCH" >&2; exit 1; }
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
+      # The shipping ID explicitly: build-app.sh defaults to the development ID (app-sandbox.md
+      # section 2.4); verify() in `sign` checks the ID of what ships.
       - name: Build the app (ad-hoc)
         env:
           SHANJIE_VERSION: ${{ steps.version.outputs.version }}
+          BUNDLE_ID: com.nyanako.inputmethod.shanjie
         run: scripts/build-app.sh
 
       # The installer skeleton (docs/contracts/s3c-installer.md section 3): everything except the
@@ -207,8 +211,9 @@ jobs:
           mkdir -p "$T/work" "$T/out" "$T/check"
           tar -xf "$T/unsigned/unsigned.tar" -C "$T/work"
           APP="$T/work/善解輸入法.app"
-          # Hardened runtime, secure timestamp, and no --entitlements.
-          codesign --force --options runtime --timestamp --sign "$IDENTITY" --keychain "$KC" "$APP"
+          # Hardened runtime, secure timestamp, and the App Sandbox entitlements build-app.sh signed
+          # in (app-sandbox.md section 2.4): without --preserve-metadata a --force re-sign drops them.
+          codesign --force --options runtime --timestamp --preserve-metadata=entitlements --sign "$IDENTITY" --keychain "$KC" "$APP"
           codesign --verify --strict --deep "$APP"
 
           # notarytool can exit 0 on a rejected submission: the verdict is read from its JSON.
@@ -237,23 +242,52 @@ jobs:
           ditto -c -k --keepParent "$APP" "$T/out/$ZIP"
           (cd "$T/out" && shasum -a 256 "$ZIP" > "$ZIP.sha256")
 
-          # verify <app>: what ships, as extracted from its final zip.
+          # verify <app> <ime|installer>: what ships, as extracted from its final zip.
+          # Entitlements by bundle (app-sandbox.md section 2.4): the input method has exactly the
+          # App Sandbox and the mach-register exception named by its InputMethodConnectionName,
+          # compared the way scripts/check-entitlements.sh compares them (inline here, because this
+          # job runs no repository code; a change there goes here too). The installer has none.
           verify() {
             V="$1"
+            ID=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$V/Contents/Info.plist")
             codesign --verify --strict --deep "$V" || fail "codesign --verify --strict --deep: $V"
             INFO=$(codesign -dv --verbose=2 "$V" 2>&1)
             grep -q '^Authority=Developer ID Application: ' <<<"$INFO" || fail "not signed with Developer ID Application: $V"
             grep -qx "TeamIdentifier=$EXPECTED_TEAM" <<<"$INFO" || fail "team identifier is not $EXPECTED_TEAM: $V"
             grep -Eq 'flags=0x[0-9a-f]+\([^)]*runtime' <<<"$INFO" || fail "hardened runtime flag missing: $V"
-            ENT=$(codesign -d --entitlements - "$V" 2>/dev/null || true)
-            [ -z "$ENT" ] || fail "the app carries entitlements: $V"
+            case "$2" in
+              ime)
+                [ "$ID" = com.nyanako.inputmethod.shanjie ] || fail "bundle ID is $ID, not the shipping ID: $V"
+                CONN=$(/usr/libexec/PlistBuddy -c 'Print :InputMethodConnectionName' "$V/Contents/Info.plist")
+                rm -f "$T/ent-actual.plist" "$T/ent-expected.plist"
+                codesign -d --entitlements - --xml "$V" > "$T/ent-actual.plist" 2>/dev/null || true
+                [ -s "$T/ent-actual.plist" ] || fail "the input method carries no entitlements: $V"
+                printf '%s\n' '<?xml version="1.0" encoding="UTF-8"?>' \
+                  '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">' \
+                  '<plist version="1.0"><dict>' \
+                  '<key>com.apple.security.app-sandbox</key><true/>' \
+                  '<key>com.apple.security.temporary-exception.mach-register.global-name</key>' \
+                  "<array><string>$CONN</string></array>" \
+                  '</dict></plist>' > "$T/ent-expected.plist"
+                plutil -convert xml1 "$T/ent-actual.plist" || fail "the entitlements are not a property list: $V"
+                plutil -convert xml1 "$T/ent-expected.plist"
+                cmp -s "$T/ent-actual.plist" "$T/ent-expected.plist" \
+                  || fail "the entitlements are not exactly the sandbox and $CONN: $(plutil -p "$T/ent-actual.plist")"
+                ;;
+              installer)
+                [ "$ID" = com.nyanako.shanjie.installer ] || fail "bundle ID is $ID, not the installer's: $V"
+                ENT=$(codesign -d --entitlements - "$V" 2>/dev/null || true)
+                [ -z "$ENT" ] || fail "the installer carries entitlements: $V"
+                ;;
+              *) fail "verify: unknown kind $2" ;;
+            esac
             xcrun stapler validate "$V" > /dev/null || fail "no stapled notarization ticket: $V"
             # Captured first: `spctl | grep -q` under pipefail can fail on SIGPIPE.
             GK=$(spctl -a -t exec -vv "$V" 2>&1 || true)
             grep -qx 'source=Notarized Developer ID' <<<"$GK" || fail "Gatekeeper does not report Notarized Developer ID: $GK"
           }
           ditto -x -k "$T/out/$ZIP" "$T/check"
-          verify "$T/check/善解輸入法.app"
+          verify "$T/check/善解輸入法.app" ime
           echo "verified $ZIP"
 
           # The installer (docs/contracts/s3c-installer.md section 3): the skeleton from `build`,
@@ -272,7 +306,7 @@ jobs:
           (cd "$T/out" && shasum -a 256 "$IZIP" > "$IZIP.sha256")
           mkdir -p "$T/check-installer"
           ditto -x -k "$T/out/$IZIP" "$T/check-installer"
-          verify "$T/check-installer/安裝善解輸入法.app"
+          verify "$T/check-installer/安裝善解輸入法.app" installer
           cmp -s "$T/check-installer/安裝善解輸入法.app/Contents/Resources/$ZIP" "$T/out/$ZIP" \
             || fail "the installer's bundled zip differs from $ZIP"
           echo "verified $IZIP"

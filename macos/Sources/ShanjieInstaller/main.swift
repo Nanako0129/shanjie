@@ -24,6 +24,8 @@ enum Paths {
         return String(cString: dir)
     }()
     static let installed = URL(fileURLWithPath: home + "/Library/Input Methods/善解輸入法.app")
+    /// The name before s3b section 13 (the two-mode versions), which install-ime.sh upgrades.
+    static let legacy = URL(fileURLWithPath: home + "/Library/Input Methods/shanjie.app")
     static let bundledVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? ""
     static let zip = Bundle.main.url(forResource: "shanjie-\(bundledVersion)", withExtension: "zip")
     static let script = Bundle.main.url(forResource: "install-ime", withExtension: "sh")
@@ -255,8 +257,9 @@ enum Screens {
                      "A newer version (\(installed ?? "")) is installed; this installer does not downgrade. Choose Enable to use it.")
             primary = L("啟用", "Enable")
         }
-        let details = L("安裝位置：~/Library/Input Methods（只有你的帳號）。\n執行中的舊版會被結束，上一版保留在同一個資料夾的 .shanjie-previous。\n",
-                        "Installs into ~/Library/Input Methods (your account only).\nA running older copy is stopped; the previous version is kept there as .shanjie-previous.\n") + license
+        // app-sandbox.md section 2.5: the rollback note.
+        let details = L("安裝位置：~/Library/Input Methods（只有你的帳號）。\n執行中的舊版會被結束，上一版保留在同一個資料夾的 .shanjie-previous。\n退回 0.4.x 以前（沒有沙盒）的版本時，舊版看不到學習資料與設定，它們已搬進 ~/Library/Containers/com.nyanako.inputmethod.shanjie；退回期間學到的，再升級時不會搬過去。搬回：docs/sandbox-restore.md。\n",
+                        "Installs into ~/Library/Input Methods (your account only).\nA running older copy is stopped; the previous version is kept there as .shanjie-previous.\nA version without the sandbox (0.4.x or earlier) sees no learned words or settings: they moved into ~/Library/Containers/com.nyanako.inputmethod.shanjie. What it learns is not moved on the next upgrade. To move data back: docs/sandbox-restore.md.\n") + license
         return Screen(step: 0, title: L("善解輸入法 ", "Shanjie ") + bundled,
                       body: L("開源的 macOS 注音輸入法。", "An open-source Zhuyin input method for macOS.") + "\n" + line,
                       seal: true, details: details, primary: primary, secondary: secondary, close: L("取消", "Cancel"))
@@ -501,6 +504,10 @@ final class Controller: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private let view = StepView(frame: NSRect(origin: .zero, size: Look.windowSize))
     private var isBusy = false
     private var plan = InstallerPlan.install
+    /// app-sandbox.md section 2.7: the installed copy's bundle ID and its enabled input modes, read
+    /// once at the start, before anything is swapped.
+    private var startBundleID: String?
+    private var startModes: Set<String> = []
     private var primaryAction: () -> Void = {}
     private var secondaryAction: () -> Void = {}
 
@@ -561,6 +568,8 @@ final class Controller: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private func showWelcome() {
         let installed = Paths.installedVersion()
         plan = InstallerPlan.decide(installed: installed, bundled: Paths.bundledVersion)
+        startBundleID = Bundle(url: Paths.installed)?.bundleIdentifier ?? Bundle(url: Paths.legacy)?.bundleIdentifier
+        startModes = startBundleID.map(Registration.enabledModeIDs(bundleID:)) ?? []
         show(Screens.welcome(plan: plan, installed: installed, bundled: Paths.bundledVersion),
              primary: { [weak self] in
                  guard let self else { return }
@@ -575,9 +584,16 @@ final class Controller: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     private func copyThenEnable() {
         show(Screens.working(Screens.copying))
+        // app-sandbox.md section 2.7: the ETen carry-over with the state read at the start, before
+        // the swap (the fullFlow call after enabling stays; it does not rewrite a chosen layout).
+        let (bundleID, modes) = (startBundleID, startModes)
+        let carryOver = {
+            guard let bundleID, let defaults = UserDefaults(suiteName: bundleID) else { return }
+            Registration.carryOverEten(enabledModeIDs: modes, bundleID: bundleID, defaults: defaults)
+        }
         // The controller lives as long as the app (it is the application delegate).
         DispatchQueue.global(qos: .userInitiated).async {
-            let failure = copyFiles()
+            let failure = InstallerFlow.copy(carryOver: carryOver, swap: copyFiles)
             DispatchQueue.main.async {
                 if let failure { self.fail(failure) } else { self.enable(afterCopy: true) }
             }

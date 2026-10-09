@@ -22,6 +22,14 @@ public enum InstallerFlow {
         }
     }
 
+    /// app-sandbox.md section 2.7: the installer's copy step. The ETen carry-over runs first, before
+    /// install-ime.sh swaps the files: once the sandboxed version has started, the preferences live
+    /// in its container and a value written outside it would be silently lost.
+    public static func copy<T>(carryOver: () -> Void, swap: () -> T) -> T {
+        carryOver()
+        return swap()
+    }
+
     /// Section 1.2: the one source 「切換到善解」 selects, given each listed source's input mode ID
     /// and whether it is select-capable. The same bundle ID also lists the input method itself
     /// (no mode ID, not selectable) and, when disabling them failed, the modes of earlier

@@ -4,27 +4,50 @@
 # (TISCreateInputSourceList), never registered or enabled, and the app is never launched as an
 # input method: it runs only with `--selftest` and with arguments it must refuse.
 #
-#   scripts/check-app.sh [build/善解輸入法.app]
+# app-sandbox.md section 2.3: the bundle is sandboxed, so check 6 creates the bundle ID's container
+# on its first run, and for the shipping ID moves the user's learning data and preferences into it.
+# Outside CI (CI is not `true`) check 6 therefore refuses a shipping-ID build and exits non-zero: an
+# ad-hoc local build must not create the shipping container first. SKIP_RUN=1 runs checks 2 and 3
+# only, never executes the bundle, and exits 0 when they pass (any ID).
+#
+#   [EXPECTED_BUNDLE_ID=<id>] [SKIP_RUN=1] scripts/check-app.sh [app]
+#
+# EXPECTED_BUNDLE_ID defaults to the shipping ID; the folder and names follow from it (the table in
+# app-sandbox.md section 2.3, the same as scripts/build-app.sh). The app defaults to build/<folder>.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-APP="${1:-$ROOT/build/善解輸入法.app}"
+fail() { echo "error: $*" >&2; exit 1; }
+SHIPPING_ID=com.nyanako.inputmethod.shanjie
+ID="${EXPECTED_BUNDLE_ID:-$SHIPPING_ID}"
+if [ "$ID" = "$SHIPPING_ID" ]; then
+  NAME_ZH=善解輸入法 NAME_EN=Shanjie
+else
+  NAME_ZH=善解（開發版） NAME_EN="Shanjie (Dev)"
+fi
+APP="${1:-$ROOT/build/$NAME_ZH.app}"
 BIN="$APP/Contents/MacOS/shanjie"
 PLIST="$APP/Contents/Info.plist"
-fail() { echo "error: $*" >&2; exit 1; }
 pb() { /usr/libexec/PlistBuddy -c "Print :$1" "${2:-$PLIST}" 2>/dev/null; }
-MODE=com.nyanako.inputmethod.shanjie.zhuyin
+MODE="$ID.zhuyin"
+MIGRATION="$APP/Contents/Resources/container-migration.plist"
 
-# --- 2: Info.plist and Resources (with section 13: one input mode, the 善解輸入法.app folder and
-# the zh-Hant / en names)
-[ "$(basename "$APP")" = 善解輸入法.app ] || fail "the bundle folder is not 善解輸入法.app"
+# --- 2: Info.plist and Resources (with section 13: one input mode, the folder and the zh-Hant / en
+# names; with app-sandbox.md section 2.2: the migration list only for the shipping ID)
+[ "$(basename "$APP")" = "$NAME_ZH.app" ] || fail "the bundle folder is not $NAME_ZH.app"
 plutil -lint "$PLIST" >/dev/null || fail "Info.plist does not lint"
 [ "$(pb CFBundleDevelopmentRegion)" = en ] || fail "CFBundleDevelopmentRegion"
-[ "$(pb CFBundleName)" = Shanjie ] || fail "CFBundleName"
-[ "$(pb CFBundleDisplayName)" = 善解輸入法 ] || fail "CFBundleDisplayName must equal the folder name"
+[ "$(pb CFBundleName)" = "$NAME_EN" ] || fail "CFBundleName"
+[ "$(pb CFBundleDisplayName)" = "$NAME_ZH" ] || fail "CFBundleDisplayName must equal the folder name"
 [ "$(pb LSHasLocalizedDisplayName)" = true ] || fail "LSHasLocalizedDisplayName"
-[ "$(pb CFBundleIdentifier)" = com.nyanako.inputmethod.shanjie ] || fail "bundle ID"
-[ "$(pb InputMethodConnectionName)" = com.nyanako.inputmethod.shanjie_Connection ] || fail "InputMethodConnectionName"
+[ "$(pb CFBundleIdentifier)" = "$ID" ] || fail "bundle ID is not $ID"
+[ "$(pb InputMethodConnectionName)" = "${ID}_Connection" ] || fail "InputMethodConnectionName"
+if [ "$ID" = "$SHIPPING_ID" ]; then
+  [ "$(pb Move:0 "$MIGRATION")" = '${ApplicationSupport}/shanjie' ] && ! pb Move:1 "$MIGRATION" >/dev/null \
+    || fail "container-migration.plist is not exactly Move = [\${ApplicationSupport}/shanjie]"
+else
+  [ ! -e "$MIGRATION" ] || fail "a non-shipping build carries container-migration.plist"
+fi
 [ "$(pb InputMethodServerControllerClass)" = ShanjieInputController ] || fail "InputMethodServerControllerClass"
 [ "$(pb InputMethodServerDelegateClass)" = ShanjieInputController ] || fail "InputMethodServerDelegateClass"
 [ "$(pb LSUIElement)" = true ] || fail "LSUIElement"
@@ -36,7 +59,7 @@ K="ComponentInputModeDict:tsInputModeListKey:$MODE"
 [ "$(pb "$K:tsInputModeScriptKey")" = smTradChinese ] || fail "mode: tsInputModeScriptKey"
 [ "$(pb ComponentInputModeDict:tsVisibleInputModeOrderedArrayKey)" = "$(printf 'Array {\n    %s\n}' "$MODE")" ] || fail "visible mode list"
 R="$APP/Contents/Resources"
-for lp in "zh-Hant 善解輸入法" "en Shanjie"; do
+for lp in "zh-Hant $NAME_ZH" "en $NAME_EN"; do
   read -r l name <<<"$lp"
   S="$R/$l.lproj/InfoPlist.strings"
   plutil -lint "$S" >/dev/null || fail "$l InfoPlist.strings does not lint"
@@ -65,15 +88,24 @@ PY
 grep -q 'packs/acg-add.tsv' "$R/LICENSES/CC-BY-SA-4.0-attribution.txt" || fail "the attribution file does not list packs/acg-add.tsv"
 echo "check 2: ok"
 
-# --- 3: signature: valid, hardened runtime, no entitlements at all
+# --- 3: signature: valid, hardened runtime, exactly the two sandbox entitlements (app-sandbox.md
+# section 2.1)
 codesign --verify --strict --deep "$APP" || fail "codesign --verify --strict --deep"
-ENT="$(codesign -d --entitlements - "$APP" 2>/dev/null || true)"
-[ -z "$ENT" ] || fail "the app carries entitlements"
+"$ROOT/scripts/check-entitlements.sh" "$APP" || fail "entitlements"
 INFO="$(codesign -dv "$APP" 2>&1)"
 grep -Eq 'flags=0x[0-9a-f]+\([^)]*runtime' <<<"$INFO" || fail "hardened runtime flag missing"
 echo "check 3: ok"
 
-# --- 6: selftest and refused arguments, with no side effects
+if [ "${SKIP_RUN:-}" = 1 ]; then
+  echo "check 6: skipped (SKIP_RUN=1; the bundle was not run)"
+  exit 0
+fi
+if [ "${CI:-}" != true ] && [ "$(pb CFBundleIdentifier)" = "$SHIPPING_ID" ]; then
+  fail "check 6 refused: running a shipping-ID build outside CI would create ~/Library/Containers/$SHIPPING_ID from an ad-hoc signature and move the learning data and preferences into it (app-sandbox.md section 2.3). Use SKIP_RUN=1 for checks 2 and 3."
+fi
+# --- 6: selftest and refused arguments, with no side effects. The sandbox container the first run
+# creates is not part of this comparison; CI checks it before and after separately (app-sandbox.md
+# section 2.6).
 snapshot() {
   ls -laR "$HOME/Library/Input Methods" 2>&1 || true
   shasum -a 256 "$HOME/Library/Preferences/com.nyanako.inputmethod.shanjie.plist" 2>&1 || true
