@@ -143,6 +143,8 @@ extension Shell {
     /// Section 4: memory, pending learns and the three files; non-zero opens the failure window.
     func clearLearning() {
         let code = engine?.learningClear() ?? 4
+        // The settings window's "cannot save" row may change with the clear.
+        NotificationCenter.default.post(name: Shell.didChangeSettings, object: self)
         guard code != 0 else { return }
         Log.shell.error("shanjie_engine_learning_clear failed, code \(code)")
         dialogs.clearFailed()
