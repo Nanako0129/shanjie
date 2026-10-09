@@ -679,9 +679,9 @@ fn rows9_to_14_pending_syllable() {
     assert!(kk(&mut e, KeyKind::Backspace).preedit == "ㄅㄨ");
     assert!(kk(&mut e, KeyKind::Backspace).preedit == "ㄅ");
     assert!(kk(&mut e, KeyKind::Backspace).preedit.is_empty());
-    // 13: other keys are handled and ignored
+    // 13: other keys are handled and ignored (Enter is rule 12a, below)
     typ(&mut e, "s");
-    for key in [KeyKind::Enter, KeyKind::Left, KeyKind::Tab, KeyKind::Up, KeyKind::Delete, KeyKind::Down] {
+    for key in [KeyKind::Left, KeyKind::Tab, KeyKind::Up, KeyKind::Delete, KeyKind::Down] {
         let o = kk(&mut e, key);
         assert!(o.handled && o.commit.is_empty() && o.preedit == "ㄋ");
     }
@@ -878,10 +878,11 @@ fn reset_both_modes_equal_fresh_engine() {
         kk(&mut e, KeyKind::Right);
         kk(&mut e, KeyKind::Enter); // a fixed word exists
         kk(&mut e, KeyKind::Left);
-        typ(&mut e, "c"); // and a pending symbol
+        let shown = typ(&mut e, "c").preedit; // and a pending symbol
         let o = e.reset(mode);
         match mode {
-            ResetMode::Commit => assert!(o.commit.chars().count() == 2 && o.preedit.is_empty()),
+            // enter-pending contract §2: Commit sends what is shown, the pending ㄏ at the cursor, like Enter
+            ResetMode::Commit => assert!(o.commit == shown && o.commit.contains('ㄏ') && o.preedit.is_empty()),
             ResetMode::Discard => assert!(o == blank(true)),
         }
         assert!(o.candidates.is_empty() && o.selected.is_none() && o.cursor_utf16 == 0);
@@ -910,4 +911,46 @@ fn auto_commit_at_40th_syllable() {
     assert!(o.handled && o.commit.chars().count() == 40 && o.preedit.is_empty() && o.cursor_utf16 == 0);
     let o = typ(&mut e, "su3");
     assert!(o.commit.is_empty() && o.preedit == top(NI));
+}
+
+/// enter-pending contract: Enter with an unfinished syllable commits what is shown, the unfinished symbols where they
+/// are shown (rule 12a); Shift+Enter then passes the key on, with or without one (12b, 19a). Apple Zhuyin, measured
+/// 2026-10-09.
+#[test]
+fn enter_commits_what_is_shown_unfinished_symbols_included() {
+    let shift_enter = Key { kind: KeyKind::Enter, ch: '\0', modifiers: MOD_SHIFT };
+    // Only an unfinished syllable.
+    for (keys, want) in [("1", "ㄅ"), ("su", "ㄋㄧ")] {
+        for (key, handled) in [(Key::new(KeyKind::Enter), true), (shift_enter, false)] {
+            let mut e = std();
+            typ(&mut e, keys);
+            let o = k(&mut e, key);
+            assert!(o == Output { commit: want.to_string(), ..blank(handled) }, "{want} handled {handled}");
+        }
+    }
+    // Syllables, then an unfinished one at the end.
+    let mut e = std();
+    assert!(typ(&mut e, &format!("{NIHAO}a")).preedit == "你好ㄇ");
+    assert!(kk(&mut e, KeyKind::Enter) == Output { commit: "你好ㄇ".into(), ..blank(true) });
+    // In the middle: 你好嗎, two ←, ㄅ (Apple commits 你ㄅ好嗎).
+    for (key, handled) in [(Key::new(KeyKind::Enter), true), (shift_enter, false)] {
+        let mut e = std();
+        typ(&mut e, &format!("{NIHAO}a87"));
+        presses(&mut e, 2, KeyKind::Left);
+        assert!(typ(&mut e, "1").preedit == "你ㄅ好嗎");
+        assert!(k(&mut e, key) == Output { commit: "你ㄅ好嗎".into(), ..blank(handled) }, "handled {handled}");
+    }
+    // 19a: Shift+Enter without an unfinished syllable commits and passes the key on (19: plain Enter keeps it).
+    let mut e = std();
+    typ(&mut e, NIHAO);
+    assert!(k(&mut e, shift_enter) == Output { commit: "你好".into(), ..blank(false) });
+    let mut e = std();
+    typ(&mut e, NIHAO);
+    assert!(kk(&mut e, KeyKind::Enter) == Output { commit: "你好".into(), ..blank(true) });
+    // Rule 1: ⌘Enter passes through and changes nothing; rule 13 still swallows other keys.
+    let mut e = std();
+    typ(&mut e, "1");
+    let o = k(&mut e, Key { kind: KeyKind::Enter, ch: '\0', modifiers: MOD_COMMAND });
+    assert!(!o.handled && o.commit.is_empty() && o.preedit == "ㄅ");
+    assert!(kk(&mut e, KeyKind::Up).preedit == "ㄅ");
 }

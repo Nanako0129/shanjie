@@ -69,13 +69,16 @@
 | 10 | 有未完成音節 | 聲調鍵、空白鍵 | 完成音節（§2） |
 | 11 | 有未完成音節 | Backspace | 刪掉顯示位置最後的符號（韻母→介音→聲母；2026-10-06 實測蘋果注音與小麥注音） |
 | 12 | 有未完成音節 | Esc | 清掉未完成音節 |
+| 12a | 有未完成音節 | Enter（沒有修飾鍵） | 送出組字區顯示的整串：游標前的顯示文字、未完成音節的符號（照顯示順序）、游標後的顯示文字，然後清空組字區（2026-10-09 起，蘋果注音實測；`docs/contracts/enter-pending.md`；原本是第 13 條的吃掉） |
+| 12b | 有未完成音節 | Shift+Enter | 照第 12a 條送出，然後直通這個鍵（`handled = 0`，App 收到換行；蘋果注音實測） |
 | 13 | 有未完成音節 | 其他鍵 | 已處理，忽略 |
 | 14 | 沒有未完成音節 | 注音鍵 | 開始新的未完成音節 |
 | 15 | 組字區有字 | 空白鍵、↓ | 開啟候選（§3.1） |
 | 16 | 組字區有字 | 聲調鍵（空白鍵以外）、↑ | 已處理，忽略 |
 | 17 | 組字區有字 | ←→、Home、End | 游標在音節之間移動 |
 | 18 | 組字區有字 | Backspace／Delete | 刪掉游標左邊／右邊的音節；游標在邊界時忽略 |
-| 19 | 組字區有字 | Enter | 送出組字區顯示的整句 |
+| 19 | 組字區有字 | Enter（沒有修飾鍵） | 送出組字區顯示的整句 |
+| 19a | 組字區有字 | Shift+Enter | 送出組字區顯示的整句，然後直通這個鍵（2026-10-09 起，蘋果注音實測；原本送出後吃掉，App 收不到換行） |
 | 20 | 組字區有字 | Esc | 清空組字區 |
 | 21 | 組字區有字 | 其他鍵（含 Shift＋非標點、Tab） | 送出組字區，然後直通這個鍵（`handled = 0`、`commit` 非空） |
 | 22a | 組字區空 | 聲調鍵（空白鍵以外） | 把該聲調符號（ˊ ˇ ˋ ˙）放進組字區，和第 2 條的標點相同（2026-10-05 起；蘋果注音實測按 3 打出「ˇ」但立刻送出，使用者選擇留在組字區，Backspace 可刪、Enter 才送出；原本直通成數字） |
@@ -147,7 +150,7 @@ typedef struct ShanjieEngine ShanjieEngine;
 int32_t shanjie_engine_new(const char *data_dir, uint32_t layout, ShanjieEngine **out); // layout 0 標準、1 倚天
 void    shanjie_engine_free(ShanjieEngine *engine);
 int32_t shanjie_engine_key(ShanjieEngine *engine, ShanjieKey key, ShanjieOutput **out);
-int32_t shanjie_engine_reset(ShanjieEngine *engine, uint32_t mode, ShanjieOutput **out); // mode 0 送出後清空、1 丟棄
+int32_t shanjie_engine_reset(ShanjieEngine *engine, uint32_t mode, ShanjieOutput **out); // mode 0 送出顯示的整串（含未完成的注音，和 Enter 相同）後清空、1 丟棄
 void    shanjie_output_free(ShanjieOutput *output);
 // s3b2 §8.2 新增：滑鼠點選。index 是這次輸出 candidates 裡的位置；核心選 candidate_first + index，走和 Enter 同一個 choose()。
 // V3：候選窗關閉但有預測列（進入或未進入）時，選預測列的第 index 個（點擊是明確的選取；學習開著時照改選學，v3-engine.md §10.1）。
