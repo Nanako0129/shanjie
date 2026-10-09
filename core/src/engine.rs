@@ -3,7 +3,7 @@
 
 use crate::learn::{context_key, local_day, Learner, Level, Record};
 use crate::learn_store::{LearnStore, Opened, StoreError, JOURNAL_MAX};
-use crate::predict::{predict, reading_matches, unit_of_syllable, Mode, Unit};
+use crate::predict::{predict, reading_matches_in, unit_of_syllable, Mode, Unit};
 use crate::lm::{decode_segment_learned, history, CappedLexicon, Demote, End, Learn, Lm, Profile};
 use crate::{decode_beam, Lexicon, NoLearning, BEAM_S1};
 use std::collections::{HashMap, HashSet};
@@ -28,6 +28,9 @@ pub const PREDICT_LONG_CAP: usize = 3;
 /// inside words this far back are queried last. Five is the user's choice; long names in the ACG pack were measured
 /// at 4, 5 and 6 (research log 2026-10-09).
 pub const PREDICT_BACK: usize = 5;
+/// Most unfinished units the abbreviation composer holds (V3 engine contract section 12.2). The longest names in the ACG pack
+/// are 10 characters and an abbreviation only helps up to the longest word; past this an occupied column replaces (rule 9).
+pub const ABBR_MAX_UNITS: usize = 10;
 /// Items in the prediction row.
 pub const PREDICT_MAX: usize = PAGE_SIZE;
 /// Items asked of `predict` for a start that some learned record could match (V3 engine contract section 10.2 step 1).
@@ -295,6 +298,9 @@ pub struct Engine {
     syls: Vec<String>,
     cursor: usize,
     pend: [Option<char>; 3],
+    /// V3 engine contract section 12: with the abbreviation composer on, the unfinished units before `pend` (the last one),
+    /// in typing order. Never empty units; non-empty only while `pend` is.
+    pend_prev: Vec<[Option<char>; 3]>,
     fixed: Vec<Fixed>,
     display: String,
     cands: Option<Cands>,
@@ -303,6 +309,8 @@ pub struct Engine {
     pred_sel: Option<usize>,
     /// Whether the row is computed at all (default on; `set_prediction`).
     predict_on: bool,
+    /// Whether a symbol in an occupied column opens a new unfinished unit (default off; `set_abbreviation`, section 12).
+    abbr: bool,
     /// Test hook: false queries `PREDICT_SCAN` at every start once the learner has records (no gate).
     scan_gate: bool,
     /// Set by the key rules that recompute the row (section 1.1); `key` recomputes after the rule ran.
@@ -450,12 +458,14 @@ impl Engine {
             syls: Vec::new(),
             cursor: 0,
             pend: [None; 3],
+            pend_prev: Vec::new(),
             fixed: Vec::new(),
             display: String::new(),
             cands: None,
             pred: Vec::new(),
             pred_sel: None,
             predict_on: true,
+            abbr: false,
             scan_gate: true,
             pred_dirty: false,
             left: String::new(),
@@ -705,8 +715,47 @@ impl Engine {
     /// on recomputes it, so a row that fits section 1.1 shows at once. Returns the snapshot.
     pub fn set_prediction(&mut self, on: bool) -> Result<Output, EngineError> {
         self.predict_on = on;
+        if !on {
+            self.drop_units(); // the units' only way out is the row (section 12.1)
+        }
         self.recompute_pred(); // clears first; returns empty while off
         self.handled()
+    }
+
+    /// Whether a symbol typed into an occupied column opens a new unfinished unit (default off, V3 engine contract section 12).
+    /// Turning it off with two or more units drops them all (as Esc does); otherwise nothing changes. Returns the snapshot.
+    pub fn set_abbreviation(&mut self, on: bool) -> Result<Output, EngineError> {
+        self.abbr = on;
+        if !on {
+            self.drop_units();
+        }
+        self.handled()
+    }
+
+    /// What `set_prediction(false)` and `set_abbreviation(false)` do with two or more unfinished units: they go, the row
+    /// with them, as with Esc (which goes through `clear_pend`); the composition, fixed words and cursor stay.
+    fn drop_units(&mut self) {
+        if !self.pend_prev.is_empty() {
+            self.clear_pend();
+            self.clear_pred();
+        }
+    }
+
+    /// Section 12.1: a new unit opens only with the setting on, the row on (it needs a model to show) and the cursor at
+    /// the end, and only below `ABBR_MAX_UNITS`; the completed syllables plus the units stay within `MAX_SYLLABLES`.
+    fn abbr_active(&self) -> bool {
+        let units = self.pend_prev.len() + 1;
+        self.abbr
+            && self.predict_on
+            && self.lm.is_some()
+            && self.cursor == self.syls.len()
+            && units < ABBR_MAX_UNITS
+            && self.syls.len() + units < MAX_SYLLABLES
+    }
+
+    fn clear_pend(&mut self) {
+        self.pend = [None; 3];
+        self.pend_prev.clear();
     }
 
     /// Switch the profile (default chat; remembered even before a model is loaded), recompute the
@@ -803,15 +852,21 @@ impl Engine {
         let (Some(st), true) = (self.lm.clone(), self.predict_on && self.cursor == n && self.cands.is_none()) else { return };
         let idx = st.capped.predict_index(&st.lm);
         let lam = self.profile.lambda();
-        let pending: Vec<char> = self.pend.iter().flatten().copied().collect();
+        // The unfinished units in order (one without the abbreviation composer); two or more can only read as an abbreviation.
+        let pending: Vec<Vec<char>> =
+            self.pend_prev.iter().chain([&self.pend]).map(|u| u.iter().flatten().copied().collect::<Vec<_>>()).filter(|u| !u.is_empty()).collect();
+        let multi = pending.len() > 1;
+        // One unit reads the same in both modes; only two or more can be an abbreviation.
+        let mode = if multi { Mode::PA } else { Mode::P };
         // Section 11: the last two path tokens' starts, and the start of every earlier one within `PREDICT_BACK`, far to
         // near. Positions inside words within `PREDICT_BACK` come last, except inside a word the user fixed: choosing
         // such an item would take the user's choice (and its pending learn) apart.
-        let starts = self.path_starts();
+        // Two or more units match nothing that holds a complete syllable (section 12.3): only the cursor start is queried.
+        let starts = if multi { Vec::new() } else { self.path_starts() };
         let k = starts.len();
         let long_starts: Vec<usize> =
             starts.iter().enumerate().filter(|&(i, &s)| i + 2 >= k || s + PREDICT_BACK >= n).map(|(_, &s)| s).collect();
-        let mid: Vec<usize> = (n.saturating_sub(PREDICT_BACK)..n)
+        let mid: Vec<usize> = (n.saturating_sub(PREDICT_BACK)..if multi { 0 } else { n })
             .filter(|&p| !long_starts.contains(&p) && !self.fixed.iter().any(|f| f.start < p && p < f.end))
             .collect();
         let disp: Vec<char> = self.display.chars().collect();
@@ -825,9 +880,7 @@ impl Engine {
             if units.len() != n - s {
                 return Vec::new();
             }
-            if !pending.is_empty() {
-                units.push(Unit { chars: pending.clone(), done: false, tone: None });
-            }
+            units.extend(pending.iter().map(|chars| Unit { chars: chars.clone(), done: false, tone: None }));
             if units.is_empty() {
                 return Vec::new();
             }
@@ -836,8 +889,8 @@ impl Engine {
             let v = history(if key == crate::learn::SENTINEL { "" } else { &key }, &st.lm);
             let shown: String = disp[off(s)..off(n)].iter().collect();
             // A start no record can match scans 9 and weighs nothing: its row is the slice-1 one, cheaper.
-            let gate = learned && (!self.scan_gate || self.learner.records().iter().any(|r| reading_matches(&units, &r.reading)));
-            predict(idx, &st.lm, lam, v, &units, Mode::P, if gate { PREDICT_SCAN } else { PREDICT_MAX })
+            let gate = learned && (!self.scan_gate || self.learner.records().iter().any(|r| reading_matches_in(&units, &r.reading, mode)));
+            predict(idx, &st.lm, lam, v, &units, mode, if gate { PREDICT_SCAN } else { PREDICT_MAX })
                 .into_iter()
                 .enumerate()
                 .filter_map(|(i, (word, _, _, reading))| {
@@ -889,7 +942,7 @@ impl Engine {
         let Pred { word, reading, start, key, .. } = self.pred.swap_remove(i);
         let pre = self.learning.then(String::new);
         self.clear_pred();
-        self.pend = [None; 3];
+        self.clear_pend();
         let (m, end) = (reading.len(), self.cursor);
         self.fixed.retain(|f| !(f.start < end && start < f.end));
         self.syls.splice(start..end, reading);
@@ -909,7 +962,7 @@ impl Engine {
         self.left.clear();
         self.syls.clear();
         self.cursor = 0;
-        self.pend = [None; 3];
+        self.clear_pend();
         self.fixed.clear();
         self.display.clear();
         self.path.clear();
@@ -918,7 +971,7 @@ impl Engine {
     }
 
     fn pending(&self) -> String {
-        self.pend.iter().flatten().collect()
+        self.pend_prev.iter().chain([&self.pend]).flatten().flatten().collect()
     }
 
     /// The composition as shown: the display text with the unfinished symbols at the cursor, and the cursor after
@@ -1123,7 +1176,7 @@ impl Engine {
         };
         if let Some(p) = punct {
             // s3d §1: into the composition at the cursor, not committed.
-            self.pend = [None; 3];
+            self.clear_pend();
             self.cands = None;
             return self.insert_token(format!("{PUNCT_PREFIX}{p}"), Some(p.to_string()));
         }
@@ -1142,19 +1195,29 @@ impl Engine {
         if has_pending {
             // 9-13
             if let Some((col, sym)) = zy {
+                // Section 12: an occupied column opens the next unit instead of being replaced.
+                if self.pend[col].is_some() && self.abbr_active() {
+                    self.pend_prev.push(std::mem::replace(&mut self.pend, [None; 3]));
+                }
                 self.pend[col] = Some(sym);
                 self.pred_dirty = true;
             } else if let Some(t) = tone {
-                return self.finish_syllable(t, old);
+                if self.pend_prev.is_empty() {
+                    return self.finish_syllable(t, old);
+                }
+                self.pred = old; // two or more units: tone and space do nothing (section 12.2)
             } else if k.kind == KeyKind::Backspace {
                 // Row 11: the last symbol in display order (final, then medial, then initial), as Apple Zhuyin and
                 // McBopomofo do (measured 2026-10-06: ㄉㄨㄟ, ㄅ replaces ㄉ, then Backspace gives ㄅㄨ, then ㄅ).
                 if let Some(col) = (0..3).rev().find(|&c| self.pend[c].is_some()) {
                     self.pend[col] = None;
                 }
+                if self.pend.iter().all(Option::is_none) {
+                    self.pend_prev.pop().into_iter().for_each(|u| self.pend = u); // an emptied unit goes
+                }
                 self.pred_dirty = true;
             } else if k.kind == KeyKind::Esc {
-                self.pend = [None; 3];
+                self.clear_pend();
             } else if k.kind == KeyKind::Enter {
                 return self.commit_enter(m); // 12a, 12b
             } else {
@@ -1311,7 +1374,7 @@ impl Engine {
             self.pred = old; // section 1.1: a syllable the lexicon lacks changes nothing
             return self.handled();
         }
-        self.pend = [None; 3];
+        self.clear_pend();
         self.pred_dirty = true;
         self.insert_token(syl, None)
     }
