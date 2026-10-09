@@ -1,5 +1,6 @@
-# Audit of why pack words lose to lexicon words (docs/research-log.md, 2026-10-10). Inputs are the dumps of acg_audit.rs;
-# S and ROOT below are the paths of the original run.
+# Audit of why pack words lose to lexicon words (docs/research-log.md, 2026-10-10).
+# KEPT AS A RECORD, NOT AS A RERUNNABLE SCRIPT: it ran on files in the author's session scratch directory (S and ROOT below), which are
+# not in the repo and are not kept. The inputs were the dumps of acg_audit.rs and the pack of c84e1ac.
 import collections, math, os, re, sys
 S = "/private/tmp/claude-501/-Users-nanako-side-project-shanjie/9cffaeb7-0bdc-48b8-8156-79a5228cbc30/scratchpad"
 A = S + "/acg-audit"

@@ -1,4 +1,4 @@
-// Scratch audit helper (not committed). args: LM PACKS_DIR. stdin: `reading<TAB>word`. For each line and profile prints
+// Audit helper, kept as a record of the 2026-10-10 audit (docs/research-log.md); it builds as a cargo example once copied into cli/examples/. args: LM PACKS_DIR. stdin: `reading<TAB>word`. For each line and profile prints
 // reading, word, profile, top-1 words (joined by +), top-1 total score, top-1 components (word:capped lp:count:in-vocab, |-separated),
 // rank of the candidate that is exactly [word] (-1 if none in the beam), its total score, and the word's capped lp, count, in-vocab.
 use core::engine::{capping_overlay, load_lexicon_packs, PACK_ACG};

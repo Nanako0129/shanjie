@@ -110,6 +110,12 @@ class Rules(unittest.TestCase):
         self.assertFalse(ok("阿庫雷特", "阿庫雷特（A）"))                     # 單一拉丁字母不算原名
         for credit in ("阿庫雷特（CV：Akari）", "阿庫雷特（CV：ひかさ）", "阿庫雷特（OVA）", "阿庫雷特（TV）", "阿庫雷特（聲優：Akari）", "阿庫雷特（由 Akari 配音）", "阿庫雷特（聲：Akari, Mv版）"):
             self.assertFalse(ok("阿庫雷特", credit), credit)               # 聲優、播出形式不是原名
+        # 第一個聲優標記之後的文字不是原名的證據；ver.、第N話、XY／IT／TVB 這類標籤與縮寫也不是
+        self.assertFalse(ok("勅使河原鏡花", "勅使河原鏡花（勅使河原 鏡花，聲：長月アキ）"))
+        self.assertTrue(ok("勅使河原鏡花", "勅使河原鏡花（てしがわら きょうか，聲：長月アキ）"))
+        for tag in ("天音姐妹（泳裝ver.）", "天音姐妹（偶像Ver. 2）", "天音姐妹（XY第129話）", "天音姐妹（IT，聲：山田）", "天音姐妹（TVB）", "天音姐妹（第5集）"):
+            self.assertFalse(ok("天音姐妹", tag), tag)
+        self.assertTrue(ok("天音姐妹", "天音姐妹（Amane Shimai, ver. 2）"))
         self.assertTrue(ok("由井薰", "由井薰（ゆい かおる）"))                   # 姓以「由」開頭的名字不是聲優標註
         self.assertTrue(ok("阿庫雷特", "阿庫雷特（Akuret, CV Akari）"))        # 有原名，後面才有聲優
 
@@ -138,6 +144,24 @@ class Rules(unittest.TestCase):
         # 語言轉換只取 zh-tw 的分支
         t = table("|1月||[[-{zh-tw:台灣作品;zh-cn:大陸作品}-]]||1", "|2月||-{zh-tw:[[乙]];zh-cn:[[丁]]}-||2", "|3月||[[-{丙}-]]||3")
         self.assertEqual(B.year_works(t), ["台灣作品", "乙", "丙"])
+
+    def test_year_list_rowspan_gap_header_colspan_zh_tw_and_footnotes(self):
+        table = lambda head, *rows: '{| class="wikitable"\n' + head + "\n" + "".join("|-\n" + r + "\n" for r in rows) + "|}"
+        # 一列在沒被佔用的欄位結束，後面還有被 rowspan 佔著的欄位：每一個被佔的欄位都補上並扣掉一列
+        t = table("!日期!!作品名!!話數!!備註", "|1月||[[甲]]||12||rowspan=2|n", "|2月||[[乙]]", "|3月||[[丙]]||12||n3")
+        self.assertEqual(B.table_rows(t)[1], [["1月", "[[甲]]", "12", "n"], ["2月", "[[乙]]", "", ""], ["3月", "[[丙]]", "12", "n3"]])
+        self.assertEqual(B.year_works(t), ["甲", "乙", "丙"])
+        # 標題列的 colspan 展開，作品名欄的索引才對得上資料列
+        self.assertEqual(B.year_works(table("!日期!!colspan=2|作品名!!話數", "|1月||[[甲]]||甲原名||12")), ["甲"])
+        # colspan=0 的資料格：欄位對不上，建置中止，不能靜靜地位移
+        with self.assertRaises(SystemExit):
+            B.year_works(table("!日期!!作品名!!話數", "|1月||colspan=0|[[甲]]||12"))
+        # 沒有語言變體的 -{ }-：整段保留（冒號、分號不是語言代碼）；&amp; 還原
+        self.assertEqual(B.zh_tw_branch("[[-{Re:從零開始的異世界生活}-]]"), "[[Re:從零開始的異世界生活]]")
+        self.assertEqual(B.year_works(table("!日期!!作品名", "|1月||[[-{Re:從零開始的異世界生活}-]]", "|2月||[[-{A&amp;B}-]]")), ["Re:從零開始的異世界生活", "A&B"])
+        self.assertEqual(B.zh_tw_branch("-{zh-cn:甲;zh-hk:乙}-"), "甲")                # 只有別的語言：取第一個
+        # 作品名在第一欄的列，其他欄是空的：不是註腳列；作品名欄也是空的整列才是
+        self.assertEqual(B.year_works(table("!作品名!!日期", "|[[甲]]||", "|colspan=2|註腳")), ["甲"])
 
     def test_year_list_stops_on_a_misaligned_row_or_too_few_works(self):
         ok = '{| class="wikitable"\n!日期!!作品名\n|-\n|1月||[[甲]]\n|-\n|colspan=2|註腳 <references/>\n|}'
@@ -366,6 +390,17 @@ class Build(unittest.TestCase):
             api.wiki(action="parse", page="已刪除")
         self.assertEqual(c.exception.args[0]["code"], "missingtitle")
 
+    def test_a_manual_words_fourth_column_sets_its_reading(self):
+        manual = os.path.join(self.tmp, "manual3.tsv")
+        open(manual, "w", encoding="utf-8").write("奇希莉卡\t無職轉生\t角色\tㄑㄧˊ ㄒㄧ ㄌㄧˋ ㄍㄚˇ\n")
+        files = B.build(FakeApi(), self.groups, self.excl, manual, readings=fake_readings, exclude_tsv=self.none, years=(),
+                        decode=lambda pairs, prof, packs=None: [w for w, _ in pairs])[0]
+        self.assertIn("ㄑㄧˊ-ㄒㄧ-ㄌㄧˋ-ㄍㄚˇ\t奇希莉卡\t", files["acg-add.tsv"])
+        bad = os.path.join(self.tmp, "manual4.tsv")
+        open(bad, "w", encoding="utf-8").write("奇希莉卡\t無職轉生\t角色\tㄑㄧˊ ㄒㄧ\n")
+        with self.assertRaises(SystemExit):
+            B.build(FakeApi(), self.groups, self.excl, bad, readings=fake_readings, exclude_tsv=self.none, years=(), decode=lambda pairs, prof, packs=None: [w for w, _ in pairs])
+
     def test_manual_words_carry_their_own_source_tag(self):
         files, *_ = self.build(self.excl)
         self.assertIn("奇希莉卡\tmanual\t無職轉生\t", files["acg-sources.tsv"])
@@ -444,6 +479,18 @@ class Build(unittest.TestCase):
         self.assertIn(r, run(f"{r}\t阿庫雷特\t+某個舊詞\t點名了\n"))           # 點名了阿庫雷特，但開了之後的第一名奇希莉卡沒被點名：新詞搶走第一名，照樣列出
         self.assertIn(r, run(f"{r}\t阿庫雷特\t+奇希莉卡\t兩個都點名，但保留的詞阿庫雷特不是第一名\n"))      # 保留的詞必須是第一名，點名第二個不夠
         self.assertNotIn(r, run(f"{r}\t奇希莉卡\t+阿庫雷特\t保留的詞奇希莉卡是第一名\n"))
+
+    def test_the_keep_word_is_the_first_row_whose_keep_word_is_in_the_pack(self):
+        # 同一個讀音兩列：第一列的保留的詞不在詞包，第二列的在 → 以第二列的為準（開詞包後的第一名是它就算已處置）
+        def decode(pairs, prof, packs=None):
+            return ["奇希莉卡" if packs and w == "阿庫雷特" else w for w, _ in pairs]
+        r = "ㄚ ㄎㄨˋ ㄌㄟˊ ㄊㄜˋ"
+        c = os.path.join(self.tmp, "c2.tsv")
+        def run(rows):
+            open(c, "w", encoding="utf-8").write(rows)
+            return B.build(FakeApi(), self.groups, c, self.manual, decode=decode, readings=fake_readings, exclude_tsv=self.none, years=())[2]
+        self.assertNotIn(r, run(f"{r}\t某個舊詞\t+另一個舊詞\t第一列的保留的詞不在詞包\n{r}\t奇希莉卡\t+阿庫雷特\t第二列\n"))
+        self.assertIn(r, run(f"{r}\t某個舊詞\t+奇希莉卡\t第一列的保留的詞不在詞包\n{r}\t阿庫雷特\t+某個舊詞\t第二列保留阿庫雷特但第一名是奇希莉卡\n"))
 
     def test_excluded_strings_leave_the_pack_and_the_reference_list(self):
         excl = os.path.join(self.tmp, "exclude.tsv")

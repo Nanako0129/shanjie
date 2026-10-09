@@ -23,6 +23,7 @@ import tempfile
 import time
 import urllib.parse
 import urllib.request
+from html import unescape
 from html.parser import HTMLParser
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -205,36 +206,51 @@ def table_rows(block):
             attrs, text = cell_attrs(c)
             m = re.search(r"rowspan\s*=\s*\"?(\d+)", attrs)
             n = re.search(r"colspan\s*=\s*\"?(\d+)", attrs)
-            for k in range(int(n.group(1)) if n else 1):         # colspan：佔好幾欄，文字放第一欄
+            span = int(n.group(1)) if n else 1
+            if span < 1:
+                raise SystemExit(f"year list: colspan={span} in a cell: {text[:30]!r}")
+            for k in range(span):                                # colspan：佔好幾欄，文字放第一欄
                 row.append(text if k == 0 else "")
                 if m and int(m.group(1)) > 1:
                     busy[col] = int(m.group(1)) - 1
                 col += 1
-        while busy.get(col, 0) > 0:                             # 這一列比較早結束，後面被 rowspan 佔著的欄位也要補上並扣掉一列
-            busy[col] -= 1
-            row.append("")
-            col += 1
+        for c in sorted(k for k, v in busy.items() if v > 0 and k >= col):   # 這一列比較早結束：後面所有被 rowspan 佔著的欄位（不只是緊接的）都補上並扣掉一列
+            row.extend([""] * (c - len(row) + 1))
+            busy[c] -= 1
         placed.append(row)
-    return [cell_attrs(c)[1] for c in head], placed
+    heads = []
+    for c in head:                                              # 標題列的 colspan 也展開，作品名欄的索引才對得上資料列
+        attrs, text = cell_attrs(c)
+        n = re.search(r"colspan\s*=\s*\"?(\d+)", attrs)
+        span = int(n.group(1)) if n else 1
+        if span < 1:
+            raise SystemExit(f"year list: header colspan={span}")
+        heads += [text] + [""] * (span - 1)
+    return heads, placed
 
 
 MIN_YEAR_WORKS = 100      # 一頁年度清單至少要取到這麼多個作品連結（2020–2026 實測最少 200）；少於這個就是頁面結構變了，建置中止（契約 A2.7）
 
 
+ZH_VARIANTS = {"zh", "zh-hans", "zh-hant", "zh-cn", "zh-tw", "zh-hk", "zh-mo", "zh-sg", "zh-my"}
+
+
 def zh_tw_branch(text):
-    """`-{zh-tw:甲;zh-cn:乙}-` → 甲（沒有 zh-tw 才用 zh-hant，再沒有就取第一段）；`-{甲}-` → 甲。其他語言的分支不取。"""
+    """`-{zh-tw:甲;zh-cn:乙}-` → 甲（沒有 zh-tw 才用 zh-hant、zh，再沒有就取第一個語言的值）；沒有任何語言變體的 `-{甲:乙;丙}-` 整段原樣保留
+    （「Re:從零開始…」的冒號不是語言代碼）。其他語言的分支不取。"""
     def pick(m):
         body = re.sub(r"^\s*[A-Za-z]+\s*\|", "", m.group(1))
-        parts = [p.strip() for p in body.split(";") if p.strip()]
         langs = {}
-        for p in parts:
-            k, sep, v = p.partition(":")
-            if sep and re.fullmatch(r"\s*zh(-[a-z]+)?\s*", k):
-                langs[k.strip()] = v.strip()
+        for part in body.split(";"):
+            k, sep, v = part.partition(":")
+            if sep and k.strip().lower() in ZH_VARIANTS:
+                langs[k.strip().lower()] = v.strip()
+        if not langs:
+            return body.strip()
         for k in ("zh-tw", "zh-hant", "zh"):
             if k in langs:
                 return langs[k]
-        return langs and next(iter(langs.values())) or (parts[0] if parts and ":" not in parts[0] else "")
+        return next(iter(langs.values()))
     return re.sub(r"-\{(.*?)\}-", pick, text, flags=re.S)
 
 
@@ -254,13 +270,13 @@ def year_works(text, minimum=0):
         i = names.index("作品名")
         tables += 1
         for row in rows:
-            if all(not c.strip() for c in row[1:]):          # 橫跨整列的註腳列
+            if not (row[i] if i < len(row) else "").strip() and all(not c.strip() for c in row[1:]):     # 橫跨整列的註腳列（作品名欄也是空的）
                 continue
             if len(row) > len(head) or len(row) <= i:               # 比標題列多，或短到沒有作品名欄：欄位對不上
                 raise SystemExit(f"year list: a row with {len(row)} cells under {len(head)} headers: {[c[:20] for c in row]}")
             cell = zh_tw_branch(re.sub(r"\{\{[^{}]*\}\}", "", row[i]))
             for m in re.finditer(r"\[\[([^\[\]|]+)(?:\|[^\[\]]*)?\]\]", cell):
-                t = m.group(1).split("#")[0].replace("_", " ").strip()
+                t = unescape(m.group(1)).split("#")[0].replace("_", " ").strip()
                 if t and not NOT_ARTICLE.match(t) and t not in out:
                     out.append(t)
     if not tables:
@@ -611,22 +627,29 @@ def names_of(html):
     return out
 
 
-# 契約 A2.2：括號裡的原名是假名，或不在這份清單裡的拉丁字母詞；聲優、播出形式這類標註（「（CV：…）」「（OVA）」）不是原名
-NOT_ORIGINAL = {"CV", "OVA", "OAD", "ONA", "TV", "TVA", "SP", "PV", "MV", "DVD", "BD", "CD", "ED", "OP", "OST", "NHK", "TBS", "MBS"}
+# 契約 A2.2：括號裡的原名是假名，或不在這份清單裡的拉丁字母詞；聲優、播出形式這類標註（「（CV：…）」「（OVA）」）不是原名。
+# 括號裡第一個聲優標記之後的文字不算證據（「（勅使河原 鏡花，聲：長月アキ）」只有「勅使河原 鏡花」算）；ver.、第N話 這類標籤先拿掉，XY、PT、IT、TVB 這類縮寫也不算。
+NOT_ORIGINAL = {"CV", "OVA", "OAD", "ONA", "TV", "TVA", "SP", "PV", "MV", "DVD", "BD", "CD", "ED", "OP", "OST", "NHK", "TBS", "MBS", "TVB", "IT", "XY", "PT", "VER"}
 LATIN = re.compile(r"[A-Za-z]{2,}")
-CREDIT = re.compile(r"\s*(CV|聲優|声优|配音|演員|飾演|聲\s*[:：]|由[^）)（(]*(配音|飾演|演出))")      # 開頭的「由」不能單獨算：由井、由比 這類姓也以由開頭
+CREDIT_AT = re.compile(r"(?<![A-Za-z])CV(?![A-Za-z])|聲優|声优|配音|日本配音|演員|飾演|[聲声]\s*[:：]|由[^，,；;）)（(]*(?:配音|飾演|演出)")
+TAGS = re.compile(r"[Vv]er\.?|第\s*\d+\s*[話话集]")
 ORIGINAL = re.compile(r"^\s*[（(]([^）)]*)[）)]")
 
 
+def has_original(content):
+    """括號裡（第一個聲優標記之前、拿掉標籤之後）有假名，或有不在 NOT_ORIGINAL 的拉丁字母詞。"""
+    m = CREDIT_AT.search(content)
+    head = TAGS.sub(" ", content[:m.start()] if m else content)
+    return bool(KANA.search(head) or any(t.upper() not in NOT_ORIGINAL for t in LATIN.findall(head)))
+
+
 def strict_ok(name, kind, snip, base):
-    """嚴格過濾（契約 A.1）：不在基底、不是小標題、不是關係詞組、不是泛稱，而且名字緊接的括號裡有原名（假名或兩個以上拉丁字母；契約 A2.2）。"""
+    """嚴格過濾（契約 A.1）：不在基底、不是小標題、不是關係詞組、不是泛稱，而且名字緊接的括號裡有原名（契約 A2.2，`has_original`）。"""
     if not HAN.match(name) or name in base or kind == "heading" or REL.search(name) or ROLE_END.search(name) or ROLE_ANY.search(name):
         return False
     sn = snip.replace("\n", " ").strip()
     m = ORIGINAL.match(sn[len(name):]) if sn.startswith(name) else None
-    if not m or CREDIT.match(m.group(1)):
-        return False
-    return bool(KANA.search(m.group(1)) or any(t.upper() not in NOT_ORIGINAL for t in LATIN.findall(m.group(1))))
+    return bool(m and has_original(m.group(1)))
 
 
 # ---------------------------------------------------------------- 去重、讀音、分數、排序
@@ -767,20 +790,19 @@ def detect_collisions(words, reading, rows, ref, decode=top1, existing=None):
 
 def read_collisions(path):
     """acg-collisions.tsv：讀音、保留的詞、排除的詞、理由。排除欄寫 `+詞` 表示兩個都留，`+` 後面是另一個留下的詞
-    （使用者決定的處置）。回傳 ({排除的詞: 讀音}, {(讀音, 詞)}, {讀音: 保留的詞})：處置列裡點名的兩個詞才算已處置，
-    同讀音的新詞不算；同一個讀音有好幾列時，第一列的保留的詞必須是開詞包後的第一名，排序也照列出現的先後（保留的詞在前）。"""
+    （使用者決定的處置）。回傳 ({排除的詞: 讀音}, {(讀音, 詞)})：處置列裡點名的兩個詞才算已處置，同讀音的新詞不算。
+    同一個讀音的排序與保留的詞見 `build`（列出現的先後；保留的詞在前，第一個還在詞包的保留的詞必須是開詞包後的第一名）。"""
     if not os.path.exists(path):
-        return {}, set(), {}
-    out, decided, keep = {}, set(), {}
+        return {}, set()
+    out, decided = {}, set()
     for r in read_tsv(path):
         if not (len(r) == 4 and r[2].lstrip("+")):
             raise SystemExit(f"{path}: bad collision row: {r}")
         other = r[2].lstrip("+")
         decided |= {(r[0], r[1]), (r[0], other)}
-        keep.setdefault(r[0], r[1])
         if not r[2].startswith("+"):
             out[other] = r[0]
-    return out, decided, keep
+    return out, decided
 
 
 def read_exclude(path):
@@ -885,16 +907,22 @@ def build(api, groups_tsv=os.path.join(PACKS, "acg-groups.tsv"), collisions_tsv=
         src[v]["title"] |= {f"{t}@{art_rev[t]}" for t in s}
     for n in chars:
         src[n]["char"] |= {f"{t}@{art_rev[t]}" for t in name_src[n]}
-    for w, work, *_ in read_tsv(manual_tsv):            # 維護者手動加的詞（欄位：詞、作品、備註）：同樣去重、定讀音、算分數、偵測衝突
+    manual_reading = {}
+    for w, work, *rest in read_tsv(manual_tsv):         # 維護者手動加的詞（欄位：詞、作品、備註、讀音（選填））：同樣去重、定讀音、算分數、偵測衝突
         if not HAN.match(w):
             raise SystemExit(f"{manual_tsv}: bad manual word: {w!r}")
+        if len(rest) > 1 and rest[1].strip():           # 第四欄指定讀音（音節以空白分隔，要和字數一致），讀音工具選的和想要的不同時用
+            if len(rest[1].split()) != len(w):
+                raise SystemExit(f"{manual_tsv}: reading of {w!r} has {len(rest[1].split())} syllables")
+            manual_reading[w] = rest[1].split()
         src[w]["manual"].add(work)
         ref.add(w)
     exclude = read_exclude(exclude_tsv)
     ref -= exclude
-    excluded, decided, keep = read_collisions(collisions_tsv)
-    rank = {}
+    excluded, decided = read_collisions(collisions_tsv)
+    rank, keeps = {}, collections.defaultdict(list)           # rank：處置列點名的先後（保留的詞在前）；keeps：每個讀音各列的保留的詞
     for r in read_tsv(collisions_tsv) if os.path.exists(collisions_tsv) else []:
+        keeps[r[0]].append(r[1])
         for w in (r[1], r[2].lstrip("+")):
             rank.setdefault((r[0], w), len(rank))
     deduped = set(dedupe(src, have))
@@ -903,6 +931,7 @@ def build(api, groups_tsv=os.path.join(PACKS, "acg-groups.tsv"), collisions_tsv=
     log("candidates", len(src), "after dedupe and exclusions", len(cand), "excluded by acg-collisions.tsv", len(set(excluded) & deduped), "by acg-exclude.tsv", len(dropped))
 
     rd = readings(cand)
+    rd.update({w: (r, False) for w, r in manual_reading.items() if w in cand})
     unread = sorted(set(cand) - set(rd))
     words = [w for w in cand if w in rd]
     reading = {w: rd[w][0] for w in words}
@@ -921,10 +950,12 @@ def build(api, groups_tsv=os.path.join(PACKS, "acg-groups.tsv"), collisions_tsv=
     else:
         raise SystemExit(f"type (c) collisions not settled after {LEXICON_RULE_ROUNDS} rounds")
     col = {}
+    inpack = set(words)
+    keep_now = {r: next((k for k in ks if k in inpack), None) for r, ks in keeps.items()}       # 保留的詞：第一列裡還在詞包的；都不在就看後面的列
     for r, v in found.items():
         # 詞 e[0] 在這個讀音的處置列裡被點名，而且開了之後的第一名 e[4] 就是處置列的保留的詞，才算已處置
         # （2026-10-10：被舊處置蓋住的新詞搶走第一名，或點名的詞沒排在保留的詞前面，都要列出）
-        left = [e for e in v if (r, e[0]) not in decided or e[4] != keep[r]]
+        left = [e for e in v if (r, e[0]) not in decided or e[4] != keep_now.get(r)]
         if left:
             col[r] = left
     ts_max = max(ts)
