@@ -526,16 +526,18 @@ def detect_collisions(words, reading, rows, ref, decode=top1):
 
 
 def read_collisions(path):
-    """acg-collisions.tsv：讀音、保留的詞、排除的詞、理由。排除的詞寫 `-` 表示兩個都留（使用者決定的處置，排序照來源數）。
-    回傳 ({排除的詞: 讀音}, {(讀音, 詞)})：處置列裡點名的（保留的詞、排除的詞）才算已處置，同讀音的新詞不算。"""
+    """acg-collisions.tsv：讀音、保留的詞、排除的詞、理由。排除欄寫 `+詞` 表示兩個都留，`+` 後面是另一個留下的詞
+    （使用者決定的處置，排序照來源數）。回傳 ({排除的詞: 讀音}, {(讀音, 詞)})：處置列裡點名的兩個詞才算已處置，
+    同讀音的新詞不算。"""
     if not os.path.exists(path):
         return {}, set()
     out, decided = {}, set()
     for r in read_tsv(path):
-        assert len(r) == 4 and r[2], f"bad collision row: {r}"
-        decided |= {(r[0], r[1]), (r[0], r[2])}
-        if r[2] != "-":
-            out[r[2]] = r[0]
+        assert len(r) == 4 and r[2].lstrip("+"), f"bad collision row: {r}"
+        other = r[2].lstrip("+")
+        decided |= {(r[0], r[1]), (r[0], other)}
+        if not r[2].startswith("+"):
+            out[other] = r[0]
     return out, decided
 
 
