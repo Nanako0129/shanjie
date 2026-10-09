@@ -258,8 +258,8 @@ enum Screens {
             primary = L("啟用", "Enable")
         }
         // app-sandbox.md section 2.5: the rollback note.
-        let details = L("安裝位置：~/Library/Input Methods（只有你的帳號）。\n執行中的舊版會被結束，上一版保留在同一個資料夾的 .shanjie-previous。\n退回 0.3.1 以前（沒有沙盒）的版本時，舊版看不到學習資料與設定，它們已搬進 ~/Library/Containers/com.nyanako.inputmethod.shanjie；退回期間學到的，再升級時不會搬過去。搬回：docs/sandbox-restore.md。\n",
-                        "Installs into ~/Library/Input Methods (your account only).\nA running older copy is stopped; the previous version is kept there as .shanjie-previous.\nA version without the sandbox (0.3.1 or earlier) sees no learned words or settings: they moved into ~/Library/Containers/com.nyanako.inputmethod.shanjie. What it learns is not moved on the next upgrade. To move data back: docs/sandbox-restore.md.\n") + license
+        let details = L("安裝位置：~/Library/Input Methods（只有你的帳號）。\n執行中的舊版會被結束，上一版保留在同一個資料夾的 .shanjie-previous。\n退回 0.4.x 以前（沒有沙盒）的版本時，舊版看不到學習資料與設定，它們已搬進 ~/Library/Containers/com.nyanako.inputmethod.shanjie；退回期間學到的，再升級時不會搬過去。搬回：docs/sandbox-restore.md。\n",
+                        "Installs into ~/Library/Input Methods (your account only).\nA running older copy is stopped; the previous version is kept there as .shanjie-previous.\nA version without the sandbox (0.4.x or earlier) sees no learned words or settings: they moved into ~/Library/Containers/com.nyanako.inputmethod.shanjie. What it learns is not moved on the next upgrade. To move data back: docs/sandbox-restore.md.\n") + license
         return Screen(step: 0, title: L("善解輸入法 ", "Shanjie ") + bundled,
                       body: L("開源的 macOS 注音輸入法。", "An open-source Zhuyin input method for macOS.") + "\n" + line,
                       seal: true, details: details, primary: primary, secondary: secondary, close: L("取消", "Cancel"))

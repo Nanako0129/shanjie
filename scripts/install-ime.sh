@@ -185,7 +185,7 @@ if [ "$rc" -ne 0 ]; then
   # app-sandbox.md section 2.5: the first sandboxed run moved the data, so an older version without
   # the sandbox starts empty.
   if [ -d "$PREV" ] && [ "$ID" = "$SHIPPING_ID" ]; then
-    echo "If the previous version is one without the App Sandbox (0.3.1 or earlier), it starts with no" >&2
+    echo "If the previous version is one without the App Sandbox (0.4.x or earlier), it starts with no" >&2
     echo "learned words and default settings: the sandboxed version moved them into" >&2
     echo "~/Library/Containers/$SHIPPING_ID on its first run. What the older version learns stays in the" >&2
     echo "old place and is not moved again on the next upgrade. To move the data back:" >&2
