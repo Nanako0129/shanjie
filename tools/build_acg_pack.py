@@ -142,15 +142,16 @@ CELL_ATTR = re.compile(r"^((?:\s*[A-Za-z-]+\s*=\s*(?:\"[^\"]*\"|'[^']*'|[^\s|\"'
 NOT_ARTICLE = re.compile(r"^(?::|(?:File|Image|檔案|文件|Category|分類|Template|模板|Help|Special|Wikipedia|WP|ja|en|zh|ko|w|wikt|d):)", re.I)
 
 
-def table_cells(line):
-    """表格列裡的一行（`|a||b` 或 `!a!!b`）→ 儲存格文字清單，只在最外層（不在 {{ }}、[[ ]] 裡）拆 `||`／`!!`。"""
+def table_cells(line, header=False):
+    """表格列裡的一行（`|a||b` 或 `!a!!b`）→ 儲存格文字清單，只在最外層（不在 {{ }}、[[ ]] 裡）拆 `||`；標題行（header）另外拆 `!!`，資料行裡的 `!!` 是內容。"""
+    seps = ("||", "!!") if header else ("||",)
     out, cur, depth = [], [], 0
     for tok in TOKEN.split(line):
         if tok in ("{{", "[["):
             depth += 1
         elif tok in ("}}", "]]"):
             depth -= 1
-        elif tok in ("||", "!!") and depth <= 0:
+        elif tok in seps and depth <= 0:
             out.append("".join(cur))
             cur = []
             continue
@@ -181,7 +182,7 @@ def table_rows(block):
                 rows.append(cur)
             cur = []
         elif depth <= 0 and line[:1] in ("|", "!") and not line.startswith("|+"):
-            parts = table_cells(line[1:])
+            parts = table_cells(line[1:], header=line[0] == "!")
             if line[0] == "!" and not rows and not cur:
                 head += parts                                   # 第一列之前的 ! 行是標題列
             else:
@@ -193,7 +194,7 @@ def table_rows(block):
         depth += len(re.findall(r"\{\{|\[\[", line)) - len(re.findall(r"\}\}|\]\]", line))
     if cur:
         rows.append(cur)
-    placed, busy = [], {}
+    placed, busy = [], {}                                       # busy：欄 → 還要被上面的 rowspan 佔幾列
     for cells in rows:
         row, col = [], 0
         for c in cells:
@@ -203,20 +204,47 @@ def table_rows(block):
                 col += 1
             attrs, text = cell_attrs(c)
             m = re.search(r"rowspan\s*=\s*\"?(\d+)", attrs)
-            row.append(text)
-            if m and int(m.group(1)) > 1:
-                busy[col] = int(m.group(1)) - 1
+            n = re.search(r"colspan\s*=\s*\"?(\d+)", attrs)
+            for k in range(int(n.group(1)) if n else 1):         # colspan：佔好幾欄，文字放第一欄
+                row.append(text if k == 0 else "")
+                if m and int(m.group(1)) > 1:
+                    busy[col] = int(m.group(1)) - 1
+                col += 1
+        while busy.get(col, 0) > 0:                             # 這一列比較早結束，後面被 rowspan 佔著的欄位也要補上並扣掉一列
+            busy[col] -= 1
+            row.append("")
             col += 1
         placed.append(row)
     return [cell_attrs(c)[1] for c in head], placed
 
 
-def year_works(text):
-    """年度清單頁（wikitext）→ 作品名欄裡的條目連結（出現順序、去重）。每個 wikitable 的標題列必須有「作品名」欄，只取那一欄的 [[連結]]；
-    沒有這一欄的表格就中止（頁面結構變了，契約 A2.7 的停止條件）。紅連結模板（{{link-ja}}、{{tsl}}）沒有中文條目，不取。"""
-    text = re.sub(r"<ref[^>/]*/>|<ref[^>]*>.*?</ref>", "", strip_comments(text, False), flags=re.S)
+MIN_YEAR_WORKS = 100      # 一頁年度清單至少要取到這麼多個作品連結（2020–2026 實測最少 200）；少於這個就是頁面結構變了，建置中止（契約 A2.7）
+
+
+def zh_tw_branch(text):
+    """`-{zh-tw:甲;zh-cn:乙}-` → 甲（沒有 zh-tw 才用 zh-hant，再沒有就取第一段）；`-{甲}-` → 甲。其他語言的分支不取。"""
+    def pick(m):
+        body = re.sub(r"^\s*[A-Za-z]+\s*\|", "", m.group(1))
+        parts = [p.strip() for p in body.split(";") if p.strip()]
+        langs = {}
+        for p in parts:
+            k, sep, v = p.partition(":")
+            if sep and re.fullmatch(r"\s*zh(-[a-z]+)?\s*", k):
+                langs[k.strip()] = v.strip()
+        for k in ("zh-tw", "zh-hant", "zh"):
+            if k in langs:
+                return langs[k]
+        return langs and next(iter(langs.values())) or (parts[0] if parts and ":" not in parts[0] else "")
+    return re.sub(r"-\{(.*?)\}-", pick, text, flags=re.S)
+
+
+def year_works(text, minimum=0):
+    """年度清單頁（wikitext）→ 作品名欄裡的條目連結（出現順序、去重）。每個 wikitable 的標題列必須有「作品名」欄，只取那一欄的 [[連結]]
+    （語言轉換 `-{ }-` 只取 zh-tw 的分支）；沒有這一欄、有一列的欄數和標題列對不上（整列橫跨的註腳列除外），或取到的連結少於 minimum，
+    建置中止（頁面結構變了，契約 A2.7 的停止條件）。紅連結模板（{{link-ja}}、{{tsl}}）沒有中文條目，不取。"""
+    text = re.sub(r"<ref\b[^>]*/>|<ref\b[^>]*>.*?</ref>", "", strip_comments(text, False), flags=re.S)
     out, tables = [], 0
-    for block in re.split(r"\n(?=\{\|)", text)[1:]:
+    for block in (b for b in re.split(r"(?m)^(?=\{\|)", text) if b.startswith("{|")):
         if "wikitable" not in block.split("\n", 1)[0]:
             continue
         head, rows = table_rows(block)
@@ -226,14 +254,19 @@ def year_works(text):
         i = names.index("作品名")
         tables += 1
         for row in rows:
-            cell = row[i] if i < len(row) else ""
-            cell = re.sub(r"\{\{[^{}]*\}\}", "", cell)
+            if all(not c.strip() for c in row[1:]):          # 橫跨整列的註腳列
+                continue
+            if len(row) > len(head) or len(row) <= i:               # 比標題列多，或短到沒有作品名欄：欄位對不上
+                raise SystemExit(f"year list: a row with {len(row)} cells under {len(head)} headers: {[c[:20] for c in row]}")
+            cell = zh_tw_branch(re.sub(r"\{\{[^{}]*\}\}", "", row[i]))
             for m in re.finditer(r"\[\[([^\[\]|]+)(?:\|[^\[\]]*)?\]\]", cell):
                 t = m.group(1).split("#")[0].replace("_", " ").strip()
                 if t and not NOT_ARTICLE.match(t) and t not in out:
                     out.append(t)
     if not tables:
         raise SystemExit("year list: no wikitable found")
+    if len(out) < minimum:
+        raise SystemExit(f"year list: only {len(out)} work links, expected at least {minimum}")
     return out
 
 
@@ -528,7 +561,7 @@ SEP = re.compile(r"[・·•･ 　/／]")
 CUT = re.compile(r"[（(：:、,，；;〔\[「『【《—–\-~～…→＝=|｜\n]|\s聲|CV|配音|演員|飾演|聲優")
 STOP = set("日本 角色 其他 旁白 香港 台灣 中國大陸 國語 醫生 主角 老師 首領 怪物 播音員 記者 警官 校長 警備員 長老 老婆婆 角色名 角色名稱 登場人物 登場角色 客串角色 次要角色 主要人物 主要角色 原作角色 本作角色 其他人物 其他角色 其他登場人物 必殺技 合體必殺技 主角的家人 傳說神奇寶貝 台灣 中國 美國 韓國 英語 粵語 日語".split())
 STOP_RE = re.compile(r"(角色|人物|登場|列表|一覽|必殺技|聲優|配音|名稱|演員)$|^(主要|次要|其他|原創|登場)")
-KANA, LAT = re.compile(r"[぀-ヿ]"), re.compile(r"[A-Za-z]{2}")
+KANA = re.compile(r"[぀-ヿ]")
 REL = re.compile(r"的|之(母|父|女|子|妻|夫|弟|兄|姊|姐|妹|友|師|徒|主|王|僕)")
 ROLE_END = re.compile(r"(母親|父親|哥哥|姊姊|姐姐|弟弟|妹妹|爺爺|奶奶|老師|同學|學生|校長|社長|部長|隊長|會長|隊員|成員|一夥|一伙|學園|學院|小隊|軍團|集團|社團|俱樂部|協會|公司|組織|王國|帝國|村落|號|家|們)$")
 ROLE_ANY = re.compile(r"社團|俱樂部|同好會|研究會|委員會|學生會|粉絲|觀眾|路人|店員|店長|護士|警察|刑警|警官|醫生|老闆|客人|居民|村民|士兵|聲優|配音|旁白|廣播")
@@ -578,6 +611,10 @@ def names_of(html):
     return out
 
 
+# 契約 A2.2：括號裡的原名是假名，或不在這份清單裡的拉丁字母詞；聲優、播出形式這類標註（「（CV：…）」「（OVA）」）不是原名
+NOT_ORIGINAL = {"CV", "OVA", "OAD", "ONA", "TV", "TVA", "SP", "PV", "MV", "DVD", "BD", "CD", "ED", "OP", "OST", "NHK", "TBS", "MBS"}
+LATIN = re.compile(r"[A-Za-z]{2,}")
+CREDIT = re.compile(r"\s*(CV|聲優|声优|配音|演員|飾演|由)")
 ORIGINAL = re.compile(r"^\s*[（(]([^）)]*)[）)]")
 
 
@@ -587,7 +624,9 @@ def strict_ok(name, kind, snip, base):
         return False
     sn = snip.replace("\n", " ").strip()
     m = ORIGINAL.match(sn[len(name):]) if sn.startswith(name) else None
-    return bool(m and (KANA.search(m.group(1)) or LAT.search(m.group(1))))
+    if not m or CREDIT.match(m.group(1)):
+        return False
+    return bool(KANA.search(m.group(1)) or any(t.upper() not in NOT_ORIGINAL for t in LATIN.findall(m.group(1))))
 
 
 # ---------------------------------------------------------------- 去重、讀音、分數、排序
@@ -642,9 +681,11 @@ def make_readings(words):
         return out
 
 
-def ordered(words, nsrc):
-    """同音詞的順序（疊加層同分時看檔案順序）：來源數多的在前，同數依字串排序，所以可以重現。"""
-    return sorted(words, key=lambda w: (-nsrc(w), w))
+def ordered(words, nsrc, rank=None, reading=None):
+    """同音詞的順序，由 `pack_rows` 轉成分數的差（解碼器同分時的先後與檔案順序無關，2026-10-10 實測）：處置列點名的先照列的順序
+    （rank：{(讀音, 詞): 名次}，保留的詞在前），其餘來源數多的在前，同數依字串排序，所以可以重現。"""
+    rank = rank or {}
+    return sorted(words, key=lambda w: (rank.get((" ".join(reading[w]), w), len(rank)) if reading else 0, -nsrc(w), w))
 
 
 TIE = 1e-6      # 同讀音的詞包詞，排在第 k 位的分數減 k × TIE：解碼器遇到同分時的先後與檔案順序無關（2026-10-10 實測），要讓「來源數多的在前」成立只能靠分數
@@ -726,19 +767,20 @@ def detect_collisions(words, reading, rows, ref, decode=top1, existing=None):
 
 def read_collisions(path):
     """acg-collisions.tsv：讀音、保留的詞、排除的詞、理由。排除欄寫 `+詞` 表示兩個都留，`+` 後面是另一個留下的詞
-    （使用者決定的處置，排序照來源數）。回傳 ({排除的詞: 讀音}, {(讀音, 詞)})：處置列裡點名的兩個詞才算已處置，
-    同讀音的新詞不算。"""
+    （使用者決定的處置）。回傳 ({排除的詞: 讀音}, {(讀音, 詞)}, {讀音: 保留的詞})：處置列裡點名的兩個詞才算已處置，
+    同讀音的新詞不算；同一個讀音有好幾列時，第一列的保留的詞必須是開詞包後的第一名，排序也照列出現的先後（保留的詞在前）。"""
     if not os.path.exists(path):
-        return {}, set()
-    out, decided = {}, set()
+        return {}, set(), {}
+    out, decided, keep = {}, set(), {}
     for r in read_tsv(path):
         if not (len(r) == 4 and r[2].lstrip("+")):
             raise SystemExit(f"{path}: bad collision row: {r}")
         other = r[2].lstrip("+")
         decided |= {(r[0], r[1]), (r[0], other)}
+        keep.setdefault(r[0], r[1])
         if not r[2].startswith("+"):
             out[other] = r[0]
-    return out, decided
+    return out, decided, keep
 
 
 def read_exclude(path):
@@ -755,7 +797,7 @@ def read_exclude(path):
 
 # ---------------------------------------------------------------- 主流程
 
-def build(api, groups_tsv=os.path.join(PACKS, "acg-groups.tsv"), collisions_tsv=os.path.join(PACKS, "acg-collisions.tsv"), manual_tsv=os.path.join(PACKS, "acg-manual.tsv"), decode=top1, readings=make_readings, exclude_tsv=os.path.join(PACKS, "acg-exclude.tsv"), years=range(LAST_YEAR - YEARS + 1, LAST_YEAR + 1)):
+def build(api, groups_tsv=os.path.join(PACKS, "acg-groups.tsv"), collisions_tsv=os.path.join(PACKS, "acg-collisions.tsv"), manual_tsv=os.path.join(PACKS, "acg-manual.tsv"), decode=top1, readings=make_readings, exclude_tsv=os.path.join(PACKS, "acg-exclude.tsv"), years=range(LAST_YEAR - YEARS + 1, LAST_YEAR + 1), min_year_works=MIN_YEAR_WORKS):
     log = lambda *a: print(*a, file=sys.stderr)
     gr = read_groups(groups_tsv)
     listing = pages(api, ["Template:CGroup/list"])["Template:CGroup/list"]
@@ -795,7 +837,7 @@ def build(api, groups_tsv=os.path.join(PACKS, "acg-groups.tsv"), collisions_tsv=
             raise SystemExit(f"year list not found: {t}")
         ts.append(ylists[t]["ts"])
         revs.append(ylists[t]["revid"])
-        yw = year_works(ylists[t]["text"])
+        yw = year_works(ylists[t]["text"], min_year_works)
         ywork += yw
         yearly[str(y)] = {"title": ylists[t]["title"], "revid": ylists[t]["revid"], "ts": ylists[t]["ts"], "links": len(yw)}
         log("year", y, "works linked", len(yw))
@@ -850,7 +892,11 @@ def build(api, groups_tsv=os.path.join(PACKS, "acg-groups.tsv"), collisions_tsv=
         ref.add(w)
     exclude = read_exclude(exclude_tsv)
     ref -= exclude
-    excluded, decided = read_collisions(collisions_tsv)
+    excluded, decided, keep = read_collisions(collisions_tsv)
+    rank = {}
+    for r in read_tsv(collisions_tsv) if os.path.exists(collisions_tsv) else []:
+        for w in (r[1], r[2].lstrip("+")):
+            rank.setdefault((r[0], w), len(rank))
     deduped = set(dedupe(src, have))
     dropped = exclude & deduped                          # 實際從候選拿掉的才算
     cand = [w for w in sorted(deduped) if w not in excluded and w not in dropped]
@@ -864,7 +910,7 @@ def build(api, groups_tsv=os.path.join(PACKS, "acg-groups.tsv"), collisions_tsv=
     # 使用者 2026-10-10 的規則：詞包詞若把既有詞庫的詞擠下第一名（類型 c），既有詞勝、詞包詞丟掉；丟掉之後別的詞的結果可能變，重跑到沒有 c 為止。
     lexicon_dropped = []
     for _ in range(LEXICON_RULE_ROUNDS):
-        order = ordered(words, lambda w: sum(len(s) for s in src[w].values()))
+        order = ordered(words, lambda w: sum(len(s) for s in src[w].values()), rank, reading)
         rows = pack_rows(order, reading, sc)
         found = detect_collisions(words, reading, rows, ref, decode)
         hit = {e[0]: (r, e) for r, v in sorted(found.items()) for e in v if e[1] == "c"}
@@ -875,12 +921,10 @@ def build(api, groups_tsv=os.path.join(PACKS, "acg-groups.tsv"), collisions_tsv=
     else:
         raise SystemExit(f"type (c) collisions not settled after {LEXICON_RULE_ROUNDS} rounds")
     col = {}
-    named = collections.defaultdict(set)                        # 讀音 → 處置列裡點名的詞
-    for r, w in decided:
-        named[r].add(w)
     for r, v in found.items():
-        # 詞 e[0] 在這個讀音的處置列裡被點名，而且開了之後的第一名 e[4] 也是處置列點名的詞，才算已處置（2026-10-10：被舊處置蓋住的新詞搶走第一名要列出）
-        left = [e for e in v if (r, e[0]) not in decided or e[4] not in named[r]]
+        # 詞 e[0] 在這個讀音的處置列裡被點名，而且開了之後的第一名 e[4] 就是處置列的保留的詞，才算已處置
+        # （2026-10-10：被舊處置蓋住的新詞搶走第一名，或點名的詞沒排在保留的詞前面，都要列出）
+        left = [e for e in v if (r, e[0]) not in decided or e[4] != keep[r]]
         if left:
             col[r] = left
     ts_max = max(ts)

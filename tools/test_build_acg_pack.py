@@ -108,6 +108,9 @@ class Rules(unittest.TestCase):
         self.assertTrue(ok("阿庫雷特", "阿庫雷特 (Akuret)"))                  # 半形括號、拉丁字母
         self.assertTrue(ok("阿庫雷特", "阿庫雷特 （アクレット，主角）"))        # 括號前可有空白
         self.assertFalse(ok("阿庫雷特", "阿庫雷特（A）"))                     # 單一拉丁字母不算原名
+        for credit in ("阿庫雷特（CV：Akari）", "阿庫雷特（CV：ひかさ）", "阿庫雷特（OVA）", "阿庫雷特（TV）", "阿庫雷特（聲優：Akari）", "阿庫雷特（由 Akari 配音）"):
+            self.assertFalse(ok("阿庫雷特", credit), credit)               # 聲優、播出形式不是原名
+        self.assertTrue(ok("阿庫雷特", "阿庫雷特（Akuret, CV Akari）"))        # 有原名，後面才有聲優
 
     def test_year_list_takes_only_the_links_in_the_title_column(self):
         got = B.year_works(YEAR_LIST)
@@ -116,6 +119,34 @@ class Rules(unittest.TestCase):
             B.year_works('{| class="wikitable"\n|-\n!日期!!名稱\n|-\n|1月||[[甲]]\n|}')
         with self.assertRaises(SystemExit):
             B.year_works("沒有表格")
+
+    def test_year_list_parser_survives_rows_that_end_early_colspan_and_markup(self):
+        table = lambda *rows: '{| class="wikitable"\n!日期!!作品名!!話數\n' + "".join("|-\n" + r + "\n" for r in rows) + "|}"
+        # 一列比標題列早結束，而且最後一欄被上一列的 rowspan 佔著：佔位要補上並扣掉，下一列才不會多出一格
+        t = table("|1月||[[甲]]||rowspan=2|12話", "|2月||[[乙]]", "|3月||[[丙]]||12話")
+        self.assertEqual(B.table_rows(t)[1], [["1月", "[[甲]]", "12話"], ["2月", "[[乙]]", ""], ["3月", "[[丙]]", "12話"]])
+        self.assertEqual(B.year_works(t), ["甲", "乙", "丙"])
+        # colspan：佔好幾欄，文字放第一欄
+        self.assertEqual(B.table_rows(table("|1月||colspan=2|[[甲]]", "|2月||[[乙]]||z"))[1], [["1月", "[[甲]]", ""], ["2月", "[[乙]]", "z"]])
+        # `!!` 只在標題行拆；資料行裡的 !! 是內容
+        self.assertEqual(B.table_cells("a!!b||c"), ["a!!b", "c"])
+        self.assertEqual(B.table_cells("a!!b||c", header=True), ["a", "b", "c"])
+        # 自閉合的 <ref .../>，屬性裡有 /：不能吃到後面的文字，也不能把 ref 內容當連結
+        t = table('|1月||[[甲]]<ref name="a/b" />||1', '|2月||[[乙]]<ref>[[不要]]</ref>||2', '|3月||[[丙]]||3')
+        self.assertEqual(B.year_works(t), ["甲", "乙", "丙"])
+        # 語言轉換只取 zh-tw 的分支
+        t = table("|1月||[[-{zh-tw:台灣作品;zh-cn:大陸作品}-]]||1", "|2月||-{zh-tw:[[乙]];zh-cn:[[丁]]}-||2", "|3月||[[-{丙}-]]||3")
+        self.assertEqual(B.year_works(t), ["台灣作品", "乙", "丙"])
+
+    def test_year_list_stops_on_a_misaligned_row_or_too_few_works(self):
+        ok = '{| class="wikitable"\n!日期!!作品名\n|-\n|1月||[[甲]]\n|-\n|colspan=2|註腳 <references/>\n|}'
+        self.assertEqual(B.year_works(ok), ["甲"])               # 橫跨整列的註腳列不算
+        with self.assertRaises(SystemExit):                    # 比標題列多出一格
+            B.year_works('{| class="wikitable"\n!日期!!作品名\n|-\n|1月||[[甲]]||多出來\n|}')
+        with self.assertRaises(SystemExit):                    # 短到沒有作品名欄
+            B.year_works('{| class="wikitable"\n!日期!!話數!!作品名\n|-\n|1月||12\n|}')
+        with self.assertRaises(SystemExit):                    # 取到的作品太少
+            B.year_works(ok, minimum=2)
 
     def test_groups_column_four_must_be_include_or_exclude(self):
         d = tempfile.mkdtemp()
@@ -140,6 +171,12 @@ class Dedupe(unittest.TestCase):
 
 
 class Ordering(unittest.TestCase):
+    def test_a_decision_rows_keep_word_ranks_before_more_sources(self):
+        n = {"乙乙": 5, "甲甲": 1}
+        reading = {"乙乙": ["ㄅ"], "甲甲": ["ㄅ"]}
+        self.assertEqual(B.ordered(["乙乙", "甲甲"], n.get, {("ㄅ", "甲甲"): 0, ("ㄅ", "乙乙"): 1}, reading), ["甲甲", "乙乙"])    # 處置列的順序先於來源數
+        self.assertEqual(B.ordered(["乙乙", "甲甲"], n.get, {}, reading), ["乙乙", "甲甲"])
+
     def test_more_sources_first_then_by_string(self):
         n = {"乙乙": 1, "甲甲": 1, "丙丙": 3}
         self.assertEqual(B.ordered(["乙乙", "甲甲", "丙丙"], n.get), ["丙丙"] + sorted(["乙乙", "甲甲"]))
@@ -269,7 +306,7 @@ class Build(unittest.TestCase):
 
     def build(self, collisions, exclude=None, real_decoder=False, years=()):
         # 真的解碼器每次建置要跑 4 個 CLI 程序；只有斷言需要真實解碼結果的測試才開（real_decoder=True）。
-        return B.build(FakeApi(), self.groups, collisions, self.manual, readings=fake_readings, exclude_tsv=exclude or self.none, years=years,
+        return B.build(FakeApi(), self.groups, collisions, self.manual, readings=fake_readings, exclude_tsv=exclude or self.none, years=years, min_year_works=1,
                        **({} if real_decoder else {"decode": lambda pairs, prof, packs=None: [w for w, _ in pairs]}))
 
     def test_pack_content_and_filters(self):
@@ -404,8 +441,8 @@ class Build(unittest.TestCase):
         r = "ㄚ ㄎㄨˋ ㄌㄟˊ ㄊㄜˋ"
         self.assertIn(r, run(f"{r}\t某個舊詞\t+另一個舊詞\t別的詞已處置\n"))   # 同讀音但沒點名 阿庫雷特：新詞照樣列出
         self.assertIn(r, run(f"{r}\t阿庫雷特\t+某個舊詞\t點名了\n"))           # 點名了阿庫雷特，但開了之後的第一名奇希莉卡沒被點名：新詞搶走第一名，照樣列出
-        self.assertNotIn(r, run(f"{r}\t阿庫雷特\t+奇希莉卡\t兩個都點名\n"))
-        self.assertNotIn(r, run(f"{r}\t某個舊詞\t+阿庫雷特\t點名在第三欄\n{r}\t奇希莉卡\t+某個舊詞\t第一名也點名\n"))
+        self.assertIn(r, run(f"{r}\t阿庫雷特\t+奇希莉卡\t兩個都點名，但保留的詞阿庫雷特不是第一名\n"))      # 保留的詞必須是第一名，點名第二個不夠
+        self.assertNotIn(r, run(f"{r}\t奇希莉卡\t+阿庫雷特\t保留的詞奇希莉卡是第一名\n"))
 
     def test_excluded_strings_leave_the_pack_and_the_reference_list(self):
         excl = os.path.join(self.tmp, "exclude.tsv")
@@ -433,20 +470,28 @@ class Build(unittest.TestCase):
     def test_the_committed_dispositions_are_applied_to_the_committed_pack(self):
         pack = second_column(os.path.join(B.PACKS, "acg-add.tsv"))
         rows = B.read_tsv(os.path.join(B.PACKS, "acg-collisions.tsv"))
-        by_reading = {}
-        for l in open(os.path.join(B.PACKS, "acg-add.tsv"), encoding="utf-8"):
-            f = l.split("\t")
-            by_reading.setdefault(f[0].replace("-", " "), set()).add(f[1])
         self.assertGreater(len(rows), 100)
         for reading, keep, exclude, why in rows:
-            if exclude.startswith("+"):                # 兩個都留：兩個詞都在詞包裡；(b) 型只有一個詞包詞時，另一個是不開詞包時拼出來的字串，不在詞包
+            if exclude.startswith("+"):                # 兩個都留：兩個詞都在詞包裡
                 self.assertIn(keep, pack, keep)
-                self.assertTrue(exclude[1:] in pack or len(by_reading[reading]) == 1, exclude)
+                self.assertIn(exclude[1:], pack, exclude)
             else:
                 self.assertNotIn(exclude, pack, exclude)
             self.assertTrue(why)
         self.assertIn("風之谷", pack)
         self.assertNotIn("楓之谷", pack)
+
+    def test_every_decided_readings_keep_word_is_first_with_the_committed_pack(self):
+        # 處置列同一個讀音的第一列，保留的詞：只要詞包改變了第一名，新的第一名就必須是它（聊天與書面；出貨的詞包與真的解碼器）。
+        # 詞包沒有改變第一名（詞庫的詞或解碼器拼出的字串原本就贏）的讀音不算：保留的詞贏不了語言模型是已知的限制（見研究紀錄）。
+        keep = {}
+        for reading, k, exclude, why in B.read_tsv(os.path.join(B.PACKS, "acg-collisions.tsv")):
+            keep.setdefault(reading, k)
+        pairs = [(k, r.split()) for r, k in keep.items()]
+        for prof in ("chat", "formal"):
+            on, off = B.top1(pairs, prof, B.PACKS), B.top1(pairs, prof)
+            bad = [(k, g) for (k, _), g, o in zip(pairs, on, off) if g != k and g != o]
+            self.assertEqual(bad, [], prof)
 
 
 if __name__ == "__main__":
