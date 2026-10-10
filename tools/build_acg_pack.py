@@ -818,7 +818,7 @@ def detect_collisions(words, reading, rows, ref, decode=top1, existing=None, ext
 def read_collisions(path):
     """acg-collisions.tsv：讀音、保留的詞、排除的詞、理由。排除欄寫 `+詞` 表示兩個都留，`+` 後面是另一個留下的詞
     （使用者決定的處置）。回傳 ({排除的詞: 讀音}, {(讀音, 詞)})：處置列裡點名的兩個詞才算已處置，同讀音的新詞不算。
-    同一個讀音的排序與保留的詞見 `build`（列出現的先後；保留的詞在前，第一個還在詞包的保留的詞必須是開詞包後的第一名）。"""
+    同一個讀音的排序與開詞包後的第一名見 `collision_rank`、`first_named`（列出現的先後，每列保留的詞在前；名次最前、還在詞包的點名的詞必須是第一名）。"""
     if not os.path.exists(path):
         return {}, set()
     out, decided = {}, set()

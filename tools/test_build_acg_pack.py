@@ -482,7 +482,7 @@ class Build(unittest.TestCase):
         self.assertNotIn(r, run(f"{r}\t奇希莉卡\t+阿庫雷特\t保留的詞奇希莉卡是第一名\n"))
 
     def test_the_keep_word_is_the_first_row_whose_keep_word_is_in_the_pack(self):
-        # 同一個讀音兩列：第一列的保留的詞不在詞包，第二列的在 → 以第二列的為準（開詞包後的第一名是它就算已處置）
+        # 同一個讀音兩列：第一列點名的詞都不在詞包 → 以後面的列為準（`first_named`：名次最前、還在詞包的點名的詞）
         def decode(pairs, prof, packs=None):
             return ["奇希莉卡" if packs and w == "阿庫雷特" else w for w, _ in pairs]
         r = "ㄚ ㄎㄨˋ ㄌㄟˊ ㄊㄜˋ"
@@ -496,7 +496,7 @@ class Build(unittest.TestCase):
         self.assertNotIn(r, run(f"{r}\t某個舊詞\t+奇希莉卡\t第一列的保留的詞不在詞包\n{r}\t阿庫雷特\t+某個舊詞\t第二列\n"))
 
     def test_the_required_first_word_is_the_first_named_word_in_ordering(self):
-        # 兩列的保留的詞都在詞包：第一列的保留的詞必須是第一名（next → reversed 就會讓這個測試失敗）
+        # 兩列的保留的詞都在詞包：第一列的保留的詞名次在前，所以它必須是第一名（`first_named`）
         def decode(pairs, prof, packs=None):
             return ["奇希莉卡" if packs and w == "阿庫雷特" else w for w, _ in pairs]
         r = "ㄚ ㄎㄨˋ ㄌㄟˊ ㄊㄜˋ"
@@ -555,7 +555,7 @@ class Build(unittest.TestCase):
         self.assertNotIn("楓之谷", pack)
 
     def test_every_decided_readings_keep_word_is_first_with_the_committed_pack(self):
-        # 處置列同一個讀音的第一列，保留的詞：只要詞包改變了第一名，新的第一名就必須是它（聊天與書面；出貨的詞包與真的解碼器）。
+        # 每個有處置列的讀音，只要詞包改變了第一名，新的第一名就必須是 `first_named`（名次最前、還在詞包的點名的詞；聊天與書面；出貨的詞包與真的解碼器）。
         # 詞包沒有改變第一名（詞庫的詞或解碼器拼出的字串原本就贏）的讀音不算：保留的詞贏不了語言模型是已知的限制（見研究紀錄）。
         rank = B.collision_rank(B.read_tsv(os.path.join(B.PACKS, "acg-collisions.tsv")))
         first = B.first_named(rank, second_column(os.path.join(B.PACKS, "acg-add.tsv")))         # 和建置工具同一個定義
