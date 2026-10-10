@@ -321,6 +321,15 @@ fn extra_overlay_adds_words_and_fails_loudly_when_missing() {
             .output()
             .unwrap();
         assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        // The summary line is marked `+xo:<sha8 of the file>` only when --extra-overlay is given.
+        let head = String::from_utf8(out.stdout).unwrap();
+        let head = head.lines().next().unwrap().split("  ").nth(1).unwrap().to_string();
+        let marked = extra_args.contains(&"--extra-overlay");
+        assert_eq!(head.contains("+xo:"), marked, "{head}");
+        if marked {
+            let h = head.split("+xo:").nth(1).unwrap();
+            assert!(h.len() == 8 && h.bytes().all(|b| b.is_ascii_hexdigit()), "{head}");
+        }
         let dump = std::fs::read_to_string(&dump).unwrap();
         let top = dump.lines().find(|l| l.split('\t').nth(1) == Some("1")).unwrap();
         top.split('\t').nth(2).unwrap().to_string()

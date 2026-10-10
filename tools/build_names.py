@@ -39,7 +39,7 @@ ACG_ADD = os.path.join(bap.PACKS, "acg-add.tsv")
 CACHE = os.path.expanduser("~/.cache/shanjie/sources/names")
 MAX_REQUESTS, MAX_CACHE = 3000, 500_000_000   # 契約 §2：一次建置的網路請求數、快取位元組數
 TAG = "names"
-NSI_COMMIT = ""                               # 第 0 步釘住的 NSI commit（40 碼十六進位）；--nsi-commit 可覆寫
+NSI_COMMIT = "ac22bfd445b729b567070c1b0900be6d0c6ef924"   # 釘住的 NSI commit（和 data/lexicon/names.json 同一個）；--nsi-commit 可覆寫
 NSI_CATEGORIES = [("amenity", v) for v in "cafe restaurant fast_food bank fuel pharmacy".split()] + \
     [("shop", v) for v in "convenience supermarket department_store mall electronics mobile_phone clothes cosmetics bakery tea beverages".split()]
 NAME_KEYS = ["name:zh-Hant", "name:zh-TW", "name:zh", "brand:zh-Hant", "brand:zh", "name", "brand"]   # 契約 §1：取名字的順序
@@ -206,8 +206,8 @@ def tw_title(api, title, memo, follow=True):
         try:
             d = api.wiki(**(dict(p, redirects="1") if follow else p))["parse"]
         except RuntimeError as e:
-            if e.args[0].get("code") != "missingtitle":
-                raise
+            if not (isinstance(e.args[0], dict) and e.args[0].get("code") == "missingtitle"):
+                raise      # Api._get 的 "maxlag did not clear" 是字串，原樣再丟
             memo[k] = None
             return None
         disp = html.unescape(re.sub(r"<[^>]+>", "", d["displaytitle"])).strip()
@@ -270,7 +270,7 @@ def check_disjoint(words, have, what="names-add.tsv"):
 
 
 def check_committed(lex_dir=LEX, acg_add=ACG_ADD):
-    """已提交的 names-add.tsv（沒有或空的也行）對那四份檔；make test 與 --check 用。"""
+    """已提交的 names-add.tsv 對那四份檔（沒有檔就是空，照樣通過）；make test 與 --check 用。"""
     check_disjoint(file_words(os.path.join(lex_dir, "names-add.tsv")), known_words(lex_dir, acg_add))
 
 
@@ -284,14 +284,16 @@ def read_name_readings(path):
     return out
 
 
-def decode(pairs, profile, packs_dir=None):
+def decode(pairs, profile, packs_dir=None, acg=False):
     """評測 CLI 解碼每個 (詞, 讀音音節串)，回傳第一名。packs_dir 給了就加 `--extra-overlay`（detect_collisions 把名單寫成那個目錄的
-    acg-add.tsv，檔名是 build_acg_pack 寫死的）。"""
+    acg-add.tsv，檔名是 build_acg_pack 寫死的）。acg=True 另開 ACG 詞包（`--packs acg`，用這份 checkout 的 data/packs/acg-add.tsv）。"""
     with tempfile.TemporaryDirectory() as d:
         rows, dump = os.path.join(d, "rows.txt"), os.path.join(d, "dump.txt")
         with open(rows, "w", encoding="utf-8") as f:
             f.writelines(f"|{w}|{' '.join(syls)}\n" for w, syls in pairs)
         cmd = [bap.eval_bin(), "--lm", bap.LM, "--profile", profile, "--rows", rows, "--dump", dump]
+        if acg:
+            cmd += ["--packs", "acg"]
         if packs_dir:
             cmd += ["--extra-overlay", os.path.join(packs_dir, "acg-add.tsv")]
         subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL)
@@ -305,9 +307,41 @@ def decode(pairs, profile, packs_dir=None):
         return [first[i + 1] for i in range(len(pairs))]
 
 
+def decode_acg(pairs, profile, packs_dir=None):
+    """ACG 詞包開著的 `decode`（給 detect_collisions 查名字與詞包詞的同音衝突）。"""
+    return decode(pairs, profile, packs_dir, acg=True)
+
+
+def pack_scores(path):
+    """acg-add.tsv → {讀音鍵: {詞: 分數}}。"""
+    out = collections.defaultdict(dict)
+    for r in bap.read_tsv(path) if os.path.exists(path) else []:
+        out[r[0]][r[1]] = float(r[2])
+    return out
+
+
+def below_pack(rows, rank, inpack, pack):
+    """契約 §2 的排序規則（只這一條）：處置列把詞包詞排在最前面時，同讀音、同一列點名的名字詞，分數至多是詞包詞的分數減 TIE
+    （分數相同時解碼器的先後不可靠）。其他列原樣。"""
+    first = {}
+    for (r, w), _ in sorted(rank.items(), key=lambda kv: kv[1]):
+        first.setdefault(r, w)
+    out = []
+    for row in rows:
+        key, word, score, tag = row.rstrip("\n").split("\t")
+        r = key.replace("-", " ")
+        top = first.get(r)
+        if top is not None and top not in inpack and top in pack.get(key, {}) and word != top and word in inpack and (r, word) in rank:
+            limit = round(pack[key][top] - bap.TIE, 8)
+            if float(score) > limit:
+                row = f"{key}\t{word}\t{limit!r}\t{tag}\n"
+        out.append(row)
+    return out
+
+
 # ---------------------------------------------------------------- 主流程
 
-def build(api, nsi_commit, manual_tsv=MANUAL, readings_tsv=READINGS_TSV, collisions_tsv=COLLISIONS_TSV, have=None, decode=decode, readings=bap.make_readings,
+def build(api, nsi_commit, manual_tsv=MANUAL, readings_tsv=READINGS_TSV, collisions_tsv=COLLISIONS_TSV, have=None, decode=decode, decode_acg=decode_acg, acg_add=ACG_ADD, readings=bap.make_readings,
           base=None, wiki_categories=WIKI_CATEGORIES, nsi_categories=NSI_CATEGORIES, moe_files=MOE_FILES):
     log = lambda *a: print(*a, file=sys.stderr)
     have = known_words() if have is None else have
@@ -426,13 +460,14 @@ def build(api, nsi_commit, manual_tsv=MANUAL, readings_tsv=READINGS_TSV, collisi
     words = [w for w in cand if w in rd]
     reading = {w: rd[w][0] for w in words}
     sc = bap.scores(base)
+    pack = pack_scores(acg_add)
     nsrc = lambda w: sum(len(s) for s in cands[w].values())
 
     # 同音衝突：(c) 名字把既有詞擠下第一名就丟（既有詞勝）；(a) 名單內同音要有處置
     lexicon_dropped = []
     for _ in range(bap.LEXICON_RULE_ROUNDS):
         order = bap.ordered(words, nsrc, rank, reading)
-        rows = [r.rsplit("\t", 1)[0] + f"\t{TAG}\n" for r in bap.pack_rows(order, reading, sc)]
+        rows = below_pack([r.rsplit("\t", 1)[0] + f"\t{TAG}\n" for r in bap.pack_rows(order, reading, sc)], rank, set(words), pack)
         found = bap.detect_collisions(words, reading, rows, frozenset(), decode, existing=have)
         hit = {e[0]: (r, e) for r, v in sorted(found.items()) for e in v if e[1] == "c"}
         if not hit:
@@ -442,11 +477,22 @@ def build(api, nsi_commit, manual_tsv=MANUAL, readings_tsv=READINGS_TSV, collisi
     else:
         raise SystemExit(f"type (c) collisions not settled after {bap.LEXICON_RULE_ROUNDS} rounds")
     keep_now = bap.first_named(rank, set(words))
+    # 名字與 ACG 詞包詞同音（詞包預設開著）：詞包開著時名字把詞包詞擠下第一名，一律當未處置的 (a)，由維護者決定（排除名字，
+    # 或在處置列把詞包詞排前面、名字用 `+`，由 below_pack 排到它後面）。名字只和既有詞庫的詞同音另由上面的 (c) 處理。
+    pack_words = set().union(*pack.values()) if pack else set()
+    with_pack = bap.detect_collisions(words, reading, rows, frozenset(), decode_acg, existing=pack_words)
+    keep_any = {}
+    for (r, w), _ in sorted(rank.items(), key=lambda kv: kv[1]):
+        keep_any.setdefault(r, w)
     col = {}
     for r, v in found.items():
         left = [e for e in v if (r, e[0]) not in decided or e[4] != keep_now.get(r)]
         if left:
             col[r] = left
+    for r, v in with_pack.items():
+        left = [(w, "a", prof, o, n) for w, cond, prof, o, n in v if cond == "c" and ((r, w) not in decided or n != keep_any.get(r))]
+        if left:
+            col.setdefault(r, []).extend(left)
     check_disjoint([r.split("\t")[1] for r in rows], have)
     dropped["type_c_dropped"] = len(lexicon_dropped)
     dropped["unreadable"] = len(unread)
