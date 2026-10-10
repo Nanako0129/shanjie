@@ -53,9 +53,9 @@ fn lenient_dump_uses_the_variant_table() {
     assert_ne!(lines[2], lines[3], "散佈 has no dictionary entry, so it is not a listed variant");
 }
 
-const LM_MISSING: &str = "data/lm/bigram.sjlm is missing: download it with `gh release download model-v4 -R Nanako0129/shanjie -p bigram.sjlm -D data/lm`";
+const LM_MISSING: &str = "data/lm/bigram.sjlm is missing: download it with `gh release download model-v5 -R Nanako0129/shanjie -p bigram.sjlm -D data/lm`";
 
-const CLASSES_MISSING: &str = "data/lm/classes.sjc is missing: download it with `gh release download classes-v2 -R Nanako0129/shanjie -p classes.sjc -D data/lm` (or build it with tools/build_classes.py)";
+const CLASSES_MISSING: &str = "data/lm/classes.sjc is missing: download it with `gh release download classes-v3 -R Nanako0129/shanjie -p classes.sjc -D data/lm` (or build it with tools/build_classes.py)";
 
 fn lm_path() -> String {
     let p = format!("{}/../data/lm/bigram.sjlm", env!("CARGO_MANIFEST_DIR"));
@@ -116,20 +116,20 @@ fn lm_file_is_the_released_model() {
     let bytes = std::fs::read(lm_path()).unwrap();
     assert_eq!(
         core::eval::sha256_hex(&bytes),
-        "06768f2949cf8b135d1f591056ffb16f3ae3f6d70aef5911ffd55de134250322",
-        "data/lm/bigram.sjlm differs from the model-v4 release; download it again (a model rebuilt with tools/build_lm.py has no fingerprint entries and never matches)"
+        "f81a021e5dea08dc48dbca1db0d0f63517bb6f0f3e1b20fdac631542d13f45af",
+        "data/lm/bigram.sjlm differs from the model-v5 release; download it again (a model rebuilt with tools/build_lm.py has no fingerprint entries and never matches)"
     );
 }
 
-/// S2k section 4.4: the class table is the classes-v2 release asset (data/classes.sjc.sha256).
+/// S2k section 4.4: the class table is the classes-v3 release asset (data/classes.sjc.sha256).
 #[test]
 fn classes_file_is_the_released_build() {
     let p = std::path::Path::new(&lm_path()).with_file_name("classes.sjc");
-    let bytes = std::fs::read(&p).unwrap_or_else(|_| panic!("{} is missing: gh release download classes-v2 -R Nanako0129/shanjie -p classes.sjc -D data/lm", p.display()));
+    let bytes = std::fs::read(&p).unwrap_or_else(|_| panic!("{} is missing: gh release download classes-v3 -R Nanako0129/shanjie -p classes.sjc -D data/lm", p.display()));
     assert_eq!(
         core::eval::sha256_hex(&bytes),
-        "9e343d3e3ce83f1008e371f62de5d8e62721df97e7b02562503ef2cc57226f3f",
-        "data/lm/classes.sjc differs from the classes-v2 release; download it again or rebuild with tools/build_classes.py"
+        "75a5efb3d050a9b0d21bca707ff6b1fd71945a8e059b869aa856618290e55827",
+        "data/lm/classes.sjc differs from the classes-v3 release; download it again or rebuild with tools/build_classes.py"
     );
 }
 

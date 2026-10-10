@@ -191,7 +191,7 @@ v4 日期 2026-10-03。v1 經 `pilotfish:plan-verifier`（REVISE，4 項）與 `
 - 組字區上限改成可設定（使用者 2026-10-05），預設對照蘋果注音或小麥注音。目前是 40 個音節。
 - 真正的句首判斷（issue #30）。
 - 詞類回退實驗（`exp/word-classes`，Brown 分群 K=512）：dev302 chat 238 → 250、formal 237 → 254。要在 S2n 的乾淨計數上重跑，再決定要不要成片。
-  - 已在 model-v3 上重跑並做進 Python 參考實作與 Rust 核心（`docs/contracts/s2k-word-classes.md`，結果見 `docs/research-log.md` 2026-10-08）；GitHub Release `classes-v1` 已建（使用者 2026-10-08 同意，獨立的 Release；下載比對雜湊相符），CI、`release.yml`、`build-app.sh` 與 golden 測試都釘它的雜湊（`data/classes.sjc.sha256`），說明在 `docs/data-files.md`。〔更正，2026-10-08〕現在釘的是 classes-v2（配 model-v4，`docs/contracts/model-v4.md`）。
+  - 已在 model-v3 上重跑並做進 Python 參考實作與 Rust 核心（`docs/contracts/s2k-word-classes.md`，結果見 `docs/research-log.md` 2026-10-08）；GitHub Release `classes-v1` 已建（使用者 2026-10-08 同意，獨立的 Release；下載比對雜湊相符），CI、`release.yml`、`build-app.sh` 與 golden 測試都釘它的雜湊（`data/classes.sjc.sha256`），說明在 `docs/data-files.md`。〔更正，2026-10-08〕現在釘的是 classes-v2（配 model-v4，`docs/contracts/model-v4.md`）。〔更正，2026-10-10〕v0.4.0 起釘的是 classes-v3（配 model-v5，`docs/contracts/model-v5.md` §9）。
   - 選字記憶的全域層因此先關（`s4-learning.md` §13）。v0.3.0 之後重新研究全域層：要能分辨「使用者想翻的平手」和「模型已經判對的平手」，再用 `global_eps_table` 量。
 - **訓練切分與詞庫擴充**（issue #47，Willseed；2026-10-06 的覆蓋量測與文獻調查見研究紀錄同日）。排在前文接進 n-gram、S2n 計數重建之後，寫契約、過 plan-verifier。
   - 覆蓋：dev302 正解在前 8 名約 98%，前 64 名缺的 2 句都是「拭鏡布」。這組集合的主要錯誤是排序，B 的效果要另外找「組不出來的新詞」量。
@@ -558,7 +558,7 @@ v4 日期 2026-10-03。v1 經 `pilotfish:plan-verifier`（REVISE，4 項）與 `
   7. **效能**：release 重播（載入 LM）每鍵 p95 < 16 ms；回報 LM 載入時間與引擎（詞庫＋上限後詞庫＋LM）的峰值 RSS。上限後詞庫可以和原始詞庫共用字串池，由 executor 決定。
   8. 模型檔 ≤ 100 MB（目前 80,040,411 bytes）。
   9. **保留集**（片結束，只由 verifier 跑一次）：`--set holdout` 在 chat 與 formal 的 top1 與 oracle@64，只回數字。A1a 要求 oracle@64 ≥ 98%；低於時照實回報、記為 A1a 未達成，由使用者決定，不是這片的停止條件。報告時註明 LM 模式的 oracle 用寬鬆對照，S1 的 `extra` 行（97.8%）用完全相符。
-- **模型檔不進 repo**（`data/lm/` 在 `.gitignore`）：從 GitHub Release `model-v4` 下載（`gh release download model-v4 -R Nanako0129/shanjie -p bigram.sjlm -D data/lm`，CC BY-SA 4.0，model-v4 自 2026-10-08 起）；SHA-256 `06768f2949cf8b135d1f591056ffb16f3ae3f6d70aef5911ffd55de134250322`。需要它的測試在檔案不存在時**直接失敗**，訊息說明怎麼取得，不得默默跳過。隨輸入法散布的方式在 S3b（打包進 app）。
+- **模型檔不進 repo**（`data/lm/` 在 `.gitignore`）：從 GitHub Release `model-v5` 下載（`gh release download model-v5 -R Nanako0129/shanjie -p bigram.sjlm -D data/lm`，CC BY-SA 4.0，model-v5 自 v0.4.0 起；v0.3.0 用的 model-v4 是 `06768f29…`）；SHA-256 `f81a021e5dea08dc48dbca1db0d0f63517bb6f0f3e1b20fdac631542d13f45af`。需要它的測試在檔案不存在時**直接失敗**，訊息說明怎麼取得，不得默默跳過。隨輸入法散布的方式在 S3b（打包進 app）。
 - **範圍外。** 改分數、參數、剪枝或語料；候選清單用 LM 排序；trigram；學習（S4）。
 - **預算。** executor、security-executor 各 1 回合＋1 次修正。
 - **停止。** 驗收 2、3、4 有任何差異：回報第一個不同的列與原因，不得修改 Python 參考實作或對照檔來湊。峰值 RSS 超過 300 MB：回報實測值與瓶頸。
