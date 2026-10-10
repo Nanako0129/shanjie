@@ -53,7 +53,7 @@
 - **同一個 PR 更新的文件**：`docs/contracts/s3a.md` 的按鍵規則表（第 3–5 條加直排的版本或新列、Page Up／Down 的列、§6 的新種類與新欄位）、`core/include/shanjie.h`、`docs/contracts/s3b.md` 的表外鍵規則（加「直排候選窗開著、沒有修飾鍵時 Page Up／Down 例外送進核心」）、`docs/contracts/settings-window.md` §2.2 的表與「同步」那一段重讀的值（加方向）。
 - 標點候選（s3e）用同一個候選窗，跟著方向。
 - **即時預測列**：照 §2.4（修訂三取代原本的「預測列不變、仍是橫排」）。
-- 橫排的行為完全不變：現有測試的斷言與期望值、所有 golden 都不能改。**預期會改的只有這五處**（不算停止條件；「現有測試」指 main 上的測試，這片自己加的測試可以照修訂改）：`core/tests/engine.rs` 的 `blank()` 寫出整個 `Output`，加上新欄位（方向經由 `engine::Output` 傳到 `ffi.rs` 的 `to_c`），值是橫排／沒有候選的 0；`core/src/ffi.rs` 測試裡把 14 當無效種類的那一筆改成 16；每個 `Shell(...)` 呼叫多帶一個方向 store 參數（照 `GlassTintStore` 必填的模式，現有約 21 處、6 個測試檔）；測試用 `FakePanel.show` 的簽名多一個 `vertical`；`ShanjieOutput` 的 Swift 鏡像（`Core.swift`）多一個欄位。
+- 橫排的行為完全不變：現有測試的斷言與期望值、所有 golden 都不能改。**預期會改的只有這六處**（第六處是沒有行位置時的橫排定位，見本段最後與 §6；不算停止條件；「現有測試」指 main 上的測試，這片自己加的測試可以照修訂改）：`core/tests/engine.rs` 的 `blank()` 寫出整個 `Output`，加上新欄位（方向經由 `engine::Output` 傳到 `ffi.rs` 的 `to_c`），值是橫排／沒有候選的 0；`core/src/ffi.rs` 測試裡把 14 當無效種類的那一筆改成 16；每個 `Shell(...)` 呼叫多帶一個方向 store 參數（照 `GlassTintStore` 必填的模式，現有約 21 處、6 個測試檔）；測試用 `FakePanel.show` 的簽名多一個 `vertical`；`ShanjieOutput` 的 Swift 鏡像（`Core.swift`）多一個欄位；**第六處（2026-10-10，使用者接受，§6）**：沒有行位置時，橫排候選列／網格不再沿用上一個面板的左上角，改成記住上一次的行位置、依每次的面板大小重算，main 上的 `PanelPlacementTests.testNoLineReusesTheLastOrigin` 因此改成 `testNoLineUsesTheLastLine`，`PanelPlacement.topLeft` 的簽名也改了（行位置只傳一個、螢幕在函式裡依行位置挑），該檔的其他測試只跟著簽名改、期望值不變。
 
 ### 2.3 Swift 候選窗（`macos/Sources/Shanjie`）
 
@@ -109,7 +109,7 @@
 
 ## 4. 停止條件、預算、限制
 
-- **停止條件**：現有測試的斷言或期望值、任何 golden 需要改（§2.2 列的五處預期修改除外）；蘋果行為和 §1 的記錄對不上（再量一次再寫）；實作需要改到 §2 以外的核心規則。
+- **停止條件**：現有測試的斷言或期望值、任何 golden 需要改（§2.2 列的六處預期修改除外）；蘋果行為和 §1 的記錄對不上（再量一次再寫）；實作需要改到 §2 以外的核心規則。
 - **預算**：實作交 executor 1 次＋修正 1 次；外觀輪次照使用者。
 - **限制**：agent 不安裝、不啟動 App、不呼叫 TIS 或 lsregister、不碰 `~/Library` 與鑰匙圈；`imeshot` 與安裝只由 main 做。
 
@@ -127,5 +127,5 @@
 | 收尾審查 REVISE（2026-10-10） | 預期修改漏了 `core/tests/engine.rs` 的 `blank()`（它寫出整個 `Output`，加欄位後要跟著補）；範圍檢查在 `engine.rs` 的 `KeyKind::from_code`，不在 `ffi.rs` | FIX（照審查的最小修改，設計不變）；使用者 2026-10-10 決定補上就開工，不再送審 |
 | 修訂三（2026-10-10） | 使用者：「即時預測也要直排」，取代原本「預測列維持橫排」與範圍外的那一條 | 加 §2.4：預測列跟著當下的設定直排、輸出值 2、進入後 ↑↓ 移動、Page 鍵不轉送；待 plan-verifier |
 | 修訂三 plan-verifier REVISE（2026-10-10） | 1. 面板只收到 Bool，分不出直排預測列與直排候選窗，兩者互換時的重設與高度沒辦法照 §2.4 做；2. 第一版自己加的「預測列永遠不直排」測試和修訂三矛盾，`blank()` 的值也要改；3. 直排預測列沒有實機步驟 | FIX（照審查的修法）：1 → `show` 帶 0／1／2，重設與大小寫成 `VerticalLayout` 純函式並加測試；2 → 列出要改的第一版測試、「現有測試」限定 main 上的、`blank()` 值 0；3 → §3.2 加一段 imeshot。另外照第一版 /code-review 更正 §1 組字區的說法、補 Page Down 選取不往回。使用者 2026-10-10 決定補上就開工 |
-| 第三輪 /code-review 後的定位修正（2026-10-10） | 沒有行位置時記住「上一個面板的左上角」會讓一個高的直排窗把之後較矮的候選列推到半空；根本修法是記住上一次的行位置、依每次的面板大小重算。這改了 main 上的 `PanelPlacementTests.testNoLineReusesTheLastOrigin`（改成 `testNoLineUsesTheLastLine`）：沒有行位置的 App 裡，橫排候選列的位置只在第一個候選字寬度不同時差幾個 pt | 第六處預期修改（不在 §2.2 原本的五處）；使用者 2026-10-10 接受（選擇題，另一個選項是「橫排維持舊做法」） |
+| 第三輪 /code-review 後的定位修正（2026-10-10） | 沒有行位置時記住「上一個面板的左上角」會讓一個高的直排窗把之後較矮的候選列推到半空；根本修法是記住上一次的行位置、依每次的面板大小重算。這改了 main 上的 `PanelPlacementTests.testNoLineReusesTheLastOrigin`（改成 `testNoLineUsesTheLastLine`）。〔更正，第四輪 /code-review 後〕原本這裡寫「沒有行位置的 App 裡，橫排候選列的位置只在第一個候選字寬度不同時差幾個 pt」是錯的（`alignOffset` 是常數）。實際差異是：沒有行位置時，(a) 靠近右緣時，較窄的面板不再沿用較寬面板被夾過的左上角，而是回到行位置算出來的地方；(b) 靠近下緣時，展開的網格現在會翻到行的上方，而不是伸出螢幕下緣。使用者 2026-10-10 在更正後重新確認接受 | 第六處預期修改（不在 §2.2 原本的五處）；使用者 2026-10-10 接受（選擇題，另一個選項是「橫排維持舊做法」） |
 | 實機收尾（2026-10-10） | §3.2 直排預測列：使用者實機打字後回覆「沒有怪怪的」（閃爍與外觀） | 收尾 |
