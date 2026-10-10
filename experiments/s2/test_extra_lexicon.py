@@ -79,20 +79,19 @@ class ExtraLexicon(unittest.TestCase):
     def test_text_script_threads_option(self):
         src = os.path.join(self.tmp.name, "s.txt")
         open(src, "w", encoding="utf-8").write(WORD + "\n")
+        with self.assertRaises(SystemExit):   # 只有 --expected 是加法計數（契約 §8），其他路徑不收這個選項
+            bct.main(["--extra-lexicon", self.extra, os.path.join(self.tmp.name, "x.pkl"), src])
         for extra, want in [([], False), (["--extra-lexicon", self.extra], True)]:
-            out = os.path.join(self.tmp.name, f"o{want}.pkl")
-            bct.main(extra + [out, src])
-            self.assertEqual(WORD in pickle.load(open(out, "rb"))["uni"], want)
             out = os.path.join(self.tmp.name, f"e{want}.pkl")
             bct.main(["--expected"] + extra + [out, src])
             self.assertEqual(pickle.load(open(out, "rb"))["uni"].get(WORD, 0) > 0.99, want)
 
     def test_wiki_script_parses_option(self):
-        with mock.patch.object(sys, "argv", ["x", "--extra-lexicon", self.extra, "--extra-lexicon", self.extra]), \
+        with mock.patch.object(sys, "argv", ["x", "--expected", "--extra-lexicon", self.extra, "--extra-lexicon", self.extra]), \
              mock.patch("multiprocessing.Pool", side_effect=RuntimeError("stop")) as pool:
             with self.assertRaises(RuntimeError):
                 bc.main()
-        self.assertEqual(pool.call_args.kwargs["initargs"][3], (self.extra, self.extra))
+        self.assertEqual(pool.call_args.kwargs["initargs"][3], (self.extra,))   # 同一個檔給兩次只讀一次（重複的列會讓詞庫報錯）
 
 
 if __name__ == "__main__":
