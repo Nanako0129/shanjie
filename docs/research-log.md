@@ -2592,3 +2592,11 @@ PR #90 的審查意見逐項處理。
 - **使用者決定**：選擇題的回答是「這個功能先隱藏」，接著說「那這個功能不應該出貨」。
 - **做法**：`Shell` 加 `showsAbbreviation`（預設 true，現有測試不變）；App 傳 false：選單與設定視窗都不顯示，`abbreviationOn` 一律 false、不讀也不寫存著的值，送給核心的也是關。核心與 `Shell` 的邏輯保留；新測試 `HiddenAbbreviationTests`。PLAN、發版說明、`v3-engine.md` §12、`settings-window.md`、README 同步。
 - **/code-review（PR #104）的處置**：卡鍵的原因在 v3-engine §12、PLAN、`Shell` 的註解都改標成推論；`s3b.md` 的選單順序補上「v0.4.0 起隱藏」；README 寫明 v0.4.0 不出貨；App 的值（`showsAbbreviation: false`）沒有測試看得到，`main.swift` 與 `Shell.init` 的說明寫明由出貨前的實機檢查確認選單沒有這一項；`HiddenAbbreviationTests` 補一筆走設定視窗路徑的寫入檢查（原本的斷言分不出「沒寫」和「寫入同一個值」）。
+
+## 2026-10-10：錯字回報第 67–69 列
+
+- 使用者在對話裡打錯、標出來的三句，加在 `eval/dev/user-reported.txt` 最後（使用者 2026-10-03 同意以 CC0 釋出，前 302 列不變），讀音由 `tools/readings.py` 產生後人工核對：
+  - 第 67 列 `|酷澎|ㄎㄨˋ ㄆㄥˊ`：打成「酷朋」。「酷澎」不在詞庫（常見廠商名，PLAN「常見廠商名與產品名」）。
+  - 第 68 列 `|即時預測也要直排|`：打成「及時預測也要直排」。
+  - 第 69 列 `|想辦法從詞態解決常見錯字|`：打成「想辦法從詞太解決常見錯字」。
+- model-v5（`f81a021e…`）、`--context`，聊天與書面、開不開詞包，三句的第一名都和使用者遇到的一樣；正解都在前 64 名裡。`eval/golden/s2h-lm-context.txt` 的 user-reported 兩行照 Python 參考實作重產（n 66 → 69，top1 15／18 不變，oracle@64 64 → 67）。
