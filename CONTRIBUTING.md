@@ -34,11 +34,11 @@
 
 ```sh
 # 語言模型與詞類表不在 repo 裡，從 Release 下載（CC BY-SA 4.0；兩個都要，說明見 docs/data-files.md）
-gh release download model-v4 -R Nanako0129/shanjie -p bigram.sjlm -D data/lm
-gh release download classes-v2 -R Nanako0129/shanjie -p classes.sjc -D data/lm
+gh release download model-v5 -R Nanako0129/shanjie -p bigram.sjlm -D data/lm
+gh release download classes-v3 -R Nanako0129/shanjie -p classes.sjc -D data/lm
 # 沒有登入 gh 的話改用：
-# curl -L --create-dirs -o data/lm/bigram.sjlm https://github.com/Nanako0129/shanjie/releases/download/model-v4/bigram.sjlm
-# curl -L --create-dirs -o data/lm/classes.sjc https://github.com/Nanako0129/shanjie/releases/download/classes-v2/classes.sjc
+# curl -L --create-dirs -o data/lm/bigram.sjlm https://github.com/Nanako0129/shanjie/releases/download/model-v5/bigram.sjlm
+# curl -L --create-dirs -o data/lm/classes.sjc https://github.com/Nanako0129/shanjie/releases/download/classes-v3/classes.sjc
 shasum -a 256 -c data/bigram.sjlm.sha256 data/classes.sjc.sha256
 
 make test      # Rust 核心測試，再跑 Swift 殼的測試，以及詞包建置工具的 python3 單元測試（需要 python3、真的模型與 cargo 建出來的 CLI）

@@ -53,9 +53,9 @@ fn lenient_dump_uses_the_variant_table() {
     assert_ne!(lines[2], lines[3], "散佈 has no dictionary entry, so it is not a listed variant");
 }
 
-const LM_MISSING: &str = "data/lm/bigram.sjlm is missing: download it with `gh release download model-v4 -R Nanako0129/shanjie -p bigram.sjlm -D data/lm`";
+const LM_MISSING: &str = "data/lm/bigram.sjlm is missing: download it with `gh release download model-v5 -R Nanako0129/shanjie -p bigram.sjlm -D data/lm`";
 
-const CLASSES_MISSING: &str = "data/lm/classes.sjc is missing: download it with `gh release download classes-v2 -R Nanako0129/shanjie -p classes.sjc -D data/lm` (or build it with tools/build_classes.py)";
+const CLASSES_MISSING: &str = "data/lm/classes.sjc is missing: download it with `gh release download classes-v3 -R Nanako0129/shanjie -p classes.sjc -D data/lm` (or build it with tools/build_classes.py)";
 
 fn lm_path() -> String {
     let p = format!("{}/../data/lm/bigram.sjlm", env!("CARGO_MANIFEST_DIR"));
@@ -116,20 +116,20 @@ fn lm_file_is_the_released_model() {
     let bytes = std::fs::read(lm_path()).unwrap();
     assert_eq!(
         core::eval::sha256_hex(&bytes),
-        "06768f2949cf8b135d1f591056ffb16f3ae3f6d70aef5911ffd55de134250322",
-        "data/lm/bigram.sjlm differs from the model-v4 release; download it again (a model rebuilt with tools/build_lm.py has no fingerprint entries and never matches)"
+        "f81a021e5dea08dc48dbca1db0d0f63517bb6f0f3e1b20fdac631542d13f45af",
+        "data/lm/bigram.sjlm differs from the model-v5 release; download it again (a model rebuilt with tools/build_lm.py has no fingerprint entries and never matches)"
     );
 }
 
-/// S2k section 4.4: the class table is the classes-v2 release asset (data/classes.sjc.sha256).
+/// S2k section 4.4: the class table is the classes-v3 release asset (data/classes.sjc.sha256).
 #[test]
 fn classes_file_is_the_released_build() {
     let p = std::path::Path::new(&lm_path()).with_file_name("classes.sjc");
-    let bytes = std::fs::read(&p).unwrap_or_else(|_| panic!("{} is missing: gh release download classes-v2 -R Nanako0129/shanjie -p classes.sjc -D data/lm", p.display()));
+    let bytes = std::fs::read(&p).unwrap_or_else(|_| panic!("{} is missing: gh release download classes-v3 -R Nanako0129/shanjie -p classes.sjc -D data/lm", p.display()));
     assert_eq!(
         core::eval::sha256_hex(&bytes),
-        "9e343d3e3ce83f1008e371f62de5d8e62721df97e7b02562503ef2cc57226f3f",
-        "data/lm/classes.sjc differs from the classes-v2 release; download it again or rebuild with tools/build_classes.py"
+        "75a5efb3d050a9b0d21bca707ff6b1fd71945a8e059b869aa856618290e55827",
+        "data/lm/classes.sjc differs from the classes-v3 release; download it again or rebuild with tools/build_classes.py"
     );
 }
 
@@ -262,4 +262,43 @@ fn packs_options_fail_loudly() {
     assert!(err.contains(missing.join("acg-add.tsv").to_str().unwrap()), "{err}");
     assert!(fail(&["--packs-dir", missing.to_str().unwrap()]).contains("--packs-dir needs --packs"));
     std::fs::remove_file(&rows).unwrap();
+}
+
+/// acg-pack A2.5: a pack file that exists but cannot be read is named with its path and ErrorKind, not "cannot load lexicon".
+#[cfg(unix)]
+#[test]
+fn unreadable_pack_file_names_the_path_and_kind() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = std::env::temp_dir().join(format!("shanjie-packs-unreadable-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let pack = dir.join("acg-add.tsv");
+    std::fs::write(&pack, "").unwrap();
+    std::fs::set_permissions(&pack, std::fs::Permissions::from_mode(0o000)).unwrap();
+    let rows = dir.join("rows.txt");
+    std::fs::write(&rows, "|風之谷|ㄈㄥ ㄓ ㄍㄨˇ\n").unwrap();
+    let out = Command::new(env!("CARGO_BIN_EXE_shanjie-eval"))
+        .args(["--lm", &lm_path(), "--profile", "chat", "--rows", rows.to_str().unwrap(), "--packs", "acg", "--packs-dir", dir.to_str().unwrap()])
+        .output()
+        .unwrap();
+    std::fs::set_permissions(&pack, std::fs::Permissions::from_mode(0o644)).unwrap();
+    std::fs::remove_dir_all(&dir).unwrap();
+    let err = String::from_utf8(out.stderr).unwrap();
+    assert!(!out.status.success() && err.contains("acg-add.tsv") && err.contains("PermissionDenied"), "{err}");
+}
+
+/// acg-pack A2.5: a pack that reads but does not parse is reported as a parse failure naming the data directory.
+#[test]
+fn unparsable_pack_is_a_parse_error() {
+    let dir = std::env::temp_dir().join(format!("shanjie-packs-badrows-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("acg-add.tsv"), "not a row\n").unwrap();
+    let rows = dir.join("rows.txt");
+    std::fs::write(&rows, "|風之谷|ㄈㄥ ㄓ ㄍㄨˇ\n").unwrap();
+    let out = Command::new(env!("CARGO_BIN_EXE_shanjie-eval"))
+        .args(["--lm", &lm_path(), "--profile", "chat", "--rows", rows.to_str().unwrap(), "--packs", "acg", "--packs-dir", dir.to_str().unwrap()])
+        .output()
+        .unwrap();
+    std::fs::remove_dir_all(&dir).unwrap();
+    let err = String::from_utf8(out.stderr).unwrap();
+    assert!(!out.status.success() && err.contains("cannot parse the lexicon in") && err.contains("data/lexicon"), "{err}");
 }

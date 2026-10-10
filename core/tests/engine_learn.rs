@@ -13,7 +13,7 @@ fn root() -> PathBuf {
 }
 fn lm_path() -> PathBuf {
     let p = root().join("data/lm/bigram.sjlm");
-    assert!(root().join("data/lm/classes.sjc").exists(), "data/lm/classes.sjc is missing: download it with `gh release download classes-v2 -R Nanako0129/shanjie -p classes.sjc -D data/lm` (or build it with tools/build_classes.py)");
+    assert!(root().join("data/lm/classes.sjc").exists(), "data/lm/classes.sjc is missing: download it with `gh release download classes-v3 -R Nanako0129/shanjie -p classes.sjc -D data/lm` (or build it with tools/build_classes.py)");
     assert!(p.exists(), "data/lm/bigram.sjlm is missing (see engine_lm.rs)");
     p
 }

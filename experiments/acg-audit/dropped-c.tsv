@@ -1,0 +1,10 @@
+profile_dropped_for	reading	w	w_count	w_in_vocab	w_capped_lp_if_in_pack	top_with_w_in_pack	total_with_w	o_with_pack_without_w	o_origin	o_counts	o_in_vocab	o_total	gap_w_minus_o	w_lm_term_with	o_lm_term
+chat	ㄋㄧㄝˋ ㄙㄚˋ	涅薩	0	0	-8.171	涅薩	-9.595	躡馺	overlay:wikt	0	0	-9.595	0.000	-5.509	-5.509
+formal	ㄌㄚ ㄈㄟˇ ㄧㄚˇ	拉斐亞	0	0	-8.041	拉斐亞	-10.034	拉+菲+亞	base|base|base	124589|21090|95471	1|1|1	-10.310	0.277	-7.621	-5.977
+chat	ㄎㄚˇ ㄓㄚˊ ㄎㄜˋ	卡札克	0	0	-8.041	卡札克	-9.464	卡+扎+克	base|base|base	85230|9634|123402	1|1|1	-11.099	1.635	-5.444	-3.823
+formal	ㄒㄧㄠˇ ㄇㄚˇ ㄓㄣˋ	小馬鎮	0	0	-8.041	小馬鎮	-10.034	小馬圳	overlay:zhwiki	0	0	-10.034	0.000	-7.621	-7.621
+chat	ㄓㄨ ㄋㄧㄝˋ	朱涅	0	0	-8.171	朱涅	-9.595	株櫱	overlay:wikt	0	0	-9.595	0.000	-5.509	-5.509
+formal	ㄗㄨㄛˋ ㄅㄨˋ ㄊㄨㄢˊ	座布團	0	0	-8.041	座布團	-10.034	座布団	overlay:wikt	0	0	-10.034	0.000	-7.621	-7.621
+formal	ㄡ ㄉㄡ ㄇㄞˋ	歐兜賣	0	0	-8.041	歐兜賣	-10.034	歐兜邁	overlay:wikt	0	0	-10.034	0.000	-7.621	-7.621
+formal	ㄧ ㄆㄨˇ ㄒㄧ ㄌㄨㄥˊ	伊普西龍	0	0	-7.610	伊普西龍	-9.602	伊普西隆	overlay:wikt	5	1	-10.022	0.420	-7.319	-7.781
+formal	ㄧㄚˇ ㄇㄟˇ ㄌㄧˋ ㄧㄚˇ	亞美莉亞	0	0	-7.610	亞美莉亞	-9.602	亞美+利+亞	base|base|base	655|90288|95471	1|1|1	-9.978	0.376	-7.319	-6.038

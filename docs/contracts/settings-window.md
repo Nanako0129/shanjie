@@ -1,6 +1,6 @@
 # 契約：設定視窗（第一片）
 
-狀態：實作完成，使用者實機驗收 OK、fresh verifier CONFIRMED（2026-10-10，§6）。
+狀態：實作完成，使用者實機驗收 OK、fresh verifier CONFIRMED（2026-10-10，§6）。第三、四輪實機的外觀修訂（背景材質、標題列、滑桿圖示）使用者實機 OK，見 §6。
 
 ## 0. 起因與依據
 
@@ -36,7 +36,8 @@
   - 實機上仍然帶不到前面時，才照 fcitx5 的做法改：開窗時暫時切成 `.regular`、關掉後切回。改法寫進這份契約再做（§5）。
 - **第一輪實機回饋（2026-10-10）**：
   - **置中**：視窗出現在螢幕上方（CGWindowList：X=1279、Y=31、420×532），推論是 `center()` 在內容撐出尺寸之前就跑了。改成每次 `show()` 先設內容尺寸（`NSHostingView.fittingSize`）再置中，置中在滑鼠所在的螢幕（使用者剛在那裡點了選單；`NSScreen.main` 是 key window 所在的螢幕，輸入法的程序沒有）。
-  - **視窗背景是 Liquid Glass**（照 Syrtis 的做法）：系統的 `NSGlassEffectView` 放在內容**後面**填滿視窗，SwiftUI 的 `Form` 在它上面、`.scrollContentBackground(.hidden)` 隱藏自己的不透明背景。玻璃不包住內容，否則內容會套 vibrancy、文字變淡。視窗 `isOpaque = false`、背景透明，標題列與關閉鈕維持系統的。只用系統樣式，沒有自訂的模糊或透明度數值。
+  - **視窗背景是系統的毛玻璃**（結構照 Syrtis 的設定視窗：玻璃在內容後面、延伸到標題列底下；材質不同，Syrtis 用 `.hudWindow`）：`NSVisualEffectView`（材質 `.popover`、`.behindWindow`）放在內容**後面**填滿整個視窗，連標題列底下也是（`.fullSizeContentView`、`titlebarAppearsTransparent`），SwiftUI 的 `Form` 從標題列下面開始、`.scrollContentBackground(.hidden)` 隱藏自己的不透明背景。玻璃不包住內容，否則內容會套 vibrancy、文字變淡。視窗 `isOpaque = false`、背景透明，標題文字與關閉鈕維持系統的。只用系統樣式，沒有自訂的模糊或透明度數值。
+    - 修訂（2026-10-10 第三、四輪實機）：原本是 Liquid Glass（`NSGlassEffectView`），使用者覺得設定視窗太透，換成較平的毛玻璃；標題列原本在玻璃外面、視窗背景透明，所以幾乎全透（「標題列不要做那麼透」），改成玻璃延伸到標題列底下。材質 `.popover` 是看系統的清單挑的，沒有量測；使用者實機看過 OK。
 - 視窗裡**沒有文字欄位**：只有選擇器、開關、滑桿與按鈕。所以不需要自己裝 Edit 選單，也不會讓善解在自己的視窗裡處理打字。
 - 安全輸入期間選單是反灰的，打不開設定視窗。這是系統行為，照 CLAUDE.md「已知的系統問題」處理，不另外做。
 
@@ -45,12 +46,13 @@
 | 區塊 | 項目 | 寫到哪裡 |
 |---|---|---|
 | 鍵盤 | 鍵盤排列：標準／倚天（選擇器） | `Shell.selectLayout`，和選單相同 |
-| 選字 | 即時預測、避免把敏感字詞排在前面、動漫與遊戲詞（開關） | `Shell` 現有的 setter，和選單相同 |
-| 外觀 | 候選窗玻璃深淺（滑桿 0–1，兩端標「透明」「深」） | UserDefaults 鍵 `glassTint`（Double，沒設過是 0） |
+| 選字 | 即時預測、可省略韻母（緊接在即時預測之後；即時預測關閉時反灰，勾選狀態仍顯示；**v0.4.0 起隱藏**：`Shell.showsAbbreviation` 是 false 時不顯示，使用者 2026-10-10）、避免把敏感字詞排在前面、動漫與遊戲詞（開關） | `Shell` 現有的 setter，和選單相同 |
+| 外觀 | 候選窗方向（分段控制「橫排／直排」，放在玻璃深淺之前；下一次出現的候選窗用新的方向，開著的候選窗不變；核心的 setter 快照會把正在顯示的即時預測列換成新方向，但從設定視窗改時看不到（點設定視窗會讓組字被送出、候選窗收起，是推論、沒量過），所以只有 API 與測試走得到這條；`docs/contracts/candidate-vertical.md` §2.1、§2.4） | UserDefaults 鍵 `candidateVertical`（Bool，沒設過是 false＝橫排）；`Shell.applyCandidateVertical`，核心每次建 engine 與設定改變時收到 |
+| 外觀 | 候選窗玻璃深淺（滑桿 0–1，兩端是 Syrtis 的圖示：左邊中空的 `rectangle.on.rectangle`、右邊實心的 `rectangle.fill.on.rectangle.fill`，只是裝飾、VoiceOver 不讀） | UserDefaults 鍵 `glassTint`（Double，沒設過是 0） |
 | 選字記憶 | 不要備份選字記憶（開關）、清除選字記憶…（按鈕，走現有的確認視窗） | `Shell` 現有的路徑 |
 
 - **狀態列**：「選字記憶」區塊最上面只顯示「學習已暫停（安全輸入）」（`IsSecureEventInputEnabled`，開窗時與每次重新讀取時查）與「選字記憶無法存檔」（`Shell` 的 learningUnavailable）。「學習已暫停（此 App）」取自某一個輸入 session 的 client，設定視窗不屬於任何 session，所以只留在選單，不在視窗顯示。
-- **同步**：`Shell` 在任何設定改變時發一個程序內通知，設定視窗收到就重新讀取 `Shell` 已快取的設定值（排列、三個開關、玻璃深淺）。外部狀態（安全輸入、備份旗標、無法存檔）沒有通知，只在開窗與視窗成為 key window 時讀；視窗自己改備份旗標或清除之後也立刻重讀。選單每次打開時本來就會重讀，不需要改。
+- **同步**：`Shell` 在任何設定改變時發一個程序內通知，設定視窗收到就重新讀取 `Shell` 已快取的設定值（排列、四個開關、玻璃深淺、候選窗方向）。外部狀態（安全輸入、備份旗標、無法存檔）沒有通知，只在開窗與視窗成為 key window 時讀；視窗自己改備份旗標或清除之後也立刻重讀。選單每次打開時本來就會重讀，不需要改。
 - **之後的重構（不在這一片）**：用 `@Observable` 的 Shell 狀態取代 `SettingsModel` 的鏡像與通知。
 
 ### 2.3 玻璃深淺
@@ -113,3 +115,4 @@
 | 第一輪實機回饋（2026-10-10） | 視窗出現在螢幕上方、不在中間；要 Liquid Glass 視窗背景；滑桿下要有即時預覽 | §2.1 置中與玻璃背景、§2.3 預覽；`GlassTint.isDark` 抽到 ShanjieKit 讓候選窗與預覽共用，加測試。玻璃的外觀、置中的位置與預覽的深淺是否和真的候選窗一致，等使用者實機看 |
 | 第二輪實機驗收（2026-10-10） | 使用者：「善解設定驗收OK」（置中、Liquid Glass 背景、預覽、各項設定） | 驗收通過 |
 | fresh verifier（2026-10-10，676bae8） | CONFIRMED；P3 文件狀態沒跟上實機結果、P4 §2.3「套用」的寫法和 `Applier` 不一致、P4 無 owner 時的失敗路徑沒有測試 | 文件兩項修正；無 owner 失敗路徑核心無法按需失敗，只靠讀程式確認，記在這裡 |
+| 第三、四輪實機（2026-10-10，v0.4.0 前） | 滑桿兩端改成 Syrtis 那樣的圖示（「左邊應該是中空的」）；Liquid Glass 太透，要較平的玻璃；「標題列不要做那麼透」 | 圖示放在滑桿兩旁的 `HStack`（放進 `Slider` 自己的兩端標籤時，在分組的 `Form` 裡兩個都變實心）；背景改成 `.popover` 毛玻璃並延伸到標題列底下。使用者：「設定面板OK」。滑桿兩端的圖示改成不給 VoiceOver 讀（滑桿本身有標籤；/code-review） |
