@@ -628,18 +628,17 @@ def names_of(html):
 
 
 # 契約 A2.2：括號裡的原名是假名，或不在這份清單裡的拉丁字母詞；聲優、播出形式這類標註（「（CV：…）」「（OVA）」）不是原名。
-# 括號裡第一個聲優標記之後的文字不算證據（「（勅使河原 鏡花，聲：長月アキ）」只有「勅使河原 鏡花」算）；ver.、第N話 這類標籤先拿掉，XY、PT、IT、TVB 這類縮寫也不算。
+# 括號裡第一個聲優標記之後的文字不算證據（「（勅使河原 鏡花，聲：長月アキ）」只有「勅使河原 鏡花」算）；ver、XY、PT、IT、TVB 這類標籤與縮寫不算原名（第N話 沒有拉丁字母詞，本來就不算）。
 NOT_ORIGINAL = {"CV", "OVA", "OAD", "ONA", "TV", "TVA", "SP", "PV", "MV", "DVD", "BD", "CD", "ED", "OP", "OST", "NHK", "TBS", "MBS", "TVB", "IT", "XY", "PT", "VER"}
 LATIN = re.compile(r"[A-Za-z]{2,}")
 CREDIT_AT = re.compile(r"(?<![A-Za-z])CV(?![A-Za-z])|聲優|声优|配音|日本配音|演員|飾演|[聲声]\s*[:：]|由[^，,；;）)（(]*(?:配音|飾演|演出)")
-TAGS = re.compile(r"[Vv]er\.?|第\s*\d+\s*[話话集]")
 ORIGINAL = re.compile(r"^\s*[（(]([^）)]*)[）)]")
 
 
 def has_original(content):
-    """括號裡（第一個聲優標記之前、拿掉標籤之後）有假名，或有不在 NOT_ORIGINAL 的拉丁字母詞。"""
+    """括號裡（第一個聲優標記之前）有假名，或有不在 NOT_ORIGINAL 的拉丁字母詞。"""
     m = CREDIT_AT.search(content)
-    head = TAGS.sub(" ", content[:m.start()] if m else content)
+    head = content[:m.start()] if m else content
     return bool(KANA.search(head) or any(t.upper() not in NOT_ORIGINAL for t in LATIN.findall(head)))
 
 
@@ -704,25 +703,52 @@ def make_readings(words):
         return out
 
 
-def ordered(words, nsrc, rank=None, reading=None):
-    """同音詞的順序，由 `pack_rows` 轉成分數的差（解碼器同分時的先後與檔案順序無關，2026-10-10 實測）：處置列點名的先照列的順序
-    （rank：{(讀音, 詞): 名次}，保留的詞在前），其餘來源數多的在前，同數依字串排序，所以可以重現。"""
+def collision_rank(rows):
+    """處置列的名次：{(讀音, 詞): 名次}，依列出現的先後、每一列保留的詞在前。`ordered`（排序）與 `first_named`（開詞包後的第一名）共用這一份。"""
+    rank = {}
+    for r in rows:
+        for w in (r[1], r[2].lstrip("+")):
+            rank.setdefault((r[0], w), len(rank))
+    return rank
+
+
+def first_named(rank, inpack):
+    """每個有處置列的讀音，名次最前、而且還在詞包的詞：`ordered` 排在最前面的那個，也是開詞包後必須是第一名的詞。"""
+    out = {}
+    for (r, w), _ in sorted(rank.items(), key=lambda kv: kv[1]):
+        if w in inpack:
+            out.setdefault(r, w)
+    return out
+
+
+def ordered(words, nsrc, rank=None, reading=None, extra=None):
+    """同音詞的順序，由 `pack_rows` 轉成分數的差（解碼器同分時的先後與檔案順序無關，2026-10-10 實測）：處置列點名的先照 `collision_rank`
+    的名次（詞有好幾個讀音時取最前面的），其餘來源數多的在前，同數依字串排序，所以可以重現。"""
     rank = rank or {}
-    return sorted(words, key=lambda w: (rank.get((" ".join(reading[w]), w), len(rank)) if reading else 0, -nsrc(w), w))
+    extra = extra or {}
+    def rk(w):
+        if not reading:
+            return 0
+        rs = [reading[w]] + list(extra.get(w, []))
+        return min((rank.get((" ".join(r), w), len(rank)) for r in rs))
+    return sorted(words, key=lambda w: (rk(w), -nsrc(w), w))
 
 
 TIE = 1e-6      # 同讀音的詞包詞，排在第 k 位的分數減 k × TIE：解碼器遇到同分時的先後與檔案順序無關（2026-10-10 實測），要讓「來源數多的在前」成立只能靠分數
 
 
-def pack_rows(order, reading, sc):
-    """每個詞的列，格式和 build_overlay 共用同一個函式；同讀音的列依 order 的先後各減 k × TIE，讓同分的詞有固定的第一名。"""
+def pack_rows(order, reading, sc, extra=None):
+    """每個詞的列，格式和 build_overlay 共用同一個函式；同讀音的列依 order 的先後各減 k × TIE，讓同分的詞有固定的第一名。
+    extra：{詞: [另外的讀音]}（手動詞第四欄），這些讀音也各有一列（含變調列），和主要讀音同分數。"""
     rows, seen = [], collections.Counter()
+    extra = extra or {}
     for w in order:
-        for r in bo.overlay_rows(w, reading[w], sc[len(w)], TAG):
-            key, word, score, tag = r.rstrip("\n").split("\t")
-            k = seen[key]
-            seen[key] += 1
-            rows.append(r if not k else f"{key}\t{word}\t{round(float(score) - k * TIE, 8)!r}\t{tag}\n")
+        for syls in [reading[w]] + list(extra.get(w, [])):
+            for r in bo.overlay_rows(w, syls, sc[len(w)], TAG):
+                key, word, score, tag = r.rstrip("\n").split("\t")
+                k = seen[key]
+                seen[key] += 1
+                rows.append(r if not k else f"{key}\t{word}\t{round(float(score) - k * TIE, 8)!r}\t{tag}\n")
     return rows
 
 
@@ -759,7 +785,7 @@ def top1(pairs, profile, packs_dir=None):
 LEXICON_RULE_ROUNDS = 5      # 類型 c 規則重跑的上限；丟一個詞只會讓少數鄰居改變，實測幾輪就穩
 
 
-def detect_collisions(words, reading, rows, ref, decode=top1, existing=None):
+def detect_collisions(words, reading, rows, ref, decode=top1, existing=None, extra=None):
     """對每個詞包詞 w 的讀音（含「一」「不」變調列的讀音），各解碼兩次（不開／開詞包；聊天與書面）。符合其一就列出：
     (a) 開了之後第一名是另一個詞包詞；(b) 不開時第一名不是 w，而且在參考名單 ref 裡；
     (c) 不開時第一名 o 不是 w、是既有詞庫的詞（existing，預設 lexicon_words()），開了之後第一名變成 w（w 把既有詞擠下第一名）。
@@ -771,12 +797,13 @@ def detect_collisions(words, reading, rows, ref, decode=top1, existing=None):
         with open(os.path.join(d, "acg-add.tsv"), "w", encoding="utf-8") as f:
             f.writelines(rows)
         inpack, found = set(words), collections.defaultdict(list)
-        pairs = []
+        pairs, extra = [], extra or {}
         for w in words:
-            pairs.append((w, reading[w]))
-            var = bo.sandhi_variant(w, reading[w])
-            if var:
-                pairs.append((w, var))
+            for syls in [reading[w]] + list(extra.get(w, [])):
+                pairs.append((w, syls))
+                var = bo.sandhi_variant(w, syls)
+                if var:
+                    pairs.append((w, var))
         for prof in ("chat", "formal"):
             off, on = decode(pairs, prof), decode(pairs, prof, d)
             for (w, syls), o, n in zip(pairs, off, on):
@@ -799,6 +826,8 @@ def read_collisions(path):
         if not (len(r) == 4 and r[2].lstrip("+")):
             raise SystemExit(f"{path}: bad collision row: {r}")
         other = r[2].lstrip("+")
+        if r[2].startswith("+") and other == r[1]:
+            raise SystemExit(f"{path}: a row keeps {r[1]!r} and also names it as the other word: {r}")
         decided |= {(r[0], r[1]), (r[0], other)}
         if not r[2].startswith("+"):
             out[other] = r[0]
@@ -907,41 +936,37 @@ def build(api, groups_tsv=os.path.join(PACKS, "acg-groups.tsv"), collisions_tsv=
         src[v]["title"] |= {f"{t}@{art_rev[t]}" for t in s}
     for n in chars:
         src[n]["char"] |= {f"{t}@{art_rev[t]}" for t in name_src[n]}
-    manual_reading = {}
-    for w, work, *rest in read_tsv(manual_tsv):         # 維護者手動加的詞（欄位：詞、作品、備註、讀音（選填））：同樣去重、定讀音、算分數、偵測衝突
+    manual_extra = {}
+    for w, work, *rest in read_tsv(manual_tsv):         # 維護者手動加的詞（欄位：詞、作品、備註、另外的讀音（選填））：同樣去重、定讀音、算分數、偵測衝突
         if not HAN.match(w):
             raise SystemExit(f"{manual_tsv}: bad manual word: {w!r}")
-        if len(rest) > 1 and rest[1].strip():           # 第四欄指定讀音（音節以空白分隔，要和字數一致），讀音工具選的和想要的不同時用
+        if len(rest) > 1 and rest[1].strip():           # 第四欄：另外的讀音（音節以空白分隔，要和字數一致）。詞同時有讀音工具選的讀音和這一個
             if len(rest[1].split()) != len(w):
                 raise SystemExit(f"{manual_tsv}: reading of {w!r} has {len(rest[1].split())} syllables")
-            manual_reading[w] = rest[1].split()
+            manual_extra[w] = rest[1].split()
         src[w]["manual"].add(work)
         ref.add(w)
     exclude = read_exclude(exclude_tsv)
     ref -= exclude
     excluded, decided = read_collisions(collisions_tsv)
-    rank, keeps = {}, collections.defaultdict(list)           # rank：處置列點名的先後（保留的詞在前）；keeps：每個讀音各列的保留的詞
-    for r in read_tsv(collisions_tsv) if os.path.exists(collisions_tsv) else []:
-        keeps[r[0]].append(r[1])
-        for w in (r[1], r[2].lstrip("+")):
-            rank.setdefault((r[0], w), len(rank))
+    rank = collision_rank(read_tsv(collisions_tsv) if os.path.exists(collisions_tsv) else [])      # 排序與開詞包後的第一名共用同一份名次
     deduped = set(dedupe(src, have))
     dropped = exclude & deduped                          # 實際從候選拿掉的才算
     cand = [w for w in sorted(deduped) if w not in excluded and w not in dropped]
     log("candidates", len(src), "after dedupe and exclusions", len(cand), "excluded by acg-collisions.tsv", len(set(excluded) & deduped), "by acg-exclude.tsv", len(dropped))
 
     rd = readings(cand)
-    rd.update({w: (r, False) for w, r in manual_reading.items() if w in cand})
     unread = sorted(set(cand) - set(rd))
     words = [w for w in cand if w in rd]
     reading = {w: rd[w][0] for w in words}
+    extra = {w: [r] for w, r in manual_extra.items() if w in reading and r != reading[w]}      # 手動詞多出來的讀音
     sc = scores(base)
     # 使用者 2026-10-10 的規則：詞包詞若把既有詞庫的詞擠下第一名（類型 c），既有詞勝、詞包詞丟掉；丟掉之後別的詞的結果可能變，重跑到沒有 c 為止。
     lexicon_dropped = []
     for _ in range(LEXICON_RULE_ROUNDS):
-        order = ordered(words, lambda w: sum(len(s) for s in src[w].values()), rank, reading)
-        rows = pack_rows(order, reading, sc)
-        found = detect_collisions(words, reading, rows, ref, decode)
+        order = ordered(words, lambda w: sum(len(s) for s in src[w].values()), rank, reading, extra)
+        rows = pack_rows(order, reading, sc, extra)
+        found = detect_collisions(words, reading, rows, ref, decode, extra=extra)
         hit = {e[0]: (r, e) for r, v in sorted(found.items()) for e in v if e[1] == "c"}
         if not hit:
             break
@@ -951,7 +976,7 @@ def build(api, groups_tsv=os.path.join(PACKS, "acg-groups.tsv"), collisions_tsv=
         raise SystemExit(f"type (c) collisions not settled after {LEXICON_RULE_ROUNDS} rounds")
     col = {}
     inpack = set(words)
-    keep_now = {r: next((k for k in ks if k in inpack), None) for r, ks in keeps.items()}       # 保留的詞：第一列裡還在詞包的；都不在就看後面的列
+    keep_now = first_named(rank, inpack)       # 每個讀音開詞包後必須是第一名的詞：名次最前、還在詞包的那個（和排序同一個定義）
     for r, v in found.items():
         # 詞 e[0] 在這個讀音的處置列裡被點名，而且開了之後的第一名 e[4] 就是處置列的保留的詞，才算已處置
         # （2026-10-10：被舊處置蓋住的新詞搶走第一名，或點名的詞沒排在保留的詞前面，都要列出）

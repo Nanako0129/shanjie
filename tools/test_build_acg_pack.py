@@ -390,12 +390,13 @@ class Build(unittest.TestCase):
             api.wiki(action="parse", page="已刪除")
         self.assertEqual(c.exception.args[0]["code"], "missingtitle")
 
-    def test_a_manual_words_fourth_column_sets_its_reading(self):
+    def test_a_manual_words_fourth_column_adds_a_reading(self):
         manual = os.path.join(self.tmp, "manual3.tsv")
         open(manual, "w", encoding="utf-8").write("奇希莉卡\t無職轉生\t角色\tㄑㄧˊ ㄒㄧ ㄌㄧˋ ㄍㄚˇ\n")
         files = B.build(FakeApi(), self.groups, self.excl, manual, readings=fake_readings, exclude_tsv=self.none, years=(),
                         decode=lambda pairs, prof, packs=None: [w for w, _ in pairs])[0]
-        self.assertIn("ㄑㄧˊ-ㄒㄧ-ㄌㄧˋ-ㄍㄚˇ\t奇希莉卡\t", files["acg-add.tsv"])
+        self.assertIn("ㄑㄧˊ-ㄒㄧ-ㄌㄧˋ-ㄍㄚˇ\t奇希莉卡\t", files["acg-add.tsv"])         # 另外的讀音
+        self.assertIn("ㄑㄧˊ-ㄒㄧ-ㄌㄧˋ-ㄎㄚˇ\t奇希莉卡\t", files["acg-add.tsv"])         # 讀音工具的讀音也還在
         bad = os.path.join(self.tmp, "manual4.tsv")
         open(bad, "w", encoding="utf-8").write("奇希莉卡\t無職轉生\t角色\tㄑㄧˊ ㄒㄧ\n")
         with self.assertRaises(SystemExit):
@@ -490,7 +491,31 @@ class Build(unittest.TestCase):
             open(c, "w", encoding="utf-8").write(rows)
             return B.build(FakeApi(), self.groups, c, self.manual, decode=decode, readings=fake_readings, exclude_tsv=self.none, years=())[2]
         self.assertNotIn(r, run(f"{r}\t某個舊詞\t+另一個舊詞\t第一列的保留的詞不在詞包\n{r}\t奇希莉卡\t+阿庫雷特\t第二列\n"))
-        self.assertIn(r, run(f"{r}\t某個舊詞\t+奇希莉卡\t第一列的保留的詞不在詞包\n{r}\t阿庫雷特\t+某個舊詞\t第二列保留阿庫雷特但第一名是奇希莉卡\n"))
+        self.assertIn(r, run(f"{r}\t某個舊詞\t+另一個舊詞\t第一列都不在詞包\n{r}\t阿庫雷特\t+某個舊詞\t第二列保留阿庫雷特但第一名是奇希莉卡\n"))
+        # 第一列的保留的詞不在詞包、但 + 後面的詞在：排序上它排在第二列之前，所以它才是該有的第一名
+        self.assertNotIn(r, run(f"{r}\t某個舊詞\t+奇希莉卡\t第一列的保留的詞不在詞包\n{r}\t阿庫雷特\t+某個舊詞\t第二列\n"))
+
+    def test_the_required_first_word_is_the_first_named_word_in_ordering(self):
+        # 兩列的保留的詞都在詞包：第一列的保留的詞必須是第一名（next → reversed 就會讓這個測試失敗）
+        def decode(pairs, prof, packs=None):
+            return ["奇希莉卡" if packs and w == "阿庫雷特" else w for w, _ in pairs]
+        r = "ㄚ ㄎㄨˋ ㄌㄟˊ ㄊㄜˋ"
+        c = os.path.join(self.tmp, "c3.tsv")
+        def run(rows):
+            open(c, "w", encoding="utf-8").write(rows)
+            return B.build(FakeApi(), self.groups, c, self.manual, decode=decode, readings=fake_readings, exclude_tsv=self.none, years=())[2]
+        both = f"{r}\t阿庫雷特\t+某個舊詞\t第一列\n{r}\t奇希莉卡\t+阿庫雷特\t第二列\n"
+        self.assertIn(r, run(both))                    # 第一名是奇希莉卡，但第一列的保留的詞阿庫雷特才該是第一名
+        self.assertNotIn(r, run(f"{r}\t奇希莉卡\t+阿庫雷特\t第一列\n{r}\t阿庫雷特\t+某個舊詞\t第二列\n"))    # 順序反過來就對了
+        rank = B.collision_rank([[r, "阿庫雷特", "+某個舊詞", ""], [r, "奇希莉卡", "+阿庫雷特", ""]])
+        self.assertEqual(B.first_named(rank, {"阿庫雷特", "奇希莉卡"}), {r: "阿庫雷特"})
+        self.assertEqual(B.first_named(rank, {"奇希莉卡"}), {r: "奇希莉卡"})              # 第一個不在詞包就看後面的
+
+    def test_a_row_may_not_keep_a_word_and_name_it_as_the_other_word(self):
+        bad = os.path.join(self.tmp, "self.tsv")
+        open(bad, "w", encoding="utf-8").write("ㄅㄚ\t甲甲\t+甲甲\t自己點名自己\n")
+        with self.assertRaises(SystemExit):
+            B.read_collisions(bad)
 
     def test_excluded_strings_leave_the_pack_and_the_reference_list(self):
         excl = os.path.join(self.tmp, "exclude.tsv")
@@ -532,10 +557,10 @@ class Build(unittest.TestCase):
     def test_every_decided_readings_keep_word_is_first_with_the_committed_pack(self):
         # 處置列同一個讀音的第一列，保留的詞：只要詞包改變了第一名，新的第一名就必須是它（聊天與書面；出貨的詞包與真的解碼器）。
         # 詞包沒有改變第一名（詞庫的詞或解碼器拼出的字串原本就贏）的讀音不算：保留的詞贏不了語言模型是已知的限制（見研究紀錄）。
-        keep = {}
-        for reading, k, exclude, why in B.read_tsv(os.path.join(B.PACKS, "acg-collisions.tsv")):
-            keep.setdefault(reading, k)
-        pairs = [(k, r.split()) for r, k in keep.items()]
+        rank = B.collision_rank(B.read_tsv(os.path.join(B.PACKS, "acg-collisions.tsv")))
+        first = B.first_named(rank, second_column(os.path.join(B.PACKS, "acg-add.tsv")))         # 和建置工具同一個定義
+        self.assertGreater(len(first), 100)
+        pairs = [(k, r.split()) for r, k in first.items()]
         for prof in ("chat", "formal"):
             on, off = B.top1(pairs, prof, B.PACKS), B.top1(pairs, prof)
             bad = [(k, g) for (k, _), g, o in zip(pairs, on, off) if g != k and g != o]
