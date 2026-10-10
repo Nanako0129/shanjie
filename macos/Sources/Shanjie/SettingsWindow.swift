@@ -28,7 +28,10 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         m.refreshExternal()
         let w = window ?? makeWindow(m)
         window = w
-        if let host { w.setContentSize(NSSize(width: host.fittingSize.width, height: host.fittingSize.height + Self.titleBarHeight)) }
+        if let host {
+            let fit = host.fittingSize
+            w.setContentSize(NSSize(width: fit.width, height: fit.height + Self.titleBarHeight))
+        }
         center(w)
         NSApp.activate()
         w.makeKeyAndOrderFront(nil)
@@ -44,15 +47,17 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 
     /// The glass runs under the title bar, as in Syrtis's settings window (TokenBar SettingsWindowController.swift):
     /// with the window's background clear, a title bar outside the glass was see-through (user, 2026-10-10, third
-    /// visual round). The form starts this far down; the system's own title bar height for this style mask.
+    /// visual round). The form starts this far down. The mask here deliberately leaves out the window's
+    /// `.fullSizeContentView`: with it the content rect is the whole frame and this comes out 0. 32 pt on the maintainer's
+    /// machine (2026-10-10 review probe); a toolbar or another title bar style would need this changed.
     static let titleBarHeight = NSWindow.frameRect(forContentRect: NSRect(x: 0, y: 0, width: 100, height: 100), styleMask: [.titled, .closable]).height - 100
 
     private func makeWindow(_ model: SettingsModel) -> NSWindow {
         // The system's frosted material behind the content, never around it (a wrapped view gets vibrancy
         // and washed-out text; Syrtis, PR 491); the SwiftUI form sits on top with its own background hidden.
         // Not Liquid Glass (NSGlassEffectView): on device it was too see-through for a settings window, and the
-        // user asked for a flatter glass (2026-10-10, second visual round). The tint preview keeps the real
-        // candidate glass, so its depth still matches typing.
+        // user asked for a flatter glass (2026-10-10, third visual round). The tint preview keeps the real
+        // candidate glass; whether its depth on this backdrop matches the bar over an app was not measured.
         let glass = NSVisualEffectView()
         glass.material = Self.backgroundMaterial
         glass.blendingMode = .behindWindow
@@ -110,6 +115,8 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 struct SettingsForm: View {
     /// Chosen to fit the controls and their labels on one line each; not measured against any reference.
     private static let formWidth: CGFloat = 420
+    /// Icon-to-slider gap, Syrtis's value (TokenBar GlassTintControl.swift `HStack(spacing: 8)`); not measured.
+    private static let tintIconSpacing: CGFloat = 8
     @ObservedObject var model: SettingsModel
 
     var body: some View {
@@ -134,17 +141,18 @@ struct SettingsForm: View {
             Section("外觀") {
                 // The end icons are Syrtis's (TokenBar GlassTintControl.swift): outline at the clear end, filled at the deep
                 // end, in an HStack beside the slider. As the Slider's own value labels inside a grouped Form both came out
-                // filled on device (user, 2026-10-10).
+                // filled on device (user, 2026-10-10). The slider keeps the regular size (Syrtis's is .small), as checked on
+                // device. The icons are decoration, hidden from VoiceOver; the slider carries the label.
                 LabeledContent("候選窗玻璃深淺") {
-                    HStack(spacing: 8) {
+                    HStack(spacing: Self.tintIconSpacing) {
                         Image(systemName: "rectangle.on.rectangle")
                             .foregroundStyle(.secondary)
-                            .accessibilityLabel("透明")
+                            .accessibilityHidden(true)
                         Slider(value: Binding(get: { model.glassTint }, set: { model.setGlassTint($0) }), in: 0...1)
                             .accessibilityLabel("候選窗玻璃深淺")
                         Image(systemName: "rectangle.fill.on.rectangle.fill")
                             .foregroundStyle(.secondary)
-                            .accessibilityLabel("深")
+                            .accessibilityHidden(true)
                     }
                 }
                 // The real bar's glass, cells and tint decision, so the depth is what typing shows.
