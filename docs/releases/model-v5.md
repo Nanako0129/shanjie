@@ -6,7 +6,7 @@
 - 量測（對 model-v4，開動漫與遊戲詞包，聊天／書面）：
   - dev302、打字測驗、錯字回報：每一列的第一名都和 model-v4 相同（開不開詞包都是）。
   - 動漫作品名 135→138／135→139、角色名 182→187／188→192、角色名片段 67→73／71→77（共 105 句）。
-  - 調參集（cvtune、wikitune，約 1.3 萬句）：少對 0 到 2 句，不顯著。
+  - 調參集（cvtune、wikitune，約 6,600 句，聊天與書面各量一次）：少對 0 到 2 句，不顯著。
   - 詞包詞單獨打的時候不是第一名的比例 12.5% → 10.8%（兩字名字 59.2% → 46.7%）。
 - 要和 [classes-v3](https://github.com/Nanako0129/shanjie/releases/tag/classes-v3) 的 `classes.sjc` 一起用，放在同一個資料夾。
 - 授權：**CC BY-SA 4.0**（https://creativecommons.org/licenses/by-sa/4.0/ ）。模型由下列語料的詞頻計數而來：
