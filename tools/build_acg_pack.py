@@ -591,7 +591,14 @@ CHAR_RE = re.compile(r"(登場|登场)?(人物|角色)|主角|配角|角色介�
 CHAR_NEG = re.compile(r"列表$|一覽$|相關|周邊|商品|遊戲|玩具|聲優|配音|演員|製作|聲音|影響|評價|設計|創作|名詞|專有|用語")
 # 整頁模式（A3.2）不收的地方：頁尾的參考、注釋、外部連結、相關條目小節，以及導覽框、參考文獻框（PR #111 /code-review：
 # 網際網路電影資料庫、集換式卡牌遊戲 等從這裡進了詞包）。只用在人物小標題以外，A2 的抽取不變。
-BACK_RE = re.compile(r"參考|参考|注釋|註釋|注释|註解|注解|腳注|脚注|外部連結|外部链接|相關條目|相关条目|參見|参见|延伸閱讀")
+# 小標題要整個由這些詞組成（可用「與」「及」「和」「、」連接）才算頁尾；「印第安那黃蜂隊（應參考於…）」這種內文小標題不算（verifier 2026-10-11）。
+BACK_WORDS = set("參考 參考資料 參考文獻 參考來源 参考 参考资料 参考文献 註釋 注釋 注释 註解 注解 腳注 脚注 外部連結 外部链接 相關條目 相关条目 "
+                 "相關參見 參見 参见 延伸閱讀 來源 出處".split())
+
+
+def is_back(heading):
+    parts = [p for p in re.split(r"與|及|和|、|\s+", heading.strip()) if p]
+    return bool(parts) and all(p in BACK_WORDS for p in parts)
 BOX = {"navbox", "navbox-inner", "vertical-navbox", "reflist", "references", "refbegin"}
 
 
@@ -623,7 +630,7 @@ def raw_candidates(root, whole_page=False):
                 stack.pop()
             stack.append((lv, n.text().strip(), n))
         in_sec = any(CHAR_RE.search(t) and not CHAR_NEG.search(t) for _, t, _ in stack)
-        if not in_sec and (not whole_page or any(BACK_RE.search(t) for _, t, _ in stack) or in_box(n)):
+        if not in_sec and (not whole_page or any(is_back(t) for _, t, _ in stack) or in_box(n)):
             continue
         if n.tag == "dt":
             yield "dt", "".join(k.text() for k in n.kids if k.tag not in ("ul", "ol", "dl", "table", "div")), in_sec
