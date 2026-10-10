@@ -203,6 +203,51 @@ final class VerticalLayoutTests: XCTestCase {
         XCTAssertEqual(VerticalLayout.width(contentWidths: [300.2], current: 0, gutter: 0), (300.2 + VerticalLayout.sideInset * 2).rounded(.up))
     }
 
+    // MARK: row separators (Apple Zhuyin's vertical window, measured 2026-10-10)
+
+    private func seps(rows: Int = 9, selected: Int, rowWidth: CGFloat = 226) -> [VerticalLayout.Separator] {
+        VerticalLayout.separators(rows: rows, selected: selected, rowWidth: rowWidth, capsuleHeight: 24, thickness: 1)
+    }
+
+    /// Apple's numbers: capsule tops 86, 114, ... and lines at 111, 139, ... (capsule top + 25), from 6 pt inside the
+    /// capsule's left edge to 6 pt inside its right edge (capsule 11...237, line 17...231).
+    func testSeparatorRectsFollowApple() {
+        let s = seps(selected: -1)
+        XCTAssertEqual(s.count, 8, "between nine rows, none above the first or below the last")
+        for (i, line) in s.enumerated() {
+            XCTAssertEqual(line.index, i)
+            XCTAssertEqual(line.y, VerticalLayout.rowY(i, capsuleHeight: 24) + 25, "line \(i)")
+            XCTAssertEqual(line.height, 1)
+        }
+        XCTAssertEqual(s[1].y - s[0].y, 28, "one pitch apart")
+        // Capsule at x = sideInset with a width of rowWidth: the line starts 6 in and ends 6 before the capsule's end.
+        XCTAssertEqual(s[0].x, VerticalLayout.sideInset + 6)
+        XCTAssertEqual(s[0].x + s[0].width, VerticalLayout.sideInset + 226 - 6)
+        XCTAssertEqual(seps(selected: -1, rowWidth: 300)[0].width, 288)
+        // Thickness is whatever the caller says (1 device pixel).
+        XCTAssertEqual(VerticalLayout.separators(rows: 3, selected: -1, rowWidth: 226, capsuleHeight: 24, thickness: 0.5)[0].height, 0.5)
+        // Apple's check at its own origin: with the first capsule top at 86 the line is at 111.
+        XCTAssertEqual(86 + VerticalLayout.separatorBelowCapsuleTop, 111)
+    }
+
+    func testSeparatorsTouchingTheSelectedRowAreHidden() {
+        func hidden(_ selected: Int, rows: Int = 9) -> [Int] { seps(rows: rows, selected: selected).filter { !$0.visible }.map(\.index) }
+        XCTAssertEqual(hidden(0), [0], "row 1 selected: no line between rows 1 and 2, the one between 2 and 3 shows")
+        XCTAssertEqual(hidden(1), [0, 1], "row 2 selected: neither 1|2 nor 2|3")
+        XCTAssertEqual(hidden(4), [3, 4], "a middle row")
+        XCTAssertEqual(hidden(8), [7], "the last row: only the line above it")
+        XCTAssertEqual(hidden(-1), [], "no selection (the not-entered prediction row): all show")
+        XCTAssertEqual(hidden(1, rows: 3), [0, 1])
+        XCTAssertEqual(hidden(2, rows: 3), [1])
+    }
+
+    func testSeparatorsOfShortListsAndOneRow() {
+        XCTAssertEqual(seps(rows: 1, selected: 0).count, 0)
+        XCTAssertEqual(seps(rows: 0, selected: -1).count, 0)
+        XCTAssertEqual(seps(rows: 2, selected: -1).count, 1)
+        XCTAssertEqual(seps(rows: 2, selected: 0).filter(\.visible).count, 0)
+    }
+
     // MARK: scroll indicator
 
     func testThumbIsAbsentWhileEverythingFits() {

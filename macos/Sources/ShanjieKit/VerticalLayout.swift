@@ -73,6 +73,40 @@ public enum VerticalLayout {
     /// included. The panel asks this first, clears, makes its cells and only then asks `plan` for the size.
     public static func resets(previous: Plan?, kind: Int) -> Bool { previous?.kind != kind }
 
+    /// Row separators. Source: Apple Zhuyin's vertical window, main's imeshot shots of 2026-10-10 (1x external display,
+    /// 1 px = 1 pt, dark mode): a line in the gap between two consecutive visible rows at 111, 139, 167 ... for capsules whose
+    /// tops are at 86, 114, 142 ..., i.e. the capsule's top + 25; it runs from 6 pt right of the capsule's left edge to 6 pt
+    /// left of its right edge (capsule x 11...237, line x 17...231); no line above the first row or below the last.
+    public static let separatorBelowCapsuleTop: CGFloat = 25
+    public static let separatorInset: CGFloat = 6
+
+    /// One separator between row `index` and row `index + 1` of the vertical panel (flipped content coordinates).
+    public struct Separator: Equatable {
+        public var index: Int
+        public var visible: Bool
+        public var x: CGFloat
+        public var y: CGFloat
+        public var width: CGFloat
+        public var height: CGFloat
+    }
+
+    /// The `rows - 1` separators between consecutive rows, with the rule of which show: the two touching the selected row
+    /// (above and below it) are hidden, the others show; with no selection (`selected` < 0, the not-entered prediction row)
+    /// all show.
+    /// - `thickness`: 1 device pixel (the caller passes 1 / backingScaleFactor). Measured only at 1x; the thickness at 2x is
+    ///   inferred, not measured. The line's colour is the system's `separatorColor` (set by the panel's adapter): Apple's line
+    ///   measured about +12 brightness over the glass in dark mode (41 -> 53); light mode was not measured.
+    /// - `rowWidth`: the capsule's width (the panel's width less the side insets and the gutter).
+    public static func separators(rows: Int, selected: Int, rowWidth: CGFloat, capsuleHeight: CGFloat, thickness: CGFloat) -> [Separator] {
+        guard rows > 1 else { return [] }
+        return (0..<(rows - 1)).map { i in
+            Separator(index: i, visible: selected != i && selected != i + 1,
+                      x: sideInset + separatorInset,
+                      y: rowY(i, capsuleHeight: capsuleHeight) + separatorBelowCapsuleTop,
+                      width: max(rowWidth - separatorInset * 2, 0), height: thickness)
+        }
+    }
+
     /// The window's height for `rows` visible rows. Fixed when the window opens (contract section 2.3).
     public static func height(rows: Int) -> CGFloat {
         inset * 2 + CGFloat(rows) * rowPitch
