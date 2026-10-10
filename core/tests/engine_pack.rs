@@ -11,8 +11,8 @@ fn root() -> PathBuf {
 }
 fn lm_path() -> PathBuf {
     let p = root().join("data/lm/bigram.sjlm");
-    assert!(root().join("data/lm/classes.sjc").exists(), "data/lm/classes.sjc is missing: gh release download classes-v2 -R Nanako0129/shanjie -p classes.sjc -D data/lm");
-    assert!(p.exists(), "data/lm/bigram.sjlm is missing: gh release download model-v4 -R Nanako0129/shanjie -p bigram.sjlm -D data/lm");
+    assert!(root().join("data/lm/classes.sjc").exists(), "data/lm/classes.sjc is missing: gh release download classes-v3 -R Nanako0129/shanjie -p classes.sjc -D data/lm");
+    assert!(p.exists(), "data/lm/bigram.sjlm is missing: gh release download model-v5 -R Nanako0129/shanjie -p bigram.sjlm -D data/lm");
     p
 }
 

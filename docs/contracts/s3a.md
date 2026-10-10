@@ -53,23 +53,30 @@
 | 0 | 預測列已進入 | ⌘⌫ | 遺忘選取的那一項：丟掉同一個（詞、讀音）的待學記錄，`learner.forget` 並照候選窗 ⌘⌫ 的規則改寫學習檔（學習暫停時也可以），重算預測列，仍是已進入、選取移到那個詞的新位置（不在列中是 0）；判斷在第 1 條之前（V3，`v3-engine.md` §10.3；修訂一取代原本的「吃掉、不動作」）。未進入時照第 1 條直通 |
 | 1 | 任何 | 帶 COMMAND、OPTION、CAPSLOCK，或帶 CONTROL 但不是 Ctrl+\ | 不處理（直通），**不改任何狀態** |
 | 1a | 預測列已進入 | 1–9 | 選預測列的第 n 個（超過個數就吃掉、不動作）；選取見 `v3-engine.md` §2 |
-| 1b | 預測列已進入 | ←→、Tab（無修飾鍵） | 移動選取（Tab 往後，到最後一個停住） |
+| 1b | 預測列已進入 | ←→、Tab（無修飾鍵） | 移動選取（Tab 往後，到最後一個停住）。**設定是直排時**（`candidate-vertical.md` §2.4）↓ 同 →、↑ 同 ←，也在兩端停住；橫排時 ↑↓ 不是預測列的鍵，照第 1e 條 |
 | 1c | 預測列已進入 | Shift+Tab、Esc | 退回未進入（預測列保留） |
 | 1d | 預測列已進入 | Enter | 選目前選取的 |
-| 1e | 預測列已進入 | 其他鍵（含 Backspace） | 退回未進入，再從第 2 條起處理這個鍵。Backspace 有未完成音節時照第 11 條刪最後一個符號並重算預測列（和第 7 條不同，使用者選擇）；沒有未完成音節時照第 18 條 |
-| 2 | 任何 | §4 的標點鍵（Shift 表與單按表）、Ctrl+\ | 丟掉未完成音節、關閉候選，**把標點插入組字區的游標處**（不送出；2026-10-04 起，見 `docs/contracts/s3d-punctuation.md`；原本是「送出組字區，再送出標點」） |
+| 1e | 預測列已進入 | 其他鍵（含 Backspace；橫排時含 ↑↓） | 退回未進入，再從第 2 條起處理這個鍵。Backspace 有未完成音節時照第 11 條刪最後一個符號並重算預測列（和第 7 條不同，使用者選擇）；沒有未完成音節時照第 18 條 |
+| 2 | 任何 | §4 的標點鍵（Shift 表與單按表）、Ctrl+\ | 丟掉未完成音節（多個單位時是全部）、關閉候選，**把標點插入組字區的游標處**（不送出；2026-10-04 起，見 `docs/contracts/s3d-punctuation.md`；原本是「送出組字區，再送出標點」） |
 | 3 | 候選開啟 | 1–9 | 收合：選目前頁的第 n 個（超出本頁則忽略），關閉候選。展開：選選取所在那一排的第 n 個（每排 9 個；最後一排不足 n 個則吃掉、不動作，s3b2 §8.2、§9） |
 | 4 | 候選開啟 | ↑↓、←→ | 收合：↑←上一個、→下一個（跨頁），↓ 展開成網格（選取不動）。展開（一律 9 欄，一排是一頁，展開時選取所在的那一頁在最上面，s3b2 §9）：↓ 下一排同一個位置（最後一排較短時到該排最後一個，已在最後一排時不動）、↑ 上一排（在最上面那排但不是整份清單的第 0 排時往上捲一排；只有第 0 排才收回，選取不變）、←→ 上／下一個（跨列）。←→ 和系統注音一樣逐一移動（2026-10-04 使用者實測後改；原本是翻頁；2026-10-05 起 ↓ 改為展開，s3b2 §8.2） |
 | 5 | 候選開啟 | 空白鍵 | 收合：下一頁，最後一頁再按回第一頁。展開：和 ↓ 相同，但在最後一排時回第一排同一個位置 |
+| 3v | 直排候選窗開啟（`candidate_vertical` 1） | 1–9 | 取代第 3 條。選**可見範圍**的第 n 個（超出可見個數則忽略、候選保持），關閉候選（`candidate-vertical.md` §2.2） |
+| 4v | 直排候選窗開啟 | ↓、→ | 取代第 4 條。下一個；選取在可見範圍最後一個時，可見範圍往下捲**一個**（選取停在可見的最後一列，編號跟著可見的列重排成 1–9）；已是整份清單最後一個時不動。直排沒有網格，↓ 不展開 |
+| 4w | 直排候選窗開啟 | ↑、← | 取代第 4 條。上一個；選取在可見範圍第一個時，可見範圍往上捲一個；已是整份清單第一個時不動 |
+| 5v | 直排候選窗開啟 | 空白鍵 | 取代第 5 條。和 ↓ 相同（下一個，不是翻頁；蘋果注音直排實測），已是整份清單最後一個時不動（不回第一個） |
+| 5p | 直排候選窗開啟，無修飾鍵 | Page Down（kind 15）、Page Up（kind 14） | Page Down：可見範圍往後移 9 個（不超過讓最後一個候選可見的位置），選取在新的可見範圍第一個，**但選取不往回**：被夾住、新的第一個比原本的選取還前面時選取不動（10 個候選，↓ 八次（選取在位置 8，從 0 起算，即第 9 個候選）後 Page Down，選取仍在位置 8）；已在最後時不動。Page Up：往前移 9 個（最小 0），選取在第一個；已在最前時不動。兩者都是已處理（`handled` 1）。殼只在最後一次輸出的 `candidate_vertical` 為 1 且沒有任何修飾鍵時才送這兩個 kind |
+| 5q | 不是直排候選窗（橫排候選、網格、組字中、未完成音節、預測列（含直排預測列）、組字區空），或帶任何修飾鍵 | Page Down、Page Up（kind 15、14） | 不處理（`handled` 0、`commit` 空），**不改任何狀態**（含預測列）。只有殼出錯時才會收到；殼平常不把這兩個鍵送給核心，它們走 `s3b.md` 的表外鍵路徑 |
 | 6 | 候選開啟 | Enter | 選目前選取的，關閉候選 |
 | 7 | 候選開啟 | Esc、Backspace | 關閉候選，不改變 |
 | 8 | 候選開啟 | 其他鍵 | 關閉候選（不改變），再從第 9 條起處理這個鍵 |
 | 8a | 預測列未進入且不是空的（候選窗關閉） | Tab（無修飾鍵） | 進入預測列，選取第 0 個（插在第 9 條之前）；預測列是空的時照第 13、21 條 |
-| 9 | 有未完成音節 | 注音鍵 | 放進對應欄位 |
+| 9 | 有未完成音節 | 注音鍵 | 放進對應欄位（同一欄再按一次是取代）。**例外（V3 第二片，`v3-engine.md` §12）**：「可省略韻母」開、預測列開、游標在組字區尾端時，那一欄已有符號就**開新的未完成單位**（最後一個單位的那一欄是空的就放進去）；有兩個以上單位時，聲調鍵與空白鍵見 9a。要有語言模型；單位上限 `ABBR_MAX_UNITS` = 10，到了上限已有符號的那一欄照取代 |
+| 9a | 有兩個以上未完成單位 | 聲調鍵、空白鍵 | 吃掉、不動作（單位只靠預測列選取、Backspace、Esc 解決；最多 10 個單位，見第 9 條）；只有一個單位時照第 10 條 |
 | 10 | 有未完成音節 | 聲調鍵、空白鍵 | 完成音節（§2） |
-| 11 | 有未完成音節 | Backspace | 刪掉顯示位置最後的符號（韻母→介音→聲母；2026-10-06 實測蘋果注音與小麥注音） |
-| 12 | 有未完成音節 | Esc | 清掉未完成音節 |
-| 12a | 有未完成音節 | Enter（沒有修飾鍵） | 送出組字區顯示的整串：游標前的顯示文字、未完成音節的符號（照顯示順序）、游標後的顯示文字，然後清空組字區（2026-10-09 起，蘋果注音實測；`docs/contracts/enter-pending.md`；原本是第 13 條的吃掉） |
+| 11 | 有未完成音節 | Backspace | 刪掉顯示位置最後的符號（韻母→介音→聲母；2026-10-06 實測蘋果注音與小麥注音）。多個單位時刪最後一個單位的最後一個符號，空了的單位拿掉 |
+| 12 | 有未完成音節 | Esc | 清掉未完成音節（多個單位時是全部單位；組字區的字、固定詞、游標不動） |
+| 12a | 有未完成音節 | Enter（沒有修飾鍵） | 送出組字區顯示的整串：游標前的顯示文字、未完成音節（多個單位時是全部單位）的符號（照顯示順序）、游標後的顯示文字，然後清空組字區（2026-10-09 起，蘋果注音實測；`docs/contracts/enter-pending.md`；原本是第 13 條的吃掉） |
 | 12b | 有未完成音節 | Shift+Enter | 照第 12a 條送出，然後直通這個鍵（`handled = 0`，App 收到換行；蘋果注音實測） |
 | 13 | 有未完成音節 | 其他鍵 | 已處理，忽略 |
 | 14 | 沒有未完成音節 | 注音鍵 | 開始新的未完成音節 |
@@ -84,7 +91,9 @@
 | 22a | 組字區空 | 聲調鍵（空白鍵以外） | 把該聲調符號（ˊ ˇ ˋ ˙）放進組字區，和第 2 條的標點相同（2026-10-05 起；蘋果注音實測按 3 打出「ˇ」但立刻送出，使用者選擇留在組字區，Backspace 可刪、Enter 才送出；原本直通成數字） |
 | 22 | 組字區空 | 其他鍵 | 不處理（直通） |
 
-- **預測列（V3，`docs/contracts/v3-engine.md`）**：有載入語言模型、游標在組字區尾端、候選窗關閉時，第 9、10、11、14 條處理完之後重算（第 10 條遇到詞庫沒有的音節而不完成時不變）；其他所有狀態變化都清掉（標點、22a、開候選窗與候選窗內的鍵、游標移動、刪音節、送出、Esc、`reset`、`set_profile`／`set_demote`／`set_prediction`（關閉時；開啟時重算）、`pick`、選了預測、回傳碼 4）；什麼都沒改的鍵（↑、不起作用的聲調鍵、游標在邊界的 Backspace／Delete、有未完成音節時的其他鍵、第 1 條的直通）保留預測列。預測列透過候選欄位輸出（§6）。
+**直排候選窗與直排預測列**（`docs/contracts/candidate-vertical.md`，放在表外：夾在表中間會讓後面的列不再顯示成表格）：方向由 `shanjie_engine_set_candidate_vertical` 設定（預設橫排）。**候選窗在開啟時固定方向**（第 15 條與 s3e 的標點候選開窗時讀；設定只影響下一次開窗，開著的窗，含展開的網格，照開啟時的方向）。**預測列沒有開窗的時間點**，每個輸出都照 engine 當下的設定，所以設定的回傳快照裡正在顯示的預測列就換成新的方向。直排候選窗的狀態是「整份清單、可見範圍的第一個、選取」，可見範圍固定 9 個（不足 9 個就是全部）；開窗時從 0 開始、選取 0。輸出：`candidates` 是可見範圍、`candidate_selected` 是在可見範圍裡的位置、`candidate_first`／`candidate_total` 照現有意義、`candidate_columns` 一律 0。`candidate_vertical` 是 0（橫排，或沒有候選）、1（直排候選窗）、2（直排預測列，進入或未進入；其他欄位的意義不變）。第 3v–5p 條取代直排候選窗的第 3–5 條，第 6–8 條、⌘⌫ 遺忘與其他條不變；直排預測列進入後的 ↑↓ 見第 1b 條，未進入時 ↓ 照第 15 條、↑ 照第 16 條，與橫排相同。
+
+- **預測列（V3，`docs/contracts/v3-engine.md`）**：有載入語言模型、游標在組字區尾端、候選窗關閉時，第 9、10、11、14 條處理完之後重算（第 10 條遇到詞庫沒有的音節而不完成時不變）；其他所有狀態變化都清掉（標點、22a、開候選窗與候選窗內的鍵、游標移動、刪音節、送出、Esc、`reset`、`set_profile`／`set_demote`／`set_prediction`（關閉時；開啟時重算）、`pick`、選了預測、回傳碼 4）；什麼都沒改的鍵（↑、不起作用的聲調鍵、游標在邊界的 Backspace／Delete、有未完成音節時的其他鍵、第 1 條的直通）保留預測列。預測列透過候選欄位輸出（§6）。「可省略韻母」（`shanjie_engine_set_abbreviation`，預設關）見第 9、9a、11、12 條與 `v3-engine.md` §12：兩個以上的未完成單位在關掉縮寫或關掉預測列時一併清掉（等於 Esc），一個單位時不動。
 - 「注音鍵」與「聲調鍵」指 §1 表中的鍵、且沒按 Shift。
 - 第 1 條的直通不改任何狀態：一段組字中間插入任意個第 1 條的鍵，之後的輸出必須和沒按過時逐欄位相同。
 - 中英切換：用系統的「使用大寫鎖定鍵切換輸入方式」（使用者 2026-10-03 選 Caps Lock），切換時系統停用本輸入法；殼不保留中英狀態，原本寫的 Shift 單按切換不做（見 `docs/contracts/s3b.md` §6）。
@@ -126,13 +135,13 @@
 
 `data_dir` 裡必須有 `mcbpmf-data.txt`、`overlay-add.tsv` 與 `sandhi-add.tsv`（S2r 加入），用 `Lexicon::parse_with(基底, Some(疊加層))` 載入，疊加層是 `overlay-add.tsv` 接著 `sandhi-add.tsv`（`engine::join_overlays`，前一份沒有結尾換行就補一個），和評測 CLI 預設相同。任一個不存在或解析失敗，回傳碼 3（`load_lm` 重讀 `overlay-add.tsv` 與 `demote.tsv`，建構之後它們被移走也是碼 3）。
 
-詞包（acg-pack 契約 A.2）：`Engine::new_with_packs(data_dir, layout, Some((packs_dir, mask)))` 把啟用的詞包檔（`PACK_ACG` → `packs_dir/acg-add.tsv`）接在 `sandhi-add.tsv` 後面一起解析；`load_lm` 重新讀 `data_dir/overlay-add.tsv`（`engine::capping_overlay`；引擎不為此留一份約 17 MB 的副本），後面接建構時 `load_lexicon_packs` 給出的啟用詞包列（詞包檔不重讀；沒有啟用就沒有），交給 `CappedLexicon::new`，所以詞包的詞也依語料頻率封頂（沒看過的減 1.0）。沒有啟用的位元、或檔案不存在，就不讀任何詞包，引擎和 `Engine::new` 完全相同（`core/tests/engine_pack.rs` 逐位元比對解碼、候選清單與 V3 預測列）。未定義的位元是 `LoadFailed`。評測 CLI 的 `--packs acg [--packs-dir DIR]` 走同一組函式（`load_lexicon_packs`、`read_packs`）。
+詞包（acg-pack 契約 A.2）：`Engine::new_with_packs(data_dir, layout, Some((packs_dir, mask)))` 把啟用的詞包檔（`PACK_ACG` → `packs_dir/acg-add.tsv`）接在 `sandhi-add.tsv` 後面一起解析；`load_lm` 重新讀 `data_dir/overlay-add.tsv`（`engine::capping_overlay`；引擎不為此留一份約 17 MB 的副本），後面接建構時 `load_lexicon_packs` 給出的啟用詞包列（詞包檔不重讀；沒有啟用就沒有），交給 `CappedLexicon::new`，所以詞包的詞也依語料頻率封頂（沒看過的減 1.0）。沒有啟用的位元、或檔案不存在，就不讀任何詞包，引擎和 `Engine::new` 完全相同（`core/tests/engine_pack.rs` 逐位元比對解碼、候選清單與 V3 預測列）。未定義的位元是 `LoadFailed`。評測 CLI 的 `--packs acg [--packs-dir DIR]` 走同一組函式（`load_lexicon_packs_detailed`、`capping_overlay_detailed`，讀取失敗帶出錯的檔案與 `ErrorKind`；解析失敗帶資料夾與解析器的 `detail`（指不出是哪個檔，見 acg-pack 契約 A2.7 的延後項）；`load_lexicon_packs` 與 `capping_overlay` 是把它們的錯誤對應成 `LoadFailed` 的包裝）。
 
 ## 6. C ABI（`core/include/shanjie.h`）
 
 ```c
 typedef struct { uint32_t kind; uint32_t ch; uint32_t modifiers; } ShanjieKey;
-// kind：1 CHAR、2 SPACE、3 ENTER、4 BACKSPACE、5 DELETE、6 ESC、7 LEFT、8 RIGHT、9 UP、10 DOWN、11 HOME、12 END、13 TAB
+// kind：1 CHAR、2 SPACE、3 ENTER、4 BACKSPACE、5 DELETE、6 ESC、7 LEFT、8 RIGHT、9 UP、10 DOWN、11 HOME、12 END、13 TAB、14 PAGE_UP、15 PAGE_DOWN（候選窗直排的規則 5p／5q；殼只在直排候選窗開著、沒有修飾鍵時才送）
 // ch：kind 為 CHAR 時的 Unicode scalar（不含 Shift 的鍵帽字元）；其他 kind 時忽略
 // modifiers：bit0 SHIFT、bit1 CONTROL、bit2 OPTION、bit3 COMMAND、bit4 CAPSLOCK
 typedef struct {
@@ -146,6 +155,7 @@ typedef struct {
   uint32_t candidate_columns; // s3b2 §8.2：0 = 收合的一列；展開時一律 9（一排一頁，s3b2 §9）
   uint32_t candidate_first;   // candidates[0] 在整份候選清單的位置；沒開候選時為 0
   uint32_t candidate_total;   // 整份候選清單的數量；沒開候選時為 0
+  uint32_t candidate_vertical; // 0 = 橫排或沒有候選；1 = 直排候選窗（candidate_columns 為 0，最多 9 列，從 candidate_first 起，開窗時固定方向）；2 = 直排預測列（進入或未進入，照當下的設定，columns 0、first 0）。加在結構尾端
 } ShanjieOutput;
 typedef struct ShanjieEngine ShanjieEngine;
 
@@ -168,6 +178,9 @@ int32_t shanjie_engine_set_profile(ShanjieEngine *engine, uint32_t profile, Shan
 int32_t shanjie_engine_new_packs(const char *data_dir, uint32_t layout, const char *packs_dir, uint32_t packs, ShanjieEngine **out);
 // s3e 新增（docs/contracts/s3e-punctuation-candidates.md）
 int32_t shanjie_engine_set_punctuation(ShanjieEngine *engine, const char *table); // 標點候選表；不合法回 2 並保留原表；不改目前顯示
+// candidate-vertical 新增（docs/contracts/candidate-vertical.md §2.2）：下一次開啟的候選窗的方向。enabled 0（預設，橫排）或 1（直排），其他值回 2、狀態不變；
+// 1 = engine 或 out 為 NULL；回傳快照（handled 1、commit ""），和 set_prediction 相同。開著的候選窗照開啟時的方向（快照和呼叫前的輸出相同），正在顯示的預測列則換成新的方向（值 2）。殼在每次建 engine 後都要呼叫。
+int32_t shanjie_engine_set_candidate_vertical(ShanjieEngine *engine, uint32_t enabled, ShanjieOutput **out);
 ```
 
 - **回傳碼**：0 成功、1 必要的指標是 NULL、2 輸入不合法（data_dir、LM 路徑或標點表不是 UTF-8、`ch` 不是合法的 Unicode scalar、layout、mode 或 profile 超出範圍、標點表格式不合法或超過上限，見 s3e §3）、3 資料載入失敗（含 LM 檔讀取或格式錯誤、引擎沒有 data_dir）、4 內部錯誤（攔下的 panic 或解碼錯誤）。`load_lm` 失敗時 LM 維持原狀；碼 4 時任何函式都照下面的規則丟棄組字。
@@ -247,7 +260,7 @@ int32_t shanjie_engine_set_punctuation(ShanjieEngine *engine, const char *table)
 
 契約沒寫、`engine.rs` 實作時自行決定的事（S3b 對照截圖時可改）：
 
-- **API 形狀**：`Engine::new(data_dir, Layout)` 讀檔，`Engine::with_lexicon(Arc<Lexicon>, Layout)` 共用已載入的詞庫（測試每個測試檔只載入一次）；`load_lexicon(data_dir)` 單獨公開。`Key { kind: KeyKind, ch: char, modifiers: u32 }`（`KeyKind::from_code` 把 ABI 的 1–13 轉成列舉，`ch` 的合法性由 `ffi.rs` 先擋）。`Output` 欄位與 §6 一一對應（`selected: Option<usize>`、`candidates: Vec<String>`）。錯誤只有 `EngineError::LoadFailed`（碼 3）與 `Internal`（碼 4）；`key` 回 `Internal` 之前引擎已自行清空（等同 reset 模式 1）。`reset(mode)` 不會失敗。
+- **API 形狀**：`Engine::new(data_dir, Layout)` 讀檔，`Engine::with_lexicon(Arc<Lexicon>, Layout)` 共用已載入的詞庫（測試每個測試檔只載入一次）；`load_lexicon(data_dir)` 單獨公開。`Key { kind: KeyKind, ch: char, modifiers: u32 }`（`KeyKind::from_code` 把 ABI 的 1–15 轉成列舉，`ch` 的合法性由 `ffi.rs` 先擋）。`Output` 欄位與 §6 一一對應（`selected: Option<usize>`、`candidates: Vec<String>`）。錯誤只有 `EngineError::LoadFailed`（碼 3）與 `Internal`（碼 4）；`key` 回 `Internal` 之前引擎已自行清空（等同 reset 模式 1）。`reset(mode)` 不會失敗。
 - **R2**：`Key`、`Output`、`Engine` 都不 `derive(Debug)`；`Output` 只 derive `PartialEq`，測試用 `assert!(a == b)`。
 - **Ctrl+\ 的判定**：只有「修飾鍵恰為 CONTROL、字元為 `\`」算 Ctrl+\；Ctrl+Shift+\ 屬第 1 條（直通）。§4 的 Shift 表只認「修飾鍵恰為 SHIFT」；單按表只認「沒有修飾鍵、而且該鍵在目前排列不是注音鍵或聲調鍵」（2026-10-05 起）。
 - **第 1 條的輸出**：直通時回傳 `handled = 0`、`commit` 為空，其餘欄位是目前狀態的快照（狀態不變）。第 22 條直通同理。
@@ -258,7 +271,7 @@ int32_t shanjie_engine_set_punctuation(ShanjieEngine *engine, const char *table)
 - **固定詞**：選字後游標不動；固定詞範圍以音節為單位；插入發生在固定詞左邊界（`start == 游標`）時整段右移，發生在右邊界（`end == 游標`）時不動；刪除的音節落在 `[start, end)` 內就移除。
 - **自動送出**：第 40 個音節完成後（`syls.len() >= 40`）立刻送出整段並清空，`handled = 1`。
 - **解碼成本**：每次組字區變動都重算所有空白段（沒做快取）；重播測試 8,336 鍵的 p95 約 1.2 ms、最大約 9 ms（release，標準與倚天相近）。
-- **C ABI 的輸入檢查（`ffi.rs`）**：`kind` 不在 1–13 時回傳 2（同「輸入不合法」）；`modifiers` 的未定義位元（bit5 以上）不擋，照原樣交給引擎。輸出字串含 NUL 而無法建 `CString` 時回傳 4，engine 先丟棄組字再返回。
+- **C ABI 的輸入檢查（`ffi.rs`）**：`kind` 不在 1–15 時回傳 2（同「輸入不合法」）；`modifiers` 的未定義位元（bit5 以上）不擋，照原樣交給引擎。輸出字串含 NUL 而無法建 `CString` 時回傳 4，engine 先丟棄組字再返回。
 - **panic hook 是行程全域的**：靜音 hook 會取代宿主行程原有的 hook。S3b 的輸入法行程只有這個函式庫，所以沒有影響；呼叫匯出函式的測試都在子行程裡跑，以免影響同一個測試執行檔裡其他測試的 panic 訊息。
 
 ## 9. S2c 實作決定
