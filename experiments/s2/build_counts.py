@@ -302,7 +302,41 @@ def _init(trigram=False, expected=False, mw=False, extra_lexicons=()):
     _W["expected"] = expected
     _W["lex"] = ime.Lexicon(os.path.join(ROOT, "data", "lexicon", "mcbpmf-data.txt"),
                             overlay=[os.path.join(ROOT, "data", "lexicon", "overlay-add.tsv"), *extra_lexicons])   # --extra-lexicon：疊加層格式，接在 overlay-add.tsv 後面
+    _W["pack"] = set()
+    if extra_lexicons:
+        # model-v5 契約 §8（加法計數）：一般的詞與二元組照沒有詞包的詞庫算（lex0），詞包詞只「加上」自己的單詞與
+        # 含它的二元組（lex1）。直接用 lex1 會讓詞包裡的兩字片段（拉斯、萊恩）吃掉常用字對的計數，不開詞包時打不出來。
+        _W["lex0"] = ime.Lexicon(os.path.join(ROOT, "data", "lexicon", "mcbpmf-data.txt"),
+                                 overlay=[os.path.join(ROOT, "data", "lexicon", "overlay-add.tsv")])
+        _W["pack"] = set(_W["lex"].by_word) - set(_W["lex0"].by_word)
+        _W["pack_lens"] = sorted({len(w) for w in _W["pack"]})
     _W["conv"] = load_conv()
+
+
+def run_expected(run):
+    """--expected 的一段連續漢字：沒有詞包時就是 expected_counts(lex, run)。有詞包時是加法計數（契約 §8）：
+    lex0（不含詞包）的全部單詞與二元組，加上 lex1（含詞包）裡詞包詞的單詞、以及一端是詞包詞的二元組。
+    lex0 切不開的段落整段不計（和沒有詞包時相同）；段落裡沒有詞包詞的字串時不必算 lex1。"""
+    pack = _W["pack"]
+    if not pack:
+        return expected_counts(_W["lex"], run)
+    r0 = expected_counts(_W["lex0"], run)
+    if r0 is None:
+        return None
+    n = len(run)
+    if not any(run[i:i + L] in pack for i in range(n) for L in _W["pack_lens"] if i + L <= n):
+        return r0
+    r1 = expected_counts(_W["lex"], run)
+    if r1 is None:
+        return r0
+    uni, bi = r0
+    for w, e in r1[0].items():
+        if w in pack:
+            uni[w] += e
+    for k, e in r1[1].items():
+        if k[0] in pack or k[1] in pack:
+            bi[k] += e
+    return uni, bi
 
 
 def count_batch(texts):
@@ -321,7 +355,7 @@ def count_batch(texts):
                 if len(run) < 2:
                     continue
                 if _W["expected"]:
-                    r = expected_counts(lex, run)
+                    r = run_expected(run)
                     if r is None:
                         continue
                     sents += 1
