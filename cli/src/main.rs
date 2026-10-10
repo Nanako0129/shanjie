@@ -186,6 +186,11 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     check_lm_opts(set.as_deref(), dump.is_some(), packs, packs_dir.is_some())?;
     let pdir = packs_dir_checked(packs, packs_dir)?;
     let extra_overlay = extra_overlay_checked(extra_overlay)?;
+    // Summary-line marker `+xo:<sha8 of the file>`, only with the option, so a names-layer run never prints the baseline's label.
+    let xo = match &extra_overlay {
+        Some(p) => format!("+xo:{}", &sha256_hex(&fs::read(p).map_err(|e| format!("--extra-overlay: cannot read {} ({:?})", p.display(), e.kind()))?)[..8]),
+        None => String::new(),
+    };
     let profile_name = profile.ok_or("--profile is required")?;
     let prof = match profile_name.as_str() {
         "chat" => Profile::Chat,
@@ -274,7 +279,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
         f.write_all(format_rowstats(&rs).as_bytes()).map_err(|e| format!("cannot write rowstats ({:?})", e.kind()))?;
     }
     let sha = sha256_hex(firsts.join("\n").as_bytes());
-    println!("## {name}  lm-{profile_name}{}{}{}{}  {{'n': {}, 'top1': {top1}, 'oracle@64': {o64}, 'top1_sha256': '{sha}'}}", if ctx_mode { "+ctx" } else { "" }, if demote { "" } else { "-nodemote" }, if classes { "" } else { "-noclasses" }, if packs & PACK_ACG != 0 { "+acg" } else { "" }, rows.len());
+    println!("## {name}  lm-{profile_name}{}{}{}{}{xo}  {{'n': {}, 'top1': {top1}, 'oracle@64': {o64}, 'top1_sha256': '{sha}'}}", if ctx_mode { "+ctx" } else { "" }, if demote { "" } else { "-nodemote" }, if classes { "" } else { "-noclasses" }, if packs & PACK_ACG != 0 { "+acg" } else { "" }, rows.len());
     Ok(())
 }
 

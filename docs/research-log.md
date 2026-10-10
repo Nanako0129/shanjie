@@ -2625,7 +2625,7 @@ PR #90 的審查意見逐項處理。
 - **name-suggestion-index（NSI）** https://github.com/osmlab/name-suggestion-index ：OpenStreetMap 社群給編輯器用的品牌名正規化清單，`data/brands/<key>/<value>.json`。LICENSE.md 是 BSD-3-Clause，整個 repo 含資料都適用（用 gh api 讀過）：可商用、改作、再散布，保留版權聲明與免責聲明、不得用作者名義背書，沒有 share-alike。欄位有 `locationSet`、`name`、`name:zh-Hant`、`brand:wikidata`。抽 5 類的台灣品牌數（`locationSet` 含 tw）：cafe 48／507、restaurant 53／818、fast_food 33／1,011、convenience 4／739、beverages 0／28（例如 50嵐、可不可熟成紅茶、八方雲集、三商巧福、全家、蝦皮店到店）。`name` 有時是日文原名或中英混寫，要優先取 `name:zh-Hant`。
 - **Wikidata 與中文維基**：Wikidata 結構化資料 CC0（https://www.wikidata.org/wiki/Wikidata:Licensing ）；中文維基 CC BY-SA 4.0。小查詢：P17＝臺灣的 business（含子類）20,340 項；臺灣的 university 157 項。「酷澎」是 Q12620655，只有 `zh` 標籤（Coupang／库邦／酷澎），沒有 zh-tw，中文維基標題是「酷澎」→ 要取 zh-tw 變體的顯示標題，不用 `zh` 標籤。分類名稱用「台灣」：`Category:台灣手搖茶飲品牌` 24 頁、`Category:台灣餐飲公司` 11 頁＋5 子分類、`Category:台灣公司` 14 頁＋18 子分類；用「臺灣」查不到這幾個。
 - **教育部統計處各級學校名錄**：大專校院 https://data.gov.tw/dataset/6091 （`u1_new.csv` 274,044 bytes，HEAD 實測）、一般高級中等學校 6089、國中 6088（`j1_new.csv` 1,208,247 bytes）、國小 6087、軍警 28589；每學年更新，UTF-8 CSV／JSON，只有學校全名。
-- **政府資料開放授權條款－第 1 版**（https://data.gov.tw/license ）：第 2.1 條永久、全球、免費，可重製、散布、改作、商用；第 3.2 條要照附件格式標示出處，否則授權自始無效；第 4.2 條與 CC BY 4.0 相容（CC BY 可單向併入 CC BY-SA 4.0）；第 2.4 條不含商標權。附件建議的標示文字：「此開放資料依政府資料開放授權條款 (Open Government Data License) 進行公眾釋出，使用者於遵守本條款各項規定之前提下，得利用之。」
+- **政府資料開放授權條款－第 1 版**（https://data.gov.tw/license ）：第 2.1 條永久、全球、免費，可重製、散布、改作、商用；第 3.2 條要照附件格式標示出處，否則授權自始無效；第 4.2 條與 CC BY 4.0 相容（CC BY 可單向併入 CC BY-SA 4.0）。附件建議的標示文字：「此開放資料依政府資料開放授權條款 (Open Government Data License) 進行公眾釋出，使用者於遵守本條款各項規定之前提下，得利用之。」
 - **不用**：
   - 財政部全國營業（稅籍）登記（資料集 9400，ZIP 66,357,706 bytes，每日）：營業人名稱是法定全名，含獨資商號，名稱可能就是個人姓名；只適合當「還在營業」的佐證。
   - 經濟部公司登記（22197、13861、22198）：只有依統一編號逐筆查詢的 API，含負責人姓名。

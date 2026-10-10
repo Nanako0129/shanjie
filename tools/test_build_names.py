@@ -290,12 +290,12 @@ class Build(unittest.TestCase):
             f.write(text)
         return p
 
-    def build(self, have=(), readings_tsv="", collisions="", readings=None, decode=None, manual=None, api=None, **kw):
+    def build(self, have=(), readings_tsv="", collisions="", readings=None, decode=None, manual=None, api=None, decode_acg=None, acg_add=None, **kw):
         inputs = [manual or self.manual, self.write("readings.tsv", readings_tsv), self.write("collisions.tsv", collisions)]
         before = [get(p) for p in inputs]
         files, manifest, col, unread, ldrop, check = B.build(
             api or FakeApi(), COMMIT, manual_tsv=inputs[0], readings_tsv=inputs[1], collisions_tsv=inputs[2],
-            have=set(have), decode=decode or identity_decode(), readings=readings or fake_readings(), nsi_categories=[("amenity", "cafe"), ("amenity", "restaurant"), ("amenity", "fast_food")],
+            have=have if isinstance(have, set) else set(have), decode=decode or identity_decode(), decode_acg=decode_acg or decode or identity_decode(), acg_add=acg_add or self.write("no-acg-add.tsv", ""), readings=readings or fake_readings(), nsi_categories=[("amenity", "cafe"), ("amenity", "restaurant"), ("amenity", "fast_food")],
             wiki_categories=["Category:台灣手搖茶飲品牌", "Category:不存在的分類"], moe_files={"u1_new.csv": "u1", "high.csv": "high"}, **kw)
         self.assertEqual([get(p) for p in inputs], before, "the build only reads names-manual.tsv, names-readings.tsv and names-collisions.tsv")
         self.files, self.manifest, self.col, self.unread, self.ldrop, self.check = files, manifest, col, unread, ldrop, check
@@ -377,15 +377,21 @@ class Build(unittest.TestCase):
         B.check_disjoint(["酷澎"], B.known_words(d, acg))
 
     def test_end_of_build_check_stops_when_the_dedupe_is_missing(self):
-        # mutation guard: if build() let a lexicon word through (say its dedupe were dropped), the intersection check must still stop the run
-        with tiny_simplified(), mock.patch.object(B, "check_disjoint", wraps=B.check_disjoint) as chk:
+        # mutation: the dedupe is removed (the set claims to hold nothing when asked by `in` / `&`, but iterates honestly, which is what
+        # the end-of-build check reads); the build must then abort instead of writing a word that is already in the lexicon
+        class Blind(set):
+            __contains__ = lambda self, w: False
+            __and__ = lambda self, o: set()
+        with tiny_simplified():
             self.build(have={"貢茶"})
-            self.assertEqual(chk.call_count, 1)
+            self.assertNotIn("貢茶", self.words)
+            with self.assertRaises(SystemExit):
+                self.build(have=Blind({"貢茶"}))
         with self.assertRaises(SystemExit):
             B.check_disjoint(["貢茶", "麥味登"], {"貢茶"})
 
     def test_committed_names_add_shares_no_word_with_the_four_files(self):
-        B.check_committed()          # the files in the repo; names-add.tsv absent or empty passes
+        B.check_committed()          # the files in the repo
 
     def test_committed_check_fails_when_acg_add_gains_a_names_word(self):
         d = tempfile.mkdtemp()
@@ -468,6 +474,42 @@ class Build(unittest.TestCase):
         self.assertEqual([x[1] for x in self.ldrop], ["貢茶"])
         self.assertEqual(self.manifest["dropped"]["type_c_dropped"], 1)
 
+    def pack_case(self, collisions=""):
+        """旗農 (names) and 奇儂 (ACG pack) share a reading and a score; the pack is on by default, so the names word must not silently take first place."""
+        same = {"貢茶": ["ㄍㄨㄥˋ", "ㄔㄚˊ"]}
+        pack = self.write("acg-add.tsv", "ㄍㄨㄥˋ-ㄔㄚˊ\t供茶\t-7.17149945\tacg\n")
+        pk = lambda path: {l.split("\t")[0]: (l.split("\t")[1], float(l.split("\t")[2])) for l in open(path, encoding="utf-8") if l.strip()}
+
+        def dec(pairs, profile, packs_dir=None):       # the pack is always on here; the names layer (packs_dir) adds rows; the higher score wins, a tie goes to the names word
+            best = dict(pk(pack))
+            if packs_dir:
+                for k, (w, sc) in pk(os.path.join(packs_dir, "acg-add.tsv")).items():
+                    if k not in best or sc >= best[k][1]:
+                        best[k] = (w, sc)
+            return [best[("-".join(s))][0] if "-".join(s) in best else w for w, s in pairs]
+        with tiny_simplified():
+            self.build(readings=fake_readings(same), decode=lambda p, prof, d=None: [w for w, _ in p], decode_acg=dec, acg_add=pack, collisions=collisions)
+
+    def test_a_name_that_displaces_an_acg_pack_word_is_an_unresolved_a_row(self):
+        self.pack_case()
+        self.assertEqual(list(self.col), ["ㄍㄨㄥˋ ㄔㄚˊ"])
+        self.assertEqual({(w, c, o, n) for w, c, _, o, n in self.col["ㄍㄨㄥˋ ㄔㄚˊ"]}, {("貢茶", "a", "供茶", "貢茶")})
+        self.assertIn("貢茶", self.words, "reported for the maintainer; the build neither drops it nor lets the pack word be displaced silently")
+        self.assertIn("ㄍㄨㄥˋ ㄔㄚˊ\t貢茶\ta\t", B.collisions_text(self.col, self.ldrop))
+
+    def test_names_collisions_tsv_resolves_a_name_against_a_pack_word(self):
+        self.pack_case("ㄍㄨㄥˋ ㄔㄚˊ\t供茶\t貢茶\t使用者決定\n")        # keep the pack word, drop the name
+        self.assertEqual(self.col, {})
+        self.assertNotIn("貢茶", self.words)
+        self.pack_case("ㄍㄨㄥˋ ㄔㄚˊ\t供茶\t+貢茶\t使用者決定\n")       # keep both, the pack word first: the name is scored one TIE below it
+        self.assertEqual(self.col, {})
+        self.assertIn("貢茶", self.words)
+        score = [float(l.split("\t")[2]) for l in self.files["names-add.tsv"].splitlines() if l.split("\t")[1] == "貢茶"]
+        self.assertEqual(score, [round(-7.17149945 - B.bap.TIE, 8)])
+        self.pack_case("ㄍㄨㄥˋ ㄔㄚˊ\t貢茶\t+供茶\t使用者決定\n")       # keep both, the name first: it may take first place
+        self.assertEqual(self.col, {})
+        self.assertIn("貢茶", self.words)
+
     def test_two_builds_from_the_same_inputs_are_byte_identical(self):
         col = "# 處置\nㄍㄨㄥˋ ㄔㄚˊ\t貢茶\t五十嵐\t理由\n"
         with tiny_simplified():
@@ -494,7 +536,40 @@ class Build(unittest.TestCase):
         self.assertEqual(m["unresolved_collision_readings"], 0)
 
 
+class TwTitle(unittest.TestCase):
+    def test_only_a_dict_missingtitle_means_no_article_anything_else_is_raised_as_it_was(self):
+        class Raises:
+            def __init__(self, arg):
+                self.arg = arg
+
+            def wiki(self, **p):
+                raise RuntimeError(self.arg)
+        self.assertIsNone(B.tw_title(Raises({"code": "missingtitle"}), "x", {}))
+        with self.assertRaises(RuntimeError) as cm:
+            B.tw_title(Raises("maxlag did not clear"), "x", {})
+        self.assertEqual(cm.exception.args, ("maxlag did not clear",))
+        with self.assertRaises(RuntimeError):
+            B.tw_title(Raises({"code": "ratelimited"}), "x", {})
+
+
 class RealDecode(unittest.TestCase):
+    def test_decode_opens_the_acg_pack_only_when_asked(self):
+        """The command line the real decode builds (the CLI itself is run by the next test)."""
+        cmds = []
+
+        def run(cmd, **kw):
+            cmds.append(cmd)
+            with open(cmd[cmd.index("--dump") + 1], "w", encoding="utf-8") as f:
+                f.write("1\t1\t酷澎\t-1.0\n")
+        with mock.patch.object(B.subprocess, "run", run), mock.patch.object(B.bap, "eval_bin", return_value="eval"):
+            B.decode([("酷澎", ["ㄎㄨˋ", "ㄆㄥˊ"])], "chat")
+            B.decode_acg([("酷澎", ["ㄎㄨˋ", "ㄆㄥˊ"])], "chat", "/x")
+        self.assertNotIn("--packs", cmds[0])
+        self.assertIn("--packs", cmds[1])
+        self.assertEqual(cmds[1][cmds[1].index("--packs") + 1], "acg")
+        self.assertIn("--extra-overlay", cmds[1])
+
+
     def test_decode_uses_the_extra_overlay_option(self):
         """The real CLI: without the names layer 酷澎 loses to 酷朋; with a rows file passed as --extra-overlay it wins (needs data/lm and cargo)."""
         d = tempfile.mkdtemp()
