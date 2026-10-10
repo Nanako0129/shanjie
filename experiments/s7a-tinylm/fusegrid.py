@@ -20,6 +20,9 @@ ALPHAS = [0.1, 0.2, 0.3, 0.5, 0.7, 1, 1.5, 2]
 TAUS = [0.5, 1, 2, 3, 5, math.inf]       # inf = no threshold; listed ascending because ties go to the smaller tau
 TUNING = ("cvtune", "wikitune")
 CTX_REQUIRED = ("user-reported", "discordtune")   # sets that must show rows whose LL changes with context (section 3 item 3)
+GUARDS = ("cvtune", "wikitune", "dev302", "typing76", "user-reported")   # section 4: every one, in both settings, plus discordtune chat
+SETTINGS = ("chat", "formal")
+REQUIRED_CELLS = [(st, g) for st in SETTINGS for g in GUARDS] + [("chat", "discordtune")]
 LL_CHANGED = 1e-6                                  # a candidate's LL counts as changed by context above this (log10)
 
 
@@ -87,10 +90,11 @@ def load_scores(path):
 def decision(cells):
     """Section 4 for one model. cells[(setting, set)] = dict(fixed, broken, p, ci_lo, dcer, n) of the frozen-main fusion vs the n-gram first.
     Returns [(criterion, passed)]; the last entry is the overall verdict."""
-    d = cells.get(("chat", "discordtune"))
-    out = []
-    if d is None:
-        return [("discordtune chat present", False)]
+    missing = [c for c in REQUIRED_CELLS if c not in cells]
+    out = [(f"every guard set in both settings plus discordtune chat present (missing: {missing})", not missing)]
+    if ("chat", "discordtune") not in cells:
+        return out + [("PASS (all above)", False)]
+    d = cells[("chat", "discordtune")]
     delta = d["fixed"] - d["broken"]
     out += [(f"delta top1 >= +1.0 pt ({delta} rows of {d['n']})", 100 * delta / d["n"] >= 1.0),
             (f"exact McNemar p < 0.05 (p = {d['p']:.4f})", d["p"] < 0.05),
@@ -166,8 +170,11 @@ def main(argv=None):
                 p = os.path.join(a.scores, f"{model}.{setting}.{s}.jsonl")
                 if os.path.isfile(p):
                     sets[s] = load_scores(p)
-                else:
-                    print(f"SKIP {model} {setting} {s}: no file {p}")
+                elif (setting, s) in REQUIRED_CELLS:
+                    print(f"MISSING {model} {setting} {s}: no file {p}")
+            for s in CTX_REQUIRED:
+                if s in a.sets and s not in sets and (setting == "chat" or s != "discordtune"):
+                    stop.append(f"context not checked, no scores: {model} {setting} {s}")
             if not all(t in sets for t in TUNING):
                 sys.exit(f"fusegrid: tuning sets {TUNING} missing for {model} {setting}")
             c, gain, st = run_setting(model, setting, sets, a.out)
@@ -175,8 +182,11 @@ def main(argv=None):
             if setting == "chat":
                 chat_gain.append(gain)
         print(f"\n### section 4, {model}")
-        for crit, ok in decision(cells):
+        dec = decision(cells)
+        for crit, ok in dec:
             print(f"- {'PASS' if ok else 'FAIL'}: {crit}")
+        if not dec[0][1]:
+            stop.append(f"section 4 cannot be decided for {model}: {dec[0][0]}")
     if chat_gain and all(g < 0.5 for g in chat_gain):
         print(f"STOP CONDITION (section 4): every model gains < +0.5 pt on {'+'.join(TUNING)} in the chat setting ({chat_gain})")
         stop.append("gain below +0.5 pt")

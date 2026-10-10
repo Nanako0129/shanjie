@@ -4,6 +4,7 @@ Run: /opt/homebrew/bin/python3 -m unittest discover -s experiments/s7a-tinylm -p
 import json
 import math
 import os
+import shutil
 import tempfile
 import unittest
 
@@ -163,6 +164,10 @@ class TestNumpyForward(unittest.TestCase):
         cls.params = tinylm.random_params(cls.chars, 2, 16, 4, seed=3)
         tinylm.save_params(cls.path, cls.params, cls.chars, 2, 4)
         cls.m64 = NumpyLM(cls.path, dtype=np.float64)
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tmp, ignore_errors=True)
 
     def test_matches_loop_reference(self):
         # the saved file is float32; compare in float64 against the reference built from the same float32 values

@@ -23,7 +23,7 @@ import prep
 from torch_model import CONFIGS, GPT, export_npz
 
 PEAK_LR = 1e-3
-WARMUP = 200          # linear warm-up steps before the cosine decay (to 0); not specified by the contract, needed for lr 1e-3 at d 384
+WARMUP = 200          # linear warm-up steps before the cosine decay (to 0). The contract names AdamW + cosine only; this warm-up is a deviation chosen without a run showing it is needed (not measured)
 WEIGHT_DECAY = 0.1    # on matrices only
 LOG_EVERY = 100
 
