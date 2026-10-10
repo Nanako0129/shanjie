@@ -29,7 +29,7 @@
 <style>
   :root {
     --paper: #F6F1E7; --paper-2: #EFE8DA; --ink: #1F1D1A; --ink-2: #5A544C; --line: #D9CFBD;
-    --seal: #B83A2E; --seal-ink: #F6F1E7; --ok: #3F6B4F; --wip: #9A6A1E;
+    --seal: #B83A2E; --seal-ink: #F6F1E7; --ok: #3F6B4F; --wip: #8A5C14;
     --serif: "Noto Serif TC", "Songti TC", "PMingLiU", serif;
     --sans: "Noto Sans TC", -apple-system, "PingFang TC", "Heiti TC", sans-serif;
   }
@@ -184,24 +184,24 @@
     <div class="layer"><div><h3>本機重排</h3><p>小型語言模型看你前面寫的內容，從候選中挑出最合理的一句；在背景執行，不拖慢打字。</p><div class="when">停頓或送出前・本機</div></div></div>
     <div class="layer"><div><h3>雲端校正（選用）</h3><p>打完按一下快速鍵，請雲端模型再看一次。預設關閉；雲端只能回傳候選的編號，不能自己寫字。</p><div class="when">你按下快速鍵時・雲端</div></div></div>
   </div>
-  <p class="note">目前只有第 1 層在輸入法裡；第 2、3 層還在研究，沒有出貨，見下面的路線圖。</p>
+  <p class="note">目前只有第 1 層在輸入法裡；第 2、3 層還沒做出來，排在路線圖的「未排定」；本機重排的研究結論是暫不進輸入法。</p>
 </section>
 
 <section>
   <h2>目前的實測</h2>
-  <p class="sub">所有數字都來自專案的評測集，句子由專案自寫並以 CC0 釋出。</p>
+  <p class="sub">所有數字都來自專案的評測集；各評測集的來源與授權見「開源與授權」。</p>
   <div class="stats">
     <div class="stat"><b>99.6%</b><span>正解出現在前 64 名候選的比例（保留集 227 句；開發集 302 句是 99.3%）</span></div>
     <div class="stat"><b>92.7%</b><span>目前最準的判斷器從候選中挑對整句的比例（開發集，雲端）</span></div>
     <div class="stat"><b>79.3%</b><span>輸入法實際送出整句的正確率（保留集 227 句，聊天設定，model-v4 時量的；model-v5 在保留集每一句都相同）</span></div>
-    <div class="stat"><b>2.5 ms</b><span>每個按鍵的處理時間（p95）：76 句打字測驗共 2,483 個按鍵，含語言模型、即時預測、教過的選字與 5 萬筆記錄（M5 Mac，低負載，兩次量測 2.2–2.5 ms）</span></div>
+    <div class="stat"><b>2.5 ms</b><span>每個按鍵的處理時間（p95）：76 句打字測驗共 2,483 個按鍵，含語言模型、即時預測、教過的選字與 5 萬筆記錄（M5 Mac，低負載，兩次量測 2.2–2.5 ms；model-v4、沒有載入動漫詞包，還沒有用 v0.4.0 的設定重量）</span></div>
   </div>
   <details>
     <summary>這些數字怎麼量的</summary>
     <p>評測分成開發集與保留集。開發集用來調整；保留集由另一個流程撰寫、開發過程中不看內容，只在每個階段結束時量一次，用來確認進步不是因為「背了題目」。前 64 名含正解的比例用寬鬆對照：「她／他」「臺／台」這類寫法視為相同；保留集的 99.6% 是用 model-v2 量的，之後沒有重新量；只有詞庫、還沒有語言模型時，保留集是 97.8%（完全相符）。</p>
     <p>判斷器比較了本機模型與多家雲端服務的三十多組設定；所有判斷器都卡在同一個上限：正解根本不在候選裡的句子，誰也救不回來。所以目前的重點是先把正解放進候選。</p>
     <p>輸入法實際送出整句的正確率，保留集上聊天設定 79.3%、書面設定 81.1%，是 model-v4 加詞類回退的數字；v0.4.0 的 model-v5 在保留集上兩種設定每一句都和它相同（v0.4.0 發佈後的 2026-10-10 量的）。這是只用詞庫與語言模型、還沒有語意重排的成績。</p>
-    <p>每個按鍵的處理時間是 76 句打字測驗共 2,483 個按鍵的 p95，2026-10-10 在 M5 Mac、低負載下量了兩次：教過選字並放 5 萬筆記錄是 2.2–2.5 毫秒，記憶是空的是 2.3–2.6 毫秒。</p>
+    <p>每個按鍵的處理時間是 76 句打字測驗共 2,483 個按鍵的 p95，2026-10-10 在 M5 Mac、低負載下量了兩次：教過選字並放 5 萬筆記錄是 2.2–2.5 毫秒，記憶是空的是 2.3–2.6 毫秒。這是在可省略韻母那一片（PR #98）量的，用的是 model-v4，也沒有載入動漫詞包（計時測試只在設定 ACG_PACK 時才載入詞包）；v0.4.0 的設定（model-v5、詞包開）還沒有重新量。</p>
   </details>
 </section>
 
@@ -285,7 +285,7 @@
         <li class="done"><span class="mark"></span><span class="sr-only">完成：</span><h3>設定視窗</h3><p>選單的「善解設定…」打開一個視窗，選單裡的選項都在裡面，還可以調候選窗玻璃的深淺，下面即時預覽。</p></li>
         <li class="done"><span class="mark"></span><span class="sr-only">完成：</span><h3>動漫與遊戲詞（第一片）</h3><p>從中文維基百科收錄約 1.5 萬個作品名與角色名，選單可以關掉。同音的名字由維護者逐一決定先後。</p></li>
         <li class="done"><span class="mark"></span><span class="sr-only">完成：</span><h3>動漫與遊戲詞（第二片）</h3><p>加進 2020 年以後的作品與角色，共約 3 萬詞；選單下面顯示資料日期。</p></li>
-        <li class="done"><span class="mark"></span><span class="sr-only">完成：</span><h3>新的語言模型（model-v5）</h3><p>詞包裡的名字有了語料次數，開著詞包時作品名、角色名在評測裡多對幾句；開發集、打字測驗、錯字回報在聊天與書面兩種設定下每一句都和上一版相同；約 1.3 萬句的調參集有 4 句變差、0 句變好；保留集兩種設定也每一句相同（v0.4.0 發佈後的 2026-10-10 量的）。語料裡很少出現的名字（例如「宿儺」）仍然打不出來，另外處理。</p></li>
+        <li class="done"><span class="mark"></span><span class="sr-only">完成：</span><h3>新的語言模型（model-v5）</h3><p>詞包裡的名字有了語料次數，開著詞包時作品名、角色名在評測裡多對幾句；開發集、打字測驗、錯字回報在聊天與書面兩種設定下每一句都和上一版相同；約 6,600 句的調參集（聊天、書面各量一次）合計 4 處變差、0 處變好；保留集兩種設定也每一句相同（v0.4.0 發佈後的 2026-10-10 量的）。語料裡很少出現的名字（例如「宿儺」）仍然打不出來，見「之後」的「語料很少出現的名字」。</p></li>
         <li class="done"><span class="mark"></span><span class="sr-only">完成：</span><h3>候選窗直排</h3><p>設定視窗的「候選窗方向」可選直排，候選字和即時預測列都排成一欄；按鍵照蘋果注音的直排。預設仍是橫排。</p></li>
         <li class="research done"><span class="mark"></span><span class="sr-only">完成：</span><h3><span class="kind">研究</span>詞包的名字為什麼打不出來</h3><p>逐一檢查詞包的每個詞。<b>結論：</b>輸掉的多半輸給常用單字的組合，原因是詞包詞沒有進到語料統計，只有固定的分數；所以重建語言模型，而不是一個一個調分數。</p></li>
       </ul>
@@ -295,9 +295,9 @@
       <summary><span class="ver">v0.4.1</span><span class="st-title">回報的修正</span><span class="tag wip">進行中</span>
         <span class="meta">v0.4.0 之後</span></summary>
       <ul class="items">
-        <li class="wip"><span class="mark"></span><span class="sr-only">進行中：</span><h3>候選窗在瀏覽器裡的位置</h3><p>使用者回報：網頁版 Messenger 打第一個字時預測列跑到中間，選完字才回到字的下方；Aside 裡候選列跑到左上角。先在 Chrome 重現，再決定修法。</p></li>
-        <li><span class="mark"></span><span class="sr-only">規劃中：</span><h3>補上缺的名字與讀音</h3><p>詞庫與詞包都沒有「獄門疆」，補進來；「虎杖」的讀音資料少了三聲，一併修正。「芙莉蓮」在詞庫裡，單獨打得出來，但在有些句子裡輸給「福利聯」，另外處理。</p></li>
-        <li><span class="mark"></span><span class="sr-only">規劃中：</span><h3>動漫詞包：含間隔號的名字</h3><p>詞包建置時把含間隔號的名字整個略過，像「洛琪希·米格路迪亞」這類名字完全沒收進來。改成把名和姓拆開收，原本維護者保留的名字維持不變。</p></li>
+        <li><span class="mark"></span><span class="sr-only">規劃中：</span><h3>候選窗在瀏覽器裡的位置</h3><p>使用者回報：網頁版 Messenger 打第一個字時預測列跑到中間，選完字才回到字的下方；Aside 裡候選列跑到左上角。還沒有重現；先在 Chrome 重現，再決定修法。</p></li>
+        <li><span class="mark"></span><span class="sr-only">規劃中：</span><h3>補上缺的名字與讀音</h3><p>詞庫與詞包都沒有「獄門疆」，補進來；「虎杖」的讀音資料少了三聲，一併修正。「芙莉蓮」在詞庫裡，單獨打得出來，但在有些句子裡輸給「福利聯」，這一項在 v0.4.1 不修，另外調查。</p></li>
+        <li class="wip"><span class="mark"></span><span class="sr-only">進行中：</span><h3>動漫詞包：含間隔號的名字</h3><p>契約審查中（分支 feat/acg-a3）。詞包建置時把含間隔號的名字整個略過，像「洛琪希·米格路迪亞」這類名字完全沒收進來。改成把名和姓拆開收，原本維護者保留的名字維持不變。</p></li>
       </ul>
     </details>
 
@@ -307,10 +307,11 @@
       <ul class="items">
         <li><span class="mark"></span><span class="sr-only">規劃中：</span><h3>常見專有名詞</h3><p>公司、學校、飲料店、餐廳、產品這類常見的專有名詞（例如「酷澎」）納入一般詞庫；先查來源與授權再寫契約，版本未定。</p></li>
         <li class="wip"><span class="mark"></span><span class="sr-only">進行中：</span><h3>從改選記住新詞組</h3><p>改選後送出的片段如果不是詞庫裡的詞（例如「版控」），記成你的詞，下次直接打得出來。</p></li>
-        <li class="wip"><span class="mark"></span><span class="sr-only">進行中：</span><h3>預測可省略韻母</h3><p>每個字只打第一個注音也能找到詞。一次縮寫一個詞的版本做完了，但還不能整句縮寫，v0.4.0 先不放；做到整句縮寫再出。</p></li>
+        <li class="wip"><span class="mark"></span><span class="sr-only">進行中：</span><h3>預測可省略韻母</h3><p>每個字只打第一個注音也能找到詞。一次縮寫一個詞的版本做完了，但還不能整句縮寫，v0.4.0 先不放；做到整句縮寫再出。另外有使用者回報打了某些注音之後按鍵好像卡住；從設計推論，是有兩個以上縮寫單位時空白鍵與聲調鍵會被吃掉，沒有重現。</p></li>
         <li class="wip"><span class="mark"></span><span class="sr-only">進行中：</span><h3>App 沙盒</h3><p>輸入法在 macOS 的 App 沙盒裡執行，只拿到需要的權限。已經有實作分支，目標是 v0.5.0。</p></li>
         <li class="research wip"><span class="mark"></span><span class="sr-only">進行中：</span><h3><span class="kind">研究</span>Kneser–Ney 平滑</h3><p>回退時看一個詞接在幾種不同的詞後面，而不是只看它出現幾次，減少「常用單字組合贏過整詞」的錯。先離線量測，有效才做進輸入法。</p></li>
         <li class="research"><span class="mark"></span><span class="sr-only">規劃中：</span><h3><span class="kind">研究</span>在／再、作／做</h3><p>回報裡常見的一類同音錯，先量現在錯在哪裡再決定做法。</p></li>
+        <li><span class="mark"></span><span class="sr-only">規劃中：</span><h3>語料很少出現的名字</h3><p>像「宿儺」這種語料裡幾乎沒出現的名字，v0.4.0 的新模型也沒有救起來；需要另外寫契約處理。</p></li>
         <li class="research"><span class="mark"></span><span class="sr-only">規劃中：</span><h3><span class="kind">研究</span>口語與財經用語</h3><p>語料偏百科，「零股」「月繳」這類日常用語太少；找授權清楚的口語來源。</p></li>
         <li class="research"><span class="mark"></span><span class="sr-only">規劃中：</span><h3><span class="kind">研究</span>貝氏選字記憶</h3><p>把改選記錄當成證據、以語言模型為先驗，取代固定的加分。</p></li>
         <li><span class="mark"></span><span class="sr-only">規劃中：</span><h3>更多新詞</h3><p>從語料自動找出詞庫沒收的新詞（例如口語縮寫）；也能手動加詞。</p></li>
@@ -359,11 +360,18 @@
       <li>程式碼：Apache-2.0。</li>
       <li>基礎詞庫：小麥注音（MIT；片語源自 libtabe，BSD）。</li>
       <li>補充詞表：由維基百科與維基詞典的條目標題產生，CC BY-SA 4.0，署名維基百科與維基詞典貢獻者。</li>
-      <li>動漫與遊戲詞包：約 3 萬個作品名與角色名，來自中文維基百科的公共轉換組與作品條目的人物，CC BY-SA 4.0，署名維基百科貢獻者。語言模型斷詞用的詞包詞另有 Wikidata（CC0）的來源，作品清單也取自 Wikidata。</li>
+      <li>動漫與遊戲詞包：約 3 萬個作品名與角色名，隨 App 內附，選單可關。來源是中文維基百科的公共轉換組、動畫作品條目的標題與條目裡的登場人物，另有維護者手動加的詞（維護者自己的條目是 CC0，34 個 BanG Dream! 成員名字取自維基百科）；整份詞包以 CC BY-SA 4.0 散布，署名維基百科貢獻者。作品清單取自 Wikidata（CC0）。</li>
+      <li>降權表（<code>demote.tsv</code>）：專案自寫，隨 App 內附，CC BY-SA 4.0，不含第三方資料。</li>
       <li>標準讀音變體：依教育部《國語辭典簡編本》〈單一音讀〉與《國語一字多音審訂表》的規則，從小麥注音詞庫產生，MIT。規則是事實，檔案不含教育部資料。</li>
-      <li>語言模型（詞的兩兩搭配頻率）與詞類表：由維基百科 2026-10-01 的 20 萬篇條目、Mozilla Common Voice 繁中（台灣）句子、Tatoeba 中文句子，以及 gpt-oss-120b 產生的台灣口語合成句計算，CC BY-SA 4.0，署名維基百科與 Tatoeba 貢獻者。不含任何私人對話。發佈的模型另含少量用來辨識來源的指紋條目。</li>
+      <li>語言模型（詞的兩兩搭配頻率）與詞類表：由維基百科 2026-10-01 的 20 萬篇條目、Mozilla Common Voice 繁中（台灣）句子（CC0）、Tatoeba 中文句子（CC BY 2.0 FR），以及 gpt-oss-120b 產生的台灣口語合成句計算，CC BY-SA 4.0，署名維基百科與 Tatoeba 貢獻者。斷詞用的詞包詞來自中文維基百科與 Wikidata。不含任何私人對話。發佈的模型另含少量用來辨識來源的指紋條目。</li>
       <li>目前沒有使用任何神經網路模型。</li>
-      <li>評測句：專案自寫，CC0。</li>
+      <li>評測句（不隨 App 內附，只用來量測）：
+        <ul>
+          <li>專案自寫或使用者回報的句子（開發集、保留集、學習測試、陷阱句、日常句等）：CC0。</li>
+          <li>動漫與遊戲評測（<code>eval/dev/acg/</code>）：取自 Wikidata 的標籤，CC0；其中 2026 年作品那一份（<code>recent.txt</code>）取自中文維基百科條目，CC BY-SA 4.0。</li>
+          <li>教育部《重編國語辭典修訂本》的例句抽樣（<code>eval/sets/moedict.txt</code>）與「也作／亦作」詞對（<code>eval/variants.tsv</code>）：CC BY-ND 3.0 TW，只用於評測，不用來建詞庫或改作。</li>
+        </ul>
+      </li>
     </ul>
     <p>原始碼：<a href="https://github.com/Nanako0129/shanjie">github.com/Nanako0129/shanjie</a></p>
   </details>
