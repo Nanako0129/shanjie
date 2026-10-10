@@ -147,6 +147,15 @@ class TestConstructionCheck(unittest.TestCase):
         self.assertFalse(buildcheck.construction_check(raws, n_false + 1)["ok"])
         self.assertFalse(buildcheck.construction_check(raws, n_false - 1)["ok"])
         self.assertTrue(buildcheck.construction_check(raws, n_false)["ok"])
+        self.assertIn("NOT CHECKED", buildcheck.construction_check(raws, n_false)["wiki_articles_used"])    # not recorded: said, not claimed
+
+    def test_check_fails_when_prep_used_too_many_articles(self):
+        raws = [f"line {i}" for i in range(50)]
+        n_false = sum(not build_tune.is_tune(r) for r in raws)
+        self.assertTrue(buildcheck.construction_check(raws, n_false, articles=buildcheck.WIKI_TUNE_FIRST_INDEX)["ok"])
+        rep = buildcheck.construction_check(raws, n_false, articles=buildcheck.WIKI_TUNE_FIRST_INDEX + 1)
+        self.assertFalse(rep["ok"])
+        self.assertIn("wikitune starts", rep["reasons"][0])
 
     def test_substring_ratio(self):
         with tempfile.TemporaryDirectory() as td:

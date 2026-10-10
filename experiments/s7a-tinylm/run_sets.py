@@ -8,6 +8,7 @@
          for cvtune and wikitune (chat setting only: the gold perplexity does not depend on the setting)
 """
 import argparse
+import hashlib
 import os
 import re
 import subprocess
@@ -38,7 +39,20 @@ def rows_args(name, a):
     sys.exit(f"run_sets: unknown set {name}")
 
 
+def check_model(lm):
+    """The model lm_eval will load and the classes.sjc beside it must be the pinned ones (data/*.sha256); score.py's --expect-top1
+    comes from the same lm_eval run, so it cannot notice a wrong model."""
+    lm = lm or os.path.join(ROOT, "data", "lm", "bigram.sjlm")
+    for f, pin in ((lm, "bigram.sjlm.sha256"), (os.path.join(os.path.dirname(lm), "classes.sjc"), "classes.sjc.sha256")):
+        if not os.path.isfile(f):
+            sys.exit(f"run_sets: {f} not found")
+        want = open(os.path.join(ROOT, "data", pin)).read().split()[0]
+        if hashlib.sha256(open(f, "rb").read()).hexdigest() != want:
+            sys.exit(f"run_sets: SHA-256 of {f} does not match data/{pin}")
+
+
 def cmd_dumps(a):
+    check_model(a.lm)
     os.makedirs(os.path.join(a.work, "dumps"), exist_ok=True)
     for name in a.sets:
         for setting in SETTINGS:
@@ -49,6 +63,8 @@ def cmd_dumps(a):
             if r.returncode:
                 sys.exit(f"run_sets: lm_eval failed for {name} {setting}:\n{r.stderr[-2000:]}")
             m = re.search(r"'n': (\d+), 'top1': (\d+)", r.stdout)
+            if not m:
+                sys.exit(f"run_sets: no summary line ('n': .., 'top1': ..) in lm_eval output for {name} {setting}:\n{r.stdout[-500:]}")
             open(os.path.join(a.work, "dumps", f"{name}.{setting}.top1"), "w").write(m.group(2))
             print(r.stdout.strip(), flush=True)
 

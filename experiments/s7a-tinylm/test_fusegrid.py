@@ -188,7 +188,7 @@ class TestScoreMain(unittest.TestCase):
 
 
 class TestDriver(unittest.TestCase):
-    def make_scores(self, td, wired=True):
+    def make_scores(self, td, wired=True, skip=()):
         rng = np.random.default_rng(0)
 
         def rows(n, seed, ctx):
@@ -202,18 +202,24 @@ class TestDriver(unittest.TestCase):
                 ok = [int(j == gold) for j in range(3)]
                 out.append(rec(i, ng, ll, ok, ll0=ll0, key=2 if ctx else 0))
             return out
-        for s, seed, ctx in (("cvtune", 1, True), ("wikitune", 2, False), ("user-reported", 3, True), ("discordtune", 4, True)):
-            with open(os.path.join(td, f"S.chat.{s}.jsonl"), "w") as f:
-                f.write("".join(json.dumps(r) + "\n" for r in rows(300 if s == "discordtune" else 120, seed, ctx)))
+        for st in ("chat", "formal"):
+            for s, seed, ctx in (("cvtune", 1, True), ("wikitune", 2, False), ("dev302", 5, False), ("typing76", 6, False),
+                                 ("user-reported", 3, True), ("discordtune", 4, True)):
+                if s == "discordtune" and st == "formal":
+                    continue
+                if (st, s) in skip:
+                    continue
+                with open(os.path.join(td, f"S.{st}.{s}.jsonl"), "w") as f:
+                    f.write("".join(json.dumps(r) + "\n" for r in rows(300 if s == "discordtune" else 120, seed, ctx)))
 
-    def run_driver(self, td, wired=True):
-        self.make_scores(td, wired)
+    def run_driver(self, td, wired=True, skip=()):
+        self.make_scores(td, wired, skip)
         out = io.StringIO()
         code = 0
         with contextlib.redirect_stdout(out):
             try:
-                fg.main(["--scores", td, "--out", os.path.join(td, "out"), "--models", "S", "--settings", "chat",
-                         "--sets", "cvtune", "wikitune", "user-reported", "discordtune", "typing76"])
+                fg.main(["--scores", td, "--out", os.path.join(td, "out"), "--models", "S", "--settings", "chat", "formal",
+                         "--sets", "cvtune", "wikitune", "dev302", "typing76", "user-reported", "discordtune"])
             except SystemExit as e:
                 code = e.code
         return out.getvalue(), code
@@ -222,15 +228,26 @@ class TestDriver(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             text, code = self.run_driver(td)
             self.assertEqual(code, 0, text)
+            self.assertNotIn("SKIP", text)
             self.assertIn("| 集合 | n | top1 基準 | top1 新 |", text)
-            self.assertEqual(len(re.findall(r"^\| S chat [\w-]+ \|", text, re.M)), 4)                 # one table row per set present
-            self.assertEqual(len(re.findall(r"^\| S chat [\w-]+ \(16-char context\) \|", text, re.M)), 4)
-            self.assertIn("SKIP S chat typing76", text)
+            self.assertEqual(len(re.findall(r"^\| S chat [\w-]+ \|", text, re.M)), 6)                 # one table row per set present
+            self.assertEqual(len(re.findall(r"^\| S chat [\w-]+ \(16-char context\) \|", text, re.M)), 6)
             self.assertIn("frozen on cvtune+wikitune", text)
             self.assertIn("section 4, S", text)
             self.assertIn("(16-char context)", text)
             for f in os.listdir(os.path.join(td, "out", "rowstats")):
                 self.assertRegex(open(os.path.join(td, "out", "rowstats", f)).read(), r"\A[0-9\t\n]+\Z")
+
+    def test_missing_guard_set_fails_closed(self):
+        for gone in (("chat", "typing76"), ("formal", "dev302"), ("chat", "user-reported"), ("chat", "discordtune")):
+            with tempfile.TemporaryDirectory() as td:
+                text, code = self.run_driver(td, skip=(gone,))
+                self.assertEqual(code, 3, (gone, text))
+                self.assertIn("FAIL: every guard set", text)
+                self.assertIn(str(gone), text)
+        with tempfile.TemporaryDirectory() as td:        # a missing context set is named, not silently skipped
+            text, code = self.run_driver(td, skip=(("chat", "user-reported"),))
+            self.assertIn("context not checked, no scores: S chat user-reported", text)
 
     def test_unwired_context_stops(self):
         with tempfile.TemporaryDirectory() as td:
@@ -240,13 +257,18 @@ class TestDriver(unittest.TestCase):
 
     def test_decision_rules(self):
         base = {"n": 4958, "fixed": 120, "broken": 50, "p": 1e-7, "ci_lo": 30, "dcer": -0.2}
-        cells = {("chat", "discordtune"): base, ("chat", "cvtune"): {"n": 10, "fixed": 1, "broken": 0, "p": 1.0, "dcer": 0}}
+        quiet = {"n": 10, "fixed": 1, "broken": 0, "p": 1.0, "dcer": 0}
+        cells = {c: quiet for c in fg.REQUIRED_CELLS}
+        cells[("chat", "discordtune")] = base
         self.assertTrue(fg.decision(cells)[-1][1])
         for edit in ({"fixed": 98}, {"p": 0.06}, {"ci_lo": 0}, {"dcer": 0.1}):
             c = dict(cells); c[("chat", "discordtune")] = {**base, **edit}
             self.assertFalse(fg.decision(c)[-1][1], edit)
         c = dict(cells); c[("formal", "dev302")] = {"n": 302, "fixed": 2, "broken": 30, "p": 0.001, "dcer": 0.5}
         self.assertFalse(fg.decision(c)[-1][1])                                # a net-negative significant cell blocks it
+        for gone in fg.REQUIRED_CELLS:                                         # a guard cell that was never loaded blocks it too
+            c = {k: v for k, v in cells.items() if k != gone}
+            self.assertFalse(fg.decision(c)[-1][1], gone)
 
 
 if __name__ == "__main__":
