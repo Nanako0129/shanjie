@@ -45,7 +45,10 @@ extern "C" {
 #endif
 
 typedef struct { uint32_t kind; uint32_t ch; uint32_t modifiers; } ShanjieKey;
-// kind: 1 CHAR, 2 SPACE, 3 ENTER, 4 BACKSPACE, 5 DELETE, 6 ESC, 7 LEFT, 8 RIGHT, 9 UP, 10 DOWN, 11 HOME, 12 END, 13 TAB
+// kind: 1 CHAR, 2 SPACE, 3 ENTER, 4 BACKSPACE, 5 DELETE, 6 ESC, 7 LEFT, 8 RIGHT, 9 UP, 10 DOWN, 11 HOME, 12 END, 13 TAB, 14 PAGE_UP, 15 PAGE_DOWN
+// PAGE_UP / PAGE_DOWN (candidate-vertical contract section 2.2): the shell sends them only while the last output had
+//   candidate_vertical 1 and no modifier is held. They move the vertical window by nine. With any other state of the
+//   engine (no vertical window open, or a modifier) they are not handled (handled 0), change nothing and commit nothing.
 // ch: Unicode scalar of the keycap without Shift when kind is CHAR; ignored for other kinds
 // modifiers: bit0 SHIFT, bit1 CONTROL, bit2 OPTION, bit3 COMMAND, bit4 CAPSLOCK
 typedef struct {
@@ -59,6 +62,7 @@ typedef struct {
   uint32_t candidate_columns; // 0 = collapsed single row; > 0 = expanded, always 9 (one row = one page, the selected page on top; s3b2 9)
   uint32_t candidate_first;   // position of candidates[0] in the whole list; 0 when closed (and for the prediction row)
   uint32_t candidate_total;   // length of the whole list; 0 when closed (the prediction row: its length)
+  uint32_t candidate_vertical; // 0 = horizontal, or no candidates; 1 = vertical candidate window (candidate_columns is then 0; up to 9 rows from candidate_first; fixed when the window opened); 2 = vertical prediction row, entered or not (follows the current setting on every output; candidate_columns 0, first 0). Appended last.
 } ShanjieOutput;
 typedef struct ShanjieEngine ShanjieEngine;
 
@@ -107,6 +111,14 @@ int32_t shanjie_engine_set_demote(ShanjieEngine *engine, uint32_t enabled, Shanj
 //   0 clears the prediction row (an entered row is left) and computes none; 1 recomputes it, so a row that
 //   fits the display conditions shows in the returned snapshot. No effect without a loaded model.
 int32_t shanjie_engine_set_prediction(ShanjieEngine *engine, uint32_t enabled, ShanjieOutput **out); // 0 or 1; returns a snapshot
+// candidate-vertical (docs/contracts/candidate-vertical.md section 2.2): set_candidate_vertical 0 or 1 (2 otherwise, state
+//   unchanged), default 0, like set_prediction in its codes and its snapshot (handled 1, commit ""); 1 when engine or out is
+//   NULL. It sets the orientation of the candidate windows that open from now on (the Space/Down that opens the window,
+//   and the punctuation window). A window that is already open (including an expanded grid) keeps the orientation it
+//   opened with, so the snapshot equals the output before the call. The prediction row has no opening: it follows the
+//   current setting on every output, so a row on screen is re-rendered in the new orientation in the snapshot (value 2
+//   when vertical). In the entered vertical row Up / Down move the selection (stopping at both ends). Call it after every engine creation, like set_prediction.
+int32_t shanjie_engine_set_candidate_vertical(ShanjieEngine *engine, uint32_t enabled, ShanjieOutput **out); // 0 or 1; returns a snapshot
 // V3 (docs/contracts/v3-engine.md section 12): set_abbreviation 0 or 1 (2 otherwise, state unchanged), default 0, like
 //   set_prediction in its codes and its snapshot (handled 1, commit ""); 1 when engine or out is NULL. With 1 (and the
 //   prediction row on and the cursor at the end of the composition) a zhuyin key whose column already holds a symbol

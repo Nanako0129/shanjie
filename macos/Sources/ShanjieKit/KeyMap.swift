@@ -8,7 +8,12 @@ enum KeyMap {
     // ShanjieKey.kind (s3a section 6).
     static let char: UInt32 = 1, space: UInt32 = 2, enter: UInt32 = 3, backspace: UInt32 = 4,
         delete: UInt32 = 5, esc: UInt32 = 6, left: UInt32 = 7, right: UInt32 = 8, up: UInt32 = 9,
-        down: UInt32 = 10, home: UInt32 = 11, end: UInt32 = 12, tab: UInt32 = 13
+        down: UInt32 = 10, home: UInt32 = 11, end: UInt32 = 12, tab: UInt32 = 13, pageUp: UInt32 = 14, pageDown: UInt32 = 15
+
+    /// kVK_PageUp and kVK_PageDown. Deliberately not in `specials` or `translate`: the shell turns them into the core's
+    /// kinds 14 / 15 only while a vertical candidate window is open and no modifier is held (candidate-vertical contract
+    /// section 2.2, `Session.handle`); every other time they are keys outside the tables.
+    static let pageKeys: [UInt16: UInt32] = [116: pageUp, 121: pageDown]
 
     /// Virtual key codes of the special keys (Carbon kVK_*; the tests cross-check against Carbon).
     static let specials: [UInt16: UInt32] = [

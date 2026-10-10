@@ -139,6 +139,12 @@ struct SettingsForm: View {
                 }
             }
             Section("外觀") {
+                // Before the glass tint (candidate-vertical contract section 2.1). A candidate window already open keeps its orientation, so the next one uses the new setting. (The core also turns a prediction row on screen, but a click in this window is inferred, not measured, to commit the composition and hide the panel first.)
+                Picker("候選窗方向", selection: Binding(get: { model.candidateVertical }, set: { model.setCandidateVertical($0) })) {
+                    Text("橫排").tag(false)
+                    Text("直排").tag(true)
+                }
+                .pickerStyle(.segmented)
                 // The end icons are Syrtis's (TokenBar GlassTintControl.swift): outline at the clear end, filled at the deep
                 // end, in an HStack beside the slider. As the Slider's own value labels inside a grouped Form both came out
                 // filled on device (user, 2026-10-10). The slider keeps the regular size (Syrtis's is .small), as checked on

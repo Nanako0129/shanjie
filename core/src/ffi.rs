@@ -40,6 +40,8 @@ pub struct ShanjieOutput {
     pub candidate_columns: u32,
     pub candidate_first: u32,
     pub candidate_total: u32,
+    /// Appended last (candidate-vertical contract section 2.2): 0 horizontal or none, 1 vertical candidate window, 2 vertical prediction row.
+    pub candidate_vertical: u32,
 }
 
 /// Opaque to C.
@@ -111,6 +113,7 @@ fn to_c(o: Output) -> Option<*mut ShanjieOutput> {
         candidate_columns: o.columns,
         candidate_first: o.first,
         candidate_total: o.total,
+        candidate_vertical: o.vertical,
     };
     Some(Box::into_raw(Box::new(OwnedOutput { out, _strings: strings, _ptrs: ptrs })).cast())
 }
@@ -522,6 +525,42 @@ pub unsafe extern "C" fn shanjie_engine_set_prediction(
                 // SAFETY: `out` checked non-NULL above.
                 unsafe { emit(o, out) }
             }
+            Err(_) => SHANJIE_ERR_INTERNAL,
+        }
+    });
+    if rc == SHANJIE_ERR_INTERNAL {
+        // SAFETY: forwarded caller contract.
+        unsafe { discard(engine) };
+    }
+    rc
+}
+
+/// Candidate-vertical contract section 2.2. `enabled` 0 or 1 (default 0): the orientation of the candidate windows that
+/// open from now on. Returns the snapshot like `set_prediction`: an open candidate window keeps its orientation, a
+/// prediction row on screen is re-rendered in the new one (`candidate_vertical` 2 or 0); any other value changes nothing
+/// and returns 2.
+///
+/// # Safety
+/// `engine` is NULL or a live handle; `out` is NULL or valid for one pointer write.
+#[no_mangle]
+pub unsafe extern "C" fn shanjie_engine_set_candidate_vertical(
+    engine: *mut ShanjieEngine,
+    enabled: u32,
+    out: *mut *mut ShanjieOutput,
+) -> i32 {
+    let rc = guard(|| {
+        // SAFETY: forwarded caller contract.
+        if !unsafe { clear_out(out) } || engine.is_null() {
+            return SHANJIE_ERR_NULL;
+        }
+        if enabled > 1 {
+            return SHANJIE_ERR_INVALID;
+        }
+        // SAFETY: live handle, single-threaded use (§6).
+        let e = unsafe { &mut (*engine).0 };
+        match e.set_candidate_vertical(enabled == 1) {
+            // SAFETY: `out` checked non-NULL above.
+            Ok(o) => unsafe { emit(o, out) },
             Err(_) => SHANJIE_ERR_INTERNAL,
         }
     });
@@ -971,7 +1010,7 @@ mod tests {
         o = sentinel();
         assert!(unsafe { shanjie_engine_key(e, key(ESC, '\0'), ptr::null_mut()) } == 1, "key out NULL");
         assert!(unsafe { shanjie_engine_key(ptr::null_mut(), key(ESC, '\0'), &mut o) } == 1 && o.is_null(), "key engine NULL");
-        for (kind, ch) in [(0, 0x61), (14, 0x61), (CHAR, 0xD800), (CHAR, 0x110000)] {
+        for (kind, ch) in [(0, 0x61), (16, 0x61), (CHAR, 0xD800), (CHAR, 0x110000)] {
             o = sentinel();
             let k = ShanjieKey { kind, ch, modifiers: 0 };
             assert!(unsafe { shanjie_engine_key(e, k, &mut o) } == 2 && o.is_null(), "key invalid");
@@ -1088,6 +1127,101 @@ mod tests {
     fn expand_and_pick_through_the_c_abi() {
         let (ok, out, _) = run_child("child_pick", false);
         assert!(ok, "pick child failed");
+        assert!(out.contains("1 passed"), "child test actually ran");
+    }
+
+    // ---- candidate-vertical contract section 2.2 / 3.1: set_candidate_vertical, kinds 14 / 15, candidate_vertical ----
+
+    const PAGE_UP: u32 = 14;
+    const PAGE_DOWN: u32 = 15;
+    const DOWN: u32 = 10;
+
+    /// (code, handled, candidates, selected, columns, first, total, candidate_vertical) of one key; frees the output.
+    fn vkey(e: *mut ShanjieEngine, k: ShanjieKey) -> (i32, i32, Vec<String>, i32, u32, u32, u32, u32) {
+        let mut o = ptr::null_mut();
+        let rc = unsafe { shanjie_engine_key(e, k, &mut o) };
+        if rc != 0 {
+            assert!(o.is_null(), "*out NULL on error");
+            return (rc, 0, vec![], 0, 0, 0, 0, 0);
+        }
+        let (c, sel, cols, first, total, _) = read_out(o);
+        // SAFETY: test-only read of a live output.
+        let (handled, vert) = unsafe { ((*o).handled, (*o).candidate_vertical) };
+        unsafe { shanjie_output_free(o) };
+        (rc, handled, c, sel, cols, first, total, vert)
+    }
+
+    #[test]
+    fn child_vertical() {
+        if !is_child("child_vertical") {
+            return;
+        }
+        let base: String = (0..30).map(|i| format!("ㄋㄧˇ {} -1.0\n", char::from_u32(0x4E00 + i).unwrap())).collect();
+        let dir = tiny_dir("vertical", base.as_bytes());
+        let e = new_engine(&dir, 0);
+
+        // Codes, like set_prediction.
+        let mut o: *mut ShanjieOutput = sentinel();
+        assert!(unsafe { shanjie_engine_set_candidate_vertical(e, 1, ptr::null_mut()) } == 1, "out NULL");
+        assert!(unsafe { shanjie_engine_set_candidate_vertical(ptr::null_mut(), 1, &mut o) } == 1 && o.is_null(), "engine NULL");
+        for v in [2, u32::MAX] {
+            o = sentinel();
+            assert!(unsafe { shanjie_engine_set_candidate_vertical(e, v, &mut o) } == 2 && o.is_null(), "out of range");
+        }
+        // The failed calls changed nothing: the window still opens horizontal.
+        for c in ['s', 'u', '3'] {
+            send(e, key(CHAR, c));
+        }
+        let h = vkey(e, key(SPACE, '\0'));
+        assert!(h.1 == 1 && h.2.len() == 9 && h.4 == 0 && h.7 == 0, "default horizontal, candidate_vertical 0");
+        send(e, key(ESC, '\0'));
+        // 1 turns it on; the snapshot (no window open) is handled 1 with no candidates.
+        o = sentinel();
+        assert!(unsafe { shanjie_engine_set_candidate_vertical(e, 1, &mut o) } == 0 && !o.is_null(), "set 1");
+        let snap = read_out(o);
+        assert!(unsafe { (*o).handled == 1 && (*o).candidate_vertical == 0 } && snap.0.is_empty() && snap.1 == -1);
+        unsafe { shanjie_output_free(o) };
+
+        // Kinds 14 / 15 are accepted (not code 2); 16 is not. With no vertical window they are not handled.
+        for kind in [PAGE_UP, PAGE_DOWN] {
+            let r = vkey(e, key(kind, '\0'));
+            assert!(r.0 == 0 && r.1 == 0, "no window: accepted, not handled");
+        }
+        o = sentinel();
+        assert!(unsafe { shanjie_engine_key(e, key(16, '\0'), &mut o) } == 2 && o.is_null(), "kind 16");
+
+        // Vertical window: nine rows, columns 0, candidate_vertical 1; Down moves, Page Down turns by nine.
+        let v = vkey(e, key(SPACE, '\0'));
+        assert!(v.1 == 1 && v.2.len() == 9 && v.3 == 0 && v.4 == 0 && v.5 == 0 && v.6 == 30 && v.7 == 1, "vertical open");
+        let d = vkey(e, key(DOWN, '\0'));
+        assert!(d.2 == v.2 && d.3 == 1 && d.4 == 0 && d.7 == 1, "Down moves the selection, no grid");
+        let p = vkey(e, key(PAGE_DOWN, '\0'));
+        assert!(p.1 == 1 && p.3 == 0 && p.5 == 9 && p.2.len() == 9 && p.2 != v.2 && p.7 == 1, "Page Down by nine");
+        let u = vkey(e, key(PAGE_UP, '\0'));
+        assert!(u.2 == v.2 && u.5 == 0 && u.3 == 0 && u.7 == 1, "Page Up back");
+        // Page Down with a modifier is not handled and the window stays.
+        let m = vkey(e, ShanjieKey { kind: PAGE_DOWN, ch: 0, modifiers: 8 });
+        assert!(m.1 == 0 && m.2 == v.2 && m.7 == 1, "COMMAND+Page Down passes through");
+        // set_candidate_vertical(0) while the window is open: the snapshot is the open window, orientation kept.
+        o = sentinel();
+        assert!(unsafe { shanjie_engine_set_candidate_vertical(e, 0, &mut o) } == 0);
+        let snap = read_out(o);
+        assert!(unsafe { (*o).candidate_vertical } == 1 && snap.0 == v.2 && snap.2 == 0 && snap.4 == 30, "open window unchanged");
+        unsafe { shanjie_output_free(o) };
+        let d = vkey(e, key(DOWN, '\0'));
+        assert!(d.4 == 0 && d.7 == 1, "still vertical after the switch");
+        send(e, key(ESC, '\0'));
+        let h = vkey(e, key(SPACE, '\0'));
+        assert!(h.2.len() == 9 && h.4 == 0 && h.7 == 0, "reopened horizontal");
+        assert!(vkey(e, key(DOWN, '\0')).4 == 9, "horizontal Down expands the grid");
+        unsafe { shanjie_engine_free(e) };
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn candidate_vertical_through_the_c_abi() {
+        let (ok, out, _) = run_child("child_vertical", false);
+        assert!(ok, "vertical child failed");
         assert!(out.contains("1 passed"), "child test actually ran");
     }
 
