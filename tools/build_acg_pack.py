@@ -755,9 +755,9 @@ def first_named(rank, inpack):
     return out
 
 
-def ordered(words, nsrc, rank=None, reading=None, extra=None):
+def ordered(words, nsrc, rank=None, reading=None, extra=None, shipped=frozenset()):
     """同音詞的順序，由 `pack_rows` 轉成分數的差（解碼器同分時的先後與檔案順序無關，2026-10-10 實測）：處置列點名的先照 `collision_rank`
-    的名次（詞有好幾個讀音時取最前面的），其餘來源數多的在前，同數依字串排序，所以可以重現。"""
+    的名次（詞有好幾個讀音時取最前面的），其餘已出貨的詞（shipped，契約 A3 使用者決定）在新詞前面，再來源數多的在前，同數依字串排序，所以可以重現。"""
     rank = rank or {}
     extra = extra or {}
     def rk(w):
@@ -765,24 +765,29 @@ def ordered(words, nsrc, rank=None, reading=None, extra=None):
             return 0
         rs = [reading[w]] + list(extra.get(w, []))
         return min((rank.get((" ".join(r), w), len(rank)) for r in rs))
-    return sorted(words, key=lambda w: (rk(w), -nsrc(w), w))
+    return sorted(words, key=lambda w: (rk(w), w not in shipped, -nsrc(w), w))
 
 
+# 契約 A3 使用者決定：同讀音有已出貨的詞時，新詞只當候選。光靠 TIE 的順序不夠（2026-10-11 實測：model-v5 對某些新詞的語料次數會讓它贏過分數較高的已出貨詞，
+# 例如 `波伊德` 贏 `波依得`），所以新詞的列在這種讀音上另外減這個分數。3.0 是量過的（見研究紀錄 A3 修正輪）：已出貨讀音在 v0.4.0 詞包與新詞包的第一名只剩「唯」的讀音覆寫造成的差異。
+NEW_BEHIND_SHIPPED = 3.0
 TIE = 1e-6      # 同讀音的詞包詞，排在第 k 位的分數減 k × TIE：解碼器遇到同分時的先後與檔案順序無關（2026-10-10 實測），要讓「來源數多的在前」成立只能靠分數
 
 
-def pack_rows(order, reading, sc, extra=None):
+def pack_rows(order, reading, sc, extra=None, shipped=frozenset()):
     """每個詞的列，格式和 build_overlay 共用同一個函式；同讀音的列依 order 的先後各減 k × TIE，讓同分的詞有固定的第一名。
-    extra：{詞: [另外的讀音]}（手動詞第四欄），這些讀音也各有一列（含變調列），和主要讀音同分數。"""
+    extra：{詞: [另外的讀音]}（手動詞第四欄），這些讀音也各有一列（含變調列），和主要讀音同分數。
+    shipped（契約 A3 使用者決定）：已出貨的詞的讀音上，新詞的列另外減 NEW_BEHIND_SHIPPED，新詞只是候選、不搶已出貨的選字；order 裡已出貨的詞要排在前面，它們的 k 才和 v0.4.0 一樣。"""
     rows, seen = [], collections.Counter()
     extra = extra or {}
+    gen = lambda w: [(w, syls, r.rstrip("\n").split("\t")) for syls in [reading[w]] + list(extra.get(w, [])) for r in bo.overlay_rows(w, syls, sc[len(w)], TAG)]
+    ship_keys = {f[0] for w in order if w in shipped for _, _, f in gen(w)}
     for w in order:
-        for syls in [reading[w]] + list(extra.get(w, [])):
-            for r in bo.overlay_rows(w, syls, sc[len(w)], TAG):
-                key, word, score, tag = r.rstrip("\n").split("\t")
-                k = seen[key]
-                seen[key] += 1
-                rows.append(r if not k else f"{key}\t{word}\t{round(float(score) - k * TIE, 8)!r}\t{tag}\n")
+        for _, _, (key, word, score, tag) in gen(w):
+            k = seen[key]
+            seen[key] += 1
+            pen = NEW_BEHIND_SHIPPED if w not in shipped and key in ship_keys else 0
+            rows.append(f"{key}\t{word}\t{score}\t{tag}\n" if not (k or pen) else f"{key}\t{word}\t{round(float(score) - k * TIE - pen, 8)!r}\t{tag}\n")
     return rows
 
 
@@ -919,13 +924,16 @@ def read_keep_both(path):
     return out
 
 
-def open_collisions(found, decided, keep_now, keep_both):
+def open_collisions(found, decided, keep_now, keep_both, shipped=frozenset(), pack_at=None):
     """沒處置的衝突 {讀音: [條目]}。已處置：詞 e[0] 在處置列裡被點名、而且開了之後的第一名 e[4] 就是處置列的保留的詞（`first_named`，2026-10-10：
     被舊處置蓋住的新詞搶走第一名，或點名的詞沒排在保留的詞前面，都要列出）。keep-both（契約 A3.3a）：詞包詞和開詞包後的第一名都是該讀音的 keep-both 詞才豁免，
-    不做 `first_named` 檢查；同讀音的其他詞照樣列出。"""
+    不做 `first_named` 檢查；同讀音的其他詞照樣列出。開詞包後的第一名在這個讀音上不是詞包詞（pack_at 是 {(讀音, 詞包詞)}；解碼器拼出來的字串、或詞包詞只是在別的讀音上，只有 (b) 與跨讀音的 (a) 會有）時，詞包詞是 keep-both 詞就豁免：使用者決定的是 keep-both 的詞順序照 model-v5，沒有別的詞包詞被搶走。
+    已出貨的詞排前面（契約 A3 使用者決定，都留）：開詞包後的第一名 e[4] 是已出貨的詞就豁免——已出貨的詞排在新詞前面，所以新詞只是候選，已出貨的讀音選字不變
+    （這一點不靠這裡的判斷，由 `recheck --base` 比新舊詞包在已出貨讀音上的第一名來驗）；第一名是新詞的照樣列出。"""
     col = {}
     for r, v in found.items():
-        left = [e for e in v if not ((r, e[0]) in keep_both and (r, e[4]) in keep_both) and ((r, e[0]) not in decided or e[4] != keep_now.get(r))]
+        left = [e for e in v if not ((r, e[0]) in keep_both and ((r, e[4]) in keep_both or (pack_at is not None and (r, e[4]) not in pack_at))) and e[4] not in shipped
+                and ((r, e[0]) not in decided or e[4] != keep_now.get(r))]
         if left:
             col[r] = left
     return col
@@ -937,7 +945,8 @@ def build(api, groups_tsv=os.path.join(PACKS, "acg-groups.tsv"), collisions_tsv=
     """a3：關掉就是 v0.4.0 的抽取（A3.1、A3.2、A3.4 不做）。info：給了就把報告要用的中間結果放進去（詞的來源、讀音）。"""
     log = lambda *a: print(*a, file=sys.stderr)
     v040 = load_v040(v040_words, v040_sha)
-    keep_both = read_keep_both(keep_both_tsv)
+    keep_both = read_keep_both(keep_both_tsv) if a3 else set()      # A3 關掉（開發用，重建 v0.4.0）時，keep-both 裡的新詞不在詞包，不檢查
+    shipped = v040 if a3 else frozenset()       # 契約 A3：同音時已出貨的詞排在新詞前面；A3 關掉就是 v0.4.0 的做法
     gr = read_groups(groups_tsv)
     listing = pages(api, ["Template:CGroup/list"])["Template:CGroup/list"]
     items = list_items(listing["text"])
@@ -968,6 +977,7 @@ def build(api, groups_tsv=os.path.join(PACKS, "acg-groups.tsv"), collisions_tsv=
     ws = sorted({x["w"]["value"].rsplit("/", 1)[1]: (x["w"]["value"].rsplit("/", 1)[1], wiki_title(x["art"]["value"]), int(x["sl"]["value"])) for x in b}.values(), key=lambda t: (-t[2], t[0]))[:WORKS]
     arts, art_rev, seen, queued = [], {}, set(), set()
     title_src, name_src, all_names = {}, collections.defaultdict(set), set()
+    name_base = collections.defaultdict(set)         # 名字 → A3 關掉時也收得到的出處（不是間隔號、不在段落外）：已出貨的詞的來源數只算這些，順序才和 v0.4.0 一樣
     name_occ = collections.defaultdict(set)         # 名字 → 通過的每一次出現的 (含間隔號, 在段落外)；報告 A3.1、A3.2 各補了多少用
     base, have = base_lexicon(), lexicon_words()
     ylists = pages(api, year_titles(years)) if years else {}      # 契約 A2.1：年度動畫清單，只取作品名欄的連結
@@ -1015,6 +1025,8 @@ def build(api, groups_tsv=os.path.join(PACKS, "acg-groups.tsv"), collisions_tsv=
             if strict_ok(nm.name, nm.kind, nm.snip, have, nm.full) and not (a3 and nm.name not in v040 and TITLE_END.search(nm.name)):
                 name_src[nm.name].add(f"{nm.full + '@' if nm.full else ''}{d['title']}@{d['revid']}")      # 含間隔號的名字，出處記全名（契約 A3.1）
                 name_occ[nm.name].add((bool(nm.full), nm.outside))
+                if not nm.full and not nm.outside:
+                    name_base[nm.name].add(f"{d['title']}@{d['revid']}")
     revs += art_rev.values()
     log("works", len(ws), "articles", len(arts), "titles", len(title_src), "names", len(all_names), "passing", len(name_src))
 
@@ -1056,9 +1068,13 @@ def build(api, groups_tsv=os.path.join(PACKS, "acg-groups.tsv"), collisions_tsv=
     sc = scores(base)
     # 使用者 2026-10-10 的規則：詞包詞若把既有詞庫的詞擠下第一名（類型 c），既有詞勝、詞包詞丟掉；丟掉之後別的詞的結果可能變，重跑到沒有 c 為止。
     lexicon_dropped = []
+    def nsrc(w):        # 來源數：新詞算全部；已出貨的詞不算 A3 新加的出處（間隔號、段落外、A3.4 的手動），同讀音已出貨的詞之間的順序才不會因為 A3 變動
+        if w not in shipped:
+            return sum(len(s) for s in src[w].values())
+        return sum(len(s) for k, s in src[w].items() if k != "char") + len(name_base[w]) - (w in A3_MANUAL and "manual" in src[w])
     for _ in range(LEXICON_RULE_ROUNDS):
-        order = ordered(words, lambda w: sum(len(s) for s in src[w].values()), rank, reading, extra)
-        rows = pack_rows(order, reading, sc, extra)
+        order = ordered(words, nsrc, rank, reading, extra, shipped)
+        rows = pack_rows(order, reading, sc, extra, shipped)
         found = detect_collisions(words, reading, rows, ref, decode, extra=extra)
         hit = {e[0]: (r, e) for r, v in sorted(found.items()) for e in v if e[1] == "c"}
         if not hit:
@@ -1072,7 +1088,7 @@ def build(api, groups_tsv=os.path.join(PACKS, "acg-groups.tsv"), collisions_tsv=
     if gone:                                    # 契約 A3.3a：keep-both 的每個詞都要在輸出的 acg-add.tsv，少一個就中止
         raise SystemExit(f"{keep_both_tsv}: not in the built pack: {gone}")
     keep_now = first_named(rank, inpack)       # 每個讀音開詞包後必須是第一名的詞：名次最前、還在詞包的那個（和排序同一個定義）
-    col = open_collisions(found, decided, keep_now, keep_both)
+    col = open_collisions(found, decided, keep_now, keep_both, shipped, {(r.split("\t")[0].replace("-", " "), r.split("\t")[1]) for r in rows})
     ts_max = max(ts)
     manifest = {
         "version": ts_max[:10].replace("-", "") + "-" + hashlib.sha256("".join(rows).encode()).hexdigest()[:8],   # 最新的有時間戳的來源頁日期＋詞包內容雜湊：內容變了版號一定變
@@ -1173,8 +1189,9 @@ def load_pack(path):
     return sorted(rs), reading, extra, rows
 
 
-def recheck(out_dir, report_dir, packs=PACKS):
-    """契約 A3.5 第 6 項：不重建，用出貨的模型（`top1` 預設的 data/lm）重驗 out_dir 裡的詞包。回傳報告文字。"""
+def recheck(out_dir, report_dir, packs=PACKS, decode=top1, base_dir=None):
+    """契約 A3.5 第 6 項：不重建，用 decode 的模型（預設 `top1` 的出貨 data/lm；`rule_decoder` 換成規則模型）重驗 out_dir 裡的詞包。
+    base_dir（v0.4.0 詞包所在的資料夾）給了就多比一項：已出貨的詞與讀音，新舊詞包的第一名有沒有變。回傳報告文字。"""
     words, reading, extra, rows = load_pack(os.path.join(out_dir, "acg-add.tsv"))
     ref = {l.rstrip("\n") for l in open(os.path.join(report_dir, "reference.txt"), encoding="utf-8")}
     coll = os.path.join(packs, "acg-collisions.tsv")
@@ -1183,10 +1200,11 @@ def recheck(out_dir, report_dir, packs=PACKS):
     inpack = set(words)
     keep_both = read_keep_both(os.path.join(packs, "acg-keep-both.tsv"))
     kept_c = {r[1]: r for r in read_tsv(os.path.join(packs, "acg-kept-c.tsv"))}
-    found = detect_collisions(words, reading, rows, ref, extra=extra)
+    shipped = load_v040()
+    found = detect_collisions(words, reading, rows, ref, decode, extra=extra)
     c = {e[0]: (r, e[3]) for r, v in sorted(found.items()) for e in v if e[1] == "c"}
     keep_now = first_named(rank, inpack)
-    ab = open_collisions({r: [e for e in v if e[1] != "c"] for r, v in found.items()}, decided, keep_now, keep_both)
+    ab = open_collisions({r: [e for e in v if e[1] != "c"] for r, v in found.items()}, decided, keep_now, keep_both, shipped, {(r.split("\t")[0].replace("-", " "), r.split("\t")[1]) for r in rows})
     out = [f"words {len(words)} rows {len(rows)}; (a) readings {len({r for r, v in found.items() if any(e[1] == 'a' for e in v)})}, (b) {len({r for r, v in found.items() if any(e[1] == 'b' for e in v)})}, (c) words {len(c)}"]
     out.append(f"kept-c {len(kept_c)}: (c) not in kept-c {sorted(set(c) - set(kept_c))}; kept-c no longer (c) {sorted(set(kept_c) - set(c))}")
     out.append(f"unresolved (a)(b) readings {len(ab)} (outside keep-both and dispositions); reading, word, cond, profile, off-first, on-first:")
@@ -1195,13 +1213,24 @@ def recheck(out_dir, report_dir, packs=PACKS):
     pairs = [(k, r.split()) for r, k in first.items()]
     bad = []
     for prof in ("chat", "formal"):
-        on, off = top1(pairs, prof, out_dir), top1(pairs, prof)
+        on, off = decode(pairs, prof, out_dir), decode(pairs, prof)
         bad += [(prof, k, g) for (k, _), g, o in zip(pairs, on, off) if g != k and g != o]
     out.append(f"first_named readings {len(first)}, not first after the pack changed the top1: {bad}")
     kb_pairs = sorted((r, w) for r, w in keep_both)
     out.append("keep-both readings, first place with the pack on (reading, word, chat, formal):")
-    on = {prof: top1([(w, r.split()) for r, w in kb_pairs], prof, out_dir) for prof in ("chat", "formal")}
+    on = {prof: decode([(w, r.split()) for r, w in kb_pairs], prof, out_dir) for prof in ("chat", "formal")}
     out += [f"  {r}\t{w}\t{on['chat'][i]}\t{on['formal'][i]}" for i, (r, w) in enumerate(kb_pairs)]
+    if base_dir:
+        bwords, breading, bextra, _ = load_pack(os.path.join(base_dir, "acg-add.tsv"))
+        bpairs = [(w, r) for w in bwords for r in [breading[w]] + bextra.get(w, [])]
+        out.append("shipped (word, reading) pairs whose first place differs between the v0.4.0 pack and this pack (word, reading, profile, v0.4.0, new):")
+        n = 0
+        for prof in ("chat", "formal"):
+            a, b = decode(bpairs, prof, base_dir), decode(bpairs, prof, out_dir)
+            diff = [(w, " ".join(r), prof, x, y) for (w, r), x, y in zip(bpairs, a, b) if x != y]
+            n += len(diff)
+            out += ["  " + "\t".join(d) for d in diff]
+        out.append(f"  total {n}")
     return "\n".join(out) + "\n"
 
 
@@ -1214,11 +1243,13 @@ def main():
     ap.add_argument("--rule-lm", default=RULE_LM_DIR)
     ap.add_argument("--a3", choices=("on", "off"), default="on")
     ap.add_argument("--recheck", action="store_true")
+    ap.add_argument("--recheck-rule", action="store_true", help="--recheck 用規則模型（--rule-lm）而不是出貨的 data/lm")
+    ap.add_argument("--base", help="--recheck：v0.4.0 詞包所在的資料夾，多比已出貨的詞的第一名有沒有變")
     a = ap.parse_args()
     if a.recheck:
-        text = recheck(a.out, a.report)
+        text = recheck(a.out, a.report, decode=rule_decoder(check_rule_lm(a.rule_lm)) if a.recheck_rule else top1, base_dir=a.base)
         os.makedirs(a.report, exist_ok=True)
-        open(os.path.join(a.report, "recheck.txt"), "w", encoding="utf-8").write(text)
+        open(os.path.join(a.report, "recheck-rule.txt" if a.recheck_rule else "recheck.txt"), "w", encoding="utf-8").write(text)
         print(text, end="")
         return
     rule = check_rule_lm(a.rule_lm)
