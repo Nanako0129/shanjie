@@ -9,33 +9,21 @@ public enum PanelPlacement {
     /// above the line (no room below) uses the same value; Apple's there is not measured.
     public static let gap: CGFloat = 6
 
-    /// What the panel remembers as its place after showing at `origin`: the origin itself when the client gave a line (or
-    /// there was nothing remembered), else the old anchor untouched. `topLeft` may clamp the anchor for a tall panel; if that
-    /// clamped value were remembered, one tall window would permanently raise the shorter panels shown after it.
-    public static func anchor(afterShowingAt origin: NSPoint, lineRect: NSRect?, lastOrigin: NSPoint?) -> NSPoint {
-        guard lineRect == nil, let lastOrigin else { return origin }
-        return lastOrigin
-    }
-
     /// The bar's top-left corner.
-    /// - `lineRect`: the text line (origin bottom-left); `nil` reuses `lastOrigin` (clamped into its screen's visible frame
-    ///   for `size`), and with none either, the bar sits at the bottom-left of the main screen's visible frame.
+    /// - `lineRect`: the text line (origin bottom-left); `nil` uses `lastLine`, the last line the client gave, and with none
+    ///   either, the bar sits at the bottom-left of the visible frame of the screen `rectScreen` (else the main one) names.
     /// - `size`: the bar's size.
     /// - `alignOffset`: how far the first candidate glyph sits from the bar's left edge, so the
     ///   glyph lines up with the composed text.
     /// - `screens`: the visibleFrames; `rectScreen` is the index of the one containing the line
     ///   (`nil` if none), `main` the index of the main screen.
-    public static func topLeft(lineRect: NSRect?, lastOrigin: NSPoint?, size: NSSize, alignOffset: CGFloat,
+    public static func topLeft(lineRect: NSRect?, lastLine: NSRect?, size: NSSize, alignOffset: CGFloat,
                                screens: [NSRect], rectScreen: Int?, main: Int) -> NSPoint {
         let visible = screens[rectScreen ?? main]
-        guard let line = lineRect else {
-            guard let last = lastOrigin else { return NSPoint(x: visible.minX, y: visible.minY + size.height) }
-            // The last place may no longer fit: another panel size (the vertical window is much taller than the bar), another
-            // screen layout. Clamp it into the visible frame of the screen it was on, for this size.
-            let home = screens.first { $0.contains(NSPoint(x: last.x, y: last.y - 1)) } ?? visible
-            return NSPoint(x: max(min(last.x, home.maxX - size.width), home.minX),
-                           y: min(max(last.y, home.minY + size.height), home.maxY))
-        }
+        // No line from the client: the last one it gave, if any, so the origin is worked out again for this panel's size (a
+        // remembered corner would depend on the size of the panel that was shown when it was remembered); with none, the bottom-left
+        // of the visible frame for this size, which is never remembered.
+        guard let line = lineRect ?? lastLine else { return NSPoint(x: visible.minX, y: visible.minY + size.height) }
         var x = line.minX - alignOffset
         var top = line.minY - gap
         // No room below: above the line instead.
