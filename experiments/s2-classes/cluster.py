@@ -39,7 +39,8 @@ def prepare():
     ids = {w: i for i, w in enumerate(vocab)}
     V = len(vocab); ids["<s>"], ids["</s>"] = V, V + 1
     # model-v5 §8（加法計數）：詞包詞旁邊的一般詞可能只有二元組、沒有單詞計數，丟掉這種二元組（和 tools/build_lm.py 相同）。
-    # 沒有加法計數的輸入不會出現（期望次數的二元組不會比兩端的單詞多），edges 逐位元組不變。
+    # 沒有加法計數的輸入不會出現（期望次數的二元組不會比兩端的單詞多），edges 應該逐位元組不變（推論，沒有量；
+    # 量過的是 tools/build_lm.py 同一個過濾重建 model-v3 仍是 5c7d5a94…）。
     bi = {k: v for k, v in bi.items() if k[0] in ids and k[1] in ids}
     n = len(bi)
     src = np.fromiter((ids[a] for a, b in bi), np.int32, n)
@@ -149,12 +150,15 @@ class Clusterer:
         log(f"init done MI={self.objective():.5f}")
 
     def init_from(self, old, vocab, log):
-        """model-v5 契約 §9：前 N 詞裡舊分群有類別的詞沿用舊類別，其餘（新詞）依頻率順序貪婪貼進最佳類別（同 init 的分數）。"""
+        """model-v5 契約 §9：前 N 詞裡舊分群的詞沿用舊類別（舊分群沒有類別的仍沒有，不進 M），
+        其餘（新詞）依頻率順序貪婪貼進最佳類別（同 init 的分數）。"""
         new = []
         for w in range(self.N):
-            b = old.get(vocab[w], -1)
-            if b < 0:
+            b = old.get(vocab[w])
+            if b is None:
                 new.append(w)
+                continue
+            if b < 0:
                 continue
             out, inn, s = self.neighbors(w)
             self.cls[w] = b
@@ -187,7 +191,7 @@ def assign_rare(cl, vocab_n, src, dst, cnt, V, N):
     """N 之外的詞：用和已分類詞（前 N 詞）的 bigram 貼進最佳類別。回傳長度 V 的類別陣列（−1＝無）。"""
     full = np.full(V + 2, -1, np.int32)
     full[:N] = cl.cls[:N]; full[V], full[V + 1] = cl.K + 1, cl.K + 2
-    ok = np.zeros(V + 2, bool); ok[:N] = True; ok[V:] = True
+    ok = np.zeros(V + 2, bool); ok[:N] = cl.cls[:N] >= 0; ok[V:] = True   # --keep-from 時前 N 詞可能有沒有類別的舊詞
     so = np.argsort(src, kind="stable"); ptr_o = np.zeros(V + 3, np.int64); np.cumsum(np.bincount(src, minlength=V + 2), out=ptr_o[1:])
     do = np.argsort(dst, kind="stable"); ptr_i = np.zeros(V + 3, np.int64); np.cumsum(np.bincount(dst, minlength=V + 2), out=ptr_i[1:])
     K3 = cl.K3
@@ -226,6 +230,8 @@ def main():
     vocab, uni, src, dst, cnt = prepare()
     V = len(vocab)
     log(f"loaded V={V} edges={len(src)} {time.time() - t0:.0f}s")
+    if a.keep_from and os.path.abspath(a.keep_from) == os.path.abspath(OUT):
+        ap.error("--keep-from 不能是輸出資料夾（S2K_OUT）：會用到舊的 edges.npz、覆寫舊的分群")
     cl = Clusterer(a.N, a.K, src, dst, cnt, V)
     old = load_old(a.keep_from, a.N, a.K) if a.keep_from else None
     if old is None:

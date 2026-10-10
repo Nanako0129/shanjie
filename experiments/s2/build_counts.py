@@ -401,10 +401,12 @@ def main():
     a = ap.parse_args()
     if a.expected and a.trigram:
         ap.error("--expected 不算 trigram")
+    if a.extra_lexicon and not a.expected:
+        ap.error("--extra-lexicon 只用在 --expected（加法計數，model-v5 契約 §8）")
     os.makedirs(OUT, exist_ok=True)
     uni, bi, tri = collections.Counter(), collections.Counter(), collections.Counter()
     sents = arts = 0
-    with mp.Pool(a.procs, initializer=_init, initargs=(a.trigram, a.expected, a.mw, tuple(os.path.abspath(f) for f in a.extra_lexicon))) as pool:
+    with mp.Pool(a.procs, initializer=_init, initargs=(a.trigram, a.expected, a.mw, tuple(dict.fromkeys(os.path.abspath(f) for f in a.extra_lexicon)))) as pool:
         for u, b, t, s_ in pool.imap_unordered(count_batch, batches(articles(a.articles))):
             uni.update(u); bi.update(b); tri.update(t); sents += s_; arts += 200
             if arts % 10000 == 0:

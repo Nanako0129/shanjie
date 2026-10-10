@@ -138,5 +138,5 @@ dev302 取 `eval/dev/*.txt` 依檔名排序後的前 302 列（和 `lm_eval.py -
 ## model-v5 的詞類（classes-v3，2026-10-10，契約 `docs/contracts/model-v5.md` §9）
 
 - 用 model-v5 的計數重新分群時，詞包詞進了詞彙，分群整體漂移：一般詞的計數和 model-v4 完全相同，但 s2r 探針書面 69 → 66 句（`--no-classes` 時兩個模型相同）。
-- 改用 `cluster.py --N 40000 --K 512 --keep-from <classes-v2 那次的輸出資料夾>`（188 `work/s2k`，`cls-40000-512.npz` `5fee9a50…2225`）：舊詞彙的詞沿用它的類別（沒有類別的仍沒有），不跑交換；前 N 詞裡的新詞依頻率順序貼進最佳類別，其餘新詞照罕見詞的方式貼。model-v5 的前 4 萬詞裡舊詞 39,457 個、新詞 543 個，互資訊 0.8351；輸出 `af637997…`。s2r 探針回到聊天 63、書面 69。
+- 改用 `cluster.py --N 40000 --K 512 --keep-from <classes-v2 那次的輸出資料夾>`（`S2K_COUNTS` 指向 model-v5 的計數、`S2K_OUT` 用新的資料夾；和 `--keep-from` 相同會被擋，因為 `prepare()` 會沿用資料夾裡現成的 `edges.npz`）（188 `work/s2k`，`cls-40000-512.npz` `5fee9a50…2225`）：舊詞彙的詞沿用它的類別（沒有類別的仍沒有），不跑交換；前 N 詞裡的新詞依頻率順序貼進最佳類別，其餘新詞照罕見詞的方式貼。model-v5 的前 4 萬詞裡舊詞 39,457 個、新詞 543 個，互資訊 0.8351；輸出 `af637997…`。s2r 探針回到聊天 63、書面 69。
 - 單元檢查：`python3 experiments/s2-classes/test_cluster.py`。
