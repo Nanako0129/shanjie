@@ -41,9 +41,10 @@ class KnCont(unittest.TestCase):
         cls.tmp.cleanup()
 
     def side(self, theta=1, bi=None, name="side.sjkn"):
-        n = kn_cont.continuation(self.bi if bi is None else bi, self.cls, theta)
+        vocab = L.BigramLM(self.path, classes=False).vocab
+        n = kn_cont.continuation(self.bi if bi is None else bi, self.cls, theta, vocab)
         p = os.path.join(self.tmp.name, name)
-        open(p, "wb").write(kn_cont.side_bytes(self.path, n, self.cls, theta))
+        open(p, "wb").write(kn_cont.side_bytes(self.path, vocab, n, self.cls, theta))
         return p
 
     def load(self, beta, theta=1):
@@ -63,8 +64,9 @@ class KnCont(unittest.TestCase):
         self.assertEqual(struct.unpack_from("<II", b, 48), (0, 0))
 
     def test_counts_by_hand(self):
-        """合併後二元組：(他,起床)4 (他,佔)2 (他,占)5 (<s>,起床)8 (<s>,他)15 (起床,</s>)14 (起牀,</s>)14。<s> 與 </s> 不算；
-        起床類當前文只算代表（once），所以 N(起床)=N(起牀)=1（只有 他）、N(他)=0、N(佔)=N(占)=1，ΣN′ = 1+2+2+2 = 7（起牀不再算）。"""
+        """合併後二元組：(他,起床)4 (他,佔)2 (他,占)5 (<s>,起床)8 (<s>,他)15 (起床,</s>)14 (起牀,</s>)14。前文 <s> 不算、</s> 不進側檔，
+        所以 N(起床)=1（前文只有 他）、起牀 取代表的 N、N(他)=0、N(佔)=N(占)=1；ΣN′ 每類只算代表：1+2+2+2 = 7。
+        once(v) 這裡用不到（起床類只出現在 </s> 前面），由 test_predecessor_filters 測。"""
         lm = self.load(1.0)
         _, np1, total = lm.kn
         g = lambda w: np1[lm.ids[w]]
@@ -119,7 +121,17 @@ class KnCont(unittest.TestCase):
             p = os.path.join(self.tmp.name, f"bad-{k}.sjkn")
             open(p, "wb").write(b)
             with self.assertRaises(ValueError, msg=k):
-                L.BigramLM(self.path, classes=False, kn=p, kn_beta=1.0)
+                L.BigramLM(self.path, classes=False, kn=p, kn_beta=1.0, kn_classes=self.cls)
+        good = self.side()
+        for kw in (dict(kn_beta=1.0), dict(kn_classes=self.cls), dict(kn_beta=1.5, kn_classes=self.cls)):
+            with self.assertRaises(ValueError, msg=str(kw)):
+                L.BigramLM(self.path, classes=False, kn=good, **kw)
+
+    def test_predecessor_filters(self):
+        """起床、起牀 同一類，都接 他：N(他) 只算一次（once）；詞彙外的前文不算（build 也丟掉那些二元組）。"""
+        vocab = L.BigramLM(self.path, classes=False).vocab
+        bi = {("起床", "他"): 1, ("起牀", "他"): 1, ("沒見過", "佔"): 3}
+        self.assertEqual(kn_cont.continuation(bi, self.cls, 1, vocab), {"他": 1})
 
     def test_thetas_differ(self):
         bi = {("他", "起床"): 1, ("佔", "起床"): 2, ("占", "起床"): 3}   # N(起床) = 3、2、1
