@@ -9,6 +9,14 @@ public enum PanelPlacement {
     /// above the line (no room below) uses the same value; Apple's there is not measured.
     public static let gap: CGFloat = 6
 
+    /// What the panel remembers as its place after showing at `origin`: the origin itself when the client gave a line (or
+    /// there was nothing remembered), else the old anchor untouched. `topLeft` may clamp the anchor for a tall panel; if that
+    /// clamped value were remembered, one tall window would permanently raise the shorter panels shown after it.
+    public static func anchor(afterShowingAt origin: NSPoint, lineRect: NSRect?, lastOrigin: NSPoint?) -> NSPoint {
+        guard lineRect == nil, let lastOrigin else { return origin }
+        return lastOrigin
+    }
+
     /// The bar's top-left corner.
     /// - `lineRect`: the text line (origin bottom-left); `nil` reuses `lastOrigin` (clamped into its screen's visible frame
     ///   for `size`), and with none either, the bar sits at the bottom-left of the main screen's visible frame.

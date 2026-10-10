@@ -311,8 +311,9 @@ final class CandidatePanelAdapter: CandidatePanel {
     /// hidden. `VerticalLayout.plan` decides from it whether the next output resets and how big the vertical panel is
     /// (candidate-vertical contract section 2.4).
     private var shownPlan: VerticalLayout.Plan?
-    /// The vertical panel's scroll indicator: kept while it is needed and only moved and resized (a new view on every
-    /// output flickered the horizontal grid's, s3b2 section 9.1), removed when the list fits or the content resets.
+    /// The vertical panel's scroll indicator: kept while it is needed and only moved and resized, so a scroll does not add and
+    /// remove a view on every key; removed when the list fits or the content resets. Whether a new view each time would
+    /// flicker was not measured.
     private var thumb: FilledView?
     /// Widen-only column widths of the open grid (section 9); empty when collapsed or hidden.
     private var columnWidths: [CGFloat] = []
@@ -389,15 +390,18 @@ final class CandidatePanelAdapter: CandidatePanel {
     }
 
     /// Candidate-vertical contract sections 2.3 and 2.4: one column of up to nine rows, a capsule across the row's width, the
-    /// scroll indicator in a gutter on the right (candidate window only). The reset and the size come from
-    /// `VerticalLayout.plan`; `plan.reset` has already cleared the content when this runs.
+    /// scroll indicator in a gutter on the right (candidate window only). The reset (`VerticalLayout.resets`, decided in `show`)
+    /// has already cleared the content when this runs; the size and the gutter come from `VerticalLayout.plan`.
     private func showVertical(_ candidates: [String], notes: [String?], selected: Int, first: Int, total: Int,
-                              lineRect: NSRect?, plan: VerticalLayout.Plan) {
+                              kind: Int, lineRect: NSRect?) {
         let update = cellSet.update(candidates: candidates, notes: notes, selected: selected, first: first, columns: 0, renumber: true)
         let cells = update.cells
+        // The size comes from the cells that exist now (reused ones keep their measured width), so nothing is measured twice.
+        let plan = VerticalLayout.plan(previous: shownPlan, kind: kind, count: candidates.count, total: total,
+                                       contentWidths: cells.map(\.contentWidth))
+        shownPlan = plan
         let size = plan.size
-        let scrolls = total > candidates.count
-        let gutter = scrolls ? VerticalLayout.scrollGutter : 0
+        let gutter = plan.gutter
         update.removed.forEach { $0.removeFromSuperview() }
         let rowWidth = size.width - VerticalLayout.sideInset * 2 - gutter
         for (i, cell) in cells.enumerated() {
@@ -434,10 +438,12 @@ final class CandidatePanelAdapter: CandidatePanel {
         let origin = PanelPlacement.topLeft(
             lineRect: lineRect, lastOrigin: lastOrigin, size: size, alignOffset: alignOffset,
             screens: screens.map(\.visibleFrame), rectScreen: rectScreen, main: main)
-        lastOrigin = origin
-        // No animation: a vertical window never expands or collapses, and a widening is rare (a wider name scrolls in).
-        if window.frame.size != size { window.setContentSize(size) }
-        if window.frame.origin.x != origin.x || window.frame.maxY != origin.y { window.setFrameTopLeftPoint(origin) }
+        lastOrigin = PanelPlacement.anchor(afterShowingAt: origin, lineRect: lineRect, lastOrigin: lastOrigin)
+        // No animation: a vertical window never expands or collapses, and a widening is rare (a wider name scrolls in). One
+        // setFrame with the final rect anchored at its top-left, so a change of height (the prediction row) is not made in two
+        // steps (size, then origin).
+        let frame = NSRect(x: origin.x, y: origin.y - size.height, width: size.width, height: size.height)
+        if window.frame != frame { window.setFrame(frame, display: true) }
         if !window.isVisible { window.orderFrontRegardless() }
     }
 
@@ -465,19 +471,17 @@ final class CandidatePanelAdapter: CandidatePanel {
               lineRect: NSRect?, appearance: NSAppearance?, glassTint: Double) {
         if window.appearance?.name != appearance?.name { window.appearance = appearance }
         applyTint(glassTint)
-        // Sizes and resets of the vertical panel are a pure function (ShanjieKit); the widths it needs are those of the cells
-        // this output will show, measured before any cell is made.
-        let widths = vertical == 0 ? [] : candidates.indices.map {
-            CandidateCell.contentWidth(numberText: String($0 + 1), text: candidates[$0], note: notes[$0])
+        // A change of value (the bar, a prediction row, a vertical window, in any order) clears what was on screen first
+        // (`VerticalLayout.resets`); the vertical path then makes its cells and asks `VerticalLayout.plan` for the size.
+        if VerticalLayout.resets(previous: shownPlan, kind: vertical) {
+            resetContent()
+            shownPlan = nil
         }
-        let gutter = vertical == VerticalLayout.candidates && total > candidates.count ? VerticalLayout.scrollGutter : 0
-        let plan = VerticalLayout.plan(previous: shownPlan, kind: vertical, count: candidates.count, contentWidths: widths, gutter: gutter)
-        if plan.reset { resetContent() }
-        shownPlan = plan
         if vertical != 0 {
-            showVertical(candidates, notes: notes, selected: selected, first: first, total: total, lineRect: lineRect, plan: plan)
+            showVertical(candidates, notes: notes, selected: selected, first: first, total: total, kind: vertical, lineRect: lineRect)
             return
         }
+        shownPlan = VerticalLayout.plan(previous: shownPlan, kind: 0, count: 0, total: 0, contentWidths: [])
         let grid = columns > 0
 
         // Only the selection moved (section 8.7): keep the cells, change which one is selected and which
@@ -597,7 +601,7 @@ final class CandidatePanelAdapter: CandidatePanel {
         let origin = PanelPlacement.topLeft(
             lineRect: lineRect, lastOrigin: lastOrigin, size: size, alignOffset: alignOffset,
             screens: screens.map(\.visibleFrame), rectScreen: rectScreen, main: main)
-        lastOrigin = origin
+        lastOrigin = PanelPlacement.anchor(afterShowingAt: origin, lineRect: lineRect, lastOrigin: lastOrigin)
         let frame = NSRect(x: origin.x, y: origin.y - size.height, width: size.width, height: size.height)
         // Only the selection moved while an expand or collapse runs (autorepeat on the arrow keys):
         // the cells were updated above and the running animation already goes to this frame and these

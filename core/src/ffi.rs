@@ -536,8 +536,9 @@ pub unsafe extern "C" fn shanjie_engine_set_prediction(
 }
 
 /// Candidate-vertical contract section 2.2. `enabled` 0 or 1 (default 0): the orientation of the candidate windows that
-/// open from now on. Returns the snapshot like `set_prediction` (an open window keeps its orientation, so it is the
-/// same as before the call); any other value changes nothing and returns 2.
+/// open from now on. Returns the snapshot like `set_prediction`: an open candidate window keeps its orientation, a
+/// prediction row on screen is re-rendered in the new one (`candidate_vertical` 2 or 0); any other value changes nothing
+/// and returns 2.
 ///
 /// # Safety
 /// `engine` is NULL or a live handle; `out` is NULL or valid for one pointer write.

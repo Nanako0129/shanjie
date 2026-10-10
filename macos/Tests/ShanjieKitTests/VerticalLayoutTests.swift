@@ -65,28 +65,51 @@ final class VerticalLayoutTests: XCTestCase {
     }
 
     @MainActor
-    func testContentWidthIsWhatTheCellNeedsAndSurvivesAStretchedFrame() {
+    func testContentWidthSurvivesAStretchedFrameAndRenumbering() {
         let cell = CandidateCell(position: 0, numberText: "3", showsNumber: true, text: "善解", note: "名稱", selected: false)
-        XCTAssertEqual(cell.contentWidth, CandidateCell.contentWidth(numberText: "3", text: "善解", note: "名稱"))
         XCTAssertEqual(cell.contentWidth, cell.frame.width)
         let before = cell.contentWidth
         cell.frame.size.width = 400  // the vertical window stretches it
         XCTAssertEqual(cell.contentWidth, before)
         cell.setNumber("7")
         XCTAssertEqual(cell.numberText, "7")
-        XCTAssertEqual(cell.contentWidth, CandidateCell.contentWidth(numberText: "7", text: "善解", note: "名稱"))
+        XCTAssertEqual(cell.contentWidth, CandidateCell(position: 0, numberText: "7", showsNumber: true, text: "善解", note: "名稱", selected: false).contentWidth)
+    }
+
+    /// The system font's digits are proportional, so a cell sized by its own number puts the candidate at a different x for
+    /// each number. The vertical window's cells give the number a fixed slot: the candidate sits at the same x for 1-9 and a
+    /// renumbering does not move it or change the width. The bar's and the grid's cells stay as they were.
+    @MainActor
+    func testVerticalCandidateXIsTheSameForNumbersOneToNine() {
+        let numbers = (1...9).map(String.init)
+        let vertical = numbers.map { CandidateCell(position: 0, numberText: $0, showsNumber: true, text: "字", note: nil, selected: false, fixedNumberSlot: true) }
+        XCTAssertEqual(Set(vertical.map(\.candidateMinX)).count, 1, "one x for every number")
+        XCTAssertEqual(Set(vertical.map(\.contentWidth)).count, 1)
+        let widest = numbers.map { CandidateCell(position: 0, numberText: $0, showsNumber: true, text: "字", note: nil, selected: false).candidateMinX }.max()
+        XCTAssertEqual(vertical[0].candidateMinX, widest, "the slot is the widest digit")
+        let cell = vertical[0]
+        let x = cell.candidateMinX
+        for n in numbers { cell.setNumber(n); XCTAssertEqual(cell.candidateMinX, x, "renumbered to \(n)") }
+        // Through CandidateCells.update the vertical rule gives the same result after a scroll.
+        let cells = CandidateCells()
+        let none = [String?](repeating: nil, count: 9)
+        let list = (0..<12).map { "字\($0)" }
+        _ = cells.update(candidates: Array(list[0..<9]), notes: none, selected: 0, first: 0, columns: 0, renumber: true)
+        let scrolled = cells.update(candidates: Array(list[1..<10]), notes: none, selected: 0, first: 1, columns: 0, renumber: true)
+        XCTAssertEqual(Set(scrolled.cells.map(\.candidateMinX)).count, 1)
+        // The bar keeps each number's own width: its cells for "1" and "8" differ (the proportional digits).
+        let bar = ["1", "8"].map { CandidateCell(position: 0, numberText: $0, showsNumber: true, text: "字", note: nil, selected: false) }
+        XCTAssertNotEqual(bar[0].candidateMinX, bar[1].candidateMinX)
     }
 
     // MARK: reset and size, contract section 2.4
 
-    private func w(_ widths: [CGFloat]) -> [CGFloat] { widths }
-
     func testPlanWindowOverAPredictionRowStartsFromTheMinimum() {
-        let row = VerticalLayout.plan(previous: nil, kind: 2, count: 3, contentWidths: [300, 120, 80], gutter: 0)
+        let row = VerticalLayout.plan(previous: nil, kind: 2, count: 3, total: 3, contentWidths: [300, 120, 80])
         XCTAssertTrue(row.reset, "first output after nothing")
         XCTAssertEqual(row.rows, 3)
         XCTAssertEqual(row.width, 300 + VerticalLayout.sideInset * 2)
-        let window = VerticalLayout.plan(previous: row, kind: 1, count: 9, contentWidths: [100, 80], gutter: 9)
+        let window = VerticalLayout.plan(previous: row, kind: 1, count: 9, total: 30, contentWidths: [100, 80])
         XCTAssertTrue(window.reset, "2 -> 1 always resets")
         XCTAssertEqual(window.rows, 9)
         XCTAssertEqual(window.size.height, VerticalLayout.height(rows: 9))
@@ -94,8 +117,8 @@ final class VerticalLayoutTests: XCTestCase {
     }
 
     func testPlanRowAfterAWindowTakesItsOwnHeight() {
-        let window = VerticalLayout.plan(previous: nil, kind: 1, count: 9, contentWidths: [260], gutter: 9)
-        let row = VerticalLayout.plan(previous: window, kind: 2, count: 2, contentWidths: [50, 60], gutter: 0)
+        let window = VerticalLayout.plan(previous: nil, kind: 1, count: 9, total: 30, contentWidths: [260])
+        let row = VerticalLayout.plan(previous: window, kind: 2, count: 2, total: 2, contentWidths: [50, 60])
         XCTAssertTrue(row.reset, "1 -> 2 always resets")
         XCTAssertEqual(row.rows, 2)
         XCTAssertEqual(row.size.height, VerticalLayout.height(rows: 2))
@@ -103,42 +126,55 @@ final class VerticalLayoutTests: XCTestCase {
     }
 
     func testPlanConsecutiveRowsFollowTheCountAndOnlyWiden() {
-        let a = VerticalLayout.plan(previous: nil, kind: 2, count: 5, contentWidths: [250, 100], gutter: 0)
-        let b = VerticalLayout.plan(previous: a, kind: 2, count: 3, contentWidths: [100, 90, 80], gutter: 0)
+        let a = VerticalLayout.plan(previous: nil, kind: 2, count: 5, total: 5, contentWidths: [250, 100])
+        let b = VerticalLayout.plan(previous: a, kind: 2, count: 3, total: 3, contentWidths: [100, 90, 80])
         XCTAssertFalse(b.reset)
         XCTAssertEqual(b.rows, 3, "the height follows the count on every output")
         XCTAssertEqual(b.size.height, VerticalLayout.height(rows: 3))
         XCTAssertEqual(b.width, a.width, "the width does not shrink")
-        let c = VerticalLayout.plan(previous: b, kind: 2, count: 4, contentWidths: [400], gutter: 0)
+        let c = VerticalLayout.plan(previous: b, kind: 2, count: 4, total: 4, contentWidths: [400])
         XCTAssertFalse(c.reset)
         XCTAssertEqual(c.rows, 4)
         XCTAssertEqual(c.width, 400 + VerticalLayout.sideInset * 2, "a wider row widens it")
-        let d = VerticalLayout.plan(previous: c, kind: 2, count: 4, contentWidths: [60], gutter: 0)
+        let d = VerticalLayout.plan(previous: c, kind: 2, count: 4, total: 4, contentWidths: [60])
         XCTAssertEqual(d.width, c.width)
     }
 
     func testPlanWindowKeepsItsHeightFromTheOpeningAndOnlyWidens() {
-        let open = VerticalLayout.plan(previous: nil, kind: 1, count: 9, contentWidths: [100], gutter: 9)
+        let open = VerticalLayout.plan(previous: nil, kind: 1, count: 9, total: 30, contentWidths: [100])
         XCTAssertEqual(open.rows, 9)
-        let scrolled = VerticalLayout.plan(previous: open, kind: 1, count: 9, contentWidths: [300], gutter: 9)
+        let scrolled = VerticalLayout.plan(previous: open, kind: 1, count: 9, total: 30, contentWidths: [300])
         XCTAssertFalse(scrolled.reset)
         XCTAssertEqual(scrolled.rows, 9)
         XCTAssertEqual(scrolled.width, 300 + VerticalLayout.sideInset * 2 + 9)
-        let again = VerticalLayout.plan(previous: scrolled, kind: 1, count: 9, contentWidths: [100], gutter: 9)
+        let again = VerticalLayout.plan(previous: scrolled, kind: 1, count: 9, total: 30, contentWidths: [100])
         XCTAssertEqual(again.width, scrolled.width)
         // A short list: the height is its count, from the opening on.
-        XCTAssertEqual(VerticalLayout.plan(previous: nil, kind: 1, count: 4, contentWidths: [100], gutter: 0).rows, 4)
+        XCTAssertEqual(VerticalLayout.plan(previous: nil, kind: 1, count: 4, total: 4, contentWidths: [100]).rows, 4)
+    }
+
+    /// The scroll gutter is decided once, in the plan: only the candidate window, only with a list longer than its rows.
+    func testPlanGutterIsDecidedOnceInThePlan() {
+        let long = VerticalLayout.plan(previous: nil, kind: 1, count: 9, total: 30, contentWidths: [300])
+        XCTAssertEqual(long.gutter, VerticalLayout.scrollGutter)
+        XCTAssertEqual(long.width, 300 + VerticalLayout.sideInset * 2 + VerticalLayout.scrollGutter)
+        XCTAssertEqual(VerticalLayout.plan(previous: nil, kind: 1, count: 9, total: 9, contentWidths: [300]).gutter, 0, "the list fits")
+        XCTAssertEqual(VerticalLayout.plan(previous: nil, kind: 2, count: 9, total: 30, contentWidths: [300]).gutter, 0, "a prediction row has none")
+        XCTAssertEqual(VerticalLayout.plan(previous: nil, kind: 0, count: 9, total: 30, contentWidths: []).gutter, 0)
+        XCTAssertTrue(VerticalLayout.resets(previous: nil, kind: 1))
+        XCTAssertFalse(VerticalLayout.resets(previous: long, kind: 1))
+        XCTAssertTrue(VerticalLayout.resets(previous: long, kind: 2))
     }
 
     func testPlanEveryChangeOfValueResetsAndSameValueDoesNot() {
         for from in 0...2 {
             for to in 0...2 {
-                let previous = VerticalLayout.plan(previous: nil, kind: from, count: 4, contentWidths: [100], gutter: 0)
-                let next = VerticalLayout.plan(previous: previous, kind: to, count: 4, contentWidths: [100], gutter: 0)
+                let previous = VerticalLayout.plan(previous: nil, kind: from, count: 4, total: 4, contentWidths: [100])
+                let next = VerticalLayout.plan(previous: previous, kind: to, count: 4, total: 4, contentWidths: [100])
                 XCTAssertEqual(next.reset, from != to, "\(from) -> \(to)")
             }
         }
-        XCTAssertTrue(VerticalLayout.plan(previous: nil, kind: 0, count: 3, contentWidths: [], gutter: 0).reset, "nothing on screen before")
+        XCTAssertTrue(VerticalLayout.plan(previous: nil, kind: 0, count: 3, total: 3, contentWidths: []).reset, "nothing on screen before")
     }
 
     // MARK: width: at least 226, widen-only
@@ -216,6 +252,19 @@ final class VerticalLayoutTests: XCTestCase {
         let rightScreen = NSRect(x: 1440, y: 0, width: 1000, height: 800)
         let second = PanelPlacement.topLeft(lineRect: nil, lastOrigin: NSPoint(x: 2300, y: 60), size: size, alignOffset: 10, screens: [screen, rightScreen], rectScreen: nil, main: 0)
         XCTAssertEqual(second, NSPoint(x: 2440 - 226, y: size.height))
+        // The remembered place is the anchor, not the clamped result: after a tall panel was clamped, a short one asks for the
+        // original anchor again and gets it.
+        let anchor = NSPoint(x: 100, y: 60)
+        let tall = PanelPlacement.topLeft(lineRect: nil, lastOrigin: anchor, size: size, alignOffset: 10, screens: [screen], rectScreen: nil, main: 0)
+        XCTAssertEqual(tall.y, size.height, "the tall panel was raised")
+        let kept2 = PanelPlacement.anchor(afterShowingAt: tall, lineRect: nil, lastOrigin: anchor)
+        XCTAssertEqual(kept2, anchor, "the anchor is not replaced by the clamped origin")
+        let shortSize = NSSize(width: 100, height: 28)
+        let shortBar = PanelPlacement.topLeft(lineRect: nil, lastOrigin: kept2, size: shortSize, alignOffset: 10, screens: [screen], rectScreen: nil, main: 0)
+        XCTAssertEqual(shortBar, anchor, "the short bar returns to the original anchor")
+        // With a line the origin is remembered; with nothing remembered, too.
+        XCTAssertEqual(PanelPlacement.anchor(afterShowingAt: tall, lineRect: NSRect(x: 1, y: 2, width: 3, height: 4), lastOrigin: anchor), tall)
+        XCTAssertEqual(PanelPlacement.anchor(afterShowingAt: tall, lineRect: nil, lastOrigin: nil), tall)
         // Clamped to the right edge by the panel's own width.
         let right = NSRect(x: 1400, y: 600, width: 8, height: 18)
         let clamped = PanelPlacement.topLeft(lineRect: right, lastOrigin: nil, size: size, alignOffset: 10, screens: [screen], rectScreen: 0, main: 0)

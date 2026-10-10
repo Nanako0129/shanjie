@@ -139,7 +139,7 @@ struct SettingsForm: View {
                 }
             }
             Section("外觀") {
-                // Before the glass tint (candidate-vertical contract section 2.1). Applies to the next window that opens.
+                // Before the glass tint (candidate-vertical contract section 2.1). A candidate window already open keeps its orientation (the next one uses the new setting); a prediction row on screen turns at once.
                 Picker("候選窗方向", selection: Binding(get: { model.candidateVertical }, set: { model.setCandidateVertical($0) })) {
                     Text("橫排").tag(false)
                     Text("直排").tag(true)

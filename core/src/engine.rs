@@ -770,8 +770,9 @@ impl Engine {
     }
 
     /// Orientation of the candidate windows that open from now on (default horizontal; candidate-vertical contract
-    /// section 2.2). A window already open keeps the orientation it opened with, so the snapshot is the same as before the
-    /// call.
+    /// section 2.2). A candidate window already open keeps the orientation it opened with. A prediction row has no opening
+    /// and follows the setting on every output (section 2.4), so a row on screen is re-rendered in the new orientation in
+    /// the returned snapshot; with a candidate window open or nothing shown the snapshot equals the output before the call.
     pub fn set_candidate_vertical(&mut self, on: bool) -> Result<Output, EngineError> {
         self.cand_vertical = on;
         self.handled()
