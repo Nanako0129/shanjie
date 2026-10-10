@@ -38,6 +38,9 @@ def prepare():
     vocab = sorted(uni, key=lambda s: (-uni[s], s))
     ids = {w: i for i, w in enumerate(vocab)}
     V = len(vocab); ids["<s>"], ids["</s>"] = V, V + 1
+    # model-v5 §8（加法計數）：詞包詞旁邊的一般詞可能只有二元組、沒有單詞計數，丟掉這種二元組（和 tools/build_lm.py 相同）。
+    # 沒有加法計數的輸入不會出現（期望次數的二元組不會比兩端的單詞多），edges 逐位元組不變。
+    bi = {k: v for k, v in bi.items() if k[0] in ids and k[1] in ids}
     n = len(bi)
     src = np.fromiter((ids[a] for a, b in bi), np.int32, n)
     dst = np.fromiter((ids[b] for a, b in bi), np.int32, n)
