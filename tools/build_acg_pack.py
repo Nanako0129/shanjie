@@ -5,6 +5,9 @@
 用法：python3 tools/build_acg_pack.py                  抓取（有快取就用快取）並寫入 data/packs/
       python3 tools/build_acg_pack.py --offline        只用快取，缺了就中止
       --cache DIR  --out DIR  --report DIR            快取（預設 ~/.cache/shanjie/sources/acg）、輸出、報告（預設 build/acg-pack）
+      --rule-lm DIR                                   (c) 規則與衝突偵測用的規則模型（契約 A3.3；預設 build/rule-lm，雜湊不符就中止）
+      --a3 off                                        開發用：關掉 A3.1、A3.2、A3.4，重建 v0.4.0 的詞包（契約 A3.5 第 3 項 (i)）
+      --recheck                                       不重建：用 data/lm 的出貨模型重驗 --out 裡的詞包（契約 A3.5 第 6 項）
 
 只連 zh.wikipedia.org/w/api.php 與 query.wikidata.org，依序送出、每秒不超過 1 個、帶 User-Agent 與 maxlag=5。
 讀音靠 tools/readings.py（需要萌典與小麥的破音字表，路徑見該檔），同音衝突靠評測 CLI（target/release/shanjie-eval，
@@ -41,6 +44,19 @@ LAST_YEAR, YEARS = 2026, 7        # 契約 A2.1：年度動畫清單「N年日�
 MAX_REQUESTS, MAX_CACHE = 5000, 1_500_000_000   # 契約 A2.7 的停止條件：一次建置的網路請求數、快取位元組數
 HAN = re.compile(r"^[一-鿿]{2,10}$")
 TAG = "acg"
+# 契約 A3.2：「v0.4.0 的詞」固定取自提交進版控的詞表（v0.4.0 tag 的 acg-add.tsv 第二欄、位元組排序去重），不讀會被建置覆寫的 acg-add.tsv。
+V040_WORDS = os.path.join(PACKS, "acg-v040-words.txt")
+V040_SHA = "efb2d45d9747f2101aa76614fd3a7cabddd90b5cf07bab7cf19be41204113fba"
+# 契約 A3.3：(c) 規則與衝突偵測釘住的規則模型（model-v4 的 bigram.sjlm、classes-v2 的 classes.sjc）。
+RULE_LM_DIR = os.path.join(ROOT, "build", "rule-lm")
+RULE_LM_SHA = {"bigram.sjlm": "06768f2949cf8b135d1f591056ffb16f3ae3f6d70aef5911ffd55de134250322",
+               "classes.sjc": "9e343d3e3ce83f1008e371f62de5d8e62721df97e7b02562503ef2cc57226f3f"}
+RULE_LM_HELP = "gh release download model-v4 -p bigram.sjlm -D build/rule-lm; gh release download classes-v2 -p classes.sjc -D build/rule-lm"
+# 契約 A3.2：角色列表整頁算人物段落之後，稱號會混進來（A3.0 樣本裡出現的結尾）；只擋 v0.4.0 詞包沒有的新詞。
+TITLE_END = re.compile(r"(女王|王子|公主|國王|王妃|皇后|皇帝|殿下|大人|舞娘)$")
+A3_MANUAL = frozenset({"獄門疆", "虎杖悠仁"})      # 契約 A3.4：`--a3 off` 時不併入
+CHECK_SEED, CHECK_N = 20261010, 40               # 契約 A3.5 第 1 項：檢查集的固定種子與抽樣數
+CHECK_FIXED = ("洛琪希", "塞妮絲", "瑞傑路德", "獄門疆", "虎杖悠仁")
 SPARQL = """SELECT ?w ?sl ?art ?twl WHERE {
   VALUES ?cls { wd:Q63952888 wd:Q20650540 }
   ?w wdt:P31 ?cls ; wikibase:sitelinks ?sl .
@@ -583,8 +599,8 @@ ROLE_END = re.compile(r"(母親|父親|哥哥|姊姊|姐姐|弟弟|妹妹|爺爺
 ROLE_ANY = re.compile(r"社團|俱樂部|同好會|研究會|委員會|學生會|粉絲|觀眾|路人|店員|店長|護士|警察|刑警|警官|醫生|老闆|客人|居民|村民|士兵|聲優|配音|旁白|廣播")
 
 
-def raw_candidates(root):
-    """條目裡登場人物段落下的 (種類, 文字)。"""
+def raw_candidates(root, whole_page=False):
+    """條目裡登場人物段落下的 (種類, 文字, 是否在登場人物小標題下)。whole_page（契約 A3.2，角色列表條目）：整頁都算人物段落，段落外的照樣產出（第三項為 False）。"""
     stack = []
     for n in root.walk():
         if n.tag in ("h2", "h3", "h4", "h5"):
@@ -592,38 +608,55 @@ def raw_candidates(root):
             while stack and stack[-1][0] >= lv:
                 stack.pop()
             stack.append((lv, n.text().strip(), n))
-        if not any(CHAR_RE.search(t) and not CHAR_NEG.search(t) for _, t, _ in stack):
+        in_sec = any(CHAR_RE.search(t) and not CHAR_NEG.search(t) for _, t, _ in stack)
+        if not in_sec and not whole_page:
             continue
         if n.tag == "dt":
-            yield "dt", "".join(k.text() for k in n.kids if k.tag not in ("ul", "ol", "dl", "table", "div"))
+            yield "dt", "".join(k.text() for k in n.kids if k.tag not in ("ul", "ol", "dl", "table", "div")), in_sec
         elif n.tag == "li":
             if "toclevel-1" not in str(n.attrs):
-                yield "li", "".join(k.text() for k in n.kids if k.tag not in ("ul", "ol", "dl", "table", "div"))
+                yield "li", "".join(k.text() for k in n.kids if k.tag not in ("ul", "ol", "dl", "table", "div")), in_sec
         elif n.tag == "tr":
             cells = [k for k in n.kids if k.tag in ("th", "td")]
             if len(cells) >= 2:
                 for c in cells:
                     t = c.text().strip()
                     if t:
-                        yield "tr", t
+                        yield "tr", t, in_sec
                         break
         elif n.tag == "p":
             b = [k for k in n.kids if k.tag != "#t"][:1]
             if b and b[0].tag in ("b", "strong"):
-                yield "p-bold", b[0].text()
+                yield "p-bold", b[0].text(), in_sec
         elif n.tag in ("h3", "h4", "h5") and stack and stack[-1][2] is n:
-            yield "heading", n.text()
+            yield "heading", n.text(), in_sec
 
 
-def names_of(html):
-    """條目 HTML → [(名字, 種類, 原文前 120 字)]，只有單一名字（含 ・／空白的複合寫法不收）。"""
+class Name(collections.namedtuple("Name", "name kind snip full outside")):
+    """full：含間隔號的全名（A3.1 拆出來的部分才有），其他是 None；outside：不在登場人物小標題下（A3.2 才多收的）。"""
+
+
+INTERPUNCT = re.compile(r"[・·•･]")
+SPACE_SEP = re.compile(r"[ 　/／]")
+
+
+def names_of(html, whole_page=False, a3=True):
+    """條目 HTML → [Name(名字, 種類, 原文前 120 字, 全名, 段落外)]。名字欄含空白、斜線的複合寫法不收；含間隔號 `・·•･` 的（契約 A3.1，a3 才收）
+    依間隔號拆成各部分，每一部分各自照單名的規則過濾（這裡是 HANX、2–10 字、STOP、STOP_RE，其餘在 `strict_ok`），全名記在 full。"""
     out = []
-    for kind, raw in raw_candidates(dom(html)):
+    for kind, raw, in_sec in raw_candidates(dom(html), whole_page and a3):
         s = re.sub(r"\[[^\]]*\]", "", raw).strip()
         m = CUT.search(s)
         head = (s[:m.start()] if m else s).strip()
-        if head and not SEP.search(head) and HANX.match(head) and 2 <= len(head) <= 10 and head not in STOP and not STOP_RE.search(head):
-            out.append((head, kind, s[:120]))
+        if not head:
+            continue
+        if a3 and INTERPUNCT.search(head) and not SPACE_SEP.search(head):
+            parts, full = INTERPUNCT.split(head), head
+        elif SEP.search(head):
+            continue
+        else:
+            parts, full = [head], None
+        out += [Name(p, kind, s[:120], full, not in_sec) for p in parts if HANX.match(p) and 2 <= len(p) <= 10 and p not in STOP and not STOP_RE.search(p)]
     return out
 
 
@@ -642,12 +675,13 @@ def has_original(content):
     return bool(KANA.search(head) or any(t.upper() not in NOT_ORIGINAL for t in LATIN.findall(head)))
 
 
-def strict_ok(name, kind, snip, base):
-    """嚴格過濾（契約 A.1）：不在基底、不是小標題、不是關係詞組、不是泛稱，而且名字緊接的括號裡有原名（契約 A2.2，`has_original`）。"""
+def strict_ok(name, kind, snip, base, full=None):
+    """嚴格過濾（契約 A.1）：不在基底、不是小標題、不是關係詞組、不是泛稱，而且名字緊接的括號裡有原名（契約 A2.2，`has_original`）。
+    含間隔號的名字（契約 A3.1）：name 是其中一部分，full 是全名；原名的判斷看全名緊接的括號。"""
     if not HAN.match(name) or name in base or kind == "heading" or REL.search(name) or ROLE_END.search(name) or ROLE_ANY.search(name):
         return False
-    sn = snip.replace("\n", " ").strip()
-    m = ORIGINAL.match(sn[len(name):]) if sn.startswith(name) else None
+    sn, lead = snip.replace("\n", " ").strip(), full or name
+    m = ORIGINAL.match(sn[len(lead):]) if sn.startswith(lead) else None
     return bool(m and has_original(m.group(1)))
 
 
@@ -763,13 +797,13 @@ def eval_bin():
     return os.path.join(ROOT, "target", "release", "shanjie-eval")
 
 
-def top1(pairs, profile, packs_dir=None):
-    """評測 CLI 解碼每個 (詞, 讀音音節串)，回傳第一名。packs_dir 給了就開詞包（`--packs acg`）。"""
+def top1(pairs, profile, packs_dir=None, lm=LM):
+    """評測 CLI 解碼每個 (詞, 讀音音節串)，回傳第一名。packs_dir 給了就開詞包（`--packs acg`）；lm 預設是出貨的 data/lm（契約 A3.3：建置用的解碼經 `--rule-lm` 改傳規則模型）。"""
     with tempfile.TemporaryDirectory() as d:
         rows, dump = os.path.join(d, "rows.txt"), os.path.join(d, "dump.txt")
         with open(rows, "w", encoding="utf-8") as f:
             f.writelines(f"|{w}|{' '.join(syls)}\n" for w, syls in pairs)
-        cmd = [eval_bin(), "--lm", LM, "--profile", profile, "--rows", rows, "--dump", dump]
+        cmd = [eval_bin(), "--lm", lm, "--profile", profile, "--rows", rows, "--dump", dump]
         if packs_dir:
             cmd += ["--packs", "acg", "--packs-dir", packs_dir]
         subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL)
@@ -846,10 +880,64 @@ def read_exclude(path):
     return out
 
 
+def sha256_file(path):
+    with open(path, "rb") as f:
+        return hashlib.sha256(f.read()).hexdigest()
+
+
+def load_v040(path=V040_WORDS, sha=V040_SHA):
+    """v0.4.0 詞包的詞（契約 A3.2）；缺檔或雜湊不符就中止。"""
+    if not os.path.exists(path) or sha256_file(path) != sha:
+        raise SystemExit(f"{path}: missing or not the v0.4.0 word list (SHA-256 {sha})")
+    with open(path, encoding="utf-8") as f:
+        return frozenset(l.rstrip("\n") for l in f if l.strip())
+
+
+def check_rule_lm(directory=RULE_LM_DIR):
+    """契約 A3.3：規則模型的兩個檔都在而且雜湊相符，回傳 bigram.sjlm 的路徑（classes.sjc 由評測 CLI 從同一個資料夾載入）；否則中止並附下載指令。"""
+    for name, sha in RULE_LM_SHA.items():
+        path = os.path.join(directory, name)
+        if not os.path.exists(path) or sha256_file(path) != sha:
+            raise SystemExit(f"rule model: {path} is missing or its SHA-256 is not {sha}; download it: {RULE_LM_HELP}")
+    return os.path.join(directory, "bigram.sjlm")
+
+
+def rule_decoder(lm):
+    """建置用的解碼器：`top1` 固定用規則模型 lm。"""
+    return lambda pairs, prof, packs=None: top1(pairs, prof, packs, lm=lm)
+
+
+def read_keep_both(path):
+    """acg-keep-both.tsv：讀音、詞包詞（契約 A3.3a，使用者決定兩種寫法都留、順序照 model-v5）。回傳 {(讀音, 詞)}；沒有檔就是空的。"""
+    if not os.path.exists(path):
+        return set()
+    out = set()
+    for r in read_tsv(path):
+        if len(r) != 2 or not HAN.match(r[1]) or len(r[0].split()) != len(r[1]):
+            raise SystemExit(f"{path}: bad keep-both row: {r}")
+        out.add((r[0], r[1]))
+    return out
+
+
+def open_collisions(found, decided, keep_now, keep_both):
+    """沒處置的衝突 {讀音: [條目]}。已處置：詞 e[0] 在處置列裡被點名、而且開了之後的第一名 e[4] 就是處置列的保留的詞（`first_named`，2026-10-10：
+    被舊處置蓋住的新詞搶走第一名，或點名的詞沒排在保留的詞前面，都要列出）。keep-both（契約 A3.3a）：詞包詞和開詞包後的第一名都是該讀音的 keep-both 詞才豁免，
+    不做 `first_named` 檢查；同讀音的其他詞照樣列出。"""
+    col = {}
+    for r, v in found.items():
+        left = [e for e in v if not ((r, e[0]) in keep_both and (r, e[4]) in keep_both) and ((r, e[0]) not in decided or e[4] != keep_now.get(r))]
+        if left:
+            col[r] = left
+    return col
+
+
 # ---------------------------------------------------------------- 主流程
 
-def build(api, groups_tsv=os.path.join(PACKS, "acg-groups.tsv"), collisions_tsv=os.path.join(PACKS, "acg-collisions.tsv"), manual_tsv=os.path.join(PACKS, "acg-manual.tsv"), decode=top1, readings=make_readings, exclude_tsv=os.path.join(PACKS, "acg-exclude.tsv"), years=range(LAST_YEAR - YEARS + 1, LAST_YEAR + 1), min_year_works=MIN_YEAR_WORKS):
+def build(api, groups_tsv=os.path.join(PACKS, "acg-groups.tsv"), collisions_tsv=os.path.join(PACKS, "acg-collisions.tsv"), manual_tsv=os.path.join(PACKS, "acg-manual.tsv"), decode=top1, readings=make_readings, exclude_tsv=os.path.join(PACKS, "acg-exclude.tsv"), years=range(LAST_YEAR - YEARS + 1, LAST_YEAR + 1), min_year_works=MIN_YEAR_WORKS, a3=True, v040_words=V040_WORDS, v040_sha=V040_SHA, keep_both_tsv=os.path.join(PACKS, "acg-keep-both.tsv"), info=None):
+    """a3：關掉就是 v0.4.0 的抽取（A3.1、A3.2、A3.4 不做）。info：給了就把報告要用的中間結果放進去（詞的來源、讀音）。"""
     log = lambda *a: print(*a, file=sys.stderr)
+    v040 = load_v040(v040_words, v040_sha)
+    keep_both = read_keep_both(keep_both_tsv)
     gr = read_groups(groups_tsv)
     listing = pages(api, ["Template:CGroup/list"])["Template:CGroup/list"]
     items = list_items(listing["text"])
@@ -880,6 +968,7 @@ def build(api, groups_tsv=os.path.join(PACKS, "acg-groups.tsv"), collisions_tsv=
     ws = sorted({x["w"]["value"].rsplit("/", 1)[1]: (x["w"]["value"].rsplit("/", 1)[1], wiki_title(x["art"]["value"]), int(x["sl"]["value"])) for x in b}.values(), key=lambda t: (-t[2], t[0]))[:WORKS]
     arts, art_rev, seen, queued = [], {}, set(), set()
     title_src, name_src, all_names = {}, collections.defaultdict(set), set()
+    name_occ = collections.defaultdict(set)         # 名字 → 通過的每一次出現的 (含間隔號, 在段落外)；報告 A3.1、A3.2 各補了多少用
     base, have = base_lexicon(), lexicon_words()
     ylists = pages(api, year_titles(years)) if years else {}      # 契約 A2.1：年度動畫清單，只取作品名欄的連結
     yearly, ywork = {}, []
@@ -920,10 +1009,12 @@ def build(api, groups_tsv=os.path.join(PACKS, "acg-groups.tsv"), collisions_tsv=
                 if l.get("ns") == 0 and l.get("exists") and LIST_RE.search(l["title"]) and l["title"] not in queued:
                     queued.add(l["title"])
                     todo.append((l["title"], False))
-        for n, kind, snip in names_of(d["text"]):             # 契約 A2.2：每一次出現都判斷，有一次通過就收；出處只記通過的條目
-            all_names.add(n)
-            if strict_ok(n, kind, snip, have):
-                name_src[n].add(d["title"])
+        whole = a3 and bool(LIST_RE.search(d["title"]))      # 契約 A3.2：角色列表條目整頁算人物段落
+        for nm in names_of(d["text"], whole, a3):             # 契約 A2.2：每一次出現都判斷，有一次通過就收；出處只記通過的條目
+            all_names.add(nm.name)
+            if strict_ok(nm.name, nm.kind, nm.snip, have, nm.full) and not (a3 and nm.name not in v040 and TITLE_END.search(nm.name)):
+                name_src[nm.name].add(f"{nm.full + '@' if nm.full else ''}{d['title']}@{d['revid']}")      # 含間隔號的名字，出處記全名（契約 A3.1）
+                name_occ[nm.name].add((bool(nm.full), nm.outside))
     revs += art_rev.values()
     log("works", len(ws), "articles", len(arts), "titles", len(title_src), "names", len(all_names), "passing", len(name_src))
 
@@ -935,9 +1026,11 @@ def build(api, groups_tsv=os.path.join(PACKS, "acg-groups.tsv"), collisions_tsv=
     for v, s in title_src.items():
         src[v]["title"] |= {f"{t}@{art_rev[t]}" for t in s}
     for n in chars:
-        src[n]["char"] |= {f"{t}@{art_rev[t]}" for t in name_src[n]}
+        src[n]["char"] |= name_src[n]
     manual_extra = {}
     for w, work, *rest in read_tsv(manual_tsv):         # 維護者手動加的詞（欄位：詞、作品、備註、另外的讀音（選填））：同樣去重、定讀音、算分數、偵測衝突
+        if not a3 and w in A3_MANUAL:
+            continue
         if not HAN.match(w):
             raise SystemExit(f"{manual_tsv}: bad manual word: {w!r}")
         if len(rest) > 1 and rest[1].strip():           # 第四欄：另外的讀音（音節以空白分隔，要和字數一致）。詞同時有讀音工具選的讀音和這一個
@@ -974,15 +1067,12 @@ def build(api, groups_tsv=os.path.join(PACKS, "acg-groups.tsv"), collisions_tsv=
         words = [w for w in words if w not in hit]
     else:
         raise SystemExit(f"type (c) collisions not settled after {LEXICON_RULE_ROUNDS} rounds")
-    col = {}
     inpack = set(words)
+    gone = sorted({w for _, w in keep_both} - inpack)
+    if gone:                                    # 契約 A3.3a：keep-both 的每個詞都要在輸出的 acg-add.tsv，少一個就中止
+        raise SystemExit(f"{keep_both_tsv}: not in the built pack: {gone}")
     keep_now = first_named(rank, inpack)       # 每個讀音開詞包後必須是第一名的詞：名次最前、還在詞包的那個（和排序同一個定義）
-    for r, v in found.items():
-        # 詞 e[0] 在這個讀音的處置列裡被點名，而且開了之後的第一名 e[4] 就是處置列的保留的詞，才算已處置
-        # （2026-10-10：被舊處置蓋住的新詞搶走第一名，或點名的詞沒排在保留的詞前面，都要列出）
-        left = [e for e in v if (r, e[0]) not in decided or e[4] != keep_now.get(r)]
-        if left:
-            col[r] = left
+    col = open_collisions(found, decided, keep_now, keep_both)
     ts_max = max(ts)
     manifest = {
         "version": ts_max[:10].replace("-", "") + "-" + hashlib.sha256("".join(rows).encode()).hexdigest()[:8],   # 最新的有時間戳的來源頁日期＋詞包內容雜湊：內容變了版號一定變
@@ -1001,6 +1091,15 @@ def build(api, groups_tsv=os.path.join(PACKS, "acg-groups.tsv"), collisions_tsv=
         "excluded_by_exclude_tsv": len(dropped),
         "unresolved_collision_readings": len(col),
     }
+    if info is not None:
+        def origin(w):                          # 新詞（不在 v0.4.0）靠哪一項才收得到；兩項各自就夠的記 either
+            occ = name_occ.get(w, set())
+            if "manual" in src[w] or not occ:
+                return "manual" if "manual" in src[w] else "other"
+            a31, a32 = all(i for i, _ in occ), all(o for _, o in occ)
+            return {(True, True): "A3.1+A3.2", (True, False): "A3.1", (False, True): "A3.2"}.get((a31, a32), "either")
+        info.update(v040=v040, origin={w: origin(w) for w in words if w not in v040}, reading=reading, extra=extra, check={w: rd[w][1] for w in words},
+                    work={w: sorted(t.rsplit("@", 2)[-2] for t in src[w].get("char", ())) for w in words}, src=src, words=words)
     sources = ["word\tsource_kind\tsources (page@revision)\tnote\n"]
     for w in order:
         for k in ("cgroup", "title", "char", "manual"):
@@ -1031,14 +1130,101 @@ def write_all(files, manifest, out_dir):
         os.replace(os.path.join(out_dir, n) + ".tmp", os.path.join(out_dir, n))
 
 
+def check_rows(info, seed=CHECK_SEED, n=CHECK_N, readings=make_readings):
+    """契約 A3.5 第 1 項的檢查集 eval/dev/acg/interpunct.txt：從 A3.1、A3.2 新增的詞（不在 v0.4.0；讀音不必人工確認的）依作品分層抽 n 個
+    （作品用固定種子洗牌，輪流從每個作品抽一個，抽滿為止；詞的作品取第一個出處條目去掉「角色列表」尾巴），再加 CHECK_FIXED 五列。
+    列的格式同其他動漫集（前文|句子|讀音）；「虎杖悠仁」用正確讀音。回傳 (列, 抽到的作品數)。"""
+    import random
+    rng = random.Random(seed)
+    new = [w for w, o in sorted(info["origin"].items()) if o.startswith("A3") or o == "either"]
+    by_work = collections.defaultdict(list)
+    for w in new:
+        if not info["check"][w] and w not in CHECK_FIXED and info["work"][w]:
+            by_work[LIST_RE.sub("", info["work"][w][0])].append(w)
+    works = sorted(by_work)
+    rng.shuffle(works)
+    pool = {k: rng.sample(v, len(v)) for k, v in by_work.items()}
+    picked = []
+    while len(picked) < n and any(pool.values()):
+        for k in works:
+            if pool[k] and len(picked) < n:
+                picked.append(pool[k].pop())
+    rd = {w: info["reading"][w] for w in picked + list(CHECK_FIXED) if w in info["reading"]}
+    rd.update({w: r[0] for w, r in readings([w for w in CHECK_FIXED if w not in rd]).items()})
+    rd["虎杖悠仁"] = "ㄏㄨˇ ㄓㄤˋ ㄧㄡ ㄖㄣˊ".split()
+    return [f"|{w}|{' '.join(rd[w])}\n" for w in picked + list(CHECK_FIXED)], len({LIST_RE.sub('', info['work'][w][0]) for w in picked})
+
+
+def load_pack(path):
+    """已建好的 acg-add.tsv → (詞, {詞: 主要讀音}, {詞: [另外的讀音]}, 列)；「一」「不」的變調列不算另外的讀音。"""
+    rows = open(path, encoding="utf-8").readlines()
+    rs = collections.defaultdict(list)
+    for l in rows:
+        r = l.split("\t")[0].split("-")
+        if r not in rs[l.split("\t")[1]]:
+            rs[l.split("\t")[1]].append(r)
+    reading, extra = {}, {}
+    for w in sorted(rs):
+        sandhi = {tuple(v) for r in rs[w] if (v := bo.sandhi_variant(w, r))}
+        prim = [r for r in rs[w] if tuple(r) not in sandhi] or rs[w][:1]
+        reading[w] = prim[0]
+        if len(prim) > 1:
+            extra[w] = prim[1:]
+    return sorted(rs), reading, extra, rows
+
+
+def recheck(out_dir, report_dir, packs=PACKS):
+    """契約 A3.5 第 6 項：不重建，用出貨的模型（`top1` 預設的 data/lm）重驗 out_dir 裡的詞包。回傳報告文字。"""
+    words, reading, extra, rows = load_pack(os.path.join(out_dir, "acg-add.tsv"))
+    ref = {l.rstrip("\n") for l in open(os.path.join(report_dir, "reference.txt"), encoding="utf-8")}
+    coll = os.path.join(packs, "acg-collisions.tsv")
+    _, decided = read_collisions(coll)
+    rank = collision_rank(read_tsv(coll))
+    inpack = set(words)
+    keep_both = read_keep_both(os.path.join(packs, "acg-keep-both.tsv"))
+    kept_c = {r[1]: r for r in read_tsv(os.path.join(packs, "acg-kept-c.tsv"))}
+    found = detect_collisions(words, reading, rows, ref, extra=extra)
+    c = {e[0]: (r, e[3]) for r, v in sorted(found.items()) for e in v if e[1] == "c"}
+    keep_now = first_named(rank, inpack)
+    ab = open_collisions({r: [e for e in v if e[1] != "c"] for r, v in found.items()}, decided, keep_now, keep_both)
+    out = [f"words {len(words)} rows {len(rows)}; (a) readings {len({r for r, v in found.items() if any(e[1] == 'a' for e in v)})}, (b) {len({r for r, v in found.items() if any(e[1] == 'b' for e in v)})}, (c) words {len(c)}"]
+    out.append(f"kept-c {len(kept_c)}: (c) not in kept-c {sorted(set(c) - set(kept_c))}; kept-c no longer (c) {sorted(set(kept_c) - set(c))}")
+    out.append(f"unresolved (a)(b) readings {len(ab)} (outside keep-both and dispositions); reading, word, cond, profile, off-first, on-first:")
+    out += [f"  {r}\t{w}\t{cond}\t{prof}\t{o}\t{n}" for r, v in sorted(ab.items()) for w, cond, prof, o, n in sorted(v)]
+    first = first_named(rank, inpack)       # 已處置的讀音：詞包改變了第一名，新的第一名就必須是 first_named
+    pairs = [(k, r.split()) for r, k in first.items()]
+    bad = []
+    for prof in ("chat", "formal"):
+        on, off = top1(pairs, prof, out_dir), top1(pairs, prof)
+        bad += [(prof, k, g) for (k, _), g, o in zip(pairs, on, off) if g != k and g != o]
+    out.append(f"first_named readings {len(first)}, not first after the pack changed the top1: {bad}")
+    kb_pairs = sorted((r, w) for r, w in keep_both)
+    out.append("keep-both readings, first place with the pack on (reading, word, chat, formal):")
+    on = {prof: top1([(w, r.split()) for r, w in kb_pairs], prof, out_dir) for prof in ("chat", "formal")}
+    out += [f"  {r}\t{w}\t{on['chat'][i]}\t{on['formal'][i]}" for i, (r, w) in enumerate(kb_pairs)]
+    return "\n".join(out) + "\n"
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--cache", default=CACHE)
     ap.add_argument("--out", default=PACKS)
     ap.add_argument("--report", default=os.path.join(ROOT, "build", "acg-pack"))
     ap.add_argument("--offline", action="store_true")
+    ap.add_argument("--rule-lm", default=RULE_LM_DIR)
+    ap.add_argument("--a3", choices=("on", "off"), default="on")
+    ap.add_argument("--recheck", action="store_true")
     a = ap.parse_args()
-    files, manifest, col, unread, ref, ldrop = build(Api(a.cache, a.offline))
+    if a.recheck:
+        text = recheck(a.out, a.report)
+        os.makedirs(a.report, exist_ok=True)
+        open(os.path.join(a.report, "recheck.txt"), "w", encoding="utf-8").write(text)
+        print(text, end="")
+        return
+    rule = check_rule_lm(a.rule_lm)
+    decode = rule_decoder(rule)       # 契約 A3.3：(c) 規則與衝突偵測都用規則模型
+    info = {}
+    files, manifest, col, unread, ref, ldrop = build(Api(a.cache, a.offline), decode=decode, a3=a.a3 == "on", info=info)
     write_all(files, manifest, a.out)
     os.makedirs(a.report, exist_ok=True)
     with open(os.path.join(a.report, "collisions.txt"), "w", encoding="utf-8") as f:
@@ -1046,6 +1232,17 @@ def main():
     for name, lines in (("unreadable.txt", unread), ("reference.txt", sorted(ref))):
         with open(os.path.join(a.report, name), "w", encoding="utf-8") as f:
             f.write("".join(w + "\n" for w in lines))
+    origin = info["origin"]
+    with open(os.path.join(a.report, "new-words.tsv"), "w", encoding="utf-8") as f:       # 比 v0.4.0 多的詞（契約 A3.5 第 3 項 (ii)、第 5 項的母體）
+        f.writelines(f"{w}\t{o}\t{';'.join(sorted(set(info['work'][w])))}\n" for w, o in sorted(origin.items()))
+    lost = sorted(info["v040"] - set(info["words"]))
+    print(f"v0.4.0 words {len(info['v040'])}, missing from the new pack {len(lost)}: {lost}")
+    print("new words by origin:", dict(sorted(collections.Counter(origin.values()).items())), "total", len(origin))
+    if a.a3 == "on":
+        rows, nworks = check_rows(info)
+        with open(os.path.join(a.report, "interpunct.txt"), "w", encoding="utf-8") as f:
+            f.writelines(rows)
+        print(f"check set: {len(rows)} rows, {CHECK_N} sampled from {nworks} works (seed {CHECK_SEED}, round robin over shuffled works), see {os.path.join(a.report, 'interpunct.txt')}")
     print(json.dumps({k: v for k, v in manifest.items() if k != "unclassified_groups"}, ensure_ascii=False, sort_keys=True))
     print(f"unresolved collision readings: {len(col)} (see {os.path.join(a.report, 'collisions.txt')})")
 
