@@ -1,0 +1,1744 @@
+word	source_kind	sources	qid	note
+臺灣藝大	school-abbr	zhwiki:臺灣藝大->國立臺灣藝術大學@4209451		
+台灣藝大	school-abbr	zhwiki:台灣藝大->國立臺灣藝術大學@4209459		
+私立忠信高中	school	moe:high.csv@115		
+私立中信高中	school	moe:high.csv@115		
+日出茶太	category	Category:台灣公司:日出茶太@93239640; Category:台灣手搖茶飲品牌:日出茶太@93239640; Category:台灣餐飲公司:日出茶太@93239640	Q16829306	
+日出茶太	nsi	nsi:amenity/cafe/chatime-7d270d@ac22bfd445b7	Q16829306	
+日出茶太	nsi-wikipedia	zhwiki:日出茶太@93239640+wikidata:Q16829306@2534531347	Q16829306	
+大苑子	category	Category:台灣公司:大苑子@94870106; Category:台灣手搖茶飲品牌:大苑子@94870106	Q67934123	
+大苑子	nsi	nsi:amenity/cafe/dayungs-7d270d@ac22bfd445b7	Q67934123	
+大苑子	nsi-wikipedia	zhwiki:大苑子@94870106+wikidata:Q67934123@2251963327	Q67934123	
+珍煮丹	category	Category:台灣公司:珍煮丹@90087936; Category:台灣手搖茶飲品牌:珍煮丹@90087936	Q67933431	
+珍煮丹	nsi	nsi:amenity/cafe/truedan-7f2f5a@ac22bfd445b7	Q67933431	
+珍煮丹	nsi-wikipedia	zhwiki:珍煮丹@90087936+wikidata:Q67933431@2448138362	Q67933431	
+甲文青	category	Category:台灣公司:甲文青@91828099; Category:台灣手搖茶飲品牌:甲文青@91828099	Q108166285	
+甲文青	nsi	nsi:amenity/cafe/jiawencing-7d270d@ac22bfd445b7	Q108166285	
+甲文青	nsi-wikipedia	zhwiki:甲文青@91828099+wikidata:Q108166285@2316388792	Q108166285	
+一芳水果茶	category	Category:台灣手搖茶飲品牌:一芳水果茶@93840250	Q66196395	
+一芳水果茶	nsi	nsi:amenity/cafe/yifangtea-7d270d@ac22bfd445b7	Q66196395	
+一芳水果茶	nsi-wikipedia	zhwiki:一芳水果茶@93840250+wikidata:Q66196395@2453925383	Q66196395	
+三信商業銀行	category	Category:台灣公司:三信商業銀行@92501662	Q10865324	POLY
+三信商業銀行	nsi	nsi:amenity/bank/cotacommercialbank-47d9e2@ac22bfd445b7	Q10865324	POLY
+三信商業銀行	nsi-wikipedia	zhwiki:三信商業銀行@92501662+wikidata:Q10865324@2433216237	Q10865324	POLY
+三分春色	category	Category:台灣手搖茶飲品牌:三分春色@90792462	Q111812481	
+三分春色	nsi	nsi:amenity/cafe/trinitea3-7d270d@ac22bfd445b7	Q111812481	
+三分春色	nsi-wikipedia	zhwiki:三分春色@90792462+wikidata:Q111812481@2447979272	Q111812481	
+上海商業儲蓄銀行	category	Category:台灣公司:上海商業儲蓄銀行@94757932	Q4207208	POLY
+上海商業儲蓄銀行	nsi	nsi:amenity/bank/shanghaicommercialandsavingsbank-47d9e2@ac22bfd445b7	Q4207208	POLY
+上海商業儲蓄銀行	nsi-wikipedia	zhwiki:上海商業儲蓄銀行@94757932+wikidata:Q4207208@2534641837	Q4207208	POLY
+京城商業銀行	category	Category:台灣公司:京城商業銀行@94778826	Q10883132	POLY
+京城商業銀行	nsi	nsi:amenity/bank/kingstownbank-47d9e2@ac22bfd445b7	Q10883132	POLY
+京城商業銀行	nsi-wikipedia	zhwiki:京城商業銀行@94778826+wikidata:Q10883132@2534632033	Q10883132	POLY
+元大商業銀行	category	Category:台灣公司:元大商業銀行@94054850	Q10889602	POLY
+元大商業銀行	nsi	nsi:amenity/bank/yuantacommercialbank-47d9e2@ac22bfd445b7	Q10889602	POLY
+元大商業銀行	nsi-wikipedia	zhwiki:元大商業銀行@94054850+wikidata:Q10889602@2548938139	Q10889602	POLY
+全國加油站	category	Category:台灣公司:全國加油站@94073653	Q20410455	
+全國加油站	nsi	nsi:amenity/fuel/npc-db3418@ac22bfd445b7	Q20410455	
+全國加油站	nsi-wikipedia	zhwiki:全國加油站@94073653+wikidata:Q20410455@2435703493	Q20410455	
+全國電子	category	Category:台灣公司:全國電子@94371770	Q10891540	
+全國電子	nsi	nsi:shop/electronics/elifemall-745265@ac22bfd445b7	Q10891540	
+全國電子	nsi-wikipedia	zhwiki:全國電子@94371770+wikidata:Q10891540@2534601083	Q10891540	
+八曜和茶	category	Category:台灣手搖茶飲品牌:八曜和茶@94082474	Q130360667	
+八曜和茶	nsi	nsi:amenity/cafe/hachiyotea-7d270d@ac22bfd445b7	Q130360667	
+八曜和茶	nsi-wikipedia	zhwiki:八曜和茶@94082474+wikidata:Q130360667@2301574752	Q130360667	
+台中商業銀行	category	Category:台灣公司:台中商業銀行@94401537	Q6136958	POLY
+台中商業銀行	nsi	nsi:amenity/bank/taichungbank-47d9e2@ac22bfd445b7	Q6136958	POLY
+台中商業銀行	nsi-wikipedia	zhwiki:台中商業銀行@94401537+wikidata:Q6136958@2534605073	Q6136958	POLY
+台北富邦商業銀行	category	Category:台灣公司:台北富邦商業銀行@94406607	Q697293	POLY
+台北富邦商業銀行	nsi	nsi:amenity/bank/taipeifubonbank-47d9e2@ac22bfd445b7	Q697293	POLY
+台北富邦商業銀行	nsi-wikipedia	zhwiki:台北富邦商業銀行@94406607+wikidata:Q697293@2549465682	Q697293	POLY
+台灣中油	category	Category:台灣公司:台灣中油@94412891	Q698024	
+台灣中油	nsi	nsi:amenity/fuel/cpccorporationtaiwan-db3418@ac22bfd445b7	Q698024	
+台灣中油	nsi-wikipedia	zhwiki:台灣中油@94412891+wikidata:Q698024@2524842014	Q698024	
+合作金庫商業銀行	category	Category:台灣公司:合作金庫商業銀行@94624789	Q701540	POLY
+合作金庫商業銀行	nsi	nsi:amenity/bank/taiwancooperativebank-47d9e2@ac22bfd445b7	Q701540	POLY
+合作金庫商業銀行	nsi-wikipedia	zhwiki:合作金庫商業銀行@94624789+wikidata:Q701540@2485643726	Q701540	POLY
+安泰商業銀行	category	Category:台灣公司:安泰商業銀行@94647852	Q10946952	POLY
+安泰商業銀行	nsi	nsi:amenity/bank/entiecommercialbank-47d9e2@ac22bfd445b7	Q10946952	POLY
+安泰商業銀行	nsi-wikipedia	zhwiki:安泰商業銀行@94647852+wikidata:Q10946952@2534590814	Q10946952	POLY
+彰化商業銀行	category	Category:台灣公司:彰化商業銀行@94356653	Q5071627	POLY
+彰化商業銀行	nsi	nsi:amenity/bank/changhwabank-47d9e2@ac22bfd445b7	Q5071627	POLY
+彰化商業銀行	nsi-wikipedia	zhwiki:彰化商業銀行@94356653+wikidata:Q5071627@2534666042	Q5071627	POLY
+摩斯漢堡	category	Category:台灣公司:摩斯漢堡@94318202	Q1204169	
+摩斯漢堡	nsi	nsi:amenity/fast_food/mosburger-60a4d5@ac22bfd445b7	Q1204169	
+摩斯漢堡	nsi-wikipedia	zhwiki:摩斯漢堡@94318202+wikidata:Q1204169@2555610277	Q1204169	
+春水堂人文茶館	category	Category:台灣餐飲公司:春水堂人文茶館@93190986	Q11088820	
+春水堂人文茶館	nsi	nsi:amenity/cafe/chunshuitang-880fa5@ac22bfd445b7	Q11088820	
+春水堂人文茶館	nsi-wikipedia	zhwiki:春水堂人文茶館@93190986+wikidata:Q11088820@2510036481	Q11088820	
+板信商業銀行	category	Category:台灣公司:板信商業銀行@91382957	Q11104946	POLY
+板信商業銀行	nsi	nsi:amenity/bank/bankofpanshin-47d9e2@ac22bfd445b7	Q11104946	POLY
+板信商業銀行	nsi-wikipedia	zhwiki:板信商業銀行@91382957+wikidata:Q11104946@2433216211	Q11104946	POLY
+清心福全	category	Category:台灣手搖茶飲品牌:清心福全@92656342	Q10391229	
+清心福全	nsi	nsi:amenity/cafe/chingshin-7d270d@ac22bfd445b7	Q10391229	
+清心福全	nsi-wikipedia	zhwiki:清心福全@92656342+wikidata:Q10391229@2362637629	Q10391229	
+玉山商業銀行	category	Category:台灣公司:玉山商業銀行@93849102	Q5321663	POLY
+玉山商業銀行	nsi	nsi:amenity/bank/esuncommercialbank-47d9e2@ac22bfd445b7	Q5321663	POLY
+玉山商業銀行	nsi-wikipedia	zhwiki:玉山商業銀行@93849102+wikidata:Q5321663@2433281097	Q5321663	POLY
+第一商業銀行	category	Category:台灣公司:第一商業銀行@93912953	Q11602128	POLY
+第一商業銀行	nsi	nsi:amenity/bank/firstcommercialbank-47d9e2@ac22bfd445b7	Q11602128	POLY
+第一商業銀行	nsi-wikipedia	zhwiki:第一商業銀行@93912953+wikidata:Q11602128@2439010744	Q11602128	POLY
+聯邦商業銀行	category	Category:台灣公司:聯邦商業銀行@94671499	Q15927195	POLY
+聯邦商業銀行	nsi	nsi:amenity/bank/unionbankoftaiwan-47d9e2@ac22bfd445b7	Q15927195	POLY
+聯邦商業銀行	nsi-wikipedia	zhwiki:聯邦商業銀行@94671499+wikidata:Q15927195@2534640050	Q15927195	POLY
+臺灣中小企業銀行	category	Category:台灣公司:臺灣中小企業銀行@93974730	Q15913812	POLY
+臺灣中小企業銀行	nsi	nsi:amenity/bank/taiwanbusinessbank-47d9e2@ac22bfd445b7	Q15913812	POLY
+臺灣中小企業銀行	nsi-wikipedia	zhwiki:臺灣中小企業銀行@93974730+wikidata:Q15913812@2433281273	Q15913812	POLY
+臺灣銀行	category	Category:台灣公司:臺灣銀行@94313328	Q706533	POLY
+臺灣銀行	nsi	nsi:amenity/bank/bankoftaiwan-47d9e2@ac22bfd445b7	Q706533	POLY
+臺灣銀行	nsi-wikipedia	zhwiki:臺灣銀行@94313328+wikidata:Q706533@2534551559	Q706533	POLY
+茶之魔手	category	Category:台灣公司:茶之魔手@91727121; Category:台灣手搖茶飲品牌:茶之魔手@91727121	Q67933727	
+茶之魔手	nsi-wikipedia	zhwiki:茶之魔手@91727121+wikidata:Q67933727@2295439792	Q67933727	
+華南商業銀行	category	Category:台灣公司:華南商業銀行@90902073	Q11620043	POLY
+華南商業銀行	nsi	nsi:amenity/bank/huanancommercialbank-47d9e2@ac22bfd445b7	Q11620043	POLY
+華南商業銀行	nsi-wikipedia	zhwiki:華南商業銀行@90902073+wikidata:Q11620043@2242229351	Q11620043	POLY
+華泰商業銀行	category	Category:台灣公司:華泰商業銀行@94412475	Q17500686	POLY
+華泰商業銀行	nsi	nsi:amenity/bank/hwataicommercialbank-47d9e2@ac22bfd445b7	Q17500686	POLY
+華泰商業銀行	nsi-wikipedia	zhwiki:華泰商業銀行@94412475+wikidata:Q17500686@2433173223	Q17500686	POLY
+路易莎咖啡	category	Category:台灣公司:路易莎咖啡@94370139	Q96390921	
+路易莎咖啡	nsi	nsi:amenity/cafe/louisacoffee-7d270d@ac22bfd445b7	Q96390921	
+路易莎咖啡	nsi-wikipedia	zhwiki:路易莎咖啡@94370139+wikidata:Q96390921@2425822581	Q96390921	
+迷客夏	category	Category:台灣手搖茶飲品牌:迷客夏@94150911	Q67934215	
+迷客夏	nsi	nsi:amenity/cafe/milkshop-7d270d@ac22bfd445b7	Q67934215	
+迷客夏	nsi-wikipedia	zhwiki:迷客夏@94150911+wikidata:Q67934215@2420088353	Q67934215	
+遠東國際商業銀行	category	Category:台灣公司:遠東國際商業銀行@93916882	Q15911143	POLY
+遠東國際商業銀行	nsi	nsi:amenity/bank/fareasterninternationalbank-47d9e2@ac22bfd445b7	Q15911143	POLY
+遠東國際商業銀行	nsi-wikipedia	zhwiki:遠東國際商業銀行@93916882+wikidata:Q15911143@2534590374	Q15911143	POLY
+錢都涮涮鍋	category	Category:台灣餐飲公司:錢都涮涮鍋@92565071	Q109344533	POLY
+錢都涮涮鍋	nsi	nsi:amenity/restaurant/chientuhotpot-aafd63@ac22bfd445b7	Q109344533	POLY
+錢都涮涮鍋	nsi-wikipedia	zhwiki:錢都涮涮鍋@92565071+wikidata:Q109344533@2545961581	Q109344533	POLY
+高雄銀行	category	Category:台灣公司:高雄銀行@93974726	Q11673248	POLY
+高雄銀行	nsi	nsi:amenity/bank/bankofkaohsiung-47d9e2@ac22bfd445b7	Q11673248	POLY
+高雄銀行	nsi-wikipedia	zhwiki:高雄銀行@93974726+wikidata:Q11673248@2534666863	Q11673248	POLY
+麻古茶坊	category	Category:台灣手搖茶飲品牌:麻古茶坊@93096104	Q97300375	
+麻古茶坊	nsi	nsi:amenity/cafe/macu-7d270d@ac22bfd445b7	Q97300375	
+麻古茶坊	nsi-wikipedia	zhwiki:麻古茶坊@93096104+wikidata:Q97300375@2347531118	Q97300375	
+一風堂	nsi	nsi:amenity/restaurant/ippudo-8a40ea@ac22bfd445b7	Q6065417	
+一風堂	nsi-wikipedia	zhwiki:一风堂@94900362+wikidata:Q6065417@2520080982	Q6065417	
+中信科技大學	category	Category:台灣公司:中信科技大學@93720261		
+中信科技大學	school	moe:u1_new.csv@115		
+中信金融管理學院	category	Category:台灣公司:中信金融管理學院@94812289		
+中信金融管理學院	school	moe:u1_new.csv@115		
+中國信託商業銀行	nsi	nsi:amenity/bank/ctbcbank-ffa7f0@ac22bfd445b7	Q5100191	POLY
+中國信託商業銀行	nsi-wikipedia	zhwiki:中國信託商業銀行@93852752+wikidata:Q5100191@2518770742	Q5100191	POLY
+丸作食茶	category	Category:台灣手搖茶飲品牌:丸作食茶@93247731	Q111537052	
+丸作食茶	nsi	nsi:amenity/cafe/onezotapioca-783c92@ac22bfd445b7	Q111537052	
+亞東科技大學	category	Category:台灣公司:亞東科技大學@89888979		
+亞東科技大學	school	moe:u1_new.csv@115		
+伯朗咖啡館	nsi	nsi:amenity/cafe/mrbrowncafe-7d270d@ac22bfd445b7	Q21016949	
+伯朗咖啡館	nsi-wikipedia	zhwiki:伯朗咖啡館@88080065+wikidata:Q21016949@2453925233	Q21016949	
+兆豐國際商業銀行	nsi	nsi:amenity/bank/megainternationalcommercialbank-47d9e2@ac22bfd445b7	Q709757	POLY
+兆豐國際商業銀行	nsi-wikipedia	zhwiki:兆豐國際商業銀行@93734388+wikidata:Q709757@2532419626	Q709757	POLY
+六角國際	category	Category:台灣公司:六角國際集團@94651212; Category:台灣餐飲公司:六角國際集團@94651212		
+凱基商業銀行	nsi	nsi:amenity/bank/kgicommercialbank-47d9e2@ac22bfd445b7	Q19851918	POLY
+凱基商業銀行	nsi-wikipedia	zhwiki:凱基商業銀行@94648186+wikidata:Q19851918@2513653228	Q19851918	POLY
+千葉火鍋	nsi	nsi:amenity/restaurant/chienyenshabushabu-aafd63@ac22bfd445b7	Q67936077	
+千葉火鍋	nsi-wikipedia	zhwiki:千葉火鍋@90531094+wikidata:Q67936077@2321923715	Q67936077	
+台塑石化	category	Category:台灣公司:台塑石化@93653598	Q1437742	
+台塑石化	nsi-wikipedia	zhwiki:台塑石化@93653598+wikidata:Q1437742@2534634174	Q1437742	
+台新國際商業銀行	nsi	nsi:amenity/bank/taishininternationalbank-47d9e2@ac22bfd445b7	Q7676420	POLY
+台新國際商業銀行	nsi-wikipedia	zhwiki:台新國際商業銀行@94705267+wikidata:Q7676420@2433281159	Q7676420	POLY
+台鋼科技大學	category	Category:台灣公司:台鋼科技大學@94699371		
+台鋼科技大學	school	moe:u1_new.csv@115		
+四海遊龍	nsi	nsi:amenity/restaurant/yuloong-aafd63@ac22bfd445b7	Q28417394	
+四海遊龍	nsi-wikipedia	zhwiki:四海遊龍@94614293+wikidata:Q28417394@2443949947	Q28417394	
+國泰世華商業銀行	nsi	nsi:amenity/bank/cathayunitedbank-47d9e2@ac22bfd445b7	Q702656	POLY
+國泰世華商業銀行	nsi-wikipedia	zhwiki:國泰世華商業銀行@94641201+wikidata:Q702656@2532412134	Q702656	POLY
+大同大學	category	Category:台灣公司:大同大學 (台灣)@94822401		
+大同大學	school	moe:u1_new.csv@115		
+大西洋飲料	category	Category:台灣公司:大西洋飲料@91799614; Category:台灣餐飲公司:大西洋飲料@91799614		
+大阪王將	nsi	nsi:amenity/restaurant/osakaohsho-d30421@ac22bfd445b7	Q48743717	
+大阪王將	nsi-wikipedia	zhwiki:大阪王將@94702001+wikidata:Q48743717@2534609004	Q48743717	
+天仁茶業	category	Category:台灣公司:天仁茶業@94903017	Q10939065	
+天仁茶業	nsi-wikipedia	zhwiki:天仁茶業@94903017+wikidata:Q10939065@2425822599	Q10939065	
+孫東寶台式牛排教父	category	Category:台灣公司:孫東寶台式牛排教父@92565158	Q101084415	
+孫東寶台式牛排教父	nsi-wikipedia	zhwiki:孫東寶台式牛排教父@92565158+wikidata:Q101084415@2471798386	Q101084415	
+宏國德霖科技大學	category	Category:台灣公司:宏國德霖科技大學@93851226		
+宏國德霖科技大學	school	moe:u1_new.csv@115		
+客美多咖啡	nsi	nsi:amenity/cafe/komedacoffeeshop-7d270d@ac22bfd445b7	Q11302679	
+客美多咖啡	nsi-wikipedia	zhwiki:客美多咖啡@94771259+wikidata:Q11302679@2534612500	Q11302679	
+山崎麵包	nsi	nsi:shop/bakery/yamazakibaking-ea5ee6@ac22bfd445b7	Q3138937	
+山崎麵包	nsi-wikipedia	zhwiki:山崎麵包@94464571+wikidata:Q3138937@2534527827	Q3138937	
+德克士	nsi	nsi:amenity/fast_food/dicos-70aa35@ac22bfd445b7	Q5273883	
+德克士	nsi-wikipedia	zhwiki:德克士@94062424+wikidata:Q5273883@2460324635	Q5273883	
+快樂檸檬	nsi	nsi:amenity/cafe/happylemon-7d270d@ac22bfd445b7	Q109968422	POLY
+快樂檸檬	nsi-wikipedia	zhwiki:快樂檸檬@83870949+wikidata:Q109968422@2423428535	Q109968422	POLY
+拉亞漢堡	nsi	nsi:amenity/fast_food/layaburger-60a4d5@ac22bfd445b7	Q67933743	
+拉亞漢堡	nsi-wikipedia	zhwiki:拉亞漢堡@94067863+wikidata:Q67933743@2447979235	Q67933743	
+敏實科技大學	category	Category:台灣公司:敏實科技大學@94854702		
+敏實科技大學	school	moe:u1_new.csv@115		
+早安美芝城	nsi	nsi:amenity/fast_food/goodmorningmacc-60a4d5@ac22bfd445b7	Q30941219	
+早安美芝城	nsi-wikipedia	zhwiki:早安美芝城@92197868+wikidata:Q30941219@2447979210	Q30941219	
+明志科技大學	category	Category:台灣公司:明志科技大學@94865605		
+明志科技大學	school	moe:u1_new.csv@115		
+星展銀行	nsi	nsi:amenity/bank/dbsbanktaiwan-47d9e2@ac22bfd445b7	Q705417	POLY
+星展銀行	nsi-wikipedia	zhwiki:星展銀行@94016930+wikidata:Q705417@2538801744	Q705417	POLY
+楓康超市	nsi	nsi:shop/supermarket/funcomsupermarket-14223e@ac22bfd445b7	Q10915548	
+楓康超市	nsi-wikipedia	zhwiki:楓康超市@94256762+wikidata:Q10915548@2428593736	Q10915548	
+永豐商業銀行	nsi	nsi:amenity/bank/banksinopac-47d9e2@ac22bfd445b7	Q11132721	POLY
+永豐商業銀行	nsi-wikipedia	zhwiki:永豐商業銀行@94235274+wikidata:Q11132721@2433281086	Q11132721	POLY
+泰山企業	category	Category:台灣公司:泰山企業@94226441; Category:台灣餐飲公司:泰山企業@94226441		
+渣打國際商業銀行	nsi	nsi:amenity/bank/standardcharteredtaiwan-47d9e2@ac22bfd445b7	Q62267023	POLY
+渣打國際商業銀行	nsi-wikipedia	zhwiki:渣打國際商業銀行@94080471+wikidata:Q62267023@2517765140	Q62267023	POLY
+爭鮮	nsi	nsi:amenity/restaurant/sushiexpress-aafd63@ac22bfd445b7	Q15920674	
+爭鮮	nsi-wikipedia	zhwiki:爭鮮@94520534+wikidata:Q15920674@2425822579	Q15920674	
+王品	category	Category:台灣公司:王品集團@93788499; Category:台灣餐飲公司:王品集團@93788499		
+瑞興商業銀行	nsi	nsi:amenity/bank/taipeistarbank-47d9e2@ac22bfd445b7	Q10933886	POLY
+瑞興商業銀行	nsi-wikipedia	zhwiki:瑞興商業銀行@90855587+wikidata:Q10933886@2485285959	Q10933886	POLY
+瓦城泰統	category	Category:台灣公司:瓦城泰統集團@93826439; Category:台灣餐飲公司:瓦城泰統集團@93826439		
+築間幸福鍋物	nsi	nsi:amenity/restaurant/jhujianshabu-aafd63@ac22bfd445b7	Q80214451	
+築間幸福鍋物	nsi-wikipedia	zhwiki:築間幸福鍋物@92491631+wikidata:Q80214451@2519615660	Q80214451	
+築間餐飲	category	Category:台灣公司:築間餐飲集團@94184165; Category:台灣餐飲公司:築間餐飲集團@94184165		
+統一企業	category	Category:台灣公司:統一企業@94537844; Category:台灣餐飲公司:統一企業@94537844		
+繼光香香雞	nsi	nsi:amenity/fast_food/jandgfriedchicken-60a4d5@ac22bfd445b7	Q110256533	
+繼光香香雞	nsi-wikipedia	zhwiki:繼光香香雞@92767407+wikidata:Q110256533@2460291229	Q110256533	
+胖老爹美式炸雞	nsi	nsi:amenity/fast_food/fatdaddyamericanfriedchicken-60a4d5@ac22bfd445b7	Q66768745	
+胖老爹美式炸雞	nsi-wikipedia	zhwiki:胖老爹美式炸雞@90583966+wikidata:Q66768745@2321924218	Q66768745	
+臺灣土地銀行	nsi	nsi:amenity/bank/landbankoftaiwan-47d9e2@ac22bfd445b7	Q717592	POLY
+臺灣土地銀行	nsi-wikipedia	zhwiki:臺灣土地銀行@91575242+wikidata:Q717592@2468105830	Q717592	POLY
+臺灣新光商業銀行	nsi	nsi:amenity/bank/shinkongcommercialbank-47d9e2@ac22bfd445b7	Q15909616	POLY
+臺灣新光商業銀行	nsi-wikipedia	zhwiki:臺灣新光商業銀行@94705317+wikidata:Q15909616@2433216201	Q15909616	POLY
+薩莉亞	nsi	nsi:amenity/restaurant/saizeriya-aafd63@ac22bfd445b7	Q886564	
+薩莉亞	nsi-wikipedia	zhwiki:萨莉亚@94323297+wikidata:Q886564@2534539298	Q886564	
+許留山	nsi	nsi:amenity/cafe/huilaushan-f1b18f@ac22bfd445b7	Q5934913	
+許留山	nsi-wikipedia	zhwiki:許留山@93805498+wikidata:Q5934913@2425822620	Q5934913	
+貴族世家	nsi	nsi:amenity/restaurant/noblesteak-aafd63@ac22bfd445b7	Q24702031	
+貴族世家	nsi-wikipedia	zhwiki:貴族世家@94474869+wikidata:Q24702031@2548069147	Q24702031	
+達美樂披薩	nsi	nsi:amenity/fast_food/dominos-60a4d5@ac22bfd445b7	Q839466	POLY
+達美樂披薩	nsi-wikipedia	zhwiki:達美樂披薩@94195725+wikidata:Q839466@2538131485	Q839466	POLY
+長庚大學	category	Category:台灣公司:長庚大學@94857558		POLY
+長庚大學	school	moe:u1_new.csv@115		POLY
+長庚科技大學	category	Category:台灣公司:長庚科技大學@93510526		POLY
+長庚科技大學	school	moe:u1_new.csv@115		POLY
+陶板屋	category	Category:台灣公司:陶板屋@92753653; Category:台灣餐飲公司:陶板屋@92753653		
+陽信商業銀行	nsi	nsi:amenity/bank/sunnycommercialbank-47d9e2@ac22bfd445b7	Q11658759	POLY
+陽信商業銀行	nsi-wikipedia	zhwiki:陽信商業銀行@91140770+wikidata:Q11658759@2388655922	Q11658759	POLY
+餃子的王將	nsi	nsi:amenity/restaurant/gyozanoohsho-aafd63@ac22bfd445b7	Q11666805	
+餃子的王將	nsi-wikipedia	zhwiki:餃子的王將@94702007+wikidata:Q11666805@2534662993	Q11666805	
+麥味登	nsi	nsi:amenity/restaurant/mywarmdaycafeandbrunch-aafd63@ac22bfd445b7	Q108830023	
+麥味登	nsi-wikipedia	zhwiki:麥味登@93092917+wikidata:Q108830023@2511069491	Q108830023	
+一之軒	nsi	nsi:shop/bakery/ijysheng-ea5ee6@ac22bfd445b7	Q57269686	
+一卡通票證	category	Category:台灣公司:一卡通票證公司@93956051		
+一沐日	nsi	nsi:amenity/cafe/aniceholiday-7d270d@ac22bfd445b7	Q127692987	
+一福堂	category	Category:台灣公司:一福堂@93237923		
+丁丁藥局	nsi	nsi:amenity/pharmacy/tintindrugstore-9d8b4e@ac22bfd445b7	Q108166589	
+七大工商團體	category	Category:台灣公司:七大工商團體@94152271		
+三井餐飲	category	Category:台灣餐飲公司:三井餐飲集團@90571378		
+三商企業	category	Category:台灣公司:三商企業@94561776		
+三商炸雞	nsi	nsi:amenity/fast_food/33friedchicken-60a4d5@ac22bfd445b7	Q130214438	
+三商餐飲	category	Category:台灣公司:三商餐飲@93752660		
+三媽臭臭鍋	nsi	nsi:amenity/restaurant/goldseight-aafd63@ac22bfd445b7	Q108212222	
+三發地產	category	Category:台灣公司:三發地產@93760756		
+三竹資訊	category	Category:台灣公司:三竹資訊@93761139		
+三貝德數位文創	category	Category:台灣公司:三貝德數位文創@93059361		
+三陽工業	category	Category:台灣公司:三陽工業@94098860		
+上島珈琲店	nsi	nsi:amenity/cafe/ueshimacoffeehouse-7f2f5a@ac22bfd445b7	Q96152143	
+上華唱片	category	Category:台灣公司:上華唱片@93653597		
+上銀科技	category	Category:台灣公司:上銀科技@93785721		
+世界健身俱樂部	category	Category:台灣公司:世界健身俱樂部@93793649		POLY
+世界先進	category	Category:台灣公司:世界先進@94849670		
+中信國際實驗教育機構	category	Category:台灣公司:中信國際實驗教育機構@89725672		
+中信環境技術	category	Category:台灣公司:中信环境技术@90519029		
+中國人造纖維	category	Category:台灣公司:中國人造纖維@91926438		
+中國信託金融控股	category	Category:台灣公司:中國信託金融控股@94562409		
+中國化學製藥	category	Category:台灣公司:中國化學製藥@94421081		
+中國泰山科技集團控股	category	Category:台灣公司:中國泰山科技集團控股@92155617		
+中國石油化學工業開發	category	Category:台灣公司:中國石油化學工業開發@94785546		
+中國航運	category	Category:台灣公司:中國航運@94617348		
+中國醫藥大學	school	moe:u1_new.csv@115		
+中國鋼鐵	category	Category:台灣公司:中國鋼鐵@94845313		
+中國電器	category	Category:台灣公司:中國電器@93856256		
+中央再保險	category	Category:台灣公司:中央再保險公司@93272418		
+中央投資	category	Category:台灣公司:中央投資公司@94053510		
+中山醫學大學	school	moe:u1_new.csv@115		
+中悅建設	category	Category:台灣公司:中悅建設@93866880		
+中港高中	school-abbr	zhwiki:中港高中->臺中市立中港高級中學@22395249		
+中科實中	school-abbr	zhwiki:中科實中->國立中科實驗高級中學@16752051		
+中科實驗中學	school-abbr	zhwiki:中科實驗中學->國立中科實驗高級中學@18922621		
+中科實驗高中	school-abbr	zhwiki:中科實驗高中->國立中科實驗高級中學@22395207		
+中科實驗高級中學	school-abbr	zhwiki:中科實驗高級中學->國立中科實驗高級中學@22395203		
+中科購物廣場	category	Category:台灣公司:中科購物廣場@94856171		
+中科高中	school-abbr	zhwiki:中科高中->國立中科實驗高級中學@22395202		
+中租控股	category	Category:台灣公司:中租控股@92998073		
+中美製藥	category	Category:台灣公司:中美製藥@94769662		
+中臺科大	school-abbr	zhwiki:中臺科大->中臺科技大學@3613695		
+中臺科技大學	school	moe:u1_new.csv@115		
+中興保全科技	category	Category:台灣公司:中興保全科技@88416677		
+中興商業銀行	category	Category:台灣公司:中興商業銀行@94231655		POLY
+中興巴士暨關係企業	category	Category:台灣公司:中興巴士暨關係企業@94887318		
+中華工程	category	Category:台灣公司:中華工程@93419034		
+中華機械	category	Category:台灣公司:中華機械@89222334		
+中華汽車工業	category	Category:台灣公司:中華汽車工業@94445414		
+中華票券金融	category	Category:台灣公司:中華票券金融公司@91670343		
+中華科大	school-abbr	zhwiki:中華科大->中華科技大學@18865053		
+中華科技大學	school	moe:u1_new.csv@115		
+中華紙漿	category	Category:台灣公司:中華紙漿@91038189		
+中華網龍	category	Category:台灣公司:中華網龍@90797939		
+中華醫事科大	school-abbr	zhwiki:中華醫事科大->中華醫事科技大學@3613706		
+中華醫事科技大學	school	moe:u1_new.csv@115		
+中鼎	category	Category:台灣公司:中鼎集團@93892008		
+丸亀製麵	nsi	nsi:amenity/fast_food/marugameseimen-f9a382@ac22bfd445b7	Q10877253	
+久津實業	category	Category:台灣餐飲公司:久津實業@89639577		
+久鼎金屬	category	Category:台灣公司:久鼎金屬@86444111		
+二林工商	school-abbr	zhwiki:二林工商->國立二林高級工商職業學校@15305647		
+五木拉麵	category	Category:台灣公司:五木拉麵@77081614		
+五桐號	nsi	nsi:amenity/cafe/wootea-7d270d@ac22bfd445b7	Q126455337	
+亞信電子	category	Category:台灣公司:亞信電子@94408561		
+亞妮斯比	nsi-wikipedia	zhwiki:亞妮斯比@94780001+wikidata:Q282967@2534676062	Q282967	
+亞憶	category	Category:台灣公司:亞憶@93329564		
+亞昕國際開發	category	Category:台灣公司:亞昕國際開發@93946557		
+亞東科大	school-abbr	zhwiki:亞東科大->亞東科技大學@91199180		
+亞洲水泥	category	Category:台灣公司:亞洲水泥@91670188		
+亞洲航空	category	Category:台灣公司:亞洲航空 (臺灣)@93171187		
+亞洲藏壽司	category	Category:台灣公司:亞洲藏壽司@93948612		POLY
+亞都麗緻大飯店	category	Category:台灣公司:亞都麗緻大飯店@93959326		POLY
+京元電子	category	Category:台灣公司:京元電子@93956111		
+仁寶電腦	category	Category:台灣公司:仁寶電腦@93966728		
+仁德護專	school-abbr	zhwiki:仁德護專->仁德醫護管理專科學校@4709528		
+仁德醫護管理專校	school-abbr	zhwiki:仁德醫護管理專校->仁德醫護管理專科學校@4709529		
+仁德醫護管理專科學校	school	moe:u1_new.csv@115		
+今展科技	category	Category:台灣公司:今展科技@84580358		
+伊夫黎雪	nsi-wikipedia	zhwiki:葉露芝@88487029+wikidata:Q1477321@2534557565	Q1477321	
+伊蕾名店	nsi	nsi:shop/clothes/ileyed-9293e1@ac22bfd445b7	Q132360513	
+休閒國聯	category	Category:台灣餐飲公司:休閒國聯@90523239		
+休閒小站	category	Category:台灣手搖茶飲品牌:休閒小站@93653594		
+何嘉仁書店	category	Category:台灣公司:何嘉仁書店@89758351		
+佛光大學	school	moe:u1_new.csv@115		
+佳世達科技	category	Category:台灣公司:佳世達科技@94507634		
+佳邦科技	category	Category:台灣公司:佳邦科技@80232017		
+佳音英語	category	Category:台灣公司:佳音英語@94024611		
+佳龍科技工程	category	Category:台灣公司:佳龍科技工程@75748397		
+依夢	nsi	nsi:shop/clothes/emon-9293e1@ac22bfd445b7	Q132360486	
+信義房屋	category	Category:台灣公司:信義房屋@94038929		
+信驊科技	category	Category:台灣公司:信驊科技@94495503		
+修平科大	school-abbr	zhwiki:修平科大->修平科技大學@48237740		
+修平科技大學	school	moe:u1_new.csv@115		
+倚天資訊	category	Category:台灣公司:倚天資訊@93662588		
+偉康科技	category	Category:台灣公司:偉康科技@91949632		
+偉聯科技	category	Category:台灣公司:偉聯科技@94044563		
+健行科大	school-abbr	zhwiki:健行科大->健行科技大學@45648100		POLY
+健行科技大學	school	moe:u1_new.csv@115		POLY
+健身工廠	category	Category:台灣公司:健身工廠@92387001		
+僑中	school-abbr	zhwiki:僑中->國立華僑高級中等學校@34162010		
+僑光科大	school-abbr	zhwiki:僑光科大->僑光科技大學@16221855		
+僑光科技大學	school	moe:u1_new.csv@115		
+億川鐵工所	category	Category:台灣公司:億川鐵工所@86261825		
+億薩佧控股	category	Category:台灣公司:億薩佧控股@92837486		
+億豐綜合工業	category	Category:台灣公司:億豐綜合工業@91637500		
+元培科大	school-abbr	zhwiki:元培科大->元培醫事科技大學@78125859		
+元培科技大學	school-abbr	zhwiki:元培科技大學->元培醫事科技大學@78125875		
+元培醫事科技大學	school	moe:u1_new.csv@115		
+元大寶來富盈債券基金	category	Category:台灣公司:元大寶來富盈債券基金@68063612		
+元大金融控股	category	Category:台灣公司:元大金融控股@94086095		
+元太外匯	category	Category:台灣公司:元太外匯@90855657		
+元太科技工業	category	Category:台灣公司:元太科技工業@94053286		
+元美國際映像	category	Category:台灣公司:元美國際映像@94247851		
+兆勤科技	category	Category:台灣公司:兆勤科技@84832919		
+兆豐金融控股	category	Category:台灣公司:兆豐金融控股@93912772		
+先喝道	nsi	nsi:amenity/cafe/taotaotea-7d270d@ac22bfd445b7	Q126456282	
+光啟高中	school-abbr	zhwiki:光啟高中->桃園市光啟高級中等學校@59468288		
+光寶科技	category	Category:台灣公司:光寶科技@94200418		
+光禾華德福實驗學校	school	moe:high.csv@115		
+光聚晶電聯合	category	Category:台灣公司:光聚晶電聯合@94057859		
+內工	school-abbr	zhwiki:內工->臺北市立內湖高級工業職業學校@9886605		
+內湖高工	school-abbr	zhwiki:內湖高工->臺北市立內湖高級工業職業學校@3550313		
+全人實中	school-abbr	zhwiki:全人實中->苗栗縣私立全人實驗高級中學@41685945		
+全人高中	school-abbr	zhwiki:全人高中->苗栗縣私立全人實驗高級中學@41685946		
+全友電腦	category	Category:台灣公司:全友電腦@89871129		
+全漢	category	Category:台灣公司:全漢@94119979		
+全球傳動	category	Category:台灣公司:全球傳動@91216925		
+全祥茶莊	category	Category:台灣公司:全祥茶莊@86421467		
+全聯實業	nsi-wikipedia	zhwiki:全聯實業@94887755+wikidata:Q7262792@2455803411	Q7262792	
+全聯福利中心	nsi	nsi:shop/supermarket/pxmart-14223e@ac22bfd445b7	Q7262792	
+八大電視	category	Category:台灣公司:八大電視@94233721		
+六和高中	school-abbr	zhwiki:六和高中->桃園市六和高級中等學校@69128502		
+六扇門時尚湯鍋	nsi	nsi:amenity/restaurant/6owldoor-aafd63@ac22bfd445b7	Q131688921	
+六福開發	category	Category:台灣公司:六福開發@91670338		
+再睡五分鐘	nsi	nsi:amenity/cafe/naptea-7d270d@ac22bfd445b7	Q108166651	
+再興中學	school-abbr	zhwiki:再興中學->臺北市私立再興高級中學@11202753		
+冠德建設	category	Category:台灣公司:冠德建設@94150481		
+冰饌茶飲專賣店	nsi	nsi:amenity/cafe/teaworkstation-7d270d@ac22bfd445b7	Q127692990	
+凌天航空	category	Category:台灣公司:凌天航空@93783158		
+凌巨科技	category	Category:台灣公司:凌巨科技@94160954		
+凱基金融控股	category	Category:台灣公司:凱基金融控股@94165664		
+凱普松國際	category	Category:台灣公司:凱普松國際@94371824		
+凱碩科技	category	Category:台灣公司:凱碩科技@77329322		
+利民科技	category	Category:台灣公司:利民科技@86879263		
+利汎科技	category	Category:台灣公司:利汎科技@75747827		
+利華羊毛工業	category	Category:台灣公司:利華羊毛工業股份有限公司@94195364		
+創意電子	category	Category:台灣公司:創意電子@92958420		
+創新新零售	category	Category:台灣公司:創新新零售@80044251		
+創業家兄弟	category	Category:台灣公司:創業家兄弟@94201464		
+創見資訊	category	Category:台灣公司:創見資訊@93789094		
+劍湖山世界	category	Category:台灣公司:劍湖山世界@93377143		
+力成科技	category	Category:台灣公司:力成科技@94209272		
+力積電	category	Category:台灣公司:力積電@94669821		
+力麗	category	Category:台灣公司:力麗集團@94669823		
+勝博殿	nsi	nsi:amenity/restaurant/shengbopalace-aafd63@ac22bfd445b7	Q126369046	
+勤崴國際科技	category	Category:台灣公司:勤崴國際科技@93787516		
+勤益科大	school-abbr	zhwiki:勤益科大->國立勤益科技大學@3610779		
+勤益科技大學	school-abbr	zhwiki:勤益科技大學->國立勤益科技大學@3744307		
+勤誠興業	category	Category:台灣公司:勤誠興業@94223988		
+北城科大	school-abbr	zhwiki:北城科大->臺北城市科技大學@76943947		
+十興建設	category	Category:台灣公司:十興建設@92792533		
+十銓科技	category	Category:台灣公司:十銓科技@90797844		
+協和國際多媒體	category	Category:台灣公司:協和國際多媒體@94370591		
+南亞塑膠	category	Category:台灣公司:南亞塑膠@94275314		
+南亞技術學院	school	moe:u1_new.csv@115		
+南亞科技	category	Category:台灣公司:南亞科技@94419121		
+南亞食品	category	Category:台灣餐飲公司:南亞食品@94275466		
+南僑	category	Category:台灣公司:南僑集團@94282229		
+南六企業	category	Category:台灣公司:南六企業@81724819		
+南女	school-abbr	zhwiki:南女->國立臺南女子高級中學@15508618		
+南山台南廣場	category	Category:台灣公司:南山台南廣場@94800867		
+南投縣同德高中	school	moe:high.csv@115		
+南港輪胎	category	Category:台灣公司:南港輪胎@93180141		
+南紡	category	Category:台灣公司:南紡@47759453		
+南臺科技大學	school	moe:u1_new.csv@115		
+南華大學	school	moe:u1_new.csv@115		
+南開科大	school-abbr	zhwiki:南開科大->南開科技大學@55593221		
+南開科技大學	school	moe:u1_new.csv@115		
+卜蜂	category	Category:台灣公司:台灣卜蜂企業@94413833		
+原相科技	category	Category:台灣公司:原相科技@93138167		
+友達光電	category	Category:台灣公司:友達光電@94363224		
+可不可熟成紅茶	nsi	nsi:amenity/cafe/kebuke-7d270d@ac22bfd445b7	Q45572389	
+可成科技	category	Category:台灣公司:可成科技@93483956		
+台中教育大學	school-abbr	zhwiki:台中教育大學->國立臺中教育大學@32775974		
+台中日月千禧酒店	category	Category:台灣公司:台中日月千禧酒店@91318350		
+台中科技大學	school-abbr	zhwiki:台中科技大學->國立臺中科技大學@30149303		
+台亞半導體	category	Category:台灣公司:台亞半導體@93908476		
+台北商業大學	school-abbr	zhwiki:台北商業大學->國立臺北商業大學@34944088		
+台北國際商業銀行	category	Category:台灣公司:台北國際商業銀行@94501175		POLY
+台北城市大學	school-abbr	zhwiki:台北城市大學->臺北城市科技大學@19403911		
+台北城市科大	school-abbr	zhwiki:台北城市科大->臺北城市科技大學@19258483		
+台北數位實中	school-abbr	zhwiki:台北數位實中->臺北市數位實驗高級中等學校@76319230		
+台北海大	school-abbr	zhwiki:台北海大->台北海洋科技大學@71913422		
+台北海洋大學	school-abbr	zhwiki:台北海洋大學->台北海洋科技大學@71991119		
+台北海洋科技大學	school	moe:u1_new.csv@115		
+台北科技大學	school-abbr	zhwiki:台北科技大學->國立臺北科技大學@2899014		
+台北護理健康大學	school-abbr	zhwiki:台北護理健康大學->國立臺北護理健康大學@20993620		
+台北金融大樓	category	Category:台灣公司:台北金融大樓公司@94785902		
+台南企業	category	Category:台灣公司:台南企業@91038173		
+台南女中	school-abbr	zhwiki:台南女中->國立臺南女子高級中學@15508623		
+台南應用科大	school-abbr	zhwiki:台南應用科大->台南應用科技大學@37264940		
+台南應用科技大學	school	moe:u1_new.csv@115		
+台南科大	school-abbr	zhwiki:台南科大->台南應用科技大學@14528694		
+台南科技大學	school-abbr	zhwiki:台南科技大學->台南應用科技大學@14528691		
+台南紡織	category	Category:台灣公司:台南紡織@91670680		
+台南藝術大學	school-abbr	zhwiki:台南藝術大學->國立臺南藝術大學@8392066		
+台原藥	category	Category:台灣公司:台原藥@94537467		
+台塑九寶	category	Category:台灣公司:台塑九寶@87966332		
+台塑企業	category	Category:台灣公司:台塑企業@94892943		
+台塑勝高科技	category	Category:台灣公司:台塑勝高科技@93748817		
+台塑石油	nsi	nsi:amenity/fuel/formosapetrochemicalcorporation-db3418@ac22bfd445b7	Q1437742	
+台新新光金融控股	category	Category:台灣公司:台新新光金融控股@94717015		
+台東大學	school-abbr	zhwiki:台東大學->國立臺東大學@6438649		
+台東專校	school-abbr	zhwiki:台東專校->國立臺東專科學校@19049218		
+台東專科學校	school-abbr	zhwiki:台東專科學校->國立臺東專科學校@65741994		
+台橡	category	Category:台灣公司:台橡@92893810		
+台灣三洋電機	category	Category:台灣公司:台灣三洋電機@90534029		
+台灣優良品牌	category	Category:台灣公司:台灣優良品牌@72600069		
+台灣光罩	category	Category:台灣公司:台灣光罩@94413277		
+台灣半導體	category	Category:台灣公司:台灣半導體股份有限公司@93312588		
+台灣國際品牌	category	Category:台灣公司:台灣國際品牌@91296762		
+台灣國際造船	category	Category:台灣公司:台灣國際造船@93710374		
+台灣土地開發	category	Category:台灣公司:台灣土地開發公司@93272478		
+台灣大車隊	category	Category:台灣公司:台灣大車隊@94414563		
+台灣大雪山林業	category	Category:台灣公司:台灣大雪山林業@88655536		
+台灣宅配通	category	Category:台灣公司:台灣宅配通@91670286		
+台灣師大	school-abbr	zhwiki:台灣師大->國立臺灣師範大學@5757204		
+台灣戲曲學院	school-abbr	zhwiki:台灣戲曲學院->國立臺灣戲曲學院@57367307		
+台灣數位光訊科技	category	Category:台灣公司:台灣數位光訊科技集團@94718624		
+台灣新日化	category	Category:台灣公司:台灣新日化@90989173		
+台灣日光燈	category	Category:台灣公司:台灣日光燈@88056734		
+台灣水泥	category	Category:台灣公司:台灣水泥@94418596		
+台灣浩鼎生技	category	Category:台灣公司:台灣浩鼎生技@94418696		
+台灣海洋大學	school-abbr	zhwiki:台灣海洋大學->國立臺灣海洋大學@22079955		
+台灣玻璃工業	category	Category:台灣公司:台灣玻璃工業@94419950		
+台灣神隆	category	Category:台灣公司:台灣神隆@91038166		
+台灣科大	school-abbr	zhwiki:台灣科大->國立臺灣科技大學@72670937		
+台灣科技大學	school-abbr	zhwiki:台灣科技大學->國立臺灣科技大學@72670910		
+台灣第一生化科技	category	Category:台灣餐飲公司:台灣第一生化科技@93925260		
+台灣苯乙烯工業	category	Category:台灣公司:台灣苯乙烯工業@93059065		
+台灣藝術大學	school-abbr	zhwiki:台灣藝術大學->國立臺灣藝術大學@4209465		
+台灣虎航	category	Category:台灣公司:台灣虎航@94668428		
+台灣農林	category	Category:台灣公司:台灣農林@92558847		
+台灣鋼鐵	category	Category:台灣公司:台灣鋼鐵集團@94845323		
+台灣體大	school-abbr	zhwiki:台灣體大->國立臺灣體育運動大學@25387836		
+台灣高鐵	category	Category:台灣公司:台灣高鐵公司@94676793		
+台火開發	category	Category:台灣公司:台火開發@94426941		
+台鋼科大	school-abbr	zhwiki:台鋼科大->台鋼科技大學@82373276		
+吃茶三千	nsi	nsi:amenity/cafe/chichasanchen-f1b18f@ac22bfd445b7	Q133042869	
+合作金庫金融控股	category	Category:台灣公司:合作金庫金融控股@94562325		
+合勤科技	category	Category:台灣公司:合勤科技@94266260		
+吉哆火鍋百匯	category	Category:台灣餐飲公司:吉哆火鍋百匯@90318768		
+吉隆建設	category	Category:台灣公司:吉隆建設@83261350		
+同方友友	category	Category:台灣公司:同方友友@68063439		
+君毅高中	school-abbr	zhwiki:君毅高中->苗栗縣私立君毅高級中學@41685932		
+吳鳳科大	school-abbr	zhwiki:吳鳳科大->吳鳳科技大學@41617806		
+吳鳳科技大學	school	moe:u1_new.csv@115		
+味王	category	Category:台灣公司:味王@91216996		
+呷尚寶	nsi	nsi:amenity/fast_food/jsp-60a4d5@ac22bfd445b7	Q109996570	
+和信	category	Category:台灣公司:和信集團@93310933		
+和平電力	category	Category:台灣公司:和平電力公司@93019299		
+和成欣業	category	Category:台灣公司:和成欣業@90507185		
+和潤企業	category	Category:台灣公司:和潤企業@90823178		
+和碩聯合科技	category	Category:台灣公司:和碩聯合科技@94530062		
+哈伯精密	category	Category:台灣公司:哈伯精密@89303616		
+員中	school-abbr	zhwiki:員中->國立員林高級中學@44853262		
+員林農工	school-abbr	zhwiki:員林農工->國立員林高級農工職業學校@5015448		
+員林高中	school-abbr	zhwiki:員林高中->國立員林高級中學@5212115		
+員農	school-abbr	zhwiki:員農->國立員林高級農工職業學校@5015452		
+員高	school-abbr	zhwiki:員高->國立員林高級中學@24471183		
+唐榮鐵工廠	category	Category:台灣公司:唐榮鐵工廠@94227317		
+啟碁科技	category	Category:台灣公司:啟碁科技@93631353		
+喜滿客影城	category	Category:台灣公司:喜滿客影城@94583162		
+喬山健康科技	category	Category:台灣公司:喬山健康科技@94587299		
+嘉中	school-abbr	zhwiki:嘉中->國立嘉義高級中學@4653257		
+嘉南藥大	school-abbr	zhwiki:嘉南藥大->嘉南藥理大學@30107102		
+嘉南藥理	school-abbr	zhwiki:嘉南藥理->嘉南藥理大學@30107096		
+嘉南藥理大學	school	moe:u1_new.csv@115		
+嘉女	school-abbr	zhwiki:嘉女->國立嘉義女子高級中學@7342548		
+嘉工	school-abbr	zhwiki:嘉工->國立嘉義高級工業職業學校@4726458		
+嘉新水泥	category	Category:台灣公司:嘉新水泥@76374196		
+嘉義大學	school-abbr	zhwiki:嘉義大學->國立嘉義大學@69579510		
+嘉義女中	school-abbr	zhwiki:嘉義女中->國立嘉義女子高級中學@7303148		
+嘉義高中	school-abbr	zhwiki:嘉義高中->國立嘉義高級中學@4653265		
+嘉義高工	school-abbr	zhwiki:嘉義高工->國立嘉義高級工業職業學校@4726453		
+嘉裕西服	category	Category:台灣公司:嘉裕西服@85373785		
+嘉里大榮物流	category	Category:台灣公司:嘉里大榮物流@94600127		
+嘉高	school-abbr	zhwiki:嘉高->國立嘉義高級中學@44567964		
+國北	school-abbr	zhwiki:國北->國立臺北教育大學@23918982		
+國巨	category	Category:台灣公司:國巨@94371453		
+國揚	category	Category:台灣公司:國揚集團@94639513		
+國泰化工廠	category	Category:台灣公司:國泰化工廠股份有限公司@94641210		
+國泰建設	category	Category:台灣公司:國泰建設@94641262		
+國泰金融控股	category	Category:台灣公司:國泰金融控股@94641605		
+國泰銀行	nsi-wikipedia	zhwiki:國泰銀行@94641615+wikidata:Q4189507@2534636753	Q4189507	POLY
+國產實業	category	Category:台灣公司:國產實業集團@93203342		
+國產建材實業	category	Category:台灣公司:國產建材實業@92843717		
+國產汽車	category	Category:台灣公司:國產汽車股份有限公司@92213809		
+國票金融控股	category	Category:台灣公司:國票金融控股@94644878		
+國立中山大學	school	moe:u1_new.csv@115		
+國立中正大學	school	moe:u1_new.csv@115		
+國立中科實驗高級中學	school	moe:high.csv@115		
+國立中興高中	school	moe:high.csv@115		
+國立二林工商	school	moe:high.csv@115		
+國立仁愛高農	school	moe:high.csv@115		
+國立佳冬高農	school	moe:high.csv@115		
+國立光復商工	school	moe:high.csv@115		
+國立內埔農工	school	moe:high.csv@115		
+國立勤益科技大學	school	moe:u1_new.csv@115		
+國立北斗家商	school	moe:high.csv@115		
+國立北港農工	school	moe:high.csv@115		
+國立北港高中	school	moe:high.csv@115		
+國立北門農工	school	moe:high.csv@115		
+國立北門高中	school	moe:high.csv@115		
+國立卓蘭高中	school	moe:high.csv@115		
+國立南投高中	school	moe:high.csv@115		
+國立南投高商	school	moe:high.csv@115		
+國立南科國際實驗高中	school	moe:high.csv@115		
+國立台中科大	school-abbr	zhwiki:國立台中科大->國立臺中科技大學@56050547		
+國立員林家商	school	moe:high.csv@115		
+國立員林崇實高工	school	moe:high.csv@115		
+國立員林農工	school	moe:high.csv@115		
+國立員林高中	school	moe:high.csv@115		
+國立善化高中	school	moe:high.csv@115		
+國立嘉科實驗高中	school	moe:high.csv@115		
+國立嘉義大學	school	moe:u1_new.csv@115		
+國立嘉義女中	school	moe:high.csv@115		
+國立嘉義家職	school	moe:high.csv@115		
+國立嘉義高中	school	moe:high.csv@115		
+國立嘉義高商	school	moe:high.csv@115		
+國立嘉義高工	school	moe:high.csv@115		
+國立土庫商工	school	moe:high.csv@115		
+國立埔里高工	school	moe:high.csv@115		
+國立基隆商工	school	moe:high.csv@115		
+國立基隆女中	school	moe:high.csv@115		
+國立基隆高中	school	moe:high.csv@115		
+國立大湖農工	school	moe:high.csv@115		
+國立宜中	school-abbr	zhwiki:國立宜中->國立宜蘭高級中學@7901210		
+國立宜蘭大學	school	moe:u1_new.csv@115		
+國立宜蘭高中	school	moe:high.csv@115		
+國立宜蘭高商	school	moe:high.csv@115		
+國立家齊高中	school	moe:high.csv@115		
+國立屏北高中	school	moe:high.csv@115		
+國立屏東大學	school	moe:u1_new.csv@115		
+國立屏東女中	school	moe:high.csv@115		
+國立屏東科技大學	school	moe:u1_new.csv@115		
+國立屏東高中	school	moe:high.csv@115		
+國立屏東高工	school	moe:high.csv@115		
+國立屏科實驗高中	school	moe:high.csv@115		
+國立岡山農工	school	moe:high.csv@115		
+國立岡山高中	school	moe:high.csv@115		
+國立師大附中	school	moe:high.csv@115		
+國立彰化女中	school	moe:high.csv@115		
+國立彰化師大	school-abbr	zhwiki:國立彰化師大->國立彰化師範大學@4980923		
+國立彰化師範大學	school	moe:u1_new.csv@115		
+國立彰化高中	school	moe:high.csv@115		
+國立彰化高商	school	moe:high.csv@115		
+國立彰師附工	school	moe:high.csv@115		
+國立後壁高中	school	moe:high.csv@115		
+國立恆春工商	school	moe:high.csv@115		
+國立成功商水	school	moe:high.csv@115		
+國立成功大學	school	moe:u1_new.csv@115		
+國立成大附屬南工	school	moe:high.csv@115		
+國立政大	school-abbr	zhwiki:國立政大->國立政治大學@53449751		
+國立政大附中	school	moe:high.csv@115		
+國立政治大學	school	moe:u1_new.csv@115		
+國立斗六家商	school	moe:high.csv@115		
+國立斗六高中	school	moe:high.csv@115		
+國立新化高中	school	moe:high.csv@115		
+國立新化高工	school	moe:high.csv@115		
+國立新港藝術高中	school	moe:high.csv@115		
+國立新營高中	school	moe:high.csv@115		
+國立新營高工	school	moe:high.csv@115		
+國立新竹女中	school	moe:high.csv@115		
+國立新竹高中	school	moe:high.csv@115		
+國立新竹高商	school	moe:high.csv@115		
+國立新竹高工	school	moe:high.csv@115		
+國立新豐高中	school	moe:high.csv@115		
+國立旗山農工	school	moe:high.csv@115		
+國立旗美高中	school	moe:high.csv@115		
+國立暨南國際大學	school	moe:u1_new.csv@115		
+國立暨大附中	school	moe:high.csv@115		
+國立曾文家商	school	moe:high.csv@115		
+國立曾文農工	school	moe:high.csv@115		
+國立東港海事	school	moe:high.csv@115		
+國立東石高中	school	moe:high.csv@115		
+國立東華大學	school	moe:u1_new.csv@115		
+國立民雄農工	school	moe:high.csv@115		
+國立水里商工	school	moe:high.csv@115		
+國立永靖高工	school	moe:high.csv@115		
+國立海洋大學	school-abbr	zhwiki:國立海洋大學->國立臺灣海洋大學@21860692		
+國立清華大學	school	moe:u1_new.csv@115		
+國立溪湖高中	school	moe:high.csv@115		
+國立潮州高中	school	moe:high.csv@115		
+國立澎湖海事水產	school	moe:high.csv@115		
+國立澎湖科大	school-abbr	zhwiki:國立澎湖科大->國立澎湖科技大學@3613718		
+國立澎湖科技大學	school	moe:u1_new.csv@115		
+國立玉井工商	school	moe:high.csv@115		
+國立玉里高中	school	moe:high.csv@115		
+國立白河商工	school	moe:high.csv@115		
+國立秀水高工	school	moe:high.csv@115		
+國立竹南高中	school	moe:high.csv@115		
+國立竹山高中	school	moe:high.csv@115		
+國立竹東高中	school	moe:high.csv@115		
+國立羅東高中	school	moe:high.csv@115		
+國立羅東高商	school	moe:high.csv@115		
+國立羅東高工	school	moe:high.csv@115		
+國立聯合大學	school	moe:u1_new.csv@115		
+國立臺中教育大學	school	moe:u1_new.csv@115		
+國立臺中科技大學	school	moe:u1_new.csv@115		
+國立臺北商業大學	school	moe:u1_new.csv@115		
+國立臺北大學	school	moe:u1_new.csv@115		
+國立臺北教育大學	school	moe:u1_new.csv@115		
+國立臺北科技大學	school	moe:u1_new.csv@115		
+國立臺北藝術大學	school	moe:u1_new.csv@115		
+國立臺北護理健康大學	school	moe:u1_new.csv@115		
+國立臺南一中	school	moe:high.csv@115		
+國立臺南二中	school	moe:high.csv@115		
+國立臺南大學	school	moe:u1_new.csv@115		
+國立臺南大學附中	school	moe:high.csv@115		
+國立臺南女中	school	moe:high.csv@115		
+國立臺南海事	school	moe:high.csv@115		
+國立臺南藝術大學	school	moe:u1_new.csv@115		
+國立臺南護理專科學校	school	moe:u1_new.csv@115		
+國立臺南高商	school	moe:high.csv@115		
+國立臺東大學	school	moe:u1_new.csv@115		
+國立臺東女中	school	moe:high.csv@115		
+國立臺東專科學校	school	moe:u1_new.csv@115		
+國立臺東高中	school	moe:high.csv@115		
+國立臺東高商	school	moe:high.csv@115		
+國立臺灣師範大學	school	moe:u1_new.csv@115		
+國立臺灣戲曲學院	school	moe:u1_new.csv@115		
+國立臺灣海洋大學	school	moe:u1_new.csv@115		
+國立臺灣科技大學	school	moe:u1_new.csv@115		
+國立臺灣藝術大學	school	moe:u1_new.csv@115		
+國立臺灣體育運動大學	school	moe:u1_new.csv@115		
+國立興大附中	school	moe:high.csv@115		
+國立興大附農	school	moe:high.csv@115		
+國立花蓮女中	school	moe:high.csv@115		
+國立花蓮高中	school	moe:high.csv@115		
+國立花蓮高商	school	moe:high.csv@115		
+國立花蓮高工	school	moe:high.csv@115		
+國立花蓮高農	school	moe:high.csv@115		
+國立苑中	school-abbr	zhwiki:國立苑中->國立苑裡高級中學@55240879		
+國立苑裡高中	school	moe:high.csv@115		
+國立苑高	school-abbr	zhwiki:國立苑高->國立苑裡高級中學@41685893		
+國立苗中	school-abbr	zhwiki:國立苗中->國立苗栗高級中學@61819338		
+國立苗栗農工	school	moe:high.csv@115		
+國立苗栗高中	school	moe:high.csv@115		
+國立苗栗高商	school	moe:high.csv@115		
+國立草屯商工	school	moe:high.csv@115		
+國立華僑高級中等學校	school	moe:high.csv@115		
+國立華南高商	school	moe:high.csv@115		
+國立華商	school-abbr	zhwiki:國立華商->國立華南高級商業職業學校@31443401		
+國立蘇澳海事	school	moe:high.csv@115		
+國立蘭女	school-abbr	zhwiki:國立蘭女->國立蘭陽女子高級中學@21728173		
+國立蘭陽女中	school	moe:high.csv@115		
+國立虎尾科大	school-abbr	zhwiki:國立虎尾科大->國立虎尾科技大學@4308827		
+國立虎尾科技大學	school	moe:u1_new.csv@115		
+國立虎尾農工	school	moe:high.csv@115		
+國立虎尾高中	school	moe:high.csv@115		
+國立西螺農工	school	moe:high.csv@115		
+國立金門大學	school	moe:u1_new.csv@115		
+國立金門農工	school	moe:high.csv@115		
+國立金門高中	school	moe:high.csv@115		
+國立關山工商	school	moe:high.csv@115		
+國立關西高中	school	moe:high.csv@115		
+國立陽明交大附中	school	moe:high.csv@115		
+國立陽明交通大學	school	moe:u1_new.csv@115		
+國立雲林科大	school-abbr	zhwiki:國立雲林科大->國立雲林科技大學@28144070		
+國立雲林科技大學	school	moe:u1_new.csv@115		
+國立頭城家商	school	moe:high.csv@115		
+國立馬公高中	school	moe:high.csv@115		
+國立馬祖高中	school	moe:high.csv@115		
+國立體大	school-abbr	zhwiki:國立體大->國立體育大學@53743990		
+國立體育大學	school	moe:u1_new.csv@115		
+國立高師大附中	school	moe:high.csv@115		
+國立高科大	school-abbr	zhwiki:國立高科大->國立高雄科技大學@53330008		
+國立高科實驗高中	school	moe:high.csv@115		
+國立高雄大學	school	moe:u1_new.csv@115		
+國立高雄師範大學	school	moe:u1_new.csv@115		
+國立高雄科大	school-abbr	zhwiki:國立高雄科大->國立高雄科技大學@53330007		
+國立高雄科技大學	school	moe:u1_new.csv@115		
+國立高雄餐旅大學	school	moe:u1_new.csv@115		
+國立鳳山商工	school	moe:high.csv@115		
+國立鳳山高中	school	moe:high.csv@115		
+國立鳳新高中	school	moe:high.csv@115		
+國立鹿港高中	school	moe:high.csv@115		
+國臺藝	school-abbr	zhwiki:國臺藝->國立臺灣藝術大學@57033253		
+國賓大飯店	category	Category:台灣公司:國賓大飯店@94432935		
+國際中橡投資控股	category	Category:台灣公司:國際中橡投資控股@90989154		
+圓剛科技	category	Category:台灣公司:圓剛科技@94659203		
+圓展科技	category	Category:台灣公司:圓展科技@94811710		
+圓神出版社	category	Category:台灣公司:圓神出版社@94049743		
+均豪精密工業	category	Category:台灣公司:均豪精密工業@94691900		
+城市科大	school-abbr	zhwiki:城市科大->臺北城市科技大學@19258485		
+城科	school-abbr	zhwiki:城科->臺北城市科技大學@22082945		
+基隆高中	school-abbr	zhwiki:基隆高中->國立基隆高級中學@1321130		
+墨凡商場	category	Category:台灣公司:墨凡商場@94773865		
+士林紙業	category	Category:台灣公司:士林紙業@94433200		
+士林電機	category	Category:台灣公司:士林電機@91488186		
+壹番屋	nsi-wikipedia	zhwiki:壹番屋@90126934+wikidata:Q5986105@2534530262	Q5986105	
+夏都酒店	category	Category:台灣公司:夏都酒店集團@87158582		POLY
+多那之咖啡	nsi	nsi:amenity/cafe/donutescoffee-7d270d@ac22bfd445b7	Q132010304	
+大仁科大	school-abbr	zhwiki:大仁科大->大仁科技大學@3613698		
+大南汽車	category	Category:台灣公司:大南汽車@94266273		
+大埔平價鐵板燒	nsi	nsi:amenity/restaurant/daproteppanyaki-aafd63@ac22bfd445b7	Q131300484	
+大埔鐵板燒	nsi	nsi:amenity/restaurant/593b05-aafd63@ac22bfd445b7	Q108541437	
+大墩食衣生活廣場	category	Category:台灣公司:大墩食衣生活廣場@94831763		
+大安高工	school-abbr	zhwiki:大安高工->臺北市立大安高級工業職業學校@4915284		
+大成不銹鋼	category	Category:台灣公司:大成不銹鋼@77457808		
+大成玉米	category	Category:台灣公司:大成玉米集團@90870940		
+大成食品	category	Category:台灣公司:大成食品@90870903		
+大戶屋	nsi	nsi:amenity/restaurant/ootoya-d30421@ac22bfd445b7	Q11435522	
+大數智能	category	Category:台灣公司:大數智能@94843247		
+大昌國際	category	Category:台灣公司:大昌國際@94843976		
+大樹藥局	nsi	nsi:amenity/pharmacy/greattreepharmacy-9d8b4e@ac22bfd445b7	Q108167767	
+大江生醫	category	Category:台灣公司:大江生醫@91948839		
+大湖農工	school-abbr	zhwiki:大湖農工->國立大湖高級農工職業學校@6447146		
+大研生醫	category	Category:台灣公司:大研生醫@94863713		
+大立光電	category	Category:台灣公司:大立光電@93484185		
+大聯大控股	category	Category:台灣公司:大聯大控股@94867717		
+大茗本位製茶堂	nsi	nsi:amenity/cafe/daming-7d270d@ac22bfd445b7	Q131300307	
+大里高中	school-abbr	zhwiki:大里高中->臺中市立大里高級中學@30006763		
+大陸工程	category	Category:台灣公司:大陸工程@88651268		
+大魯閣實業	category	Category:台灣公司:大魯閣實業@92719682		
+天主教明誠高中	school	moe:high.csv@115		
+天主教道明中學	school	moe:high.csv@115		
+天仁茗茶	nsi	nsi:amenity/cafe/tenrenstea-7d270d@ac22bfd445b7	Q10939065	
+天品山莊	category	Category:台灣公司:天品山莊@94907238		
+天成飯店	category	Category:台灣公司:天成飯店集團@93886847		
+天瀚科技	category	Category:台灣公司:天瀚科技@93614597		
+天禧海嘉控股	category	Category:台灣公司:天禧海嘉控股@88105246		
+天臣控股	category	Category:台灣公司:天臣控股@93253496		
+太子建設	category	Category:台灣公司:太子建設@93110089		
+太平洋建設	category	Category:台灣公司:太平洋建設集團 (台灣)@93876984		
+太平洋電線電纜	category	Category:台灣公司:太平洋電線電纜@93254262		
+太空梭高傳真科技	category	Category:台灣公司:太空梭高傳真科技@82039406		
+奐鑫控股	category	Category:台灣公司:奐鑫控股@93329578		
+好來化工	category	Category:台灣公司:好來化工@90989180		
+好市多加油站	nsi	nsi:amenity/fuel/costcogasoline-db3418@ac22bfd445b7	Q715583	
+好樂迪	category	Category:台灣公司:好樂迪@94058852		POLY
+威剛科技	category	Category:台灣公司:威剛科技@94230088		
+威盛電子	category	Category:台灣公司:威盛電子@94058978		
+威睿科技	category	Category:台灣公司:威睿科技@76623057		
+孫東寶台式牛排	nsi	nsi:amenity/restaurant/sundongbaobeefsteak-aafd63@ac22bfd445b7	Q101084415	
+宇峻奧汀	category	Category:台灣公司:宇峻奧汀@94853310		
+安鈦克	category	Category:台灣公司:安鈦克@89355968		
+安鋒鋼鐵	category	Category:台灣公司:安鋒鋼鐵@93302846		
+宏亞食品	category	Category:台灣公司:宏亞食品@94634360		
+宏佳騰動力科技	category	Category:台灣公司:宏佳騰動力科技@90624890		
+宏全國際	category	Category:台灣公司:宏全國際集團@89425824		
+宏國科大	school-abbr	zhwiki:宏國科大->宏國德霖科技大學@65366818		
+宏正自動科技	category	Category:台灣公司:宏正自動科技@89433804		
+宏泰	category	Category:台灣公司:宏泰集團@91670068		
+宏達國際電子	category	Category:台灣公司:宏達國際電子@94875502		
+官田鋼鐵	category	Category:台灣公司:官田鋼鐵@90677755		
+宜中	school-abbr	zhwiki:宜中->國立宜蘭高級中學@4454976		
+宜蘭大學	school-abbr	zhwiki:宜蘭大學->國立宜蘭大學@3761052		
+宜蘭高中	school-abbr	zhwiki:宜蘭高中->國立宜蘭高級中學@4419878		
+宜進實業	category	Category:台灣公司:宜進實業@90543200		
+宜高	school-abbr	zhwiki:宜高->國立宜蘭高級中學@7772123		
+宜鼎國際	category	Category:台灣公司:宜鼎國際@93863166		
+家齊高中	school-abbr	zhwiki:家齊高中->國立臺南家齊高級中等學校@40998639		
+宸鴻光電科技	category	Category:台灣公司:宸鸿光电科技@82096783		
+富強輪胎	category	Category:台灣公司:富強輪胎@88890293		
+富邦媒體科技	category	Category:台灣公司:富邦媒體科技股份有限公司@94146916		
+富邦金融控股	category	Category:台灣公司:富邦金融控股@94562356		
+富采投資控股	category	Category:台灣公司:富采投資控股@93160505		
+富驛酒店	category	Category:台灣公司:富驛酒店集團@82046973		
+寰邦科技	category	Category:台灣公司:寰邦科技@88106160		
+寶佳機構	category	Category:台灣公司:寶佳機構@93211115		
+寶島鐘錶眼鏡行	category	Category:台灣公司:寶島鐘錶眼鏡行@93396220		POLY
+寶成工業	category	Category:台灣公司:寶成工業@93301114		
+寶華商業銀行	category	Category:台灣公司:寶華商業銀行@94391362		POLY
+寶齡富錦生技	category	Category:台灣公司:寶齡富錦生技@94876234		
+小林眼鏡	category	Category:台灣公司:小林眼鏡@86330654		
+小萌科技	category	Category:台灣公司:小萌科技@94278381		
+小豆苗便利商店	category	Category:台灣公司:小豆苗便利商店@88327467		
+尚立	category	Category:台灣公司:尚立@91308297		
+屏東大學	school-abbr	zhwiki:屏東大學->國立屏東大學@30985809		
+屏東女中	school-abbr	zhwiki:屏東女中->國立屏東女子高級中學@7302799		
+屏東科大	school-abbr	zhwiki:屏東科大->國立屏東科技大學@3122025		
+屏東高中	school-abbr	zhwiki:屏東高中->國立屏東高級中學@15517241		
+屏東高工	school-abbr	zhwiki:屏東高工->國立屏東高級工業職業學校@15824825		
+山富國際旅行社	category	Category:台灣公司:山富国际旅行社@90823142		POLY
+山隆加油站	nsi	nsi:amenity/fuel/sanlong-db3418@ac22bfd445b7	Q130214215	
+岡山高中	school-abbr	zhwiki:岡山高中->國立岡山高級中學@22673171		
+峰圃茶莊	category	Category:台灣餐飲公司:峰圃茶莊@94275003		
+崇仁護專	school-abbr	zhwiki:崇仁護專->崇仁醫護管理專科學校@67189304		
+崇仁醫護管理專科學校	school	moe:u1_new.csv@115		
+崇右影藝科技大學	school	moe:u1_new.csv@115		
+崇右科技大學	school-abbr	zhwiki:崇右科技大學->崇右影藝科技大學@55519339		
+崇工	school-abbr	zhwiki:崇工->國立員林崇實高級工業職業學校@55240792		
+崇越科技	category	Category:台灣公司:崇越科技@88867601		
+崑山科大	school-abbr	zhwiki:崑山科大->崑山科技大學@9902085		
+崑科	school-abbr	zhwiki:崑科->崑山科技大學@50841078		
+嶺東科技大學	school	moe:u1_new.csv@115		
+川湖科技	category	Category:台灣公司:川湖科技@94203732		
+巨匠電腦	category	Category:台灣公司:巨匠電腦@92885149		
+巨思媒體	category	Category:台灣公司:巨思媒體集團@92479851		
+巨林美而美	nsi	nsi:amenity/fast_food/jyulinmeiandmei-60a4d5@ac22bfd445b7	Q105722219	
+巨騰國際	category	Category:台灣公司:巨騰國際@92709662		
+巴塔哥尼亞	nsi-wikipedia	zhwiki:巴塔哥尼亞 (公司)@92388346+wikidata:Q1660552@2550148617	Q1660552	
+巴登咖啡	category	Category:台灣公司:巴登咖啡@84679217		
+市大里高中	school-abbr	zhwiki:市大里高中->臺中市立大里高級中學@17061972		
+市立三民家商	school	moe:high.csv@115		
+市立三民高中	school	moe:high.csv@115		
+市立三重商工	school	moe:high.csv@115		POLY
+市立三重高中	school	moe:high.csv@115		POLY
+市立中和高中	school	moe:high.csv@115		
+市立中壢家商	school	moe:high.csv@115		
+市立中壢高商	school	moe:high.csv@115		
+市立中山女高	school	moe:high.csv@115		
+市立中山高中	school	moe:high.csv@115		
+市立中崙高中	school	moe:high.csv@115		
+市立中正高中	school	moe:high.csv@115		
+市立中正高工	school	moe:high.csv@115		
+市立中港高中	school	moe:high.csv@115		
+市立丹鳳高中	school	moe:high.csv@115		
+市立仁武高中	school	moe:high.csv@115		
+市立光復高中	school	moe:high.csv@115		
+市立內壢高中	school	moe:high.csv@115		
+市立內湖高中	school	moe:high.csv@115		
+市立內湖高工	school	moe:high.csv@115		
+市立八斗高中	school	moe:high.csv@115		
+市立六龜高中	school	moe:high.csv@115		
+市立前鎮高中	school	moe:high.csv@115		
+市立北一女中	school	moe:high.csv@115		
+市立北大高級中學	school	moe:high.csv@115		
+市立北市大附中	school	moe:high.csv@115		
+市立南寧高中	school	moe:high.csv@115		
+市立南崁高中	school	moe:high.csv@115		
+市立南港高中	school	moe:high.csv@115		
+市立南港高工	school	moe:high.csv@115		
+市立南湖高中	school	moe:high.csv@115		
+市立后綜高中	school	moe:high.csv@115		
+市立和平高中	school	moe:high.csv@115		
+市立土城高中	school	moe:high.csv@115		
+市立士林高商	school	moe:high.csv@115		
+市立壽山高中	school	moe:high.csv@115		
+市立大同	school-abbr	zhwiki:市立大同->臺北市立大同高級中學@7851679		
+市立大同高中	school	moe:high.csv@115		
+市立大園國際高中	school	moe:high.csv@115		
+市立大安高工	school	moe:high.csv@115		
+市立大溪高中	school	moe:high.csv@115		
+市立大灣高中	school	moe:high.csv@115		
+市立大甲高中	school	moe:high.csv@115		
+市立大甲高工	school	moe:high.csv@115		
+市立大直高中	school	moe:high.csv@115		
+市立大里	school-abbr	zhwiki:市立大里->臺中市立大里高級中學@17048941		
+市立大里高中	school	moe:high.csv@115		
+市立安康高中	school	moe:high.csv@115		
+市立安樂高中	school	moe:high.csv@115		POLY
+市立小港高中	school	moe:high.csv@115		
+市立左營高中	school	moe:high.csv@115		
+市立平鎮高中	school	moe:high.csv@115		
+市立建功高中	school	moe:high.csv@115		
+市立建國中學	school	moe:high.csv@115		
+市立復興高中	school	moe:high.csv@115		
+市立忠明高中	school	moe:high.csv@115		
+市立惠文高中	school	moe:high.csv@115		
+市立成功中學	school	moe:high.csv@115		
+市立成德高中	school	moe:high.csv@115		
+市立成淵高中	school	moe:high.csv@115		
+市立文山高中	school	moe:high.csv@115		
+市立文華高中	school	moe:high.csv@115		
+市立新北高中	school	moe:high.csv@115		
+市立新北高工	school	moe:high.csv@115		
+市立新屋高中	school	moe:high.csv@115		
+市立新店高中	school	moe:high.csv@115		
+市立新社高中	school	moe:high.csv@115		
+市立新興高中	school	moe:high.csv@115		
+市立新莊高中	school	moe:high.csv@115		
+市立明倫高中	school	moe:high.csv@115		
+市立明德高中	school	moe:high.csv@115		
+市立景美女中	school	moe:high.csv@115		
+市立暖暖高中	school	moe:high.csv@115		
+市立木柵高工	school	moe:high.csv@115		
+市立東勢高工	school	moe:high.csv@115		
+市立東山高中	school	moe:high.csv@115		
+市立松山家商	school	moe:high.csv@115		
+市立松山工農	school	moe:high.csv@115		
+市立松山高中	school	moe:high.csv@115		
+市立板橋高中	school	moe:high.csv@115		
+市立林口高中	school	moe:high.csv@115		
+市立林園高中	school	moe:high.csv@115		
+市立桃園高中	school	moe:high.csv@115		
+市立楊梅高中	school	moe:high.csv@115		
+市立楠梓高中	school	moe:high.csv@115		
+市立樟樹國際實中	school	moe:high.csv@115		
+市立樹林高中	school	moe:high.csv@115		
+市立武陵高中	school	moe:high.csv@115		
+市立永仁高中	school	moe:high.csv@115		
+市立永平高中	school	moe:high.csv@115		
+市立永春高中	school	moe:high.csv@115		
+市立永豐高中	school	moe:high.csv@115		
+市立沙崙國際高中	school	moe:high.csv@115		
+市立沙鹿高工	school	moe:high.csv@115		
+市立泰山高中	school	moe:high.csv@115		
+市立海山高中	school	moe:high.csv@115		
+市立海青工商	school	moe:high.csv@115		
+市立淡水商工	school	moe:high.csv@115		
+市立清水高中	school	moe:high.csv@115		
+市立瑞祥高中	school	moe:high.csv@115		
+市立瑞芳高工	school	moe:high.csv@115		
+市立百齡高中	school	moe:high.csv@115		
+市立石碇高中	school	moe:high.csv@115		
+市立神岡高工	school	moe:high.csv@115		
+市立福誠高中	school	moe:high.csv@115		
+市立秀峰高中	school	moe:high.csv@115		
+市立竹圍高中	school	moe:high.csv@115		
+市立羅浮高中	school	moe:high.csv@115		
+市立育成高中	school	moe:high.csv@115		
+市立臺中一中	school	moe:high.csv@115		
+市立臺中二中	school	moe:high.csv@115		
+市立臺中女中	school	moe:high.csv@115		
+市立臺中家商	school	moe:high.csv@115		
+市立臺中高工	school	moe:high.csv@115		
+市立芳和實中	school	moe:high.csv@115		
+市立華江高中	school	moe:high.csv@115		
+市立萬芳高中	school	moe:high.csv@115		
+市立西松高中	school	moe:high.csv@115		
+市立西苑高中	school	moe:high.csv@115		
+市立觀音高中	school	moe:high.csv@115		
+市立豐原高中	school	moe:high.csv@115		
+市立豐原高商	school	moe:high.csv@115		
+市立豐珠中學	school	moe:high.csv@115		
+市立路竹高中	school	moe:high.csv@115		
+市立金山高中	school	moe:high.csv@115		
+市立錦和高中	school	moe:high.csv@115		
+市立長億高中	school	moe:high.csv@115		POLY
+市立陽明高中	school	moe:high.csv@115		
+市立雙溪高中	school	moe:high.csv@115		
+市立霧峰農工	school	moe:high.csv@115		
+市立香山高中	school	moe:high.csv@115		
+市立高雄中學	school	moe:high.csv@115		
+市立高雄女中	school	moe:high.csv@115		
+市立高雄高商	school	moe:high.csv@115		
+市立高雄高工	school	moe:high.csv@115		
+市立鶯歌工商	school	moe:high.csv@115		
+市立麗山高中	school	moe:high.csv@115		
+市立鼓山高中	school	moe:high.csv@115		
+市立龍津高中	school	moe:high.csv@115		
+市立龍潭高中	school	moe:high.csv@115		
+帝寶工業	category	Category:台灣公司:帝寶工業@75750458		
+平原出版社	category	Category:台灣公司:平原出版社@51197534		
+幸福水泥	category	Category:台灣公司:幸福水泥@90081284		
+府都建設	category	Category:台灣公司:府都建設@89734896		POLY
+康寧大學	school	moe:u1_new.csv@115		
+康揚	category	Category:台灣公司:康揚@76911210		
+康普	category	Category:台灣公司:康普集團@93653775		
+康橋雙語學校	category	Category:台灣公司:康橋雙語學校@93925175		
+廣化科技	category	Category:台灣公司:廣化科技@87617179		
+廣源良	category	Category:台灣公司:廣源良@90547748		
+廣穎電通	category	Category:台灣公司:廣穎電通@89918591		
+廣輝電子	category	Category:台灣公司:廣輝電子@77374895		
+廣達電腦	category	Category:台灣公司:廣達電腦@93872142		
+延陵實業	category	Category:台灣公司:延陵实业@90547784		
+廷鑫興業	category	Category:台灣公司:廷鑫興業@75748233		
+建台高中	school-abbr	zhwiki:建台高中->苗栗縣私立建臺高級中學@29625676		
+建國科大	school-abbr	zhwiki:建國科大->建國科技大學@3613684		
+建國科技大學	school	moe:u1_new.csv@115		
+建大輪胎	category	Category:台灣公司:建大輪胎@87242969		
+建碁	category	Category:台灣公司:建碁@75749601		
+弘光大學	school-abbr	zhwiki:弘光大學->弘光科技大學@84646337		
+弘光科大	school-abbr	zhwiki:弘光科大->弘光科技大學@49589324		
+弘光科技大學	school	moe:u1_new.csv@115		
+弘煜科技	category	Category:台灣公司:弘煜科技@90798040		
+弘爺漢堡	nsi	nsi:amenity/fast_food/hongyahambuger-60a4d5@ac22bfd445b7	Q105377817	
+強尼兄弟	nsi	nsi:amenity/restaurant/johnnybro-aafd63@ac22bfd445b7	Q127692591	
+彰化女中	school-abbr	zhwiki:彰化女中->國立彰化女子高級中學@1343283		
+彰化師大	school-abbr	zhwiki:彰化師大->國立彰化師範大學@3175207		
+彰化高中	school-abbr	zhwiki:彰化高中->國立彰化高級中學@1493961		
+彰化高商	school-abbr	zhwiki:彰化高商->國立彰化高級商業職業學校@2856094		
+彰南電池工業	category	Category:台灣公司:彰南电池工业@90549219		
+彰商	school-abbr	zhwiki:彰商->國立彰化高級商業職業學校@3124245		
+彰工	school-abbr	zhwiki:彰工->國立彰化師範大學附屬高級工業職業學校@1879811		
+彰師附工	school-abbr	zhwiki:彰師附工->國立彰化師範大學附屬高級工業職業學校@1879814		
+得來素	nsi	nsi:amenity/restaurant/derlife-aafd63@ac22bfd445b7	Q130525358	
+得利影視	category	Category:台灣公司:得利影視@91670061		
+循天航空	category	Category:台灣公司:循天航空@93434524		
+德明科大	school-abbr	zhwiki:德明科大->德明財經科技大學@9093406		
+德明科技大學	school-abbr	zhwiki:德明科技大學->德明財經科技大學@4761465		
+德明財經科技大學	school	moe:u1_new.csv@115		
+德育護理健康學院	school	moe:u1_new.csv@115		
+德記洋行	category	Category:台灣公司:德記洋行@89552446		POLY
+德霖科大	school-abbr	zhwiki:德霖科大->宏國德霖科技大學@46392773		
+德霖科技大學	school-abbr	zhwiki:德霖科技大學->宏國德霖科技大學@45249968		
+必應創造	category	Category:台灣公司:必應創造@92343940		
+志聖工業	category	Category:台灣公司:志聖工業@74077363		
+忠泰	category	Category:台灣公司:忠泰集團@94817723		
+怡興開發建設	category	Category:台灣公司:怡興開發建設@82064450		
+悠遊卡投資控股	category	Category:台灣公司:悠遊卡投資控股@93010429		
+愛情公寓	category	Category:台灣公司:愛情公寓 (網站)@91847166		
+慈大	school-abbr	zhwiki:慈大->慈濟大學@43051860		
+慈惠醫護管理專科學校	school	moe:u1_new.csv@115		
+慈明高中	school-abbr	zhwiki:慈明高中->臺中市私立慈明高級中學@15293018		
+慧洋海運	category	Category:台灣公司:慧洋海運集團@90551285		
+承啟	category	Category:台灣公司:承啟@83791786		
+投高	school-abbr	zhwiki:投高->國立南投高級中學@41252414		
+拓凱實業	category	Category:台灣公司:拓凱實業@75748834		
+拿坡里披薩	nsi	nsi:amenity/fast_food/napolipizza-60a4d5@ac22bfd445b7	Q48927936	
+振宇五金	category	Category:台灣公司:振宇五金@93509579		
+揚子江船業	category	Category:台灣公司:揚子江船業@93252435		
+揚智科技	category	Category:台灣公司:揚智科技@88388210		
+政中	school-abbr	zhwiki:政中->國立政治大學附屬高級中學@42173944		
+政大附中	school-abbr	zhwiki:政大附中->國立政治大學附屬高級中學@1041109		
+政附	school-abbr	zhwiki:政附->國立政治大學附屬高級中學@7801342		
+敏實科大	school-abbr	zhwiki:敏實科大->敏實科技大學@72236902		
+敏惠醫護管理專科學校	school	moe:u1_new.csv@115		
+數位實中	school-abbr	zhwiki:數位實中->臺北市數位實驗高級中等學校@76319227		
+數字科技	category	Category:台灣公司:數字科技@92987607		
+文華高中	school-abbr	zhwiki:文華高中->臺中市立文華高級中等學校@42617622		
+文藻外大	school-abbr	zhwiki:文藻外大->文藻外語大學@50821409		
+文藻外語大學	school	moe:u1_new.csv@115		
+新光保全	category	Category:台灣公司:新光保全@92193205		
+新光合成纖維	category	Category:台灣公司:新光合成纖維@83917780		
+新光產物保險	category	Category:台灣公司:新光產物保險@90566818		
+新光金融控股	category	Category:台灣公司:新光金融控股@93815179		
+新化高工	school-abbr	zhwiki:新化高工->國立新化高級工業職業學校@15506444		
+新北市南山中學	school	moe:high.csv@115		
+新北市崇光高中	school	moe:high.csv@115		
+新北捷運	category	Category:台灣公司:新北捷運公司@93327059		
+新商	school-abbr	zhwiki:新商->國立新竹高級商業職業學校@72113587		
+新天地餐飲	category	Category:台灣公司:新天地餐飲集團@90674135		
+新普科技	category	Category:台灣公司:新普科技@93653592		
+新曄科技	category	Category:台灣公司:新曄科技@88108718		
+新燕紡織	category	Category:台灣公司:新燕紡織@90823145		
+新營高工	school-abbr	zhwiki:新營高工->國立新營高級工業職業學校@15658699		
+新生護專	school-abbr	zhwiki:新生護專->新生醫護管理專科學校@26289663		
+新生醫護管理專科學校	school	moe:u1_new.csv@115		
+新竹女中	school-abbr	zhwiki:新竹女中->國立新竹女子高級中學@1394786		
+新竹市數位實驗高中	school	moe:high.csv@115		
+新竹高中	school-abbr	zhwiki:新竹高中->國立新竹高級中學@734374		
+新竹高商	school-abbr	zhwiki:新竹高商->國立新竹高級商業職業學校@6309478		
+新麗企業	category	Category:台灣公司:新麗企業@94031995		
+旗山農工	school-abbr	zhwiki:旗山農工->國立旗山高級農工職業學校@15474681		
+旗農	school-abbr	zhwiki:旗農->國立旗山高級農工職業學校@55240418		
+日勝生活科技	category	Category:台灣公司:日勝生活科技@91670209		
+日月光半導體	category	Category:台灣公司:日月光半導體@94711798		
+昆盈企業	category	Category:台灣公司:昆盈企業@94748474		
+昇陽國際半導體	category	Category:台灣公司:昇陽國際半導體@94404348		
+明基友達	category	Category:台灣公司:明基友達集團@88071359		
+明基材料	category	Category:台灣公司:明基材料@90557479		
+明志科大	school-abbr	zhwiki:明志科大->明志科技大學@3613690		
+明新科大	school-abbr	zhwiki:明新科大->明新科技大學@29629813		
+明新科技大學	school	moe:u1_new.csv@115		
+明新製罐工廠	category	Category:台灣公司:明新製罐工廠@90557526		
+明泰科技	category	Category:台灣公司:明泰科技@93583009		
+明輝環球海事	category	Category:台灣公司:明輝環球海事@88109084		
+明通大學	school-abbr	zhwiki:明通大學->國立陽明交通大學@63945945		
+易飛網	category	Category:台灣公司:易飛網@94718784		
+昕力資訊	category	Category:台灣公司:昕力資訊@94160294		
+星乃珈琲店	nsi	nsi:amenity/cafe/hoshinocoffee-7f2f5a@ac22bfd445b7	Q88396880	
+星宇航空	category	Category:台灣公司:星宇航空@94705700		
+星寶國際	category	Category:台灣公司:星寶國際@90989177		
+星通資訊	category	Category:台灣公司:星通資訊@89747615		
+映泰	category	Category:台灣公司:映泰集团@80009261		
+是方電訊	category	Category:台灣公司:是方電訊@94172786		
+昱泉國際	category	Category:台灣公司:昱泉國際@94198653		
+時報文化	category	Category:台灣公司:時報文化@91485498		
+晨訊科技	category	Category:台灣公司:晨訊科技@91033409		
+普利特科技	category	Category:台灣公司:普利特科技@88109215		
+普安科技	category	Category:台灣公司:普安科技@90557962		
+景女	school-abbr	zhwiki:景女->臺北市立景美女子高級中學@5292938		
+景文科大	school-abbr	zhwiki:景文科大->景文科技大學@3613702		
+景文科技大學	school	moe:u1_new.csv@115		
+景碩科技	category	Category:台灣公司:景碩科技@93453073		
+晶心科技	category	Category:台灣公司:晶心科技@94796822		
+晶睿通訊	category	Category:台灣公司:晶睿通訊@92706990		
+晶華國際酒店	category	Category:台灣公司:晶華國際酒店集團@92946544		
+智冠科技	category	Category:台灣公司:智冠科技@93864843		
+智原科技	category	Category:台灣公司:智原科技@89711414		
+智微科技	category	Category:台灣公司:智微科技@92358597		
+暨南國際大學	school-abbr	zhwiki:暨南國際大學->國立暨南國際大學@10549512		
+曉明女中	school-abbr	zhwiki:曉明女中->臺中市私立曉明女子高級中學@23161671		
+曜越科技	category	Category:台灣公司:曜越科技@93642926		
+書寶二手書店	category	Category:台灣公司:書寶二手書店@80750898		
+朝陽科大	school-abbr	zhwiki:朝陽科大->朝陽科技大學@3608174		POLY
+木棉花創投	category	Category:台灣公司:木棉花創投@93334894		
+杏一醫療用品	nsi	nsi:amenity/pharmacy/medfirst-9d8b4e@ac22bfd445b7	Q126368664	
+杜康控股	category	Category:台灣公司:杜康控股@91033566		
+東中	school-abbr	zhwiki:東中->國立臺東高級中學@2320514		
+東元電機	category	Category:台灣公司:東元電機@94463189		
+東南水泥	category	Category:台灣公司:東南水泥@89570293		
+東南科大	school-abbr	zhwiki:東南科大->東南科技大學@9093400		
+東南科技大學	school	moe:u1_new.csv@115		
+東和鋼鐵	category	Category:台灣公司:東和鋼鐵@90823221		
+東哥企業	category	Category:台灣公司:東哥企業@78391767		
+東海高中	school-abbr	zhwiki:東海高中->新北市私立東海高級中學@19374042		
+東科控股	category	Category:台灣公司:東科控股@90560268		
+東訊	category	Category:台灣公司:東訊@94570462		
+東貝光電	category	Category:台灣公司:東貝光電@89975784		
+松屋	nsi	nsi:amenity/fast_food/matsuya-992e2a@ac22bfd445b7	Q848773	
+松屋食品	nsi-wikipedia	zhwiki:松屋食品@94391995+wikidata:Q848773@2534661267	Q848773	
+松果購物	category	Category:台灣公司:松果購物@93625793		
+格上租車	category	Category:台灣公司:格上租車@90823212		
+格蘭英語	category	Category:台灣公司:格蘭英語@89553036		
+桂冠實業	category	Category:台灣公司:桂冠實業@80795572		
+桂田文創	category	Category:台灣公司:桂田文創@94795057		
+桂盟	category	Category:台灣公司:桂盟@90562070		
+桃園市世紀綠能工商	school	moe:high.csv@115		
+桃園市啟英高中	school	moe:high.csv@115		
+桃園市大興高中	school	moe:high.csv@115		
+桃園市復旦高中	school	moe:high.csv@115		
+桃園市振聲高中	school	moe:high.csv@115		
+桃園市新興高中	school	moe:high.csv@115		
+桃園市治平高中	school	moe:high.csv@115		
+桃園市清華高中	school	moe:high.csv@115		
+桃園市育達高中	school	moe:high.csv@115		
+桃園市路亞國際高中	school	moe:high.csv@115		
+桃園捷運	category	Category:台灣公司:桃園捷運公司@89568405		
+桃園果菜市場	category	Category:台灣公司:桃園果菜市場股份有限公司@89799832		
+桃園機場保全	category	Category:台灣公司:桃園機場保全@86238185		
+桃園治平高中	school-abbr	zhwiki:桃園治平高中->桃園市治平高級中等學校@65030214		
+梁社漢排骨	nsi	nsi:amenity/restaurant/liangshehanbuyfood-aafd63@ac22bfd445b7	Q108204804	
+業強科技	category	Category:台灣公司:業強科技@78991285		
+榮剛材料科技	category	Category:台灣公司:榮剛材料科技@83295350		
+樂田麵包屋	nsi	nsi:shop/bakery/gakuden-ea5ee6@ac22bfd445b7	Q108366505	POLY
+樂陞科技	category	Category:台灣公司:樂陞科技@93830362		POLY
+樂雅樂	nsi	nsi:amenity/restaurant/royalhost-aafd63@ac22bfd445b7	Q11120884	POLY
+樂雅樂家庭餐廳	nsi-wikipedia	zhwiki:樂雅樂家庭餐廳@90906165+wikidata:Q11120884@2469005754	Q11120884	POLY
+樹人醫護管理專科學校	school	moe:u1_new.csv@115		
+樹德科大	school-abbr	zhwiki:樹德科大->樹德科技大學@3613680		
+櫻花建設	category	Category:台灣公司:櫻花建設@93152773		
+欣欣百貨	category	Category:台灣公司:欣欣百貨@93544953		
+欣興電子	category	Category:台灣公司:欣興電子@94318542		
+欣銓科技	category	Category:台灣公司:欣銓科技@93642922		
+歇腳亭	nsi	nsi:amenity/cafe/sharetea-ed30b2@ac22bfd445b7	Q64827032	
+歌林	category	Category:台灣公司:歌林@94822316		
+歌萊美唱片	category	Category:台灣公司:歌萊美唱片@89032152		
+歐付寶	category	Category:台灣公司:歐付寶@90288425		
+歐付寶投資控股	category	Category:台灣公司:歐付寶投資控股@90797920		
+歐群科技	category	Category:台灣公司:歐群科技@94890343		
+正修科技大學	school	moe:u1_new.csv@115		
+正新輪胎	category	Category:台灣公司:正新輪胎@92825614		
+段純貞牛肉麵餐廳	category	Category:台灣餐飲公司:段純貞牛肉麵餐廳@90571994		
+永工	school-abbr	zhwiki:永工->國立永靖高級工業職業學校@3118608		
+永豐金融控股	category	Category:台灣公司:永豐金融控股@94292064		
+永道射頻技術	category	Category:台灣公司:永道射頻技術@90565924		
+沙工	school-abbr	zhwiki:沙工->臺中市立沙鹿工業高級中等學校@42617678		
+沙鹿高工	school-abbr	zhwiki:沙鹿高工->臺中市立沙鹿工業高級中等學校@42617675		
+沛鑫能源科技	category	Category:台灣公司:沛鑫能源科技@75747631		
+治平高中	school-abbr	zhwiki:治平高中->桃園市治平高級中等學校@65030313		
+泓德能源	category	Category:台灣公司:泓德能源@93840253		
+法國巴黎銀行	nsi-wikipedia	zhwiki:法國巴黎銀行@94242351+wikidata:Q499707@2551388944	Q499707	POLY
+法藍瓷	category	Category:台灣公司:法藍瓷@88241760		
+法鼓文理學院	school	moe:u1_new.csv@115		
+泰豐輪胎	category	Category:台灣公司:泰豐輪胎@91284735		
+海底撈	nsi-wikipedia	zhwiki:海底捞@94883182+wikidata:Q5638920@2551766894	Q5638920	
+海底撈火鍋	nsi	nsi:amenity/restaurant/haidilaohotpot-aafd63@ac22bfd445b7	Q5638920	
+涮乃葉	nsi	nsi:amenity/restaurant/syabuyo-aafd63@ac22bfd445b7	Q67710247	
+添好運點心專門店	nsi-wikipedia	zhwiki:添好運點心專門店@94618528+wikidata:Q11153709@2493733524	Q11153709	
+港都客運	category	Category:台灣公司:港都客運@94663621		POLY
+湖農	school-abbr	zhwiki:湖農->國立大湖高級農工職業學校@55240858		
+湯臣	category	Category:台灣公司:湯臣集團@94549674		
+溪湖高中	school-abbr	zhwiki:溪湖高中->國立溪湖高級中學@1444704		
+溪高	school-abbr	zhwiki:溪高->國立溪湖高級中學@7686639		
+滬安電力控股	category	Category:台灣公司:滬安電力控股@92867762		
+滾石唱片	category	Category:台灣公司:滾石唱片@94910703		
+漢來美食	category	Category:台灣公司:漢來美食@92897154		
+漢唐集成	category	Category:台灣公司:漢唐集成@90569361		
+漢磊	category	Category:台灣公司:漢磊@85422864		
+漢翔航空工業	category	Category:台灣公司:漢翔航空工業@93671909		
+潤德室內裝修設計工程	category	Category:台灣公司:潤德室內裝修設計工程@92808856		
+潤泰企業	category	Category:台灣公司:潤泰企業集團@93540235		
+潤泰全球	category	Category:台灣公司:潤泰全球@90660237		
+潤泰創新國際	category	Category:台灣公司:潤泰創新國際@93540221		
+潤泰精密材料	category	Category:台灣公司:潤泰精密材料@93653774		
+潮港城餐飲	category	Category:台灣餐飲公司:潮港城餐飲集團@92620726		
+澎湖科大	school-abbr	zhwiki:澎湖科大->國立澎湖科技大學@3175186		
+澎湖科技大學	school-abbr	zhwiki:澎湖科技大學->國立澎湖科技大學@3175175		
+濱壽司	nsi-wikipedia	zhwiki:滨寿司@94444539+wikidata:Q17220385@2534588006	Q17220385	
+無敵科技	category	Category:台灣公司:無敵科技@90991138		
+煥德科技	category	Category:台灣公司:煥德科技@87627304		
+營工	school-abbr	zhwiki:營工->國立新營高級工業職業學校@55240469		
+特力	category	Category:台灣公司:特力集團@93407444		
+特藝石油能源	category	Category:台灣公司:特藝石油能源@92964067		
+犀動智能	category	Category:台灣公司:犀動智能@93872619		
+玄奘大學	school	moe:u1_new.csv@115		
+玉中	school-abbr	zhwiki:玉中->國立玉里高級中學@7946613		
+玉山金融控股	category	Category:台灣公司:玉山金融控股@94518598		
+玉里高中	school-abbr	zhwiki:玉里高中->國立玉里高級中學@7946611		
+玉高	school-abbr	zhwiki:玉高->國立玉里高級中學@7946617		
+王品牛排	category	Category:台灣餐飲公司:王品牛排@92622698		
+王道商業銀行	category	Category:台灣公司:王道商業銀行@94901413		POLY
+王道銀行	category	Category:台灣公司:王道銀行集團@90571575		POLY
+現觀科技	category	Category:台灣公司:現觀科技@90738066		
+琉璃工房	category	Category:台灣公司:琉璃工房@92759106		
+瑞昱半導體	category	Category:台灣公司:瑞昱半導體@93530618		
+瑞智精密	category	Category:台灣公司:瑞智精密@86868333		
+瑞麟美而美	nsi	nsi:amenity/fast_food/rueilinmeiandmei-60a4d5@ac22bfd445b7	Q105722191	
+環球晶圓	category	Category:台灣公司:環球晶圓@88736107		
+環球水泥	category	Category:台灣公司:環球水泥@90823238		
+瓦城泰國料理	nsi	nsi:amenity/restaurant/thaitown-aafd63@ac22bfd445b7	Q130214321	
+甘泉魚麵	nsi	nsi:amenity/restaurant/fishnoodle-aafd63@ac22bfd445b7	Q132360457	
+生達化學製藥	category	Category:台灣公司:生達化學製藥@94813556		
+百八魚場	nsi	nsi:amenity/restaurant/fish180-aafd63@ac22bfd445b7	Q108199211	
+相光科	category	Category:台灣公司:相光科@82083287		
+真理大學	school	moe:u1_new.csv@115		
+眾星國際	category	Category:台灣公司:眾星國際@90971753		
+矽品精密工業	category	Category:台灣公司:矽品精密工業@90989194		
+矽統科技	category	Category:台灣公司:矽統科技@92297960		
+研揚科技	category	Category:台灣公司:研揚科技@88784294		
+研華科技	category	Category:台灣公司:研華科技@94252293		
+神基投資控股	category	Category:台灣公司:神基投資控股@89694700		
+神州數碼	category	Category:台灣公司:神州数码@91043737		
+神準科技	category	Category:台灣公司:神準科技@93729288		
+神腦國際	category	Category:台灣公司:神腦國際@94370625		
+祥碩科技	category	Category:台灣公司:祥碩科技@90989192		
+福利麵包	nsi	nsi:shop/bakery/floridabakery-ea5ee6@ac22bfd445b7	Q111128271	
+福勝亭	nsi	nsi:amenity/restaurant/tonkatsu-aafd63@ac22bfd445b7	Q126368392	
+福壽實業	category	Category:台灣公司:福壽實業@93575113		
+福懋加油站	nsi	nsi:amenity/fuel/formosataffetacoltd-db3418@ac22bfd445b7		
+福懋油脂	category	Category:台灣公司:福懋油脂@94097894		
+福智高中	school	moe:high.csv@115		
+禾聯碩	category	Category:台灣公司:禾聯碩@93029644		
+私立三信家商	school	moe:high.csv@115		
+私立三育高中	school	moe:high.csv@115		
+私立世界高中	school	moe:high.csv@115		
+私立中山工商	school	moe:high.csv@115		
+私立中興商工	school	moe:high.csv@115		
+私立中華商海	school	moe:high.csv@115		
+私立中華藝校	school	moe:high.csv@115		
+私立中道高中	school	moe:high.csv@115		
+私立二信高中	school	moe:high.csv@115		
+私立五育高中	school	moe:high.csv@115		
+私立亞洲餐旅	school	moe:high.csv@115		
+私立仰德高中	school	moe:high.csv@115		
+私立僑泰高中	school	moe:high.csv@115		
+私立光仁高中	school	moe:high.csv@115		
+私立光啟高中	school	moe:high.csv@115		
+私立光復高中	school	moe:high.csv@115		
+私立光華高商進修學校	school	moe:high.csv@115		
+私立內思高工	school	moe:high.csv@115		
+私立全人實驗高中	school	moe:high.csv@115		
+私立公東高工	school	moe:high.csv@115		
+私立六信高中	school	moe:high.csv@115		
+私立六和高中	school	moe:high.csv@115		
+私立再興中學	school	moe:high.csv@115		
+私立協同高中	school	moe:high.csv@115		
+私立協和祐德高中	school	moe:high.csv@115		
+私立南光高中	school	moe:high.csv@115		
+私立南英商工	school	moe:high.csv@115		
+私立南華高中進修學校	school	moe:high.csv@115		
+私立君毅高中	school	moe:high.csv@115		
+私立喬治工商	school	moe:high.csv@115		
+私立嘉華高中	school	moe:high.csv@115		
+私立嘉陽高中	school	moe:high.csv@115		
+私立四維高中	school	moe:high.csv@115		
+私立培德工家	school	moe:high.csv@115		
+私立大同高中	school	moe:high.csv@115		
+私立大德工商	school	moe:high.csv@115		
+私立大成商工	school	moe:high.csv@115		
+私立大榮高中	school	moe:high.csv@115		
+私立大華高中	school	moe:high.csv@115		
+私立大誠高中	school	moe:high.csv@115		
+私立奎山實驗高級中學	school	moe:high.csv@115		
+私立宏仁高中	school	moe:high.csv@115		
+私立宜寧高中	school	moe:high.csv@115		
+私立崇義高中	school	moe:high.csv@115		
+私立嶺東高中	school	moe:high.csv@115		
+私立巨人高中	school	moe:high.csv@115		
+私立康橋高中	school	moe:high.csv@115		
+私立延平中學	school	moe:high.csv@115		
+私立建臺高中	school	moe:high.csv@115		
+私立弘文高中	school	moe:high.csv@115		
+私立弘明實驗高中	school	moe:high.csv@115		
+私立徐匯高中	school	moe:high.csv@115		
+私立復興商工	school	moe:high.csv@115		
+私立復興實驗高中	school	moe:high.csv@115		
+私立復華高中	school	moe:high.csv@115		
+私立德光高中	school	moe:high.csv@115		
+私立志仁中學進修學校	school	moe:high.csv@115		
+私立惇敍工商	school	moe:high.csv@115		
+私立慈幼工商	school	moe:high.csv@115		
+私立慈明高中	school	moe:high.csv@115		
+私立慧燈高中	school	moe:high.csv@115		
+私立揚子高中	school	moe:high.csv@115		
+私立文生高中	school	moe:high.csv@115		
+私立文興高中	school	moe:high.csv@115		
+私立方曙商工	school	moe:high.csv@115		
+私立旗美商工	school	moe:high.csv@115		
+私立明台高中	school	moe:high.csv@115		
+私立明德高中	school	moe:high.csv@115		
+私立明道高中	school	moe:high.csv@115		
+私立明達高中	school	moe:high.csv@115		
+私立時雨高中	school	moe:high.csv@115		
+私立普台高中	school	moe:high.csv@115		
+私立景文高中	school	moe:high.csv@115		
+私立智光商工	school	moe:high.csv@115		
+私立曉明女中	school	moe:high.csv@115		
+私立曙光女中	school	moe:high.csv@115		
+私立東吳工家	school	moe:high.csv@115		
+私立東大附中	school	moe:high.csv@115		
+私立東山高中	school	moe:high.csv@115		
+私立東方工商	school	moe:high.csv@115		
+私立東泰高中	school	moe:high.csv@115		
+私立東海高中	school	moe:high.csv@115		
+私立格致高中	school	moe:high.csv@115		
+私立樹人家商	school	moe:high.csv@115		
+私立樹德家商	school	moe:high.csv@115		
+私立正心高中	school	moe:high.csv@115		
+私立正義高中	school	moe:high.csv@115		
+私立民生家商	school	moe:high.csv@115		
+私立永平工商	school	moe:high.csv@115		
+私立永年高中	school	moe:high.csv@115		
+私立泰北高中	school	moe:high.csv@115		
+私立海星高中	school	moe:high.csv@115		
+私立淡江高中	school	moe:high.csv@115		
+私立港明高中	school	moe:high.csv@115		
+私立滬江高中	school	moe:high.csv@115		
+私立瀛海國際高中	school	moe:high.csv@115		
+私立玉山高中	school	moe:high.csv@115		
+私立磐石高中	school	moe:high.csv@115		
+私立稻江護家	school	moe:high.csv@115		
+私立稻江高商	school	moe:high.csv@115		
+私立穀保家商	school	moe:high.csv@115		
+私立立人高中	school	moe:high.csv@115		
+私立立仁高中	school	moe:high.csv@115		
+私立立志高中	school	moe:high.csv@115		
+私立竹林高中	school	moe:high.csv@115		
+私立精誠高中	school	moe:high.csv@115		
+私立美和高中	school	moe:high.csv@115		
+私立義大國際高中	school	moe:high.csv@115		
+私立義峰高中	school	moe:high.csv@115		
+私立義民高中	school	moe:high.csv@115		
+私立聖心女中	school	moe:high.csv@115		
+私立育德工家	school	moe:high.csv@115		
+私立育達高中	school	moe:high.csv@115		
+私立能仁家商	school	moe:high.csv@115		
+私立至善高中	school	moe:high.csv@115		
+私立致用高中	school	moe:high.csv@115		
+私立興華高中	school	moe:high.csv@115		
+私立莊敬工家	school	moe:high.csv@115		
+私立華岡藝校	school	moe:high.csv@115		
+私立華德工家	school	moe:high.csv@115		
+私立華盛頓高中	school	moe:high.csv@115		
+私立華興中學	school	moe:high.csv@115		
+私立萬能工商	school	moe:high.csv@115		
+私立葳格高中	school	moe:high.csv@115		
+私立薇閣高中	school	moe:high.csv@115		
+私立衛理女中	school	moe:high.csv@115		
+私立衛道高中	school	moe:high.csv@115		
+私立豫章工商	school	moe:high.csv@115		
+私立輔仁高中	school	moe:high.csv@115		
+私立達人高中	school	moe:high.csv@115		
+私立達德商工	school	moe:high.csv@115		
+私立醒吾高中	school	moe:high.csv@115		
+私立金甌女中	school	moe:high.csv@115		
+私立金陵女中	school	moe:high.csv@115		
+私立長榮女中	school	moe:high.csv@115		POLY
+私立長榮高中	school	moe:high.csv@115		POLY
+私立開平餐飲	school	moe:high.csv@115		
+私立陸興高中	school	moe:high.csv@115		
+私立陽明工商	school	moe:high.csv@115		
+私立青年高中	school	moe:high.csv@115		
+私立靜修高中	school	moe:high.csv@115		
+私立靜心高中	school	moe:high.csv@115		
+私立高苑工商	school	moe:high.csv@115		
+私立高英工商	school	moe:high.csv@115		
+私立黎明高中	school	moe:high.csv@115		
+私立龍德家商	school	moe:high.csv@115		
+秋雨創新	category	Category:台灣公司:秋雨創新@75750520		
+科科世界	category	Category:台灣公司:科科世界@93642923		
+科見美語	category	Category:台灣公司:科見美語@89553144		
+稻江護家	school-abbr	zhwiki:稻江護家->臺北市私立稻江高級護理家事職業學校@15547706		
+稻護	school-abbr	zhwiki:稻護->臺北市私立稻江高級護理家事職業學校@15547715		
+立錡科技	category	Category:台灣公司:立錡科技@91348962		
+竹商	school-abbr	zhwiki:竹商->國立新竹高級商業職業學校@55237324		
+竹風建設	category	Category:台灣公司:竹風建設@93653771		
+第一伸銅科技	category	Category:台灣公司:第一伸銅科技@76530179		
+第一金融控股	category	Category:台灣公司:第一金融控股@93912909		
+築間酸菜魚	nsi	nsi:amenity/restaurant/jhujiansuancaiyu-aafd63@ac22bfd445b7	Q127693383	
+精彩火鍋	category	Category:台灣公司:精彩火鍋@91023138		
+精技電腦	category	Category:台灣公司:精技電腦@91038180		
+精熙國際	category	Category:台灣公司:精熙國際@93748818		
+精英電腦	category	Category:台灣公司:精英電腦@94738632		
+精華光學	category	Category:台灣公司:精華光學@89426085		
+系微	category	Category:台灣公司:系微公司@93337986		
+紅心辣椒	category	Category:台灣公司:紅心辣椒@88098245		
+純文學出版社	category	Category:台灣公司:純文學出版社@94238547		
+統一健身俱樂部	category	Category:台灣公司:統一健身俱樂部@94245307		POLY
+統一麵包便利商店	category	Category:台灣公司:統一麵包便利商店@93691595		
+統領廣場	category	Category:台灣公司:統領廣場@94361262		
+綠河	category	Category:台灣公司:綠河@92426449		
+綠界科技	category	Category:台灣公司:綠界科技@92349884		
+維他露食品	category	Category:台灣餐飲公司:維他露食品@94387251		
+維多利亞建設	category	Category:台灣公司:維多利亞建設集團@92565144		
+緯創資通	category	Category:台灣公司:纬创资通@93872172		
+緯穎科技	category	Category:台灣公司:緯穎科技@91492870		
+縣立三義高中	school	moe:high.csv@115		
+縣立二林高中	school	moe:high.csv@115		
+縣立來義高中	school	moe:high.csv@115		
+縣立六家高級中學	school	moe:high.csv@115		
+縣立南平中學	school	moe:high.csv@115		
+縣立南澳高中	school	moe:high.csv@115		
+縣立和美高中	school	moe:high.csv@115		
+縣立大同高中	school	moe:high.csv@115		
+縣立彰化藝術高中	school	moe:high.csv@115		
+縣立慈心華德福實中	school	moe:high.csv@115		
+縣立成功高中	school	moe:high.csv@115		
+縣立斗南高中	school	moe:high.csv@115		
+縣立旭光高中	school	moe:high.csv@115		
+縣立東港高中	school	moe:high.csv@115		
+縣立枋寮高中	school	moe:high.csv@115		
+縣立永慶高中	school	moe:high.csv@115		
+縣立湖口高中	school	moe:high.csv@115		
+縣立田中高中	school	moe:high.csv@115		
+縣立竹北實驗高中	school	moe:high.csv@115		
+縣立竹崎高中	school	moe:high.csv@115		
+縣立自強高工	school	moe:high.csv@115		
+縣立興華高中	school	moe:high.csv@115		
+縣立苑中	school-abbr	zhwiki:縣立苑中->苗栗縣立苑裡高級中學@41685908		
+縣立苑裡高中	school	moe:high.csv@115		
+縣立苑高	school-abbr	zhwiki:縣立苑高->苗栗縣立苑裡高級中學@55240885		
+縣立蔦松藝術高中	school	moe:high.csv@115		
+縣立蘭嶼高中	school	moe:high.csv@115		
+縣立麥寮高中	school	moe:high.csv@115		
+繼茂橡膠工業	category	Category:台灣公司:繼茂橡膠工業股份有限公司@90579592		
+羅東高中	school-abbr	zhwiki:羅東高中->國立羅東高級中學@6581699		
+美亞控股	category	Category:台灣公司:美亞控股@93787499		
+美利德	category	Category:台灣公司:美利德@90581120		
+美利達工業	category	Category:台灣公司:美利達工業@94018535		
+美和科技大學	school	moe:u1_new.csv@115		
+美商謀智	category	Category:台灣公司:美商謀智@89786428		
+美好證券	category	Category:台灣公司:美好證券@90582147		
+美德向邦	category	Category:台灣公司:美德向邦@88117771		
+群信行動數位科技	category	Category:台灣公司:群信行動數位科技@90091785		POLY
+群創光電	category	Category:台灣公司:群創光電@93830688		
+群益金鼎證券	category	Category:台灣公司:群益金鼎證券@91670030		
+群聯電子	category	Category:台灣公司:群聯電子@90797762		
+義美食品	category	Category:台灣餐飲公司:義美食品@93925253		
+羽田機械	category	Category:台灣公司:羽田機械@93665202		
+翰林茶館	category	Category:台灣餐飲公司:翰林茶館@88467141		
+老爺酒店	category	Category:台灣公司:老爺酒店集團@92622721		
+老虎堂	nsi	nsi:amenity/cafe/tigersugar-2851bb@ac22bfd445b7	Q76099070	
+老賴茶棧	category	Category:台灣手搖茶飲品牌:老賴茶棧@90582719		
+耐斯企業	category	Category:台灣公司:耐斯企業@93179910		
+耕莘健康管理專科學校	school	moe:u1_new.csv@115		
+聖德科斯	nsi	nsi:shop/supermarket/santacruz-14223e@ac22bfd445b7	Q126368246	
+聖心高中	school-abbr	zhwiki:聖心高中->基隆市輔大聖心高級中學@69128718		
+聖母醫護管理專科學校	school	moe:u1_new.csv@115		
+聖約翰科大	school-abbr	zhwiki:聖約翰科大->聖約翰科技大學@3613693		
+聖約翰科技大學	school	moe:u1_new.csv@115		
+聖馬丁國際	category	Category:台灣公司:聖馬丁國際@91043655		
+聚和國際	category	Category:台灣公司:聚和國際@90583455		
+聚積科技	category	Category:台灣公司:聚積科技@90797757		
+聯力工業	category	Category:台灣公司:聯力工業@94229784		
+聯合再生能源	category	Category:台灣公司:聯合再生能源@92361625		
+聯成電腦	category	Category:台灣公司:聯成電腦@91387980		
+聯茂電子	category	Category:台灣公司:联茂电子@82084694		
+聯華電子	category	Category:台灣公司:聯華電子@94712803		
+聯華食品	category	Category:台灣公司:聯華食品@93542721		
+聯詠科技	category	Category:台灣公司:聯詠科技@94836307		
+聯陽半導體	category	Category:台灣公司:聯陽半導體@79165593		
+肉多多火鍋	category	Category:台灣公司:肉多多火鍋@93840268		
+育英醫護管理專科學校	school	moe:u1_new.csv@115		
+育達科技大學	school	moe:u1_new.csv@115		
+胡連精密	category	Category:台灣公司:胡連精密@82084707		
+能量小姐	nsi	nsi:amenity/restaurant/missenergy-aafd63@ac22bfd445b7	Q131554250	
+致理科大	school-abbr	zhwiki:致理科大->致理科技大學@67762684		
+致理科技大學	school	moe:u1_new.csv@115		
+致茂電子	category	Category:台灣公司:致茂電子@92213987		
+臺中一中	school-abbr	zhwiki:臺中一中->臺中市立臺中第一高級中等學校@42617591		
+臺中二中	school-abbr	zhwiki:臺中二中->臺中市立臺中第二高級中等學校@55404403		
+臺中市大明高中	school	moe:high.csv@115		
+臺中市新民高中	school	moe:high.csv@115		
+臺中快捷巴士	category	Category:台灣公司:臺中快捷巴士公司@92508493		
+臺中捷運	category	Category:台灣公司:臺中捷運公司@94532787		
+臺中教大	school-abbr	zhwiki:臺中教大->國立臺中教育大學@33314336		
+臺中教育大學	school-abbr	zhwiki:臺中教育大學->國立臺中教育大學@32775973		
+臺中科大	school-abbr	zhwiki:臺中科大->國立臺中科技大學@18556909		
+臺中科技大學	school-abbr	zhwiki:臺中科技大學->國立臺中科技大學@30149306		
+臺北商業大學	school-abbr	zhwiki:臺北商業大學->國立臺北商業大學@34829745		
+臺北城市大學	school-abbr	zhwiki:臺北城市大學->臺北城市科技大學@19403910		
+臺北城市科大	school-abbr	zhwiki:臺北城市科大->臺北城市科技大學@19258486		
+臺北城市科技大學	school	moe:u1_new.csv@115		
+臺北外匯	category	Category:台灣公司:臺北外匯@90855653		
+臺北市幼華高中	school	moe:high.csv@115		
+臺北市數位實驗高中	school	moe:high.csv@115		
+臺北市新民高中	school	moe:high.csv@115		
+臺北市立大學	school	moe:u1_new.csv@115		
+臺北市開南高中	school	moe:high.csv@115		
+臺北廣播電臺	category	Category:台灣公司:臺北廣播電臺@93746861		
+臺北捷運	category	Category:台灣公司:臺北捷運公司@94724255		
+臺北教育大學	school-abbr	zhwiki:臺北教育大學->國立臺北教育大學@2142177		
+臺北海洋大學	school-abbr	zhwiki:臺北海洋大學->台北海洋科技大學@72021743		
+臺北科技大學	school-abbr	zhwiki:臺北科技大學->國立臺北科技大學@3120831		
+臺北藝	school-abbr	zhwiki:臺北藝->國立臺北藝術大學@57033002		
+臺北藝大	school-abbr	zhwiki:臺北藝大->國立臺北藝術大學@57032999		
+臺北護大	school-abbr	zhwiki:臺北護大->國立臺北護理健康大學@20993693		
+臺北護理健康大學	school-abbr	zhwiki:臺北護理健康大學->國立臺北護理健康大學@20993617		
+臺北農產運銷	category	Category:台灣公司:臺北農產運銷公司@92652791		
+臺北醫學大學	school	moe:u1_new.csv@115		
+臺南大學	school-abbr	zhwiki:臺南大學->國立臺南大學@4708020		
+臺南市中信國際高中	school	moe:high.csv@115		
+臺南市光華高中	school	moe:high.csv@115		
+臺南市崑山高中	school	moe:high.csv@115		
+臺南科技大學	school-abbr	zhwiki:臺南科技大學->台南應用科技大學@14528911		
+臺南藝術大學	school-abbr	zhwiki:臺南藝術大學->國立臺南藝術大學@36334365		
+臺南護校	school-abbr	zhwiki:臺南護校->國立臺南護理專科學校@15292097		
+臺東大學	school-abbr	zhwiki:臺東大學->國立臺東大學@7589869		
+臺東專校	school-abbr	zhwiki:臺東專校->國立臺東專科學校@25741510		
+臺東縣均一高中	school	moe:high.csv@115		
+臺東高中	school-abbr	zhwiki:臺東高中->國立臺東高級中學@2320496		
+臺海大	school-abbr	zhwiki:臺海大->國立臺灣海洋大學@52795661		
+臺灣不動產投資信託	category	Category:台灣公司:臺灣不動產投資信託@93518652		
+臺灣存託憑證	category	Category:台灣公司:臺灣存託憑證@88243453		
+臺灣師大	school-abbr	zhwiki:臺灣師大->國立臺灣師範大學@5757205		
+臺灣戲曲學院	school-abbr	zhwiki:臺灣戲曲學院->國立臺灣戲曲學院@57367305		
+臺灣海大	school-abbr	zhwiki:臺灣海大->國立臺灣海洋大學@52795654		
+臺灣海洋大學	school-abbr	zhwiki:臺灣海洋大學->國立臺灣海洋大學@22522475		
+臺灣產物保險	category	Category:台灣公司:臺灣產物保險@93272463		
+臺灣科大	school-abbr	zhwiki:臺灣科大->國立臺灣科技大學@72670385		
+臺灣藝術大學	school-abbr	zhwiki:臺灣藝術大學->國立臺灣藝術大學@4209455		
+臺灣金融控股	category	Category:台灣公司:臺灣金融控股@93924782		
+臺灣電視	category	Category:台灣公司:臺灣電視公司@94215732		
+臺灣體大	school-abbr	zhwiki:臺灣體大->國立臺灣體育運動大學@45952372		
+臺灣體育運動大學	school-abbr	zhwiki:臺灣體育運動大學->國立臺灣體育運動大學@72226380		
+臺灣高速鐵路大事年表	category	Category:台灣公司:臺灣高速鐵路大事年表@92809323		
+臺藝	school-abbr	zhwiki:臺藝->國立臺灣藝術大學@57032973		
+臺金	category	Category:台灣公司:臺金公司@91591840		
+臺鹽實業	category	Category:台灣公司:臺鹽實業@93013859		
+興勤電子	category	Category:台灣公司:興勤電子@93601045		
+興富發建設	category	Category:台灣公司:興富發建設@91670191		
+色控攝影工作室	category	Category:台灣公司:色控攝影工作室@90972145		
+艾姆勒科技	category	Category:台灣公司:艾姆勒科技@94230105		
+艾美特	category	Category:台灣公司:艾美特@94587598		
+花仙子企業	category	Category:台灣公司:花仙子企業@90989125		
+花工	school-abbr	zhwiki:花工->國立花蓮高級工業職業學校@4726823		
+花蓮縣上騰工商	school	moe:high.csv@115		
+花蓮縣立體育高中	school	moe:high.csv@115		
+花蓮高商	school-abbr	zhwiki:花蓮高商->國立花蓮高級商業職業學校@9183151		
+芳珍蔬食	nsi	nsi:amenity/fast_food/fjveggie-60a4d5@ac22bfd445b7	Q130458837	
+苑高	school-abbr	zhwiki:苑高->國立苑裡高級中學@22395393		
+茂為歐買尬	category	Category:台灣公司:茂為歐買尬@90797726		
+茂迪	category	Category:台灣公司:茂迪@90797764		
+茶的魔手	nsi	nsi:amenity/cafe/teaandmagichand-7d270d@ac22bfd445b7	Q67933727	
+草屯商工	school-abbr	zhwiki:草屯商工->國立草屯高級商工職業學校@15469544		
+華亞科技	category	Category:台灣公司:華亞科技@92530093		
+華僑高中	school-abbr	zhwiki:華僑高中->國立華僑高級中等學校@34162008		
+華南金融控股	category	Category:台灣公司:華南金融控股@93912789		
+華友聯	category	Category:台灣公司:華友聯集團@93194068		
+華固建設	category	Category:台灣公司:華固建設@94263347		
+華夏科大	school-abbr	zhwiki:華夏科大->華夏科技大學@34893258		
+華夏科技大學	school	moe:u1_new.csv@115		
+華孚科技	category	Category:台灣公司:華孚科技@88745477		
+華寶通訊	category	Category:台灣公司:華寶通訊@84616327		
+華德福大地實驗學校	school	moe:high.csv@115		
+華擎科技	category	Category:台灣公司:華擎科技@94271515		
+華新麗華	category	Category:台灣公司:華新麗華@90856176		
+華盛頓高中	school-abbr	zhwiki:華盛頓高中->臺中市私立華盛頓高級中學@15289072		
+華研國際音樂	category	Category:台灣公司:華研國際音樂@94805908		POLY
+華立企業	category	Category:台灣公司:華立企業@85083153		
+華義國際	category	Category:台灣公司:華義國際@94152723		
+華膳空廚	category	Category:台灣公司:華膳空廚@94289057		
+華苓科技	category	Category:台灣公司:華苓科技@93375984		
+華豐橡膠	category	Category:台灣公司:華豐橡膠@91960651		
+華邦電子	category	Category:台灣公司:華邦電子@93484781		
+華隆紡織	category	Category:台灣公司:華隆紡織@94319653		
+萬國通路	category	Category:台灣公司:萬國通路@88746300		
+萬海航運	category	Category:台灣公司:萬海航運@94883365		
+萬能科大	school-abbr	zhwiki:萬能科大->萬能科技大學@3613683		
+萬能科技大學	school	moe:u1_new.csv@115		
+萬芳高中	school-abbr	zhwiki:萬芳高中->臺北市立萬芳高級中學@1572286		
+葉露芝	nsi	nsi:shop/cosmetics/yvesrocher-4d255f@ac22bfd445b7	Q1477321	
+葡萄王生技	category	Category:台灣公司:葡萄王生技@94211602		
+蒙恬科技	category	Category:台灣公司:蒙恬科技@90797637		
+薇閣高中	school-abbr	zhwiki:薇閣高中->臺北市私立薇閣高級中學@20716312		
+薛長興	category	Category:台灣公司:薛長興集團@92452862		POLY
+薡茶	nsi	nsi:amenity/cafe/dingtea-f1b18f@ac22bfd445b7	Q112123475	
+薩得爾企業	category	Category:台灣公司:薩得爾企業@90592549		
+藍天電腦	category	Category:台灣公司:藍天電腦@94851093		
+蘭女	school-abbr	zhwiki:蘭女->國立蘭陽女子高級中學@5309138		
+蘭陽女中	school-abbr	zhwiki:蘭陽女中->國立蘭陽女子高級中學@5315546		
+蘭高	school-abbr	zhwiki:蘭高->國立宜蘭高級中學@7784179		
+虎中	school-abbr	zhwiki:虎中->國立虎尾高級中學@22861833		
+虎尾科技大學	school-abbr	zhwiki:虎尾科技大學->國立虎尾科技大學@726701		
+虎尾高中	school-abbr	zhwiki:虎尾高中->國立虎尾高級中學@17605391		
+虎高	school-abbr	zhwiki:虎高->國立虎尾高級中學@54724367		
+虹光精密工業	category	Category:台灣公司:虹光精密工业@88305421		
+蜂行資本	category	Category:台灣公司:蜂行資本@94259276		POLY
+蝦皮店到店	nsi	nsi:shop/convenience/spxexpress-aa89a7@ac22bfd445b7	Q109676747	
+蝦皮購物	nsi-wikipedia	zhwiki:蝦皮購物@92640399+wikidata:Q109676747@2423428981	Q109676747	
+融程電訊	category	Category:台灣公司:融程電訊@88432800		
+裕元	category	Category:台灣公司:裕元集團@85130357		
+裕融企業	category	Category:台灣公司:裕融企業@86059106		
+裕隆汽車	category	Category:台灣公司:裕隆汽車@94368982		
+西堤牛排	category	Category:台灣餐飲公司:西堤牛排@94623135		
+西苑高中	school-abbr	zhwiki:西苑高中->臺中市立西苑高級中學@13398838		
+西螺農工	school-abbr	zhwiki:西螺農工->國立西螺高級農工職業學校@15544633		
+西雅圖極品咖啡	nsi	nsi:amenity/cafe/baristacoffee-7d270d@ac22bfd445b7	Q130525295	
+訊舟科技	category	Category:台灣公司:訊舟科技@82084781		
+詩肯	category	Category:台灣公司:詩肯@80353498		
+豐原高中	school-abbr	zhwiki:豐原高中->臺中市立豐原高級中等學校@42617543		
+豐泰企業	category	Category:台灣公司:豐泰企業@91050059		
+豐群企業	category	Category:台灣公司:豐群企業集團@93990635		
+貝勒斯國際	category	Category:台灣公司:貝勒斯國際有限公司@90594719		
+財團法人光華高工	school	moe:high.csv@115		
+財團法人屏榮高中	school	moe:high.csv@115		
+財團法人常春藤高中	school	moe:high.csv@115		
+財團法人恆毅高中	school	moe:high.csv@115		
+財團法人慈濟大學附中	school	moe:high.csv@115		
+財團法人慈濟高中	school	moe:high.csv@115		
+財團法人新光高中	school	moe:high.csv@115		
+財團法人普門中學	school	moe:high.csv@115		
+財團法人正德高中	school	moe:high.csv@115		
+財團法人聖功女中	school	moe:high.csv@115		
+財團法人辭修高中	school	moe:high.csv@115		
+資通電腦	category	Category:台灣公司:資通電腦@92114772		
+購物橘子	category	Category:台灣公司:購物橘子@88954711		
+赤鬼牛排	category	Category:台灣公司:赤鬼牛排@90571800		
+越南製造加工出口	category	Category:台灣公司:越南製造加工出口@88344896		
+輔信科技	category	Category:台灣公司:輔信科技@93980953		
+輔大聖中	school-abbr	zhwiki:輔大聖中->基隆市輔大聖心高級中學@69128775		
+輔大聖心	school-abbr	zhwiki:輔大聖心->基隆市輔大聖心高級中學@69128778		
+輔大聖心高中	school	moe:high.csv@115		
+輔英科大	school-abbr	zhwiki:輔英科大->輔英科技大學@27970203		
+輔英科技大學	school	moe:u1_new.csv@115		
+迎廣科技	category	Category:台灣公司:迎廣科技@89337869		
+逢大	school-abbr	zhwiki:逢大->逢甲大學@16502912		
+連加網路商業	category	Category:台灣公司:連加網路商業@90283321		
+遊戲橘子	category	Category:台灣公司:遊戲橘子@94664158		
+達欣工程	category	Category:台灣公司:達欣工程@91670200		
+達達企業	category	Category:台灣公司:達達企業集團@94396720		
+達麗建設	category	Category:台灣公司:達麗建設@91670216		
+遠傳電信	category	Category:台灣公司:遠傳電信@93980875		
+遠東新世紀	category	Category:台灣公司:遠東新世紀@91670208		
+遠東百貨	category	Category:台灣公司:遠東百貨@94120876		
+遠雄	category	Category:台灣公司:遠雄集團@93959985		
+遠雄悅來大飯店	category	Category:台灣公司:遠雄悅來大飯店@91114215		
+鄉林建設	category	Category:台灣公司:鄉林建設@90646479		
+鄉民金融科技	category	Category:台灣公司:鄉民金融科技@75750618		
+酷澎	manual	使用者 2026-10-10 回報打成「酷朋」（Coupang 的中文名）		
+醒吾科大	school-abbr	zhwiki:醒吾科大->醒吾科技大學@23767613		
+醒吾科技大學	school	moe:u1_new.csv@115		
+里仁	nsi	nsi:shop/supermarket/leezen-14223e@ac22bfd445b7	Q126368246	
+金寶電子	category	Category:台灣公司:金寶電子@91670667		
+金義合行	category	Category:台灣公司:金義合行@92615030		POLY
+金門酒廠	category	Category:台灣公司:金門酒廠@94871290		
+金鼎綜合證券	category	Category:台灣公司:金鼎綜合證券@68216510		
+鈊象電子	category	Category:台灣公司:鈊象電子@93053757		
+銀箭沖印	category	Category:台灣公司:銀箭沖印@93391468		
+錸德	category	Category:台灣公司:錸德集團@90607547		
+錸德科技	category	Category:台灣公司:铼德科技@94847806		
+長佳機電工程	category	Category:台灣公司:長佳機電工程@93701463		POLY
+長庚科大	school-abbr	zhwiki:長庚科大->長庚科技大學@17239994		POLY
+長榮國際儲運	category	Category:台灣公司:長榮國際儲運@91251397		POLY
+長榮國際連鎖酒店	category	Category:台灣公司:長榮國際連鎖酒店@92658434		POLY
+長榮大學	school	moe:u1_new.csv@115		POLY
+長榮海運	category	Category:台灣公司:長榮海運@94883409		POLY
+長榮空廚	category	Category:台灣公司:長榮空廚@94289084		POLY
+長榮航空	category	Category:台灣公司:長榮航空@94883439		POLY
+長青連鎖藥局	nsi	nsi:amenity/pharmacy/evergreeneveryoung-9d8b4e@ac22bfd445b7	Q126369781	POLY
+開南大學	school	moe:u1_new.csv@115		
+關西高中	school-abbr	zhwiki:關西高中->國立關西高級中學@11000186		
+關高	school-abbr	zhwiki:關高->國立關西高級中學@35620850		
+阿官國際餐飲	category	Category:台灣公司:阿官國際餐飲集團@91266963		
+阿瘦皮鞋	category	Category:台灣公司:阿瘦皮鞋@93709064		
+附工	school-abbr	zhwiki:附工->國立彰化師範大學附屬高級工業職業學校@51535296		
+陞技電腦	category	Category:台灣公司:陞技電腦@92731210		
+陞泰科技	category	Category:台灣公司:陞泰科技@79274429		
+陽光能源	category	Category:台灣公司:陽光能源@91040773		
+陽明交大	school-abbr	zhwiki:陽明交大->國立陽明交通大學@65330847		
+陽明交大附中	school-abbr	zhwiki:陽明交大附中->國立陽明交通大學附屬竹北高級中等學校@88611578		
+陽明交通大學	school-abbr	zhwiki:陽明交通大學->國立陽明交通大學@62486209		
+陽明海運	category	Category:台灣公司:陽明海運@94230028		
+隆成金融	category	Category:台灣公司:隆成金融@90612366		
+隆美窗簾	category	Category:台灣公司:隆美窗簾@78568887		
+雄獅旅行社	category	Category:台灣公司:雄獅旅行社@93498369		POLY
+集盛	category	Category:台灣公司:集盛@70902892		
+雲朗觀光	category	Category:台灣公司:雲朗觀光集團@93887652		
+雲林科大	school-abbr	zhwiki:雲林科大->國立雲林科技大學@3120704		
+雷笛克光學	category	Category:台灣公司:雷笛克光學@94315610		
+雷虎科技	category	Category:台灣公司:雷虎科技@90455707		
+霖園	category	Category:台灣公司:霖園集團@93208477		
+霹靂國際多媒體	category	Category:台灣公司:霹靂國際多媒體@94400028		
+青年高中	school-abbr	zhwiki:青年高中->臺中市私立青年高級中學@19288150		
+青雲國際科技	category	Category:台灣公司:青雲國際科技@94230543		
+靜大	school-abbr	zhwiki:靜大->靜宜大學@45651531		
+非常泰概念餐坊	nsi	nsi:amenity/restaurant/verythairestaurant-aafd63@ac22bfd445b7	Q130214351	
+順成蛋糕	nsi	nsi:shop/bakery/shunchenbakery-ea5ee6@ac22bfd445b7	Q126364999	
+頎邦科技	category	Category:台灣公司:頎邦科技@90989175		
+食其家	nsi	nsi:amenity/fast_food/sukiya-60a4d5@ac22bfd445b7	Q6137375	
+饗食天堂	nsi	nsi:amenity/restaurant/eatogether-aafd63@ac22bfd445b7	Q130213889	
+首泰建設	category	Category:台灣公司:首泰建設@93653644		
+馬偕護理專科學校	school-abbr	zhwiki:馬偕護理專科學校->馬偕醫護管理專科學校@15878822		
+馬偕醫學大學	school	moe:u1_new.csv@115		
+馬偕醫護管理專科學校	school	moe:u1_new.csv@115		
+馬可先生	nsi	nsi:shop/bakery/mrmark-ea5ee6@ac22bfd445b7	Q108366217	
+馬祖酒廠	category	Category:台灣公司:馬祖酒廠@93498641		
+騰雲科技	category	Category:台灣公司:騰雲科技@92435514		
+高端疫苗生物製劑	category	Category:台灣公司:高端疫苗生物製劑@90797651		
+高雄市輪船	category	Category:台灣公司:高雄市輪船公司@94445375		
+高雄師大	school-abbr	zhwiki:高雄師大->國立高雄師範大學@4008243		
+高雄廣播電臺	category	Category:台灣公司:高雄廣播電臺@93784539		
+高雄捷運	category	Category:台灣公司:高雄捷運公司@91563004		
+高雄科大	school-abbr	zhwiki:高雄科大->國立高雄科技大學@47495976		
+高雄科技大學	school-abbr	zhwiki:高雄科技大學->國立高雄科技大學@8612646		
+高雄醫大	school-abbr	zhwiki:高雄醫大->高雄醫學大學@8077435		
+高雄餐旅大學	school-abbr	zhwiki:高雄餐旅大學->國立高雄餐旅大學@73143612		
+魚中魚	category	Category:台灣公司:魚中魚@93850762		
+鮮茶道	nsi	nsi:amenity/cafe/e7db71-7d270d@ac22bfd445b7	Q108166223	
+鳳凰旅遊	category	Category:台灣公司:鳳凰旅遊@93701676		
+鳳商	school-abbr	zhwiki:鳳商->國立鳳山高級商工職業學校@14899580		
+鳳山商工	school-abbr	zhwiki:鳳山商工->國立鳳山高級商工職業學校@14856024		
+鴻海科技	category	Category:台灣公司:鴻海科技集團@94421602		
+鴻海精密	category	Category:台灣公司:鴻海精密@94205153		
+鴻華先進科技	category	Category:台灣公司:鴻華先進科技@94728027		
+鶴茶樓	nsi	nsi:amenity/cafe/hechaloutea-7d270d@ac22bfd445b7	Q108168889	
+麗嬰房	category	Category:台灣公司:麗嬰房@93091390		
+麗臺科技	category	Category:台灣公司:麗臺科技@84806795		
+黃金投資	category	Category:台灣公司:黃金投資@93309803		
+黎明技術學院	school	moe:u1_new.csv@115		
+鼎新數智	category	Category:台灣公司:鼎新數智@94347625		
+鼎王餐飲	category	Category:台灣公司:鼎王餐飲集團@93235810		
+龍德家商	school-abbr	zhwiki:龍德家商->苗栗縣私立龍德高級家事商業職業學校@41295562		
+龍華科技大學	school	moe:u1_new.csv@115		
+龍邦	category	Category:台灣公司:龍邦集團@90620897		
+龜記茗品	category	Category:台灣手搖茶飲品牌:龜記茗品@93851743		
