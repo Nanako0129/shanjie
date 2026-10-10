@@ -4,7 +4,7 @@
 use crate::learn::{context_key, local_day, Learner, Level, Record};
 use crate::learn_store::{LearnStore, Opened, StoreError, JOURNAL_MAX};
 use crate::predict::{predict, reading_matches_in, unit_of_syllable, Mode, Unit};
-use crate::lm::{decode_segment_learned, history, Bayes, CappedLexicon, Demote, End, Learn, Lm, Profile};
+use crate::lm::{decode_segment_learned, history, CappedLexicon, Demote, End, Learn, Lm, Profile};
 use crate::{decode_beam, Lexicon, NoLearning, BEAM_S1};
 use std::collections::{HashMap, HashSet};
 use std::panic::{catch_unwind, AssertUnwindSafe};
@@ -335,8 +335,6 @@ pub struct Engine {
     learning: bool,
     /// ε of the global learning level (§12); a test hook sweeps it.
     eps_global: f64,
-    /// Test hook (s4-bayes): the posterior in place of the ε rule; `None` (the default) is the ε rule.
-    bayes: Option<Bayes>,
     learner: Learner,
     store: Option<LearnStore>,
     /// §4 bit0: the last full rewrite failed. Set by a failed full rewrite; cleared only by a
@@ -520,7 +518,6 @@ impl Engine {
             left: String::new(),
             learning: false,
             eps_global: crate::lm::LEARN_EPS_GLOBAL,
-            bayes: None,
             learner: Learner::default(),
             store: None,
             write_failed: false,
@@ -599,11 +596,6 @@ impl Engine {
     /// Test hook (§12): ε of the global level.
     pub fn set_eps_global(&mut self, eps: f64) {
         self.eps_global = eps;
-    }
-
-    /// Test hook (s4-bayes §1): the Bayesian posterior replaces the ε boost; `None` restores the ε rule.
-    pub fn set_bayes(&mut self, bayes: Option<Bayes>) {
-        self.bayes = bayes;
     }
 
     /// Test-purpose clock: day number to use instead of the local day.
@@ -1142,7 +1134,7 @@ impl Engine {
                     _ => End::Eos,
                 };
                 let before = format!("{}{out}", self.left);
-                let learn = (!self.learner.is_empty()).then(|| Learn { learner: &self.learner, before: &before, today, eps_global: self.eps_global, eps: crate::lm::LEARN_EPS, bayes: self.bayes });
+                let learn = (!self.learner.is_empty()).then(|| Learn { learner: &self.learner, before: &before, today, eps_global: self.eps_global });
                 let best = decode_segment_learned(
                     &st.capped, &self.syls[from..to], &st.lm, lam, prev, end, BEAM_S1, learn.as_ref(), self.demote,
                 )
