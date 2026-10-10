@@ -39,7 +39,7 @@ class BigramLM:
         """classes=True 讀同一個目錄的 classes.sjc（不存在、魔數、長度、模型雜湊不符都丟錯誤）；False 是明確不用類別項（--no-classes）。
         kn=側檔路徑（docs/contracts/kn-smoothing.md §2.2、kn-core.md §1）：Kneser-Ney 回退分布，id >= 2 的詞 pb = β·N′/ΣN′ + (1−β)·10^lp。
         SJKN0002：β 與 ΣN′ 取自檔頭；kn_beta 可不給，給了和檔頭不同就 ValueError；kn_classes 可不給，給了就用 kn_total 重算 ΣN′，和檔頭不同就 ValueError
-        （lm_eval 每次都傳，這是 ΣN′ 這個預先彙總值在上游的檢查，Rust 只讀檔頭）。
+        （lm_eval 每次都傳，這是 ΣN′ 這個預先彙總值在上游的檢查，Rust 只讀檔頭，只核對它夾在 max N′ 與 Σ N′ 之間）。
         SJKN0001（研究用舊檔，沒有 β 與 ΣN′）：一定要給 kn_beta（0 <= β <= 1）與 kn_classes（詞 -> 成員 tuple，第一個是代表，
         用 build_lm.variant_classes 算；沒有類就傳 {}），ΣN′ 每類只算一次（kn_total），否則 ValueError。
         沒給 kn 卻給了 kn_beta 或 kn_classes 也是 ValueError。"""
@@ -96,6 +96,8 @@ class BigramLM:
             file_beta, total = struct.unpack_from("<dQ", b, 48)
             if not 0.0 <= file_beta <= 1.0 or total == 0:
                 raise ValueError(f"{path}: kn side file has beta outside [0, 1] or a zero total")
+            if not max(np1[2:]) <= total <= sum(np1[2:]):   # 和 Rust add_kn 同一個檢查：每類只算一次的總和夾在最大值與全部相加之間
+                raise ValueError(f"{path}: kn side file total is incompatible with its N array")
             if beta is not None and beta != file_beta:
                 raise ValueError(f"{path}: kn_beta differs from the side file's beta")
             if cls is not None and kn_total(self.vocab, np1, cls) != total:

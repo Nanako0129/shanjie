@@ -334,7 +334,9 @@ fn run_predict(args: &[String]) -> Result<(), String> {
         _ => return Err("--profile must be chat or formal".into()),
     }
     .lambda();
-    let lm = Lm::load(Path::new(&lm_path.ok_or("--lm is required")?)).map_err(|e| e.to_string())?;
+    // The Kneser-Ney side file is deliberately off here: the Python predict reference (experiments/sp/predict.py) does not
+    // load it, so the sp-predict golden would stop being comparable (docs/contracts/kn-core.md, model-v6 note).
+    let lm = Lm::load_with(Path::new(&lm_path.ok_or("--lm is required")?), true, false).map_err(|e| e.to_string())?;
     let dir = root().join("data/lexicon");
     let (lex, overlay) = load_with_packs(&dir, packs, &pdir)?;
     // Prediction scores use the capped lp only; demotion applies to decoding (sw §3).

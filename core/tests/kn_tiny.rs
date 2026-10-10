@@ -18,7 +18,7 @@ fn lm_with(side: Option<&[u8]>, classes: bool) -> Result<Lm, LmError> {
     let model = bytes("bigram.sjlm");
     let mut lm = if classes { Lm::parse_with_classes(&model, &bytes("classes.sjc"))? } else { Lm::parse(&model)? };
     if let Some(s) = side {
-        lm.add_kn(&model, s)?;
+        lm.add_kn(s)?;
     }
     Ok(lm)
 }
@@ -96,6 +96,7 @@ fn bad_side_files_are_format_errors() {
     let good = bytes("kn.sjkn");
     let model = bytes("bigram.sjlm");
     assert!(lm_with(Some(&good), true).is_ok());
+    let hex_bytes = |h: String| (0..32).map(|i| u8::from_str_radix(&h[2 * i..2 * i + 2], 16).unwrap()).collect::<Vec<u8>>();
     let flip = |at: usize| {
         let mut b = good.clone();
         b[at] ^= 1;
@@ -110,19 +111,23 @@ fn bad_side_files_are_format_errors() {
         ("beta below 0", patched(48, &(-0.1f64).to_le_bytes())),
         ("beta NaN", patched(48, &f64::NAN.to_le_bytes())),
         ("zero total", patched(56, &0u64.to_le_bytes())),
+        ("total below the largest N'", patched(56, &1u64.to_le_bytes())), // largest N' is 2
+        ("total above the sum of N'", patched(56, &10u64.to_le_bytes())), // N' of 他, 佔, 占, 起床, 起牀 is 1 + 2 + 2 + 2 + 2 = 9
         ("short", good[..good.len() - 4].to_vec()),
         ("trailing byte", [good.as_slice(), &[0]].concat()),
         ("header only", good[..64].to_vec()),
         ("empty", vec![]),
     ];
     for (name, b) in &cases {
-        assert_eq!(lm_with(Some(b), true).err(), Some(LmError::Format), "{name}");
+        assert_eq!(lm_with(Some(b), true).err(), Some(LmError::KnSide), "{name}");
     }
-    // Another model's side file: same bytes, the hash of a model that differs in one byte.
-    let mut other = model.clone();
-    other[8] = 5;
-    let mut lm = Lm::parse(&model).unwrap();
-    assert_eq!(lm.add_kn(&other, &good), Err(LmError::Format), "hash of another model");
+    assert!(lm_with(Some(&patched(56, &9u64.to_le_bytes())), true).is_ok(), "the sum of all N' is the largest total that passes");
+    // A side file built for model B (same V, one other field) is refused by an Lm parsed from model A, and accepted for B.
+    let mut model_b = model.clone();
+    model_b[20] ^= 1; // eos_total
+    let side_b = patched(12, &hex_bytes(core::eval::sha256_hex(&model_b)));
+    assert_eq!(Lm::parse(&model).unwrap().add_kn(&side_b), Err(LmError::KnSide), "another model with the same V");
+    assert!(Lm::parse(&model_b).unwrap().add_kn(&side_b).is_ok());
 }
 
 /// Lm::load: a kn.sjkn beside the model is read, a missing one is off, a bad one is an error; load_with(kn: false) ignores it.
@@ -140,8 +145,13 @@ fn load_reads_the_side_file_beside_the_model() {
     assert!(on.kn_tag().unwrap().starts_with("+kn:") && Lm::load_without_classes(&m).unwrap().kn_tag().is_some());
     assert!(Lm::load_with(&m, true, false).unwrap().kn_tag().is_none(), "--no-kn");
     assert_eq!(on.prob("占", "他", 0.1), lm_with(Some(&bytes("kn.sjkn")), true).unwrap().prob("占", "他", 0.1));
+    std::fs::remove_file(tmp.join("kn.sjkn")).unwrap();
+    std::os::unix::fs::symlink(tmp.join("missing.sjkn"), tmp.join("kn.sjkn")).unwrap();
+    assert_eq!(Lm::load(&m).err(), Some(LmError::KnSide), "a dangling kn.sjkn symlink is not 'absent'");
+    assert!(Lm::load_with(&m, true, false).is_ok());
+    std::fs::remove_file(tmp.join("kn.sjkn")).unwrap();
     std::fs::write(tmp.join("kn.sjkn"), patched(48, &2.0f64.to_le_bytes())).unwrap();
-    assert_eq!(Lm::load(&m).err(), Some(LmError::Format), "a bad side file is never ignored");
+    assert_eq!(Lm::load(&m).err(), Some(LmError::KnSide), "a bad side file is never ignored");
     assert!(Lm::load_with(&m, true, false).is_ok(), "--no-kn does not read it");
     std::fs::remove_dir_all(tmp).unwrap();
 }
