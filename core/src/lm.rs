@@ -622,62 +622,6 @@ pub struct Learn<'a> {
     /// `Engine::set_eps_global` (a feature or cfg(test) cannot reach integration tests, and it is one
     /// float read per hypothesis key).
     pub eps_global: f64,
-    /// ε of the exact and last-character levels: `LEARN_EPS` in production (a field so a test can show
-    /// that posterior mode ignores it).
-    pub eps: f64,
-    /// `Some`: the posterior replaces the ε boost (s4-bayes §1); `None` (production): the ε rule above.
-    pub bayes: Option<Bayes>,
-}
-
-/// Which way the posterior moves a word (s4-bayes §1.4).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Variant {
-    /// Only up: `max(0, log10(p/q))`, so learning never lowers a word (the S4 §1.4 principle).
-    R,
-    /// As the formula says: unchosen words of the reading are lowered too.
-    D,
-}
-
-/// Posterior selection memory (s4-bayes §1): prior strength of the context level `alpha_c` and of the
-/// global level `alpha_g` (`f64::INFINITY` switches the global level off), in "re-picks".
-#[derive(Clone, Copy, Debug)]
-pub struct Bayes {
-    pub variant: Variant,
-    pub alpha_c: f64,
-    pub alpha_g: f64,
-}
-
-/// s4-bayes §1.1-§1.4: the added term `log10(p/q)` (R: at least 0) of every entry for one hypothesis.
-/// `t` is each entry's word term, `cand` its (word, beyond PER_KEY) pair, `cx` the context records
-/// (empty when `lookup` answered at the global level) and `cg` the global records (empty when the global
-/// level is off). `None`: an extra entry that no record admits, so it is not a candidate on this path
-/// (and not in the normalizer). With no record in `cx` and `cg` the term is exactly 0.
-fn posterior(b: &Bayes, t: &[f64], cand: &[(&str, bool)], cx: &[(&str, f64)], cg: &[(&str, f64)]) -> Vec<Option<f64>> {
-    let weight = |c: &[(&str, f64)], w: &str| c.iter().find(|x| x.0 == w).map_or(0.0, |x| x.1);
-    let live: Vec<bool> = cand.iter().map(|&(w, extra)| !extra || weight(cx, w) > 0.0 || weight(cg, w) > 0.0).collect();
-    let top = t.iter().zip(&live).filter(|x| *x.1).map(|x| *x.0).fold(f64::NEG_INFINITY, f64::max);
-    let m: Vec<f64> = t.iter().map(|&t| 10f64.powf(t - top)).collect();
-    let z: f64 = m.iter().zip(&live).filter(|x| *x.1).map(|x| *x.0).sum();
-    let (sx, sg): (f64, f64) = (cx.iter().map(|x| x.1).sum(), cg.iter().map(|x| x.1).sum());
-    cand.iter()
-        .enumerate()
-        .map(|(i, &(w, _))| {
-            if !live[i] {
-                return None;
-            }
-            if sx == 0.0 && sg == 0.0 {
-                return Some(0.0);
-            }
-            let q = m[i] / z;
-            let g = if sg > 0.0 { (b.alpha_g * q + weight(cg, w)) / (b.alpha_g + sg) } else { q };
-            let p = if sx > 0.0 { (b.alpha_c * g + weight(cx, w)) / (b.alpha_c + sx) } else { g };
-            let d = (p / q).log10();
-            Some(match b.variant {
-                Variant::R => d.max(0.0),
-                Variant::D => d,
-            })
-        })
-        .collect()
 }
 
 /// lm.decode generalized to a segment: `start` is the word before the segment (`<s>` for a sentence),
@@ -730,7 +674,6 @@ pub fn decode_segment_learned<'a>(
             }
             let span = &syls[i - l..i];
             let learned = learn.filter(|ln| ln.learner.has_reading(span));
-            let bayes = learned.and_then(|ln| ln.bayes);
             let range = base.range(r);
             let best = lex.ents[range.start].score;
             let dl = if demote { lex.deltas_in(&range) } else { &[] };
@@ -766,49 +709,16 @@ pub fn decode_segment_learned<'a>(
             } else {
                 hits_of = Vec::new();
             }
-            // Posterior mode: each hypothesis's added term per entry (it depends on the hypothesis's
-            // context through the word terms), the global records being looked up once for the span.
-            let adj: Vec<Vec<Option<f64>>> = match (learned, bayes) {
-                (Some(ln), Some(b)) => {
-                    let cg = if b.alpha_g.is_finite() { ln.learner.lookup_global(span, ln.today) } else { Vec::new() };
-                    let info: Vec<(Option<u32>, f64, f64)> = entries
-                        .iter()
-                        .map(|&(p, _)| {
-                            let e = &lex.ents[p];
-                            (lm.word_id(lex.word_of(e)), e.score, pow10(e.score))
-                        })
-                        .collect();
-                    let cand: Vec<(&str, bool)> = entries.iter().map(|&(p, extra)| (lex.word_of(&lex.ents[p]), extra)).collect();
-                    hyps[i - l]
-                        .iter()
-                        .enumerate()
-                        .map(|(hi, h)| {
-                            let (lv, ws) = &hits[hits_of[hi]];
-                            // A global answer is not context evidence: it only counts through `cg`.
-                            let cx: &[(&str, f64)] = if *lv == Level::Global { &[] } else { ws };
-                            let t: Vec<f64> = info.iter().map(|&(wid, lp, pb)| word_term(lam, lm.prob_c(h.ctx, wid, pb), lp)).collect();
-                            posterior(&b, &t, &cand, cx, &cg)
-                        })
-                        .collect()
-                }
-                _ => Vec::new(),
-            };
-            for (ei, (p, extra)) in entries.into_iter().enumerate() {
+            for (p, extra) in entries {
                 let e = &lex.ents[p];
                 let (word, lp0) = (lex.word_of(e), e.score);
                 let (wid, pb0) = (lm.word_id(word), pow10(lp0));
                 let delta = dl.iter().find(|&&(q, _)| q == p).map_or(0.0, |x| x.1);
                 for (hi, h) in hyps[i - l].iter().enumerate() {
                     let (mut lp, mut pb) = (lp0, pb0);
-                    let mut add = 0.0;
-                    if bayes.is_some() {
-                        match adj[hi][ei] {
-                            Some(a) => add = a,
-                            None => continue,
-                        }
-                    } else if let Some(ln) = learned {
+                    if let Some(ln) = learned {
                         let (lv, ws) = &hits[hits_of[hi]];
-                        let eps = if *lv == Level::Global { ln.eps_global } else { ln.eps };
+                        let eps = if *lv == Level::Global { ln.eps_global } else { LEARN_EPS };
                         // eps 0 switches the level off, for `extra` entries too: `best + 0` would
                         // still lift a word to a tie with the top.
                         match ws.iter().find(|(w, _)| *w == word) {
@@ -823,11 +733,7 @@ pub fn decode_segment_learned<'a>(
                             _ => {}
                         }
                     }
-                    let mut term = word_term(lam, lm.prob_c(h.ctx, wid, pb), lp) - delta;
-                    if add != 0.0 {
-                        term += add;
-                    }
-                    let sc = h.score + term;
+                    let sc = h.score + (word_term(lam, lm.prob_c(h.ctx, wid, pb), lp) - delta);
                     let surface = format!("{}{word}", h.surface);
                     match idx.get(&surface) {
                         Some(&q) if !(sc > cand[q].score) => {}
@@ -1184,173 +1090,6 @@ mod tests {
         ] {
             assert!(Demote::parse(bad).is_none(), "{bad:?}");
         }
-    }
-
-    // ---- s4-bayes §3 item 7: the posterior through `decode_segment_learned` ----
-
-    /// ㄅ has `a` (q 0.9) and `b` (q 0.1) with lam 0, so the word term is the lexicon score itself.
-    const BAYES_LEX: &str = "ㄅ a -0.045757490560675115\nㄅ b -1.0\n";
-    /// Neither candidate is in the bigram model's history, `lam` 0 makes the term the capped score `lp`.
-    fn bayes_run(lex: &str, learner: &Learner, before: &str, b: Option<Bayes>, eps: f64, eps_global: f64) -> Vec<(f64, String)> {
-        let lm = Lm::parse(&tiny()).unwrap();
-        let capped = CappedLexicon::new(Arc::new(Lexicon::parse(lex).unwrap()), "", &lm, Some(&Demote::parse("").unwrap())).unwrap();
-        let ln = Learn { learner, before, today: 0, eps_global, eps, bayes: b };
-        let syls = ["ㄅ".to_string()];
-        decode_segment_learned(&capped, &syls, &lm, 0.0, "<s>", End::Eos, 64, Some(&ln), true)
-            .unwrap()
-            .into_iter()
-            .map(|(s, ws)| (s, ws.iter().map(|w| w.0).collect()))
-            .collect()
-    }
-    fn rec(context: &str, word: &str, weight: f64) -> crate::learn::Record {
-        crate::learn::Record { context: context.into(), reading: vec!["ㄅ".into()], word: word.into(), weight, day: 0 }
-    }
-    fn bayes(variant: Variant, alpha_c: f64, alpha_g: f64) -> Option<Bayes> {
-        Some(Bayes { variant, alpha_c, alpha_g })
-    }
-    fn at(v: &[(f64, String)], w: &str) -> f64 {
-        v.iter().find(|x| x.1 == w).unwrap().0
-    }
-    /// Score gain of `w` over the unlearned run.
-    fn gain(v: &[(f64, String)], base: &[(f64, String)], w: &str) -> f64 {
-        at(v, w) - at(base, w)
-    }
-    fn same_bits(a: &[(f64, String)], b: &[(f64, String)]) -> bool {
-        a.len() == b.len() && a.iter().zip(b).all(|(x, y)| x.0.to_bits() == y.0.to_bits() && x.1 == y.1)
-    }
-    const NO_BAYES_EPS: f64 = LEARN_EPS;
-
-    /// q = (0.9, 0.1); `b` taught once under 他 (c 1), alpha_c 1: p = (0.45, 0.55), by hand.
-    #[test]
-    fn posterior_gain_is_log_p_over_q() {
-        let l = Learner::from_records(vec![rec("他", "b", 1.0)]);
-        let base = bayes_run(BAYES_LEX, &Learner::default(), "他", None, NO_BAYES_EPS, 0.0);
-        assert!((at(&base, "a") - at(&base, "b") - (0.9f64 / 0.1).log10()).abs() < 1e-12, "q = (0.9, 0.1)");
-        let r = bayes_run(BAYES_LEX, &l, "他", bayes(Variant::R, 1.0, f64::INFINITY), NO_BAYES_EPS, 0.0);
-        let d = bayes_run(BAYES_LEX, &l, "他", bayes(Variant::D, 1.0, f64::INFINITY), NO_BAYES_EPS, 0.0);
-        assert!((gain(&r, &base, "b") - (0.55f64 / 0.1).log10()).abs() < 1e-12, "R lifts b by log10(0.55/0.1)");
-        assert_eq!(gain(&r, &base, "a"), 0.0, "R never lowers the unchosen word");
-        assert!((gain(&d, &base, "b") - (0.55f64 / 0.1).log10()).abs() < 1e-12);
-        assert!((gain(&d, &base, "a") - (0.45f64 / 0.9).log10()).abs() < 1e-12, "D lowers it by log10(0.45/0.9)");
-        assert!(at(&r, "b") < at(&r, "a"), "one teach against a confident model does not flip it (p 0.55 vs 0.45 acts on 0.1 vs 0.9)");
-    }
-
-    /// Context record and global record of the same reading, alpha_g finite: p uses c_g and c_x.
-    /// c_x(b) 1 under 他, c_g(a) 2, alpha_c 1, alpha_g 2: g = (0.95, 0.05), p = (0.475, 0.525).
-    #[test]
-    fn posterior_uses_the_global_and_the_context_evidence() {
-        let l = Learner::from_records(vec![rec("他", "b", 1.0), rec("", "a", 2.0)]);
-        let base = bayes_run(BAYES_LEX, &Learner::default(), "他", None, NO_BAYES_EPS, 0.0);
-        let d = bayes_run(BAYES_LEX, &l, "他", bayes(Variant::D, 1.0, 2.0), NO_BAYES_EPS, 0.0);
-        let r = bayes_run(BAYES_LEX, &l, "他", bayes(Variant::R, 1.0, 2.0), NO_BAYES_EPS, 0.0);
-        assert!((gain(&d, &base, "a") - (0.475f64 / 0.9).log10()).abs() < 1e-12);
-        assert!((gain(&d, &base, "b") - (0.525f64 / 0.1).log10()).abs() < 1e-12);
-        assert_eq!(gain(&r, &base, "a"), 0.0);
-        assert!((gain(&r, &base, "b") - (0.525f64 / 0.1).log10()).abs() < 1e-12);
-        // alpha_g changes the outcome: the global record is not decoration
-        let d4 = bayes_run(BAYES_LEX, &l, "他", bayes(Variant::D, 1.0, 8.0), NO_BAYES_EPS, 0.0);
-        assert!((gain(&d4, &base, "a") - (0.46f64 / 0.9).log10()).abs() < 1e-12);
-        assert!((gain(&d4, &base, "a") - gain(&d, &base, "a")).abs() > 1e-3);
-        // only the global record, found under a context that has none: c_g alone moves the words
-        let g = Learner::from_records(vec![rec("", "b", 2.0)]);
-        let o = bayes_run(BAYES_LEX, &g, "我們", bayes(Variant::R, 1.0, 2.0), NO_BAYES_EPS, 0.0);
-        // g(b) = (2 * 0.1 + 2) / 4 = 0.55
-        assert!((gain(&o, &base, "b") - (0.55f64 / 0.1).log10()).abs() < 1e-12);
-    }
-
-    /// alpha_g infinite: no global level, and what `lookup` answers at the global level is not context evidence.
-    #[test]
-    fn infinite_alpha_g_means_no_global_and_a_global_hit_is_not_c_x() {
-        let base = bayes_run(BAYES_LEX, &Learner::default(), "他", None, NO_BAYES_EPS, 0.0);
-        let g = Learner::from_records(vec![rec("", "b", 5.0)]);
-        for v in [Variant::R, Variant::D] {
-            let off = bayes_run(BAYES_LEX, &g, "我們", bayes(v, 1.0, f64::INFINITY), NO_BAYES_EPS, 0.0);
-            assert!(same_bits(&off, &base), "{v:?}: global record, alpha_g infinite: nothing moves");
-            // finite alpha_g: it moves; had the global hit been counted as c_x as well it would move further
-            let on = bayes_run(BAYES_LEX, &g, "我們", bayes(v, 1.0, 4.0), NO_BAYES_EPS, 0.0);
-            // g(b) = (4 * 0.1 + 5) / 9 = 0.6; p = g since c_x = 0
-            assert!((gain(&on, &base, "b") - (0.6f64 / 0.1).log10()).abs() < 1e-12, "{v:?}");
-        }
-        // a context record plus a global one, alpha_g infinite: the context evidence alone
-        let both = Learner::from_records(vec![rec("他", "b", 1.0), rec("", "b", 5.0)]);
-        let one = Learner::from_records(vec![rec("他", "b", 1.0)]);
-        let (x, y) = (
-            bayes_run(BAYES_LEX, &both, "他", bayes(Variant::R, 1.0, f64::INFINITY), NO_BAYES_EPS, 0.0),
-            bayes_run(BAYES_LEX, &one, "他", bayes(Variant::R, 1.0, f64::INFINITY), NO_BAYES_EPS, 0.0),
-        );
-        assert!(same_bits(&x, &y));
-    }
-
-    /// A reading without a record: bit for bit the unlearned scores, also in posterior mode.
-    #[test]
-    fn reading_without_a_record_is_untouched() {
-        let other = Learner::from_records(vec![crate::learn::Record { context: "他".into(), reading: vec!["ㄆ".into()], word: "b".into(), weight: 3.0, day: 0 }]);
-        let base = bayes_run(BAYES_LEX, &Learner::default(), "他", None, NO_BAYES_EPS, 0.0);
-        for v in [Variant::R, Variant::D] {
-            assert!(same_bits(&bayes_run(BAYES_LEX, &other, "他", bayes(v, 1.0, 8.0), NO_BAYES_EPS, 0.0), &base));
-        }
-        // and a record of this reading under another context changes nothing either (no c_x, no c_g)
-        let elsewhere = Learner::from_records(vec![rec("她", "b", 3.0)]);
-        for v in [Variant::R, Variant::D] {
-            assert!(same_bits(&bayes_run(BAYES_LEX, &elsewhere, "他", bayes(v, 1.0, 8.0), NO_BAYES_EPS, 0.0), &base));
-        }
-    }
-
-    /// 14 words under ㄅ (a..n, one character each, as a one-syllable lexicon requires): m and n are beyond PER_KEY (12), so they are `extra`.
-    fn many() -> String {
-        (0..14).map(|i| format!("ㄅ {} {:.1}\n", (b'a' + i as u8) as char, -1.0 - 0.1 * i as f64)).collect()
-    }
-    fn words(v: &[(f64, String)]) -> Vec<&str> {
-        v.iter().map(|x| x.1.as_str()).collect()
-    }
-
-    /// Extra words: admitted only by c_x > 0 or (alpha_g finite and c_g > 0).
-    #[test]
-    fn extra_words_enter_only_through_evidence() {
-        let lex = many();
-        let base = bayes_run(&lex, &Learner::default(), "他", None, NO_BAYES_EPS, 0.0);
-        assert!(!words(&base).contains(&"n"));
-        // records only under another context: the output is the unlearned one
-        let other = Learner::from_records(vec![rec("她", "n", 3.0)]);
-        for v in [Variant::R, Variant::D] {
-            assert!(same_bits(&bayes_run(&lex, &other, "他", bayes(v, 1.0, 8.0), NO_BAYES_EPS, 0.0), &base), "{v:?}");
-        }
-        // only a global record, alpha_g infinite: the extra word is in no candidate; alpha_g finite: it is
-        let g = Learner::from_records(vec![rec("", "n", 3.0)]);
-        for v in [Variant::R, Variant::D] {
-            let off = bayes_run(&lex, &g, "他", bayes(v, 1.0, f64::INFINITY), NO_BAYES_EPS, 0.0);
-            assert!(!words(&off).contains(&"n"), "{v:?}");
-            assert!(same_bits(&off, &base));
-            let on = bayes_run(&lex, &g, "他", bayes(v, 1.0, 4.0), NO_BAYES_EPS, 0.0);
-            assert!(words(&on).contains(&"n"), "{v:?}: a global record admits it");
-        }
-        // a context record admits it
-        let c = Learner::from_records(vec![rec("他", "n", 1.0)]);
-        let on = bayes_run(&lex, &c, "他", bayes(Variant::R, 1.0, f64::INFINITY), NO_BAYES_EPS, 0.0);
-        assert!(words(&on).contains(&"n"));
-        // the normalizer holds only candidates: with n out, the others' q is the 12-word distribution;
-        // with it in (a record for another word) n is not counted
-        let r = Learner::from_records(vec![rec("他", "a", 1.0)]);
-        let o = bayes_run(&lex, &r, "他", bayes(Variant::D, 1.0, f64::INFINITY), NO_BAYES_EPS, 0.0);
-        let z: f64 = (0..12).map(|i| 10f64.powf(-1.0 - 0.1 * i as f64)).sum();
-        let q0 = 0.1 / z;
-        let p0 = (q0 + 1.0) / 2.0;
-        assert!((gain(&o, &base, "a") - (p0 / q0).log10()).abs() < 1e-9);
-        assert!(!words(&o).contains(&"m") && !words(&o).contains(&"n"));
-    }
-
-    /// Posterior mode has no ε: the scores do not move with it; the ε rule (control) does.
-    #[test]
-    fn epsilon_does_not_enter_the_posterior() {
-        let l = Learner::from_records(vec![rec("他", "b", 1.0), rec("", "a", 2.0)]);
-        for v in [Variant::R, Variant::D] {
-            let lo = bayes_run(BAYES_LEX, &l, "他", bayes(v, 1.0, 2.0), 0.5, 0.5);
-            let hi = bayes_run(BAYES_LEX, &l, "他", bayes(v, 1.0, 2.0), 60.0, 60.0);
-            assert!(same_bits(&lo, &hi), "{v:?}");
-        }
-        let lo = bayes_run(BAYES_LEX, &l, "他", None, 0.5, 0.5);
-        let hi = bayes_run(BAYES_LEX, &l, "他", None, 60.0, 60.0);
-        assert!(!same_bits(&lo, &hi), "control: the ε rule does depend on ε");
     }
 
     #[test]

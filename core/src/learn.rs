@@ -230,36 +230,25 @@ impl Learner {
         for (lv, level) in levels {
             // Rule 5: no last-character level for single characters. Single-character records under "^"
             // or the global key do not exist: teach never makes them and load drops old ones.
-            let hits = self.active(ix, today, level, lv == Level::LastChar);
+            let single_barred = lv == Level::LastChar;
+            let mut hits: Vec<(&str, f64)> = Vec::new();
+            for &i in ix {
+                let r = &self.records[i];
+                let w = decayed(r, today);
+                if w < ACTIVE || !level(&r.context) || (single_barred && is_single(&r.word)) {
+                    continue;
+                }
+                match hits.iter_mut().find(|h| h.0 == r.word) {
+                    Some(h) => h.1 = h.1.max(w),
+                    None => hits.push((r.word.as_str(), w)),
+                }
+            }
             if !hits.is_empty() {
+                hits.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal).then(a.0.cmp(b.0)));
                 return (lv, hits);
             }
         }
         (Level::Global, Vec::new())
-    }
-    /// The active records of `ix` whose context passes `level`, one entry per word (highest weight),
-    /// heaviest first. `single_barred` leaves out single-character words.
-    fn active(&self, ix: &[usize], today: i64, level: &dyn Fn(&str) -> bool, single_barred: bool) -> Vec<(&str, f64)> {
-        let mut hits: Vec<(&str, f64)> = Vec::new();
-        for &i in ix {
-            let r = &self.records[i];
-            let w = decayed(r, today);
-            if w < ACTIVE || !level(&r.context) || (single_barred && is_single(&r.word)) {
-                continue;
-            }
-            match hits.iter_mut().find(|h| h.0 == r.word) {
-                Some(h) => h.1 = h.1.max(w),
-                None => hits.push((r.word.as_str(), w)),
-            }
-        }
-        hits.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal).then(a.0.cmp(b.0)));
-        hits
-    }
-    /// The global records of `reading` (context ""), active ones only, with their decayed weight: the
-    /// global evidence of the posterior (s4-bayes §1), whichever level `lookup` answered at. A global
-    /// record exists only for words of 2+ characters (§12), so there is no single-character rule here.
-    pub fn lookup_global(&self, reading: &[String], today: i64) -> Vec<(&str, f64)> {
-        self.index.get(&reading_key(reading)).map_or(Vec::new(), |ix| self.active(ix, today, &|c| c == GLOBAL, false))
     }
     /// Removes the records at positions `drop` with swap_remove, patching the index instead of
     /// rebuilding it: every learning Enter on a full store trims one record, and a rebuild of
