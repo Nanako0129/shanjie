@@ -1,0 +1,2 @@
+# 整名讀音表（契約 docs/contracts/names-lexicon.md §2），維護者人工核對的結果，CC0。欄位：名字、讀音（音節以空白分隔，音節數要等於字數）。tools/build_names.py 在 tools/readings.py 之後套用，取代該名字的讀音；不改 tools/reading_overrides.tsv（那張表會改到評測集合與 ACG 詞包的讀音）。
+# 要核對的名字（readings.py 標 CHECK 的與多音字）由建置列在 build/names/check-readings.txt。

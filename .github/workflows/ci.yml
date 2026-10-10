@@ -175,6 +175,11 @@ jobs:
       - name: ACG pack builder (Python)
         run: python3 -m unittest tools.test_build_acg_pack
 
+      # docs/contracts/names-lexicon.md section 3 items 6 and 8: the common proper-noun builder against fixtures and a fake API, and the
+      # committed names-add.tsv (absent or empty until the lexicon is built) sharing no word with the base, overlay-add, sandhi-add and acg-add.
+      - name: Names lexicon builder (Python)
+        run: python3 -m unittest tools.test_build_names
+
       # docs/contracts/model-v5.md sections 8-9: the count scripts' --extra-lexicon (additive counting), the
       # out-of-vocabulary bigram filter in tools/build_lm.py, the count comparison and the counting lexicon rule.
       # Stdlib only; experiments/s2-classes/test_cluster.py needs numpy and runs in `make test`.

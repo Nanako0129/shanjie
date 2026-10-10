@@ -1,0 +1,2 @@
+# 維護者手動加的常見專有名詞（契約 docs/contracts/names-lexicon.md §1），維護者自己加的詞，CC0。欄位：詞、備註、讀音（選填，音節以空白分隔，音節數要等於字數；沒有就用 tools/readings.py 選的）。建置工具 tools/build_names.py 當成一個來源（標籤 manual），去重、分數、同音衝突偵測都和其他來源相同。
+酷澎	使用者 2026-10-10 回報打成「酷朋」（Coupang 的中文名）	ㄎㄨˋ ㄆㄥˊ

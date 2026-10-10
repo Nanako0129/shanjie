@@ -1,0 +1,83 @@
+{
+ "items": [
+  {
+   "displayName": "すき家 (臺灣)",
+   "id": "sukiya-60a4d5",
+   "locationSet": {
+    "include": [
+     "tw"
+    ]
+   },
+   "note": "According to TW community, sukiya only use ja name in TW, so don't change 'name' to '食其家' or 'Sukiya'",
+   "tags": {
+    "amenity": "fast_food",
+    "brand": "すき家",
+    "brand:en": "Sukiya",
+    "brand:ja": "すき家",
+    "brand:wikidata": "Q6137375",
+    "brand:zh": "食其家",
+    "cuisine": "beef_bowl",
+    "name": "すき家",
+    "name:en": "Sukiya",
+    "name:ja": "すき家",
+    "name:zh": "食其家",
+    "takeaway": "yes"
+   }
+  },
+  {
+   "displayName": "Mister Donut (臺灣)",
+   "id": "misterdonut-60a4d5",
+   "locationSet": {
+    "include": [
+     "tw"
+    ]
+   },
+   "matchNames": [
+    "唐先生圓圓圈",
+    "美仕唐納滋"
+   ],
+   "tags": {
+    "amenity": "fast_food",
+    "brand": "Mister Donut",
+    "brand:en": "Mister Donut",
+    "brand:ja": "ミスタードーナツ",
+    "brand:wikidata": "Q1065819",
+    "brand:zh": "Mister Donut",
+    "cuisine": "donut",
+    "name": "Mister Donut",
+    "name:en": "Mister Donut",
+    "name:ja": "ミスタードーナツ",
+    "name:zh": "Mister Donut",
+    "operator": "統一多拿滋股份有限公司",
+    "operator:wikidata": "Q15934112",
+    "takeaway": "yes"
+   }
+  },
+  {
+   "displayName": "麥當勞",
+   "id": "mcdonalds-60a4d5",
+   "locationSet": {
+    "include": [
+     "tw"
+    ]
+   },
+   "matchNames": [
+    "大m"
+   ],
+   "tags": {
+    "amenity": "fast_food",
+    "brand": "麥當勞",
+    "brand:en": "McDonald's",
+    "brand:wikidata": "Q38076",
+    "brand:zh": "麥當勞",
+    "brand:zh-Hant": "麥當勞",
+    "cuisine": "burger",
+    "name": "麥當勞",
+    "name:en": "McDonald's",
+    "name:zh": "麥當勞",
+    "name:zh-Hant": "麥當勞",
+    "takeaway": "yes"
+   }
+  }
+ ]
+}
