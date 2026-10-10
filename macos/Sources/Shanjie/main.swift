@@ -118,6 +118,8 @@ func runServer() -> Never {
         learningDirectory: Shell.learningURL(), dialogs: AlertDialogs(), demoteStore: DefaultsDemoteStore(), predictionStore: DefaultsPredictionStore(), abbreviationStore: DefaultsAbbreviationStore(), acgPackStore: DefaultsAcgPackStore(),
         glassTintStore: DefaultsGlassTintStore(), candidateOrientationStore: DefaultsCandidateOrientationStore(),
         // 可省略韻母 does not ship in v0.4.0 (user, 2026-10-10); see Shell.showsAbbreviation. Flip to true to offer it again.
+        // This argument alone hides it (Shell's default true is for the tests) and the app target has no tests: the release
+        // device check confirms the menu has no 可省略韻母.
         showsAbbreviation: false)
     let settings = SettingsWindowController(shell: App.shell)
     App.shell?.onOpenSettings = { settings.show() }

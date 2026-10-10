@@ -25,6 +25,8 @@ final class HiddenAbbreviationTests: XCTestCase {
         c.session.perform(.toggleAbbreviation)
         XCTAssertFalse(shell.abbreviationOn)
         XCTAssertEqual(store.abbreviation, true, "the store is not written")
+        shell.applyAbbreviation(false)  // the settings window's path; a write would store false
+        XCTAssertEqual(store.abbreviation, true, "the store is not written")
         c.type("st")
         XCTAssertEqual(c.client.marked, "ㄔ")
     }
