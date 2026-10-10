@@ -62,6 +62,11 @@
   .tagline { font: 600 clamp(20px, 4.2vw, 26px)/1.5 var(--serif); margin: 10px 0 0; }
   .lede { color: var(--ink-2); margin: 20px 0 0; grid-column: 1 / -1; max-width: 36em; }
   .badge { display: inline-block; margin-top: 18px; font-size: 14px; padding: 2px 12px; border: 1px solid var(--line); border-radius: 999px; color: var(--ink-2); }
+  a.badge { text-decoration: none; }
+  .install pre { margin: 8px 0 0; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; overflow-x: auto;
+                 font: 14px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .install code { font: 14px ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap: anywhere; }
+  .install pre code { overflow-wrap: normal; }
   @media (max-width: 520px) { .hero { grid-template-columns: 1fr; gap: 20px; } .seal { width: 84px; height: 84px; } .seal span { font-size: 48px; } }
 
   /* 錯字例子 */
@@ -74,7 +79,7 @@
 
   /* 三層 */
   .layers { display: grid; gap: 12px; counter-reset: layer; }
-  .layer { display: grid; grid-template-columns: 44px 1fr; gap: 14px; padding: 18px; border: 1px solid var(--line); border-radius: 12px; }
+  .layer { display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 14px; padding: 18px; border: 1px solid var(--line); border-radius: 12px; }
   .layer::before { counter-increment: layer; content: counter(layer); font: 900 22px/44px var(--serif); text-align: center;
                    width: 44px; height: 44px; border-radius: 10px; background: var(--paper-2); border: 1px solid var(--line); }
   .layer h3 { margin: 0; font-size: 19px; }
@@ -149,7 +154,7 @@
     <h1 class="name">善解</h1>
     <p class="tagline">善解，所以選對。</p>
   </div>
-  <p class="lede">一個開源的 macOS 注音輸入法，專心把同音字選對：看懂你前面寫了什麼，選出你真正要打的那個字。<br><span class="badge">開發中・尚未開放下載</span></p>
+  <p class="lede">一個開源的 macOS 注音輸入法，專心把同音字選對：看懂你前面寫了什麼，選出你真正要打的那個字。<br><a class="badge" href="#install">開放下載</a></p>
 </header>
 
 <hr class="rule">
@@ -187,8 +192,24 @@
     <summary>這些數字怎麼量的</summary>
     <p>評測分成開發集與保留集。開發集用來調整；保留集由另一個流程撰寫、開發過程中不看內容，只在每個階段結束時量一次，用來確認進步不是因為「背了題目」。前 64 名含正解的比例用寬鬆對照：「她／他」「臺／台」這類寫法視為相同；保留集的 99.6% 是上一版語言模型（model-v2）時量的；只有詞庫、還沒有語言模型時，保留集是 97.8%（完全相符）。</p>
     <p>判斷器比較了本機模型與多家雲端服務的三十多組設定；所有判斷器都卡在同一個上限：正解根本不在候選裡的句子，誰也救不回來。所以目前的重點是先把正解放進候選。</p>
-    <p>輸入法實際送出整句的正確率，保留集上聊天設定 79.3%、書面設定 81.1%（目前的語言模型加詞類回退）；這是只用詞庫與語言模型、還沒有語意重排的成績。</p>
+    <p>輸入法實際送出整句的正確率，保留集上聊天設定 79.3%、書面設定 81.1%（model-v4 加詞類回退；v0.4.0 的 model-v5 在開發集、打字測驗、錯字回報上每一句都和 model-v4 相同，保留集還沒重新量）；這是只用詞庫與語言模型、還沒有語意重排的成績。</p>
     <p>每個按鍵的處理時間是 76 句打字測驗共 2,483 個按鍵的 p95；量測時機器同時在跑其他工作。沒有選字記憶時 p95 是 2.5 毫秒。</p>
+  </details>
+</section>
+
+<section id="install" class="install">
+  <h2>安裝</h2>
+  <p class="sub">需要 macOS 26（Tahoe）以上、Apple 晶片。只裝在你的帳號，不需要管理員密碼。</p>
+  <div class="layers">
+    <div class="layer"><div><h3>安裝程式</h3><p>到 <a href="https://github.com/Nanako0129/shanjie/releases/latest">GitHub Releases</a> 下載 <code>shanjie-installer</code> 開頭的 zip，解壓縮後打開「安裝善解輸入法」，照四個步驟：歡迎、安裝、到系統設定加入、試打。</p><div class="when">推薦</div></div></div>
+    <div class="layer"><div><h3>Homebrew</h3>
+      <pre><code>brew install --cask nanako0129/tap/shanjie
+"$HOME/Library/Input Methods/善解輸入法.app/Contents/MacOS/shanjie" install</code></pre>
+      <p>第二行在系統還不認得善解時註冊；結束碼是 3 時，到「系統設定 → 鍵盤 → 輸入方式」按「+」，選「繁體中文」裡的「善解輸入法」，按「加入」。升級用 <code>brew upgrade --cask nanako0129/tap/shanjie</code>。</p></div></div>
+  </div>
+  <details>
+    <summary>已經裝過舊版</summary>
+    <p>照當初安裝的方式升級；選字記憶和設定都放在 App 外面，升級不會動到。兩種方式不要混用：要換方式，先刪掉 <code>~/Library/Input Methods/善解輸入法.app</code>。升級後輸入法選單找不到善解時，照上面的系統設定步驟加回來。Caps Lock 切換不了任何輸入法時，到「系統設定 → 輔助使用 → 鍵盤」打開「慢速按鍵」，按一次 Caps Lock，再關掉。</p>
   </details>
 </section>
 
@@ -210,7 +231,7 @@
         <li class="done"><span class="mark"></span><h3>語言模型整句選字</h3><p>用上下文排序候選，聊天與書面兩種設定依前景 App 自動切換。</p></li>
         <li class="done"><span class="mark"></span><h3>macOS 輸入法本體</h3><p>標準與倚天鍵盤、候選窗；標點留在組字區，並有標點候選清單。</p></li>
         <li class="done"><span class="mark"></span><h3>標準讀音</h3><p>依教育部規範，「一」「不」打本調或變調都能打出整個詞，「法國」的「法」用審定音 ㄈㄚˇ；補充詞表的錯誤讀音一併修正。</p></li>
-        <li class="done"><span class="mark"></span><h3>簽章與發佈流程</h3><p>Developer ID 簽章與 Apple 公證、安裝程式、Homebrew 的發佈流程已就緒；開放下載的時間另行公布。</p></li>
+        <li class="done"><span class="mark"></span><h3>簽章與發佈流程</h3><p>Developer ID 簽章與 Apple 公證、安裝程式、Homebrew 的發佈流程已就緒；v0.4.0 起開放下載。</p></li>
       </ul>
     </details>
 
@@ -244,8 +265,8 @@
     </details>
 
     <details class="stage" open>
-      <summary><span class="ver">v0.4</span><span class="st-title">安裝、設定與動漫詞</span><span class="tag wip">進行中</span>
-        <span class="meta">2026-10-09 起・v0.4.0</span></summary>
+      <summary><span class="ver">v0.4</span><span class="st-title">安裝、設定與動漫詞</span><span class="tag done">完成</span>
+        <span class="meta">2026-10-09～10-10・v0.4.0</span></summary>
       <ul class="items">
         <li class="done"><span class="mark"></span><h3>新的安裝程式</h3><p>四個步驟：歡迎、安裝、到系統設定加入、試打，每一步用白話說明，裝好可以直接在裡面試打。</p></li>
         <li class="done"><span class="mark"></span><h3>更新不弄壞 Caps Lock 切換</h3><p>已經裝過的善解再更新時，不再重新註冊輸入法。實測找到原因：更新後再註冊，會讓 Caps Lock 切換輸入法失效。</p></li>
@@ -254,9 +275,19 @@
         <li class="done"><span class="mark"></span><h3>即時預測往回找</h3><p>打到詞的中間也會預測，往回找到 5 個音節，例如「巴基斯」再按 ㄊ 就有「巴基斯坦」。</p></li>
         <li class="done"><span class="mark"></span><h3>設定視窗</h3><p>選單的「善解設定…」打開一個視窗，選單裡的選項都在裡面，還可以調候選窗玻璃的深淺，下面即時預覽。</p></li>
         <li class="done"><span class="mark"></span><h3>動漫與遊戲詞（第一片）</h3><p>從中文維基百科收錄約 1.5 萬個作品名與角色名，選單可以關掉。同音的名字由維護者逐一決定先後。</p></li>
-        <li class="wip"><span class="mark"></span><h3>動漫與遊戲詞（第二片）</h3><p>加進 2020 年以後的作品與角色，約 3 萬詞；選單下面顯示資料日期。</p></li>
-        <li class="wip"><span class="mark"></span><h3>新的語言模型</h3><p>讓詞包裡的名字也進到語料統計，有真實的機率，不再輸給常用單字的組合（例如「宿儺」打成「素娜」）。</p></li>
+        <li class="done"><span class="mark"></span><h3>動漫與遊戲詞（第二片）</h3><p>加進 2020 年以後的作品與角色，共約 3 萬詞；選單下面顯示資料日期。</p></li>
+        <li class="done"><span class="mark"></span><h3>新的語言模型（model-v5）</h3><p>詞包裡的名字有了語料次數，開著詞包時作品名、角色名在評測裡多對幾句；一般打字的評測集每一句都和上一版相同。語料裡很少出現的名字（例如「宿儺」）仍然打不出來，另外處理。</p></li>
+        <li class="done"><span class="mark"></span><h3>候選窗直排</h3><p>設定視窗的「候選窗方向」可選直排，候選字和即時預測列都排成一欄；按鍵照蘋果注音的直排。預設仍是橫排。</p></li>
         <li class="research done"><span class="mark"></span><h3><span class="kind">研究</span>詞包的名字為什麼打不出來</h3><p>逐一檢查詞包的每個詞。<b>結論：</b>輸掉的多半輸給常用單字的組合，原因是詞包詞沒有進到語料統計，只有固定的分數；所以重建語言模型，而不是一個一個調分數。</p></li>
+      </ul>
+    </details>
+
+    <details class="stage" open>
+      <summary><span class="ver">v0.4.1</span><span class="st-title">回報的修正</span><span class="tag wip">進行中</span>
+        <span class="meta">v0.4.0 之後</span></summary>
+      <ul class="items">
+        <li class="wip"><span class="mark"></span><h3>候選窗在瀏覽器裡的位置</h3><p>使用者回報：網頁版 Messenger 打第一個字時預測列跑到中間，選完字才回到字的下方；Aside 裡候選列跑到左上角。先在 Chrome 重現，再決定修法。</p></li>
+        <li><span class="mark"></span><h3>補上缺的名字</h3><p>「芙莉蓮」「獄門疆」這類詞彙裡還沒有的名字補進來；「虎杖」的讀音資料少了三聲，一併修正。</p></li>
       </ul>
     </details>
 
@@ -265,7 +296,7 @@
         <span class="meta">順序依實測與回報調整</span></summary>
       <ul class="items">
         <li class="wip"><span class="mark"></span><h3>從改選記住新詞組</h3><p>改選後送出的片段如果不是詞庫裡的詞（例如「版控」），記成你的詞，下次直接打得出來。</p></li>
-        <li class="wip"><span class="mark"></span><h3>預測可省略韻母</h3><p>即時預測的選用設定：每個字只打第一個注音也能找到詞。預設關閉。</p></li>
+        <li class="wip"><span class="mark"></span><h3>預測可省略韻母</h3><p>每個字只打第一個注音也能找到詞。一次縮寫一個詞的版本做完了，但還不能整句縮寫，v0.4.0 先不放；做到整句縮寫再出。</p></li>
         <li><span class="mark"></span><h3>App 沙盒</h3><p>輸入法在 macOS 的 App 沙盒裡執行，只拿到需要的權限。</p></li>
         <li class="research wip"><span class="mark"></span><h3><span class="kind">研究</span>Kneser–Ney 平滑</h3><p>回退時看一個詞接在幾種不同的詞後面，而不是只看它出現幾次，減少「常用單字組合贏過整詞」的錯。先離線量測，有效才做進輸入法。</p></li>
         <li class="research wip"><span class="mark"></span><h3><span class="kind">研究</span>在／再、作／做</h3><p>回報裡常見的一類同音錯，先量現在錯在哪裡再決定做法。</p></li>
@@ -328,7 +359,7 @@
 
 <footer>
   <span>善解 shanjie</span>
-  <span>最後更新：2026-10-08</span>
+  <span>最後更新：2026-10-10</span>
 </footer>
 
 </main>
