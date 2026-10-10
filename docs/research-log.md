@@ -2695,3 +2695,10 @@ PR #90 的審查意見逐項處理。
   - 第 68 列 `|即時預測也要直排|`：打成「及時預測也要直排」。
   - 第 69 列 `|想辦法從詞態解決常見錯字|`：打成「想辦法從詞太解決常見錯字」。
 - model-v5（`f81a021e…`）、`--context`，聊天與書面、開不開詞包，三句的第一名都和使用者遇到的一樣；正解都在前 64 名裡。`eval/golden/s2h-lm-context.txt` 的 user-reported 兩行照 Python 參考實作重產（n 66 → 69，top1 15／18 不變，oracle@64 64 → 67）。
+
+## 2026-10-10 kn-core 實作（核心讀 Kneser–Ney 側檔，預設關）
+
+- 格式 `SJKN0002`：檔頭多 β（f64）與 ΣN′（u64），N 陣列從位元組 64 開始。ΣN′ 由 `tools/kn_cont.py` 用 `lm.kn_total` 加 `build_lm.variant_classes` 算好寫入，Rust 只讀檔頭，作用在 `core/src/lm.rs` 的 `prob_c`（所有詞項的唯一入口）：id >= 2 的詞 `pb = β·N′/ΣN′ + (1−β)·pb`。`Lm::load` 在模型旁邊有 `kn.sjkn` 時載入，核對 magic、V、模型雜湊、長度、β、ΣN′，不符就 `LmError::Format`；CLI `--no-kn` 關閉；摘要行加 `+kn:<sha8>:θ<θ>:β<β>`。
+- 上游檢查：`lm.py` 讀 `SJKN0002` 時若呼叫端給 `kn_classes`，用 `kn_total` 重算 ΣN′ 和檔頭比對；`lm_eval.py` 每次都傳。用玩具側檔配真詞庫的異體類跑 `lm_eval.py`，確實因為檔頭的 ΣN′ 不符而 `ValueError`，也就是這個檢查有在作用。
+- 玩具模型的跨語言比對：`tools/gen_kn_tiny.py` 產生模型、詞類表、兩個側檔（β=1、0.75）與 Python 的解碼輸出，`core/tests/kn_tiny.rs` 逐位元組比對（無側檔、β=1、β=0.75，聊天與書面），入庫的檔案由 `tools/test_kn_cont.py` 檢查等於現在的輸出。
+- 突變：拿掉 KN 那一行（`if false && w >= 2`）、拿掉 `w >= 2` 的條件，`kn_tiny` 都有測試失敗（前者三項，後者句尾那項與解碼比對）。真模型的跨語言比對與延遲（契約 §3 第 5、6 項）由 main 跑，尚未做。

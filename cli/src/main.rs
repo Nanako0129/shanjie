@@ -145,7 +145,7 @@ fn load_with_packs(dir: &Path, packs: u32, pdir: &Path) -> Result<(std::sync::Ar
 fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     let (mut lm_path, mut profile, mut name, mut dev, mut rows_file) = (None, None, None, None, None);
     let (mut limit, mut set, mut dump, mut ctx_mode, mut demote) = (None::<usize>, None, None, false, true);
-    let mut classes = true;
+    let (mut classes, mut kn) = (true, true);
     let mut rowstats = None::<String>;
     // acg-pack contract A.2: `--packs acg` adds data/packs/acg-add.tsv (or `--packs-dir DIR`'s) to the lexicon and the cap; off by default.
     let (mut packs, mut packs_dir) = (0u32, None::<String>);
@@ -166,6 +166,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
             "--context" => ctx_mode = true,
             "--no-demote" => demote = false,
             "--no-classes" => classes = false,
+            "--no-kn" => kn = false,
             "--packs" => packs |= pack_flag(&val()?)?,
             "--packs-dir" => packs_dir = Some(val()?),
             _ => return Err("unknown argument".into()),
@@ -181,8 +182,8 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     };
     let lm_path = lm_path.ok_or("--lm is required")?;
     // S2k: the class term is part of the model; classes.sjc beside it is required unless --no-classes.
-    let lm = if classes { Lm::load(std::path::Path::new(&lm_path)) } else { Lm::load_without_classes(std::path::Path::new(&lm_path)) }
-        .map_err(|e| e.to_string())?;
+    // A kn.sjkn beside the model (docs/contracts/kn-core.md) turns the Kneser-Ney term on unless --no-kn.
+    let lm = Lm::load_with(std::path::Path::new(&lm_path), classes, kn).map_err(|e| e.to_string())?;
     let dir = root().join("data/lexicon");
     let (lex, overlay) = load_with_packs(&dir, packs, &pdir)?;
     let demote_rows = fs::read_to_string(dir.join("demote.tsv")).map_err(|e| format!("cannot read demote.tsv ({:?})", e.kind()))?;
@@ -261,7 +262,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
         f.write_all(format_rowstats(&rs).as_bytes()).map_err(|e| format!("cannot write rowstats ({:?})", e.kind()))?;
     }
     let sha = sha256_hex(firsts.join("\n").as_bytes());
-    println!("## {name}  lm-{profile_name}{}{}{}{}  {{'n': {}, 'top1': {top1}, 'oracle@64': {o64}, 'top1_sha256': '{sha}'}}", if ctx_mode { "+ctx" } else { "" }, if demote { "" } else { "-nodemote" }, if classes { "" } else { "-noclasses" }, if packs & PACK_ACG != 0 { "+acg" } else { "" }, rows.len());
+    println!("## {name}  lm-{profile_name}{}{}{}{}{}  {{'n': {}, 'top1': {top1}, 'oracle@64': {o64}, 'top1_sha256': '{sha}'}}", if ctx_mode { "+ctx" } else { "" }, if demote { "" } else { "-nodemote" }, if classes { "" } else { "-noclasses" }, lm.kn_tag().unwrap_or(""), if packs & PACK_ACG != 0 { "+acg" } else { "" }, rows.len());
     Ok(())
 }
 

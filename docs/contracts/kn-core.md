@@ -55,3 +55,4 @@ little-endian：magic `b"SJKN0002"`、V（u32）、模型檔 SHA-256（32 bytes�
   1. 決定性的比對驗不到預先彙總的 ΣN′（兩邊都讀檔頭）：`lm_eval.py` 照舊傳 `kn_classes` 讓 `lm.py` 重算比對；第 5 項加 ΣN′ = 23,700,571 與 N 陣列和 `fceb70cd…` 逐位元組相同。
   2. 錯字回報從 66 列變 69 列，不能直接對研究數字：只對內容沒變的集合（列出雜湊或 n），錯字回報用 `--limit 66`，停止條件同步。
   3. 側檔放錯地方會讓其他 checkout 都開著 KN：第 5 項用專用暫存目錄的實體複本；第 6 項只放這個 worktree 自己的 `data/lm`、用完移除；測試前確認不存在。
+- 實作（2026-10-10，executor 第 1 次）：§2 第 1–4 項、§3 第 1–4、8 項完成（第 5–6 項是 main 的）。`lm_eval.py` 讀玩具側檔時用真詞庫的異體類重算 ΣN′，和玩具側檔的檔頭不符就 `ValueError`，這正是上游檢查會抓的情形，所以玩具模型的跨語言比對走 `tools/gen_kn_tiny.py` 與 `core/tests/kn_tiny.rs`，不走 `lm_eval.py`。細節見 `docs/research-log.md` 同日「kn-core 實作」。

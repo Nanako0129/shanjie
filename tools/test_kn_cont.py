@@ -41,28 +41,28 @@ class KnCont(unittest.TestCase):
         build_lm.WORK = cls.old_work
         cls.tmp.cleanup()
 
-    def side(self, theta=1, bi=None, name="side.sjkn"):
+    def side(self, theta=1, bi=None, name="side.sjkn", beta=1.0):
         vocab = L.BigramLM(self.path, classes=False).vocab
         n = kn_cont.continuation(self.bi if bi is None else bi, self.cls, theta, vocab)
         p = os.path.join(self.tmp.name, name)
-        open(p, "wb").write(kn_cont.side_bytes(self.path, n, self.cls, theta))
+        open(p, "wb").write(kn_cont.side_bytes(self.path, n, self.cls, theta, beta))
         return p
 
     def load(self, beta, theta=1):
-        return L.BigramLM(self.path, classes=False, kn=self.side(theta), kn_beta=beta, kn_classes=self.cls)
+        return L.BigramLM(self.path, classes=False, kn=self.side(theta, beta=beta), kn_beta=beta, kn_classes=self.cls)
 
     def test_build_bytes_unchanged(self):
         self.assertEqual(hashlib.sha256(self.data).hexdigest(), GOLDEN_TINY_MODEL_SHA)
 
     def test_side_file_layout(self):
-        b = open(self.side(2), "rb").read()
+        b = open(self.side(2, beta=0.75), "rb").read()
         V = len(L.BigramLM(self.path, classes=False).vocab)
-        self.assertEqual(b[:8], b"SJKN0001")
+        self.assertEqual(b[:8], b"SJKN0002")
         self.assertEqual(struct.unpack_from("<I", b, 8)[0], V)
         self.assertEqual(b[12:44], hashlib.sha256(self.data).digest())
-        self.assertEqual(struct.unpack_from("<I", b, 44)[0], 2)
-        self.assertEqual(len(b), 48 + 4 * V)
-        self.assertEqual(struct.unpack_from("<II", b, 48), (0, 0))
+        self.assertEqual(struct.unpack_from("<IdQ", b, 44), (2, 0.75, 7))   # θ、β、ΣN′：玩具語料的前文詞對次數都 >= 2，所以 θ=2 和 θ=1 一樣是 7（test_counts_by_hand）
+        self.assertEqual(len(b), 64 + 4 * V)
+        self.assertEqual(struct.unpack_from("<II", b, 64), (0, 0))
 
     def test_counts_by_hand(self):
         """合併後二元組：(他,起床)4 (他,佔)2 (他,占)5 (<s>,起床)8 (<s>,他)15 (起床,</s>)14 (起牀,</s>)14。前文 <s> 不算、</s> 不進側檔，
@@ -70,6 +70,7 @@ class KnCont(unittest.TestCase):
         once(v) 這裡用不到（起床類只出現在 </s> 前面），由 test_predecessor_filters 測。"""
         lm = self.load(1.0)
         _, np1, total = lm.kn
+        self.assertEqual(struct.unpack_from("<Q", open(self.side(), "rb").read(), 56)[0], 7)   # 檔頭的 ΣN′
         g = lambda w: np1[lm.ids[w]]
         self.assertEqual((g("他"), g("佔"), g("占"), g("起床"), g("起牀")), (1, 2, 2, 2, 2))
         self.assertEqual(total, 7)
@@ -115,20 +116,49 @@ class KnCont(unittest.TestCase):
 
     def test_mismatch_raises(self):
         side = open(self.side(), "rb").read()
+        put = lambda off, fmt, *v: side[:off] + struct.pack(fmt, *v) + side[off + struct.calcsize(fmt):]
         bad = {"hash": side[:12] + bytes([side[12] ^ 1]) + side[13:],
-               "V": side[:8] + struct.pack("<I", 99) + side[12:],
-               "len": side[:-4]}
+               "V": put(8, "<I", 99),
+               "len": side[:-4],
+               "trailing": side + b"\0",
+               "magic": b"SJKN0003" + side[8:],
+               "header total": put(56, "<Q", 8),
+               "zero total": put(56, "<Q", 0),
+               "header beta > 1": put(48, "<d", 1.5),
+               "header beta < 0": put(48, "<d", -0.1),
+               "header beta nan": put(48, "<d", float("nan"))}
         for k, b in bad.items():
-            p = os.path.join(self.tmp.name, f"bad-{k}.sjkn")
+            p = os.path.join(self.tmp.name, f"bad-{k.replace(' ', '-')}.sjkn")
             open(p, "wb").write(b)
             with self.assertRaises(ValueError, msg=k):
-                L.BigramLM(self.path, classes=False, kn=p, kn_beta=1.0, kn_classes=self.cls)
-        good = self.side()
-        for kw in (dict(kn_beta=1.0), dict(kn_classes=self.cls), dict(kn_beta=1.5, kn_classes=self.cls)):
+                L.BigramLM(self.path, classes=False, kn=p, kn_classes=self.cls)
+
+    def test_beta_and_classes_args(self):
+        """SJKN0002：β、ΣN′ 取自檔頭，呼叫端可以都不給；給了就要一致。"""
+        good = self.side(beta=0.5)
+        lm = L.BigramLM(self.path, classes=False, kn=good)
+        self.assertEqual((lm.kn[0], lm.kn[2]), (0.5, 7))
+        self.assertEqual(L.BigramLM(self.path, classes=False, kn=good, kn_beta=0.5, kn_classes=self.cls).kn[2], 7)
+        for kw in (dict(kn_beta=1.0), dict(kn_beta=1.5), dict(kn_beta=0.5, kn_classes={})):   # 類少了 起床 那一類，重算的 ΣN′ 不是 7
             with self.assertRaises(ValueError, msg=str(kw)):
                 L.BigramLM(self.path, classes=False, kn=good, **kw)
-        with self.assertRaises(ValueError, msg="beta without kn"):
-            L.BigramLM(self.path, classes=False, kn_beta=1.0, kn_classes=self.cls)
+
+    def test_kn_args_without_kn(self):
+        """PR #105 verifier P4：沒有 kn 時只給 kn_beta、只給 kn_classes，各自丟 ValueError。"""
+        for kw in (dict(kn_beta=1.0), dict(kn_classes=self.cls)):
+            with self.assertRaises(ValueError, msg=str(kw)):
+                L.BigramLM(self.path, classes=False, **kw)
+
+    def test_old_sjkn0001_still_reads(self):
+        """SJKN0001（研究用）：沒有 β 與 ΣN′，一定要 kn_beta 與 kn_classes；讀出的數字和 SJKN0002 相同。"""
+        new = open(self.side(), "rb").read()
+        old = os.path.join(self.tmp.name, "old.sjkn")
+        open(old, "wb").write(b"SJKN0001" + new[8:48] + new[64:])
+        lm = L.BigramLM(self.path, classes=False, kn=old, kn_beta=1.0, kn_classes=self.cls)
+        self.assertEqual(lm.kn, L.BigramLM(self.path, classes=False, kn=self.side()).kn)
+        for kw in (dict(), dict(kn_beta=1.0), dict(kn_classes=self.cls), dict(kn_beta=1.5, kn_classes=self.cls)):
+            with self.assertRaises(ValueError, msg=str(kw)):
+                L.BigramLM(self.path, classes=False, kn=old, **kw)
 
     def test_predecessor_filters(self):
         """起床、起牀 同一類，都接 他：N(他) 只算一次（once）；詞彙外的前文不算（build 也丟掉那些二元組）。"""
@@ -141,7 +171,19 @@ class KnCont(unittest.TestCase):
         sides = [open(self.side(t, bi, f"t{t}.sjkn"), "rb").read() for t in (1, 2, 3)]
         self.assertEqual(len(set(sides)), 3)
         vi = L.BigramLM(self.path, classes=False).ids["起床"]
-        self.assertEqual([struct.unpack_from("<I", s, 48 + 4 * vi)[0] for s in sides], [3, 2, 1])
+        self.assertEqual([struct.unpack_from("<I", s, 64 + 4 * vi)[0] for s in sides], [3, 2, 1])
+
+    def test_kn_tiny_golden_is_current(self):
+        """eval/golden/kn-tiny/ 是 tools/gen_kn_tiny.py 現在的輸出（core/tests/kn_tiny.rs 拿它對 Rust）；改了任何一邊就要重產。"""
+        import gen_kn_tiny
+        for name, b in gen_kn_tiny.generate().items():
+            self.assertEqual(open(os.path.join(gen_kn_tiny.OUT, name), "rb").read(), b, name)
+
+    def test_summary_tag(self):
+        """lm_eval 的摘要行標籤；Rust 的 Lm::kn_tag 同格式（core/tests/kn_tiny.rs、lm.rs fmt_g）。"""
+        import lm_eval
+        p = self.side(beta=0.5)
+        self.assertEqual(lm_eval.kn_tag(p, 0.5), f"+kn:{hashlib.sha256(open(p, 'rb').read()).hexdigest()[:8]}:θ1:β0.5")
 
 
 if __name__ == "__main__":
