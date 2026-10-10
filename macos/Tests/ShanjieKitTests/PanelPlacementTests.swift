@@ -48,9 +48,17 @@ final class PanelPlacementTests: XCTestCase {
         XCTAssertEqual(place(nil, last: NSRect(x: 1990, y: 400, width: 8, height: 18), screens: [screen, right]).x, 1800)
     }
 
-    /// A remembered line no screen holds (its screen is gone) is dropped: the default corner, not a panel off the screen.
+    /// A remembered line no screen holds (its screen is gone) is not used: the default corner, not a panel off the screen.
+    /// The client's own line off every screen is still used, as on main.
     func testLastLineOnNoScreenIsDropped() {
-        XCTAssertEqual(place(nil, last: NSRect(x: 1500, y: -500, width: 8, height: 18)), NSPoint(x: 0, y: 30))
+        let off = NSRect(x: 300, y: -500, width: 8, height: 18)
+        XCTAssertEqual(place(nil, last: off), NSPoint(x: 0, y: 30))
+        XCTAssertEqual(place(off), NSPoint(x: 280, y: -500 + 18 + 6 + 30), "the client's line: flipped above it, as on main")
+        // The test is the screen's full frame, not its visible frame: a remembered line behind the Dock is still used.
+        let docked = PanelPlacement.Screen(frame: screen, visibleFrame: NSRect(x: 0, y: 80, width: 1000, height: 695))
+        let behindDock = NSRect(x: 300, y: 20, width: 8, height: 18)
+        let p = PanelPlacement.topLeft(line: nil, last: behindDock, size: size, alignOffset: 20, screens: [docked], main: 0).origin
+        XCTAssertEqual(p, NSPoint(x: 280, y: 20 + 18 + 6 + 30))
     }
 
     func testNoLineAndNoLastGoesBottomLeftOfMain() {
