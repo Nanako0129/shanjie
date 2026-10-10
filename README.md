@@ -1,6 +1,6 @@
 # 善解 shanjie
 
-以「選字正確」為第一優先的開源 macOS 注音輸入法（開發中）。
+以「選字正確」為第一優先的開源 macOS 注音輸入法（持續開發中）。
 
 - 計畫：`docs/PLAN.md`
 - 授權：程式碼 Apache-2.0（`LICENSE`）；資料見 `LICENSES/data.md`
@@ -8,7 +8,7 @@
 
 ## 進度
 
-最新發佈是 [v0.3.0](https://github.com/Nanako0129/shanjie/releases)：可以安裝使用的注音輸入法。
+最新發佈見 [Releases 的 Latest](https://github.com/Nanako0129/shanjie/releases/latest)：可以安裝使用的注音輸入法。各版的變更見發佈說明（`docs/releases/`）。
 - 標準與倚天鍵盤；整句轉換（詞庫＋bigram 語言模型＋詞類回退）；教育部「一／不／法」讀音變體。
 - 看前文選字：讀取游標前已經送出的字，接著它選這一段的第一個詞。
 - 即時預測：打下一個詞的第一個注音，候選窗就列出接得上前文的詞（Tab 進入選取，選單可關）。
@@ -41,7 +41,7 @@
 
 ## 安裝
 
-需要 macOS 26（Tahoe）以上、Apple 晶片。下面兩種方式擇一；要換方式時，先刪掉 `~/Library/Input Methods/善解輸入法.app`。
+需要 macOS 26（Tahoe）以上、Apple 晶片。下面兩種方式擇一；換方式時：從 Homebrew 換成安裝程式，先執行 `brew uninstall --cask nanako0129/tap/shanjie`；從安裝程式換成 Homebrew，先刪掉 `~/Library/Input Methods/善解輸入法.app`。
 
 **Homebrew**
 
@@ -68,6 +68,6 @@ pkill -f '^[^ ]*/Library/Input Methods/(善解輸入法|shanjie)\.app/Contents/M
 scripts/install-ime.sh <解壓出來的 善解輸入法.app 路徑>
 ```
 
-也可以從 Releases 下載 `shanjie-installer-<版本>.zip`，解壓後點兩下「安裝善解輸入法」（測試中）。
+也可以從 Releases 下載 `shanjie-installer-<版本>.zip`，解壓後點兩下「安裝善解輸入法」。
 
 裝好後在選單列的輸入法選單選「善解輸入法」；標準／倚天鍵盤在它自己的選單裡切換。選單裡的「善解設定…」會開一個設定視窗，選單上的各項設定都能在裡面改，另外有候選窗的方向（橫排或直排）與玻璃深淺。
