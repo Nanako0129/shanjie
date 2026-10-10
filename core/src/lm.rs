@@ -41,6 +41,8 @@ impl Profile {
 pub enum LmError {
     Io,
     Format,
+    /// The Kneser-Ney side file (`kn.sjkn`) exists but cannot be read, or does not match the model (docs/contracts/kn-core.md).
+    KnSide,
 }
 
 impl fmt::Display for LmError {
@@ -48,6 +50,7 @@ impl fmt::Display for LmError {
         f.write_str(match self {
             LmError::Io => "cannot read language model file",
             LmError::Format => "bad language model file",
+            LmError::KnSide => "unreadable or mismatching Kneser-Ney side file (kn.sjkn)",
         })
     }
 }
@@ -69,6 +72,32 @@ pub struct Lm {
     cnt: Vec<u32>,
     /// S2k word-class term (classes.sjc); `None` only for the explicit class-less constructors.
     classes: Option<Classes>,
+    /// SHA-256 (hex) of the model bytes, taken once in `parse`: classes.sjc and kn.sjkn are bound to it.
+    sha: String,
+    /// Kneser-Ney side file (`kn.sjkn` beside the model, docs/contracts/kn-core.md); `None` is off.
+    kn: Option<Kn>,
+}
+
+/// kn.sjkn (SJKN0002, written by tools/kn_cont.py), indexed by model word id. `total` (sum of N') is computed
+/// upstream in Python (lm.kn_total over the variant classes) and only read here.
+struct Kn {
+    beta: f64,
+    theta: u32,
+    total: u64,
+    /// The whole file; N is read in place (little-endian u32 at `KN_N + 4 * id`), so nothing is copied.
+    raw: Vec<u8>,
+    /// `+kn:<side file sha8>:θ<θ>:β<β>`, the suffix of lm_eval.py's summary line; hashed on first use.
+    tag: OnceLock<String>,
+}
+
+const KN_N: usize = 64;
+
+impl Kn {
+    /// N' = N + 1 of word `id`.
+    fn np1(&self, id: usize) -> u64 {
+        let at = KN_N + 4 * id;
+        u32::from_le_bytes([self.raw[at], self.raw[at + 1], self.raw[at + 2], self.raw[at + 3]]) as u64 + 1
+    }
 }
 
 /// classes.sjc (format in tools/build_classes.py), indexed by model word id.
@@ -81,6 +110,7 @@ struct Classes {
 }
 
 const CLASS_MAGIC: &[u8; 8] = b"SJCL0001";
+const KN_MAGIC: &[u8; 8] = b"SJKN0002";
 const NO_CLASS: u16 = 0xFFFF;
 
 /// classes.sjc bytes for `model` (tests only; the real file is written by tools/build_classes.py).
@@ -151,22 +181,81 @@ impl Lm {
     }
 
     /// The model at `path` and the `classes.sjc` beside it (S2k section 4.3). A missing or mismatching class
-    /// file is an error, never a silent fallback.
+    /// file is an error, never a silent fallback. A `kn.sjkn` beside the model switches the Kneser-Ney term on
+    /// (docs/contracts/kn-core.md); one that does not match the model is an error too.
     pub fn load(path: &Path) -> Result<Lm, LmError> {
-        let model = std::fs::read(path).map_err(|_| LmError::Io)?;
-        let classes = std::fs::read(path.with_file_name("classes.sjc")).map_err(|_| LmError::Io)?;
-        Lm::parse_with_classes(&model, &classes)
+        Lm::load_with(path, true, true)
     }
 
-    /// The model alone, explicitly without the class term (`--no-classes`).
+    /// The model without the class term (`--no-classes`); a `kn.sjkn` beside it is still read.
     pub fn load_without_classes(path: &Path) -> Result<Lm, LmError> {
-        Lm::parse(&std::fs::read(path).map_err(|_| LmError::Io)?)
+        Lm::load_with(path, false, true)
+    }
+
+    /// `load` with the class file (`classes`) and the Kneser-Ney side file (`kn`) each optional (`--no-classes`, `--no-kn`).
+    /// With `kn` on, no `kn.sjkn` path is simply off; one that exists (a dangling symlink included) but cannot be
+    /// read or does not match is `KnSide`, never ignored.
+    pub fn load_with(path: &Path, classes: bool, kn: bool) -> Result<Lm, LmError> {
+        let model = std::fs::read(path).map_err(|_| LmError::Io)?;
+        let mut lm = if classes {
+            let c = std::fs::read(path.with_file_name("classes.sjc")).map_err(|_| LmError::Io)?;
+            Lm::parse_with_classes(&model, &c)?
+        } else {
+            Lm::parse(&model)?
+        };
+        if kn {
+            let side = path.with_file_name("kn.sjkn");
+            match std::fs::symlink_metadata(&side) {
+                Ok(_) => lm.add_kn(&std::fs::read(&side).map_err(|_| LmError::KnSide)?)?,
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(_) => return Err(LmError::KnSide),
+            }
+        }
+        Ok(lm)
+    }
+
+    /// SJKN0002 bytes (docs/contracts/kn-core.md section 1): magic, V, the model's SHA-256, θ, β, sum of N', N[V]. Checked
+    /// (all `KnSide`): magic, V, the hash of the model this `Lm` was parsed from, exact length, β in [0, 1], and the
+    /// header sum of N' between the largest N' and the sum of all N' over ids >= 2 (a correct file always is: the sum counts
+    /// each variant class once). Turns the Kneser-Ney term on.
+    pub fn add_kn(&mut self, side: &[u8]) -> Result<(), LmError> {
+        let bad = |_| LmError::KnSide;
+        let mut r = Rd(side);
+        if r.take(8).map_err(bad)? != KN_MAGIC {
+            return Err(LmError::KnSide);
+        }
+        let v = r.u32().map_err(bad)? as usize;
+        let want: String = r.take(32).map_err(bad)?.iter().map(|b| format!("{b:02x}")).collect();
+        let (theta, beta, total) = (r.u32().map_err(bad)?, r.f64().map_err(bad)?, r.u64().map_err(bad)?);
+        if v != self.uni.len() || want != self.sha || !(0.0..=1.0).contains(&beta) || side.len() != KN_N + 4 * v {
+            return Err(LmError::KnSide);
+        }
+        let kn = Kn { beta, theta, total, raw: side.to_vec(), tag: OnceLock::new() };
+        let (mut max, mut sum) = (0u64, 0u128);
+        for id in 2..v {
+            let n = kn.np1(id);
+            max = max.max(n);
+            sum += n as u128;
+        }
+        if total == 0 || total < max || total as u128 > sum {
+            return Err(LmError::KnSide);
+        }
+        self.kn = Some(kn);
+        Ok(())
+    }
+
+    /// The summary-line suffix `+kn:<side file sha8>:θ<θ>:β<β>` (same text as reference/proto/lm_eval.py); `None` when the
+    /// Kneser-Ney term is off. The side file is hashed on the first call.
+    pub fn kn_tag(&self) -> Option<&str> {
+        self.kn.as_ref().map(|k| {
+            k.tag.get_or_init(|| format!("+kn:{}:θ{}:β{}", &crate::eval::sha256_hex(&k.raw)[..8], k.theta, fmt_g(k.beta))).as_str()
+        })
     }
 
     /// Model bytes plus classes.sjc bytes: magic, the model's SHA-256, the vocabulary size and the exact length must match.
     pub fn parse_with_classes(model: &[u8], classes: &[u8]) -> Result<Lm, LmError> {
         let mut lm = Lm::parse(model)?;
-        let sha = crate::eval::sha256_hex(model);
+        let sha = lm.sha.clone();
         let mut r = Rd(classes);
         if r.take(8)? != CLASS_MAGIC {
             return Err(LmError::Format);
@@ -267,6 +356,8 @@ impl Lm {
             nxt,
             cnt,
             classes: None,
+            sha: crate::eval::sha256_hex(bytes),
+            kn: None,
         })
     }
 
@@ -301,7 +392,18 @@ impl Lm {
     /// caller goes through. A kept bigram is unchanged; every other pair (also a context without entries,
     /// `back` = 1) gets `back * ((1 - mu) * pb + mu * Pc[c(v), c(w)] * emit(w))` when both words have a class
     /// (S2k section 4.2; the operation order is the Python one), else `back * pb`.
+    ///
+    /// Unlike lm.py's `prob`, this includes the Kneser-Ney term below (lm.py applies it in `word()`); decode results are the
+    /// same because every word term here goes through this one formula.
+    ///
+    /// Kneser-Ney (kn.sjkn, docs/contracts/kn-core.md): for a vocabulary word (id >= 2) `pb` first becomes
+    /// `beta * N' / sum(N') + (1 - beta) * pb`, so all three branches see it. Sentence end (id 1) and words outside
+    /// the vocabulary keep `pb`. Done here once because every word term (decode paths, `word`, `eos`) comes through this function.
     fn prob_c(&self, ctx: Ctx, w: Option<u32>, pb: f64) -> f64 {
+        let pb = match (&self.kn, w) {
+            (Some(kn), Some(w)) if w >= 2 => kn.beta * kn.np1(w as usize) as f64 / kn.total as f64 + (1.0 - kn.beta) * pb,
+            _ => pb,
+        };
         let back = match ctx.idx {
             None => 1.0,
             Some(i) => {
@@ -322,6 +424,8 @@ impl Lm {
         back * pb
     }
 
+    /// `prob_c` by word strings. Includes the Kneser-Ney term when a side file is loaded; lm.py's `prob` does not (it applies
+    /// the term in `word()`), so compare whole word terms (`word`, decode), not this value, across the two.
     pub fn prob(&self, v: &str, w: &str, pb: f64) -> f64 {
         self.prob_c(self.ctx_of(self.word_id(v)), self.word_id(w), pb)
     }
@@ -366,6 +470,15 @@ impl Lm {
 /// differently in the last bit (seen as 1-ulp score differences), so the base is hidden from the optimizer.
 fn pow10(lp: f64) -> f64 {
     std::hint::black_box(10.0f64).powf(lp)
+}
+
+/// Python `f"{x:g}"` for a number in [0, 1] (6 significant digits, no trailing zeros): `1`, `0.5`, `0.123457`, `1e-05`.
+fn fmt_g(x: f64) -> String {
+    let e = format!("{x:.5e}");
+    let (m, exp) = e.split_once('e').unwrap_or((&e, "0"));
+    let exp: i32 = exp.parse().unwrap_or(0);
+    let trim = |s: &str| if s.contains('.') { s.trim_end_matches('0').trim_end_matches('.').to_string() } else { s.to_string() };
+    if exp < -4 { format!("{}e-{:02}", trim(m), -exp) } else { trim(&format!("{:.*}", (5 - exp) as usize, x)) }
 }
 
 fn word_term(lam: f64, p: f64, lp: f64) -> f64 {
@@ -860,6 +973,14 @@ mod tests {
             b.extend(c.to_le_bytes());
         }
         b
+    }
+
+    /// Python `f"{x:g}"` (the summary line's beta).
+    #[test]
+    fn fmt_g_matches_python() {
+        for (x, want) in [(1.0, "1"), (0.5, "0.5"), (0.0, "0"), (0.25, "0.25"), (0.75, "0.75"), (0.123456789, "0.123457"), (0.0001, "0.0001"), (0.00001234, "1.234e-05"), (1e-5, "1e-05"), (0.999999999, "1")] {
+            assert_eq!(fmt_g(x), want, "{x}");
+        }
     }
 
     #[test]

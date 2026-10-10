@@ -75,7 +75,8 @@ def merge_variants(uni, bi, cls):
     return uni, bi
 
 
-def build(cls=None):
+def merged_counts(cls=None):
+    """計數階段（加權、四捨五入、去 0、異體合併）。回傳 (uni, bi, cls)；build() 與 tools/kn_cont.py 共用。"""
     uni, bi = {}, {}
     for name, w in CORPORA:
         c = pickle.load(open(os.path.join(WORK, name), "rb"))
@@ -93,6 +94,11 @@ def build(cls=None):
         lex = ime.Lexicon(os.path.join(LEXDIR, "mcbpmf-data.txt"), overlay=ime.OVERLAYS)
         cls = variant_classes(lex.by_reading)
     uni, bi = merge_variants(uni, bi, cls)
+    return uni, bi, cls
+
+
+def build(cls=None):
+    uni, bi, cls = merged_counts(cls)
     words = sorted(uni, key=lambda s: s.encode("utf-8"))
     vocab = ["<s>", "</s>"] + words
     ids = {w: i for i, w in enumerate(vocab)}
