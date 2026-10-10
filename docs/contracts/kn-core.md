@@ -21,7 +21,7 @@ little-endian：magic `b"SJKN0002"`、V（u32）、模型檔 SHA-256（32 bytes�
 1. **`tools/kn_cont.py`**：加 `--beta`，輸出 `SJKN0002`；`SJKN0001` 不再產生（舊檔照舊能讀）。
 2. **`reference/proto/lm.py`**：讀 `SJKN0002`：β、ΣN′ 取自檔頭；呼叫端另外給 `kn_classes` 時，用 `kn_total` 重算並和檔頭比對，不同就 `ValueError`；給了 `kn_beta` 而且和檔頭不同也 `ValueError`。`lm_eval.py`：`--kn FILE` 讀 `SJKN0002` 時不需要 `--kn-beta`，但**照舊**用自己的詞庫算 `kn_classes`（`build_lm.variant_classes`）並傳進去，所以每次評測都會用 `kn_total` 重算 ΣN′ 和檔頭比對——這是 ΣN′ 這個預先彙總值在上游的檢查，Rust 只讀檔頭。
 3. **Rust `core/src/lm.rs`**：
-   - `Lm::load(path)`：模型旁邊有 `kn.sjkn` 就讀（`SJKN0002`，核對 magic、V、模型 SHA-256、長度、β ∈ [0, 1]、ΣN′ > 0、N 的長度），不合就 `LmError::Format`（不靜默略過）；沒有這個檔就是關閉。
+   - `Lm::load(path)`：模型旁邊有 `kn.sjkn` 就讀（`SJKN0002`，核對 magic、V、模型 SHA-256、長度、β ∈ [0, 1]、ΣN′ > 0、N 的長度），不合就 `LmError::KnSide`（不靜默略過；實作時加的變體，讀不到與格式不合都用它，訊息點名側檔；FFI 的 `load_lm` 照舊把所有載入失敗回 3）。另外核對檔頭 ΣN′ 夾在 max N′ 與 Σ N′ 之間（O(V)，正確的檔一定通過），側檔綁的是這個 `Lm` 解析時算的模型 SHA-256；`kn.sjkn` 這個路徑存在（含壞掉的 symlink）卻讀不了也是 `KnSide`；沒有這個檔就是關閉。
    - 作用位置和 `lm.py` 一致：詞項的 `pb`（id ≥ 2）換成 `β·N′/ΣN′ + (1−β)·pb`；句尾（id 1）、不在詞彙裡的詞（`None`）不變。所有詞項都經過同一個函式（現在是 `prob_c`），在那裡做一次，不在各個呼叫端各做一次。
    - `Lm::kn_enabled()`（或同等）讓評測 CLI 在摘要行加 `+kn`，和 `lm_eval.py` 同一個格式（`+kn:<側檔 sha8>:θ<θ>:β<β>`），這樣 golden 與比對看得出有沒有開。
 4. **評測 CLI `cli/`**：載入時照上面規則（旁邊有 `kn.sjkn` 就開）；`--no-kn` 明確關閉（研究用）。
@@ -30,7 +30,7 @@ little-endian：magic `b"SJKN0002"`、V（u32）、模型檔 SHA-256（32 bytes�
 ## 3. 驗收
 
 1. **沒有側檔時逐位元組不變**：現有 golden 測試（`cli/tests/golden.rs` 等）全過，不改任何 golden 檔。
-2. **Rust 單元測試**（玩具模型＋玩具側檔，數值和 `tools/test_kn_cont.py` 的手算相同）：β = 0 與沒有側檔逐位元相同；β = 1 時保留條目、詞類項、一般回退三個分支各一個手算值；句尾與詞彙外的詞不變；壞檔（magic、V、雜湊、長度、β 超出範圍、ΣN′ = 0）都回 `LmError::Format`。突變：把 KN 那一行拿掉、把 id ≥ 2 的條件拿掉，各要讓測試失敗。
+2. **Rust 單元測試**（玩具模型＋玩具側檔，數值和 `tools/test_kn_cont.py` 的手算相同）：β = 0 與沒有側檔逐位元相同；β = 1 時保留條目、詞類項、一般回退三個分支各一個手算值；句尾與詞彙外的詞不變；壞檔（magic、V、雜湊、長度、β 超出範圍、ΣN′ = 0）都回 `LmError::KnSide`（實作時加：檔頭 ΣN′ 小於最大 N′ 或大於全部 N′ 的和、綁到同 V 的另一個模型、壞 symlink）。突變：把 KN 那一行拿掉、把 id ≥ 2 的條件拿掉，各要讓測試失敗。
 3. **Python**：`SJKN0002` 的讀寫、檔頭 ΣN′ 和 `kn_total` 不同時的錯誤、`kn_beta` 不符的錯誤；`tools/test_kn_cont.py` 照舊全過（改成產生 `SJKN0002`）。
 4. **小模型的跨語言比對**：同一個玩具模型＋側檔，Rust 與 Python 對一組句子的解碼輸出（前 N 名與分數）逐位元組相同，寫成 golden 測試（像現有的 golden 測試，Python 產生、Rust 比對）。
 5. **真模型的跨語言比對（決定性的一項，main 執行）**：model-v5＋classes-v3＋用 model-v5 計數重產的 θ=1、β=1 `SJKN0002` 側檔（188 產生，不進 repo）。三個檔的**實體複本**放在一個專用暫存目錄（例如 `~/.cache/shanjie/work/kn-core/lm/`），CLI 的 `--lm` 指向那裡；不放進任何 checkout 的 `data/lm`。
@@ -56,3 +56,4 @@ little-endian：magic `b"SJKN0002"`、V（u32）、模型檔 SHA-256（32 bytes�
   2. 錯字回報從 66 列變 69 列，不能直接對研究數字：只對內容沒變的集合（列出雜湊或 n），錯字回報用 `--limit 66`，停止條件同步。
   3. 側檔放錯地方會讓其他 checkout 都開著 KN：第 5 項用專用暫存目錄的實體複本；第 6 項只放這個 worktree 自己的 `data/lm`、用完移除；測試前確認不存在。
 - 實作（2026-10-10，executor 第 1 次）：§2 第 1–4 項、§3 第 1–4、8 項完成（第 5–6 項是 main 的）。`lm_eval.py` 讀玩具側檔時用真詞庫的異體類重算 ΣN′，和玩具側檔的檔頭不符就 `ValueError`，這正是上游檢查會抓的情形，所以玩具模型的跨語言比對走 `tools/gen_kn_tiny.py` 與 `core/tests/kn_tiny.rs`，不走 `lm_eval.py`。細節見 `docs/research-log.md` 同日「kn-core 實作」。
+- 修正一（2026-10-11，/code-review 14 項）：加 `LmError::KnSide`、ΣN′ 範圍檢查（Rust 與 `lm.py`）、`Lm` 存模型 SHA-256（側檔不再另拿模型位元組比對，也少一次整份雜湊；側檔自己的 SHA-256 在 `kn_tag()` 第一次用時才算）、壞 symlink 不當成沒有、`shanjie.h` 與 `ffi.rs` 註解、CI 跑 `tools/test_kn_cont.py`、文件更正。**`--predict` 的 CLI 路徑把側檔明確關掉**（`Lm::load_with(.., false)`）：Python 的預測參考（`experiments/sp/predict.py`）不讀側檔，開著會讓 sp-predict golden 失去可比性。**model-v6 在 `kn.sjkn` 出貨前，必須讓 `experiments/sp/predict.py` 也讀側檔、`--predict` 也開。**`experiments/acg-audit/acg_audit.rs` 是留存的稽核輔助（要複製進 `cli/examples/` 才能建），仍用 `Lm::load`，會跟著旁邊的側檔走。

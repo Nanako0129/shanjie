@@ -1,5 +1,5 @@
 """kn-smoothing 契約 §2.1／§2.2 的單元測試，加上 build_lm 重構後輸出位元組不變的金標準。用法：python3 -B -m unittest tools/test_kn_cont.py
-玩具語料沿用 test_build_lm（手算見各測試）。異體類的資訊不在側檔裡：lm.py 由呼叫端傳 kn_classes（和 lm_eval 一樣用 build_lm.variant_classes 算）。"""
+玩具語料沿用 test_build_lm（手算見各測試）。SJKN0002 的檔頭有 β 與 ΣN′（kn_cont.py 用 lm.kn_total 算）；呼叫端另外傳 kn_classes（和 lm_eval 一樣用 build_lm.variant_classes 算）時，lm.py 重算 ΣN′ 和檔頭比對。"""
 import hashlib
 import math
 import os
@@ -124,6 +124,8 @@ class KnCont(unittest.TestCase):
                "magic": b"SJKN0003" + side[8:],
                "header total": put(56, "<Q", 8),
                "zero total": put(56, "<Q", 0),
+               "total below max N'": put(56, "<Q", 1),
+               "total above sum N'": put(56, "<Q", 10),
                "header beta > 1": put(48, "<d", 1.5),
                "header beta < 0": put(48, "<d", -0.1),
                "header beta nan": put(48, "<d", float("nan"))}
