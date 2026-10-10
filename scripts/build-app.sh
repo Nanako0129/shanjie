@@ -88,7 +88,9 @@ packs/acg-add.tsv: the optional anime and game word pack, built from Chinese Wik
   Attribution: Wikipedia contributors.
 demote.tsv: written for this project; no third-party data.
 bigram.sjlm: word counts from Wikipedia articles, Mozilla Common Voice
-  sentences (CC0), Tatoeba sentences (CC BY 2.0 FR) and synthetic sentences.
+  sentences (CC0), Tatoeba sentences (CC BY 2.0 FR) and synthetic sentences;
+  the anime and game pack words (Chinese Wikipedia, and Wikidata, CC0) are
+  also counted as words.
   Attribution: Wikipedia contributors, Tatoeba contributors.
 classes.sjc: word classes and class transition probabilities computed from
   the same counts as bigram.sjlm; same sources and attribution.
