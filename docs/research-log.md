@@ -2523,3 +2523,28 @@ PR #90 的審查意見逐項處理。
 - **PR #101 的 /code-review**（15 項）處置：
   - 修：發版說明的「一般打字不變」改成照實寫；契約的標題、狀態、§2.2「build_lm.py 不改」加更正；`count.bat` 與 README 改成實際流程（計數詞表、`--keep-from`）並填輸入雜湊；`cluster.py` 擋 `--keep-from` 等於輸出資料夾、舊分群沒有類別的詞不再暫時貼進類別（188 重跑輸出仍是 `af637997…`，逐位元組相同）；`--extra-lexicon` 只收 `--expected`、同一個檔給兩次只讀一次；新測試（含 `count_lexicon.py` 的）進 `make test` 與 CI；方法論補一節；詞包 (c) 規則的待辦寫進契約 §9 與 PLAN。
   - 延後：在計數源頭保證二元組兩端都有單詞（會改變計數，要重建模型）；`build_counts.py` 一個到不了的分支、測試與 `read_tsv` 的重複、`compare_counts.py` 的記憶體；§8、§9 沒有另送 plan-verifier（契約 §6 記了）。
+
+
+## 2026-10-10：model-v5／classes-v3 的引用與 golden 重產（PR 2，分支 `feat/model-v5-refs`）
+
+契約 `docs/contracts/model-v5.md` §2.5 的 PR 2。引用從 `model-v4`／`classes-v2` 改成 `model-v5`／`classes-v3`（雜湊檔、CI、`release.yml`、`build-app.sh`、`cli/tests/golden.rs`、各測試的缺檔訊息、`Support.swift`、README、CONTRIBUTING、`docs/data-files.md`、`docs/verification.md`、`LICENSES/data.md`、`docs/PLAN.md` 的模型檔那一條）。`UNSEEN_OVERLAY_PENALTY` 維持 1.0，沒有動。Release `model-v5`、`classes-v3` 還沒建，雜湊與大小取自 188 產出的最終檔（`f81a021e…`、`75a5efb3…`）。〔更新：兩個 Release 在 PR #101 合併後建好（使用者同意，不標 Latest），main 下載回來核對，雜湊與大小都相符。〕
+
+- **哪些 golden 變了**：全部用各自的產生者在新模型上重產（`lm_eval.py` 的指令見 `docs/PLAN.md` S2c 與 `cli/tests/golden.rs` 的註解，`sp-predict.txt` 用 `experiments/sp/golden_predict.py`），再確認 Rust 逐位元組相同（`cargo test --release -p cli --test golden`，19 項通過）。
+
+| golden | 變動行數 | 原因 |
+|---|---|---|
+| `s2-lm.txt` | 0／4 | 每列第一名都沒變（契約 §3.1），`top1_sha256` 同 |
+| `s2-lm-dev302-top1.tsv` | 0／303 | 同上 |
+| `s2-lm-dev302-{chat,formal}.rowstats` | 0／302、0／302 | 同上 |
+| `s2r-probe-top1.tsv` | 0／84 | 同上（探針聊天 63） |
+| `s2h-lm-context.txt` | 0／6 | 同上 |
+| `sw-probe.txt` | 88／96 | 8 條摘要行不變；88 條「第一名的分數」變了，字串與名次都沒變，分數差最大 0.0057 |
+| `sp-predict.txt` | 18,590／23,778（候選行 20,837 行裡的 18,590 行；查詢行 2,938 條與標頭 3 行不變） | 見下 |
+
+  - `sp-predict.txt` 的變動全是分數：模型的總數 N（比 model-v4 多 0.4%）與詞類表都換了，每個詞的分數都漂一點（原因是推論，沒有逐項拆開量；同一個詞的差在 −0.025 到 +0.036 之間，變大 6,382 筆、變小 12,206 筆）。2,262 條查詢有至少一行分數變了；33 條的候選列不同：31 條是同樣 9 個詞換了順序（最多移 2 位，都是原本分數很接近的相鄰詞），另外 2 條是前 9 名換了一個詞（commit b5073ff 的說明把 33 寫成重排、2 另計，其實 33 已含這 2 條）（`要的／ㄋㄚˋ` 的「那麼多」換成「納」、`封存／ㄌㄜ˙` 的「了納」換成「了大空」，都在第 9 名的邊界）；後繼詞旗標一個都沒變。
+  - 用 `--no-classes` 的兩行摘要（`no_classes_flag_restores_the_pre_s2k_numbers`）不變：聊天 235、書面 240，雜湊同。不依賴模型的 golden（`unigram.txt`、`s1-*`、`s2r-probe-unigram.txt`、`sbench-unigram-typing76.txt`）沒碰。
+  - 依賴模型、寫死字串或分數的測試（`engine_lm`、`engine_demote`、`engine_learn`、`engine_predict`、`engine_pack`）在新模型上都沒改就通過。
+- **詞包關閉時，在模型詞彙裡、不在詞庫裡的詞包詞會不會出現**（任務要求的核對）：不會。解碼的格子與預測的索引都只從詞庫（加上開啟的詞包）取詞，模型只供分數：解碼的詞來自 `CappedLexicon` 的詞庫條目，預測的候選來自 `Index::new(&capped, &lm)` 的詞庫條目（`core/src/predict.rs` 的 `predict` 掃 `idx.ents`），後繼詞只用來決定排在第一層還是第二層。
+  - 實測（`shanjie-eval`，聊天設定）：「佩德羅」在模型詞彙裡（計數 1,034，是「主席」的後繼詞），不在 `mcbpmf-data.txt` 與 `overlay-add.tsv`，只在詞包。`--predict` 前文「主席」、輸入 ㄆㄟˋ ㄉㄜˊ ㄌㄨㄛˊ：詞包關閉時 0 個候選，開啟時第一名是「佩德羅」（後繼詞旗標 1）；只輸入 ㄆㄟˋ 時，關閉的前 9 名沒有它，開啟的有。
+  - 解碼「佩德羅」的讀音：兩邊第一名的字串都是「佩德羅」，但關閉時是單字拼出來的（分數 −9.943），開啟時是詞包詞（分數 −6.101），表示關閉時模型裡「佩德羅」這個詞的分數沒被用到。
+- **PR #102 的 /code-review**（11 項，都是文件與可維護性）：修了 `docs/data-files.md`（下一版改成 model-v6／classes-v4、重建配方指向 model-v5 契約、換版要改的地方列完整）、PLAN 的 S2k 釘選說明、App 內附署名文字加上詞包詞的來源、ci.yml 雜湊來源的註解、上面兩處數字與 Release 狀態。延後：測試的缺檔訊息還叫人用 `build_classes.py` 自己建詞類表（classes-v3 要 188 上的分群資料才建得出同一份）、Release tag 寫死在約 20 處（要抽成共用的測試 helper 或單一設定檔）、`sp-predict.txt` 檔頭只說依賴模型（也依賴詞類表；改檔頭會動到 golden）。
