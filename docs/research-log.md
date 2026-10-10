@@ -2731,7 +2731,7 @@ PR #90 的審查意見逐項處理。
 
 ## 2026-10-10 kn-core 實作（核心讀 Kneser–Ney 側檔，預設關）
 
-- 格式 `SJKN0002`：檔頭多 β（f64）與 ΣN′（u64），N 陣列從位元組 64 開始。ΣN′ 由 `tools/kn_cont.py` 用 `lm.kn_total` 加 `build_lm.variant_classes` 算好寫入，Rust 只讀檔頭，作用在 `core/src/lm.rs` 的 `prob_c`（所有詞項的唯一入口）：id >= 2 的詞 `pb = β·N′/ΣN′ + (1−β)·pb`。`Lm::load` 在模型旁邊有 `kn.sjkn` 時載入，核對 magic、V、模型雜湊、長度、β、ΣN′，不符就 `LmError::Format`；CLI `--no-kn` 關閉；摘要行加 `+kn:<sha8>:θ<θ>:β<β>`。
+- 格式 `SJKN0002`：檔頭多 β（f64）與 ΣN′（u64），N 陣列從位元組 64 開始。ΣN′ 由 `tools/kn_cont.py` 用 `lm.kn_total` 加 `build_lm.variant_classes` 算好寫入，Rust 只讀檔頭，作用在 `core/src/lm.rs` 的 `prob_c`（所有詞項的唯一入口）：id >= 2 的詞 `pb = β·N′/ΣN′ + (1−β)·pb`。`Lm::load` 在模型旁邊有 `kn.sjkn` 時載入，核對 magic、V、模型雜湊、長度、β、ΣN′，不符就 `LmError::KnSide`〔更正，2026-10-11：原寫 `LmError::Format`，程式碼（`core/src/lm.rs`）用的是 `KnSide`〕；CLI `--no-kn` 關閉；摘要行加 `+kn:<sha8>:θ<θ>:β<β>`。
 - 上游檢查：`lm.py` 讀 `SJKN0002` 時若呼叫端給 `kn_classes`，用 `kn_total` 重算 ΣN′ 和檔頭比對；`lm_eval.py` 每次都傳。用玩具側檔配真詞庫的異體類跑 `lm_eval.py`，確實因為檔頭的 ΣN′ 不符而 `ValueError`，也就是這個檢查有在作用。
 - 玩具模型的跨語言比對：`tools/gen_kn_tiny.py` 產生模型、詞類表、兩個側檔（β=1、0.75）與 Python 的解碼輸出，`core/tests/kn_tiny.rs` 逐位元組比對（無側檔、β=1、β=0.75，聊天與書面），入庫的檔案由 `tools/test_kn_cont.py` 檢查等於現在的輸出。
 - 突變：拿掉 KN 那一行（`if false && w >= 2`）、拿掉 `w >= 2` 的條件，`kn_tiny` 都有測試失敗（前者三項，後者句尾那項與解碼比對）。真模型的跨語言比對與延遲（契約 §3 第 5、6 項）由 main 跑，尚未做。
@@ -2804,3 +2804,32 @@ PR #90 的審查意見逐項處理。
 - **其他選項**：Accelerate（`cblas_sgemm` 走 AMX，從 Rust 只要 `extern "C"` 與連結 framework，沙盒可用、沒有暖機與時脈問題）；BNNSGraph（macOS 15 以上，吃 Core ML 編好的模型）；Core ML／ANE（fp16，第一次載入要準備、快取綁路徑與系統版本）；candle 的 Metal 後端有未修的記憶體洩漏（#2271）；ggml 的 int8 在 136 列這種批次省記憶體不省時間；ONNX Runtime 加上 CoreML 會切圖。
 - **排序**（研究 agent 的建議，main 同意）：(1) Rust＋Accelerate fp32，風險最低，其他選項都要贏過它；(2) MLX GPU（mlx-c、fp16、`mx.compile`、固定形狀），只有 XL 可能需要；(3) Core ML fp16。決定要看「打字節奏」的 p95（每次呼叫間隔 150 ms），不是連續跑的數字。MLX 要先裝 Python 套件才能量，安裝前先問使用者。
 
+## 2026-10-11：語意 S7b 比 M 更大的字元模型（L、XL）與 int8（契約 `docs/contracts/s7b-larger-lm.md`，分支 `research/s7b-larger`）
+
+使用者 2026-10-11：「我希望寧願品質允許大一點的模型開始測吧」、「已經訓練好的可以先看看 int8 效果有沒有需要 FP32」。程式改動在 0c50772（`torch_model.CONFIGS` 加 L、XL；錯字回報固定前 66 列並核對雜湊；`int8check.py`）。
+
+- **M 的重現關卡**（Mac；discordtune 候選用釘住的 model-v5＋classes-v3 重新產生一次；S7a 的 `tinylm-M.npz` `32308122…`；凍結的 α 0.7、τ 2，不重選）：聊天 n 4,958、top1 4,209 → 4,276；書面 4,143 → 4,223。和 S7a 記的完全相同，通過。公開集合的候選檔雜湊也和 S7a 相同（cvtune `8044ce76`／`7e752103` 等，見上一節）。
+- **M 的 int8**（`int8check.py`：`latency.quantize_int8` 的權重每列對稱 int8、float32 縮放，還原成 float32 後用同一個 numpy 前向打分；α、τ 用 M 的凍結值；int8 複本 SHA-256 前 8 碼 `b84376c3`）：**結論「int8 夠用」**（§2.3 兩條都成立）。
+  - int8 對 n-gram 的 §4 全部通過：discordtune 聊天 4,209 → 4,275（+66 列、+1.33 個百分點），精確 McNemar p = 0.0010，Δtop1 95% 區間 [28, 104]，ΔCER −0.23 個百分點；其他集合兩種設定都沒有「淨值為負而且 p < 0.05」的格。
+  - int8 對 fp32（fp32 為基準）12 格都沒有「淨值為負而且 p < 0.05」。每格的改對／改壞都在 10 列以內；最差的是 dev302 書面 0／2（p = 0.50）與 cvtune 書面 2／4（p = 0.69）。discordtune 聊天 9／10（p = 1.0），書面 10／5（p = 0.30）。
+  - 這量的只是權重 int8；Rust 版若把活化值也量化，要在核心片再量（契約 §2.3）。
+
+| 集合 | n | top1 基準 | top1 新 | 改對 | 改壞 | p | CER 基準 | CER 新 | Δtop1 95%（列） | ΔCER 95%（百分點） |
+|---|---|---|---|---|---|---|---|---|---|---|
+| M8 vs M chat cvtune | 3791 | 3504 | 3504 | 4 | 4 | 1.0000 | 1.20% | 1.21% | [-6, 6] | [-0.02, 0.04] |
+| M8 vs M chat wikitune | 2827 | 2248 | 2248 | 7 | 7 | 1.0000 | 3.36% | 3.38% | [-7, 7] | [-0.02, 0.07] |
+| M8 vs M chat dev302 | 302 | 277 | 276 | 0 | 1 | 1.0000 | 1.48% | 1.56% | [-3, 0] | [0.00, 0.24] |
+| M8 vs M chat typing76 | 76 | 68 | 68 | 0 | 0 | 1.0000 | 1.32% | 1.32% | [0, 0] | [0.00, 0.00] |
+| M8 vs M chat user-reported | 66 | 31 | 32 | 1 | 0 | 1.0000 | 9.19% | 8.77% | [0, 3] | [-1.39, 0.00] |
+| M8 vs M chat discordtune | 4958 | 4276 | 4275 | 9 | 10 | 1.0000 | 2.24% | 2.24% | [-10, 8] | [-0.03, 0.03] |
+| M8 vs M formal cvtune | 3791 | 3499 | 3497 | 2 | 4 | 0.6875 | 1.24% | 1.24% | [-7, 3] | [-0.02, 0.03] |
+| M8 vs M formal wikitune | 2827 | 2248 | 2250 | 5 | 3 | 0.7266 | 3.32% | 3.30% | [-3, 8] | [-0.06, 0.01] |
+| M8 vs M formal dev302 | 302 | 275 | 273 | 0 | 2 | 0.5000 | 1.60% | 1.72% | [-5, 0] | [0.00, 0.31] |
+| M8 vs M formal typing76 | 76 | 69 | 69 | 0 | 0 | 1.0000 | 1.32% | 1.32% | [0, 0] | [0.00, 0.00] |
+| M8 vs M formal user-reported | 66 | 30 | 30 | 0 | 0 | 1.0000 | 9.81% | 9.81% | [0, 0] | [0.00, 0.00] |
+| M8 vs M formal discordtune | 4958 | 4223 | 4228 | 10 | 5 | 0.3018 | 2.42% | 2.41% | [-2, 13] | [-0.04, 0.02] |
+
+- **Rust＋Accelerate 的延遲**（上一節排序第一的做法；main 在 Mac 用 session 暫存區的基準程式量，**不在 repo**、權重是隨機值、形狀和 M、L、XL 相同：pre-LN、權重共用的嵌入、GELU tanh、因果注意力、每個位置對整個字表做 log-softmax；8 個候選 × 18（BOS＋17 字）一批、float32、`cblas_sgemm`；Apple M5，使用者桌面照常在用，負載約 5）。「打字節奏」＝每次呼叫前睡 150 ms，200 次：
+  - GELU 與 log-softmax 用純量的 `tanh`／`exp`：M p50 22.7、p95 43.3 ms；L 42.3、64.1；XL 80.7、113.2。
+  - 改用 Accelerate 的 vForce（`vvtanhf`、`vvexpf`；LL 總和和純量版逐位相同）：M p50 13.6、p95 35.0 ms；L 25.2、49.2；XL 53.2、84.8。連續跑的 p95：M 20.0、L 52.2、XL 119.9 ms。
+  - 讀法（推論）：三個大小的 p95 都低於 150 ms；比矩陣乘法的下限（M 5.94 ms）慢的部分是逐元素運算、注意力的純量迴圈與每次配置記憶體。p95 約為 p50 的兩倍，可能是閒置後 CPU 降頻或排到效能核心以外，核心片要用輸入法程序實測（QoS 設定是那時的變數）。MLX 沒有量（要先裝 Python 套件，需要使用者同意）。
