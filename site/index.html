@@ -29,7 +29,7 @@
 <style>
   :root {
     --paper: #F6F1E7; --paper-2: #EFE8DA; --ink: #1F1D1A; --ink-2: #5A544C; --line: #D9CFBD;
-    --seal: #B83A2E; --seal-ink: #F6F1E7; --ok: #3F6B4F; --wip: #9A6A1E;
+    --seal: #B83A2E; --seal-ink: #F6F1E7; --ok: #3F6B4F; --wip: #8A5C14;
     --serif: "Noto Serif TC", "Songti TC", "PMingLiU", serif;
     --sans: "Noto Sans TC", -apple-system, "PingFang TC", "Heiti TC", sans-serif;
   }
@@ -62,6 +62,11 @@
   .tagline { font: 600 clamp(20px, 4.2vw, 26px)/1.5 var(--serif); margin: 10px 0 0; }
   .lede { color: var(--ink-2); margin: 20px 0 0; grid-column: 1 / -1; max-width: 36em; }
   .badge { display: inline-block; margin-top: 18px; font-size: 14px; padding: 2px 12px; border: 1px solid var(--line); border-radius: 999px; color: var(--ink-2); }
+  a.badge { text-decoration: none; }
+  .install pre { margin: 8px 0 0; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; overflow-x: auto;
+                 font: 14px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .install code { font: 14px ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap: anywhere; }
+  .install pre code { overflow-wrap: normal; }
   @media (max-width: 520px) { .hero { grid-template-columns: 1fr; gap: 20px; } .seal { width: 84px; height: 84px; } .seal span { font-size: 48px; } }
 
   /* 錯字例子 */
@@ -74,12 +79,17 @@
 
   /* 三層 */
   .layers { display: grid; gap: 12px; counter-reset: layer; }
-  .layer { display: grid; grid-template-columns: 44px 1fr; gap: 14px; padding: 18px; border: 1px solid var(--line); border-radius: 12px; }
+  .layer { display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 14px; padding: 18px; border: 1px solid var(--line); border-radius: 12px; }
   .layer::before { counter-increment: layer; content: counter(layer); font: 900 22px/44px var(--serif); text-align: center;
                    width: 44px; height: 44px; border-radius: 10px; background: var(--paper-2); border: 1px solid var(--line); }
   .layer h3 { margin: 0; font-size: 19px; }
   .layer p { margin: 4px 0 0; color: var(--ink-2); font-size: 16px; }
   .layer .when { font-size: 14px; color: var(--seal); }
+  /* 擇一的選項：不是依序的步驟，不顯示編號 */
+  .layers.alt .layer { grid-template-columns: minmax(0, 1fr); }
+  .layers.alt .layer::before { display: none; }
+  .note { margin: 12px 0 0; color: var(--ink-2); font-size: 15px; }
+  .sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 
   /* 數字 */
   .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
@@ -88,19 +98,49 @@
   .stat span { font-size: 15px; color: var(--ink-2); }
 
 
-  /* 路線圖 */
-  .road { list-style: none; margin: 0; padding: 0; }
-  .road li { position: relative; padding: 0 0 26px 34px; }
-  .road li::before { content: ""; position: absolute; left: 8px; top: 12px; bottom: -12px; width: 2px; background: var(--line); }
-  .road li:last-child::before { display: none; }
-  .road .dot { position: absolute; left: 0; top: 6px; width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--line); background: var(--paper); }
-  .road .done .dot { background: var(--seal); border-color: var(--seal); }
-  .road .wip .dot { border-color: var(--seal); background: var(--paper); box-shadow: inset 0 0 0 4px var(--paper), inset 0 0 0 9px var(--seal); }
-  .road h3 { margin: 0; font-size: 19px; display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; }
-  .road .tag { font: 500 13px/1.6 var(--sans); padding: 0 9px; border-radius: 999px; border: 1px solid var(--line); color: var(--ink-2); }
-  .road .done .tag { color: var(--ok); border-color: currentColor; }
-  .road .wip .tag { color: var(--wip); border-color: currentColor; }
-  .road p { margin: 4px 0 0; color: var(--ink-2); font-size: 16px; }
+  /* 路線圖：依版本分階段，研究插在它進行的階段裡 */
+  :root { --dot: 16px; --rail: 2px; --item-indent: 32px; }  /* 圓點與縱線：和內文 16px 同尺度，縮排留給圓點加間距 */
+  .stages { display: grid; gap: 12px; }
+  .stage { border: 1px solid var(--line); border-radius: 12px; padding: 0; }
+  .stage > summary { list-style: none; display: grid; grid-template-columns: auto 1fr auto auto; gap: 2px 14px; align-items: center;
+                     padding: 16px 18px; border-radius: 12px; cursor: pointer; }
+  .stage > summary::-webkit-details-marker { display: none; }
+  .stage[open] > summary { border-bottom: 1px solid var(--line); border-radius: 12px 12px 0 0; background: var(--paper-2); }
+  .stage .ver { font: 900 22px/1.3 var(--serif); min-width: 3.2em; }
+  .stage .st-title { font: 900 19px/1.4 var(--serif); }
+  .stage .meta { grid-column: 2 / -1; font-size: 14px; color: var(--ink-2); }
+  /* 展開提示：小箭頭佔自己的一欄，不和狀態標籤搶位置（手機上曾疊在一起，2026-10-08 使用者截圖） */
+  .stage > summary::after { content: ""; grid-column: 4; grid-row: 1; width: 8px; height: 8px; margin: 0 4px 4px;
+                            border-right: 2px solid var(--ink-2); border-bottom: 2px solid var(--ink-2); transform: rotate(45deg); }
+  .stage[open] > summary::after { transform: rotate(-135deg); margin: 4px 4px 0; }
+  .tag { font: 500 13px/1.6 var(--sans); padding: 0 9px; border-radius: 999px; border: 1px solid var(--line); color: var(--ink-2); white-space: nowrap; }
+  .tag.done { color: var(--ok); border-color: currentColor; }
+  .tag.wip { color: var(--wip); border-color: currentColor; }
+  .stage > summary .tag { grid-column: 3; grid-row: 1; justify-self: end; }
+  .items { list-style: none; margin: 0; padding: 18px 18px 2px; }
+  .items li { position: relative; padding: 0 0 22px var(--item-indent); }
+  .items li::before { content: ""; position: absolute; left: calc(var(--dot) / 2 - var(--rail) / 2); top: 12px; bottom: -10px; width: var(--rail); background: var(--line); }
+  .items li:last-child::before { display: none; }
+  .items .mark { position: absolute; left: 0; top: 6px; width: var(--dot); height: var(--dot); border-radius: 50%; border: 2px solid var(--line); background: var(--paper); }
+  .items .done .mark { background: var(--seal); border-color: var(--seal); }
+  .items .wip .mark { border-color: var(--seal); box-shadow: inset 0 0 0 3px var(--paper), inset 0 0 0 8px var(--seal); }
+  .items .research .mark { border-radius: 3px; transform: rotate(45deg) scale(.82); border-color: var(--ink-2); }
+  .items .research.done .mark { background: var(--ink-2); border-color: var(--ink-2); }
+  .items h3 { margin: 0; font-size: 17px; display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: baseline; }
+  .items .kind { font: 500 12px/1.6 var(--sans); padding: 0 7px; border-radius: 4px; background: var(--paper-2); border: 1px solid var(--line); color: var(--ink-2); }
+  .items p { margin: 4px 0 0; color: var(--ink-2); font-size: 15px; }
+  .items p b { color: var(--ink); font-weight: 500; }
+  .legend { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 14px; color: var(--ink-2); margin: 0 0 16px; padding: 0; list-style: none; }
+  .legend li { display: flex; align-items: center; gap: 6px; }
+  .legend i { display: inline-block; width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--line); background: var(--paper); }
+  .legend .l-done { background: var(--seal); border-color: var(--seal); }
+  .legend .l-wip { border-color: var(--seal); box-shadow: inset 0 0 0 2px var(--paper), inset 0 0 0 6px var(--seal); }
+  .legend .l-res { border-radius: 2px; transform: rotate(45deg) scale(.82); border-color: var(--ink-2); }
+  .legend .l-res-done { background: var(--ink-2); }
+  .legend .l-res-wip { box-shadow: inset 0 0 0 2px var(--paper), inset 0 0 0 6px var(--seal); }
+  @media (max-width: 520px) { .stage > summary { grid-template-columns: 1fr auto auto; } .stage .ver { grid-column: 1; grid-row: 1; }
+    .stage .st-title { grid-column: 1 / -1; grid-row: 2; } .stage .meta { grid-column: 1 / -1; grid-row: 3; }
+    .stage > summary .tag { grid-column: 2; grid-row: 1; } .stage > summary::after { grid-column: 3; grid-row: 1; } }
 
   /* 詳細 */
   details { border-top: 1px solid var(--line); padding: 12px 0; }
@@ -121,7 +161,7 @@
     <h1 class="name">善解</h1>
     <p class="tagline">善解，所以選對。</p>
   </div>
-  <p class="lede">一個開源的 macOS 注音輸入法，專心把同音字選對：看懂你前面寫了什麼，選出你真正要打的那個字。<br><span class="badge">開發中・尚未開放下載</span></p>
+  <p class="lede">一個開源的 macOS 注音輸入法，專心把同音字選對：看懂你前面寫了什麼，選出你真正要打的那個字。<br><a class="badge" href="#install">開放下載</a></p>
 </header>
 
 <hr class="rule">
@@ -144,46 +184,154 @@
     <div class="layer"><div><h3>本機重排</h3><p>小型語言模型看你前面寫的內容，從候選中挑出最合理的一句；在背景執行，不拖慢打字。</p><div class="when">停頓或送出前・本機</div></div></div>
     <div class="layer"><div><h3>雲端校正（選用）</h3><p>打完按一下快速鍵，請雲端模型再看一次。預設關閉；雲端只能回傳候選的編號，不能自己寫字。</p><div class="when">你按下快速鍵時・雲端</div></div></div>
   </div>
+  <p class="note">目前只有第 1 層在輸入法裡；第 2、3 層還沒做出來，排在路線圖的「未排定」；本機重排的研究結論是暫不進輸入法。</p>
 </section>
 
 <section>
   <h2>目前的實測</h2>
-  <p class="sub">所有數字都來自專案的評測集，句子由專案自寫並以 CC0 釋出。</p>
+  <p class="sub">所有數字都來自專案的評測集；各評測集的來源與授權見「開源與授權」。</p>
   <div class="stats">
     <div class="stat"><b>99.6%</b><span>正解出現在前 64 名候選的比例（保留集 227 句；開發集 302 句是 99.3%）</span></div>
     <div class="stat"><b>92.7%</b><span>目前最準的判斷器從候選中挑對整句的比例（開發集，雲端）</span></div>
-    <div class="stat"><b>77.1%</b><span>輸入法實際送出整句的正確率（保留集 227 句，聊天設定）</span></div>
-    <div class="stat"><b>1.8 ms</b><span>每個按鍵的處理時間，含語言模型與 5 萬筆選字記憶（p95，M5 Mac）</span></div>
+    <div class="stat"><b>79.3%</b><span>輸入法實際送出整句的正確率（保留集 227 句，聊天設定，model-v4 時量的；model-v5 在保留集每一句都相同）</span></div>
+    <div class="stat"><b>2.5 ms</b><span>每個按鍵的處理時間（p95）：76 句打字測驗共 2,483 個按鍵，含語言模型、即時預測、教過的選字與 5 萬筆記錄（M5 Mac，低負載，兩次量測 2.2–2.5 ms；model-v4、沒有載入動漫詞包，還沒有用 v0.4.0 的設定重量）</span></div>
   </div>
   <details>
     <summary>這些數字怎麼量的</summary>
-    <p>評測分成開發集與保留集。開發集用來調整；保留集由另一個流程撰寫、開發過程中不看內容，只在每個階段結束時量一次，用來確認進步不是因為「背了題目」。前 64 名含正解的比例用寬鬆對照：「她／他」「臺／台」這類寫法視為相同；只有詞庫、還沒有語言模型時，保留集是 97.8%（完全相符）。</p>
+    <p>評測分成開發集與保留集。開發集用來調整；保留集由另一個流程撰寫、開發過程中不看內容，只在每個階段結束時量一次，用來確認進步不是因為「背了題目」。前 64 名含正解的比例用寬鬆對照：「她／他」「臺／台」這類寫法視為相同；保留集的 99.6% 是用 model-v2 量的，之後沒有重新量；只有詞庫、還沒有語言模型時，保留集是 97.8%（完全相符）。</p>
     <p>判斷器比較了本機模型與多家雲端服務的三十多組設定；所有判斷器都卡在同一個上限：正解根本不在候選裡的句子，誰也救不回來。所以目前的重點是先把正解放進候選。</p>
-    <p>輸入法實際送出整句的正確率，保留集上聊天設定 77.1%、書面設定 79.7%；這是目前只用詞庫與語言模型、還沒有語意重排的成績。</p>
+    <p>輸入法實際送出整句的正確率，保留集上聊天設定 79.3%、書面設定 81.1%，是 model-v4 加詞類回退的數字；v0.4.0 的 model-v5 在保留集上兩種設定每一句都和它相同（v0.4.0 發佈後的 2026-10-10 量的）。這是只用詞庫與語言模型、還沒有語意重排的成績。</p>
+    <p>每個按鍵的處理時間是 76 句打字測驗共 2,483 個按鍵的 p95，2026-10-10 在 M5 Mac、低負載下量了兩次：教過選字並放 5 萬筆記錄是 2.2–2.5 毫秒，記憶是空的是 2.3–2.6 毫秒。這是在可省略韻母那一片（PR #98）量的，用的是 model-v4，也沒有載入動漫詞包（計時測試只在設定 ACG_PACK 時才載入詞包）；v0.4.0 的設定（model-v5、詞包開）還沒有重新量。</p>
+  </details>
+</section>
+
+<section id="install" class="install">
+  <h2>安裝</h2>
+  <p class="sub">需要 macOS 26（Tahoe）以上、Apple 晶片。只裝在你的帳號，不需要管理員密碼。兩種方式擇一。</p>
+  <div class="layers alt">
+    <div class="layer"><div><h3>安裝程式</h3><p>到 <a href="https://github.com/Nanako0129/shanjie/releases/latest">GitHub Releases</a> 下載 <code>shanjie-installer</code> 開頭的 zip，解壓縮後打開「安裝善解輸入法」，照四個步驟：歡迎、安裝、到系統設定加入、試打。</p><div class="when">推薦</div></div></div>
+    <div class="layer"><div><h3>Homebrew</h3>
+      <pre><code>brew install --cask nanako0129/tap/shanjie
+"$HOME/Library/Input Methods/善解輸入法.app/Contents/MacOS/shanjie" install</code></pre>
+      <p>第二行在系統還不認得善解時註冊；結束碼是 3 時，到「系統設定 → 鍵盤 → 輸入方式」按「+」，選「繁體中文」裡的「善解輸入法」，按「加入」。升級用 <code>brew upgrade --cask nanako0129/tap/shanjie</code>。</p></div></div>
+  </div>
+  <p class="note">兩種方式不要混用。從 Homebrew 換成安裝程式，先執行 <code>brew uninstall --cask nanako0129/tap/shanjie</code>；從安裝程式換成 Homebrew，先刪掉 <code>~/Library/Input Methods/善解輸入法.app</code>。</p>
+  <details>
+    <summary>已經裝過舊版</summary>
+    <p>照當初安裝的方式升級；選字記憶和設定都放在 App 外面，升級不會動到。升級後輸入法選單找不到善解時，照上面的系統設定步驟加回來。Caps Lock 切換不了任何輸入法時，到「系統設定 → 輔助使用 → 鍵盤」打開「慢速按鍵」，按一次 Caps Lock，再關掉。</p>
   </details>
 </section>
 
 <section>
   <h2>路線圖</h2>
-  <p class="sub">依序進行，每一段都有可量測的驗收條件，由獨立的檢查流程確認後才算完成。</p>
-  <ol class="road">
-    <li class="done"><span class="dot"></span><h3>評測基準 <span class="tag">完成</span></h3><p>Rust 核心與研究原型逐字一致，之後每一步都能和基準對照。</p></li>
-    <li class="done"><span class="dot"></span><h3>評測資料 <span class="tag">完成</span></h3><p>口語開發集與獨立撰寫的保留集，含同音陷阱與詞庫沒收的日常用語。</p></li>
-    <li class="done"><span class="dot"></span><h3>語意選字可行性 <span class="tag">完成</span></h3><p>實測本機與雲端模型的準確度與延遲，找出真正的瓶頸在候選，而不在判斷。</p></li>
-    <li class="done"><span class="dot"></span><h3>詞庫 v1 <span class="tag">完成</span></h3><p>從維基標題與維基詞典補進約 34 萬個詞，並可從鎖定版本的來源完整重建。</p></li>
-    <li class="done"><span class="dot"></span><h3>精簡詞庫格式 <span class="tag">完成</span></h3><p>重寫詞庫在記憶體中的結構：輸出逐字不變，記憶體從約 390 MB 降到約 88 MB。</p></li>
-    <li class="done"><span class="dot"></span><h3>語言模型 <span class="tag">完成</span></h3><p>用上下文排序候選，分聊天與書面兩種設定；每一鍵的處理時間 p95 不到 2 毫秒。</p></li>
-    <li class="done"><span class="dot"></span><h3>macOS 輸入法本體 <span class="tag">完成</span></h3><p>標準注音鍵盤、候選窗，中文模式下 Ctrl+\ 輸出「、」。標點留在組字區，並有標點候選清單。</p></li>
-    <li class="done"><span class="dot"></span><h3>簽章與發佈流程 <span class="tag">完成</span></h3><p>Developer ID 簽章與 Apple 公證、安裝程式、Homebrew 的發佈流程已就緒；開放下載的時間另行公布。</p></li>
-    <li class="done"><span class="dot"></span><h3>標準讀音 <span class="tag">完成</span></h3><p>依教育部規範，「一」「不」打本調或變調都能打出整個詞（ㄅㄨˋ ㄕˋ 和 ㄅㄨˊ ㄕˋ 都是「不是」），「法國」的「法」用審定音 ㄈㄚˇ。</p></li>
-    <li class="done"><span class="dot"></span><h3>補充詞表讀音修正 <span class="tag">完成</span></h3><p>維基補充詞表裡「不」「和」「法」「一」大部分的錯誤讀音改成教育部讀音，含「一」「不」的詞也能用變調打出來；評測集合都沒有退步。</p></li>
-    <li class="done"><span class="dot"></span><h3>個人化學習 <span class="tag">完成・v0.2.0</span></h3><p>只從你在候選窗的改選、以及從預測列選過的詞學習，依前文分開記，不會一次改選就污染所有句子；單一個字只在前文完全相同時才套用。密碼欄與安全輸入時自動暫停；可以清除全部記憶，清除前會先確認。</p></li>
-    <li class="done"><span class="dot"></span><h3>玻璃候選窗 <span class="tag">完成・v0.2.0</span></h3><p>自己繪製的玻璃候選列，標點附上名稱，比照 Apple 原生注音。按 ↓ 往下疊出更多候選列，每列 9 個，原本第一列的候選展開後仍在第一列，不會像 Apple 那樣被擠到第二列。</p></li>
-    <li class="wip"><span class="dot"></span><h3>簡體殘留修正 <span class="tag">進行中・下一版</span></h3><p>維基語料轉換後留下的「最后」「由于」「哪里」，會讓輸入法打出簡體寫法。改成先逐句判斷是不是簡體句再轉換，並避免把「吃」轉成「喫」、把「著」寫成「着」這類台灣不用的寫法。殘留已經清掉；「十分鐘後到」這類時間後面接的字還會選錯，修好後再發佈。</p></li>
-    <li><span class="dot"></span><h3>台灣在地化語料 <span class="tag">規劃中・下一版</span></h3><p>改用維基百科自己的台灣正體轉換，連同條目裡編者標好的用字一起套用；並評估更多台灣在地的語料來源。</p></li>
-    <li class="wip"><span class="dot"></span><h3>本機重排 <span class="tag">實驗中・下一版</span></h3><p>把語意判斷接進輸入法，在本機執行。第一次實驗發現「從幾句候選裡挑一句」這種問法不可靠：換個順序答案就變。第二次改成讓模型替每個候選分別打分數：四個本機模型都沒過預先定好的門檻，最好的 Qwen3-1.7B（4-bit）略有進步但不顯著，每句 p95 510–640 毫秒也超過 300 毫秒的上限。下一步是擴大抽樣、縮短延遲，並試更大的模型。</p></li>
-    <li><span class="dot"></span><h3>一鍵校正、新手測驗 <span class="tag">規劃中</span></h3><p>打完一段可以請模型重看；第一次使用時用簡單測驗了解你的打字習慣。</p></li>
-  </ol>
+  <p class="sub">依版本分階段。每一項都有可量測的驗收條件，由獨立的檢查流程確認後才算完成；研究插在它進行的那個階段，寫明結論。日期是發佈日，用台灣時間。</p>
+  <ul class="legend" aria-label="圖例">
+    <li><i class="l-done"></i>完成</li><li><i class="l-wip"></i>進行中</li><li><i></i>規劃中</li><li><i class="l-res"></i>研究（規劃中）</li><li><i class="l-res l-res-wip"></i>研究進行中</li><li><i class="l-res l-res-done"></i>研究完成</li>
+  </ul>
+  <div class="stages">
+
+    <details class="stage">
+      <summary><span class="ver">v0.1</span><span class="st-title">輸入法本體</span><span class="tag done">完成</span>
+        <span class="meta">2026-10-04～10-05・v0.1.0～v0.1.2</span></summary>
+      <ul class="items">
+        <li class="done"><span class="mark"></span><span class="sr-only">完成：</span><h3>評測基準與評測資料</h3><p>Rust 核心與研究原型逐字一致；口語開發集與獨立撰寫的保留集，含同音陷阱與詞庫沒收的日常用語。</p></li>
+        <li class="research done"><span class="mark"></span><span class="sr-only">完成：</span><h3><span class="kind">研究</span>語意選字可行性</h3><p>實測本機與雲端模型的準確度與延遲。<b>結論：</b>瓶頸在候選，不在判斷，先把正解放進候選。</p></li>
+        <li class="done"><span class="mark"></span><span class="sr-only">完成：</span><h3>詞庫 v1 與精簡格式</h3><p>從維基標題與維基詞典補進約 34 萬個詞，可從鎖定版本的來源完整重建；記憶體從約 390 MB 降到約 88 MB，輸出逐字不變。</p></li>
+        <li class="done"><span class="mark"></span><span class="sr-only">完成：</span><h3>語言模型整句選字</h3><p>用上下文排序候選，聊天與書面兩種設定依前景 App 自動切換。</p></li>
+        <li class="done"><span class="mark"></span><span class="sr-only">完成：</span><h3>macOS 輸入法本體</h3><p>標準與倚天鍵盤、候選窗；標點留在組字區，並有標點候選清單。</p></li>
+        <li class="done"><span class="mark"></span><span class="sr-only">完成：</span><h3>標準讀音</h3><p>依教育部規範，「一」「不」打本調或變調都能打出整個詞，「法國」的「法」用審定音 ㄈㄚˇ；補充詞表的錯誤讀音一併修正。</p></li>
+        <li class="done"><span class="mark"></span><span class="sr-only">完成：</span><h3>簽章與發佈流程</h3><p>Developer ID 簽章與 Apple 公證、安裝程式、Homebrew 的發佈流程已就緒；Releases 與 Homebrew 從 v0.1.0 起就是公開的，網站從 v0.4.0 起放安裝說明。</p></li>
+      </ul>
+    </details>
+
+    <details class="stage">
+      <summary><span class="ver">v0.2</span><span class="st-title">選字記憶與候選窗</span><span class="tag done">完成</span>
+        <span class="meta">2026-10-05～10-07・v0.2.0～v0.2.1</span></summary>
+      <ul class="items">
+        <li class="done"><span class="mark"></span><span class="sr-only">完成：</span><h3>個人化學習</h3><p>只從你在候選窗的改選學習，依前文分開記，不會一次改選就污染所有句子；單一個字只在前文完全相同時才套用。密碼欄與安全輸入時自動暫停；可以清除全部記憶，清除前會先確認。</p></li>
+        <li class="done"><span class="mark"></span><span class="sr-only">完成：</span><h3>玻璃候選窗</h3><p>自己繪製的玻璃候選列，標點附上名稱。按 ↓ 往下疊出更多候選列，每列 9 個，原本第一列的候選展開後仍在第一列。</p></li>
+        <li class="done"><span class="mark"></span><span class="sr-only">完成：</span><h3>按鍵細節</h3><p>組字區是空的時候按聲調鍵打出聲調符號；音節還沒打完時，Backspace 逐個刪掉注音符號，和蘋果注音相同。</p></li>
+      </ul>
+    </details>
+
+    <details class="stage">
+      <summary><span class="ver">v0.3</span><span class="st-title">選字品質</span><span class="tag done">完成</span>
+        <span class="meta">2026-10-08・v0.3.0</span></summary>
+      <ul class="items">
+        <li class="done"><span class="mark"></span><span class="sr-only">完成：</span><h3>看前文選字</h3><p>讀取游標前已經送出的文字（按過 Enter、已經在文件裡的字），接著它選這一段的第一個詞；分好幾次送出的句子，選字仍接得上前面，不再每段都從頭猜。</p></li>
+        <li class="done"><span class="mark"></span><span class="sr-only">完成：</span><h3>台灣字形與簡體殘留</h3><p>語料與補充詞表裡的「最后」「由于」清掉；台灣常用的「床」「秘」「灶」不再被當成簡體字轉成異體字；同一個詞的異體寫法合併計數。</p></li>
+        <li class="done"><span class="mark"></span><span class="sr-only">完成：</span><h3>詞類回退</h3><p>兩個詞沒在語料裡一起出現過時，用「哪一類詞後面常接哪一類詞」補估計。保留集聊天設定多對 2 句，書面持平。</p></li>
+        <li class="done"><span class="mark"></span><span class="sr-only">完成：</span><h3>非標準讀音不擋路</h3><p>整句選字時，詞庫為了容錯收錄的非標準讀音不再擋住同音的一般詞（例如「搞完這波」）；選單可以關掉。</p></li>
+        <li class="done"><span class="mark"></span><span class="sr-only">完成：</span><h3>即時預測</h3><p>打下一個詞的第一個注音，就在候選窗列出接得上前文的詞；按 Tab 進入選取，不會自動替換你打的字。選過的詞會記住，選單可以關掉。</p></li>
+        <li class="done"><span class="mark"></span><span class="sr-only">完成：</span><h3>候選窗跟著 App 的深淺色</h3><p>App 用淺色或深色外觀時，候選窗跟著切換，不只看系統設定；候選列的高度與位置和蘋果注音並排量過，完全相同。</p></li>
+        <li class="done"><span class="mark"></span><span class="sr-only">完成：</span><h3>選字記憶只在前文對得上時優先</h3><p>改選過的詞只在前文相同、或前文最後一個字相同時優先，不再因為在別的句子改過就到處優先。</p></li>
+        <li class="research done"><span class="mark"></span><span class="sr-only">完成：</span><h3><span class="kind">研究</span>即時預測怎麼做</h3><p>在公開資料與一份私人的聊天調參集（只看統計數字）上比較幾種預測方式。<b>結論：</b>用「接在前文後面的詞」當候選、注音只用來篩選，做成上面的即時預測。</p></li>
+        <li class="research done"><span class="mark"></span><span class="sr-only">完成：</span><h3><span class="kind">研究</span>維基百科的台灣正體轉換</h3><p>改用維基百科自己的台灣正體轉換重建模型，和現行模型配對比較。<b>結論：</b>對打字沒有顯著幫助，還打錯了使用者回報的句子，不採用。</p></li>
+        <li class="research done"><span class="mark"></span><span class="sr-only">完成：</span><h3><span class="kind">研究</span>本機重排</h3><p>讓本機模型替每個候選打分數。四個本機模型都沒過預先定好的門檻，每句 p95 510～640 毫秒也超過 300 毫秒的上限。<b>結論：</b>暫不進輸入法。</p></li>
+        <li class="research done"><span class="mark"></span><span class="sr-only">完成：</span><h3><span class="kind">研究</span>評測統計</h3><p>從 2026-10-08 起，會改變選字結果的改動都用配對比較、精確檢定與信賴區間判斷有沒有進步，不靠感覺。</p></li>
+        <li class="research done"><span class="mark"></span><span class="sr-only">完成：</span><h3><span class="kind">研究</span>改選後其他字不動</h3><p>在候選窗改選一段後，讓旁邊已經顯示的詞維持原樣（比照蘋果注音）。修了四輪，最後一輪讓「改選後繼續打字」變差。<b>結論：</b>回報的例子（「版控」）根本上是詞庫缺詞，先做「從改選記住新詞組」，這項暫停、之後再評估。</p></li>
+      </ul>
+    </details>
+
+    <details class="stage" open>
+      <summary><span class="ver">v0.4</span><span class="st-title">安裝、設定與動漫詞</span><span class="tag done">完成</span>
+        <span class="meta">2026-10-10・v0.4.0</span></summary>
+      <ul class="items">
+        <li class="done"><span class="mark"></span><span class="sr-only">完成：</span><h3>新的安裝程式</h3><p>四個步驟：歡迎、安裝、到系統設定加入、試打，每一步用白話說明，裝好可以直接在裡面試打。</p></li>
+        <li class="done"><span class="mark"></span><span class="sr-only">完成：</span><h3>更新不弄壞 Caps Lock 切換</h3><p>已經裝過的善解再更新時，不再重新註冊輸入法。實測找到原因：更新後再註冊，會讓 Caps Lock 切換輸入法失效。</p></li>
+        <li class="done"><span class="mark"></span><span class="sr-only">完成：</span><h3>Homebrew 升級直接接手</h3><p><code>brew upgrade</code> 之後由新版接手，不必手動結束舊的程序。</p></li>
+        <li class="done"><span class="mark"></span><span class="sr-only">完成：</span><h3>Enter 送出未完成的注音</h3><p>只打了注音、還沒選字時按 Enter，照畫面上顯示的送出；Shift+Enter 送出後再換行，和蘋果注音實測相同。</p></li>
+        <li class="done"><span class="mark"></span><span class="sr-only">完成：</span><h3>即時預測往回找</h3><p>打到詞的中間也會預測，往回找到 5 個音節，例如「巴基斯」再按 ㄊ 就有「巴基斯坦」。</p></li>
+        <li class="done"><span class="mark"></span><span class="sr-only">完成：</span><h3>設定視窗</h3><p>選單的「善解設定…」打開一個視窗，選單裡的選項都在裡面，還可以調候選窗玻璃的深淺，下面即時預覽。</p></li>
+        <li class="done"><span class="mark"></span><span class="sr-only">完成：</span><h3>動漫與遊戲詞（第一片）</h3><p>從中文維基百科收錄約 1.5 萬個作品名與角色名，選單可以關掉。同音的名字由維護者逐一決定先後。</p></li>
+        <li class="done"><span class="mark"></span><span class="sr-only">完成：</span><h3>動漫與遊戲詞（第二片）</h3><p>加進 2020 年以後的作品與角色，共約 3 萬詞；選單下面顯示資料日期。</p></li>
+        <li class="done"><span class="mark"></span><span class="sr-only">完成：</span><h3>新的語言模型（model-v5）</h3><p>詞包裡的名字有了語料次數，開著詞包時作品名、角色名在評測裡多對幾句；開發集、打字測驗、錯字回報在聊天與書面兩種設定下每一句都和上一版相同；約 6,600 句的調參集（聊天、書面各量一次）合計 4 處變差、0 處變好；保留集兩種設定也每一句相同（v0.4.0 發佈後的 2026-10-10 量的）。語料裡很少出現的名字（例如「宿儺」）仍然打不出來，見「之後」的「語料很少出現的名字」。</p></li>
+        <li class="done"><span class="mark"></span><span class="sr-only">完成：</span><h3>候選窗直排</h3><p>設定視窗的「候選窗方向」可選直排，候選字和即時預測列都排成一欄；按鍵照蘋果注音的直排。預設仍是橫排。</p></li>
+        <li class="research done"><span class="mark"></span><span class="sr-only">完成：</span><h3><span class="kind">研究</span>詞包的名字為什麼打不出來</h3><p>逐一檢查詞包的每個詞。<b>結論：</b>輸掉的多半輸給常用單字的組合，原因是詞包詞沒有進到語料統計，只有固定的分數；所以重建語言模型，而不是一個一個調分數。</p></li>
+      </ul>
+    </details>
+
+    <details class="stage" open>
+      <summary><span class="ver">v0.4.1</span><span class="st-title">回報的修正</span><span class="tag wip">進行中</span>
+        <span class="meta">v0.4.0 之後</span></summary>
+      <ul class="items">
+        <li><span class="mark"></span><span class="sr-only">規劃中：</span><h3>候選窗在瀏覽器裡的位置</h3><p>使用者回報：網頁版 Messenger 打第一個字時預測列跑到中間，選完字才回到字的下方；Aside 裡候選列跑到左上角。還沒有重現；先在 Chrome 重現，再決定修法。</p></li>
+        <li><span class="mark"></span><span class="sr-only">規劃中：</span><h3>補上缺的名字與讀音</h3><p>詞庫與詞包都沒有「獄門疆」，補進來；「虎杖」的讀音資料少了三聲，一併修正。「芙莉蓮」在詞庫裡，單獨打得出來，但在有些句子裡輸給「福利聯」，這一項在 v0.4.1 不修，另外調查。</p></li>
+        <li class="wip"><span class="mark"></span><span class="sr-only">進行中：</span><h3>動漫詞包：含間隔號的名字</h3><p>契約審查中（分支 feat/acg-a3）。詞包建置時把含間隔號的名字整個略過，像「洛琪希·米格路迪亞」這類名字完全沒收進來。改成把名和姓拆開收，原本維護者保留的名字維持不變。</p></li>
+      </ul>
+    </details>
+
+    <details class="stage" open>
+      <summary><span class="ver">之後</span><span class="st-title">已排定，在 v0.4 之後</span><span class="tag wip">進行中</span>
+        <span class="meta">順序依實測與回報調整</span></summary>
+      <ul class="items">
+        <li><span class="mark"></span><span class="sr-only">規劃中：</span><h3>常見專有名詞</h3><p>公司、學校、飲料店、餐廳、產品這類常見的專有名詞（例如「酷澎」）納入一般詞庫；先查來源與授權再寫契約，版本未定。</p></li>
+        <li class="wip"><span class="mark"></span><span class="sr-only">進行中：</span><h3>從改選記住新詞組</h3><p>改選後送出的片段如果不是詞庫裡的詞（例如「版控」），記成你的詞，下次直接打得出來。</p></li>
+        <li class="wip"><span class="mark"></span><span class="sr-only">進行中：</span><h3>預測可省略韻母</h3><p>每個字只打第一個注音也能找到詞。一次縮寫一個詞的版本做完了，但還不能整句縮寫，v0.4.0 先不放；做到整句縮寫再出。另外有使用者回報打了某些注音之後按鍵好像卡住；從設計推論，是有兩個以上縮寫單位時空白鍵與聲調鍵會被吃掉，沒有重現。</p></li>
+        <li class="wip"><span class="mark"></span><span class="sr-only">進行中：</span><h3>App 沙盒</h3><p>輸入法在 macOS 的 App 沙盒裡執行，只拿到需要的權限。已經有實作分支，目標是 v0.5.0。</p></li>
+        <li class="research wip"><span class="mark"></span><span class="sr-only">進行中：</span><h3><span class="kind">研究</span>Kneser–Ney 平滑</h3><p>回退時看一個詞接在幾種不同的詞後面，而不是只看它出現幾次，減少「常用單字組合贏過整詞」的錯。先離線量測，有效才做進輸入法。</p></li>
+        <li class="research"><span class="mark"></span><span class="sr-only">規劃中：</span><h3><span class="kind">研究</span>在／再、作／做</h3><p>回報裡常見的一類同音錯，先量現在錯在哪裡再決定做法。</p></li>
+        <li><span class="mark"></span><span class="sr-only">規劃中：</span><h3>語料很少出現的名字</h3><p>像「宿儺」這種語料裡幾乎沒出現的名字，v0.4.0 的新模型也沒有救起來；需要另外寫契約處理。</p></li>
+        <li class="research"><span class="mark"></span><span class="sr-only">規劃中：</span><h3><span class="kind">研究</span>口語與財經用語</h3><p>語料偏百科，「零股」「月繳」這類日常用語太少；找授權清楚的口語來源。</p></li>
+        <li class="research"><span class="mark"></span><span class="sr-only">規劃中：</span><h3><span class="kind">研究</span>貝氏選字記憶</h3><p>把改選記錄當成證據、以語言模型為先驗，取代固定的加分。</p></li>
+        <li><span class="mark"></span><span class="sr-only">規劃中：</span><h3>更多新詞</h3><p>從語料自動找出詞庫沒收的新詞（例如口語縮寫）；也能手動加詞。</p></li>
+        <li><span class="mark"></span><span class="sr-only">規劃中：</span><h3>改選後其他字不動（重新評估）</h3><p>新詞做完後，照蘋果注音的實測（含改選後繼續打字）重新評估要不要做、怎麼做。</p></li>
+        <li><span class="mark"></span><span class="sr-only">規劃中：</span><h3>破音字的搭配</h3><p>同一個字的不同讀音分開計算搭配，例如「空」唸 ㄎㄨㄥˋ 時，不再借用「空間」的搭配而搶走「控」。</p></li>
+        <li class="research"><span class="mark"></span><span class="sr-only">規劃中：</span><h3><span class="kind">研究</span>中英混打</h3><p>按鍵組不成注音時自動判斷是英文，或依鍵盤上相鄰的鍵校正打錯的注音。</p></li>
+        <li class="research"><span class="mark"></span><span class="sr-only">規劃中：</span><h3><span class="kind">研究</span>評測集擴充</h3><p>保留集定期擴充與輪替，並加入較長的口語句子。</p></li>
+      </ul>
+    </details>
+
+    <details class="stage">
+      <summary><span class="ver">未排定</span><span class="st-title">語意判斷與校正</span><span class="tag">規劃中</span>
+        <span class="meta">等候選與延遲夠好再接</span></summary>
+      <ul class="items">
+        <li><span class="mark"></span><span class="sr-only">規劃中：</span><h3>本機重排</h3><p>把語意判斷接進輸入法，在本機執行，不拖慢打字。</p></li>
+        <li><span class="mark"></span><span class="sr-only">規劃中：</span><h3>一鍵校正、新手測驗</h3><p>打完一段可以請模型重看（雲端，預設關閉）；第一次使用時用簡單測驗了解你的打字習慣。</p></li>
+      </ul>
+    </details>
+
+  </div>
 </section>
 
 <section>
@@ -212,10 +360,18 @@
       <li>程式碼：Apache-2.0。</li>
       <li>基礎詞庫：小麥注音（MIT；片語源自 libtabe，BSD）。</li>
       <li>補充詞表：由維基百科與維基詞典的條目標題產生，CC BY-SA 4.0，署名維基百科與維基詞典貢獻者。</li>
+      <li>動漫與遊戲詞包：約 3 萬個作品名與角色名，隨 App 內附，選單可關。來源是中文維基百科的公共轉換組、動畫作品條目的標題與條目裡的登場人物，另有維護者手動加的詞（維護者自己的條目是 CC0，34 個 BanG Dream! 成員名字取自維基百科）；整份詞包以 CC BY-SA 4.0 散布，署名維基百科貢獻者。作品清單取自 Wikidata（CC0）。</li>
+      <li>降權表（<code>demote.tsv</code>）：專案自寫，隨 App 內附，CC BY-SA 4.0，不含第三方資料。</li>
       <li>標準讀音變體：依教育部《國語辭典簡編本》〈單一音讀〉與《國語一字多音審訂表》的規則，從小麥注音詞庫產生，MIT。規則是事實，檔案不含教育部資料。</li>
-      <li>語言模型（詞的兩兩搭配頻率）：由維基百科 2026-10-01 的 20 萬篇條目、Mozilla Common Voice 繁中（台灣）句子、Tatoeba 中文句子，以及 gpt-oss-120b 產生的台灣口語合成句計算，CC BY-SA 4.0，署名維基百科與 Tatoeba 貢獻者。不含任何私人對話。</li>
+      <li>語言模型（詞的兩兩搭配頻率）與詞類表：由維基百科 2026-10-01 的 20 萬篇條目、Mozilla Common Voice 繁中（台灣）句子（CC0）、Tatoeba 中文句子（CC BY 2.0 FR），以及 gpt-oss-120b 產生的台灣口語合成句計算，CC BY-SA 4.0，署名維基百科與 Tatoeba 貢獻者。斷詞用的詞包詞來自中文維基百科與 Wikidata。不含任何私人對話。發佈的模型另含少量用來辨識來源的指紋條目。</li>
       <li>目前沒有使用任何神經網路模型。</li>
-      <li>評測句：專案自寫，CC0。</li>
+      <li>評測句（不隨 App 內附，只用來量測）：
+        <ul>
+          <li>專案自寫或使用者回報的句子（開發集、保留集、學習測試、陷阱句、日常句等）：CC0。</li>
+          <li>動漫與遊戲評測（<code>eval/dev/acg/</code>）：取自 Wikidata 的標籤，CC0；其中 2026 年作品那一份（<code>recent.txt</code>）取自中文維基百科條目，CC BY-SA 4.0。</li>
+          <li>教育部《重編國語辭典修訂本》的例句抽樣（<code>eval/sets/moedict.txt</code>）與「也作／亦作」詞對（<code>eval/variants.tsv</code>）：CC BY-ND 3.0 TW，只用於評測，不用來建詞庫或改作。</li>
+        </ul>
+      </li>
     </ul>
     <p>原始碼：<a href="https://github.com/Nanako0129/shanjie">github.com/Nanako0129/shanjie</a></p>
   </details>
@@ -223,7 +379,7 @@
 
 <footer>
   <span>善解 shanjie</span>
-  <span>最後更新：2026-10-06</span>
+  <span>最後更新：2026-10-10</span>
 </footer>
 
 </main>
