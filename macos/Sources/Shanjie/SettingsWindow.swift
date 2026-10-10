@@ -155,7 +155,7 @@ struct SettingsForm: View {
                             .accessibilityHidden(true)
                     }
                 }
-                // The real bar's glass, cells and tint decision, so the depth is what typing shows.
+                // The real bar's glass, cells and tint decision (the depth over an app while typing was not compared).
                 HStack {
                     Spacer()
                     TintPreview(value: model.glassTint)
