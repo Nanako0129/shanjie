@@ -13,6 +13,8 @@ public final class SettingsModel: ObservableObject {
     @Published public private(set) var layout = InputMode.standard
     @Published public private(set) var prediction = true
     @Published public private(set) var abbreviation = false
+    /// The abbreviation toggle is shown only when the shell offers it (`Shell.showsAbbreviation`).
+    public var showsAbbreviation: Bool { shell.showsAbbreviation }
     @Published public private(set) var demote = true
     @Published public private(set) var acgPack = true
     /// The grey "資料更新至 …" line under the 動漫與遊戲詞 toggle (acg-pack contract A2.4): the same text as the menu's, `nil` for no line.

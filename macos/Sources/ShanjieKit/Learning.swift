@@ -195,7 +195,9 @@ extension Session {
         items.append(MenuEntry(title: T.demote, action: .toggleDemote, checked: shell.demoteOn))
         items.append(MenuEntry(title: T.prediction, action: .togglePrediction, checked: shell.predictionOn))
         // Greyed while the prediction row is off: the units it makes can only be resolved from the row (section 12.1).
-        items.append(MenuEntry(title: T.abbreviation, action: .toggleAbbreviation, checked: shell.abbreviationOn, enabled: shell.predictionOn))
+        if shell.showsAbbreviation {
+            items.append(MenuEntry(title: T.abbreviation, action: .toggleAbbreviation, checked: shell.abbreviationOn, enabled: shell.predictionOn))
+        }
         items.append(MenuEntry(title: T.acgPack, action: .toggleAcgPack, checked: shell.acgPackOn))
         if let date = shell.acgDataDate { items.append(MenuEntry(title: T.acgDataDate(date))) }   // about the data, so shown with the pack off too
         items.append(MenuEntry(title: T.settings, action: .openSettings))
