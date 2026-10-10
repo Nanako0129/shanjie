@@ -1,6 +1,7 @@
 """Tests for tools/build_acg_pack.py (docs/contracts/acg-pack.md A.5). Run: python3 -m unittest tools.test_build_acg_pack   (from the repo root).
 No network: the build runs against a fake API. It needs the repo's data (data/lexicon, data/lm/bigram.sjlm) and the evaluation CLI
 (built on demand with cargo) for the collision detection; it fails loudly without them, never skips."""
+import atexit
 import hashlib
 import json
 import os
@@ -9,6 +10,7 @@ import sys
 import tempfile
 import threading
 import unittest
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import build_acg_pack as B  # noqa: E402
@@ -275,19 +277,20 @@ PARSES = {
 
 class FakeApi:
     parsed = []
+    parses = PARSES
 
     def wiki(self, **p):
         if p.get("converttitles"):                  # resolve_titles：存在的標題、簡繁轉換、紅連結
             ts = p["titles"].split("|")
-            gone = lambda t: CONVERTED.get(t, t) not in PARSES and t not in PAGES
+            gone = lambda t: CONVERTED.get(t, t) not in self.parses and t not in PAGES
             return {"query": {"converted": [{"from": t, "to": CONVERTED[t]} for t in ts if t in CONVERTED],
                               "pages": [{"title": CONVERTED.get(t, t), **({"missing": True} if gone(t) else {"pageid": 1})} for t in ts]}}
         if p["action"] == "parse":
             self.parsed.append(p["page"])
-            if p["page"] not in PARSES:
+            if p["page"] not in self.parses:
                 raise RuntimeError({"code": "missingtitle"})
             assert "revid" in p["prop"]
-            return {"parse": dict(PARSES[p["page"]], revid=REVID[p["page"]])}
+            return {"parse": dict(self.parses[p["page"]], revid=REVID[p["page"]])}
         out = []
         for t in p["titles"].split("|"):
             if t not in PAGES:
@@ -312,6 +315,21 @@ READINGS = {  # tools/readings.py needs the MOE dictionary; the fixture fixes th
 }
 
 
+FAKE_V040 = tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False, encoding="utf-8")
+FAKE_V040.write("沒有這個詞\n")
+FAKE_V040.close()
+atexit.register(os.unlink, FAKE_V040.name)     # 模組層級的暫存檔，跑完就刪（PR #111 /code-review）
+
+
+def build(api, *a, **k):
+    """B.build without the committed acg-keep-both.tsv and v0.4.0 word list (they name real pack words, and some fixture words are real ones such as 風之谷
+    and 奇希莉卡; a fake build has none of them shipped) unless a test passes its own."""
+    k.setdefault("keep_both_tsv", "/nonexistent/acg-keep-both.tsv")
+    k.setdefault("v040_words", FAKE_V040.name)
+    k.setdefault("v040_sha", hashlib.sha256("沒有這個詞\n".encode()).hexdigest())
+    return B.build(api, *a, **k)
+
+
 def fake_readings(words):
     return {w: (READINGS[w].split(), False) for w in words if w in READINGS}
 
@@ -331,7 +349,7 @@ class Build(unittest.TestCase):
 
     def build(self, collisions, exclude=None, real_decoder=False, years=()):
         # 真的解碼器每次建置要跑 4 個 CLI 程序；只有斷言需要真實解碼結果的測試才開（real_decoder=True）。
-        return B.build(FakeApi(), self.groups, collisions, self.manual, readings=fake_readings, exclude_tsv=exclude or self.none, years=years, min_year_works=1,
+        return build(FakeApi(), self.groups, collisions, self.manual, readings=fake_readings, exclude_tsv=exclude or self.none, years=years, min_year_works=1,
                        **({} if real_decoder else {"decode": lambda pairs, prof, packs=None: [w for w, _ in pairs]}))
 
     def test_pack_content_and_filters(self):
@@ -374,7 +392,7 @@ class Build(unittest.TestCase):
     def test_a_changed_pack_changes_the_version(self):
         manual = os.path.join(self.tmp, "manual2.tsv")
         open(manual, "w", encoding="utf-8").write(open(self.manual, encoding="utf-8").read() + "艾倫葉卡\t某作品\t角色\n")
-        more = B.build(FakeApi(), self.groups, self.excl, manual, readings=lambda w: fake_readings(w) | {"艾倫葉卡": (["ㄞˋ", "ㄌㄨㄣˊ", "ㄧㄝˋ", "ㄎㄚˇ"], False)}, exclude_tsv=self.none, years=(),
+        more = build(FakeApi(), self.groups, self.excl, manual, readings=lambda w: fake_readings(w) | {"艾倫葉卡": (["ㄞˋ", "ㄌㄨㄣˊ", "ㄧㄝˋ", "ㄎㄚˇ"], False)}, exclude_tsv=self.none, years=(),
                         decode=lambda pairs, prof, packs=None: [w for w, _ in pairs])[1]
         base = self.build(self.excl)[1]
         self.assertEqual(more["version"][:8], base["version"][:8])            # 來源頁沒變，日期一樣
@@ -393,14 +411,14 @@ class Build(unittest.TestCase):
     def test_a_manual_words_fourth_column_adds_a_reading(self):
         manual = os.path.join(self.tmp, "manual3.tsv")
         open(manual, "w", encoding="utf-8").write("奇希莉卡\t無職轉生\t角色\tㄑㄧˊ ㄒㄧ ㄌㄧˋ ㄍㄚˇ\n")
-        files = B.build(FakeApi(), self.groups, self.excl, manual, readings=fake_readings, exclude_tsv=self.none, years=(),
+        files = build(FakeApi(), self.groups, self.excl, manual, readings=fake_readings, exclude_tsv=self.none, years=(),
                         decode=lambda pairs, prof, packs=None: [w for w, _ in pairs])[0]
         self.assertIn("ㄑㄧˊ-ㄒㄧ-ㄌㄧˋ-ㄍㄚˇ\t奇希莉卡\t", files["acg-add.tsv"])         # 另外的讀音
         self.assertIn("ㄑㄧˊ-ㄒㄧ-ㄌㄧˋ-ㄎㄚˇ\t奇希莉卡\t", files["acg-add.tsv"])         # 讀音工具的讀音也還在
         bad = os.path.join(self.tmp, "manual4.tsv")
         open(bad, "w", encoding="utf-8").write("奇希莉卡\t無職轉生\t角色\tㄑㄧˊ ㄒㄧ\n")
         with self.assertRaises(SystemExit):
-            B.build(FakeApi(), self.groups, self.excl, bad, readings=fake_readings, exclude_tsv=self.none, years=(), decode=lambda pairs, prof, packs=None: [w for w, _ in pairs])
+            build(FakeApi(), self.groups, self.excl, bad, readings=fake_readings, exclude_tsv=self.none, years=(), decode=lambda pairs, prof, packs=None: [w for w, _ in pairs])
 
     def test_manual_words_carry_their_own_source_tag(self):
         files, *_ = self.build(self.excl)
@@ -462,7 +480,7 @@ class Build(unittest.TestCase):
         def decode(pairs, prof, packs=None):       # 阿庫雷特：不開是 朋友；開了而且詞包裡有它就是它自己
             pack = open(os.path.join(packs, "acg-add.tsv"), encoding="utf-8").read() if packs else ""
             return [w if (w != "阿庫雷特" or w in pack) else "朋友" for w, _ in pairs] if packs else ["朋友" if w == "阿庫雷特" else w for w, _ in pairs]
-        files, manifest, col, _, _, dropped = B.build(FakeApi(), self.groups, self.none, self.manual, decode=decode, readings=fake_readings, exclude_tsv=self.none, years=())
+        files, manifest, col, _, _, dropped = build(FakeApi(), self.groups, self.none, self.manual, decode=decode, readings=fake_readings, exclude_tsv=self.none, years=())
         self.assertNotIn("阿庫雷特", {l.split("\t")[1] for l in files["acg-add.tsv"].splitlines()})
         self.assertEqual([(w, o) for _, w, o, _ in dropped], [("阿庫雷特", "朋友")])
         self.assertEqual((manifest["dropped_by_lexicon_rule"], manifest["unresolved_collision_readings"]), (1, 0))
@@ -474,7 +492,7 @@ class Build(unittest.TestCase):
         def run(row):
             c = os.path.join(self.tmp, "c.tsv")
             open(c, "w", encoding="utf-8").write(row)
-            return B.build(FakeApi(), self.groups, c, self.manual, decode=decode, readings=fake_readings, exclude_tsv=self.none, years=())[2]
+            return build(FakeApi(), self.groups, c, self.manual, decode=decode, readings=fake_readings, exclude_tsv=self.none, years=())[2]
         r = "ㄚ ㄎㄨˋ ㄌㄟˊ ㄊㄜˋ"
         self.assertIn(r, run(f"{r}\t某個舊詞\t+另一個舊詞\t別的詞已處置\n"))   # 同讀音但沒點名 阿庫雷特：新詞照樣列出
         self.assertIn(r, run(f"{r}\t阿庫雷特\t+某個舊詞\t點名了\n"))           # 點名了阿庫雷特，但開了之後的第一名奇希莉卡沒被點名：新詞搶走第一名，照樣列出
@@ -489,7 +507,7 @@ class Build(unittest.TestCase):
         c = os.path.join(self.tmp, "c2.tsv")
         def run(rows):
             open(c, "w", encoding="utf-8").write(rows)
-            return B.build(FakeApi(), self.groups, c, self.manual, decode=decode, readings=fake_readings, exclude_tsv=self.none, years=())[2]
+            return build(FakeApi(), self.groups, c, self.manual, decode=decode, readings=fake_readings, exclude_tsv=self.none, years=())[2]
         self.assertNotIn(r, run(f"{r}\t某個舊詞\t+另一個舊詞\t第一列的保留的詞不在詞包\n{r}\t奇希莉卡\t+阿庫雷特\t第二列\n"))
         self.assertIn(r, run(f"{r}\t某個舊詞\t+另一個舊詞\t第一列都不在詞包\n{r}\t阿庫雷特\t+某個舊詞\t第二列保留阿庫雷特但第一名是奇希莉卡\n"))
         # 第一列的保留的詞不在詞包、但 + 後面的詞在：排序上它排在第二列之前，所以它才是該有的第一名
@@ -503,7 +521,7 @@ class Build(unittest.TestCase):
         c = os.path.join(self.tmp, "c3.tsv")
         def run(rows):
             open(c, "w", encoding="utf-8").write(rows)
-            return B.build(FakeApi(), self.groups, c, self.manual, decode=decode, readings=fake_readings, exclude_tsv=self.none, years=())[2]
+            return build(FakeApi(), self.groups, c, self.manual, decode=decode, readings=fake_readings, exclude_tsv=self.none, years=())[2]
         both = f"{r}\t阿庫雷特\t+某個舊詞\t第一列\n{r}\t奇希莉卡\t+阿庫雷特\t第二列\n"
         self.assertIn(r, run(both))                    # 第一名是奇希莉卡，但第一列的保留的詞阿庫雷特才該是第一名
         self.assertNotIn(r, run(f"{r}\t奇希莉卡\t+阿庫雷特\t第一列\n{r}\t阿庫雷特\t+某個舊詞\t第二列\n"))    # 順序反過來就對了
@@ -565,6 +583,232 @@ class Build(unittest.TestCase):
             on, off = B.top1(pairs, prof, B.PACKS), B.top1(pairs, prof)
             bad = [(k, g) for (k, _), g, o in zip(pairs, on, off) if g != k and g != o]
             self.assertEqual(bad, [], prof)
+
+
+# ---- A3 (docs/contracts/acg-pack.md A3.5 item 7): fake HTML and a fake decoder, no network
+
+R_A3 = "ㄚ ㄎㄨˋ ㄌㄟˊ ㄊㄜˋ"          # 阿庫雷特 的讀音
+A3_LIST = ("<h2>人物</h2><ul><li>碇真次郎（シンジロウ）</li></ul>"
+           "<h2>魯迪的親人</h2><dl>"
+           "<dt>洛琪希·米格路迪亞（ロキシー・ミグルディア，Roxy Migurdia）</dt>"       # 兩個部分都通過
+           "<dt>吉爾卡們·吉爾卡特（ギルカ）</dt>"                                      # 第一部分被 ROLE_END 擋掉，第二部分通過
+           "<dt>洛爾克·貝爾戈（主角）</dt>"                                             # 全名緊接的括號沒有原名：兩部分都不收
+           "<dt>洛爾克 貝爾戈（ロルク）</dt></dl>"                                      # 空白分隔照舊不收
+           "<ul><li>賽妮絲（セニス）</li><li>米達利亞女王（ミダ）</li><li>阿爾法王子（アル）</li><li>貝塔王子（ベタ）</li></ul>")
+A3_PARSES = dict(PARSES, **{
+    "風之谷角色列表": {"title": "風之谷角色列表", "displaytitle": "風之谷角色列表", "text": A3_LIST, "links": []},
+    "風之谷": dict(PARSES["風之谷"], text=ARTICLE + "<h2>劇情</h2><ul><li>艾德溫（エドウィン）</li></ul>"),      # 作品條目：非人物小標題下的名字不收
+})
+A3_READINGS = {"洛琪希": "ㄌㄨㄛˋ ㄑㄧˊ ㄒㄧ", "米格路迪亞": "ㄇㄧˇ ㄍㄜˊ ㄌㄨˋ ㄉㄧˊ ㄧㄚˋ", "吉爾卡特": "ㄐㄧˊ ㄦˇ ㄎㄚˇ ㄊㄜˋ", "賽妮絲": "ㄙㄞˋ ㄋㄧ ㄙ",
+               "阿爾法王子": "ㄚ ㄦˇ ㄈㄚˇ ㄨㄤˊ ㄗˇ", "貝塔王子": "ㄅㄟˋ ㄊㄚˇ ㄨㄤˊ ㄗˇ", "米達利亞女王": "ㄇㄧˇ ㄉㄚˊ ㄌㄧˋ ㄧㄚˋ ㄋㄩˇ ㄨㄤˊ", "艾德溫": "ㄞˋ ㄉㄜˊ ㄨㄣ",
+               "吉爾卡們": "ㄐㄧˊ ㄦˇ ㄎㄚˇ ㄇㄣ˙", "洛爾克": "ㄌㄨㄛˋ ㄦˇ ㄎㄜˋ", "貝爾戈": "ㄅㄟˋ ㄦˇ ㄍㄜ"}
+
+
+class A3Api(FakeApi):
+    parses = A3_PARSES
+
+
+def a3_readings(words):
+    return fake_readings(words) | {w: (A3_READINGS[w].split(), False) for w in words if w in A3_READINGS}
+
+
+def identity(pairs, prof, packs=None):
+    return [w for w, _ in pairs]
+
+
+class A3(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.mkdtemp()
+        cls.addClassCleanup(shutil.rmtree, cls.tmp, True)
+        w = lambda name, text: (open(os.path.join(cls.tmp, name), "w", encoding="utf-8").write(text), os.path.join(cls.tmp, name))[1]
+        cls.groups, cls.manual, cls.none = w("g.tsv", GROUPS), w("m.tsv", "# m\n奇希莉卡\t無職轉生\t角色\n"), os.path.join(cls.tmp, "none.tsv")
+        cls.v040 = w("v040.txt", "阿爾法王子\n")
+        cls.sha = hashlib.sha256("阿爾法王子\n".encode()).hexdigest()
+
+    def build(self, a3=True, v040=None, sha=None, kb=None, decode=identity, info=None):
+        return build(A3Api(), self.groups, self.none, self.manual, decode=decode, readings=a3_readings, exclude_tsv=self.none, years=(), a3=a3,
+                     v040_words=v040 or self.v040, v040_sha=sha or self.sha, keep_both_tsv=kb or self.none, info=info)
+
+    def test_names_of_splits_interpunct_and_takes_the_whole_page_only_for_a_list(self):
+        html = "<h2>魯迪的親人</h2><dl><dt>洛琪希·米格路迪亞（ロキシー）</dt><dt>洛琪希/米格 路迪亞（ロキシー）</dt></dl><h2>登場人物</h2><ul><li>艾蓮娜（エレナ）</li></ul>"
+        got = [(n.name, n.full, n.outside) for n in B.names_of(html, whole_page=True)]
+        self.assertEqual(got, [("洛琪希", "洛琪希·米格路迪亞", True), ("米格路迪亞", "洛琪希·米格路迪亞", True), ("艾蓮娜", None, False)])
+        self.assertEqual([n.name for n in B.names_of(html)], ["洛琪希", "米格路迪亞", "艾蓮娜"][2:])           # 作品條目：段落外的不收
+        self.assertEqual([n.name for n in B.names_of(html, whole_page=True, a3=False)], ["艾蓮娜"])             # A3 關掉：間隔號與整頁都不做
+        self.assertEqual([n.name for n in B.names_of("<h2>登場人物</h2><ul><li>洛·米（ロ）</li></ul>")], [])      # 部分太短（單字）
+
+    def test_whole_page_skips_back_matter_and_navigation_boxes(self):
+        """PR #111 /code-review：整頁模式不收頁尾的參考、外部連結小節與導覽框；人物小標題下的照收。"""
+        html = ("<h2>主要角色</h2><ul><li>艾蓮娜</li></ul><h2>其他</h2><ul><li>卡羅爾</li></ul>"
+                "<h2>參考資料</h2><ul><li>網際網路電影資料庫</li></ul><h2>外部連結</h2><ul><li>集換式卡牌遊戲</li></ul>"
+                "<h2>關聯項目</h2><div class=\"navbox\"><ul><li>神奇寶貝鑽石</li></ul></div>"       # 不是頁尾小標題：只靠導覽框過濾
+                "<h2>印第安那黃蜂隊（應參考於克里夫蘭印地安人隊）</h2><dl><dt>史戴西</dt></dl>")                 # 內文小標題提到「參考」：照收
+        self.assertEqual([n.name for n in B.names_of(html, whole_page=True)], ["艾蓮娜", "卡羅爾", "史戴西"])
+        self.assertTrue(B.is_back("註釋與參考資料") and B.is_back("相關參見") and not B.is_back("印第安那黃蜂隊（應參考於克里夫蘭印地安人隊）"))
+
+    def test_strict_ok_reads_the_original_after_the_whole_name(self):
+        snip = "洛琪希·米格路迪亞（ロキシー・ミグルディア）"
+        self.assertTrue(B.strict_ok("洛琪希", "dt", snip, set(), "洛琪希·米格路迪亞"))
+        self.assertFalse(B.strict_ok("洛琪希", "dt", snip, set()))                              # 沒給全名：名字後面接的是 ·，不是括號
+        self.assertFalse(B.strict_ok("洛琪希", "dt", "洛琪希·米格路迪亞（主角）", set(), "洛琪希·米格路迪亞"))
+
+    def test_interpunct_parts_and_list_pages_are_collected_and_each_part_is_filtered(self):
+        files, _, _, unread, ref, _ = self.build()
+        words = {l.split("\t")[1] for l in files["acg-add.tsv"].splitlines()}
+        self.assertTrue({"洛琪希", "米格路迪亞", "吉爾卡特", "賽妮絲", "阿爾法王子"} <= words)       # 間隔號的兩個部分；列表條目非人物小標題下的名字
+        for w in ("吉爾卡們", "洛爾克", "貝爾戈"):
+            self.assertNotIn(w, words)                  # 被濾掉的部分；全名沒有原名括號；空白分隔
+            self.assertNotIn(w, unread)
+        self.assertIn("洛爾克", ref)                    # 參考名單含所有抽出來的人名（沒有原名的也在）
+        self.assertNotIn("艾德溫", words)               # 作品條目的非人物小標題
+        self.assertIn("洛琪希\tchar\t洛琪希·米格路迪亞@風之谷角色列表@6\t", files["acg-sources.tsv"])      # 出處記全名
+        self.assertIn("賽妮絲\tchar\t風之谷角色列表@6\t", files["acg-sources.tsv"])
+
+    def test_a3_off_is_the_old_extraction_and_leaves_out_the_new_manual_words(self):
+        files, *_ = self.build(a3=False)
+        words = {l.split("\t")[1] for l in files["acg-add.tsv"].splitlines()}
+        self.assertTrue(words.isdisjoint({"洛琪希", "米格路迪亞", "吉爾卡特", "賽妮絲", "阿爾法王子", "貝塔王子"}))
+        manual = os.path.join(self.tmp, "m2.tsv")
+        open(manual, "w", encoding="utf-8").write("獄門疆\t咒術迴戰\tx\n奇希莉卡\t無職轉生\t角色\n")
+        for on in (True, False):
+            files = build(A3Api(), self.groups, self.none, manual, decode=identity, readings=lambda w: a3_readings(w) | {"獄門疆": (["ㄩˋ", "ㄇㄣˊ", "ㄐㄧㄤ"], False)}, exclude_tsv=self.none,
+                          years=(), a3=on, v040_words=self.v040, v040_sha=self.sha, keep_both_tsv=self.none)[0]
+            self.assertEqual("獄門疆" in {l.split("\t")[1] for l in files["acg-add.tsv"].splitlines()}, on)
+
+    def test_title_end_blocks_only_new_words(self):
+        files, _, _, unread, ref, _ = self.build()
+        words = {l.split("\t")[1] for l in files["acg-add.tsv"].splitlines()}
+        self.assertIn("阿爾法王子", words)                                  # v0.4.0 的詞：照留
+        for w in ("貝塔王子", "米達利亞女王"):
+            self.assertNotIn(w, words)                                     # 新詞：擋掉
+            self.assertNotIn(w, unread)
+            self.assertIn(w, ref)
+        # 詞表固定取自提交的 v0.4.0 詞表（雜湊另外釘住，test_a_missing_or_changed_v040_word_list_stops_the_build），換一份就跟著換
+        other = os.path.join(self.tmp, "v040b.txt")                            # 換一份詞表：擋或留跟著詞表走
+        open(other, "w", encoding="utf-8").write("貝塔王子\n")
+        words2 = {l.split("\t")[1] for l in self.build(v040=other, sha=hashlib.sha256("貝塔王子\n".encode()).hexdigest())[0]["acg-add.tsv"].splitlines()}
+        self.assertIn("貝塔王子", words2)
+        self.assertNotIn("阿爾法王子", words2)
+
+    def test_a_missing_or_changed_v040_word_list_stops_the_build(self):
+        with self.assertRaises(SystemExit):
+            self.build(sha="0" * 64)
+        with self.assertRaises(SystemExit):
+            self.build(v040=os.path.join(self.tmp, "nonexistent.txt"))
+        self.assertEqual(len(B.load_v040()), 30019)                          # 提交進版控的那份：雜湊相符
+
+    def test_the_rule_model_hash_is_checked_and_the_build_decoder_uses_it(self):
+        d = os.path.join(self.tmp, "rule")
+        with self.assertRaises(SystemExit) as c:                            # 缺檔
+            B.check_rule_lm(d)
+        self.assertIn("gh release download model-v4", str(c.exception))
+        os.makedirs(d)
+        for n in B.RULE_LM_SHA:
+            open(os.path.join(d, n), "w").write("wrong")
+        with self.assertRaises(SystemExit):                                 # 雜湊不符
+            B.check_rule_lm(d)
+        with mock.patch.object(B, "top1", return_value=[]) as t:
+            B.rule_decoder("/rule/bigram.sjlm")([("甲", ["ㄅ"])], "chat", "/p")
+        self.assertEqual(t.call_args.kwargs["lm"], "/rule/bigram.sjlm")
+        self.assertEqual(t.call_args.args[1:], ("chat", "/p"))
+        import inspect
+        self.assertEqual(inspect.signature(B.top1).parameters["lm"].default, B.LM)       # 預設照舊是出貨的 data/lm
+
+    def test_shipped_words_rank_before_new_words_of_the_same_reading(self):
+        n = {"新詞": 9, "舊詞": 1}
+        reading = {"新詞": ["ㄅ", "ㄅ"], "舊詞": ["ㄅ", "ㄅ"]}
+        self.assertEqual(B.ordered(["新詞", "舊詞"], n.get), ["新詞", "舊詞"])                              # 沒有 shipped：來源數多的在前
+        self.assertEqual(B.ordered(["新詞", "舊詞"], n.get, shipped={"舊詞"}), ["舊詞", "新詞"])              # 已出貨的先於新詞，不論來源數
+        rank = B.collision_rank([["ㄅ ㄅ", "新詞", "+舊詞", ""]])
+        self.assertEqual(B.ordered(["舊詞", "新詞"], n.get, rank, reading, shipped={"舊詞"}), ["新詞", "舊詞"])   # 處置列的名次還是最優先
+
+    def test_new_words_on_a_shipped_reading_get_a_lower_score_and_shipped_ranks_are_untouched(self):
+        sc = {2: -7.0}
+        reading = {"舊甲": ["ㄅ", "ㄅ"], "舊乙": ["ㄅ", "ㄅ"], "新詞": ["ㄅ", "ㄅ"], "別的": ["ㄆ", "ㄆ"]}
+        score = lambda rows: {l.split("\t")[1]: float(l.split("\t")[2]) for l in rows}
+        plain = score(B.pack_rows(["舊甲", "舊乙", "新詞", "別的"], reading, sc))
+        with_shipped = score(B.pack_rows(["舊甲", "舊乙", "新詞", "別的"], reading, sc, shipped={"舊甲", "舊乙"}))
+        self.assertEqual((with_shipped["舊甲"], with_shipped["舊乙"]), (plain["舊甲"], plain["舊乙"]))          # 已出貨的分數和沒有新詞時一樣
+        self.assertAlmostEqual(plain["新詞"] - with_shipped["新詞"], B.NEW_BEHIND_SHIPPED)                    # 新詞在已出貨的讀音上另外減分
+        self.assertEqual(with_shipped["別的"], plain["別的"])                                                 # 沒有已出貨的詞的讀音：不動
+
+    def test_a_new_word_that_resolves_to_a_shipped_word_is_fine_but_not_the_other_way(self):
+        r, shipped = "ㄅ ㄅ", frozenset({"舊甲", "舊乙"})
+        e = lambda w, n: {r: [(w, "a", "chat", "原本", n)]}
+        none = lambda found: B.open_collisions(found, set(), {}, set(), shipped)
+        self.assertEqual(none(e("新詞", "舊甲")), {})                      # 新詞的第一名是已出貨的詞：已出貨的選字沒變
+        self.assertEqual(none(e("新詞", "新乙")), e("新詞", "新乙"))        # 新詞的第一名是另一個新詞：照樣列出
+        self.assertEqual(none(e("舊甲", "新詞")), e("舊甲", "新詞"))        # 已出貨的詞被新詞搶走第一名：列出
+        self.assertEqual(none(e("舊甲", "舊乙")), {})                      # 第一名是已出貨的詞：已出貨讀音的選字沒變（recheck --base 另外比新舊詞包）
+        self.assertEqual(B.open_collisions(e("新詞", "新乙"), set(), {}, {(r, "新詞"), (r, "新乙")}, shipped), {})      # 全是新詞的讀音：keep-both
+        self.assertEqual(B.open_collisions(e("新詞", "舊甲"), set(), {}, set(), frozenset()), e("新詞", "舊甲"))     # 沒有 shipped（A3 關掉）：不豁免
+        kb = {(r, "新詞")}
+        self.assertEqual(B.open_collisions(e("新詞", "拼出來的"), set(), {}, kb, shipped, {(r, "新詞")}), {})                   # 第一名是解碼器拼出來的字串（不是詞包詞）：keep-both 詞豁免
+        self.assertEqual(B.open_collisions(e("新詞", "拼出來的"), set(), {}, set(), shipped, {(r, "新詞")}), e("新詞", "拼出來的"))   # 不是 keep-both 詞：列出
+        self.assertEqual(B.open_collisions(e("新詞", "新乙"), set(), {}, kb, shipped, {(r, "新詞"), (r, "新乙")}), e("新詞", "新乙"))      # 第一名是別的詞包詞（第三個詞）：列出
+
+    def test_in_a_build_the_shipped_word_keeps_first_place_over_a_new_word(self):
+        shared = lambda words: a3_readings(words) | {w: (R_A3.split(), False) for w in words if w in ("阿庫雷特", "奇希莉卡")}
+        v040 = os.path.join(self.tmp, "v040c.txt")
+        open(v040, "w", encoding="utf-8").write("阿庫雷特\n")
+        sha = hashlib.sha256("阿庫雷特\n".encode()).hexdigest()
+        def run(decode):
+            return build(A3Api(), self.groups, self.none, self.manual, decode=decode, readings=shared, exclude_tsv=self.none, years=(), v040_words=v040, v040_sha=sha, keep_both_tsv=self.none)
+        files, _, col, *_ = run(lambda pairs, prof, packs=None: ["阿庫雷特" if packs and w == "奇希莉卡" else w for w, _ in pairs])
+        score = {l.split("\t")[1]: float(l.split("\t")[2]) for l in files["acg-add.tsv"].splitlines() if l.startswith(R_A3.replace(" ", "-") + "\t")}
+        self.assertGreater(score["阿庫雷特"], score["奇希莉卡"])           # 舊的分數高：新詞只是候選（來源數兩邊相同時字串順序本來是奇希莉卡在前）
+        self.assertNotIn(R_A3, col)                                       # 新詞的第一名是已出貨的詞：不列
+        col = run(lambda pairs, prof, packs=None: ["奇希莉卡" if packs and w == "阿庫雷特" else w for w, _ in pairs])[2]
+        self.assertIn(R_A3, col)                                          # 已出貨的詞被新詞搶走：列出
+
+    def kb(self, rows):
+        path = os.path.join(self.tmp, "kb.tsv")
+        open(path, "w", encoding="utf-8").write(rows)
+        return path
+
+    def test_keep_both_words_are_exempt_only_when_the_first_place_is_a_keep_both_word_too(self):
+        take = lambda pairs, prof, packs=None: ["奇希莉卡" if packs and w == "阿庫雷特" else w for w, _ in pairs]
+        steal = lambda pairs, prof, packs=None: ["艾倫葉卡" if packs and w == "阿庫雷特" else w for w, _ in pairs]       # 第三個詞包詞（同讀音）拿到第一名
+        away = lambda pairs, prof, packs=None: ["拼出來的字串" if packs and w == "阿庫雷特" else w for w, _ in pairs]     # 第一名不是詞包詞
+        manual = os.path.join(self.tmp, "m3.tsv")
+        open(manual, "w", encoding="utf-8").write("奇希莉卡\t無職轉生\t角色\n艾倫葉卡\t某作品\t角色\n")
+        three = lambda words: a3_readings(words) | {"艾倫葉卡": (R_A3.split(), False)}
+        both = self.kb(f"{R_A3}\t阿庫雷特\n{R_A3}\t奇希莉卡\n")
+        run = lambda decode, kb=None: build(A3Api(), self.groups, self.none, manual, decode=decode, readings=three, exclude_tsv=self.none, years=(), v040_words=self.v040, v040_sha=self.sha,
+                                           keep_both_tsv=kb or self.none)[2]
+        self.assertIn(R_A3, run(take))                       # 沒有 keep-both：照樣列出
+        self.assertNotIn(R_A3, run(take, both))              # 兩個都是 keep-both 詞：豁免（也不做 first_named 檢查）
+        self.assertIn(R_A3, run(steal, both))                # 第三個詞（不是 keep-both 詞）拿到第一名：列為未處置
+        self.assertNotIn(R_A3, run(away, both))              # 第一名不是這個讀音的詞包詞（解碼器拼的）：keep-both 詞豁免
+
+    def test_every_keep_both_word_must_be_in_the_built_pack(self):
+        with self.assertRaises(SystemExit):
+            self.build(kb=self.kb(f"{R_A3}\t阿庫雷特\n{R_A3}\t某某某某\n"))          # 詞不在輸出的 acg-add.tsv
+        exclude = os.path.join(self.tmp, "ex.tsv")
+        open(exclude, "w", encoding="utf-8").write("阿庫雷特\t測試\n")                 # 從輸出拿掉其中一個詞
+        with self.assertRaises(SystemExit):
+            build(A3Api(), self.groups, self.none, self.manual, decode=identity, readings=a3_readings, exclude_tsv=exclude, years=(), v040_words=self.v040, v040_sha=self.sha,
+                  keep_both_tsv=self.kb(f"{R_A3}\t阿庫雷特\n"))
+        with self.assertRaises(SystemExit):
+            B.read_keep_both(self.kb("ㄚ\t阿庫雷特\n"))                              # 音節數和字數對不上
+
+    def test_the_committed_lists(self):
+        pack = {}
+        for l in open(os.path.join(B.PACKS, "acg-add.tsv"), encoding="utf-8"):
+            k, w, *_ = l.split("\t")
+            pack.setdefault(w, set()).add(k.replace("-", " "))
+        kept = B.read_tsv(os.path.join(B.PACKS, "acg-kept-c.tsv"))
+        self.assertEqual(len(kept), 178)                                      # 契約 A3.3a
+        self.assertTrue(all(w in pack and r in pack[w] for r, w, _ in kept))
+        both = B.read_keep_both(os.path.join(B.PACKS, "acg-keep-both.tsv"))
+        self.assertEqual((len(both), len({r for r, _ in both})), (169, 97))        # 契約 A3.3a 的 49 個詞、28 組讀音，加 A3 修正輪的 120 個詞、69 組讀音（全是新詞的讀音，與 3 組新舊詞包第一名相同的）
+        self.assertTrue({(r, w) for r, w in both if w in ("坂木", "阪木", "加米", "嘉米", "愛莉卡", "艾莉卡", "艾利卡")} and len(both) >= 49)
+        self.assertTrue(all(r in pack.get(w, ()) for r, w in both), sorted((r, w) for r, w in both if r not in pack.get(w, ())))
+        self.assertTrue(set(B.load_v040()) <= set(pack))                       # v0.4.0 的詞一個都不能少
+        self.assertIn("ㄩˋ ㄇㄣˊ ㄐㄧㄤ", pack["獄門疆"])                          # 契約 A3.4
+        self.assertTrue({"ㄏㄨ ㄓㄤˋ ㄧㄡ ㄖㄣˊ", "ㄏㄨˇ ㄓㄤˋ ㄧㄡ ㄖㄣˊ"} <= pack["虎杖悠仁"])
+        self.assertNotIn("艾文斯", pack)                                           # 契約 A3：新詞若在 model-v5 擠下詞庫的詞就不收（kb 例外只給已出貨的詞）
 
 
 if __name__ == "__main__":

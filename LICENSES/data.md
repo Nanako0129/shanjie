@@ -13,6 +13,9 @@
 | `data/packs/acg-collisions.tsv` | 同音衝突的處置：讀音、保留與排除的詞（取自維基百科轉換組與條目的詞）與理由 | **CC BY-SA 4.0**，署名：Wikipedia 貢獻者（https://creativecommons.org/licenses/by-sa/4.0/ ），與 `acg-exclude.tsv` 相同 | 建置輸入，不隨 App 內附 |
 | `eval/dev/acg/*.txt` | Wikidata 的 zh-tw 標籤（作品名、角色、角色名片段，sitelink 數最多者），讀音由 `tools/readings.py` 產生 | CC0（Wikidata 的資料授權） | 只用於評測，不用來調參 |
 | `eval/dev/acg/recent.txt` | 2026 年作品與角色名 23 個（葬送的芙莉蓮、咒術迴戰與其角色列表、判處勇者刑、魔法帽的工作室、日本三國、淡島百景、無職轉生、穹廬下的魔女、BLACK TORCH 闇黑燈火、桃源暗鬼等的中文維基百科條目），逐一對照條目確認；讀音由 `tools/readings.py` 產生 | **CC BY-SA 4.0**，署名：Wikipedia 貢獻者（https://creativecommons.org/licenses/by-sa/4.0/ ），與 `acg-collisions.tsv` 相同 | 只用於評測，不用來調參，不隨 App 內附 |
+| `eval/dev/acg/interpunct.txt` | A3 片的檢查集（契約 `docs/contracts/acg-pack.md` A3.5 第 1 項）：從 `tools/build_acg_pack.py` 新增的含間隔號、角色列表條目整頁的角色名依作品分層抽 40 個（固定種子 20261010，抽法寫在工具的報告；`tools/readings.py` 標 CHECK、讀音有疑義的詞不抽），加「洛琪希」「塞妮絲」「瑞傑路德」「獄門疆」「虎杖悠仁」共 45 列；名字取自中文維基百科的角色列表條目（revision 記在 `acg-sources.tsv`），讀音由 `tools/readings.py` 產生（「虎杖悠仁」用正確讀音） | **CC BY-SA 4.0**，署名：Wikipedia 貢獻者（https://creativecommons.org/licenses/by-sa/4.0/ ），與 `acg-collisions.tsv` 相同 | 只用於評測，不用來調參，不隨 App 內附 |
+| `data/packs/acg-v040-words.txt` | v0.4.0 出貨詞包的詞（v0.4.0 tag 的 `acg-add.tsv` 第二欄、位元組排序去重，SHA-256 `efb2d45d…`），建置工具用它區分「已出貨的詞」與新詞（A3.2 的稱號過濾、A3.5 第 3 項） | **CC BY-SA 4.0**，署名：Wikipedia 貢獻者（https://creativecommons.org/licenses/by-sa/4.0/ ），與 `acg-collisions.tsv` 相同 | 建置輸入，不隨 App 內附 |
+| `data/packs/acg-kept-c.tsv`、`data/packs/acg-keep-both.tsv` | 使用者決定保留的詞包名字（178 個，讓詞包名字排第一）與「兩種寫法都留、順序照 model-v5」的 169 個詞、97 組讀音（契約 A3.3a；A3 重建後的數字）；詞取自詞包 | **CC BY-SA 4.0**，署名：Wikipedia 貢獻者（https://creativecommons.org/licenses/by-sa/4.0/ ），與 `acg-collisions.tsv` 相同 | 建置輸入與驗收清單，不隨 App 內附 |
 | `eval/sets/trap.txt`、`eval/sets/daily.txt` | 本專案自寫 | CC0 | |
 | `eval/probe/s2r-probe.txt` | 由 `experiments/s2/build_probe.py` 從 `eval/dev/` 的句子產生（換「一」「不」的讀音） | CC0 | |
 | `eval/dev/*.txt`、`eval/holdout/*`、`eval/learn/cases.tsv` | 本專案自寫 | CC0 | |
