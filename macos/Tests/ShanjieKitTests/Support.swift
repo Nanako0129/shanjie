@@ -39,9 +39,9 @@ enum TestData {
             let src = repo.appendingPathComponent(f.source)
             guard FileManager.default.fileExists(atPath: src.path) else {
                 XCTFail("""
-                    \(f.source) is missing. The lexicon is in git; the model is the model-v4 release asset: \
-                    gh release download model-v4 -R Nanako0129/shanjie -p bigram.sjlm -D data/lm
-                    classes.sjc: gh release download classes-v2 -R Nanako0129/shanjie -p classes.sjc -D data/lm
+                    \(f.source) is missing. The lexicon is in git; the model is the model-v5 release asset: \
+                    gh release download model-v5 -R Nanako0129/shanjie -p bigram.sjlm -D data/lm
+                    classes.sjc: gh release download classes-v3 -R Nanako0129/shanjie -p classes.sjc -D data/lm
                     """, file: file, line: line)
                 return nil
             }

@@ -22,14 +22,14 @@ cd "$ROOT"
 fail() { echo "error: $*" >&2; exit 1; }
 
 # The model is not in git (docs/PLAN.md S2c); check it before spending time on the build.
-[ -f data/lm/bigram.sjlm ] || fail "data/lm/bigram.sjlm is missing. Download the model-v4 release asset:
-  gh release download model-v4 -R Nanako0129/shanjie -p bigram.sjlm -D data/lm"
+[ -f data/lm/bigram.sjlm ] || fail "data/lm/bigram.sjlm is missing. Download the model-v5 release asset:
+  gh release download model-v5 -R Nanako0129/shanjie -p bigram.sjlm -D data/lm"
 shasum -a 256 -c data/bigram.sjlm.sha256 >/dev/null \
-  || fail "data/lm/bigram.sjlm does not match data/bigram.sjlm.sha256; download model-v4 again"
-[ -f data/lm/classes.sjc ] || fail "data/lm/classes.sjc is missing (the word-class term of the model, S2k). Download the classes-v2 release asset:
-  gh release download classes-v2 -R Nanako0129/shanjie -p classes.sjc -D data/lm"
+  || fail "data/lm/bigram.sjlm does not match data/bigram.sjlm.sha256; download model-v5 again"
+[ -f data/lm/classes.sjc ] || fail "data/lm/classes.sjc is missing (the word-class term of the model, S2k). Download the classes-v3 release asset:
+  gh release download classes-v3 -R Nanako0129/shanjie -p classes.sjc -D data/lm"
 shasum -a 256 -c data/classes.sjc.sha256 >/dev/null \
-  || fail "data/lm/classes.sjc does not match data/classes.sjc.sha256; download classes-v2 again"
+  || fail "data/lm/classes.sjc does not match data/classes.sjc.sha256; download classes-v3 again"
 for f in data/lexicon/mcbpmf-data.txt data/lexicon/overlay-add.tsv data/lexicon/sandhi-add.tsv data/lexicon/demote.tsv data/packs/acg-add.tsv data/packs/acg-sources.tsv data/packs/acg.json LICENSE LICENSES/McBopomofo-MIT.txt LICENSES/data.md; do
   [ -f "$f" ] || fail "$f is missing"
 done

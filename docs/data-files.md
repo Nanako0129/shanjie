@@ -6,18 +6,18 @@
 
 | 檔案 | Release | 內容 | 大小 | 雜湊檔 |
 |---|---|---|---|---|
-| `bigram.sjlm` | [`model-v4`](https://github.com/Nanako0129/shanjie/releases/tag/model-v4) | bigram 語言模型：詞與詞相鄰出現的機率；含少量用來辨識來源的指紋條目 | 81,373,933 bytes | `data/bigram.sjlm.sha256` |
-| `classes.sjc` | [`classes-v2`](https://github.com/Nanako0129/shanjie/releases/tag/classes-v2) | 詞類表（S2k）：512 個詞類、每個詞屬於哪一類、「這類詞後面接那類詞」的機率。兩個詞沒在語料一起出現過時，用它補估計 | 5,443,546 bytes | `data/classes.sjc.sha256` |
+| `bigram.sjlm` | [`model-v5`](https://github.com/Nanako0129/shanjie/releases/tag/model-v5) | bigram 語言模型：詞與詞相鄰出現的機率；含少量用來辨識來源的指紋條目 | 82,535,147 bytes | `data/bigram.sjlm.sha256` |
+| `classes.sjc` | [`classes-v3`](https://github.com/Nanako0129/shanjie/releases/tag/classes-v3) | 詞類表（S2k）：512 個詞類、每個詞屬於哪一類、「這類詞後面接那類詞」的機率。兩個詞沒在語料一起出現過時，用它補估計 | 5,575,836 bytes | `data/classes.sjc.sha256` |
 
-- **兩個一起用，放在同一個資料夾**（`data/lm/`）。`classes.sjc` 不含模型本身，`classes-v2` 這個 Release 也只有這一個檔案。
-- **綁定**：`classes.sjc` 裡記了它是為哪個模型建的（model-v4 的 SHA-256）。缺檔、配到別的模型、或檔案內容不對，載入都會失敗（C ABI 的 `load_lm` 回傳 3），不會靜靜地用錯或不用。
+- **兩個一起用，放在同一個資料夾**（`data/lm/`）。`classes.sjc` 不含模型本身，`classes-v3` 這個 Release 也只有這一個檔案。
+- **綁定**：`classes.sjc` 裡記了它是為哪個模型建的（model-v5 的 SHA-256）。缺檔、配到別的模型、或檔案內容不對，載入都會失敗（C ABI 的 `load_lm` 回傳 3），不會靜靜地用錯或不用。
 - **App 裡**：打包時兩個檔案都放進 `善解輸入法.app/Contents/Resources/`，使用者不用另外下載。
 
 ## 下載
 
 ```sh
-gh release download model-v4 -R Nanako0129/shanjie -p bigram.sjlm -D data/lm
-gh release download classes-v2 -R Nanako0129/shanjie -p classes.sjc -D data/lm
+gh release download model-v5 -R Nanako0129/shanjie -p bigram.sjlm -D data/lm
+gh release download classes-v3 -R Nanako0129/shanjie -p classes.sjc -D data/lm
 shasum -a 256 -c data/bigram.sjlm.sha256 data/classes.sjc.sha256
 ```
 
