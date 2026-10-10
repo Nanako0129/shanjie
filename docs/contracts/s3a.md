@@ -127,7 +127,7 @@
 
 `data_dir` 裡必須有 `mcbpmf-data.txt`、`overlay-add.tsv` 與 `sandhi-add.tsv`（S2r 加入），用 `Lexicon::parse_with(基底, Some(疊加層))` 載入，疊加層是 `overlay-add.tsv` 接著 `sandhi-add.tsv`（`engine::join_overlays`，前一份沒有結尾換行就補一個），和評測 CLI 預設相同。任一個不存在或解析失敗，回傳碼 3（`load_lm` 重讀 `overlay-add.tsv` 與 `demote.tsv`，建構之後它們被移走也是碼 3）。
 
-詞包（acg-pack 契約 A.2）：`Engine::new_with_packs(data_dir, layout, Some((packs_dir, mask)))` 把啟用的詞包檔（`PACK_ACG` → `packs_dir/acg-add.tsv`）接在 `sandhi-add.tsv` 後面一起解析；`load_lm` 重新讀 `data_dir/overlay-add.tsv`（`engine::capping_overlay`；引擎不為此留一份約 17 MB 的副本），後面接建構時 `load_lexicon_packs` 給出的啟用詞包列（詞包檔不重讀；沒有啟用就沒有），交給 `CappedLexicon::new`，所以詞包的詞也依語料頻率封頂（沒看過的減 1.0）。沒有啟用的位元、或檔案不存在，就不讀任何詞包，引擎和 `Engine::new` 完全相同（`core/tests/engine_pack.rs` 逐位元比對解碼、候選清單與 V3 預測列）。未定義的位元是 `LoadFailed`。評測 CLI 的 `--packs acg [--packs-dir DIR]` 走同一組函式（`load_lexicon_packs_detailed`、`capping_overlay_detailed`，帶出錯的檔案與 `ErrorKind`；`load_lexicon_packs` 與 `capping_overlay` 是把它們的錯誤對應成 `LoadFailed` 的包裝）。
+詞包（acg-pack 契約 A.2）：`Engine::new_with_packs(data_dir, layout, Some((packs_dir, mask)))` 把啟用的詞包檔（`PACK_ACG` → `packs_dir/acg-add.tsv`）接在 `sandhi-add.tsv` 後面一起解析；`load_lm` 重新讀 `data_dir/overlay-add.tsv`（`engine::capping_overlay`；引擎不為此留一份約 17 MB 的副本），後面接建構時 `load_lexicon_packs` 給出的啟用詞包列（詞包檔不重讀；沒有啟用就沒有），交給 `CappedLexicon::new`，所以詞包的詞也依語料頻率封頂（沒看過的減 1.0）。沒有啟用的位元、或檔案不存在，就不讀任何詞包，引擎和 `Engine::new` 完全相同（`core/tests/engine_pack.rs` 逐位元比對解碼、候選清單與 V3 預測列）。未定義的位元是 `LoadFailed`。評測 CLI 的 `--packs acg [--packs-dir DIR]` 走同一組函式（`load_lexicon_packs_detailed`、`capping_overlay_detailed`，讀取失敗帶出錯的檔案與 `ErrorKind`；解析失敗帶資料夾與解析器的 `detail`（指不出是哪個檔，見 acg-pack 契約 A2.7 的延後項）；`load_lexicon_packs` 與 `capping_overlay` 是把它們的錯誤對應成 `LoadFailed` 的包裝）。
 
 ## 6. C ABI（`core/include/shanjie.h`）
 
