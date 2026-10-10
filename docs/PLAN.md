@@ -191,7 +191,7 @@ v4 日期 2026-10-03。v1 經 `pilotfish:plan-verifier`（REVISE，4 項）與 `
 - 組字區上限改成可設定（使用者 2026-10-05），預設對照蘋果注音或小麥注音。目前是 40 個音節。
 - 真正的句首判斷（issue #30）。
 - 詞類回退實驗（`exp/word-classes`，Brown 分群 K=512）：dev302 chat 238 → 250、formal 237 → 254。要在 S2n 的乾淨計數上重跑，再決定要不要成片。
-  - 已在 model-v3 上重跑並做進 Python 參考實作與 Rust 核心（`docs/contracts/s2k-word-classes.md`，結果見 `docs/research-log.md` 2026-10-08）；GitHub Release `classes-v1` 已建（使用者 2026-10-08 同意，獨立的 Release；下載比對雜湊相符），CI、`release.yml`、`build-app.sh` 與 golden 測試都釘它的雜湊（`data/classes.sjc.sha256`），說明在 `docs/data-files.md`。〔更正，2026-10-08〕現在釘的是 classes-v2（配 model-v4，`docs/contracts/model-v4.md`）。
+  - 已在 model-v3 上重跑並做進 Python 參考實作與 Rust 核心（`docs/contracts/s2k-word-classes.md`，結果見 `docs/research-log.md` 2026-10-08）；GitHub Release `classes-v1` 已建（使用者 2026-10-08 同意，獨立的 Release；下載比對雜湊相符），CI、`release.yml`、`build-app.sh` 與 golden 測試都釘它的雜湊（`data/classes.sjc.sha256`），說明在 `docs/data-files.md`。〔更正，2026-10-08〕現在釘的是 classes-v2（配 model-v4，`docs/contracts/model-v4.md`）。〔更正，2026-10-10〕v0.4.0 起釘的是 classes-v3（配 model-v5，`docs/contracts/model-v5.md` §9）。
   - 選字記憶的全域層因此先關（`s4-learning.md` §13）。v0.3.0 之後重新研究全域層：要能分辨「使用者想翻的平手」和「模型已經判對的平手」，再用 `global_eps_table` 量。
 - **訓練切分與詞庫擴充**（issue #47，Willseed；2026-10-06 的覆蓋量測與文獻調查見研究紀錄同日）。排在前文接進 n-gram、S2n 計數重建之後，寫契約、過 plan-verifier。
   - 覆蓋：dev302 正解在前 8 名約 98%，前 64 名缺的 2 句都是「拭鏡布」。這組集合的主要錯誤是排序，B 的效果要另外找「組不出來的新詞」量。
