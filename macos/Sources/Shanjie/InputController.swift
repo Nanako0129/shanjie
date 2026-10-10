@@ -315,6 +315,9 @@ final class CandidatePanelAdapter: CandidatePanel {
     /// remove a view on every key; removed when the list fits or the content resets. Whether a new view each time would
     /// flicker was not measured.
     private var thumb: FilledView?
+    /// The vertical panel's row separators (`VerticalLayout.separators`): one view per gap, kept across keys and only moved,
+    /// hidden or shown; added and removed only when the number of rows changes or the content resets.
+    private var separators: [FilledView] = []
     /// Widen-only column widths of the open grid (section 9); empty when collapsed or hidden.
     private var columnWidths: [CGFloat] = []
     /// The cells and the decision which survive an output (ShanjieKit); this class only adds and removes
@@ -409,6 +412,7 @@ final class CandidatePanelAdapter: CandidatePanel {
                                 width: rowWidth, height: Metrics.capsuleHeight)
             if !update.reused[i] { row.addSubview(cell) }
         }
+        updateSeparators(rows: cells.count, selected: selected, rowWidth: rowWidth)
         if let t = VerticalLayout.thumb(first: first, total: total, visible: candidates.count, height: size.height) {
             let frame = NSRect(x: size.width - VerticalLayout.sideInset - VerticalLayout.thumbWidth, y: t.y,
                                width: VerticalLayout.thumbWidth, height: t.height)
@@ -447,6 +451,25 @@ final class CandidatePanelAdapter: CandidatePanel {
         if !window.isVisible { window.orderFrontRegardless() }
     }
 
+    /// Puts the separators where `VerticalLayout.separators` says; a view is made only for a gap that has none yet.
+    private func updateSeparators(rows: Int, selected: Int, rowWidth: CGFloat) {
+        // One device pixel, as Apple's (measured at 1x; the 2x thickness is inferred).
+        let scale = max(window.backingScaleFactor, 1)
+        let lines = VerticalLayout.separators(rows: rows, selected: selected, rowWidth: rowWidth,
+                                              capsuleHeight: Metrics.capsuleHeight, thickness: 1 / scale)
+        while separators.count > lines.count { separators.removeLast().removeFromSuperview() }
+        while separators.count < lines.count {
+            let view = FilledView(frame: .zero, color: .separatorColor)
+            row.addSubview(view)
+            separators.append(view)
+        }
+        for (view, line) in zip(separators, lines) {
+            let frame = NSRect(x: line.x, y: line.y, width: line.width, height: line.height)
+            if view.frame != frame { view.frame = frame }
+            if view.isHidden == line.visible { view.isHidden = !line.visible }
+        }
+    }
+
     /// Forgets everything on screen without hiding the window: the value of `candidate_vertical` changed (the bar, a prediction
     /// row, a vertical window, in any order) or the panel is hiding. The horizontal path's `shown*` and the vertical path's
     /// thumb and size all go; the next output starts from nothing.
@@ -463,6 +486,8 @@ final class CandidatePanelAdapter: CandidatePanel {
         columnWidths = []
         thumb?.removeFromSuperview()
         thumb = nil
+        separators.forEach { $0.removeFromSuperview() }
+        separators = []
         cellSet.reset().forEach { $0.removeFromSuperview() }
         decor.clear()
     }
