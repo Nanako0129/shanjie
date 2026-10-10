@@ -3,7 +3,7 @@
 
 use crate::learn::{context_key, local_day, Learner, Level, Record};
 use crate::learn_store::{LearnStore, Opened, StoreError, JOURNAL_MAX};
-use crate::predict::{predict, reading_matches, unit_of_syllable, Mode, Unit};
+use crate::predict::{predict, reading_matches_in, unit_of_syllable, Mode, Unit};
 use crate::lm::{decode_segment_learned, history, CappedLexicon, Demote, End, Learn, Lm, Profile};
 use crate::{decode_beam, Lexicon, NoLearning, BEAM_S1};
 use std::collections::{HashMap, HashSet};
@@ -28,6 +28,9 @@ pub const PREDICT_LONG_CAP: usize = 3;
 /// inside words this far back are queried last. Five is the user's choice; long names in the ACG pack were measured
 /// at 4, 5 and 6 (research log 2026-10-09).
 pub const PREDICT_BACK: usize = 5;
+/// Most unfinished units the abbreviation composer holds (V3 engine contract section 12.2). The longest names in the ACG pack
+/// are 10 characters and an abbreviation only helps up to the longest word; past this an occupied column replaces (rule 9).
+pub const ABBR_MAX_UNITS: usize = 10;
 /// Items in the prediction row.
 pub const PREDICT_MAX: usize = PAGE_SIZE;
 /// Items asked of `predict` for a start that some learned record could match (V3 engine contract section 10.2 step 1).
@@ -143,13 +146,17 @@ pub enum KeyKind {
     Home,
     End,
     Tab,
+    /// Only the vertical candidate window takes these (candidate-vertical contract section 2.2); the shell sends them
+    /// only then. Anywhere else they pass through and change nothing.
+    PageUp,
+    PageDown,
 }
 
 impl KeyKind {
-    /// ABI code (1..=13) to kind.
+    /// ABI code (1..=15) to kind.
     pub fn from_code(code: u32) -> Option<KeyKind> {
         use KeyKind::*;
-        [Char, Space, Enter, Backspace, Delete, Esc, Left, Right, Up, Down, Home, End, Tab]
+        [Char, Space, Enter, Backspace, Delete, Esc, Left, Right, Up, Down, Home, End, Tab, PageUp, PageDown]
             .get((code as usize).checked_sub(1)?)
             .copied()
     }
@@ -204,6 +211,9 @@ pub struct Output {
     pub first: u32,
     /// Length of the whole list; 0 when closed.
     pub total: u32,
+    /// Candidate-vertical contract section 2.2: 0 horizontal (or no candidates), 1 the vertical candidate window (fixed
+    /// when it opened), 2 the vertical prediction row, entered or not (it follows the setting on every output, section 2.4).
+    pub vertical: u32,
 }
 
 struct Fixed {
@@ -239,11 +249,15 @@ struct Cands {
     /// First visible grid row while expanded; keeps the selected row inside `GRID_ROWS`. Set to the
     /// selected page on expand, so the first row is the page the collapsed bar showed (s3b2 §9).
     top: usize,
+    /// Candidate-vertical contract section 2.2: the orientation at the moment the window opened. A vertical window
+    /// never expands; `first` is the list position of its first visible row.
+    vertical: bool,
+    first: usize,
 }
 
 impl Cands {
-    fn new(list: Vec<(String, usize)>) -> Cands {
-        Cands { list, sel: 0, expanded: false, top: 0 }
+    fn new(list: Vec<(String, usize)>, vertical: bool) -> Cands {
+        Cands { list, sel: 0, expanded: false, top: 0, vertical, first: 0 }
     }
 
     fn scroll(&mut self) {
@@ -258,7 +272,9 @@ impl Cands {
     /// (position of the first output candidate, how many are output).
     fn window(&self) -> (usize, usize) {
         let len = self.list.len();
-        if self.expanded {
+        if self.vertical {
+            (self.first, (len - self.first).min(PAGE_SIZE))
+        } else if self.expanded {
             let first = self.top * PAGE_SIZE;
             (first, (len - first).min(GRID_ROWS * PAGE_SIZE))
         } else {
@@ -295,6 +311,9 @@ pub struct Engine {
     syls: Vec<String>,
     cursor: usize,
     pend: [Option<char>; 3],
+    /// V3 engine contract section 12: with the abbreviation composer on, the unfinished units before `pend` (the last one),
+    /// in typing order. Never empty units; non-empty only while `pend` is.
+    pend_prev: Vec<[Option<char>; 3]>,
     fixed: Vec<Fixed>,
     display: String,
     cands: Option<Cands>,
@@ -303,6 +322,10 @@ pub struct Engine {
     pred_sel: Option<usize>,
     /// Whether the row is computed at all (default on; `set_prediction`).
     predict_on: bool,
+    /// Orientation the next candidate window opens with (default horizontal; `set_candidate_vertical`).
+    cand_vertical: bool,
+    /// Whether a symbol in an occupied column opens a new unfinished unit (default off; `set_abbreviation`, section 12).
+    abbr: bool,
     /// Test hook: false queries `PREDICT_SCAN` at every start once the learner has records (no gate).
     scan_gate: bool,
     /// Set by the key rules that recompute the row (section 1.1); `key` recomputes after the rule ran.
@@ -347,51 +370,82 @@ pub const PACK_ALL: u32 = PACK_ACG;
 /// A pack's overlay file inside the packs directory, in the order the packs are appended.
 const PACK_FILES: [(u32, &str); 1] = [(PACK_ACG, "acg-add.tsv")];
 
+/// Why a lexicon load failed, for messages: the file that could not be read and its `ErrorKind`, or the lexicon text
+/// that did not parse (`path` is the data directory the files came from, `detail` the `Lexicon` parse error). The C ABI
+/// and `EngineError` stay as they were; the plain functions map this to `LoadFailed`.
+#[derive(Debug)]
+pub enum LoadError {
+    Read { path: PathBuf, kind: std::io::ErrorKind },
+    Parse { path: PathBuf, detail: String },
+}
+
+impl std::fmt::Display for LoadError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            LoadError::Read { path, kind } => write!(f, "cannot read {} ({kind:?})", path.display()),
+            LoadError::Parse { path, detail } => write!(f, "cannot parse the lexicon in {}: {detail}", path.display()),
+        }
+    }
+}
+
+fn read_file(p: PathBuf) -> Result<String, LoadError> {
+    std::fs::read_to_string(&p).map_err(|e| LoadError::Read { kind: e.kind(), path: p })
+}
+
 /// The enabled packs' overlay rows in `dir`, concatenated; a pack whose file is missing contributes
 /// nothing (the engine is then identical to one without packs). An unreadable file is a load failure.
-pub fn read_packs(dir: &Path, mask: u32) -> Result<String, EngineError> {
+pub fn read_packs_detailed(dir: &Path, mask: u32) -> Result<String, LoadError> {
     let mut text = String::new();
     for (bit, name) in PACK_FILES {
         if mask & bit == 0 {
             continue;
         }
-        match std::fs::read_to_string(dir.join(name)) {
+        match read_file(dir.join(name)) {
             Ok(t) => {
                 if !text.is_empty() && !text.ends_with('\n') {
                     text.push('\n');
                 }
                 text.push_str(&t);
             }
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            Err(_) => return Err(EngineError::LoadFailed),
+            Err(LoadError::Read { kind: std::io::ErrorKind::NotFound, .. }) => {}
+            Err(e) => return Err(e),
         }
     }
     Ok(text)
 }
 
-/// `load_lexicon` with the rows of `packs` (`(directory, mask)`, see `read_packs`) after `sandhi-add.tsv`,
+/// `load_lexicon` with the rows of `packs` (`(directory, mask)`, see `read_packs_detailed`) after `sandhi-add.tsv`,
 /// plus those rows alone (empty with no pack), for `capping_overlay`. `None` or an empty mask: exactly
 /// `load_lexicon`. The engine and the evaluation CLI share this.
 pub fn load_lexicon_packs(data_dir: &Path, packs: Option<(&Path, u32)>) -> Result<(Arc<Lexicon>, String), EngineError> {
-    let base = std::fs::read_to_string(data_dir.join("mcbpmf-data.txt")).map_err(|_| EngineError::LoadFailed)?;
-    let overlay = std::fs::read_to_string(data_dir.join("overlay-add.tsv")).map_err(|_| EngineError::LoadFailed)?;
-    let sandhi = std::fs::read_to_string(data_dir.join("sandhi-add.tsv")).map_err(|_| EngineError::LoadFailed)?;
+    load_lexicon_packs_detailed(data_dir, packs).map_err(|_| EngineError::LoadFailed)
+}
+
+/// `load_lexicon_packs` with the failing file named (the evaluation CLI prints it).
+pub fn load_lexicon_packs_detailed(data_dir: &Path, packs: Option<(&Path, u32)>) -> Result<(Arc<Lexicon>, String), LoadError> {
+    let base = read_file(data_dir.join("mcbpmf-data.txt"))?;
+    let overlay = read_file(data_dir.join("overlay-add.tsv"))?;
+    let sandhi = read_file(data_dir.join("sandhi-add.tsv"))?;
     let mut text = join_overlays(overlay, &sandhi);
     let extra = match packs {
-        Some((dir, mask)) => read_packs(dir, mask)?,
+        Some((dir, mask)) => read_packs_detailed(dir, mask)?,
         None => String::new(),
     };
     if !extra.is_empty() {
         text = join_overlays(text, &extra);
     }
-    let lex = Lexicon::parse_with(&base, Some(&text)).map_err(|_| EngineError::LoadFailed)?;
+    let lex = Lexicon::parse_with(&base, Some(&text)).map_err(|e| LoadError::Parse { path: data_dir.to_path_buf(), detail: e.to_string() })?;
     Ok((Arc::new(lex), extra))
 }
 
 /// The text `CappedLexicon::new` takes as its overlay: `overlay-add.tsv` (read here, as `load_lm` always
 /// did), then the packs' rows `load_lexicon_packs` returned (no sandhi rows).
 pub fn capping_overlay(data_dir: &Path, pack_text: &str) -> Result<String, EngineError> {
-    let overlay = std::fs::read_to_string(data_dir.join("overlay-add.tsv")).map_err(|_| EngineError::LoadFailed)?;
+    capping_overlay_detailed(data_dir, pack_text).map_err(|_| EngineError::LoadFailed)
+}
+
+pub fn capping_overlay_detailed(data_dir: &Path, pack_text: &str) -> Result<String, LoadError> {
+    let overlay = read_file(data_dir.join("overlay-add.tsv"))?;
     Ok(if pack_text.is_empty() { overlay } else { join_overlays(overlay, pack_text) })
 }
 
@@ -450,12 +504,15 @@ impl Engine {
             syls: Vec::new(),
             cursor: 0,
             pend: [None; 3],
+            pend_prev: Vec::new(),
             fixed: Vec::new(),
             display: String::new(),
             cands: None,
             pred: Vec::new(),
             pred_sel: None,
             predict_on: true,
+            cand_vertical: false,
+            abbr: false,
             scan_gate: true,
             pred_dirty: false,
             left: String::new(),
@@ -705,8 +762,56 @@ impl Engine {
     /// on recomputes it, so a row that fits section 1.1 shows at once. Returns the snapshot.
     pub fn set_prediction(&mut self, on: bool) -> Result<Output, EngineError> {
         self.predict_on = on;
+        if !on {
+            self.drop_units(); // the units' only way out is the row (section 12.1)
+        }
         self.recompute_pred(); // clears first; returns empty while off
         self.handled()
+    }
+
+    /// Orientation of the candidate windows that open from now on (default horizontal; candidate-vertical contract
+    /// section 2.2). A candidate window already open keeps the orientation it opened with. A prediction row has no opening
+    /// and follows the setting on every output (section 2.4), so a row on screen is re-rendered in the new orientation in
+    /// the returned snapshot; with a candidate window open or nothing shown the snapshot equals the output before the call.
+    pub fn set_candidate_vertical(&mut self, on: bool) -> Result<Output, EngineError> {
+        self.cand_vertical = on;
+        self.handled()
+    }
+
+    /// Whether a symbol typed into an occupied column opens a new unfinished unit (default off, V3 engine contract section 12).
+    /// Turning it off with two or more units drops them all (as Esc does); otherwise nothing changes. Returns the snapshot.
+    pub fn set_abbreviation(&mut self, on: bool) -> Result<Output, EngineError> {
+        self.abbr = on;
+        if !on {
+            self.drop_units();
+        }
+        self.handled()
+    }
+
+    /// What `set_prediction(false)` and `set_abbreviation(false)` do with two or more unfinished units: they go, the row
+    /// with them, as with Esc (which goes through `clear_pend`); the composition, fixed words and cursor stay.
+    fn drop_units(&mut self) {
+        if !self.pend_prev.is_empty() {
+            self.clear_pend();
+            self.clear_pred();
+        }
+    }
+
+    /// Section 12.1: a new unit opens only with the setting on, the row on (it needs a model to show) and the cursor at
+    /// the end, and only below `ABBR_MAX_UNITS`; the completed syllables plus the units stay within `MAX_SYLLABLES`.
+    fn abbr_active(&self) -> bool {
+        let units = self.pend_prev.len() + 1;
+        self.abbr
+            && self.predict_on
+            && self.lm.is_some()
+            && self.cursor == self.syls.len()
+            && units < ABBR_MAX_UNITS
+            && self.syls.len() + units < MAX_SYLLABLES
+    }
+
+    fn clear_pend(&mut self) {
+        self.pend = [None; 3];
+        self.pend_prev.clear();
     }
 
     /// Switch the profile (default chat; remembered even before a model is loaded), recompute the
@@ -778,6 +883,7 @@ impl Engine {
             Ok(o) if std::mem::take(&mut self.pred_dirty) => {
                 self.recompute_pred();
                 (o.candidates, o.selected, o.total) = self.pred_view();
+                o.vertical = self.pred_vertical();
             }
             Ok(_) => {}
         }
@@ -787,6 +893,12 @@ impl Engine {
     fn clear_pred(&mut self) {
         self.pred.clear();
         self.pred_sel = None;
+    }
+
+    /// Candidate-vertical contract section 2.4: the output value of a prediction row, 2 when the setting is vertical and
+    /// there is a row, else 0. Read from the current setting, not fixed at any time: the row has no opening.
+    fn pred_vertical(&self) -> u32 {
+        if self.cand_vertical && !self.pred.is_empty() { 2 } else { 0 }
     }
 
     /// The row as output fields (candidates, selected, total); `columns` and `first` stay 0.
@@ -803,15 +915,21 @@ impl Engine {
         let (Some(st), true) = (self.lm.clone(), self.predict_on && self.cursor == n && self.cands.is_none()) else { return };
         let idx = st.capped.predict_index(&st.lm);
         let lam = self.profile.lambda();
-        let pending: Vec<char> = self.pend.iter().flatten().copied().collect();
+        // The unfinished units in order (one without the abbreviation composer); two or more can only read as an abbreviation.
+        let pending: Vec<Vec<char>> =
+            self.pend_prev.iter().chain([&self.pend]).map(|u| u.iter().flatten().copied().collect::<Vec<_>>()).filter(|u| !u.is_empty()).collect();
+        let multi = pending.len() > 1;
+        // One unit reads the same in both modes; only two or more can be an abbreviation.
+        let mode = if multi { Mode::PA } else { Mode::P };
         // Section 11: the last two path tokens' starts, and the start of every earlier one within `PREDICT_BACK`, far to
         // near. Positions inside words within `PREDICT_BACK` come last, except inside a word the user fixed: choosing
         // such an item would take the user's choice (and its pending learn) apart.
-        let starts = self.path_starts();
+        // Two or more units match nothing that holds a complete syllable (section 12.3): only the cursor start is queried.
+        let starts = if multi { Vec::new() } else { self.path_starts() };
         let k = starts.len();
         let long_starts: Vec<usize> =
             starts.iter().enumerate().filter(|&(i, &s)| i + 2 >= k || s + PREDICT_BACK >= n).map(|(_, &s)| s).collect();
-        let mid: Vec<usize> = (n.saturating_sub(PREDICT_BACK)..n)
+        let mid: Vec<usize> = (n.saturating_sub(PREDICT_BACK)..if multi { 0 } else { n })
             .filter(|&p| !long_starts.contains(&p) && !self.fixed.iter().any(|f| f.start < p && p < f.end))
             .collect();
         let disp: Vec<char> = self.display.chars().collect();
@@ -825,9 +943,7 @@ impl Engine {
             if units.len() != n - s {
                 return Vec::new();
             }
-            if !pending.is_empty() {
-                units.push(Unit { chars: pending.clone(), done: false, tone: None });
-            }
+            units.extend(pending.iter().map(|chars| Unit { chars: chars.clone(), done: false, tone: None }));
             if units.is_empty() {
                 return Vec::new();
             }
@@ -836,8 +952,8 @@ impl Engine {
             let v = history(if key == crate::learn::SENTINEL { "" } else { &key }, &st.lm);
             let shown: String = disp[off(s)..off(n)].iter().collect();
             // A start no record can match scans 9 and weighs nothing: its row is the slice-1 one, cheaper.
-            let gate = learned && (!self.scan_gate || self.learner.records().iter().any(|r| reading_matches(&units, &r.reading)));
-            predict(idx, &st.lm, lam, v, &units, Mode::P, if gate { PREDICT_SCAN } else { PREDICT_MAX })
+            let gate = learned && (!self.scan_gate || self.learner.records().iter().any(|r| reading_matches_in(&units, &r.reading, mode)));
+            predict(idx, &st.lm, lam, v, &units, mode, if gate { PREDICT_SCAN } else { PREDICT_MAX })
                 .into_iter()
                 .enumerate()
                 .filter_map(|(i, (word, _, _, reading))| {
@@ -889,7 +1005,7 @@ impl Engine {
         let Pred { word, reading, start, key, .. } = self.pred.swap_remove(i);
         let pre = self.learning.then(String::new);
         self.clear_pred();
-        self.pend = [None; 3];
+        self.clear_pend();
         let (m, end) = (reading.len(), self.cursor);
         self.fixed.retain(|f| !(f.start < end && start < f.end));
         self.syls.splice(start..end, reading);
@@ -909,7 +1025,7 @@ impl Engine {
         self.left.clear();
         self.syls.clear();
         self.cursor = 0;
-        self.pend = [None; 3];
+        self.clear_pend();
         self.fixed.clear();
         self.display.clear();
         self.path.clear();
@@ -918,7 +1034,7 @@ impl Engine {
     }
 
     fn pending(&self) -> String {
-        self.pend.iter().flatten().collect()
+        self.pend_prev.iter().chain([&self.pend]).flatten().flatten().collect()
     }
 
     /// The composition as shown: the display text with the unfinished symbols at the cursor, and the cursor after
@@ -949,7 +1065,11 @@ impl Engine {
                 (list, sel, 0, 0, total)
             }
         };
-        Output { handled, commit, preedit, cursor_utf16, candidates, selected, columns, first, total }
+        let vertical = match &self.cands {
+            Some(c) => c.vertical as u32,
+            None => self.pred_vertical(),
+        };
+        Output { handled, commit, preedit, cursor_utf16, candidates, selected, columns, first, total, vertical }
     }
 
     /// Recompute the display string: free segments decoded top-1, fixed words in between (§3.1).
@@ -1060,6 +1180,11 @@ impl Engine {
     fn dispatch(&mut self, k: Key) -> Result<Output, EngineError> {
         let m = k.modifiers;
         let is_char = k.kind == KeyKind::Char;
+        // Candidate-vertical contract section 2.2: Page Up / Down mean something only in an open vertical window, without
+        // modifiers; anywhere else the key changes nothing (not even the prediction row) and is not handled.
+        if matches!(k.kind, KeyKind::PageUp | KeyKind::PageDown) && !(m == 0 && self.cands.as_ref().is_some_and(|c| c.vertical)) {
+            return self.passthrough(String::new());
+        }
         // V3 section 10.3: ⌘⌫ while the prediction row is entered forgets the selected item (before rule 1).
         if let (KeyKind::Backspace, true, Some(sel)) = (k.kind, m & MOD_COMMAND != 0, self.pred_sel) {
             let Pred { word, reading, .. } = &self.pred[sel];
@@ -1095,12 +1220,17 @@ impl Engine {
                 }
                 (KeyKind::Left, _) => self.pred_sel = Some(sel.saturating_sub(1)),
                 (KeyKind::Right, _) => self.pred_sel = Some((sel + 1).min(len - 1)),
+                // Candidate-vertical contract section 2.4: in the vertical row Up / Down move like Left / Right, stopping at both ends.
+                (KeyKind::Up, _) if self.cand_vertical => self.pred_sel = Some(sel.saturating_sub(1)),
+                (KeyKind::Down, _) if self.cand_vertical => self.pred_sel = Some((sel + 1).min(len - 1)),
                 (KeyKind::Tab, _) if m & MOD_SHIFT == 0 => self.pred_sel = Some((sel + 1).min(len - 1)),
                 (KeyKind::Tab, _) | (KeyKind::Esc, _) => self.pred_sel = None,
                 (KeyKind::Enter, _) => return self.choose_pred(sel),
                 _ => self.pred_sel = None,
             }
-            if matches!(k.kind, KeyKind::Left | KeyKind::Right | KeyKind::Tab | KeyKind::Esc) {
+            if matches!(k.kind, KeyKind::Left | KeyKind::Right | KeyKind::Tab | KeyKind::Esc)
+                || (self.cand_vertical && matches!(k.kind, KeyKind::Up | KeyKind::Down))
+            {
                 return self.handled();
             }
         }
@@ -1123,7 +1253,7 @@ impl Engine {
         };
         if let Some(p) = punct {
             // s3d §1: into the composition at the cursor, not committed.
-            self.pend = [None; 3];
+            self.clear_pend();
             self.cands = None;
             return self.insert_token(format!("{PUNCT_PREFIX}{p}"), Some(p.to_string()));
         }
@@ -1142,19 +1272,29 @@ impl Engine {
         if has_pending {
             // 9-13
             if let Some((col, sym)) = zy {
+                // Section 12: an occupied column opens the next unit instead of being replaced.
+                if self.pend[col].is_some() && self.abbr_active() {
+                    self.pend_prev.push(std::mem::replace(&mut self.pend, [None; 3]));
+                }
                 self.pend[col] = Some(sym);
                 self.pred_dirty = true;
             } else if let Some(t) = tone {
-                return self.finish_syllable(t, old);
+                if self.pend_prev.is_empty() {
+                    return self.finish_syllable(t, old);
+                }
+                self.pred = old; // two or more units: tone and space do nothing (section 12.2)
             } else if k.kind == KeyKind::Backspace {
                 // Row 11: the last symbol in display order (final, then medial, then initial), as Apple Zhuyin and
                 // McBopomofo do (measured 2026-10-06: ㄉㄨㄟ, ㄅ replaces ㄉ, then Backspace gives ㄅㄨ, then ㄅ).
                 if let Some(col) = (0..3).rev().find(|&c| self.pend[c].is_some()) {
                     self.pend[col] = None;
                 }
+                if self.pend.iter().all(Option::is_none) {
+                    self.pend_prev.pop().into_iter().for_each(|u| self.pend = u); // an emptied unit goes
+                }
                 self.pred_dirty = true;
             } else if k.kind == KeyKind::Esc {
-                self.pend = [None; 3];
+                self.clear_pend();
             } else if k.kind == KeyKind::Enter {
                 return self.commit_enter(m); // 12a, 12b
             } else {
@@ -1212,6 +1352,46 @@ impl Engine {
         let (len, sel, cols) = (c.list.len(), c.sel, PAGE_SIZE);
         let digit = (k.kind == KeyKind::Char && k.modifiers == 0 && ('1'..='9').contains(&k.ch))
             .then(|| k.ch as usize - '1' as usize);
+        if c.vertical {
+            // Candidate-vertical contract section 2.2: `first` is the first visible row, nine rows (fewer at the end).
+            let first = c.first;
+            let last_first = len.saturating_sub(PAGE_SIZE); // the first row that still shows the last candidate in the ninth
+            match (k.kind, digit) {
+                (KeyKind::Char, Some(d)) => {
+                    if first + d < len {
+                        self.choose(first + d)?;
+                    }
+                }
+                (KeyKind::Down | KeyKind::Right | KeyKind::Space, _) => {
+                    c.sel = (sel + 1).min(len - 1);
+                    if c.sel >= first + PAGE_SIZE {
+                        c.first = c.sel + 1 - PAGE_SIZE;
+                    }
+                }
+                (KeyKind::Up | KeyKind::Left, _) => {
+                    c.sel = sel.saturating_sub(1);
+                    c.first = first.min(c.sel);
+                }
+                (KeyKind::PageDown, _) if first < last_first => {
+                    c.first = (first + PAGE_SIZE).min(last_first);
+                    // The selection goes to the new first row but never backwards: when the move was clamped the new first
+                    // row can be above the selection (10 items, selection on 8: it stays on 8).
+                    c.sel = sel.max(c.first);
+                }
+                (KeyKind::PageUp, _) if first > 0 => {
+                    c.first = first.saturating_sub(PAGE_SIZE);
+                    c.sel = c.first;
+                }
+                (KeyKind::PageDown | KeyKind::PageUp, _) => {}
+                (KeyKind::Enter, _) => self.choose(sel)?,
+                (KeyKind::Esc | KeyKind::Backspace, _) => self.cands = None,
+                _ => {
+                    self.cands = None;
+                    return Ok(false);
+                }
+            }
+            return Ok(true);
+        }
         if c.expanded {
             let (row, col, last_row) = (sel / cols, sel % cols, (len - 1) / cols);
             // Next row, same column; a short last row ends at its last candidate.
@@ -1311,7 +1491,7 @@ impl Engine {
             self.pred = old; // section 1.1: a syllable the lexicon lacks changes nothing
             return self.handled();
         }
-        self.pend = [None; 3];
+        self.clear_pend();
         self.pred_dirty = true;
         self.insert_token(syl, None)
     }
@@ -1391,7 +1571,7 @@ impl Engine {
                     list.push((w, 1));
                 }
             }
-            self.cands = Some(Cands::new(list));
+            self.cands = Some(Cands::new(list, self.cand_vertical));
             return;
         }
         for l in (1..=self.lex.max_len.min(avail)).rev() {
@@ -1403,7 +1583,7 @@ impl Engine {
             }
         }
         if !list.is_empty() {
-            self.cands = Some(Cands::new(list));
+            self.cands = Some(Cands::new(list, self.cand_vertical));
         }
     }
 

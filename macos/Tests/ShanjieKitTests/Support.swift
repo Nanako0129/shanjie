@@ -39,9 +39,9 @@ enum TestData {
             let src = repo.appendingPathComponent(f.source)
             guard FileManager.default.fileExists(atPath: src.path) else {
                 XCTFail("""
-                    \(f.source) is missing. The lexicon is in git; the model is the model-v4 release asset: \
-                    gh release download model-v4 -R Nanako0129/shanjie -p bigram.sjlm -D data/lm
-                    classes.sjc: gh release download classes-v2 -R Nanako0129/shanjie -p classes.sjc -D data/lm
+                    \(f.source) is missing. The lexicon is in git; the model is the model-v5 release asset: \
+                    gh release download model-v5 -R Nanako0129/shanjie -p bigram.sjlm -D data/lm
+                    classes.sjc: gh release download classes-v3 -R Nanako0129/shanjie -p classes.sjc -D data/lm
                     """, file: file, line: line)
                 return nil
             }
@@ -142,6 +142,8 @@ final class FakePanel: CandidatePanel {
     private(set) var columns = 0
     private(set) var first = 0
     private(set) var total = 0
+    /// The `vertical` of the last show: 0 horizontal, 1 vertical candidate window, 2 vertical prediction row.
+    private(set) var vertical = 0
     /// The glassTint of every show, in order.
     private(set) var glassTints: [Double] = []
     var onSelect: ((Int) -> Void)?
@@ -150,7 +152,7 @@ final class FakePanel: CandidatePanel {
 
     func setGlassTint(_ glassTint: Double) { retints.append(glassTint) }
 
-    func show(_ candidates: [String], notes: [String?], selected: Int, columns: Int, first: Int, total: Int,
+    func show(_ candidates: [String], notes: [String?], selected: Int, columns: Int, first: Int, total: Int, vertical: Int,
               lineRect: NSRect?, appearance: NSAppearance?, glassTint: Double) {
         glassTints.append(glassTint)
         self.lineRect = lineRect
@@ -158,6 +160,7 @@ final class FakePanel: CandidatePanel {
         self.columns = columns
         self.first = first
         self.total = total
+        self.vertical = vertical
         visible = true
         items = candidates
         self.notes = notes

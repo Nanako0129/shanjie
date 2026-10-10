@@ -108,9 +108,12 @@ v4 日期 2026-10-03。v1 經 `pilotfish:plan-verifier`（REVISE，4 項）與 `
 **v0.3.0（範圍 2026-10-08 定案）。** 收進：S2h 看前文選字與 #57 前文讀取修正、model-v4（S2n＋S2f＋指紋條目）、S2k 詞類回退（classes-v2）、S4 全域學習層關閉（§13）、SW 敏感字降權第一片、V3 即時預測第一片（含開關與記住選擇；Tab 在預測列出現時進入預測列）、候選窗跟著 App 外觀、候選列高度。說明 `docs/releases/v0.3.0.md`。
 - **沒有收進的**：
   - **改選後其他字不動**（`docs/contracts/repick-freeze.md`，分支 `feat/repick-freeze`）：四次修訂後，第五次 review 量到修訂四讓「改選後繼續打字」比修訂三（fa0ae06）差（開發集模擬「刪一個雙音節詞、補打、改選第一字」，整句正確 1500 → 1438／2165）。使用者 2026-10-08 指出「版控」這類問題的根本可能是缺詞：「版控」不在詞庫（量過），改選固定只讓「控」不動，下次同前文再打是「版空」（量過）。決定先做新詞 B（從改選記住新詞組），改選固定暫停，之後照蘋果實測（含改選後連續打字）重新評估。
-  - **可省略韻母**（V3 第二片）：使用者 2026-10-08 選「今天發」時，兩個選項都寫明它移到之後（v0.3.1 或下一片），出貨前先重查。原本「v0.3.0 前綴補完預設開、縮寫做成設定預設關」那句以此為準更正。
+  - **可省略韻母**（V3 第二片）：使用者 2026-10-08 選「今天發」時，兩個選項都寫明它移到之後（v0.3.1 或下一片），出貨前先重查。原本「v0.3.0 前綴補完預設開、縮寫做成設定預設關」那句以此為準更正。〔狀態，2026-10-10〕使用者提前做：契約 `docs/contracts/v3-engine.md` §12（修訂三，plan-verifier 兩次 REVISE 後收尾 READY），選單與設定視窗都在「即時預測」之後，預設關。已合併（PR #98），收進 v0.4.0。〔2026-10-10〕使用者實機後決定不出貨、先隱藏（整句縮寫沒做；卡鍵推論是多個單位時空白鍵與聲調鍵被吃掉，沒有重現），見 v0.4.0 那段。
 
-**下一版（尚未發版）：動漫與遊戲詞包。** 契約 `docs/contracts/acg-pack.md`（A 片：詞包與引擎）。約 1.5 萬個作品名與角色名，獨立成選用詞包 `Resources/packs/acg-add.tsv`，選單「動漫與遊戲詞」，預設開（使用者 2026-10-09）。來源是中文維基百科的公共轉換組、作品條目的人物與標題（作品清單來自 Wikidata），授權 CC BY-SA 4.0，署名 Wikipedia 貢獻者（`LICENSES/data.md`）。一般評測集合（dev302、打字測驗、錯字回報）開關前後改壞 0；建置時逐一解碼詞包詞的讀音，原本第一名是詞庫裡的詞、開詞包後換成詞包詞的，丟掉詞包詞（使用者 2026-10-10 決定；只檢查單獨的讀音，句子裡的影響看一般評測集合）；詞包自己的評測集合在 `eval/dev/acg/`。B（CI 排程與詞包 Release）、C（使用者端獨立更新）待補。
+**v0.4.0（使用者 2026-10-10 定範圍；不發 v0.3.1；原定當天出貨，使用者同日決定延後，等候選窗直排一起出）。** 收進：安裝程式 v2（更新時不再重新註冊，不再弄壞 Caps Lock 切換）、`brew upgrade` 後結束舊程序、設定視窗、動漫與遊戲詞包（A、A2 片，下一段）、即時預測起點往回 5 個音節、Enter 送出未完成的注音、model-v5＋classes-v3（`docs/contracts/model-v5.md`；詞包詞進斷詞詞彙、加法計數，舊詞沿用 classes-v2 的詞類）、候選窗與即時預測列可選直排（`docs/contracts/candidate-vertical.md`，設定視窗「候選窗方向」，預設橫排）。說明 `docs/releases/v0.4.0.md`。
+- **沒有收進的**：可省略韻母（程式已合併，但使用者 2026-10-10 決定不出貨、先隱藏：使用者回報沒辦法整句縮寫、某些注音之後會卡鍵；卡鍵的原因推論是 §12.2 有兩個以上單位時吃掉空白鍵與聲調鍵，沒有另外重現；App 傳 `showsAbbreviation: false`，選單與設定視窗都不顯示，一律關）；「宿儺」這類語料很少出現的名字（model-v5 契約 §7，要另寫契約）；新詞 B；App 沙盒（v0.5.0）。
+
+**v0.4.0 的動漫與遊戲詞包。** 契約 `docs/contracts/acg-pack.md`（A 片：詞包與引擎；A2 片：年度動畫清單、人名抽取、選單灰字日期）。約 3 萬個作品名與角色名，獨立成選用詞包 `Resources/packs/acg-add.tsv`，選單「動漫與遊戲詞」，預設開（使用者 2026-10-09）。來源是中文維基百科的公共轉換組、作品條目的人物與標題（作品清單來自 Wikidata 的前 400 部與維基百科最近 7 年的年度動畫清單），授權 CC BY-SA 4.0，署名 Wikipedia 貢獻者（`LICENSES/data.md`）。一般評測集合（dev302、打字測驗、錯字回報）開關前後改壞 0；建置時逐一解碼詞包詞的讀音，原本第一名是詞庫裡的詞、開詞包後換成詞包詞的，丟掉詞包詞（使用者 2026-10-10 決定；只檢查單獨的讀音，句子裡的影響看一般評測集合）。〔換成 model-v5 後，使用者決定讓 193 個這類詞包名字排第一（`docs/contracts/model-v5.md` §9）；下次重建詞包前要先改這條規則，否則會把它們丟掉。〕詞包自己的評測集合在 `eval/dev/acg/`。B（CI 排程與詞包 Release）、C（使用者端獨立更新）待補。
 
 **v0.3.0 時的規劃（保留作紀錄；排入前各自寫契約、過 plan-verifier）。**
 - **發版**：推 tag 前寫好 `docs/releases/v0.3.0.md`（中文、手寫）並合併；發版後確認 Release 說明等於這個檔、v0.3.0 標成 Latest（`docs/contracts/release-notes.md` §4 第 5 項，`release.yml` 的 publish 路徑第一次真的跑）。
@@ -188,7 +191,7 @@ v4 日期 2026-10-03。v1 經 `pilotfish:plan-verifier`（REVISE，4 項）與 `
 - 組字區上限改成可設定（使用者 2026-10-05），預設對照蘋果注音或小麥注音。目前是 40 個音節。
 - 真正的句首判斷（issue #30）。
 - 詞類回退實驗（`exp/word-classes`，Brown 分群 K=512）：dev302 chat 238 → 250、formal 237 → 254。要在 S2n 的乾淨計數上重跑，再決定要不要成片。
-  - 已在 model-v3 上重跑並做進 Python 參考實作與 Rust 核心（`docs/contracts/s2k-word-classes.md`，結果見 `docs/research-log.md` 2026-10-08）；GitHub Release `classes-v1` 已建（使用者 2026-10-08 同意，獨立的 Release；下載比對雜湊相符），CI、`release.yml`、`build-app.sh` 與 golden 測試都釘它的雜湊（`data/classes.sjc.sha256`），說明在 `docs/data-files.md`。〔更正，2026-10-08〕現在釘的是 classes-v2（配 model-v4，`docs/contracts/model-v4.md`）。
+  - 已在 model-v3 上重跑並做進 Python 參考實作與 Rust 核心（`docs/contracts/s2k-word-classes.md`，結果見 `docs/research-log.md` 2026-10-08）；GitHub Release `classes-v1` 已建（使用者 2026-10-08 同意，獨立的 Release；下載比對雜湊相符），CI、`release.yml`、`build-app.sh` 與 golden 測試都釘它的雜湊（`data/classes.sjc.sha256`），說明在 `docs/data-files.md`。〔更正，2026-10-08〕現在釘的是 classes-v2（配 model-v4，`docs/contracts/model-v4.md`）。〔更正，2026-10-10〕v0.4.0 起釘的是 classes-v3（配 model-v5，`docs/contracts/model-v5.md` §9）。
   - 選字記憶的全域層因此先關（`s4-learning.md` §13）。v0.3.0 之後重新研究全域層：要能分辨「使用者想翻的平手」和「模型已經判對的平手」，再用 `global_eps_table` 量。
 - **訓練切分與詞庫擴充**（issue #47，Willseed；2026-10-06 的覆蓋量測與文獻調查見研究紀錄同日）。排在前文接進 n-gram、S2n 計數重建之後，寫契約、過 plan-verifier。
   - 覆蓋：dev302 正解在前 8 名約 98%，前 64 名缺的 2 句都是「拭鏡布」。這組集合的主要錯誤是排序，B 的效果要另外找「組不出來的新詞」量。
@@ -205,7 +208,8 @@ v4 日期 2026-10-03。v1 經 `pilotfish:plan-verifier`（REVISE，4 項）與 `
   - 安裝註冊在沙盒裡做得到，暫時不需要不在沙盒裡的輔助程式。
   - 學習資料用 container 移轉，是「搬」而且只搬一次；偏好設定由系統自動搬。
   - 移轉清單的路徑和 bundle ID 無關，所以本機組建用另一個 bundle ID 還不夠：只有正式 ID 的組建放移轉清單，否則任何沙盒組建（例如 `make selftest-bundled`）都會把真正的學習資料搬走。這一點是推論：量到的是一個拋棄式 ID 搬走了那份資料。
-- **設定視窗**（契約 `docs/contracts/settings-window.md`）：選單的「善解設定…」開一個視窗，放選單的所有選項，另加候選窗玻璃深淺滑桿；使用者 2026-10-10 實機驗收 OK，排進 v0.3.1。
+- **設定視窗**（契約 `docs/contracts/settings-window.md`）：選單的「善解設定…」開一個視窗，放選單的所有選項，另加候選窗玻璃深淺滑桿；使用者 2026-10-10 實機驗收 OK，收進 v0.4.0（不發 v0.3.1）。
+- **常見廠商名與產品名**（使用者 2026-10-10：「常見廠商名和產品名需要納入詞庫」；起因是「酷澎」打成「酷朋」，酷澎不在詞庫）：v0.4.0 之後寫契約，來源、授權與放基本詞庫或選用詞包由使用者決定。
 - **新詞**（三個方向都要；B 是 v0.3.0 之後的第一片，使用者 2026-10-08）：
   - A：從語料自動找出詞庫沒收的詞（例如「版控」這類口語縮寫），併進詞庫完整確認那一片；先量口語縮寫的缺漏率、找公開的口語語料。
   - C：使用者手動加詞。
@@ -554,7 +558,7 @@ v4 日期 2026-10-03。v1 經 `pilotfish:plan-verifier`（REVISE，4 項）與 `
   7. **效能**：release 重播（載入 LM）每鍵 p95 < 16 ms；回報 LM 載入時間與引擎（詞庫＋上限後詞庫＋LM）的峰值 RSS。上限後詞庫可以和原始詞庫共用字串池，由 executor 決定。
   8. 模型檔 ≤ 100 MB（目前 80,040,411 bytes）。
   9. **保留集**（片結束，只由 verifier 跑一次）：`--set holdout` 在 chat 與 formal 的 top1 與 oracle@64，只回數字。A1a 要求 oracle@64 ≥ 98%；低於時照實回報、記為 A1a 未達成，由使用者決定，不是這片的停止條件。報告時註明 LM 模式的 oracle 用寬鬆對照，S1 的 `extra` 行（97.8%）用完全相符。
-- **模型檔不進 repo**（`data/lm/` 在 `.gitignore`）：從 GitHub Release `model-v4` 下載（`gh release download model-v4 -R Nanako0129/shanjie -p bigram.sjlm -D data/lm`，CC BY-SA 4.0，model-v4 自 2026-10-08 起）；SHA-256 `06768f2949cf8b135d1f591056ffb16f3ae3f6d70aef5911ffd55de134250322`。需要它的測試在檔案不存在時**直接失敗**，訊息說明怎麼取得，不得默默跳過。隨輸入法散布的方式在 S3b（打包進 app）。
+- **模型檔不進 repo**（`data/lm/` 在 `.gitignore`）：從 GitHub Release `model-v5` 下載（`gh release download model-v5 -R Nanako0129/shanjie -p bigram.sjlm -D data/lm`，CC BY-SA 4.0，model-v5 自 v0.4.0 起；v0.3.0 用的 model-v4 是 `06768f29…`）；SHA-256 `f81a021e5dea08dc48dbca1db0d0f63517bb6f0f3e1b20fdac631542d13f45af`。需要它的測試在檔案不存在時**直接失敗**，訊息說明怎麼取得，不得默默跳過。隨輸入法散布的方式在 S3b（打包進 app）。
 - **範圍外。** 改分數、參數、剪枝或語料；候選清單用 LM 排序；trigram；學習（S4）。
 - **預算。** executor、security-executor 各 1 回合＋1 次修正。
 - **停止。** 驗收 2、3、4 有任何差異：回報第一個不同的列與原因，不得修改 Python 參考實作或對照檔來湊。峰值 RSS 超過 300 MB：回報實測值與瓶頸。
