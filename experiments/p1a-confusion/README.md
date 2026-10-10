@@ -83,7 +83,7 @@ python3 experiments/p1a-confusion/fuse.py accuracy --work $W
 python3 experiments/p1a-confusion/fuse.py stage 1 --work $W --out $W/stage1.json
 ```
 
-`accuracy` 印 §3 第 2 項的表（分類器、最常見字、n-gram 第一名）與停用清單。`stage 1` 印啟用的讀音、兩種設定凍結的 (μ, τ)、cvtune 聊天的「再＞在」「在＞再」前後與停止規則的 PASS／STOP，以及合計 top1 對 n-gram 的增減。**STOP 就停在這裡寫結論**（契約 §2.4）。
+`accuracy` 印 §3 第 2 項的表（分類器、最常見字、n-gram 第一名）與停用清單。`stage 1` 印啟用的讀音、兩種設定凍結的 (μ, τ)、cvtune 聊天的「再＞在」「在＞再」前後與停止規則的 PASS／STOP，以及合計 top1 對 n-gram 的增減。**STOP 就停在這裡寫結論**（契約 §2.4）。`f(c)` 用 log10（和 n-gram 分數 `s` 同一個底，`s + μ·f` 才是同單位）。`stage` 把決定（`decision` PASS／STOP 與 `reasons`：階段停止規則、過半分類器停用、階段 3 聊天合計增幅 < +0.2 個百分點）寫進 `stageN.json`；凍結的 τ 不設門檻時存成 JSON 的 `Infinity`。
 
 ## 第 2、3 階段
 
@@ -99,7 +99,7 @@ PASS 才繼續。階段 2：`--readings ㄗㄨㄛˋ` 重跑 `extract`、`fit`（
 python3 experiments/p1a-confusion/fuse.py report --work $W --stage $W/stageN.json --sets cvtune,wikitune,dev302,typing,reported,discordtune
 ```
 
-印：每個集合 × 兩種設定的 `evalstats` 表格（分類器、詞庫分數拉平、μ = 0 三組，基準是 n-gram 第一名）、凍結的 (μ, τ)、門檻觸發比例、前 8 名 oracle、各讀音字位正確率（基準→新）、錯字只在功能字的列數及其中錯在多字詞裡與修好的列數、第一名換成或換掉不在類別表的字的列數、加不加前文 `f(c)` 有變的列數（錯字回報與 discordtune 都必須 ≥ 1）、非零特徵數與大小，最後是 §4 的逐項 PASS／FAIL 與一行結論。報告裡沒有任何句子。
+印：每個集合 × 兩種設定的 `evalstats` 表格（分類器、詞庫分數拉平、μ = 0 三組，基準是 n-gram 第一名）、凍結的 (μ, τ)、門檻觸發比例、前 8 名 oracle、各讀音字位正確率（基準→新）、錯字只在功能字的列數及其中錯在多字詞裡與修好的列數、第一名換成或換掉不在類別表的字的列數、加不加前文 `f(c)` 有變的列數（錯字回報與 discordtune 都必須 ≥ 1）、非零特徵數與大小，最後是 §4 的逐項 PASS／FAIL 與一行結論。報告裡沒有任何句子。**`stageN.json` 記的決定不是 PASS（或沒有記）時，結論一律是 STOP、不判斷 §4**，不會印「做進核心」。任何指名的集合缺檔（`scored\`、`eq\` 的 `<集合>.<設定>.jsonl`）或集合名不在 `cvtune wikitune dev302 typing reported discordtune`，都以非零結束碼停下並印出路徑，不會略過。
 
 ## 實作時決定的細節（契約沒寫死的地方）
 

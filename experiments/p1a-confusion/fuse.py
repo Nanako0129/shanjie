@@ -33,12 +33,17 @@ def load_rows(path):
 
 
 def load_sets(work, sub, names, profiles=PROFILES):
+    """Every named set must exist for every profile: an unknown name or a missing file is an error, never skipped."""
     out = {p: {} for p in profiles}
+    for n in names:
+        if n not in SETS:
+            sys.exit(f"unknown set {n!r} (known: {', '.join(SETS)})")
     for p in profiles:
         for n in names:
             f = os.path.join(work, sub, f"{n}.{p}.jsonl")
-            if os.path.exists(f):
-                out[p][n] = load_rows(f)
+            if not os.path.exists(f):
+                sys.exit(f"missing input file: {f}")
+            out[p][n] = load_rows(f)
     return out
 
 
@@ -112,16 +117,20 @@ def cmd_stage(a):
     major = {r: m.meta["majority"] for r, m in models.items()}
     by_prof = load_sets(a.work, "scored", list(TUNING))
     res = p1a.run_stage(a.stage, by_prof, major)
-    json.dump(res, open(a.out, "w", encoding="utf-8"), indent=1, ensure_ascii=False)
-    print(json.dumps(res, ensure_ascii=False))
     chat = by_prof["chat"]
     pooled = [r for n in TUNING for r in chat[n]]
     base = sum(is_ok(r, 0) for r in pooled)
     c = res["chat"]
+    reasons = []
     print(f"classifiers not strictly above the most common character: {len(res['disabled'])} of {len(major)} trained (stop if more than half)")
-    print(f"chat cvtune+wikitune: n-gram {base}, frozen {c['top1']} of {len(pooled)} (+{100 * (c['top1'] - base) / len(pooled):.2f} points; stage 3 stop line: < +0.20)")
+    if 2 * len(res["disabled"]) > len(major):
+        reasons.append(f"{len(res['disabled'])} of {len(major)} classifiers not above the most common character (more than half)")
+    gain = 100 * (c["top1"] - base) / len(pooled)
+    print(f"chat cvtune+wikitune: n-gram {base}, frozen {c['top1']} of {len(pooled)} ({gain:+.2f} points; stage 3 stop line: < +0.20)")
+    if a.stage == 3 and gain < 0.2:
+        reasons.append(f"chat cvtune+wikitune gain {gain:+.2f} points < +0.20")
     rows = chat["cvtune"]
-    new = lambda r: pick(r, res["active"], c["mu"], p1a.tau_of(c["tau"]))
+    new = lambda r: pick(r, res["active"], c["mu"], c["tau"])
     old = lambda r: 0
     pairs = {1: [("再", "在", "在", "再")], 2: [("做", "作", "作", "做")]}.get(a.stage, [])
     for fix_a, fix_b, back_a, back_b in pairs:
@@ -129,6 +138,12 @@ def cmd_stage(a):
         g0, g1 = pair_count(rows, old, back_a, back_b), pair_count(rows, new, back_a, back_b)
         passed = 2 * f1 <= f0 and g1 - g0 <= 2
         print(f"cvtune chat stop rule: {fix_a}>{fix_b} {f0} -> {f1} (must at least halve), {back_a}>{back_b} {g0} -> {g1} (increase <= 2): {'PASS, continue' if passed else 'STOP, write the conclusion'}")
+        if not passed:
+            reasons.append(f"stage {a.stage} stop rule: {fix_a}>{fix_b} {f0} -> {f1}, {back_a}>{back_b} {g0} -> {g1}")
+    res["decision"], res["reasons"] = ("STOP" if reasons else "PASS"), reasons
+    json.dump(res, open(a.out, "w", encoding="utf-8"), indent=1, ensure_ascii=False)   # json writes tau = inf as Infinity and reads it back
+    print(json.dumps(res, ensure_ascii=False))
+    print(f"stage {a.stage} decision: {res['decision']}" + "".join(f"\n  - {x}" for x in reasons))
 
 
 def arm(label, base, cand):
@@ -157,9 +172,9 @@ def cmd_report(a):
     scored, eq = load_sets(a.work, "scored", names), load_sets(a.work, "eq", names)
     tables, verdict_cells, disc, ctx_rows = [], [], {}, {}
     for prof in PROFILES:
-        mu, tau = st[prof]["mu"], p1a.tau_of(st[prof]["tau"])
+        mu, tau = st[prof]["mu"], st[prof]["tau"]
         new = lambda r: pick(r, active, mu, tau)
-        zero = lambda r: pick(r, active, 0, tau)
+        zero = lambda r: pick(r, active, 0, tau)   # mu = 0 is the first candidate by construction; the baseline itself is checked by top1_sha256 against the CLI (step 0)
         print(f"\n## {prof}: stage {st['stage']}, active {active}, frozen mu={mu} tau={st[prof]['tau']}")
         for name in names:
             rows = scored[prof].get(name)
@@ -168,10 +183,8 @@ def cmd_report(a):
             first = lambda r: 0
             base = tuples(rows, first)
             line_c, num_c = arm(f"{name} {prof} 分類器", base, tuples(rows, new))
-            line_z, num_z = arm(f"{name} {prof} μ=0", base, tuples(rows, zero))
+            line_z, _ = arm(f"{name} {prof} μ=0", base, tuples(rows, zero))
             tables += [line_c, line_z]
-            if num_z["fixed"] or num_z["broken"]:
-                print(f"ERROR: {name} {prof}: mu = 0 differs from the n-gram first candidate, the baseline of the tables is wrong")
             if name in eq[prof]:
                 eqrows = eq[prof][name]
                 assert [r["gold"] for r in eqrows] == [r["gold"] for r in rows], "equalized candidates are for another set"
@@ -214,6 +227,12 @@ def cmd_report(a):
 def verdict(st, cells, disc, ctx_rows):
     """Section 4, chat setting of discordtune, plus the no-significant-loss rule on the other sets (both profiles)."""
     print(f"\n## section 4 verdict (stage {st['stage']})")
+    if st.get("decision") != "PASS":   # a stage file without a recorded PASS stops too
+        print(f"stage {st['stage']} decision {st.get('decision')}: section 4 is not judged")
+        for x in st.get("reasons", []):
+            print(f"  - {x}")
+        print("verdict: STOP, do not build it into the core; write the conclusion")
+        return
     if "chat" not in disc:
         print("discordtune chat not given: no verdict")
         return

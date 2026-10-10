@@ -54,7 +54,7 @@ def cmd_extract(a):
     got = {r: {"y": [], "src": [], "ch": [], "ids": []} for r in use}
     for src, fname in SRC_FILES:
         with mp.Pool(a.procs, initializer=_init, initargs=(a.model, tables)) as pool:
-            it, n = prep.chunks(prep.iter_runs(os.path.join(a.runs, fname)), 500), 0
+            it, n = bc.batches(prep.iter_runs(os.path.join(a.runs, fname)), 500), 0
             while not quota.done(src):
                 group = list(itertools.islice(it, a.procs * 4))
                 if not group:
