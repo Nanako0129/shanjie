@@ -24,9 +24,9 @@ def test_keep_from_keeps_old_classes_and_places_new_words():
     cl = C.Clusterer(6, 2, src.astype(np.int32), dst.astype(np.int32), cnt, V)
     cl.init_from(old, vocab, lambda m: None)
     assert list(cl.cls[:4]) == [0, 0, 1, 1]           # 舊詞的類別不動
-    assert cl.cls[4] in (0, 1) and cl.cls[5] == 0      # 舊分群沒有類別的詞與新詞都貼進類別；新詞跟著同樣鄰居的 a、b
-    res = np.array([old.get(w, r) for w, r in zip(vocab, cl.cls[:V])], np.int32)
-    assert res[4] == -1 and res[5] == 0                # main() 的覆寫：舊分群是 −1 的仍是 −1
+    assert cl.cls[4] == -1 and cl.cls[5] == 0          # 舊分群沒有類別的詞仍沒有、不進 M；新詞跟著同樣鄰居的 a、b
+    res = C.assign_rare(cl, V, src.astype(np.int32), dst.astype(np.int32), cnt, V, 6)
+    assert list(res) == [0, 0, 1, 1, -1, 0]
 
 
 if __name__ == "__main__":

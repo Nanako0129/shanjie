@@ -1,5 +1,5 @@
 @echo off
-rem model-v5 契約 §2.1 / §2.5：計數，加 --extra-lexicon（acg-add.tsv）。範本，不是現成可跑：先把下面三個路徑換成 188 上的絕對路徑，再讀 README.md。
+rem model-v5 契約 §2.1 / §2.5 / §9：計數，加 --extra-lexicon（count_lexicon.py 產生的計數詞表）。範本，不是現成可跑：先把下面三個路徑換成 188 上的絕對路徑，再讀 README.md。
 rem 慣例同 S2n／S2f：絕對路徑、start /b /wait /affinity FFF（P-core）、PYTHONUTF8=1。
 set PYTHONUTF8=1
 set REPO=C:\ABSOLUTE\PATH\TO\shanjie-modelv5
@@ -12,8 +12,11 @@ if not exist "%S2_WORK%" mkdir "%S2_WORK%"
 rem 輸入雜湊先記到 %S2_WORK%\inputs.sha256（README 的表），再往下跑。
 for %%F in ("%USERPROFILE%\.cache\shanjie\sources\zhwiki-20261001-pages-articles.xml.bz2" "%M3%\tune\colloquial-train.txt" "%SYNTH%" "%REPO%\data\lexicon\mcbpmf-data.txt" "%REPO%\data\lexicon\overlay-add.tsv" "%USERPROFILE%\.cache\shanjie\sources\opencc\TWVariants.txt" "%USERPROFILE%\.cache\shanjie\sources\opencc\STCharacters.txt" "%REPO%\data\packs\acg-add.tsv") do certutil -hashfile %%F SHA256 >> "%S2_WORK%\inputs.sha256"
 cd /d "%REPO%"
-rem acg-add.tsv 的 SHA-256 必須等於 main 上的（不同就停；README 的表）
-set ACG=%REPO%\data\packs\acg-add.tsv
+rem acg-add.tsv 的 SHA-256 必須等於 main 上的（不同就停；README 的表）。計數用的是排除衝突詞與片段後的詞表（契約 §9），2026-10-10 是 1c4aa6cc…
+set ACG=%S2_WORK%\acg-count.tsv
+python -u experiments\model-v5\count_lexicon.py data\packs\acg-add.tsv data\packs\acg-collisions.tsv experiments\model-v5\collision-readings-v5.txt "%ACG%"
+if errorlevel 1 exit /b 1
+certutil -hashfile "%ACG%" SHA256 >> "%S2_WORK%\inputs.sha256"
 rem 1. 口語計數（單一程序，×5 的那份；輸入同 model-v3：colloquial-train.txt 加 synth.txt）
 start "" /b /wait /affinity FFF python -u experiments\s2\build_counts_text.py --expected --extra-lexicon "%ACG%" "%S2_WORK%\counts-colloquial3.pkl" "%M3%\tune\colloquial-train.txt" "%SYNTH%"
 if errorlevel 1 exit /b 1
