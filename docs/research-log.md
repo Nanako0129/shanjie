@@ -2617,3 +2617,25 @@ PR #90 的審查意見逐項處理。
   - 第 68 列 `|即時預測也要直排|`：打成「及時預測也要直排」。
   - 第 69 列 `|想辦法從詞態解決常見錯字|`：打成「想辦法從詞太解決常見錯字」。
 - model-v5（`f81a021e…`）、`--context`，聊天與書面、開不開詞包，三句的第一名都和使用者遇到的一樣；正解都在前 64 名裡。`eval/golden/s2h-lm-context.txt` 的 user-reported 兩行照 Python 參考實作重產（n 66 → 69，top1 15／18 不變，oracle@64 64 → 67）。
+
+## 2026-10-10：常見專有名詞的來源與授權
+
+使用者要求常見公司、品牌、手搖飲、餐廳、學校、產品名放進一般詞庫（起因：「酷澎」打成「酷朋」）。寫契約前由研究 agent 只讀授權頁、資料集說明頁與少量樣本（沒有下載整批資料），main 整理。契約 `docs/contracts/names-lexicon.md`。
+
+- **name-suggestion-index（NSI）** https://github.com/osmlab/name-suggestion-index ：OpenStreetMap 社群給編輯器用的品牌名正規化清單，`data/brands/<key>/<value>.json`。LICENSE.md 是 BSD-3-Clause，整個 repo 含資料都適用（用 gh api 讀過）：可商用、改作、再散布，保留版權聲明與免責聲明、不得用作者名義背書，沒有 share-alike。欄位有 `locationSet`、`name`、`name:zh-Hant`、`brand:wikidata`。抽 5 類的台灣品牌數（`locationSet` 含 tw）：cafe 48／507、restaurant 53／818、fast_food 33／1,011、convenience 4／739、beverages 0／28（例如 50嵐、可不可熟成紅茶、八方雲集、三商巧福、全家、蝦皮店到店）。`name` 有時是日文原名或中英混寫，要優先取 `name:zh-Hant`。
+- **Wikidata 與中文維基**：Wikidata 結構化資料 CC0（https://www.wikidata.org/wiki/Wikidata:Licensing ）；中文維基 CC BY-SA 4.0。小查詢：P17＝臺灣的 business（含子類）20,340 項；臺灣的 university 157 項。「酷澎」是 Q12620655，只有 `zh` 標籤（Coupang／库邦／酷澎），沒有 zh-tw，中文維基標題是「酷澎」→ 要取 zh-tw 變體的顯示標題，不用 `zh` 標籤。分類名稱用「台灣」：`Category:台灣手搖茶飲品牌` 24 頁、`Category:台灣餐飲公司` 11 頁＋5 子分類、`Category:台灣公司` 14 頁＋18 子分類；用「臺灣」查不到這幾個。
+- **教育部統計處各級學校名錄**：大專校院 https://data.gov.tw/dataset/6091 （`u1_new.csv` 274,044 bytes，HEAD 實測）、一般高級中等學校 6089、國中 6088（`j1_new.csv` 1,208,247 bytes）、國小 6087、軍警 28589；每學年更新，UTF-8 CSV／JSON，只有學校全名。
+- **政府資料開放授權條款－第 1 版**（https://data.gov.tw/license ）：第 2.1 條永久、全球、免費，可重製、散布、改作、商用；第 3.2 條要照附件格式標示出處，否則授權自始無效；第 4.2 條與 CC BY 4.0 相容（CC BY 可單向併入 CC BY-SA 4.0）；第 2.4 條不含商標權。附件建議的標示文字：「此開放資料依政府資料開放授權條款 (Open Government Data License) 進行公眾釋出，使用者於遵守本條款各項規定之前提下，得利用之。」
+- **不用**：
+  - 財政部全國營業（稅籍）登記（資料集 9400，ZIP 66,357,706 bytes，每日）：營業人名稱是法定全名，含獨資商號，名稱可能就是個人姓名；只適合當「還在營業」的佐證。
+  - 經濟部公司登記（22197、13861、22198）：只有依統一編號逐筆查詢的 API，含負責人姓名。
+  - 商標公報 XML（15975）：有 `Trademark_Name`，但量大雜訊多、申請人有自然人。
+  - OpenStreetMap POI：ODbL 1.0，資料庫 share-alike，和 CC BY-SA 不相容。
+  - 萌娘百科、部落格、店家官網、商工登記網頁抓取：未授權、NC 或不在開放資料授權範圍內。
+- **共通陷阱**：法定名稱和品牌名不同（「台灣酷澎有限公司」對「酷澎」）；所有來源都沒有注音；注音打不出英文字母；店家會倒閉或改名（要記版本）。
+- **決定**（使用者指定「一般詞庫」）：做成常開的一般詞庫層，不是選用詞包；名單不進計數就上線多半打不出來（A2 審計），所以上線放在 model-v6 重算計數時。
+- **格式樣本（main 2026-10-10 抓取，給建置程式與測試夾具用）**：
+  - NSI：`data/brands/<key>/<value>.json`（例如 `data/brands/amenity/cafe.json`），頂層是 `{"properties": {"path", "exclude"}, "items": [...]}`；一筆台灣品牌（cafe）：`{"displayName": "50嵐", "id": "50lan-7d270d", "locationSet": {"include": ["tw"]}, "tags": {"amenity": "cafe", "brand": "50嵐", "brand:en": "50 Lan", "brand:wikidata": "Q106926258", "brand:zh": "50嵐", "name": "50嵐", "name:en": "50 Lan", "name:zh": "50嵐", …}}`。**台灣品牌多半只有 `name:zh`**（繁體），沒有 `name:zh-Hant`；有的是日文（`CoCo壱番屋` 的 `name`，`name:zh` 是 `CoCo壹番屋`）。`matchNames` 裡有法定全名（例如「二十一世紀生活事業股份有限公司」），不用。
+  - 大專校院名錄 `https://stats.moe.gov.tw/files/opendata/u1_new.csv`：UTF-8 帶 BOM，274,044 bytes（SHA-256 `2cf2c5c6c2ce9cad…`），表頭 `學年度,代碼,學校名稱,公/私立,縣市名稱,地址,電話,網址,體系別`，範例 `103,0001,國立政治大學,公立,[38]臺北市,…`；含 103–115 學年，共 1,946 列。
+  - 一般高級中等學校名錄 115 學年 `https://stats.moe.gov.tw/files/school/115/high.csv`（data.gov.tw 6089 另有 113、114 學年各一份）：UTF-8 帶 BOM，70,257 bytes（`826979ec988a0a94…`），表頭 `學年度,代碼,學校名稱,公/私立,縣市名稱,地址,電話,網址,備註`，範例 `115,010301,國立華僑高級中等學校,公立,…`；507 列，其中有一列的「學年度」欄是「高中部尚未招生」，要用「學年度是數字」過濾。
+
