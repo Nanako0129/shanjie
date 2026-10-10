@@ -27,7 +27,7 @@ public enum PanelPlacement {
     /// The bar's top-left corner, and the index of the screen it goes to.
     /// - `line`: the client's text line (origin bottom-left); `nil` when it gave none.
     /// - `last`: the last line the client gave, used when `line` is `nil` (a remembered line, not a remembered corner, which
-    ///   depends on the size of the panel it was worked out for). One no screen holds (its screen is gone) is dropped. With
+    ///   depends on the size of the panel it was worked out for). One whose origin no screen frame holds (its screen is gone) is not used this time (the caller keeps it). With
     ///   neither, the panel sits at the bottom-left of the main screen's visible frame for this size, which is never remembered.
     ///   The screen is the one whose frame holds the line used, else the main one.
     /// - `size`: the panel's size.
