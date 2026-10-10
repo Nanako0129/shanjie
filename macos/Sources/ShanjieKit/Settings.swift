@@ -12,8 +12,11 @@ public final class SettingsModel: ObservableObject {
 
     @Published public private(set) var layout = InputMode.standard
     @Published public private(set) var prediction = true
+    @Published public private(set) var abbreviation = false
     @Published public private(set) var demote = true
     @Published public private(set) var acgPack = true
+    /// The grey "資料更新至 …" line under the 動漫與遊戲詞 toggle (acg-pack contract A2.4): the same text as the menu's, `nil` for no line.
+    public var acgDataLine: String? { shell.acgDataDate.map(MenuEntry.Text.acgDataDate) }
     @Published public private(set) var backupExcluded = false
     @Published public private(set) var glassTint = 0.0
     /// Status rows (section 2.2). There is no "this app" row: it comes from one session's client and
@@ -42,6 +45,7 @@ public final class SettingsModel: ObservableObject {
     func refreshSettings() {
         layout = shell.layout
         prediction = shell.predictionOn
+        abbreviation = shell.abbreviationOn
         demote = shell.demoteOn
         acgPack = shell.acgPackOn
         glassTint = shell.glassTint
@@ -57,6 +61,7 @@ public final class SettingsModel: ObservableObject {
 
     public func selectLayout(_ m: InputMode) { shell.selectLayout(m) }
     public func setPrediction(_ on: Bool) { shell.applyPrediction(on) }
+    public func setAbbreviation(_ on: Bool) { shell.applyAbbreviation(on) }
     public func setDemote(_ on: Bool) { shell.applyDemote(on) }
     public func setAcgPack(_ on: Bool) { shell.setAcgPack(on) }
     public func setBackupExcluded(_ on: Bool) {

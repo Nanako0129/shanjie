@@ -101,6 +101,20 @@ public final class MemoryPredictionStore: PredictionStore {
     public init(_ prediction: Bool? = nil) { self.prediction = prediction }
 }
 
+/// Where the "可省略韻母" switch is kept (docs/contracts/v3-engine.md section 12.1): `nil` means never chosen, which is off.
+/// Same arrangement as `PredictionStore`.
+@MainActor
+public protocol AbbreviationStore: AnyObject {
+    var abbreviation: Bool? { get set }
+}
+
+/// The in-memory AbbreviationStore.
+@MainActor
+public final class MemoryAbbreviationStore: AbbreviationStore {
+    public var abbreviation: Bool?
+    public init(_ abbreviation: Bool? = nil) { self.abbreviation = abbreviation }
+}
+
 /// Where the "動漫與遊戲詞" switch is kept (docs/contracts/acg-pack.md A.2): `nil` means never chosen, which is on
 /// (user decision 2026-10-09, after the A.3 numbers). Same arrangement as `PredictionStore`.
 @MainActor
@@ -154,9 +168,15 @@ public final class Shell {
     private let predictionStore: PredictionStore
     /// V3: whether the prediction row is computed (default on); sent to every engine `build()` makes.
     private(set) var predictionOn = true
+    private let abbreviationStore: AbbreviationStore
+    /// V3 section 12: the abbreviation composer (default off); sent to every engine `build()` makes, next to the prediction switch.
+    private(set) var abbreviationOn = false
     private let acgPackStore: AcgPackStore
     /// The ACG word pack (default on, user decision 2026-10-09): parsed into the lexicon, so a change rebuilds the engine like a layout change.
     private(set) var acgPackOn = true
+    /// The pack's source date for the grey menu line (acg-pack contract A2.4): `latest_source_revision` of `Resources/packs/acg.json`
+    /// as a UTC date, read once at init. `nil` (file or field missing or unreadable) means no line.
+    let acgDataDate: String?
     private let glassTintStore: GlassTintStore
     /// Posted (object: this shell) after any setting changes, from the menu or the settings window;
     /// the window's model re-reads on it (settings-window section 2.2).
@@ -183,6 +203,19 @@ public final class Shell {
     /// Cleared whenever the panel hides: commit, reset, owner change.
     var lineCache: (preedit: String, cursor: Int, rect: NSRect?)?
 
+    /// `latest_source_revision` ("2026-10-06T00:08:14Z") of the manifest at `url` as a UTC "yyyy-MM-dd"; `nil` for anything else.
+    static func readAcgDataDate(_ url: URL) -> String? {
+        guard let data = try? Data(contentsOf: url),
+              let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              let stamp = json["latest_source_revision"] as? String,
+              let date = ISO8601DateFormatter().date(from: stamp) else { return nil }
+        let utc = DateFormatter()
+        utc.locale = Locale(identifier: "en_US_POSIX")
+        utc.timeZone = TimeZone(identifier: "UTC")
+        utc.dateFormat = "yyyy-MM-dd"
+        return utc.string(from: date)
+    }
+
     /// `resources`: the absolute Resources directory holding the lexicon files and bigram.sjlm.
     /// `panel`: the one candidate panel (an NSPanel in the app).
     /// `isSecureInput`: IsSecureEventInputEnabled in the app (Carbon lives in the executable only);
@@ -198,13 +231,14 @@ public final class Shell {
     /// `demoteStore`: the demotion switch (sw). Required, with no default, like `layoutStore`: the app passes
     /// its UserDefaults-backed store, tests the in-memory one.
     /// `predictionStore`: the prediction switch (V3 section 10.5). Required, like `demoteStore`.
+    /// `abbreviationStore`: the abbreviation switch (V3 section 12.1). Required, like `predictionStore`.
     /// `acgPackStore`: the ACG word pack switch (acg-pack contract A.2). Required, like `demoteStore`.
     /// `glassTintStore`: the candidate glass tint (settings-window section 2.3). Required, like `demoteStore`.
     /// `punctuationTable`: Apple's punctuation candidate table (s3e); tests pass another path.
     /// `punctuationNames`: Apple's punctuation names (s3f); tests pass another path.
     public init(resources: URL, panel: CandidatePanel, isSecureInput: @escaping () -> Bool,
                 layoutStore: LayoutStore, learningDirectory: URL?, dialogs: LearningDialogs,
-                demoteStore: DemoteStore, predictionStore: PredictionStore, acgPackStore: AcgPackStore,
+                demoteStore: DemoteStore, predictionStore: PredictionStore, abbreviationStore: AbbreviationStore, acgPackStore: AcgPackStore,
                 glassTintStore: GlassTintStore,
                 punctuationTable: URL = PunctuationTable.systemURL,
                 punctuationNames: URL = PunctuationNames.systemURL) {
@@ -228,7 +262,10 @@ public final class Shell {
         demoteOn = demoteStore.demote ?? true
         self.predictionStore = predictionStore
         predictionOn = predictionStore.prediction ?? true
+        self.abbreviationStore = abbreviationStore
+        abbreviationOn = abbreviationStore.abbreviation ?? false
         self.acgPackStore = acgPackStore
+        acgDataDate = Shell.readAcgDataDate(resources.appendingPathComponent("packs/acg.json"))
         self.glassTintStore = glassTintStore
         glassTint = glassTintStore.glassTint ?? 0
         acgPackOn = acgPackStore.acgPack ?? true
@@ -262,6 +299,10 @@ public final class Shell {
 
     func applyPrediction(_ on: Bool) {
         if let o = owner { o.applyPrediction(on) } else { dropOnFailure(setPrediction(on)) }
+    }
+
+    func applyAbbreviation(_ on: Bool) {
+        if let o = owner { o.applyAbbreviation(on) } else { dropOnFailure(setAbbreviation(on)) }
     }
 
     /// No session to ask: a failed core call is logged and the composition dropped, as `Session.fail` does.
@@ -309,6 +350,14 @@ public final class Shell {
         return engine?.setPrediction(on)
     }
 
+    /// The menu's choice (V3 section 12.1): stored, and sent to the engine; the snapshot is for the caller to show.
+    func setAbbreviation(_ on: Bool) -> CoreResult? {
+        abbreviationOn = on
+        abbreviationStore.abbreviation = on
+        defer { changed() }
+        return engine?.setAbbreviation(on)
+    }
+
     /// The menu's choice (acg-pack contract A.2): the pack is part of the lexicon, so like a layout change the
     /// composition is committed and the engine rebuilt; the choice is stored. Same value: nothing happens.
     func setAcgPack(_ on: Bool) {
@@ -346,6 +395,10 @@ public final class Shell {
         }
         if case .failed(let c) = e.setPrediction(predictionOn) {
             Log.shell.error("shanjie_engine_set_prediction failed, code \(c)")
+        }
+        // A rebuilt engine (layout, word pack) starts with the core's default, so this is sent every time (section 12.1).
+        if case .failed(let c) = e.setAbbreviation(abbreviationOn) {
+            Log.shell.error("shanjie_engine_set_abbreviation failed, code \(c)")
         }
         if case .failed(let c) = e.setProfile(profile) {
             Log.shell.error("shanjie_engine_set_profile failed, code \(c)")
@@ -511,6 +564,15 @@ public final class Session {
     /// The menu's prediction switch: the snapshot is shown, if this session owns the composition.
     func applyPrediction(_ on: Bool) {
         switch shell.setPrediction(on) {
+        case .ok(let o)? where shell.owner === self: apply(o)
+        case .failed(let c)?: _ = fail(c)
+        default: break
+        }
+    }
+
+    /// The menu's abbreviation switch: the snapshot is shown, if this session owns the composition.
+    func applyAbbreviation(_ on: Bool) {
+        switch shell.setAbbreviation(on) {
         case .ok(let o)? where shell.owner === self: apply(o)
         case .failed(let c)?: _ = fail(c)
         default: break
