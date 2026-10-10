@@ -198,21 +198,42 @@ final class VerticalShellTests: XCTestCase {
         XCTAssertEqual(c.panel.vertical, 0)
     }
 
-    /// Changing the setting during a horizontal composition (no row, or an open window) is invisible: no client call, no panel
-    /// show. Only a prediction row that turns is applied.
-    func testSettingChangeLeavesAHorizontalCompositionAlone() {
-        let c = Controller(makeShell())
-        c.session.activate()
-        let model = SettingsModel(shell: c.session.shell)
-        c.type("su3cl3")  // two syllables; a row may show, but then it is already vertical-free
-        c.press(Keys.esc)
-        c.type("g4 ")  // an open horizontal window
-        XCTAssertEqual(c.panel.vertical, 0)
-        let calls = c.client.calls.count, shows = c.panel.glassTints.count
-        model.setCandidateVertical(true)
-        model.setCandidateVertical(false)
-        XCTAssertEqual(c.client.calls.count, calls, "no marked text was set again")
-        XCTAssertEqual(c.panel.glassTints.count, shows, "the panel was not shown again")
+    /// The setter's snapshot is applied only when the orientation of what is on screen changes (a prediction row). Cases where
+    /// it must not touch the client or the panel: an open horizontal window, a composition with nothing shown, and an open
+    /// vertical window (value 1), whose orientation is fixed at open.
+    func testSettingChangeAppliesNothingWhenNoPredictionRowTurns() {
+        func quiet(_ c: Controller, _ model: SettingsModel, _ what: String) {
+            let calls = c.client.calls.count, shows = c.panel.glassTints.count
+            model.setCandidateVertical(true)
+            model.setCandidateVertical(false)
+            model.setCandidateVertical(true)
+            XCTAssertEqual(c.client.calls.count, calls, "\(what): no marked text was set again")
+            XCTAssertEqual(c.panel.glassTints.count, shows, "\(what): the panel was not shown again")
+        }
+        // An open horizontal window.
+        let h = Controller(makeShell())
+        h.session.activate()
+        h.type("g4 ")
+        XCTAssertEqual(h.panel.vertical, 0)
+        quiet(h, SettingsModel(shell: h.session.shell), "horizontal window")
+        XCTAssertEqual(h.panel.vertical, 0)
+
+        // A composition with no candidates on screen (prediction off, so no row either).
+        let n = Controller(makeShell())
+        n.session.activate()
+        let model = SettingsModel(shell: n.session.shell)
+        model.setPrediction(false)
+        n.type("su3")
+        XCTAssertFalse(n.panel.visible)
+        quiet(n, model, "composition without candidates")
+
+        // An open vertical window (value 1): the setting flips, the window and the panel are left as they are.
+        let v = controller(vertical: true)
+        v.type("g4 ")
+        XCTAssertEqual(v.panel.vertical, 1)
+        quiet(v, SettingsModel(shell: v.session.shell), "vertical window")
+        XCTAssertEqual(v.panel.vertical, 1)
+        XCTAssertEqual(v.panel.items.count, 9)
     }
 
     // MARK: Page Up / Down inside the vertical window

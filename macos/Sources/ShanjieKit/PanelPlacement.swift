@@ -9,40 +9,47 @@ public enum PanelPlacement {
     /// above the line (no room below) uses the same value; Apple's there is not measured.
     public static let gap: CGFloat = 6
 
-    /// What the panel remembers as its place after showing at `origin`: the origin itself when the client gave a line (or
-    /// there was nothing remembered), else the old anchor untouched. `topLeft` may clamp the anchor for a tall panel; if that
-    /// clamped value were remembered, one tall window would permanently raise the shorter panels shown after it.
-    public static func anchor(afterShowingAt origin: NSPoint, lineRect: NSRect?, lastOrigin: NSPoint?) -> NSPoint {
-        guard lineRect == nil, let lastOrigin else { return origin }
-        return lastOrigin
+    /// One screen: its full frame (which screen holds the line) and its visible frame (where a panel may go).
+    public struct Screen: Equatable, Sendable {
+        public var frame: NSRect
+        public var visibleFrame: NSRect
+        public init(frame: NSRect, visibleFrame: NSRect) {
+            self.frame = frame
+            self.visibleFrame = visibleFrame
+        }
     }
 
-    /// The bar's top-left corner.
-    /// - `lineRect`: the text line (origin bottom-left); `nil` reuses `lastOrigin` (clamped into its screen's visible frame
-    ///   for `size`), and with none either, the bar sits at the bottom-left of the main screen's visible frame.
-    /// - `size`: the bar's size.
-    /// - `alignOffset`: how far the first candidate glyph sits from the bar's left edge, so the
-    ///   glyph lines up with the composed text.
-    /// - `screens`: the visibleFrames; `rectScreen` is the index of the one containing the line
-    ///   (`nil` if none), `main` the index of the main screen.
-    public static func topLeft(lineRect: NSRect?, lastOrigin: NSPoint?, size: NSSize, alignOffset: CGFloat,
-                               screens: [NSRect], rectScreen: Int?, main: Int) -> NSPoint {
-        let visible = screens[rectScreen ?? main]
-        guard let line = lineRect else {
-            guard let last = lastOrigin else { return NSPoint(x: visible.minX, y: visible.minY + size.height) }
-            // The last place may no longer fit: another panel size (the vertical window is much taller than the bar), another
-            // screen layout. Clamp it into the visible frame of the screen it was on, for this size.
-            let home = screens.first { $0.contains(NSPoint(x: last.x, y: last.y - 1)) } ?? visible
-            return NSPoint(x: max(min(last.x, home.maxX - size.width), home.minX),
-                           y: min(max(last.y, home.minY + size.height), home.maxY))
-        }
+    /// The index of the screen a panel for `line` goes to: the one whose frame holds the line's origin, else the main one.
+    public static func screenIndex(for line: NSRect?, in screens: [Screen], main: Int) -> Int {
+        line.flatMap { r in screens.firstIndex { $0.frame.contains(r.origin) } } ?? main
+    }
+
+    /// The bar's top-left corner, and the index of the screen it goes to.
+    /// - `line`: the client's text line (origin bottom-left); `nil` when it gave none.
+    /// - `last`: the last line the client gave, used when `line` is `nil` (a remembered line, not a remembered corner, which
+    ///   depends on the size of the panel it was worked out for). One whose origin no screen frame holds (its screen is gone) is not used this time (the caller keeps it). With
+    ///   neither, the panel sits at the bottom-left of the main screen's visible frame for this size, which is never remembered.
+    ///   The screen is the one whose frame holds the line used, else the main one.
+    /// - `size`: the panel's size.
+    /// - `sideHeight`: the height used to decide below or above the line, `size.height` when `nil`. A panel whose height
+    ///   changes from output to output (the vertical prediction row) passes its largest, so it stays on one side while it
+    ///   shows; the corner still uses `size`.
+    /// - `alignOffset`: how far the first candidate glyph sits from the panel's left edge, so the glyph lines up with the
+    ///   composed text.
+    /// - `screens`, `main`: every screen, and the index of the main one.
+    public static func topLeft(line: NSRect?, last: NSRect? = nil, size: NSSize, sideHeight: CGFloat? = nil,
+                               alignOffset: CGFloat, screens: [Screen], main: Int) -> (origin: NSPoint, screen: Int) {
+        let line = line ?? last.flatMap { l in screens.contains { $0.frame.contains(l.origin) } ? l : nil }
+        let index = screenIndex(for: line, in: screens, main: main)
+        let visible = screens[index].visibleFrame
+        guard let line else { return (NSPoint(x: visible.minX, y: visible.minY + size.height), index) }
         var x = line.minX - alignOffset
         var top = line.minY - gap
         // No room below: above the line instead.
-        if top - size.height < visible.minY { top = line.maxY + gap + size.height }
+        if top - (sideHeight ?? size.height) < visible.minY { top = line.maxY + gap + size.height }
         x = min(x, visible.maxX - size.width)
         x = max(x, visible.minX)
         top = min(top, visible.maxY)
-        return NSPoint(x: x, y: top)
+        return (NSPoint(x: x, y: top), index)
     }
 }
