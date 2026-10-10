@@ -2024,3 +2024,28 @@ fn reading_matches_follows_the_query_mode() {
         assert!(returned > 0);
     }
 }
+
+// ---------- candidate-vertical contract section 2.2: the row never carries the vertical mark ----------
+
+#[test]
+fn the_prediction_row_is_never_vertical_and_page_keys_leave_it_alone() {
+    let (mut e, _) = build(A.0, A.1, A.2);
+    let snap = e.set_candidate_vertical(true).unwrap();
+    assert_passive(&snap);
+    assert!(!snap.vertical, "the passive row is horizontal with the setting on");
+    let entered = e.key(kind(KeyKind::Tab)).unwrap();
+    assert_eq!(entered.selected, Some(0));
+    assert!(!entered.vertical && entered.columns == 0, "the entered row too");
+    // Page Down / Up are not handled and do not leave the row or touch the selection.
+    for k in [KeyKind::PageDown, KeyKind::PageUp] {
+        let o = e.key(Key::new(k)).unwrap();
+        assert!(!o.handled && o.commit.is_empty());
+        assert!(o == Output { handled: false, ..entered.clone() });
+    }
+    assert_eq!(e.key(Key::new(KeyKind::Right)).unwrap().selected, Some(1), "still entered");
+    // Opening the candidate window from the same state is vertical; the row is gone while it is open.
+    let (mut e, _) = build(D.0, D.1, D.2);
+    e.set_candidate_vertical(true).unwrap();
+    let o = e.key(Key::new(KeyKind::Space)).unwrap();
+    assert!(o.vertical && o.columns == 0);
+}

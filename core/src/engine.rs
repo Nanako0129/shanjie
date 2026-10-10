@@ -146,13 +146,17 @@ pub enum KeyKind {
     Home,
     End,
     Tab,
+    /// Only the vertical candidate window takes these (candidate-vertical contract section 2.2); the shell sends them
+    /// only then. Anywhere else they pass through and change nothing.
+    PageUp,
+    PageDown,
 }
 
 impl KeyKind {
-    /// ABI code (1..=13) to kind.
+    /// ABI code (1..=15) to kind.
     pub fn from_code(code: u32) -> Option<KeyKind> {
         use KeyKind::*;
-        [Char, Space, Enter, Backspace, Delete, Esc, Left, Right, Up, Down, Home, End, Tab]
+        [Char, Space, Enter, Backspace, Delete, Esc, Left, Right, Up, Down, Home, End, Tab, PageUp, PageDown]
             .get((code as usize).checked_sub(1)?)
             .copied()
     }
@@ -207,6 +211,9 @@ pub struct Output {
     pub first: u32,
     /// Length of the whole list; 0 when closed.
     pub total: u32,
+    /// True while the open candidate window is the vertical one (fixed when it opened); false for the horizontal
+    /// window, the prediction row and no candidates.
+    pub vertical: bool,
 }
 
 struct Fixed {
@@ -242,11 +249,15 @@ struct Cands {
     /// First visible grid row while expanded; keeps the selected row inside `GRID_ROWS`. Set to the
     /// selected page on expand, so the first row is the page the collapsed bar showed (s3b2 §9).
     top: usize,
+    /// Candidate-vertical contract section 2.2: the orientation at the moment the window opened. A vertical window
+    /// never expands; `first` is the list position of its first visible row.
+    vertical: bool,
+    first: usize,
 }
 
 impl Cands {
-    fn new(list: Vec<(String, usize)>) -> Cands {
-        Cands { list, sel: 0, expanded: false, top: 0 }
+    fn new(list: Vec<(String, usize)>, vertical: bool) -> Cands {
+        Cands { list, sel: 0, expanded: false, top: 0, vertical, first: 0 }
     }
 
     fn scroll(&mut self) {
@@ -261,7 +272,9 @@ impl Cands {
     /// (position of the first output candidate, how many are output).
     fn window(&self) -> (usize, usize) {
         let len = self.list.len();
-        if self.expanded {
+        if self.vertical {
+            (self.first, (len - self.first).min(PAGE_SIZE))
+        } else if self.expanded {
             let first = self.top * PAGE_SIZE;
             (first, (len - first).min(GRID_ROWS * PAGE_SIZE))
         } else {
@@ -309,6 +322,8 @@ pub struct Engine {
     pred_sel: Option<usize>,
     /// Whether the row is computed at all (default on; `set_prediction`).
     predict_on: bool,
+    /// Orientation the next candidate window opens with (default horizontal; `set_candidate_vertical`).
+    cand_vertical: bool,
     /// Whether a symbol in an occupied column opens a new unfinished unit (default off; `set_abbreviation`, section 12).
     abbr: bool,
     /// Test hook: false queries `PREDICT_SCAN` at every start once the learner has records (no gate).
@@ -496,6 +511,7 @@ impl Engine {
             pred: Vec::new(),
             pred_sel: None,
             predict_on: true,
+            cand_vertical: false,
             abbr: false,
             scan_gate: true,
             pred_dirty: false,
@@ -750,6 +766,14 @@ impl Engine {
             self.drop_units(); // the units' only way out is the row (section 12.1)
         }
         self.recompute_pred(); // clears first; returns empty while off
+        self.handled()
+    }
+
+    /// Orientation of the candidate windows that open from now on (default horizontal; candidate-vertical contract
+    /// section 2.2). A window already open keeps the orientation it opened with, so the snapshot is the same as before the
+    /// call.
+    pub fn set_candidate_vertical(&mut self, on: bool) -> Result<Output, EngineError> {
+        self.cand_vertical = on;
         self.handled()
     }
 
@@ -1033,7 +1057,8 @@ impl Engine {
                 (list, sel, 0, 0, total)
             }
         };
-        Output { handled, commit, preedit, cursor_utf16, candidates, selected, columns, first, total }
+        let vertical = self.cands.as_ref().is_some_and(|c| c.vertical);
+        Output { handled, commit, preedit, cursor_utf16, candidates, selected, columns, first, total, vertical }
     }
 
     /// Recompute the display string: free segments decoded top-1, fixed words in between (§3.1).
@@ -1144,6 +1169,11 @@ impl Engine {
     fn dispatch(&mut self, k: Key) -> Result<Output, EngineError> {
         let m = k.modifiers;
         let is_char = k.kind == KeyKind::Char;
+        // Candidate-vertical contract section 2.2: Page Up / Down mean something only in an open vertical window, without
+        // modifiers; anywhere else the key changes nothing (not even the prediction row) and is not handled.
+        if matches!(k.kind, KeyKind::PageUp | KeyKind::PageDown) && !(m == 0 && self.cands.as_ref().is_some_and(|c| c.vertical)) {
+            return self.passthrough(String::new());
+        }
         // V3 section 10.3: ⌘⌫ while the prediction row is entered forgets the selected item (before rule 1).
         if let (KeyKind::Backspace, true, Some(sel)) = (k.kind, m & MOD_COMMAND != 0, self.pred_sel) {
             let Pred { word, reading, .. } = &self.pred[sel];
@@ -1306,6 +1336,44 @@ impl Engine {
         let (len, sel, cols) = (c.list.len(), c.sel, PAGE_SIZE);
         let digit = (k.kind == KeyKind::Char && k.modifiers == 0 && ('1'..='9').contains(&k.ch))
             .then(|| k.ch as usize - '1' as usize);
+        if c.vertical {
+            // Candidate-vertical contract section 2.2: `first` is the first visible row, nine rows (fewer at the end).
+            let first = c.first;
+            let last_first = len.saturating_sub(PAGE_SIZE); // the first row that still shows the last candidate in the ninth
+            match (k.kind, digit) {
+                (KeyKind::Char, Some(d)) => {
+                    if first + d < len {
+                        self.choose(first + d)?;
+                    }
+                }
+                (KeyKind::Down | KeyKind::Right | KeyKind::Space, _) => {
+                    c.sel = (sel + 1).min(len - 1);
+                    if c.sel >= first + PAGE_SIZE {
+                        c.first = c.sel + 1 - PAGE_SIZE;
+                    }
+                }
+                (KeyKind::Up | KeyKind::Left, _) => {
+                    c.sel = sel.saturating_sub(1);
+                    c.first = first.min(c.sel);
+                }
+                (KeyKind::PageDown, _) if first < last_first => {
+                    c.first = (first + PAGE_SIZE).min(last_first);
+                    c.sel = c.first;
+                }
+                (KeyKind::PageUp, _) if first > 0 => {
+                    c.first = first.saturating_sub(PAGE_SIZE);
+                    c.sel = c.first;
+                }
+                (KeyKind::PageDown | KeyKind::PageUp, _) => {}
+                (KeyKind::Enter, _) => self.choose(sel)?,
+                (KeyKind::Esc | KeyKind::Backspace, _) => self.cands = None,
+                _ => {
+                    self.cands = None;
+                    return Ok(false);
+                }
+            }
+            return Ok(true);
+        }
         if c.expanded {
             let (row, col, last_row) = (sel / cols, sel % cols, (len - 1) / cols);
             // Next row, same column; a short last row ends at its last candidate.
@@ -1485,7 +1553,7 @@ impl Engine {
                     list.push((w, 1));
                 }
             }
-            self.cands = Some(Cands::new(list));
+            self.cands = Some(Cands::new(list, self.cand_vertical));
             return;
         }
         for l in (1..=self.lex.max_len.min(avail)).rev() {
@@ -1497,7 +1565,7 @@ impl Engine {
             }
         }
         if !list.is_empty() {
-            self.cands = Some(Cands::new(list));
+            self.cands = Some(Cands::new(list, self.cand_vertical));
         }
     }
 

@@ -2548,3 +2548,18 @@ PR #90 的審查意見逐項處理。
   - 實測（`shanjie-eval`，聊天設定）：「佩德羅」在模型詞彙裡（計數 1,034，是「主席」的後繼詞），不在 `mcbpmf-data.txt` 與 `overlay-add.tsv`，只在詞包。`--predict` 前文「主席」、輸入 ㄆㄟˋ ㄉㄜˊ ㄌㄨㄛˊ：詞包關閉時 0 個候選，開啟時第一名是「佩德羅」（後繼詞旗標 1）；只輸入 ㄆㄟˋ 時，關閉的前 9 名沒有它，開啟的有。
   - 解碼「佩德羅」的讀音：兩邊第一名的字串都是「佩德羅」，但關閉時是單字拼出來的（分數 −9.943），開啟時是詞包詞（分數 −6.101），表示關閉時模型裡「佩德羅」這個詞的分數沒被用到。
 - **PR #102 的 /code-review**（11 項，都是文件與可維護性）：修了 `docs/data-files.md`（下一版改成 model-v6／classes-v4、重建配方指向 model-v5 契約、換版要改的地方列完整）、PLAN 的 S2k 釘選說明、App 內附署名文字加上詞包詞的來源、ci.yml 雜湊來源的註解、上面兩處數字與 Release 狀態。延後：測試的缺檔訊息還叫人用 `build_classes.py` 自己建詞類表（classes-v3 要 188 上的分群資料才建得出同一份）、Release tag 寫死在約 20 處（要抽成共用的測試 helper 或單一設定檔）、`sp-predict.txt` 檔頭只說依賴模型（也依賴詞類表；改檔頭會動到 golden）。
+
+
+## 2026-10-10：候選窗直排（分支 `feat/candidate-vertical`，契約 `docs/contracts/candidate-vertical.md`）
+
+使用者要「直行的候選字」，並決定 v0.4.0 等直排一起出。本片實作設定可選的直排候選窗，預設仍是橫排。
+
+- **用到的蘋果實測事實**（契約 §1，2026-10-10，main 用 `imeshot` 對蘋果注音、設定切成垂直；截圖與錄影不進 repo，實作端沒有拿到截圖）：
+  - 一欄、可見 9 列、列距 28 pt（選取框下緣依序 109、137、165、193）、選取框寬約 226 pt、整列寬的選取膠囊、右側有捲軸。
+  - ↓ 與 → 是下一個、↑ 與 ← 是上一個；**空白鍵也是下一個，不是翻頁**（官方說明寫的往下翻頁，實測不是）。
+  - 選取在第 9 列再按 ↓：清單往下捲一列、選取停在第 9 列，編號跟著可見的列重排成 1–9。Page Down 可見範圍往後移 9 個、選取在第 1 列；Page Up 回上一頁、選取在第 1 列。
+  - 沒量到的：整份清單最後一個再按 ↓、第一頁按 Page Up、最後一頁按 Page Down、數字鍵與 Enter／Esc。這些照橫排一致的推論做（第一個與最後一個不動），等使用者實機看。
+- **核心**：`Output` 與 `ShanjieOutput` 尾端加 `candidate_vertical`；`shanjie_engine_set_candidate_vertical`（0／1，其他回 2，回傳快照）；方向在開窗時固定（`Cands` 記 `vertical` 與可見範圍第一個 `first`），設定只影響下一次開窗；按鍵種類 14 PAGE_UP、15 PAGE_DOWN（範圍檢查改 1–15）。核心在最前面攔下 14／15：不是「直排候選窗開著、沒有修飾鍵」就原樣回傳 `handled` 0，不動任何狀態（連預測列也不清）。直排的按鍵規則照契約 §2.2，寫在 `docs/contracts/s3a.md` 的 3v–5q 列。預測列永遠是 0。
+- **殼**：`CandidateOrientationStore`（`MemoryCandidateOrientationStore`、App 端 `DefaultsCandidateOrientationStore`，鍵 `candidateVertical`）；`Shell.build()` 每次建 engine 都送方向；`Shell` 記著最後顯示的輸出是不是直排（`verticalOpen`），只有在直排窗開著、沒有修飾鍵時 `Session.handle` 才把 116／121 轉成 14／15，其他情況照原本的表外鍵路徑（`KeyMap.translate` 不變）。設定視窗「外觀」加分段控制，放在玻璃深淺前面。
+- **面板**：`CandidatePanel.show` 多 `vertical`；`CandidatePanelAdapter` 的直排版是一欄 9 列、整列寬的膠囊、右側捲動指示；高度開窗時固定、寬度至少 226 pt 且只放寬不縮（直排幾乎每按一次 ↓ 可見的字就換，寬度跟內容變會每鍵重設大小，就是 2026-10-05 的玻璃閃爍）；位置照 s3b2 §2.3 的函式，只是尺寸換成直排面板。幾何與寬度規則放在 `ShanjieKit/VerticalLayout.swift`（純函式，有測試）。**列距 28 與寬度 226 是量到的；上下內距 5、左右內距 3、圓角 16、捲動指示的槽 9／寬 5／最短 12、對齊文字的位置都是第一版的猜測**（取橫排網格與橫排候選列的值），常數註解有寫，外觀由使用者實機的輪次收斂。
+- **驗證**：`make test` 全過（log 在 session 暫存區），所有 golden 沒動，橫排的既有斷言與期望值沒改，只有契約列的五處預期修改。新測試：`core/tests/engine_vertical.rs`（直排每條規則含邊界、方向固定、標點窗、Page 鍵在直排窗以外不動）、`engine_predict.rs` 一條（預測列不帶標記）、`ffi.rs` 的 `child_vertical`、Swift 的 `VerticalShellTests`（真核心、建 engine 的路徑、Page 鍵在窗內外）與 `VerticalLayoutTests`。突變：`Shell.build()` 不送方向，建 engine 路徑的測試失敗；Page 鍵不看 `verticalOpen`，表外鍵路徑的測試失敗。實機（`imeshot` 並排、按鍵行為）還沒做，等使用者。

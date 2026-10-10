@@ -61,9 +61,17 @@
 | 3 | 候選開啟 | 1–9 | 收合：選目前頁的第 n 個（超出本頁則忽略），關閉候選。展開：選選取所在那一排的第 n 個（每排 9 個；最後一排不足 n 個則吃掉、不動作，s3b2 §8.2、§9） |
 | 4 | 候選開啟 | ↑↓、←→ | 收合：↑←上一個、→下一個（跨頁），↓ 展開成網格（選取不動）。展開（一律 9 欄，一排是一頁，展開時選取所在的那一頁在最上面，s3b2 §9）：↓ 下一排同一個位置（最後一排較短時到該排最後一個，已在最後一排時不動）、↑ 上一排（在最上面那排但不是整份清單的第 0 排時往上捲一排；只有第 0 排才收回，選取不變）、←→ 上／下一個（跨列）。←→ 和系統注音一樣逐一移動（2026-10-04 使用者實測後改；原本是翻頁；2026-10-05 起 ↓ 改為展開，s3b2 §8.2） |
 | 5 | 候選開啟 | 空白鍵 | 收合：下一頁，最後一頁再按回第一頁。展開：和 ↓ 相同，但在最後一排時回第一排同一個位置 |
+| 3v | 直排候選窗開啟（`candidate_vertical` 1） | 1–9 | 取代第 3 條。選**可見範圍**的第 n 個（超出可見個數則忽略、候選保持），關閉候選（`candidate-vertical.md` §2.2） |
+| 4v | 直排候選窗開啟 | ↓、→ | 取代第 4 條。下一個；選取在可見範圍最後一個時，可見範圍往下捲**一個**（選取停在可見的最後一列，編號跟著可見的列重排成 1–9）；已是整份清單最後一個時不動。直排沒有網格，↓ 不展開 |
+| 4w | 直排候選窗開啟 | ↑、← | 取代第 4 條。上一個；選取在可見範圍第一個時，可見範圍往上捲一個；已是整份清單第一個時不動 |
+| 5v | 直排候選窗開啟 | 空白鍵 | 取代第 5 條。和 ↓ 相同（下一個，不是翻頁；蘋果注音直排實測），已是整份清單最後一個時不動（不回第一個） |
+| 5p | 直排候選窗開啟，無修飾鍵 | Page Down（kind 15）、Page Up（kind 14） | Page Down：可見範圍往後移 9 個（不超過讓最後一個候選可見的位置），選取在可見範圍第一個；已在最後時不動。Page Up：往前移 9 個（最小 0），選取在第一個；已在最前時不動。兩者都是已處理（`handled` 1）。殼只在最後一次輸出的 `candidate_vertical` 為 1 且沒有任何修飾鍵時才送這兩個 kind |
+| 5q | 不是直排候選窗（橫排候選、網格、組字中、未完成音節、預測列、組字區空），或帶任何修飾鍵 | Page Down、Page Up（kind 15、14） | 不處理（`handled` 0、`commit` 空），**不改任何狀態**（含預測列）。只有殼出錯時才會收到；殼平常不把這兩個鍵送給核心，它們走 `s3b.md` 的表外鍵路徑 |
 | 6 | 候選開啟 | Enter | 選目前選取的，關閉候選 |
 | 7 | 候選開啟 | Esc、Backspace | 關閉候選，不改變 |
 | 8 | 候選開啟 | 其他鍵 | 關閉候選（不改變），再從第 9 條起處理這個鍵 |
+
+**直排候選窗**（`docs/contracts/candidate-vertical.md`）：方向由 `shanjie_engine_set_candidate_vertical` 設定（預設橫排），**在候選窗開啟時固定**（第 15 條與 s3e 的標點候選開窗時讀；設定只影響下一次開窗，開著的窗，含展開的網格，照開啟時的方向，設定的回傳快照與呼叫前相同）。直排的狀態是「整份清單、可見範圍的第一個、選取」，可見範圍固定 9 個（不足 9 個就是全部）；開窗時從 0 開始、選取 0。輸出：`candidates` 是可見範圍、`candidate_selected` 是在可見範圍裡的位置、`candidate_first`／`candidate_total` 照現有意義、`candidate_columns` 一律 0、`candidate_vertical` 為 1。上表 3v–5p 取代直排時的第 3–5 條，第 6–8 條、⌘⌫ 遺忘與其他條不變。預測列永遠是橫排的一列，`candidate_vertical` 為 0。
 | 8a | 預測列未進入且不是空的（候選窗關閉） | Tab（無修飾鍵） | 進入預測列，選取第 0 個（插在第 9 條之前）；預測列是空的時照第 13、21 條 |
 | 9 | 有未完成音節 | 注音鍵 | 放進對應欄位（同一欄再按一次是取代）。**例外（V3 第二片，`v3-engine.md` §12）**：「可省略韻母」開、預測列開、游標在組字區尾端時，那一欄已有符號就**開新的未完成單位**（最後一個單位的那一欄是空的就放進去）；有兩個以上單位時，聲調鍵與空白鍵見 9a。要有語言模型；單位上限 `ABBR_MAX_UNITS` = 10，到了上限已有符號的那一欄照取代 |
 | 9a | 有兩個以上未完成單位 | 聲調鍵、空白鍵 | 吃掉、不動作（單位只靠預測列選取、Backspace、Esc 解決；最多 10 個單位，見第 9 條）；只有一個單位時照第 10 條 |
@@ -133,7 +141,7 @@
 
 ```c
 typedef struct { uint32_t kind; uint32_t ch; uint32_t modifiers; } ShanjieKey;
-// kind：1 CHAR、2 SPACE、3 ENTER、4 BACKSPACE、5 DELETE、6 ESC、7 LEFT、8 RIGHT、9 UP、10 DOWN、11 HOME、12 END、13 TAB
+// kind：1 CHAR、2 SPACE、3 ENTER、4 BACKSPACE、5 DELETE、6 ESC、7 LEFT、8 RIGHT、9 UP、10 DOWN、11 HOME、12 END、13 TAB、14 PAGE_UP、15 PAGE_DOWN（候選窗直排的規則 5p／5q；殼只在直排候選窗開著、沒有修飾鍵時才送）
 // ch：kind 為 CHAR 時的 Unicode scalar（不含 Shift 的鍵帽字元）；其他 kind 時忽略
 // modifiers：bit0 SHIFT、bit1 CONTROL、bit2 OPTION、bit3 COMMAND、bit4 CAPSLOCK
 typedef struct {
@@ -147,6 +155,7 @@ typedef struct {
   uint32_t candidate_columns; // s3b2 §8.2：0 = 收合的一列；展開時一律 9（一排一頁，s3b2 §9）
   uint32_t candidate_first;   // candidates[0] 在整份候選清單的位置；沒開候選時為 0
   uint32_t candidate_total;   // 整份候選清單的數量；沒開候選時為 0
+  uint32_t candidate_vertical; // 1 = 這個輸出是直排候選窗（此時 candidate_columns 為 0，最多 9 列，從 candidate_first 起）；橫排候選窗、預測列、沒有候選時為 0。加在結構尾端
 } ShanjieOutput;
 typedef struct ShanjieEngine ShanjieEngine;
 
@@ -169,6 +178,9 @@ int32_t shanjie_engine_set_profile(ShanjieEngine *engine, uint32_t profile, Shan
 int32_t shanjie_engine_new_packs(const char *data_dir, uint32_t layout, const char *packs_dir, uint32_t packs, ShanjieEngine **out);
 // s3e 新增（docs/contracts/s3e-punctuation-candidates.md）
 int32_t shanjie_engine_set_punctuation(ShanjieEngine *engine, const char *table); // 標點候選表；不合法回 2 並保留原表；不改目前顯示
+// candidate-vertical 新增（docs/contracts/candidate-vertical.md §2.2）：下一次開啟的候選窗的方向。enabled 0（預設，橫排）或 1（直排），其他值回 2、狀態不變；
+// 1 = engine 或 out 為 NULL；回傳快照（handled 1、commit ""），和 set_prediction 相同。開著的候選窗照開啟時的方向，所以快照和呼叫前的輸出相同。殼在每次建 engine 後都要呼叫。
+int32_t shanjie_engine_set_candidate_vertical(ShanjieEngine *engine, uint32_t enabled, ShanjieOutput **out);
 ```
 
 - **回傳碼**：0 成功、1 必要的指標是 NULL、2 輸入不合法（data_dir、LM 路徑或標點表不是 UTF-8、`ch` 不是合法的 Unicode scalar、layout、mode 或 profile 超出範圍、標點表格式不合法或超過上限，見 s3e §3）、3 資料載入失敗（含 LM 檔讀取或格式錯誤、引擎沒有 data_dir）、4 內部錯誤（攔下的 panic 或解碼錯誤）。`load_lm` 失敗時 LM 維持原狀；碼 4 時任何函式都照下面的規則丟棄組字。
@@ -248,7 +260,7 @@ int32_t shanjie_engine_set_punctuation(ShanjieEngine *engine, const char *table)
 
 契約沒寫、`engine.rs` 實作時自行決定的事（S3b 對照截圖時可改）：
 
-- **API 形狀**：`Engine::new(data_dir, Layout)` 讀檔，`Engine::with_lexicon(Arc<Lexicon>, Layout)` 共用已載入的詞庫（測試每個測試檔只載入一次）；`load_lexicon(data_dir)` 單獨公開。`Key { kind: KeyKind, ch: char, modifiers: u32 }`（`KeyKind::from_code` 把 ABI 的 1–13 轉成列舉，`ch` 的合法性由 `ffi.rs` 先擋）。`Output` 欄位與 §6 一一對應（`selected: Option<usize>`、`candidates: Vec<String>`）。錯誤只有 `EngineError::LoadFailed`（碼 3）與 `Internal`（碼 4）；`key` 回 `Internal` 之前引擎已自行清空（等同 reset 模式 1）。`reset(mode)` 不會失敗。
+- **API 形狀**：`Engine::new(data_dir, Layout)` 讀檔，`Engine::with_lexicon(Arc<Lexicon>, Layout)` 共用已載入的詞庫（測試每個測試檔只載入一次）；`load_lexicon(data_dir)` 單獨公開。`Key { kind: KeyKind, ch: char, modifiers: u32 }`（`KeyKind::from_code` 把 ABI 的 1–15 轉成列舉，`ch` 的合法性由 `ffi.rs` 先擋）。`Output` 欄位與 §6 一一對應（`selected: Option<usize>`、`candidates: Vec<String>`）。錯誤只有 `EngineError::LoadFailed`（碼 3）與 `Internal`（碼 4）；`key` 回 `Internal` 之前引擎已自行清空（等同 reset 模式 1）。`reset(mode)` 不會失敗。
 - **R2**：`Key`、`Output`、`Engine` 都不 `derive(Debug)`；`Output` 只 derive `PartialEq`，測試用 `assert!(a == b)`。
 - **Ctrl+\ 的判定**：只有「修飾鍵恰為 CONTROL、字元為 `\`」算 Ctrl+\；Ctrl+Shift+\ 屬第 1 條（直通）。§4 的 Shift 表只認「修飾鍵恰為 SHIFT」；單按表只認「沒有修飾鍵、而且該鍵在目前排列不是注音鍵或聲調鍵」（2026-10-05 起）。
 - **第 1 條的輸出**：直通時回傳 `handled = 0`、`commit` 為空，其餘欄位是目前狀態的快照（狀態不變）。第 22 條直通同理。
@@ -259,7 +271,7 @@ int32_t shanjie_engine_set_punctuation(ShanjieEngine *engine, const char *table)
 - **固定詞**：選字後游標不動；固定詞範圍以音節為單位；插入發生在固定詞左邊界（`start == 游標`）時整段右移，發生在右邊界（`end == 游標`）時不動；刪除的音節落在 `[start, end)` 內就移除。
 - **自動送出**：第 40 個音節完成後（`syls.len() >= 40`）立刻送出整段並清空，`handled = 1`。
 - **解碼成本**：每次組字區變動都重算所有空白段（沒做快取）；重播測試 8,336 鍵的 p95 約 1.2 ms、最大約 9 ms（release，標準與倚天相近）。
-- **C ABI 的輸入檢查（`ffi.rs`）**：`kind` 不在 1–13 時回傳 2（同「輸入不合法」）；`modifiers` 的未定義位元（bit5 以上）不擋，照原樣交給引擎。輸出字串含 NUL 而無法建 `CString` 時回傳 4，engine 先丟棄組字再返回。
+- **C ABI 的輸入檢查（`ffi.rs`）**：`kind` 不在 1–15 時回傳 2（同「輸入不合法」）；`modifiers` 的未定義位元（bit5 以上）不擋，照原樣交給引擎。輸出字串含 NUL 而無法建 `CString` 時回傳 4，engine 先丟棄組字再返回。
 - **panic hook 是行程全域的**：靜音 hook 會取代宿主行程原有的 hook。S3b 的輸入法行程只有這個函式庫，所以沒有影響；呼叫匯出函式的測試都在子行程裡跑，以免影響同一個測試執行檔裡其他測試的 panic 訊息。
 
 ## 9. S2c 實作決定

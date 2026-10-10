@@ -19,6 +19,8 @@ public final class SettingsModel: ObservableObject {
     public var acgDataLine: String? { shell.acgDataDate.map(MenuEntry.Text.acgDataDate) }
     @Published public private(set) var backupExcluded = false
     @Published public private(set) var glassTint = 0.0
+    /// The 候選窗方向 control (candidate-vertical contract section 2.1): true is 直排.
+    @Published public private(set) var candidateVertical = false
     /// Status rows (section 2.2). There is no "this app" row: it comes from one session's client and
     /// this window belongs to no session.
     @Published public private(set) var pausedSecure = false
@@ -49,6 +51,7 @@ public final class SettingsModel: ObservableObject {
         demote = shell.demoteOn
         acgPack = shell.acgPackOn
         glassTint = shell.glassTint
+        candidateVertical = shell.candidateVertical
     }
 
     /// State the Shell does not announce or caches nowhere: secure input, the backup flag (a
@@ -69,6 +72,7 @@ public final class SettingsModel: ObservableObject {
         refreshExternal()  // not read on the change notification
     }
     public func setGlassTint(_ v: Double) { shell.setGlassTint(v) }
+    public func setCandidateVertical(_ on: Bool) { shell.applyCandidateVertical(on) }
     /// The same confirmation window as the menu's.
     public func clear() {
         shell.confirmAndClear { [weak self] in self?.refreshExternal() }  // the "cannot save" row may change
