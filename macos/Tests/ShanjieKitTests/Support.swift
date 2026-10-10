@@ -142,8 +142,8 @@ final class FakePanel: CandidatePanel {
     private(set) var columns = 0
     private(set) var first = 0
     private(set) var total = 0
-    /// The `vertical` of the last show.
-    private(set) var vertical = false
+    /// The `vertical` of the last show: 0 horizontal, 1 vertical candidate window, 2 vertical prediction row.
+    private(set) var vertical = 0
     /// The glassTint of every show, in order.
     private(set) var glassTints: [Double] = []
     var onSelect: ((Int) -> Void)?
@@ -152,7 +152,7 @@ final class FakePanel: CandidatePanel {
 
     func setGlassTint(_ glassTint: Double) { retints.append(glassTint) }
 
-    func show(_ candidates: [String], notes: [String?], selected: Int, columns: Int, first: Int, total: Int, vertical: Bool,
+    func show(_ candidates: [String], notes: [String?], selected: Int, columns: Int, first: Int, total: Int, vertical: Int,
               lineRect: NSRect?, appearance: NSAppearance?, glassTint: Double) {
         glassTints.append(glassTint)
         self.lineRect = lineRect

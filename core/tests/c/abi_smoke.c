@@ -203,6 +203,36 @@ static int run_lm(const char *dir, const char *lm, const char *missing) {
   o = 0;
   CHECK(816, shanjie_engine_reset(e, 1, &o) == 0 && o != 0);
   shanjie_output_free(o);
+  /* set_candidate_vertical (candidate-vertical contract section 2.2): codes like set_prediction; candidate_vertical is the
+   * struct's last field (read through the header, so the C layout is checked): 0 horizontal, 2 the vertical prediction row,
+   * 1 the vertical candidate window. The window keeps its orientation when the setting changes. */
+  o = 0;
+  CHECK(830, shanjie_engine_set_candidate_vertical(0, 1, &o) == 1 && o == 0);
+  CHECK(831, shanjie_engine_set_candidate_vertical(e, 1, 0) == 1);
+  o = &dummy;
+  CHECK(832, shanjie_engine_set_candidate_vertical(e, 2, &o) == 2 && o == 0);
+  o = type_last(e, "s");
+  CHECK(833, o != 0 && o->candidate_count >= 1 && o->candidate_selected == -1 && o->candidate_vertical == 0);
+  shanjie_output_free(o);
+  o = 0;
+  CHECK(834, shanjie_engine_set_candidate_vertical(e, 1, &o) == 0 && o != 0 && o->candidate_count >= 1);
+  CHECK(835, o->candidate_selected == -1 && o->candidate_columns == 0 && o->candidate_first == 0 && o->candidate_vertical == 2);
+  shanjie_output_free(o);
+  o = type_last(e, "u3 "); /* ㄋㄧˇ, then space opens the window */
+  CHECK(836, o != 0 && o->candidate_selected == 0 && o->candidate_columns == 0 && o->candidate_vertical == 1);
+  shanjie_output_free(o);
+  o = 0;
+  CHECK(837, shanjie_engine_set_candidate_vertical(e, 0, &o) == 0 && o != 0 && o->candidate_vertical == 1);
+  shanjie_output_free(o);
+  o = 0;
+  CHECK(838, shanjie_engine_reset(e, 1, &o) == 0 && o != 0 && o->candidate_vertical == 0);
+  shanjie_output_free(o);
+  o = type_last(e, "s");
+  CHECK(839, o != 0 && o->candidate_count >= 1 && o->candidate_vertical == 0);
+  shanjie_output_free(o);
+  o = 0;
+  CHECK(840, shanjie_engine_reset(e, 1, &o) == 0 && o != 0);
+  shanjie_output_free(o);
   /* set_abbreviation (v3-engine section 12.1): codes like set_prediction; with it on, s then t are two units (preedit ㄋㄔ), and turning it off drops them. */
   o = 0;
   CHECK(820, shanjie_engine_set_abbreviation(0, 1, &o) == 1 && o == 0);

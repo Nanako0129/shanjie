@@ -39,12 +39,12 @@ final class VerticalShellTests: XCTestCase {
         XCTAssertFalse(c.session.shell.candidateVertical)
         c.type("g4 ")
         XCTAssertTrue(c.panel.visible)
-        XCTAssertFalse(c.panel.vertical)
+        XCTAssertEqual(c.panel.vertical, 0)
         XCTAssertEqual(c.panel.columns, 0)
         XCTAssertEqual(c.panel.items.count, 9)
         XCTAssertTrue(c.press(down), "horizontal Down still expands the grid")
         XCTAssertEqual(c.panel.columns, 9)
-        XCTAssertFalse(c.panel.vertical)
+        XCTAssertEqual(c.panel.vertical, 0)
     }
 
     /// The Shell passes the stored orientation to the engine it builds without anyone calling a setter, and again to the one
@@ -53,7 +53,7 @@ final class VerticalShellTests: XCTestCase {
         let c = controller(vertical: true)
         let first = c.session.shell.engine
         c.type("g4 ")
-        XCTAssertTrue(c.panel.vertical, "the engine built at init did not get the orientation")
+        XCTAssertEqual(c.panel.vertical, 1, "the engine built at init did not get the orientation")
         XCTAssertEqual(c.panel.columns, 0)
         XCTAssertEqual(c.panel.items.count, 9)
         c.press(Keys.esc)
@@ -62,7 +62,7 @@ final class VerticalShellTests: XCTestCase {
         XCTAssertTrue(c.session.shell.engine !== first, "no rebuild")
         c.type("ne3 ")  // ㄋㄧˇ on the ETen layout, then space opens the window
         XCTAssertTrue(c.panel.visible)
-        XCTAssertTrue(c.panel.vertical, "the rebuilt engine did not get the orientation")
+        XCTAssertEqual(c.panel.vertical, 1, "the rebuilt engine did not get the orientation")
         XCTAssertEqual(c.panel.columns, 0)
     }
 
@@ -75,7 +75,7 @@ final class VerticalShellTests: XCTestCase {
         let model = SettingsModel(shell: c.session.shell)
         XCTAssertFalse(model.candidateVertical)
         c.type("g4 ")
-        XCTAssertFalse(c.panel.vertical)
+        XCTAssertEqual(c.panel.vertical, 0)
         let shownBefore = c.panel.items
 
         model.setCandidateVertical(true)
@@ -83,23 +83,23 @@ final class VerticalShellTests: XCTestCase {
         XCTAssertTrue(c.session.shell.candidateVertical)
         XCTAssertTrue(model.candidateVertical)
         // The open window keeps its orientation: nothing was re-shown, and the next key still works on the bar and its grid.
-        XCTAssertFalse(c.panel.vertical)
+        XCTAssertEqual(c.panel.vertical, 0)
         XCTAssertEqual(c.panel.items, shownBefore)
         c.press(down)
         XCTAssertEqual(c.panel.columns, 9, "the open window turned into a grid, not a vertical list")
-        XCTAssertFalse(c.panel.vertical)
+        XCTAssertEqual(c.panel.vertical, 0)
         // Closed and opened again, it is vertical.
         c.press(Keys.esc)
         c.press(Keys.space)
-        XCTAssertTrue(c.panel.vertical)
+        XCTAssertEqual(c.panel.vertical, 1)
         XCTAssertEqual(c.panel.columns, 0)
 
         model.setCandidateVertical(false)
         XCTAssertEqual(store.candidateVertical, false)
-        XCTAssertTrue(c.panel.vertical, "the open vertical window stays vertical")
+        XCTAssertEqual(c.panel.vertical, 1, "the open vertical window stays vertical")
         c.press(Keys.esc)
         c.press(Keys.space)
-        XCTAssertFalse(c.panel.vertical)
+        XCTAssertEqual(c.panel.vertical, 0)
     }
 
     /// A new Shell reads the stored choice.
@@ -110,7 +110,7 @@ final class VerticalShellTests: XCTestCase {
         let b = Controller(makeShell(store))
         b.session.activate()
         b.type("g4 ")
-        XCTAssertTrue(b.panel.vertical)
+        XCTAssertEqual(b.panel.vertical, 1)
     }
 
     // MARK: what the panel receives
@@ -118,7 +118,7 @@ final class VerticalShellTests: XCTestCase {
     func testPanelReceivesTheCoreVerticalFlag() {
         let v = controller(vertical: true)
         v.type("g4 ")
-        XCTAssertTrue(v.panel.vertical)
+        XCTAssertEqual(v.panel.vertical, 1)
         XCTAssertEqual([v.panel.columns, v.panel.first, v.panel.selected], [0, 0, 0])
         XCTAssertGreaterThan(v.panel.total, 27)
         // Punctuation windows follow the orientation too.
@@ -126,7 +126,7 @@ final class VerticalShellTests: XCTestCase {
         v.press(Keys.esc)
         v.type(",", flags: .shift)  // ，
         v.press(Keys.space)
-        XCTAssertTrue(v.panel.vertical)
+        XCTAssertEqual(v.panel.vertical, 1)
         XCTAssertEqual(v.panel.items.first, "，")
         XCTAssertEqual(v.panel.columns, 0)
         // Closing the window clears the flag the shell remembers.
@@ -136,25 +136,66 @@ final class VerticalShellTests: XCTestCase {
 
         let h = controller(vertical: false)
         h.type("g4 ")
-        XCTAssertFalse(h.panel.vertical)
+        XCTAssertEqual(h.panel.vertical, 0)
     }
 
-    /// The prediction row never carries the mark, even with the setting on; a vertical window opened over it replaces it.
-    func testPredictionRowIsNeverVertical() {
+    /// Candidate-vertical contract section 2.4: with the setting on, the prediction row (not entered, then entered) reaches the
+    /// panel as 2, the candidate window opened over it as 1, and the row that comes back after a pick as 2 again; with the
+    /// setting off it stays 0.
+    func testPredictionRowFollowsTheSettingAndTheWindowOverItIsOne() {
         let c = controller(vertical: true)
         c.type("s")  // ㄋ: the passive row
         XCTAssertTrue(c.panel.visible)
-        XCTAssertFalse(c.panel.vertical)
+        XCTAssertEqual(c.panel.vertical, 2)
         XCTAssertEqual(c.panel.columns, 0)
         XCTAssertEqual(c.panel.selected, -1)
-        XCTAssertFalse(c.session.shell.verticalOpen)
+        XCTAssertFalse(c.session.shell.verticalOpen, "the row is not the window: Page keys are not forwarded")
         c.press(tab)  // entered row
         XCTAssertEqual(c.panel.selected, 0)
-        XCTAssertFalse(c.panel.vertical)
+        XCTAssertEqual(c.panel.vertical, 2)
+        c.press(down)  // the entered vertical row moves with Down
+        XCTAssertEqual(c.panel.selected, 1)
+        XCTAssertEqual(c.panel.vertical, 2)
         c.press(Keys.esc)
         c.press(Keys.esc)
-        c.type("su3 ")
-        XCTAssertTrue(c.panel.vertical, "the window after the row is vertical")
+        // 2 -> 1 -> 2: a syllable's row, the window opened over it by Down, the row after a pick.
+        c.type("su3")
+        XCTAssertTrue(c.panel.visible)
+        XCTAssertEqual(c.panel.vertical, 2, "the row after a complete syllable")
+        let rowItems = c.panel.items
+        c.press(down)  // rule 15 on the not-entered row: opens the candidates
+        XCTAssertEqual(c.panel.vertical, 1)
+        XCTAssertEqual(c.panel.selected, 0)
+        XCTAssertNotEqual(c.panel.items, rowItems)
+        XCTAssertTrue(c.session.shell.verticalOpen)
+        c.type("1")  // picks the first row; the window closes
+        XCTAssertFalse(c.panel.visible)
+        c.type("s")
+        XCTAssertTrue(c.panel.visible)
+        XCTAssertEqual(c.panel.vertical, 2, "the row comes back vertical")
+
+        let h = controller(vertical: false)
+        h.type("s")
+        XCTAssertTrue(h.panel.visible)
+        XCTAssertEqual(h.panel.vertical, 0)
+        h.press(tab)
+        XCTAssertEqual(h.panel.vertical, 0)
+    }
+
+    /// Changing the setting while a row is on screen: the snapshot is applied to the owner's panel in the new orientation; a
+    /// vertical candidate window stays.
+    func testSettingChangeReRendersAShownPredictionRow() {
+        let c = Controller(makeShell())
+        c.session.activate()
+        let model = SettingsModel(shell: c.session.shell)
+        c.type("s")
+        XCTAssertEqual(c.panel.vertical, 0)
+        let items = c.panel.items
+        model.setCandidateVertical(true)
+        XCTAssertEqual(c.panel.vertical, 2, "the row on screen turned vertical at once")
+        XCTAssertEqual(c.panel.items, items)
+        model.setCandidateVertical(false)
+        XCTAssertEqual(c.panel.vertical, 0)
     }
 
     // MARK: Page Up / Down inside the vertical window
@@ -169,7 +210,7 @@ final class VerticalShellTests: XCTestCase {
         XCTAssertTrue(c.press(pageDown), "Page Down is consumed")
         XCTAssertEqual(c.panel.first, 9)
         XCTAssertEqual(c.panel.selected, 0)
-        XCTAssertTrue(c.panel.vertical)
+        XCTAssertEqual(c.panel.vertical, 1)
         let page1 = c.panel.items
         XCTAssertEqual(page1.count, 9)
         XCTAssertNotEqual(page1, page0)
@@ -241,7 +282,7 @@ final class VerticalShellTests: XCTestCase {
         let scenarios: [(name: String, vertical: Bool, composing: Bool, keys: [(UInt16, NSEvent.ModifierFlags)], setup: (Controller) -> Void)] = [
             ("horizontal window", false, true, [(pageDown, []), (pageDown, .command)], { c in
                 c.type("g4 ")
-                XCTAssertTrue(c.panel.visible && !c.panel.vertical && c.panel.columns == 0)
+                XCTAssertTrue(c.panel.visible && c.panel.vertical == 0 && c.panel.columns == 0)
             }),
             ("grid", false, true, [(pageDown, []), (pageDown, .command)], { c in
                 c.type("g4 ")
@@ -260,12 +301,17 @@ final class VerticalShellTests: XCTestCase {
                 c.type("s")
                 c.press(self.tab)
                 XCTAssertEqual(c.panel.selected, 0, "the row is entered")
-                XCTAssertFalse(c.panel.vertical)
+                XCTAssertEqual(c.panel.vertical, 2, "a vertical row, which is not the window")
+            }),
+            ("prediction row, not entered", true, true, [(pageDown, []), (pageDown, .command)], { c in
+                c.type("s")
+                XCTAssertEqual(c.panel.selected, -1)
+                XCTAssertEqual(c.panel.vertical, 2)
             }),
             ("empty composition", true, false, [(pageDown, []), (pageDown, .command)], { _ in }),
             ("vertical window, Command", true, true, [(pageDown, .command), (pageUp, .command), (pageDown, .shift), (pageDown, .control)], { c in
                 c.type("g4 ")
-                XCTAssertTrue(c.panel.vertical)
+                XCTAssertEqual(c.panel.vertical, 1)
             }),
         ]
         for s in scenarios {

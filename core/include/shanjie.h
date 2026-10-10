@@ -62,7 +62,7 @@ typedef struct {
   uint32_t candidate_columns; // 0 = collapsed single row; > 0 = expanded, always 9 (one row = one page, the selected page on top; s3b2 9)
   uint32_t candidate_first;   // position of candidates[0] in the whole list; 0 when closed (and for the prediction row)
   uint32_t candidate_total;   // length of the whole list; 0 when closed (the prediction row: its length)
-  uint32_t candidate_vertical; // 1 = this output is a vertical candidate window (candidate_columns is then 0; the window shows up to 9 rows from candidate_first); 0 for the horizontal window, the prediction row and no candidates. Appended last.
+  uint32_t candidate_vertical; // 0 = horizontal, or no candidates; 1 = vertical candidate window (candidate_columns is then 0; up to 9 rows from candidate_first; fixed when the window opened); 2 = vertical prediction row, entered or not (follows the current setting on every output; candidate_columns 0, first 0). Appended last.
 } ShanjieOutput;
 typedef struct ShanjieEngine ShanjieEngine;
 
@@ -115,7 +115,9 @@ int32_t shanjie_engine_set_prediction(ShanjieEngine *engine, uint32_t enabled, S
 //   unchanged), default 0, like set_prediction in its codes and its snapshot (handled 1, commit ""); 1 when engine or out is
 //   NULL. It sets the orientation of the candidate windows that open from now on (the Space/Down that opens the window,
 //   and the punctuation window). A window that is already open (including an expanded grid) keeps the orientation it
-//   opened with, so the snapshot equals the output before the call. Call it after every engine creation, like set_prediction.
+//   opened with, so the snapshot equals the output before the call. The prediction row has no opening: it follows the
+//   current setting on every output, so a row on screen is re-rendered in the new orientation in the snapshot (value 2
+//   when vertical). In the entered vertical row Up / Down move the selection (stopping at both ends). Call it after every engine creation, like set_prediction.
 int32_t shanjie_engine_set_candidate_vertical(ShanjieEngine *engine, uint32_t enabled, ShanjieOutput **out); // 0 or 1; returns a snapshot
 // V3 (docs/contracts/v3-engine.md section 12): set_abbreviation 0 or 1 (2 otherwise, state unchanged), default 0, like
 //   set_prediction in its codes and its snapshot (handled 1, commit ""); 1 when engine or out is NULL. With 1 (and the

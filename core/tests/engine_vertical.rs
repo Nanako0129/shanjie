@@ -61,7 +61,7 @@ fn at(o: &Output) -> usize {
 }
 /// The vertical window showing nine (or fewer) rows from `first`, the selection at list position `sel`.
 fn assert_view(o: &Output, all: &[String], first: usize, sel: usize) {
-    assert!(o.handled && o.vertical && o.columns == 0, "vertical window, no grid");
+    assert!(o.handled && o.vertical == 1 && o.columns == 0, "vertical window, no grid");
     assert!(o.candidates == all[first..(first + 9).min(all.len())], "visible rows from {first}");
     assert!(o.first as usize == first && o.total as usize == all.len(), "first/total");
     assert!(o.selected == Some(sel - first), "selection at {sel}, first {first}");
@@ -83,9 +83,9 @@ fn default_is_horizontal_and_a_horizontal_window_is_unchanged() {
     // set_candidate_vertical never called.
     let mut e = Engine::with_lexicon(tiny(30), Layout::Standard);
     let o = typ(&mut e, "su3 ");
-    assert!(!o.vertical && o.columns == 0 && o.candidates.len() == 9 && o.selected == Some(0));
+    assert!(o.vertical == 0 && o.columns == 0 && o.candidates.len() == 9 && o.selected == Some(0));
     let o = kk(&mut e, KeyKind::Down);
-    assert!(!o.vertical && o.columns == 9, "horizontal Down still expands the grid");
+    assert!(o.vertical == 0 && o.columns == 9, "horizontal Down still expands the grid");
 }
 
 // ---------- keys ----------
@@ -96,7 +96,7 @@ fn digits_pick_the_nth_visible_row() {
     // Scroll one row: the visible rows are list[1..10], so 1 picks list[1].
     presses(&mut e, 9, KeyKind::Down);
     let o = k(&mut e, digit('1'));
-    assert!(o.handled && o.selected.is_none() && o.candidates.is_empty() && !o.vertical && o.preedit == all[1], "1 = first visible row");
+    assert!(o.handled && o.selected.is_none() && o.candidates.is_empty() && o.vertical == 0 && o.preedit == all[1], "1 = first visible row");
     let (mut e, _, all) = open(0, true);
     presses(&mut e, 9, KeyKind::Down);
     let o = k(&mut e, digit('9'));
@@ -233,7 +233,27 @@ fn page_keys_with_short_lists_and_the_near_end() {
     // Eleven candidates scrolled by one, then Page Down goes to the end (2), not past it.
     let (mut e, _, all) = open(11, true);
     presses(&mut e, 9, KeyKind::Down);
-    assert_view(&kk(&mut e, KeyKind::PageDown), &all, 2, 2);
+    // The selection was on row 9 (list position 9): the clamped move shows 2.. and the selection stays where it was.
+    assert_view(&kk(&mut e, KeyKind::PageDown), &all, 2, 9);
+}
+
+/// Contract section 2.2: Page Down puts the selection on the new first row but never moves it backwards.
+#[test]
+fn page_down_never_moves_the_selection_backwards() {
+    // Ten items, selection on the ninth row (position 8): the only move is by one and the selection stays on 8.
+    let (mut e, _, all) = open(10, true);
+    assert_view(&presses(&mut e, 8, KeyKind::Down), &all, 0, 8);
+    assert_view(&kk(&mut e, KeyKind::PageDown), &all, 1, 8);
+    // Already at the end: nothing moves.
+    assert_view(&kk(&mut e, KeyKind::PageDown), &all, 1, 8);
+    // Thirty items, selection on the ninth row of the window starting at 15 (position 23): clamped to 21, selection stays 23.
+    let (mut e, _, all) = open(30, true);
+    assert_view(&presses(&mut e, 23, KeyKind::Down), &all, 15, 23);
+    assert_view(&kk(&mut e, KeyKind::PageDown), &all, 21, 23);
+    // An unclamped move still puts the selection on the new first row.
+    let (mut e, _, all) = open(30, true);
+    assert_view(&presses(&mut e, 4, KeyKind::Down), &all, 0, 4);
+    assert_view(&kk(&mut e, KeyKind::PageDown), &all, 9, 9);
 }
 
 #[test]
@@ -241,12 +261,12 @@ fn enter_picks_the_selected_candidate_and_esc_backspace_close() {
     let (mut e, _, all) = open(0, true);
     presses(&mut e, 12, KeyKind::Down); // first 4, selection 12
     let o = kk(&mut e, KeyKind::Enter);
-    assert!(o.handled && o.commit.is_empty() && o.selected.is_none() && o.candidates.is_empty() && !o.vertical && o.preedit == all[12]);
+    assert!(o.handled && o.commit.is_empty() && o.selected.is_none() && o.candidates.is_empty() && o.vertical == 0 && o.preedit == all[12]);
     for kind in [KeyKind::Esc, KeyKind::Backspace] {
         let (mut e, _, all) = open(0, true);
         presses(&mut e, 12, KeyKind::Down);
         let o = kk(&mut e, kind);
-        assert!(o.handled && o.selected.is_none() && o.candidates.is_empty() && !o.vertical && o.preedit == all[0] && o.cursor_utf16 == 1);
+        assert!(o.handled && o.selected.is_none() && o.candidates.is_empty() && o.vertical == 0 && o.preedit == all[0] && o.cursor_utf16 == 1);
     }
 }
 
@@ -254,7 +274,7 @@ fn enter_picks_the_selected_candidate_and_esc_backspace_close() {
 fn other_keys_close_then_run_from_rule_9_like_horizontal() {
     let (mut e, _, all) = open(0, true);
     let o = k(&mut e, Key::ch('c', 0)); // ㄏ: closes, starts a syllable
-    assert!(o.handled && o.selected.is_none() && !o.vertical && o.preedit == format!("{}ㄏ", all[0]));
+    assert!(o.handled && o.selected.is_none() && o.vertical == 0 && o.preedit == format!("{}ㄏ", all[0]));
     let (mut e, _, all) = open(0, true);
     let o = kk(&mut e, KeyKind::Tab); // closes, commits, passes through
     assert!(!o.handled && o.commit == all[0] && o.selected.is_none());
@@ -278,7 +298,7 @@ fn mouse_pick_counts_from_the_first_visible_row() {
     let (mut e, _, all) = open(0, true);
     presses(&mut e, 9, KeyKind::Down); // first 1
     let o = e.pick(2).unwrap().unwrap();
-    assert!(o.handled && o.selected.is_none() && !o.vertical && o.preedit == all[3]);
+    assert!(o.handled && o.selected.is_none() && o.vertical == 0 && o.preedit == all[3]);
     let (mut e, _, all) = open(5, true);
     assert!(e.pick(5).unwrap().is_none(), "outside the five rows");
     assert!(e.pick(4).unwrap().unwrap().preedit == all[4]);
@@ -292,14 +312,14 @@ fn punctuation_window_follows_the_orientation() {
         k(&mut e, Key::ch(',', MOD_SHIFT)); // ，
         let o = kk(&mut e, KeyKind::Space);
         assert!(o.selected == Some(0) && o.candidates.len() == 5, "typed mark and its four alternatives");
-        assert!(o.vertical == vertical && o.columns == 0, "punctuation window vertical {vertical}");
+        assert!(o.vertical == vertical as u32 && o.columns == 0, "punctuation window vertical {vertical}");
     }
     let mut e = Engine::with_lexicon(real(), Layout::Standard);
     e.set_candidate_vertical(true).unwrap();
     k(&mut e, Key::ch(',', MOD_SHIFT));
     kk(&mut e, KeyKind::Space);
     let o = kk(&mut e, KeyKind::Down);
-    assert!(o.selected == Some(1) && o.vertical, "Down in the punctuation window moves the selection");
+    assert!(o.selected == Some(1) && o.vertical == 1, "Down in the punctuation window moves the selection");
 }
 
 // ---------- orientation is fixed at open ----------
@@ -307,16 +327,16 @@ fn punctuation_window_follows_the_orientation() {
 #[test]
 fn switching_while_a_horizontal_window_is_open_changes_nothing_until_it_reopens() {
     let (mut e, o0, _) = open(30, false);
-    assert!(!o0.vertical);
+    assert!(o0.vertical == 0);
     let snap = e.set_candidate_vertical(true).unwrap();
     assert!(snap == o0, "the snapshot equals the output before the call");
     let o = kk(&mut e, KeyKind::Down);
-    assert!(!o.vertical && o.columns == 9 && o.candidates.len() == 30, "still the horizontal grid");
+    assert!(o.vertical == 0 && o.columns == 9 && o.candidates.len() == 30, "still the horizontal grid");
     // Still expanded: switching again leaves the grid as it is.
     assert!(e.set_candidate_vertical(false).unwrap() == o && e.set_candidate_vertical(true).unwrap() == o);
     kk(&mut e, KeyKind::Esc);
     let o = kk(&mut e, KeyKind::Space);
-    assert!(o.vertical && o.columns == 0 && o.selected == Some(0) && o.candidates.len() == 9, "reopened vertical");
+    assert!(o.vertical == 1 && o.columns == 0 && o.selected == Some(0) && o.candidates.len() == 9, "reopened vertical");
 }
 
 #[test]
@@ -330,18 +350,18 @@ fn switching_while_a_vertical_window_is_open_changes_nothing_until_it_reopens() 
     assert_view(&kk(&mut e, KeyKind::PageDown), &all, 13, 13);
     kk(&mut e, KeyKind::Esc);
     let o = kk(&mut e, KeyKind::Space);
-    assert!(!o.vertical && o.columns == 0 && o.selected == Some(0));
+    assert!(o.vertical == 0 && o.columns == 0 && o.selected == Some(0));
     assert!(kk(&mut e, KeyKind::Down).columns == 9, "reopened horizontal");
 }
 
 #[test]
 fn no_candidates_and_the_closed_window_carry_no_orientation() {
     let mut e = Engine::with_lexicon(tiny(5), Layout::Standard);
-    assert!(!e.set_candidate_vertical(true).unwrap().vertical, "nothing open");
-    assert!(!typ(&mut e, "su3").vertical, "composing");
-    assert!(typ(&mut e, " ").vertical);
-    assert!(!kk(&mut e, KeyKind::Esc).vertical, "closed");
-    assert!(!e.reset(ResetMode::Discard).vertical);
+    assert!(e.set_candidate_vertical(true).unwrap().vertical == 0, "nothing open");
+    assert!(typ(&mut e, "su3").vertical == 0, "composing, no prediction row without a model");
+    assert!(typ(&mut e, " ").vertical == 1);
+    assert!(kk(&mut e, KeyKind::Esc).vertical == 0, "closed");
+    assert!(e.reset(ResetMode::Discard).vertical == 0);
 }
 
 // ---------- Page Up / Down outside the vertical window ----------

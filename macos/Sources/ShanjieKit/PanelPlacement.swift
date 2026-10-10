@@ -10,8 +10,8 @@ public enum PanelPlacement {
     public static let gap: CGFloat = 6
 
     /// The bar's top-left corner.
-    /// - `lineRect`: the text line (origin bottom-left); `nil` reuses `lastOrigin`, and with none
-    ///   either, the bar sits at the bottom-left of the main screen's visible frame.
+    /// - `lineRect`: the text line (origin bottom-left); `nil` reuses `lastOrigin` (clamped into its screen's visible frame
+    ///   for `size`), and with none either, the bar sits at the bottom-left of the main screen's visible frame.
     /// - `size`: the bar's size.
     /// - `alignOffset`: how far the first candidate glyph sits from the bar's left edge, so the
     ///   glyph lines up with the composed text.
@@ -21,7 +21,12 @@ public enum PanelPlacement {
                                screens: [NSRect], rectScreen: Int?, main: Int) -> NSPoint {
         let visible = screens[rectScreen ?? main]
         guard let line = lineRect else {
-            return lastOrigin ?? NSPoint(x: visible.minX, y: visible.minY + size.height)
+            guard let last = lastOrigin else { return NSPoint(x: visible.minX, y: visible.minY + size.height) }
+            // The last place may no longer fit: another panel size (the vertical window is much taller than the bar), another
+            // screen layout. Clamp it into the visible frame of the screen it was on, for this size.
+            let home = screens.first { $0.contains(NSPoint(x: last.x, y: last.y - 1)) } ?? visible
+            return NSPoint(x: max(min(last.x, home.maxX - size.width), home.minX),
+                           y: min(max(last.y, home.minY + size.height), home.maxY))
         }
         var x = line.minX - alignOffset
         var top = line.minY - gap

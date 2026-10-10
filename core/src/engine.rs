@@ -211,9 +211,9 @@ pub struct Output {
     pub first: u32,
     /// Length of the whole list; 0 when closed.
     pub total: u32,
-    /// True while the open candidate window is the vertical one (fixed when it opened); false for the horizontal
-    /// window, the prediction row and no candidates.
-    pub vertical: bool,
+    /// Candidate-vertical contract section 2.2: 0 horizontal (or no candidates), 1 the vertical candidate window (fixed
+    /// when it opened), 2 the vertical prediction row, entered or not (it follows the setting on every output, section 2.4).
+    pub vertical: u32,
 }
 
 struct Fixed {
@@ -882,6 +882,7 @@ impl Engine {
             Ok(o) if std::mem::take(&mut self.pred_dirty) => {
                 self.recompute_pred();
                 (o.candidates, o.selected, o.total) = self.pred_view();
+                o.vertical = self.pred_vertical();
             }
             Ok(_) => {}
         }
@@ -891,6 +892,12 @@ impl Engine {
     fn clear_pred(&mut self) {
         self.pred.clear();
         self.pred_sel = None;
+    }
+
+    /// Candidate-vertical contract section 2.4: the output value of a prediction row, 2 when the setting is vertical and
+    /// there is a row, else 0. Read from the current setting, not fixed at any time: the row has no opening.
+    fn pred_vertical(&self) -> u32 {
+        if self.cand_vertical && !self.pred.is_empty() { 2 } else { 0 }
     }
 
     /// The row as output fields (candidates, selected, total); `columns` and `first` stay 0.
@@ -1057,7 +1064,10 @@ impl Engine {
                 (list, sel, 0, 0, total)
             }
         };
-        let vertical = self.cands.as_ref().is_some_and(|c| c.vertical);
+        let vertical = match &self.cands {
+            Some(c) => c.vertical as u32,
+            None => self.pred_vertical(),
+        };
         Output { handled, commit, preedit, cursor_utf16, candidates, selected, columns, first, total, vertical }
     }
 
@@ -1209,12 +1219,17 @@ impl Engine {
                 }
                 (KeyKind::Left, _) => self.pred_sel = Some(sel.saturating_sub(1)),
                 (KeyKind::Right, _) => self.pred_sel = Some((sel + 1).min(len - 1)),
+                // Candidate-vertical contract section 2.4: in the vertical row Up / Down move like Left / Right, stopping at both ends.
+                (KeyKind::Up, _) if self.cand_vertical => self.pred_sel = Some(sel.saturating_sub(1)),
+                (KeyKind::Down, _) if self.cand_vertical => self.pred_sel = Some((sel + 1).min(len - 1)),
                 (KeyKind::Tab, _) if m & MOD_SHIFT == 0 => self.pred_sel = Some((sel + 1).min(len - 1)),
                 (KeyKind::Tab, _) | (KeyKind::Esc, _) => self.pred_sel = None,
                 (KeyKind::Enter, _) => return self.choose_pred(sel),
                 _ => self.pred_sel = None,
             }
-            if matches!(k.kind, KeyKind::Left | KeyKind::Right | KeyKind::Tab | KeyKind::Esc) {
+            if matches!(k.kind, KeyKind::Left | KeyKind::Right | KeyKind::Tab | KeyKind::Esc)
+                || (self.cand_vertical && matches!(k.kind, KeyKind::Up | KeyKind::Down))
+            {
                 return self.handled();
             }
         }
@@ -1358,7 +1373,9 @@ impl Engine {
                 }
                 (KeyKind::PageDown, _) if first < last_first => {
                     c.first = (first + PAGE_SIZE).min(last_first);
-                    c.sel = c.first;
+                    // The selection goes to the new first row but never backwards: when the move was clamped the new first
+                    // row can be above the selection (10 items, selection on 8: it stays on 8).
+                    c.sel = sel.max(c.first);
                 }
                 (KeyKind::PageUp, _) if first > 0 => {
                     c.first = first.saturating_sub(PAGE_SIZE);
