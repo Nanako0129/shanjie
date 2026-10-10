@@ -215,6 +215,12 @@ enum Metrics {
     /// last cell's capsule), and the chevron 3 pt, so the chevron's ink is centred in the rest of the area.
     static let chevronSeparatorInset: CGFloat = 2
     static let chevronImageInset: CGFloat = 3
+    /// The vertical panel's row separators (candidate-vertical contract, appearance round 1): one device pixel thick. Measured on
+    /// Apple Zhuyin at 1x (1 px = 1 pt); the thickness at 2x is inferred, not measured.
+    static let separatorPixels: CGFloat = 1
+    /// Their colour is the system's `separatorColor`, which follows light and dark. Apple's line measured about +12 brightness
+    /// over its glass in dark mode (41 -> 53); ours was not compared with that number, and light mode was not measured at all.
+    static var separatorColor: NSColor { .separatorColor }
     /// Section 9: a column widening while the grid is open, the system's default 0.2 s.
     static let widenDuration: TimeInterval = 0.2
     /// bv.mov 420-438: about 0.3 s, system default timing (no custom curve).
@@ -296,7 +302,9 @@ final class CandidatePanelAdapter: CandidatePanel {
     /// (user report 2026-10-05). Since 9.1 a move updates the existing cells and a scroll swaps only
     /// the entering and leaving rows.
     private let row = GridView()
-    private var lastOrigin: NSPoint?
+    /// The last line rectangle the client gave. A shown panel's corner is worked out from it again for each panel's size
+    /// (`PanelPlacement.topLeft`); the corner itself is not remembered, as it depends on the size of the panel it was made for.
+    private var lastLine: NSRect?
     /// The last shown output, to animate the collapsed -> expanded change from where the bar's cells
     /// were, and to update only the selection when nothing else changed.
     private var shownColumns = 0
@@ -308,8 +316,8 @@ final class CandidatePanelAdapter: CandidatePanel {
     private var shownFrame = NSRect.zero
     private var shownTargets: [NSPoint] = []
     /// The last output's `VerticalLayout.Plan` (its kind 0, 1 or 2, row count and width so far); `nil` while the panel is
-    /// hidden. `VerticalLayout.plan` decides from it whether the next output resets and how big the vertical panel is
-    /// (candidate-vertical contract section 2.4).
+    /// hidden. `VerticalLayout.resets` decides from its kind whether the next output clears the content, and
+    /// `VerticalLayout.plan` how big the vertical panel is (candidate-vertical contract section 2.4).
     private var shownPlan: VerticalLayout.Plan?
     /// The vertical panel's scroll indicator: kept while it is needed and only moved and resized, so a scroll does not add and
     /// remove a view on every key; removed when the list fits or the content resets. Whether a new view each time would
@@ -412,7 +420,6 @@ final class CandidatePanelAdapter: CandidatePanel {
                                 width: rowWidth, height: Metrics.capsuleHeight)
             if !update.reused[i] { row.addSubview(cell) }
         }
-        updateSeparators(rows: cells.count, selected: selected, rowWidth: rowWidth)
         if let t = VerticalLayout.thumb(first: first, total: total, visible: candidates.count, height: size.height) {
             let frame = NSRect(x: size.width - VerticalLayout.sideInset - VerticalLayout.thumbWidth, y: t.y,
                                width: VerticalLayout.thumbWidth, height: t.height)
@@ -435,14 +442,17 @@ final class CandidatePanelAdapter: CandidatePanel {
 
         let screens = NSScreen.screens
         guard !screens.isEmpty else { return }
-        let rectScreen = lineRect.flatMap { r in screens.firstIndex { $0.frame.contains(r.origin) } }
+        let line = lineRect ?? lastLine
+        let rectScreen = line.flatMap { r in screens.firstIndex { $0.frame.contains(r.origin) } }
         let main = NSScreen.main.flatMap { m in screens.firstIndex(of: m) } ?? 0
         // The first row's candidate glyph under the composed text, as the bar does. A first guess for the vertical window.
         let alignOffset = VerticalLayout.sideInset + (cells.first?.candidateMinX ?? 0)
         let origin = PanelPlacement.topLeft(
-            lineRect: lineRect, lastOrigin: lastOrigin, size: size, alignOffset: alignOffset,
+            lineRect: lineRect, lastLine: lastLine, size: size, alignOffset: alignOffset,
             screens: screens.map(\.visibleFrame), rectScreen: rectScreen, main: main)
-        lastOrigin = PanelPlacement.anchor(afterShowingAt: origin, lineRect: lineRect, lastOrigin: lastOrigin)
+        if let lineRect { lastLine = lineRect }
+        // The separators' thickness is a device pixel of the screen the panel is going to, not of the one it was on.
+        updateSeparators(rows: cells.count, selected: selected, rowWidth: rowWidth, scale: screens[rectScreen ?? main].backingScaleFactor)
         // No animation: a vertical window never expands or collapses, and a widening is rare (a wider name scrolls in). One
         // setFrame with the final rect anchored at its top-left, so a change of height (the prediction row) is not made in two
         // steps (size, then origin).
@@ -452,14 +462,13 @@ final class CandidatePanelAdapter: CandidatePanel {
     }
 
     /// Puts the separators where `VerticalLayout.separators` says; a view is made only for a gap that has none yet.
-    private func updateSeparators(rows: Int, selected: Int, rowWidth: CGFloat) {
-        // One device pixel, as Apple's (measured at 1x; the 2x thickness is inferred).
-        let scale = max(window.backingScaleFactor, 1)
+    private func updateSeparators(rows: Int, selected: Int, rowWidth: CGFloat, scale: CGFloat) {
         let lines = VerticalLayout.separators(rows: rows, selected: selected, rowWidth: rowWidth,
-                                              capsuleHeight: Metrics.capsuleHeight, thickness: 1 / scale)
+                                              capsuleHeight: Metrics.capsuleHeight,
+                                              thickness: Metrics.separatorPixels / max(scale, 1))
         while separators.count > lines.count { separators.removeLast().removeFromSuperview() }
         while separators.count < lines.count {
-            let view = FilledView(frame: .zero, color: .separatorColor)
+            let view = FilledView(frame: .zero, color: Metrics.separatorColor)
             row.addSubview(view)
             separators.append(view)
         }
@@ -472,7 +481,7 @@ final class CandidatePanelAdapter: CandidatePanel {
 
     /// Forgets everything on screen without hiding the window: the value of `candidate_vertical` changed (the bar, a prediction
     /// row, a vertical window, in any order) or the panel is hiding. The horizontal path's `shown*` and the vertical path's
-    /// thumb and size all go; the next output starts from nothing.
+    /// thumb, separators and size all go; the next output starts from nothing.
     private func resetContent() {
         // A running expand or collapse would keep moving the window after its content is gone; end it first.
         if animating { settle(frame: shownFrame) }
@@ -506,7 +515,7 @@ final class CandidatePanelAdapter: CandidatePanel {
             showVertical(candidates, notes: notes, selected: selected, first: first, total: total, kind: vertical, lineRect: lineRect)
             return
         }
-        shownPlan = VerticalLayout.plan(previous: shownPlan, kind: 0, count: 0, total: 0, contentWidths: [])
+        shownPlan = .horizontal
         let grid = columns > 0
 
         // Only the selection moved (section 8.7): keep the cells, change which one is selected and which
@@ -619,14 +628,15 @@ final class CandidatePanelAdapter: CandidatePanel {
         }
 
         let screens = NSScreen.screens
-        let rectScreen = lineRect.flatMap { r in screens.firstIndex { $0.frame.contains(r.origin) } }
+        let line = lineRect ?? lastLine
+        let rectScreen = line.flatMap { r in screens.firstIndex { $0.frame.contains(r.origin) } }
         let main = NSScreen.main.flatMap { m in screens.firstIndex(of: m) } ?? 0
         guard !screens.isEmpty else { return }
         let alignOffset = Metrics.barInset + (newCells.first?.candidateMinX ?? 0)
         let origin = PanelPlacement.topLeft(
-            lineRect: lineRect, lastOrigin: lastOrigin, size: size, alignOffset: alignOffset,
+            lineRect: lineRect, lastLine: lastLine, size: size, alignOffset: alignOffset,
             screens: screens.map(\.visibleFrame), rectScreen: rectScreen, main: main)
-        lastOrigin = PanelPlacement.anchor(afterShowingAt: origin, lineRect: lineRect, lastOrigin: lastOrigin)
+        if let lineRect { lastLine = lineRect }
         let frame = NSRect(x: origin.x, y: origin.y - size.height, width: size.width, height: size.height)
         // Only the selection moved while an expand or collapse runs (autorepeat on the arrow keys):
         // the cells were updated above and the running animation already goes to this frame and these

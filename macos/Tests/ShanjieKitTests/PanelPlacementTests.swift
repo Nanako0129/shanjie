@@ -6,8 +6,8 @@ final class PanelPlacementTests: XCTestCase {
     let size = NSSize(width: 200, height: 30)
     let line = NSRect(x: 300, y: 400, width: 8, height: 18)
 
-    func place(_ line: NSRect?, last: NSPoint? = nil, screens: [NSRect]? = nil, rectScreen: Int? = 0, main: Int = 0) -> NSPoint {
-        PanelPlacement.topLeft(lineRect: line, lastOrigin: last, size: size, alignOffset: 20,
+    func place(_ line: NSRect?, last: NSRect? = nil, screens: [NSRect]? = nil, rectScreen: Int? = 0, main: Int = 0) -> NSPoint {
+        PanelPlacement.topLeft(lineRect: line, lastLine: last, size: size, alignOffset: 20,
                                screens: screens ?? [screen], rectScreen: rectScreen, main: main)
     }
 
@@ -36,8 +36,10 @@ final class PanelPlacementTests: XCTestCase {
         XCTAssertEqual(q.x, 1480)
     }
 
-    func testNoLineReusesTheLastOrigin() {
-        XCTAssertEqual(place(nil, last: NSPoint(x: 11, y: 222)), NSPoint(x: 11, y: 222))
+    /// No line: the last line the client gave is used and the origin is worked out for this size (not a remembered corner).
+    func testNoLineUsesTheLastLine() {
+        XCTAssertEqual(place(nil, last: line), place(line))
+        XCTAssertEqual(place(nil, last: line), NSPoint(x: 280, y: 394))
     }
 
     func testNoLineAndNoLastGoesBottomLeftOfMain() {
