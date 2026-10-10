@@ -21,6 +21,17 @@ import score
 
 SETTINGS = ("chat", "formal")
 EVAL_DEV = os.path.join(ROOT, "eval", "dev")
+# S7b section 2.2: user-reported stays at S7a's first 66 rows (new reports are appended at the end), so n matches across models.
+REPORTED_ROWS = 66
+REPORTED_SHA = "6e338dc1293060162585c09e02bbb252c93148c9928d61007faea5e8860369e8"
+
+
+def check_reported(path):
+    with open(path, encoding="utf-8", newline="") as f:
+        head = [next(f, "") for _ in range(REPORTED_ROWS)]
+    got = hashlib.sha256("".join(head).encode()).hexdigest()
+    if got != REPORTED_SHA:
+        sys.exit(f"run_sets: the first {REPORTED_ROWS} rows of {path} changed (sha256 {got[:16]}…, expected {REPORTED_SHA[:16]}…)")
 
 
 def rows_args(name, a):
@@ -31,7 +42,9 @@ def rows_args(name, a):
     if name == "typing76":
         return ["--rows", os.path.join(EVAL_DEV, "user-typing.txt")]
     if name == "user-reported":
-        return ["--rows", os.path.join(EVAL_DEV, "user-reported.txt")]
+        path = os.path.join(EVAL_DEV, "user-reported.txt")
+        check_reported(path)
+        return ["--rows", path, "--limit", str(REPORTED_ROWS)]
     if name == "discordtune":
         if not a.discord:
             sys.exit("run_sets: discordtune needs --discord FILE")

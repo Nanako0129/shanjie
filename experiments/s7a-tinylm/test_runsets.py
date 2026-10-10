@@ -1,6 +1,7 @@
 """S7a: run_sets.py plumbing with lm_eval.py stubbed out (no model file needed): the command line, the .top1 file, the score loop."""
 import contextlib
 import io
+import argparse
 import os
 import subprocess
 import tempfile
@@ -70,6 +71,20 @@ class TestRunSets(unittest.TestCase):
                     run_sets.main(["dumps", "--work", td, "--sets", "dev302"])
             self.assertIn("no summary line", str(e.exception.code))
             self.assertIn("garbage output", str(e.exception.code))
+
+    def test_user_reported_is_pinned_to_the_first_66_rows(self):
+        """S7b §2.2: --limit 66, and a changed head of the file stops the run (appending rows at the end does not)."""
+        a = argparse.Namespace(tune=None, discord=None)
+        self.assertEqual(run_sets.rows_args("user-reported", a)[-2:], ["--limit", "66"])
+        with tempfile.TemporaryDirectory() as td:
+            real = open(os.path.join(run_sets.EVAL_DEV, "user-reported.txt"), encoding="utf-8", newline="").read()   # newline="": the hash is over the bytes
+            open(os.path.join(td, "user-reported.txt"), "w", encoding="utf-8", newline="").write(real + "|多加一列|ㄉㄨㄛ ㄐㄧㄚ ㄧ ㄌㄧㄝˋ\n")
+            with mock.patch.object(run_sets, "EVAL_DEV", td):
+                self.assertEqual(run_sets.rows_args("user-reported", a)[-1], "66")          # appended rows are fine
+                open(os.path.join(td, "user-reported.txt"), "w", encoding="utf-8", newline="").write("|改過的第一列|ㄍㄞˇ\n" + real)
+                with self.assertRaises(SystemExit) as e:
+                    run_sets.rows_args("user-reported", a)
+                self.assertIn("first 66 rows", str(e.exception.code))
 
 
 if __name__ == "__main__":

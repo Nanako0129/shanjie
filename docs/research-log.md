@@ -2791,3 +2791,16 @@ PR #90 的審查意見逐項處理。
 - **讀法**（推論，沒有另外量）：公開集合的進步遠大於 discordtune（dev302 聊天 241 → 277、錯字回報 15 → 31），discordtune 是使用者真實聊天、n-gram 已經 84.9% 對，剩下的錯比較難。M 比 S 在聊天設定多對的列：cvtune +30、wikitune +23、dev302 +6、錯字回報 +4、打字測驗 −2、discordtune +36（分散在各集合，不是只在 discordtune；〔更正，2026-10-11，PR #112 /code-review：第一版寫「主要在 discordtune」，和這張表不符〕）。保留集照契約在下一片（核心實作）由 fresh verifier 跑。
 - **/code-review 後的程式修正（PR #112）**：產生候選前核對模型與詞類表的雜湊；§4 判斷缺任何一個防護集合或 discordtune 聊天就判不過（不再印 SKIP 照樣通過）；建構檢查刪掉不會失敗的那條、維基那半改讀 prep 實際用的條目數；摘要行對不上時給清楚的錯誤。這次的結果不受影響（基準數字和 model-v5 相同，所有集合都有）。
 
+## 2026-10-11：小型字元模型的推論方式（MLX 與其他選項的調查，S7b 期間）
+
+使用者 2026-10-11：「研究一下 mlx 怎麼調用加快推論」。研究 agent 只讀網路資料（沒有安裝或執行任何東西），main 在 Mac（Apple M5、32 GB、macOS 27.0.1）量了一個不用安裝的下限。
+
+- **CPU 矩陣乘法的下限**（main 量的；numpy 2.5，BLAS 是 Accelerate；只算每層的 qkv、輸出投影、兩個 MLP 矩陣乘法與注意力的兩個乘法，再加整個字表的 logits，不含 LayerNorm、softmax 的細節；[8, 17]、float32、20 次暖機後 200 次）：p95 M 5.94 ms、L 13.02 ms、XL 29.17 ms。S7a 用 numpy 完整前向量到的 M 是 32–45 ms，差距大多不是矩陣乘法（推論：Python 每個運算的開銷、float64、注意力與 softmax 的寫法）。
+- **MLX 的呼叫方式**（來源：github.com/ml-explore/mlx、mlx-c、mlx-swift、oxideai/mlx-rs 的 README 與 release；MIT）：Python `mlx`（執行時要 Python，只能拿來篩選）、C++ `libmlx`、C API `mlx-c`（`mlx_load_safetensors`、`mlx_compile`）、Swift `mlx-swift` 0.32.3、Rust `mlx-rs` 0.32.0（`metal`、`accelerate` 預設關；建置時把 `mlx.metallib` 寫到 `~/.mlx/lib`，出貨要另外打包）。要 macOS 14 以上、Apple silicon；`.metallib` 要隨 App 放在 `Contents/Resources`（`SWIFTPM_BUNDLE` 那條查找路徑，issue #1286）；`mlx-metal` 0.32.2 的 wheel 壓縮後 42.5 MB（含 libmlx 與 shader，沒有官方的單獨大小）。
+- **輸入法特有的風險**（來源見研究 agent 的報告，論壇與 issue 標明）：
+  - GPU 時脈：Apple 工程師說沒有辦法事先拉高 GPU 時脈（developer.apple.com/forums/thread/702651）；有開發者量到短而斷續的 3 ms GPU 工作比固定最高時脈慢約一倍（thread/768160）。輸入法是「每按一個鍵一次前向」，正是這種負載。
+  - 第一次呼叫：Metal 驅動在每次安裝或更新後第一次用到某個 kernel 時才編譯（MLX issue #4566，維護者說是驅動層的設計）；`mx.compile` 第一次呼叫要追蹤與產生程式碼，輸入形狀變了會重編。
+  - 輸入法程序裡能不能拿到 Metal 裝置：沒有找到任何報告，**沒有驗證**（要裝好的輸入法才能確認）。
+- **其他選項**：Accelerate（`cblas_sgemm` 走 AMX，從 Rust 只要 `extern "C"` 與連結 framework，沙盒可用、沒有暖機與時脈問題）；BNNSGraph（macOS 15 以上，吃 Core ML 編好的模型）；Core ML／ANE（fp16，第一次載入要準備、快取綁路徑與系統版本）；candle 的 Metal 後端有未修的記憶體洩漏（#2271）；ggml 的 int8 在 136 列這種批次省記憶體不省時間；ONNX Runtime 加上 CoreML 會切圖。
+- **排序**（研究 agent 的建議，main 同意）：(1) Rust＋Accelerate fp32，風險最低，其他選項都要贏過它；(2) MLX GPU（mlx-c、fp16、`mx.compile`、固定形狀），只有 XL 可能需要；(3) Core ML fp16。決定要看「打字節奏」的 p95（每次呼叫間隔 150 ms），不是連續跑的數字。MLX 要先裝 Python 套件才能量，安裝前先問使用者。
+
