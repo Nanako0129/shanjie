@@ -38,9 +38,10 @@ public protocol CandidatePanel: AnyObject {
     /// `lineRect`: where the composition's line is (s3b2 section 2.3), `nil` if unknown.
     /// `appearance`: the client's (s3b2 section 10), `nil` for the system's.
     /// `glassTint`: the 0...1 slider value (settings-window section 2.3), applied on every show, 0 included.
-    /// `vertical`: the core's `candidate_vertical` of this output (candidate-vertical contract section 2.2): the single
-    /// column of up to nine rows; `columns` is 0 then. The panel draws what it is told and reads no setting.
-    func show(_ candidates: [String], notes: [String?], selected: Int, columns: Int, first: Int, total: Int, vertical: Bool,
+    /// `vertical`: the core's `candidate_vertical` of this output (candidate-vertical contract sections 2.2 and 2.4): 0
+    /// horizontal, 1 the vertical candidate window (a single column of up to nine rows), 2 the vertical prediction row;
+    /// `columns` is 0 for both. The panel draws what it is told and reads no setting.
+    func show(_ candidates: [String], notes: [String?], selected: Int, columns: Int, first: Int, total: Int, vertical: Int,
               lineRect: NSRect?, appearance: NSAppearance?, glassTint: Double)
     func hide()
     /// Re-applies the tint to what is on screen now, without a new `show` (the slider moved while the panel is up).
@@ -198,8 +199,9 @@ public final class Shell {
     /// The candidate window's orientation for windows that open from now on (default horizontal); sent to every engine
     /// `build()` makes and on every change (candidate-vertical contract section 2.1).
     public private(set) var candidateVertical = false
-    /// Whether the candidate window on screen is the vertical one: the `vertical` of the last output that showed candidates
-    /// (false once the panel hid). It decides whether Page Up / Down go to the core (section 2.2).
+    /// Whether the candidate window on screen is the vertical one: the last output that showed candidates had `vertical` 1
+    /// (false once the panel hid; the vertical prediction row, 2, does not count). It decides whether Page Up / Down go to
+    /// the core (section 2.2).
     private(set) var verticalOpen = false
     /// Posted (object: this shell) after any setting changes, from the menu or the settings window;
     /// the window's model re-reads on it (settings-window section 2.2).
@@ -389,7 +391,8 @@ public final class Shell {
     }
 
     /// The settings window's choice (candidate-vertical contract section 2.1): stored, and sent to the engine, which applies it
-    /// to the next window that opens. An open window keeps its orientation, so the snapshot is not shown again.
+    /// to the next window that opens and to the prediction row at once. An open window keeps its orientation; the snapshot is
+    /// for the caller to show.
     func setCandidateVertical(_ on: Bool) -> CoreResult? {
         candidateVertical = on
         candidateOrientationStore.candidateVertical = on
@@ -483,11 +486,11 @@ public final class Shell {
         return engine?.setProfile(p)
     }
 
-    func showCandidates(_ list: [String], selected: Int, columns: Int, first: Int, total: Int, vertical: Bool, lineRect: NSRect?,
+    func showCandidates(_ list: [String], selected: Int, columns: Int, first: Int, total: Int, vertical: Int, lineRect: NSRect?,
                         appearance: NSAppearance?) {
         // Only an exact punctuation mark has a name: a word candidate is never a key of the table.
         let notes = list.map { names[$0] }
-        verticalOpen = vertical
+        verticalOpen = vertical == VerticalLayout.candidates
         panel.show(list, notes: notes, selected: selected, columns: columns, first: first, total: total, vertical: vertical,
                    lineRect: lineRect, appearance: appearance, glassTint: glassTint)
     }
@@ -629,9 +632,15 @@ public final class Session {
         }
     }
 
-    /// The orientation setting: it only affects windows that open later, so only a failure needs handling here.
+    /// The orientation setting: the snapshot is shown, if this session owns the composition, so a prediction row on screen
+    /// turns at once (candidate-vertical contract section 2.4); an open candidate window keeps its orientation, so for it the
+    /// snapshot is the output already shown.
     func applyCandidateVertical(_ on: Bool) {
-        if case .failed(let c)? = shell.setCandidateVertical(on) { _ = fail(c) }
+        switch shell.setCandidateVertical(on) {
+        case .ok(let o)? where shell.owner === self: apply(o)
+        case .failed(let c)?: _ = fail(c)
+        default: break
+        }
     }
 
     /// The profile for this client's app, from its bundle ID (looked up, never kept).

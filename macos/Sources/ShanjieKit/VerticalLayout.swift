@@ -31,6 +31,38 @@ public enum VerticalLayout {
     public static let thumbWidth: CGFloat = 5
     public static let thumbMinHeight: CGFloat = 12
 
+    /// The values of the core's `candidate_vertical` (candidate-vertical contract sections 2.2 and 2.4); 0 is horizontal.
+    public static let candidates = 1
+    public static let predictions = 2
+
+    /// What is on screen after one output, and what the next one needs to decide about: `kind` is the output's value, `rows`
+    /// the row count the height comes from, `width` the panel's width. `reset` says the content that was on screen must go.
+    public struct Plan: Equatable {
+        public var kind: Int
+        public var reset: Bool
+        public var rows: Int
+        public var width: CGFloat
+        public var size: CGSize { CGSize(width: width, height: VerticalLayout.height(rows: rows)) }
+    }
+
+    /// Candidate-vertical contract section 2.4: the reset and the size of the panel for one output.
+    /// - `previous`: the plan of the last output that is still on screen, `nil` when nothing is.
+    /// - `kind`: this output's `candidate_vertical`. A change of value, in any direction (0, 1, 2), always resets: the
+    ///   content of a prediction row, a candidate window and the bar do not carry over to each other, and neither does the
+    ///   width (a window opening over a wide prediction row starts at the minimum).
+    /// - Kind 1 (candidate window): the height is fixed when it opens (`min(count, 9)`); the width only grows.
+    /// - Kind 2 (prediction row): the height follows `count` on every output; the width only grows while the outputs stay 2.
+    /// - Kind 0 sizes nothing here (the bar and the grid have their own layout); only `reset` matters.
+    /// - `contentWidths`: each shown cell's `CandidateCell.contentWidth`; `gutter`: the scroll indicator's room, 0 if none.
+    public static func plan(previous: Plan?, kind: Int, count: Int, contentWidths: [CGFloat], gutter: CGFloat) -> Plan {
+        let reset = previous?.kind != kind
+        guard kind != 0 else { return Plan(kind: 0, reset: reset, rows: 0, width: 0) }
+        let base = reset ? nil : previous
+        let rows = kind == candidates ? (base?.rows ?? min(count, visibleRows)) : min(count, visibleRows)
+        return Plan(kind: kind, reset: reset, rows: rows,
+                    width: width(contentWidths: contentWidths, current: base?.width ?? 0, gutter: gutter))
+    }
+
     /// The window's height for `rows` visible rows. Fixed when the window opens (contract section 2.3).
     public static func height(rows: Int) -> CGFloat {
         inset * 2 + CGFloat(rows) * rowPitch

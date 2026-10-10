@@ -251,7 +251,7 @@ final class SampleCandidateBar: NSGlassEffectView {
         for cell in update.cells {
             cell.setFrameOrigin(NSPoint(x: x, y: (Metrics.barHeight - Metrics.capsuleHeight) / 2))
             row.addSubview(cell)
-            x += cell.frame.width + Metrics.cellSpacing
+            x += cell.contentWidth + Metrics.cellSpacing
         }
         size = NSSize(width: x - Metrics.cellSpacing + Metrics.barInset, height: Metrics.barHeight)
         row.frame = NSRect(origin: .zero, size: size)
@@ -307,12 +307,13 @@ final class CandidatePanelAdapter: CandidatePanel {
     private var shownSize = NSSize.zero
     private var shownFrame = NSRect.zero
     private var shownTargets: [NSPoint] = []
-    /// The vertical window (candidate-vertical contract section 2.3): whether what is on screen is one, its width so far (only
-    /// ever grows while it is open) and its row count at open (the height stays). All reset when the panel hides or the
-    /// orientation changes.
-    private var shownVertical = false
-    private var verticalWidth: CGFloat = 0
-    private var verticalRows = 0
+    /// The last output's `VerticalLayout.Plan` (its kind 0, 1 or 2, row count and width so far); `nil` while the panel is
+    /// hidden. `VerticalLayout.plan` decides from it whether the next output resets and how big the vertical panel is
+    /// (candidate-vertical contract section 2.4).
+    private var shownPlan: VerticalLayout.Plan?
+    /// The vertical panel's scroll indicator: kept while it is needed and only moved and resized (a new view on every
+    /// output flickered the horizontal grid's, s3b2 section 9.1), removed when the list fits or the content resets.
+    private var thumb: FilledView?
     /// Widen-only column widths of the open grid (section 9); empty when collapsed or hidden.
     private var columnWidths: [CGFloat] = []
     /// The cells and the decision which survive an output (ShanjieKit); this class only adds and removes
@@ -387,20 +388,16 @@ final class CandidatePanelAdapter: CandidatePanel {
         }
     }
 
-    /// Candidate-vertical contract section 2.3: one column of up to nine rows, a capsule across the row's width, the scroll
-    /// indicator in a gutter on the right. Everything the horizontal path keeps (`shown*`, the grid's column widths) is empty
-    /// while this is up, and everything this keeps is empty while the horizontal path is.
+    /// Candidate-vertical contract sections 2.3 and 2.4: one column of up to nine rows, a capsule across the row's width, the
+    /// scroll indicator in a gutter on the right (candidate window only). The reset and the size come from
+    /// `VerticalLayout.plan`; `plan.reset` has already cleared the content when this runs.
     private func showVertical(_ candidates: [String], notes: [String?], selected: Int, first: Int, total: Int,
-                              lineRect: NSRect?) {
-        let update = cellSet.update(candidates: candidates, notes: notes, selected: selected, first: first, columns: 0)
+                              lineRect: NSRect?, plan: VerticalLayout.Plan) {
+        let update = cellSet.update(candidates: candidates, notes: notes, selected: selected, first: first, columns: 0, renumber: true)
         let cells = update.cells
-        // The height is fixed when the window opens: a window never has fewer or more rows after that (the core shows nine, or
-        // all of a shorter list), and a different count would only come from a new window.
-        if verticalRows == 0 { verticalRows = candidates.count }
+        let size = plan.size
         let scrolls = total > candidates.count
         let gutter = scrolls ? VerticalLayout.scrollGutter : 0
-        verticalWidth = VerticalLayout.width(contentWidths: cells.map(\.contentWidth), current: verticalWidth, gutter: gutter)
-        let size = NSSize(width: verticalWidth, height: VerticalLayout.height(rows: verticalRows))
         update.removed.forEach { $0.removeFromSuperview() }
         let rowWidth = size.width - VerticalLayout.sideInset * 2 - gutter
         for (i, cell) in cells.enumerated() {
@@ -408,13 +405,20 @@ final class CandidatePanelAdapter: CandidatePanel {
                                 width: rowWidth, height: Metrics.capsuleHeight)
             if !update.reused[i] { row.addSubview(cell) }
         }
-        var thumbs: [NSView] = []
         if let t = VerticalLayout.thumb(first: first, total: total, visible: candidates.count, height: size.height) {
-            thumbs.append(FilledView(frame: NSRect(x: size.width - VerticalLayout.sideInset - VerticalLayout.thumbWidth, y: t.y,
-                                                   width: VerticalLayout.thumbWidth, height: t.height),
-                                     color: .tertiaryLabelColor, cornerRadius: VerticalLayout.thumbWidth / 2))
+            let frame = NSRect(x: size.width - VerticalLayout.sideInset - VerticalLayout.thumbWidth, y: t.y,
+                               width: VerticalLayout.thumbWidth, height: t.height)
+            if let thumb {
+                if thumb.frame != frame { thumb.frame = frame }
+            } else {
+                let view = FilledView(frame: frame, color: .tertiaryLabelColor, cornerRadius: VerticalLayout.thumbWidth / 2)
+                row.addSubview(view)
+                thumb = view
+            }
+        } else {
+            thumb?.removeFromSuperview()
+            thumb = nil
         }
-        decor.replace(with: thumbs, deferred: false, in: row)
         if shownSize != size {
             row.frame = NSRect(origin: .zero, size: size)
             glass.cornerRadius = VerticalLayout.cornerRadius
@@ -437,8 +441,9 @@ final class CandidatePanelAdapter: CandidatePanel {
         if !window.isVisible { window.orderFrontRegardless() }
     }
 
-    /// Forgets everything on screen without hiding the window: the orientation changed (a prediction row, then a vertical
-    /// window) or the panel is hiding.
+    /// Forgets everything on screen without hiding the window: the value of `candidate_vertical` changed (the bar, a prediction
+    /// row, a vertical window, in any order) or the panel is hiding. The horizontal path's `shown*` and the vertical path's
+    /// thumb and size all go; the next output starts from nothing.
     private func resetContent() {
         // A running expand or collapse would keep moving the window after its content is gone; end it first.
         if animating { settle(frame: shownFrame) }
@@ -450,23 +455,27 @@ final class CandidatePanelAdapter: CandidatePanel {
         shownSize = .zero
         shownTargets = []
         columnWidths = []
-        verticalWidth = 0
-        verticalRows = 0
+        thumb?.removeFromSuperview()
+        thumb = nil
         cellSet.reset().forEach { $0.removeFromSuperview() }
         decor.clear()
     }
 
-    func show(_ candidates: [String], notes: [String?], selected: Int, columns: Int, first: Int, total: Int, vertical: Bool,
+    func show(_ candidates: [String], notes: [String?], selected: Int, columns: Int, first: Int, total: Int, vertical: Int,
               lineRect: NSRect?, appearance: NSAppearance?, glassTint: Double) {
         if window.appearance?.name != appearance?.name { window.appearance = appearance }
         applyTint(glassTint)
-        // The prediction row is horizontal: a vertical window opening over it (or the reverse) starts from nothing.
-        if vertical != shownVertical {
-            resetContent()
-            shownVertical = vertical
+        // Sizes and resets of the vertical panel are a pure function (ShanjieKit); the widths it needs are those of the cells
+        // this output will show, measured before any cell is made.
+        let widths = vertical == 0 ? [] : candidates.indices.map {
+            CandidateCell.contentWidth(numberText: String($0 + 1), text: candidates[$0], note: notes[$0])
         }
-        if vertical {
-            showVertical(candidates, notes: notes, selected: selected, first: first, total: total, lineRect: lineRect)
+        let gutter = vertical == VerticalLayout.candidates && total > candidates.count ? VerticalLayout.scrollGutter : 0
+        let plan = VerticalLayout.plan(previous: shownPlan, kind: vertical, count: candidates.count, contentWidths: widths, gutter: gutter)
+        if plan.reset { resetContent() }
+        shownPlan = plan
+        if vertical != 0 {
+            showVertical(candidates, notes: notes, selected: selected, first: first, total: total, lineRect: lineRect, plan: plan)
             return
         }
         let grid = columns > 0
@@ -496,7 +505,7 @@ final class CandidatePanelAdapter: CandidatePanel {
             var gridXs: [CGFloat] = []
             if grid {
                 let current = shownColumns > 0 ? columnWidths : []
-                let lay = GridLayout.layout(cellWidths: newCells.map(\.frame.width), columns: columns, current: current,
+                let lay = GridLayout.layout(cellWidths: newCells.map(\.contentWidth), columns: columns, current: current,
                                             inset: Metrics.barInset, spacing: Metrics.cellSpacing,
                                             trailing: Metrics.barInset + Metrics.scrollGutter)
                 gridXs = lay.xs
@@ -523,7 +532,7 @@ final class CandidatePanelAdapter: CandidatePanel {
                 var x = Metrics.barInset
                 for cell in newCells {
                     t.append(NSPoint(x: x, y: (Metrics.barHeight - Metrics.capsuleHeight) / 2))
-                    x += cell.frame.width + Metrics.cellSpacing
+                    x += cell.contentWidth + Metrics.cellSpacing
                 }
                 size = NSSize(width: x - Metrics.cellSpacing + Metrics.chevronArea, height: Metrics.barHeight)
             }
@@ -662,7 +671,7 @@ final class CandidatePanelAdapter: CandidatePanel {
         if animating { settle(frame: shownFrame) }
         window.orderOut(nil)
         resetContent()
-        shownVertical = false
+        shownPlan = nil
     }
 }
 

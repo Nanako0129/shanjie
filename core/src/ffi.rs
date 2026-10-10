@@ -40,7 +40,7 @@ pub struct ShanjieOutput {
     pub candidate_columns: u32,
     pub candidate_first: u32,
     pub candidate_total: u32,
-    /// Appended last (candidate-vertical contract section 2.2): 1 = this output is a vertical candidate window.
+    /// Appended last (candidate-vertical contract section 2.2): 0 horizontal or none, 1 vertical candidate window, 2 vertical prediction row.
     pub candidate_vertical: u32,
 }
 
@@ -113,7 +113,7 @@ fn to_c(o: Output) -> Option<*mut ShanjieOutput> {
         candidate_columns: o.columns,
         candidate_first: o.first,
         candidate_total: o.total,
-        candidate_vertical: o.vertical as u32,
+        candidate_vertical: o.vertical,
     };
     Some(Box::into_raw(Box::new(OwnedOutput { out, _strings: strings, _ptrs: ptrs })).cast())
 }

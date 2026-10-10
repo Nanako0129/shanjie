@@ -43,10 +43,11 @@ public final class CandidateCell: NSView {
     public var ignoresMouse = false
     var onClick: ((Int) -> Void)?
 
-    private let numberWidth: CGFloat, candidateWidth: CGFloat, nameWidth: CGFloat
+    private var numberWidth: CGFloat
+    private let candidateWidth: CGFloat, nameWidth: CGFloat
     /// The width the content needs (number, candidate, name), whatever the frame is now: the vertical window stretches every
-    /// cell to the row's width and still has to know how wide the content itself is.
-    public let contentWidth: CGFloat
+    /// cell to the row's width, so the layout code reads this, never `frame.width`.
+    public private(set) var contentWidth: CGFloat
 
     private static func measure(_ s: String, _ font: NSFont) -> CGFloat {
         // Rounded up to a device pixel the way a text field's frame is when it is not in a window yet,
@@ -57,6 +58,19 @@ public final class CandidateCell: NSView {
         // old text fields did; round per panel screen if that ever shows as blur.
         let scale = NSScreen.screens.map(\.backingScaleFactor).max() ?? 2
         return ceil(NSAttributedString(string: s, attributes: [.font: font]).size().width * scale) / scale
+    }
+
+    private static func width(numberWidth: CGFloat, candidateWidth: CGFloat, nameWidth: CGFloat, hasNote: Bool) -> CGFloat {
+        var width = CellMetrics.numberLeading + numberWidth + CellMetrics.numberToCandidate + candidateWidth
+        if hasNote { width += CellMetrics.candidateToName + nameWidth }
+        return width + CellMetrics.trailing
+    }
+
+    /// What a cell with these strings needs, without making one: the vertical panel sizes the window from it before it
+    /// decides which cells to keep.
+    public static func contentWidth(numberText: String, text: String, note: String?) -> CGFloat {
+        width(numberWidth: measure(numberText, CellMetrics.numberFont), candidateWidth: measure(text, CellMetrics.candidateFont),
+              nameWidth: note.map { measure($0, CellMetrics.nameFont) } ?? 0, hasNote: note != nil)
     }
 
     private static func lineHeight(_ font: NSFont) -> CGFloat { ceil(font.ascender - font.descender + font.leading) }
@@ -76,9 +90,7 @@ public final class CandidateCell: NSView {
         numberWidth = Self.measure(numberText, CellMetrics.numberFont)
         candidateWidth = Self.measure(text, CellMetrics.candidateFont)
         nameWidth = note.map { Self.measure($0, CellMetrics.nameFont) } ?? 0
-        var width = CellMetrics.numberLeading + numberWidth + CellMetrics.numberToCandidate + candidateWidth
-        if note != nil { width += CellMetrics.candidateToName + nameWidth }
-        width += CellMetrics.trailing
+        let width = Self.width(numberWidth: numberWidth, candidateWidth: candidateWidth, nameWidth: nameWidth, hasNote: note != nil)
         contentWidth = width
         super.init(frame: NSRect(x: 0, y: 0, width: width, height: CellMetrics.capsuleHeight))
         setAccessibilityElement(true)
@@ -105,6 +117,16 @@ public final class CandidateCell: NSView {
             setAccessibilitySelected(selected)
             needsDisplay = true
         }
+    }
+
+    /// The vertical window renumbers its rows when it scrolls: the cell stays and shows the new number. The frame is not
+    /// touched; the owner sets it (a vertical cell is as wide as the row).
+    func setNumber(_ text: String) {
+        guard text != numberText else { return }
+        numberText = text
+        numberWidth = Self.measure(text, CellMetrics.numberFont)
+        contentWidth = Self.width(numberWidth: numberWidth, candidateWidth: candidateWidth, nameWidth: nameWidth, hasNote: note != nil)
+        needsDisplay = true
     }
 
     public override func draw(_ dirtyRect: NSRect) {
@@ -152,7 +174,11 @@ public final class CandidateCells {
 
     public init() {}
 
-    public func update(candidates: [String], notes: [String?], selected: Int, first newFirst: Int, columns newColumns: Int) -> Update {
+    /// `renumber`: the vertical window's rule (candidate-vertical contract section 2.3): a cell survives when the candidate
+    /// and its name are the same, and shows its new number, so a one-row scroll keeps eight of nine cells. Off (the bar and
+    /// the grid), the number is part of the key as before.
+    public func update(candidates: [String], notes: [String?], selected: Int, first newFirst: Int, columns newColumns: Int,
+                       renumber: Bool = false) -> Update {
         let grid = newColumns > 0
         let selectedRow = grid ? selected / newColumns : 0
         // Candidate at global index g sat at old position g - first.
@@ -165,8 +191,9 @@ public final class CandidateCells {
             let shows = selected >= 0 && (!grid || i / newColumns == selectedRow)
             let old = newFirst + i - first
             if sameMode, cells.indices.contains(old), cells[old].text == text, cells[old].note == notes[i],
-               cells[old].numberText == numberText {
+               renumber || cells[old].numberText == numberText {
                 let cell = cells[old]
+                cell.setNumber(numberText)
                 cell.update(position: i, selected: i == selected, showsNumber: shows)
                 next.append(cell)
                 reused.append(true)
