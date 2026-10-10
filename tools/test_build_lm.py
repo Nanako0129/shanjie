@@ -102,6 +102,19 @@ class BuildLm(unittest.TestCase):
                 self.assertEqual(fold(g[0]), g[0], g)
         self.assertGreater(tied, 10)     # 修訂二的延伸規則拿掉多數疊加層舊字形後，同分而有正規形的類量到 23 個（修訂一時約 1,656）
 
+    def test_bigram_with_a_word_outside_the_vocabulary_is_dropped(self):
+        """model-v5 §8：二元組的一端不在詞彙表（單詞計數四捨五入成 0）時丟掉那個二元組，不中止建置。"""
+        with tempfile.TemporaryDirectory() as d:
+            wiki = {"uni": {**WIKI["uni"], "令坦": 0.2}, "bi": {**WIKI["bi"], ("令坦", "他"): 3, ("他", "令坦"): 2}}
+            for name, c in (("counts-200000.pkl", wiki), ("counts-colloquial3.pkl", COLL)):
+                pickle.dump(c, open(os.path.join(d, name), "wb"))
+            old, build_lm.WORK = build_lm.WORK, d
+            try:
+                data = build_lm.build(self.cls)[0]
+            finally:
+                build_lm.WORK = old
+            self.assertEqual(data, open(self.path, "rb").read())   # 丟掉之後和沒有那兩個二元組時逐位元組相同
+
     def test_rust_loads(self):
         rows = os.path.join(self.tmp.name, "rows.txt")
         open(rows, "w", encoding="utf-8").write("|起床|ㄑㄧˇ ㄔㄨㄤˊ\n")
