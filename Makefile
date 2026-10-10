@@ -24,6 +24,7 @@ test: rust
 	@$(call rebuild_if_header_stale,Debug)
 	cargo test --release --locked
 	python3 -m unittest tools/test_build_acg_pack.py
+	python3 -m unittest tools/test_build_names.py
 	python3 -W ignore -m unittest tools/test_build_lm.py experiments/s2/test_extra_lexicon.py experiments/model-v5/test_compare_counts.py experiments/model-v5/test_count_lexicon.py
 	python3 experiments/s2-classes/test_cluster.py
 	swift test --package-path macos

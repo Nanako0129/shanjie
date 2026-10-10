@@ -1,4 +1,4 @@
-use core::engine::{capping_overlay_detailed, load_lexicon_packs_detailed, PACK_ACG};
+use core::engine::{capping_overlay_detailed, load_lexicon_extra_detailed, load_lexicon_packs_detailed, PACK_ACG};
 use core::eval::*;
 use core::learn::{context_key, SENTINEL};
 use core::lm::{decode_from, history, CappedLexicon, Demote, Lm, Profile};
@@ -132,11 +132,21 @@ fn packs_dir_checked(packs: u32, packs_dir: Option<String>) -> Result<PathBuf, S
     Ok(pdir)
 }
 
-/// The lexicon with the chosen packs and the overlay text that caps the LM scores (the same helpers as the engine's
-/// `new` and `load_lm`).
-fn load_with_packs(dir: &Path, packs: u32, pdir: &Path) -> Result<(std::sync::Arc<Lexicon>, String), String> {
+/// `--extra-overlay FILE` (evaluation only, names-lexicon contract section 3.5): a missing file stops the run naming the path,
+/// checked with the other options before the model is read.
+fn extra_overlay_checked(extra: Option<String>) -> Result<Option<PathBuf>, String> {
+    let extra = extra.map(PathBuf::from);
+    match extra.as_deref() {
+        Some(p) if !p.is_file() => Err(format!("--extra-overlay: file not found: {}", p.display())),
+        _ => Ok(extra),
+    }
+}
+
+/// The lexicon with the chosen packs and the `--extra-overlay` rows, and the overlay text that caps the LM scores (the
+/// same helpers as the engine's `new` and `load_lm`). The extra rows travel with the pack rows, so they are capped too.
+fn load_with_packs(dir: &Path, packs: u32, pdir: &Path, extra: Option<&Path>) -> Result<(std::sync::Arc<Lexicon>, String), String> {
     // The pack rows are read once and reused for the cap; overlay-add.tsv is read again by capping_overlay, as load_lm does.
-    let (lex, pack_text) = load_lexicon_packs_detailed(dir, Some((pdir, packs))).map_err(|e| e.to_string())?;
+    let (lex, pack_text) = load_lexicon_extra_detailed(dir, Some((pdir, packs)), extra).map_err(|e| e.to_string())?;
     let overlay = capping_overlay_detailed(dir, &pack_text).map_err(|e| e.to_string())?;
     Ok((lex, overlay))
 }
@@ -149,6 +159,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     let mut rowstats = None::<String>;
     // acg-pack contract A.2: `--packs acg` adds data/packs/acg-add.tsv (or `--packs-dir DIR`'s) to the lexicon and the cap; off by default.
     let (mut packs, mut packs_dir) = (0u32, None::<String>);
+    let mut extra_overlay = None::<String>;
     let mut it = args.iter();
     while let Some(a) = it.next() {
         let mut val = || it.next().cloned().ok_or_else(|| "missing option value".to_string());
@@ -168,11 +179,13 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
             "--no-classes" => classes = false,
             "--packs" => packs |= pack_flag(&val()?)?,
             "--packs-dir" => packs_dir = Some(val()?),
+            "--extra-overlay" => extra_overlay = Some(val()?),
             _ => return Err("unknown argument".into()),
         }
     }
     check_lm_opts(set.as_deref(), dump.is_some(), packs, packs_dir.is_some())?;
     let pdir = packs_dir_checked(packs, packs_dir)?;
+    let extra_overlay = extra_overlay_checked(extra_overlay)?;
     let profile_name = profile.ok_or("--profile is required")?;
     let prof = match profile_name.as_str() {
         "chat" => Profile::Chat,
@@ -184,7 +197,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     let lm = if classes { Lm::load(std::path::Path::new(&lm_path)) } else { Lm::load_without_classes(std::path::Path::new(&lm_path)) }
         .map_err(|e| e.to_string())?;
     let dir = root().join("data/lexicon");
-    let (lex, overlay) = load_with_packs(&dir, packs, &pdir)?;
+    let (lex, overlay) = load_with_packs(&dir, packs, &pdir, extra_overlay.as_deref())?;
     let demote_rows = fs::read_to_string(dir.join("demote.tsv")).map_err(|e| format!("cannot read demote.tsv ({:?})", e.kind()))?;
     let table = Demote::parse(&demote_rows).filter(|d| d.check(&lex)).ok_or("bad demote.tsv")?;
     // The table is always loaded, so a malformed one stops the run even with --no-demote.
@@ -335,7 +348,7 @@ fn run_predict(args: &[String]) -> Result<(), String> {
     .lambda();
     let lm = Lm::load(Path::new(&lm_path.ok_or("--lm is required")?)).map_err(|e| e.to_string())?;
     let dir = root().join("data/lexicon");
-    let (lex, overlay) = load_with_packs(&dir, packs, &pdir)?;
+    let (lex, overlay) = load_with_packs(&dir, packs, &pdir, None)?;
     // Prediction scores use the capped lp only; demotion applies to decoding (sw §3).
     let capped = CappedLexicon::new(lex.clone(), &overlay, &lm, None).ok_or("cannot build the capped lexicon")?;
     let text = fs::read_to_string(file.ok_or("--predict is required")?).map_err(|e| format!("cannot read file ({:?})", e.kind()))?;
@@ -562,5 +575,34 @@ mod tests {
         assert!(check_lm_opts(None, true, 0, false).is_ok());
         assert!(check_lm_opts(None, false, 0, true).is_err(), "--packs-dir without --packs");
         assert!(check_lm_opts(None, false, PACK_ACG, true).is_ok());
+    }
+
+    /// names-lexicon 3.5: `--extra-overlay` rows are capped like pack rows. Goes through the CLI's own load path
+    /// (`load_with_packs`, then `CappedLexicon::new`); a word the corpus never saw is scored fixture score minus 1.0.
+    /// If the rows reached only the lexicon and not the capping text, the score would stay -7.5.
+    #[test]
+    fn extra_overlay_rows_are_capped_like_pack_rows() {
+        let lm = Lm::load(&root().join("data/lm/bigram.sjlm")).expect("data/lm/bigram.sjlm and classes.sjc are required (see cli/tests/golden.rs)");
+        assert_eq!(lm.count("酷澎"), 0, "the fixture word must be one the corpus never saw");
+        let file = std::env::temp_dir().join(format!("shanjie-extra-overlay-{}.tsv", std::process::id()));
+        fs::write(&file, "ㄎㄨˋ-ㄆㄥˊ\t酷澎\t-7.5\tnames\n").unwrap();
+        let (dir, pdir) = (root().join("data/lexicon"), root().join("data/packs"));
+        let key = ["ㄎㄨˋ".to_string(), "ㄆㄥˊ".to_string()];
+        let score = |extra: Option<&Path>| {
+            let (lex, overlay) = load_with_packs(&dir, 0, &pdir, extra).unwrap();
+            CappedLexicon::new(lex, &overlay, &lm, None).unwrap().best_lp(&key, "酷澎")
+        };
+        let (with, without) = (score(Some(&file)), score(None));
+        fs::remove_file(&file).unwrap();
+        assert_eq!(with, Some(-8.5));
+        assert_eq!(without, None);
+    }
+
+    #[test]
+    fn extra_overlay_missing_file_names_the_path() {
+        let missing = std::env::temp_dir().join("shanjie-no-such-extra-overlay.tsv");
+        let err = extra_overlay_checked(Some(missing.to_str().unwrap().into())).unwrap_err();
+        assert!(err.contains(missing.to_str().unwrap()), "{err}");
+        assert_eq!(extra_overlay_checked(None), Ok(None));
     }
 }

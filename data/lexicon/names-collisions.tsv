@@ -1,0 +1,2 @@
+# 名單內同音衝突的處置（契約 docs/contracts/names-lexicon.md §2 類型 a），人工維護的輸入，建置只讀、不改。格式與規則同 data/packs/acg-collisions.tsv：欄位為讀音、保留的詞、排除的詞、理由；排除欄寫 `+詞` 表示兩個都留，`+` 後面是另一個留下的詞。同讀音的先後照列出現的順序（保留的詞在前），沒點名的接著來源數多的在前。
+# 未處置的列在 build/names/collisions.txt；全部處置完才合併。

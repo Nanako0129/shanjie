@@ -423,14 +423,24 @@ pub fn load_lexicon_packs(data_dir: &Path, packs: Option<(&Path, u32)>) -> Resul
 
 /// `load_lexicon_packs` with the failing file named (the evaluation CLI prints it).
 pub fn load_lexicon_packs_detailed(data_dir: &Path, packs: Option<(&Path, u32)>) -> Result<(Arc<Lexicon>, String), LoadError> {
+    load_lexicon_extra_detailed(data_dir, packs, None)
+}
+
+/// `load_lexicon_packs_detailed` plus the evaluation-only `--extra-overlay` file (names-lexicon contract section 3.5):
+/// its rows join the lexicon after the packs' rows and come back in the returned text, so `capping_overlay` caps them
+/// the same way. `None`: exactly `load_lexicon_packs_detailed`. A missing or unreadable file is a load failure naming it.
+pub fn load_lexicon_extra_detailed(data_dir: &Path, packs: Option<(&Path, u32)>, extra_file: Option<&Path>) -> Result<(Arc<Lexicon>, String), LoadError> {
     let base = read_file(data_dir.join("mcbpmf-data.txt"))?;
     let overlay = read_file(data_dir.join("overlay-add.tsv"))?;
     let sandhi = read_file(data_dir.join("sandhi-add.tsv"))?;
     let mut text = join_overlays(overlay, &sandhi);
-    let extra = match packs {
+    let mut extra = match packs {
         Some((dir, mask)) => read_packs_detailed(dir, mask)?,
         None => String::new(),
     };
+    if let Some(f) = extra_file {
+        extra = join_overlays(extra, &read_file(f.to_path_buf())?);
+    }
     if !extra.is_empty() {
         text = join_overlays(text, &extra);
     }

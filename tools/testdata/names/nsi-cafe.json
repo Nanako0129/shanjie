@@ -1,0 +1,219 @@
+{
+ "items": [
+  {
+   "displayName": "50嵐",
+   "id": "50lan-7d270d",
+   "locationSet": {
+    "include": [
+     "tw"
+    ]
+   },
+   "tags": {
+    "amenity": "cafe",
+    "brand": "50嵐",
+    "brand:en": "50 Lan",
+    "brand:wikidata": "Q106926258",
+    "brand:zh": "50嵐",
+    "cuisine": "bubble_tea",
+    "name": "50嵐",
+    "name:en": "50 Lan",
+    "name:zh": "50嵐",
+    "takeaway": "yes"
+   }
+  },
+  {
+   "displayName": "85度C",
+   "id": "957ff6-f1b18f",
+   "locationSet": {
+    "include": [
+     "cn",
+     "tw"
+    ],
+    "exclude": [
+     "hk",
+     "mo"
+    ]
+   },
+   "matchNames": [
+    "85c",
+    "85c bakery cafe",
+    "85oc"
+   ],
+   "tags": {
+    "amenity": "cafe",
+    "brand": "85度C",
+    "brand:en": "85°C Bakery Cafe",
+    "brand:wikidata": "Q4644852",
+    "brand:zh": "85度C",
+    "cuisine": "coffee_shop",
+    "name": "85度C",
+    "name:en": "85°C Bakery Cafe",
+    "name:zh": "85度C",
+    "takeaway": "yes"
+   }
+  },
+  {
+   "displayName": "快樂檸檬",
+   "id": "happylemon-7d270d",
+   "locationSet": {
+    "include": [
+     "tw"
+    ]
+   },
+   "tags": {
+    "amenity": "cafe",
+    "brand": "快樂檸檬",
+    "brand:en": "Happy Lemon",
+    "brand:wikidata": "Q109968422",
+    "brand:zh-Hans": "快乐柠檬",
+    "brand:zh-Hant": "快樂檸檬",
+    "cuisine": "bubble_tea",
+    "name": "快樂檸檬",
+    "name:en": "Happy Lemon",
+    "name:zh-Hans": "快乐柠檬",
+    "name:zh-Hant": "快樂檸檬",
+    "takeaway": "yes"
+   }
+  },
+  {
+   "displayName": "Chatime",
+   "id": "chatime-859a55",
+   "locationSet": {
+    "include": [
+     "001"
+    ],
+    "exclude": [
+     "cn",
+     "tw"
+    ]
+   },
+   "tags": {
+    "amenity": "cafe",
+    "brand": "Chatime",
+    "brand:wikidata": "Q16829306",
+    "cuisine": "bubble_tea",
+    "name": "Chatime",
+    "takeaway": "yes"
+   }
+  },
+  {
+   "displayName": "Starbucks",
+   "id": "starbucks-795f60",
+   "locationSet": {
+    "include": [
+     "001"
+    ],
+    "exclude": [
+     "ae",
+     "bh",
+     "cn",
+     "dz",
+     "eg",
+     "iq",
+     "jo",
+     "jp",
+     "kr",
+     "kw",
+     "lb",
+     "ly",
+     "ma",
+     "om",
+     "qa",
+     "rs",
+     "ru",
+     "sa",
+     "tn",
+     "tw"
+    ]
+   },
+   "matchNames": [
+    "starbucks canada",
+    "starbucks uk"
+   ],
+   "tags": {
+    "amenity": "cafe",
+    "brand": "Starbucks",
+    "brand:wikidata": "Q37158",
+    "cuisine": "coffee_shop",
+    "name": "Starbucks",
+    "official_name": "Starbucks Coffee",
+    "takeaway": "yes"
+   }
+  },
+  {
+   "displayName": "Quickly",
+   "id": "quickly-92c4b0",
+   "locationSet": {
+    "include": [
+     "001"
+    ],
+    "exclude": [
+     "bg",
+     "tw"
+    ]
+   },
+   "tags": {
+    "amenity": "cafe",
+    "brand": "Quickly",
+    "brand:en": "Quickly",
+    "brand:wikidata": "Q3771463",
+    "brand:zh": "快可立",
+    "cuisine": "bubble_tea",
+    "name": "Quickly",
+    "name:en": "Quickly",
+    "name:zh": "快可立",
+    "takeaway": "yes"
+   }
+  },
+  {
+   "displayName": "貢茶 (臺灣)",
+   "id": "gongcha-7d270d",
+   "locationSet": {
+    "include": [
+     "tw"
+    ]
+   },
+   "tags": {
+    "amenity": "cafe",
+    "brand": "貢茶",
+    "brand:en": "Gong Cha",
+    "brand:wikidata": "Q5581670",
+    "brand:zh": "貢茶",
+    "brand:zh-Hans": "贡茶",
+    "brand:zh-Hant": "貢茶",
+    "cuisine": "bubble_tea",
+    "int_name": "Gong Cha",
+    "name": "貢茶",
+    "name:en": "Gong Cha",
+    "name:zh": "貢茶",
+    "name:zh-Hans": "贡茶",
+    "name:zh-Hant": "貢茶",
+    "takeaway": "yes"
+   }
+  },
+  {
+   "displayName": "星乃珈琲店",
+   "id": "hoshinocoffee-7f2f5a",
+   "locationSet": {
+    "include": [
+     "jp",
+     "tw"
+    ]
+   },
+   "tags": {
+    "alt_name:zh": "星乃咖啡店",
+    "amenity": "cafe",
+    "brand": "星乃珈琲店",
+    "brand:en": "Hoshino Coffee",
+    "brand:ja": "星乃珈琲店",
+    "brand:wikidata": "Q88396880",
+    "cuisine": "coffee_shop",
+    "name": "星乃珈琲店",
+    "name:en": "Hoshino Coffee",
+    "name:ja": "星乃珈琲店",
+    "name:zh": "星乃珈琲店",
+    "takeaway": "yes"
+   }
+  }
+ ]
+}

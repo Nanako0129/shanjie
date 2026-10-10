@@ -302,3 +302,37 @@ fn unparsable_pack_is_a_parse_error() {
     let err = String::from_utf8(out.stderr).unwrap();
     assert!(!out.status.success() && err.contains("cannot parse the lexicon in") && err.contains("data/lexicon"), "{err}");
 }
+
+/// names-lexicon 3.5: `--extra-overlay FILE` makes the file's word the first candidate (and only then), and a
+/// missing file is a non-zero exit that names the path. (The contract says "appears among the candidates"; the string
+/// 酷澎 is also composable from two single-character words, so it appears in the list either way and only its rank tells.)
+#[test]
+fn extra_overlay_adds_words_and_fails_loudly_when_missing() {
+    let dir = std::env::temp_dir().join(format!("shanjie-extra-overlay-cli-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let (rows, extra, dump) = (dir.join("rows.txt"), dir.join("names-add.tsv"), dir.join("dump.tsv"));
+    std::fs::write(&rows, "|酷澎|ㄎㄨˋ ㄆㄥˊ\n").unwrap();
+    std::fs::write(&extra, "ㄎㄨˋ-ㄆㄥˊ\t酷澎\t-3.0\tnames\n").unwrap();
+    let lm = lm_path();
+    let first = |extra_args: &[&str]| {
+        let out = Command::new(env!("CARGO_BIN_EXE_shanjie-eval"))
+            .args(["--lm", &lm, "--profile", "chat", "--rows", rows.to_str().unwrap(), "--dump", dump.to_str().unwrap()])
+            .args(extra_args)
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        let dump = std::fs::read_to_string(&dump).unwrap();
+        let top = dump.lines().find(|l| l.split('\t').nth(1) == Some("1")).unwrap();
+        top.split('\t').nth(2).unwrap().to_string()
+    };
+    assert_eq!(first(&["--extra-overlay", extra.to_str().unwrap()]), "酷澎");
+    assert_ne!(first(&[]), "酷澎");
+    let missing = dir.join("no-such.tsv");
+    let out = Command::new(env!("CARGO_BIN_EXE_shanjie-eval"))
+        .args(["--lm", &lm, "--profile", "chat", "--rows", rows.to_str().unwrap(), "--extra-overlay", missing.to_str().unwrap()])
+        .output()
+        .unwrap();
+    let err = String::from_utf8(out.stderr).unwrap();
+    assert!(!out.status.success() && err.contains(missing.to_str().unwrap()), "{err}");
+    std::fs::remove_dir_all(&dir).unwrap();
+}
