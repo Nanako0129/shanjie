@@ -29,9 +29,17 @@ CLASS_MAGIC = b"SJCL0001"
 NO_CLASS = 0xFFFF
 
 
+def kn_total(vocab, np1, cls):
+    """ΣN′：id >= 2 的 N′ 相加，每個異體類只算代表成員一次（kn-smoothing.md §2.2）。"""
+    return sum(np1[i] for i in range(2, len(vocab)) if vocab[i] not in cls or cls[vocab[i]][0] == vocab[i])
+
+
 class BigramLM:
-    def __init__(self, path, classes=True):
-        """classes=True 讀同一個目錄的 classes.sjc（不存在、魔數、長度、模型雜湊不符都丟錯誤）；False 是明確不用類別項（--no-classes）。"""
+    def __init__(self, path, classes=True, kn=None, kn_beta=None, kn_classes=None):
+        """classes=True 讀同一個目錄的 classes.sjc（不存在、魔數、長度、模型雜湊不符都丟錯誤）；False 是明確不用類別項（--no-classes）。
+        kn=側檔路徑、kn_beta=β：Kneser-Ney 回退分布（docs/contracts/kn-smoothing.md §2.2，離線量測）；id >= 2 的詞 pb = β·N′/ΣN′ + (1−β)·10^lp。
+        異體類的資訊不在側檔裡，由呼叫端用同一個 build_lm.variant_classes 算好傳 kn_classes（詞 -> 成員 tuple，第一個是代表）；
+        ΣN′ 每類只算一次（kn_total）。給了 kn 就一定要給 kn_classes（沒有類就傳 {}）和 0 <= kn_beta <= 1，否則丟 ValueError。"""
         b = open(path, "rb").read()
         assert b[:8] == b"SJLM0001", "bad magic"
         V, self.N, self.eos_total, self.D = struct.unpack_from("<IQQd", b, 8)
@@ -58,9 +66,30 @@ class BigramLM:
                 entries[nxt[j]] = cnt[j]
                 kept_sum += cnt[j] - self.D
             self.ctx[v] = (t, 1.0 - kept_sum / t, entries)
+        self.kn = None
+        sha = hashlib.sha256(b).digest() if kn is not None or classes else None
+        if kn is None and (kn_beta is not None or kn_classes is not None):
+            raise ValueError("kn_beta / kn_classes given without kn")
+        if kn is not None:
+            if kn_classes is None or kn_beta is None or not 0.0 <= kn_beta <= 1.0:
+                raise ValueError("kn needs kn_classes and 0 <= kn_beta <= 1")
+            self._load_kn(kn, sha, kn_beta, kn_classes)
         self.cls = None
         if classes:
-            self._load_classes(os.path.join(os.path.dirname(os.path.abspath(path)), "classes.sjc"), hashlib.sha256(b).digest())
+            self._load_classes(os.path.join(os.path.dirname(os.path.abspath(path)), "classes.sjc"), sha)
+
+    def _load_kn(self, path, model_sha, beta, cls):
+        with open(path, "rb") as f:
+            b = f.read()
+        V = len(self.vocab)
+        if len(b) != 48 + 4 * V or b[:8] != b"SJKN0001":
+            raise ValueError(f"{path}: bad kn side file")
+        if struct.unpack_from("<I", b, 8)[0] != V:
+            raise ValueError(f"{path}: kn side file vocabulary size differs from the model")
+        if b[12:44] != model_sha:
+            raise ValueError(f"{path}: kn side file was built for another model")
+        np1 = [n + 1 for n in struct.unpack_from(f"<{V}I", b, 48)]
+        self.kn = (beta, np1, kn_total(self.vocab, np1, cls))
 
     def _load_classes(self, path, model_sha):
         with open(path, "rb") as f:
@@ -104,7 +133,13 @@ class BigramLM:
         return back * pb
 
     def word(self, lam, v, w, lp):
-        return lam * math.log10(self.prob(v, w, 10 ** lp)) + (1 - lam) * lp
+        pb = 10 ** lp
+        if self.kn is not None:
+            wi = self.ids.get(w, -1)
+            if wi >= 2:
+                beta, np1, total = self.kn
+                pb = beta * np1[wi] / total + (1 - beta) * pb
+        return lam * math.log10(self.prob(v, w, pb)) + (1 - lam) * lp
 
     def eos(self, lam, v):
         return lam * math.log10(self.prob(v, "</s>", self.p_eos))
