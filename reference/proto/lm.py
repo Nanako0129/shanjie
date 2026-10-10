@@ -37,9 +37,12 @@ def kn_total(vocab, np1, cls):
 class BigramLM:
     def __init__(self, path, classes=True, kn=None, kn_beta=None, kn_classes=None):
         """classes=True 讀同一個目錄的 classes.sjc（不存在、魔數、長度、模型雜湊不符都丟錯誤）；False 是明確不用類別項（--no-classes）。
-        kn=側檔路徑、kn_beta=β：Kneser-Ney 回退分布（docs/contracts/kn-smoothing.md §2.2，離線量測）；id >= 2 的詞 pb = β·N′/ΣN′ + (1−β)·10^lp。
-        異體類的資訊不在側檔裡，由呼叫端用同一個 build_lm.variant_classes 算好傳 kn_classes（詞 -> 成員 tuple，第一個是代表）；
-        ΣN′ 每類只算一次（kn_total）。給了 kn 就一定要給 kn_classes（沒有類就傳 {}）和 0 <= kn_beta <= 1，否則丟 ValueError。"""
+        kn=側檔路徑（docs/contracts/kn-smoothing.md §2.2、kn-core.md §1）：Kneser-Ney 回退分布，id >= 2 的詞 pb = β·N′/ΣN′ + (1−β)·10^lp。
+        SJKN0002：β 與 ΣN′ 取自檔頭；kn_beta 可不給，給了和檔頭不同就 ValueError；kn_classes 可不給，給了就用 kn_total 重算 ΣN′，和檔頭不同就 ValueError
+        （lm_eval 每次都傳，這是 ΣN′ 這個預先彙總值在上游的檢查，Rust 只讀檔頭，只核對它夾在 max N′ 與 Σ N′ 之間）。
+        SJKN0001（研究用舊檔，沒有 β 與 ΣN′）：一定要給 kn_beta（0 <= β <= 1）與 kn_classes（詞 -> 成員 tuple，第一個是代表，
+        用 build_lm.variant_classes 算；沒有類就傳 {}），ΣN′ 每類只算一次（kn_total），否則 ValueError。
+        沒給 kn 卻給了 kn_beta 或 kn_classes 也是 ValueError。"""
         b = open(path, "rb").read()
         assert b[:8] == b"SJLM0001", "bad magic"
         V, self.N, self.eos_total, self.D = struct.unpack_from("<IQQd", b, 8)
@@ -71,8 +74,6 @@ class BigramLM:
         if kn is None and (kn_beta is not None or kn_classes is not None):
             raise ValueError("kn_beta / kn_classes given without kn")
         if kn is not None:
-            if kn_classes is None or kn_beta is None or not 0.0 <= kn_beta <= 1.0:
-                raise ValueError("kn needs kn_classes and 0 <= kn_beta <= 1")
             self._load_kn(kn, sha, kn_beta, kn_classes)
         self.cls = None
         if classes:
@@ -82,14 +83,30 @@ class BigramLM:
         with open(path, "rb") as f:
             b = f.read()
         V = len(self.vocab)
-        if len(b) != 48 + 4 * V or b[:8] != b"SJKN0001":
+        v2 = b[:8] == b"SJKN0002"
+        head = 64 if v2 else 48
+        if len(b) != head + 4 * V or not (v2 or b[:8] == b"SJKN0001"):
             raise ValueError(f"{path}: bad kn side file")
         if struct.unpack_from("<I", b, 8)[0] != V:
             raise ValueError(f"{path}: kn side file vocabulary size differs from the model")
         if b[12:44] != model_sha:
             raise ValueError(f"{path}: kn side file was built for another model")
-        np1 = [n + 1 for n in struct.unpack_from(f"<{V}I", b, 48)]
-        self.kn = (beta, np1, kn_total(self.vocab, np1, cls))
+        np1 = [n + 1 for n in struct.unpack_from(f"<{V}I", b, head)]
+        if v2:
+            file_beta, total = struct.unpack_from("<dQ", b, 48)
+            if not 0.0 <= file_beta <= 1.0 or total == 0:
+                raise ValueError(f"{path}: kn side file has beta outside [0, 1] or a zero total")
+            if not max(np1[2:]) <= total <= sum(np1[2:]):   # 和 Rust add_kn 同一個檢查：每類只算一次的總和夾在最大值與全部相加之間
+                raise ValueError(f"{path}: kn side file total is incompatible with its N array")
+            if beta is not None and beta != file_beta:
+                raise ValueError(f"{path}: kn_beta differs from the side file's beta")
+            if cls is not None and kn_total(self.vocab, np1, cls) != total:
+                raise ValueError(f"{path}: kn side file total differs from kn_total")
+            self.kn = (file_beta, np1, total)
+        else:
+            if cls is None or beta is None or not 0.0 <= beta <= 1.0:
+                raise ValueError("SJKN0001 needs kn_classes and 0 <= kn_beta <= 1")
+            self.kn = (beta, np1, kn_total(self.vocab, np1, cls))
 
     def _load_classes(self, path, model_sha):
         with open(path, "rb") as f:

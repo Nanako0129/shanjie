@@ -5,10 +5,12 @@
 --context：第一個詞的歷史用每列的前文（S2h：context_key 截尾 → history），摘要行的 profile 欄寫成 lm-<profile>+ctx。
 --no-classes：不用詞類別項（預設載入 --lm 同目錄的 classes.sjc，沒有就報錯）；摘要行的 profile 欄後面加 -noclasses（接在 -nodemote 後）。
 --no-demote：不套降權（預設套用 data/lexicon/demote.tsv）；摘要行的 profile 欄後面加 -nodemote（和 +ctx 一樣接在 lm-<profile> 後，兩個都有時 +ctx 在前）。
---kn FILE --kn-beta β：Kneser-Ney 回退分布的側檔（tools/kn_cont.py）與 β，兩個一起給；摘要行的 profile 欄最後加 +kn:<側檔 SHA-256 前 8 碼>:θ<θ>:β<β>。
+--kn FILE [--kn-beta β]：Kneser-Ney 回退分布的側檔（tools/kn_cont.py）。SJKN0002 的 β 取自檔頭，--kn-beta 可不給（給了和檔頭不同就報錯）；
+  舊的 SJKN0001 一定要給 --kn-beta。不論哪種格式都傳 kn_classes（build_lm.variant_classes），讓 lm.py 用 kn_total 重算 ΣN′ 和檔頭比對。
+  摘要行的 profile 欄最後加 +kn:<側檔 SHA-256 前 8 碼>:θ<θ>:β<β>（Rust CLI 同格式）。
 --rowstats FILE：每列一行 `列號\\t對錯\\t錯字數\\t正解字數`（只有數字，見 docs/contracts/eval-stats.md）。
 --dump FILE：每列寫 `列號\\t名次\\tsurface\\t分數(repr)`，前 64 名，給逐分數比對（容許 1e-9 的浮點誤差）。
-用法：python3 reference/proto/lm_eval.py --lm data/lm/bigram.sjlm --profile chat|formal --rows <檔> [--limit N] [--name 名稱] [--dump FILE] [--context] [--no-demote] [--no-classes] [--kn FILE --kn-beta β]
+用法：python3 reference/proto/lm_eval.py --lm data/lm/bigram.sjlm --profile chat|formal --rows <檔> [--limit N] [--name 名稱] [--dump FILE] [--context] [--no-demote] [--no-classes] [--kn FILE [--kn-beta β]]
   評測檔格式 `前文|句子|讀音`；dev 集要先依檔名排序串接（和 CLI 相同），可用 --dev 302 直接取開發集前 N 列。
 """
 import argparse
@@ -41,7 +43,7 @@ def rows_of(paths):
 
 
 def kn_tag(path, beta):
-    """摘要行的 KN 標籤：側檔內容的 SHA-256 前 8 碼與檔頭的 θ，同名不同內容的側檔也分得出來。"""
+    """摘要行的 KN 標籤：側檔內容的 SHA-256 前 8 碼與檔頭的 θ，同名不同內容的側檔也分得出來；beta 是 lm.kn[0]（SJKN0002 取自檔頭）。"""
     import struct
     b = open(path, "rb").read()
     return f"+kn:{hashlib.sha256(b).hexdigest()[:8]}:θ{struct.unpack_from('<I', b, 44)[0]}:β{beta:g}"
@@ -61,8 +63,8 @@ def main():
     else:
         rows = rows_of([a.rows])[:a.limit] if a.limit else rows_of([a.rows])
         name = a.name or os.path.basename(a.rows)
-    if bool(a.kn) != (a.kn_beta is not None):   # 空字串（未設定的變數）也算沒給
-        ap.error("--kn and --kn-beta go together")
+    if not a.kn and a.kn_beta is not None:   # 空字串（未設定的變數）也算沒給
+        ap.error("--kn-beta needs --kn")
     base = ime.Lexicon(os.path.join(ROOT, "data", "lexicon", "mcbpmf-data.txt"),
                        overlay=ime.OVERLAYS)
     kw = {}
@@ -91,7 +93,7 @@ def main():
         with rsf:
             rsf.write(format_rowstats(rs))
     sha = hashlib.sha256("\n".join(firsts).encode("utf-8")).hexdigest()
-    print(f"## {name}  lm-{a.profile}{'+ctx' if a.context else ''}{'-nodemote' if a.no_demote else ''}{'-noclasses' if a.no_classes else ''}{kn_tag(a.kn, a.kn_beta) if a.kn else ''}  {{'n': {len(rows)}, 'top1': {top1}, 'oracle@64': {o64}, 'top1_sha256': '{sha}'}}")
+    print(f"## {name}  lm-{a.profile}{'+ctx' if a.context else ''}{'-nodemote' if a.no_demote else ''}{'-noclasses' if a.no_classes else ''}{kn_tag(a.kn, lm.kn[0]) if a.kn else ''}  {{'n': {len(rows)}, 'top1': {top1}, 'oracle@64': {o64}, 'top1_sha256': '{sha}'}}")
 
 
 if __name__ == "__main__":

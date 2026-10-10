@@ -2695,3 +2695,17 @@ PR #90 的審查意見逐項處理。
   - 第 68 列 `|即時預測也要直排|`：打成「及時預測也要直排」。
   - 第 69 列 `|想辦法從詞態解決常見錯字|`：打成「想辦法從詞太解決常見錯字」。
 - model-v5（`f81a021e…`）、`--context`，聊天與書面、開不開詞包，三句的第一名都和使用者遇到的一樣；正解都在前 64 名裡。`eval/golden/s2h-lm-context.txt` 的 user-reported 兩行照 Python 參考實作重產（n 66 → 69，top1 15／18 不變，oracle@64 64 → 67）。
+
+## 2026-10-10 kn-core 實作（核心讀 Kneser–Ney 側檔，預設關）
+
+- 格式 `SJKN0002`：檔頭多 β（f64）與 ΣN′（u64），N 陣列從位元組 64 開始。ΣN′ 由 `tools/kn_cont.py` 用 `lm.kn_total` 加 `build_lm.variant_classes` 算好寫入，Rust 只讀檔頭，作用在 `core/src/lm.rs` 的 `prob_c`（所有詞項的唯一入口）：id >= 2 的詞 `pb = β·N′/ΣN′ + (1−β)·pb`。`Lm::load` 在模型旁邊有 `kn.sjkn` 時載入，核對 magic、V、模型雜湊、長度、β、ΣN′，不符就 `LmError::Format`；CLI `--no-kn` 關閉；摘要行加 `+kn:<sha8>:θ<θ>:β<β>`。
+- 上游檢查：`lm.py` 讀 `SJKN0002` 時若呼叫端給 `kn_classes`，用 `kn_total` 重算 ΣN′ 和檔頭比對；`lm_eval.py` 每次都傳。用玩具側檔配真詞庫的異體類跑 `lm_eval.py`，確實因為檔頭的 ΣN′ 不符而 `ValueError`，也就是這個檢查有在作用。
+- 玩具模型的跨語言比對：`tools/gen_kn_tiny.py` 產生模型、詞類表、兩個側檔（β=1、0.75）與 Python 的解碼輸出，`core/tests/kn_tiny.rs` 逐位元組比對（無側檔、β=1、β=0.75，聊天與書面），入庫的檔案由 `tools/test_kn_cont.py` 檢查等於現在的輸出。
+- 突變：拿掉 KN 那一行（`if false && w >= 2`）、拿掉 `w >= 2` 的條件，`kn_tiny` 都有測試失敗（前者三項，後者句尾那項與解碼比對）。真模型的跨語言比對與延遲（契約 §3 第 5、6 項）由 main 跑，尚未做。
+- **真模型的跨語言比對（契約 §3 第 5 項，main 2026-10-10）**：
+  - 側檔：188 用這個分支的 `tools/kn_cont.py --theta 1 --beta 1`、model-v5 的計數（`work\modelv5`）產生 `SJKN0002`，SHA-256 `ef2110161d731984…`。檔頭 ΣN′ = 23,700,571（等於研究紀錄的更正值）；N 陣列和研究用的 θ=1 側檔（`SJKN0001`，`fceb70cd…`）逐位元組相同。`lm_eval.py` 讀它時有傳 `kn_classes`，`kn_total` 重算等於檔頭，沒有 `ValueError`。
+  - Rust 在 Mac 上用專用暫存目錄（`~/.cache/shanjie/work/kn-core/lm/`，model-v5、classes-v3、側檔都是實體複本），Python 在 188 上：dev302、打字測驗、錯字回報（69 列與 `--limit 66`）、cvtune（`31de456d…`）、wikitune（`8dcfe40c…`）× 聊天、書面，`--context`，**12／12 行摘要逐字相同**（含 `+kn:ef211016:θ1:β1` 與 `top1_sha256`）。
+  - 對研究數字：cvtune 聊天 3,372、書面 3,372，wikitune 2,072、2,149，dev302 243、248，打字測驗 67、69，錯字回報前 66 列 14、20，和研究紀錄 KN 那一節 θ1β1 的列相同（研究紀錄的表沒有雜湊；`top1_sha256` 與研究當時 188 輸出印的相同，那份輸出不在 repo 裡）。
+- **延遲（§3 第 6 項）**：`perf_full_store_per_key_and_enter_with_write` 依序跑三次，側檔只在這個 worktree 的 `data/lm` 放了第二次、量完立刻移除：不開 p95 7.17 ms、開 9.89 ms、不開 4.52 ms，三次都通過。機器負載 8–16（其他 worktree 在跑），兩次不開差 2.65 ms（7.17 與 4.52），開的那一次 9.89 ms 比它們慢 2.72、5.37 ms，只有一個樣本，又在負載下，**無法判定**有沒有可分辨的成本；KN 每個詞項多兩次乘法、一次除法、一次減法、一次加法。
+- **/code-review 修正（5378bcb）之後重跑**：載入程式改過（ΣN′ 範圍檢查、模型雜湊只算一次、`KnSide` 錯誤、斷掉的 symlink 會報錯），Rust 用同一個暫存目錄重跑 12 組，摘要行和修正前那次逐位元組相同（修正前已和 Python 12／12 相同）；新的 `lm.py` 讀真側檔（`ef211016…`）通過總和檢查，錯字回報書面那一行和 Rust 相同。
+
