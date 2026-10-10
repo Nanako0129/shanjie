@@ -44,6 +44,8 @@ public final class CandidateCell: NSView {
     var onClick: ((Int) -> Void)?
 
     private var numberWidth: CGFloat
+    /// The vertical window's numbers take a fixed slot (`numberSlot`); the bar and the grid size each number by itself.
+    private let fixedNumberSlot: Bool
     private let candidateWidth: CGFloat, nameWidth: CGFloat
     /// The width the content needs (number, candidate, name), whatever the frame is now: the vertical window stretches every
     /// cell to the row's width, so the layout code reads this, never `frame.width`.
@@ -66,12 +68,12 @@ public final class CandidateCell: NSView {
         return width + CellMetrics.trailing
     }
 
-    /// What a cell with these strings needs, without making one: the vertical panel sizes the window from it before it
-    /// decides which cells to keep.
-    public static func contentWidth(numberText: String, text: String, note: String?) -> CGFloat {
-        width(numberWidth: measure(numberText, CellMetrics.numberFont), candidateWidth: measure(text, CellMetrics.candidateFont),
-              nameWidth: note.map { measure($0, CellMetrics.nameFont) } ?? 0, hasNote: note != nil)
-    }
+    /// The widest of the digits 1-9 in the number font. The vertical window gives every number this much room: the system
+    /// font's digits are proportional (measured 2026-10-10: '1' 4.34 pt, '8' 5.92 pt at 9 pt), so with each number's own
+    /// width the candidate column would shift between rows and move when a scroll renumbers a cell.
+    static let numberSlot: CGFloat = (1...9).map { measure(String($0), CellMetrics.numberFont) }.max() ?? 0
+
+    private var numberRoom: CGFloat { fixedNumberSlot ? Self.numberSlot : Self.measure(numberText, CellMetrics.numberFont) }
 
     private static func lineHeight(_ font: NSFont) -> CGFloat { ceil(font.ascender - font.descender + font.leading) }
     private static let numberHeight = lineHeight(CellMetrics.numberFont)
@@ -80,14 +82,16 @@ public final class CandidateCell: NSView {
 
     /// The cell is as wide as its content; `showsNumber` false keeps the number's room but hides it
     /// (grid rows other than the selected one, so the rows line up).
-    init(position: Int, numberText: String, showsNumber: Bool, text: String, note: String?, selected: Bool) {
+    init(position: Int, numberText: String, showsNumber: Bool, text: String, note: String?, selected: Bool,
+         fixedNumberSlot: Bool = false) {
+        self.fixedNumberSlot = fixedNumberSlot
         self.position = position
         self.numberText = numberText
         self.showsNumber = showsNumber
         self.text = text
         self.note = note
         self.isSelected = selected
-        numberWidth = Self.measure(numberText, CellMetrics.numberFont)
+        numberWidth = fixedNumberSlot ? Self.numberSlot : Self.measure(numberText, CellMetrics.numberFont)
         candidateWidth = Self.measure(text, CellMetrics.candidateFont)
         nameWidth = note.map { Self.measure($0, CellMetrics.nameFont) } ?? 0
         let width = Self.width(numberWidth: numberWidth, candidateWidth: candidateWidth, nameWidth: nameWidth, hasNote: note != nil)
@@ -124,7 +128,7 @@ public final class CandidateCell: NSView {
     func setNumber(_ text: String) {
         guard text != numberText else { return }
         numberText = text
-        numberWidth = Self.measure(text, CellMetrics.numberFont)
+        numberWidth = numberRoom
         contentWidth = Self.width(numberWidth: numberWidth, candidateWidth: candidateWidth, nameWidth: nameWidth, hasNote: note != nil)
         needsDisplay = true
     }
@@ -175,8 +179,8 @@ public final class CandidateCells {
     public init() {}
 
     /// `renumber`: the vertical window's rule (candidate-vertical contract section 2.3): a cell survives when the candidate
-    /// and its name are the same, and shows its new number, so a one-row scroll keeps eight of nine cells. Off (the bar and
-    /// the grid), the number is part of the key as before.
+    /// and its name are the same, and shows its new number, so a one-row scroll keeps eight of nine cells; its cells give the
+    /// number a fixed slot. Off (the bar and the grid), the number is part of the key and sizes its own cell as before.
     public func update(candidates: [String], notes: [String?], selected: Int, first newFirst: Int, columns newColumns: Int,
                        renumber: Bool = false) -> Update {
         let grid = newColumns > 0
@@ -200,7 +204,7 @@ public final class CandidateCells {
                 kept.insert(ObjectIdentifier(cell))
             } else {
                 let cell = CandidateCell(position: i, numberText: numberText, showsNumber: shows, text: text,
-                                         note: notes[i], selected: i == selected)
+                                         note: notes[i], selected: i == selected, fixedNumberSlot: renumber)
                 cell.onClick = { [weak self] position in self?.onSelect?(position) }
                 next.append(cell)
                 reused.append(false)

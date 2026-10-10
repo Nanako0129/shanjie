@@ -196,13 +196,14 @@ public final class Shell {
     let acgDataDate: String?
     private let glassTintStore: GlassTintStore
     private let candidateOrientationStore: CandidateOrientationStore
-    /// The candidate window's orientation for windows that open from now on (default horizontal); sent to every engine
-    /// `build()` makes and on every change (candidate-vertical contract section 2.1).
+    /// The orientation setting (default horizontal); sent to every engine `build()` makes and on every change (candidate-vertical
+    /// contract section 2.1). A candidate window already open keeps the orientation it opened with, so a change reaches the
+    /// next window; a prediction row on screen turns at once (section 2.4).
     public private(set) var candidateVertical = false
-    /// Whether the candidate window on screen is the vertical one: the last output that showed candidates had `vertical` 1
-    /// (false once the panel hid; the vertical prediction row, 2, does not count). It decides whether Page Up / Down go to
-    /// the core (section 2.2).
-    private(set) var verticalOpen = false
+    /// The `vertical` value (0, 1 or 2) of what the panel shows now; 0 once it hid. Page Up / Down go to the core only while
+    /// it is 1, the vertical candidate window (section 2.2); the vertical prediction row, 2, does not count.
+    private(set) var shownVertical = 0
+    var verticalOpen: Bool { shownVertical == VerticalLayout.candidates }
     /// Posted (object: this shell) after any setting changes, from the menu or the settings window;
     /// the window's model re-reads on it (settings-window section 2.2).
     public static let didChangeSettings = Notification.Name("ShanjieShellDidChangeSettings")
@@ -490,14 +491,14 @@ public final class Shell {
                         appearance: NSAppearance?) {
         // Only an exact punctuation mark has a name: a word candidate is never a key of the table.
         let notes = list.map { names[$0] }
-        verticalOpen = vertical == VerticalLayout.candidates
+        shownVertical = vertical
         panel.show(list, notes: notes, selected: selected, columns: columns, first: first, total: total, vertical: vertical,
                    lineRect: lineRect, appearance: appearance, glassTint: glassTint)
     }
 
     func hideCandidates() {
         lineCache = nil
-        verticalOpen = false
+        shownVertical = 0
         panel.hide()
     }
 
@@ -632,12 +633,13 @@ public final class Session {
         }
     }
 
-    /// The orientation setting: the snapshot is shown, if this session owns the composition, so a prediction row on screen
-    /// turns at once (candidate-vertical contract section 2.4); an open candidate window keeps its orientation, so for it the
-    /// snapshot is the output already shown.
+    /// The orientation setting: the snapshot is shown, if this session owns the composition, but only when its `vertical` value
+    /// differs from what the panel shows, i.e. a prediction row that turns (candidate-vertical contract section 2.4). An open
+    /// candidate window keeps its orientation and nothing is on screen otherwise, so those outputs are not applied again: a
+    /// horizontal composition sees no client or panel call at all.
     func applyCandidateVertical(_ on: Bool) {
         switch shell.setCandidateVertical(on) {
-        case .ok(let o)? where shell.owner === self: apply(o)
+        case .ok(let o)? where shell.owner === self && o.vertical != shell.shownVertical: apply(o)
         case .failed(let c)?: _ = fail(c)
         default: break
         }

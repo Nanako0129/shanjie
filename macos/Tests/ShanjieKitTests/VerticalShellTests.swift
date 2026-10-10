@@ -82,7 +82,7 @@ final class VerticalShellTests: XCTestCase {
         XCTAssertEqual(store.candidateVertical, true)
         XCTAssertTrue(c.session.shell.candidateVertical)
         XCTAssertTrue(model.candidateVertical)
-        // The open window keeps its orientation: nothing was re-shown, and the next key still works on the bar and its grid.
+        // The open candidate window keeps its orientation: the snapshot is the output already shown, and the next key still works on the bar and its grid.
         XCTAssertEqual(c.panel.vertical, 0)
         XCTAssertEqual(c.panel.items, shownBefore)
         c.press(down)
@@ -196,6 +196,23 @@ final class VerticalShellTests: XCTestCase {
         XCTAssertEqual(c.panel.items, items)
         model.setCandidateVertical(false)
         XCTAssertEqual(c.panel.vertical, 0)
+    }
+
+    /// Changing the setting during a horizontal composition (no row, or an open window) is invisible: no client call, no panel
+    /// show. Only a prediction row that turns is applied.
+    func testSettingChangeLeavesAHorizontalCompositionAlone() {
+        let c = Controller(makeShell())
+        c.session.activate()
+        let model = SettingsModel(shell: c.session.shell)
+        c.type("su3cl3")  // two syllables; a row may show, but then it is already vertical-free
+        c.press(Keys.esc)
+        c.type("g4 ")  // an open horizontal window
+        XCTAssertEqual(c.panel.vertical, 0)
+        let calls = c.client.calls.count, shows = c.panel.glassTints.count
+        model.setCandidateVertical(true)
+        model.setCandidateVertical(false)
+        XCTAssertEqual(c.client.calls.count, calls, "no marked text was set again")
+        XCTAssertEqual(c.panel.glassTints.count, shows, "the panel was not shown again")
     }
 
     // MARK: Page Up / Down inside the vertical window

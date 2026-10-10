@@ -42,6 +42,9 @@ public enum VerticalLayout {
         public var reset: Bool
         public var rows: Int
         public var width: CGFloat
+        /// Room reserved at the right for the scroll indicator: only the candidate window, only when its list is longer than
+        /// the rows it shows. Decided here once; the panel uses this and no other condition.
+        public var gutter: CGFloat
         public var size: CGSize { CGSize(width: width, height: VerticalLayout.height(rows: rows)) }
     }
 
@@ -53,15 +56,22 @@ public enum VerticalLayout {
     /// - Kind 1 (candidate window): the height is fixed when it opens (`min(count, 9)`); the width only grows.
     /// - Kind 2 (prediction row): the height follows `count` on every output; the width only grows while the outputs stay 2.
     /// - Kind 0 sizes nothing here (the bar and the grid have their own layout); only `reset` matters.
-    /// - `contentWidths`: each shown cell's `CandidateCell.contentWidth`; `gutter`: the scroll indicator's room, 0 if none.
-    public static func plan(previous: Plan?, kind: Int, count: Int, contentWidths: [CGFloat], gutter: CGFloat) -> Plan {
-        let reset = previous?.kind != kind
-        guard kind != 0 else { return Plan(kind: 0, reset: reset, rows: 0, width: 0) }
+    /// - `count`, `total`: the shown rows and the whole list (the indicator is needed when `total > count`).
+    /// - `contentWidths`: each shown cell's `CandidateCell.contentWidth`, taken from the cells that exist after `resets`
+    ///   cleared what had to go, so nothing is measured twice.
+    public static func plan(previous: Plan?, kind: Int, count: Int, total: Int, contentWidths: [CGFloat]) -> Plan {
+        let reset = resets(previous: previous, kind: kind)
+        guard kind != 0 else { return Plan(kind: 0, reset: reset, rows: 0, width: 0, gutter: 0) }
         let base = reset ? nil : previous
-        let rows = kind == candidates ? (base?.rows ?? min(count, visibleRows)) : min(count, visibleRows)
+        let rows = kind == predictions ? min(count, visibleRows) : (base?.rows ?? min(count, visibleRows))
+        let gutter = kind == candidates && total > count ? scrollGutter : 0
         return Plan(kind: kind, reset: reset, rows: rows,
-                    width: width(contentWidths: contentWidths, current: base?.width ?? 0, gutter: gutter))
+                    width: width(contentWidths: contentWidths, current: base?.width ?? 0, gutter: gutter), gutter: gutter)
     }
+
+    /// Whether an output of this `kind` clears what `previous` left on screen: any change of value, `nil` (nothing on screen)
+    /// included. The panel asks this first, clears, makes its cells and only then asks `plan` for the size.
+    public static func resets(previous: Plan?, kind: Int) -> Bool { previous?.kind != kind }
 
     /// The window's height for `rows` visible rows. Fixed when the window opens (contract section 2.3).
     public static func height(rows: Int) -> CGFloat {
