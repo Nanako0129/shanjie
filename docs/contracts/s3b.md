@@ -84,7 +84,7 @@
 - 只處理 `keyDown`；`flagsChanged` 不送進核心。**中英切換用系統的「使用大寫鎖定鍵切換輸入方式」**（使用者 2026-10-03 選 Caps Lock）：**未實測**：預期切換時系統會停用本輸入法並呼叫 `deactivateServer`（依 IMK 文件推論，使用者實測 13 會確認）。殼不保留中英狀態（s3a §3 原本寫的 Shift 單按切換不做）。
 - `kind` 依 `keyCode`：Return／keypad Enter → ENTER、Space → SPACE、Delete(51) → BACKSPACE、Forward Delete(117) → DELETE、Esc → ESC、←→↑↓、Home(115)、End(119)、Tab。
 - `CHAR` 的 `ch` 依 `keyCode` 查 **ANSI 實體鍵位表**取「不按 Shift 的 ASCII」（a–z、0–9、`` ` ``、`-`、`=`、`[`、`]`、`\`、`;`、`'`、`,`、`.`、`/`），不使用 `event.characters`。
-- **表外的鍵**（數字鍵盤、功能鍵等）與 IMK 傳入的 `nil` 事件不送進核心：組字區有字時先 `reset(0)` 送出，然後回傳「不處理」；組字區空時直接回傳「不處理」。
+- **表外的鍵**（數字鍵盤、功能鍵等）與 IMK 傳入的 `nil` 事件不送進核心：組字區有字時先 `reset(0)` 送出，然後回傳「不處理」；組字區空時直接回傳「不處理」。**例外（`candidate-vertical.md` §2.2）**：直排候選窗開著（最後一次套用的輸出 `candidate_vertical` 為 1）而且沒有任何修飾鍵（Shift、Control、Option、Command、Caps Lock）時，Page Up（`kVK_PageUp` 116）與 Page Down（`kVK_PageDown` 121）由殼在 `Session.handle` 轉成核心的 kind 14／15 送進去，核心換頁並回傳已處理。`KeyMap.translate` 本身不變，這兩個鍵仍回 nil；橫排候選、網格、組字中、未完成音節、預測列進入、組字區空、或帶修飾鍵時照上面的表外鍵路徑，與以前完全相同。
 - `modifiers`：Shift、Control、Option、Command、Caps Lock 依 `modifierFlags` 對到 bit0–4。
 
 ## 7. 輸出套用

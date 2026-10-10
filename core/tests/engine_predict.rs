@@ -2024,3 +2024,111 @@ fn reading_matches_follows_the_query_mode() {
         assert!(returned > 0);
     }
 }
+
+// ---------- candidate-vertical contract section 2.4 (revision three): the prediction row follows the setting ----------
+
+#[test]
+fn the_prediction_row_carries_two_when_vertical_and_zero_when_horizontal() {
+    for (vertical, want) in [(false, 0), (true, 2)] {
+        let mut e = engine();
+        e.set_candidate_vertical(vertical).unwrap();
+        let (mut e, o) = build_in(e, A.0, A.1, A.2);
+        assert_passive(&o);
+        assert_eq!(o.vertical, want, "passive row, vertical {vertical}");
+        let entered = e.key(kind(KeyKind::Tab)).unwrap();
+        assert_eq!((entered.selected, entered.columns, entered.first), (Some(0), 0, 0));
+        assert_eq!(entered.vertical, want, "entered row, vertical {vertical}");
+        // No row, no mark: leaving to an empty composition.
+        assert_eq!(e.reset(ResetMode::Discard).vertical, 0);
+    }
+}
+
+#[test]
+fn the_setter_snapshot_re_renders_a_shown_row_in_the_new_orientation() {
+    let (mut e, o) = build(A.0, A.1, A.2);
+    assert_eq!(o.vertical, 0);
+    let v = e.set_candidate_vertical(true).unwrap();
+    assert_passive(&v);
+    assert_eq!((row(&v), v.vertical), (row(&o), 2), "same row, now vertical");
+    let h = e.set_candidate_vertical(false).unwrap();
+    assert!(h == o, "back to the horizontal output of before");
+    // Entered: the selection survives the switch.
+    e.key(kind(KeyKind::Tab)).unwrap();
+    e.key(kind(KeyKind::Right)).unwrap();
+    let v = e.set_candidate_vertical(true).unwrap();
+    assert_eq!((v.vertical, v.selected), (2, Some(1)));
+    // No row on screen: nothing to re-render.
+    e.reset(ResetMode::Discard);
+    assert_eq!(e.set_candidate_vertical(false).unwrap().vertical, 0);
+    assert_eq!(e.set_candidate_vertical(true).unwrap().vertical, 0);
+}
+
+#[test]
+fn the_entered_vertical_row_moves_with_up_and_down_and_stops_at_both_ends() {
+    let mut e = engine();
+    e.set_candidate_vertical(true).unwrap();
+    let (mut e, o) = build_in(e, A.0, A.1, A.2);
+    let r = row(&o);
+    assert!(r.len() >= 3);
+    assert_eq!(e.key(kind(KeyKind::Tab)).unwrap().selected, Some(0));
+    // Up at the first item stays.
+    let o = e.key(kind(KeyKind::Up)).unwrap();
+    assert!(o.handled && o.commit.is_empty());
+    assert_eq!((row(&o), o.selected, o.vertical), (r.clone(), Some(0), 2));
+    for i in 1..r.len() {
+        let o = e.key(kind(KeyKind::Down)).unwrap();
+        assert!(o.handled);
+        assert_eq!((row(&o), o.selected, o.vertical), (r.clone(), Some(i), 2), "Down {i}");
+    }
+    let last = r.len() - 1;
+    assert_eq!(e.key(kind(KeyKind::Down)).unwrap().selected, Some(last), "Down at the last item stays");
+    assert_eq!(e.key(kind(KeyKind::Up)).unwrap().selected, Some(last - 1));
+    // Tab, Left, Right and Shift+Tab keep their rules next to it.
+    assert_eq!(e.key(kind(KeyKind::Left)).unwrap().selected, Some(last - 2));
+    assert_eq!(e.key(kind(KeyKind::Right)).unwrap().selected, Some(last - 1));
+    let o = e.key(shift_tab()).unwrap();
+    assert_eq!((row(&o), o.selected), (r, None), "Shift+Tab still leaves, the row stays");
+    // Page Down / Up are not handled and change nothing.
+    e.key(kind(KeyKind::Tab)).unwrap();
+    let entered = e.key(kind(KeyKind::Down)).unwrap();
+    for k in [KeyKind::PageDown, KeyKind::PageUp] {
+        let o = e.key(Key::new(k)).unwrap();
+        assert!(!o.handled && o.commit.is_empty());
+        assert!(o == Output { handled: false, ..entered.clone() });
+    }
+}
+
+#[test]
+fn the_passive_vertical_row_keeps_down_as_open_and_up_as_ignore() {
+    let mut e = engine();
+    e.set_candidate_vertical(true).unwrap();
+    let (mut e, o) = build_in(e, D.0, D.1, D.2);
+    assert_passive(&o);
+    assert_eq!(o.vertical, 2);
+    // Up (rule 16): handled, ignored, the row stays as it was.
+    let u = e.key(kind(KeyKind::Up)).unwrap();
+    assert!(u.handled);
+    assert!(u == o);
+    // Down (rule 15): opens the candidate window, vertical (1), the row is gone.
+    let d = e.key(kind(KeyKind::Down)).unwrap();
+    assert!(d.handled);
+    assert_eq!((d.vertical, d.columns, d.selected, d.first), (1, 0, Some(0), 0));
+    assert!(d.total as usize > 0 && d.candidates.len() == (d.total as usize).min(9));
+}
+
+#[test]
+fn the_horizontal_prediction_row_keeps_its_keys_and_output() {
+    // Entered horizontal row: Up / Down are not row keys; they leave it and run from rule 2, as before this slice.
+    let (mut e, o) = build(D.0, D.1, D.2);
+    let r = row(&o);
+    assert_eq!(o.vertical, 0);
+    e.key(kind(KeyKind::Tab)).unwrap();
+    let d = e.key(kind(KeyKind::Down)).unwrap();
+    assert_eq!((d.vertical, d.columns, d.selected), (0, 0, Some(0)));
+    assert_ne!(row(&d), r, "Down left the row and opened the candidate window");
+    let (mut e, _) = build(D.0, D.1, D.2);
+    e.key(kind(KeyKind::Tab)).unwrap();
+    let u = e.key(kind(KeyKind::Up)).unwrap();
+    assert!(u.handled);
+    assert_eq!((u.selected, u.vertical), (None, 0), "Up left the row (rule 16 then ignored): not entered any more");
+}
