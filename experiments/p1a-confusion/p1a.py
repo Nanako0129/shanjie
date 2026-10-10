@@ -288,19 +288,20 @@ class Model:
 # ---------------------------------------------------------------- scoring (section 2.3)
 
 def char_term(model, p, ch):
-    """log P_char(ch | features) - max_m log P(m | features); <= 0. A character outside the class table gets P(OTHER) * q(ch | OTHER)."""
+    """log10 P_char(ch | features) - max_m log P(m | features); <= 0. A character outside the class table gets P(OTHER) * q(ch | OTHER)."""
     j = model.index.get(ch)
-    lp = math.log(p[j]) if j is not None else math.log(p[model.other]) + math.log(model.q(ch))
-    return lp - math.log(p.max())
+    # log10, the base of the n-gram scores s it is added to (s + mu * f)
+    lp = math.log10(p[j]) if j is not None else math.log10(p[model.other]) + math.log10(model.q(ch))
+    return lp - math.log10(p.max())
 
 
 def scored_positions(words, syls, reading):
-    """[(char index, length of its word)] for every character of the candidate, inside multi-character words too, whose typed syllable is `reading`."""
+    """[char index] for every character of the candidate, inside multi-character words too, whose typed syllable is `reading`."""
     out, i = [], 0
     for w in words:
         for j in range(len(w)):
             if syls[i + j] == reading:
-                out.append((i + j, len(w)))
+                out.append(i + j)
         i += len(w)
     return out
 
@@ -309,7 +310,7 @@ def candidate_f(model, featurize, ctxk, words, syls):
     """f(c) for one reading: the sum of char_term over the candidate's positions. featurize(left, right) -> hashed ids; the left part
     is the context_key characters followed by the candidate up to the position (a sentinel context is the empty string)."""
     text, tot = "".join(words), 0.0
-    for i, _ in scored_positions(words, syls, model.reading):
+    for i in scored_positions(words, syls, model.reading):
         tot += char_term(model, model.predict(featurize(ctxk + text[:i], text[i + 1:])), text[i])
     return tot
 
@@ -339,15 +340,15 @@ def equalize(lex, readings=tuple(EQUALIZE)):
 # A row: {"gold": str, "syls": [...], "cands": [{"s": n-gram score, "w": [words], "f": {reading: [f with context, f without]}}], "gp": {reading: [[gold, predicted]]}}
 # cands are in decode order (best first).
 
-def pick(row, active, mu, tau, use_ctx=True):
+def pick(row, active, mu, tau):
     """Index of the chosen candidate: the n-gram best unless its lead over the second is < tau, then the best s + mu * f
     (ties keep the earlier candidate). f sums the active readings."""
     c = row["cands"]
     if len(c) < 2 or c[0]["s"] - c[1]["s"] >= tau:
         return 0
-    k, best, bi = (0 if use_ctx else 1), None, 0
+    best, bi = None, 0
     for i, x in enumerate(c):
-        v = x["s"] + mu * sum(x["f"][r][k] for r in active if r in x["f"])
+        v = x["s"] + mu * sum(x["f"][r][0] for r in active if r in x["f"])
         if best is None or v > best:
             best, bi = v, i
     return bi
@@ -409,12 +410,8 @@ def run_stage(stage, sets_by_profile, majority):
     out = {"stage": stage, "active": active, "disabled": disabled_readings(gp_sets, majority)}
     for prof, sets in sets_by_profile.items():
         mu, tau, n = select(sets, active)
-        out[prof] = {"mu": mu, "tau": "inf" if tau == math.inf else tau, "top1": n}
+        out[prof] = {"mu": mu, "tau": tau, "top1": n}
     return out
-
-
-def tau_of(v):
-    return math.inf if v == "inf" else v
 
 
 def confusions(gold, top1):

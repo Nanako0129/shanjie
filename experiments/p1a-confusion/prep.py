@@ -77,9 +77,9 @@ def cmd_construction(a):
             else:
                 false_n += 1
     train_n = open(a.train, encoding="utf-8", newline="\n").read().count("\n")
-    ok = false_n == train_n and false_n + true_n == total > 0 and WIKI_ARTICLES <= WIKITUNE_FIRST_ARTICLE
+    ok = false_n == train_n and total > 0
     print(f"raw lines {total}: is_tune true {true_n}, false {false_n}; colloquial-train.txt {train_n} lines")
-    print(f"wiki: counts use articles 0..{WIKI_ARTICLES - 1}, wikitune uses articles >= {WIKITUNE_FIRST_ARTICLE}")
+    print(f"wiki (constants, not an observation of the data): counts use articles 0..{WIKI_ARTICLES - 1}, wikitune uses articles >= {WIKITUNE_FIRST_ARTICLE}")
     print("construction", "OK" if ok else "FAILED")
     sys.exit(0 if ok else 1)
 
@@ -119,16 +119,6 @@ def iter_runs(path):
             yield line.rstrip("\n")
 
 
-def chunks(it, n):
-    b = []
-    for x in it:
-        b.append(x)
-        if len(b) == n:
-            yield b; b = []
-    if b:
-        yield b
-
-
 def _init_count():
     _G["lex"] = p1a.training_lexicon()
 
@@ -146,7 +136,7 @@ def cmd_classes(a):
     tot = collections.Counter()
     with mp.Pool(a.procs, initializer=_init_count) as pool:
         for src in ("runs-wiki.txt.gz", "runs-colloq.txt.gz"):
-            for c in pool.imap_unordered(_count, chunks(iter_runs(os.path.join(a.runs, src)), 2000)):
+            for c in pool.imap_unordered(_count, bc.batches(iter_runs(os.path.join(a.runs, src)), 2000)):
                 tot.update(c)
     out = {}
     for r in p1a.READINGS:

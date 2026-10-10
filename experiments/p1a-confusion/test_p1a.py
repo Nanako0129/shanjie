@@ -103,10 +103,10 @@ class DataPrep(TmpCase):
             if ws:
                 rec.append(run)
             return ws
-        with mock.patch.object(bc, "load_conv", lambda: ({}, {}, 1)), mock.patch.object(bc, "segment", spy), \
-                redirect_stdout(io.StringIO()):
+        with mock.patch.dict(bc._W), mock.patch.object(bc, "load_conv", lambda: ({}, {}, 1)), mock.patch.object(bc, "segment", spy), \
+                redirect_stdout(io.StringIO()):   # patch.dict restores the module-global _W that bct.main overwrites
             bct.main([os.path.join(self.tmp, "o.pkl"), *paths])
-        lex = bc._W["lex"]
+            lex = bc._W["lex"]
         mine = list(p1a.colloquial_runs(lex, paths, ({}, {}, 1)))
         self.assertGreaterEqual(len(rec), 3)
         self.assertEqual(rec, mine)
@@ -196,34 +196,34 @@ class Scoring(unittest.TestCase):
 
     def test_multi_character_word_positions_are_scored(self):
         syls = ["ㄅㄨˊ", "ㄧㄠˋ", "ㄗㄞˋ"]
-        self.assertEqual(p1a.scored_positions(["不要再"], syls, "ㄗㄞˋ"), [(2, 3)])
-        self.assertEqual(p1a.scored_positions(["不要", "再"], syls, "ㄗㄞˋ"), [(2, 1)])
+        self.assertEqual(p1a.scored_positions(["不要再"], syls, "ㄗㄞˋ"), [2])
+        self.assertEqual(p1a.scored_positions(["不要", "再"], syls, "ㄗㄞˋ"), [2])
         calls = []
         spy = lambda left, right: calls.append((left, right)) or np.zeros(1, np.int32)   # noqa: E731
         f = p1a.candidate_f(stub_model(), spy, "", ["不要再"], syls)
         self.assertEqual(calls, [("不要", "")])
-        self.assertAlmostEqual(f, math.log(0.3) - math.log(0.5), places=9)
+        self.assertAlmostEqual(f, math.log10(0.3) - math.log10(0.5), places=9)
 
     def test_term_values_by_hand(self):
         m = stub_model()
         p = np.array(self.P)
         self.assertAlmostEqual(p1a.char_term(m, p, "在"), 0.0, places=9)
-        self.assertAlmostEqual(p1a.char_term(m, p, "再"), math.log(0.3 / 0.5), places=9)
+        self.assertAlmostEqual(p1a.char_term(m, p, "再"), math.log10(0.3 / 0.5), places=9)
         # outside the table: P(OTHER) * q(c | OTHER), q = (n + 0.5) / (N + 0.5 V) = (n + 0.5) / 110
-        self.assertAlmostEqual(p1a.char_term(m, p, "載"), math.log(0.2 * 10.5 / 110) - math.log(0.5), places=9)
-        self.assertAlmostEqual(p1a.char_term(m, p, "坐"), math.log(0.2 * 2.5 / 110) - math.log(0.5), places=9)
-        self.assertAlmostEqual(p1a.char_term(m, p, "鬻"), math.log(0.2 * 0.5 / 110) - math.log(0.5), places=9)   # never seen in OTHER
+        self.assertAlmostEqual(p1a.char_term(m, p, "載"), math.log10(0.2 * 10.5 / 110) - math.log10(0.5), places=9)
+        self.assertAlmostEqual(p1a.char_term(m, p, "坐"), math.log10(0.2 * 2.5 / 110) - math.log10(0.5), places=9)
+        self.assertAlmostEqual(p1a.char_term(m, p, "鬻"), math.log10(0.2 * 0.5 / 110) - math.log10(0.5), places=9)   # never seen in OTHER
         # same features, two characters with different q: different terms, and none is 0 or the bare log P(OTHER)
         a, b = p1a.char_term(m, p, "載"), p1a.char_term(m, p, "坐")
         self.assertNotAlmostEqual(a, b, places=3)
-        self.assertLess(max(a, b), math.log(0.2) - math.log(0.5) - 1e-3)
+        self.assertLess(max(a, b), math.log10(0.2) - math.log10(0.5) - 1e-3)
         self.assertLess(a, 0)
 
     def test_f_sums_every_scored_position(self):
         m = stub_model()
         spy = lambda left, right: np.zeros(1, np.int32)   # noqa: E731
         f = p1a.candidate_f(m, spy, "", ["在", "再", "載"], ["ㄗㄞˋ", "ㄗㄞˋ", "ㄗㄞˋ"])
-        self.assertAlmostEqual(f, 0 + math.log(0.6) + math.log(0.2 * 10.5 / 110) - math.log(0.5), places=9)
+        self.assertAlmostEqual(f, 0 + math.log10(0.6) + math.log10(0.2 * 10.5 / 110) - math.log10(0.5), places=9)
         self.assertEqual(p1a.candidate_f(m, spy, "", ["在"], ["ㄕˋ"]), 0.0)   # other readings are not this classifier's business
 
     def test_predicted_character(self):
@@ -250,11 +250,6 @@ class Fusion(unittest.TestCase):
         self.assertEqual(p1a.pick(r, [], 3, math.inf), 0)     # no active reading
         self.assertEqual(p1a.pick(r, ["other"], 3, math.inf), 0)   # f of a reading that is not active is ignored
 
-    def test_context_switch(self):
-        r = row("B", [cand(-10.0, "A"), cand(-10.5, "B")])
-        r["cands"][0]["f"] = {"r": [-1.0, 0.0]}; r["cands"][1]["f"] = {"r": [0.0, -1.0]}
-        self.assertEqual(p1a.pick(r, ["r"], 1, 1, use_ctx=True), 1)
-        self.assertEqual(p1a.pick(r, ["r"], 1, 1, use_ctx=False), 0)
 
     def sets(self, gap, advantage, n=3):
         rows = [row("B", [cand(-10.0, "A", r=-advantage), cand(-10.0 - gap, "B", r=0.0)]) for _ in range(n)]
@@ -310,6 +305,22 @@ class Fusion(unittest.TestCase):
             r["gp"] = {ZAI: gp[ZAI], ZUO: [["做", "作"]] * 2}   # always wrong, and the most common character is 做
         s2 = p1a.run_stage(2, by_prof, {ZAI: "在", ZUO: "做"})
         self.assertEqual((s2["active"], s2["disabled"]), ([ZAI], [ZUO]))
+
+
+    def test_disabling_is_decided_on_both_tuning_sets_together(self):
+        ZAI, ZUO = "ㄗㄞˋ", "ㄗㄨㄛˋ"
+        fs = lambda zai, zuo: {ZAI: [zai, zai], ZUO: [zuo, zuo]}   # noqa: E731
+        cands = [{"s": -10.0, "w": ["H"], "f": fs(-1.0, -9.0)}, {"s": -10.5, "w": ["G"], "f": fs(0.0, 0.0)}]
+        # each reading beats the most common character in ONE tuning set and loses in the other, and wins pooled: enabled
+        cv = row("G", cands, gp={ZAI: [["再", "再"]] * 3, ZUO: [["作", "做"]]})        # ZAI 3 vs 0; ZUO 0 vs 1 (majority 作)
+        wk = row("G", cands, gp={ZAI: [["在", "再"]], ZUO: [["做", "做"]] * 3})        # ZAI 0 vs 1 (majority 在); ZUO 3 vs 0
+        by_prof = {p: {"cvtune": [cv], "wikitune": [wk]} for p in p1a.PROFILES}
+        s = p1a.run_stage(2, by_prof, {ZAI: "在", ZUO: "作"})
+        self.assertEqual((s["active"], s["disabled"]), ([ZAI, ZUO], []))
+        # a reading that wins one set but loses pooled is disabled
+        wk2 = row("G", cands, gp={ZAI: [["在", "再"]] * 4, ZUO: [["做", "做"]] * 3})
+        s = p1a.run_stage(2, {p: {"cvtune": [cv], "wikitune": [wk2]} for p in p1a.PROFILES}, {ZAI: "在", ZUO: "作"})
+        self.assertEqual((s["active"], s["disabled"]), ([ZUO], [ZAI]))
 
 
 class Control(TmpCase):
@@ -413,7 +424,7 @@ class RealModel(unittest.TestCase):
 class FuseSmoke(unittest.TestCase):
     """The reports run end to end on synthetic candidate files."""
 
-    def make(self, d):
+    def make(self, d, wrong_gp=False):
         for sub in ("cands", "scored", "eq", "weights"):
             os.makedirs(os.path.join(d, sub))
         meta = {"reading": "ㄗㄞˋ", "classes": ["在", "再"], "other_counts": {}, "other_total": 0, "v_other": 1, "n_keep": 0, "majority": "在"}
@@ -426,7 +437,7 @@ class FuseSmoke(unittest.TestCase):
                     gold = "在" if a else "再"
                     c = [{"s": -1.0, "w": ["再"], "f": {"ㄗㄞˋ": [-1.0 if a else 0.0, -0.9]}}, {"s": -1.2, "w": ["在"], "f": {"ㄗㄞˋ": [0.0 if a else -1.0, 0.0]}}]
                     rows.append({"i": i + 1, "gold": gold, "syls": ["ㄗㄞˋ"], "ctxk": "", "cands": c,
-                                 "gp": {"ㄗㄞˋ": [[gold, gold]]}})
+                                 "gp": {"ㄗㄞˋ": [[gold, "再" if gold == "在" else "在"] if wrong_gp else [gold, gold]]}})
                     eq_rows.append({"i": i + 1, "gold": gold, "syls": ["ㄗㄞˋ"], "ctxk": "", "cands": [{"s": -1.0, "w": ["在"]}]})
                 for sub, rs in (("scored", rows), ("eq", eq_rows), ("cands", [{k: v for k, v in r.items() if k != "gp"} for r in rows])):
                     with open(os.path.join(d, sub, f"{name}.{prof}.jsonl"), "w", encoding="utf-8") as f:
@@ -452,6 +463,37 @@ class FuseSmoke(unittest.TestCase):
             self.assertIn("verdict: build it into the core", rep)
             self.assertIn("PASS  reported chat: 12 rows where f(c) changes with the context", rep)
             self.assertNotIn("ERROR", rep)
+            self.assertEqual((st["decision"], st["reasons"]), ("PASS", []))
+            # a stage that recorded STOP never yields the build verdict
+            st["decision"], st["reasons"] = "STOP", ["x"]
+            json.dump(st, open(os.path.join(d, "stop.json"), "w"))
+            rep = self.run_cmd("report", "--work", d, "--stage", os.path.join(d, "stop.json"), "--sets", ",".join(fuse.SETS))
+            self.assertIn("verdict: STOP", rep)
+            self.assertNotIn("build it into the core (next", rep)
+            self.assertNotIn("PASS  ", rep)
+
+    def test_missing_input_and_unknown_set_are_errors(self):
+        with tempfile.TemporaryDirectory() as d:
+            self.make(d)
+            self.run_cmd("stage", "1", "--work", d, "--out", os.path.join(d, "s.json"))
+            gone = os.path.join(d, "scored", "typing.chat.jsonl")
+            os.unlink(gone)
+            with self.assertRaises(SystemExit) as e:
+                self.run_cmd("report", "--work", d, "--stage", os.path.join(d, "s.json"), "--sets", ",".join(fuse.SETS))
+            self.assertIn(gone, str(e.exception.code))
+            with self.assertRaises(SystemExit) as e:
+                self.run_cmd("accuracy", "--work", d, "--sets", "cvtune,nosuchset")
+            self.assertIn("nosuchset", str(e.exception.code))
+
+    def test_stage_stops_when_more_than_half_the_classifiers_are_disabled(self):
+        with tempfile.TemporaryDirectory() as d:
+            self.make(d, wrong_gp=True)
+            out = self.run_cmd("stage", "1", "--work", d, "--out", os.path.join(d, "s.json"))
+            st = json.load(open(os.path.join(d, "s.json")))
+            self.assertEqual(st["decision"], "STOP")
+            self.assertIn("more than half", st["reasons"][0])
+            rep = self.run_cmd("report", "--work", d, "--stage", os.path.join(d, "s.json"), "--sets", ",".join(fuse.SETS))
+            self.assertIn("verdict: STOP", rep)
 
 
 if __name__ == "__main__":
