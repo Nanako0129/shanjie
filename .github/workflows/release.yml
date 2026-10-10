@@ -85,9 +85,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          gh release download model-v4 --repo "$GITHUB_REPOSITORY" -p bigram.sjlm -D data/lm
+          gh release download model-v5 --repo "$GITHUB_REPOSITORY" -p bigram.sjlm -D data/lm
           shasum -a 256 -c data/bigram.sjlm.sha256
-          gh release download classes-v2 --repo "$GITHUB_REPOSITORY" -p classes.sjc -D data/lm
+          gh release download classes-v3 --repo "$GITHUB_REPOSITORY" -p classes.sjc -D data/lm
           shasum -a 256 -c data/classes.sjc.sha256
 
       - name: Version
