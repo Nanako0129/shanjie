@@ -1,4 +1,44 @@
-# 維護者手動加的詞（契約 docs/contracts/acg-pack.md A.1），維護者自己的清單，CC0。欄位：詞、作品、備註；建置工具當成一個來源（標籤 manual），去重、讀音、分數、衝突偵測都和其他來源相同。
+# 維護者手動加的詞（契約 docs/contracts/acg-pack.md A.1），維護者自己加的詞 CC0；BanG Dream! 主要樂團成員取自中文維基百科（CC BY-SA 4.0，見 LICENSES/data.md），整份檔案隨詞包以 CC BY-SA 4.0 散布。欄位：詞、作品、備註、另外的讀音（選填，音節以空白分隔，詞同時有讀音工具選的讀音和這一個）；建置工具當成一個來源（標籤 manual），去重、讀音、分數、衝突偵測都和其他來源相同。
 奇希莉卡	無職轉生	角色奇希莉卡·奇希里斯
 奇希里斯	無職轉生	角色奇希莉卡·奇希里斯
 十種影法術	咒術迴戰	術式名，2026-10-09 維基百科確認（acg-exclude.tsv 的「十種影法術最著名式神」）
+宿儺	咒術迴戰	簡稱（兩面宿儺）；使用者 2026-10-09 回報打成「素娜」，簡稱的一般抽取不在 A2 片
+蕾妮亞	（見 acg-collisions.tsv）	使用者 2026-10-10：「蕾妮婭」兩個都留，補上另一側；第四欄是另外加的讀音（和蕾妮婭同音），讀音工具選的 ㄧㄚˇ 也保留，兩個讀音都出貨（人們打的是工具選的讀音）	ㄌㄟˇ ㄋㄧˊ ㄧㄚˋ
+戈爾茲	（見 acg-collisions.tsv）	使用者 2026-10-10：「哥爾茲」兩個都留，補上另一側
+村岡皋月	（見 acg-collisions.tsv）	使用者 2026-10-10：「村岡皐月」兩個都留，補上另一側
+柚木準	（見 acg-collisions.tsv）	使用者 2026-10-10：「柚木隼」兩個都留，補上另一側
+# BanG Dream! 主要樂團成員（使用者 2026-10-10 決定）。出處：中文維基百科「BanG Dream!角色列表」（revid 94761519，快取的 zh-tw 內容）各樂團小節的成員；括號裡只有漢字原名與聲優，通不過人名抽取的相鄰檢查。
+戶山香澄	BanG Dream!角色列表@94761519	BanG Dream!角色列表 Poppin'Party
+花園多惠	BanG Dream!角色列表@94761519	BanG Dream!角色列表 Poppin'Party
+牛込里美	BanG Dream!角色列表@94761519	BanG Dream!角色列表 Poppin'Party
+山吹沙綾	BanG Dream!角色列表@94761519	BanG Dream!角色列表 Poppin'Party
+市谷有咲	BanG Dream!角色列表@94761519	BanG Dream!角色列表 Poppin'Party
+美竹蘭	BanG Dream!角色列表@94761519	BanG Dream!角色列表 Afterglow
+青葉摩卡	BanG Dream!角色列表@94761519	BanG Dream!角色列表 Afterglow
+上原緋瑪麗	BanG Dream!角色列表@94761519	BanG Dream!角色列表 Afterglow
+宇田川巴	BanG Dream!角色列表@94761519	BanG Dream!角色列表 Afterglow
+羽澤鶇	BanG Dream!角色列表@94761519	BanG Dream!角色列表 Afterglow
+丸山彩	BanG Dream!角色列表@94761519	BanG Dream!角色列表 Pastel*Palettes
+冰川日菜	BanG Dream!角色列表@94761519	BanG Dream!角色列表 Pastel*Palettes
+白鷺千聖	BanG Dream!角色列表@94761519	BanG Dream!角色列表 Pastel*Palettes
+大和麻彌	BanG Dream!角色列表@94761519	BanG Dream!角色列表 Pastel*Palettes
+若宮伊芙	BanG Dream!角色列表@94761519	BanG Dream!角色列表 Pastel*Palettes
+湊友希那	BanG Dream!角色列表@94761519	BanG Dream!角色列表 Roselia
+冰川紗夜	BanG Dream!角色列表@94761519	BanG Dream!角色列表 Roselia
+今井莉莎	BanG Dream!角色列表@94761519	BanG Dream!角色列表 Roselia
+宇田川亞子	BanG Dream!角色列表@94761519	BanG Dream!角色列表 Roselia
+白金燐子	BanG Dream!角色列表@94761519	BanG Dream!角色列表 Roselia
+弦卷心	BanG Dream!角色列表@94761519	BanG Dream!角色列表 Hello, Happy World!
+瀨田薰	BanG Dream!角色列表@94761519	BanG Dream!角色列表 Hello, Happy World!
+北澤育美	BanG Dream!角色列表@94761519	BanG Dream!角色列表 Hello, Happy World!
+松原花音	BanG Dream!角色列表@94761519	BanG Dream!角色列表 Hello, Happy World!
+奧澤美咲	BanG Dream!角色列表@94761519	BanG Dream!角色列表 Hello, Happy World!
+和奏瑞依	BanG Dream!角色列表@94761519	BanG Dream!角色列表 RAISE A SUILEN
+朝日六花	BanG Dream!角色列表@94761519	BanG Dream!角色列表 RAISE A SUILEN
+佐藤益木	BanG Dream!角色列表@94761519	BanG Dream!角色列表 RAISE A SUILEN
+珠手知由	BanG Dream!角色列表@94761519	BanG Dream!角色列表 RAISE A SUILEN
+倉田真白	BanG Dream!角色列表@94761519	BanG Dream!角色列表 Morfonica
+桐谷透子	BanG Dream!角色列表@94761519	BanG Dream!角色列表 Morfonica
+廣町七深	BanG Dream!角色列表@94761519	BanG Dream!角色列表 Morfonica
+二葉筑紫	BanG Dream!角色列表@94761519	BanG Dream!角色列表 Morfonica
+八潮瑠唯	BanG Dream!角色列表@94761519	BanG Dream!角色列表 Morfonica；第四欄是另外加的讀音：唯 取萌典第一個讀音 ㄨㄟˊ，讀音工具選的 ㄨㄟˇ 也保留，兩個讀音都出貨（人們打的是工具選的讀音）	ㄅㄚ ㄔㄠˊ ㄌㄧㄡˊ ㄨㄟˊ

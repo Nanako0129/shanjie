@@ -15,6 +15,8 @@ public final class SettingsModel: ObservableObject {
     @Published public private(set) var abbreviation = false
     @Published public private(set) var demote = true
     @Published public private(set) var acgPack = true
+    /// The grey "資料更新至 …" line under the 動漫與遊戲詞 toggle (acg-pack contract A2.4): the same text as the menu's, `nil` for no line.
+    public var acgDataLine: String? { shell.acgDataDate.map(MenuEntry.Text.acgDataDate) }
     @Published public private(set) var backupExcluded = false
     @Published public private(set) var glassTint = 0.0
     /// Status rows (section 2.2). There is no "this app" row: it comes from one session's client and
