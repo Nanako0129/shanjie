@@ -642,8 +642,10 @@ class A3(unittest.TestCase):
         """PR #111 /code-review：整頁模式不收頁尾的參考、外部連結小節與導覽框；人物小標題下的照收。"""
         html = ("<h2>主要角色</h2><ul><li>艾蓮娜</li></ul><h2>其他</h2><ul><li>卡羅爾</li></ul>"
                 "<h2>參考資料</h2><ul><li>網際網路電影資料庫</li></ul><h2>外部連結</h2><ul><li>集換式卡牌遊戲</li></ul>"
-                "<div class=\"navbox\"><ul><li>神奇寶貝鑽石</li></ul></div>")
-        self.assertEqual([n.name for n in B.names_of(html, whole_page=True)], ["艾蓮娜", "卡羅爾"])
+                "<h2>關聯項目</h2><div class=\"navbox\"><ul><li>神奇寶貝鑽石</li></ul></div>"       # 不是頁尾小標題：只靠導覽框過濾
+                "<h2>印第安那黃蜂隊（應參考於克里夫蘭印地安人隊）</h2><dl><dt>史戴西</dt></dl>")                 # 內文小標題提到「參考」：照收
+        self.assertEqual([n.name for n in B.names_of(html, whole_page=True)], ["艾蓮娜", "卡羅爾", "史戴西"])
+        self.assertTrue(B.is_back("註釋與參考資料") and B.is_back("相關參見") and not B.is_back("印第安那黃蜂隊（應參考於克里夫蘭印地安人隊）"))
 
     def test_strict_ok_reads_the_original_after_the_whole_name(self):
         snip = "洛琪希·米格路迪亞（ロキシー・ミグルディア）"
