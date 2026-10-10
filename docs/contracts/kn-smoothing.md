@@ -23,19 +23,19 @@
 
 ### 2.1 接續次數表（側檔，不動模型檔）
 
-- 新工具 `tools/kn_cont.py --lm MODEL --theta θ --out FILE`（`S2_WORK` 指定計數目錄，和 `build_lm.py` 相同）：
+- 新工具 `tools/kn_cont.py --lm MODEL --theta θ --beta β --out FILE`（`S2_WORK` 指定計數目錄，和 `build_lm.py` 相同；〔後續〕現在的 `kn_cont.py` 產生 `SJKN0002`，β 寫在檔頭，所以 β 格點要每個 β 一個側檔，或用舊的 `SJKN0001` 檔配 `--kn-beta`）：
   1. 用 `build_lm.py` 同一套程式（import，不複製）讀 `CORPORA`、加權、四捨五入、去掉 0、`variant_classes`、`merge_variants`，得到整數的 `bi`。
   2. 對每個詞 w（合併之後，後一個詞只會是代表成員或不在任何類裡的詞）算 `N(w) = |{ v : once(v), v ≠ "<s>", v 在模型詞彙裡, bi[(v, w)] ≥ θ }|`。`once(v)` 讓一個 k 個成員的類只算一種前文。〔更正 2026-10-10，PR #105 /code-review〕原本寫 `w ≠ "</s>"`、沒有詞彙條件：`build` 丟掉 v 不在詞彙裡的詞對，`N` 也要照丟（量到的差別見研究紀錄同日）；`</s>` 不必擋，側檔只取 id ≥ 2。
   3. 類的非代表成員取代表成員的 `N`（和 unigram 寫回每個成員的做法一致）。
   4. 讀 `MODEL` 的詞彙，依字串對到每個詞彙 id；模型詞彙裡有、計數裡沒有的詞（不問原因），`N = 0`。
-  5. 寫側檔：magic `SJKN0001`、V（u32）、`MODEL` 檔的 SHA-256（32 bytes）、θ（u32）、`N(w)`（u32[V]，id 0、1 寫 0）。
+  5. 寫側檔：magic `SJKN0001`、V（u32）、`MODEL` 檔的 SHA-256（32 bytes）、θ（u32）、`N(w)`（u32[V]，id 0、1 寫 0）。〔後續 2026-10-10〕`docs/contracts/kn-core.md` 起 `kn_cont.py` 只產生 `SJKN0002`（多 β 與 ΣN′），`SJKN0001` 只剩 `lm.py` 讀得到。
 - **θ 格點 {1, 2, 3}**：計數在這一步已是整數（§0），θ = 1 是所有留下的詞對（加權期望次數 ≥ 0.5），θ = 2 和模型的剪枝門檻相同，θ = 3 再排除只靠零星出現的前文。
 - 分數次數上的 Kneser–Ney 有現成做法（Zhang & Chiang 2014，ACL，https://aclanthology.org/P14-1072/ ），但它作用在每個詞對的次數分布上；我們的計數檔只存期望值的加總，做不到，所以用「四捨五入後的整數＋門檻」近似，報告寫明。
 - 報告每個 θ：`N = 0` 的詞占模型詞彙的比例、ΣN′（下一節）。
 
 ### 2.2 回退分布
 
-- `reference/proto/lm.py` 的 `BigramLM` 加可選的側檔（`kn=FILE, kn_beta=β`）；載入時核對側檔的 V 與模型雜湊，不符就丟 `ValueError`。`lm_eval.py` 加 `--kn FILE --kn-beta β`。
+- `reference/proto/lm.py` 的 `BigramLM` 加可選的側檔（`kn=FILE, kn_beta=β`）；載入時核對側檔的 V 與模型雜湊，不符就丟 `ValueError`。`lm_eval.py` 加 `--kn FILE --kn-beta β`（〔後續〕`SJKN0002` 的 β 在檔頭，`--kn-beta` 可省略，給了要和檔頭相同；`SJKN0001` 一定要給）。
 - 模型詞彙裡的詞（id ≥ 2）：
   - `N′(w) = N(w) + 1`（加一，讓 `N = 0` 的詞不會是 0）；
   - `ΣN′ = Σ_{w: id ≥ 2, once(w)} N′(w)`，每類只算一次（類的資訊由 `kn_cont.py` 一併寫進側檔，或由 `lm.py` 依同一套 `variant_classes` 算，實作時二選一並寫進測試；〔實作〕兩者都不是：`lm.py` 沒有詞庫、算不了，改由呼叫端用 `build_lm.variant_classes` 算好傳 `kn_classes`，給了側檔卻沒傳類或 β 不在 [0, 1] 就丟 `ValueError`，有測試）；
@@ -58,7 +58,7 @@
 - 指令（固定，每一次都一樣，只換 `--rows`／`--dev`、`--profile` 與側檔）：
 
   ```
-  python3 reference/proto/lm_eval.py --lm MODEL --profile chat|formal --rows SET --context --rowstats OUT [--kn SIDE --kn-beta β]
+  python3 reference/proto/lm_eval.py --lm MODEL --profile chat|formal --rows SET --context --rowstats OUT [--kn SIDE [--kn-beta β]]
   ```
 
   - 詞類表照預設（`MODEL` 同目錄的 `classes.sjc`），降權照預設；dev302 用 `--dev 302` 取代 `--rows`。
@@ -88,7 +88,7 @@
 4. **收尾**：fresh verifier 照 repo `CLAUDE.md` 的保留集規則（寫到它自己的暫存目錄、檔內只能有 `[0-9\t\n]`、比完刪掉），基準與選出的設定各跑一次，只回那一行表格：
 
    ```
-   python3 reference/proto/lm_eval.py --lm MODEL --profile chat|formal --rows eval/holdout/holdout.txt --context --rowstats OUT [--kn SIDE --kn-beta β]
+   python3 reference/proto/lm_eval.py --lm MODEL --profile chat|formal --rows eval/holdout/holdout.txt --context --rowstats OUT [--kn SIDE [--kn-beta β]]
    python3 tools/evalstats.py compare BASE CAND --label holdout-chat|holdout-formal
    ```
 
