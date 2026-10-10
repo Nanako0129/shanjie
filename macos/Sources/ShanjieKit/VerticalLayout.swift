@@ -111,6 +111,13 @@ public enum VerticalLayout {
         inset * 2 + CGFloat(rows) * rowPitch
     }
 
+    /// The height that decides below or above the line (`PanelPlacement.topLeft`'s `sideHeight`) for an output of `kind`: the
+    /// prediction row's height changes with its count, so it decides by the nine-row height and stays on one side of the line
+    /// while it shows; a vertical window's height is fixed while it is open (`nil`: its own).
+    public static func sideHeight(kind: Int) -> CGFloat? {
+        kind == predictions ? height(rows: visibleRows) : nil
+    }
+
     /// Top edge of the capsule of row `i` (0 = first visible row), with a capsule `capsuleHeight` tall centred in its pitch.
     public static func rowY(_ i: Int, capsuleHeight: CGFloat) -> CGFloat {
         inset + CGFloat(i) * rowPitch + (rowPitch - capsuleHeight) / 2
