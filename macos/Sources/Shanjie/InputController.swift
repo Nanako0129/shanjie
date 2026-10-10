@@ -307,6 +307,12 @@ final class CandidatePanelAdapter: CandidatePanel {
     private var shownSize = NSSize.zero
     private var shownFrame = NSRect.zero
     private var shownTargets: [NSPoint] = []
+    /// The vertical window (candidate-vertical contract section 2.3): whether what is on screen is one, its width so far (only
+    /// ever grows while it is open) and its row count at open (the height stays). All reset when the panel hides or the
+    /// orientation changes.
+    private var shownVertical = false
+    private var verticalWidth: CGFloat = 0
+    private var verticalRows = 0
     /// Widen-only column widths of the open grid (section 9); empty when collapsed or hidden.
     private var columnWidths: [CGFloat] = []
     /// The cells and the decision which survive an output (ShanjieKit); this class only adds and removes
@@ -381,11 +387,89 @@ final class CandidatePanelAdapter: CandidatePanel {
         }
     }
 
-    func show(_ candidates: [String], notes: [String?], selected: Int, columns: Int, first: Int, total: Int,
+    /// Candidate-vertical contract section 2.3: one column of up to nine rows, a capsule across the row's width, the scroll
+    /// indicator in a gutter on the right. Everything the horizontal path keeps (`shown*`, the grid's column widths) is empty
+    /// while this is up, and everything this keeps is empty while the horizontal path is.
+    private func showVertical(_ candidates: [String], notes: [String?], selected: Int, first: Int, total: Int,
+                              lineRect: NSRect?) {
+        let update = cellSet.update(candidates: candidates, notes: notes, selected: selected, first: first, columns: 0)
+        let cells = update.cells
+        // The height is fixed when the window opens: a window never has fewer or more rows after that (the core shows nine, or
+        // all of a shorter list), and a different count would only come from a new window.
+        if verticalRows == 0 { verticalRows = candidates.count }
+        let scrolls = total > candidates.count
+        let gutter = scrolls ? VerticalLayout.scrollGutter : 0
+        verticalWidth = VerticalLayout.width(contentWidths: cells.map(\.contentWidth), current: verticalWidth, gutter: gutter)
+        let size = NSSize(width: verticalWidth, height: VerticalLayout.height(rows: verticalRows))
+        update.removed.forEach { $0.removeFromSuperview() }
+        let rowWidth = size.width - VerticalLayout.sideInset * 2 - gutter
+        for (i, cell) in cells.enumerated() {
+            cell.frame = NSRect(x: VerticalLayout.sideInset, y: VerticalLayout.rowY(i, capsuleHeight: Metrics.capsuleHeight),
+                                width: rowWidth, height: Metrics.capsuleHeight)
+            if !update.reused[i] { row.addSubview(cell) }
+        }
+        var thumbs: [NSView] = []
+        if let t = VerticalLayout.thumb(first: first, total: total, visible: candidates.count, height: size.height) {
+            thumbs.append(FilledView(frame: NSRect(x: size.width - VerticalLayout.sideInset - VerticalLayout.thumbWidth, y: t.y,
+                                                   width: VerticalLayout.thumbWidth, height: t.height),
+                                     color: .tertiaryLabelColor, cornerRadius: VerticalLayout.thumbWidth / 2))
+        }
+        decor.replace(with: thumbs, deferred: false, in: row)
+        if shownSize != size {
+            row.frame = NSRect(origin: .zero, size: size)
+            glass.cornerRadius = VerticalLayout.cornerRadius
+            shownSize = size
+        }
+
+        let screens = NSScreen.screens
+        guard !screens.isEmpty else { return }
+        let rectScreen = lineRect.flatMap { r in screens.firstIndex { $0.frame.contains(r.origin) } }
+        let main = NSScreen.main.flatMap { m in screens.firstIndex(of: m) } ?? 0
+        // The first row's candidate glyph under the composed text, as the bar does. A first guess for the vertical window.
+        let alignOffset = VerticalLayout.sideInset + (cells.first?.candidateMinX ?? 0)
+        let origin = PanelPlacement.topLeft(
+            lineRect: lineRect, lastOrigin: lastOrigin, size: size, alignOffset: alignOffset,
+            screens: screens.map(\.visibleFrame), rectScreen: rectScreen, main: main)
+        lastOrigin = origin
+        // No animation: a vertical window never expands or collapses, and a widening is rare (a wider name scrolls in).
+        if window.frame.size != size { window.setContentSize(size) }
+        if window.frame.origin.x != origin.x || window.frame.maxY != origin.y { window.setFrameTopLeftPoint(origin) }
+        if !window.isVisible { window.orderFrontRegardless() }
+    }
+
+    /// Forgets everything on screen without hiding the window: the orientation changed (a prediction row, then a vertical
+    /// window) or the panel is hiding.
+    private func resetContent() {
+        // A running expand or collapse would keep moving the window after its content is gone; end it first.
+        if animating { settle(frame: shownFrame) }
+        shownColumns = 0
+        shownFirst = 0
+        shownTotal = 0
+        shownCandidates = []
+        shownNotes = []
+        shownSize = .zero
+        shownTargets = []
+        columnWidths = []
+        verticalWidth = 0
+        verticalRows = 0
+        cellSet.reset().forEach { $0.removeFromSuperview() }
+        decor.clear()
+    }
+
+    func show(_ candidates: [String], notes: [String?], selected: Int, columns: Int, first: Int, total: Int, vertical: Bool,
               lineRect: NSRect?, appearance: NSAppearance?, glassTint: Double) {
-        let grid = columns > 0
         if window.appearance?.name != appearance?.name { window.appearance = appearance }
         applyTint(glassTint)
+        // The prediction row is horizontal: a vertical window opening over it (or the reverse) starts from nothing.
+        if vertical != shownVertical {
+            resetContent()
+            shownVertical = vertical
+        }
+        if vertical {
+            showVertical(candidates, notes: notes, selected: selected, first: first, total: total, lineRect: lineRect)
+            return
+        }
+        let grid = columns > 0
 
         // Only the selection moved (section 8.7): keep the cells, change which one is selected and which
         // row shows numbers. The glass's content view is never replaced either way.
@@ -577,16 +661,8 @@ final class CandidatePanelAdapter: CandidatePanel {
         // at its animated frame next time; end it first.
         if animating { settle(frame: shownFrame) }
         window.orderOut(nil)
-        shownColumns = 0
-        shownFirst = 0
-        shownTotal = 0
-        shownCandidates = []
-        shownNotes = []
-        shownSize = .zero
-        shownTargets = []
-        columnWidths = []
-        cellSet.reset().forEach { $0.removeFromSuperview() }
-        decor.clear()
+        resetContent()
+        shownVertical = false
     }
 }
 

@@ -44,6 +44,9 @@ public final class CandidateCell: NSView {
     var onClick: ((Int) -> Void)?
 
     private let numberWidth: CGFloat, candidateWidth: CGFloat, nameWidth: CGFloat
+    /// The width the content needs (number, candidate, name), whatever the frame is now: the vertical window stretches every
+    /// cell to the row's width and still has to know how wide the content itself is.
+    public let contentWidth: CGFloat
 
     private static func measure(_ s: String, _ font: NSFont) -> CGFloat {
         // Rounded up to a device pixel the way a text field's frame is when it is not in a window yet,
@@ -76,6 +79,7 @@ public final class CandidateCell: NSView {
         var width = CellMetrics.numberLeading + numberWidth + CellMetrics.numberToCandidate + candidateWidth
         if note != nil { width += CellMetrics.candidateToName + nameWidth }
         width += CellMetrics.trailing
+        contentWidth = width
         super.init(frame: NSRect(x: 0, y: 0, width: width, height: CellMetrics.capsuleHeight))
         setAccessibilityElement(true)
         setAccessibilityRole(.button)

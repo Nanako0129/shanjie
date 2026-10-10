@@ -38,7 +38,9 @@ public protocol CandidatePanel: AnyObject {
     /// `lineRect`: where the composition's line is (s3b2 section 2.3), `nil` if unknown.
     /// `appearance`: the client's (s3b2 section 10), `nil` for the system's.
     /// `glassTint`: the 0...1 slider value (settings-window section 2.3), applied on every show, 0 included.
-    func show(_ candidates: [String], notes: [String?], selected: Int, columns: Int, first: Int, total: Int,
+    /// `vertical`: the core's `candidate_vertical` of this output (candidate-vertical contract section 2.2): the single
+    /// column of up to nine rows; `columns` is 0 then. The panel draws what it is told and reads no setting.
+    func show(_ candidates: [String], notes: [String?], selected: Int, columns: Int, first: Int, total: Int, vertical: Bool,
               lineRect: NSRect?, appearance: NSAppearance?, glassTint: Double)
     func hide()
     /// Re-applies the tint to what is on screen now, without a new `show` (the slider moved while the panel is up).
@@ -143,6 +145,20 @@ public final class MemoryGlassTintStore: GlassTintStore {
     public init(_ glassTint: Double? = nil) { self.glassTint = glassTint }
 }
 
+/// Where the "候選窗方向" choice is kept (docs/contracts/candidate-vertical.md section 2.1): `true` is the vertical window, `nil`
+/// means never set, which is horizontal. Same arrangement as `GlassTintStore`.
+@MainActor
+public protocol CandidateOrientationStore: AnyObject {
+    var candidateVertical: Bool? { get set }
+}
+
+/// The in-memory CandidateOrientationStore.
+@MainActor
+public final class MemoryCandidateOrientationStore: CandidateOrientationStore {
+    public var candidateVertical: Bool?
+    public init(_ candidateVertical: Bool? = nil) { self.candidateVertical = candidateVertical }
+}
+
 /// Process-wide state: the single engine (about 240 MB each, so never two at once), the single
 /// candidate panel and the page it shows, and which session owns the composition (section 5).
 /// All calls happen on the main thread.
@@ -178,6 +194,13 @@ public final class Shell {
     /// as a UTC date, read once at init. `nil` (file or field missing or unreadable) means no line.
     let acgDataDate: String?
     private let glassTintStore: GlassTintStore
+    private let candidateOrientationStore: CandidateOrientationStore
+    /// The candidate window's orientation for windows that open from now on (default horizontal); sent to every engine
+    /// `build()` makes and on every change (candidate-vertical contract section 2.1).
+    public private(set) var candidateVertical = false
+    /// Whether the candidate window on screen is the vertical one: the `vertical` of the last output that showed candidates
+    /// (false once the panel hid). It decides whether Page Up / Down go to the core (section 2.2).
+    private(set) var verticalOpen = false
     /// Posted (object: this shell) after any setting changes, from the menu or the settings window;
     /// the window's model re-reads on it (settings-window section 2.2).
     public static let didChangeSettings = Notification.Name("ShanjieShellDidChangeSettings")
@@ -234,12 +257,13 @@ public final class Shell {
     /// `abbreviationStore`: the abbreviation switch (V3 section 12.1). Required, like `predictionStore`.
     /// `acgPackStore`: the ACG word pack switch (acg-pack contract A.2). Required, like `demoteStore`.
     /// `glassTintStore`: the candidate glass tint (settings-window section 2.3). Required, like `demoteStore`.
+    /// `candidateOrientationStore`: the candidate window's orientation (candidate-vertical contract section 2.1). Required, like `glassTintStore`.
     /// `punctuationTable`: Apple's punctuation candidate table (s3e); tests pass another path.
     /// `punctuationNames`: Apple's punctuation names (s3f); tests pass another path.
     public init(resources: URL, panel: CandidatePanel, isSecureInput: @escaping () -> Bool,
                 layoutStore: LayoutStore, learningDirectory: URL?, dialogs: LearningDialogs,
                 demoteStore: DemoteStore, predictionStore: PredictionStore, abbreviationStore: AbbreviationStore, acgPackStore: AcgPackStore,
-                glassTintStore: GlassTintStore,
+                glassTintStore: GlassTintStore, candidateOrientationStore: CandidateOrientationStore,
                 punctuationTable: URL = PunctuationTable.systemURL,
                 punctuationNames: URL = PunctuationNames.systemURL) {
         self.resources = resources
@@ -268,6 +292,8 @@ public final class Shell {
         acgDataDate = Shell.readAcgDataDate(resources.appendingPathComponent("packs/acg.json"))
         self.glassTintStore = glassTintStore
         glassTint = glassTintStore.glassTint ?? 0
+        self.candidateOrientationStore = candidateOrientationStore
+        candidateVertical = candidateOrientationStore.candidateVertical ?? false
         acgPackOn = acgPackStore.acgPack ?? true
         // The preference is read before the one engine is built (about 240 MB): building first
         // and switching after would build twice.
@@ -303,6 +329,10 @@ public final class Shell {
 
     func applyAbbreviation(_ on: Bool) {
         if let o = owner { o.applyAbbreviation(on) } else { dropOnFailure(setAbbreviation(on)) }
+    }
+
+    func applyCandidateVertical(_ on: Bool) {
+        if let o = owner { o.applyCandidateVertical(on) } else { dropOnFailure(setCandidateVertical(on)) }
     }
 
     /// No session to ask: a failed core call is logged and the composition dropped, as `Session.fail` does.
@@ -358,6 +388,15 @@ public final class Shell {
         return engine?.setAbbreviation(on)
     }
 
+    /// The settings window's choice (candidate-vertical contract section 2.1): stored, and sent to the engine, which applies it
+    /// to the next window that opens. An open window keeps its orientation, so the snapshot is not shown again.
+    func setCandidateVertical(_ on: Bool) -> CoreResult? {
+        candidateVertical = on
+        candidateOrientationStore.candidateVertical = on
+        defer { changed() }
+        return engine?.setCandidateVertical(on)
+    }
+
     /// The menu's choice (acg-pack contract A.2): the pack is part of the lexicon, so like a layout change the
     /// composition is committed and the engine rebuilt; the choice is stored. Same value: nothing happens.
     func setAcgPack(_ on: Bool) {
@@ -400,6 +439,10 @@ public final class Shell {
         if case .failed(let c) = e.setAbbreviation(abbreviationOn) {
             Log.shell.error("shanjie_engine_set_abbreviation failed, code \(c)")
         }
+        // Same for the candidate window's orientation (candidate-vertical contract section 2.2).
+        if case .failed(let c) = e.setCandidateVertical(candidateVertical) {
+            Log.shell.error("shanjie_engine_set_candidate_vertical failed, code \(c)")
+        }
         if case .failed(let c) = e.setProfile(profile) {
             Log.shell.error("shanjie_engine_set_profile failed, code \(c)")
         }
@@ -440,16 +483,18 @@ public final class Shell {
         return engine?.setProfile(p)
     }
 
-    func showCandidates(_ list: [String], selected: Int, columns: Int, first: Int, total: Int, lineRect: NSRect?,
+    func showCandidates(_ list: [String], selected: Int, columns: Int, first: Int, total: Int, vertical: Bool, lineRect: NSRect?,
                         appearance: NSAppearance?) {
         // Only an exact punctuation mark has a name: a word candidate is never a key of the table.
         let notes = list.map { names[$0] }
-        panel.show(list, notes: notes, selected: selected, columns: columns, first: first, total: total,
+        verticalOpen = vertical
+        panel.show(list, notes: notes, selected: selected, columns: columns, first: first, total: total, vertical: vertical,
                    lineRect: lineRect, appearance: appearance, glassTint: glassTint)
     }
 
     func hideCandidates() {
         lineCache = nil
+        verticalOpen = false
         panel.hide()
     }
 
@@ -489,6 +534,11 @@ public final class Session {
         guard shell.engine != nil else { return false }
         guard event == nil || event?.type == .keyDown else { return false }
         if claim() { applyProfile() }
+        // candidate-vertical contract section 2.2: Page Up / Down reach the core only while the vertical window is on screen
+        // and no modifier (Shift, Control, Option, Command, Caps Lock) is held; otherwise they are keys outside the tables.
+        if let event, shell.verticalOpen, KeyMap.modifiers(event.modifierFlags) == 0, let kind = KeyMap.pageKeys[event.keyCode] {
+            return send(ShanjieKey(kind: kind, ch: 0, modifiers: 0))
+        }
         guard let event,
               let key = KeyMap.translate(keyCode: event.keyCode, flags: event.modifierFlags)
         else {
@@ -579,6 +629,11 @@ public final class Session {
         }
     }
 
+    /// The orientation setting: it only affects windows that open later, so only a failure needs handling here.
+    func applyCandidateVertical(_ on: Bool) {
+        if case .failed(let c)? = shell.setCandidateVertical(on) { _ = fail(c) }
+    }
+
     /// The profile for this client's app, from its bundle ID (looked up, never kept).
     private func applyProfile() {
         let chat = client.bundleIdentifier.map { Shell.chatApps.contains($0) } ?? false
@@ -648,7 +703,7 @@ public final class Session {
                 shell.lineCache = (o.preedit, cursor, rect)
             }
             shell.showCandidates(o.candidates, selected: o.selected, columns: o.columns, first: o.first, total: o.total,
-                                 lineRect: rect, appearance: client.appearance)
+                                 vertical: o.vertical, lineRect: rect, appearance: client.appearance)
         }
     }
 

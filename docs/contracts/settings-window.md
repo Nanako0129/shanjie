@@ -47,11 +47,12 @@
 |---|---|---|
 | 鍵盤 | 鍵盤排列：標準／倚天（選擇器） | `Shell.selectLayout`，和選單相同 |
 | 選字 | 即時預測、可省略韻母（緊接在即時預測之後；即時預測關閉時反灰，勾選狀態仍顯示）、避免把敏感字詞排在前面、動漫與遊戲詞（開關） | `Shell` 現有的 setter，和選單相同 |
+| 外觀 | 候選窗方向（分段控制「橫排／直排」，放在玻璃深淺之前；下一次出現的候選窗用新的方向，開著的不變；`docs/contracts/candidate-vertical.md` §2.1） | UserDefaults 鍵 `candidateVertical`（Bool，沒設過是 false＝橫排）；`Shell.applyCandidateVertical`，核心每次建 engine 與設定改變時收到 |
 | 外觀 | 候選窗玻璃深淺（滑桿 0–1，兩端是 Syrtis 的圖示：左邊中空的 `rectangle.on.rectangle`、右邊實心的 `rectangle.fill.on.rectangle.fill`，只是裝飾、VoiceOver 不讀） | UserDefaults 鍵 `glassTint`（Double，沒設過是 0） |
 | 選字記憶 | 不要備份選字記憶（開關）、清除選字記憶…（按鈕，走現有的確認視窗） | `Shell` 現有的路徑 |
 
 - **狀態列**：「選字記憶」區塊最上面只顯示「學習已暫停（安全輸入）」（`IsSecureEventInputEnabled`，開窗時與每次重新讀取時查）與「選字記憶無法存檔」（`Shell` 的 learningUnavailable）。「學習已暫停（此 App）」取自某一個輸入 session 的 client，設定視窗不屬於任何 session，所以只留在選單，不在視窗顯示。
-- **同步**：`Shell` 在任何設定改變時發一個程序內通知，設定視窗收到就重新讀取 `Shell` 已快取的設定值（排列、四個開關、玻璃深淺）。外部狀態（安全輸入、備份旗標、無法存檔）沒有通知，只在開窗與視窗成為 key window 時讀；視窗自己改備份旗標或清除之後也立刻重讀。選單每次打開時本來就會重讀，不需要改。
+- **同步**：`Shell` 在任何設定改變時發一個程序內通知，設定視窗收到就重新讀取 `Shell` 已快取的設定值（排列、四個開關、玻璃深淺、候選窗方向）。外部狀態（安全輸入、備份旗標、無法存檔）沒有通知，只在開窗與視窗成為 key window 時讀；視窗自己改備份旗標或清除之後也立刻重讀。選單每次打開時本來就會重讀，不需要改。
 - **之後的重構（不在這一片）**：用 `@Observable` 的 Shell 狀態取代 `SettingsModel` 的鏡像與通知。
 
 ### 2.3 玻璃深淺

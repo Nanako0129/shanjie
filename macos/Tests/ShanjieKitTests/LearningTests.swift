@@ -19,7 +19,7 @@ final class LearningTests: XCTestCase {
 
     private func makeShell(gate: Gate = Gate(), learning: URL? = nil, dialogs: FakeDialogs = FakeDialogs()) -> Shell {
         let shell = Shell(resources: resources, panel: FakePanel(), isSecureInput: { gate.secure },
-                          layoutStore: MemoryLayoutStore(), learningDirectory: learning, dialogs: dialogs, demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore())
+                          layoutStore: MemoryLayoutStore(), learningDirectory: learning, dialogs: dialogs, demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore())
         XCTAssertNotNil(shell.engine)
         return shell
     }
@@ -172,7 +172,7 @@ final class LearningTests: XCTestCase {
         let dialogs = FakeDialogs()
         let shell = Shell(resources: resources.appendingPathComponent("missing"), panel: FakePanel(),
                           isSecureInput: { false }, layoutStore: MemoryLayoutStore(),
-                          learningDirectory: TestLearning.directory(), dialogs: dialogs, demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore())
+                          learningDirectory: TestLearning.directory(), dialogs: dialogs, demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore())
         XCTAssertNil(shell.engine)
         let c = Controller(shell)
         c.session.perform(.clear)

@@ -38,7 +38,7 @@ const NIHAO: &str = "su3cl3"; // standard layout: ㄋㄧˇ ㄏㄠˇ
 const NI: &str = "ㄋㄧˇ";
 const HAO: &str = "ㄏㄠˇ";
 fn blank(handled: bool) -> Output {
-    Output { handled, commit: String::new(), preedit: String::new(), cursor_utf16: 0, candidates: vec![], selected: None, columns: 0, first: 0, total: 0 }
+    Output { handled, commit: String::new(), preedit: String::new(), cursor_utf16: 0, candidates: vec![], selected: None, columns: 0, first: 0, total: 0, vertical: false }
 }
 /// Independent expectation of the candidate list. `end`: readings end at `ks.len()`; otherwise they start at 0.
 fn expect_cands(ks: &[&str], from_start: bool) -> Vec<String> {

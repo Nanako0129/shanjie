@@ -17,6 +17,8 @@ struct CoreOutput {
     /// Position of `candidates[0]` in the whole list, and the whole list's length (scroll bar).
     var first: Int
     var total: Int
+    /// candidate-vertical contract section 2.2: this output is a vertical candidate window (never the prediction row).
+    var vertical: Bool
 }
 
 /// The result of a core call: an output, or the non-zero C ABI return code (carries no input).
@@ -78,6 +80,14 @@ final class CoreEngine {
 
     /// V3 section 12: whether a symbol typed into an occupied column opens a new unfinished unit (the core's default is
     /// off); returns the snapshot. Sent to every engine `Shell.build()` makes.
+    /// candidate-vertical contract section 2.2: the orientation of the candidate windows that open from now on (the core's
+    /// default is horizontal); an open window keeps its own, so the snapshot equals the last output. Sent to every engine
+    /// `Shell.build()` makes, like `setPrediction`.
+    func setCandidateVertical(_ on: Bool) -> CoreResult {
+        var out: UnsafeMutablePointer<ShanjieOutput>?
+        return Self.take(shanjie_engine_set_candidate_vertical(handle, on ? 1 : 0, &out), out)
+    }
+
     func setAbbreviation(_ on: Bool) -> CoreResult {
         var out: UnsafeMutablePointer<ShanjieOutput>?
         return Self.take(shanjie_engine_set_abbreviation(handle, on ? 1 : 0, &out), out)
@@ -145,7 +155,8 @@ final class CoreEngine {
             selected: Int(o.candidate_selected),
             columns: Int(o.candidate_columns),
             first: Int(o.candidate_first),
-            total: Int(o.candidate_total)
+            total: Int(o.candidate_total),
+            vertical: o.candidate_vertical != 0
         ))
     }
 }
