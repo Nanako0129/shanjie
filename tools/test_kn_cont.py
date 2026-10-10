@@ -28,7 +28,7 @@ class KnCont(unittest.TestCase):
         cls.tmp = tempfile.TemporaryDirectory()
         for name, c in (("counts-200000.pkl", WIKI), ("counts-colloquial3.pkl", COLL)):
             pickle.dump(c, open(os.path.join(cls.tmp.name, name), "wb"))
-        build_lm.WORK = cls.tmp.name
+        cls.old_work, build_lm.WORK = build_lm.WORK, cls.tmp.name
         cls.cls = build_lm.variant_classes(BY_READING)
         data = build_lm.build(cls.cls)[0]
         cls.data = data
@@ -38,13 +38,14 @@ class KnCont(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
+        build_lm.WORK = cls.old_work
         cls.tmp.cleanup()
 
     def side(self, theta=1, bi=None, name="side.sjkn"):
         vocab = L.BigramLM(self.path, classes=False).vocab
         n = kn_cont.continuation(self.bi if bi is None else bi, self.cls, theta, vocab)
         p = os.path.join(self.tmp.name, name)
-        open(p, "wb").write(kn_cont.side_bytes(self.path, vocab, n, self.cls, theta))
+        open(p, "wb").write(kn_cont.side_bytes(self.path, n, self.cls, theta))
         return p
 
     def load(self, beta, theta=1):
@@ -126,6 +127,8 @@ class KnCont(unittest.TestCase):
         for kw in (dict(kn_beta=1.0), dict(kn_classes=self.cls), dict(kn_beta=1.5, kn_classes=self.cls)):
             with self.assertRaises(ValueError, msg=str(kw)):
                 L.BigramLM(self.path, classes=False, kn=good, **kw)
+        with self.assertRaises(ValueError, msg="beta without kn"):
+            L.BigramLM(self.path, classes=False, kn_beta=1.0, kn_classes=self.cls)
 
     def test_predecessor_filters(self):
         """起床、起牀 同一類，都接 他：N(他) 只算一次（once）；詞彙外的前文不算（build 也丟掉那些二元組）。"""

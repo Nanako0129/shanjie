@@ -68,6 +68,8 @@ class BigramLM:
             self.ctx[v] = (t, 1.0 - kept_sum / t, entries)
         self.kn = None
         sha = hashlib.sha256(b).digest() if kn is not None or classes else None
+        if kn is None and (kn_beta is not None or kn_classes is not None):
+            raise ValueError("kn_beta / kn_classes given without kn")
         if kn is not None:
             if kn_classes is None or kn_beta is None or not 0.0 <= kn_beta <= 1.0:
                 raise ValueError("kn needs kn_classes and 0 <= kn_beta <= 1")

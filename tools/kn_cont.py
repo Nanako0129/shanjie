@@ -26,15 +26,17 @@ def continuation(bi, cls, theta, vocab):
     """詞 -> N（只含代表成員與不在類裡的詞；非代表成員由 side_bytes 取代表的）。"""
     once = lambda w: w not in cls or cls[w][0] == w
     known = set(vocab)
-    seen = {}
-    for (v, w), c in bi.items():
+    n = {}
+    for (v, w), c in bi.items():   # 每個 (v, w) 在 bi 裡只出現一次，所以直接計數
         if c >= theta and v != "<s>" and v in known and once(v):
-            seen.setdefault(w, set()).add(v)
-    return {w: len(vs) for w, vs in seen.items()}
+            n[w] = n.get(w, 0) + 1
+    return n
 
 
-def side_bytes(model_path, vocab, n, cls, theta):
+def side_bytes(model_path, n, cls, theta):
+    """詞彙與雜湊都取自 model_path 這一個檔，N 陣列一定對齊它。"""
     raw = open(model_path, "rb").read()
+    vocab = L.BigramLM(model_path, classes=False).vocab
     rep = lambda w: cls[w][0] if w in cls else w
     vals = [0, 0] + [n.get(rep(w), 0) for w in vocab[2:]]
     return MAGIC + struct.pack("<I", len(vocab)) + hashlib.sha256(raw).digest() + struct.pack("<I", theta) \
@@ -49,7 +51,7 @@ def main():
     a = ap.parse_args()
     vocab = L.BigramLM(a.lm, classes=False).vocab
     _, bi, cls = build_lm.merged_counts()
-    data = side_bytes(a.lm, vocab, continuation(bi, cls, a.theta, vocab), cls, a.theta)
+    data = side_bytes(a.lm, continuation(bi, cls, a.theta, vocab), cls, a.theta)
     V = len(vocab)
     np1 = [x + 1 for x in struct.unpack_from(f"<{V}I", data, 48)]
     zero = sum(1 for x in np1[2:] if x == 1)
