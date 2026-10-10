@@ -1,0 +1,97 @@
+{
+ "categories": {
+  "Category:台灣公司": {
+   "exists": true,
+   "pages": 956,
+   "subcategories": 18
+  },
+  "Category:台灣手搖茶飲品牌": {
+   "exists": true,
+   "pages": 24,
+   "subcategories": 0
+  },
+  "Category:台灣電子商務網站": {
+   "exists": false
+  },
+  "Category:台灣餐飲公司": {
+   "exists": true,
+   "pages": 38,
+   "subcategories": 5
+  },
+  "Category:臺灣的大學": {
+   "exists": false
+  }
+ },
+ "dropped": {
+  "excluded_by_names_collisions_tsv": 0,
+  "in_lexicon": 317,
+  "list_article": 16,
+  "not_han_or_length": 48,
+  "nsi_no_usable_name": 43,
+  "simplified": 1,
+  "title_not_han": 75,
+  "type_c_dropped": 2,
+  "unreadable": 1
+ },
+ "files": {
+  "names-add.tsv": {
+   "bytes": 133024,
+   "lines": 1631,
+   "sha256": "f5565235f156e38833844f9df7a6f10c30ff1177ec55b0e81410735ecd0db826"
+  },
+  "names-sources.tsv": {
+   "bytes": 120606,
+   "lines": 1744,
+   "sha256": "2151c30148278805d45a1f81304106cc0345d190b0dd2266fdfcf1e65c56585e"
+  }
+ },
+ "moe": {
+  "high.csv": {
+   "rows": 506,
+   "sha256": "826979ec988a0a941c6a71d3570c3b7efe16fea7b03e7a9dcb2ea8090eba7ca1",
+   "year": 115
+  },
+  "u1_new.csv": {
+   "rows": 139,
+   "sha256": "2cf2c5c6c2ce9cad6c09f842a89714b011213a7af67b6d08349b02778e2cd166",
+   "year": 115
+  }
+ },
+ "nsi_commit": "ac22bfd445b729b567070c1b0900be6d0c6ef924",
+ "nsi_taiwan_brands": {
+  "amenity/bank": 34,
+  "amenity/cafe": 48,
+  "amenity/fast_food": 33,
+  "amenity/fuel": 6,
+  "amenity/pharmacy": 5,
+  "amenity/restaurant": 53,
+  "shop/bakery": 8,
+  "shop/beverages": 0,
+  "shop/clothes": 10,
+  "shop/convenience": 4,
+  "shop/cosmetics": 3,
+  "shop/department_store": 0,
+  "shop/electronics": 4,
+  "shop/mall": 0,
+  "shop/mobile_phone": 1,
+  "shop/supermarket": 11,
+  "shop/tea": 0
+ },
+ "rows": 1631,
+ "sources": {
+  "category": 651,
+  "manual": 1,
+  "nsi": 141,
+  "nsi-wikipedia": 87,
+  "school": 596,
+  "school-abbr": 267
+ },
+ "unresolved_collision_readings": 0,
+ "version": "nsiac22bfd4-moe115.115-f5565235",
+ "wiki_revisions": {
+  "max": 94910703,
+  "min": 700780,
+  "pages": 1304
+ },
+ "words": 1622
+}

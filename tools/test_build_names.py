@@ -330,6 +330,21 @@ class Build(unittest.TestCase):
         self.assertEqual(self.manifest["nsi_taiwan_brands"]["amenity/cafe"], 5)
         self.assertEqual(self.manifest["dropped"]["title_not_han"], 1)
 
+    def test_list_articles_in_categories_are_not_names(self):
+        """2026-10-11 抽樣：分類成員裡的「…列表」條目（臺灣鐵道公司組織列表）不是名字，不收。"""
+        pages, subs = CATEGORY["Category:台灣手搖茶飲品牌"]
+        PARSE["台灣機車公司列表"] = ("台灣機車公司列表", "台灣機車公司列表", 77)
+        CATEGORY["Category:台灣手搖茶飲品牌"] = (pages + ["台灣機車公司列表"], subs)
+        try:
+            with tiny_simplified():
+                self.build()
+        finally:
+            CATEGORY["Category:台灣手搖茶飲品牌"] = (pages, subs)
+            del PARSE["台灣機車公司列表"]
+        self.assertNotIn("台灣機車公司列表", self.words)
+        self.assertNotIn("台灣機車公司", self.words, "the company suffix is not stripped off a list title")
+        self.assertEqual(self.manifest["dropped"]["list_article"], 1)
+
     def test_company_suffix_is_only_removed_for_category_sources(self):
         items = json.loads(fixture("nsi-cafe.json"))
         items["items"][0]["tags"].update({"name:zh": "五十嵐有限公司", "brand:wikidata": ""})

@@ -1,12 +1,10 @@
 name-suggestion-index (NSI), https://github.com/osmlab/name-suggestion-index
-Licence of the whole repository including its data (LICENSE.md): BSD-3-Clause.
+Licence of the whole repository including its data: BSD-3-Clause.
+Copied verbatim from LICENSE.md at commit ac22bfd445b729b567070c1b0900be6d0c6ef924 (the nsi_commit recorded in data/lexicon/names.json).
 
-Copyright notice, to be copied verbatim from LICENSE.md at the NSI commit recorded in data/lexicon/names.json ("nsi_commit")
-when the lexicon is built (NOT YET FILLED IN: the build machine had no network when this file was written):
+## BSD 3-Clause
 
-    Copyright (c) <as printed in LICENSE.md at that commit>
-
-BSD 3-Clause text (the conditions of the licence, unchanged):
+Copyright 2026, name-suggestion-index contributors
 
 Redistribution and use in source and binary forms, with or without modification, are permitted provided that the following conditions are met:
 

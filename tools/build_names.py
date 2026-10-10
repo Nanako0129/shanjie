@@ -174,6 +174,9 @@ def moe_names(raw):
     return year, [n for y, n in rows if y == year]
 
 
+LIST_SUFFIX = "列表"   # 分類成員裡的列表條目（臺灣鐵道公司組織列表、台灣機車公司列表），2026-10-11 抽樣後加的過濾
+
+
 def strip_company(name):
     """去掉公司後綴（只用在分類來源）；剩下不到兩個字就不去。"""
     for s in COMPANY_SUFFIXES:
@@ -315,6 +318,9 @@ def build(api, nsi_commit, manual_tsv=MANUAL, readings_tsv=READINGS_TSV, collisi
     revs = set()
 
     def admit(name, kind, source, qid=None, company=False):
+        if company and name.endswith(LIST_SUFFIX):    # 契約 §3 第 2 項的抽樣（2026-10-11）：分類裡的「…列表」條目不是名字
+            dropped["list_article"] += 1
+            return
         name = strip_company(name) if company else name
         if not bap.HAN.fullmatch(name):
             dropped["not_han_or_length"] += 1
