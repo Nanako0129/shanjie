@@ -302,3 +302,23 @@ fn unparsable_pack_is_a_parse_error() {
     let err = String::from_utf8(out.stderr).unwrap();
     assert!(!out.status.success() && err.contains("cannot parse the lexicon in") && err.contains("data/lexicon"), "{err}");
 }
+
+/// kn-core: the CLI turns the Kneser-Ney term on when a kn.sjkn sits beside the model and prints lm_eval.py's `+kn:` tag;
+/// `--no-kn` turns it off (the toy model of eval/golden/kn-tiny, the real lexicon).
+#[test]
+fn kn_side_file_beside_the_model_is_announced_and_can_be_turned_off() {
+    let root = concat!(env!("CARGO_MANIFEST_DIR"), "/..");
+    let (lm, rows) = (format!("{root}/eval/golden/kn-tiny/bigram.sjlm"), std::env::temp_dir().join(format!("shanjie-kn-rows-{}.txt", std::process::id())));
+    std::fs::write(&rows, "|他占|ㄊㄚ ㄓㄢˋ\n").unwrap();
+    let args = |extra: &[&'static str]| {
+        let mut a = vec!["--lm", lm.as_str(), "--profile", "chat", "--rows", rows.to_str().unwrap(), "--name", "t"];
+        a.extend(extra);
+        run(&a)
+    };
+    let side = std::fs::read(format!("{root}/eval/golden/kn-tiny/kn.sjkn")).unwrap();
+    let tag = format!("+kn:{}:θ1:β1", &core::eval::sha256_hex(&side)[..8]);
+    let (on, off) = (args(&[]), args(&["--no-kn"]));
+    std::fs::remove_file(&rows).unwrap();
+    assert!(on.starts_with(&format!("## t  lm-chat{tag}  {{'n': 1,")), "{on}");
+    assert!(off.starts_with("## t  lm-chat  {'n': 1,"), "{off}");
+}

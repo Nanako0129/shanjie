@@ -29,6 +29,10 @@
  *    keeps no app identity. A profile set before any LM is loaded is remembered and applies once loaded.
  *  - shanjie_engine_load_lm needs classes.sjc (the word-class term, docs/contracts/s2k-word-classes.md) in
  *    the same directory as the model file, built for that model; without it the load fails with 3.
+ *  - shanjie_engine_load_lm also reads an optional kn.sjkn (Kneser-Ney side file, docs/contracts/kn-core.md) in
+ *    the same directory. No such file: nothing changes. A file that exists but cannot be read, or does not
+ *    match the model (magic, size, SHA-256, header values), fails the load with 3, never silently ignored.
+ *    When it is present and valid it changes the scoring of every vocabulary word. The shipped app has none.
  *  - Load the LM once at startup while the composition is empty: loading does not recompute the
  *    current display; the next change to the composition decodes with the new model.
  *  - shanjie_engine_reset (both modes) and the automatic reset after code 4 clear the composition only;

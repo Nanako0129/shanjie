@@ -181,6 +181,10 @@ jobs:
       - name: model-v5 build scripts (Python)
         run: python3 -W ignore -m unittest tools/test_build_lm.py experiments/s2/test_extra_lexicon.py experiments/model-v5/test_compare_counts.py experiments/model-v5/test_count_lexicon.py
 
+      # docs/contracts/kn-core.md: the SJKN0002 writer and lm.py reader, and the kn-tiny golden is the generator's current output.
+      - name: Kneser-Ney side file (Python)
+        run: python3 -W ignore -m unittest tools/test_kn_cont.py
+
   # The Swift input method (docs/contracts/s3b.md section 3): build the ad-hoc
   # app, the Swift tests through the real core and model, the bundled
   # selftest, and acceptance checks 2, 3 and 6 of contract section 10.
