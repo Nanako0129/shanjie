@@ -51,6 +51,25 @@ class ExtraLexicon(unittest.TestCase):
         self.assertGreater(bi[("<s>", WORD)], 0.99)
         self.assertLess(bc.expected_counts(self.lex(), WORD)[0].get(WORD, 0), 0.01)
 
+    def test_additive_counts_keep_the_plain_counts(self):
+        """契約 §8：有詞包時，一般的計數等於沒有詞包時的計數，詞包詞與含它的二元組另外加上。"""
+        text = "我說" + WORD + "很好"
+        bc._init(False, True)
+        plain_uni, plain_bi = bc.run_expected(text)
+        self.assertEqual((plain_uni, plain_bi), bc.expected_counts(self.lex(), text))
+        bc._init(False, True, extra_lexicons=(self.extra,))
+        self.assertEqual(bc._W["pack"], {WORD})
+        uni, bi = bc.run_expected(text)
+        for w, e in plain_uni.items():
+            self.assertAlmostEqual(uni[w], e, places=9)
+        for k, e in plain_bi.items():
+            self.assertAlmostEqual(bi[k], e, places=9)   # lex0 的二元組都不含詞包詞，原樣保留
+        self.assertGreater(uni[WORD], 0.99)
+        # 詞包詞的每一次出現各有一個後繼與一個前導，期望次數加總等於它的單詞次數
+        self.assertAlmostEqual(sum(e for (a, b), e in bi.items() if a == WORD), uni[WORD], places=6)
+        self.assertAlmostEqual(sum(e for (a, b), e in bi.items() if b == WORD), uni[WORD], places=6)
+        self.assertEqual(set(uni) - set(plain_uni), {WORD})
+
     def test_option_given_twice(self):
         second = os.path.join(self.tmp.name, "second.tsv")
         open(second, "w", encoding="utf-8").write("ㄇㄧㄠ-ㄏㄚ-ㄌㄨㄛ\t喵哈囉\t-1.0\ttest\n")

@@ -38,7 +38,7 @@ def main(argv=None):
                 if len(run) < 2:
                     continue
                 if expected:
-                    r = bc.expected_counts(lex, run)
+                    r = bc.run_expected(run)
                     if r is None:
                         continue
                     runs += 1
