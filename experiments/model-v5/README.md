@@ -7,7 +7,7 @@
 | 檔 | `S2_WORK` | `--extra-lexicon` | 產出 |
 |---|---|---|---|
 | `repro.bat` | `work\modelv5-repro` | 無 | 口語與維基計數、`bigram-repro.sjlm` |
-| `count.bat` | `work\modelv5` | `data\packs\acg-add.tsv` | 同上、`bigram-v5-nofp.sjlm`（尚未加指紋） |
+| `count.bat` | `work\modelv5` | 計數詞表 `acg-count.tsv`（`count_lexicon.py` 由 `data\packs\acg-add.tsv` 產生，§9） | 同上、`bigram-v5-nofp.sjlm`（尚未加指紋） |
 
 先跑 `repro.bat` 做重現核對，全部成立才跑 `count.bat`（A2 已合併、本分支已 rebase、`acg-add.tsv` 的 SHA-256 等於 main 的）。口語訓練檔直接用 model-v3 的 `%M3%\tune\colloquial-train.txt`，不重產。
 
@@ -15,16 +15,18 @@
 
 批次檔開頭會把這些檔的 SHA-256 寫進 `%S2_WORK%\inputs.sha256`。model-v3 的值取自 model-v3 建置那個 commit 的檔案與 188 `work\s2f4` 的紀錄。除了 `acg-add.tsv`，每一列都必須相同。
 
-| 輸入 | model-v3 | repro | count |
+2026-10-10 的值（188 `work\modelv5-repro\inputs.sha256` 與最終那次 `work\modelv5\inputs.sha256`）。model-v3 欄：重現核對重建的模型和 model-v3 逐位元組相同（`5c7d5a94…`），所以和 repro 欄相同。
+
+| 輸入 | model-v3 | repro | count（最終） |
 |---|---|---|---|
-| `zhwiki-20261001-pages-articles.xml.bz2` | | | |
-| `colloquial-train.txt` | | | |
-| `synth.txt` | | | |
-| `mcbpmf-data.txt` | | | |
-| `overlay-add.tsv` | | | |
-| `TWVariants.txt` | `245b94eb…` | | |
-| `STCharacters.txt` | | | |
-| `acg-add.tsv` | （無） | （不用） | 等於 main 的 |
+| `zhwiki-20261001-pages-articles.xml.bz2` | 同 repro | `5db9052e…7e2f` | 同 repro |
+| `colloquial-train.txt` | 同 repro | `3e833d06…b4db` | 同 repro |
+| `synth.txt` | 同 repro | `bec7a6a2…99f1` | 同 repro |
+| `mcbpmf-data.txt` | 同 repro | `0deae7b7…b7ac` | 同 repro |
+| `overlay-add.tsv` | 同 repro | `348979c8…547a` | 同 repro |
+| `TWVariants.txt` | `245b94eb…` | `245b94eb…cb86` | 同 repro |
+| `STCharacters.txt` | 同 repro | `a0ca1601…582b` | 同 repro |
+| 計數詞表 `acg-count.tsv` | （無） | （不用） | `1c4aa6cc…058f`（`count_lexicon.py` 對 `data/packs/acg-add.tsv`、`acg-collisions.tsv`、`collision-readings-v5.txt` 的輸出；這三個檔改了就會不同） |
 
 ## 重現核對（`repro.bat` 的產出對 model-v3）
 
@@ -42,4 +44,9 @@
 
 ## 之後
 
-`count.bat` 的 `bigram-v5-nofp.sjlm` 交給 main 加指紋、重新分群與 `build_classes.py`（§2.5 步驟 3 後半），這些不在批次檔裡。
+`count.bat` 的 `bigram-v5-nofp.sjlm` 交給 main 加指紋（私有流程），再建詞類，這些不在批次檔裡：
+
+1. 分群（188）：`S2K_COUNTS=work\modelv5`、`S2K_OUT` 用新的資料夾（不能是 `work\s2k`，`cluster.py` 會擋），`python experiments\s2-classes\cluster.py --N 40000 --K 512 --keep-from %USERPROFILE%\.cache\shanjie\work\s2k`（契約 §9：舊詞沿用 classes-v2 的類別）。2026-10-10 的輸出 `cls-40000-512.npz` `af637997…`。
+2. `tools/build_classes.py --edges <S2K_OUT>\edges.npz --cls <S2K_OUT>\cls-40000-512.npz --lm <加過指紋的模型> --out classes.sjc`（Mac）。
+
+每一批（計數、分群）在 188 都在 8 小時內跑完（最長的計數約 1 小時，從排程到寫完的時間）；記憶體沒有量（契約 §3.5 的 48 GB 上限沒有核對）。

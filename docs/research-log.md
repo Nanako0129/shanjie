@@ -2453,6 +2453,13 @@ PR #90 的審查意見逐項處理。
   結論不變：改對、改壞的數量都沒有動。
 - 沒有一列靠調參數修。
 
+## 2026-10-10：設定視窗的第三、四輪實機（v0.4.0 前）
+
+- 滑桿兩端：使用者要 Syrtis 那樣的圖示（「左邊應該是中空的」）。放進 `Slider` 的 `minimumValueLabel`／`maximumValueLabel` 時，在分組的 `Form` 裡 `square.on.square` 也畫成實心；照 Syrtis（`GlassTintControl.swift`）改成滑桿兩旁的 `HStack`，左 `rectangle.on.rectangle`、右 `rectangle.fill.on.rectangle.fill`，`.secondary` 前景。
+- 背景：Liquid Glass（`NSGlassEffectView`）對設定視窗太透，使用者要較平的玻璃，換成 `NSVisualEffectView` 的 `.popover`（看系統清單挑的，沒有量測）。
+- 標題列：視窗背景透明、標題列又在玻璃外面，所以幾乎全透（「標題列不要做那麼透」）。照 Syrtis 的設定視窗，玻璃延伸到標題列底下（`.fullSizeContentView`、`titlebarAppearsTransparent`），表單從標題列下面開始（高度用 `NSWindow.frameRect(forContentRect:styleMask:)` 算，`safeAreaRegions = []` 不再重複內縮）。
+- 使用者實機：「設定面板OK」。契約 `docs/contracts/settings-window.md` §2.1 與審查紀錄同步。
+
 ## 2026-10-10：model-v5 的計數、守門與兩次修訂（分支 `feat/model-v5`，契約 `docs/contracts/model-v5.md`）
 
 - **覆蓋量測**（計數之前，契約 §2.1）：
@@ -2512,6 +2519,11 @@ PR #90 的審查意見逐項處理。
   - Discord 調參集（main 在本機跑，只記數字）：聊天 4,209→4,209、書面 4,142→4,143。
   - 固定探針：「大概十分鐘後到」「竈門」「好吧」兩種設定都對；s2r 探針聊天 63、書面 69（同 model-v4）；「宿儺」仍是「素娜」、「那些月繳」仍是「越角」、「摩擦聲」仍是「摩擦生」（已知，契約 §7、§0 更正）。
   - 衝突重驗（扣分 1.0）：沒處置的讀音 5 個（多利姆／多力姆、克蕾亞／克蕾雅、加米／嘉米、愛莉卡／艾莉卡、由里烏斯／尤里烏斯），都不是使用者處置過的，照使用者對同類的決定「一律都留」接受；(c) 193 個，照使用者的決定讓詞包名字排第一，只報數字。
+- **契約 §4「明顯的常用句退步」**：一般集合改壞的 4 句裡，「他說的不可能是真的」→「他說得」（cvtune 書面）是常用句。main 的判斷：只有一句、書面設定、和扣分無關（扣分 1.0），不調分；已在 2026-10-10 逐列回報使用者，使用者之後同意建 Release，沒有另外表示意見。發版說明照實寫這一句。
+- **PR #101 的 /code-review**（15 項）處置：
+  - 修：發版說明的「一般打字不變」改成照實寫；契約的標題、狀態、§2.2「build_lm.py 不改」加更正；`count.bat` 與 README 改成實際流程（計數詞表、`--keep-from`）並填輸入雜湊；`cluster.py` 擋 `--keep-from` 等於輸出資料夾、舊分群沒有類別的詞不再暫時貼進類別（188 重跑輸出仍是 `af637997…`，逐位元組相同）；`--extra-lexicon` 只收 `--expected`、同一個檔給兩次只讀一次；新測試（含 `count_lexicon.py` 的）進 `make test` 與 CI；方法論補一節；詞包 (c) 規則的待辦寫進契約 §9 與 PLAN。
+  - 延後：在計數源頭保證二元組兩端都有單詞（會改變計數，要重建模型）；`build_counts.py` 一個到不了的分支、測試與 `read_tsv` 的重複、`compare_counts.py` 的記憶體；§8、§9 沒有另送 plan-verifier（契約 §6 記了）。
+
 
 ## 2026-10-10：model-v5／classes-v3 的引用與 golden 重產（PR 2，分支 `feat/model-v5-refs`）
 

@@ -28,8 +28,10 @@ def main(argv=None):
     ap.add_argument("out")
     ap.add_argument("paths", nargs="+")
     a = ap.parse_args(argv)
+    if a.extra_lexicon and not a.expected:
+        ap.error("--extra-lexicon 只用在 --expected（加法計數，model-v5 契約 §8）")
     expected, out, paths = a.expected, a.out, a.paths
-    bc._init(False, expected, extra_lexicons=tuple(os.path.abspath(f) for f in a.extra_lexicon))
+    bc._init(False, expected, extra_lexicons=tuple(dict.fromkeys(os.path.abspath(f) for f in a.extra_lexicon)))
     lex, (phrase, char, maxp) = bc._W["lex"], bc._W["conv"]
     uni, bi, tri, runs = collections.Counter(), collections.Counter(), collections.Counter(), 0
     for p in paths:
