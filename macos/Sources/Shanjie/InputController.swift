@@ -440,25 +440,35 @@ final class CandidatePanelAdapter: CandidatePanel {
             shownSize = size
         }
 
-        let screens = NSScreen.screens
-        guard !screens.isEmpty else { return }
-        let line = lineRect ?? lastLine
-        let rectScreen = line.flatMap { r in screens.firstIndex { $0.frame.contains(r.origin) } }
-        let main = NSScreen.main.flatMap { m in screens.firstIndex(of: m) } ?? 0
         // The first row's candidate glyph under the composed text, as the bar does. A first guess for the vertical window.
         let alignOffset = VerticalLayout.sideInset + (cells.first?.candidateMinX ?? 0)
-        let origin = PanelPlacement.topLeft(
-            lineRect: lineRect, lastLine: lastLine, size: size, alignOffset: alignOffset,
-            screens: screens.map(\.visibleFrame), rectScreen: rectScreen, main: main)
-        if let lineRect { lastLine = lineRect }
-        // The separators' thickness is a device pixel of the screen the panel is going to, not of the one it was on.
-        updateSeparators(rows: cells.count, selected: selected, rowWidth: rowWidth, scale: screens[rectScreen ?? main].backingScaleFactor)
+        // The prediction row's height changes with its count: it decides above or below by the nine-row height, so it stays
+        // on one side of the line while it shows.
+        let placement = place(lineRect: lineRect, size: size, alignOffset: alignOffset,
+                              sideHeight: kind == VerticalLayout.predictions ? VerticalLayout.height(rows: VerticalLayout.visibleRows) : nil)
+        // Cells and separators are laid out together even when there is no screen to put the panel on (a device pixel of the
+        // screen it goes to; 1x without one).
+        updateSeparators(rows: cells.count, selected: selected, rowWidth: rowWidth, scale: placement?.scale ?? 1)
+        guard let origin = placement?.origin else { return }
         // No animation: a vertical window never expands or collapses, and a widening is rare (a wider name scrolls in). One
         // setFrame with the final rect anchored at its top-left, so a change of height (the prediction row) is not made in two
         // steps (size, then origin).
         let frame = NSRect(x: origin.x, y: origin.y - size.height, width: size.width, height: size.height)
         if window.frame != frame { window.setFrame(frame, display: true) }
         if !window.isVisible { window.orderFrontRegardless() }
+    }
+
+    /// Where a panel of `size` goes: remembers the client's line (`lastLine`), uses the last one when it gave none, and returns
+    /// the origin `PanelPlacement.topLeft` works out for this size with the scale of the screen it chose; `nil` without a screen.
+    private func place(lineRect: NSRect?, size: NSSize, alignOffset: CGFloat, sideHeight: CGFloat? = nil) -> (origin: NSPoint, scale: CGFloat)? {
+        let screens = NSScreen.screens
+        guard !screens.isEmpty else { return nil }
+        let line = lineRect ?? lastLine
+        if let lineRect { lastLine = lineRect }
+        let list = screens.map { PanelPlacement.Screen(frame: $0.frame, visibleFrame: $0.visibleFrame) }
+        let main = NSScreen.main.flatMap { m in screens.firstIndex(of: m) } ?? 0
+        let origin = PanelPlacement.topLeft(line: line, size: size, sideHeight: sideHeight, alignOffset: alignOffset, screens: list, main: main)
+        return (origin, screens[PanelPlacement.screenIndex(for: line, in: list, main: main)].backingScaleFactor)
     }
 
     /// Puts the separators where `VerticalLayout.separators` says; a view is made only for a gap that has none yet.
@@ -627,16 +637,8 @@ final class CandidatePanelAdapter: CandidatePanel {
             shownTargets = targets
         }
 
-        let screens = NSScreen.screens
-        let line = lineRect ?? lastLine
-        let rectScreen = line.flatMap { r in screens.firstIndex { $0.frame.contains(r.origin) } }
-        let main = NSScreen.main.flatMap { m in screens.firstIndex(of: m) } ?? 0
-        guard !screens.isEmpty else { return }
         let alignOffset = Metrics.barInset + (newCells.first?.candidateMinX ?? 0)
-        let origin = PanelPlacement.topLeft(
-            lineRect: lineRect, lastLine: lastLine, size: size, alignOffset: alignOffset,
-            screens: screens.map(\.visibleFrame), rectScreen: rectScreen, main: main)
-        if let lineRect { lastLine = lineRect }
+        guard let origin = place(lineRect: lineRect, size: size, alignOffset: alignOffset)?.origin else { return }
         let frame = NSRect(x: origin.x, y: origin.y - size.height, width: size.width, height: size.height)
         // Only the selection moved while an expand or collapse runs (autorepeat on the arrow keys):
         // the cells were updated above and the running animation already goes to this frame and these

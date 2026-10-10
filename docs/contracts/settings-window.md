@@ -47,7 +47,7 @@
 |---|---|---|
 | 鍵盤 | 鍵盤排列：標準／倚天（選擇器） | `Shell.selectLayout`，和選單相同 |
 | 選字 | 即時預測、可省略韻母（緊接在即時預測之後；即時預測關閉時反灰，勾選狀態仍顯示）、避免把敏感字詞排在前面、動漫與遊戲詞（開關） | `Shell` 現有的 setter，和選單相同 |
-| 外觀 | 候選窗方向（分段控制「橫排／直排」，放在玻璃深淺之前；下一次出現的候選窗用新的方向，開著的候選窗不變，正在顯示的即時預測列馬上換；`docs/contracts/candidate-vertical.md` §2.1） | UserDefaults 鍵 `candidateVertical`（Bool，沒設過是 false＝橫排）；`Shell.applyCandidateVertical`，核心每次建 engine 與設定改變時收到 |
+| 外觀 | 候選窗方向（分段控制「橫排／直排」，放在玻璃深淺之前；下一次出現的候選窗用新的方向，開著的候選窗不變；核心的 setter 快照會把正在顯示的即時預測列換成新方向，但從設定視窗改時看不到（點設定視窗會讓組字被送出、候選窗收起，是推論、沒量過），所以只有 API 與測試走得到這條；`docs/contracts/candidate-vertical.md` §2.1、§2.4） | UserDefaults 鍵 `candidateVertical`（Bool，沒設過是 false＝橫排）；`Shell.applyCandidateVertical`，核心每次建 engine 與設定改變時收到 |
 | 外觀 | 候選窗玻璃深淺（滑桿 0–1，兩端是 Syrtis 的圖示：左邊中空的 `rectangle.on.rectangle`、右邊實心的 `rectangle.fill.on.rectangle.fill`，只是裝飾、VoiceOver 不讀） | UserDefaults 鍵 `glassTint`（Double，沒設過是 0） |
 | 選字記憶 | 不要備份選字記憶（開關）、清除選字記憶…（按鈕，走現有的確認視窗） | `Shell` 現有的路徑 |
 

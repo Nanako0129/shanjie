@@ -188,7 +188,8 @@ public final class CandidateCells {
         let selectedRow = grid ? selected / newColumns : 0
         // Candidate at global index g sat at old position g - first.
         // The bar and the vertical window both have 0 columns, but their cells differ (a fixed number slot, renumbering), so
-        // the rule they were made under is part of the mode: a bar cell is never reused by a vertical update or the reverse.
+        // the rule they were made under is part of the mode. This is CandidateCells' own contract (cells made under one rule
+        // are never reused under the other), not something the panel relies on: it also clears everything on a change of kind.
         let sameMode = newColumns == columns && renumber == renumbered
         var next: [CandidateCell] = []
         var reused: [Bool] = []
