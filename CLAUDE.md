@@ -50,7 +50,7 @@
 
 - 推 `v*` tag 觸發簽章、公證與發佈，**每次都要使用者當下同意**。
 - **Release 說明與 Latest**（使用者 2026-10-08）：說明進版控、每次手寫；Latest 永遠是輸入法的最新版、資料類 Release 不標。規則與指令只寫在 `docs/releases/README.md`。
-- 網站（shanjie.nyanako.com）手動部署，部署前先問；網站不放下載連結，直到使用者決定公開。
+- 網站（shanjie.nyanako.com）手動部署，部署前先問。使用者 2026-10-10 決定開放下載：網站的「安裝」段落連到 Releases 的 latest 頁與 Homebrew 指令，不寫死某個版本的檔名，發版時不必改網站的下載資訊。
 
 ## 已知的系統問題
 
