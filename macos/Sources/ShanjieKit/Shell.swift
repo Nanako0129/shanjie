@@ -202,7 +202,9 @@ public final class Shell {
     private let candidateOrientationStore: CandidateOrientationStore
     /// The orientation setting (default horizontal); sent to every engine `build()` makes and on every change (candidate-vertical
     /// contract section 2.1). A candidate window already open keeps the orientation it opened with, so a change reaches the
-    /// next window; a prediction row on screen turns at once (section 2.4).
+    /// next window. The core also re-renders a prediction row that is on screen in the new orientation (section 2.4); with the
+    /// setting only in the settings window, where clicking is inferred (not measured) to commit the composition and hide the
+    /// panel, that is reachable through the API and the tests but not observable from the window as shipped.
     public private(set) var candidateVertical = false
     /// The `vertical` value (0, 1 or 2) of what the panel shows now; 0 once it hid. Page Up / Down go to the core only while
     /// it is 1, the vertical candidate window (section 2.2); the vertical prediction row, 2, does not count.
@@ -399,8 +401,10 @@ public final class Shell {
     }
 
     /// The settings window's choice (candidate-vertical contract section 2.1): stored, and sent to the engine, which applies it
-    /// to the next window that opens and to the prediction row at once. An open window keeps its orientation; the snapshot is
-    /// for the caller to show.
+    /// to the next window that opens. An open candidate window keeps its orientation; a prediction row on screen is re-rendered
+    /// in the snapshot, for the caller to show. In the app only the settings window calls this, and a click there is inferred
+    /// (not measured) to commit the composition and hide the panel, so the row case is reachable through the API and the tests
+    /// but not observable from the window as shipped.
     func setCandidateVertical(_ on: Bool) -> CoreResult? {
         candidateVertical = on
         candidateOrientationStore.candidateVertical = on
@@ -643,7 +647,9 @@ public final class Session {
     /// The orientation setting: the snapshot is shown, if this session owns the composition, but only when its `vertical` value
     /// differs from what the panel shows, i.e. a prediction row that turns (candidate-vertical contract section 2.4). An open
     /// candidate window keeps its orientation and nothing is on screen otherwise, so those outputs are not applied again: a
-    /// horizontal composition sees no client or panel call at all.
+    /// horizontal composition sees no client or panel call at all. The row case is reachable only through the API and the
+    /// tests: the setting is only in the settings window, where a click is inferred (not measured) to commit the composition
+    /// and hide the panel first.
     func applyCandidateVertical(_ on: Bool) {
         switch shell.setCandidateVertical(on) {
         case .ok(let o)? where shell.owner === self && o.vertical != shell.shownVertical: apply(o)

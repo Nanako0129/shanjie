@@ -64,6 +64,23 @@ final class VerticalLayoutTests: XCTestCase {
         XCTAssertEqual(b.reused, [false, false, false])
     }
 
+    /// The bar and the vertical window both have 0 columns. A bar cell (own-width number) must not be reused by a vertical
+    /// update (fixed slot), nor the reverse, even without a reset in between.
+    @MainActor
+    func testBarCellsAreNotReusedByTheVerticalRuleOrTheReverse() {
+        let cells = CandidateCells()
+        let list = (0..<9).map { "字\($0)" }
+        let none = [String?](repeating: nil, count: 9)
+        let bar = cells.update(candidates: list, notes: none, selected: 0, first: 0, columns: 0)
+        let vertical = cells.update(candidates: list, notes: none, selected: 0, first: 0, columns: 0, renumber: true)
+        XCTAssertEqual(vertical.reused, Array(repeating: false, count: 9), "nothing carries over from the bar")
+        XCTAssertEqual(Set(vertical.cells.map(\.candidateMinX)).count, 1, "one x for 1-9, as a vertical window needs")
+        XCTAssertEqual(vertical.removed.count, 9)
+        XCTAssertTrue(zip(bar.cells, vertical.cells).allSatisfy { $0 !== $1 })
+        let back = cells.update(candidates: list, notes: none, selected: 0, first: 0, columns: 0)
+        XCTAssertEqual(back.reused, Array(repeating: false, count: 9), "nor the reverse")
+    }
+
     @MainActor
     func testContentWidthSurvivesAStretchedFrameAndRenumbering() {
         let cell = CandidateCell(position: 0, numberText: "3", showsNumber: true, text: "善解", note: "名稱", selected: false)
@@ -106,11 +123,11 @@ final class VerticalLayoutTests: XCTestCase {
 
     func testPlanWindowOverAPredictionRowStartsFromTheMinimum() {
         let row = VerticalLayout.plan(previous: nil, kind: 2, count: 3, total: 3, contentWidths: [300, 120, 80])
-        XCTAssertTrue(row.reset, "first output after nothing")
+        XCTAssertTrue(VerticalLayout.resets(previous: nil, kind: 2), "first output after nothing")
         XCTAssertEqual(row.rows, 3)
         XCTAssertEqual(row.width, 300 + VerticalLayout.sideInset * 2)
         let window = VerticalLayout.plan(previous: row, kind: 1, count: 9, total: 30, contentWidths: [100, 80])
-        XCTAssertTrue(window.reset, "2 -> 1 always resets")
+        XCTAssertTrue(VerticalLayout.resets(previous: row, kind: 1), "2 -> 1 always resets")
         XCTAssertEqual(window.rows, 9)
         XCTAssertEqual(window.size.height, VerticalLayout.height(rows: 9))
         XCTAssertEqual(window.width, 226, "the minimum, not the row's width")
@@ -119,7 +136,7 @@ final class VerticalLayoutTests: XCTestCase {
     func testPlanRowAfterAWindowTakesItsOwnHeight() {
         let window = VerticalLayout.plan(previous: nil, kind: 1, count: 9, total: 30, contentWidths: [260])
         let row = VerticalLayout.plan(previous: window, kind: 2, count: 2, total: 2, contentWidths: [50, 60])
-        XCTAssertTrue(row.reset, "1 -> 2 always resets")
+        XCTAssertTrue(VerticalLayout.resets(previous: window, kind: 2), "1 -> 2 always resets")
         XCTAssertEqual(row.rows, 2)
         XCTAssertEqual(row.size.height, VerticalLayout.height(rows: 2))
         XCTAssertEqual(row.width, 226, "the window's width is not carried over")
@@ -128,12 +145,12 @@ final class VerticalLayoutTests: XCTestCase {
     func testPlanConsecutiveRowsFollowTheCountAndOnlyWiden() {
         let a = VerticalLayout.plan(previous: nil, kind: 2, count: 5, total: 5, contentWidths: [250, 100])
         let b = VerticalLayout.plan(previous: a, kind: 2, count: 3, total: 3, contentWidths: [100, 90, 80])
-        XCTAssertFalse(b.reset)
+        XCTAssertFalse(VerticalLayout.resets(previous: a, kind: 2))
         XCTAssertEqual(b.rows, 3, "the height follows the count on every output")
         XCTAssertEqual(b.size.height, VerticalLayout.height(rows: 3))
         XCTAssertEqual(b.width, a.width, "the width does not shrink")
         let c = VerticalLayout.plan(previous: b, kind: 2, count: 4, total: 4, contentWidths: [400])
-        XCTAssertFalse(c.reset)
+        XCTAssertFalse(VerticalLayout.resets(previous: b, kind: 2))
         XCTAssertEqual(c.rows, 4)
         XCTAssertEqual(c.width, 400 + VerticalLayout.sideInset * 2, "a wider row widens it")
         let d = VerticalLayout.plan(previous: c, kind: 2, count: 4, total: 4, contentWidths: [60])
@@ -144,7 +161,7 @@ final class VerticalLayoutTests: XCTestCase {
         let open = VerticalLayout.plan(previous: nil, kind: 1, count: 9, total: 30, contentWidths: [100])
         XCTAssertEqual(open.rows, 9)
         let scrolled = VerticalLayout.plan(previous: open, kind: 1, count: 9, total: 30, contentWidths: [300])
-        XCTAssertFalse(scrolled.reset)
+        XCTAssertFalse(VerticalLayout.resets(previous: open, kind: 1))
         XCTAssertEqual(scrolled.rows, 9)
         XCTAssertEqual(scrolled.width, 300 + VerticalLayout.sideInset * 2 + 9)
         let again = VerticalLayout.plan(previous: scrolled, kind: 1, count: 9, total: 30, contentWidths: [100])
@@ -170,11 +187,12 @@ final class VerticalLayoutTests: XCTestCase {
         for from in 0...2 {
             for to in 0...2 {
                 let previous = VerticalLayout.plan(previous: nil, kind: from, count: 4, total: 4, contentWidths: [100])
-                let next = VerticalLayout.plan(previous: previous, kind: to, count: 4, total: 4, contentWidths: [100])
-                XCTAssertEqual(next.reset, from != to, "\(from) -> \(to)")
+                XCTAssertEqual(previous.kind, from)
+                XCTAssertEqual(VerticalLayout.resets(previous: previous, kind: to), from != to, "\(from) -> \(to)")
             }
         }
-        XCTAssertTrue(VerticalLayout.plan(previous: nil, kind: 0, count: 3, total: 3, contentWidths: []).reset, "nothing on screen before")
+        XCTAssertTrue(VerticalLayout.resets(previous: nil, kind: 0), "nothing on screen before")
+        XCTAssertEqual(VerticalLayout.plan(previous: nil, kind: 0, count: 3, total: 3, contentWidths: []), .horizontal)
     }
 
     // MARK: width: at least 226, widen-only
@@ -226,8 +244,6 @@ final class VerticalLayoutTests: XCTestCase {
         XCTAssertEqual(seps(selected: -1, rowWidth: 300)[0].width, 288)
         // Thickness is whatever the caller says (1 device pixel).
         XCTAssertEqual(VerticalLayout.separators(rows: 3, selected: -1, rowWidth: 226, capsuleHeight: 24, thickness: 0.5)[0].height, 0.5)
-        // Apple's check at its own origin: with the first capsule top at 86 the line is at 111.
-        XCTAssertEqual(86 + VerticalLayout.separatorBelowCapsuleTop, 111)
     }
 
     func testSeparatorsTouchingTheSelectedRowAreHidden() {
@@ -269,50 +285,70 @@ final class VerticalLayoutTests: XCTestCase {
 
     // MARK: position: s3b2 section 2.3 with the vertical panel size
 
+    private func scr(_ r: NSRect) -> PanelPlacement.Screen { PanelPlacement.Screen(frame: r, visibleFrame: r) }
+
     func testPlacementUsesTheVerticalSizeBelowTheLineAndAboveWhenThereIsNoRoom() {
         let size = NSSize(width: 226, height: VerticalLayout.height(rows: 9))
-        let screen = NSRect(x: 0, y: 0, width: 1440, height: 900)
+        let screen = scr(NSRect(x: 0, y: 0, width: 1440, height: 900))
+        func at(_ line: NSRect?, last: NSRect? = nil, _ size: NSSize, screens: [PanelPlacement.Screen]? = nil) -> NSPoint {
+            PanelPlacement.topLeft(line: line, last: last, size: size, alignOffset: 10, screens: screens ?? [screen], main: 0).origin
+        }
         // Room below: the top edge is the gap under the line.
         let line = NSRect(x: 300, y: 600, width: 8, height: 18)
-        let below = PanelPlacement.topLeft(lineRect: line, lastOrigin: nil, size: size, alignOffset: 10, screens: [screen], rectScreen: 0, main: 0)
-        XCTAssertEqual(below, NSPoint(x: 290, y: 600 - PanelPlacement.gap))
+        XCTAssertEqual(at(line, size), NSPoint(x: 290, y: 600 - PanelPlacement.gap))
         // A line so low that the 262 pt panel does not fit below: it goes above the line.
         let low = NSRect(x: 300, y: 100, width: 8, height: 18)
-        let above = PanelPlacement.topLeft(lineRect: low, lastOrigin: nil, size: size, alignOffset: 10, screens: [screen], rectScreen: 0, main: 0)
-        XCTAssertEqual(above.y, low.maxY + PanelPlacement.gap + size.height)
+        XCTAssertEqual(at(low, size).y, low.maxY + PanelPlacement.gap + size.height)
         // The horizontal bar (28 pt) still fits below the same line: the vertical size is what moved it.
-        let bar = PanelPlacement.topLeft(lineRect: low, lastOrigin: nil, size: NSSize(width: 100, height: 28), alignOffset: 10, screens: [screen], rectScreen: 0, main: 0)
-        XCTAssertEqual(bar.y, low.minY - PanelPlacement.gap)
-        // No line: the last origin is reused, but clamped for this size. A tall panel at a low last origin moves up; a wide
-        // one at the right edge moves left; an origin that still fits stays.
-        let kept = PanelPlacement.topLeft(lineRect: nil, lastOrigin: NSPoint(x: 100, y: 500), size: size, alignOffset: 10, screens: [screen], rectScreen: nil, main: 0)
-        XCTAssertEqual(kept, NSPoint(x: 100, y: 500))
-        let low2 = PanelPlacement.topLeft(lineRect: nil, lastOrigin: NSPoint(x: 100, y: 60), size: size, alignOffset: 10, screens: [screen], rectScreen: nil, main: 0)
-        XCTAssertEqual(low2, NSPoint(x: 100, y: size.height), "the whole panel stays above the bottom edge")
-        let edge = PanelPlacement.topLeft(lineRect: nil, lastOrigin: NSPoint(x: 1400, y: 500), size: size, alignOffset: 10, screens: [screen], rectScreen: nil, main: 0)
-        XCTAssertEqual(edge, NSPoint(x: 1440 - 226, y: 500))
-        let high = PanelPlacement.topLeft(lineRect: nil, lastOrigin: NSPoint(x: 100, y: 2000), size: size, alignOffset: 10, screens: [screen], rectScreen: nil, main: 0)
-        XCTAssertEqual(high, NSPoint(x: 100, y: 900))
-        // On a second screen it is clamped into that screen, not moved to the main one.
-        let rightScreen = NSRect(x: 1440, y: 0, width: 1000, height: 800)
-        let second = PanelPlacement.topLeft(lineRect: nil, lastOrigin: NSPoint(x: 2300, y: 60), size: size, alignOffset: 10, screens: [screen, rightScreen], rectScreen: nil, main: 0)
-        XCTAssertEqual(second, NSPoint(x: 2440 - 226, y: size.height))
-        // The remembered place is the anchor, not the clamped result: after a tall panel was clamped, a short one asks for the
-        // original anchor again and gets it.
-        let anchor = NSPoint(x: 100, y: 60)
-        let tall = PanelPlacement.topLeft(lineRect: nil, lastOrigin: anchor, size: size, alignOffset: 10, screens: [screen], rectScreen: nil, main: 0)
-        XCTAssertEqual(tall.y, size.height, "the tall panel was raised")
-        let kept2 = PanelPlacement.anchor(afterShowingAt: tall, lineRect: nil, lastOrigin: anchor)
-        XCTAssertEqual(kept2, anchor, "the anchor is not replaced by the clamped origin")
-        let shortSize = NSSize(width: 100, height: 28)
-        let shortBar = PanelPlacement.topLeft(lineRect: nil, lastOrigin: kept2, size: shortSize, alignOffset: 10, screens: [screen], rectScreen: nil, main: 0)
-        XCTAssertEqual(shortBar, anchor, "the short bar returns to the original anchor")
-        // With a line the origin is remembered; with nothing remembered, too.
-        XCTAssertEqual(PanelPlacement.anchor(afterShowingAt: tall, lineRect: NSRect(x: 1, y: 2, width: 3, height: 4), lastOrigin: anchor), tall)
-        XCTAssertEqual(PanelPlacement.anchor(afterShowingAt: tall, lineRect: nil, lastOrigin: nil), tall)
+        XCTAssertEqual(at(low, NSSize(width: 100, height: 28)).y, low.minY - PanelPlacement.gap)
         // Clamped to the right edge by the panel's own width.
-        let right = NSRect(x: 1400, y: 600, width: 8, height: 18)
-        let clamped = PanelPlacement.topLeft(lineRect: right, lastOrigin: nil, size: size, alignOffset: 10, screens: [screen], rectScreen: 0, main: 0)
-        XCTAssertEqual(clamped.x, 1440 - 226)
+        XCTAssertEqual(at(NSRect(x: 1400, y: 600, width: 8, height: 18), size).x, 1440 - 226)
+
+        // No line at all: the bottom-left default for the panel's own size, tall first and short after, never remembered.
+        XCTAssertEqual(at(nil, size), NSPoint(x: 0, y: size.height))
+        let shortSize = NSSize(width: 100, height: 28)
+        XCTAssertEqual(at(nil, shortSize), NSPoint(x: 0, y: 28), "the short bar does not inherit the tall panel's corner")
+        // A remembered line: each size works out its own side. The tall panel above, the short bar below.
+        XCTAssertEqual(at(nil, last: low, size).y, low.maxY + PanelPlacement.gap + size.height, "above the remembered line")
+        XCTAssertEqual(at(nil, last: low, shortSize), NSPoint(x: 290, y: low.minY - PanelPlacement.gap), "just below the remembered line")
+        // On a second screen the remembered line keeps the placement on that screen (the screen is chosen from the line).
+        let rightScreen = scr(NSRect(x: 1440, y: 0, width: 1000, height: 800))
+        let second = at(nil, last: NSRect(x: 2300, y: 60, width: 8, height: 18), size, screens: [screen, rightScreen])
+        XCTAssertEqual(second.y, 60 + 18 + PanelPlacement.gap + size.height)
+        XCTAssertGreaterThanOrEqual(second.x, 1440)
+        XCTAssertEqual(PanelPlacement.screenIndex(for: NSRect(x: 2300, y: 60, width: 8, height: 18), in: [screen, rightScreen], main: 0), 1)
+        XCTAssertEqual(PanelPlacement.screenIndex(for: nil, in: [screen, rightScreen], main: 0), 0)
+        XCTAssertEqual(PanelPlacement.screenIndex(for: NSRect(x: 9000, y: 0, width: 1, height: 1), in: [screen, rightScreen], main: 1), 1, "no screen holds it: main")
+    }
+
+    /// The vertical prediction row changes height with its count; the side is decided by the nine-row height, so the row does
+    /// not jump between below and above the line as the count changes.
+    func testPredictionRowStaysOnOneSideOfTheLineWhateverItsCount() {
+        let screen = scr(NSRect(x: 0, y: 0, width: 1440, height: 900))
+        let nine = VerticalLayout.height(rows: 9)
+        func place(_ line: NSRect, rows: Int) -> NSPoint {
+            let size = NSSize(width: 226, height: VerticalLayout.height(rows: rows))
+            return PanelPlacement.topLeft(line: line, size: size, sideHeight: VerticalLayout.sideHeight(kind: VerticalLayout.predictions),
+                                          alignOffset: 10, screens: [screen], main: 0).origin
+        }
+        // Three rows (94 pt) fit below this line, nine (262 pt) do not: with the nine-row height every count goes above.
+        let low = NSRect(x: 300, y: 200, width: 8, height: 18)
+        XCTAssertGreaterThan(low.minY - PanelPlacement.gap - VerticalLayout.height(rows: 3), 0, "three rows alone would fit below")
+        XCTAssertLessThan(low.minY - PanelPlacement.gap - nine, 0, "nine rows would not")
+        for rows in 1...9 {
+            XCTAssertEqual(place(low, rows: rows).y, low.maxY + PanelPlacement.gap + VerticalLayout.height(rows: rows), "\(rows) rows above")
+        }
+        // Without the side height the three-row panel would have flipped below.
+        let alone = PanelPlacement.topLeft(line: low, size: NSSize(width: 226, height: VerticalLayout.height(rows: 3)), alignOffset: 10, screens: [screen], main: 0).origin
+        XCTAssertEqual(alone.y, low.minY - PanelPlacement.gap)
+        // A vertical window's height is fixed while it is open: it decides by its own.
+        XCTAssertEqual(VerticalLayout.sideHeight(kind: VerticalLayout.predictions), nine)
+        XCTAssertNil(VerticalLayout.sideHeight(kind: VerticalLayout.candidates))
+        XCTAssertNil(VerticalLayout.sideHeight(kind: 0))
+        // A high line: below for every count.
+        let high = NSRect(x: 300, y: 600, width: 8, height: 18)
+        for rows in 1...9 {
+            XCTAssertEqual(place(high, rows: rows).y, high.minY - PanelPlacement.gap, "\(rows) rows below")
+        }
     }
 }

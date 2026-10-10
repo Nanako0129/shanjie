@@ -36,36 +36,35 @@ public enum VerticalLayout {
     public static let predictions = 2
 
     /// What is on screen after one output, and what the next one needs to decide about: `kind` is the output's value, `rows`
-    /// the row count the height comes from, `width` the panel's width. `reset` says the content that was on screen must go.
-    public struct Plan: Equatable {
+    /// the row count the height comes from, `width` the panel's width.
+    public struct Plan: Equatable, Sendable {
         public var kind: Int
-        public var reset: Bool
         public var rows: Int
         public var width: CGFloat
         /// Room reserved at the right for the scroll indicator: only the candidate window, only when its list is longer than
         /// the rows it shows. Decided here once; the panel uses this and no other condition.
         public var gutter: CGFloat
         public var size: CGSize { CGSize(width: width, height: VerticalLayout.height(rows: rows)) }
+        /// What the bar and the grid (kind 0) leave behind: they size themselves, only the kind matters.
+        public static let horizontal = Plan(kind: 0, rows: 0, width: 0, gutter: 0)
     }
 
-    /// Candidate-vertical contract section 2.4: the reset and the size of the panel for one output.
+    /// Candidate-vertical contract section 2.4: the size of the panel for one output (whether the content resets is `resets`).
     /// - `previous`: the plan of the last output that is still on screen, `nil` when nothing is.
-    /// - `kind`: this output's `candidate_vertical`. A change of value, in any direction (0, 1, 2), always resets: the
-    ///   content of a prediction row, a candidate window and the bar do not carry over to each other, and neither does the
-    ///   width (a window opening over a wide prediction row starts at the minimum).
+    /// - `kind`: this output's `candidate_vertical`. After a change of value (`resets`) nothing carries over from `previous`:
+    ///   not the rows and not the width (a window opening over a wide prediction row starts at the minimum).
     /// - Kind 1 (candidate window): the height is fixed when it opens (`min(count, 9)`); the width only grows.
     /// - Kind 2 (prediction row): the height follows `count` on every output; the width only grows while the outputs stay 2.
-    /// - Kind 0 sizes nothing here (the bar and the grid have their own layout); only `reset` matters.
+    /// - Kind 0 sizes nothing here (the bar and the grid have their own layout): `Plan.horizontal`.
     /// - `count`, `total`: the shown rows and the whole list (the indicator is needed when `total > count`).
     /// - `contentWidths`: each shown cell's `CandidateCell.contentWidth`, taken from the cells that exist after `resets`
     ///   cleared what had to go, so nothing is measured twice.
     public static func plan(previous: Plan?, kind: Int, count: Int, total: Int, contentWidths: [CGFloat]) -> Plan {
-        let reset = resets(previous: previous, kind: kind)
-        guard kind != 0 else { return Plan(kind: 0, reset: reset, rows: 0, width: 0, gutter: 0) }
-        let base = reset ? nil : previous
+        guard kind != 0 else { return .horizontal }
+        let base = resets(previous: previous, kind: kind) ? nil : previous
         let rows = kind == predictions ? min(count, visibleRows) : (base?.rows ?? min(count, visibleRows))
         let gutter = kind == candidates && total > count ? scrollGutter : 0
-        return Plan(kind: kind, reset: reset, rows: rows,
+        return Plan(kind: kind, rows: rows,
                     width: width(contentWidths: contentWidths, current: base?.width ?? 0, gutter: gutter), gutter: gutter)
     }
 
@@ -110,6 +109,13 @@ public enum VerticalLayout {
     /// The window's height for `rows` visible rows. Fixed when the window opens (contract section 2.3).
     public static func height(rows: Int) -> CGFloat {
         inset * 2 + CGFloat(rows) * rowPitch
+    }
+
+    /// The height that decides below or above the line (`PanelPlacement.topLeft`'s `sideHeight`) for an output of `kind`: the
+    /// prediction row's height changes with its count, so it decides by the nine-row height and stays on one side of the line
+    /// while it shows; a vertical window's height is fixed while it is open (`nil`: its own).
+    public static func sideHeight(kind: Int) -> CGFloat? {
+        kind == predictions ? height(rows: visibleRows) : nil
     }
 
     /// Top edge of the capsule of row `i` (0 = first visible row), with a capsule `capsuleHeight` tall centred in its pitch.

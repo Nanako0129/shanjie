@@ -174,6 +174,7 @@ public final class CandidateCells {
     public var onSelect: ((Int) -> Void)?
     public private(set) var cells: [CandidateCell] = []
     private var columns = 0
+    private var renumbered = false
     private var first = 0
 
     public init() {}
@@ -186,7 +187,10 @@ public final class CandidateCells {
         let grid = newColumns > 0
         let selectedRow = grid ? selected / newColumns : 0
         // Candidate at global index g sat at old position g - first.
-        let sameMode = newColumns == columns
+        // The bar and the vertical window both have 0 columns, but their cells differ (a fixed number slot, renumbering), so
+        // the rule they were made under is part of the mode. This is CandidateCells' own contract (cells made under one rule
+        // are never reused under the other), not something the panel relies on: it also clears everything on a change of kind.
+        let sameMode = newColumns == columns && renumber == renumbered
         var next: [CandidateCell] = []
         var reused: [Bool] = []
         var kept = Set<ObjectIdentifier>()
@@ -213,6 +217,7 @@ public final class CandidateCells {
         let removed = cells.filter { !kept.contains(ObjectIdentifier($0)) }
         cells = next
         columns = newColumns
+        renumbered = renumber
         first = newFirst
         return Update(cells: next, reused: reused, removed: removed)
     }
@@ -222,6 +227,7 @@ public final class CandidateCells {
         let old = cells
         cells = []
         columns = 0
+        renumbered = false
         first = 0
         return old
     }
