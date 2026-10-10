@@ -24,11 +24,12 @@ public enum PanelPlacement {
         line.flatMap { r in screens.firstIndex { $0.frame.contains(r.origin) } } ?? main
     }
 
-    /// The bar's top-left corner.
-    /// - `line`: the text line (origin bottom-left). The caller passes the client's line, else the last one it gave (a
-    ///   remembered line, not a remembered corner, which depends on the size of the panel it was worked out for); the screen
-    ///   is chosen here from it, so a remembered line on a second screen keeps the panel on that screen. With none, the panel
-    ///   sits at the bottom-left of the main screen's visible frame for this size, which is never remembered.
+    /// The bar's top-left corner, and the index of the screen it goes to.
+    /// - `line`: the client's text line (origin bottom-left); `nil` when it gave none.
+    /// - `last`: the last line the client gave, used when `line` is `nil` (a remembered line, not a remembered corner, which
+    ///   depends on the size of the panel it was worked out for). One no screen holds (its screen is gone) is dropped. With
+    ///   neither, the panel sits at the bottom-left of the main screen's visible frame for this size, which is never remembered.
+    ///   The screen is the one whose frame holds the line used, else the main one.
     /// - `size`: the panel's size.
     /// - `sideHeight`: the height used to decide below or above the line, `size.height` when `nil`. A panel whose height
     ///   changes from output to output (the vertical prediction row) passes its largest, so it stays on one side while it
@@ -36,20 +37,19 @@ public enum PanelPlacement {
     /// - `alignOffset`: how far the first candidate glyph sits from the panel's left edge, so the glyph lines up with the
     ///   composed text.
     /// - `screens`, `main`: every screen, and the index of the main one.
-    public static func topLeft(line: NSRect?, size: NSSize, sideHeight: CGFloat? = nil, alignOffset: CGFloat,
-                               screens: [Screen], main: Int) -> NSPoint {
-        let visible = screens[screenIndex(for: line, in: screens, main: main)].visibleFrame
-        guard let line else { return NSPoint(x: visible.minX, y: visible.minY + size.height) }
+    public static func topLeft(line: NSRect?, last: NSRect? = nil, size: NSSize, sideHeight: CGFloat? = nil,
+                               alignOffset: CGFloat, screens: [Screen], main: Int) -> (origin: NSPoint, screen: Int) {
+        let line = line ?? last.flatMap { l in screens.contains { $0.frame.contains(l.origin) } ? l : nil }
+        let index = screenIndex(for: line, in: screens, main: main)
+        let visible = screens[index].visibleFrame
+        guard let line else { return (NSPoint(x: visible.minX, y: visible.minY + size.height), index) }
         var x = line.minX - alignOffset
         var top = line.minY - gap
         // No room below: above the line instead.
         if top - (sideHeight ?? size.height) < visible.minY { top = line.maxY + gap + size.height }
         x = min(x, visible.maxX - size.width)
         x = max(x, visible.minX)
-        // Inside the visible frame at both ends: a stale line (a screen that is gone, a panel taller than the room) must not
-        // put the panel off the screen.
         top = min(top, visible.maxY)
-        top = max(top, visible.minY + size.height)
-        return NSPoint(x: x, y: top)
+        return (NSPoint(x: x, y: top), index)
     }
 }

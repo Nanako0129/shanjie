@@ -442,10 +442,7 @@ final class CandidatePanelAdapter: CandidatePanel {
 
         // The first row's candidate glyph under the composed text, as the bar does. A first guess for the vertical window.
         let alignOffset = VerticalLayout.sideInset + (cells.first?.candidateMinX ?? 0)
-        // The prediction row's height changes with its count: it decides above or below by the nine-row height, so it stays
-        // on one side of the line while it shows.
-        let placement = place(lineRect: lineRect, size: size, alignOffset: alignOffset,
-                              sideHeight: kind == VerticalLayout.predictions ? VerticalLayout.height(rows: VerticalLayout.visibleRows) : nil)
+        let placement = place(lineRect: lineRect, size: size, alignOffset: alignOffset, sideHeight: VerticalLayout.sideHeight(kind: kind))
         // Cells and separators are laid out together even when there is no screen to put the panel on (a device pixel of the
         // screen it goes to; 1x without one).
         updateSeparators(rows: cells.count, selected: selected, rowWidth: rowWidth, scale: placement?.scale ?? 1)
@@ -458,17 +455,17 @@ final class CandidatePanelAdapter: CandidatePanel {
         if !window.isVisible { window.orderFrontRegardless() }
     }
 
-    /// Where a panel of `size` goes: remembers the client's line (`lastLine`), uses the last one when it gave none, and returns
-    /// the origin `PanelPlacement.topLeft` works out for this size with the scale of the screen it chose; `nil` without a screen.
+    /// Where a panel of `size` goes: the origin `PanelPlacement.topLeft` works out for this size from the client's line, else
+    /// the last one it gave (`lastLine`, remembered here), with the scale of the screen it chose; `nil` without a screen.
     private func place(lineRect: NSRect?, size: NSSize, alignOffset: CGFloat, sideHeight: CGFloat? = nil) -> (origin: NSPoint, scale: CGFloat)? {
         let screens = NSScreen.screens
         guard !screens.isEmpty else { return nil }
-        let line = lineRect ?? lastLine
-        if let lineRect { lastLine = lineRect }
-        let list = screens.map { PanelPlacement.Screen(frame: $0.frame, visibleFrame: $0.visibleFrame) }
         let main = NSScreen.main.flatMap { m in screens.firstIndex(of: m) } ?? 0
-        let origin = PanelPlacement.topLeft(line: line, size: size, sideHeight: sideHeight, alignOffset: alignOffset, screens: list, main: main)
-        return (origin, screens[PanelPlacement.screenIndex(for: line, in: list, main: main)].backingScaleFactor)
+        let p = PanelPlacement.topLeft(line: lineRect, last: lastLine, size: size, sideHeight: sideHeight, alignOffset: alignOffset,
+                                       screens: screens.map { PanelPlacement.Screen(frame: $0.frame, visibleFrame: $0.visibleFrame) },
+                                       main: main)
+        if let lineRect { lastLine = lineRect }
+        return (p.origin, screens[p.screen].backingScaleFactor)
     }
 
     /// Puts the separators where `VerticalLayout.separators` says; a view is made only for a gap that has none yet.

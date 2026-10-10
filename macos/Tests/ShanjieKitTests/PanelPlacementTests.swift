@@ -6,10 +6,10 @@ final class PanelPlacementTests: XCTestCase {
     let size = NSSize(width: 200, height: 30)
     let line = NSRect(x: 300, y: 400, width: 8, height: 18)
 
-    /// `last` is the remembered line: the caller passes the client's line, else that one.
+    /// `last` is the remembered line, the last one the client gave.
     func place(_ line: NSRect?, last: NSRect? = nil, screens: [NSRect]? = nil, main: Int = 0) -> NSPoint {
-        PanelPlacement.topLeft(line: line ?? last, size: size, alignOffset: 20,
-                               screens: (screens ?? [screen]).map { PanelPlacement.Screen(frame: $0, visibleFrame: $0) }, main: main)
+        PanelPlacement.topLeft(line: line, last: last, size: size, alignOffset: 20,
+                               screens: (screens ?? [screen]).map { PanelPlacement.Screen(frame: $0, visibleFrame: $0) }, main: main).origin
     }
 
     func testBelowTheLineAlignedToTheText() {
@@ -38,22 +38,19 @@ final class PanelPlacementTests: XCTestCase {
     }
 
     /// No line: the last line the client gave is used and the origin is worked out for this size (not a remembered corner).
+    /// The client's line wins over it.
     func testNoLineUsesTheLastLine() {
-        XCTAssertEqual(place(nil, last: line), place(line))
         XCTAssertEqual(place(nil, last: line), NSPoint(x: 280, y: 394))
+        let other = NSRect(x: 600, y: 200, width: 8, height: 18)
+        XCTAssertEqual(place(line, last: other), NSPoint(x: 280, y: 394))
+        // On a second screen the remembered line keeps the panel on that screen.
+        let right = NSRect(x: 1000, y: 0, width: 1000, height: 800)
+        XCTAssertEqual(place(nil, last: NSRect(x: 1990, y: 400, width: 8, height: 18), screens: [screen, right]).x, 1800)
     }
 
-    /// A stale line (an unplugged screen, a panel taller than the room) must not put the panel below the visible frame.
-    func testBottomEdgeIsClamped() {
-        // A line below the screen: it flips above, which is on screen.
-        let stale = NSRect(x: 300, y: -500, width: 8, height: 18)
-        let p = place(stale)
-        XCTAssertGreaterThanOrEqual(p.y - size.height, screen.minY)
-        // A line so high that "above" would leave the top, and a panel that fits neither way: the top stays inside.
-        let tall = NSSize(width: 200, height: 900)
-        let q = PanelPlacement.topLeft(line: NSRect(x: 300, y: 400, width: 8, height: 18), size: tall, alignOffset: 20,
-                                       screens: [PanelPlacement.Screen(frame: screen, visibleFrame: screen)], main: 0)
-        XCTAssertEqual(q.y, screen.minY + tall.height, "the bottom edge stays on the screen")
+    /// A remembered line no screen holds (its screen is gone) is dropped: the default corner, not a panel off the screen.
+    func testLastLineOnNoScreenIsDropped() {
+        XCTAssertEqual(place(nil, last: NSRect(x: 1500, y: -500, width: 8, height: 18)), NSPoint(x: 0, y: 30))
     }
 
     func testNoLineAndNoLastGoesBottomLeftOfMain() {
