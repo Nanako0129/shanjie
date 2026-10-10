@@ -60,6 +60,15 @@ final class DefaultsPredictionStore: PredictionStore {
     }
 }
 
+/// The "可省略韻母" switch (docs/contracts/v3-engine.md section 12.1), key `abbreviation` in the same domain; absent means off.
+@MainActor
+final class DefaultsAbbreviationStore: AbbreviationStore {
+    var abbreviation: Bool? {
+        get { UserDefaults.standard.object(forKey: "abbreviation") as? Bool }
+        set { UserDefaults.standard.set(newValue, forKey: "abbreviation") }
+    }
+}
+
 /// The "動漫與遊戲詞" switch (docs/contracts/acg-pack.md A.2), key `acgPack` in the same domain; absent means on (user decision 2026-10-09).
 @MainActor
 final class DefaultsAcgPackStore: AcgPackStore {
@@ -75,6 +84,16 @@ final class DefaultsGlassTintStore: GlassTintStore {
     var glassTint: Double? {
         get { UserDefaults.standard.object(forKey: "glassTint") as? Double }
         set { UserDefaults.standard.set(newValue, forKey: "glassTint") }
+    }
+}
+
+/// The candidate window's orientation (docs/contracts/candidate-vertical.md section 2.1), key `candidateVertical` (Bool); absent means
+/// horizontal.
+@MainActor
+final class DefaultsCandidateOrientationStore: CandidateOrientationStore {
+    var candidateVertical: Bool? {
+        get { UserDefaults.standard.object(forKey: "candidateVertical") as? Bool }
+        set { UserDefaults.standard.set(newValue, forKey: "candidateVertical") }
     }
 }
 
@@ -96,8 +115,12 @@ func runServer() -> Never {
     App.shell = Shell(
         resources: resources.absoluteURL, panel: CandidatePanelAdapter(),
         isSecureInput: { IsSecureEventInputEnabled() }, layoutStore: DefaultsLayoutStore(),
-        learningDirectory: Shell.learningURL(), dialogs: AlertDialogs(), demoteStore: DefaultsDemoteStore(), predictionStore: DefaultsPredictionStore(), acgPackStore: DefaultsAcgPackStore(),
-        glassTintStore: DefaultsGlassTintStore())
+        learningDirectory: Shell.learningURL(), dialogs: AlertDialogs(), demoteStore: DefaultsDemoteStore(), predictionStore: DefaultsPredictionStore(), abbreviationStore: DefaultsAbbreviationStore(), acgPackStore: DefaultsAcgPackStore(),
+        glassTintStore: DefaultsGlassTintStore(), candidateOrientationStore: DefaultsCandidateOrientationStore(),
+        // 可省略韻母 does not ship in v0.4.0 (user, 2026-10-10); see Shell.showsAbbreviation. Flip to true to offer it again.
+        // This argument alone hides it (Shell's default true is for the tests) and the app target has no tests: the release
+        // device check confirms the menu has no 可省略韻母.
+        showsAbbreviation: false)
     let settings = SettingsWindowController(shell: App.shell)
     App.shell?.onOpenSettings = { settings.show() }
     withExtendedLifetime(server) { app.run() }

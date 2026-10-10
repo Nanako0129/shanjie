@@ -291,7 +291,7 @@ def expected_counts(lex, text, min_count=EXPECTED_MIN):
 _W = {}
 
 
-def _init(trigram=False, expected=False, mw=False):
+def _init(trigram=False, expected=False, mw=False, extra_lexicons=()):
     _W["mw"] = None
     if mw:   # S2w：每個 worker 載一次 mwdata.json（契約 §3.2）
         sys.path.insert(0, os.path.join(ROOT, "experiments", "s2w"))
@@ -301,8 +301,42 @@ def _init(trigram=False, expected=False, mw=False):
     _W["trigram"] = trigram
     _W["expected"] = expected
     _W["lex"] = ime.Lexicon(os.path.join(ROOT, "data", "lexicon", "mcbpmf-data.txt"),
-                            overlay=os.path.join(ROOT, "data", "lexicon", "overlay-add.tsv"))
+                            overlay=[os.path.join(ROOT, "data", "lexicon", "overlay-add.tsv"), *extra_lexicons])   # --extra-lexicon：疊加層格式，接在 overlay-add.tsv 後面
+    _W["pack"] = set()
+    if extra_lexicons:
+        # model-v5 契約 §8（加法計數）：一般的詞與二元組照沒有詞包的詞庫算（lex0），詞包詞只「加上」自己的單詞與
+        # 含它的二元組（lex1）。直接用 lex1 會讓詞包裡的兩字片段（拉斯、萊恩）吃掉常用字對的計數，不開詞包時打不出來。
+        _W["lex0"] = ime.Lexicon(os.path.join(ROOT, "data", "lexicon", "mcbpmf-data.txt"),
+                                 overlay=[os.path.join(ROOT, "data", "lexicon", "overlay-add.tsv")])
+        _W["pack"] = set(_W["lex"].by_word) - set(_W["lex0"].by_word)
+        _W["pack_lens"] = sorted({len(w) for w in _W["pack"]})
     _W["conv"] = load_conv()
+
+
+def run_expected(run):
+    """--expected 的一段連續漢字：沒有詞包時就是 expected_counts(lex, run)。有詞包時是加法計數（契約 §8）：
+    lex0（不含詞包）的全部單詞與二元組，加上 lex1（含詞包）裡詞包詞的單詞、以及一端是詞包詞的二元組。
+    lex0 切不開的段落整段不計（和沒有詞包時相同）；段落裡沒有詞包詞的字串時不必算 lex1。"""
+    pack = _W["pack"]
+    if not pack:
+        return expected_counts(_W["lex"], run)
+    r0 = expected_counts(_W["lex0"], run)
+    if r0 is None:
+        return None
+    n = len(run)
+    if not any(run[i:i + L] in pack for i in range(n) for L in _W["pack_lens"] if i + L <= n):
+        return r0
+    r1 = expected_counts(_W["lex"], run)
+    if r1 is None:
+        return r0
+    uni, bi = r0
+    for w, e in r1[0].items():
+        if w in pack:
+            uni[w] += e
+    for k, e in r1[1].items():
+        if k[0] in pack or k[1] in pack:
+            bi[k] += e
+    return uni, bi
 
 
 def count_batch(texts):
@@ -321,7 +355,7 @@ def count_batch(texts):
                 if len(run) < 2:
                     continue
                 if _W["expected"]:
-                    r = expected_counts(lex, run)
+                    r = run_expected(run)
                     if r is None:
                         continue
                     sents += 1
@@ -363,13 +397,16 @@ def main():
     ap.add_argument("--trigram", action="store_true", help="也算 trigram（記憶體用量大，請搭配較少的篇數）")
     ap.add_argument("--expected", action="store_true", help="詞圖上的期望次數（S2n 契約 §6.2），取代最高分切分；不算 trigram")
     ap.add_argument("--mw", action="store_true", help="S2w：用 MediaWiki 的 zh-tw 轉換（zhconv-rs ＋ $S2_WORK/mwdata.json），取代 convert()")
+    ap.add_argument("--extra-lexicon", action="append", default=[], metavar="FILE", help="model-v5：疊加層格式（讀音\\t詞\\t分數\\t來源）的檔加進斷詞詞庫，可給多次")
     a = ap.parse_args()
     if a.expected and a.trigram:
         ap.error("--expected 不算 trigram")
+    if a.extra_lexicon and not a.expected:
+        ap.error("--extra-lexicon 只用在 --expected（加法計數，model-v5 契約 §8）")
     os.makedirs(OUT, exist_ok=True)
     uni, bi, tri = collections.Counter(), collections.Counter(), collections.Counter()
     sents = arts = 0
-    with mp.Pool(a.procs, initializer=_init, initargs=(a.trigram, a.expected, a.mw)) as pool:
+    with mp.Pool(a.procs, initializer=_init, initargs=(a.trigram, a.expected, a.mw, tuple(dict.fromkeys(os.path.abspath(f) for f in a.extra_lexicon)))) as pool:
         for u, b, t, s_ in pool.imap_unordered(count_batch, batches(articles(a.articles))):
             uni.update(u); bi.update(b); tri.update(t); sents += s_; arts += 200
             if arts % 10000 == 0:

@@ -71,7 +71,7 @@ final class KeyMapTests: XCTestCase {
     @MainActor
     func testBothLayoutsThroughTheCore() throws {
         let res = try XCTUnwrap(TestData.resources())
-        let shell = Shell(resources: res, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(), learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore())
+        let shell = Shell(resources: res, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(), learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore())
         let c = Controller(shell)
         c.session.activate()
         for eten in [false, true] {

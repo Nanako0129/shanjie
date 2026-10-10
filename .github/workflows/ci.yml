@@ -92,19 +92,20 @@ jobs:
         with:
           toolchain: 1.97.1
 
-      # The bigram model is not in git (docs/PLAN.md S2c); it is the model-v4
-      # release asset, and its word-class table (S2k) is the classes-v2 asset.
+      # The bigram model is not in git (docs/PLAN.md S2c); it is the model-v5
+      # release asset, and its word-class table (S2k) is the classes-v3 asset.
       # Checking them here fails the run in seconds with a clear message instead
-      # of after the build. Each hash has one source: data/bigram.sjlm.sha256 and
-      # data/classes.sjc.sha256 (also read by build-app.sh and release.yml).
+      # of after the build. The hashes are checked against data/bigram.sjlm.sha256 and
+      # data/classes.sjc.sha256 (also read by build-app.sh and release.yml); cli/tests/golden.rs
+      # repeats them, so a model switch updates both (docs/data-files.md).
       - name: Fetch the language model
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          gh release download model-v4 --repo "$GITHUB_REPOSITORY" -p bigram.sjlm -D data/lm
+          gh release download model-v5 --repo "$GITHUB_REPOSITORY" -p bigram.sjlm -D data/lm
           shasum -a 256 -c data/bigram.sjlm.sha256
-          gh release download classes-v2 --repo "$GITHUB_REPOSITORY" -p classes.sjc -D data/lm
+          gh release download classes-v3 --repo "$GITHUB_REPOSITORY" -p classes.sjc -D data/lm
           shasum -a 256 -c data/classes.sjc.sha256
 
       - name: Tests (debug)
@@ -174,6 +175,12 @@ jobs:
       - name: ACG pack builder (Python)
         run: python3 -m unittest tools.test_build_acg_pack
 
+      # docs/contracts/model-v5.md sections 8-9: the count scripts' --extra-lexicon (additive counting), the
+      # out-of-vocabulary bigram filter in tools/build_lm.py, the count comparison and the counting lexicon rule.
+      # Stdlib only; experiments/s2-classes/test_cluster.py needs numpy and runs in `make test`.
+      - name: model-v5 build scripts (Python)
+        run: python3 -W ignore -m unittest tools/test_build_lm.py experiments/s2/test_extra_lexicon.py experiments/model-v5/test_compare_counts.py experiments/model-v5/test_count_lexicon.py
+
   # The Swift input method (docs/contracts/s3b.md section 3): build the ad-hoc
   # app, the Swift tests through the real core and model, the bundled
   # selftest, and acceptance checks 2, 3 and 6 of contract section 10.
@@ -198,9 +205,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          gh release download model-v4 --repo "$GITHUB_REPOSITORY" -p bigram.sjlm -D data/lm
+          gh release download model-v5 --repo "$GITHUB_REPOSITORY" -p bigram.sjlm -D data/lm
           shasum -a 256 -c data/bigram.sjlm.sha256
-          gh release download classes-v2 --repo "$GITHUB_REPOSITORY" -p classes.sjc -D data/lm
+          gh release download classes-v3 --repo "$GITHUB_REPOSITORY" -p classes.sjc -D data/lm
           shasum -a 256 -c data/classes.sjc.sha256
 
       # The local entry points (Makefile, docs/verification.md). cargo test

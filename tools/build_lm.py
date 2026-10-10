@@ -96,6 +96,9 @@ def build(cls=None):
     words = sorted(uni, key=lambda s: s.encode("utf-8"))
     vocab = ["<s>", "</s>"] + words
     ids = {w: i for i, w in enumerate(vocab)}
+    # model-v5 §8（加法計數）：詞包詞旁邊的一般詞可能留下二元組計數、單詞計數卻四捨五入成 0，不在詞彙表裡；
+    # 這種二元組沒有前文可存，丟掉。沒有加法計數的輸入不會出現（二元組的期望次數不超過兩端的單詞），輸出逐位元組不變。
+    bi = {k: c for k, c in bi.items() if k[0] in ids and k[1] in ids}
     # S2f 修訂二 7.2.2：類只算一次（只算代表成員的 unigram 與代表成員前文的 </s>）；影響約 0.006 log10
     once = lambda w: w not in cls or cls[w][0] == w
     N = sum(c for w, c in uni.items() if once(w))
