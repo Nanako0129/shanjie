@@ -314,9 +314,17 @@ READINGS = {  # tools/readings.py needs the MOE dictionary; the fixture fixes th
 }
 
 
+FAKE_V040 = tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False, encoding="utf-8")
+FAKE_V040.write("沒有這個詞\n")
+FAKE_V040.close()
+
+
 def build(api, *a, **k):
-    """B.build without the committed acg-keep-both.tsv (it names real pack words; a fake build has none of them) unless a test passes its own."""
+    """B.build without the committed acg-keep-both.tsv and v0.4.0 word list (they name real pack words, and some fixture words are real ones such as 風之谷
+    and 奇希莉卡; a fake build has none of them shipped) unless a test passes its own."""
     k.setdefault("keep_both_tsv", "/nonexistent/acg-keep-both.tsv")
+    k.setdefault("v040_words", FAKE_V040.name)
+    k.setdefault("v040_sha", hashlib.sha256("沒有這個詞\n".encode()).hexdigest())
     return B.build(api, *a, **k)
 
 
@@ -700,6 +708,53 @@ class A3(unittest.TestCase):
         import inspect
         self.assertEqual(inspect.signature(B.top1).parameters["lm"].default, B.LM)       # 預設照舊是出貨的 data/lm
 
+    def test_shipped_words_rank_before_new_words_of_the_same_reading(self):
+        n = {"新詞": 9, "舊詞": 1}
+        reading = {"新詞": ["ㄅ", "ㄅ"], "舊詞": ["ㄅ", "ㄅ"]}
+        self.assertEqual(B.ordered(["新詞", "舊詞"], n.get), ["新詞", "舊詞"])                              # 沒有 shipped：來源數多的在前
+        self.assertEqual(B.ordered(["新詞", "舊詞"], n.get, shipped={"舊詞"}), ["舊詞", "新詞"])              # 已出貨的先於新詞，不論來源數
+        rank = B.collision_rank([["ㄅ ㄅ", "新詞", "+舊詞", ""]])
+        self.assertEqual(B.ordered(["舊詞", "新詞"], n.get, rank, reading, shipped={"舊詞"}), ["新詞", "舊詞"])   # 處置列的名次還是最優先
+
+    def test_new_words_on_a_shipped_reading_get_a_lower_score_and_shipped_ranks_are_untouched(self):
+        sc = {2: -7.0}
+        reading = {"舊甲": ["ㄅ", "ㄅ"], "舊乙": ["ㄅ", "ㄅ"], "新詞": ["ㄅ", "ㄅ"], "別的": ["ㄆ", "ㄆ"]}
+        score = lambda rows: {l.split("\t")[1]: float(l.split("\t")[2]) for l in rows}
+        plain = score(B.pack_rows(["舊甲", "舊乙", "新詞", "別的"], reading, sc))
+        with_shipped = score(B.pack_rows(["舊甲", "舊乙", "新詞", "別的"], reading, sc, shipped={"舊甲", "舊乙"}))
+        self.assertEqual((with_shipped["舊甲"], with_shipped["舊乙"]), (plain["舊甲"], plain["舊乙"]))          # 已出貨的分數和沒有新詞時一樣
+        self.assertAlmostEqual(plain["新詞"] - with_shipped["新詞"], B.NEW_BEHIND_SHIPPED)                    # 新詞在已出貨的讀音上另外減分
+        self.assertEqual(with_shipped["別的"], plain["別的"])                                                 # 沒有已出貨的詞的讀音：不動
+
+    def test_a_new_word_that_resolves_to_a_shipped_word_is_fine_but_not_the_other_way(self):
+        r, shipped = "ㄅ ㄅ", frozenset({"舊甲", "舊乙"})
+        e = lambda w, n: {r: [(w, "a", "chat", "原本", n)]}
+        none = lambda found: B.open_collisions(found, set(), {}, set(), shipped)
+        self.assertEqual(none(e("新詞", "舊甲")), {})                      # 新詞的第一名是已出貨的詞：已出貨的選字沒變
+        self.assertEqual(none(e("新詞", "新乙")), e("新詞", "新乙"))        # 新詞的第一名是另一個新詞：照樣列出
+        self.assertEqual(none(e("舊甲", "新詞")), e("舊甲", "新詞"))        # 已出貨的詞被新詞搶走第一名：列出
+        self.assertEqual(none(e("舊甲", "舊乙")), {})                      # 第一名是已出貨的詞：已出貨讀音的選字沒變（recheck --base 另外比新舊詞包）
+        self.assertEqual(B.open_collisions(e("新詞", "新乙"), set(), {}, {(r, "新詞"), (r, "新乙")}, shipped), {})      # 全是新詞的讀音：keep-both
+        self.assertEqual(B.open_collisions(e("新詞", "舊甲"), set(), {}, set(), frozenset()), e("新詞", "舊甲"))     # 沒有 shipped（A3 關掉）：不豁免
+        kb = {(r, "新詞")}
+        self.assertEqual(B.open_collisions(e("新詞", "拼出來的"), set(), {}, kb, shipped, {(r, "新詞")}), {})                   # 第一名是解碼器拼出來的字串（不是詞包詞）：keep-both 詞豁免
+        self.assertEqual(B.open_collisions(e("新詞", "拼出來的"), set(), {}, set(), shipped, {(r, "新詞")}), e("新詞", "拼出來的"))   # 不是 keep-both 詞：列出
+        self.assertEqual(B.open_collisions(e("新詞", "新乙"), set(), {}, kb, shipped, {(r, "新詞"), (r, "新乙")}), e("新詞", "新乙"))      # 第一名是別的詞包詞（第三個詞）：列出
+
+    def test_in_a_build_the_shipped_word_keeps_first_place_over_a_new_word(self):
+        shared = lambda words: a3_readings(words) | {w: (R_A3.split(), False) for w in words if w in ("阿庫雷特", "奇希莉卡")}
+        v040 = os.path.join(self.tmp, "v040c.txt")
+        open(v040, "w", encoding="utf-8").write("阿庫雷特\n")
+        sha = hashlib.sha256("阿庫雷特\n".encode()).hexdigest()
+        def run(decode):
+            return build(A3Api(), self.groups, self.none, self.manual, decode=decode, readings=shared, exclude_tsv=self.none, years=(), v040_words=v040, v040_sha=sha, keep_both_tsv=self.none)
+        files, _, col, *_ = run(lambda pairs, prof, packs=None: ["阿庫雷特" if packs and w == "奇希莉卡" else w for w, _ in pairs])
+        score = {l.split("\t")[1]: float(l.split("\t")[2]) for l in files["acg-add.tsv"].splitlines() if l.startswith(R_A3.replace(" ", "-") + "\t")}
+        self.assertGreater(score["阿庫雷特"], score["奇希莉卡"])           # 舊的分數高：新詞只是候選（來源數兩邊相同時字串順序本來是奇希莉卡在前）
+        self.assertNotIn(R_A3, col)                                       # 新詞的第一名是已出貨的詞：不列
+        col = run(lambda pairs, prof, packs=None: ["奇希莉卡" if packs and w == "阿庫雷特" else w for w, _ in pairs])[2]
+        self.assertIn(R_A3, col)                                          # 已出貨的詞被新詞搶走：列出
+
     def kb(self, rows):
         path = os.path.join(self.tmp, "kb.tsv")
         open(path, "w", encoding="utf-8").write(rows)
@@ -707,11 +762,18 @@ class A3(unittest.TestCase):
 
     def test_keep_both_words_are_exempt_only_when_the_first_place_is_a_keep_both_word_too(self):
         take = lambda pairs, prof, packs=None: ["奇希莉卡" if packs and w == "阿庫雷特" else w for w, _ in pairs]
-        steal = lambda pairs, prof, packs=None: ["碇源堂" if packs and w == "阿庫雷特" else w for w, _ in pairs]       # 第三個詞包詞拿到第一名
+        steal = lambda pairs, prof, packs=None: ["艾倫葉卡" if packs and w == "阿庫雷特" else w for w, _ in pairs]       # 第三個詞包詞（同讀音）拿到第一名
+        away = lambda pairs, prof, packs=None: ["拼出來的字串" if packs and w == "阿庫雷特" else w for w, _ in pairs]     # 第一名不是詞包詞
+        manual = os.path.join(self.tmp, "m3.tsv")
+        open(manual, "w", encoding="utf-8").write("奇希莉卡\t無職轉生\t角色\n艾倫葉卡\t某作品\t角色\n")
+        three = lambda words: a3_readings(words) | {"艾倫葉卡": (R_A3.split(), False)}
         both = self.kb(f"{R_A3}\t阿庫雷特\n{R_A3}\t奇希莉卡\n")
-        self.assertIn(R_A3, self.build(decode=take)[2])                       # 沒有 keep-both：照樣列出
-        self.assertNotIn(R_A3, self.build(decode=take, kb=both)[2])           # 兩個都是 keep-both 詞：豁免（也不做 first_named 檢查）
-        self.assertIn(R_A3, self.build(decode=steal, kb=both)[2])             # 第三個詞拿到第一名：列為未處置
+        run = lambda decode, kb=None: build(A3Api(), self.groups, self.none, manual, decode=decode, readings=three, exclude_tsv=self.none, years=(), v040_words=self.v040, v040_sha=self.sha,
+                                           keep_both_tsv=kb or self.none)[2]
+        self.assertIn(R_A3, run(take))                       # 沒有 keep-both：照樣列出
+        self.assertNotIn(R_A3, run(take, both))              # 兩個都是 keep-both 詞：豁免（也不做 first_named 檢查）
+        self.assertIn(R_A3, run(steal, both))                # 第三個詞（不是 keep-both 詞）拿到第一名：列為未處置
+        self.assertNotIn(R_A3, run(away, both))              # 第一名不是這個讀音的詞包詞（解碼器拼的）：keep-both 詞豁免
 
     def test_every_keep_both_word_must_be_in_the_built_pack(self):
         with self.assertRaises(SystemExit):
@@ -733,10 +795,13 @@ class A3(unittest.TestCase):
         self.assertEqual(len(kept), 178)                                      # 契約 A3.3a
         self.assertTrue(all(w in pack and r in pack[w] for r, w, _ in kept))
         both = B.read_keep_both(os.path.join(B.PACKS, "acg-keep-both.tsv"))
-        self.assertEqual((len(both), len({r for r, _ in both})), (49, 28))
+        self.assertEqual((len(both), len({r for r, _ in both})), (169, 97))        # 契約 A3.3a 的 49 個詞、28 組讀音，加 A3 修正輪的 120 個詞、69 組讀音（全是新詞的讀音，與 3 組新舊詞包第一名相同的）
+        self.assertTrue({(r, w) for r, w in both if w in ("坂木", "阪木", "加米", "嘉米", "愛莉卡", "艾莉卡", "艾利卡")} and len(both) >= 49)
         self.assertTrue(all(r in pack.get(w, ()) for r, w in both), sorted((r, w) for r, w in both if r not in pack.get(w, ())))
         self.assertTrue(set(B.load_v040()) <= set(pack))                       # v0.4.0 的詞一個都不能少
-        # ponytail: 契約 A3.4 的獄門疆、虎杖悠仁在提交的詞包裡，等詞包依使用者對衝突的決定重建後再加（現在提交的還是 v0.4.0 的詞包）
+        self.assertIn("ㄩˋ ㄇㄣˊ ㄐㄧㄤ", pack["獄門疆"])                          # 契約 A3.4
+        self.assertTrue({"ㄏㄨ ㄓㄤˋ ㄧㄡ ㄖㄣˊ", "ㄏㄨˇ ㄓㄤˋ ㄧㄡ ㄖㄣˊ"} <= pack["虎杖悠仁"])
+        self.assertNotIn("艾文斯", pack)                                           # 契約 A3：新詞若在 model-v5 擠下詞庫的詞就不收（kb 例外只給已出貨的詞）
 
 
 if __name__ == "__main__":
