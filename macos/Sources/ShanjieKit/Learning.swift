@@ -69,6 +69,7 @@ public struct MenuEntry: Equatable, Sendable {
         public static let prediction = "即時預測"
         public static let abbreviation = "可省略韻母"
         public static let acgPack = "動漫與遊戲詞"
+        public static func acgDataDate(_ date: String) -> String { "資料更新至 \(date)（維基百科）" }
         public static let settings = "善解設定…"
         public static let clear = "清除選字記憶…"
         public static let excludeBackup = "不要備份選字記憶"
@@ -196,6 +197,7 @@ extension Session {
         // Greyed while the prediction row is off: the units it makes can only be resolved from the row (section 12.1).
         items.append(MenuEntry(title: T.abbreviation, action: .toggleAbbreviation, checked: shell.abbreviationOn, enabled: shell.predictionOn))
         items.append(MenuEntry(title: T.acgPack, action: .toggleAcgPack, checked: shell.acgPackOn))
+        if let date = shell.acgDataDate { items.append(MenuEntry(title: T.acgDataDate(date))) }   // about the data, so shown with the pack off too
         items.append(MenuEntry(title: T.settings, action: .openSettings))
         items.append(MenuEntry(title: T.clear, action: .clear))
         items.append(MenuEntry(title: T.excludeBackup, action: .toggleBackup, checked: shell.backupExcluded))
