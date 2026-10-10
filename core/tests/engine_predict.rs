@@ -3,7 +3,7 @@
 use core::engine::*;
 use core::learn::context_key;
 use core::lm::{decode_segment, history, CappedLexicon, End, Lm, Profile};
-use core::predict::{predict, reading_matches, units_of, Mode};
+use core::predict::{predict, reading_matches_in, units_of, Mode, Unit};
 use core::Lexicon;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
@@ -728,6 +728,13 @@ fn timing_typing76_keys() {
     time_typing76(None);
 }
 
+/// The same with the abbreviation composer on (section 12.4 item 6).
+#[test]
+#[ignore]
+fn timing_typing76_keys_abbreviation() {
+    time_typing76_in(None, true);
+}
+
 /// Real picks from the typing76 rows: for each sample, two short sessions (after the first key of the first
 /// syllable, and after the first key of the second) pick the row's second item, then commit, so the store holds
 /// records that match the situations the timed pass visits and the promotion and sorting run on them.
@@ -796,6 +803,20 @@ fn timing_typing76_keys_with_taught_picks_and_50k() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// Taught picks plus synthetic records up to the capacity, with the abbreviation composer on.
+#[test]
+#[ignore]
+fn timing_typing76_keys_with_taught_picks_and_50k_abbreviation() {
+    let dir = tmp_dir("timing-taught50k-abbr");
+    let taught = teach_typing76_picks(&dir);
+    let (store, mut records, _) = LearnStore::open(&dir).unwrap();
+    records.extend(synthetic_records(core::learn::CAPACITY - taught));
+    store.save(&records).unwrap();
+    println!("taught records: {taught}, total {}", records.len());
+    time_typing76_in(Some(&dir), true);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 fn synthetic_records(count: usize) -> Vec<Record> {
     let text = std::fs::read_to_string(root().join("eval/dev/user-typing.txt")).unwrap();
     let mut readings: Vec<Vec<String>> = Vec::new();
@@ -826,6 +847,41 @@ fn timing_typing76_keys_with_50k_records() {
 }
 
 fn time_typing76(dir: Option<&Path>) {
+    time_typing76_in(dir, false);
+}
+
+/// Section 12.4 item 6: the keys of the abbreviation variant, fully determined. The reading is cut into groups of two
+/// syllables (the last group one when the count is odd); each group's target is the sentence's characters at those
+/// positions. Per group: the first zhuyin key of each syllable, then, if the target is in the row, Tab and its digit,
+/// else Esc and the group's full syllables. The sentence ends with Enter.
+fn abbreviation_keys(e: &mut Engine, sent: &str, reading: &str, mut each: impl FnMut(&mut Engine, Key) -> Output) {
+    let syls: Vec<&str> = reading.split(' ').collect();
+    let chars: Vec<char> = sent.chars().collect();
+    assert_eq!(chars.len(), syls.len());
+    for (g, group) in syls.chunks(2).enumerate() {
+        let target: String = chars[g * 2..g * 2 + group.len()].iter().collect();
+        let mut o = None;
+        for y in group {
+            // The first zhuyin key; a neutral tone written in front (`˙ㄅㄚ`) is a tone key, not a symbol.
+            let k = syl_keys(y).into_iter().find(|k| L.symbol_of(k.ch).is_some()).unwrap();
+            o = Some(each(e, k));
+        }
+        let row = o.unwrap().candidates;
+        match row.iter().position(|w| *w == target) {
+            Some(i) => {
+                each(e, kind(KeyKind::Tab));
+                each(e, digit(i + 1));
+            }
+            None => {
+                each(e, kind(KeyKind::Esc));
+                group.iter().flat_map(|y| syl_keys(y)).for_each(|k| drop(each(e, k)));
+            }
+        }
+    }
+    each(e, kind(KeyKind::Enter));
+}
+
+fn time_typing76_in(dir: Option<&Path>, abbr: bool) {
     let s = shared();
     let rss0 = rss_kb();
     let t = Instant::now();
@@ -833,7 +889,7 @@ fn time_typing76(dir: Option<&Path>) {
     println!("index build {:?}; rss {} -> {} KiB", t.elapsed(), rss0, rss_kb());
     let text = std::fs::read_to_string(root().join("eval/dev/user-typing.txt")).unwrap();
     let mut times: Vec<Duration> = Vec::new();
-    let mut slow: Vec<(Duration, usize, usize)> = Vec::new();
+    let mut slow: Vec<(Duration, usize, usize, KeyKind)> = Vec::new();
     let mut rows = 0;
     for line in text.lines().filter(|l| !l.is_empty()) {
         let f: Vec<&str> = line.split('|').collect();
@@ -844,27 +900,37 @@ fn time_typing76(dir: Option<&Path>) {
             e.learning_open(d).unwrap();
         }
         e.set_left_context(left);
-        let mut keys: Vec<Key> = reading.split(' ').flat_map(syl_keys).collect();
-        keys.push(kind(KeyKind::Enter));
-        for (ki, k) in keys.into_iter().enumerate() {
+        let mut ki = 0;
+        let mut timed = |e: &mut Engine, k: Key| {
             let t = Instant::now();
-            e.key(k).unwrap();
+            let o = e.key(k).unwrap();
             let d = t.elapsed();
             times.push(d);
-            slow.push((d, rows, ki));
+            slow.push((d, rows, ki, k.kind));
+            ki += 1;
+            o
+        };
+        if abbr {
+            e.set_abbreviation(true).unwrap();
+            abbreviation_keys(&mut e, f[1], reading, &mut timed);
+        } else {
+            let mut keys: Vec<Key> = reading.split(' ').flat_map(syl_keys).collect();
+            keys.push(kind(KeyKind::Enter));
+            keys.into_iter().for_each(|k| drop(timed(&mut e, k)));
         }
         rows += 1;
     }
     times.sort();
     let ms = |d: Duration| d.as_secs_f64() * 1000.0;
-    slow.sort();
-    for (d, r, k) in slow.iter().rev().take(3) {
-        println!("slowest: {:.3} ms at row {r} key {k}", ms(*d));
+    slow.sort_by_key(|x| x.0);
+    for (d, r, k, kd) in slow.iter().rev().take(3) {
+        println!("slowest: {:.3} ms at row {r} key {k}{}", ms(*d), if *kd == KeyKind::Enter { " (Enter: commit, learning write)" } else { "" });
     }
     println!("keys over 16 ms: {}", times.iter().filter(|d| **d > Duration::from_millis(16)).count());
     println!(
-        "typing76{}: rows {rows} keys {} p50 {:.3} ms p95 {:.3} ms max {:.3} ms",
+        "typing76{}{}: rows {rows} keys {} p50 {:.3} ms p95 {:.3} ms max {:.3} ms",
         if dir.is_some() { " + store" } else { "" },
+        if abbr { " + abbreviation" } else { "" },
         times.len(),
         ms(times[times.len() / 2]),
         ms(times[times.len() * 95 / 100]),
@@ -1607,7 +1673,7 @@ fn reading_matches_compares_the_first_syllable_as_before() {
     ];
     for (keys, reading, want) in cases {
         let u = units_of(keys);
-        assert_eq!(reading_matches(&u, &r(reading)), want, "{keys} {reading}");
+        assert_eq!(reading_matches_in(&u, &r(reading), Mode::P), want, "{keys} {reading}");
         assert_eq!(old(&u, &r(reading)), want, "the old first-syllable test: {keys} {reading}");
     }
 }
@@ -1754,4 +1820,207 @@ fn cells(v: &[Vec<bool>]) -> String {
         })
         .collect();
     format!("{}\t{}", v.len(), c.join("\t"))
+}
+
+// ---------- the abbreviation composer (contract section 12) ----------
+
+/// A chat engine with the abbreviation setting on and `left` before the insertion point.
+fn abbr_engine(left: &str) -> Engine {
+    let mut e = engine();
+    e.set_abbreviation(true).unwrap();
+    e.set_left_context(left);
+    e
+}
+/// `predict` in `PA` mode for these unfinished units, as the row of an empty composition (no long starts), first nine.
+fn abbr_oracle(left: &str, units: &[&str]) -> Vec<(String, Vec<String>)> {
+    let s = shared();
+    let key = context_key(left);
+    let v = history(if key == "^" { "" } else { &key }, &s.lm);
+    let u: Vec<Unit> = units.iter().map(|c| Unit { chars: c.chars().collect(), done: false, tone: None }).collect();
+    predict(s.capped.predict_index(&s.lm), &s.lm, Profile::Chat.lambda(), v, &u, Mode::PA, 9).into_iter().map(|x| (x.0, x.3)).collect()
+}
+fn milk_tea_reading() -> Vec<String> {
+    vec!["ㄋㄞˇ".to_string(), "ㄔㄚˊ".to_string()]
+}
+
+#[test]
+fn abbreviation_two_units_show_and_select_milk_tea() {
+    let mut e = abbr_engine(A.0);
+    e.set_learning(true);
+    let o = typ(&mut e, &[], "ㄋㄔ");
+    assert_eq!(o.preedit, "ㄋㄔ", "two units show in order");
+    assert_passive(&o);
+    let want = abbr_oracle(A.0, &["ㄋ", "ㄔ"]);
+    assert_eq!(row(&o), want.iter().map(|x| x.0.clone()).collect::<Vec<_>>(), "the row is predict in PA mode");
+    assert!(row(&o).contains(&"奶茶".to_string()), "{:?}", row(&o));
+    let o = pick_word(&mut e, "奶茶");
+    assert_eq!((o.preedit.as_str(), o.cursor_utf16), ("奶茶", 2));
+    assert_no_row(&o);
+    assert_eq!(e.key(kind(KeyKind::Enter)).unwrap().commit, "奶茶");
+    let r = e.learner().records();
+    assert_eq!(r.len(), 1);
+    assert_eq!((r[0].reading.clone(), r[0].word.as_str()), (milk_tea_reading(), "奶茶"), "the syllables are the word's reading");
+    assert_eq!(want.iter().find(|x| x.0 == "奶茶").unwrap().1, milk_tea_reading());
+}
+
+#[test]
+fn abbreviation_needs_the_setting_the_row_and_the_end_of_the_composition() {
+    // setting off: the second key replaces the first
+    let mut e = engine();
+    e.set_left_context(A.0);
+    assert_eq!(typ(&mut e, &[], "ㄋㄔ").preedit, "ㄔ");
+    // setting on, row off
+    let mut e = abbr_engine(A.0);
+    e.set_prediction(false).unwrap();
+    assert_eq!(typ(&mut e, &[], "ㄋㄔ").preedit, "ㄔ");
+    // setting on, cursor not at the end
+    let mut e = abbr_engine("");
+    typ(&mut e, &["ㄋㄧˇ", "ㄏㄠˇ"], "");
+    e.key(kind(KeyKind::Left)).unwrap();
+    let o = send(&mut e, pend_keys("ㄋㄔ"));
+    assert!(o.preedit.contains('ㄔ') && !o.preedit.contains('ㄋ'), "{}", o.preedit);
+}
+
+#[test]
+fn abbreviation_needs_a_model_and_stops_at_the_unit_cap() {
+    // No model, so no row to resolve units with: the second key replaces the first although the setting and the row are on.
+    let mut e = Engine::with_lexicon(shared().lex.clone(), L);
+    e.set_abbreviation(true).unwrap();
+    assert_eq!(typ(&mut e, &[], "ㄋㄔ").preedit, "ㄔ");
+    // The cap: ten presses make ten units, the next ones replace the last unit.
+    let mut e = abbr_engine("");
+    let o = send(&mut e, (0..12).map(|_| Key::ch('s', 0)).collect());
+    assert_eq!(o.preedit, "ㄋ".repeat(ABBR_MAX_UNITS));
+    let o = e.key(Key::ch('t', 0)).unwrap();
+    assert_eq!(o.preedit, format!("{}ㄔ", "ㄋ".repeat(ABBR_MAX_UNITS - 1)));
+}
+
+#[test]
+fn abbreviation_keys_with_two_units() {
+    let mut e = abbr_engine(A.0);
+    let before = typ(&mut e, &[], "ㄋㄔ");
+    for k in [Key::ch('3', 0), kind(KeyKind::Space)] {
+        assert!(e.key(k).unwrap() == before, "tone and space do nothing");
+    }
+    assert_eq!(e.key(kind(KeyKind::Backspace)).unwrap().preedit, "ㄋ", "one Backspace leaves one unit");
+    // Enter and Shift+Enter send the shown symbols
+    let mut e = abbr_engine(A.0);
+    typ(&mut e, &[], "ㄋㄔ");
+    let o = e.key(kind(KeyKind::Enter)).unwrap();
+    assert_eq!((o.commit.as_str(), o.handled), ("ㄋㄔ", true));
+    typ(&mut e, &[], "ㄋㄔ");
+    let o = e.key(Key { kind: KeyKind::Enter, ch: '\0', modifiers: MOD_SHIFT }).unwrap();
+    assert_eq!((o.commit.as_str(), o.handled), ("ㄋㄔ", false));
+    // punctuation drops the units, then inserts the mark (rule 2)
+    typ(&mut e, &[], "ㄋㄔ");
+    assert_eq!(e.key(comma()).unwrap().preedit, "，");
+    // the known gap: a syllable without an initial joins the unit before it
+    e.reset(ResetMode::Discard);
+    let o = typ(&mut e, &[], "ㄋㄢ");
+    assert_eq!(o.preedit, "ㄋㄢ");
+    let o = e.key(Key::ch('6', 0)).unwrap(); // ˊ: one unit, so the tone completes ㄋㄢˊ
+    assert!(!o.preedit.contains('ㄋ') && !o.preedit.is_empty(), "{}", o.preedit);
+}
+
+#[test]
+fn abbreviation_esc_drops_only_the_units() {
+    let mut e = abbr_engine(A.0);
+    e.set_learning(true);
+    typ(&mut e, &[], "ㄋ");
+    let o = pick_word(&mut e, "奶茶");
+    assert_eq!(o.preedit, "奶茶");
+    let o = send(&mut e, pend_keys("ㄋㄔ"));
+    assert_eq!(o.preedit, "奶茶ㄋㄔ");
+    let o = e.key(kind(KeyKind::Esc)).unwrap();
+    assert_eq!((o.preedit.as_str(), o.cursor_utf16), ("奶茶", 2), "the word and the cursor stay");
+    assert_eq!(e.key(kind(KeyKind::Enter)).unwrap().commit, "奶茶");
+    assert_eq!(e.learner().records().len(), 1, "the fixed word is still there to be learned");
+}
+
+#[test]
+fn abbreviation_off_or_row_off_drops_two_units_only() {
+    for row_off in [false, true] {
+        let mut e = abbr_engine(A.0);
+        let two = typ(&mut e, &[], "ㄋㄔ");
+        assert_eq!(two.preedit, "ㄋㄔ");
+        let o = if row_off { e.set_prediction(false) } else { e.set_abbreviation(false) }.unwrap();
+        assert_eq!(o.preedit, "", "row_off {row_off}");
+        assert_no_row(&o);
+    }
+    let mut e = abbr_engine(A.0);
+    let one = typ(&mut e, &[], "ㄋ");
+    assert!(e.set_abbreviation(false).unwrap() == one, "one unit: nothing changes");
+    let mut e = abbr_engine(A.0);
+    let one = typ(&mut e, &[], "ㄋ");
+    assert!(e.set_prediction(false).unwrap().preedit == one.preedit);
+    // switching it on changes nothing
+    let mut e = engine();
+    e.set_left_context(A.0);
+    let one = typ(&mut e, &[], "ㄋ");
+    assert!(e.set_abbreviation(true).unwrap() == one);
+}
+
+#[test]
+fn abbreviation_picks_are_learned_like_prefix_picks_and_come_first_next_time() {
+    // the same record as the prefix completion
+    let mut e = learner_engine(Profile::Chat, None);
+    e.set_abbreviation(true).unwrap();
+    teach(&mut e, A.0, "ㄋㄔ", "奶茶");
+    let abbr_rec = e.learner().records().to_vec();
+    let mut p = learner_engine(Profile::Chat, None);
+    teach(&mut p, A.0, "ㄋ", "奶茶");
+    assert_eq!(abbr_rec.len(), 1);
+    assert_eq!(abbr_rec[0].context, p.learner().records()[0].context);
+    assert_eq!(abbr_rec[0].reading, p.learner().records()[0].reading);
+    assert_eq!(abbr_rec[0].word, p.learner().records()[0].word);
+    // an item that was not first comes first after it was chosen
+    let mut e = learner_engine(Profile::Chat, None);
+    e.set_abbreviation(true).unwrap();
+    e.set_left_context(A.0);
+    let base = row(&typ(&mut e, &[], "ㄋㄔ"));
+    assert!(base.len() > 2, "{base:?}");
+    let word = base[2].clone();
+    pick_word(&mut e, &word);
+    assert_eq!(e.key(kind(KeyKind::Enter)).unwrap().commit, word);
+    e.set_left_context(A.0);
+    let again = row(&typ(&mut e, &[], "ㄋㄔ"));
+    assert_eq!(again[0], word, "{base:?} -> {again:?}");
+}
+
+#[test]
+fn reading_matches_follows_the_query_mode() {
+    let r = |s: &str| s.split(' ').map(String::from).collect::<Vec<_>>();
+    let u = |ch: &[&str]| -> Vec<Unit> { ch.iter().map(|c| Unit { chars: c.chars().collect(), done: false, tone: None }).collect() };
+    // (units, reading, in P, in PA)
+    let cases = [
+        (u(&["ㄋ", "ㄔ"]), "ㄋㄞˇ ㄔㄚˊ", false, true),
+        (u(&["ㄋ", "ㄔ"]), "ㄋㄞˇ ㄔㄚˊ ㄗ", false, false), // an abbreviation is as long as its word
+        (u(&["ㄋ", "ㄔ"]), "ㄋㄞˇ ㄇㄚ", false, false),
+        (u(&["ㄋ"]), "ㄋㄞˇ ㄔㄚˊ", true, true),
+        (u(&["ㄋ", "ㄔ", "ㄗ"]), "˙ㄋㄜ ㄔㄚˊ ㄗㄨㄛˋ", false, true),
+    ];
+    for (units, reading, p, pa) in cases {
+        assert_eq!(reading_matches_in(&units, &r(reading), Mode::P), p, "P {reading}");
+        assert_eq!(reading_matches_in(&units, &r(reading), Mode::PA), pa, "PA {reading}");
+    }
+    // done + undone: only the prefix reading
+    let mixed = units_of("ㄋㄧˇㄏ");
+    assert_eq!(reading_matches_in(&mixed, &r("ㄋㄧˇ ㄏㄠˇ"), Mode::PA), true);
+    assert_eq!(reading_matches_in(&mixed, &r("ㄋㄧㄡˊ ㄏㄠˇ"), Mode::PA), false);
+    // never false for a reading predict returns, in either mode
+    let s = shared();
+    let idx = s.capped.predict_index(&s.lm);
+    let sep = |keys: &str| -> Vec<Unit> { keys.chars().map(|c| u(&[&c.to_string()])).flatten().collect() };
+    for (units, abbr_only) in [(sep("ㄋ"), false), (sep("ㄋㄔ"), true), (sep("ㄅㄐㄙ"), true), (units_of("ㄇㄧㄥˊㄊ"), false), (units_of("ㄉㄜ"), false)] {
+        let mut returned = 0;
+        for mode in [Mode::P, Mode::PA] {
+            let got = predict(idx, &s.lm, Profile::Chat.lambda(), "", &units, mode, 200);
+            returned += got.len();
+            assert!(mode == Mode::PA || !abbr_only || got.is_empty());
+            for (w, _, _, reading) in got {
+                assert!(reading_matches_in(&units, &reading, mode), "{w} {reading:?}");
+            }
+        }
+        assert!(returned > 0);
+    }
 }

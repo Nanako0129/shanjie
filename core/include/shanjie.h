@@ -107,6 +107,15 @@ int32_t shanjie_engine_set_demote(ShanjieEngine *engine, uint32_t enabled, Shanj
 //   0 clears the prediction row (an entered row is left) and computes none; 1 recomputes it, so a row that
 //   fits the display conditions shows in the returned snapshot. No effect without a loaded model.
 int32_t shanjie_engine_set_prediction(ShanjieEngine *engine, uint32_t enabled, ShanjieOutput **out); // 0 or 1; returns a snapshot
+// V3 (docs/contracts/v3-engine.md section 12): set_abbreviation 0 or 1 (2 otherwise, state unchanged), default 0, like
+//   set_prediction in its codes and its snapshot (handled 1, commit ""); 1 when engine or out is NULL. With 1 (and the
+//   prediction row on and the cursor at the end of the composition) a zhuyin key whose column already holds a symbol
+//   opens a new unfinished unit instead of replacing it, so ㄋㄔ is two units, and the prediction row reads them as
+//   the initials of a word's syllables (奶茶). With two or more units a tone key and space do nothing, Enter sends the
+//   shown symbols, Esc drops all units (the composition, fixed words and cursor stay) and Backspace takes the last symbol.
+//   Turning it off, or the prediction row off, while there are two or more units drops them all (as Esc) and returns
+//   that state; with one unit nothing changes. Turning it on changes nothing. No effect without a loaded model.
+int32_t shanjie_engine_set_abbreviation(ShanjieEngine *engine, uint32_t enabled, ShanjieOutput **out); // 0 or 1; returns a snapshot
 // s3e (docs/contracts/s3e-punctuation-candidates.md): punctuation alternatives, UTF-8 lines
 // "mark\talt\talt...", blank lines ignored, a repeated mark overrides; at most 64 KB / 1,000 lines.
 // 2 on any invalid input, keeping the previous table (a built-in default until the first success).
