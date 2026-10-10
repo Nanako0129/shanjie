@@ -2421,3 +2421,10 @@ PR #90 的審查意見逐項處理。
 - 手動詞 蕾妮亞、八潮瑠唯 的備註改成：第四欄是另外加的讀音，兩個讀音都出貨。只改備註欄，詞包輸出不變。
 - `docs/contracts/s3a.md` 不再說解析失敗也帶檔案與 `ErrorKind`：讀取失敗帶路徑與 `ErrorKind`，解析失敗帶資料夾與解析器的 `detail`。
 - 延後項（B 片的前置條件，寫在契約 A2.7）：七項，見該處。
+
+## 2026-10-10：設定視窗的第三、四輪實機（v0.4.0 前）
+
+- 滑桿兩端：使用者要 Syrtis 那樣的圖示（「左邊應該是中空的」）。放進 `Slider` 的 `minimumValueLabel`／`maximumValueLabel` 時，在分組的 `Form` 裡 `square.on.square` 也畫成實心；照 Syrtis（`GlassTintControl.swift`）改成滑桿兩旁的 `HStack`，左 `rectangle.on.rectangle`、右 `rectangle.fill.on.rectangle.fill`，`.secondary` 前景。
+- 背景：Liquid Glass（`NSGlassEffectView`）對設定視窗太透，使用者要較平的玻璃，換成 `NSVisualEffectView` 的 `.popover`（看系統清單挑的，沒有量測）。
+- 標題列：視窗背景透明、標題列又在玻璃外面，所以幾乎全透（「標題列不要做那麼透」）。照 Syrtis 的設定視窗，玻璃延伸到標題列底下（`.fullSizeContentView`、`titlebarAppearsTransparent`），表單從標題列下面開始（高度用 `NSWindow.frameRect(forContentRect:styleMask:)` 算，`safeAreaRegions = []` 不再重複內縮）。
+- 使用者實機：「設定面板OK」。契約 `docs/contracts/settings-window.md` §2.1 與審查紀錄同步。

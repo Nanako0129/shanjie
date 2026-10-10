@@ -28,7 +28,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         m.refreshExternal()
         let w = window ?? makeWindow(m)
         window = w
-        w.setContentSize(host?.fittingSize ?? w.contentLayoutRect.size)
+        if let host { w.setContentSize(NSSize(width: host.fittingSize.width, height: host.fittingSize.height + Self.titleBarHeight)) }
         center(w)
         NSApp.activate()
         w.makeKeyAndOrderFront(nil)
@@ -38,23 +38,40 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         w.orderFrontRegardless()
     }
 
+    /// The window's background material (user, 2026-10-10: Liquid Glass was too see-through; a flatter glass).
+    /// `.popover` was picked by eye on the system's list, not measured; the user's device check passed (2026-10-10).
+    static let backgroundMaterial: NSVisualEffectView.Material = .popover
+
+    /// The glass runs under the title bar, as in Syrtis's settings window (TokenBar SettingsWindowController.swift):
+    /// with the window's background clear, a title bar outside the glass was see-through (user, 2026-10-10, third
+    /// visual round). The form starts this far down; the system's own title bar height for this style mask.
+    static let titleBarHeight = NSWindow.frameRect(forContentRect: NSRect(x: 0, y: 0, width: 100, height: 100), styleMask: [.titled, .closable]).height - 100
+
     private func makeWindow(_ model: SettingsModel) -> NSWindow {
-        // Liquid Glass behind the content, never around it (a wrapped view gets vibrancy and washed-out
-        // text; Syrtis, PR 491): the system glass fills the window, the SwiftUI form sits on top with
-        // its own background hidden.
-        let glass = NSGlassEffectView()
+        // The system's frosted material behind the content, never around it (a wrapped view gets vibrancy
+        // and washed-out text; Syrtis, PR 491); the SwiftUI form sits on top with its own background hidden.
+        // Not Liquid Glass (NSGlassEffectView): on device it was too see-through for a settings window, and the
+        // user asked for a flatter glass (2026-10-10, second visual round). The tint preview keeps the real
+        // candidate glass, so its depth still matches typing.
+        let glass = NSVisualEffectView()
+        glass.material = Self.backgroundMaterial
+        glass.blendingMode = .behindWindow
+        glass.state = .active
         let host = NSHostingView(rootView: SettingsForm(model: model))
+        host.safeAreaRegions = []  // placed below the title bar by its top constraint, so no second inset
         self.host = host
         let container = NSView()
-        for v in [glass, host] {
+        let layers: [(NSView, CGFloat)] = [(glass, 0), (host, Self.titleBarHeight)]
+        for (v, top) in layers {
             v.translatesAutoresizingMaskIntoConstraints = false
             container.addSubview(v)
             NSLayoutConstraint.activate([
                 v.leadingAnchor.constraint(equalTo: container.leadingAnchor), v.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-                v.topAnchor.constraint(equalTo: container.topAnchor), v.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+                v.topAnchor.constraint(equalTo: container.topAnchor, constant: top), v.bottomAnchor.constraint(equalTo: container.bottomAnchor),
             ])
         }
-        let w = NSWindow(contentRect: .zero, styleMask: [.titled, .closable], backing: .buffered, defer: false)
+        let w = NSWindow(contentRect: .zero, styleMask: [.titled, .closable, .fullSizeContentView], backing: .buffered, defer: false)
+        w.titlebarAppearsTransparent = true
         w.contentView = container
         w.title = "善解設定"
         w.isOpaque = false
@@ -115,12 +132,20 @@ struct SettingsForm: View {
                 }
             }
             Section("外觀") {
-                Slider(value: Binding(get: { model.glassTint }, set: { model.setGlassTint($0) }), in: 0...1) {
-                    Text("候選窗玻璃深淺")
-                } minimumValueLabel: {
-                    Text("透明")
-                } maximumValueLabel: {
-                    Text("深")
+                // The end icons are Syrtis's (TokenBar GlassTintControl.swift): outline at the clear end, filled at the deep
+                // end, in an HStack beside the slider. As the Slider's own value labels inside a grouped Form both came out
+                // filled on device (user, 2026-10-10).
+                LabeledContent("候選窗玻璃深淺") {
+                    HStack(spacing: 8) {
+                        Image(systemName: "rectangle.on.rectangle")
+                            .foregroundStyle(.secondary)
+                            .accessibilityLabel("透明")
+                        Slider(value: Binding(get: { model.glassTint }, set: { model.setGlassTint($0) }), in: 0...1)
+                            .accessibilityLabel("候選窗玻璃深淺")
+                        Image(systemName: "rectangle.fill.on.rectangle.fill")
+                            .foregroundStyle(.secondary)
+                            .accessibilityLabel("深")
+                    }
                 }
                 // The real bar's glass, cells and tint decision, so the depth is what typing shows.
                 HStack {
