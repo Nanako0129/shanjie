@@ -189,8 +189,9 @@ public final class Shell {
     /// V3 section 12: the abbreviation composer (default off); sent to every engine `build()` makes, next to the prediction switch.
     private(set) var abbreviationOn = false
     /// Whether the abbreviation switch is offered at all (menu item, settings toggle). The app passes false: the feature does not
-    /// ship in v0.4.0 (user, 2026-10-10: several units cannot be resolved as a sentence, and Space and tone keys are eaten while
-    /// two or more units are pending). Hidden means always off; the stored value is neither read nor written.
+    /// ship in v0.4.0 (user, 2026-10-10, after a device check: a whole sentence cannot be abbreviated, and keys seemed stuck; the
+    /// stuck keys are read against V3 section 12.2, not reproduced: Space and tone keys are eaten while two or more units are
+    /// pending). Hidden means always off; the stored value is neither read nor written.
     public let showsAbbreviation: Bool
     private let acgPackStore: AcgPackStore
     /// The ACG word pack (default on, user decision 2026-10-09): parsed into the lexicon, so a change rebuilds the engine like a layout change.
@@ -269,6 +270,8 @@ public final class Shell {
     /// `candidateOrientationStore`: the candidate window's orientation (candidate-vertical contract section 2.1). Required, like `glassTintStore`.
     /// `punctuationTable`: Apple's punctuation candidate table (s3e); tests pass another path.
     /// `punctuationNames`: Apple's punctuation names (s3f); tests pass another path.
+    /// `showsAbbreviation`: whether the abbreviation switch is offered. The default `true` is for the tests; the app passes `false`
+    /// (v0.4.0). No test sees the app's value: the release device check does (no 可省略韻母 in the menu).
     public init(resources: URL, panel: CandidatePanel, isSecureInput: @escaping () -> Bool,
                 layoutStore: LayoutStore, learningDirectory: URL?, dialogs: LearningDialogs,
                 demoteStore: DemoteStore, predictionStore: PredictionStore, abbreviationStore: AbbreviationStore, acgPackStore: AcgPackStore,
@@ -298,7 +301,7 @@ public final class Shell {
         predictionOn = predictionStore.prediction ?? true
         self.abbreviationStore = abbreviationStore
         self.showsAbbreviation = showsAbbreviation
-        abbreviationOn = showsAbbreviation ? abbreviationStore.abbreviation ?? false : false
+        abbreviationOn = showsAbbreviation && abbreviationStore.abbreviation == true
         self.acgPackStore = acgPackStore
         acgDataDate = Shell.readAcgDataDate(resources.appendingPathComponent("packs/acg.json"))
         self.glassTintStore = glassTintStore
