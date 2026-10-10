@@ -188,6 +188,10 @@ public final class Shell {
     private let abbreviationStore: AbbreviationStore
     /// V3 section 12: the abbreviation composer (default off); sent to every engine `build()` makes, next to the prediction switch.
     private(set) var abbreviationOn = false
+    /// Whether the abbreviation switch is offered at all (menu item, settings toggle). The app passes false: the feature does not
+    /// ship in v0.4.0 (user, 2026-10-10: several units cannot be resolved as a sentence, and Space and tone keys are eaten while
+    /// two or more units are pending). Hidden means always off; the stored value is neither read nor written.
+    public let showsAbbreviation: Bool
     private let acgPackStore: AcgPackStore
     /// The ACG word pack (default on, user decision 2026-10-09): parsed into the lexicon, so a change rebuilds the engine like a layout change.
     private(set) var acgPackOn = true
@@ -268,7 +272,8 @@ public final class Shell {
                 demoteStore: DemoteStore, predictionStore: PredictionStore, abbreviationStore: AbbreviationStore, acgPackStore: AcgPackStore,
                 glassTintStore: GlassTintStore, candidateOrientationStore: CandidateOrientationStore,
                 punctuationTable: URL = PunctuationTable.systemURL,
-                punctuationNames: URL = PunctuationNames.systemURL) {
+                punctuationNames: URL = PunctuationNames.systemURL,
+                showsAbbreviation: Bool = true) {
         self.resources = resources
         self.learningDirectory = learningDirectory
         self.dialogs = dialogs
@@ -290,7 +295,8 @@ public final class Shell {
         self.predictionStore = predictionStore
         predictionOn = predictionStore.prediction ?? true
         self.abbreviationStore = abbreviationStore
-        abbreviationOn = abbreviationStore.abbreviation ?? false
+        self.showsAbbreviation = showsAbbreviation
+        abbreviationOn = showsAbbreviation ? abbreviationStore.abbreviation ?? false : false
         self.acgPackStore = acgPackStore
         acgDataDate = Shell.readAcgDataDate(resources.appendingPathComponent("packs/acg.json"))
         self.glassTintStore = glassTintStore
@@ -385,6 +391,7 @@ public final class Shell {
 
     /// The menu's choice (V3 section 12.1): stored, and sent to the engine; the snapshot is for the caller to show.
     func setAbbreviation(_ on: Bool) -> CoreResult? {
+        guard showsAbbreviation else { return nil }
         abbreviationOn = on
         abbreviationStore.abbreviation = on
         defer { changed() }
