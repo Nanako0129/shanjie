@@ -8,10 +8,12 @@
       --rule-lm DIR                                   (c) 規則與衝突偵測用的規則模型（契約 A3.3；預設 build/rule-lm，雜湊不符就中止）
       --a3 off                                        開發用：關掉 A3.1、A3.2、A3.4，重建 v0.4.0 的詞包（契約 A3.5 第 3 項 (i)）
       --recheck                                       不重建：用 data/lm 的出貨模型重驗 --out 裡的詞包（契約 A3.5 第 6 項）
+      --recheck-rule                                  --recheck 改用規則模型（--rule-lm）
+      --base DIR                                      --recheck 時另外比 v0.4.0 詞包（DIR/acg-add.tsv）每一列的第一名有沒有變
 
 只連 zh.wikipedia.org/w/api.php 與 query.wikidata.org，依序送出、每秒不超過 1 個、帶 User-Agent 與 maxlag=5。
 讀音靠 tools/readings.py（需要萌典與小麥的破音字表，路徑見該檔），同音衝突靠評測 CLI（target/release/shanjie-eval，
-沒有就用 cargo 建）與 data/lm/bigram.sjlm。
+沒有就用 cargo 建，一律加 --no-kn）與 --rule-lm 的規則模型；--recheck 預設用 data/lm/bigram.sjlm。
 """
 import argparse
 import collections
@@ -587,6 +589,18 @@ def dom(html):
 
 CHAR_RE = re.compile(r"(登場|登场)?(人物|角色)|主角|配角|角色介紹|人物介紹|角色簡介|主要登場|登場者|^演員|角色設定")
 CHAR_NEG = re.compile(r"列表$|一覽$|相關|周邊|商品|遊戲|玩具|聲優|配音|演員|製作|聲音|影響|評價|設計|創作|名詞|專有|用語")
+# 整頁模式（A3.2）不收的地方：頁尾的參考、注釋、外部連結、相關條目小節，以及導覽框、參考文獻框（PR #111 /code-review：
+# 網際網路電影資料庫、集換式卡牌遊戲 等從這裡進了詞包）。只用在人物小標題以外，A2 的抽取不變。
+BACK_RE = re.compile(r"參考|参考|注釋|註釋|注释|註解|注解|腳注|脚注|外部連結|外部链接|相關條目|相关条目|參見|参见|延伸閱讀")
+BOX = {"navbox", "navbox-inner", "vertical-navbox", "reflist", "references", "refbegin"}
+
+
+def in_box(n):
+    while n is not None:
+        if BOX.intersection(n.cls()) or n.attrs.get("role") == "navigation":
+            return True
+        n = n.parent
+    return False
 LIST_RE = re.compile(r"(角色|人物)(列表|一覽|一览)$|登場(人物|角色)(列表|一覽|一览)$")   # 契約：連到的角色列表條目（不含機體、用語列表）
 HANX = re.compile(r"^[㐀-䶿一-鿿]+$")
 SEP = re.compile(r"[・·•･ 　/／]")
@@ -609,7 +623,7 @@ def raw_candidates(root, whole_page=False):
                 stack.pop()
             stack.append((lv, n.text().strip(), n))
         in_sec = any(CHAR_RE.search(t) and not CHAR_NEG.search(t) for _, t, _ in stack)
-        if not in_sec and not whole_page:
+        if not in_sec and (not whole_page or any(BACK_RE.search(t) for _, t, _ in stack) or in_box(n)):
             continue
         if n.tag == "dt":
             yield "dt", "".join(k.text() for k in n.kids if k.tag not in ("ul", "ol", "dl", "table", "div")), in_sec
@@ -808,7 +822,7 @@ def top1(pairs, profile, packs_dir=None, lm=LM):
         rows, dump = os.path.join(d, "rows.txt"), os.path.join(d, "dump.txt")
         with open(rows, "w", encoding="utf-8") as f:
             f.writelines(f"|{w}|{' '.join(syls)}\n" for w, syls in pairs)
-        cmd = [eval_bin(), "--lm", lm, "--profile", profile, "--rows", rows, "--dump", dump]
+        cmd = [eval_bin(), "--lm", lm, "--profile", profile, "--rows", rows, "--dump", dump, "--no-kn"]   # 釘住的模型不含 KN 側檔（模型旁有 kn.sjkn 時 CLI 會開）
         if packs_dir:
             cmd += ["--packs", "acg", "--packs-dir", packs_dir]
         subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL)
@@ -1069,8 +1083,8 @@ def build(api, groups_tsv=os.path.join(PACKS, "acg-groups.tsv"), collisions_tsv=
     # 使用者 2026-10-10 的規則：詞包詞若把既有詞庫的詞擠下第一名（類型 c），既有詞勝、詞包詞丟掉；丟掉之後別的詞的結果可能變，重跑到沒有 c 為止。
     lexicon_dropped = []
     def nsrc(w):        # 來源數：新詞算全部；已出貨的詞不算 A3 新加的出處（間隔號、段落外、A3.4 的手動），同讀音已出貨的詞之間的順序才不會因為 A3 變動
-        if w not in shipped:
-            return sum(len(s) for s in src[w].values())
+        if w not in shipped:      # 「全名@條目@revid」：同一條目的不同全名算一個出處（PR #111 /code-review）
+            return sum(len({x.rsplit("@", 2)[-2] for x in s}) if k == "char" else len(s) for k, s in src[w].items())
         return sum(len(s) for k, s in src[w].items() if k != "char") + len(name_base[w]) - (w in A3_MANUAL and "manual" in src[w])
     for _ in range(LEXICON_RULE_ROUNDS):
         order = ordered(words, nsrc, rank, reading, extra, shipped)
@@ -1112,6 +1126,8 @@ def build(api, groups_tsv=os.path.join(PACKS, "acg-groups.tsv"), collisions_tsv=
             occ = name_occ.get(w, set())
             if "manual" in src[w] or not occ:
                 return "manual" if "manual" in src[w] else "other"
+            if (False, False) in occ:           # 一般寫法、人物段落內：v0.4.0 的抽取就收得到，不算 A3 的
+                return "other"
             a31, a32 = all(i for i, _ in occ), all(o for _, o in occ)
             return {(True, True): "A3.1+A3.2", (True, False): "A3.1", (False, True): "A3.2"}.get((a31, a32), "either")
         info.update(v040=v040, origin={w: origin(w) for w in words if w not in v040}, reading=reading, extra=extra, check={w: rd[w][1] for w in words},
@@ -1221,8 +1237,8 @@ def recheck(out_dir, report_dir, packs=PACKS, decode=top1, base_dir=None):
     on = {prof: decode([(w, r.split()) for r, w in kb_pairs], prof, out_dir) for prof in ("chat", "formal")}
     out += [f"  {r}\t{w}\t{on['chat'][i]}\t{on['formal'][i]}" for i, (r, w) in enumerate(kb_pairs)]
     if base_dir:
-        bwords, breading, bextra, _ = load_pack(os.path.join(base_dir, "acg-add.tsv"))
-        bpairs = [(w, r) for w in bwords for r in [breading[w]] + bextra.get(w, [])]
+        brows = load_pack(os.path.join(base_dir, "acg-add.tsv"))[3]       # 每一列都比，含「一」「不」的變調列（PR #111 /code-review）
+        bpairs = [(w, list(r)) for w, r in sorted({(l.split("\t")[1], tuple(l.split("\t")[0].split("-"))) for l in brows})]
         out.append("shipped (word, reading) pairs whose first place differs between the v0.4.0 pack and this pack (word, reading, profile, v0.4.0, new):")
         n = 0
         for prof in ("chat", "formal"):
@@ -1256,6 +1272,9 @@ def main():
     decode = rule_decoder(rule)       # 契約 A3.3：(c) 規則與衝突偵測都用規則模型
     info = {}
     files, manifest, col, unread, ref, ldrop = build(Api(a.cache, a.offline), decode=decode, a3=a.a3 == "on", info=info)
+    lost = sorted(info["v040"] - set(info["words"]))
+    if lost:        # 契約 A3.5 第 3 項 (ii)：v0.4.0 的詞少了就停，不寫檔
+        raise SystemExit(f"v0.4.0 words missing from the new pack ({len(lost)}), nothing written: {lost}")
     write_all(files, manifest, a.out)
     os.makedirs(a.report, exist_ok=True)
     with open(os.path.join(a.report, "collisions.txt"), "w", encoding="utf-8") as f:
@@ -1266,14 +1285,13 @@ def main():
     origin = info["origin"]
     with open(os.path.join(a.report, "new-words.tsv"), "w", encoding="utf-8") as f:       # 比 v0.4.0 多的詞（契約 A3.5 第 3 項 (ii)、第 5 項的母體）
         f.writelines(f"{w}\t{o}\t{';'.join(sorted(set(info['work'][w])))}\n" for w, o in sorted(origin.items()))
-    lost = sorted(info["v040"] - set(info["words"]))
-    print(f"v0.4.0 words {len(info['v040'])}, missing from the new pack {len(lost)}: {lost}")
+    print(f"v0.4.0 words {len(info['v040'])}, missing from the new pack 0")
     print("new words by origin:", dict(sorted(collections.Counter(origin.values()).items())), "total", len(origin))
     if a.a3 == "on":
         rows, nworks = check_rows(info)
         with open(os.path.join(a.report, "interpunct.txt"), "w", encoding="utf-8") as f:
             f.writelines(rows)
-        print(f"check set: {len(rows)} rows, {CHECK_N} sampled from {nworks} works (seed {CHECK_SEED}, round robin over shuffled works), see {os.path.join(a.report, 'interpunct.txt')}")
+        print(f"check set: {len(rows)} rows, {CHECK_N} sampled from {nworks} works (seed {CHECK_SEED}, round robin over shuffled works; words whose reading readings.py marks CHECK are left out), see {os.path.join(a.report, 'interpunct.txt')}")
     print(json.dumps({k: v for k, v in manifest.items() if k != "unclassified_groups"}, ensure_ascii=False, sort_keys=True))
     print(f"unresolved collision readings: {len(col)} (see {os.path.join(a.report, 'collisions.txt')})")
 

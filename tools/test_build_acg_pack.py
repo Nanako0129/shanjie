@@ -1,6 +1,7 @@
 """Tests for tools/build_acg_pack.py (docs/contracts/acg-pack.md A.5). Run: python3 -m unittest tools.test_build_acg_pack   (from the repo root).
 No network: the build runs against a fake API. It needs the repo's data (data/lexicon, data/lm/bigram.sjlm) and the evaluation CLI
 (built on demand with cargo) for the collision detection; it fails loudly without them, never skips."""
+import atexit
 import hashlib
 import json
 import os
@@ -317,6 +318,7 @@ READINGS = {  # tools/readings.py needs the MOE dictionary; the fixture fixes th
 FAKE_V040 = tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False, encoding="utf-8")
 FAKE_V040.write("沒有這個詞\n")
 FAKE_V040.close()
+atexit.register(os.unlink, FAKE_V040.name)     # 模組層級的暫存檔，跑完就刪（PR #111 /code-review）
 
 
 def build(api, *a, **k):
@@ -636,6 +638,13 @@ class A3(unittest.TestCase):
         self.assertEqual([n.name for n in B.names_of(html, whole_page=True, a3=False)], ["艾蓮娜"])             # A3 關掉：間隔號與整頁都不做
         self.assertEqual([n.name for n in B.names_of("<h2>登場人物</h2><ul><li>洛·米（ロ）</li></ul>")], [])      # 部分太短（單字）
 
+    def test_whole_page_skips_back_matter_and_navigation_boxes(self):
+        """PR #111 /code-review：整頁模式不收頁尾的參考、外部連結小節與導覽框；人物小標題下的照收。"""
+        html = ("<h2>主要角色</h2><ul><li>艾蓮娜</li></ul><h2>其他</h2><ul><li>卡羅爾</li></ul>"
+                "<h2>參考資料</h2><ul><li>網際網路電影資料庫</li></ul><h2>外部連結</h2><ul><li>集換式卡牌遊戲</li></ul>"
+                "<div class=\"navbox\"><ul><li>神奇寶貝鑽石</li></ul></div>")
+        self.assertEqual([n.name for n in B.names_of(html, whole_page=True)], ["艾蓮娜", "卡羅爾"])
+
     def test_strict_ok_reads_the_original_after_the_whole_name(self):
         snip = "洛琪希·米格路迪亞（ロキシー・ミグルディア）"
         self.assertTrue(B.strict_ok("洛琪希", "dt", snip, set(), "洛琪希·米格路迪亞"))
@@ -673,11 +682,7 @@ class A3(unittest.TestCase):
             self.assertNotIn(w, words)                                     # 新詞：擋掉
             self.assertNotIn(w, unread)
             self.assertIn(w, ref)
-        # 詞表固定取自提交的 v0.4.0 詞表，不是前一次建置的輸出：建置輸出覆寫了 acg-add.tsv 之後，結果不變
-        out = os.path.join(self.tmp, "out")
-        B.write_all(files, {"version": "x"}, out)
-        again = self.build()[0]
-        self.assertEqual(again["acg-add.tsv"], files["acg-add.tsv"])
+        # 詞表固定取自提交的 v0.4.0 詞表（雜湊另外釘住，test_a_missing_or_changed_v040_word_list_stops_the_build），換一份就跟著換
         other = os.path.join(self.tmp, "v040b.txt")                            # 換一份詞表：擋或留跟著詞表走
         open(other, "w", encoding="utf-8").write("貝塔王子\n")
         words2 = {l.split("\t")[1] for l in self.build(v040=other, sha=hashlib.sha256("貝塔王子\n".encode()).hexdigest())[0]["acg-add.tsv"].splitlines()}
