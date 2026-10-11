@@ -175,6 +175,11 @@ impl<'a> Rd<'a> {
 }
 
 impl Lm {
+    /// SHA-256 (hex) of the model file this `Lm` was parsed from.
+    pub fn sha256(&self) -> &str {
+        &self.sha
+    }
+
     /// Cheap fingerprint of the loaded model (sizes of its tables), to tell two models apart.
     pub fn identity(&self) -> (u64, usize, usize) {
         (self.n, self.voff.len(), self.nxt.len())
