@@ -174,6 +174,22 @@ $PY fusegrid.py --scores $W/s7e/scores --out $W/s7e/w10 --models M8 --sets cvtun
 - `score.py` 每個候選算 ll、ll0、ll16 三欄。這個模式用 ll 選與判斷，用 ll0 檢查前文有沒有接上（「LL changed by context」，錯字回報與 discordtune 是 0 就停），ll16 沒用到。
 - L、XL 是在 Colab 上用 `train.py --size L|XL`、同一份 `ids-*.npy` 與 `vocab.txt` 訓練，公開集合也在 Colab 上打分（研究紀錄 2026-10-12 記了上傳的限制）；discordtune 只在 Mac 本機打分。
 
+## Colab：資料怎麼傳（2026-10-12 實測，使用者定案）
+
+VM 在美國（實測時在南卡羅來納州）。只傳公開的程式與資料；私人資料（discordtune、學習檔、聊天紀錄）不上 Colab。
+
+| 路徑 | 實測 | 用在 |
+|---|---|---|
+| VM 自己抓公開資料：維基 dump 走 your.org 鏡像、8 路平行分段 | 約 39.5 MiB/s（官方 dumps.wikimedia.org 單線 4.8 MiB/s，平行分段會被截短） | 維基 dump |
+| VM 自己抓：Hugging Face／GitHub | 約 54.5／12.5 MiB/s | 資料集、程式 |
+| Mac → S4（rclone）→ VM（有時效的下載網址） | 約 33 MiB/s ＋ 約 15.7 MiB/s | 只在 Mac 上的檔案（自己的衍生檔、模型） |
+| `colab download`（VM → Mac） | 約 3.2 MiB/s | 結果（幾百 MB 以內） |
+| `colab upload`（Mac → VM，16 MiB 分片） | 約 2.2 MiB/s | 不用 |
+| Google Drive（`colab drivemount`） | Mac → Drive 16.8、Drive → VM 32.5、VM → Drive 13.1 MiB/s | 不用：每個 session 都要使用者授權一次 |
+
+- 有時效的網址用 `rclone link --expire 1h`，在 Mac 上產生、存成只有自己能讀的檔、不印出來；金鑰不離開 Mac。用完刪掉嵌著網址的腳本。
+- CPU 的 session（不帶 GPU）在實測時沒有扣運算單元。
+
 ## S7c-1：Rust 推論（`SJTL0001`）
 
 契約 `docs/contracts/s7c-core-tinylm.md`。`.sjtl` 不進 repo（只有 `eval/golden/tinylm-tiny/` 的隨機小模型例外），放 `~/.cache/shanjie/work/` 或 session 暫存區，**不放進任何 `data/lm/`**。

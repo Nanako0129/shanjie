@@ -3135,3 +3135,15 @@ CLI 重現（model-v5、動漫詞包開、沒有前文；小模型是 `tinylm.sj
 **Colab 的做法**（Google 官方的 `google-colab-cli` 0.7.4，使用者同意安裝）：`colab new --gpu A100 --high-mem` 拿到 A100 80GB（要求 H100 被拒）；`colab upload` 一個 544 MB 的檔回 HTTP 500、切成 100 MB 的塊回 400，切成 16 MB 的塊才穩定；上傳到 VM 上不存在的資料夾也回 500，所以先平放在 `/content/out/`、再在 VM 上合併與搬移，合併後核對 SHA-256 才訓練。只上傳公開的程式與資料。
 
 **打分速度**：XL 在 Mac 上用 numpy 打 discordtune（float64、單核），每種設定約 45 分鐘（L 約 23 分鐘、M 約 16 分鐘）。`score.py` 每個候選算三種 LL（ll、ll0、ll16）；這一片用 ll 選與判斷、用 ll0 檢查前文有沒有接上（「LL changed by context」），ll16 沒用到。之後要再打分時，可以不算 ll16、兩種設定同時跑。
+
+## 2026-10-12：Colab 的資料傳輸（實測，使用者定案）
+
+- **起因**：S7e 在 Colab 訓練 L、XL 時，從 Mac 上傳約 540 MB 的 `ids-*.npy` 要用 16 MiB 分片、很慢。使用者：「研究一下 Colab 怎麼傳資料比較快，是不是可以走 Google Drive，或是我有 MEGA S4」。
+- **實測**（VM 在美國南卡羅來納州；200 MiB 隨機檔，SHA-256 在兩端一致；不帶 GPU 的 session，沒有扣運算單元）：
+  - `colab upload` 約 2.2 MiB/s、`colab download` 約 3.2 MiB/s；
+  - Mac → S4 東京 約 33 MiB/s，S4 → VM（有時效的下載網址）約 15.7 MiB/s；
+  - Mac → Google Drive（rclone）約 16.8 MiB/s，Drive → VM（`colab drivemount` 後第一次讀）約 32.5 MiB/s，VM → Drive（含 flush）約 13.1 MiB/s；
+  - VM 直接抓：Hugging Face 約 54.5、GitHub clone 約 12.5、維基 dump 官方站單線 4.8 MiB/s（8 路平行分段有些被截短）、your.org 鏡像 8 路平行約 39.5 MiB/s。
+- **結論**：540 MB 從 Mac 到 VM，S4 與 Drive 都約 50 秒，`colab upload` 約 4 分鐘。S4 不需要使用者介入（Mac 上產生有時效的網址，金鑰不離開 Mac）；Drive 每個 session 都要使用者在終端機授權一次。
+- **使用者定案**：公開資料讓 VM 自己抓；只在 Mac 上的檔案走 S4；結果用 `colab download`。做法寫在 `experiments/s7a-tinylm/README.md`。測試檔照使用者同意刪除：S4 與 rclone 上傳到 Drive 的那份由 main 刪；VM 透過掛載寫進 Drive 的那份，rclone 的 `drive.file` 權限看不到，由使用者在網頁上刪。
+
