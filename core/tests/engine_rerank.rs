@@ -612,6 +612,19 @@ fn replay_dev302_parity_and_measurements() {
         cpu as f64 / CLOCKS_PER_SEC / wall.as_secs_f64(),
         diff_rule
     );
+    // Item 5's baseline: the same keys on an engine without the small model, for "job creation adds at most 1 ms to key p95".
+    let mut b = Engine::new(&root().join("data/lexicon"), Layout::Standard).unwrap();
+    b.load_lm(&lm_path()).unwrap();
+    let mut base = Vec::new();
+    for (_, syls) in &rows {
+        for key in syls.iter().flat_map(|s| keys_of(s)).chain([k(KeyKind::Enter)]) {
+            let t = Instant::now();
+            b.key(key).unwrap();
+            assert!(b.take_rerank_job().is_none());
+            base.push(t.elapsed());
+        }
+    }
+    eprintln!("baseline (no small model): key path p50 {:?} p95 {:?}", pct(base.clone(), 50), pct(base, 95));
     let firsts = std::env::var_os("SHANJIE_TINYLM_FIRSTS").expect("SHANJIE_TINYLM_FIRSTS: the CLI firsts file is needed for item 4");
     let want: Vec<String> = std::fs::read_to_string(firsts).unwrap().lines().map(String::from).collect();
     assert_eq!(want.len(), 302, "302 CLI firsts");

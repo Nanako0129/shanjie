@@ -2837,3 +2837,15 @@ PR #90 的審查意見逐項處理。
 
 - 留待之後（P4，verifier）：`experiments/s7a-tinylm` 的 Python 測試（含 `test_export_sjtl.py`）不在 `make test` 與 CI 裡，exporter 改壞只能靠手動跑抓到（S7a 起就是這樣）。
 - discordtune 的分數檔、rowstats 與記錄檔用完已刪。
+
+## 2026-10-11：語意 S7c-2a 重排接進引擎的核心（兩段式 API；契約 `docs/contracts/s7c2a-core-rerank.md`，分支 `feat/s7c2-core-rerank`）
+
+使用者 2026-10-11 決定：照 PLAN A3／A7 非同步；預設開＋設定開關；模型在主程序裡（PLAN 第 36、692、873 行補了例外與條件）；A4 的衝突先量再決定。設計先請 Fable 5.1 唯讀分析；契約兩次 plan-verifier 要求修改、一次安全審查（12 項都處置）、兩次收尾審查（第一次要求修改時停下來問使用者，使用者選「照修再審一次」）。security-executor 實作（0a81aa8），main 跑一致性重播與量測。
+
+- **一致性重播**（`replay_dev302_parity_and_measurements`；引擎 `Engine::new(data/lexicon)`＋`load_lm(model-v5)`＋`load_tinylm(M 的 int8 .sjtl，8725204c)`、聊天、降權開、沒有左文；dev302 每列逐鍵打，每個鍵之後同步「取工作 → 算 → 套用」，最後 Enter）：302 句送出的字串和 CLI `--dev 302 --tinylm`（不加 `--context`）重排後的第一名逐字相同；程序內用 CLI 規則算的對照也全部相同。CLI 這次的 top1 是 276／302。
+- **量測**（Apple M5；負載約 3.5–4，兩次）：
+  - 按鍵路徑（`key`＋`take`，含產生工作）：第一次 p50 0.72、p95 2.45 ms；第二次 p50 1.03、p95 3.53 ms，同一批按鍵在沒有小模型的引擎上 p50 0.80、p95 2.75 ms，增加 0.78 ms（契約的停止條件是增加超過 1 ms，沒有觸發，但很接近；兩次之間的差異顯示這些數字受負載影響）。都遠低於 A3 的 16 ms。
+  - 一次重排（`RerankJob::run`）：p50 4.48、p95 7.63 ms（第一次）；p50 7.09、p95 12.10 ms（第二次）。CPU 時間／牆鐘時間 1.00、0.97：Accelerate 在這個大小沒有另開執行緒。
+  - 8,336 個鍵產生 2,559 個工作，套用後字有變的 285 次。
+  - **「變回再換回」**（A4 的量測：某個位置在上一個鍵被重排改過，這一個鍵的 n-gram 先顯示別的字，重排後又換回上一個鍵的字）：55 個鍵，佔所有鍵的 0.66%。
+- **之後（2b 之前）要使用者決定**：帶著這個 0.66% 決定 A4 要不要加「黏住已重排的前綴」的規則或修改 A4；開關名稱與位置；Release 資產名稱與 `LICENSES/data.md` 那一列。
