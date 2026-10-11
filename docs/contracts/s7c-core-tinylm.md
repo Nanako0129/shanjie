@@ -1,6 +1,6 @@
 # S7c-1：小型字元模型重排的 Rust 推論（離線；不接引擎、不出貨）
 
-接續 S7a（`docs/contracts/s7a-tinylm.md`，M 通過 §4）與 S7b（`docs/contracts/s7b-larger-lm.md`，L／XL 與 int8，進行中）。**使用者 2026-10-11**：S7a「接受，先量 int8」——下一片用 int8（約 15 MB）做 Rust 推論，在 int8 上重跑 §4 與保留集；int8 沒過再問 float32。S7b 已量到 M 的權重 int8「夠用」（numpy）。
+接續 S7a（`docs/contracts/s7a-tinylm.md`，M 通過 §4）與 S7b（`docs/contracts/s7b-larger-lm.md`，L／XL 與 int8；結論維持 M）。**使用者 2026-10-11**：S7a「接受，先量 int8」——下一片用 int8（約 15 MB）做 Rust 推論，在 int8 上重跑 §4 與保留集；int8 沒過再問 float32。S7b 已量到 M 的權重 int8「夠用」（numpy）。
 
 S7c 分兩片。這一片（S7c-1）只做**核心的前向、模型檔、`pick`、評測 CLI**，回答「Rust 的 int8 路徑在離線評測上是不是仍然通過 S7a §4」。接進引擎、殼、設定、Release 是 S7c-2（§6 列出它要使用者先決定的事）。模型大小等 S7b 的結論；這一片的程式不綁大小，先用 M。
 
@@ -20,7 +20,7 @@ S7c 分兩片。這一片（S7c-1）只做**核心的前向、模型檔、`pick`
   - 字表（id 3 起的字，Unicode 碼位 u32；id 0／1／2 是 PAD／UNK／BOS，和 `tinylm.Vocab` 相同）；
   - 張量：順序固定（照 `tinylm.py` 的參數名排序規則，寫在 exporter 與 Rust 讀檔處的同一份註解）。二維的矩陣：`int8` 型別時是每列對稱 int8 加 f32 縮放，**直接呼叫 `latency.quantize_int8`**（和 S7b §2.3 量過的同一個量化）；`f32` 型別時原樣。一維的向量一律 f32。
 - 不另外產生 npz 讀取器；Rust 不讀 npz。
-- `int8check.py`（`dequant`）在 S7b 的分支（`research/s7b-larger`，未合併）。這一片從 main 開，golden 產生器與 exporter 只依賴 main 已有的 `latency.quantize_int8`，還原用同一個算式（`q.astype(float32) * scale`）；第 4 項的 `tinylm-M8.npz` 是 S7b 已經產生的檔（`b84376c3…`）。
+- `int8check.py`（`dequant`）在 S7b 的分支（寫這份契約時尚未合併，PR #114 合併後在 main）。這一片從 main 開，golden 產生器與 exporter 只依賴 main 已有的 `latency.quantize_int8`，還原用同一個算式（`q.astype(float32) * scale`）；第 4 項的 `tinylm-M8.npz` 是 S7b 已經產生的檔（`b84376c3…`）。
 
 ### 2.2 Rust：`core/src/tinylm.rs`
 
@@ -69,7 +69,7 @@ S7c 分兩片。這一片（S7c-1）只做**核心的前向、模型檔、`pick`
 2. **預設與設定**：預設開＋設定視窗開關（建議）；預設開、不給開關；預設關＋開關。
 3. **動漫詞包守門不過時**：開詞包時不重排（建議）；另訂詞包規則；照樣出貨並記錄。
 4. **選字記憶**：重排不改「n-gram 第一名裡有學過加分的詞」的那一段（建議，S7c-2 的契約寫測試）。
-5. **大小**：S7b 的結論出來前用 M；檔案格式與程式不綁大小。
+5. **大小**：S7b 的結論是維持 M（L 沒過 §4；XL 依使用者決定先停，先修 α 的選法，見 S7d）；檔案格式與程式不綁大小。
 
 ## 7. 結果（2026-10-11）
 
