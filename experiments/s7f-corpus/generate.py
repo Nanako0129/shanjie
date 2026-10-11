@@ -214,7 +214,7 @@ def main(argv=None):
     m = {"provider": a.provider, "model": a.model, "provider_order": a.or_provider.split(",") if a.or_provider else None,
          "allow_fallbacks": False if a.provider == "openrouter" else None, "instruction": INSTRUCTION, "seed": a.seed,
          "temperature": a.temperature, "max_tokens": a.max_tokens, "reasoning": a.reasoning, "seeds": seed_info,
-         "seed_words": len(words), "invade": inv_info, "eval": ev_info, "responses": i, "kept_before_sampling": n_chars,
+         "seed_words": len(words), "invade": inv_info, "eval": ev_info, "eval_below_min_hits": flt.short_report(), "responses": i, "kept_before_sampling": n_chars,
          "removed": dict(sorted(flt.removed.items())), "ledger_usd": spent, **tokens, "served_by": sorted(served),
          "quota": a.chars, "rows": len(final), "chars": sum(map(len, final)), "stopped": halt}
     if m["chars"] == a.chars:
