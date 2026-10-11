@@ -1,9 +1,10 @@
 """S7a fusion grid, frozen selection, rowstats and the standard tables (contract sections 2.3, 3.3, 4). Numbers only, numpy not even needed.
 
   python fusegrid.py --scores DIR --models S M --settings chat formal \
-         --sets cvtune wikitune dev302 typing76 user-reported [discordtune] --out OUT [--tune-keep FLAGDIR]
+         --sets cvtune wikitune dev302 typing76 user-reported [fw] [discordtune] --out OUT [--tune-keep FLAGDIR] [--break-weight W]
 
-reads DIR/<model>.<setting>.<set>.jsonl (score.py output), writes OUT/rowstats/<model>.<setting>.<set>.{base,new}[.k16].txt (only [0-9\\t\\n])
+reads DIR/<model>.<setting>.<set>.jsonl (score.py output), writes OUT/rowstats/<model>.<setting>.<set>.{base,new}[.k16].txt (only [0-9\\t\\n];
+with --break-weight also .shipped.txt and no .k16; the two modes write the same .base/.new names, so give each its own OUT)
 and prints Markdown: per model x setting the frozen (alpha, tau), one tools/evalstats.py table row per set, and the section 3 / 4 reports.
 The (alpha, tau) selection reads ONLY the tuning sets (TUNING); the other sets are scored with the frozen values. With --tune-keep (S7d)
 the selection reads only the tuning rows whose flag is 0 (buildcheck.py substr --flags); the tables still use every row.
@@ -225,8 +226,10 @@ def run_setting_weighted(model, setting, sets, out, weight, keep=None):
     """S7e: select by fixed - weight * broken (S7e section 2.2), then for every set the table row against the n-gram first and the row
     against the shipped values (section 2.4), each with the weighted net. Returns (cells, shipped cells, stop notes)."""
     sel = kept(sets, keep)
-    al, ta, de, f, b = select_weighted(sel, weight)
     tune = [r for t in TUNING for r in sel[t]]
+    if not tune:    # every (alpha, tau, delta) would tie at 0/0 and the tie rule would "select" a corner (as run_setting stops)
+        sys.exit(f"fusegrid: no tuning rows left to select on for {model} {setting} (every row flagged?)")
+    al, ta, de, f, b = select_weighted(sel, weight)
     f0, b0 = fixed_broken(tune, *SHIPPED)
     print(f"\n## {model} {setting}: selected on {'+'.join(TUNING)}{' (kept rows)' if keep else ''} by fixed - {weight:g} x broken: "
           f"alpha {al}, tau {ta}, delta {de}; fixed {f}, broken {b} of {len(tune)} (shipped {SHIPPED[0]}/{SHIPPED[1]}/{SHIPPED[2]}: "
@@ -258,6 +261,8 @@ def main(argv=None):
     ap.add_argument("--tune-keep", help="S7d: DIR with <tuning set>.flags (0/1 per row, buildcheck.py substr --flags); select on the 0 rows only")
     ap.add_argument("--break-weight", type=float, help="S7e: select by fixed - W x broken over (alpha, tau, delta); decide by S7e section 3")
     a = ap.parse_args(argv)
+    if a.break_weight is not None and not a.break_weight > 0:   # NaN fails this too: every comparison would be False
+        ap.error("--break-weight must be a number > 0")
     required = REQUIRED_S7E if a.break_weight is not None else REQUIRED_CELLS
     keep = None
     if a.tune_keep:
