@@ -191,7 +191,8 @@ extension Session {
     public var menu: [MenuEntry] {
         typealias T = MenuEntry.Text
         var items: [MenuEntry] = []
-        switch learningPause {
+        let bundle = client.bundleIdentifier  // a synchronous IPC: read once per menu
+        switch shell.learningPause(bundle: bundle) {
         case .secureInput?: items.append(MenuEntry(title: T.pausedSecure))
         case .app?: items.append(MenuEntry(title: T.pausedApp))
         case nil: break
@@ -207,8 +208,8 @@ extension Session {
         items.append(MenuEntry(title: T.acgPack, action: .toggleAcgPack, checked: shell.acgPackOn))
         if let date = shell.acgDataDate { items.append(MenuEntry(title: T.acgDataDate(date))) }   // about the data, so shown with the pack off too
         // profile-choice section 2.3: absent without a bundle ID (nothing to store); greyed outside auto, checked as forced.
-        if let bundle = client.bundleIdentifier, !bundle.isEmpty {
-            items.append(MenuEntry(title: T.appChat, action: .toggleAppChat, checked: clientProfile == Shell.chat,
+        if let bundle, !bundle.isEmpty {
+            items.append(MenuEntry(title: T.appChat, action: .toggleAppChat, checked: profile(for: bundle) == Shell.chat,
                                    enabled: shell.profileMode == .auto))
         }
         items.append(MenuEntry(title: T.settings, action: .openSettings))

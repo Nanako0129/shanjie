@@ -74,7 +74,7 @@ final class ProfileChoiceTests: XCTestCase {
         XCTAssertEqual(row226(discord), Row226.formal)
     }
 
-    /// Section 2.2: the window does not re-apply the profile; the next activateServer uses it.
+    /// The two forced modes give their profile in every app, the built-in chat app and another alike; auto restores the rule.
     func testForcedModes() {
         let shell = makeShell()
         let textEdit = Controller(shell, bundle: Self.textEdit), discord = Controller(shell, bundle: Self.discord)
@@ -214,6 +214,34 @@ final class ProfileChoiceTests: XCTestCase {
         XCTAssertEqual(b.client.calls, [], "B received A's composition")
         XCTAssertTrue(shell.owner === b.session)
         XCTAssertEqual(row226(b), Row226.chat)
+    }
+
+    /// Section 2.2 (review round): the window's changes reach the owner's composition at once, with no new activateServer, so
+    /// Enter commits what the menu's checkmark now says.
+    func testWindowChangesReapplyToTheComposingOwner() {
+        let apps = MemoryAppProfileStore([Self.textEdit: "chat"])
+        let shell = makeShell(apps: apps)
+        let model = SettingsModel(shell: shell)
+        let c = Controller(shell, bundle: Self.textEdit)
+        c.client.selectedOverride = NSRange(location: NSNotFound, length: 0)
+        c.session.activate()
+        model.setProfileMode(.formal)                       // owner not composing: nothing reaches the client
+        XCTAssertEqual(c.client.calls, [])
+        c.type(Row226.standardKeys)
+        XCTAssertEqual(c.client.marked, Row226.formal)
+        model.setProfileMode(.chat)
+        XCTAssertEqual(c.client.marked, Row226.chat, "the mode did not reach the composition")
+        c.press(Keys.enter)
+        XCTAssertEqual(c.client.text, Row226.chat)
+
+        model.setProfileMode(.auto)                         // TextEdit set to chat: still chat
+        c.type(Row226.standardKeys)
+        XCTAssertEqual(c.client.marked, Row226.chat)
+        model.removeAppProfile(Self.textEdit)
+        XCTAssertEqual(c.client.marked, Row226.formal, "the removal did not reach the composition")
+        c.press(Keys.enter)
+        XCTAssertEqual(c.client.text, Row226.chat + Row226.formal)
+        XCTAssertNil(apps.appProfiles)
     }
 
     // MARK: SettingsModel (section 2.4)

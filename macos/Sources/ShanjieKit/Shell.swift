@@ -162,7 +162,7 @@ public final class MemoryCandidateOrientationStore: CandidateOrientationStore {
 
 /// How the chat or formal profile is chosen (docs/contracts/profile-choice.md section 2.2): by the app (`chatApps` and the
 /// user's per-app choices), or always one of the two.
-public enum ProfileMode: String, Sendable, CaseIterable {
+public enum ProfileMode: String, Sendable {
     case auto
     case chat
     case formal
@@ -203,17 +203,18 @@ public final class MemoryAppProfileStore: AppProfileStore {
 @MainActor
 public enum AppProfiles {
     /// Entry by entry: a root that is not a dictionary is empty; only a non-empty string key with the string value `chat` or
-    /// `formal` is kept, and any other entry is skipped without affecting the valid ones (a whole-dictionary cast would drop
-    /// them all, and the next write would erase them).
+    /// `formal` (`ProfileMode`'s raw values, the one string table) is kept, and any other entry is skipped without affecting the
+    /// valid ones (a whole-dictionary cast would drop them all, and the next write would erase them).
     public static func parse(_ raw: Any?) -> [String: UInt32] {
         guard let dict = raw as? [AnyHashable: Any] else { return [:] }
         var out: [String: UInt32] = [:]
         for (key, value) in dict {
-            guard let bundle = key.base as? String, !bundle.isEmpty, let name = value as? String else { continue }
-            switch name {
-            case "chat": out[bundle] = Shell.chat
-            case "formal": out[bundle] = Shell.formal
-            default: continue
+            guard let bundle = key.base as? String, !bundle.isEmpty,
+                  let mode = (value as? String).flatMap(ProfileMode.init(rawValue:)) else { continue }
+            switch mode {
+            case .chat: out[bundle] = Shell.chat
+            case .formal: out[bundle] = Shell.formal
+            case .auto: continue
             }
         }
         return out
@@ -221,7 +222,7 @@ public enum AppProfiles {
 
     /// What `parse` reads back.
     static func stored(_ profiles: [String: UInt32]) -> [String: String] {
-        profiles.mapValues { $0 == Shell.chat ? "chat" : "formal" }
+        profiles.mapValues { ($0 == Shell.chat ? ProfileMode.chat : ProfileMode.formal).rawValue }
     }
 }
 
@@ -468,19 +469,27 @@ public final class Shell {
         changed()
     }
 
-    /// The settings window's 切換方式 (profile-choice section 2.2): stored; the profile is not re-applied here, the next
-    /// `activateServer` in the app uses it.
+    /// The settings window's 切換方式 (profile-choice section 2.2): stored, posted, then re-applied to the owner of the
+    /// composition, if any, so what Enter commits matches the menu's checkmark at once.
     public func setProfileMode(_ m: ProfileMode) {
         profileMode = m
         profileModeStore.profileMode = m.rawValue
         changed()
+        reapplyProfileToOwner()
     }
 
-    /// The settings window's remove button: the app goes back to `chatApps`, from its next `activateServer`.
+    /// The settings window's remove button: the app goes back to `chatApps`; re-applied like `setProfileMode`.
     public func removeAppProfile(_ bundle: String) {
         appProfiles[bundle] = nil
         appProfileStore.setAppProfiles(AppProfiles.stored(appProfiles))
         changed()
+        reapplyProfileToOwner()
+    }
+
+    /// Section 2.2: no claim, the owner already owns the composition (as the window's other switches go through the owner).
+    private func reapplyProfileToOwner() {
+        guard let o = owner else { return }
+        o.applyProfile(bundle: o.client.bundleIdentifier)
     }
 
     /// The menu's choice for one app (section 2.3): a value equal to `chatApps`' removes the entry, so the list keeps only the
@@ -664,7 +673,7 @@ public final class Session {
     public func handle(_ event: NSEvent?) -> Bool {
         guard shell.engine != nil else { return false }
         guard event == nil || event?.type == .keyDown else { return false }
-        if claim() { applyProfile() }
+        if claim() { applyProfile(bundle: client.bundleIdentifier) }
         // candidate-vertical contract section 2.2: Page Up / Down reach the core only while the vertical window is on screen
         // and no modifier (Shift, Control, Option, Command, Caps Lock) is held; otherwise they are keys outside the tables.
         if let event, shell.verticalOpen, KeyMap.modifiers(event.modifierFlags) == 0, let kind = KeyMap.pageKeys[event.keyCode] {
@@ -683,7 +692,7 @@ public final class Session {
     /// Section 5 order: ownership first, then the profile for this client's app.
     public func activate() {
         claim()
-        applyProfile()
+        applyProfile(bundle: client.bundleIdentifier)
     }
 
     /// Only the owner acts; a late call from any other controller does nothing at all.
@@ -775,24 +784,26 @@ public final class Session {
     }
 
     /// The menu's 這個 App 用聊天設定 (profile-choice section 2.3): the opposite of this client's profile is stored for its
-    /// app, then `activate()` re-applies it: `claim()` first sends another session's composition back to its own client,
-    /// so `applyProfile()` recomputes only this session's (security review P2-1). Nothing to store without a bundle ID, and
-    /// the item is greyed outside `auto`.
+    /// app, then it is re-applied in `activate()`'s order: `claim()` first sends another session's composition back to its
+    /// own client, so `applyProfile` recomputes only this session's (security review P2-1). The bundle ID is read once (a
+    /// synchronous IPC) and passed on. Nothing to store without a bundle ID, and the item is greyed outside `auto`.
     func toggleAppChat() {
         guard let bundle = client.bundleIdentifier, !bundle.isEmpty, shell.profileMode == .auto else { return }
-        shell.setAppProfile(bundle, clientProfile == Shell.chat ? Shell.formal : Shell.chat)
-        activate()
+        shell.setAppProfile(bundle, profile(for: bundle) == Shell.chat ? Shell.formal : Shell.chat)
+        claim()
+        applyProfile(bundle: bundle)
         shell.changed()
     }
 
-    /// This client's profile now (profile-choice section 2.2): the menu's checkmark and what `applyProfile` sends.
-    var clientProfile: UInt32 {
-        Shell.profile(bundle: client.bundleIdentifier, mode: shell.profileMode, overrides: shell.appProfiles)
+    /// The profile `bundle` (this client's, read by the caller) gets now (profile-choice section 2.2).
+    func profile(for bundle: String?) -> UInt32 {
+        Shell.profile(bundle: bundle, mode: shell.profileMode, overrides: shell.appProfiles)
     }
 
-    /// The profile for this client's app. No owner check: callers claim first (`activate`, `handle`, `toggleAppChat`).
-    private func applyProfile() {
-        switch shell.setProfile(clientProfile) {
+    /// The profile for this client's app, `bundle` being its bundle ID as the caller read it. No owner check: callers claim
+    /// first (`activate`, `handle`, `toggleAppChat`) or are the owner (`Shell.reapplyProfileToOwner`).
+    fileprivate func applyProfile(bundle: String?) {
+        switch shell.setProfile(profile(for: bundle)) {
         case .ok(let o)?: apply(o)
         case .failed(let c)?: _ = fail(c)
         case nil: break
