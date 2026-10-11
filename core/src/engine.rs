@@ -5,11 +5,101 @@ use crate::learn::{context_key, local_day, Learner, Level, Record};
 use crate::learn_store::{LearnStore, Opened, StoreError, JOURNAL_MAX};
 use crate::predict::{predict, reading_matches_in, unit_of_syllable, Mode, Unit};
 use crate::lm::{decode_segment_learned, history, CappedLexicon, Demote, End, Learn, Lm, Profile};
+use crate::tinylm::{TinyLm, TOPK};
 use crate::{decode_beam, Lexicon, NoLearning, BEAM_S1};
 use std::collections::{HashMap, HashSet};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+
+/// S7c-2a section 2.3: one counter for the whole process, so a job of one engine never matches another engine, nor an engine
+/// built later at the same address.
+static GENERATION: AtomicU64 = AtomicU64::new(1);
+
+fn next_generation() -> u64 {
+    GENERATION.fetch_add(1, Ordering::Relaxed)
+}
+
+/// One free stretch of a rerank job (S7c-2a section 2.2). Owned data only.
+struct Stretch {
+    /// Index in `Engine::path` of the stretch's first word, and how many words the n-gram first path has there.
+    at: usize,
+    len: usize,
+    /// The first `TOPK` paths of the n-best: (word, lp, demotion delta), as `path` holds them.
+    paths: Vec<Vec<(String, f64, f64)>>,
+    /// Their n-gram scores.
+    ng: Vec<f64>,
+    /// `context_key` of the left context and the shown text before the stretch.
+    key: String,
+}
+
+/// What the small model has to rerank after one change of the composition (S7c-2a section 2.2): only owned data and the model, never
+/// a borrow of the engine, so it can run on another thread and outlive the engine. Holds input text, so no `Debug`.
+pub struct RerankJob {
+    generation: u64,
+    model: Arc<TinyLm>,
+    profile: Profile,
+    stretches: Vec<Stretch>,
+}
+
+/// One stretch's choice: index into the job's paths, and that path when it is not the first.
+struct Choice {
+    at: usize,
+    len: usize,
+    pick: usize,
+    words: Vec<(String, f64, f64)>,
+}
+
+/// The output of `RerankJob::run`, for `Engine::apply_rerank`. Holds input text, so no `Debug`.
+pub struct RerankResult {
+    generation: u64,
+    choices: Vec<Choice>,
+}
+
+impl RerankJob {
+    /// Section 2.4: `TinyLm::rerank` on every stretch; a candidate longer than the model's context keeps the first.
+    pub fn run(&self) -> RerankResult {
+        let choices = self
+            .stretches
+            .iter()
+            .map(|s| {
+                let surfaces: Vec<String> = s.paths.iter().map(|p| p.iter().map(|w| w.0.as_str()).collect()).collect();
+                let cands: Vec<&str> = surfaces.iter().map(String::as_str).collect();
+                let pick = self.model.rerank(&s.ng, &cands, &s.key, self.profile).map_or(0, |r| r.0);
+                let words = if pick == 0 { Vec::new() } else { s.paths.get(pick).cloned().unwrap_or_default() };
+                Choice { at: s.at, len: s.len, pick: if words.is_empty() { 0 } else { pick }, words }
+            })
+            .collect();
+        RerankResult { generation: self.generation, choices }
+    }
+
+    /// Test hook (the FFI panic test): every candidate's text, so an injected panic payload carries input text.
+    #[cfg(test)]
+    pub(crate) fn texts(&self) -> String {
+        self.stretches.iter().flat_map(|s| s.paths.iter().flatten().map(|w| w.0.as_str())).collect()
+    }
+}
+
+impl RerankResult {
+    /// The chosen index of each stretch, in composition order (0 = the n-gram first).
+    pub fn picks(&self) -> Vec<usize> {
+        self.choices.iter().map(|c| c.pick).collect()
+    }
+}
+
+// Section 2.5 (F8): the thread guarantees come from the types themselves, never from an `unsafe impl`.
+const _: () = {
+    fn send<T: Send>() {}
+    fn sync<T: Sync>() {}
+    #[allow(dead_code)]
+    fn assertions() {
+        send::<TinyLm>();
+        sync::<TinyLm>();
+        send::<RerankJob>();
+        send::<RerankResult>();
+    }
+};
 
 pub const MOD_SHIFT: u32 = 1;
 pub const MOD_CONTROL: u32 = 2;
@@ -355,6 +445,15 @@ pub struct Engine {
     learn_panic: bool,
     /// Test-purpose injection: the next ⌘⌫ forget panics after changing memory (§6.13).
     forget_panic: bool,
+    /// S7c-2a: the small character model, from `load_tinylm`; dropped when another n-gram model is loaded (its `.sjtl` names
+    /// the n-gram model's hash).
+    tinylm: Option<Arc<TinyLm>>,
+    /// Whether rerank jobs are made (default on; `set_rerank`). `load_tinylm` leaves it as it is.
+    rerank_on: bool,
+    /// Section 2.3: renewed from `GENERATION` at the entry of every state-changing public method and in `clear_all`.
+    generation: u64,
+    /// The job of the last refresh, until `take_rerank_job` or the next change.
+    pending: Option<RerankJob>,
 }
 
 /// Base lexicon + overlay from `data_dir` (§5), same as the eval CLI default. The overlay rows are
@@ -527,13 +626,85 @@ impl Engine {
             today: None,
             learn_panic: false,
             forget_panic: false,
+            tinylm: None,
+            rerank_on: true,
+            generation: next_generation(),
+            pending: None,
         }
+    }
+
+    /// Section 2.3: whatever was pending belongs to the state before this call.
+    fn invalidate(&mut self) {
+        self.generation = next_generation();
+        self.pending = None;
+    }
+
+    // ---- S7c-2a rerank (docs/contracts/s7c2a-core-rerank.md) ----
+
+    /// Section 2.5: the small model at `path` for this engine's n-gram model. Fails (the previous model, or none, stays) when
+    /// the file cannot be read or is malformed, when no n-gram model is loaded, when the Kneser-Ney side file is on, or when the
+    /// `.sjtl` was tuned with another n-gram model (a pairing check, not an integrity check of the `.sjtl`). Leaves the rerank
+    /// switch and the display as they are.
+    pub fn load_tinylm(&mut self, path: &Path) -> Result<(), EngineError> {
+        self.invalidate();
+        let st = self.lm.as_ref().ok_or(EngineError::LoadFailed)?;
+        if st.lm.kn_tag().is_some() {
+            return Err(EngineError::LoadFailed);
+        }
+        let model = TinyLm::load(path).map_err(|_| EngineError::LoadFailed)?;
+        if model.ngram_sha256() != st.lm.sha256() {
+            return Err(EngineError::LoadFailed);
+        }
+        self.tinylm = Some(Arc::new(model));
+        Ok(())
+    }
+
+    /// Whether rerank jobs are made (default on); recomputes the composition and returns the snapshot like `set_demote`, so
+    /// turning it off shows the n-gram result at once. On a decode failure the engine resets itself.
+    pub fn set_rerank(&mut self, on: bool) -> Result<Output, EngineError> {
+        self.invalidate();
+        self.rerank_on = on;
+        self.clear_pred();
+        if let Err(e) = self.refresh() {
+            self.clear_all();
+            return Err(e);
+        }
+        self.handled()
+    }
+
+    /// The job of the last change, if it has one (none without a model, with rerank or demotion off, or with nothing to rerank).
+    pub fn take_rerank_job(&mut self) -> Option<RerankJob> {
+        self.pending.take()
+    }
+
+    /// Section 2.4: puts the chosen paths into the composition and returns the new output. `None` (nothing changes) when the
+    /// result is stale, the prediction row is entered, every stretch kept its first path, or a range no longer fits `path`.
+    /// Syllables, cursor, fixed words and the candidate window are not touched.
+    pub fn apply_rerank(&mut self, r: RerankResult) -> Result<Option<Output>, EngineError> {
+        if r.generation != self.generation || self.pred_sel.is_some() {
+            return Ok(None);
+        }
+        let changes: Vec<Choice> = r.choices.into_iter().filter(|c| c.pick != 0).collect();
+        if changes.is_empty() || changes.iter().any(|c| c.at.checked_add(c.len).is_none_or(|end| end > self.path.len())) {
+            return Ok(None);
+        }
+        // Right to left, so the earlier ranges still point at their words.
+        for c in changes.into_iter().rev() {
+            self.path.splice(c.at..c.at + c.len, c.words.into_iter().map(|(w, lp, delta)| (w, lp, false, delta)));
+        }
+        // `refresh_lm` builds the display from exactly the strings of `path`.
+        self.display = self.path.iter().map(|p| p.0.as_str()).collect();
+        // Applied: another result of the same job (run twice) is stale now.
+        self.generation = next_generation();
+        self.recompute_pred();
+        self.handled().map(Some)
     }
 
     // ---- S4 learning (docs/contracts/s4-learning.md) ----
 
     /// §2: keep only the last ≤ 2 consecutive Han characters of `text` (none: empty).
     pub fn set_left_context(&mut self, text: &str) {
+        self.invalidate();
         let k = context_key(text);
         self.left = if k == crate::learn::SENTINEL { String::new() } else { k };
     }
@@ -541,6 +712,7 @@ impl Engine {
     /// §3: off by default. Turning it off drops pending learns; a span is learned only if the flag was
     /// on both when it was chosen and at commit.
     pub fn set_learning(&mut self, on: bool) {
+        self.invalidate();
         self.learning = on;
         if !on {
             self.fixed.iter_mut().for_each(|f| f.pre = None);
@@ -551,6 +723,7 @@ impl Engine {
     /// is always a full rewrite). On error the previous learner and store stay. `must_rewrite` and
     /// bit0 are left as they are: only a successful full rewrite or clear clears them.
     pub fn learning_open(&mut self, dir: &Path) -> Result<Opened, StoreError> {
+        self.invalidate();
         let (store, records, opened) = LearnStore::open(dir)?;
         self.learner = Learner::from_records(records);
         self.learner.prune(self.today());
@@ -564,6 +737,7 @@ impl Engine {
     /// deleting the files fails. Without a store (no successful `learning_open`) it is an error: there
     /// is no file it could have deleted, and the shell must not show the clear as done.
     pub fn learning_clear(&mut self) -> Result<(), StoreError> {
+        self.invalidate();
         if self.store.is_some() {
             self.must_rewrite = true;
         }
@@ -590,27 +764,32 @@ impl Engine {
 
     /// Test hook (V3 section 10.2 step 1): false turns the "could a record match" gate off.
     pub fn set_scan_gate(&mut self, on: bool) {
+        self.invalidate();
         self.scan_gate = on;
     }
 
     /// Test hook (§12): ε of the global level.
     pub fn set_eps_global(&mut self, eps: f64) {
+        self.invalidate();
         self.eps_global = eps;
     }
 
     /// Test-purpose clock: day number to use instead of the local day.
     pub fn set_today(&mut self, day: Option<i64>) {
+        self.invalidate();
         self.today = day;
     }
 
     /// Test-purpose injection: the next commit's learning pass panics (§6.9).
     pub fn inject_learn_panic(&mut self) {
+        self.invalidate();
         self.learn_panic = true;
     }
 
     /// Test-purpose injection: the next ⌘⌫ forget panics right after removing the word from memory,
     /// before the file is rewritten (§6.13).
     pub fn inject_forget_panic(&mut self) {
+        self.invalidate();
         self.forget_panic = true;
     }
 
@@ -693,6 +872,7 @@ impl Engine {
     /// shared constructor. Failure leaves the previous state. The composition display is not recomputed;
     /// the next change to it decodes with the new model.
     pub fn load_lm(&mut self, path: &Path) -> Result<(), EngineError> {
+        self.invalidate();
         let dir = self.data_dir.as_ref().ok_or(EngineError::LoadFailed)?;
         let overlay = capping_overlay(dir, self.pack_text.as_deref().unwrap_or(""))?;
         let demote = std::fs::read_to_string(dir.join("demote.tsv")).map_err(|_| EngineError::LoadFailed)?;
@@ -702,6 +882,7 @@ impl Engine {
         // Built now, not at the first key: the index takes hundreds of ms (V3 engine contract section 1.2).
         capped.predict_index(&lm);
         self.lm = Some(LmState { lm: Arc::new(lm), capped: Arc::new(capped) });
+        self.tinylm = None; // S7c-2a section 2.3: tuned for the previous model
         Ok(())
     }
 
@@ -709,6 +890,7 @@ impl Engine {
     /// lines ignored, a repeated mark overrides the earlier line). On any invalid input nothing
     /// changes and `false` is returned. The composition is not recomputed.
     pub fn set_punctuation(&mut self, table: &str) -> bool {
+        self.invalidate();
         if table.len() > PUNCT_TABLE_MAX_BYTES {
             return false;
         }
@@ -742,13 +924,16 @@ impl Engine {
     /// Test-purpose injection for `with_lexicon` engines: a prebuilt model and its capped lexicon
     /// (built by `CappedLexicon::new` from this engine's lexicon).
     pub fn set_lm(&mut self, lm: Arc<Lm>, capped: Arc<CappedLexicon>) {
+        self.invalidate();
         self.lm = Some(LmState { lm, capped });
+        self.tinylm = None;
     }
 
     /// Whether the demotion table applies (default on, remembered even before a model is loaded);
     /// recomputes the composition and returns the snapshot, like `set_profile`. On a decode failure the
     /// engine resets itself.
     pub fn set_demote(&mut self, on: bool) -> Result<Output, EngineError> {
+        self.invalidate();
         self.demote = on;
         self.clear_pred();
         if let Err(e) = self.refresh() {
@@ -761,6 +946,7 @@ impl Engine {
     /// Whether the prediction row is computed (default on, V3 section 10.5). Off clears the row (an entered row is left);
     /// on recomputes it, so a row that fits section 1.1 shows at once. Returns the snapshot.
     pub fn set_prediction(&mut self, on: bool) -> Result<Output, EngineError> {
+        self.invalidate();
         self.predict_on = on;
         if !on {
             self.drop_units(); // the units' only way out is the row (section 12.1)
@@ -774,6 +960,7 @@ impl Engine {
     /// and follows the setting on every output (section 2.4), so a row on screen is re-rendered in the new orientation in
     /// the returned snapshot; with a candidate window open or nothing shown the snapshot equals the output before the call.
     pub fn set_candidate_vertical(&mut self, on: bool) -> Result<Output, EngineError> {
+        self.invalidate();
         self.cand_vertical = on;
         self.handled()
     }
@@ -781,6 +968,7 @@ impl Engine {
     /// Whether a symbol typed into an occupied column opens a new unfinished unit (default off, V3 engine contract section 12).
     /// Turning it off with two or more units drops them all (as Esc does); otherwise nothing changes. Returns the snapshot.
     pub fn set_abbreviation(&mut self, on: bool) -> Result<Output, EngineError> {
+        self.invalidate();
         self.abbr = on;
         if !on {
             self.drop_units();
@@ -817,6 +1005,7 @@ impl Engine {
     /// Switch the profile (default chat; remembered even before a model is loaded), recompute the
     /// composition and return the snapshot. On a decode failure the engine resets itself.
     pub fn set_profile(&mut self, profile: Profile) -> Result<Output, EngineError> {
+        self.invalidate();
         self.profile = profile;
         self.clear_pred();
         if let Err(e) = self.refresh() {
@@ -870,12 +1059,14 @@ impl Engine {
     /// §6 reset: Commit returns the composition as shown, unfinished symbols included, like Enter (enter-pending
     /// contract §2; no learning here); both clear everything.
     pub fn reset(&mut self, mode: ResetMode) -> Output {
+        self.invalidate();
         let commit = if mode == ResetMode::Commit { self.shown().0 } else { String::new() };
         self.clear_all();
         self.view(true, commit)
     }
 
     pub fn key(&mut self, k: Key) -> Result<Output, EngineError> {
+        self.invalidate();
         self.pred_dirty = false;
         let mut r = self.dispatch(k);
         match &mut r {
@@ -1021,7 +1212,10 @@ impl Engine {
         self.handled()
     }
 
+    /// Also renews the generation (section 2.3): a commit or a reset inside one call (the 40-syllable auto-commit, a commit from
+    /// the prediction row) voids the job the refresh before it made.
     fn clear_all(&mut self) {
+        self.invalidate();
         self.left.clear();
         self.syls.clear();
         self.cursor = 0;
@@ -1074,6 +1268,8 @@ impl Engine {
 
     /// Recompute the display string: free segments decoded top-1, fixed words in between (§3.1).
     fn refresh(&mut self) -> Result<(), EngineError> {
+        // A call can refresh twice; only the last refresh's job describes what is shown.
+        self.pending = None;
         if let Some(st) = self.lm.clone() {
             return self.refresh_lm(&st);
         }
@@ -1117,6 +1313,9 @@ impl Engine {
             delta_fixed.push(if self.demote { delta } else { 0.0 });
         }
         let (mut out, mut path) = (String::new(), Vec::new());
+        // S7c-2a section 2.2: alpha and tau hold only for the scores with the demotion table on.
+        let jobs = self.tinylm.is_some() && self.rerank_on && self.demote;
+        let mut stretches = Vec::new();
         for gap in 0..=self.fixed.len() {
             let from = if gap == 0 { 0 } else { self.fixed[gap - 1].end };
             let right = self.fixed.get(gap);
@@ -1139,7 +1338,18 @@ impl Engine {
                     &st.capped, &self.syls[from..to], &st.lm, lam, prev, end, BEAM_S1, learn.as_ref(), self.demote,
                 )
                 .map_err(|_| EngineError::Internal)?;
-                for (w, lp, delta) in &best.first().ok_or(EngineError::Internal)?.1 {
+                let first = &best.first().ok_or(EngineError::Internal)?.1;
+                if jobs && best.len() >= 2 && !self.boosted(st, from, first) {
+                    let top = &best[..best.len().min(TOPK)];
+                    stretches.push(Stretch {
+                        at: path.len(),
+                        len: first.len(),
+                        paths: top.iter().map(|(_, ws)| ws.iter().map(|&(w, lp, delta)| (w.to_string(), lp, delta)).collect()).collect(),
+                        ng: top.iter().map(|(score, _)| *score).collect(),
+                        key: context_key(&before),
+                    });
+                }
+                for (w, lp, delta) in first {
                     out.push_str(w);
                     path.push((w.to_string(), *lp, false, *delta));
                 }
@@ -1151,7 +1361,27 @@ impl Engine {
         }
         self.display = out;
         self.path = path;
+        if let (false, Some(model)) = (stretches.is_empty(), &self.tinylm) {
+            self.pending = Some(RerankJob { generation: self.generation, model: model.clone(), profile: self.profile, stretches });
+        }
         Ok(())
+    }
+
+    /// S7c-2a section 2.2, the learning guard: whether a word of a stretch's first path (the stretch starts at syllable `from`)
+    /// was scored with a learned boost, i.e. with an lp above the best capped lp of that word under its reading (the decoder
+    /// raises lp only that way). Such a stretch is not reranked, so a choice the user taught is never undone by the model.
+    fn boosted(&self, st: &LmState, from: usize, words: &[(&str, f64, f64)]) -> bool {
+        if self.learner.is_empty() {
+            return false;
+        }
+        let mut at = from;
+        words.iter().any(|&(w, lp, _)| {
+            let n = w.chars().count();
+            let span = self.syls.get(at..at + n);
+            at += n;
+            // A span that does not fit cannot happen (one character per syllable); counted as boosted, the safe side.
+            span.is_none_or(|s| st.capped.best_lp(s, w).is_some_and(|best| lp > best))
+        })
     }
 
     fn handled(&self) -> Result<Output, EngineError> {
@@ -1460,6 +1690,7 @@ impl Engine {
     /// the window closed, the V3 prediction row's (entered or not). `Ok(None)` when there is neither or `index` is
     /// outside that output (state unchanged).
     pub fn pick(&mut self, index: usize) -> Result<Option<Output>, EngineError> {
+        self.invalidate();
         let Some(c) = &self.cands else {
             // V3 section 4: a click on the prediction row selects at once, entered or not.
             if index >= self.pred.len() {
