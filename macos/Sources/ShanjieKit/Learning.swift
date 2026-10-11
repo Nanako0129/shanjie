@@ -200,8 +200,9 @@ extension Session {
         if shell.showsAbbreviation {
             items.append(MenuEntry(title: T.abbreviation, action: .toggleAbbreviation, checked: shell.abbreviationOn, enabled: shell.predictionOn))
         }
-        // s7c2b section 2.3 (F11): greyed while the demotion table is off, where the core makes no rerank job.
-        items.append(MenuEntry(title: T.rerank, action: .toggleRerank, checked: shell.rerankOn, enabled: shell.demoteOn))
+        // s7c2b section 2.3 (F11): greyed while the demotion table is off or the small model did not load, where the core makes
+        // no rerank job.
+        items.append(MenuEntry(title: T.rerank, action: .toggleRerank, checked: shell.rerankOn, enabled: shell.rerankEnabled))
         items.append(MenuEntry(title: T.acgPack, action: .toggleAcgPack, checked: shell.acgPackOn))
         if let date = shell.acgDataDate { items.append(MenuEntry(title: T.acgDataDate(date))) }   // about the data, so shown with the pack off too
         items.append(MenuEntry(title: T.settings, action: .openSettings))
@@ -226,7 +227,9 @@ extension Session {
         case .toggleAbbreviation:
             applyAbbreviation(!shell.abbreviationOn)
         case .toggleRerank:
-            applyRerank(!shell.rerankOn)
+            // To the owner of the composition, not this session: the core re-decodes the owner's composition, so this session
+            // could not show the snapshot.
+            shell.applyRerank(!shell.rerankOn)
         case .toggleAcgPack:
             shell.setAcgPack(!shell.acgPackOn)
         case .openSettings:

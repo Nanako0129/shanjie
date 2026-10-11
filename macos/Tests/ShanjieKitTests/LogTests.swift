@@ -78,14 +78,25 @@ final class LogTests: XCTestCase {
             .appendingPathComponent("shanjie-tests-\(pathMarker)", isDirectory: true)
         try? FileManager.default.createDirectory(at: learning, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: learning) }
+        let runner = HeldRerankRunner()
         let shell = Shell(resources: resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(),
-                          learningDirectory: learning, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner())
+                          learningDirectory: learning, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: runner)
         let c = Controller(shell, bundle: bundleMarker)
         c.client.before = "ab\t\(Self.contextMarker)"
         c.session.activate()                            // profile from a marked bundle ID
         c.type(Row226.standardKeys)
         c.press(Keys.enter)                             // commits the marker sentence
         XCTAssertEqual(c.client.text, Row226.formal, "the typing path did not commit row 226")
+        // s7c2b: the async rerank path (rerankFinished -> applyRerankJob -> apply) with the job's candidate text, in a chat app
+        // and without left context, where the small model changes the sentence.
+        let chat = Controller(shell, bundle: RerankTests.chatApp)
+        chat.client.selectedOverride = NSRange(location: NSNotFound, length: 0)
+        chat.session.activate()
+        chat.type(Row25.standardKeys)
+        runner.drain()
+        XCTAssertEqual(chat.client.marked, Row25.reranked, "the rerank result was not applied")
+        chat.press(Keys.esc)
+        c.session.activate()
         c.type("su3 ")
         let first = c.panel.items.first                 // optional, not XCTUnwrap: no throw while captured
         XCTAssertNotNil(first, "no candidate was shown for the mouse-selection path")
@@ -96,6 +107,7 @@ final class LogTests: XCTestCase {
         XCTAssertTrue(c.client.text.hasSuffix("你好"), "deactivate did not commit the composition")
         c.session.activate()
         c.type("su3")
+        runner.drain()
         c.session.selectLayout(.eten) // mode switch commits and rebuilds
         for action: MenuEntry.Action in [.clear, .toggleBackup, .toggleBackup] {
             c.session.perform(action)                   // S4 menu: clear, backup exclusion
@@ -134,6 +146,7 @@ final class LogTests: XCTestCase {
             Row226.formal, Row226.chat, "你好", Row226.zhuyin, "ㄑㄧ", "ㄋㄧ",
             Row226.standardKeys, String(Row226.standardKeys.prefix(6)), "su3cl3",
             bundleMarker, pathMarker, Self.contextMarker,
+            Row25.ngram, Row25.reranked, Row25.zhuyin, Row25.standardKeys, "城市", "程式",
         ]
         for marker in negatives {
             XCTAssertFalse(everything.contains(marker), "a negative marker reached the log")

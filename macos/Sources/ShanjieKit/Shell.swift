@@ -261,6 +261,14 @@ public final class Shell {
     var rerankFree: @Sendable (OpaquePointer) -> Void = { shanjie_rerank_free($0) }
     /// `CoreEngine.rerankTake`; the tests replace it to see a non-zero take handled (F5).
     var rerankTake: (CoreEngine, @escaping @Sendable (OpaquePointer) -> Void) -> (RerankJob?, Int32) = { $0.rerankTake(free: $1) }
+    /// `RerankJob.apply(on:)`; the tests replace it to see apply's non-zero codes other than 5 handled.
+    var rerankApply: (RerankJob, CoreEngine) -> CoreResult = { $0.apply(on: $1) }
+    /// Whether the current engine has the small model (set by every `build()`): false when there is no engine, when load_lm
+    /// failed (load_tinylm is then skipped) or when load_tinylm returned non-zero. Without it no job is ever made.
+    private(set) var rerankAvailable = false
+    /// The 語意校正 menu item and settings toggle are enabled only when the switch can do something: the demotion table on (the
+    /// core makes no job without it, F11) and the small model loaded. The checkmark still shows the stored choice.
+    var rerankEnabled: Bool { demoteOn && rerankAvailable }
 
     /// A job waiting for the runner, with the session and engine it was taken for. Weak (F3): a waiting job keeps neither alive,
     /// and an identity is never compared by address.
@@ -548,6 +556,7 @@ public final class Shell {
     /// failure leaves an engine without the LM (still usable) or no engine (every key passes).
     private func build() {
         engine = nil  // free the old engine first: only one exists at a time
+        rerankAvailable = false
         rerankPending = nil  // the old engine's; one still running is not applied (its engine is gone)
         let packsDir = resources.appendingPathComponent("packs").path
         var (made, code) = CoreEngine.make(dataDir: resources.path, layout: mode.layout, packsDir: acgPackOn ? packsDir : nil)
@@ -569,6 +578,7 @@ public final class Shell {
         if lm == 0 {
             let tiny = e.loadTinyLM(path: resources.appendingPathComponent(Shell.tinyLMFile).path)
             if tiny != 0 { Log.shell.error("shanjie_engine_load_tinylm failed, code \(tiny); no rerank") }
+            rerankAvailable = tiny == 0
         }
         if case .failed(let c) = e.setDemote(demoteOn) {
             Log.shell.error("shanjie_engine_set_demote failed, code \(c)")
@@ -800,7 +810,7 @@ public final class Session {
     /// Section 2.1: a finished job, for the engine it was taken from (the shell checked that it is current). 0 shows the
     /// snapshot like any output; 5 changes nothing; anything else (4: the engine has reset itself) is handled like a failed key.
     func applyRerankJob(_ job: RerankJob, on engine: CoreEngine) {
-        switch job.apply(on: engine) {
+        switch shell.rerankApply(job, engine) {
         case .ok(let o): apply(o)
         case .failed(let c) where c == SHANJIE_NO_CHANGE: break
         case .failed(let c): _ = fail(c)
