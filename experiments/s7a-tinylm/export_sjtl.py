@@ -22,6 +22,7 @@ Layout (little-endian; docs/contracts/s7c-core-tinylm.md section 2.1, version 2 
 """
 import argparse
 import hashlib
+import math
 import os
 import struct
 import tempfile
@@ -50,14 +51,22 @@ def tensor_shapes(n_layer, d, ctx, V):
     return out
 
 
-def export(npz, out, wtype, chat, formal, ngram_sha):
-    """Write `out` from the .npz at `npz`. wtype "f32" | "int8"; chat / formal = (alpha, tau) for version 1, or both
-    (alpha, tau, delta) for version 2; ngram_sha = 32 bytes. Returns the version written. Bad deltas raise before anything is written."""
+def check_params(chat, formal):
+    """Raise ValueError unless the header's fusion floats are ones the Rust reader loads (core/src/tinylm.rs: alpha finite,
+    tau not NaN, delta in [0, MAX_DELTA]); a file it refuses would make reranking silently do nothing."""
     if {len(chat), len(formal)} not in ({2}, {3}):
         raise ValueError("give a delta for both profiles or for neither")
-    v2 = len(chat) == 3
-    if v2 and not all(0 <= x <= MAX_DELTA for x in (chat[2], formal[2])):      # also false for NaN
+    if not all(math.isfinite(p[0]) and not math.isnan(p[1]) for p in (chat, formal)):
+        raise ValueError(f"alpha must be finite and tau not NaN: chat {chat[:2]}, formal {formal[:2]}")
+    if len(chat) == 3 and not all(0 <= x <= MAX_DELTA for x in (chat[2], formal[2])):      # also false for NaN
         raise ValueError(f"delta must lie in [0, {MAX_DELTA:g}]: chat {chat[2]}, formal {formal[2]}")
+
+
+def export(npz, out, wtype, chat, formal, ngram_sha):
+    """Write `out` from the .npz at `npz`. wtype "f32" | "int8"; chat / formal = (alpha, tau) for version 1, or both
+    (alpha, tau, delta) for version 2; ngram_sha = 32 bytes. Returns the version written. Bad parameters raise before anything is written."""
+    check_params(chat, formal)
+    v2 = len(chat) == 3
     z = np.load(npz, allow_pickle=False)
     n_layer, n_head, ctx = (int(x) for x in z["cfg"])
     chars = [str(c) for c in z["chars"]]
@@ -134,14 +143,13 @@ def main(argv=None):
     ap.add_argument("--chat", type=float, nargs="+", metavar="ALPHA TAU [DELTA]", required=True)
     ap.add_argument("--formal", type=float, nargs="+", metavar="ALPHA TAU [DELTA]", required=True)
     a = ap.parse_args(argv)
-    if not (2 <= len(a.chat) <= 3 and 2 <= len(a.formal) <= 3):
-        ap.error("--chat and --formal take ALPHA TAU [DELTA]")
-    with open(a.ngram_model, "rb") as f:
-        sha = hashlib.sha256(f.read()).digest()
     try:
-        version = export(a.npz, a.out, a.type, a.chat, a.formal, sha)
+        check_params(a.chat, a.formal)      # argument mistakes are usage errors; a bad model file keeps its traceback
     except ValueError as e:
         ap.error(str(e))
+    with open(a.ngram_model, "rb") as f:
+        sha = hashlib.sha256(f.read()).digest()
+    version = export(a.npz, a.out, a.type, a.chat, a.formal, sha)
     deltas = f"delta chat {a.chat[2]!r} formal {a.formal[2]!r}" if version == VERSION_V2 else "no delta"
     print(f"wrote {a.out} ({os.path.getsize(a.out)} bytes, {a.type}, version {version}, {deltas}); "
           f"sjtl sha256 {hashlib.sha256(open(a.out, 'rb').read()).hexdigest()}")

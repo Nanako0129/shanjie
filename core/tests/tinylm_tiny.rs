@@ -76,9 +76,8 @@ fn context_length_rules() {
 #[test]
 fn header_fields_are_read() {
     let m = TinyLm::parse(&bytes("tiny-int8.sjtl")).unwrap();
-    assert_eq!(m.alpha_tau(Profile::Chat), (0.7, 2.0));
-    assert_eq!(m.alpha_tau(Profile::Formal), (0.5, 1.0));
-    assert_eq!((m.alpha_tau_delta(Profile::Chat).2, m.alpha_tau_delta(Profile::Formal).2), (0.0, 0.0), "version 1: delta 0");
+    assert_eq!(m.alpha_tau_delta(Profile::Chat), (0.7, 2.0, 0.0), "version 1: delta 0");
+    assert_eq!(m.alpha_tau_delta(Profile::Formal), (0.5, 1.0, 0.0), "version 1: delta 0");
     let kn_tiny = std::fs::read(dir().join("../kn-tiny/bigram.sjlm")).unwrap();
     assert_eq!(m.ngram_sha256(), core::eval::sha256_hex(&kn_tiny));
 }
@@ -264,8 +263,8 @@ fn pick_delta_gate() {
     assert!(moved > n / 10, "the random lists move the choice often enough ({moved} of {n})");
 }
 
-/// Python parity: pick.tsv (tools/gen_tinylm_tiny.py) holds random ng / ll lists, plus hand lists whose fused gap is exactly
-/// 0.25 or 2, written with repr, and fusegrid.pick's choice at every (alpha, tau, delta) of its grid lines.
+/// Python parity: pick.tsv (tools/gen_tinylm_tiny.py) holds random ng / ll lists, plus hand lists whose fused gap lands exactly on
+/// a grid delta or on 0 (PICK_HAND lists them), written with repr, and fusegrid.pick's choice at every (alpha, tau, delta) of its grid lines.
 #[test]
 fn pick_matches_fusegrid() {
     let text = String::from_utf8(bytes("pick.tsv")).unwrap();

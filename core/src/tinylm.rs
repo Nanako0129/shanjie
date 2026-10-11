@@ -356,12 +356,6 @@ impl TinyLm {
         })
     }
 
-    /// (alpha, tau) tuned for the profile.
-    pub fn alpha_tau(&self, p: Profile) -> (f64, f64) {
-        let (a, t, _) = self.alpha_tau_delta(p);
-        (a, t)
-    }
-
     /// (alpha, tau, delta) tuned for the profile; delta is 0 in a version 1 file.
     pub fn alpha_tau_delta(&self, p: Profile) -> (f64, f64, f64) {
         match p {
