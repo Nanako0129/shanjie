@@ -469,7 +469,8 @@ pub struct Engine {
     tinylm: Option<Arc<TinyLm>>,
     /// Whether rerank jobs are made (default on; `set_rerank`). `load_tinylm` leaves it as it is.
     rerank_on: bool,
-    /// Section 2.3: renewed from `GENERATION` at the entry of every state-changing public method and in `clear_all`.
+    /// Section 2.3 (修正一): renewed from `GENERATION` only where decoding changes: every `refresh`, `clear_all`, the model and
+    /// decoding settings (`load_lm`, `set_lm`, `load_tinylm`, `set_rerank`, `set_profile`, `set_demote`, learning on/open/clear).
     generation: u64,
     /// The job of the last refresh, until `take_rerank_job` or the next change.
     rerank_job: Option<RerankJob>,

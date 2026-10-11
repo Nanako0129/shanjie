@@ -1,11 +1,12 @@
 """S7a fusion grid, frozen selection, rowstats and the standard tables (contract sections 2.3, 3.3, 4). Numbers only, numpy not even needed.
 
   python fusegrid.py --scores DIR --models S M --settings chat formal \
-         --sets cvtune wikitune dev302 typing76 user-reported [discordtune] --out OUT
+         --sets cvtune wikitune dev302 typing76 user-reported [discordtune] --out OUT [--tune-keep FLAGDIR]
 
 reads DIR/<model>.<setting>.<set>.jsonl (score.py output), writes OUT/rowstats/<model>.<setting>.<set>.{base,new}[.k16].txt (only [0-9\\t\\n])
 and prints Markdown: per model x setting the frozen (alpha, tau), one tools/evalstats.py table row per set, and the section 3 / 4 reports.
-The (alpha, tau) selection reads ONLY the tuning sets (TUNING); the other sets are scored with the frozen values.
+The (alpha, tau) selection reads ONLY the tuning sets (TUNING); the other sets are scored with the frozen values. With --tune-keep (S7d)
+the selection reads only the tuning rows whose flag is 0 (buildcheck.py substr --flags); the tables still use every row.
 """
 import argparse
 import json
@@ -50,6 +51,14 @@ def select(sets, col="ll"):
             if best is None or c > best[2]:
                 best = (alpha, tau, c)
     return best
+
+
+def kept(sets, keep):
+    """S7d: the tuning sets reduced to the rows whose flag is 0 (gold sentence not verbatim in the training text); other sets as
+    they are. keep: {tuning set: [0/1 per row, row i at index i - 1]}; None keeps everything."""
+    if keep is None:
+        return sets
+    return {name: [r for r in rows if keep[name][r["i"] - 1] == 0] if name in TUNING else rows for name, rows in sets.items()}
 
 
 def lm_alone(r, col="ll"):
@@ -123,13 +132,17 @@ def table_row(bp, np_, label, first):
     return "\n".join(t if first else t[2:])
 
 
-def run_setting(model, setting, sets, out):
-    """Select on the tuning sets, then score every set with the frozen values. Returns (decision cells, tuning gain in points, stop notes)."""
-    frozen = {"": select(sets, "ll"), "k16": select(sets, "ll16")}
-    tune_base = sum(r["ok"][0] for t in TUNING for r in sets[t])
-    tune_n = sum(len(sets[t]) for t in TUNING)
+def run_setting(model, setting, sets, out, keep=None):
+    """Select on the tuning sets (S7d: only their kept rows when `keep` is given), then score every set, all rows, with the frozen
+    values. Returns (decision cells, tuning gain in points on the rows the selection used, stop notes)."""
+    sel = kept(sets, keep)
+    frozen = {"": select(sel, "ll"), "k16": select(sel, "ll16")}
+    tune_base = sum(r["ok"][0] for t in TUNING for r in sel[t])
+    tune_n = sum(len(sel[t]) for t in TUNING)
+    if tune_n == 0:
+        sys.exit(f"fusegrid: no tuning rows left to select on for {model} {setting} (every row flagged?)")
     gain = 100 * (frozen[""][2] - tune_base) / tune_n
-    print(f"\n## {model} {setting}: frozen on {'+'.join(TUNING)}: alpha {frozen[''][0]}, tau {frozen[''][1]}; "
+    print(f"\n## {model} {setting}: frozen on {'+'.join(TUNING)}{' (kept rows)' if keep else ''}: alpha {frozen[''][0]}, tau {frozen[''][1]}; "
           f"pooled top1 {tune_base} -> {frozen[''][2]} of {tune_n} ({gain:+.2f} pt). "
           f"16-character context (record only), own selection by the same rule: alpha {frozen['k16'][0]}, tau {frozen['k16'][1]}, pooled top1 {frozen['k16'][2]}")
     cells, stop = {}, []
@@ -159,7 +172,14 @@ def main(argv=None):
     ap.add_argument("--scores", required=True); ap.add_argument("--out", required=True)
     ap.add_argument("--models", nargs="+", default=["S", "M"]); ap.add_argument("--settings", nargs="+", default=["chat", "formal"])
     ap.add_argument("--sets", nargs="+", required=True)
+    ap.add_argument("--tune-keep", help="S7d: DIR with <tuning set>.flags (0/1 per row, buildcheck.py substr --flags); select on the 0 rows only")
     a = ap.parse_args(argv)
+    keep = None
+    if a.tune_keep:
+        keep = {t: open(os.path.join(a.tune_keep, f"{t}.flags")).read().split() for t in TUNING}
+        if any(x not in ("0", "1") for v in keep.values() for x in v):
+            sys.exit("fusegrid: a .flags file holds something other than 0 / 1 per line")
+        keep = {t: [int(x) for x in v] for t, v in keep.items()}
     os.makedirs(os.path.join(a.out, "rowstats"), exist_ok=True)
     stop, chat_gain = [], []
     for model in a.models:
@@ -177,7 +197,10 @@ def main(argv=None):
                     stop.append(f"context not checked, no scores: {model} {setting} {s}")
             if not all(t in sets for t in TUNING):
                 sys.exit(f"fusegrid: tuning sets {TUNING} missing for {model} {setting}")
-            c, gain, st = run_setting(model, setting, sets, a.out)
+            for t in TUNING if keep else ():
+                if len(keep[t]) != len(sets[t]):      # row i of the scores is line i of the flags (load_scores checks i = 1..n)
+                    sys.exit(f"fusegrid: {t}.flags has {len(keep[t])} rows, the scores of {model} {setting} {t} have {len(sets[t])}")
+            c, gain, st = run_setting(model, setting, sets, a.out, keep)
             cells.update(c); stop += st
             if setting == "chat":
                 chat_gain.append(gain)

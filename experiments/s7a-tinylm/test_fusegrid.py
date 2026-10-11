@@ -81,6 +81,39 @@ class TestSelect(unittest.TestCase):
         s["cvtune"] = [rec(i, [-1.0, -2.5], [-4.0, 0.0], [1, 0]) for i in range(1, 50)]         # but the tuning sets do matter
         self.assertNotEqual(fg.select(s), chosen)
 
+    def test_kept_rows_only_drive_the_selection(self):
+        # S7d: rows flagged 1 (gold in the training text) are left out of the selection, whatever their scores
+        s = self.sets()
+        chosen = fg.select(s)
+        keep = {"cvtune": [0] * 5 + [1] * 60, "wikitune": [0] * 5}
+        s["cvtune"] += [rec(i, [-1.0, -2.5], [-4.0, 0.0], [1, 0]) for i in range(6, 66)]           # would prefer never reranking
+        self.assertNotEqual(fg.select(s), chosen)                                                   # they matter when kept ...
+        self.assertEqual(fg.select(fg.kept(s, keep)), chosen)                                       # ... and not when flagged
+        self.assertEqual(fg.select(fg.kept(s, {t: [0] * len(s[t]) for t in fg.TUNING})), fg.select(s))   # all 0: same as no flags
+        self.assertIs(fg.kept(s, None), s)
+
+    def test_kept_rows_header_counts_only_the_kept_rows(self):
+        s = self.sets()
+        s["cvtune"] += [rec(i, [-1.0, -2.5], [-4.0, 0.0], [1, 0]) for i in range(6, 66)]     # 60 flagged rows that prefer never reranking
+        keep = {"cvtune": [0] * 5 + [1] * 60, "wikitune": [0] * 5}
+        self.assertNotEqual(fg.select(s)[:2], (0.5, 2))                                      # on all rows the selection differs ...
+        out = io.StringIO()
+        with tempfile.TemporaryDirectory() as td, contextlib.redirect_stdout(out):
+            os.makedirs(os.path.join(td, "rowstats"))
+            _cells, gain, _stop = fg.run_setting("S", "chat", s, td, keep)
+        # ... run_setting selects on the 10 kept rows: all wrong at the n-gram first, all right after fusion -> 0 -> 10 of 10, +100 pt
+        self.assertIn("frozen on cvtune+wikitune (kept rows): alpha 0.5, tau 2; pooled top1 0 -> 10 of 10 (+100.00 pt)", out.getvalue())
+        self.assertAlmostEqual(gain, 100.0)
+        # the tables still use every row: cvtune has 65 rows in its table line
+        self.assertRegex(out.getvalue(), r"\| S chat cvtune \| 65 \|")
+
+    def test_tune_keep_refuses_bad_flags_and_empty_selections(self):
+        s = self.sets()
+        with tempfile.TemporaryDirectory() as td, contextlib.redirect_stdout(io.StringIO()):
+            os.makedirs(os.path.join(td, "rowstats"))
+            with self.assertRaises(SystemExit):
+                fg.run_setting("S", "chat", s, td, {"cvtune": [1] * 5, "wikitune": [1] * 5})
+
     def test_pooled_over_both_sets(self):
         good = [rec(i, [-1.0, -2.5], [-4.0, 0.0], [0, 1]) for i in range(1, 4)]
         bad = [rec(i, [-1.0, -2.5], [-4.0, 0.0], [1, 0]) for i in range(1, 3)]
