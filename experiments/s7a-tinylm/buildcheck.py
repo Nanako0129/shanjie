@@ -1,13 +1,14 @@
 """S7a construction check and the record-only substring ratio (contract section 2.2).
 
   python buildcheck.py construction --coll colloquial-train.txt --out report.json [--charcount DIR/charcount.json]
-  python buildcheck.py substr --work DIR --rows cvtune.txt wikitune.txt [--procs N]
+  python buildcheck.py substr --work DIR --rows cvtune.txt wikitune.txt [--procs N] [--flags DIR]
 
 construction: runs on the RAW sources (never on converted sentences: conversion changes characters, so the hash changes):
   wikitune articles start at index 300,000: the `articles` prep.py recorded in charcount.json must not exceed that
   (build_tune.py hard-codes the index, so the constant here is a copy; without --charcount the report says NOT CHECKED);
   for the cv-* files and cmn_sentences.tsv.bz2, in build_tune.py's order: is_tune(raw) false lines == lines of colloquial-train.txt. Only a failure of this check stops (exit 1). Source file hashes go in the report.
-substr (record only, never a stop): share of each set's gold sentences that occur as a substring of DIR/runs-*.txt.
+substr: share of each set's gold sentences that occur as a substring of DIR/runs-*.txt (S7a: record only, never a stop). With --flags
+  (S7d) it also writes one 0/1 per row, which fusegrid.py --tune-keep uses to choose the tuning rows alpha/tau are selected on.
 """
 import argparse
 import bz2
@@ -21,6 +22,7 @@ import tinylm  # noqa: F401  (sys.path)
 import build_counts as bc  # noqa: E402
 from build_tune import is_tune  # noqa: E402  the very function that split cvtune from colloquial-train.txt
 from prep import sha256_file  # noqa: E402
+from lm_eval import rows_of  # noqa: E402
 
 WIKI_TUNE_FIRST_INDEX = 300_000    # build_tune.py: `if i < 300_000: continue`
 
@@ -111,7 +113,7 @@ def substring_ratio(sents, paths, procs=1):
 def cmd_substr(a):
     paths = [os.path.join(a.work, f"runs-{n}.txt") for n in ("wiki", "coll")]
     for rows in a.rows:
-        golds = [l.split("|")[1] for l in open(rows, encoding="utf-8") if l.count("|") == 2]
+        golds = [r[0] for r in rows_of([rows])]      # the evaluation's own row reader: flag i is score.py's row i by construction
         hits = substring_hits(golds, paths, a.procs)
         hit, n = sum(hits), sum(1 for s in golds if s)
         print(f"substr {os.path.basename(rows)} gold sentences {n}, in training text {hit} ({100 * hit / max(1, n):.2f}%)")
