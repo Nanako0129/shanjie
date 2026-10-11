@@ -8,6 +8,9 @@
           Colloquial: build_counts_text.lines() of colloquial-train.txt then synth.txt, convert, HAN, length >= 2.
 `encode`: vocabulary (characters seen >= min-count times in the training text; other characters are UNK), DIR/vocab.txt, and
           DIR/ids-{wiki,coll}.npy: uint16, every run preceded by BOS.
+`text`  : (S7f) python prep.py text --work DIR --in FILE --name chat
+          one more text file through the colloquial path (text_runs: convert, HAN, length >= 2) into DIR/runs-<name>.txt and
+          DIR/ids-<name>.npy with the EXISTING DIR/vocab.txt (no vocabulary rebuild); DIR/text-<name>.json has the counts and hashes.
 """
 import argparse
 import collections
@@ -178,6 +181,31 @@ def cmd_encode(a):
     print(json.dumps(rep, indent=1))
 
 
+def encode_extra(src, work, name, conv):
+    """`text`: src -> DIR/runs-<name>.txt -> DIR/ids-<name>.npy with DIR/vocab.txt. Returns the report dict."""
+    if name in ("wiki", "coll"):
+        die(f"--name {name} would overwrite the S7a training ids")
+    lut = make_lut(load_vocab(work))
+    runs_path, ids_path = os.path.join(work, f"runs-{name}.txt"), os.path.join(work, f"ids-{name}.npy")
+    n_lines = 0
+    with open(src, encoding="utf-8", newline="\n") as f, open(runs_path, "w", encoding="utf-8", newline="\n") as out:
+        for line in f:
+            n_lines += 1
+            for run in text_runs(line.rstrip("\n"), conv):
+                out.write(run + "\n")
+    ids = encode_file(runs_path, lut)
+    np.save(ids_path, ids)
+    rep = {"input": src, "input_sha256": sha256_file(src), "lines": n_lines, "tokens": int(len(ids)), "runs": int((ids == BOS).sum()),
+           "unk_fraction": float((ids == UNK).sum() / max(1, len(ids) - (ids == BOS).sum())),
+           "vocab_sha256": sha256_file(os.path.join(work, "vocab.txt")), "runs_sha256": sha256_file(runs_path), "ids_sha256": sha256_file(ids_path)}
+    json.dump(rep, open(os.path.join(work, f"text-{name}.json"), "w"), indent=1)
+    return rep
+
+
+def cmd_text(a):
+    print(json.dumps(encode_extra(a.input, a.work, a.name, bc.load_conv()), indent=1))
+
+
 def load_vocab(work):
     return open(os.path.join(work, "vocab.txt"), encoding="utf-8", newline="\n").read().split("\n")[:-1]
 
@@ -190,8 +218,10 @@ def main(argv=None):
     r.add_argument("--articles", type=int, default=200_000); r.add_argument("--procs", type=int, default=max(1, (os.cpu_count() or 4) - 2))
     e = sub.add_parser("encode")
     e.add_argument("--work", required=True); e.add_argument("--min-count", type=int, default=MIN_COUNT)
+    t = sub.add_parser("text")
+    t.add_argument("--work", required=True); t.add_argument("--in", dest="input", required=True); t.add_argument("--name", required=True)
     a = ap.parse_args(argv)
-    {"runs": cmd_runs, "encode": cmd_encode}[a.cmd](a)
+    {"runs": cmd_runs, "encode": cmd_encode, "text": cmd_text}[a.cmd](a)
 
 
 if __name__ == "__main__":
