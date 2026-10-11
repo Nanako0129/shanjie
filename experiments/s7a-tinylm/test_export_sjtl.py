@@ -75,7 +75,7 @@ class TestExport(unittest.TestCase):
         z["emb"] = z["emb"][:-1]
         bad = os.path.join(self.td.name, "bad.npz")
         np.savez(bad, **z)
-        with self.assertRaises(AssertionError):
+        with self.assertRaises(ValueError):
             ex.export(bad, os.path.join(self.td.name, "x.sjtl"), "f32", (0.7, 2.0), (0.7, 2.0), SHA)
 
     def test_committed_golden_reads_back(self):

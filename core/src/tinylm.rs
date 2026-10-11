@@ -6,6 +6,7 @@
 //! docstring is the format (and the tensor order, which `parse` repeats).
 //! R2: errors carry a kind only, never text.
 
+use crate::learn::SENTINEL;
 use crate::lm::Profile;
 use std::collections::HashMap;
 use std::fmt;
@@ -19,6 +20,8 @@ const UNK: u32 = 1;
 const BOS: u32 = 2;
 /// Candidates per forward pass (right-padded with PAD; the causal mask keeps the padding out of the real positions).
 pub const BATCH: usize = 8;
+/// How many n-best candidates the model reranks (S7a: the first 8).
+pub const TOPK: usize = 8;
 const LN10: f64 = std::f64::consts::LN_10;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -101,25 +104,23 @@ fn gemm(be: Backend, a: &[f32], b: &[f32], c: &mut [f32], (m, k, n): (usize, usi
     }
 }
 
-fn tanh_in_place(be: Backend, x: &mut [f32]) {
+/// y = tanh(x), elementwise (out of place: vForce is not documented to allow y == x).
+fn tanh_into(be: Backend, x: &[f32], y: &mut [f32]) {
+    debug_assert_eq!(x.len(), y.len());
     match be {
         #[cfg(target_os = "macos")]
-        Backend::Accelerate => {
-            let (src, n) = (x.to_vec(), x.len() as i32);
-            unsafe { vvtanhf(x.as_mut_ptr(), src.as_ptr(), &n) };
-        }
-        Backend::Plain => x.iter_mut().for_each(|v| *v = v.tanh()),
+        Backend::Accelerate => unsafe { vvtanhf(y.as_mut_ptr(), x.as_ptr(), &(x.len() as i32)) },
+        Backend::Plain => y.iter_mut().zip(x).for_each(|(o, v)| *o = v.tanh()),
     }
 }
 
-fn exp_in_place(be: Backend, x: &mut [f32]) {
+/// y = exp(x), elementwise, out of place.
+fn exp_into(be: Backend, x: &[f32], y: &mut [f32]) {
+    debug_assert_eq!(x.len(), y.len());
     match be {
         #[cfg(target_os = "macos")]
-        Backend::Accelerate => {
-            let (src, n) = (x.to_vec(), x.len() as i32);
-            unsafe { vvexpf(x.as_mut_ptr(), src.as_ptr(), &n) };
-        }
-        Backend::Plain => x.iter_mut().for_each(|v| *v = v.exp()),
+        Backend::Accelerate => unsafe { vvexpf(y.as_mut_ptr(), x.as_ptr(), &(x.len() as i32)) },
+        Backend::Plain => y.iter_mut().zip(x).for_each(|(o, v)| *o = v.exp()),
     }
 }
 
@@ -145,8 +146,6 @@ pub struct TinyLm {
     chat: (f64, f64),
     formal: (f64, f64),
     ng_sha: [u8; 32],
-    /// SHA-256 (hex) of the .sjtl bytes, for the summary line's `+tl:` tag.
-    sha: String,
     ids: HashMap<char, u32>,
     emb: Vec<f32>,
     pos: Vec<f32>,
@@ -182,7 +181,11 @@ impl Cursor<'_> {
         let q = &self.b[self.at..self.at + rows * cols];
         self.at += rows * cols;
         let scale = self.f32s(rows);
-        q.chunks_exact(cols).zip(&scale).flat_map(|(row, s)| row.iter().map(move |&x| x as i8 as f32 * s)).collect()
+        let mut out = Vec::with_capacity(rows * cols);
+        for (row, s) in q.chunks_exact(cols).zip(&scale) {
+            out.extend(row.iter().map(|&x| x as i8 as f32 * s));
+        }
+        out
     }
 }
 
@@ -254,7 +257,6 @@ impl TinyLm {
             chat,
             formal,
             ng_sha: bytes[68..100].try_into().unwrap(),
-            sha: crate::eval::sha256_hex(bytes),
             ids,
             emb,
             pos,
@@ -277,9 +279,20 @@ impl TinyLm {
         hex(&self.ng_sha)
     }
 
-    /// First 8 hex digits of the .sjtl file's SHA-256 (the summary line's `+tl:` tag).
-    pub fn sha8(&self) -> &str {
-        &self.sha[..8]
+    /// The S7a rerank of one n-best list, the one rule the CLI measures and the engine will use: the first `TOPK` candidates,
+    /// k = the engine's context key (`learn::context_key`; its `SENTINEL`, no Han character before the cursor, is the empty k as
+    /// in tinylm.row_key), alpha and tau of the profile, then `pick`. Returns the chosen index and, when the model ran (two or more
+    /// candidates), the LLs. A candidate longer than ctx - 1 characters is `TooLong`; the caller decides to keep the first.
+    pub fn rerank(&self, ng: &[f64], cands: &[&str], key: &str, p: Profile) -> Result<(usize, Option<Vec<f64>>), TinyLmError> {
+        let n = cands.len().min(ng.len()).min(TOPK);
+        if n < 2 {
+            return Ok((0, None));
+        }
+        let k = if key == SENTINEL { "" } else { key };
+        let items: Vec<(&str, &str)> = cands[..n].iter().map(|c| (k, *c)).collect();
+        let ll = self.ll_many(&items)?;
+        let (alpha, tau) = self.alpha_tau(p);
+        Ok((pick(&ng[..n], &ll, alpha, tau), Some(ll)))
     }
 
     /// LL of each (k, c): the sum over the characters of c of log10 P(c_i | [BOS] + k + c_<i), as `tinylm.ll_many`
@@ -328,13 +341,13 @@ impl TinyLm {
         let v = self.emb.len() / d;
         let mut logits = vec![0f32; targets.len() * v];
         gemm(be, &rows, &self.emb, &mut logits, (targets.len(), d, v), true);
-        let mut ll = vec![0f64; seqs.len()];
+        let (mut ll, mut e) = (vec![0f64; seqs.len()], vec![0f32; v]);
         for (z, &(b, target)) in logits.chunks_exact_mut(v).zip(&targets) {
             let m = z.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
             let zt = z[target] - m;
-            z.iter_mut().for_each(|e| *e -= m);
-            exp_in_place(be, z);
-            let sum: f64 = z.iter().map(|&e| e as f64).sum();
+            z.iter_mut().for_each(|x| *x -= m);
+            exp_into(be, z, &mut e);
+            let sum: f64 = e.iter().map(|&x| x as f64).sum();
             ll[b] += (zt as f64 - sum.ln()) / LN10;
         }
         ll
@@ -365,8 +378,8 @@ impl TinyLm {
                             s[tj] = q.iter().zip(k).map(|(a, b)| a * b).sum::<f32>() / scale;
                         }
                         let m = s[..=ti].iter().cloned().fold(f32::NEG_INFINITY, f32::max);
-                        s[..=ti].iter_mut().for_each(|e| *e -= m);
-                        exp_in_place(be, &mut s[..=ti]);
+                        // Scalar exp on both paths: at most ctx values per row, where a vForce call per row costs more than it saves.
+                        s[..=ti].iter_mut().for_each(|e| *e = (*e - m).exp());
                         let sum: f32 = s[..=ti].iter().sum();
                         let o = &mut att[(b * t + ti) * d + hd * dh..][..dh];
                         for tj in 0..=ti {
@@ -410,9 +423,10 @@ fn layer_norm(x: &[f32], w: &[f32], b: &[f32]) -> Vec<f32> {
 
 /// GELU, tanh form: 0.5 x (1 + tanh(0.7978845608028654 (x + 0.044715 x^3))).
 fn gelu(be: Backend, x: &mut [f32]) {
-    let mut u: Vec<f32> = x.iter().map(|&v| 0.797_884_560_802_865_4_f32 * (v + 0.044715_f32 * v * v * v)).collect();
-    tanh_in_place(be, &mut u);
-    x.iter_mut().zip(&u).for_each(|(v, t)| *v = 0.5 * *v * (1.0 + t));
+    let u: Vec<f32> = x.iter().map(|&v| 0.797_884_560_802_865_4_f32 * (v + 0.044715_f32 * v * v * v)).collect();
+    let mut t = vec![0f32; u.len()];
+    tanh_into(be, &u, &mut t);
+    x.iter_mut().zip(&t).for_each(|(v, t)| *v = 0.5 * *v * (1.0 + t));
 }
 
 /// S7a fusion (experiments/s7a-tinylm/fusegrid.py `pick`): the index of the chosen candidate. Fewer than two candidates, or an
@@ -495,6 +509,26 @@ mod tests {
             put_vec(&mut b, &mut st, d, 0.0);
         }
         b
+    }
+
+    /// `rerank` is the rule the CLI measured: the key reaches the model as k (a Han key changes the LLs, and they are exactly
+    /// ll_many's with that k); the engine's SENTINEL is the empty k; fewer than two candidates run nothing; only the first TOPK
+    /// are scored; the choice is `pick` with the profile's alpha and tau.
+    #[test]
+    fn rerank_is_the_measured_rule() {
+        let m = TinyLm::parse(&random_file(false)).unwrap();
+        let cands: Vec<String> = (0..10).map(|i| (0..4).map(|j| char::from_u32(0x4e00 + ((i * 7 + j * 3) % 110) as u32).unwrap()).collect()).collect();
+        let cands: Vec<&str> = cands.iter().map(String::as_str).collect();
+        let ng: Vec<f64> = (0..10).map(|i| -0.05 * i as f64).collect();
+        let with = |k: &str| m.ll_many(&cands[..TOPK].iter().map(|c| (k, *c)).collect::<Vec<_>>()).unwrap();
+        let key = "\u{4e01}\u{4e02}";
+        let (chosen, ll) = m.rerank(&ng, &cands, key, Profile::Chat).unwrap();
+        let ll = ll.unwrap();
+        assert_eq!(ll, with(key));
+        assert_ne!(ll, with(""), "the key is the model's context");
+        assert_eq!(chosen, pick(&ng[..TOPK], &ll, 0.7, 2.0));
+        assert_eq!(m.rerank(&ng, &cands, SENTINEL, Profile::Chat).unwrap().1.unwrap(), with(""), "SENTINEL is the empty k");
+        assert_eq!(m.rerank(&ng[..1], &cands[..1], key, Profile::Chat).unwrap(), (0, None));
     }
 
     /// Contract 2.2: the Accelerate path (macOS) and the plain path agree to 1e-5 in LL on random weights; on other targets both
