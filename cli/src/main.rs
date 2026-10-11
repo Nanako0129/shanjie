@@ -145,21 +145,19 @@ fn load_with_packs(dir: &Path, packs: u32, pdir: &Path) -> Result<(std::sync::Ar
 
 /// S7c-1 `--tinylm`: alpha and tau hold only for the n-gram scores they were tuned on (S7a: this model, its classes and the demotion
 /// table on, Kneser-Ney off). A different model hash, the KN side file, `--no-classes` or `--no-demote` is refused before anything
-/// is printed. Returns the model, the load time (read + parse; the hash below is the CLI's, outside it) and the file's sha8.
+/// is printed. The file is read, checked and paired by the engine's loader (`TinyLm::load_paired`, S7c-2a). Returns the model, the
+/// load time (read + parse + the pairing checks; the hash below is the CLI's, outside it) and the sha8 of the bytes it parsed.
 fn load_tinylm(path: &str, lm: &Lm, classes: bool, demote: bool) -> Result<(TinyLm, Duration, String), String> {
     if !classes || !demote {
         return Err("--tinylm: this .sjtl was tuned with the class term and the demotion table on (drop --no-classes / --no-demote)".into());
     }
     let t0 = Instant::now();
-    let bytes = fs::read(path).map_err(|_| TinyLmError::Io.to_string())?;
-    let tl = TinyLm::parse(&bytes).map_err(|e| e.to_string())?;
+    let (tl, bytes) = TinyLm::load_paired(Path::new(path), lm).map_err(|e| match e {
+        TinyLmError::KneserNey => format!("--tinylm: {e} (use --no-kn)"),
+        TinyLmError::OtherNgram => format!("--tinylm: {e}"),
+        _ => e.to_string(),
+    })?;
     let load = t0.elapsed();
-    if tl.ngram_sha256() != lm.sha256() {
-        return Err("--tinylm: this .sjtl was tuned with another n-gram model (SHA-256 differs)".into());
-    }
-    if lm.kn_tag().is_some() {
-        return Err("--tinylm: the Kneser-Ney side file is on, but this .sjtl was tuned without it (use --no-kn)".into());
-    }
     Ok((tl, load, sha256_hex(&bytes)[..8].to_string()))
 }
 

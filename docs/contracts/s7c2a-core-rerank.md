@@ -28,11 +28,14 @@ S7c-2 分兩片：這一片（2a）只做核心與 FFI，用同步的測試驅�
 每個會改變狀態的公開方法（所有 `&mut self` 的公開方法，`take_rerank_job` 與 `apply_rerank` 除外）一進來就換新的世代號、清掉 `pending`；**`clear_all`（送出與清空組字都經過它）也換世代號、清掉 `pending`**，所以同一次呼叫裡「先重算、再自動送出」（40 音節自動送出、預測列選字觸發的送出，`insert_token`、`choose_pred` 都是先 `refresh()` 再 `take_commit()`）產生的工作會作廢。工作帶著產生時的世代號。
 - **換 n-gram 模型時丟掉小模型**：`load_lm`、`set_lm` 成功後把 `tinylm` 設為 None（殼在載入 n-gram 之後才載入小模型；`.sjtl` 綁的是 n-gram 的雜湊）。
 
+**修正一（2026-10-11，PR #116 /code-review）取代上面「每個公開方法一進來就換號」的規則**：只有會改變解碼結果的地方換號並作廢工作——每次 `refresh()`（重新解碼時產生新工作、新號碼）、`clear_all`、`load_lm`／`set_lm`／`load_tinylm`、`set_rerank`、`set_profile`、`set_demote`、選字記憶的開關／開檔／清除。不重新解碼的鍵（游標移動、還沒完成音節的注音符號、進入預測列、直通鍵）**不再**作廢進行中的工作，算完照樣套用；原規則會讓「打得快」時 Enter 送出 n-gram 的字。另外工作記下每一段在 `path` 裡原本的詞，套用時逐一核對，不同就整個不套用（不只靠號碼）。
+
 ### 2.4 計算與套用
 
 - `RerankJob::run(&self) -> RerankResult`：只用工作裡的 `Arc<TinyLm>` 與資料（不碰引擎），對每一段呼叫 `TinyLm::rerank`；`TooLong` 記為選 0。`RerankJob`、`RerankResult` 是 `Send`。
+- **修正一**：`RerankJob::run` 依序處理各段，後一段的前文鍵用前面各段**選定後**的字（加上中間的固定詞與左文）重算 `context_key`，不用 n-gram 第一名的字；只有一段時和原本相同（CLI 的一致性不變）。套用時：**候選窗開著 → `None`**；**預測列只在套用當下非空時才重算**（V3 規則清掉的列不會因為套用又出現）。
 - `Engine::apply_rerank(result) -> Result<Option<Output>, EngineError>`：世代號不同 → `None`；**預測列已進入（`pred_sel` 有值）→ `None`**（不把使用者在列裡的選取踢掉）；每一段都選 0 → `None`（不輸出，不閃）；工作記的範圍超出現在的 `path` → `None`（防呆，正常不會發生）；否則把選到的路徑換進 `path` 的那一段、重建 `display`、重算預測列，回傳新的輸出。不動 `syls`、游標、固定詞、候選窗。
-- **送出**：Enter、標點送出、40 音節自動送出、`reset` 等，一律送出畫面上的內容；還沒套用的工作因為換了世代號而作廢（不等待）。
+- **送出**：Enter、40 個字元自動送出、`reset` 等，一律送出畫面上的內容（標點不是送出：它進組字區、重新解碼、產生新工作）；還沒套用的工作因為換了世代號而作廢（不等待）。
 
 ### 2.5 FFI 與標頭（`core/src/ffi.rs`、`core/include/shanjie.h`、`docs/contracts/s3a.md` §6）
 
@@ -45,7 +48,7 @@ S7c-2 分兩片：這一片（2a）只做核心與 FFI，用同步的測試驅�
   - `shanjie_engine_rerank_apply` 回 4：引擎 `discard`（組字清空），`*out` 為 NULL。
   - `docs/contracts/s3a.md` §6 那條「任何函式回 4 後引擎已重設」加一行例外：`shanjie_rerank_run` 的 4 不重設任何東西（它沒有引擎）。
 - **NULL 規則**：`take` 的 engine 或 job 參數為 NULL → 1；job 參數非 NULL 時一律先設 `*job = NULL`。`run(NULL)` → 1。`apply` 的 engine、job、out 任一為 NULL → 1，`*out` 為 NULL。`free(NULL)` 不做事。
-- **所有權與執行緒**（標頭每個函式寫明，s3a §6 也寫）：`take` 交出的每個工作都由呼叫端恰好 `free` 一次；`apply` 不釋放工作，套用後同一個工作再 apply 一律回「沒有改變」；同一個工作不可同時在兩個執行緒使用（run 回傳之後才能 apply 或 free）；引擎本身仍是單執行緒；只有 `shanjie_rerank_run` 可以在別的執行緒呼叫。工作只放擁有的資料（字串、分數、範圍、世代號、設定、`Arc<TinyLm>`），**不借用引擎**（不放 `&Engine`、指標、`Arc<Lm>`、`Arc<CappedLexicon>`），所以引擎釋放之後工作仍可 run 或 free。標頭列出未定義行為：同一個工作 free 兩次、free 之後再 run 或 apply、free 一個不是 `take` 交出的指標、run 進行中同時 apply 或 free。run 不可取消（新按鍵只能讓結果作廢，殼一次只跑一個 run，這寫進 2b）。結果放在 `Mutex<Option<RerankResult>>`，apply 用 `take()` 取走，所以同一個工作再 apply 一律回「沒有改變」，即使殼違規讓 run 與 apply 同時發生也不會是資料競爭。工作與結果都是不透明型別：沒有 `Debug`、不寫進任何紀錄（內含候選文字）；`load_tinylm` 的路徑也不寫進任何紀錄（照標頭現有的日誌規則）。
+- **所有權與執行緒**（標頭每個函式寫明，s3a §6 也寫）：`take` 交出的每個工作都由呼叫端恰好 `free` 一次；`apply` 不釋放工作，套用後同一個工作再 apply 一律回「沒有改變」；同一個工作不可同時在兩個執行緒使用（run 回傳之後才能 apply 或 free）；引擎本身仍是單執行緒；`shanjie_rerank_run` 可以在別的執行緒呼叫，`shanjie_rerank_free` 在 run 回傳之後也可以在任何執行緒呼叫。工作只放擁有的資料（字串、分數、範圍、世代號、設定、`Arc<TinyLm>`），**不借用引擎**（不放 `&Engine`、指標、`Arc<Lm>`、`Arc<CappedLexicon>`），所以引擎釋放之後工作仍可 run 或 free。標頭列出未定義行為：同一個工作 free 兩次、free 之後再 run 或 apply、free 一個不是 `take` 交出的指標、run 進行中同時 apply 或 free。run 不可取消（新按鍵只能讓結果作廢，殼一次只跑一個 run，這寫進 2b）。結果放在 `Mutex<Option<RerankResult>>`，apply 用 `take()` 取走，所以同一個工作再 apply 一律回「沒有改變」，即使殼違規讓 run 與 apply 同時發生也不會是資料競爭。工作與結果都是不透明型別：沒有 `Debug`、不寫進任何紀錄（內含候選文字）；`load_tinylm` 的路徑也不寫進任何紀錄（照標頭現有的日誌規則）。
 - **型別保證**（F8）：不寫任何 `unsafe impl Send/Sync`；用編譯期斷言確認 `TinyLm: Send + Sync`、`RerankJob: Send`、`RerankResult: Send`。
 
 ### 2.6 讀檔加固與 PLAN 的例外（安全審查 F2–F6）

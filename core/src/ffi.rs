@@ -761,7 +761,7 @@ pub unsafe extern "C" fn shanjie_engine_rerank_take(engine: *mut ShanjieEngine, 
     rc
 }
 
-/// No engine is touched: a 4 here resets nothing and stores no result.
+/// No engine is touched: a 4 here resets nothing and leaves no result (an earlier run's result is cleared first).
 ///
 /// # Safety
 /// `job` is NULL or a job from `shanjie_engine_rerank_take` not yet freed, not in use by another call.
@@ -773,6 +773,8 @@ pub unsafe extern "C" fn shanjie_rerank_run(job: *mut ShanjieRerankJob) -> i32 {
         }
         // SAFETY: live job per the caller contract; shared reference only.
         let j = unsafe { &*job };
+        // A run that panics leaves no result, not even one of an earlier run of this job.
+        *j.result.lock().unwrap_or_else(PoisonError::into_inner) = None;
         #[cfg(test)]
         tests::inject_run(&j.job);
         let r = j.job.run();
@@ -909,6 +911,7 @@ mod tests {
     const CHAR: u32 = 1;
     const SPACE: u32 = 2;
     const ENTER: u32 = 3;
+    const BACKSPACE: u32 = 4;
     const ESC: u32 = 6;
     /// Leaves a composition intact, so an empty preedit after it proves the reset.
     const LEFT: u32 = 7;
@@ -1730,18 +1733,31 @@ mod tests {
         let (rc, _, commit) = send(e, key(ENTER, '\0'));
         assert!(rc == 0 && commit == after, "Enter sends the applied text");
 
-        // Stale: a key between take and apply.
+        // A key that does not re-decode (a cursor move) keeps the job; one that does (Backspace deleting a syllable) makes it stale.
+        for &k in &keys {
+            send(e, k);
+        }
+        let (_, j) = take(e);
+        assert!(send(e, key(LEFT, '\0')).1 == RERANK_NGRAM);
+        assert!(unsafe { shanjie_rerank_run(j) } == 0);
+        let (rc, moved) = apply(e, j);
+        assert!(rc == 0 && moved == after, "applied after a cursor move");
+        unsafe { shanjie_rerank_free(j) };
+        assert!(send(e, key(ESC, '\0')).0 == 0);
         for &k in &keys {
             send(e, k);
         }
         let (_, j) = take(e);
         assert!(unsafe { shanjie_rerank_run(j) } == 0);
-        assert!(send(e, key(LEFT, '\0')).1 == RERANK_NGRAM);
+        assert!(send(e, key(BACKSPACE, '\0')).1 != RERANK_NGRAM, "Backspace re-decodes");
         assert!(apply(e, j).0 == SHANJIE_NO_CHANGE, "stale");
         unsafe { shanjie_rerank_free(j) };
+        assert!(send(e, key(ESC, '\0')).0 == 0);
 
         // apply code 4 (injected panic after the change): NULL out, composition discarded.
-        set_rerank(e, 1);
+        for &k in &keys {
+            send(e, k);
+        }
         let (_, j) = take(e);
         assert!(unsafe { shanjie_rerank_run(j) } == 0);
         ARMED.with(|a| a.set(true));
@@ -1785,6 +1801,8 @@ mod tests {
         }
         let (_, j) = take(e);
         assert!(!j.is_null(), "a job");
+        // A first run succeeds; the second panics and must leave no result behind (not even the first one's).
+        assert!(unsafe { shanjie_rerank_run(j) } == 0, "first run");
         ARMED.with(|a| a.set(true));
         assert!(unsafe { shanjie_rerank_run(j) } == 4, "run panic maps to 4");
         assert!(PAYLOAD.with(|p| p.borrow().contains(RERANK_NGRAM)), "payload carries the candidate text");

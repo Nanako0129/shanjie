@@ -23,15 +23,16 @@ fn next_generation() -> u64 {
 
 /// One free stretch of a rerank job (S7c-2a section 2.2). Owned data only.
 struct Stretch {
-    /// Index in `Engine::path` of the stretch's first word, and how many words the n-gram first path has there.
+    /// Index in `Engine::path` of the stretch's first word.
     at: usize,
-    len: usize,
-    /// The first `TOPK` paths of the n-best: (word, lp, demotion delta), as `path` holds them.
+    /// The first `TOPK` paths of the n-best: (word, lp, demotion delta), as `path` holds them. `paths[0]` is what `path` holds at
+    /// `at..at + len` when the job is made; apply checks that it still does (section 2.3, revision 1).
     paths: Vec<Vec<(String, f64, f64)>>,
     /// Their n-gram scores.
     ng: Vec<f64>,
-    /// `context_key` of the left context and the shown text before the stretch.
-    key: String,
+    /// The shown text between the previous stretch of the job (or the composition's start) and this one: fixed words, and the
+    /// n-gram text of stretches left out of the job.
+    gap: String,
 }
 
 /// What the small model has to rerank after one change of the composition (S7c-2a section 2.2): only owned data and the model, never
@@ -40,15 +41,20 @@ pub struct RerankJob {
     generation: u64,
     model: Arc<TinyLm>,
     profile: Profile,
+    /// The engine's left context when the job was made.
+    left: String,
     stretches: Vec<Stretch>,
 }
 
 /// One stretch's choice: index into the job's paths, and that path when it is not the first.
 struct Choice {
     at: usize,
-    len: usize,
+    /// The words `path` must still hold at `at..` (the n-gram first path the job was made from).
+    expect: Vec<String>,
     pick: usize,
     words: Vec<(String, f64, f64)>,
+    /// The context key the stretch was scored with.
+    key: String,
 }
 
 /// The output of `RerankJob::run`, for `Engine::apply_rerank`. Holds input text, so no `Debug`.
@@ -58,17 +64,25 @@ pub struct RerankResult {
 }
 
 impl RerankJob {
-    /// Section 2.4: `TinyLm::rerank` on every stretch; a candidate longer than the model's context keeps the first.
+    /// Section 2.4: `TinyLm::rerank` on every stretch in order; a candidate longer than the model's context keeps the first.
+    /// Revision 1: a stretch's context key is `context_key` of the left context and the text before it as it will be shown,
+    /// i.e. with the earlier stretches' chosen candidates (one stretch: the n-gram text before it, as before).
     pub fn run(&self) -> RerankResult {
+        let mut before = self.left.clone();
         let choices = self
             .stretches
             .iter()
             .map(|s| {
+                before.push_str(&s.gap);
+                let key = context_key(&before);
                 let surfaces: Vec<String> = s.paths.iter().map(|p| p.iter().map(|w| w.0.as_str()).collect()).collect();
                 let cands: Vec<&str> = surfaces.iter().map(String::as_str).collect();
-                let pick = self.model.rerank(&s.ng, &cands, &s.key, self.profile).map_or(0, |r| r.0);
-                let words = if pick == 0 { Vec::new() } else { s.paths.get(pick).cloned().unwrap_or_default() };
-                Choice { at: s.at, len: s.len, pick: if words.is_empty() { 0 } else { pick }, words }
+                let pick = self.model.rerank(&s.ng, &cands, &key, self.profile).map_or(0, |r| r.0);
+                let pick = if pick < s.paths.len() { pick } else { 0 };
+                before.push_str(&surfaces[pick]);
+                let words = if pick == 0 { Vec::new() } else { s.paths[pick].clone() };
+                let expect = s.paths[0].iter().map(|w| w.0.clone()).collect();
+                Choice { at: s.at, expect, pick, words, key }
             })
             .collect();
         RerankResult { generation: self.generation, choices }
@@ -85,6 +99,11 @@ impl RerankResult {
     /// The chosen index of each stretch, in composition order (0 = the n-gram first).
     pub fn picks(&self) -> Vec<usize> {
         self.choices.iter().map(|c| c.pick).collect()
+    }
+
+    /// The context key each stretch was scored with, in composition order (holds input text: never log it).
+    pub fn keys(&self) -> Vec<String> {
+        self.choices.iter().map(|c| c.key.clone()).collect()
     }
 }
 
@@ -453,7 +472,7 @@ pub struct Engine {
     /// Section 2.3: renewed from `GENERATION` at the entry of every state-changing public method and in `clear_all`.
     generation: u64,
     /// The job of the last refresh, until `take_rerank_job` or the next change.
-    pending: Option<RerankJob>,
+    rerank_job: Option<RerankJob>,
 }
 
 /// Base lexicon + overlay from `data_dir` (§5), same as the eval CLI default. The overlay rows are
@@ -629,14 +648,16 @@ impl Engine {
             tinylm: None,
             rerank_on: true,
             generation: next_generation(),
-            pending: None,
+            rerank_job: None,
         }
     }
 
-    /// Section 2.3: whatever was pending belongs to the state before this call.
+    /// Section 2.3 (revision 1): called wherever decoding changes (every `refresh`, `clear_all`, a new n-gram or small model,
+    /// the rerank switch, the profile, the demotion table, learning on / open / clear): a job made before is stale from now on.
+    /// Keys that do not re-decode (cursor moves, unfinished symbols, entering the prediction row, pass-through) keep it.
     fn invalidate(&mut self) {
         self.generation = next_generation();
-        self.pending = None;
+        self.rerank_job = None;
     }
 
     // ---- S7c-2a rerank (docs/contracts/s7c2a-core-rerank.md) ----
@@ -648,13 +669,7 @@ impl Engine {
     pub fn load_tinylm(&mut self, path: &Path) -> Result<(), EngineError> {
         self.invalidate();
         let st = self.lm.as_ref().ok_or(EngineError::LoadFailed)?;
-        if st.lm.kn_tag().is_some() {
-            return Err(EngineError::LoadFailed);
-        }
-        let model = TinyLm::load(path).map_err(|_| EngineError::LoadFailed)?;
-        if model.ngram_sha256() != st.lm.sha256() {
-            return Err(EngineError::LoadFailed);
-        }
+        let (model, _) = TinyLm::load_paired(path, &st.lm).map_err(|_| EngineError::LoadFailed)?;
         self.tinylm = Some(Arc::new(model));
         Ok(())
     }
@@ -674,29 +689,37 @@ impl Engine {
 
     /// The job of the last change, if it has one (none without a model, with rerank or demotion off, or with nothing to rerank).
     pub fn take_rerank_job(&mut self) -> Option<RerankJob> {
-        self.pending.take()
+        self.rerank_job.take()
     }
 
     /// Section 2.4: puts the chosen paths into the composition and returns the new output. `None` (nothing changes) when the
-    /// result is stale, the prediction row is entered, every stretch kept its first path, or a range no longer fits `path`.
-    /// Syllables, cursor, fixed words and the candidate window are not touched.
+    /// result is stale (another decode since the job, revision 1 of section 2.3), `path` no longer holds the words the job was
+    /// made from at every stretch (e.g. the same job's other result was applied), the candidate window is open, the
+    /// prediction row is entered, or every stretch kept its first path. Syllables, cursor, fixed words and the candidate window
+    /// are not touched; the prediction row is recomputed only when one is showing (a row the key rules cleared stays cleared).
     pub fn apply_rerank(&mut self, r: RerankResult) -> Result<Option<Output>, EngineError> {
-        if r.generation != self.generation || self.pred_sel.is_some() {
+        if r.generation != self.generation || self.cands.is_some() || self.pred_sel.is_some() {
+            return Ok(None);
+        }
+        let holds = |c: &Choice| {
+            self.path.get(c.at..c.at + c.expect.len()).is_some_and(|ws| ws.iter().map(|w| &w.0).eq(c.expect.iter()))
+        };
+        if !r.choices.iter().all(holds) {
             return Ok(None);
         }
         let changes: Vec<Choice> = r.choices.into_iter().filter(|c| c.pick != 0).collect();
-        if changes.is_empty() || changes.iter().any(|c| c.at.checked_add(c.len).is_none_or(|end| end > self.path.len())) {
+        if changes.is_empty() {
             return Ok(None);
         }
         // Right to left, so the earlier ranges still point at their words.
         for c in changes.into_iter().rev() {
-            self.path.splice(c.at..c.at + c.len, c.words.into_iter().map(|(w, lp, delta)| (w, lp, false, delta)));
+            self.path.splice(c.at..c.at + c.expect.len(), c.words.into_iter().map(|(w, lp, delta)| (w, lp, false, delta)));
         }
         // `refresh_lm` builds the display from exactly the strings of `path`.
         self.display = self.path.iter().map(|p| p.0.as_str()).collect();
-        // Applied: another result of the same job (run twice) is stale now.
-        self.generation = next_generation();
-        self.recompute_pred();
+        if !self.pred.is_empty() {
+            self.recompute_pred();
+        }
         self.handled().map(Some)
     }
 
@@ -704,7 +727,6 @@ impl Engine {
 
     /// §2: keep only the last ≤ 2 consecutive Han characters of `text` (none: empty).
     pub fn set_left_context(&mut self, text: &str) {
-        self.invalidate();
         let k = context_key(text);
         self.left = if k == crate::learn::SENTINEL { String::new() } else { k };
     }
@@ -764,32 +786,27 @@ impl Engine {
 
     /// Test hook (V3 section 10.2 step 1): false turns the "could a record match" gate off.
     pub fn set_scan_gate(&mut self, on: bool) {
-        self.invalidate();
         self.scan_gate = on;
     }
 
     /// Test hook (§12): ε of the global level.
     pub fn set_eps_global(&mut self, eps: f64) {
-        self.invalidate();
         self.eps_global = eps;
     }
 
     /// Test-purpose clock: day number to use instead of the local day.
     pub fn set_today(&mut self, day: Option<i64>) {
-        self.invalidate();
         self.today = day;
     }
 
     /// Test-purpose injection: the next commit's learning pass panics (§6.9).
     pub fn inject_learn_panic(&mut self) {
-        self.invalidate();
         self.learn_panic = true;
     }
 
     /// Test-purpose injection: the next ⌘⌫ forget panics right after removing the word from memory,
     /// before the file is rewritten (§6.13).
     pub fn inject_forget_panic(&mut self) {
-        self.invalidate();
         self.forget_panic = true;
     }
 
@@ -890,7 +907,6 @@ impl Engine {
     /// lines ignored, a repeated mark overrides the earlier line). On any invalid input nothing
     /// changes and `false` is returned. The composition is not recomputed.
     pub fn set_punctuation(&mut self, table: &str) -> bool {
-        self.invalidate();
         if table.len() > PUNCT_TABLE_MAX_BYTES {
             return false;
         }
@@ -946,7 +962,6 @@ impl Engine {
     /// Whether the prediction row is computed (default on, V3 section 10.5). Off clears the row (an entered row is left);
     /// on recomputes it, so a row that fits section 1.1 shows at once. Returns the snapshot.
     pub fn set_prediction(&mut self, on: bool) -> Result<Output, EngineError> {
-        self.invalidate();
         self.predict_on = on;
         if !on {
             self.drop_units(); // the units' only way out is the row (section 12.1)
@@ -960,7 +975,6 @@ impl Engine {
     /// and follows the setting on every output (section 2.4), so a row on screen is re-rendered in the new orientation in
     /// the returned snapshot; with a candidate window open or nothing shown the snapshot equals the output before the call.
     pub fn set_candidate_vertical(&mut self, on: bool) -> Result<Output, EngineError> {
-        self.invalidate();
         self.cand_vertical = on;
         self.handled()
     }
@@ -968,7 +982,6 @@ impl Engine {
     /// Whether a symbol typed into an occupied column opens a new unfinished unit (default off, V3 engine contract section 12).
     /// Turning it off with two or more units drops them all (as Esc does); otherwise nothing changes. Returns the snapshot.
     pub fn set_abbreviation(&mut self, on: bool) -> Result<Output, EngineError> {
-        self.invalidate();
         self.abbr = on;
         if !on {
             self.drop_units();
@@ -1059,14 +1072,12 @@ impl Engine {
     /// §6 reset: Commit returns the composition as shown, unfinished symbols included, like Enter (enter-pending
     /// contract §2; no learning here); both clear everything.
     pub fn reset(&mut self, mode: ResetMode) -> Output {
-        self.invalidate();
         let commit = if mode == ResetMode::Commit { self.shown().0 } else { String::new() };
         self.clear_all();
         self.view(true, commit)
     }
 
     pub fn key(&mut self, k: Key) -> Result<Output, EngineError> {
-        self.invalidate();
         self.pred_dirty = false;
         let mut r = self.dispatch(k);
         match &mut r {
@@ -1268,8 +1279,8 @@ impl Engine {
 
     /// Recompute the display string: free segments decoded top-1, fixed words in between (§3.1).
     fn refresh(&mut self) -> Result<(), EngineError> {
-        // A call can refresh twice; only the last refresh's job describes what is shown.
-        self.pending = None;
+        // Section 2.3, revision 1: every decode is a new generation; its job (if any) is made at the end of `refresh_lm`.
+        self.invalidate();
         if let Some(st) = self.lm.clone() {
             return self.refresh_lm(&st);
         }
@@ -1316,6 +1327,8 @@ impl Engine {
         // S7c-2a section 2.2: alpha and tau hold only for the scores with the demotion table on.
         let jobs = self.tinylm.is_some() && self.rerank_on && self.demote;
         let mut stretches = Vec::new();
+        // Byte offset in `out` after the last stretch put into the job: the text from there on is the next stretch's `gap`.
+        let mut job_end = 0;
         for gap in 0..=self.fixed.len() {
             let from = if gap == 0 { 0 } else { self.fixed[gap - 1].end };
             let right = self.fixed.get(gap);
@@ -1339,19 +1352,22 @@ impl Engine {
                 )
                 .map_err(|_| EngineError::Internal)?;
                 let first = &best.first().ok_or(EngineError::Internal)?.1;
-                if jobs && best.len() >= 2 && !self.boosted(st, from, first) {
+                let in_job = jobs && best.len() >= 2 && !self.boosted(st, from, first);
+                if in_job {
                     let top = &best[..best.len().min(TOPK)];
                     stretches.push(Stretch {
                         at: path.len(),
-                        len: first.len(),
                         paths: top.iter().map(|(_, ws)| ws.iter().map(|&(w, lp, delta)| (w.to_string(), lp, delta)).collect()).collect(),
                         ng: top.iter().map(|(score, _)| *score).collect(),
-                        key: context_key(&before),
+                        gap: out[job_end..].to_string(),
                     });
                 }
                 for (w, lp, delta) in first {
                     out.push_str(w);
                     path.push((w.to_string(), *lp, false, *delta));
+                }
+                if in_job {
+                    job_end = out.len();
                 }
             }
             if let Some(f) = right {
@@ -1362,7 +1378,8 @@ impl Engine {
         self.display = out;
         self.path = path;
         if let (false, Some(model)) = (stretches.is_empty(), &self.tinylm) {
-            self.pending = Some(RerankJob { generation: self.generation, model: model.clone(), profile: self.profile, stretches });
+            let (model, profile, left) = (model.clone(), self.profile, self.left.clone());
+            self.rerank_job = Some(RerankJob { generation: self.generation, model, profile, left, stretches });
         }
         Ok(())
     }
@@ -1690,7 +1707,6 @@ impl Engine {
     /// the window closed, the V3 prediction row's (entered or not). `Ok(None)` when there is neither or `index` is
     /// outside that output (state unchanged).
     pub fn pick(&mut self, index: usize) -> Result<Option<Output>, EngineError> {
-        self.invalidate();
         let Some(c) = &self.cands else {
             // V3 section 4: a click on the prediction row selects at once, entered or not.
             if index >= self.pred.len() {

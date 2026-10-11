@@ -191,9 +191,9 @@ int32_t shanjie_engine_load_tinylm(ShanjieEngine *engine, const char *path);
 int32_t shanjie_engine_set_rerank(ShanjieEngine *engine, uint32_t enabled, ShanjieOutput **out);
 // rerank_take：交出上一次改變的工作（只交一次）；沒有工作時回 0、*job 為 NULL。engine 或 job 為 NULL → 1（job 非 NULL 時先設 *job = NULL）；4 → 引擎 discard。
 int32_t shanjie_engine_rerank_take(ShanjieEngine *engine, ShanjieRerankJob **job);
-// rerank_run：任何執行緒都可呼叫，不需要引擎；結果存在工作裡。0 成功、1 job 為 NULL、4 攔下的 panic（沒有碰任何引擎，組字不變；不存結果）。
+// rerank_run：任何執行緒都可呼叫，不需要引擎；結果存在工作裡。0 成功、1 job 為 NULL、4 攔下的 panic（沒有碰任何引擎，組字不變；不留結果，連之前那次 run 的結果也清掉）。
 int32_t shanjie_rerank_run(ShanjieRerankJob *job);
-// rerank_apply：在引擎的執行緒、run 回傳之後。有改變 → 0 與快照；沒有結果、過期、預測列已進入、每段都選第一名、已套用過 → SHANJIE_NO_CHANGE、*out 為 NULL；
+// rerank_apply：在引擎的執行緒、run 回傳之後。有改變 → 0 與快照（預測列只在套用當下有顯示時才重算）；沒有結果、過期、組字裡已不是工作記下的詞、候選窗開著、預測列已進入、每段都選第一名、已套用過 → SHANJIE_NO_CHANGE、*out 為 NULL；
 // 不釋放工作。engine、job、out 任一為 NULL → 1；4 → 引擎 discard、*out 為 NULL。
 int32_t shanjie_engine_rerank_apply(ShanjieEngine *engine, ShanjieRerankJob *job, ShanjieOutput **out);
 // rerank_free(NULL) 不做事。
@@ -206,11 +206,11 @@ void    shanjie_rerank_free(ShanjieRerankJob *job);
   - 回傳非 0 時，`*out` 一律設成 NULL，而且不配置任何記憶體。
   - `shanjie_engine_free(NULL)`、`shanjie_output_free(NULL)` 什麼都不做。重複釋放、或釋放不是核心配置的指標，屬於未定義行為。
   - `ShanjieOutput` 擁有自己的字串副本，有效期到 `shanjie_output_free` 為止，不受之後的 `engine_key`、`engine_reset`、`engine_set_profile`、`engine_load_lm`、`engine_free` 影響。
-  - handle 不是 thread-safe：所有呼叫都在同一個執行緒（IMK 主執行緒）。唯一的例外是 `shanjie_rerank_run`（不需要引擎，S7c-2a）。
+  - handle 不是 thread-safe：所有呼叫都在同一個執行緒（IMK 主執行緒）。例外是 `shanjie_rerank_run` 與 `shanjie_rerank_free`（不需要引擎，S7c-2a；free 要在 run 回傳之後，同一個工作不可同時 run 與 free）。
   - 回傳碼 4 之後，engine 自動 reset（mode 1），丟掉可能只改了一半的組字。**例外**：`shanjie_rerank_run` 的 4 不重設任何東西（它沒有引擎）。
   - 殼收到 `engine_key`、`engine_pick` 的非 0 回傳時，當作「不處理」直通，而且不記錄這個按鍵。`rerank_take`、`rerank_run`、`rerank_apply` 的非 0 碼**不代表按鍵直通**（它們沒有對應的按鍵）。
-  - 回傳碼 5（`SHANJIE_NO_CHANGE`）只有 `rerank_apply` 會回：沒有改變、過期、還沒 run（或 run 回 4）、已套用過。
-  - **重排工作（S7c-2a）**：`rerank_take` 交出的每個工作都由殼恰好 `rerank_free` 一次；`rerank_apply` 不釋放工作，同一個工作再 apply 一律回 5。同一個工作不可同時在兩個執行緒使用（run 回傳之後才能 apply 或 free）；run 不可取消，新按鍵只會讓結果作廢。工作只放擁有的資料（字串、分數、範圍、世代號、設定、模型），不借用引擎，所以引擎釋放之後工作仍可 run 或 free。未定義行為：同一個工作 free 兩次、free 之後再 run 或 apply、free 一個不是 `rerank_take` 交出的指標、run 進行中同時 apply 或 free。工作與結果內含候選文字：不寫進任何紀錄（含指標），`load_tinylm` 的路徑也不寫。
+  - 回傳碼 5（`SHANJIE_NO_CHANGE`）只有 `rerank_apply` 會回：沒有改變、過期、組字裡已不是工作記下的詞、候選窗開著、預測列已進入、還沒 run（或 run 回 4）、已套用過。
+  - **重排工作（S7c-2a）**：`rerank_take` 交出的每個工作都由殼恰好 `rerank_free` 一次；`rerank_apply` 不釋放工作，同一個工作再 apply 一律回 5。同一個工作不可同時在兩個執行緒使用（run 回傳之後才能 apply 或 free）；run 不可取消，之後的改變只會讓結果作廢。**過期**（s7c2a §2.3 修正一）：只有會重新解碼的改變讓結果作廢——完成音節、刪除、選字或預測列選字、標點（標點不是送出：它進組字區、重新解碼、產生新工作）、⌘⌫ 忘記、改變解碼的設定（profile、降權、重排開關、換模型、選字記憶的開關／開檔／清除）；不重新解碼的鍵（游標移動、還沒完成音節的注音符號、進入預測列、直通鍵）不讓結果作廢。送出（Enter、40 個字元自動送出、reset）送出畫面上的內容，還沒套用的工作作廢。工作只放擁有的資料（字串、分數、範圍、世代號、設定、模型），不借用引擎，所以引擎釋放之後工作仍可 run 或 free。未定義行為：同一個工作 free 兩次、free 之後再 run 或 apply、free 一個不是 `rerank_take` 交出的指標、run 進行中同時 apply 或 free。工作與結果內含候選文字：不寫進任何紀錄（含指標），`load_tinylm` 的路徑也不寫。
 - **R2 規則**：
   - 每個匯出函式都包 `catch_unwind`。`ffi.rs` 加 `#[cfg(panic = "abort")] compile_error!(…)`，讓 release 設定改成 abort 時建置失敗。
   - 匯出函式的入口用 `std::sync::Once` 安裝不印任何東西的 panic hook（`|_| {}`）；不在 `Engine::new` 裡裝，引擎單元測試仍保有 panic 訊息。
@@ -244,7 +244,7 @@ void    shanjie_rerank_free(ShanjieRerankJob *job);
 - **經 C ABI 的重播**：在子行程裡經 C ABI 跑完 §7.2 的前 20 列，結果與 §7.2 相同。子行程的 stdout、stderr 除了 libtest 自己的 harness 行（`running 1 test`、`test … ok`、`test result: …` 與空行）之外沒有其他內容，而且不含這 20 列任何一列的句子或讀音字串。
 - 兩個 free 函式傳 NULL 不崩潰；各種錯誤碼的情境回傳正確的碼且 `*out` 為 NULL。
 - **S2c**：子行程測試 `child_lm`／`load_lm_and_set_profile_codes` 用手工的小 SJLM 檔，涵蓋 load_lm 的碼 1、2、3 與失敗時保留原本的 LM、set_profile 的碼 1、2、4（注入 panic）與成功快照、reset 保留 LM 與設定，並檢查子行程輸出不含暫存路徑。
-- **S7c-2a**：子行程測試 `child_rerank`／`rerank_codes_through_the_c_abi` 用真的詞庫與 n-gram 模型、`eval/golden/tinylm-tiny/` 的玩具模型（執行時改寫 n-gram 雜湊與 alpha／tau），涵蓋 load_tinylm 的碼 1、2、3（沒有 n-gram、不存在、壞檔、別的模型的雜湊、資料夾）、set_rerank 的碼、take／run／apply 的所有 NULL 組合、沒有工作時 NULL、還沒 run 就 apply 回 5、run → apply → 同一個工作再 apply 回 5、過期回 5、apply 注入 panic 回 4 之後組字為空、load_tinylm 不改開關、引擎釋放後工作仍可 run 與 free，並檢查子行程輸出不含暫存路徑。`child_rerank_panic`／`r2_rerank_run_panic_is_silent`：run 在注入點 panic（payload 含候選文字）回 4，子行程的 stdout／stderr 不含該文字（預設 hook 的正向對照看得到），之後組字不變、apply 回 5。
+- **S7c-2a**：子行程測試 `child_rerank`／`rerank_codes_through_the_c_abi` 用真的詞庫與 n-gram 模型、`eval/golden/tinylm-tiny/` 的玩具模型（執行時改寫 n-gram 雜湊與 alpha／tau），涵蓋 load_tinylm 的碼 1、2、3（沒有 n-gram、不存在、壞檔、別的模型的雜湊、資料夾）、set_rerank 的碼、take／run／apply 的所有 NULL 組合、沒有工作時 NULL、還沒 run 就 apply 回 5、run → apply → 同一個工作再 apply 回 5、游標移動後照樣套用、Backspace 刪音節後過期回 5、apply 注入 panic 回 4 之後組字為空、load_tinylm 不改開關、引擎釋放後工作仍可 run 與 free，並檢查子行程輸出不含暫存路徑。`child_rerank_panic`／`r2_rerank_run_panic_is_silent`：第一次 run 成功之後，第二次 run 在注入點 panic（payload 含候選文字）回 4，子行程的 stdout／stderr 不含該文字（預設 hook 的正向對照看得到），之後組字不變、apply 回 5（第一次的結果也不留）。
 
 `core/tests/engine_pack.rs`（acg-pack 契約 A.5）：走出貨的建構子 `new_with_packs`，用會變的輸入（碇源堂、螢火蟲之墓的讀音，聊天與書面）。遮罩 0 且檔案存在、遮罩 1 且檔案不存在，兩者的每一個 `Output`（解碼、候選窗、預測列）都和 `Engine::new` 逐位元相同；遮罩 1 且檔案存在時，兩個名字是第一個候選。把遮罩改成什麼都不做會讓 `on != plain` 的斷言失敗（2026-10-09 實測，exit 101）。
 
