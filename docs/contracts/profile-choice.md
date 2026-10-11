@@ -1,6 +1,6 @@
 # 契約：聊天／書面的切換方式與個別 App 設定
 
-狀態：實作完成、/code-review 處置完（2026-10-12，§6），等 fresh verifier 與使用者實機（§3.4）。
+狀態：實作完成；fresh verifier CONFIRMED；使用者實機驗收通過（2026-10-12，§6）。
 
 ## 0. 起因與依據
 
@@ -127,7 +127,7 @@
 
 - **停止條件**：
   - 常用 App 的 client 取不到 bundle ID，使得選單項目在那些 App 都不出現：記下 App 名稱，問使用者；
-  - 實機的 `log stream` 出現 bundle ID 或任何輸入內容。
+  - 實機的 `log stream` 裡，**善解自己的 subsystem**（`com.nyanako.inputmethod.shanjie`）出現 bundle ID 或任何輸入內容。〔修訂，2026-10-12 使用者決定〕系統框架在善解程序裡記的 Debug 訊息不算（見 §6 實機那一列）。
 - **預算**：executor 實作 1 次＋修正 1 次；設定視窗的外觀照使用者的實機回饋收斂，每一輪只改指出的地方。
 - **限制**：agent 不安裝、不啟動 App、不呼叫 TIS 或 lsregister、不在 .app 裡執行任何東西、不碰 `~/Library` 與鑰匙圈、不改真實的 UserDefaults（測試只用記憶體版 store）。
 - **和 #118 的關係**：#118（S7c-2b，未合併）也改選單、設定視窗與 `Shell` 的 init。後合併的那一個 rebase 並處理衝突，選單順序以兩份契約合起來為準。
@@ -140,3 +140,4 @@
 | plan-verifier 第 1 次 REVISE（2026-10-12） | 沒有測試或突變證明建 `Shell` 時會讀回已存的 `profileMode`／`appProfiles`；init 忽略 store 時所有測試照過、§3.4 也不重啟，使用者的設定在重開後失效，下一次切換還會把空的快取寫回、清掉存檔 | **FIX**：§3.1 加「啟動時讀回存檔」測試（兩種模式、有效＋壞項目、切換別的 App 後原項目仍在），§3.2 加突變「init 不讀 store」 |
 | plan-verifier 第 2 次（2026-10-12） | READY | 開始實作 |
 | 本地 /code-review（2026-10-12，7a5ee1d） | 12 項：設定視窗的修改不重設擁有者（只靠沒量過的 `activateServer` 推論）；§1 的「組字中立刻重算」沒有實機步驟；清單在每次重繪時查 LaunchServices；s3b §13.2 選單順序、settings-window §2.2 與 README 沒更新；非自動模式時移除按鈕也反灰；`AppLabel` 註解寫「不記錄」但系統查詢沒量過；研究紀錄沒有這一片的條目；`bundleIdentifier`（同步 IPC）每次讀三次；`chat`／`formal` 字串對照寫了兩份；清單變動時視窗高度不跟著改；`testForcedModes` 的註解說的性質沒有斷言 | **FIX**：§2.2 改成重設擁有者（並刪掉對應的停止條件），§3.1 加測試、§3.2 加突變；§3.4 加組字中切換的實機步驟；§2.4 加名稱快取、移除按鈕不反灰、視窗跟著調整；文件三處；註解改寫；研究紀錄補條目（main）；`bundleIdentifier` 只讀一次；字串對照改用 `ProfileMode` 的 raw value。**不改**：`SettingsModel` 依 bundle ID 排序、畫面依名稱排序，兩者用途不同（測試要固定順序，畫面要依名稱） |
+| 使用者實機（2026-10-12，build 3c7e8d7） | §3.4 全部通過（使用者：「都沒問題」）：終端機打第 226 列是書面的「即時」；組字中按「這個 App 用聊天設定」，組字立刻變成聊天的「及時」；設定視窗列出這個終端機（聊天），移除後回到書面；「一律聊天」時是聊天。同時錄的 `log stream`（約 2 萬行）：善解自己的 subsystem **0 行**；第三方 bundle ID 只出現在蘋果 LaunchServices 的 Debug 訊息（`[com.apple.launchservices:cas]`，前景 App 改變的通知 `kLSNotifyLostFrontmost`，12 次），不是善解的程式記的。推論（沒有量舊版對照）：這是系統對每個 AppKit 程序都會送的前景通知，和本片無關 | **使用者決定**接受：§5 的停止條件改成只看善解自己的 subsystem |
