@@ -2798,7 +2798,7 @@ PR #90 的審查意見逐項處理。
 - **模型檔**：`export_sjtl.py` 從 S7a 的 `tinylm-M.npz`（`32308122…`）匯出，α、τ 為 S7a 凍結值（聊天、書面都是 0.7／2），n-gram 雜湊為 model-v5（`f81a021e…`）。int8 檔 14,638,208 bytes（SHA-256 前 8 碼 `8725204c`），f32 檔 57,652,780 bytes（`9230605c`）。
 - **一致性關卡（都通過）**：
   - Rust 前 8 名對 `reference/proto/lm_eval.py --dump`：cvtune、wikitune、dev302、打字測驗、錯字回報前 66 列，兩種設定，10 格都沒有字串或順序不同；分數最大差 7.11e-15。
-  - LL（cvtune 聊天全部 30,328 個候選）：Rust f32 檔對 numpy float64（`tinylm-M.npz`）最大 |ΔLL| 2.05e-5；Rust int8 檔對 numpy float64（`tinylm-M8.npz`，S7b 的還原權重）1.59e-5。門檻 1e-4。
+  - LL（cvtune 聊天全部 30,328 個候選）：Rust f32 檔對 numpy float64（`tinylm-M.npz`）最大 |ΔLL| 2.05e-5；Rust int8 檔對 numpy float64（`tinylm-M8.npz`，S7b 的還原權重）1.59e-5。門檻 1e-4。review 修正（85dd4d3）後重跑：1.58e-5、1.43e-5。
   - pick：`fusegrid.rowstats`（用 `fusegrid.pick`）和 Rust CLI 的 `--rowstats` 在 20 格（10 個集合 × 2 種設定）逐位元組相同。
 - **表格與 §4（Rust int8 路徑，基準＝n-gram 第一名，`--context`）**：S7a §4 全部通過：discordtune 聊天 4,209 → 4,275（+66 列、+1.33 個百分點），精確 McNemar p = 0.0010，Δtop1 區間 [28, 104]，ΔCER −0.23 個百分點；其他格（含動漫）沒有「淨值為負而且 p < 0.05」。公開集合與 discordtune 的每一列都和 S7b 的 numpy int8 結果相同（例如 discordtune 書面 4,143 → 4,228）。
 
@@ -2826,6 +2826,8 @@ PR #90 的審查意見逐項處理。
 | M8 Rust formal acg-recent | 23 | 22 | 22 | 0 | 0 | 1.0000 | 2.04% | 2.04% | [0, 0] | [0.00, 0.00] |
 
 - **動漫詞包守門**（`--packs acg`，S7a 量的時候詞包是關的）：8 格都沒有顯著退步；聊天的角色名與名字片段各多對 6、5 列（p 0.15、0.13），作品名書面少 2 列（p = 0.50）。這幾個集合沒有前文（k 為空）。
-- **延遲（只記錄；量的時候 Mac 同時在跑 S7b 的 numpy 打分，負載約 5–7）**：CLI 每列一次重排（前 8 名一批，連續跑，不是打字節奏）：int8 檔 dev302 聊天 p50 8.8、p95 11.4 ms，cvtune 聊天 p50 7.8、p95 13.5 ms；f32 檔 cvtune 聊天 p50 12.1、p95 23.4 ms。載入：int8 56–59 ms（載入時還原成 f32），f32 268 ms；載入前後的常駐記憶體 184,080 → 246,784 KiB（int8）、184,080 → 240,800 KiB（f32）。按鍵路徑的門檻與量法在 S7c-2。
+- **延遲（只記錄；兩次量的時候 Mac 都同時在跑 S7b 的 numpy 打分，負載約 5–8）**：CLI 每列一次重排（前 8 名一批，連續跑，不是打字節奏）。第一次（a628142）：int8 檔 dev302 聊天 p50 8.8、p95 11.4 ms，cvtune 聊天 p50 7.8、p95 13.5 ms；f32 檔 cvtune 聊天 p50 12.1、p95 23.4 ms。review 修正後（85dd4d3，只算模型有跑的列）：int8 dev302 p50 11.6、p95 19.8 ms，cvtune p50 12.7、p95 25.4 ms；f32 cvtune p50 11.6、p95 22.9 ms。同一條路徑兩次差到 1.5 倍，int8 與 f32 載入後是同樣的 f32 權重，所以這些數字主要反映機器負載，不是兩者的差；按鍵路徑的門檻在 S7c-2 用空閒的機器與引擎重播量。
+- **載入**〔更正，2026-10-11，PR #113 /code-review：第一次記的「int8 56–59 ms（載入時還原成 f32）、f32 268 ms」大多是對整個檔算 SHA-256（reviewer 量到 14.6 MB 73–95 ms、57.7 MB 305–327 ms）加上一次 `ps`，不是還原 f32 的時間〕：雜湊移到 CLI、在計時之外後，讀檔加解析 int8 10–21 ms、f32 35 ms；載入前後的常駐記憶體 int8 184,080 → 255,120 KiB、f32 185,472 → 240,912 KiB（含配置器還沒還給系統的讀檔緩衝，推論）。
+- **/code-review（PR #113）**：13 項，12 項修正（85dd4d3）：重排規則搬進核心 `TinyLm::rerank`（S7c-2 用同一份）；保留集不准寫 `--tinylm-scores`；`--no-classes`／`--no-demote` 也拒絕；延遲只算模型有跑的列；候選超過模型長度的列保留 n-gram 第一名、不讓整個集合失敗；非有限值拒絕寫出；exporter 改丟 `ValueError`；還原權重預先配置、vForce 不再每次複製輸入、注意力的 softmax 改用純量 exp。延後 1 項（CLI 裡重複的百分位程式）。修正後關卡與表格整套重跑：20 列表格與第一次逐字相同，§4 照樣全部通過。
 - 保留集：契約第 7 項，PR 收尾時由 fresh verifier 跑（第 5 項已通過，用 int8 檔）。
 - discordtune 的分數檔、rowstats 與記錄檔用完已刪。
