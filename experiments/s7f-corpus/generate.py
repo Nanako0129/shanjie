@@ -42,7 +42,9 @@ def load_seeds(paths):
     words, info = [], {}
     for p in paths:
         info[os.path.basename(p)] = clean.sha256_file(p)
-        for line in open(p, encoding="utf-8"):
+        with open(p, encoding="utf-8") as f:
+            lines = f.read().split("\n")
+        for line in lines:
             w = line.strip()
             if w and not w.startswith("#") and w not in words:
                 words.append(w)
