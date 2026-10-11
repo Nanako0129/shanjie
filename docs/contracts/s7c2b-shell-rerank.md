@@ -78,4 +78,6 @@
 
 ## 6. 結果
 
-- 實作見研究紀錄 2026-10-11 S7c-2b 一節；量測數字（selftest-bundled、TSan、實機）由 main 補。
+- 實作見研究紀錄 2026-10-11 S7c-2b 一節。TSan：RerankTests 在 `--sanitize=thread` 下 11／11、沒有報告（只跑這一組）。
+- §2.4 的 `docs/data-files.md` 與 `LICENSES/data.md` 兩列改由文件 PR #117 帶進 main（它們描述的是那個 Release）；Release `tinylm-v1` 照 §2.4 的順序在使用者同意後建立，上傳前後的核對都 OK。
+- selftest-bundled 與 check-app 在 CI 的 `shell` job 跑（main 與 agent 不在本機執行 .app 裡的程式）；實機（§3 第 5 項）由 main 安裝後交給使用者。
