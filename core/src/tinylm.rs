@@ -1,5 +1,7 @@
-//! S7c-1: the small character language model (S7a) in Rust, offline only: the SJTL0001 loader, the forward pass, LL and `pick`
-//! (docs/contracts/s7c-core-tinylm.md section 2). Nothing here is reachable from the engine or the FFI yet.
+//! S7c-1: the small character language model (S7a) in Rust: the SJTL0001 loader, the forward pass, LL and `pick`
+//! (docs/contracts/s7c-core-tinylm.md section 2). S7c-2a (docs/contracts/s7c2a-core-rerank.md) reaches it from the engine's rerank
+//! jobs and the C ABI, so the loader is hardened for in-process use (section 2.6): a size cap, a regular-file check, header
+//! bounds and finite restored weights.
 //!
 //! The model is `tinylm.NumpyLM` of experiments/s7a-tinylm in f32 (pre-LN decoder, tied embedding, learned positions, GELU tanh,
 //! causal attention); `ll_many` is `tinylm.ll_many`. The file is written only by experiments/s7a-tinylm/export_sjtl.py, whose
@@ -22,6 +24,14 @@ const BOS: u32 = 2;
 pub const BATCH: usize = 8;
 /// How many n-best candidates the model reranks (S7a: the first 8).
 pub const TOPK: usize = 8;
+/// S7c-2a section 2.6 (F3): the largest `.sjtl` `load` reads. The shipped M model in int8 is about 15 MB.
+pub const MAX_FILE: u64 = 64 << 20;
+// S7c-2a section 2.6 (F4): header bounds of the shipped model's order of magnitude, so that the forward pass's allocations are
+// bounded too. The M model (S7c-1, docs/contracts/s7c-core-tinylm.md) is V 9,720, ctx 64, d 384, 6 layers.
+const MAX_V: usize = 65_536;
+const MAX_CTX: usize = 1_024;
+const MAX_D: usize = 2_048;
+const MAX_LAYERS: usize = 64;
 const LN10: f64 = std::f64::consts::LN_10;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -71,11 +81,12 @@ extern "C" {
 
 /// c (m x n) += a (m x k) . b, with b (k x n), or b (n x k) transposed when `trans_b`. All row-major.
 fn gemm(be: Backend, a: &[f32], b: &[f32], c: &mut [f32], (m, k, n): (usize, usize, usize), trans_b: bool) {
-    debug_assert!(a.len() == m * k && b.len() == k * n && c.len() == m * n);
+    // Checked in release too (F6): the Accelerate call reads and writes through raw pointers with these lengths.
+    assert!(a.len() == m * k && b.len() == k * n && c.len() == m * n, "gemm: matrix lengths do not match");
     match be {
         #[cfg(target_os = "macos")]
         Backend::Accelerate => {
-            assert!(m.max(k).max(n) < i32::MAX as usize);
+            assert!(m.max(k).max(n) < i32::MAX as usize, "gemm: dimension too large");
             // CblasRowMajor 101, CblasNoTrans 111, CblasTrans 112
             unsafe {
                 cblas_sgemm(
@@ -106,7 +117,7 @@ fn gemm(be: Backend, a: &[f32], b: &[f32], c: &mut [f32], (m, k, n): (usize, usi
 
 /// y = tanh(x), elementwise (out of place: vForce is not documented to allow y == x).
 fn tanh_into(be: Backend, x: &[f32], y: &mut [f32]) {
-    debug_assert_eq!(x.len(), y.len());
+    assert!(x.len() == y.len() && x.len() < i32::MAX as usize, "tanh: lengths do not match");
     match be {
         #[cfg(target_os = "macos")]
         Backend::Accelerate => unsafe { vvtanhf(y.as_mut_ptr(), x.as_ptr(), &(x.len() as i32)) },
@@ -116,7 +127,7 @@ fn tanh_into(be: Backend, x: &[f32], y: &mut [f32]) {
 
 /// y = exp(x), elementwise, out of place.
 fn exp_into(be: Backend, x: &[f32], y: &mut [f32]) {
-    debug_assert_eq!(x.len(), y.len());
+    assert!(x.len() == y.len() && x.len() < i32::MAX as usize, "exp: lengths do not match");
     match be {
         #[cfg(target_os = "macos")]
         Backend::Accelerate => unsafe { vvexpf(y.as_mut_ptr(), x.as_ptr(), &(x.len() as i32)) },
@@ -185,13 +196,29 @@ impl Cursor<'_> {
         for (row, s) in q.chunks_exact(cols).zip(&scale) {
             out.extend(row.iter().map(|&x| x as i8 as f32 * s));
         }
+        // F5: finite scales can still restore to inf (127 * f32::MAX).
+        self.ok &= out.iter().all(|x| x.is_finite());
         out
     }
 }
 
 impl TinyLm {
+    /// Reads only a regular file of at most `MAX_FILE` bytes (checked before reading, and the read itself is bounded).
     pub fn load(path: &Path) -> Result<TinyLm, TinyLmError> {
-        TinyLm::parse(&std::fs::read(path).map_err(|_| TinyLmError::Io)?)
+        use std::io::Read;
+        let meta = std::fs::metadata(path).map_err(|_| TinyLmError::Io)?;
+        if !meta.is_file() {
+            return Err(TinyLmError::Io);
+        }
+        if meta.len() > MAX_FILE {
+            return Err(TinyLmError::Format);
+        }
+        let mut bytes = Vec::with_capacity(meta.len() as usize);
+        std::fs::File::open(path).and_then(|f| f.take(MAX_FILE + 1).read_to_end(&mut bytes)).map_err(|_| TinyLmError::Io)?;
+        if bytes.len() as u64 > MAX_FILE {
+            return Err(TinyLmError::Format);
+        }
+        TinyLm::parse(&bytes)
     }
 
     /// Every check of the format; a bad file is an error, never a partial model.
@@ -208,8 +235,9 @@ impl TinyLm {
         if version != VERSION || wtype > 1 || n_layer == 0 || n_head == 0 || d == 0 || d % n_head != 0 || ctx < 2 || v < 3 {
             return Err(bad);
         }
-        // Sanity bounds so that the length arithmetic cannot overflow; the real check is the exact file length.
-        if n_layer > 1 << 10 || d > 1 << 16 || ctx > 1 << 16 || v > 1 << 24 {
+        // Bounds of the shipped model's order of magnitude (also keep the length arithmetic far from overflow); the exact file
+        // length is checked next.
+        if n_layer > MAX_LAYERS || d > MAX_D || ctx > MAX_CTX || v > MAX_V {
             return Err(bad);
         }
         let int8 = wtype == 1;
@@ -509,6 +537,69 @@ mod tests {
             put_vec(&mut b, &mut st, d, 0.0);
         }
         b
+    }
+
+    /// A file of exactly the length `parse` expects for these sizes, all tensors zero (finite), f32.
+    fn zero_file(n_layer: usize, d: usize, ctx: usize, v: usize) -> Vec<u8> {
+        let mut b = Vec::new();
+        b.extend_from_slice(MAGIC);
+        for x in [VERSION, 0, n_layer as u32, 1, d as u32, ctx as u32, v as u32] {
+            b.extend_from_slice(&x.to_le_bytes());
+        }
+        for x in [0.7f64, 2.0, 0.7, 2.0] {
+            b.extend_from_slice(&x.to_le_bytes());
+        }
+        b.extend_from_slice(&[7u8; 32]);
+        // From U+10000: 65,533 characters from U+4E00 would cross the surrogates.
+        (0..v - 3).for_each(|i| b.extend_from_slice(&(0x10000 + i as u32).to_le_bytes()));
+        // Per layer: four matrices (3 d^2 + d^2 + 4 d^2 + 4 d^2) and the vectors ln1 2d, qkv_b 3d, proj_b d, ln2 2d, fc1_b 4d, fc2_b d.
+        let layer = 4 * (12 * d * d + 13 * d);
+        b.resize(b.len() + 4 * (v * d + ctx * d + 2 * d) + n_layer * layer, 0);
+        b
+    }
+
+    /// S7c-2a section 2.6 (F4): a header past any bound is `Format` even when the length matches it; at the bound it parses
+    /// (so the length helper is right and only the bound rejects).
+    #[test]
+    fn header_bounds() {
+        for (n_layer, d, ctx, v) in [(MAX_LAYERS, 4, 2, 3), (1, 4, MAX_CTX, 3), (1, 4, 2, MAX_V)] {
+            assert!(TinyLm::parse(&zero_file(n_layer, d, ctx, v)).is_ok(), "at the bound");
+        }
+        for (n_layer, d, ctx, v) in [(MAX_LAYERS + 1, 4, 2, 3), (1, 4, MAX_CTX + 1, 3), (1, 4, 2, MAX_V + 1), (1, MAX_D + 1, 2, 3)] {
+            assert_eq!(TinyLm::parse(&zero_file(n_layer, d, ctx, v)).err(), Some(TinyLmError::Format), "past the bound");
+        }
+    }
+
+    /// F5: a finite int8 scale that restores to inf (127 * f32::MAX) is `Format`; a length off by one byte is `Format`.
+    #[test]
+    fn restored_inf_and_length_off_by_one() {
+        let good = random_file(true);
+        assert!(TinyLm::parse(&good).is_ok());
+        // The first matrix (emb, V 120 x d 64) follows the vocabulary; its scales follow its V * d int8 bytes.
+        let scale0 = HEADER + 4 * (120 - 3) + 120 * 64;
+        let mut b = good.clone();
+        b[scale0..scale0 + 4].copy_from_slice(&f32::MAX.to_le_bytes());
+        assert_eq!(TinyLm::parse(&b).err(), Some(TinyLmError::Format), "restored inf");
+        let mut longer = good.clone();
+        longer.push(0);
+        assert_eq!(TinyLm::parse(&longer).err(), Some(TinyLmError::Format), "one byte more");
+        assert_eq!(TinyLm::parse(&good[..good.len() - 1]).err(), Some(TinyLmError::Format), "one byte less");
+    }
+
+    /// F3: `load` reads only a regular file of at most `MAX_FILE` bytes.
+    #[test]
+    fn load_needs_a_regular_file_within_the_cap() {
+        let dir = std::env::temp_dir().join(format!("shanjie-tinylm-load-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let ok = dir.join("ok.sjtl");
+        std::fs::write(&ok, random_file(true)).unwrap();
+        assert!(TinyLm::load(&ok).is_ok(), "control");
+        assert_eq!(TinyLm::load(&dir).err(), Some(TinyLmError::Io), "a directory");
+        // Sparse: no disk space used. Its content would also be a bad file, so only the cap can reject it as Format before reading.
+        let big = dir.join("big.sjtl");
+        std::fs::File::create(&big).unwrap().set_len(MAX_FILE + 1).unwrap();
+        assert_eq!(TinyLm::load(&big).err(), Some(TinyLmError::Format), "over the cap");
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     /// `rerank` is the rule the CLI measured: the key reaches the model as k (a Han key changes the LLs, and they are exactly

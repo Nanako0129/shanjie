@@ -6,14 +6,18 @@
  *    other logging; never interpolate input text into fatalError / precondition / assert messages.
  *  - Copy every field you need into Swift `String`s in the same call that received the output, then
  *    call shanjie_output_free immediately. Do not keep ShanjieOutput pointers around.
- *  - A handle is not thread-safe: make every call on one thread (the IMK main thread).
- *  - Any non-zero return: treat the key as not handled (pass it through) and do not record it.
+ *  - A handle is not thread-safe: make every call on one thread (the IMK main thread). The one exception is
+ *    shanjie_rerank_run, which takes no engine (S7c-2a, below).
+ *  - Any non-zero return of shanjie_engine_key / shanjie_engine_pick: treat the key as not handled (pass it
+ *    through) and do not record it. The non-zero codes of shanjie_engine_rerank_take, shanjie_rerank_run and
+ *    shanjie_engine_rerank_apply do NOT mean pass-through: they have no key.
  *
  * Return codes: 0 success, 1 a required pointer is NULL, 2 invalid input (data_dir or LM path not
  * UTF-8, ch not a Unicode scalar, kind / layout / mode / profile out of range), 3 data load failed
  * (including an unreadable or malformed LM file, and since S2k a missing or mismatching classes.sjc beside
  * it), 4 internal error (caught panic or decode/encode
- * error; the engine has already been reset in discard mode). shanjie_engine_load_lm failing leaves the
+ * error; the engine has already been reset in discard mode; exception: shanjie_rerank_run has no engine and
+ * resets nothing), 5 SHANJIE_NO_CHANGE (shanjie_engine_rerank_apply only). shanjie_engine_load_lm failing leaves the
  * LM state as it was (no LM, or the previously loaded one).
  *
  * Memory and lifetime:
@@ -182,6 +186,45 @@ int32_t shanjie_engine_learning_clear(ShanjieEngine *engine);
 //   fails falls back to a full rewrite, so it counts only through that rewrite). Set by a failed full
 //   rewrite; cleared only by a successful full rewrite or a successful learning_clear.
 int32_t shanjie_engine_learning_status(ShanjieEngine *engine, uint32_t *flags);
+
+// S7c-2a (docs/contracts/s7c2a-core-rerank.md): the small character model reranks the n-gram's first 8 candidates of each free
+//   stretch of the composition, off the key path. Every change of the composition may leave a rerank job; the shell takes it,
+//   runs it on another thread, and applies it back on the engine's thread. A key or setting that comes in between makes the
+//   result stale and apply drops it: the composition shows the n-gram result first and may change once when the result applies.
+//   Commits (ENTER, punctuation, the 40-syllable auto-commit, reset) send what is shown; a job not yet applied is dropped.
+// Logging: a job and its result hold candidate text. Never log them, their pointers, or the .sjtl path (the rules at the top).
+#define SHANJIE_NO_CHANGE 5
+typedef struct ShanjieRerankJob ShanjieRerankJob;
+// load_tinylm: the .sjtl for the loaded n-gram model. Call it after shanjie_engine_load_lm (a successful load_lm drops the small
+//   model: the .sjtl names the n-gram model's hash). 3 when the file cannot be read, is not a regular file, is over 64 MiB or
+//   malformed, when no n-gram model is loaded, when the Kneser-Ney side file is on, or when the .sjtl was tuned with another
+//   n-gram model (a pairing check only, not an integrity check of the .sjtl); the engine keeps its previous model (or none) and
+//   the n-gram keeps working. 1 for a NULL engine or path, 2 for a path that is not UTF-8. Does not change the rerank setting
+//   (set_rerank) or the current display.
+int32_t shanjie_engine_load_tinylm(ShanjieEngine *engine, const char *path);
+// set_rerank 0 or 1 (2 otherwise, state unchanged), default 1 at engine creation, like set_demote in its codes and its snapshot
+//   (handled 1, commit ""): it recomputes the composition, so turning it off shows the n-gram result at once; 1 when engine or
+//   out is NULL. Call it after every engine creation, like set_candidate_vertical. With 0, or without a small model, or with
+//   set_demote 0 (alpha and tau hold only with the table on), no job is ever made.
+int32_t shanjie_engine_set_rerank(ShanjieEngine *engine, uint32_t enabled, ShanjieOutput **out);
+// rerank_take: hands out the job of the last change, once; 0 with *job NULL when there is none. 1 when engine or job is NULL
+//   (*job is set to NULL first whenever job is non-NULL); 4 internal (the engine is reset in discard mode, *job NULL).
+//   Every job handed out must be freed exactly once with shanjie_rerank_free.
+int32_t shanjie_engine_rerank_take(ShanjieEngine *engine, ShanjieRerankJob **job);
+// rerank_run: computes the result and keeps it in the job. Callable on any thread; it needs no engine and the job does not
+//   borrow one, so it may run (or be freed) after shanjie_engine_free. It cannot be cancelled: a newer key only makes the
+//   result stale. 0 success, 1 job NULL, 4 caught panic: no engine is touched (the composition is unchanged) and no result
+//   is kept (a later apply returns SHANJIE_NO_CHANGE).
+int32_t shanjie_rerank_run(ShanjieRerankJob *job);
+// rerank_apply: on the engine's thread, after run returned. Takes the job's result: 0 and a snapshot (handled 1, commit "")
+//   when the composition changed; SHANJIE_NO_CHANGE with *out NULL when there is no result (not run, or run returned 4), the
+//   result is stale, the prediction row is entered, every stretch kept its first candidate, or the job was applied before
+//   (a second apply of the same job never changes anything). Does not free the job. 1 when engine, job or out is NULL
+//   (*out NULL); 4 internal (the engine is reset in discard mode, *out NULL).
+int32_t shanjie_engine_rerank_apply(ShanjieEngine *engine, ShanjieRerankJob *job, ShanjieOutput **out);
+// rerank_free(NULL) does nothing. Undefined behaviour: freeing a job twice, run or apply after free, freeing a pointer
+//   rerank_take did not hand out, and using one job from two threads at once (apply or free while run is still running).
+void    shanjie_rerank_free(ShanjieRerankJob *job);
 
 #ifdef __cplusplus
 }
