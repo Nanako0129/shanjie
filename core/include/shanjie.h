@@ -206,8 +206,8 @@ typedef struct ShanjieRerankJob ShanjieRerankJob;
 //   the n-gram keeps working. 1 for a NULL engine or path, 2 for a path that is not UTF-8. Does not change the rerank setting
 //   (set_rerank) or the current display.
 int32_t shanjie_engine_load_tinylm(ShanjieEngine *engine, const char *path);
-// set_rerank 0 or 1 (2 otherwise, state unchanged), default 1 at engine creation, like set_demote in its codes and its snapshot
-//   (handled 1, commit ""): it recomputes the composition, so turning it off shows the n-gram result at once; 1 when engine or
+// set_rerank 0 or 1 (2 otherwise, state unchanged), default 0 at engine creation (S7c-2c), like set_demote in its codes and its
+//   snapshot (handled 1, commit ""): it recomputes the composition, so turning it off shows the n-gram result at once; 1 when engine or
 //   out is NULL. Call it after every engine creation, like set_candidate_vertical. With 0, or without a small model, or with
 //   set_demote 0 (alpha and tau hold only with the table on), no job is ever made.
 int32_t shanjie_engine_set_rerank(ShanjieEngine *engine, uint32_t enabled, ShanjieOutput **out);
