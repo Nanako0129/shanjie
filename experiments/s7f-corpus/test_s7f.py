@@ -83,6 +83,27 @@ class TestClean(unittest.TestCase):
             self.assertTrue(f.keep("他常常準時到"))
             self.assertEqual(f.removed["eval_overlap"], 3)
 
+    def test_short_eval_rows_do_not_remove(self):
+        rows = {"吧": ["user-reported.txt:29"], "試了": ["user-reported.txt:40"], "等一下再說": ["fw:3"], "要不要去": ["cvtune.txt:7"]}
+        f = clean.Filter(SIMP, rows)
+        self.assertTrue(f.keep("那我們走吧"))                       # a 1-character row inside: not an overlap
+        self.assertTrue(f.keep("我試了好幾次吧"))
+        self.assertFalse(f.keep("好啦等一下再說吧"))                 # a 5-character row inside: removed
+        self.assertFalse(f.keep("你要不要去"))                       # exactly 4 characters: removed
+        self.assertEqual(f.removed["eval_overlap"], 2)
+        self.assertEqual(f.short_report(), {"user-reported.txt:29": 2, "user-reported.txt:40": 1})
+
+    def test_real_short_row_kept_and_counted(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            rows, info = clean.eval_sentences(tune_dir(tmp))
+        self.assertIn("user-reported.txt:29", rows["吧"])
+        self.assertEqual(info["below_min_rows"], sum(len(ids) for t, ids in rows.items() if len(t) < 4))
+        self.assertGreater(info["below_min_rows"], 0)
+        f = clean.Filter(SIMP, rows)
+        self.assertTrue(f.keep("那我們走吧"))
+        self.assertEqual(f.short_report()["user-reported.txt:29"], 1)
+        self.assertNotIn("吧", json.dumps(f.short_report(), ensure_ascii=False))
+
     def test_eval_sources_recorded(self):
         with tempfile.TemporaryDirectory() as tmp:
             _, info = clean.eval_sentences(tune_dir(tmp))
@@ -238,6 +259,7 @@ def invade_repo(root):
     write(os.path.join(d, "鼠標.yml"), "#\nword    : 鼠標\nbopomofo: ㄕㄨˇ ㄅㄧㄠ\n")
     write(os.path.join(d, "視頻.yml"), "#\nword       : 視頻\n")
     write(os.path.join(d, "計算機.yml"), "#\nword    : 計算機\ndeprecation: 台灣也用\n")
+    write(os.path.join(d, "寄.yml"), "#\nword    : 寄\n")
     return os.path.join(root, "invade")
 
 
@@ -247,6 +269,7 @@ class TestInvade(unittest.TestCase):
             terms, info = invade.load(invade_repo(tmp))
         self.assertEqual(terms, {"鼠標", "視頻"})
         self.assertEqual(info["deprecated"], ["計算機"])
+        self.assertEqual(info["single_char_excluded"], ["寄"])
         self.assertEqual(info["sha256"], invade.list_sha256({"視頻", "鼠標"}))
 
 
@@ -306,12 +329,13 @@ class TestGenerate(unittest.TestCase):
 
     def test_rules(self):
         with tempfile.TemporaryDirectory() as tmp:
-            f, terms = clean.Filter(SIMP, eval_set(tmp)), clean.Matcher({"鼠標", "視頻"})
+            f, terms = clean.Filter(SIMP, eval_set(tmp)), clean.Matcher(invade.load(invade_repo(tmp))[0])
         ws = ["夜市", "捷運"]
         self.assertEqual(generate.judge("「等等去夜市吃東西」", ws, terms, f), "等等去夜市吃東西")
         self.assertIsNone(generate.judge("等等去公館吃東西", ws, terms, f))                 # no seed word of this prompt
         self.assertIsNone(generate.judge("等等去雞排店吃東西", ws, terms, f))               # a seed word, but of another prompt
-        self.assertIsNone(generate.judge("在捷運上看視頻好無聊", ws, terms, f))             # invade term
+        self.assertIsNone(generate.judge("在捷運上看視頻好無聊", ws, terms, f))             # invade term (multi-character)
+        self.assertEqual(generate.judge("逛完夜市再寄信給你", ws, terms, f), "逛完夜市再寄信給你")   # 寄 is a single-character term: not used
         self.assertIsNone(generate.judge("我们去夜市吧好不好", ws, terms, f))               # simplified-only character
         self.assertIsNone(generate.judge("等等去夜市吃東西", ws, terms, f))                 # duplicate
         self.assertIsNone(generate.judge(f"夜市那邊{DEV_SENT}", ws, terms, f))              # eval sentence inside

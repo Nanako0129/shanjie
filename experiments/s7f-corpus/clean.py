@@ -111,12 +111,15 @@ class Matcher:
 
 def eval_sentences(tune, extra=(), dev=DEV_ROWS):
     """The public evaluation sentences: dev302 (the first `dev` rows of eval/dev/*.txt in name order, as lm_eval --dev reads them),
-    EVAL_FILES, TUNE_FILES inside `tune`, and any `extra` row files. Returns (set of sentences, {name: {path, sha256, rows}})."""
-    out, info = set(), {}
+    EVAL_FILES, TUNE_FILES inside `tune`, and any `extra` row files.
+    Returns ({sentence: ["<set>:<row>", ...]}, {name: {paths, sha256, rows}, ...}); row numbers are 1-based within the set."""
+    out, info = {}, {}
 
     def add(name, paths, limit=None):
         rows = rows_of(paths)[:limit] if limit else rows_of(paths)
-        out.update(t for t, _, _ in rows if t)
+        for n, (t, _, _) in enumerate(rows, 1):
+            if t:
+                out.setdefault(t, []).append(f"{name}:{n}")
         info[name] = {"paths": [os.path.relpath(p, ROOT) if p.startswith(ROOT) else p for p in paths],
                       "sha256": [sha256_file(p) for p in paths], "rows": len(rows)}
     dev_paths = sorted(glob.glob(os.path.join(ROOT, "eval", "dev", "*.txt")))
@@ -132,6 +135,8 @@ def eval_sentences(tune, extra=(), dev=DEV_ROWS):
         add(os.path.basename(p), [p])
     info["distinct_sentences"] = len(out)
     info["shortest"] = min(map(len, out)) if out else 0
+    # main 2026-10-12: rows shorter than MIN_LEN are not used for overlap removal (Filter); counted here, hits in the manifest
+    info["below_min_rows"] = sum(len(ids) for t, ids in out.items() if len(t) < MIN_LEN)
     return out, info
 
 
@@ -142,9 +147,17 @@ def add_eval_args(ap):
 
 # ------------------------------------------------------------------ the sentence filter
 class Filter:
-    def __init__(self, simp_only, eval_set, lo=MIN_LEN, hi=MAX_LEN):
-        self.simp, self.ev, self.lo, self.hi = frozenset(simp_only), Matcher(eval_set), lo, hi
-        self.seen, self.removed = set(), collections.Counter()
+    """eval_rows: eval_sentences()'s {sentence: [row ids]} (a plain set also works; its sentences are their own ids). Only evaluation
+    sentences of at least `lo` characters remove a corpus sentence (main, 2026-10-12): a 1-3 character row such as `吧` inside a
+    sentence is not an overlap of that sentence. For each shorter row, short_report() gives how many kept sentences contain it."""
+
+    def __init__(self, simp_only, eval_rows, lo=MIN_LEN, hi=MAX_LEN):
+        rows = eval_rows if isinstance(eval_rows, dict) else {t: [t] for t in eval_rows}
+        self.simp, self.lo, self.hi = frozenset(simp_only), lo, hi
+        self.ev = Matcher(t for t in rows if len(t) >= lo)
+        self.short_rows = {t: ids for t, ids in rows.items() if len(t) < lo}
+        self.short = Matcher(self.short_rows)
+        self.seen, self.removed, self.short_hits = set(), collections.Counter(), collections.Counter()
 
     def reason(self, s):
         if not self.simp.isdisjoint(s):
@@ -165,7 +178,12 @@ class Filter:
             self.removed[r] += 1
             return False
         self.seen.add(s)
+        self.short_hits.update(set(self.short.find(s)))
         return True
+
+    def short_report(self):
+        """{row id: kept sentences containing that row's sentence} for the rows below the minimum length. Counts only."""
+        return {i: self.short_hits[t] for t, ids in sorted(self.short_rows.items()) for i in ids}
 
 
 def clean_text(text, flt, counts):
@@ -252,4 +270,5 @@ def write_manifest(path, d):
 def source_manifest(source, inputs, kept, flt, counts, eval_info, **extra):
     return {"source": source, "inputs": inputs, "rows": len(kept), "chars": sum(map(len, kept)), "sha256": sha256_lines(kept),
             "removed": dict(sorted(flt.removed.items())), "scrubbed": dict(sorted(counts.items())),
-            "length": [flt.lo, flt.hi], "eval": eval_info, **extra}
+            "length": [flt.lo, flt.hi], "eval": eval_info,
+            "eval_below_min_hits": flt.short_report(), **extra}
