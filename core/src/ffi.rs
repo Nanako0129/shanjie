@@ -1796,6 +1796,7 @@ mod tests {
         let (e, keys) = rerank_engine();
         let lm = CString::new(root().join("data/lm/bigram.sjlm").to_str().unwrap()).unwrap();
         assert!(unsafe { shanjie_engine_load_lm(e, lm.as_ptr()) } == 0 && load_tinylm(e, &good) == 0, "loads");
+        assert!(set_rerank(e, 1).0 == 0, "on (off by default since S7c-2c)");
         for &k in &keys {
             send(e, k);
         }
