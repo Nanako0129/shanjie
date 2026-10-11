@@ -27,7 +27,7 @@ pub const TOPK: usize = 8;
 /// S7c-2a section 2.6 (F3): the largest `.sjtl` `load` reads. The shipped M model in int8 is about 15 MB.
 pub const MAX_FILE: u64 = 64 << 20;
 // S7c-2a section 2.6 (F4): header bounds of the shipped model's order of magnitude, so that the forward pass's allocations are
-// bounded too. The M model (S7c-1, docs/contracts/s7c-core-tinylm.md) is V 9,720, ctx 64, d 384, 6 layers.
+// bounded too. The M model (S7c-1, docs/contracts/s7c-core-tinylm.md) is V 9,717 (9,714 characters + PAD, UNK, BOS), ctx 64, d 384, 6 layers.
 const MAX_V: usize = 65_536;
 const MAX_CTX: usize = 1_024;
 const MAX_D: usize = 2_048;

@@ -26,7 +26,7 @@
 ## 3. 規則（寫在 `docs/releases/README.md`；repo 根目錄 `CLAUDE.md`「發版」只放一句摘要與指標）
 
 - 推 `v*` tag 之前，`docs/releases/<tag>.md` 要先寫好、經 PR 合併到 main；推 tag 仍要使用者當下同意。
-- 資料類 Release（`model-v…`、`classes-v…`）照樣手動建，一律 `gh release create <tag> <檔案> --notes-file docs/releases/<tag>.md --latest=false`；說明檔同樣先進 main。
+- 資料類 Release（`model-v…`、`classes-v…`，以及 2026-10-11 起的 `tinylm-v…`）照樣手動建（上傳前後的雜湊核對與雜湊檔的時機見 `docs/releases/README.md`），一律 `gh release create <tag> <檔案> --notes-file docs/releases/<tag>.md --latest=false`；說明檔同樣先進 main。
 - 之後在網頁上改了說明，要同步回這個檔（以 repo 為準）。
 
 ## 4. 驗收
