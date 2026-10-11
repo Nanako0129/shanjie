@@ -231,6 +231,14 @@ class TestParity(unittest.TestCase):
         with self.assertRaises(ValueError):
             parity.max_delta(a, b)
 
+    def test_ngram_scores_compare_with_a_tolerance(self):
+        a, b = [self.rec(1, [-1.0, -2.0])], [self.rec(1, [-1.0, -2.0])]
+        b[0]["ng"] = [-1.0 + 5e-10, -2.0 - 5e-10]
+        parity.max_delta(a, b)                       # within 1e-9: the same candidates
+        b[0]["ng"] = [-1.0 + 5e-9, -2.0]
+        with self.assertRaises(ValueError):
+            parity.max_delta(a, b)
+
     def test_gate_exit_codes(self):
         with tempfile.TemporaryDirectory() as td:
             def write(name, rows):
