@@ -146,9 +146,11 @@ M 的 int8 比對同樣用 `--fp32 M --int8 M8 --chat 0.7 2 --formal 0.7 2`，�
 ```sh
 # 188（訓練文字在那裡）：每個調參集一個 0／1 旗標檔，第 i 行對應 score.py 的列號 i
 %PY% -u buildcheck.py substr --work %W% --rows %TUNE%\cvtune.txt %TUNE%\wikitune.txt --flags %W%\s7d-flags
+# 拷回 Mac：%W%\s7d-flags\cvtune.flags、wikitune.flags → $W/s7d-flags/
 # Mac：重現關卡（不加 --tune-keep，必須等於 S7b），再只用旗標 0 的列選
 $PY fusegrid.py --scores $OUT/scores --out $W/s7d/repro --models M L --settings chat formal --sets cvtune wikitune dev302 typing76 user-reported discordtune
 $PY fusegrid.py --scores $OUT/scores --out $W/s7d/keep --models M L --settings chat formal --sets cvtune wikitune dev302 typing76 user-reported discordtune --tune-keep $W/s7d-flags
+# 用完：刪掉 discordtune 的候選、分數、rowstats（$W/dumps/discordtune.*、$OUT/scores/*.discordtune.jsonl、各 rowstats 資料夾的 *discordtune*）
 ```
 
 ## S7c-1：Rust 推論（`SJTL0001`）
