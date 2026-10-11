@@ -1,6 +1,7 @@
 """S7a: run the same step for every evaluation set, so the README's commands are one line per machine.
 
   python run_sets.py dumps --work DIR --tune TUNEDIR --sets cvtune wikitune dev302 typing76 user-reported [discordtune --discord FILE]
+                         [--reported-rows 66]
       -> DIR/dumps/<set>.<setting>.dump and <set>.<setting>.top1 (the summary line's top1) from reference/proto/lm_eval.py
          (shipping model, --context, no word pack; --lm defaults to data/lm/bigram.sjlm, classes.sjc next to it)
   python run_sets.py score --work DIR --out SCORES --models S M --backend numpy|torch --sets ... [--ppl]
@@ -21,6 +22,19 @@ import score
 
 SETTINGS = ("chat", "formal")
 EVAL_DEV = os.path.join(ROOT, "eval", "dev")
+# S7b section 2.2: `--reported-rows 66` keeps user-reported at S7a's first 66 rows (new reports are appended at the end), so n
+# matches the models scored on them; without it the whole file is used, as every other evaluation does.
+REPORTED_ROWS = 66
+REPORTED_SHA = "6e338dc1293060162585c09e02bbb252c93148c9928d61007faea5e8860369e8"
+
+
+def check_reported(path):
+    # Universal newlines, as lm_eval.rows_of reads the rows: a CRLF checkout (git on Windows) hashes like the LF one.
+    with open(path, encoding="utf-8") as f:
+        head = [next(f, "") for _ in range(REPORTED_ROWS)]
+    got = hashlib.sha256("".join(head).encode()).hexdigest()
+    if got != REPORTED_SHA:
+        sys.exit(f"run_sets: the first {REPORTED_ROWS} rows of {path} changed (sha256 {got[:16]}…, expected {REPORTED_SHA[:16]}…)")
 
 
 def rows_args(name, a):
@@ -31,7 +45,8 @@ def rows_args(name, a):
     if name == "typing76":
         return ["--rows", os.path.join(EVAL_DEV, "user-typing.txt")]
     if name == "user-reported":
-        return ["--rows", os.path.join(EVAL_DEV, "user-reported.txt")]
+        path = os.path.join(EVAL_DEV, "user-reported.txt")
+        return ["--rows", path] + (["--limit", str(REPORTED_ROWS)] if getattr(a, "reported_rows", None) else [])
     if name == "discordtune":
         if not a.discord:
             sys.exit("run_sets: discordtune needs --discord FILE")
@@ -91,12 +106,16 @@ def main(argv=None):
         p = sub.add_parser(cmd)
         p.add_argument("--work", required=True); p.add_argument("--sets", nargs="+", required=True)
         p.add_argument("--tune", help="directory holding cvtune.txt and wikitune.txt"); p.add_argument("--discord")
+        p.add_argument("--reported-rows", type=int, choices=[REPORTED_ROWS],
+                       help="user-reported: only S7a's first 66 rows, their SHA-256 checked before anything runs (S7b, S7d)")
         if cmd == "dumps":
             p.add_argument("--lm")
         else:
             p.add_argument("--out", required=True); p.add_argument("--models", nargs="+", default=["S", "M"])
             p.add_argument("--backend", choices=["numpy", "torch"], default="numpy"); p.add_argument("--ppl", action="store_true")
     a = ap.parse_args(argv)
+    if a.reported_rows and "user-reported" in a.sets:
+        check_reported(os.path.join(EVAL_DEV, "user-reported.txt"))      # before any set runs, not when the loop reaches it
     {"dumps": cmd_dumps, "score": cmd_score}[a.cmd](a)
 
 
