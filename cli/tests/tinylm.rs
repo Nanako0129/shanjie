@@ -98,8 +98,9 @@ fn kneser_ney_side_file_is_refused() {
 
 /// The engine's context key is "^" when no Han character precedes the cursor; the model must see an empty k then, as score.py does
 /// (tinylm.row_key). With --context, a row with an empty prefix and a row whose prefix ends in a non-Han character therefore score
-/// exactly like the same rows without --context (k empty); a row with a Han prefix does not. Fed "^" as a character (an UNK token),
-/// the first two would differ.
+/// exactly like the same rows without --context (k empty); fed "^" as a character (an UNK token), they would differ. A row with a
+/// Han prefix scores its own top 8 (read from --dump) with k = that prefix: its LLs are exactly TinyLm::ll_many's with k "我們", so a
+/// CLI that dropped the key would fail here.
 #[test]
 fn sentinel_context_is_an_empty_k() {
     let lm = lm_path();
@@ -120,8 +121,36 @@ fn sentinel_context_is_an_empty_k() {
     let ll = |l: &String| l[l.find("\"ll\": ").expect("n >= 2: an ll list")..].to_string();
     assert_eq!(ll(&plain[0]), ll(&with_ctx[0]), "empty prefix");
     assert_eq!(ll(&plain[1]), ll(&with_ctx[1]), "prefix ending in a non-Han character");
-    assert_ne!(ll(&plain[2]), ll(&with_ctx[2]), "a Han prefix is the model's context");
+    // Row 3's own candidates, from the dump of a --context run (same decode as the scores above).
+    let dump = dir.join("ctx.dump");
+    let o = run(&["--lm", &lm, "--profile", "chat", "--rows", rows.to_str().unwrap(), "--context", "--dump", dump.to_str().unwrap()]);
+    assert!(o.status.success(), "{}", text(&o.stderr));
+    let cands: Vec<String> = std::fs::read_to_string(&dump).unwrap().lines()
+        .filter_map(|l| { let f: Vec<&str> = l.split('\t').collect(); (f[0] == "3" && f[1].parse::<usize>().unwrap() <= 8).then(|| f[2].to_string()) })
+        .collect();
+    let model = core::tinylm::TinyLm::load(Path::new(&sjtl)).unwrap();
+    let want = model.ll_many(&cands.iter().map(|c| ("我們", c.as_str())).collect::<Vec<_>>()).unwrap();
+    let l = &with_ctx[2];
+    let got: Vec<f64> = l[l.find("\"ll\": [").unwrap() + 7..l.rfind(']').unwrap()].split(", ").map(|x| x.parse().unwrap()).collect();
+    assert_eq!(got, want, "a Han prefix is the model's context");
     // numbers only: no candidate text in the file
     assert!(plain.iter().all(|l| l.is_ascii()));
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+/// The holdout never gets a per-candidate record (it is what alpha and tau are tuned on), and alpha / tau are refused under
+/// n-gram settings other than the tuned ones. Each refusal comes before any model or row is read.
+#[test]
+fn refusals_before_anything_is_read() {
+    let lm = lm_path();
+    let (dir, sjtl) = tmp_with_sjtl("refuse", Path::new(&lm));
+    let o = run(&["--lm", &lm, "--profile", "chat", "--set", "holdout", "--tinylm", "no-such.sjtl", "--tinylm-scores", "x.jsonl"]);
+    assert!(!o.status.success() && text(&o.stderr).contains("holdout"), "{}", text(&o.stderr));
+    let rows = dir.join("rows.txt");
+    std::fs::write(&rows, "|你好|ㄋㄧˇ ㄏㄠˇ\n").unwrap();
+    for flag in ["--no-demote", "--no-classes"] {
+        let o = run(&["--lm", &lm, "--profile", "chat", "--rows", rows.to_str().unwrap(), "--tinylm", &sjtl, flag]);
+        assert!(!o.status.success() && text(&o.stderr).contains(".sjtl") && o.stdout.is_empty(), "{flag}: {}", text(&o.stderr));
+    }
     std::fs::remove_dir_all(dir).unwrap();
 }

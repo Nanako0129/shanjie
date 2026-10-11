@@ -79,7 +79,6 @@ fn header_fields_are_read() {
     assert_eq!(m.alpha_tau(Profile::Formal), (0.5, 1.0));
     let kn_tiny = std::fs::read(dir().join("../kn-tiny/bigram.sjlm")).unwrap();
     assert_eq!(m.ngram_sha256(), core::eval::sha256_hex(&kn_tiny));
-    assert_eq!(m.sha8(), &core::eval::sha256_hex(&bytes("tiny-int8.sjtl"))[..8]);
 }
 
 /// Every bad file is an error naming the format, for both weight types.

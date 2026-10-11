@@ -46,12 +46,15 @@ def export(npz, out, wtype, chat, formal, ngram_sha):
     z = np.load(npz, allow_pickle=False)
     n_layer, n_head, ctx = (int(x) for x in z["cfg"])
     chars = [str(c) for c in z["chars"]]
-    tinylm.Vocab(chars)                                   # no duplicates, one code point each
+    if len(set(chars)) != len(chars) or any(len(c) != 1 for c in chars):
+        raise ValueError("vocabulary: duplicate or multi-character entries")
     d = z["emb"].shape[1]
     V = len(chars) + 3
-    assert d % n_head == 0 and len(ngram_sha) == 32 and wtype in ("f32", "int8")
+    if d % n_head or len(ngram_sha) != 32 or wtype not in ("f32", "int8"):
+        raise ValueError(f"bad arguments or config: d {d}, n_head {n_head}, sha {len(ngram_sha)} bytes, type {wtype}")
     shapes = tensor_shapes(n_layer, d, ctx, V)
-    assert sorted(n for n, _ in shapes) == sorted(k for k in z.files if k not in ("cfg", "chars")), "npz keys differ from the model layout"
+    if sorted(n for n, _ in shapes) != sorted(k for k in z.files if k not in ("cfg", "chars")):
+        raise ValueError("npz keys differ from the model layout")
     if wtype == "int8":
         with tempfile.TemporaryDirectory() as tmp:
             quantize_int8(npz, os.path.join(tmp, "q.npz"))    # the one quantizer (S7b section 2.3); never reimplemented here
@@ -60,9 +63,12 @@ def export(npz, out, wtype, chat, formal, ngram_sha):
                          chat[0], chat[1], formal[0], formal[1], bytes(ngram_sha)),
              struct.pack(f"<{V - 3}I", *(ord(c) for c in chars))]
     for name, shape in shapes:
-        assert z[name].shape == shape, f"{name}: shape {z[name].shape} != {shape}"
+        # ValueError, not assert: under python -O a transposed tensor of the right size would export silently wrong weights
+        if z[name].shape != shape:
+            raise ValueError(f"{name}: shape {z[name].shape} != {shape}")
         if len(shape) == 2 and wtype == "int8":
-            assert z[name].dtype == np.int8 and z[name + ".scale"].shape == (shape[0], 1)
+            if z[name].dtype != np.int8 or z[name + ".scale"].shape != (shape[0], 1):
+                raise ValueError(f"{name}: not an int8 matrix with one scale per row")
             parts += [z[name].tobytes(), z[name + ".scale"].astype("<f4").tobytes()]
         else:
             parts.append(z[name].astype("<f4").tobytes())
