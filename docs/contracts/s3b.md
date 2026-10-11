@@ -105,6 +105,7 @@
 ## 9. 設定判斷與隱私
 
 - **聊天／書面設定**：`activateServer` 時、以及組字擁有者改變時（§5），用擁有者 client 的 `bundleIdentifier()` 查內建的聊天 App 清單：Discord（`com.hnc.Discord`）、LINE（`jp.naver.line.mac`）、訊息（`com.apple.MobileSMS`）、Slack（`com.tinyspeck.slackmacgap`）、Telegram（`ru.keepcoder.Telegram`、Telegram Desktop `com.tdesktop.Telegram`）、WhatsApp（`net.whatsapp.WhatsApp`）、Messenger（`com.facebook.archon`）。bundle ID 是依公開資料整理，未逐一在本機核對；使用者實測 15 會涵蓋 Discord。在清單內用 chat，其餘用 formal，以 `shanjie_engine_set_profile` 傳**列舉**給核心；bundle ID 不傳給核心、不寫 log、不存檔。清單在這一版寫在程式裡；PLAN §S2 的「清單可在設定中修改」延到設定頁（S3b-2）。
+  - **修訂（2026-10-12，`profile-choice.md` §2.5）**：使用者可以選「依 App 自動」「一律聊天」「一律書面」，並在選單對個別 App 切換。「不存檔」改成：**只有使用者在選單上按過的 App** 的 bundle ID 存在 App 自己的 UserDefaults（鍵 `appProfiles`，值只有 `chat`／`formal`），其他 App 的 bundle ID 照舊不存；照舊不傳給核心、不寫 log。判斷改由 `Shell.profile(bundle:mode:overrides:)` 一處決定，時機另加選單切換之後（`claim()` 再 `applyProfile()`）。
 - **日誌（R2，白名單）**：只能用 `os.Logger`，訊息**只能是靜態字串與 C ABI 回傳碼**；不得內插任何其他值（含 keyCode、`ch`、游標位置、數量、路徑、bundle ID、組字、候選、送出內容）；不得使用 `.public`，也不得用 hash mask。不得用 `print`、`NSLog`、`debugPrint`、`dump`。
 - **當機報告**：`fatalError`／`precondition` 不得內插任何值；禁用 `try!`；裝著輸入文字的型別不得是 `Error`，也不得實作 `CustomStringConvertible`／`CustomDebugStringConvertible`。
 - **privacyGate（R3）延到 S4**：這一版沒有學習、雲端、左文，gate 沒有東西可擋。PLAN 與 s3a 原本列在 S3 的 gate、gate 單元測試、「privacyGate 轉為生效時 reset」都移到 S4。
@@ -272,7 +273,7 @@
     - `postflight_steps` 在 Homebrew 的沙盒裡執行（`cask/artifact/abstract_artifact.rb` 把 `HOME` 設成暫存資料夾，`sandbox.rb` 的 `deny_read_home` 擋住讀取真正的家目錄），`~` 開頭的指令路徑也不會展開（`install_steps.rb` 的 `resolve_command`）。這樣寫出來的步驟找不到執行檔；加上 `must_succeed: false`，安裝仍然顯示成功，等於「靜靜地沒做」。
     - 就算改成 `base: :home` 讓沙盒放行讀取，`TISRegisterInputSource` 在沙盒裡能不能成功也沒有量過。
   - `uninstall on_upgrade: :signal, signal: ["TERM", "com.nyanako.inputmethod.shanjie"]`：解除安裝和升級時都結束執行中的行程，系統下次就會啟動新版。Homebrew 預設在升級時略過 `signal`（`UPGRADE_REINSTALL_SKIP_DIRECTIVES`），所以要加 `on_upgrade`。Homebrew 用 `launchctl list` 的標籤找行程；2026-10-04 在本機看到其他輸入法的標籤是 `application.<bundle ID>.<數字>.<數字>`，符合它的比對規則。**已由 §15（修訂四）取代**：0.3.0 實測升級後舊版仍在跑，改成 `postflight_steps` 在新版就位後結束行程，`uninstall` 只留 `signal`。
-  - `zap trash: "~/Library/Preferences/com.nyanako.inputmethod.shanjie.plist"`：目前唯一的使用者資料，也就是 `layout` 偏好。
+  - `zap trash: "~/Library/Preferences/com.nyanako.inputmethod.shanjie.plist"`：App 的偏好檔。寫這段時（2026-10-04）裡面只有 `layout` 偏好；之後加了其他設定，2026-10-12 起也包括使用者在選單上切換過的 App 的 bundle ID 與聊天／書面設定（`profile-choice.md` §2.5）。選字記憶不在這個檔案，在 `~/Library/Application Support/shanjie`。
   - `caveats`：第一次安裝後執行 `"$HOME/Library/Input Methods/善解輸入法.app/Contents/MacOS/shanjie" install`，由它註冊並啟用輸入方式；第一次安裝通常要登出再登入：它結束碼是 3 時，登出、再登入，然後再執行一次（修訂三）。caveats 不提升級；升級後由 §15 的 postflight 接手。**2026-10-09 修訂（`installer-v2.md` §9）**：「登出、再登入再執行一次」已取代，現在 caveats 寫「結束碼是 3 時，到系統設定 → 鍵盤 → 輸入方式加入」。
 - **未驗證**（由使用者實測，見 14.5，停止條件見 14.7）：
   - 從 Homebrew 下載的 app 帶有 quarantine（已公證、已 staple）：在終端機執行 caveats 的 `install` 時，以及系統啟動輸入法時，會不會跳出確認視窗；
