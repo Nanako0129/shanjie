@@ -16,6 +16,7 @@
 | `parity.py` | 一致性關卡：兩份分數檔的最大 \|ΔLL\| | 否 |
 | `fusegrid.py` | 格點、凍結選擇、rowstats、`evalstats` 表格、§3／§4 報告 | 否 |
 | `latency.py` | numpy 延遲（8 候選 × 17 字，200 次）與 int8 大小 | 否 |
+| `export_sjtl.py` | S7c-1：`.npz` → `SJTL0001`（Rust 讀的模型檔；檔案格式寫在檔頭的 docstring）；`read_sjtl` 供測試與 golden 產生器用 | 否 |
 | `test_*.py` | 單元測試；`test_torch.py` 沒有 torch 時整檔跳過 | 只有 `test_torch.py` |
 
 ## 契約沒寫死、我做的決定
@@ -112,6 +113,30 @@ rm $W/scores/*.discordtune.jsonl $W/dumps/discordtune.* $W/fusion/rowstats/*.dis
 | 5 延遲與大小 | `latency.py` |
 | 6 判斷 | `fusegrid.py` 的 `section 4` 逐項 PASS／FAIL（只涵蓋 discordtune 與護欄格；M 要使用者同意多約 30 MB、M 的 p95 > 150 ms 只考慮 S，這兩項看 `latency.py` 與使用者） |
 
+## S7c-1：Rust 推論（`SJTL0001`）
+
+契約 `docs/contracts/s7c-core-tinylm.md`。`.sjtl` 不進 repo（只有 `eval/golden/tinylm-tiny/` 的隨機小模型例外），放 `~/.cache/shanjie/work/` 或 session 暫存區，**不放進任何 `data/lm/`**。
+
+```sh
+cd experiments/s7a-tinylm
+W=~/.cache/shanjie/work/s7a
+LM=<model-v5 的 bigram.sjlm，同資料夾要有 classes.sjc>      # 調 α、τ 時的 n-gram 模型；它的 SHA-256 寫進檔頭
+# 匯出（α、τ 是 S7a 凍結的值，必填，沒有預設）。int8 與 f32 各一個檔
+/opt/homebrew/bin/python3 export_sjtl.py --npz $W/tinylm-M.npz --out $W/tinylm-M8.sjtl  --type int8 --ngram-model $LM --chat 0.7 2 --formal 0.7 2
+/opt/homebrew/bin/python3 export_sjtl.py --npz $W/tinylm-M.npz --out $W/tinylm-M32.sjtl --type f32  --ngram-model $LM --chat 0.7 2 --formal 0.7 2
+# 評測 CLI：加 --tinylm 就用重排後的第一名算 top1、--rowstats、摘要行（摘要行多 +tl:<.sjtl 的 sha8>）
+cd ../..
+cargo run --release -q -p cli -- --lm $LM --profile chat --context --dev 302 --rowstats OUT --tinylm $W/tinylm-M8.sjtl     # 或 --rows FILE／--set holdout
+# 每列的前 8 名與 LL（只有數字；score.py 的欄位去掉 key／key16／ll0／ll16），給 parity.py 與 fusegrid.pick／rowstats 讀
+cargo run --release -q -p cli -- --lm $LM --profile chat --context --rows $W/tune/cvtune.txt --tinylm $W/tinylm-M8.sjtl --tinylm-scores OUT.jsonl
+```
+
+- `--tinylm` 要求載入的 n-gram 模型的 SHA-256 等於檔頭記的，而且 `kn.sjkn` 不能開（旁邊有的話加 `--no-kn`）；否則結束碼 1、訊息點名 `.sjtl`，不輸出結果。
+- `k` 是 `context_key(前文)`（`--context`）或空；`context_key` 回哨兵 `"^"` 時 k 是空字串，和 `tinylm.row_key` 一致。
+- 沒有 `--tinylm` 時輸出逐位元組不變。有的時候 stderr 多一行 `tinylm: rerank …`（每列重排時間 p50／p95、載入時間、載入前後的 RSS），給契約第 6 項的紀錄用。
+- 一致性：f32 檔對 `tinylm-M.npz`、int8 檔對 `tinylm-M8.npz`（`int8check.dequant` 的還原權重）的 numpy LL，用 `--tinylm-scores` 的輸出和 `score.py` 的輸出跑 `parity.py`（`ng` 容許 1e-9，`i`、`n` 要相同）。
+- 小模型 golden 的產生：`python3 -B tools/gen_tinylm_tiny.py`（`eval/golden/tinylm-tiny/`；Rust 測試 `core/tests/tinylm_tiny.rs`）。
+
 ## 測試
 
 ```sh
@@ -136,5 +161,7 @@ cd experiments/s7a-tinylm
 | numpy 前向沒有因果遮罩 | `test_causal`、`test_matches_loop_reference`、`test_pad_and_batch_invariance` |
 | GELU 常數改錯 | `test_matches_loop_reference` |
 | 字表外的字被丟掉而不是 UNK | `test_unk`、`test_ids` |
+
+S7c-1 的 Rust 測試（`cargo test --release`）與突變檢查見契約的結果一節；Python 這一側的 `test_export_sjtl.py` 檢查檔頭、字表、張量與 int8 還原（`q.astype(float32) * scale`）。
 
 沒有 torch 就無法在這台 Mac 驗證的部分：`torch_model.py`、`train.py` 只做過語法檢查（`py_compile`）與逐行對照，`test_torch.py` 的 6 項要在 188 上第一次跑；其中 numpy／torch 的 `LL` 差 < 1e-4（經過 `export_npz`）是契約的單元測試項目。

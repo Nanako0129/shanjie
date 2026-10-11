@@ -7,16 +7,17 @@ import json
 import sys
 
 LIMIT = 1e-4
+NG_TOL = 1e-9   # the n-gram scores of two decoders (Python and the Rust CLI) agree to 1e-9; candidates and ranks are exact (S7c-1)
 COLS = ("ll", "ll0", "ll16")
 
 
 def max_delta(rows_a, rows_b):
-    """{column: (max |delta|, number of candidates compared)}; the files must hold the same rows and the same n-gram scores."""
+    """{column: (max |delta|, number of candidates compared)}; the files must hold the same rows and the same n-gram scores (to NG_TOL)."""
     if len(rows_a) != len(rows_b):
         raise ValueError(f"row counts differ: {len(rows_a)} vs {len(rows_b)}")
     out = {c: [0.0, 0] for c in COLS}
     for a, b in zip(rows_a, rows_b):
-        if a["i"] != b["i"] or a["n"] != b["n"] or a["ng"] != b["ng"]:
+        if a["i"] != b["i"] or a["n"] != b["n"] or len(a["ng"]) != len(b["ng"]) or any(abs(x - y) > NG_TOL for x, y in zip(a["ng"], b["ng"])):
             raise ValueError(f"row {a['i']}: the files do not hold the same candidates")
         for c in COLS:
             for x, y in zip(a.get(c, []), b.get(c, [])):
