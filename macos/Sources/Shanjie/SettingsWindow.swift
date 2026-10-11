@@ -1,6 +1,7 @@
 import AppKit
 import ShanjieKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// The settings window (docs/contracts/settings-window.md section 2.1): one NSWindow with a SwiftUI
 /// grouped Form, in the input method's own process. It has no text field, so it needs no Edit menu and
@@ -117,6 +118,8 @@ struct SettingsForm: View {
     private static let formWidth: CGFloat = 420
     /// Icon-to-slider gap, Syrtis's value (TokenBar GlassTintControl.swift `HStack(spacing: 8)`); not measured.
     private static let tintIconSpacing: CGFloat = 8
+    /// The app icons in the 個別設定的 App list: one line of body text; not measured against any reference.
+    private static let appIconSize: CGFloat = 16
     @ObservedObject var model: SettingsModel
 
     var body: some View {
@@ -139,6 +142,38 @@ struct SettingsForm: View {
                 if let line = model.acgDataLine {
                     Text(line).font(.caption).foregroundStyle(.secondary)
                 }
+            }
+            // profile-choice section 2.4, between 選字 and 外觀.
+            Section("聊天／書面") {
+                Picker("切換方式", selection: Binding(get: { model.profileMode }, set: { model.setProfileMode($0) })) {
+                    Text("依 App 自動").tag(ProfileMode.auto)
+                    Text("一律聊天").tag(ProfileMode.chat)
+                    Text("一律書面").tag(ProfileMode.formal)
+                }
+                Text("依 App 自動：聊天 App（Discord、LINE、訊息等）用聊天設定，其他 App 用書面設定。")
+                    .font(.caption).foregroundStyle(.secondary)
+                // Kept, greyed, outside 依 App 自動: the choices apply again once it is back.
+                Group {
+                    Text("個別設定的 App")
+                    if model.appProfiles.isEmpty {
+                        Text("在 App 裡打開善解選單，勾選「\(MenuEntry.Text.appChat)」，就會列在這裡。")
+                            .font(.caption).foregroundStyle(.secondary)
+                    } else {
+                        ForEach(AppLabel.sorted(model.appProfiles), id: \.row) { label in
+                            HStack {
+                                Image(nsImage: label.icon).resizable().frame(width: Self.appIconSize, height: Self.appIconSize)
+                                    .accessibilityHidden(true)
+                                Text(label.name)
+                                Spacer()
+                                Text(label.row.chat ? "聊天" : "書面").foregroundStyle(.secondary)
+                                Button { model.removeAppProfile(label.row.bundle) } label: { Image(systemName: "minus.circle") }
+                                    .buttonStyle(.borderless)
+                                    .accessibilityLabel("移除")
+                            }
+                        }
+                    }
+                }
+                .disabled(model.profileMode != .auto)
             }
             Section("外觀") {
                 // Before the glass tint (candidate-vertical contract section 2.1). A candidate window already open keeps its orientation, so the next one uses the new setting. (The core also turns a prediction row on screen, but a click in this window is inferred, not measured, to commit the composition and hide the panel first.)
@@ -181,6 +216,33 @@ struct SettingsForm: View {
         .scrollContentBackground(.hidden)  // the window's glass shows through
         .frame(width: Self.formWidth)
         .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
+/// The name and icon of a 個別設定的 App row (profile-choice section 2.4), looked up here so `SettingsModel` and the tests never
+/// touch NSWorkspace. An app that is gone shows its bundle ID and the generic app icon. Nothing is logged.
+private struct AppLabel {
+    let row: AppProfileRow
+    let name: String
+    let icon: NSImage
+
+    init(_ row: AppProfileRow) {
+        self.row = row
+        if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: row.bundle) {
+            name = FileManager.default.displayName(atPath: url.path)
+            icon = NSWorkspace.shared.icon(forFile: url.path)
+        } else {
+            name = row.bundle
+            icon = NSWorkspace.shared.icon(for: .applicationBundle)
+        }
+    }
+
+    /// By name, then bundle ID, so equal names keep a fixed order.
+    static func sorted(_ rows: [AppProfileRow]) -> [AppLabel] {
+        rows.map(AppLabel.init).sorted {
+            let order = $0.name.localizedStandardCompare($1.name)
+            return order == .orderedSame ? $0.row.bundle < $1.row.bundle : order == .orderedAscending
+        }
     }
 }
 
