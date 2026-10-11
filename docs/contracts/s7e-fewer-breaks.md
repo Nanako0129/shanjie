@@ -53,7 +53,7 @@
 1. 「改對 − 3 × 改壞」（相對 n-gram）**> 0**，而且比現行值的 −260 大；
 2. 改壞的列數比現行值的 163 少；
 3. 對 n-gram 的 Δtop1 ≥ 0；
-4. cvtune、wikitune、dev302、打字測驗、錯字回報、功能字測試句在兩種設定都沒有「淨值為負而且 p < 0.05」的格（對 n-gram）。
+4. cvtune、wikitune、dev302、打字測驗、錯字回報、功能字測試句在兩種設定都沒有「改對 < 改壞，而且精確 McNemar p < 0.05」的格（對 n-gram；和 S7a §4、`fusegrid.decision` 同一條規則，1:1 比較，因為 McNemar 檢定比的就是改對與改壞的列數）。表格另列的「改對 − 3 × 改壞」只供參考，不進這一項。
 
 四項都過 → 寫出貨片的契約（§5）。第 1 項不過（照使用者的權重，新值在真實聊天上仍不如不重排）→ **停下來問使用者**，選項寫進研究紀錄：出貨但預設關、改 δ 格點再試一次、或換做法（例如只在小模型的分數差距很大時才換）。其他項不過也停下來回報。
 
@@ -65,7 +65,7 @@
 2. 公開集合的重現關卡（§2.2 的 10 格）、錯字回報前 66 列的一致性、discordtune 的重現關卡（§2.3）都相等，72 列檔的雜湊，都記進研究紀錄。
 3. 表格與 §3 逐項，記進研究紀錄；本契約的結果一節；PLAN 的 S7 狀態行。
 4. 功能字測試句進 repo（§2.1），`eval/README.md`、`LICENSES/data.md` 各一列；重疊比例記進研究紀錄。
-5. `make test` 全綠；`experiments/s7a-tinylm` 的 Python 測試全過；fresh verifier 確認第 1、2、4 項與公開集合的表格可以從檔案重現（discordtune 照 S7a 的做法核對內部一致）。
+5. `make test` 全綠；`experiments/s7a-tinylm` 的 Python 測試全過；fresh verifier 確認第 1、2、4 項與公開集合的表格可以從檔案重現（discordtune 照 S7a 的做法核對內部一致）。**verifier 的輸入**：main 把公開集合的分數與候選（S7b 的 `M8.*.{cvtune,wikitune,dev302,typing76}.jsonl`、這一片新產生的錯字回報 72 列與 `fw` 的分數，以及對應的 dump）複製到 `~/.cache/shanjie/s7e-public/`，verifier 只讀那裡；**順序**：discordtune 的衍生檔先刪、確認刪掉之後，verifier 才開始。
 
 ## 5. 之後的出貨片（這一片不做，只寫方向）
 
@@ -78,9 +78,10 @@
 - **範圍外**：重新訓練、換模型大小、核心與殼的改動、出貨、保留集、針對單一字的規則。
 - **停止條件**：公開集合或 discordtune 的重現關卡不符；錯字回報前 66 列的一致性不符；錯字回報不是 72 列或前 66 列雜湊不符（#119 沒併進來）；缺分數檔；§3 第 1 項不過（問使用者）；其他項不過（回報）。
 - **預算**：程式改動只有 `fusegrid.py`（δ、`--objective`）、`run_sets.py`（集合名 `fw`）與測試，main 做；Mac 打分（discordtune 兩種設定、錯字回報、測試句）；188 只跑一次 substr。
-- **限制**：discordtune 只在 Mac、只回數字、結束刪除衍生檔；不讀 `eval/holdout`；agent 不讀 `~/side-project/shanjie-private`、`~/.cache/shanjie/work`、學習檔、`~/Library`、鑰匙圈。
+- **限制**：discordtune 只在 Mac、只回數字，衍生檔在 verifier 開始前刪除；不讀 `eval/holdout`；agent 不讀 `~/side-project/shanjie-private`、`~/.cache/shanjie/work`、學習檔、`~/Library`、鑰匙圈（verifier 只讀 §4 第 5 項的 `~/.cache/shanjie/s7e-public/`，那裡只有公開集合的檔）。
 - **回滾**：只加選項、集合名、測試、測試句與文件；不給新選項、不用 `fw` 時行為不變；revert 即可。不出貨。
 
 ## 7. 審查紀錄
 
 - 第一次 plan-verifier（2026-10-11）：REVISE 4 點，全部 **FIX**。1：discordtune 要重新產生，卻沒有檢查它和 §3 比較用的數字同源 → 加 discordtune 的重現關卡（4,958 列、聊天 4,209 → 4,275、229／163，書面 4,143 → 4,228、232／147），公開集合的關卡寫明是哪 10 格與數字。2：72 列在 #119、還不在 main → 寫成前提，記雜湊，不符就停。3：`run_sets.py` 不認得測試句集合 → 加集合名 `fw`，列進預算與回滾。4：§0 把沒量過的推論寫成結論、而且和書面的數字矛盾 → 改寫，標明推論，引用 S7b 的字元計數。
+- 第二次 plan-verifier（2026-10-11）：REVISE 2 點，逐點處置，都 **FIX**。1：§3 第 4 項的「淨值為負」有 1:1 與 ×3 兩種讀法 → 寫明是「改對 < 改壞而且 p < 0.05」（S7a 防線），×3 只列表參考。2：verifier 要重現的分數放在 agent 不能讀的 `~/.cache/shanjie/work` → main 把公開集合的檔複製到 `~/.cache/shanjie/s7e-public/`，discordtune 衍生檔先刪、verifier 後跑。接著一次收尾審查。
