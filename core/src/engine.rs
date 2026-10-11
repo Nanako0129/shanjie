@@ -467,7 +467,8 @@ pub struct Engine {
     /// S7c-2a: the small character model, from `load_tinylm`; dropped when another n-gram model is loaded (its `.sjtl` names
     /// the n-gram model's hash).
     tinylm: Option<Arc<TinyLm>>,
-    /// Whether rerank jobs are made (default on; `set_rerank`). `load_tinylm` leaves it as it is.
+    /// Whether rerank jobs are made (default off since S7c-2c, docs/contracts/s7c2c-delta.md section 2.3; `set_rerank`).
+    /// `load_tinylm` leaves it as it is.
     rerank_on: bool,
     /// Section 2.3 (修正一): renewed from `GENERATION` only where decoding changes: every `refresh`, `clear_all`, the model and
     /// decoding settings (`load_lm`, `set_lm`, `load_tinylm`, `set_rerank`, `set_profile`, `set_demote`, learning on/open/clear).
@@ -647,7 +648,7 @@ impl Engine {
             learn_panic: false,
             forget_panic: false,
             tinylm: None,
-            rerank_on: true,
+            rerank_on: false,
             generation: next_generation(),
             rerank_job: None,
         }
@@ -675,8 +676,8 @@ impl Engine {
         Ok(())
     }
 
-    /// Whether rerank jobs are made (default on); recomputes the composition and returns the snapshot like `set_demote`, so
-    /// turning it off shows the n-gram result at once. On a decode failure the engine resets itself.
+    /// Whether rerank jobs are made (default off, S7c-2c); recomputes the composition and returns the snapshot like `set_demote`,
+    /// so turning it off shows the n-gram result at once. On a decode failure the engine resets itself.
     pub fn set_rerank(&mut self, on: bool) -> Result<Output, EngineError> {
         self.invalidate();
         self.rerank_on = on;

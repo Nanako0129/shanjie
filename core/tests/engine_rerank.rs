@@ -95,6 +95,7 @@ fn engine_with(model: Option<&Path>) -> Engine {
     e.set_lm(s.lm.clone(), s.capped.clone());
     if let Some(m) = model {
         e.load_tinylm(m).unwrap();
+        e.set_rerank(true).unwrap(); // off by default since S7c-2c
     }
     e
 }
@@ -508,6 +509,7 @@ fn new_ngram_model_drops_the_small_model() {
     let mut e = Engine::new(&root().join("data/lexicon"), Layout::Standard).unwrap();
     e.load_lm(&lm_path()).unwrap();
     e.load_tinylm(&rerank_model()).unwrap();
+    e.set_rerank(true).unwrap();
     assert!(e.load_lm(Path::new("/nonexistent/shanjie.sjlm")).is_err());
     type_syls(&mut e, &syls);
     assert!(e.take_rerank_job().is_some(), "a failed load_lm keeps the model");
@@ -556,6 +558,24 @@ fn learned_stretch_is_not_reranked() {
     // Control: without the teach the same fix reranks both stretches (fixed_word_between_two_stretches).
 }
 
+/// S7c-2c section 2.3 (docs/contracts/s7c2c-delta.md): a new engine with the small model loaded makes no rerank job until
+/// `set_rerank(true)`; the same keys then make one.
+#[test]
+fn rerank_is_off_until_set_rerank() {
+    let syls = row(12);
+    let mut e = Engine::new(&root().join("data/lexicon"), Layout::Standard).unwrap();
+    e.load_lm(&lm_path()).unwrap();
+    e.load_tinylm(&rerank_model()).unwrap();
+    for syl in &syls {
+        for key in keys_of(syl) {
+            e.key(key).unwrap();
+            assert!(e.take_rerank_job().is_none(), "a job without set_rerank(true)");
+        }
+    }
+    e.set_rerank(true).unwrap();
+    assert!(e.take_rerank_job().is_some(), "control: on, the same composition makes a job");
+}
+
 /// Section 2.5: load errors keep the previous state (none or the old model); `load_tinylm` never touches the switch.
 #[test]
 fn load_tinylm_errors_and_the_switch() {
@@ -566,6 +586,7 @@ fn load_tinylm_errors_and_the_switch() {
     assert!(e.load_tinylm(&rerank_model()).is_err(), "no n-gram model");
     // A missing file, another model's hash, a directory: errors, and no model afterwards.
     let mut e = engine_with(None);
+    e.set_rerank(true).unwrap();
     let (other, tmp) = (sjtl_for(100.0, f64::INFINITY, None), std::env::temp_dir());
     for bad in [Path::new("/nonexistent/x.sjtl"), &other, &tmp] {
         assert!(e.load_tinylm(bad).is_err());
@@ -711,6 +732,7 @@ fn replay_dev302_parity_and_measurements() {
     let mut e = Engine::new(&root().join("data/lexicon"), Layout::Standard).unwrap();
     e.load_lm(&lm_path()).unwrap();
     e.load_tinylm(Path::new(&model)).unwrap();
+    e.set_rerank(true).unwrap();
     let rows = dev302();
     // The CLI's rule in process.
     let s = shared();
