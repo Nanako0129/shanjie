@@ -14,7 +14,7 @@
 | `score.py` | 候選（`--dump` 前 8 名）× `LL` → 只有數字的分數檔；`--ppl-out` 正解句困惑度 | 否（`--backend torch` 才要） |
 | `run_sets.py` | 每個集合各跑一次 `lm_eval.py --dump` 與 `score.py`（一行命令跑完全部集合） | 否 |
 | `parity.py` | 一致性關卡：兩份分數檔的最大 \|ΔLL\| | 否 |
-| `fusegrid.py` | 格點、凍結選擇、rowstats、`evalstats` 表格、§3／§4 報告；`--tune-keep` 只用旗標 0 的調參列選（S7d） | 否 |
+| `fusegrid.py` | 格點、凍結選擇、rowstats、`evalstats` 表格、§3／§4 報告；`--tune-keep` 只用旗標 0 的調參列選（S7d）；`--break-weight W` 照「改對 − W × 改壞」在 (α, τ, δ) 上選、照 S7e §3 判斷，δ 是融合的門檻（S7e） | 否 |
 | `latency.py` | numpy 延遲（8 候選 × 17 字，200 次）與 int8 大小 | 否 |
 | `int8check.py` | S7b §2.3：`dequant`（權重 int8 還原成 float32 的複本）、`compare`（int8 對 n-gram 的 §4 與 int8 對 fp32 的表，結論「int8 夠用／需要 FP32／不適用」） | 否 |
 | `export_sjtl.py` | S7c-1：`.npz` → `SJTL0001`（Rust 讀的模型檔；檔案格式寫在檔頭的 docstring）；`read_sjtl` 供測試與 golden 產生器用 | 否 |

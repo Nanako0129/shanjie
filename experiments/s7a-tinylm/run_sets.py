@@ -1,6 +1,6 @@
 """S7a: run the same step for every evaluation set, so the README's commands are one line per machine.
 
-  python run_sets.py dumps --work DIR --tune TUNEDIR --sets cvtune wikitune dev302 typing76 user-reported [discordtune --discord FILE]
+  python run_sets.py dumps --work DIR --tune TUNEDIR --sets cvtune wikitune dev302 typing76 user-reported [fw] [discordtune --discord FILE]
                          [--reported-rows 66]
       -> DIR/dumps/<set>.<setting>.dump and <set>.<setting>.top1 (the summary line's top1) from reference/proto/lm_eval.py
          (shipping model, --context, no word pack; --lm defaults to data/lm/bigram.sjlm, classes.sjc next to it)
@@ -47,6 +47,8 @@ def rows_args(name, a):
     if name == "user-reported":
         path = os.path.join(EVAL_DEV, "user-reported.txt")
         return ["--rows", path] + (["--limit", str(REPORTED_ROWS)] if getattr(a, "reported_rows", None) else [])
+    if name == "fw":    # S7e: the function-word sentences (eval/rerank/s7e-function-words.txt)
+        return ["--rows", os.path.join(ROOT, "eval", "rerank", "s7e-function-words.txt")]
     if name == "discordtune":
         if not a.discord:
             sys.exit("run_sets: discordtune needs --discord FILE")

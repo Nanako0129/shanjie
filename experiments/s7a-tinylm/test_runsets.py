@@ -72,6 +72,13 @@ class TestRunSets(unittest.TestCase):
             self.assertIn("no summary line", str(e.exception.code))
             self.assertIn("garbage output", str(e.exception.code))
 
+    def test_fw_is_the_function_word_file(self):
+        """S7e section 2.3: the set name fw reads eval/rerank/s7e-function-words.txt, which exists and has 186 rows."""
+        args = run_sets.rows_args("fw", argparse.Namespace(tune=None, discord=None, reported_rows=None))
+        self.assertEqual(args[0], "--rows")
+        self.assertTrue(args[1].endswith(os.path.join("eval", "rerank", "s7e-function-words.txt")))
+        self.assertEqual(sum(1 for _ in open(args[1], encoding="utf-8")), 186)
+
     def test_user_reported_is_pinned_to_the_first_66_rows_only_when_asked(self):
         """S7b §2.2: --reported-rows 66 adds --limit 66 and checks the head first; without it the whole file is used."""
         pinned, whole = argparse.Namespace(tune=None, discord=None, reported_rows=66), argparse.Namespace(tune=None, discord=None, reported_rows=None)
