@@ -7,8 +7,9 @@
          --sets cvtune wikitune dev302 typing76 user-reported discordtune --out OUT
       reranks the fp32 and the int8 score files of every set and setting with the fp32 model's frozen (alpha, tau) (no re-selection),
       prints int8-vs-n-gram and int8-vs-fp32 table rows, the S7a section-4 decision for int8, and the verdict:
-      "int8 enough" = section 4 passes and no int8-vs-fp32 cell is net-negative with p < 0.05; otherwise "FP32 needed".
-      Exit 3 when a required cell (fusegrid.REQUIRED_CELLS) has no score files.
+      "int8 enough" = section 4 passes and no int8-vs-fp32 cell is net-negative with p < 0.05; otherwise "FP32 needed"; "not applicable"
+      when the fp32 model itself fails section 4. The given alpha/tau must be the fp32 model's own selection on cvtune+wikitune.
+      Exit 3, before any verdict, when a set of --sets lacks score files in either setting or a section-4 cell is missing.
 """
 import argparse
 import os
@@ -38,15 +39,24 @@ def same_candidates(rf, rq, path):
 
 
 def compare(a):
+    """Returns True ("int8 enough"), False ("FP32 needed") or None (not applicable: the fp32 model itself fails section 4)."""
     frozen = {"chat": tuple(a.chat), "formal": tuple(a.formal)}
     os.makedirs(os.path.join(a.out, "rowstats"), exist_ok=True)
-    cells, vs_fp32 = {}, {}
+    cells, cells_fp32, vs_fp32, missing = {}, {}, {}, []
     for setting in fg.SETTINGS:
         al, ta = frozen[setting]
+        paths = {s: tuple(os.path.join(a.scores, f"{m}.{setting}.{s}.jsonl") for m in (a.fp32, a.int8)) for s in a.sets}
+        tuning = {t: fg.load_scores(paths[t][0]) for t in fg.TUNING if t in paths and os.path.isfile(paths[t][0])}
+        if len(tuning) == len(fg.TUNING):
+            sel = fg.select(tuning)[:2]
+            if sel != (al, ta):            # contract 2.3: the fp32 model's frozen values, not values typed for another model
+                sys.exit(f"int8check: --{setting} {al} {ta} is not {a.fp32}'s frozen alpha/tau on {'+'.join(fg.TUNING)} ({sel[0]} {sel[1]})")
         print(f"\n## {a.int8} vs {a.fp32}, {setting}: frozen alpha {al}, tau {ta} (from {a.fp32}, not re-selected)")
-        for k, s in enumerate(a.sets):
-            pf, pq = (os.path.join(a.scores, f"{m}.{setting}.{s}.jsonl") for m in (a.fp32, a.int8))
+        first = True
+        for s in a.sets:
+            pf, pq = paths[s]
             if not (os.path.isfile(pf) and os.path.isfile(pq)):
+                missing.append((setting, s))
                 continue
             rf, rq = fg.load_scores(pf), fg.load_scores(pq)
             same_candidates(rf, rq, pq)
@@ -54,26 +64,32 @@ def compare(a):
             open(base, "w", newline="").write(fg.rowstats(rf, [0] * len(rf)))
             open(f32, "w", newline="").write(fg.rowstats(rf, [fg.pick(r, al, ta) for r in rf]))
             open(i8, "w", newline="").write(fg.rowstats(rq, [fg.pick(r, al, ta) for r in rq]))
-            print(fg.table_row(base, i8, f"{a.int8} vs n-gram {setting} {s}", first=(k == 0)))
+            print(fg.table_row(base, i8, f"{a.int8} vs n-gram {setting} {s}", first=first))
             print(fg.table_row(f32, i8, f"{a.int8} vs {a.fp32} {setting} {s}", first=False))
-            cells[(setting, s)] = fg.cell_stats(base, i8)
+            first = False
+            cells[(setting, s)], cells_fp32[(setting, s)] = fg.cell_stats(base, i8), fg.cell_stats(base, f32)
             vs_fp32[(setting, s)] = fg.cell_stats(f32, i8)
             if (setting, s) == ("chat", "discordtune"):
-                cells[(setting, s)]["ci_lo"] = evalstats.paired_bootstrap(evalstats.read_rowstats(base), evalstats.read_rowstats(i8))[0][0]
-    missing = [c for c in fg.REQUIRED_CELLS if c not in cells]     # whatever --sets says, every required cell must be there
+                rb = evalstats.read_rowstats(base)
+                cells[(setting, s)]["ci_lo"] = evalstats.paired_bootstrap(rb, evalstats.read_rowstats(i8))[0][0]
+                cells_fp32[(setting, s)]["ci_lo"] = evalstats.paired_bootstrap(rb, evalstats.read_rowstats(f32))[0][0]
+    # every set of --sets in both settings (12 cells for the six sets) and every section-4 cell must be there before any verdict
+    missing += [c for c in fg.REQUIRED_CELLS if c not in cells and c not in missing]
+    if missing:
+        print(f"STOP: cells missing {sorted(missing)}")
+        sys.exit(3)
     print(f"\n### section 4, {a.int8} (vs the n-gram first)")
     dec = fg.decision(cells)
     for crit, ok in dec:
         print(f"- {'PASS' if ok else 'FAIL'}: {crit}")
     bad = sorted(k for k, c in vs_fp32.items() if c["fixed"] < c["broken"] and c["p"] < 0.05)
     print(f"- {'PASS' if not bad else 'FAIL'}: no {a.int8}-vs-{a.fp32} cell net-negative with p < 0.05 (bad: {bad})")
+    if not fg.decision(cells_fp32)[-1][1]:
+        print(f"verdict: not applicable ({a.fp32} itself fails section 4, so neither int8 nor FP32 is a candidate)")
+        return None
     enough = dec[-1][1] and not bad
     print(f"verdict: {'int8 enough' if enough else 'FP32 needed'}")
-    if missing:
-        print(f"STOP: required cells missing {missing}")
-        sys.exit(3)
     return enough
-
 
 def main(argv=None):
     ap = argparse.ArgumentParser()

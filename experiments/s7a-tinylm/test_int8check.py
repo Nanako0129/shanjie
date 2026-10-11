@@ -23,16 +23,17 @@ def write_sets(d, model, rows_by_set):
                 f.writelines(json.dumps(rec(i + 1, r["ng"], r["ll"], r["ok"])) + "\n" for i, r in enumerate(rows))
 
 
-def run(d, sets=("cvtune", "wikitune", "dev302", "typing76", "user-reported", "discordtune")):
+def run(d, sets=("cvtune", "wikitune", "dev302", "typing76", "user-reported", "discordtune"), frozen=(0.1, 0.5)):
     out = io.StringIO()
     with contextlib.redirect_stdout(out):
-        enough = int8check.compare(int8check_args(d, sets))
+        enough = int8check.compare(int8check_args(d, sets, frozen))
     return enough, out.getvalue()
 
 
-def int8check_args(d, sets):
+def int8check_args(d, sets, frozen=(0.1, 0.5)):
+    # (0.1, 0.5): what fusegrid.select picks on these tuning sets (every cell ties, or the smallest one that fixes FIX rows)
     import argparse
-    return argparse.Namespace(scores=d, out=os.path.join(d, "out"), fp32="M", int8="M8", chat=[0.7, 2.0], formal=[0.7, 2.0], sets=list(sets))
+    return argparse.Namespace(scores=d, out=os.path.join(d, "out"), fp32="M", int8="M8", chat=list(frozen), formal=list(frozen), sets=list(sets))
 
 
 GOOD = {"cvtune": [KEEP] * 20, "wikitune": [KEEP] * 20, "dev302": [KEEP] * 10, "typing76": [KEEP] * 10, "user-reported": [KEEP] * 10,
@@ -61,6 +62,33 @@ class TestDequant(unittest.TestCase):
 
 
 class TestCompare(unittest.TestCase):
+    def test_fp32_failing_section_4_is_not_applicable(self):
+        flat = dict(GOOD, discordtune=[KEEP] * 200)                      # nothing to gain on discordtune: fp32 fails section 4 too
+        with tempfile.TemporaryDirectory() as td:
+            write_sets(td, "M", flat); write_sets(td, "M8", flat)
+            enough, out = run(td)
+            self.assertIsNone(enough, out)
+            self.assertIn("verdict: not applicable", out)
+            self.assertNotIn("FP32 needed", out)
+
+    def test_alpha_tau_must_be_the_fp32_selection(self):
+        with tempfile.TemporaryDirectory() as td:
+            write_sets(td, "M", GOOD); write_sets(td, "M8", GOOD)
+            with self.assertRaises(SystemExit) as e:
+                run(td, frozen=(0.7, 2.0))
+            self.assertIn("frozen alpha/tau", str(e.exception.code))
+
+    def test_every_set_in_both_settings_or_stop_before_the_verdict(self):
+        with tempfile.TemporaryDirectory() as td:
+            write_sets(td, "M", GOOD); write_sets(td, "M8", GOOD)
+            os.remove(os.path.join(td, "M8.formal.discordtune.jsonl"))     # not a section-4 cell, still one of the 12
+            out = io.StringIO()
+            with self.assertRaises(SystemExit) as e, contextlib.redirect_stdout(out):
+                int8check.compare(int8check_args(td, ("cvtune", "wikitune", "dev302", "typing76", "user-reported", "discordtune")))
+            self.assertEqual(e.exception.code, 3)
+            self.assertIn("('formal', 'discordtune')", out.getvalue())
+            self.assertNotIn("verdict", out.getvalue())
+
     def test_identical_int8_is_enough(self):
         with tempfile.TemporaryDirectory() as td:
             write_sets(td, "M", GOOD); write_sets(td, "M8", GOOD)

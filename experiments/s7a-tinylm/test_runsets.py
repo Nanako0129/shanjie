@@ -72,20 +72,28 @@ class TestRunSets(unittest.TestCase):
             self.assertIn("no summary line", str(e.exception.code))
             self.assertIn("garbage output", str(e.exception.code))
 
-    def test_user_reported_is_pinned_to_the_first_66_rows(self):
-        """S7b §2.2: --limit 66, and a changed head of the file stops the run (appending rows at the end does not)."""
-        a = argparse.Namespace(tune=None, discord=None)
-        self.assertEqual(run_sets.rows_args("user-reported", a)[-2:], ["--limit", "66"])
+    def test_user_reported_is_pinned_to_the_first_66_rows_only_when_asked(self):
+        """S7b §2.2: --reported-rows 66 adds --limit 66 and checks the head first; without it the whole file is used."""
+        pinned, whole = argparse.Namespace(tune=None, discord=None, reported_rows=66), argparse.Namespace(tune=None, discord=None, reported_rows=None)
+        self.assertEqual(run_sets.rows_args("user-reported", pinned)[-2:], ["--limit", "66"])
+        self.assertNotIn("--limit", run_sets.rows_args("user-reported", whole))
+        real = open(os.path.join(run_sets.EVAL_DEV, "user-reported.txt"), encoding="utf-8").read()
         with tempfile.TemporaryDirectory() as td:
-            real = open(os.path.join(run_sets.EVAL_DEV, "user-reported.txt"), encoding="utf-8", newline="").read()   # newline="": the hash is over the bytes
-            open(os.path.join(td, "user-reported.txt"), "w", encoding="utf-8", newline="").write(real + "|多加一列|ㄉㄨㄛ ㄐㄧㄚ ㄧ ㄌㄧㄝˋ\n")
-            with mock.patch.object(run_sets, "EVAL_DEV", td):
-                self.assertEqual(run_sets.rows_args("user-reported", a)[-1], "66")          # appended rows are fine
-                open(os.path.join(td, "user-reported.txt"), "w", encoding="utf-8", newline="").write("|改過的第一列|ㄍㄞˇ\n" + real)
-                with self.assertRaises(SystemExit) as e:
-                    run_sets.rows_args("user-reported", a)
-                self.assertIn("first 66 rows", str(e.exception.code))
-
+            path = os.path.join(td, "user-reported.txt")
+            open(path, "w", encoding="utf-8", newline="").write(real + "|多加一列|ㄉㄨㄛ ㄐㄧㄚ ㄧ ㄌㄧㄝˋ\n")
+            run_sets.check_reported(path)                                                  # appended rows are fine
+            open(path, "w", encoding="utf-8", newline="").write(real.replace("\n", "\r\n"))
+            run_sets.check_reported(path)                                                  # a CRLF checkout hashes the same
+            open(path, "w", encoding="utf-8", newline="").write("|改過的第一列|ㄍㄞˇ\n" + real)
+            with self.assertRaises(SystemExit) as e:
+                run_sets.check_reported(path)
+            self.assertIn("first 66 rows", str(e.exception.code))
+            # main checks before any set runs: nothing is decoded when the head changed
+            with mock.patch.object(run_sets, "EVAL_DEV", td), mock.patch.object(run_sets, "check_model"), \
+                    mock.patch.object(run_sets.subprocess, "run") as sp:
+                with self.assertRaises(SystemExit):
+                    run_sets.main(["dumps", "--work", td, "--sets", "dev302", "user-reported", "--reported-rows", "66"])
+                sp.assert_not_called()
 
 if __name__ == "__main__":
     unittest.main()

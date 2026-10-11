@@ -55,7 +55,7 @@
 4. 表格與判斷：每個模型 × 兩種設定 × 六個集合（cvtune、wikitune、dev302、打字測驗、錯字回報前 66 列、discordtune），`evalstats` 同一張表；凍結的 α、τ；對 n-gram 的判斷逐項 PASS／FAIL；對 M 的配對比較（聊天、書面各一行）。
 5. int8 的判斷（§2.3）：每個量的模型，int8 對 n-gram 的 §4 逐項、int8 對 fp32 的表（每個集合 × 兩種設定），與結論「int8 夠用」或「需要 FP32」。
 6. 延遲與大小（§2.4）。
-7. 研究紀錄、本契約的結果一節、PLAN 的 S7 狀態行；`make test` 全綠；fresh verifier 確認第 3、4 項可以從檔案重現（discordtune 那幾行照 S7a 的做法核對內部一致）。
+7. 研究紀錄、本契約的結果一節、PLAN 的 S7 狀態行；`make test` 全綠（它不跑 `experiments/s7a-tinylm` 的測試，那些在 Mac 手動跑全過、torch 測試在 188 跑）；fresh verifier 確認第 3、4 項可以從檔案重現（discordtune 那幾行照 S7a 的做法核對內部一致）。
 
 ## 4. 範圍外、停止條件、預算、限制
 
@@ -66,7 +66,7 @@
 
 ## 5. 回滾
 
-這一片只改 `torch_model.CONFIGS`（加 L、XL）、`int8check.py` 與它們的測試，以及文件；revert 那個 commit 即可。不出貨，使用者端不受影響；權重與分數只在 188 與 Mac 的 `~/.cache/shanjie/work/`，不進 repo。
+這一片只改 `torch_model.CONFIGS`（加 L、XL）、`run_sets.py`（錯字回報前 66 列的選項與雜湊檢查）、`int8check.py`，以及它們的測試與文件；revert 這個 PR 即可。不出貨，使用者端不受影響；權重與分數只在 188 與 Mac 的 `~/.cache/shanjie/work/`，不進 repo。
 
 ## 6. 結果（2026-10-11）
 
