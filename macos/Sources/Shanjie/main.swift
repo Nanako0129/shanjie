@@ -97,6 +97,15 @@ final class DefaultsCandidateOrientationStore: CandidateOrientationStore {
     }
 }
 
+/// The "語意校正" switch (docs/contracts/s7c2b-shell-rerank.md section 2.2), key `rerank` in the same domain; absent means on.
+@MainActor
+final class DefaultsRerankStore: RerankStore {
+    var rerank: Bool? {
+        get { UserDefaults.standard.object(forKey: "rerank") as? Bool }
+        set { UserDefaults.standard.set(newValue, forKey: "rerank") }
+    }
+}
+
 @MainActor
 func runServer() -> Never {
     guard let bundleID = Bundle.main.bundleIdentifier,
@@ -117,6 +126,7 @@ func runServer() -> Never {
         isSecureInput: { IsSecureEventInputEnabled() }, layoutStore: DefaultsLayoutStore(),
         learningDirectory: Shell.learningURL(), dialogs: AlertDialogs(), demoteStore: DefaultsDemoteStore(), predictionStore: DefaultsPredictionStore(), abbreviationStore: DefaultsAbbreviationStore(), acgPackStore: DefaultsAcgPackStore(),
         glassTintStore: DefaultsGlassTintStore(), candidateOrientationStore: DefaultsCandidateOrientationStore(),
+        rerankStore: DefaultsRerankStore(), rerankRunner: QueueRerankRunner(),
         // 可省略韻母 does not ship in v0.4.0 (user, 2026-10-10); see Shell.showsAbbreviation. Flip to true to offer it again.
         // This argument alone hides it (Shell's default true is for the tests) and the app target has no tests: the release
         // device check confirms the menu has no 可省略韻母.

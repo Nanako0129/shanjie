@@ -315,6 +315,25 @@ fn keys_that_do_not_redecode_keep_the_job() {
     assert!(e.key(k(KeyKind::Esc)).unwrap().preedit == x.surfaces[0]);
 }
 
+/// S7c-2b section 2 (main decision 2026-10-11): the shell sends set_learning before every key (s4-learning.md section 3), so the
+/// same value again keeps the job; only a change of the value makes it stale. Both starting values.
+#[test]
+fn set_learning_stales_the_job_only_when_the_value_changes() {
+    let syls = row(12);
+    for start in [false, true] {
+        let mut e = engine();
+        e.set_learning(start);
+        type_syls(&mut e, &syls);
+        let job = e.take_rerank_job().unwrap();
+        e.set_learning(start);
+        assert!(e.apply_rerank(job.run()).unwrap().is_some(), "the same value again keeps the job");
+        e.set_rerank(true).unwrap(); // re-decodes to the n-gram result and leaves a fresh job
+        let job = e.take_rerank_job().unwrap();
+        e.set_learning(!start);
+        assert!(e.apply_rerank(job.run()).unwrap().is_none(), "a change of the value makes it stale");
+    }
+}
+
 /// Section 2.4, revision 1: a prediction row the key rules cleared (a candidate pick, a deleted syllable) is not brought back by
 /// the apply; a recompute would show one, so an apply that recomputed regardless fails here.
 #[test]

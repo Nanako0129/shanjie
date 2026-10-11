@@ -654,7 +654,8 @@ impl Engine {
     }
 
     /// Section 2.3 (revision 1): called wherever decoding changes (every `refresh`, `clear_all`, a new n-gram or small model,
-    /// the rerank switch, the profile, the demotion table, learning on / open / clear): a job made before is stale from now on.
+    /// the rerank switch, the profile, the demotion table, learning turned on or off / open / clear): a job made before is stale
+    /// from now on.
     /// Keys that do not re-decode (cursor moves, unfinished symbols, entering the prediction row, pass-through) keep it.
     fn invalidate(&mut self) {
         self.generation = next_generation();
@@ -733,9 +734,13 @@ impl Engine {
     }
 
     /// §3: off by default. Turning it off drops pending learns; a span is learned only if the flag was
-    /// on both when it was chosen and at commit.
+    /// on both when it was chosen and at commit. Only a change of the value makes a rerank job stale (S7c-2b section 2,
+    /// main decision 2026-10-11): the shell sends the gate before every key (s4-learning.md section 3), and the same value
+    /// again changes neither decoding nor learning state.
     pub fn set_learning(&mut self, on: bool) {
-        self.invalidate();
+        if on != self.learning {
+            self.invalidate();
+        }
         self.learning = on;
         if !on {
             self.fixed.iter_mut().for_each(|f| f.pre = None);

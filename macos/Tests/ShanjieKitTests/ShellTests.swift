@@ -15,7 +15,7 @@ final class ShellTests: XCTestCase {
     }
 
     private func makeShell(secure: Bool = false, store: LayoutStore = MemoryLayoutStore()) -> Shell {
-        let shell = Shell(resources: resources, panel: FakePanel(), isSecureInput: { secure }, layoutStore: store, learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore())
+        let shell = Shell(resources: resources, panel: FakePanel(), isSecureInput: { secure }, layoutStore: store, learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner())
         XCTAssertNotNil(shell.engine)
         return shell
     }
@@ -292,7 +292,7 @@ final class ShellTests: XCTestCase {
     }
 
     func testEngineThatCannotBeBuiltPassesEveryKey() {
-        let shell = Shell(resources: resources.appendingPathComponent("missing"), panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(), learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore())
+        let shell = Shell(resources: resources.appendingPathComponent("missing"), panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(), learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner())
         XCTAssertNil(shell.engine)
         let c = Controller(shell)
         c.session.activate()
@@ -500,7 +500,7 @@ final class ShellTests: XCTestCase {
         let report = Layouts.keys("ㄍㄠˇ ㄨㄢˊ ㄓㄜˋ ㄅㄛ", eten: false)
         let store = MemoryDemoteStore()
         let shell = Shell(resources: resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(),
-                          learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: store, predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore())
+                          learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: store, predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner())
         let c = Controller(shell)
         c.session.activate()
         let item = { c.session.menu.first { $0.action == .toggleDemote } }
@@ -526,7 +526,7 @@ final class ShellTests: XCTestCase {
         XCTAssertEqual(c.client.marked, "睪丸這波")
         c.press(Keys.esc)
         let again = Controller(Shell(resources: resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(),
-                                     learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: store, predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore()))
+                                     learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: store, predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner()))
         again.session.activate()
         again.type(report)
         XCTAssertEqual(again.client.marked, "睪丸這波", "a new shell reads the stored off")
@@ -543,7 +543,7 @@ final class ShellTests: XCTestCase {
         let store = MemoryPredictionStore()
         let make = {
             Shell(resources: self.resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(),
-                  learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: store, abbreviationStore: MemoryAbbreviationStore(), acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore())
+                  learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: store, abbreviationStore: MemoryAbbreviationStore(), acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner())
         }
         let c = Controller(make())
         c.session.activate()
@@ -578,7 +578,7 @@ final class ShellTests: XCTestCase {
         let store = MemoryAbbreviationStore()
         let make = {
             Shell(resources: self.resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(),
-                  learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), abbreviationStore: store, acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore())
+                  learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), abbreviationStore: store, acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner())
         }
         let c = Controller(make())
         c.session.activate()
@@ -626,7 +626,7 @@ final class ShellTests: XCTestCase {
         let store = MemoryAcgPackStore()
         let make = {
             Shell(resources: self.resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(),
-                  learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), acgPackStore: store, glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore())
+                  learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), acgPackStore: store, glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner())
         }
         let name = "2u/4m06w;6"  // ㄉㄧㄥˋ ㄩㄢˊ ㄊㄤˊ; the chat profile spells it 定元堂 without the pack (formal already gets it right)
         let c = Controller(make(), bundle: "com.hnc.Discord")
@@ -663,14 +663,14 @@ final class ShellTests: XCTestCase {
         let manifest = packs.appendingPathComponent("acg.json")
         let make = { (store: MemoryAcgPackStore) in
             Controller(Shell(resources: self.resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(),
-                             learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), acgPackStore: store, glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore()))
+                             learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), acgPackStore: store, glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner()))
         }
         let titles = { (c: Controller) in c.session.menu.map(\.title) }
         XCTAssertFalse(titles(make(MemoryAcgPackStore())).contains { $0.hasPrefix("資料更新至") }, "no manifest, no line")
         try #"{"latest_source_revision": "2026-10-06T23:59:59Z", "version": "x"}"#.write(to: manifest, atomically: true, encoding: .utf8)
         let on = make(MemoryAcgPackStore())
         let line = "資料更新至 2026-10-06（維基百科）"
-        XCTAssertEqual(titles(on), ["標準鍵盤", "倚天鍵盤", "避免把敏感字詞排在前面", "即時預測", "可省略韻母", "動漫與遊戲詞", line, "善解設定…", "清除選字記憶…", "不要備份選字記憶"])
+        XCTAssertEqual(titles(on), ["標準鍵盤", "倚天鍵盤", "避免把敏感字詞排在前面", "即時預測", "可省略韻母", "語意校正", "動漫與遊戲詞", line, "善解設定…", "清除選字記憶…", "不要備份選字記憶"])
         XCTAssertNil(on.session.menu.first { $0.title == line }?.action, "not clickable")
         XCTAssertTrue(titles(make(MemoryAcgPackStore(false))).contains(line), "shown with the pack off too")
         try #"{"version": "x"}"#.write(to: manifest, atomically: true, encoding: .utf8)
@@ -688,7 +688,7 @@ final class ShellTests: XCTestCase {
         XCTAssertNotEqual(CoreEngine.make(dataDir: resources.path, layout: 0, packsDir: packs.path).1, 0, "the fixture is a pack that cannot load")
         let store = MemoryAcgPackStore()
         let shell = Shell(resources: resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(),
-                          learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), acgPackStore: store, glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore())
+                          learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), acgPackStore: store, glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner())
         XCTAssertNotNil(shell.engine)
         XCTAssertNil(store.acgPack, "the preference is left as it was")
         let c = Controller(shell)

@@ -51,6 +51,7 @@ public struct MenuEntry: Equatable, Sendable {
         case toggleDemote
         case togglePrediction
         case toggleAbbreviation
+        case toggleRerank
         case toggleAcgPack
         case openSettings
     }
@@ -68,6 +69,7 @@ public struct MenuEntry: Equatable, Sendable {
         public static let demote = "避免把敏感字詞排在前面"
         public static let prediction = "即時預測"
         public static let abbreviation = "可省略韻母"
+        public static let rerank = "語意校正"
         public static let acgPack = "動漫與遊戲詞"
         public static func acgDataDate(_ date: String) -> String { "資料更新至 \(date)（維基百科）" }
         public static let settings = "善解設定…"
@@ -198,6 +200,8 @@ extension Session {
         if shell.showsAbbreviation {
             items.append(MenuEntry(title: T.abbreviation, action: .toggleAbbreviation, checked: shell.abbreviationOn, enabled: shell.predictionOn))
         }
+        // s7c2b section 2.3 (F11): greyed while the demotion table is off, where the core makes no rerank job.
+        items.append(MenuEntry(title: T.rerank, action: .toggleRerank, checked: shell.rerankOn, enabled: shell.demoteOn))
         items.append(MenuEntry(title: T.acgPack, action: .toggleAcgPack, checked: shell.acgPackOn))
         if let date = shell.acgDataDate { items.append(MenuEntry(title: T.acgDataDate(date))) }   // about the data, so shown with the pack off too
         items.append(MenuEntry(title: T.settings, action: .openSettings))
@@ -221,6 +225,8 @@ extension Session {
             applyPrediction(!shell.predictionOn)
         case .toggleAbbreviation:
             applyAbbreviation(!shell.abbreviationOn)
+        case .toggleRerank:
+            applyRerank(!shell.rerankOn)
         case .toggleAcgPack:
             shell.setAcgPack(!shell.acgPackOn)
         case .openSettings:

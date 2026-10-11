@@ -134,6 +134,9 @@ struct SettingsForm: View {
                     Toggle(MenuEntry.Text.abbreviation, isOn: Binding(get: { model.abbreviation }, set: { model.setAbbreviation($0) }))
                         .disabled(!model.prediction)
                 }
+                // Greyed while 避免敏感詞排第一 is off, like the menu item: the core makes no rerank job then (s7c2b section 2.3).
+                Toggle(MenuEntry.Text.rerank, isOn: Binding(get: { model.rerank }, set: { model.setRerank($0) }))
+                    .disabled(!model.demote)
                 Toggle(MenuEntry.Text.demote, isOn: Binding(get: { model.demote }, set: { model.setDemote($0) }))
                 Toggle(MenuEntry.Text.acgPack, isOn: Binding(get: { model.acgPack }, set: { model.setAcgPack($0) }))
                 if let line = model.acgDataLine {

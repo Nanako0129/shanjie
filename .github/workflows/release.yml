@@ -79,7 +79,7 @@ jobs:
         with:
           toolchain: 1.97.1
 
-      # Before build-app.sh, against the tracked hashes (data/bigram.sjlm.sha256 and data/classes.sjc.sha256, as ci.yml).
+      # Before build-app.sh, against the tracked hashes (data/bigram.sjlm.sha256, data/classes.sjc.sha256 and data/tinylm.sjtl.sha256, as ci.yml).
       - name: Fetch the language model
         env:
           GH_TOKEN: ${{ github.token }}
@@ -89,6 +89,8 @@ jobs:
           shasum -a 256 -c data/bigram.sjlm.sha256
           gh release download classes-v3 --repo "$GITHUB_REPOSITORY" -p classes.sjc -D data/lm
           shasum -a 256 -c data/classes.sjc.sha256
+          gh release download tinylm-v1 --repo "$GITHUB_REPOSITORY" -p tinylm.sjtl -D data/lm
+          shasum -a 256 -c data/tinylm.sjtl.sha256
 
       - name: Version
         id: version
