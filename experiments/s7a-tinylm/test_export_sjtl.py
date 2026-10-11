@@ -101,7 +101,7 @@ class TestExport(unittest.TestCase):
         # build() exports every golden file again (version 1 with no delta, version 2, pick.tsv): each equals the committed bytes
         d = os.path.join(tinylm.ROOT, "eval", "golden", "tinylm-tiny")
         files = gen_tinylm_tiny.build()
-        self.assertEqual(sorted(files), sorted(os.listdir(d)))
+        self.assertEqual(sorted(files), sorted(n for n in os.listdir(d) if not n.startswith(".")))   # .DS_Store and the like
         for name, b in files.items():
             self.assertEqual(b, open(os.path.join(d, name), "rb").read(), name)
         self.assertEqual(files["tiny-int8.sjtl"][:8], b"SJTL0001")
@@ -127,6 +127,9 @@ class TestExport(unittest.TestCase):
         cases = [((0.7, 2.0, 0.25), (0.5, 1.0)), ((0.7, 2.0), (0.5, 1.0, 2.0))]
         for bad in (float("nan"), float("inf"), float("-inf"), -0.25, 1000.5):
             cases += [((0.7, 2.0, bad), (0.5, 1.0, 2.0)), ((0.7, 2.0, 0.25), (0.5, 1.0, bad))]
+        for bad in (float("nan"), float("inf")):    # alpha must be finite, tau must not be NaN (both versions)
+            cases += [((bad, 2.0), (0.5, 1.0)), ((0.7, 2.0, 0.25), (bad, 1.0, 2.0))]
+        cases += [((0.7, float("nan")), (0.5, 1.0)), ((0.7, 2.0, 0.25), (0.5, float("nan"), 2.0))]
         for chat, formal in cases:
             with self.assertRaises(ValueError, msg=(chat, formal)):
                 ex.export(self.npz, out, "int8", chat, formal, SHA)

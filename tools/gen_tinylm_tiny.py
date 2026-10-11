@@ -79,7 +79,8 @@ def build():
 PICK_ALPHAS = [0.2, 0.5, 0.7, 1.0, 1.5]
 PICK_TAUS = [0.5, 1.0, 2.0, float("inf")]
 PICK_DELTAS = [0.0, 0.25, 0.5, 1.0, 2.0, 4.0]
-# (ng, ll) whose fused gap s[1] - s[0] is exactly 0.25 or 2 at alpha 1 and 0.5 or 1 at alpha 0.5 (multiples of 1/8)
+# (ng, ll) whose fused gap s[1] - s[0] lands exactly on a grid delta or on 0 (multiples of 1/8): 0.25, 2, 0.5, 2 at alpha 1;
+# 0, 0.5, 0, 0.5 at alpha 0.5
 PICK_HAND = [
     ([-1.0, -1.25], [-1.0, -0.5]),
     ([-1.0, -2.0], [-4.0, -1.0]),

@@ -1,6 +1,6 @@
 # S7c-2c：門檻 δ 進核心與 `.sjtl`（版本 2）、核心的重排預設關
 
-狀態：READY（2026-10-12：security-reviewer 一次、plan-verifier 第 2 次 READY，§6），實作中。
+狀態：READY（2026-10-12：security-reviewer 一次、plan-verifier 第 2 次 READY，§6）；實作與 §3.3、§3.4 完成（PR #122），等 fresh verifier（含保留集）。
 
 ## 0. 起因與依據
 
@@ -32,7 +32,7 @@
 ### 2.2 Rust：`pick` 與 `rerank`
 
 - `pick(ng, ll, α, τ, δ)`：原本的規則選出 j 之後，**只有** `s[j] − s[0] ≥ δ` 才回傳 j，否則回傳 0（`s[i] = ng[i] + α·ll[i]`；和 `fusegrid.pick` 同一個比較，邊界含等號）。δ 0 時和現在完全相同。
-- `TinyLm` 加讀取 δ 的方法（照 `alpha_tau` 的樣子，回 `(α, τ, δ)`），`rerank` 用它。`pick` 的註解改寫，不再說是「現在的」`fusegrid.py pick` 而是寫明含 δ。
+- `TinyLm` 加讀取 δ 的方法（照 `alpha_tau` 的樣子，回 `(α, τ, δ)`），`rerank` 用它〔實作：`alpha_tau_delta` 取代 `alpha_tau`，舊的方法只剩測試在用，已刪〕。`pick` 的註解改寫，不再說是「現在的」`fusegrid.py pick` 而是寫明含 δ。
 - 呼叫者（`RerankJob::run`、CLI 的 `--tinylm`）不改介面；C ABI（`core/include/shanjie.h`）不變。
 
 ### 2.3 核心的重排預設

@@ -39,7 +39,7 @@ S7c-2 分兩片：這一片（2a）只做核心與 FFI，用同步的測試驅�
 
 ### 2.5 FFI 與標頭（`core/src/ffi.rs`、`core/include/shanjie.h`、`docs/contracts/s3a.md` §6）
 
-- `shanjie_engine_load_tinylm(engine, path)`：讀檔失敗、格式錯、沒有載入 n-gram 模型、KN 側檔開著、`.sjtl` 記的 n-gram 雜湊和載入的模型不同 → 錯誤碼 3，引擎維持原狀（沒有小模型或原本那個），輸入法照常用 n-gram；照 `load_lm` 的寫法。**不改 `rerank_on`**（建立引擎時預設 true；殼每次建引擎後照設定呼叫 `set_rerank`，和 `set_candidate_vertical` 一樣，使用者關掉的設定不會因為重新載入而被打開）。n-gram 雜湊的比對只是「配對」檢查，**不是**對 `.sjtl` 本身的完整性檢查。
+- `shanjie_engine_load_tinylm(engine, path)`：讀檔失敗、格式錯、沒有載入 n-gram 模型、KN 側檔開著、`.sjtl` 記的 n-gram 雜湊和載入的模型不同 → 錯誤碼 3，引擎維持原狀（沒有小模型或原本那個），輸入法照常用 n-gram；照 `load_lm` 的寫法。**不改 `rerank_on`**（建立引擎時預設 true，〔更正，2026-10-12〕S7c-2c 起預設 false，`docs/contracts/s7c2c-delta.md` §2.3；殼每次建引擎後照設定呼叫 `set_rerank`，和 `set_candidate_vertical` 一樣，使用者關掉的設定不會因為重新載入而被打開）。n-gram 雜湊的比對只是「配對」檢查，**不是**對 `.sjtl` 本身的完整性檢查。
 - `shanjie_engine_set_rerank(engine, on, out)`：照 `set_demote` 的樣子回傳快照；關掉時重算，畫面回到 n-gram 的結果。
 - `shanjie_engine_rerank_take(engine, **job)`（沒有工作時 `*job` 為 NULL）、`shanjie_rerank_run(job)`（任何執行緒都可以呼叫，不需要引擎；結果存在工作裡，對應 Rust 的 `RerankJob::run` 產生 `RerankResult`）、`shanjie_engine_rerank_apply(engine, job, out)`（用工作裡的結果呼叫 `apply_rerank`：有改變 → 0 與快照；沒有改變、過期或還沒 run → 新的代碼，`*out` 為 NULL）、`shanjie_rerank_free(job)`。
 - **回傳碼與 panic**（安全審查 F1）：每個新匯出都包現有的 `guard`。「沒有改變、過期、還沒 run、已套用過」用新的具名常數 `SHANJIE_NO_CHANGE`（5，不和 1–4 撞號）。標頭寫明：`take`／`run`／`apply` 的非 0 碼**不代表按鍵直通**（它們沒有對應的按鍵）。碼 4 逐一寫：

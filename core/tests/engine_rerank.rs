@@ -212,6 +212,7 @@ fn choose_at_cursor(e: &mut Engine, word: &str) -> Output {
 fn no_model_or_switch_off_makes_no_job_and_keys_are_unchanged() {
     let syls = row(12);
     let (mut plain, mut with) = (engine_with(None), engine());
+    plain.set_rerank(true).unwrap(); // the switch on, so only the missing model keeps jobs away
     let mut jobs = 0;
     for syl in &syls {
         for key in keys_of(syl) {
