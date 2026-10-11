@@ -7,6 +7,9 @@ reads DIR/<model>.<setting>.<set>.jsonl (score.py output), writes OUT/rowstats/<
 and prints Markdown: per model x setting the frozen (alpha, tau), one tools/evalstats.py table row per set, and the section 3 / 4 reports.
 The (alpha, tau) selection reads ONLY the tuning sets (TUNING); the other sets are scored with the frozen values. With --tune-keep (S7d)
 the selection reads only the tuning rows whose flag is 0 (buildcheck.py substr --flags); the tables still use every row.
+With --break-weight W (S7e, docs/contracts/s7e-fewer-breaks.md) the selection maximises fixed - W x broken against the n-gram first
+over (alpha, tau, delta), each set gets a second table row against the shipped values (SHIPPED), and the decision is S7e section 3
+instead of S7a section 4; the 16-character context variant is not run in that mode.
 """
 import argparse
 import json
@@ -19,21 +22,27 @@ import evalstats  # noqa: E402  tools/evalstats.py
 
 ALPHAS = [0.1, 0.2, 0.3, 0.5, 0.7, 1, 1.5, 2]
 TAUS = [0.5, 1, 2, 3, 5, math.inf]       # inf = no threshold; listed ascending because ties go to the smaller tau
+DELTAS = [0, 0.25, 0.5, 1, 1.5, 2, 3, 4]  # S7e: the fused winner replaces the n-gram first only if it beats it by at least delta
+SHIPPED = (0.7, 2, 0)                     # S7e section 2.4: (alpha, tau, delta) in tinylm-v1, both settings
 TUNING = ("cvtune", "wikitune")
 CTX_REQUIRED = ("user-reported", "discordtune")   # sets that must show rows whose LL changes with context (section 3 item 3)
 GUARDS = ("cvtune", "wikitune", "dev302", "typing76", "user-reported")   # section 4: every one, in both settings, plus discordtune chat
 SETTINGS = ("chat", "formal")
 REQUIRED_CELLS = [(st, g) for st in SETTINGS for g in GUARDS] + [("chat", "discordtune")]
+GUARDS_S7E = GUARDS + ("fw",)            # S7e section 3 item 4: the function-word sentences guard too
+REQUIRED_S7E = [(st, g) for st in SETTINGS for g in GUARDS_S7E] + [("chat", "discordtune")]
 LL_CHANGED = 1e-6                                  # a candidate's LL counts as changed by context above this (log10)
 
 
 # ------------------------------------------------------------------ pure functions
-def pick(r, alpha, tau, col="ll"):
-    """Index of the chosen candidate. Rerank only when the n-gram margin (first minus second) is < tau; ties go to the better n-gram rank."""
+def pick(r, alpha, tau, col="ll", delta=0):
+    """Index of the chosen candidate. Rerank only when the n-gram margin (first minus second) is < tau; ties go to the better n-gram rank.
+    S7e: the fused winner replaces the first only if its fused score is at least `delta` above the first's (0: always, as before)."""
     if r["n"] < 2 or r["ng"][0] - r["ng"][1] >= tau:
         return 0
     s = [g + alpha * l for g, l in zip(r["ng"], r[col])]
-    return max(range(len(s)), key=lambda i: (s[i], -i))
+    j = max(range(len(s)), key=lambda i: (s[i], -i))
+    return j if s[j] - s[0] >= delta else 0
 
 
 def correct(rows, alpha, tau, col="ll"):
@@ -50,6 +59,31 @@ def select(sets, col="ll"):
             c = correct(rows, alpha, tau, col)
             if best is None or c > best[2]:
                 best = (alpha, tau, c)
+    return best
+
+
+def fixed_broken(rows, alpha, tau, delta, col="ll"):
+    """S7e: rows the fusion turns right (fixed) and wrong (broken) against the n-gram first."""
+    f = b = 0
+    for r in rows:
+        j = pick(r, alpha, tau, col, delta)
+        f += bool(r["ok"][j] and not r["ok"][0])
+        b += bool(r["ok"][0] and not r["ok"][j])
+    return f, b
+
+
+def select_weighted(sets, weight, col="ll"):
+    """S7e section 2.2: (alpha, tau, delta, fixed, broken) maximising fixed - weight * broken over the tuning sets pooled; ties: fewer
+    broken, then larger delta, then smaller tau, then smaller alpha. Only TUNING names are read."""
+    rows = [r for name in TUNING for r in sets[name]]
+    best = key = None
+    for alpha in ALPHAS:
+        for tau in TAUS:
+            for delta in DELTAS:
+                f, b = fixed_broken(rows, alpha, tau, delta, col)
+                k = (f - weight * b, -b, delta, -tau, -alpha)
+                if key is None or k > key:
+                    best, key = (alpha, tau, delta, f, b), k
     return best
 
 
@@ -115,6 +149,26 @@ def decision(cells):
     return out
 
 
+def decision_weighted(cells, shipped, weight):
+    """S7e section 3. cells / shipped[(setting, set)] = cell_stats of the new / shipped values against the n-gram first.
+    Returns [(criterion, passed)]; the last entry is the overall verdict."""
+    missing = [c for c in REQUIRED_S7E if c not in cells or c not in shipped]
+    out = [(f"every guard set in both settings plus discordtune chat present (missing: {missing})", not missing)]
+    k = ("chat", "discordtune")
+    if k not in cells or k not in shipped:
+        return out + [("PASS (all above)", False)]
+    d, s = cells[k], shipped[k]
+    net, net0 = d["fixed"] - weight * d["broken"], s["fixed"] - weight * s["broken"]
+    out += [(f"1. discordtune chat fixed - {weight:g} x broken > 0 and above the shipped values ({net:g}; shipped {net0:g})",
+             net > 0 and net > net0),
+            (f"2. discordtune chat broken below the shipped values ({d['broken']}; shipped {s['broken']})", d["broken"] < s["broken"]),
+            (f"3. discordtune chat delta top1 >= 0 ({d['fixed'] - d['broken']:+d} rows)", d["fixed"] - d["broken"] >= 0)]
+    bad = [c for c in REQUIRED_S7E if c in cells and c[1] != "discordtune" and cells[c]["fixed"] < cells[c]["broken"] and cells[c]["p"] < 0.05]
+    out.append((f"4. no guard cell with fixed < broken and p < 0.05 (bad: {bad})", not bad))
+    out.append(("PASS (all above)", all(ok for _, ok in out)))
+    return out
+
+
 # ------------------------------------------------------------------ driver
 def cell_stats(base_path, new_path):
     """Numbers for the decision from the two rowstats files, with the same functions evalstats.compare uses."""
@@ -167,13 +221,44 @@ def run_setting(model, setting, sets, out, keep=None):
     return cells, gain, stop
 
 
+def run_setting_weighted(model, setting, sets, out, weight, keep=None):
+    """S7e: select by fixed - weight * broken (S7e section 2.2), then for every set the table row against the n-gram first and the row
+    against the shipped values (section 2.4), each with the weighted net. Returns (cells, shipped cells, stop notes)."""
+    sel = kept(sets, keep)
+    al, ta, de, f, b = select_weighted(sel, weight)
+    tune = [r for t in TUNING for r in sel[t]]
+    f0, b0 = fixed_broken(tune, *SHIPPED)
+    print(f"\n## {model} {setting}: selected on {'+'.join(TUNING)}{' (kept rows)' if keep else ''} by fixed - {weight:g} x broken: "
+          f"alpha {al}, tau {ta}, delta {de}; fixed {f}, broken {b} of {len(tune)} (shipped {SHIPPED[0]}/{SHIPPED[1]}/{SHIPPED[2]}: "
+          f"fixed {f0}, broken {b0})")
+    cells, shipped, stop = {}, {}, []
+    for k, (s, rows) in enumerate(sets.items()):
+        tag = f"{model}.{setting}.{s}"
+        bp, sp, np_ = (os.path.join(out, "rowstats", f"{tag}.{x}.txt") for x in ("base", "shipped", "new"))
+        open(bp, "w", newline="").write(rowstats(rows, [0] * len(rows)))
+        open(sp, "w", newline="").write(rowstats(rows, [pick(r, *SHIPPED[:2], "ll", SHIPPED[2]) for r in rows]))
+        open(np_, "w", newline="").write(rowstats(rows, [pick(r, al, ta, "ll", de) for r in rows]))
+        print(table_row(bp, np_, f"{model} {setting} {s}", first=(k == 0)))
+        print(table_row(sp, np_, f"{model} {setting} {s} (vs shipped)", first=False))
+        cells[(setting, s)], shipped[(setting, s)] = cell_stats(bp, np_), cell_stats(bp, sp)
+        c, c0 = cells[(setting, s)], shipped[(setting, s)]
+        rep = report(rows, al, ta)
+        print(f"  {s}: fixed - {weight:g} x broken {c['fixed'] - weight * c['broken']:g} ({c['fixed']}/{c['broken']}); shipped "
+              f"{c0['fixed'] - weight * c0['broken']:g} ({c0['fixed']}/{c0['broken']}); LL changed by context {rep['ll_changed']}")
+        if s in CTX_REQUIRED and rep["ll_changed"] < 1:
+            stop.append(f"context not wired: {model} {setting} {s}")
+    return cells, shipped, stop
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--scores", required=True); ap.add_argument("--out", required=True)
     ap.add_argument("--models", nargs="+", default=["S", "M"]); ap.add_argument("--settings", nargs="+", default=["chat", "formal"])
     ap.add_argument("--sets", nargs="+", required=True)
     ap.add_argument("--tune-keep", help="S7d: DIR with <tuning set>.flags (0/1 per row, buildcheck.py substr --flags); select on the 0 rows only")
+    ap.add_argument("--break-weight", type=float, help="S7e: select by fixed - W x broken over (alpha, tau, delta); decide by S7e section 3")
     a = ap.parse_args(argv)
+    required = REQUIRED_S7E if a.break_weight is not None else REQUIRED_CELLS
     keep = None
     if a.tune_keep:
         keep = {t: open(os.path.join(a.tune_keep, f"{t}.flags")).read().split() for t in TUNING}
@@ -183,14 +268,14 @@ def main(argv=None):
     os.makedirs(os.path.join(a.out, "rowstats"), exist_ok=True)
     stop, chat_gain = [], []
     for model in a.models:
-        cells = {}
+        cells, shipped = {}, {}
         for setting in a.settings:
             sets = {}
             for s in a.sets:
                 p = os.path.join(a.scores, f"{model}.{setting}.{s}.jsonl")
                 if os.path.isfile(p):
                     sets[s] = load_scores(p)
-                elif (setting, s) in REQUIRED_CELLS:
+                elif (setting, s) in required:
                     print(f"MISSING {model} {setting} {s}: no file {p}")
             for s in CTX_REQUIRED:
                 if s in a.sets and s not in sets and (setting == "chat" or s != "discordtune"):
@@ -200,16 +285,20 @@ def main(argv=None):
             for t in TUNING if keep else ():
                 if len(keep[t]) != len(sets[t]):      # row i of the scores is line i of the flags (load_scores checks i = 1..n)
                     sys.exit(f"fusegrid: {t}.flags has {len(keep[t])} rows, the scores of {model} {setting} {t} have {len(sets[t])}")
+            if a.break_weight is not None:
+                c, c0, st = run_setting_weighted(model, setting, sets, a.out, a.break_weight, keep)
+                cells.update(c); shipped.update(c0); stop += st
+                continue
             c, gain, st = run_setting(model, setting, sets, a.out, keep)
             cells.update(c); stop += st
             if setting == "chat":
                 chat_gain.append(gain)
-        print(f"\n### section 4, {model}")
-        dec = decision(cells)
+        print(f"\n### {'S7e section 3' if a.break_weight is not None else 'section 4'}, {model}")
+        dec = decision_weighted(cells, shipped, a.break_weight) if a.break_weight is not None else decision(cells)
         for crit, ok in dec:
             print(f"- {'PASS' if ok else 'FAIL'}: {crit}")
         if not dec[0][1]:
-            stop.append(f"section 4 cannot be decided for {model}: {dec[0][0]}")
+            stop.append(f"the decision cannot be made for {model}: {dec[0][0]}")
     if chat_gain and all(g < 0.5 for g in chat_gain):
         print(f"STOP CONDITION (section 4): every model gains < +0.5 pt on {'+'.join(TUNING)} in the chat setting ({chat_gain})")
         stop.append("gain below +0.5 pt")

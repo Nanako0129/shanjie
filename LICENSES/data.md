@@ -15,6 +15,7 @@
 | `eval/dev/acg/recent.txt` | 2026 年作品與角色名 23 個（葬送的芙莉蓮、咒術迴戰與其角色列表、判處勇者刑、魔法帽的工作室、日本三國、淡島百景、無職轉生、穹廬下的魔女、BLACK TORCH 闇黑燈火、桃源暗鬼等的中文維基百科條目），逐一對照條目確認；讀音由 `tools/readings.py` 產生 | **CC BY-SA 4.0**，署名：Wikipedia 貢獻者（https://creativecommons.org/licenses/by-sa/4.0/ ），與 `acg-collisions.tsv` 相同 | 只用於評測，不用來調參，不隨 App 內附 |
 | `eval/sets/trap.txt`、`eval/sets/daily.txt` | 本專案自寫 | CC0 | |
 | `eval/probe/s2r-probe.txt` | 由 `experiments/s2/build_probe.py` 從 `eval/dev/` 的句子產生（換「一」「不」的讀音） | CC0 | |
+| `eval/rerank/s7e-function-words.txt` | 本專案自寫（2026-10-11） | CC0 | 只用於評測 |
 | `eval/dev/*.txt`、`eval/holdout/*`、`eval/learn/cases.tsv` | 本專案自寫 | CC0 | |
 | `eval/dev/user-reported.txt` | 使用者回報的真實句子 | CC0（使用者 2026-10-03 同意） | |
 | `eval/sets/moedict.txt` | 教育部《重編國語辭典修訂本》例句抽樣（經 g0v/moedict-data） | CC BY-ND 3.0 TW | **只用於評測，不得用來建詞庫或改作** |

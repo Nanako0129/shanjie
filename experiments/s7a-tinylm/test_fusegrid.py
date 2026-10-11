@@ -56,6 +56,87 @@ class TestPick(unittest.TestCase):
         self.assertEqual(fg.correct([r], 0.1, 0.5), 0)
 
 
+class TestDelta(unittest.TestCase):
+    """S7e section 2.2: the delta gate."""
+
+    def rows(self, n=300, seed=7):
+        rng = np.random.default_rng(seed)
+        out = []
+        for i in range(1, n + 1):
+            k = int(rng.integers(2, 6))
+            ng = sorted((float(-1 - rng.uniform(0, 3)) for _ in range(k)), reverse=True)
+            ll = [float(-3 + rng.normal(0, 1.5)) for _ in range(k)]
+            ok = [int(j == int(rng.integers(0, k))) for j in range(k)]
+            out.append(rec(i, ng, ll, ok))
+        return out
+
+    def test_delta_zero_is_the_old_pick(self):
+        rows = self.rows()
+        for a in fg.ALPHAS:
+            for t in fg.TAUS:
+                self.assertEqual([fg.pick(r, a, t) for r in rows], [fg.pick(r, a, t, "ll", 0) for r in rows])
+        self.assertTrue(any(fg.pick(r, 2, math.inf) for r in rows))       # the rows do get reranked at delta 0
+
+    def test_large_delta_keeps_the_first(self):
+        rows = self.rows()
+        self.assertEqual({fg.pick(r, 2, math.inf, "ll", 1e9) for r in rows}, {0})
+
+    def test_delta_boundary_is_inclusive(self):
+        r = rec(1, [-1.0, -1.5], [-3.0, -1.0], [0, 1])      # alpha 1: s0 = -4.0, s1 = -2.5, so s1 - s0 = 1.5
+        self.assertEqual(fg.pick(r, 1.0, math.inf, "ll", 1.5), 1)
+        self.assertEqual(fg.pick(r, 1.0, math.inf, "ll", 1.75), 0)
+
+    def test_fixed_broken_counts_against_the_first(self):
+        fix = rec(1, [-1.0, -1.5], [-3.0, -1.0], [0, 1])
+        brk = rec(2, [-1.0, -1.5], [-3.0, -1.0], [1, 0])
+        same = rec(3, [-1.0, -1.5], [-3.0, -1.0], [0, 0])
+        self.assertEqual(fg.fixed_broken([fix, brk, same], 1.0, math.inf, 0), (1, 1))
+        self.assertEqual(fg.fixed_broken([fix, brk, same], 1.0, math.inf, 9), (0, 0))
+
+
+class TestSelectWeighted(unittest.TestCase):
+    """S7e section 2.2: select by fixed - W x broken; ties fewer broken, larger delta, smaller tau, smaller alpha."""
+
+    def sets(self):
+        # 4 rows the fusion fixes with a big fused gap (2.5 at alpha 1) and 1 row it breaks with a small gap (0.5 at alpha 1):
+        # every row has n-gram margin 0.5, so tau 0.5 shuts the gate and tau >= 1 opens it
+        fixes = [rec(i, [-1.0, -1.5], [-4.0, -1.0], [0, 1]) for i in range(1, 5)]
+        breaks = [rec(5, [-1.0, -1.5], [-2.0, -1.0], [1, 0])]
+        return {"cvtune": fixes + breaks, "wikitune": [], "dev302": [rec(1, [-1.0, -1.5], [-4.0, -1.0], [1, 0])]}
+
+    def test_weight_decides_between_more_fixes_and_no_breaks(self):
+        s = self.sets()
+        a1, t1, d1, f1, b1 = fg.select_weighted(s, 1)
+        self.assertEqual((f1 - b1, b1), (4, 0))          # weight 1: a delta that drops the break wins on ties by fewer breaks
+        a10, t10, d10, f10, b10 = fg.select_weighted(s, 10)
+        self.assertEqual((f10, b10), (4, 0))
+        # with the break impossible to drop (same gap as the fixes), weight 1 keeps the fusion and weight 10 turns it off
+        s2 = {"cvtune": [rec(i, [-1.0, -1.5], [-4.0, -1.0], [0, 1]) for i in range(1, 3)]
+                        + [rec(3, [-1.0, -1.5], [-4.0, -1.0], [1, 0])], "wikitune": []}
+        self.assertEqual(fg.select_weighted(s2, 1)[3:], (2, 1))
+        self.assertEqual(fg.select_weighted(s2, 10)[3:], (0, 0))
+
+    def test_ties_fewer_broken_then_larger_delta_then_smaller_tau_then_smaller_alpha(self):
+        s = self.sets()
+        a, t, d, f, b = fg.select_weighted(s, 10)
+        # every (alpha, tau, delta) that fixes 4 and breaks 0 ties; the largest such delta wins, then the smallest tau, alpha
+        cands = [(al, ta, de) for al in fg.ALPHAS for ta in fg.TAUS for de in fg.DELTAS
+                 if fg.fixed_broken(s["cvtune"], al, ta, de) == (4, 0)]
+        dmax = max(c[2] for c in cands)
+        tmin = min(c[1] for c in cands if c[2] == dmax)
+        amin = min(c[0] for c in cands if c[2] == dmax and c[1] == tmin)
+        self.assertEqual((a, t, d), (amin, tmin, dmax))
+
+    def test_selection_reads_only_the_tuning_sets(self):
+        s = self.sets()
+        chosen = fg.select_weighted(s, 10)
+        s["dev302"] = [rec(i, [-1.0, -1.5], [-4.0, -1.0], [1, 0]) for i in range(1, 400)]
+        s["discordtune"] = [rec(i, [-1.0, -1.5], [-4.0, -1.0], [1, 0]) for i in range(1, 400)]
+        self.assertEqual(fg.select_weighted(s, 10), chosen)
+        s["wikitune"] = [rec(i, [-1.0, -1.5], [-4.0, -1.0], [1, 0]) for i in range(1, 40)]    # the tuning sets do matter
+        self.assertNotEqual(fg.select_weighted(s, 10), chosen)
+
+
 class TestSelect(unittest.TestCase):
     def sets(self):
         # margin 1.5: tau in {2, 3, 5, inf} lets fusion in; candidate 1 beats 0 iff 4a > 1.5 (a >= 0.5)
@@ -287,6 +368,50 @@ class TestDriver(unittest.TestCase):
             text, code = self.run_driver(td, wired=False)
             self.assertEqual(code, 3, text)
             self.assertIn("context not wired: S chat user-reported", text)
+
+    def test_weighted_end_to_end(self):
+        with tempfile.TemporaryDirectory() as td:
+            self.make_scores(td)
+            for st in ("chat", "formal"):                  # fw: copy of dev302's scores under the new set name
+                open(os.path.join(td, f"S.{st}.fw.jsonl"), "w").write(open(os.path.join(td, f"S.{st}.dev302.jsonl")).read())
+            out = io.StringIO()
+            code = 0
+            with contextlib.redirect_stdout(out):
+                try:
+                    fg.main(["--scores", td, "--out", os.path.join(td, "out"), "--models", "S", "--settings", "chat", "formal",
+                             "--sets", "cvtune", "wikitune", "dev302", "typing76", "user-reported", "fw", "discordtune",
+                             "--break-weight", "10"])
+                except SystemExit as e:
+                    code = e.code
+            text = out.getvalue()
+            self.assertIn(code, (0, 3), text)
+            self.assertIn("by fixed - 10 x broken", text)
+            self.assertEqual(len(re.findall(r"^\| S chat [\w-]+ \(vs shipped\) \|", text, re.M)), 7)
+            self.assertNotIn("16-char context", text)
+            self.assertIn("### S7e section 3, S", text)
+            self.assertNotIn("missing: [(", text)
+            for f in os.listdir(os.path.join(td, "out", "rowstats")):
+                self.assertRegex(open(os.path.join(td, "out", "rowstats", f)).read(), r"\A[0-9\t\n]+\Z")
+
+    def test_weighted_decision_rules(self):
+        new = {"n": 4958, "fixed": 80, "broken": 5, "p": 1e-7}
+        old = {"n": 4958, "fixed": 229, "broken": 163, "p": 1e-3}
+        quiet = {"n": 10, "fixed": 1, "broken": 0, "p": 1.0}
+        cells = {c: quiet for c in fg.REQUIRED_S7E}
+        shipped = {c: quiet for c in fg.REQUIRED_S7E}
+        cells[("chat", "discordtune")], shipped[("chat", "discordtune")] = new, old
+        self.assertTrue(fg.decision_weighted(cells, shipped, 10)[-1][1])          # 80 - 50 = 30 > 0 and > 229 - 1630
+        for edit in ({"broken": 8}, {"broken": 163}, {"fixed": 4, "broken": 5}):  # net <= 0; not fewer breaks; delta top1 < 0
+            c = dict(cells); c[("chat", "discordtune")] = {**new, **edit}
+            self.assertFalse(fg.decision_weighted(c, shipped, 10)[-1][1], edit)
+        self.assertFalse(fg.decision_weighted(cells, shipped, 20)[-1][1])         # the weight is used: 80 - 100 < 0
+        c = dict(cells); c[("formal", "fw")] = {"n": 186, "fixed": 1, "broken": 9, "p": 0.02}
+        self.assertFalse(fg.decision_weighted(c, shipped, 10)[-1][1])            # a guard cell, fw included, blocks it
+        c = dict(cells); c[("formal", "discordtune")] = {"n": 4958, "fixed": 1, "broken": 90, "p": 1e-9}
+        self.assertTrue(fg.decision_weighted(c, shipped, 10)[-1][1])             # discordtune formal is not a guard cell
+        for gone in fg.REQUIRED_S7E:
+            c = {k: v for k, v in cells.items() if k != gone}
+            self.assertFalse(fg.decision_weighted(c, shipped, 10)[-1][1], gone)
 
     def test_decision_rules(self):
         base = {"n": 4958, "fixed": 120, "broken": 50, "p": 1e-7, "ci_lo": 30, "dcer": -0.2}
