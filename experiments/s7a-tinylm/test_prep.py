@@ -163,6 +163,9 @@ class TestConstructionCheck(unittest.TestCase):
             open(p, "w", encoding="utf-8", newline="\n").write("今天天氣真好\n我們去吃飯\n")
             self.assertEqual(buildcheck.substring_ratio(["天氣真", "吃飯吧", "今天", "好我"], [p]), (2, 4))      # the last one spans a line break
             self.assertEqual(buildcheck.substring_ratio(["天氣真", "吃飯吧", "今天", "好我"], [p], procs=2), (2, 4))
+            # S7d flags: one per sentence, in order, with the pool too; an empty sentence is never a hit
+            for procs in (1, 2):
+                self.assertEqual(buildcheck.substring_hits(["天氣真", "", "吃飯吧", "今天", "好我"], [p], procs=procs), [True, False, False, True, False])
 
 
 if __name__ == "__main__":

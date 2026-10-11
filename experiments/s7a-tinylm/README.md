@@ -8,13 +8,13 @@
 |---|---|---|
 | `tinylm.py` | numpy 核心：字表（PAD 0、UNK 1、BOS 2）、`row_key`（`context_key`；16 字版）、`.npz` 格式（`save_params`）、numpy 前向（`NumpyLM`）、**唯一的 `LL`**（`ll_many`，序列 `[BOS] + k + c`） | 否 |
 | `prep.py` | `runs`：核對輸入雜湊，產生訓練文字（維基＋口語，與 n-gram 同一組函式）；`encode`：字表（≥ 5 次）與 `ids-*.npy` | 否 |
-| `buildcheck.py` | `construction`：對原始來源的建構檢查；`substr`：調參集正解句出現在訓練文字裡的比例（只記錄） | 否 |
+| `buildcheck.py` | `construction`：對原始來源的建構檢查；`substr`：調參集正解句出現在訓練文字裡的比例（只記錄）；`--flags` 另寫逐列 0／1（S7d） | 否 |
 | `batching.py` | 訓練批次（一段一個序列、同長度成批、超過 65 個 token 的切片重疊 1 個） | 否 |
 | `torch_model.py`、`train.py` | 模型、`export_npz`、torch 打分後端、訓練 | 是 |
 | `score.py` | 候選（`--dump` 前 8 名）× `LL` → 只有數字的分數檔；`--ppl-out` 正解句困惑度 | 否（`--backend torch` 才要） |
 | `run_sets.py` | 每個集合各跑一次 `lm_eval.py --dump` 與 `score.py`（一行命令跑完全部集合） | 否 |
 | `parity.py` | 一致性關卡：兩份分數檔的最大 \|ΔLL\| | 否 |
-| `fusegrid.py` | 格點、凍結選擇、rowstats、`evalstats` 表格、§3／§4 報告 | 否 |
+| `fusegrid.py` | 格點、凍結選擇、rowstats、`evalstats` 表格、§3／§4 報告；`--tune-keep` 只用旗標 0 的調參列選（S7d） | 否 |
 | `latency.py` | numpy 延遲（8 候選 × 17 字，200 次）與 int8 大小 | 否 |
 | `int8check.py` | S7b §2.3：`dequant`（權重 int8 還原成 float32 的複本）、`compare`（int8 對 n-gram 的 §4 與 int8 對 fp32 的表，結論「int8 夠用／需要 FP32／不適用」） | 否 |
 | `export_sjtl.py` | S7c-1：`.npz` → `SJTL0001`（Rust 讀的模型檔；檔案格式寫在檔頭的 docstring）；`read_sjtl` 供測試與 golden 產生器用 | 否 |
@@ -138,6 +138,20 @@ $PY int8check.py compare --scores $OUT/scores --fp32 L --int8 L8 --chat 2 2 --fo
 ```
 
 M 的 int8 比對同樣用 `--fp32 M --int8 M8 --chat 0.7 2 --formal 0.7 2`，輸出在 `$OUT/int8`。
+
+## S7d：只用和訓練文字沒有整句重疊的調參列選 α、τ
+
+契約 `docs/contracts/s7d-tune-overlap.md`。
+
+```sh
+# 188（訓練文字在那裡）：每個調參集一個 0／1 旗標檔，第 i 行對應 score.py 的列號 i
+%PY% -u buildcheck.py substr --work %W% --rows %TUNE%\cvtune.txt %TUNE%\wikitune.txt --flags %W%\s7d-flags
+# 拷回 Mac：%W%\s7d-flags\cvtune.flags、wikitune.flags → $W/s7d-flags/
+# Mac：重現關卡（不加 --tune-keep，必須等於 S7b），再只用旗標 0 的列選
+$PY fusegrid.py --scores $OUT/scores --out $W/s7d/repro --models M L --settings chat formal --sets cvtune wikitune dev302 typing76 user-reported discordtune
+$PY fusegrid.py --scores $OUT/scores --out $W/s7d/keep --models M L --settings chat formal --sets cvtune wikitune dev302 typing76 user-reported discordtune --tune-keep $W/s7d-flags
+# 用完：刪掉 discordtune 的候選、分數、rowstats（$W/dumps/discordtune.*、$OUT/scores/*.discordtune.jsonl、各 rowstats 資料夾的 *discordtune*）
+```
 
 ## S7c-1：Rust 推論（`SJTL0001`）
 
