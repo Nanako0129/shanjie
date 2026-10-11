@@ -14,7 +14,7 @@
 | `score.py` | 候選（`--dump` 前 8 名）× `LL` → 只有數字的分數檔；`--ppl-out` 正解句困惑度 | 否（`--backend torch` 才要） |
 | `run_sets.py` | 每個集合各跑一次 `lm_eval.py --dump` 與 `score.py`（一行命令跑完全部集合） | 否 |
 | `parity.py` | 一致性關卡：兩份分數檔的最大 \|ΔLL\| | 否 |
-| `fusegrid.py` | 格點、凍結選擇、rowstats、`evalstats` 表格、§3／§4 報告；`--tune-keep` 只用旗標 0 的調參列選（S7d） | 否 |
+| `fusegrid.py` | 格點、凍結選擇、rowstats、`evalstats` 表格、§3／§4 報告；`--tune-keep` 只用旗標 0 的調參列選（S7d）；`--break-weight W` 照「改對 − W × 改壞」在 (α, τ, δ) 上選、照 S7e §3 判斷，δ 是融合的門檻（S7e） | 否 |
 | `latency.py` | numpy 延遲（8 候選 × 17 字，200 次）與 int8 大小 | 否 |
 | `int8check.py` | S7b §2.3：`dequant`（權重 int8 還原成 float32 的複本）、`compare`（int8 對 n-gram 的 §4 與 int8 對 fp32 的表，結論「int8 夠用／需要 FP32／不適用」） | 否 |
 | `export_sjtl.py` | S7c-1：`.npz` → `SJTL0001`（Rust 讀的模型檔；檔案格式寫在檔頭的 docstring）；`read_sjtl` 供測試與 golden 產生器用 | 否 |
@@ -152,6 +152,27 @@ $PY fusegrid.py --scores $OUT/scores --out $W/s7d/repro --models M L --settings 
 $PY fusegrid.py --scores $OUT/scores --out $W/s7d/keep --models M L --settings chat formal --sets cvtune wikitune dev302 typing76 user-reported discordtune --tune-keep $W/s7d-flags
 # 用完：刪掉 discordtune 的候選、分數、rowstats（$W/dumps/discordtune.*、$OUT/scores/*.discordtune.jsonl、各 rowstats 資料夾的 *discordtune*）
 ```
+
+## S7e：照「改對 − W × 改壞」選 (α, τ, δ)
+
+契約 `docs/contracts/s7e-fewer-breaks.md`。公開集合沿用 S7b 的 M8 分數（cvtune、wikitune、dev302、打字測驗、錯字回報前 66 列）；新打分的是錯字回報 72 列、功能字測試句 `fw`、discordtune。
+
+```sh
+cd experiments/s7a-tinylm
+W=~/.cache/shanjie/work/s7a; PY=/opt/homebrew/bin/python3
+# 候選與分數（fw 的前 186 列會先核對 SHA-256）
+$PY run_sets.py dumps --work $W/s7e-work --sets user-reported fw [discordtune --discord FILE]
+$PY run_sets.py score --work $W/s7e-work --out $W/s7e-work/scores --models M8 --backend numpy --sets user-reported fw [discordtune --discord FILE]
+# 分數資料夾：S7b 的 M8.*.{cvtune,wikitune,dev302,typing76}.jsonl 加上 s7e-work 的 user-reported、fw、discordtune（symlink 到 $W/s7e/scores）
+# 重現關卡（不給 --break-weight，必須選回 0.7／2，契約 §2.2 的 10 格）用 S7b 的 66 列錯字回報，另一個 --out
+$PY fusegrid.py --scores $W/s7b/scores --out $W/s7e/gate --models M8 --sets cvtune wikitune dev302 typing76 user-reported
+# 選與判斷（兩種模式寫同名的 .base／.new，所以各用自己的 --out）
+$PY fusegrid.py --scores $W/s7e/scores --out $W/s7e/w10 --models M8 --sets cvtune wikitune dev302 typing76 user-reported fw discordtune --break-weight 10
+# 用完：刪掉 discordtune 的候選、分數與 rowstats（find $W/s7e-work $W/s7e -name '*discordtune*'）
+```
+
+- `score.py` 每個候選算 ll、ll0、ll16 三欄。這個模式用 ll 選與判斷，用 ll0 檢查前文有沒有接上（「LL changed by context」，錯字回報與 discordtune 是 0 就停），ll16 沒用到。
+- L、XL 是在 Colab 上用 `train.py --size L|XL`、同一份 `ids-*.npy` 與 `vocab.txt` 訓練，公開集合也在 Colab 上打分（研究紀錄 2026-10-12 記了上傳的限制）；discordtune 只在 Mac 本機打分。
 
 ## S7c-1：Rust 推論（`SJTL0001`）
 
