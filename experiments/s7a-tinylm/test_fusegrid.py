@@ -70,11 +70,21 @@ class TestDelta(unittest.TestCase):
             out.append(rec(i, ng, ll, ok))
         return out
 
+    @staticmethod
+    def old_pick(r, alpha, tau):
+        """pick as it was before S7e (origin/main 59adc18), so delta 0 is compared with the old formula, not with itself."""
+        if r["n"] < 2 or r["ng"][0] - r["ng"][1] >= tau:
+            return 0
+        s = [g + alpha * l for g, l in zip(r["ng"], r["ll"])]
+        return max(range(len(s)), key=lambda i: (s[i], -i))
+
     def test_delta_zero_is_the_old_pick(self):
         rows = self.rows()
         for a in fg.ALPHAS:
             for t in fg.TAUS:
-                self.assertEqual([fg.pick(r, a, t) for r in rows], [fg.pick(r, a, t, "ll", 0) for r in rows])
+                old = [self.old_pick(r, a, t) for r in rows]
+                self.assertEqual([fg.pick(r, a, t) for r in rows], old)
+                self.assertEqual([fg.pick(r, a, t, "ll", 0) for r in rows], old)
         self.assertTrue(any(fg.pick(r, 2, math.inf) for r in rows))       # the rows do get reranked at delta 0
 
     def test_large_delta_keeps_the_first(self):
@@ -384,7 +394,7 @@ class TestDriver(unittest.TestCase):
                 except SystemExit as e:
                     code = e.code
             text = out.getvalue()
-            self.assertIn(code, (0, 3), text)
+            self.assertEqual(code, 0, text)                # wired context and every required cell: no STOP
             self.assertIn("by fixed - 10 x broken", text)
             self.assertEqual(len(re.findall(r"^\| S chat [\w-]+ \(vs shipped\) \|", text, re.M)), 7)
             self.assertNotIn("16-char context", text)
@@ -405,6 +415,8 @@ class TestDriver(unittest.TestCase):
             c = dict(cells); c[("chat", "discordtune")] = {**new, **edit}
             self.assertFalse(fg.decision_weighted(c, shipped, 10)[-1][1], edit)
         self.assertFalse(fg.decision_weighted(cells, shipped, 20)[-1][1])         # the weight is used: 80 - 100 < 0
+        s = dict(shipped); s[("chat", "discordtune")] = {**old, "fixed": 200, "broken": 10}
+        self.assertFalse(fg.decision_weighted(cells, s, 10)[-1][1])               # 30 > 0 but not above the shipped 200 - 100
         c = dict(cells); c[("formal", "fw")] = {"n": 186, "fixed": 1, "broken": 9, "p": 0.02}
         self.assertFalse(fg.decision_weighted(c, shipped, 10)[-1][1])            # a guard cell, fw included, blocks it
         c = dict(cells); c[("formal", "discordtune")] = {"n": 4958, "fixed": 1, "broken": 90, "p": 1e-9}
@@ -412,6 +424,21 @@ class TestDriver(unittest.TestCase):
         for gone in fg.REQUIRED_S7E:
             c = {k: v for k, v in cells.items() if k != gone}
             self.assertFalse(fg.decision_weighted(c, shipped, 10)[-1][1], gone)
+
+    def test_weighted_refuses_bad_weights_and_empty_tuning(self):
+        with tempfile.TemporaryDirectory() as td:
+            self.make_scores(td)
+            args = ["--scores", td, "--out", os.path.join(td, "out"), "--models", "S", "--sets", "cvtune", "wikitune", "dev302"]
+            for w in ("nan", "0", "-10"):
+                with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as e:
+                    fg.main(args + ["--break-weight", w])
+                self.assertEqual(e.exception.code, 2, w)                          # argparse error, before anything runs
+            for t in ("cvtune", "wikitune"):
+                for st in ("chat", "formal"):
+                    open(os.path.join(td, f"S.{st}.{t}.jsonl"), "w").close()
+            with contextlib.redirect_stdout(io.StringIO()), self.assertRaises(SystemExit) as e:
+                fg.main(args + ["--break-weight", "10"])
+            self.assertIn("no tuning rows left", str(e.exception.code))
 
     def test_decision_rules(self):
         base = {"n": 4958, "fixed": 120, "broken": 50, "p": 1e-7, "ci_lo": 30, "dcer": -0.2}
