@@ -71,7 +71,15 @@ S7c 分兩片。這一片（S7c-1）只做**核心的前向、模型檔、`pick`
 4. **選字記憶**：重排不改「n-gram 第一名裡有學過加分的詞」的那一段（建議，S7c-2 的契約寫測試）。
 5. **大小**：S7b 的結論出來前用 M；檔案格式與程式不綁大小。
 
-## 7. 審查紀錄
+## 7. 結果（2026-10-11）
+
+- 實作 a628142（executor，main 審 diff）：`make test` 全綠，沒有改任何 golden；小模型 golden 的 |ΔLL| 最大 9.2e-6；8 個突變都由斷言抓到。殼加的那一行 Accelerate 是必要的：拿掉時 `swift build` 缺 `_cblas_sgemm`（executor 量）。
+- 第 4 項（main）：前 8 名 10 格和 Python 相同（分數最大差 7.11e-15）；LL f32 2.05e-5、int8 1.59e-5；pick 20 格逐位元組相同。
+- 第 5 項（main）：§4 在 Rust int8 路徑全部通過（discordtune 聊天 +66／4,958，p = 0.0010，區間 [28, 104]，ΔCER −0.23）；動漫 8 格沒有顯著退步。表格在研究紀錄同日「S7c-1」一節。
+- 第 6 項：int8 每列重排 p50 7.8–8.8 ms、p95 11.4–13.5 ms（連續跑、Mac 同時有其他負載）；載入 56–59 ms；常駐記憶體增量約 61 MiB（還原成 f32）。
+- 第 7 項（保留集）：PR 收尾時由 fresh verifier 跑。
+
+## 8. 審查紀錄
 
 - 第一次 plan-verifier（2026-10-11）：REVISE 4 點，全部 **FIX**。
   1. pick 的關卡比不出「兩邊都錯但選了不同候選」：`--tinylm-scores` 加 `ed`、`glen`，關卡改成 `fusegrid.rowstats`（用 `fusegrid.pick`）和 CLI 的 `--rowstats` 逐位元組相同；「`fusegrid.py` 直接讀」縮小成 `pick`／`rowstats`。
