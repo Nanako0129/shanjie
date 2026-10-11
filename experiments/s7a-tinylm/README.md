@@ -16,6 +16,7 @@
 | `parity.py` | 一致性關卡：兩份分數檔的最大 \|ΔLL\| | 否 |
 | `fusegrid.py` | 格點、凍結選擇、rowstats、`evalstats` 表格、§3／§4 報告 | 否 |
 | `latency.py` | numpy 延遲（8 候選 × 17 字，200 次）與 int8 大小 | 否 |
+| `int8check.py` | S7b §2.3：`dequant`（權重 int8 還原成 float32 的複本）、`compare`（int8 對 n-gram 的 §4 與 int8 對 fp32 的表，結論「int8 夠用／需要 FP32／不適用」） | 否 |
 | `export_sjtl.py` | S7c-1：`.npz` → `SJTL0001`（Rust 讀的模型檔；檔案格式寫在檔頭的 docstring）；`read_sjtl` 供測試與 golden 產生器用 | 否 |
 | `test_*.py` | 單元測試；`test_torch.py` 沒有 torch 時整檔跳過 | 只有 `test_torch.py` |
 
@@ -112,6 +113,31 @@ rm $W/scores/*.discordtune.jsonl $W/dumps/discordtune.* $W/fusion/rowstats/*.dis
 | 4 一致性 | `parity.py` 的 `ll` 行 |
 | 5 延遲與大小 | `latency.py` |
 | 6 判斷 | `fusegrid.py` 的 `section 4` 逐項 PASS／FAIL（只涵蓋 discordtune 與護欄格；M 要使用者同意多約 30 MB、M 的 p95 > 150 ms 只考慮 S，這兩項看 `latency.py` 與使用者） |
+
+## S7b：L、XL 與 int8
+
+契約 `docs/contracts/s7b-larger-lm.md`；結果在研究紀錄同日 S7b 一節。188 用 S7a 同一份訓練文字與 ids；Mac 的 `OUT`＝`$W/s7b`。
+
+```sh
+# 188：訓練與公開集合的 torch 打分（錯字回報固定 S7a 的前 66 列）
+%PY% -u train.py --size L --work %W% --out %W%
+%PY% -u run_sets.py score --work %W% --tune %TUNE% --backend torch --models L --out %W%\scores188 --ppl --reported-rows 66 --sets cvtune wikitune dev302 typing76 user-reported
+
+# Mac：一致性關卡（cvtune 兩種設定）、discordtune（只回數字、用完刪除）、格點、對 M、int8
+$PY run_sets.py score --work $W --tune $W/tune --backend numpy --models L --out $W/scores-mac-L --sets cvtune
+$PY parity.py <188 的 L.chat.cvtune.jsonl> $W/scores-mac-L/L.chat.cvtune.jsonl      # formal 同樣一次
+cp <188 的 scores188/L.*.jsonl> $OUT/scores/
+$PY run_sets.py score --work $W --discord <discordtune 的檔> --backend numpy --models L --out $OUT/scores --sets discordtune
+$PY fusegrid.py --scores $OUT/scores --out $OUT/fusion --models L --settings chat formal --sets cvtune wikitune dev302 typing76 user-reported discordtune
+# L 對 M：M 的 rowstats 來自 M 的 int8 比對（S7a 凍結的 0.7／2 重排 M 的分數，檔名 M8.<設定>.<集合>.fp32.txt），L 的來自 fusegrid
+python3 ../../tools/evalstats.py compare $OUT/int8/rowstats/M8.chat.discordtune.fp32.txt $OUT/fusion/rowstats/L.chat.discordtune.new.txt --label "L vs M chat discordtune"
+# int8：還原複本、所有集合打分、比對（α、τ 必須是 fp32 自己選出的值，工具會核對）
+$PY int8check.py dequant --npz $W/tinylm-L.npz --out $W/tinylm-L8.npz
+$PY run_sets.py score --work $W --tune $W/tune --discord <discordtune 的檔> --backend numpy --models L8 --out $OUT/scores --reported-rows 66 --sets cvtune wikitune dev302 typing76 user-reported discordtune
+$PY int8check.py compare --scores $OUT/scores --fp32 L --int8 L8 --chat 2 2 --formal 1 2 --sets cvtune wikitune dev302 typing76 user-reported discordtune --out $OUT/int8-L
+```
+
+M 的 int8 比對同樣用 `--fp32 M --int8 M8 --chat 0.7 2 --formal 0.7 2`，輸出在 `$OUT/int8`。
 
 ## S7c-1：Rust 推論（`SJTL0001`）
 

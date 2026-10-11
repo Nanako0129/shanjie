@@ -101,6 +101,10 @@ class TestTorch(unittest.TestCase):
             print(name, sum(p.numel() for p in m.parameters()), "parameters at V =", V)
         self.assertEqual(tm.CONFIGS["S"], dict(n_layer=4, d=256, n_head=4))
         self.assertEqual(tm.CONFIGS["M"], dict(n_layer=6, d=384, n_head=6))
+        # S7b §2.1: about 30M and 65M parameters at the real vocabulary (9,717 characters + PAD, UNK, BOS)
+        for name, lo, hi in (("L", 29.5e6, 31e6), ("XL", 64e6, 66.5e6)):
+            n = sum(p.numel() for p in tm.GPT(9720, **tm.CONFIGS[name]).parameters())
+            self.assertTrue(lo <= n <= hi, (name, n))
 
 
 if __name__ == "__main__":
