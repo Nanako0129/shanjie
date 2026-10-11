@@ -3135,3 +3135,11 @@ CLI 重現（model-v5、動漫詞包開、沒有前文；小模型是 `tinylm.sj
 **Colab 的做法**（Google 官方的 `google-colab-cli` 0.7.4，使用者同意安裝）：`colab new --gpu A100 --high-mem` 拿到 A100 80GB（要求 H100 被拒）；`colab upload` 一個 544 MB 的檔回 HTTP 500、切成 100 MB 的塊回 400，切成 16 MB 的塊才穩定；上傳到 VM 上不存在的資料夾也回 500，所以先平放在 `/content/out/`、再在 VM 上合併與搬移，合併後核對 SHA-256 才訓練。只上傳公開的程式與資料。
 
 **打分速度**：XL 在 Mac 上用 numpy 打 discordtune（float64、單核），每種設定約 45 分鐘（L 約 23 分鐘、M 約 16 分鐘）。`score.py` 每個候選算三種 LL（ll、ll0、ll16）；這一片用 ll 選與判斷、用 ll0 檢查前文有沒有接上（「LL changed by context」），ll16 沒用到。之後要再打分時，可以不算 ll16、兩種設定同時跑。
+
+## 2026-10-12：聊天／書面的切換方式與個別 App 設定（契約 `docs/contracts/profile-choice.md`，分支 `feat/profile-choice`）
+
+- **起因**：使用者問「現在使用者可以選書面或是聊天嗎？」。答案是不能：殼依前景 App 的 bundle ID 查寫死的 8 個聊天 App，其他 App 一律書面，所以終端機、瀏覽器、編輯器裡都是書面設定。使用者：「應該要讓人可以自己選或自動或是增加 app 清單」。
+- **使用者的決定（選擇題）**：三選一（依 App 自動／一律聊天／一律書面）＋可改的 App 清單（內建的 8 個也能改回書面）；在 App 裡從善解選單一鍵切換，設定視窗列出改過的 App、可以移除；不做從「應用程式」資料夾挑 App。
+- **隱私規則的修訂**：s3b §9 原本承諾 bundle ID「不存檔」。現在只有使用者在選單上按過的 App 會存進 App 自己的 UserDefaults（`appProfiles`，值只有 `chat`／`formal`）；照舊不傳給核心、不寫日誌；不影響學習的 privacyGate。security-reviewer 抓到一個 P2：選單切換若直接重設 profile，別的 App 正在打的組字會被重算後送進目前的 App，所以切換照 `activate()` 的順序先 `claim()` 再套用。
+- **審查**：security-reviewer 一次、plan-verifier 兩次（第一次指出沒有測試證明重開後會讀回存檔）、本地 /code-review 12 項（主要是設定視窗的修改要立刻對目前的擁有者重設、清單的名稱查詢要快取、非自動模式時移除按鈕不能反灰），都處置在契約 §6。
+- **驗證**：殼層測試 `ProfileChoiceTests`（14 項）；九個突變（忽略模式、忽略個別設定、和內建相同也寫入、切換後不套用、切換不先 claim、整份字典轉型、啟動不讀存檔、不發通知、設定視窗的修改不重設擁有者）各讓測試在斷言失敗；`make test` 通過。**實機**（使用者，2026-10-12）：§3.4 全部通過（組字中切換會立刻重算；設定視窗列出、移除；一律聊天）。同時錄的 `log stream` 裡善解自己的 subsystem 0 行；前景 App 的 bundle ID 只出現在蘋果 LaunchServices 的 Debug 前景通知（12 次），使用者決定接受，契約的停止條件改成只看善解自己的日誌。

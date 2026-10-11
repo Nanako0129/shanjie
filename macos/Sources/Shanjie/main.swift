@@ -97,6 +97,31 @@ final class DefaultsCandidateOrientationStore: CandidateOrientationStore {
     }
 }
 
+/// How chat or formal is chosen (docs/contracts/profile-choice.md section 2.1), key `profileMode` (`auto`, `chat` or `formal`);
+/// absent or anything else means `auto`.
+@MainActor
+final class DefaultsProfileModeStore: ProfileModeStore {
+    var profileMode: String? {
+        get { UserDefaults.standard.string(forKey: "profileMode") }
+        set { UserDefaults.standard.set(newValue, forKey: "profileMode") }
+    }
+}
+
+/// The per-app choices (profile-choice section 2.1), key `appProfiles`: bundle ID to `chat` or `formal`, only for apps switched
+/// from the menu. Read back raw (`AppProfiles.parse` filters it entry by entry); an empty dictionary removes the key. One
+/// top-level key, not a key path: a bundle ID has dots.
+@MainActor
+final class DefaultsAppProfileStore: AppProfileStore {
+    var appProfiles: Any? { UserDefaults.standard.object(forKey: "appProfiles") }
+    func setAppProfiles(_ profiles: [String: String]) {
+        if profiles.isEmpty {
+            UserDefaults.standard.removeObject(forKey: "appProfiles")
+        } else {
+            UserDefaults.standard.set(profiles, forKey: "appProfiles")
+        }
+    }
+}
+
 @MainActor
 func runServer() -> Never {
     guard let bundleID = Bundle.main.bundleIdentifier,
@@ -117,6 +142,7 @@ func runServer() -> Never {
         isSecureInput: { IsSecureEventInputEnabled() }, layoutStore: DefaultsLayoutStore(),
         learningDirectory: Shell.learningURL(), dialogs: AlertDialogs(), demoteStore: DefaultsDemoteStore(), predictionStore: DefaultsPredictionStore(), abbreviationStore: DefaultsAbbreviationStore(), acgPackStore: DefaultsAcgPackStore(),
         glassTintStore: DefaultsGlassTintStore(), candidateOrientationStore: DefaultsCandidateOrientationStore(),
+        profileModeStore: DefaultsProfileModeStore(), appProfileStore: DefaultsAppProfileStore(),
         // 可省略韻母 does not ship in v0.4.0 (user, 2026-10-10); see Shell.showsAbbreviation. Flip to true to offer it again.
         // This argument alone hides it (Shell's default true is for the tests) and the app target has no tests: the release
         // device check confirms the menu has no 可省略韻母.

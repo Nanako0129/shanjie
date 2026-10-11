@@ -11,7 +11,7 @@ final class HiddenAbbreviationTests: XCTestCase {
         let shell = Shell(resources: resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(),
                           learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(),
                           predictionStore: MemoryPredictionStore(), abbreviationStore: store, acgPackStore: MemoryAcgPackStore(),
-                          glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(),
+                          glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore(),
                           showsAbbreviation: false)
         let c = Controller(shell)
         c.session.activate()
