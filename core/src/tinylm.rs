@@ -9,7 +9,7 @@
 //! R2: errors carry a kind only, never text.
 
 use crate::learn::SENTINEL;
-use crate::lm::Profile;
+use crate::lm::{Lm, Profile};
 use std::collections::HashMap;
 use std::fmt;
 use std::path::Path;
@@ -40,6 +40,10 @@ pub enum TinyLmError {
     Format,
     /// The candidate alone does not fit the context (`ctx - 1` characters after [BOS]).
     TooLong,
+    /// `load_paired`: the file was tuned with another n-gram model (its recorded SHA-256 differs).
+    OtherNgram,
+    /// `load_paired`: the n-gram model has the Kneser-Ney side file on; alpha and tau were tuned without it.
+    KneserNey,
 }
 
 impl fmt::Display for TinyLmError {
@@ -48,6 +52,8 @@ impl fmt::Display for TinyLmError {
             TinyLmError::Io => "cannot read tiny language model file (.sjtl)",
             TinyLmError::Format => "bad tiny language model file (.sjtl)",
             TinyLmError::TooLong => "candidate does not fit the context of the tiny language model (.sjtl)",
+            TinyLmError::OtherNgram => "this .sjtl was tuned with another n-gram model (SHA-256 differs)",
+            TinyLmError::KneserNey => "the Kneser-Ney side file is on, but this .sjtl was tuned without it",
         })
     }
 }
@@ -202,23 +208,56 @@ impl Cursor<'_> {
     }
 }
 
+/// `O_NONBLOCK`: opening a FIFO for reading must not wait for a writer (it is rejected right after, as not a regular file).
+#[cfg(target_os = "linux")]
+const O_NONBLOCK: i32 = 0o4000;
+#[cfg(all(unix, not(target_os = "linux")))]
+const O_NONBLOCK: i32 = 0x0004; // macOS and the BSDs
+
+/// S7c-2a section 2.6 (F3): opens first, then checks the opened handle (a regular file of at most `MAX_FILE` bytes) and reads at
+/// most the cap from that same handle, so the file checked is the file read.
+fn read_bounded(path: &Path) -> Result<Vec<u8>, TinyLmError> {
+    use std::io::Read;
+    let mut opts = std::fs::OpenOptions::new();
+    opts.read(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::custom_flags(&mut opts, O_NONBLOCK);
+    let file = opts.open(path).map_err(|_| TinyLmError::Io)?;
+    let meta = file.metadata().map_err(|_| TinyLmError::Io)?;
+    if !meta.is_file() {
+        return Err(TinyLmError::Io);
+    }
+    if meta.len() > MAX_FILE {
+        return Err(TinyLmError::Format);
+    }
+    let mut bytes = Vec::with_capacity(meta.len() as usize);
+    file.take(MAX_FILE + 1).read_to_end(&mut bytes).map_err(|_| TinyLmError::Io)?;
+    if bytes.len() as u64 > MAX_FILE {
+        return Err(TinyLmError::Format);
+    }
+    Ok(bytes)
+}
+
 impl TinyLm {
-    /// Reads only a regular file of at most `MAX_FILE` bytes (checked before reading, and the read itself is bounded).
+    /// Reads only a regular file of at most `MAX_FILE` bytes (`read_bounded`).
     pub fn load(path: &Path) -> Result<TinyLm, TinyLmError> {
-        use std::io::Read;
-        let meta = std::fs::metadata(path).map_err(|_| TinyLmError::Io)?;
-        if !meta.is_file() {
-            return Err(TinyLmError::Io);
+        TinyLm::parse(&read_bounded(path)?)
+    }
+
+    /// The one loader of the engine and the evaluation CLI (S7c-2a): `load`'s checks, then the pairing with `lm` — the n-gram
+    /// model hash the file records must be `lm`'s, and `lm` must not have the Kneser-Ney side file on (alpha and tau were tuned
+    /// without it). A pairing check only, not an integrity check of the `.sjtl`. Also returns the bytes it parsed (the CLI
+    /// prints their hash; the engine drops them).
+    pub fn load_paired(path: &Path, lm: &Lm) -> Result<(TinyLm, Vec<u8>), TinyLmError> {
+        let bytes = read_bounded(path)?;
+        let model = TinyLm::parse(&bytes)?;
+        if model.ngram_sha256() != lm.sha256() {
+            return Err(TinyLmError::OtherNgram);
         }
-        if meta.len() > MAX_FILE {
-            return Err(TinyLmError::Format);
+        if lm.kn_tag().is_some() {
+            return Err(TinyLmError::KneserNey);
         }
-        let mut bytes = Vec::with_capacity(meta.len() as usize);
-        std::fs::File::open(path).and_then(|f| f.take(MAX_FILE + 1).read_to_end(&mut bytes)).map_err(|_| TinyLmError::Io)?;
-        if bytes.len() as u64 > MAX_FILE {
-            return Err(TinyLmError::Format);
-        }
-        TinyLm::parse(&bytes)
+        Ok((model, bytes))
     }
 
     /// Every check of the format; a bad file is an error, never a partial model.
@@ -600,6 +639,23 @@ mod tests {
         std::fs::File::create(&big).unwrap().set_len(MAX_FILE + 1).unwrap();
         assert_eq!(TinyLm::load(&big).err(), Some(TinyLmError::Format), "over the cap");
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// F3 with the handle checked after opening: a FIFO with no writer is refused at once instead of blocking the open (without
+    /// O_NONBLOCK the open would wait for a writer forever; the receive below would then time out).
+    #[cfg(unix)]
+    #[test]
+    fn load_refuses_a_fifo_without_blocking() {
+        let dir = std::env::temp_dir().join(format!("shanjie-tinylm-fifo-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let fifo = dir.join("fifo.sjtl");
+        assert!(std::process::Command::new("mkfifo").arg(&fifo).status().unwrap().success(), "mkfifo");
+        let (tx, rx) = std::sync::mpsc::channel();
+        let p = fifo.clone();
+        std::thread::spawn(move || tx.send(TinyLm::load(&p).err()).unwrap());
+        let got = rx.recv_timeout(std::time::Duration::from_secs(10));
+        std::fs::remove_dir_all(dir).unwrap();
+        assert_eq!(got.expect("load blocked on the FIFO"), Some(TinyLmError::Io), "not a regular file");
     }
 
     /// `rerank` is the rule the CLI measured: the key reaches the model as k (a Han key changes the LLs, and they are exactly

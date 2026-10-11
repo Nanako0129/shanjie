@@ -13,6 +13,7 @@ use core::lm::{decode_segment_learned, CappedLexicon, Demote, End, Lm, Profile};
 use core::tinylm::{TinyLm, TOPK};
 use core::{Lexicon, Syls, BEAM_S1};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -50,7 +51,7 @@ fn sha_bytes(file: &Path) -> Vec<u8> {
 }
 
 /// The toy model with `alpha` / `tau` for both profiles and the n-gram hash of `lm` (None: left as recorded, i.e. kn-tiny's).
-fn sjtl_for(alpha: f64, tau: f64, lm: Option<&Path>) -> PathBuf {
+fn sjtl_for(alpha: f64, tau: f64, lm: Option<&Path>) -> TempFile {
     let mut b = std::fs::read(root().join("eval/golden/tinylm-tiny/tiny-int8.sjtl")).unwrap();
     if let Some(lm) = lm {
         b[68..100].copy_from_slice(&sha_bytes(lm));
@@ -59,17 +60,32 @@ fn sjtl_for(alpha: f64, tau: f64, lm: Option<&Path>) -> PathBuf {
         b[at..at + 8].copy_from_slice(&alpha.to_le_bytes());
         b[at + 8..at + 16].copy_from_slice(&tau.to_le_bytes());
     }
-    let tag = format!("{alpha}-{tau}-{}", lm.is_some());
-    let p = std::env::temp_dir().join(format!("shanjie-rerank-{}-{tag}.sjtl", std::process::id()));
+    // One file per call (tests run in parallel), removed when the guard drops.
+    static N: AtomicUsize = AtomicUsize::new(0);
+    let n = N.fetch_add(1, Ordering::Relaxed);
+    let p = std::env::temp_dir().join(format!("shanjie-rerank-{}-{n}.sjtl", std::process::id()));
     std::fs::write(&p, b).unwrap();
-    p
+    TempFile(p)
+}
+/// A temporary file, deleted on drop; derefs to its path.
+struct TempFile(PathBuf);
+impl Drop for TempFile {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+impl std::ops::Deref for TempFile {
+    type Target = Path;
+    fn deref(&self) -> &Path {
+        &self.0
+    }
 }
 /// Lets the toy model's LLs decide.
-fn rerank_model() -> PathBuf {
+fn rerank_model() -> TempFile {
     sjtl_for(100.0, f64::INFINITY, Some(&lm_path()))
 }
 /// tau 0: `pick` always keeps the first.
-fn keep_model() -> PathBuf {
+fn keep_model() -> TempFile {
     sjtl_for(100.0, 0.0, Some(&lm_path()))
 }
 
@@ -237,25 +253,28 @@ fn apply_shows_the_models_choice() {
     assert!(e.key(k(KeyKind::Enter)).unwrap().commit == x.surfaces[x.pick], "Enter sends what is shown");
 }
 
-/// Stale results change nothing: a key (even one that does not refresh) or a setting after the take, and Enter before the apply
-/// (it sends the shown n-gram text).
+/// Section 2.3, revision 1: a re-decode after the take makes the result stale — a deleted syllable, and settings that re-decode
+/// to the very same words (only the generation tells those apart) — and so does Enter (it sends the shown n-gram text).
 #[test]
 fn stale_results_are_dropped() {
     let syls = row(12);
     let mut e = engine();
     let shown = type_syls(&mut e, &syls).preedit;
     let r = e.take_rerank_job().unwrap().run();
-    assert!(e.key(k(KeyKind::Left)).unwrap().preedit == shown);
-    assert!(e.apply_rerank(r).unwrap().is_none(), "a key after the take");
-    e.key(k(KeyKind::Right)).unwrap();
-    for change in [0, 1] {
+    assert!(e.key(k(KeyKind::Backspace)).unwrap().preedit != shown, "premise: Backspace deleted a syllable");
+    assert!(e.apply_rerank(r).unwrap().is_none(), "a re-decoding key after the take");
+    for key in keys_of(syls.last().unwrap()) {
+        e.key(key).unwrap();
+    }
+    for change in 0..2 {
         e.set_rerank(true).unwrap(); // a fresh job for the shown composition
         let r = e.take_rerank_job().unwrap().run();
-        match change {
-            0 => drop(e.set_candidate_vertical(false).unwrap()),
-            _ => drop(e.set_profile(Profile::Chat).unwrap()),
-        }
-        assert!(e.apply_rerank(r).unwrap().is_none(), "a setting after the take");
+        let o = match change {
+            0 => e.set_profile(Profile::Chat).unwrap(),
+            _ => e.set_demote(true).unwrap(),
+        };
+        assert!(o.preedit == shown, "premise: the same words after the re-decode");
+        assert!(e.apply_rerank(r).unwrap().is_none(), "a re-decoding setting after the take");
     }
     e.set_rerank(true).unwrap();
     let r = e.take_rerank_job().unwrap().run();
@@ -263,6 +282,85 @@ fn stale_results_are_dropped() {
     assert!(e.key(k(KeyKind::Enter)).unwrap().commit == shown, "Enter sends the shown text");
     assert!(e.apply_rerank(r).unwrap().is_none(), "applied after the commit");
     assert!(e.key(k(KeyKind::Left)).unwrap().preedit.is_empty());
+}
+
+/// Section 2.3, revision 1: keys that do not re-decode keep the job — a cursor move, an unfinished symbol (shown after the
+/// applied text) — while an open candidate window blocks the apply (section 2.4).
+#[test]
+fn keys_that_do_not_redecode_keep_the_job() {
+    let model = rerank_model();
+    let syls = row(12);
+    let x = expect(&model, &syls, "<s>", End::Eos, "");
+    assert!(x.pick != 0, "premise: the model changes row 12");
+    let mut e = engine_with(Some(&model));
+    type_syls(&mut e, &syls);
+    let job = e.take_rerank_job().unwrap();
+    e.key(k(KeyKind::Left)).unwrap();
+    let o = e.apply_rerank(job.run()).unwrap().expect("applied after a cursor move");
+    assert!(o.preedit == x.surfaces[x.pick]);
+
+    let mut e = engine_with(Some(&model));
+    type_syls(&mut e, &syls);
+    let job = e.take_rerank_job().unwrap();
+    assert!(e.key(Key::ch('2', 0)).unwrap().preedit == format!("{}ㄉ", x.surfaces[0]), "premise: ㄉ is unfinished");
+    let o = e.apply_rerank(job.run()).unwrap().expect("applied with an unfinished symbol");
+    assert!(o.preedit == format!("{}ㄉ", x.surfaces[x.pick]), "the symbol stays after the applied text");
+
+    let mut e = engine_with(Some(&model));
+    type_syls(&mut e, &syls);
+    let job = e.take_rerank_job().unwrap();
+    let open = e.key(k(KeyKind::Space)).unwrap();
+    assert!(open.selected == Some(0), "premise: the candidate window is open");
+    assert!(e.apply_rerank(job.run()).unwrap().is_none(), "no apply under an open window");
+    assert!(e.key(k(KeyKind::Esc)).unwrap().preedit == x.surfaces[0]);
+}
+
+/// Section 2.4, revision 1: a prediction row the key rules cleared (a candidate pick, a deleted syllable) is not brought back by
+/// the apply; a recompute would show one, so an apply that recomputed regardless fails here.
+#[test]
+fn apply_does_not_bring_back_a_cleared_prediction_row() {
+    let mut e = engine();
+    type_syls(&mut e, &row(27));
+    let o = choose_at_cursor(&mut e, "了");
+    assert!(o.candidates.is_empty(), "premise: the pick cleared the row");
+    let r = e.take_rerank_job().unwrap().run();
+    assert!(r.picks().iter().any(|&p| p != 0), "premise: the stretch before 了 changes");
+    let a = e.apply_rerank(r).unwrap().expect("a change");
+    assert!(a.candidates.is_empty(), "the row stays cleared after a candidate pick");
+    assert!(!e.set_prediction(true).unwrap().candidates.is_empty(), "premise: a recompute would show a row");
+
+    let mut e = engine();
+    let mut syls = row(12);
+    syls.push("ㄉㄜ˙".to_string());
+    type_syls(&mut e, &syls);
+    let o = e.key(k(KeyKind::Backspace)).unwrap();
+    assert!(o.candidates.is_empty(), "premise: deleting a syllable cleared the row");
+    let r = e.take_rerank_job().unwrap().run();
+    let a = e.apply_rerank(r).unwrap().expect("a change");
+    assert!(a.candidates.is_empty(), "the row stays cleared after Backspace");
+    assert!(!e.set_prediction(true).unwrap().candidates.is_empty(), "premise: a recompute would show a row");
+}
+
+/// Section 2.4, revision 1: a later stretch is scored with the context key of the text as it will be shown, i.e. after the
+/// earlier stretch's choice. Row 16 with the single character 打 fixed: the left stretch's choice changes its last character, so
+/// the right stretch's key differs from the one the n-gram text would give.
+#[test]
+fn later_stretch_key_uses_the_earlier_choice() {
+    let model = rerank_model();
+    let s = shared();
+    let syls = row(16);
+    let (a, b, word) = (3, 4, "打");
+    let (lp, delta) = s.capped.best_lp_delta(&syls[a..b], word).unwrap();
+    let left = expect(&model, &syls[..a], "<s>", End::Next { word, lp, delta }, "");
+    let chosen = format!("{}{word}", left.surfaces[left.pick]);
+    let ngram = format!("{}{word}", left.surfaces[0]);
+    assert!(context_key(&chosen) != context_key(&ngram), "premise: the left choice changes the right stretch's key");
+    let right = expect(&model, &syls[b..], word, End::Eos, &chosen);
+    let mut e = engine_with(Some(&model));
+    assert!(fix_word(&mut e, &syls, b, word).preedit.starts_with(&ngram));
+    let r = e.take_rerank_job().unwrap().run();
+    assert_eq!(r.keys(), vec![context_key(""), context_key(&chosen)], "keys from the chosen text");
+    assert_eq!(r.picks(), vec![left.pick, right.pick]);
 }
 
 /// Generations come from one process-wide counter: a result never applies to another engine.
@@ -278,8 +376,9 @@ fn two_engines_do_not_share_generations() {
     assert!(b.apply_rerank(rb).unwrap().is_some(), "b's own result");
 }
 
-/// A result applies once: the same job run twice gives two results, and the second is stale after the first applied. The job
-/// owns its data, so it runs after the engine is gone.
+/// A result applies once: the same job run twice gives two results with the same generation; after the first applied, `path`
+/// no longer holds the words the job was made from, so the second changes nothing (section 2.3, revision 1). The job owns its
+/// data, so it runs after the engine is gone.
 #[test]
 fn a_job_applies_once_and_outlives_the_engine() {
     let syls = row(12);
@@ -319,7 +418,7 @@ fn fixed_word_between_two_stretches() {
     let (a, b, word) = (7, 9, "郵件");
     let (lp, delta) = s.capped.best_lp_delta(&syls[a..b], word).unwrap();
     let left = expect(&model, &syls[..a], "<s>", End::Next { word, lp, delta }, "");
-    let right = expect(&model, &syls[b..], word, End::Eos, &format!("{}{word}", left.surfaces[0]));
+    let right = expect(&model, &syls[b..], word, End::Eos, &format!("{}{word}", left.surfaces[left.pick]));
     assert!(left.pick != 0 && right.pick != 0, "premise: both stretches change");
     let mut e = engine_with(Some(&model));
     let fixed = fix_word(&mut e, &syls, b, word);
@@ -467,8 +566,9 @@ fn load_tinylm_errors_and_the_switch() {
     assert!(e.load_tinylm(&rerank_model()).is_err(), "no n-gram model");
     // A missing file, another model's hash, a directory: errors, and no model afterwards.
     let mut e = engine_with(None);
-    for bad in [PathBuf::from("/nonexistent/x.sjtl"), sjtl_for(100.0, f64::INFINITY, None), std::env::temp_dir()] {
-        assert!(e.load_tinylm(&bad).is_err());
+    let (other, tmp) = (sjtl_for(100.0, f64::INFINITY, None), std::env::temp_dir());
+    for bad in [Path::new("/nonexistent/x.sjtl"), &other, &tmp] {
+        assert!(e.load_tinylm(bad).is_err());
     }
     type_syls(&mut e, &syls);
     assert!(e.take_rerank_job().is_none(), "failed loads leave no model");
@@ -511,27 +611,102 @@ fn kneser_ney_side_file_refuses_the_model() {
 
 // ---------- items 4 and 5: run by the main session ----------
 
+/// What one key-by-key replay of the rows saw.
+#[derive(Default)]
+struct Replay {
+    commits: Vec<String>,
+    /// `key` plus `take` per key (the job's creation is inside `key`).
+    keys: Vec<Duration>,
+    runs: Vec<Duration>,
+    /// `apply_rerank` per job, and only those that changed the composition.
+    applies: Vec<Duration>,
+    applies_changed: Vec<Duration>,
+    jobs: usize,
+    /// Process CPU (`clock`, microseconds on macOS) and wall time of the runs.
+    cpu: u64,
+    wall: Duration,
+    /// Keys after which the composition re-decoded (a completed syllable; not the commits).
+    redecode: usize,
+    /// A4 measures over the re-decoding keys k (positions that existed after key k-1):
+    /// the n-gram text at k differs from the shown text after k-1 (what the user sees flip first);
+    flicker: usize,
+    /// the shown text after k's apply differs from the shown text after k-1 (what stays changed);
+    net: usize,
+    /// a position the apply at k-1 had changed shows the n-gram's text again at k and the apply at k brings back k-1's text.
+    back: usize,
+}
+
+/// Every row typed key by key, with take, run and apply after every key, then Enter.
+fn replay(e: &mut Engine, rows: &[(String, Syls)]) -> Replay {
+    extern "C" {
+        fn clock() -> std::ffi::c_ulong;
+    }
+    let han = |o: &Output| -> Vec<char> {
+        // The cursor is at the end, so the unfinished symbols are the tail of the preedit.
+        let mut v: Vec<char> = o.preedit.chars().collect();
+        while v.last().is_some_and(|c| ('\u{3105}'..='\u{3129}').contains(c) || "ˊˇˋ˙".contains(*c)) {
+            v.pop();
+        }
+        v
+    };
+    let differs = |a: &[char], b: &[char]| a.iter().zip(b).any(|(x, y)| x != y);
+    let mut st = Replay::default();
+    for (_, syls) in rows {
+        let mut commit = String::new();
+        let (mut prev_ng, mut prev_shown): (Vec<char>, Vec<char>) = (Vec::new(), Vec::new());
+        for key in syls.iter().flat_map(|s| keys_of(s)).chain([k(KeyKind::Enter)]) {
+            let t = Instant::now();
+            let o = e.key(key).unwrap();
+            let job = e.take_rerank_job();
+            st.keys.push(t.elapsed());
+            commit.push_str(&o.commit);
+            let ng = han(&o);
+            let mut shown = ng.clone();
+            if let Some(job) = job {
+                st.jobs += 1;
+                let (c0, t) = (unsafe { clock() }, Instant::now());
+                let r = job.run();
+                st.runs.push(t.elapsed());
+                st.wall += t.elapsed();
+                st.cpu += (unsafe { clock() } - c0) as u64;
+                let t = Instant::now();
+                let a = e.apply_rerank(r).unwrap();
+                st.applies.push(t.elapsed());
+                if let Some(a) = a {
+                    st.applies_changed.push(*st.applies.last().unwrap());
+                    shown = han(&a);
+                }
+            }
+            // Only a key that completes a syllable re-decodes here; a symbol key shows the previous text unchanged.
+            if o.commit.is_empty() && ng.len() != prev_shown.len() {
+                st.redecode += 1;
+                st.flicker += differs(&ng, &prev_shown) as usize;
+                st.net += differs(&shown, &prev_shown) as usize;
+                let n = prev_shown.len().min(prev_ng.len()).min(ng.len()).min(shown.len());
+                st.back += (0..n).any(|i| prev_shown[i] != prev_ng[i] && ng[i] != prev_shown[i] && shown[i] == prev_shown[i]) as usize;
+                (prev_ng, prev_shown) = (ng, shown);
+            }
+        }
+        st.commits.push(commit);
+    }
+    st
+}
+
 /// Item 4 (parity) and item 5 (measurements). Skipped unless SHANJIE_TINYLM names the real `.sjtl` (never copied into data/lm).
 /// The engine is built as the contract says: `Engine::new(data/lexicon)` + `load_lm(data/lm/bigram.sjlm)` + `load_tinylm`, chat,
 /// demotion on, no left context. Every dev302 row is typed key by key with take, run and apply after every key, then Enter.
 /// The commits are compared with SHANJIE_TINYLM_FIRSTS (302 lines, row order: the CLI's chosen candidate of
 /// `--lm data/lm/bigram.sjlm --profile chat --dev 302 --tinylm <.sjtl>`), and always with the CLI's rule computed here
-/// (`decode_from` + `TinyLm::rerank`, as cli/src/main.rs does it). Prints to stderr: key-path p50 / p95 (key plus take, so the
-/// job's creation is inside), run p50 / p95, CPU / wall time of the runs (process CPU from `clock`, so run this test alone),
-/// jobs, changed applies, keys, and the A4 measure.
-///
-/// A4 measure (section 1): a key "reverted then changed back" when some character position that the previous key's apply had
-/// changed (the shown text after key k-1 differs there from key k-1's n-gram text) shows something else in key k's n-gram text
-/// and the shown text after key k's apply is again what it was after key k-1.
+/// (`decode_from` + `TinyLm::rerank`, as cli/src/main.rs does it). Prints to stderr, with their denominators: key-path p50 / p95
+/// (key plus take, so the job's creation is inside), run p50 / p95, apply p50 / p95 (all and changed), CPU / wall time of the runs
+/// (process CPU from `clock`, so run this test alone), jobs, changed applies, keys, and the A4 measures of `Replay` — also for
+/// the same keys on an engine without the small model (the n-gram's own rewrites, where flicker and net rewrite coincide).
 #[test]
 fn replay_dev302_parity_and_measurements() {
     let Some(model) = std::env::var_os("SHANJIE_TINYLM") else {
         eprintln!("SKIPPED replay_dev302_parity_and_measurements: set SHANJIE_TINYLM to the .sjtl (and SHANJIE_TINYLM_FIRSTS to the CLI firsts)");
         return;
     };
-    extern "C" {
-        fn clock() -> std::ffi::c_ulong;
-    }
     const CLOCKS_PER_SEC: f64 = 1_000_000.0; // macOS
     let mut e = Engine::new(&root().join("data/lexicon"), Layout::Standard).unwrap();
     e.load_lm(&lm_path()).unwrap();
@@ -551,83 +726,51 @@ fn replay_dev302_parity_and_measurements() {
             surf[pick].clone()
         })
         .collect();
-    let han = |o: &Output| -> Vec<char> {
-        // The cursor is at the end, so the unfinished symbols are the tail of the preedit.
-        let mut v: Vec<char> = o.preedit.chars().collect();
-        while v.last().is_some_and(|c| ('\u{3105}'..='\u{3129}').contains(c) || "ˊˇˋ˙".contains(*c)) {
-            v.pop();
-        }
-        v
-    };
-    let (mut keys, mut runs, mut got) = (Vec::new(), Vec::new(), Vec::new());
-    let (mut jobs, mut changed, mut back, mut cpu, mut wall) = (0usize, 0usize, 0usize, 0u64, Duration::ZERO);
-    for (_, syls) in &rows {
-        let mut list: Vec<Key> = syls.iter().flat_map(|s| keys_of(s)).collect();
-        list.push(k(KeyKind::Enter));
-        let mut commit = String::new();
-        let (mut prev_ng, mut prev_shown): (Vec<char>, Vec<char>) = (Vec::new(), Vec::new());
-        for key in list {
-            let t = Instant::now();
-            let o = e.key(key).unwrap();
-            let job = e.take_rerank_job();
-            keys.push(t.elapsed());
-            commit.push_str(&o.commit);
-            let ng = han(&o);
-            let mut shown = ng.clone();
-            if let Some(job) = job {
-                jobs += 1;
-                let (c0, t) = (unsafe { clock() }, Instant::now());
-                let r = job.run();
-                runs.push(t.elapsed());
-                wall += t.elapsed();
-                cpu += (unsafe { clock() } - c0) as u64;
-                if let Some(a) = e.apply_rerank(r).unwrap() {
-                    changed += 1;
-                    shown = han(&a);
-                }
-            }
-            // Only a key that completes a syllable (or commits) re-decodes; a symbol key shows the previous text unchanged.
-            if ng.len() != prev_shown.len() {
-                let n = prev_shown.len().min(prev_ng.len()).min(ng.len()).min(shown.len());
-                back += (0..n).any(|i| prev_shown[i] != prev_ng[i] && ng[i] != prev_shown[i] && shown[i] == prev_shown[i]) as usize;
-                (prev_ng, prev_shown) = (ng, shown);
-            }
-        }
-        got.push(commit);
-    }
-    let diff_rule: Vec<usize> = (0..rows.len()).filter(|&i| got[i] != rule[i]).map(|i| i + 1).collect();
-    let pct = |mut t: Vec<Duration>, p: usize| {
+    let pct = |t: &[Duration], p: usize| -> Duration {
+        let mut t = t.to_vec();
         t.sort();
-        t[(t.len() * p / 100).min(t.len() - 1)]
+        t.get((t.len() * p / 100).min(t.len().saturating_sub(1))).copied().unwrap_or_default()
     };
+    let a4 = |name: &str, r: &Replay| {
+        let rate = |n: usize| 100.0 * n as f64 / r.redecode as f64;
+        eprintln!(
+            "{name}: re-decoding keys {}; flicker {} ({:.2}%); net rewrite {} ({:.2}%); reverted-then-back {} ({:.2}%; {:.2}% of all {} keys)",
+            r.redecode, r.flicker, rate(r.flicker), r.net, rate(r.net), r.back, rate(r.back), 100.0 * r.back as f64 / r.keys.len() as f64, r.keys.len()
+        );
+    };
+    let m = replay(&mut e, &rows);
+    let diff_rule: Vec<usize> = (0..rows.len()).filter(|&i| m.commits[i] != rule[i]).map(|i| i + 1).collect();
     eprintln!(
-        "rerank replay: keys {} jobs {jobs} changed {changed} reverted-then-back {back} ({:.2}% of keys); key path p50 {:?} p95 {:?}; run n {} p50 {:?} p95 {:?}; run cpu/wall {:.2}; rows differing from the CLI rule {:?}",
-        keys.len(),
-        100.0 * back as f64 / keys.len() as f64,
-        pct(keys.clone(), 50),
-        pct(keys.clone(), 95),
-        runs.len(),
-        pct(runs.clone(), 50),
-        pct(runs.clone(), 95),
-        cpu as f64 / CLOCKS_PER_SEC / wall.as_secs_f64(),
+        "rerank replay: keys {} jobs {} changed {}; key path p50 {:?} p95 {:?}; run n {} p50 {:?} p95 {:?}; apply n {} p50 {:?} p95 {:?}, changed n {} p50 {:?} p95 {:?}; run cpu/wall {:.2}; rows differing from the CLI rule {:?}",
+        m.keys.len(),
+        m.jobs,
+        m.applies_changed.len(),
+        pct(&m.keys, 50),
+        pct(&m.keys, 95),
+        m.runs.len(),
+        pct(&m.runs, 50),
+        pct(&m.runs, 95),
+        m.applies.len(),
+        pct(&m.applies, 50),
+        pct(&m.applies, 95),
+        m.applies_changed.len(),
+        pct(&m.applies_changed, 50),
+        pct(&m.applies_changed, 95),
+        m.cpu as f64 / CLOCKS_PER_SEC / m.wall.as_secs_f64(),
         diff_rule
     );
-    // Item 5's baseline: the same keys on an engine without the small model, for "job creation adds at most 1 ms to key p95".
+    a4("A4 with the small model", &m);
+    // Item 5's baseline: the same keys on an engine without the small model, for "job creation adds at most 1 ms to key p95",
+    // and the n-gram's own rewrites.
     let mut b = Engine::new(&root().join("data/lexicon"), Layout::Standard).unwrap();
     b.load_lm(&lm_path()).unwrap();
-    let mut base = Vec::new();
-    for (_, syls) in &rows {
-        for key in syls.iter().flat_map(|s| keys_of(s)).chain([k(KeyKind::Enter)]) {
-            let t = Instant::now();
-            b.key(key).unwrap();
-            assert!(b.take_rerank_job().is_none());
-            base.push(t.elapsed());
-        }
-    }
-    eprintln!("baseline (no small model): key path p50 {:?} p95 {:?}", pct(base.clone(), 50), pct(base, 95));
+    let base = replay(&mut b, &rows);
+    assert!(base.jobs == 0);
+    eprintln!("baseline (no small model): key path p50 {:?} p95 {:?}", pct(&base.keys, 50), pct(&base.keys, 95));
+    a4("A4 baseline (no small model)", &base);
     let firsts = std::env::var_os("SHANJIE_TINYLM_FIRSTS").expect("SHANJIE_TINYLM_FIRSTS: the CLI firsts file is needed for item 4");
     let want: Vec<String> = std::fs::read_to_string(firsts).unwrap().lines().map(String::from).collect();
     assert_eq!(want.len(), 302, "302 CLI firsts");
-    let diff: Vec<usize> = (0..302).filter(|&i| got[i] != want[i]).map(|i| i + 1).collect();
+    let diff: Vec<usize> = (0..302).filter(|&i| m.commits[i] != want[i]).map(|i| i + 1).collect();
     assert!(diff.is_empty() && diff_rule.is_empty(), "replay differs from the CLI at rows {diff:?} (rule: {diff_rule:?})");
 }

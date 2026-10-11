@@ -6,8 +6,8 @@
  *    other logging; never interpolate input text into fatalError / precondition / assert messages.
  *  - Copy every field you need into Swift `String`s in the same call that received the output, then
  *    call shanjie_output_free immediately. Do not keep ShanjieOutput pointers around.
- *  - A handle is not thread-safe: make every call on one thread (the IMK main thread). The one exception is
- *    shanjie_rerank_run, which takes no engine (S7c-2a, below).
+ *  - A handle is not thread-safe: make every call on one thread (the IMK main thread). The exceptions are
+ *    shanjie_rerank_run and shanjie_rerank_free, which take no engine (S7c-2a, below).
  *  - Any non-zero return of shanjie_engine_key / shanjie_engine_pick: treat the key as not handled (pass it
  *    through) and do not record it. The non-zero codes of shanjie_engine_rerank_take, shanjie_rerank_run and
  *    shanjie_engine_rerank_apply do NOT mean pass-through: they have no key.
@@ -189,9 +189,13 @@ int32_t shanjie_engine_learning_status(ShanjieEngine *engine, uint32_t *flags);
 
 // S7c-2a (docs/contracts/s7c2a-core-rerank.md): the small character model reranks the n-gram's first 8 candidates of each free
 //   stretch of the composition, off the key path. Every change of the composition may leave a rerank job; the shell takes it,
-//   runs it on another thread, and applies it back on the engine's thread. A key or setting that comes in between makes the
-//   result stale and apply drops it: the composition shows the n-gram result first and may change once when the result applies.
-//   Commits (ENTER, punctuation, the 40-syllable auto-commit, reset) send what is shown; a job not yet applied is dropped.
+//   runs it on another thread, and applies it back on the engine's thread. The composition shows the n-gram result first and may
+//   change once when the result applies. Only a change that re-decodes the composition makes the result stale (apply drops it):
+//   a completed syllable, a deletion, a candidate or prediction pick, punctuation (it does not commit: it enters the composition,
+//   re-decodes and leaves a new job), a learning forget, and the settings that change decoding (profile, demote, rerank, a new
+//   model, learning on / open / clear). Keys that do not re-decode (cursor moves, unfinished zhuyin symbols, entering the
+//   prediction row, pass-through keys) keep the job valid. Commits (ENTER, the auto-commit at 40 tokens, reset) send what is
+//   shown; a job not yet applied is dropped.
 // Logging: a job and its result hold candidate text. Never log them, their pointers, or the .sjtl path (the rules at the top).
 #define SHANJIE_NO_CHANGE 5
 typedef struct ShanjieRerankJob ShanjieRerankJob;
@@ -214,16 +218,18 @@ int32_t shanjie_engine_rerank_take(ShanjieEngine *engine, ShanjieRerankJob **job
 // rerank_run: computes the result and keeps it in the job. Callable on any thread; it needs no engine and the job does not
 //   borrow one, so it may run (or be freed) after shanjie_engine_free. It cannot be cancelled: a newer key only makes the
 //   result stale. 0 success, 1 job NULL, 4 caught panic: no engine is touched (the composition is unchanged) and no result
-//   is kept (a later apply returns SHANJIE_NO_CHANGE).
+//   is kept, not even an earlier run's (a later apply returns SHANJIE_NO_CHANGE).
 int32_t shanjie_rerank_run(ShanjieRerankJob *job);
 // rerank_apply: on the engine's thread, after run returned. Takes the job's result: 0 and a snapshot (handled 1, commit "")
 //   when the composition changed; SHANJIE_NO_CHANGE with *out NULL when there is no result (not run, or run returned 4), the
-//   result is stale, the prediction row is entered, every stretch kept its first candidate, or the job was applied before
-//   (a second apply of the same job never changes anything). Does not free the job. 1 when engine, job or out is NULL
-//   (*out NULL); 4 internal (the engine is reset in discard mode, *out NULL).
+//   result is stale, the composition no longer holds the words the job was made from, the candidate window is open, the
+//   prediction row is entered, every stretch kept its first candidate, or the job was applied before (a second apply of the
+//   same job never changes anything). The prediction row in the snapshot is recomputed only if one was showing. Does not free
+//   the job. 1 when engine, job or out is NULL (*out NULL); 4 internal (the engine is reset in discard mode, *out NULL).
 int32_t shanjie_engine_rerank_apply(ShanjieEngine *engine, ShanjieRerankJob *job, ShanjieOutput **out);
-// rerank_free(NULL) does nothing. Undefined behaviour: freeing a job twice, run or apply after free, freeing a pointer
-//   rerank_take did not hand out, and using one job from two threads at once (apply or free while run is still running).
+// rerank_free(NULL) does nothing. Like run, it may be called on any thread, once run has returned (never while run is running on
+//   the same job). Undefined behaviour: freeing a job twice, run or apply after free, freeing a pointer rerank_take did not hand
+//   out, and using one job from two threads at once (apply or free while run is still running).
 void    shanjie_rerank_free(ShanjieRerankJob *job);
 
 #ifdef __cplusplus
