@@ -190,6 +190,16 @@ WIKI_XML = """<mediawiki>
 ::同意，建議換成[[某書|另一本書]]比較好。--[[User:Bob|Bob]] 2026年10月1日 (三) 13:00 (UTC)
 :我们这边也这样认为啦，大家说是不是。
 存檔通知：本頁已經自動存檔完成了。[[User:Cewbot|Cewbot]]（[[User talk:Cewbot|留言]]）
+在生平的那個部分補一下吧-- 04:10 2006年5月11日 (UTC)
+:我也覺得要改--發言者： 16:56 2007年3月13日 (UTC)
+:那就這樣決定--  2016年11月5日 (六) 15：34 (UTC)
+您好，Dd19980908
+我覺得——其實不用改
+您好，Alice。謝謝你補了來源
+這段可以再精簡一點<small>2007年7月23日 (一) 17:45 (UTC)</small>
+需要更多來源—以上未簽名的留言由（｜）於2012年5月12日 (六) 07:58加入
+:那就先這樣—— 2007年7月23日 (一) 17:45
+——不夠豐富
 &lt;!-- 隱藏的註解不要收 --&gt;</text></revision>
   </page>
   <page>
@@ -201,6 +211,16 @@ WIKI_XML = """<mediawiki>
     <title>Wikipedia:互助客棧/技術</title>
     <ns>4</ns>
     <revision><text bytes="1" xml:space="preserve">請問手機版為什麼打不開？</text></revision>
+  </page>
+  <page>
+    <title>Wikipedia:互助客栈/求助</title>
+    <ns>4</ns>
+    <revision><text bytes="1" xml:space="preserve">電腦版也一樣打不開。</text></revision>
+  </page>
+  <page>
+    <title>Talk:舊名</title>
+    <ns>1</ns>
+    <revision><text bytes="1" xml:space="preserve">#重定向 [[Talk:新名]]</text></revision>
   </page>
   <page>
     <title>Wikipedia:投票/某提案</title>
@@ -219,10 +239,12 @@ class TestWikitalk(unittest.TestCase):
                 f.write(WIKI_XML)
             f, counts = clean.Filter(SIMP, set()), clean.collections.Counter()
             kept = wikitalk.run([p], f, counts)
-        self.assertEqual(kept, ["我覺得這個來源不太可靠", "同意，建議換成另一本書比較好", "謝謝你上次幫忙修改條目", "請問手機版為什麼打不開"])
-        self.assertEqual(counts["para_bot"], 1)
+        self.assertEqual(kept, ["我覺得這個來源不太可靠", "同意，建議換成另一本書比較好", "在生平的那個部分補一下吧", "我也覺得要改",
+                                "那就這樣決定", "我覺得——其實不用改", "謝謝你補了來源", "這段可以再精簡一點", "需要更多來源", "那就先這樣",
+                                "不夠豐富", "謝謝你上次幫忙修改條目", "請問手機版為什麼打不開", "電腦版也一樣打不開"])
+        self.assertEqual((counts["para_bot"], counts["sent_greeting"], counts["pages_redirect"]), (1, 2, 1))
         self.assertEqual(counts["para_simplified"], 1)       # the whole paragraph, though some of its sentences have none
-        self.assertEqual((counts["pages_ns1"], counts["pages_ns3"], counts["pages_ns4"]), (1, 1, 1))
+        self.assertEqual((counts["pages_ns1"], counts["pages_ns3"], counts["pages_ns4"]), (1, 1, 2))
 
 
 class TestBuildChat(unittest.TestCase):
@@ -437,6 +459,17 @@ class TestDiscordOverlap(unittest.TestCase):
             for s in ("祕密", "完全", "前文"):
                 self.assertNotIn(s, text)
             self.assertEqual(open(mask).read(), "1\n2\n4\n")
+
+    def test_net_skips_the_overlap_rows(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            # rows 1..5: 2 fixed (rows 1, 4), 2 broken (rows 2, 5), row 3 unchanged; rows 4 and 5 overlap
+            base = write(os.path.join(tmp, "b.txt"), "1\t0\t2\t5\n2\t1\t0\t5\n3\t1\t0\t5\n4\t0\t1\t5\n5\t1\t0\t5\n")
+            new = write(os.path.join(tmp, "n.txt"), "1\t1\t0\t5\n2\t0\t1\t5\n3\t1\t0\t5\n4\t1\t0\t5\n5\t0\t2\t5\n")
+            ex = write(os.path.join(tmp, "ex.txt"), "4\n5\n")
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                discord_overlap.main(["--net", base, new, "--exclude", ex, "--weight", "10"])
+            self.assertEqual(out.getvalue(), "rows\t3\nfixed\t1\nbroken\t1\nnet\t-9\n")
 
 
 if __name__ == "__main__":

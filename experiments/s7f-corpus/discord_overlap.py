@@ -5,6 +5,11 @@
 Rows are `前文|句子|讀音` (lm_eval.rows_of). A row overlaps a corpus file when its sentence occurs whole inside some line of it.
 Output: `rows<TAB>n`, one `<corpus basename><TAB>count` per file, and `any<TAB>count`. --rows-out writes the 1-based numbers of the
 overlapping rows (digits and newlines only), so the judgement can use the rows that overlap nothing.
+
+  python discord_overlap.py --net BASE.txt NEW.txt --exclude OVERLAP_ROWS [--weight 10]
+
+Contract section 3's net: over the rows of two rowstats files (fusegrid's .base / .new) NOT listed in OVERLAP_ROWS (the --rows-out
+file), prints `rows`, `fixed`, `broken` and `net` (fixed - weight x broken). Numbers only.
 """
 import argparse
 import os
@@ -30,11 +35,32 @@ def overlap(sentences, corpus_paths):
     return per, set().union(*per.values()) if per else set()
 
 
+def net(base, new, exclude, weight):
+    """(rows, fixed, broken, fixed - weight x broken) over the rows not in `exclude` (1-based row numbers)."""
+    ok = [{int(c[0]): int(c[1]) for c in (line.split("\t") for line in open(p, encoding="utf-8")) if c[0].strip()} for p in (base, new)]
+    if ok[0].keys() != ok[1].keys():
+        raise SystemExit("discord_overlap: the two rowstats files have different rows")
+    rows = [r for r in ok[0] if r not in exclude]
+    fixed = sum(1 for r in rows if not ok[0][r] and ok[1][r])
+    broken = sum(1 for r in rows if ok[0][r] and not ok[1][r])
+    return len(rows), fixed, broken, fixed - weight * broken
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser()
-    ap.add_argument("--rows", required=True); ap.add_argument("--corpus", nargs="+", required=True)
+    ap.add_argument("--rows"); ap.add_argument("--corpus", nargs="+")
     ap.add_argument("--rows-out")
+    ap.add_argument("--net", nargs=2, metavar=("BASE", "NEW")); ap.add_argument("--exclude"); ap.add_argument("--weight", type=float, default=10)
     a = ap.parse_args(argv)
+    if a.net:
+        if not a.exclude:
+            ap.error("--net needs --exclude")
+        exclude = {int(x) for x in open(a.exclude).read().split()}
+        n, f, b, v = net(*a.net, exclude, a.weight)
+        print(f"rows\t{n}\nfixed\t{f}\nbroken\t{b}\nnet\t{v:g}")
+        return
+    if not (a.rows and a.corpus):
+        ap.error("--rows and --corpus are required (or --net)")
     sentences = [t for t, _, _ in clean.rows_of([a.rows])]
     per, any_ = overlap(sentences, a.corpus)
     print(f"rows\t{len(sentences)}")
