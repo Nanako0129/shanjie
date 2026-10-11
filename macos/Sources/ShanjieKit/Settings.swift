@@ -16,8 +16,10 @@ public final class SettingsModel: ObservableObject {
     /// The abbreviation toggle is shown only when the shell offers it (`Shell.showsAbbreviation`).
     public var showsAbbreviation: Bool { shell.showsAbbreviation }
     @Published public private(set) var demote = true
-    /// 語意校正 (s7c2b section 2.2); the window greys it while `demote` is off, like the menu item.
+    /// 語意校正 (s7c2b section 2.2).
     @Published public private(set) var rerank = true
+    /// Whether the window's 語意校正 toggle is enabled: the demotion table on and the small model loaded, like the menu item.
+    @Published public private(set) var rerankEnabled = true
     @Published public private(set) var acgPack = true
     /// The grey "資料更新至 …" line under the 動漫與遊戲詞 toggle (acg-pack contract A2.4): the same text as the menu's, `nil` for no line.
     public var acgDataLine: String? { shell.acgDataDate.map(MenuEntry.Text.acgDataDate) }
@@ -54,6 +56,7 @@ public final class SettingsModel: ObservableObject {
         abbreviation = shell.abbreviationOn
         demote = shell.demoteOn
         rerank = shell.rerankOn
+        rerankEnabled = shell.rerankEnabled
         acgPack = shell.acgPackOn
         glassTint = shell.glassTint
         candidateVertical = shell.candidateVertical

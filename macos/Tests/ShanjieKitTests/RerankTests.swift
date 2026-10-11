@@ -29,8 +29,8 @@ final class RerankTests: XCTestCase {
     }
 
     private func makeShell(store: RerankStore = MemoryRerankStore(), runner: RerankRunner, demote: DemoteStore = MemoryDemoteStore(),
-                           frees: FreeCounter) -> Shell {
-        let shell = Shell(resources: resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(),
+                           frees: FreeCounter, resources: URL? = nil) -> Shell {
+        let shell = Shell(resources: resources ?? self.resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(),
                           learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: demote, predictionStore: MemoryPredictionStore(),
                           abbreviationStore: MemoryAbbreviationStore(), acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore(),
                           candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: store, rerankRunner: runner)
@@ -39,10 +39,10 @@ final class RerankTests: XCTestCase {
         return shell
     }
 
-    private func rig(store: RerankStore = MemoryRerankStore()) -> Rig {
+    private func rig(store: RerankStore = MemoryRerankStore(), resources: URL? = nil) -> Rig {
         let runner = HeldRerankRunner(), frees = FreeCounter()
         counters.append(frees)
-        let shell = makeShell(store: store, runner: runner, frees: frees)
+        let shell = makeShell(store: store, runner: runner, frees: frees, resources: resources)
         let c = Controller(shell, bundle: Self.chatApp)
         c.session.activate()
         return Rig(shell: shell, c: c, runner: runner, frees: frees)
@@ -181,6 +181,24 @@ final class RerankTests: XCTestCase {
         XCTAssertEqual(r.c.client.marked, "你好", "typing goes on")
     }
 
+    /// Apply's non-zero codes other than 5 (4: the engine has reset itself) are handled like a failed key: composition and
+    /// panel cleared. Each job is still freed exactly once.
+    func testApplyFailureClearsTheComposition() {
+        let r = rig()
+        r.shell.rerankApply = { _, _ in .failed(4) }
+        r.c.type(Row25.standardKeys)
+        XCTAssertEqual(r.c.client.marked, Row25.ngram, "premise: the composition is shown")
+        r.runner.complete()  // reaches the injected apply whatever the job's generation
+        XCTAssertEqual(r.c.client.marked, "")
+        XCTAssertFalse(r.c.panel.visible)
+        r.runner.drain()
+        XCTAssertEqual(r.frees.freed, r.shell.rerankTaken, "each job freed once")
+        XCTAssertEqual(r.frees.doubleFrees, 0)
+        r.shell.rerankApply = { $0.apply(on: $1) }
+        r.c.type("su3cl3")
+        XCTAssertEqual(r.c.client.marked, "你好", "typing goes on")
+    }
+
     // MARK: exactly one free per job
 
     /// Every job taken is freed exactly once, on each path: replaced while waiting, the engine rebuilt, the switch turned off,
@@ -290,7 +308,7 @@ final class RerankTests: XCTestCase {
         XCTAssertEqual(again.c.client.marked, Row25.reranked)
     }
 
-    /// F11: with 避免敏感詞排第一 off the core makes no job, so the item is greyed (checkmark kept) and no job is made.
+    /// F11: with 避免把敏感字詞排在前面 off the core makes no job, so the item is greyed (checkmark kept) and no job is made.
     func testGreyedWhileDemotionIsOff() {
         let r = rig()
         r.c.session.perform(.toggleDemote)
@@ -302,6 +320,45 @@ final class RerankTests: XCTestCase {
         r.c.press(Keys.esc)
         r.c.session.perform(.toggleDemote)
         XCTAssertEqual(r.c.session.menu.first { $0.action == .toggleRerank }?.enabled, true)
+    }
+
+    /// The menu action reaches the owner of the composition even when another session gets it: the core re-decodes the
+    /// owner's composition, so the owner's client shows the snapshot; the other client is not touched.
+    func testMenuToggleFromAnotherSessionReachesTheOwner() {
+        let r = rig()
+        r.c.type(Row25.standardKeys)
+        r.runner.drain()
+        XCTAssertEqual(r.c.client.marked, Row25.reranked, "premise")
+        let other = Controller(r.shell, bundle: Self.chatApp)  // not activated: r.c keeps the composition
+        other.session.perform(.toggleRerank)
+        XCTAssertFalse(r.shell.rerankOn)
+        XCTAssertEqual(r.c.client.marked, Row25.ngram, "the owner shows the n-gram result at once")
+        other.session.perform(.toggleRerank)
+        r.runner.drain()
+        XCTAssertEqual(r.c.client.marked, Row25.reranked, "on again: the owner's snapshot left a job")
+        XCTAssertTrue(other.client.calls.isEmpty, "the session that got the menu action is not the owner")
+    }
+
+    /// Without the small model (file missing or corrupt) the switch can do nothing: the menu item and the settings toggle are
+    /// greyed, the checkmark still shows the stored choice, and no job is made. With the file both are enabled.
+    func testGreyedWithoutTheSmallModel() throws {
+        let names: Set<String> = ["mcbpmf-data.txt", "overlay-add.tsv", "sandhi-add.tsv", "demote.tsv", "bigram.sjlm", "classes.sjc"]
+        let missing = try XCTUnwrap(TestData.resources(only: names))
+        let corrupt = try XCTUnwrap(TestData.resources(only: names))
+        try Data("not a model".utf8).write(to: corrupt.appendingPathComponent(Shell.tinyLMFile))
+        for (res, label) in [(missing, "missing"), (corrupt, "corrupt")] {
+            let r = rig(resources: res)
+            let item = r.c.session.menu.first { $0.action == .toggleRerank }
+            XCTAssertEqual(item?.enabled, false, label)
+            XCTAssertEqual(item?.checked, true, label)
+            XCTAssertFalse(SettingsModel(shell: r.shell).rerankEnabled, label)
+            r.c.type(Row25.standardKeys)
+            XCTAssertEqual(r.runner.received, 0, label)
+            XCTAssertEqual(r.c.client.marked, Row25.ngram, label)
+        }
+        let r = rig()
+        XCTAssertEqual(r.c.session.menu.first { $0.action == .toggleRerank }?.enabled, true)
+        XCTAssertTrue(SettingsModel(shell: r.shell).rerankEnabled)
     }
 
     // MARK: the app's runner (F2)

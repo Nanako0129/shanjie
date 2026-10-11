@@ -65,15 +65,13 @@ final class CoreEngine {
         return Self.take(shanjie_engine_set_rerank(handle, on ? 1 : 0, &out), out)
     }
 
-    /// S7c-2a: the job of the last change, once; `(nil, 0)` when there is none, `(nil, code)` on a non-zero code. The job is
-    /// wrapped at once, so the pointer never leaves this file and is freed exactly once, by `free`, when the wrapper goes.
+    /// S7c-2a: the job of the last change, once; `(nil, 0)` when there is none, `(nil, code)` on a non-zero code (the header
+    /// guarantees `*job` is NULL then, so there is nothing to free). The job is wrapped at once, so the pointer never leaves this
+    /// file and is freed exactly once, by `free`, when the wrapper goes.
     func rerankTake(free: @escaping @Sendable (OpaquePointer) -> Void) -> (RerankJob?, Int32) {
         var job: OpaquePointer?
         let code = shanjie_engine_rerank_take(handle, &job)
-        guard code == 0 else {
-            if let job { free(job) }  // the header sets it to NULL on every non-zero code; kept for exactly-once
-            return (nil, code)
-        }
+        guard code == 0 else { return (nil, code) }
         return (job.map { RerankJob($0, free: free) }, 0)
     }
 
