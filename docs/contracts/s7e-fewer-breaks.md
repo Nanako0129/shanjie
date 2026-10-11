@@ -65,7 +65,7 @@
 2. 公開集合的重現關卡（§2.2 的 10 格）、錯字回報前 66 列的一致性、discordtune 的重現關卡（§2.3）都相等，72 列檔的雜湊，都記進研究紀錄。
 3. 表格與 §3 逐項，記進研究紀錄；本契約的結果一節；PLAN 的 S7 狀態行。
 4. 功能字測試句進 repo（§2.1），`eval/README.md`、`LICENSES/data.md` 各一列；重疊比例記進研究紀錄。
-5. `make test` 全綠；`experiments/s7a-tinylm` 的 Python 測試全過；fresh verifier 確認第 1、2、4 項與公開集合的表格可以從檔案重現（discordtune 照 S7a 的做法核對內部一致）。**verifier 的輸入**：main 把公開集合的分數與候選（S7b 的 `M8.*.{cvtune,wikitune,dev302,typing76}.jsonl`、這一片新產生的錯字回報 72 列與 `fw` 的分數，以及對應的 dump）複製到 `~/.cache/shanjie/s7e-public/`，verifier 只讀那裡；**順序**：discordtune 的衍生檔先刪、確認刪掉之後，verifier 才開始。
+5. `make test` 全綠；`experiments/s7a-tinylm` 的 Python 測試全過；fresh verifier 確認第 1、2、4 項與公開集合的表格可以從檔案重現（discordtune 照 S7a 的做法核對內部一致）。**verifier 的輸入**：main 把公開集合的分數與候選複製到 `~/.cache/shanjie/s7e-public/`，分兩個資料夾（檔名相同，不能放在一起）：`s7b/` 放 S7b 的 `M8.{chat,formal}.{cvtune,wikitune,dev302,typing76,user-reported}.jsonl`（錯字回報是前 66 列那份）與對應的 dump；`s7e/` 放這一片新產生的錯字回報 72 列與 `fw` 的分數和 dump。verifier 只讀那裡：用 `s7b/` 跑不給新選項的 fusegrid 重現 §2.2 的 10 格，並拿 `s7e/` 的 72 列分數的前 66 列和 `s7b/` 的 66 列逐列比對；**順序**：discordtune 的衍生檔先刪、確認刪掉之後，verifier 才開始。
 
 ## 5. 之後的出貨片（這一片不做，只寫方向）
 
@@ -85,3 +85,4 @@
 
 - 第一次 plan-verifier（2026-10-11）：REVISE 4 點，全部 **FIX**。1：discordtune 要重新產生，卻沒有檢查它和 §3 比較用的數字同源 → 加 discordtune 的重現關卡（4,958 列、聊天 4,209 → 4,275、229／163，書面 4,143 → 4,228、232／147），公開集合的關卡寫明是哪 10 格與數字。2：72 列在 #119、還不在 main → 寫成前提，記雜湊，不符就停。3：`run_sets.py` 不認得測試句集合 → 加集合名 `fw`，列進預算與回滾。4：§0 把沒量過的推論寫成結論、而且和書面的數字矛盾 → 改寫，標明推論，引用 S7b 的字元計數。
 - 第二次 plan-verifier（2026-10-11）：REVISE 2 點，逐點處置，都 **FIX**。1：§3 第 4 項的「淨值為負」有 1:1 與 ×3 兩種讀法 → 寫明是「改對 < 改壞而且 p < 0.05」（S7a 防線），×3 只列表參考。2：verifier 要重現的分數放在 agent 不能讀的 `~/.cache/shanjie/work` → main 把公開集合的檔複製到 `~/.cache/shanjie/s7e-public/`，discordtune 衍生檔先刪、verifier 後跑。接著一次收尾審查。
+- 收尾審查（2026-10-11）：REVISE 1 點——verifier 的輸入漏了 S7b 的 66 列錯字回報分數，而且它和新的 72 列檔同名 → 補進清單，分成 `s7b/`、`s7e/` 兩個資料夾。**使用者決定**照這點改完就開始做，不再送審。
