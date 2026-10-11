@@ -3143,3 +3143,12 @@ CLI 重現（model-v5、動漫詞包開、沒有前文；小模型是 `tinylm.sj
 - **隱私規則的修訂**：s3b §9 原本承諾 bundle ID「不存檔」。現在只有使用者在選單上按過的 App 會存進 App 自己的 UserDefaults（`appProfiles`，值只有 `chat`／`formal`）；照舊不傳給核心、不寫日誌；不影響學習的 privacyGate。security-reviewer 抓到一個 P2：選單切換若直接重設 profile，別的 App 正在打的組字會被重算後送進目前的 App，所以切換照 `activate()` 的順序先 `claim()` 再套用。
 - **審查**：security-reviewer 一次、plan-verifier 兩次（第一次指出沒有測試證明重開後會讀回存檔）、本地 /code-review 12 項（主要是設定視窗的修改要立刻對目前的擁有者重設、清單的名稱查詢要快取、非自動模式時移除按鈕不能反灰），都處置在契約 §6。
 - **驗證**：殼層測試 `ProfileChoiceTests`（14 項）；九個突變（忽略模式、忽略個別設定、和內建相同也寫入、切換後不套用、切換不先 claim、整份字典轉型、啟動不讀存檔、不發通知、設定視窗的修改不重設擁有者）各讓測試在斷言失敗；`make test` 通過。**實機**（使用者，2026-10-12）：§3.4 全部通過（組字中切換會立刻重算；設定視窗列出、移除；一律聊天）。同時錄的 `log stream` 裡善解自己的 subsystem 0 行；前景 App 的 bundle ID 只出現在蘋果 LaunchServices 的 Debug 前景通知（12 次），使用者決定接受，契約的停止條件改成只看善解自己的日誌。
+
+## 2026-10-12：語意 S7c-2c 門檻 δ 進核心與 `.sjtl` 版本 2、核心的重排預設關（契約 `docs/contracts/s7c2c-delta.md`，分支 `feat/s7c2c-delta`）
+
+- **起因**：S7e 選到的嚴格值（聊天 α 0.2、τ 1、δ 0.25；書面 0.7、1、2）要有 δ 才成立，`SJTL0001` 與 Rust 的 `pick` 沒有 δ。使用者決定語意重排預設關閉出貨，這一片照流程做、不發版、不合併 #118。
+- **改動**：`SJTL0002`（版本 1 的 100 bytes 檔頭不變，加聊天與書面的 δ 各 8 bytes；先由 magic 與版本欄決定檔頭長度、確認檔案夠長才讀 δ，δ 必須在 [0, 1000]）；`pick` 與 `rerank` 用 δ；核心 `rerank_on` 預設改成關；`export_sjtl.py` 兩個 δ 都給才寫版本 2；小的版本 2 測試檔與和 Python `fusegrid.pick` 逐列比對的資料。
+- **審查**：security-reviewer 一次（P1：版本 2 的檔若只有 100–115 bytes 讀 δ 會越界；另有 4 個 P2、4 個 P3，全部改進契約）；plan-verifier 兩次（第一次要寫死端對端的指令與 verifier 的輸入）。
+- **驗證**：七個突變（δ 比較改成 `>`、版本 2 忽略 δ、不檢查 δ 範圍、拿掉長度檢查、`rerank` 傳 0、預設改回開、沒給 δ 也寫版本 2）各讓測試在斷言失敗；`make test` 通過。
+- **端對端**（main 跑）：從 S7a 的 `tinylm-M.npz`（`32308122…`）匯出候選檔，14,638,224 bytes（比版本 1 多 16 bytes），SHA-256 `710249c2…`。Rust CLI（model-v5＋classes-v3、`--context`、不開詞包）在 cvtune、wikitune、dev302、打字測驗、錯字回報 72 列、功能字測試句兩種設定的 12 格，`evalstats compare` 的表格行和 S7e 研究紀錄的 M8 表**逐字元相同**（12／12）。`tinylm-v1` 在 dev302 兩種設定的摘要行與 rowstats 和改動前（81e4453）逐位元組相同；輸出第一行的耗時與記憶體量測每次都不同，不算。
+- **還沒做**：保留集（fresh verifier）；`tinylm-v2` Release（要使用者同意，說明草稿在 `docs/releases/tinylm-v2.md`）；#118 改讀新檔、殼的預設改關。
