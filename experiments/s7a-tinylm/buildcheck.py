@@ -75,40 +75,53 @@ def cmd_construction(a):
 
 
 # ------------------------------------------------------------------ record-only: gold sentences inside the training text
-def find_in_files(sents, paths):
-    """How many of sents occur as a substring of any of the files (utf-8 bytes, mmap)."""
+def hits_in_files(sents, paths):
+    """For each of sents, whether it occurs as a substring of any of the files (utf-8 bytes, mmap)."""
     maps = []
     for p in paths:
         f = open(p, "rb")
         maps.append((f, mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)))
     try:
-        return sum(any(m.find(s.encode("utf-8")) >= 0 for _, m in maps) for s in sents)
+        return [any(m.find(s.encode("utf-8")) >= 0 for _, m in maps) for s in sents]
     finally:
         for f, m in maps:
             m.close(); f.close()
 
 
 def _chunk(args):
-    return find_in_files(*args)
+    return hits_in_files(*args)
+
+
+def substring_hits(sents, paths, procs=1):
+    """hits_in_files over a process pool, in the order of sents (an empty sentence is not a hit)."""
+    if procs <= 1:
+        return [bool(s) and h for s, h in zip(sents, hits_in_files(sents, paths))]
+    step = max(1, len(sents) // (procs * 4))
+    with mp.Pool(procs) as pool:
+        hits = [h for part in pool.map(_chunk, [(sents[i:i + step], paths) for i in range(0, len(sents), step)]) for h in part]
+    return [bool(s) and h for s, h in zip(sents, hits)]
 
 
 def substring_ratio(sents, paths, procs=1):
-    sents = [s for s in sents if s]
-    if not sents:
-        return 0, 0
-    if procs <= 1:
-        return find_in_files(sents, paths), len(sents)
-    step = max(1, len(sents) // (procs * 4))
-    with mp.Pool(procs) as pool:
-        return sum(pool.map(_chunk, [(sents[i:i + step], paths) for i in range(0, len(sents), step)])), len(sents)
+    """(hits, number of non-empty sentences): the S7a record-only ratio."""
+    hits = substring_hits(sents, paths, procs)
+    return sum(hits), sum(1 for s in sents if s)
 
 
 def cmd_substr(a):
     paths = [os.path.join(a.work, f"runs-{n}.txt") for n in ("wiki", "coll")]
     for rows in a.rows:
         golds = [l.split("|")[1] for l in open(rows, encoding="utf-8") if l.count("|") == 2]
-        hit, n = substring_ratio(golds, paths, a.procs)
+        hits = substring_hits(golds, paths, a.procs)
+        hit, n = sum(hits), sum(1 for s in golds if s)
         print(f"substr {os.path.basename(rows)} gold sentences {n}, in training text {hit} ({100 * hit / max(1, n):.2f}%)")
+        if a.flags:
+            # S7d: one 0/1 per row in rows-file order (score.py's row i is line i), digits and newlines only
+            os.makedirs(a.flags, exist_ok=True)
+            out = os.path.join(a.flags, os.path.splitext(os.path.basename(rows))[0] + ".flags")
+            with open(out, "w", newline="") as f:
+                f.write("".join(f"{int(h)}\n" for h in hits))
+            print(f"wrote {out} ({len(hits)} rows, {hit} ones)")
 
 
 def main(argv=None):
@@ -119,6 +132,7 @@ def main(argv=None):
     c.add_argument("--charcount", help="DIR/charcount.json written by prep.py runs; its `articles` is checked against the wikitune index")
     s = sub.add_parser("substr")
     s.add_argument("--work", required=True); s.add_argument("--rows", nargs="+", required=True)
+    s.add_argument("--flags", help="S7d: also write DIR/<rows stem>.flags, 1 where the row's gold sentence is in the training text")
     s.add_argument("--procs", type=int, default=max(1, (os.cpu_count() or 4) - 2))
     a = ap.parse_args(argv)
     {"construction": cmd_construction, "substr": cmd_substr}[a.cmd](a)
