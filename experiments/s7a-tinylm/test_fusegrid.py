@@ -383,7 +383,8 @@ class TestDriver(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             self.make_scores(td)
             for st in ("chat", "formal"):                  # fw: copy of dev302's scores under the new set name
-                open(os.path.join(td, f"S.{st}.fw.jsonl"), "w").write(open(os.path.join(td, f"S.{st}.dev302.jsonl")).read())
+                with open(os.path.join(td, f"S.{st}.dev302.jsonl")) as src, open(os.path.join(td, f"S.{st}.fw.jsonl"), "w") as dst:
+                    dst.write(src.read())
             out = io.StringIO()
             code = 0
             with contextlib.redirect_stdout(out):
@@ -433,11 +434,13 @@ class TestDriver(unittest.TestCase):
                 with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as e:
                     fg.main(args + ["--break-weight", w])
                 self.assertEqual(e.exception.code, 2, w)                          # argparse error, before anything runs
+            flags = os.path.join(td, "flags")                 # the guard's real trigger: --tune-keep with every tuning row flagged
+            os.makedirs(flags)
             for t in ("cvtune", "wikitune"):
-                for st in ("chat", "formal"):
-                    open(os.path.join(td, f"S.{st}.{t}.jsonl"), "w").close()
+                with open(os.path.join(flags, f"{t}.flags"), "w") as f:
+                    f.write("1\n" * 120)                      # make_scores writes 120 rows per tuning set
             with contextlib.redirect_stdout(io.StringIO()), self.assertRaises(SystemExit) as e:
-                fg.main(args + ["--break-weight", "10"])
+                fg.main(args + ["--break-weight", "10", "--tune-keep", flags])
             self.assertIn("no tuning rows left", str(e.exception.code))
 
     def test_decision_rules(self):

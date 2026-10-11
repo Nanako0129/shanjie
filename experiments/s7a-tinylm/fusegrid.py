@@ -126,7 +126,8 @@ def check_rows(rows, path):
 
 
 def load_scores(path):
-    rows = [json.loads(l) for l in open(path, encoding="utf-8") if l.strip()]
+    with open(path, encoding="utf-8") as f:
+        rows = [json.loads(l) for l in f if l.strip()]
     check_rows(rows, path)
     return rows
 
