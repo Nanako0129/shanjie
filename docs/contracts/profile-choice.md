@@ -1,6 +1,6 @@
 # 契約：聊天／書面的切換方式與個別 App 設定
 
-狀態：READY（2026-10-12，security-reviewer 一次、plan-verifier 第 2 次 READY，§6），實作中。
+狀態：實作完成、/code-review 處置完（2026-10-12，§6），等 fresh verifier 與使用者實機（§3.4）。
 
 ## 0. 起因與依據
 
