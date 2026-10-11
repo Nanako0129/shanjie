@@ -33,7 +33,7 @@ v4 日期 2026-10-03。v1 經 `pilotfish:plan-verifier`（REVISE，4 項）與 `
 **已定的架構決策。**
 
 - Rust 核心（lattice、n-gram、使用者模型、驗證協調）＋ Swift InputMethodKit 殼，介面為 C ABI；FFI 邊界一律 `catch_unwind`，panic 訊息不含輸入內容。
-- 神經模型（S5）放在沙盒化的 XPC helper（無網路權限）裡載入與推論，不在看得到所有按鍵的主 process 裡解析外部權重；其餘核心先 in-process。
+- 神經模型（S5）放在沙盒化的 XPC helper（無網路權限）裡載入與推論，不在看得到所有按鍵的主 process 裡解析外部權重；其餘核心先 in-process。**例外（使用者 2026-10-11，`docs/contracts/s7c2a-core-rerank.md` §2.6）**：自己訓練、自寫格式（SJTL）、雜湊進版控並在建置時核對、隨簽章的 App 打包、路徑不可設定的 S7 字元模型，和 `bigram.sjlm` 同等對待，在主程序以嚴格讀檔器載入；只能在 n-gram 前 8 名之間重排、不能產生任意文字。下載的、第三方的或使用者指定的權重仍照 R8 放在 XPC helper。其中「自寫格式、嚴格讀檔器、失敗時關閉重排不讓程序當掉、只在前 8 名重排」在 S7c-2a 成立；「隨 App 打包、路徑寫死、雜湊進版控並在建置時核對」是 S7c-2b 的出貨前提。
 - 左右文：`client.string(from:actualRange:)`，在最後一個換行處截斷，以 grapheme 計數，左側上限 64 字；只存在這一次轉換的記憶體裡。
 - 不連結 LGPL 元件（KenLM 是 LGPL）；n-gram 格式自寫。
 - 程式碼授權：Apache-2.0（使用者 2026-10-03 確認）。
@@ -689,7 +689,7 @@ S3a 不需要外觀參考，可以先做；S3b 等使用者提供 macOS 內建�
 ### S5：端上重排（v5 改寫）
 
 - **從本機 N-best 重排**（N0 的 M1），不做字級生成。N0 實測 M1 勝過 M2：Gemma 91.4% 對 82.5%，M2 偏好流暢的常用詞。v4 寫的字級搜尋是為了救「拭鏡布」這種詞庫沒收的詞，現在改由 S1 補詞處理。
-- 模型在 XPC helper（R8）；推論引擎用 MLX-Swift 或 Core ML／ANE（先量再選）；下載依 R8。
+- 模型在 XPC helper（R8）；推論引擎用 MLX-Swift 或 Core ML／ANE（先量再選）；下載依 R8。（但書：S7 的自訓字元模型照第 36 行的例外在主程序載入，條件見 `docs/contracts/s7c2a-core-rerank.md` §2.6；這一條管下載的、第三方的或使用者指定的權重。）
 - **先量，在使用者沒在用電腦時、經使用者同意。** 2026-10-03 的 Mac 量測（Qwen 4-bit，p50 487–893 ms）是在電腦很卡時量的，不能當定論。要量的項目：
   - 同一句的候選共用前文的 KV 快取，只算候選本身。
   - 候選數 8／16／32。
@@ -725,6 +725,7 @@ S3a 不需要外觀參考，可以先做；S3b 等使用者提供 macOS 內建�
 - **〔狀態，2026-10-11〕S7b**（`docs/contracts/s7b-larger-lm.md`，更大的模型）：M 的 int8 夠用；L（3,000 萬參數）在調參集上更好，但在使用者的聊天上沒過 §4（−30 列）、輸給 M（−97），XL 放不進 8 GB GPU，使用者決定先修 α 的選法再說。結論維持 M。
 - **〔狀態，2026-10-11〕S7d**（`docs/contracts/s7d-tune-overlap.md`）：調參集去掉和訓練文字整句重疊的列（cvtune 507、wikitune 671 列）重選，M、L 選到的值完全不變，L 照樣沒過；重疊不是讓 L 選到格點上限 α 2 的原因（格點以外沒量），不訓 XL，出貨維持 M（0.7／2）。
 - **〔狀態，2026-10-11〕S7c-1**（`docs/contracts/s7c-core-tinylm.md`，Rust 推論、離線）：M 的 int8 檔（14.6 MB）在 Rust 路徑上仍通過 S7a §4（discordtune 聊天 +66 列，p = 0.0010），和 numpy 的 int8 結果逐列相同；Rust 的前 8 名和 Python 相同、LL 差 < 2.1e-5；動漫詞包開著沒有顯著退步；保留集（聊天）top1 180 → 200／227（p = 0.0003）。接進輸入法是 S7c-2，延遲設計（A3／A7 寫的非同步，或改門檻同步）要使用者先決定。
+- **〔狀態，2026-10-11〕S7c-2a**（`docs/contracts/s7c2a-core-rerank.md`，核心的兩段式 API）：引擎每次改變組字後產生重排工作、在別的執行緒算、回主執行緒套用；dev302 逐鍵重播和 CLI 逐字相同；按鍵 p95 約 2.6 ms（只比沒有小模型多 0.16 ms）；重新解碼時前面的字被改寫的比例從 n-gram 自己的 14.5% 降到 9.3%，新增的「閃回再換回」約 2.2%。殼與打包（S7c-2b）之前要使用者決定 A4 的處理、開關名稱、Release 資產。
 
 ### 外部專案借鏡（2026-10-04，見 research-log 同日；排入前要過 plan-verifier）
 
@@ -872,7 +873,7 @@ S3a 不需要外觀參考，可以先做；S3b 等使用者提供 macOS 內建�
 | R5 | P2 | 學習檔放 `~/Library/Application Support/shanjie/`，權限 0600，只存「前文 ≤ 2 個漢字、讀音、詞、權重、日期」；一鍵清除含記憶體與附屬檔（暫存檔、`.corrupt`；S4 不用 SQLite）；靠 FileVault 不另加密；設定頁揭露 Time Machine 並提供排除備份 | 採納 | S4 |
 | R6 | P2 | Keychain：service＝bundle ID、`SecItemUpdate` 並檢查狀態、key 不進 URL／log／錯誤訊息；agent 測試用記憶體 store；真 Keychain 交給使用者實測；預告 ad-hoc 簽章可能跳授權提示 | 採納 | S6 |
 | R7 | P2 | `URLSessionConfiguration.ephemeral`、系統 ATS／TLS、硬逾時 2 秒、只在送出或驗證時送；opt-in 對話框列出送出內容範例與所選供應商現行的資料保留政策（v5：供應商可切換；S6 時逐家核對最新條款） | 採納 | S6 |
-| R8 | P2 | 模型清單內建 HF repo＋commit SHA＋每檔 SHA-256，下載到暫存檔驗證後才改名；只收 safetensors／GGUF／JSON；權重在無網路的沙盒 XPC helper 解析 | 採納；XPC 從條件式改成 S5 必做 | S5 |
+| R8 | P2 | 模型清單內建 HF repo＋commit SHA＋每檔 SHA-256，下載到暫存檔驗證後才改名；只收 safetensors／GGUF／JSON；權重在無網路的沙盒 XPC helper 解析 | 採納；XPC 從條件式改成 S5 必做（但書：S7 的自訓字元模型照第 36 行的例外在主程序以嚴格讀檔器載入，條件見 `docs/contracts/s7c2a-core-rerank.md` §2.6；下載的、第三方的或使用者指定的權重仍照本條） | S5 |
 | R9 | P3 | hardened runtime、不加 `disable-library-validation`、不需 root、v1 不做自動安裝（只檢查版本開瀏覽器） | 採納 | S3b（簽章、hardened runtime、無 entitlements、安裝不用 sudo）；S8（更新檢查） |
 
 ### plan-verifier（v5 第一次：REVISE）

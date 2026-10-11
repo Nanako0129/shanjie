@@ -352,6 +352,45 @@ static int run_packs(const char *dir) {
   return 0;
 }
 
+/* S7c-2a (docs/contracts/s7c2a-core-rerank.md section 2.5): every new function at least once, through the header. There is no
+ * .sjtl here, so a successful run / apply is covered by the child-process tests in ffi.rs; here: the NULL paths, load errors,
+ * set_rerank's codes, and take on an engine without a small model (0 with *job NULL). */
+static int run_rerank(const char *dir, const char *lm, const char *missing) {
+  static ShanjieOutput dummy;
+  static ShanjieRerankJob *job_dummy = (ShanjieRerankJob *)&dummy; /* non-NULL sentinel, never dereferenced */
+  ShanjieEngine *e = 0;
+  ShanjieOutput *o = 0;
+  ShanjieRerankJob *j = 0;
+  CHECK(901, shanjie_engine_new(dir, 0, &e) == 0 && e != 0);
+  CHECK(902, shanjie_engine_load_tinylm(e, missing) == 3);         /* no n-gram model yet */
+  CHECK(903, shanjie_engine_load_tinylm(0, missing) == 1);
+  CHECK(904, shanjie_engine_load_tinylm(e, 0) == 1);
+  CHECK(905, shanjie_engine_load_lm(e, lm) == 0);
+  CHECK(906, shanjie_engine_load_tinylm(e, missing) == 3);         /* missing file */
+  CHECK(907, shanjie_engine_set_rerank(0, 1, &o) == 1 && o == 0);
+  CHECK(908, shanjie_engine_set_rerank(e, 1, 0) == 1);
+  o = &dummy;
+  CHECK(909, shanjie_engine_set_rerank(e, 2, &o) == 2 && o == 0);
+  CHECK(910, shanjie_engine_set_rerank(e, 1, &o) == 0 && o != 0 && o->handled == 1);
+  shanjie_output_free(o);
+  o = 0;
+  CHECK(911, type(e, "su3cl3"));
+  j = job_dummy;
+  CHECK(912, shanjie_engine_rerank_take(e, &j) == 0 && j == 0);    /* no small model: no job */
+  j = job_dummy;
+  CHECK(913, shanjie_engine_rerank_take(0, &j) == 1 && j == 0);
+  CHECK(914, shanjie_engine_rerank_take(e, 0) == 1);
+  CHECK(915, shanjie_rerank_run(0) == 1);
+  o = &dummy;
+  CHECK(916, shanjie_engine_rerank_apply(0, job_dummy, &o) == 1 && o == 0);
+  o = &dummy;
+  CHECK(917, shanjie_engine_rerank_apply(e, 0, &o) == 1 && o == 0);
+  CHECK(918, shanjie_engine_rerank_apply(e, job_dummy, 0) == 1 && SHANJIE_NO_CHANGE == 5);
+  shanjie_rerank_free(0);
+  shanjie_engine_free(e);
+  return 0;
+}
+
 int main(int argc, char **argv) {
   int rc;
   if (argc != 3 && argc != 4) return 2;
@@ -362,6 +401,7 @@ int main(int argc, char **argv) {
   if (rc == 0) rc = run_grid(argv[1]);
   if (rc == 0) rc = run_learn(argv[1], argc == 4 ? argv[3] : 0);
   if (rc == 0) rc = run_packs(argv[1]);
+  if (rc == 0) rc = run_rerank(argv[1], argv[2], "/nonexistent/shanjie-missing.sjtl");
   shanjie_engine_free(0);
   shanjie_output_free(0);
   if (rc != 0) {
