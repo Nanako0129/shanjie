@@ -1,6 +1,6 @@
 # S7c-2c：門檻 δ 進核心與 `.sjtl`（版本 2）、核心的重排預設關
 
-狀態：READY（2026-10-12：security-reviewer 一次、plan-verifier 第 2 次 READY，§6）；實作與 §3.3、§3.4 完成（PR #122），等 fresh verifier（含保留集）。
+狀態：READY（2026-10-12：security-reviewer 一次、plan-verifier 第 2 次 READY，§6）；實作完成（PR #122）；fresh verifier CONFIRMED（§3 第 1–6 項重現、9 個突變、保留集聊天 180 → 187（7／0）、書面 184 → 187（3／0））。
 
 ## 0. 起因與依據
 
