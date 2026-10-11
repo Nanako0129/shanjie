@@ -37,7 +37,7 @@
   - `auto`：bundle 是 nil 或空字串 → 書面（和現在相同）；`overrides` 有這個 bundle → 用它；否則 `chatApps` 有 → 聊天，沒有 → 書面。
 - `Session.applyProfile()` 改成呼叫它，呼叫時機和現在相同（`activateServer`、組字擁有者改變，s3b §5），另外加上：
   - 選單切換之後（§2.3），對這個 session 立刻走一次 `activate()` 的路徑：**先 `claim()`**（別的 session 正在組字時，把它的組字送回它自己的 client），**再 `applyProfile()`**（`set_profile` 重算組字並回傳快照，殼照快照更新這個 session 的畫面）。不能只呼叫 `applyProfile()`：它沒有擁有者檢查，別的 App 的組字會被重算後送進這個 client（安全審查 P2-1）；也不能只加 `shell.owner === self` 的檢查（像其他選單開關那樣），那樣共用的 profile 仍會改到別人的組字。
-- 從設定視窗改模式或移除 App：`Shell` 存下來並發 `didChangeSettings`，**不**主動重設 profile；回到 App 時的 `activateServer` 會用新的值。推論（沒量過）：從設定視窗回到 App 時，IMK 會對那個 App 的 controller 呼叫 `activateServer`。由實機確認（§3.4）；不成立時照 §5 停下來。
+- 從設定視窗改模式或移除 App：`Shell` 存下來、發 `didChangeSettings`，並**對目前的組字擁有者（有的話）重設 profile**（擁有者本來就擁有組字，不需要 `claim()`；和設定視窗的其他開關經過擁有者套用的做法相同）。〔修訂，2026-10-12 /code-review〕原本不重設、等回到 App 時的 `activateServer`，那是沒量過的推論；只靠它的話，選單的勾選（照新值算）和實際送出的結果可能不一致。推論仍由實機記錄（§3.4），但不再是停止條件。
 
 ### 2.3 選單
 
@@ -59,7 +59,9 @@
   - 說明文字（灰色小字）：「依 App 自動：聊天 App（Discord、LINE、訊息等）用聊天設定，其他 App 用書面設定。」
   - 「個別設定的 App」清單：每列是 App 圖示、名稱、右邊「聊天」或「書面」、一個移除按鈕（圖示按鈕，VoiceOver 讀「移除」）。名稱與圖示用 `NSWorkspace.urlForApplication(withBundleIdentifier:)` 找；找不到（App 已刪除）時名稱顯示 bundle ID、用一般 App 圖示。依名稱排序。
   - 清單是空的時候，顯示灰色小字：「在 App 裡打開善解選單，勾選「這個 App 用聊天設定」，就會列在這裡。」
-  - 模式不是「依 App 自動」時，清單照常顯示但反灰（個別設定保留，切回自動時生效）。
+  - 模式不是「依 App 自動」時，清單照常顯示、聊天／書面的文字反灰（個別設定保留，切回自動時生效），**移除按鈕仍然可以按**：清單存的是 bundle ID，刪除不應該要先切回自動（/code-review）。
+  - App 名稱與圖示只在清單內容改變時查一次（依 bundle ID 快取），不在每次畫面重繪時查：拖玻璃深淺滑桿也會發通知、讓畫面重繪。
+  - 清單列數改變時，視窗高度跟著內容重新調整（上緣不動）。
 - `SettingsModel` 加 `profileMode`、`appProfiles`（排好序的列）、`setProfileMode(_:)`、`removeAppProfile(_:)`，都經過 `Shell` 的 setter；收到 `didChangeSettings` 時重讀（`refreshSettings`）。名稱與圖示的查找放在 App target（SwiftUI 畫面），`SettingsModel` 只給 bundle ID 與設定，讓測試不碰 `NSWorkspace`。
 - 視窗仍然沒有文字欄位（`settings-window.md` §2.1）。
 
@@ -92,6 +94,7 @@
    - store：`profileMode` 沒設過或是未知字串 → `auto`。`AppProfiles.parse`：nil、根不是 dictionary（字串、陣列）→ 空；值是 NSNumber、巢狀 dictionary、其他字串、鍵是空字串的項目被略過；**一個壞項目和幾個有效項目放在一起時，有效的都留下**。
    - **啟動時讀回存檔**（照 `ShellTests` 的 `MemoryLayoutStore("eten")`、`SettingsTests` 的 `MemoryGlassTintStore(0.4)` 的做法）：用已經有值的 store 建 `Shell`：(a) `profileMode` 是 `chat` 時 TextEdit 打 Row226＋Enter 是聊天的結果，`formal` 時 Discord 是書面的結果；(b) `appProfiles` 的原始值是 {TextEdit: `chat`, 一個壞項目}：TextEdit 的 Row226 是聊天的結果、選單在 TextEdit 打勾、`SettingsModel` 的清單只有 TextEdit；再對另一個 App 按一次選單之後，store 裡 TextEdit 那一項還在（快取沒有從空的開始、沒有把存檔蓋掉）。
    - **擁有者**：A 組字中，對 B 的 session 按 `toggleAppChat`：A 的組字送回 A 的 client（照 s3b §5），B 的 client 沒有收到 A 的組字。
+   - 設定視窗的修改會重設擁有者：TextEdit 組字中（不重新啟用），`setProfileMode(.chat)`、之後 `removeAppProfile`，Enter 送出的分別是新設定的結果。
    - `SettingsModel`：選擇器寫進 store 並發通知；清單和 `appProfiles` 一致、排序固定；移除後清單與 store 都少一項；選單切換後 model 收到通知、清單跟著變。
    - `LogTests`：用帶標記的 bundle ID 按 `toggleAppChat` 兩次，再用 `SettingsModel` 改模式、移除這個 App，擷取的日誌裡沒有標記（加進現有的負向動作）。
 2. **突變**（每一項都要讓某個測試失敗；build error 不算）：
@@ -102,12 +105,14 @@
    - 按下時不先 `claim()`；
    - `AppProfiles.parse` 改成整份 `as? [String: String]`；
    - `Shell.init` 不讀 `profileMode`／`appProfiles` 的 store（從 `auto`／空的開始）；
-   - 按下後不發 `didChangeSettings`。
+   - 按下後不發 `didChangeSettings`；
+   - `setProfileMode`／`removeAppProfile` 不重設擁有者的 profile。
 3. `make test`、CI 全綠。
 4. **實機**（使用者；鍵盤操作由 `imeshot` 做，每次 ≤ 15 秒）：
    - 在終端機打第 226 列（`ㄒㄧㄥˋ ㄏㄠˇ ㄐㄧㄡˋ ㄏㄨˋ ㄔㄜ ㄐㄧˊ ㄕˊ ㄍㄢˇ ㄉㄠˋ`，`Selftest.row226Standard`、測試的 `Row226`）＋Enter，得到書面的「幸好救護車即時趕到」；勾選「這個 App 用聊天設定」後再打一次，得到聊天的「幸好救護車及時趕到」。使用者的選字記憶可能讓實機結果和測試不同，不同時記下來，改用兩種設定結果不同的另一句；
    - 設定視窗列出終端機（聊天）；按移除，回到終端機再打，回到書面（同時確認 §2.2 的推論：從設定視窗回到 App 時有重新套用）；
    - 模式改「一律聊天」，在 TextEdit 打第 226 列得到聊天的結果；改回「依 App 自動」；
+   - **組字中切換**：在終端機打第 226 列但不按 Enter，打開善解選單按「這個 App 用聊天設定」，看組字是不是立刻換成另一種設定的結果。打開選單時組字如果已經被送出，記下來，§1 改成「下一次組字用新的設定」；
    - 實機時另開 `log stream`（s3b §10 實測 16 的做法），涵蓋選單切換**與打開清單不是空的設定視窗**（`NSWorkspace` 查 App 名稱在 App target，殼層測試看不到；LaunchServices 會不會用公開等級記下查詢的 ID 沒查證，這一步就是檢查），確認輸出裡沒有 bundle ID。
 
 ## 4. 範圍外
@@ -121,7 +126,6 @@
 ## 5. 停止條件、預算、限制
 
 - **停止條件**：
-  - 實機上從設定視窗回到 App 時沒有重新套用設定（§2.2 的推論不成立）：先改契約（例如 `Shell` 對擁有者主動重設）再做；
   - 常用 App 的 client 取不到 bundle ID，使得選單項目在那些 App 都不出現：記下 App 名稱，問使用者；
   - 實機的 `log stream` 出現 bundle ID 或任何輸入內容。
 - **預算**：executor 實作 1 次＋修正 1 次；設定視窗的外觀照使用者的實機回饋收斂，每一輪只改指出的地方。
@@ -135,3 +139,4 @@
 | security-reviewer（2026-10-12） | 沒有 P0／P1。P2-1：選單切換後只呼叫 `applyProfile()`，它沒有擁有者檢查，別的 App 的組字會被重算後送進這個 client。P3-1：整份 `as? [String: String]` 一個壞值就讓整份消失，過濾的位置沒寫、沒測試。P3-2：程式註解裡還有「bundle ID 不存」的承諾（`Shell.swift`、`Learning.swift`、s3b §14）。P3-3：日誌檢查漏了設定視窗的路徑與 App target 的 `NSWorkspace` 查找；選單標題要寫明不含 App 名稱。P4：清單不影響學習 gate、通知不帶 `userInfo`、備份與 `zap`、執行中手動改的值會被蓋掉 | 全部 **FIX**：§2.2／§2.3 改成 `claim()` → `applyProfile()`，§3.1 加擁有者測試、§3.2 加突變；§2.1 改成原始值＋`AppProfiles.parse` 逐項過濾、禁 `as!`，§3.1 加壞值測試、§3.2 加突變；§2.6 列出要改的註解；§3.1 `LogTests` 加設定視窗的動作、§3.4 `log stream` 涵蓋設定視窗、§2.3 標題固定字串；§2.1、§2.5 加 P4 的四句 |
 | plan-verifier 第 1 次 REVISE（2026-10-12） | 沒有測試或突變證明建 `Shell` 時會讀回已存的 `profileMode`／`appProfiles`；init 忽略 store 時所有測試照過、§3.4 也不重啟，使用者的設定在重開後失效，下一次切換還會把空的快取寫回、清掉存檔 | **FIX**：§3.1 加「啟動時讀回存檔」測試（兩種模式、有效＋壞項目、切換別的 App 後原項目仍在），§3.2 加突變「init 不讀 store」 |
 | plan-verifier 第 2 次（2026-10-12） | READY | 開始實作 |
+| 本地 /code-review（2026-10-12，7a5ee1d） | 12 項：設定視窗的修改不重設擁有者（只靠沒量過的 `activateServer` 推論）；§1 的「組字中立刻重算」沒有實機步驟；清單在每次重繪時查 LaunchServices；s3b §13.2 選單順序、settings-window §2.2 與 README 沒更新；非自動模式時移除按鈕也反灰；`AppLabel` 註解寫「不記錄」但系統查詢沒量過；研究紀錄沒有這一片的條目；`bundleIdentifier`（同步 IPC）每次讀三次；`chat`／`formal` 字串對照寫了兩份；清單變動時視窗高度不跟著改；`testForcedModes` 的註解說的性質沒有斷言 | **FIX**：§2.2 改成重設擁有者（並刪掉對應的停止條件），§3.1 加測試、§3.2 加突變；§3.4 加組字中切換的實機步驟；§2.4 加名稱快取、移除按鈕不反灰、視窗跟著調整；文件三處；註解改寫；研究紀錄補條目（main）；`bundleIdentifier` 只讀一次；字串對照改用 `ProfileMode` 的 raw value。**不改**：`SettingsModel` 依 bundle ID 排序、畫面依名稱排序，兩者用途不同（測試要固定順序，畫面要依名稱） |
