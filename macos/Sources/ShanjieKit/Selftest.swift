@@ -3,8 +3,9 @@ import Foundation
 
 /// `shanjie --selftest` (docs/contracts/s3b.md section 9): build the engine from Resources, load
 /// the LM, type dev302 row 226 with the standard layout and require the chat and formal top-1
-/// sentences, then build with the bundled ACG pack (Resources/packs), require the same sentences and one pack word. Returns the exit status. Writes nothing but a fixed message and a return code to
-/// stderr; touches no file, UserDefaults, TIS, NSApplication or IMK server.
+/// sentences, then build with the bundled ACG pack (Resources/packs), require the same sentences and one pack word, then load the
+/// small model (Resources/tinylm.sjtl) and require the rerank to change a chat sentence, and the switch off not to (s7c2b section
+/// 2.5). Returns the exit status. Writes nothing but a fixed message and a return code to stderr; touches no file, UserDefaults, TIS, NSApplication or IMK server.
 @MainActor
 public enum Selftest {
     /// Row 226 `ㄒㄧㄥˋ ㄏㄠˇ ㄐㄧㄡˋ ㄏㄨˋ ㄔㄜ ㄐㄧˊ ㄕˊ ㄍㄢˇ ㄉㄠˋ` on the standard layout (s3a section 1);
@@ -17,6 +18,13 @@ public enum Selftest {
     /// profile spells it 定元堂 without the pack, so the sentence is the pack word only if the pack loaded.
     static let packWordStandard = "2u/4m06w;6"
     static let packWord = "碇源堂"
+
+    /// s7c2b section 2.5: dev302 row 25 `ㄓˊ ㄒㄧㄥˊ ㄓㄜˋ ㄍㄜ˙ ㄔㄥˊ ㄕˋ` on the standard layout, chat profile, no left context.
+    /// The n-gram's first is 執行這個城市; the small model picks 執行這個程式 (CLI `--profile chat --dev 302 --tinylm` and
+    /// fusegrid's pick at alpha 0.7, tau 2, 2026-10-11). The tests derive the same keys from the zhuyin independently.
+    static let rerankRowStandard = "56vu/65k4ek7t/6g4"
+    static let rerankedText = "執行這個程式"
+    static let ngramText = "執行這個城市"
 
     public static func run(resources: URL) -> Int32 {
         let lmPath = resources.appendingPathComponent("bigram.sjlm").path
@@ -41,7 +49,41 @@ public enum Selftest {
         let (word, c) = type(packWordStandard, withPack)
         guard c == 0 else { return fail("selftest: shanjie_engine_key (pack) failed, code", c) }
         guard word == packWord else { return fail("selftest: the bundled word pack is not in effect, code", 0) }
+        // The small model, as the shell loads it: a bundle without it (or with one for another n-gram model) fails here, so
+        // 語意校正 cannot ship silently doing nothing.
+        let tiny = withPack.loadTinyLM(path: resources.appendingPathComponent(Shell.tinyLMFile).path)
+        guard tiny == 0 else { return fail("selftest: shanjie_engine_load_tinylm failed, code", tiny) }
+        for (on, text) in [(true, rerankedText), (false, ngramText)] {
+            if case .failed(let c) = withPack.setRerank(on) { return fail("selftest: shanjie_engine_set_rerank failed, code", c) }
+            let (shown, c) = typeReranked(rerankRowStandard, withPack)
+            guard c == 0 else { return fail("selftest: rerank typing failed, code", c) }
+            guard shown == text else { return fail("selftest: unexpected rerank composition with the switch", on ? 1 : 0) }
+        }
         return 0
+    }
+
+    /// Types `keys` and after every key takes the job, runs it and applies it, all on this thread (the shell runs it on a queue);
+    /// returns the composition shown at the end and discards it, or a nonzero code.
+    private static func typeReranked(_ keys: String, _ engine: CoreEngine) -> (String, Int32) {
+        var shown = ""
+        for k in keys.unicodeScalars.map({ ShanjieKey(kind: KeyMap.char, ch: $0.value, modifiers: 0) }) {
+            switch engine.key(k) {
+            case .ok(let o): shown = o.preedit
+            case .failed(let c): return ("", c)
+            }
+            let (job, c) = engine.rerankTake(free: { shanjie_rerank_free($0) })
+            guard c == 0 else { return ("", c) }
+            guard let job else { continue }
+            let r = job.run()
+            guard r == 0 else { return ("", r) }
+            switch job.apply(on: engine) {
+            case .ok(let o): shown = o.preedit
+            case .failed(let c) where c == SHANJIE_NO_CHANGE: break
+            case .failed(let c): return ("", c)
+            }
+        }
+        if case .failed(let c) = engine.reset(mode: 1) { return ("", c) }
+        return (shown, 0)
     }
 
     /// Row 226 in both profiles; nil when both match, else the exit status.

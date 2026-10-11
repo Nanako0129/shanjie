@@ -22,6 +22,7 @@
 - **不會卡住**（F4）：完成處理一進來就用 `defer` 清掉「執行中」並接著跑留著的工作，不論是過期、session 換人、引擎重建、開關已關或碼 5。
 - **`take` 回非 0**（F5）：和 apply 回 4 走同一條處理（清組字區與候選窗，只記靜態字串加回傳碼）。
 - 不寫任何紀錄（工作含候選文字與左文，PLAN R2）；run 回非 0 時只記碼。
+- **核心的 `set_learning` 只有值改變才讓結果作廢**（main 決定 2026-10-11，來自實作時的發現）：殼照 S4 每個按鍵前都送一次 `set_learning`（`s4-learning.md` §3），核心原本每次都換世代號，所以任何按鍵（含 ←）都讓進行中的工作過期，上面「不重新解碼的鍵之後照樣套用」做不到。改成同值不作廢；`shanjie.h` 與 `s3a.md` §6 的過期清單跟著寫明；核心測試 `set_learning_stales_the_job_only_when_the_value_changes`。
 
 ### 2.2 開關「語意校正」
 
@@ -73,3 +74,8 @@
 - 安全審查（`pilotfish:security-reviewer`，2026-10-11，唯讀）：沒有可遠端觸發的嚴重問題，沒有違反 R2 的設計；核心已擋住「套用到別的引擎」。處置：F1（指標不能帶出包裝物件）、F2（真的 runner 放 Swift 6 模組、加真佇列測試、主執行緒不等背景）、F3（weak 比對、不強參照舊引擎）、F4（`defer` 清旗標）、F5（`take` 回非 0）、F6（check-app 對記的雜湊比）、F10（具名常數、verifier 讀 diff）、F11（降權關掉時反灰）、F12（不實作描述、固定 label、只記碼、data-files 寫不含私人資料）**FIX**，見 §2.1、§2.3、§2.4、§3；F7（release.yml）**FIX**：verifier 讀 diff，發版前的 dry run 到時候問使用者；F9（上傳前後核對、完整雜湊進紀錄）**FIX**；GitHub 的 immutable releases 是 repo 設定，**留給使用者**之後決定；F8、F13（執行時完整性、沙盒）記錄，不需改動。三個出貨前提的對應寫在 §3 第 4 項。
 - 第一次 plan-verifier（2026-10-11）：REVISE 6 點。1–5 **FIX**：實機改在訊息 App（聊天設定）、selftest 與殼的測試都在聊天設定下核對「重排後和 n-gram 不同」；Release 的順序改成先合併只含說明與雜湊的文件 PR、問使用者、從 main 建 Release、再跑程式 PR 的 CI；free 的計數改在可注入的 free 函式並涵蓋所有路徑；開關的保存、重建、選單與設定視窗同步都加測試；殼的測試用 `data/lm/tinylm.sjtl`、`RerankRunner` 是必填參數。6（缺安全審查）：跑了安全審查，處置見下一條。
 - 第二次 plan-verifier（2026-10-11）：READY。
+- 實作（security-executor，2026-10-11）：殼的 ← 測試在真的殼裡失敗（`set_learning` 每鍵讓工作過期，見 §2.1 最後一條），回報 main；main 選「核心只在值改變時作廢」（不改殼的 S4 呼叫方式），在這一片處理。
+
+## 6. 結果
+
+- 實作見研究紀錄 2026-10-11 S7c-2b 一節；量測數字（selftest-bundled、TSan、實機）由 main 補。

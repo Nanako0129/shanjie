@@ -3021,3 +3021,15 @@ M 聊天 α 0.7、τ 2（保留列合計 4,342 → 4,630／5,440，+5.29 個百�
   - 沒有小模型（n-gram 自己）：flicker＝net rewrite＝371（14.50%）；變回再換回 0。
   - 讀法：整句轉換本來就會在打字時改寫前面的字（n-gram 自己 14.5%）；加上重排後，最後被改寫的比例降到 9.34%。新增的只有「先閃回 n-gram 的字、再換回來」這一種，每 100 個重新解碼的鍵約 2 次。第一版寫的「0.66%」分母是全部的鍵（含不會重新解碼的注音鍵），只算了變回再換回這一種〔更正，PR #116 /code-review〕。
 - **之後（2b 之前）要使用者決定**：帶著上面的 A4 數字，決定要不要加規則（例如記住已選的結果，同一段的候選沒變就直接沿用）或修改 A4；開關名稱與位置；Release 資產名稱與 `LICENSES/data.md` 那一列。
+
+## 2026-10-11：語意 S7c-2b 重排接進輸入法的殼、「語意校正」開關與打包（契約 `docs/contracts/s7c2b-shell-rerank.md`，分支 `feat/s7c2b-shell`）
+
+security-executor 實作，main 之後補量測與實機。
+
+- **殼**：`Session.apply` 每次套用輸出後取工作；`Shell` 一次只把一個工作交給 `RerankRunner`，其他的只留最新的一個（被取代的立刻釋放）。App 用 `QueueRerankRunner`（`DispatchQueue(qos: .utility)`、固定 label），跑完用 `DispatchQueue.main.async` 回主執行緒；完成時用 weak 參照比對 session 與引擎（`===`），開關要開著，`defer` 清掉「執行中」並接著跑留著的工作。碼 0 照一般輸出套用、5 不做事、其他碼（4）和 `take` 的非 0 一樣走既有的失敗處理。工作包在 `RerankJob`（指標 private、只在 deinit 經可注入的 free 函式釋放）。
+- **開關**：「語意校正」在選單（即時預測、可省略韻母之後）與設定視窗，預設開，存在 `UserDefaults` 的 `rerank`；每次建引擎後送 `set_rerank`；降權表關掉時反灰。
+- **模型**：`build()` 在 `load_lm` 之後載入 `Resources/tinylm.sjtl`（具名常數 `Shell.tinyLMFile`），失敗只記碼、照常用 n-gram。打包時 `build-app.sh` 核對 `data/tinylm.sjtl.sha256`，`check-app.sh` 把 bundle 裡的檔和記的雜湊比；CI 與 `release.yml` 下載 `tinylm-v1` 並核對（Release 建立之前 CI 會在下載失敗，是預期的）。
+- **selftest 的句子**：用 CLI `--profile chat --dev 302 --tinylm data/lm/tinylm.sjtl --tinylm-scores`／`--dump`，以 `fusegrid.pick`（α 0.7、τ 2）找重排改了第一名的列，挑短的 dev302 第 25 列 `ㄓˊ ㄒㄧㄥˊ ㄓㄜˋ ㄍㄜ˙ ㄔㄥˊ ㄕˋ`：n-gram「執行這個城市」、重排「執行這個程式」。這次 CLI 的 top1 276／302，和 2a 相同。
+- **實作時的發現與更正**：殼照 S4 每個按鍵前都呼叫 `set_learning`，核心的 `set_learning` 每次都換世代號，所以任何按鍵（含 ←、未完成的注音）都讓進行中的重排作廢，2a 的「不重新解碼的鍵不作廢」在殼裡不成立（引擎直接打 ← 時套用回 0，經過殼回 5，`swift test` 實測）。main 決定改核心：只有值改變才作廢（S4 每鍵送的做法不動）。核心測試加一條，突變「無條件作廢」時那條測試的斷言失敗。
+- **測試裡的左文**：殼的測試在同一個 client 送出「執行這個城市」後再打同一句時，左文「城市」讓小模型留在 n-gram 的第一名（測試改成讀不到插入點，沒有左文）。同一個測試只差在有沒有左文：有「城市」時最後顯示 n-gram 的字，沒有左文時顯示重排的字。所以實機核對（契約 §3 第 5 項）要在前面沒有漢字的地方打（例如空的訊息欄）；其他左文下會不會改沒量過。
+
