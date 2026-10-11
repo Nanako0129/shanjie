@@ -1,5 +1,6 @@
-//! S7c-1: the small character language model (S7a) in Rust: the SJTL0001 loader, the forward pass, LL and `pick`
-//! (docs/contracts/s7c-core-tinylm.md section 2). S7c-2a (docs/contracts/s7c2a-core-rerank.md) reaches it from the engine's rerank
+//! S7c-1: the small character language model (S7a) in Rust: the SJTL0001 / SJTL0002 loader, the forward pass, LL and `pick`
+//! (docs/contracts/s7c-core-tinylm.md section 2; SJTL0002, the per-profile delta, is docs/contracts/s7c2c-delta.md section 2.1).
+//! S7c-2a (docs/contracts/s7c2a-core-rerank.md) reaches it from the engine's rerank
 //! jobs and the C ABI, so the loader is hardened for in-process use (section 2.6): a size cap, a regular-file check, header
 //! bounds and finite restored weights.
 //!
@@ -17,6 +18,12 @@ use std::path::Path;
 const MAGIC: &[u8; 8] = b"SJTL0001";
 const HEADER: usize = 100;
 const VERSION: u32 = 1;
+/// S7c-2c: version 2 is version 1's 100 header bytes (magic and version field changed) plus the chat and formal delta (f64).
+const MAGIC_V2: &[u8; 8] = b"SJTL0002";
+const HEADER_V2: usize = 116;
+const VERSION_V2: u32 = 2;
+/// S7c-2c section 2.1: a guard on delta, far above the S7e grid (at most 4).
+const MAX_DELTA: f64 = 1000.0;
 const PAD: u32 = 0;
 const UNK: u32 = 1;
 const BOS: u32 = 2;
@@ -160,8 +167,9 @@ pub struct TinyLm {
     n_head: usize,
     d: usize,
     ctx: usize,
-    chat: (f64, f64),
-    formal: (f64, f64),
+    /// (alpha, tau, delta); version 1 files have delta 0.
+    chat: (f64, f64, f64),
+    formal: (f64, f64, f64),
     ng_sha: [u8; 32],
     ids: HashMap<char, u32>,
     emb: Vec<f32>,
@@ -263,15 +271,30 @@ impl TinyLm {
     /// Every check of the format; a bad file is an error, never a partial model.
     pub fn parse(bytes: &[u8]) -> Result<TinyLm, TinyLmError> {
         let bad = TinyLmError::Format;
-        if bytes.len() < HEADER || &bytes[..8] != MAGIC {
+        if bytes.len() < 12 {
             return Err(bad);
         }
         let u32_at = |at: usize| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         let f64_at = |at: usize| f64::from_le_bytes(bytes[at..at + 8].try_into().unwrap());
-        let (version, wtype) = (u32_at(8), u32_at(12));
+        // S7c-2c section 2.1: magic and version field together choose the header length, the one length the vocabulary start,
+        // the tensor start and `want` use; the file must hold the whole header before any field past the version is read.
+        let header = match (&bytes[..8], u32_at(8)) {
+            (m, VERSION) if m == MAGIC => HEADER,
+            (m, VERSION_V2) if m == MAGIC_V2 => HEADER_V2,
+            _ => return Err(bad),
+        };
+        if bytes.len() < header {
+            return Err(bad);
+        }
+        let wtype = u32_at(12);
         let [n_layer, n_head, d, ctx, v] = [16, 20, 24, 28, 32].map(|at| u32_at(at) as usize);
-        let (chat, formal) = ((f64_at(36), f64_at(44)), (f64_at(52), f64_at(60)));
-        if version != VERSION || wtype > 1 || n_layer == 0 || n_head == 0 || d == 0 || d % n_head != 0 || ctx < 2 || v < 3 {
+        let (chat_delta, formal_delta) = if header == HEADER_V2 { (f64_at(100), f64_at(108)) } else { (0.0, 0.0) };
+        // One range test rejects NaN, the infinities and negatives; -0.0 passes and compares as 0 in `pick`.
+        if !(0.0..=MAX_DELTA).contains(&chat_delta) || !(0.0..=MAX_DELTA).contains(&formal_delta) {
+            return Err(bad);
+        }
+        let (chat, formal) = ((f64_at(36), f64_at(44), chat_delta), (f64_at(52), f64_at(60), formal_delta));
+        if wtype > 1 || n_layer == 0 || n_head == 0 || d == 0 || d % n_head != 0 || ctx < 2 || v < 3 {
             return Err(bad);
         }
         // Bounds of the shipped model's order of magnitude (also keep the length arithmetic far from overflow); the exact file
@@ -282,19 +305,19 @@ impl TinyLm {
         let int8 = wtype == 1;
         let mat = |r: usize, c: usize| if int8 { r * c + 4 * r } else { 4 * r * c };
         let layer_bytes = 4 * 4 * d + mat(d, 3 * d) + 4 * 3 * d + mat(d, d) + 4 * d + mat(d, 4 * d) + 4 * 4 * d + mat(4 * d, d) + 4 * d;
-        let want = HEADER + 4 * (v - 3) + mat(v, d) + mat(ctx, d) + 4 * 2 * d + n_layer * layer_bytes;
+        let want = header + 4 * (v - 3) + mat(v, d) + mat(ctx, d) + 4 * 2 * d + n_layer * layer_bytes;
         // A NaN alpha or tau would pick nothing sensible; tau may be infinite (no threshold).
         if bytes.len() != want || !chat.0.is_finite() || !formal.0.is_finite() || chat.1.is_nan() || formal.1.is_nan() {
             return Err(bad);
         }
         let mut ids = HashMap::new();
         for i in 0..v - 3 {
-            let c = char::from_u32(u32_at(HEADER + 4 * i)).ok_or(bad)?;
+            let c = char::from_u32(u32_at(header + 4 * i)).ok_or(bad)?;
             if ids.insert(c, i as u32 + 3).is_some() {
                 return Err(bad);
             }
         }
-        let mut r = Cursor { b: bytes, at: HEADER + 4 * (v - 3), int8, ok: true };
+        let mut r = Cursor { b: bytes, at: header + 4 * (v - 3), int8, ok: true };
         // The tensor order of export_sjtl.py: emb, pos, lnf_w, lnf_b, then for each layer ln1_w, ln1_b, qkv_w, qkv_b, proj_w, proj_b,
         // ln2_w, ln2_b, fc1_w, fc1_b, fc2_w, fc2_b (tinylm.LAYER_KEYS). Struct fields evaluate in source order.
         let (emb, pos, lnf_w, lnf_b) = (r.mat(v, d), r.mat(ctx, d), r.f32s(d), r.f32s(d));
@@ -333,8 +356,8 @@ impl TinyLm {
         })
     }
 
-    /// (alpha, tau) tuned for the profile.
-    pub fn alpha_tau(&self, p: Profile) -> (f64, f64) {
+    /// (alpha, tau, delta) tuned for the profile; delta is 0 in a version 1 file.
+    pub fn alpha_tau_delta(&self, p: Profile) -> (f64, f64, f64) {
         match p {
             Profile::Chat => self.chat,
             Profile::Formal => self.formal,
@@ -348,7 +371,7 @@ impl TinyLm {
 
     /// The S7a rerank of one n-best list, the one rule the CLI measures and the engine will use: the first `TOPK` candidates,
     /// k = the engine's context key (`learn::context_key`; its `SENTINEL`, no Han character before the cursor, is the empty k as
-    /// in tinylm.row_key), alpha and tau of the profile, then `pick`. Returns the chosen index and, when the model ran (two or more
+    /// in tinylm.row_key), alpha, tau and delta of the profile, then `pick`. Returns the chosen index and, when the model ran (two or more
     /// candidates), the LLs. A candidate longer than ctx - 1 characters is `TooLong`; the caller decides to keep the first.
     pub fn rerank(&self, ng: &[f64], cands: &[&str], key: &str, p: Profile) -> Result<(usize, Option<Vec<f64>>), TinyLmError> {
         let n = cands.len().min(ng.len()).min(TOPK);
@@ -358,8 +381,8 @@ impl TinyLm {
         let k = if key == SENTINEL { "" } else { key };
         let items: Vec<(&str, &str)> = cands[..n].iter().map(|c| (k, *c)).collect();
         let ll = self.ll_many(&items)?;
-        let (alpha, tau) = self.alpha_tau(p);
-        Ok((pick(&ng[..n], &ll, alpha, tau), Some(ll)))
+        let (alpha, tau, delta) = self.alpha_tau_delta(p);
+        Ok((pick(&ng[..n], &ll, alpha, tau, delta), Some(ll)))
     }
 
     /// LL of each (k, c): the sum over the characters of c of log10 P(c_i | [BOS] + k + c_<i), as `tinylm.ll_many`
@@ -496,21 +519,27 @@ fn gelu(be: Backend, x: &mut [f32]) {
     x.iter_mut().zip(&t).for_each(|(v, t)| *v = 0.5 * *v * (1.0 + t));
 }
 
-/// S7a fusion (experiments/s7a-tinylm/fusegrid.py `pick`): the index of the chosen candidate. Fewer than two candidates, or an
-/// n-gram margin (first minus second) of at least `tau`, keeps the first; otherwise the highest `ng + alpha * ll`, ties to the
-/// better n-gram rank.
-pub fn pick(ng: &[f64], ll: &[f64], alpha: f64, tau: f64) -> usize {
+/// The S7a fusion with the S7e gate, experiments/s7a-tinylm/fusegrid.py `pick` with its `delta`: the index of the chosen
+/// candidate. Fewer than two candidates, or an n-gram margin (first minus second) of at least `tau`, keeps the first; otherwise
+/// j = the highest s = `ng + alpha * ll` (ties to the better n-gram rank), and j replaces the first only when `s[j] - s[0] >= delta`.
+/// Delta 0 is the S7a rule.
+pub fn pick(ng: &[f64], ll: &[f64], alpha: f64, tau: f64, delta: f64) -> usize {
     if ng.len() < 2 || ng[0] - ng[1] >= tau {
         return 0;
     }
-    let (mut best, mut best_s) = (0, ng[0] + alpha * ll[0]);
+    let s0 = ng[0] + alpha * ll[0];
+    let (mut best, mut best_s) = (0, s0);
     for i in 1..ng.len() {
         let s = ng[i] + alpha * ll[i];
         if s > best_s {
             (best, best_s) = (i, s);
         }
     }
-    best
+    if best_s - s0 >= delta {
+        best
+    } else {
+        0
+    }
 }
 
 #[cfg(test)]
@@ -660,7 +689,8 @@ mod tests {
 
     /// `rerank` is the rule the CLI measured: the key reaches the model as k (a Han key changes the LLs, and they are exactly
     /// ll_many's with that k); the engine's SENTINEL is the empty k; fewer than two candidates run nothing; only the first TOPK
-    /// are scored; the choice is `pick` with the profile's alpha and tau.
+    /// are scored; the choice is `pick` with the profile's alpha, tau and delta (a nonzero delta: tests/tinylm_tiny.rs
+    /// `rerank_uses_the_files_delta`).
     #[test]
     fn rerank_is_the_measured_rule() {
         let m = TinyLm::parse(&random_file(false)).unwrap();
@@ -673,7 +703,8 @@ mod tests {
         let ll = ll.unwrap();
         assert_eq!(ll, with(key));
         assert_ne!(ll, with(""), "the key is the model's context");
-        assert_eq!(chosen, pick(&ng[..TOPK], &ll, 0.7, 2.0));
+        assert_eq!(m.alpha_tau_delta(Profile::Chat), (0.7, 2.0, 0.0), "a version 1 file");
+        assert_eq!(chosen, pick(&ng[..TOPK], &ll, 0.7, 2.0, 0.0));
         assert_eq!(m.rerank(&ng, &cands, SENTINEL, Profile::Chat).unwrap().1.unwrap(), with(""), "SENTINEL is the empty k");
         assert_eq!(m.rerank(&ng[..1], &cands[..1], key, Profile::Chat).unwrap(), (0, None));
     }
