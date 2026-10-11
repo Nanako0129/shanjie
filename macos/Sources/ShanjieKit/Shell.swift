@@ -160,18 +160,97 @@ public final class MemoryCandidateOrientationStore: CandidateOrientationStore {
     public init(_ candidateVertical: Bool? = nil) { self.candidateVertical = candidateVertical }
 }
 
+/// How the chat or formal profile is chosen (docs/contracts/profile-choice.md section 2.2): by the app (`chatApps` and the
+/// user's per-app choices), or always one of the two.
+public enum ProfileMode: String, Sendable {
+    case auto
+    case chat
+    case formal
+}
+
+/// Where the profile mode is kept (profile-choice section 2.1): the raw value of a `ProfileMode`; `nil` or any other string is
+/// `auto`. Same arrangement as `LayoutStore`.
+@MainActor
+public protocol ProfileModeStore: AnyObject {
+    var profileMode: String? { get set }
+}
+
+/// The in-memory ProfileModeStore.
+@MainActor
+public final class MemoryProfileModeStore: ProfileModeStore {
+    public var profileMode: String?
+    public init(_ profileMode: String? = nil) { self.profileMode = profileMode }
+}
+
+/// Where the per-app choices are kept (profile-choice section 2.1): bundle ID to `chat` or `formal`, only for apps the user
+/// switched from the menu. Read back raw, exactly as stored, and filtered entry by entry by `AppProfiles.parse`; written as a
+/// whole, an empty dictionary removing the value. Same arrangement as `LayoutStore` otherwise.
+@MainActor
+public protocol AppProfileStore: AnyObject {
+    var appProfiles: Any? { get }
+    func setAppProfiles(_ profiles: [String: String])
+}
+
+/// The in-memory AppProfileStore. `appProfiles` is whatever the test put there, so a malformed value can be tried.
+@MainActor
+public final class MemoryAppProfileStore: AppProfileStore {
+    public private(set) var appProfiles: Any?
+    public init(_ appProfiles: Any? = nil) { self.appProfiles = appProfiles }
+    public func setAppProfiles(_ profiles: [String: String]) { appProfiles = profiles.isEmpty ? nil : profiles }
+}
+
+/// The stored per-app choices, converted both ways (profile-choice section 2.1).
+@MainActor
+public enum AppProfiles {
+    /// Entry by entry: a root that is not a dictionary is empty; only a non-empty string key with the string value `chat` or
+    /// `formal` (`ProfileMode`'s raw values, the one string table) is kept, and any other entry is skipped without affecting the
+    /// valid ones (a whole-dictionary cast would drop them all, and the next write would erase them).
+    public static func parse(_ raw: Any?) -> [String: UInt32] {
+        guard let dict = raw as? [AnyHashable: Any] else { return [:] }
+        var out: [String: UInt32] = [:]
+        for (key, value) in dict {
+            guard let bundle = key.base as? String, !bundle.isEmpty,
+                  let mode = (value as? String).flatMap(ProfileMode.init(rawValue:)) else { continue }
+            switch mode {
+            case .chat: out[bundle] = Shell.chat
+            case .formal: out[bundle] = Shell.formal
+            case .auto: continue
+            }
+        }
+        return out
+    }
+
+    /// What `parse` reads back.
+    static func stored(_ profiles: [String: UInt32]) -> [String: String] {
+        profiles.mapValues { ($0 == Shell.chat ? ProfileMode.chat : ProfileMode.formal).rawValue }
+    }
+}
+
 /// Process-wide state: the single engine (about 240 MB each, so never two at once), the single
 /// candidate panel and the page it shows, and which session owns the composition (section 5).
 /// All calls happen on the main thread.
 @MainActor
 public final class Shell {
-    /// Built-in chat apps (section 9); every other app gets the formal profile. The bundle ID is
-    /// only looked up here: it is never passed to the core, logged or stored.
+    /// Built-in chat apps (section 9); every other app gets the formal profile, unless the user switched it
+    /// (profile-choice section 2.5). A bundle ID is never passed to the core or logged; it is stored only for an
+    /// app the user switched from the menu (`appProfiles`).
     static let chatApps: Set<String> = [
         "com.hnc.Discord", "jp.naver.line.mac", "com.apple.MobileSMS", "com.tinyspeck.slackmacgap",
         "ru.keepcoder.Telegram", "com.tdesktop.Telegram", "net.whatsapp.WhatsApp", "com.facebook.archon",
     ]
     static let chat: UInt32 = 0, formal: UInt32 = 1
+
+    /// The one place the profile is decided (profile-choice section 2.2). `auto`: no bundle ID is formal, as before; then the
+    /// user's choice for the app; then `chatApps`.
+    static func profile(bundle: String?, mode: ProfileMode, overrides: [String: UInt32]) -> UInt32 {
+        switch mode {
+        case .chat: return chat
+        case .formal: return formal
+        case .auto:
+            guard let bundle, !bundle.isEmpty else { return formal }
+            return overrides[bundle] ?? (chatApps.contains(bundle) ? chat : formal)
+        }
+    }
 
     private let resources: URL
     /// s3e: the converted system punctuation table, `nil` when unavailable (the core keeps its own).
@@ -207,6 +286,12 @@ public final class Shell {
     /// setting only in the settings window, where clicking is inferred (not measured) to commit the composition and hide the
     /// panel, that is reachable through the API and the tests but not observable from the window as shipped.
     public private(set) var candidateVertical = false
+    private let profileModeStore: ProfileModeStore
+    private let appProfileStore: AppProfileStore
+    /// profile-choice section 2.1: both read once at init, then changed only through the setters below.
+    public private(set) var profileMode = ProfileMode.auto
+    /// Bundle ID to profile, only where it differs from `chatApps` (section 2.3).
+    public private(set) var appProfiles: [String: UInt32] = [:]
     /// The `vertical` value (0, 1 or 2) of what the panel shows now; 0 once it hid. Page Up / Down go to the core only while
     /// it is 1, the vertical candidate window (section 2.2); the vertical prediction row, 2, does not count.
     private(set) var shownVertical = 0
@@ -268,6 +353,8 @@ public final class Shell {
     /// `acgPackStore`: the ACG word pack switch (acg-pack contract A.2). Required, like `demoteStore`.
     /// `glassTintStore`: the candidate glass tint (settings-window section 2.3). Required, like `demoteStore`.
     /// `candidateOrientationStore`: the candidate window's orientation (candidate-vertical contract section 2.1). Required, like `glassTintStore`.
+    /// `profileModeStore`, `appProfileStore`: how chat or formal is chosen and the per-app choices (profile-choice section 2.1).
+    /// Required, like `glassTintStore`.
     /// `punctuationTable`: Apple's punctuation candidate table (s3e); tests pass another path.
     /// `punctuationNames`: Apple's punctuation names (s3f); tests pass another path.
     /// `showsAbbreviation`: whether the abbreviation switch is offered. The default `true` is for the tests; the app passes `false`
@@ -276,6 +363,7 @@ public final class Shell {
                 layoutStore: LayoutStore, learningDirectory: URL?, dialogs: LearningDialogs,
                 demoteStore: DemoteStore, predictionStore: PredictionStore, abbreviationStore: AbbreviationStore, acgPackStore: AcgPackStore,
                 glassTintStore: GlassTintStore, candidateOrientationStore: CandidateOrientationStore,
+                profileModeStore: ProfileModeStore, appProfileStore: AppProfileStore,
                 punctuationTable: URL = PunctuationTable.systemURL,
                 punctuationNames: URL = PunctuationNames.systemURL,
                 showsAbbreviation: Bool = true) {
@@ -308,6 +396,10 @@ public final class Shell {
         glassTint = glassTintStore.glassTint ?? 0
         self.candidateOrientationStore = candidateOrientationStore
         candidateVertical = candidateOrientationStore.candidateVertical ?? false
+        self.profileModeStore = profileModeStore
+        profileMode = profileModeStore.profileMode.flatMap(ProfileMode.init(rawValue:)) ?? .auto
+        self.appProfileStore = appProfileStore
+        appProfiles = AppProfiles.parse(appProfileStore.appProfiles)
         acgPackOn = acgPackStore.acgPack ?? true
         // The preference is read before the one engine is built (about 240 MB): building first
         // and switching after would build twice.
@@ -375,6 +467,36 @@ public final class Shell {
         glassTintStore.glassTint = value
         panel.setGlassTint(value)  // section 2.3: a panel that is up changes at once
         changed()
+    }
+
+    /// The settings window's 切換方式 (profile-choice section 2.2): stored, posted, then re-applied to the owner of the
+    /// composition, if any, so what Enter commits matches the menu's checkmark at once.
+    public func setProfileMode(_ m: ProfileMode) {
+        profileMode = m
+        profileModeStore.profileMode = m.rawValue
+        changed()
+        reapplyProfileToOwner()
+    }
+
+    /// The settings window's remove button: the app goes back to `chatApps`; re-applied like `setProfileMode`.
+    public func removeAppProfile(_ bundle: String) {
+        appProfiles[bundle] = nil
+        appProfileStore.setAppProfiles(AppProfiles.stored(appProfiles))
+        changed()
+        reapplyProfileToOwner()
+    }
+
+    /// Section 2.2: no claim, the owner already owns the composition (as the window's other switches go through the owner).
+    private func reapplyProfileToOwner() {
+        guard let o = owner else { return }
+        o.applyProfile(bundle: o.client.bundleIdentifier)
+    }
+
+    /// The menu's choice for one app (section 2.3): a value equal to `chatApps`' removes the entry, so the list keeps only the
+    /// apps that differ. The caller re-applies the profile and posts the change.
+    func setAppProfile(_ bundle: String, _ p: UInt32) {
+        appProfiles[bundle] = p == (Shell.chatApps.contains(bundle) ? Shell.chat : Shell.formal) ? nil : p
+        appProfileStore.setAppProfiles(AppProfiles.stored(appProfiles))
     }
 
     /// The menu's choice (sw): stored, and sent to the engine, which recomputes the composition; the
@@ -551,7 +673,7 @@ public final class Session {
     public func handle(_ event: NSEvent?) -> Bool {
         guard shell.engine != nil else { return false }
         guard event == nil || event?.type == .keyDown else { return false }
-        if claim() { applyProfile() }
+        if claim() { applyProfile(bundle: client.bundleIdentifier) }
         // candidate-vertical contract section 2.2: Page Up / Down reach the core only while the vertical window is on screen
         // and no modifier (Shift, Control, Option, Command, Caps Lock) is held; otherwise they are keys outside the tables.
         if let event, shell.verticalOpen, KeyMap.modifiers(event.modifierFlags) == 0, let kind = KeyMap.pageKeys[event.keyCode] {
@@ -570,7 +692,7 @@ public final class Session {
     /// Section 5 order: ownership first, then the profile for this client's app.
     public func activate() {
         claim()
-        applyProfile()
+        applyProfile(bundle: client.bundleIdentifier)
     }
 
     /// Only the owner acts; a late call from any other controller does nothing at all.
@@ -661,10 +783,27 @@ public final class Session {
         }
     }
 
-    /// The profile for this client's app, from its bundle ID (looked up, never kept).
-    private func applyProfile() {
-        let chat = client.bundleIdentifier.map { Shell.chatApps.contains($0) } ?? false
-        switch shell.setProfile(chat ? Shell.chat : Shell.formal) {
+    /// The menu's 這個 App 用聊天設定 (profile-choice section 2.3): the opposite of this client's profile is stored for its
+    /// app, then it is re-applied in `activate()`'s order: `claim()` first sends another session's composition back to its
+    /// own client, so `applyProfile` recomputes only this session's (security review P2-1). The bundle ID is read once (a
+    /// synchronous IPC) and passed on. Nothing to store without a bundle ID, and the item is greyed outside `auto`.
+    func toggleAppChat() {
+        guard let bundle = client.bundleIdentifier, !bundle.isEmpty, shell.profileMode == .auto else { return }
+        shell.setAppProfile(bundle, profile(for: bundle) == Shell.chat ? Shell.formal : Shell.chat)
+        claim()
+        applyProfile(bundle: bundle)
+        shell.changed()
+    }
+
+    /// The profile `bundle` (this client's, read by the caller) gets now (profile-choice section 2.2).
+    func profile(for bundle: String?) -> UInt32 {
+        Shell.profile(bundle: bundle, mode: shell.profileMode, overrides: shell.appProfiles)
+    }
+
+    /// The profile for this client's app, `bundle` being its bundle ID as the caller read it. No owner check: callers claim
+    /// first (`activate`, `handle`, `toggleAppChat`) or are the owner (`Shell.reapplyProfileToOwner`).
+    fileprivate func applyProfile(bundle: String?) {
+        switch shell.setProfile(profile(for: bundle)) {
         case .ok(let o)?: apply(o)
         case .failed(let c)?: _ = fail(c)
         case nil: break
