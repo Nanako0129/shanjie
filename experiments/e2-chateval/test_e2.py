@@ -3,6 +3,7 @@ Run: python3 -W ignore -m unittest experiments/e2-chateval/test_e2.py -v   (from
 """
 import contextlib
 import csv
+import datetime as dt
 import io
 import json
 import os
@@ -57,7 +58,7 @@ class Context(unittest.TestCase):
     def prepare(self, channels, **kw):
         td = tempfile.mkdtemp()
         root = package(td, channels)
-        counts = bc.prepare(root, kw.get("threads"), kw.get("exclude", []), os.path.join(td, "w"))
+        counts = bc.prepare(root, None, None, kw.get("exclude", []), os.path.join(td, "w"))
         return os.path.join(td, "w"), counts
 
     def test_three_segment_message_with_a_previous_message_5_and_15_minutes_earlier(self):
@@ -76,18 +77,51 @@ class Context(unittest.TestCase):
         work, _ = self.prepare({"c1": [("1", ts(5, "12:00"), "先說這個，再說那個"), ("2", ts(5, "12:03"), "接著回答")]})
         self.assertEqual({s: x for _m, _src, x, s in clauses_of(work)}["接著回答"], "再說那個")
 
-    def test_threads_first_segment_blank_and_later_segments_chain(self):
+    def test_meta_export_threads_facebook_messenger(self):
         td = tempfile.mkdtemp()
-        tf = os.path.join(td, "t.jsonl")
-        open(tf, "w", encoding="utf-8").write("\n".join(json.dumps(r, ensure_ascii=False) for r in [
-            {"url": "https://t/1", "time": "2026-03-05T12:00:00+00:00", "text": "貼文一，貼文二"},
-            {"url": "https://t/2", "time": "2026-03-05T12:01:00+00:00", "text": "第二篇文"},      # one minute later: still blank (no cross-post context)
-            {"url": "https://t/3", "text": "沒有時間"},
-            {"url": "https://t/4", "time": "2026-03-05T12:02:00+00:00", "text": ""}]) + "\n")
-        counts = bc.prepare(None, tf, [], os.path.join(td, "w"))
-        rows = {s: x for _m, src, x, s in clauses_of(os.path.join(td, "w")) if src == "threads"}
-        self.assertEqual(rows, {"貼文一": "", "貼文二": "貼文一", "第二篇文": ""})
-        self.assertEqual(counts["threads"]["_dropped_no_url_time_text"], 2)
+        root = os.path.join(td, "export")
+        me = "陳小明"
+
+        def moji(x):        # Meta's escaping: the UTF-8 bytes as latin-1 characters
+            return x.encode("utf-8").decode("latin-1")
+
+        def put(rel, obj):
+            p = os.path.join(root, rel)
+            os.makedirs(os.path.dirname(p), exist_ok=True)
+            with open(p, "w", encoding="utf-8") as f:
+                json.dump(obj, f, ensure_ascii=True)
+            return p
+
+        t0 = int(dt.datetime(2026, 3, 5, 12, 0, tzinfo=dt.timezone.utc).timestamp())
+        put("threads/threads_and_replies.json", {"text_post_app_text_posts": [
+            {"creation_timestamp": t0, "text": moji("串文一，串文二")}, {"creation_timestamp": t0 + 60, "text": moji("另一串文")},
+            {"creation_timestamp": t0 + 120, "text": ""}]})
+        put("posts/your_posts__check_ins__photos_and_videos_1.json", [
+            {"timestamp": t0, "title": moji("某某更新了狀態"), "data": [{"post": moji("臉書貼文，第二段")}]}])
+        put("comments_and_reactions/comments.json", {"comments_v2": [
+            {"timestamp": t0, "title": moji("某某在別人的貼文留言"), "data": [{"comment": {"comment": moji("一則留言"), "timestamp": t0, "author": moji(me)}}]}]})
+        put("your_activity/messages/inbox/friend_abc/message_1.json", {"title": moji("朋友"), "messages": [
+            {"sender_name": moji(me), "timestamp_ms": 1000 * t0, "content": moji("我的第一句")},
+            {"sender_name": moji("別人"), "timestamp_ms": 1000 * (t0 + 120), "content": moji("對方說的話")},
+            {"sender_name": moji(me), "timestamp_ms": 1000 * (t0 + 300), "content": moji("五分鐘後的第二則")},
+            {"sender_name": moji(me), "timestamp_ms": 1000 * (t0 + 3600), "content": moji("隔很久的話")}]})
+        raw = open(os.path.join(root, "threads/threads_and_replies.json"), encoding="utf-8").read()
+        self.assertIn("\\u00e4", raw)                                  # the fixture really is mojibake on disk
+        self.assertTrue(all(ord(ch) < 128 for ch in raw))
+        counts = bc.prepare(None, root, me, [], os.path.join(td, "w"))
+        rows = {(src, s): x for _m, src, x, s in clauses_of(os.path.join(td, "w"))}
+        self.assertEqual(rows, {("threads", "串文一"): "", ("threads", "串文二"): "串文一", ("threads", "另一串文"): "",
+                                ("facebook", "臉書貼文"): "", ("facebook", "第二段"): "臉書貼文", ("facebook", "一則留言"): "",
+                                ("messenger", "我的第一句"): "", ("messenger", "五分鐘後的第二則"): "我的第一句", ("messenger", "隔很久的話"): ""})
+        self.assertNotIn("對方說的話", [s for _k, s in rows])                # the other person's message never reaches the rows
+        self.assertEqual(counts["messenger"]["_dropped_other_sender"], 1)
+        self.assertEqual(counts["threads"]["_dropped_no_text"], 1)
+
+    def test_unmojibake(self):
+        self.assertEqual(bc.unmojibake("好"), "好")
+        self.assertEqual(bc.unmojibake("好".encode("utf-8").decode("latin-1")), "好")
+        self.assertEqual(bc.unmojibake("café"), "café")                    # latin-1 text that is not UTF-8 bytes stays
+        self.assertEqual(bc.unmojibake("abc"), "abc")
 
     def test_csv_and_json_packages_both_read_and_other_folders_ignored(self):
         work, counts = self.prepare({"c1": [("1", ts(5, "12:00"), "甲乙丙丁")], "2": [("2", ts(6, "12:00"), "戊己庚辛")]})
@@ -109,7 +143,7 @@ class Exclusions(unittest.TestCase):
             ("7", "2026-09-02 10:04:00.000000+00:00", "重複的句子，別的集合的句子"),
             ("8", "2026-09-03 10:05:00.000000+00:00", "重複的句子"),
             ("9", "2026-10-03 10:06:00.000000+00:00", "重複的句子")]})   # another month: not a duplicate
-        counts = bc.prepare(root, None, [ex], os.path.join(td, "w"))["discord"]
+        counts = bc.prepare(root, None, None, [ex], os.path.join(td, "w"))["discord"]
         self.assertEqual(sorted(counts), ["2026-08", "2026-09", "2026-10"])
         s = counts["2026-09"]
         self.assertEqual({k: s[k] for k in ("messages", "url", "code", "no_segment", "segments", "overlap", "duplicate", "mechanical")},
@@ -172,7 +206,7 @@ class Freeze(unittest.TestCase):
         for p in patches:
             p.start()
             self.addCleanup(p.stop)
-        bc.prepare(self.root, None, [], self.work)
+        bc.prepare(self.root, None, None, [], self.work)
         with contextlib.redirect_stdout(io.StringIO()):
             bc.main(["split", "--work", self.work])
 
@@ -243,7 +277,7 @@ class PublicBuilders(unittest.TestCase):
         src = os.path.join(td, "ly")
         os.makedirs(os.path.join(src, "data", "csv"))
         text = ("陳委員玉珍：（15時16分）你知道我是哪裡來的委員嘛？\\n主席：請交通部王部長說明。王部長國材：好不好，沒有口語詞的一句。\\n"
-                "陳委員玉珍：（15時20分）是不是這樣")
+                "陳委員玉珍：（15時20分）是不是這樣。主席：請說。是不是這樣")
         p = os.path.join(src, "data", "csv", "1.csv")
         with open(p, "w", encoding="utf-8", newline="") as f:
             w = csv.writer(f)
@@ -259,12 +293,13 @@ class PublicBuilders(unittest.TestCase):
         self.assertEqual(outs[0], outs[1])                                                    # byte reproducible
         rows = sorted(l.split("|")[:2] for l in outs[0].decode().split("\n") if l)
         sentences = [r[1] for r in rows]
-        self.assertEqual(sorted(sentences), sorted(["你知道我是哪裡來的委員嘛", "好不好", "是不是這樣"]))
+        self.assertEqual(sorted(sentences), sorted(["你知道我是哪裡來的委員嘛", "是不是這樣"]))   # 好不好 is only a filter word; the second 是不是這樣 is a duplicate
         self.assertTrue(all("委員玉珍" not in s and "王部長國材" not in s and "主席" not in s for r in rows for s in r))
         ctx = {r[1]: r[0] for r in rows}
         self.assertEqual(ctx["你知道我是哪裡來的委員嘛"], "")        # first segment of the speech
-        self.assertEqual(ctx["好不好"], "請交通部王部長說明")
-        self.assertEqual((n["speeches"], n["clauses_2_30_han"], n["clauses_colloquial"], n["rows"]), (1, 5, 3, 3))
+        self.assertEqual(ctx["是不是這樣"], "沒有口語詞的一句")      # the first occurrence is kept
+        self.assertEqual((n["speeches"], n["clauses_2_30_han"], n["clauses_colloquial"], n["after_dropping_bare_filter_words"],
+                          n["after_dropping_duplicate_sentences"], n["rows"]), (1, 7, 4, 3, 2, 2))
         json.dump({**man, "files": [{"path": "data/csv/1.csv", "sha256": "0" * 64}]}, open(os.path.join(src, "manifest.json"), "w"))
         with self.assertRaises(SystemExit):
             bl.run(src, os.path.join(td, "bad.txt"), fake_readings)                           # CSV hash differs from the manifest
@@ -282,20 +317,23 @@ class PublicBuilders(unittest.TestCase):
                  f"全然\t全部\t{bw.AWB}",                          # different reading
                  f"生澀\t生涩\t{bw.AWB}",                          # unreadable right word
                  f"沒有\t\t{bw.AWB}",                              # empty right word
-                 f"藉口\t籍口\tother"]                              # 藉 but not from the AWB rule: kept
+                 f"藉口\t籍口\tother",
+                 "筆蹟\t笔跡\tother",                                # simplified-only gold: dropped
+                 "痕迹\t痕跡\tother"]                                # the gold 痕跡 again: dropped                              # 藉 but not from the AWB rule: kept
         pf = os.path.join(td, "pairs.tsv")
         open(pf, "w", encoding="utf-8").write("\n".join(pairs) + "\n")
         json.dump({"pages": [{"title": bw.AWB, "file": "awb.wikitext", "sha256": c.sha256_file(wf)}]}, open(os.path.join(td, "manifest.json"), "w"))
-        table = {"痕蹟": "ㄏ ㄐ", "痕跡": "ㄏ ㄐ", "全然": "ㄑ ㄖ", "全部": "ㄑ ㄅ", "藉貫": "ㄐ ㄍ", "籍貫": "ㄐ ㄍ", "藉口": "ㄐ ㄎ", "籍口": "ㄐ ㄎ"}
+        table = {"痕蹟": "ㄏ ㄐ", "痕跡": "ㄏ ㄐ", "全然": "ㄑ ㄖ", "全部": "ㄑ ㄅ", "藉貫": "ㄐ ㄍ", "籍貫": "ㄐ ㄍ", "藉口": "ㄐ ㄎ", "籍口": "ㄐ ㄎ", "筆蹟": "ㄅ ㄐ", "笔跡": "ㄅ ㄐ", "痕迹": "ㄏ ㄐ"}
         rd = lambda ss: {s: ("ok", table[s]) if s in table else ("unreadable", "") for s in set(ss)}
         outs = []
         for k in range(2):
             out = os.path.join(td, f"o{k}.txt")
-            n = bw.run(td, out, rd, check_hash=False)
+            n = bw.run(td, out, rd, check_hash=False, simp=lambda: set("笔"))
             outs.append(open(out, "rb").read())
         self.assertEqual(outs[0], outs[1])
         self.assertEqual(outs[0].decode(), "|籍貫|ㄐ ㄍ\n|痕跡|ㄏ ㄐ\n|籍口|ㄐ ㄎ\n")
-        self.assertEqual((n["pairs"], n["after_empty_or_same"], n["dropped_jie_rule_rows"], n["distinct_pairs"], n["rows"]), (9, 8, 2, 5, 3))
+        self.assertEqual((n["pairs"], n["after_empty_or_same"], n["dropped_jie_rule_rows"], n["distinct_pairs"], n["rows"]), (11, 10, 2, 7, 3))
+        self.assertEqual((n["same_reading_pairs"], n["dropped_simplified_gold"], n["dropped_duplicate_gold"]), (5, 1, 1))
         with self.assertRaises(SystemExit):
             bw.run(td, os.path.join(td, "x.txt"), rd)                                         # the pinned pairs.tsv hash does not match
 

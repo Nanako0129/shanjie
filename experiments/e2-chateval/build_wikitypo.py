@@ -6,7 +6,8 @@ Reads SRC/pairs.tsv (wrong, right, source; SHA-256 pinned below) and SRC/AutoWik
 against SRC/manifest.json). Drops the rows of the AutoWikiBrowser rules that turn 藉 into 籍 (context rules: their lookarounds, which
 the pair expansion dropped, are what excluded the exceptions): the rules are found in the raw wikitext by their find/replace and a
 pair is dropped when the rule's regex matches its wrong word, never by position. Keeps the distinct pairs whose wrong and right words
-have identical readings (tools/readings.py; CHECK and unreadable words drop the pair). One row per pair: no context, gold = right
+have identical readings (tools/readings.py; CHECK and unreadable words drop the pair). Then rows whose gold has a TRAD_SIMP_ONLY character and repeated golds (first kept) are
+dropped (main, 2026-10-12). One row per pair: no context, gold = right
 word. Writes OUT (`|right|reading`) and OUT.manifest.json (counts per step, SHA-256). The row file is not for the repo.
 """
 import argparse
@@ -46,7 +47,16 @@ def read_pairs(path):
     return [tuple(l.split("\t")) for l in lines[1:] if l]
 
 
-def run(src, out, readings=c.readings, check_hash=True):
+def trad_simp_only():
+    """The project's simplified-only characters for a traditional sentence (experiments/s2/build_counts.TRAD_SIMP_ONLY), not the full
+    SIMP_ONLY, which holds common Taiwan characters."""
+    sys.path[:0] = [os.path.join(c.ROOT, "experiments", "s2"), os.path.join(c.ROOT, "reference", "proto")]
+    import build_counts
+    build_counts.load_conv()
+    return set(build_counts.TRAD_SIMP_ONLY)
+
+
+def run(src, out, readings=c.readings, check_hash=True, simp=trad_simp_only):
     pf = os.path.join(src, "pairs.tsv")
     if check_hash and c.sha256_file(pf) != PAIRS_SHA:
         sys.exit(f"build_wikitypo: pairs.tsv sha256 {c.sha256_file(pf)[:16]}…, expected {PAIRS_SHA[:16]}…")
@@ -75,8 +85,18 @@ def run(src, out, readings=c.readings, check_hash=True):
     n["dropped_check_or_unreadable"] = len(uniq) - len(both)
     same = [(w, r) for w, r in both if rd[w][1] == rd[r][1]]
     n["dropped_different_reading"] = len(both) - len(same)
+    n["same_reading_pairs"] = len(same)
+    so = simp()
+    same = [(w, r) for w, r in same if not any(ch in so for ch in r)]
+    n["dropped_simplified_gold"] = n["same_reading_pairs"] - len(same)
+    seen, uniq = set(), []
+    for w, r in same:
+        if r not in seen:
+            seen.add(r)
+            uniq.append((w, r))
+    n["dropped_duplicate_gold"] = len(same) - len(uniq)
+    same = uniq
     n["rows"] = len(same)
-    n["duplicate_gold_rows"] = len(same) - len({r for _, r in same})
     text = "".join(f"|{r}|{rd[r][1]}\n" for _, r in same)
     c.write_lf(out, text)
     n["sha256"] = c.sha256_bytes(text.encode("utf-8"))

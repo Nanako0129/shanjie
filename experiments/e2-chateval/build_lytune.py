@@ -4,7 +4,7 @@
 
 Checks every CSV of --src/manifest.json against its SHA-256, strips speaker labels and timestamps, cuts each transcript (= one
 speech) into 2-30 character Han segments with the previous segment of the same speech as context, keeps the segments holding one of
-the colloquial words, draws 5,000 with seed 20261012, and spells them with tools/readings.py (CHECK and unreadable rows dropped).
+the colloquial words, drops clauses that are only a colloquial word and exact duplicate sentences (first kept), draws 5,000 with seed 20261012, and spells them with tools/readings.py (CHECK and unreadable rows dropped).
 Writes OUT (`context|sentence|reading`) and OUT with .manifest.json (row counts per step, SHA-256). The row file is not for the repo.
 """
 import argparse
@@ -61,6 +61,17 @@ def run(src, out, readings=c.readings):
     counts["clauses_2_30_han"] = len(rows)
     rows = [r for r in rows if any(w in r[1] for w in COLLOQUIAL)]
     counts["clauses_colloquial"] = len(rows)
+    # main, 2026-10-12 (before any scoring): a clause that is only a filter word (對不對, 好不好, 是不是, 嘛, 吧 ...) is a bare tag
+    # whose row differs only in context; drop them, then exact duplicate sentences (first in file order kept), then sample.
+    rows = [r for r in rows if r[1] not in COLLOQUIAL]
+    counts["after_dropping_bare_filter_words"] = len(rows)
+    seen, uniq = set(), []
+    for r in rows:
+        if r[1] not in seen:
+            seen.add(r[1])
+            uniq.append(r)
+    rows = uniq
+    counts["after_dropping_duplicate_sentences"] = len(rows)
     pick = random.Random(c.SEED).sample(rows, min(ROWS, len(rows)))
     counts["sampled"] = len(pick)
     rd = readings([s for _, s in pick])

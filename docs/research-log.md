@@ -3708,3 +3708,11 @@ A2（同上）：
 - **候選傾印**（`run_sets.py dumps`，出貨的 n-gram、`--context`、不開詞包）：lytune 聊天 n 4,881、top1 4,282、oracle@64 4,867，書面 top1 4,243、4,864；wikitypo 聊天 n 165、top1 143、oracle@64 159，書面 142、160。傾印檔放在 `~/.cache/shanjie/e2-public/dumps/`，還沒打分。
 - **測試與突變**：新增的測試都接進 `make test`。七個突變（拿掉 `cap` 檢查、`names` 被忽略、前文一律空白、拿掉 10 分鐘條件、2026-10 進判斷期兩種做法、拿掉凍結檢查）都讓指名的測試以斷言失敗（`names` 被忽略時另有一個測試因 KeyError 出錯，斷言失敗的是 `test_fusegrid` 那個）。
 
+## 2026-10-12：E2 打分前的決定（main，還沒有任何打分；契約 §7 最後一列）
+
+- (a) 「藉→籍」規則列：121，不是 122（量到的）。
+- (b) `lytune`：抽樣前先丟整句只是篩選詞的子句，再丟完全相同的句子（留檔案順序的第一個），之後才抽。各步：含口語詞的子句 142,573 → 丟單獨的篩選詞後 109,936 → 去重後 91,842 → 抽 5,000 → CHECK 丟 189、讀不出 0 → **4,811 列**（4,811 個不重複的句子），SHA-256 `0e0fdbed0728a4c3b359995beb03040c6834eb091e4028c9dc1ec104b6eeca96`（完整值在 `lytune.txt.manifest.json`）。傾印：聊天 n 4,811、top1 3,986、oracle@64 4,792；書面 top1 3,971、4,794。
+- (c) `wikitypo`：讀音相同的 165 組詞對，丟正解含 `build_counts.TRAD_SIMP_ONLY` 字元的 3 列、重複的正解 7 列 → **155 列**，SHA-256 `50f4ceb89b6a3d021c0fe273e8512c7b0af7d20f6ffd5c2f145a7c3a251a2d47`。傾印：聊天 n 155、top1 136、oracle@64 152；書面 top1 135、153。
+- (d) Threads 的來源：維護者原本選了 Grok 抓的貼文，之後改用 Meta 官方的「下載你的資訊」匯出，Grok 的檔案已刪除。Threads 的 robots.txt 禁止未經書面許可的自動蒐集。契約 §2.1 抽 10 則核對原頁的步驟，由「匯出就是逐字原文」取代。
+- (e) 維護者也在匯出 Facebook 貼文與留言（可能還有 Messenger）。它們以相同的規則併入 `chatclause`：只用自己的文字、判斷期只到 2026-09、由 main 讀並校對、只記數字；Messenger 只留寄件人是維護者的訊息，別人的由程式丟掉、從不讀。`build_chatclause.py prepare --meta EXPORT_DIR --self-name NAME` 讀這些匯出。**檔案位置我沒有查到可靠的文件**（只憑常見的描述：Messenger 的 `messages/inbox/<對話>/message_N.json`、Facebook 的 `your_posts*.json` 與 `comments*.json`、Threads 資料夾下的 JSON），所以讀取程式是寬鬆的：照檔名與資料夾名找、任何帶時間戳的物件算一則，欄位名對不上就會讀到 0 則；匯出到手之後要先看 `prepare` 印出的每來源列數。Meta 的 JSON 把 UTF-8 位元組存成 latin-1 跳脫（亂碼），讀取時逐字串還原並有測試。
+

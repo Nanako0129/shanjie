@@ -2,7 +2,7 @@
 
 Private data: run by main on the maintainer's machine with --work in the private folder; the row files never enter the repo.
 
-  prepare --work DIR [--discord MESSAGES_DIR] [--threads FILE.jsonl] [--exclude ROWFILE ...]
+  prepare --work DIR [--discord MESSAGES_DIR] [--meta EXPORT_DIR --self-name NAME] [--exclude ROWFILE ...]
       reads the sources, writes DIR/clauses.tsv (month, source, context, sentence; every clause that survives the mechanical
       exclusions, in time order) and DIR/counts.json, prints the per-month counts table (numbers only).
   split --work DIR
@@ -20,7 +20,15 @@ Discord data package: MESSAGES_DIR is the package's messages folder (`Messages/`
 (`c<channel id>/` or just `<id>/`), each holding `messages.json` (a JSON array of objects with ID, Timestamp, Contents) or the older
 `messages.csv` (header ID,Timestamp,Contents,Attachments). Both are read; index.json and every other folder are not. Timestamps are
 `2021-03-14 12:34:56.789000+00:00` (UTC) and are put in UTC+8 (Taiwan has no daylight saving) before the month is taken.
-Threads JSONL: one object per line with url, time (ISO 8601), text; a line without all three is dropped and counted.
+Meta official export ("Download your information", JSON; --meta EXPORT_DIR): Threads posts and replies, Facebook posts and comments,
+Messenger messages. The file layout is not documented in one place, so the reader is tolerant and searches the folder for the known
+names: Threads = any .json under a folder whose name contains "threads"; Facebook posts = your_posts*.json; Facebook comments =
+comments*.json under a folder whose name contains "comments"; Messenger = message_*.json under a folder named "messages". Within a
+file any object with a timestamp (timestamp, timestamp_ms, creation_timestamp, created_timestamp; seconds or milliseconds) is one item,
+its text is the strings under post / comment / text (Facebook), content (Messenger) or text / title / description / post / content (Threads) in it. Meta writes text as UTF-8 bytes escaped as
+latin-1 (mojibake); every string is decoded back (see unmojibake). Messenger items whose sender_name is not --self-name are dropped
+by the program (counted, never examined). Context: Threads and Facebook, first segment blank and later segments the previous one;
+Messenger, the Discord rule (same thread, own previous message within 10 minutes).
 
 Corrections file (optional, UTF-8, tab separated, applied before spelling; the proofreading itself is main's job):
   OLD<TAB>NEW           the sentence OLD becomes NEW
@@ -82,21 +90,97 @@ def discord_messages(root):
     return out
 
 
-def threads_posts(path):
-    """([(channel, id, ts, text)], dropped): channel is the url; a line missing url, time or text (or unreadable) is dropped."""
-    out, dropped = [], 0
-    for line in open(path, encoding="utf-8"):
-        if not line.strip():
-            continue
-        try:
-            r = json.loads(line)
-            url, t, text = r["url"], r["time"], r["text"]
-            if not (url and t and text):
-                raise ValueError
-            out.append((url, url, parse_ts(t), text))
-        except (ValueError, KeyError, TypeError):
-            dropped += 1
-    return out, dropped
+def unmojibake(x):
+    """Meta's JSON holds UTF-8 bytes as latin-1 escapes (\\u00e5\\u00a5\\u00bd for the one character 好); undo that. A string that is not
+    such a byte sequence (it has a character above U+00FF, or the bytes are not UTF-8) is already text and comes back unchanged."""
+    try:
+        return x.encode("latin-1").decode("utf-8")
+    except (UnicodeEncodeError, UnicodeDecodeError):
+        return x
+
+
+TS_KEYS = ("timestamp_ms", "timestamp", "creation_timestamp", "created_timestamp")
+# Which keys hold the typed text. A Facebook `title` is Meta's own sentence ("... commented on ...'s post"), so only Threads reads title.
+TEXT_KEYS = {"threads": ("text", "title", "description", "post", "content"), "facebook": ("post", "comment", "text"), "messenger": ("content",)}
+
+
+def _ts(node):
+    for k in TS_KEYS:
+        v = node.get(k)
+        if isinstance(v, (int, float)) and v > 0:
+            return dt.datetime.fromtimestamp(v / 1000 if v > 1e11 else v, dt.timezone.utc).astimezone(TZ)
+    return None
+
+
+def _texts(node, keys, out):
+    if isinstance(node, dict):
+        for k, v in node.items():
+            if k in keys and isinstance(v, str):
+                out.append(unmojibake(v))
+            else:
+                _texts(v, keys, out)
+    elif isinstance(node, list):
+        for v in node:
+            _texts(v, keys, out)
+    return out
+
+
+def _items(node):
+    """Objects of a Meta JSON tree that carry a timestamp (or a sender_name, so an undated message is still counted)."""
+    if isinstance(node, dict):
+        if "sender_name" in node or any(k in node for k in TS_KEYS):
+            yield node
+        else:
+            for v in node.values():
+                yield from _items(v)
+    elif isinstance(node, list):
+        for v in node:
+            yield from _items(v)
+
+
+def meta_files(root):
+    """{kind: [path]} found under the export folder: threads, facebook_posts, facebook_comments, messenger."""
+    kinds = {"threads": [], "facebook_posts": [], "facebook_comments": [], "messenger": []}
+    for d, _dirs, files in os.walk(root):
+        parts = [p.lower() for p in os.path.relpath(d, root).split(os.sep)]
+        for f in sorted(files):
+            if not f.lower().endswith(".json"):
+                continue
+            p, fl = os.path.join(d, f), f.lower()
+            if "messages" in parts and fl.startswith("message_"):
+                kinds["messenger"].append(p)
+            elif any("threads" in x for x in parts):
+                kinds["threads"].append(p)
+            elif fl.startswith("your_posts"):
+                kinds["facebook_posts"].append(p)
+            elif any("comments" in x for x in parts) and fl.startswith("comments"):
+                kinds["facebook_comments"].append(p)
+    return {k: sorted(v) for k, v in kinds.items()}
+
+
+def meta_messages(root, self_name):
+    """{source: ([(channel, id, ts, text)], {dropped counters})} for threads, facebook (posts and comments) and messenger.
+    Messenger keeps only messages whose (decoded) sender_name equals self_name; the others are counted and not examined."""
+    found = meta_files(root)
+    out = {"threads": ([], {}), "facebook": ([], {}), "messenger": ([], {})}
+    for kind, paths in found.items():
+        src = "facebook" if kind.startswith("facebook") else kind
+        msgs, dropped = out[src]
+        for p in paths:
+            rel = os.path.relpath(p, root)
+            for k, node in enumerate(_items(json.load(open(p, encoding="utf-8")))):
+                if src == "messenger" and unmojibake(str(node.get("sender_name", ""))) != self_name:
+                    dropped["_dropped_other_sender"] = dropped.get("_dropped_other_sender", 0) + 1
+                    continue
+                text = "\n".join(_texts(node, TEXT_KEYS[src], []))
+                ts = _ts(node)
+                if not text.strip():
+                    dropped["_dropped_no_text"] = dropped.get("_dropped_no_text", 0) + 1
+                    continue
+                # a messenger thread is its folder (message_1.json, message_2.json ... belong together); a post or comment stands alone
+                chan = os.path.dirname(rel) if src == "messenger" else f"{rel}#{k}"
+                msgs.append((chan, f"{rel}#{k}", ts, text))
+    return out
 
 
 # ------------------------------------------------------------------ clauses
@@ -138,7 +222,7 @@ def load_exclude(paths):
     return s
 
 
-def prepare(discord_root, threads_file, exclude_files, work):
+def prepare(discord_root, meta_root, self_name, exclude_files, work):
     """Writes clauses.tsv and counts.json; returns the counts {source: {month: {step: n}, '_dropped_...': n}}."""
     exclude = load_exclude(exclude_files)
     counts = {}
@@ -149,10 +233,11 @@ def prepare(discord_root, threads_file, exclude_files, work):
     sources = []                                # (name, messages, cross-message context)
     if discord_root:
         sources.append(("discord", discord_messages(discord_root), True))
-    if threads_file:
-        posts, dropped = threads_posts(threads_file)
-        counts["threads"] = {"_dropped_no_url_time_text": dropped}
-        sources.append(("threads", posts, False))
+    if meta_root:
+        for src, (msgs, dropped) in meta_messages(meta_root, self_name).items():
+            if msgs or dropped:
+                counts[src] = dict(dropped)
+                sources.append((src, msgs, src == "messenger"))
     rows = []                                   # (ts, source rank, month, source, context, sentence)
     for rank, (src, msgs, cross) in enumerate(sources):
         dated = [m for m in msgs if m[2] is not None]
@@ -327,7 +412,7 @@ def main(argv=None):
         p = sub.add_parser(name)
         p.add_argument("--work", required=True)
         if name == "prepare":
-            p.add_argument("--discord"); p.add_argument("--threads"); p.add_argument("--exclude", nargs="*", default=[])
+            p.add_argument("--discord"); p.add_argument("--meta"); p.add_argument("--self-name"); p.add_argument("--exclude", nargs="*", default=[])
         if name in ("freeze", "emit"):
             p.add_argument("--period", choices=["tune", "judge"], required=True)
         if name == "freeze":
@@ -336,9 +421,11 @@ def main(argv=None):
             p.add_argument("--out", required=True)
     a = ap.parse_args(argv)
     if a.cmd == "prepare":
-        if not (a.discord or a.threads):
-            ap.error("give --discord and/or --threads")
-        counts = prepare(a.discord, a.threads, a.exclude, a.work)
+        if not (a.discord or a.meta):
+            ap.error("give --discord and/or --meta")
+        if a.meta and not a.self_name:
+            ap.error("--meta needs --self-name (the sender name of your own Messenger messages)")
+        counts = prepare(a.discord, a.meta, a.self_name, a.exclude, a.work)
         show_counts(counts)
     elif a.cmd == "split":
         by = mechanical_by_month(json.load(open(os.path.join(a.work, "counts.json"), encoding="utf-8")))
