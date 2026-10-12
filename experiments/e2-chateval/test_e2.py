@@ -77,7 +77,7 @@ class Context(unittest.TestCase):
         work, _ = self.prepare({"c1": [("1", ts(5, "12:00"), "先說這個，再說那個"), ("2", ts(5, "12:03"), "接著回答")]})
         self.assertEqual({s: x for _m, _src, x, s in clauses_of(work)}["接著回答"], "再說那個")
 
-    def test_meta_export_threads_facebook_messenger(self):
+    def test_meta_export_exact_files(self):
         td = tempfile.mkdtemp()
         root = os.path.join(td, "export")
         me = "陳小明"
@@ -85,37 +85,70 @@ class Context(unittest.TestCase):
         def moji(x):        # Meta's escaping: the UTF-8 bytes as latin-1 characters
             return x.encode("utf-8").decode("latin-1")
 
-        def put(rel, obj):
+        def mj(o):          # every string of a fixture, keys included
+            if isinstance(o, str):
+                return moji(o)
+            if isinstance(o, list):
+                return [mj(v) for v in o]
+            return {moji(k): mj(v) for k, v in o.items()} if isinstance(o, dict) else o
+
+        def put(rel, obj, raw=None):
             p = os.path.join(root, rel)
             os.makedirs(os.path.dirname(p), exist_ok=True)
             with open(p, "w", encoding="utf-8") as f:
-                json.dump(obj, f, ensure_ascii=True)
+                f.write(raw if raw is not None else json.dumps(mj(obj), ensure_ascii=True))
             return p
 
         t0 = int(dt.datetime(2026, 3, 5, 12, 0, tzinfo=dt.timezone.utc).timestamp())
-        put("threads/threads_and_replies.json", {"text_post_app_text_posts": [
-            {"creation_timestamp": t0, "text": moji("串文一，串文二")}, {"creation_timestamp": t0 + 60, "text": moji("另一串文")},
-            {"creation_timestamp": t0 + 120, "text": ""}]})
-        put("posts/your_posts__check_ins__photos_and_videos_1.json", [
-            {"timestamp": t0, "title": moji("某某更新了狀態"), "data": [{"post": moji("臉書貼文，第二段")}]}])
-        put("comments_and_reactions/comments.json", {"comments_v2": [
-            {"timestamp": t0, "title": moji("某某在別人的貼文留言"), "data": [{"comment": {"comment": moji("一則留言"), "timestamp": t0, "author": moji(me)}}]}]})
-        put("your_activity/messages/inbox/friend_abc/message_1.json", {"title": moji("朋友"), "messages": [
-            {"sender_name": moji(me), "timestamp_ms": 1000 * t0, "content": moji("我的第一句")},
-            {"sender_name": moji("別人"), "timestamp_ms": 1000 * (t0 + 120), "content": moji("對方說的話")},
-            {"sender_name": moji(me), "timestamp_ms": 1000 * (t0 + 300), "content": moji("五分鐘後的第二則")},
-            {"sender_name": moji(me), "timestamp_ms": 1000 * (t0 + 3600), "content": moji("隔很久的話")}]})
-        raw = open(os.path.join(root, "threads/threads_and_replies.json"), encoding="utf-8").read()
+        pth = put("threads/threads_and_replies.json", {"text_post_app_text_posts": [
+            {"media": [{"uri": "u", "creation_timestamp": t0, "media_metadata": {}, "title": "串文一，串文二", "cross_post_source": {}, "text_app_post": {}}]},
+            # multi-media post: its own title and time win over media[0]
+            {"title": "多媒體的貼文", "creation_timestamp": t0 + 60, "media": [{"creation_timestamp": t0 + 999, "title": "不用這個標題"}, {"title": "也不用"}]},
+            {"media": [{"creation_timestamp": t0 + 120, "title": ""}]}]})
+        put("facebook/your_posts__check_ins__photos_and_videos_1.json", [
+            {"timestamp": t0, "attachments": [], "title": "某某更新了狀態", "data": [{"post": "臉書貼文，第二段"}, {"update_timestamp": 5}, {"post": "第二個欄位"}]},
+            {"timestamp": t0 + 1, "title": "某某分享了連結", "data": [{"external_context": {"url": "x"}}]}])      # no post text: skipped
+        put("facebook/your_posts__check_ins__photos_and_videos_2.json", [{"timestamp": t0 + 2, "title": "標題", "data": [{"post": "第二個檔案的貼文"}]}])
+        put("facebook/posts_on_other_pages_and_profiles.json", [
+            {"timestamp": t0, "media": [], "fbid": "1", "label_values": [{"label": "網址", "value": "不是這個"}, {"label": "訊息", "value": "別人的牆上寫的話"}]}])
+        put("facebook/comments.json", {"comments_v2": [
+            {"timestamp": t0, "title": "某某在別人的貼文留言", "data": [
+                {"comment": {"timestamp": t0 + 5, "comment": "我的留言，第二句", "author": me}},
+                {"comment": {"timestamp": t0 + 6, "comment": "別人的留言不讀", "author": "別人"}}]}]})
+        # decoys: other files of the real export, valid JSON of a shape no reader here knows; the opened-files check below is the guard
+        decoy = put("facebook/followers.json", None, raw='{"relationships_followers": [{"timestamp": 1, "post": "不能讀"}]}')
+        put("threads/followers.json", None, raw='{"text_post_app_text_posts": [{"title": "不能讀的追蹤者", "creation_timestamp": 1}]}')
+        put("threads/liked_threads.json", None, raw='{"text_post_app_text_posts": [{"title": "不能讀的按讚", "creation_timestamp": 1}]}')
+        raw = open(pth, encoding="utf-8").read()
         self.assertIn("\\u00e4", raw)                                  # the fixture really is mojibake on disk
         self.assertTrue(all(ord(ch) < 128 for ch in raw))
-        counts = bc.prepare(None, root, me, [], os.path.join(td, "w"))
+        real_open, opened = open, []
+
+        def spy(f, *a, **k):
+            if isinstance(f, (str, os.PathLike)) and os.fspath(f).startswith(root):
+                opened.append(os.path.relpath(os.fspath(f), root))
+            return real_open(f, *a, **k)
+        with mock.patch("builtins.open", spy):
+            counts = bc.prepare(None, root, me, [], os.path.join(td, "w"))
+        self.assertEqual(sorted(opened), sorted(["threads/threads_and_replies.json", "facebook/your_posts__check_ins__photos_and_videos_1.json",
+                                                 "facebook/your_posts__check_ins__photos_and_videos_2.json",
+                                                 "facebook/posts_on_other_pages_and_profiles.json", "facebook/comments.json"]))
         rows = {(src, s): x for _m, src, x, s in clauses_of(os.path.join(td, "w"))}
-        self.assertEqual(rows, {("threads", "串文一"): "", ("threads", "串文二"): "串文一", ("threads", "另一串文"): "",
-                                ("facebook", "臉書貼文"): "", ("facebook", "第二段"): "臉書貼文", ("facebook", "一則留言"): "",
-                                ("messenger", "我的第一句"): "", ("messenger", "五分鐘後的第二則"): "我的第一句", ("messenger", "隔很久的話"): ""})
-        self.assertNotIn("對方說的話", [s for _k, s in rows])                # the other person's message never reaches the rows
-        self.assertEqual(counts["messenger"]["_dropped_other_sender"], 1)
+        self.assertEqual(rows, {("threads", "串文一"): "", ("threads", "串文二"): "串文一", ("threads", "多媒體的貼文"): "",
+                                ("facebook_posts", "臉書貼文"): "", ("facebook_posts", "第二段"): "臉書貼文",
+                                ("facebook_posts", "第二個欄位"): "第二段", ("facebook_posts", "第二個檔案的貼文"): "",
+                                ("facebook_other_pages", "別人的牆上寫的話"): "",
+                                ("facebook_comments", "我的留言"): "", ("facebook_comments", "第二句"): "我的留言"})
+        self.assertEqual(counts["facebook_comments"]["_dropped_other_author"], 1)
         self.assertEqual(counts["threads"]["_dropped_no_text"], 1)
+        self.assertEqual(counts["facebook_posts"]["_dropped_no_text"], 1)
+        self.assertEqual({k: sum(v[m]["messages"] for m in v if not m.startswith("_")) for k, v in counts.items()},
+                         {"threads": 2, "facebook_posts": 2, "facebook_other_pages": 1, "facebook_comments": 1})
+        # the post-level time of the multi-media post is the one used: 2026-03 either way, so check the timestamp itself
+        msgs = bc.meta_messages(root, me)["threads"][0]
+        self.assertEqual(msgs[1][2].timestamp(), t0 + 60)
+        # no export at all: nothing is read and nothing fails
+        self.assertEqual({k: v for k, v in bc.meta_messages(os.path.join(td, "none"), me).items() if v[0]}, {})
 
     def test_unmojibake(self):
         self.assertEqual(bc.unmojibake("好"), "好")

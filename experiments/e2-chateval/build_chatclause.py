@@ -20,15 +20,12 @@ Discord data package: MESSAGES_DIR is the package's messages folder (`Messages/`
 (`c<channel id>/` or just `<id>/`), each holding `messages.json` (a JSON array of objects with ID, Timestamp, Contents) or the older
 `messages.csv` (header ID,Timestamp,Contents,Attachments). Both are read; index.json and every other folder are not. Timestamps are
 `2021-03-14 12:34:56.789000+00:00` (UTC) and are put in UTC+8 (Taiwan has no daylight saving) before the month is taken.
-Meta official export ("Download your information", JSON; --meta EXPORT_DIR): Threads posts and replies, Facebook posts and comments,
-Messenger messages. The file layout is not documented in one place, so the reader is tolerant and searches the folder for the known
-names: Threads = any .json under a folder whose name contains "threads"; Facebook posts = your_posts*.json; Facebook comments =
-comments*.json under a folder whose name contains "comments"; Messenger = message_*.json under a folder named "messages". Within a
-file any object with a timestamp (timestamp, timestamp_ms, creation_timestamp, created_timestamp; seconds or milliseconds) is one item,
-its text is the strings under post / comment / text (Facebook), content (Messenger) or text / title / description / post / content (Threads) in it. Meta writes text as UTF-8 bytes escaped as
-latin-1 (mojibake); every string is decoded back (see unmojibake). Messenger items whose sender_name is not --self-name are dropped
-by the program (counted, never examined). Context: Threads and Facebook, first segment blank and later segments the previous one;
-Messenger, the Discord rule (same thread, own previous message within 10 minutes).
+Meta official export ("Download your information", JSON; --meta EXPORT_DIR --self-name NAME): only these four exact relative paths
+are opened (each optional; the rest of the export, e.g. followers.json, is never opened): threads/threads_and_replies.json,
+facebook/your_posts__check_ins__photos_and_videos_N.json, facebook/posts_on_other_pages_and_profiles.json, facebook/comments.json
+(the shapes are in meta_messages). Meta writes every string, keys and labels included, as UTF-8 bytes escaped as latin-1 (mojibake);
+decode_tree undoes it. Comments are kept only when the author is --self-name. Each file is its own source in the tables. Context:
+a post or comment's first segment is blank, later segments follow the previous one.
 
 Corrections file (optional, UTF-8, tab separated, applied before spelling; the proofreading itself is main's job):
   OLD<TAB>NEW           the sentence OLD becomes NEW
@@ -99,87 +96,80 @@ def unmojibake(x):
         return x
 
 
-TS_KEYS = ("timestamp_ms", "timestamp", "creation_timestamp", "created_timestamp")
-# Which keys hold the typed text. A Facebook `title` is Meta's own sentence ("... commented on ...'s post"), so only Threads reads title.
-TEXT_KEYS = {"threads": ("text", "title", "description", "post", "content"), "facebook": ("post", "comment", "text"), "messenger": ("content",)}
+def decode_tree(x):
+    """Every string of a Meta JSON tree, keys and labels included, through unmojibake."""
+    if isinstance(x, str):
+        return unmojibake(x)
+    if isinstance(x, list):
+        return [decode_tree(v) for v in x]
+    if isinstance(x, dict):
+        return {unmojibake(k): decode_tree(v) for k, v in x.items()}
+    return x
 
 
-def _ts(node):
-    for k in TS_KEYS:
-        v = node.get(k)
-        if isinstance(v, (int, float)) and v > 0:
-            return dt.datetime.fromtimestamp(v / 1000 if v > 1e11 else v, dt.timezone.utc).astimezone(TZ)
-    return None
+def epoch(v):
+    return dt.datetime.fromtimestamp(v, dt.timezone.utc).astimezone(TZ) if isinstance(v, (int, float)) and v > 0 else None
 
 
-def _texts(node, keys, out):
-    if isinstance(node, dict):
-        for k, v in node.items():
-            if k in keys and isinstance(v, str):
-                out.append(unmojibake(v))
-            else:
-                _texts(v, keys, out)
-    elif isinstance(node, list):
-        for v in node:
-            _texts(v, keys, out)
-    return out
+THREADS_FILE = os.path.join("threads", "threads_and_replies.json")
+FB_POSTS = re.compile(r"your_posts__check_ins__photos_and_videos_(\d+)\.json\Z")
+FB_OTHER = os.path.join("facebook", "posts_on_other_pages_and_profiles.json")
+FB_COMMENTS = os.path.join("facebook", "comments.json")
+OTHER_LABEL = "訊息"       # the label of a post's text in posts_on_other_pages_and_profiles.json
 
 
-def _items(node):
-    """Objects of a Meta JSON tree that carry a timestamp (or a sender_name, so an undated message is still counted)."""
-    if isinstance(node, dict):
-        if "sender_name" in node or any(k in node for k in TS_KEYS):
-            yield node
-        else:
-            for v in node.values():
-                yield from _items(v)
-    elif isinstance(node, list):
-        for v in node:
-            yield from _items(v)
-
-
-def meta_files(root):
-    """{kind: [path]} found under the export folder: threads, facebook_posts, facebook_comments, messenger."""
-    kinds = {"threads": [], "facebook_posts": [], "facebook_comments": [], "messenger": []}
-    for d, _dirs, files in os.walk(root):
-        parts = [p.lower() for p in os.path.relpath(d, root).split(os.sep)]
-        for f in sorted(files):
-            if not f.lower().endswith(".json"):
-                continue
-            p, fl = os.path.join(d, f), f.lower()
-            if "messages" in parts and fl.startswith("message_"):
-                kinds["messenger"].append(p)
-            elif any("threads" in x for x in parts):
-                kinds["threads"].append(p)
-            elif fl.startswith("your_posts"):
-                kinds["facebook_posts"].append(p)
-            elif any("comments" in x for x in parts) and fl.startswith("comments"):
-                kinds["facebook_comments"].append(p)
-    return {k: sorted(v) for k, v in kinds.items()}
+def _load(root, rel):
+    p = os.path.join(root, rel)
+    return decode_tree(json.load(open(p, encoding="utf-8"))) if os.path.isfile(p) else None
 
 
 def meta_messages(root, self_name):
-    """{source: ([(channel, id, ts, text)], {dropped counters})} for threads, facebook (posts and comments) and messenger.
-    Messenger keeps only messages whose (decoded) sender_name equals self_name; the others are counted and not examined."""
-    found = meta_files(root)
-    out = {"threads": ([], {}), "facebook": ([], {}), "messenger": ([], {})}
-    for kind, paths in found.items():
-        src = "facebook" if kind.startswith("facebook") else kind
+    """{source: ([(channel, id, ts, text)], {dropped counters})} from exactly these files under the export folder (each optional,
+    nothing else is opened, no folder is walked or globbed beyond the one name pattern):
+      threads/threads_and_replies.json  {"text_post_app_text_posts": [post]}: text = post title, else media[0] title; time =
+          post creation_timestamp, else media[0] creation_timestamp (seconds)
+      facebook/your_posts__check_ins__photos_and_videos_N.json  [{timestamp, data: [{post}], title}]: text = the data[].post
+          strings joined with newline (the outer title is Meta's own sentence and is not read)
+      facebook/posts_on_other_pages_and_profiles.json  [{timestamp, label_values: [{label, value}]}]: text = the value of the
+          label 訊息
+      facebook/comments.json  {"comments_v2": [{timestamp, data: [{comment: {timestamp, comment, author}}]}]}: one item per
+          comment whose author is self_name (the others are counted and never read further)
+    Sources: threads, facebook_posts, facebook_other_pages, facebook_comments. A post or comment is one message: its first segment
+    has no context and the later ones follow the previous segment."""
+    out = {k: ([], {}) for k in ("threads", "facebook_posts", "facebook_other_pages", "facebook_comments")}
+
+    def add(src, rel, k, ts, text):
         msgs, dropped = out[src]
-        for p in paths:
-            rel = os.path.relpath(p, root)
-            for k, node in enumerate(_items(json.load(open(p, encoding="utf-8")))):
-                if src == "messenger" and unmojibake(str(node.get("sender_name", ""))) != self_name:
-                    dropped["_dropped_other_sender"] = dropped.get("_dropped_other_sender", 0) + 1
-                    continue
-                text = "\n".join(_texts(node, TEXT_KEYS[src], []))
-                ts = _ts(node)
-                if not text.strip():
-                    dropped["_dropped_no_text"] = dropped.get("_dropped_no_text", 0) + 1
-                    continue
-                # a messenger thread is its folder (message_1.json, message_2.json ... belong together); a post or comment stands alone
-                chan = os.path.dirname(rel) if src == "messenger" else f"{rel}#{k}"
-                msgs.append((chan, f"{rel}#{k}", ts, text))
+        if not (text or "").strip():
+            dropped["_dropped_no_text"] = dropped.get("_dropped_no_text", 0) + 1
+        else:
+            msgs.append((f"{rel}#{k}", f"{rel}#{k}", epoch(ts), text))
+
+    d = _load(root, THREADS_FILE)
+    for k, post in enumerate((d or {}).get("text_post_app_text_posts", [])):
+        media = (post.get("media") or [{}])[0]
+        add("threads", THREADS_FILE, k, post.get("creation_timestamp") or media.get("creation_timestamp"), post.get("title") or media.get("title"))
+    fb = os.path.join(root, "facebook")
+    names = sorted((n for n in os.listdir(fb) if FB_POSTS.match(n)), key=lambda n: int(FB_POSTS.match(n).group(1))) if os.path.isdir(fb) else []
+    for n in names:
+        rel = os.path.join("facebook", n)
+        for k, e in enumerate(_load(root, rel)):
+            posts = [x["post"] for x in e.get("data", []) if isinstance(x, dict) and isinstance(x.get("post"), str)]
+            add("facebook_posts", rel, k, e.get("timestamp"), "\n".join(posts))
+    for k, e in enumerate(_load(root, FB_OTHER) or []):
+        add("facebook_other_pages", FB_OTHER, k, e.get("timestamp"),
+            "\n".join(v.get("value", "") for v in e.get("label_values", []) if v.get("label") == OTHER_LABEL))
+    k = 0
+    for e in (_load(root, FB_COMMENTS) or {}).get("comments_v2", []):
+        for x in e.get("data", []):
+            cm = x.get("comment")
+            if not isinstance(cm, dict):
+                continue
+            k += 1
+            if cm.get("author") != self_name:
+                out["facebook_comments"][1]["_dropped_other_author"] = out["facebook_comments"][1].get("_dropped_other_author", 0) + 1
+                continue
+            add("facebook_comments", FB_COMMENTS, k, cm.get("timestamp") or e.get("timestamp"), cm.get("comment"))
     return out
 
 
@@ -237,7 +227,7 @@ def prepare(discord_root, meta_root, self_name, exclude_files, work):
         for src, (msgs, dropped) in meta_messages(meta_root, self_name).items():
             if msgs or dropped:
                 counts[src] = dict(dropped)
-                sources.append((src, msgs, src == "messenger"))
+                sources.append((src, msgs, False))
     rows = []                                   # (ts, source rank, month, source, context, sentence)
     for rank, (src, msgs, cross) in enumerate(sources):
         dated = [m for m in msgs if m[2] is not None]
@@ -424,7 +414,7 @@ def main(argv=None):
         if not (a.discord or a.meta):
             ap.error("give --discord and/or --meta")
         if a.meta and not a.self_name:
-            ap.error("--meta needs --self-name (the sender name of your own Messenger messages)")
+            ap.error("--meta needs --self-name (the author name on your own Facebook comments)")
         counts = prepare(a.discord, a.meta, a.self_name, a.exclude, a.work)
         show_counts(counts)
     elif a.cmd == "split":
