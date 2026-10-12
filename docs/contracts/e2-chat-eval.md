@@ -200,4 +200,8 @@
 
 ## 8. 結果
 
-（還沒做）
+- **已做（2026-10-12，不需要維護者資料的部分）**：`evalstats --net`、`fusegrid` 的 `names`／`cap`、`judge.py`、`run_sets` 的三個集合名、`build_lytune.py`、`build_wikitypo.py`、`build_chatclause.py`（只有合成資料的測試）、重現關卡；`lytune` 4,881 列、`wikitypo` 165 列，數字與雜湊見研究紀錄 2026-10-12「E2 實作」。
+- **和契約不同的地方**：
+  - `wikitypo` 丟掉的「藉→籍」規則列是 121，不是 122（規則比對的結果）。
+  - `fusegrid.fixed_broken` 的 `names` 預設是 None（維持傳入扁平列清單的舊用法）；給 `names` 時第一個參數改成「集合名 → 列」的字典。
+- **還沒做**：`chatclause` 的真實資料、R1／R2／R3 的表、公開集合與守門集合的打分、fresh verifier。
