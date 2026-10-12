@@ -27,7 +27,7 @@ final class SettingsTests: XCTestCase {
         let acg = MemoryAcgPackStore(), tint = MemoryGlassTintStore(), dialogs = FakeDialogs()
         let shell = Shell(resources: resources, panel: FakePanel(), isSecureInput: { secure }, layoutStore: layout,
                           learningDirectory: learning, dialogs: dialogs, demoteStore: demote, predictionStore: prediction, abbreviationStore: abbreviation,
-                          acgPackStore: acg, glassTintStore: tint, candidateOrientationStore: MemoryCandidateOrientationStore(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore())
+                          acgPackStore: acg, glassTintStore: tint, candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore())
         XCTAssertNotNil(shell.engine)
         return Rig(shell: shell, model: SettingsModel(shell: shell), controller: Controller(shell),
                    layout: layout, demote: demote, prediction: prediction, abbreviation: abbreviation, acg: acg, tint: tint, dialogs: dialogs)
@@ -66,6 +66,27 @@ final class SettingsTests: XCTestCase {
         XCTAssertTrue(r.model.abbreviation)
         r.model.setPrediction(true)
         XCTAssertEqual(item(r, .toggleAbbreviation)?.enabled, true)
+    }
+
+    /// s7c2b section 2.2: the window's 語意校正 goes through the same setter as the menu item, the two stay in sync, and with the
+    /// demotion table off the menu item is greyed (checkmark kept), which the window's toggle follows through `demote` (F11).
+    func testRerankFromTheWindowReachesMenuAndFollowsDemote() {
+        let r = rig()
+        XCTAssertFalse(r.model.rerank, "never chosen: off (revised 2026-10-12)")
+        XCTAssertEqual(item(r, .toggleRerank)?.checked, false)
+        r.model.setRerank(true)
+        XCTAssertTrue(r.shell.rerankOn)
+        XCTAssertEqual(item(r, .toggleRerank)?.checked, true)
+        XCTAssertTrue(r.model.rerank)
+        r.controller.session.perform(.toggleRerank)
+        XCTAssertFalse(r.model.rerank, "the model did not follow the menu")
+        r.model.setRerank(true)
+        r.model.setDemote(false)
+        XCTAssertFalse(r.model.demote, "the window greys 語意校正 on this")
+        XCTAssertEqual(item(r, .toggleRerank)?.enabled, false)
+        XCTAssertEqual(item(r, .toggleRerank)?.checked, true, "greyed, still showing the setting")
+        r.model.setDemote(true)
+        XCTAssertEqual(item(r, .toggleRerank)?.enabled, true)
     }
 
     func testDemoteFromTheWindowReachesStoreAndMenu() {
@@ -129,7 +150,7 @@ final class SettingsTests: XCTestCase {
 
     func testMenuHasTheSettingsItemBeforeClear() {
         let r = rig()
-        XCTAssertEqual(r.controller.session.menu.map(\.title), ["標準鍵盤", "倚天鍵盤", "避免把敏感字詞排在前面", "即時預測", "可省略韻母", "動漫與遊戲詞", "這個 App 用聊天設定", "善解設定…", "清除選字記憶…", "不要備份選字記憶"])
+        XCTAssertEqual(r.controller.session.menu.map(\.title), ["標準鍵盤", "倚天鍵盤", "避免把敏感字詞排在前面", "即時預測", "可省略韻母", "語意校正", "動漫與遊戲詞", "這個 App 用聊天設定", "善解設定…", "清除選字記憶…", "不要備份選字記憶"])
         var opened = 0
         r.shell.onOpenSettings = { opened += 1 }
         r.controller.session.perform(.openSettings)
@@ -225,7 +246,7 @@ final class SettingsTests: XCTestCase {
         let tint = MemoryGlassTintStore(0.4)
         let shell = Shell(resources: resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(),
                           learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(),
-                          predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), acgPackStore: MemoryAcgPackStore(), glassTintStore: tint, candidateOrientationStore: MemoryCandidateOrientationStore(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore())
+                          predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), acgPackStore: MemoryAcgPackStore(), glassTintStore: tint, candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore())
         XCTAssertEqual(shell.glassTint, 0.4)
         tint.glassTint = 0.9
         XCTAssertEqual(shell.glassTint, 0.4, "the Shell reads the store only at start and on set")
@@ -236,7 +257,7 @@ final class SettingsTests: XCTestCase {
         var secure = false
         let shell = Shell(resources: resources, panel: FakePanel(), isSecureInput: { secure }, layoutStore: MemoryLayoutStore(),
                           learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(),
-                          predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore())
+                          predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore())
         let model = SettingsModel(shell: shell)
         secure = true
         shell.changed()
