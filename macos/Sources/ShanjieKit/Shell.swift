@@ -342,6 +342,8 @@ public final class Shell {
     var rerankTake: (CoreEngine, @escaping @Sendable (OpaquePointer) -> Void) -> (RerankJob?, Int32) = { $0.rerankTake(free: $1) }
     /// `RerankJob.apply(on:)`; the tests replace it to see apply's non-zero codes other than 5 handled.
     var rerankApply: (RerankJob, CoreEngine) -> CoreResult = { $0.apply(on: $1) }
+    /// Every value `build()` passed to `setRerank`, in order (the tests read it: a nil store must send false, not nothing).
+    private(set) var rerankSent: [Bool] = []
     /// Whether the current engine has the small model (set by every `build()`): false when there is no engine, when load_lm
     /// failed (load_tinylm is then skipped) or when load_tinylm returned non-zero. Without it no job is ever made.
     private(set) var rerankAvailable = false
@@ -716,7 +718,9 @@ public final class Shell {
         if case .failed(let c) = e.setCandidateVertical(candidateVertical) {
             Log.shell.error("shanjie_engine_set_candidate_vertical failed, code \(c)")
         }
-        // A rebuilt engine starts with the core's default (on), and load_tinylm leaves the switch alone: sent every time.
+        // A rebuilt engine starts with the core's default (off since S7c-2c), and load_tinylm leaves the switch alone: the shell's
+        // own value is sent every time, so the core's default never decides.
+        rerankSent.append(rerankOn)
         if case .failed(let c) = e.setRerank(rerankOn) {
             Log.shell.error("shanjie_engine_set_rerank failed, code \(c)")
         }

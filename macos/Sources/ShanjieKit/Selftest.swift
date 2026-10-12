@@ -20,9 +20,12 @@ public enum Selftest {
     static let packWord = "碇源堂"
 
     /// s7c2b section 2.5 (revised 2026-10-12): dev302 row 65 `ㄨㄛˇ ㄉㄥˇ ㄧ ㄒㄧㄚˋ ㄗㄞˋ ㄍㄨㄛˋ ㄑㄩˋ` on the standard layout, chat
-    /// profile, no left context; a space is the first tone. The n-gram's first is 我等一下在過去; the small model (tinylm-v2, the
-    /// strict chat values) picks 我等一下再過去 (CLI `--profile chat --context --tinylm`, top1 on this row 0 -> 1). Row 25, the sentence
-    /// under tinylm-v1, is not changed by v2's chat setting. The tests derive the same keys from the zhuyin independently.
+    /// profile, no left context, the bundled pack loaded; a space is the first tone. The n-gram's first is 我等一下在過去; the small
+    /// model (tinylm-v2) picks 我等一下再過去. Measured under these conditions by this selftest and by RerankTests (2026-10-12, both
+    /// pass). Row 25 (執行這個城市 -> 程式), the sentence under tinylm-v1, stayed 城市 under v2 in the same XCTest run (14 failures
+    /// before the swap). A different condition, for context only: the CLI with `--profile chat --context --tinylm` and no pack
+    /// gave top1 0 -> 4 on rows 25, 27, 46, 49 and 65, row 25 being the one that did not change. The tests derive the same keys
+    /// from the zhuyin independently.
     static let rerankRowStandard = "ji32/3u vu84y94eji4fm4"
     static let rerankedText = "我等一下再過去"
     static let ngramText = "我等一下在過去"
@@ -63,12 +66,20 @@ public enum Selftest {
         return 0
     }
 
+    /// The keys of a layout string: a space is the first tone, everything else a character key. The one mapping `type` and
+    /// `typeReranked` share.
+    private static func keyEvents(_ keys: String) -> [ShanjieKey] {
+        keys.unicodeScalars.map {
+            $0 == " " ? ShanjieKey(kind: KeyMap.space, ch: 0, modifiers: 0)
+                      : ShanjieKey(kind: KeyMap.char, ch: $0.value, modifiers: 0)
+        }
+    }
+
     /// Types `keys` and after every key takes the job, runs it and applies it, all on this thread (the shell runs it on a queue);
     /// returns the composition shown at the end and discards it, or a nonzero code.
     private static func typeReranked(_ keys: String, _ engine: CoreEngine) -> (String, Int32) {
         var shown = ""
-        for k in keys.unicodeScalars.map({ $0 == " " ? ShanjieKey(kind: KeyMap.space, ch: 0, modifiers: 0)
-                                                     : ShanjieKey(kind: KeyMap.char, ch: $0.value, modifiers: 0) }) {
+        for k in keyEvents(keys) {
             switch engine.key(k) {
             case .ok(let o): shown = o.preedit
             case .failed(let c): return ("", c)
@@ -103,10 +114,7 @@ public enum Selftest {
 
     /// Types `keys` (a space is the first tone) and Enter; returns the committed text, or a nonzero code.
     private static func type(_ keys: String, _ engine: CoreEngine) -> (String, Int32) {
-        var all = keys.unicodeScalars.map {
-            $0 == " " ? ShanjieKey(kind: KeyMap.space, ch: 0, modifiers: 0)
-                      : ShanjieKey(kind: KeyMap.char, ch: $0.value, modifiers: 0)
-        }
+        var all = keyEvents(keys)
         all.append(ShanjieKey(kind: KeyMap.enter, ch: 0, modifiers: 0))
         var committed = ""
         for k in all {

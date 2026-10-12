@@ -3695,3 +3695,10 @@ A2（同上）：
 - **突變**：把 `rerankStore.rerank ?? false` 暫時改回 `?? true`，跑 `swift test --filter 'RerankTests/testNeverChosen|SettingsTests/testRerank'`：exit 1，兩個測試共 8 個斷言失敗（`default off`、`the window shows off too`、選單的 checked、`no job: the engine was told setRerank(false)`：2 ≠ 0、`rerankTaken` 7 ≠ 0、組字是 再 不是 在、SettingsTests 的 `never chosen: off`），沒有編譯錯誤；還原後重跑全綠。沒有另外突變 `rerankOn` 的起始值：init 一定覆蓋它，改它看不到差別。
 - **結果**：`make test`（v2 檔、`shasum -a 256 -c data/*.sha256` 三個 OK）rc=0，XCTest 188 個、1 個略過、0 失敗；Rust 與 Python 的部分全綠（輸出裡一行 `--extra-lexicon 只用在 --expected` 是 Python 測試故意觸發的錯誤訊息）。
 - **沒做**：`scripts/check-app.sh`、`make selftest-bundled`、打包與實機（main 跑）；沒有推送、沒有碰 PR #118。
+
+## 2026-10-12：#118 本地 /code-review 一輪（557d3df 之後）
+
+- **處置**：修正 12 項、延後 2 項、不改 1 項。修正：`LICENSES/data.md` 兩處（v2 的融合參數和 v1 不同，不只多 δ；v2 寫成已發佈的 Release 附件、從含 #118 的第一個 App 版本起隨附，不寫「已出貨」）、README 的 S7 列（預設關）、`build()` 裡「核心預設開」的註解（Shell／Core／main 其餘「預設開」的字樣是別的開關，沒改）、`docs/data-files.md` 的換檔清單（加 selftest 句子要重新量）、`s3b.md` §13.2 的選單順序（`profile-choice.md` 同一段只談自己那一項，不需改）、PLAN 兩處（`set_learning` 的說法與 #118 的預設／v2 已完成）、`SelftestTests` 的註解、契約三處〔修訂〕標記、`Selftest.swift` 的量測來源註解與共用的 `keyEvents`。
+- **第 5 項（預設的測試分不出「傳了 false」與「沒傳」）**：選了可觀察的做法，沒有改說法。核心預設也是關，只看有沒有工作分不出這兩種。`Shell` 加 `private(set) var rerankSent: [Bool]`，`build()` 在每次呼叫 `setRerank` 前記下傳的值；`testNeverChosenIsOffAndTheEngineIsToldOff` 斷言初次建置是 `[false]`、換兩次排列後是 `[false, false, false]`，存 true 的 store 傳 `[true]`。限制：記的是殼傳出去的值，不是核心收到的值（收到的效果由「沒有工作」那幾條斷言看）。
+- **新測試**：`testProfileChangeWhileAJobIsHeldDiscardsTheStaleResult`——重排開著、工作留在 runner 時先用選單切這個 App 的聊天／書面，再用 `setProfileMode(.chat)`；舊工作完成後不多出 setMarkedText，組字不變，取到的工作數等於 free 的次數、沒有重複 free。
+- **延後**：`docs/releases/tinylm-v1.md`（已發佈 Release 的文字，改它要同時改 Release，等維護者同意）；`Shell(...)` 測試建構子重構（約 25 處，之後的 PR）。**不改**：`s7f-colloquial.md` 第 32 行（當時為真）。

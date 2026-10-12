@@ -158,6 +158,36 @@ final class RerankTests: XCTestCase {
         XCTAssertEqual(s.c.client.marked, RerankRow.reranked, "the rebuilt engine reranks too")
     }
 
+    /// Rerank on together with profile-choice: a job taken in the chat profile is held, then the app's chat/formal choice flips
+    /// (menu item, then the global mode). `set_profile` re-decodes, so the held job is stale and applies nothing (s7c2b section
+    /// 2.1, the generation rule); the queue goes on, and every job taken is freed once.
+    func testProfileChangeWhileAJobIsHeldDiscardsTheStaleResult() {
+        let r = rig()
+        r.c.type(RerankRow.standardKeys)
+        XCTAssertEqual(r.runner.held.count, 1, "premise: a job is with the runner")
+        r.c.session.toggleAppChat()  // Messages is a chat app: now formal for this app
+        var shown = r.c.client.marked
+        var before = marks(r.c)
+        r.runner.complete()  // the job taken in the chat profile
+        XCTAssertEqual(marks(r.c), before, "a result from before the profile change is not applied")
+        XCTAssertEqual(r.c.client.marked, shown)
+        r.runner.drain()  // jobs made after the change may apply, but the composition stays a valid one
+        r.c.press(Keys.esc)
+
+        r.c.type(RerankRow.standardKeys)
+        XCTAssertGreaterThanOrEqual(r.runner.held.count, 1)
+        r.shell.setProfileMode(.chat)  // the global mode forces chat: the owner's composition is re-decoded
+        shown = r.c.client.marked
+        before = marks(r.c)
+        r.runner.complete()
+        XCTAssertEqual(marks(r.c), before, "a result from before the mode change is not applied")
+        XCTAssertEqual(r.c.client.marked, shown)
+        r.runner.drain()
+        r.c.press(Keys.esc)
+        XCTAssertEqual(r.frees.freed, r.shell.rerankTaken, "taken == freed")
+        XCTAssertEqual(r.frees.doubleFrees, 0)
+    }
+
     /// F4 again, on the code path: run's non-zero code (a caught panic) applies nothing, and the queue goes on.
     func testRunFailureAppliesNothingAndTheQueueGoesOn() {
         let r = rig()
@@ -284,6 +314,14 @@ final class RerankTests: XCTestCase {
         XCTAssertEqual(r.shell.rerankTaken, 0)
         XCTAssertEqual(r.c.client.marked, RerankRow.ngram)
         XCTAssertNil(store.rerank, "building the engine chose nothing")
+        // The call itself, not only its effect: the core's own default is off too, so "sent false" and "sent nothing" look the
+        // same in the jobs. The shell recorded what it passed to setRerank on every build.
+        XCTAssertEqual(r.shell.rerankSent, [false], "the first build sent setRerank(false)")
+        r.c.session.perform(.layout(.eten))  // a rebuild
+        r.c.session.perform(.layout(.standard))
+        XCTAssertEqual(r.shell.rerankSent, [false, false, false], "every rebuild sends setRerank(false) again")
+        let on = rig(store: MemoryRerankStore(true))
+        XCTAssertEqual(on.shell.rerankSent, [true], "a stored true is what the build sends")
     }
 
     /// Section 2.2: 語意校正 follows 即時預測 and 可省略韻母; a stored on makes jobs, off shows the n-gram result at once and

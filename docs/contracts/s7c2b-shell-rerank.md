@@ -6,7 +6,8 @@
 
 | 日期 | 修訂 | 原因 |
 |---|---|---|
-| 2026-10-12 | **預設關**：`RerankStore` 的 `nil`（沒設過）＝關，`Shell.rerankOn` 起始為 false，設定視窗與選單沒設過時顯示關；存著的 true 照樣開，每次建引擎仍照目前的值呼叫 `setRerank`。**改用 `tinylm-v2`**：`data/tinylm.sjtl.sha256` 記 `710249c2…`（SJTL0002，14,638,224 bytes），CI（兩個 job）與 `release.yml` 下載 `tinylm-v2`，`docs/data-files.md`、`LICENSES/data.md`、CONTRIBUTING 同步。**selftest 與殼的測試改用 dev302 第 65 列**（我等一下在過去 → 再過去）：S7e 的嚴格聊天值下第 25 列不再被重排改掉（量過：`--profile chat --context --tinylm`，第 25 列留在 城市），第 65 列是 v2 聊天設定改對的列之一（第 25、27、46、49、65 列這 5 列的 top1 0 → 4，沒變的那一列就是第 25 列）。selftest 與測試都明確開啟重排，沒有靠預設。測試：沒設過 → 關、引擎收到 `setRerank(false)`（沒有工作被取）；存 true → 照舊產生工作。 | 維護者 2026-10-12 的決定：重排預設關閉出貨、同意 `tinylm-v2`（S7e、`docs/contracts/s7c2c-delta.md` §4 第一項）。 |
+| 2026-10-12 | **預設關**：`RerankStore` 的 `nil`（沒設過）＝關，`Shell.rerankOn` 起始為 false，設定視窗與選單沒設過時顯示關；存著的 true 照樣開，每次建引擎仍照目前的值呼叫 `setRerank`。**改用 `tinylm-v2`**：`data/tinylm.sjtl.sha256` 記 `710249c2…`（SJTL0002，14,638,224 bytes），CI（兩個 job）與 `release.yml` 下載 `tinylm-v2`，`docs/data-files.md`、`LICENSES/data.md`、CONTRIBUTING 同步。**selftest 與殼的測試改用 dev302 第 65 列**（我等一下在過去 → 再過去）：S7e 的嚴格聊天值下第 25 列不再被重排改掉（量過：`--profile chat --context --tinylm`，第 25 列留在 城市），第 65 列是 v2 聊天設定改對的列之一（第 25、27、46、49、65 列這 5 列的 top1 0 → 4，沒變的那一列就是第 25 列）。selftest 與測試都明確開啟重排，沒有靠預設。測試：沒設過 → 關、殼每次建引擎都傳 `setRerank(false)`（`Shell.rerankSent` 記下每次傳的值，測試逐次核對，初次建置與兩次重建）、沒有工作被取；存 true → 傳 true、照舊產生工作。 |
+| 2026-10-12（/code-review 一輪） | 修正 12 項、延後 2 項、1 項不改：授權表與 README 的寫法、`build()` 的註解、`Shell.rerankSent` 讓測試分得出「傳了 false」與「什麼都沒傳」、`docs/data-files.md` 的換檔清單加 selftest 句子、`s3b.md` §13.2 選單順序補「語意校正」、PLAN 兩處、`SelftestTests` 與 `Selftest.swift` 的註解（量測條件改寫成 selftest／XCTest 自己的條件，CLI 數字標明是另一種條件）、兩邊共用的鍵序列對應（`keyEvents`）、本檔三處〔修訂〕標記、新增一個測試：重排工作被留住時換聊天／書面，舊結果不套用。**延後**：`docs/releases/tinylm-v1.md`（已發佈 Release 的文字，改它要連 Release 一起改，等維護者同意）；`Shell(...)` 測試建構子的重構（約 25 處，之後的 PR）。**不改**：`s7f-colloquial.md` 第 32 行（當時為真的歷史敘述）。 | 維護者 2026-10-12 的決定：重排預設關閉出貨、同意 `tinylm-v2`（S7e、`docs/contracts/s7c2c-delta.md` §4 第一項）。 |
 
 ## 1. 要做到什麼、怎麼看到
 
@@ -47,7 +48,7 @@
 - **發佈時核對雜湊**（F9）：`docs/releases/README.md` 的資料類 Release 流程加兩步——上傳前 `shasum -a 256 -c data/tinylm.sjtl.sha256`，上傳後重新下載再核對一次；研究紀錄補上 `.sjtl` 完整的 64 碼 SHA-256 與大小（14,638,208 bytes），寫雜湊檔時兩者都要相符。
 - **`release.yml`**（F7）：它的 build job 不跑 check-app 與 selftest（現有做法，靠同一個 commit 先過 CI，`build-app.sh` 自己也核對）；漏掉下載只會讓發版時建置失敗。合併後、下一個 `v*` tag 之前，在 main 用 `workflow_dispatch` 跑一次 dry run（對外動作，到時候先問使用者）；verifier 讀 `release.yml` 的 diff。
 - **Release 的順序**（和 `docs/releases/README.md` 一致，避免「Release 等說明進 main、說明等 CI、CI 等 Release」）：(1) 一個只含 `docs/releases/tinylm-v1.md` 與 `data/tinylm.sjtl.sha256` 的小文件 PR 先合併進 main；(2) 問使用者；(3) 同意後從 main 照 README 的指令建 `tinylm-v1`（附件 `tinylm.sjtl`，`--latest=false`）；(4) 這一片的程式 PR 的 CI 才下載得到檔案，全綠後合併。
-- `scripts/build-app.sh`：檔案存在、雜湊相符才打包，複製到 `Resources/`，隨附的授權說明加一段（訓練文字和 `bigram.sjlm` 同源：維基百科 CC BY-SA 4.0、Common Voice CC0、Tatoeba CC BY 2.0 FR）；`scripts/check-app.sh` 檢查 bundle 裡有這個檔（加進非空檔的清單與授權說明的檢查），並把 `Resources/tinylm.sjtl` 算出的雜湊和 `data/tinylm.sjtl.sha256` 裡**記的值**比對（不是和 `data/lm/` 的檔互比，那只證明複製正確；F6）；`.github/workflows/ci.yml` 與 `release.yml` 照 `model-v5` 的方式下載並核對；`docs/data-files.md` 加一列（寫明和 `bigram.sjlm` 同源、不含私人對話資料）與「版本怎麼往前走」（重訓或改 α、τ → `tinylm-v2`；換 n-gram 模型（model-v6）時 `.sjtl` 綁的雜湊會對不上，要一起發新的 `.sjtl`，否則語意校正會靜靜地沒載入——selftest 會抓到）；`LICENSES/data.md` 加一列。
+- `scripts/build-app.sh`：檔案存在、雜湊相符才打包，複製到 `Resources/`，隨附的授權說明加一段（訓練文字和 `bigram.sjlm` 同源：維基百科 CC BY-SA 4.0、Common Voice CC0、Tatoeba CC BY 2.0 FR）；`scripts/check-app.sh` 檢查 bundle 裡有這個檔（加進非空檔的清單與授權說明的檢查），並把 `Resources/tinylm.sjtl` 算出的雜湊和 `data/tinylm.sjtl.sha256` 裡**記的值**比對（不是和 `data/lm/` 的檔互比，那只證明複製正確；F6）；`.github/workflows/ci.yml` 與 `release.yml` 照 `model-v5` 的方式下載並核對；`docs/data-files.md` 加一列（寫明和 `bigram.sjlm` 同源、不含私人對話資料）與「版本怎麼往前走」（重訓或改 α、τ → `tinylm-v2`〔修訂 2026-10-12：v2 已用掉，下一個是 `tinylm-v3`，見 `docs/data-files.md`〕；換 n-gram 模型（model-v6）時 `.sjtl` 綁的雜湊會對不上，要一起發新的 `.sjtl`，否則語意校正會靜靜地沒載入——selftest 會抓到）；`LICENSES/data.md` 加一列。
 
 ### 2.5 Selftest（`Selftest.swift`）
 
@@ -60,7 +61,7 @@
 
 ## 3. 驗收
 
-1. **殼的測試**（`ShanjieKitTests`，用現有的 FakeClient，client 的 bundle 設成聊天 App，例如 `com.apple.MobileSMS`，句子和 §2.5 相同）：按鍵後有一個工作交給 runner；完成且有改變 → 多一次 `setMarkedText`，內容是重排後的字（和 n-gram 的字不同）；完成但沒改變（5）→ 沒有多的呼叫；取工作後又有一個會重新解碼的鍵，舊結果不套用；不重新解碼的鍵（例如 ←）之後完成，照樣套用；開關關掉 → 沒有工作交給 runner、組字回到 n-gram 的字；session 換人或引擎重建之後才完成 → 不套用；一次只跑一個（第二個工作等第一個跑完）。**free 的計數在可注入的 free 函式**：涵蓋被取代、引擎重建、開關關掉、過期、碼 4、正常套用，最後「取到的工作數 ＝ free 的次數」而且沒有任何一個 free 兩次；拿掉任何一條路徑的 free 或多 free 一次，測試要失敗。**開關**（比照「可省略韻母」的測試）：選單「語意校正」預設打勾、切換會寫進 store；關掉之後換排列、切動漫詞包（兩種都會重建引擎）仍沒有工作；用存了「關」的 store 建新的 `Shell` 也沒有工作；設定視窗切換後選單同步（比照 SettingsTests 現有的開關）。突變：拿掉 `build()` 裡的 `set_rerank`，測試要失敗。
+1. **殼的測試**（`ShanjieKitTests`，用現有的 FakeClient，client 的 bundle 設成聊天 App，例如 `com.apple.MobileSMS`，句子和 §2.5 相同）：按鍵後有一個工作交給 runner；完成且有改變 → 多一次 `setMarkedText`，內容是重排後的字（和 n-gram 的字不同）；完成但沒改變（5）→ 沒有多的呼叫；取工作後又有一個會重新解碼的鍵，舊結果不套用；不重新解碼的鍵（例如 ←）之後完成，照樣套用；開關關掉 → 沒有工作交給 runner、組字回到 n-gram 的字；session 換人或引擎重建之後才完成 → 不套用；一次只跑一個（第二個工作等第一個跑完）。**free 的計數在可注入的 free 函式**：涵蓋被取代、引擎重建、開關關掉、過期、碼 4、正常套用，最後「取到的工作數 ＝ free 的次數」而且沒有任何一個 free 兩次；拿掉任何一條路徑的 free 或多 free 一次，測試要失敗。**開關**（比照「可省略韻母」的測試）：選單「語意校正」預設打勾〔修訂 2026-10-12：預設不打勾；打開之後才有工作、才重排，測試用存著的 true 打開〕、切換會寫進 store；關掉之後換排列、切動漫詞包（兩種都會重建引擎）仍沒有工作；用存了「關」的 store 建新的 `Shell` 也沒有工作；設定視窗切換後選單同步（比照 SettingsTests 現有的開關）。突變：拿掉 `build()` 裡的 `set_rerank`，測試要失敗。
 2. **Selftest**：本機與 CI（`make selftest-bundled`）通過；拿掉模型檔時失敗。**真的佇列 runner 的測試**（F2）：用 ShanjieKit 裡 App 用的那個 runner，按鍵 → 背景 run → 主執行緒 apply，組字換成重排後的字，「取到的工作數 ＝ free 的次數」；main 試跑一次 `swift test --sanitize=thread`，沒跑成就在研究紀錄標明沒量過。殼的測試另外加：過期的完成之後，下一個工作照樣交給 runner（F4）；`take` 回非 0 的處理（F5）；降權表關掉時「語意校正」反灰（F11）。
 3. **打包**：`build-app.sh` 在缺檔或雜湊不符時失敗；`check-app.sh` 檢查 bundle 裡的檔與雜湊；CI 的 `shell` job 全綠。
 4. `make test`、CI 全綠；`/code-review` 沒有未處置的問題；fresh verifier 確認第 1–3 項，並讀 diff 確認：模型路徑只從 bundle 的 Resources 接具名常數（這是靠構造保證，原始碼掃描不算防護）、包裝類別的規則（§2.1）、`release.yml` 的下載與核對。
@@ -73,7 +74,7 @@
 - **停止條件**：selftest 在 CI 失敗；實機顯示錯字、卡頓或明顯延遲；使用者覺得閃動不能接受（停下來決定規則）；建 Release 沒有得到使用者同意（程式先合併不了：CI 下載會失敗）。
 - **預算**：executor 實作 1 次＋修正 1 次；main 做打包核對、Release（經同意）、安裝與實機協調。
 - **限制**：executor 不安裝、不啟動 App、不呼叫 TIS 或 lsregister、不在 .app 裡執行任何東西（selftest 只在 CI 與 main 跑）；不讀 `~/side-project/shanjie-private`、`~/.cache/shanjie/work`、學習檔、`~/Library`、鑰匙圈、`eval/holdout`；不 push、不開 PR、不建 Release、不碰其他 worktree。
-- **回滾**：預設改成關是一行；整片 revert 時，bundle 裡留著的 `tinylm.sjtl` 沒有人載入，無害。
+- **回滾**：預設改成關是一行〔修訂 2026-10-12：已經是預設，不需要回滾這一步〕；整片 revert 時，bundle 裡留著的 `tinylm.sjtl` 沒有人載入，無害。
 
 ## 5. 審查紀錄
 
