@@ -32,7 +32,8 @@ enum CoreResult {
 /// the handle is not thread-safe (s3a section 6).
 @MainActor
 final class CoreEngine {
-    private let handle: OpaquePointer
+    /// fileprivate, not private: only `RerankJob.apply(on:)` in this file reads it.
+    fileprivate let handle: OpaquePointer
 
     private init(handle: OpaquePointer) { self.handle = handle }
 
@@ -54,6 +55,25 @@ final class CoreEngine {
     isolated deinit { shanjie_engine_free(handle) }
 
     func loadLM(path: String) -> Int32 { shanjie_engine_load_lm(handle, path) }
+
+    /// S7c-2a: the small model for the loaded n-gram model; call it after `loadLM`. Non-zero keeps the n-gram only.
+    func loadTinyLM(path: String) -> Int32 { shanjie_engine_load_tinylm(handle, path) }
+
+    /// S7c-2a: whether rerank jobs are made (the core's default is off since S7c-2c; the shell sends its own value to every engine); returns the snapshot, like `setDemote`.
+    func setRerank(_ on: Bool) -> CoreResult {
+        var out: UnsafeMutablePointer<ShanjieOutput>?
+        return Self.take(shanjie_engine_set_rerank(handle, on ? 1 : 0, &out), out)
+    }
+
+    /// S7c-2a: the job of the last change, once; `(nil, 0)` when there is none, `(nil, code)` on a non-zero code (the header
+    /// guarantees `*job` is NULL then, so there is nothing to free). The job is wrapped at once, so the pointer never leaves this
+    /// file and is freed exactly once, by `free`, when the wrapper goes.
+    func rerankTake(free: @escaping @Sendable (OpaquePointer) -> Void) -> (RerankJob?, Int32) {
+        var job: OpaquePointer?
+        let code = shanjie_engine_rerank_take(handle, &job)
+        guard code == 0 else { return (nil, code) }
+        return (job.map { RerankJob($0, free: free) }, 0)
+    }
 
     /// s3e: replace the punctuation alternatives; 0 on success, 2 on an invalid table (kept as before).
     func setPunctuation(_ table: String) -> Int32 { shanjie_engine_set_punctuation(handle, table) }
@@ -134,7 +154,7 @@ final class CoreEngine {
     }
 
     /// Copies every field into Swift values, then frees the C output at once.
-    private static func take(_ code: Int32, _ out: UnsafeMutablePointer<ShanjieOutput>?) -> CoreResult {
+    fileprivate static func take(_ code: Int32, _ out: UnsafeMutablePointer<ShanjieOutput>?) -> CoreResult {
         guard code == 0, let out else {
             shanjie_output_free(out)  // NULL on a non-zero code (s3a section 6); freeing NULL is a no-op
             return .failed(code == 0 ? 4 : code)
@@ -159,5 +179,36 @@ final class CoreEngine {
             total: Int(o.candidate_total),
             vertical: Int(o.candidate_vertical)
         ))
+    }
+}
+
+/// One rerank job of the core (S7c-2a; docs/contracts/s7c2b-shell-rerank.md section 2.1). It holds candidate text and the left
+/// context, so it is not `CustomStringConvertible` and is never logged (R2).
+///
+/// `@unchecked Sendable` rests on three invariants the shell keeps (the header's rules for one job):
+/// 1. One run at a time: `run()` is called once, on one thread, by the shell's runner, which runs a single job at a time.
+/// 2. `apply(on:)` only after `run()` returned: the runner hands the code back through `DispatchQueue.main.async`, which
+///    orders the background run before the main-thread apply.
+/// 3. The job is freed only in `deinit`, exactly once: the last reference may go on any thread (the header allows free on
+///    any thread once run returned), and the runner's closure holds this wrapper, never the pointer, while run is running.
+public final class RerankJob: @unchecked Sendable {
+    private let job: OpaquePointer
+    private let free: @Sendable (OpaquePointer) -> Void
+
+    fileprivate init(_ job: OpaquePointer, free: @escaping @Sendable (OpaquePointer) -> Void) {
+        self.job = job
+        self.free = free
+    }
+
+    deinit { free(job) }
+
+    /// `shanjie_rerank_run`, off the main thread: 0, or 4 (caught panic; nothing touched, no result kept).
+    nonisolated func run() -> Int32 { shanjie_rerank_run(job) }
+
+    /// `shanjie_engine_rerank_apply` on the main thread: `.ok` with the snapshot when the composition changed, `.failed(5)`
+    /// for no change (stale, nothing to do, applied before), `.failed(4)` internal (the engine has reset itself).
+    @MainActor func apply(on engine: CoreEngine) -> CoreResult {
+        var out: UnsafeMutablePointer<ShanjieOutput>?
+        return CoreEngine.take(shanjie_engine_rerank_apply(engine.handle, job, &out), out)
     }
 }

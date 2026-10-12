@@ -18,7 +18,7 @@ final class ProfileChoiceTests: XCTestCase {
         let shell = Shell(resources: resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(),
                           learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(),
                           abbreviationStore: MemoryAbbreviationStore(), acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore(),
-                          candidateOrientationStore: MemoryCandidateOrientationStore(), profileModeStore: mode, appProfileStore: apps)
+                          candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: mode, appProfileStore: apps)
         XCTAssertNotNil(shell.engine)
         return shell
     }

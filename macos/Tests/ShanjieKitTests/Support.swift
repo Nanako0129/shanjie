@@ -4,7 +4,7 @@ import XCTest
 @testable import ShanjieKit
 
 /// The repository's data, laid out like the app's Resources (docs/contracts/s3b.md section 10.4):
-/// a temporary directory of symlinks to data/lexicon/* and data/lm/bigram.sjlm. Missing files fail
+/// a temporary directory of symlinks to data/lexicon/*, data/lm/bigram.sjlm and data/lm/tinylm.sjtl. Missing files fail
 /// the test with instructions; nothing is ever skipped.
 enum TestData {
     static let repo = URL(fileURLWithPath: #filePath)
@@ -18,6 +18,7 @@ enum TestData {
         ("demote.tsv", "data/lexicon/demote.tsv"),
         ("bigram.sjlm", "data/lm/bigram.sjlm"),
         ("classes.sjc", "data/lm/classes.sjc"),
+        ("tinylm.sjtl", "data/lm/tinylm.sjtl"),
     ]
 
     /// Adds Resources/packs/acg-add.tsv (a symlink to the repo's pack) like the app bundle has it. Opt-in: tests
@@ -42,6 +43,7 @@ enum TestData {
                     \(f.source) is missing. The lexicon is in git; the model is the model-v5 release asset: \
                     gh release download model-v5 -R Nanako0129/shanjie -p bigram.sjlm -D data/lm
                     classes.sjc: gh release download classes-v3 -R Nanako0129/shanjie -p classes.sjc -D data/lm
+                    tinylm.sjtl: gh release download tinylm-v2 -R Nanako0129/shanjie -p tinylm.sjtl -D data/lm
                     """, file: file, line: line)
                 return nil
             }
@@ -275,4 +277,74 @@ enum TestLearning {
         guard let text = try? String(contentsOf: dir.appendingPathComponent("learning.tsv"), encoding: .utf8) else { return [] }
         return text.split(separator: "\n").dropFirst().map(String.init)
     }
+}
+
+/// s7c2b section 2.1: a rerank runner that never completes on its own. It holds each job until the test completes it, so a
+/// result never lands at a time the test did not choose.
+@MainActor
+final class HeldRerankRunner: RerankRunner {
+    private(set) var held: [(job: RerankJob, done: @MainActor @Sendable (Int32) -> Void)] = []
+    /// Jobs handed over so far.
+    private(set) var received = 0
+
+    func run(_ job: RerankJob, done: @escaping @MainActor @Sendable (Int32) -> Void) {
+        received += 1
+        held.append((job, done))
+    }
+
+    /// Runs the oldest held job on this thread and hands back its code, as the app's runner does from its queue. `code`
+    /// instead skips the run and hands back that code (run's 4, a caught panic, keeps no result).
+    func complete(code: Int32? = nil, file: StaticString = #filePath, line: UInt = #line) {
+        guard !held.isEmpty else { return XCTFail("no job is with the runner", file: file, line: line) }
+        let (job, done) = held.removeFirst()
+        let c = code ?? job.run()
+        done(c)
+    }
+
+    /// Completes until nothing is held (a completion may start the job that waited).
+    func drain() {
+        while !held.isEmpty { complete() }
+    }
+}
+
+/// Counts rerank frees at the shell's injectable free function (s7c2b section 3 item 1). The jobs are not freed until
+/// `release()`, so no address is reused while a test runs: a job freed twice is counted as such, never undefined behaviour.
+/// Lock-protected: the app's runner may drop the last reference on its queue.
+final class FreeCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var freedJobs: [UInt] = []
+    private var seen: Set<UInt> = []
+    private var twice = 0
+
+    var free: @Sendable (OpaquePointer) -> Void { { [self] in record($0) } }
+
+    private func record(_ job: OpaquePointer) {
+        let bits = UInt(bitPattern: Int(bitPattern: UnsafeRawPointer(job)))
+        lock.lock()
+        defer { lock.unlock() }
+        if seen.insert(bits).inserted { freedJobs.append(bits) } else { twice += 1 }
+    }
+
+    var freed: Int { lock.lock(); defer { lock.unlock() }; return freedJobs.count }
+    var doubleFrees: Int { lock.lock(); defer { lock.unlock() }; return twice }
+
+    /// Frees every recorded job once, for real.
+    func release() {
+        lock.lock()
+        let jobs = freedJobs
+        freedJobs = []
+        lock.unlock()
+        for bits in jobs { shanjie_rerank_free(OpaquePointer(bitPattern: bits)) }
+    }
+}
+
+/// dev302 row 65 (s7c2b section 2.5, revised 2026-10-12, the selftest's sentence): in the chat profile the n-gram's first is 在,
+/// the small model picks 再. Row 25 (執行這個城市 -> 程式) was this sentence under tinylm-v1; the strict chat values of tinylm-v2
+/// no longer change it (measured, `--profile chat --context --tinylm`), and row 65 is one of the rows the v2 chat setting fixes.
+enum RerankRow {
+    static let zhuyin = "ㄨㄛˇ ㄉㄥˇ ㄧ ㄒㄧㄚˋ ㄗㄞˋ ㄍㄨㄛˋ ㄑㄩˋ"
+    static let standardKeys = Layouts.keys(zhuyin, eten: false)
+    static let etenKeys = Layouts.keys(zhuyin, eten: true)
+    static let ngram = "我等一下在過去"
+    static let reranked = "我等一下再過去"
 }
