@@ -187,7 +187,7 @@ typedef struct ShanjieRerankJob ShanjieRerankJob;
 // load_tinylm：讀檔失敗、不是一般檔案、超過 64 MiB、格式錯、沒有載入 n-gram、KN 側檔開著、.sjtl 記的 n-gram 雜湊不同 → 3（只是配對檢查，不是 .sjtl 的完整性檢查），
 // 引擎維持原狀；NULL → 1、路徑不是 UTF-8 → 2。不改 set_rerank 的開關、不改目前顯示。load_lm 成功會丟掉小模型（要在 load_lm 之後呼叫）。
 int32_t shanjie_engine_load_tinylm(ShanjieEngine *engine, const char *path);
-// set_rerank：0 或 1（其他回 2、狀態不變），建立時預設 1；碼與快照同 set_demote（重算組字，關掉時畫面回到 n-gram 的結果）。殼每次建 engine 後都要呼叫。
+// set_rerank：0 或 1（其他回 2、狀態不變），建立時預設 0（S7c-2c 起；之前是 1）；碼與快照同 set_demote（重算組字，關掉時畫面回到 n-gram 的結果）。殼每次建 engine 後都要呼叫。
 int32_t shanjie_engine_set_rerank(ShanjieEngine *engine, uint32_t enabled, ShanjieOutput **out);
 // rerank_take：交出上一次改變的工作（只交一次）；沒有工作時回 0、*job 為 NULL。engine 或 job 為 NULL → 1（job 非 NULL 時先設 *job = NULL）；4 → 引擎 discard。
 int32_t shanjie_engine_rerank_take(ShanjieEngine *engine, ShanjieRerankJob **job);

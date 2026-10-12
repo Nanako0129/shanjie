@@ -15,6 +15,7 @@
 | `eval/dev/acg/recent.txt` | 2026 年作品與角色名 23 個（葬送的芙莉蓮、咒術迴戰與其角色列表、判處勇者刑、魔法帽的工作室、日本三國、淡島百景、無職轉生、穹廬下的魔女、BLACK TORCH 闇黑燈火、桃源暗鬼等的中文維基百科條目），逐一對照條目確認；讀音由 `tools/readings.py` 產生 | **CC BY-SA 4.0**，署名：Wikipedia 貢獻者（https://creativecommons.org/licenses/by-sa/4.0/ ），與 `acg-collisions.tsv` 相同 | 只用於評測，不用來調參，不隨 App 內附 |
 | `eval/sets/trap.txt`、`eval/sets/daily.txt` | 本專案自寫 | CC0 | |
 | `eval/probe/s2r-probe.txt` | 由 `experiments/s2/build_probe.py` 從 `eval/dev/` 的句子產生（換「一」「不」的讀音） | CC0 | |
+| `eval/rerank/s7e-function-words.txt` | 本專案自寫（2026-10-11） | CC0 | 只用於評測 |
 | `eval/dev/*.txt`、`eval/holdout/*`、`eval/learn/cases.tsv` | 本專案自寫 | CC0 | |
 | `eval/dev/user-reported.txt` | 使用者回報的真實句子 | CC0（使用者 2026-10-03 同意） | |
 | `eval/sets/moedict.txt` | 教育部《重編國語辭典修訂本》例句抽樣（經 g0v/moedict-data） | CC BY-ND 3.0 TW | **只用於評測，不得用來建詞庫或改作** |
@@ -23,3 +24,17 @@
 | `data/lm/classes.sjc`（不在 git；GitHub Release `classes-v3` 附件） | 由 `tools/build_classes.py` 從和 `bigram.sjlm` 同一批計數的詞類分群產生（S2k），只配 model-v5 | **CC BY-SA 4.0**（來源同上一列） | 署名：Wikipedia contributors、Tatoeba contributors。不含任何私人對話資料 |
 | `data/lm/tinylm.sjtl`（不在 git；GitHub Release `tinylm-v1` 附件） | 「語意校正」用的小型字元語言模型（S7，SJTL0001），由 `experiments/s7a-tinylm` 訓練、`export_sjtl.py` 匯出成 int8；訓練文字和 `bigram.sjlm` 同源：中文維基百科 2026-10-01 dump 的前 20 萬篇條目、Mozilla Common Voice 繁中（台灣）句子、Tatoeba 中文句子、gpt-oss-120b 產生的台灣口語合成句 | **CC BY-SA 4.0**（來源同 `bigram.sjlm` 那一列） | 署名：Wikipedia contributors、Tatoeba contributors。不含任何私人對話資料 |
 | 執行期模型（S5 起） | Gemma 4 E2B 等 | 各自授權（Gemma 4：Apache-2.0） | 不隨安裝檔散布，第一次啟用時下載並顯示授權 |
+
+## 研究語料（未出貨）
+
+S7f（`docs/contracts/s7f-colloquial.md`）研究訓練用的文字。**沒有進任何已發佈的檔案**；上面 `tinylm.sjtl` 那一列描述的是已出貨的 `tinylm-v1`，不受影響，等出貨片再改。清理用的程式在 `experiments/s7f-corpus/`；文字本身不進 git。條款頁的快照（HTML 或原始檔）存在維護者機器上，這裡記網址、取得時間、SHA-256 前 12 碼與原文摘錄。量是 2026-10-12 修正清理規則（研究紀錄同日）之後重跑的版本。
+
+| 來源 | 取用範圍與版本 | 取得 | 授權與條款摘錄 | 用在 S7f 的量 |
+|---|---|---|---|---|
+| 唐鳳逐字稿 archive.tw（https://github.com/audreyt/transcript ） | 中文的 `.md` 檔；commit `3bc642e`（2026-10-08） | 2026-10-12 `git clone` | **CC0 1.0**。README：「the content is CC0 and may be corrected by anyone」、「[CC0 1.0 Universal](https://creativecommons.org/publicdomain/zero/1.0/)」 | 清理後 192,304 句、5,117,211 字（SHA-256 `c8c358846512`），全收 |
+| Cofacts 真的假的（https://huggingface.co/datasets/Cofacts/line-msg-fact-check-tw ） | 只有 `articles.csv.zip`（`fa6eec2c…`）與 `reply_requests.csv.zip`（`84469d72…`）；revision `eda4648c69d3`；只在 Mac 上下載 | 2026-10-12，HF 上同意資料使用者條款後用 read token 下載 | **CC BY-SA 4.0**。資料卡（同一 revision，快照 `1f5b870db991`）：「license: cc-by-sa-4.0」；資料使用者條款 Version 1（https://github.com/cofacts/opendata/blob/master/LEGAL.md ，commit `cf6dee4721c5`，快照 `190142902ed5`）二.5：「本編輯資料容許採任何目的及方式利用與轉載，然限定延續採 CC BY-SA 4.0 授權方式發布，並保留以上顯名聲明」；五.4：「採公眾授權條款或相關聲明釋出之標的，僅涵蓋編輯性資料，並不保證隨附資訊之中，沒有包括或鏈結至任何第三方受著作權保護之客體」 | 清理後 1,001,608 句、21,815,587 字（`629a2febb53d`）；固定種子抽 341,428 句、7,441,395 字 |
+| 中文維基百科的討論頁與互助客棧 | `zhwiki-20261001-pages-meta-current.xml.bz2`（4,791,119,059 bytes，SHA-1 與官方清單相符），namespace 1、3 與標題以 `Wikipedia:互助客棧` 或 `Wikipedia:互助客栈` 開頭的 namespace 4 頁面 | 2026-10-12，your.org 鏡像 | **CC BY-SA 4.0**（與 GFDL）。https://dumps.wikimedia.org/legal.html （快照 `104242365285`）：「all original textual content is licensed under the GNU Free Documentation License (GFDL) and the Creative Commons Attribution-Share-Alike 4.0 License」 | 清理後 1,329,979 句、34,312,781 字（`986626adaefa`）；固定種子抽 288,022 句、7,441,394 字 |
+| gpt-oss-120b 生成句（Cerebras API） | 模型 `openai/gpt-oss-120b`（HF `b5c939de8f75`，授權欄 apache-2.0，2026-10-12 查）；提示只有公開的種子詞與固定指示 | 2026-10-12 | 模型 **Apache-2.0**。Cerebras 條款（https://www.cerebras.ai/terms-of-service ，2026-10-11T19:37Z 快照 `8b41481d5367`）：「ownership of the output you receive from the Service ("Output") is governed by the Third-Party Model Terms, and as between you and Cerebras, Cerebras claims no ownership rights over the Outputs」；另有「You shall not (i) represent that Output was human-generated」 | 2,500,000 字、84,304 句（`152c2712443d`） |
+| Gemma 4 31B 生成句（OpenRouter，provider 固定 DeepInfra、不 fallback） | 模型 `google/gemma-4-31B-it`（HF `842da3794eaa`，授權欄 apache-2.0，https://ai.google.dev/gemma/docs/gemma_4_license ，2026-10-12 查）；提示同上 | 2026-10-12 | 模型 **Apache-2.0**。OpenRouter 條款（https://openrouter.ai/terms ，快照 `03ae8f384ac8`）：「Your ownership rights in the Output are set forth in the Model Terms for each Model you use」；DeepInfra 條款（https://deepinfra.com/terms ，Last modified: August 17th, 2026，快照 `0b9182c92cc0`）：「Provider will not sell Customer Data, and will not use Customer Data to train, fine-tune, or otherwise improve any model」，沒有限制用輸出訓練模型的條文 | 2,500,000 字、130,209 句（`25091ffa8fb3`） |
+| 種子詞（`experiments/s7f-corpus/seeds/`） | Wikidata 的 zh-tw 標籤（遊戲、軟體、網站、台灣地名、食物）與維護者自寫的詞表；生成前凍結（commit `45731aa`） | 2026-10-12 | Wikidata **CC0**；維護者的詞表 CC0 | 608 個詞 |
+| 大陸用語詞表 invade（https://github.com/caris-events/invade ） | commit `cbc7bdc`；只用來**丟掉**含這些詞的生成句，不進訓練文字 | 2026-10-12 | 程式 MIT；README：「文字段落以 CC 0 公眾領域釋出」 | 369 個詞（單字詞宏、寄、潤不用） |

@@ -1,6 +1,6 @@
 """S7a: run the same step for every evaluation set, so the README's commands are one line per machine.
 
-  python run_sets.py dumps --work DIR --tune TUNEDIR --sets cvtune wikitune dev302 typing76 user-reported [discordtune --discord FILE]
+  python run_sets.py dumps --work DIR --tune TUNEDIR --sets cvtune wikitune dev302 typing76 user-reported [fw] [discordtune --discord FILE]
                          [--reported-rows 66]
       -> DIR/dumps/<set>.<setting>.dump and <set>.<setting>.top1 (the summary line's top1) from reference/proto/lm_eval.py
          (shipping model, --context, no word pack; --lm defaults to data/lm/bigram.sjlm, classes.sjc next to it)
@@ -26,15 +26,23 @@ EVAL_DEV = os.path.join(ROOT, "eval", "dev")
 # matches the models scored on them; without it the whole file is used, as every other evaluation does.
 REPORTED_ROWS = 66
 REPORTED_SHA = "6e338dc1293060162585c09e02bbb252c93148c9928d61007faea5e8860369e8"
+# S7e section 2.1: the function-word sentences, frozen at 186 rows; rows may be appended, the first 186 must not change.
+FW_PATH = os.path.join(ROOT, "eval", "rerank", "s7e-function-words.txt")
+FW_ROWS = 186
+FW_SHA = "6b853a329aee569ad51c731d6f188541b9670e9617838725f45a26d57845d18d"
+
+
+def check_head(path, n, sha):
+    # Universal newlines, as lm_eval.rows_of reads the rows: a CRLF checkout (git on Windows) hashes like the LF one.
+    with open(path, encoding="utf-8") as f:
+        head = [next(f, "") for _ in range(n)]
+    got = hashlib.sha256("".join(head).encode()).hexdigest()
+    if got != sha:
+        sys.exit(f"run_sets: the first {n} rows of {path} changed (sha256 {got[:16]}…, expected {sha[:16]}…)")
 
 
 def check_reported(path):
-    # Universal newlines, as lm_eval.rows_of reads the rows: a CRLF checkout (git on Windows) hashes like the LF one.
-    with open(path, encoding="utf-8") as f:
-        head = [next(f, "") for _ in range(REPORTED_ROWS)]
-    got = hashlib.sha256("".join(head).encode()).hexdigest()
-    if got != REPORTED_SHA:
-        sys.exit(f"run_sets: the first {REPORTED_ROWS} rows of {path} changed (sha256 {got[:16]}…, expected {REPORTED_SHA[:16]}…)")
+    check_head(path, REPORTED_ROWS, REPORTED_SHA)
 
 
 def rows_args(name, a):
@@ -47,6 +55,8 @@ def rows_args(name, a):
     if name == "user-reported":
         path = os.path.join(EVAL_DEV, "user-reported.txt")
         return ["--rows", path] + (["--limit", str(REPORTED_ROWS)] if getattr(a, "reported_rows", None) else [])
+    if name == "fw":    # S7e: the function-word sentences (FW_PATH)
+        return ["--rows", FW_PATH]
     if name == "discordtune":
         if not a.discord:
             sys.exit("run_sets: discordtune needs --discord FILE")
@@ -116,6 +126,8 @@ def main(argv=None):
     a = ap.parse_args(argv)
     if a.reported_rows and "user-reported" in a.sets:
         check_reported(os.path.join(EVAL_DEV, "user-reported.txt"))      # before any set runs, not when the loop reaches it
+    if "fw" in a.sets:
+        check_head(FW_PATH, FW_ROWS, FW_SHA)
     {"dumps": cmd_dumps, "score": cmd_score}[a.cmd](a)
 
 

@@ -27,7 +27,7 @@ final class SettingsTests: XCTestCase {
         let acg = MemoryAcgPackStore(), tint = MemoryGlassTintStore(), dialogs = FakeDialogs()
         let shell = Shell(resources: resources, panel: FakePanel(), isSecureInput: { secure }, layoutStore: layout,
                           learningDirectory: learning, dialogs: dialogs, demoteStore: demote, predictionStore: prediction, abbreviationStore: abbreviation,
-                          acgPackStore: acg, glassTintStore: tint, candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner())
+                          acgPackStore: acg, glassTintStore: tint, candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore())
         XCTAssertNotNil(shell.engine)
         return Rig(shell: shell, model: SettingsModel(shell: shell), controller: Controller(shell),
                    layout: layout, demote: demote, prediction: prediction, abbreviation: abbreviation, acg: acg, tint: tint, dialogs: dialogs)
@@ -148,7 +148,7 @@ final class SettingsTests: XCTestCase {
 
     func testMenuHasTheSettingsItemBeforeClear() {
         let r = rig()
-        XCTAssertEqual(r.controller.session.menu.map(\.title), ["標準鍵盤", "倚天鍵盤", "避免把敏感字詞排在前面", "即時預測", "可省略韻母", "語意校正", "動漫與遊戲詞", "善解設定…", "清除選字記憶…", "不要備份選字記憶"])
+        XCTAssertEqual(r.controller.session.menu.map(\.title), ["標準鍵盤", "倚天鍵盤", "避免把敏感字詞排在前面", "即時預測", "可省略韻母", "語意校正", "動漫與遊戲詞", "這個 App 用聊天設定", "善解設定…", "清除選字記憶…", "不要備份選字記憶"])
         var opened = 0
         r.shell.onOpenSettings = { opened += 1 }
         r.controller.session.perform(.openSettings)
@@ -244,7 +244,7 @@ final class SettingsTests: XCTestCase {
         let tint = MemoryGlassTintStore(0.4)
         let shell = Shell(resources: resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(),
                           learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(),
-                          predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), acgPackStore: MemoryAcgPackStore(), glassTintStore: tint, candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner())
+                          predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), acgPackStore: MemoryAcgPackStore(), glassTintStore: tint, candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore())
         XCTAssertEqual(shell.glassTint, 0.4)
         tint.glassTint = 0.9
         XCTAssertEqual(shell.glassTint, 0.4, "the Shell reads the store only at start and on set")
@@ -255,7 +255,7 @@ final class SettingsTests: XCTestCase {
         var secure = false
         let shell = Shell(resources: resources, panel: FakePanel(), isSecureInput: { secure }, layoutStore: MemoryLayoutStore(),
                           learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(),
-                          predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner())
+                          predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore())
         let model = SettingsModel(shell: shell)
         secure = true
         shell.changed()

@@ -1,6 +1,6 @@
 # S7c-2a：重排接進引擎的核心部分（兩段式 API；殼與打包在 S7c-2b）
 
-接續 S7c-1（`docs/contracts/s7c-core-tinylm.md`，合併 368eebc：Rust 前向、`SJTL0001`、`TinyLm::rerank`，M int8 在 Rust 路徑通過 S7a §4，保留集聊天 180 → 200／227）。**使用者 2026-10-11**：照 PLAN A3／A7 非同步（按鍵路徑 p95 < 16 ms，重排離開按鍵路徑、低 QoS、新按鍵取代進行中的重排，組字區先顯示 n-gram 的結果、算完可能換一次字）；預設開，設定視窗給開關。設計先請 Fable 5.1 唯讀分析（建議由核心提供同步的兩段式 API、殼負責執行緒），main 採用。**使用者 2026-10-11 另外決定**：模型在主程序裡載入與推論（in-process，不放 XPC helper；PLAN 架構原則裡 XPC 那一行、S5 的模型那一行與風險表 R8 那一列補上例外，條件見 §2.6）；A4 的衝突「先量再決定」（§1）。
+接續 S7c-1（`docs/contracts/s7c-core-tinylm.md`，合併 368eebc：Rust 前向、`SJTL0001`、`TinyLm::rerank`，M int8 在 Rust 路徑通過 S7a §4，保留集聊天 180 → 200／227）。**使用者 2026-10-11**：照 PLAN A3／A7 非同步（按鍵路徑 p95 < 16 ms，重排離開按鍵路徑、低 QoS、新按鍵取代進行中的重排，組字區先顯示 n-gram 的結果、算完可能換一次字）；預設開，設定視窗給開關（〔更正，2026-10-12〕使用者決定預設關出貨，核心的預設改成關，見 `docs/contracts/s7c2c-delta.md` §2.3）。設計先請 Fable 5.1 唯讀分析（建議由核心提供同步的兩段式 API、殼負責執行緒），main 採用。**使用者 2026-10-11 另外決定**：模型在主程序裡載入與推論（in-process，不放 XPC helper；PLAN 架構原則裡 XPC 那一行、S5 的模型那一行與風險表 R8 那一列補上例外，條件見 §2.6）；A4 的衝突「先量再決定」（§1）。
 
 S7c-2 分兩片：這一片（2a）只做核心與 FFI，用同步的測試驅動；殼的佇列、開關、模型檔打包、實機檢查是 2b。
 
@@ -14,7 +14,7 @@ S7c-2 分兩片：這一片（2a）只做核心與 FFI，用同步的測試驅�
 
 ### 2.1 引擎的狀態
 
-`tinylm: Option<Arc<TinyLm>>`、`rerank_on: bool`（預設 true）、`generation: u64`（從整個程序共用的 `AtomicU64` 取號，重建的引擎不會重用號碼）、`pending: Option<RerankJob>`。沒有呼叫 `load_tinylm` 時，引擎的一切行為與輸出逐位元組不變。
+`tinylm: Option<Arc<TinyLm>>`、`rerank_on: bool`（預設 true；〔更正，2026-10-12〕S7c-2c 起預設 false，要 `set_rerank(true)` 才產生工作，`docs/contracts/s7c2c-delta.md` §2.3）、`generation: u64`（從整個程序共用的 `AtomicU64` 取號，重建的引擎不會重用號碼）、`pending: Option<RerankJob>`。沒有呼叫 `load_tinylm` 時，引擎的一切行為與輸出逐位元組不變。
 
 ### 2.2 產生工作（`refresh_lm` 結尾，模型已載入且 `rerank_on`）
 
@@ -41,7 +41,7 @@ S7c-2 分兩片：這一片（2a）只做核心與 FFI，用同步的測試驅�
 
 ### 2.5 FFI 與標頭（`core/src/ffi.rs`、`core/include/shanjie.h`、`docs/contracts/s3a.md` §6）
 
-- `shanjie_engine_load_tinylm(engine, path)`：讀檔失敗、格式錯、沒有載入 n-gram 模型、KN 側檔開著、`.sjtl` 記的 n-gram 雜湊和載入的模型不同 → 錯誤碼 3，引擎維持原狀（沒有小模型或原本那個），輸入法照常用 n-gram；照 `load_lm` 的寫法。**不改 `rerank_on`**（建立引擎時預設 true；殼每次建引擎後照設定呼叫 `set_rerank`，和 `set_candidate_vertical` 一樣，使用者關掉的設定不會因為重新載入而被打開）。n-gram 雜湊的比對只是「配對」檢查，**不是**對 `.sjtl` 本身的完整性檢查。
+- `shanjie_engine_load_tinylm(engine, path)`：讀檔失敗、格式錯、沒有載入 n-gram 模型、KN 側檔開著、`.sjtl` 記的 n-gram 雜湊和載入的模型不同 → 錯誤碼 3，引擎維持原狀（沒有小模型或原本那個），輸入法照常用 n-gram；照 `load_lm` 的寫法。**不改 `rerank_on`**（建立引擎時預設 true，〔更正，2026-10-12〕S7c-2c 起預設 false，`docs/contracts/s7c2c-delta.md` §2.3；殼每次建引擎後照設定呼叫 `set_rerank`，和 `set_candidate_vertical` 一樣，使用者關掉的設定不會因為重新載入而被打開）。n-gram 雜湊的比對只是「配對」檢查，**不是**對 `.sjtl` 本身的完整性檢查。
 - `shanjie_engine_set_rerank(engine, on, out)`：照 `set_demote` 的樣子回傳快照；關掉時重算，畫面回到 n-gram 的結果。
 - `shanjie_engine_rerank_take(engine, **job)`（沒有工作時 `*job` 為 NULL）、`shanjie_rerank_run(job)`（任何執行緒都可以呼叫，不需要引擎；結果存在工作裡，對應 Rust 的 `RerankJob::run` 產生 `RerankResult`）、`shanjie_engine_rerank_apply(engine, job, out)`（用工作裡的結果呼叫 `apply_rerank`：有改變 → 0 與快照；沒有改變、過期或還沒 run → 新的代碼，`*out` 為 NULL）、`shanjie_rerank_free(job)`。
 - **回傳碼與 panic**（安全審查 F1）：每個新匯出都包現有的 `guard`。「沒有改變、過期、還沒 run、已套用過」用新的具名常數 `SHANJIE_NO_CHANGE`（5，不和 1–4 撞號）。標頭寫明：`take`／`run`／`apply` 的非 0 碼**不代表按鍵直通**（它們沒有對應的按鍵）。碼 4 逐一寫：
@@ -85,7 +85,7 @@ revert 這一片；沒有呼叫 `load_tinylm` 時引擎行為不變，殼也還�
 
 ## 6. 使用者的決定與 2b 之前要決定的事
 
-- 已決定（2026-10-11）：非同步（A3／A7）；預設開＋設定開關；模型在主程序裡（in-process；這一片把 PLAN 的架構原則（XPC 那一行）、S5 的模型那一行與風險表 R8 那一列補上例外，條件見 §2.6）；A4 的衝突先量再決定。
+- 已決定（2026-10-11）：非同步（A3／A7）；預設開＋設定開關（〔更正，2026-10-12〕改成預設關，`docs/contracts/s7c2c-delta.md`）；模型在主程序裡（in-process；這一片把 PLAN 的架構原則（XPC 那一行）、S5 的模型那一行與風險表 R8 那一列補上例外，條件見 §2.6）；A4 的衝突先量再決定。
 - 2b 之前要決定：(1) A4：帶著第 5 項的比例，決定加「黏住已重排的前綴」的規則或修改 A4；(2) 開關的名稱與位置（設定視窗＋選單，名稱例如「語意校正」）；(3) Release 資產名稱（例如 `tinylm-v1`）與 `LICENSES/data.md` 的那一列（訓練文字是維基 20 萬篇與口語語料）。
 
 ## 7. 結果（2026-10-11）

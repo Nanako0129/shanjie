@@ -33,7 +33,8 @@ final class RerankTests: XCTestCase {
         let shell = Shell(resources: resources ?? self.resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(),
                           learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: demote, predictionStore: MemoryPredictionStore(),
                           abbreviationStore: MemoryAbbreviationStore(), acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore(),
-                          candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: store, rerankRunner: runner)
+                          candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: store, rerankRunner: runner,
+                          profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore())
         XCTAssertNotNil(shell.engine)
         shell.rerankFree = frees.free  // before any job is taken (build() takes none)
         return shell
