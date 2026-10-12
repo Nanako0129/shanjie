@@ -297,7 +297,7 @@
       <ul class="items">
         <li><span class="mark"></span><span class="sr-only">規劃中：</span><h3>候選窗在瀏覽器裡的位置</h3><p>使用者回報：網頁版 Messenger 打第一個字時預測列跑到中間，選完字才回到字的下方；Aside 裡候選列跑到左上角。還沒有重現；先在 Chrome 重現，再決定修法。</p></li>
         <li><span class="mark"></span><span class="sr-only">規劃中：</span><h3>補上缺的名字與讀音</h3><p>詞庫與詞包都沒有「獄門疆」，補進來；「虎杖」的讀音資料少了三聲，一併修正。「芙莉蓮」在詞庫裡，單獨打得出來，但在有些句子裡輸給「福利聯」，這一項在 v0.4.1 不修，另外調查。</p></li>
-        <li class="wip"><span class="mark"></span><span class="sr-only">進行中：</span><h3>動漫詞包：含間隔號的名字</h3><p>契約審查中（分支 feat/acg-a3）。詞包建置時把含間隔號的名字整個略過，像「洛琪希·米格路迪亞」這類名字完全沒收進來。改成把名和姓拆開收，原本維護者保留的名字維持不變。</p></li>
+        <li class="wip"><span class="mark"></span><span class="sr-only">進行中：</span><h3>動漫詞包：含間隔號的名字</h3><p>已實作（PR #111），等實機檢查。詞包建置時把含間隔號的名字整個略過，像「洛琪希·米格路迪亞」這類名字完全沒收進來。改成把名和姓拆開收，原本維護者保留的名字維持不變。</p></li>
       </ul>
     </details>
 
@@ -327,7 +327,7 @@
       <summary><span class="ver">未排定</span><span class="st-title">語意判斷與校正</span><span class="tag wip">進行中</span>
         <span class="meta">等候選與延遲夠好再接</span></summary>
       <ul class="items">
-        <li class="wip"><span class="mark"></span><span class="sr-only">進行中：</span><h3>語意重排（自訓小模型）</h3><p>1,440 萬參數的字元模型，只在前 8 名候選之間重排。核心的接入做完了（非同步重排、門檻 δ、檔案格式 SJTL0002），核心預設關閉；輸入法端的開關與打包（PR #118）還沒合併。照「改壞 1 句 ≈ 改對 10 句」選了嚴格的參數，少改壞對的句子；用公開的口語文字重訓沒有通過、模型不換。出貨時預設關閉。</p></li>
+        <li class="wip"><span class="mark"></span><span class="sr-only">進行中：</span><h3>語意重排（自訓小模型）</h3><p>1,440 萬參數的字元模型，只在前 8 名候選之間重排。核心的接入做完了（非同步重排、門檻 δ、檔案格式 SJTL0002），核心預設關閉；輸入法端的開關與打包（PR #118）還沒合併。選了嚴格的參數，少改壞對的句子；用公開的口語文字重訓沒有通過、模型不換。出貨時預設關閉。之後改用「改對 − 改壞」計分，改壞率不超過 0.5% 才會考慮預設開啟（2026-10-12 決定）。</p></li>
         <li><span class="mark"></span><span class="sr-only">規劃中：</span><h3>一鍵校正、新手測驗</h3><p>打完一段可以請模型重看（雲端，預設關閉）；第一次使用時用簡單測驗了解你的打字習慣。</p></li>
       </ul>
     </details>
