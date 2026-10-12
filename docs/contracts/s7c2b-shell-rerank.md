@@ -1,11 +1,17 @@
 # S7c-2b：語意校正接進輸入法的殼、設定開關與打包
 
-接續 S7c-2a（`docs/contracts/s7c2a-core-rerank.md`，合併 fd990b4：核心的兩段式重排 API 與 FFI）。**使用者 2026-10-11 的決定**：照 PLAN A3／A7 非同步；預設開，設定視窗與選單都有開關，名稱「語意校正」；模型在主程序裡（PLAN 的例外，條件是隨 App 打包、路徑寫死、雜湊進版控並在建置時核對——這些是這一片要做的出貨前提）；A4：「先閃回 n-gram 的字再換回」（2a 量到每 100 個重新解碼的鍵約 2 次）先照現況做，由實機打字的感受決定要不要加規則。
+接續 S7c-2a（`docs/contracts/s7c2a-core-rerank.md`，合併 fd990b4：核心的兩段式重排 API 與 FFI）。**使用者 2026-10-11 的決定**：照 PLAN A3／A7 非同步；預設開〔修訂 2026-10-12：預設關，見〈修訂〉〕，設定視窗與選單都有開關，名稱「語意校正」；模型在主程序裡（PLAN 的例外，條件是隨 App 打包、路徑寫死、雜湊進版控並在建置時核對——這些是這一片要做的出貨前提）；A4：「先閃回 n-gram 的字再換回」（2a 量到每 100 個重新解碼的鍵約 2 次）先照現況做，由實機打字的感受決定要不要加規則。
+
+## 修訂
+
+| 日期 | 修訂 | 原因 |
+|---|---|---|
+| 2026-10-12 | **預設關**：`RerankStore` 的 `nil`（沒設過）＝關，`Shell.rerankOn` 起始為 false，設定視窗與選單沒設過時顯示關；存著的 true 照樣開，每次建引擎仍照目前的值呼叫 `setRerank`。**改用 `tinylm-v2`**：`data/tinylm.sjtl.sha256` 記 `710249c2…`（SJTL0002，14,638,224 bytes），CI（兩個 job）與 `release.yml` 下載 `tinylm-v2`，`docs/data-files.md`、`LICENSES/data.md`、CONTRIBUTING 同步。**selftest 與殼的測試改用 dev302 第 65 列**（我等一下在過去 → 再過去）：S7e 的嚴格聊天值下第 25 列不再被重排改掉（量過：`--profile chat --context --tinylm`，第 25 列留在 城市），第 65 列是 v2 聊天設定改對的列之一（第 25、27、46、49、65 列這 5 列的 top1 0 → 4，沒變的那一列就是第 25 列）。selftest 與測試都明確開啟重排，沒有靠預設。測試：沒設過 → 關、引擎收到 `setRerank(false)`（沒有工作被取）；存 true → 照舊產生工作。 | 維護者 2026-10-12 的決定：重排預設關閉出貨、同意 `tinylm-v2`（S7e、`docs/contracts/s7c2c-delta.md` §4 第一項）。 |
 
 ## 1. 要做到什麼、怎麼看到
 
 - 裝好的輸入法打字時，組字區先顯示 n-gram 的結果，小模型在背景算完後（2a 量到一次 p95 約 8 ms）若選了別的候選就換字；按鍵本身不等它。
-- 「語意校正」在設定視窗與選單都能開關，預設開；關掉時立刻回到 n-gram 的結果。
+- 「語意校正」在設定視窗與選單都能開關，預設開〔修訂：預設關〕；關掉時立刻回到 n-gram 的結果。
 - **怎麼看到**：使用者實機（§3 第 5 項）；殼的測試、selftest、CI。
 
 ## 2. 做法
@@ -26,7 +32,7 @@
 
 ### 2.2 開關「語意校正」
 
-- 照「即時預測」的寫法：`RerankStore` 協定與 `MemoryRerankStore`、App 用 `UserDefaults` 的 `DefaultsRerankStore`（`macos/Sources/Shanjie/main.swift`），沒設過＝開。
+- 照「即時預測」的寫法：`RerankStore` 協定與 `MemoryRerankStore`、App 用 `UserDefaults` 的 `DefaultsRerankStore`（`macos/Sources/Shanjie/main.swift`），沒設過＝開〔修訂：沒設過＝關〕。
 - `Shell` 每次建引擎後照設定呼叫 `set_rerank`（`load_tinylm` 不改開關，所以重建引擎不會把關掉的打開）；切換時對目前的 session 呼叫 `set_rerank` 並套用回傳的快照（關掉時立刻回到 n-gram 的結果）。
 - 選單在「即時預測」之後加「語意校正」（打勾表示開）；設定視窗加同名的開關（`SettingsModel`、`SettingsWindow`），兩邊同步。
 
@@ -37,7 +43,7 @@
 
 ### 2.4 打包與發佈
 
-- 模型檔：S7c-1 匯出的 M int8 `.sjtl`（SHA-256 `8725204c…`，綁 model-v5 的雜湊，聊天與書面 α 0.7、τ 2）。開發時放 `data/lm/tinylm.sjtl`（不進 git，和 `bigram.sjlm` 一樣）；雜湊記在進版控的 `data/tinylm.sjtl.sha256`。殼的測試從 `data/lm/tinylm.sjtl` 以 `tinylm.sjtl` 的名稱連進測試用的 Resources（缺檔時照現有的寫法失敗，不略過）；CI 的 `shell` job 在 `swift test` 之前下載並核對。
+- 模型檔〔修訂：`tinylm-v2`，SHA-256 `710249c2…`，SJTL0002，14,638,224 bytes，S7e 的嚴格值加 δ；下面的 `8725204c…`、14,638,208 bytes 與 `tinylm-v1` 是原契約的 v1〕：S7c-1 匯出的 M int8 `.sjtl`（SHA-256 `8725204c…`，綁 model-v5 的雜湊，聊天與書面 α 0.7、τ 2）。開發時放 `data/lm/tinylm.sjtl`（不進 git，和 `bigram.sjlm` 一樣）；雜湊記在進版控的 `data/tinylm.sjtl.sha256`。殼的測試從 `data/lm/tinylm.sjtl` 以 `tinylm.sjtl` 的名稱連進測試用的 Resources（缺檔時照現有的寫法失敗，不略過）；CI 的 `shell` job 在 `swift test` 之前下載並核對。
 - **發佈時核對雜湊**（F9）：`docs/releases/README.md` 的資料類 Release 流程加兩步——上傳前 `shasum -a 256 -c data/tinylm.sjtl.sha256`，上傳後重新下載再核對一次；研究紀錄補上 `.sjtl` 完整的 64 碼 SHA-256 與大小（14,638,208 bytes），寫雜湊檔時兩者都要相符。
 - **`release.yml`**（F7）：它的 build job 不跑 check-app 與 selftest（現有做法，靠同一個 commit 先過 CI，`build-app.sh` 自己也核對）；漏掉下載只會讓發版時建置失敗。合併後、下一個 `v*` tag 之前，在 main 用 `workflow_dispatch` 跑一次 dry run（對外動作，到時候先問使用者）；verifier 讀 `release.yml` 的 diff。
 - **Release 的順序**（和 `docs/releases/README.md` 一致，避免「Release 等說明進 main、說明等 CI、CI 等 Release」）：(1) 一個只含 `docs/releases/tinylm-v1.md` 與 `data/tinylm.sjtl.sha256` 的小文件 PR 先合併進 main；(2) 問使用者；(3) 同意後從 main 照 README 的指令建 `tinylm-v1`（附件 `tinylm.sjtl`，`--latest=false`）；(4) 這一片的程式 PR 的 CI 才下載得到檔案，全綠後合併。
@@ -45,7 +51,7 @@
 
 ### 2.5 Selftest（`Selftest.swift`）
 
-- 載入模型；**聊天設定**下用一句已知會被重排改掉的句子（從 2a 的 dev302 聊天重播挑一句，CLI 第一名和 n-gram 第一名不同的），同步地打字、每個鍵後「取 → 算 → 套用」，最後的組字等於重排後的句子、而且和 n-gram 的句子不同；關掉開關重打一次，等於 n-gram 的句子。模型沒載入時 selftest 失敗（不讓「語意校正靜靜地沒作用」的 bundle 出貨）。
+- 〔修訂：句子改用 dev302 第 65 列 `ㄨㄛˇ ㄉㄥˇ ㄧ ㄒㄧㄚˋ ㄗㄞˋ ㄍㄨㄛˋ ㄑㄩˋ`，我等一下在過去 → 再過去；第 25 列在 tinylm-v2 的聊天設定下不被改；selftest 明確開啟重排，不靠預設。〕載入模型；**聊天設定**下用一句已知會被重排改掉的句子（從 2a 的 dev302 聊天重播挑一句，CLI 第一名和 n-gram 第一名不同的），同步地打字、每個鍵後「取 → 算 → 套用」，最後的組字等於重排後的句子、而且和 n-gram 的句子不同；關掉開關重打一次，等於 n-gram 的句子。模型沒載入時 selftest 失敗（不讓「語意校正靜靜地沒作用」的 bundle 出貨）。
 
 ### 2.6 文件
 
@@ -59,7 +65,7 @@
 3. **打包**：`build-app.sh` 在缺檔或雜湊不符時失敗；`check-app.sh` 檢查 bundle 裡的檔與雜湊；CI 的 `shell` job 全綠。
 4. `make test`、CI 全綠；`/code-review` 沒有未處置的問題；fresh verifier 確認第 1–3 項，並讀 diff 確認：模型路徑只從 bundle 的 Resources 接具名常數（這是靠構造保證，原始碼掃描不算防護）、包裝類別的規則（§2.1）、`release.yml` 的下載與核對。
    - **S7c-2a 安全審查留下的三個出貨前提各由哪一項證明**：隨簽章的 App 打包 → 第 3 項（`check-app.sh` 對記的雜湊比對）加現有的 `codesign --verify --strict --deep`；路徑寫死 → 第 4 項 verifier 讀 diff；雜湊進版控並在建置時核對 → 第 3 項（`build-app.sh`）與 CI，`release.yml` 由 verifier 讀 diff 與發版前的 dry run。
-5. **實機**（使用者，每次佔用鍵盤 ≤ 15 秒；main 用 `scripts/install-ime.sh` 安裝，裝完提醒 Caps Lock 切換可能失效與復原方法）：在**訊息 App**（`com.apple.MobileSMS`，聊天設定；只打字、不按 Enter 送出）打 §2.5 那一句，最後顯示重排後的字（和 n-gram 的字不同）；到設定視窗關掉「語意校正」再打一次，顯示 n-gram 的字；請使用者說打字時的閃動能不能接受（A4 的決定）。
+5. **實機**（使用者，每次佔用鍵盤 ≤ 15 秒；main 用 `scripts/install-ime.sh` 安裝，裝完提醒 Caps Lock 切換可能失效與復原方法）：在**訊息 App**（`com.apple.MobileSMS`，聊天設定；只打字、不按 Enter 送出）打 §2.5 那一句，最後顯示重排後的字（和 n-gram 的字不同）；〔修訂：預設關，要先到設定視窗打開「語意校正」，打完再關掉重打一次，顯示 n-gram 的字，句子是第 65 列的〕到設定視窗關掉「語意校正」再打一次，顯示 n-gram 的字；請使用者說打字時的閃動能不能接受（A4 的決定）。
 
 ## 4. 範圍外、停止條件、預算、限制、回滾
 

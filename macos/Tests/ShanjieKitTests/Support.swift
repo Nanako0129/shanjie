@@ -43,7 +43,7 @@ enum TestData {
                     \(f.source) is missing. The lexicon is in git; the model is the model-v5 release asset: \
                     gh release download model-v5 -R Nanako0129/shanjie -p bigram.sjlm -D data/lm
                     classes.sjc: gh release download classes-v3 -R Nanako0129/shanjie -p classes.sjc -D data/lm
-                    tinylm.sjtl: gh release download tinylm-v1 -R Nanako0129/shanjie -p tinylm.sjtl -D data/lm
+                    tinylm.sjtl: gh release download tinylm-v2 -R Nanako0129/shanjie -p tinylm.sjtl -D data/lm
                     """, file: file, line: line)
                 return nil
             }
@@ -338,12 +338,13 @@ final class FreeCounter: @unchecked Sendable {
     }
 }
 
-/// dev302 row 25 (s7c2b section 2.5, the selftest's sentence): in the chat profile the n-gram's first is 城市, the small model
-/// picks 程式.
-enum Row25 {
-    static let zhuyin = "ㄓˊ ㄒㄧㄥˊ ㄓㄜˋ ㄍㄜ˙ ㄔㄥˊ ㄕˋ"
+/// dev302 row 65 (s7c2b section 2.5, revised 2026-10-12, the selftest's sentence): in the chat profile the n-gram's first is 在,
+/// the small model picks 再. Row 25 (執行這個城市 -> 程式) was this sentence under tinylm-v1; the strict chat values of tinylm-v2
+/// no longer change it (measured, `--profile chat --context --tinylm`), and row 65 is one of the rows the v2 chat setting fixes.
+enum RerankRow {
+    static let zhuyin = "ㄨㄛˇ ㄉㄥˇ ㄧ ㄒㄧㄚˋ ㄗㄞˋ ㄍㄨㄛˋ ㄑㄩˋ"
     static let standardKeys = Layouts.keys(zhuyin, eten: false)
     static let etenKeys = Layouts.keys(zhuyin, eten: true)
-    static let ngram = "執行這個城市"
-    static let reranked = "執行這個程式"
+    static let ngram = "我等一下在過去"
+    static let reranked = "我等一下再過去"
 }

@@ -19,12 +19,13 @@ public enum Selftest {
     static let packWordStandard = "2u/4m06w;6"
     static let packWord = "碇源堂"
 
-    /// s7c2b section 2.5: dev302 row 25 `ㄓˊ ㄒㄧㄥˊ ㄓㄜˋ ㄍㄜ˙ ㄔㄥˊ ㄕˋ` on the standard layout, chat profile, no left context.
-    /// The n-gram's first is 執行這個城市; the small model picks 執行這個程式 (CLI `--profile chat --dev 302 --tinylm` and
-    /// fusegrid's pick at alpha 0.7, tau 2, 2026-10-11). The tests derive the same keys from the zhuyin independently.
-    static let rerankRowStandard = "56vu/65k4ek7t/6g4"
-    static let rerankedText = "執行這個程式"
-    static let ngramText = "執行這個城市"
+    /// s7c2b section 2.5 (revised 2026-10-12): dev302 row 65 `ㄨㄛˇ ㄉㄥˇ ㄧ ㄒㄧㄚˋ ㄗㄞˋ ㄍㄨㄛˋ ㄑㄩˋ` on the standard layout, chat
+    /// profile, no left context; a space is the first tone. The n-gram's first is 我等一下在過去; the small model (tinylm-v2, the
+    /// strict chat values) picks 我等一下再過去 (CLI `--profile chat --context --tinylm`, top1 on this row 0 -> 1). Row 25, the sentence
+    /// under tinylm-v1, is not changed by v2's chat setting. The tests derive the same keys from the zhuyin independently.
+    static let rerankRowStandard = "ji32/3u vu84y94eji4fm4"
+    static let rerankedText = "我等一下再過去"
+    static let ngramText = "我等一下在過去"
 
     public static func run(resources: URL) -> Int32 {
         let lmPath = resources.appendingPathComponent("bigram.sjlm").path
@@ -66,7 +67,8 @@ public enum Selftest {
     /// returns the composition shown at the end and discards it, or a nonzero code.
     private static func typeReranked(_ keys: String, _ engine: CoreEngine) -> (String, Int32) {
         var shown = ""
-        for k in keys.unicodeScalars.map({ ShanjieKey(kind: KeyMap.char, ch: $0.value, modifiers: 0) }) {
+        for k in keys.unicodeScalars.map({ $0 == " " ? ShanjieKey(kind: KeyMap.space, ch: 0, modifiers: 0)
+                                                     : ShanjieKey(kind: KeyMap.char, ch: $0.value, modifiers: 0) }) {
             switch engine.key(k) {
             case .ok(let o): shown = o.preedit
             case .failed(let c): return ("", c)

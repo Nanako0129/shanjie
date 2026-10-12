@@ -97,7 +97,7 @@ final class DefaultsCandidateOrientationStore: CandidateOrientationStore {
     }
 }
 
-/// The "語意校正" switch (docs/contracts/s7c2b-shell-rerank.md section 2.2), key `rerank` in the same domain; absent means on.
+/// The "語意校正" switch (docs/contracts/s7c2b-shell-rerank.md section 2.2), key `rerank` in the same domain; absent means off.
 @MainActor
 final class DefaultsRerankStore: RerankStore {
     var rerank: Bool? {
