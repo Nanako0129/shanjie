@@ -24,7 +24,7 @@ public final class SettingsModel: ObservableObject {
     public var showsAbbreviation: Bool { shell.showsAbbreviation }
     @Published public private(set) var demote = true
     /// 語意校正 (s7c2b section 2.2).
-    @Published public private(set) var rerank = true
+    @Published public private(set) var rerank = false
     /// Whether the window's 語意校正 toggle is enabled: the demotion table on and the small model loaded, like the menu item.
     @Published public private(set) var rerankEnabled = true
     @Published public private(set) var acgPack = true

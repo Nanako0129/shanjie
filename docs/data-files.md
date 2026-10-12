@@ -8,7 +8,7 @@
 |---|---|---|---|---|
 | `bigram.sjlm` | [`model-v5`](https://github.com/Nanako0129/shanjie/releases/tag/model-v5) | bigram 語言模型：詞與詞相鄰出現的機率；含少量用來辨識來源的指紋條目 | 82,535,147 bytes | `data/bigram.sjlm.sha256` |
 | `classes.sjc` | [`classes-v3`](https://github.com/Nanako0129/shanjie/releases/tag/classes-v3) | 詞類表（S2k）：512 個詞類、每個詞屬於哪一類、「這類詞後面接那類詞」的機率。兩個詞沒在語料一起出現過時，用它補估計 | 5,575,836 bytes | `data/classes.sjc.sha256` |
-| `tinylm.sjtl` | [`tinylm-v1`](https://github.com/Nanako0129/shanjie/releases/tag/tinylm-v1) | 「語意校正」用的小型字元語言模型（S7，SJTL0001）：6 層、字表 9,714 字，二維權重 int8；在 n-gram 的前幾名裡重新排序 | 14,638,208 bytes | `data/tinylm.sjtl.sha256` |
+| `tinylm.sjtl` | [`tinylm-v2`](https://github.com/Nanako0129/shanjie/releases/tag/tinylm-v2) | 「語意校正」用的小型字元語言模型（S7，SJTL0002）：6 層、字表 9,714 字，二維權重 int8；在 n-gram 的前幾名裡重新排序 | 14,638,224 bytes | `data/tinylm.sjtl.sha256` |
 
 - **放在同一個資料夾**（`data/lm/`）。前兩個一起用；`classes.sjc` 不含模型本身，`classes-v3` 這個 Release 也只有這一個檔案。
 - **綁定**：`classes.sjc` 裡記了它是為哪個模型建的（model-v5 的 SHA-256）。缺檔、配到別的模型、或檔案內容不對，載入都會失敗（C ABI 的 `load_lm` 回傳 3），不會靜靜地用錯或不用。
@@ -20,7 +20,7 @@
 ```sh
 gh release download model-v5 -R Nanako0129/shanjie -p bigram.sjlm -D data/lm
 gh release download classes-v3 -R Nanako0129/shanjie -p classes.sjc -D data/lm
-gh release download tinylm-v1 -R Nanako0129/shanjie -p tinylm.sjtl -D data/lm
+gh release download tinylm-v2 -R Nanako0129/shanjie -p tinylm.sjtl -D data/lm
 shasum -a 256 -c data/bigram.sjlm.sha256 data/classes.sjc.sha256 data/tinylm.sjtl.sha256
 ```
 

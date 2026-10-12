@@ -59,7 +59,7 @@ final class CoreEngine {
     /// S7c-2a: the small model for the loaded n-gram model; call it after `loadLM`. Non-zero keeps the n-gram only.
     func loadTinyLM(path: String) -> Int32 { shanjie_engine_load_tinylm(handle, path) }
 
-    /// S7c-2a: whether rerank jobs are made (the core's default is on); returns the snapshot, like `setDemote`.
+    /// S7c-2a: whether rerank jobs are made (the core's default is off since S7c-2c; the shell sends its own value to every engine); returns the snapshot, like `setDemote`.
     func setRerank(_ on: Bool) -> CoreResult {
         var out: UnsafeMutablePointer<ShanjieOutput>?
         return Self.take(shanjie_engine_set_rerank(handle, on ? 1 : 0, &out), out)

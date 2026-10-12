@@ -160,7 +160,7 @@ public final class MemoryCandidateOrientationStore: CandidateOrientationStore {
     public init(_ candidateVertical: Bool? = nil) { self.candidateVertical = candidateVertical }
 }
 
-/// Where the "語意校正" switch is kept (docs/contracts/s7c2b-shell-rerank.md section 2.2): `nil` means never chosen, which is on.
+/// Where the "語意校正" switch is kept (docs/contracts/s7c2b-shell-rerank.md section 2.2): `nil` means never chosen, which is off.
 /// Same arrangement as `PredictionStore`.
 @MainActor
 public protocol RerankStore: AnyObject {
@@ -324,8 +324,8 @@ public final class Shell {
     /// panel, that is reachable through the API and the tests but not observable from the window as shipped.
     public private(set) var candidateVertical = false
     private let rerankStore: RerankStore
-    /// s7c2b section 2.2: whether the core makes rerank jobs (default on); sent to every engine `build()` makes and on every change.
-    private(set) var rerankOn = true
+    /// s7c2b section 2.2: whether the core makes rerank jobs (default off, the maintainer's decision 2026-10-12); sent to every engine `build()` makes and on every change.
+    private(set) var rerankOn = false
     /// The small model's file in Resources (section 2.3). The only path it is loaded from: `build()` and the selftest join it to
     /// `resources`; no init parameter, defaults key or environment variable names another.
     static let tinyLMFile = "tinylm.sjtl"
@@ -471,7 +471,7 @@ public final class Shell {
         self.candidateOrientationStore = candidateOrientationStore
         candidateVertical = candidateOrientationStore.candidateVertical ?? false
         self.rerankStore = rerankStore
-        rerankOn = rerankStore.rerank ?? true
+        rerankOn = rerankStore.rerank ?? false
         self.rerankRunner = rerankRunner
         self.profileModeStore = profileModeStore
         profileMode = profileModeStore.profileMode.flatMap(ProfileMode.init(rawValue:)) ?? .auto

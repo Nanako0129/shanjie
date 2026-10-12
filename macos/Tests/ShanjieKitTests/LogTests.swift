@@ -80,7 +80,7 @@ final class LogTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: learning) }
         let runner = HeldRerankRunner()
         let shell = Shell(resources: resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(),
-                          learningDirectory: learning, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: runner, profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore())
+                          learningDirectory: learning, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(true), rerankRunner: runner, profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore())
         let c = Controller(shell, bundle: bundleMarker)
         c.client.before = "ab\t\(Self.contextMarker)"
         c.session.activate()                            // profile from a marked bundle ID
@@ -92,9 +92,9 @@ final class LogTests: XCTestCase {
         let chat = Controller(shell, bundle: RerankTests.chatApp)
         chat.client.selectedOverride = NSRange(location: NSNotFound, length: 0)
         chat.session.activate()
-        chat.type(Row25.standardKeys)
+        chat.type(RerankRow.standardKeys)
         runner.drain()
-        XCTAssertEqual(chat.client.marked, Row25.reranked, "the rerank result was not applied")
+        XCTAssertEqual(chat.client.marked, RerankRow.reranked, "the rerank result was not applied")
         chat.press(Keys.esc)
         c.session.activate()
         c.type("su3 ")
@@ -155,7 +155,7 @@ final class LogTests: XCTestCase {
             Row226.formal, Row226.chat, "你好", Row226.zhuyin, "ㄑㄧ", "ㄋㄧ",
             Row226.standardKeys, String(Row226.standardKeys.prefix(6)), "su3cl3",
             bundleMarker, pathMarker, Self.contextMarker,
-            Row25.ngram, Row25.reranked, Row25.zhuyin, Row25.standardKeys, "城市", "程式",
+            RerankRow.ngram, RerankRow.reranked, RerankRow.zhuyin, RerankRow.standardKeys, "在過去", "再過去",
         ]
         for marker in negatives {
             XCTAssertFalse(everything.contains(marker), "a negative marker reached the log")
