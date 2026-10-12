@@ -7,17 +7,17 @@
 | 檔 | 做什麼 | 需要 torch |
 |---|---|---|
 | `tinylm.py` | numpy 核心：字表（PAD 0、UNK 1、BOS 2）、`row_key`（`context_key`；16 字版）、`.npz` 格式（`save_params`）、numpy 前向（`NumpyLM`）、**唯一的 `LL`**（`ll_many`，序列 `[BOS] + k + c`） | 否 |
-| `prep.py` | `runs`：核對輸入雜湊，產生訓練文字（維基＋口語，與 n-gram 同一組函式）；`encode`：字表（≥ 5 次）與 `ids-*.npy` | 否 |
+| `prep.py` | `runs`：核對輸入雜湊，產生訓練文字（維基＋口語，與 n-gram 同一組函式）；`encode`：字表（≥ 5 次）與 `ids-*.npy`；`text`（S7f）：另一個文字檔照口語的切法、用**現有**字表轉成 `ids-<name>.npy` | 否 |
 | `buildcheck.py` | `construction`：對原始來源的建構檢查；`substr`：調參集正解句出現在訓練文字裡的比例（只記錄）；`--flags` 另寫逐列 0／1（S7d） | 否 |
-| `batching.py` | 訓練批次（一段一個序列、同長度成批、超過 65 個 token 的切片重疊 1 個） | 否 |
+| `batching.py` | 訓練批次（一段一個序列、同長度成批、超過 65 個 token 的切片重疊 1 個）；`build_epoch`／`plan`：`train.py` 的 epoch 與批次順序（S7f 起放這裡，沒有 torch 也能測；`--extra` 的檔權重 1、接在最後） | 否 |
 | `torch_model.py`、`train.py` | 模型、`export_npz`、torch 打分後端、訓練 | 是 |
 | `score.py` | 候選（`--dump` 前 8 名）× `LL` → 只有數字的分數檔；`--ppl-out` 正解句困惑度 | 否（`--backend torch` 才要） |
 | `run_sets.py` | 每個集合各跑一次 `lm_eval.py --dump` 與 `score.py`（一行命令跑完全部集合） | 否 |
 | `parity.py` | 一致性關卡：兩份分數檔的最大 \|ΔLL\| | 否 |
-| `fusegrid.py` | 格點、凍結選擇、rowstats、`evalstats` 表格、§3／§4 報告；`--tune-keep` 只用旗標 0 的調參列選（S7d） | 否 |
+| `fusegrid.py` | 格點、凍結選擇、rowstats、`evalstats` 表格、§3／§4 報告；`--tune-keep` 只用旗標 0 的調參列選（S7d）；`--break-weight W` 照「改對 − W × 改壞」在 (α, τ, δ) 上選、照 S7e §3 判斷，δ 是融合的門檻（S7e） | 否 |
 | `latency.py` | numpy 延遲（8 候選 × 17 字，200 次）與 int8 大小 | 否 |
 | `int8check.py` | S7b §2.3：`dequant`（權重 int8 還原成 float32 的複本）、`compare`（int8 對 n-gram 的 §4 與 int8 對 fp32 的表，結論「int8 夠用／需要 FP32／不適用」） | 否 |
-| `export_sjtl.py` | S7c-1：`.npz` → `SJTL0001`（Rust 讀的模型檔；檔案格式寫在檔頭的 docstring）；`read_sjtl` 供測試與 golden 產生器用 | 否 |
+| `export_sjtl.py` | S7c-1：`.npz` → `SJTL0001`，S7c-2c 起給 δ 時寫 `SJTL0002`（Rust 讀的模型檔；檔案格式寫在檔頭的 docstring）；`read_sjtl` 供測試與 golden 產生器用 | 否 |
 | `test_*.py` | 單元測試；`test_torch.py` 沒有 torch 時整檔跳過 | 只有 `test_torch.py` |
 
 ## 契約沒寫死、我做的決定
@@ -152,6 +152,43 @@ $PY fusegrid.py --scores $OUT/scores --out $W/s7d/repro --models M L --settings 
 $PY fusegrid.py --scores $OUT/scores --out $W/s7d/keep --models M L --settings chat formal --sets cvtune wikitune dev302 typing76 user-reported discordtune --tune-keep $W/s7d-flags
 # 用完：刪掉 discordtune 的候選、分數、rowstats（$W/dumps/discordtune.*、$OUT/scores/*.discordtune.jsonl、各 rowstats 資料夾的 *discordtune*）
 ```
+
+## S7e：照「改對 − W × 改壞」選 (α, τ, δ)
+
+契約 `docs/contracts/s7e-fewer-breaks.md`。公開集合沿用 S7b 的 M8 分數（cvtune、wikitune、dev302、打字測驗、錯字回報前 66 列）；新打分的是錯字回報 72 列、功能字測試句 `fw`、discordtune。
+
+```sh
+cd experiments/s7a-tinylm
+W=~/.cache/shanjie/work/s7a; PY=/opt/homebrew/bin/python3
+# 候選與分數（fw 的前 186 列會先核對 SHA-256）
+$PY run_sets.py dumps --work $W/s7e-work --sets user-reported fw [discordtune --discord FILE]
+$PY run_sets.py score --work $W/s7e-work --out $W/s7e-work/scores --models M8 --backend numpy --sets user-reported fw [discordtune --discord FILE]
+# 分數資料夾：S7b 的 M8.*.{cvtune,wikitune,dev302,typing76}.jsonl 加上 s7e-work 的 user-reported、fw、discordtune（symlink 到 $W/s7e/scores）
+# 重現關卡（不給 --break-weight，必須選回 0.7／2，契約 §2.2 的 10 格）用 S7b 的 66 列錯字回報，另一個 --out
+$PY fusegrid.py --scores $W/s7b/scores --out $W/s7e/gate --models M8 --sets cvtune wikitune dev302 typing76 user-reported
+# 選與判斷（兩種模式寫同名的 .base／.new，所以各用自己的 --out）
+$PY fusegrid.py --scores $W/s7e/scores --out $W/s7e/w10 --models M8 --sets cvtune wikitune dev302 typing76 user-reported fw discordtune --break-weight 10
+# 用完：刪掉 discordtune 的候選、分數與 rowstats（find $W/s7e-work $W/s7e -name '*discordtune*'）
+```
+
+- `score.py` 每個候選算 ll、ll0、ll16 三欄。這個模式用 ll 選與判斷，用 ll0 檢查前文有沒有接上（「LL changed by context」，錯字回報與 discordtune 是 0 就停），ll16 沒用到。
+- L、XL 是在 Colab 上用 `train.py --size L|XL`、同一份 `ids-*.npy` 與 `vocab.txt` 訓練，公開集合也在 Colab 上打分（研究紀錄 2026-10-12 記了上傳的限制）；discordtune 只在 Mac 本機打分。
+
+## Colab：資料怎麼傳（2026-10-12 實測，使用者定案）
+
+VM 在美國（實測時在南卡羅來納州）。只傳公開的程式與資料；私人資料（discordtune、學習檔、聊天紀錄）不上 Colab。
+
+| 路徑 | 實測 | 用在 |
+|---|---|---|
+| VM 自己抓公開資料：維基 dump 走 your.org 鏡像、8 路平行分段 | 約 39.5 MiB/s（官方 dumps.wikimedia.org 單線 4.8 MiB/s，平行分段會被截短） | 維基 dump |
+| VM 自己抓：Hugging Face／GitHub | 約 54.5／12.5 MiB/s | 資料集、程式 |
+| Mac → S4（rclone）→ VM（有時效的下載網址） | 約 33 MiB/s ＋ 約 15.7 MiB/s | 只在 Mac 上的檔案（自己的衍生檔、模型） |
+| `colab download`（VM → Mac） | 約 3.2 MiB/s | 結果（幾百 MB 以內） |
+| `colab upload`（Mac → VM，16 MiB 分片） | 約 2.2 MiB/s | 不用 |
+| Google Drive（`colab drivemount`） | Mac → Drive 16.8、Drive → VM 32.5、VM → Drive 13.1 MiB/s | 不用：每個 session 都要使用者授權一次 |
+
+- 有時效的網址用 `rclone link --expire 1h`，在 Mac 上產生、存成只有自己能讀的檔、不印出來；金鑰不離開 Mac。用完刪掉嵌著網址的腳本。
+- CPU 的 session（不帶 GPU）在實測時沒有扣運算單元。
 
 ## S7c-1：Rust 推論（`SJTL0001`）
 
