@@ -445,16 +445,32 @@ class TestGenerate(unittest.TestCase):
         self.assertNotIn('"content"', self.files().get("cerebras-gpt-oss-120b.jsonl", ""))   # not kept as an empty reply
 
     def test_wrong_shape_body_with_200_stops(self):
-        ok_choices = [{"message": {"content": "今天好讚"}}]
-        for body in ([], None, {"choices": "x"}, {"usage": [1], "choices": ok_choices}, {"choices": ok_choices},
-                     {"usage": {"cost": 0.001}, "choices": []}, {"usage": {"cost": "abc"}, "choices": ok_choices},
-                     {"usage": {"cost": "NaN"}, "choices": ok_choices}, {"usage": {"cost": -1}, "choices": ok_choices},
-                     {"usage": {"cost": 0.001, "prompt_tokens": None}, "choices": ok_choices},
-                     {"usage": {"cost": 0.001}, "choices": [{"message": {"content": ["a"]}}]}):
-            api = lambda host, path, req, key, body=body: (200, json.dumps(body).encode())
+        ok_u, ok_c = {"cost": 0.001, "prompt_tokens": 50, "completion_tokens": 20}, [{"message": {"content": "今天好讚"}}]
+        bad = [b"[]", b"null", b"[" * 100000 + b"]" * 100000]
+        bad += [json.dumps(x).encode() for x in (
+            {"choices": ok_c}, {"usage": [1], "choices": ok_c}, {"usage": {}, "choices": ok_c},
+            {"usage": {"total_tokens": 70}, "choices": ok_c}, {"usage": {**ok_u, "prompt_tokens": None}, "choices": ok_c},
+            {"usage": {**ok_u, "prompt_tokens": -5}, "choices": ok_c}, {"usage": {**ok_u, "cost": "abc"}, "choices": ok_c},
+            {"usage": {**ok_u, "cost": "NaN"}, "choices": ok_c}, {"usage": {**ok_u, "cost": -1}, "choices": ok_c},
+            {"usage": ok_u, "choices": "x"}, {"usage": ok_u, "choices": []}, {"usage": ok_u, "choices": [{}]},
+            {"usage": ok_u, "choices": [{"message": {"content": ["a"]}}]}, {"usage": ok_u, "choices": [{"message": {"content": []}}]},
+            {"usage": ok_u, "choices": [{"message": {"content": 0}}]})]
+        bad.append(b'{"usage": {"cost": 1e999, "prompt_tokens": 50, "completion_tokens": 20}, "choices": [{"message": {"content": "x"}}]}')
+        for body in bad:
+            api = lambda host, path, req, key, body=body: (200, body)
             code, log = self.run_main(api, "--chars", "100", "--budget-usd", "5", "--price-in", "0.5", "--price-out", "1", "--resume")
-            self.assertEqual(code, 3, body)
-            self.assertIn("not the expected JSON shape", log, body)
+            self.assertEqual(code, 3, body[:80])
+            self.assertIn("not the expected JSON shape", log, body[:80])
+
+    def test_error_with_known_cost_still_reaches_the_ledger(self):
+        u = {"cost": 0.5, "prompt_tokens": 50, "completion_tokens": 0}
+        for choices in ([], [{"message": {"content": ""}, "finish_reason": "error", "error": {"message": "upstream"}}]):
+            api = lambda host, path, req, key, choices=choices: (200, json.dumps({"usage": u, "choices": choices}).encode())
+            before = json.load(open(os.path.join(self.tmp.name, "spend.json")))["usd"] if os.path.exists(os.path.join(self.tmp.name, "spend.json")) else 0.0
+            code, log = self.run_main(api, "--chars", "100", "--budget-usd", "5", "--resume")
+            self.assertEqual(code, 3, choices)
+            self.assertAlmostEqual(json.load(open(os.path.join(self.tmp.name, "spend.json")))["usd"] - before, 0.5)
+        self.assertIn("choice error", log)
 
     def test_resume_continues(self):
         api = FakeAPI(unique_reply, cost=0.01)

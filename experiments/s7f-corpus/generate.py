@@ -186,21 +186,29 @@ def main(argv=None):
         status, payload = post(host, path, request_body(a, prompt_text(ws)), key)
         if status != 200:
             return {"i": j, "status": status, "error": payload[:200].decode("utf-8", "replace")}
-        try:
+        usd = 0.0
+        try:   # a 200 body that cannot be accounted for is an error record, never a worker exception: an exception would skip
+               # ledger_add for the whole paid batch. A cost already read stays on the error record, so the ledger still counts it.
             out = json.loads(payload)
-        except ValueError:
-            return {"i": j, "status": status, "error": "the response is not JSON"}
-        try:                       # a 200 body that cannot be accounted for is an error, never a worker exception: an exception
-            if out.get("error"):   # would skip ledger_add for the whole paid batch. OpenRouter can answer 200 with an error body.
+            if out.get("error"):   # OpenRouter can answer 200 with an error body (a provider failure): an error, not an empty reply
                 return {"i": j, "status": status, "error": json.dumps(out["error"], ensure_ascii=False)[:200]}
-            u, message = out["usage"], out["choices"][0]["message"]
+            u = out["usage"]
             if u.get("cost") is None and not (a.price_in or a.price_out):
                 return {"i": j, "status": status, "error": "no usage.cost and no --price-in/--price-out: the budget cannot be enforced"}
-            content, toks, usd = message.get("content") or "", (u.get("prompt_tokens", 0), u.get("completion_tokens", 0)), cost_of(u, a)
-            if not (isinstance(content, str) and all(type(t) is int and t >= 0 for t in toks) and math.isfinite(usd) and usd >= 0):
-                raise ValueError("field types")
+            toks = (u["prompt_tokens"], u["completion_tokens"])
+            cost = cost_of(u, a)
+            if not (all(type(t) is int and t >= 0 for t in toks) and math.isfinite(cost) and cost >= 0):
+                raise ValueError("usage values")
+            usd = cost
+            choice = out["choices"][0]
+            if choice.get("error") or choice.get("finish_reason") == "error":   # a provider failure reported inside the choice
+                return {"i": j, "status": status, "usd": usd, "error": "choice error: " + json.dumps(choice.get("error"), ensure_ascii=False)[:200]}
+            content = choice["message"].get("content")
+            content = "" if content is None else content   # null content is an empty reply; any other non-string is an error
+            if not isinstance(content, str):
+                raise ValueError("content")
         except Exception as e:
-            return {"i": j, "status": status, "error": f"the response is not the expected JSON shape ({type(e).__name__})"}
+            return {"i": j, "status": status, "usd": usd, "error": f"the response is not the expected JSON shape ({type(e).__name__})"}
         return {"i": j, "seeds": ws, "content": content, "in_tokens": toks[0], "out_tokens": toks[1], "usd": usd,
                 "served_by": out.get("provider")}
 
