@@ -29,6 +29,7 @@ test: rust
 	python3 -m unittest discover -s experiments/s7a-tinylm -p test_export_sjtl.py
 	python3 -W ignore -m unittest tools/test_kn_cont.py
 	python3 -W ignore -m unittest experiments/p1a-confusion/test_p1a.py
+	python3 -W ignore -m unittest experiments/s7f-corpus/test_s7f.py experiments/s7a-tinylm/test_extra.py
 	swift test --package-path macos
 
 # The shipping bundle: build/$(APP_NAME) with the shipping bundle ID.
