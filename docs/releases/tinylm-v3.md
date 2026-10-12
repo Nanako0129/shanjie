@@ -8,12 +8,14 @@
 - 聊天的值怎麼選（`docs/contracts/e2-chat-eval.md`，研究紀錄 2026-10-13）：在維護者自己的聊天訊息建的評測集上，用「改對 − 改壞」（1:1）計分、改壞率上限 0.5%，在調參期的月份選值並先凍結，之後才在判斷期（2026-08）算一次。評測集只用來選三個數字；檔案裡沒有任何訊息的文字，評測集本身不公開。
 - **綁定**：和 `tinylm-v2` 相同，檔案記了 [model-v5](https://github.com/Nanako0129/shanjie/releases/tag/model-v5) `bigram.sjlm` 的 SHA-256，配到別的 n-gram 模型就拒絕載入；這個核對不看詞類表，參數是在 model-v5＋[classes-v3](https://github.com/Nanako0129/shanjie/releases/tag/classes-v3) 上調的。換 n-gram 模型或詞類表都要重新調參、發新的檔（`docs/data-files.md`）。
 - 產生：S7a 訓練出的 `tinylm-M.npz`（SHA-256 `32308122782d3c5aba8a838521f031a466671d47d48ec0f54dcfb9256451815e`，沒有另外發布；訓練見 `docs/contracts/s7a-tinylm.md`），用 `experiments/s7a-tinylm/export_sjtl.py` 以 `--type int8 --chat 0.3 2 0.25 --formal 0.7 1 2` 匯出（`docs/contracts/s7h-tinylm-v3.md`）。
-- 量測（對 n-gram 第一名，聊天設定）：
+- 量測，聊天設定（對 n-gram 第一名）：
   - 聊天評測的判斷期（2026-08，6,559 列，只記數字）：改對 125／改壞 16，淨值 +109，改壞率 0.24%（改壞數 95% 上界換成比例 0.37%）；`tinylm-v2` 的聊天值是 82／7、+75、0.11%。
-  - 公開集合（Rust 的 int8 路徑；8 行和 E2 的 numpy 表逐字元相同，研究紀錄 2026-10-13 的 S7h 一節）：dev302 241 → 259（改對 18／改壞 0）、cvtune 83／4、wikitune 108／5、打字測驗 3／0、錯字回報（前 72 列）9／1、功能字測試句 4／1。
-  - 口語守門集合：立法院公報委員發言（`lytune`）107／49、維基錯字表（`wikitypo`）0／2（p = 0.50）。
-  - 書面設定的結果和 `tinylm-v2` 逐位元組相同（dev302、cvtune）。
-  - 保留集在換檔的 PR（S7h PR 2）由 fresh verifier 量一次。
+  - Rust 的 int8 路徑重現 E2 的 numpy 表，8 個集合逐字元相同（研究紀錄 2026-10-13 的 S7h 一節）：
+    - 公開集合：dev302 241 → 259（改對 18／改壞 0）、cvtune 83／4、wikitune 108／5、打字測驗 3／0、錯字回報（前 72 列）9／1、功能字測試句 4／1。
+    - 口語守門集合：立法院公報委員發言（`lytune`）107／49、維基錯字表（`wikitypo`）0／2（p = 0.50）。
+  - 錯字回報整個檔（77 列）：n-gram → v3 9／1，`tinylm-v2` → v3 6／1。
+- 量測，書面設定：參數和 `tinylm-v2` 相同，dev302、cvtune 的結果逐位元組相同；對 n-gram 第一名，dev302 4／0、打字測驗 1／0、錯字回報 1／0。
+- 保留集〔待 fresh verifier 的結果〕。
 - 授權：**CC BY-SA 4.0**（https://creativecommons.org/licenses/by-sa/4.0/ ）。訓練文字和 `tinylm-v1`、`v2` 相同，和 model-v5 的 `bigram.sjlm` 同源：
   - 中文維基百科 2026-10-01 dump 的前 20 萬篇條目（CC BY-SA 4.0，署名：Wikipedia contributors）
   - Mozilla Common Voice 繁體中文（台灣）的句子（CC0）
