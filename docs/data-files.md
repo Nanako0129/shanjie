@@ -8,7 +8,7 @@
 |---|---|---|---|---|
 | `bigram.sjlm` | [`model-v5`](https://github.com/Nanako0129/shanjie/releases/tag/model-v5) | bigram 語言模型：詞與詞相鄰出現的機率；含少量用來辨識來源的指紋條目 | 82,535,147 bytes | `data/bigram.sjlm.sha256` |
 | `classes.sjc` | [`classes-v3`](https://github.com/Nanako0129/shanjie/releases/tag/classes-v3) | 詞類表（S2k）：512 個詞類、每個詞屬於哪一類、「這類詞後面接那類詞」的機率。兩個詞沒在語料一起出現過時，用它補估計 | 5,575,836 bytes | `data/classes.sjc.sha256` |
-| `tinylm.sjtl` | [`tinylm-v1`](https://github.com/Nanako0129/shanjie/releases/tag/tinylm-v1) | 「語意校正」用的小型字元語言模型（S7，SJTL0001）：6 層、字表 9,714 字，二維權重 int8；在 n-gram 的前幾名裡重新排序 | 14,638,208 bytes | `data/tinylm.sjtl.sha256` |
+| `tinylm.sjtl` | [`tinylm-v2`](https://github.com/Nanako0129/shanjie/releases/tag/tinylm-v2) | 「語意校正」用的小型字元語言模型（S7，SJTL0002）：6 層、字表 9,714 字，二維權重 int8；在 n-gram 的前幾名裡重新排序 | 14,638,224 bytes | `data/tinylm.sjtl.sha256` |
 
 - **放在同一個資料夾**（`data/lm/`）。前兩個一起用；`classes.sjc` 不含模型本身，`classes-v3` 這個 Release 也只有這一個檔案。
 - **綁定**：`classes.sjc` 裡記了它是為哪個模型建的（model-v5 的 SHA-256）。缺檔、配到別的模型、或檔案內容不對，載入都會失敗（C ABI 的 `load_lm` 回傳 3），不會靜靜地用錯或不用。
@@ -20,7 +20,7 @@
 ```sh
 gh release download model-v5 -R Nanako0129/shanjie -p bigram.sjlm -D data/lm
 gh release download classes-v3 -R Nanako0129/shanjie -p classes.sjc -D data/lm
-gh release download tinylm-v1 -R Nanako0129/shanjie -p tinylm.sjtl -D data/lm
+gh release download tinylm-v2 -R Nanako0129/shanjie -p tinylm.sjtl -D data/lm
 shasum -a 256 -c data/bigram.sjlm.sha256 data/classes.sjc.sha256 data/tinylm.sjtl.sha256
 ```
 
@@ -34,7 +34,7 @@ shasum -a 256 -c data/bigram.sjlm.sha256 data/classes.sjc.sha256 data/tinylm.sjt
 | 只重新分群（類別數、μ、分群用的資料） | `classes-v4`，模型不變（`eval/golden/sp-predict.txt`、`sw-probe.txt` 的分數也依賴詞類表，要重產）；語意校正模型的 α、τ、δ 要重新調，發 `tinylm-v3`（雜湊檔不會攔下這種錯配，要靠這張表） |
 | 語意校正模型的訓練、大小、匯出格式或融合參數 | `tinylm-v3`，n-gram 模型與詞類表不變（`tinylm-v2` 就是只換融合參數） |
 
-舊的 Release 保留，可以回到那一版；例外是 model-v3 與 classes-v1，在 `docs/contracts/model-v4.md` §4 第 4 步的條件成立後移除。下一次重建模型時，發佈的檔案要先加上指紋條目再算雜湊，詞類表也對加過的檔案建。換版時同一個 PR 更新：雜湊檔（`data/*.sha256`）、CI 兩個 job 與 `release.yml` 的下載、`cli/tests/golden.rs` 的雜湊與訊息、`core/tests/engine_*.rs` 的缺檔訊息、`macos/Tests/ShanjieKitTests/Support.swift`、`scripts/build-app.sh` 的提示與內附的署名文字、README、CONTRIBUTING、`docs/verification.md`、`LICENSES/data.md`、`docs/PLAN.md` 的模型檔那一條，以及這份文件；換 `tinylm.sjtl` 時另外照 `docs/releases/README.md` 的上傳與核對步驟；依模型的 golden 照各自的產生方式重產（`docs/contracts/model-v5.md` §2.5 的 PR 2 是完整的例子）。
+舊的 Release 保留，可以回到那一版；例外是 model-v3 與 classes-v1，在 `docs/contracts/model-v4.md` §4 第 4 步的條件成立後移除。下一次重建模型時，發佈的檔案要先加上指紋條目再算雜湊，詞類表也對加過的檔案建。換版時同一個 PR 更新：雜湊檔（`data/*.sha256`）、CI 兩個 job 與 `release.yml` 的下載、`cli/tests/golden.rs` 的雜湊與訊息、`core/tests/engine_*.rs` 的缺檔訊息、`macos/Tests/ShanjieKitTests/Support.swift`、`scripts/build-app.sh` 的提示與內附的署名文字、README、CONTRIBUTING、`docs/verification.md`、`LICENSES/data.md`、`docs/PLAN.md` 的模型檔那一條，以及這份文件；換 `tinylm.sjtl` 時另外照 `docs/releases/README.md` 的上傳與核對步驟；換 `tinylm.sjtl` 而融合參數有變時，要重新量 selftest 的那一句還會被重排改掉（`Selftest.rerankRowStandard`、`rerankedText`、`ngramText`，與測試的 `RerankRow`），不會就重挑（tinylm-v2 的嚴格聊天值就讓原本的第 25 列不再被改，改用第 65 列）；依模型的 golden 照各自的產生方式重產（`docs/contracts/model-v5.md` §2.5 的 PR 2 是完整的例子）。
 
 ## 怎麼產生
 

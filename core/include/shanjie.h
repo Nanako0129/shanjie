@@ -193,7 +193,7 @@ int32_t shanjie_engine_learning_status(ShanjieEngine *engine, uint32_t *flags);
 //   change once when the result applies. Only a change that re-decodes the composition makes the result stale (apply drops it):
 //   a completed syllable, a deletion, a candidate or prediction pick, punctuation (it does not commit: it enters the composition,
 //   re-decodes and leaves a new job), a learning forget, and the settings that change decoding (profile, demote, rerank, a new
-//   model, learning on / open / clear). Keys that do not re-decode (cursor moves, unfinished zhuyin symbols, entering the
+//   model, learning open / clear; set_learning never makes the job stale: it does not change decoding, S7c-2b). Keys that do not re-decode (cursor moves, unfinished zhuyin symbols, entering the
 //   prediction row, pass-through keys) keep the job valid. Commits (ENTER, the auto-commit at 40 tokens, reset) send what is
 //   shown; a job not yet applied is dropped.
 // Logging: a job and its result hold candidate text. Never log them, their pointers, or the .sjtl path (the rules at the top).

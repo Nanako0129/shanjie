@@ -2836,7 +2836,7 @@ PR #90 的審查意見逐項處理。
 
 ### S7b：L 的結果（2026-10-11）
 
-- **第 0 步**（輸入）：S7a 的 `charcount.json` 只記原始文字的雜湊，沒有 `ids-*.npy` 的雜湊，契約「雜湊和 `charcount.json` 記的相同」照字面做不到。改核對三件事：`ids-wiki.npy`、`ids-coll.npy`、`vocab.txt` 的修改時間是 10/10，比 S7a 的 S、M 訓練早，之後沒有重產；L 的訓練記錄字表 9,717、片段 32,896,236、步數 8,836 和 S7a 的 M（`train-M.json`）相同；現在的 SHA-256 前 8 碼 `80ad1949`（ids-wiki）、`996b9ffc`（ids-coll）、`85cd05b0`（vocab），XL 用同一份。
+- **第 0 步**（輸入）：S7a 的 `charcount.json` 只記原始文字的雜湊，沒有 `ids-*.npy` 的雜湊，契約「雜湊和 `charcount.json` 記的相同」照字面做不到。改核對三件事：`ids-wiki.npy`、`ids-coll.npy`、`vocab.txt` 的修改時間是 10/10，比 S7a 的 S、M 訓練早，之後沒有重產；L 的訓練記錄字表 9,717（id 數，含 PAD、UNK、BOS；字是 9,714 個）、片段 32,896,236、步數 8,836 和 S7a 的 M（`train-M.json`）相同；現在的 SHA-256 前 8 碼 `80ad1949`（ids-wiki）、`996b9ffc`（ids-coll）、`85cd05b0`（vocab），XL 用同一份。
 - **訓練**（188，同一個種子與排程）：L 30,227,968 參數、8,836 步、最終損失 3.886 nats／token（M 3.993）、12,262 秒；每字困惑度（聊天、正解句）cvtune 47.7、wikitune 53.5（M 53.1、59.4）。權重 SHA-256 前 8 碼 `0c7c7c48`。
 - **一致性關卡**（Mac numpy 對 188 torch，cvtune 兩種設定各 30,328 個候選）：最大 |ΔLL| 1.26e-5，通過。
 - **凍結的格點**（cvtune＋wikitune 合計選）：聊天 α 2、τ 2，5,431 → 5,804（+5.64 個百分點；α 2 是格點的最大值）；書面 α 1、τ 2，5,501 → 5,812（+4.70）。
@@ -3021,6 +3021,19 @@ M 聊天 α 0.7、τ 2（保留列合計 4,342 → 4,630／5,440，+5.29 個百�
   - 沒有小模型（n-gram 自己）：flicker＝net rewrite＝371（14.50%）；變回再換回 0。
   - 讀法：整句轉換本來就會在打字時改寫前面的字（n-gram 自己 14.5%）；加上重排後，最後被改寫的比例降到 9.34%。新增的只有「先閃回 n-gram 的字、再換回來」這一種，每 100 個重新解碼的鍵約 2 次。第一版寫的「0.66%」分母是全部的鍵（含不會重新解碼的注音鍵），只算了變回再換回這一種〔更正，PR #116 /code-review〕。
 - **之後（2b 之前）要使用者決定**：帶著上面的 A4 數字，決定要不要加規則（例如記住已選的結果，同一段的候選沒變就直接沿用）或修改 A4；開關名稱與位置；Release 資產名稱與 `LICENSES/data.md` 那一列。
+
+## 2026-10-11：語意 S7c-2b 重排接進輸入法的殼、「語意校正」開關與打包（契約 `docs/contracts/s7c2b-shell-rerank.md`，分支 `feat/s7c2b-shell`）
+
+security-executor 實作，main 之後補量測與實機。
+
+- **殼**：`Session.apply` 每次套用輸出後取工作；`Shell` 一次只把一個工作交給 `RerankRunner`，其他的只留最新的一個（被取代的立刻釋放）。App 用 `QueueRerankRunner`（`DispatchQueue(qos: .utility)`、固定 label），跑完用 `DispatchQueue.main.async` 回主執行緒；完成時用 weak 參照比對 session 與引擎（`===`），開關要開著，`defer` 清掉「執行中」並接著跑留著的工作。碼 0 照一般輸出套用、5 不做事、其他碼（4）和 `take` 的非 0 一樣走既有的失敗處理。工作包在 `RerankJob`（指標 private、只在 deinit 經可注入的 free 函式釋放）。
+- **開關**：「語意校正」在選單（即時預測、可省略韻母之後）與設定視窗，預設開，存在 `UserDefaults` 的 `rerank`；每次建引擎後送 `set_rerank`；降權表關掉時反灰。
+- **模型**：`build()` 在 `load_lm` 之後載入 `Resources/tinylm.sjtl`（具名常數 `Shell.tinyLMFile`），失敗只記碼、照常用 n-gram。打包時 `build-app.sh` 核對 `data/tinylm.sjtl.sha256`，`check-app.sh` 把 bundle 裡的檔和記的雜湊比；CI 與 `release.yml` 下載 `tinylm-v1` 並核對。Release `tinylm-v1` 照契約 §2.4 的順序建立：文件 PR #117（說明檔、雜湊檔、`docs/data-files.md` 與 `LICENSES/data.md` 的列）先合併，使用者 2026-10-11 同意後從 main 建（`--latest=false`），上傳前與重新下載後各用 `shasum -a 256 -c data/tinylm.sjtl.sha256` 核對，兩次都 OK。
+- **selftest 的句子**：用 CLI `--profile chat --dev 302 --tinylm data/lm/tinylm.sjtl --tinylm-scores`／`--dump`，以 `fusegrid.pick`（α 0.7、τ 2）找重排改了第一名的列，挑短的 dev302 第 25 列 `ㄓˊ ㄒㄧㄥˊ ㄓㄜˋ ㄍㄜ˙ ㄔㄥˊ ㄕˋ`：n-gram「執行這個城市」、重排「執行這個程式」。這次 CLI 的 top1 276／302，和 2a 相同。
+- **實作時的發現與更正**：殼照 S4 每個按鍵前都呼叫 `set_learning`，核心的 `set_learning` 每次都換世代號，所以任何按鍵（含 ←、未完成的注音）都讓進行中的重排作廢，2a 的「不重新解碼的鍵不作廢」在殼裡不成立（引擎直接打 ← 時套用回 0，經過殼回 5，`swift test` 實測）。main 決定改核心：只有值改變才作廢（S4 每鍵送的做法不動）。核心測試加一條，突變「無條件作廢」時那條測試的斷言失敗。
+- **更正（2026-10-11，/code-review 後）**：上一條「只有值改變才作廢」不對，改成 `set_learning` 不論值都不作廢。核對 `core/src/engine.rs`：讀 `self.learning` 的地方只有送出時的學習（`learn_commit`）和選字時記下 `pre`（`choose`、`choose_pred`），解碼（`refresh_lm`）只看學習資料是不是空的，不看開關；所以值改變也不影響重排結果。核心測試改成 `set_learning_keeps_the_job_with_either_value`。
+- **TSan**：`swift test --sanitize=thread --filter RerankTests` 11／11、沒有 ThreadSanitizer 報告（測試執行檔有連 `libclang_rt.tsan_osx_dynamic.dylib`）；只跑了 RerankTests，不是整個測試集。
+- **測試裡的左文**：殼的測試在同一個 client 送出「執行這個城市」後再打同一句時，左文「城市」讓小模型留在 n-gram 的第一名（測試改成讀不到插入點，沒有左文）。同一個測試只差在有沒有左文：有「城市」時最後顯示 n-gram 的字，沒有左文時顯示重排的字。所以實機核對（契約 §3 第 5 項）要在前面沒有漢字的地方打（例如空的訊息欄）；其他左文下會不會改沒量過。
 
 ## 2026-10-11：錯字回報第 70–72 列（S7c-2b 實機測試版，終端機）
 
@@ -3672,23 +3685,50 @@ A2（同上）：
 - **本地 /code-review**（12 點）改了：說明的下載指令原本會蓋掉 repo 還釘著的 `tinylm-v1`（改成下載到另一個資料夾，兩行用 `&&` 串起來）；補上需要含 #122 之後的核心（之前的核心只認得 `SJTL0001`，2747c9d 之前 `core/src/tinylm.rs` 的 `MAGIC`）；「預設關閉」改成只講 #122 之後的核心，輸入法要等 #118；署名照 `tinylm-v1` 補齊；「產生」那一行寫明 `tinylm-M.npz` 的完整雜湊、沒有另外發布；`docs/data-files.md` 之後要發的語意校正模型改成 `tinylm-v3`，並把「只換融合參數」也列進去；`docs/releases/README.md` 加上換檔時的建法（雜湊檔還是舊的，改用說明檔的雜湊在暫存資料夾核對）與建之前檢查草稿標記。
 - **更正**：這個 PR 的第一個 commit（3fe1a08）訊息寫「make test passes」，但它是在測試跑完之前 commit 並推上去的：新的 worktree 沒有 `data/lm` 的模型檔，第一次跑 10 個 golden 測試失敗；複製模型、`shasum -a 256 -c data/*.sha256` 通過之後重跑才全綠。檔案內容沒有因此改動。
 
+## 2026-10-12：S7c-2b（#118）接上 main、改用 `tinylm-v2`、語意校正預設關
+
+- **起因**：維護者決定語意重排預設關閉出貨、同意 `tinylm-v2`（S7e、`docs/contracts/s7c2c-delta.md` §4 第一項）。#118 從 main 分出之後 main 多了 48 個 commit（含 #121 聊天／書面與個別 App 設定、#122 SJTL0002 與核心預設關），先合併 main，再改預設與模型檔。
+- **合併**：12 個檔衝突，都是兩邊各加東西。`Shell` 的 init 同時收 `rerankStore`、`rerankRunner` 與 `profileModeStore`、`appProfileStore`；`Shell.swift`、`main.swift` 兩組協定與 Defaults 實作並列；`applyProfile(bundle:)`（#121）取代無參數的 `applyProfile()`，`takeRerank`、`applyRerankJob` 保留；測試裡每一處 `Shell(...)` 都帶四個參數，選單標題的順序是 可省略韻母、語意校正、動漫與遊戲詞、（日期行）、這個 App 用聊天設定、善解設定…。PLAN 與本檔兩邊的條目照時間並列。合併的 commit 用 v1 的模型檔先跑 `make test`：rc=0、XCTest 187 個、0 失敗（合併後的核心仍讀得了 v1）。
+- **改了什麼**：`data/tinylm.sjtl.sha256` 記 `710249c2…`；ci.yml 兩個 job 與 release.yml 下載 `tinylm-v2`；CONTRIBUTING、`docs/data-files.md`、`docs/verification.md`、`LICENSES/data.md`、`scripts/build-app.sh` 的說明跟著改（`check-app.sh` 本來就讀雜湊檔，沒有 v1 的字樣）。`RerankStore` 的 `nil`＝關、`Shell.rerankOn` 起始 false、`SettingsModel.rerank` 起始 false；存著的 true 照開，每次建引擎仍呼叫 `setRerank`。`Core.swift`、`Shell.swift`、`main.swift` 裡寫「預設開」的註解改了。
+- **量到的事：第 25 列在 v2 的聊天設定下不再被改**。換上 v2（`710249c2…`）之後，selftest 與殼的重排測試 14 項失敗，全是 `執行這個城市` 沒變成 `執行這個程式`。用 CLI 查（`--profile chat --context --tinylm`，只有第 25、27、46、49、65 列）：top1 0 → 4，被改對的是 27、46、49、65，第 25 列留在 城市。這和 S7e 的嚴格聊天值（α 0.2、τ 1、δ 0.25）一致：v1 的 α 0.7、τ 2 才改它。selftest 的要求（聊天設定下重排和 n-gram 不同）沒有放寬，只換句子：`Selftest.rerankRowStandard` 等三個常數與測試的 `Row25`（改名 `RerankRow`）改成第 65 列 `ㄨㄛˇ ㄉㄥˇ ㄧ ㄒㄧㄚˋ ㄗㄞˋ ㄍㄨㄛˋ ㄑㄩˋ`，n-gram 第一名 我等一下在過去、重排後 我等一下再過去；這句有第一聲（空白鍵），`typeReranked` 原本把空白當一般字元送，改成和 `type` 一樣送 space 鍵。游標位置的斷言跟著從 6、5 改成 7、6。selftest 本來就明確開啟重排，沒有靠預設。**實機測試的句子也因此要換成這一句**（契約 §3 第 5 項已改）。
+- **預設的測試**：`RerankTests.testNeverChosenIsOffAndTheEngineIsToldOff`（`MemoryRerankStore()`、nil：`rerankOn` false、設定視窗的 `rerank` false、選單未打勾但可用、打完整句沒有任何工作交給 runner、`rerankTaken` 0、組字留在 n-gram 的字、store 仍是 nil）。其他重排測試的預設 store 明確傳 `MemoryRerankStore(true)`（`LogTests` 的重排路徑也是）；`SettingsTests` 改成「沒設過關 → 開 → 選單同步」。
+- **突變**：把 `rerankStore.rerank ?? false` 暫時改回 `?? true`，跑 `swift test --filter 'RerankTests/testNeverChosen|SettingsTests/testRerank'`：exit 1，兩個測試共 8 個斷言失敗（`default off`、`the window shows off too`、選單的 checked、`no job: the engine was told setRerank(false)`：2 ≠ 0、`rerankTaken` 7 ≠ 0、組字是 再 不是 在、SettingsTests 的 `never chosen: off`），沒有編譯錯誤；還原後重跑全綠。沒有另外突變 `rerankOn` 的起始值：init 一定覆蓋它，改它看不到差別。
+- **結果**：`make test`（v2 檔、`shasum -a 256 -c data/*.sha256` 三個 OK）rc=0，XCTest 188 個、1 個略過、0 失敗；Rust 與 Python 的部分全綠（輸出裡一行 `--extra-lexicon 只用在 --expected` 是 Python 測試故意觸發的錯誤訊息）。
+- **沒做**：`scripts/check-app.sh`、`make selftest-bundled`、打包與實機（main 跑）；沒有推送、沒有碰 PR #118。
+
+## 2026-10-12：#118 本地 /code-review 一輪（557d3df 之後）
+
+- **處置**：修正 12 項、延後 2 項、不改 1 項。修正：`LICENSES/data.md` 兩處（v2 的融合參數和 v1 不同，不只多 δ；v2 寫成已發佈的 Release 附件、從含 #118 的第一個 App 版本起隨附，不寫「已出貨」）、README 的 S7 列（預設關）、`build()` 裡「核心預設開」的註解（Shell／Core／main 其餘「預設開」的字樣是別的開關，沒改）、`docs/data-files.md` 的換檔清單（加 selftest 句子要重新量）、`s3b.md` §13.2 的選單順序（`profile-choice.md` 同一段只談自己那一項，不需改）、PLAN 兩處（`set_learning` 的說法與 #118 的預設／v2 已完成）、`SelftestTests` 的註解、契約三處〔修訂〕標記、`Selftest.swift` 的量測來源註解與共用的 `keyEvents`。
+- **第 5 項（預設的測試分不出「傳了 false」與「沒傳」）**：選了可觀察的做法，沒有改說法。核心預設也是關，只看有沒有工作分不出這兩種。`Shell` 加 `private(set) var rerankSent: [Bool]`，`build()` 在每次呼叫 `setRerank` 前記下傳的值；`testNeverChosenIsOffAndTheEngineIsToldOff` 斷言初次建置是 `[false]`、換兩次排列後是 `[false, false, false]`，存 true 的 store 傳 `[true]`。限制：記的是殼傳出去的值，不是核心收到的值（收到的效果由「沒有工作」那幾條斷言看）。
+- **新測試**：`testProfileChangeWhileTheNewestJobIsHeldDiscardsTheStaleResult`。第一版（`testProfileChangeWhileAJobIsHeld…`）被 verifier 駁回：它留住的是第一個鍵的工作，那個本來就因後面的鍵過期，最新的工作在 `rerankPending`、被切換後的 `takeRerank` 取代而沒跑，所以拿掉兩個切換它照樣過，註解說「`set_profile` 讓它過期」也不對。重寫：先 `complete()` 一次讓 runner 留住最新的工作；對照組不切換，套用（再）；切換組用選單 `toggleAppChat` 與全域 `setProfileMode(.formal)`（原本寫 `.chat` 對聊天 App 沒有變化）各一次，完成後 setMarkedText 次數不變、組字不變；每組結尾取到的工作數等於 free 的次數、沒有重複 free。突變（`git archive` 到暫存資料夾，拿掉兩個切換）：exit 1，4 個斷言失敗（`a result from before the app's profile switch is not applied`：23 ≠ 22、組字是 再 不是 在；`a result from before the mode change is not applied` 同樣），沒有編譯錯誤；沒突變時通過。
+- **延後**：`docs/releases/tinylm-v1.md`（已發佈 Release 的文字，改它要同時改 Release，等維護者同意）；`Shell(...)` 測試建構子重構（約 25 處，之後的 PR）。**不改**：`s7f-colloquial.md` 第 32 行（當時為真）。
+- **實機（使用者，2026-10-12）**：用 `scripts/install-ime.sh` 安裝 c7e074f 的 build（f1c8354 只改測試與文件；系統已啟用，註冊跳過，Caps Lock 沒受影響）。先刪掉 10-11 試用時留下的 `rerank = 1`（`defaults delete`），重開輸入法程序，模擬從沒選過：選單與設定視窗的「語意校正」都是關；聊天 App 裡 ㄨㄛˇ ㄉㄥˇ ㄧ ㄒㄧㄚˋ ㄗㄞˋ ㄍㄨㄛˋ ㄑㄩˋ 打出「我等一下在過去」，打開後是「我等一下再過去」。使用者回覆「確認OK」。
+- **本機的打包檢查**：main 在 557d3df 與 c7e074f 各跑一次 `make bundle`、`scripts/check-app.sh`（2、3、6 ok）、`make selftest-bundled`（rc 0）。
+- **延後的 `docs/releases/tinylm-v1.md`**：使用者同意（選擇題）加一行〔更正〕（#118 起改用 tinylm-v2），合併後用 `gh release edit tinylm-v1 --notes-file docs/releases/tinylm-v1.md` 同步到 Release 頁。
+
 ## 2026-10-12：錯字回報第 73–76 列
 
-使用者 2026-10-12 用 PR #118 的測試版打字，三句被轉成錯字並回報（打的讀音是想要的那句）；第三列是 2026-10-11 錯字回報條目裡「下一批錯字回報再加 |絲滑|」的那一列（另一位使用者回報）。加在 `eval/dev/user-reported.txt` 最後面（讀音由 `tools/readings.py` 產生，CHECK 0；開發集前 302 列不變；2026-10-03 同意以 CC0 釋出）：
+來源：
+- 73、74、76 是維護者 2026-10-12 用 PR #118 的測試版打的，輸入法轉成錯字；打的讀音是想要的那句。語意校正在打字當下開著與否沒有記錄。2026-10-03 的 CC0 同意涵蓋維護者的列。
+- 75 `絲滑` 是另一位使用者 2026-10-11 回報的（絲滑 → 斯華／思華）。只收這個詞，不收那位使用者的句子與前文；它是一個常見詞。沒有宣稱那位使用者同意釋出。（先前的 commit 訊息說 75 是維護者測試版打的、又提到「承諾加入」，兩點都不對：repo 裡沒有那句承諾。）
+
+加在 `eval/dev/user-reported.txt` 最後面（讀音由 `tools/readings.py` 產生，CHECK 0）。檔案 SHA-256 `eaa877c3…`（76 列）；前 72 列不變（`head -72` 的 SHA-256 `a91ba715…`）；開發集前 302 列不變。
 
 - 73 `|我測也是正常|`：顯示「我側也是正常」。
 - 74 `|我試不出問題|`：顯示「我是不出問題」。
 - 75 `|絲滑|`：n-gram 第一名「斯華」。
 - 76 `|語意校正|`：顯示「語義校正」（功能本身的名稱，使用者打的是「語意」）。
 
-CLI 重現（Rust，model-v5，`--context`、沒有前文；聊天與書面、動漫詞包開與關、有無 `--tinylm ~/.cache/shanjie/s7c2c-public/tinylm-M8-v2.sjtl`〔tinylm-v2，指紋 710249c2〕共 8 種組合）：
+CLI 重現（Rust，model-v5，`--context`、沒有前文；聊天與書面、動漫詞包開與關、有無小模型共 8 種組合）。小模型是 Release 的 tinylm-v2（SHA-256 `710249c2…`；聊天 α 0.2、τ 1、δ 0.25，書面 0.7、1、2）。
 
-| 列 | n-gram 第一名（8 種組合相同） | 正解名次（聊天／書面） | 小模型改變第一名？ |
+| 列 | n-gram 第一名 | 加 tinylm-v2 | 正解名次（n-gram，dump；聊天／書面） |
 |---|---|---|---|
-| 73 | 我側也是正常 ✗ | 3／3 | 否 |
-| 74 | 我是不出問題 ✗ | 4／4 | 否 |
-| 75 | 斯華 ✗ | 6／7 | 否 |
-| 76 | 語義校正 ✗ | 2／2 | 否 |
+| 73 | 我側也是正常 ✗ | 同左 | 3／3 |
+| 74 | 我是不出問題 ✗ | 同左 | 4／4 |
+| 75 | 斯華 ✗ | 同左 | 6／7 |
+| 76 | 語義校正 ✗ | 同左 | 2／2 |
 
-- 四列的正解都在前 64 名；n-gram 第一名錯，名次都在 8 名內（小模型的重排範圍），但小模型沒把它們拉到第一（每種組合四列的 top1 摘要 SHA 相同）。詞包開關對這四列沒有影響。
-- `eval/golden/s2h-lm-context.txt` 的兩行 user-reported 摘要用 Python 參考實作（`lm_eval.py --context`）重產，Rust 逐位元組相同：n 72 → 76，top1 聊天 15、書面 19 都不變（四列都錯），oracle@64 70 → 74。`eval/README.md` 列數 72 → 76。
+- 四列的正解都在前 64 名；名次都在 8 名內（小模型的重排範圍），但 v2 沒把它們拉到第一（每種組合四列的 top1 摘要 SHA 相同）。詞包開關沒有影響。
+- 「重排不改第一名」只在這組參數成立。換成 tinylm-v1（SHA-256 `8725204c…`，0.7／2／0）量過：聊天（詞包開與關）top1 為 1／4，改對的是 73（我測也是正常）；書面 0／4，和 n-gram 相同。其餘三列 v1 也沒改。
+- `eval/golden/s2h-lm-context.txt` 的兩行 user-reported 摘要用 Python 參考實作（`lm_eval.py --context`）重產，Rust 逐位元組相同：n 72 → 76，top1 聊天 15、書面 19 不變（四列都錯），oracle@64 70 → 74。`eval/README.md` 列數 72 → 76。
+- **之前引用「錯字回報 72 列」的數字**（`docs/contracts/s7c2c-delta.md` 約第 68 行、S7e 的各表）要用 `--limit 72` 才重現；沒有改那些檔案。S7f／E2 的語料清理讀整個檔案，現在重建會把這四句當成評測重疊排除；已記下，沒有動。
