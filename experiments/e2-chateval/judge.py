@@ -53,8 +53,12 @@ def main(argv=None):
     ap.add_argument("--select", metavar="LABEL"); ap.add_argument("--tuning", nargs="+")
     ap.add_argument("--weight", type=float); ap.add_argument("--cap", type=float)
     a = ap.parse_args(argv)
-    if bool(a.select) != bool(a.tuning) or (a.select and not a.weight):
+    if bool(a.select) != bool(a.tuning) or (a.select and not a.weight > 0):
         ap.error("--select needs --tuning and --weight (> 0), and the other way round")
+    if not a.select and (a.weight is not None or a.cap is not None):
+        ap.error("--weight and --cap only apply with --select")
+    if a.cap is not None and not 0 <= a.cap <= 1:      # also rejects NaN
+        ap.error("--cap must be within [0, 1]")
     if a.select and not set(a.tuning) <= set(a.sets):
         ap.error("--tuning sets must be among --sets")
     if not a.fixed and not a.select:
@@ -63,6 +67,8 @@ def main(argv=None):
     os.makedirs(os.path.join(a.out, "rowstats"), exist_ok=True)
     configs = [(lab, (float(al), float(ta), float(de))) for lab, al, ta, de in a.fixed]
     if a.select:
+        if not sum(len(sets[t]) for t in a.tuning):
+            ap.error("no tuning rows")
         al, ta, de, f, b = fg.select_weighted(sets, a.weight, names=tuple(a.tuning), cap=a.cap)
         n = sum(len(sets[t]) for t in a.tuning)
         print(f"\n{a.select}: selected on {'+'.join(a.tuning)} ({n} rows) by fixed - {a.weight:g} x broken"

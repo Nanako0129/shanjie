@@ -32,6 +32,11 @@ class PoissonUpper(unittest.TestCase):
         for k, want in ((0, 2.9957), (1, 4.7439), (2, 6.2958), (5, 10.5130), (9, 15.7052), (10, 16.9622)):
             self.assertAlmostEqual(E.poisson_upper95(k), want, places=3, msg=k)
 
+    def test_large_k_does_not_underflow(self):
+        # roots of the cdf = 0.05, checked once with 60-digit Decimal arithmetic; exp(-lam) underflows for lam > 745 (k = 1000 gave 745.13)
+        for k, want in ((1000, 1053.6031), (5000, 5117.8861)):
+            self.assertAlmostEqual(E.poisson_upper95(k), want, places=3, msg=k)
+
     def test_is_the_cdf_root(self):
         for k in (0, 3, 40):
             lam = E.poisson_upper95(k)

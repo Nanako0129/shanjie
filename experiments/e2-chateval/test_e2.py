@@ -397,6 +397,31 @@ class Freeze(unittest.TestCase):
             bc.freeze(self.work, "judge", readings=fake_readings)
         self.assertIn("tuning period first", str(e.exception.code))
 
+    def test_judge_draft_also_needs_the_tune_freeze_first(self):
+        with self.assertRaises(SystemExit):
+            bc.freeze(self.work, "judge", draft=True, readings=fake_readings)
+        self.assertFalse(os.path.exists(os.path.join(self.work, "judge.draft.txt")))
+
+    def test_manifest_records_the_pool_size_before_sampling(self):
+        bc.freeze(self.work, "tune", readings=fake_readings)
+        m = json.load(open(os.path.join(self.work, "tune.manifest.json"), encoding="utf-8"))
+        self.assertEqual((m["rows"], m["clauses_before_sampling_or_corrections"]), (4, 9))
+
+    def test_more_than_10_percent_check_stops_the_freeze_but_not_the_draft(self):
+        def checky(sentences):      # 2 of 4 sampled rows are CHECK
+            bad = sorted(set(sentences))[:2]
+            return {s: ("check" if s in bad else "ok", "ㄅ") for s in set(sentences)}
+        with self.assertRaises(SystemExit) as e:
+            bc.freeze(self.work, "tune", readings=checky)
+        self.assertIn("CHECK", str(e.exception.code))
+        for f in ("tune.rows.txt", "tune.sha256", "tune.manifest.json"):
+            self.assertFalse(os.path.exists(os.path.join(self.work, f)), f)
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            bc.freeze(self.work, "tune", draft=True, readings=checky)
+        self.assertIn("WARNING", err.getvalue())
+        self.assertTrue(os.path.exists(os.path.join(self.work, "tune.draft.txt")))
+
     def test_frozen_hash_mismatch_refuses_to_emit(self):
         bc.freeze(self.work, "tune", readings=fake_readings)
         out = os.path.join(self.td, "out.txt")

@@ -142,5 +142,12 @@ class TestRunSets(unittest.TestCase):
                     self.assertIn(f"--{name}", str(e.exception.code))
                     sp.assert_not_called()
 
+    def test_every_requested_e2_set_is_checked_before_the_first_set_runs(self):
+        with tempfile.TemporaryDirectory() as td, mock.patch.object(run_sets.subprocess, "run") as sp, mock.patch.object(run_sets, "check_model"):
+            with self.assertRaises(SystemExit) as e:
+                run_sets.main(["dumps", "--work", td, "--sets", "cvtune", "lytune", "--tune", td])
+            self.assertIn("--lytune", str(e.exception.code))
+            sp.assert_not_called()
+
 if __name__ == "__main__":
     unittest.main()

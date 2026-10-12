@@ -174,6 +174,15 @@ class TestE2NamesAndCap(unittest.TestCase):
         self.assertEqual((f, b), (0, 0))
         self.assertEqual(fg.select_weighted(s, 1, cap=1 / 3)[3:], (2, 1))              # the boundary is allowed (<=)
 
+    def test_cap_boundary_survives_float_rounding(self):
+        fix = lambda i: rec(i, [-1.0, -1.5], [-4.0, -1.0], [0, 1])
+        brk = lambda i: rec(i, [-1.0, -1.5], [-4.0, -1.0], [1, 0])
+        ok = lambda i: rec(i, [-1.0, -1.5], [-4.0, -1.0], [1, 1])
+        mk = lambda nb: {"cvtune": [fix(i) for i in range(40)] + [brk(i) for i in range(nb)] + [ok(i) for i in range(60 - nb)], "wikitune": []}
+        self.assertGreater(29, 0.29 * 100)                                             # the float product is 28.999999999999996
+        self.assertEqual(fg.select_weighted(mk(29), 1, cap=0.29)[3:], (40, 29))        # exactly at the cap: allowed
+        self.assertEqual(fg.select_weighted(mk(30), 1, cap=0.29)[3:], (0, 0))          # one over: no fusing cell
+
     def test_cap_with_no_admissible_cell_is_an_error(self):
         s = {"cvtune": [rec(i, [-1.0, -1.5], [-4.0, -1.0], [1, 0]) for i in range(1, 4)], "wikitune": []}
         # a negative cap admits no cell (broken >= 0 is always above it)
