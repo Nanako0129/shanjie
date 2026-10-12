@@ -31,11 +31,8 @@ def poisson_upper95(k):
     """One-sided exact (Garwood) 95% upper confidence limit of a Poisson mean given k observed events: the rate L with
     P(X <= k | L) = 0.05 (k = 0 gives -ln 0.05 = 2.9957). Bisection on the exact cdf, so no scipy."""
     def cdf(lam):
-        t = term = math.exp(-lam)
-        for i in range(1, k + 1):
-            term *= lam / i
-            t += term
-        return t
+        ll = math.log(lam)  # log space: exp(-lam) alone underflows to 0 for lam > ~745
+        return sum(math.exp(i * ll - lam - math.lgamma(i + 1)) for i in range(k + 1))
     lo, hi = 0.0, k + 10 + 10 * math.sqrt(k + 1)  # the limit is below k + 10 sqrt(k + 1) + a few for every k
     for _ in range(100):
         mid = (lo + hi) / 2

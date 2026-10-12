@@ -114,6 +114,24 @@ class Select(unittest.TestCase):
             with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
                 run(["--scores", d, "--sets", "tune", "--setting", "chat", "--out", o] + extra)
 
+    def test_bad_weight_cap_and_orphan_options_are_clean_errors(self):
+        d, o = tempfile.mkdtemp(), tempfile.mkdtemp()
+        write_scores(d, "chat", "tune", [FIX(1)])
+        write_scores(d, "chat", "empty", [])
+        base = ["--scores", d, "--sets", "tune", "--setting", "chat", "--out", o]
+        sel = base + ["--select", "R3", "--tuning", "tune"]
+        for extra in (sel + ["--weight", "-1"], sel + ["--weight", "nan"], sel + ["--weight", "1", "--cap", "nan"],
+                      sel + ["--weight", "1", "--cap", "1.5"], sel + ["--weight", "1", "--cap", "-0.1"],
+                      base + ["--fixed", "A", "1", "1", "0", "--weight", "1"], base + ["--fixed", "A", "1", "1", "0", "--cap", "0.1"]):
+            with self.assertRaises(SystemExit) as e, contextlib.redirect_stderr(io.StringIO()):
+                run(extra)
+            self.assertEqual(e.exception.code, 2, extra)
+        err = io.StringIO()
+        with self.assertRaises(SystemExit) as e, contextlib.redirect_stderr(err):
+            run(["--scores", d, "--sets", "tune", "empty", "--setting", "chat", "--out", o, "--select", "R3", "--tuning", "empty", "--weight", "1"])
+        self.assertEqual(e.exception.code, 2)
+        self.assertIn("no tuning rows", err.getvalue())
+
 
 if __name__ == "__main__":
     unittest.main()

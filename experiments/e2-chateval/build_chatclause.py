@@ -55,6 +55,7 @@ JUDGE_START = "2026-09"                # the judge months run back from here; ne
 JUDGE_MIN = 2950                       # mechanical rows (2,500 plus about 15% for proofreading and reading losses)
 MIN_USABLE = 2500                      # fewer mechanical rows than this before SHANJIE_FROM: stop and ask
 TUNE_MAX = 6000
+CHECK_MAX = 0.10   # contract 2.1: more CHECK readings than this stops the freeze
 URL = re.compile(r"https?://|www\.", re.I)
 FENCE = "```"
 STEPS = ("messages", "no_timestamp", "url", "code", "no_segment", "segments", "overlap", "duplicate", "mechanical")
@@ -386,9 +387,10 @@ def period_rows(work, period):
     split = json.load(open(os.path.join(work, "split.json"), encoding="utf-8"))
     months = set(split["judge_months"] if period == "judge" else split["pool_months"])
     rows = [(x, s) for mon, _src, x, s in read_clauses(work) if mon in months]
+    pool = len(rows)
     if period == "tune":
         rows = random.Random(c.SEED).sample(rows, min(TUNE_MAX, len(rows)))
-    return rows, len(rows)
+    return rows, pool
 
 
 def load_corrections(path):
@@ -427,14 +429,19 @@ def build_period(rows, corrections, readings=c.readings):
 
 
 def freeze(work, period, corrections_file=None, draft=False, readings=c.readings):
+    if period == "judge" and not os.path.isfile(os.path.join(work, "tune.sha256")):
+        sys.exit("build_chatclause: STOP, freeze the tuning period first (contract 2.1 order (1) before (3))")
     rows, pool_rows = period_rows(work, period)
     frozen, drafted, st = build_period(rows, load_corrections(corrections_file), readings)
+    check_share = st["dropped_check"] / st["rows_in"] if st["rows_in"] else 0
     if draft:
+        if check_share > CHECK_MAX:
+            print(f"build_chatclause: WARNING, {check_share:.1%} of the {period} rows are CHECK (> {CHECK_MAX:.0%}); a real freeze would stop", file=sys.stderr)
         c.write_lf(os.path.join(work, f"{period}.draft.txt"),
                    "".join(f"{x}|{s}|{r}{'|CHECK' if status != 'ok' else ''}\n" for x, s, r, status in drafted))
         return st
-    if period == "judge" and not os.path.isfile(os.path.join(work, "tune.sha256")):
-        sys.exit("build_chatclause: STOP, freeze the tuning period first (contract 2.1 order (1) before (3))")
+    if check_share > CHECK_MAX:
+        sys.exit(f"build_chatclause: STOP, {check_share:.1%} of the {period} rows are CHECK (> {CHECK_MAX:.0%}); report to main (contract 2.1)")
     text = "".join(f"{x}|{s}|{r}\n" for x, s, r in frozen)
     sha = c.sha256_bytes(text.encode("utf-8"))
     sf = os.path.join(work, f"{period}.sha256")

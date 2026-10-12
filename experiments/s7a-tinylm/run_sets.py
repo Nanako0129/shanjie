@@ -134,6 +134,9 @@ def main(argv=None):
     a = ap.parse_args(argv)
     if a.reported_rows and "user-reported" in a.sets:
         check_reported(os.path.join(EVAL_DEV, "user-reported.txt"))      # before any set runs, not when the loop reaches it
+    for e in EXTRA_SETS:
+        if e in a.sets:
+            rows_args(e, a)     # exits on a missing --<e> file before any set runs
     if "fw" in a.sets:
         check_head(FW_PATH, FW_ROWS, FW_SHA)
     {"dumps": cmd_dumps, "score": cmd_score}[a.cmd](a)

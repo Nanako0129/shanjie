@@ -87,7 +87,7 @@ def select_weighted(sets, weight, col="ll", names=TUNING, cap=None):
         for tau in TAUS:
             for delta in DELTAS:
                 f, b = fixed_broken(rows, alpha, tau, delta, col)
-                if cap is not None and b > cap * len(rows):
+                if cap is not None and b > cap * len(rows) + 1e-9:   # b is an integer: the epsilon keeps cells exactly at the cap (float rounding)
                     continue
                 k = (f - weight * b, -b, delta, -tau, -alpha)
                 if key is None or k > key:
