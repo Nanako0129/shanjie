@@ -3671,3 +3671,31 @@ A2（同上）：
 - **使用者決定**（2026-10-12 晚上，選擇題）：建 `tinylm-v2` Release。說明檔 `docs/releases/tinylm-v2.md` 照 `docs/releases/README.md` 要先進 main，所以先開這個 PR 拿掉「草稿」那一行。
 - **本地 /code-review**（12 點）改了：說明的下載指令原本會蓋掉 repo 還釘著的 `tinylm-v1`（改成下載到另一個資料夾，兩行用 `&&` 串起來）；補上需要含 #122 之後的核心（之前的核心只認得 `SJTL0001`，2747c9d 之前 `core/src/tinylm.rs` 的 `MAGIC`）；「預設關閉」改成只講 #122 之後的核心，輸入法要等 #118；署名照 `tinylm-v1` 補齊；「產生」那一行寫明 `tinylm-M.npz` 的完整雜湊、沒有另外發布；`docs/data-files.md` 之後要發的語意校正模型改成 `tinylm-v3`，並把「只換融合參數」也列進去；`docs/releases/README.md` 加上換檔時的建法（雜湊檔還是舊的，改用說明檔的雜湊在暫存資料夾核對）與建之前檢查草稿標記。
 - **更正**：這個 PR 的第一個 commit（3fe1a08）訊息寫「make test passes」，但它是在測試跑完之前 commit 並推上去的：新的 worktree 沒有 `data/lm` 的模型檔，第一次跑 10 個 golden 測試失敗；複製模型、`shasum -a 256 -c data/*.sha256` 通過之後重跑才全綠。檔案內容沒有因此改動。
+
+## 2026-10-12：E2 聊天評測片的契約（契約 `docs/contracts/e2-chat-eval.md`，分支 `eval/e2-chat-eval`）
+
+- **使用者的回答**（2026-10-12 晚上，選擇題；接在「評測的題目與計分」那一節的決定之後，那一節在網站更新的 PR 裡）：
+  - 聊天評測集用維護者自己的訊息：Discord 個人資料包（維護者申請，下載後給路徑）與 Threads 帳號的公開貼文（請 Grok 抓）。blobhaj 只在兩個伺服器裡、會讀到別人的訊息，所以不用它。
+  - 2026-10 起才主要用善解打字，之前用蘋果注音。用善解打的訊息，正解本身就是善解的輸出，n-gram 會先天佔優勢，所以判斷只用 2026-09 以前的月份。
+  - 同意 main 逐句讀訊息原文、校對正解與讀音；範圍是資料包的訊息資料夾與 Threads 貼文。repo 只記數字。
+  - 公開資料四組都做：立法院公報委員發言、維基錯字表、SIGHAN 2013–2015、NTUML2021。
+- **公開評測資料的調查**（agent，唯讀抓網頁與資料卡）：
+  - 沒有任何公開的注音或繁體輸入法評測集；論文裡的拼音轉漢字基準都是簡體。
+  - 也沒有同時符合台灣聊天語域、明確授權、免登入、無個資的語料：Cofacts 的 LINE 訊息要登入，政大口語語料要登入，PTT／Dcard 本來就排除。
+  - 已取得（`~/.cache/shanjie/e2-public/`）：
+    - 立法院公報委員發言：HF `aigrant/taiwan-legislator-transcript`，revision `e07c04e8…`，不需登入，資料卡標 Apache-2.0；9 個 CSV，16,407 段，transcript 合計 45,320,046 字，2021-10-22 到 2025-01-07，雜湊都和 HF 的 LFS oid 相同。
+    - 中文維基的兩頁錯字表：AutoWikiBrowser/Typos rev 90288329、常見錯別字 rev 90832206，CC BY-SA 4.0；抽出 588 列、485 組不重複的錯→正詞對（還沒用讀音過濾）。
+  - 準備好、要維護者自己處理：
+    - SIGHAN 2013–2015：繁體的同音錯字資料，限學術研究、不得轉交；原本的申請表單已經 404，要寫信給主辦人。
+    - NTUML2021：臺大課堂口語逐字稿；資料集 README 其實寫了 `license: mit`，只是縮排錯，HF 沒認出來；要向作者確認。
+    - 兩份信件草稿在 `~/.cache/shanjie/e2-public/sighan/HOWTO.md`、`ntuml/ASK.md`，不進 repo。
+  - **robots 的一次失誤**：agent 把查 robots.txt 和查 API 寫在同一個指令裡，對 export.arxiv.org 送出了一次 GET；該站的 robots.txt 對所有爬蟲 `Disallow: /`。之後就沒再碰，論文改從允許的 arxiv.org/pdf 下載。
+  - data.ly.gov.tw 的 robots.txt 兩次回 HTTP 500，照 RFC 9309 視同禁止，沒有抓。
+- **契約審查**：plan-verifier 兩次 REVISE（第 1 次 10 點、第 2 次 4 點），逐項處置後收尾審查 READY。主要的設計：
+  - 只做子句列；前文分「同一則訊息的前一段」與「同一頻道 10 分鐘內本人的上一則」兩種。
+  - 正解校對後先凍結雜湊，才產生候選；校對時不看模型輸出。
+  - 調參期的參考值先凍結，才建判斷期。
+  - 判斷期的月份在動手前用機械計數定死（2026-09 起往前，直到 ≥ 2,950 列）。
+  - 依據：1:1 計分下約 1,720 列才分得出現行值的方向，再加上子句彼此相關的餘裕。
+  - 現有工具的預設行為不變：新的 `judge.py`、`evalstats --net`、`fusegrid` 的 `names`／`cap` 參數。
+  - 立法院與維基錯字的列檔不進 repo，只當守門。這一片不碰保留集。
