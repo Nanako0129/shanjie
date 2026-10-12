@@ -352,15 +352,18 @@ def prev_month(mon):
     return f"{y - 1:04d}-12" if m == 1 else f"{y:04d}-{m - 1:02d}"
 
 
-def choose_judge_months(by_month, pool_months=()):
-    """(judge months, pool months) from the mechanical counts alone. Judge: JUDGE_START then each earlier month until the rows reach
+def choose_judge_months(by_month, pool_months=(), start=JUDGE_START):
+    """(judge months, pool months) from the mechanical counts alone. Judge: `start` (JUDGE_START unless the maintainer moved it) then each
+    earlier month until the rows reach
     JUDGE_MIN (months without data count 0 and are passed). Never SHANJIE_FROM or later; never a month in `pool_months` (months
     already in a frozen tuning pool). Pool: every other month with data before the judge months. Stops (SystemExit) when all the
     months before SHANJIE_FROM together have fewer than MIN_USABLE rows."""
+    if not (re.fullmatch(r"\d{4}-\d{2}", start) and start < SHANJIE_FROM):
+        sys.exit(f"build_chatclause: STOP, judge start {start} must be a month before {SHANJIE_FROM}")
     usable = {m: n for m, n in by_month.items() if m < SHANJIE_FROM}
     if sum(usable.values()) < MIN_USABLE:
         sys.exit(f"build_chatclause: STOP, {sum(usable.values())} mechanical rows before {SHANJIE_FROM} (< {MIN_USABLE}); ask the maintainer")
-    first, judge, total, mon = min(usable), [], 0, JUDGE_START
+    first, judge, total, mon = min(usable), [], 0, start
     while total < JUDGE_MIN:
         if mon < first:
             sys.exit(f"build_chatclause: STOP, the months back to {first} give only {total} rows (< {JUDGE_MIN}); ask the maintainer")
@@ -476,6 +479,10 @@ def main(argv=None):
             p.add_argument("--discord"); p.add_argument("--meta"); p.add_argument("--self-name"); p.add_argument("--exclude", nargs="*", default=[])
         if name in ("freeze", "emit"):
             p.add_argument("--period", choices=["tune", "judge"], required=True)
+        if name == "split":
+            # Maintainer 2026-10-13: 2026-09 is skipped (never read or used); the judge period starts at 2026-08. Months from the start
+            # up to SHANJIE_FROM are in neither the judge period nor the pool.
+            p.add_argument("--judge-start", default=JUDGE_START)
         if name == "freeze":
             p.add_argument("--corrections"); p.add_argument("--draft", action="store_true")
         if name == "emit":
@@ -492,8 +499,8 @@ def main(argv=None):
         by = mechanical_by_month(json.load(open(os.path.join(a.work, "counts.json"), encoding="utf-8")))
         tf = os.path.join(a.work, "tune.manifest.json")
         frozen_pool = json.load(open(tf, encoding="utf-8"))["months"] if os.path.isfile(tf) else ()
-        judge, pool = choose_judge_months(by, frozen_pool)
-        out = {"judge_months": judge, "pool_months": pool, "mechanical_by_month": dict(sorted(by.items())),
+        judge, pool = choose_judge_months(by, frozen_pool, a.judge_start)
+        out = {"judge_start": a.judge_start, "judge_months": judge, "pool_months": pool, "mechanical_by_month": dict(sorted(by.items())),
                "judge_min": JUDGE_MIN, "never_from": SHANJIE_FROM}
         text = json.dumps(out, ensure_ascii=False, indent=1) + "\n"
         sp = os.path.join(a.work, "split.json")
