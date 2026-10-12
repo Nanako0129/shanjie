@@ -18,7 +18,8 @@ let package = Package(
         .target(
             name: "ShanjieKit",
             dependencies: ["CShanjie"],
-            linkerSettings: [.unsafeFlags([libcore])]
+            // Accelerate: core/src/tinylm.rs declares its symbols, and Rust's #[link(kind = "framework")] does not travel in the staticlib.
+            linkerSettings: [.unsafeFlags([libcore]), .linkedFramework("Accelerate")]
         ),
         // TIS registration shared by `shanjie install` and the installer (docs/contracts/s3c-installer.md
         // section 2.3). ShanjieKit stays free of TIS.
