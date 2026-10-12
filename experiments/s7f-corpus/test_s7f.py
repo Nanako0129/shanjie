@@ -445,8 +445,13 @@ class TestGenerate(unittest.TestCase):
         self.assertNotIn('"content"', self.files().get("cerebras-gpt-oss-120b.jsonl", ""))   # not kept as an empty reply
 
     def test_wrong_shape_body_with_200_stops(self):
-        for body in (b"[]", b"null", b'{"choices": "x"}', b'{"usage": [1], "choices": []}'):
-            api = lambda host, path, req, key, body=body: (200, body)
+        ok_choices = [{"message": {"content": "今天好讚"}}]
+        for body in ([], None, {"choices": "x"}, {"usage": [1], "choices": ok_choices}, {"choices": ok_choices},
+                     {"usage": {"cost": 0.001}, "choices": []}, {"usage": {"cost": "abc"}, "choices": ok_choices},
+                     {"usage": {"cost": "NaN"}, "choices": ok_choices}, {"usage": {"cost": -1}, "choices": ok_choices},
+                     {"usage": {"cost": 0.001, "prompt_tokens": None}, "choices": ok_choices},
+                     {"usage": {"cost": 0.001}, "choices": [{"message": {"content": ["a"]}}]}):
+            api = lambda host, path, req, key, body=body: (200, json.dumps(body).encode())
             code, log = self.run_main(api, "--chars", "100", "--budget-usd", "5", "--price-in", "0.5", "--price-out", "1", "--resume")
             self.assertEqual(code, 3, body)
             self.assertIn("not the expected JSON shape", log, body)

@@ -22,6 +22,7 @@ import collections
 import concurrent.futures
 import http.client
 import json
+import math
 import os
 import random
 import sys
@@ -189,19 +190,19 @@ def main(argv=None):
             out = json.loads(payload)
         except ValueError:
             return {"i": j, "status": status, "error": "the response is not JSON"}
-        try:                       # a 200 body of the wrong shape ([], null, "choices": "x") is an error, not a worker traceback
-            if out.get("error"):   # OpenRouter can answer 200 with an error body (a provider failure): an error, not an empty reply
+        try:                       # a 200 body that cannot be accounted for is an error, never a worker exception: an exception
+            if out.get("error"):   # would skip ledger_add for the whole paid batch. OpenRouter can answer 200 with an error body.
                 return {"i": j, "status": status, "error": json.dumps(out["error"], ensure_ascii=False)[:200]}
-            u = out.get("usage") or {}
+            u, message = out["usage"], out["choices"][0]["message"]
             if u.get("cost") is None and not (a.price_in or a.price_out):
                 return {"i": j, "status": status, "error": "no usage.cost and no --price-in/--price-out: the budget cannot be enforced"}
-            content = ((out.get("choices") or [{}])[0].get("message") or {}).get("content") or ""
-            if not isinstance(content, str):
-                raise TypeError("content")
-            return {"i": j, "seeds": ws, "content": content, "in_tokens": u.get("prompt_tokens", 0),
-                    "out_tokens": u.get("completion_tokens", 0), "usd": cost_of(u, a), "served_by": out.get("provider")}
-        except (AttributeError, IndexError, KeyError, TypeError):
-            return {"i": j, "status": status, "error": "the response is not the expected JSON shape"}
+            content, toks, usd = message.get("content") or "", (u.get("prompt_tokens", 0), u.get("completion_tokens", 0)), cost_of(u, a)
+            if not (isinstance(content, str) and all(type(t) is int and t >= 0 for t in toks) and math.isfinite(usd) and usd >= 0):
+                raise ValueError("field types")
+        except Exception as e:
+            return {"i": j, "status": status, "error": f"the response is not the expected JSON shape ({type(e).__name__})"}
+        return {"i": j, "seeds": ws, "content": content, "in_tokens": toks[0], "out_tokens": toks[1], "usd": usd,
+                "served_by": out.get("provider")}
 
     spent, halt = (json.load(open(a.ledger))["usd"] if os.path.exists(a.ledger) else 0.0), None
     with open(raw_path, "a", encoding="utf-8") as raw, concurrent.futures.ThreadPoolExecutor(a.workers) as ex:
