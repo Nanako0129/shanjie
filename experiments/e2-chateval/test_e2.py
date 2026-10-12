@@ -217,6 +217,33 @@ class Privacy(unittest.TestCase):
         self.assertFalse(any(k in s for s in rows for k in ("someone", "信箱", "身分證", "金鑰", "訂單編號")))     # the whole message is gone
         self.assertEqual(counts["discord"]["2026-03"]["messages"], len(self.KEEP))
 
+    def test_discord_markup_is_stripped_before_the_private_filter(self):
+        sf = "123456789012345678"
+        markup = [f"<@{sf}>", f"<@!{sf}>", f"<@&{sf}>", f"<#{sf}>", f"<:你好嗎:{sf}>", f"<a:跳舞:{sf}>", "<t:1700000000:R>", "<t:1700000000>", "<id:customize>"]
+        msgs = [(str(i), f"2026-03-05 12:{i:02d}:00.000000+00:00", f"{m} 這句話{'甲乙丙丁戊己庚辛壬癸'[i]}沒問題 {m}") for i, m in enumerate(markup)]
+        msgs += [("20", ts(5, "12:30"), f"<@{sf}> 這是真的電話 0912-345-678 不能留"),            # markup does not hide a real phone number
+                 ("21", ts(5, "12:31"), f"明碼{sf}混在文字裡"),                                  # a bare id outside markup still counts (as a phone-like run)
+                 ("22", ts(5, "12:32"), "看這個 https://example.com/abcdefghij1234567890klmnop 很好玩"),   # URL first: counted as url, not token
+                 ("23", ts(5, "12:33"), f"<@{sf}> 金鑰 abcd1234efgh5678ijkl9012 不要貼")]            # markup stripped, the token stays
+        td = tempfile.mkdtemp()
+        counts = bc.prepare(package(td, {"c1": msgs}), None, None, [], os.path.join(td, "w"))["discord"]
+        rows = [s for _m, _src, _x, s in clauses_of(os.path.join(td, "w"))]
+        for i in range(len(markup)):
+            self.assertIn(f"這句話{'甲乙丙丁戊己庚辛壬癸'[i]}沒問題", rows)             # kept, Han text segmented as usual
+        self.assertFalse(any("你好嗎" in s or "跳舞" in s for s in rows))                # the emoji name inside the markup is gone
+        self.assertEqual(counts["_dropped_private_by_rule"], {"phone": 2, "token": 1})
+        self.assertEqual(counts["2026-03"]["url"], 1)
+        self.assertEqual(counts["2026-03"]["messages"], len(msgs) - 3)
+
+    def test_markup_becomes_a_space_and_a_segment_boundary_never_a_drop(self):
+        td = tempfile.mkdtemp()
+        root = package(td, {"c1": [("1", ts(5, "12:00"), "我跟<@123456789012345678>說好了"), ("2", ts(5, "12:30"), "<t:1700000000:R>")]})
+        counts = bc.prepare(root, None, None, [], os.path.join(td, "w"))["discord"]
+        self.assertEqual(sorted((s, x) for _m, _src, x, s in clauses_of(os.path.join(td, "w"))), sorted([("我跟", ""), ("說好了", "我跟")]))
+        self.assertEqual(counts["_dropped_private_by_rule"], {})
+        self.assertEqual({k: counts["2026-03"][k] for k in ("messages", "segments", "no_segment", "mechanical")},
+                         {"messages": 2, "segments": 2, "no_segment": 1, "mechanical": 2})      # the markup-only message is empty, not dropped as private
+
     def test_dm_and_private_channels_are_never_opened(self):
         td = tempfile.mkdtemp()
         msgs = lambda t: [("1", ts(5, "12:00"), t)]
