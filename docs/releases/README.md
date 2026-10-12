@@ -14,4 +14,16 @@
 
   **雜湊檔什麼時候改**：換掉現有的檔（例如 model-v5 → model-v6）時，雜湊檔和 CI、`release.yml` 的下載在**同一個**切換的 PR 裡改（先把新雜湊合進 main，CI 會拿舊檔對新雜湊而失敗）。第一次加的新檔（例如 `tinylm-v1`）沒有人讀，雜湊檔可以和說明檔一起先進 main。
 
+  **換檔時建 Release**（例如 `tinylm-v2`，雜湊檔在切換的 PR 才改）：這時 repo 的雜湊檔與 `data/lm/<檔名>` 都還是舊版，照上面的指令會核對並上傳舊檔。改成在暫存資料夾放新檔，上傳前後都用說明檔裡寫的雜湊核對：
+
+  ```sh
+  S=/tmp/stage-<tag> && rm -rf "$S" && mkdir -p "$S/data/lm" && cp <新檔> "$S/data/lm/<檔名>"
+  (cd "$S" && echo "<說明檔裡的雜湊>  data/lm/<檔名>" | shasum -a 256 -c)   # 上傳前
+  gh release create <tag> "$S/data/lm/<檔名>" -R Nanako0129/shanjie --title "<標題>" --notes-file docs/releases/<tag>.md --latest=false
+  rm -rf /tmp/check-<tag> && gh release download <tag> -R Nanako0129/shanjie -p <檔名> -D /tmp/check-<tag>/data/lm \
+    && (cd /tmp/check-<tag> && echo "<說明檔裡的雜湊>  data/lm/<檔名>" | shasum -a 256 -c)   # 上傳後
+  ```
+
+  **說明檔不能帶草稿標記**：說明檔在 Release 建好之前可以有「〔草稿…〕」一行，建之前要先用 PR 拿掉；建 Release 的指令前先跑 `! grep -q '〔草稿' docs/releases/<tag>.md`，有標記就停。
+
   資料類的 Release 一律不標 Latest，Releases 頁的 Latest 永遠是輸入法的最新版。
