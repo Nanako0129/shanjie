@@ -39,7 +39,8 @@ SIG_TIME = re.compile(r"(?:\d{1,2}[:：]\d{2}\s*\d{4}年\d{1,2}月\d{1,2}日|\d{
 UNSIGNED = re.compile(r"(?:以上未簽名的|此條)留言(?:由.{0,40}?)?於.{0,40}?加入")     # the {{unsigned}} templates' text, substituted
 EMPTY_PAREN = re.compile(r"[（(]\s*[）)]")
 TRAIL_DASH = re.compile(r"\s*[-—–]{2,}\s*$")
-SIG_TAIL = re.compile(r"\s*[-—–]+[^-—–]{0,20}$")     # on a signed line: the dash and a short custom signature (`--發言者：`)
+SIG_TAIL = re.compile(r"\s*(?:[-—–]{2,}|—)[^-—–]{0,20}$")   # on a signed line: `--` / `——` / `—` and a short custom signature
+# (`--發言者：`); a single hyphen or en dash is content (2019-2020, A–B)
 GREETING = re.compile(r"^(?:您好|你好|Hello|Hi|嗨)[，,!！\s]*[^\u4e00-\u9fff]*$", re.I)   # `您好，Username`: a welcome's name sentence
 REDIRECT = re.compile(r"\s*#\s*(?:REDIRECT|重定向)", re.I)
 HEADING = re.compile(r"^=+.*=+$")
@@ -104,10 +105,10 @@ def run(paths, flt, counts):
             continue
         counts[f"pages_ns{ns}"] += 1
         for para in paragraphs(text, flt.simp, counts):
-            for s in clean.clean_text(para, flt, counts):    # per sentence: `您好，Name。謝謝…` splits into a name line and the rest
-                if GREETING.match(s):
+            for s in clean.sentences(clean.scrub(para, counts)):   # per sentence: `您好，Name。謝謝…` splits into a name line and the rest
+                if GREETING.match(s):          # before Filter.keep, so a greeting never enters its duplicate or short-row counts
                     counts["sent_greeting"] += 1
-                else:
+                elif flt.keep(s):
                     kept.append(s)
     return kept
 
@@ -118,7 +119,7 @@ def main(argv=None):
     clean.add_eval_args(ap)
     a = ap.parse_args(argv)
     ev, info = clean.eval_sentences(a.tune, a.eval)
-    flt, counts = clean.Filter(clean.load_simp_only(), ev), collections.Counter()
+    flt, counts = clean.Filter(clean.load_simp_only(), ev, convert=clean.converter()), collections.Counter()
     kept = run(a.dump, flt, counts)
     os.makedirs(a.out, exist_ok=True)
     clean.write_lines(os.path.join(a.out, "wikitalk.txt"), kept)

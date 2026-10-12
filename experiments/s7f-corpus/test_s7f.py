@@ -58,6 +58,24 @@ class TestClean(unittest.TestCase):
             self.assertNotIn(bad, joined)
         self.assertIn("2026-10-12共100000元", joined)       # a date and an amount are not phone numbers
         self.assertIn("請打", out)                          # the scrubbed string is a break, not glued text
+        for keep in ("發布日期（2020-03-15）大家注意", "會議在（2026.10.12）舉行", "總金額(12345678元)", "比例是0.12345678喔"):
+            self.assertEqual(clean.scrub(keep), keep)        # dates, amounts and decimals of 8+ digits are not phones
+        self.assertEqual(list(clean.sentences(clean.scrub("電話（02-2345-6789）請撥"))), ["電話", "請撥"])   # no stray `）`
+
+    def test_simp_set_is_the_traditional_one(self):
+        # build_counts.SIMP_ONLY holds 群 床 秘 峰 ..., standard in Taiwan; TRAD_SIMP_ONLY is the set for traditional sentences
+        with mock.patch.object(clean.bc, "load_conv"), mock.patch.object(clean.bc, "SIMP_ONLY", set("们群床")), \
+                mock.patch.object(clean.bc, "TRAD_SIMP_ONLY", set("们")):
+            simp = clean.load_simp_only()
+        f = clean.Filter(simp, set())
+        self.assertTrue(f.keep("我把你加進群組了"))
+        self.assertTrue(f.keep("我剛起床而已啦"))
+        self.assertFalse(f.keep("我们今天去吃飯"))
+
+    def test_eval_overlap_after_conversion(self):
+        f = clean.Filter(SIMP, {"在這裡等我"}, convert=lambda s: s.replace("裏", "裡"))
+        self.assertFalse(f.keep("你在這裏等我一下"))       # training sees 這裡: the eval sentence is inside
+        self.assertTrue(clean.Filter(SIMP, {"在這裡等我"}).keep("你在這裏等我一下"))   # without the converter it is not found
 
     def test_split(self):
         self.assertEqual(list(clean.sentences("今天好熱。要不要去？\n好啊！走吧…嗯")), ["今天好熱", "要不要去", "好啊", "走吧", "嗯"])
@@ -136,11 +154,11 @@ class TestArchiveTw(unittest.TestCase):
             write(os.path.join(repo, "2020-01-01-演講.md"), "# 2020-01-01 演講\n\n### 唐鳳：\n\n這是翻譯過來的稿子喔。\n")
             write(os.path.join(repo, "README.md"), "這不是逐字稿的中文說明檔案。\n")
             write(os.path.join(repo, "2020-02-02-座談.md"),
-                  "# 2020-02-02 座談\n\n### 主持人甲：\n\n大家好，今天天氣很好。\n\n> （休息十分鐘）\n\n答：我們來看[這份文件](https://x.tw/a)吧！"
-                  "\n\n11:30 我覺得**這樣**可以。\n")
+                  "# 2020-02-02 座談\n\n### 主持人甲：\n\n大家好，今天天氣很好。\n\n> （休息十分鐘）\n\nsli.do：我們來看[這份文件](https://x.tw/a)吧！"
+                  "\n\n11:30 我覺得**這樣**可以。\n\n比如：先做這個再說。\n")
             f, counts = clean.Filter(SIMP, set()), clean.collections.Counter()
             kept = archive_tw.run(repo, f, counts)
-        self.assertEqual(kept, ["大家好，今天天氣很好", "我們來看這份文件吧", "我覺得這樣可以"])
+        self.assertEqual(kept, ["大家好，今天天氣很好", "我們來看這份文件吧", "我覺得這樣可以", "比如：先做這個再說"])  # only sli.do is a label
         self.assertEqual((counts["file_used"], counts["file_alternates"], counts["file_not_chinese"]), (1, 1, 1))
         self.assertEqual(counts["line_blockquote"], 1)
 
@@ -196,6 +214,8 @@ WIKI_XML = """<mediawiki>
 您好，Dd19980908
 我覺得——其實不用改
 您好，Alice。謝謝你補了來源
+您好，Alice
+:請補上2019-2020的數據[[User:Alice|Alice]] 2026年10月1日 (三) 12:34 (UTC)
 這段可以再精簡一點<small>2007年7月23日 (一) 17:45 (UTC)</small>
 需要更多來源—以上未簽名的留言由（｜）於2012年5月12日 (六) 07:58加入
 :那就先這樣—— 2007年7月23日 (一) 17:45
@@ -240,9 +260,10 @@ class TestWikitalk(unittest.TestCase):
             f, counts = clean.Filter(SIMP, set()), clean.collections.Counter()
             kept = wikitalk.run([p], f, counts)
         self.assertEqual(kept, ["我覺得這個來源不太可靠", "同意，建議換成另一本書比較好", "在生平的那個部分補一下吧", "我也覺得要改",
-                                "那就這樣決定", "我覺得——其實不用改", "謝謝你補了來源", "這段可以再精簡一點", "需要更多來源", "那就先這樣",
+                                "那就這樣決定", "我覺得——其實不用改", "謝謝你補了來源", "請補上2019-2020的數據", "這段可以再精簡一點", "需要更多來源", "那就先這樣",
                                 "不夠豐富", "謝謝你上次幫忙修改條目", "請問手機版為什麼打不開", "電腦版也一樣打不開"])
-        self.assertEqual((counts["para_bot"], counts["sent_greeting"], counts["pages_redirect"]), (1, 2, 1))
+        self.assertEqual((counts["para_bot"], counts["sent_greeting"], counts["pages_redirect"]), (1, 3, 1))
+        self.assertEqual(f.removed["duplicate"], 0)          # the repeated greeting is a greeting, never seen by the filter
         self.assertEqual(counts["para_simplified"], 1)       # the whole paragraph, though some of its sentences have none
         self.assertEqual((counts["pages_ns1"], counts["pages_ns3"], counts["pages_ns4"]), (1, 1, 2))
 
@@ -326,6 +347,7 @@ class TestGenerate(unittest.TestCase):
         self.args = ["--provider", "cerebras", "--model", "gpt-oss-120b", "--seeds", self.seeds, "--invade", invade_repo(t),
                      "--tune", tune_dir(t), "--out", os.path.join(t, "out"), "--ledger", os.path.join(t, "spend.json"), "--workers", "1"]
         self.patches = [mock.patch.object(clean, "load_simp_only", return_value=SIMP),
+                        mock.patch.object(clean, "converter", return_value=lambda s: s),
                         mock.patch.dict(os.environ, {"CEREBRAS_API_KEY": "sk-test-SECRET", "OPENROUTER_API_KEY": "sk-test-SECRET"})]
         for p in self.patches:
             p.start()
@@ -415,6 +437,13 @@ class TestGenerate(unittest.TestCase):
         self.assertEqual((code, len(api.bodies)), (3, 1))
         self.assertIn("budget cannot be enforced", log)
 
+    def test_error_body_with_200_stops_with_the_provider_error(self):
+        api = lambda host, path, body, key: (200, json.dumps({"error": {"code": 502, "message": "upstream provider error"}}).encode())
+        code, log = self.run_main(api, "--chars", "100", "--budget-usd", "5", "--price-in", "0.5", "--price-out", "1")
+        self.assertEqual(code, 3)
+        self.assertIn("upstream provider error", log)
+        self.assertNotIn('"content"', self.files().get("cerebras-gpt-oss-120b.jsonl", ""))   # not kept as an empty reply
+
     def test_resume_continues(self):
         api = FakeAPI(unique_reply, cost=0.01)
         self.run_main(api, "--chars", "100000", "--budget-usd", "0.02")
@@ -470,6 +499,22 @@ class TestDiscordOverlap(unittest.TestCase):
             with contextlib.redirect_stdout(out):
                 discord_overlap.main(["--net", base, new, "--exclude", ex, "--weight", "10"])
             self.assertEqual(out.getvalue(), "rows\t3\nfixed\t1\nbroken\t1\nnet\t-9\n")
+            bad = write(os.path.join(tmp, "bad.txt"), "1\t1\t0\t5\n2\t0\t1\t9\n3\t1\t0\t5\n4\t1\t0\t5\n5\t0\t2\t5\n")   # row 2's gold length
+            with self.assertRaises(SystemExit):
+                discord_overlap.main(["--net", base, bad, "--exclude", ex])
+            gap = write(os.path.join(tmp, "gap.txt"), "1\t1\t0\t5\n3\t1\t0\t5\n")
+            with self.assertRaises(ValueError):                     # evalstats.read_rowstats: rows must be aligned
+                discord_overlap.main(["--net", gap, gap, "--exclude", ex])
+
+    def test_min_len_reference(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            rows = write(os.path.join(tmp, "rows.txt"), "|吧|ㄅ\n|好想睡覺喔|ㄏ\n")
+            c = write(os.path.join(tmp, "c.txt"), "那就這樣吧\n我好想睡覺喔\n")
+            for extra, want in (([], "any\t2\n"), (["--min-len", "4"], "any\t1\n")):
+                out = io.StringIO()
+                with contextlib.redirect_stdout(out):
+                    discord_overlap.main(["--rows", rows, "--corpus", c] + extra)
+                self.assertTrue(out.getvalue().endswith(want), extra)
 
 
 if __name__ == "__main__":

@@ -61,7 +61,7 @@ def main(argv=None):
         if os.path.basename(p) != want:
             sys.exit(f"cofacts: {p}: only {want} is used here")
     ev, info = clean.eval_sentences(a.tune, a.eval)
-    flt, counts = clean.Filter(clean.load_simp_only(), ev), collections.Counter()
+    flt, counts = clean.Filter(clean.load_simp_only(), ev, convert=clean.converter()), collections.Counter()
     kept = run(a.articles, a.requests, flt, counts)
     os.makedirs(a.out, exist_ok=True)
     clean.write_lines(os.path.join(a.out, "cofacts.txt"), kept)

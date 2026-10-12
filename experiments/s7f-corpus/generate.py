@@ -156,7 +156,7 @@ def main(argv=None):
     if a.invade_sha256 and inv_info["sha256"] != a.invade_sha256:
         stop(f"invade list SHA-256 {inv_info['sha256']} is not the frozen {a.invade_sha256}")
     ev, ev_info = clean.eval_sentences(a.tune, a.eval)
-    flt, term_m = clean.Filter(clean.load_simp_only(), ev), clean.Matcher(terms)
+    flt, term_m = clean.Filter(clean.load_simp_only(), ev, convert=clean.converter()), clean.Matcher(terms)
     for p in a.dedupe_against:
         flt.seen.update(clean.read_lines(p))
     os.makedirs(a.out, exist_ok=True)
@@ -189,6 +189,8 @@ def main(argv=None):
             out = json.loads(payload)
         except ValueError:
             return {"i": j, "status": status, "error": "the response is not JSON"}
+        if out.get("error"):       # OpenRouter can answer 200 with an error body (a provider failure): an error, not an empty reply
+            return {"i": j, "status": status, "error": json.dumps(out["error"], ensure_ascii=False)[:200]}
         u = out.get("usage") or {}
         if u.get("cost") is None and not (a.price_in or a.price_out):
             return {"i": j, "status": status, "error": "no usage.cost and no --price-in/--price-out: the budget cannot be enforced"}

@@ -4,7 +4,8 @@
 
 Rows are `前文|句子|讀音` (lm_eval.rows_of). A row overlaps a corpus file when its sentence occurs whole inside some line of it.
 Output: `rows<TAB>n`, one `<corpus basename><TAB>count` per file, and `any<TAB>count`. --rows-out writes the 1-based numbers of the
-overlapping rows (digits and newlines only), so the judgement can use the rows that overlap nothing.
+overlapping rows (digits and newlines only), so the judgement can use the rows that overlap nothing. --min-len N skips rows shorter
+than N characters (reference only; the contract's count uses every row).
 
   python discord_overlap.py --net BASE.txt NEW.txt --exclude OVERLAP_ROWS [--weight 10]
 
@@ -13,15 +14,20 @@ file), prints `rows`, `fixed`, `broken` and `net` (fixed - weight x broken). Num
 """
 import argparse
 import os
+import sys
 
 import clean
 
+sys.path.insert(0, os.path.join(clean.ROOT, "tools"))
+import evalstats  # noqa: E402  read_rowstats: aligned, digits-only rowstats lines
 
-def overlap(sentences, corpus_paths):
-    """Returns ({path: set of row indices}, set of row indices overlapping any)."""
+
+def overlap(sentences, corpus_paths, min_len=1):
+    """Returns ({path: set of row indices}, set of row indices overlapping any). Rows shorter than `min_len` never count (the contract
+    counts every row; --min-len 4 is the corpus-removal rule of section 2.1, reported for reference)."""
     by_sent = {}
     for i, s in enumerate(sentences):
-        if s:
+        if s and len(s) >= min_len:
             by_sent.setdefault(s, []).append(i)
     m = clean.Matcher(by_sent)
     per = {}
@@ -37,19 +43,19 @@ def overlap(sentences, corpus_paths):
 
 def net(base, new, exclude, weight):
     """(rows, fixed, broken, fixed - weight x broken) over the rows not in `exclude` (1-based row numbers)."""
-    ok = [{int(c[0]): int(c[1]) for c in (line.split("\t") for line in open(p, encoding="utf-8")) if c[0].strip()} for p in (base, new)]
-    if ok[0].keys() != ok[1].keys():
-        raise SystemExit("discord_overlap: the two rowstats files have different rows")
-    rows = [r for r in ok[0] if r not in exclude]
-    fixed = sum(1 for r in rows if not ok[0][r] and ok[1][r])
-    broken = sum(1 for r in rows if ok[0][r] and not ok[1][r])
+    b, c = evalstats.read_rowstats(base), evalstats.read_rowstats(new)
+    if len(b) != len(c) or any(x[2] != y[2] for x, y in zip(b, c)):
+        raise SystemExit("discord_overlap: the two rowstats files are not the same rows (count or gold lengths differ)")
+    rows = [r for r in range(1, len(b) + 1) if r not in exclude]
+    fixed = sum(1 for r in rows if not b[r - 1][0] and c[r - 1][0])
+    broken = sum(1 for r in rows if b[r - 1][0] and not c[r - 1][0])
     return len(rows), fixed, broken, fixed - weight * broken
 
 
 def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--rows"); ap.add_argument("--corpus", nargs="+")
-    ap.add_argument("--rows-out")
+    ap.add_argument("--rows-out"); ap.add_argument("--min-len", type=int, default=1)
     ap.add_argument("--net", nargs=2, metavar=("BASE", "NEW")); ap.add_argument("--exclude"); ap.add_argument("--weight", type=float, default=10)
     a = ap.parse_args(argv)
     if a.net:
@@ -62,7 +68,7 @@ def main(argv=None):
     if not (a.rows and a.corpus):
         ap.error("--rows and --corpus are required (or --net)")
     sentences = [t for t, _, _ in clean.rows_of([a.rows])]
-    per, any_ = overlap(sentences, a.corpus)
+    per, any_ = overlap(sentences, a.corpus, a.min_len)
     print(f"rows\t{len(sentences)}")
     for p in a.corpus:
         print(f"{os.path.basename(p)}\t{len(per[p])}")

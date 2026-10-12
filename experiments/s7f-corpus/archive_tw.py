@@ -19,7 +19,9 @@ import clean
 FILE = re.compile(r"^\d{4}-\d{2}-\d{2}-.+\.md$")
 LATIN = re.compile(r"[A-Za-zÀ-ɏ]")
 TIMESTAMP = re.compile(r"^[\[(（]?\d{1,2}:\d{2}(?::\d{2})?[\])）]?\s*")
-LABEL = re.compile(r"^[^\s：，。「」]{1,8}：\s*")
+# The only in-body label (speakers are `### 名字：` headings, dropped as headings): the sli.do questions. A wider `^.{1,8}：` took
+# content such as 比如：, 舉例來說：, 我的意思是： (S7f review: 1,775 lines, 473 + 30 of them sli.do).
+LABEL = re.compile(r"^sli\.?do：\s*", re.I)
 MD = [(re.compile(r"!\[[^\]]*\]\([^)]*\)"), ""),                  # images
       (re.compile(r"\[([^\]]*)\]\([^)]*\)"), r"\1"),              # links keep their text
       (re.compile(r"<[^>]+>"), ""), (re.compile(r"\*{1,3}|`"), "")]
@@ -85,7 +87,7 @@ def main(argv=None):
     a = ap.parse_args(argv)
     commit = subprocess.run(["git", "-C", a.repo, "rev-parse", "HEAD"], capture_output=True, text=True, check=True).stdout.strip()
     ev, info = clean.eval_sentences(a.tune, a.eval)
-    flt, counts = clean.Filter(clean.load_simp_only(), ev), collections.Counter()
+    flt, counts = clean.Filter(clean.load_simp_only(), ev, convert=clean.converter()), collections.Counter()
     kept = run(a.repo, flt, counts)
     os.makedirs(a.out, exist_ok=True)
     clean.write_lines(os.path.join(a.out, "archive_tw.txt"), kept)
