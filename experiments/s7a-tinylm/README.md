@@ -7,9 +7,9 @@
 | 檔 | 做什麼 | 需要 torch |
 |---|---|---|
 | `tinylm.py` | numpy 核心：字表（PAD 0、UNK 1、BOS 2）、`row_key`（`context_key`；16 字版）、`.npz` 格式（`save_params`）、numpy 前向（`NumpyLM`）、**唯一的 `LL`**（`ll_many`，序列 `[BOS] + k + c`） | 否 |
-| `prep.py` | `runs`：核對輸入雜湊，產生訓練文字（維基＋口語，與 n-gram 同一組函式）；`encode`：字表（≥ 5 次）與 `ids-*.npy` | 否 |
+| `prep.py` | `runs`：核對輸入雜湊，產生訓練文字（維基＋口語，與 n-gram 同一組函式）；`encode`：字表（≥ 5 次）與 `ids-*.npy`；`text`（S7f）：另一個文字檔照口語的切法、用**現有**字表轉成 `ids-<name>.npy` | 否 |
 | `buildcheck.py` | `construction`：對原始來源的建構檢查；`substr`：調參集正解句出現在訓練文字裡的比例（只記錄）；`--flags` 另寫逐列 0／1（S7d） | 否 |
-| `batching.py` | 訓練批次（一段一個序列、同長度成批、超過 65 個 token 的切片重疊 1 個） | 否 |
+| `batching.py` | 訓練批次（一段一個序列、同長度成批、超過 65 個 token 的切片重疊 1 個）；`build_epoch`／`plan`：`train.py` 的 epoch 與批次順序（S7f 起放這裡，沒有 torch 也能測；`--extra` 的檔權重 1、接在最後） | 否 |
 | `torch_model.py`、`train.py` | 模型、`export_npz`、torch 打分後端、訓練 | 是 |
 | `score.py` | 候選（`--dump` 前 8 名）× `LL` → 只有數字的分數檔；`--ppl-out` 正解句困惑度 | 否（`--backend torch` 才要） |
 | `run_sets.py` | 每個集合各跑一次 `lm_eval.py --dump` 與 `score.py`（一行命令跑完全部集合） | 否 |
@@ -173,6 +173,22 @@ $PY fusegrid.py --scores $W/s7e/scores --out $W/s7e/w10 --models M8 --sets cvtun
 
 - `score.py` 每個候選算 ll、ll0、ll16 三欄。這個模式用 ll 選與判斷，用 ll0 檢查前文有沒有接上（「LL changed by context」，錯字回報與 discordtune 是 0 就停），ll16 沒用到。
 - L、XL 是在 Colab 上用 `train.py --size L|XL`、同一份 `ids-*.npy` 與 `vocab.txt` 訓練，公開集合也在 Colab 上打分（研究紀錄 2026-10-12 記了上傳的限制）；discordtune 只在 Mac 本機打分。
+
+## Colab：資料怎麼傳（2026-10-12 實測，使用者定案）
+
+VM 在美國（實測時在南卡羅來納州）。只傳公開的程式與資料；私人資料（discordtune、學習檔、聊天紀錄）不上 Colab。
+
+| 路徑 | 實測 | 用在 |
+|---|---|---|
+| VM 自己抓公開資料：維基 dump 走 your.org 鏡像、8 路平行分段 | 約 39.5 MiB/s（官方 dumps.wikimedia.org 單線 4.8 MiB/s，平行分段會被截短） | 維基 dump |
+| VM 自己抓：Hugging Face／GitHub | 約 54.5／12.5 MiB/s | 資料集、程式 |
+| Mac → S4（rclone）→ VM（有時效的下載網址） | 約 33 MiB/s ＋ 約 15.7 MiB/s | 只在 Mac 上的檔案（自己的衍生檔、模型） |
+| `colab download`（VM → Mac） | 約 3.2 MiB/s | 結果（幾百 MB 以內） |
+| `colab upload`（Mac → VM，16 MiB 分片） | 約 2.2 MiB/s | 不用 |
+| Google Drive（`colab drivemount`） | Mac → Drive 16.8、Drive → VM 32.5、VM → Drive 13.1 MiB/s | 不用：每個 session 都要使用者授權一次 |
+
+- 有時效的網址用 `rclone link --expire 1h`，在 Mac 上產生、存成只有自己能讀的檔、不印出來；金鑰不離開 Mac。用完刪掉嵌著網址的腳本。
+- CPU 的 session（不帶 GPU）在實測時沒有扣運算單元。
 
 ## S7c-1：Rust 推論（`SJTL0001`）
 
