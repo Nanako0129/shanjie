@@ -1,0 +1,364 @@
+"""E2 chatclause (docs/contracts/e2-chat-eval.md section 2.1): the maintainer's own chat as clause rows, built from INPUT FILES only.
+
+Private data: run by main on the maintainer's machine with --work in the private folder; the row files never enter the repo.
+
+  prepare --work DIR [--discord MESSAGES_DIR] [--threads FILE.jsonl] [--exclude ROWFILE ...]
+      reads the sources, writes DIR/clauses.tsv (month, source, context, sentence; every clause that survives the mechanical
+      exclusions, in time order) and DIR/counts.json, prints the per-month counts table (numbers only).
+  split --work DIR
+      fixes the judge months from the mechanical counts (DIR/split.json; written once, a later run must give the same file).
+  freeze --work DIR --period tune|judge [--corrections FILE] [--draft]
+      tune: min(6,000, pool) clauses of the pool months, seed 20261012; judge: every clause of the judge months. Applies the optional
+      corrections, spells with tools/readings.py, drops CHECK and unreadable rows, writes DIR/<period>.rows.txt (`context|sentence|reading`),
+      DIR/<period>.manifest.json and DIR/<period>.sha256. With --draft only DIR/<period>.draft.txt (readings marked CHECK) for proofreading.
+      A frozen period is never rewritten with other content; judge needs the tune freeze first (contract order (1) before (3)).
+  emit --work DIR --period tune|judge --out FILE
+      copies the frozen rows to FILE for run_sets.py dumps, and refuses (exit 1, nothing written) when the rows no longer hash to
+      the frozen SHA-256.
+
+Discord data package: MESSAGES_DIR is the package's messages folder (`Messages/` or `messages/`): one folder per channel
+(`c<channel id>/` or just `<id>/`), each holding `messages.json` (a JSON array of objects with ID, Timestamp, Contents) or the older
+`messages.csv` (header ID,Timestamp,Contents,Attachments). Both are read; index.json and every other folder are not. Timestamps are
+`2021-03-14 12:34:56.789000+00:00` (UTC) and are put in UTC+8 (Taiwan has no daylight saving) before the month is taken.
+Threads JSONL: one object per line with url, time (ISO 8601), text; a line without all three is dropped and counted.
+
+Corrections file (optional, UTF-8, tab separated, applied before spelling; the proofreading itself is main's job):
+  OLD<TAB>NEW           the sentence OLD becomes NEW
+  OLD<TAB>              drop the row
+  OLD<TAB>NEW<TAB>READ  as the first, and READ (space separated syllables) is taken as the confirmed reading of NEW, so a CHECK row stays.
+"""
+import argparse
+import csv
+import datetime as dt
+import json
+import os
+import random
+import re
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import e2common as c  # noqa: E402
+
+TZ = dt.timezone(dt.timedelta(hours=8))
+GAP = dt.timedelta(minutes=10)         # contract 2.1: the previous message of the same channel counts as context within 10 minutes
+SHANJIE_FROM = "2026-10"               # the maintainer typed with Zhuyin of Apple before this month, with shanjie from it (2026-10-12)
+JUDGE_START = "2026-09"                # the judge months run back from here; never SHANJIE_FROM or later
+JUDGE_MIN = 2950                       # mechanical rows (2,500 plus about 15% for proofreading and reading losses)
+MIN_USABLE = 2500                      # fewer mechanical rows than this before SHANJIE_FROM: stop and ask
+TUNE_MAX = 6000
+URL = re.compile(r"https?://|www\.", re.I)
+FENCE = "```"
+STEPS = ("messages", "no_timestamp", "url", "code", "no_segment", "segments", "overlap", "duplicate", "mechanical")
+
+
+# ------------------------------------------------------------------ reading the sources
+def parse_ts(s):
+    """A timestamp (aware: converted, naive: taken as UTC+8) in UTC+8."""
+    d = dt.datetime.fromisoformat(s.strip().replace("Z", "+00:00"))
+    return d.astimezone(TZ) if d.tzinfo else d.replace(tzinfo=TZ)
+
+
+def discord_messages(root):
+    """[(channel, id, ts, text)] of the messages folder; channels in folder-name order. ts is None when it cannot be read."""
+    out = []
+    for ch in sorted(os.listdir(root)):
+        d = os.path.join(root, ch)
+        if not os.path.isdir(d):
+            continue
+        j, cs = os.path.join(d, "messages.json"), os.path.join(d, "messages.csv")
+        if os.path.isfile(j):
+            recs = json.load(open(j, encoding="utf-8"))
+        elif os.path.isfile(cs):
+            csv.field_size_limit(10 ** 9)
+            recs = list(csv.DictReader(open(cs, encoding="utf-8", newline="")))
+        else:
+            continue
+        for r in recs:
+            try:
+                ts = parse_ts(r.get("Timestamp") or "")
+            except ValueError:
+                ts = None
+            out.append((ch, str(r.get("ID", "")), ts, r.get("Contents") or ""))
+    return out
+
+
+def threads_posts(path):
+    """([(channel, id, ts, text)], dropped): channel is the url; a line missing url, time or text (or unreadable) is dropped."""
+    out, dropped = [], 0
+    for line in open(path, encoding="utf-8"):
+        if not line.strip():
+            continue
+        try:
+            r = json.loads(line)
+            url, t, text = r["url"], r["time"], r["text"]
+            if not (url and t and text):
+                raise ValueError
+            out.append((url, url, parse_ts(t), text))
+        except (ValueError, KeyError, TypeError):
+            dropped += 1
+    return out, dropped
+
+
+# ------------------------------------------------------------------ clauses
+def clauses(messages, cross_message):
+    """[(ts, channel, seq, context, sentence, flags)] for every segment of every message. messages: [(channel, id, ts, text)] with
+    ts not None. Context (contract 2.1): the previous segment of the same message; for the first segment, when cross_message, the
+    last segment of the same channel's previous message if it is at most GAP earlier; else ''. flags: 'url' / 'code' when the
+    message has one (the caller drops those messages)."""
+    out, prev = [], {}
+    for k, (ch, _id, ts, text) in enumerate(sorted(messages, key=lambda m: (m[0], m[2], m[1]))):
+        segs = c.segments(text)
+        before = prev.get(ch)
+        for i, s in enumerate(segs):
+            if i:
+                ctx = segs[i - 1]
+            elif cross_message and before and ts - before[0] <= GAP and before[1]:
+                ctx = before[1]
+            else:
+                ctx = ""
+            out.append((ts, ch, k, ctx, s, ("url" if URL.search(text) else "") + ("code" if FENCE in text else "")))
+        if not segs:
+            out.append((ts, ch, k, "", None, ("url" if URL.search(text) else "") + ("code" if FENCE in text else "")))
+        prev[ch] = (ts, segs[-1] if segs else "")
+    return out
+
+
+def month(ts):
+    return f"{ts.year:04d}-{ts.month:02d}"
+
+
+def load_exclude(paths):
+    """The sentences of the other evaluation sets (rows `context|sentence|reading`, or one sentence per line)."""
+    s = set()
+    for p in paths:
+        for line in open(p, encoding="utf-8"):
+            line = line.rstrip("\n")
+            if line and not line.startswith("#"):
+                s.add(line.split("|")[1] if "|" in line else line)
+    return s
+
+
+def prepare(discord_root, threads_file, exclude_files, work):
+    """Writes clauses.tsv and counts.json; returns the counts {source: {month: {step: n}, '_dropped_...': n}}."""
+    exclude = load_exclude(exclude_files)
+    counts = {}
+
+    def bump(src, mon, step):
+        counts.setdefault(src, {}).setdefault(mon, dict.fromkeys(STEPS, 0))[step] += 1
+
+    sources = []                                # (name, messages, cross-message context)
+    if discord_root:
+        sources.append(("discord", discord_messages(discord_root), True))
+    if threads_file:
+        posts, dropped = threads_posts(threads_file)
+        counts["threads"] = {"_dropped_no_url_time_text": dropped}
+        sources.append(("threads", posts, False))
+    rows = []                                   # (ts, source rank, month, source, context, sentence)
+    for rank, (src, msgs, cross) in enumerate(sources):
+        dated = [m for m in msgs if m[2] is not None]
+        if len(dated) < len(msgs):
+            counts.setdefault(src, {})["_dropped_no_timestamp"] = len(msgs) - len(dated)
+        by_msg = {}
+        for ts, ch, k, ctx, s, flags in clauses(dated, cross):
+            by_msg.setdefault((ch, k), []).append((ts, ctx, s, flags))
+        for cl in by_msg.values():
+            ts, _ctx, first, flags = cl[0]
+            mon = month(ts)
+            bump(src, mon, "messages")
+            if "url" in flags:
+                bump(src, mon, "url")
+            elif "code" in flags:
+                bump(src, mon, "code")
+            elif first is None:
+                bump(src, mon, "no_segment")
+            else:
+                for ts, ctx, s, _f in cl:
+                    bump(src, mon, "segments")
+                    rows.append((ts, rank, mon, src, ctx, s))
+    rows.sort(key=lambda r: (r[0], r[1]))
+    seen, kept = set(), []
+    for _ts, _rank, mon, src, ctx, s in rows:
+        if s in exclude:
+            bump(src, mon, "overlap")
+        elif (mon, s) in seen:
+            bump(src, mon, "duplicate")
+        else:
+            seen.add((mon, s))
+            kept.append((mon, src, ctx, s))
+            bump(src, mon, "mechanical")
+    os.makedirs(work, exist_ok=True)
+    c.write_lf(os.path.join(work, "clauses.tsv"), "".join("\t".join(r) + "\n" for r in kept))
+    c.write_lf(os.path.join(work, "counts.json"), json.dumps(counts, ensure_ascii=False, indent=1, sort_keys=True) + "\n")
+    return counts
+
+
+def mechanical_by_month(counts):
+    t = {}
+    for src, months in counts.items():
+        for mon, st in months.items():
+            if not mon.startswith("_"):
+                t[mon] = t.get(mon, 0) + st["mechanical"]
+    return t
+
+
+def prev_month(mon):
+    y, m = int(mon[:4]), int(mon[5:])
+    return f"{y - 1:04d}-12" if m == 1 else f"{y:04d}-{m - 1:02d}"
+
+
+def choose_judge_months(by_month, pool_months=()):
+    """(judge months, pool months) from the mechanical counts alone. Judge: JUDGE_START then each earlier month until the rows reach
+    JUDGE_MIN (months without data count 0 and are passed). Never SHANJIE_FROM or later; never a month in `pool_months` (months
+    already in a frozen tuning pool). Pool: every other month with data before the judge months. Stops (SystemExit) when all the
+    months before SHANJIE_FROM together have fewer than MIN_USABLE rows."""
+    usable = {m: n for m, n in by_month.items() if m < SHANJIE_FROM}
+    if sum(usable.values()) < MIN_USABLE:
+        sys.exit(f"build_chatclause: STOP, {sum(usable.values())} mechanical rows before {SHANJIE_FROM} (< {MIN_USABLE}); ask the maintainer")
+    first, judge, total, mon = min(usable), [], 0, JUDGE_START
+    while total < JUDGE_MIN:
+        if mon < first:
+            sys.exit(f"build_chatclause: STOP, the months back to {first} give only {total} rows (< {JUDGE_MIN}); ask the maintainer")
+        if mon in pool_months:
+            sys.exit(f"build_chatclause: STOP, judge month {mon} is already in the frozen tuning pool")
+        judge.append(mon)
+        total += usable.get(mon, 0)
+        mon = prev_month(mon)
+    pool = sorted(m for m in usable if m < min(judge))
+    return sorted(judge), pool
+
+
+# ------------------------------------------------------------------ periods
+def read_clauses(work):
+    return [tuple(l.rstrip("\n").split("\t")) for l in open(os.path.join(work, "clauses.tsv"), encoding="utf-8")]
+
+
+def period_rows(work, period):
+    """[(context, sentence)] before corrections: the whole judge months, or the seeded tuning sample of the pool."""
+    split = json.load(open(os.path.join(work, "split.json"), encoding="utf-8"))
+    months = set(split["judge_months"] if period == "judge" else split["pool_months"])
+    rows = [(x, s) for mon, _src, x, s in read_clauses(work) if mon in months]
+    if period == "tune":
+        rows = random.Random(c.SEED).sample(rows, min(TUNE_MAX, len(rows)))
+    return rows, len(rows)
+
+
+def load_corrections(path):
+    out = {}
+    for line in open(path, encoding="utf-8") if path else []:
+        p = line.rstrip("\n").split("\t")
+        if len(p) >= 2 and p[0]:
+            out[p[0]] = (p[1], p[2] if len(p) > 2 else None)
+    return out
+
+
+def build_period(rows, corrections, readings=c.readings):
+    """-> (frozen rows [(ctx, sentence, reading)], draft rows [(ctx, sentence, reading, status)], stats)."""
+    st = {"rows_in": len(rows), "corrected": 0, "dropped_by_correction": 0, "dropped_check": 0, "dropped_unreadable": 0}
+    work = []
+    for x, s in rows:
+        if s in corrections:
+            new, rd = corrections[s]
+            if not new:
+                st["dropped_by_correction"] += 1
+                continue
+            st["corrected"] += new != s
+            work.append((x, new, rd))
+        else:
+            work.append((x, s, None))
+    rd = readings([s for _, s, _ in work])
+    draft = []
+    for x, s, given in work:
+        status, reading = ("ok", given) if given else rd[s]
+        draft.append((x, s, reading, status))
+    frozen = [(x, s, r) for x, s, r, status in draft if status == "ok"]
+    st["dropped_check"] = sum(d[3] == "check" for d in draft)
+    st["dropped_unreadable"] = sum(d[3] == "unreadable" for d in draft)
+    st["rows"] = len(frozen)
+    return frozen, draft, st
+
+
+def freeze(work, period, corrections_file=None, draft=False, readings=c.readings):
+    rows, pool_rows = period_rows(work, period)
+    frozen, drafted, st = build_period(rows, load_corrections(corrections_file), readings)
+    if draft:
+        c.write_lf(os.path.join(work, f"{period}.draft.txt"),
+                   "".join(f"{x}|{s}|{r}{'|CHECK' if status != 'ok' else ''}\n" for x, s, r, status in drafted))
+        return st
+    if period == "judge" and not os.path.isfile(os.path.join(work, "tune.sha256")):
+        sys.exit("build_chatclause: STOP, freeze the tuning period first (contract 2.1 order (1) before (3))")
+    text = "".join(f"{x}|{s}|{r}\n" for x, s, r in frozen)
+    sha = c.sha256_bytes(text.encode("utf-8"))
+    sf = os.path.join(work, f"{period}.sha256")
+    if os.path.isfile(sf) and open(sf).read().split()[0] != sha:
+        sys.exit(f"build_chatclause: STOP, the {period} period is frozen with another content; it is never rewritten")
+    c.write_lf(os.path.join(work, f"{period}.rows.txt"), text)
+    c.write_lf(sf, f"{sha}  {period}.rows.txt\n")
+    split = json.load(open(os.path.join(work, "split.json"), encoding="utf-8"))
+    st.update(period=period, clauses_before_sampling_or_corrections=pool_rows, sha256=sha,
+              months=split["judge_months"] if period == "judge" else split["pool_months"])
+    c.write_lf(os.path.join(work, f"{period}.manifest.json"), json.dumps(st, ensure_ascii=False, indent=1) + "\n")
+    return st
+
+
+def emit(work, period, out):
+    rows_file, sf = os.path.join(work, f"{period}.rows.txt"), os.path.join(work, f"{period}.sha256")
+    if not os.path.isfile(sf):
+        sys.exit(f"build_chatclause: no frozen {period} period in {work}")
+    want = open(sf).read().split()[0]
+    got = c.sha256_file(rows_file)
+    if got != want:
+        sys.exit(f"build_chatclause: REFUSED, {period}.rows.txt hashes to {got[:16]}…, frozen {want[:16]}…")
+    c.write_lf(out, open(rows_file, encoding="utf-8").read())
+
+
+def show_counts(counts):
+    for src in sorted(counts):
+        extra = {k: v for k, v in counts[src].items() if k.startswith("_")}
+        print(f"## {src} {extra if extra else ''}".rstrip())
+        print("| month | ime | " + " | ".join(STEPS) + " |\n|---|---|" + "---|" * len(STEPS))
+        for mon in sorted(m for m in counts[src] if not m.startswith("_")):
+            print(f"| {mon} | {'shanjie' if mon >= SHANJIE_FROM else 'apple'} | " + " | ".join(str(counts[src][mon][s]) for s in STEPS) + " |")
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser()
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    for name in ("prepare", "split", "freeze", "emit"):
+        p = sub.add_parser(name)
+        p.add_argument("--work", required=True)
+        if name == "prepare":
+            p.add_argument("--discord"); p.add_argument("--threads"); p.add_argument("--exclude", nargs="*", default=[])
+        if name in ("freeze", "emit"):
+            p.add_argument("--period", choices=["tune", "judge"], required=True)
+        if name == "freeze":
+            p.add_argument("--corrections"); p.add_argument("--draft", action="store_true")
+        if name == "emit":
+            p.add_argument("--out", required=True)
+    a = ap.parse_args(argv)
+    if a.cmd == "prepare":
+        if not (a.discord or a.threads):
+            ap.error("give --discord and/or --threads")
+        counts = prepare(a.discord, a.threads, a.exclude, a.work)
+        show_counts(counts)
+    elif a.cmd == "split":
+        by = mechanical_by_month(json.load(open(os.path.join(a.work, "counts.json"), encoding="utf-8")))
+        tf = os.path.join(a.work, "tune.manifest.json")
+        frozen_pool = json.load(open(tf, encoding="utf-8"))["months"] if os.path.isfile(tf) else ()
+        judge, pool = choose_judge_months(by, frozen_pool)
+        out = {"judge_months": judge, "pool_months": pool, "mechanical_by_month": dict(sorted(by.items())),
+               "judge_min": JUDGE_MIN, "never_from": SHANJIE_FROM}
+        text = json.dumps(out, ensure_ascii=False, indent=1) + "\n"
+        sp = os.path.join(a.work, "split.json")
+        if os.path.isfile(sp) and open(sp, encoding="utf-8").read() != text:
+            sys.exit("build_chatclause: STOP, split.json exists with another split; it is never changed")
+        c.write_lf(sp, text)
+        print(f"judge months {judge} ({sum(by.get(m, 0) for m in judge)} mechanical rows); pool {len(pool)} months, "
+              f"{sum(by[m] for m in pool)} rows")
+    elif a.cmd == "freeze":
+        print(json.dumps(freeze(a.work, a.period, a.corrections, a.draft), ensure_ascii=False))
+    else:
+        emit(a.work, a.period, a.out)
+
+
+if __name__ == "__main__":
+    main()

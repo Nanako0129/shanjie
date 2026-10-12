@@ -111,5 +111,36 @@ class TestRunSets(unittest.TestCase):
                     run_sets.main(["dumps", "--work", td, "--sets", "dev302", "user-reported", "--reported-rows", "66"])
                 sp.assert_not_called()
 
+    def test_e2_sets_take_their_own_file_and_a_missing_path_exits(self):
+        """E2 section 3.2: chatclause / lytune / wikitypo read --<name> FILE; no option or a missing file exits non-zero before lm_eval runs."""
+        with tempfile.TemporaryDirectory() as td:
+            files = {}
+            for name in run_sets.EXTRA_SETS:
+                files[name] = os.path.join(td, f"{name}.txt")
+                open(files[name], "w", encoding="utf-8").write("|你好|ㄋㄧˇ ㄏㄠˇ\n")
+            ns = argparse.Namespace(tune=None, discord=None, reported_rows=None, **files)
+            for name in run_sets.EXTRA_SETS:
+                self.assertEqual(run_sets.rows_args(name, ns), ["--rows", files[name]])
+            calls = []
+
+            def fake_run(cmd, **kw):
+                calls.append(cmd)
+                with open(cmd[cmd.index("--dump") + 1], "w", encoding="utf-8") as f:
+                    f.write("1\t1\t你好\t-1.0\n")
+                return subprocess.CompletedProcess(cmd, 0, "## x  {'n': 1, 'top1': 1}\n", "")
+            opts = [x for n in run_sets.EXTRA_SETS for x in (f"--{n}", files[n])]
+            with mock.patch.object(run_sets.subprocess, "run", fake_run), mock.patch.object(run_sets, "check_model"), contextlib.redirect_stdout(io.StringIO()):
+                run_sets.main(["dumps", "--work", td, "--sets", *run_sets.EXTRA_SETS, *opts])
+            self.assertEqual(len(calls), 6)
+            self.assertEqual([c[c.index("--name") + 1] for c in calls[::2]], list(run_sets.EXTRA_SETS))
+            self.assertEqual(calls[0][calls[0].index("--rows") + 1], files["chatclause"])
+            for name in run_sets.EXTRA_SETS:
+                for opts2 in ([], [f"--{name}", os.path.join(td, "missing.txt")]):
+                    with mock.patch.object(run_sets.subprocess, "run") as sp, mock.patch.object(run_sets, "check_model"):
+                        with self.assertRaises(SystemExit) as e:
+                            run_sets.main(["dumps", "--work", td, "--sets", name, *opts2])
+                    self.assertIn(f"--{name}", str(e.exception.code))
+                    sp.assert_not_called()
+
 if __name__ == "__main__":
     unittest.main()
