@@ -42,6 +42,9 @@
     3. `facebook/posts_on_other_pages_and_profiles.json`：文字是 `label_values` 裡解碼後標籤正好是「訊息」的 `value`。
     4. `facebook/comments.json`：`{"comments_v2": [...]}`，每個 `data[].comment` 一則，只留解碼後 `author` 等於維護者本人（`--self-name`）的；別人的留言只計數、不再讀；文字是 `comment["comment"]`，時間是 `comment["timestamp"]`（沒有就用外層的）；外層 `title` 不用。
     - 匯出的每個字串（鍵與標籤也是）都是 UTF-8 位元組存成 latin-1 碼位的亂碼，程式先還原再用。Messenger 這次沒有匯出，不讀。匯出是 Meta 原樣給的文字，所以原本「抽 10 則用網址核對原頁」的步驟取消。
+  - **私訊排除與個資、密鑰過濾**（維護者 2026-10-12 選「排除私訊，再濾掉個資格式」，另加「token 也要過濾」，見 §7 最後一列）：
+    - Discord 每個頻道資料夾先讀 `channel.json`，只用 `GUILD_TEXT`、`GUILD_ANNOUNCEMENT`、`PUBLIC_THREAD`、`ANNOUNCEMENT_THREAD`、`GUILD_VOICE`；`DM`、`GROUP_DM`、`PRIVATE_THREAD`、沒有 `channel.json` 或類型不認得的頻道整個跳過，不開它的訊息檔；各類型跳過幾個頻道會印出來。main 已在本機的匯出複本刪掉 DM、GROUP_DM、PRIVATE_THREAD 的資料夾與頻道索引 `index.json`；程式的過濾照樣要有、要測試。
+    - 所有來源（Discord、Threads、Facebook 貼文與留言）的訊息，原文含下列任何一種就整則丟掉，在斷句、網址與程式碼排除、月份計數**之前**，所以機械計數不含這些訊息：電子郵件；電話樣式（8 個以上的數字，數字間可有空白、連字號、點或括號，含 09xx-xxx-xxx）；連續 6 個以上的數字；身分證樣式 `[A-Z][12]\d{8}`；token 或密鑰（`[A-Za-z0-9_\-+/=]` 連續 20 字以上而且同時有字母與數字；已知前綴 `sk-`、`sk_`、`ghp_`、`gho_`、`github_pat_`、`xox[abpr]-`、`AKIA`、`AIza`、`eyJ`＋base64（涵蓋 JWT）、`Bearer `；鍵含 token、secret、password、passwd、pwd、api_key、apikey（不分大小寫）的 key=value；PEM 標頭 `-----BEGIN`）。程式只印每個來源、每條規則丟了幾則，不印符合的文字。副作用：電話規則也會丟含 `2026-10-12` 這種日期的訊息（寧可多丟）。
   - 資料包留在維護者放的位置，不複製。衍生的列檔放 `~/side-project/shanjie-private/chat-eval/`（權限 700）。
   - 不進 repo、不上 Colab、不進任何訓練文字、種子、詞表或規則；agent 一律不讀。
 - **月份與輸入法**：每則訊息依時間戳分月。研究紀錄的每月列數表有一欄「輸入法」：2026-09 以前是蘋果注音，2026-10 起是善解（使用者 2026-10-12 回答）。善解的月份不進判斷期。
@@ -203,6 +206,7 @@
 | plan-verifier 第 2 次 REVISE（2026-10-12） | 第 1 次的 10 點：(1)(4)(5)(6)(7)(10) 修好，(2)(3)(8) 部分。新的 4 點：(1) 判斷期要不要往前併取決於校對後的列數，但調參期在那之前就建好，可能把已經在調參池的月份併進判斷期；(2) verifier 重跑 `lytune`、`wikitypo` 需要 `tools/readings.py` 讀的兩個字典檔，不在可讀清單；(3) 「每月列數加總等於調參期加判斷期」在調參池超過 6,000 列時不成立；(4) Threads 的原文、網址、時間戳沒有保證，前文規則只寫了 Discord | 第 2 次 REVISE 後逐項處置，全部 **FIX**：(1) 月份分法在第 (1) 步前用機械計數定死（判斷期 ≥ 2,950 列），校對後不到 2,500 列照報接受、不借調參月，測試加「調參池的月份不會進判斷期」；(2) 兩個字典檔與雜湊列進 verifier 的可讀清單；(3) 等式改成判斷期加總、調參池加總、調參 n ＝ min(6,000, 池)，報池的大小；(4) Threads 要網址、時間戳、逐字原文，抽 10 則核對原頁、不符就整批不用，前文規則補上，每月表分開報 |
 | 收尾審查（2026-10-12） | READY | 開始實作 |
 | main，實作後、打分前（2026-10-12；還沒有任何打分） | (a) 「藉→籍」規則在原始維基文字裡量到的是 121 列，不是 122（含 lookaround 的三條規則；原本的 122 沒有記算法）。(b) `lytune`：抽樣前先丟掉整句只是篩選詞的子句（對不對、好不好、是不是、嘛、吧 …），再丟完全相同的句子（留檔案順序的第一個），之後才抽 5,000 句；原本的 4,881 列有 24% 是三個單獨語尾子句。(c) `wikitypo`：丟掉正解含 `build_counts.TRAD_SIMP_ONLY`（不是完整的 SIMP_ONLY，那個含常用的台灣用字）簡體專用字的列，再丟重複的正解（留第一個）；數字見研究紀錄。(d) Threads 的來源：維護者原本選了 Grok 抓的貼文，之後改用 Meta 官方的「下載你的資訊」匯出，Grok 的檔案已刪除。Threads 的 robots.txt 禁止未經書面許可的自動蒐集。§2.1 抽 10 則核對原頁的步驟，由「匯出就是逐字原文」取代。(e) 維護者也用官方匯出匯 Facebook 貼文與留言（可能還有 Messenger）；這些以完全相同的規則併入 `chatclause`：只用自己的文字、月份分法、判斷期只到 2026-09、由 main 讀並校對、只記數字。Messenger 只留寄件人是維護者的訊息，別人的訊息由程式丟掉、從不讀。前文：Facebook 的貼文或留言第 1 段空白、之後用前一段；Messenger 用 Discord 的規則。§2.1 的來源清單與「資料包沒來」的停止條件一併改成涵蓋所有匯出 | 照改（`build_chatclause.py` 加讀取 Meta 匯出的程式與合成資料的測試） |
+| main，維護者的隱私決定（2026-10-12，仍在打分前） | 維護者選「排除私訊，再濾掉個資格式」，另加「token 也要過濾」：Discord 只用公開頻道類型（過濾見 §2.1），所有來源的訊息含個資格式或密鑰就整則丟掉（規則見 §2.1）；main 已在本機匯出複本刪掉 DM、GROUP_DM、PRIVATE_THREAD 資料夾與 `index.json` | 照改（`build_chatclause.py` 的頻道過濾與 `private_rule`，合成資料的測試與突變） |
 
 ## 8. 結果
 

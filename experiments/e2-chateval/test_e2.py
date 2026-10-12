@@ -30,7 +30,7 @@ def ts(day, hm, month="2026-03"):
     return f"{month}-{day:02d} {hm}:00.000000+00:00"
 
 
-def package(td, channels):
+def package(td, channels, types=None):
     """channels: {folder: [(id, timestamp, contents)]} -> a Discord messages folder (JSON for c-folders, CSV for the others)."""
     root = os.path.join(td, "Messages")
     os.makedirs(root)
@@ -38,6 +38,8 @@ def package(td, channels):
     for ch, msgs in channels.items():
         d = os.path.join(root, ch)
         os.makedirs(d)
+        if (types or {}).get(ch, "GUILD_TEXT") is not None:
+            json.dump({"id": ch, "type": (types or {}).get(ch, "GUILD_TEXT")}, open(os.path.join(d, "channel.json"), "w"))
         if ch.startswith("c"):
             json.dump([{"ID": i, "Timestamp": t, "Contents": x, "Attachments": ""} for i, t, x in msgs], open(os.path.join(d, "messages.json"), "w", encoding="utf-8"))
         else:
@@ -161,6 +163,83 @@ class Context(unittest.TestCase):
         self.assertEqual(sorted(s for _m, _s, _x, s in clauses_of(work)), ["戊己庚辛", "甲乙丙丁"])
 
 
+class Privacy(unittest.TestCase):
+    DROP = {
+        "email": "寫信到 someone@example.com 給我",
+        "tw_id": "他的身分證是A123456789喔",
+        "phone": "打給我 0912-345-678 好了",
+        "phone2": "電話 (02) 2345 6789 謝謝",
+        "digits6": "訂單編號123456完成了",
+        "token_run": "金鑰是 abcd1234efgh5678ijkl9012 不要外傳",
+        "token_sk": "用 sk-proj-abc 這個",
+        "token_ghp": "ghp_xxxxxxxx 這個",
+        "token_pat": "github_pat_11AAAA 試試",
+        "token_slack": "xoxb-12-ab 換掉",
+        "token_aws": "AKIA 開頭的那個",
+        "token_google": "AIzaSy 的那個",
+        "token_jwt": "eyJhbGciOiJIUzI1 看這個",
+        "token_bearer": "Authorization 是 Bearer 後面接字",
+        "token_kv": "設定 API_KEY=abc 之後",
+        "token_kv2": "my_password = hunter",
+        "token_pem": "-----BEGIN PRIVATE KEY----- 貼出來了",
+    }
+    KEEP = {
+        "year": "二〇二六年是2026年的事",
+        "short": "我有3個蘋果和10個橘子",
+        "words": "internationalizationally 是很長的英文字",     # 20+ letters, no digits
+        "hyphen_words": "這是一個well-known-and-widely-used-example 的說法",
+    }
+
+    def test_each_rule_drops_and_near_misses_stay(self):
+        for name, text in self.DROP.items():
+            self.assertIsNotNone(bc.private_rule(text), name)
+        self.assertEqual({bc.private_rule(self.DROP[k]) for k in ("email", "tw_id", "phone", "digits6", "token_run")},
+                         {"email", "tw_id", "phone", "digits6", "token"})
+        for name, text in self.KEEP.items():
+            self.assertIsNone(bc.private_rule(text), name)
+
+    def test_prepare_drops_whole_messages_in_every_source_and_counts_per_rule(self):
+        td = tempfile.mkdtemp()
+        msgs = [(str(i), f"2026-03-05 12:{i:02d}:00.000000+00:00", t) for i, t in enumerate(list(self.DROP.values()) + list(self.KEEP.values()))]
+        root = package(td, {"c1": msgs})
+        exp = os.path.join(td, "export")
+        os.makedirs(os.path.join(exp, "facebook"))
+        t0 = 1772712000
+        json.dump({"comments_v2": [{"timestamp": t0, "data": [{"comment": {"timestamp": t0, "comment": "留言裡有 a@b.co 信箱", "author": "我"}},
+                                                                {"comment": {"timestamp": t0, "comment": "乾淨的留言內容", "author": "我"}}]}]},
+                  open(os.path.join(exp, "facebook", "comments.json"), "w", encoding="utf-8"))
+        counts = bc.prepare(root, exp, "我", [], os.path.join(td, "w"))
+        self.assertEqual(counts["discord"]["_dropped_private_by_rule"], {"email": 1, "tw_id": 1, "phone": 2, "digits6": 1, "token": 12})
+        self.assertEqual(counts["facebook_comments"]["_dropped_private_by_rule"], {"email": 1})
+        rows = [s for _m, _src, _x, s in clauses_of(os.path.join(td, "w"))]
+        self.assertIn("乾淨的留言內容", rows)
+        self.assertTrue(any("蘋果" in s for s in rows))            # the near-misses survive (3 and 10 are not digits runs)
+        self.assertFalse(any(k in s for s in rows for k in ("someone", "信箱", "身分證", "金鑰", "訂單編號")))     # the whole message is gone
+        self.assertEqual(counts["discord"]["2026-03"]["messages"], len(self.KEEP))
+
+    def test_dm_and_private_channels_are_never_opened(self):
+        td = tempfile.mkdtemp()
+        msgs = lambda t: [("1", ts(5, "12:00"), t)]
+        name = lambda ch: "甲乙丙丁戊己庚辛壬癸"[int(ch[1:]) - 1] * 2
+        types = {"c1": "GUILD_TEXT", "c2": "DM", "c3": "GROUP_DM", "c4": "PRIVATE_THREAD", "c5": "PUBLIC_THREAD", "c6": "GUILD_VOICE",
+                 "c7": "SOMETHING_NEW", "c8": None, "c9": "GUILD_ANNOUNCEMENT", "c10": "ANNOUNCEMENT_THREAD"}   # c8: no channel.json
+        root = package(td, {ch: msgs(f"頻道{name(ch)}的話語") for ch in types}, types)
+        # a decoy that would produce rows (and raise on an unreadable messages file) if a skipped channel were read
+        real_open, opened = open, []
+
+        def spy(f, *a, **k):
+            if isinstance(f, (str, os.PathLike)) and os.fspath(f).startswith(root):
+                opened.append(os.path.relpath(os.fspath(f), root))
+            return real_open(f, *a, **k)
+        with mock.patch("builtins.open", spy):
+            counts = bc.prepare(root, None, None, [], os.path.join(td, "w"))
+        for ch in ("c2", "c3", "c4", "c7", "c8"):
+            self.assertNotIn(os.path.join(ch, "messages.json"), opened, ch)
+        self.assertEqual(sorted(s for _m, _s, _x, s in clauses_of(os.path.join(td, "w"))),
+                         sorted(f"頻道{name(f'c{n}')}的話語" for n in (1, 5, 6, 9, 10)))
+        self.assertEqual(counts["discord"]["_skipped_channels_by_type"], {"DM": 1, "GROUP_DM": 1, "PRIVATE_THREAD": 1, "SOMETHING_NEW": 1, "MISSING": 1})
+
+
 class Exclusions(unittest.TestCase):
     def test_counts_per_step_and_month_grouping_in_utc_plus_8(self):
         td = tempfile.mkdtemp()
@@ -177,7 +256,7 @@ class Exclusions(unittest.TestCase):
             ("8", "2026-09-03 10:05:00.000000+00:00", "重複的句子"),
             ("9", "2026-10-03 10:06:00.000000+00:00", "重複的句子")]})   # another month: not a duplicate
         counts = bc.prepare(root, None, None, [ex], os.path.join(td, "w"))["discord"]
-        self.assertEqual(sorted(counts), ["2026-08", "2026-09", "2026-10"])
+        self.assertEqual(sorted(m for m in counts if not m.startswith("_")), ["2026-08", "2026-09", "2026-10"])
         s = counts["2026-09"]
         self.assertEqual({k: s[k] for k in ("messages", "url", "code", "no_segment", "segments", "overlap", "duplicate", "mechanical")},
                          {"messages": 7, "url": 1, "code": 1, "no_segment": 1, "segments": 5, "overlap": 2, "duplicate": 1, "mechanical": 2})
