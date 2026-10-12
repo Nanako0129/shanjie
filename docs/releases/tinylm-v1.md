@@ -1,5 +1,7 @@
 善解「語意校正」用的小型字元語言模型（SJTL0001 格式）。S7c-2b（`docs/contracts/s7c2b-shell-rerank.md`）合併後，打包 App、CI 與發布版從這裡下載。**這不是輸入法的發行版。**
 
+〔更正，2026-10-12〕S7c-2b（PR #118）合併時改用 [`tinylm-v2`](https://github.com/Nanako0129/shanjie/releases/tag/tinylm-v2)：打包 App、CI 與發布版從 v2 下載，這個 Release 只留作紀錄。
+
 - 檔案：`tinylm.sjtl`，14,638,208 bytes
 - SHA-256：`8725204cf590d08bd0660d6170a23678a708155cee6690fbdf2b471fc8389bdb`
 - 內容：一個 1,440 萬參數的字元語言模型（6 層、d 384、字表 9,714 字，加上 PAD、UNK、BOS 三個特殊符號共 9,717 個 id）。二維的權重矩陣以每列對稱 int8 加 float32 縮放存放，一維的向量（LayerNorm 與 bias）是 float32；載入時還原成 float32。用途是在 n-gram 解碼出的前 8 名候選之間重排，只能從這 8 個候選裡挑，不會產生新的文字。聊天與書面設定的融合參數都是 α 0.7、τ 2。

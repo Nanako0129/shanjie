@@ -89,3 +89,5 @@
 - 實作見研究紀錄 2026-10-11 S7c-2b 一節。TSan：RerankTests 在 `--sanitize=thread` 下 11／11、沒有報告（只跑這一組）。
 - §2.4 的 `docs/data-files.md` 與 `LICENSES/data.md` 兩列改由文件 PR #117 帶進 main（它們描述的是那個 Release）；Release `tinylm-v1` 照 §2.4 的順序在使用者同意後建立，上傳前後的核對都 OK。
 - selftest-bundled 與 check-app 在 CI 的 `shell` job 跑（main 與 agent 不在本機執行 .app 裡的程式）；實機（§3 第 5 項）由 main 安裝後交給使用者。
+- 〔2026-10-12〕main 在本機跑了 `make bundle`、`scripts/check-app.sh`（檢查 2、3、6 都 ok）與 `make selftest-bundled`（rc 0），在 557d3df 與 c7e074f 各一次；和上一條「main 不在本機執行 .app 裡的程式」的做法不同，照實記。
+- 實機（§3 第 5 項，使用者，2026-10-12）：main 用 `scripts/install-ime.sh` 安裝 c7e074f 的 build（f1c8354 只改測試與文件；系統已啟用，註冊跳過），刪掉 10-11 試用時留下的 `rerank` 設定值後重開輸入法程序：選單與設定視窗的「語意校正」沒有打勾；聊天 App 裡 ㄨㄛˇ ㄉㄥˇ ㄧ ㄒㄧㄚˋ ㄗㄞˋ ㄍㄨㄛˋ ㄑㄩˋ 打出「我等一下在過去」，打開後是「我等一下再過去」。使用者：「確認OK」。
