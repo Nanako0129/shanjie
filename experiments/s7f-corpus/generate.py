@@ -189,6 +189,8 @@ def main(argv=None):
             out = json.loads(payload)
         except ValueError:
             return {"i": j, "status": status, "error": "the response is not JSON"}
+        if not isinstance(out, dict):
+            return {"i": j, "status": status, "error": "the response is not a JSON object"}
         if out.get("error"):       # OpenRouter can answer 200 with an error body (a provider failure): an error, not an empty reply
             return {"i": j, "status": status, "error": json.dumps(out["error"], ensure_ascii=False)[:200]}
         u = out.get("usage") or {}

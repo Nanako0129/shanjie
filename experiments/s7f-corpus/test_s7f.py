@@ -444,6 +444,12 @@ class TestGenerate(unittest.TestCase):
         self.assertIn("upstream provider error", log)
         self.assertNotIn('"content"', self.files().get("cerebras-gpt-oss-120b.jsonl", ""))   # not kept as an empty reply
 
+    def test_non_object_body_with_200_stops(self):
+        api = lambda host, path, body, key: (200, b"[]")
+        code, log = self.run_main(api, "--chars", "100", "--budget-usd", "5", "--price-in", "0.5", "--price-out", "1")
+        self.assertEqual(code, 3)
+        self.assertIn("not a JSON object", log)
+
     def test_resume_continues(self):
         api = FakeAPI(unique_reply, cost=0.01)
         self.run_main(api, "--chars", "100000", "--budget-usd", "0.02")
