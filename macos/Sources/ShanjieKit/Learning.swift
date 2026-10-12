@@ -53,6 +53,7 @@ public struct MenuEntry: Equatable, Sendable {
         case toggleDemote
         case togglePrediction
         case toggleAbbreviation
+        case toggleRerank
         case toggleAcgPack
         case toggleAppChat
         case openSettings
@@ -71,6 +72,7 @@ public struct MenuEntry: Equatable, Sendable {
         public static let demote = "避免把敏感字詞排在前面"
         public static let prediction = "即時預測"
         public static let abbreviation = "可省略韻母"
+        public static let rerank = "語意校正"
         public static let acgPack = "動漫與遊戲詞"
         public static func acgDataDate(_ date: String) -> String { "資料更新至 \(date)（維基百科）" }
         /// No app name in the title (profile-choice section 2.3).
@@ -205,6 +207,9 @@ extension Session {
         if shell.showsAbbreviation {
             items.append(MenuEntry(title: T.abbreviation, action: .toggleAbbreviation, checked: shell.abbreviationOn, enabled: shell.predictionOn))
         }
+        // s7c2b section 2.3 (F11): greyed while the demotion table is off or the small model did not load, where the core makes
+        // no rerank job.
+        items.append(MenuEntry(title: T.rerank, action: .toggleRerank, checked: shell.rerankOn, enabled: shell.rerankEnabled))
         items.append(MenuEntry(title: T.acgPack, action: .toggleAcgPack, checked: shell.acgPackOn))
         if let date = shell.acgDataDate { items.append(MenuEntry(title: T.acgDataDate(date))) }   // about the data, so shown with the pack off too
         // profile-choice section 2.3: absent without a bundle ID (nothing to store); greyed outside auto, checked as forced.
@@ -233,6 +238,10 @@ extension Session {
             applyPrediction(!shell.predictionOn)
         case .toggleAbbreviation:
             applyAbbreviation(!shell.abbreviationOn)
+        case .toggleRerank:
+            // To the owner of the composition, not this session: the core re-decodes the owner's composition, so this session
+            // could not show the snapshot.
+            shell.applyRerank(!shell.rerankOn)
         case .toggleAcgPack:
             shell.setAcgPack(!shell.acgPackOn)
         case .toggleAppChat:
