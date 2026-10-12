@@ -33,7 +33,7 @@
 
 - 聊天／書面設定可自己選：依 App 自動、一律聊天、一律書面，個別 App 可從選單切換（PR #121，實機通過 2026-10-12）。
 - 語意重排的核心（S7c-2a PR #116、S7c-2c PR #122）：核心做完，預設關閉；輸入法端還沒接（見下）。
-- `tinylm-v2`（語意重排的模型檔）：說明草稿在 `docs/releases/tinylm-v2.md`，Release 還沒發布，要等使用者同意。
+- `tinylm-v2`（語意重排的模型檔）：已發布為 [Release 資產](https://github.com/Nanako0129/shanjie/releases/tag/tinylm-v2)（2026-10-12，說明 [`docs/releases/tinylm-v2.md`](docs/releases/tinylm-v2.md)）；輸入法從 PR #118 合併後的版本起打包。
 
 ### 進行中
 
