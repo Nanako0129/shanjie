@@ -11,13 +11,15 @@ final class HiddenAbbreviationTests: XCTestCase {
         let shell = Shell(resources: resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(),
                           learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(),
                           predictionStore: MemoryPredictionStore(), abbreviationStore: store, acgPackStore: MemoryAcgPackStore(),
-                          glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore(),
+                          glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore(),
                           showsAbbreviation: false)
         let c = Controller(shell)
         c.session.activate()
         XCTAssertFalse(shell.abbreviationOn, "the stored on is not read")
         XCTAssertFalse(c.session.menu.contains { $0.action == .toggleAbbreviation })
         XCTAssertFalse(c.session.menu.map(\.title).contains("可省略韻母"))
+        let titles = c.session.menu.map(\.title)  // s7c2b: 語意校正 then follows 即時預測 directly, as in the app
+        XCTAssertEqual(titles.firstIndex(of: "語意校正"), titles.firstIndex(of: "即時預測").map { $0 + 1 })
         XCTAssertFalse(SettingsModel(shell: shell).showsAbbreviation)
         c.type("st")  // ㄋ, ㄔ
         XCTAssertEqual(c.client.marked, "ㄔ", "off: the second key replaces the first instead of opening a unit")

@@ -160,6 +160,43 @@ public final class MemoryCandidateOrientationStore: CandidateOrientationStore {
     public init(_ candidateVertical: Bool? = nil) { self.candidateVertical = candidateVertical }
 }
 
+/// Where the "語意校正" switch is kept (docs/contracts/s7c2b-shell-rerank.md section 2.2): `nil` means never chosen, which is off.
+/// Same arrangement as `PredictionStore`.
+@MainActor
+public protocol RerankStore: AnyObject {
+    var rerank: Bool? { get set }
+}
+
+/// The in-memory RerankStore.
+@MainActor
+public final class MemoryRerankStore: RerankStore {
+    public var rerank: Bool?
+    public init(_ rerank: Bool? = nil) { self.rerank = rerank }
+}
+
+/// Runs a rerank job off the main thread (s7c2b section 2.1): `job.run()` on another thread, then `done` with its code on the
+/// main thread. The app passes `QueueRerankRunner`; the tests pass runners they complete by hand.
+@MainActor
+public protocol RerankRunner: AnyObject {
+    func run(_ job: RerankJob, done: @escaping @MainActor @Sendable (Int32) -> Void)
+}
+
+/// The app's runner (F2): one serial `.utility` queue with a fixed label. The closure holds the job wrapper (never its
+/// pointer) until run returns; the code comes back through `DispatchQueue.main.async`, which orders the run before the
+/// main-thread apply. The main thread never waits for the queue.
+public final class QueueRerankRunner: RerankRunner {
+    private let queue = DispatchQueue(label: "com.nyanako.inputmethod.shanjie.rerank", qos: .utility)
+
+    public init() {}
+
+    public func run(_ job: RerankJob, done: @escaping @MainActor @Sendable (Int32) -> Void) {
+        queue.async {
+            let code = job.run()
+            DispatchQueue.main.async { done(code) }
+        }
+    }
+}
+
 /// How the chat or formal profile is chosen (docs/contracts/profile-choice.md section 2.2): by the app (`chatApps` and the
 /// user's per-app choices), or always one of the two.
 public enum ProfileMode: String, Sendable {
@@ -286,6 +323,41 @@ public final class Shell {
     /// setting only in the settings window, where clicking is inferred (not measured) to commit the composition and hide the
     /// panel, that is reachable through the API and the tests but not observable from the window as shipped.
     public private(set) var candidateVertical = false
+    private let rerankStore: RerankStore
+    /// s7c2b section 2.2: whether the core makes rerank jobs (default off, the maintainer's decision 2026-10-12); sent to every engine `build()` makes and on every change.
+    private(set) var rerankOn = false
+    /// The small model's file in Resources (section 2.3). The only path it is loaded from: `build()` and the selftest join it to
+    /// `resources`; no init parameter, defaults key or environment variable names another.
+    static let tinyLMFile = "tinylm.sjtl"
+    private let rerankRunner: RerankRunner
+    /// A job is with the runner (section 2.1: one at a time).
+    private var rerankRunning = false
+    /// The latest job taken while another ran. A newer one replaces it, and the replaced job is freed as it is dropped here.
+    private var rerankPending: PendingRerank?
+    /// Jobs taken from the core; the tests compare it with the frees.
+    private(set) var rerankTaken = 0
+    /// Frees a job; every wrapper calls it once from its deinit. The tests count here.
+    var rerankFree: @Sendable (OpaquePointer) -> Void = { shanjie_rerank_free($0) }
+    /// `CoreEngine.rerankTake`; the tests replace it to see a non-zero take handled (F5).
+    var rerankTake: (CoreEngine, @escaping @Sendable (OpaquePointer) -> Void) -> (RerankJob?, Int32) = { $0.rerankTake(free: $1) }
+    /// `RerankJob.apply(on:)`; the tests replace it to see apply's non-zero codes other than 5 handled.
+    var rerankApply: (RerankJob, CoreEngine) -> CoreResult = { $0.apply(on: $1) }
+    /// Every value `build()` passed to `setRerank`, in order (the tests read it: a nil store must send false, not nothing).
+    private(set) var rerankSent: [Bool] = []
+    /// Whether the current engine has the small model (set by every `build()`): false when there is no engine, when load_lm
+    /// failed (load_tinylm is then skipped) or when load_tinylm returned non-zero. Without it no job is ever made.
+    private(set) var rerankAvailable = false
+    /// The 語意校正 menu item and settings toggle are enabled only when the switch can do something: the demotion table on (the
+    /// core makes no job without it, F11) and the small model loaded. The checkmark still shows the stored choice.
+    var rerankEnabled: Bool { demoteOn && rerankAvailable }
+
+    /// A job waiting for the runner, with the session and engine it was taken for. Weak (F3): a waiting job keeps neither alive,
+    /// and an identity is never compared by address.
+    private struct PendingRerank {
+        let job: RerankJob
+        weak var session: Session?
+        weak var engine: CoreEngine?
+    }
     private let profileModeStore: ProfileModeStore
     private let appProfileStore: AppProfileStore
     /// profile-choice section 2.1: both read once at init, then changed only through the setters below.
@@ -353,6 +425,9 @@ public final class Shell {
     /// `acgPackStore`: the ACG word pack switch (acg-pack contract A.2). Required, like `demoteStore`.
     /// `glassTintStore`: the candidate glass tint (settings-window section 2.3). Required, like `demoteStore`.
     /// `candidateOrientationStore`: the candidate window's orientation (candidate-vertical contract section 2.1). Required, like `glassTintStore`.
+    /// `rerankStore`: the 語意校正 switch (s7c2b section 2.2). Required, like `predictionStore`.
+    /// `rerankRunner`: runs rerank jobs off the main thread (section 2.1). Required, with no default: the app passes
+    /// `QueueRerankRunner`, the tests a runner they complete by hand.
     /// `profileModeStore`, `appProfileStore`: how chat or formal is chosen and the per-app choices (profile-choice section 2.1).
     /// Required, like `glassTintStore`.
     /// `punctuationTable`: Apple's punctuation candidate table (s3e); tests pass another path.
@@ -363,6 +438,7 @@ public final class Shell {
                 layoutStore: LayoutStore, learningDirectory: URL?, dialogs: LearningDialogs,
                 demoteStore: DemoteStore, predictionStore: PredictionStore, abbreviationStore: AbbreviationStore, acgPackStore: AcgPackStore,
                 glassTintStore: GlassTintStore, candidateOrientationStore: CandidateOrientationStore,
+                rerankStore: RerankStore, rerankRunner: RerankRunner,
                 profileModeStore: ProfileModeStore, appProfileStore: AppProfileStore,
                 punctuationTable: URL = PunctuationTable.systemURL,
                 punctuationNames: URL = PunctuationNames.systemURL,
@@ -396,6 +472,9 @@ public final class Shell {
         glassTint = glassTintStore.glassTint ?? 0
         self.candidateOrientationStore = candidateOrientationStore
         candidateVertical = candidateOrientationStore.candidateVertical ?? false
+        self.rerankStore = rerankStore
+        rerankOn = rerankStore.rerank ?? false
+        self.rerankRunner = rerankRunner
         self.profileModeStore = profileModeStore
         profileMode = profileModeStore.profileMode.flatMap(ProfileMode.init(rawValue:)) ?? .auto
         self.appProfileStore = appProfileStore
@@ -439,6 +518,10 @@ public final class Shell {
 
     func applyCandidateVertical(_ on: Bool) {
         if let o = owner { o.applyCandidateVertical(on) } else { dropOnFailure(setCandidateVertical(on)) }
+    }
+
+    func applyRerank(_ on: Bool) {
+        if let o = owner { o.applyRerank(on) } else { dropOnFailure(setRerank(on)) }
     }
 
     /// No session to ask: a failed core call is logged and the composition dropped, as `Session.fail` does.
@@ -537,6 +620,50 @@ public final class Shell {
         return engine?.setCandidateVertical(on)
     }
 
+    /// The menu's choice (s7c2b section 2.2): stored, and sent to the engine, which recomputes the composition (off: the n-gram
+    /// result at once); the snapshot is for the caller to show. A job waiting for the runner is dropped; one running is not applied.
+    func setRerank(_ on: Bool) -> CoreResult? {
+        rerankOn = on
+        rerankStore.rerank = on
+        if !on { rerankPending = nil }
+        defer { changed() }
+        return engine?.setRerank(on)
+    }
+
+    /// Section 2.1: a job taken for `session` from `engine` runs now, or waits if another is running (only the latest waits).
+    func enqueueRerank(_ job: RerankJob, session: Session, engine: CoreEngine) {
+        rerankTaken += 1
+        let pending = PendingRerank(job: job, session: session, engine: engine)
+        if rerankRunning { rerankPending = pending } else { startRerank(pending) }
+    }
+
+    private func startRerank(_ p: PendingRerank) {
+        rerankRunning = true
+        let job = p.job, session = p.session, engine = p.engine
+        rerankRunner.run(job) { [weak self, weak session, weak engine] code in
+            self?.rerankFinished(job, code: code, session: session, engine: engine)
+        }
+    }
+
+    /// On the main thread once run returned. Applied only while the switch is on, the session still owns the composition and the
+    /// engine is still the current one (weak references compared with ===, F3); the core's generation check is the second line.
+    private func rerankFinished(_ job: RerankJob, code: Int32, session: Session?, engine: CoreEngine?) {
+        // F4: whatever is returned below, the running flag is cleared and a waiting job starts.
+        defer {
+            rerankRunning = false
+            if let next = rerankPending {
+                rerankPending = nil
+                startRerank(next)
+            }
+        }
+        guard code == 0 else {
+            Log.shell.error("shanjie_rerank_run failed, code \(code)")
+            return
+        }
+        guard rerankOn, let session, session === owner, let engine, engine === self.engine else { return }
+        session.applyRerankJob(job, on: engine)
+    }
+
     /// The menu's choice (acg-pack contract A.2): the pack is part of the lexicon, so like a layout change the
     /// composition is committed and the engine rebuilt; the choice is stored. Same value: nothing happens.
     func setAcgPack(_ on: Bool) {
@@ -553,6 +680,8 @@ public final class Shell {
     /// failure leaves an engine without the LM (still usable) or no engine (every key passes).
     private func build() {
         engine = nil  // free the old engine first: only one exists at a time
+        rerankAvailable = false
+        rerankPending = nil  // the old engine's; one still running is not applied (its engine is gone)
         let packsDir = resources.appendingPathComponent("packs").path
         var (made, code) = CoreEngine.make(dataDir: resources.path, layout: mode.layout, packsDir: acgPackOn ? packsDir : nil)
         if made == nil && acgPackOn {
@@ -569,6 +698,12 @@ public final class Shell {
         }
         let lm = e.loadLM(path: resources.appendingPathComponent("bigram.sjlm").path)
         if lm != 0 { Log.shell.error("shanjie_engine_load_lm failed, code \(lm)") }
+        // s7c2b section 2.3: after load_lm (which drops a small model). Missing or failed: the n-gram alone, no rerank.
+        if lm == 0 {
+            let tiny = e.loadTinyLM(path: resources.appendingPathComponent(Shell.tinyLMFile).path)
+            if tiny != 0 { Log.shell.error("shanjie_engine_load_tinylm failed, code \(tiny); no rerank") }
+            rerankAvailable = tiny == 0
+        }
         if case .failed(let c) = e.setDemote(demoteOn) {
             Log.shell.error("shanjie_engine_set_demote failed, code \(c)")
         }
@@ -582,6 +717,12 @@ public final class Shell {
         // Same for the candidate window's orientation (candidate-vertical contract section 2.2).
         if case .failed(let c) = e.setCandidateVertical(candidateVertical) {
             Log.shell.error("shanjie_engine_set_candidate_vertical failed, code \(c)")
+        }
+        // A rebuilt engine starts with the core's default (off since S7c-2c), and load_tinylm leaves the switch alone: the shell's
+        // own value is sent every time, so the core's default never decides.
+        rerankSent.append(rerankOn)
+        if case .failed(let c) = e.setRerank(rerankOn) {
+            Log.shell.error("shanjie_engine_set_rerank failed, code \(c)")
         }
         if case .failed(let c) = e.setProfile(profile) {
             Log.shell.error("shanjie_engine_set_profile failed, code \(c)")
@@ -783,6 +924,37 @@ public final class Session {
         }
     }
 
+    /// The menu's 語意校正 switch: the snapshot is shown, if this session owns the composition.
+    func applyRerank(_ on: Bool) {
+        switch shell.setRerank(on) {
+        case .ok(let o)? where shell.owner === self: apply(o)
+        case .failed(let c)?: _ = fail(c)
+        default: break
+        }
+    }
+
+    /// Section 2.1: a finished job, for the engine it was taken from (the shell checked that it is current). 0 shows the
+    /// snapshot like any output; 5 changes nothing; anything else (4: the engine has reset itself) is handled like a failed key.
+    func applyRerankJob(_ job: RerankJob, on engine: CoreEngine) {
+        switch shell.rerankApply(job, engine) {
+        case .ok(let o): apply(o)
+        case .failed(let c) where c == SHANJIE_NO_CHANGE: break
+        case .failed(let c): _ = fail(c)
+        }
+    }
+
+    /// Section 2.1: the job the output just applied left, if any, goes to the shell's runner. A non-zero take is handled like
+    /// apply's 4 (F5): composition and panel cleared, only the code logged.
+    private func takeRerank() {
+        guard let engine = shell.engine else { return }
+        let (job, code) = shell.rerankTake(engine, shell.rerankFree)
+        if code != 0 {
+            _ = fail(code)
+        } else if let job {
+            shell.enqueueRerank(job, session: self, engine: engine)
+        }
+    }
+
     /// The menu's 這個 App 用聊天設定 (profile-choice section 2.3): the opposite of this client's profile is stored for its
     /// app, then it is re-applied in `activate()`'s order: `claim()` first sends another session's composition back to its
     /// own client, so `applyProfile` recomputes only this session's (security review P2-1). The bundle ID is read once (a
@@ -871,6 +1043,7 @@ public final class Session {
             shell.showCandidates(o.candidates, selected: o.selected, columns: o.columns, first: o.first, total: o.total,
                                  vertical: o.vertical, lineRect: rect, appearance: client.appearance)
         }
+        takeRerank()
     }
 
     /// Section 7, non-zero return code: the core discards its composition too (reset mode 1; it
