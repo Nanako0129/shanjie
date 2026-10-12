@@ -328,6 +328,16 @@ class Months(unittest.TestCase):
         with self.assertRaises(SystemExit):
             bc.choose_judge_months({"2026-09": 1500, "2026-08": 1100})      # 2,600 usable but < 2,950 judge rows: stop
 
+    def test_a_moved_judge_start_leaves_the_skipped_month_out_of_both(self):
+        # maintainer 2026-10-13: 2026-09 is skipped, the judge period starts at 2026-08
+        by = {"2026-09": 9000, "2026-08": 3000, "2026-07": 500, "2026-06": 400}
+        self.assertEqual(bc.choose_judge_months(by, start="2026-08"), (["2026-08"], ["2026-06", "2026-07"]))
+        self.assertEqual(bc.choose_judge_months({"2026-09": 9000, "2026-08": 1000, "2026-07": 2000, "2026-06": 400}, start="2026-08"),
+                         (["2026-07", "2026-08"], ["2026-06"]))
+        for bad in ("2026-10", "2026-8", "x"):
+            with self.assertRaises(SystemExit):
+                bc.choose_judge_months(by, start=bad)
+
 
 class Freeze(unittest.TestCase):
     """prepare -> split -> freeze tune -> freeze judge -> emit, with small thresholds and a fake reading tool."""
@@ -358,6 +368,17 @@ class Freeze(unittest.TestCase):
             with self.assertRaises(SystemExit) as e:
                 bc.main(["split", "--work", self.work])                               # another split: refused
         self.assertIn("never changed", str(e.exception.code))
+
+    def test_split_judge_start_option(self):
+        w2 = os.path.join(self.td, "w2")
+        bc.prepare(self.root, None, None, [], w2)
+        with contextlib.redirect_stdout(io.StringIO()):
+            bc.main(["split", "--work", w2, "--judge-start", "2026-07"])
+        sp = json.load(open(os.path.join(w2, "split.json")))
+        self.assertEqual((sp["judge_start"], sp["judge_months"], sp["pool_months"]), ("2026-07", ["2026-06", "2026-07"], ["2026-05"]))
+        judge = bc.freeze(w2, "tune", readings=fake_readings) and bc.freeze(w2, "judge", readings=fake_readings)
+        months = {m for m, _src, _x, s in bc.read_clauses(w2) if s in {r.split("|")[1] for r in open(os.path.join(w2, "judge.rows.txt"), encoding="utf-8").read().splitlines()}}
+        self.assertEqual((judge["rows"], months), (6, {"2026-06", "2026-07"}))     # nothing from 2026-08 or 2026-09
 
     def test_tune_sample_is_seeded_min_of_cap_and_pool_and_judge_takes_everything(self):
         tune = bc.freeze(self.work, "tune", readings=fake_readings)
