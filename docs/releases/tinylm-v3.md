@@ -15,7 +15,7 @@
     - 口語守門集合：立法院公報委員發言（`lytune`）107／49、維基錯字表（`wikitypo`）0／2（p = 0.50）。
   - 錯字回報整個檔（77 列）：n-gram → v3 9／1，`tinylm-v2` → v3 6／1。
 - 量測，書面設定：參數和 `tinylm-v2` 相同，dev302、cvtune 的結果逐位元組相同；對 n-gram 第一名，dev302 4／0、打字測驗 1／0、錯字回報 1／0。
-- 保留集〔待 fresh verifier 的結果〕。
+- 保留集（fresh verifier，2026-10-13，建 Release 之前；對 n-gram 第一名）：聊天 180 → 191（改對 11／改壞 0，p = 0.0010），書面 184 → 187（3／0，p = 0.25）。
 - 授權：**CC BY-SA 4.0**（https://creativecommons.org/licenses/by-sa/4.0/ ）。訓練文字和 `tinylm-v1`、`v2` 相同，和 model-v5 的 `bigram.sjlm` 同源：
   - 中文維基百科 2026-10-01 dump 的前 20 萬篇條目（CC BY-SA 4.0，署名：Wikipedia contributors）
   - Mozilla Common Voice 繁體中文（台灣）的句子（CC0）
