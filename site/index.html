@@ -184,7 +184,7 @@
     <div class="layer"><div><h3>本機重排</h3><p>小型語言模型看你前面寫的內容，從候選中挑出最合理的一句；在背景執行，不拖慢打字。</p><div class="when">停頓或送出前・本機</div></div></div>
     <div class="layer"><div><h3>雲端校正（選用）</h3><p>打完按一下快速鍵，請雲端模型再看一次。預設關閉；雲端只能回傳候選的編號，不能自己寫字。</p><div class="when">你按下快速鍵時・雲端</div></div></div>
   </div>
-  <p class="note">目前只有第 1 層在輸入法裡；第 2、3 層還沒做出來，排在路線圖的「未排定」；本機重排的研究結論是暫不進輸入法。</p>
+  <p class="note">目前只有第 1 層在輸入法裡。第 2 層：1,440 萬參數的小模型已接進核心、預設關閉，輸入法端的開關與打包還沒合併；現成的本機大模型研究結論是暫不進輸入法。第 3 層還沒做，排在路線圖的「未排定」。</p>
 </section>
 
 <section>
@@ -307,6 +307,7 @@
       <ul class="items">
         <li><span class="mark"></span><span class="sr-only">規劃中：</span><h3>常見專有名詞</h3><p>公司、學校、飲料店、餐廳、產品這類常見的專有名詞（例如「酷澎」）納入一般詞庫；先查來源與授權再寫契約，版本未定。</p></li>
         <li class="wip"><span class="mark"></span><span class="sr-only">進行中：</span><h3>從改選記住新詞組</h3><p>改選後送出的片段如果不是詞庫裡的詞（例如「版控」），記成你的詞，下次直接打得出來。</p></li>
+        <li class="done"><span class="mark"></span><span class="sr-only">完成：</span><h3>聊天／書面設定可自己選</h3><p>設定視窗可選「依 App 自動」「一律聊天」「一律書面」；依 App 自動時，從善解選單對個別 App 切換「這個 App 用聊天設定」，設定視窗列出改過的 App、可以移除。已合併，還沒發版；實機驗收通過（2026-10-12）。</p></li>
         <li class="wip"><span class="mark"></span><span class="sr-only">進行中：</span><h3>預測可省略韻母</h3><p>每個字只打第一個注音也能找到詞。一次縮寫一個詞的版本做完了，但還不能整句縮寫，v0.4.0 先不放；做到整句縮寫再出。另外有使用者回報打了某些注音之後按鍵好像卡住；從設計推論，是有兩個以上縮寫單位時空白鍵與聲調鍵會被吃掉，沒有重現。</p></li>
         <li class="wip"><span class="mark"></span><span class="sr-only">進行中：</span><h3>App 沙盒</h3><p>輸入法在 macOS 的 App 沙盒裡執行，只拿到需要的權限。已經有實作分支，目標是 v0.5.0。</p></li>
         <li class="research wip"><span class="mark"></span><span class="sr-only">進行中：</span><h3><span class="kind">研究</span>Kneser–Ney 平滑</h3><p>回退時看一個詞接在幾種不同的詞後面，而不是只看它出現幾次，減少「常用單字組合贏過整詞」的錯。先離線量測，有效才做進輸入法。</p></li>
@@ -323,10 +324,10 @@
     </details>
 
     <details class="stage">
-      <summary><span class="ver">未排定</span><span class="st-title">語意判斷與校正</span><span class="tag">規劃中</span>
+      <summary><span class="ver">未排定</span><span class="st-title">語意判斷與校正</span><span class="tag wip">進行中</span>
         <span class="meta">等候選與延遲夠好再接</span></summary>
       <ul class="items">
-        <li><span class="mark"></span><span class="sr-only">規劃中：</span><h3>本機重排</h3><p>把語意判斷接進輸入法，在本機執行，不拖慢打字。</p></li>
+        <li class="wip"><span class="mark"></span><span class="sr-only">進行中：</span><h3>語意重排（自訓小模型）</h3><p>1,440 萬參數的字元模型，只在前 8 名候選之間重排。核心的接入做完了（非同步重排、門檻 δ、檔案格式 SJTL0002），核心預設關閉；輸入法端的開關與打包（PR #118）還沒合併。照「改壞 1 句 ≈ 改對 10 句」選了嚴格的參數，少改壞對的句子；用公開的口語文字重訓沒有通過、模型不換。出貨時預設關閉。</p></li>
         <li><span class="mark"></span><span class="sr-only">規劃中：</span><h3>一鍵校正、新手測驗</h3><p>打完一段可以請模型重看（雲端，預設關閉）；第一次使用時用簡單測驗了解你的打字習慣。</p></li>
       </ul>
     </details>
@@ -379,7 +380,7 @@
 
 <footer>
   <span>善解 shanjie</span>
-  <span>最後更新：2026-10-10</span>
+  <span>最後更新：2026-10-12</span>
 </footer>
 
 </main>
