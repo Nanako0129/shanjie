@@ -6,14 +6,14 @@
 
 | 檔 | 做什麼 |
 |---|---|
-| `clean.py` | 共用：去掉網址／email／電話（換成斷句）、切句（`。！？；!?…` 與換行）、`Filter`（簡體專用字 → 沒有漢字 → 長度 4–60 → 去重 → 和評測集重疊）、評測句載入（dev302 用 `lm_eval.rows_of` 照 `--dev 302` 的讀法）、`sample_to_cap`（固定種子抽到剛好的字數）、`water_fill`（合計上限的分配） |
+| `clean.py` | 共用：去掉網址／email／電話（換成斷句）、切句（`。！？；!?…` 與換行）、`Filter`（簡體專用字（`build_counts.TRAD_SIMP_ONLY`，專案給繁體句用的縮小集合）→ 沒有漢字 → 長度 4–60 → 去重 → 和評測集重疊，原句與訓練時轉換後的句子都查）、評測句載入（dev302 用 `lm_eval.rows_of` 照 `--dev 302` 的讀法）、`sample_to_cap`（固定種子抽到剛好的字數）、`water_fill`（合計上限的分配） |
 | `archive_tw.py` | archive.tw 逐字稿 → `archive_tw.txt`＋manifest（commit） |
 | `cofacts.py` | Cofacts 的 `articles.csv.zip`（`text`）與 `reply_requests.csv.zip`（`reason`）→ `cofacts.txt`＋manifest（HF revision、兩個 zip 的 SHA-256）。只在 Mac 上跑 |
 | `wikitalk.py` | 中文維基 `pages-meta-current` dump（串流）→ `wikitalk.txt`＋manifest（dump 的 SHA-256） |
 | `build_chat.py` | 三個來源 → `chat-real.txt`＋manifest（每個來源的列數、字數、SHA-256）；合計少於 500 萬字結束碼 3、不寫檔 |
 | `invade.py` | invade 大陸用語詞表（`word:` 欄位）；印出詞數、詞表 SHA-256、commit，生成前凍結 |
 | `generate.py` | 種子詞 → 提示 → Cerebras／OpenRouter → 把關 → 剛好 `--chars` 字；花費帳本、`--dry-run`、`--resume` |
-| `discord_overlap.py` | 評測列（`前文|句子|讀音`）整句出現在各語料檔的列數；只印數字，`--rows-out` 寫重疊的列號 |
+| `discord_overlap.py` | 評測列（`前文\|句子\|讀音`）整句出現在各語料檔的列數；只印數字，`--rows-out` 寫重疊的列號，`--min-len 4` 只算 4 字以上的列（參考用）；`--net BASE NEW --exclude 列號檔` 算不重疊列上的「改對 − 10 × 改壞」（rowstats 用 `tools/evalstats.py` 的讀法檢查對齊） |
 | `test_s7f.py` | 單元測試（`make test` 會跑）；`experiments/s7a-tinylm/test_extra.py` 測 `--extra` 與 `prep.py text` |
 
 `clean.load_simp_only()` 讀 `~/.cache/shanjie/sources/opencc`（`build_counts.load_conv`，有雜湊核對），所以清理與生成都要在有這些檔的機器上跑；測試用假的簡體字集，不讀這些檔。
@@ -24,11 +24,11 @@
 |---|---|
 | archive.tw「只收中文檔」 | 根目錄 `YYYY-MM-DD-*.md`、漢字數 > 拉丁字母數的檔 |
 | archive.tw「用 `.alternates` 去掉英文演講的譯稿」 | `.alternates` 只記成對、不記哪邊是原文，所以**列在裡面的中文檔全部不收**（也會去掉少數中文原稿） |
-| archive.tw 的標記 | `#` 開頭的行（標題、`### 唐鳳：`）與 `>` 開頭的行（舞台說明、段落標記）整行丟掉；行首的時間（`11:30`）與短標籤（`答：`、`sli.do：`）去掉；Markdown 連結留文字 |
+| archive.tw 的標記 | `#` 開頭的行（標題、`### 唐鳳：`）與 `>` 開頭的行（舞台說明、段落標記）整行丟掉；行首的時間（`11:30`）與 `sli.do：` 去掉（其他「xx：」是內容，像「比如：」「我的意思是：」，留著）；Markdown 連結留文字 |
 | 沒有漢字的句子 | 丟掉（`no_han`）：英文句不算進字數上限 |
 | Cofacts | `articles` 只收 `articleType = TEXT` 且 `status = NORMAL`；`reply_requests` 只收 `status = NORMAL`。其他欄位（含使用者雜湊）不讀不寫；檔名不是那兩個 zip 就停 |
-| 維基「段落」 | wikitext 的一行。連到名字以 bot／機器人結尾的使用者頁（或 MediaWiki message delivery）的段落整段丟掉；簽名（使用者頁、討論頁、貢獻頁連結與 `2026年10月1日 (三) 12:34 (UTC)`）去掉後才判斷簡體 |
-| 電話 | `+` 或 `0`（或括號）開頭、至少 8 個數字（可夾 `-`、空白、括號、`.`）；日期與金額不算 |
+| 維基「段落」 | wikitext 的一行。連到名字以 bot／機器人結尾的使用者頁（或 MediaWiki message delivery）的段落整段丟掉；簽名（使用者頁、討論頁、貢獻頁連結、`{{unsigned}}` 的文字與 dump 裡三種格式的時間）去掉後才判斷簡體；有簽名的行，行尾的 `--`、`——` 或 `—` 與後面 20 字內的自訂簽名一起去掉（單一的 `-`、`–` 是內容，像 2019-2020）；重定向頁不收；只有問候加非漢字名字的句子（`您好，帳號`）丟掉 |
+| 電話 | `+` 加數字，或 `0` 開頭（前面可以有左括號）、至少 8 個數字（可夾 `-`、空白、括號），緊接的右括號一起去掉；日期（2020-03-15）、金額、小數（0.12345678）不算 |
 | 合計上限 | 三個來源各自封頂 800 萬字後若超過 2,000 萬字：比共同水位少的來源整個收，其餘切到同一個水位（三個都夠就各 6,666,667／6,666,667／6,666,666 字）；不拿別的來源補 |
 | 跨來源重複 | `build_chat.py` 照給的順序，後面來源裡已出現過的句子拿掉，列數記在 manifest |
 | 抽到剛好的字數 | 固定種子打散，取前段到上限前 60 字，剩下的 60–120 字從接下來 1,000 句裡用子集合湊剛好；輸出照原順序 |
@@ -78,8 +78,9 @@ $PY ../s7a-tinylm/prep.py text --work <同上> --in $W/chat-a2.txt --name chat-a
 python train.py --size M --work <work> --out <out> --seed 20261012 --max-steps 8836 [--extra <work>/ids-chat-a1.npy]
 
 # discordtune 的重疊（Mac，只印數字）
-$PY discord_overlap.py --rows <discordtune 的列> --corpus <A0 的 runs-wiki.txt> <A0 的 runs-coll.txt> $W/clean/chat-real.txt \
-    $W/gen/cerebras-gpt-oss-120b.txt $W/gen/<openrouter tag>.txt --rows-out <只有列號的檔>
+# A1、A2 的新文字原句與 prep.py text 轉換後的連續段都算（原句有標點、連續段有轉換後的字形，各自會漏掉另一種）
+$PY discord_overlap.py --rows <discordtune 的列> --corpus $W/clean/chat-real.txt <work>/runs-chat-a1.txt \
+    $W/gen/cerebras-gpt-oss-120b.txt $W/gen/<openrouter tag>.txt <work>/runs-chat-a2.txt --rows-out <只有列號的檔>
 ```
 
 - `prep.py text` 和口語文字同一條路：`convert`、`HAN` 連續段、≥ 2 字，每段前面一個 BOS；`text-<name>.json` 記輸入、字表、runs、ids 的 SHA-256，VM 與 Mac 的結果用它核對。

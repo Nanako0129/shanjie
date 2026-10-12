@@ -2,7 +2,8 @@
 the evaluation-set loader and the manifest writer.
 
 Order inside a source: scrub (URL, email, phone-like -> a sentence break) -> split into sentences -> Filter.keep:
-simplified (any build_counts.SIMP_ONLY character) -> no_han -> length 4..60 -> duplicate -> eval_overlap.
+simplified (any build_counts.TRAD_SIMP_ONLY character) -> no_han -> length 4..60 -> duplicate -> eval_overlap (on the sentence and,
+when a converter is given, on the sentence as prep.py text converts it for training).
 `sample_to_cap` is the seeded down-sampling used by build_chat.py (per-source and total caps) and generate.py (exact quota).
 """
 import collections
@@ -20,7 +21,7 @@ for _p in ("experiments/s2", "reference/proto"):
     _p = os.path.join(ROOT, *_p.split("/"))
     if _p not in sys.path:
         sys.path.insert(0, _p)
-import build_counts as bc  # noqa: E402  SIMP_ONLY (filled by load_conv), HAN, TEMPLATE, MARKUP
+import build_counts as bc  # noqa: E402  TRAD_SIMP_ONLY (filled by load_conv), HAN, TEMPLATE, MARKUP, convert
 from lm_eval import rows_of  # noqa: E402  the evaluation rows exactly as lm_eval / the CLI read them
 
 MIN_LEN, MAX_LEN = 4, 60
@@ -33,15 +34,25 @@ TUNE_FILES = ["cvtune.txt", "wikitune.txt"]
 
 URL = re.compile(r"(?:https?|ftp)://[!-~]+|www\.[!-~]+", re.I)
 EMAIL = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+")
-PHONE_CAND = re.compile(r"(?:\+|(?<!\d)[0０(（])[\d\s\-()（）.]{6,}\d")   # starts with + or 0 (or a parenthesis): not a date or an amount
+# A phone number starts with + and a digit, or with 0 (after an optional opening parenthesis): a date (2020-03-15), an amount or a
+# decimal (0.12345678) is not one. A closing parenthesis right after the number goes with it, so no stray `）` is left behind.
+PHONE_CAND = re.compile(r"(?:\+\d|(?<![\d.])[(（]?[0０])[\d\s\-()（）]{6,}\d[)）]?")
 PHONE_MIN_DIGITS = 8
 SENT = re.compile(r"[^。！？；!?…\n]+")   # build_counts.SENT plus the half-width ! ? and the ellipsis (chat text uses them)
 
 
 def load_simp_only():
-    """build_counts.SIMP_ONLY, filled from the hash-checked OpenCC files (~/.cache/shanjie/sources/opencc). Main's machines only."""
+    """build_counts.TRAD_SIMP_ONLY, filled from the hash-checked OpenCC files (~/.cache/shanjie/sources/opencc). Main's machines only.
+    It is the reduced set the project uses for traditional sentences (S2f): the full SIMP_ONLY also holds 14 characters that are
+    standard in Taiwan (群 床 秘 峰 粽 ...), which dropped every sentence with 社群, 群組, 起床 or 秘密 (S7f review, 2026-10-12)."""
     bc.load_conv()
-    return frozenset(bc.SIMP_ONLY)
+    return frozenset(bc.TRAD_SIMP_ONLY)
+
+
+def converter():
+    """The conversion prep.py text applies before training (build_counts.convert with the loaded tables), for Filter's eval check."""
+    conv = bc.load_conv()
+    return lambda s: bc.convert(s, *conv)
 
 
 def sha256_file(path):
@@ -149,11 +160,12 @@ def add_eval_args(ap):
 class Filter:
     """eval_rows: eval_sentences()'s {sentence: [row ids]} (a plain set also works; its sentences are their own ids). Only evaluation
     sentences of at least `lo` characters remove a corpus sentence (main, 2026-10-12): a 1-3 character row such as `吧` inside a
-    sentence is not an overlap of that sentence. For each shorter row, short_report() gives how many kept sentences contain it."""
+    sentence is not an overlap of that sentence. For each shorter row, short_report() gives how many kept sentences contain it.
+    `convert` (clean.converter()): the eval check also looks at the sentence as training sees it (這裏 -> 這裡, 鼠標 -> 滑鼠)."""
 
-    def __init__(self, simp_only, eval_rows, lo=MIN_LEN, hi=MAX_LEN):
+    def __init__(self, simp_only, eval_rows, lo=MIN_LEN, hi=MAX_LEN, convert=None):
         rows = eval_rows if isinstance(eval_rows, dict) else {t: [t] for t in eval_rows}
-        self.simp, self.lo, self.hi = frozenset(simp_only), lo, hi
+        self.simp, self.lo, self.hi, self.convert = frozenset(simp_only), lo, hi, convert
         self.ev = Matcher(t for t in rows if len(t) >= lo)
         self.short_rows = {t: ids for t, ids in rows.items() if len(t) < lo}
         self.short = Matcher(self.short_rows)
@@ -168,7 +180,7 @@ class Filter:
             return "length"
         if s in self.seen:
             return "duplicate"
-        if self.ev.any(s):
+        if self.ev.any(s) or (self.convert is not None and self.ev.any(self.convert(s))):
             return "eval_overlap"
         return None
 
