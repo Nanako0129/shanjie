@@ -1,7 +1,7 @@
 """S7a: run the same step for every evaluation set, so the README's commands are one line per machine.
 
   python run_sets.py dumps --work DIR --tune TUNEDIR --sets cvtune wikitune dev302 typing76 user-reported [fw] [discordtune --discord FILE]
-                         [--reported-rows 66]
+                         [--reported-rows 66] [chatclause --chatclause FILE] [lytune --lytune FILE] [wikitypo --wikitypo FILE]
       -> DIR/dumps/<set>.<setting>.dump and <set>.<setting>.top1 (the summary line's top1) from reference/proto/lm_eval.py
          (shipping model, --context, no word pack; --lm defaults to data/lm/bigram.sjlm, classes.sjc next to it)
   python run_sets.py score --work DIR --out SCORES --models S M --backend numpy|torch --sets ... [--ppl]
@@ -30,6 +30,7 @@ REPORTED_SHA = "6e338dc1293060162585c09e02bbb252c93148c9928d61007faea5e8860369e8
 FW_PATH = os.path.join(ROOT, "eval", "rerank", "s7e-function-words.txt")
 FW_ROWS = 186
 FW_SHA = "6b853a329aee569ad51c731d6f188541b9670e9617838725f45a26d57845d18d"
+EXTRA_SETS = ("chatclause", "lytune", "wikitypo")   # E2 (docs/contracts/e2-chat-eval.md section 3.2)
 
 
 def check_head(path, n, sha):
@@ -61,6 +62,11 @@ def rows_args(name, a):
         if not a.discord:
             sys.exit("run_sets: discordtune needs --discord FILE")
         return ["--rows", a.discord]
+    if name in EXTRA_SETS:    # E2: sets whose row file the caller names (--chatclause / --lytune / --wikitypo)
+        path = getattr(a, name, None)
+        if not path or not os.path.isfile(path):
+            sys.exit(f"run_sets: {name} needs --{name} FILE ({path or 'no path given'}: no such file)")
+        return ["--rows", path]
     sys.exit(f"run_sets: unknown set {name}")
 
 
@@ -116,6 +122,8 @@ def main(argv=None):
         p = sub.add_parser(cmd)
         p.add_argument("--work", required=True); p.add_argument("--sets", nargs="+", required=True)
         p.add_argument("--tune", help="directory holding cvtune.txt and wikitune.txt"); p.add_argument("--discord")
+        for e in EXTRA_SETS:
+            p.add_argument(f"--{e}", help=f"E2: row file of the {e} set")
         p.add_argument("--reported-rows", type=int, choices=[REPORTED_ROWS],
                        help="user-reported: only S7a's first 66 rows, their SHA-256 checked before anything runs (S7b, S7d)")
         if cmd == "dumps":
@@ -126,6 +134,9 @@ def main(argv=None):
     a = ap.parse_args(argv)
     if a.reported_rows and "user-reported" in a.sets:
         check_reported(os.path.join(EVAL_DEV, "user-reported.txt"))      # before any set runs, not when the loop reaches it
+    for e in EXTRA_SETS:
+        if e in a.sets:
+            rows_args(e, a)     # exits on a missing --<e> file before any set runs
     if "fw" in a.sets:
         check_head(FW_PATH, FW_ROWS, FW_SHA)
     {"dumps": cmd_dumps, "score": cmd_score}[a.cmd](a)
