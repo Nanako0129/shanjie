@@ -17,6 +17,7 @@ S2k 的保留集只回總數（聊天 180、書面 184，對第一段的 179、1
 | CER 基準／新 | 字元錯誤率：各列字元錯誤數總和 ÷ 正解字數總和 |
 | Δtop1 95% 區間 | 配對 bootstrap（Koehn 2004）：每次對列有放回抽 n 列，算「新 − 基準」的第一名列數差，取 2.5% 與 97.5% 分位 |
 | ΔCER 95% 區間 | 同一批抽樣算 CER 差 |
+| 淨值、改壞率、改壞數 95% 上界（E2，只在 `--net` 時多出來，接在最後三欄） | 淨值＝改對 − 改壞（1:1）；改壞率＝改壞 ÷ n；改壞數的 95% 精確 Poisson 單尾上界（Garwood：滿足 P(X ≤ 改壞數 ∣ λ) ＝ 0.05 的 λ；改壞 0 時是 2.9957，1 時 4.7439） |
 
 ## 1. 逐列統計檔 `rowstats`（不含任何文字）
 
@@ -31,7 +32,7 @@ S2k 的保留集只回總數（聊天 180、書面 184，對第一段的 179、1
 
 ## 2. 比較工具 `tools/evalstats.py`
 
-- `python3 tools/evalstats.py compare BASE CAND [--label 名稱] [--seed S] [--resamples N]`：讀兩個 rowstats，列數不同或列號不對齊就報錯結束；印出 §0 的一行表格（Markdown）。
+- `python3 tools/evalstats.py compare BASE CAND [--label 名稱] [--seed S] [--resamples N] [--net]`：讀兩個 rowstats，列數不同或列號不對齊就報錯結束；印出 §0 的一行表格（Markdown）。`--net`（E2）在最後多三欄（淨值、改壞率、改壞數的 95% 上界）；不給 `--net` 時輸出逐位元組不變。
 - 預設 `--seed 20261008`、`--resamples 10000`；同樣的輸入與參數，輸出逐位元組相同。
 - 只用 Python 標準函式庫。
 - 函式（`mcnemar_exact`、`levenshtein`、`paired_bootstrap`）可以給其他工具 import；這一片不改 `tools/bench.py`（§5）。

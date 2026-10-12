@@ -147,6 +147,49 @@ class TestSelectWeighted(unittest.TestCase):
         self.assertNotEqual(fg.select_weighted(s, 10), chosen)
 
 
+class TestE2NamesAndCap(unittest.TestCase):
+    """E2: `names` picks the pooled sets, `cap` bars cells whose broken / rows is above it; neither given = S7e behaviour."""
+
+    def sets(self):
+        fix = lambda i: rec(i, [-1.0, -1.5], [-4.0, -1.0], [0, 1])
+        brk = lambda i: rec(i, [-1.0, -1.5], [-4.0, -1.0], [1, 0])
+        # cvtune + wikitune: 2 fixes and 1 break with the same gap, so no delta separates them; "judge": 3 breaks only
+        return {"cvtune": [fix(1), fix(2), brk(3)], "wikitune": [], "judge": [brk(1), brk(2), brk(3)]}
+
+    def test_names_selects_which_sets_are_read(self):
+        s = self.sets()
+        self.assertEqual(fg.select_weighted(s, 1)[3:], (2, 1))
+        self.assertEqual(fg.select_weighted(s, 1, names=("cvtune", "wikitune")), fg.select_weighted(s, 1))
+        self.assertEqual(fg.select_weighted(s, 1, names=("judge",))[3:], (0, 0))      # only the break rows: fusion off
+        self.assertEqual(fg.fixed_broken(s, 1.0, math.inf, 0, names=("cvtune",)), (2, 1))
+        self.assertEqual(fg.fixed_broken(s, 1.0, math.inf, 0, names=("judge",)), (0, 3))
+        self.assertEqual(fg.fixed_broken(s, 1.0, math.inf, 0, names=("cvtune", "judge")), (2, 4))
+        with self.assertRaises(KeyError):                                              # a name that is absent is an error, not skipped
+            fg.select_weighted({"cvtune": s["cvtune"]}, 1)                             # default TUNING needs wikitune
+
+    def test_cap_bars_cells_over_the_break_rate(self):
+        s = self.sets()
+        self.assertEqual(fg.select_weighted(s, 1)[3:], (2, 1))                         # no cap: the fusion that breaks 1 of 3 wins
+        a, t, d, f, b = fg.select_weighted(s, 1, cap=0.2)                              # 1 / 3 > 0.2 for every cell that fixes
+        self.assertEqual((f, b), (0, 0))
+        self.assertEqual(fg.select_weighted(s, 1, cap=1 / 3)[3:], (2, 1))              # the boundary is allowed (<=)
+
+    def test_cap_boundary_survives_float_rounding(self):
+        fix = lambda i: rec(i, [-1.0, -1.5], [-4.0, -1.0], [0, 1])
+        brk = lambda i: rec(i, [-1.0, -1.5], [-4.0, -1.0], [1, 0])
+        ok = lambda i: rec(i, [-1.0, -1.5], [-4.0, -1.0], [1, 1])
+        mk = lambda nb: {"cvtune": [fix(i) for i in range(40)] + [brk(i) for i in range(nb)] + [ok(i) for i in range(60 - nb)], "wikitune": []}
+        self.assertGreater(29, 0.29 * 100)                                             # the float product is 28.999999999999996
+        self.assertEqual(fg.select_weighted(mk(29), 1, cap=0.29)[3:], (40, 29))        # exactly at the cap: allowed
+        self.assertEqual(fg.select_weighted(mk(30), 1, cap=0.29)[3:], (0, 0))          # one over: no fusing cell
+
+    def test_cap_with_no_admissible_cell_is_an_error(self):
+        s = {"cvtune": [rec(i, [-1.0, -1.5], [-4.0, -1.0], [1, 0]) for i in range(1, 4)], "wikitune": []}
+        # a negative cap admits no cell (broken >= 0 is always above it)
+        with self.assertRaises(ValueError):
+            fg.select_weighted(s, 1, cap=-1)
+
+
 class TestSelect(unittest.TestCase):
     def sets(self):
         # margin 1.5: tau in {2, 3, 5, inf} lets fusion in; candidate 1 beats 0 iff 4a > 1.5 (a >= 0.5)
