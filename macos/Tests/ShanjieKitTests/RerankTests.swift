@@ -158,34 +158,49 @@ final class RerankTests: XCTestCase {
         XCTAssertEqual(s.c.client.marked, RerankRow.reranked, "the rebuilt engine reranks too")
     }
 
-    /// Rerank on together with profile-choice: a job taken in the chat profile is held, then the app's chat/formal choice flips
-    /// (menu item, then the global mode). `set_profile` re-decodes, so the held job is stale and applies nothing (s7c2b section
-    /// 2.1, the generation rule); the queue goes on, and every job taken is freed once.
-    func testProfileChangeWhileAJobIsHeldDiscardsTheStaleResult() {
-        let r = rig()
-        r.c.type(RerankRow.standardKeys)
-        XCTAssertEqual(r.runner.held.count, 1, "premise: a job is with the runner")
-        r.c.session.toggleAppChat()  // Messages is a chat app: now formal for this app
-        var shown = r.c.client.marked
-        var before = marks(r.c)
-        r.runner.complete()  // the job taken in the chat profile
-        XCTAssertEqual(marks(r.c), before, "a result from before the profile change is not applied")
-        XCTAssertEqual(r.c.client.marked, shown)
-        r.runner.drain()  // jobs made after the change may apply, but the composition stays a valid one
-        r.c.press(Keys.esc)
+    /// Rerank on together with profile-choice. The first held job is stale anyway (later keys re-decoded), so the test completes
+    /// it first: the job the runner then holds is the newest one, taken for the final chat composition. Control: with no
+    /// switch it applies (再). Then the same state, but the app's chat/formal choice (menu) or the global mode is switched to
+    /// formal first: `set_profile` re-decodes under a new generation, so that held job is stale and applies nothing (s7c2b
+    /// section 2.1). Taken == freed throughout.
+    func testProfileChangeWhileTheNewestJobIsHeldDiscardsTheStaleResult() {
+        func held() -> Rig {
+            let r = rig()
+            r.c.type(RerankRow.standardKeys)
+            r.runner.complete()  // the first job, stale: the newest one starts and stays held
+            XCTAssertEqual(r.runner.held.count, 1, "premise: the newest job is with the runner")
+            XCTAssertEqual(r.c.client.marked, RerankRow.ngram, "premise: nothing applied yet")
+            return r
+        }
+        func finish(_ r: Rig) {
+            r.runner.drain()
+            r.c.press(Keys.esc)
+            XCTAssertEqual(r.frees.freed, r.shell.rerankTaken, "taken == freed")
+            XCTAssertEqual(r.frees.doubleFrees, 0)
+        }
 
-        r.c.type(RerankRow.standardKeys)
-        XCTAssertGreaterThanOrEqual(r.runner.held.count, 1)
-        r.shell.setProfileMode(.chat)  // the global mode forces chat: the owner's composition is re-decoded
-        shown = r.c.client.marked
-        before = marks(r.c)
-        r.runner.complete()
-        XCTAssertEqual(marks(r.c), before, "a result from before the mode change is not applied")
-        XCTAssertEqual(r.c.client.marked, shown)
-        r.runner.drain()
-        r.c.press(Keys.esc)
-        XCTAssertEqual(r.frees.freed, r.shell.rerankTaken, "taken == freed")
-        XCTAssertEqual(r.frees.doubleFrees, 0)
+        let control = held()
+        let controlBefore = marks(control.c)
+        control.runner.complete()
+        XCTAssertEqual(marks(control.c), controlBefore + 1, "control: with no switch the held job applies")
+        XCTAssertEqual(control.c.client.marked, RerankRow.reranked)
+        finish(control)
+
+        let viaMenu = held()
+        viaMenu.c.session.toggleAppChat()  // Messages is a chat app: formal for this app now
+        let menuShown = viaMenu.c.client.marked, menuBefore = marks(viaMenu.c)
+        viaMenu.runner.complete()
+        XCTAssertEqual(marks(viaMenu.c), menuBefore, "a result from before the app's profile switch is not applied")
+        XCTAssertEqual(viaMenu.c.client.marked, menuShown)
+        finish(viaMenu)
+
+        let viaMode = held()
+        viaMode.shell.setProfileMode(.formal)  // the global mode: the owner's composition is re-decoded
+        let modeShown = viaMode.c.client.marked, modeBefore = marks(viaMode.c)
+        viaMode.runner.complete()
+        XCTAssertEqual(marks(viaMode.c), modeBefore, "a result from before the mode change is not applied")
+        XCTAssertEqual(viaMode.c.client.marked, modeShown)
+        finish(viaMode)
     }
 
     /// F4 again, on the code path: run's non-zero code (a caught panic) applies nothing, and the queue goes on.
