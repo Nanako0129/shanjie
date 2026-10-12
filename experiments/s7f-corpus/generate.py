@@ -189,16 +189,19 @@ def main(argv=None):
             out = json.loads(payload)
         except ValueError:
             return {"i": j, "status": status, "error": "the response is not JSON"}
-        if not isinstance(out, dict):
-            return {"i": j, "status": status, "error": "the response is not a JSON object"}
-        if out.get("error"):       # OpenRouter can answer 200 with an error body (a provider failure): an error, not an empty reply
-            return {"i": j, "status": status, "error": json.dumps(out["error"], ensure_ascii=False)[:200]}
-        u = out.get("usage") or {}
-        if u.get("cost") is None and not (a.price_in or a.price_out):
-            return {"i": j, "status": status, "error": "no usage.cost and no --price-in/--price-out: the budget cannot be enforced"}
-        content = ((out.get("choices") or [{}])[0].get("message") or {}).get("content") or ""
-        return {"i": j, "seeds": ws, "content": content, "in_tokens": u.get("prompt_tokens", 0),
-                "out_tokens": u.get("completion_tokens", 0), "usd": cost_of(u, a), "served_by": out.get("provider")}
+        try:                       # a 200 body of the wrong shape ([], null, "choices": "x") is an error, not a worker traceback
+            if out.get("error"):   # OpenRouter can answer 200 with an error body (a provider failure): an error, not an empty reply
+                return {"i": j, "status": status, "error": json.dumps(out["error"], ensure_ascii=False)[:200]}
+            u = out.get("usage") or {}
+            if u.get("cost") is None and not (a.price_in or a.price_out):
+                return {"i": j, "status": status, "error": "no usage.cost and no --price-in/--price-out: the budget cannot be enforced"}
+            content = ((out.get("choices") or [{}])[0].get("message") or {}).get("content") or ""
+            if not isinstance(content, str):
+                raise TypeError("content")
+            return {"i": j, "seeds": ws, "content": content, "in_tokens": u.get("prompt_tokens", 0),
+                    "out_tokens": u.get("completion_tokens", 0), "usd": cost_of(u, a), "served_by": out.get("provider")}
+        except (AttributeError, IndexError, KeyError, TypeError):
+            return {"i": j, "status": status, "error": "the response is not the expected JSON shape"}
 
     spent, halt = (json.load(open(a.ledger))["usd"] if os.path.exists(a.ledger) else 0.0), None
     with open(raw_path, "a", encoding="utf-8") as raw, concurrent.futures.ThreadPoolExecutor(a.workers) as ex:
