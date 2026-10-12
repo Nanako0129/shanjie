@@ -20,7 +20,8 @@ Discord data package: MESSAGES_DIR is the package's messages folder (`Messages/`
 (`c<channel id>/` or just `<id>/`), each holding `messages.json` (a JSON array of objects with ID, Timestamp, Contents) or the older
 `messages.csv` (header ID,Timestamp,Contents,Attachments). Both are read; index.json and every other folder are not. Each channel.json is read first and only GUILD_TEXT, GUILD_ANNOUNCEMENT,
 PUBLIC_THREAD, ANNOUNCEMENT_THREAD and GUILD_VOICE channels are used: a DM, group DM, private thread, unknown type or missing
-channel.json is skipped without opening its messages file. In every source a message with an email address, phone-like number, a run
+channel.json is skipped without opening its messages file. In every source, after the URL exclusion (and for Discord after removing the markup that carries snowflake ids: mentions, roles,
+channels, custom emoji, timestamps, <id:...>), a message with an email address, phone-like number, a run
 of 6+ digits, a Taiwan ID or a token/secret (private_rule) is dropped whole before anything else; only counts per rule are printed. Timestamps are
 `2021-03-14 12:34:56.789000+00:00` (UTC) and are put in UTC+8 (Taiwan has no daylight saving) before the month is taken.
 Meta official export ("Download your information", JSON; --meta EXPORT_DIR --self-name NAME): only these four exact relative paths
@@ -201,6 +202,9 @@ DIGITS6 = re.compile(r"\d{6,}")
 RUN20 = re.compile(r"[A-Za-z0-9_\-+/=]{20,}")
 TOKEN_PREFIX = re.compile(r"\b(?:sk-|sk_|ghp_|gho_|github_pat_|xox[abpr]-|AKIA|AIza)|eyJ[A-Za-z0-9_\-]{5,}|Bearer ")
 TOKEN_KV = re.compile(r"[\w.-]*(?:token|secret|password|passwd|pwd|api_key|apikey)[\w.-]*\s*=\s*\S", re.I)
+# Discord markup carrying 17-20 digit snowflake ids (mentions, roles, channels, custom emoji, timestamps, guide links): not personal data,
+# removed whole before the private filter (Discord only; main saw 1 in 6 server messages dropped by the phone rule because of them).
+DISCORD_MARKUP = re.compile(r"<(?:@[!&]?\d+|#\d+|a?:[^:<>\s]+:\d+|t:-?\d+(?::[A-Za-z])?|id:[A-Za-z0-9_]+)>")
 PRIVATE_RULES = ("email", "tw_id", "phone", "digits6", "token")
 
 
@@ -279,19 +283,27 @@ def prepare(discord_root, meta_root, self_name, exclude_files, work):
                 sources.append((src, msgs, False))
     rows = []                                   # (ts, source rank, month, source, context, sentence)
     for rank, (src, msgs, cross) in enumerate(sources):
-        hits = {}
-        clean = []
-        for m in msgs:
-            r = private_rule(m[3])
-            if r:
-                hits[r] = hits.get(r, 0) + 1
-            else:
-                clean.append(m)
-        msgs = clean
-        counts.setdefault(src, {})["_dropped_private_by_rule"] = hits
+        # Order (maintainer, 2026-10-12): URL exclusion of the whole message, then (Discord only) the platform markup is stripped, then the
+        # private filter on the stripped text, then (below) code exclusion and segmentation. A message dropped here is also not offered as
+        # context to the next one. ponytail: a URL message is no longer context for the next message (it was before).
         dated = [m for m in msgs if m[2] is not None]
         if len(dated) < len(msgs):
             counts.setdefault(src, {})["_dropped_no_timestamp"] = len(msgs) - len(dated)
+        hits, clean = {}, []
+        for ch, mid, ts, text in dated:
+            if URL.search(text):
+                bump(src, month(ts), "messages")
+                bump(src, month(ts), "url")
+                continue
+            if src == "discord":
+                text = DISCORD_MARKUP.sub(" ", text)
+            r = private_rule(text)
+            if r:
+                hits[r] = hits.get(r, 0) + 1
+            else:
+                clean.append((ch, mid, ts, text))
+        dated = clean
+        counts.setdefault(src, {})["_dropped_private_by_rule"] = hits
         by_msg = {}
         for ts, ch, k, ctx, s, flags in clauses(dated, cross):
             by_msg.setdefault((ch, k), []).append((ts, ctx, s, flags))
