@@ -18,7 +18,10 @@ Private data: run by main on the maintainer's machine with --work in the private
 
 Discord data package: MESSAGES_DIR is the package's messages folder (`Messages/` or `messages/`): one folder per channel
 (`c<channel id>/` or just `<id>/`), each holding `messages.json` (a JSON array of objects with ID, Timestamp, Contents) or the older
-`messages.csv` (header ID,Timestamp,Contents,Attachments). Both are read; index.json and every other folder are not. Timestamps are
+`messages.csv` (header ID,Timestamp,Contents,Attachments). Both are read; index.json and every other folder are not. Each channel.json is read first and only GUILD_TEXT, GUILD_ANNOUNCEMENT,
+PUBLIC_THREAD, ANNOUNCEMENT_THREAD and GUILD_VOICE channels are used: a DM, group DM, private thread, unknown type or missing
+channel.json is skipped without opening its messages file. In every source a message with an email address, phone-like number, a run
+of 6+ digits, a Taiwan ID or a token/secret (private_rule) is dropped whole before anything else; only counts per rule are printed. Timestamps are
 `2021-03-14 12:34:56.789000+00:00` (UTC) and are put in UTC+8 (Taiwan has no daylight saving) before the month is taken.
 Meta official export ("Download your information", JSON; --meta EXPORT_DIR --self-name NAME): only these four exact relative paths
 are opened (each optional; the rest of the export, e.g. followers.json, is never opened): threads/threads_and_replies.json,
@@ -63,12 +66,26 @@ def parse_ts(s):
     return d.astimezone(TZ) if d.tzinfo else d.replace(tzinfo=TZ)
 
 
-def discord_messages(root):
-    """[(channel, id, ts, text)] of the messages folder; channels in folder-name order. ts is None when it cannot be read."""
+KEEP_CHANNELS = ("GUILD_TEXT", "GUILD_ANNOUNCEMENT", "PUBLIC_THREAD", "ANNOUNCEMENT_THREAD", "GUILD_VOICE")
+
+
+def discord_messages(root, skipped=None):
+    """[(channel, id, ts, text)] of the messages folder; channels in folder-name order. ts is None when it cannot be read.
+    Privacy (maintainer, 2026-10-12): each folder's channel.json is read first and only the KEEP_CHANNELS types are used; a DM, group DM,
+    private thread, a missing channel.json or an unknown type is skipped WITHOUT opening its messages file. `skipped` (a dict) gets
+    the number of skipped channels per type ('MISSING' for no channel.json)."""
     out = []
     for ch in sorted(os.listdir(root)):
         d = os.path.join(root, ch)
         if not os.path.isdir(d):
+            continue
+        try:
+            kind = str(json.load(open(os.path.join(d, "channel.json"), encoding="utf-8")).get("type"))
+        except (OSError, ValueError, AttributeError):
+            kind = "MISSING"
+        if kind not in KEEP_CHANNELS:
+            if skipped is not None:
+                skipped[kind] = skipped.get(kind, 0) + 1
             continue
         j, cs = os.path.join(d, "messages.json"), os.path.join(d, "messages.csv")
         if os.path.isfile(j):
@@ -173,6 +190,36 @@ def meta_messages(root, self_name):
     return out
 
 
+# ------------------------------------------------------------------ personal data and secrets
+# Maintainer's decision 2026-10-12: a message whose raw text has any of these is dropped whole, before segmentation, URL/code exclusion and
+# the month counts, in every source. Only the counts per rule are ever printed, never the matched text.
+# ponytail: the phone rule also takes an ISO date such as 2026-10-12 (8 digits with hyphens); dropping a message too many is the safe side.
+EMAIL = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
+TW_ID = re.compile(r"[A-Z][12]\d{8}")
+PHONE = re.compile(r"\+?\d(?:[\s\-.()]*\d){7,}")
+DIGITS6 = re.compile(r"\d{6,}")
+RUN20 = re.compile(r"[A-Za-z0-9_\-+/=]{20,}")
+TOKEN_PREFIX = re.compile(r"\b(?:sk-|sk_|ghp_|gho_|github_pat_|xox[abpr]-|AKIA|AIza)|eyJ[A-Za-z0-9_\-]{5,}|Bearer ")
+TOKEN_KV = re.compile(r"[\w.-]*(?:token|secret|password|passwd|pwd|api_key|apikey)[\w.-]*\s*=\s*\S", re.I)
+PRIVATE_RULES = ("email", "tw_id", "phone", "digits6", "token")
+
+
+def private_rule(text):
+    """The name of the first PRIVATE_RULES rule the raw text hits, else None."""
+    if EMAIL.search(text):
+        return "email"
+    if TW_ID.search(text):
+        return "tw_id"
+    if PHONE.search(text):
+        return "phone"
+    if DIGITS6.search(text):
+        return "digits6"
+    if (TOKEN_PREFIX.search(text) or TOKEN_KV.search(text) or "-----BEGIN" in text
+            or any(re.search("[A-Za-z]", m) and re.search("[0-9]", m) for m in RUN20.findall(text))):
+        return "token"
+    return None
+
+
 # ------------------------------------------------------------------ clauses
 def clauses(messages, cross_message):
     """[(ts, channel, seq, context, sentence, flags)] for every segment of every message. messages: [(channel, id, ts, text)] with
@@ -222,7 +269,9 @@ def prepare(discord_root, meta_root, self_name, exclude_files, work):
 
     sources = []                                # (name, messages, cross-message context)
     if discord_root:
-        sources.append(("discord", discord_messages(discord_root), True))
+        skipped = {}
+        sources.append(("discord", discord_messages(discord_root, skipped), True))
+        counts["discord"] = {"_skipped_channels_by_type": skipped}
     if meta_root:
         for src, (msgs, dropped) in meta_messages(meta_root, self_name).items():
             if msgs or dropped:
@@ -230,6 +279,16 @@ def prepare(discord_root, meta_root, self_name, exclude_files, work):
                 sources.append((src, msgs, False))
     rows = []                                   # (ts, source rank, month, source, context, sentence)
     for rank, (src, msgs, cross) in enumerate(sources):
+        hits = {}
+        clean = []
+        for m in msgs:
+            r = private_rule(m[3])
+            if r:
+                hits[r] = hits.get(r, 0) + 1
+            else:
+                clean.append(m)
+        msgs = clean
+        counts.setdefault(src, {})["_dropped_private_by_rule"] = hits
         dated = [m for m in msgs if m[2] is not None]
         if len(dated) < len(msgs):
             counts.setdefault(src, {})["_dropped_no_timestamp"] = len(msgs) - len(dated)
