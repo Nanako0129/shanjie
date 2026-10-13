@@ -1,6 +1,6 @@
 # S7h：`tinylm-v3`（聊天設定改用 E2 選出的值）與語意校正預設開
 
-狀態：READY（2026-10-13：plan-verifier REVISE 兩次、逐項處置後最後一次收尾審查 READY，§8）；〔修訂，2026-10-13，PR #129 的 /code-review〕保留集移到 PR 1、建 Release 之前；加 CLAUDE.md 的評測表與預設開的實機檢查（§8 最後兩列），plan-verifier READY。
+狀態：PR 1（#129）已合併、Release `tinylm-v3` 已建、PR 2（#130）fresh verifier CONFIRMED、實機通過（2026-10-13，研究紀錄 S7h PR 2 一節）。契約 READY（2026-10-13：plan-verifier REVISE 兩次、逐項處置後最後一次收尾審查 READY，§8）；〔修訂，2026-10-13，PR #129 的 /code-review〕保留集移到 PR 1、建 Release 之前；加 CLAUDE.md 的評測表與預設開的實機檢查（§8 最後兩列），plan-verifier READY。
 
 ## 0. 起因與依據
 
