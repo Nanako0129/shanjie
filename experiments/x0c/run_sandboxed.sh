@@ -1,7 +1,12 @@
 #!/bin/bash
 # X0c (docs/contracts/x0c-compare.md section 8, F4): every run that loads the third-party model goes through here.
-# The venv's Python runs under sandbox-exec with no network, no reads of the private folder, keys or configs (except
-# the files named with --read), no writes under $HOME except --out, and no other program may be executed.
+# The venv's Python runs under sandbox-exec. Denied (measured, research log 2026-10-13 X0c): the network; reads of the
+# private folder, the HackMD key and ~/.claude (the other key and config paths in PROFILE use the same rule but were not
+# probed one by one; files named with --read are allowed); writes
+# anywhere except --out and /dev/null; executing any other program; looking up the LaunchServices and pasteboard services
+# (so the process cannot ask another one to open a URL or hand over data). Sending Apple events is denied in PROFILE too
+# but not measured (a probe would have to send one to a real app). Everything else is allowed (`allow default`): this is
+# a list of denials, not an allow-list.
 #   experiments/x0c/run_sandboxed.sh --out DIR [--read FILE]... -- <python arguments>
 # Denials return a permission error (no SIGKILL: sbench.md 3.7 notes a killed process pops a macOS crash report).
 set -euo pipefail
@@ -29,10 +34,13 @@ for r in "${READS[@]+"${READS[@]}"}"; do ALLOW_READS+="(allow file-read* (litera
 PROFILE="(version 1)(allow default)
 (deny network*)
 (deny file-read* (subpath $(q "$H/side-project/shanjie-private")) (subpath $(q "$H/.ssh")) (subpath $(q "$H/.config"))
-  (subpath $(q "$H/Library/Keychains")) (subpath $(q "$H/.codex")) (subpath $(q "$H/.grok")) (literal $(q "$H/side-project/.hackmd_key")))
+  (subpath $(q "$H/Library/Keychains")) (subpath $(q "$H/.codex")) (subpath $(q "$H/.grok")) (literal $(q "$H/side-project/.hackmd_key"))
+  (subpath $(q "$H/.claude")) (subpath $(q "$H/.gnupg")) (subpath $(q "$H/.aws")) (literal $(q "$H/.netrc")))
 $ALLOW_READS
-(deny file-write* (subpath $(q "$H")))
-(allow file-write* (subpath $(q "$OUT")))
+(deny file-write*)
+(allow file-write* (subpath $(q "$OUT")) (literal $(q /dev/null)))
+(deny appleevent-send)
+(deny mach-lookup (global-name $(q com.apple.coreservices.launchservicesd)) (global-name-prefix $(q com.apple.pasteboard)))
 (deny process-exec* (require-not (literal $(q "$PY") $(q "$REAL_PY"))))"
 # The venv path, not the real binary: Python finds the venv (pyvenv.cfg) from the path it was started with.
 exec sandbox-exec -p "$PROFILE" "$PY" -I -B "$@"
