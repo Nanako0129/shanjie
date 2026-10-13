@@ -1,7 +1,7 @@
 //! S3a key engine (docs/contracts/s3a.md): key events in, preedit / commit / candidates out.
 //! R2: no input text in errors or panics; types holding input text do not derive Debug.
 
-use crate::learn::{context_key, local_day, Learner, Level, Record};
+use crate::learn::{context_key, local_day, next_key, Learner, Level, Record, SENTINEL};
 use crate::learn_store::{LearnStore, Opened, StoreError, JOURNAL_MAX};
 use crate::predict::{predict, reading_matches_in, unit_of_syllable, Mode, Unit};
 use crate::lm::{decode_segment_learned, history, CappedLexicon, Demote, End, Learn, Lm, Profile};
@@ -872,7 +872,11 @@ impl Engine {
                     let pre = f.pre.as_ref().filter(|p| **p != f.word && !self.is_punct(f.start))?;
                     let off: usize = (0..f.start).map(|i| self.token_width(i)).sum();
                     let before: String = display.chars().take(off).collect();
-                    let ctx = f.key.clone().unwrap_or_else(|| context_key(&format!("{}{before}", self.left)));
+                    let mut ctx = f.key.clone().unwrap_or_else(|| context_key(&format!("{}{before}", self.left)));
+                    // Rule 8: at sentence start the key holds the reading of the syllable after the word.
+                    if ctx == SENTINEL {
+                        ctx = next_key(self.syls.get(f.end).map(String::as_str));
+                    }
                     Some((ctx, self.syls[f.start..f.end].to_vec(), f.word.clone(), pre.clone()))
                 })
                 .collect();
@@ -880,7 +884,7 @@ impl Engine {
             for (ctx, reading, word, displaced) in &plans {
                 touched.extend(self.learner.teach(ctx, reading, word, displaced, today));
             }
-            // Nothing touched (e.g. a single character under "^", §12): no write, unless a full
+            // Nothing touched (e.g. a single character under "^" or a one-character key, §12, §14): no write, unless a full
             // rewrite is pending (a failed forget or rewrite). It is retried only by commits that reach
             // this point: learning on and at least one re-pick (the early return above); other commits
             // leave it pending.
@@ -1200,7 +1204,9 @@ impl Engine {
     /// Weight of `word` for `reading` under context `key` at the exact or last-character level; the global level
     /// counts 0 (s4-learning section 12: it never overrides what the model is sure of).
     fn learned_weight(&self, key: &str, reading: &[String], word: &str, today: i64) -> f64 {
-        match self.learner.lookup(key, reading, today) {
+        // Rule 8: a predicted word ends at the cursor, with no syllable after it.
+        let key = if key == SENTINEL { next_key(None) } else { key.to_string() };
+        match self.learner.lookup(&key, reading, today) {
             (Level::Global, _) => 0.0,
             (_, hits) => hits.iter().find(|h| h.0 == word).map_or(0.0, |h| h.1),
         }
@@ -1351,7 +1357,7 @@ impl Engine {
                     _ => End::Eos,
                 };
                 let before = format!("{}{out}", self.left);
-                let learn = (!self.learner.is_empty()).then(|| Learn { learner: &self.learner, before: &before, today, eps_global: self.eps_global });
+                let learn = (!self.learner.is_empty()).then(|| Learn { learner: &self.learner, before: &before, after: self.syls.get(to).map(String::as_str), today, eps_global: self.eps_global });
                 let best = decode_segment_learned(
                     &st.capped, &self.syls[from..to], &st.lm, lam, prev, end, BEAM_S1, learn.as_ref(), self.demote,
                 )

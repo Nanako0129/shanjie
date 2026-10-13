@@ -7,8 +7,13 @@
 /// Han characters kept as context (§1.1).
 pub const MAX_CONTEXT: usize = 2;
 /// Context key when no Han character precedes the span (sentence start, after punctuation or ASCII,
-/// or no readable left context). Distinct from the global key "".
+/// or no readable left context). Distinct from the global key "". The context key of a span, never a record's:
+/// learning and lookup replace it by `next_key` (§14, rule 8), and `learn_store` drops records that hold it.
 pub const SENTINEL: &str = "^";
+/// Prefix of the synthetic context keys (s4-learning §14, rule 8): at sentence start (`SENTINEL`) a word is learned
+/// and looked up under `^>` plus the reading of the syllable right after it, `^>$` when nothing follows.
+/// These keys never take part in the last-character level.
+pub const NEXT_PREFIX: &str = "^>";
 /// The global key (§1.3): created only after ≥ 2 distinct full keys learned the same (reading, word).
 pub const GLOBAL: &str = "";
 /// Half-life in days (user decision 2026-10-05): one teach stays effective about two weeks; words in
@@ -39,6 +44,12 @@ pub fn context_key(prefix: &str) -> String {
     }
 }
 
+/// Rule 8: the key a word under `SENTINEL` is learned and looked up with; `next` is the reading of the syllable
+/// right after the word (`None`: the word ends the composition).
+pub fn next_key(next: Option<&str>) -> String {
+    format!("{NEXT_PREFIX}{}", next.unwrap_or("$"))
+}
+
 /// Which lookup level answered (§1.1, §12): decides the boost size (`lm::LEARN_EPS` or the smaller global one).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Level {
@@ -47,9 +58,15 @@ pub enum Level {
     Global,
 }
 
-/// A one-character word: no global level, no last-character level, never under "^" (§12).
+/// A one-character word: no global level, no last-character level, learned only under a full two-character
+/// context (§12, rule 7).
 pub fn is_single(word: &str) -> bool {
     word.chars().count() == 1
+}
+
+/// Exactly `MAX_CONTEXT` Han characters: the only key a one-character word is learned under (rule 7).
+pub fn is_full_context(key: &str) -> bool {
+    key.chars().count() == MAX_CONTEXT && key.chars().all(is_han)
 }
 
 /// One learned record (§1.3, §4). `day` is the local calendar day as days since 1970-01-01.
@@ -179,8 +196,9 @@ impl Learner {
     /// records it changed, as they now are (displaced, taught, global; at most 3): what an append
     /// writes (§4).
     pub fn teach(&mut self, context: &str, reading: &[String], word: &str, displaced: &str, today: i64) -> Vec<Record> {
-        // §12 rule 6: a single character neither learns nor looks up under "^".
-        if is_single(word) && context == SENTINEL {
+        // §12 rules 6 and 7: a single character learns only under a full two-character Han context (not "^",
+        // not a one-character key, not a synthetic key).
+        if is_single(word) && !is_full_context(context) {
             return Vec::new();
         }
         let mut touched = Vec::with_capacity(3);
@@ -217,19 +235,20 @@ impl Learner {
     /// (exact, last character, global), with their decayed weight, and the level that answered. The
     /// first level that has any usable record answers; a word found by several records of that level
     /// keeps the highest weight. Single characters skip the last-character level (§12 rule 5); a
-    /// single-character record under "^" or the global key cannot exist (rule 6: teach does not make
-    /// one, and load drops old ones).
+    /// single-character record under any key but a full two-character one cannot exist (rules 6 and 7: teach
+    /// does not make one, and load drops old ones). A synthetic key (`NEXT_PREFIX`, rule 8) has no
+    /// last-character level, like "^".
     pub fn lookup(&self, context: &str, reading: &[String], today: i64) -> (Level, Vec<(&str, f64)>) {
         let Some(ix) = self.index.get(&reading_key(reading)) else { return (Level::Global, Vec::new()) };
-        let last = context.chars().next_back().filter(|_| context != SENTINEL && context != GLOBAL);
+        let last = context.chars().next_back().filter(|_| context != SENTINEL && context != GLOBAL && !context.starts_with(NEXT_PREFIX));
         let levels: [(Level, &dyn Fn(&str) -> bool); 3] = [
             (Level::Exact, &|c| c == context),
-            (Level::LastChar, &|c| last.is_some_and(|l| c != SENTINEL && c != GLOBAL && c.chars().next_back() == Some(l))),
+            (Level::LastChar, &|c| last.is_some_and(|l| c != SENTINEL && c != GLOBAL && !c.starts_with(NEXT_PREFIX) && c.chars().next_back() == Some(l))),
             (Level::Global, &|c| c == GLOBAL),
         ];
         for (lv, level) in levels {
-            // Rule 5: no last-character level for single characters. Single-character records under "^"
-            // or the global key do not exist: teach never makes them and load drops old ones.
+            // Rule 5: no last-character level for single characters. Single-character records under any
+            // key but a full two-character one do not exist: teach never makes them and load drops old ones.
             let single_barred = lv == Level::LastChar;
             let mut hits: Vec<(&str, f64)> = Vec::new();
             for &i in ix {
