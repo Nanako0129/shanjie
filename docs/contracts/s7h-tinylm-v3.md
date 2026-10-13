@@ -36,7 +36,7 @@
 - **`docs/releases/tinylm-v3.md`**：說明（檔案、SHA-256、大小、內容：權重同 v1／v2、只有聊天的融合參數不同、怎麼選的、判斷期與公開集合的數字、綁 model-v5、授權）。照 `docs/releases/README.md` 的規則：建 Release 前拿掉草稿標記。
 - **研究紀錄**：新的一節，§3 第 1、2 項的結果與候選檔雜湊；另加 E2 一節的〔更正〕（下面）。
 - **〔更正〕E2 研究紀錄 2026-10-13「/code-review 與 fresh verifier」一節**：「舊的在改壞數約 705 以上會卡在 745」寫得不準。實作時用 df57b34 之前的 `evalstats` 上界函式重新量「從哪個 k 起和 log 空間的結果不同」「從哪個 k 起固定在 745」，照量到的數字寫〔更正〕。main 已先量（2026-10-13，`git show df57b34^:tools/evalstats.py` 對照現在的 `poisson_upper95`，k 0–1,200）：k ≤ 485 差 < 4e-12；k 679 起差 > 1e-9，686 起 > 1e-6，**694 起 > 0.001**；**k ≥ 700 時舊函式固定是 745.1332**（新的：700 是 745.1109、705 是 750.2659）。〔更正〕照這些數字寫。原句保留、後面加更正，不改數字了事。
-- **CLAUDE.md 的評測表**（§3 第 8 項）：dev302、打字測驗、錯字回報（整個檔，現在 77 列）在聊天與書面各報「n-gram → v3」與「v2 → v3」兩行，寫進研究紀錄；說明檔摘要。
+- **CLAUDE.md 的評測表**（§3 第 8 項）：dev302、打字測驗、錯字回報（整個檔，當時 77 列〔修訂，2026-10-13：#131 加了第 78 列，重現這張表用 `--limit 77`〕）在聊天與書面各報「n-gram → v3」與「v2 → v3」兩行，寫進研究紀錄；說明檔摘要。
 - **保留集**（§3 第 5 項）：在 PR 1 由 fresh verifier 對候選檔跑，**建 Release 之前**；這是這一片唯一的一次。verifier 回報的兩行由 main 寫進研究紀錄與說明檔，再 commit。
 - PLAN（v0.4.1 一段、S7 的狀態清單加 S7h 一條；#126 已合併）、README（S7 的狀態：第 35 行與路線圖表的 S7 一列）、網站 `site/index.html`（v0.4.1 路線圖與語意校正一項，和 PLAN 第 116 行說的同步；只改檔，部署要使用者同意）：寫 E2 結果之後的狀態（候選檔、等 Release、預設開是 PR 2 才做）。
 
@@ -59,7 +59,7 @@
 ## 3. 驗收
 
 1. **重現 E2 的 R3′ 表（PR 1，main 跑）**。候選與 E2 相同（出貨的 model-v5＋classes-v3、`--context`、不開詞包、不載 KN）。先 `test ! -e data/lm/kn.sjkn`（CLI 看到這個檔就自動開 KN；2026-10-13 三個 checkout 都沒有），有就停。每個集合跑兩次，基準不給 `--tinylm`、候選給 `--tinylm ~/.cache/shanjie/s7h-public/tinylm-M8-v3.sjtl`：`cargo run --release -q -p cli -- --lm data/lm/bigram.sjlm --profile chat --context --rowstats OUT` 加上集合的列：
-   - cvtune `--rows ~/.cache/shanjie/s7c2c-public/tune/cvtune.txt`、wikitune `--rows ~/.cache/shanjie/s7c2c-public/tune/wikitune.txt`、dev302 `--dev 302`、打字測驗 `--rows eval/dev/user-typing.txt`（76 列）、錯字回報 `--rows eval/dev/user-reported.txt --limit 72`（E2 用的是 72 列；檔案現在 77 列）、功能字測試句 `--rows eval/rerank/s7e-function-words.txt`、`lytune` `--rows ~/.cache/shanjie/e2-public/lytune.txt`、`wikitypo` `--rows ~/.cache/shanjie/e2-public/wikitypo.txt`；
+   - cvtune `--rows ~/.cache/shanjie/s7c2c-public/tune/cvtune.txt`、wikitune `--rows ~/.cache/shanjie/s7c2c-public/tune/wikitune.txt`、dev302 `--dev 302`、打字測驗 `--rows eval/dev/user-typing.txt`（76 列）、錯字回報 `--rows eval/dev/user-reported.txt --limit 72`（E2 用的是 72 列；檔案當時 77 列）、功能字測試句 `--rows eval/rerank/s7e-function-words.txt`、`lytune` `--rows ~/.cache/shanjie/e2-public/lytune.txt`、`wikitypo` `--rows ~/.cache/shanjie/e2-public/wikitypo.txt`；
    - 每格 `python3 tools/evalstats.py compare BASE CAND --net --label "R3′ chat <集合>"`（`<集合>` 逐字用表上的名稱：`cvtune`、`wikitune`、`dev302`、`typing76`、`user-reported`、`fw`、`lytune`、`wikitypo`），輸出的表格行要和研究紀錄 2026-10-13「E2 的新調參期與 R3′」第二張表同名的那一行**逐字元相同**。不同就停，回報不同的列數與 `s[j] − s[0]` 和 δ 的距離（只有數字），分得出是 Rust／numpy 的邊界誤差還是程式錯誤。
    - 已試跑（2026-10-13）：dev302 聊天 top1 259，和表上相同。
 2. **書面不變（PR 1）**：先 `shasum -a 256 -c data/tinylm.sjtl.sha256`（`data/lm/tinylm.sjtl` 是 v2，`710249c2…`），再 dev302 與 cvtune 各跑兩次 `cargo run --release -q -p cli -- --lm data/lm/bigram.sjlm --profile formal --context --dev 302 --tinylm <檔> --rowstats OUT`（cvtune 把 `--dev 302` 換成 `--rows ~/.cache/shanjie/s7c2c-public/tune/cvtune.txt`），`<檔>` 分別是 `data/lm/tinylm.sjtl` 與 `~/.cache/shanjie/s7h-public/tinylm-M8-v3.sjtl`；兩個 rowstats 用 `cmp` 比，逐位元組相同（書面的值沒變）。
@@ -75,7 +75,7 @@
    - 保留集出現「改對 < 改壞而且 p < 0.05」就停，交給使用者決定；這時還沒有建 Release。
 6. **實機（PR 2，維護者）**：§1 的兩項：預設開（刪 key 要維護者當下同意）與那一句的開關。main 先用 imeshot 量一次（每次 ≤ 15 秒），再請維護者自己打一次；檢查時切掉的開關最後切回開。
 7. 兩個 PR：本地 `/code-review` 沒有未處置的問題、fresh `pilotfish:verifier` CONFIRMED（PR 1：第 1、2、5、8 項；PR 2：第 3、4 項與換檔的完整性）、CI 全綠，merge commit。
-8. **CLAUDE.md 的評測表（PR 1，main 跑，verifier 重現）**：先 `test ! -e data/lm/kn.sjkn`。`P` 是 `chat`、`formal`，集合是 dev302（`--dev 302`）、打字測驗（`--rows eval/dev/user-typing.txt`）、錯字回報（`--rows eval/dev/user-reported.txt`，整個檔）。每格跑三次 `cargo run --release -q -p cli -- --lm data/lm/bigram.sjlm --profile P --context <集合> [--tinylm F] --rowstats OUT`：不給 `--tinylm`（n-gram）、`F` 是 `~/.cache/shanjie/s7c2c-public/tinylm-M8-v2.sjtl`（v2）、`F` 是 v3 的候選檔；再 `python3 tools/evalstats.py compare` 各比「n-gram → v3」與「v2 → v3」（`--net`）。12 行寫進研究紀錄；verifier 重跑要逐字相同。
+8. **CLAUDE.md 的評測表（PR 1，main 跑，verifier 重現）**：先 `test ! -e data/lm/kn.sjkn`。`P` 是 `chat`、`formal`，集合是 dev302（`--dev 302`）、打字測驗（`--rows eval/dev/user-typing.txt`）、錯字回報（`--rows eval/dev/user-reported.txt`，整個檔；〔修訂，2026-10-13〕第 78 列加入之後重現要加 `--limit 77`）。每格跑三次 `cargo run --release -q -p cli -- --lm data/lm/bigram.sjlm --profile P --context <集合> [--tinylm F] --rowstats OUT`：不給 `--tinylm`（n-gram）、`F` 是 `~/.cache/shanjie/s7c2c-public/tinylm-M8-v2.sjtl`（v2）、`F` 是 v3 的候選檔；再 `python3 tools/evalstats.py compare` 各比「n-gram → v3」與「v2 → v3」（`--net`）。12 行寫進研究紀錄；verifier 重跑要逐字相同。
 
 ## 4. 範圍外
 
