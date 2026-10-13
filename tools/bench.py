@@ -904,12 +904,15 @@ def cmd_run2(args):
         die("--lm is not used by suite v2 (models come from data/*.sha256 and ~/.cache/shanjie/bench/models)")
     if args.base:
         die("--base belongs to suite v1; suite v2 compares each version with the ref before it")
-    ctx = preflight2(args)
     anchor = args.override_packs == "off"
     labels = version_labels(args.refs, args.as_)
     if anchor and any(l not in ANCHOR for l in labels):
         die(f"--override-packs off checks S7h's anchor, which exists only for {', '.join(ANCHOR)}")
     args.label = args.label or "+".join(labels)
+    out = os.path.join(RESULTS, "v2-" + args.label + ".json")
+    if not anchor and os.path.isfile(out) and any("holdout" in r for r in json.load(open(out, encoding="utf-8")).get("versions", [])):
+        die(f"{out} holds holdout numbers, which are measured once and cannot be re-run; use another --label or move the file first")
+    ctx = preflight2(args)
     cells = [(n, p) for n in SETS2 if n in ctx.files for p in (["chat"] if anchor else PROFILES2) if not anchor or n in ANCHOR[labels[0]]]
     load0 = os.getloadavg()[0]
     vers = []
@@ -984,7 +987,7 @@ def cmd_run2(args):
     result["env"] = {"machine": sh(["sysctl", "-n", "hw.model"]).strip(), "macos": platform.mac_ver()[0],
                      "cargo": sh(["cargo", "--version"]).strip(), "load_avg_start": load0, "load_avg_end": os.getloadavg()[0]}
     os.makedirs(RESULTS, exist_ok=True)
-    with open(os.path.join(RESULTS, "v2-" + args.label + ".json"), "w", encoding="utf-8") as f:
+    with open(out, "w", encoding="utf-8") as f:
         json.dump(result, f, ensure_ascii=False, indent=1)
         f.write("\n")
     sys.exit(1 if failed else 0)
@@ -1008,13 +1011,13 @@ def render_v2(results):
             n = next((r["accuracy"][c]["n"] for r in vs if "n" in r.get("accuracy", {}).get(c, {})), "—")
             L.append(f"| {c} | {n} | " + " | ".join(cell_text(r, c) if "accuracy" in r else "失敗" for r in vs) + " |")
     L += ["", "### 保留集", "",
-          "照 `CLAUDE.md`：等要打 tag 的 commit 定下來後跑一次，由 fresh verifier 以 `evalstats compare --net` 比上一版與新版，main 把 n 與兩版的 top1（可再加 `fixed`、`broken`、`p`）填進 results JSON 的 `holdout`（`{\"chat\": {n, top1, fixed, broken, p}, \"formal\": ...}`）。", "",
+          "照 `CLAUDE.md` 一片只跑一次：由 fresh verifier 以 `evalstats compare --net` 比上一版與新版，main 把 n 與兩版的 top1（可再加 `fixed`、`broken`、`p`）和實際量的 commit 填進 results JSON 的 `holdout`（`{\"commit\": …, \"chat\": {n, top1, fixed, broken, p}, \"formal\": ...}`）。下表版本下面的 commit 是保留集實際量的那一個；它和上面「出貨設定」表被量的 commit 在 `docs/verification.md` 列的路徑上必須沒有差異（契約 §2.3、§5）。", "",
           "| 版本 | chat | formal |", "|---|---|---|"]
     for res in results:
         for rec in res["versions"]:
             h = rec.get("holdout", {})
             f = lambda p: "—（尚未量測）" if p not in h else f"{100 * h[p]['top1'] / h[p]['n']:.2f}%<br>{h[p]['top1']}/{h[p]['n']}" + (f"<br>+{h[p]['fixed']} / −{h[p]['broken']}，p={h[p]['p']:.3g}" if "fixed" in h[p] else "")
-            L.append(f"| {rec['version']}<br>`{rec['sha'][:7]}` | {f('chat')} | {f('formal')} |")
+            L.append(f"| {rec['version']}<br>`{h.get('commit', rec['sha'])[:7]}` | {f('chat')} | {f('formal')} |")
     L += ["", "### 速度與記憶體（同場）", "",
           "重播程式用該版的 `bigram.sjlm` 與 `classes.sjc`，**不載詞包、沒有前文、沒有語意校正**（重播是同步打鍵，語意校正是非同步、不在按鍵路徑上）；標準排列、chat、dev302，每版 3 輪輪流，p95 取中位數。「重播＝CLI」是和另跑的一格同設定 CLI（`--profile chat`，不帶 `--context`、`--packs`、`--tinylm`）逐列比。重排是 CLI 在 stderr 印的語意校正每列耗時（p50／p95：三輪重播都跑完之後再跑三次、取中位數，不和其他格同時跑）。", "",
           "| 版本 | 日期 | 機型／macOS／load avg | p95 | max | 載入 | RSS | 按鍵數 | 重播＝CLI | 重排 p50／p95 |", "|---|---|---|---|---|---|---|---|---|---|"]
