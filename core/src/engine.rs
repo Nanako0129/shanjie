@@ -147,6 +147,12 @@ pub const PREDICT_MAX: usize = PAGE_SIZE;
 /// `PREDICT_MAX` only, so with an empty learner the row is the slice-1 row bit for bit. The added time of 27 over 9
 /// is only measured as part of the whole row with a 50,000-record store (research log 2026-10-08), not by itself.
 pub const PREDICT_SCAN: usize = 27;
+/// zhen-mixed section 2.2: the shadow holds at most this many keys; the next one empties it.
+pub const SHADOW_MAX: usize = 32;
+/// zhen-mixed section 2.6: the word list's limits (bytes, lines) and its word length range.
+const ENGLISH_MAX_BYTES: u64 = 4 << 20;
+const ENGLISH_MAX_LINES: usize = 200_000;
+const ENGLISH_LEN: std::ops::RangeInclusive<usize> = 3..=32;
 
 /// Initial (21), medial (3), final (13) symbols in the contract's column order.
 const SYMBOLS: &str = "ㄅㄆㄇㄈㄉㄊㄋㄌㄍㄎㄏㄐㄑㄒㄓㄔㄕㄖㄗㄘㄙㄧㄨㄩㄚㄛㄜㄝㄞㄟㄠㄡㄢㄣㄤㄥㄦ";
@@ -362,11 +368,13 @@ struct Cands {
     /// never expands; `first` is the list position of its first visible row.
     vertical: bool,
     first: usize,
+    /// zhen-mixed section 2.3: the English window (items have syllable length 0, except an optional Chinese last item of 1).
+    english: bool,
 }
 
 impl Cands {
     fn new(list: Vec<(String, usize)>, vertical: bool) -> Cands {
-        Cands { list, sel: 0, expanded: false, top: 0, vertical, first: 0 }
+        Cands { list, sel: 0, expanded: false, top: 0, vertical, first: 0, english: false }
     }
 
     fn scroll(&mut self) {
@@ -475,6 +483,15 @@ pub struct Engine {
     generation: u64,
     /// The job of the last refresh, until `take_rerank_job` or the next change.
     rerank_job: Option<RerankJob>,
+    /// zhen-mixed: the switch (default off; `set_english`) and the word list (`load_english`).
+    english: bool,
+    english_words: Option<HashSet<Box<str>>>,
+    /// Section 2.2: the keycaps of the unfinished syllable's Zhuyin keys (at most `SHADOW_MAX`), and how many times a key
+    /// replaced a symbol in an occupied column (rule 9). Empty unless `shadow_on`; cleared with `clear_pend`.
+    shadow: Vec<char>,
+    shadow_over: u32,
+    /// Set by `choose_english` for the output of the key or pick that made it: the committed text (section 2.3).
+    commit_out: Option<String>,
 }
 
 /// Base lexicon + overlay from `data_dir` (§5), same as the eval CLI default. The overlay rows are
@@ -651,6 +668,11 @@ impl Engine {
             rerank_on: false,
             generation: next_generation(),
             rerank_job: None,
+            english: false,
+            english_words: None,
+            shadow: Vec::new(),
+            shadow_over: 0,
+            commit_out: None,
         }
     }
 
@@ -990,8 +1012,155 @@ impl Engine {
         self.abbr = on;
         if !on {
             self.drop_units();
+        } else {
+            self.close_english(); // zhen-mixed section 2.1: the two are exclusive
         }
         self.handled()
+    }
+
+    /// zhen-mixed section 3.1: the English word list at `path`: `[a-z]{3,32}` per line, LF, no duplicate, no BOM, at most
+    /// 4 MiB and 200,000 lines. Any other content, or an unreadable or non-regular file, fails and the previous list (or
+    /// none) stays; nothing is loaded in part. Does not touch the switch or the display. No path or word in any error (R2).
+    pub fn load_english(&mut self, path: &Path) -> Result<(), EngineError> {
+        use std::io::Read;
+        let file = std::fs::File::open(path).map_err(|_| EngineError::LoadFailed)?;
+        if !file.metadata().is_ok_and(|m| m.is_file()) {
+            return Err(EngineError::LoadFailed);
+        }
+        let mut bytes = Vec::new();
+        file.take(ENGLISH_MAX_BYTES + 1).read_to_end(&mut bytes).map_err(|_| EngineError::LoadFailed)?;
+        if bytes.len() as u64 > ENGLISH_MAX_BYTES {
+            return Err(EngineError::LoadFailed);
+        }
+        let text = String::from_utf8(bytes).map_err(|_| EngineError::LoadFailed)?;
+        let mut words = HashSet::new();
+        // The last line ends with a line break (stripped once); an empty file is an empty list, a blank line anywhere is bad.
+        let lines = if text.is_empty() { None } else { Some(text.strip_suffix('\n').unwrap_or(&text).split('\n')) };
+        for line in lines.into_iter().flatten() {
+            let ok = ENGLISH_LEN.contains(&line.len()) && line.bytes().all(|b| b.is_ascii_lowercase());
+            if !ok || words.len() >= ENGLISH_MAX_LINES || !words.insert(Box::<str>::from(line)) {
+                return Err(EngineError::LoadFailed);
+            }
+        }
+        self.english_words = Some(words);
+        Ok(())
+    }
+
+    /// zhen-mixed (docs/contracts/zhen-mixed.md): the switch, default off, remembered even without a list. Takes effect only
+    /// with a loaded list, the standard layout and the abbreviation composer off (`shadow_on`). Off closes an open English
+    /// window and clears the shadow. Returns the snapshot.
+    pub fn set_english(&mut self, on: bool) -> Result<Output, EngineError> {
+        self.english = on;
+        if !on {
+            self.close_english();
+        }
+        self.handled()
+    }
+
+    /// Whether the English window is open (test and tool hook).
+    #[doc(hidden)]
+    pub fn english_open(&self) -> bool {
+        self.cands.as_ref().is_some_and(|c| c.english)
+    }
+
+    /// The shadow's length (test and tool hook).
+    #[doc(hidden)]
+    pub fn english_shadow_len(&self) -> usize {
+        self.shadow.len()
+    }
+
+    /// Section 2.1: the four conditions under which the shadow is recorded at all.
+    fn shadow_on(&self) -> bool {
+        self.english && self.english_words.is_some() && !self.abbr && self.layout == Layout::Standard
+    }
+
+    fn clear_shadow(&mut self) {
+        self.shadow.clear();
+        self.shadow_over = 0;
+    }
+
+    /// Closes the English window if it is open, and clears the shadow either way; the unfinished syllable stays.
+    fn close_english(&mut self) {
+        if self.english_open() {
+            self.cands = None;
+        }
+        self.clear_shadow();
+    }
+
+    /// Closes the candidate window (rules 7 and 8); an English window takes the shadow with it (section 2.3).
+    fn close_cands(&mut self) {
+        if self.cands.take().is_some_and(|c| c.english) {
+            self.clear_shadow();
+        }
+    }
+
+    /// Section 2.2: one Zhuyin key of the unfinished syllable; `over` is whether it replaced a symbol (rule 9).
+    fn shadow_push(&mut self, ch: char, over: bool) {
+        if !self.shadow_on() {
+            return;
+        }
+        if self.shadow.len() == SHADOW_MAX {
+            self.clear_shadow(); // the 33rd key: start again
+            return;
+        }
+        self.shadow.push(ch);
+        self.shadow_over += over as u32;
+    }
+
+    /// Section 2.2, the trigger (Space before rule 10): the shadow is a listed word, replaced at least once, and when the
+    /// leftover syllable (tone 1) is itself in the lexicon at least twice. The cursor is at the end and there is one unit.
+    fn english_trigger(&self) -> bool {
+        let Some(words) = self.english_words.as_ref().filter(|_| self.shadow_on()) else { return false };
+        if self.cursor != self.syls.len() || !self.pend_prev.is_empty() || self.shadow_over == 0 {
+            return false;
+        }
+        let word: String = self.shadow.iter().collect();
+        words.contains(word.as_str())
+            && (self.shadow_over >= 2 || self.lex.entries(&[self.pending()]).is_empty())
+    }
+
+    /// Section 2.3: the window of the shadow's word (as typed, capitalised, upper case) and, when the leftover syllable is in
+    /// the lexicon, its first entry. The unfinished syllable stays in the preedit.
+    fn open_english(&mut self) -> Result<Output, EngineError> {
+        let word: String = self.shadow.iter().collect();
+        let mut title = word.clone();
+        title[..1].make_ascii_uppercase();
+        let mut list = vec![(word.clone(), 0), (title, 0), (word.to_uppercase(), 0)];
+        if let Some((zh, _)) = self.lex.entries(&[self.pending()]).first() {
+            list.push((zh.to_string(), 1));
+        }
+        let mut c = Cands::new(list, self.cand_vertical);
+        c.english = true;
+        self.cands = Some(c);
+        self.handled()
+    }
+
+    /// Section 2.3: item `idx` of the English window. An English item commits the composition as shown and the word, no
+    /// space (learning as for Enter; the word itself is never learned); a Chinese item becomes a fixed word at the cursor.
+    fn choose_english(&mut self, idx: usize) -> Result<(), EngineError> {
+        let Some(c) = self.cands.take() else { return Ok(()) };
+        let Some((word, len)) = c.list.get(idx).cloned() else { return Ok(()) };
+        let syl = self.pending();
+        self.clear_pend();
+        if len == 0 {
+            let commit = self.take_commit() + &word;
+            self.commit_out = Some(commit);
+            return Ok(());
+        }
+        let out = self.insert_token(syl, Some(word))?;
+        self.pred_dirty = true;
+        if !out.commit.is_empty() {
+            self.commit_out = Some(out.commit); // the 40th syllable committed everything (section 2.1 of s3d)
+        }
+        Ok(())
+    }
+
+    /// The output of a key or pick that chose a candidate: the English item's commit, or the plain snapshot.
+    fn chosen(&mut self) -> Result<Output, EngineError> {
+        match self.commit_out.take() {
+            Some(commit) => Ok(self.view(true, commit)),
+            None => self.handled(),
+        }
     }
 
     /// What `set_prediction(false)` and `set_abbreviation(false)` do with two or more unfinished units: they go, the row
@@ -1018,6 +1187,7 @@ impl Engine {
     fn clear_pend(&mut self) {
         self.pend = [None; 3];
         self.pend_prev.clear();
+        self.clear_shadow();
     }
 
     /// Switch the profile (default chat; remembered even before a model is loaded), recompute the
@@ -1512,7 +1682,7 @@ impl Engine {
         let plain = m == 0;
         // 3-8: candidates open.
         if self.cands.is_some() && self.candidate_key(k)? {
-            return self.handled();
+            return self.chosen();
         }
         let zy = if is_char && plain { self.layout.symbol_of(k.ch) } else { None };
         let tone = match k.kind {
@@ -1528,9 +1698,13 @@ impl Engine {
                 if self.pend[col].is_some() && self.abbr_active() {
                     self.pend_prev.push(std::mem::replace(&mut self.pend, [None; 3]));
                 }
+                self.shadow_push(k.ch, self.pend[col].is_some());
                 self.pend[col] = Some(sym);
                 self.pred_dirty = true;
             } else if let Some(t) = tone {
+                if t == 0 && self.english_trigger() {
+                    return self.open_english(); // 10e
+                }
                 if self.pend_prev.is_empty() {
                     return self.finish_syllable(t, old);
                 }
@@ -1540,9 +1714,13 @@ impl Engine {
                 // McBopomofo do (measured 2026-10-06: ㄉㄨㄟ, ㄅ replaces ㄉ, then Backspace gives ㄅㄨ, then ㄅ).
                 if let Some(col) = (0..3).rev().find(|&c| self.pend[c].is_some()) {
                     self.pend[col] = None;
+                    self.shadow.pop(); // zhen-mixed section 2.2: the last key; the replacement count stays
                 }
                 if self.pend.iter().all(Option::is_none) {
                     self.pend_prev.pop().into_iter().for_each(|u| self.pend = u); // an emptied unit goes
+                    if self.pend.iter().all(Option::is_none) {
+                        self.clear_shadow(); // the syllable is gone
+                    }
                 }
                 self.pred_dirty = true;
             } else if k.kind == KeyKind::Esc {
@@ -1556,6 +1734,7 @@ impl Engine {
         }
         // 14
         if let Some((col, sym)) = zy {
+            self.shadow_push(k.ch, false);
             self.pend[col] = Some(sym);
             self.pred_dirty = true;
             return self.handled();
@@ -1636,9 +1815,9 @@ impl Engine {
                 }
                 (KeyKind::PageDown | KeyKind::PageUp, _) => {}
                 (KeyKind::Enter, _) => self.choose(sel)?,
-                (KeyKind::Esc | KeyKind::Backspace, _) => self.cands = None,
+                (KeyKind::Esc | KeyKind::Backspace, _) => self.close_cands(),
                 _ => {
-                    self.cands = None;
+                    self.close_cands();
                     return Ok(false);
                 }
             }
@@ -1667,9 +1846,9 @@ impl Engine {
                 (KeyKind::Left, _) => c.sel = sel.saturating_sub(1),
                 (KeyKind::Right, _) => c.sel = (sel + 1).min(len - 1),
                 (KeyKind::Enter, _) => self.choose(sel)?,
-                (KeyKind::Esc | KeyKind::Backspace, _) => self.cands = None,
+                (KeyKind::Esc | KeyKind::Backspace, _) => self.close_cands(),
                 _ => {
-                    self.cands = None;
+                    self.close_cands();
                     return Ok(false);
                 }
             }
@@ -1699,9 +1878,9 @@ impl Engine {
             }
             (KeyKind::Space, _) => c.sel = next_page.unwrap_or(0),
             (KeyKind::Enter, _) => self.choose(sel)?,
-            (KeyKind::Esc | KeyKind::Backspace, _) => self.cands = None,
+            (KeyKind::Esc | KeyKind::Backspace, _) => self.close_cands(),
             _ => {
-                self.cands = None;
+                self.close_cands();
                 return Ok(false);
             }
         }
@@ -1727,9 +1906,16 @@ impl Engine {
         if index >= n {
             return Ok(None);
         }
-        let r = self.choose(first + index).and_then(|()| self.handled());
+        self.pred_dirty = false;
+        let mut r = self.choose(first + index).and_then(|()| self.chosen());
         if r.is_err() {
             self.clear_all();
+        } else if std::mem::take(&mut self.pred_dirty) {
+            self.recompute_pred(); // a Chinese item of the English window (zhen-mixed section 2.3)
+            if let Ok(o) = &mut r {
+                (o.candidates, o.selected, o.total) = self.pred_view();
+                o.vertical = self.pred_vertical();
+            }
         }
         r.map(Some)
     }
@@ -1858,7 +2044,7 @@ impl Engine {
     /// still be in the file, so "memory changed" says nothing about the file. `must_rewrite` is set
     /// first, so a panic or failure part way makes the next write a full rewrite too.
     fn forget_highlighted(&mut self) -> Result<(), EngineError> {
-        let Some(c) = &self.cands else { return Ok(()) };
+        let Some(c) = self.cands.as_ref().filter(|c| !c.english) else { return Ok(()) }; // an English item has nothing to forget
         let Some((word, l)) = c.list.get(c.sel).cloned() else { return Ok(()) };
         let (start, end) = if self.cursor == 0 { (0, l) } else { (self.cursor - l, self.cursor) };
         if self.is_punct(start) {
@@ -1892,6 +2078,9 @@ impl Engine {
 
     /// Fix candidate `idx` over its range, close candidates, recompute.
     fn choose(&mut self, idx: usize) -> Result<(), EngineError> {
+        if self.english_open() {
+            return self.choose_english(idx);
+        }
         let Some(c) = self.cands.take() else { return Ok(()) };
         let Some((word, l)) = c.list.get(idx).cloned() else { return Ok(()) };
         let (start, end) = if self.cursor == 0 { (0, l) } else { (self.cursor - l, self.cursor) };
