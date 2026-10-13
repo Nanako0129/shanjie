@@ -141,7 +141,9 @@ fn replay_standard_chat_production_path() {
 #[test]
 fn replay_standard_formal() {
     let mut e = engine(Layout::Standard, Profile::Formal);
-    check_replay(&replay(&mut e, Layout::Standard).0, &golden_top1(1));
+    let (got, times) = replay(&mut e, Layout::Standard);
+    check_replay(&got, &golden_top1(1));
+    let _ = p95(times); // recorded (dec-recombine section 3.5), no threshold of its own
 }
 
 #[test]

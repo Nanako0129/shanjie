@@ -286,9 +286,15 @@ def decode(lex, syls, lm, profile, beam=64, start="<s>", demote=True):
                 d = demote_delta(table, reading, word)
                 for s, ws in hyps[i - L]:
                     sc = s + (lm.word(lam, ws[-1] if ws else start, word, lp) - d)
-                    surface = "".join(ws) + word
-                    if surface not in cand or sc > cand[surface][0]:
-                        cand[surface] = (sc, ws + (word,))
+                    key = ("".join(ws) + word, word)  # one path per (surface, last word): the next score depends on the last word
+                    if key not in cand or sc > cand[key][0]:
+                        cand[key] = (sc, ws + (word,))
         hyps[i] = sorted(cand.values(), key=lambda x: -x[0])[:beam]
     out = [(s + lm.eos(lam, ws[-1] if ws else start), ws) for s, ws in hyps[n]]
-    return sorted(out, key=lambda x: -x[0])
+    best, seen = [], set()  # the n-best the callers get has distinct surfaces: keep each surface's best path
+    for x in sorted(out, key=lambda x: -x[0]):
+        surface = "".join(x[1])
+        if surface not in seen:
+            seen.add(surface)
+            best.append(x)
+    return best

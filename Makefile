@@ -42,6 +42,7 @@ test-python:
 	python3 -m unittest tools/test_bench.py
 	cd experiments/s7a-tinylm && python3 -W ignore -m unittest test_fusegrid test_runsets
 	python3 -W ignore -m unittest experiments/x0c/test_x0c.py
+	python3 -m unittest reference/proto/test_recombine.py
 
 test-swift: rust
 	@$(call relink_if_stale,Debug)
