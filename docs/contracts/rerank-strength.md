@@ -10,7 +10,7 @@
 
 ## 1. 選值（main；選完凍結，commit 進研究紀錄，之後不改）
 
-分數檔（tinylm-v3 的分數，`judge.py --model v3`；X0c 用 v0.4.1 CLI、不開詞包、`--context` 產生，研究紀錄 2026-10-13 X0c 記了 dump 雜湊）：公開集合在 `~/.cache/shanjie/x0c/run/`，E2 調參期（5,761 列，列檔 `81c035b0…`）在 `~/side-project/shanjie-private/x0c/run/tune/`，discordtune 在 `~/side-project/shanjie-private/x0c/run/`。私人的部分照「Mac 不跑重運算」放 188 或在 Mac 上只跑選值（只讀分數檔、不解碼，量很小）。`R=~/.cache/shanjie/x0c/run; P=~/side-project/shanjie-private/x0c/run`，在 `experiments/e2-chateval/` 執行：
+分數檔（tinylm-v3 的分數，`judge.py --model v3`；X0c 用 v0.4.1 CLI、不開詞包、`--context` 產生，研究紀錄 2026-10-13 X0c 記了 dump 雜湊）：公開集合的分數檔在 repo 外的快取（`R`），E2 調參期（5,761 列，列檔 `81c035b0…`）與 discordtune 的分數檔在私人資料夾（`P`，調參期在 `P/tune`）。私人的部分照「Mac 不跑重運算」放 Mac 以外的機器，或在 Mac 上只跑選值（只讀分數檔、不解碼，量很小）。`R`、`P` 是那兩個資料夾，在 `experiments/e2-chateval/` 執行：
 
 1. **先重現標準**（不相等就停，§6）：
    - `python3 judge.py --scores $P/tune $R --sets chatclause --setting chat --model v3 --out /tmp/rs-c0 --select STD --tuning chatclause --weight 1 --cap 0.005` → 必須選出 α 0.3、τ 2、δ 0.25。
@@ -65,7 +65,7 @@
      - 兩條都要以 0 結束並印出 STD／CONS／AGGR 的表。
 3. **出貨門檻**（逐格、機械判斷；每一條不過的結果都寫在後面）：
    - (a) 任一格「改對 < 改壞 而且 p < 0.05」→ 該檔該設定寫成標準值。
-   - (b) 聊天積極：discordtune 淨值 ≥ 標準 且 lytune 淨值 ≥ 標準；書面積極：lytune 淨值 ≥ 標準 且 wikitypo 淨值 ≥ 標準。不過 → 該設定的積極寫成標準值。
+   - (b) 聊天積極：discordtune 淨值 ≥ 標準 且 lytune 淨值 ≥ 標準；書面積極：lytune 淨值 ≥ 標準 且 wikitypo 淨值不比標準少超過 1 列（〔修訂，2026-10-14〕原本是「≥ 標準」；wikitypo 只有 155 列，差 1 列在雜訊內，照維護者「自訂規則擋到設計就放寬」放寬，見 §10）。不過 → 該設定的積極寫成標準值。
    - (c) 保守：每一格改壞數 ≤ 標準。不過 → 該設定的保守寫成標準值。
    - (d) 聊天與書面各自判斷，可以只有一種設定有積極。
 4. **一致性**（main，dev302，兩種設定 × 三檔）：
@@ -90,7 +90,7 @@
 
 1. main：§1 選值與 §4.2–§4.3（私人部分只讀分數檔）。
 2. `pilotfish:security-executor`（worktree `../shanjie-strength`，分支 `feat/rerank-strength`；讀檔與 C ABI 屬安全審查範圍，先例 s7c2a、s7c2b、s7c2c）：§2、§3、§9 的每一項 FIX、格式與 ABI 與 CLI 測試（用合成的 v3 小檔，不用真模型）。本機測試：`make test-rust`、`make test-python`、`make test-swift`。**不改** `data/*.sha256`、CI 與 `release.yml` 的下載。
-3. main：先核對 `~/.cache/shanjie/work/s7a/tinylm-M.npz` 的 SHA-256 是 `32308122…`，再 `python3 experiments/s7a-tinylm/export_sjtl.py --npz ~/.cache/shanjie/work/s7a/tinylm-M.npz --out ~/.cache/shanjie/strength/tinylm-v3-levels.sjtl --type int8 --ngram-model data/lm/bigram.sjlm --chat 0.3 2 0.25 --formal 0.7 1 2 --levels <聊天保守 α τ δ 聊天積極 α τ δ 書面保守 α τ δ 書面積極 α τ δ>`。機械核對（`python3 -c` 比切片，結束碼 0，記進研究紀錄）：新檔 bytes [12,116) 等於 `data/lm/tinylm.sjtl` 的 [12,116)；新檔 212 之後等於舊檔 116 之後。然後 §4.4、§4.5（保留集一次）。
+3. main：先核對 S7a 的 `tinylm-M.npz`（repo 外）的 SHA-256 是 `32308122…`，再 `python3 experiments/s7a-tinylm/export_sjtl.py --npz <tinylm-M.npz> --out <repo 外的暫存>/tinylm-v3-levels.sjtl --type int8 --ngram-model data/lm/bigram.sjlm --chat 0.3 2 0.25 --formal 0.7 1 2 --levels <聊天保守 α τ δ 聊天積極 α τ δ 書面保守 α τ δ 書面積極 α τ δ>`。機械核對（`python3 -c` 比切片，結束碼 0，記進研究紀錄）：新檔 bytes [12,116) 等於 `data/lm/tinylm.sjtl` 的 [12,116)；新檔 212 之後等於舊檔 116 之後。然後 §4.4、§4.5（保留集一次）。
 4. main：§4.5 通過後**問維護者**能不能建資料 Release（名稱照 `docs/data-files.md` 的表：匯出格式變了發新的 tinylm Release，下一個編號；說明照 `docs/releases/README.md`，不標 Latest）；建好後下載回來核對雜湊。
 5. main：切換的 PR（照 `docs/data-files.md` 換版清單：雜湊檔、CI 與 `release.yml` 的下載、`cli/tests/golden.rs`、`Support.swift`、文件），和 executor 的 PR 合在同一個 PR 或緊接著的下一個；/code-review＋fresh verifier＋CI，merge commit。合併時的 verifier **不再跑保留集**：核對切換進來的檔 SHA-256 等於 §7.3 本機匯出、§4.5 量過的那個檔，引用研究紀錄的 §4.5 結果。
 6. 維護者：§4.6 實機。
@@ -98,7 +98,7 @@
 
 ## 8. executor 不可以做的事
 
-安裝軟體；啟動 App、呼叫 TIS、lsregister；碰 `~/Library`、鑰匙圈；讀 `~/side-project/shanjie-private`、`eval/holdout/`；建 Release、push、開 PR、留言；改 `data/*.sha256`、CI 或 `release.yml`；改選出的值或這份契約。
+安裝軟體；啟動 App、呼叫 TIS、lsregister；碰 `~/Library`、鑰匙圈；讀維護者的私人資料、`eval/holdout/`；建 Release、push、開 PR、留言；改 `data/*.sha256`、CI 或 `release.yml`；改選出的值或這份契約。
 
 ## 9. 安全審查（`pilotfish:security-reviewer`，2026-10-14）與處置
 
