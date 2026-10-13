@@ -43,9 +43,9 @@ fn rec(context: &str, reading: &str, word: &str, weight: f64, day: i64) -> Recor
 fn sample() -> Vec<Record> {
     vec![
         rec("管把", "ㄅㄚˇ", "把", 1.0, 20_000),
-        rec("^", "ㄐㄧㄣ-ㄊㄧㄢ", "今天", 0.75, 20_001),
+        rec("^>$", "ㄐㄧㄣ-ㄊㄧㄢ", "今天", 0.75, 20_001),
         rec("", "ㄓㄢˋ-ㄐㄧ", "戰績", 2.5, 20_002),
-        rec("他", "_punct_，", "，", 0.125, 0),
+        rec("他們", "_punct_，", "，", 0.125, 0),
     ]
 }
 
@@ -116,21 +116,21 @@ fn records_that_would_not_read_back_are_never_written() {
     let (_p, dir) = temp();
     let (store, _, _) = LearnStore::open(&dir).unwrap();
     let bad = vec![
-        rec("中", "ㄅㄚˇ", "把\n#shanjie-learning v1", 1.0, 1),
-        rec("中", "ㄅㄚˇ", "a\tb", 1.0, 1),
+        rec("中文", "ㄅㄚˇ", "把\n#shanjie-learning v1", 1.0, 1),
+        rec("中文", "ㄅㄚˇ", "a\tb", 1.0, 1),
         rec("abc", "ㄅㄚˇ", "把", 1.0, 1),
         rec("中文字", "ㄅㄚˇ", "把", 1.0, 1),
-        rec("中", "", "把", 1.0, 1),
-        rec("中", "ㄅㄚˇ", "", 1.0, 1),
-        rec("中", "ㄅㄚˇ", "把", f64::NAN, 1),
-        rec("中", "ㄅㄚˇ", "把", -1.0, 1),
-        rec("中", "ㄅㄚˇ", "把", 1.0, -1),
+        rec("中文", "", "把", 1.0, 1),
+        rec("中文", "ㄅㄚˇ", "", 1.0, 1),
+        rec("中文", "ㄅㄚˇ", "把", f64::NAN, 1),
+        rec("中文", "ㄅㄚˇ", "把", -1.0, 1),
+        rec("中文", "ㄅㄚˇ", "把", 1.0, -1),
     ];
     let mut all = bad.clone();
-    all.push(rec("中", "ㄅㄚˇ", "把", 1.0, 1));
+    all.push(rec("中文", "ㄅㄚˇ", "把", 1.0, 1));
     store.save(&all).unwrap();
     let text = fs::read_to_string(dir.join(FILE)).unwrap();
-    assert_eq!(text, format!("{HEADER}\n中\tㄅㄚˇ\t把\t1\t1\n"));
+    assert_eq!(text, format!("{HEADER}\n中文\tㄅㄚˇ\t把\t1\t1\n"));
 }
 
 /// Contract section 12: a single-character record under ^ or the global key (from a file written before it) is skipped at
@@ -156,22 +156,69 @@ fn single_character_global_records_are_not_loaded_or_written() {
     assert_eq!(fs::read_to_string(dir.join(FILE)).unwrap(), body);
 }
 
+/// Contract section 14 (rules 7 and 8), the one migration point `valid`: the synthetic sentence-start keys
+/// survive a save and a load as written; a single character under a synthetic key, under a one-Han key, and
+/// every bare "^" record are not loaded (counted as bad lines), and a full rewrite leaves none of them in the file.
+#[test]
+fn synthetic_keys_round_trip_and_old_records_are_dropped() {
+    let (_p, dir) = temp();
+    let (store, _, _) = LearnStore::open(&dir).unwrap();
+    let two = "ㄨㄛˇ-ㄕˋ";
+    let kept = vec![
+        rec("^>$", two, "我試", 1.0, 20_000),
+        rec("^>ㄕˋ", two, "我試", 1.0, 20_000),
+        rec("^>ㄉㄜ˙", two, "我的", 1.0, 20_000),
+        rec("^>_punct_，", two, "我是", 1.0, 20_000),
+        rec("^>ㄒㄧㄢ-ㄕㄥ", two, "我是", 1.0, 20_000), // a reading may hold "-": the key field is not split
+        rec("他們", "ㄗㄞˋ", "再", 1.0, 20_000),         // a single character under exactly two Han characters
+    ];
+    let dropped = vec![
+        rec("^>ㄕˋ", "ㄗㄞˋ", "再", 1.0, 20_000), // a single character under a synthetic key
+        rec("他", "ㄗㄞˋ", "再", 1.0, 20_000),    // a single character under a one-Han key
+        rec("^", two, "我試", 1.0, 20_000),       // every bare "^" record (written before rule 8)
+        rec("^", "ㄗㄞˋ", "再", 1.0, 20_000),
+        rec("^>", two, "我試", 1.0, 20_000),      // a synthetic key with no reading
+        rec("^>ㄕ\tˋ", two, "我試", 1.0, 20_000),
+    ];
+    let all: Vec<Record> = dropped.iter().take(1).chain(&kept).chain(dropped.iter().skip(1)).cloned().collect();
+    store.save(&all).unwrap();
+    let want = format!("{HEADER}\n{}", kept.iter().map(|r| format!("{}\t{}\t{}\t1\t20000\n", r.context, r.reading.join("-"), r.word)).collect::<String>());
+    assert_eq!(fs::read_to_string(dir.join(FILE)).unwrap(), want, "save writes no illegal key");
+    // a file that has the old records: they are skipped at load, and a full rewrite of what loaded drops them
+    let mut text = want.clone();
+    for r in &dropped {
+        let _ = std::fmt::Write::write_fmt(&mut text, format_args!("{}\t{}\t{}\t1\t20000\n", r.context, r.reading.join("-"), r.word));
+    }
+    fs::write(dir.join(FILE), text).unwrap();
+    let (store, records, opened) = LearnStore::open(&dir).unwrap();
+    assert_eq!(opened, Opened::Loaded { skipped: dropped.len() });
+    assert!(records == kept, "records differ (contents not printed: R2)");
+    let l = Learner::from_records(records.clone());
+    assert!(l.words_of(&["ㄗㄞˋ".to_string()]) == ["再"], "only the one under 他們 is visible");
+    assert!(l.records().iter().all(|r| r.context != "^" && r.context != "他"));
+    store.save(&records).unwrap();
+    assert_eq!(fs::read_to_string(dir.join(FILE)).unwrap(), want, "the rewrite leaves none of them");
+    let (_, again, opened) = LearnStore::open(&dir).unwrap();
+    assert_eq!(opened, Opened::Loaded { skipped: 0 });
+    assert!(again == kept, "records differ (contents not printed: R2)");
+}
+
 #[test]
 fn bad_lines_are_skipped_one_by_one() {
     let (_p, dir) = temp();
     fs::create_dir(&dir).unwrap();
     let lines = [
         HEADER,
-        "中\tㄅㄚˇ\t把\t1\t20000",     // good
-        "中\tㄅㄚˇ\t把\tNaN\t20000",   // NaN
-        "中\tㄅㄚˇ\t把\tinf\t20000",   // inf
-        "中\tㄅㄚˇ\t把\t-1\t20000",    // negative
+        "中文\tㄅㄚˇ\t把\t1\t20000",     // good
+        "中文\tㄅㄚˇ\t把\tNaN\t20000",   // NaN
+        "中文\tㄅㄚˇ\t把\tinf\t20000",   // inf
+        "中文\tㄅㄚˇ\t把\t-1\t20000",    // negative
         "中文字\tㄅㄚˇ\t把\t1\t20000", // context over 2 characters
         "a\tㄅㄚˇ\t把\t1\t20000",      // context not Han
-        "中\tㄅㄚˇ\t把\t1\tx",         // bad day
-        "中\tㄅㄚˇ\t把\t1",            // 4 fields
-        "中\tㄅㄚˇ\t把\t1\t1\tx",      // 6 fields
-        "^\tㄅㄚˇ-ㄅㄚˇ\t把手\t0.5\t20001", // good, sentence start (two characters)
+        "中文\tㄅㄚˇ\t把\t1\tx",         // bad day
+        "中文\tㄅㄚˇ\t把\t1",            // 4 fields
+        "中文\tㄅㄚˇ\t把\t1\t1\tx",      // 6 fields
+        "^>$\tㄅㄚˇ-ㄅㄚˇ\t把手\t0.5\t20001", // good, sentence start (synthetic key)
         "\tㄅㄚˇ-ㄅㄚˇ\t把手\t0.5\t20001", // good, global (two characters)
         "",                           // blank: not counted
     ];
@@ -181,8 +228,8 @@ fn bad_lines_are_skipped_one_by_one() {
     let (_, records, opened) = LearnStore::open(&dir).unwrap();
     assert_eq!(opened, Opened::Loaded { skipped: 9 });
     assert!(records == vec![
-        rec("中", "ㄅㄚˇ", "把", 1.0, 20_000),
-        rec("^", "ㄅㄚˇ-ㄅㄚˇ", "把手", 0.5, 20_001),
+        rec("中文", "ㄅㄚˇ", "把", 1.0, 20_000),
+        rec("^>$", "ㄅㄚˇ-ㄅㄚˇ", "把手", 0.5, 20_001),
         rec("", "ㄅㄚˇ-ㄅㄚˇ", "把手", 0.5, 20_001),
     ], "records differ (contents not printed: R2)");
 }
@@ -191,7 +238,7 @@ fn bad_lines_are_skipped_one_by_one() {
 fn bad_header_is_renamed_to_corrupt_0600_one_copy() {
     let (_p, dir) = temp();
     fs::create_dir(&dir).unwrap();
-    for (i, body) in ["#shanjie-learning v2\n", "not a header\n中\tㄅㄚˇ\t把\t1\t1\n", ""].iter().enumerate() {
+    for (i, body) in ["#shanjie-learning v2\n", "not a header\n中文\tㄅㄚˇ\t把\t1\t1\n", ""].iter().enumerate() {
         fs::write(dir.join(FILE), body).unwrap();
         fs::set_permissions(dir.join(FILE), fs::Permissions::from_mode(0o644)).unwrap();
         let (_, records, opened) = LearnStore::open(&dir).unwrap();
@@ -224,7 +271,7 @@ fn oversized_file_is_corrupt_without_being_read() {
 fn file_exactly_at_the_cap_still_loads() {
     let (_p, dir) = temp();
     fs::create_dir(&dir).unwrap();
-    let mut body = format!("{HEADER}\n中\tㄅㄚˇ\t把\t1\t1\n").into_bytes();
+    let mut body = format!("{HEADER}\n中文\tㄅㄚˇ\t把\t1\t1\n").into_bytes();
     body.resize(MAX_BYTES as usize, b'\n');
     fs::write(dir.join(FILE), body).unwrap();
     let (_, records, opened) = LearnStore::open(&dir).unwrap();
@@ -237,7 +284,7 @@ fn symlink_in_place_of_the_file_is_not_followed() {
     let (p, dir) = temp();
     fs::create_dir(&dir).unwrap();
     let target = p.join("elsewhere.tsv");
-    let content = format!("{HEADER}\n中\tㄅㄚˇ\t把\t1\t1\n");
+    let content = format!("{HEADER}\n中文\tㄅㄚˇ\t把\t1\t1\n");
     fs::write(&target, &content).unwrap();
     fs::set_permissions(&target, fs::Permissions::from_mode(0o644)).unwrap();
     symlink(&target, dir.join(FILE)).unwrap();
@@ -336,13 +383,13 @@ fn records_100_days_old_are_pruned_across_save_and_load() {
     let (_p, dir) = temp();
     let today = 20_100;
     let (store, _, _) = LearnStore::open(&dir).unwrap();
-    store.save(&[rec("中", "ㄅㄚˇ", "把", 1.0, today - 100), rec("中", "ㄅㄚˇ", "吧", 1.0, today)]).unwrap();
+    store.save(&[rec("中文", "ㄅㄚˇ", "把", 1.0, today - 100), rec("中文", "ㄅㄚˇ", "吧", 1.0, today)]).unwrap();
     let (_, records, _) = LearnStore::open(&dir).unwrap();
     let mut learner = Learner::from_records(records);
     learner.prune(today);
     store.save(learner.records()).unwrap();
     let (_, records, _) = LearnStore::open(&dir).unwrap();
-    assert!(records == vec![rec("中", "ㄅㄚˇ", "吧", 1.0, today)], "records differ (contents not printed: R2)");
+    assert!(records == vec![rec("中文", "ㄅㄚˇ", "吧", 1.0, today)], "records differ (contents not printed: R2)");
 }
 
 /// §6.13: the same record appended twice, then reopened: one record, the later weight and day.
@@ -352,14 +399,14 @@ fn append_twice_then_open_keeps_the_last_line() {
     let (store, _, _) = LearnStore::open(&dir).unwrap();
     store.save(&sample()).unwrap();
     store.append(&[rec("管把", "ㄅㄚˇ", "把", 2.0, 20_010)]).unwrap();
-    store.append(&[rec("管把", "ㄅㄚˇ", "把", 3.5, 20_020), rec("中", "ㄅㄚˇ", "吧", 1.0, 20_020)]).unwrap();
+    store.append(&[rec("管把", "ㄅㄚˇ", "把", 3.5, 20_020), rec("中文", "ㄅㄚˇ", "吧", 1.0, 20_020)]).unwrap();
     assert_eq!(fs::read_to_string(dir.join(FILE)).unwrap().lines().count(), 1 + 4 + 3);
     assert_eq!(mode(&dir.join(FILE)), 0o600);
     let (_, records, opened) = LearnStore::open(&dir).unwrap();
     assert_eq!(opened, Opened::Loaded { skipped: 0 });
     let mut want = sample();
     want[0] = rec("管把", "ㄅㄚˇ", "把", 3.5, 20_020);
-    want.push(rec("中", "ㄅㄚˇ", "吧", 1.0, 20_020));
+    want.push(rec("中文", "ㄅㄚˇ", "吧", 1.0, 20_020));
     assert!(records == want, "records differ (contents not printed: R2)");
 }
 

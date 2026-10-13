@@ -5,7 +5,9 @@
 //! context key, reading (syllables joined by `-`, as in the lexicon), word, weight, day. A record
 //! that would not read back as itself (a tab, newline or control character in a field, a `-` or an
 //! empty syllable in the reading, a bad context, weight or day) is never written and is skipped one
-//! line at a time on load. When a (context, reading, word) appears on several lines, the last one
+//! line at a time on load. A bad context includes the ones contract §14 retired: a single character
+//! under a one-Han key or a synthetic key, and every bare "^" (sentence-start records are `^>` plus
+//! the next syllable's reading, `^>$` when none follows). When a (context, reading, word) appears on several lines, the last one
 //! wins: `append` adds newer versions of records at the end (revision one, §4 and §11).
 //!
 //! Directory 0700 with an owner check. Two write paths (the engine picks one, §4):
@@ -19,7 +21,7 @@
 //! bad header or an oversized file is renamed to `learning.tsv.corrupt` (0600, one copy). Nothing
 //! here logs: no path and no record ever leaves this module except as data.
 
-use crate::learn::{context_key, is_single, Record, GLOBAL, SENTINEL};
+use crate::learn::{context_key, is_full_context, is_single, Record, GLOBAL, NEXT_PREFIX, SENTINEL};
 use std::fmt::Write as _;
 use std::fs::{self, DirBuilder, File, OpenOptions, Permissions};
 use std::io::{ErrorKind, Read, Write};
@@ -114,13 +116,28 @@ fn clean(s: &str) -> bool {
     !s.is_empty() && !s.chars().any(char::is_control)
 }
 
-/// Whether `r` survives a write and a read unchanged; the one rule for both directions. A
-/// single-character record under "^" or the global key (written before contract §12) is invalid:
-/// skipped at load, so it counts toward nothing (capacity, has_reading, words_of, is_empty) and is
-/// absent after the first full rewrite. The one place that migrates them.
+/// A legal context key for `r` (s4-learning §14): `GLOBAL` for words of 2+ characters; one or two Han
+/// characters (a single-character word only with exactly two, rule 7); `NEXT_PREFIX` plus a clean,
+/// non-empty reading (`$` when nothing follows) for words of 2+ characters (rule 8). A bare "^" is
+/// never legal: sentence-start records live under the synthetic keys.
+fn legal_context(r: &Record) -> bool {
+    let c = r.context.as_str();
+    if c == GLOBAL {
+        return !is_single(&r.word);
+    }
+    if let Some(next) = c.strip_prefix(NEXT_PREFIX) {
+        return !is_single(&r.word) && clean(next);
+    }
+    c != SENTINEL && context_key(c) == c && (!is_single(&r.word) || is_full_context(c))
+}
+
+/// Whether `r` survives a write and a read unchanged; the one rule for both directions. A record under
+/// an illegal context key (`legal_context`) is invalid: skipped at load, so it counts toward nothing
+/// (capacity, has_reading, words_of, is_empty) and is absent after the first full rewrite. This is the
+/// one place that migrates the records written before contract §12 (single character under "^" or the
+/// global key) and before §14 (single character under a one-character key, every bare "^").
 fn valid(r: &Record) -> bool {
-    (r.context == GLOBAL || context_key(&r.context) == r.context)
-        && !((r.context == GLOBAL || r.context == SENTINEL) && is_single(&r.word))
+    legal_context(r)
         && !r.reading.is_empty()
         && r.reading.iter().all(|s| clean(s) && !s.contains('-'))
         && clean(&r.word)
