@@ -125,12 +125,12 @@
 
 ### 保留集
 
-照 `CLAUDE.md`：等要打 tag 的 commit 定下來後跑一次，由 fresh verifier 以 `evalstats compare --net` 比上一版與新版，main 把 n 與兩版的 top1（可再加 `fixed`、`broken`、`p`）填進 results JSON 的 `holdout`（`{"chat": {n, top1, fixed, broken, p}, "formal": ...}`）。
+照 `CLAUDE.md` 一片只跑一次：由 fresh verifier 以 `evalstats compare --net` 比上一版與新版，main 把 n 與兩版的 top1（可再加 `fixed`、`broken`、`p`）和實際量的 commit 填進 results JSON 的 `holdout`（`{"commit": …, "chat": {n, top1, fixed, broken, p}, "formal": ...}`）。下表版本下面的 commit 是保留集實際量的那一個；它和上面「出貨設定」表被量的 commit 在 `docs/verification.md` 列的路徑上必須沒有差異（契約 §2.3、§5）。
 
 | 版本 | chat | formal |
 |---|---|---|
-| v0.4.0<br>`01a3455` | —（尚未量測） | —（尚未量測） |
-| v0.4.1<br>`3503fd8` | —（尚未量測） | —（尚未量測） |
+| v0.4.0<br>`01a3455` | 79.30%<br>180/227 | 81.06%<br>184/227 |
+| v0.4.1<br>`50268d3` | 84.14%<br>191/227<br>+11 / −0，p=0.000977 | 82.38%<br>187/227<br>+3 / −0，p=0.25 |
 
 ### 速度與記憶體（同場）
 

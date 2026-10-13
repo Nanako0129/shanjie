@@ -387,7 +387,7 @@ class SuiteV2(Tmp):
         recs = [{"ref": "v0.4.0", "version": "v0.4.0", "sha": "a" * 40, "models": {"bigram.sjlm": "a" * 64}, "flags": ["--context"], "accuracy": {"dev302/chat": cell}, "speed": speed},
                 {"ref": "c", "version": "v0.4.1", "sha": "b" * 40, "models": {"bigram.sjlm": "a" * 64}, "flags": ["--context", "--tinylm", "<file>"],
                  "accuracy": {"dev302/chat": cell, "discordtune/chat": {"missing": True}}, "vs_prev": {"dev302/chat": {"fixed": 3, "broken": 1, "p": 0.625}},
-                 "speed": dict(speed, rerank_p50_ms=7.0, rerank_p95_ms=12.0), "holdout": {"chat": {"n": 227, "top1": 191, "fixed": 11, "broken": 0, "p": 0.001}}}]
+                 "speed": dict(speed, rerank_p50_ms=7.0, rerank_p95_ms=12.0), "holdout": {"commit": "e" * 40, "chat": {"n": 227, "top1": 191, "fixed": 11, "broken": 0, "p": 0.001}}}]
         v2 = {"label": "v0.4.0+v0.4.1", "suite": "v2", "date": "2026-10-13", "env": env, "versions": recs}
         out = os.path.join(bench.ROOT, "docs/benchmark.md")
         with open(os.path.join(bench.RESULTS, "2026-10-05-baseline.json"), "w") as f:
@@ -404,10 +404,23 @@ class SuiteV2(Tmp):
         self.assertIn("## 套件 v2", tail)
         self.assertIn("+3 / −1，p=0.625", tail)
         self.assertIn("191/227", tail)
+        self.assertIn("| v0.4.1<br>`eeeeeee` |", tail)  # the holdout row names the commit the holdout ran on
+        self.assertIn("| v0.4.0<br>`aaaaaaa` |", tail)  # no commit recorded: the measured one
         self.assertIn("7.00／12.00 ms", tail)
         self.assertNotIn("v0.4.1", before)
         bench.cmd_table(None)  # deterministic
         self.assertEqual(open(out, encoding="utf-8").read(), after)
+
+    def test_rerun_never_overwrites_holdout_numbers(self):
+        bench.RESULTS = os.path.join(self.td, "results")
+        os.makedirs(bench.RESULTS)
+        with open(os.path.join(bench.RESULTS, "v2-v0.4.0+v0.4.1.json"), "w") as f:
+            json.dump({"versions": [{"version": "v0.4.1", "holdout": {"chat": {"n": 1, "top1": 1}}}]}, f)
+        args = types.SimpleNamespace(lm=None, base=None, override_packs=None, refs=["v0.4.0", "v0.4.1"], as_=None, label=None, private_root=self.td)
+        err = io.StringIO()
+        with self.assertRaises(SystemExit), contextlib.redirect_stderr(err):
+            bench.cmd_run2(args)  # stops before preflight and any build
+        self.assertIn("holdout numbers", err.getvalue())
 
 
 if __name__ == "__main__":
