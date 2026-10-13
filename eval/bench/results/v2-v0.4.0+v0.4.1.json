@@ -219,10 +219,10 @@
     "rows_match": "302/302",
     "keys": 8336,
     "rounds": 3,
-    "p95_us": 2189.1,
-    "max_us": 6888.9,
-    "load_ms": 764.8,
-    "rss_mb": 279.359375
+    "p95_us": 2697.3,
+    "max_us": 107530.1,
+    "load_ms": 767.1,
+    "rss_mb": 285.1875
    }
   },
   {
@@ -504,12 +504,12 @@
     "rows_match": "302/302",
     "keys": 8336,
     "rounds": 3,
-    "p95_us": 2156.9,
-    "max_us": 22438.8,
-    "load_ms": 777.2,
-    "rss_mb": 283.375,
-    "rerank_p50_ms": 6.701,
-    "rerank_p95_ms": 9.267
+    "p95_us": 2538.5,
+    "max_us": 97757.4,
+    "load_ms": 855.2,
+    "rss_mb": 288.96875,
+    "rerank_p50_ms": 7.061,
+    "rerank_p95_ms": 10.989
    }
   }
  ],
@@ -517,7 +517,7 @@
   "machine": "Mac17,3",
   "macos": "27.0.1",
   "cargo": "cargo 1.97.1 (c980f4866 2026-06-30) (Homebrew)",
-  "load_avg_start": 5.07861328125,
-  "load_avg_end": 4.2119140625
+  "load_avg_start": 5.2216796875,
+  "load_avg_end": 13.9033203125
  }
 }

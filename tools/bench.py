@@ -702,7 +702,8 @@ def version_labels(refs, as_):
         labels[-1] = as_
     for l in labels:
         if l not in VERSIONS2:
-            die(f"{l!r} is not in the suite-v2 settings table ({', '.join(VERSIONS2)}); name an untagged commit with --as VERSION")
+            die(f"{l!r} is not in the suite-v2 settings table ({', '.join(VERSIONS2)}): add its release, shipped flags and setting tag to VERSIONS2 "
+                f"in tools/bench.py first (docs/contracts/sbench-v2.md 2.1); an untagged commit is named with --as VERSION")
     if len(set(labels)) != len(labels):
         die("the same version twice")
     return labels
@@ -759,7 +760,8 @@ def cli_env(anchor):
 
 
 def cell_cmd(ver, prof, rows, dump, rowstats, anchor):
-    return [ver.cli, "--lm", ver.lm, "--profile", prof, "--rows", rows, "--dump", dump, "--rowstats", rowstats] + ship_flags(ver, anchor) + (["--tinylm", ver.tl] if ver.tl else [])
+    return ([ver.cli, "--lm", ver.lm, "--profile", prof, "--rows", rows] + (["--dump", dump] if dump else []) + ["--rowstats", rowstats]
+            + ship_flags(ver, anchor) + (["--tinylm", ver.tl] if ver.tl else []))
 
 
 def parse_summary(out):
@@ -794,7 +796,8 @@ def run_cell2(ctx, ver, name, prof, anchor):
     """One CLI run with the version's shipped flags; the result is the CLI's chosen sentence (rowstats), not the dump's first row."""
     rows = ctx.files[name]
     dump, rs = cell_paths(ctx, ver, name, prof, anchor)
-    m = parse_summary(sh(cell_cmd(ver, prof, rows, dump, rs, anchor), cwd=ver.dir, env=cli_env(anchor)))
+    check = not ver.tl and not anchor  # no rerank: the dump's first row is the chosen one, so the tool's own lenient scoring must agree row for row
+    m = parse_summary(sh(cell_cmd(ver, prof, rows, dump if check else None, rs, anchor), cwd=ver.dir, env=cli_env(anchor)))
     want = expected_tag(ver, prof, anchor)
     if m["tag"] != want:
         raise RuntimeError(f"{name}/{prof}: CLI setting tag {m['tag']} != {want} from the settings table")
@@ -803,8 +806,9 @@ def run_cell2(ctx, ver, name, prof, anchor):
     ok = parse_rowstats(rs, m["n"])
     if sum(ok) != m["top1"]:
         raise RuntimeError(f"{name}/{prof}: rowstats top1 {sum(ok)} != CLI summary top1 {m['top1']}")
-    if not ver.tl and not anchor:  # no rerank: the dump's first row is the chosen one, so the tool's own lenient scoring must agree row for row
+    if check:
         res, ok2 = score(rows, dump)
+        os.remove(dump)  # read once here, never reused
         if ok2 != ok or res["top1_sha256"] != m["top1_sha256"]:
             raise RuntimeError(f"{name}/{prof}: top1 recomputed from the dump disagrees with rowstats ({res['top1']} vs {m['top1']})")
     return {"n": m["n"], "top1": m["top1"], "oracle64": m["oracle64"], "top1_sha256": m["top1_sha256"], "tag": m["tag"]}, ok
@@ -846,13 +850,18 @@ def measure_speed2(ctx, vers):
                     continue
                 m["rss_mb"] = ru.ru_maxrss / 2 ** 20  # macOS reports bytes
                 runs[v.sha].append(m)
-                if v.tl:  # rerank latency the CLI prints on stderr, run alone so the parallel cells do not skew it
-                    r = subprocess.run(cell_cmd(v, "chat", rows, td + "/rr.dump", td + "/rr.rs", False), capture_output=True, text=True, cwd=v.dir, env=cli_env(False))
-                    g = RERANK.search(r.stderr)
-                    if r.returncode or not g:
-                        errs[v.sha] = f"rerank timing run failed ({r.returncode}): {r.stderr[-300:]}"
-                        continue
-                    rr[v.sha].append((float(g.group(2)), float(g.group(3))))
+        # rerank latency the CLI prints on stderr: after every replay round, so no replay starts on a CPU a rerank run just heated,
+        # and alone, so the parallel accuracy cells do not skew it
+        for rnd in range(3):
+            for v in vers:
+                if not v.tl or v.sha in errs:
+                    continue
+                r = subprocess.run(cell_cmd(v, "chat", rows, None, td + "/rr.rs", False), capture_output=True, text=True, cwd=v.dir, env=cli_env(False))
+                g = RERANK.search(r.stderr)
+                if r.returncode or not g:
+                    errs[v.sha] = f"rerank timing run failed ({r.returncode}): {r.stderr[-300:]}"
+                    continue
+                rr[v.sha].append((float(g.group(2)), float(g.group(3))))
     out = {}
     for v in vers:
         if v.sha in errs:
@@ -893,9 +902,13 @@ def preflight2(args):
 def cmd_run2(args):
     if args.lm:
         die("--lm is not used by suite v2 (models come from data/*.sha256 and ~/.cache/shanjie/bench/models)")
+    if args.base:
+        die("--base belongs to suite v1; suite v2 compares each version with the ref before it")
     ctx = preflight2(args)
     anchor = args.override_packs == "off"
     labels = version_labels(args.refs, args.as_)
+    if anchor and any(l not in ANCHOR for l in labels):
+        die(f"--override-packs off checks S7h's anchor, which exists only for {', '.join(ANCHOR)}")
     args.label = args.label or "+".join(labels)
     cells = [(n, p) for n in SETS2 if n in ctx.files for p in (["chat"] if anchor else PROFILES2) if not anchor or n in ANCHOR[labels[0]]]
     load0 = os.getloadavg()[0]
@@ -952,13 +965,12 @@ def cmd_run2(args):
         rec["vs_prev"] = {}
         for (n, p) in cells:
             cell = f"{n}/{p}"
-            if (v.sha, n, p) not in oks or (pv.sha, n, p) not in oks:
+            if (v.sha, n, p) not in oks:  # this version's cell failed; the error is in its accuracy entry
                 continue
-            new, old, nrows = oks[(v.sha, n, p)], oks[(pv.sha, n, p)], rec["accuracy"][cell]["n"]
-            if not len(new) == len(old) == nrows:
-                die(f"{v.ref} {cell}: row counts differ (new {len(new)}, previous {len(old)}, set {nrows})")
-            if sum(old) != prec["accuracy"][cell]["top1"]:
-                die(f"{pv.ref} {cell}: per-row top1 {sum(old)} != recorded top1 {prec['accuracy'][cell]['top1']}")
+            if (pv.sha, n, p) not in oks:
+                rec["vs_prev"][cell] = {"error": "previous version's cell failed: " + prec["accuracy"][cell].get("error", "")[-200:]}
+                continue
+            new, old = oks[(v.sha, n, p)], oks[(pv.sha, n, p)]  # same set file, both checked against its row count in run_cell2
             fixed = sum(a and not b for a, b in zip(new, old))
             broken = sum(b and not a for a, b in zip(new, old))
             rec["vs_prev"][cell] = {"fixed": fixed, "broken": broken, "p": mcnemar(fixed, broken)}
@@ -987,8 +999,8 @@ def render_v2(results):
     for res in results:
         for rec in res["versions"]:
             L.append(f"| {rec['version']} | `{rec['sha'][:7]}` | " + "、".join(f"{n} `{h[:8]}`" for n, h in rec["models"].items()) + " | `" + " ".join(rec["flags"]) + "` |")
-    L += ["", "依據：App 預設開動漫詞包、組字用前文；v0.4.1 起語意校正預設開、v0.4.0 沒有；降權表兩邊預設都開。**CLI 沒有模擬的 App 行為**：本機學習（CLI 不學）；殼在每個鍵之後非同步重排、CLI 每列只排一次；殼的前文來自輸入框、CLI 用列檔的前文欄；聊天或書面由 App 決定，這裡兩種都量。所以這張表不是「和 App 完全相同」，但這些差異不影響 v0.4.0 → v0.4.1 的比較。", ""]
-    L += ["### 準確率（top1，寬鬆對照）", "", "每格：top1%、答對／列數、和上一版比的「修好 / 弄壞，McNemar 雙尾精確 p」。cvtune、wikitune、lytune、wikitypo 與 dev302 在調參時被看過，不是未見資料；唯一沒被看過的是保留集。"]
+    L += ["", "依據：App 預設開動漫詞包、組字用前文；語意校正從 v0.4.1 起預設開；降權表預設開。**CLI 沒有模擬的 App 行為**：本機學習（CLI 不學）；殼在每個鍵之後非同步重排、CLI 每列只排一次；殼的前文來自輸入框、CLI 用列檔的前文欄；聊天或書面由 App 決定，這裡兩種都量。所以這張表不是「和 App 完全相同」。推論（沒量過）：App 裡在重排結果回來之前就送出的列保留 n-gram 的第一名，所以開著語意校正的版本在 App 裡的改善可能比表上小；本機學習對各版的影響也沒量。", ""]
+    L += ["### 準確率（top1，寬鬆對照）", "", "每格：top1%、答對／列數、和上一版比的「修好 / 弄壞，McNemar 雙尾精確 p」。錯字回報、fw、cvtune、wikitune、lytune、wikitypo、dev302 與 discordtune 在調參或選值時被看過，不是未見資料；dev302 是挑戰集，只當參考；唯一沒被看過的是保留集。"]
     for res in results:
         vs = res["versions"]
         L += ["", f"#### {res['label']}（{res['date']}）", "", "| 集合／設定 | 列數 | " + " | ".join(r["version"] for r in vs) + " |", "|---|---|" + "---|" * len(vs)]
@@ -996,7 +1008,7 @@ def render_v2(results):
             n = next((r["accuracy"][c]["n"] for r in vs if "n" in r.get("accuracy", {}).get(c, {})), "—")
             L.append(f"| {c} | {n} | " + " | ".join(cell_text(r, c) if "accuracy" in r else "失敗" for r in vs) + " |")
     L += ["", "### 保留集", "",
-          "照 `CLAUDE.md`：等要打 tag 的 commit 定下來後跑一次，由 fresh verifier 以 `evalstats compare --net` 比 v0.4.0 與新版，main 把 n 與兩版的 top1（可再加 `fixed`、`broken`、`p`）填進 results JSON 的 `holdout`（`{\"chat\": {n, top1, fixed, broken, p}, \"formal\": ...}`）。", "",
+          "照 `CLAUDE.md`：等要打 tag 的 commit 定下來後跑一次，由 fresh verifier 以 `evalstats compare --net` 比上一版與新版，main 把 n 與兩版的 top1（可再加 `fixed`、`broken`、`p`）填進 results JSON 的 `holdout`（`{\"chat\": {n, top1, fixed, broken, p}, \"formal\": ...}`）。", "",
           "| 版本 | chat | formal |", "|---|---|---|"]
     for res in results:
         for rec in res["versions"]:
@@ -1004,7 +1016,7 @@ def render_v2(results):
             f = lambda p: "—（尚未量測）" if p not in h else f"{100 * h[p]['top1'] / h[p]['n']:.2f}%<br>{h[p]['top1']}/{h[p]['n']}" + (f"<br>+{h[p]['fixed']} / −{h[p]['broken']}，p={h[p]['p']:.3g}" if "fixed" in h[p] else "")
             L.append(f"| {rec['version']}<br>`{rec['sha'][:7]}` | {f('chat')} | {f('formal')} |")
     L += ["", "### 速度與記憶體（同場）", "",
-          "重播程式用該版的 `bigram.sjlm` 與 `classes.sjc`，**不載詞包、沒有前文、沒有語意校正**（重播是同步打鍵，語意校正是非同步、不在按鍵路徑上）；標準排列、chat、dev302，每版 3 輪輪流，p95 取中位數。「重播＝CLI」是和另跑的一格同設定 CLI（`--profile chat`，不帶 `--context`、`--packs`、`--tinylm`）逐列比。重排是 CLI 在 stderr 印的語意校正每列耗時（p50／p95，三輪中位數，單獨跑）。", "",
+          "重播程式用該版的 `bigram.sjlm` 與 `classes.sjc`，**不載詞包、沒有前文、沒有語意校正**（重播是同步打鍵，語意校正是非同步、不在按鍵路徑上）；標準排列、chat、dev302，每版 3 輪輪流，p95 取中位數。「重播＝CLI」是和另跑的一格同設定 CLI（`--profile chat`，不帶 `--context`、`--packs`、`--tinylm`）逐列比。重排是 CLI 在 stderr 印的語意校正每列耗時（p50／p95：三輪重播都跑完之後再跑三次、取中位數，不和其他格同時跑）。", "",
           "| 版本 | 日期 | 機型／macOS／load avg | p95 | max | 載入 | RSS | 按鍵數 | 重播＝CLI | 重排 p50／p95 |", "|---|---|---|---|---|---|---|---|---|---|"]
     for res in results:
         e = res["env"]
@@ -1020,7 +1032,7 @@ def render_v2(results):
           "- 集合凍結：dev302、typing76、probe 與套件 v1 同檔；user-reported 是 `eval/dev/user-reported.txt` 3503fd8 時的前 80 列、fw 是 `eval/rerank/s7e-function-words.txt`（兩者在 `eval/bench/suite-v2/`）；cvtune、wikitune、lytune、wikitypo 不進 repo；SHA-256 都寫死在工具裡。計分用套件 v1 的 `variants.tsv`。",
           "- 每一版的模型雜湊取自該版 `data/*.sha256`，檔案由 main 放在 `~/.cache/shanjie/bench/models/<sha256>/`；工具為每版組只含 `bigram.sjlm` 與 `classes.sjc` 的資料夾，不讓 CLI 自動載入 `kn.sjkn`。",
           "- 每一格的 CLI 摘要行設定標記必須等於工具裡設定表推出的字串，不符就該格失敗。沒有 `--tinylm` 的格另從 dump 重算 top1，要和 rowstats 逐列相同。",
-          "- 重跑：`tools/bench.py run --suite v2 v0.4.0 <commit> --as v0.4.1 --private-root <目錄>`，再 `tools/bench.py table`。`--override-packs off` 是對 S7h 錨點的檢查，不寫結果。", ""]
+          "- 重跑：`tools/bench.py run --suite v2 <上一版 tag> <commit> --as <新版> --private-root <目錄>`，再 `tools/bench.py table`。新版要先在工具的 `VERSIONS2` 加一列（Release 名、出貨旗標、摘要行設定標記）。`--override-packs off` 是對 S7h 錨點的檢查（只有 v0.4.0、v0.4.1），不寫結果。", ""]
     return "\n".join(L)
 
 
