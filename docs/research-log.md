@@ -4827,5 +4827,5 @@ CLI 重現（Rust，model-v5，`--context`、沒有前文；聊天與書面、�
 ## 2026-10-13：工作流程分級（維護者：「先停，最佳化整個工作流程」）
 
 - 起因：一個只記錄決定的文件 PR（#140）跑了 /code-review、三次 verifier、四次完整 `make test`（其中兩次中途停掉重跑），加三條錯字也跟著排隊；新開的 worktree 第一次還要從零編譯、缺模型檔。量到的：已編譯的 worktree 上 `make test` 的 Python 部分約 90 秒（最慢三組 35、26、17 秒），只跑 golden 比對的 `cargo test --release -p cli --test golden` 6.8 秒，完整 `make test` 368 秒（`/usr/bin/time`，拆分後的 Makefile，同一個 worktree）。
-- 維護者決定（選擇題，都選推薦）：錯字回報列只跑 golden 測試、直接 commit 到 main；純文件 PR 不跑 `make test`、審一次就合併；程式改動在本機只跑改到的那一塊，完整測試交給 CI。Makefile 拆成 `test-rust`、`test-python`、`test-swift`、`test-golden`（`make test` 仍是三者依序全跑）。規則寫在 `CLAUDE.md`「改動分級」。
+- 維護者決定（選擇題，都選推薦）：錯字回報列只跑 golden 測試、直接 commit 到 main；純文件 PR 不跑 `make test`、審一次就合併；程式改動在本機只跑改到的那一塊，其餘交給 CI。〔同日更正：CI 跑 `cargo test`、`swift test`，但 `test-python` 的 16 個檔只跑 7 個，`experiments/` 的測試只在本機；所以改到任何 Python 一律在本機跑 `test-python`（verifier 與 /code-review 都指出）。〕Makefile 拆成 `test-rust`、`test-python`、`test-swift`、`test-golden`（`make test` 仍是三者依序全跑）。規則寫在 `CLAUDE.md`「改動分級」。
 

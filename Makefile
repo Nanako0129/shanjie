@@ -19,7 +19,8 @@ build: rust
 	@$(call rebuild_if_header_stale,Debug)
 	swift build --package-path macos
 
-# Everything, in the order it always ran. CLAUDE.md says which part a change runs before a commit; CI runs all of it.
+# Everything, in the order it always ran. CLAUDE.md says which part a change runs before a commit. CI runs cargo test, swift test
+# and only part of test-python: the experiments/ tests run only here, so any Python change runs test-python locally.
 test: test-rust test-python test-swift
 
 test-rust:
