@@ -4,8 +4,15 @@
 Stages (each a multiprocessing Pool map, results identical for any --jobs):
   1. exact decodes, once per (set, kind, p) (clean input once per set, shared by the kinds), never recomputed per delta or gate;
   2. tune: per kind and delta, G2 on a seeded subsample (--tune-rows per set, default all) of cvtune and wikitune pooled;
-     delta = most G2 rescue@1 at p=0.1 among deltas whose clean G2 break rate <= 0.5% (none -> the largest delta, marked fallback);
-  3. report: dev302 and typing76, every kind x gate x p with the chosen delta, plus clean (p=0) fixed/broken/pushed9/time ratio.
+     delta = most G2 rescue@1 at p=0.1 among deltas whose clean G2 break rate <= 0.5%, a tie goes to the larger delta (fewer
+     clean rows touched); none qualifies -> the largest delta, marked fallback;
+  3. report: dev299 (the dev302 rows without the 3 user-reported ones, see fuzzy.load_set) and typing76, every kind x gate x p
+     with the chosen delta, plus clean (p=0) fixed/broken/pushed9/time ratio.
+     Rescue counts only changed rows the exact decoder gets right on the clean input (the others are `excluded`, not rescuable).
+     time_ratio = gate time / exact decode time of the clean input (also at p > 0).
+Column meanings (measure.py has the full list): rows = rows of the set (tuning lines: the pooled tuning rows); n = rows counted by
+the other columns (clean lines: all rows; p > 0 and tuning lines: rows the injection changed). On tuning lines `broken` counts
+over `rows` (clean input), the rescue columns over `n`.
 TSV: first line is a '#' header with the tuning record (seed, tune rows, sizes, deltas); elapsed_s = wall seconds of the
 delta-dependent decode job that produced the cell (the shared exact decode is not included).
 Also writes OUT.evalstats.md: the tools/evalstats.py compare --net table row of each clean report cell."""
@@ -38,15 +45,16 @@ def _tune(job):
     kind, p, delta, ex_p, ex_0 = job
     t0 = time.perf_counter()
     rows = _sets["tune"]
-    _, wrong, r1, _ = F.rescue(F.process(_ctx, rows, kind, p, _seed, delta, exact=ex_p), "G2")
+    n, excl, wrong, r1, r9, empty, _ = F.rescue(F.process(_ctx, rows, kind, p, _seed, delta, exact=ex_p, clean=ex_0), "G2")
     broken = F.clean_stats(F.process(_ctx, rows, kind, 0, _seed, delta, exact=ex_0), "G2")[3]
-    return kind, delta, r1, wrong, broken, len(rows), time.perf_counter() - t0
+    return dict(kind=kind, delta=delta, n=n, excluded=excl, wrong=wrong, empty=empty, rescue1=r1, rescue9=r9, broken=broken,
+                rows=len(rows), el=time.perf_counter() - t0)
 
 
 def _report(job):
-    name, kind, p, delta, ex = job
+    name, kind, p, delta, ex, ex_0 = job
     t0 = time.perf_counter()
-    recs = F.process(_ctx, _sets[name], kind, p, _seed, delta, exact=ex)
+    recs = F.process(_ctx, _sets[name], kind, p, _seed, delta, exact=ex, clean=ex_0)
     rows, md = [], []
     for gate in F.GATES:
         rows += M.cell_rows(name, kind, gate, p, delta, recs)
@@ -63,14 +71,14 @@ def _report(job):
 
 
 def run_grid(sets, tune_n, seed, profile, jobs, ps, deltas, out_path):
-    """sets: name -> rows for 'cvtune', 'wikitune', 'dev302', 'typing76'. Writes out_path and out_path + '.evalstats.md'."""
+    """sets: name -> rows for 'cvtune', 'wikitune', 'dev299', 'typing76'. Writes out_path and out_path + '.evalstats.md'."""
     tune = []
     for name in ("cvtune", "wikitune"):
         rows = sets[name]
         if tune_n and tune_n < len(rows):
             rows = [rows[i] for i in sorted(random.Random(f"{seed}|tune|{name}").sample(range(len(rows)), tune_n))]
         tune += rows
-    work = {"tune": tune, "dev302": sets["dev302"], "typing76": sets["typing76"]}
+    work = {"tune": tune, "dev299": sets["dev299"], "typing76": sets["typing76"]}
     pool = Pool(jobs, _init, (profile, work, seed)) if jobs > 1 else None
     if pool is None:
         _init(profile, work, seed)
@@ -86,23 +94,24 @@ def run_grid(sets, tune_n, seed, profile, jobs, ps, deltas, out_path):
                        for kind in F.KINDS for d in deltas])
     chosen, tune_lines = {}, []
     for kind in F.KINDS:
-        mine = [r for r in res if r[0] == kind]
-        ok = [r for r in mine if r[4] / r[5] <= MAX_BREAK]
-        pick = max(ok, key=lambda r: (r[2], -r[1])) if ok else max(mine, key=lambda r: r[1])
-        chosen[kind] = pick[1]
-        for _, d, r1, wrong, broken, n, el in mine:
-            note = ("chosen" if ok else "fallback") if d == pick[1] else ""
-            tune_lines.append((dict(set="tune", kind=kind, gate="G2", p=TUNE_P, delta=d, cls="all", n=n, wrong=wrong,
-                                    rescue1=r1, broken=broken, elapsed_s=f"{el:.1f}"), note))
-    rep = pmap(_report, [(name, kind, p, chosen[kind], exact[ek(name, kind, p)])
-                         for name in ("dev302", "typing76") for kind in F.KINDS for p in [0] + ps])
+        mine = [r for r in res if r["kind"] == kind]
+        ok = [r for r in mine if r["broken"] / r["rows"] <= MAX_BREAK]
+        pick = max(ok, key=lambda r: (r["rescue1"], r["delta"])) if ok else max(mine, key=lambda r: r["delta"])
+        chosen[kind] = pick["delta"]
+        for r in mine:
+            note = ("chosen" if ok else "fallback") if r["delta"] == pick["delta"] else ""
+            tune_lines.append((dict(set="tune", kind=kind, gate="G2", p=TUNE_P, delta=r["delta"], cls="all",
+                                    **{c: r[c] for c in ("rows", "n", "excluded", "wrong", "empty", "rescue1", "rescue9", "broken")},
+                                    elapsed_s=f"{r['el']:.1f}"), note))
+    rep = pmap(_report, [(name, kind, p, chosen[kind], exact[ek(name, kind, p)], exact[ek(name, kind, 0)])
+                         for name in ("dev299", "typing76") for kind in F.KINDS for p in [0] + ps])
     if pool:
         pool.close(); pool.join()
     cols = M.COLS + ["elapsed_s"]
     line = lambda r, note="": "\t".join(str(r.get(c, "")) for c in cols) + f"\t{note}\n"
     with open(out_path, "w", encoding="utf-8", newline="") as out, open(out_path + ".evalstats.md", "w", encoding="utf-8") as md:
         out.write(f"# seed={seed} tune_rows_per_set={tune_n or 'all'} tune_n={len(tune)} cvtune_n={len(sets['cvtune'])} "
-                  f"wikitune_n={len(sets['wikitune'])} deltas={','.join(map(str, deltas))} tune_p={TUNE_P} chosen="
+                  f"wikitune_n={len(sets['wikitune'])} time_ratio=gate_time/clean_exact_time deltas={','.join(map(str, deltas))} tune_p={TUNE_P} chosen="
                   + ",".join(f"{k}:{d}" for k, d in chosen.items()) + "\n")
         out.write("\t".join(cols + ["note"]) + "\n")
         for r, note in tune_lines:
@@ -122,7 +131,7 @@ def main():
     a = ap.parse_args()
     lim = lambda r: r[:a.limit] if a.limit else r
     sets = {"cvtune": lim(F.load_set(a.cvtune)), "wikitune": lim(F.load_set(a.wikitune)),
-            "dev302": lim(F.load_set("dev302")), "typing76": lim(F.load_set("typing76"))}
+            "dev299": lim(F.load_set("dev299")), "typing76": lim(F.load_set("typing76"))}
     run_grid(sets, a.tune_rows, a.seed, a.profile, a.jobs, [float(x) for x in a.ps.split(",")],
              [float(x) for x in a.deltas.split(",")], a.out)
 

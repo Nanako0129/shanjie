@@ -5,7 +5,6 @@ lattice entries from tolerant readings (at most one tolerant syllable per word),
 Kinds: tone (tone mark ignored), fuzzy (paired symbols merged), adjacent (one symbol replaced by a row neighbour key).
 Gates: G0 tolerant only when the exact input fails, G1 exact top 5 + up to 4 tolerant sentences + the rest, G2 tolerant always.
 """
-import glob
 import os
 import random
 import sys
@@ -45,6 +44,21 @@ def _neighbours():
 NEIGHBOURS = _neighbours()
 
 
+def _slot(sym):
+    """Composer column of a symbol (docs/contracts/s3a.md section 2; core/src/engine.rs symbol_of): 0 initial, 1 medial, 2 final."""
+    i = SYMBOLS.index(sym)
+    return 0 if i < 21 else 1 if i < 24 else 2
+
+
+def compose(keys):
+    """The reading the composer shows after these symbol keys, typed in order (s3a rule 9: a key fills its own column,
+    a second key in the same column replaces the first)."""
+    cols = ["", "", ""]
+    for c in keys:
+        cols[_slot(c)] = c
+    return "".join(cols)
+
+
 def strip_tone(syl):
     return "".join(c for c in syl if c in SYMBOLS)
 
@@ -70,17 +84,18 @@ def inject(syls, kind, p, rng, valid_syls, pairs=FUZZY_PAIRS):
                 new = base + rng.choice([t for t in TONES if t != tone_of(s)])
         else:
             chars = []
-            for c in s:
+            for c in strip_tone(s) if kind == "adjacent" else s:
                 alt = None
                 if kind == "fuzzy" and c in pm:
                     if rng.random() < p:
                         alt = pm[c]
-                elif kind == "adjacent" and c in SYMBOLS:
+                elif kind == "adjacent":
                     nb = NEIGHBOURS.get(c, [])
                     if nb and rng.random() < p:
                         alt = rng.choice(nb)
                 chars.append(alt or c)
-            new = "".join(chars)
+            # adjacent: the neighbour key may sit in another column; what the IME shows is the slot composition of the keys
+            new = compose(chars) + tone_of(s) if kind == "adjacent" else "".join(chars)
         if new != s:
             changed = True
             invalid = invalid or new not in valid_syls
@@ -96,9 +111,17 @@ class Tolerance:
         self.canon = {p[1]: p[0] for p in pairs}  # second of a pair -> first
         self.valid = {s for key in lex.by_reading for s in key}
         self.index = {}
-        if kind != "adjacent":
-            for s in self.valid:
+        for s in self.valid:
+            if kind != "adjacent":
                 self.index.setdefault(self.normal(s), set()).add(s)
+                continue
+            # reverse of the injection: every reading the composer can show when one key of s was a row neighbour
+            keys = strip_tone(s)
+            for i, c in enumerate(keys):
+                for n in NEIGHBOURS.get(c, []):
+                    shown = compose(keys[:i] + n + keys[i + 1:]) + tone_of(s)
+                    if shown != s:
+                        self.index.setdefault(shown, set()).add(s)
         self._cache = {}
 
     def normal(self, syl):
@@ -110,11 +133,8 @@ class Tolerance:
     def variants(self, syl):
         v = self._cache.get(syl)
         if v is None:
-            if self.kind == "adjacent":
-                cand = {syl[:i] + n + syl[i + 1:] for i, c in enumerate(syl) for n in NEIGHBOURS.get(c, [])}
-                v = sorted(cand & self.valid - {syl})
-            else:
-                v = sorted(self.index.get(self.normal(syl), set()) - {syl})
+            key = syl if self.kind == "adjacent" else self.normal(syl)
+            v = sorted(self.index.get(key, set()) - {syl})
             self._cache[syl] = v
         return v
 
@@ -197,13 +217,18 @@ def rows_of(path):
     return out
 
 
+# dev rows with real key presses. eval/dev/user-reported.txt has none (contract section 2) and is left out; the first 302 rows
+# of all eval/dev/*.txt (and eval/bench/suite-v1/dev302.txt, the frozen copy) include its first 3 rows, so this set is 299.
+DEV_FILES = ("existing.txt", "homophones.txt", "oov.txt")
+
+
 def load_set(name):
-    """(gold sentence, syllables) rows: dev302 (same loader as lm_eval --dev 302), typing76, or a file path."""
-    if name == "dev302":
+    """(gold sentence, syllables) rows: dev299 (the dev302 rows minus the 3 user-reported ones), typing76, or a file path."""
+    if name == "dev299":
         rows = []
-        for f in sorted(glob.glob(os.path.join(ROOT, "eval", "dev", "*.txt"))):
-            rows += rows_of(f)
-        return rows[:302]
+        for f in DEV_FILES:
+            rows += rows_of(os.path.join(ROOT, "eval", "dev", f))
+        return rows
     if name == "typing76":
         return rows_of(os.path.join(ROOT, "eval", "dev", "user-typing.txt"))
     return rows_of(name)
@@ -222,19 +247,24 @@ def exact_of(ctx, rows, kind, p, seed, pairs=FUZZY_PAIRS):
     return out
 
 
-def process(ctx, rows, kind, p, seed, delta, pairs=FUZZY_PAIRS, exact=None):
-    """One record per row: dict(gold, ex, tol, failed, changed, invalid, t_ex, t_tol). p = 0 is clean input.
-    exact: the result of exact_of for the same arguments, reused instead of decoding again."""
+def process(ctx, rows, kind, p, seed, delta, pairs=FUZZY_PAIRS, exact=None, clean=None):
+    """One record per row: dict(gold, ex, tol, failed, changed, invalid, clean_ok, t_ex, t_base, t_tol). p = 0 is clean input.
+    exact: the result of exact_of for the same arguments, reused instead of decoding again.
+    clean: exact_of at p = 0 (kind does not matter), reused too; clean_ok = the exact decoder's first answer on the clean input
+    is right, t_base = its decode time (the latency baseline). Decoded here when p > 0 and not given."""
     tol = ctx.tol(kind, pairs)
     exact = exact if exact is not None else exact_of(ctx, rows, kind, p, seed, pairs)
+    if clean is None:
+        clean = exact if p == 0 else exact_of(ctx, rows, kind, 0, seed, pairs)
     recs = []
-    for (gold, _), e in zip(rows, exact):
+    for (gold, _), e, c in zip(rows, exact, clean):
         t1 = time.perf_counter()
         tl = [("".join(ws), f) for _, ws, f in decode_tol(ctx.lex, tol, e["inp"], ctx.lm, ctx.profile, delta)]
         t_tol = time.perf_counter() - t1
         failed = not e["ex"] or any(s not in tol.valid for s in e["inp"])
         recs.append(dict(gold=lenient(gold), gold_raw=gold, ex=e["ex"], tol=tl, failed=failed, changed=e["changed"],
-                         invalid=e["invalid"], t_ex=e["t_ex"], t_tol=t_tol))
+                         invalid=e["invalid"], clean_ok=ok_at(c["ex"], lenient(gold), 1), t_ex=e["t_ex"], t_base=c["t_ex"],
+                         t_tol=t_tol))
     return recs
 
 
@@ -243,17 +273,25 @@ def ok_at(surfs, gold, k):
 
 
 def rescue(recs, gate, cls="all"):
-    """Rows the injection changed and the exact decoder got wrong; how many the gate puts first / in the top 9.
-    Returns (n_changed, n_wrong, rescue@1, rescue@9)."""
+    """Rows the injection changed. Those the exact decoder already gets wrong on the clean input are counted as excluded: no
+    gate can rescue them. Of the rest, the ones the exact decoder gets wrong are the denominator; the gate puts how many
+    first / in the top 9. A wrong row whose exact list is empty gets at most 4 sentences from G1 (the tolerant extras), so its
+    top 9 is really a top 4: those rows are counted in `empty` and rescue@9 is also given without them.
+    Returns (n_changed, n_excluded, n_wrong, rescue@1, rescue@9, n_empty, rescue@9 over wrong rows with a non-empty exact list)."""
     ch = [r for r in recs if r["changed"] and (cls == "all" or (cls == "invalid") == r["invalid"])]
-    wrong = [r for r in ch if not ok_at(r["ex"], r["gold"], 1)]
+    kept = [r for r in ch if r["clean_ok"]]
+    wrong = [r for r in kept if not ok_at(r["ex"], r["gold"], 1)]
     g = [gate_lists(r["ex"], r["tol"], r["failed"])[gate] for r in wrong]
-    return (len(ch), len(wrong), sum(ok_at(s, r["gold"], 1) for s, r in zip(g, wrong)),
-            sum(ok_at(s, r["gold"], 9) for s, r in zip(g, wrong)))
+    r9 = [ok_at(s, r["gold"], 9) for s, r in zip(g, wrong)]
+    return (len(ch), len(ch) - len(kept), len(wrong), sum(ok_at(s, r["gold"], 1) for s, r in zip(g, wrong)), sum(r9),
+            sum(not r["ex"] for r in wrong), sum(x for x, r in zip(r9, wrong) if r["ex"]))
 
 
 def time_ratio(recs, gate):
-    base = sum(r["t_ex"] for r in recs)
+    """Time the gate spends / time of the exact decode of the clean input (not of the injected input: that one stops early at
+    a syllable the lexicon lacks, so dividing by it grows with p). t_ex and t_base come from the stage-1 jobs, t_tol from the
+    stage-3 job: the load differs between them, which is not measured."""
+    base = sum(r["t_base"] for r in recs)
     if gate == "G2":
         t = sum(r["t_tol"] for r in recs)
     elif gate == "G1":

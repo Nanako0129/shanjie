@@ -15,6 +15,21 @@ def ctx():
     return _ctx
 
 
+class Seq:
+    """Stand-in for random.Random: random() cycles through `rolls`, choice() returns `pick`."""
+
+    def __init__(self, rolls, pick):
+        self.rolls, self.pick, self.i = rolls, pick, 0
+
+    def random(self):
+        self.i += 1
+        return self.rolls[(self.i - 1) % len(self.rolls)]
+
+    def choice(self, seq):
+        assert self.pick in seq
+        return self.pick
+
+
 class FakeLex:
     by_reading = {("ㄇㄧㄥˊ",): 1, ("ㄇㄧㄥˇ",): 1, ("ㄇㄧㄣˊ",): 1, ("ㄇㄧㄥ",): 1, ("ㄙㄜˋ",): 1, ("ㄕㄜˋ",): 1,
                   ("ㄅㄚ", "ㄅㄚˋ"): 1}
@@ -22,12 +37,15 @@ class FakeLex:
 
 class Static(unittest.TestCase):
     def test_keys_match_rust_source(self):
+        # A source scan, not an observation of the shipping config (the Rust constants are private): it fails, not skips, when
+        # engine.rs moves or the declarations change shape, so the Python copy cannot drift unnoticed.
         p = os.path.join(F.ROOT, "core", "src", "engine.rs")
-        if not os.path.exists(p):
-            self.skipTest("no Rust source")
+        self.assertTrue(os.path.exists(p), "core/src/engine.rs moved: update this test and the copies in fuzzy.py")
         src = open(p, encoding="utf-8").read()
-        self.assertEqual(re.search(r'const KEYS_STANDARD: &str = "([^"]*)"', src).group(1), F.KEYS_STANDARD)
-        self.assertEqual(re.search(r'const SYMBOLS: &str = "([^"]*)"', src).group(1), F.SYMBOLS)
+        for name, mine in (("KEYS_STANDARD", F.KEYS_STANDARD), ("SYMBOLS", F.SYMBOLS)):
+            m = re.search(r'const %s: &str = "([^"]*)"' % name, src)
+            self.assertIsNotNone(m, "no `const %s: &str = \"...\"` in engine.rs: update this test and fuzzy.py" % name)
+            self.assertEqual(m.group(1), mine)
         key_sym = dict(zip(F.KEYS_STANDARD, F.SYMBOLS))
         self.assertEqual((key_sym["1"], key_sym["q"], key_sym["8"], key_sym["-"]), ("ㄅ", "ㄆ", "ㄚ", "ㄦ"))
 
@@ -77,15 +95,45 @@ class Static(unittest.TestCase):
         self.assertEqual(out, ["ㄓㄠˇ", "ㄊㄧㄢ", "ㄙㄤˋ"])
         # fuzzy unit is per paired symbol: p = 0 changes nothing
         self.assertEqual(F.inject(syls, "fuzzy", 0.0, random.Random(1), valid)[1], False)
-        # adjacent p = 1: every symbol with a neighbour moves to a neighbour; tone marks stay
+        # adjacent p = 1: every key with a neighbour is pressed as one (the draws replayed here), the composer shows the slot
+        # composition of those keys; the tone mark stays
         out, _, _ = F.inject(["ㄇㄧㄥˊ"], "adjacent", 1.0, random.Random(3), valid)
-        o = out[0]
-        self.assertEqual(F.tone_of(o), "ˊ")
-        for a, b in zip(F.strip_tone("ㄇㄧㄥˊ"), F.strip_tone(o)):
-            self.assertIn(b, F.NEIGHBOURS[a])
+        rng = random.Random(3)
+        pressed = [(rng.random(), rng.choice(F.NEIGHBOURS[c]))[1] for c in "ㄇㄧㄥ"]
+        self.assertEqual(out, [F.compose(pressed) + "ˊ"])
         # invalid flag: tone ˇ->? result absent from valid set is invalid
         out, ch, inv = F.inject(["ㄊㄧㄢ"], "tone", 1.0, random.Random(1), valid)
         self.assertTrue(inv)
+
+    def test_adjacent_follows_slot_composition(self):
+        # s3a rule 9: a key fills its own column, a second key in the same column replaces the first.
+        self.assertEqual(F.compose("ㄇㄛㄥ"), "ㄇㄥ")
+        self.assertEqual(F.compose("ㄇㄗㄥ"), "ㄗㄥ")
+        self.assertEqual(F.compose("ㄇㄧㄥ"), "ㄇㄧㄥ")
+        self.assertIn("ㄛ", F.NEIGHBOURS["ㄧ"]); self.assertIn("ㄗ", F.NEIGHBOURS["ㄧ"])
+        valid = {"ㄇㄧㄥ", "ㄇㄥ", "ㄗㄥ"}
+        # intended ㄇㄧㄥ, only the medial key is pressed wrong (rolls: ㄇ kept, ㄧ replaced, ㄥ kept)
+        for wrong_key, shown in (("ㄛ", "ㄇㄥ"), ("ㄗ", "ㄗㄥ")):
+            out, changed, invalid = F.inject(["ㄇㄧㄥ"], "adjacent", 0.5, Seq([0.9, 0.0, 0.9], wrong_key), valid)
+            self.assertEqual((out, changed, invalid), ([shown], True, False))
+        # the tone mark stays last
+        out, _, _ = F.inject(["ㄇㄧㄥˊ"], "adjacent", 0.5, Seq([0.9, 0.0, 0.9], "ㄛ"), valid)
+        self.assertEqual(out, ["ㄇㄥˊ"])
+        # the tolerant variants undo the replacement: what is shown could have been ㄇㄧㄥ
+        class Lex:
+            by_reading = {(s,): 1 for s in valid}
+        t = F.Tolerance(Lex, "adjacent")
+        self.assertIn("ㄇㄧㄥ", t.variants("ㄇㄥ"))
+        self.assertIn("ㄇㄧㄥ", t.variants("ㄗㄥ"))
+        # a plain same-column swap still works: ㄛ (key i) and ㄟ (key o) are row neighbours
+        t2 = F.Tolerance(type("L", (), {"by_reading": {("ㄇㄛ",): 1, ("ㄇㄟ",): 1}}), "adjacent")
+        self.assertEqual(t2.variants("ㄇㄛ"), ["ㄇㄟ"])
+
+    def test_rescue_counts(self):
+        mk = lambda **k: dict(dict(gold="g", changed=True, invalid=False, clean_ok=True, failed=False, ex=["x"], tol=[("g", True)]), **k)
+        recs = [mk(), mk(clean_ok=False), mk(ex=[], failed=True), mk(ex=["g"]), mk(changed=False)]
+        # changed 4; one of them already wrong on clean input (excluded); wrong = rows 0 and 2 (row 3 is right); row 2 has an empty exact list
+        self.assertEqual(F.rescue(recs, "G2"), (4, 1, 2, 2, 2, 1, 1))
 
     def test_gate_lists(self):
         ex = ["a", "b", "c", "d", "e", "f", "g"]
@@ -100,7 +148,7 @@ class Static(unittest.TestCase):
 class RealModel(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.rows = F.load_set("dev302")[:15]
+        cls.rows = F.load_set("dev299")[:15]
 
     def test_tol_decoder_equals_exact_without_variants(self):
         c = ctx()
@@ -131,15 +179,16 @@ class RealModel(unittest.TestCase):
     def test_grid_jobs_identical(self):
         import tempfile
         import grid
-        rows = F.load_set("dev302")[:4]
-        sets = {"cvtune": rows[:3], "wikitune": rows[1:], "dev302": rows[:3], "typing76": F.load_set("typing76")[:3]}
+        rows = F.load_set("dev299")[:4]
+        sets = {"cvtune": rows[:3], "wikitune": rows[1:], "dev299": rows[:3], "typing76": F.load_set("typing76")[:3]}
         outs = []
         with tempfile.TemporaryDirectory() as td:
             for j in (1, 2):
                 o = os.path.join(td, f"g{j}.tsv")
                 grid.run_grid(sets, 2, 1, "chat", j, [0.1], [1.0, 3.0], o)
                 rs = [l.rstrip("\n").split("\t") for l in open(o, encoding="utf-8")][1:]  # drop the '#' header
-                outs.append([r[:15] + r[17:] for r in rs])  # drop time_ratio and elapsed_s: wall-clock, differ by run
+                wall = [rs[0].index("time_ratio"), rs[0].index("elapsed_s")]  # wall-clock: differ by run
+                outs.append([[c for i, c in enumerate(r) if i not in wall] for r in rs])
             self.assertEqual(outs[0], outs[1])
             self.assertGreater(len(outs[0]), 10)
 
