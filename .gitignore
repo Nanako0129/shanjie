@@ -11,3 +11,6 @@ data/lm/
 
 # S5j smoke outputs (limit runs)
 experiments/s5-judges/results/*-n*/
+
+# Maintainer-local agent guidance (see CLAUDE.md); never tracked.
+.agent-local/
