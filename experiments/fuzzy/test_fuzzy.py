@@ -128,6 +128,21 @@ class RealModel(unittest.TestCase):
         key = lambda rs: [(r["ex"][:3], r["tol"][:3], r["changed"], r["invalid"]) for r in rs]
         self.assertEqual(key(a), key(b))
 
+    def test_grid_jobs_identical(self):
+        import tempfile
+        import grid
+        rows = F.load_set("dev302")[:4]
+        sets = {"cvtune": rows[:3], "wikitune": rows[1:], "dev302": rows[:3], "typing76": F.load_set("typing76")[:3]}
+        outs = []
+        with tempfile.TemporaryDirectory() as td:
+            for j in (1, 2):
+                o = os.path.join(td, f"g{j}.tsv")
+                grid.run_grid(sets, 2, 1, "chat", j, [0.1], [1.0, 3.0], o)
+                rs = [l.rstrip("\n").split("\t") for l in open(o, encoding="utf-8")][1:]  # drop the '#' header
+                outs.append([r[:15] + r[17:] for r in rs])  # drop time_ratio and elapsed_s: wall-clock, differ by run
+            self.assertEqual(outs[0], outs[1])
+            self.assertGreater(len(outs[0]), 10)
+
     def test_tiny_timing(self):
         recs = F.process(ctx(), self.rows, "tone", 0.0, 1, 2.0)
         print("\ntiming ratio G2 %.2f G1 %.2f G0 %.2f" % tuple(F.time_ratio(recs, g) for g in ("G2", "G1", "G0")))

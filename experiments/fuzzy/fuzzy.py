@@ -209,21 +209,32 @@ def load_set(name):
     return rows_of(name)
 
 
-def process(ctx, rows, kind, p, seed, delta, pairs=FUZZY_PAIRS):
-    """One record per row: dict(gold, ex, tol, failed, changed, invalid, t_ex, t_tol). p = 0 is clean input."""
+def exact_of(ctx, rows, kind, p, seed, pairs=FUZZY_PAIRS):
+    """The delta-independent part of a cell: per row the injected input and the exact decode (cache this per (rows, kind, p))."""
     tol = ctx.tol(kind, pairs)
-    recs = []
+    out = []
     for i, (gold, syls) in enumerate(rows):
         rng = random.Random(f"{seed}|{kind}|{p}|{i}")  # per row: independent of the other rows and of the gate
         inp, changed, invalid = inject(syls, kind, p, rng, tol.valid, pairs) if p > 0 else (syls, False, False)
         t0 = time.perf_counter()
         ex = ["".join(ws) for _, ws in L.decode(ctx.lex, inp, ctx.lm, ctx.profile)]
+        out.append(dict(inp=inp, changed=changed, invalid=invalid, ex=ex, t_ex=time.perf_counter() - t0))
+    return out
+
+
+def process(ctx, rows, kind, p, seed, delta, pairs=FUZZY_PAIRS, exact=None):
+    """One record per row: dict(gold, ex, tol, failed, changed, invalid, t_ex, t_tol). p = 0 is clean input.
+    exact: the result of exact_of for the same arguments, reused instead of decoding again."""
+    tol = ctx.tol(kind, pairs)
+    exact = exact if exact is not None else exact_of(ctx, rows, kind, p, seed, pairs)
+    recs = []
+    for (gold, _), e in zip(rows, exact):
         t1 = time.perf_counter()
-        tl = [("".join(ws), f) for _, ws, f in decode_tol(ctx.lex, tol, inp, ctx.lm, ctx.profile, delta)]
-        t2 = time.perf_counter()
-        failed = not ex or any(s not in tol.valid for s in inp)
-        recs.append(dict(gold=lenient(gold), gold_raw=gold, ex=ex, tol=tl, failed=failed, changed=changed,
-                         invalid=invalid, t_ex=t1 - t0, t_tol=t2 - t1))
+        tl = [("".join(ws), f) for _, ws, f in decode_tol(ctx.lex, tol, e["inp"], ctx.lm, ctx.profile, delta)]
+        t_tol = time.perf_counter() - t1
+        failed = not e["ex"] or any(s not in tol.valid for s in e["inp"])
+        recs.append(dict(gold=lenient(gold), gold_raw=gold, ex=e["ex"], tol=tl, failed=failed, changed=e["changed"],
+                         invalid=e["invalid"], t_ex=e["t_ex"], t_tol=t_tol))
     return recs
 
 
