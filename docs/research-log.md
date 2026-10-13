@@ -4505,5 +4505,8 @@ CLI 重現（Rust，model-v5，`--context`、沒有前文；聊天與書面、�
 - **實機句的 XCTest**（`DeviceRow`，dev302 第 25 列；`RerankTests` 的 `rig()` 加上內附詞包 `TestData.addBundledPack`，聊天 App、沒有前文、每個鍵後取工作；其他 RerankTests 不載詞包）。A3（#111）併進來之後量：v2 下只有「開時是 `執行這個程式`」那個斷言失敗（組字是 `執行這個城市`）；v3 下 `RerankTests` 18 個、`SelftestTests` 9 個（selftest 本身開著詞包打第 65 列）、`SettingsTests` 17 個全過。第一版的測試沒有載詞包（/code-review 抓到），上面的數字是改過之後的。
 - **打包**（合併 A3 之前，fb65303）：`make test` 通過；`make bundle`、`scripts/check-app.sh`（2、3、6 項 ok）、`make selftest-bundled` 都是 rc 0；bundle 裡的 `tinylm.sjtl` 雜湊是 `7e73ef67…`。
 - **/code-review（PR #130，13 點）**：修 12 點：第 25 列的測試加詞包（上面）；`DeviceRow`、`Selftest.swift` 的註解寫實際量的條件（selftest 開詞包、RerankTests 不開），CLI 那句標明是 v2；`Shell.rerankSent` 與 `SelftestTests` 的註解改成預設開；`docs/contracts/s3b.md` §13.2 的選單規格、`s7c2b` §2.2、§2.4、§3 第 1、5 項加再修訂；這一節的測試數與「之後」；PLAN 的 S7h 狀態；網站兩處「目前的值」改成 v2 的值；`rerankOn` 只留一個預設值。**延後**：核心預設（關）與殼預設（開）不同，靠每次建引擎都傳值（`rerankSent` 測試守著）；改核心預設在契約 §4 範圍外。
-- **之後**：`make test`、重新打包與 selftest-bundled；fresh verifier；實機（刪 `rerank` key 要維護者同意，看選單是勾著的；打第 25 列，開與關各一次）。
+- **make test、打包**（2e6cb95，合併 A3 與 review 修正之後）：`make test` 通過；`make bundle`、`scripts/check-app.sh`（2、3、6 項 ok）、`make selftest-bundled` 都是 rc 0；bundle 裡的 `tinylm.sjtl` 是 `7e73ef67…`。
+- **fresh verifier（2e6cb95）CONFIRMED**：換檔（Release 附件下載後的雜湊也相符）、預設開、`make test`（Swift 191 個，1 個需要環境變數的跑分略過）、突變（10 個斷言失敗、0 個 unexpected）、v2 下第 25 列只有「開」的斷言失敗、bundle 的雜湊、文件。
+- **實機**（維護者，2026-10-13）：main 經維護者同意刪掉存著的 `rerank`（原本是 1，#118 實機時打開的），裝 2e6cb95 的 App（安裝程式跳過重新註冊）。維護者回報和預期一樣：選單的「語意校正」沒設過時是勾著的；聊天 App 打第 25 列 `ㄓˊ ㄒㄧㄥˊ ㄓㄜˋ ㄍㄜ˙ ㄔㄥˊ ㄕˋ`，開時是 `執行這個程式`，關掉之後是 `執行這個城市`；檢查完切回開。
+- **維護者的看法**：這個例子不好，表示 bigram 沒做好——這句應該 n-gram 自己就對。推論（沒量過）：詞 bigram 選「城市／程式」時只看前一個詞「這個」，決定的「執行」在兩個詞以前；小模型看整句所以改得回來。記進 PLAN S2 一節的「之後」：先量這一型的錯有多少，再決定做法。
 
