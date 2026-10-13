@@ -38,6 +38,8 @@ def counts(rows_a, rows_b, prefixes, pa, pb):
     ll_ne_ll0: rows with some candidate's ll != ll0 (> 1e-6, log10); ctx_pick: pick(ll) != pick(ll0); ctx_longer: of those, 0c's context
     (last 64 characters) is longer than tinylm's row_key; tone_pick: pick(ll) != pick(llr); a_fix_b_not: A right where the n-gram first
     is wrong and B is not right; of those, ctx / tone: A's pick changes with the context / with the tone marks."""
+    if not len(rows_a) == len(rows_b) == len(prefixes):
+        sys.exit(f"versus: STOP, {len(rows_a)} 0c rows, {len(rows_b)} tinylm rows and {len(prefixes)} prefixes")
     c = dict(rows=len(rows_a), skip=0, ll_ne_ll0=0, ctx_pick=0, ctx_longer=0, tone_pick=0, a_fix_b_not=0, fix_ctx=0, fix_tone=0, fix_both=0)
     for a, b, pre in zip(rows_a, rows_b, prefixes):
         c["skip"] += bool(a.get("skip"))
@@ -84,6 +86,9 @@ def main(argv=None):
         rb = fg.load_scores(os.path.join(a.scores, f"v3.{a.setting}.{s}.jsonl"))
         if len(ra) != len(rb) or any(x[k] != y[k] for x, y in zip(ra, rb) for k in ("n", "ng", "ok", "ed", "glen")):
             sys.exit(f"versus: STOP, {s}: the 0c and tinylm score files do not describe the same candidates")
+        missing = sum(r["n"] >= 2 and "ll" not in r for r in ra + rb)   # contract 4: tinylm's TooLong rows
+        if missing:
+            sys.exit(f"versus: STOP, {s}: {missing} rows with n >= 2 and no ll")
         skip = [r["skip"] for r in ra]
         for cov in (False, True):
             tag = f"{a.setting}.{s}.{'cov' if cov else 'all'}"

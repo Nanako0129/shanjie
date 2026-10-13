@@ -27,9 +27,10 @@
 
 - **保留集** `eval/holdout/`：只在一片收尾時由 fresh verifier 跑一次、只回數字：基準與新版各跑一次 `--set holdout --rowstats`（寫到它自己的暫存目錄、檔內只能有 `[0-9\t\n]`），再跑 `tools/evalstats.py compare`，只回那一行表格，然後刪掉兩個 rowstats。其他時候不讀、不用來調參數。
 - **私有資料**（使用者的 Discord 調參集、學習檔、聊天紀錄）放在 repo 外，只報統計數字。讀個人資料前先問；agent 一律不讀。
+- **Mac 不跑重運算**（使用者 2026-10-13：「不要再增加 Mac 負擔了」）：打分、大量評測、訓練、多程序一律放 188 或 Colab（第三方模型在 188 要另做隔離；Colab 的 VM 本身和金鑰隔開）。Mac 只跑 commit 前的 `make test` 與少量的單句量測；要更快就換機器，不在 Mac 上加執行緒。私人評測集可以放在 188 或 Colab 跑（使用者同日：「私人訊息能搬到別台機器，請搬」「colab可以放」）：188 放在 `%USERPROFILE%\shanjie-private\`，Colab 照 Mac 檔案的傳法（有時效的網址、用完刪掉嵌網址的腳本），搬過去都要核對雜湊；只用來算評測，出貨的模型仍不用私人訊息訓練（要改是另一個決定）。
 - **語料不進版控**（使用者 2026-10-13）：私人訊息、公開語料（立法院發言、維基錯字表、SIGHAN、NTUML、口語重訓文字等），以及從它們建出的列檔、候選傾印、分數、rowstats，一律放在 repo 外（`~/side-project/shanjie-private/`、`~/.cache/shanjie/`）。repo 只放建置程式、合成的測試資料、數字與雜湊；私人訊息的句子不寫進研究紀錄、契約、commit 或 PR。
 - **使用者回報的錯字**：加到 `eval/dev/user-reported.txt` 的**最後面**（使用者 2026-10-03 同意以 CC0 釋出），格式 `前文|句子|讀音`。加在最後，`--dev 302` 的前 302 列才不會變。
-- 改到選字結果的改動（使用者 2026-10-08 決定，從下一片開始），dev302、打字測驗、錯字回報檔在聊天與書面兩種設定各報一行同一張表：n、top1 基準／新、改對／改壞、精確 McNemar p、CER（字元錯誤率）基準／新、Δtop1 與 ΔCER 的配對 bootstrap 95% 區間。做法：基準與新版各跑 `cargo run --release -q -p cli -- --lm data/lm/bigram.sjlm --profile chat … --rowstats FILE`（或 `reference/proto/lm_eval.py` 同樣的選項），再 `python3 tools/evalstats.py compare BASE CAND --label 名稱`；加 `--net`（E2）會在最後多三欄：淨值（改對 − 改壞）、改壞率（改壞 ÷ n）、改壞數的 95% 精確 Poisson 上界，不加時輸出不變；契約 `docs/contracts/eval-stats.md`。Discord 調參集由 main 在本機跑、只貼表格數字。調參數用 cvtune、wikitune，不用 dev302；調參的前後比較也用同一張表。
+- 改到選字結果的改動（使用者 2026-10-08 決定，從下一片開始），dev302、打字測驗、錯字回報檔在聊天與書面兩種設定各報一行同一張表：n、top1 基準／新、改對／改壞、精確 McNemar p、CER（字元錯誤率）基準／新、Δtop1 與 ΔCER 的配對 bootstrap 95% 區間。做法：基準與新版各跑 `cargo run --release -q -p cli -- --lm data/lm/bigram.sjlm --profile chat … --rowstats FILE`（或 `reference/proto/lm_eval.py` 同樣的選項），再 `python3 tools/evalstats.py compare BASE CAND --label 名稱`；加 `--net`（E2）會在最後多三欄：淨值（改對 − 改壞）、改壞率（改壞 ÷ n）、改壞數的 95% 精確 Poisson 上界，不加時輸出不變；契約 `docs/contracts/eval-stats.md`。Discord 調參集由 main 跑（Mac、188 或 Colab，見上面「Mac 不跑重運算」）、只貼表格數字。調參數用 cvtune、wikitune，不用 dev302；調參的前後比較也用同一張表。
 
 ## 實機測試（`tools/imeshot.swift`）
 

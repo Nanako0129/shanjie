@@ -176,7 +176,7 @@ $PY fusegrid.py --scores $W/s7e/scores --out $W/s7e/w10 --models M8 --sets cvtun
 
 ## Colab：資料怎麼傳（2026-10-12 實測，使用者定案）
 
-VM 在美國（實測時在南卡羅來納州）。只傳公開的程式與資料；私人資料（discordtune、學習檔、聊天紀錄）不上 Colab。
+VM 在美國（實測時在南卡羅來納州）。訓練只傳公開的程式與資料。私人評測集（discordtune、E2 的聊天列檔）從 2026-10-13 起可以上 Colab 算評測（維護者：「colab可以放」，`CLAUDE.md`「Mac 不跑重運算」），只用來評測、不進訓練；學習檔與原始聊天紀錄不上。
 
 | 路徑 | 實測 | 用在 |
 |---|---|---|

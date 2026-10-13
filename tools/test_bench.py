@@ -208,7 +208,7 @@ class SuiteV2(Tmp):
 
     def setUp(self):
         super().setUp()
-        self.saved = {k: getattr(bench, k) for k in ("CACHE", "MODELS", "sh", "RESULTS", "ROOT", "STATIC")}
+        self.saved = {k: getattr(bench, k) for k in ("CACHE", "MODELS", "sh", "RESULTS", "ROOT", "STATIC", "EXTERNAL")}
         bench.CACHE, bench.MODELS = os.path.join(self.td, "cache"), os.path.join(self.td, "models")
         self.addCleanup(lambda: [setattr(bench, k, v) for k, v in self.saved.items()])
         self.rows = self.write("rows.txt", "|你好|ㄋㄧˇ ㄏㄠˇ\n|世界|ㄕˋ ㄐㄧㄝˋ\n")
@@ -377,8 +377,21 @@ class SuiteV2(Tmp):
         self.assertIn("setting tag", bench.measure_speed2(self.ctx, [v])[v.sha]["error"])
 
     # --- table: suite v1 text unchanged, v2 appended, v2 files invisible to v1
+    def test_external_section_rows(self):
+        x = {"name": "m", "date": "2026-10-13", "conditions": "c", "label": "0c", "ours_label": "v3",
+             "rows": [{"setting": "chat", "set": "dev302", "n": 4, "ngram": 1, "ours": 2, "external": 3, "fixed": 2, "broken": 1, "p": 1.0},
+                      {"setting": "formal", "set": "cvtune", "n": 4, "ngram": 4, "ours": 4, "external": 4, "fixed": 0, "broken": 0, "p": 1.0,
+                       "tuning": True},
+                      {"setting": "chat", "set": "x", "n": 4, "ngram": 1, "ours": 1, "external": 4, "fixed": 3, "broken": 0, "p": 0.0}]}
+        t = bench.render_external([x])
+        self.assertIn("## 外部模型對照（不是善解的版本）", t)
+        self.assertIn("| chat／dev302 | 4 | 25.00%<br>1/4 | 50.00%<br>2/4 | 75.00%<br>3/4 | +2 / −1，p=1 |", t)
+        self.assertIn("| formal／cvtune（選值用） |", t)
+        self.assertIn("+3 / −0，p<0.0001 |", t)
+
     def test_table_appends_v2_after_unchanged_v1_text(self):
         bench.RESULTS, bench.ROOT, bench.STATIC = (os.path.join(self.td, "results"), os.path.join(self.td, "root"), os.path.join(self.td, "none.json"))
+        bench.EXTERNAL = os.path.join(self.td, "no-external")
         os.makedirs(bench.RESULTS)
         os.makedirs(os.path.join(bench.ROOT, "docs"))
         cell = {"n": 10, "top1": 7, "oracle64": 9, "top1_sha256": "x"}
