@@ -4939,7 +4939,9 @@ CLI 重現（Rust，model-v5，`--context`、沒有前文；聊天與書面、�
 | discordtune-formal-tl | 4958 | 4172 | 4191 | 28 | 9 | 0.0026 | 2.61% | 2.57% | [7, 31] | [-0.08, -0.01] | 19 | 0.18% | 15.7 |	
 
 - **門檻**：沒有任何一格「改對 < 改壞 且 p < 0.05」；每一格淨值 ≥ 0（開語意校正那組也是）；cvtune＋wikitune 每種設定的淨值合計：聊天 n-gram +12、書面 n-gram +10、聊天 tl +10、書面 tl +6。lytune 四格都顯著變好（p 0.0005–0.017），discordtune 四格都顯著變好（p ≤ 0.0041）。
-- 還沒做：§3.5 速度與記憶體在安靜的機器上重量（executor 量的被同時跑的工作干擾）、§3.8 保留集（收尾的 fresh verifier）。§3.6 預測 hit@9：executor 量 user-typing 566 → 565（契約允許少 1 列）、user-reported 不變。
+- §3.6 預測 hit@9：executor 量 user-typing 566 → 565（契約允許少 1 列）、user-reported 不變。
+- **§3.5 速度與記憶體**（main，Mac，release，基準 main `c1323ea`、新版合併後 `1a640ae`；測試程式都已編好之後各跑兩次，量測時的一分鐘負載 7–17，不算安靜，數字只用來看有沒有接近門檻）：每鍵 p95，聊天正式路徑（`replay_standard_chat_production_path`）基準 4.2／3.2 ms、新版 2.4／4.3 ms；有學習（`perf_full_store_per_key_and_enter_with_write`）基準 2.7／2.8 ms、新版 3.1／7.3 ms；typing76（`timing_typing76_keys`，`--ignored`）基準 3.5／3.0 ms、新版 2.4／3.0 ms；書面（`replay_standard_formal`）新版 2.7／2.4 ms（基準的這個測試不印 p95）。全部遠低於 16 ms，前後的差在同一台機器兩次之間的起伏內。記憶體：`shanjie-eval --profile chat --dev 302 --context` 的最大常駐記憶體（`/usr/bin/time -l`）基準 276,955,136、新版 276,938,752 bytes，相同。
+- 還沒做：§3.8 保留集（收尾的 fresh verifier）。
 
 ## 2026-10-14：中英混打的需求量測（第 0 步）
 
