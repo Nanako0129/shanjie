@@ -30,6 +30,8 @@ test: rust
 	python3 -W ignore -m unittest tools/test_kn_cont.py
 	python3 -W ignore -m unittest experiments/p1a-confusion/test_p1a.py
 	python3 -W ignore -m unittest experiments/s7f-corpus/test_s7f.py experiments/s7a-tinylm/test_extra.py
+	python3 -W ignore -m unittest tools/test_evalstats.py experiments/e2-chateval/test_e2.py experiments/e2-chateval/test_judge.py
+	cd experiments/s7a-tinylm && python3 -W ignore -m unittest test_fusegrid test_runsets
 	swift test --package-path macos
 
 # The shipping bundle: build/$(APP_NAME) with the shipping bundle ID.

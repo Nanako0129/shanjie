@@ -4,10 +4,11 @@ A rowstats file has one line per evaluated row: `row\tok\terrors\tgold_len` (row
 errors = Levenshtein distance of the first candidate to the gold sentence when the row is wrong, else 0;
 gold_len = Unicode scalar count of the gold sentence). Digits, tabs and newlines only: no text.
 
-  python3 tools/evalstats.py compare BASE CAND [--label NAME] [--seed S] [--resamples N]
+  python3 tools/evalstats.py compare BASE CAND [--label NAME] [--seed S] [--resamples N] [--net]
 
 prints a Markdown table row: n, top1 base/new, fixed/broken, exact McNemar p, CER base/new, and the paired
-bootstrap 95% intervals of the top1 and CER differences (new - base). Standard library only.
+bootstrap 95% intervals of the top1 and CER differences (new - base). With --net three more columns: net (fixed - broken),
+break rate (broken / n) and the one-sided exact 95% Poisson upper limit of the broken count. Standard library only.
 """
 import argparse
 import math
@@ -24,6 +25,19 @@ def mcnemar_exact(b, c):
     if n == 0:
         return 1.0
     return min(1.0, 2 * sum(math.comb(n, k) for k in range(min(b, c) + 1)) / 2 ** n)
+
+
+def poisson_upper95(k):
+    """One-sided exact (Garwood) 95% upper confidence limit of a Poisson mean given k observed events: the rate L with
+    P(X <= k | L) = 0.05 (k = 0 gives -ln 0.05 = 2.9957). Bisection on the exact cdf, so no scipy."""
+    def cdf(lam):
+        ll = math.log(lam)  # log space: exp(-lam) alone underflows to 0 for lam > ~745
+        return sum(math.exp(i * ll - lam - math.lgamma(i + 1)) for i in range(k + 1))
+    lo, hi = 0.0, k + 10 + 10 * math.sqrt(k + 1)  # the limit is below k + 10 sqrt(k + 1) + a few for every k
+    for _ in range(100):
+        mid = (lo + hi) / 2
+        lo, hi = (mid, hi) if cdf(mid) > 0.05 else (lo, mid)
+    return (lo + hi) / 2
 
 
 def levenshtein(a, b):
@@ -82,7 +96,7 @@ def paired_bootstrap(base, cand, seed=20261008, resamples=10000):
     return ci(d_ok), ci(d_err)
 
 
-def compare(base_path, cand_path, label="", seed=20261008, resamples=10000):
+def compare(base_path, cand_path, label="", seed=20261008, resamples=10000, net=False):
     base, cand = read_rowstats(base_path), read_rowstats(cand_path)
     if len(base) != len(cand):
         raise ValueError(f"row counts differ ({len(base)} vs {len(cand)})")
@@ -97,10 +111,15 @@ def compare(base_path, cand_path, label="", seed=20261008, resamples=10000):
     (tlo, thi), (clo, chi) = paired_bootstrap(base, cand, seed, resamples)
     head = ["| 集合 | n | top1 基準 | top1 新 | 改對 | 改壞 | p | CER 基準 | CER 新 | Δtop1 95%（列） | ΔCER 95%（百分點） |",
             "|---|---|---|---|---|---|---|---|---|---|---|"]
+    if net:  # E2: 1:1 scoring columns appended at the end, so the default output is unchanged
+        head[0] += " 淨值 | 改壞率 | 改壞數 95% 上界 |"
+        head[1] += "---|---|---|"
     label = label.replace("|", "\\|")  # a '|' would shift every Markdown column
     row = (f"| {label} | {len(base)} | {sum(r[0] for r in base)} | {sum(r[0] for r in cand)} | {fixed} | {broken} "
            f"| {mcnemar_exact(fixed, broken):.4f} | {cer_b:.2f}% | {cer_c:.2f}% | [{tlo}, {thi}] "
            f"| [{100 * clo:.2f}, {100 * chi:.2f}] |")
+    if net:
+        row += f" {fixed - broken} | {100 * broken / len(base):.2f}% | {poisson_upper95(broken):.1f} |"
     return "\n".join(head + [row])
 
 
@@ -110,9 +129,10 @@ def main():
     c = sub.add_parser("compare")
     c.add_argument("base"); c.add_argument("cand"); c.add_argument("--label", default="")
     c.add_argument("--seed", type=int, default=20261008); c.add_argument("--resamples", type=int, default=10000)
+    c.add_argument("--net", action="store_true", help="E2: add net (fixed - broken), break rate (broken / n) and the 95%% exact Poisson upper limit of broken")
     a = ap.parse_args()
     try:
-        print(compare(a.base, a.cand, a.label, a.seed, a.resamples))
+        print(compare(a.base, a.cand, a.label, a.seed, a.resamples, a.net))
     except (ValueError, OSError) as e:
         print(f"evalstats: {e}", file=sys.stderr)
         sys.exit(1)
