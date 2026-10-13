@@ -4497,6 +4497,19 @@ CLI 重現（Rust，model-v5，`--context`、沒有前文；聊天與書面、�
 - 之前同一批名字在 A3 之前的版本打錯（維護者的截圖，2026-10-12：許長優人、御門將、洛奇西）。
 - PR #111 併入 main（含 #126、#129），之後合併；跟 v0.4.1 一起出。
 
+## 2026-10-13：S7h PR 2——換成 `tinylm-v3`、語意校正預設開（契約 §2.3）
+
+- **Release `tinylm-v3`**：維護者同意（選擇題）後建立（`--latest=false`，標題照 v2 的格式）。上傳前在暫存資料夾用說明檔的雜湊核對，上傳後重新下載再核對，兩次都是 OK；Latest 仍是 v0.4.0；Release 本文就是 `docs/releases/tinylm-v3.md`（只差結尾的一個空行）。
+- **換檔**：`data/tinylm.sjtl.sha256` 記 `7e73ef67…`；`ci.yml` 兩個 job、`release.yml`、`scripts/build-app.sh` 的提示、CONTRIBUTING、`docs/verification.md`、`docs/data-files.md`、`LICENSES/data.md`、測試的缺檔訊息都改成 `tinylm-v3`。`grep -rn tinylm-v2` 剩下的是歷史敘述與對照（研究紀錄、舊契約、PLAN 的舊狀態、`docs/releases/` 的 README 例子與 v1／v2／v3 說明、README「之前打包 v2」、data-files「v2、v3 都只換融合參數」、`LICENSES/data.md` 列出 v1／v2／v3 的參數、`Selftest.swift` 與 `Support.swift` 註解裡 v2 與 v3 的量測）。`docs/data-files.md`「版本怎麼往前走」的下一個版本改成 `tinylm-v4`。
+- **預設開**：`Shell` 的 `rerankStore.rerank ?? true`（`rerankOn` 不再有起始值，只有這一個字面值決定預設）、`SettingsModel.rerank` 起始 true（`init` 的 `refresh()` 會蓋掉，和其他欄位寫法一致）；核心預設不變（關），殼每次建引擎都明確傳值。測試：沒設過 → 開（選單勾著、設定視窗的模型是開、每次建引擎傳 `setRerank(true)`、有工作、最後顯示重排後的句子）；存 false → 關（傳 false、沒有工作）；存 true → 傳 true；設定視窗的測試改成從「開」出發。**突變**：`?? true` 改回 `?? false`，`RerankTests` 與 `SettingsTests` 10 個斷言失敗（0 個 unexpected），改回後全過。
+- **實機句的 XCTest**（`DeviceRow`，dev302 第 25 列；`RerankTests` 的 `rig()` 加上內附詞包 `TestData.addBundledPack`，聊天 App、沒有前文、每個鍵後取工作；其他 RerankTests 不載詞包）。A3（#111）併進來之後量：v2 下只有「開時是 `執行這個程式`」那個斷言失敗（組字是 `執行這個城市`）；v3 下 `RerankTests` 18 個、`SelftestTests` 9 個（selftest 本身開著詞包打第 65 列）、`SettingsTests` 17 個全過。第一版的測試沒有載詞包（/code-review 抓到），上面的數字是改過之後的。
+- **打包**（合併 A3 之前，fb65303）：`make test` 通過；`make bundle`、`scripts/check-app.sh`（2、3、6 項 ok）、`make selftest-bundled` 都是 rc 0；bundle 裡的 `tinylm.sjtl` 雜湊是 `7e73ef67…`。
+- **/code-review（PR #130，13 點）**：修 12 點：第 25 列的測試加詞包（上面）；`DeviceRow`、`Selftest.swift` 的註解寫實際量的條件（selftest 開詞包、RerankTests 不開），CLI 那句標明是 v2；`Shell.rerankSent` 與 `SelftestTests` 的註解改成預設開；`docs/contracts/s3b.md` §13.2 的選單規格、`s7c2b` §2.2、§2.4、§3 第 1、5 項加再修訂；這一節的測試數與「之後」；PLAN 的 S7h 狀態；網站兩處「目前的值」改成 v2 的值；`rerankOn` 只留一個預設值。**延後**：核心預設（關）與殼預設（開）不同，靠每次建引擎都傳值（`rerankSent` 測試守著）；改核心預設在契約 §4 範圍外。
+- **make test、打包**（2e6cb95，合併 A3 與 review 修正之後）：`make test` 通過；`make bundle`、`scripts/check-app.sh`（2、3、6 項 ok）、`make selftest-bundled` 都是 rc 0；bundle 裡的 `tinylm.sjtl` 是 `7e73ef67…`。
+- **fresh verifier（2e6cb95）CONFIRMED**：換檔（Release 附件下載後的雜湊也相符）、預設開、`make test`（Swift 191 個，1 個需要環境變數的跑分略過）、突變（10 個斷言失敗、0 個 unexpected）、v2 下第 25 列只有「開」的斷言失敗、bundle 的雜湊、文件。
+- **實機**（維護者，2026-10-13）：main 經維護者同意刪掉存著的 `rerank`（原本是 1，#118 實機時打開的），裝 2e6cb95 的 App（安裝程式跳過重新註冊）。維護者回報和預期一樣：選單的「語意校正」沒設過時是勾著的；聊天 App 打第 25 列 `ㄓˊ ㄒㄧㄥˊ ㄓㄜˋ ㄍㄜ˙ ㄔㄥˊ ㄕˋ`，開時是 `執行這個程式`，關掉之後是 `執行這個城市`；檢查完切回開。
+- **維護者的看法**：這個例子不好，表示 bigram 沒做好——這句應該 n-gram 自己就對。推論（沒量過）：詞 bigram 選「城市／程式」時只看前一個詞「這個」，決定的「執行」在兩個詞以前；小模型看整句所以改得回來。記進 PLAN S2 一節的「之後」：先量這一型的錯有多少，再決定做法。
+
 ## 2026-10-13：錯字回報第 78 列與「把答案直接訓練」的決定
 
 - **第 78 列**：維護者用 S7h PR 2 的版本（`tinylm-v3`，語意校正開）打 `ㄓˊ ㄕˋ ㄒㄧㄢˇ ㄕˋ`，得到 `執事顯示`（截圖）；正解 `直式顯示`（維護者選擇題確認）。加在 `eval/dev/user-reported.txt` 最後面，沒有前文；讀音由 `tools/readings.py` 產生，CHECK 0。前 77 列和 main 逐位元組相同。
