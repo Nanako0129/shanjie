@@ -224,19 +224,19 @@
   "麵包超人：細菌人與繪本的露露",
   "鼠小弟的小背心"
  ],
- "dropped_by_lexicon_rule": 9,
- "excluded_by_collisions_tsv": 135,
+ "dropped_by_lexicon_rule": 17,
+ "excluded_by_collisions_tsv": 136,
  "excluded_by_exclude_tsv": 2,
  "files": {
   "acg-add.tsv": {
-   "bytes": 1898015,
-   "lines": 30372,
-   "sha256": "f5ab49a801190f16d8b4cbe31c11a4186e836096d8d20a2c8c017e8d707d8711"
+   "bytes": 2739266,
+   "lines": 45017,
+   "sha256": "ecd5f2633d93842e9e2df98cc8eb658202ab7cfe9217e221e488b272d9f97841"
   },
   "acg-sources.tsv": {
-   "bytes": 1730420,
-   "lines": 30671,
-   "sha256": "f8210e8de0a80a85a04b01706e4158e3d2e8d4b7818d83afe450d66c3487e14e"
+   "bytes": 3148632,
+   "lines": 46313,
+   "sha256": "aa2b3cffcbb251330c2515b1276b3b7082115a683c24d96cca1643f49b9c83e7"
   }
  },
  "groups": {
@@ -250,18 +250,18 @@
   "min": 22981265,
   "pages": 2189
  },
- "rows": 30372,
+ "rows": 45017,
  "sources": {
   "cgroup": 9872,
-  "char": 19978,
-  "manual": 42,
+  "char": 35618,
+  "manual": 44,
   "title": 778
  },
  "unclassified_groups": [],
- "unreadable_dropped": 48,
+ "unreadable_dropped": 62,
  "unresolved_collision_readings": 0,
- "version": "20261008-f5ab49a8",
- "words": 30019,
+ "version": "20261008-ecd5f263",
+ "words": 44554,
  "yearly_lists": {
   "2020": {
    "links": 200,
