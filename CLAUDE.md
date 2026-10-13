@@ -10,6 +10,6 @@
 | 評測方法、方法上的教訓 | [`docs/methodology.md`](docs/methodology.md)、[`docs/verification.md`](docs/verification.md) |
 | 實驗、決定與更正（時間序） | [`docs/research-log.md`](docs/research-log.md) |
 
-維護者本機的工作方式放在 `.agent-local/CLAUDE.md`（不進版控，`.gitignore` 排除）。存在的話，讀完上面的文件後讀它；在連結的 worktree 裡，它在主 checkout（`git rev-parse --git-common-dir` 的上一層）。它補充本機的流程，不覆蓋公開文件裡的規格。repo 文件裡寫到「`CLAUDE.md` 的某一節」（例如「改動分級」「評測與資料」）時，指的是那一份。
+維護者本機的工作方式放在 `.agent-local/CLAUDE.md`，由指向它的 `CLAUDE.local.md` 自動載入；兩者都不進版控（`.gitignore`）。公開的 clone 裡沒有這兩個檔，照上表的公開文件做事即可；repo 文件裡寫到「`CLAUDE.md` 的某一節」（例如「改動分級」「評測與資料」）時，指的是維護者本機那一份，公開文件裡的規格照舊適用。
 
-追蹤的檔案不放私人路徑、主機、帳號、金鑰的位置或本機工具的細節；這些放 `.agent-local/`。
+新寫進追蹤檔案的內容不放私人路徑、主機、帳號或金鑰的位置（既有文件裡還有一些，之後另案整理）；這些放 `.agent-local/`。
