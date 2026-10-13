@@ -66,7 +66,7 @@
   - 保留集表；
   - 速度表（同場）；
   - 量測規則：哪些集合被調參數看過、dev302 只當參考、保留集是唯一沒被看過的集合、怎麼重跑。
-- `docs/verification.md` 加一列：發版前跑 `tools/bench.py run <新版 commit>`，再請 verifier 量保留集，兩者的結果隨發版前的 PR 進 repo。
+- `docs/verification.md` 加一列：發版前跑 `tools/bench.py run <新版 commit>`，再請 verifier 量保留集，兩者的結果隨發版前的 PR 進 repo。〔2026-10-13 起發版改跑套件 v2：`docs/contracts/sbench-v2.md`〕
 
 ## 3. 驗收
 
@@ -91,7 +91,7 @@
 ## 4. 範圍外
 
 - 實打對照（`tools/imetype.swift`，要使用者放開鍵盤）：使用者這次沒選。
-- S4 學習的效果：靜態集合量不到。S4 合併後另加套件 v2（例如用使用者聊天的前半段模擬改選、量後半段）。
+- S4 學習的效果：靜態集合量不到。S4 合併後另加學習用的套件（例如用使用者聊天的前半段模擬改選、量後半段）。〔2026-10-13：「套件 v2」這個名字已給出貨設定的套件（`docs/contracts/sbench-v2.md`）〕
 - 保留集自動化、CI 每次跑（太慢，私有資料也不在 CI）。
 
 ## 5. 負責人、預算、停止條件
@@ -168,7 +168,7 @@
 
 ### 7.4 落地
 
-- 分支先 rebase 到 main，再照 CLAUDE.md 的合併關卡落地。套件 v1 仍釘 model-v1；model-v2 出貨時另寫套件 v2。
+- 分支先 rebase 到 main，再照 CLAUDE.md 的合併關卡落地。套件 v1 仍釘 model-v1；model-v2 出貨時另寫套件 v2。〔model-v2 出貨時沒寫；2026-10-13 補上，`docs/contracts/sbench-v2.md`，每一版用自己出貨的設定〕
 - **負責人與順序**：
   1. 分支先 rebase 到 main。
   2. `pilotfish:executor` 在 rebase 後的分支上做 7.1 的 CLI 改動、`unigram_eval.py` 與 golden、`reference` 子命令、7.2 的程式部分（`table` 的新節、讀 JSON、依欄位位置的檢查邏輯，用 fixture 測）。

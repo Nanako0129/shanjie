@@ -80,3 +80,70 @@
 - 重跑：`tools/bench.py run <ref>... --label <名稱>`，再 `tools/bench.py table`。模型換了就是新的套件版本。
 - 「小麥資料基準」列不是版本：用目前 checkout 的 CLI（`--no-overlay`，不帶 `--lm`）量基底詞庫的 unigram。重跑：`tools/bench.py reference --private-root <目錄>`，commit 或任一指紋（集合、`variants.tsv`、基底詞庫）和 `reference-mcbpmf.json` 不同時才重算並在 stderr 說明原因；rebase 或改到 `core/`、`cli/`、`data/` 之後要重跑，再 `tools/bench.py table`。
 - 實打對照表是靜態的：新增或更新後跑 `tools/bench.py check-static`，每格依 `docs/typing-test.md` 的行號與欄位位置比對。
+
+## 套件 v2（每一版用自己出貨的設定）
+
+契約：`docs/contracts/sbench-v2.md`。和套件 v1 不同：每一版用出貨時的模型與 CLI 旗標，不是同一個 model-v1；逐列對錯取自 CLI 選出的那一句（`--rowstats`），語意校正開著時不是 dump 的第一名；聊天與書面兩種設定都量。
+
+### 出貨設定
+
+| 版本 | 被量的 commit | 模型（SHA-256 前 8 碼） | CLI 旗標 |
+|---|---|---|---|
+| v0.4.0 | `01a3455` | bigram.sjlm `f81a021e`、classes.sjc `75a5efb3` | `--context --packs acg` |
+| v0.4.1 | `3503fd8` | bigram.sjlm `f81a021e`、classes.sjc `75a5efb3`、tinylm.sjtl `7e73ef67` | `--context --packs acg --tinylm <file>` |
+
+依據：App 預設開動漫詞包、組字用前文；語意校正從 v0.4.1 起預設開；降權表預設開。**CLI 沒有模擬的 App 行為**：本機學習（CLI 不學）；殼在每個鍵之後非同步重排、CLI 每列只排一次；殼的前文來自輸入框、CLI 用列檔的前文欄；聊天或書面由 App 決定，這裡兩種都量。所以這張表不是「和 App 完全相同」。推論（沒量過）：App 裡在重排結果回來之前就送出的列保留 n-gram 的第一名，所以開著語意校正的版本在 App 裡的改善可能比表上小；本機學習對各版的影響也沒量。
+
+### 準確率（top1，寬鬆對照）
+
+每格：top1%、答對／列數、和上一版比的「修好 / 弄壞，McNemar 雙尾精確 p」。錯字回報、fw、cvtune、wikitune、lytune、wikitypo、dev302 與 discordtune 在調參或選值時被看過，不是未見資料；dev302 是挑戰集，只當參考；唯一沒被看過的是保留集。
+
+#### v0.4.0+v0.4.1（2026-10-13）
+
+| 集合／設定 | 列數 | v0.4.0 | v0.4.1 |
+|---|---|---|---|
+| dev302/chat | 302 | 79.80%<br>241/302 | 85.76%<br>259/302<br>+18 / −0，p=7.63e-06 |
+| dev302/formal | 302 | 82.12%<br>248/302 | 83.44%<br>252/302<br>+4 / −0，p=0.125 |
+| typing76/chat | 76 | 86.84%<br>66/76 | 90.79%<br>69/76<br>+3 / −0，p=0.25 |
+| typing76/formal | 76 | 90.79%<br>69/76 | 92.11%<br>70/76<br>+1 / −0，p=1 |
+| probe/chat | 83 | 75.90%<br>63/83 | 79.52%<br>66/83<br>+3 / −0，p=0.25 |
+| probe/formal | 83 | 83.13%<br>69/83 | 83.13%<br>69/83<br>+0 / −0，p=1 |
+| user-reported/chat | 80 | 21.25%<br>17/80 | 31.25%<br>25/80<br>+9 / −1，p=0.0215 |
+| user-reported/formal | 80 | 25.00%<br>20/80 | 26.25%<br>21/80<br>+1 / −0，p=1 |
+| fw/chat | 186 | 82.80%<br>154/186 | 84.41%<br>157/186<br>+4 / −1，p=0.375 |
+| fw/formal | 186 | 82.80%<br>154/186 | 83.87%<br>156/186<br>+2 / −0，p=0.5 |
+| cvtune/chat | 3791 | 88.63%<br>3360/3791 | 90.77%<br>3441/3791<br>+84 / −3，p=1.42e-21 |
+| cvtune/formal | 3791 | 88.82%<br>3367/3791 | 89.84%<br>3406/3791<br>+40 / −1，p=3.82e-11 |
+| wikitune/chat | 2827 | 73.36%<br>2074/2827 | 77.08%<br>2179/2827<br>+110 / −5，p=7.73e-27 |
+| wikitune/formal | 2827 | 75.52%<br>2135/2827 | 76.83%<br>2172/2827<br>+37 / −0，p=1.46e-11 |
+| lytune/chat | 4811 | 82.85%<br>3986/4811 | 84.04%<br>4043/4811<br>+106 / −49，p=5.44e-06 |
+| lytune/formal | 4811 | 82.54%<br>3971/4811 | 83.21%<br>4003/4811<br>+36 / −4，p=1.86e-07 |
+| wikitypo/chat | 155 | 87.74%<br>136/155 | 86.45%<br>134/155<br>+0 / −2，p=0.5 |
+| wikitypo/formal | 155 | 87.10%<br>135/155 | 87.10%<br>135/155<br>+0 / −0，p=1 |
+| discordtune/chat | 4958 | 84.89%<br>4209/4958 | 86.71%<br>4299/4958<br>+114 / −24，p=3.17e-15 |
+| discordtune/formal | 4958 | 83.56%<br>4143/4958 | 84.15%<br>4172/4958<br>+30 / −1，p=2.98e-08 |
+
+### 保留集
+
+照 `CLAUDE.md`：等要打 tag 的 commit 定下來後跑一次，由 fresh verifier 以 `evalstats compare --net` 比上一版與新版，main 把 n 與兩版的 top1（可再加 `fixed`、`broken`、`p`）填進 results JSON 的 `holdout`（`{"chat": {n, top1, fixed, broken, p}, "formal": ...}`）。
+
+| 版本 | chat | formal |
+|---|---|---|
+| v0.4.0<br>`01a3455` | —（尚未量測） | —（尚未量測） |
+| v0.4.1<br>`3503fd8` | —（尚未量測） | —（尚未量測） |
+
+### 速度與記憶體（同場）
+
+重播程式用該版的 `bigram.sjlm` 與 `classes.sjc`，**不載詞包、沒有前文、沒有語意校正**（重播是同步打鍵，語意校正是非同步、不在按鍵路徑上）；標準排列、chat、dev302，每版 3 輪輪流，p95 取中位數。「重播＝CLI」是和另跑的一格同設定 CLI（`--profile chat`，不帶 `--context`、`--packs`、`--tinylm`）逐列比。重排是 CLI 在 stderr 印的語意校正每列耗時（p50／p95：三輪重播都跑完之後再跑三次、取中位數，不和其他格同時跑）。
+
+| 版本 | 日期 | 機型／macOS／load avg | p95 | max | 載入 | RSS | 按鍵數 | 重播＝CLI | 重排 p50／p95 |
+|---|---|---|---|---|---|---|---|---|---|
+| v0.4.0 | 2026-10-13 | Mac17,3 / 27.0.1 / 5.2→13.9 | 2.697 ms | 107.53 ms | 767 ms | 285 MB | 8336 | 302/302 | —（沒有語意校正） |
+| v0.4.1 | 2026-10-13 | Mac17,3 / 27.0.1 / 5.2→13.9 | 2.538 ms | 97.76 ms | 855 ms | 289 MB | 8336 | 302/302 | 7.06／10.99 ms |
+
+### 量測規則（套件 v2）
+
+- 集合凍結：dev302、typing76、probe 與套件 v1 同檔；user-reported 是 `eval/dev/user-reported.txt` 3503fd8 時的前 80 列、fw 是 `eval/rerank/s7e-function-words.txt`（兩者在 `eval/bench/suite-v2/`）；cvtune、wikitune、lytune、wikitypo 不進 repo；SHA-256 都寫死在工具裡。計分用套件 v1 的 `variants.tsv`。
+- 每一版的模型雜湊取自該版 `data/*.sha256`，檔案由 main 放在 `~/.cache/shanjie/bench/models/<sha256>/`；工具為每版組只含 `bigram.sjlm` 與 `classes.sjc` 的資料夾，不讓 CLI 自動載入 `kn.sjkn`。
+- 每一格的 CLI 摘要行設定標記必須等於工具裡設定表推出的字串，不符就該格失敗。沒有 `--tinylm` 的格另從 dump 重算 top1，要和 rowstats 逐列相同。
+- 重跑：`tools/bench.py run --suite v2 <上一版 tag> <commit> --as <新版> --private-root <目錄>`，再 `tools/bench.py table`。新版要先在工具的 `VERSIONS2` 加一列（Release 名、出貨旗標、摘要行設定標記）。`--override-packs off` 是對 S7h 錨點的檢查（只有 v0.4.0、v0.4.1），不寫結果。
