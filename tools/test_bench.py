@@ -228,6 +228,7 @@ class SuiteV2(Tmp):
         self.assertEqual(c1[-5:], ["--context", "--packs", "acg", "--tinylm", "/m/tinylm.sjtl"])
         self.assertNotIn("--packs", bench.cell_cmd(v1, "chat", "r", "d", "s", True))
         self.assertIn("--rowstats", c1)
+        self.assertNotIn("--dump", bench.cell_cmd(v1, "chat", "r", None, "s", False))  # only cells whose dump is read get one
         self.assertEqual(bench.cli_env(False)["SHANJIE_VARIANTS"], bench.VARIANTS)
         self.assertNotIn("SHANJIE_VARIANTS", bench.cli_env(True))
 
@@ -297,10 +298,10 @@ class SuiteV2(Tmp):
     # --- rowstats scoring and the guards
     def fake_cli(self, tag, ok, first, extra_rows=0):
         def sh(cmd, **kw):
-            dump = cmd[cmd.index("--dump") + 1]
-            with open(dump, "w", encoding="utf-8") as f:
-                for i, w in enumerate(first, 1):
-                    f.write(f"{i}\t1\t{w}\t-1.0\n{i}\t2\t別的\t-2.0\n")
+            if "--dump" in cmd:
+                with open(cmd[cmd.index("--dump") + 1], "w", encoding="utf-8") as f:
+                    for i, w in enumerate(first, 1):
+                        f.write(f"{i}\t1\t{w}\t-1.0\n{i}\t2\t別的\t-2.0\n")
             if "--rowstats" in cmd:
                 with open(cmd[cmd.index("--rowstats") + 1], "w") as f:
                     f.write("".join(f"{i}\t{int(o)}\t0\t2\n" for i, o in enumerate(ok, 1)))
@@ -325,8 +326,9 @@ class SuiteV2(Tmp):
         # fixture: rowstats says row 2 is wrong while the dump's first row is right -> the cross-check fails
         with self.assertRaisesRegex(RuntimeError, "disagrees with rowstats"):
             self.cell("v0.4.0", ok=(True, False))
+        # and the reverse: rowstats says both right while the dump's first row 2 is wrong
         with self.assertRaisesRegex(RuntimeError, "disagrees with rowstats"):
-            self.cell("v0.4.0", ok=(True, False), first=("你好", "世界"))
+            self.cell("v0.4.0", ok=(True, True), first=("你好", "別的"))
 
     def test_wrong_setting_tag_fails_the_cell(self):
         for tag in ("lm-chat+ctx", "lm-chat+ctx+acg+kn:abc", "lm-chat+acg"):  # flag dropped / a kn.sjkn picked up

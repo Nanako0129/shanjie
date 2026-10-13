@@ -24,7 +24,7 @@
 | v0.4.1 | 同上，加 `tinylm.sjtl`（tinylm-v3） | `--context --packs acg --tinylm <檔>` |
 
 - 依據：App 預設開動漫詞包（`Shell.swift` 的 `acgPack ?? true`）、組字用前文（S2h）；v0.4.1 起語意校正預設開（`rerank ?? true`），v0.4.0 沒有語意校正；降權表兩邊預設都開（CLI `demote=true`、`Shell` 的 `demote ?? true`），一致。聊天與書面兩種設定都量。
-- **CLI 沒有模擬的 App 行為**（表的說明要寫出來，不說成「和 App 完全相同」）：本機學習（CLI 不學）；殼是每個鍵之後非同步重排、CLI 每列只排一次；殼的前文來自輸入框、CLI 用列檔的前文欄；聊天／書面由 App 決定，這裡兩種都量。這些不影響 v0.4.0 → v0.4.1 的比較。
+- **CLI 沒有模擬的 App 行為**（表的說明要寫出來，不說成「和 App 完全相同」）：本機學習（CLI 不學）；殼是每個鍵之後非同步重排、CLI 每列只排一次；殼的前文來自輸入框、CLI 用列檔的前文欄；聊天／書面由 App 決定，這裡兩種都量。〔/code-review 2026-10-13 更正：原本寫「這些不影響 v0.4.0 → v0.4.1 的比較」，沒量過。推論：App 在重排結果回來前送出的列保留 n-gram 的第一名，所以開著語意校正的版本在 App 裡的改善可能比表上小。〕
 - **旗標守門**：每一格的 CLI 摘要行的設定標記要等於這張表推出來的字串（例如 v0.4.1 聊天是 `lm-chat+ctx+tl:7e73ef67+acg`），而且沒有 KN 標記；不符就那一格失敗。這同時守住「旗標漏帶」與「模型資料夾裡多了 `kn.sjkn` 被自動載入」。
 - 模型檔：工具讀匯出版本的 `data/bigram.sjlm.sha256`、`data/classes.sjc.sha256`、`data/tinylm.sjtl.sha256`（有的話），到 `~/.cache/shanjie/bench/models/<sha256>/<檔名>` 找；找不到就失敗退出並寫出要下載哪個 Release。**main 事先放好檔案**（從 Release 下載並核對雜湊），executor 不連網。CLI 從 `--lm` 同一個資料夾讀 `classes.sjc`、看到 `kn.sjkn` 會自動開 KN（`cli/src/main.rs` 235–237 行），所以工具為每一版組一個暫時的模型資料夾，只放 `bigram.sjlm` 與 `classes.sjc`（不放 `kn.sjkn`），`--lm` 指向它。
 - **計分改用 CLI 選出的那一句**：開 `--tinylm` 時 dump 保留 n-gram 的順序（`cli/src/main.rs` 305 行的註解），從 dump 取第一名會忽略語意校正。套件 v2 的逐列對錯取自 CLI 的 `--rowstats`（`SHANJIE_VARIANTS` 設成套件 v2 的 `variants.tsv`，和 v1 同一套寬鬆對照）；CLI 摘要行的 `top1_sha256` 算的就是選出的那一句（main.rs 343、369 行），直接記進結果。獨立的交叉檢查：**沒有 `--tinylm` 的格**，工具從 dump 用自己的寬鬆對照重算 top1，要和 rowstats 相等；有 `--tinylm` 的格靠 §3 第 1 項的錨點守。
@@ -72,7 +72,7 @@
 - main：放好模型檔（Release 下載＋雜湊核對）；用真的私有資料跑 v0.4.0 與 v0.4.1、commit 結果 JSON 與 `docs/benchmark.md`；請 fresh verifier 量保留集並填入；`docs/verification.md` 那一列改成套件 v2 的指令，`docs/releases/README.md` 與 `CLAUDE.md`「發版」加一句指向它；研究紀錄、PLAN。
 - executor 不可以：讀 `~/side-project/shanjie-private/`、`eval/holdout/`、`~/.cache/shanjie/work/`（每次執行 `--private-root` 指向空的暫存目錄；§3 第 5 項的沙盒拒絕規則把這三處都列進去）；連網、下載 Release；push、開 PR；安裝、開 App、在 `.app` 裡執行；改 `core/`、`cli/`、`macos/`。
 - 停止條件：錨點對不上；同一版兩次結果不同；舊版 build 不起來而且原因不明；超過預算（executor 1 回合加 1 次修正）；保留集 v0.4.1 對 v0.4.0「改對 < 改壞而且 p < 0.05」。
-- **被量的 commit 要等於出貨的那一版**：結果 JSON 記被量的 commit SHA。推 v0.4.1 tag 之前，`git diff <被量的 commit> <要打 tag 的 commit> -- Cargo.toml Cargo.lock core cli data eval/variants.tsv` 必須是空的，輸出記進研究紀錄；不是空的就停，回報使用者（保留集不重跑第二次；重跑要使用者決定）。
+- **被量的 commit 要等於出貨的那一版**：結果 JSON 記被量的 commit SHA。推 v0.4.1 tag 之前，`git diff <被量的 commit> <要打 tag 的 commit> -- Cargo.toml Cargo.lock core cli data eval/variants.tsv macos scripts` 必須是空的（`macos` 有殼的預設值，例如語意校正與詞包的 `?? true`；`scripts` 有 `build-app.sh` 包進去的模型；/code-review 2026-10-13 補上），輸出記進研究紀錄；不是空的就停，回報使用者（保留集不重跑第二次；重跑要使用者決定）。
 - **錨點前先確認**：`git diff v0.4.0 677b08f -- core cli data/lexicon eval/variants.tsv` 與 `git diff 677b08f <v0.4.1 被量的 commit> -- core cli data/lexicon eval/variants.tsv`（677b08f 是 S7h 量錨點時的 main）沒有改到不開詞包時的解碼；有的話先回報，不直接拿錨點比。
 - 回滾：只新增檔案與工具的新路徑，revert 合併 commit。
 
