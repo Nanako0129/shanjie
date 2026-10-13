@@ -6,7 +6,7 @@ Spec: `docs/contracts/s5c-clef-cloud.md` (conditions, hashes, decision rules and
 |---|---|
 | `clef_run.py` | Driver. `--sets cvtune,dev302,typing76 [--limit N] [--model clef-flash\|clef]` (`clef` is the 27B, files `clef27-*`). Resumable. Requests carry `cf-aig-gateway-id`. HTTP layer is injectable (`Client(post=...)`). |
 | `clef_score.py` | Offline scorer: S5j's metrics for C-sent-fwd, C-sent-rev, C-pos and (as a control) J-*, plus the C-vs-J pairs and the section 3 verdict. |
-| `test_clef.py` | Offline tests (fake HTTP, decoding, scorer reproduction of S5j's Jev rows). |
+| `test_clef.py`, `test_clef27.py`, `test_gateway.py` | Removed 2026-10-14 (research concluded, never in `make test`). Restore with `git show 63e2f5d:experiments/s5-clef/test_clef.py`. |
 | `results/` | Per-row results for dev302 and typing76 only (created by the run). |
 
 S5j's constants and pure functions (`INSTR`, `POS_INSTR`, `BATCH`, `positions`, `pos_decision`, `mcnemar`, `pct`, `lenient`) are imported from `experiments/s5-judges/s5.py`. Its `set_dir`, `read_rows`, `score_set`, `prep` are never called; the `jev_conds`/`score_set` arithmetic is copied into the scorer. `sys.dont_write_bytecode` is set so no `__pycache__` appears in S5j's folders.

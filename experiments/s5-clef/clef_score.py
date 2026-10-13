@@ -5,7 +5,7 @@
 Reads S5j's rows and jev-*.jsonl only through clef_run.verified_text (hash checked). Writes only
 <clef out dir>/score.json (cvtune and any --limit run: ~/.cache/shanjie/work/s5-clef/, else experiments/s5-clef/results/).
 The metric code is S5j's score_set/jev_conds arithmetic, copied (their callers write files); S5j's own
-numbers are reproduced exactly, see test_clef.py.
+numbers are reproduced exactly, see test_clef.py (removed 2026-10-14; git show 63e2f5d:experiments/s5-clef/test_clef.py).
 """
 import argparse
 import json

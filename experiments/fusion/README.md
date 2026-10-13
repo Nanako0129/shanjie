@@ -6,7 +6,7 @@
 
 ```bash
 cd experiments/fusion
-python3 test_fuse.py                                   # 單元檢查
+# 單元檢查 test_fuse.py 已移除（2026-10-14，研究已結束）；要重跑先 git show 63e2f5d:experiments/fusion/test_fuse.py > test_fuse.py
 python3 fuse.py --set cvtune dev302 typing76           # 公開集合，每個集合跑所有有檔案的判斷器
 python3 fuse.py --repro --set cvtune --tau 0.6309      # 重現 S5k（cvtune 的 τ 是 discordtune 選的）
 ```

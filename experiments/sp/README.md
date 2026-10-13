@@ -27,7 +27,7 @@
 ## 指令
 
 ```
-python3 experiments/sp/test_predict.py
+# test_predict.py 已移除（2026-10-14，研究已結束）；要重跑先 git show 63e2f5d:experiments/sp/test_predict.py > experiments/sp/test_predict.py
 python3 experiments/sp/predict.py --rows eval/dev/user-typing.txt --set-name typing76 --profile chat --check
 python3 experiments/sp/predict.py --rows eval/dev/user-reported.txt --set-name user-reported --profile formal --check
 python3 experiments/sp/predict.py --rows ~/.cache/shanjie/work/s2h/cvtail.txt --set-name cvtail --profile chat --sample 600 --seed 20261007
@@ -463,7 +463,7 @@ query time (ms, 866 position queries, candidates+score+top64): p50=5.3 p95=42.5 
 規格是 `docs/contracts/sp2-successor-prediction.md`。候選 C = 前文歷史詞 `v` 在模型裡的後繼詞，再用已打的注音篩選；分數和第一片的 c 組相同。P 模式只用前綴解讀（預設），PA 模式是前綴與縮寫的聯集（縮寫設定打開）。對照組是第一片的 c 組（全部相容字串、同一個分數），在同一批樣本、同一個位置上算。
 
 ```
-python3 experiments/sp/test_predict2.py
+# test_predict2.py 已移除（2026-10-14，研究已結束）；要重跑先 git show 63e2f5d:experiments/sp/test_predict2.py > experiments/sp/test_predict2.py
 python3 experiments/sp/predict2.py --rows eval/dev/user-typing.txt --set-name typing76 --profile chat --check
 python3 experiments/sp/predict2.py --rows ~/.cache/shanjie/work/s2h/cvtail.txt --set-name cvtail --profile chat --sample 600 --seed 20261007
 ```
@@ -945,7 +945,7 @@ query time (ms, 1422 position queries, C+score+top64; varies 20-30% between runs
 規格是 `docs/contracts/sp3-successor-first.md`。候選集合和第一片的 c 組相同（詞庫裡和查詢相容的全部字串）；**S** 把前文歷史詞 `v` 的後繼詞依分數排在前面，其餘相容字串依分數接在後面。S 的前段就是第二片的 V3。名次一律悲觀，S 第二層的名次加上第一層的個數。樣本、位置、母體與第二片相同，完整輸出表中的 V3 欄是第二片的 V3 在該表模式下的結果（P 表只用前綴解讀，PA 表是前綴與縮寫的聯集），同一批樣本重算。
 
 ```
-python3 experiments/sp/test_predict3.py
+# test_predict3.py 已移除（2026-10-14，研究已結束）；要重跑先 git show 63e2f5d:experiments/sp/test_predict3.py > experiments/sp/test_predict3.py
 python3 experiments/sp/predict3.py --rows eval/dev/user-typing.txt --set-name typing76 --profile chat --check
 python3 experiments/sp/predict3.py --rows ~/.cache/shanjie/work/s2h/cvtail.txt --set-name cvtail --profile chat --sample 600 --seed 20261007
 ```

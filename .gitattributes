@@ -1,0 +1,3 @@
+# Research scripts (concluded slices and their reproduction tooling) are kept for the records in docs/research-log.md;
+# they are not the shipped code, so GitHub's language statistics leave them out.
+experiments/** linguist-detectable=false
