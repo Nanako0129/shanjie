@@ -119,7 +119,7 @@ main 安裝後，請使用者在 TextEdit：打「好」按 Enter 送出，再�
 
 - **探針檔的位置**：`eval/probe/` 底下的 `.txt` 會被 `--set probe` 與 `s2r-probe-unigram.txt` 的 golden 讀進去，所以 §5.5 的探針改放 `experiments/s2h/probe.txt`（內容照 §5.5），`eval/README.md` 不必改。
 - **依賴模型的 golden**：`eval/golden/s2h-lm-context.txt` 用模型 E 重產。
-- **第二輪的預算**：executor 1 回合加 1 次修正；第一輪的實作（分支上的 WIP commit `3b90472`）可以沿用。
+- **第二輪的預算**：executor 1 回合加 1 次修正；第一輪的實作（分支上的 WIP commit `941a27b`）可以沿用。
 - **§8、§9 對 `engine_learn.rs` 的限制的例外**：§8 的「`engine_learn.rs` 任何既有斷言失敗」停止條件、§8 檔案清單的「不改 `engine_learn.rs` 既有的測試與斷言」、§9 的禁止事項，對 `empty_learner_matches_goldens`、`global_eps_table`／`global_sweep` 以外的每一個測試照舊適用；這兩個只能照 §10.3 改（含 §10.3 (1) 讓教學迴圈讀 `SWEEP_TAUGHT` 的那一處），由 executor 改。
 - §8 的其他停止條件照舊，另加：§10.2 沒過；§10.3 的關卡斷言不成立或五個數的停止條件成立；任何 §10.3 列出以外的測試或斷言需要修改。
 

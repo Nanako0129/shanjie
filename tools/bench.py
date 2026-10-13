@@ -689,7 +689,7 @@ SETS2 = {
     "dev302": SETS["dev302"][:2] + (False,),
     "typing76": SETS["typing76"][:2] + (False,),
     "probe": SETS["probe"][:2] + (False,),
-    # first 80 three-field rows of eval/dev/user-reported.txt as of 3503fd8; later rows are not part of this suite
+    # first 80 three-field rows of eval/dev/user-reported.txt as of 76beb24; later rows are not part of this suite
     "user-reported": (os.path.join(SUITE2, "user-reported.txt"), "9fd08e50f13eccea94a76faf5260e7edcf49826bd3dcf7ba4e2cf6de17bcce9a", False),
     "fw": (os.path.join(SUITE2, "fw.txt"), "6b853a329aee569ad51c731d6f188541b9670e9617838725f45a26d57845d18d", False),  # eval/rerank/s7e-function-words.txt
     "cvtune": (os.path.join(TUNE2, "cvtune.txt"), "31de456d66ece98eb5d00154a31c3f7e9c9b38240690f7f76203485ca82acc51", False),
@@ -1052,7 +1052,7 @@ def render_v2(results):
                 rr = f"{s['rerank_p50_ms']:.2f}／{s['rerank_p95_ms']:.2f} ms" if "rerank_p50_ms" in s else "—（沒有語意校正）"
                 L.append(head + f" {s['p95_us'] / 1000:.3f} ms | {s['max_us'] / 1000:.2f} ms | {s['load_ms']:.0f} ms | {s['rss_mb']:.0f} MB | {s['keys']} | {s['rows_match']} | {rr} |")
     L += ["", "### 量測規則（套件 v2）", "",
-          "- 集合凍結：dev302、typing76、probe 與套件 v1 同檔；user-reported 是 `eval/dev/user-reported.txt` 3503fd8 時的前 80 列、fw 是 `eval/rerank/s7e-function-words.txt`（兩者在 `eval/bench/suite-v2/`）；cvtune、wikitune、lytune、wikitypo 不進 repo；SHA-256 都寫死在工具裡。計分用套件 v1 的 `variants.tsv`。",
+          "- 集合凍結：dev302、typing76、probe 與套件 v1 同檔；user-reported 是 `eval/dev/user-reported.txt` 76beb24 時的前 80 列、fw 是 `eval/rerank/s7e-function-words.txt`（兩者在 `eval/bench/suite-v2/`）；cvtune、wikitune、lytune、wikitypo 不進 repo；SHA-256 都寫死在工具裡。計分用套件 v1 的 `variants.tsv`。",
           "- 每一版的模型雜湊取自該版 `data/*.sha256`，檔案由 main 放在 `~/.cache/shanjie/bench/models/<sha256>/`；工具為每版組只含 `bigram.sjlm` 與 `classes.sjc` 的資料夾，不讓 CLI 自動載入 `kn.sjkn`。",
           "- 每一格的 CLI 摘要行設定標記必須等於工具裡設定表推出的字串，不符就該格失敗。沒有 `--tinylm` 的格另從 dump 重算 top1，要和 rowstats 逐列相同。",
           "- 重跑：`tools/bench.py run --suite v2 <上一版 tag> <commit> --as <新版> --private-root <目錄>`，再 `tools/bench.py table`。新版要先在工具的 `VERSIONS2` 加一列（Release 名、出貨旗標、摘要行設定標記）。`--override-packs off` 是對 S7h 錨點的檢查（只有 v0.4.0、v0.4.1），不寫結果。", ""]

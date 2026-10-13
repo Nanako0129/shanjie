@@ -2,7 +2,7 @@
 
 S2r（`docs/contracts/s2r-sandhi-variants.md`，PR #13）只處理小麥基底。疊加層 `data/lexicon/overlay-add.tsv`（維基標題，34 萬列，CC BY-SA 4.0）的讀音，是 `tools/build_overlay.py` 用 `ime.Lexicon.to_syllables` 推出來的：把詞切成基底詞，每段取那個詞分數最高的讀音。單字段遇到破音字時只能猜分數最高的讀音，因此有系統性的錯誤。使用者 2026-10-04 核准三件平行；這片照 S2r 的規則 AUTO 進行。
 
-## 0. 現況（main 2026-10-04 在 main `c6abd58` 上量得）
+## 0. 現況（main 2026-10-04 在 main `ed9b633` 上量得）
 
 | 問題 | 列數 |
 |---|---|
