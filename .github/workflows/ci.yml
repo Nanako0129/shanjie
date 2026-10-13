@@ -188,6 +188,11 @@ jobs:
       - name: Kneser-Ney side file (Python)
         run: python3 -W ignore -m unittest tools/test_kn_cont.py
 
+      # docs/contracts/sbench.md and sbench-v2.md: the benchmark tool's guards (frozen set hashes, settings table and tags,
+      # rowstats scoring, dump cross-check, replay consistency) against a fake CLI; no builds, no private data.
+      - name: Benchmark tool (Python)
+        run: python3 -m unittest tools/test_bench.py
+
   # The Swift input method (docs/contracts/s3b.md section 3): build the ad-hoc
   # app, the Swift tests through the real core and model, the bundled
   # selftest, and acceptance checks 2, 3 and 6 of contract section 10.
