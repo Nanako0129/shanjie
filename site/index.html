@@ -142,6 +142,12 @@
     .stage .st-title { grid-column: 1 / -1; grid-row: 2; } .stage .meta { grid-column: 1 / -1; grid-row: 3; }
     .stage > summary .tag { grid-column: 2; grid-row: 1; } .stage > summary::after { grid-column: 3; grid-row: 1; } }
 
+  /* 這週：一行一項，狀態標籤沿用 .tag */
+  .week { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+  .week li { display: flex; gap: 10px; align-items: baseline; }
+  .week .tag { flex: none; }
+  .week li span:last-child { min-width: 0; }
+
   /* 詳細 */
   details { border-top: 1px solid var(--line); padding: 12px 0; }
   details:last-of-type { border-bottom: 1px solid var(--line); }
@@ -184,7 +190,7 @@
     <div class="layer"><div><h3>本機重排</h3><p>小型語言模型看你前面寫的內容，從候選中挑出最合理的一句；在背景執行，不拖慢打字。</p><div class="when">停頓或送出前・本機</div></div></div>
     <div class="layer"><div><h3>雲端校正（選用）</h3><p>打完按一下快速鍵，請雲端模型再看一次。預設關閉；雲端只能回傳候選的編號，不能自己寫字。</p><div class="when">你按下快速鍵時・雲端</div></div></div>
   </div>
-  <p class="note">目前發佈的版本只有第 1 層。第 2 層：1,440 萬參數的小模型已接進核心、預設關閉，輸入法端的開關「語意校正」也已合併，下一版（v0.4.1）起沒設過時是開的，還沒發版；現成的本機大模型研究結論是暫不進輸入法。第 3 層還沒做，排在路線圖的「未排定」。</p>
+  <p class="note">第 2 層從 v0.4.1 起出貨：1,440 萬參數的小模型重排前 8 名，輸入法的「語意校正」沒設過時是開的；現成的本機大模型研究結論是暫不進輸入法。第 3 層還沒做，排在路線圖的「未排定」。</p>
 </section>
 
 <section>
@@ -193,14 +199,14 @@
   <div class="stats">
     <div class="stat"><b>99.6%</b><span>正解出現在前 64 名候選的比例（保留集 227 句；開發集 302 句是 99.3%）</span></div>
     <div class="stat"><b>92.7%</b><span>目前最準的判斷器從候選中挑對整句的比例（開發集，雲端）</span></div>
-    <div class="stat"><b>79.3%</b><span>輸入法實際送出整句的正確率（保留集 227 句，聊天設定，model-v4 時量的；model-v5 在保留集每一句都相同）</span></div>
+    <div class="stat"><b>84.1%</b><span>輸入法實際送出整句的正確率（保留集 227 句，聊天設定，v0.4.1 的出貨設定、含語意校正；書面設定 82.4%）</span></div>
     <div class="stat"><b>2.5 ms</b><span>每個按鍵的處理時間（p95）：76 句打字測驗共 2,483 個按鍵，含語言模型、即時預測、教過的選字與 5 萬筆記錄（M5 Mac，低負載，兩次量測 2.2–2.5 ms；model-v4、沒有載入動漫詞包，還沒有用 v0.4.0 的設定重量）</span></div>
   </div>
   <details>
     <summary>這些數字怎麼量的</summary>
     <p>評測分成開發集與保留集。開發集用來調整；保留集由另一個流程撰寫、開發過程中不看內容，只在每個階段結束時量一次，用來確認進步不是因為「背了題目」。前 64 名含正解的比例用寬鬆對照：「她／他」「臺／台」這類寫法視為相同；保留集的 99.6% 是用 model-v2 量的，之後沒有重新量；只有詞庫、還沒有語言模型時，保留集是 97.8%（完全相符）。</p>
     <p>判斷器比較了本機模型與多家雲端服務的三十多組設定；所有判斷器都卡在同一個上限：正解根本不在候選裡的句子，誰也救不回來。所以目前的重點是先把正解放進候選。</p>
-    <p>輸入法實際送出整句的正確率，保留集上聊天設定 79.3%、書面設定 81.1%，是 model-v4 加詞類回退的數字；v0.4.0 的 model-v5 在保留集上兩種設定每一句都和它相同（v0.4.0 發佈後的 2026-10-10 量的）。這是只用詞庫與語言模型、還沒有語意重排的成績。</p>
+    <p>輸入法實際送出整句的正確率，保留集上 v0.4.1 是聊天設定 84.1%（191／227）、書面設定 82.4%（187／227），用的是 v0.4.1 出貨的模型與設定（看前文、動漫詞包、語意校正 tinylm-v3），2026-10-13 發版前量的；v0.4.0 用同樣的量法是 79.3%（180／227）與 81.1%（184／227）。各版本的數字在 <a href="https://github.com/Nanako0129/shanjie/blob/main/docs/benchmark.md">docs/benchmark.md</a>。</p>
     <p>每個按鍵的處理時間是 76 句打字測驗共 2,483 個按鍵的 p95，2026-10-10 在 M5 Mac、低負載下量了兩次：教過選字並放 5 萬筆記錄是 2.2–2.5 毫秒，記憶是空的是 2.3–2.6 毫秒。這是在可省略韻母那一片（PR #98）量的，用的是 model-v4，也沒有載入動漫詞包（計時測試只在設定 ACG_PACK 時才載入詞包）；v0.4.0 的設定（model-v5、詞包開）還沒有重新量。</p>
   </details>
 </section>
@@ -220,6 +226,19 @@
     <summary>已經裝過舊版</summary>
     <p>照當初安裝的方式升級；選字記憶和設定都放在 App 外面，升級不會動到。升級後輸入法選單找不到善解時，照上面的系統設定步驟加回來。Caps Lock 切換不了任何輸入法時，到「系統設定 → 輔助使用 → 鍵盤」打開「慢速按鍵」，按一次 Caps Lock，再關掉。</p>
   </details>
+</section>
+
+<section>
+  <h2>這週</h2>
+  <p class="sub">2026-10-12～10-18</p>
+  <ul class="week">
+    <li><span class="tag done">已發佈</span><span>v0.4.1：語意校正預設開（tinylm-v3）。</span></li>
+    <li><span class="tag done">已發佈</span><span>v0.4.1：聊天／書面可以自己選。</span></li>
+    <li><span class="tag done">已發佈</span><span>v0.4.1：動漫詞包約 3 萬 → 約 4.5 萬詞。</span></li>
+    <li><span class="tag">決定</span><span>下一片先做解碼器的合併方式（v0.4.2）。</span></li>
+    <li><span class="tag done">已發佈</span><span>tinylm-v2、tinylm-v3 發佈在 GitHub Releases。</span></li>
+  </ul>
+  <p class="note"><a href="updates.html">完整更新紀錄 →</a></p>
 </section>
 
 <section>
@@ -292,12 +311,13 @@
     </details>
 
     <details class="stage" open>
-      <summary><span class="ver">v0.4.1</span><span class="st-title">回報的修正</span><span class="tag wip">進行中</span>
-        <span class="meta">v0.4.0 之後</span></summary>
+      <summary><span class="ver">v0.4.1</span><span class="st-title">回報的修正</span><span class="tag done">完成</span>
+        <span class="meta">2026-10-13・v0.4.1</span></summary>
       <ul class="items">
         <li><span class="mark"></span><span class="sr-only">結案：</span><h3>候選窗在瀏覽器裡的位置</h3><p>使用者回報：網頁版 Messenger 打第一個字時預測列跑到中間；Aside 裡候選列跑到左上角。2026-10-12 在 Chrome 的測試頁、Aside 與網頁版 Messenger 都看起來正常，記錄 176 次定位沒有一次落到最後一行或螢幕角落，重現不了，v0.4.1 結案；再發生時用保留的診斷分支。</p></li>
         <li class="done"><span class="mark"></span><span class="sr-only">完成：</span><h3>動漫詞包：含間隔號的名字、缺的名字與讀音</h3><p>已實作（PR #111），實機打「洛琪希」「獄門疆」「虎杖悠仁」都對了。詞包建置時把含間隔號的名字整個略過，像「洛琪希·米格路迪亞」完全沒收進來；改成把名和姓拆開收，並加整頁角色列表當第二個來源，原本維護者保留的名字維持不變。同一片補上「獄門疆」與「虎杖悠仁」的讀音。「芙莉蓮」在有些句子裡輸給「福利聯」，v0.4.1 不修，另外調查。</p></li>
-        <li class="wip"><span class="mark"></span><span class="sr-only">進行中：</span><h3>語意校正改多一點</h3><p>原本的值（tinylm-v2）偏保守、改得少。用維護者自己的聊天重新選值，計分是「改對 − 改壞」，改壞率要 ≤ 0.5%：新值在判斷期改對 125 句、改壞 16 句，改壞率 0.24%（tinylm-v2 的值是 82／7）。新的模型檔 tinylm-v3 已發布，語意校正改成預設開，跟 v0.4.1 一起出。</p></li>
+        <li class="done"><span class="mark"></span><span class="sr-only">完成：</span><h3>語意校正改多一點</h3><p>已合併（PR #129、#130）。原本的值（tinylm-v2）偏保守、改得少。用維護者自己的聊天重新選值，計分是「改對 − 改壞」，改壞率要 ≤ 0.5%：新值在判斷期改對 125 句、改壞 16 句，改壞率 0.24%（tinylm-v2 的值是 82／7）。新的模型檔 tinylm-v3 已發布，語意校正改成預設開，隨 v0.4.1 發佈。</p></li>
+        <li class="done"><span class="mark"></span><span class="sr-only">完成：</span><h3>聊天／書面可以自己選</h3><p>設定視窗可選「依 App 自動」（預設）「一律聊天」「一律書面」；依 App 自動時，從善解選單對個別 App 切換「這個 App 用聊天設定」，設定視窗列出改過的 App、可以移除。已合併（PR #121），隨 v0.4.1 發佈；實機驗收通過（2026-10-12）。</p></li>
       </ul>
     </details>
 
@@ -305,9 +325,12 @@
       <summary><span class="ver">之後</span><span class="st-title">已排定，在 v0.4 之後</span><span class="tag wip">進行中</span>
         <span class="meta">順序依實測與回報調整</span></summary>
       <ul class="items">
+        <li><span class="mark"></span><span class="sr-only">規劃中：</span><h3>解碼器的合併方式（v0.4.2，下一片）</h3><p>每個位置同一個字串只留一條路徑，會丟掉接下去更好的拆法；改掉這點。</p></li>
+        <li><span class="mark"></span><span class="sr-only">規劃中：</span><h3>句首單字的選字記憶</h3><p>句首打「照建議」會出「趙建議」，改選也記不住。</p></li>
+        <li><span class="mark"></span><span class="sr-only">規劃中：</span><h3>語意校正強度設定</h3><p>保守、標準、積極三段，預設維持改壞率 ≤ 0.5%。</p></li>
+        <li><span class="mark"></span><span class="sr-only">規劃中：</span><h3>領域詞包</h3><p>資訊與 AI 先，預設開；醫藥、法律接著，預設關。跟下一版語言模型一起。</p></li>
         <li><span class="mark"></span><span class="sr-only">規劃中：</span><h3>常見專有名詞</h3><p>公司、學校、飲料店、餐廳、產品這類常見的專有名詞（例如「酷澎」）納入一般詞庫；契約過審，PR #110（草稿）還沒合併，詞還沒收進詞庫，版本未定。</p></li>
         <li><span class="mark"></span><span class="sr-only">規劃中：</span><h3>從改選記住新詞組</h3><p>改選後送出的片段如果不是詞庫裡的詞（例如「版控」），記成你的詞，下次直接打得出來。</p></li>
-        <li class="done"><span class="mark"></span><span class="sr-only">完成：</span><h3>聊天／書面設定可自己選</h3><p>設定視窗可選「依 App 自動」「一律聊天」「一律書面」；依 App 自動時，從善解選單對個別 App 切換「這個 App 用聊天設定」，設定視窗列出改過的 App、可以移除。已合併，還沒發版；實機驗收通過（2026-10-12）。</p></li>
         <li class="wip"><span class="mark"></span><span class="sr-only">進行中：</span><h3>預測可省略韻母</h3><p>每個字只打第一個注音也能找到詞。一次縮寫一個詞的版本做完了，但還不能整句縮寫，v0.4.0 先不放；做到整句縮寫再出。另外有使用者回報打了某些注音之後按鍵好像卡住；從設計推論，是有兩個以上縮寫單位時空白鍵與聲調鍵會被吃掉，沒有重現。</p></li>
         <li class="wip"><span class="mark"></span><span class="sr-only">進行中：</span><h3>App 沙盒</h3><p>輸入法在 macOS 的 App 沙盒裡執行，只拿到需要的權限。已經有實作分支，目標是 v0.5.0。</p></li>
         <li class="research wip"><span class="mark"></span><span class="sr-only">進行中：</span><h3><span class="kind">研究</span>Kneser–Ney 平滑</h3><p>回退時看一個詞接在幾種不同的詞後面，而不是只看它出現幾次。離線量測：調參集四格合計多對 33 列；保留集打平，但那一次用的是更正前的側檔。核心已能讀側檔（PR #107），預設關；正式側檔隨下一次模型重建（model-v6）產生。</p></li>
@@ -324,10 +347,10 @@
     </details>
 
     <details class="stage">
-      <summary><span class="ver">未排定</span><span class="st-title">語意判斷與校正</span><span class="tag wip">進行中</span>
-        <span class="meta">已合併、還沒發版</span></summary>
+      <summary><span class="ver">未排定</span><span class="st-title">語意判斷與校正</span><span class="tag">規劃中</span>
+        <span class="meta">語意校正 v0.4.1 起出貨</span></summary>
       <ul class="items">
-        <li class="wip"><span class="mark"></span><span class="sr-only">進行中：</span><h3>語意校正（自訓小模型）</h3><p>1,440 萬參數的字元模型，只在前 8 名候選之間重排（機制叫語意重排）。核心的接入做完了（非同步重排、門檻 δ、檔案格式 SJTL0002），核心預設關閉；輸入法端的開關與打包（PR #118）已合併（2026-10-12），還沒發版。用公開的口語文字重訓沒有通過、模型不換。2026-10-12 決定改用「改對 − 改壞」計分，要預設開啟，另外要求改壞率 ≤ 0.5%。原本的值（tinylm-v2）偏保守、改得少；用維護者自己的聊天選出的新值改得比較多、改壞率仍在 0.5% 以內，做成 tinylm-v3 並改成預設開（輸入法端；核心預設仍關），v0.4.1 一起出。</p></li>
+        <li class="done"><span class="mark"></span><span class="sr-only">完成：</span><h3>語意校正（自訓小模型）</h3><p>1,440 萬參數的字元模型，只在前 8 名候選之間重排（機制叫語意重排）。核心的接入做完了（非同步重排、門檻 δ、檔案格式 SJTL0002），核心預設關閉；輸入法端的開關與打包（PR #118）已合併（2026-10-12）。用公開的口語文字重訓沒有通過、模型不換。2026-10-12 決定改用「改對 − 改壞」計分，要預設開啟，另外要求改壞率 ≤ 0.5%。原本的值（tinylm-v2）偏保守、改得少；用維護者自己的聊天選出的新值改得比較多、改壞率仍在 0.5% 以內，做成 tinylm-v3 並改成預設開（輸入法端；核心預設仍關），隨 v0.4.1 發佈（2026-10-13）。</p></li>
         <li><span class="mark"></span><span class="sr-only">規劃中：</span><h3>一鍵校正、新手測驗</h3><p>打完一段可以請模型重看（雲端，預設關閉）；第一次使用時用簡單測驗了解你的打字習慣。</p></li>
       </ul>
     </details>
@@ -361,11 +384,11 @@
       <li>程式碼：Apache-2.0。</li>
       <li>基礎詞庫：小麥注音（MIT；片語源自 libtabe，BSD）。</li>
       <li>補充詞表：由維基百科與維基詞典的條目標題產生，CC BY-SA 4.0，署名維基百科與維基詞典貢獻者。</li>
-      <li>動漫與遊戲詞包：約 3 萬個作品名與角色名，隨 App 內附，選單可關。來源是中文維基百科的公共轉換組、動畫作品條目的標題與條目裡的登場人物，另有維護者手動加的詞（維護者自己的條目是 CC0，34 個 BanG Dream! 成員名字取自維基百科）；整份詞包以 CC BY-SA 4.0 散布，署名維基百科貢獻者。作品清單取自 Wikidata（CC0）。</li>
+      <li>動漫與遊戲詞包：約 4.5 萬個作品名與角色名（v0.4.1 是 44,554 個詞），隨 App 內附，選單可關。來源是中文維基百科的公共轉換組、動畫作品條目的標題、條目與角色列表頁裡的登場人物，另有維護者手動加的詞（維護者自己的條目是 CC0，34 個 BanG Dream! 成員名字取自維基百科）；整份詞包以 CC BY-SA 4.0 散布，署名維基百科貢獻者。作品清單取自 Wikidata（CC0）。</li>
       <li>降權表（<code>demote.tsv</code>）：專案自寫，隨 App 內附，CC BY-SA 4.0，不含第三方資料。</li>
       <li>標準讀音變體：依教育部《國語辭典簡編本》〈單一音讀〉與《國語一字多音審訂表》的規則，從小麥注音詞庫產生，MIT。規則是事實，檔案不含教育部資料。</li>
       <li>語言模型（詞的兩兩搭配頻率）與詞類表：由維基百科 2026-10-01 的 20 萬篇條目、Mozilla Common Voice 繁中（台灣）句子（CC0）、Tatoeba 中文句子（CC BY 2.0 FR），以及 gpt-oss-120b 產生的台灣口語合成句計算，CC BY-SA 4.0，署名維基百科與 Tatoeba 貢獻者。斷詞用的詞包詞來自中文維基百科與 Wikidata。不含任何私人對話。發佈的模型另含少量用來辨識來源的指紋條目。</li>
-      <li>目前沒有使用任何神經網路模型。</li>
+      <li>語意校正模型（<code>tinylm.sjtl</code>，v0.4.1 起隨 App 內附、預設開）：1,440 萬參數的字元語言模型，訓練文字和語言模型同源（維基百科 2026-10-01 的前 20 萬篇條目、Mozilla Common Voice、Tatoeba、gpt-oss-120b 產生的台灣口語合成句），CC BY-SA 4.0，署名維基百科與 Tatoeba 貢獻者。聊天設定的融合參數用維護者自己的訊息選，檔案裡沒有任何訊息的文字。</li>
       <li>評測句（不隨 App 內附，只用來量測）：
         <ul>
           <li>專案自寫或使用者回報的句子（開發集、保留集、學習測試、陷阱句、日常句等）：CC0。</li>
@@ -380,7 +403,7 @@
 
 <footer>
   <span>善解 shanjie</span>
-  <span>最後更新：2026-10-12</span>
+  <span>最後更新：2026-10-13</span>
 </footer>
 
 </main>
