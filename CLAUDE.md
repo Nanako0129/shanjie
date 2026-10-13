@@ -50,6 +50,7 @@
 ## 發版
 
 - 推 `v*` tag 觸發簽章、公證與發佈，**每次都要使用者當下同意**。
+- 推 tag 之前先跑跨版本 benchmark（套件 v2）與保留集，結果進 `docs/benchmark.md`：指令與條件只寫在 `docs/verification.md` 的「跨版本基準測試」一節（使用者 2026-10-13；之前規則就在，v0.2.0 起沒照做）。
 - **Release 說明與 Latest**（使用者 2026-10-08）：說明進版控、每次手寫；Latest 永遠是輸入法的最新版、資料類 Release 不標。規則與指令只寫在 `docs/releases/README.md`。
 - 網站（shanjie.nyanako.com）手動部署，部署前先問。使用者 2026-10-10 決定開放下載：網站的「安裝」段落連到 Releases 的 latest 頁與 Homebrew 指令，不寫死某個版本的檔名，發版時不必改網站的下載資訊。
 
