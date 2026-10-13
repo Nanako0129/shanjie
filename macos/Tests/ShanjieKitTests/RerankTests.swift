@@ -28,8 +28,8 @@ final class RerankTests: XCTestCase {
         var frees: FreeCounter
     }
 
-    /// The shipped default is off (s7c2b section 2.2, revised 2026-10-12): every test but the default's own switches rerank on
-    /// explicitly, through a stored true.
+    /// The shipped default is on (s7h section 2.3); every test but the default's own still switches rerank on explicitly, through
+    /// a stored true.
     private func makeShell(store: RerankStore = MemoryRerankStore(true), runner: RerankRunner, demote: DemoteStore = MemoryDemoteStore(),
                            frees: FreeCounter, resources: URL? = nil) -> Shell {
         let shell = Shell(resources: resources ?? self.resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(),
@@ -59,6 +59,21 @@ final class RerankTests: XCTestCase {
         XCTAssertEqual(RerankRow.ngram, Selftest.ngramText)
         XCTAssertEqual(RerankRow.reranked, Selftest.rerankedText)
         XCTAssertNotEqual(RerankRow.ngram, RerankRow.reranked)
+    }
+
+    /// s7h section 2.3: the device sentence under the shell's conditions. On, the finished job shows 程式; off, the n-gram's
+    /// sentence stays.
+    func testDeviceSentenceIsRerankedOnlyWhenOn() {
+        let on = rig()
+        on.c.type(DeviceRow.standardKeys)
+        XCTAssertEqual(on.c.client.marked, DeviceRow.ngram, "the n-gram result shows first")
+        on.runner.drain()
+        XCTAssertEqual(on.c.client.marked, DeviceRow.reranked)
+        let off = rig(store: MemoryRerankStore(false))
+        off.c.type(DeviceRow.standardKeys)
+        off.runner.drain()
+        XCTAssertEqual(off.c.client.marked, DeviceRow.ngram)
+        XCTAssertNotEqual(DeviceRow.ngram, DeviceRow.reranked)
     }
 
     // MARK: the queue
@@ -311,30 +326,43 @@ final class RerankTests: XCTestCase {
 
     // MARK: the switch
 
-    /// Section 2.2 (revised 2026-10-12): never chosen (a nil store) means off, whatever the core's own default: the menu item is
-    /// unchecked, the engine was told off (no job is ever taken, the n-gram result stays), and the window's model agrees. This
-    /// is the test that fails if the shipped default goes back to on.
-    func testNeverChosenIsOffAndTheEngineIsToldOff() {
+    /// s7h section 2.3: never chosen (a nil store) means on, although the core's own default is off: the menu item is checked,
+    /// the engine was told on (jobs are taken, the reranked sentence shows), and the window's model agrees. This is the test
+    /// that fails if the shipped default goes back to off.
+    func testNeverChosenIsOnAndTheEngineIsToldOn() {
         let store = MemoryRerankStore()
         XCTAssertNil(store.rerank)
         let r = rig(store: store)
-        XCTAssertFalse(r.shell.rerankOn, "default off")
-        XCTAssertFalse(SettingsModel(shell: r.shell).rerank, "the window shows off too")
+        XCTAssertTrue(r.shell.rerankOn, "default on")
+        XCTAssertTrue(SettingsModel(shell: r.shell).rerank, "the window shows on too")
         let item = r.c.session.menu.first { $0.action == .toggleRerank }
-        XCTAssertEqual(item?.checked, false, "default off")
-        XCTAssertEqual(item?.enabled, true, "off, but the switch can be turned on")
+        XCTAssertEqual(item?.checked, true, "default on")
+        XCTAssertEqual(item?.enabled, true)
+        r.c.type(RerankRow.standardKeys)
+        XCTAssertGreaterThan(r.runner.received, 0, "jobs: the engine was told setRerank(true)")
+        r.runner.drain()
+        XCTAssertGreaterThan(r.shell.rerankTaken, 0)
+        XCTAssertEqual(r.c.client.marked, RerankRow.reranked)
+        XCTAssertNil(store.rerank, "building the engine chose nothing")
+        // The call itself, not only its effect: the core's own default is off, so the shell must send true on every build.
+        XCTAssertEqual(r.shell.rerankSent, [true], "the first build sent setRerank(true)")
+        r.c.session.perform(.layout(.eten))  // a rebuild
+        r.c.session.perform(.layout(.standard))
+        XCTAssertEqual(r.shell.rerankSent, [true, true, true], "every rebuild sends setRerank(true) again")
+    }
+
+    /// s7h section 2.3: a stored false stays off under the new default: the build sends false and no job is taken.
+    func testStoredOffStaysOff() {
+        let store = MemoryRerankStore(false)
+        let r = rig(store: store)
+        XCTAssertFalse(r.shell.rerankOn)
+        XCTAssertEqual(r.c.session.menu.first { $0.action == .toggleRerank }?.checked, false)
         r.c.type(RerankRow.standardKeys)
         r.runner.drain()
         XCTAssertEqual(r.runner.received, 0, "no job: the engine was told setRerank(false)")
-        XCTAssertEqual(r.shell.rerankTaken, 0)
         XCTAssertEqual(r.c.client.marked, RerankRow.ngram)
-        XCTAssertNil(store.rerank, "building the engine chose nothing")
-        // The call itself, not only its effect: the core's own default is off too, so "sent false" and "sent nothing" look the
-        // same in the jobs. The shell recorded what it passed to setRerank on every build.
-        XCTAssertEqual(r.shell.rerankSent, [false], "the first build sent setRerank(false)")
-        r.c.session.perform(.layout(.eten))  // a rebuild
-        r.c.session.perform(.layout(.standard))
-        XCTAssertEqual(r.shell.rerankSent, [false, false, false], "every rebuild sends setRerank(false) again")
+        XCTAssertEqual(r.shell.rerankSent, [false])
+        XCTAssertEqual(store.rerank, false)
         let on = rig(store: MemoryRerankStore(true))
         XCTAssertEqual(on.shell.rerankSent, [true], "a stored true is what the build sends")
     }

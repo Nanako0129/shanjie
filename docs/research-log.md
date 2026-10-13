@@ -4429,3 +4429,11 @@ CLI 重現（Rust，model-v5，`--context`、沒有前文；聊天與書面、�
   - 沒有「改對 < 改壞而且 p < 0.05」，沒有觸發停止條件。對照：`tinylm-v2` 在 2026-10-12 的保留集是聊天 180 → 187（7／0）、書面 184 → 187（3／0）。
 - **下一步**：PR 1 合併後，建 `tinylm-v3` Release 要維護者當下同意；之後 PR 2 換檔、語意校正預設開（PR 2 不再跑保留集）。
 
+## 2026-10-13：S7h PR 2——換成 `tinylm-v3`、語意校正預設開（契約 §2.3）
+
+- **Release `tinylm-v3`**：維護者同意（選擇題）後建立（`--latest=false`，標題照 v2 的格式）。上傳前在暫存資料夾用說明檔的雜湊核對，上傳後重新下載再核對，兩次都是 OK；Latest 仍是 v0.4.0；Release 本文就是 `docs/releases/tinylm-v3.md`（只差結尾的一個空行）。
+- **換檔**：`data/tinylm.sjtl.sha256` 記 `7e73ef67…`；`ci.yml` 兩個 job、`release.yml`、`scripts/build-app.sh` 的提示、CONTRIBUTING、`docs/verification.md`、`docs/data-files.md`、`LICENSES/data.md`、測試的缺檔訊息都改成 `tinylm-v3`。`grep -rn tinylm-v2` 剩下的是歷史敘述與對照（研究紀錄、舊契約、PLAN 的舊狀態、`docs/releases/` 的 README 例子與 v1／v2／v3 說明、README「之前打包 v2」、data-files「v2、v3 都只換融合參數」、`LICENSES/data.md` 列出 v1／v2／v3 的參數、`Selftest.swift` 與 `Support.swift` 註解裡 v2 與 v3 的量測）。`docs/data-files.md`「版本怎麼往前走」的下一個版本改成 `tinylm-v4`。
+- **預設開**：`Shell` 的 `rerankStore.rerank ?? true`、`rerankOn` 起始 true、`SettingsModel.rerank` 起始 true；核心預設不變（關），殼每次建引擎都明確傳值。測試：沒設過 → 開（選單勾著、設定視窗的模型是開、每次建引擎傳 `setRerank(true)`、有工作、最後顯示重排後的句子）；存 false → 關（傳 false、沒有工作）；存 true → 傳 true；設定視窗的測試改成從「開」出發。**突變**：`?? true` 改回 `?? false`，`RerankTests` 與 `SettingsTests` 10 個斷言失敗（0 個 unexpected），改回後全過。
+- **實機句的 XCTest**（`DeviceRow`，dev302 第 25 列，`RerankTests` 的 `rig()`）：v2 下只有「開時是 `執行這個程式`」那一個斷言失敗（組字是 `執行這個城市`），v3 下通過；`RerankTests` 17 個在 v3 下全過（含 selftest 的第 65 列，v3 下仍被改）。
+- **之後**：`make test`、App 打包與 `check-app.sh`、selftest-bundled；/code-review、fresh verifier；實機（刪 `rerank` key 要維護者同意，看選單是勾著的；打第 25 列，開與關各一次）。
+
