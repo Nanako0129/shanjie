@@ -4803,3 +4803,6 @@ CLI 重現（Rust，model-v5，`--context`、沒有前文；聊天與書面、�
   - 運算位置（維護者：「不要再增加Mac負擔了」「私人訊息能搬到別台機器，請搬」「colab可以放」）：打分、大量評測、訓練、多程序不在 Mac 上跑，改用 188 或 Colab；私人評測集（discordtune、E2 調參期與判斷期的列檔）已複製到 188、雜湊核對過，也可以上 Colab，只用來評測。`score_0c.py` 加了 `--workers N`（多程序、依序切片、結果照順序合併；測試驗過），只在 188／Colab 用。
   - 語料：不爬購物網站。蝦皮的服務條款第 3.1 條寫明不得用機器人、蜘蛛程式或其他自動裝置或手動程序監視或複製其內容；momo、PChome 的條款原文沒讀到（前端渲染、回 429）；商品文案是賣家的著作，也不符合「每個來源都要可再散布」。改用開放資料，和領域詞包一起做：Wikidata（CC0）、智慧局的商品暨服務名稱與商標資料（政府資料開放授權 1.0）、公司登記與食藥署產品登記、Cofacts（CC BY-SA）。授權逐一核對後才用。
 
+## 2026-10-13：CodeRabbit 不再自動審查
+
+- 維護者決定（選擇題）：`.coderabbit.yaml` 設 `reviews.auto_review.enabled: false`。善解的合併關卡是本地 `/code-review`（`CLAUDE.md`「一片工作的流程」第 4 項），CodeRabbit 不是必要檢查（main 的 ruleset 停用，必要的只有 CI 的 changes、core、shell），但它每個 PR 都自動跑（#136、#138、#139 都有），用掉的是其他以它當關卡的 repo 的額度。要它審時在 PR 留言 `@coderabbitai review`。原本的 `auto_pause_after_reviewed_commits: 0` 只對自動審查有意義，一起拿掉；路徑說明與保留集排除照留，手動叫它審時仍適用。
