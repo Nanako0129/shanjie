@@ -66,7 +66,7 @@ def count_lines(path):
 def cmd_construction(a):
     files = raw_sources()
     articles = None
-    if a.charcount and os.path.isfile(a.charcount):
+    if a.charcount:   # given = must be readable; a missing file is an error, not NOT CHECKED
         articles = json.load(open(a.charcount, encoding="utf-8"))["report"].get("articles")
     rep = construction_check((r for p in files for r in raw_lines(p)), count_lines(a.coll), articles)
     rep["source_sha256"] = {os.path.basename(p): sha256_file(p) for p in files}

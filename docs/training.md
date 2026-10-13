@@ -189,7 +189,7 @@ classes-v3 分群在 188 約花多少時間：沒有紀錄（model-v5 README 只
 `experiments/s7a-tinylm/README.md`「檔案」「契約沒寫死、我做的決定」、`docs/contracts/s7a-tinylm.md` §2.2。
 
 1. **產生訓練文字**：`python -u prep.py runs --work %W% --coll <colloquial-train.txt> --synth <synth.txt> --procs 10`。用和 n-gram 計數**同一組函式**（`build_counts` 的 `articles`、`convert`、`HAN`），維基前 20 萬篇＋口語兩個檔，每個連續漢字段（≥ 2 字）一個序列。核對輸入雜湊（維基 dump `5db9052e…`、`colloquial-train.txt` `3e833d06…`、`synth.txt` `bec7a6a2…`、`TWVariants.txt` `245b94eb…`、`STCharacters.txt` `a0ca1601…`），不符就停（`prep.py` 的 `EXPECTED`）。**不用** S2w 的轉換，也**不用**詞包（model-v5 計數那一步才有）。
-2. **建構檢查**：`python -u buildcheck.py construction --coll … --out … [--charcount <DIR>/charcount.json]`：口語那一半對原始來源逐行算 `is_tune(raw)`，核對 `is_tune` 為假的行數等於 `colloquial-train.txt` 的行數，不符就停（結束碼 1）；它核對的是切分，不是「沒有整句重疊」（第 4 步量到的整句重疊就不是 0）。維基那一半只比 `charcount.json` 記的條目數和 wikitune 起點 300,000 兩個數字：給了 `--charcount` 而條目數超過 300,000 也會停（結束碼 1），沒給時報告寫 `NOT CHECKED`、不會失敗（研究紀錄 2026-10-11 S7a 的〔更正〕：沒有實際讀條目核對）。
+2. **建構檢查**：`python -u buildcheck.py construction --coll … --out … [--charcount <DIR>/charcount.json]`：口語那一半對原始來源逐行算 `is_tune(raw)`，核對 `is_tune` 為假的行數等於 `colloquial-train.txt` 的行數，不符就停（結束碼 1）；它核對的是切分，不是「沒有整句重疊」（第 4 步量到的整句重疊就不是 0）。維基那一半只比 `charcount.json` 記的條目數和 wikitune 起點 300,000 兩個數字：給了 `--charcount` 而條目數超過 300,000 也會停（結束碼 1；給了但檔案讀不到也會出錯），沒給時報告寫 `NOT CHECKED`、不會失敗（研究紀錄 2026-10-11 S7a 的〔更正〕：沒有實際讀條目核對）。
 3. **字表與編碼**：`python -u prep.py encode --work %W%`。字表取訓練文字（維基、口語各算一次，不乘 5）出現 ≥ 5 次的字，次數多的在前、同次數依碼位，其餘 UNK；id 0／1／2 是 PAD／UNK／BOS。字本身 9,714 個，加三個特殊符號共 9,717 個 id（研究紀錄 2026-10-11 S7a 的更正）。
 4. **記錄用的整句重疊比例**：`buildcheck.py substr`：調參集正解句整句出現在訓練文字裡的比例，cvtune 507／3,791（13.37%）、wikitune 671／2,827（23.74%）。只記錄，不是停止條件。
 
@@ -249,7 +249,7 @@ python3 experiments/s7a-tinylm/export_sjtl.py --npz ~/.cache/shanjie/work/s7a/ti
 |---|---|---|---|---|
 | `tinylm-v1` | 0.7／2／（無） | 0.7／2／（無） | S7a：cvtune＋wikitune 合計 top1 最高，同分取 τ 較小、再取 α 較小；選好凍結。S7d 只用和訓練文字沒有整句重疊的調參列重選，M 選到的值完全不變 | `s7a-tinylm.md` §2.3、§8；`s7d-tune-overlap.md`；研究紀錄 2026-10-11 S7a、S7d |
 | `tinylm-v2` | 0.2／1／0.25 | 0.7／1／2 | S7e：在 cvtune＋wikitune 合計（6,618 列）上，照「改對 − 10 × 改壞」選；`fusegrid.py --break-weight 10`。「改壞 1 句 ≈ 改對 10 句」是使用者的權重 | `s7e-fewer-breaks.md` §2.2；研究紀錄 2026-10-12 S7e；`docs/releases/tinylm-v2.md` |
-| `tinylm-v3` | **0.3／2／0.25** | 0.7／1／2（不變） | E2：計分改 1:1 的「改對 − 改壞」、改壞率 ≤ 0.5%；在**維護者自己的聊天訊息**建的調參期（5,761 列）上選，先凍結（`judge.py --select R3p --tuning chatclause --weight 1 --cap 0.005`；`R3p` 只是輸出表格裡那一列的名稱，值由 `--tuning`、`--weight`、`--cap` 選出），之後只在判斷期 2026-08（6,559 列）算一次 | `e2-chat-eval.md`；`s7h-tinylm-v3.md` §0；研究紀錄 2026-10-13「E2 的新調參期與 R3′」「E2 判斷期（2026-08）的表與結論」 |
+| `tinylm-v3` | **0.3／2／0.25** | 0.7／1／2（不變） | E2：計分改 1:1 的「改對 − 改壞」、改壞率 ≤ 0.5%；在**維護者自己的聊天訊息**建的調參期（5,761 列）上選，先凍結（`judge.py --select R3p --tuning chatclause --weight 1 --cap 0.005`；`R3p` 只是名稱（輸出那一列與 rowstats 檔名的前綴），值由 `--tuning`、`--weight`、`--cap` 選出），之後只在判斷期 2026-08（6,559 列）算一次 | `e2-chat-eval.md`；`s7h-tinylm-v3.md` §0；研究紀錄 2026-10-13「E2 的新調參期與 R3′」「E2 判斷期（2026-08）的表與結論」 |
 
 注意事項：
 
