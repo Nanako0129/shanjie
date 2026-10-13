@@ -4914,7 +4914,7 @@ CLI 重現（Rust，model-v5，`--context`、沒有前文；聊天與書面、�
 ## 2026-10-14：CLAUDE.md 移出版控（改寫歷史）
 
 - 維護者：「你不應該把 CLAUDE.md 放上去，應該要有 ./local 的做法」，並要求「把 CLAUDE.md 的相關 commit 都重寫」。改成另一個專案用的做法：追蹤的 `CLAUDE.md` 只做導引，維護者本機的工作方式放 `.agent-local/CLAUDE.md`（`.gitignore` 排除）。
-- **改寫**：`git filter-repo --path CLAUDE.md --invert-paths`，所有分支與 tag 都拿掉舊的 `CLAUDE.md`（1,033 個 commit 裡 950 個換了編號）。先在獨立的 mirror 上跑、核對過：每個 ref 都沒有 `CLAUDE.md`，main 與每個 tag 的檔案樹等於舊的檔案樹減掉 `CLAUDE.md`。之後強制推送 7 個遠端分支與 19 個 tag（model-v1 早於 `CLAUDE.md`，編號沒變；推 `v*` tag 前先停用發版 workflow，推完再開，期間沒有發版 run）。Release 的附件（簽章、公證過的 zip、模型檔）與 Homebrew 的下載網址不受影響；tag 名稱不變、改指向對應的新 commit。
+- **改寫**：`git filter-repo --path CLAUDE.md --invert-paths`，所有分支與 tag 都拿掉舊的 `CLAUDE.md`（正式改寫的 mirror 含本機分支，1,036 個 commit 裡 953 個換了編號，其中 1 個整個消失）。先在獨立的 mirror 上跑、核對過：每個 ref 都沒有 `CLAUDE.md`，main 與每個 tag 的檔案樹等於舊的檔案樹減掉 `CLAUDE.md`。之後強制推送 7 個遠端分支與 19 個 tag（model-v1 早於 `CLAUDE.md`，編號沒變；推 `v*` tag 前先停用發版 workflow，推完再開，期間沒有發版 run）。Release 的附件（簽章、公證過的 zip、模型檔）與 Homebrew 的下載網址不受影響；tag 名稱不變、改指向對應的新 commit。
 - **舊編號**：現行文件裡引用到被改寫 commit 的 230 處（46 個檔，106 個不同的編號）換成新編號（同長度、核對過沒有撞號）；歷史裡的舊版文件照舊。commit 說明裡的縮寫編號由 filter-repo 自動改寫。新舊對照表存在維護者本機。
 - 改寫還做了兩件事，所以不是每個 ref 都只差 `CLAUDE.md`：還沒合併的 PR #142 分支上，一段寫錯的文字用 `--replace-text` 一起改掉（原文不再出現在任何 ref），那個分支有一個 commit 的說明也跟著改寫；只改 `CLAUDE.md` 的一個 commit 整個消失。main 與 19 個 tag 是「舊的檔案樹減掉 `CLAUDE.md`」（核對過）。
 - 現行文件裡有兩個編號（`docs/PLAN.md` 一個、研究紀錄一個）指的是只在維護者本機的實驗分支 `feat/repick-freeze`，GitHub 上查不到（改寫前就是這樣）。
