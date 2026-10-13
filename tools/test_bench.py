@@ -1,6 +1,7 @@
 """Tests for tools/bench.py's reference row, static table check and table rendering (sbench 7.1, 7.2, 7.4).
 Run: python3 -m unittest tools/test_bench.py   (from the repo root). No network, no private data, no real builds."""
 import argparse, contextlib, io, json, os, stat, sys, tempfile, types, unittest
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import bench  # noqa: E402
@@ -418,7 +419,9 @@ class SuiteV2(Tmp):
             json.dump({"versions": [{"version": "v0.4.1", "holdout": {"chat": {"n": 1, "top1": 1}}}]}, f)
         args = types.SimpleNamespace(lm=None, base=None, override_packs=None, refs=["v0.4.0", "v0.4.1"], as_=None, label=None, private_root=self.td)
         err = io.StringIO()
-        with self.assertRaises(SystemExit), contextlib.redirect_stderr(err):
+        # preflight is a tripwire: without the guard the test fails here, before any build starts
+        with self.assertRaises(SystemExit), contextlib.redirect_stderr(err), \
+                mock.patch.object(bench, "preflight2", side_effect=AssertionError("reached preflight")):
             bench.cmd_run2(args)  # stops before preflight and any build
         self.assertIn("holdout numbers", err.getvalue())
 

@@ -22,7 +22,7 @@
 
 | 指令 | 什麼時候 | 內容 |
 |---|---|---|
-| `tools/bench.py run --suite v2 <上一版 tag> <要打 tag 的 commit> --as <新版> --private-root ~/side-project/shanjie-private`，再 `tools/bench.py table` | 發版前（推 `v*` tag 之前） | 套件 v2（`docs/contracts/sbench-v2.md`）：每一版用自己出貨的模型、詞類表、小模型與旗標量準確率與速度，結果寫 `eval/bench/results/v2-<label>.json`；要打 tag 的 commit 定下來之後，請 fresh verifier 照 CLAUDE.md 量保留集（上一版對新版的 `evalstats compare` 一行），填進同一個 JSON。兩者隨發版前的 PR 進 repo；推 tag 前核對被量的 commit 和要打 tag 的 commit 在 `Cargo.toml Cargo.lock core cli data eval/variants.tsv macos scripts` 上沒有差異。新版要先在 `tools/bench.py` 的 `VERSIONS2` 加一列（Release 名、出貨旗標、摘要行設定標記，照 App 的預設值與 `scripts/build-app.sh` 包進去的模型） |
+| `tools/bench.py run --suite v2 <上一版 tag> <要打 tag 的 commit> --as <新版> --private-root ~/side-project/shanjie-private`，再 `tools/bench.py table` | 發版前（推 `v*` tag 之前） | 套件 v2（`docs/contracts/sbench-v2.md`）：每一版用自己出貨的模型、詞類表、小模型與旗標量準確率與速度，結果寫 `eval/bench/results/v2-<label>.json`；要打 tag 的 commit 定下來之後，請 fresh verifier 照 CLAUDE.md 量保留集（上一版對新版的 `evalstats compare` 一行），填進同一個 JSON（可以在最後幾個只改綁定路徑以外檔案的 PR 合併前就量，條件見 `docs/contracts/sbench-v2.md` §2.3 的修訂）。兩者隨發版前的 PR 進 repo；推 tag 前核對被量的 commit 和要打 tag 的 commit 在 `Cargo.toml Cargo.lock core cli data eval/variants.tsv macos scripts` 上沒有差異。新版要先在 `tools/bench.py` 的 `VERSIONS2` 加一列（Release 名、出貨旗標、摘要行設定標記，照 App 的預設值與 `scripts/build-app.sh` 包進去的模型） |
 | `tools/bench.py run <commit> --private-root ~/side-project/shanjie-private` | 不再用於發版 | 套件 v1（固定 model-v1），保留給 v0.1.x 的歷史表 |
 | `tools/bench.py reference --private-root ~/side-project/shanjie-private` | commit 或指紋改變時 | 「小麥資料基準」列（`--no-overlay`、不帶 `--lm` 的 unigram） |
 | `tools/bench.py check-static` | 改動 `eval/bench/static/typing-test.json` 或 `docs/typing-test.md` 時 | 實打對照表逐格對照原文 |
