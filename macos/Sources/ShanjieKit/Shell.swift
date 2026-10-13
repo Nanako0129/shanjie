@@ -387,9 +387,17 @@ public final class Shell {
 
     /// The owning session. "Still valid" means this weak reference is not nil; an address
     /// (ObjectIdentifier) is never used, as a freed controller's address can be reused.
-    weak var owner: Session?
+    weak var owner: Session? {
+        didSet { if owner !== oldValue { lineAnchor = nil } }
+    }
     /// Whether the composition (as last applied to a client) is non-empty.
-    var composing = false
+    var composing = false {
+        didSet { if !composing { lineAnchor = nil } }
+    }
+    /// docs/contracts/line-jump-guard.md section 2.2: the last line used in this composition, which `PanelPlacement.steadyLine`
+    /// measures the client's next line against. It lives as long as the composition: cleared when `composing` turns false
+    /// (commit, clear, core failure, orphan discard) or the owner changes, not when the panel hides mid-composition.
+    var lineAnchor: NSRect?
     /// The last `lineRect` answer and the preedit and cursor it was asked for. Asking the client is a
     /// synchronous IPC on the key path, so a pure selection move (same preedit and cursor) reuses it.
     /// Cleared whenever the panel hides: commit, reset, owner change.
@@ -1039,9 +1047,10 @@ public final class Session {
             if let c = shell.lineCache, c.preedit == o.preedit, c.cursor == cursor {
                 rect = c.rect
             } else {
-                rect = client.lineRect(cursor: cursor)
+                rect = PanelPlacement.steadyLine(client.lineRect(cursor: cursor), anchor: shell.lineAnchor)
                 shell.lineCache = (o.preedit, cursor, rect)
             }
+            if shell.composing, let rect { shell.lineAnchor = rect }
             shell.showCandidates(o.candidates, selected: o.selected, columns: o.columns, first: o.first, total: o.total,
                                  vertical: o.vertical, lineRect: rect, appearance: client.appearance)
         }
