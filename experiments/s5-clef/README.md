@@ -88,7 +88,7 @@ Stdout and stderr carry counts, numbers, HTTP statuses and fixed strings. An une
 `CF_AI_TOKEN` and `CF_ACCOUNT_ID` come from the environment. Only main runs paid calls; agent briefs forbid running `clef_run.py`.
 
 ```sh
-cd /Users/nanako/side-project/shanjie-s5c
+# run from the repository root
 
 # offline tests (no network); restore them first, see the file table above
 python3 -B -m unittest discover -s experiments/s5-clef -p 'test_*.py'

@@ -7,7 +7,7 @@
   python3 fuse.py --repro --set cvtune --tau 0.6309
 
 列（row）的內部表示：dict(ng=[n-gram 分數], js=[判斷器分數], margin, half, ok=[各候選對錯 0/1])。
-選取函式都是純函式，test_fuse.py 直接餵手造的列（2026-10-14 移除；git show 4517db7:experiments/fusion/test_fuse.py）。
+選取函式都是純函式，test_fuse.py 直接餵手造的列（2026-10-14 移除；取回：git show 4517db7:experiments/fusion/test_fuse.py > experiments/fusion/test_fuse.py）。
 """
 import argparse
 import json
