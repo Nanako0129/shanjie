@@ -4912,6 +4912,6 @@ CLI 重現（Rust，model-v5，`--context`、沒有前文；聊天與書面、�
 - 維護者：「整理一下 python test 的腳本，佔據了 repo 比例有點高」。量過（`git ls-files` 的位元組）：Python 1.38 MB（Rust 0.78、Swift 0.52），其中 `experiments/` 1.00 MB；所有 `test_*.py` 0.45 MB／37 檔，`make test`、CI 都沒跑的 18 檔共 0.15 MB（大部分照舊會過）。比例主要來自研究腳本，不是測試。
 - 維護者選擇題：「不計入統計＋清掉沒在跑的測試」。
   - `.gitattributes`：`experiments/** linguist-detectable=false`，GitHub 的語言統計不算研究腳本（檔案不動，研究紀錄與契約裡的重現指令照樣能用）。
-  - 刪掉已結束研究的 10 個測試（約 94 KB）：`s5-prompts`（2）、`s5-clef`（3）、`s5-local`（1）、`sp`（3，預測已在 Rust 核心）、`fusion`（1）。要重跑從 `63e2f5d` 取回（各 README 寫了指令）。
-  - **沒刪的 7 個**（選項說明寫成 17 個全刪，查引用後更正）：`experiments/s2` 的 `test_convert.py`、`test_expected.py` 測語料計數的建置流程（model-v6 改 `TWPhrases` 會用到），`s7a-tinylm` 的 4 個測 tinylm 訓練流程（tinylm-v4 會用到），`s2w/test_mw.py` 測維基轉換。刪掉等於拿掉接下來要改的程式的保護。
-  - 加進 `make test-python`：`tools/test_build_classes.py`（還在用的工具，0.15 秒）、`experiments/s2/test_expected.py`（0.07 秒）。`test_convert.py` 要讀 `~/.cache` 的 OpenCC 檔，放進去別人的機器會失敗，照舊手動跑。
+  - 刪掉已結束研究的 7 個測試（約 79 KB）：`s5-prompts`（2）、`s5-clef`（3）、`s5-local`（1）、`fusion`（1）。各 README 寫了從 `4517db7` 取回的指令（`s5-clef` 的付費腳本重跑前要先取回，其中 `test_gateway.py` 檢查只有 Clef 的請求帶閘道標頭）。
+  - **沒刪的 10 個**（選項說明寫成 17 個全刪，查引用與 /code-review 後更正）：`experiments/s2` 的 `test_convert.py`、`test_expected.py` 測語料計數的建置流程（model-v6 改 `TWPhrases` 會用到），`s7a-tinylm` 的 4 個測 tinylm 訓練流程（tinylm-v4 會用到），`s2w/test_mw.py` 測維基轉換，`sp` 的 3 個測 `predict.py`／`predict3.py`（`golden_predict.py` 用它們重產核心的 `eval/golden/sp-predict.txt`，每次換模型都會跑）。刪掉等於拿掉接下來要改的程式的保護。
+  - 加進 `make test-python`：`tools/test_build_classes.py`（還在用的工具，0.15 秒）、`experiments/s2/test_expected.py`（0.07 秒）、`sp` 的 3 個（24 項，約 0.1 秒）。`test_convert.py` 要讀 `~/.cache` 的 OpenCC 檔，放進去別人的機器會失敗，照舊手動跑。

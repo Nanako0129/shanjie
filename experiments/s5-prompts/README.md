@@ -6,7 +6,7 @@ Spec: `docs/contracts/s5p-cloud-prompts.md` (texts, rules and stops are frozen t
 |---|---|
 | `p_run.py` | Driver: `--provider jev\|clef\|clef27 --sets S[,S] [--half A\|B] [--variants v1,v2,v3,v4] [--limit N]`; `--print-request`; `--check-examples`. Resumable, one request per row. |
 | `p_score.py` | `select` (A half) and `test --jev vN --clef vN --clef27 vN` (B half: the 8 named tests with all three providers, 5 with Jev and flash only). |
-| `test_prompts.py`, `test_prompts27.py` | Removed 2026-10-14 (research concluded, never in `make test`). Restore with `git show 63e2f5d:experiments/s5-prompts/test_prompts.py`. |
+| `test_prompts.py`, `test_prompts27.py` | Removed 2026-10-14 (research concluded, never in `make test`). Restore both: `for f in test_prompts test_prompts27; do git show 4517db7:experiments/s5-prompts/$f.py > experiments/s5-prompts/$f.py; done` (`test_prompts27.py` imports `test_prompts`). |
 
 Keys come from the environment only: Jev `TYPESAFE_API_KEY`, Clef `CF_AI_TOKEN` + `CF_ACCOUNT_ID`; read only after the set allowlist and hash checks. Clef refuses to run until `CLEF_V0_SHA` (27B: `CLEF27_V0_SHA`) in `p_run.py` holds the contract section 12 hash. Clef requests carry `cf-aig-gateway-id` (S5c). Output: `~/.cache/shanjie/work/s5-prompts/<set>[-nN]/{jev,clef,clef27}-<variant>.jsonl` (cvtune and smoke), `results/<set>/` for full dev302/typing76 runs. Budget US$2 shared (Clef from tokens, Jev estimated at S5j's J1 rate); Jev hard cap 6,000 requests.
 

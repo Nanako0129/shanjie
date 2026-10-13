@@ -10,7 +10,7 @@ Spec: `docs/contracts/s5k-local-scorers.md`. This directory holds the tooling an
 | `run_laya.py` | L-noul, L-choice-fwd, L-choice-rev, L-pos (venv A) |
 | `run_ll.py` | Q-ll (venv A), B1-ll / B4-ll (venv B) |
 | `run_ll_cuda.py` | Q8-ll: Qwen3-8B 4-bit (bitsandbytes nf4) on CUDA, for 188 (contract §11); pure scoring functions import without torch |
-| `test_run_ll_cuda.py` | removed 2026-10-14 (research concluded, never in `make test`); restore with `git show 63e2f5d:experiments/s5-local/test_run_ll_cuda.py` |
+| `test_run_ll_cuda.py` | removed 2026-10-14 (research concluded, never in `make test`); restore with `git show 4517db7:experiments/s5-local/test_run_ll_cuda.py > experiments/s5-local/test_run_ll_cuda.py` |
 | `score.py` | metrics, tau, pairing with S5j (any Python) |
 | `selftest.py` | error-path checks: prefix-only scorer trips the stop (exit 3); wrong hash exits non-zero |
 

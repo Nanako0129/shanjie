@@ -6,7 +6,7 @@
 
 ```bash
 cd experiments/fusion
-# 單元檢查 test_fuse.py 已移除（2026-10-14，研究已結束）；要重跑先 git show 63e2f5d:experiments/fusion/test_fuse.py > test_fuse.py
+# 單元檢查 test_fuse.py 已移除（2026-10-14，研究已結束）；要重跑先 git show 4517db7:experiments/fusion/test_fuse.py > test_fuse.py
 python3 fuse.py --set cvtune dev302 typing76           # 公開集合，每個集合跑所有有檔案的判斷器
 python3 fuse.py --repro --set cvtune --tau 0.6309      # 重現 S5k（cvtune 的 τ 是 discordtune 選的）
 ```
@@ -179,5 +179,5 @@ python3 fuse.py --set discordtune --judge Q8-ll Laya     # 主要檢定與預先
 
 ## 驗證
 
-* `python3 test_fuse.py`：5 項。Jev 反序對齊、參數只用 A 半（含格點）、w = 0 等於第 1 組、第 5 組決策等於等效 τ 門檻、S5k 分位數索引與同分規則。
+* `python3 test_fuse.py`：5 項（2026-10-14 移除，取回方式見上方「怎麼跑」）。Jev 反序對齊、參數只用 A 半（含格點）、w = 0 等於第 1 組、第 5 組決策等於等效 τ 門檻、S5k 分位數索引與同分規則。
 * 突變（暫時改 `fuse.py`，跑完還原，`git status` 無額外變動）：Jev 反序改成照位置對齊，`test_jev_reverse_aligns_to_candidates` 失敗；τ 格點改用全部列，`test_params_only_from_A` 失敗。

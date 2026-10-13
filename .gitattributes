@@ -1,3 +1,3 @@
-# Research scripts (concluded slices and their reproduction tooling) are kept for the records in docs/research-log.md;
-# they are not the shipped code, so GitHub's language statistics leave them out.
+# Research code and its reproduction tooling. Some of it still feeds later work (count building, tinylm training,
+# golden generation), so it stays tracked; it is not the shipped app, so GitHub's language statistics leave it out.
 experiments/** linguist-detectable=false
