@@ -43,9 +43,9 @@
 
 | 改了什麼 | 要發 |
 |---|---|
-| 語料、計數或模型格式 | `model-v6`＋`classes-v4`＋`tinylm-v4` |
-| 只重新分群 | `classes-v4`＋`tinylm-v4` |
-| 小模型的訓練、大小、匯出格式或融合參數 | `tinylm-v4`（`tinylm-v2`、`tinylm-v3` 都只換融合參數） |
+| 語料、計數或模型格式 | `model-v6`＋`classes-v4`＋下一個 `tinylm-v…` |
+| 只重新分群 | `classes-v4`＋下一個 `tinylm-v…` |
+| 小模型的訓練、大小、匯出格式或融合參數 | 下一個 `tinylm-v…`（`tinylm-v2`、`tinylm-v3` 都只換融合參數） |
 
 ## 2. 語料與輸入
 
@@ -361,7 +361,7 @@ python3 experiments/s7a-tinylm/export_sjtl.py --npz ~/.cache/shanjie/work/s7a/ti
 | **領域詞包（資訊與 AI、醫藥、法律）** | 跟 model-v6：詞包的詞要放進 model-v6 的斷詞詞表、加領域語料重建（動漫詞包在 model-v5 的做法） | `docs/PLAN.md`「領域詞包」 |
 | **錯字回報當線索補語料** | 下一次重建模型（model-v6）一起訓練；評分不能用當過線索的列 | `docs/PLAN.md` |
 | **詞包 (c) 規則的待辦** | 重建詞包前要先改 `tools/build_acg_pack.py` 的 (c) 規則（`LEXICON_RULE_ROUNDS`）或加例外，否則換成 model-v5 的模型解碼會丟掉使用者決定保留的名字 | model-v5 契約 §9「待辦」 |
-| **model-v6 需要的連鎖** | `model-v6`＋`classes-v4`＋`tinylm-v4`（§1.3）；小模型的**權重**要不要用新語料重訓：沒有紀錄（目前只決定融合參數與檔頭雜湊要重做） | `docs/data-files.md` |
+| **model-v6 需要的連鎖** | `model-v6`＋`classes-v4`＋下一個 `tinylm-v…`（§1.3）；小模型的**權重**要不要用新語料重訓：沒有紀錄（目前只決定融合參數與檔頭雜湊要重做） | `docs/data-files.md` |
 | **聊天評測的下一個判斷期** | 2026-08 這一期已用掉；下一次要用新的月份 | `e2-chat-eval.md` |
 
 ## 10. 引用的來源
