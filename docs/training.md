@@ -35,7 +35,7 @@
 | 詞類表 → 模型 | `classes.sjc` 檔頭記模型的 SHA-256；缺檔、配到別的模型、內容不對，載入都回 3 | 重建模型就要重建詞類表（`docs/data-files.md`「現在用的檔案」） |
 | 語意校正模型 → 模型 | `tinylm.sjtl` 檔頭記調參時用的模型的 SHA-256；不符時核心拒絕載入、只用 n-gram（`docs/data-files.md`） | 重建模型就要重新匯出、重新調參 |
 | 語意校正模型 → 詞類表 | **沒有檢查**，只在 α、τ、δ 的調法上依賴：它們是在 model-v5＋classes-v3 上調的 | 只換詞類表也要重調，雜湊攔不住這種錯配，只能靠 `docs/data-files.md` 的版本表 |
-| 語意校正 → Kneser–Ney 側檔 | `--tinylm` 要求 `kn.sjkn` 不能開，因為調參時沒有開（`experiments/s7a-tinylm/README.md`「S7c-1」） | 之後若開 KN，融合參數要重調（見 §9） |
+| 語意校正 → Kneser–Ney 側檔 | `--tinylm` 要求 `kn.sjkn` 不能開（`experiments/s7a-tinylm/README.md`「S7c-1」）；〔推論〕原因是調參時沒有開，來源只寫了要求 | 之後若開 KN，融合參數要重調（見 §9） |
 
 ### 1.3 改了什麼，要發哪些新 Release
 
@@ -73,7 +73,7 @@
 | OpenCC 對照表 | commit `3ac34aa439a9908dd49fa92b5174b46314787ac2` 的 `STCharacters.txt`、`TWVariants.txt`、`STPhrases.txt`、`TWPhrases.txt`；`build_counts.py` 讀之前核對雜湊，不符就中止 | Apache-2.0 | 四個檔的雜湊在 `docs/PLAN.md` S1 的來源表；其中 `STCharacters.txt` `a0ca1601…582b`、`TWVariants.txt` `245b94eb…cb86` 也在 model-v5 README 的表 |
 | ACG 詞包 | `data/packs/acg-add.tsv`（`tools/build_acg_pack.py` 從中文維基與 Wikidata 產生，契約 `docs/contracts/acg-pack.md`），model-v5 起當斷詞詞彙的一部分；實際進計數的是 `count_lexicon.py` 過濾後的詞表 | CC BY-SA 4.0／CC0 | 計數詞表 `1c4aa6cc…058f`（model-v5 README） |
 
-2.1、2.2 兩節所有雜湊都是批次檔一開始就寫進 `inputs.sha256` 的（`experiments/model-v5/repro.bat`、`count.bat`）；缺的雜湊就是上面標「沒有紀錄」的那幾格。
+批次檔（`experiments/model-v5/repro.bat`、`count.bat`）一開始寫進 `inputs.sha256` 的是：維基 dump、`colloquial-train.txt`、`synth.txt`、`mcbpmf-data.txt`、`overlay-add.tsv`、`TWVariants.txt`、`STCharacters.txt`，`count.bat` 再加 `acg-add.tsv`；計數詞表 `acg-count.tsv` 的雜湊是 `count_lexicon.py` 跑完才追加的。`STPhrases.txt`、`TWPhrases.txt` 不寫進 `inputs.sha256`，是 `build_counts.py` 讀檔時用 `PHRASE_SHA` 核對。上面標「沒有紀錄」的是這些都沒涵蓋的檔。
 
 ### 2.3 只用來評測、不進訓練的資料
 
@@ -100,7 +100,7 @@
 
 下面的指令與環境變數取自 `experiments/model-v5/repro.bat`、`count.bat`、`README.md`；兩個批次檔是**範本**，要先把 `REPO`、`SYNTH` 換成機器上的絕對路徑。慣例：絕對路徑、`start "" /b /wait /affinity FFF`（綁 P-core）、`PYTHONUTF8=1`、`S2_WORK` 指到新目錄（已有 `counts-200000.pkl` 就停，免得混到舊檔）。
 
-1. **固定輸入並記雜湊**：批次檔開頭把 §2 的輸入雜湊寫進 `%S2_WORK%\inputs.sha256`。除了詞包，雜湊要和上一版相同（model-v5 契約 §2.1）。
+1. **固定輸入並記雜湊**：批次檔開頭把 §2.2 末段列的那幾個輸入的雜湊寫進 `%S2_WORK%\inputs.sha256`。除了詞包，雜湊要和上一版相同（model-v5 契約 §2.1）。
 2. **（model-v5 的做法）算計數詞表**：`python experiments\model-v5\count_lexicon.py data\packs\acg-add.tsv data\packs\acg-collisions.tsv experiments\model-v5\collision-readings-v5.txt <acg-count.tsv>`。詞包詞只要有一個讀音落在「衝突讀音」裡連續兩個以上音節，整個詞不進計數；model-v5 排除 377 詞（model-v5 契約 §9「片段的規則」）。目的：同音名字的排序維持使用者在 `acg-collisions.tsv` 的決定。
 3. **口語計數**（單一程序）：
    `python -u experiments\s2\build_counts_text.py --expected --extra-lexicon <acg-count.tsv> <S2_WORK>\counts-colloquial3.pkl <colloquial-train.txt> <synth.txt>`
@@ -119,7 +119,7 @@
 6. **加指紋**（見 §3.3）。
 7. **對加過指紋的檔算雜湊**，並用它建詞類表（§4）。
 
-model-v5 的最終檔：`bigram.sjlm` 82,535,147 bytes、SHA-256 `f81a021e…13f45af`；不含指紋的版本是 `7961cb9d…`、V = 345,398（model-v5 契約 §9、研究紀錄 2026-10-10）。不含指紋版本的位元組數：沒有紀錄。
+model-v5 的最終檔：`bigram.sjlm` 82,535,147 bytes、SHA-256 `f81a021e…13f45af`；不含指紋的版本是 `7961cb9d…`、V = 345,398（研究紀錄 2026-10-10「model-v5」一節的「排除 377 詞後的模型」）。不含指紋版本的位元組數：沒有紀錄。
 
 ### 3.3 指紋條目：怎麼處理、為什麼自己建的雜湊不同
 
@@ -132,15 +132,15 @@ model-v5 的最終檔：`bigram.sjlm` 82,535,147 bytes、SHA-256 `f81a021e…13f
 
 ### 3.4 重現核對（改了計數程式之後先跑）
 
-先不加 `--extra-lexicon`、用和上一版相同的輸入重算一次，確認之後的比較只反映新東西（model-v5 契約 §2.1、README「重現核對」），任何一項不成立就停：
+先不加 `--extra-lexicon`、用和上一版相同的輸入重算一次，確認之後的比較只反映新東西（model-v5 契約 §2.1、README「重現核對」），任何一項不成立就停（模型檔的位元組不算在內，見第三列）：
 
 | 項目 | 標準 |
 |---|---|
 | 口語計數 | `counts-colloquial3.pkl` 的 SHA-256 等於 model-v3 的 `13d0ab5b…` |
 | 維基計數 | 用 `python3 experiments\model-v5\compare_counts.py <舊的 counts-200000.pkl> <新的>` 比內容：鍵集合、`runs`、`articles` 相同，每個值相對誤差 ≤ 1e-9；舊檔 SHA-256 是 `ca2f1361…` |
-| 重建的模型 | 用 `tools/build_lm.py` 建出來，和 model-v3 逐位元組相同（`5c7d5a94…`） |
+| 重建的模型 | 用 `tools/build_lm.py` 建出來；同一個 CLI 執行檔、兩邊都加 `--no-classes`、都不加 `--packs`、加 `--context`，解碼重建的模型與 model-v3（兩邊都不加指紋），dev302、打字測驗、錯字回報，聊天與書面的第一名逐列相同（`top1_sha256` 相同）。不和歷史紀錄的雜湊比；模型檔位元組不同時記下差了幾個條目，但不是停止條件 |
 
-model-v5 實際的結果：三項都成立，重建的模型 `5c7d5a94…` 與 model-v3 逐位元組相同（研究紀錄 2026-10-10「model-v5 的計數、守門與兩次修訂」）。`tools/build_lm.py --check` 可以把重建結果對現有檔比雜湊。
+model-v5 實際的結果：三項都成立，重建的模型 `5c7d5a94…` 還和 model-v3 逐位元組相同（研究紀錄 2026-10-10「model-v5 的計數、守門與兩次修訂」；位元組相同是額外的結果，不是標準）。`tools/build_lm.py --check` 重建後和 `--out` 指的檔比 SHA-256、不寫檔；`--out` 預設是 `data/lm/bigram.sjlm`，也就是加過指紋的發佈檔，自己重建的一定不同，所以要比時另外給 `--out <不含指紋的檔>`。不帶 `--check` 也不帶 `--out` 執行會直接覆寫 `data/lm/bigram.sjlm`。
 
 ### 3.5 在哪台機器跑、花多久
 
@@ -189,7 +189,7 @@ classes-v3 分群在 188 約花多少時間：沒有紀錄（model-v5 README 只
 `experiments/s7a-tinylm/README.md`「檔案」「契約沒寫死、我做的決定」、`docs/contracts/s7a-tinylm.md` §2.2。
 
 1. **產生訓練文字**：`python -u prep.py runs --work %W% --coll <colloquial-train.txt> --synth <synth.txt> --procs 10`。用和 n-gram 計數**同一組函式**（`build_counts` 的 `articles`、`convert`、`HAN`），維基前 20 萬篇＋口語兩個檔，每個連續漢字段（≥ 2 字）一個序列。核對輸入雜湊（維基 dump `5db9052e…`、`colloquial-train.txt` `3e833d06…`、`synth.txt` `bec7a6a2…`、`TWVariants.txt` `245b94eb…`、`STCharacters.txt` `a0ca1601…`），不符就停（`prep.py` 的 `EXPECTED`）。**不用** S2w 的轉換，也**不用**詞包（model-v5 計數那一步才有）。
-2. **建構檢查**：`python -u buildcheck.py construction --coll … --out …`：對原始來源逐行算 `is_tune(raw)`，確認訓練文字和 cvtune 沒有整句重疊；wikitune 的條目序號 ≥ 300,000，訓練只用前 200,000 篇。失敗就停。
+2. **建構檢查**：`python -u buildcheck.py construction --coll … --out … [--charcount <DIR>/charcount.json]`：口語那一半對原始來源逐行算 `is_tune(raw)`，核對 `is_tune` 為假的行數等於 `colloquial-train.txt` 的行數，只有這一項失敗會停（結束碼 1）；它核對的是切分，不是「沒有整句重疊」（第 4 步量到的整句重疊就不是 0）。維基那一半只比 `charcount.json` 記的條目數和 wikitune 起點 300,000 兩個數字，沒給 `--charcount` 時報告寫 `NOT CHECKED`、不會失敗（研究紀錄 2026-10-11 S7a 的〔更正〕：沒有實際讀條目核對）。
 3. **字表與編碼**：`python -u prep.py encode --work %W%`。字表取訓練文字（維基、口語各算一次，不乘 5）出現 ≥ 5 次的字，次數多的在前、同次數依碼位，其餘 UNK；id 0／1／2 是 PAD／UNK／BOS。字本身 9,714 個，加三個特殊符號共 9,717 個 id（研究紀錄 2026-10-11 S7a 的更正）。
 4. **記錄用的整句重疊比例**：`buildcheck.py substr`：調參集正解句整句出現在訓練文字裡的比例，cvtune 507／3,791（13.37%）、wikitune 671／2,827（23.74%）。只記錄，不是停止條件。
 
@@ -249,7 +249,7 @@ python3 experiments/s7a-tinylm/export_sjtl.py --npz ~/.cache/shanjie/work/s7a/ti
 |---|---|---|---|---|
 | `tinylm-v1` | 0.7／2／（無） | 0.7／2／（無） | S7a：cvtune＋wikitune 合計 top1 最高，同分取 τ 較小、再取 α 較小；選好凍結。S7d 只用和訓練文字沒有整句重疊的調參列重選，M 選到的值完全不變 | `s7a-tinylm.md` §2.3、§8；`s7d-tune-overlap.md`；研究紀錄 2026-10-11 S7a、S7d |
 | `tinylm-v2` | 0.2／1／0.25 | 0.7／1／2 | S7e：在 cvtune＋wikitune 合計（6,618 列）上，照「改對 − 10 × 改壞」選；`fusegrid.py --break-weight 10`。「改壞 1 句 ≈ 改對 10 句」是使用者的權重 | `s7e-fewer-breaks.md` §2.2；研究紀錄 2026-10-12 S7e；`docs/releases/tinylm-v2.md` |
-| `tinylm-v3` | **0.3／2／0.25** | 0.7／1／2（不變） | E2：計分改 1:1 的「改對 − 改壞」、改壞率 ≤ 0.5%；在**維護者自己的聊天訊息**建的調參期（5,761 列）上選，先凍結（`judge.py --select --tuning chatclause --weight 1 --cap 0.005`），之後只在判斷期 2026-08（6,559 列）算一次 | `e2-chat-eval.md`；`s7h-tinylm-v3.md` §0；研究紀錄 2026-10-13「E2 的新調參期與 R3′」「E2 判斷期（2026-08）的表與結論」 |
+| `tinylm-v3` | **0.3／2／0.25** | 0.7／1／2（不變） | E2：計分改 1:1 的「改對 − 改壞」、改壞率 ≤ 0.5%；在**維護者自己的聊天訊息**建的調參期（5,761 列）上選，先凍結（`judge.py --select R3p --tuning chatclause --weight 1 --cap 0.005`），之後只在判斷期 2026-08（6,559 列）算一次 | `e2-chat-eval.md`；`s7h-tinylm-v3.md` §0；研究紀錄 2026-10-13「E2 的新調參期與 R3′」「E2 判斷期（2026-08）的表與結論」 |
 
 注意事項：
 
@@ -276,7 +276,7 @@ python3 experiments/s7a-tinylm/export_sjtl.py --npz ~/.cache/shanjie/work/s7a/ti
 |---|---|---|
 | 一律「同一張表」 | 改到選字結果的改動，dev302、打字測驗、錯字回報，聊天與書面兩種設定各報一行：n、top1 基準／新、改對／改壞、精確 McNemar p、CER 基準／新、Δtop1 與 ΔCER 的配對 bootstrap 95% 區間；做法是基準與新版各跑 CLI 的 `--rowstats`，再 `python3 tools/evalstats.py compare BASE CAND --label 名稱`；`--net` 多報淨值、改壞率與改壞數的 95% 精確 Poisson 上界 | `CLAUDE.md`「評測與資料」、`docs/contracts/eval-stats.md` |
 | 守門與否決 | cvtune、wikitune、dev302、打字測驗任何一格出現「配對檢定 p < 0.05 而且淨值為負」就否決；調參數只用 cvtune、wikitune，不用 dev302 | model-v5 契約 §3.1、§3.2；`CLAUDE.md` |
-| 固定探針 | 「大概十分鐘後到」、竈門、好吧、s2r 探針、字形探針等不退步 | model-v5 契約 §3.4 |
+| 固定探針 | 「大概十分鐘後到」、竈門、好吧、s2r 探針不退步；字形探針 `experiments/s2f/probe.txt` 從 S2f 起每次重建都跑 | model-v5 契約 §3.4；字形探針見 `docs/contracts/s2f-variant-forms.md`、`s2k-word-classes.md` |
 | 動漫詞包 | `eval/dev/acg/*` 開詞包的表；詞包衝突在新模型上重驗，沒處置的衝突讀音要停下來問使用者 | model-v5 契約 §3.3 |
 | 規模 | 模型 < 100 MB；每一批計數 < 8 小時、記憶體 < 48 GB（model-v5 的記憶體沒有量）；每鍵延遲照既有的 perf 測試 | model-v5 契約 §3.5 |
 | 指紋核對 | 見 §3.3 | model-v4 契約 §2、model-v5 契約 §3.6 |
@@ -285,22 +285,14 @@ python3 experiments/s7a-tinylm/export_sjtl.py --npz ~/.cache/shanjie/work/s7a/ti
 | 私人資料 | 使用者的聊天評測集、Discord 調參集由維護者在本機跑，只貼表格數字；agent 一律不讀 | `CLAUDE.md` |
 | 語意校正專屬 | 判斷期淨值 > 0、改壞率點估計 ≤ 0.5%、公開與守門集合沒有「改對 < 改壞而且 p < 0.05」的格；保留集在建 Release 之前跑一次 | `s7h-tinylm-v3.md` §0、§3 |
 | 合併關卡 | 本地 `/code-review` 沒有未處置的問題、fresh `pilotfish:verifier` CONFIRMED、CI 全綠，merge commit（repo 未滿 100 顆星） | `CLAUDE.md`「一片工作的流程」第 4 項 |
-| 跨版本基準 | 輸入法版本（`v*`）發版前，不是模型檔發佈前：`tools/bench.py run --suite v2 …`，套件 v2 每一版用自己出貨的模型、詞類表、小模型與旗標量準確率與速度，保留集由 fresh verifier 量 | `docs/verification.md`「跨版本基準測試」、`docs/contracts/sbench-v2.md` |
+| 跨版本基準 | 輸入法版本（`v*`）發版前才跑，不是模型檔發佈前；指令與條件只寫在 `docs/verification.md`「跨版本基準測試」（`CLAUDE.md`「發版」），這裡不另抄 | `docs/verification.md`「跨版本基準測試」、`docs/contracts/sbench-v2.md` |
 
 ## 7. 建 Release 與切換
 
 整體順序（model-v4／model-v5 契約的做法；`docs/contracts/model-v4.md` §4、`model-v5.md` §2.5）：
 
 1. **PR 1（不換檔）**：契約、`docs/releases/<tag>.md` 說明檔、研究紀錄；本地驗收（§6）通過後開，`/code-review`、fresh verifier、CI 全綠後 merge。保留集在這個階段、**建 Release 之前**跑（`s7h-tinylm-v3.md` §2.1）。
-2. **建 Release（對外動作，先問使用者）**：資料類 Release 一律 `--latest=false`，不標 Latest（`docs/releases/README.md`）。換檔時（舊雜湊檔還在 repo）用暫存資料夾，上傳前後都用說明檔裡寫的雜湊核對：
-
-   ```sh
-   S=/tmp/stage-<tag> && rm -rf "$S" && mkdir -p "$S/data/lm" && cp <新檔> "$S/data/lm/<檔名>"
-   (cd "$S" && echo "<說明檔裡的雜湊>  data/lm/<檔名>" | shasum -a 256 -c)   # 上傳前
-   gh release create <tag> "$S/data/lm/<檔名>" -R Nanako0129/shanjie --title "<標題>" --notes-file docs/releases/<tag>.md --latest=false
-   ```
-
-   建好後下載回來再核對一次（兩次都看結束碼）。說明檔不能帶「〔草稿」標記，建之前用 `! grep -q '〔草稿' docs/releases/<tag>.md` 檢查。完整指令與規則看 `docs/releases/README.md`。
+2. **建 Release（對外動作，先問使用者）**：指令、核對步驟與規則（資料類 Release 不標 Latest、上傳前後用說明檔的雜湊核對、說明檔不能留草稿標記）只寫在 `docs/releases/README.md`（`CLAUDE.md`「發版」），照那裡做，這裡不另抄一份。
 3. **PR 2（換引用）**：同一個 PR 更新 `docs/data-files.md`「換版時同一個 PR 更新」那一串：雜湊檔（`data/*.sha256`）、CI 兩個 job 與 `release.yml` 的下載、`cli/tests/golden.rs` 的雜湊與訊息、`core/tests/engine_*.rs` 的缺檔訊息、`macos/Tests/ShanjieKitTests/Support.swift`、`scripts/build-app.sh`、README、CONTRIBUTING、`docs/verification.md`、`LICENSES/data.md`、`docs/PLAN.md` 的模型檔那一條與 `docs/data-files.md` 本身；換 `tinylm.sjtl` 時另外照 `docs/releases/README.md`，融合參數有變時要重量 selftest 的那一句（`Selftest.rerankRowStandard` 等）；依模型的 golden 重產。
 4. **舊 Release**：保留，可以回到那一版；model-v3 與 classes-v1 是依 `docs/contracts/model-v4.md` §4 第 4 步的條件移除的例外（`docs/data-files.md`）。
 5. **換檔順序**：先把新雜湊合進 main 會讓 CI 拿舊檔對新雜湊而失敗，所以雜湊檔和 CI 下載在**同一個切換的 PR** 裡改；第一次加的新檔沒有人讀，雜湊檔可以和說明檔一起先進 main（`docs/releases/README.md`「雜湊檔什麼時候改」）。
@@ -311,7 +303,7 @@ python3 experiments/s7a-tinylm/export_sjtl.py --npz ~/.cache/shanjie/work/s7a/ti
 
 **現行做法（維護者 2026-10-12 起）**：
 
-- **模型訓練跑在 Google Colab**：A100 80GB，一次訓練約 10 分鐘（研究紀錄 2026-10-12 S7e／S7f：S7f 的 M 重訓 554–560 秒、種子 20261012；S7e 的 L 904 秒、XL 1,622 秒、用 `train.py` 的預設設定；都是 8,836 步、每批 32,768 token）。Windows 機器 188 **只做計數與推論**；公開資料由 Colab 的 VM 自己抓。
+- **模型訓練跑在 Google Colab**：A100 80GB，一次訓練約 10 分鐘（研究紀錄 2026-10-12 S7e／S7f：S7f 的 M 重訓 554–560 秒、種子 20261012；S7e 的 L 904 秒、XL 1,622 秒、用 `train.py` 的預設設定；都是 8,836 步、每批 32,768 token）。Windows 機器 188 只做計數與推論，這是維護者的做法（研究紀錄 2026-10-12 S7f 寫的是「這一片的訓練全部在 Colab」），還沒有寫成 repo 的規則；公開資料由 Colab 的 VM 自己抓。
 - 要送上 Colab 的只有公開的程式與資料；私人資料（使用者訊息、學習檔、聊天紀錄）不上 Colab（`experiments/s7a-tinylm/README.md`「Colab：資料怎麼傳」）。
 - 資料怎麼傳（2026-10-12 實測，使用者定案；同一節）：
   - 公開資料讓 VM 自己抓：維基 dump 走 your.org 鏡像、8 路平行分段，約 39.5 MiB/s（官方站單線約 4.8 MiB/s）；Hugging Face 約 54.5 MiB/s、GitHub 約 12.5 MiB/s。
@@ -319,14 +311,14 @@ python3 experiments/s7a-tinylm/export_sjtl.py --npz ~/.cache/shanjie/work/s7a/ti
   - 結果用 `colab download` 取回，約 3.2 MiB/s，適合幾百 MB 以內。
   - `colab upload` 約 2.2 MiB/s，不用；Google Drive 每個 session 都要使用者授權一次，不用。
 - 工具：Google 官方的 `google-colab-cli` 0.7.4；`colab new --gpu A100 --high-mem` 拿到 A100 80GB（研究紀錄 2026-10-12 S7e「Colab 的做法」）。
-- Colab 用量記帳：S7f 整片 14.28 個運算單元（研究紀錄 2026-10-12 S7f）；一個 session 的上限寫在 S7f 契約 §5。
+- Colab 用量記帳：S7f 整片 14.28 個運算單元（研究紀錄 2026-10-12 S7f）；S7f 契約 §5 定的是整片的 Colab 預算（10 個運算單元，三次 M 的訓練加備案），不是每個 session 的上限。
 
 **過去實際的跑法**（事實，來自紀錄）：
 
 | 訓練 | 機器 | 時間 | 來源 |
 |---|---|---|---|
 | S7a 的 S、M；S7b 的 L（出貨的 `tinylm-M.npz` 就是這一次） | 188，RTX 3070，torch 2.11＋CUDA | S 2,641 秒、M 5,209 秒、L 12,262 秒 | 研究紀錄 2026-10-11 S7a、S7b |
-| S7b 的 XL | 188，8 GB GPU 放不下，約 22.5 小時、被停止 | 沒有權重 | 研究紀錄 2026-10-11 S7b「XL 觸發停止條件」 |
+| S7b 的 XL | 188；前 100 步用了 917 秒，照這速度推估 8,836 步要約 22.5 小時（推估，不是實際跑的時間），超過預算所以停掉 | 沒有權重 | 研究紀錄 2026-10-11 S7b「XL 觸發停止條件」 |
 | S7e 的 L、XL；S7f 的 A0′、A1、A2 | Colab A100 80GB | 904／1,622 秒；A0′ 560、A1 554、A2 559 秒 | 研究紀錄 2026-10-12 S7e、S7f |
 | n-gram 計數、`build_lm.py`、分群 | 188 | 見 §3.5、§4 | model-v5 README、s2-classes README |
 
@@ -348,7 +340,7 @@ python3 experiments/s7a-tinylm/export_sjtl.py --npz ~/.cache/shanjie/work/s7a/ti
 | 疊加層與詞包 | `overlay-add.tsv` 在 repo；詞包 `data/packs/acg-add.tsv` 也在 repo，但重建詞包要讀維基，且詞包的 (c) 規則會用 `data/lm` 的模型解碼（見 §9.3） | model-v5 契約 §9「待辦」 |
 | 小模型權重 | 出貨的 `tinylm-M.npz` 是 188 的 GPU 訓練出的；換平台（Colab）重訓得到不同的權重（§8）；是否能在同一台機器上位元組重現：沒有紀錄 | 研究紀錄 2026-10-11、2026-10-12 |
 | ×5 的口語權重、小模型 v3 的聊天值 | ×5 是看著 Discord 與新聞稿的數字挑的（S2），v3 的聊天值是用維護者的聊天訊息選的；這些私人資料不在 repo，只有數字 | `experiments/s2/README.md`、`docs/releases/tinylm-v3.md` |
-| 私人口語資料 | 三個發佈檔都**沒有**用私人訊息訓練（`docs/releases/model-v5.md`、`tinylm-v3.md`）；私人訊息只用在評測與選三個融合數字。研究用的真人口語與生成句（S7f）沒有進任何已發佈的檔案 | `LICENSES/data.md`「研究語料（未出貨）」 |
+| 私人口語資料 | 三個發佈檔都**沒有**用私人訊息訓練（`docs/releases/model-v5.md`、`tinylm-v3.md`）；但私人訊息影響了出貨的選擇：口語權重 ×5 是看著 Discord 的數字挑的（上一列）、S7a 用 discordtune 決定出貨 M、model-v5 的守門報了 Discord 調參集、v3 的聊天值在維護者的訊息上選。研究用的真人口語與生成句（S7f）沒有進任何已發佈的檔案 | `LICENSES/data.md`「研究語料（未出貨）」 |
 
 ### 9.2 沒有紀錄的事
 
