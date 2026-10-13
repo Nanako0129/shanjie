@@ -705,6 +705,7 @@ PROFILES2 = ["chat", "formal"]
 VERSIONS2 = {
     "v0.4.0": {"release": "v0.4.0", "flags": ["--context", "--packs", "acg"], "tinylm": False, "tag": "+ctx+acg"},
     "v0.4.1": {"release": "v0.4.1", "flags": ["--context", "--packs", "acg"], "tinylm": True, "tag": "+ctx+tl:{tl8}+acg"},
+    "v0.4.2": {"release": "v0.4.2", "flags": ["--context", "--packs", "acg"], "tinylm": True, "tag": "+ctx+tl:{tl8}+acg"},
 }
 # Anchor (contract 3.1): S7h's measurement in the research log of 2026-10-13, `--override-packs off`, chat, the CLI's own variants table.
 ANCHOR = {

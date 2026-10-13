@@ -4942,3 +4942,10 @@ CLI 重現（Rust，model-v5，`--context`、沒有前文；聊天與書面、�
 - 現行文件裡有兩個編號（`docs/PLAN.md` 一個、研究紀錄一個）指的是只在維護者本機的實驗分支 `feat/repick-freeze`，GitHub 上查不到（改寫前就是這樣）。
 - `tools/bench.py` 的快取（`~/.cache/shanjie/bench` 與私人資料夾裡的列檔）以 commit 編號命名，已照對照表改名（21 個），下次跑不必重建舊版本。
 - GitHub 上已合併 PR 的頁面與舊編號的網址仍看得到舊 commit；維護者決定不申請清除。
+
+## 2026-10-14：v0.4.2 的跨版本基準測試與保留集
+
+- 照 `docs/verification.md`：`tools/bench.py run --suite v2 v0.4.1 9c68e1b --as v0.4.2 --private-root …`（先在 `tools/bench.py` 的 `VERSIONS2` 加 v0.4.2：設定和 v0.4.1 相同，`--context --packs acg --tinylm`），再 `tools/bench.py table`。v0.4.1 的列用它的 tag commit `98e5028` 重量（歷史改寫後舊的快取編號是 `76beb24`，工具以 tag 指向的 commit 為準）。
+- **準確率**：所有集合、兩種設定的第一名，v0.4.2 和 v0.4.1 完全相同（改對 0／改壞 0）。這一版只改學習，評測沒有學習資料，預期如此。
+- **速度不能用**：這次量測時 Mac 同時在跑兩個 executor 的編譯與測試，負載在 40–100 之間（表上只記到開始與結束的 19→11.8），v0.4.2 每鍵 p95 308.7 ms 對 v0.4.1 142.5 ms 是負載造成的，不是程式變慢（兩版解碼路徑相同）。要在 Mac 空下來時重量。
+- **保留集**（fresh verifier，只回數字；基準 v0.4.1 `98e5028`、新版 `9c68e1b`，兩版的 `eval/holdout` 逐位元組相同，`git diff 9c68e1b origin/main` 在綁定路徑上是空的）：聊天 n 227，top1 191 → 191，改對 0／改壞 0，p 1.0000；書面 n 227，187 → 187，0／0，p 1.0000。兩版的 rowstats 逐位元組相同。停止條件不成立。
