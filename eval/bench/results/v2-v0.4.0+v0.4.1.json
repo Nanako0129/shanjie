@@ -223,6 +223,17 @@
     "max_us": 107530.1,
     "load_ms": 767.1,
     "rss_mb": 285.1875
+   },
+   "holdout": {
+    "commit": "01a3455a06a7c76902c5ead774a796d75e5fa7e4",
+    "chat": {
+     "n": 227,
+     "top1": 180
+    },
+    "formal": {
+     "n": 227,
+     "top1": 184
+    }
    }
   },
   {
@@ -510,6 +521,23 @@
     "rss_mb": 288.96875,
     "rerank_p50_ms": 7.061,
     "rerank_p95_ms": 10.989
+   },
+   "holdout": {
+    "commit": "50268d30acfe58c0fc88a4991e1548e8fc1e624f",
+    "chat": {
+     "n": 227,
+     "top1": 191,
+     "fixed": 11,
+     "broken": 0,
+     "p": 0.0009765625
+    },
+    "formal": {
+     "n": 227,
+     "top1": 187,
+     "fixed": 3,
+     "broken": 0,
+     "p": 0.25
+    }
    }
   }
  ],
