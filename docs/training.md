@@ -282,7 +282,7 @@ python3 experiments/s7a-tinylm/export_sjtl.py --npz ~/.cache/shanjie/work/s7a/ti
 | 指紋核對 | 見 §3.3 | model-v4 契約 §2、model-v5 契約 §3.6 |
 | golden | 所有依模型的 golden 用 Python 參考實作重產，Rust 逐位元組相同；`sp-predict.txt` 照它的程序 | model-v5 契約 §2.5 PR 2；`docs/data-files.md` |
 | 保留集 `eval/holdout/` | 只在一片收尾時由 **fresh verifier** 跑一次、只回數字：基準與新版各跑一次 `--set holdout --rowstats`（寫到它自己的暫存目錄、檔內只能有 `[0-9\t\n]`），再跑 `tools/evalstats.py compare`，只回那一行表格，然後刪掉兩個 rowstats。其他時候不讀、不用來調參 | `CLAUDE.md`「評測與資料」 |
-| 私人資料 | 使用者的聊天評測集、Discord 調參集由維護者在本機跑，只貼表格數字；agent 一律不讀 | `CLAUDE.md` |
+| 私人資料 | 使用者的聊天評測集、Discord 調參集由維護者（main）跑，只貼表格數字；agent 一律不讀。2026-10-13 起重運算不在 Mac 上跑，私人評測集可以放 188 或 Colab，搬過去要核對雜湊、只用來評測 | `CLAUDE.md`「評測與資料」 |
 | 語意校正專屬 | 判斷期淨值 > 0、改壞率點估計 ≤ 0.5%、公開與守門集合沒有「改對 < 改壞而且 p < 0.05」的格；保留集在建 Release 之前跑一次 | `s7h-tinylm-v3.md` §0、§3 |
 | 合併關卡 | 本地 `/code-review` 沒有未處置的問題、fresh `pilotfish:verifier` CONFIRMED、CI 全綠，merge commit（repo 未滿 100 顆星） | `CLAUDE.md`「一片工作的流程」第 4 項 |
 | 跨版本基準 | 輸入法版本（`v*`）發版前才跑，不是模型檔發佈前；指令與條件只寫在 `docs/verification.md`「跨版本基準測試」（`CLAUDE.md`「發版」），這裡不另抄 | `docs/verification.md`「跨版本基準測試」、`docs/contracts/sbench-v2.md` |
@@ -304,7 +304,7 @@ python3 experiments/s7a-tinylm/export_sjtl.py --npz ~/.cache/shanjie/work/s7a/ti
 **現行做法（維護者 2026-10-12 起）**：
 
 - **模型訓練跑在 Google Colab**：A100 80GB，一次訓練約 10 分鐘（研究紀錄 2026-10-12 S7e／S7f：S7f 的 M 重訓 554–560 秒、種子 20261012；S7e 的 L 904 秒、XL 1,622 秒、用 `train.py` 的預設設定；都是 8,836 步、每批 32,768 token）。Windows 機器 188 只做計數與推論，這是維護者的做法（研究紀錄 2026-10-12 S7f 寫的是「這一片的訓練全部在 Colab」），還沒有寫成 repo 的規則；公開資料由 Colab 的 VM 自己抓。
-- 要送上 Colab 的只有公開的程式與資料；私人資料（使用者訊息、學習檔、聊天紀錄）不上 Colab（`experiments/s7a-tinylm/README.md`「Colab：資料怎麼傳」）。
+- 訓練送上 Colab 的只有公開的程式與資料。私人評測集（discordtune、E2 的聊天列檔）從 2026-10-13 起可以上 Colab 算評測，不進訓練；學習檔與原始聊天紀錄不上（`CLAUDE.md`「評測與資料」、`experiments/s7a-tinylm/README.md`「Colab：資料怎麼傳」）。
 - 資料怎麼傳（2026-10-12 實測，使用者定案；同一節）：
   - 公開資料讓 VM 自己抓：維基 dump 走 your.org 鏡像、8 路平行分段，約 39.5 MiB/s（官方站單線約 4.8 MiB/s）；Hugging Face 約 54.5 MiB/s、GitHub 約 12.5 MiB/s。
   - 只在 Mac 上的檔案：用有時效的下載網址交給 VM，網址在 Mac 上產生、不印出、用完刪掉嵌著網址的腳本。
