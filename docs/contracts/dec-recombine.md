@@ -52,6 +52,7 @@
 - §3.6 的 hit@9 在任一集合比基準少超過 1 列。
 - 門檻類斷言不過（§2）；自我測試的句子改變（§2）。
 - 重產後 dev302 第 226 列聊天與書面的第一名相同（這一列是用來證明切換設定會改變輸出的；由 main 另挑一列）。
+  - 〔2026-10-14，實作時觸發〕新解碼器下第 226 列聊天與書面都是 `幸好救護車及時趕到`。main 改用**第 284 列**（`廚房新裝了一個濾水壺`）：dev302 裡唯一一列 unigram（`廚房新莊了一個率水壺`）、聊天（`…綠水壺`）、書面（`…濾水壺`）兩兩不同；正解在書面那邊（原本第 226 列是聊天對），`acceptance6_sentence_has_three_different_top1` 改斷言 `formal == truth`。`Selftest.swift`、`abi_smoke.c`、`Support.swift`、`engine_lm.rs` 兩個測試、`docs/contracts/profile-choice.md` 跟著改。
 
 碰到就停下來回報，不自己放寬。
 
