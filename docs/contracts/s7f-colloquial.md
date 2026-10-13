@@ -91,7 +91,7 @@ discordtune 在 S7a、S7b、S7d、S7e 已經用了四次，這一片**只當開�
 - **範圍外**：外接（NC／ND、立法院公報等）、n-gram 模型重建、核心或殼的改動、出貨、δ 進核心（S7c-2c）。
 - **停止條件**：任何來源的授權頁和調查時不同；清理後三個對話來源合計少於 500 萬字；生成句不夠 500 萬字；§2.3 的重現關卡不符；§3 兩項都不過；Colab 用量到預算上限；生成模型需要同意條款或 token 才能下載。
 - **預算**（使用者 2026-10-12）：API 花費上限 **US$20**（照 `experiments/providers/` 的帳本，超過就停）；Colab 上限 **10 個運算單元**（三次 M 的訓練，加上 API 不能用時的生成備案）；到上限就停下來問使用者。量都照 §2.1、§2.2 固定。
-- **限制**：私人資料（discordtune、學習檔、聊天紀錄）不上 Colab、不進任何訓練文字或種子；HF token 與 S4 金鑰只從鑰匙圈讀、不離開 Mac；agent 不讀 `~/side-project/shanjie-private`、`~/.cache/shanjie/work`、`eval/holdout`。
+- **限制**：私人資料（discordtune、學習檔、聊天紀錄）不上 Colab、不進任何訓練文字或種子〔2026-10-13 修訂：維護者同意私人評測集（discordtune、E2 的列檔）可以放 188 或 Colab 算評測，搬過去要核對雜湊，仍不進訓練；學習檔與原始聊天紀錄不變。規則在 `CLAUDE.md`「評測與資料」〕；HF token 與 S4 金鑰只從鑰匙圈讀、不離開 Mac；agent 不讀 `~/side-project/shanjie-private`、`~/.cache/shanjie/work`、`eval/holdout`。
 - **回滾**：repo 的改動（`experiments/s7f-corpus/`、種子檔、`train.py --extra`、文件）revert 即可，不出貨。外部狀態：S4 bucket `shanjie-colab` 的 `s7f/` 前綴下的暫存物件，在使用者同意後刪除；每次用完就 `colab stop` 關掉 session；嵌著有時效網址的腳本用完就刪；使用者在 HF 同意的條款與 token 由使用者決定要不要撤銷。
 
 ## 6. 審查紀錄

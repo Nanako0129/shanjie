@@ -25,6 +25,7 @@ SUITE = os.path.join(ROOT, "eval/bench/suite-v1")
 RESULTS = os.path.join(ROOT, "eval/bench/results")
 REFERENCE = "reference-mcbpmf.json"  # not a version file: `run` bookkeeping and the version rows skip it
 STATIC = os.path.join(ROOT, "eval/bench/static/typing-test.json")
+EXTERNAL = os.path.join(ROOT, "eval/bench/external")  # other models scored on our candidates (not versions of 善解)
 TYPING_MD = os.path.join(ROOT, "docs/typing-test.md")
 BASE_LEXICON = os.path.join(ROOT, "data/lexicon/mcbpmf-data.txt")
 CACHE = os.path.expanduser("~/.cache/shanjie/bench")
@@ -651,12 +652,31 @@ def render_table(results, ref=None, static=None):
     return "\n".join(L)
 
 
+def render_external(exts):
+    """Other models reranking the same n-gram top-k as tinylm (e.g. X0c): not versions, so a separate section with its own conditions."""
+    L = ["", "## 外部模型對照（不是善解的版本）", "",
+         "由 `tools/bench.py table` 從 `eval/bench/external/*.json` 產生。外部模型和善解的語意校正在**同一批候選**（善解 n-gram 的前 k 名）上重排，"
+         "用同一種選值方法；不是外部輸入法本身的成績（它自己的詞庫與解碼器沒有量）。保留集不能輸出候選，所以沒有保留集。"]
+    for x in exts:
+        L += ["", f"### {x['name']}（{x['date']}）", "", x["conditions"], "",
+              f"| 設定／集合 | n | n-gram 第一名 | {x['ours_label']} | {x['label']} | {x['label']} 對 {x['ours_label']}：改對／改壞，p |",
+              "|---|---|---|---|---|---|"]
+        for r in x["rows"]:
+            f = lambda k: f"{100 * r[k] / r['n']:.2f}%<br>{r[k]}/{r['n']}"
+            name = f"{r['setting']}／{r['set']}" + ("（選值用）" if r.get("tuning") else "")
+            pv = "p<0.0001" if r["p"] < 1e-4 else f"p={r['p']:.3g}"   # the source tables print p to 4 decimals
+            L.append(f"| {name} | {r['n']} | {f('ngram')} | {f('ours')} | {f('external')} | +{r['fixed']} / −{r['broken']}，{pv} |")
+    return "\n".join(L) + "\n"
+
+
 def cmd_table(_):
     results = [json.load(open(os.path.join(RESULTS, f), encoding="utf-8")) for f in sorted(os.listdir(RESULTS)) if is_v1_file(f)]
     load = lambda p: json.load(open(p, encoding="utf-8")) if os.path.isfile(p) else None
     text = render_table(results, load(os.path.join(RESULTS, REFERENCE)), load(STATIC))
     v2 = [json.load(open(os.path.join(RESULTS, f), encoding="utf-8")) for f in sorted(os.listdir(RESULTS)) if f.startswith("v2-") and f.endswith(".json")]
-    open(os.path.join(ROOT, "docs/benchmark.md"), "w", encoding="utf-8").write(text + (render_v2(v2) if v2 else ""))
+    ext = [json.load(open(os.path.join(EXTERNAL, f), encoding="utf-8")) for f in sorted(os.listdir(EXTERNAL)) if f.endswith(".json")] \
+        if os.path.isdir(EXTERNAL) else []
+    open(os.path.join(ROOT, "docs/benchmark.md"), "w", encoding="utf-8").write(text + (render_v2(v2) if v2 else "") + (render_external(ext) if ext else ""))
 
 
 # ---------- suite v2 (docs/contracts/sbench-v2.md): each version with its shipped settings ----------

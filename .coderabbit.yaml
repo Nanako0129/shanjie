@@ -10,9 +10,11 @@ reviews:
     - "!eval/holdout/**"
 
   auto_review:
-    # 0 disables the pause; at the default of 5, automatic review stops silently
-    # once a pull request has five reviewed commits.
-    auto_pause_after_reviewed_commits: 0
+    # Off (maintainer, 2026-10-13): this repo's merge gate is a local
+    # /code-review (CLAUDE.md, "一片工作的流程" item 4), and automatic reviews
+    # here spent the rate limit other repos gate on. Comment
+    # `@coderabbitai review` on a pull request to ask for one.
+    enabled: false
 
   pre_merge_checks:
     docstrings:

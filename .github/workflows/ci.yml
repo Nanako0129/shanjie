@@ -193,6 +193,17 @@ jobs:
       - name: Benchmark tool (Python)
         run: python3 -m unittest tools/test_bench.py
 
+      # docs/contracts/x0c-compare.md acceptance 5: score_0c.py and versus.py against a fake model (input layout, 64-character
+      # context, log10 scale, unscorable rows, covered-only comparison). They need numpy (not onnxruntime, not the weights),
+      # which the runner may not have, so it goes into a throwaway venv.
+      - name: X0c scoring and comparison (Python)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m venv "$RUNNER_TEMP/x0c-venv"
+          "$RUNNER_TEMP/x0c-venv/bin/python" -m pip install --quiet numpy==2.5.4
+          "$RUNNER_TEMP/x0c-venv/bin/python" -W ignore -m unittest experiments/x0c/test_x0c.py
+
   # The Swift input method (docs/contracts/s3b.md section 3): build the ad-hoc
   # app, the Swift tests through the real core and model, the bundled
   # selftest, and acceptance checks 2, 3 and 6 of contract section 10.
