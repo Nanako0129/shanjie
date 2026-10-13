@@ -327,7 +327,7 @@ public final class Shell {
     private let rerankStore: RerankStore
     /// s7c2b section 2.2: whether the core makes rerank jobs (default on since S7h, the maintainer's decision 2026-10-12: on, with a
     /// break rate <= 0.5%); sent to every engine `build()` makes and on every change.
-    private(set) var rerankOn = true
+    private(set) var rerankOn: Bool
     /// The small model's file in Resources (section 2.3). The only path it is loaded from: `build()` and the selftest join it to
     /// `resources`; no init parameter, defaults key or environment variable names another.
     static let tinyLMFile = "tinylm.sjtl"
@@ -344,7 +344,7 @@ public final class Shell {
     var rerankTake: (CoreEngine, @escaping @Sendable (OpaquePointer) -> Void) -> (RerankJob?, Int32) = { $0.rerankTake(free: $1) }
     /// `RerankJob.apply(on:)`; the tests replace it to see apply's non-zero codes other than 5 handled.
     var rerankApply: (RerankJob, CoreEngine) -> CoreResult = { $0.apply(on: $1) }
-    /// Every value `build()` passed to `setRerank`, in order (the tests read it: a nil store must send false, not nothing).
+    /// Every value `build()` passed to `setRerank`, in order (the tests read it: a nil store must send true, not nothing).
     private(set) var rerankSent: [Bool] = []
     /// Whether the current engine has the small model (set by every `build()`): false when there is no engine, when load_lm
     /// failed (load_tinylm is then skipped) or when load_tinylm returned non-zero. Without it no job is ever made.
