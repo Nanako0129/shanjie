@@ -26,7 +26,7 @@ final class SelftestTests: XCTestCase {
     }
 
     /// s7c2b section 2.5: the switch can be turned on, and without the model it would silently do nothing, so a bundle without it
-    /// must fail the selftest (the switch ships off by default, which is no reason to let that bundle through).
+    /// must fail the selftest (the switch ships on by default since S7h, so such a bundle would silently do nothing for most users).
     func testFailsWithoutTheSmallModel() throws {
         let res = try XCTUnwrap(TestData.resources(only: ["mcbpmf-data.txt", "overlay-add.tsv", "sandhi-add.tsv", "demote.tsv", "bigram.sjlm", "classes.sjc"]))
         try TestData.addBundledPack(to: res)
