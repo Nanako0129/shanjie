@@ -7,6 +7,7 @@ compile_error!("C ABI requires panic=unwind");
 
 use crate::engine::{Engine, EngineError, Key, KeyKind, Layout, Output, RerankJob, RerankResult, ResetMode, PACK_ALL};
 use crate::lm::Profile;
+use crate::tinylm::RerankLevel;
 use std::ffi::{c_char, CStr, CString};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::Path;
@@ -736,6 +737,56 @@ pub unsafe extern "C" fn shanjie_engine_set_rerank(engine: *mut ShanjieEngine, e
         unsafe { discard(engine) };
     }
     rc
+}
+
+/// Rerank strength (docs/contracts/rerank-strength.md section 2.2): level 0 conservative, 1 standard (default), 2 aggressive; codes
+/// and snapshot like `set_profile`. The out pointer is cleared and the range checked before the engine is touched, so 1 and 2
+/// leave the level and the generation as they were.
+///
+/// # Safety
+/// `engine` is NULL or a live handle; `out` is NULL or valid for one pointer write.
+#[no_mangle]
+pub unsafe extern "C" fn shanjie_engine_set_rerank_level(engine: *mut ShanjieEngine, level: u32, out: *mut *mut ShanjieOutput) -> i32 {
+    let rc = guard(|| {
+        // SAFETY: forwarded caller contract.
+        if !unsafe { clear_out(out) } || engine.is_null() {
+            return SHANJIE_ERR_NULL;
+        }
+        let Some(level) = RerankLevel::from_code(level) else { return SHANJIE_ERR_INVALID };
+        // SAFETY: live handle, single-threaded use (§6).
+        let e = unsafe { &mut (*engine).0 };
+        match e.set_rerank_level(level) {
+            Ok(o) => {
+                #[cfg(test)]
+                tests::inject(&o);
+                // SAFETY: `out` checked non-NULL above.
+                unsafe { emit(o, out) }
+            }
+            Err(_) => SHANJIE_ERR_INTERNAL,
+        }
+    });
+    if rc == SHANJIE_ERR_INTERNAL {
+        // SAFETY: forwarded caller contract.
+        unsafe { discard(engine) };
+    }
+    rc
+}
+
+/// Rerank strength section 2.2 (P2-1: an out parameter, so NULL, a panic's 4 and "no model" stay apart): `*levels` is the mask
+/// of `Engine::rerank_levels`. Like `learning_status`, it changes nothing, so a 4 resets nothing.
+///
+/// # Safety
+/// `engine` is NULL or a live handle; `levels` is NULL or writable.
+#[no_mangle]
+pub unsafe extern "C" fn shanjie_engine_rerank_levels(engine: *mut ShanjieEngine, levels: *mut u32) -> i32 {
+    guard(|| {
+        if engine.is_null() || levels.is_null() {
+            return SHANJIE_ERR_NULL;
+        }
+        // SAFETY: live handle; `levels` non-NULL and writable per the caller contract.
+        unsafe { *levels = (*engine).0.rerank_levels() };
+        SHANJIE_OK
+    })
 }
 
 /// # Safety
@@ -1782,6 +1833,180 @@ mod tests {
     fn rerank_codes_through_the_c_abi() {
         let (ok, out, err) = run_child("child_rerank", false);
         assert!(ok, "rerank child failed");
+        assert!(out.contains("1 passed"), "child test actually ran");
+        assert!(!out.contains("shanjie-ffi-") && !err.contains("shanjie-ffi-"), "a path leaked");
+    }
+
+    // ---- Rerank strength: set_rerank_level, rerank_levels (docs/contracts/rerank-strength.md sections 2.2 and 9) ----
+
+    /// alpha 0: the fused score is the n-gram score, so the first always stays (`pick` moves only on a strictly higher score).
+    const KEEP: (f64, f64, f64) = (0.0, f64::INFINITY, 0.0);
+    /// alpha 100, tau infinite, delta 0: the toy model's LLs decide, and RERANK_ROW changes (as `toy_sjtl`).
+    const MOVE: (f64, f64, f64) = (100.0, f64::INFINITY, 0.0);
+
+    /// The synthetic version 3 file eval/golden/tinylm-tiny/tiny-int8-v3.sjtl in `dir`, its n-gram hash patched to
+    /// data/lm/bigram.sjlm's, with MOVE for both profiles at level `moving` (`RerankLevel` code) and KEEP at the other two: which
+    /// level the rerank used then shows in whether RERANK_ROW changes. Offsets: rerank-strength section 2.1.
+    fn toy_sjtl_v3(dir: &Path, moving: u32) -> PathBuf {
+        let mut b = std::fs::read(root().join("eval/golden/tinylm-tiny/tiny-int8-v3.sjtl")).unwrap();
+        let h = crate::eval::sha256_hex(&std::fs::read(root().join("data/lm/bigram.sjlm")).unwrap());
+        for i in 0..32 {
+            b[68 + i] = u8::from_str_radix(&h[2 * i..2 * i + 2], 16).unwrap();
+        }
+        let t = |level: u32| if level == moving { MOVE } else { KEEP };
+        // (alpha, tau, delta offsets, level): the standard sets (chat, formal), then chat conservative, chat aggressive, formal
+        // conservative, formal aggressive.
+        let sets = [(36, 44, 100, 1), (52, 60, 108, 1), (116, 124, 132, 0), (140, 148, 156, 2), (164, 172, 180, 0), (188, 196, 204, 2)];
+        for (a, tau, d, level) in sets {
+            let (x, y, z) = t(level);
+            b[a..a + 8].copy_from_slice(&x.to_le_bytes());
+            b[tau..tau + 8].copy_from_slice(&y.to_le_bytes());
+            b[d..d + 8].copy_from_slice(&z.to_le_bytes());
+        }
+        let p = dir.join(format!("v3-moving-{moving}.sjtl"));
+        std::fs::write(&p, b).unwrap();
+        p
+    }
+
+    /// set_rerank_level; returns (code, out was NULL) and frees the output.
+    fn set_level(e: *mut ShanjieEngine, level: u32) -> (i32, bool) {
+        let mut o: *mut ShanjieOutput = sentinel();
+        let rc = unsafe { shanjie_engine_set_rerank_level(e, level, &mut o) };
+        let null = o.is_null();
+        unsafe { shanjie_output_free(o) };
+        (rc, null)
+    }
+
+    fn levels(e: *mut ShanjieEngine) -> u32 {
+        let mut m = 0xdead_beef;
+        assert!(unsafe { shanjie_engine_rerank_levels(e, &mut m) } == 0, "rerank_levels");
+        m
+    }
+
+    /// With RERANK_ROW composed: set the level (its snapshot re-decodes the n-gram text and leaves a job), take, run, apply;
+    /// true when the composition changed.
+    fn moves_at(e: *mut ShanjieEngine, level: u32) -> bool {
+        assert!(set_level(e, level) == (0, false), "set level {level}");
+        let (rc, j) = take(e);
+        assert!(rc == 0 && !j.is_null(), "a job after set level {level}");
+        assert!(unsafe { shanjie_rerank_run(j) } == 0);
+        let (rc, shown) = apply(e, j);
+        unsafe { shanjie_rerank_free(j) };
+        assert!(rc == 0 || rc == SHANJIE_NO_CHANGE, "apply {rc}");
+        assert!(rc == SHANJIE_NO_CHANGE || shown != RERANK_NGRAM);
+        rc == 0
+    }
+
+    #[test]
+    fn child_rerank_level() {
+        if !is_child("child_rerank_level") {
+            return;
+        }
+        let dir = std::env::temp_dir().join(format!("shanjie-ffi-{}-rerank-level", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let v1 = toy_sjtl(&dir, "v1.sjtl", true);
+        let (e, keys) = rerank_engine();
+
+        // Codes: 1 for a NULL engine or out, 2 out of range with *out NULL; rerank_levels 1 for a NULL engine or levels.
+        let mut o: *mut ShanjieOutput = sentinel();
+        assert!(unsafe { shanjie_engine_set_rerank_level(ptr::null_mut(), 1, &mut o) } == 1 && o.is_null(), "engine NULL");
+        assert!(unsafe { shanjie_engine_set_rerank_level(e, 1, ptr::null_mut()) } == 1, "out NULL");
+        for v in [3, 7, u32::MAX] {
+            assert!(set_level(e, v) == (2, true), "level {v} out of range");
+        }
+        let mut m = 0u32;
+        assert!(unsafe { shanjie_engine_rerank_levels(ptr::null_mut(), &mut m) } == 1, "levels engine NULL");
+        assert!(unsafe { shanjie_engine_rerank_levels(e, ptr::null_mut()) } == 1, "levels out NULL");
+
+        // No small model: mask 0, and a level is remembered for the model loaded later.
+        assert!(levels(e) == 0, "no model");
+        assert!(set_level(e, 2) == (0, false), "remembered without a model");
+        let lm = CString::new(root().join("data/lm/bigram.sjlm").to_str().unwrap()).unwrap();
+        assert!(unsafe { shanjie_engine_load_lm(e, lm.as_ptr()) } == 0, "load_lm");
+        assert!(levels(e) == 0, "no small model after load_lm");
+        assert!(load_tinylm(e, &toy_sjtl_v3(&dir, 2)) == 0 && levels(e) == 7, "version 3: 7");
+        assert!(set_rerank(e, 1).0 == 0);
+        for &k in &keys {
+            send(e, k);
+        }
+        let (_, j) = take(e);
+        assert!(unsafe { shanjie_rerank_run(j) } == 0);
+        let (rc, shown) = apply(e, j);
+        assert!(rc == 0 && shown != RERANK_NGRAM, "the level set before the load is used");
+        unsafe { shanjie_rerank_free(j) };
+
+        // Out of range leaves level and generation alone: a job run before still applies (aggressive moves).
+        assert!(set_level(e, 2) == (0, false));
+        let (_, j) = take(e);
+        assert!(!j.is_null() && unsafe { shanjie_rerank_run(j) } == 0);
+        assert!(set_level(e, 3) == (2, true));
+        let (rc, shown) = apply(e, j);
+        assert!(rc == 0 && shown != RERANK_NGRAM, "level 3 changed neither the generation nor the level");
+        unsafe { shanjie_rerank_free(j) };
+
+        // A valid level makes a job already run stale (the job fixed its own (alpha, tau, delta) when it was made).
+        assert!(set_level(e, 2) == (0, false));
+        let (_, j) = take(e);
+        assert!(unsafe { shanjie_rerank_run(j) } == 0);
+        assert!(set_level(e, 2) == (0, false), "even the same level");
+        assert!(apply(e, j).0 == SHANJIE_NO_CHANGE, "stale after set_rerank_level");
+        unsafe { shanjie_rerank_free(j) };
+
+        // Each level uses its own set, in both profiles: with MOVE at exactly one level, only that level changes the row.
+        for moving in 0..3 {
+            assert!(load_tinylm(e, &toy_sjtl_v3(&dir, moving)) == 0 && levels(e) == 7);
+            for p in [1, 0] {
+                assert!(profile(e, p).0 == 0);
+                for level in 0..3 {
+                    assert!(moves_at(e, level) == (level == moving), "MOVE at {moving}, level {level}, profile {p}");
+                }
+            }
+        }
+
+        // load_lm keeps the level (and drops the model: mask 0); the reloaded model uses it at once.
+        assert!(set_level(e, 0) == (0, false));
+        assert!(unsafe { shanjie_engine_load_lm(e, lm.as_ptr()) } == 0 && levels(e) == 0);
+        assert!(load_tinylm(e, &toy_sjtl_v3(&dir, 0)) == 0);
+        assert!(set_rerank(e, 1).0 == 0);
+        let (_, j) = take(e);
+        assert!(unsafe { shanjie_rerank_run(j) } == 0 && apply(e, j).0 == 0, "conservative kept across load_lm and load_tinylm");
+        unsafe { shanjie_rerank_free(j) };
+
+        // A version 1 or 2 file: mask 2, and every level uses the standard set (the toy's alpha 100: it moves).
+        let mut v2 = std::fs::read(&v1).unwrap();
+        v2.splice(100..100, [0f64, 0f64].iter().flat_map(|d| d.to_le_bytes()));
+        v2[7] = b'2';
+        v2[8..12].copy_from_slice(&2u32.to_le_bytes());
+        let v2_path = dir.join("v2.sjtl");
+        std::fs::write(&v2_path, v2).unwrap();
+        for f in [&v1, &v2_path] {
+            assert!(load_tinylm(e, f) == 0 && levels(e) == 2, "version 1 or 2: 2");
+            for level in 0..3 {
+                assert!(moves_at(e, level), "level {level} uses the standard set");
+            }
+        }
+
+        // Code 4 (injected panic): NULL out, composition discarded, the new level kept.
+        assert!(load_tinylm(e, &toy_sjtl_v3(&dir, 2)) == 0);
+        ARMED.with(|a| a.set(true));
+        assert!(set_level(e, 2) == (4, true), "panic maps to 4 with NULL out");
+        let (rc, preedit, _) = send(e, key(LEFT, '\0'));
+        assert!(rc == 0 && preedit.is_empty(), "composition discarded after code 4");
+        for &k in &keys {
+            send(e, k);
+        }
+        let (_, j) = take(e);
+        assert!(unsafe { shanjie_rerank_run(j) } == 0);
+        assert!(apply(e, j).0 == 0, "the level set by the call that returned 4 is kept");
+        unsafe { shanjie_rerank_free(j) };
+        unsafe { shanjie_engine_free(e) };
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn rerank_level_through_the_c_abi() {
+        let (ok, out, err) = run_child("child_rerank_level", false);
+        assert!(ok, "rerank level child failed: {err}");
         assert!(out.contains("1 passed"), "child test actually ran");
         assert!(!out.contains("shanjie-ffi-") && !err.contains("shanjie-ffi-"), "a path leaked");
     }

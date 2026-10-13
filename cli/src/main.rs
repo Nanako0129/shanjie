@@ -2,7 +2,7 @@ use core::engine::{capping_overlay_detailed, load_lexicon_packs_detailed, PACK_A
 use core::eval::*;
 use core::learn::{context_key, SENTINEL};
 use core::lm::{decode_from, history, CappedLexicon, Demote, Lm, Profile};
-use core::tinylm::{TinyLm, TinyLmError, TOPK};
+use core::tinylm::{RerankLevel, TinyLm, TinyLmError, TOPK};
 use core::predict::{parse_units, predict, units_of, units_str, Index, Mode};
 use core::{decode_beam, Error, Lexicon, NoLearning, Syls, BEAM_S1};
 use std::fs;
@@ -184,12 +184,14 @@ fn scores_line(i: usize, ng: &[f64], ok: &[bool], ed: &[u32], glen: usize, ll: O
 
 /// S2c LM mode (docs/PLAN.md S2c): the one summary line of lm_eval.py, plus the optional `--dump` and `--rowstats`.
 /// S7c-1: `--tinylm FILE.sjtl` reranks the first 8 candidates of every row with the small character model (docs/contracts/s7c-core-tinylm.md);
-/// `--tinylm-scores OUT` writes score.py's numbers-only records for them.
+/// `--tinylm-scores OUT` writes score.py's numbers-only records for them. `--rerank-level conservative|standard|aggressive` (default
+/// standard) picks which of the file's (alpha, tau, delta) the rerank uses (docs/contracts/rerank-strength.md section 2.3).
 fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     let (mut lm_path, mut profile, mut name, mut dev, mut rows_file) = (None, None, None, None, None);
     let (mut limit, mut set, mut dump, mut ctx_mode, mut demote) = (None::<usize>, None, None, false, true);
     let (mut classes, mut kn) = (true, true);
     let (mut rowstats, mut tinylm, mut tinylm_scores) = (None::<String>, None::<String>, None::<String>);
+    let mut level = RerankLevel::Standard;
     // acg-pack contract A.2: `--packs acg` adds data/packs/acg-add.tsv (or `--packs-dir DIR`'s) to the lexicon and the cap; off by default.
     let (mut packs, mut packs_dir) = (0u32, None::<String>);
     let mut it = args.iter();
@@ -208,6 +210,14 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
             "--rowstats" => rowstats = Some(val()?),
             "--tinylm" => tinylm = Some(val()?),
             "--tinylm-scores" => tinylm_scores = Some(val()?),
+            "--rerank-level" => {
+                level = match val()?.as_str() {
+                    "conservative" => RerankLevel::Conservative,
+                    "standard" => RerankLevel::Standard,
+                    "aggressive" => RerankLevel::Aggressive,
+                    _ => return Err("--rerank-level must be conservative, standard or aggressive".into()),
+                }
+            }
             "--context" => ctx_mode = true,
             "--no-demote" => demote = false,
             "--no-classes" => classes = false,
@@ -220,6 +230,10 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     check_lm_opts(set.as_deref(), dump.is_some(), packs, packs_dir.is_some())?;
     if tinylm_scores.is_some() && tinylm.is_none() {
         return Err("--tinylm-scores needs --tinylm".into());
+    }
+    // Section 9 P3-8: without a small model a level would silently measure the n-gram alone.
+    if level != RerankLevel::Standard && tinylm.is_none() {
+        return Err("--rerank-level needs --tinylm".into());
     }
     if tinylm_scores.is_some() && set.as_deref() == Some("holdout") {
         return Err("--tinylm-scores is not allowed with --set holdout".into());
@@ -237,6 +251,11 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     let lm = Lm::load_with(std::path::Path::new(&lm_path), classes, kn).map_err(|e| e.to_string())?;
     let rss_before = tinylm.is_some().then(rss_kb).flatten();
     let tl = tinylm.as_deref().map(|p| load_tinylm(p, &lm, classes, demote)).transpose()?;
+    // Section 2.3: a version 1 or 2 file has only the standard set; another level would silently measure the standard one.
+    if level != RerankLevel::Standard && tl.as_ref().is_some_and(|(m, _, _)| !m.has_levels()) {
+        eprintln!("error: --rerank-level: this .sjtl (version 1 or 2) has only the standard set; use a version 3 file or --rerank-level standard");
+        std::process::exit(2);
+    }
     let rss_after = tinylm.is_some().then(rss_kb).flatten();
     let dir = root().join("data/lexicon");
     let (lex, overlay) = load_with_packs(&dir, packs, &pdir)?;
@@ -309,7 +328,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
             let ng: Vec<f64> = nb.iter().take(TOPK).map(|(sc, _)| *sc).collect();
             // The key is the context key (its SENTINEL is the empty k, in TinyLm::rerank); without --context, no key.
             let t0 = Instant::now();
-            let ll = match tl.rerank(&ng, &top, left.as_deref().unwrap_or(""), prof) {
+            let ll = match tl.rerank(&ng, &top, left.as_deref().unwrap_or(""), tl.params(prof, level)) {
                 Ok((c, ll)) => {
                     chosen = c;
                     ll

@@ -162,17 +162,38 @@ public final class MemoryCandidateOrientationStore: CandidateOrientationStore {
 
 /// Where the "語意校正" switch is kept (docs/contracts/s7c2b-shell-rerank.md section 2.2): `nil` means never chosen, which is on
 /// (docs/contracts/s7h-tinylm-v3.md section 2.3; off before S7h).
-/// Same arrangement as `PredictionStore`.
+/// Same arrangement as `PredictionStore`. `rerankLevel` is the strength (docs/contracts/rerank-strength.md section 3): the raw
+/// value of a `RerankLevel`; `nil` or any other string is standard, like `ProfileModeStore`.
 @MainActor
 public protocol RerankStore: AnyObject {
     var rerank: Bool? { get set }
+    var rerankLevel: String? { get set }
 }
 
 /// The in-memory RerankStore.
 @MainActor
 public final class MemoryRerankStore: RerankStore {
     public var rerank: Bool?
-    public init(_ rerank: Bool? = nil) { self.rerank = rerank }
+    public var rerankLevel: String?
+    public init(_ rerank: Bool? = nil, level: String? = nil) {
+        self.rerank = rerank
+        rerankLevel = level
+    }
+}
+
+/// 語意校正的強度 (docs/contracts/rerank-strength.md section 3): stored by raw value; `code` is the C ABI's level, fixed per case.
+public enum RerankLevel: String, CaseIterable, Sendable {
+    case conservative
+    case standard
+    case aggressive
+
+    var code: UInt32 {
+        switch self {
+        case .conservative: return 0
+        case .standard: return 1
+        case .aggressive: return 2
+        }
+    }
 }
 
 /// Runs a rerank job off the main thread (s7c2b section 2.1): `job.run()` on another thread, then `done` with its code on the
@@ -346,12 +367,21 @@ public final class Shell {
     var rerankApply: (RerankJob, CoreEngine) -> CoreResult = { $0.apply(on: $1) }
     /// Every value `build()` passed to `setRerank`, in order (the tests read it: a nil store must send true, not nothing).
     private(set) var rerankSent: [Bool] = []
+    /// Rerank strength (section 3): the stored level, sent to every engine `build()` makes and on every change.
+    private(set) var rerankLevel: RerankLevel
+    /// Every level code sent to an engine, by `build()` and by `setRerankLevel`, in order (the tests read it, as `rerankSent`).
+    private(set) var rerankLevelSent: [UInt32] = []
+    /// `shanjie_engine_rerank_levels` of the current engine after `build()` loaded the small model (0 without one).
+    private(set) var rerankLevels: UInt32 = 0
     /// Whether the current engine has the small model (set by every `build()`): false when there is no engine, when load_lm
     /// failed (load_tinylm is then skipped) or when load_tinylm returned non-zero. Without it no job is ever made.
     private(set) var rerankAvailable = false
     /// The 語意校正 menu item and settings toggle are enabled only when the switch can do something: the demotion table on (the
     /// core makes no job without it, F11) and the small model loaded. The checkmark still shows the stored choice.
     var rerankEnabled: Bool { demoteOn && rerankAvailable }
+    /// The settings window's 強度 control (section 3) is enabled only when the switch is on and can do something, and the loaded
+    /// model offers the conservative and the aggressive set (a version 3 file); otherwise it shows greyed with the stored choice.
+    var rerankLevelEnabled: Bool { rerankOn && rerankEnabled && rerankLevels & 0b101 == 0b101 }
 
     /// A job waiting for the runner, with the session and engine it was taken for. Weak (F3): a waiting job keeps neither alive,
     /// and an identity is never compared by address.
@@ -476,6 +506,7 @@ public final class Shell {
         candidateVertical = candidateOrientationStore.candidateVertical ?? false
         self.rerankStore = rerankStore
         rerankOn = rerankStore.rerank ?? true
+        rerankLevel = rerankStore.rerankLevel.flatMap(RerankLevel.init(rawValue:)) ?? .standard
         self.rerankRunner = rerankRunner
         self.profileModeStore = profileModeStore
         profileMode = profileModeStore.profileMode.flatMap(ProfileMode.init(rawValue:)) ?? .auto
@@ -524,6 +555,10 @@ public final class Shell {
 
     func applyRerank(_ on: Bool) {
         if let o = owner { o.applyRerank(on) } else { dropOnFailure(setRerank(on)) }
+    }
+
+    func applyRerankLevel(_ level: RerankLevel) {
+        if let o = owner { o.applyRerankLevel(level) } else { dropOnFailure(setRerankLevel(level)) }
     }
 
     /// No session to ask: a failed core call is logged and the composition dropped, as `Session.fail` does.
@@ -632,6 +667,17 @@ public final class Shell {
         return engine?.setRerank(on)
     }
 
+    /// The settings window's 強度 (rerank-strength section 3): stored, and sent to the engine, which recomputes the composition;
+    /// the snapshot is for the caller to show (its job uses the new level; one already taken is stale in the core).
+    func setRerankLevel(_ level: RerankLevel) -> CoreResult? {
+        rerankLevel = level
+        rerankStore.rerankLevel = level.rawValue
+        defer { changed() }
+        guard let engine else { return nil }
+        rerankLevelSent.append(level.code)
+        return engine.setRerankLevel(level.code)
+    }
+
     /// Section 2.1: a job taken for `session` from `engine` runs now, or waits if another is running (only the latest waits).
     func enqueueRerank(_ job: RerankJob, session: Session, engine: CoreEngine) {
         rerankTaken += 1
@@ -683,6 +729,7 @@ public final class Shell {
     private func build() {
         engine = nil  // free the old engine first: only one exists at a time
         rerankAvailable = false
+        rerankLevels = 0
         rerankPending = nil  // the old engine's; one still running is not applied (its engine is gone)
         let packsDir = resources.appendingPathComponent("packs").path
         var (made, code) = CoreEngine.make(dataDir: resources.path, layout: mode.layout, packsDir: acgPackOn ? packsDir : nil)
@@ -726,6 +773,13 @@ public final class Shell {
         if case .failed(let c) = e.setRerank(rerankOn) {
             Log.shell.error("shanjie_engine_set_rerank failed, code \(c)")
         }
+        // Rerank strength (section 3, P4-13): after load_tinylm and before `engine = e`, the stored level, every build (the core
+        // starts at standard); then what the loaded model offers, for the settings window.
+        rerankLevelSent.append(rerankLevel.code)
+        if case .failed(let c) = e.setRerankLevel(rerankLevel.code) {
+            Log.shell.error("shanjie_engine_set_rerank_level failed, code \(c)")
+        }
+        rerankLevels = e.rerankLevels()
         if case .failed(let c) = e.setProfile(profile) {
             Log.shell.error("shanjie_engine_set_profile failed, code \(c)")
         }
@@ -929,6 +983,15 @@ public final class Session {
     /// The menu's 語意校正 switch: the snapshot is shown, if this session owns the composition.
     func applyRerank(_ on: Bool) {
         switch shell.setRerank(on) {
+        case .ok(let o)? where shell.owner === self: apply(o)
+        case .failed(let c)?: _ = fail(c)
+        default: break
+        }
+    }
+
+    /// The settings window's 強度: the snapshot is shown, if this session owns the composition.
+    func applyRerankLevel(_ level: RerankLevel) {
+        switch shell.setRerankLevel(level) {
         case .ok(let o)? where shell.owner === self: apply(o)
         case .failed(let c)?: _ = fail(c)
         default: break

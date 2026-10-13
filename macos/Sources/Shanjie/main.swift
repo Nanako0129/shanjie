@@ -105,6 +105,12 @@ final class DefaultsRerankStore: RerankStore {
         get { UserDefaults.standard.object(forKey: "rerank") as? Bool }
         set { UserDefaults.standard.set(newValue, forKey: "rerank") }
     }
+    /// docs/contracts/rerank-strength.md section 3: key `rerankLevel` (`conservative`, `standard` or `aggressive`); absent or any
+    /// other value is standard.
+    var rerankLevel: String? {
+        get { UserDefaults.standard.string(forKey: "rerankLevel") }
+        set { UserDefaults.standard.set(newValue, forKey: "rerankLevel") }
+    }
 }
 
 /// How chat or formal is chosen (docs/contracts/profile-choice.md section 2.1), key `profileMode` (`auto`, `chat` or `formal`);
