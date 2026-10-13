@@ -7,7 +7,7 @@
 1. **先寫契約**：`docs/contracts/` 一片一份，寫清楚要做到什麼、怎麼看到它有效、驗收、停止條件、範圍外。
 2. **契約送 fresh `pilotfish:plan-verifier`**，READY 才實作；REVISE 照最小修改處理，第二次 REVISE 後逐項處置，再一次收尾審查。
 3. **實作**交給 executor 或自己做；改到核心行為時同一個 PR 更新 `docs/contracts/s3a.md` 的按鍵規則表與 `core/include/shanjie.h`。
-4. **合併關卡**（repo 未滿 100 顆星）：本地 `/code-review` 沒有未處置的問題 ＋ fresh `pilotfish:verifier` CONFIRMED ＋ CI 全綠。用 **merge commit**，不 squash。
+4. **合併關卡**（程式改動；repo 未滿 100 顆星。錯字列與純文件見下方「改動分級」）：本地 `/code-review` 沒有未處置的問題 ＋ fresh `pilotfish:verifier` CONFIRMED ＋ CI 全綠。用 **merge commit**，不 squash。
 5. **合併後當場清理**：GitHub 已開「merge 後自動刪分支」；本機 `git worktree remove` 那片的 worktree、`git branch -d` 本機分支、`git fetch --prune`。有未提交改動的先處理，不硬刪。實驗分支結論寫進文件後再刪，刪前先問。
 
 細節：
@@ -15,7 +15,19 @@
 - 需要使用者決定的事，用選擇題問，推薦的選項放第一個。
 - 使用者明說的需求照字面做；要偏離時先做到，再附上有依據的說明。
 - verifier 或其他會改檔的 agent 在某個 worktree 跑的時候，不碰那個 worktree；要急修就先停掉它。
-- commit 一律接在測試成功之後（`make test && git commit …`），commit 前看 `git diff --cached --stat` 有沒有預期外的檔案。測試或 merge 的輸出不要經過 `| tail`、`| grep` 再接 `&&`：管線的結束碼是最後一個指令的，失敗會被吃掉（2026-10-05 因此 commit 了一次沒過的測試）。要篩選輸出就先導到檔案、看 `$?`，再 commit。
+- commit 一律接在該級要求的測試成功之後（例如 `make test-rust && git commit …`），commit 前看 `git diff --cached --stat` 有沒有預期外的檔案。測試或 merge 的輸出不要經過 `| tail`、`| grep` 再接 `&&`：管線的結束碼是最後一個指令的，失敗會被吃掉（2026-10-05 因此 commit 了一次沒過的測試）。要篩選輸出就先導到檔案、看 `$?`，再 commit。
+
+## 改動分級（使用者 2026-10-13：「最佳化整個工作流程」）
+
+| 改動 | commit 前的本機測試 | 審查 | 進 main |
+|---|---|---|---|
+| 錯字回報列（只動 `eval/dev/user-reported.txt`、對應的 golden 行、`eval/README.md` 列數、研究紀錄） | `make test-golden`（約 7 秒） | 不審 | 直接 commit 到 main 並 push；CI 在 main 上跑，紅了當場修 |
+| 純文件（研究紀錄、契約、PLAN、README、只改 docstring／註解） | 不跑 | `/code-review` 或 fresh verifier 擇一、只跑一次；之後的措辭問題就地改完，不再重審 | PR，CI 綠就 merge commit |
+| 程式 | 改到哪塊跑哪塊：`make test-rust`、`make test-python`、`make test-swift`（跨語言就都跑；`make test` 是全部，已編譯的 worktree 上 368 秒（2026-10-13 量）） | `/code-review` ＋ fresh verifier | PR，CI 全綠才 merge commit |
+
+- 錯字與文件用長期的 worktree `../shanjie-docs`：合併後 `git fetch && git reset --hard origin/main` 繼續用，不刪（新開的 worktree 要從零編譯，`data/lm/` 的模型檔也要另外複製、核對 `data/*.sha256`）。
+- 測試跑著的時候來了新改動：不要停掉重跑；跑完先 commit，新改動放下一個 commit。
+- 使用者給的是一整類的許可或決定，照整類套用、一次問完；不要逐項縮成最窄再回頭問。
 
 ## 文件要跟著更新
 
@@ -27,7 +39,7 @@
 
 - **保留集** `eval/holdout/`：只在一片收尾時由 fresh verifier 跑一次、只回數字：基準與新版各跑一次 `--set holdout --rowstats`（寫到它自己的暫存目錄、檔內只能有 `[0-9\t\n]`），再跑 `tools/evalstats.py compare`，只回那一行表格，然後刪掉兩個 rowstats。其他時候不讀、不用來調參數。
 - **私有資料**（使用者的 Discord 調參集、學習檔、聊天紀錄）放在 repo 外，只報統計數字。讀個人資料前先問；agent 一律不讀。
-- **Mac 不跑重運算**（使用者 2026-10-13：「不要再增加 Mac 負擔了」）：打分、大量評測、訓練、多程序一律放 188 或 Colab（第三方模型在 188 要另做隔離；Colab 的 VM 本身和金鑰隔開）。Mac 只跑 commit 前的 `make test` 與少量的單句量測；要更快就換機器，不在 Mac 上加執行緒。私人評測集可以放在 188 或 Colab 跑（使用者同日：「私人訊息能搬到別台機器，請搬」「colab可以放」）：188 放在 `%USERPROFILE%\shanjie-private\`，Colab 照 Mac 檔案的傳法（有時效的網址、用完刪掉嵌網址的腳本），搬過去都要核對雜湊；只用來算評測，出貨的模型仍不用私人訊息訓練（要改是另一個決定，維護者 2026-10-13 選「之後再決定」）。搬的是過濾後的評測列檔；原始聊天匯出留在 Mac，重建列檔在 Mac 上做（維護者同日）。不進 repo 的語料與評測集（立法院發言、政府新聞稿、wikitypo、SIGHAN、NTUML 等）同樣都可以放 188 或 Colab（維護者同日：「NTUML 等語料都可以放 188 或是 colab」），搬過去核對雜湊；仍不進 repo、不交給別人（SIGHAN 條款不得轉交）。
+- **Mac 不跑重運算**（使用者 2026-10-13：「不要再增加 Mac 負擔了」）：打分、大量評測、訓練、多程序一律放 188 或 Colab（第三方模型在 188 要另做隔離；Colab 的 VM 本身和金鑰隔開）。Mac 只跑 commit 前要求的測試（見「改動分級」）與少量的單句量測；要更快就換機器，不在 Mac 上加執行緒。私人評測集可以放在 188 或 Colab 跑（使用者同日：「私人訊息能搬到別台機器，請搬」「colab可以放」）：188 放在 `%USERPROFILE%\shanjie-private\`，Colab 照 Mac 檔案的傳法（有時效的網址、用完刪掉嵌網址的腳本），搬過去都要核對雜湊；只用來算評測，出貨的模型仍不用私人訊息訓練（要改是另一個決定，維護者 2026-10-13 選「之後再決定」）。搬的是過濾後的評測列檔；原始聊天匯出留在 Mac，重建列檔在 Mac 上做（維護者同日）。不進 repo 的語料與評測集（立法院發言、政府新聞稿、wikitypo、SIGHAN、NTUML 等）同樣都可以放 188 或 Colab（維護者同日：「NTUML 等語料都可以放 188 或是 colab」），搬過去核對雜湊；仍不進 repo、不交給別人（SIGHAN 條款不得轉交）。
 - **語料不進版控**（使用者 2026-10-13）：私人訊息、公開語料（立法院發言、維基錯字表、SIGHAN、NTUML、口語重訓文字等），以及從它們建出的列檔、候選傾印、分數、rowstats，一律放在 repo 外（`~/side-project/shanjie-private/`、`~/.cache/shanjie/`）。repo 只放建置程式、合成的測試資料、數字與雜湊；私人訊息的句子不寫進研究紀錄、契約、commit 或 PR。
 - **使用者回報的錯字**：加到 `eval/dev/user-reported.txt` 的**最後面**（使用者 2026-10-03 同意以 CC0 釋出），格式 `前文|句子|讀音`。加在最後，`--dev 302` 的前 302 列才不會變。
 - 改到選字結果的改動（使用者 2026-10-08 決定，從下一片開始），dev302、打字測驗、錯字回報檔在聊天與書面兩種設定各報一行同一張表：n、top1 基準／新、改對／改壞、精確 McNemar p、CER（字元錯誤率）基準／新、Δtop1 與 ΔCER 的配對 bootstrap 95% 區間。做法：基準與新版各跑 `cargo run --release -q -p cli -- --lm data/lm/bigram.sjlm --profile chat … --rowstats FILE`（或 `reference/proto/lm_eval.py` 同樣的選項），再 `python3 tools/evalstats.py compare BASE CAND --label 名稱`；加 `--net`（E2）會在最後多三欄：淨值（改對 − 改壞）、改壞率（改壞 ÷ n）、改壞數的 95% 精確 Poisson 上界，不加時輸出不變；契約 `docs/contracts/eval-stats.md`。Discord 調參集由 main 跑（Mac、188 或 Colab，見上面「Mac 不跑重運算」）、只貼表格數字。調參數用 cvtune、wikitune，不用 dev302；調參的前後比較也用同一張表。
