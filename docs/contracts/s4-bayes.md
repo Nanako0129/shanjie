@@ -88,5 +88,5 @@ revert 這一片的 merge commit。預設沒變、檔案格式沒變，使用者
 ## 8. 結果（2026-10-10）
 
 - 40 組沒有一組符合 §2 的必要條件：鏡像學會率每一組都低於基準（R 0–2／8、D 0–3／8，基準 7／8）；D 變體 α_g = 4 的 4 組另外在調參集有 1／62 全域污染；A2 同前文在 D α_c ≤ 1 的組等於基準（3／3），其餘 1–2／3。依 §3 第 4 項：**保留現行規則**。表與推論的原因在研究紀錄 2026-10-10「選字機率 s4-bayes」。
-- 實作（`Engine::set_bayes`、`Learner::lookup_global`、`bayes_sweep`）在 commit c09693a，同一個分支之後 revert：結果是負的，不在 main 的程式碼裡留一段不用的解碼分支。§3 第 8 項的掃描表要在 c09693a 上重跑（PR head 上已經沒有 `bayes_sweep`）。
+- 實作（`Engine::set_bayes`、`Learner::lookup_global`、`bayes_sweep`）在 commit e469768，同一個分支之後 revert：結果是負的，不在 main 的程式碼裡留一段不用的解碼分支。§3 第 8 項的掃描表要在 e469768 上重跑（PR head 上已經沒有 `bayes_sweep`）。
 - 收尾審查（第三輪）READY；四個突變的結果記在研究紀錄。

@@ -72,7 +72,7 @@ class TestDelta(unittest.TestCase):
 
     @staticmethod
     def old_pick(r, alpha, tau):
-        """pick as it was before S7e (origin/main 59adc18), so delta 0 is compared with the old formula, not with itself."""
+        """pick as it was before S7e (origin/main 1031e0d), so delta 0 is compared with the old formula, not with itself."""
         if r["n"] < 2 or r["ng"][0] - r["ng"][1] >= tau:
             return 0
         s = [g + alpha * l for g, l in zip(r["ng"], r["ll"])]

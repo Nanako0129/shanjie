@@ -35,7 +35,7 @@
   已試跑（2026-10-13）：`7e73ef677cd232099132b542c3f3e92aa6a1d7d17725fb0fbda25873509f12ce`，14,638,224 bytes，和 `tinylm-v2` 的檔只差 9 個 byte（`cmp -l`）。實作時照同一個指令重跑，雜湊要相同。
 - **`docs/releases/tinylm-v3.md`**：說明（檔案、SHA-256、大小、內容：權重同 v1／v2、只有聊天的融合參數不同、怎麼選的、判斷期與公開集合的數字、綁 model-v5、授權）。照 `docs/releases/README.md` 的規則：建 Release 前拿掉草稿標記。
 - **研究紀錄**：新的一節，§3 第 1、2 項的結果與候選檔雜湊；另加 E2 一節的〔更正〕（下面）。
-- **〔更正〕E2 研究紀錄 2026-10-13「/code-review 與 fresh verifier」一節**：「舊的在改壞數約 705 以上會卡在 745」寫得不準。實作時用 df57b34 之前的 `evalstats` 上界函式重新量「從哪個 k 起和 log 空間的結果不同」「從哪個 k 起固定在 745」，照量到的數字寫〔更正〕。main 已先量（2026-10-13，`git show df57b34^:tools/evalstats.py` 對照現在的 `poisson_upper95`，k 0–1,200）：k ≤ 485 差 < 4e-12；k 679 起差 > 1e-9，686 起 > 1e-6，**694 起 > 0.001**；**k ≥ 700 時舊函式固定是 745.1332**（新的：700 是 745.1109、705 是 750.2659）。〔更正〕照這些數字寫。原句保留、後面加更正，不改數字了事。
+- **〔更正〕E2 研究紀錄 2026-10-13「/code-review 與 fresh verifier」一節**：「舊的在改壞數約 705 以上會卡在 745」寫得不準。實作時用 8b83a1d 之前的 `evalstats` 上界函式重新量「從哪個 k 起和 log 空間的結果不同」「從哪個 k 起固定在 745」，照量到的數字寫〔更正〕。main 已先量（2026-10-13，`git show 8b83a1d^:tools/evalstats.py` 對照現在的 `poisson_upper95`，k 0–1,200）：k ≤ 485 差 < 4e-12；k 679 起差 > 1e-9，686 起 > 1e-6，**694 起 > 0.001**；**k ≥ 700 時舊函式固定是 745.1332**（新的：700 是 745.1109、705 是 750.2659）。〔更正〕照這些數字寫。原句保留、後面加更正，不改數字了事。
 - **CLAUDE.md 的評測表**（§3 第 8 項）：dev302、打字測驗、錯字回報（整個檔，當時 77 列〔修訂，2026-10-13：#131 加了第 78 列，重現這張表用 `--limit 77`〕）在聊天與書面各報「n-gram → v3」與「v2 → v3」兩行，寫進研究紀錄；說明檔摘要。
 - **保留集**（§3 第 5 項）：在 PR 1 由 fresh verifier 對候選檔跑，**建 Release 之前**；這是這一片唯一的一次。verifier 回報的兩行由 main 寫進研究紀錄與說明檔，再 commit。
 - PLAN（v0.4.1 一段、S7 的狀態清單加 S7h 一條；#126 已合併）、README（S7 的狀態：第 35 行與路線圖表的 S7 一列）、網站 `site/index.html`（v0.4.1 路線圖與語意校正一項，和 PLAN 第 116 行說的同步；只改檔，部署要使用者同意）：寫 E2 結果之後的狀態（候選檔、等 Release、預設開是 PR 2 才做）。
@@ -100,7 +100,7 @@
 
 ## 7. 前置條件與 agent 的限制
 
-- 前置：E2（PR #126）已合併（97aa832，2026-10-13），`evalstats --net`、E2 的研究紀錄與 `lytune`／`wikitypo` 的建置程式都在 main。
+- 前置：E2（PR #126）已合併（0a622a0，2026-10-13），`evalstats --net`、E2 的研究紀錄與 `lytune`／`wikitypo` 的建置程式都在 main。
 - verifier 可以讀：worktree 本身、`~/.cache/shanjie/s7h-public/`（v3 候選檔、量測）、`~/.cache/shanjie/s7c2c-public/tune/`（cvtune、wikitune）、`~/.cache/shanjie/e2-public/`（`lytune.txt`、`wikitypo.txt`）、`~/.cache/shanjie/s7c2c-public/tinylm-M8-v2.sjtl`；`eval/holdout` 只在 §3 第 5 項（PR 1）照規則跑一次。
 - agent 一律不讀 `~/side-project/shanjie-private/`、`~/.cache/shanjie/work/`（匯出由 main 做）、`~/Library`、鑰匙圈；不安裝、不啟動 App、不在 `.app` 裡執行程式、不呼叫 TIS 或 lsregister；不建 Release、不推 tag、不部署網站、不改 GitHub 上的任何東西（推分支與開 PR 由 main 做）。
 

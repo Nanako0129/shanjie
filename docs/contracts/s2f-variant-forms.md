@@ -96,7 +96,7 @@
    - 兩條路徑都變成「轉繁體 → TWPhrases → 最後一層」，和 OpenCC 的順序相同；`VARIANTS` 的工作全部由最後一層做。
 3. **代表成員**（取代 §2.4 的寫回）：unigram 照舊寫回每個成員（每個寫法都要在詞彙表裡，才能當前文）；二元組裡「後一個詞」是類別成員時，次數只放在代表成員上，所以 t 只算一次。前文是類別成員時，每個成員的條目相同（照舊）。代表依序取：詞庫最高分最大、是 `MERGE` 的正規形（`fold(w) == w`）、字串 code point 最小。
 4. **合併條件**：同一類的成員在詞庫裡的讀音集合必須完全相同，才合併（拆掉 7 類：佔／占、偽／僞、着／著、祕／秘、佔了／占了、便祕／便秘、瞭望台／瞭望臺）。
-5. **review 的小修**：`cv_native.py` 的舊轉換改讀 `ae01597`（原本指向 rebase 前的 commit）；`TW_VARIANTS` 在 `load_conv()` 裡才讀檔，import `build_counts` 不再需要 OpenCC 檔；`STPhrases.txt`、`TWPhrases.txt` 讀之前核對雜湊；`build_overlay.py` 拿掉不可能失敗的斷言，S2n 的連鎖規則把「目標被 §2.5 拿掉」也算進去並加斷言；`make_probe.py` 兩種寫法都在詞庫但讀音不同、或都不在時報錯；`test_convert.py` 的突變改回可執行的斷言。
+5. **review 的小修**：`cv_native.py` 的舊轉換改讀 `f26d578`（原本指向 rebase 前的 commit）；`TW_VARIANTS` 在 `load_conv()` 裡才讀檔，import `build_counts` 不再需要 OpenCC 檔；`STPhrases.txt`、`TWPhrases.txt` 讀之前核對雜湊；`build_overlay.py` 拿掉不可能失敗的斷言，S2n 的連鎖規則把「目標被 §2.5 拿掉」也算進去並加斷言；`make_probe.py` 兩種寫法都在詞庫但讀音不同、或都不在時報錯；`test_convert.py` 的突變改回可執行的斷言。
 
 ### 6.3 驗收（§3 全部重跑，另加）
 
