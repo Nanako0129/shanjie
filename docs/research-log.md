@@ -4806,3 +4806,13 @@ CLI 重現（Rust，model-v5，`--context`、沒有前文；聊天與書面、�
 ## 2026-10-13：CodeRabbit 不再自動審查
 
 - 維護者決定（選擇題）：`.coderabbit.yaml` 設 `reviews.auto_review.enabled: false`。善解的合併關卡是本地 `/code-review`（`CLAUDE.md`「一片工作的流程」第 4 項），CodeRabbit 不是必要檢查（main 的 ruleset 停用，必要的只有 CI 的 changes、core、shell），但它每個 PR 都自動跑（#136、#138、#139 都有），用掉的是其他以它當關卡的 repo 的額度。要它審時在 PR 留言 `@coderabbitai review`。原本的 `auto_pause_after_reviewed_commits: 0` 只對自動審查有意義，一起拿掉；路徑說明與保留集排除照留，手動叫它審時仍適用。
+
+## 2026-10-13：評測資料放在哪裡、私人訊息訓練、0c App 的測驗（維護者，選擇題）
+
+- **立法院發言（lytune）**：列檔可以放 188 或 Colab 算評測（自己的機器與 VM，不是散布）；仍不進 repo、不出貨、不進訓練（`docs/contracts/e2-chat-eval.md` 的修訂）。
+- **政府新聞稿**：`docs/methodology.md` 寫的「授權待確認」是舊說法。著作權法第 9 條第 1 項第 1 款「憲法、法律、命令或公文」不得為著作權之標的，第 2 項「前項第一款所稱公文，包括公務員於職務上草擬之文告、講稿、新聞稿及其他文書」（全國法規資料庫，2026-10-13 讀）；10-12 的口語語料調查也這樣記。所以新聞稿驗證集同樣可以放 188 或 Colab 算評測。
+- **原始聊天紀錄**：只搬過濾後的評測列檔；Discord、Threads、Facebook 的原始匯出（含私訊）留在 Mac，重建列檔在 Mac 上做。
+- **出貨模型用私人訊息訓練**：維護者以為出貨模型已經用了；查過，三個出貨檔都沒有（`docs/training.md`「私人口語資料」一列），私人訊息只用在選值（×5 口語權重、S7a 選 M、tinylm-v3 聊天值）。要不要開始用：**之後再決定**。考量是出貨檔人人都能下載，即時預測可能把訓練過的句子原樣顯示給別人，Release 說明也寫了不含私人對話。
+- **0c App 本身的打字測驗**：裝在 macOS VM（VMware Fusion）裡測，不裝在維護者的系統上。要先寫契約（VM 的準備、怎麼送按鍵、量什麼、和 X0c 的離線結果怎麼對照），過 plan-verifier 才動手。
+- 同一個 PR 也修了 #139 延後的兩點：`buildcheck.py` 的說明與 `docs/training.md` §5.1 第 2 步漏寫「給了 `--charcount` 而條目數超過 300,000 也會結束碼 1」；`--select R3p` 的 `R3p` 只是輸出那一列的名稱。
+
