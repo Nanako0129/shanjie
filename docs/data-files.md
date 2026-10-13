@@ -13,7 +13,14 @@
 - **放在同一個資料夾**（`data/lm/`）。前兩個一起用；`classes.sjc` 不含模型本身，`classes-v3` 這個 Release 也只有這一個檔案。
 - **綁定**：`classes.sjc` 裡記了它是為哪個模型建的（model-v5 的 SHA-256）。缺檔、配到別的模型、或檔案內容不對，載入都會失敗（C ABI 的 `load_lm` 回傳 3），不會靜靜地用錯或不用。
 - **語意校正模型的綁定**：`tinylm.sjtl` 裡記了它調參時用的模型（model-v5 的 SHA-256），配到別的模型時核心拒絕載入、只用 n-gram。它不檢查詞類表，但它的 α、τ 是在 model-v5＋classes-v3 上調的，所以換詞類表也要重新調參、發新的 `tinylm-v…`（見下面的表）。
+- **英文單字表**（中英混打，`docs/contracts/zhen-mixed.md`）不在這張表：它不是 Release 附件，也不進 git，每次建置時由 `scripts/build-app.sh` 產生（見下面「建置時產生的檔案」）。
 - **App 裡**：打包時 `bigram.sjlm`、`classes.sjc` 放進 `善解輸入法.app/Contents/Resources/`，使用者不用另外下載。`tinylm.sjtl` 從語意校正上線（S7c-2b，`docs/contracts/s7c2b-shell-rerank.md`）起也一起放進去。
+
+## 建置時產生的檔案
+
+| 檔案 | 來源 | 雜湊 | 怎麼產生 |
+|---|---|---|---|
+| `english-words.txt`（`Resources/` 裡，中英混打的英文單字表） | SymSpell（`wolfgarbe/SymSpell`）釘住的 commit `c239062ae02961df18ab7da1671d01b4388204e0` 的 `SymSpell/frequency_dictionary_en_82_765.txt`，輸入 SHA-256 `c604e1121e398ae7c7fbf777f11e0a0f2fa66eda932cb9fba1321466cf3acd7b` | 輸出的 SHA-256 記在 `data/english-words.txt.sha256`（**還是佔位**：最終的切法由 `docs/contracts/zhen-mixed.md` §4.4 的量測決定，之後才填；填之前 `build-app.sh` 預設失敗，只有環境變數 `SHANJIE_ENGLISH_ALLOW_UNPINNED=1`（CI 設定）才容許不核對輸出） | `scripts/build-app.sh` 在建置時下載輸入（快取在 `~/.cache/shanjie/english/`，有快取且雜湊相符就不再下載；下載失敗或雜湊不符就建置失敗），用 `tools/build_english_words.py`（切法與常數在檔頭；測試 `tools/test_build_english_words.py`）產生，核對輸出雜湊後放進 `Resources/`。授權見 `LICENSES/data.md` 與 `LICENSES/SCOWL.txt`、`LICENSES/SymSpell-MIT.txt` |
 
 ## 下載
 

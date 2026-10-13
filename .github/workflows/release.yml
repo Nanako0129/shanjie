@@ -92,6 +92,14 @@ jobs:
           gh release download tinylm-v3 --repo "$GITHUB_REPOSITORY" -p tinylm.sjtl -D data/lm
           shasum -a 256 -c data/tinylm.sjtl.sha256
 
+      # The input of the English word list (SymSpell, pinned commit; build-app.sh downloads it when missing and checks its SHA-256
+      # either way, so a bad cache is only a miss). The key names the commit of tools/build_english_words.py's SYMSPELL_COMMIT.
+      - name: Cache the English word list input
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/shanjie/english
+          key: symspell-c239062ae02961df18ab7da1671d01b4388204e0
+
       - name: Version
         id: version
         run: |
