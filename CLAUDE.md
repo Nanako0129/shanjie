@@ -23,7 +23,7 @@
 |---|---|---|---|
 | 錯字回報列（只動 `eval/dev/user-reported.txt`、對應的 golden 行、`eval/README.md` 列數、研究紀錄） | `make test-golden`（約 7 秒） | 不審 | 直接 commit 到 main 並 push；CI 在 main 上跑，紅了當場修 |
 | 純文件（研究紀錄、契約、PLAN、README、只改 docstring／註解） | 不跑 | `/code-review` 或 fresh verifier 擇一、只跑一次；之後的措辭問題就地改完，不再重審 | PR，CI 綠就 merge commit |
-| 程式 | 改到哪塊跑哪塊：`make test-rust`、`make test-python`、`make test-swift`（跨語言就都跑；`make test` 是全部，已編譯的 worktree 上 368 秒（2026-10-13 量）） | `/code-review` ＋ fresh verifier | PR，CI 全綠才 merge commit |
+| 程式 | 改到哪塊跑哪塊：`make test-rust`、`make test-python`、`make test-swift`（跨語言就都跑；改到任何 Python，含 `reference/proto/`、`tools/`，就跑 `test-python`：CI 只跑其中 7 個檔，`experiments/` 的測試只在本機；`make test` 是全部，已編譯的 worktree 上 368 秒（2026-10-13 量）） | `/code-review` ＋ fresh verifier | PR，CI 全綠才 merge commit |
 
 - 錯字與文件用長期的 worktree `../shanjie-docs`：合併後 `git fetch && git reset --hard origin/main` 繼續用，不刪（新開的 worktree 要從零編譯，`data/lm/` 的模型檔也要另外複製、核對 `data/*.sha256`）。
 - 測試跑著的時候來了新改動：不要停掉重跑；跑完先 commit，新改動放下一個 commit。
