@@ -2,7 +2,7 @@
 //! The Python code is ground truth; float operation order is kept on purpose (no fusing or reordering).
 //! R2: errors carry no content; nothing here formats input text.
 
-use crate::learn::{context_key, next_key, Learner, Level, SENTINEL};
+use crate::learn::{context_key, record_key, Learner, Level};
 use crate::{Error, Lexicon, PER_KEY};
 use std::collections::{HashMap, HashSet};
 use std::fmt;
@@ -823,10 +823,7 @@ pub fn decode_segment_learned<'a>(
                 hits_of = hyps[i - l]
                     .iter()
                     .map(|h| {
-                        let mut key = context_key(&format!("{before_tail}{}", h.surface));
-                        if key == SENTINEL {
-                            key = next_key(next);
-                        }
+                        let key = record_key(context_key(&format!("{before_tail}{}", h.surface)), next);
                         *by_ctx.entry(key).or_insert_with_key(|k| {
                             hits.push(ln.learner.lookup(k, span, ln.today));
                             hits.len() - 1

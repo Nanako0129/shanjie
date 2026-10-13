@@ -1101,15 +1101,22 @@ fn t3b_a_sentence_start_pick_is_stored_under_the_next_syllable_and_reorders_the_
     let r = e.learner().records();
     assert_eq!(r.iter().map(|x| (x.context.as_str(), x.word.as_str())).collect::<Vec<_>>(), [("^>$", word.as_str())]);
     assert_eq!(row(&typ(&mut e, &[], "ㄋ"))[0], word, "the learned item first (lookup key ^>$)");
-    e.reset(ResetMode::Discard);
-    // a syllable typed after the pick becomes part of the key
+}
+
+/// Point 3: a sentence-start prediction pick is stored under `^>$` whatever is typed after it, the key the row looks up.
+#[test]
+fn t3c_a_sentence_start_pick_followed_by_more_typing_is_still_stored_under_the_end_key() {
+    let base = fresh_row(Profile::Chat, "", "ㄋ");
+    let word = base.iter().skip(1).find(|w| w.chars().count() > 1).expect("a two-character item below the first").clone();
     let mut e = learner_engine(Profile::Chat, None);
     typ(&mut e, &[], "ㄋ");
     pick_word(&mut e, &word);
     typ(&mut e, &["ㄏㄠˇ"], "");
     e.key(kind(KeyKind::Enter)).unwrap();
     let r = e.learner().records();
-    assert_eq!(r.iter().map(|x| (x.context.as_str(), x.word.as_str())).collect::<Vec<_>>(), [("^>ㄏㄠˇ", word.as_str())]);
+    assert_eq!(r.iter().map(|x| (x.context.as_str(), x.word.as_str())).collect::<Vec<_>>(), [("^>$", word.as_str())]);
+    e.reset(ResetMode::Discard);
+    assert_eq!(row(&typ(&mut e, &[], "ㄋ"))[0], word, "the row in the same situation reflects the record");
 }
 
 /// Index of `word` in `predict(..., 27)` for the situation "after `left`, `pending` typed", chat profile.

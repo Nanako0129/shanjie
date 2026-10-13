@@ -50,6 +50,16 @@ pub fn next_key(next: Option<&str>) -> String {
     format!("{NEXT_PREFIX}{}", next.unwrap_or("$"))
 }
 
+/// The one place a span's context key becomes the key records are learned and looked up under (rule 8): `^`
+/// becomes `next_key(next)`, every other key is kept. Decoding, the commit and the prediction row all call it.
+pub fn record_key(context: String, next: Option<&str>) -> String {
+    if context == SENTINEL {
+        next_key(next)
+    } else {
+        context
+    }
+}
+
 /// Which lookup level answered (§1.1, §12): decides the boost size (`lm::LEARN_EPS` or the smaller global one).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Level {
@@ -191,34 +201,41 @@ impl Learner {
             }
         }
     }
+    /// Halves the decayed weight of (context, reading, word) if it has a record; returns the record as it now is.
+    /// A re-pick halves the displaced word under the key it is committed with and, when different, under the key
+    /// it was picked with (§14 amendment, point 2).
+    pub fn halve(&mut self, context: &str, reading: &[String], word: &str, today: i64) -> Option<Record> {
+        let i = self.find(context, reading, word)?;
+        let r = &mut self.records[i];
+        r.weight = decayed(r, today) * 0.5;
+        r.day = today;
+        Some(r.clone())
+    }
     /// One re-pick at commit (§1.2–§1.3): `context` is a full key from `context_key`, `displaced` the
     /// word shown before the pick (its weight halves if it had a record under this key). Returns the
     /// records it changed, as they now are (displaced, taught, global; at most 3): what an append
     /// writes (§4).
     pub fn teach(&mut self, context: &str, reading: &[String], word: &str, displaced: &str, today: i64) -> Vec<Record> {
+        // The bare "^" is never a record key (§14 rule 8; §8 point 5: memory matches the disk, where `valid` drops it).
         // §12 rules 6 and 7: a single character learns only under a full two-character Han context (not "^",
         // not a one-character key, not a synthetic key).
-        if is_single(word) && !is_full_context(context) {
+        if context == SENTINEL || (is_single(word) && !is_full_context(context)) {
             return Vec::new();
         }
         let mut touched = Vec::with_capacity(3);
-        if let Some(i) = self.find(context, reading, displaced) {
-            let r = &mut self.records[i];
-            r.weight = decayed(r, today) * 0.5;
-            r.day = today;
-            touched.push(r.clone());
-        }
+        touched.extend(self.halve(context, reading, displaced, today));
         touched.push(self.bump(context, reading, word, today, 1.0));
         if is_single(word) {
             return touched; // never globalizes (§12 rule 1)
         }
-        // §1.3 globalize: ≥ 2 distinct full keys (SENTINEL counts) with an active record.
+        // §1.3 globalize: ≥ 2 distinct full keys with an active record. All sentence-start keys (`NEXT_PREFIX`)
+        // count as one key, as the single "^" did before rule 8.
         let Some(ix) = self.index.get(&reading_key(reading)) else { return touched };
         let keys: std::collections::HashSet<&str> = ix
             .iter()
             .map(|&i| &self.records[i])
             .filter(|r| r.word == word && r.context != GLOBAL && decayed(r, today) >= ACTIVE)
-            .map(|r| r.context.as_str())
+            .map(|r| if r.context.starts_with(NEXT_PREFIX) { NEXT_PREFIX } else { r.context.as_str() })
             .collect();
         if keys.len() >= 2 {
             let prev = self.find(GLOBAL, reading, word).map(|i| self.records[i].clone());

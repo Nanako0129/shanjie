@@ -1,7 +1,7 @@
 //! S3a key engine (docs/contracts/s3a.md): key events in, preedit / commit / candidates out.
 //! R2: no input text in errors or panics; types holding input text do not derive Debug.
 
-use crate::learn::{context_key, local_day, next_key, Learner, Level, Record, SENTINEL};
+use crate::learn::{context_key, local_day, next_key, record_key, Learner, Level, Record};
 use crate::learn_store::{LearnStore, Opened, StoreError, JOURNAL_MAX};
 use crate::predict::{predict, reading_matches_in, unit_of_syllable, Mode, Unit};
 use crate::lm::{decode_segment_learned, history, CappedLexicon, Demote, End, Learn, Lm, Profile};
@@ -336,6 +336,10 @@ struct Fixed {
     /// The context key a prediction pick is recorded under, fixed when the row was built: re-decoding after the pick can
     /// change the text before the start, so the commit must not recompute it (section 10.1). `None` for candidate picks.
     key: Option<String>,
+    /// The synthetic sentence-start key (`^>` + the next reading) the displaced word was shown under when this candidate
+    /// pick was made, when the span's context key was `^`. The commit halves the displaced word there too if the key
+    /// at the commit differs (the user may have typed on after the pick). `None` otherwise.
+    pick_key: Option<String>,
 }
 
 /// One item of the prediction row: the word, the compatible reading that scored it, and the syllable index where
@@ -872,17 +876,22 @@ impl Engine {
                     let pre = f.pre.as_ref().filter(|p| **p != f.word && !self.is_punct(f.start))?;
                     let off: usize = (0..f.start).map(|i| self.token_width(i)).sum();
                     let before: String = display.chars().take(off).collect();
-                    let mut ctx = f.key.clone().unwrap_or_else(|| context_key(&format!("{}{before}", self.left)));
-                    // Rule 8: at sentence start the key holds the reading of the syllable after the word.
-                    if ctx == SENTINEL {
-                        ctx = next_key(self.syls.get(f.end).map(String::as_str));
-                    }
-                    Some((ctx, self.syls[f.start..f.end].to_vec(), f.word.clone(), pre.clone()))
+                    let ctx = f.key.clone().unwrap_or_else(|| context_key(&format!("{}{before}", self.left)));
+                    // Rule 8: at sentence start the key holds the reading of the syllable after the word; a
+                    // prediction pick (`f.key` set) was made at the end of the composition, so it is `^>$`.
+                    let next = if f.key.is_some() { None } else { self.syls.get(f.end).map(String::as_str) };
+                    let ctx = record_key(ctx, next);
+                    // The key the displaced word was scored under at the pick, when it differs from the commit's.
+                    let at_pick = f.pick_key.clone().filter(|k| *k != ctx);
+                    Some((ctx, self.syls[f.start..f.end].to_vec(), f.word.clone(), pre.clone(), at_pick))
                 })
                 .collect();
             let mut touched = Vec::new();
-            for (ctx, reading, word, displaced) in &plans {
+            for (ctx, reading, word, displaced, at_pick) in &plans {
                 touched.extend(self.learner.teach(ctx, reading, word, displaced, today));
+                if let Some(k) = at_pick {
+                    touched.extend(self.learner.halve(k, reading, displaced, today));
+                }
             }
             // Nothing touched (e.g. a single character under "^" or a one-character key, §12, §14): no write, unless a full
             // rewrite is pending (a failed forget or rewrite). It is retried only by commits that reach
@@ -1205,7 +1214,7 @@ impl Engine {
     /// counts 0 (s4-learning section 12: it never overrides what the model is sure of).
     fn learned_weight(&self, key: &str, reading: &[String], word: &str, today: i64) -> f64 {
         // Rule 8: a predicted word ends at the cursor, with no syllable after it.
-        let key = if key == SENTINEL { next_key(None) } else { key.to_string() };
+        let key = record_key(key.to_string(), None);
         match self.learner.lookup(&key, reading, today) {
             (Level::Global, _) => 0.0,
             (_, hits) => hits.iter().find(|h| h.0 == word).map_or(0.0, |h| h.1),
@@ -1223,7 +1232,7 @@ impl Engine {
         self.fixed.retain(|f| !(f.start < end && start < f.end));
         self.syls.splice(start..end, reading);
         let key = pre.is_some().then_some(key);
-        self.fixed.push(Fixed { start, end: start + m, word, pre, key });
+        self.fixed.push(Fixed { start, end: start + m, word, pre, key, pick_key: None });
         self.fixed.sort_by_key(|f| f.start);
         self.cursor = start + m;
         self.refresh()?;
@@ -1772,7 +1781,7 @@ impl Engine {
         });
         self.syls.insert(c, reading);
         if let Some(word) = fixed_word {
-            self.fixed.push(Fixed { start: c, end: c + 1, word, pre: None, key: None });
+            self.fixed.push(Fixed { start: c, end: c + 1, word, pre: None, key: None, pick_key: None });
             self.fixed.sort_by_key(|f| f.start);
         }
         self.cursor += 1;
@@ -1859,6 +1868,15 @@ impl Engine {
         Some(self.display.chars().skip(off).take(len).collect())
     }
 
+    /// Rule 8: the synthetic key (`^>` + `syls[end]`, `^>$` at the end) the span [start, end) is shown under now, when
+    /// the context key before it is `^`; `None` for any other context.
+    fn pick_key(&self, start: usize, end: usize) -> Option<String> {
+        let off: usize = (0..start).map(|i| self.token_width(i)).sum();
+        let before: String = self.display.chars().take(off).collect();
+        let ctx = context_key(&format!("{}{before}", self.left));
+        (ctx == crate::learn::SENTINEL).then(|| next_key(self.syls.get(end).map(String::as_str)))
+    }
+
     /// §1.5: drop the highlighted candidate's records for its reading (all keys), then re-decode.
     /// With a store the file is always fully rewritten (§4): a record pruned from memory on load can
     /// still be in the file, so "memory changed" says nothing about the file. `must_rewrite` is set
@@ -1907,13 +1925,18 @@ impl Engine {
             Some(f) if self.learning => (f.pre.clone(), f.key.clone()),
             _ => (self.learning.then(|| self.pre_pick(start, end)).flatten(), None),
         };
+        // Re-picking the span of an earlier pick keeps that pick's key along with its displaced text.
+        let pick_key = match self.fixed.iter().find(|f| f.start == start && f.end == end && f.pre.as_ref().is_some_and(|p| !p.is_empty())) {
+            Some(f) if self.learning => f.pick_key.clone(),
+            _ => (self.learning && pre.is_some()).then(|| self.pick_key(start, end)).flatten(),
+        };
         self.fixed.retain(|f| !(f.start < end && start < f.end));
         // A candidate pick changes the text before every fixed word to its right: their prediction keys no longer
         // describe what the user sees, so those records fall back to the key at the commit (section 10.1).
         for f in self.fixed.iter_mut().filter(|f| f.start >= end) {
             f.key = None;
         }
-        self.fixed.push(Fixed { start, end, word, pre, key });
+        self.fixed.push(Fixed { start, end, word, pre, key, pick_key });
         self.fixed.sort_by_key(|f| f.start);
         self.refresh()
     }

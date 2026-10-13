@@ -216,8 +216,8 @@ final class LearningTests: XCTestCase {
         return second
     }
 
-    /// Like `repick`, for a word of two characters (ㄋㄧˇ ㄏㄠˇ): it may learn under "^" too, so when a
-    /// gate test stores nothing the gate is the reason, not the single-character rule (section 12).
+    /// Like `repick`, for a word of two characters (ㄋㄧˇ ㄏㄠˇ): it may learn at sentence start too (under
+    /// a "^>..." key), so when a gate test stores nothing the gate is the reason, not the single-character rule (section 12).
     @discardableResult
     private func repickTwo(_ c: Controller) throws -> String {
         c.type("su3cl3 ")

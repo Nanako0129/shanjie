@@ -180,6 +180,9 @@ int32_t shanjie_engine_learning_clear(ShanjieEngine *engine);
 // A word of 2+ characters picked with no Han character before it (context key "^") is learned, and
 //   looked up, under the key "^>" plus the reading of the syllable right after the word ("^>$" when the
 //   word ends the composition): it boosts the same word only where the next syllable is the same.
+//   A prediction-row pick is always stored under "^>$" (it is made at the end of the composition), and a
+//   re-pick halves the displaced word under the key it was shown under when it was picked as well as
+//   under the key at the commit.
 //   The shell computes none of this; it only passes the left-context text (section 14).
 // Learning happens only at a commit (Enter, a key the engine passes through after committing, or the
 //   40-syllable auto-commit), never on shanjie_engine_reset or Esc, and never for punctuation picks.

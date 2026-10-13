@@ -474,11 +474,13 @@ fn keys(e: &Engine) -> Vec<String> {
 #[test]
 fn sentinel_one_char_and_global() {
     // §12: only words of 2+ characters globalize, so the global parts use a two-syllable word.
+    // The bare "^" is no record key (§14 amendment, point 5); the sentence-start key is the synthetic one.
+    const SYN: &str = "^>$";
     let r = syls("ㄅㄚˇ ㄅㄚˇ");
     let mut l = Learner::default();
-    l.teach(SENTINEL, &r, "把手", "爸爸", DAY);
+    l.teach(SYN, &r, "把手", "爸爸", DAY);
     assert!(l.lookup("管把", &r, DAY).1.is_empty() && l.lookup("", &r, DAY).1.is_empty(), "sentence start is not global");
-    assert_eq!(l.lookup(SENTINEL, &r, DAY).1.len(), 1);
+    assert_eq!(l.lookup(SYN, &r, DAY).1.len(), 1);
     assert!(l.records().iter().all(|x| x.context != GLOBAL));
 
     let mut l = Learner::default();
@@ -486,7 +488,7 @@ fn sentinel_one_char_and_global() {
     assert_eq!(l.lookup("肯把", &r, DAY).1[0].0, "權力", "1-char step: same last character");
     assert_eq!(l.lookup("管把", &r, DAY).1[0].0, "權力");
     assert!(l.lookup("把", &r, DAY).1.is_empty() || l.lookup("把", &r, DAY).1[0].0 == "權力", "1-char key still shares the last char");
-    assert!(l.lookup("管他", &r, DAY).1.is_empty() && l.lookup(SENTINEL, &r, DAY).1.is_empty());
+    assert!(l.lookup("管他", &r, DAY).1.is_empty() && l.lookup(SYN, &r, DAY).1.is_empty());
     assert!(l.records().iter().all(|x| x.context != GLOBAL), "one teach never globalizes");
     // a second distinct full key globalizes; 1-char matches and repeats of the same key do not
     l.teach("管把", &r, "權力", "全力", DAY);
@@ -494,10 +496,10 @@ fn sentinel_one_char_and_global() {
     l.teach("肯把", &r, "權力", "全力", DAY);
     assert_eq!(l.records().iter().filter(|x| x.context == GLOBAL).count(), 1);
     assert_eq!(l.lookup("完全不同", &r, DAY).1[0].0, "權力", "global answers any context");
-    assert_eq!(l.lookup(SENTINEL, &r, DAY).1[0].0, "權力");
-    // SENTINEL counts as one of the two keys
+    assert_eq!(l.lookup(SYN, &r, DAY).1[0].0, "權力");
+    // SYN counts as one of the two keys
     let mut l = Learner::default();
-    l.teach(SENTINEL, &r, "權力", "全力", DAY);
+    l.teach(SYN, &r, "權力", "全力", DAY);
     l.teach("管把", &r, "權力", "全力", DAY);
     assert_eq!(l.records().iter().filter(|x| x.context == GLOBAL).count(), 1);
 }
@@ -673,7 +675,7 @@ fn forget_removes_every_key() {
     let r = syls("ㄒㄧㄣ ㄅㄣ");
     let mut l = Learner::default();
     l.teach("他", &r, "欣奔", "鑫犇", DAY);
-    l.teach(SENTINEL, &r, "欣奔", "鑫犇", DAY);
+    l.teach("^>$", &r, "欣奔", "鑫犇", DAY);
     assert_eq!(l.records().iter().filter(|x| x.context == GLOBAL).count(), 1);
     l.teach("他", &r, "新奔", "鑫犇", DAY);
     l.forget(&r, "欣奔");
@@ -862,7 +864,7 @@ fn row_flag_must_be_on_at_pick_and_at_commit() {
 }
 #[test]
 fn left_context_is_dropped_after_commit() {
-    // Two-character words may learn under ^ (single characters may not, §12), so use the real model.
+    // Two-character words may learn at sentence start, under ^>... (single characters may not, §12), so use the real model.
     let mut e = engine();
     e.set_left_context("好他");
     type_syls(&mut e, "ㄑㄩㄢˊ ㄌㄧˋ");
@@ -1531,7 +1533,7 @@ fn single_character_never_globalizes_two_characters_do() {
     assert!(l.records().iter().all(|r| r.context != GLOBAL), "a single character never gets a global record");
     let two = syls("ㄗㄞˋ ㄐㄧㄢˋ");
     let mut l = Learner::default();
-    for c in ["可以", SENTINEL, "他"] {
+    for c in ["可以", "^>$", "他"] {
         l.teach(c, &two, "再見", "在建", DAY);
     }
     assert_eq!(l.records().iter().filter(|r| r.context == GLOBAL).count(), 1, "a two-character word does");
@@ -1627,7 +1629,7 @@ fn pollution_zai_taught_under_two_contexts() {
 
 /// §12 rules 5 and 6 and §14 rule 7 at the lookup: a single character is used only at the exact full
 /// two-character key, and never under "^" or a one-character key; a word of 2+ characters keeps all three
-/// levels and "^".
+/// levels and the synthetic sentence-start key (never the bare "^").
 #[test]
 fn single_character_rules_in_the_learner() {
     let one = syls("ㄗㄞˋ");
@@ -1635,7 +1637,8 @@ fn single_character_rules_in_the_learner() {
     let mut l = Learner::default();
     assert!(l.teach(SENTINEL, &one, "再", "在", DAY).is_empty(), "rule 6: nothing is learned under ^");
     assert!(l.records().is_empty());
-    assert_eq!(l.teach(SENTINEL, &two, "再見", "在建", DAY).len(), 1, "a word of 2+ characters still learns under ^");
+    assert!(l.teach(SENTINEL, &two, "再見", "在建", DAY).is_empty(), "§14 amendment: no word learns under the bare ^");
+    assert_eq!(l.teach("^>$", &two, "再見", "在建", DAY).len(), 1, "a word of 2+ characters learns under the synthetic key");
     l.teach("可以", &one, "再", "在", DAY);
     assert_eq!(l.lookup("可以", &one, DAY).0, Level::Exact);
     assert_eq!(l.lookup("可以", &one, DAY).1[0].0, "再");
@@ -1989,4 +1992,82 @@ fn rule7_single_character_after_one_han_character_is_not_learned() {
     assert_eq!(e.key(k(KeyKind::Enter)).unwrap().commit, "你再嗎", "precondition: the re-pick took");
     assert_eq!(commit_of(&mut e, Q), "你在嗎", "再 learned under the one-character key 你 bent {Q}");
     assert!(e.learner().records().iter().all(|r| r.word != "再"), "no record for 再 under a one-Han key");
+}
+
+// ---------- 14b: PR review round (contract learn-single-ctx.md section 8) ----------
+
+fn records_of(e: &Engine, word: &str) -> Vec<(String, f64)> {
+    e.learner().records().iter().filter(|r| r.word == word).map(|r| (r.context.clone(), r.weight)).collect()
+}
+
+/// Learn.after, the right neighbour is a fixed word: the segment 0..2 ends where the fixed 買 starts, so the key of
+/// 我試 there is `^>ㄇㄞˇ` only if the engine passes the syllable right of the segment (B4 of the verifier's probes).
+#[test]
+fn rule8_after_is_the_first_syllable_of_a_fixed_word_to_the_right() {
+    const R: &str = "ㄨㄛˇ ㄕˋ ㄇㄞˇ";
+    assert_eq!(baseline(R), "我是買", "precondition");
+    let mut e = engine();
+    assert_eq!(repick_commit(&mut e, R, 2, "我試"), "我試買");
+    assert_eq!(records_of(&e, "我試"), [("^>ㄇㄞˇ".to_string(), 1.0)], "precondition: taught under the next syllable");
+    // the free syllables 0..2 now end at a fixed 買: the only way to reach ^>ㄇㄞˇ is `after`
+    type_syls(&mut e, R);
+    pick(&mut e, 3, 3, "買");
+    let o = e.key(k(KeyKind::End)).unwrap();
+    assert_eq!(o.preedit, "我試買", "the word before a fixed 買 uses the key ^>ㄇㄞˇ");
+}
+
+/// Learn.after, the right neighbour is punctuation: the record is under `^>_punct_...` and a fixed punctuation token
+/// right of the segment finds it.
+#[test]
+fn rule8_after_is_the_punctuation_token_to_the_right() {
+    let comma = |e: &mut Engine| {
+        type_syls(e, "ㄨㄛˇ ㄕˋ");
+        e.key(Key::ch(',', MOD_SHIFT)).unwrap();
+    };
+    let mut plain = engine();
+    comma(&mut plain);
+    let shown = plain.key(k(KeyKind::End)).unwrap().preedit;
+    assert_eq!(shown, "我是，", "precondition: the unlearned default");
+    let mut e = engine();
+    comma(&mut e);
+    pick(&mut e, 3, 2, "我試");
+    assert_eq!(e.key(k(KeyKind::Enter)).unwrap().commit, "我試，");
+    let ks: Vec<_> = records_of(&e, "我試").into_iter().map(|r| r.0).collect();
+    assert_eq!(ks.len(), 1);
+    assert!(ks[0].starts_with("^>_punct_"), "the key holds the punctuation token: {ks:?}");
+    comma(&mut e);
+    assert_eq!(e.key(k(KeyKind::End)).unwrap().preedit, "我試，", "a fixed punctuation token right of the segment finds the record");
+}
+
+/// Point 2: the displaced word is halved under the key it was shown under when it was picked (`^>$`, the word was last),
+/// not only under the key at the commit (`^>ㄇㄞˇ`, after the user typed on).
+#[test]
+fn repick_halves_the_displaced_word_under_the_pick_time_key() {
+    let mut e = engine();
+    repick_commit(&mut e, "ㄨㄛˇ ㄕˋ", 2, "我試");
+    assert_eq!(records_of(&e, "我試"), [("^>$".to_string(), 1.0)], "precondition: 我試 taught at the end of a composition");
+    assert_eq!(type_syls(&mut e, "ㄨㄛˇ ㄕˋ").preedit, "我試", "precondition: it is shown");
+    pick(&mut e, 2, 2, "我是");
+    type_syls(&mut e, "ㄇㄞˇ");
+    e.key(k(KeyKind::Enter)).unwrap();
+    let r = records_of(&e, "我試");
+    assert_eq!(r, [("^>$".to_string(), 0.5)], "halved under the key it was shown under");
+    assert_eq!(records_of(&e, "我是"), [("^>ㄇㄞˇ".to_string(), 1.0)], "the new word is taught under the commit-time key");
+}
+
+/// Point 4: every sentence-start key is one key for globalization; two different two-character contexts are two.
+#[test]
+fn sentence_start_keys_count_as_one_key_for_globalization() {
+    let two = syls("ㄗㄞˋ ㄐㄧㄢˋ");
+    let globals = |l: &Learner| l.records().iter().filter(|r| r.context == GLOBAL).count();
+    let mut l = Learner::default();
+    l.teach("^>ㄕˋ", &two, "再見", "在建", DAY);
+    l.teach("^>ㄧ", &two, "再見", "在建", DAY);
+    assert_eq!(globals(&l), 0, "^>ㄕˋ and ^>ㄧ are one sentence-start key");
+    l.teach("可以", &two, "再見", "在建", DAY);
+    assert_eq!(globals(&l), 1, "a sentence-start key and a Han key are two");
+    let mut l = Learner::default();
+    l.teach("可以", &two, "再見", "在建", DAY);
+    l.teach("我們", &two, "再見", "在建", DAY);
+    assert_eq!(globals(&l), 1, "two different two-character contexts globalize as before");
 }
