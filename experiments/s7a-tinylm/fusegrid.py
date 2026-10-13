@@ -63,8 +63,12 @@ def select(sets, col="ll"):
     return best
 
 
-def fixed_broken(rows, alpha, tau, delta, col="ll"):
-    """S7e: rows the fusion turns right (fixed) and wrong (broken) against the n-gram first."""
+def fixed_broken(rows, alpha, tau, delta, col="ll", names=None):
+    """S7e: rows the fusion turns right (fixed) and wrong (broken) against the n-gram first. `rows` is a flat list of rows; with E2's
+    `names`, `rows` is instead a dict name -> rows and only those names are pooled (default None keeps the flat-list form every
+    S7e caller uses, since a flat list has no names to default to)."""
+    if names is not None:
+        rows = [r for name in names for r in rows[name]]
     f = b = 0
     for r in rows:
         j = pick(r, alpha, tau, col, delta)
@@ -73,18 +77,23 @@ def fixed_broken(rows, alpha, tau, delta, col="ll"):
     return f, b
 
 
-def select_weighted(sets, weight, col="ll"):
-    """S7e section 2.2: (alpha, tau, delta, fixed, broken) maximising fixed - weight * broken over the tuning sets pooled; ties: fewer
-    broken, then larger delta, then smaller tau, then smaller alpha. Only TUNING names are read."""
-    rows = [r for name in TUNING for r in sets[name]]
+def select_weighted(sets, weight, col="ll", names=TUNING, cap=None):
+    """S7e section 2.2: (alpha, tau, delta, fixed, broken) maximising fixed - weight * broken over the `names` sets pooled (default
+    TUNING); ties: fewer broken, then larger delta, then smaller tau, then smaller alpha. Only `names` are read.
+    E2: with `cap` set, a cell whose broken / rows exceeds cap is never chosen; if every cell exceeds it, ValueError."""
+    rows = [r for name in names for r in sets[name]]
     best = key = None
     for alpha in ALPHAS:
         for tau in TAUS:
             for delta in DELTAS:
                 f, b = fixed_broken(rows, alpha, tau, delta, col)
+                if cap is not None and b > cap * len(rows) + 1e-9:   # b is an integer: the epsilon keeps cells exactly at the cap (float rounding)
+                    continue
                 k = (f - weight * b, -b, delta, -tau, -alpha)
                 if key is None or k > key:
                     best, key = (alpha, tau, delta, f, b), k
+    if best is None:  # cap excluded every cell
+        raise ValueError(f"select_weighted: no grid cell has broken / rows <= {cap}")
     return best
 
 
