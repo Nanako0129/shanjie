@@ -7,7 +7,8 @@ construction: runs on the RAW sources (never on converted sentences: conversion 
   wikitune articles start at index 300,000: the `articles` prep.py recorded in charcount.json must not exceed that
   (build_tune.py hard-codes the index, so the constant here is a copy; without --charcount the report says NOT CHECKED);
   for the cv-* files and cmn_sentences.tsv.bz2, in build_tune.py's order: is_tune(raw) false lines == lines of colloquial-train.txt. Either
-  failure stops (exit 1): this count, or (with --charcount) more articles than 300,000. Source file hashes go in the report.
+  failure stops (exit 1): this count, or (with --charcount) more articles than 300,000. A --charcount file that cannot be read is an
+  error too. Source file hashes go in the report.
 substr: share of each set's gold sentences that occur as a substring of DIR/runs-*.txt (S7a: record only, never a stop). With --flags
   (S7d) it also writes one 0/1 per row, which fusegrid.py --tune-keep uses to choose the tuning rows alpha/tau are selected on.
 """
