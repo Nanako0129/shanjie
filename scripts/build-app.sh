@@ -144,7 +144,8 @@ EOF
 cat > "$RES/LICENSES/english-words-attribution.txt" <<EOF
 english-words.txt is generated at build time from frequency_dictionary_en_82_765.txt of SymSpell
 (https://github.com/wolfgarbe/SymSpell, commit $EN_COMMIT): the words of 3 to 32 lowercase letters,
-the most frequent ones of each length class, sorted. That list is the intersection of two sources:
+the most frequent ones of each length class, sorted. SymSpell's list is the intersection of two sources (1 and 2), and the list
+itself is SymSpell's (3):
 
 1. Word frequencies: Google Books Ngram Viewer data, Creative Commons Attribution 3.0 Unported (CC BY 3.0),
    https://creativecommons.org/licenses/by/3.0/ . The data was filtered and cut as described above.
