@@ -436,7 +436,7 @@
      - `brew info` 是 0.3.0，bundle 的 cdhash 和 Release 相同。
      - tap 用 `git checkout` 還原後，本機 tap 落後成 0.1.2，brew 把它當成「可升級」。所以 main 再 `git pull --ff-only` 到遠端的 0.3.0，`brew outdated` 不再列出善解。
      - `/usr/bin/pkill -f` 那一行沒有印出來：verbose 與 debug 沒有傳進沙盒裡的子行程，所以用 notice 判讀。
-   - **最終版再跑一次**（2026-10-09，review 之後 pattern 開頭改成 `^[^ ]*`、notice 改了措辭）：用上面的第二次做法跑 `brew reinstall`。那次的 notice 是 8853a3e 的文字；424eda6 只再把 notice 縮短（`brew style` 行長），pattern 與 `match` 不變。
+   - **最終版再跑一次**（2026-10-09，review 之後 pattern 開頭改成 `^[^ ]*`、notice 改了措辭）：用上面的第二次做法跑 `brew reinstall`。那次的 notice 是 1fc8b99 的文字；9db4ae0 只再把 notice 縮短（`brew style` 行長），pattern 與 `match` 不變。
      - receipt 已經是新版 cask，log 裡沒有 `Signalling`，也沒有 `launchctl list`：reinstall 照規則略過 `signal`。
      - 舊行程 PID 9892 撐過解除安裝、移除、搬進新版，notice 前 0.27 秒還在，notice 後 0.01 秒內消失。所以這次結束它的只有 postflight。
      - 跑完後 tap 用 `git checkout` 還原（本機 tap 停在 0.3.0 的 0960ea0），`brew outdated` 沒有列出善解，bundle 的 cdhash 和 Release 相同。

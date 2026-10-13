@@ -98,7 +98,7 @@ final class CandidateCellTests: XCTestCase {
         XCTAssertEqual(cell("你").frame.height, CellMetrics.capsuleHeight)
     }
 
-    // MARK: Old cells (NSTextField, 4b22c30) for the comparisons below
+    // MARK: Old cells (NSTextField, ddf3e8c) for the comparisons below
 
     /// The cell as it was before section 9.1, kept here only to compare against.
     private final class LegacyCell: NSView {

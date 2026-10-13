@@ -66,7 +66,7 @@ python3 $S score --sets dev302 --limit 20 --tau-self
 
 ## Results (full run 2026-10-05)
 
-Candidates from the production CLI at c6abd58 (chat profile), top 8 distinct strings. discordtune rows are aggregates only (per-row files stay in shanjie-private). tau was chosen on discordtune half A: A-fwd 0.161, A-both 0.378; the same values apply to half B and every other set. Apple latency was taken while the Mac was in moderate-to-high everyday use, as the user reported (snapshot at 00:18: about 22 foreground apps, 22 Claude Code sessions, load average 15–18, 51% memory free), so it is not decision-grade. Jev latency is per request of up to 20 questions. Every Apple call returned (0 blocked, 0 unparsable).
+Candidates from the production CLI at ed9b633 (chat profile), top 8 distinct strings. discordtune rows are aggregates only (per-row files stay in shanjie-private). tau was chosen on discordtune half A: A-fwd 0.161, A-both 0.378; the same values apply to half B and every other set. Apple latency was taken while the Mac was in moderate-to-high everyday use, as the user reported (snapshot at 00:18: about 22 foreground apps, 22 Claude Code sessions, load average 15–18, 51% memory free), so it is not decision-grade. Jev latency is per request of up to 20 questions. Every Apple call returned (0 blocked, 0 unparsable).
 
 | Set | Subset | Cond | n | Acc (base → judge) | oracle@8 | A1b@8 | Fixed | Broken | Net | p | First-pick | Flip | Blocked/unparsable | Latency p50/p95/max ms |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
