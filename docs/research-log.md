@@ -4806,3 +4806,26 @@ CLI 重現（Rust，model-v5，`--context`、沒有前文；聊天與書面、�
 ## 2026-10-13：CodeRabbit 不再自動審查
 
 - 維護者決定（選擇題）：`.coderabbit.yaml` 設 `reviews.auto_review.enabled: false`。善解的合併關卡是本地 `/code-review`（`CLAUDE.md`「一片工作的流程」第 4 項），CodeRabbit 不是必要檢查（main 的 ruleset 停用，必要的只有 CI 的 changes、core、shell），但它每個 PR 都自動跑（#136、#138、#139 都有），用掉的是其他以它當關卡的 repo 的額度。要它審時在 PR 留言 `@coderabbitai review`。原本的 `auto_pause_after_reviewed_commits: 0` 只對自動審查有意義，一起拿掉；路徑說明與保留集排除照留，手動叫它審時仍適用。
+
+## 2026-10-13：評測資料放在哪裡、私人訊息訓練、0c App 的測驗（維護者，選擇題）
+
+- **立法院發言（lytune）**：列檔可以放 188 或 Colab 算評測（自己的機器與 VM，不是散布）；仍不進 repo、不出貨、不進訓練（`docs/contracts/e2-chat-eval.md` 的修訂）。
+- **政府新聞稿**：`docs/methodology.md` 寫的「授權待確認」是舊說法。著作權法第 9 條第 1 項第 1 款「憲法、法律、命令或公文」不得為著作權之標的，第 2 項「前項第一款所稱公文，包括公務員於職務上草擬之文告、講稿、新聞稿及其他文書」（全國法規資料庫，2026-10-13 讀）；10-12 的口語語料調查也這樣記。所以新聞稿驗證集同樣可以放 188 或 Colab 算評測。
+- **其他不進 repo 的語料**（維護者同日補充：「NTUML 等語料都可以放 188 或是 colab」）：SIGHAN、NTUML、wikitypo 等也都可以放 188 或 Colab，取代 2026-10-12 記的「只在本機評測」；仍不進 repo、不交給別人（SIGHAN 條款不得轉交）。
+- **原始聊天紀錄**：只搬過濾後的評測列檔；Discord、Threads、Facebook 的原始匯出留在 Mac，重建列檔在 Mac 上做。
+- **出貨模型用私人訊息訓練**：維護者以為出貨模型已經用了；查過，三個出貨檔都沒有（`docs/training.md`「私人口語資料」一列），私人訊息只用在選值（×5 口語權重、S7a 選 M、tinylm-v3 聊天值）。要不要開始用：**之後再決定**。考量是出貨檔人人都能下載，即時預測可能把訓練過的句子原樣顯示給別人，Release 說明也寫了不含私人對話。
+- **0c App 本身的打字測驗**：裝在 tart 的 macOS 虛擬機（`shanjie-exp`／`shanjie-fresh`，App 沙盒與全新安裝測試用的那兩台）裡測，不裝在維護者的系統上。要先寫契約（VM 的準備、怎麼送按鍵、量什麼、和 X0c 的離線結果怎麼對照），過 plan-verifier 才動手。
+- 同一個 PR 也修了 #139 合併前的審查裡留到之後的兩點（當時只在對話裡記下，研究紀錄 #139 那一節沒寫）：`buildcheck.py` 的說明與 `docs/training.md` §5.1 第 2 步漏寫「給了 `--charcount` 而條目數超過 300,000 也會結束碼 1」；`--select R3p` 的 `R3p` 只是名稱（輸出那一列與 rowstats 檔名的前綴），選出的值由 `--tuning`、`--weight`、`--cap` 決定。另外 `buildcheck.py` 給了 `--charcount` 但檔案不存在時，原本會安靜地當成沒給（報告寫 NOT CHECKED）；改成讀不到就出錯（#140 的 /code-review 指出）。
+
+## 2026-10-13：錯字回報第 91–93 列（講這麼多遍、沒按、我是打這）
+
+- **第 91 列**（維護者訊息 `為什麼我講這麼多便你才聽懂`，正解 `遍`）：整句、沒有前文。讀音 `tools/readings.py`，CHECK 1：「這麼」工具給 ㄓㄜˋ ㄇㄛ˙、另一個是 ㄇㄜ˙；維護者說自己打 ㄇㄛ，照它。聊天與書面的 n-gram 都選 `便`，正解第 3 名（聊天 −29.44、`變` −29.76、`遍` −30.59）。
+- **第 92 列**（`我沒案`，正解 `按`）：工具 CHECK 0。兩種設定都選 `案`，正解不在前 3 名。
+- **第 93 列**（`我試打這`，正解 `是`）：維護者那則訊息後面接著打 `ㄇㄛ` 示範「這麼」的讀音（沒按聲調就送出），不是錯字。離線的 n-gram 與 tinylm-v3 兩種設定都選 `是`（`我是打這` −11.75，`我試打這` −13.50，聊天）；畫面上卻是 `試`，原因沒查（可能是前文、本機學習紀錄，或後面未完成的 `ㄇㄛ`）。
+- golden：錯字回報兩行用 Python 參考實作重產（`reference/proto/lm_eval.py --context`）：n 93，top1 聊天 17 → 18、書面 22 → 23（都是第 93 列），oracle@64 91；Rust CLI 由 `make test` 的 golden 測試核對。`eval/README.md` 列數 93。
+
+## 2026-10-13：工作流程分級（維護者：「先停，最佳化整個工作流程」）
+
+- 起因：一個只記錄決定的文件 PR（#140）跑了 /code-review、三次 verifier、四次完整 `make test`（其中兩次中途停掉重跑），加三條錯字也跟著排隊；新開的 worktree 第一次還要從零編譯、缺模型檔。量到的：已編譯的 worktree 上 `make test` 的 Python 部分約 90 秒（最慢三組 35、26、17 秒），只跑 golden 比對的 `cargo test --release -p cli --test golden` 6.8 秒，完整 `make test` 368 秒（`/usr/bin/time`，拆分後的 Makefile，同一個 worktree）。
+- 維護者決定（選擇題，都選推薦）：錯字回報列只跑 golden 測試、直接 commit 到 main；純文件 PR 不跑 `make test`、審一次就合併；程式改動在本機只跑改到的那一塊，其餘交給 CI。〔同日更正：CI 跑 `cargo test`、`swift test`，但 `test-python` 的 16 個檔只跑 7 個，`experiments/` 的測試只在本機；所以改到任何 Python 一律在本機跑 `test-python`（verifier 與 /code-review 都指出）。〕Makefile 拆成 `test-rust`、`test-python`、`test-swift`、`test-golden`（`make test` 仍是三者依序全跑）。規則寫在 `CLAUDE.md`「改動分級」。
+

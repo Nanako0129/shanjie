@@ -1,7 +1,7 @@
 # Local entry point (docs/verification.md), modeled on syrtis's Makefile. Run from the repo root.
 # Build order matters: the Rust staticlib must exist before the Swift package links it.
 
-.PHONY: rust build test bundle installer selftest-bundled clean-bundle
+.PHONY: rust build test test-rust test-golden test-python test-swift bundle installer selftest-bundled clean-bundle
 
 SWIFT_OUT := macos/.build/out
 # The bundle folder (docs/contracts/s3b.md section 13.1). LEGACY_APP_NAME is the name before
@@ -19,10 +19,18 @@ build: rust
 	@$(call rebuild_if_header_stale,Debug)
 	swift build --package-path macos
 
-test: rust
-	@$(call relink_if_stale,Debug)
-	@$(call rebuild_if_header_stale,Debug)
+# Everything, in the order it always ran. CLAUDE.md says which part a change runs before a commit. CI runs cargo test, swift test
+# and only part of test-python: the experiments/ tests run only here, so any Python change runs test-python locally.
+test: test-rust test-python test-swift
+
+test-rust:
 	cargo test --release --locked
+
+# Only the golden comparisons (eval/golden/): enough for a change that only adds rows to eval/dev/.
+test-golden:
+	cargo test --release --locked -p cli --test golden
+
+test-python:
 	python3 -m unittest tools/test_build_acg_pack.py
 	python3 -W ignore -m unittest tools/test_build_lm.py experiments/s2/test_extra_lexicon.py experiments/model-v5/test_compare_counts.py experiments/model-v5/test_count_lexicon.py
 	python3 experiments/s2-classes/test_cluster.py
@@ -34,6 +42,10 @@ test: rust
 	python3 -m unittest tools/test_bench.py
 	cd experiments/s7a-tinylm && python3 -W ignore -m unittest test_fusegrid test_runsets
 	python3 -W ignore -m unittest experiments/x0c/test_x0c.py
+
+test-swift: rust
+	@$(call relink_if_stale,Debug)
+	@$(call rebuild_if_header_stale,Debug)
 	swift test --package-path macos
 
 # The shipping bundle: build/$(APP_NAME) with the shipping bundle ID.

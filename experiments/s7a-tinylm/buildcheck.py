@@ -6,7 +6,9 @@
 construction: runs on the RAW sources (never on converted sentences: conversion changes characters, so the hash changes):
   wikitune articles start at index 300,000: the `articles` prep.py recorded in charcount.json must not exceed that
   (build_tune.py hard-codes the index, so the constant here is a copy; without --charcount the report says NOT CHECKED);
-  for the cv-* files and cmn_sentences.tsv.bz2, in build_tune.py's order: is_tune(raw) false lines == lines of colloquial-train.txt. Only a failure of this check stops (exit 1). Source file hashes go in the report.
+  for the cv-* files and cmn_sentences.tsv.bz2, in build_tune.py's order: is_tune(raw) false lines == lines of colloquial-train.txt. Either
+  failure stops (exit 1): this count, or (with --charcount) more articles than 300,000. A --charcount file that cannot be read is an
+  error too. Source file hashes go in the report.
 substr: share of each set's gold sentences that occur as a substring of DIR/runs-*.txt (S7a: record only, never a stop). With --flags
   (S7d) it also writes one 0/1 per row, which fusegrid.py --tune-keep uses to choose the tuning rows alpha/tau are selected on.
 """
@@ -65,7 +67,7 @@ def count_lines(path):
 def cmd_construction(a):
     files = raw_sources()
     articles = None
-    if a.charcount and os.path.isfile(a.charcount):
+    if a.charcount:   # given = must be readable; a missing file is an error, not NOT CHECKED
         articles = json.load(open(a.charcount, encoding="utf-8"))["report"].get("articles")
     rep = construction_check((r for p in files for r in raw_lines(p)), count_lines(a.coll), articles)
     rep["source_sha256"] = {os.path.basename(p): sha256_file(p) for p in files}
