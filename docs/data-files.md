@@ -38,6 +38,8 @@ shasum -a 256 -c data/bigram.sjlm.sha256 data/classes.sjc.sha256 data/tinylm.sjt
 
 ## 怎麼產生
 
+三個檔案從語料到發佈的完整流程（輸入、步驟順序、在哪裡訓練、重現與缺口）整理在 `docs/training.md`；下表只列工具與規格的位置。
+
 | 檔案 | 工具 | 規格與量測 |
 |---|---|---|
 | `bigram.sjlm` | `tools/build_lm.py`（格式說明在檔頭）；model-v5 的計數加了 `--extra-lexicon`（加法計數，計數詞表由 `experiments/model-v5/count_lexicon.py` 產生）。發佈的檔案另含指紋條目，加的工具不在 repo，所以自己重建的模型雜湊不同 | `docs/contracts/model-v5.md`、`experiments/model-v5/README.md`（之前的配方：`docs/contracts/s2f-variant-forms.md`、`experiments/s2f/README.md`） |
