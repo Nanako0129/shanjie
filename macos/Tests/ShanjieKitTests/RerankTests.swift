@@ -34,7 +34,7 @@ final class RerankTests: XCTestCase {
                            frees: FreeCounter, resources: URL? = nil) -> Shell {
         let shell = Shell(resources: resources ?? self.resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(),
                           learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: demote, predictionStore: MemoryPredictionStore(),
-                          abbreviationStore: MemoryAbbreviationStore(), acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore(),
+                          abbreviationStore: MemoryAbbreviationStore(), englishStore: MemoryEnglishStore(), acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore(),
                           candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: store, rerankRunner: runner,
                           profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore())
         XCTAssertNotNil(shell.engine)
@@ -369,14 +369,14 @@ final class RerankTests: XCTestCase {
         XCTAssertEqual(on.shell.rerankSent, [true], "a stored true is what the build sends")
     }
 
-    /// Section 2.2: 語意校正 follows 即時預測 and 可省略韻母; a stored on makes jobs, off shows the n-gram result at once and
+    /// Section 2.2: 語意校正 follows 即時預測, 可省略韻母 and 中英混打（實驗）; a stored on makes jobs, off shows the n-gram result at once and
     /// makes no job, also after the two rebuilds (layout, word pack); a new shell with the stored off makes none either.
     func testSwitchStoresAndSurvivesRebuildsAndRestart() {
         let store = MemoryRerankStore(true)
         let r = rig(store: store)
         let item = { r.c.session.menu.first { $0.action == .toggleRerank } }
         let titles = r.c.session.menu.map(\.title)
-        XCTAssertEqual(titles.firstIndex(of: "語意校正"), titles.firstIndex(of: "可省略韻母").map { $0 + 1 })
+        XCTAssertEqual(titles.firstIndex(of: "語意校正"), titles.firstIndex(of: "中英混打（實驗）").map { $0 + 1 })
         XCTAssertEqual(item()?.checked, true, "a stored true is on")
         XCTAssertEqual(item()?.enabled, true)
         r.c.type(RerankRow.standardKeys)

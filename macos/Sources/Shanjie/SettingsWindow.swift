@@ -158,6 +158,10 @@ struct SettingsForm: View {
                     Toggle(MenuEntry.Text.abbreviation, isOn: Binding(get: { model.abbreviation }, set: { model.setAbbreviation($0) }))
                         .disabled(!model.prediction)
                 }
+                // Same place as in the menu (after 即時預測 and 可省略韻母 when shown); greyed (setting kept) when the word list did not load
+                // (zhen-mixed section 3.2).
+                Toggle(MenuEntry.Text.english, isOn: Binding(get: { model.english }, set: { model.setEnglish($0) }))
+                    .disabled(!model.englishAvailable)
                 Toggle(MenuEntry.Text.demote, isOn: Binding(get: { model.demote }, set: { model.setDemote($0) }))
                 // Right after the toggle that greys it. Greyed while 避免把敏感字詞排在前面 is off or the small model did not load,
                 // like the menu item: the core makes no rerank job then (s7c2b section 2.3).

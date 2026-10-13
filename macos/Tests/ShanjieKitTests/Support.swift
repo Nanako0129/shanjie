@@ -19,6 +19,8 @@ enum TestData {
         ("bigram.sjlm", "data/lm/bigram.sjlm"),
         ("classes.sjc", "data/lm/classes.sjc"),
         ("tinylm.sjtl", "data/lm/tinylm.sjtl"),
+        // zhen-mixed: the synthetic list stands in for the generated Resources/english-words.txt (docs/contracts/zhen-mixed.md section 5.3).
+        ("english-words.txt", "eval/golden/english-tiny.txt"),
     ]
 
     /// Adds Resources/packs/acg-add.tsv (a symlink to the repo's pack) like the app bundle has it. Opt-in: tests
