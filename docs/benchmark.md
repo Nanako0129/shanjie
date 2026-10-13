@@ -154,7 +154,7 @@
 
 ### 0c-sequence-d512（Funmula／BigGo 靈犀注音，MIT，commit 66eb4a81）（2026-10-13）
 
-候選：v0.4.1 的 CLI（`--context`，不開詞包、不載 KN）n-gram 前 8 名；兩個模型在同一批候選上重排。選值方法和 tinylm-v3 當初相同：聊天在 E2 調參期（私人，5,761 列）以「改對 − 改壞」、改壞率 ≤ 0.5% 選，0c 選到 α 1.5、τ 1、δ 2，tinylm-v3 是 R3′（0.3、2、0.25）；書面在 cvtune＋wikitune 以「改對 − 10 × 改壞」選，0c 選到 0.2、0.5、0.5，tinylm-v3 是 0.7、1、2。0c 不能打分的列（字表外的字）留 n-gram 第一名。p 是兩個模型之間的精確 McNemar。檔案大小 0c 130.7 MB（fp32）、tinylm-v3 約 14.6 MB（int8）。契約 `docs/contracts/x0c-compare.md`，細節與限制在研究紀錄 2026-10-13「X0c」。
+候選：v0.4.1 的 CLI（`--context`，不開詞包、不載 KN）n-gram 前 8 名；兩個模型在同一批候選上重排。選值方法和 tinylm-v3 當初相同：聊天在 E2 調參期（私人，5,761 列）以「改對 − 改壞」、改壞率 ≤ 0.5% 選，0c 選到 α 1.5、τ 1、δ 2，tinylm-v3 是 R3′（0.3、2、0.25）；書面在 cvtune＋wikitune 以「改對 − 10 × 改壞」選，0c 選到 0.2、0.5、0.5，tinylm-v3 是 0.7、1、2。0c 不能打分的列（候選含字表外的字，或讀音少於 2 個音節）留 n-gram 第一名。p 是兩個模型之間的精確 McNemar。檔案大小 0c 130.7 MB（fp32）、tinylm-v3 約 14.6 MB（int8）。契約 `docs/contracts/x0c-compare.md`，細節與限制在研究紀錄 2026-10-13「X0c」。
 
 | 設定／集合 | n | n-gram 第一名 | tinylm-v3 | 0c | 0c 對 tinylm-v3：改對／改壞，p |
 |---|---|---|---|---|---|
