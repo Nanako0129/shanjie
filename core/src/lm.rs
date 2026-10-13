@@ -861,18 +861,24 @@ pub fn decode_segment_learned<'a>(
                     }
                     let sc = h.score + (word_term(lam, lm.prob_c(h.ctx, wid, pb), lp) - delta);
                     let key = (format!("{}{word}", h.surface), word);
-                    match idx.get(&key) {
-                        Some(&q) if !(sc > cand[q].score) => {}
+                    match idx.get(&key).copied() {
+                        Some(q) if !(sc > cand[q].score) => {}
                         found => {
                             let mut words = h.words.clone();
                             words.push((word, lp, delta));
-                            let nh = Hyp { score: sc, surface: key.0.clone(), words, last: wid, ctx: lm.ctx_of(None) };
-                            match found {
-                                Some(&q) => cand[q] = nh,
+                            // The surface is cloned only for a new slot (the index keeps one copy); a replacement moves it.
+                            let surface = match found {
+                                Some(_) => key.0,
                                 None => {
+                                    let s = key.0.clone();
                                     idx.insert(key, cand.len());
-                                    cand.push(nh);
+                                    s
                                 }
+                            };
+                            let nh = Hyp { score: sc, surface, words, last: wid, ctx: lm.ctx_of(None) };
+                            match found {
+                                Some(q) => cand[q] = nh,
+                                None => cand.push(nh),
                             }
                         }
                     }
@@ -907,7 +913,7 @@ pub fn decode_segment_learned<'a>(
     out.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
     // The n-best has distinct surfaces: keep each surface's best path (dec-recombine section 1.4).
     let mut seen: HashSet<String> = HashSet::new();
-    Ok(out.into_iter().filter(|(_, _, s)| seen.insert(s.clone())).map(|(sc, ws, _)| (sc, ws)).collect())
+    Ok(out.into_iter().filter_map(|(sc, ws, s)| seen.insert(s).then_some((sc, ws))).collect())
 }
 
 /// S2h §1: the word that conditions the first word of a composition with no fixed word on its left.
@@ -1297,5 +1303,27 @@ mod tests {
         let words: Vec<&str> = out[0].1.iter().map(|x| x.0).collect();
         assert_eq!(words, ["下", "來", "分析"]);
         assert_eq!(out[0].0, split_all + lm.eos(0.5, "分析"));
+    }
+
+    /// dec-recombine section 1.4: `下來` and `下 | 來` end in different words, so both paths reach the end of
+    /// `ㄒㄧㄚˋ ㄌㄞˊ`; the n-best lists the surface once, with the better of the two closed scores.
+    #[test]
+    fn n_best_lists_a_surface_reached_by_two_last_words_once() {
+        let words = ["<s>", "</s>", "下", "下來", "來", "分析"];
+        let model = lm_bytes(
+            &words,
+            &[0, 0, 4, 5, 6, 8],
+            &[(0, 9, &[(2, 4), (3, 5)]), (2, 6, &[(4, 6)]), (4, 8, &[(5, 8)])],
+        );
+        let lm = Lm::parse(&model).unwrap();
+        let lex = Arc::new(Lexicon::parse("ㄒㄧㄚˋ 下 -1.0\nㄌㄞˊ 來 -1.0\nㄒㄧㄚˋ-ㄌㄞˊ 下來 -1.0\n").unwrap());
+        let capped = CappedLexicon::new(lex, "", &lm, Some(&Demote::parse("").unwrap())).unwrap();
+        let w = |v, x, lp| lm.word(0.5, v, x, lp);
+        let split = w("<s>", "下", -1.0) + w("下", "來", -1.0) + lm.eos(0.5, "來");
+        let joined = w("<s>", "下來", -1.0) + lm.eos(0.5, "下來");
+        let syls: Vec<String> = ["ㄒㄧㄚˋ", "ㄌㄞˊ"].iter().map(|s| s.to_string()).collect();
+        let out = decode_segment_learned(&capped, &syls, &lm, 0.5, "<s>", End::Eos, 64, None, true).unwrap();
+        assert_eq!(out.len(), 1, "two paths, one surface");
+        assert_eq!(out[0].0, split.max(joined));
     }
 }

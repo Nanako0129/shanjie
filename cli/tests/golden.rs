@@ -212,7 +212,7 @@ fn sw_probe_matches_python_golden_byte_for_byte() {
 /// `lm_eval.py --no-classes --profile P --dev 302 --context` prints (regenerated 2026-10-14 for dec-recombine; before it they were the
 /// ones main's s2h-lm-context.txt held before S2k).
 #[test]
-fn no_classes_flag_restores_the_pre_s2k_numbers() {
+fn no_classes_flag_matches_its_pinned_numbers() {
     let lm = lm_path();
     let line = |p: &str| run(&["--lm", &lm, "--no-classes", "--profile", p, "--dev", "302", "--context"]);
     assert_eq!(

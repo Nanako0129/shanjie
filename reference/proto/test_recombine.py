@@ -60,6 +60,11 @@ class Recombine(unittest.TestCase):
         out = L.decode(FakeLex, SYLS, FakeLM(), "chat")
         self.assertEqual([ws for _, ws in out], [("下", "來", "分析")])
 
+    def test_surface_reached_by_two_last_words_is_listed_once(self):
+        # `下來` and `下｜來` end in different words, so both reach the end; the n-best keeps the better one only.
+        out = L.decode(FakeLex, SYLS[:2], FakeLM(), "chat")
+        self.assertEqual([ws for _, ws in out], [("下來",)])
+
 
 if __name__ == "__main__":
     unittest.main()

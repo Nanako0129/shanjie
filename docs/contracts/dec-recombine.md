@@ -1,6 +1,6 @@
 # 解碼器依「字串＋最後一個詞」合併（v0.4.3）
 
-狀態：READY（2026-10-14 收尾審查）；plan-verifier 第一次 REVISE（6 點）、第二次 REVISE（2 點：§3.1 改在 188 跑、第 226 列的 `Selftest.expected` 與相等即停）都照改（FIX）。
+狀態：READY（2026-10-14 收尾審查）；plan-verifier 第一次 REVISE（6 點）、第二次 REVISE（2 點：§3.1 改在 Mac 以外的機器跑、第 226 列的 `Selftest.expected` 與相等即停）都照改（FIX）。
 
 ## 0. 起因
 
@@ -32,7 +32,7 @@
 
 ## 3. 驗收
 
-1. **一致性**：§2 所有預期輸出，Rust 與 Python 逐位元組相同（executor，`make test-rust`）。cvtune、wikitune（不在 repo；`~/.cache/shanjie/s7c2c-public/tune/`，雜湊照 `docs/contracts/s4-bayes.md` 記的 `31de456d…`、`8dcfe40c…`，先核對）兩種設定的 Rust 與 Python 摘要行（含 `top1_sha256`）相同：由 **main** 在 **188** 上跑（Python 與同一個 commit 建的 Rust CLI；188 上的兩個檔先核對雜湊；照 `CLAUDE.md`「Mac 不跑重運算」，不在 Mac 上跑）。
+1. **一致性**：§2 所有預期輸出，Rust 與 Python 逐位元組相同（executor，`make test-rust`）。cvtune、wikitune（不在 repo，雜湊照 `docs/contracts/s4-bayes.md` 記的 `31de456d…`、`8dcfe40c…`，先核對）兩種設定的 Rust 與 Python 摘要行（含 `top1_sha256`）相同：由 **main** 在 Mac 以外的機器上跑（Python 與同一個 commit 建的 Rust CLI；那台機器上的兩個檔先核對雜湊；照 `CLAUDE.md`「Mac 不跑重運算」）。
 2. **同一張表**（`CLAUDE.md`「評測與資料」）：基準＝main（v0.4.1 等價），新＝這一片。dev302、打字測驗、錯字回報（當時的全部列），聊天與書面各一行，`--net`；**只用 n-gram** 一組、**開語意校正**（`--tinylm data/lm/tinylm.sjtl`，檔頭的 R3′ 與書面值，不重選）一組。
 3. **守門**（公開）：cvtune、wikitune、lytune、wikitypo 兩種設定、只用 n-gram 與開語意校正各一組，沒有任何一格「改對 < 改壞 且精確 McNemar p < 0.05」；cvtune＋wikitune 每種設定的淨值合計 ≥ 0。
 4. **私人調參集**（main 跑，只貼數字）：discordtune 兩種設定、只用 n-gram 與開語意校正各一行。E2 判斷期 2026-08 已用掉，這一片不用。
@@ -69,4 +69,4 @@ beam 大小；trigram；學習規則（句首單字學習是下一片）；重�
 
 ## 7. executor 不可以做的事
 
-安裝軟體；啟動 App、呼叫 TIS、lsregister；碰 `~/Library`、鑰匙圈；讀 `~/side-project/shanjie-private`、`eval/holdout/`；push、開 PR、留言；改 beam 或其他常數；改這份契約。
+安裝軟體；啟動 App、呼叫 TIS、lsregister；碰 `~/Library`、鑰匙圈；讀維護者的私人資料、`eval/holdout/`；push、開 PR、留言；改 beam 或其他常數；改這份契約。

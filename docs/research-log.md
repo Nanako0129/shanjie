@@ -4899,7 +4899,7 @@ CLI 重現（Rust，model-v5，`--context`、沒有前文；聊天與書面、�
 
 ## 2026-10-14：解碼器依「字串＋最後一個詞」合併的評測（契約 §3.1–§3.4）
 
-- **在哪裡跑**：188（照「Mac 不跑重運算」）。Rust 的 `core` 在 Windows 編不過（`learn_store.rs` 用 Unix 的檔案權限與 `fcntl`，`learn.rs` 用 `localtime_r`），評測時在 188 的兩份副本（基準 `8b23268`、新版 `663354b`）把 `learn_store.rs` 換成只回錯誤的空殼、補一個 `localtime_r` 符號；評測 CLI 不開學習檔，空殼不進 repo。空殼不影響選字的證據：基準在 188 的數字和 X0c 對照表（v0.4.1）完全相同（例如 dev302 聊天 241／開語意校正 259、cvtune 聊天 3364／3443），新版 dev302 聊天的 `top1_sha256` 和 Mac 上的 Rust 相同（`b20071da…`）。輸入檔在 188 核對過雜湊（cvtune `31de456d…`、wikitune `8dcfe40c…`、lytune `0e0fdbed…`、wikitypo `50f4ceb8…`、三個模型檔與 v0.4.1 出貨的相同）。
+- **在哪裡跑**：另一台 Windows 機器（照「Mac 不跑重運算」）。Rust 的 `core` 在 Windows 編不過（`learn_store.rs` 用 Unix 的檔案權限與 `fcntl`，`learn.rs` 用 `localtime_r`），評測時在那台機器的兩份副本（基準 `0ca19a9`、新版 `76f74a3`）把 `learn_store.rs` 換成只回錯誤的空殼、補一個 `localtime_r` 符號；評測 CLI 不開學習檔，空殼不進 repo。空殼不影響選字的證據：基準在那台機器上的數字和 X0c 對照表（v0.4.1）完全相同（例如 dev302 聊天 241／開語意校正 259、cvtune 聊天 3364／3443），新版 dev302 聊天的 `top1_sha256` 和 Mac 上的 Rust 相同（`b20071da…`）。輸入檔在那台機器上核對過雜湊（cvtune `31de456d…`、wikitune `8dcfe40c…`、lytune `0e0fdbed…`、wikitypo `50f4ceb8…`、三個模型檔與 v0.4.1 出貨的相同）。
 - **§3.1 一致性**：新版的 Python 參考實作與 Rust，在 dev302、cvtune、wikitune 兩種設定的摘要行（含 `top1_sha256`）與 rowstats 逐位元組相同。
 - **§3.2–§3.4 同一張表**（基準＝main，新＝這一片；`ng` 只用 n-gram、`tl` 開語意校正 `data/lm/tinylm.sjtl`；錯字回報是當時的 102 列；discordtune 是私人調參集，只有數字）：
 
@@ -4940,7 +4940,7 @@ CLI 重現（Rust，model-v5，`--context`、沒有前文；聊天與書面、�
 
 - **門檻**：沒有任何一格「改對 < 改壞 且 p < 0.05」；每一格淨值 ≥ 0（開語意校正那組也是）；cvtune＋wikitune 每種設定的淨值合計：聊天 n-gram +12、書面 n-gram +10、聊天 tl +10、書面 tl +6。lytune 四格都顯著變好（p 0.0005–0.017），discordtune 四格都顯著變好（p ≤ 0.0041）。
 - §3.6 預測 hit@9：executor 量 user-typing 566 → 565（契約允許少 1 列）、user-reported 不變。
-- **§3.5 速度與記憶體**（main，Mac，release，基準 main `c1323ea`、新版合併後 `1a640ae`；測試程式都已編好之後各跑兩次，量測時的一分鐘負載 7–17，不算安靜，數字只用來看有沒有接近門檻）：每鍵 p95，聊天正式路徑（`replay_standard_chat_production_path`）基準 4.2／3.2 ms、新版 2.4／4.3 ms；有學習（`perf_full_store_per_key_and_enter_with_write`）基準 2.7／2.8 ms、新版 3.1／7.3 ms；typing76（`timing_typing76_keys`，`--ignored`）基準 3.5／3.0 ms、新版 2.4／3.0 ms；書面（`replay_standard_formal`）新版 2.7／2.4 ms（基準的這個測試不印 p95）。全部遠低於 16 ms，前後的差在同一台機器兩次之間的起伏內。記憶體：`shanjie-eval --profile chat --dev 302 --context` 的最大常駐記憶體（`/usr/bin/time -l`）基準 276,955,136、新版 276,938,752 bytes，相同。
+- **§3.5 速度與記憶體**（main，Mac，release，基準 main `c1323ea`、新版合併後 `1a640ae`；測試程式都已編好之後各跑兩次，量測時的一分鐘負載 7–17，不算安靜，數字只用來看有沒有接近門檻）：每鍵 p95，聊天正式路徑（`replay_standard_chat_production_path`）基準 4.2／3.2 ms、新版 2.4／4.3 ms；有學習（`perf_full_store_per_key_and_enter_with_write`）基準 2.7／2.8 ms、新版 3.1／7.3 ms；typing76（`timing_typing76_keys`，`--ignored`）基準 3.5／3.0 ms、新版 2.4／3.0 ms；書面（`replay_standard_formal`）新版 2.7／2.4 ms（基準的這個測試不印 p95）。全部遠低於 16 ms。前後的差是否只是負載造成的起伏沒有確定（推論：有學習那項新版 3.1／7.3 ms 的差距比基準兩次之間大，但量測時負載在 7–17，要在安靜的機器上重量才能判斷）。記憶體：`shanjie-eval --profile chat --dev 302 --context` 的最大常駐記憶體（`/usr/bin/time -l`）基準 276,955,136、新版 276,938,752 bytes，相同。
 - **§3.8 保留集**（收尾的 fresh verifier 跑一次、只回數字；基準 main `c1323ea`、新版 `1a640ae`，兩邊的模型檔與 `eval/holdout` 相同；`ng` 只用 n-gram、`tl` 開語意校正、`bench` 是跨版本基準測試的出貨設定 `--tinylm … --packs acg`，都加 `--context`）：
 
 | 集合 | n | top1 基準 | top1 新 | 改對 | 改壞 | p | CER 基準 | CER 新 | Δtop1 95%（列） | ΔCER 95%（百分點） | 淨值 | 改壞率 | 改壞數 95% 上界 |
@@ -4952,7 +4952,9 @@ CLI 重現（Rust，model-v5，`--context`、沒有前文；聊天與書面、�
 | holdout-formal-tl | 227 | 187 | 189 | 2 | 0 | 0.5000 | 2.27% | 2.09% | [0, 5] | [-0.46, 0.00] | 2 | 0.00% | 3.0 |
 | holdout-formal-bench | 227 | 187 | 189 | 2 | 0 | 0.5000 | 2.27% | 2.09% | [0, 5] | [-0.46, 0.00] | 2 | 0.00% | 3.0 |
 
-- 停止條件（任一設定淨值 < 0）沒有觸發。verifier 另外確認：兩邊的合併鍵都改成（字串、最後一個詞），沒有常數改變；單元測試在合併鍵退回只看字串時失敗（Rust 與 Python 各一次突變）；dev302 兩種設定 Rust 與 Python 的摘要行相同。它也指出單元測試沒有涵蓋輸出去重（拿掉去重兩個測試仍過，因為合成例子裡兩條路徑的最後一個詞相同，合併鍵已經先合併了）；去重的正確性目前靠 Rust 與 Python 逐位元組相同間接保證，補測試留給之後。
+- 停止條件（任一設定淨值 < 0）沒有觸發。verifier 另外確認：兩邊的合併鍵都改成（字串、最後一個詞），沒有常數改變；單元測試在合併鍵退回只看字串時失敗（Rust 與 Python 各一次突變）；dev302 兩種設定 Rust 與 Python 的摘要行相同。它也指出單元測試沒有涵蓋輸出去重（拿掉去重兩個測試仍過：合成例子裡兩條路徑的最後一個詞相同，合併鍵已經先合併了；Rust 與 Python 的逐位元組比對只看第一名，也蓋不到）。/code-review 之後補了 Rust 與 Python 各一個測試：只打 `ㄒㄧㄚˋ ㄌㄞˊ`，`下來` 與 `下｜來` 的最後一個詞不同、都走到句尾，n-best 只列一次；拿掉去重時兩個測試都失敗（Rust 結束碼 101、Python 1 個 FAIL）。
+- **n-best 變短**（/code-review 指出、main 量過）：beam 數的是路徑（契約 §1.3），同一個字串可以佔好幾格，去重之後 n-best 的相異句子少於 64。dev302 聊天 `--context`：基準每列都是 64 句；新版 257／302 列少於 64，最少 37、中位數 59。typing76 聊天 `--context` 的 oracle@64 從 76 降到 75（有一列的正解掉出名單；摘要行的標籤仍寫 `oracle@64`，指的是名單上限）；dev302 的 oracle@64 兩版都是 300。第一名與語意校正用的前 8 名不受影響（每列至少 37 句）。
+- **自測句的差距很小**：第 284 列（`Selftest.expected`）在聊天設定、沒有前文時，`綠水壺` −26.1585 只贏 `律水壺` −26.1875（差 0.029，log10）；書面 `濾水壺` 贏 `氯水壺` 0.125。模型、詞庫或降權表小改就可能讓聊天的第一名換掉，自測與約 10 個測試會一起失敗；那時照停止條件再換列（或改讀 `eval/golden` 的檔，另案）。
 
 ## 2026-10-14：中英混打的需求量測（第 0 步）
 

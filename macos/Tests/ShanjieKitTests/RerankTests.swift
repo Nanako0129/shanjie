@@ -101,7 +101,7 @@ final class RerankTests: XCTestCase {
         XCTAssertEqual(r.c.client.text, RerankRow.reranked, "Enter sends what is shown")
     }
 
-    /// A finished job that changes nothing (code 5): no extra client call. Row 226 keeps its n-gram first in the chat profile.
+    /// A finished job that changes nothing (code 5): no extra client call. Row 284 keeps its n-gram first in the chat profile.
     func testNoChangeMakesNoCall() {
         let r = rig()
         r.c.type(Row284.standardKeys)
