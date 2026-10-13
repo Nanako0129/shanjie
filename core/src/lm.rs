@@ -2,7 +2,7 @@
 //! The Python code is ground truth; float operation order is kept on purpose (no fusing or reordering).
 //! R2: errors carry no content; nothing here formats input text.
 
-use crate::learn::{context_key, Learner, Level};
+use crate::learn::{context_key, record_key, Learner, Level};
 use crate::{Error, Lexicon, PER_KEY};
 use std::collections::{HashMap, HashSet};
 use std::fmt;
@@ -712,8 +712,8 @@ struct Hyp<'a> {
     ctx: Ctx,
 }
 
-/// Learned boost (S4 §1.4, §12): which records may boost is decided by `Learner::lookup` (single
-/// characters only at the exact full key and never under "^"). A learned word scores
+/// Learned boost (S4 §1.4, §12, §14): which records may boost is decided by `Learner::lookup` (single
+/// characters only at the exact full two-character key). A learned word scores
 /// `best of its reading + eps * w / (w + 1)`, eps being `LEARN_EPS` (6.0) at the exact and last-character
 /// levels and `LEARN_EPS_GLOBAL` (0, `Learn::eps_global`) at the global level, for weight `w`
 /// (so a heavier record outranks a lighter one: a re-pick halves the displaced word), never
@@ -735,6 +735,10 @@ pub const LEARN_EPS_GLOBAL: f64 = 0.0;
 pub struct Learn<'a> {
     pub learner: &'a Learner,
     pub before: &'a str,
+    /// The first syllable right of the segment (`None`: the segment ends the composition). A word that
+    /// ends the segment is followed by it; under the sentence-start key the reading of the next syllable
+    /// is part of the key (rule 8).
+    pub after: Option<&'a str>,
     pub today: i64,
     /// ε of the global level: `LEARN_EPS_GLOBAL` in production; the integration tests sweep it through
     /// `Engine::set_eps_global` (a feature or cfg(test) cannot reach integration tests, and it is one
@@ -814,10 +818,12 @@ pub fn decode_segment_learned<'a>(
             let mut hits: Vec<(Level, Vec<(&str, f64)>)> = Vec::new();
             if let Some(ln) = learned {
                 let mut by_ctx: HashMap<String, usize> = HashMap::new();
+                // Rule 8: at sentence start the key also holds the syllable after the word.
+                let next = syls.get(i).map(String::as_str).or(ln.after);
                 hits_of = hyps[i - l]
                     .iter()
                     .map(|h| {
-                        let key = context_key(&format!("{before_tail}{}", h.surface));
+                        let key = record_key(context_key(&format!("{before_tail}{}", h.surface)), next);
                         *by_ctx.entry(key).or_insert_with_key(|k| {
                             hits.push(ln.learner.lookup(k, span, ln.today));
                             hits.len() - 1

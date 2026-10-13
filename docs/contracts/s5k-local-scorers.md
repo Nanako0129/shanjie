@@ -25,7 +25,7 @@
   - discordtune：`~/side-project/shanjie-private/s5-judges/discordtune/`；
   - cvtune：`~/.cache/shanjie/work/s5-judges/cvtune/`；
   - dev302、typing76：`experiments/s5-judges/results/`。
-- 所以每一列都能和 S5j 的 A-fwd、J-sent 配對。候選來自 c6abd58 的評測 CLI（chat）。
+- 所以每一列都能和 S5j 的 A-fwd、J-sent 配對。候選來自 ed9b633 的評測 CLI（chat）。
 - **S5j 的 prep 檔只能唯讀使用，而且要先核對雜湊。** main 在 2026-10-05 記下的 SHA-256（discordtune 只記雜湊，不記內容）：
 
   | 檔案 | 列數 | SHA-256 |

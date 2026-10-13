@@ -33,7 +33,7 @@
  "versions": [
   {
    "ref": "v0.1.0",
-   "sha": "a08090d1f90883ac9b8050f347f0a6d93019dfec",
+   "sha": "b0d2871e16842ec643bbc7b699d8c01bc2827184",
    "lexicon_sha256": "b0a8f0b0a678bea0852649ef3e00b286c9887565e58cfc2fdb9f13fa8d279ace",
    "accuracy": {
     "dev302/chat": {
@@ -105,7 +105,7 @@
   },
   {
    "ref": "v0.1.1",
-   "sha": "d48732947dea434439b7e99bbab4e636cad0f853",
+   "sha": "1cc9b85ccd9e31ceea8350b12f39c3f49318db46",
    "lexicon_sha256": "b0a8f0b0a678bea0852649ef3e00b286c9887565e58cfc2fdb9f13fa8d279ace",
    "accuracy": {
     "dev302/chat": {
@@ -220,7 +220,7 @@
   },
   {
    "ref": "v0.1.2",
-   "sha": "ef20c40c2c4d8dde7bf2eb8ad687358442ef145a",
+   "sha": "eae57e298806d67f958c1fb0172dd8456131655f",
    "lexicon_sha256": "9794790048a1330f41b23787800fe37efd5f72024a4ea11a4564fd8606863515",
    "accuracy": {
     "dev302/chat": {

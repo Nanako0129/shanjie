@@ -74,11 +74,11 @@ S7c 分兩片。這一片（S7c-1）只做**核心的前向、模型檔、`pick`
 
 ## 7. 結果（2026-10-11）
 
-- 實作 a628142（executor，main 審 diff）：`make test` 全綠，沒有改任何 golden；小模型 golden 的 |ΔLL| 最大 9.2e-6；8 個突變都由斷言抓到。殼加的那一行 Accelerate 是必要的：拿掉時 `swift build` 缺 `_cblas_sgemm`（executor 量）。
-- 第 4 項（main）：前 8 名 10 格和 Python 相同（分數最大差 7.11e-15）；LL f32 2.05e-5、int8 1.59e-5；pick 20 格逐位元組相同（a628142）。
+- 實作 2ca5bb4（executor，main 審 diff）：`make test` 全綠，沒有改任何 golden；小模型 golden 的 |ΔLL| 最大 9.2e-6；8 個突變都由斷言抓到。殼加的那一行 Accelerate 是必要的：拿掉時 `swift build` 缺 `_cblas_sgemm`（executor 量）。
+- 第 4 項（main）：前 8 名 10 格和 Python 相同（分數最大差 7.11e-15）；LL f32 2.05e-5、int8 1.59e-5；pick 20 格逐位元組相同（2ca5bb4）。
 - 第 5 項（main）：§4 在 Rust int8 路徑全部通過（discordtune 聊天 +66／4,958，p = 0.0010，區間 [28, 104]，ΔCER −0.23）；動漫 8 格沒有顯著退步。表格在研究紀錄同日「S7c-1」一節。
 - 第 6 項：int8 每列重排 p50 7.8–12.7 ms、p95 11.4–25.4 ms（兩次、連續跑、Mac 都有其他負載，數字主要反映負載）；讀檔加解析 int8 10–21 ms、f32 35 ms〔更正：第一次記的 56–59 ms 大多是雜湊，見研究紀錄〕；常駐記憶體增量約 55–70 MiB。
-- /code-review 修正（85dd4d3）後第 4、5 項整套重跑：LL f32 1.58e-5、int8 1.43e-5；前 8 名與 pick 照樣全部相同；表格逐字相同。
+- /code-review 修正（792d6a9）後第 4、5 項整套重跑：LL f32 1.58e-5、int8 1.43e-5；前 8 名與 pick 照樣全部相同；表格逐字相同。
 - 第 7 項（保留集，fresh verifier，一次，聊天，int8）：top1 180 → 200／227，p = 0.0003，CER 2.73% → 1.64%；verifier 判定 CONFIRMED（第 1–4 項可從檔案重現）。
 
 ## 8. 審查紀錄

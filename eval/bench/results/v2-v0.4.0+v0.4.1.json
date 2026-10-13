@@ -49,7 +49,7 @@
   {
    "ref": "v0.4.0",
    "version": "v0.4.0",
-   "sha": "01a3455a06a7c76902c5ead774a796d75e5fa7e4",
+   "sha": "729a858bd95729a1c9c6b9d412cc4f9c1e71bf38",
    "lexicon_sha256": "c73ff3dd328fe377327ae722089af1ef5e373bc27d6418228b17cb68cd4cf7c4",
    "models": {
     "bigram.sjlm": "f81a021e5dea08dc48dbca1db0d0f63517bb6f0f3e1b20fdac631542d13f45af",
@@ -225,7 +225,7 @@
     "rss_mb": 285.1875
    },
    "holdout": {
-    "commit": "01a3455a06a7c76902c5ead774a796d75e5fa7e4",
+    "commit": "729a858bd95729a1c9c6b9d412cc4f9c1e71bf38",
     "chat": {
      "n": 227,
      "top1": 180
@@ -237,9 +237,9 @@
    }
   },
   {
-   "ref": "3503fd8625c1187669c10afadf5847b2dcd3ee83",
+   "ref": "76beb2454d68da371dfc7e1b3adaf32064d24149",
    "version": "v0.4.1",
-   "sha": "3503fd8625c1187669c10afadf5847b2dcd3ee83",
+   "sha": "76beb2454d68da371dfc7e1b3adaf32064d24149",
    "lexicon_sha256": "c73ff3dd328fe377327ae722089af1ef5e373bc27d6418228b17cb68cd4cf7c4",
    "models": {
     "bigram.sjlm": "f81a021e5dea08dc48dbca1db0d0f63517bb6f0f3e1b20fdac631542d13f45af",
@@ -523,7 +523,7 @@
     "rerank_p95_ms": 10.989
    },
    "holdout": {
-    "commit": "50268d30acfe58c0fc88a4991e1548e8fc1e624f",
+    "commit": "a1c3174e2a8782e42e4c0b40c532c32d7a3917d9",
     "chat": {
      "n": 227,
      "top1": 191,
