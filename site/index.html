@@ -235,7 +235,9 @@
     <li><span class="tag done">已發佈</span><span>v0.4.1：語意校正預設開（tinylm-v3）。</span></li>
     <li><span class="tag done">已發佈</span><span>v0.4.1：聊天／書面可以自己選。</span></li>
     <li><span class="tag done">已發佈</span><span>v0.4.1：動漫詞包約 3 萬 → 約 4.5 萬詞。</span></li>
-    <li><span class="tag">決定</span><span>下一片先做解碼器的合併方式（v0.4.2）。</span></li>
+    <li><span class="tag wip">進行中</span><span>v0.4.2 先修選字記憶：句首學過「我試」後，「我是」會被蓋掉。</span></li>
+    <li><span class="tag wip">進行中</span><span>解碼器的合併方式實作中，改排 v0.4.3。</span></li>
+    <li><span class="tag done">完成</span><span>研究：和外部模型 0c 的重排對照；決定不直接接，之後讓自己的模型吃讀音（效果還沒量）。</span></li>
     <li><span class="tag done">已發佈</span><span>tinylm-v2、tinylm-v3 發佈在 GitHub Releases。</span></li>
   </ul>
   <p class="note"><a href="updates.html">完整更新紀錄 →</a></p>
@@ -325,10 +327,11 @@
       <summary><span class="ver">之後</span><span class="st-title">已排定，在 v0.4 之後</span><span class="tag wip">進行中</span>
         <span class="meta">順序依實測與回報調整</span></summary>
       <ul class="items">
-        <li><span class="mark"></span><span class="sr-only">規劃中：</span><h3>解碼器的合併方式（v0.4.2，下一片）</h3><p>每個位置同一個字串只留一條路徑，會丟掉接下去更好的拆法；改掉這點。</p></li>
+        <li class="wip"><span class="mark"></span><span class="sr-only">進行中：</span><h3>選字記憶的前文（v0.4.2，下一版）</h3><p>回報的「我試買新的」「我再牛與…」：在句首改選過一次「我試」「我再」，之後句首的「我是」「我在」都被蓋掉（實機重現）。改成句首學到的詞要後面接的音也一樣才加分，單一個字要有兩個字的前文才學；舊的這類記錄更新後自動丟掉。契約過審。</p></li>
+        <li class="wip"><span class="mark"></span><span class="sr-only">進行中：</span><h3>解碼器的合併方式（v0.4.3）</h3><p>每個位置同一個字串只留一條路徑，會丟掉接下去更好的拆法（「夏來分析」）；改成依「字串＋最後一個詞」保留。契約過審，實作中。</p></li>
         <li><span class="mark"></span><span class="sr-only">規劃中：</span><h3>句首單字的選字記憶</h3><p>句首打「照建議」會出「趙建議」，改選也記不住。</p></li>
-        <li><span class="mark"></span><span class="sr-only">規劃中：</span><h3>語意校正強度設定</h3><p>保守、標準、積極三段，預設維持改壞率 ≤ 0.5%。</p></li>
-        <li><span class="mark"></span><span class="sr-only">規劃中：</span><h3>領域詞包</h3><p>資訊與 AI 先，預設開；醫藥、法律接著，預設關。跟下一版語言模型一起。</p></li>
+        <li><span class="mark"></span><span class="sr-only">規劃中：</span><h3>語意校正強度設定</h3><p>保守、標準、積極三段，預設維持改壞率 ≤ 0.5%；用公開集合、私人調參集與保留集評估。契約過審。</p></li>
+        <li><span class="mark"></span><span class="sr-only">規劃中：</span><h3>領域詞包</h3><p>資訊與 AI 先，預設開；醫藥、法律接著，預設關。跟下一版語言模型一起。來源調查完：國教院樂詞網的資訊名詞（約 13 萬列，政府資料開放授權）等。同時修正建語料時把台灣用詞也轉掉的問題（「插件」被換成「外掛」）。</p></li>
         <li><span class="mark"></span><span class="sr-only">規劃中：</span><h3>常見專有名詞</h3><p>公司、學校、飲料店、餐廳、產品這類常見的專有名詞（例如「酷澎」）納入一般詞庫；契約過審，PR #110（草稿）還沒合併，詞還沒收進詞庫，版本未定。</p></li>
         <li><span class="mark"></span><span class="sr-only">規劃中：</span><h3>從改選記住新詞組</h3><p>改選後送出的片段如果不是詞庫裡的詞（例如「版控」），記成你的詞，下次直接打得出來。</p></li>
         <li class="wip"><span class="mark"></span><span class="sr-only">進行中：</span><h3>預測可省略韻母</h3><p>每個字只打第一個注音也能找到詞。一次縮寫一個詞的版本做完了，但還不能整句縮寫，v0.4.0 先不放；做到整句縮寫再出。另外有使用者回報打了某些注音之後按鍵好像卡住；從設計推論，是有兩個以上縮寫單位時空白鍵與聲調鍵會被吃掉，沒有重現。</p></li>
@@ -341,7 +344,10 @@
         <li><span class="mark"></span><span class="sr-only">規劃中：</span><h3>更多新詞</h3><p>從語料自動找出詞庫沒收的新詞（例如口語縮寫）；也能手動加詞。</p></li>
         <li><span class="mark"></span><span class="sr-only">規劃中：</span><h3>改選後其他字不動（重新評估）</h3><p>新詞做完後，照蘋果注音的實測（含改選後繼續打字）重新評估要不要做、怎麼做。</p></li>
         <li><span class="mark"></span><span class="sr-only">規劃中：</span><h3>破音字的搭配</h3><p>同一個字的不同讀音分開計算搭配，例如「空」唸 ㄎㄨㄥˋ 時，不再借用「空間」的搭配而搶走「控」。</p></li>
-        <li class="research"><span class="mark"></span><span class="sr-only">規劃中：</span><h3><span class="kind">研究</span>中英混打</h3><p>按鍵組不成注音時自動判斷是英文，或依鍵盤上相鄰的鍵校正打錯的注音。</p></li>
+        <li><span class="mark"></span><span class="sr-only">規劃中：</span><h3>中英混打（實驗功能，預設關）</h3><p>不用按 Caps Lock：打完一個英文單字按空白鍵，候選窗列出英文，選了就送出。先查過其他輸入法的做法；量過維護者自己的訊息，約兩成夾著英文單字。契約修改中。</p></li>
+        <li class="research done"><span class="mark"></span><span class="sr-only">完成：</span><h3><span class="kind">研究</span>外部模型 0c 的重排對照</h3><p>用同一批候選比靈犀注音 0c 公開的模型與善解的小模型。結果依設定與集合而不同：聊天設定在口語聊天與錯字上比較好、在百科與立法院發言比較差；書面設定在立法院發言與口語聊天比較好。<b>決定：</b>不直接接進善解，改走讓自己的模型吃讀音與聲調（是否有效還沒量）。數字在 <a href="https://github.com/Nanako0129/shanjie/blob/main/docs/benchmark.md">benchmark 文件</a>。</p></li>
+        <li class="research"><span class="mark"></span><span class="sr-only">規劃中：</span><h3><span class="kind">研究</span>0c App 本身的打字測驗</h3><p>在虛擬機裡裝 0c 的 App，只當黑箱打字，連它自己的詞庫與解碼器一起比。</p></li>
+        <li class="research"><span class="mark"></span><span class="sr-only">規劃中：</span><h3><span class="kind">研究</span>讀音感知的語言模型</h3><p>兩條線並行：語言模型改用依讀音分開的計數（上面的「破音字的搭配」），再用 log-linear 權重合併各種分數；小模型下一版吃讀音與聲調，再用我們自己的候選做排序訓練。</p></li>
         <li class="research"><span class="mark"></span><span class="sr-only">規劃中：</span><h3><span class="kind">研究</span>評測集擴充</h3><p>保留集定期擴充與輪替，並加入較長的口語句子。</p></li>
       </ul>
     </details>
@@ -403,7 +409,7 @@
 
 <footer>
   <span>善解 shanjie</span>
-  <span>最後更新：2026-10-13</span>
+  <span>最後更新：2026-10-14</span>
 </footer>
 
 </main>
