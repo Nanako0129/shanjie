@@ -19,6 +19,23 @@ public enum PanelPlacement {
         }
     }
 
+    /// docs/contracts/line-jump-guard.md: how many line heights a line may move up or down within one composition before
+    /// it is taken as a wrong report. Measured 2026-10-13 (diagnostic rect trace): within a composition Orca's line moved
+    /// 0–1 pt and Discord's 0, while Orca's wrong reports jumped 189–840 pt; line heights were 21–23 pt, so 2 lines
+    /// (42–46 pt) keeps a move to the next line and stops every measured jump.
+    public static let jumpLines: CGFloat = 2
+    /// The line height used when the client reports none: the side of the rectangle `lineRect` starts from.
+    public static let minLineHeight: CGFloat = 16
+
+    /// docs/contracts/line-jump-guard.md section 2.1: the line to use, given the client's `new` one and the last one used in
+    /// this composition (`anchor`). A line more than `jumpLines` line heights above or below the anchor is not used (the
+    /// anchor is); `nil` stays `nil` (section 2.3's remembered line takes over), and the first line of a composition is used
+    /// as given. Only y is checked: wrapping to the next line moves x far left.
+    public static func steadyLine(_ new: NSRect?, anchor: NSRect?) -> NSRect? {
+        guard let new, let anchor else { return new }
+        return abs(new.minY - anchor.minY) > jumpLines * max(anchor.height, minLineHeight) ? anchor : new
+    }
+
     /// The index of the screen a panel for `line` goes to: the one whose frame holds the line's origin, else the main one.
     public static func screenIndex(for line: NSRect?, in screens: [Screen], main: Int) -> Int {
         line.flatMap { r in screens.firstIndex { $0.frame.contains(r.origin) } } ?? main
