@@ -4582,3 +4582,16 @@ CLI 重現（Rust，model-v5，`--context`、沒有前文；聊天與書面、�
 - **PLAN 的兩處文字**（/code-review 與 verifier 的 P4）：S-bench 一項補上狀態；「學習依詞類與領域推廣」的列號改成第 78、79、82 列，並指明研究紀錄的哪一節。
 - **/code-review（PR #135，9 點，沒有程式錯誤）**：修 8 點：保留集提早量是偏離契約（上面與契約 §2.3 都寫明）；結果 JSON 的 `holdout` 加 `commit`，表上保留集那一列顯示實際量的 commit；`tools/bench.py run --suite v2` 遇到已有 `holdout` 的結果檔就停（原本會整檔覆寫、把量一次的數字靜默刪掉；測試 `test_rerun_never_overwrites_holdout_numbers`）；綁定 diff 對這個 PR 也記下；PLAN 第二處 S-bench 狀態補上保留集；「在／再、作／做」一項指到 10-13 的兩節；「作說明」合乎書面規範的註記；PR 說明裡的中文改用反引號。延後：golden 釘在固定列數（每加一列錯字回報就要重產兩行 golden；之前已列為延後，這次又付了一次）。
 
+## 2026-10-13：v0.4.1 發佈
+
+- **tag**：維護者同意（選擇題）後在 `5c4415a`（#135 的合併）推 `v0.4.1`。合併 commit 的 tree（`401f232…`）等於 #135 最後一個 commit 的 tree，`git diff 3503fd8 5c4415a -- Cargo.toml Cargo.lock core cli data eval/variants.tsv macos scripts` 是空的（套件 v2 被量的 commit 與保留集量的 `50268d3` 都在這條綁定之內）。
+- **發版流程**：`release.yml` run 38364605417 的 gate、build、sign、publish 四步都成功。
+- **發佈後核對**（main 下載 Release 資產在暫存資料夾檢查，用完刪掉）：Release「善解 0.4.1」是 Latest，本文等於 `docs/releases/v0.4.1.md`（只多一個結尾空行）；`shanjie-0.4.1.zip` 與 `shanjie-installer-0.4.1.zip` 用附上的 `.sha256` 核對都 OK；App 的 `codesign --verify --deep --strict` 通過、Developer ID（team 2LJ882GPY8）、`spctl` 是 Notarized Developer ID、`stapler validate` 通過；版本 0.4.1；包進去的模型 `tinylm.sjtl` `7e73ef67…`、`bigram.sjlm` `f81a021e…`、`classes.sjc` `75a5efb3…`，沒有 `kn.sjkn`；Homebrew tap 的 `shanjie.rb` 是 0.4.1，sha256 等於 zip。
+- **維護者的機器**：main 用 `scripts/install-ime.sh` 裝正式的 0.4.1 zip（先用 `.sha256` 與 `stapler validate` 核對），輸出「already enabled; registration skipped」（installer-v2 §9：已啟用就不再註冊，Caps Lock 切換不受影響）。
+- **公告與 demo**：Discord 公告照發版公告流程起草、逐條查核（改正：虎杖悠仁是少了 ㄏㄨˇ、不是讀音錯；安裝程式檔名；RSS 是重播程式不含語意校正模型；刪掉絕對化與自誇的句子），維護者確認後送出三則。demo 影片（語意校正關／開上下對照，聊天設定，同樣的注音）在筆電內建螢幕用 demo 版工具錄、交給維護者，不進 repo。第一次用 repo 的 `imeshot` 在外接螢幕、每鍵 10 ms 錄，畫質與打字速度都不對，整段重錄；demo 的錄法寫進 `CLAUDE.md`「實機測試」。截圖探測視窗不在聊天 App 清單，錄語意校正時請維護者先切「一律聊天」（書面設定下這兩句語意校正不會換，CLI 量過）。
+- **review 延後的兩點順手做了**：`docs/verification.md` 指向契約 §2.3 保留集提早量的修訂；`test_rerun_never_overwrites_holdout_numbers` 用 preflight 當絆線，拿掉防覆寫檢查時測試在 0.07 秒內失敗（在暫存副本突變過），不會跑到建置。
+
+## 2026-10-13：錯字回報第 85 列（以設定）
+
+- **第 85 列**（維護者回報 `不能改變以設定的變數`，「錯字」；正解 `已設定`）：整句、沒有前文；讀音 `tools/readings.py`，CHECK 0。量測（3503fd8 建置的 CLI，core 與 cli 和 `5c4415a` 相同；開詞包）：聊天與書面、n-gram 與 `tinylm-v3` 都選 `以設定`，正解第 2 名（聊天 −19.62 對 −19.85，書面 −19.29 對 −19.36）。和第 63、83、84 列同屬功能字的同音錯，記進 PLAN「在／再、作／做」那項。
+- golden：錯字回報兩行用 Python 參考實作重產、Rust CLI 逐字相同：n 85，top1 不變（聊天 17、書面 21），oracle@64 83；`eval/README.md` 列數 85。
