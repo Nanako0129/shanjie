@@ -34,7 +34,7 @@
 
 ### 2.2 開關「語意校正」
 
-- 照「即時預測」的寫法：`RerankStore` 協定與 `MemoryRerankStore`、App 用 `UserDefaults` 的 `DefaultsRerankStore`（`macos/Sources/Shanjie/main.swift`），沒設過＝開〔修訂：沒設過＝關〕。
+- 照「即時預測」的寫法：`RerankStore` 協定與 `MemoryRerankStore`、App 用 `UserDefaults` 的 `DefaultsRerankStore`（`macos/Sources/Shanjie/main.swift`），沒設過＝開〔修訂：沒設過＝關；再修訂 2026-10-13，S7h：沒設過＝開〕。
 - `Shell` 每次建引擎後照設定呼叫 `set_rerank`（`load_tinylm` 不改開關，所以重建引擎不會把關掉的打開）；切換時對目前的 session 呼叫 `set_rerank` 並套用回傳的快照（關掉時立刻回到 n-gram 的結果）。
 - 選單在「即時預測」之後加「語意校正」（打勾表示開）；設定視窗加同名的開關（`SettingsModel`、`SettingsWindow`），兩邊同步。
 
@@ -49,7 +49,7 @@
 - **發佈時核對雜湊**（F9）：`docs/releases/README.md` 的資料類 Release 流程加兩步——上傳前 `shasum -a 256 -c data/tinylm.sjtl.sha256`，上傳後重新下載再核對一次；研究紀錄補上 `.sjtl` 完整的 64 碼 SHA-256 與大小（14,638,208 bytes），寫雜湊檔時兩者都要相符。
 - **`release.yml`**（F7）：它的 build job 不跑 check-app 與 selftest（現有做法，靠同一個 commit 先過 CI，`build-app.sh` 自己也核對）；漏掉下載只會讓發版時建置失敗。合併後、下一個 `v*` tag 之前，在 main 用 `workflow_dispatch` 跑一次 dry run（對外動作，到時候先問使用者）；verifier 讀 `release.yml` 的 diff。
 - **Release 的順序**（和 `docs/releases/README.md` 一致，避免「Release 等說明進 main、說明等 CI、CI 等 Release」）：(1) 一個只含 `docs/releases/tinylm-v1.md` 與 `data/tinylm.sjtl.sha256` 的小文件 PR 先合併進 main；(2) 問使用者；(3) 同意後從 main 照 README 的指令建 `tinylm-v1`（附件 `tinylm.sjtl`，`--latest=false`）；(4) 這一片的程式 PR 的 CI 才下載得到檔案，全綠後合併。
-- `scripts/build-app.sh`：檔案存在、雜湊相符才打包，複製到 `Resources/`，隨附的授權說明加一段（訓練文字和 `bigram.sjlm` 同源：維基百科 CC BY-SA 4.0、Common Voice CC0、Tatoeba CC BY 2.0 FR）；`scripts/check-app.sh` 檢查 bundle 裡有這個檔（加進非空檔的清單與授權說明的檢查），並把 `Resources/tinylm.sjtl` 算出的雜湊和 `data/tinylm.sjtl.sha256` 裡**記的值**比對（不是和 `data/lm/` 的檔互比，那只證明複製正確；F6）；`.github/workflows/ci.yml` 與 `release.yml` 照 `model-v5` 的方式下載並核對；`docs/data-files.md` 加一列（寫明和 `bigram.sjlm` 同源、不含私人對話資料）與「版本怎麼往前走」（重訓或改 α、τ → `tinylm-v2`〔修訂 2026-10-12：v2 已用掉，下一個是 `tinylm-v3`，見 `docs/data-files.md`〕；換 n-gram 模型（model-v6）時 `.sjtl` 綁的雜湊會對不上，要一起發新的 `.sjtl`，否則語意校正會靜靜地沒載入——selftest 會抓到）；`LICENSES/data.md` 加一列。
+- `scripts/build-app.sh`：檔案存在、雜湊相符才打包，複製到 `Resources/`，隨附的授權說明加一段（訓練文字和 `bigram.sjlm` 同源：維基百科 CC BY-SA 4.0、Common Voice CC0、Tatoeba CC BY 2.0 FR）；`scripts/check-app.sh` 檢查 bundle 裡有這個檔（加進非空檔的清單與授權說明的檢查），並把 `Resources/tinylm.sjtl` 算出的雜湊和 `data/tinylm.sjtl.sha256` 裡**記的值**比對（不是和 `data/lm/` 的檔互比，那只證明複製正確；F6）；`.github/workflows/ci.yml` 與 `release.yml` 照 `model-v5` 的方式下載並核對；`docs/data-files.md` 加一列（寫明和 `bigram.sjlm` 同源、不含私人對話資料）與「版本怎麼往前走」（重訓或改 α、τ → `tinylm-v2`〔修訂 2026-10-12：v2 已用掉，下一個是 `tinylm-v3`，見 `docs/data-files.md`；再修訂 2026-10-13：v3 由 S7h 用掉，下一個是 `tinylm-v4`〕；換 n-gram 模型（model-v6）時 `.sjtl` 綁的雜湊會對不上，要一起發新的 `.sjtl`，否則語意校正會靜靜地沒載入——selftest 會抓到）；`LICENSES/data.md` 加一列。
 
 ### 2.5 Selftest（`Selftest.swift`）
 
@@ -62,12 +62,12 @@
 
 ## 3. 驗收
 
-1. **殼的測試**（`ShanjieKitTests`，用現有的 FakeClient，client 的 bundle 設成聊天 App，例如 `com.apple.MobileSMS`，句子和 §2.5 相同）：按鍵後有一個工作交給 runner；完成且有改變 → 多一次 `setMarkedText`，內容是重排後的字（和 n-gram 的字不同）；完成但沒改變（5）→ 沒有多的呼叫；取工作後又有一個會重新解碼的鍵，舊結果不套用；不重新解碼的鍵（例如 ←）之後完成，照樣套用；開關關掉 → 沒有工作交給 runner、組字回到 n-gram 的字；session 換人或引擎重建之後才完成 → 不套用；一次只跑一個（第二個工作等第一個跑完）。**free 的計數在可注入的 free 函式**：涵蓋被取代、引擎重建、開關關掉、過期、碼 4、正常套用，最後「取到的工作數 ＝ free 的次數」而且沒有任何一個 free 兩次；拿掉任何一條路徑的 free 或多 free 一次，測試要失敗。**開關**（比照「可省略韻母」的測試）：選單「語意校正」預設打勾〔修訂 2026-10-12：預設不打勾；打開之後才有工作、才重排，測試用存著的 true 打開〕、切換會寫進 store；關掉之後換排列、切動漫詞包（兩種都會重建引擎）仍沒有工作；用存了「關」的 store 建新的 `Shell` 也沒有工作；設定視窗切換後選單同步（比照 SettingsTests 現有的開關）。突變：拿掉 `build()` 裡的 `set_rerank`，測試要失敗。
+1. **殼的測試**（`ShanjieKitTests`，用現有的 FakeClient，client 的 bundle 設成聊天 App，例如 `com.apple.MobileSMS`，句子和 §2.5 相同）：按鍵後有一個工作交給 runner；完成且有改變 → 多一次 `setMarkedText`，內容是重排後的字（和 n-gram 的字不同）；完成但沒改變（5）→ 沒有多的呼叫；取工作後又有一個會重新解碼的鍵，舊結果不套用；不重新解碼的鍵（例如 ←）之後完成，照樣套用；開關關掉 → 沒有工作交給 runner、組字回到 n-gram 的字；session 換人或引擎重建之後才完成 → 不套用；一次只跑一個（第二個工作等第一個跑完）。**free 的計數在可注入的 free 函式**：涵蓋被取代、引擎重建、開關關掉、過期、碼 4、正常套用，最後「取到的工作數 ＝ free 的次數」而且沒有任何一個 free 兩次；拿掉任何一條路徑的 free 或多 free 一次，測試要失敗。**開關**（比照「可省略韻母」的測試）：選單「語意校正」預設打勾〔修訂 2026-10-12：預設不打勾；打開之後才有工作、才重排，測試用存著的 true 打開；再修訂 2026-10-13，S7h：預設打勾，沒設過的測試改成開〕、切換會寫進 store；關掉之後換排列、切動漫詞包（兩種都會重建引擎）仍沒有工作；用存了「關」的 store 建新的 `Shell` 也沒有工作；設定視窗切換後選單同步（比照 SettingsTests 現有的開關）。突變：拿掉 `build()` 裡的 `set_rerank`，測試要失敗。
 2. **Selftest**：本機與 CI（`make selftest-bundled`）通過；拿掉模型檔時失敗。**真的佇列 runner 的測試**（F2）：用 ShanjieKit 裡 App 用的那個 runner，按鍵 → 背景 run → 主執行緒 apply，組字換成重排後的字，「取到的工作數 ＝ free 的次數」；main 試跑一次 `swift test --sanitize=thread`，沒跑成就在研究紀錄標明沒量過。殼的測試另外加：過期的完成之後，下一個工作照樣交給 runner（F4）；`take` 回非 0 的處理（F5）；降權表關掉時「語意校正」反灰（F11）。
 3. **打包**：`build-app.sh` 在缺檔或雜湊不符時失敗；`check-app.sh` 檢查 bundle 裡的檔與雜湊；CI 的 `shell` job 全綠。
 4. `make test`、CI 全綠；`/code-review` 沒有未處置的問題；fresh verifier 確認第 1–3 項，並讀 diff 確認：模型路徑只從 bundle 的 Resources 接具名常數（這是靠構造保證，原始碼掃描不算防護）、包裝類別的規則（§2.1）、`release.yml` 的下載與核對。
    - **S7c-2a 安全審查留下的三個出貨前提各由哪一項證明**：隨簽章的 App 打包 → 第 3 項（`check-app.sh` 對記的雜湊比對）加現有的 `codesign --verify --strict --deep`；路徑寫死 → 第 4 項 verifier 讀 diff；雜湊進版控並在建置時核對 → 第 3 項（`build-app.sh`）與 CI，`release.yml` 由 verifier 讀 diff 與發版前的 dry run。
-5. **實機**（使用者，每次佔用鍵盤 ≤ 15 秒；main 用 `scripts/install-ime.sh` 安裝，裝完提醒 Caps Lock 切換可能失效與復原方法）：在**訊息 App**（`com.apple.MobileSMS`，聊天設定；只打字、不按 Enter 送出）打 §2.5 那一句，最後顯示重排後的字（和 n-gram 的字不同）；〔修訂：預設關，要先到設定視窗打開「語意校正」，打完再關掉重打一次，顯示 n-gram 的字，句子是第 65 列的〕到設定視窗關掉「語意校正」再打一次，顯示 n-gram 的字；請使用者說打字時的閃動能不能接受（A4 的決定）。
+5. **實機**（使用者，每次佔用鍵盤 ≤ 15 秒；main 用 `scripts/install-ime.sh` 安裝，裝完提醒 Caps Lock 切換可能失效與復原方法）：在**訊息 App**（`com.apple.MobileSMS`，聊天設定；只打字、不按 Enter 送出）打 §2.5 那一句，最後顯示重排後的字（和 n-gram 的字不同）；〔修訂：預設關，要先到設定視窗打開「語意校正」，打完再關掉重打一次，顯示 n-gram 的字，句子是第 65 列的；再修訂 2026-10-13：S7h 起預設開，實機句與預設的檢查見 `s7h-tinylm-v3.md` §1〕到設定視窗關掉「語意校正」再打一次，顯示 n-gram 的字；請使用者說打字時的閃動能不能接受（A4 的決定）。
 
 ## 4. 範圍外、停止條件、預算、限制、回滾
 

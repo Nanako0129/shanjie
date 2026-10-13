@@ -61,15 +61,17 @@ final class RerankTests: XCTestCase {
         XCTAssertNotEqual(RerankRow.ngram, RerankRow.reranked)
     }
 
-    /// s7h section 2.3: the device sentence under the shell's conditions. On, the finished job shows 程式; off, the n-gram's
-    /// sentence stays.
-    func testDeviceSentenceIsRerankedOnlyWhenOn() {
-        let on = rig()
+    /// s7h section 2.3: the device sentence under the shell's conditions, the bundled pack loaded like the shipped app (the other
+    /// tests here run without it). On, the finished job shows 程式; off, the n-gram's sentence stays.
+    func testDeviceSentenceIsRerankedOnlyWhenOn() throws {
+        let packed = try XCTUnwrap(TestData.resources())
+        try TestData.addBundledPack(to: packed)
+        let on = rig(resources: packed)
         on.c.type(DeviceRow.standardKeys)
         XCTAssertEqual(on.c.client.marked, DeviceRow.ngram, "the n-gram result shows first")
         on.runner.drain()
         XCTAssertEqual(on.c.client.marked, DeviceRow.reranked)
-        let off = rig(store: MemoryRerankStore(false))
+        let off = rig(store: MemoryRerankStore(false), resources: packed)
         off.c.type(DeviceRow.standardKeys)
         off.runner.drain()
         XCTAssertEqual(off.c.client.marked, DeviceRow.ngram)

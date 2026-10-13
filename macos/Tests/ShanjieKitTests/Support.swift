@@ -350,7 +350,8 @@ enum RerankRow {
 }
 
 /// dev302 row 25, the device sentence of docs/contracts/s7h-tinylm-v3.md section 1: in the chat profile with no left context and
-/// the bundled pack, the n-gram's first is 城市; tinylm-v3's chat values pick 程式 (tinylm-v2's did not).
+/// the bundled pack (RerankTests adds it for this sentence), the n-gram's first is 城市; tinylm-v3's chat values pick 程式
+/// (tinylm-v2's did not).
 enum DeviceRow {
     static let zhuyin = "ㄓˊ ㄒㄧㄥˊ ㄓㄜˋ ㄍㄜ˙ ㄔㄥˊ ㄕˋ"
     static let standardKeys = Layouts.keys(zhuyin, eten: false)
