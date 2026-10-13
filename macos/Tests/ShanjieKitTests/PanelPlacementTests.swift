@@ -65,4 +65,36 @@ final class PanelPlacementTests: XCTestCase {
         let other = NSRect(x: 1000, y: 50, width: 1000, height: 700)
         XCTAssertEqual(place(nil, screens: [screen, other], main: 1), NSPoint(x: 1000, y: 80))
     }
+
+    // docs/contracts/line-jump-guard.md section 3, items 1-3. Rectangles are the diagnostic trace's (x, y, width x height).
+    func r(_ x: CGFloat, _ y: CGFloat, _ h: CGFloat = 22) -> NSRect { NSRect(x: x, y: y, width: 1, height: h) }
+
+    /// Item 1: the three jumps Orca reported mid-composition (2026-10-13) are not used; its next line on the input row is.
+    func testOrcaJumpsAreNotUsed() {
+        XCTAssertEqual(PanelPlacement.steadyLine(r(472, 319), anchor: r(434, 88)), r(434, 88))
+        var anchor = r(572, 88)
+        for jump in [r(1002, 928), r(1018, 928), r(2504, 739)] {
+            anchor = PanelPlacement.steadyLine(jump, anchor: anchor)!
+            XCTAssertEqual(anchor, r(572, 88), "\(jump)")
+        }
+        XCTAssertEqual(PanelPlacement.steadyLine(r(622, 88), anchor: anchor), r(622, 88))
+    }
+
+    /// Item 2: moves along the line and to the next line (one line height down, y up in AppKit) are used, twice in a row too.
+    func testNormalMovesAreUsed() {
+        XCTAssertEqual(PanelPlacement.steadyLine(r(450, 88), anchor: r(434, 88)), r(450, 88))
+        XCTAssertEqual(PanelPlacement.steadyLine(r(418, 87, 23), anchor: r(402, 88)), r(418, 87, 23))
+        let second = PanelPlacement.steadyLine(r(10, 66), anchor: r(900, 88))
+        XCTAssertEqual(second, r(10, 66))
+        XCTAssertEqual(PanelPlacement.steadyLine(r(10, 44), anchor: second), r(10, 44))
+    }
+
+    /// Item 3: the first line of a composition is used as given, no line stays none, and a zero-height anchor counts 16 pt.
+    func testFirstLineNoLineAndZeroHeight() {
+        XCTAssertEqual(PanelPlacement.steadyLine(r(472, 319), anchor: nil), r(472, 319))
+        XCTAssertNil(PanelPlacement.steadyLine(nil, anchor: r(434, 88)))
+        let flat = r(100, 100, 0)
+        XCTAssertEqual(PanelPlacement.steadyLine(r(100, 132), anchor: flat), r(100, 132))
+        XCTAssertEqual(PanelPlacement.steadyLine(r(100, 133), anchor: flat), flat)
+    }
 }

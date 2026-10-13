@@ -134,6 +134,52 @@ final class ShellTests: XCTestCase {
         XCTAssertGreaterThan(c.client.lineAsks, asked, "a new composition asks again")
     }
 
+    // docs/contracts/line-jump-guard.md section 3, items 4-7: the client's lines from the 2026-10-13 Orca trace.
+    let inputRow = NSRect(x: 434, y: 88, width: 1, height: 22), farLine = NSRect(x: 472, y: 319, width: 1, height: 22)
+
+    /// Items 4 and 5: within one composition a far line from the client does not reach the panel, neither on the key that
+    /// asked for it nor through the line cache on later keys with the same preedit and cursor.
+    func testAFarLineMidCompositionDoesNotReachThePanel() {
+        let c = Controller(makeShell())
+        c.session.activate()
+        c.client.line = inputRow
+        c.type("s")
+        XCTAssertEqual(c.panel.lineRect, inputRow)
+        c.client.line = farLine
+        c.type("u")
+        XCTAssertEqual(c.panel.lineRect, inputRow, "a far line asked for mid-composition")
+        c.type("3 ")  // the space opens the candidate window over the same preedit and cursor: the cached line
+        XCTAssertEqual(c.panel.lineRect, inputRow, "the cache holds the line used, not the client's")
+        XCTAssertTrue(c.press(125))  // a selection move
+        XCTAssertEqual(c.panel.lineRect, inputRow)
+    }
+
+    /// Item 6: a far line is stopped in one composition; after the commit, the next composition's first line is used as given.
+    func testTheNextCompositionStartsAfresh() {
+        let c = Controller(makeShell())
+        c.session.activate()
+        c.client.line = inputRow
+        c.type("s")
+        c.client.line = farLine
+        c.type("u3")
+        XCTAssertEqual(c.panel.lineRect, inputRow)
+        XCTAssertTrue(c.press(Keys.enter))
+        c.type("s")
+        XCTAssertEqual(c.panel.lineRect, farLine)
+    }
+
+    /// Item 7: the panel hiding mid-composition does not end the composition, so the far line is still stopped.
+    func testAPanelHiddenMidCompositionKeepsTheAnchor() {
+        let c = Controller(makeShell())
+        c.session.activate()
+        c.client.line = inputRow
+        c.type("s")
+        c.session.shell.hideCandidates()
+        c.client.line = farLine
+        c.type("u")
+        XCTAssertEqual(c.panel.lineRect, inputRow)
+    }
+
     /// s3b2 section 8: down expands (the panel is told the columns, first and total); a click on a
     /// lower row picks that cell, and after a scroll the position counts from `first`.
     func testExpandedGridReachesThePanelAndAClickPicksTheCell() throws {
