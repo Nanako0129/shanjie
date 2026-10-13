@@ -58,7 +58,7 @@
 
 - **交付**：
   - `experiments/fusion/fuse.py`：參數是集合與判斷器，只印統計數字。
-  - `experiments/fusion/test_fuse.py`。
+  - `experiments/fusion/test_fuse.py`（2026-10-14 移除，研究已結束；取回方式見 `experiments/fusion/README.md`）。
   - `experiments/fusion/README.md`。
   - 研究紀錄與 PLAN 由 main 寫。
 - **驗收**：
