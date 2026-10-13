@@ -25,12 +25,12 @@
 | `eval/variants.tsv` | 教育部《重編國語辭典修訂本》釋義中的「也作／亦作」詞對（經 g0v/moedict-data，commit a6dc997） | CC BY-ND 3.0 TW | **只用於評測**。每一欄都是辭典原有的詞條字串，詞對是辭典記載的事實，不含釋義文字；由 `tools/build_variants.py` 產生 |
 | `data/lm/bigram.sjlm`（不在 git；GitHub Release `model-v5` 附件） | 由 `tools/build_lm.py` 從語料詞頻計數產生：中文維基百科 2026-10-01 dump 的 20 萬篇條目、Mozilla Common Voice 繁中（台灣）句子、Tatoeba 中文句子、gpt-oss-120b 產生的台灣口語合成句。斷詞用的動漫與遊戲詞包詞（model-v5 起也計入斷詞詞彙）來自中文維基百科（CC BY-SA 4.0）與 Wikidata（CC0）。發佈的檔案另含少量用來辨識來源的指紋條目 | **CC BY-SA 4.0**（https://creativecommons.org/licenses/by-sa/4.0/ ；維基為 CC BY-SA 4.0；Common Voice 為 CC0；Tatoeba 為 CC BY 2.0 FR；合成句是 gpt-oss-120b 的模型輸出，模型權重本身為 Apache-2.0） | 署名：Wikipedia contributors、Tatoeba contributors。不含任何私人對話資料 |
 | `data/lm/classes.sjc`（不在 git；GitHub Release `classes-v3` 附件） | 由 `tools/build_classes.py` 從和 `bigram.sjlm` 同一批計數的詞類分群產生（S2k），只配 model-v5 | **CC BY-SA 4.0**（來源同上一列） | 署名：Wikipedia contributors、Tatoeba contributors。不含任何私人對話資料 |
-| `data/lm/tinylm.sjtl`（不在 git；GitHub Release `tinylm-v2` 附件） | 「語意校正」用的小型字元語言模型（S7，SJTL0002，權重和 `tinylm-v1` 相同；融合參數不同：v1 聊天與書面都是 α 0.7、τ 2，v2 聊天 α 0.2、τ 1、δ 0.25、書面 α 0.7、τ 1、δ 2，見 `docs/releases/tinylm-v2.md`），由 `experiments/s7a-tinylm` 訓練、`export_sjtl.py` 匯出成 int8；訓練文字和 `bigram.sjlm` 同源：中文維基百科 2026-10-01 dump 的前 20 萬篇條目、Mozilla Common Voice 繁中（台灣）句子、Tatoeba 中文句子、gpt-oss-120b 產生的台灣口語合成句 | **CC BY-SA 4.0**（來源同 `bigram.sjlm` 那一列） | 署名：Wikipedia contributors、Tatoeba contributors。不含任何私人對話資料 |
+| `data/lm/tinylm.sjtl`（不在 git；GitHub Release `tinylm-v3` 附件） | 「語意校正」用的小型字元語言模型（S7，SJTL0002，權重和 `tinylm-v1`、`v2` 相同；融合參數不同：v1 聊天與書面都是 α 0.7、τ 2，v2 聊天 α 0.2、τ 1、δ 0.25、書面 α 0.7、τ 1、δ 2，v3 聊天 α 0.3、τ 2、δ 0.25、書面同 v2，見 `docs/releases/tinylm-v3.md`；v3 的聊天值在維護者自己的訊息建的評測集上選，檔案裡沒有任何訊息的文字），由 `experiments/s7a-tinylm` 訓練、`export_sjtl.py` 匯出成 int8；訓練文字和 `bigram.sjlm` 同源：中文維基百科 2026-10-01 dump 的前 20 萬篇條目、Mozilla Common Voice 繁中（台灣）句子、Tatoeba 中文句子、gpt-oss-120b 產生的台灣口語合成句 | **CC BY-SA 4.0**（來源同 `bigram.sjlm` 那一列） | 署名：Wikipedia contributors、Tatoeba contributors。不含任何私人對話資料 |
 | 執行期模型（S5 起） | Gemma 4 E2B 等 | 各自授權（Gemma 4：Apache-2.0） | 不隨安裝檔散布，第一次啟用時下載並顯示授權 |
 
 ## 研究語料（未出貨）
 
-S7f（`docs/contracts/s7f-colloquial.md`）研究訓練用的文字。**沒有進任何已發佈的檔案**；上面 `tinylm.sjtl` 那一列描述的是 `tinylm-v2`（訓練文字與 v1 相同；已發佈為 `tinylm-v2` Release 附件，從含 PR #118 的第一個 App 版本起隨 App 打包），不受影響，等出貨片再改。清理用的程式在 `experiments/s7f-corpus/`；文字本身不進 git。條款頁的快照（HTML 或原始檔）存在維護者機器上，這裡記網址、取得時間、SHA-256 前 12 碼與原文摘錄。量是 2026-10-12 修正清理規則（研究紀錄同日）之後重跑的版本。
+S7f（`docs/contracts/s7f-colloquial.md`）研究訓練用的文字。**沒有進任何已發佈的檔案**；上面 `tinylm.sjtl` 那一列描述的是 `tinylm-v3`（訓練文字與 v1、v2 相同；已發佈為 `tinylm-v3` Release 附件，從含 S7h PR 2 的第一個 App 版本起隨 App 打包；之前的版本打包 `tinylm-v2`），不受 S7f 影響。清理用的程式在 `experiments/s7f-corpus/`；文字本身不進 git。條款頁的快照（HTML 或原始檔）存在維護者機器上，這裡記網址、取得時間、SHA-256 前 12 碼與原文摘錄。量是 2026-10-12 修正清理規則（研究紀錄同日）之後重跑的版本。
 
 | 來源 | 取用範圍與版本 | 取得 | 授權與條款摘錄 | 用在 S7f 的量 |
 |---|---|---|---|---|
