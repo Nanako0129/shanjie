@@ -323,3 +323,20 @@ fn kn_side_file_beside_the_model_is_announced_and_can_be_turned_off() {
     assert!(on.starts_with(&format!("## t  lm-chat{tag}  {{'n': 1,")), "{on}");
     assert!(off.starts_with("## t  lm-chat  {'n': 1,"), "{off}");
 }
+
+/// data/lexicon/overlay-manual.tsv: every manual word comes first in the shipping setting, alone and in a sentence, in both profiles
+/// (eval/golden/manual-words-rows.txt; MANUAL_BONUS in tools/build_overlay.py was chosen on these rows). A retrained model or a new
+/// rerank that pushes a name below its homophones fails here instead of shipping silently.
+#[test]
+fn manual_words_come_first_in_the_shipping_setting() {
+    let root = concat!(env!("CARGO_MANIFEST_DIR"), "/..");
+    let rows = format!("{root}/eval/golden/manual-words-rows.txt");
+    let tl = format!("{root}/data/lm/tinylm.sjtl");
+    for profile in ["chat", "formal"] {
+        let out = run(&["--lm", &lm_path(), "--profile", profile, "--context", "--packs", "acg", "--tinylm", &tl, "--rows", &rows]);
+        let summary = out.lines().find(|l| l.starts_with("## ")).unwrap_or_default();
+        let num = |key: &str| summary.split(&format!("'{key}': ")).nth(1).and_then(|t| t.split([',', '}']).next()).map(str::to_string);
+        assert_eq!(num("n").as_deref(), Some("9"), "{profile}: {summary}");
+        assert_eq!(num("top1"), num("n"), "{profile}: a manual word is not first: {summary}");
+    }
+}
