@@ -70,12 +70,6 @@ class Lexicon(unittest.TestCase):
         with self.assertRaises(ValueError):
             T.Lex(BASE, "x-y\t新詞\t-2\n", "", "")
 
-    def test_spells(self):
-        l = lex()
-        self.assertTrue(l.spells("甲乙"))
-        self.assertFalse(l.spells("己庚"))
-        self.assertFalse(l.spells("甲己"))
-
 
 class Pick(unittest.TestCase):
     def test_pick_follows_core(self):
@@ -159,16 +153,24 @@ class Buckets(unittest.TestCase):
         res = cls(row("己甲", "f a", [("乙甲", -1, "乙 甲")], gold0="己 甲"))
         self.assertEqual(res["bucket"], "B2", "己 is no entry but a one-character segment is not a missing word")
 
-    def test_b1_takes_any_segment_and_b1b_any_spellable(self):
+    def test_b1_takes_any_segment(self):
         c = [("丁丁丙戊戊", -1, "丁 丁 丙 戊 戊")]
-        res = cls(row("甲乙丙丁戊", "a b c d e", c, gold0="甲 乙 丙 丁 戊"))
-        self.assertEqual((res["bucket"], res["b1b"]), ("B1", True), "(0,2) qualifies although (3,4) is one character")
-        res = cls(row("己庚", "f g", [("甲乙", -1, "甲 乙")], gold0="己 庚"))
-        self.assertEqual((res["bucket"], res["b1b"]), ("B1", False), "己庚 cannot be put together from entries")
+        res = cls(row("甲乙丙丁戊", "a b c d e", c, gold0="甲乙 丙 丁 戊"))
+        self.assertEqual(res["bucket"], "B1", "(3,4) is one character, but (0,2) qualifies")
 
     def test_d1_needs_scores_and_a_moved_right_first(self):
         cands = [("甲", -1, "甲"), ("乙", -1.2, "乙")]
         self.assertEqual(cls(row("甲", "a", cands, c=1, scores=scores([-1, -1.2], [1, 0], [0, 0], c=1)))["bucket"], "D1")
+        self.assertEqual(cls(row("甲", "a", cands, c=1, scores=None))["bucket"], "C", "without --tinylm-scores nothing says the rerank moved it")
+
+    def test_d1_needs_the_first_ngram_candidate_to_be_right(self):
+        cands = [("乙", -1, "乙"), ("丙", -1.1, "丙"), ("甲", -1.2, "甲")]
+        res = cls(row("甲", "a", cands, c=1, scores=scores([-1, -1.1, -1.2], [0, 0, 1], [0, 0, 0], c=1)))
+        self.assertEqual(res["bucket"], "C", "the first was already wrong: the rerank did not spoil it")
+
+    def test_a1_is_judged_when_the_gold_is_in_the_list_too(self):
+        res = cls(row("你好", "ni hao4", [("泥號", -1, "泥 號"), ("你好", -2, "你 好")]))
+        self.assertEqual((res["bucket"], res["seg"]), ("A1", "rank"), "好 has no entry under hao4; the gold split comes from the list, not rank 0")
 
     def test_c4_two_segments_even_when_both_are_single_characters(self):
         r = row("甲乙丙丁戊", "a b c d e", [("戊乙丙丁丁", -1, "戊 乙 丙 丁 丁"), ("甲乙丙丁戊", -2, "甲 乙 丙 丁 戊")])
@@ -189,6 +191,7 @@ class Buckets(unittest.TestCase):
         self.assertEqual((res["sub"], res["func"], res["func_any"]), ("C3", False, True))
         self.assertTrue(cls(row("再", "zai", [("在", -1, "在"), ("再", -2, "再")]))["func_any"])
         self.assertFalse(cls(row("再甲", "zai a", [("在乙", -1, "在 乙"), ("再甲", -2, "再 甲")]))["func_any"], "one pair is not function characters")
+        self.assertFalse(cls(row("再", "zai", [("在乙", -1, "在 乙"), ("再", -2, "再")]))["func_any"], "lengths differ: the zipped prefix pair proves nothing")
 
     def test_c2_source_flag_is_overlay_or_pack_only_never_sandhi(self):
         def go(truth, other, syls):
@@ -233,6 +236,13 @@ class D2(unittest.TestCase):
     def test_a_when_the_ngram_margin_reaches_tau(self):
         res = cls(self.c_row("丙", scores([0, -3, -3.5], [0, 1, 0], [-1, -2, -0.2])))
         self.assertEqual(res["d2"], "D2a")
+        res = cls(self.c_row("丙", scores([0, -2.0, -3.5], [0, 1, 0], [-1, 5, -0.2])))   # tau is 2.0: a margin of exactly tau keeps the first, like core pick
+        self.assertEqual(res["d2"], "D2a")
+
+    def test_the_eighth_candidate_is_inside_the_rerank_window(self):
+        cands = [("乙", -1 - i, "乙") for i in range(7)] + [("甲", -9, "甲")]
+        sc = scores([0, -0.1, -0.2, -0.3, -0.4, -0.5, -0.6, -0.7], [0] * 8, [0] * 8)
+        self.assertEqual(cls(row("甲", "a", cands, scores=sc))["d2"], "D2c", "rank 8 = TOPK is marked; rank 9 is not (test below)")
 
     def test_none_without_ll_even_with_a_wide_margin(self):
         res = cls(self.c_row("丙", scores([0, -3, -3.5], [0, 1, 0])))
@@ -257,7 +267,7 @@ class Counting(unittest.TestCase):
         self.assertEqual(cn["buckets"], {"A1": 1, "B1": 1, "B2": 1, "D1": 0, "C": 1})
         self.assertEqual(sum(cn["buckets"].values()), cn["errors"], cn["n"] - cn["top1"])
         self.assertEqual([p[0] for p in per], ["C1", "B1", "B2", "A1", "ok", "ok"])
-        self.assertEqual((cn["c_sub"]["C1"], cn["c_rank"]["2"], cn["c_margin"]["1-2"], cn["b1b"], cn["seg_lex"], cn["seg_none"]), (1, 1, 1, 1, 3, 0))
+        self.assertEqual((cn["c_sub"]["C1"], cn["c_rank"]["2"], cn["c_margin"]["1-2"], cn["seg_lex"], cn["seg_none"]), (1, 1, 1, 3, 0))
 
     def test_f_is_the_right_rows_of_the_report_set_only(self):
         rows = [self.wrong(), self.wrong()]
@@ -280,6 +290,14 @@ class Files(unittest.TestCase):
         self.assertEqual(T.lines_of("a\nb\n"), ["a", "b"])
         self.assertEqual(T.lines_of("a\n\n"), ["a", ""])
 
+    def test_a_lone_cr_inside_a_field_is_not_a_line_break(self):
+        # Rust str::lines splits on \n only; text-mode open() would turn the lone \r into a second line and drop the row
+        with tempfile.TemporaryDirectory() as td:
+            p = os.path.join(td, "rows.txt")
+            with open(p, "wb") as f:
+                f.write("前|你\r好|ni hao\r\n".encode())
+            self.assertEqual(T.parse_rows(T.read_text(p)), [("前", "你\r好", ["ni", "hao"])])
+
     def test_cli_files(self):
         with tempfile.TemporaryDirectory() as td:
             def w(n, t):
@@ -297,7 +315,29 @@ class Files(unittest.TestCase):
                 T.read_cli_files(d, bad, s, 2)
 
 
+class Run(unittest.TestCase):
+    def test_a_file_from_another_build_is_refused(self):
+        new = {"commit": "a", "models": {"m": "1"}, "alpha_tau_delta": {"chat": [1, 2, 3]}, "cli_sha256": "c", "setting": "s"}
+        T.check_same_run({}, new)
+        T.check_same_run({k: v for k, v in new.items() if k != "cli_sha256"}, new)   # an older file without the CLI hash is not refused for it
+        T.check_same_run(dict(new), new)
+        for k, v in (("commit", "b"), ("models", {"m": "2"}), ("alpha_tau_delta", {"chat": [1, 2, 4]}), ("cli_sha256", "d")):
+            with self.assertRaises(SystemExit):
+                T.check_same_run({**new, k: v}, new)
+
+
 class Render(unittest.TestCase):
+    def test_table_refuses_a_file_with_other_fields(self):
+        cn = T.empty_counts()
+        cn["b1b"] = 0   # a field of an older triage.py
+        doc = {"label": "t", "commit": "0" * 40, "setting": "s", "models": {}, "alpha_tau_delta": {}, "sets": {"x": {"profiles": {"chat": cn}}}}
+        with tempfile.TemporaryDirectory() as td:
+            p = os.path.join(td, "t.json")
+            with open(p, "w") as f:
+                json.dump(doc, f)
+            with self.assertRaises(SystemExit):
+                T.cmd_table(type("A", (), {"json": [p], "out": os.path.join(td, "o.md")}))
+
     def test_table_prints_the_three_numbers_and_sorts_by_value(self):
         cn = T.empty_counts()
         cn.update(n=10, top1=5, errors=5)
@@ -313,7 +353,7 @@ class Render(unittest.TestCase):
         self.assertTrue(any("斷詞（C3）" in l and "2 × 0.3 ÷ 2 = 0.3" in l for l in fam))
         values = [float(l.rsplit("=", 1)[1].strip(" |")) for l in fam]
         self.assertEqual(values, sorted(values, reverse=True))
-        self.assertIn("| x | 10 | 5 | 50.0% | - | 1 | 2（0） | 0 | 0 | 2 |", text)
+        self.assertIn("| x | 10 | 5 | 50.0% | - | 1 | 2 | 0 | 0 | 2 |", text)
 
 
 if __name__ == "__main__":
