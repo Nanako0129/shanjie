@@ -1,6 +1,6 @@
 # 驗證流程
 
-本機與 CI 的檢查各自在哪裡跑、怎麼跑。流程仿 syrtis 的 `Makefile` 與 `docs/knowledge/verification.md`。所有指令都在 repo 根目錄執行；需要 `data/lm/bigram.sjlm`、`data/lm/classes.sjc` 與 `data/lm/tinylm.sjtl`（`gh release download model-v6 -R Nanako0129/shanjie -p bigram.sjlm -D data/lm`、`gh release download classes-v4 -R Nanako0129/shanjie -p classes.sjc -D data/lm`、`gh release download tinylm-v4 -R Nanako0129/shanjie -p tinylm.sjtl -D data/lm`，雜湊以 `data/bigram.sjlm.sha256`、`data/classes.sjc.sha256`、`data/tinylm.sjtl.sha256` 為準；說明見 `docs/data-files.md`）。
+本機與 CI 的檢查各自在哪裡跑、怎麼跑。流程仿 syrtis 的 `Makefile` 與 `docs/knowledge/verification.md`。所有指令都在 repo 根目錄執行；需要 `data/lm/bigram.sjlm`、`data/lm/classes.sjc`、`data/lm/kn.sjkn` 與 `data/lm/tinylm.sjtl`（`gh release download model-v6 -R Nanako0129/shanjie -p bigram.sjlm -D data/lm`、`gh release download classes-v4 -R Nanako0129/shanjie -p classes.sjc -D data/lm`、`gh release download kn-v1 -R Nanako0129/shanjie -p kn.sjkn -D data/lm`、`gh release download tinylm-v5 -R Nanako0129/shanjie -p tinylm.sjtl -D data/lm`，雜湊以 `data/bigram.sjlm.sha256`、`data/classes.sjc.sha256`、`data/kn.sjkn.sha256`、`data/tinylm.sjtl.sha256` 為準；說明見 `docs/data-files.md`）。
 
 ## 本機關卡
 

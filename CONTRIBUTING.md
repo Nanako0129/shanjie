@@ -33,15 +33,17 @@
 步驟：
 
 ```sh
-# 語言模型、詞類表與語意校正模型不在 repo 裡，從 Release 下載（CC BY-SA 4.0；三個都要，說明見 docs/data-files.md）
+# 語言模型、詞類表、Kneser–Ney 側檔與語意校正模型不在 repo 裡，從 Release 下載（CC BY-SA 4.0；四個都要，說明見 docs/data-files.md）
 gh release download model-v6 -R Nanako0129/shanjie -p bigram.sjlm -D data/lm
 gh release download classes-v4 -R Nanako0129/shanjie -p classes.sjc -D data/lm
-gh release download tinylm-v4 -R Nanako0129/shanjie -p tinylm.sjtl -D data/lm
+gh release download kn-v1 -R Nanako0129/shanjie -p kn.sjkn -D data/lm
+gh release download tinylm-v5 -R Nanako0129/shanjie -p tinylm.sjtl -D data/lm
 # 沒有登入 gh 的話改用：
 # curl -L --create-dirs -o data/lm/bigram.sjlm https://github.com/Nanako0129/shanjie/releases/download/model-v6/bigram.sjlm
 # curl -L --create-dirs -o data/lm/classes.sjc https://github.com/Nanako0129/shanjie/releases/download/classes-v4/classes.sjc
-# curl -L --create-dirs -o data/lm/tinylm.sjtl https://github.com/Nanako0129/shanjie/releases/download/tinylm-v4/tinylm.sjtl
-shasum -a 256 -c data/bigram.sjlm.sha256 data/classes.sjc.sha256 data/tinylm.sjtl.sha256
+# curl -L --create-dirs -o data/lm/kn.sjkn https://github.com/Nanako0129/shanjie/releases/download/kn-v1/kn.sjkn
+# curl -L --create-dirs -o data/lm/tinylm.sjtl https://github.com/Nanako0129/shanjie/releases/download/tinylm-v5/tinylm.sjtl
+shasum -a 256 -c data/bigram.sjlm.sha256 data/classes.sjc.sha256 data/kn.sjkn.sha256 data/tinylm.sjtl.sha256
 
 make test      # Rust 核心測試，再跑 Swift 殼的測試，以及詞包建置工具的 python3 單元測試（需要 python3、真的模型與 cargo 建出來的 CLI）
 make bundle    # 組出 build/善解輸入法.app

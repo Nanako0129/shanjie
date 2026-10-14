@@ -4,7 +4,7 @@ import XCTest
 @testable import ShanjieKit
 
 /// The repository's data, laid out like the app's Resources (docs/contracts/s3b.md section 10.4):
-/// a temporary directory of symlinks to data/lexicon/*, data/lm/bigram.sjlm and data/lm/tinylm.sjtl. Missing files fail
+/// a temporary directory of symlinks to data/lexicon/*, data/lm/bigram.sjlm, classes.sjc, kn.sjkn and tinylm.sjtl. Missing files fail
 /// the test with instructions; nothing is ever skipped.
 enum TestData {
     static let repo = URL(fileURLWithPath: #filePath)
@@ -19,6 +19,7 @@ enum TestData {
         ("demote.tsv", "data/lexicon/demote.tsv"),
         ("bigram.sjlm", "data/lm/bigram.sjlm"),
         ("classes.sjc", "data/lm/classes.sjc"),
+        ("kn.sjkn", "data/lm/kn.sjkn"),  // model-v6: the Kneser-Ney side file the shipped tinylm.sjtl (SJTL0004) records
         ("tinylm.sjtl", "data/lm/tinylm.sjtl"),
         // zhen-mixed: the synthetic list stands in for the generated Resources/english-words.txt (docs/contracts/zhen-mixed.md section 5.3).
         ("english-words.txt", "eval/golden/english-tiny.txt"),
@@ -43,10 +44,11 @@ enum TestData {
             let src = repo.appendingPathComponent(f.source)
             guard FileManager.default.fileExists(atPath: src.path) else {
                 XCTFail("""
-                    \(f.source) is missing. The lexicon is in git; the model is the model-v5 release asset: \
-                    gh release download model-v5 -R Nanako0129/shanjie -p bigram.sjlm -D data/lm
-                    classes.sjc: gh release download classes-v3 -R Nanako0129/shanjie -p classes.sjc -D data/lm
-                    tinylm.sjtl: gh release download tinylm-v4 -R Nanako0129/shanjie -p tinylm.sjtl -D data/lm
+                    \(f.source) is missing. The lexicon is in git; the model is the model-v6 release asset: \
+                    gh release download model-v6 -R Nanako0129/shanjie -p bigram.sjlm -D data/lm
+                    classes.sjc: gh release download classes-v4 -R Nanako0129/shanjie -p classes.sjc -D data/lm
+                    kn.sjkn: gh release download kn-v1 -R Nanako0129/shanjie -p kn.sjkn -D data/lm
+                    tinylm.sjtl: gh release download tinylm-v5 -R Nanako0129/shanjie -p tinylm.sjtl -D data/lm
                     """, file: file, line: line)
                 return nil
             }

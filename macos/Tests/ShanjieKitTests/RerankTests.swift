@@ -481,7 +481,15 @@ final class RerankTests: XCTestCase {
             return d
         }
         let v2: Data, v3: Data
+        // model-v6 section 7 P3-6: a version 4 file records the kn.sjkn it was tuned with and pairs only with it; the version 2 and 3
+        // files derived from it record none, so their Resources below carry no kn.sjkn (the model then loads without KN and they pair).
         switch String(decoding: real.prefix(8), as: UTF8.self) {
+        case "SJTL0004":
+            var d3 = real
+            d3.removeSubrange(212..<244)
+            var d2 = d3
+            d2.removeSubrange(116..<212)
+            (v2, v3) = (label(d2, 2), label(d3, 3))
         case "SJTL0002":
             let chat = real[36..<52] + real[100..<108], formal = real[52..<68] + real[108..<116]
             var d = real
@@ -500,6 +508,11 @@ final class RerankTests: XCTestCase {
         try v2.write(to: dirs.0.appendingPathComponent(Shell.tinyLMFile))
         try v3.write(to: dirs.1.appendingPathComponent(Shell.tinyLMFile))
         addTeardownBlock { for d in [dirs.0, dirs.1] { try? FileManager.default.removeItem(at: d) } }  // two 14.6 MB files each
+        // Each derived file must actually pair (the model loaded): a refused one would grey the strength control for the wrong reason.
+        for d in [dirs.0, dirs.1] {
+            XCTAssertFalse(FileManager.default.fileExists(atPath: d.appendingPathComponent("kn.sjkn").path), "no kn.sjkn beside a version 2 or 3 file")
+            XCTAssertTrue(SettingsModel(shell: rig(resources: d).shell).rerankEnabled, "the derived small model loads")
+        }
         return dirs
     }
 

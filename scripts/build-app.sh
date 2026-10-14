@@ -30,11 +30,17 @@ shasum -a 256 -c data/bigram.sjlm.sha256 >/dev/null \
   gh release download classes-v4 -R Nanako0129/shanjie -p classes.sjc -D data/lm"
 shasum -a 256 -c data/classes.sjc.sha256 >/dev/null \
   || fail "data/lm/classes.sjc does not match data/classes.sjc.sha256; download classes-v4 again"
-# The small model behind 語意校正 (docs/contracts/s7c2b-shell-rerank.md section 2.4), paired with model-v5's hash.
-[ -f data/lm/tinylm.sjtl ] || fail "data/lm/tinylm.sjtl is missing (the small model of 語意校正, S7c). Download the tinylm-v4 release asset:
-  gh release download tinylm-v4 -R Nanako0129/shanjie -p tinylm.sjtl -D data/lm"
+# The Kneser-Ney side file (docs/contracts/kn-core.md, model-v6 section 2.3): bound to model-v6's hash; the core turns the term on
+# when it sits beside the model, and the small model below records its SHA-256.
+[ -f data/lm/kn.sjkn ] || fail "data/lm/kn.sjkn is missing (the Kneser-Ney side file of the model). Download the kn-v1 release asset:
+  gh release download kn-v1 -R Nanako0129/shanjie -p kn.sjkn -D data/lm"
+shasum -a 256 -c data/kn.sjkn.sha256 >/dev/null \
+  || fail "data/lm/kn.sjkn does not match data/kn.sjkn.sha256; download kn-v1 again"
+# The small model behind 語意校正 (docs/contracts/s7c2b-shell-rerank.md section 2.4), paired with model-v6's and kn-v1's hashes (SJTL0004).
+[ -f data/lm/tinylm.sjtl ] || fail "data/lm/tinylm.sjtl is missing (the small model of 語意校正, S7c). Download the tinylm-v5 release asset:
+  gh release download tinylm-v5 -R Nanako0129/shanjie -p tinylm.sjtl -D data/lm"
 shasum -a 256 -c data/tinylm.sjtl.sha256 >/dev/null \
-  || fail "data/lm/tinylm.sjtl does not match data/tinylm.sjtl.sha256; download tinylm-v4 again"
+  || fail "data/lm/tinylm.sjtl does not match data/tinylm.sjtl.sha256; download tinylm-v5 again"
 for f in data/lexicon/mcbpmf-data.txt data/lexicon/overlay-add.tsv data/lexicon/sandhi-add.tsv data/lexicon/names-add.tsv data/lexicon/demote.tsv data/packs/acg-add.tsv data/packs/acg-sources.tsv data/packs/acg.json LICENSE LICENSES/McBopomofo-MIT.txt LICENSES/data.md LICENSES/SCOWL.txt LICENSES/SymSpell-MIT.txt LICENSES/name-suggestion-index-BSD-3-Clause.txt; do
   [ -f "$f" ] || fail "$f is missing"
 done
@@ -97,7 +103,7 @@ cp data/lexicon/mcbpmf-data.txt data/lexicon/overlay-add.tsv data/lexicon/sandhi
 # (acg-groups.tsv, acg-collisions.tsv, acg-exclude.tsv, acg-manual.tsv). The shell passes Resources/packs to shanjie_engine_new_packs.
 mkdir -p "$RES/packs"
 cp data/packs/acg-add.tsv data/packs/acg-sources.tsv data/packs/acg.json "$RES/packs/"
-cp -L data/lm/bigram.sjlm data/lm/classes.sjc data/lm/tinylm.sjtl "$RES/"   # -L: the worktree's model may be a symlink
+cp -L data/lm/bigram.sjlm data/lm/classes.sjc data/lm/kn.sjkn data/lm/tinylm.sjtl "$RES/"   # -L: the worktree's model may be a symlink
 cp "$EN_TMP/english-words.txt" "$RES/"   # generated above (docs/contracts/zhen-mixed.md section 3.4)
 swift scripts/make-icon.swift "$RES/shanjie.tiff"
 
@@ -105,7 +111,7 @@ cp LICENSE "$RES/LICENSES/LICENSE"
 cp LICENSES/McBopomofo-MIT.txt LICENSES/data.md LICENSES/SCOWL.txt LICENSES/SymSpell-MIT.txt LICENSES/name-suggestion-index-BSD-3-Clause.txt "$RES/LICENSES/"
 cat > "$RES/LICENSES/CC-BY-SA-4.0-attribution.txt" <<'EOF'
 overlay-add.tsv, names-add.tsv, packs/acg-add.tsv, packs/acg-sources.tsv, packs/acg.json, demote.tsv, bigram.sjlm,
-classes.sjc and tinylm.sjtl are licensed under the Creative Commons Attribution-ShareAlike 4.0 International license
+classes.sjc, kn.sjkn and tinylm.sjtl are licensed under the Creative Commons Attribution-ShareAlike 4.0 International license
 (CC BY-SA 4.0):
 https://creativecommons.org/licenses/by-sa/4.0/
 
@@ -136,6 +142,8 @@ bigram.sjlm: word counts from Wikipedia articles, Mozilla Common Voice
   Attribution: Wikipedia contributors, Tatoeba contributors.
 classes.sjc: word classes and class transition probabilities computed from
   the same counts as bigram.sjlm; same sources and attribution.
+kn.sjkn: Kneser-Ney continuation counts computed from the same counts as
+  bigram.sjlm; same sources and attribution.
 tinylm.sjtl: a small character model (the 語意校正 rerank) trained on text
   from the same sources as bigram.sjlm: Wikipedia articles, Mozilla Common
   Voice sentences (CC0), Tatoeba sentences (CC BY 2.0 FR) and synthetic
