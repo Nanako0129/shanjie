@@ -127,8 +127,12 @@ final class CoreEngine {
     }
 
     /// zhen-inline: whether the English typed into the unfinished syllable shows as letters while it can still become a listed word
-    /// (the core's default is true; no snapshot). Sent to every engine `Shell.build()` makes.
-    func setEnglishInline(_ on: Bool) -> Int32 { shanjie_engine_set_english_inline(handle, on ? 1 : 0) }
+    /// (the core's default is true); returns the snapshot, so a composition on screen is drawn again. Sent to every engine
+    /// `Shell.build()` makes.
+    func setEnglishInline(_ on: Bool) -> CoreResult {
+        var out: UnsafeMutablePointer<ShanjieOutput>?
+        return Self.take(shanjie_engine_set_english_inline(handle, on ? 1 : 0, &out), out)
+    }
 
     func setLearning(_ enabled: Bool) -> Int32 { shanjie_engine_set_learning(handle, enabled ? 1 : 0) }
 

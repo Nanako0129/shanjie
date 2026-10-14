@@ -73,6 +73,10 @@ public struct MenuEntry: Equatable, Sendable {
         public static let demote = "避免把敏感字詞排在前面"
         public static let prediction = "即時預測"
         public static let english = "中英混打（實驗）"
+        /// The choice under it in the settings window (zhen-inline section 2): the label and its two values.
+        public static let englishDisplay = "英文的顯示"
+        public static let englishDisplayTyped = "打字時就顯示"
+        public static let englishDisplaySpace = "按空白才顯示"
         public static let abbreviation = "可省略韻母"
         public static let rerank = "語意校正"
         public static let acgPack = "動漫與遊戲詞"

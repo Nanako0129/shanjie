@@ -163,9 +163,9 @@ struct SettingsForm: View {
                 Toggle(MenuEntry.Text.english, isOn: Binding(get: { model.english }, set: { model.setEnglish($0) }))
                     .disabled(!model.englishEnabled)
                 // Under the toggle (zhen-inline section 2); greyed on the toggle's condition and while the toggle is off.
-                Picker("英文的顯示", selection: Binding(get: { model.englishInline }, set: { model.setEnglishInline($0) })) {
-                    Text("打字時就顯示").tag(true)
-                    Text("按空白才顯示").tag(false)
+                Picker(MenuEntry.Text.englishDisplay, selection: Binding(get: { model.englishInline }, set: { model.setEnglishInline($0) })) {
+                    Text(MenuEntry.Text.englishDisplayTyped).tag(true)
+                    Text(MenuEntry.Text.englishDisplaySpace).tag(false)
                 }
                 .pickerStyle(.segmented)
                 .disabled(!model.englishInlineEnabled)

@@ -715,6 +715,23 @@ final class ShellTests: XCTestCase {
         XCTAssertEqual(third.client.marked, "rus", "and the stored true")
     }
 
+    /// zhen-inline section 2: the 英文的顯示 choice goes through the session that owns the composition, like the other apply*, and the
+    /// snapshot redraws what is on screen: letters typed, the choice turned to "on Space", the marked text is the Zhuyin at once, and
+    /// back.
+    func testEnglishInlineChoiceRedrawsAComposition() {
+        let shell = Shell(resources: resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(),
+                          learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), englishStore: MemoryEnglishStore(true), acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore())
+        let c = Controller(shell)
+        c.session.activate()
+        c.type("rus")
+        XCTAssertEqual(c.client.marked, "rus")
+        XCTAssertTrue(shell.owner === c.session, "premise: the session owns the composition")
+        shell.applyEnglishInline(false)
+        XCTAssertEqual(c.client.marked, "ㄋㄧ", "the composition on screen is drawn again from the snapshot")
+        shell.applyEnglishInline(true)
+        XCTAssertEqual(c.client.marked, "rus")
+    }
+
     /// zhen-mixed section 3.2 / 5.3: a word list that is missing or refused (non-zero from `load_english`) makes `englishAvailable`
     /// false and greys the item; the stored choice still shows, and the switch does nothing.
     func testEnglishListThatDoesNotLoadGreysTheItem() throws {

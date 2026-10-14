@@ -568,13 +568,8 @@ public final class Shell {
         if let o = owner { o.applyCandidateVertical(on) } else { dropOnFailure(setCandidateVertical(on)) }
     }
 
-    /// The settings window's 英文的顯示 choice (zhen-inline section 2): stored and sent. The core gives no snapshot for it; the next
-    /// output carries the display, and a click in the window is inferred to leave no composition on screen.
     func applyEnglishInline(_ on: Bool) {
-        englishInlineOn = on
-        englishStore.englishInline = on
-        if let c = engine?.setEnglishInline(on), c != 0 { Log.shell.error("shanjie_engine_set_english_inline failed, code \(c)") }
-        changed()
+        if let o = owner { o.applyEnglishInline(on) } else { dropOnFailure(setEnglishInline(on)) }
     }
 
     func applyRerank(_ on: Bool) {
@@ -672,6 +667,15 @@ public final class Shell {
         englishStore.english = on
         defer { changed() }
         return engine?.setEnglish(on)
+    }
+
+    /// The settings window's 英文的顯示 choice (zhen-inline section 2): stored, and sent to the engine; the snapshot is for the
+    /// caller to show, so a composition on screen is drawn again in the new display.
+    func setEnglishInline(_ on: Bool) -> CoreResult? {
+        englishInlineOn = on
+        englishStore.englishInline = on
+        defer { changed() }
+        return engine?.setEnglishInline(on)
     }
 
     /// The settings window's choice (candidate-vertical contract section 2.1): stored, and sent to the engine, which applies it
@@ -791,8 +795,9 @@ public final class Shell {
             Log.shell.error("shanjie_engine_set_english failed, code \(c)")
         }
         // And its display choice (zhen-inline section 2), every time for the same reason: the core's default is true.
-        let inline = e.setEnglishInline(englishInlineOn)
-        if inline != 0 { Log.shell.error("shanjie_engine_set_english_inline failed, code \(inline)") }
+        if case .failed(let c) = e.setEnglishInline(englishInlineOn) {
+            Log.shell.error("shanjie_engine_set_english_inline failed, code \(c)")
+        }
         // Same for the candidate window's orientation (candidate-vertical contract section 2.2).
         if case .failed(let c) = e.setCandidateVertical(candidateVertical) {
             Log.shell.error("shanjie_engine_set_candidate_vertical failed, code \(c)")
@@ -983,6 +988,16 @@ public final class Session {
     /// The menu's 中英混打 switch: the snapshot is shown, if this session owns the composition.
     func applyEnglish(_ on: Bool) {
         switch shell.setEnglish(on) {
+        case .ok(let o)? where shell.owner === self: apply(o)
+        case .failed(let c)?: _ = fail(c)
+        default: break
+        }
+    }
+
+    /// The settings window's 英文的顯示 choice: the snapshot is shown, if this session owns the composition (letters turn into
+    /// Zhuyin or back on screen).
+    func applyEnglishInline(_ on: Bool) {
+        switch shell.setEnglishInline(on) {
         case .ok(let o)? where shell.owner === self: apply(o)
         case .failed(let c)?: _ = fail(c)
         default: break
