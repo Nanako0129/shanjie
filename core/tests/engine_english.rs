@@ -359,14 +359,16 @@ fn digit_beyond_total_is_ignored() {
 }
 
 #[test]
-fn letter_in_window_closes_and_restarts() {
+fn letter_in_window_keeps_the_item_and_starts_a_syllable() {
+    // Zhen-inline 1.3 (revision 2): a Zhuyin key that is not an item's digit keeps the selected item as an English token first,
+    // then is the first key of a new syllable (rule 9 as for any first key). The old rule closed the window and lost the word.
     let mut e = eng();
     run(&mut e, "r u s t _");
     let o = run(&mut e, "w");
     assert!(!e.english_open() && o.candidates.is_empty());
-    assert!(e.english_shadow_len() == 1 && o.preedit == "ㄊㄧ", "w replaced ㄔ and started a new shadow");
+    assert!(e.english_shadow_len() == 1 && o.preedit == "rustㄊ", "rust stays, w starts a syllable: {}", o.preedit);
     let o = run(&mut e, "_");
-    assert!(!e.english_open() && o.preedit == shows("ㄊㄧ"), "syls == [ㄊㄧ]");
+    assert!(!e.english_open() && o.preedit == format!("rust{}", shows("ㄊ")), "rust, then the syllable ㄊ completed");
 }
 
 #[test]
@@ -595,8 +597,8 @@ fn space_after_the_token_lists_its_three_writings() {
     assert!(o.candidates == ["rust", "Rust", "RUST"] && o.selected == Some(0) && o.total == 3, "{:?}", o.candidates);
     let o = run(&mut e, "2");
     assert!(o.preedit == "Rust" && o.commit.is_empty() && o.candidates.is_empty());
-    // Again on the new writing: the same three, in the same order.
-    assert!(run(&mut e, "_").candidates == ["rust", "Rust", "RUST"]);
+    // Again on the new writing (zhen-inline 1.0, revision 2): the text as it stands first, then lower, Capitalised, UPPER, no repeat.
+    assert!(run(&mut e, "_").candidates == ["Rust", "rust", "RUST"]);
     // Down opens it too (open_candidates), a punctuation mark still lists its own table.
     let mut e = eng();
     run(&mut e, "r u s t _ 1");
@@ -831,8 +833,12 @@ fn rule_d_conditions_one_by_one() {
     let has = |syl: &str| !lex.entries(&[syl.to_string()]).is_empty();
     // A prefix of a word, not a word, and a word that is no prefix of another: `rust` + `y` is no prefix of anything.
     let mut e = eng_inline();
+    let o = run(&mut e, "r u s h");
+    assert!(o.preedit == "ㄘㄧ" && !e.english_inline_shown(), "not the start of a listed word: {}", o.preedit);
+    // `rust` is a whole word and `y` goes nowhere from it: the auto-keep takes over (zhen-inline 1.3), not the Zhuyin.
+    let mut e = eng_inline();
     let o = run(&mut e, "r u s t y");
-    assert!(o.preedit == "ㄗㄧ" && !e.english_inline_shown(), "not the start of a listed word: {}", o.preedit);
+    assert!(o.preedit == "rustㄗ" && !e.english_inline_shown(), "{}", o.preedit);
     // Fewer than 3 letters. The real lexicon has every single symbol as a syllable, so two letters with one overwrite never
     // pass the overwrite condition there; a lexicon without ㄍ and ㄍㄠ shows the 3-letter rule alone: `h e` (one overwrite,
     // a leftover that is no syllable) shows the Zhuyin, `h e l` the letters.
@@ -912,4 +918,439 @@ fn the_word_list_is_sorted_on_load() {
     assert!(run(&mut e, "r u s").preedit == "rus", "rust sits among the others");
     assert!(run(&mut e, "t").preedit == "rust");
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+// ---------- zhen-inline revision 2 (docs/contracts/zhen-inline.md sections 1.3, 1.3b, 1.3c and 4.1) ----------
+
+/// The tiny list plus `win` and `windows` (the contract's examples need a word that is a prefix of a longer one). A file of its
+/// own in the temp directory, so eval/golden/english-tiny.txt, which the Swift tests and the simulator's recall test pin by hash,
+/// stays as it is.
+fn win_list() -> PathBuf {
+    static P: OnceLock<PathBuf> = OnceLock::new();
+    P.get_or_init(|| {
+        let dir = tmp_dir("win-list");
+        let text = std::fs::read_to_string(tiny_list()).unwrap() + "win\nwindows\n";
+        std::fs::write(dir.join("list.txt"), text).unwrap();
+        dir.join("list.txt")
+    })
+    .clone()
+}
+/// The default display ("show as typed") with the extended list.
+fn win() -> Engine {
+    let mut e = Engine::with_lexicon(real(), Layout::Standard);
+    e.load_english(&win_list()).unwrap();
+    e.set_english(true).unwrap();
+    e
+}
+/// "Show on Space" with the extended list.
+fn win_space() -> Engine {
+    let mut e = win();
+    e.set_english_inline(false).unwrap();
+    e
+}
+/// Types the three syllables of 我在用 (whatever the decoder shows for them) and returns what is shown.
+fn three(e: &mut Engine) -> String {
+    syllable(e, "ㄨㄛˇ");
+    syllable(e, "ㄗㄞˋ");
+    let zh = syllable(e, "ㄩㄥˋ").preedit;
+    assert!(zh.chars().count() == 3, "premise: three syllables show three characters: {zh}");
+    zh
+}
+/// The first lexicon entry of a syllable: the Chinese item of a window or token list.
+fn first_entry(syl: &str) -> String {
+    real().entries(&[syl.to_string()]).first().expect("a syllable of the lexicon").0.to_string()
+}
+/// 39 punctuation marks: 39 units, one short of the limit.
+fn nearly_full(e: &mut Engine) -> String {
+    for _ in 0..39 {
+        e.key(Key::ch(',', MOD_SHIFT)).unwrap();
+    }
+    "，".repeat(39)
+}
+
+#[test]
+fn shift_letter_starts_a_run_on_an_empty_composition() {
+    for mut e in [win(), win_space()] {
+        let o = run(&mut e, "S-w");
+        assert!(o.handled && o.commit.is_empty() && o.preedit == "W" && o.cursor_utf16 == 1, "{}", o.preedit);
+        let o = run(&mut e, "i n d o w s");
+        assert!(o.commit.is_empty() && o.preedit == "Windows" && o.cursor_utf16 == 7 && !e.english_open(), "{}", o.preedit);
+        assert!(o.candidates.is_empty() && e.english_shadow_len() == 0, "no window, no shadow");
+    }
+}
+
+#[test]
+fn run_after_chinese_ends_with_space_and_the_composition_goes_on() {
+    let mut e = win();
+    let zh = three(&mut e);
+    let o = run(&mut e, "S-w i n d o w s");
+    assert!(o.preedit == format!("{zh}Windows") && o.commit.is_empty());
+    let o = run(&mut e, "_");
+    assert!(o.handled && o.commit.is_empty() && o.preedit == format!("{zh}Windows") && !e.english_open(), "the space is eaten: {}", o.preedit);
+    assert!(o.candidates.is_empty(), "no window");
+    // 很好 after it, one Enter sends the lot.
+    syllable(&mut e, "ㄏㄣˇ");
+    let shown = syllable(&mut e, "ㄏㄠˇ").preedit;
+    let tail = shown.strip_prefix(&format!("{zh}Windows")).expect("Windows stays in front").to_string();
+    assert!(tail.chars().count() == 2);
+    let o = run(&mut e, "Enter");
+    assert!(o.commit == format!("{zh}Windows{tail}"), "{}", o.commit);
+}
+
+#[test]
+fn run_keeps_the_word_when_a_zhuyin_key_cannot_go_on() {
+    // The same composition with Space and without: `Windows` stays, ㄏ is the next syllable (revision 2, 1.3b). Both displays.
+    for mk in [win as fn() -> Engine, win_space] {
+        let mut a = mk();
+        let zh = three(&mut a);
+        run(&mut a, "S-w i n d o w s _ c");
+        let mut b = mk();
+        three(&mut b);
+        let ob = run(&mut b, "S-w i n d o w s c");
+        assert!(ob.preedit == format!("{zh}Windowsㄏ") && ob.commit.is_empty(), "{}", ob.preedit);
+        assert!(b.english_autokept());
+        for e in [&mut a, &mut b] {
+            syllable(e, "ㄠˇ");
+        }
+        let (ca, cb) = (run(&mut a, "Enter").commit, run(&mut b, "Enter").commit);
+        assert!(ca == cb && ca.starts_with(&format!("{zh}Windows")), "{ca} {cb}");
+    }
+}
+
+#[test]
+fn run_goes_on_with_shifted_and_prefix_letters() {
+    // `Windows` + Shift+X: a Shift letter always goes on the run, no keep.
+    let mut e = win();
+    let o = run(&mut e, "S-w i n d o w s S-x");
+    assert!(o.preedit == "WindowsX" && !e.english_autokept(), "{}", o.preedit);
+    // While the run is a prefix of a longer word (`win` of `windows`) a plain letter goes on.
+    let mut e = win();
+    let o = run(&mut e, "S-w i n d");
+    assert!(o.preedit == "Wind" && !e.english_autokept(), "{}", o.preedit);
+    // `win` is a word itself, `windows` too: after `windows` any plain letter keeps (tested above), after `win` + `d` it does not.
+    // Then the run is ended by Space as a token, still `WindowsX`.
+    let mut e = win();
+    run(&mut e, "S-w i n d o w s S-x");
+    let o = run(&mut e, "_");
+    assert!(o.preedit == "WindowsX" && o.commit.is_empty());
+}
+
+#[test]
+fn run_takes_the_shadow_letters_and_the_shift_letter() {
+    // `i` + Shift+P + `hone` + Space: iPhone, an English token.
+    let mut e = win();
+    let o = run(&mut e, "i S-p h o n e");
+    assert!(o.preedit == "iPhone", "{}", o.preedit);
+    let o = run(&mut e, "_");
+    assert!(o.preedit == "iPhone" && o.candidates.is_empty() && !e.english_open());
+    // Letters on screen (D): `rust` + Shift+W is the run `rustW`.
+    let mut e = win();
+    let o = run(&mut e, "r u s t S-w");
+    assert!(o.preedit == "rustW" && e.english_shadow_len() == 0 && !e.english_inline_shown(), "{}", o.preedit);
+    // "Show on Space": the Zhuyin is on screen, the letters typed still are the run's start.
+    let mut e = win_space();
+    assert!(run(&mut e, "r u s t").preedit == "ㄔㄧ");
+    assert!(run(&mut e, "S-w").preedit == "rustW");
+    // The window open: it closes, the shadow's letters start the run.
+    let mut e = win();
+    run(&mut e, "r u s t _");
+    assert!(e.english_open());
+    let o = run(&mut e, "S-w");
+    assert!(!e.english_open() && o.candidates.is_empty() && o.preedit == "rustW", "{}", o.preedit);
+}
+
+#[test]
+fn run_drops_an_unfinished_syllable_that_is_no_letters() {
+    // `1` is ㄅ, a key that is no letter: Shift+W throws the ㄅ away and starts a run with `W`.
+    let mut e = win();
+    assert!(run(&mut e, "1").preedit == "ㄅ");
+    let o = run(&mut e, "S-w");
+    assert!(o.preedit == "W" && e.english_shadow_len() == 0, "{}", o.preedit);
+    // The same through a Chinese candidate window: it closes.
+    let mut e = win();
+    let zh = three(&mut e);
+    let o = run(&mut e, "_");
+    assert!(!o.candidates.is_empty(), "premise: the window is open");
+    let o = run(&mut e, "S-w");
+    assert!(o.candidates.is_empty() && o.preedit == format!("{zh}W"), "{}", o.preedit);
+}
+
+#[test]
+fn run_backspace_and_escape() {
+    let mut e = win();
+    let zh = three(&mut e);
+    assert!(run(&mut e, "S-w i n").preedit == format!("{zh}Win"));
+    assert!(run(&mut e, "BS").preedit == format!("{zh}Wi"));
+    let o = run(&mut e, "Esc");
+    assert!(o.preedit == zh, "the whole run goes, the rest stays: {}", o.preedit);
+    // The run is closed: a letter starts a syllable, it does not go on a run.
+    assert!(run(&mut e, "c").preedit == format!("{zh}ㄏ"));
+    // Backspace down to nothing closes the run and takes nothing else.
+    let mut e = win();
+    let zh = three(&mut e);
+    run(&mut e, "S-w");
+    let o = run(&mut e, "BS");
+    assert!(o.preedit == zh);
+    assert!(run(&mut e, "c").preedit == format!("{zh}ㄏ"));
+}
+
+#[test]
+fn run_is_32_letters_and_the_33rd_starts_the_next() {
+    let mut e = win();
+    run(&mut e, "S-z");
+    let o = run(&mut e, &"z ".repeat(31));
+    assert!(o.preedit == format!("Z{}", "z".repeat(31)));
+    let o = run(&mut e, "q");
+    assert!(o.preedit == format!("Z{}q", "z".repeat(31)) && o.commit.is_empty());
+    // The 32 letters are a token now and `q` the new run: Backspace takes the `q`, the next one the whole token.
+    assert!(run(&mut e, "BS").preedit == format!("Z{}", "z".repeat(31)));
+    assert!(run(&mut e, "BS").preedit.is_empty());
+}
+
+#[test]
+fn other_keys_end_the_run_first() {
+    // Punctuation: the run ends, then the mark is inserted.
+    let mut e = win();
+    let o = run(&mut e, "S-w i n d o w s S-,");
+    assert!(o.preedit == "Windows，", "{}", o.preedit);
+    // Enter: the run ends, then Enter sends it all.
+    let mut e = win();
+    let zh = three(&mut e);
+    let o = run(&mut e, "S-w i n Enter");
+    assert!(o.handled && o.commit == format!("{zh}Win") && o.preedit.is_empty());
+    // A tone key: the run ends, the key does nothing more (no syllable to finish).
+    let mut e = win();
+    assert!(run(&mut e, "S-w i n 3").preedit == "Win");
+    // The commit on focus loss shows the letters as they are.
+    let mut e = win();
+    run(&mut e, "S-w i n");
+    assert!(e.reset(ResetMode::Commit).commit == "Win");
+    let mut e = win();
+    run(&mut e, "S-w i n");
+    assert!(e.reset(ResetMode::Discard).commit.is_empty() && is_empty(&mut e));
+}
+
+#[test]
+fn run_at_the_unit_limit_sends_in_the_output_of_the_ending_key() {
+    // 39 units, `Windows`, Space: the 40th unit is the token, everything goes in this output, the space is eaten.
+    let mut e = win();
+    let marks = nearly_full(&mut e);
+    run(&mut e, "S-w i n d o w s");
+    let o = run(&mut e, "_");
+    assert!(o.handled && o.commit == format!("{marks}Windows") && o.preedit.is_empty(), "{}", o.commit);
+    assert!(is_empty(&mut e));
+    // The same ended by ㄏ: the same text, the key starts a syllable in the emptied composition.
+    let mut e = win();
+    let marks = nearly_full(&mut e);
+    run(&mut e, "S-w i n d o w s");
+    let o = run(&mut e, "c");
+    assert!(o.handled && o.commit == format!("{marks}Windows") && o.preedit == "ㄏ", "{} / {}", o.commit, o.preedit);
+    // Enter that ends it: the text is sent, Enter is not passed on.
+    let mut e = win();
+    let marks = nearly_full(&mut e);
+    run(&mut e, "S-w i n d o w s");
+    let o = run(&mut e, "Enter");
+    assert!(o.handled && o.commit == format!("{marks}Windows") && o.preedit.is_empty(), "{}", o.commit);
+}
+
+#[test]
+fn shift_letter_is_the_old_rules_without_mixing() {
+    // Rule 21: Shift+letter commits the composition and passes the key on. Rule 22: nothing to commit, passes through.
+    let mut e = Engine::with_lexicon(real(), Layout::Standard);
+    let zh = three(&mut e);
+    let o = run(&mut e, "S-w");
+    assert!(!o.handled && o.commit == zh, "{} {}", o.handled, o.commit);
+    let o = run(&mut e, "S-w");
+    assert!(!o.handled && o.commit.is_empty());
+    // The same with the switch on but no list (shadow_on is false), and with Eten.
+    let mut e = Engine::with_lexicon(real(), Layout::Standard);
+    e.set_english(true).unwrap();
+    assert!(!run(&mut e, "S-w").handled);
+    let mut e = Engine::with_lexicon(real(), Layout::Eten);
+    e.load_english(&win_list()).unwrap();
+    e.set_english(true).unwrap();
+    assert!(!run(&mut e, "S-w").handled);
+}
+
+#[test]
+fn autokeep_keeps_the_word_and_starts_the_next_syllable() {
+    // Two Chinese syllables, `rust`, then ㄨ (j) which cannot go on from `rust`: the same state as choosing item 1 and typing j.
+    let build = |keys: &str| {
+        let mut e = eng_inline();
+        syllable(&mut e, "ㄨㄛˇ");
+        let zh = syllable(&mut e, "ㄗㄞˋ").preedit;
+        (e, zh, keys.to_string())
+    };
+    let (mut a, zh, ka) = build("r u s t j");
+    let (mut b, _, kb) = build("r u s t _ 1 j");
+    let (oa, ob) = (run(&mut a, &ka), run(&mut b, &kb));
+    assert!(oa == ob, "{} / {}", oa.preedit, ob.preedit);
+    assert!(oa.preedit == format!("{zh}rustㄨ") && oa.commit.is_empty() && a.english_autokept() && !b.english_autokept());
+    // Finish a Chinese syllable (ㄨㄛˇ), one Enter sends it all.
+    let (ca, cb) = (run(&mut a, "i 3 Enter").commit, run(&mut b, "i 3 Enter").commit);
+    assert!(ca == cb && ca.starts_with(&format!("{zh}rust")) && ca.chars().count() == 2 + 4 + 1, "{ca}");
+    // The kept word is a token: one Backspace takes all of it (the ㄨ first).
+    let (mut a, zh, _) = build("");
+    run(&mut a, "r u s t j");
+    assert!(run(&mut a, "BS").preedit == format!("{zh}rust"));
+    assert!(run(&mut a, "BS").preedit == zh);
+}
+
+#[test]
+fn autokeep_needs_a_whole_word_and_a_key_that_cannot_go_on() {
+    // `windo` is the start of `windows` but no word: `j` does not keep it (the old rule); the Zhuyin shows again.
+    let mut e = win();
+    let o = run(&mut e, "w i n d o");
+    assert!(o.preedit == "windo" && e.english_inline_shown());
+    let o = run(&mut e, "j");
+    assert!(!e.english_autokept() && !o.preedit.contains("windo") && !e.english_inline_shown(), "{}", o.preedit);
+    // `wind` + `o` keeps going: the letters stay, nothing kept (`win` is a word, `wind` is not).
+    let mut e = win();
+    let o = run(&mut e, "w i n d");
+    assert!(o.preedit == "wind" && !e.english_autokept());
+    // `w i n d o w s` is the whole word `windows`; the next `d` cannot go on from it: kept.
+    let mut e = win();
+    let o = run(&mut e, "w i n d o w s");
+    assert!(o.preedit == "windows");
+    // `win` is also a whole word and `d` goes on from it: while `win` is not even shown as letters (one overwrite, a valid leftover),
+    // `wind` is; the table row asks D first. Typing on never keeps.
+    let o = run(&mut e, "c");
+    assert!(e.english_autokept() && o.preedit == "windowsㄏ", "{}", o.preedit);
+}
+
+#[test]
+fn autokeep_is_not_for_tones_space_or_show_on_space() {
+    // A tone key and Space are not Zhuyin keys: nothing kept (the window opens at Space).
+    let mut e = eng_inline();
+    run(&mut e, "r u s t 3");
+    assert!(!e.english_autokept());
+    assert!(run(&mut e, "BS").preedit == "rus", "the letters were still unfinished");
+    let mut e = eng_inline();
+    run(&mut e, "r u s t _");
+    assert!(e.english_open() && !e.english_autokept());
+    // "Show on Space": D never holds, so there is no auto-keep: j replaces the ㄧ.
+    let mut e = eng();
+    let o = run(&mut e, "r u s t j");
+    assert!(o.preedit == "ㄔㄨ" && !e.english_autokept(), "{}", o.preedit);
+}
+
+#[test]
+fn window_open_and_a_zhuyin_key_keeps_the_selected_item() {
+    // `rust`, Space, then j: the state of choosing item 1 and typing j, the window closed, rust a token.
+    let mut a = eng_inline();
+    let oa = run(&mut a, "r u s t _ j");
+    let mut b = eng_inline();
+    let ob = run(&mut b, "r u s t _ 1 j");
+    assert!(oa == ob && oa.preedit == "rustㄨ" && oa.commit.is_empty() && !a.english_open(), "{}", oa.preedit);
+    assert!(a.english_autokept());
+    assert!(run(&mut a, "BS").preedit == "rust");
+    assert!(run(&mut a, "BS").preedit.is_empty(), "one Backspace takes the whole token");
+    // The selected item, not the first.
+    let mut e = eng_inline();
+    assert!(run(&mut e, "r u s t _ Right j").preedit == "Rustㄨ");
+    // A digit is an item's key, 0 is not (ㄢ).
+    let mut e = eng_inline();
+    assert!(run(&mut e, "r u s t _ 0").preedit == "rustㄢ");
+    let mut e = eng_inline();
+    assert!(run(&mut e, "r u s t _ 3").preedit == "RUST");
+    // Item 4 of google's window is the Chinese one (a digit selects, it keeps nothing).
+    let mut e = eng();
+    run(&mut e, "g o o g l e _");
+    let o = run(&mut e, "4");
+    assert!(o.preedit == first_entry("ㄍㄠ"), "item 4 of google's window is the Chinese one: {}", o.preedit);
+}
+
+#[test]
+fn autokeep_at_the_unit_limit_sends_in_this_keys_output() {
+    for keys in ["r u s t j", "r u s t _ j"] {
+        let mut e = eng_inline();
+        for _ in 0..39 {
+            syllable(&mut e, "ㄅㄚ");
+        }
+        let o = run(&mut e, keys);
+        assert!(o.handled && o.commit.chars().count() == 39 + 4 && o.commit.ends_with("rust"), "{keys}: {}", o.commit);
+        assert!(o.preedit == "ㄨ", "{keys}: the key began a syllable in the emptied composition: {}", o.preedit);
+    }
+}
+
+#[test]
+fn token_lists_follow_how_the_token_was_made() {
+    // Kept by a Zhuyin key after `google`: the leftover ㄍㄠ is a syllable, so the list has a Chinese item last.
+    let zh = first_entry("ㄍㄠ");
+    for keys in ["g o o g l e j", "g o o g l e _ j"] {
+        let mut e = eng_inline();
+        assert!(run(&mut e, keys).preedit == "googleㄨ");
+        run(&mut e, "BS");
+        let o = run(&mut e, "Down");
+        assert!(o.candidates == ["google", "Google", "GOOGLE", zh.as_str()], "{keys}: {:?}", o.candidates);
+        // Choosing the Chinese item turns the token into the character.
+        let o = run(&mut e, "4");
+        assert!(o.preedit == zh && o.commit.is_empty(), "{keys}: {}", o.preedit);
+        // And the list of the character is the character's (an ordinary candidate window), not a token's.
+        let o = run(&mut e, "_");
+        assert!(!o.candidates.iter().any(|c| c == "google"), "{keys}");
+    }
+    // `rust`: its leftover ㄔㄧ is no syllable of the lexicon, so there is no Chinese item.
+    let mut e = eng_inline();
+    run(&mut e, "r u s t j BS");
+    assert!(run(&mut e, "Down").candidates == ["rust", "Rust", "RUST"]);
+    // Choosing another writing keeps the keys: the Chinese item is still there, the list starts from the text as it is.
+    let mut e = eng_inline();
+    run(&mut e, "g o o g l e j BS Down");
+    let o = run(&mut e, "2");
+    assert!(o.preedit == "Google");
+    let o = run(&mut e, "Down");
+    assert!(o.candidates == ["Google", "google", "GOOGLE", zh.as_str()], "{:?}", o.candidates);
+    // A token chosen from the English window with Enter has no keys: three writings only.
+    let mut e = eng_inline();
+    run(&mut e, "g o o g l e _ Enter");
+    assert!(run(&mut e, "Down").candidates == ["google", "Google", "GOOGLE"]);
+    // The Space key lists the same as Down.
+    let mut e = eng_inline();
+    run(&mut e, "g o o g l e j BS");
+    assert!(run(&mut e, "_").candidates.len() == 4);
+}
+
+#[test]
+fn run_tokens_list_their_writings_without_a_chinese_item() {
+    let mut e = win();
+    run(&mut e, "S-w i n d o w s _");
+    assert!(run(&mut e, "Down").candidates == ["Windows", "windows", "WINDOWS"]);
+    let mut e = win();
+    run(&mut e, "i S-p h o n e _");
+    assert!(run(&mut e, "Down").candidates == ["iPhone", "iphone", "Iphone", "IPHONE"]);
+    // Down ends the run and opens the list in the same output (the output must show the window the engine opened).
+    let mut e = win();
+    let o = run(&mut e, "S-w i n d o w s Down");
+    assert!(o.candidates == ["Windows", "windows", "WINDOWS"] && o.selected == Some(0), "{:?}", o.candidates);
+    // Ended by a kept key (ㄏ), then ㄏ deleted: the same list, no Chinese item.
+    let mut e = win();
+    run(&mut e, "S-w i n d o w s c BS");
+    assert!(run(&mut e, "Down").candidates == ["Windows", "windows", "WINDOWS"]);
+    // With an unfinished syllable Down does nothing to the token.
+    let mut e = win();
+    run(&mut e, "S-w i n d o w s c");
+    assert!(run(&mut e, "Down").candidates.is_empty());
+}
+
+#[test]
+fn switching_mixing_off_keeps_the_run_as_a_token() {
+    // The run is text on screen: set_english(0) and set_abbreviation(1) turn it into a token (the output shows it), nothing is lost.
+    let mut e = win();
+    let zh = three(&mut e);
+    run(&mut e, "S-w i n");
+    let o = e.set_english(false).unwrap();
+    assert!(o.handled && o.commit.is_empty() && o.preedit == format!("{zh}Win"), "{}", o.preedit);
+    assert!(run(&mut e, "Enter").commit == format!("{zh}Win"));
+    let mut e = win();
+    run(&mut e, "S-w i n");
+    let o = e.set_abbreviation(true).unwrap();
+    assert!(o.preedit == "Win");
+    assert!(run(&mut e, "Enter").commit == "Win");
+    // At the limit the text goes out in that call's snapshot.
+    let mut e = win();
+    let marks = nearly_full(&mut e);
+    run(&mut e, "S-w i n");
+    let o = e.set_english(false).unwrap();
+    assert!(o.commit == format!("{marks}Win") && o.preedit.is_empty(), "{}", o.commit);
 }
