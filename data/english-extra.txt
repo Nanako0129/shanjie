@@ -85,6 +85,8 @@ Huawei
 Sony
 Nintendo
 IBM
+MUJI
+UNIQLO
 
 # 系統、裝置與 Apple 服務
 macOS
@@ -183,6 +185,20 @@ README
 LaTeX
 UTF
 ASCII
+Colab
+iTerm
+Vue
+changelog
+codesign
+config
+dataset
+datasets
+finetune
+keychain
+rebase
+repo
+repos
+worktree
 
 # 社群、通訊與常用 App
 Figma
@@ -213,6 +229,9 @@ PChome
 Dcard
 PTT
 Yahoo
+foodpanda
+Lyft
+emoji
 
 # 常見縮寫
 CEO
@@ -239,6 +258,7 @@ FPS
 RPG
 NPC
 DLC
+wtf
 
 # 維護者加的名字
 Miyago
