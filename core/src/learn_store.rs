@@ -60,6 +60,8 @@ const O_NOFOLLOW: i32 = 0o400000;
 const O_NONBLOCK: i32 = 0o4000;
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 const ELOOP: i32 = 40;
+#[cfg(all(target_os = "linux", not(target_arch = "x86_64")))]
+compile_error!("learn_store.rs has <fcntl.h> values only for macOS and x86_64 Linux (O_NOFOLLOW differs by architecture)");
 
 extern "C" {
     fn geteuid() -> u32;
