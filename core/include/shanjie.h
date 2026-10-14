@@ -163,6 +163,8 @@ int32_t shanjie_engine_load_english(ShanjieEngine *engine, const char *path);
 //     22) are unchanged.
 //   - With the cursor right after an English token or a space unit, no unfinished syllable and no window open, Space inserts
 //     a half-width space as one unit (like a punctuation mark): the first Space after a run ends it, the second types a space.
+//     With the cursor at 0 in front of one of them Space opens nothing; a space unit has no list at all (Down opens nothing).
+//     A space unit is learned under the same neighbour key as an English token (`^>_punct_en`).
 //   - With the cursor right after an English token and no unfinished syllable, only Down lists its writings (as typed, lower
 //     case, Capitalised, UPPER); a token made by an auto-keep adds a Chinese item, so a wrong keep can be undone.
 //   - An English token or space unit (from an item, an auto-keep, a run or Space) that makes the 40th unit sends the whole

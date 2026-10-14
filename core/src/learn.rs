@@ -56,10 +56,11 @@ pub fn english_of(reading: &str) -> Option<&str> {
 }
 
 /// Rule 8: the key a word under `SENTINEL` is learned and looked up with; `next` is the reading of the syllable
-/// right after the word (`None`: the word ends the composition). An English token after the word counts as one kind of
-/// neighbour, not as the word it holds (zhen-inline §1.0): `^>_punct_en`. Every key of rule 8 comes through here.
+/// right after the word (`None`: the word ends the composition). An English token or a space unit after the word counts as
+/// one kind of neighbour, not as the word it holds (zhen-inline §1.0, §1.3e): `^>_punct_en`. Every key of rule 8 comes through here.
 pub fn next_key(next: Option<&str>) -> String {
-    let next = if next.and_then(english_of).is_some() { Some(ENGLISH_NEXT) } else { next };
+    let english_or_space = next.is_some_and(|n| english_of(n).is_some() || n.strip_prefix(PUNCT_PREFIX) == Some(" "));
+    let next = if english_or_space { Some(ENGLISH_NEXT) } else { next };
     format!("{NEXT_PREFIX}{}", next.unwrap_or("$"))
 }
 

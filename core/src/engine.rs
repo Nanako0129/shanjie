@@ -2023,10 +2023,12 @@ impl Engine {
         }
         let n = self.syls.len();
         match k.kind {
-            // Zhen-inline section 1.3e: Space right after an English token or a space unit types a space.
-            KeyKind::Space if self.cursor > 0 && self.breaks_with_space(self.cursor - 1) => {
+            // Zhen-inline section 1.3e (English mixing on): Space right after an English token or a space unit types a space.
+            KeyKind::Space if self.shadow_on() && self.cursor > 0 && self.breaks_with_space(self.cursor - 1) => {
                 return self.insert_token(format!("{PUNCT_PREFIX} "), Some(" ".to_string()), None);
             }
+            // In front of one (cursor 0) Space opens nothing: the writings list opens with Down only.
+            KeyKind::Space if self.shadow_on() && self.cursor == 0 && self.breaks_with_space(0) => self.pred = old,
             KeyKind::Space | KeyKind::Down => self.open_candidates(),
             KeyKind::Up => self.pred = old,
             KeyKind::Char if tone.is_some() => self.pred = old,
@@ -2282,6 +2284,9 @@ impl Engine {
         // then its alternatives.
         let touching = if a == 0 { 0 } else { a - 1 };
         if avail == 0 && touching < self.syls.len() && self.is_punct(touching) {
+            if self.syls[touching].strip_prefix(PUNCT_PREFIX) == Some(" ") {
+                return; // zhen-inline section 1.3e: a space unit has no list
+            }
             if let Some(word) = english_of(&self.syls[touching]) {
                 // zhen-inline sections 1.0 and 1.3c: right after an English token, its writings starting from the text it has now;
                 // the punctuation table is not asked. A token an auto-keep made adds the Chinese item of the syllable it remembers.

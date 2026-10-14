@@ -57,6 +57,7 @@ fn key_of(tok: &str) -> Key {
         "Delete" => Key::new(KeyKind::Delete),
         "Left" => Key::new(KeyKind::Left),
         "Right" => Key::new(KeyKind::Right),
+        "Home" => Key::new(KeyKind::Home),
         "Down" => Key::new(KeyKind::Down),
         "S-Enter" => with(KeyKind::Enter, MOD_SHIFT),
         "Cmd-BS" => with(KeyKind::Backspace, MOD_COMMAND),
@@ -1080,8 +1081,11 @@ fn space_after_chinese_a_mark_or_an_unfinished_syllable_is_as_before() {
     assert!(!o.preedit.contains(' ') && o.preedit.starts_with("Windows"), "{:?}", o.preedit);
     // An open window: Space is the window's.
     let mut e = win();
-    run(&mut e, "S-w i n d o w s _ Down");
-    assert!(e.english_open() || run(&mut e, "_").preedit == "Windows", "the window takes the Space");
+    let o = run(&mut e, "S-w i n d o w s _ Down");
+    assert!(!e.english_open() && o.candidates == ["Windows", "windows", "WINDOWS"], "premise: the writings list is open: {:?}", o.candidates);
+    let o = run(&mut e, "_");
+    assert!(o.preedit == "Windows" && o.commit.is_empty(), "no space unit: {:?}", o.preedit);
+    assert!(o.candidates == ["Windows", "windows", "WINDOWS"] && o.selected == Some(0), "the list stays open on its first page: {:?}", o.candidates);
 }
 
 #[test]
@@ -1111,8 +1115,8 @@ fn space_unit_at_the_unit_limit_and_in_the_middle() {
 
 #[test]
 fn space_unit_is_a_punctuation_token_for_learning() {
-    // 我是 re-picked as 我試, then a space unit: the record is under the space unit's own reading, nothing else, and the
-    // lookup after typing the same finds it (the key is `NEXT_PREFIX` + the unit's reading, like any mark).
+    // 我是 re-picked as 我試, then a space unit: the record is under `^>_punct_en`, the key every English token
+    // has, and the lookup after typing the same finds it.
     let dir = tmp_dir("space-unit-key");
     let mut e = lm_eng();
     e.learning_open(&dir).unwrap();
@@ -1123,7 +1127,7 @@ fn space_unit_is_a_punctuation_token_for_learning() {
     let o = run(&mut e, "Enter");
     assert!(o.commit == "我試rust ", "{}", o.commit);
     assert!(records(&e) == [("^>_punct_en".to_string(), "我試".to_string())], "{:?}", records(&e));
-    // The space unit straight after the word (the token between them deleted): its own reading is the next key, as a mark's is.
+    // The space unit straight after the word (the token between them deleted): it is the same kind of neighbour as an English token.
     let dir2 = tmp_dir("space-unit-key2");
     let mut e = lm_eng();
     e.learning_open(&dir2).unwrap();
@@ -1133,11 +1137,11 @@ fn space_unit_is_a_punctuation_token_for_learning() {
     run(&mut e, "S-w _ _ Left Left Delete");
     let o = run(&mut e, "Enter");
     assert!(o.commit == "我試 ", "{:?}", o.commit);
-    assert!(records(&e) == [("^>_punct_ ".to_string(), "我試".to_string())], "{:?}", records(&e));
+    assert!(records(&e) == [("^>_punct_en".to_string(), "我試".to_string())], "{:?}", records(&e));
     // And it is read back from the file: a new engine on the same directory looks the record up under that key.
     let mut e = lm_eng();
     e.learning_open(&dir2).unwrap();
-    assert!(records(&e) == [("^>_punct_ ".to_string(), "我試".to_string())], "after reopening: {:?}", records(&e));
+    assert!(records(&e) == [("^>_punct_en".to_string(), "我試".to_string())], "after reopening: {:?}", records(&e));
     let _ = std::fs::remove_dir_all(&dir2);
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -1196,7 +1200,7 @@ fn run_goes_on_with_shifted_and_prefix_letters() {
     let mut e = win();
     let o = run(&mut e, "S-w i n d");
     assert!(o.preedit == "Wind" && !e.english_autokept(), "{}", o.preedit);
-    // `win` is a word itself, `windows` too: after `windows` any plain letter keeps (tested above), after `win` + `d` it does not.
+    // `win` and `windows` are both words, and still a plain letter goes on after either (amendment three: a run never auto-keeps).
     // Then the run is ended by Space as a token, still `WindowsX`.
     let mut e = win();
     run(&mut e, "S-w i n d o w s S-x");
@@ -1610,4 +1614,44 @@ fn autokept_describes_only_the_latest_call() {
         }
         assert!(!e.english_autokept(), "call {call}");
     }
+}
+
+#[test]
+fn a_space_unit_has_no_list_and_space_in_front_of_a_token_opens_nothing() {
+    // Down right after a space unit opens nothing (it used to list the one item " ").
+    let mut e = win();
+    let zh = three(&mut e);
+    let o = run(&mut e, "S-w i n _ _ Down");
+    assert!(o.handled && o.candidates.is_empty(), "{:?}", o.candidates);
+    assert!(o.preedit == format!("{zh}Win "), "{:?}", o.preedit);
+    // Space and Down at cursor 0 in front of a space unit: the same.
+    let mut e = win();
+    run(&mut e, "S-w _ _ Left Left Delete");
+    assert!(run(&mut e, "Home").preedit == " ");
+    for key in ["_", "Down"] {
+        let o = run(&mut e, key);
+        assert!(o.handled && o.candidates.is_empty() && o.preedit == " ", "{key}: {:?}", o.candidates);
+    }
+    // Space at cursor 0 in front of a token does not open its writings list; Down does.
+    let mut e = win();
+    run(&mut e, "S-w i n d o w s _");
+    let zh = syllable(&mut e, "ㄏㄠˇ").preedit["Windows".len()..].to_string();
+    let o = run(&mut e, "Home");
+    assert!(o.preedit == format!("Windows{zh}"), "{:?}", o.preedit);
+    let o = run(&mut e, "_");
+    assert!(o.handled && o.candidates.is_empty() && o.preedit == format!("Windows{zh}"), "Space: {:?}", o.candidates);
+    let o = run(&mut e, "Down");
+    assert!(o.candidates == ["Windows", "windows", "WINDOWS"], "Down: {:?}", o.candidates);
+}
+
+#[test]
+fn space_unit_rule_needs_english_mixing_on() {
+    // The token `Win` is left by switching the mixing off; Space after it is what it was before the amendment
+    // (rule 16: the writings list of the token), not a space unit.
+    let mut e = win();
+    run(&mut e, "S-w i n");
+    let o = e.set_english(false).unwrap();
+    assert!(o.preedit == "Win", "premise: the run became a token: {:?}", o.preedit);
+    let o = run(&mut e, "_");
+    assert!(o.preedit == "Win" && o.candidates == ["Win", "win", "WIN"], "{:?} {:?}", o.preedit, o.candidates);
 }
