@@ -5468,3 +5468,13 @@ formal: alpha 0.7, tau 1, delta 2
 - **重建**（離線）：`names-add.tsv` 1,615 列、1,606 詞（加分前 1,629／1,620），SHA-256 `77f70524…`；「酷澎」列的分數 −5.17149945。未處置的 (a) 仍是 0。
 - **(c) 丟掉的名字由 1 變 15**（多的都是名字比既有詞庫的詞分數高，把它擠下第一名）：法藍瓷（對法蘭茲）、鳳商（奉商）、大里高中（大理高中）、臺北護大（台北護大）、臺北城大（台北城大）、臺北藝大（台北藝大）、臺東高中（台東高中）、臺南藝大（台南藝大）、臺海大（台海大）、臺中科大（台中科大）、臺中教大（台中教大）、臺中二中（台中二中）、國臺藝（國台藝）、中臺科大（中台科大）、壹番屋（一番屋）；括號是被擠下的既有詞。丟掉的原因是分數規則（既有詞勝），這一步沒有人為決定。
 - **決定性與測試**：同一份快取離線建兩次，三個檔逐位元組相同，建置沒有改 `names-collisions.tsv`。`tools/test_build_names.py` 36 項通過（六字名字的分數斷言改成 `scores()[6] + 2`；把 `NAMES_BONUS` 設成 0 時那一項以斷言失敗，其餘不變）；`make test-golden` 22 項通過。
+
+## 2026-10-14：model-v6 的建置（契約 `docs/contracts/model-v6.md`）
+
+- 維護者在 Discord 說「tinylm-v4、model-v6 今天出」，選擇題選「照草稿全做」；之後同意「明天凌晨發」、「開 KN，核心一起改」。契約經 plan-verifier 五輪與安全審查（處置在契約 §6、§7）後 READY。
+- **輸入**（Windows 機器，`work\modelv6\inputs.sha256`）：維基 dump `5db9052e…`、`colloquial-train.txt` `3e833d06…`、`synth.txt` `bec7a6a2…`、`mcbpmf-data.txt` `0deae7b7…`、OpenCC 兩個表都和 model-v5 相同；改了的是 `overlay-add.tsv`（拿掉粵語詞後 `96b8db89…`）、`acg-add.tsv`（A3 `ecd5f263…`）、新加的 `names-add.tsv`（N1，`77f70524…`）與補次數檔（下一條）。
+- **計數詞表**（`count_lexicon.py`）：詞包 44,554 詞排除 465 個（衝突讀音 239 個），`acg-count.tsv` `e8757303…`；名單 1,606 詞排除 4 個（衝突讀音 5 個），`names-count.tsv` `5c14a359…`。
+- **重現核對**（契約 §2.1，兩項都過）：新的 `build_lm.py` 不帶 `--extra-overlay`、用 model-v5 的計數（188 `work\modelv5`）與 model-v5 當時的 `overlay-add.tsv`（`348979c8…`）建出 `7961cb9d…`，和 model-v5 去掉指紋前逐位元組相同；`build_classes.py` 不帶參數、用 classes-v3 的分群輸出（`modelv5-classes-keep`，`cls-40000-512.npz` `af637997…`）建出 `75a5efb3…`，和 classes-v3 逐位元組相同。〔第一次誤用了 `modelv5-final1` 的計數，建出 `4b1fdce4…`，和那個資料夾自己的模型相同、不是出貨的那份，改用 `work\modelv5` 重做。〕
+- **維基計數**：20 萬篇、3,107 萬段、32,035,747 種二元組、361,810 種詞；16 個 worker（所有子程序關掉 Windows 的降速）。
+- **補次數檔**（契約 §2.1b）：`generate.py`，Cerebras gpt-oss-120b、種子 `experiments/model-v6/seeds-topup.txt`、上限 US$15、目標 50 萬字；中途一次 HTTP 504 後用 `--resume` 接著跑（結果下一節補）。
+
