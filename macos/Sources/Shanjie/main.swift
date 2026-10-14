@@ -69,6 +69,15 @@ final class DefaultsAbbreviationStore: AbbreviationStore {
     }
 }
 
+/// The "中英混打（實驗）" switch (docs/contracts/zhen-mixed.md section 3.2), key `english` in the same domain; absent means off.
+@MainActor
+final class DefaultsEnglishStore: EnglishStore {
+    var english: Bool? {
+        get { UserDefaults.standard.object(forKey: "english") as? Bool }
+        set { UserDefaults.standard.set(newValue, forKey: "english") }
+    }
+}
+
 /// The "動漫與遊戲詞" switch (docs/contracts/acg-pack.md A.2), key `acgPack` in the same domain; absent means on (user decision 2026-10-09).
 @MainActor
 final class DefaultsAcgPackStore: AcgPackStore {
@@ -150,7 +159,7 @@ func runServer() -> Never {
     App.shell = Shell(
         resources: resources.absoluteURL, panel: CandidatePanelAdapter(),
         isSecureInput: { IsSecureEventInputEnabled() }, layoutStore: DefaultsLayoutStore(),
-        learningDirectory: Shell.learningURL(), dialogs: AlertDialogs(), demoteStore: DefaultsDemoteStore(), predictionStore: DefaultsPredictionStore(), abbreviationStore: DefaultsAbbreviationStore(), acgPackStore: DefaultsAcgPackStore(),
+        learningDirectory: Shell.learningURL(), dialogs: AlertDialogs(), demoteStore: DefaultsDemoteStore(), predictionStore: DefaultsPredictionStore(), abbreviationStore: DefaultsAbbreviationStore(), englishStore: DefaultsEnglishStore(), acgPackStore: DefaultsAcgPackStore(),
         glassTintStore: DefaultsGlassTintStore(), candidateOrientationStore: DefaultsCandidateOrientationStore(),
         rerankStore: DefaultsRerankStore(), rerankRunner: QueueRerankRunner(),
         profileModeStore: DefaultsProfileModeStore(), appProfileStore: DefaultsAppProfileStore(),

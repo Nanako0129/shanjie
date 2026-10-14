@@ -136,6 +136,19 @@ int32_t shanjie_engine_set_candidate_vertical(ShanjieEngine *engine, uint32_t en
 //   Turning it off, or the prediction row off, while there are two or more units drops them all (as Esc) and returns
 //   that state; with one unit nothing changes. Turning it on changes nothing. No effect without a loaded model.
 int32_t shanjie_engine_set_abbreviation(ShanjieEngine *engine, uint32_t enabled, ShanjieOutput **out); // 0 or 1; returns a snapshot
+// zhen-mixed (docs/contracts/zhen-mixed.md): the English word list. 0 ok; 1 engine or path NULL; 2 path not UTF-8; 3 unreadable,
+//   not a regular file, over 4 MiB or 200,000 lines, a line outside [a-z]{3,32}, a duplicate line, a BOM. Failure keeps the
+//   previous list (or none). Does not change the switch or the current display. Call it once after shanjie_engine_new.
+int32_t shanjie_engine_load_english(ShanjieEngine *engine, const char *path);
+// set_english 0 or 1 (2 otherwise, state unchanged), default 0 at engine creation, like set_abbreviation in its codes and its
+//   snapshot (handled 1, commit ""); 1 when engine or out is NULL. With 1, and only with a loaded list, the standard layout and
+//   the abbreviation composer off, Space after an English word typed into one unfinished syllable (the keys typed are a listed
+//   word and at least one key replaced a symbol in an occupied column; two when the leftover syllable with tone 1 is itself in
+//   the lexicon) opens the English window (s3a rule 10e): the word, Capitalised, UPPER and, when the leftover syllable is in
+//   the lexicon, its first entry. 1-9, Enter or pick(index) commits an English item with the composition, no space; the
+//   Chinese item becomes a fixed word. Turning it off, or the abbreviation composer on, closes the window. No effect without
+//   a list. Call it after every engine creation, like set_abbreviation.
+int32_t shanjie_engine_set_english(ShanjieEngine *engine, uint32_t enabled, ShanjieOutput **out); // 0 or 1; returns a snapshot
 // s3e (docs/contracts/s3e-punctuation-candidates.md): punctuation alternatives, UTF-8 lines
 // "mark\talt\talt...", blank lines ignored, a repeated mark overrides; at most 64 KB / 1,000 lines.
 // 2 on any invalid input, keeping the previous table (a built-in default until the first success).

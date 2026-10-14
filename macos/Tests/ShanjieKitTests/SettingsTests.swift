@@ -17,20 +17,20 @@ final class SettingsTests: XCTestCase {
         var shell: Shell
         var model: SettingsModel
         var controller: Controller
-        var layout: MemoryLayoutStore, demote: MemoryDemoteStore, prediction: MemoryPredictionStore, abbreviation: MemoryAbbreviationStore
+        var layout: MemoryLayoutStore, demote: MemoryDemoteStore, prediction: MemoryPredictionStore, abbreviation: MemoryAbbreviationStore, english: MemoryEnglishStore
         var acg: MemoryAcgPackStore, tint: MemoryGlassTintStore
         var dialogs: FakeDialogs
     }
 
     private func rig(secure: Bool = false, learning: URL? = nil) -> Rig {
         let layout = MemoryLayoutStore(), demote = MemoryDemoteStore(), prediction = MemoryPredictionStore(), abbreviation = MemoryAbbreviationStore()
-        let acg = MemoryAcgPackStore(), tint = MemoryGlassTintStore(), dialogs = FakeDialogs()
+        let acg = MemoryAcgPackStore(), tint = MemoryGlassTintStore(), dialogs = FakeDialogs(), english = MemoryEnglishStore()
         let shell = Shell(resources: resources, panel: FakePanel(), isSecureInput: { secure }, layoutStore: layout,
-                          learningDirectory: learning, dialogs: dialogs, demoteStore: demote, predictionStore: prediction, abbreviationStore: abbreviation,
+                          learningDirectory: learning, dialogs: dialogs, demoteStore: demote, predictionStore: prediction, abbreviationStore: abbreviation, englishStore: english,
                           acgPackStore: acg, glassTintStore: tint, candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore())
         XCTAssertNotNil(shell.engine)
         return Rig(shell: shell, model: SettingsModel(shell: shell), controller: Controller(shell),
-                   layout: layout, demote: demote, prediction: prediction, abbreviation: abbreviation, acg: acg, tint: tint, dialogs: dialogs)
+                   layout: layout, demote: demote, prediction: prediction, abbreviation: abbreviation, english: english, acg: acg, tint: tint, dialogs: dialogs)
     }
 
     private func item(_ r: Rig, _ a: MenuEntry.Action) -> MenuEntry? { r.controller.session.menu.first { $0.action == a } }
@@ -66,6 +66,52 @@ final class SettingsTests: XCTestCase {
         XCTAssertTrue(r.model.abbreviation)
         r.model.setPrediction(true)
         XCTAssertEqual(item(r, .toggleAbbreviation)?.enabled, true)
+    }
+
+    /// zhen-mixed section 3.2 / 5.3: the window's 中英混打（實驗） goes through the same setter and store as the menu item, the two stay in
+    /// sync, and it is greyed (setting kept) when the engine has no word list, which the window's toggle follows. The toggle's
+    /// place in the window (right after 即時預測, as in the menu) is in the app target's form, which has no tests.
+    func testEnglishFromTheWindowReachesStoreAndMenuAndFollowsAvailability() throws {
+        let r = rig()
+        XCTAssertFalse(r.model.english, "default off")
+        XCTAssertTrue(r.model.englishEnabled)
+        r.model.setEnglish(true)
+        XCTAssertEqual(r.english.english, true)
+        XCTAssertEqual(item(r, .toggleEnglish)?.checked, true)
+        r.controller.session.perform(.toggleEnglish)
+        XCTAssertFalse(r.model.english, "the model did not follow the menu")
+        XCTAssertEqual(r.english.english, false)
+        // No word list in Resources: the model and the menu item are both unavailable, the setting still shows.
+        let bare = try XCTUnwrap(TestData.resources(only: Set(TestData.files.map(\.name)).subtracting(["english-words.txt"])))
+        let english = MemoryEnglishStore(true)
+        let shell = Shell(resources: bare, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(),
+                          learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), englishStore: english,
+                          acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore())
+        let model = SettingsModel(shell: shell)
+        XCTAssertFalse(model.englishEnabled)
+        XCTAssertTrue(model.english, "greyed, still showing the setting")
+        let entry = Controller(shell).session.menu.first { $0.action == .toggleEnglish }
+        XCTAssertEqual(entry?.enabled, false)
+        XCTAssertEqual(entry?.checked, true)
+    }
+
+    /// zhen-mixed section 2.1: the Eten layout records no shadow, so with the list loaded the menu item and the window's toggle are
+    /// greyed there too (setting kept), and enabled again back in the standard layout. Both directions of the layout change: the
+    /// window's picker and the menu's item.
+    func testEnglishIsGreyedInTheEtenLayout() {
+        let r = rig()
+        r.model.setEnglish(true)
+        XCTAssertTrue(r.shell.englishAvailable, "the list loaded; only the layout greys it below")
+        XCTAssertEqual(item(r, .toggleEnglish)?.enabled, true)
+        XCTAssertTrue(r.model.englishEnabled)
+        r.model.selectLayout(.eten)
+        XCTAssertEqual(item(r, .toggleEnglish)?.enabled, false, "the menu item in Eten")
+        XCTAssertEqual(item(r, .toggleEnglish)?.checked, true, "greyed, still showing the setting")
+        XCTAssertFalse(r.model.englishEnabled, "the window's toggle in Eten")
+        XCTAssertTrue(r.model.english)
+        r.controller.session.perform(.layout(.standard))
+        XCTAssertEqual(item(r, .toggleEnglish)?.enabled, true)
+        XCTAssertTrue(r.model.englishEnabled, "the window followed the menu's layout change")
     }
 
     /// s7c2b section 2.2: the window's 語意校正 goes through the same setter as the menu item, the two stay in sync, and with the
@@ -149,7 +195,7 @@ final class SettingsTests: XCTestCase {
 
     func testMenuHasTheSettingsItemBeforeClear() {
         let r = rig()
-        XCTAssertEqual(r.controller.session.menu.map(\.title), ["標準鍵盤", "倚天鍵盤", "避免把敏感字詞排在前面", "即時預測", "可省略韻母", "語意校正", "動漫與遊戲詞", "這個 App 用聊天設定", "善解設定…", "清除選字記憶…", "不要備份選字記憶"])
+        XCTAssertEqual(r.controller.session.menu.map(\.title), ["標準鍵盤", "倚天鍵盤", "避免把敏感字詞排在前面", "即時預測", "可省略韻母", "中英混打（實驗）", "語意校正", "動漫與遊戲詞", "這個 App 用聊天設定", "善解設定…", "清除選字記憶…", "不要備份選字記憶"])
         var opened = 0
         r.shell.onOpenSettings = { opened += 1 }
         r.controller.session.perform(.openSettings)
@@ -245,7 +291,7 @@ final class SettingsTests: XCTestCase {
         let tint = MemoryGlassTintStore(0.4)
         let shell = Shell(resources: resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(),
                           learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(),
-                          predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), acgPackStore: MemoryAcgPackStore(), glassTintStore: tint, candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore())
+                          predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), englishStore: MemoryEnglishStore(), acgPackStore: MemoryAcgPackStore(), glassTintStore: tint, candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore())
         XCTAssertEqual(shell.glassTint, 0.4)
         tint.glassTint = 0.9
         XCTAssertEqual(shell.glassTint, 0.4, "the Shell reads the store only at start and on set")
@@ -256,7 +302,7 @@ final class SettingsTests: XCTestCase {
         var secure = false
         let shell = Shell(resources: resources, panel: FakePanel(), isSecureInput: { secure }, layoutStore: MemoryLayoutStore(),
                           learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(),
-                          predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore())
+                          predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), englishStore: MemoryEnglishStore(), acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore())
         let model = SettingsModel(shell: shell)
         secure = true
         shell.changed()

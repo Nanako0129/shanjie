@@ -505,6 +505,30 @@ fn auto_commit_voids_the_job() {
     assert!(e.take_rerank_job().is_none(), "no job after the prediction pick's commit");
 }
 
+/// zhen-mixed section 5.1: an English commit is a commit (`take_commit` renews the generation), so a job taken before it
+/// applies to nothing; closing the window with Esc is not one, and the same job still applies.
+#[test]
+fn english_commit_voids_the_job() {
+    let list = root().join("eval/golden/english-tiny.txt");
+    let after = |last: &str| {
+        let mut e = engine();
+        e.load_english(&list).unwrap();
+        e.set_english(true).unwrap();
+        type_syls(&mut e, &row(12));
+        let result = e.take_rerank_job().expect("a job").run();
+        for c in ['r', 'u', 's', 't'] {
+            e.key(Key::ch(c, 0)).unwrap();
+        }
+        e.key(k(KeyKind::Space)).unwrap();
+        assert!(e.english_open(), "premise: the window is open");
+        let key = if last == "1" { Key::ch('1', 0) } else { k(KeyKind::Esc) };
+        let o = e.key(key).unwrap();
+        (e.apply_rerank(result).unwrap().is_some(), o.commit.ends_with("rust"))
+    };
+    assert!(after("1") == (false, true), "the commit voided the job");
+    assert!(after("Esc") == (true, false), "control: Esc keeps the job");
+}
+
 /// Section 2.2: with the demotion table off there are no jobs (alpha and tau hold only with it on).
 #[test]
 fn demote_off_makes_no_job() {
