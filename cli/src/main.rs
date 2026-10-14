@@ -103,10 +103,10 @@ fn format_rowstats(rows: &[(bool, String, String)]) -> String {
 }
 
 /// Option combinations of `lm`, checked before any file is read. The holdout never prints its sentences, so
-/// `--dump` is refused there; `--rowstats` holds numbers only and is allowed.
+/// `--dump` and `--dump-words` (`dump` is true for either) are refused there; `--rowstats` holds numbers only and is allowed.
 fn check_lm_opts(set: Option<&str>, dump: bool, packs: u32, packs_dir: bool) -> Result<(), String> {
     if set == Some("holdout") && dump {
-        return Err("--dump is not allowed with --set holdout".into());
+        return Err("--dump and --dump-words are not allowed with --set holdout".into());
     }
     // (--tinylm-scores with the holdout is refused in run_lm: its per-candidate record is what alpha and tau are tuned on.)
     if packs == 0 && packs_dir {
@@ -162,15 +162,16 @@ fn load_tinylm(path: &str, lm: &Lm, classes: bool, demote: bool) -> Result<(Tiny
 }
 
 /// One `--tinylm-scores` line, the record of experiments/s7a-tinylm/score.py without the key columns and the two other LLs:
-/// `i, n, ng, ok, ed, glen` and, for n >= 2, `ll`. Numbers only.
-fn scores_line(i: usize, ng: &[f64], ok: &[bool], ed: &[u32], glen: usize, ll: Option<&[f64]>) -> Result<String, String> {
+/// `i, n, ng, ok, ed, glen`, then `c` (the 0-based index the rerank chose, 0 when it did not run; tools/triage.py) and, for n >= 2, `ll`.
+/// Numbers only.
+fn scores_line(i: usize, ng: &[f64], ok: &[bool], ed: &[u32], glen: usize, chosen: usize, ll: Option<&[f64]>) -> Result<String, String> {
     // JSON has no inf / NaN (Python's json.loads rejects inf, and a NaN would slip through parity.py's tolerance test).
     if !ng.iter().chain(ll.unwrap_or(&[])).all(|x| x.is_finite()) {
         return Err(format!("--tinylm-scores: row {i} has a non-finite score"));
     }
     let list = |v: Vec<String>| format!("[{}]", v.join(", "));
     let mut s = format!(
-        "{{\"i\": {i}, \"n\": {}, \"ng\": {}, \"ok\": {}, \"ed\": {}, \"glen\": {glen}",
+        "{{\"i\": {i}, \"n\": {}, \"ng\": {}, \"ok\": {}, \"ed\": {}, \"glen\": {glen}, \"c\": {chosen}",
         ng.len(),
         list(ng.iter().map(|x| format!("{x:?}")).collect()),
         list(ok.iter().map(|&o| (o as u8).to_string()).collect()),
@@ -184,10 +185,13 @@ fn scores_line(i: usize, ng: &[f64], ok: &[bool], ed: &[u32], glen: usize, ll: O
 
 /// S2c LM mode (docs/PLAN.md S2c): the one summary line of lm_eval.py, plus the optional `--dump` and `--rowstats`.
 /// S7c-1: `--tinylm FILE.sjtl` reranks the first 8 candidates of every row with the small character model (docs/contracts/s7c-core-tinylm.md);
-/// `--tinylm-scores OUT` writes score.py's numbers-only records for them.
+/// `--tinylm-scores OUT` writes score.py's numbers-only records for them. `--dump-words OUT` (tools/triage.py) writes, per row, the
+/// word split of every `--dump` line (`row\trank\twords`, same ranks and order) after rank 0, the gold sentence split by the core's
+/// `segment_words` (`-` when it cannot be split).
 fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     let (mut lm_path, mut profile, mut name, mut dev, mut rows_file) = (None, None, None, None, None);
     let (mut limit, mut set, mut dump, mut ctx_mode, mut demote) = (None::<usize>, None, None, false, true);
+    let mut dump_words = None::<String>;
     let (mut classes, mut kn) = (true, true);
     let (mut rowstats, mut tinylm, mut tinylm_scores) = (None::<String>, None::<String>, None::<String>);
     // acg-pack contract A.2: `--packs acg` adds data/packs/acg-add.tsv (or `--packs-dir DIR`'s) to the lexicon and the cap; off by default.
@@ -205,6 +209,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
             "--limit" => limit = Some(num(val()?)?),
             "--set" => set = Some(val()?),
             "--dump" => dump = Some(val()?),
+            "--dump-words" => dump_words = Some(val()?),
             "--rowstats" => rowstats = Some(val()?),
             "--tinylm" => tinylm = Some(val()?),
             "--tinylm-scores" => tinylm_scores = Some(val()?),
@@ -217,7 +222,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
             _ => return Err("unknown argument".into()),
         }
     }
-    check_lm_opts(set.as_deref(), dump.is_some(), packs, packs_dir.is_some())?;
+    check_lm_opts(set.as_deref(), dump.is_some() || dump_words.is_some(), packs, packs_dir.is_some())?;
     if tinylm_scores.is_some() && tinylm.is_none() {
         return Err("--tinylm-scores needs --tinylm".into());
     }
@@ -285,6 +290,10 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
         Some(f) => Some(std::io::BufWriter::new(fs::File::create(f).map_err(|e| format!("cannot create dump ({:?})", e.kind()))?)),
         None => None,
     };
+    let mut dump_words = match dump_words {
+        Some(f) => Some(std::io::BufWriter::new(fs::File::create(f).map_err(|e| format!("cannot create word dump ({:?})", e.kind()))?)),
+        None => None,
+    };
     // Opened before decoding, like the dump: an unwritable path fails now, not after a whole (holdout) run.
     let rowstats = match rowstats {
         Some(f) => Some(fs::File::create(f).map_err(|e| format!("cannot create rowstats ({:?})", e.kind()))?),
@@ -327,7 +336,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
             if let Some(w) = scores.as_mut() {
                 let oks: Vec<bool> = top.iter().map(|s| len.apply(s) == t).collect();
                 let ed: Vec<u32> = top.iter().zip(&oks).map(|(s, &ok)| if ok { 0 } else { levenshtein(s, truth) }).collect();
-                w.write_all(scores_line(i + 1, &ng, &oks, &ed, truth.chars().count(), ll.as_deref())?.as_bytes())
+                w.write_all(scores_line(i + 1, &ng, &oks, &ed, truth.chars().count(), chosen, ll.as_deref())?.as_bytes())
                     .map_err(|_| "cannot write tinylm scores".to_string())?;
             }
         }
@@ -338,6 +347,13 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
         if let Some(d) = dump.as_mut() {
             for (r, ((sc, _), s)) in nb.iter().zip(&surf).enumerate() {
                 writeln!(d, "{}\t{}\t{s}\t{sc:?}", i + 1, r + 1).map_err(|_| "cannot write dump".to_string())?;
+            }
+        }
+        if let Some(d) = dump_words.as_mut() {
+            let gold = lex.segment_words(truth).map_or("-".to_string(), |ws| ws.iter().map(|(w, _)| w.as_str()).collect::<Vec<_>>().join(" "));
+            writeln!(d, "{}\t0\t{gold}", i + 1).map_err(|_| "cannot write word dump".to_string())?;
+            for (r, (_, ws)) in nb.iter().enumerate() {
+                writeln!(d, "{}\t{}\t{}", i + 1, r + 1, ws.join(" ")).map_err(|_| "cannot write word dump".to_string())?;
             }
         }
         firsts.push(surf.swap_remove(chosen));
@@ -362,6 +378,9 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     }
     if let Some(mut d) = dump {
         d.flush().map_err(|_| "cannot write dump".to_string())?;
+    }
+    if let Some(mut d) = dump_words {
+        d.flush().map_err(|_| "cannot write word dump".to_string())?;
     }
     if let Some(mut f) = rowstats {
         f.write_all(format_rowstats(&rs).as_bytes()).map_err(|e| format!("cannot write rowstats ({:?})", e.kind()))?;

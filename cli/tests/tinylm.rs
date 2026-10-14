@@ -154,3 +154,65 @@ fn refusals_before_anything_is_read() {
     }
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+/// The numbers of `"key": [a, b, ...]` in one `--tinylm-scores` line.
+fn list_of(line: &str, key: &str) -> Vec<f64> {
+    let at = line.find(&format!("\"{key}\": [")).unwrap() + key.len() + 5;
+    let end = at + line[at..].find(']').unwrap();
+    line[at..end].split(", ").map(|x| x.parse().unwrap()).collect()
+}
+
+/// tools/triage.py's two additions. `--dump-words` has, per row, rank 0 (the gold split) and then one line per `--dump` line, same
+/// rows and ranks in the same order, whose words concatenate to that line's sentence. `--tinylm-scores` has `"c"`, the 0-based index
+/// the rerank chose: `core::tinylm::pick` over the line's own `ng` and `ll`, and the sentence the run's rowstats judged (rank c + 1 of the dump).
+#[test]
+fn dump_words_align_with_dump_and_c_is_the_chosen_index() {
+    let lm = lm_path();
+    let (dir, sjtl) = tmp_with_sjtl("words", Path::new(&lm));
+    let rows = dir.join("rows.txt");
+    let src = std::fs::read_to_string(root().join("eval/dev/homophones.txt")).unwrap();
+    std::fs::write(&rows, src.lines().filter(|l| l.split('|').count() == 3).take(40).collect::<Vec<_>>().join("\n") + "\n").unwrap();
+    let p = |n: &str| dir.join(n).to_string_lossy().into_owned();
+    let (dump, words, scores, stats) = (p("d.tsv"), p("w.tsv"), p("s.jsonl"), p("r.tsv"));
+    let o = run(&["--lm", &lm, "--profile", "chat", "--rows", rows.to_str().unwrap(), "--tinylm", &sjtl, "--dump", &dump, "--dump-words", &words,
+        "--tinylm-scores", &scores, "--rowstats", &stats]);
+    assert!(o.status.success(), "{}", text(&o.stderr));
+    let (dump, words) = (std::fs::read_to_string(&dump).unwrap(), std::fs::read_to_string(&words).unwrap());
+    let w: Vec<Vec<&str>> = words.lines().map(|l| l.splitn(3, '\t').collect()).collect();
+    let mut at = 0;
+    let (mut nrows, mut rerank_moved, mut multi) = (0, 0, false);
+    let scores = std::fs::read_to_string(&scores).unwrap();
+    let stats = std::fs::read_to_string(&stats).unwrap();
+    let len = core::eval::Lenient::parse(&std::fs::read_to_string(root().join("eval/variants.tsv")).unwrap()).unwrap();
+    let gold: Vec<String> = std::fs::read_to_string(&rows).unwrap().lines().map(|l| l.split('|').nth(1).unwrap().to_string()).collect();
+    for (i, (sline, stat)) in scores.lines().zip(stats.lines()).enumerate() {
+        assert_eq!(w[at][..2], [(i + 1).to_string(), "0".to_string()], "rank 0 first");
+        at += 1;
+        let cands: Vec<Vec<&str>> = dump.lines().map(|l| l.split('\t').collect::<Vec<_>>()).filter(|f| f[0] == (i + 1).to_string()).collect();
+        for (r, f) in cands.iter().enumerate() {
+            assert_eq!(w[at][..2], [f[0].to_string(), f[1].to_string()], "rank {}", r + 1);
+            assert_eq!(w[at][2].split(' ').collect::<String>(), f[2], "the words of a rank make its sentence");
+            multi |= w[at][2].contains(' ');
+            at += 1;
+        }
+        let (ng, ll) = (list_of(sline, "ng"), list_of(sline, "ll"));
+        let c = sline[sline.find("\"c\": ").unwrap() + 5..].split(|ch| ch == ',' || ch == '}').next().unwrap().parse::<usize>().unwrap();
+        let (a, t, d) = core::tinylm::TinyLm::load(Path::new(&sjtl)).unwrap().alpha_tau_delta(core::lm::Profile::Chat);
+        assert_eq!(c, core::tinylm::pick(&ng, &ll, a, t, d), "row {}", i + 1);
+        let ok = len.apply(cands[c][2]) == len.apply(&gold[i]);
+        assert_eq!(stat.split('\t').nth(1).unwrap(), if ok { "1" } else { "0" }, "row {}: rank c + 1 is the sentence the run judged", i + 1);
+        rerank_moved += (c != 0) as usize;
+        nrows += 1;
+    }
+    assert_eq!((nrows, at), (40, w.len()), "every row and every word line accounted for");
+    assert!(multi, "words are separated by a space");
+    assert!(rerank_moved > 0, "the toy model moves at least one row, or the c check proves nothing about c != 0");
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+/// The holdout never gets sentences in a file: `--dump-words` is refused there like `--dump`.
+#[test]
+fn dump_words_refused_with_holdout() {
+    let o = run(&["--lm", &lm_path(), "--profile", "chat", "--set", "holdout", "--dump-words", "x.tsv"]);
+    assert!(!o.status.success() && text(&o.stderr).contains("holdout"), "{}", text(&o.stderr));
+}
