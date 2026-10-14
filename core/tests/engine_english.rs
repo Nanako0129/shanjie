@@ -658,7 +658,6 @@ fn english_stays_and_the_composition_goes_on() {
 fn english_token_is_a_boundary_for_the_context_and_for_learning() {
     // Like the punctuation test of engine_learn.rs: the word after `rust` has the key ^>$ (the context is not a Han character),
     // so what was taught there is found there, and the same word after 他 alone (key 他) is another key.
-    const R2: &str = "ㄑㄩㄢˊ ㄌㄧˋ";
     let other = |shown: &str| if shown == "權力" { "全力" } else { "權力" };
     let mut e = lm_eng();
     syllable(&mut e, "ㄊㄚ");
@@ -678,6 +677,18 @@ fn english_token_is_a_boundary_for_the_context_and_for_learning() {
     syllable(&mut e, "ㄊㄚ");
     syllable(&mut e, "ㄑㄩㄢˊ");
     assert!(syllable(&mut e, "ㄌㄧˋ").preedit != format!("他{w}"), "without the word between, the key is 他, not ^");
+}
+
+#[test]
+fn the_prediction_row_after_the_token_is_recomputed_and_empty() {
+    // Section 1.0: the row follows the rule for a chosen candidate (recomputed). With the token at the cursor every start would
+    // span it, and a start across a token reads nothing, so what is recomputed is empty - while the row before the token was not.
+    let mut e = lm_eng();
+    let before = syllable(&mut e, "ㄨㄛˇ");
+    assert!(!before.candidates.is_empty(), "premise: a syllable has a prediction row");
+    run(&mut e, "r u s t _");
+    let o = run(&mut e, "1");
+    assert!(o.candidates.is_empty() && o.selected.is_none() && o.total == 0 && o.preedit.ends_with("rust"), "{:?}", o.candidates);
 }
 
 #[test]
