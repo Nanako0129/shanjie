@@ -418,9 +418,21 @@ impl Lm {
     /// Kneser-Ney (kn.sjkn, docs/contracts/kn-core.md): for a vocabulary word (id >= 2) `pb` first becomes
     /// `beta * N' / sum(N') + (1 - beta) * pb`, so all three branches see it. Sentence end (id 1) and words outside
     /// the vocabulary keep `pb`. Done here once because every word term (decode paths, `word`, `eos`) comes through this function.
+    /// The one exception (model-v6 section 2.8 rule 1): a lexicon entry the learner boosted is scored by `prob_learned`, which skips
+    /// this substitution so the boosted `pb` is not thrown away.
     fn prob_c(&self, ctx: Ctx, w: Option<u32>, pb: f64) -> f64 {
+        self.prob_c_kn(ctx, w, pb, true)
+    }
+
+    /// `prob_c` for a learned-boosted entry (model-v6 section 2.8 rule 1): the same formula as with no side file loaded, `pb` the
+    /// boosted value. Without a side file it equals `prob_c`.
+    fn prob_learned(&self, ctx: Ctx, w: Option<u32>, pb: f64) -> f64 {
+        self.prob_c_kn(ctx, w, pb, false)
+    }
+
+    fn prob_c_kn(&self, ctx: Ctx, w: Option<u32>, pb: f64, kn_on: bool) -> f64 {
         let pb = match (&self.kn, w) {
-            (Some(kn), Some(w)) if w >= 2 => kn.beta * kn.np1(w as usize) as f64 / kn.total as f64 + (1.0 - kn.beta) * pb,
+            (Some(kn), Some(w)) if kn_on && w >= 2 => kn.beta * kn.np1(w as usize) as f64 / kn.total as f64 + (1.0 - kn.beta) * pb,
             _ => pb,
         };
         let back = match ctx.idx {
@@ -452,6 +464,12 @@ impl Lm {
     /// lm.py `word`: lam * log10 P(w|v) + (1 - lam) * lp.
     pub fn word(&self, lam: f64, v: &str, w: &str, lp: f64) -> f64 {
         word_term(lam, self.prob(v, w, pow10(lp)), lp)
+    }
+
+    /// `word` for a word the learner boosted (model-v6 section 2.8 rule 1): no Kneser-Ney substitution. `Engine::total_score` uses it
+    /// for the path words `decode_segment_learned` scored that way, so the total still equals the top decode score.
+    pub fn word_learned(&self, lam: f64, v: &str, w: &str, lp: f64) -> f64 {
+        word_term(lam, self.prob_learned(self.ctx_of(self.word_id(v)), self.word_id(w), pow10(lp)), lp)
     }
 
     /// lm.py `eos`: lam * log10 P(</s>|v).
@@ -855,7 +873,7 @@ pub fn decode_segment_learned<'a>(
                 let (wid, pb0) = (lm.word_id(word), pow10(lp0));
                 let delta = dl.iter().find(|&&(q, _)| q == p).map_or(0.0, |x| x.1);
                 for (hi, h) in hyps[i - l].iter().enumerate() {
-                    let (mut lp, mut pb) = (lp0, pb0);
+                    let (mut lp, mut pb, mut was_boosted) = (lp0, pb0, false);
                     if let Some(ln) = learned {
                         let (lv, ws) = &hits[hits_of[hi]];
                         let eps = if *lv == Level::Global { ln.eps_global } else { LEARN_EPS };
@@ -867,13 +885,17 @@ pub fn decode_segment_learned<'a>(
                                 if boosted > lp {
                                     lp = boosted;
                                     pb = pow10(lp);
+                                    was_boosted = true;
                                 }
                             }
                             _ if extra => continue,
                             _ => {}
                         }
                     }
-                    let sc = h.score + (word_term(lam, lm.prob_c(h.ctx, wid, pb), lp) - delta);
+                    // model-v6 section 2.8 rule 1: a boosted entry skips the Kneser-Ney substitution (its boosted pb would be replaced
+                    // by N'/sum(N') and the boost would shrink to the (1 - lam) * lp part); every other entry is scored as before.
+                    let p = if was_boosted { lm.prob_learned(h.ctx, wid, pb) } else { lm.prob_c(h.ctx, wid, pb) };
+                    let sc = h.score + (word_term(lam, p, lp) - delta);
                     let key = (format!("{}{word}", h.surface), word);
                     match idx.get(&key).copied() {
                         Some(q) if !(sc > cand[q].score) => {}

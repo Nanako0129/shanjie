@@ -1287,15 +1287,22 @@ impl Engine {
         let mut prev = history(&self.left, &st.lm);
         let mut total = 0.0;
         let (mut any, mut open) = (false, false);
+        let mut at = 0;
         for (w, lp, is_punct, delta) in &self.path {
             if *is_punct {
+                at += 1;
                 if open {
                     total += st.lm.eos(lam, prev);
                 }
                 (prev, open) = ("<s>", false);
                 continue;
             }
-            total += st.lm.word(lam, prev, w, *lp) - delta;
+            let n = w.chars().count();
+            // model-v6 section 2.8 rule 1: a word the learner boosted (lp above its best capped lp under its reading, the test of
+            // `boosted`) was scored by the decoder without the Kneser-Ney substitution; score it the same way here.
+            let learned = self.syls.get(at..at + n).and_then(|s| st.capped.best_lp(s, w)).is_some_and(|best| *lp > best);
+            at += n;
+            total += if learned { st.lm.word_learned(lam, prev, w, *lp) } else { st.lm.word(lam, prev, w, *lp) } - delta;
             (prev, any, open) = (w, true, true);
         }
         any.then(|| if open { total + st.lm.eos(lam, prev) } else { total })
