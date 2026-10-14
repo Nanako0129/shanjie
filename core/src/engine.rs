@@ -5,7 +5,7 @@ use crate::learn::{context_key, local_day, next_key, record_key, Learner, Level,
 use crate::learn_store::{LearnStore, Opened, StoreError, JOURNAL_MAX};
 use crate::predict::{predict, reading_matches_in, unit_of_syllable, Mode, Unit};
 use crate::lm::{decode_segment_learned, history, CappedLexicon, Demote, End, Learn, Lm, Profile};
-use crate::tinylm::{TinyLm, TOPK};
+use crate::tinylm::{RerankLevel, TinyLm, TOPK};
 use crate::{decode_beam, Lexicon, NoLearning, BEAM_S1};
 use std::collections::{HashMap, HashSet};
 use std::panic::{catch_unwind, AssertUnwindSafe};
@@ -40,7 +40,9 @@ struct Stretch {
 pub struct RerankJob {
     generation: u64,
     model: Arc<TinyLm>,
-    profile: Profile,
+    /// The profile's (alpha, tau, delta) at the engine's rerank level when the job was made (rerank-strength section 2.2): an own
+    /// Copy value, so a later level or profile change never reaches a job already made (it is stale anyway).
+    params: (f64, f64, f64),
     /// The engine's left context when the job was made.
     left: String,
     stretches: Vec<Stretch>,
@@ -77,7 +79,7 @@ impl RerankJob {
                 let key = context_key(&before);
                 let surfaces: Vec<String> = s.paths.iter().map(|p| p.iter().map(|w| w.0.as_str()).collect()).collect();
                 let cands: Vec<&str> = surfaces.iter().map(String::as_str).collect();
-                let pick = self.model.rerank(&s.ng, &cands, &key, self.profile).map_or(0, |r| r.0);
+                let pick = self.model.rerank(&s.ng, &cands, &key, self.params).map_or(0, |r| r.0);
                 let pick = if pick < s.paths.len() { pick } else { 0 };
                 before.push_str(&surfaces[pick]);
                 let words = if pick == 0 { Vec::new() } else { s.paths[pick].clone() };
@@ -482,8 +484,13 @@ pub struct Engine {
     /// Whether rerank jobs are made (default off since S7c-2c, docs/contracts/s7c2c-delta.md section 2.3; `set_rerank`).
     /// `load_tinylm` leaves it as it is.
     rerank_on: bool,
+    /// Which (alpha, tau, delta) of the small model the jobs use (rerank-strength section 2.2; default standard;
+    /// `set_rerank_level`). Kept across `load_tinylm` and `load_lm`, and remembered without a model; a version 1 or 2 file has only
+    /// the standard triple, which every level then gets.
+    rerank_level: RerankLevel,
     /// Section 2.3 (修正一): renewed from `GENERATION` only where decoding changes: every `refresh`, `clear_all`, the model and
-    /// decoding settings (`load_lm`, `set_lm`, `load_tinylm`, `set_rerank`, `set_profile`, `set_demote`, learning open/clear).
+    /// decoding settings (`load_lm`, `set_lm`, `load_tinylm`, `set_rerank`, `set_rerank_level`, `set_profile`, `set_demote`,
+    /// learning open/clear).
     generation: u64,
     /// The job of the last refresh, until `take_rerank_job` or the next change.
     rerank_job: Option<RerankJob>,
@@ -670,6 +677,7 @@ impl Engine {
             forget_panic: false,
             tinylm: None,
             rerank_on: false,
+            rerank_level: RerankLevel::Standard,
             generation: next_generation(),
             rerank_job: None,
             english: false,
@@ -681,7 +689,7 @@ impl Engine {
     }
 
     /// Section 2.3 (revision 1): called wherever decoding changes (every `refresh`, `clear_all`, a new n-gram or small model,
-    /// the rerank switch, the profile, the demotion table, learning open / clear): a job made before is stale from now on.
+    /// the rerank switch, the rerank level, the profile, the demotion table, learning open / clear): a job made before is stale from now on.
     /// `set_learning` is not among them: the flag only decides whether picks are recorded (`pre`), never how the composition
     /// decodes (decoding reads the learner whenever it is non-empty).
     /// Keys that do not re-decode (cursor moves, unfinished symbols, entering the prediction row, pass-through) keep it.
@@ -715,6 +723,30 @@ impl Engine {
             return Err(e);
         }
         self.handled()
+    }
+
+    /// Rerank strength (rerank-strength section 2.2): which of the model's (alpha, tau, delta) the jobs use. Remembered without a
+    /// model and kept by `load_tinylm` / `load_lm`; with a version 1 or 2 file every level uses the standard triple. Recomputes the
+    /// composition and returns the snapshot like `set_profile`; on a decode failure the engine resets itself.
+    pub fn set_rerank_level(&mut self, level: RerankLevel) -> Result<Output, EngineError> {
+        self.invalidate();
+        self.rerank_level = level;
+        self.clear_pred();
+        if let Err(e) = self.refresh() {
+            self.clear_all();
+            return Err(e);
+        }
+        self.handled()
+    }
+
+    /// The levels the loaded small model offers, as `shanjie_engine_rerank_levels` reports them (bit0 conservative, bit1 standard,
+    /// bit2 aggressive): 0 without a model, 2 for a version 1 or 2 file, 7 for a version 3 file (whatever its values or the profile).
+    pub fn rerank_levels(&self) -> u32 {
+        match &self.tinylm {
+            None => 0,
+            Some(m) if m.has_levels() => 7,
+            Some(_) => 2,
+        }
     }
 
     /// The job of the last change, if it has one (none without a model, with rerank or demotion off, or with nothing to rerank).
@@ -1560,8 +1592,8 @@ impl Engine {
         self.display = out;
         self.path = path;
         if let (false, Some(model)) = (stretches.is_empty(), &self.tinylm) {
-            let (model, profile, left) = (model.clone(), self.profile, self.left.clone());
-            self.rerank_job = Some(RerankJob { generation: self.generation, model, profile, left, stretches });
+            let (params, left) = (model.params(self.profile, self.rerank_level), self.left.clone());
+            self.rerank_job = Some(RerankJob { generation: self.generation, model: model.clone(), params, left, stretches });
         }
         Ok(())
     }

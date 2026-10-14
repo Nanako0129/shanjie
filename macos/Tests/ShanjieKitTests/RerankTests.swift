@@ -467,6 +467,132 @@ final class RerankTests: XCTestCase {
         XCTAssertTrue(SettingsModel(shell: r.shell).rerankEnabled)
     }
 
+    // MARK: the strength (docs/contracts/rerank-strength.md section 3)
+
+    /// Two Resources directories from the real data/lm/tinylm.sjtl, whichever version ships: one with it as version 2, one as
+    /// version 3 whose four extra sets equal the standard ones (section 3: v2 -> v3 inserts at 116 the chat standard triple twice,
+    /// then the formal one twice, and relabels; v3 -> v2 drops bytes 116..<212 and relabels).
+    private func versionedResources() throws -> (v2: URL, v3: URL) {
+        let real = try Data(contentsOf: TestData.repo.appendingPathComponent("data/lm/tinylm.sjtl"))
+        let label = { (data: Data, version: UInt8) -> Data in
+            var d = data
+            d[7] = UInt8(ascii: "0") + version
+            d.replaceSubrange(8..<12, with: [version, 0, 0, 0])
+            return d
+        }
+        let v2: Data, v3: Data
+        switch String(decoding: real.prefix(8), as: UTF8.self) {
+        case "SJTL0002":
+            let chat = real[36..<52] + real[100..<108], formal = real[52..<68] + real[108..<116]
+            var d = real
+            d.insert(contentsOf: chat + chat + formal + formal, at: 116)
+            (v2, v3) = (real, label(d, 3))
+        case "SJTL0003":
+            var d = real
+            d.removeSubrange(116..<212)
+            (v2, v3) = (label(d, 2), real)
+        default:
+            throw CocoaError(.fileReadCorruptFile)  // fails the test: neither version 2 nor 3 ships
+        }
+        XCTAssertEqual(v3.count, v2.count + 96)
+        let names: Set<String> = ["mcbpmf-data.txt", "overlay-add.tsv", "sandhi-add.tsv", "demote.tsv", "bigram.sjlm", "classes.sjc"]
+        let dirs = (try XCTUnwrap(TestData.resources(only: names)), try XCTUnwrap(TestData.resources(only: names)))
+        try v2.write(to: dirs.0.appendingPathComponent(Shell.tinyLMFile))
+        try v3.write(to: dirs.1.appendingPathComponent(Shell.tinyLMFile))
+        return dirs
+    }
+
+    /// A version 2 file greys the control (all three choices still shown by the window); a version 3 file enables it, a choice is
+    /// stored as its raw value and sent to the engine at once with its fixed code, and a new shell (a restart) reads it back and
+    /// sends it on its first build.
+    func testLevelControlFollowsTheFileAndTheChoiceIsSentStoredAndRestored() throws {
+        let (v2, v3) = try versionedResources()
+        let old = rig(resources: v2)
+        XCTAssertEqual(old.shell.rerankLevels, 2)
+        XCTAssertTrue(SettingsModel(shell: old.shell).rerankEnabled, "the model itself loaded")
+        XCTAssertFalse(SettingsModel(shell: old.shell).rerankLevelEnabled, "version 2: greyed")
+
+        let store = MemoryRerankStore(true)
+        let r = rig(store: store, resources: v3)
+        let model = SettingsModel(shell: r.shell)
+        XCTAssertEqual(r.shell.rerankLevels, 7)
+        XCTAssertTrue(model.rerankLevelEnabled, "version 3: enabled")
+        XCTAssertEqual(model.rerankLevel, .standard, "never chosen is standard")
+        XCTAssertEqual(r.shell.rerankLevelSent, [1], "the build sent standard")
+        model.setRerankLevel(.aggressive)
+        XCTAssertEqual(r.shell.rerankLevelSent, [1, 2])
+        XCTAssertEqual(store.rerankLevel, "aggressive")
+        XCTAssertEqual(model.rerankLevel, .aggressive, "the window re-read it")
+        model.setRerankLevel(.conservative)
+        XCTAssertEqual(r.shell.rerankLevelSent, [1, 2, 0])
+        XCTAssertEqual(store.rerankLevel, "conservative")
+
+        let again = rig(store: store, resources: v3)
+        XCTAssertEqual(again.shell.rerankLevel, .conservative, "restored")
+        XCTAssertEqual(SettingsModel(shell: again.shell).rerankLevel, .conservative)
+        XCTAssertEqual(again.shell.rerankLevelSent, [0], "the first build sends the stored level")
+    }
+
+    /// Greyed with the 語意校正 toggle, and with everything that greys the toggle (demotion off, no small model).
+    func testLevelControlGreyedWithTheSwitch() throws {
+        let (_, v3) = try versionedResources()
+        let r = rig(resources: v3)
+        let model = SettingsModel(shell: r.shell)
+        XCTAssertTrue(model.rerankLevelEnabled)
+        model.setRerank(false)
+        XCTAssertFalse(model.rerankLevelEnabled, "語意校正 off")
+        model.setRerank(true)
+        model.setDemote(false)
+        XCTAssertFalse(model.rerankLevelEnabled, "demotion off")
+        model.setDemote(true)
+        XCTAssertTrue(model.rerankLevelEnabled)
+        let names: Set<String> = ["mcbpmf-data.txt", "overlay-add.tsv", "sandhi-add.tsv", "demote.tsv", "bigram.sjlm", "classes.sjc"]
+        let none = rig(resources: try XCTUnwrap(TestData.resources(only: names)))
+        XCTAssertEqual(none.shell.rerankLevels, 0)
+        XCTAssertFalse(SettingsModel(shell: none.shell).rerankLevelEnabled, "no small model")
+    }
+
+    /// P3-7: an unknown stored value (or none) is standard, and that is what the build sends; the store is not rewritten by reading.
+    func testUnknownStoredLevelIsStandard() {
+        for stored in [nil, "bold", "Aggressive", ""] as [String?] {
+            let store = MemoryRerankStore(true, level: stored)
+            let r = rig(store: store)
+            XCTAssertEqual(r.shell.rerankLevel, .standard, String(describing: stored))
+            XCTAssertEqual(r.shell.rerankLevelSent, [1], String(describing: stored))
+            XCTAssertEqual(store.rerankLevel, stored, "reading chose nothing")
+        }
+        XCTAssertEqual(RerankLevel.allCases.map(\.code), [0, 1, 2])
+    }
+
+    /// P4-13: every rebuilt engine (layout switch, word pack switch) gets the stored level again.
+    func testRebuildsResendTheLevel() throws {
+        let (_, v3) = try versionedResources()
+        let r = rig(store: MemoryRerankStore(true, level: "aggressive"), resources: v3)
+        XCTAssertEqual(r.shell.rerankLevelSent, [2])
+        r.c.session.perform(.layout(.eten))
+        r.c.session.perform(.layout(.standard))
+        r.c.session.perform(.toggleAcgPack)
+        XCTAssertEqual(r.shell.rerankLevelSent, [2, 2, 2, 2], "two layout rebuilds and a word pack rebuild")
+        XCTAssertEqual(r.shell.rerankLevels, 7, "the rebuilt engine has the model and its levels")
+    }
+
+    /// A change mid-composition goes through the owner: the core re-decodes, the owner shows the n-gram snapshot at once, and the
+    /// snapshot's job (with the new level; equal values here) reranks it again.
+    func testLevelChangeMidCompositionShowsTheSnapshotAndRerunsTheJob() throws {
+        let (_, v3) = try versionedResources()
+        let r = rig(resources: v3)
+        r.c.type(RerankRow.standardKeys)
+        r.runner.drain()
+        XCTAssertEqual(r.c.client.marked, RerankRow.reranked, "premise")
+        let received = r.runner.received
+        SettingsModel(shell: r.shell).setRerankLevel(.aggressive)
+        XCTAssertEqual(r.c.client.marked, RerankRow.ngram, "the snapshot: re-decoded")
+        XCTAssertEqual(r.runner.received, received + 1, "the snapshot left a job")
+        r.runner.drain()
+        XCTAssertEqual(r.c.client.marked, RerankRow.reranked)
+        XCTAssertEqual(r.frees.freed, r.shell.rerankTaken)
+    }
+
     // MARK: the app's runner (F2)
 
     /// `QueueRerankRunner`, as the app passes it: the key returns at once with the n-gram result, the job runs on the queue and

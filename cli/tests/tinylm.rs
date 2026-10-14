@@ -155,6 +155,77 @@ fn refusals_before_anything_is_read() {
     std::fs::remove_dir_all(dir).unwrap();
 }
 
+/// The synthetic version 3 toy (eval/golden/tinylm-tiny/tiny-int8-v3.sjtl) with the hash of `lm` and, for both profiles, alpha 100 /
+/// tau infinite / delta 0 (its LLs decide: rows move) at level `moving` (0 conservative, 1 standard, 2 aggressive) and alpha 0
+/// (the n-gram first always stays) at the other two. Offsets: docs/contracts/rerank-strength.md section 2.1.
+fn v3_with_moving(dir: &Path, lm: &Path, moving: u32) -> String {
+    let mut b = std::fs::read(root().join("eval/golden/tinylm-tiny/tiny-int8-v3.sjtl")).unwrap();
+    b[HASH_AT..HASH_AT + 32].copy_from_slice(&sha_bytes(lm));
+    // (alpha, tau, delta offsets, level): chat and formal standard, chat conservative / aggressive, formal conservative / aggressive
+    for (a, t, d, level) in [(36, 44, 100, 1), (52, 60, 108, 1), (116, 124, 132, 0), (140, 148, 156, 2), (164, 172, 180, 0), (188, 196, 204, 2)] {
+        let alpha: f64 = if level == moving { 100.0 } else { 0.0 };
+        b[a..a + 8].copy_from_slice(&alpha.to_le_bytes());
+        b[t..t + 8].copy_from_slice(&f64::INFINITY.to_le_bytes());
+        b[d..d + 8].copy_from_slice(&0f64.to_le_bytes());
+    }
+    let p = dir.join(format!("v3-{moving}.sjtl"));
+    std::fs::write(&p, b).unwrap();
+    p.to_string_lossy().into_owned()
+}
+
+/// The `top1_sha256` of a successful run's summary line.
+fn top1_sha(o: &Output) -> String {
+    assert!(o.status.success(), "{}", text(&o.stderr));
+    let line = text(&o.stdout);
+    line[line.find("'top1_sha256': '").expect("summary line") + 16..].chars().take(64).collect()
+}
+
+/// Rerank strength section 2.3: `--rerank-level` picks the file's set of that level. With the moving set at one level only, that
+/// level changes the chosen candidates (top1 hash differs from the n-gram run) and the other two give exactly the n-gram run,
+/// in both profiles.
+#[test]
+fn rerank_level_uses_that_levels_set() {
+    let lm = lm_path();
+    let (dir, _) = tmp_with_sjtl("level", Path::new(&lm));
+    let names = ["conservative", "standard", "aggressive"];
+    for profile in ["chat", "formal"] {
+        let base = ["--lm", lm.as_str(), "--profile", profile, "--dev", "40"];
+        let ngram = top1_sha(&run(&base));
+        for moving in [0u32, 2] {
+            let sjtl = v3_with_moving(&dir, Path::new(&lm), moving);
+            for (level, name) in names.iter().enumerate() {
+                let sha = top1_sha(&run(&[&base[..], &["--tinylm", &sjtl, "--rerank-level", name]].concat()));
+                assert_eq!(sha == ngram, level as u32 != moving, "{profile}: moving set at {moving}, --rerank-level {name}");
+            }
+        }
+        // the default is standard
+        let sjtl = v3_with_moving(&dir, Path::new(&lm), 1);
+        assert_ne!(top1_sha(&run(&[&base[..], &["--tinylm", &sjtl]].concat())), ngram, "{profile}: default standard");
+    }
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+/// Section 2.3 and 9 (P3-8): a level other than standard on a version 1 or 2 file exits with 2 and says why, before any row;
+/// standard on it runs. Without `--tinylm`, or with an unknown name, it is an error too.
+#[test]
+fn rerank_level_refusals() {
+    let lm = lm_path();
+    let (dir, v1) = tmp_with_sjtl("level-refuse", Path::new(&lm));
+    let base = ["--lm", lm.as_str(), "--profile", "chat", "--dev", "1"];
+    for name in ["conservative", "aggressive"] {
+        let o = run(&[&base[..], &["--tinylm", &v1, "--rerank-level", name]].concat());
+        assert_eq!(o.status.code(), Some(2), "{name}: {}", text(&o.stderr));
+        assert!(text(&o.stderr).contains("--rerank-level") && text(&o.stderr).contains("version") && o.stdout.is_empty());
+        let o = run(&[&base[..], &["--rerank-level", name]].concat());
+        assert!(!o.status.success() && text(&o.stderr).contains("needs --tinylm") && o.stdout.is_empty(), "{name}: {}", text(&o.stderr));
+    }
+    let o = run(&[&base[..], &["--tinylm", &v1, "--rerank-level", "standard"]].concat());
+    assert!(o.status.success(), "{}", text(&o.stderr));
+    let o = run(&[&base[..], &["--tinylm", &v1, "--rerank-level", "bold"]].concat());
+    assert!(!o.status.success() && text(&o.stderr).contains("--rerank-level") && o.stdout.is_empty());
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
 /// The numbers of `"key": [a, b, ...]` in one `--tinylm-scores` line.
 fn list_of(line: &str, key: &str) -> Vec<f64> {
     let at = line.find(&format!("\"{key}\": [")).unwrap() + key.len() + 5;

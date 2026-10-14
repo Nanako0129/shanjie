@@ -13,7 +13,7 @@
  *    shanjie_engine_rerank_apply do NOT mean pass-through: they have no key.
  *
  * Return codes: 0 success, 1 a required pointer is NULL, 2 invalid input (data_dir or LM path not
- * UTF-8, ch not a Unicode scalar, kind / layout / mode / profile out of range), 3 data load failed
+ * UTF-8, ch not a Unicode scalar, kind / layout / mode / profile / rerank level out of range), 3 data load failed
  * (including an unreadable or malformed LM file, and since S2k a missing or mismatching classes.sjc beside
  * it), 4 internal error (caught panic or decode/encode
  * error; the engine has already been reset in discard mode; exception: shanjie_rerank_run has no engine and
@@ -212,8 +212,8 @@ int32_t shanjie_engine_learning_status(ShanjieEngine *engine, uint32_t *flags);
 //   runs it on another thread, and applies it back on the engine's thread. The composition shows the n-gram result first and may
 //   change once when the result applies. Only a change that re-decodes the composition makes the result stale (apply drops it):
 //   a completed syllable, a deletion, a candidate or prediction pick, punctuation (it does not commit: it enters the composition,
-//   re-decodes and leaves a new job), a learning forget, and the settings that change decoding (profile, demote, rerank, a new
-//   model, learning open / clear; set_learning never makes the job stale: it does not change decoding, S7c-2b). Keys that do not re-decode (cursor moves, unfinished zhuyin symbols, entering the
+//   re-decodes and leaves a new job), a learning forget, and the settings that change decoding (profile, demote, rerank, rerank
+//   level, a new model, learning open / clear; set_learning never makes the job stale: it does not change decoding, S7c-2b). Keys that do not re-decode (cursor moves, unfinished zhuyin symbols, entering the
 //   prediction row, pass-through keys) keep the job valid. Commits (ENTER, the auto-commit at 40 tokens, reset) send what is
 //   shown; a job not yet applied is dropped.
 // Logging: a job and its result hold candidate text. Never log them, their pointers, or the .sjtl path (the rules at the top).
@@ -231,6 +231,19 @@ int32_t shanjie_engine_load_tinylm(ShanjieEngine *engine, const char *path);
 //   out is NULL. Call it after every engine creation, like set_candidate_vertical. With 0, or without a small model, or with
 //   set_demote 0 (alpha and tau hold only with the table on), no job is ever made.
 int32_t shanjie_engine_set_rerank(ShanjieEngine *engine, uint32_t enabled, ShanjieOutput **out);
+// Rerank strength (docs/contracts/rerank-strength.md section 2.2): set_rerank_level 0 conservative, 1 standard (default at engine
+//   creation), 2 aggressive: which of the small model's (alpha, tau, delta) the jobs use. Codes and snapshot like set_profile
+//   (handled 1, commit ""): 1 when engine or out is NULL, 2 for a level above 2 (state unchanged, the job of the last change
+//   stays valid), 4 internal (the engine is reset in discard mode, the new level kept). It makes a job taken before stale; a job
+//   keeps the values of the level it was made with. Without a small model the level is remembered and 0 returned; with a
+//   version 1 or 2 .sjtl (only the standard set) any level is remembered, 0 returned, and the standard set used.
+//   load_tinylm and load_lm keep the level. The shell sends its stored level after every engine creation, after load_tinylm.
+int32_t shanjie_engine_set_rerank_level(ShanjieEngine *engine, uint32_t level, ShanjieOutput **out);
+// rerank_levels: *levels is a bit mask of the levels the loaded small model offers (bit0 conservative, bit1 standard, bit2
+//   aggressive): 0 without a small model, 2 for a version 1 or 2 .sjtl, 7 for a version 3 .sjtl (always 7, even when a level's
+//   values equal the standard ones, and whatever the profile). 0 success; 1 when engine or levels is NULL (*levels untouched);
+//   4 internal (nothing is reset: it changes nothing). Changes nothing.
+int32_t shanjie_engine_rerank_levels(ShanjieEngine *engine, uint32_t *levels);
 // rerank_take: hands out the job of the last change, once; 0 with *job NULL when there is none. 1 when engine or job is NULL
 //   (*job is set to NULL first whenever job is non-NULL); 4 internal (the engine is reset in discard mode, *job NULL).
 //   Every job handed out must be freed exactly once with shanjie_rerank_free.

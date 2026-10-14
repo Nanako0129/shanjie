@@ -31,10 +31,10 @@ shasum -a 256 -c data/bigram.sjlm.sha256 >/dev/null \
 shasum -a 256 -c data/classes.sjc.sha256 >/dev/null \
   || fail "data/lm/classes.sjc does not match data/classes.sjc.sha256; download classes-v3 again"
 # The small model behind 語意校正 (docs/contracts/s7c2b-shell-rerank.md section 2.4), paired with model-v5's hash.
-[ -f data/lm/tinylm.sjtl ] || fail "data/lm/tinylm.sjtl is missing (the small model of 語意校正, S7c). Download the tinylm-v3 release asset:
-  gh release download tinylm-v3 -R Nanako0129/shanjie -p tinylm.sjtl -D data/lm"
+[ -f data/lm/tinylm.sjtl ] || fail "data/lm/tinylm.sjtl is missing (the small model of 語意校正, S7c). Download the tinylm-v4 release asset:
+  gh release download tinylm-v4 -R Nanako0129/shanjie -p tinylm.sjtl -D data/lm"
 shasum -a 256 -c data/tinylm.sjtl.sha256 >/dev/null \
-  || fail "data/lm/tinylm.sjtl does not match data/tinylm.sjtl.sha256; download tinylm-v3 again"
+  || fail "data/lm/tinylm.sjtl does not match data/tinylm.sjtl.sha256; download tinylm-v4 again"
 for f in data/lexicon/mcbpmf-data.txt data/lexicon/overlay-add.tsv data/lexicon/sandhi-add.tsv data/lexicon/demote.tsv data/packs/acg-add.tsv data/packs/acg-sources.tsv data/packs/acg.json LICENSE LICENSES/McBopomofo-MIT.txt LICENSES/data.md LICENSES/SCOWL.txt LICENSES/SymSpell-MIT.txt; do
   [ -f "$f" ] || fail "$f is missing"
 done
