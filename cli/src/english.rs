@@ -10,10 +10,12 @@
 //! `rows` and `syllables` are one pass over the rows; `keys` (every key event sent to the engine, repairs, Esc and Enter
 //! included) and `triggers` are summed over the seeds; `per_1000` is triggers x 1000 / syllables of one seed, mean and max
 //! over the seeds. With `--inline` (docs/contracts/zhen-inline.md section 3) two more columns follow,
-//!   inline_per_1000_mean  inline_per_1000_max
+//!   inline_per_1000_mean  inline_per_1000_max  autokeep_per_1000_mean  autokeep_per_1000_max
 //! the same figure for the syllables after one of whose keys the engine's display rule D held (`Engine::english_inline_shown`,
-//! asked after every key; a syllable counts once): how often the Zhuyin of a Chinese syllable would show as letters. Without
-//! `--inline` the line is the one above, unchanged. Recall mode:
+//! asked after every key; a syllable counts once): how often the Zhuyin of a Chinese syllable would show as letters. The last two
+//! count the auto-keeps (zhen-inline section 1.3, revision 2): the keys after which the engine reports that it turned the letters
+//! into an English token (`Engine::english_autokept`, asked after every key, before the symbols are compared), per 1000 syllables
+//! of one seed. Without `--inline` the line is the one above, unchanged. Recall mode:
 //!   words_sha256  words  opened  top1  overwrite0  overwrite1_leftover_valid  overwrite2plus_leftover_valid  leftover_invalid
 //! (`opened` and `top1`: the window opened / its first item is the word; the four classes partition the words, the last two
 //! open it, the first two never do; the tool stops if the engine and this recount disagree.)
@@ -27,6 +29,11 @@
 //!   ones, then the missing symbols in column order. After a repair the symbols are the wanted ones.
 //! - A syllable ends with its tone key, or Space for tone 1. If the engine opened the window at that Space it is counted, then
 //!   Esc (closes it, clears the shadow) and Space again finish the syllable, so engine and simulator stay in step.
+//! - Auto-keep (`--inline` only counts it; the recovery happens either way, it can only occur with D): the key that made it
+//!   started a new syllable, so Esc clears that symbol, Backspace takes the English token the engine made, and the interrupted
+//!   syllable (its symbols up to the one being typed) is typed again from the start without a mistake, so the row goes on as if
+//!   the mistake had been caught in time. A retyping that keeps again is counted and recovered again (it cannot happen without
+//!   an overwrite; after three tries the run stops instead of looping).
 //! - Rows with a reading the lexicon lacks, or a symbol without a key, are skipped (their number goes to stderr).
 //! - Random numbers: splitmix64 from the seed (no crate); one draw decides a mistake, one more picks the neighbour.
 use core::engine::{load_lexicon, Engine, Key, KeyKind, Layout, ResetMode};
@@ -90,21 +97,52 @@ struct Sim {
     /// `--inline`: ask the engine for rule D after every key; `d_held` is whether it held after any key of this syllable.
     inline: bool,
     d_held: bool,
+    /// Auto-keeps the engine reported (counted whether or not `--inline` prints them), and the symbols of the syllable being typed
+    /// up to the key in progress: what a recovery types again.
+    autokeeps: u64,
+    want: Vec<char>,
     p: f64,
     repair: Repair,
     rng: Rng,
 }
 
 impl Sim {
-    fn send(&mut self, k: Key) -> Result<(), String> {
+    /// One key to the engine, counted. Whether the key made an auto-keep (counted too): asked of the engine after every key,
+    /// before the symbols are compared, and never worked out here.
+    fn raw(&mut self, k: Key) -> Result<bool, String> {
         self.keys += 1;
         self.engine.key(k).map_err(|_| "the engine failed on a key".to_string())?;
-        // The rule is the engine's, never repeated here.
+        // The rules are the engine's, never repeated here.
         self.d_held |= self.inline && self.engine.english_inline_shown();
-        Ok(())
+        let kept = self.engine.english_autokept();
+        self.autokeeps += kept as u64;
+        Ok(kept)
     }
 
-    fn zhuyin(&mut self, sym: char) -> Result<(), String> {
+    /// One key of the typing. `Ok(true)` when it made an auto-keep and the recovery has run: the syllable then stands as typed
+    /// without a mistake up to `self.want`, and the caller does not send what is left of this symbol.
+    fn send(&mut self, k: Key) -> Result<bool, String> {
+        if !self.raw(k)? {
+            return Ok(false);
+        }
+        for _ in 0..3 {
+            self.raw(Key::new(KeyKind::Esc))?;
+            self.raw(Key::new(KeyKind::Backspace))?;
+            let mut kept = false;
+            for sym in self.want.clone() {
+                if self.raw(Key::ch(LAYOUT.key_of_symbol(sym).unwrap(), 0))? {
+                    kept = true;
+                    break;
+                }
+            }
+            if !kept {
+                return Ok(true);
+            }
+        }
+        Err("an auto-keep kept coming back on a typing without mistakes".into())
+    }
+
+    fn zhuyin(&mut self, sym: char) -> Result<bool, String> {
         self.send(Key::ch(LAYOUT.key_of_symbol(sym).unwrap(), 0))
     }
 
@@ -120,26 +158,35 @@ impl Sim {
             let key = LAYOUT.key_of_symbol(sym).unwrap();
             let near = neighbours(key);
             let want: Vec<char> = syms[..=i].iter().map(|s| s.1).collect();
-            if self.rng.unit() < self.p && !near.is_empty() {
-                let wrong = near[(self.rng.next() % near.len() as u64) as usize];
-                let (wcol, _) = LAYOUT.symbol_of(wrong).unwrap();
-                self.send(Key::ch(wrong, 0))?;
-                if self.repair == Repair::Overwrite && wcol == col {
-                    self.zhuyin(sym)?;
+            self.want = want.clone();
+            // A labeled block: an auto-keep and its recovery leave the syllable typed up to `want` already, so the rest of this
+            // symbol's keys are not sent.
+            'symbol: {
+                if self.rng.unit() < self.p && !near.is_empty() {
+                    let wrong = near[(self.rng.next() % near.len() as u64) as usize];
+                    let (wcol, _) = LAYOUT.symbol_of(wrong).unwrap();
+                    if self.send(Key::ch(wrong, 0))? {
+                        break 'symbol;
+                    }
+                    if self.repair == Repair::Overwrite && wcol == col {
+                        self.zhuyin(sym)?;
+                    } else {
+                        // Backspace until the symbols are a prefix of the wanted ones. Which symbol it takes is the engine's: the last
+                        // in display order (final, medial, initial) by rule 11, or, while letters show, the last letter's, with the
+                        // symbols rebuilt from the letters left. Each key is a step that shortens the letters or the symbols, so the
+                        // loop ends with the unfinished syllable empty at the latest.
+                        while !want.starts_with(&self.have()) {
+                            self.send(Key::new(KeyKind::Backspace))?;
+                        }
+                        for &(_, s) in &syms[self.have().len()..=i] {
+                            if self.zhuyin(s)? {
+                                break 'symbol;
+                            }
+                        }
+                    }
                 } else {
-                    // Backspace until the symbols are a prefix of the wanted ones. Which symbol it takes is the engine's: the last
-                    // in display order (final, medial, initial) by rule 11, or, while letters show, the last letter's, with the
-                    // symbols rebuilt from the letters left. Each key is a step that shortens the letters or the symbols, so the
-                    // loop ends with the unfinished syllable empty at the latest.
-                    while !want.starts_with(&self.have()) {
-                        self.send(Key::new(KeyKind::Backspace))?;
-                    }
-                    for &(_, s) in &syms[self.have().len()..=i] {
-                        self.zhuyin(s)?;
-                    }
+                    self.zhuyin(sym)?;
                 }
-            } else {
-                self.zhuyin(sym)?;
             }
             // The simulator's plan and the engine's columns must agree here; if the engine ever repairs differently the run stops
             // instead of counting a typing the model did not intend.
@@ -148,7 +195,7 @@ impl Sim {
             }
         }
         match tone {
-            Some(mark) => self.send(Key::ch(LAYOUT.key_of_tone(mark).unwrap(), 0)),
+            Some(mark) => self.send(Key::ch(LAYOUT.key_of_tone(mark).unwrap(), 0)).map(|_| ()),
             None => {
                 self.send(Key::new(KeyKind::Space))?;
                 if self.engine.english_open() {
@@ -240,9 +287,9 @@ pub fn run(args: &[String], root: &Path) -> Result<(), String> {
     if syllables == 0 {
         return Err("no row to simulate".into());
     }
-    let (mut per_1000, mut inline_1000, mut keys, mut triggers) = (Vec::new(), Vec::new(), 0u64, 0u64);
+    let (mut per_1000, mut inline_1000, mut autokeep_1000, mut keys, mut triggers) = (Vec::new(), Vec::new(), Vec::new(), 0u64, 0u64);
     for i in 0..repeat {
-        let mut sim = Sim { engine: engine_with(&lex, &words)?, keys: 0, triggers: 0, inline, d_held: false, p, repair, rng: Rng(seed.wrapping_add(i)) };
+        let mut sim = Sim { engine: engine_with(&lex, &words)?, keys: 0, triggers: 0, inline, d_held: false, autokeeps: 0, want: Vec::new(), p, repair, rng: Rng(seed.wrapping_add(i)) };
         let mut shown_syllables = 0u64;
         for row in &parsed {
             sim.engine.reset(ResetMode::Discard);
@@ -255,13 +302,14 @@ pub fn run(args: &[String], root: &Path) -> Result<(), String> {
         }
         per_1000.push(sim.triggers as f64 * 1000.0 / syllables as f64);
         inline_1000.push(shown_syllables as f64 * 1000.0 / syllables as f64);
+        autokeep_1000.push(sim.autokeeps as f64 * 1000.0 / syllables as f64);
         keys += sim.keys;
         triggers += sim.triggers;
     }
     let (mean, max) = mean_max(&per_1000);
     let extra = if inline {
-        let (imean, imax) = mean_max(&inline_1000);
-        format!("\t{imean:.3}\t{imax:.3}")
+        let ((imean, imax), (amean, amax)) = (mean_max(&inline_1000), mean_max(&autokeep_1000));
+        format!("\t{imean:.3}\t{imax:.3}\t{amean:.3}\t{amax:.3}")
     } else {
         String::new()
     };
@@ -306,4 +354,46 @@ fn run_recall(lex: &Arc<Lexicon>, words: &Path) -> Result<(), String> {
     }
     println!("{sha}\t{}\t{opened}\t{top1}\t{}\t{}\t{}\t{}", list.len(), classes[0], classes[1], classes[2], classes[3]);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Zhen-inline section 4.1, simulator: a row that triggers auto-keeps ends with the same text as the same row typed without a
+    /// mistake (a text is checked here, in the module, because the tool's output never carries content, R2).
+    #[test]
+    fn autokeep_recovery_leaves_the_row_as_if_typed_clean() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+        let lex = load_lexicon(&root.join("data/lexicon")).unwrap();
+        let dir = std::env::temp_dir().join(format!("shanjie-english-sim-unit-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("words.txt"), "ewuk\n").unwrap();
+        let (syms, tone) = parse_syllable("ㄊㄧㄠ").unwrap();
+        let mk = |p: f64| Sim {
+            engine: engine_with(&lex, &dir.join("words.txt")).unwrap(),
+            keys: 0,
+            triggers: 0,
+            inline: true,
+            d_held: false,
+            autokeeps: 0,
+            want: Vec::new(),
+            p,
+            repair: Repair::Overwrite,
+            rng: Rng(20261014),
+        };
+        let row = |sim: &mut Sim| {
+            sim.engine.reset(ResetMode::Discard);
+            sim.syllable(&syms, tone).unwrap();
+            sim.engine.key(Key::new(KeyKind::Enter)).unwrap().commit
+        };
+        let clean = row(&mut mk(0.0));
+        assert!(!clean.is_empty() && clean.chars().count() == 1);
+        let mut sim = mk(0.5);
+        for i in 0..400 {
+            assert_eq!(row(&mut sim), clean, "row {i}");
+        }
+        assert!(sim.autokeeps >= 1, "premise: the rows keep a word");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 }
