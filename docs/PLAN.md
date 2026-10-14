@@ -350,7 +350,7 @@ v4 日期 2026-10-03。v1 經 `pilotfish:plan-verifier`（REVISE，4 項）與 `
       疊加層的詞也加進 `by_word`，規則同 S0：分數嚴格較高才取代。這只影響開了疊加層時沒有讀音欄的集合；golden 用 `--no-overlay`，不受影響。參考實作是 `reference/proto/ime.py` 的 `Lexicon(path, overlay=...)`。
     - **檔案格式。**
       - 每列 `讀音\t詞\t分數\t來源標籤\n`，沒有標頭。
-      - 依詞的 code point 排序。
+      - 依詞的 code point 排序；手動詞（下面「手動詞」）照 `data/lexicon/overlay-manual.tsv` 的順序接在最後。
       - 分數是 Python `repr(float)` 的字面，例如 `-7.17149945`。
     - `shanjie-eval --no-overlay` 只用基底。`unigram` 行沿用 S0 的搜尋參數，因此 `--no-overlay` 跑 trap、daily、moedict、`--learn-sim` 的輸出必須和 `eval/golden/unigram.txt` 逐行相同。
   - **來源（使用者 2026-10-03 決定，鎖定版本）。**
@@ -366,7 +366,7 @@ v4 日期 2026-10-03。v1 經 `pilotfish:plan-verifier`（REVISE，4 項）與 `
     | — | OpenCC `data/dictionary/TWPhrases.txt`，同一個 commit（S2f 起核對） | `bcb435b744ee3e522beb9b18fcc5486a36ed4763c6aa642ce18112fb5d604e31` | Apache-2.0 | 台灣用詞（TWPhrases），不進疊加層 |
 
     三個 dump 的 sha1 已和 Wikimedia 官方的 `sha1sums.txt` 比對相符。來源檔不進 repo，因為合計 55 MB。`tools/build_overlay.py` 下載到 `~/.cache/shanjie/sources/` 後驗證 SHA-256，不符就中止。
-  - **篩選。** 由 `tools/build_overlay.py` 依序做，不得手動加減。這支腳本就是本契約的參考實作，下列文字和腳本不一致時以腳本為準：
+  - **篩選。** 由 `tools/build_overlay.py` 依序做，不得手動加減（例外是下面「手動詞」那個檔，同樣由這支腳本接上）。這支腳本就是本契約的參考實作，下列文字和腳本不一致時以腳本為準：
     1. 純漢字 2–4 字（U+4E00–U+9FFF）。
     2. 不在基底的詞表裡。基底詞表是照 S0 規則解析後 `by_word` 的鍵。
     3. 每個字都是基底的單字詞條。
@@ -376,7 +376,8 @@ v4 日期 2026-10-03。v1 經 `pilotfish:plan-verifier`（REVISE，4 項）與 `
     複合詞規則是 main 看過開發集 OOV 詞（收納盒、防滑墊…）之後定的。它是一般的構詞規則，不是逐詞挑選，但仍有偏向開發集的風險，由保留集把關，報告時要揭露。**禁止從 `eval/` 的句子挑詞加入**。
   - **讀音。** 用基底的 `to_syllables`：以基底詞切分，取最高分讀音；轉不出讀音的詞略過。不做人工確認，避免人手偏向評測句。`tools/readings.py` 不改。
   - **分數。** 同字數基底詞條分數的第 25 百分位：所有讀音長度為 L 的詞條分數由小到大排序，取 `sorted[len // 4]`。結果是 2 字 `-7.17149945`、3 字 `-7.04116568`、4 字 `-6.60980192`。
-  - **來源標籤。** 出現在任一維基詞典的標 `wikt`，其餘標 `zhwiki`。
+  - **來源標籤。** 出現在任一維基詞典的標 `wikt`，其餘標 `zhwiki`；手動詞標 `manual`。
+  - **手動詞（維護者 2026-10-14）。** 維護者明確要的詞寫在 `data/lexicon/overlay-manual.tsv`（詞、讀音、備註；CC0），`manual_rows()` 接在產生的列後面：純漢字、2 字以上，讀音的音節都是基底有的音節，不能是基底、疊加層或 ACG 詞包已有的詞，同一個（讀音, 詞）不能出現兩次（含自動加的變調列），不符就中止。分數＝同字數詞條分數的第 25 百分位（5 字以上和 ACG 詞包相同，`length_scores`）＋`MANUAL_BONUS` 0.5（研究紀錄 2026-10-14）。`tools/test_build_overlay.py` 不需要 dump 就核對檔尾的手動列；`cli/tests/golden.rs` 的 `manual_words_come_first_in_the_shipping_setting` 確認每個手動詞在出貨設定下排第一。
   - **授權。** `overlay-add.tsv` 以 CC BY-SA 4.0 釋出，署名 Wikipedia 與 Wiktionary 貢獻者，寫進 `LICENSES/data.md`；程式碼仍是 Apache-2.0。
   - **搜尋參數。** S1 路徑 `BEAM = 64`：要 64 名候選，BEAM 至少 64。`PER_KEY = 12`：步驟 1 實測放寬到 24 也沒有差別。S0 的常數保留給 `unigram` 行與 golden。
   - **參考結果。** `reference/proto/ime.py` 載入 commit 的 `overlay-add.tsv`（342,761 列），開發集前 302 列，`decode(beam=64)`，`PER_KEY` 12：
