@@ -402,11 +402,48 @@ mod tests {
             assert_eq!(row(&mut sim), clean, "row {i}");
         }
         assert!(sim.autokeeps >= 1, "premise: the rows keep a word");
-        // The same with the Backspace repair: while letters show (rule D) the engine's Backspace opens an English run (section 1.3g),
-        // which the repair must take with Esc and then type the symbols again; the row ends as if typed clean all the same.
-        let mut sim = Sim { repair: Repair::Backspace, ..mk(0.5) };
-        for i in 0..400 {
-            assert_eq!(row(&mut sim), clean, "backspace repair, row {i}");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// Zhen-inline section 1.3g, simulator: while letters show (rule D) the engine's Backspace opens an English run instead of taking
+    /// a symbol, so the Backspace repair must take the run with Esc and type the symbols again; every row still ends as if typed
+    /// clean. The list holds every three-letter word, so a wrong key often makes D hold (the mutation without that Esc fails here).
+    #[test]
+    fn backspace_repair_under_rule_d_leaves_the_row_as_if_typed_clean() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+        let lex = load_lexicon(&root.join("data/lexicon")).unwrap();
+        let dir = std::env::temp_dir().join(format!("shanjie-english-sim-unit-bs-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let words: String = ('a'..='z').flat_map(|a| ('a'..='z').flat_map(move |b| ('a'..='z').map(move |c| format!("{a}{b}{c}\n")))).collect();
+        std::fs::write(dir.join("words.txt"), words).unwrap();
+        let mut sim = Sim {
+            engine: engine_with(&lex, &dir.join("words.txt")).unwrap(),
+            keys: 0,
+            triggers: 0,
+            inline: true,
+            d_held: false,
+            autokeeps: 0,
+            want: Vec::new(),
+            p: 0.0,
+            repair: Repair::Backspace,
+            rng: Rng(20261014),
+        };
+        // Medial then final (`ㄍㄨㄛ`): the final's neighbour on the keyboard row is a medial, so a slip lands in the occupied medial column
+        // (one overwrite, not the wanted column): the repair is Backspace, and the letters are on screen.
+        for syl in ["ㄍㄨㄛ", "ㄏㄨㄛ", "ㄌㄨㄛ", "ㄕㄨㄛ"] {
+            let (syms, tone) = parse_syllable(syl).unwrap();
+            let mut row = |sim: &mut Sim| {
+                sim.engine.reset(ResetMode::Discard);
+                sim.syllable(&syms, tone).unwrap();
+                sim.engine.key(Key::new(KeyKind::Enter)).unwrap().commit
+            };
+            sim.p = 0.0;
+            let clean = row(&mut sim);
+            assert!(!clean.is_empty());
+            sim.p = 0.5;
+            for i in 0..300 {
+                assert_eq!(row(&mut sim), clean, "{syl} row {i}");
+            }
         }
         std::fs::remove_dir_all(&dir).unwrap();
     }
