@@ -45,7 +45,7 @@
    - `load_tinylm` 或 `load_lm` 之後保留記下的 level。
    - setter 呼叫 `invalidate`：舊的 rerank job 套用時回 `SHANJIE_NO_CHANGE`；job 建立時記下當時的 α、τ、δ。
    - `core/include/shanjie.h` 與 `docs/contracts/s3a.md` 同一個 PR 更新。
-3. **CLI**：`--rerank-level conservative|standard|aggressive`（預設 standard），用在 v1／v2 檔而不是 standard 時結束碼 2 並說明。cli 測試涵蓋。
+3. **CLI**：`--rerank-level conservative|standard|aggressive`（預設 standard），用在 v1／v2 檔而不是 standard 時結束碼 2 並說明；沒有 `--tinylm` 時，任何值（standard 也是）都是用法錯誤；不是 standard 時摘要行的設定標記在 `+tl:…` 後加 `+rl:<conservative|aggressive>`（standard 的輸出不變），`tools/bench.py`、`tools/triage.py` 的整串比對因此把它當作不是出貨設定。cli 測試涵蓋。
 
 ## 3. 殼
 

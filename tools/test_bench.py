@@ -337,6 +337,9 @@ class SuiteV2(Tmp):
                 self.cell("v0.4.0", tag=tag)
         with self.assertRaisesRegex(RuntimeError, "setting tag"):  # v0.4.1 without --packs acg
             self.cell("v0.4.1", tag="lm-chat+ctx+tl:7e73ef67")
+        for lv in ("conservative", "aggressive"):  # --rerank-level other than standard: the CLI adds +rl:, which is not the shipping setting
+            with self.assertRaisesRegex(RuntimeError, "setting tag"):
+                self.cell("v0.4.1", tag=f"lm-chat+ctx+tl:7e73ef67+rl:{lv}+acg")
 
     def test_malformed_rowstats_fail(self):
         for text in ("1\t1\t0\n", "1\tx\t0\t2\n2\t1\t0\t2\n", "2\t1\t0\t2\n1\t1\t0\t2\n", "1\t1\t0\t2\n"):

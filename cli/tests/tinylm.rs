@@ -216,6 +216,9 @@ fn rerank_level_refusals() {
         let o = run(&[&base[..], &["--tinylm", &v1, "--rerank-level", name]].concat());
         assert_eq!(o.status.code(), Some(2), "{name}: {}", text(&o.stderr));
         assert!(text(&o.stderr).contains("--rerank-level") && text(&o.stderr).contains("version") && o.stdout.is_empty());
+    }
+    // any level without --tinylm, standard included: it would silently measure the n-gram alone
+    for name in ["conservative", "standard", "aggressive"] {
         let o = run(&[&base[..], &["--rerank-level", name]].concat());
         assert!(!o.status.success() && text(&o.stderr).contains("needs --tinylm") && o.stdout.is_empty(), "{name}: {}", text(&o.stderr));
     }
@@ -290,4 +293,26 @@ fn dump_words_align_with_dump_and_c_is_the_chosen_index() {
 fn dump_words_refused_with_holdout() {
     let o = run(&["--lm", &lm_path(), "--profile", "chat", "--set", "holdout", "--dump-words", "x.tsv"]);
     assert!(!o.status.success() && text(&o.stderr).contains("holdout"), "{}", text(&o.stderr));
+}
+
+/// The summary line records a non-standard level (`+rl:<level>`, after `+tl:`) so a tool comparing the whole setting tag sees a run
+/// that is not the shipping setting; standard (given or default) leaves the line as before.
+#[test]
+fn summary_line_records_a_non_standard_level() {
+    let lm = lm_path();
+    let (dir, _) = tmp_with_sjtl("level-tag", Path::new(&lm));
+    let sjtl = v3_with_moving(&dir, Path::new(&lm), 1);
+    let base = ["--lm", lm.as_str(), "--profile", "chat", "--dev", "5", "--tinylm", sjtl.as_str()];
+    let head = |extra: &[&str]| {
+        let o = run(&[&base[..], extra].concat());
+        assert!(o.status.success(), "{}", text(&o.stderr));
+        text(&o.stdout).split("  {").next().unwrap().to_string()
+    };
+    let plain = head(&[]);
+    assert!(plain.contains("+tl:") && !plain.contains("+rl:"), "{plain}");
+    assert_eq!(head(&["--rerank-level", "standard"]), plain);
+    for name in ["conservative", "aggressive"] {
+        assert_eq!(head(&["--rerank-level", name]), format!("{plain}+rl:{name}"));
+    }
+    std::fs::remove_dir_all(dir).unwrap();
 }
