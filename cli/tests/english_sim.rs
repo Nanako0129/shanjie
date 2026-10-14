@@ -1,4 +1,4 @@
-//! `english-sim` (docs/contracts/zhen-mixed.md section 4.1): a fixed-seed run with the numbers written down. Change the typing
+//! `english-sim` (docs/contracts/zhen-mixed.md section 4.1, `--inline`: zhen-inline.md section 3): a fixed-seed run with the numbers written down. Change the typing
 //! model in cli/src/english.rs and these numbers change with it. Synthetic rows and words only.
 use std::process::Command;
 
@@ -18,6 +18,8 @@ fn files(name: &str) -> (String, String) {
     let words = dir.join("words.txt");
     std::fs::write(&rows, "|挑|ㄊㄧㄠ\n".repeat(400)).unwrap();
     std::fs::write(&words, "ewukl\nqwukl\n").unwrap();
+    // Longer words with the same starts and no word of their own: rule D holds on the way to them, the window never opens.
+    std::fs::write(dir.join("longer.txt"), "ewuklzz\nqwuklzz\n").unwrap();
     (rows.to_str().unwrap().into(), words.to_str().unwrap().into())
 }
 
@@ -39,7 +41,29 @@ fn fixed_seed_numbers() {
     // One seed, one repeat: the first seed is the one the mean above starts from.
     let one = run(&["--words", &words, "--rows", &rows, "--p", "0.5", "--seed", "1", "--repeat", "1"]);
     assert_eq!(one, format!("{ROWS_SHA}\t400\t400\t2964\t45\t112.500\t112.500\n"));
+    // `--inline` (docs/contracts/zhen-inline.md section 3) adds the two columns of the display rule D, asked of the engine after every
+    // key, and leaves the rest of the line as it is. Here D holds exactly in the syllables that trigger (the two words are the only
+    // ones, so no longer start exists): the same 214 over five seeds.
+    let inline = run(&["--words", &words, "--rows", &rows, "--p", "0.5", "--repair", "overwrite", "--inline"]);
+    assert_eq!(inline, format!("{ROWS_SHA}\t400\t400\t14898\t214\t107.000\t117.500\t107.000\t117.500\n"));
+    // Words that are only longer than what is typed: D holds (the Zhuyin would show as letters), nothing triggers.
+    let longer = std::path::Path::new(&rows).parent().unwrap().join("longer.txt");
+    let longer = longer.to_str().unwrap();
+    assert_eq!(
+        run(&["--words", longer, "--rows", &rows, "--p", "0.5", "--repair", "overwrite", "--inline"]),
+        format!("{ROWS_SHA}\t400\t400\t14470\t0\t0.000\t0.000\t107.000\t117.500\n")
+    );
+    // The backspace repair and no mistakes: zero, in both columns.
+    assert_eq!(run(&["--words", longer, "--rows", &rows, "--p", "0.5", "--repair", "backspace", "--inline"]), format!("{ROWS_SHA}\t400\t400\t16506\t0\t0.000\t0.000\t0.000\t0.000\n"));
+    assert_eq!(run(&["--words", longer, "--rows", &rows, "--p", "0", "--inline"]), format!("{ROWS_SHA}\t400\t400\t10000\t0\t0.000\t0.000\t0.000\t0.000\n"));
     std::fs::remove_dir_all(std::path::Path::new(&rows).parent().unwrap()).unwrap();
+}
+
+#[test]
+fn inline_is_for_the_typing_mode() {
+    let list = concat!(env!("CARGO_MANIFEST_DIR"), "/../eval/golden/english-tiny.txt");
+    let out = Command::new(env!("CARGO_BIN_EXE_shanjie-eval")).arg("english-sim").args(["--words", list, "--recall", "--inline"]).output().unwrap();
+    assert!(!out.status.success() && out.stdout.is_empty());
 }
 
 #[test]

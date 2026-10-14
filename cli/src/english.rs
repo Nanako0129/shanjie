@@ -2,14 +2,18 @@
 //! and how many words of a list open it at all. It drives the real engine (`Engine::load_english`, `set_english(true)`) and
 //! reads `Engine::english_open()` after every Space: the trigger rule is the engine's, never repeated here.
 //!
-//!   english-sim --words FILE --rows FILE [--p 0.02] [--repair overwrite|backspace] [--seed 20261014] [--repeat 5]
+//!   english-sim --words FILE --rows FILE [--p 0.02] [--repair overwrite|backspace] [--seed 20261014] [--repeat 5] [--inline]
 //!   english-sim --words FILE --recall
 //!
 //! Output is one TSV line and no content text (R2). Typing mode:
 //!   rows_sha256  rows  syllables  keys  triggers  per_1000_mean  per_1000_max
 //! `rows` and `syllables` are one pass over the rows; `keys` (every key event sent to the engine, repairs, Esc and Enter
 //! included) and `triggers` are summed over the seeds; `per_1000` is triggers x 1000 / syllables of one seed, mean and max
-//! over the seeds. Recall mode:
+//! over the seeds. With `--inline` (docs/contracts/zhen-inline.md section 3) two more columns follow,
+//!   inline_per_1000_mean  inline_per_1000_max
+//! the same figure for the syllables after one of whose keys the engine's display rule D held (`Engine::english_inline_shown`,
+//! asked after every key; a syllable counts once): how often the Zhuyin of a Chinese syllable would show as letters. Without
+//! `--inline` the line is the one above, unchanged. Recall mode:
 //!   words_sha256  words  opened  top1  overwrite0  overwrite1_leftover_valid  overwrite2plus_leftover_valid  leftover_invalid
 //! (`opened` and `top1`: the window opened / its first item is the word; the four classes partition the words, the last two
 //! open it, the first two never do; the tool stops if the engine and this recount disagree.)
@@ -83,6 +87,9 @@ struct Sim {
     engine: Engine,
     keys: u64,
     triggers: u64,
+    /// `--inline`: ask the engine for rule D after every key; `shown` is whether it held after any key of this syllable.
+    inline: bool,
+    shown: bool,
     p: f64,
     repair: Repair,
     rng: Rng,
@@ -91,13 +98,17 @@ struct Sim {
 impl Sim {
     fn send(&mut self, k: Key) -> Result<(), String> {
         self.keys += 1;
-        self.engine.key(k).map(|_| ()).map_err(|_| "the engine failed on a key".to_string())
+        self.engine.key(k).map_err(|_| "the engine failed on a key".to_string())?;
+        // The rule is the engine's, never repeated here.
+        self.shown |= self.inline && self.engine.english_inline_shown();
+        Ok(())
     }
 
     fn zhuyin(&mut self, sym: char) -> Result<(), String> {
         self.send(Key::ch(LAYOUT.key_of_symbol(sym).unwrap(), 0))
     }
 
+    /// One syllable typed; whether rule D held after any of its keys is left in `self.shown` (the caller counts and clears it).
     fn syllable(&mut self, syms: &[(usize, char)], tone: Option<char>) -> Result<(), String> {
         let mut shown: [Option<char>; 3] = [None; 3];
         for (i, &(col, sym)) in syms.iter().enumerate() {
@@ -149,6 +160,7 @@ fn engine_with(lex: &Arc<Lexicon>, words: &Path) -> Result<Engine, String> {
     let mut e = Engine::with_lexicon(lex.clone(), LAYOUT);
     e.load_english(words).map_err(|_| "cannot load the word list".to_string())?;
     e.set_english(true).map_err(|_| "cannot switch the English window on".to_string())?;
+    e.set_english_inline(true); // the shipped default; only `--inline` asks about it
     Ok(e)
 }
 
@@ -162,7 +174,7 @@ fn read(path: &Path) -> Result<Vec<u8>, String> {
 }
 
 pub fn run(args: &[String], root: &Path) -> Result<(), String> {
-    let (mut words, mut rows, mut recall) = (None::<PathBuf>, None::<PathBuf>, false);
+    let (mut words, mut rows, mut recall, mut inline) = (None::<PathBuf>, None::<PathBuf>, false, false);
     let (mut p, mut repair, mut seed, mut repeat) = (0.02f64, Repair::Overwrite, 20261014u64, 5u64);
     let mut it = args.iter();
     while let Some(a) = it.next() {
@@ -171,6 +183,7 @@ pub fn run(args: &[String], root: &Path) -> Result<(), String> {
             "--words" => words = Some(val()?.into()),
             "--rows" => rows = Some(val()?.into()),
             "--recall" => recall = true,
+            "--inline" => inline = true,
             "--p" => p = val()?.parse().map_err(|_| "bad --p")?,
             "--repair" => {
                 repair = match val()?.as_str() {
@@ -193,6 +206,9 @@ pub fn run(args: &[String], root: &Path) -> Result<(), String> {
     }
     let lex = load_lexicon(&root.join("data/lexicon")).map_err(|_| "cannot load the lexicon")?;
     if recall {
+        if inline {
+            return Err("--inline is for the typing mode".into());
+        }
         return run_recall(&lex, &words);
     }
 
@@ -219,22 +235,32 @@ pub fn run(args: &[String], root: &Path) -> Result<(), String> {
     if syllables == 0 {
         return Err("no row to simulate".into());
     }
-    let (mut per_1000, mut keys, mut triggers) = (Vec::new(), 0u64, 0u64);
+    let (mut per_1000, mut inline_1000, mut keys, mut triggers) = (Vec::new(), Vec::new(), 0u64, 0u64);
     for i in 0..repeat {
-        let mut sim = Sim { engine: engine_with(&lex, &words)?, keys: 0, triggers: 0, p, repair, rng: Rng(seed.wrapping_add(i)) };
+        let mut sim = Sim { engine: engine_with(&lex, &words)?, keys: 0, triggers: 0, inline, shown: false, p, repair, rng: Rng(seed.wrapping_add(i)) };
+        let mut shown_syllables = 0u64;
         for row in &parsed {
             sim.engine.reset(ResetMode::Discard);
             for (syms, tone) in row {
+                sim.shown = false;
                 sim.syllable(syms, *tone)?;
+                shown_syllables += sim.shown as u64;
             }
             sim.send(Key::new(KeyKind::Enter))?;
         }
         per_1000.push(sim.triggers as f64 * 1000.0 / syllables as f64);
+        inline_1000.push(shown_syllables as f64 * 1000.0 / syllables as f64);
         keys += sim.keys;
         triggers += sim.triggers;
     }
     let (mean, max) = mean_max(&per_1000);
-    println!("{rows_sha}\t{}\t{syllables}\t{keys}\t{triggers}\t{mean:.3}\t{max:.3}", parsed.len());
+    let extra = if inline {
+        let (imean, imax) = mean_max(&inline_1000);
+        format!("\t{imean:.3}\t{imax:.3}")
+    } else {
+        String::new()
+    };
+    println!("{rows_sha}\t{}\t{syllables}\t{keys}\t{triggers}\t{mean:.3}\t{max:.3}{extra}", parsed.len());
     Ok(())
 }
 
