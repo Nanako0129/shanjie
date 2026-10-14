@@ -6,7 +6,17 @@
 
 ## 補次數檔（§2.1b）的生成指令
 
-（main 補上實際跑過的指令、`--chars`、帳本與輸出檔 SHA-256。）
+在 Mac 跑（只呼叫 API，計算量小），金鑰只放進這一個程序的環境變數：
+
+```
+cd experiments/s7f-corpus
+CEREBRAS_API_KEY=… python3 generate.py --provider cerebras --model gpt-oss-120b --price-in 0.5 --price-out 1.0 \
+  --seeds ../model-v6/seeds-topup.txt --invade <INVADE_CLONE> --invade-sha256 f5406195a719b29c6f61c61919d45bbb52b3f95d811c8fd4eb0a55a14ff01cb6 \
+  --tune <S7C2C_TUNE> --chars 500000 --budget-usd 15 --dedupe-against <S7F 的 cerebras-gpt-oss-120b.txt> \
+  --ledger <DIR>/spend.json --out <DIR>
+```
+
+中途一次 HTTP 504（第 9,376 個提示）後，同一個指令加 `--resume` 接著跑。結果：23,928 個回應、留下 501,062 字、抽成剛好 500,000 字（22,745 列），帳本 US$2.8733；濾掉的：重複 258、和評測集重疊 90、入侵詞 312、長度 1、沒用到種子詞 405、簡體 67。輸出 `cerebras-gpt-oss-120b.txt` SHA-256 `315939d7391205a2ea738504e71c4a7fd702f7ef3ee892d197ec177205814d54`（建置機上的檔名是 `topup.txt`，雜湊相同）。
 
 ## 步驟
 

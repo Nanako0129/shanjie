@@ -5476,5 +5476,5 @@ formal: alpha 0.7, tau 1, delta 2
 - **計數詞表**（`count_lexicon.py`）：詞包 44,554 詞排除 465 個（衝突讀音 239 個），`acg-count.tsv` `e8757303…`；名單 1,606 詞排除 4 個（衝突讀音 5 個），`names-count.tsv` `5c14a359…`。
 - **重現核對**（契約 §2.1，兩項都過）：新的 `build_lm.py` 不帶 `--extra-overlay`、用 model-v5 的計數（188 `work\modelv5`）與 model-v5 當時的 `overlay-add.tsv`（`348979c8…`）建出 `7961cb9d…`，和 model-v5 去掉指紋前逐位元組相同；`build_classes.py` 不帶參數、用 classes-v3 的分群輸出（`modelv5-classes-keep`，`cls-40000-512.npz` `af637997…`）建出 `75a5efb3…`，和 classes-v3 逐位元組相同。〔第一次誤用了 `modelv5-final1` 的計數，建出 `4b1fdce4…`，和那個資料夾自己的模型相同、不是出貨的那份，改用 `work\modelv5` 重做。〕
 - **維基計數**：20 萬篇、3,107 萬段、32,035,747 種二元組、361,810 種詞；16 個 worker（所有子程序關掉 Windows 的降速）。
-- **補次數檔**（契約 §2.1b）：`generate.py`，Cerebras gpt-oss-120b、種子 `experiments/model-v6/seeds-topup.txt`、上限 US$15、目標 50 萬字；中途一次 HTTP 504 後用 `--resume` 接著跑（結果下一節補）。
+- **補次數檔**（契約 §2.1b）：`generate.py`，Cerebras gpt-oss-120b、種子 `experiments/model-v6/seeds-topup.txt`、上限 US$15、目標 50 萬字；中途一次 HTTP 504 後用 `--resume` 接著跑。結果：23,928 個回應、留下 501,062 字，抽成剛好 500,000 字（22,745 列），帳本 US$2.87（上限 US$15）；濾掉重複 258、評測集重疊 90、入侵詞 312、沒用到種子詞 405、簡體 67、長度 1。輸出 SHA-256 `315939d7…`（指令在 `experiments/model-v6/README.md`）。
 
