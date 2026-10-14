@@ -276,6 +276,23 @@ class SuiteV2(Tmp):
         self.assertTrue(v.tl.endswith("tinylm.sjtl"))
         self.assertEqual(v.tl8, "7e73ef67")
 
+    def test_kn_version_gets_its_side_file_and_tag(self):
+        """model-v6 and later (P4-12): a version with "kn" gets its kn.sjkn in the folder and `+kn:{kn8}` in the tag; others never do."""
+        spec = {"release": "vK", "flags": ["--context", "--packs", "acg"], "tinylm": True, "kn": True, "tag": "+ctx+kn:{kn8}:θ1:β1+tl:{tl8}+acg"}
+        HEX["kn.sjkn"] = "cbefbced" + "e" * 56
+        self.addCleanup(HEX.pop, "kn.sjkn")
+        with mock.patch.dict(bench.VERSIONS2, {"vK": spec}):
+            v = self.stage_models("vK", HEX)
+            for n in HEX:
+                self.put_model(n)
+            with mock_hash():
+                bench.setup_models(v, spec, os.path.join(self.td, "mf"))
+            self.assertEqual(sorted(os.listdir(os.path.dirname(v.lm))), ["bigram.sjlm", "classes.sjc", "kn.sjkn"])
+            self.assertEqual(bench.expected_tag(v, "chat", False), "lm-chat+ctx+kn:cbefbced:θ1:β1+tl:7e73ef67+acg")
+            os.remove(os.path.join(v.dir, "data", "kn.sjkn.sha256"))
+            with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
+                bench.setup_models(v, spec, os.path.join(self.td, "mf2"))   # a KN version without data/kn.sjkn.sha256 stops
+
     def test_v040_has_no_tinylm_sha_file_and_needs_none(self):
         v = self.stage_models("v0.4.0", ["bigram.sjlm", "classes.sjc"])
         for n in ("bigram.sjlm", "classes.sjc"):

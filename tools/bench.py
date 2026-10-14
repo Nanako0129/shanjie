@@ -702,6 +702,9 @@ PROFILES2 = ["chat", "formal"]
 # Shipped settings (contract 2.1). `flags` and `tag` are two independent statements of the same thing on purpose: the CLI summary
 # line must carry `lm-<profile>` + `tag` (`{tl8}` = first 8 hex of the .sjtl), so a dropped flag or an auto-loaded kn.sjkn fails the cell. The comparison is exact, so a run with
 # `--rerank-level` other than standard (the CLI adds `+rl:<level>` after `+tl:`) fails it too: not the shipping setting.
+# A version that ships a Kneser-Ney side file (model-v6 and later) has `"kn": True`: its kn.sjkn (hash from that version's
+# data/kn.sjkn.sha256) goes into the model folder, so the CLI turns KN on as the App does, and its tag spells `+kn:{kn8}:θ<θ>:β<β>`
+# (`{kn8}` = first 8 hex of the side file) before `+tl:`. A version without the key gets no kn.sjkn, so an auto-loaded one still fails.
 # The App also learns locally, re-ranks asynchronously after every key, takes the context from the text field: the CLI does none of that.
 VERSIONS2 = {
     "v0.4.0": {"release": "v0.4.0", "flags": ["--context", "--packs", "acg"], "tinylm": False, "tag": "+ctx+acg"},
@@ -735,7 +738,7 @@ def version_labels(refs, as_):
 def resolve_models(ver, spec):
     """-> {file name: (path, sha256)}: hashes come from the exported version's data/*.sha256, files from MODELS/<sha256>/<name>."""
     out = {}
-    for n in ["bigram.sjlm", "classes.sjc"] + (["tinylm.sjtl"] if spec["tinylm"] else []):
+    for n in ["bigram.sjlm", "classes.sjc"] + (["kn.sjkn"] if spec.get("kn") else []) + (["tinylm.sjtl"] if spec["tinylm"] else []):
         f = os.path.join(ver.dir, "data", n + ".sha256")
         if not os.path.isfile(f):
             die(f"{ver.label}: the export has no data/{n}.sha256")
@@ -750,15 +753,17 @@ def resolve_models(ver, spec):
 
 
 def setup_models(ver, spec, td):
-    """A model folder with only bigram.sjlm and classes.sjc (the CLI loads classes.sjc beside --lm and turns KN on when it sees kn.sjkn)."""
+    """A model folder with only bigram.sjlm and classes.sjc, plus kn.sjkn for a version that ships one (the CLI loads classes.sjc beside
+    --lm and turns KN on when it sees kn.sjkn)."""
     ver.spec, ver.models = spec, resolve_models(ver, spec)
     d = os.path.join(td, ver.label)
     os.makedirs(d)
-    for n in ("bigram.sjlm", "classes.sjc"):
+    for n in ("bigram.sjlm", "classes.sjc") + (("kn.sjkn",) if spec.get("kn") else ()):
         os.symlink(ver.models[n][0], os.path.join(d, n))
     ver.lm = os.path.join(d, "bigram.sjlm")
     ver.tl = ver.models["tinylm.sjtl"][0] if spec["tinylm"] else None
     ver.tl8 = ver.models["tinylm.sjtl"][1][:8] if spec["tinylm"] else ""
+    ver.kn8 = ver.models["kn.sjkn"][1][:8] if spec.get("kn") else ""
 
 
 def ship_flags(ver, anchor):
@@ -770,7 +775,7 @@ def ship_flags(ver, anchor):
 
 
 def expected_tag(ver, prof, anchor):
-    t = ver.spec["tag"].format(tl8=ver.tl8)
+    t = ver.spec["tag"].format(tl8=ver.tl8, kn8=getattr(ver, "kn8", ""))
     return f"lm-{prof}" + (t.replace("+acg", "") if anchor else t)
 
 
@@ -955,7 +960,7 @@ def cmd_run2(args):
         setup_models(v, VERSIONS2[v.label], td.name)
         rec = {"ref": v.ref, "version": v.label, "sha": v.sha, "lexicon_sha256": v.lexicon_sha,
                "models": {n: h for n, (_, h) in v.models.items()}, "flags": ship_flags(v, anchor) + (["--tinylm", "<file>"] if v.tl else []),
-               "tag": v.spec["tag"].format(tl8=v.tl8), "fingerprints": dict(ctx.fp), "accuracy": {}}
+               "tag": v.spec["tag"].format(tl8=v.tl8, kn8=getattr(v, "kn8", "")), "fingerprints": dict(ctx.fp), "accuracy": {}}
         result["versions"].append(rec)
 
         def one(n, p):

@@ -11,7 +11,7 @@ eval/bench/triage/<label>.json (counts only). Public sets also get a per-row num
 ~/.cache/shanjie/triage), outside the repo; private sets only ever get counts. `table` renders docs/triage.md from the JSON files.
 The holdout is never a set here. Standard library only, except that `tinylm_params` needs numpy (export_sjtl.py's reader), plus tools/bench.py's set table and reference/proto/eval.py's `lenient`).
 """
-import argparse, collections, importlib.util, json, os, struct, subprocess, sys, tempfile
+import argparse, collections, hashlib, importlib.util, json, os, struct, subprocess, sys, tempfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -84,10 +84,11 @@ def parse_rows(text):
 
 class Lex:
     """The lexicon the engine and the CLI load (core/src/engine.rs load_lexicon_packs_detailed): mcbpmf-data.txt, then the overlay rows of
-    overlay-add.tsv, sandhi-add.tsv and the acg pack. Every (reading, word) entry; `source` = words of overlay-add.tsv or the pack
-    (sandhi-add.tsv's changed-tone readings are not a source of words), `base` = words of mcbpmf-data.txt."""
+    overlay-add.tsv, sandhi-add.tsv, names-add.tsv (the always-on names layer since model-v6) and the acg pack. Every (reading, word) entry;
+    `source` = words of overlay-add.tsv, names-add.tsv or the pack (sandhi-add.tsv's changed-tone readings are not a source of words),
+    `base` = words of mcbpmf-data.txt."""
 
-    def __init__(self, base, overlay, sandhi, pack):
+    def __init__(self, base, overlay, sandhi, pack, names=""):
         self.by_reading = collections.defaultdict(set)
         self.readings_of = collections.defaultdict(set)
         self.base, self.source = set(), set()
@@ -98,7 +99,7 @@ class Lex:
             float(f[2])
             self._add(tuple(f[0].split("-")), f[1])
             self.base.add(f[1])
-        for text, is_source in ((overlay, True), (sandhi, False), (pack, True)):
+        for text, is_source in ((overlay, True), (sandhi, False), (names, True), (pack, True)):
             for l in lines_of(text):   # overlay_row: exactly four tab fields and a numeric score, else the engine refuses the file
                 f = l.split("\t")
                 if len(f) != 4:
@@ -115,16 +116,18 @@ class Lex:
     @classmethod
     def load(cls):
         r = lambda *p: read_text(os.path.join(ROOT, *p))
-        return cls(r("data/lexicon/mcbpmf-data.txt"), r("data/lexicon/overlay-add.tsv"), r("data/lexicon/sandhi-add.tsv"), r("data/packs/acg-add.tsv"))
+        return cls(r("data/lexicon/mcbpmf-data.txt"), r("data/lexicon/overlay-add.tsv"), r("data/lexicon/sandhi-add.tsv"), r("data/packs/acg-add.tsv"),
+                   r("data/lexicon/names-add.tsv"))
 
     def has(self, word):
         return word in self.readings_of
 
 
 def tinylm_params(path):
-    """The standard (alpha, tau, delta) per profile of a .sjtl file (versions 1 to 3; delta is 0 in version 1), read with the exporter's own
-    reader so a header change cannot leave this tool behind (experiments/s7a-tinylm/export_sjtl.py read_sjtl). The version 3 level triples are
-    not needed: the triage runs the standard level."""
+    """The standard (alpha, tau, delta) per profile of a .sjtl file (versions 1 to 4; delta is 0 in version 1), read with the exporter's own
+    reader so a header change cannot leave this tool behind (experiments/s7a-tinylm/export_sjtl.py read_sjtl). The version 3 and 4 level
+    triples are not needed: the triage runs the standard level. Version 4's Kneser-Ney side file hash is checked by the core when the CLI
+    loads the file (a mismatch stops the run), not here."""
     sys.path.insert(0, os.path.join(ROOT, "experiments", "s7a-tinylm"))
     import export_sjtl
     try:
@@ -132,6 +135,18 @@ def tinylm_params(path):
     except (AssertionError, struct.error):
         raise ValueError("not a .sjtl file") from None
     return {p: (*head[p], head["delta"][i]) for i, p in enumerate(PROFILES)}
+
+
+def kn_tag(path):
+    """The CLI's setting tag for the Kneser-Ney side file beside the model (`+kn:<sha8>:θ<θ>:β<β>`, cli/src/main.rs via Lm::kn_tag,
+    lm_eval.py kn_tag), or "" when there is none (the CLI then runs without KN). SJKN0002: θ u32 at byte 44, β f64 at 48."""
+    if not os.path.lexists(path):
+        return ""
+    b = open(path, "rb").read()
+    if b[:8] != b"SJKN0002" or len(b) < 56:
+        raise ValueError("not an SJKN0002 side file")
+    theta, beta = struct.unpack_from("<Id", b, 44)
+    return f"+kn:{hashlib.sha256(b).hexdigest()[:8]}:θ{theta}:β{beta:g}"
 
 
 def pick(ng, ll, alpha, tau, delta):
@@ -326,7 +341,7 @@ def read_cli_files(dump, words, scores, n):
     return cands, gold0, recs
 
 
-def run_cell(cli, lm, tl, prof, rows_file, lex, par, lenient, report, td):
+def run_cell(cli, lm, tl, prof, rows_file, lex, par, lenient, report, td, kn=""):
     rows = parse_rows(read_text(rows_file))
     f = lambda n: os.path.join(td, n)
     env = dict(os.environ, SHANJIE_VARIANTS=os.path.join(ROOT, "eval/variants.tsv"))
@@ -336,7 +351,7 @@ def run_cell(cli, lm, tl, prof, rows_file, lex, par, lenient, report, td):
     m0 = bench.parse_summary(bench.sh(cli_cmd(cli, lm, tl, prof, rows_file, False, ["--rowstats", f("r0")]), env=env))
     # The setting tag the CLI prints: a dropped flag (no context, no pack, no small model) must fail the cell, as in bench.run_cell2.
     for got, ctx_tag in ((m["tag"], "+ctx"), (m0["tag"], "")):
-        if got != f"lm-{prof}{ctx_tag}+tl:{tl8}+acg":
+        if got != f"lm-{prof}{ctx_tag}{kn}+tl:{tl8}+acg":
             raise RuntimeError(f"{prof}: CLI setting tag {got} is not the shipping setting")
     n, top1, o64, sha = m["n"], m["top1"], m["oracle64"], m["top1_sha256"]
     if not (len(rows) == n == m0["n"]):
@@ -388,10 +403,11 @@ def cmd_run(a):
     cli = a.cli or os.path.join(ROOT, "target/release/shanjie-eval")
     lm, tl = os.path.join(ROOT, "data/lm/bigram.sjlm"), os.path.join(ROOT, "data/lm/tinylm.sjtl")
     lenient, lex, par = load_lenient(), Lex.load(), tinylm_params(tl)
+    kn = kn_tag(os.path.join(ROOT, "data/lm/kn.sjkn"))   # the CLI turns KN on when the side file is beside the model
     path = os.path.join(OUT_DIR, a.label + ".json")
     doc = json.load(open(path, encoding="utf-8")) if os.path.isfile(path) else {"label": a.label, "sets": {}}
     meta = {"commit": git_head(), "setting": "--context --packs acg --tinylm", "cli_sha256": bench.sha_file(cli),
-            "models": {n: bench.sha_file(os.path.join(ROOT, "data/lm", n)) for n in ("bigram.sjlm", "classes.sjc", "tinylm.sjtl")},
+            "models": {n: bench.sha_file(os.path.join(ROOT, "data/lm", n)) for n in ("bigram.sjlm", "classes.sjc") + (("kn.sjkn",) if kn else ()) + ("tinylm.sjtl",)},
             "alpha_tau_delta": {p: list(v) for p, v in par.items()}}
     check_same_run(doc, meta)
     doc.update(meta)
@@ -400,7 +416,7 @@ def cmd_run(a):
         doc["sets"][name] = {"private": private, "file_sha256": bench.sha_file(f), "profiles": {}}
         for prof in PROFILES:
             with tempfile.TemporaryDirectory() as td:   # the dump and the word dump hold sentences: they are deleted here
-                cn, per = run_cell(cli, lm, tl, prof, f, lex, par[prof], lenient, name == "user-reported", td)
+                cn, per = run_cell(cli, lm, tl, prof, f, lex, par[prof], lenient, name == "user-reported", td, kn)
             doc["sets"][name]["profiles"][prof] = cn
             if not private:
                 os.makedirs(a.rows_out, exist_ok=True)
