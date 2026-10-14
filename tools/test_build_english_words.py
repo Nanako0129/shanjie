@@ -102,7 +102,7 @@ class InputHash(unittest.TestCase):
         self.assertEqual(buf.getvalue().strip(), f"2 lines, SHA-256 {hashlib.sha256(data).hexdigest()}")
 
     def test_print_options_give_the_pins_build_app_uses(self):
-        for flag, want in (("--print-url", B.SYMSPELL_URL), ("--print-input-sha256", B.INPUT_SHA256)):
+        for flag, want in (("--print-url", B.SYMSPELL_URL), ("--print-commit", B.SYMSPELL_COMMIT), ("--print-input-sha256", B.INPUT_SHA256)):
             buf = io.StringIO()
             with contextlib.redirect_stdout(buf):
                 B.main([flag])

@@ -43,7 +43,7 @@ done
 # into the cache (the URL, the commit and the input hash live only in tools/build_english_words.py), checked, generated, and the
 # output checked against data/english-words.txt.sha256. A download failure or either hash mismatch fails the build.
 EN_URL="$(python3 tools/build_english_words.py --print-url)"
-EN_COMMIT="$(printf '%s' "$EN_URL" | sed -E 's|.*/([0-9a-f]{40})/.*|\1|')"
+EN_COMMIT="$(python3 tools/build_english_words.py --print-commit)"
 EN_IN_SHA="$(python3 tools/build_english_words.py --print-input-sha256)"
 EN_IN="${SHANJIE_ENGLISH_CACHE:-$HOME/.cache/shanjie/english}/frequency_dictionary_en_82_765.txt"
 en_input_ok() { [ -f "$EN_IN" ] && [ "$(shasum -a 256 "$EN_IN" | awk '{ print $1 }')" = "$EN_IN_SHA" ]; }
@@ -135,12 +135,12 @@ EOF
 # english-words.txt is not CC BY-SA: its own attribution, not folded into the file above (docs/contracts/zhen-mixed.md section 3.4).
 cat > "$RES/LICENSES/english-words-attribution.txt" <<EOF
 english-words.txt is generated at build time from frequency_dictionary_en_82_765.txt of SymSpell
-(https://github.com/wolfgarbe/SymSpell, commit $EN_COMMIT): the words of 3 to 32 lowercase letters,
-the most frequent ones of each length class, sorted. SymSpell's list is the intersection of two sources (1 and 2), and the list
+(https://github.com/wolfgarbe/SymSpell, commit $EN_COMMIT): all of its words of 3 to 32 lowercase ASCII letters
+(words with an apostrophe, a digit or a capital letter dropped), sorted. SymSpell's list is the intersection of two sources (1 and 2), and the list
 itself is SymSpell's (3):
 
 1. Word frequencies: Google Books Ngram Viewer data, Creative Commons Attribution 3.0 Unported (CC BY 3.0),
-   https://creativecommons.org/licenses/by/3.0/ . The data was filtered and cut as described above.
+   https://creativecommons.org/licenses/by/3.0/ . The data was filtered as described above.
 2. Words: SCOWL (Spell Checker Oriented Word Lists), Copyright 2000-2026 by Kevin Atkinson. Its notice is
    LICENSES/SCOWL.txt. SymSpell does not say which SCOWL version it used; the notice included is the current release's.
 3. The list itself: SymSpell, MIT License, Copyright (c) 2018 Wolf Garbe. Its text is LICENSES/SymSpell-MIT.txt.

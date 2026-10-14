@@ -72,16 +72,15 @@ TINY_RECORDED="$(awk 'NR == 1 { print $1 }' "$ROOT/data/tinylm.sjtl.sha256")"
 [ "$(shasum -a 256 "$R/tinylm.sjtl" | awk '{ print $1 }')" = "$TINY_RECORDED" ] \
   || fail "Resources/tinylm.sjtl does not match data/tinylm.sjtl.sha256"
 # The English word list of 中英混打 (docs/contracts/zhen-mixed.md section 3.4): every line a word the core's loader accepts (the
-# loader's own limits are tested in core), the three attributions present, and, once the hash is pinned in git, the bundled file
-# against it. Until then (the feature branch's CI) the recorded value is a placeholder and only the format is checked.
+# loader's own limits are tested in core), the three attributions present, and the bundled file against the hash recorded in git
+# (a record that is not a SHA-256 fails, like tinylm.sjtl's above).
 ! grep -Eqv '^[a-z]{3,32}$' "$R/english-words.txt" || fail "english-words.txt has a line outside [a-z]{3,32}"
 grep -q 'SymSpell' "$R/LICENSES/english-words-attribution.txt" && grep -q 'Google Books Ngram' "$R/LICENSES/english-words-attribution.txt" \
   && grep -q 'SCOWL' "$R/LICENSES/english-words-attribution.txt" || fail "the English attribution file does not name its three sources"
 EN_RECORDED="$(awk 'NR == 1 { print $1 }' "$ROOT/data/english-words.txt.sha256")"
-if [[ "$EN_RECORDED" =~ ^[0-9a-f]{64}$ ]]; then
-  [ "$(shasum -a 256 "$R/english-words.txt" | awk '{ print $1 }')" = "$EN_RECORDED" ] \
-    || fail "Resources/english-words.txt does not match data/english-words.txt.sha256"
-fi
+[[ "$EN_RECORDED" =~ ^[0-9a-f]{64}$ ]] || fail "data/english-words.txt.sha256 holds no SHA-256"
+[ "$(shasum -a 256 "$R/english-words.txt" | awk '{ print $1 }')" = "$EN_RECORDED" ] \
+  || fail "Resources/english-words.txt does not match data/english-words.txt.sha256"
 echo "check 2: ok"
 
 # --- 3: signature: valid, hardened runtime, no entitlements at all
