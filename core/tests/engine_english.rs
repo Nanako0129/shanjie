@@ -52,6 +52,7 @@ fn key_of(tok: &str) -> Key {
         "_" => Key::new(KeyKind::Space),
         "Enter" => Key::new(KeyKind::Enter),
         "Esc" => Key::new(KeyKind::Esc),
+        "Tab" => Key::new(KeyKind::Tab),
         "BS" => Key::new(KeyKind::Backspace),
         "Left" => Key::new(KeyKind::Left),
         "Right" => Key::new(KeyKind::Right),
@@ -1204,16 +1205,17 @@ fn autokeep_needs_a_whole_word_and_a_key_that_cannot_go_on() {
     assert!(o.preedit == "windo" && e.english_inline_shown());
     let o = run(&mut e, "j");
     assert!(!e.english_autokept() && !o.preedit.contains("windo") && !e.english_inline_shown(), "{}", o.preedit);
-    // `wind` + `o` keeps going: the letters stay, nothing kept (`win` is a word, `wind` is not).
+    // `win` is a whole word and D holds at it (w->ㄊ, i->ㄛ, n->ㄙ is one overwrite and the leftover ㄙㄛ is not in the lexicon), but
+    // `wind` is still the start of `windows`: the `d` goes on, no auto-keep, the letters stay.
     let mut e = win();
-    let o = run(&mut e, "w i n d");
-    assert!(o.preedit == "wind" && !e.english_autokept());
-    // `w i n d o w s` is the whole word `windows`; the next `d` cannot go on from it: kept.
+    run(&mut e, "w i n");
+    assert!(e.english_inline_shown() && !e.english_autokept());
+    let o = run(&mut e, "d");
+    assert!(o.preedit == "wind" && e.english_inline_shown() && !e.english_autokept(), "{}", o.preedit);
+    // `windows` is a whole word and `c` (ㄏ) starts no word after it: kept.
     let mut e = win();
     let o = run(&mut e, "w i n d o w s");
-    assert!(o.preedit == "windows");
-    // `win` is also a whole word and `d` goes on from it: while `win` is not even shown as letters (one overwrite, a valid leftover),
-    // `wind` is; the table row asks D first. Typing on never keeps.
+    assert!(o.preedit == "windows" && !e.english_autokept());
     let o = run(&mut e, "c");
     assert!(e.english_autokept() && o.preedit == "windowsㄏ", "{}", o.preedit);
 }
@@ -1353,4 +1355,90 @@ fn switching_mixing_off_keeps_the_run_as_a_token() {
     run(&mut e, "S-w i n");
     let o = e.set_english(false).unwrap();
     assert!(o.commit == format!("{marks}Win") && o.preedit.is_empty(), "{}", o.commit);
+}
+
+// ---------- amendment two, review fixes ----------
+
+#[test]
+fn no_prediction_row_while_the_run_is_open_and_tab_ends_the_run_first() {
+    // With a model loaded, Backspace inside a run must not bring the row back: Tab would enter it before the run (and a pick
+    // would put the word in front of the run's letters). The row comes back when the run is gone.
+    let mut e = lm_eng();
+    syllable(&mut e, "ㄨㄛˇ");
+    syllable(&mut e, "ㄗㄞˋ");
+    let o = syllable(&mut e, "ㄩㄥˋ");
+    let zh = o.preedit.clone();
+    assert!(!o.candidates.is_empty() && zh.chars().count() == 3, "premise: the row shows after the three syllables");
+    let o = run(&mut e, "S-w i n");
+    assert!(o.candidates.is_empty(), "no row while the run is open");
+    let o = run(&mut e, "BS");
+    assert!(o.preedit == format!("{zh}Wi") && o.candidates.is_empty() && o.selected.is_none(), "{:?}", o.candidates);
+    // Tab ends the run first (the token `Wi` joins the composition), then is an ordinary Tab: with no row to enter it commits the
+    // composition, letters included, and passes on. It does not enter a row, and nothing is picked from one.
+    let o = run(&mut e, "Tab");
+    assert!(!o.handled && o.commit == format!("{zh}Wi") && o.selected.is_none(), "{:?} {:?} {}", o.commit, o.candidates, o.handled);
+    // Backspace that empties the run gives the row back.
+    let mut e = lm_eng();
+    three(&mut e);
+    let o = run(&mut e, "S-w BS");
+    assert!(o.preedit == zh && !o.candidates.is_empty(), "the row is back: {:?}", o.candidates);
+}
+
+#[test]
+fn the_chinese_item_of_a_kept_token_is_the_syllable_that_was_on_the_columns() {
+    // "Show on Space": `r u s`, Backspace (rule 11 takes the last symbol in display order, not the shadow's last key), `s t`: the
+    // columns are ㄔ while the shadow is `rust`. The window's fourth item is the first entry of ㄔ, and so must the kept token's
+    // Chinese item be (replaying `rust` would give ㄔㄧ, which has none).
+    let zh = first_entry("ㄔ");
+    assert!(real().entries(&["ㄔㄧ".to_string()]).is_empty(), "premise: replaying the shadow gives ㄔㄧ, which has no entry");
+    let mut e = eng();
+    let o = run(&mut e, "r u s BS s t _");
+    assert!(e.english_open() && o.candidates.len() == 4 && o.candidates[3] == zh, "premise: the window's fourth item: {:?}", o.candidates);
+    run(&mut e, "j");
+    assert!(e.english_autokept());
+    run(&mut e, "BS");
+    let o = run(&mut e, "Down");
+    assert!(o.candidates == ["rust", "Rust", "RUST", zh.as_str()], "{:?}", o.candidates);
+    assert!(run(&mut e, "4").preedit == zh);
+}
+
+#[test]
+fn a_zhuyin_key_over_the_chinese_item_is_not_an_autokeep() {
+    // `google`'s window, fourth item (Chinese) selected, then ㄨ: the Chinese item is kept, no English token was made.
+    let mut e = eng_inline();
+    run(&mut e, "g o o g l e _ Right Right Right");
+    let o = run(&mut e, "j");
+    assert!(o.preedit == format!("{}ㄨ", first_entry("ㄍㄠ")), "{}", o.preedit);
+    assert!(!e.english_autokept());
+    // The English item selected: an auto-keep.
+    let mut e = eng_inline();
+    run(&mut e, "g o o g l e _ j");
+    assert!(e.english_autokept());
+}
+
+#[test]
+fn autokept_describes_only_the_latest_call() {
+    // After an auto-keep a pick from the prediction row, a reset or a setting is not one.
+    let inline_lm = || {
+        let mut e = lm_eng();
+        e.set_english_inline(true).unwrap();
+        e
+    };
+    let mut e = inline_lm();
+    let o = run(&mut e, "r u s t j");
+    assert!(e.english_autokept() && !o.candidates.is_empty(), "premise: kept, and the row shows: {:?}", o.candidates);
+    assert!(e.pick(0).unwrap().is_some());
+    assert!(!e.english_autokept(), "pick of a prediction");
+    for call in 0..4 {
+        let mut e = inline_lm();
+        run(&mut e, "r u s t j");
+        assert!(e.english_autokept());
+        match call {
+            0 => drop(e.reset(ResetMode::Discard)),
+            1 => drop(e.set_candidate_vertical(true).unwrap()),
+            2 => drop(e.set_english_inline(false).unwrap()),
+            _ => drop(e.set_prediction(false).unwrap()),
+        }
+        assert!(!e.english_autokept(), "call {call}");
+    }
 }
