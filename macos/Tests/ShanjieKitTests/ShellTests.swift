@@ -644,7 +644,10 @@ final class ShellTests: XCTestCase {
         XCTAssertEqual(item()?.checked, true)
         XCTAssertEqual(window(c), ["rust", "Rust", "RUST"], "on: the English window")
         c.type("1")
-        XCTAssertEqual(c.client.text, "rust", "the word, no space")
+        XCTAssertEqual(c.client.text, "", "choosing the English item sends nothing (zhen-inline section 1.0)")
+        XCTAssertEqual(c.client.marked, "rust", "the word stays in the composition")
+        c.press(Keys.enter)
+        XCTAssertEqual(c.client.text, "rust", "Enter sends it, no space")
         XCTAssertEqual(c.client.marked, "")
         c.session.perform(.toggleAcgPack)  // rebuilds the engine, whose default is off
         c.session.perform(.toggleAcgPack)
@@ -665,6 +668,51 @@ final class ShellTests: XCTestCase {
         store.english = true
         XCTAssertEqual(window(Controller(make())), ["rust", "Rust", "RUST"], "a new shell reads the stored on")
         _ = again
+    }
+
+    /// zhen-inline section 2 / 4.3: the display choice defaults to "as typed" (a store with no value is true), shows the letters while
+    /// the English is typed and the Zhuyin when it is "on Space", is stored, and is sent again to every engine a rebuild makes (the
+    /// core's own default is true, so the rebuilt engine would show letters if the shell did not send false).
+    func testEnglishInlineDefaultStoredAndSentToEveryEngine() {
+        let store = MemoryEnglishStore(true)
+        let make = {
+            Shell(resources: self.resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(),
+                  learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), englishStore: store, acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore())
+        }
+        XCTAssertNil(store.englishInline, "never chosen")
+        let shell = make()
+        XCTAssertTrue(shell.englishInlineOn, "no value is true")
+        let c = Controller(shell)
+        c.session.activate()
+        c.type("rus")
+        XCTAssertEqual(c.client.marked, "rus", "as typed")
+        c.press(Keys.esc)
+        shell.applyEnglishInline(false)
+        XCTAssertEqual(store.englishInline, false)
+        c.type("rus")
+        XCTAssertEqual(c.client.marked, "ㄋㄧ", "on Space: the Zhuyin")
+        c.press(Keys.esc)
+        c.session.perform(.toggleAcgPack)  // rebuilds the engine
+        c.session.perform(.toggleAcgPack)
+        c.type("rus")
+        XCTAssertEqual(c.client.marked, "ㄋㄧ", "the rebuilt engine got the choice")
+        c.press(Keys.esc)
+        c.session.perform(.layout(.eten))
+        c.session.perform(.layout(.standard))
+        c.type("rus")
+        XCTAssertEqual(c.client.marked, "ㄋㄧ", "and the one rebuilt by a layout switch")
+        c.press(Keys.esc)
+        // A new shell reads the stored choice.
+        let again = Controller(make())
+        again.session.activate()
+        again.type("rus")
+        XCTAssertEqual(again.client.marked, "ㄋㄧ", "a new shell reads the stored false")
+        again.press(Keys.esc)
+        store.englishInline = true
+        let third = Controller(make())
+        third.session.activate()
+        third.type("rus")
+        XCTAssertEqual(third.client.marked, "rus", "and the stored true")
     }
 
     /// zhen-mixed section 3.2 / 5.3: a word list that is missing or refused (non-zero from `load_english`) makes `englishAvailable`

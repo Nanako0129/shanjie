@@ -123,13 +123,20 @@ public final class MemoryAbbreviationStore: AbbreviationStore {
 @MainActor
 public protocol EnglishStore: AnyObject {
     var english: Bool? { get set }
+    /// The display choice under it (docs/contracts/zhen-inline.md section 2): true shows the English as it is typed, false only
+    /// when Space opens the window. `nil` means never chosen, which is true.
+    var englishInline: Bool? { get set }
 }
 
 /// The in-memory EnglishStore.
 @MainActor
 public final class MemoryEnglishStore: EnglishStore {
     public var english: Bool?
-    public init(_ english: Bool? = nil) { self.english = english }
+    public var englishInline: Bool?
+    public init(_ english: Bool? = nil, inline: Bool? = nil) {
+        self.english = english
+        self.englishInline = inline
+    }
 }
 
 /// Where the "動漫與遊戲詞" switch is kept (docs/contracts/acg-pack.md A.2): `nil` means never chosen, which is on
@@ -328,6 +335,9 @@ public final class Shell {
     /// zhen-mixed: the experimental English window (default off); sent to every engine `build()` makes. Unlike the abbreviation
     /// switch it ships (the app shows it).
     private(set) var englishOn = false
+    /// zhen-inline section 2: how the English shows while it is typed (default true: as letters, `UserDefaults` key
+    /// `englishInline`, absent is true); sent to every engine `build()` makes. Only matters while `englishOn`.
+    private(set) var englishInlineOn = true
     /// Whether this engine loaded the word list (`Resources/english-words.txt`); false greys the menu item and the settings toggle
     /// (the checkmark keeps the setting), as `rerankAvailable` does for the small model.
     private(set) var englishAvailable = false
@@ -378,6 +388,8 @@ public final class Shell {
     /// The 中英混打（實驗） menu item and settings toggle, likewise: the word list loaded and the standard layout (the core records no
     /// shadow in the Eten layout, zhen-mixed section 2.1, so the switch would do nothing there). The checkmark still shows the choice.
     var englishEnabled: Bool { englishAvailable && mode == .standard }
+    /// The 英文的顯示 choice under it is enabled on the same condition and while the switch itself is on.
+    var englishInlineEnabled: Bool { englishEnabled && englishOn }
 
     /// A job waiting for the runner, with the session and engine it was taken for. Weak (F3): a waiting job keeps neither alive,
     /// and an identity is never compared by address.
@@ -497,6 +509,7 @@ public final class Shell {
         abbreviationOn = showsAbbreviation && abbreviationStore.abbreviation == true
         self.englishStore = englishStore
         englishOn = englishStore.english == true
+        englishInlineOn = englishStore.englishInline ?? true
         self.acgPackStore = acgPackStore
         acgDataDate = Shell.readAcgDataDate(resources.appendingPathComponent("packs/acg.json"))
         self.glassTintStore = glassTintStore
@@ -553,6 +566,15 @@ public final class Shell {
 
     func applyCandidateVertical(_ on: Bool) {
         if let o = owner { o.applyCandidateVertical(on) } else { dropOnFailure(setCandidateVertical(on)) }
+    }
+
+    /// The settings window's 英文的顯示 choice (zhen-inline section 2): stored and sent. The core gives no snapshot for it; the next
+    /// output carries the display, and a click in the window is inferred to leave no composition on screen.
+    func applyEnglishInline(_ on: Bool) {
+        englishInlineOn = on
+        englishStore.englishInline = on
+        if let c = engine?.setEnglishInline(on), c != 0 { Log.shell.error("shanjie_engine_set_english_inline failed, code \(c)") }
+        changed()
     }
 
     func applyRerank(_ on: Bool) {
@@ -768,6 +790,9 @@ public final class Shell {
         if case .failed(let c) = e.setEnglish(englishOn) {
             Log.shell.error("shanjie_engine_set_english failed, code \(c)")
         }
+        // And its display choice (zhen-inline section 2), every time for the same reason: the core's default is true.
+        let inline = e.setEnglishInline(englishInlineOn)
+        if inline != 0 { Log.shell.error("shanjie_engine_set_english_inline failed, code \(inline)") }
         // Same for the candidate window's orientation (candidate-vertical contract section 2.2).
         if case .failed(let c) = e.setCandidateVertical(candidateVertical) {
             Log.shell.error("shanjie_engine_set_candidate_vertical failed, code \(c)")
