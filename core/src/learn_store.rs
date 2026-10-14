@@ -52,6 +52,14 @@ const ELOOP: i32 = 62;
 const F_FULLFSYNC: i32 = 51;
 #[cfg(target_os = "macos")]
 const F_BARRIERFSYNC: i32 = 85;
+// Linux (x86_64) values, only so the test suite can run off the Mac (the Windows box's WSL); nothing
+// ships for Linux. The same symlink and FIFO tests check them there.
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+const O_NOFOLLOW: i32 = 0o400000;
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+const O_NONBLOCK: i32 = 0o4000;
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+const ELOOP: i32 = 40;
 
 extern "C" {
     fn geteuid() -> u32;
@@ -61,9 +69,16 @@ extern "C" {
 /// F_BARRIERFSYNC, else F_FULLFSYNC (§4): orders the data before the rename without waiting for the
 /// drive's cache flush on the key path (Rust's `sync_all` is F_FULLFSYNC on macOS, p99 35 ms in
 /// §11). False when both fail.
+#[cfg(target_os = "macos")]
 fn barrier(f: &File) -> bool {
     // SAFETY: a valid open descriptor; neither command takes an argument.
     unsafe { fcntl(f.as_raw_fd(), F_BARRIERFSYNC) != -1 || fcntl(f.as_raw_fd(), F_FULLFSYNC) != -1 }
+}
+
+/// Linux has neither command; fdatasync gives the same ordering for the off-Mac test runs.
+#[cfg(target_os = "linux")]
+fn barrier(f: &File) -> bool {
+    f.sync_data().is_ok()
 }
 
 /// Latest accepted day (9999-12-31 as days since 1970-01-01); earlier than 0 is rejected too.
