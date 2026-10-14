@@ -277,7 +277,6 @@ word	source_kind	sources	qid	note
 中華醫事科大	school-abbr	zhwiki:中華醫事科大->中華醫事科技大學@3613706		
 中華醫事科技大學	school	moe:u1_new.csv@115		
 中鼎	category	Category:台灣公司:中鼎集團@93892008		
-丸亀製麵	nsi	nsi:amenity/fast_food/marugameseimen-f9a382@ac22bfd445b7	Q10877253	
 久津實業	category	Category:台灣餐飲公司:久津實業@89639577		
 久鼎金屬	category	Category:台灣公司:久鼎金屬@86444111		
 二林工商	school-abbr	zhwiki:二林工商->國立二林高級工商職業學校@15305647		
@@ -1058,7 +1057,6 @@ word	source_kind	sources	qid	note
 新竹高商	school-abbr	zhwiki:新竹高商->國立新竹高級商業職業學校@6309478		
 新麗企業	category	Category:台灣公司:新麗企業@94031995		
 旗山農工	school-abbr	zhwiki:旗山農工->國立旗山高級農工職業學校@15474681		
-旗農	school-abbr	zhwiki:旗農->國立旗山高級農工職業學校@55240418		
 日勝生活科技	category	Category:台灣公司:日勝生活科技@91670209		
 日月光半導體	category	Category:台灣公司:日月光半導體@94711798		
 昆盈企業	category	Category:台灣公司:昆盈企業@94748474		
@@ -1521,6 +1519,7 @@ word	source_kind	sources	qid	note
 臺南市光華高中	school	moe:high.csv@115		
 臺南市崑山高中	school	moe:high.csv@115		
 臺南科技大學	school-abbr	zhwiki:臺南科技大學->台南應用科技大學@14528911		
+臺南藝大	school-abbr	zhwiki:臺南藝大->國立臺南藝術大學@57033044		
 臺南藝術大學	school-abbr	zhwiki:臺南藝術大學->國立臺南藝術大學@36334365		
 臺南護校	school-abbr	zhwiki:臺南護校->國立臺南護理專科學校@15292097		
 臺東大學	school-abbr	zhwiki:臺東大學->國立臺東大學@7589869		
@@ -1665,7 +1664,6 @@ word	source_kind	sources	qid	note
 金鼎綜合證券	category	Category:台灣公司:金鼎綜合證券@68216510		
 鈊象電子	category	Category:台灣公司:鈊象電子@93053757		
 銀箭沖印	category	Category:台灣公司:銀箭沖印@93391468		
-錸德	category	Category:台灣公司:錸德集團@90607547		
 錸德科技	category	Category:台灣公司:铼德科技@94847806		
 長佳機電工程	category	Category:台灣公司:長佳機電工程@93701463		POLY
 長庚科大	school-abbr	zhwiki:長庚科大->長庚科技大學@17239994		POLY
