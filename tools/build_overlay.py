@@ -29,6 +29,9 @@ PACK = os.path.join(ROOT, "data", "packs", "acg-add.tsv")   # 手動詞也不能
 # 手動詞的分數＝同字數的 length_scores ＋ 這個值（log10）。2026-10-14 量的：書面設定下「米雅歌」輸給「米亞哥」0.25（加 0.25 仍輸，
 # 加 0.5 時四個名字（五列）單獨打與放在句子裡，兩種設定 9 句都是第一名；研究紀錄同日）。手動加的是維護者明確要的詞，所以比一般疊加層詞高一點。
 MANUAL_BONUS = 0.5
+# canto-prune（docs/contracts/canto-prune.md，維護者 2026-10-14）：含這些粵語用字、又不是教育部國語辭典詞目（build() 本來就讀的
+# moe_titles()）的標題不進候選。「俾」「咩」「喎」（喎斜）「嘞」（好嘞）國語也用，不在內；審查補了嗮 噏 揸 攞 餸 嚫 撳 搣 嗌 掟 喐 睩 嗱。
+CANTO_CHARS = frozenset("冇嘅啲喺佢嘢唔咁嚟搵睇畀乜啱攰嗰哋嚿諗噉嗮噏揸攞餸嚫撳搣嗌掟喐睩嗱")
 MANUAL_WORD = re.compile(r"^[一-鿿]+$")   # 純漢字，範圍和 S1 的 HAN 相同（U+4E00–U+9FFF），字數不限 2–4
 REMOVED = os.path.join(ROOT, "experiments", "s2n", "overlay-removed.tsv")   # S2n：被拿掉的簡體寫法（詞、轉換後的寫法、讀音）
 VARIANT_REMOVED = os.path.join(ROOT, "experiments", "s2f", "overlay-variant-removed.tsv")   # S2f §2.5：被拿掉的異體寫法（詞、基底寫法、讀音）
@@ -132,8 +135,8 @@ def build():
     wikt = titles("enwiktionary") | titles("zhwiktionary")
     compounds = {t for t in titles("zhwiki") if t[:-1] in multi or t[1:] in multi}
     rows, removed, variant_removed = [], [], []
-    cand = wikt | compounds
     moe = moe_titles()
+    cand = {w for w in wikt | compounds if not cantonese(w, moe)}   # canto-prune：在候選階段拿掉，S2n／S2f 的落點不會指向被拿掉的詞
     fold = {**bc.MERGE, **bc.TW_VARIANTS}           # S2f §2.5：套到兩邊後字串相同，就是同一個詞的異體寫法
     fold_w = lambda t: "".join(fold.get(c, c) for c in t)
     # 第一輪：哪些詞條符合 (i)(iii)，目標寫法是什麼；第二輪由落點決定（修訂二 7.2.4：避免 A→B 而 B 不在了）
@@ -195,6 +198,11 @@ def build():
     assert not overlay_words & words                # 疊加層和基底的詞表交集必須是 0（手動詞由 manual_rows 自己檢查）
     rows += manual_rows(words | overlay_words | pack_words(), length_scores(base), base_syllables(base))
     return rows, removed, variant_removed
+
+
+def cantonese(w, headwords):
+    """canto-prune：詞含 CANTO_CHARS 任一字、又不是 headwords（萌典詞目）裡的詞。手動詞不套用（manual_rows 不呼叫它）。"""
+    return not CANTO_CHARS.isdisjoint(w) and w not in headwords
 
 
 def length_scores(base):
