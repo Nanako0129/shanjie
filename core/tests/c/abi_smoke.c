@@ -229,6 +229,8 @@ static int run_lm(const char *dir, const char *lm, const char *missing) {
   shanjie_output_free(o);
   o = type_last(e, "s");
   CHECK(839, o != 0 && o->candidate_count >= 1 && o->candidate_vertical == 0);
+  /* The two appended fields (zhen-inline section 1.3f) are 0 without an English run; their non-zero values are the Rust FFI test's. */
+  CHECK(841, o->english_run_utf16_start == 0 && o->english_run_utf16_len == 0);
   shanjie_output_free(o);
   o = 0;
   CHECK(840, shanjie_engine_reset(e, 1, &o) == 0 && o != 0);

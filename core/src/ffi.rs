@@ -44,6 +44,9 @@ pub struct ShanjieOutput {
     pub candidate_total: u32,
     /// Appended last (candidate-vertical contract section 2.2): 0 horizontal or none, 1 vertical candidate window, 2 vertical prediction row.
     pub candidate_vertical: u32,
+    /// Appended last (zhen-inline section 1.3f): the open English run in `preedit`, UTF-16 start and length; both 0 without a run.
+    pub english_run_utf16_start: u32,
+    pub english_run_utf16_len: u32,
 }
 
 /// Opaque to C.
@@ -134,6 +137,8 @@ fn to_c(o: Output) -> Option<*mut ShanjieOutput> {
         candidate_first: o.first,
         candidate_total: o.total,
         candidate_vertical: o.vertical,
+        english_run_utf16_start: o.english_run_utf16_start,
+        english_run_utf16_len: o.english_run_utf16_len,
     };
     Some(Box::into_raw(Box::new(OwnedOutput { out, _strings: strings, _ptrs: ptrs })).cast())
 }
@@ -1845,6 +1850,23 @@ mod tests {
         unsafe { shanjie_output_free(o) };
         assert!(send(e, key(ESC, '\0')).0 == 0);
         assert!(set_inline(e, 1) == 0);
+        // The last two fields (zhen-inline section 1.3f): an open English run, in UTF-16 units of `preedit`; 0 and 0 otherwise.
+        let fields = |k: ShanjieKey| {
+            let mut o = ptr::null_mut();
+            assert!(unsafe { shanjie_engine_key(e, k, &mut o) } == 0, "typing");
+            // SAFETY: test-only read of a live output.
+            let r = unsafe { (CStr::from_ptr((*o).preedit).to_str().unwrap().to_string(), (*o).english_run_utf16_start, (*o).english_run_utf16_len) };
+            unsafe { shanjie_output_free(o) };
+            r
+        };
+        type_out(e, "vup_"); // ㄒㄧㄣ with tone 1: one Chinese character in front
+        let r = fields(ShanjieKey { kind: CHAR, ch: 'w' as u32, modifiers: 1 });
+        assert!(r.0.chars().count() == 2 && r.1 == 1 && r.2 == 1, "the run `W` after the character: {r:?}");
+        let r = fields(key(CHAR, 'i'));
+        assert!(r.1 == 1 && r.2 == 2, "{r:?}");
+        let r = fields(key(SPACE, '\0'));
+        assert!(r.1 == 0 && r.2 == 0, "the run ended: 0 and 0, {r:?}");
+        assert!(send(e, key(ESC, '\0')).0 == 0);
         // Off: the same keys no longer open it.
         assert!(set_english(e, 0) == 0);
         let (cands, _, _) = type_out(e, "rust_");

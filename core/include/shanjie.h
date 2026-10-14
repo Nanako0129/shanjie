@@ -71,6 +71,8 @@ typedef struct {
   uint32_t candidate_first;   // position of candidates[0] in the whole list; 0 when closed (and for the prediction row)
   uint32_t candidate_total;   // length of the whole list; 0 when closed (the prediction row: its length)
   uint32_t candidate_vertical; // 0 = horizontal, or no candidates; 1 = vertical candidate window (candidate_columns is then 0; up to 9 rows from candidate_first; fixed when the window opened); 2 = vertical prediction row, entered or not (follows the current setting on every output; candidate_columns 0, first 0). Appended last.
+  uint32_t english_run_utf16_start; // UTF-16 offset in preedit where the open English run starts (zhen-inline section 1.3f); 0 when no run is open. Appended last.
+  uint32_t english_run_utf16_len;   // UTF-16 length of the open English run in preedit; 0 when no run is open. Appended last.
 } ShanjieOutput;
 typedef struct ShanjieEngine ShanjieEngine;
 
@@ -151,17 +153,20 @@ int32_t shanjie_engine_load_english(ShanjieEngine *engine, const char *path);
 //   the item becomes an English token at the cursor that stays in the composition (one unit like a punctuation mark: Backspace
 //   and the arrow keys take it whole, the next word starts a new sentence), and it is sent with the rest. The Chinese item
 //   becomes a fixed word. No effect without a list. Call it after every engine creation, like set_abbreviation.
-//   Key handling that comes with it (docs/contracts/zhen-inline.md sections 1.3, 1.3b, 1.3c):
+//   Key handling that comes with it (docs/contracts/zhen-inline.md sections 1.3, 1.3b, 1.3c, 1.3e, 1.3f):
 //   - Auto-keep: a Zhuyin key that cannot continue the letters on screen (a whole listed word) keeps the word as an English
 //     token and starts the next syllable; a Zhuyin key with the English window open first keeps the selected item.
 //   - Shift+letter starts an English run (an English token in the making, not a unit until it ends): letters go on it as
-//     typed, Space ends it (the space is eaten), Backspace and Esc take letters off, an unshifted letter that follows a whole
-//     word and starts no longer one auto-keeps it, every other key ends it first. Without set_english the Shift rules (s3a
-//     rules 13, 21, 22) are unchanged.
-//   - With the cursor right after an English token and no unfinished syllable, Space or Down lists its writings (as typed,
-//     lower case, Capitalised, UPPER); a token made by an auto-keep adds a Chinese item, so a wrong keep can be undone.
-//   - An English token (from an item, an auto-keep or a run) that makes the 40th unit sends the whole composition in `commit`
-//     of that call's output (the key that did it, the pick, or the settings call), never in a later one.
+//     typed, shifted or not, and the run is never auto-kept; Space ends it (the space is eaten), Backspace and Esc take
+//     letters off, every other key ends it first. While a run is open the output's english_run_utf16_start and
+//     english_run_utf16_len mark it in preedit (0 and 0 otherwise). Without set_english the Shift rules (s3a rules 13, 21,
+//     22) are unchanged.
+//   - With the cursor right after an English token or a space unit, no unfinished syllable and no window open, Space inserts
+//     a half-width space as one unit (like a punctuation mark): the first Space after a run ends it, the second types a space.
+//   - With the cursor right after an English token and no unfinished syllable, only Down lists its writings (as typed, lower
+//     case, Capitalised, UPPER); a token made by an auto-keep adds a Chinese item, so a wrong keep can be undone.
+//   - An English token or space unit (from an item, an auto-keep, a run or Space) that makes the 40th unit sends the whole
+//     composition in `commit` of that call's output (the key that did it, the pick, or the settings call), never in a later one.
 //   Turning it off, like turning the abbreviation composer on, closes the window and ends an open English run as a token
 //   (a run that makes the 40th unit sends the composition in the snapshot's `commit`).
 int32_t shanjie_engine_set_english(ShanjieEngine *engine, uint32_t enabled, ShanjieOutput **out); // 0 or 1; returns a snapshot
