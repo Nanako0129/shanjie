@@ -33,7 +33,7 @@
 
 ### 2.2 固定的候選與 tinylm-v3 分數（同一次 CLI 執行）
 
-- **CLI**：v0.4.1 tag（`5c4415a`）的 `shanjie-eval`。
+- **CLI**：v0.4.1 tag（`98e5028`）的 `shanjie-eval`。
 - **模型**：
   - `--lm data/lm/bigram.sjlm`（`f81a021e…`），旁邊只有 `classes.sjc`（`75a5efb3…`），沒有 `kn.sjkn`；
   - `--tinylm data/lm/tinylm.sjtl`（`7e73ef67…`）。

@@ -11,3 +11,8 @@ data/lm/
 
 # S5j smoke outputs (limit runs)
 experiments/s5-judges/results/*-n*/
+
+# Maintainer-local agent guidance (see CLAUDE.md); never tracked. No trailing slash: in linked
+# worktrees .agent-local is a symlink, which a directory-only pattern would not match.
+.agent-local
+CLAUDE.local.md

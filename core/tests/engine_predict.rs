@@ -1089,6 +1089,36 @@ fn t3_a_single_character_needs_a_han_context() {
     assert_eq!(row(&typ(&mut e, &[], "ㄋ")), other, "another key is untouched");
 }
 
+/// S4 section 14 rule 8 on the prediction row: with no Han text before, the pick is stored under the synthetic key
+/// `^>` + the next syllable (`^>$` when it ends the composition), and the row looks the same key up (`^>$`: a
+/// predicted word ends at the cursor), so the record reorders the row in the same situation.
+#[test]
+fn t3b_a_sentence_start_pick_is_stored_under_the_next_syllable_and_reorders_the_row() {
+    let base = fresh_row(Profile::Chat, "", "ㄋ");
+    let word = base.iter().skip(1).find(|w| w.chars().count() > 1).expect("a two-character item below the first").clone();
+    let mut e = learner_engine(Profile::Chat, None);
+    teach(&mut e, "", "ㄋ", &word);
+    let r = e.learner().records();
+    assert_eq!(r.iter().map(|x| (x.context.as_str(), x.word.as_str())).collect::<Vec<_>>(), [("^>$", word.as_str())]);
+    assert_eq!(row(&typ(&mut e, &[], "ㄋ"))[0], word, "the learned item first (lookup key ^>$)");
+}
+
+/// Point 3: a sentence-start prediction pick is stored under `^>$` whatever is typed after it, the key the row looks up.
+#[test]
+fn t3c_a_sentence_start_pick_followed_by_more_typing_is_still_stored_under_the_end_key() {
+    let base = fresh_row(Profile::Chat, "", "ㄋ");
+    let word = base.iter().skip(1).find(|w| w.chars().count() > 1).expect("a two-character item below the first").clone();
+    let mut e = learner_engine(Profile::Chat, None);
+    typ(&mut e, &[], "ㄋ");
+    pick_word(&mut e, &word);
+    typ(&mut e, &["ㄏㄠˇ"], "");
+    e.key(kind(KeyKind::Enter)).unwrap();
+    let r = e.learner().records();
+    assert_eq!(r.iter().map(|x| (x.context.as_str(), x.word.as_str())).collect::<Vec<_>>(), [("^>$", word.as_str())]);
+    e.reset(ResetMode::Discard);
+    assert_eq!(row(&typ(&mut e, &[], "ㄋ"))[0], word, "the row in the same situation reflects the record");
+}
+
 /// Index of `word` in `predict(..., 27)` for the situation "after `left`, `pending` typed", chat profile.
 fn reach(left: &str, pending: &str, word: &str) -> Option<usize> {
     let s = shared();
@@ -1440,6 +1470,12 @@ fn t16c_inserting_or_removing_a_syllable_before_the_pick_moves_the_record_to_the
         let before = key_before_last(&commit);
         assert_ne!(before, "以備", "precondition: the edit changed the text before 時 ({commit})");
         let r = e.learner().records();
+        if !insert {
+            // The commit is two characters, so 時 is under a one-Han key: after rules 7/8 a one-character context
+            // no longer learns a single character (s4-learning section 14).
+            assert!(r.iter().all(|x| x.word != "時"), "the one-character key learns nothing: {:?}", r.iter().map(|x| (&x.context, &x.word)).collect::<Vec<_>>());
+            continue;
+        }
         let pred = r.iter().find(|x| x.word == "時").expect("the prediction pick is learned");
         assert_eq!(pred.context, before, "insert={insert}: records {:?}", r.iter().map(|x| (&x.context, &x.word)).collect::<Vec<_>>());
     }

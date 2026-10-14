@@ -71,7 +71,7 @@
 ## 3. 驗收
 
 1. **決定性**：同一版跑兩次，results JSON 的準確率欄與 `top1_sha256` 完全相同；`table` 重產的 `docs/benchmark.md` 逐位元組相同。
-2. **對得上研究紀錄**（main）：v0.1.2（ef20c40；研究紀錄的 B 是分支 2f4f684，詞庫與 CLI 和 ef20c40 相同，不同就照停止條件處理）chat 的 cvtune 3,121／3,677、wikitune 1,860／2,733、dev302＋typing76 合計 303／378（研究紀錄 S2r-2 一節）；discordtune 4,172／4,958。對不上就停下來回報。
+2. **對得上研究紀錄**（main）：v0.1.2（eae57e2；研究紀錄的 B 是分支 6472e3f，詞庫與 CLI 和 eae57e2 相同，不同就照停止條件處理）chat 的 cvtune 3,121／3,677、wikitune 1,860／2,733、dev302＋typing76 合計 303／378（研究紀錄 S2r-2 一節）；discordtune 4,172／4,958。對不上就停下來回報。
 3. **逐列比較正確**：
    - executor：工具的列數與上一版 top1 檢查在每一格都通過；另外用套件的 rows 檔自己跑兩版 CLI 的 dump、獨立重算 v0.1.1 → v0.1.2 在 cvtune、wikitune 的修好／弄壞，和工具一致（不經過 `s2r_eval.py`，它會讀私有檔）。
    - main：同一組數字和 `experiments/s2/s2r_eval.py ab <v0.1.1 CLI> <v0.1.2 CLI> --which orig --all --sets cvtune,wikitune` 一致。

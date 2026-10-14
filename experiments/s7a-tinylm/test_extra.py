@@ -28,7 +28,7 @@ def fake_ids(rng, n_runs, vocab=40):
 
 
 def s7a_epoch(work):
-    """train.build_epoch + the batch lines of train.main as they were at S7a (cdaddf2), the reference for 'unchanged'."""
+    """train.build_epoch + the batch lines of train.main as they were at S7a (568297d), the reference for 'unchanged'."""
     wiki, coll = np.load(os.path.join(work, "ids-wiki.npy")), np.load(os.path.join(work, "ids-coll.npy"))
     ids = np.concatenate([wiki, coll])
     ws, wl = batching.pieces(wiki)

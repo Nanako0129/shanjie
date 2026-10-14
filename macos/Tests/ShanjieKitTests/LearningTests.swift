@@ -209,15 +209,15 @@ final class LearningTests: XCTestCase {
     /// open; returns the picked word.
     @discardableResult
     private func repick(_ c: Controller) throws -> String {
-        c.client.before = "他"           // a single character learns only after a Han character (section 12)
+        c.client.before = "他們"         // a single character learns only after two Han characters (sections 12, 14)
         c.type("su3 ")
         let second = try XCTUnwrap(c.panel.items.dropFirst().first)
         c.type("2")
         return second
     }
 
-    /// Like `repick`, for a word of two characters (ㄋㄧˇ ㄏㄠˇ): it may learn under "^" too, so when a
-    /// gate test stores nothing the gate is the reason, not the single-character rule (section 12).
+    /// Like `repick`, for a word of two characters (ㄋㄧˇ ㄏㄠˇ): it may learn at sentence start too (under
+    /// a "^>..." key), so when a gate test stores nothing the gate is the reason, not the single-character rule (section 12).
     @discardableResult
     private func repickTwo(_ c: Controller) throws -> String {
         c.type("su3cl3 ")
@@ -324,7 +324,7 @@ final class LearningTests: XCTestCase {
         let c = Controller(makeShell(learning: dir))
         c.session.activate()
         c.session.selectLayout(.eten)    // a rebuilt engine starts with learning off
-        c.client.before = "他"           // a single character learns only after a Han character (section 12)
+        c.client.before = "他們"         // a single character learns only after two Han characters (sections 12, 14)
         c.type("ne3 ")                   // ㄋㄧˇ on ETen, then the candidates
         let second = try XCTUnwrap(c.panel.items.dropFirst().first)
         c.type("2")

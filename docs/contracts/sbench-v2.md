@@ -34,7 +34,7 @@
 | 集合 | 來源 | 列數 | 備註 |
 |---|---|---|---|
 | dev302、typing76、probe | 套件 v1 的檔（同雜湊） | 302、76、83 | dev302 只當參考 |
-| user-reported | `eval/dev/user-reported.txt` 前 80 列（前置條件 PR #131 已合併，3503fd8；凍結時寫死實際的 SHA-256；之後的第 81 列起不進這版套件） | 80 | 使用者回報的錯字；之後新增的列不進這版套件 |
+| user-reported | `eval/dev/user-reported.txt` 前 80 列（前置條件 PR #131 已合併，76beb24；凍結時寫死實際的 SHA-256；之後的第 81 列起不進這版套件） | 80 | 使用者回報的錯字；之後新增的列不進這版套件 |
 | fw | `eval/rerank/s7e-function-words.txt` | 186 | 功能字（在／再、的／得／地） |
 | cvtune、wikitune | `~/.cache/shanjie/s7c2c-public/tune/`（`31de456d…`、`8dcfe40c…`） | 3,791、2,827 | 不進 repo（授權）；調參時看過 |
 | lytune、wikitypo | `~/.cache/shanjie/e2-public/`（雜湊在 E2 研究紀錄） | 4,811、155 | 口語守門；不進 repo |
@@ -72,8 +72,8 @@
 - main：放好模型檔（Release 下載＋雜湊核對）；用真的私有資料跑 v0.4.0 與 v0.4.1、commit 結果 JSON 與 `docs/benchmark.md`；請 fresh verifier 量保留集並填入；`docs/verification.md` 那一列改成套件 v2 的指令，`docs/releases/README.md` 與 `CLAUDE.md`「發版」加一句指向它；研究紀錄、PLAN。
 - executor 不可以：讀 `~/side-project/shanjie-private/`、`eval/holdout/`、`~/.cache/shanjie/work/`（每次執行 `--private-root` 指向空的暫存目錄；§3 第 5 項的沙盒拒絕規則把這三處都列進去）；連網、下載 Release；push、開 PR；安裝、開 App、在 `.app` 裡執行；改 `core/`、`cli/`、`macos/`。
 - 停止條件：錨點對不上；同一版兩次結果不同；舊版 build 不起來而且原因不明；超過預算（executor 1 回合加 1 次修正）；保留集 v0.4.1 對 v0.4.0「改對 < 改壞而且 p < 0.05」。
-- **被量的 commit 要等於出貨的那一版**：結果 JSON 記被量的 commit SHA。推 v0.4.1 tag 之前，`git diff <被量的 commit> <要打 tag 的 commit> -- Cargo.toml Cargo.lock core cli data eval/variants.tsv macos scripts` 必須是空的（`macos` 有殼的預設值，例如語意校正與詞包的 `?? true`；`scripts` 有 `build-app.sh` 包進去的模型；/code-review 2026-10-13 補上），輸出記進研究紀錄；不是空的就停，回報使用者（保留集不重跑第二次；重跑要使用者決定）。
-- **錨點前先確認**：`git diff v0.4.0 677b08f -- core cli data/lexicon eval/variants.tsv` 與 `git diff 677b08f <v0.4.1 被量的 commit> -- core cli data/lexicon eval/variants.tsv`（677b08f 是 S7h 量錨點時的 main）沒有改到不開詞包時的解碼；有的話先回報，不直接拿錨點比。
+- **被量的 commit 要等於出貨的那一版**：結果 JSON 記被量的 commit SHA。推 v0.4.1 tag 之前，`git diff <被量的 commit> <要打 tag 的 commit> -- Cargo.toml Cargo.lock core cli data eval/variants.tsv macos scripts` 必須是空的（`macos` 有殼的預設值，例如語意校正與詞包的 `?? true`；`scripts` 有 `build-app.sh` 包進去的模型；/code-review 2026-10-13 補上），輸出記進研究紀錄；不是空的就停，回報使用者（保留集不重跑第二次；重跑要使用者決定）。〔修訂，2026-10-14〕例外：差異只在不改輸出的地方（重構、測試、註解）時，用兩個 commit 的 CLI 在出貨設定下跑 dev302、typing76、錯字回報兩種設定，rowstats 逐位元組相同（`cmp` 結束碼 0）就可以沿用保留集的數字；diff 清單與比對結果記進研究紀錄（v0.4.3 是第一次用）。
+- **錨點前先確認**：`git diff v0.4.0 1cc5109 -- core cli data/lexicon eval/variants.tsv` 與 `git diff 1cc5109 <v0.4.1 被量的 commit> -- core cli data/lexicon eval/variants.tsv`（1cc5109 是 S7h 量錨點時的 main）沒有改到不開詞包時的解碼；有的話先回報，不直接拿錨點比。
 - 回滾：只新增檔案與工具的新路徑，revert 合併 commit。
 
 ## 6. 修訂與審查
@@ -81,6 +81,6 @@
 | 時間 | 內容 | 結果 |
 |---|---|---|
 | 2026-10-13 | 初稿 | 送 plan-verifier |
-| plan-verifier（第 1 次 REVISE） | 阻擋 4 點：錯字回報 80 列在 main 還不存在；重播的一致性比對對象沒定義；保留集沒照 CLAUDE.md；被量的 commit 沒和 tag 綁住。非阻擋：`top1_sha256` 已是選出的那一句；rowstats 與摘要行是恆等式；旗標沒有守門；錨點的 v0.4.0 數字取自 677b08f；沒寫 CLI 沒模擬的 App 行為；模型資料夾要另組、不放 `kn.sjkn`；沙盒加兩處；保留集變差時要不要停；時間會超過 3 小時 | 全部 **FIX**（§2.1 加 App 行為說明、旗標守門、模型資料夾；計分改寫；§2.2 前置條件；§2.3 重播比對格、保留集照 CLAUDE.md；§3 第 4、5、7、8 項；§5 停止條件、commit 綁定、錨點前的 diff） | 送收尾審查 |
+| plan-verifier（第 1 次 REVISE） | 阻擋 4 點：錯字回報 80 列在 main 還不存在；重播的一致性比對對象沒定義；保留集沒照 CLAUDE.md；被量的 commit 沒和 tag 綁住。非阻擋：`top1_sha256` 已是選出的那一句；rowstats 與摘要行是恆等式；旗標沒有守門；錨點的 v0.4.0 數字取自 1cc5109；沒寫 CLI 沒模擬的 App 行為；模型資料夾要另組、不放 `kn.sjkn`；沙盒加兩處；保留集變差時要不要停；時間會超過 3 小時 | 全部 **FIX**（§2.1 加 App 行為說明、旗標守門、模型資料夾；計分改寫；§2.2 前置條件；§2.3 重播比對格、保留集照 CLAUDE.md；§3 第 4、5、7、8 項；§5 停止條件、commit 綁定、錨點前的 diff） | 送收尾審查 |
 | 收尾審查（第 2 次 REVISE） | 阻擋 1 點：§3 第 7 項的突變（比對格換成開詞包的格）可能殺不死，dev302 開不開詞包第一名可能每列相同。非阻擋：重播的 `--lm` 指向模型資料夾；commit 綁定與「保留集只跑一次」衝突；錨點前少一段 diff；重排時間在 stderr；v2 不能呼叫 v1 的 preflight；快取要改存 rowstats；沒有時間預算、§3 編號亂；#131 已合併 | 第 2 次 REVISE 後逐項處置：阻擋點 **FIX**（突變改用 fixture 改掉比對格的一列）；非阻擋全部 **FIX**（§2.3、§5 的保留集時機與 commit 綁定改成「不符就停、回報使用者」、錨點前兩段 diff、實作注意、時間預算 3–4 小時、§3 重新編號、前置條件改成已滿足） | 送最後一次收尾審查 |
 | 最後一次收尾審查（2026-10-13） | READY | 照契約做 |

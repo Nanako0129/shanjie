@@ -10,7 +10,7 @@ Spec: `docs/contracts/s5k-local-scorers.md`. This directory holds the tooling an
 | `run_laya.py` | L-noul, L-choice-fwd, L-choice-rev, L-pos (venv A) |
 | `run_ll.py` | Q-ll (venv A), B1-ll / B4-ll (venv B) |
 | `run_ll_cuda.py` | Q8-ll: Qwen3-8B 4-bit (bitsandbytes nf4) on CUDA, for 188 (contract §11); pure scoring functions import without torch |
-| `test_run_ll_cuda.py` | offline tests for `run_ll_cuda.py` (`python3 -m unittest test_run_ll_cuda`, no torch) |
+| `test_run_ll_cuda.py` | removed 2026-10-14 (research concluded, never in `make test`); restore with `git show 4517db7:experiments/s5-local/test_run_ll_cuda.py > experiments/s5-local/test_run_ll_cuda.py` |
 | `score.py` | metrics, tau, pairing with S5j (any Python) |
 | `selftest.py` | error-path checks: prefix-only scorer trips the stop (exit 3); wrong hash exits non-zero |
 
@@ -78,7 +78,7 @@ Each command resumes where it stopped. The smoke test and `selftest.py` are `--l
 ## Limitations (contract §2, §3)
 
 * cvtune reference sentences carry Simplified/Traditional conversion residue (PLAN "待排入"); same as S5j.
-* Candidates, margins and halves come from S5j's `rows.jsonl` (CLI at c6abd58, chat profile); nothing is regenerated.
+* Candidates, margins and halves come from S5j's `rows.jsonl` (CLI at ed9b633, chat profile); nothing is regenerated.
 * Ll scores are not length-normalised. Candidates have equal pronunciation and character count but can differ in token count; candidates with fewer tokens are favoured. Deliberate.
 * Ll scoring starts at the first token after the prefix; rows whose prefix+candidate tokenisation does not start with the prefix's own tokens are not scored and counted (above 1% of rows the run stops). The prefix KV is computed once per row and each candidate continues from a copy of the cache. Cache vs full-forward scores differ by about 0.14 nats on one checked row of Qwen3 4-bit (numerical, near-constant across candidates); not otherwise characterised.
 * L-pos sends no context in S5j (`s5.py` passes an empty string), so S5j's J-pos corresponds to the no-context L-pos. `POS_INSTR` does not mention the context, so the with/without comparison for L-pos may show nothing.

@@ -467,7 +467,8 @@ fn pre_after_apply_is_the_reranked_text() {
     let last = *e.path_starts().last().unwrap();
     let word: String = shown.chars().skip(last).collect();
     let ngram: String = x.surfaces[0].chars().skip(last).collect();
-    // A Han character before it, so even a single character is learnable (the control below shows it is).
+    // Han text before it (a one-character word learns only after two Han characters, s4-learning section 14), so the
+    // pick is learnable (the control below shows it is).
     assert!(word != ngram && last > 0, "premise: the last word changed and has a Han character before it");
     choose_at_cursor(&mut e, &word);
     assert!(!e.key(k(KeyKind::Enter)).unwrap().commit.is_empty());

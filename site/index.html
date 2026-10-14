@@ -235,8 +235,8 @@
     <li><span class="tag done">已發佈</span><span>v0.4.1：語意校正預設開（tinylm-v3）。</span></li>
     <li><span class="tag done">已發佈</span><span>v0.4.1：聊天／書面可以自己選。</span></li>
     <li><span class="tag done">已發佈</span><span>v0.4.1：動漫詞包約 3 萬 → 約 4.5 萬詞。</span></li>
-    <li><span class="tag wip">進行中</span><span>v0.4.2 先修選字記憶：句首學過「我試」後，「我是」會被蓋掉。</span></li>
-    <li><span class="tag wip">進行中</span><span>解碼器的合併方式實作中，改排 v0.4.3。</span></li>
+    <li><span class="tag done">已發佈</span><span>v0.4.2：選字記憶的修正，句首學過「我試」後，「我是」不再被蓋掉。</span></li>
+    <li><span class="tag wip">進行中</span><span>v0.4.3：解碼器的合併方式已合併、發版中（書面打「下來分析」不再出現「夏來分析」）。</span></li>
     <li><span class="tag done">完成</span><span>研究：和外部模型 0c 的重排對照；決定不直接接，之後讓自己的模型吃讀音（效果還沒量）。</span></li>
     <li><span class="tag done">已發佈</span><span>tinylm-v2、tinylm-v3 發佈在 GitHub Releases。</span></li>
   </ul>
@@ -327,8 +327,8 @@
       <summary><span class="ver">之後</span><span class="st-title">已排定，在 v0.4 之後</span><span class="tag wip">進行中</span>
         <span class="meta">順序依實測與回報調整</span></summary>
       <ul class="items">
-        <li class="wip"><span class="mark"></span><span class="sr-only">進行中：</span><h3>選字記憶的前文（v0.4.2，下一版）</h3><p>回報的「我試買新的」「我再牛與…」：在句首改選過一次「我試」「我再」，之後句首的「我是」「我在」都被蓋掉（實機重現）。改成句首學到的詞要後面接的音也一樣才加分，單一個字要有兩個字的前文才學；舊的這類記錄更新後自動丟掉。契約過審。</p></li>
-        <li class="wip"><span class="mark"></span><span class="sr-only">進行中：</span><h3>解碼器的合併方式（v0.4.3）</h3><p>每個位置同一個字串只留一條路徑，會丟掉接下去更好的拆法（「夏來分析」）；改成依「字串＋最後一個詞」保留。契約過審，實作中。</p></li>
+        <li class="done"><span class="mark"></span><span class="sr-only">已發佈：</span><h3>選字記憶的前文（v0.4.2）</h3><p>回報的「我試買新的」「我再牛與…」：在句首改選過一次「我試」「我再」，之後句首的「我是」「我在」都被蓋掉（實機重現）。改成句首學到的詞要後面接的音也一樣才加分，單一個字要有兩個字的前文才學；舊的這類記錄更新後自動丟掉。2026-10-14 發佈。</p></li>
+        <li class="wip"><span class="mark"></span><span class="sr-only">進行中：</span><h3>解碼器的合併方式（v0.4.3）</h3><p>每個位置同一個字串只留一條路徑，會丟掉接下去更好的拆法（「夏來分析」）；改成依「字串＋最後一個詞」保留。已合併，跟 v0.4.3 發佈。</p></li>
         <li><span class="mark"></span><span class="sr-only">規劃中：</span><h3>句首單字的選字記憶</h3><p>句首打「照建議」會出「趙建議」，改選也記不住。</p></li>
         <li><span class="mark"></span><span class="sr-only">規劃中：</span><h3>語意校正強度設定</h3><p>保守、標準、積極三段，預設維持改壞率 ≤ 0.5%；用公開集合、私人調參集與保留集評估。契約過審。</p></li>
         <li><span class="mark"></span><span class="sr-only">規劃中：</span><h3>領域詞包</h3><p>資訊與 AI 先，預設開；醫藥、法律接著，預設關。跟下一版語言模型一起。來源調查完：國教院樂詞網的資訊名詞（約 13 萬列，政府資料開放授權）等。同時修正建語料時把台灣用詞也轉掉的問題（「插件」被換成「外掛」）。</p></li>

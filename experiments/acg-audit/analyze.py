@@ -1,6 +1,6 @@
 # Audit of why pack words lose to lexicon words (docs/research-log.md, 2026-10-10).
 # KEPT AS A RECORD, NOT AS A RERUNNABLE SCRIPT: it ran on files in the author's session scratch directory (S and ROOT below), which are
-# not in the repo and are not kept. The inputs were the dumps of acg_audit.rs and the pack of c84e1ac.
+# not in the repo and are not kept. The inputs were the dumps of acg_audit.rs and the pack of e44986f.
 import collections, math, os, re, sys
 S = "<session scratch directory of the original run>"
 A = S + "/acg-audit"
