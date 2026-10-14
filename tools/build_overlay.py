@@ -24,6 +24,10 @@ import readings  # noqa: E402  萌典路徑
 
 BASE = os.path.join(ROOT, "data", "lexicon", "mcbpmf-data.txt")
 OUT = os.path.join(ROOT, "data", "lexicon", "overlay-add.tsv")
+MANUAL = os.path.join(ROOT, "data", "lexicon", "overlay-manual.tsv")   # 維護者手動加的詞，接在產生的列後面（來源 manual）
+# 手動詞的分數＝同字數的 SCORE ＋ 這個值（log10）。2026-10-14 量的：書面設定下「米雅歌」輸給「米亞哥」0.25（加 0.25 仍輸，
+# 加 0.5 時五個名字單獨打與放在句子裡，兩種設定 9 句都是第一名；研究紀錄同日）。手動加的是維護者明確要的詞，所以比一般疊加層詞高一點。
+MANUAL_BONUS = 0.5
 REMOVED = os.path.join(ROOT, "experiments", "s2n", "overlay-removed.tsv")   # S2n：被拿掉的簡體寫法（詞、轉換後的寫法、讀音）
 VARIANT_REMOVED = os.path.join(ROOT, "experiments", "s2f", "overlay-variant-removed.tsv")   # S2f §2.5：被拿掉的異體寫法（詞、基底寫法、讀音）
 CACHE = os.path.expanduser("~/.cache/shanjie/sources")
@@ -185,8 +189,24 @@ def build():
             continue
         src = "wikt" if w in wikt else "zhwiki"
         rows += overlay_rows(w, syls, SCORE[len(w)], src)
+    rows += manual_rows(words | {r.split("\t")[1] for r in rows})
     assert not {r.split("\t")[1] for r in rows} & words   # 疊加層和基底的詞表交集必須是 0
     return rows, removed, variant_removed
+
+
+def manual_rows(taken, path=MANUAL):
+    """overlay-manual.tsv 的列（詞、讀音、備註；# 開頭與空行略過），照檔案順序。詞已經在基底或疊加層就中止（要加的是新詞）；
+    分數用同字數的 SCORE（五個字以上用四字的）加 MANUAL_BONUS。"""
+    rows = []
+    for line in open(path, encoding="utf-8"):
+        if line.startswith("#") or not line.strip():
+            continue
+        w, reading, _note = line.rstrip("\n").split("\t")
+        syls = reading.split(" ")
+        if len(syls) != len(w) or w in taken:
+            raise SystemExit(f"{path}: bad manual row for {w!r}")
+        rows += overlay_rows(w, syls, round(SCORE[min(len(w), 4)] + MANUAL_BONUS, 8), "manual")
+    return rows
 
 
 def main():
