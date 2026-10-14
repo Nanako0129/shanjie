@@ -100,7 +100,8 @@ fn lm_top1_tsv_hashes_match_summary_lines() {
     let summary = golden("s2-lm.txt");
     for (col, p) in ["chat", "formal"].iter().enumerate() {
         let joined = rows.iter().map(|r| r[col]).collect::<Vec<_>>().join("\n");
-        let want = summary.lines().find(|l| l.starts_with(&format!("## dev302  lm-{p}  "))).unwrap();
+        // `lm-chat` or `lm-chat+kn:…` (model-v6: kn.sjkn beside the model); s2-lm.txt has one dev302 line per profile.
+        let want = summary.lines().find(|l| l.starts_with(&format!("## dev302  lm-{p}"))).unwrap();
         assert!(want.contains(&format!("'top1_sha256': '{}'", core::eval::sha256_hex(joined.as_bytes()))));
     }
 }
@@ -209,19 +210,19 @@ fn sw_probe_matches_python_golden_byte_for_byte() {
 }
 
 /// S2k acceptance 3: `--no-classes` is the arithmetic without the word-class term. The two summary lines are what the Python
-/// `lm_eval.py --no-classes --profile P --dev 302 --context` prints (regenerated 2026-10-14 for dec-recombine; before it they were the
-/// ones main's s2h-lm-context.txt held before S2k).
+/// `lm_eval.py --no-classes --profile P --dev 302 --context` prints (regenerated 2026-10-14 for model-v6: kn.sjkn beside the model is
+/// on in both, names layer on; before it for dec-recombine, and before that they were the ones main's s2h-lm-context.txt held before S2k).
 #[test]
 fn no_classes_flag_matches_its_pinned_numbers() {
     let lm = lm_path();
     let line = |p: &str| run(&["--lm", &lm, "--no-classes", "--profile", p, "--dev", "302", "--context"]);
     assert_eq!(
         line("chat"),
-        "## dev302  lm-chat+ctx-noclasses  {'n': 302, 'top1': 237, 'oracle@64': 300, 'top1_sha256': '87a9aaa2a0f128afc732ce4c9818d74998c4c034a0767bffa050ed6ddecc6910'}\n"
+        "## dev302  lm-chat+ctx-noclasses+kn:cbefbced:θ1:β1  {'n': 302, 'top1': 246, 'oracle@64': 300, 'top1_sha256': 'f061b257afcd622c8eb7375ac143f026a31cd6a062c685603ba63ff7366da4ca'}\n"
     );
     assert_eq!(
         line("formal"),
-        "## dev302  lm-formal+ctx-noclasses  {'n': 302, 'top1': 244, 'oracle@64': 300, 'top1_sha256': '614b446765d4b9617ac9eaa5ee617046a62d66e5c051484d917bcd0dc168de14'}\n"
+        "## dev302  lm-formal+ctx-noclasses+kn:cbefbced:θ1:β1  {'n': 302, 'top1': 249, 'oracle@64': 300, 'top1_sha256': '08de71c89fea87842eab2b828d5728a842b2b7a38a6906b84c0ecc3a083eacdc'}\n"
     );
 }
 

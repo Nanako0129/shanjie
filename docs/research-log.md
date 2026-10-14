@@ -5493,3 +5493,27 @@ formal: alpha 0.7, tau 1, delta 2
 
 - `tools/build_overlay.py` 的 `MANUAL_BONUS` 0.5 → 0.75，在 Mac 上離線重建（來源 dump、OpenCC 表與萌典都在本機快取；改之前先跑 `--check`，0.5 的重建和 repo 的檔逐位元組相同）。結果 340,284 列不變，只有 7 列手動列（`manual` 標記）的分數改變，`overlay-removed.tsv`、`overlay-variant-removed.tsv` 不變。`overlay-add.tsv` `96b8db89…` → `34f7bbeb…`。
 - **變體類核對**（§2.8 規則 2 的停止條件）：基底＋疊加層＋`sandhi-add.tsv`＋`names-add.tsv`，疊加層分別用 0.5 的檔（`git show 4d47a50:data/lexicon/overlay-add.tsv`，`96b8db89…`）與 0.75 的檔，各算一次 `build_lm.variant_classes`：兩者都是 413 個詞、內容完全相同。代表詞沒有換，kn-v1 的 ΣN′ 與 model-v6 照原樣保留；`lm_eval.py` 載入 kn-v1 時用 0.75 的疊加層重算 ΣN′，和檔頭相符（`--dev 2` 跑過，沒有 ValueError）。
+
+## 2026-10-14：model-v6 PR 2 的 golden、學習數字與測試前提（修訂一之後）
+
+（model-v6＋classes-v4＋kn-v1＋名單層，`overlay-add.tsv` `34f7bbeb…`，KN 開著；暫時的 `tinylm.sjtl` `f1497ff2…`。這幾個資料檔都還是暫定，main 正在重新核對。）
+
+- **golden**：用 Python 參考實作重產，Rust 逐位元組相同：`s2-lm.txt`、`s2-lm-dev302-top1.tsv`、`s2-lm-dev302-{chat,formal}.rowstats`、`s2h-lm-context.txt`、`s2r-probe-top1.tsv`、`sw-probe.txt`、`sp-predict.txt`，以及 `cli/tests/golden.rs` 的 `--no-classes` 兩行。unigram 的 golden（`s1-*`、`s2r-probe-unigram`、`unigram`、`sbench`）不變，`check_unigram_overlay.py` 三份一致。和 0.5 疊加層、同樣開 KN 的重產相比（§2.8 驗收 3），只有 `sp-predict.txt` 變，而且只有一筆候選列（`咪呀狗` 兩行），是手動詞分數提高造成的；其他 golden 的摘要行逐字相同。
+- **dev302 摘要**（不帶前文）：聊天 top1 247、書面 250；同一份檔案、名單層開、KN 關時是聊天 242、書面 250（Rust 與 Python 的 rowstats 相同）。
+- **手動詞**（`manual_words_come_first_in_the_shipping_setting`，出貨設定、開 KN）：聊天、書面都是 15/15。不開小模型時書面 14/15：`咪呀狗在線上嗎` 第一名是 `咪呀狗再現上嗎`，分數 −20.5429 對 −20.5568，差 0.0139（§2.8 驗收 4 預期的近乎平手，這一片不處理）。
+- **學習（§2.8 規則 1 之後，Mac 上只跑這四條，完整的 `engine_learn` 在 Linux 機器）**：鏡像改選 7/8（修訂前開 KN 4/8）；A2 同前文 3/3、可達的 key 3/3，非衝突改壞 0；ㄗㄞˋ 污染：非衝突改變的列 0、整句改壞 0。`global_eps_table`：
+  | eps_global | 全域學會 | 全域污染改壞 | 鏡像 |
+  |---|---|---|---|
+  | 0 | 0/9 | 0 | 7/8 |
+  | 0.1 | 4/9 | 1 | 7/8 |
+  | 0.5 | 4/9 | 4 | 7/8 |
+  | 1 | 7/9 | 4 | 7/8 |
+  | 1.5 | 8/9 | 7 | 7/8 |
+  | 2 | 9/9 | 10 | 7/8 |
+  | 6 | 9/9 | 28 | 7/8 |
+- **測試前提改了（§2.8 驗收 5，要證明的行為不變）**：
+  - `row_decode_failure_does_not_learn`：解碼失敗後重打 ㄅㄣ，原本預期 `犇`，現在是 `奔`。改成和一個從沒失敗過的同樣小詞庫引擎比（它現在也是 `奔`），仍然證明引擎已經重設。
+  - `rule8_the_same_next_syllable_still_boosts`：對照句原本是 ㄨㄛˇ ㄗㄞˋ ㄇㄞˇ，但 model-v6 沒學習時就是 `我再買`，沒辦法再證明「下一個音不同就不加分」。改用 ㄨㄛˇ ㄗㄞˋ ㄐㄧㄚ（沒學習時是 `我在家`）：教了 `我再`（下一個音 ㄋㄧㄡˊ）之後仍是 `我在家`。
+  - `engine_lm` 的 `fixed_overlay_word_total_equals_whole_sentence_top1`：拿掉第 290 列（手搖杯）。model-v6 裡它的語料頻率和疊加層分數差不到 0.1，封頂已經不會改到它；其他四列照舊。
+  - 用 toy 小模型（v1、v3，沒有 KN 時調的）的測試（`engine_rerank.rs`、`cli/tests/tinylm.rs`、`ffi.rs` 的 rerank 子程序），改用不含 `kn.sjkn` 的模型資料夾（符號連結）；配對規則本身由 `kneser_ney_side_file_*` 測試涵蓋。
+- **沒有處理、回報給 main**：`core/tests/engine_predict.rs` 的 `t1_the_written_milk_case`：書面在 `我想喝一杯` 之後打 ㄋ，預測列是 [奶茶, 那, …]，不再是 [奶茶, 牛奶, …]，KN 開或關都一樣，是 model-v6 本身的改變。`t5_a_global_record_does_not_move_the_row`：`能夠` 在第 6 位，不是第 7 位，只有開 KN 時如此。這兩條不在 §2.8 驗收 5 的清單裡，所以沒有改。

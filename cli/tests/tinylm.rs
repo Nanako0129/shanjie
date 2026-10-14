@@ -1,6 +1,7 @@
 //! `--tinylm` / `--tinylm-scores` (docs/contracts/s7c-core-tinylm.md section 2.3, acceptance 2) on the toy model of
 //! eval/golden/tinylm-tiny/. Its .sjtl records the hash of eval/golden/kn-tiny/bigram.sjlm, so it is refused with data/lm/bigram.sjlm
-//! as it is; the tests that need it accepted patch the 32 hash bytes (header offset 68) to the model they run with.
+//! as it is; the tests that need it accepted patch the 32 hash bytes (header offset 68) to the model they run with, loaded without
+//! the Kneser-Ney side file (`lm_path`).
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
@@ -15,10 +16,24 @@ fn run(args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_shanjie-eval")).args(args).output().unwrap()
 }
 
+/// data/lm/bigram.sjlm and classes.sjc symlinked into a temporary directory without the kn.sjkn model-v6 puts beside them: the
+/// toy files here are versions 1 and 3 (tuned without a side file), which pair only with the model loaded without KN
+/// (`kneser_ney_side_file_must_be_the_recorded_one` covers the pairing).
+// ponytail: the directory (two symlinks) is left in the temp dir; a OnceLock never drops.
 fn lm_path() -> String {
-    let p = root().join("data/lm/bigram.sjlm");
-    assert!(p.exists() && root().join("data/lm/classes.sjc").exists(), "{NO_LM}");
-    p.to_string_lossy().into_owned()
+    static P: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    P.get_or_init(|| {
+        let real = root().join("data/lm");
+        assert!(real.join("bigram.sjlm").exists() && real.join("classes.sjc").exists(), "{NO_LM}");
+        let d = std::env::temp_dir().join(format!("shanjie-cli-tinylm-nokn-{}", std::process::id()));
+        std::fs::create_dir_all(&d).unwrap();
+        for f in ["bigram.sjlm", "classes.sjc"] {
+            let _ = std::fs::remove_file(d.join(f));
+            std::os::unix::fs::symlink(real.join(f), d.join(f)).unwrap();
+        }
+        d.join("bigram.sjlm").to_string_lossy().into_owned()
+    })
+    .clone()
 }
 
 fn sha_bytes(file: &Path) -> Vec<u8> {
