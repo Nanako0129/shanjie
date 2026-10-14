@@ -303,27 +303,27 @@
   },
   "user-reported": {
    "private": false,
-   "file_sha256": "eeb0a2dcf8860f0bf994b22f6791e6b706e28fb968050c0e63463b463ddac532",
+   "file_sha256": "f3e6c244950f7f68fb536c678b3d184ce91ce60a89538de724175a0846502d4e",
    "profiles": {
     "chat": {
-     "n": 104,
+     "n": 107,
      "top1": 31,
-     "errors": 73,
-     "oracle64": 102,
-     "top1_sha256": "579ee99de8204f3c8a4e73ed54bae02f3f63dd64d0ba3116c38334423618be3a",
+     "errors": 76,
+     "oracle64": 105,
+     "top1_sha256": "9f7a7d25cd08b6cdd6d862d1873846e4255ee6b40dca134f69b49e5b9c7ebca0",
      "buckets": {
       "A1": 1,
       "B1": 0,
       "B2": 1,
       "D1": 2,
-      "C": 69
+      "C": 72
      },
      "F": 31,
      "seg_lex": 2,
      "seg_none": 0,
      "c_sub": {
-      "C1": 44,
-      "C2": 5,
+      "C1": 45,
+      "C2": 7,
       "C3": 17,
       "C4": 0,
       "C5": 3
@@ -332,45 +332,45 @@
      "c_func": 13,
      "c2_source": 0,
      "c_rank": {
-      "2": 35,
-      "3-8": 32,
+      "2": 37,
+      "3-8": 33,
       "9-64": 2
      },
      "c_margin": {
-      "<0.25": 20,
+      "<0.25": 21,
       "0.25-0.5": 16,
-      "0.5-1": 19,
-      "1-2": 13,
+      "0.5-1": 20,
+      "1-2": 14,
       ">=2": 1
      },
      "d2": {
       "D2a": 0,
-      "D2b": 7,
-      "D2c": 60,
+      "D2b": 8,
+      "D2c": 62,
       "D2-none": 0
      },
      "E1": 0,
      "E2": 1
     },
     "formal": {
-     "n": 104,
+     "n": 107,
      "top1": 29,
-     "errors": 75,
-     "oracle64": 102,
-     "top1_sha256": "7025e8bb9d98ed0584bcb57dac81042f20aa711a75955c42de5314082ac0c393",
+     "errors": 78,
+     "oracle64": 105,
+     "top1_sha256": "b8f716566e5c7349f75b300149ec9a186f9965c267836667acd06194dd60d977",
      "buckets": {
       "A1": 1,
       "B1": 0,
       "B2": 1,
       "D1": 1,
-      "C": 72
+      "C": 75
      },
      "F": 29,
      "seg_lex": 2,
      "seg_none": 0,
      "c_sub": {
-      "C1": 46,
-      "C2": 4,
+      "C1": 47,
+      "C2": 6,
       "C3": 16,
       "C4": 0,
       "C5": 6
@@ -379,21 +379,21 @@
      "c_func": 10,
      "c2_source": 0,
      "c_rank": {
-      "2": 38,
+      "2": 41,
       "3-8": 32,
       "9-64": 2
      },
      "c_margin": {
-      "<0.25": 15,
+      "<0.25": 16,
       "0.25-0.5": 19,
-      "0.5-1": 19,
-      "1-2": 16,
+      "0.5-1": 20,
+      "1-2": 17,
       ">=2": 3
      },
      "d2": {
-      "D2a": 6,
-      "D2b": 22,
-      "D2c": 42,
+      "D2a": 7,
+      "D2b": 23,
+      "D2c": 43,
       "D2-none": 0
      },
      "E1": 1,
@@ -1002,8 +1002,9 @@
    }
   }
  },
- "commit": "18aec394b4219be7b1531c0b967deb45c1183d8a",
+ "commit": "fd204f3784b28b7bcf1d892eca313a7bd9456543",
  "setting": "--context --packs acg --tinylm",
+ "cli_sha256": "e4b9a9eca3b6aa8b1073d7751e0dd371282af5506bf87060dbb4fd2de8bdd8c2",
  "models": {
   "bigram.sjlm": "f81a021e5dea08dc48dbca1db0d0f63517bb6f0f3e1b20fdac631542d13f45af",
   "classes.sjc": "75a5efb3d050a9b0d21bca707ff6b1fd71945a8e059b869aa856618290e55827",
