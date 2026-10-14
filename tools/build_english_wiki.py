@@ -6,7 +6,11 @@
 
 文章文字照 experiments/s2/build_counts.py：articles() 取主名字空間的條目，同一套去標記（TEMPLATE、MARKUP）；在那之前先拿掉
 分類與檔案連結、網址（不然 Category、thumb、https 這類字每篇都有）。只數含漢字的句子裡的字：英文字＝前後都不是
-[A-Za-z0-9] 的最長 [A-Za-z]+，長度 3–32（GPT4、x86 這種黏著數字的整個丟掉）。df＝出現過的條目數。
+[A-Za-z0-9] 或拉丁重音字母的最長 [A-Za-z]+，長度 3–32（GPT4、x86 這種黏著數字的整個丟掉；Édouard 不會變成 douard）。
+另外丟掉幾種不是混打的英文（第一次抽樣過半是雜訊，研究紀錄 2026-10-14）：括號裡的原文註記（「（德語：Altschwendt）」、
+不含漢字的整個括號「珍妮特（Janet Shearon）」）、資訊框與表格沒拿乾淨的行（以 | { } ! 開頭，「| established_date1 = 1911年」）
+與句子（還有 {{ }} | 的整句不數）、HTML 實體（&nbsp;）、繁簡轉換的語言代碼（zh-hans）、<math> 與程式碼區塊、緊接在 . / 後面的字（a.png、g/mol），
+以及夾在漢字之間超過 MAX_RUN_WORDS 個英文字的一段（書名、機構全名這類英文片語）。df＝出現過的條目數。
 """
 import argparse, collections, hashlib, os, re, sys
 
@@ -16,7 +20,19 @@ sys.path.insert(0, os.path.join(ROOT, "experiments", "s2"))
 # 分類、檔案、圖片連結整個拿掉（含說明文字）：中文維基兩種寫法都有。
 NS_LINK = re.compile(r"\[\[\s*(?:category|file|image|media|分類|分类|文件|檔案|档案|圖像|图像)\s*:[^\[\]]*(?:\[\[[^\]]*\]\][^\[\]]*)*\]\]", re.I)
 URL = re.compile(r"https?://\S+|www\.\S+", re.I)
-WORD = re.compile(r"(?<![A-Za-z0-9])[A-Za-z]+(?![A-Za-z0-9])")
+WORD = re.compile(r"(?<![A-Za-z0-9_./\u00C0-\u024F])[A-Za-z]+(?![A-Za-z0-9_\u00C0-\u024F]|[./][A-Za-z])")
+# 括號裡「某語：」或「某文：」開頭的原文註記，整個括號拿掉（全形、半形都有）。
+GLOSS = re.compile(r"[（(][^（）()]*?[語语文][：:][^（）()]*[）)]|[（(][^（）()㐀-䶿一-鿿]*[）)]")
+RESIDUE = re.compile(r"^\s*[|{}!]")
+# 去標記之後還有 {{ }} | 的句子是沒拿乾淨的模板（巢狀超過三層）：整句不數（archiveurl、accessdate、Cite 這類參數名）。
+TEMPLATE_LEFT = re.compile(r"\{\{|\}\}|\|")
+BLOCK = re.compile(r"<(math|chem|code|syntaxhighlight|source|score|timeline)\b[^>]*>.*?</\1>", re.S | re.I)
+ENTITY = re.compile(r"&[A-Za-z]+;|&#\d+;")
+LANG = re.compile(r"(?<![A-Za-z])zh(?:-[A-Za-z]+)+")   # 不用 \b：漢字也算 \w，「命题zh-hans:里」的 zh 前面沒有 \b
+# 漢字與全形標點之間的一段；英文字超過 MAX_RUN_WORDS 個就是英文片語，不是混打。3：「Microsoft Office 365」這種留著，
+# 「The Lord of the Rings」這種丟掉。
+RUN_SPLIT = re.compile(r"[㐀-䶿一-鿿\u3000-\u303f\uff00-\uffef]+")
+MAX_RUN_WORDS = 3
 HAN = re.compile(r"[㐀-䶿一-鿿]")
 SENT = re.compile(r"[^。！？；\n]+")
 LEN = range(3, 33)
@@ -26,20 +42,26 @@ def clean(raw):
     """原始 wikitext -> 去標記後的文字（build_counts.count_batch 的前半，不做繁簡轉換：英文字不受影響）。"""
     import build_counts as bc
     t = raw.replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&").replace("&quot;", '"')
-    t = URL.sub(" ", NS_LINK.sub(" ", t))
+    t = URL.sub(" ", NS_LINK.sub(" ", BLOCK.sub(" ", t)))
     for _ in range(3):
         t = bc.TEMPLATE.sub("", t)
     for pat, rep in bc.MARKUP:
         t = pat.sub(rep, t)
-    return t
+    return LANG.sub(" ", ENTITY.sub(" ", t))
 
 
 def words(text):
     """去標記後的一篇 -> 含漢字的句子裡的英文字（原寫法）。"""
     out = []
+    text = "\n".join(l for l in text.split("\n") if not RESIDUE.match(l))
     for s in SENT.findall(text):
         if HAN.search(s):
-            out += [w for w in WORD.findall(s) if len(w) in LEN]
+            if TEMPLATE_LEFT.search(s):
+                continue
+            for run in RUN_SPLIT.split(GLOSS.sub("。", s)):
+                ws = WORD.findall(run)
+                if len(ws) <= MAX_RUN_WORDS:
+                    out += [w for w in ws if len(w) in LEN]
     return out
 
 

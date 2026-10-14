@@ -19,6 +19,33 @@ class Words(unittest.TestCase):
         self.assertEqual(W.words(W.clean(raw)), ["OpenAI", "ChatGPT"])
 
 
+    def test_original_name_glosses_in_brackets_are_dropped(self):
+        t = "阿爾特施文特（德語：Altschwendt）是市鎮(英語:Lowell)，居民用 Windows。"
+        self.assertEqual(W.words(t), ["Windows"])
+
+    def test_brackets_without_han_are_dropped(self):
+        self.assertEqual(W.words("珍妮特（Janet Shearon）是常規系(Regular)成員，愛用 iPad。"), ["iPad"])
+
+    def test_infobox_and_table_residue_lines_are_skipped(self):
+        t = "| established_date1 = 1911年\n{{About|雲|Cloud}}\n! 欄 Header\n成立於 1911 年，用 Linux 跑 api_key。"
+        self.assertEqual(W.words(t), ["Linux"])
+
+    def test_template_leftovers_entities_language_codes_and_code_blocks(self):
+        raw = ("見{{Cite web|archiveurl=x|accessdate=2020}}與 {{a|editor=Lee|{{b|{{c|{{d|x}}}}}}}} 這句。\n"
+               "空&nbsp;格與 -{zh-hans:软件;zh-hant:軟體}- 命题zh-hans:里; zh-hant:裡 用 <math>\\mathcal{L}</math> 和 <code>printf</code> 在 Linux 上。")
+        self.assertEqual(W.words(W.clean(raw)), ["Linux"])
+
+    def test_letters_after_a_dot_or_slash_are_not_a_word(self):
+        self.assertEqual(W.words("圖檔 logo.png 的濃度 g/mol，用 Python 寫。"), ["Python"])
+
+    def test_english_phrases_longer_than_three_words_are_dropped(self):
+        t = "他讀《The Lord of the Rings》，用 Microsoft Office 365 寫心得。"
+        self.assertEqual(W.words(t), ["Microsoft", "Office"])
+
+    def test_letters_next_to_accented_letters_are_not_a_word(self):
+        self.assertEqual(W.words("畫家 Édouard Manet 的作品。"), ["Manet"])
+
+
 class Count(unittest.TestCase):
     def test_df_counts_articles_not_occurrences(self):
         acc = W.count(["用 Rust 和 Rust 寫。", "Rust 很快。", "只有 Go 和 Swift。"])

@@ -46,7 +46,7 @@
 ## 4. 量測（main，188；數字進研究紀錄）
 
 - 工具與集合照 zhen-mixed §4.1–§4.3 與 zhen-inline §3：`english-sim`，cvtune、wikitune 選門檻；dev302、typing76 驗證。
-- **格點**：`WIKI_MIN_DF ∈ {不收維基, 1000, 300, 100, 30, 10}`，每格都含 SymSpell 與補充表。每格量：
+- **格點**：`WIKI_MIN_DF ∈ {不收維基, 1000, 300}`，每格都含 SymSpell 與補充表（〔修訂，2026-10-14〕原本還有 100、30、10；§7 的雜訊停止條件觸發，改了四輪計數規則後抽樣 df100 仍過半是雜訊、df300 以上通過，照「加大 df」拿掉這三格，研究紀錄同日）。每格量：
   - 誤觸：`--p 0.02 --repair overwrite --repeat 5` 的 per_1000_mean，與 `--p 0`；
   - 組字區顯示（zhen-inline）：`--inline` 的 `inline_per_1000_mean`；
   - 召回（`--recall`，分母＝那一格的全部詞條，分子＝英文窗開著且第一項等於顯示寫法）。
