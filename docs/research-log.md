@@ -5489,3 +5489,7 @@ formal: alpha 0.7, tau 1, delta 2
 - 降頻前在那台機器跑的評測與分數檔都要用降頻後重新編譯的執行檔重跑；崩潰的分數檔整批重跑。另在 Colab G4 的 CPU（48 執行緒）上用同一個 commit 獨立重建一次，當第三份來源。
 - **第三份來源（Colab G4 執行階段的 CPU，48 執行緒、Python 3.13，同一個 commit `f29b0c3`、同樣 16 個計數 worker）**：不帶指紋的模型 `f7777be3…` 與 KN 側檔 `cbefbced…` 和兩次 Windows 建置逐位元組相同；`classes.sjc` 又是另一個雜湊（`c9bf94b4…`），和上一條「計數合併先後不固定」的結論一致。G4 上維基計數約 6 分鐘、整條（下載 dump 之後）約 10 分鐘。G4 機型的 GPU 用不到，CPU 是 Windows 機器的 3 倍執行緒；之後建模可以放在 Colab 跑（維護者同日問「model-v6 能用 GPU 建嗎？我想用 colab」）。
 
+## 2026-10-14：修訂一的疊加層（model-v6 §2.8 規則 2）
+
+- `tools/build_overlay.py` 的 `MANUAL_BONUS` 0.5 → 0.75，在 Mac 上離線重建（來源 dump、OpenCC 表與萌典都在本機快取；改之前先跑 `--check`，0.5 的重建和 repo 的檔逐位元組相同）。結果 340,284 列不變，只有 7 列手動列（`manual` 標記）的分數改變，`overlay-removed.tsv`、`overlay-variant-removed.tsv` 不變。`overlay-add.tsv` `96b8db89…` → `34f7bbeb…`。
+- **變體類核對**（§2.8 規則 2 的停止條件）：基底＋疊加層＋`sandhi-add.tsv`＋`names-add.tsv`，疊加層分別用 0.5 的檔（`git show 4d47a50:data/lexicon/overlay-add.tsv`，`96b8db89…`）與 0.75 的檔，各算一次 `build_lm.variant_classes`：兩者都是 413 個詞、內容完全相同。代表詞沒有換，kn-v1 的 ΣN′ 與 model-v6 照原樣保留；`lm_eval.py` 載入 kn-v1 時用 0.75 的疊加層重算 ΣN′，和檔頭相符（`--dev 2` 跑過，沒有 ValueError）。
