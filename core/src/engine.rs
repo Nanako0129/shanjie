@@ -1,15 +1,124 @@
 //! S3a key engine (docs/contracts/s3a.md): key events in, preedit / commit / candidates out.
 //! R2: no input text in errors or panics; types holding input text do not derive Debug.
 
-use crate::learn::{context_key, local_day, Learner, Level, Record};
+use crate::learn::{context_key, local_day, next_key, record_key, Learner, Level, Record};
 use crate::learn_store::{LearnStore, Opened, StoreError, JOURNAL_MAX};
 use crate::predict::{predict, reading_matches_in, unit_of_syllable, Mode, Unit};
 use crate::lm::{decode_segment_learned, history, CappedLexicon, Demote, End, Learn, Lm, Profile};
+use crate::tinylm::{TinyLm, TOPK};
 use crate::{decode_beam, Lexicon, NoLearning, BEAM_S1};
 use std::collections::{HashMap, HashSet};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+
+/// S7c-2a section 2.3: one counter for the whole process, so a job of one engine never matches another engine, nor an engine
+/// built later at the same address.
+static GENERATION: AtomicU64 = AtomicU64::new(1);
+
+fn next_generation() -> u64 {
+    GENERATION.fetch_add(1, Ordering::Relaxed)
+}
+
+/// One free stretch of a rerank job (S7c-2a section 2.2). Owned data only.
+struct Stretch {
+    /// Index in `Engine::path` of the stretch's first word.
+    at: usize,
+    /// The first `TOPK` paths of the n-best: (word, lp, demotion delta), as `path` holds them. `paths[0]` is what `path` holds at
+    /// `at..at + len` when the job is made; apply checks that it still does (section 2.3, revision 1).
+    paths: Vec<Vec<(String, f64, f64)>>,
+    /// Their n-gram scores.
+    ng: Vec<f64>,
+    /// The shown text between the previous stretch of the job (or the composition's start) and this one: fixed words, and the
+    /// n-gram text of stretches left out of the job.
+    gap: String,
+}
+
+/// What the small model has to rerank after one change of the composition (S7c-2a section 2.2): only owned data and the model, never
+/// a borrow of the engine, so it can run on another thread and outlive the engine. Holds input text, so no `Debug`.
+pub struct RerankJob {
+    generation: u64,
+    model: Arc<TinyLm>,
+    profile: Profile,
+    /// The engine's left context when the job was made.
+    left: String,
+    stretches: Vec<Stretch>,
+}
+
+/// One stretch's choice: index into the job's paths, and that path when it is not the first.
+struct Choice {
+    at: usize,
+    /// The words `path` must still hold at `at..` (the n-gram first path the job was made from).
+    expect: Vec<String>,
+    pick: usize,
+    words: Vec<(String, f64, f64)>,
+    /// The context key the stretch was scored with.
+    key: String,
+}
+
+/// The output of `RerankJob::run`, for `Engine::apply_rerank`. Holds input text, so no `Debug`.
+pub struct RerankResult {
+    generation: u64,
+    choices: Vec<Choice>,
+}
+
+impl RerankJob {
+    /// Section 2.4: `TinyLm::rerank` on every stretch in order; a candidate longer than the model's context keeps the first.
+    /// Revision 1: a stretch's context key is `context_key` of the left context and the text before it as it will be shown,
+    /// i.e. with the earlier stretches' chosen candidates (one stretch: the n-gram text before it, as before).
+    pub fn run(&self) -> RerankResult {
+        let mut before = self.left.clone();
+        let choices = self
+            .stretches
+            .iter()
+            .map(|s| {
+                before.push_str(&s.gap);
+                let key = context_key(&before);
+                let surfaces: Vec<String> = s.paths.iter().map(|p| p.iter().map(|w| w.0.as_str()).collect()).collect();
+                let cands: Vec<&str> = surfaces.iter().map(String::as_str).collect();
+                let pick = self.model.rerank(&s.ng, &cands, &key, self.profile).map_or(0, |r| r.0);
+                let pick = if pick < s.paths.len() { pick } else { 0 };
+                before.push_str(&surfaces[pick]);
+                let words = if pick == 0 { Vec::new() } else { s.paths[pick].clone() };
+                let expect = s.paths[0].iter().map(|w| w.0.clone()).collect();
+                Choice { at: s.at, expect, pick, words, key }
+            })
+            .collect();
+        RerankResult { generation: self.generation, choices }
+    }
+
+    /// Test hook (the FFI panic test): every candidate's text, so an injected panic payload carries input text.
+    #[cfg(test)]
+    pub(crate) fn texts(&self) -> String {
+        self.stretches.iter().flat_map(|s| s.paths.iter().flatten().map(|w| w.0.as_str())).collect()
+    }
+}
+
+impl RerankResult {
+    /// The chosen index of each stretch, in composition order (0 = the n-gram first).
+    pub fn picks(&self) -> Vec<usize> {
+        self.choices.iter().map(|c| c.pick).collect()
+    }
+
+    /// The context key each stretch was scored with, in composition order (holds input text: never log it).
+    pub fn keys(&self) -> Vec<String> {
+        self.choices.iter().map(|c| c.key.clone()).collect()
+    }
+}
+
+// Section 2.5 (F8): the thread guarantees come from the types themselves, never from an `unsafe impl`.
+const _: () = {
+    fn send<T: Send>() {}
+    fn sync<T: Sync>() {}
+    #[allow(dead_code)]
+    fn assertions() {
+        send::<TinyLm>();
+        sync::<TinyLm>();
+        send::<RerankJob>();
+        send::<RerankResult>();
+    }
+};
 
 pub const MOD_SHIFT: u32 = 1;
 pub const MOD_CONTROL: u32 = 2;
@@ -38,6 +147,12 @@ pub const PREDICT_MAX: usize = PAGE_SIZE;
 /// `PREDICT_MAX` only, so with an empty learner the row is the slice-1 row bit for bit. The added time of 27 over 9
 /// is only measured as part of the whole row with a 50,000-record store (research log 2026-10-08), not by itself.
 pub const PREDICT_SCAN: usize = 27;
+/// zhen-mixed section 2.2: the shadow holds at most this many keys; the next one empties it.
+pub const SHADOW_MAX: usize = 32;
+/// zhen-mixed section 2.6: the word list's limits (bytes, lines) and its word length range.
+const ENGLISH_MAX_BYTES: u64 = 4 << 20;
+const ENGLISH_MAX_LINES: usize = 200_000;
+const ENGLISH_LEN: std::ops::RangeInclusive<usize> = 3..=32;
 
 /// Initial (21), medial (3), final (13) symbols in the contract's column order.
 const SYMBOLS: &str = "ㄅㄆㄇㄈㄉㄊㄋㄌㄍㄎㄏㄐㄑㄒㄓㄔㄕㄖㄗㄘㄙㄧㄨㄩㄚㄛㄜㄝㄞㄟㄠㄡㄢㄣㄤㄥㄦ";
@@ -227,6 +342,10 @@ struct Fixed {
     /// The context key a prediction pick is recorded under, fixed when the row was built: re-decoding after the pick can
     /// change the text before the start, so the commit must not recompute it (section 10.1). `None` for candidate picks.
     key: Option<String>,
+    /// The synthetic sentence-start key (`^>` + the next reading) the displaced word was shown under when this candidate
+    /// pick was made, when the span's context key was `^`. The commit halves the displaced word there too if the key
+    /// at the commit differs (the user may have typed on after the pick). `None` otherwise.
+    pick_key: Option<String>,
 }
 
 /// One item of the prediction row: the word, the compatible reading that scored it, and the syllable index where
@@ -253,11 +372,13 @@ struct Cands {
     /// never expands; `first` is the list position of its first visible row.
     vertical: bool,
     first: usize,
+    /// zhen-mixed section 2.3: the English window (items have syllable length 0, except an optional Chinese last item of 1).
+    english: bool,
 }
 
 impl Cands {
     fn new(list: Vec<(String, usize)>, vertical: bool) -> Cands {
-        Cands { list, sel: 0, expanded: false, top: 0, vertical, first: 0 }
+        Cands { list, sel: 0, expanded: false, top: 0, vertical, first: 0, english: false }
     }
 
     fn scroll(&mut self) {
@@ -355,6 +476,26 @@ pub struct Engine {
     learn_panic: bool,
     /// Test-purpose injection: the next ⌘⌫ forget panics after changing memory (§6.13).
     forget_panic: bool,
+    /// S7c-2a: the small character model, from `load_tinylm`; dropped when another n-gram model is loaded (its `.sjtl` names
+    /// the n-gram model's hash).
+    tinylm: Option<Arc<TinyLm>>,
+    /// Whether rerank jobs are made (default off since S7c-2c, docs/contracts/s7c2c-delta.md section 2.3; `set_rerank`).
+    /// `load_tinylm` leaves it as it is.
+    rerank_on: bool,
+    /// Section 2.3 (修正一): renewed from `GENERATION` only where decoding changes: every `refresh`, `clear_all`, the model and
+    /// decoding settings (`load_lm`, `set_lm`, `load_tinylm`, `set_rerank`, `set_profile`, `set_demote`, learning open/clear).
+    generation: u64,
+    /// The job of the last refresh, until `take_rerank_job` or the next change.
+    rerank_job: Option<RerankJob>,
+    /// zhen-mixed: the switch (default off; `set_english`) and the word list (`load_english`).
+    english: bool,
+    english_words: Option<HashSet<Box<str>>>,
+    /// Section 2.2: the keycaps of the unfinished syllable's Zhuyin keys (at most `SHADOW_MAX`), and how many times a key
+    /// replaced a symbol in an occupied column (rule 9). Empty unless `shadow_on`; cleared with `clear_pend`.
+    shadow: Vec<char>,
+    shadow_over: u32,
+    /// Set by `choose_english` for the output of the key or pick that made it: the committed text (section 2.3).
+    commit_out: Option<String>,
 }
 
 /// Base lexicon + overlay from `data_dir` (§5), same as the eval CLI default. The overlay rows are
@@ -537,7 +678,89 @@ impl Engine {
             today: None,
             learn_panic: false,
             forget_panic: false,
+            tinylm: None,
+            rerank_on: false,
+            generation: next_generation(),
+            rerank_job: None,
+            english: false,
+            english_words: None,
+            shadow: Vec::new(),
+            shadow_over: 0,
+            commit_out: None,
         }
+    }
+
+    /// Section 2.3 (revision 1): called wherever decoding changes (every `refresh`, `clear_all`, a new n-gram or small model,
+    /// the rerank switch, the profile, the demotion table, learning open / clear): a job made before is stale from now on.
+    /// `set_learning` is not among them: the flag only decides whether picks are recorded (`pre`), never how the composition
+    /// decodes (decoding reads the learner whenever it is non-empty).
+    /// Keys that do not re-decode (cursor moves, unfinished symbols, entering the prediction row, pass-through) keep it.
+    fn invalidate(&mut self) {
+        self.generation = next_generation();
+        self.rerank_job = None;
+    }
+
+    // ---- S7c-2a rerank (docs/contracts/s7c2a-core-rerank.md) ----
+
+    /// Section 2.5: the small model at `path` for this engine's n-gram model. Fails (the previous model, or none, stays) when
+    /// the file cannot be read or is malformed, when no n-gram model is loaded, when the Kneser-Ney side file is on, or when the
+    /// `.sjtl` was tuned with another n-gram model (a pairing check, not an integrity check of the `.sjtl`). Leaves the rerank
+    /// switch and the display as they are.
+    pub fn load_tinylm(&mut self, path: &Path) -> Result<(), EngineError> {
+        self.invalidate();
+        let st = self.lm.as_ref().ok_or(EngineError::LoadFailed)?;
+        let (model, _) = TinyLm::load_paired(path, &st.lm).map_err(|_| EngineError::LoadFailed)?;
+        self.tinylm = Some(Arc::new(model));
+        Ok(())
+    }
+
+    /// Whether rerank jobs are made (default off, S7c-2c); recomputes the composition and returns the snapshot like `set_demote`,
+    /// so turning it off shows the n-gram result at once. On a decode failure the engine resets itself.
+    pub fn set_rerank(&mut self, on: bool) -> Result<Output, EngineError> {
+        self.invalidate();
+        self.rerank_on = on;
+        self.clear_pred();
+        if let Err(e) = self.refresh() {
+            self.clear_all();
+            return Err(e);
+        }
+        self.handled()
+    }
+
+    /// The job of the last change, if it has one (none without a model, with rerank or demotion off, or with nothing to rerank).
+    pub fn take_rerank_job(&mut self) -> Option<RerankJob> {
+        self.rerank_job.take()
+    }
+
+    /// Section 2.4: puts the chosen paths into the composition and returns the new output. `None` (nothing changes) when the
+    /// result is stale (another decode since the job, revision 1 of section 2.3), `path` no longer holds the words the job was
+    /// made from at every stretch (e.g. the same job's other result was applied), the candidate window is open, the
+    /// prediction row is entered, or every stretch kept its first path. Syllables, cursor, fixed words and the candidate window
+    /// are not touched; the prediction row is recomputed only when one is showing (a row the key rules cleared stays cleared).
+    pub fn apply_rerank(&mut self, r: RerankResult) -> Result<Option<Output>, EngineError> {
+        if r.generation != self.generation || self.cands.is_some() || self.pred_sel.is_some() {
+            return Ok(None);
+        }
+        let holds = |c: &Choice| {
+            self.path.get(c.at..c.at + c.expect.len()).is_some_and(|ws| ws.iter().map(|w| &w.0).eq(c.expect.iter()))
+        };
+        if !r.choices.iter().all(holds) {
+            return Ok(None);
+        }
+        let changes: Vec<Choice> = r.choices.into_iter().filter(|c| c.pick != 0).collect();
+        if changes.is_empty() {
+            return Ok(None);
+        }
+        // Right to left, so the earlier ranges still point at their words.
+        for c in changes.into_iter().rev() {
+            self.path.splice(c.at..c.at + c.expect.len(), c.words.into_iter().map(|(w, lp, delta)| (w, lp, false, delta)));
+        }
+        // `refresh_lm` builds the display from exactly the strings of `path`.
+        self.display = self.path.iter().map(|p| p.0.as_str()).collect();
+        if !self.pred.is_empty() {
+            self.recompute_pred();
+        }
+        self.handled().map(Some)
     }
 
     // ---- S4 learning (docs/contracts/s4-learning.md) ----
@@ -549,7 +772,9 @@ impl Engine {
     }
 
     /// §3: off by default. Turning it off drops pending learns; a span is learned only if the flag was
-    /// on both when it was chosen and at commit.
+    /// on both when it was chosen and at commit. It never makes a rerank job stale (S7c-2b section 2.1, corrected
+    /// 2026-10-11): the flag does not change decoding, which reads the learner whenever it is non-empty; it only decides
+    /// whether picks are recorded. The shell sends it before every key (s4-learning.md section 3).
     pub fn set_learning(&mut self, on: bool) {
         self.learning = on;
         if !on {
@@ -561,6 +786,7 @@ impl Engine {
     /// is always a full rewrite). On error the previous learner and store stay. `must_rewrite` and
     /// bit0 are left as they are: only a successful full rewrite or clear clears them.
     pub fn learning_open(&mut self, dir: &Path) -> Result<Opened, StoreError> {
+        self.invalidate();
         let (store, records, opened) = LearnStore::open(dir)?;
         self.learner = Learner::from_records(records);
         self.learner.prune(self.today());
@@ -574,6 +800,7 @@ impl Engine {
     /// deleting the files fails. Without a store (no successful `learning_open`) it is an error: there
     /// is no file it could have deleted, and the shell must not show the clear as done.
     pub fn learning_clear(&mut self) -> Result<(), StoreError> {
+        self.invalidate();
         if self.store.is_some() {
             self.must_rewrite = true;
         }
@@ -682,14 +909,23 @@ impl Engine {
                     let off: usize = (0..f.start).map(|i| self.token_width(i)).sum();
                     let before: String = display.chars().take(off).collect();
                     let ctx = f.key.clone().unwrap_or_else(|| context_key(&format!("{}{before}", self.left)));
-                    Some((ctx, self.syls[f.start..f.end].to_vec(), f.word.clone(), pre.clone()))
+                    // Rule 8: at sentence start the key holds the reading of the syllable after the word; a
+                    // prediction pick (`f.key` set) was made at the end of the composition, so it is `^>$`.
+                    let next = if f.key.is_some() { None } else { self.syls.get(f.end).map(String::as_str) };
+                    let ctx = record_key(ctx, next);
+                    // The key the displaced word was scored under at the pick, when it differs from the commit's.
+                    let at_pick = f.pick_key.clone().filter(|k| *k != ctx);
+                    Some((ctx, self.syls[f.start..f.end].to_vec(), f.word.clone(), pre.clone(), at_pick))
                 })
                 .collect();
             let mut touched = Vec::new();
-            for (ctx, reading, word, displaced) in &plans {
+            for (ctx, reading, word, displaced, at_pick) in &plans {
                 touched.extend(self.learner.teach(ctx, reading, word, displaced, today));
+                if let Some(k) = at_pick {
+                    touched.extend(self.learner.halve(k, reading, displaced, today));
+                }
             }
-            // Nothing touched (e.g. a single character under "^", §12): no write, unless a full
+            // Nothing touched (e.g. a single character under "^" or a one-character key, §12, §14): no write, unless a full
             // rewrite is pending (a failed forget or rewrite). It is retried only by commits that reach
             // this point: learning on and at least one re-pick (the early return above); other commits
             // leave it pending.
@@ -703,6 +939,7 @@ impl Engine {
     /// shared constructor. Failure leaves the previous state. The composition display is not recomputed;
     /// the next change to it decodes with the new model.
     pub fn load_lm(&mut self, path: &Path) -> Result<(), EngineError> {
+        self.invalidate();
         let dir = self.data_dir.as_ref().ok_or(EngineError::LoadFailed)?;
         let overlay = capping_overlay(dir, self.pack_text.as_deref().unwrap_or(""))?;
         let demote = std::fs::read_to_string(dir.join("demote.tsv")).map_err(|_| EngineError::LoadFailed)?;
@@ -712,6 +949,7 @@ impl Engine {
         // Built now, not at the first key: the index takes hundreds of ms (V3 engine contract section 1.2).
         capped.predict_index(&lm);
         self.lm = Some(LmState { lm: Arc::new(lm), capped: Arc::new(capped) });
+        self.tinylm = None; // S7c-2a section 2.3: tuned for the previous model
         Ok(())
     }
 
@@ -752,13 +990,16 @@ impl Engine {
     /// Test-purpose injection for `with_lexicon` engines: a prebuilt model and its capped lexicon
     /// (built by `CappedLexicon::new` from this engine's lexicon).
     pub fn set_lm(&mut self, lm: Arc<Lm>, capped: Arc<CappedLexicon>) {
+        self.invalidate();
         self.lm = Some(LmState { lm, capped });
+        self.tinylm = None;
     }
 
     /// Whether the demotion table applies (default on, remembered even before a model is loaded);
     /// recomputes the composition and returns the snapshot, like `set_profile`. On a decode failure the
     /// engine resets itself.
     pub fn set_demote(&mut self, on: bool) -> Result<Output, EngineError> {
+        self.invalidate();
         self.demote = on;
         self.clear_pred();
         if let Err(e) = self.refresh() {
@@ -794,8 +1035,147 @@ impl Engine {
         self.abbr = on;
         if !on {
             self.drop_units();
+        } else {
+            self.close_english(); // zhen-mixed section 2.1: the two are exclusive
         }
         self.handled()
+    }
+
+    /// zhen-mixed section 3.1: the English word list at `path`: `[a-z]{3,32}` per line, LF, no duplicate, no BOM, at most
+    /// 4 MiB and 200,000 lines. Any other content, or an unreadable or non-regular file, fails and the previous list (or
+    /// none) stays; nothing is loaded in part. Does not touch the switch or the display. No path or word in any error (R2).
+    pub fn load_english(&mut self, path: &Path) -> Result<(), EngineError> {
+        // The tiny model's reader (S7c-2a F3): a FIFO is refused at once instead of blocking the shell that builds the engine.
+        let bytes = crate::tinylm::read_bounded(path, ENGLISH_MAX_BYTES).map_err(|_| EngineError::LoadFailed)?;
+        let text = String::from_utf8(bytes).map_err(|_| EngineError::LoadFailed)?;
+        let mut words = HashSet::new();
+        // The last line ends with a line break (stripped once); an empty file is an empty list, a blank line anywhere is bad.
+        let lines = if text.is_empty() { None } else { Some(text.strip_suffix('\n').unwrap_or(&text).split('\n')) };
+        for line in lines.into_iter().flatten() {
+            let ok = ENGLISH_LEN.contains(&line.len()) && line.bytes().all(|b| b.is_ascii_lowercase());
+            if !ok || words.len() >= ENGLISH_MAX_LINES || !words.insert(Box::<str>::from(line)) {
+                return Err(EngineError::LoadFailed);
+            }
+        }
+        self.english_words = Some(words);
+        Ok(())
+    }
+
+    /// zhen-mixed (docs/contracts/zhen-mixed.md): the switch, default off, remembered even without a list. Takes effect only
+    /// with a loaded list, the standard layout and the abbreviation composer off (`shadow_on`). Off closes an open English
+    /// window and clears the shadow. Returns the snapshot.
+    pub fn set_english(&mut self, on: bool) -> Result<Output, EngineError> {
+        self.english = on;
+        if !on {
+            self.close_english();
+        }
+        self.handled()
+    }
+
+    /// Whether the English window is open (test and tool hook).
+    #[doc(hidden)]
+    pub fn english_open(&self) -> bool {
+        self.cands.as_ref().is_some_and(|c| c.english)
+    }
+
+    /// The shadow's length (test and tool hook).
+    #[doc(hidden)]
+    pub fn english_shadow_len(&self) -> usize {
+        self.shadow.len()
+    }
+
+    /// Section 2.1: the four conditions under which the shadow is recorded at all.
+    fn shadow_on(&self) -> bool {
+        self.english && self.english_words.is_some() && !self.abbr && self.layout == Layout::Standard
+    }
+
+    fn clear_shadow(&mut self) {
+        self.shadow.clear();
+        self.shadow_over = 0;
+    }
+
+    /// Closes the English window if it is open, and clears the shadow either way; the unfinished syllable stays.
+    fn close_english(&mut self) {
+        if self.english_open() {
+            self.cands = None;
+        }
+        self.clear_shadow();
+    }
+
+    /// Closes the candidate window (rules 7 and 8); an English window takes the shadow with it (section 2.3).
+    fn close_cands(&mut self) {
+        if self.cands.take().is_some_and(|c| c.english) {
+            self.clear_shadow();
+        }
+    }
+
+    /// Section 2.2: one Zhuyin key of the unfinished syllable; `over` is whether it replaced a symbol (rule 9).
+    fn shadow_push(&mut self, ch: char, over: bool) {
+        if !self.shadow_on() {
+            return;
+        }
+        if self.shadow.len() == SHADOW_MAX {
+            self.clear_shadow(); // the 33rd key: start again
+            return;
+        }
+        self.shadow.push(ch);
+        self.shadow_over += over as u32;
+    }
+
+    /// Section 2.2, the trigger (Space before rule 10): the shadow is a listed word, replaced at least once, and when the
+    /// leftover syllable (tone 1) is itself in the lexicon at least twice. The cursor is at the end and there is one unit.
+    fn english_trigger(&self) -> bool {
+        let Some(words) = self.english_words.as_ref().filter(|_| self.shadow_on()) else { return false };
+        if self.cursor != self.syls.len() || !self.pend_prev.is_empty() || self.shadow_over == 0 {
+            return false;
+        }
+        let word: String = self.shadow.iter().collect();
+        words.contains(word.as_str())
+            && (self.shadow_over >= 2 || self.lex.entries(&[self.pending()]).is_empty())
+    }
+
+    /// Section 2.3: the window of the shadow's word (as typed, capitalised, upper case) and, when the leftover syllable is in
+    /// the lexicon, its first entry. The unfinished syllable stays in the preedit.
+    fn open_english(&mut self) -> Result<Output, EngineError> {
+        let word: String = self.shadow.iter().collect();
+        let mut title = word.clone();
+        title[..1].make_ascii_uppercase();
+        let mut list = vec![(word.clone(), 0), (title, 0), (word.to_uppercase(), 0)];
+        if let Some((zh, _)) = self.lex.entries(&[self.pending()]).first() {
+            list.push((zh.to_string(), 1));
+        }
+        let mut c = Cands::new(list, self.cand_vertical);
+        c.english = true;
+        self.cands = Some(c);
+        self.handled()
+    }
+
+    /// Section 2.3: item `idx` of the English window. An English item commits the composition as shown and the word, no
+    /// space (learning as for Enter; the word itself is never learned); a Chinese item becomes a fixed word at the cursor.
+    fn choose_english(&mut self, idx: usize) -> Result<(), EngineError> {
+        let Some(c) = self.cands.take() else { return Ok(()) };
+        let Some((word, len)) = c.list.get(idx).cloned() else { return Ok(()) };
+        let syl = self.pending();
+        self.clear_pend();
+        if len == 0 {
+            let commit = self.take_commit() + &word;
+            self.commit_out = Some(commit);
+            return Ok(());
+        }
+        let out = self.insert_token(syl, Some(word))?;
+        self.pred_dirty = true;
+        if !out.commit.is_empty() {
+            self.commit_out = Some(out.commit); // the 40th syllable committed everything (section 2.1 of s3d)
+        }
+        Ok(())
+    }
+
+    /// The output of a key or pick that chose a candidate: the English item's commit, or the plain snapshot.
+    fn chosen(&mut self) -> Result<Output, EngineError> {
+        match self.commit_out.take() {
+            Some(commit) => Ok(self.view(true, commit)),
+            None => self.handled(),
+        }
     }
 
     /// What `set_prediction(false)` and `set_abbreviation(false)` do with two or more unfinished units: they go, the row
@@ -822,11 +1202,13 @@ impl Engine {
     fn clear_pend(&mut self) {
         self.pend = [None; 3];
         self.pend_prev.clear();
+        self.clear_shadow();
     }
 
     /// Switch the profile (default chat; remembered even before a model is loaded), recompute the
     /// composition and return the snapshot. On a decode failure the engine resets itself.
     pub fn set_profile(&mut self, profile: Profile) -> Result<Output, EngineError> {
+        self.invalidate();
         self.profile = profile;
         self.clear_pred();
         if let Err(e) = self.refresh() {
@@ -1003,7 +1385,9 @@ impl Engine {
     /// Weight of `word` for `reading` under context `key` at the exact or last-character level; the global level
     /// counts 0 (s4-learning section 12: it never overrides what the model is sure of).
     fn learned_weight(&self, key: &str, reading: &[String], word: &str, today: i64) -> f64 {
-        match self.learner.lookup(key, reading, today) {
+        // Rule 8: a predicted word ends at the cursor, with no syllable after it.
+        let key = record_key(key.to_string(), None);
+        match self.learner.lookup(&key, reading, today) {
             (Level::Global, _) => 0.0,
             (_, hits) => hits.iter().find(|h| h.0 == word).map_or(0.0, |h| h.1),
         }
@@ -1020,7 +1404,7 @@ impl Engine {
         self.fixed.retain(|f| !(f.start < end && start < f.end));
         self.syls.splice(start..end, reading);
         let key = pre.is_some().then_some(key);
-        self.fixed.push(Fixed { start, end: start + m, word, pre, key });
+        self.fixed.push(Fixed { start, end: start + m, word, pre, key, pick_key: None });
         self.fixed.sort_by_key(|f| f.start);
         self.cursor = start + m;
         self.refresh()?;
@@ -1031,7 +1415,10 @@ impl Engine {
         self.handled()
     }
 
+    /// Also renews the generation (section 2.3): a commit or a reset inside one call (the 40-syllable auto-commit, a commit from
+    /// the prediction row) voids the job the refresh before it made.
     fn clear_all(&mut self) {
+        self.invalidate();
         self.left.clear();
         self.syls.clear();
         self.cursor = 0;
@@ -1084,6 +1471,8 @@ impl Engine {
 
     /// Recompute the display string: free segments decoded top-1, fixed words in between (§3.1).
     fn refresh(&mut self) -> Result<(), EngineError> {
+        // Section 2.3, revision 1: every decode is a new generation; its job (if any) is made at the end of `refresh_lm`.
+        self.invalidate();
         if let Some(st) = self.lm.clone() {
             return self.refresh_lm(&st);
         }
@@ -1127,6 +1516,11 @@ impl Engine {
             delta_fixed.push(if self.demote { delta } else { 0.0 });
         }
         let (mut out, mut path) = (String::new(), Vec::new());
+        // S7c-2a section 2.2: alpha and tau hold only for the scores with the demotion table on.
+        let jobs = self.tinylm.is_some() && self.rerank_on && self.demote;
+        let mut stretches = Vec::new();
+        // Byte offset in `out` after the last stretch put into the job: the text from there on is the next stretch's `gap`.
+        let mut job_end = 0;
         for gap in 0..=self.fixed.len() {
             let from = if gap == 0 { 0 } else { self.fixed[gap - 1].end };
             let right = self.fixed.get(gap);
@@ -1144,14 +1538,28 @@ impl Engine {
                     _ => End::Eos,
                 };
                 let before = format!("{}{out}", self.left);
-                let learn = (!self.learner.is_empty()).then(|| Learn { learner: &self.learner, before: &before, today, eps_global: self.eps_global });
+                let learn = (!self.learner.is_empty()).then(|| Learn { learner: &self.learner, before: &before, after: self.syls.get(to).map(String::as_str), today, eps_global: self.eps_global });
                 let best = decode_segment_learned(
                     &st.capped, &self.syls[from..to], &st.lm, lam, prev, end, BEAM_S1, learn.as_ref(), self.demote,
                 )
                 .map_err(|_| EngineError::Internal)?;
-                for (w, lp, delta) in &best.first().ok_or(EngineError::Internal)?.1 {
+                let first = &best.first().ok_or(EngineError::Internal)?.1;
+                let in_job = jobs && best.len() >= 2 && !self.boosted(st, from, first);
+                if in_job {
+                    let top = &best[..best.len().min(TOPK)];
+                    stretches.push(Stretch {
+                        at: path.len(),
+                        paths: top.iter().map(|(_, ws)| ws.iter().map(|&(w, lp, delta)| (w.to_string(), lp, delta)).collect()).collect(),
+                        ng: top.iter().map(|(score, _)| *score).collect(),
+                        gap: out[job_end..].to_string(),
+                    });
+                }
+                for (w, lp, delta) in first {
                     out.push_str(w);
                     path.push((w.to_string(), *lp, false, *delta));
+                }
+                if in_job {
+                    job_end = out.len();
                 }
             }
             if let Some(f) = right {
@@ -1161,7 +1569,28 @@ impl Engine {
         }
         self.display = out;
         self.path = path;
+        if let (false, Some(model)) = (stretches.is_empty(), &self.tinylm) {
+            let (model, profile, left) = (model.clone(), self.profile, self.left.clone());
+            self.rerank_job = Some(RerankJob { generation: self.generation, model, profile, left, stretches });
+        }
         Ok(())
+    }
+
+    /// S7c-2a section 2.2, the learning guard: whether a word of a stretch's first path (the stretch starts at syllable `from`)
+    /// was scored with a learned boost, i.e. with an lp above the best capped lp of that word under its reading (the decoder
+    /// raises lp only that way). Such a stretch is not reranked, so a choice the user taught is never undone by the model.
+    fn boosted(&self, st: &LmState, from: usize, words: &[(&str, f64, f64)]) -> bool {
+        if self.learner.is_empty() {
+            return false;
+        }
+        let mut at = from;
+        words.iter().any(|&(w, lp, _)| {
+            let n = w.chars().count();
+            let span = self.syls.get(at..at + n);
+            at += n;
+            // A span that does not fit cannot happen (one character per syllable); counted as boosted, the safe side.
+            span.is_none_or(|s| st.capped.best_lp(s, w).is_some_and(|best| lp > best))
+        })
     }
 
     fn handled(&self) -> Result<Output, EngineError> {
@@ -1270,7 +1699,7 @@ impl Engine {
         let plain = m == 0;
         // 3-8: candidates open.
         if self.cands.is_some() && self.candidate_key(k)? {
-            return self.handled();
+            return self.chosen();
         }
         let zy = if is_char && plain { self.layout.symbol_of(k.ch) } else { None };
         let tone = match k.kind {
@@ -1286,9 +1715,13 @@ impl Engine {
                 if self.pend[col].is_some() && self.abbr_active() {
                     self.pend_prev.push(std::mem::replace(&mut self.pend, [None; 3]));
                 }
+                self.shadow_push(k.ch, self.pend[col].is_some());
                 self.pend[col] = Some(sym);
                 self.pred_dirty = true;
             } else if let Some(t) = tone {
+                if t == 0 && self.english_trigger() {
+                    return self.open_english(); // 10e
+                }
                 if self.pend_prev.is_empty() {
                     return self.finish_syllable(t, old);
                 }
@@ -1298,9 +1731,13 @@ impl Engine {
                 // McBopomofo do (measured 2026-10-06: ㄉㄨㄟ, ㄅ replaces ㄉ, then Backspace gives ㄅㄨ, then ㄅ).
                 if let Some(col) = (0..3).rev().find(|&c| self.pend[c].is_some()) {
                     self.pend[col] = None;
+                    self.shadow.pop(); // zhen-mixed section 2.2: the last key; the replacement count stays
                 }
                 if self.pend.iter().all(Option::is_none) {
                     self.pend_prev.pop().into_iter().for_each(|u| self.pend = u); // an emptied unit goes
+                    if self.pend.iter().all(Option::is_none) {
+                        self.clear_shadow(); // the syllable is gone
+                    }
                 }
                 self.pred_dirty = true;
             } else if k.kind == KeyKind::Esc {
@@ -1314,6 +1751,7 @@ impl Engine {
         }
         // 14
         if let Some((col, sym)) = zy {
+            self.shadow_push(k.ch, false);
             self.pend[col] = Some(sym);
             self.pred_dirty = true;
             return self.handled();
@@ -1394,9 +1832,9 @@ impl Engine {
                 }
                 (KeyKind::PageDown | KeyKind::PageUp, _) => {}
                 (KeyKind::Enter, _) => self.choose(sel)?,
-                (KeyKind::Esc | KeyKind::Backspace, _) => self.cands = None,
+                (KeyKind::Esc | KeyKind::Backspace, _) => self.close_cands(),
                 _ => {
-                    self.cands = None;
+                    self.close_cands();
                     return Ok(false);
                 }
             }
@@ -1425,9 +1863,9 @@ impl Engine {
                 (KeyKind::Left, _) => c.sel = sel.saturating_sub(1),
                 (KeyKind::Right, _) => c.sel = (sel + 1).min(len - 1),
                 (KeyKind::Enter, _) => self.choose(sel)?,
-                (KeyKind::Esc | KeyKind::Backspace, _) => self.cands = None,
+                (KeyKind::Esc | KeyKind::Backspace, _) => self.close_cands(),
                 _ => {
-                    self.cands = None;
+                    self.close_cands();
                     return Ok(false);
                 }
             }
@@ -1457,9 +1895,9 @@ impl Engine {
             }
             (KeyKind::Space, _) => c.sel = next_page.unwrap_or(0),
             (KeyKind::Enter, _) => self.choose(sel)?,
-            (KeyKind::Esc | KeyKind::Backspace, _) => self.cands = None,
+            (KeyKind::Esc | KeyKind::Backspace, _) => self.close_cands(),
             _ => {
-                self.cands = None;
+                self.close_cands();
                 return Ok(false);
             }
         }
@@ -1485,9 +1923,16 @@ impl Engine {
         if index >= n {
             return Ok(None);
         }
-        let r = self.choose(first + index).and_then(|()| self.handled());
+        self.pred_dirty = false;
+        let mut r = self.choose(first + index).and_then(|()| self.chosen());
         if r.is_err() {
             self.clear_all();
+        } else if std::mem::take(&mut self.pred_dirty) {
+            self.recompute_pred(); // a Chinese item of the English window (zhen-mixed section 2.3)
+            if let Ok(o) = &mut r {
+                (o.candidates, o.selected, o.total) = self.pred_view();
+                o.vertical = self.pred_vertical();
+            }
         }
         r.map(Some)
     }
@@ -1524,7 +1969,7 @@ impl Engine {
         });
         self.syls.insert(c, reading);
         if let Some(word) = fixed_word {
-            self.fixed.push(Fixed { start: c, end: c + 1, word, pre: None, key: None });
+            self.fixed.push(Fixed { start: c, end: c + 1, word, pre: None, key: None, pick_key: None });
             self.fixed.sort_by_key(|f| f.start);
         }
         self.cursor += 1;
@@ -1611,12 +2056,21 @@ impl Engine {
         Some(self.display.chars().skip(off).take(len).collect())
     }
 
+    /// Rule 8: the synthetic key (`^>` + `syls[end]`, `^>$` at the end) the span [start, end) is shown under now, when
+    /// the context key before it is `^`; `None` for any other context.
+    fn pick_key(&self, start: usize, end: usize) -> Option<String> {
+        let off: usize = (0..start).map(|i| self.token_width(i)).sum();
+        let before: String = self.display.chars().take(off).collect();
+        let ctx = context_key(&format!("{}{before}", self.left));
+        (ctx == crate::learn::SENTINEL).then(|| next_key(self.syls.get(end).map(String::as_str)))
+    }
+
     /// §1.5: drop the highlighted candidate's records for its reading (all keys), then re-decode.
     /// With a store the file is always fully rewritten (§4): a record pruned from memory on load can
     /// still be in the file, so "memory changed" says nothing about the file. `must_rewrite` is set
     /// first, so a panic or failure part way makes the next write a full rewrite too.
     fn forget_highlighted(&mut self) -> Result<(), EngineError> {
-        let Some(c) = &self.cands else { return Ok(()) };
+        let Some(c) = self.cands.as_ref().filter(|c| !c.english) else { return Ok(()) }; // an English item has nothing to forget
         let Some((word, l)) = c.list.get(c.sel).cloned() else { return Ok(()) };
         let (start, end) = if self.cursor == 0 { (0, l) } else { (self.cursor - l, self.cursor) };
         if self.is_punct(start) {
@@ -1650,6 +2104,9 @@ impl Engine {
 
     /// Fix candidate `idx` over its range, close candidates, recompute.
     fn choose(&mut self, idx: usize) -> Result<(), EngineError> {
+        if self.english_open() {
+            return self.choose_english(idx);
+        }
         let Some(c) = self.cands.take() else { return Ok(()) };
         let Some((word, l)) = c.list.get(idx).cloned() else { return Ok(()) };
         let (start, end) = if self.cursor == 0 { (0, l) } else { (self.cursor - l, self.cursor) };
@@ -1659,13 +2116,18 @@ impl Engine {
             Some(f) if self.learning => (f.pre.clone(), f.key.clone()),
             _ => (self.learning.then(|| self.pre_pick(start, end)).flatten(), None),
         };
+        // Re-picking the span of an earlier pick keeps that pick's key along with its displaced text.
+        let pick_key = match self.fixed.iter().find(|f| f.start == start && f.end == end && f.pre.as_ref().is_some_and(|p| !p.is_empty())) {
+            Some(f) if self.learning => f.pick_key.clone(),
+            _ => (self.learning && pre.is_some()).then(|| self.pick_key(start, end)).flatten(),
+        };
         self.fixed.retain(|f| !(f.start < end && start < f.end));
         // A candidate pick changes the text before every fixed word to its right: their prediction keys no longer
         // describe what the user sees, so those records fall back to the key at the commit (section 10.1).
         for f in self.fixed.iter_mut().filter(|f| f.start >= end) {
             f.key = None;
         }
-        self.fixed.push(Fixed { start, end, word, pre, key });
+        self.fixed.push(Fixed { start, end, word, pre, key, pick_key });
         self.fixed.sort_by_key(|f| f.start);
         self.refresh()
     }

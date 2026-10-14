@@ -1,6 +1,7 @@
 import AppKit
 import ShanjieKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// The settings window (docs/contracts/settings-window.md section 2.1): one NSWindow with a SwiftUI
 /// grouped Form, in the input method's own process. It has no text field, so it needs no Edit menu and
@@ -14,6 +15,8 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     private var window: NSWindow?
     private var host: NSHostingView<SettingsForm>?
     private var previous: NSRunningApplication?
+    /// The 個別設定的 App names and icons, kept across window updates (profile-choice section 2.4).
+    private let appLabels = AppLabels()
 
     init(shell: Shell) {
         self.shell = shell
@@ -28,10 +31,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         m.refreshExternal()
         let w = window ?? makeWindow(m)
         window = w
-        if let host {
-            let fit = host.fittingSize
-            w.setContentSize(NSSize(width: fit.width, height: fit.height + Self.titleBarHeight))
-        }
+        fit(w)
         center(w)
         NSApp.activate()
         w.makeKeyAndOrderFront(nil)
@@ -39,6 +39,23 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         // refused and the window stayed behind the frontmost app (device check 2026-10-10). Like vChewing,
         // put it in front regardless; a click on it then activates the input method.
         w.orderFrontRegardless()
+    }
+
+    /// Sizes the window to the form, keeping its top edge where it is (`show()` centres it afterwards).
+    private func fit(_ w: NSWindow) {
+        guard let host else { return }
+        let top = w.frame.maxY
+        let size = host.fittingSize
+        w.setContentSize(NSSize(width: size.width, height: size.height + Self.titleBarHeight))
+        w.setFrameTopLeftPoint(NSPoint(x: w.frame.minX, y: top))
+    }
+
+    /// Profile-choice section 2.4: the 個別設定的 App list grew or shrank while the window is open. Called one main-actor turn
+    /// after SwiftUI's onChange, so the hosting view's fitting size is read after the change is laid out (inferred, not measured;
+    /// the device check sees it).
+    private func refit() {
+        guard let window, window.isVisible else { return }
+        fit(window)
     }
 
     /// The window's background material (user, 2026-10-10: Liquid Glass was too see-through; a flatter glass).
@@ -62,7 +79,9 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         glass.material = Self.backgroundMaterial
         glass.blendingMode = .behindWindow
         glass.state = .active
-        let host = NSHostingView(rootView: SettingsForm(model: model))
+        let host = NSHostingView(rootView: SettingsForm(model: model, appLabels: appLabels, onRowCountChange: { [weak self] in
+            Task { @MainActor in self?.refit() }
+        }))
         host.safeAreaRegions = []  // placed below the title bar by its top constraint, so no second inset
         self.host = host
         let container = NSView()
@@ -117,7 +136,12 @@ struct SettingsForm: View {
     private static let formWidth: CGFloat = 420
     /// Icon-to-slider gap, Syrtis's value (TokenBar GlassTintControl.swift `HStack(spacing: 8)`); not measured.
     private static let tintIconSpacing: CGFloat = 8
+    /// The app icons in the 個別設定的 App list: one line of body text; not measured against any reference.
+    private static let appIconSize: CGFloat = 16
     @ObservedObject var model: SettingsModel
+    let appLabels: AppLabels
+    /// The 個別設定的 App list changed length: the window refits its height.
+    let onRowCountChange: () -> Void
 
     var body: some View {
         Form {
@@ -134,10 +158,48 @@ struct SettingsForm: View {
                     Toggle(MenuEntry.Text.abbreviation, isOn: Binding(get: { model.abbreviation }, set: { model.setAbbreviation($0) }))
                         .disabled(!model.prediction)
                 }
+                // Same place as in the menu (after 即時預測 and 可省略韻母 when shown); greyed (setting kept) when the word list did not load
+                // or the layout is Eten, like the menu item (zhen-mixed section 3.2).
+                Toggle(MenuEntry.Text.english, isOn: Binding(get: { model.english }, set: { model.setEnglish($0) }))
+                    .disabled(!model.englishEnabled)
                 Toggle(MenuEntry.Text.demote, isOn: Binding(get: { model.demote }, set: { model.setDemote($0) }))
+                // Right after the toggle that greys it. Greyed while 避免把敏感字詞排在前面 is off or the small model did not load,
+                // like the menu item: the core makes no rerank job then (s7c2b section 2.3).
+                Toggle(MenuEntry.Text.rerank, isOn: Binding(get: { model.rerank }, set: { model.setRerank($0) }))
+                    .disabled(!model.rerankEnabled)
                 Toggle(MenuEntry.Text.acgPack, isOn: Binding(get: { model.acgPack }, set: { model.setAcgPack($0) }))
                 if let line = model.acgDataLine {
                     Text(line).font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            // profile-choice section 2.4, between 選字 and 外觀.
+            Section("聊天／書面") {
+                Picker("切換方式", selection: Binding(get: { model.profileMode }, set: { model.setProfileMode($0) })) {
+                    Text("依 App 自動").tag(ProfileMode.auto)
+                    Text("一律聊天").tag(ProfileMode.chat)
+                    Text("一律書面").tag(ProfileMode.formal)
+                }
+                Text("依 App 自動：聊天 App（Discord、LINE、訊息等）用聊天設定，其他 App 用書面設定。")
+                    .font(.caption).foregroundStyle(.secondary)
+                Text("個別設定的 App")
+                if model.appProfiles.isEmpty {
+                    Text("在 App 裡打開善解選單，勾選「\(MenuEntry.Text.appChat)」，就會列在這裡。")
+                        .font(.caption).foregroundStyle(.secondary)
+                } else {
+                    ForEach(appLabels.sorted(model.appProfiles), id: \.row.bundle) { item in
+                        HStack {
+                            Image(nsImage: item.label.icon).resizable().frame(width: Self.appIconSize, height: Self.appIconSize)
+                                .accessibilityHidden(true)
+                            Text(item.label.name)
+                            Spacer()
+                            // Dimmed outside 依 App 自動, where the choice is kept but not used; removing stays possible.
+                            Text(item.row.chat ? "聊天" : "書面")
+                                .foregroundStyle(model.profileMode == .auto ? .secondary : .tertiary)
+                            Button { model.removeAppProfile(item.row.bundle) } label: { Image(systemName: "minus.circle") }
+                                .buttonStyle(.borderless)
+                                .accessibilityLabel("移除")
+                        }
+                    }
                 }
             }
             Section("外觀") {
@@ -177,10 +239,52 @@ struct SettingsForm: View {
                 Button(MenuEntry.Text.clear) { model.clear() }
             }
         }
+        .onChange(of: model.appProfiles.count) { onRowCountChange() }
         .formStyle(.grouped)
         .scrollContentBackground(.hidden)  // the window's glass shows through
         .frame(width: Self.formWidth)
         .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
+/// The name and icon of one app in the 個別設定的 App list (profile-choice section 2.4), looked up here so `SettingsModel` and
+/// the tests never touch NSWorkspace. An app that is gone shows its bundle ID and the generic app icon. This code logs nothing;
+/// whether the system's LaunchServices lookup logs the queried bundle ID is unverified (contract section 3.4 checks it on device).
+struct AppLabel {
+    let name: String
+    let icon: NSImage
+
+    init(bundle: String) {
+        if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundle) {
+            name = FileManager.default.displayName(atPath: url.path)
+            icon = NSWorkspace.shared.icon(forFile: url.path)
+        } else {
+            name = bundle
+            icon = NSWorkspace.shared.icon(for: .applicationBundle)
+        }
+    }
+}
+
+/// `AppLabel`s by bundle ID, so the list looks an app up once rather than on every redraw (a glass tint drag redraws the whole
+/// form). Only bundle IDs not seen yet are looked up; ones no longer listed are forgotten, so a removed and re-added app is
+/// looked up again.
+@MainActor
+final class AppLabels {
+    private var byBundle: [String: AppLabel] = [:]
+
+    /// The rows by name, then bundle ID, so equal names keep a fixed order.
+    func sorted(_ rows: [AppProfileRow]) -> [(row: AppProfileRow, label: AppLabel)] {
+        var kept: [String: AppLabel] = [:]
+        let items = rows.map { row in
+            let label = byBundle[row.bundle] ?? AppLabel(bundle: row.bundle)
+            kept[row.bundle] = label
+            return (row: row, label: label)
+        }
+        byBundle = kept
+        return items.sorted {
+            let order = $0.label.name.localizedStandardCompare($1.label.name)
+            return order == .orderedSame ? $0.row.bundle < $1.row.bundle : order == .orderedAscending
+        }
     }
 }
 

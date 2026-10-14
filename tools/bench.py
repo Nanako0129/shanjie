@@ -4,6 +4,7 @@
   tools/bench.py run <ref>... [--label L] [--base REF] [--lm FILE] [--private-root DIR]
   tools/bench.py reference [--private-root DIR]
   tools/bench.py check-static [--json FILE] [--md FILE]
+  tools/bench.py run --suite v2 <ref>... [--as VERSION] [--override-packs off] [--private-root DIR]   (docs/contracts/sbench-v2.md)
   tools/bench.py table
 
 `run` exports each ref with `git archive`, builds its CLI and the key replay, scores the frozen suite with that
@@ -12,6 +13,8 @@ eval/bench/results/<label>.json. `reference` (sbench 7.1) scores the CURRENT che
 lexicon only (`--no-overlay`, no --lm) into eval/bench/results/reference-mcbpmf.json, recomputing only when the commit or a
 fingerprint changed. `check-static` verifies eval/bench/static/typing-test.json against docs/typing-test.md by cell position.
 `table` regenerates docs/benchmark.md from every results JSON (version rows), the reference row and the static section.
+`run --suite v2` measures each version with its shipped settings (VERSIONS2) and writes eval/bench/results/v2-<label>.json;
+`table` appends the suite-v2 section after the suite-v1 text (which stays byte for byte the same).
 Never reads eval/holdout/. Every private path is derived from --private-root.
 """
 import argparse, datetime, functools, hashlib, json, math, os, platform, re, shutil, statistics, subprocess, sys, tempfile
@@ -22,6 +25,7 @@ SUITE = os.path.join(ROOT, "eval/bench/suite-v1")
 RESULTS = os.path.join(ROOT, "eval/bench/results")
 REFERENCE = "reference-mcbpmf.json"  # not a version file: `run` bookkeeping and the version rows skip it
 STATIC = os.path.join(ROOT, "eval/bench/static/typing-test.json")
+EXTERNAL = os.path.join(ROOT, "eval/bench/external")  # other models scored on our candidates (not versions of 善解)
 TYPING_MD = os.path.join(ROOT, "docs/typing-test.md")
 BASE_LEXICON = os.path.join(ROOT, "data/lexicon/mcbpmf-data.txt")
 CACHE = os.path.expanduser("~/.cache/shanjie/bench")
@@ -256,10 +260,15 @@ def preflight(args, need_lm=True):
     return ctx
 
 
+def is_v1_file(f):
+    """Results files of suite v1: every .json except the reference row and the suite-v2 files (`v2-<label>.json`)."""
+    return f.endswith(".json") and f != REFERENCE and not f.startswith("v2-")
+
+
 def known_from_results():
     k = {}
     for f in sorted(os.listdir(RESULTS)) if os.path.isdir(RESULTS) else []:
-        if f.endswith(".json") and f != REFERENCE:
+        if is_v1_file(f):
             j = json.load(open(os.path.join(RESULTS, f), encoding="utf-8"))
             for v in j["versions"]:  # per cell, the latest file that actually measured it wins
                 for cell, r in v.get("accuracy", {}).items():
@@ -643,10 +652,413 @@ def render_table(results, ref=None, static=None):
     return "\n".join(L)
 
 
+def render_external(exts):
+    """Other models reranking the same n-gram top-k as tinylm (e.g. X0c): not versions, so a separate section with its own conditions."""
+    L = ["", "## 外部模型對照（不是善解的版本）", "",
+         "由 `tools/bench.py table` 從 `eval/bench/external/*.json` 產生。外部模型和善解的語意校正在**同一批候選**（善解 n-gram 的前 k 名）上重排，"
+         "用同一種選值方法；不是外部輸入法本身的成績（它自己的詞庫與解碼器沒有量）。保留集不能輸出候選，所以沒有保留集。"]
+    for x in exts:
+        L += ["", f"### {x['name']}（{x['date']}）", "", x["conditions"], "",
+              f"| 設定／集合 | n | n-gram 第一名 | {x['ours_label']} | {x['label']} | {x['label']} 對 {x['ours_label']}：改對／改壞，p |",
+              "|---|---|---|---|---|---|"]
+        for r in x["rows"]:
+            f = lambda k: f"{100 * r[k] / r['n']:.2f}%<br>{r[k]}/{r['n']}"
+            name = f"{r['setting']}／{r['set']}" + ("（選值用）" if r.get("tuning") else "")
+            pv = "p<0.0001" if r["p"] < 1e-4 else f"p={r['p']:.3g}"   # the source tables print p to 4 decimals
+            L.append(f"| {name} | {r['n']} | {f('ngram')} | {f('ours')} | {f('external')} | +{r['fixed']} / −{r['broken']}，{pv} |")
+    return "\n".join(L) + "\n"
+
+
 def cmd_table(_):
-    results = [json.load(open(os.path.join(RESULTS, f), encoding="utf-8")) for f in sorted(os.listdir(RESULTS)) if f.endswith(".json") and f != REFERENCE]
+    results = [json.load(open(os.path.join(RESULTS, f), encoding="utf-8")) for f in sorted(os.listdir(RESULTS)) if is_v1_file(f)]
     load = lambda p: json.load(open(p, encoding="utf-8")) if os.path.isfile(p) else None
-    open(os.path.join(ROOT, "docs/benchmark.md"), "w", encoding="utf-8").write(render_table(results, load(os.path.join(RESULTS, REFERENCE)), load(STATIC)))
+    text = render_table(results, load(os.path.join(RESULTS, REFERENCE)), load(STATIC))
+    v2 = [json.load(open(os.path.join(RESULTS, f), encoding="utf-8")) for f in sorted(os.listdir(RESULTS)) if f.startswith("v2-") and f.endswith(".json")]
+    ext = [json.load(open(os.path.join(EXTERNAL, f), encoding="utf-8")) for f in sorted(os.listdir(EXTERNAL)) if f.endswith(".json")] \
+        if os.path.isdir(EXTERNAL) else []
+    open(os.path.join(ROOT, "docs/benchmark.md"), "w", encoding="utf-8").write(text + (render_v2(v2) if v2 else "") + (render_external(ext) if ext else ""))
+
+
+# ---------- suite v2 (docs/contracts/sbench-v2.md): each version with its shipped settings ----------
+SUITE2 = os.path.join(ROOT, "eval/bench/suite-v2")
+MODELS = os.path.join(CACHE, "models")  # <sha256>/<file name>, put there by hand from the Release, never downloaded by the tool
+TUNE2 = os.path.expanduser("~/.cache/shanjie/s7c2c-public/tune")
+E2 = os.path.expanduser("~/.cache/shanjie/e2-public")
+# name -> (file, sha256, private); every set is measured in both profiles. dev302/typing76/probe are suite v1's files (same hashes).
+SETS2 = {
+    "dev302": SETS["dev302"][:2] + (False,),
+    "typing76": SETS["typing76"][:2] + (False,),
+    "probe": SETS["probe"][:2] + (False,),
+    # first 80 three-field rows of eval/dev/user-reported.txt as of 76beb24; later rows are not part of this suite
+    "user-reported": (os.path.join(SUITE2, "user-reported.txt"), "9fd08e50f13eccea94a76faf5260e7edcf49826bd3dcf7ba4e2cf6de17bcce9a", False),
+    "fw": (os.path.join(SUITE2, "fw.txt"), "6b853a329aee569ad51c731d6f188541b9670e9617838725f45a26d57845d18d", False),  # eval/rerank/s7e-function-words.txt
+    "cvtune": (os.path.join(TUNE2, "cvtune.txt"), "31de456d66ece98eb5d00154a31c3f7e9c9b38240690f7f76203485ca82acc51", False),
+    "wikitune": (os.path.join(TUNE2, "wikitune.txt"), "8dcfe40c74cce73e0a070b49e166636580ef955da8555ea9ffbd65af20c998f2", False),
+    "lytune": (os.path.join(E2, "lytune.txt"), "0e0fdbed0728a4c3b359995beb03040c6834eb091e4028c9dc1ec104b6eeca96", False),
+    "wikitypo": (os.path.join(E2, "wikitypo.txt"), "50f4ceb89b6a3d021c0fe273e8512c7b0af7d20f6ffd5c2f145a7c3a251a2d47", False),
+    "discordtune": ("discord-tune-rows.txt", None, True),
+}
+PROFILES2 = ["chat", "formal"]
+# Shipped settings (contract 2.1). `flags` and `tag` are two independent statements of the same thing on purpose: the CLI summary
+# line must carry `lm-<profile>` + `tag` (`{tl8}` = first 8 hex of the .sjtl), so a dropped flag or an auto-loaded kn.sjkn fails the cell.
+# The App also learns locally, re-ranks asynchronously after every key, takes the context from the text field: the CLI does none of that.
+VERSIONS2 = {
+    "v0.4.0": {"release": "v0.4.0", "flags": ["--context", "--packs", "acg"], "tinylm": False, "tag": "+ctx+acg"},
+    "v0.4.1": {"release": "v0.4.1", "flags": ["--context", "--packs", "acg"], "tinylm": True, "tag": "+ctx+tl:{tl8}+acg"},
+    "v0.4.2": {"release": "v0.4.2", "flags": ["--context", "--packs", "acg"], "tinylm": True, "tag": "+ctx+tl:{tl8}+acg"},
+    "v0.4.3": {"release": "v0.4.3", "flags": ["--context", "--packs", "acg"], "tinylm": True, "tag": "+ctx+tl:{tl8}+acg"},
+}
+# Anchor (contract 3.1): S7h's measurement in the research log of 2026-10-13, `--override-packs off`, chat, the CLI's own variants table.
+ANCHOR = {
+    "v0.4.0": {"cvtune": 3364, "wikitune": 2067, "dev302": 241, "typing76": 66, "fw": 154, "lytune": 3986, "wikitypo": 136},
+    "v0.4.1": {"cvtune": 3443, "wikitune": 2170, "dev302": 259, "typing76": 69, "fw": 157, "lytune": 4044, "wikitypo": 134},
+}
+SUMMARY = re.compile(r"^## (\S+)  (\S+)  \{'n': (\d+), 'top1': (\d+), 'oracle@64': (\d+), 'top1_sha256': '([0-9a-f]{64})'\}$", re.M)
+RERANK = re.compile(r"tinylm: rerank n=(\d+) p50=([\d.]+) ms p95=([\d.]+) ms")
+
+
+def version_labels(refs, as_):
+    """Table key of every ref; `--as` names the last ref (a commit without a tag yet)."""
+    labels = list(refs)
+    if as_:
+        labels[-1] = as_
+    for l in labels:
+        if l not in VERSIONS2:
+            die(f"{l!r} is not in the suite-v2 settings table ({', '.join(VERSIONS2)}): add its release, shipped flags and setting tag to VERSIONS2 "
+                f"in tools/bench.py first (docs/contracts/sbench-v2.md 2.1); an untagged commit is named with --as VERSION")
+    if len(set(labels)) != len(labels):
+        die("the same version twice")
+    return labels
+
+
+def resolve_models(ver, spec):
+    """-> {file name: (path, sha256)}: hashes come from the exported version's data/*.sha256, files from MODELS/<sha256>/<name>."""
+    out = {}
+    for n in ["bigram.sjlm", "classes.sjc"] + (["tinylm.sjtl"] if spec["tinylm"] else []):
+        f = os.path.join(ver.dir, "data", n + ".sha256")
+        if not os.path.isfile(f):
+            die(f"{ver.label}: the export has no data/{n}.sha256")
+        want = open(f).read().split()[0]
+        p = os.path.join(MODELS, want, n)
+        if not os.path.isfile(p):
+            die(f"{ver.label}: model file missing: {p}; download {n} from Release {spec['release']}, check its SHA-256 is {want}, and put it there")
+        if sha_file(p) != want:
+            die(f"{ver.label}: {p} does not match data/{n}.sha256 ({want})")
+        out[n] = (p, want)
+    return out
+
+
+def setup_models(ver, spec, td):
+    """A model folder with only bigram.sjlm and classes.sjc (the CLI loads classes.sjc beside --lm and turns KN on when it sees kn.sjkn)."""
+    ver.spec, ver.models = spec, resolve_models(ver, spec)
+    d = os.path.join(td, ver.label)
+    os.makedirs(d)
+    for n in ("bigram.sjlm", "classes.sjc"):
+        os.symlink(ver.models[n][0], os.path.join(d, n))
+    ver.lm = os.path.join(d, "bigram.sjlm")
+    ver.tl = ver.models["tinylm.sjtl"][0] if spec["tinylm"] else None
+    ver.tl8 = ver.models["tinylm.sjtl"][1][:8] if spec["tinylm"] else ""
+
+
+def ship_flags(ver, anchor):
+    f = list(ver.spec["flags"])
+    if anchor:  # --override-packs off
+        i = f.index("--packs")
+        del f[i:i + 2]
+    return f
+
+
+def expected_tag(ver, prof, anchor):
+    t = ver.spec["tag"].format(tl8=ver.tl8)
+    return f"lm-{prof}" + (t.replace("+acg", "") if anchor else t)
+
+
+def cli_env(anchor):
+    e = dict(os.environ)
+    e.pop("SHANJIE_VARIANTS", None)
+    if not anchor:  # the anchor uses the CLI's own table, as S7h did
+        e["SHANJIE_VARIANTS"] = VARIANTS
+    return e
+
+
+def cell_cmd(ver, prof, rows, dump, rowstats, anchor):
+    return ([ver.cli, "--lm", ver.lm, "--profile", prof, "--rows", rows] + (["--dump", dump] if dump else []) + ["--rowstats", rowstats]
+            + ship_flags(ver, anchor) + (["--tinylm", ver.tl] if ver.tl else []))
+
+
+def parse_summary(out):
+    m = SUMMARY.findall(out)
+    if len(m) != 1:
+        raise RuntimeError(f"expected one CLI summary line, got {len(m)}: {out.strip()[-200:]}")
+    name, tag, n, top1, o64, sha = m[0]
+    return {"name": name, "tag": tag, "n": int(n), "top1": int(top1), "oracle64": int(o64), "top1_sha256": sha}
+
+
+def parse_rowstats(path, n):
+    """`row<TAB>ok<TAB>errors<TAB>gold_len` per row from 1 (numbers only) -> per-row ok vector."""
+    ok = []
+    for i, l in enumerate(open(path, encoding="utf-8").read().split("\n")[:-1], 1):
+        f = l.split("\t")
+        if len(f) != 4 or not all(x.isdigit() for x in f) or int(f[0]) != i or f[1] not in ("0", "1"):
+            raise RuntimeError(f"rowstats line {i} is malformed")
+        ok.append(f[1] == "1")
+    if len(ok) != n:
+        raise RuntimeError(f"rowstats has {len(ok)} rows, the CLI summary says {n}")
+    return ok
+
+
+def cell_paths(ctx, ver, name, prof, anchor):
+    base = os.path.join(ctx.private_root, "bench/rows-v2") if SETS2[name][2] else os.path.join(CACHE, "rows-v2")
+    d = os.path.join(base, ver.sha, "anchor" if anchor else "ship")
+    os.makedirs(d, exist_ok=True)
+    return os.path.join(d, f"{name}.{prof}.dump.tsv"), os.path.join(d, f"{name}.{prof}.rowstats.tsv")
+
+
+def run_cell2(ctx, ver, name, prof, anchor):
+    """One CLI run with the version's shipped flags; the result is the CLI's chosen sentence (rowstats), not the dump's first row."""
+    rows = ctx.files[name]
+    dump, rs = cell_paths(ctx, ver, name, prof, anchor)
+    check = not ver.tl and not anchor  # no rerank: the dump's first row is the chosen one, so the tool's own lenient scoring must agree row for row
+    m = parse_summary(sh(cell_cmd(ver, prof, rows, dump if check else None, rs, anchor), cwd=ver.dir, env=cli_env(anchor)))
+    want = expected_tag(ver, prof, anchor)
+    if m["tag"] != want:
+        raise RuntimeError(f"{name}/{prof}: CLI setting tag {m['tag']} != {want} from the settings table")
+    if m["n"] != len(truths(rows)):
+        raise RuntimeError(f"{name}/{prof}: CLI scored {m['n']} rows, the set has {len(truths(rows))}")
+    ok = parse_rowstats(rs, m["n"])
+    if sum(ok) != m["top1"]:
+        raise RuntimeError(f"{name}/{prof}: rowstats top1 {sum(ok)} != CLI summary top1 {m['top1']}")
+    if check:
+        res, ok2 = score(rows, dump)
+        os.remove(dump)  # read once here, never reused
+        if ok2 != ok or res["top1_sha256"] != m["top1_sha256"]:
+            raise RuntimeError(f"{name}/{prof}: top1 recomputed from the dump disagrees with rowstats ({res['top1']} vs {m['top1']})")
+    return {"n": m["n"], "top1": m["top1"], "oracle64": m["oracle64"], "top1_sha256": m["top1_sha256"], "tag": m["tag"]}, ok
+
+
+def measure_speed2(ctx, vers):
+    """Replay speed with the replay's own settings (version's bigram + classes, no packs, no context, no rerank), 3 interleaved rounds.
+    The consistency check runs one more CLI cell with exactly those settings (not the result cells) and compares row for row."""
+    rows = ctx.files["dev302"]
+    want, errs, runs, rr = {}, {}, {v.sha: [] for v in vers}, {v.sha: [] for v in vers}
+    with tempfile.TemporaryDirectory() as td:
+        for v in vers:
+            try:
+                dump = os.path.join(td, v.label + ".dump")
+                tag = parse_summary(sh([v.cli, "--lm", v.lm, "--profile", "chat", "--rows", rows, "--dump", dump], cwd=v.dir, env=cli_env(False)))["tag"]
+                if tag != "lm-chat":
+                    raise RuntimeError("the replay-setting CLI cell carries setting tag " + tag)
+                want[v.sha] = [c[0] for c in read_dump(dump)]
+            except Exception as e:
+                errs[v.sha] = f"replay-setting CLI cell failed: {str(e)[-300:]}"
+        for rnd in range(3):
+            for v in vers:
+                if v.sha in errs:
+                    continue
+                with tempfile.TemporaryFile() as out:
+                    p = subprocess.Popen([v.replay, os.path.join(v.dir, "data/lexicon"), v.lm, rows, td + "/c"], stdout=out, stderr=subprocess.PIPE, text=True)
+                    _, st, ru = os.wait4(p.pid, 0)
+                    p.returncode = os.waitstatus_to_exitcode(st)
+                    if p.returncode:
+                        errs[v.sha] = f"replay failed ({p.returncode}): {p.stderr.read()[-300:]}"
+                        continue
+                    out.seek(0)
+                    m = json.loads(out.read())
+                got = open(td + "/c", encoding="utf-8").read().split("\n")[:-1]
+                w = want[v.sha]
+                bad = [i + 1 for i in range(max(len(got), len(w))) if i >= len(got) or i >= len(w) or got[i] != w[i]]
+                if bad:
+                    errs[v.sha] = f"replay differs from the replay-setting CLI cell at rows {bad[:20]} ({len(bad)} of {len(w)})"
+                    continue
+                m["rss_mb"] = ru.ru_maxrss / 2 ** 20  # macOS reports bytes
+                runs[v.sha].append(m)
+        # rerank latency the CLI prints on stderr: after every replay round, so no replay starts on a CPU a rerank run just heated,
+        # and alone, so the parallel accuracy cells do not skew it
+        for rnd in range(3):
+            for v in vers:
+                if not v.tl or v.sha in errs:
+                    continue
+                r = subprocess.run(cell_cmd(v, "chat", rows, None, td + "/rr.rs", False), capture_output=True, text=True, cwd=v.dir, env=cli_env(False))
+                g = RERANK.search(r.stderr)
+                if r.returncode or not g:
+                    errs[v.sha] = f"rerank timing run failed ({r.returncode}): {r.stderr[-300:]}"
+                    continue
+                rr[v.sha].append((float(g.group(2)), float(g.group(3))))
+    out = {}
+    for v in vers:
+        if v.sha in errs:
+            out[v.sha] = {"error": errs[v.sha]}
+            continue
+        r = runs[v.sha]
+        n = len(want[v.sha])
+        out[v.sha] = {"rows_match": f"{n}/{n}", "keys": r[0]["keys"], "rounds": len(r),
+                      "p95_us": statistics.median(x["p95_us"] for x in r), "max_us": max(x["max_us"] for x in r),
+                      "load_ms": statistics.median(x["load_ms"] for x in r), "rss_mb": max(x["rss_mb"] for x in r)}
+        if rr[v.sha]:
+            out[v.sha]["rerank_p50_ms"] = statistics.median(a for a, _ in rr[v.sha])
+            out[v.sha]["rerank_p95_ms"] = statistics.median(b for _, b in rr[v.sha])
+    return out
+
+
+def preflight2(args):
+    ctx = Ctx()
+    if sha_file(VARIANTS) != VARIANTS_SHA:
+        die("suite variants.tsv does not match its pinned SHA-256 (the suite changed; bump the suite version)")
+    ctx.private_root = os.path.abspath(os.path.expanduser(args.private_root))
+    ctx.files, ctx.fp = {}, {}
+    for name, (f, want, private) in SETS2.items():
+        if private:
+            f = os.path.join(ctx.private_root, f)
+            if not os.path.isfile(f):
+                print(f"bench: {name}: no private data under --private-root, column skipped", file=sys.stderr)
+                continue
+        elif not os.path.isfile(f):
+            die(f"{name}: missing set file {f}")
+        got = sha_file(f)
+        if want and got != want:
+            die(f"{name}: SHA-256 of {f} does not match the pinned value")
+        ctx.files[name], ctx.fp[name] = f, got
+    return ctx
+
+
+def cmd_run2(args):
+    if args.lm:
+        die("--lm is not used by suite v2 (models come from data/*.sha256 and ~/.cache/shanjie/bench/models)")
+    if args.base:
+        die("--base belongs to suite v1; suite v2 compares each version with the ref before it")
+    anchor = args.override_packs == "off"
+    labels = version_labels(args.refs, args.as_)
+    if anchor and any(l not in ANCHOR for l in labels):
+        die(f"--override-packs off checks S7h's anchor, which exists only for {', '.join(ANCHOR)}")
+    args.label = args.label or "+".join(labels)
+    out = os.path.join(RESULTS, "v2-" + args.label + ".json")
+    if not anchor and os.path.isfile(out) and any("holdout" in r for r in json.load(open(out, encoding="utf-8")).get("versions", [])):
+        die(f"{out} holds holdout numbers, which are measured once and cannot be re-run; use another --label or move the file first")
+    ctx = preflight2(args)
+    cells = [(n, p) for n in SETS2 if n in ctx.files for p in (["chat"] if anchor else PROFILES2) if not anchor or n in ANCHOR[labels[0]]]
+    load0 = os.getloadavg()[0]
+    vers = []
+    for r, l in zip(args.refs, labels):
+        v = Ver(r)
+        v.label = l
+        vers.append(v)
+    result = {"label": args.label, "suite": "v2", "date": datetime.date.today().isoformat(), "variants_sha256": VARIANTS_SHA,
+              "sets": {n: {"sha256": ctx.fp.get(n), "private": SETS2[n][2]} if n in ctx.files else {"missing": True} for n in SETS2}, "versions": []}
+    oks, failed = {}, False
+    td = tempfile.TemporaryDirectory()
+    for v in vers:
+        try:
+            v.build()
+        except Exception as e:
+            die(f"{v.ref}: build failed: {e}")
+        setup_models(v, VERSIONS2[v.label], td.name)
+        rec = {"ref": v.ref, "version": v.label, "sha": v.sha, "lexicon_sha256": v.lexicon_sha,
+               "models": {n: h for n, (_, h) in v.models.items()}, "flags": ship_flags(v, anchor) + (["--tinylm", "<file>"] if v.tl else []),
+               "tag": v.spec["tag"].format(tl8=v.tl8), "fingerprints": dict(ctx.fp), "accuracy": {}}
+        result["versions"].append(rec)
+
+        def one(n, p):
+            try:
+                return run_cell2(ctx, v, n, p, anchor)
+            except Exception as e:
+                return {"error": str(e)[-400:]}, None
+        with ThreadPoolExecutor(max_workers=3) as ex:
+            futs = {c: ex.submit(one, *c) for c in cells}
+        for (n, p), f in futs.items():
+            res, ok = f.result()
+            rec["accuracy"][f"{n}/{p}"] = res
+            if ok is None:
+                failed = True
+                print(f"bench: {v.label} {n}/{p}: {res['error']}", file=sys.stderr)
+            else:
+                oks[(v.sha, n, p)] = ok
+        for n in SETS2:
+            if n not in ctx.files:
+                rec["accuracy"][f"{n}/chat"] = {"missing": True}
+    if anchor:  # contract 3.1: stop when the anchor does not match; nothing is written
+        for v, rec in zip(vers, result["versions"]):
+            for n, want in ANCHOR[v.label].items():
+                got = rec["accuracy"].get(f"{n}/chat", {}).get("top1")
+                print(f"anchor {v.label} {n}/chat: {got} (want {want}) {'ok' if got == want else 'MISMATCH'}")
+                failed |= got != want
+        sys.exit(1 if failed else 0)
+    for i, v in enumerate(vers):  # compare each version with the one before it, same run, same sets
+        if i == 0:
+            continue
+        rec, pv, prec = result["versions"][i], vers[i - 1], result["versions"][i - 1]
+        rec["vs"] = pv.ref
+        rec["vs_prev"] = {}
+        for (n, p) in cells:
+            cell = f"{n}/{p}"
+            if (v.sha, n, p) not in oks:  # this version's cell failed; the error is in its accuracy entry
+                continue
+            if (pv.sha, n, p) not in oks:
+                rec["vs_prev"][cell] = {"error": "previous version's cell failed: " + prec["accuracy"][cell].get("error", "")[-200:]}
+                continue
+            new, old = oks[(v.sha, n, p)], oks[(pv.sha, n, p)]  # same set file, both checked against its row count in run_cell2
+            fixed = sum(a and not b for a, b in zip(new, old))
+            broken = sum(b and not a for a, b in zip(new, old))
+            rec["vs_prev"][cell] = {"fixed": fixed, "broken": broken, "p": mcnemar(fixed, broken)}
+    speed = measure_speed2(ctx, vers) if "dev302" in ctx.files else {}
+    for rec, v in zip(result["versions"], vers):
+        rec["speed"] = speed.get(v.sha, {"error": "no dev302"})
+        if "error" in rec["speed"]:
+            failed = True
+            print(f"bench: {v.label}: {rec['speed']['error']}", file=sys.stderr)
+    td.cleanup()
+    result["env"] = {"machine": sh(["sysctl", "-n", "hw.model"]).strip(), "macos": platform.mac_ver()[0],
+                     "cargo": sh(["cargo", "--version"]).strip(), "load_avg_start": load0, "load_avg_end": os.getloadavg()[0]}
+    os.makedirs(RESULTS, exist_ok=True)
+    with open(out, "w", encoding="utf-8") as f:
+        json.dump(result, f, ensure_ascii=False, indent=1)
+        f.write("\n")
+    sys.exit(1 if failed else 0)
+
+
+def render_v2(results):
+    """The suite-v2 section, appended after the suite-v1 text (starts with a blank line, ends with a newline)."""
+    cells = [f"{n}/{p}" for n in SETS2 for p in PROFILES2]
+    L = ["", "## 套件 v2（每一版用自己出貨的設定）", "",
+         "契約：`docs/contracts/sbench-v2.md`。和套件 v1 不同：每一版用出貨時的模型與 CLI 旗標，不是同一個 model-v1；逐列對錯取自 CLI 選出的那一句（`--rowstats`），語意校正開著時不是 dump 的第一名；聊天與書面兩種設定都量。", "",
+         "### 出貨設定", "", "| 版本 | 被量的 commit | 模型（SHA-256 前 8 碼） | CLI 旗標 |", "|---|---|---|---|"]
+    for res in results:
+        for rec in res["versions"]:
+            L.append(f"| {rec['version']} | `{rec['sha'][:7]}` | " + "、".join(f"{n} `{h[:8]}`" for n, h in rec["models"].items()) + " | `" + " ".join(rec["flags"]) + "` |")
+    L += ["", "依據：App 預設開動漫詞包、組字用前文；語意校正從 v0.4.1 起預設開；降權表預設開。**CLI 沒有模擬的 App 行為**：本機學習（CLI 不學）；殼在每個鍵之後非同步重排、CLI 每列只排一次；殼的前文來自輸入框、CLI 用列檔的前文欄；聊天或書面由 App 決定，這裡兩種都量。所以這張表不是「和 App 完全相同」。推論（沒量過）：App 裡在重排結果回來之前就送出的列保留 n-gram 的第一名，所以開著語意校正的版本在 App 裡的改善可能比表上小；本機學習對各版的影響也沒量。", ""]
+    L += ["### 準確率（top1，寬鬆對照）", "", "每格：top1%、答對／列數、和上一版比的「修好 / 弄壞，McNemar 雙尾精確 p」。錯字回報、fw、cvtune、wikitune、lytune、wikitypo、dev302 與 discordtune 在調參或選值時被看過，不是未見資料；dev302 是挑戰集，只當參考；唯一沒被看過的是保留集。"]
+    for res in results:
+        vs = res["versions"]
+        L += ["", f"#### {res['label']}（{res['date']}）", "", "| 集合／設定 | 列數 | " + " | ".join(r["version"] for r in vs) + " |", "|---|---|" + "---|" * len(vs)]
+        for c in cells:
+            n = next((r["accuracy"][c]["n"] for r in vs if "n" in r.get("accuracy", {}).get(c, {})), "—")
+            L.append(f"| {c} | {n} | " + " | ".join(cell_text(r, c) if "accuracy" in r else "失敗" for r in vs) + " |")
+    L += ["", "### 保留集", "",
+          "照 `CLAUDE.md` 一片只跑一次：由 fresh verifier 以 `evalstats compare --net` 比上一版與新版，main 把 n 與兩版的 top1（可再加 `fixed`、`broken`、`p`）和實際量的 commit 填進 results JSON 的 `holdout`（`{\"commit\": …, \"chat\": {n, top1, fixed, broken, p}, \"formal\": ...}`）。下表版本下面的 commit 是保留集實際量的那一個；它和上面「出貨設定」表被量的 commit 在 `docs/verification.md` 列的路徑上必須沒有差異，或差異不改輸出（出貨設定的 rowstats 逐位元組相同，記在研究紀錄；契約 §2.3、§5）。", "",
+          "| 版本 | chat | formal |", "|---|---|---|"]
+    for res in results:
+        for rec in res["versions"]:
+            h = rec.get("holdout", {})
+            f = lambda p: "—（尚未量測）" if p not in h else f"{100 * h[p]['top1'] / h[p]['n']:.2f}%<br>{h[p]['top1']}/{h[p]['n']}" + (f"<br>+{h[p]['fixed']} / −{h[p]['broken']}，p={h[p]['p']:.3g}" if "fixed" in h[p] else "")
+            L.append(f"| {rec['version']}<br>`{h.get('commit', rec['sha'])[:7]}` | {f('chat')} | {f('formal')} |")
+    L += ["", "### 速度與記憶體（同場）", "",
+          "重播程式用該版的 `bigram.sjlm` 與 `classes.sjc`，**不載詞包、沒有前文、沒有語意校正**（重播是同步打鍵，語意校正是非同步、不在按鍵路徑上）；標準排列、chat、dev302，每版 3 輪輪流，p95 取中位數。「重播＝CLI」是和另跑的一格同設定 CLI（`--profile chat`，不帶 `--context`、`--packs`、`--tinylm`）逐列比。重排是 CLI 在 stderr 印的語意校正每列耗時（p50／p95：三輪重播都跑完之後再跑三次、取中位數，不和其他格同時跑）。", "",
+          "| 版本 | 日期 | 機型／macOS／load avg | p95 | max | 載入 | RSS | 按鍵數 | 重播＝CLI | 重排 p50／p95 |", "|---|---|---|---|---|---|---|---|---|---|"]
+    for res in results:
+        e = res["env"]
+        for rec in res["versions"]:
+            s = rec.get("speed", {"error": "沒有速度結果"})
+            head = f"| {rec['version']} | {res['date']} | {e['machine']} / {e['macos']} / {e['load_avg_start']:.1f}→{e['load_avg_end']:.1f} |"
+            if "error" in s:
+                L.append(head + " 失敗：" + s["error"].replace("|", "/").replace("\n", " ")[:300] + " | | | | | | |")
+            else:
+                rr = f"{s['rerank_p50_ms']:.2f}／{s['rerank_p95_ms']:.2f} ms" if "rerank_p50_ms" in s else "—（沒有語意校正）"
+                L.append(head + f" {s['p95_us'] / 1000:.3f} ms | {s['max_us'] / 1000:.2f} ms | {s['load_ms']:.0f} ms | {s['rss_mb']:.0f} MB | {s['keys']} | {s['rows_match']} | {rr} |")
+    L += ["", "### 量測規則（套件 v2）", "",
+          "- 集合凍結：dev302、typing76、probe 與套件 v1 同檔；user-reported 是 `eval/dev/user-reported.txt` 76beb24 時的前 80 列、fw 是 `eval/rerank/s7e-function-words.txt`（兩者在 `eval/bench/suite-v2/`）；cvtune、wikitune、lytune、wikitypo 不進 repo；SHA-256 都寫死在工具裡。計分用套件 v1 的 `variants.tsv`。",
+          "- 每一版的模型雜湊取自該版 `data/*.sha256`，檔案由 main 放在 `~/.cache/shanjie/bench/models/<sha256>/`；工具為每版組只含 `bigram.sjlm` 與 `classes.sjc` 的資料夾，不讓 CLI 自動載入 `kn.sjkn`。",
+          "- 每一格的 CLI 摘要行設定標記必須等於工具裡設定表推出的字串，不符就該格失敗。沒有 `--tinylm` 的格另從 dump 重算 top1，要和 rowstats 逐列相同。",
+          "- 重跑：`tools/bench.py run --suite v2 <上一版 tag> <commit> --as <新版> --private-root <目錄>`，再 `tools/bench.py table`。新版要先在工具的 `VERSIONS2` 加一列（Release 名、出貨旗標、摘要行設定標記）。`--override-packs off` 是對 S7h 錨點的檢查（只有 v0.4.0、v0.4.1），不寫結果。", ""]
+    return "\n".join(L)
 
 
 def main():
@@ -658,6 +1070,9 @@ def main():
     r.add_argument("--base", help="compare the first ref with this one (not measured for speed)")
     r.add_argument("--lm")
     r.add_argument("--private-root", default=DEFAULT_PRIVATE)
+    r.add_argument("--suite", choices=["v1", "v2"], default="v1")
+    r.add_argument("--as", dest="as_", help="suite v2: settings-table version for the last ref (a commit without a tag yet)")
+    r.add_argument("--override-packs", choices=["off"], help="suite v2: drop --packs acg and check S7h's anchor (nothing is written)")
     sub.add_parser("table")
     rf = sub.add_parser("reference")
     rf.add_argument("--private-root", default=DEFAULT_PRIVATE)
@@ -665,7 +1080,11 @@ def main():
     cs.add_argument("--json", default=STATIC)
     cs.add_argument("--md", default=TYPING_MD)
     a = ap.parse_args()
-    if a.cmd == "run":
+    if a.cmd == "run" and a.suite == "v2":
+        cmd_run2(a)
+    elif a.cmd == "run":
+        if a.as_ or a.override_packs:
+            die("--as and --override-packs belong to --suite v2")
         a.label = a.label or "+".join(x.replace("/", "_") for x in a.refs)
         cmd_run(a)
     elif a.cmd == "reference":

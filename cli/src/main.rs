@@ -2,12 +2,15 @@ use core::engine::{capping_overlay_detailed, load_lexicon_extra_detailed, load_l
 use core::eval::*;
 use core::learn::{context_key, SENTINEL};
 use core::lm::{decode_from, history, CappedLexicon, Demote, Lm, Profile};
+use core::tinylm::{TinyLm, TinyLmError, TOPK};
 use core::predict::{parse_units, predict, units_of, units_str, Index, Mode};
 use core::{decode_beam, Error, Lexicon, NoLearning, Syls, BEAM_S1};
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
+
+mod english;
 
 fn root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().to_path_buf()
@@ -102,11 +105,12 @@ fn format_rowstats(rows: &[(bool, String, String)]) -> String {
 }
 
 /// Option combinations of `lm`, checked before any file is read. The holdout never prints its sentences, so
-/// `--dump` is refused there; `--rowstats` holds numbers only and is allowed.
+/// `--dump` and `--dump-words` (`dump` is true for either) are refused there; `--rowstats` holds numbers only and is allowed.
 fn check_lm_opts(set: Option<&str>, dump: bool, packs: u32, packs_dir: bool) -> Result<(), String> {
     if set == Some("holdout") && dump {
-        return Err("--dump is not allowed with --set holdout".into());
+        return Err("--dump and --dump-words are not allowed with --set holdout".into());
     }
+    // (--tinylm-scores with the holdout is refused in run_lm: its per-candidate record is what alpha and tau are tuned on.)
     if packs == 0 && packs_dir {
         return Err("--packs-dir needs --packs".into());
     }
@@ -151,12 +155,57 @@ fn load_with_packs(dir: &Path, packs: u32, pdir: &Path, extra: Option<&Path>) ->
     Ok((lex, overlay))
 }
 
+/// S7c-1 `--tinylm`: alpha and tau hold only for the n-gram scores they were tuned on (S7a: this model, its classes and the demotion
+/// table on, Kneser-Ney off). A different model hash, the KN side file, `--no-classes` or `--no-demote` is refused before anything
+/// is printed. The file is read, checked and paired by the engine's loader (`TinyLm::load_paired`, S7c-2a). Returns the model, the
+/// load time (read + parse + the pairing checks; the hash below is the CLI's, outside it) and the sha8 of the bytes it parsed.
+fn load_tinylm(path: &str, lm: &Lm, classes: bool, demote: bool) -> Result<(TinyLm, Duration, String), String> {
+    if !classes || !demote {
+        return Err("--tinylm: this .sjtl was tuned with the class term and the demotion table on (drop --no-classes / --no-demote)".into());
+    }
+    let t0 = Instant::now();
+    let (tl, bytes) = TinyLm::load_paired(Path::new(path), lm).map_err(|e| match e {
+        TinyLmError::KneserNey => format!("--tinylm: {e} (use --no-kn)"),
+        TinyLmError::OtherNgram => format!("--tinylm: {e}"),
+        _ => e.to_string(),
+    })?;
+    let load = t0.elapsed();
+    Ok((tl, load, sha256_hex(&bytes)[..8].to_string()))
+}
+
+/// One `--tinylm-scores` line, the record of experiments/s7a-tinylm/score.py without the key columns and the two other LLs:
+/// `i, n, ng, ok, ed, glen`, then `c` (the 0-based index the rerank chose, 0 when it did not run; tools/triage.py) and, for n >= 2, `ll`.
+/// Numbers only.
+fn scores_line(i: usize, ng: &[f64], ok: &[bool], ed: &[u32], glen: usize, chosen: usize, ll: Option<&[f64]>) -> Result<String, String> {
+    // JSON has no inf / NaN (Python's json.loads rejects inf, and a NaN would slip through parity.py's tolerance test).
+    if !ng.iter().chain(ll.unwrap_or(&[])).all(|x| x.is_finite()) {
+        return Err(format!("--tinylm-scores: row {i} has a non-finite score"));
+    }
+    let list = |v: Vec<String>| format!("[{}]", v.join(", "));
+    let mut s = format!(
+        "{{\"i\": {i}, \"n\": {}, \"ng\": {}, \"ok\": {}, \"ed\": {}, \"glen\": {glen}, \"c\": {chosen}",
+        ng.len(),
+        list(ng.iter().map(|x| format!("{x:?}")).collect()),
+        list(ok.iter().map(|&o| (o as u8).to_string()).collect()),
+        list(ed.iter().map(u32::to_string).collect())
+    );
+    if let Some(ll) = ll {
+        s += &format!(", \"ll\": {}", list(ll.iter().map(|x| format!("{x:?}")).collect()));
+    }
+    Ok(s + "}\n")
+}
+
 /// S2c LM mode (docs/PLAN.md S2c): the one summary line of lm_eval.py, plus the optional `--dump` and `--rowstats`.
+/// S7c-1: `--tinylm FILE.sjtl` reranks the first 8 candidates of every row with the small character model (docs/contracts/s7c-core-tinylm.md);
+/// `--tinylm-scores OUT` writes score.py's numbers-only records for them. `--dump-words OUT` (tools/triage.py) writes, per row, the
+/// word split of every `--dump` line (`row\trank\twords`, same ranks and order) after rank 0, the gold sentence split by the core's
+/// `segment_words` (`-` when it cannot be split).
 fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     let (mut lm_path, mut profile, mut name, mut dev, mut rows_file) = (None, None, None, None, None);
     let (mut limit, mut set, mut dump, mut ctx_mode, mut demote) = (None::<usize>, None, None, false, true);
-    let mut classes = true;
-    let mut rowstats = None::<String>;
+    let mut dump_words = None::<String>;
+    let (mut classes, mut kn) = (true, true);
+    let (mut rowstats, mut tinylm, mut tinylm_scores) = (None::<String>, None::<String>, None::<String>);
     // acg-pack contract A.2: `--packs acg` adds data/packs/acg-add.tsv (or `--packs-dir DIR`'s) to the lexicon and the cap; off by default.
     let (mut packs, mut packs_dir) = (0u32, None::<String>);
     let mut extra_overlay = None::<String>;
@@ -173,17 +222,27 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
             "--limit" => limit = Some(num(val()?)?),
             "--set" => set = Some(val()?),
             "--dump" => dump = Some(val()?),
+            "--dump-words" => dump_words = Some(val()?),
             "--rowstats" => rowstats = Some(val()?),
+            "--tinylm" => tinylm = Some(val()?),
+            "--tinylm-scores" => tinylm_scores = Some(val()?),
             "--context" => ctx_mode = true,
             "--no-demote" => demote = false,
             "--no-classes" => classes = false,
+            "--no-kn" => kn = false,
             "--packs" => packs |= pack_flag(&val()?)?,
             "--packs-dir" => packs_dir = Some(val()?),
             "--extra-overlay" => extra_overlay = Some(val()?),
             _ => return Err("unknown argument".into()),
         }
     }
-    check_lm_opts(set.as_deref(), dump.is_some(), packs, packs_dir.is_some())?;
+    check_lm_opts(set.as_deref(), dump.is_some() || dump_words.is_some(), packs, packs_dir.is_some())?;
+    if tinylm_scores.is_some() && tinylm.is_none() {
+        return Err("--tinylm-scores needs --tinylm".into());
+    }
+    if tinylm_scores.is_some() && set.as_deref() == Some("holdout") {
+        return Err("--tinylm-scores is not allowed with --set holdout".into());
+    }
     let pdir = packs_dir_checked(packs, packs_dir)?;
     let extra_overlay = extra_overlay_checked(extra_overlay)?;
     // Summary-line marker `+xo:<sha8 of the file>`, only with the option, so a names-layer run never prints the baseline's label.
@@ -199,8 +258,11 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     };
     let lm_path = lm_path.ok_or("--lm is required")?;
     // S2k: the class term is part of the model; classes.sjc beside it is required unless --no-classes.
-    let lm = if classes { Lm::load(std::path::Path::new(&lm_path)) } else { Lm::load_without_classes(std::path::Path::new(&lm_path)) }
-        .map_err(|e| e.to_string())?;
+    // A kn.sjkn beside the model (docs/contracts/kn-core.md) turns the Kneser-Ney term on unless --no-kn.
+    let lm = Lm::load_with(std::path::Path::new(&lm_path), classes, kn).map_err(|e| e.to_string())?;
+    let rss_before = tinylm.is_some().then(rss_kb).flatten();
+    let tl = tinylm.as_deref().map(|p| load_tinylm(p, &lm, classes, demote)).transpose()?;
+    let rss_after = tinylm.is_some().then(rss_kb).flatten();
     let dir = root().join("data/lexicon");
     let (lex, overlay) = load_with_packs(&dir, packs, &pdir, extra_overlay.as_deref())?;
     let demote_rows = fs::read_to_string(dir.join("demote.tsv")).map_err(|e| format!("cannot read demote.tsv ({:?})", e.kind()))?;
@@ -248,12 +310,20 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
         Some(f) => Some(std::io::BufWriter::new(fs::File::create(f).map_err(|e| format!("cannot create dump ({:?})", e.kind()))?)),
         None => None,
     };
+    let mut dump_words = match dump_words {
+        Some(f) => Some(std::io::BufWriter::new(fs::File::create(f).map_err(|e| format!("cannot create word dump ({:?})", e.kind()))?)),
+        None => None,
+    };
     // Opened before decoding, like the dump: an unwritable path fails now, not after a whole (holdout) run.
     let rowstats = match rowstats {
         Some(f) => Some(fs::File::create(f).map_err(|e| format!("cannot create rowstats ({:?})", e.kind()))?),
         None => None,
     };
-    let (mut top1, mut o64, mut firsts, mut rs) = (0usize, 0usize, Vec::new(), Vec::new());
+    let mut scores = match tinylm_scores {
+        Some(f) => Some(std::io::BufWriter::new(fs::File::create(f).map_err(|e| format!("cannot create tinylm scores ({:?})", e.kind()))?)),
+        None => None,
+    };
+    let (mut top1, mut o64, mut firsts, mut rs, mut rerank, mut long) = (0usize, 0usize, Vec::new(), Vec::new(), Vec::new(), 0usize);
     for (i, (truth, syls, ctx)) in rows.iter().enumerate() {
         // S2h: the first word is conditioned on the row's context, cut like the engine cuts it.
         let left = if ctx_mode { Some(context_key(ctx)) } else { None };
@@ -261,25 +331,82 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
         let nb = decode_from(&capped, syls, &lm, prof, BEAM_S1, start, demote).map_err(|e| e.to_string())?;
         let mut surf: Vec<String> = nb.iter().map(|(_, ws)| ws.concat()).collect();
         let t = len.apply(truth);
-        let ok = len.apply(&surf[0]) == t;
+        // The row's chosen candidate: the first, or the small model's pick among the first 8 (the dump keeps the n-gram order).
+        let mut chosen = 0;
+        if let Some((tl, _, _)) = &tl {
+            let top: Vec<&str> = surf.iter().take(TOPK).map(String::as_str).collect();
+            let ng: Vec<f64> = nb.iter().take(TOPK).map(|(sc, _)| *sc).collect();
+            // The key is the context key (its SENTINEL is the empty k, in TinyLm::rerank); without --context, no key.
+            let t0 = Instant::now();
+            let ll = match tl.rerank(&ng, &top, left.as_deref().unwrap_or(""), prof) {
+                Ok((c, ll)) => {
+                    chosen = c;
+                    ll
+                }
+                // A candidate longer than the model's context: this row keeps the n-gram first (counted on stderr), the set goes on.
+                Err(TinyLmError::TooLong) => {
+                    long += 1;
+                    None
+                }
+                Err(e) => return Err(e.to_string()),
+            };
+            if ll.is_some() {
+                rerank.push(t0.elapsed());
+            }
+            if let Some(w) = scores.as_mut() {
+                let oks: Vec<bool> = top.iter().map(|s| len.apply(s) == t).collect();
+                let ed: Vec<u32> = top.iter().zip(&oks).map(|(s, &ok)| if ok { 0 } else { levenshtein(s, truth) }).collect();
+                w.write_all(scores_line(i + 1, &ng, &oks, &ed, truth.chars().count(), chosen, ll.as_deref())?.as_bytes())
+                    .map_err(|_| "cannot write tinylm scores".to_string())?;
+            }
+        }
+        let ok = len.apply(&surf[chosen]) == t;
         top1 += ok as usize;
-        rs.push((ok, surf[0].clone(), truth.clone()));
+        rs.push((ok, surf[chosen].clone(), truth.clone()));
         o64 += surf.iter().any(|s| len.apply(s) == t) as usize;
         if let Some(d) = dump.as_mut() {
             for (r, ((sc, _), s)) in nb.iter().zip(&surf).enumerate() {
                 writeln!(d, "{}\t{}\t{s}\t{sc:?}", i + 1, r + 1).map_err(|_| "cannot write dump".to_string())?;
             }
         }
-        firsts.push(surf.swap_remove(0));
+        if let Some(d) = dump_words.as_mut() {
+            let gold = lex.segment_words(truth).map_or("-".to_string(), |ws| ws.iter().map(|(w, _)| w.as_str()).collect::<Vec<_>>().join(" "));
+            writeln!(d, "{}\t0\t{gold}", i + 1).map_err(|_| "cannot write word dump".to_string())?;
+            for (r, (_, ws)) in nb.iter().enumerate() {
+                writeln!(d, "{}\t{}\t{}", i + 1, r + 1, ws.join(" ")).map_err(|_| "cannot write word dump".to_string())?;
+            }
+        }
+        firsts.push(surf.swap_remove(chosen));
+    }
+    if let Some(mut w) = scores {
+        w.flush().map_err(|_| "cannot write tinylm scores".to_string())?;
+    }
+    if let (Some((_, load, _)), false) = (&tl, rerank.is_empty()) {
+        // Latency record (S7c-1 item 6), stderr only: one rerank = the forward pass over up to 8 candidates of a row (rows with fewer
+        // than two candidates run nothing and are not counted); load = read + parse of the .sjtl, the file loaded once.
+        rerank.sort();
+        let ms = |d: Duration| d.as_secs_f64() * 1000.0;
+        eprintln!(
+            "tinylm: rerank n={} p50={:.3} ms p95={:.3} ms; rows kept first (candidate over the context) {long}; load {:.0} ms, rss {:?} -> {:?} KiB around the .sjtl load",
+            rerank.len(),
+            ms(rerank[rerank.len() / 2]),
+            ms(rerank[(rerank.len() as f64 * 0.95) as usize]),
+            ms(*load),
+            rss_before,
+            rss_after
+        );
     }
     if let Some(mut d) = dump {
         d.flush().map_err(|_| "cannot write dump".to_string())?;
+    }
+    if let Some(mut d) = dump_words {
+        d.flush().map_err(|_| "cannot write word dump".to_string())?;
     }
     if let Some(mut f) = rowstats {
         f.write_all(format_rowstats(&rs).as_bytes()).map_err(|e| format!("cannot write rowstats ({:?})", e.kind()))?;
     }
     let sha = sha256_hex(firsts.join("\n").as_bytes());
-    println!("## {name}  lm-{profile_name}{}{}{}{}{xo}  {{'n': {}, 'top1': {top1}, 'oracle@64': {o64}, 'top1_sha256': '{sha}'}}", if ctx_mode { "+ctx" } else { "" }, if demote { "" } else { "-nodemote" }, if classes { "" } else { "-noclasses" }, if packs & PACK_ACG != 0 { "+acg" } else { "" }, rows.len());
+    println!("## {name}  lm-{profile_name}{}{}{}{}{}{}{xo}  {{'n': {}, 'top1': {top1}, 'oracle@64': {o64}, 'top1_sha256': '{sha}'}}", if ctx_mode { "+ctx" } else { "" }, if demote { "" } else { "-nodemote" }, if classes { "" } else { "-noclasses" }, lm.kn_tag().unwrap_or(""), tl.as_ref().map_or(String::new(), |(_, _, sha8)| format!("+tl:{sha8}")), if packs & PACK_ACG != 0 { "+acg" } else { "" }, rows.len());
     Ok(())
 }
 
@@ -351,7 +478,9 @@ fn run_predict(args: &[String]) -> Result<(), String> {
         _ => return Err("--profile must be chat or formal".into()),
     }
     .lambda();
-    let lm = Lm::load(Path::new(&lm_path.ok_or("--lm is required")?)).map_err(|e| e.to_string())?;
+    // The Kneser-Ney side file is deliberately off here: the Python predict reference (experiments/sp/predict.py) does not
+    // load it, so the sp-predict golden would stop being comparable (docs/contracts/kn-core.md, model-v6 note).
+    let lm = Lm::load_with(Path::new(&lm_path.ok_or("--lm is required")?), true, false).map_err(|e| e.to_string())?;
     let dir = root().join("data/lexicon");
     let (lex, overlay) = load_with_packs(&dir, packs, &pdir, None)?;
     // Prediction scores use the capped lp only; demotion applies to decoding (sw §3).
@@ -406,8 +535,12 @@ fn run_predict(args: &[String]) -> Result<(), String> {
 }
 
 fn run() -> Result<(), String> {
-    let len = load_lenient()?;
     let all: Vec<String> = std::env::args().skip(1).collect();
+    // zhen-mixed section 4: a subcommand of its own, before anything the evaluation modes read.
+    if all.first().map(String::as_str) == Some("english-sim") {
+        return english::run(&all[1..], &root());
+    }
+    let len = load_lenient()?;
     if all.iter().any(|a| a == "--predict") {
         return run_predict(&all);
     }

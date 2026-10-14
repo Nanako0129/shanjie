@@ -19,7 +19,7 @@ final class LearningTests: XCTestCase {
 
     private func makeShell(gate: Gate = Gate(), learning: URL? = nil, dialogs: FakeDialogs = FakeDialogs()) -> Shell {
         let shell = Shell(resources: resources, panel: FakePanel(), isSecureInput: { gate.secure },
-                          layoutStore: MemoryLayoutStore(), learningDirectory: learning, dialogs: dialogs, demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore())
+                          layoutStore: MemoryLayoutStore(), learningDirectory: learning, dialogs: dialogs, demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), englishStore: MemoryEnglishStore(), acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore())
         XCTAssertNotNil(shell.engine)
         return shell
     }
@@ -149,7 +149,7 @@ final class LearningTests: XCTestCase {
         let dir = TestLearning.directory()
         let dialogs = FakeDialogs()
         let c = Controller(makeShell(learning: dir, dialogs: dialogs))
-        XCTAssertEqual(c.session.menu.map(\.title), ["標準鍵盤", "倚天鍵盤", "避免把敏感字詞排在前面", "即時預測", "可省略韻母", "動漫與遊戲詞", "善解設定…", "清除選字記憶…", "不要備份選字記憶"])
+        XCTAssertEqual(c.session.menu.map(\.title), ["標準鍵盤", "倚天鍵盤", "避免把敏感字詞排在前面", "即時預測", "可省略韻母", "中英混打（實驗）", "語意校正", "動漫與遊戲詞", "這個 App 用聊天設定", "善解設定…", "清除選字記憶…", "不要備份選字記憶"])
         XCTAssertEqual(c.session.menu.first { $0.title == "清除選字記憶…" }?.action, .clear)
         c.session.activate()
         try repick(c)
@@ -164,7 +164,7 @@ final class LearningTests: XCTestCase {
         XCTAssertEqual(dialogs.asked, 2)
         XCTAssertTrue(TestLearning.records(in: dir).isEmpty, "清除 did not clear")
         XCTAssertEqual(dialogs.failures, 0)
-        XCTAssertEqual(c.session.menu.map(\.title), ["標準鍵盤", "倚天鍵盤", "避免把敏感字詞排在前面", "即時預測", "可省略韻母", "動漫與遊戲詞", "善解設定…", "清除選字記憶…", "不要備份選字記憶"])
+        XCTAssertEqual(c.session.menu.map(\.title), ["標準鍵盤", "倚天鍵盤", "避免把敏感字詞排在前面", "即時預測", "可省略韻母", "中英混打（實驗）", "語意校正", "動漫與遊戲詞", "這個 App 用聊天設定", "善解設定…", "清除選字記憶…", "不要備份選字記憶"])
     }
 
     /// A clear that does not succeed is shown, never passed off as done (here: no engine at all).
@@ -172,7 +172,7 @@ final class LearningTests: XCTestCase {
         let dialogs = FakeDialogs()
         let shell = Shell(resources: resources.appendingPathComponent("missing"), panel: FakePanel(),
                           isSecureInput: { false }, layoutStore: MemoryLayoutStore(),
-                          learningDirectory: TestLearning.directory(), dialogs: dialogs, demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore())
+                          learningDirectory: TestLearning.directory(), dialogs: dialogs, demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), englishStore: MemoryEnglishStore(), acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore())
         XCTAssertNil(shell.engine)
         let c = Controller(shell)
         c.session.perform(.clear)
@@ -209,15 +209,15 @@ final class LearningTests: XCTestCase {
     /// open; returns the picked word.
     @discardableResult
     private func repick(_ c: Controller) throws -> String {
-        c.client.before = "他"           // a single character learns only after a Han character (section 12)
+        c.client.before = "他們"         // a single character learns only after two Han characters (sections 12, 14)
         c.type("su3 ")
         let second = try XCTUnwrap(c.panel.items.dropFirst().first)
         c.type("2")
         return second
     }
 
-    /// Like `repick`, for a word of two characters (ㄋㄧˇ ㄏㄠˇ): it may learn under "^" too, so when a
-    /// gate test stores nothing the gate is the reason, not the single-character rule (section 12).
+    /// Like `repick`, for a word of two characters (ㄋㄧˇ ㄏㄠˇ): it may learn at sentence start too (under
+    /// a "^>..." key), so when a gate test stores nothing the gate is the reason, not the single-character rule (section 12).
     @discardableResult
     private func repickTwo(_ c: Controller) throws -> String {
         c.type("su3cl3 ")
@@ -324,7 +324,7 @@ final class LearningTests: XCTestCase {
         let c = Controller(makeShell(learning: dir))
         c.session.activate()
         c.session.selectLayout(.eten)    // a rebuilt engine starts with learning off
-        c.client.before = "他"           // a single character learns only after a Han character (section 12)
+        c.client.before = "他們"         // a single character learns only after two Han characters (sections 12, 14)
         c.type("ne3 ")                   // ㄋㄧˇ on ETen, then the candidates
         let second = try XCTUnwrap(c.panel.items.dropFirst().first)
         c.type("2")

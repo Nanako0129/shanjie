@@ -30,9 +30,36 @@ shasum -a 256 -c data/bigram.sjlm.sha256 >/dev/null \
   gh release download classes-v3 -R Nanako0129/shanjie -p classes.sjc -D data/lm"
 shasum -a 256 -c data/classes.sjc.sha256 >/dev/null \
   || fail "data/lm/classes.sjc does not match data/classes.sjc.sha256; download classes-v3 again"
-for f in data/lexicon/mcbpmf-data.txt data/lexicon/overlay-add.tsv data/lexicon/sandhi-add.tsv data/lexicon/demote.tsv data/packs/acg-add.tsv data/packs/acg-sources.tsv data/packs/acg.json LICENSE LICENSES/McBopomofo-MIT.txt LICENSES/data.md; do
+# The small model behind 語意校正 (docs/contracts/s7c2b-shell-rerank.md section 2.4), paired with model-v5's hash.
+[ -f data/lm/tinylm.sjtl ] || fail "data/lm/tinylm.sjtl is missing (the small model of 語意校正, S7c). Download the tinylm-v3 release asset:
+  gh release download tinylm-v3 -R Nanako0129/shanjie -p tinylm.sjtl -D data/lm"
+shasum -a 256 -c data/tinylm.sjtl.sha256 >/dev/null \
+  || fail "data/lm/tinylm.sjtl does not match data/tinylm.sjtl.sha256; download tinylm-v3 again"
+for f in data/lexicon/mcbpmf-data.txt data/lexicon/overlay-add.tsv data/lexicon/sandhi-add.tsv data/lexicon/demote.tsv data/packs/acg-add.tsv data/packs/acg-sources.tsv data/packs/acg.json LICENSE LICENSES/McBopomofo-MIT.txt LICENSES/data.md LICENSES/SCOWL.txt LICENSES/SymSpell-MIT.txt; do
   [ -f "$f" ] || fail "$f is missing"
 done
+
+# The English word list of 中英混打 (docs/contracts/zhen-mixed.md section 3.4): not in git. Downloaded from the pinned SymSpell commit
+# into the cache (the URL, the commit and the input hash live only in tools/build_english_words.py), checked, generated, and the
+# output checked against data/english-words.txt.sha256. A download failure or either hash mismatch fails the build.
+EN_URL="$(python3 tools/build_english_words.py --print-url)"
+EN_COMMIT="$(python3 tools/build_english_words.py --print-commit)"
+EN_IN_SHA="$(python3 tools/build_english_words.py --print-input-sha256)"
+EN_IN="${SHANJIE_ENGLISH_CACHE:-$HOME/.cache/shanjie/english}/frequency_dictionary_en_82_765.txt"
+en_input_ok() { [ -f "$EN_IN" ] && [ "$(shasum -a 256 "$EN_IN" | awk '{ print $1 }')" = "$EN_IN_SHA" ]; }
+if ! en_input_ok; then
+  mkdir -p "$(dirname "$EN_IN")"
+  rm -f "$EN_IN"
+  curl -fsSL --retry 3 -o "$EN_IN.part" "$EN_URL" || fail "cannot download the English word list input from $EN_URL"
+  mv "$EN_IN.part" "$EN_IN"
+  en_input_ok || { rm -f "$EN_IN"; fail "the downloaded English word list input does not match SHA-256 $EN_IN_SHA"; }
+fi
+EN_TMP="$(mktemp -d)"
+trap 'rm -rf "$EN_TMP"' EXIT
+python3 tools/build_english_words.py --input "$EN_IN" --out "$EN_TMP/english-words.txt" >/dev/null || fail "tools/build_english_words.py failed"
+EN_OUT_SHA="$(shasum -a 256 "$EN_TMP/english-words.txt" | awk '{ print $1 }')"
+EN_RECORDED="$(awk 'NR == 1 { print $1 }' data/english-words.txt.sha256)"
+[ "$EN_OUT_SHA" = "$EN_RECORDED" ] || fail "the generated english-words.txt (SHA-256 $EN_OUT_SHA) does not match data/english-words.txt.sha256"
 
 BUNDLE_ID="${BUNDLE_ID:-com.nyanako.inputmethod.shanjie}"
 [[ "$BUNDLE_ID" =~ ^[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$ ]] || fail "BUNDLE_ID '$BUNDLE_ID' is not a reverse-DNS identifier"
@@ -69,14 +96,15 @@ cp data/lexicon/mcbpmf-data.txt data/lexicon/overlay-add.tsv data/lexicon/sandhi
 # (acg-groups.tsv, acg-collisions.tsv, acg-exclude.tsv, acg-manual.tsv). The shell passes Resources/packs to shanjie_engine_new_packs.
 mkdir -p "$RES/packs"
 cp data/packs/acg-add.tsv data/packs/acg-sources.tsv data/packs/acg.json "$RES/packs/"
-cp -L data/lm/bigram.sjlm data/lm/classes.sjc "$RES/"   # -L: the worktree's model may be a symlink
+cp -L data/lm/bigram.sjlm data/lm/classes.sjc data/lm/tinylm.sjtl "$RES/"   # -L: the worktree's model may be a symlink
+cp "$EN_TMP/english-words.txt" "$RES/"   # generated above (docs/contracts/zhen-mixed.md section 3.4)
 swift scripts/make-icon.swift "$RES/shanjie.tiff"
 
 cp LICENSE "$RES/LICENSES/LICENSE"
-cp LICENSES/McBopomofo-MIT.txt LICENSES/data.md "$RES/LICENSES/"
+cp LICENSES/McBopomofo-MIT.txt LICENSES/data.md LICENSES/SCOWL.txt LICENSES/SymSpell-MIT.txt "$RES/LICENSES/"
 cat > "$RES/LICENSES/CC-BY-SA-4.0-attribution.txt" <<'EOF'
-overlay-add.tsv, packs/acg-add.tsv, packs/acg-sources.tsv, packs/acg.json, demote.tsv, bigram.sjlm and
-classes.sjc are licensed under the Creative Commons Attribution-ShareAlike 4.0 International license
+overlay-add.tsv, packs/acg-add.tsv, packs/acg-sources.tsv, packs/acg.json, demote.tsv, bigram.sjlm,
+classes.sjc and tinylm.sjtl are licensed under the Creative Commons Attribution-ShareAlike 4.0 International license
 (CC BY-SA 4.0):
 https://creativecommons.org/licenses/by-sa/4.0/
 
@@ -94,9 +122,30 @@ bigram.sjlm: word counts from Wikipedia articles, Mozilla Common Voice
   Attribution: Wikipedia contributors, Tatoeba contributors.
 classes.sjc: word classes and class transition probabilities computed from
   the same counts as bigram.sjlm; same sources and attribution.
+tinylm.sjtl: a small character model (the 語意校正 rerank) trained on text
+  from the same sources as bigram.sjlm: Wikipedia articles, Mozilla Common
+  Voice sentences (CC0), Tatoeba sentences (CC BY 2.0 FR) and synthetic
+  sentences. No private conversation data.
+  Attribution: Wikipedia contributors, Tatoeba contributors.
 
 The program itself is Apache-2.0 (LICENSE); mcbpmf-data.txt is MIT
 (McBopomofo-MIT.txt). Details: data.md.
+EOF
+
+# english-words.txt is not CC BY-SA: its own attribution, not folded into the file above (docs/contracts/zhen-mixed.md section 3.4).
+cat > "$RES/LICENSES/english-words-attribution.txt" <<EOF
+english-words.txt is generated at build time from frequency_dictionary_en_82_765.txt of SymSpell
+(https://github.com/wolfgarbe/SymSpell, commit $EN_COMMIT): all of its words of 3 to 32 lowercase ASCII letters
+(words with an apostrophe, a digit or a capital letter dropped), sorted. SymSpell's list is the intersection of two sources (1 and 2), and the list
+itself is SymSpell's (3):
+
+1. Word frequencies: Google Books Ngram Viewer data, Creative Commons Attribution 3.0 Unported (CC BY 3.0),
+   https://creativecommons.org/licenses/by/3.0/ . The data was filtered as described above.
+2. Words: SCOWL (Spell Checker Oriented Word Lists), Copyright 2000-2026 by Kevin Atkinson. Its notice is
+   LICENSES/SCOWL.txt. SymSpell does not say which SCOWL version it used; the notice included is the current release's.
+3. The list itself: SymSpell, MIT License, Copyright (c) 2018 Wolf Garbe. Its text is LICENSES/SymSpell-MIT.txt.
+
+The program is Apache-2.0 (LICENSE). Details: data.md.
 EOF
 
 # One input mode (section 13.2); the keyboard layout is chosen in its menu, not by mode.

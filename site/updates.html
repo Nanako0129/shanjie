@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>更新紀錄 — 善解</title>
+<meta name="description" content="善解每週改了什麼：發佈了什麼、合併了哪些、評測的數字。">
+<meta property="og:title" content="善解更新紀錄">
+<meta property="og:description" content="善解每週改了什麼：發佈了什麼、合併了哪些、評測的數字。">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://shanjie.nyanako.com/updates">
+<meta property="og:site_name" content="善解">
+<meta property="og:locale" content="zh_TW">
+<meta property="og:image" content="https://shanjie.nyanako.com/og.png">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="canonical" href="https://shanjie.nyanako.com/updates">
+<meta name="theme-color" content="#F6F1E7" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#1A1816" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&family=Noto+Serif+TC:wght@600;900&display=swap">
+<style>
+  :root {
+    --paper: #F6F1E7; --paper-2: #EFE8DA; --ink: #1F1D1A; --ink-2: #5A544C; --line: #D9CFBD;
+    --seal: #B83A2E; --seal-ink: #F6F1E7; --ok: #3F6B4F; --wip: #8A5C14;
+    --serif: "Noto Serif TC", "Songti TC", "PMingLiU", serif;
+    --sans: "Noto Sans TC", -apple-system, "PingFang TC", "Heiti TC", sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper: #1A1816; --paper-2: #24211E; --ink: #EDE6D8; --ink-2: #AAA192; --line: #3A352F;
+      --seal: #D4553F; --seal-ink: #1A1816; --ok: #8DBA98; --wip: #E0B060;
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper: #1A1816; --paper-2: #24211E; --ink: #EDE6D8; --ink-2: #AAA192; --line: #3A352F;
+    --seal: #D4553F; --seal-ink: #1A1816; --ok: #8DBA98; --wip: #E0B060;
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body { margin: 0; background: var(--paper); color: var(--ink); font: 17px/1.8 var(--sans); -webkit-font-smoothing: antialiased; }
+  main { max-width: 760px; margin: 0 auto; padding: 0 16px 72px; }
+  a { color: var(--seal); text-underline-offset: 3px; }
+  h1, h2, h3 { font-family: var(--serif); font-weight: 900; letter-spacing: .02em; }
+  h2 { font-size: 26px; margin: 72px 0 8px; }
+  h2 + .sub { color: var(--ink-2); margin: 0 0 24px; }
+  .rule { border: 0; border-top: 1px solid var(--line); margin: 0; }
+
+  .tag { font: 500 13px/1.6 var(--sans); padding: 0 9px; border-radius: 999px; border: 1px solid var(--line); color: var(--ink-2); white-space: nowrap; }
+  .tag.done { color: var(--ok); border-color: currentColor; }
+  .tag.wip { color: var(--wip); border-color: currentColor; }
+  .back { display: inline-block; margin-top: 40px; font-size: 15px; }
+  h1 { font-size: 34px; margin: 12px 0 0; }
+  h1 + .sub { color: var(--ink-2); margin: 8px 0 0; }
+  article { margin: 28px 0 0; padding: 18px; border: 1px solid var(--line); border-radius: 12px; }
+  article h3 { margin: 0; font-size: 19px; display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: baseline; }
+  article p { margin: 8px 0 0; color: var(--ink-2); font-size: 16px; }
+  article p b { color: var(--ink); font-weight: 500; }
+  article code { font: 14px ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap: anywhere; }
+  .note { margin: 12px 0 0; color: var(--ink-2); font-size: 15px; }
+  footer { margin-top: 72px; padding-top: 20px; border-top: 1px solid var(--line); color: var(--ink-2); font-size: 14px; display: flex; flex-wrap: wrap; gap: 6px 18px; justify-content: space-between; }
+
+</style>
+</head>
+<body>
+<main>
+
+<a class="back" href="./">← 善解首頁</a>
+<h1>更新紀錄</h1>
+<p class="sub">每週一段，新的在上面。標「已發佈」的可以從 Releases 或 Homebrew 更新；「已合併」的已進主線，不在 App 裡或還沒出新版本。</p>
+
+<section>
+  <h2>2026-10-12～10-18</h2>
+
+  <article>
+    <h3>v0.4.3：解碼器依「字串＋最後一個詞」保留斷法 <span class="tag done">已發佈</span></h3>
+    <p>PR <a href="https://github.com/Nanako0129/shanjie/pull/147">#147</a>，2026-10-14 發佈。以前每個位置同樣的字只留分數最高的一種斷法，會提早丟掉後面接得比較順的那一種；書面設定句首打「ㄒㄧㄚˋ ㄌㄞˊ ㄈㄣ ㄒㄧ」會出「夏來分析」，現在是「下來分析」（實機確認）。</p>
+    <p>跨版本基準測試（v0.4.2 → v0.4.3）：每個集合、兩種設定的第一名相同或變好；立法院發言語料聊天 +12、書面 +18（都顯著）。保留集：聊天 191 → 191、書面 187 → 189。名單去重後變短，少數集合「正解在前 64 名」少了 1–4 句。</p>
+  </article>
+
+  <article>
+    <h3>v0.4.2：選字記憶的修正 <span class="tag done">已發佈</span></h3>
+    <p>PR <a href="https://github.com/Nanako0129/shanjie/pull/142">#142</a>，2026-10-14 發佈。句首改選過一次「我試」之後，「我是買新的」會變成「我試買新的」；現在句首學到的詞要後面接的音相同才加分，單字只在緊接兩個漢字的前文後面記。選字結果在評測上和 v0.4.1 相同（評測沒有學習資料）。</p>
+  </article>
+
+  <article>
+    <h3>語意校正預設開 <span class="tag done">已發佈</span></h3>
+    <p>PR <a href="https://github.com/Nanako0129/shanjie/pull/129">#129</a>、<a href="https://github.com/Nanako0129/shanjie/pull/130">#130</a>，2026-10-13 合併，v0.4.1 發佈（2026-10-13）。模型是 tinylm-v3（1,440 萬參數，本機執行，只在前 8 名候選之間挑，不產生新字）。</p>
+    <p>聊天設定的參數用維護者自己的聊天訊息選，計分是「改對 − 改壞」，改壞率上限 0.5%。選值時沒用到的月份（2026-08，6,559 個子句）：<b>改對 125、改壞 16</b>。保留的評測句（227 句）聊天設定：<b>改對 11、改壞 0</b>。</p>
+    <p>例子：<code>我等一下在過去</code> → <code>我等一下再過去</code>。語意校正要「避免把敏感字詞排在前面」開著才作用。</p>
+  </article>
+
+  <article>
+    <h3>聊天／書面可以自己選 <span class="tag done">已發佈</span></h3>
+    <p>PR <a href="https://github.com/Nanako0129/shanjie/pull/121">#121</a>，2026-10-12 合併，v0.4.1 發佈（2026-10-13）。設定視窗可選「依 App 自動」（預設）、「一律聊天」、「一律書面」；依 App 自動時，選單可替目前的 App 切換，設定視窗列出改過的 App、可以移除。</p>
+  </article>
+
+  <article>
+    <h3>動漫詞包 <span class="tag done">已發佈</span></h3>
+    <p>PR <a href="https://github.com/Nanako0129/shanjie/pull/111">#111</a>，2026-10-13 合併，v0.4.1 發佈（2026-10-13）。含間隔號的名字（例如「洛琪希·米格路迪亞」）把名和姓分開收；新增「獄門疆」、補上「虎杖悠仁」的讀音；名字裡的「唯」改讀 ㄨㄟˊ。</p>
+    <p>詞包從約 3 萬詞增加到約 4.5 萬詞。</p>
+  </article>
+
+  <article>
+    <h3>每一版用出貨設定跑分 <span class="tag done">已合併</span></h3>
+    <p>PR <a href="https://github.com/Nanako0129/shanjie/pull/134">#134</a>、<a href="https://github.com/Nanako0129/shanjie/pull/135">#135</a>（S-bench 套件 v2）。每一版用自己出貨的模型與設定量，結果在 <a href="https://github.com/Nanako0129/shanjie/blob/main/docs/benchmark.md">docs/benchmark.md</a>。v0.4.1 對 v0.4.0，聊天設定，數字是答對句數（修好／弄壞）：</p>
+    <p>開發集 dev302：241 → 259（18／0）；錯字回報（前 80 句）：17 → 25（9／1）；公開對話集 cvtune：3,360 → 3,441（84／3）；維基 wikitune：2,074 → 2,179（110／5）；唯一變差的是維基錯字表 wikitypo：136 → 134（0／2，p = 0.5）。書面設定每個集合持平或變好。保留集（227 句，平常不看）：聊天 180 → 191（11／0），書面 184 → 187（3／0）。</p>
+  </article>
+
+  <article>
+    <h3>錯字回報與解碼器的合併問題</h3>
+    <p>這週加了第 73–87 列，共 15 句（2026-10-12～13；PR <a href="https://github.com/Nanako0129/shanjie/pull/127">#127</a>、<a href="https://github.com/Nanako0129/shanjie/pull/128">#128</a>、<a href="https://github.com/Nanako0129/shanjie/pull/131">#131</a>、<a href="https://github.com/Nanako0129/shanjie/pull/133">#133</a>、<a href="https://github.com/Nanako0129/shanjie/pull/135">#135</a>、<a href="https://github.com/Nanako0129/shanjie/pull/136">#136</a>）。這些句子只用來評測，不拿來訓練。</p>
+    <p>從「夏來分析」（應為「下來分析」）找到解碼器的合併問題：每個位置同一個字串只留一條路徑，會丟掉接下去更好的拆法。試驗在公開調參集上淨改對 +3 到 +7 句。原本排成 v0.4.2 的第一片，2026-10-14 改跟 v0.4.3 出（v0.4.2 先單獨發選字記憶的修正），同日發佈。</p>
+  </article>
+
+  <article>
+    <h3>接下來的順序 <span class="tag">決定</span></h3>
+    <p>維護者 2026-10-13 決定：解碼器合併（後來改跟 v0.4.3，2026-10-14 發佈）→ 句首單字的選字記憶（句首打「照建議」會出「趙建議」，改選也記不住）→ 語意校正強度（保守／標準／積極，預設維持改壞率 ≤ 0.5%）。領域詞包（資訊與 AI、醫藥、法律）跟下一版語言模型一起。</p>
+  </article>
+
+  <article>
+    <h3>資料類 Release <span class="tag done">已發佈</span></h3>
+    <p>tinylm-v2（2026-10-12）、tinylm-v3（2026-10-13）已發佈在 <a href="https://github.com/Nanako0129/shanjie/releases">GitHub Releases</a>。</p>
+  </article>
+</section>
+
+<footer>
+  <span>善解 shanjie</span>
+  <span>最後更新：2026-10-14</span>
+</footer>
+
+</main>
+</body>
+</html>

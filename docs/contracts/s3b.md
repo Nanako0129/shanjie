@@ -105,14 +105,16 @@
 ## 9. 設定判斷與隱私
 
 - **聊天／書面設定**：`activateServer` 時、以及組字擁有者改變時（§5），用擁有者 client 的 `bundleIdentifier()` 查內建的聊天 App 清單：Discord（`com.hnc.Discord`）、LINE（`jp.naver.line.mac`）、訊息（`com.apple.MobileSMS`）、Slack（`com.tinyspeck.slackmacgap`）、Telegram（`ru.keepcoder.Telegram`、Telegram Desktop `com.tdesktop.Telegram`）、WhatsApp（`net.whatsapp.WhatsApp`）、Messenger（`com.facebook.archon`）。bundle ID 是依公開資料整理，未逐一在本機核對；使用者實測 15 會涵蓋 Discord。在清單內用 chat，其餘用 formal，以 `shanjie_engine_set_profile` 傳**列舉**給核心；bundle ID 不傳給核心、不寫 log、不存檔。清單在這一版寫在程式裡；PLAN §S2 的「清單可在設定中修改」延到設定頁（S3b-2）。
+  - **修訂（2026-10-12，`profile-choice.md` §2.5）**：使用者可以選「依 App 自動」「一律聊天」「一律書面」，並在選單對個別 App 切換。「不存檔」改成：**只有使用者在選單上按過的 App** 的 bundle ID 存在 App 自己的 UserDefaults（鍵 `appProfiles`，值只有 `chat`／`formal`），其他 App 的 bundle ID 照舊不存；照舊不傳給核心、不寫 log。判斷改由 `Shell.profile(bundle:mode:overrides:)` 一處決定，時機另加選單切換之後（`claim()` 再 `applyProfile()`）。
 - **日誌（R2，白名單）**：只能用 `os.Logger`，訊息**只能是靜態字串與 C ABI 回傳碼**；不得內插任何其他值（含 keyCode、`ch`、游標位置、數量、路徑、bundle ID、組字、候選、送出內容）；不得使用 `.public`，也不得用 hash mask。不得用 `print`、`NSLog`、`debugPrint`、`dump`。
 - **當機報告**：`fatalError`／`precondition` 不得內插任何值；禁用 `try!`；裝著輸入文字的型別不得是 `Error`，也不得實作 `CustomStringConvertible`／`CustomDebugStringConvertible`。
 - **privacyGate（R3）延到 S4**：這一版沒有學習、雲端、左文，gate 沒有東西可擋。PLAN 與 s3a 原本列在 S3 的 gate、gate 單元測試、「privacyGate 轉為生效時 reset」都移到 S4。
 - **自測**：`shanjie --selftest`：
   - 參數只接受完全相符的 `install` 或 `--selftest`；其他參數一律 exit 非 0、沒有任何副作用。
   - 從 `Resources/` 建引擎並載入 LM；`shanjie_engine_new` 或 `shanjie_engine_load_lm` 回傳非 0 就 exit 非 0（只印錯誤碼）。
-  - 用標準排列打 dev302 第 10 列（`ㄑㄧˊ ㄓㄨㄥ ㄅㄠˋ ㄍㄠˋ ㄇㄧㄥˊ ㄊㄧㄢ ㄧㄠˋ ㄐㄧㄠ`），以 `set_profile(0)` 與 `set_profile(1)` 各送出一次：分別等於 `其中報告明天要交`（chat）與 `期中報告明天要交`（formal）才 exit 0。不印任何內容。
+  - 用標準排列打 dev302 第 284 列（`ㄔㄨˊ ㄈㄤˊ ㄒㄧㄣ ㄓㄨㄤ ㄌㄜ˙ ㄧ ㄍㄜ˙ ㄌㄩˋ ㄕㄨㄟˇ ㄏㄨˊ`），以 `set_profile(0)` 與 `set_profile(1)` 各送出一次：分別等於 `廚房新裝了一個綠水壺`（chat）與 `廚房新裝了一個濾水壺`（formal）才 exit 0。不印任何內容。（最早是第 10 列；模型或解碼改變後，原本那一列兩種設定的結果變得相同，兩度換列，2026-10-14 解碼器合併之後是第 284 列，研究紀錄同日。）
   - 再用 `Resources/packs`（預設就是開）建一個帶詞包的引擎，標準排列、`set_profile(0)` 打 `ㄉㄧㄥˋ ㄩㄢˊ ㄊㄤˊ`，等於 `碇源堂`（不帶詞包時聊天設定是 `定元堂`）才 exit 0；詞包缺檔、壞檔、或沒有生效都 exit 非 0（`acg-pack.md` A.2）。
+  - 再在帶詞包的引擎載入 `Resources/english-words.txt`（回傳 0）、開中英混打，標準排列打 `rust` 加空白鍵，英文窗要打開、項目依序是 `rust`、`Rust`、`RUST` 才 exit 0，之後把開關關回去；單字表缺檔、被核心拒絕、或英文窗沒打開都 exit 非 0（`zhen-mixed.md` §3.2）。
   - 不得呼叫 TIS、不得寫任何檔案或 UserDefaults、不得建立 NSApplication 或 IMK server。
 
 ## 10. 驗收
@@ -124,11 +126,11 @@
 4. Swift 測試（`swift test`，在 `macos/`），全部經由真正的 C 核心（`Resources` 等同的 `data/lexicon` 與 `data/lm/bigram.sjlm`；測試資料目錄由 `Support.swift` 的 `TestData.files` 列出，含 `sandhi-add.tsv`；缺檔就失敗並說明怎麼取得）：
    - 按鍵翻譯：ANSI 表每個鍵、兩種排列的 37 個注音鍵與 5 個聲調鍵、各特殊鍵、修飾鍵位元、`nil` 事件。
    - 假 client：打「你好」＋Enter → `insertText("你好")` 且組字清空；打 ㄋㄧˇ＋空白 → 候選顯示（2–9 個，因為接著要按 2）、按 2 → 組字更新、候選隱藏；帶 Caps Lock 的鍵 → 回傳 false 且輸出不變；組字中按表外的鍵 → 先送出再回傳 false；`commitComposition` → 送出並清空；回傳碼非 0 的路徑 → 組字清空、候選隱藏、回傳 false。
-   - **設定（可觀察）**：以 Discord 的 bundle ID 啟動後打第 10 列＋Enter，送出 chat 第一名；以 TextEdit 啟動送出 formal 第一名；兩者不同。
+   - **設定（可觀察）**：以 Discord 的 bundle ID 啟動後打第 284 列＋Enter，送出 chat 第一名；以 TextEdit 啟動送出 formal 第一名；兩者不同。
    - **組字擁有者**：兩個假 controller。(a) A 組字中直接對 B 按鍵：B 的輸出不含 A 的文字，A 的組字送回 A。(b) A 組字中被釋放、之後 B 按鍵：A 的組字被丟棄，不出現在 B。(c) B 組字中，A 的 `deactivateServer` 晚到：B 的組字不會出現在 A 的 client。verifier 把擁有者檢查拿掉時，至少一個測試必須失敗。
    - 切換輸入模式：標準組字中切到倚天 → 先送出、之後倚天的鍵位生效。
    - 回傳碼非 0：之後核心的組字也是空的（下一鍵不會讓舊組字重新出現）。
-   - 擁有者改變時重設設定：A（Discord）組字中，B（TextEdit）直接按鍵打第 10 列並送出，得到 formal 第一名。
+   - 擁有者改變時重設設定：A（Discord）組字中，B（TextEdit）直接按鍵打第 284 列並送出，得到 formal 第一名。
    - secure input：假閉包回傳 true 時，擁有者的 `deactivateServer` 丟棄組字、不送出。
    - 非擁有者的 `deactivateServer` 不隱藏擁有者的候選窗、不清候選陣列。
    - verifier 把殼裡的 `shanjie_engine_key` 呼叫改成固定回傳非 0，或把 `set_profile` 改成不呼叫核心時，必須有測試失敗。
@@ -151,7 +153,7 @@
 12. 對照截圖 1：候選條的形狀、號碼、選取色、深淺色模式；不像的地方記下來，進 S3b-2。
 13. 組字中按 Caps Lock 切到英文：記錄組字是被送出、丟棄還是殘留（§6 的推論在此實測）；再切回；倚天模式打幾句。
 14. Safari 密碼欄位：預期不出現組字。Terminal 開 Secure Keyboard Entry 或 `sudo` 時：記錄實際行為（這一版不存也不記任何內容，所以出現組字不算缺陷）。
-15. 聊天 App（例如 Discord）與 TextEdit 打第 10 列，結果不同。
+15. 聊天 App（例如 Discord）與 TextEdit 打第 284 列，結果不同。
 16. 實測 11 進行時，另開終端機執行 `/usr/bin/log stream --level debug --predicate 'process == "shanjie"'`（debug 等級不會寫進磁碟，事後用 `log show` 看不到），結束後確認輸出裡沒有陷阱句、App 的 bundle ID 或 Resources 路徑。
 
 ## 11. 實作決定
@@ -170,7 +172,7 @@
 - **輸入模式**（§13 之前；現行見本節最後的修訂 13）：模式 ID 是 `<bundle ID>.standard`／`.eten`，殼只看最後一段，`install` 也從執行中的 bundle ID 推出兩個模式 ID，所以拋棄式 bundle ID 的自測 bundle 也一致。IMK 每次啟用都會呼叫 `setValue`，模式沒變時不重建引擎。
 - **日誌**：`Logger(subsystem: "com.nyanako.inputmethod.shanjie", category: "shell")`，只用 `.error`（失敗碼）與 `.debug`（「input mode switched」）。回傳碼以預設隱私內插（整數預設公開，不會出現 `<private>`）。自測與 `install` 的錯誤訊息用 `StaticString`＋數字寫到 stderr，型別上就不能內插輸入。
 - **日誌行為測試**：`log stream --level debug --style ndjson`，predicate 只濾**行程**（修訂 9），`<private>` 斷言才看殼的 subsystem；ndjson 先解碼 JSON 再比對，標記不會藏在 `\uXXXX` 後面。實測發現：測試行程有 stderr 時，`NSLog` 只寫 stderr、**不進統一日誌**（2026-10-03，探測程式在 stderr 接管線、接 `/dev/null` 時都一樣），所以單靠 `log stream` 抓不到 `NSLog`。測試因此在負向動作期間另外把本行程的 stdout／stderr（fd 1、2）導進管線，用同一組負向標記檢查，並先寫一個探針確認擷取有接上。由 launchd 啟動的輸入法沒有 stderr，那時 `NSLog` 會進統一日誌，由 `log stream` 這一半負責。另加正向對照：殼自己的錯誤訊息（`shanjie_engine_new failed, code 3`）必須出現在擷取裡。
-- **自測**：`Selftest.row10Standard` 是第 10 列在標準排列的按鍵；測試用獨立謄寫的 s3a §1 表從注音推出同一串，並斷言兩者相同。
+- **自測**：`Selftest.row284Standard` 是第 284 列在標準排列的按鍵；測試用獨立謄寫的 s3a §1 表從注音推出同一串，並斷言兩者相同。
 - **建置**：`scripts/build-app.sh` 先比對 `data/bigram.sjlm.sha256` 再建置；`BUNDLE_ID`、`OUT_DIR`（必須是 repo 內的相對路徑，因為之後會 `rm -rf "$OUT_DIR/善解輸入法.app"`）、`SHANJIE_VERSION` 三個環境變數；Info.plist 與 `InfoPlist.strings` 由腳本產生，模式名稱用 `InfoPlist.strings` 的「模式 ID = 名稱」；`CFBundleDevelopmentRegion` 原本設 `zh-Hant`，§13 改為 `en`（`zh-Hant.lproj` 為「善解輸入法」、`en.lproj` 與 Info.plist 為「Shanjie」，非中文系統顯示 Shanjie）。授權檔放 `Resources/LICENSES/`：`LICENSE`、`McBopomofo-MIT.txt`、`data.md`，以及 `CC-BY-SA-4.0-attribution.txt`（overlay 的署名照 `LICENSES/data.md`：Wikipedia 與 Wiktionary 貢獻者；模型：Wikipedia 與 Tatoeba 貢獻者）。
 - **選單列圖示**：`scripts/make-icon.swift` 用 CoreText 以系統字型畫「解」加圓角方框，輸出 16 px 與 32 px 兩層的 TIFF；Info.plist 每個模式加 `TISIconIsTemplate = true`。淺色、深色模式下的實際外觀與 template 是否生效**未驗證**，由使用者在驗收 12 對照。
 - **CI**：`ci.yml` 新增 `shell` 工作（`make bundle`、`swift test`、`make selftest-bundled SELFTEST_BUNDLE_ID=`、`scripts/check-app.sh`）；core 工作改讀 `data/bigram.sjlm.sha256`。`scripts/check-app.sh` 的檢查 6 比較執行前後的 `~/Library/Input Methods` 列表、偏好設定檔雜湊、以及 `TISCreateInputSourceList` 列出的全部輸入法（ID、模式、是否啟用；只讀取），並確認 `foo`、`install x`、`--selftest x`、`--SELFTEST`、空字串等參數都被拒絕。
@@ -211,7 +213,7 @@
 
 - Info.plist 只有一個模式 `<BUNDLE_ID>.zhuyin`（「善解輸入法」／「Shanjie」，`TISIntendedLanguage` 為 `zh-Hant`，`tsInputModeScriptKey` 為 `smTradChinese`），`tsVisibleInputModeOrderedArrayKey` 只有它；`zh-Hant` 與 `en` 的 `InfoPlist.strings` 都有這個模式 ID 的名稱。
 - `IMKInputController.menu()` 回傳兩個互斥項目「標準鍵盤」「倚天鍵盤」（目前的打勾），**各自用獨立的 selector**（IMK 呼叫時 `sender` 不一定是 `NSMenuItem`）。選了就走既有的切換排列流程（§5：送出組字、重建引擎、重載 LM 與設定），並存下選擇。
-- **「避免把敏感字詞排在前面」**（`docs/contracts/sw-sensitive-demote.md` §3）：選單的第三項，獨立的 selector（`toggleDemote`），預設打勾；每按一次切換並立刻呼叫 `shanjie_engine_set_demote`，也在每次重建引擎（換排列）時再送一次。偏好存在 app 自己的 UserDefaults，鍵 `demoteSensitive`（沒有值就是開）；介面 `DemoteStore` 是 `Shell.init` 的必要參數、不給預設值（和 `LayoutStore` 一樣）；UserDefaults 版只放在 `Shanjie` target，`ShanjieKit` 與測試用記憶體版，所以測試不可能寫到真正的偏好。選單順序因此是：標準鍵盤、倚天鍵盤、避免把敏感字詞排在前面、即時預測（V3 修訂一，`v3-engine.md` §10.5，比照這一項：獨立 selector `togglePrediction`、預設打勾、UserDefaults 鍵 `prediction`、`PredictionStore` 是 `Shell.init` 的必要參數、在 `setDemote` 之後套用）、可省略韻母（V3 第二片，`v3-engine.md` §12.1：獨立 selector `toggleAbbreviation`、預設不打勾、鍵 `abbreviation`、`AbbreviationStore` 是 `Shell.init` 的必要參數；預測列關閉時反灰、仍顯示勾選狀態；每次 `build()` 送一次 `shanjie_engine_set_abbreviation`，換排列、開關詞包重建引擎後設定不會掉回關；**v0.4.0 起隱藏**：App 傳 `Shell(showsAbbreviation: false)`，選單沒有這一項、一律關，`v3-engine.md` §12）、動漫與遊戲詞（`acg-pack.md` A.2：獨立 selector `toggleAcgPack`、預設打勾、鍵 `acgPack`、`AcgPackStore` 是 `Shell.init` 的必要參數；詞包屬於詞庫，所以和切換排列一樣送出組字、重建引擎，詞包載入失敗時退回不帶詞包的引擎，偏好不動）、善解設定…（`settings-window.md`：獨立 selector `openSettings`，開設定視窗，放在清除選字記憶…之前）、清除選字記憶…、不要備份選字記憶。`shanjie_engine_set_demote` 比照 `set_profile` 重算目前的組字並回傳快照，擁有組字的 session 立刻把它顯示出來，所以組字到一半切換，preedit 馬上在「搞完這波」與「睪丸這波」之間變。
+- **「避免把敏感字詞排在前面」**（`docs/contracts/sw-sensitive-demote.md` §3）：選單的第三項，獨立的 selector（`toggleDemote`），預設打勾；每按一次切換並立刻呼叫 `shanjie_engine_set_demote`，也在每次重建引擎（換排列）時再送一次。偏好存在 app 自己的 UserDefaults，鍵 `demoteSensitive`（沒有值就是開）；介面 `DemoteStore` 是 `Shell.init` 的必要參數、不給預設值（和 `LayoutStore` 一樣）；UserDefaults 版只放在 `Shanjie` target，`ShanjieKit` 與測試用記憶體版，所以測試不可能寫到真正的偏好。選單順序因此是：標準鍵盤、倚天鍵盤、避免把敏感字詞排在前面、即時預測（V3 修訂一，`v3-engine.md` §10.5，比照這一項：獨立 selector `togglePrediction`、預設打勾、UserDefaults 鍵 `prediction`、`PredictionStore` 是 `Shell.init` 的必要參數、在 `setDemote` 之後套用）、可省略韻母（V3 第二片，`v3-engine.md` §12.1：獨立 selector `toggleAbbreviation`、預設不打勾、鍵 `abbreviation`、`AbbreviationStore` 是 `Shell.init` 的必要參數；預測列關閉時反灰、仍顯示勾選狀態；每次 `build()` 送一次 `shanjie_engine_set_abbreviation`，換排列、開關詞包重建引擎後設定不會掉回關；**v0.4.0 起隱藏**：App 傳 `Shell(showsAbbreviation: false)`，選單沒有這一項、一律關，`v3-engine.md` §12）、中英混打（實驗）（中英混打第一片，`zhen-mixed.md` §3.2：獨立 selector `toggleEnglish`、預設不打勾、鍵 `english`、`EnglishStore` 是 `Shell.init` 的必要參數；單字表 `Resources/english-words.txt`（建置時產生，`scripts/build-app.sh`）沒載入成功或排列是倚天（倚天不記影子）時反灰、仍顯示勾選狀態；每次 `build()` 在 `load_lm`／`load_tinylm` 之後呼叫 `shanjie_engine_load_english`、再送一次 `shanjie_engine_set_english`，換排列、開關詞包重建引擎後設定不會掉回關；出貨 App 顯示、預設關；位置在即時預測（可省略韻母顯示時，在它之後）之後、語意校正之前）、語意校正（`s7c2b-shell-rerank.md` §2.2：獨立 selector `toggleRerank`，〔修訂 2026-10-12〕預設不打勾〔再修訂 2026-10-13，`s7h-tinylm-v3.md` §2.3：預設打勾〕；降權關掉或小模型沒載入時反灰、仍顯示勾選狀態；放在中英混打（實驗）之後、動漫與遊戲詞之前）、動漫與遊戲詞（`acg-pack.md` A.2：獨立 selector `toggleAcgPack`、預設打勾、鍵 `acgPack`、`AcgPackStore` 是 `Shell.init` 的必要參數；詞包屬於詞庫，所以和切換排列一樣送出組字、重建引擎，詞包載入失敗時退回不帶詞包的引擎，偏好不動）、這個 App 用聊天設定（`profile-choice.md` §2.3：獨立 selector `toggleAppChat`，接在動漫與遊戲詞的資料日期之後；client 取不到 bundle ID 時不顯示，切換方式不是依 App 自動時反灰）、善解設定…（`settings-window.md`：獨立 selector `openSettings`，開設定視窗，放在清除選字記憶…之前）、清除選字記憶…、不要備份選字記憶。`shanjie_engine_set_demote` 比照 `set_profile` 重算目前的組字並回傳快照，擁有組字的 session 立刻把它顯示出來，所以組字到一半切換，preedit 馬上在「搞完這波」與「睪丸這波」之間變。
 - **偏好**：介面 `LayoutStore`（讀／寫 `standard`／`eten`）是 `Shell.init` 的**必要參數、不給預設值**；UserDefaults 版（app 自己的網域，鍵 `layout`）只放在 `Shanjie` target，`ShanjieKit` 與測試用記憶體版，所以測試不可能寫到真正的偏好。值不存在或不合法時用標準排列。**`Shell.init` 先讀偏好、再建引擎，只建一次**（約 240 MB）。
 
 ### 13.3 註冊與升級
@@ -272,7 +274,7 @@
     - `postflight_steps` 在 Homebrew 的沙盒裡執行（`cask/artifact/abstract_artifact.rb` 把 `HOME` 設成暫存資料夾，`sandbox.rb` 的 `deny_read_home` 擋住讀取真正的家目錄），`~` 開頭的指令路徑也不會展開（`install_steps.rb` 的 `resolve_command`）。這樣寫出來的步驟找不到執行檔；加上 `must_succeed: false`，安裝仍然顯示成功，等於「靜靜地沒做」。
     - 就算改成 `base: :home` 讓沙盒放行讀取，`TISRegisterInputSource` 在沙盒裡能不能成功也沒有量過。
   - `uninstall on_upgrade: :signal, signal: ["TERM", "com.nyanako.inputmethod.shanjie"]`：解除安裝和升級時都結束執行中的行程，系統下次就會啟動新版。Homebrew 預設在升級時略過 `signal`（`UPGRADE_REINSTALL_SKIP_DIRECTIVES`），所以要加 `on_upgrade`。Homebrew 用 `launchctl list` 的標籤找行程；2026-10-04 在本機看到其他輸入法的標籤是 `application.<bundle ID>.<數字>.<數字>`，符合它的比對規則。**已由 §15（修訂四）取代**：0.3.0 實測升級後舊版仍在跑，改成 `postflight_steps` 在新版就位後結束行程，`uninstall` 只留 `signal`。
-  - `zap trash: "~/Library/Preferences/com.nyanako.inputmethod.shanjie.plist"`：目前唯一的使用者資料，也就是 `layout` 偏好。
+  - `zap trash: "~/Library/Preferences/com.nyanako.inputmethod.shanjie.plist"`：App 的偏好檔。寫這段時（2026-10-04）裡面只有 `layout` 偏好；之後加了其他設定，2026-10-12 起也包括使用者在選單上切換過的 App 的 bundle ID 與聊天／書面設定（`profile-choice.md` §2.5）。選字記憶不在這個檔案，在 `~/Library/Application Support/shanjie`。
   - `caveats`：第一次安裝後執行 `"$HOME/Library/Input Methods/善解輸入法.app/Contents/MacOS/shanjie" install`，由它註冊並啟用輸入方式；第一次安裝通常要登出再登入：它結束碼是 3 時，登出、再登入，然後再執行一次（修訂三）。caveats 不提升級；升級後由 §15 的 postflight 接手。**2026-10-09 修訂（`installer-v2.md` §9）**：「登出、再登入再執行一次」已取代，現在 caveats 寫「結束碼是 3 時，到系統設定 → 鍵盤 → 輸入方式加入」。
 - **未驗證**（由使用者實測，見 14.5，停止條件見 14.7）：
   - 從 Homebrew 下載的 app 帶有 quarantine（已公證、已 staple）：在終端機執行 caveats 的 `install` 時，以及系統啟動輸入法時，會不會跳出確認視窗；
@@ -435,7 +437,7 @@
      - `brew info` 是 0.3.0，bundle 的 cdhash 和 Release 相同。
      - tap 用 `git checkout` 還原後，本機 tap 落後成 0.1.2，brew 把它當成「可升級」。所以 main 再 `git pull --ff-only` 到遠端的 0.3.0，`brew outdated` 不再列出善解。
      - `/usr/bin/pkill -f` 那一行沒有印出來：verbose 與 debug 沒有傳進沙盒裡的子行程，所以用 notice 判讀。
-   - **最終版再跑一次**（2026-10-09，review 之後 pattern 開頭改成 `^[^ ]*`、notice 改了措辭）：用上面的第二次做法跑 `brew reinstall`。那次的 notice 是 8853a3e 的文字；424eda6 只再把 notice 縮短（`brew style` 行長），pattern 與 `match` 不變。
+   - **最終版再跑一次**（2026-10-09，review 之後 pattern 開頭改成 `^[^ ]*`、notice 改了措辭）：用上面的第二次做法跑 `brew reinstall`。那次的 notice 是 1fc8b99 的文字；9db4ae0 只再把 notice 縮短（`brew style` 行長），pattern 與 `match` 不變。
      - receipt 已經是新版 cask，log 裡沒有 `Signalling`，也沒有 `launchctl list`：reinstall 照規則略過 `signal`。
      - 舊行程 PID 9892 撐過解除安裝、移除、搬進新版，notice 前 0.27 秒還在，notice 後 0.01 秒內消失。所以這次結束它的只有 postflight。
      - 跑完後 tap 用 `git checkout` 還原（本機 tap 停在 0.3.0 的 0960ea0），`brew outdated` 沒有列出善解，bundle 的 cdhash 和 Release 相同。

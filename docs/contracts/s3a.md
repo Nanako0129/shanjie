@@ -43,6 +43,7 @@
 - 按聲調鍵（含空白鍵）完成音節。音節字串的格式和詞庫、評測檔相同：聲母＋介音＋韻母＋調號，一聲不加調號，˙ 放最後（例：`ㄇㄚ˙`、`ㄕˋ`、`ㄧ`）。
 - **詞庫沒有的音節不收**：完成時若 `lex.entries(&[音節])` 是空的，這個聲調鍵回報「已處理」，未完成音節保持原狀，組字區不變（使用者可用 Backspace 修正）。實測詞庫的 1,417 個音節都有單音節詞條，所以收進來的音節一定解得出來；`decode_beam` 若仍回錯，視為內部錯誤（§6 的回傳碼 4）。
 - 新音節插在游標處，游標移到它右邊。
+- **影子（中英混打，`docs/contracts/zhen-mixed.md` §2.2）**：`set_english(1)`、`set_abbreviation(0)`、標準排列、單字表已載入，四個都成立時，未完成音節從第一個注音鍵起另外記下每個**注音鍵**（第 9、14 條處理的鍵）的鍵帽字元（不含 Shift，最多 32 個）和「覆寫次數」（第 9 條裡那一欄已有符號、被取代的次數）；否則影子一律是空的、不記。聲調鍵與空白鍵不記。第 33 個注音鍵把影子清空（長度 0、覆寫 0），之後的鍵重新開始記。影子跟著 `clear_pend` 一起清（完成音節、Esc、標點、送出、reset、回傳碼 4、第 11 條刪到未完成音節消失）。第 11 條刪最後一個符號時影子丟掉最後一個記下的鍵（覆寫次數不變；影子與欄位在覆寫過的音節上會分歧，但影子只用來查單字表，分歧無害）。倚天排列不記影子。
 
 ## 3. 按鍵行為（暫定，S3b 會對照使用者的截圖與實機修正）
 
@@ -73,6 +74,7 @@
 | 8a | 預測列未進入且不是空的（候選窗關閉） | Tab（無修飾鍵） | 進入預測列，選取第 0 個（插在第 9 條之前）；預測列是空的時照第 13、21 條 |
 | 9 | 有未完成音節 | 注音鍵 | 放進對應欄位（同一欄再按一次是取代）。**例外（V3 第二片，`v3-engine.md` §12）**：「可省略韻母」開、預測列開、游標在組字區尾端時，那一欄已有符號就**開新的未完成單位**（最後一個單位的那一欄是空的就放進去）；有兩個以上單位時，聲調鍵與空白鍵見 9a。要有語言模型；單位上限 `ABBR_MAX_UNITS` = 10，到了上限已有符號的那一欄照取代 |
 | 9a | 有兩個以上未完成單位 | 聲調鍵、空白鍵 | 吃掉、不動作（單位只靠預測列選取、Backspace、Esc 解決；最多 10 個單位，見第 9 條）；只有一個單位時照第 10 條 |
+| 10e | 有未完成音節（一個單位），影子是單字表裡的字、覆寫次數 ≥ 1（殘餘音節——目前三欄的符號加一聲——在詞庫裡時要 ≥ 2），游標在組字區尾端（`zhen-mixed.md` §2.2） | 空白鍵 | 不當一聲，開英文窗（見下）。其他情況照第 10 條 |
 | 10 | 有未完成音節 | 聲調鍵、空白鍵 | 完成音節（§2） |
 | 11 | 有未完成音節 | Backspace | 刪掉顯示位置最後的符號（韻母→介音→聲母；2026-10-06 實測蘋果注音與小麥注音）。多個單位時刪最後一個單位的最後一個符號，空了的單位拿掉 |
 | 12 | 有未完成音節 | Esc | 清掉未完成音節（多個單位時是全部單位；組字區的字、固定詞、游標不動） |
@@ -90,6 +92,19 @@
 | 21 | 組字區有字 | 其他鍵（含 Shift＋非標點、Tab） | 送出組字區，然後直通這個鍵（`handled = 0`、`commit` 非空） |
 | 22a | 組字區空 | 聲調鍵（空白鍵以外） | 把該聲調符號（ˊ ˇ ˋ ˙）放進組字區，和第 2 條的標點相同（2026-10-05 起；蘋果注音實測按 3 打出「ˇ」但立刻送出，使用者選擇留在組字區，Backspace 可刪、Enter 才送出；原本直通成數字） |
 | 22 | 組字區空 | 其他鍵 | 不處理（直通） |
+
+**英文窗（中英混打，`docs/contracts/zhen-mixed.md` §2.3）**：第 10e 條開的候選窗，`Cands.english`。清單依序是影子的小寫字 `w`、首字大寫、全大寫，殘餘音節在詞庫裡時第四項是詞庫對那個一聲音節的第一個詞條（`lex.entries(&[音節])[0]`）；方向照 `set_candidate_vertical`，開窗時固定。開窗時預測列清掉，未完成音節的符號照舊顯示在 preedit。第 3–8、3v–5p 條的其餘行為不變，英文窗開著時：
+
+| 按鍵 | 行為 |
+|---|---|
+| 1–9、Enter（含 Shift+Enter）、滑鼠 `pick(index)` | 選第 n 項／選取的那項（超出項數照第 3 條忽略）。**英文項**：先 `clear_pend`（影子跟著清，`commit` 不含注音符號），再走送出路徑，`commit` ＝ 組字區顯示的整串＋那個英文，**不加空白**（學習照送出規則：固定詞的待學記錄照常學、英文本身不學；重排工作作廢；左文清掉）；組字區清空、`handled` 1。**中文項**：清影子與未完成音節，把那個一聲音節插在游標處並固定那個詞（長度 1、`pre` 是 `None`，不學），和第 10 條一樣重算、預測列重算 |
+| ←→↑、↓（展開）、空白鍵（只有一頁，回到第 0 項）、Page Up／Down（直排） | 照第 4、5、4v–5p 條，不送出 |
+| Esc、Backspace | 關窗、**清影子**，未完成音節保留（第 7 條加上清影子；再按空白鍵就照第 10 條） |
+| ⌘⌫ | 吃掉、不動作（`handled` 1、狀態不變、不碰學習檔） |
+| 其他鍵（含注音鍵、聲調鍵、Tab、Delete、Home、End） | 第 8 條：關窗、清影子，再從第 9 條起處理這個鍵；注音鍵照第 9 條進欄位並重新開始記影子 |
+| 標點（第 2 條） | 第 2 條在第 3–8 條之前：丟掉未完成音節（影子跟著清）、關窗、插入標點 |
+
+選了英文項之後：`handled` 1、`commit` 非空、`preedit` 空、沒有候選。游標不在尾端、倚天排列、`set_english(0)`、沒有單字表、`set_abbreviation(1)` 時不記影子（或不觸發）、不開窗，和沒有這個功能時逐位元相同。
 
 **直排候選窗與直排預測列**（`docs/contracts/candidate-vertical.md`，放在表外：夾在表中間會讓後面的列不再顯示成表格）：方向由 `shanjie_engine_set_candidate_vertical` 設定（預設橫排）。**候選窗在開啟時固定方向**（第 15 條與 s3e 的標點候選開窗時讀；設定只影響下一次開窗，開著的窗，含展開的網格，照開啟時的方向）。**預測列沒有開窗的時間點**，每個輸出都照 engine 當下的設定，所以設定的回傳快照裡正在顯示的預測列就換成新的方向。直排候選窗的狀態是「整份清單、可見範圍的第一個、選取」，可見範圍固定 9 個（不足 9 個就是全部）；開窗時從 0 開始、選取 0。輸出：`candidates` 是可見範圍、`candidate_selected` 是在可見範圍裡的位置、`candidate_first`／`candidate_total` 照現有意義、`candidate_columns` 一律 0。`candidate_vertical` 是 0（橫排，或沒有候選）、1（直排候選窗）、2（直排預測列，進入或未進入；其他欄位的意義不變）。第 3v–5p 條取代直排候選窗的第 3–5 條，第 6–8 條、⌘⌫ 遺忘與其他條不變；直排預測列進入後的 ↑↓ 見第 1b 條，未進入時 ↓ 照第 15 條、↑ 照第 16 條，與橫排相同。
 
@@ -181,17 +196,42 @@ int32_t shanjie_engine_set_punctuation(ShanjieEngine *engine, const char *table)
 // candidate-vertical 新增（docs/contracts/candidate-vertical.md §2.2）：下一次開啟的候選窗的方向。enabled 0（預設，橫排）或 1（直排），其他值回 2、狀態不變；
 // 1 = engine 或 out 為 NULL；回傳快照（handled 1、commit ""），和 set_prediction 相同。開著的候選窗照開啟時的方向（快照和呼叫前的輸出相同），正在顯示的預測列則換成新的方向（值 2）。殼在每次建 engine 後都要呼叫。
 int32_t shanjie_engine_set_candidate_vertical(ShanjieEngine *engine, uint32_t enabled, ShanjieOutput **out);
+// zhen-mixed 新增（docs/contracts/zhen-mixed.md §3.1）：英文單字表。0 成功；1 engine 或 path 為 NULL；2 路徑不是 UTF-8；3 讀不了、不是一般檔案、超過 4 MiB 或 200,000 行、
+// 有一行不符 [a-z]{3,32}、有重複行、有 BOM。失敗時保留之前的單字表（或沒有）。不改開關、不改目前顯示。建立 engine 後呼叫一次。
+int32_t shanjie_engine_load_english(ShanjieEngine *engine, const char *path);
+// set_english：0 或 1（其他回 2、狀態不變），建立時預設 0，碼與快照同 set_abbreviation（handled 1、commit ""）；engine 或 out 為 NULL 回 1。
+// 1 且有單字表、標準排列、「可省略韻母」關時，英文打進一個未完成音節後的空白鍵開英文窗（第 10e 條）；關掉時開著的英文窗跟著關。沒有單字表時無作用。殼在每次建 engine 後都要呼叫。
+int32_t shanjie_engine_set_english(ShanjieEngine *engine, uint32_t enabled, ShanjieOutput **out);
+// S7c-2a 新增（docs/contracts/s7c2a-core-rerank.md §2.5）：小模型重排的兩段式 API。每次組字改變可能留下一個重排工作；殼取走、在別的執行緒 run、回到引擎的執行緒 apply。
+#define SHANJIE_NO_CHANGE 5
+typedef struct ShanjieRerankJob ShanjieRerankJob;
+// load_tinylm：讀檔失敗、不是一般檔案、超過 64 MiB、格式錯、沒有載入 n-gram、KN 側檔開著、.sjtl 記的 n-gram 雜湊不同 → 3（只是配對檢查，不是 .sjtl 的完整性檢查），
+// 引擎維持原狀；NULL → 1、路徑不是 UTF-8 → 2。不改 set_rerank 的開關、不改目前顯示。load_lm 成功會丟掉小模型（要在 load_lm 之後呼叫）。
+int32_t shanjie_engine_load_tinylm(ShanjieEngine *engine, const char *path);
+// set_rerank：0 或 1（其他回 2、狀態不變），建立時預設 0（S7c-2c 起；之前是 1）；碼與快照同 set_demote（重算組字，關掉時畫面回到 n-gram 的結果）。殼每次建 engine 後都要呼叫。
+int32_t shanjie_engine_set_rerank(ShanjieEngine *engine, uint32_t enabled, ShanjieOutput **out);
+// rerank_take：交出上一次改變的工作（只交一次）；沒有工作時回 0、*job 為 NULL。engine 或 job 為 NULL → 1（job 非 NULL 時先設 *job = NULL）；4 → 引擎 discard。
+int32_t shanjie_engine_rerank_take(ShanjieEngine *engine, ShanjieRerankJob **job);
+// rerank_run：任何執行緒都可呼叫，不需要引擎；結果存在工作裡。0 成功、1 job 為 NULL、4 攔下的 panic（沒有碰任何引擎，組字不變；不留結果，連之前那次 run 的結果也清掉）。
+int32_t shanjie_rerank_run(ShanjieRerankJob *job);
+// rerank_apply：在引擎的執行緒、run 回傳之後。有改變 → 0 與快照（預測列只在套用當下有顯示時才重算）；沒有結果、過期、組字裡已不是工作記下的詞、候選窗開著、預測列已進入、每段都選第一名、已套用過 → SHANJIE_NO_CHANGE、*out 為 NULL；
+// 不釋放工作。engine、job、out 任一為 NULL → 1；4 → 引擎 discard、*out 為 NULL。
+int32_t shanjie_engine_rerank_apply(ShanjieEngine *engine, ShanjieRerankJob *job, ShanjieOutput **out);
+// rerank_free(NULL) 不做事。
+void    shanjie_rerank_free(ShanjieRerankJob *job);
 ```
 
-- **回傳碼**：0 成功、1 必要的指標是 NULL、2 輸入不合法（data_dir、LM 路徑或標點表不是 UTF-8、`ch` 不是合法的 Unicode scalar、layout、mode 或 profile 超出範圍、標點表格式不合法或超過上限，見 s3e §3）、3 資料載入失敗（含 LM 檔讀取或格式錯誤、引擎沒有 data_dir）、4 內部錯誤（攔下的 panic 或解碼錯誤）。`load_lm` 失敗時 LM 維持原狀；碼 4 時任何函式都照下面的規則丟棄組字。
+- **回傳碼**：0 成功、1 必要的指標是 NULL、2 輸入不合法（data_dir、LM 路徑或標點表不是 UTF-8、`ch` 不是合法的 Unicode scalar、layout、mode 或 profile 超出範圍、標點表格式不合法或超過上限，見 s3e §3）、3 資料載入失敗（含 LM 檔讀取或格式錯誤、引擎沒有 data_dir）、4 內部錯誤（攔下的 panic 或解碼錯誤）、5 沒有改變（只有 `rerank_apply`，S7c-2a）。`load_lm` 失敗時 LM 維持原狀；碼 4 時任何函式都照下面的規則丟棄組字（`rerank_run` 例外，見下）。
 - **reset**：mode 0 時 `commit` 是目前組字區的顯示字串（未完成音節丟掉）；mode 1 時 `commit` 為空。兩者都清掉所有組字狀態，之後的輸出必須和新建的 engine 相同；S2c 起是「新建、載入相同 LM、使用相同設定的 engine」，reset 不清 LM 與設定。殼在 `commitComposition:`、`deactivateServer`、組字擁有者改變時呼叫（mode 與時機見 `docs/contracts/s3b.md` §5）。Caps Lock 由系統切換輸入方式，會觸發 `deactivateServer`；「privacyGate 轉為生效時」延到 S4。
 - **記憶體與生命週期**：
   - 回傳非 0 時，`*out` 一律設成 NULL，而且不配置任何記憶體。
   - `shanjie_engine_free(NULL)`、`shanjie_output_free(NULL)` 什麼都不做。重複釋放、或釋放不是核心配置的指標，屬於未定義行為。
   - `ShanjieOutput` 擁有自己的字串副本，有效期到 `shanjie_output_free` 為止，不受之後的 `engine_key`、`engine_reset`、`engine_set_profile`、`engine_load_lm`、`engine_free` 影響。
-  - handle 不是 thread-safe：所有呼叫都在同一個執行緒（IMK 主執行緒）。
-  - 回傳碼 4 之後，engine 自動 reset（mode 1），丟掉可能只改了一半的組字。
-  - 殼收到非 0 回傳時，當作「不處理」直通，而且不記錄這個按鍵。
+  - handle 不是 thread-safe：所有呼叫都在同一個執行緒（IMK 主執行緒）。例外是 `shanjie_rerank_run` 與 `shanjie_rerank_free`（不需要引擎，S7c-2a；free 要在 run 回傳之後，同一個工作不可同時 run 與 free）。
+  - 回傳碼 4 之後，engine 自動 reset（mode 1），丟掉可能只改了一半的組字。**例外**：`shanjie_rerank_run` 的 4 不重設任何東西（它沒有引擎）。
+  - 殼收到 `engine_key`、`engine_pick` 的非 0 回傳時，當作「不處理」直通，而且不記錄這個按鍵。`rerank_take`、`rerank_run`、`rerank_apply` 的非 0 碼**不代表按鍵直通**（它們沒有對應的按鍵）。
+  - 回傳碼 5（`SHANJIE_NO_CHANGE`）只有 `rerank_apply` 會回：沒有改變、過期、組字裡已不是工作記下的詞、候選窗開著、預測列已進入、還沒 run（或 run 回 4）、已套用過。
+  - **重排工作（S7c-2a）**：`rerank_take` 交出的每個工作都由殼恰好 `rerank_free` 一次；`rerank_apply` 不釋放工作，同一個工作再 apply 一律回 5。同一個工作不可同時在兩個執行緒使用（run 回傳之後才能 apply 或 free）；run 不可取消，之後的改變只會讓結果作廢。**過期**（s7c2a §2.3 修正一）：只有會重新解碼的改變讓結果作廢——完成音節、刪除、選字或預測列選字、標點（標點不是送出：它進組字區、重新解碼、產生新工作）、⌘⌫ 忘記、改變解碼的設定（profile、降權、重排開關、換模型、選字記憶的開檔／清除；`set_learning` 不論設成什麼值都不讓結果作廢：它只決定選字要不要記下來，不改變解碼，S7c-2b）；不重新解碼的鍵（游標移動、還沒完成音節的注音符號、進入預測列、直通鍵）不讓結果作廢。送出（Enter、40 個字元自動送出、reset）送出畫面上的內容，還沒套用的工作作廢。工作只放擁有的資料（字串、分數、範圍、世代號、設定、模型），不借用引擎，所以引擎釋放之後工作仍可 run 或 free。未定義行為：同一個工作 free 兩次、free 之後再 run 或 apply、free 一個不是 `rerank_take` 交出的指標、run 進行中同時 apply 或 free。工作與結果內含候選文字：不寫進任何紀錄（含指標），`load_tinylm` 的路徑也不寫。
 - **R2 規則**：
   - 每個匯出函式都包 `catch_unwind`。`ffi.rs` 加 `#[cfg(panic = "abort")] compile_error!(…)`，讓 release 設定改成 abort 時建置失敗。
   - 匯出函式的入口用 `std::sync::Once` 安裝不印任何東西的 panic hook（`|_| {}`）；不在 `Engine::new` 裡裝，引擎單元測試仍保有 panic 訊息。
@@ -225,6 +265,7 @@ int32_t shanjie_engine_set_candidate_vertical(ShanjieEngine *engine, uint32_t en
 - **經 C ABI 的重播**：在子行程裡經 C ABI 跑完 §7.2 的前 20 列，結果與 §7.2 相同。子行程的 stdout、stderr 除了 libtest 自己的 harness 行（`running 1 test`、`test … ok`、`test result: …` 與空行）之外沒有其他內容，而且不含這 20 列任何一列的句子或讀音字串。
 - 兩個 free 函式傳 NULL 不崩潰；各種錯誤碼的情境回傳正確的碼且 `*out` 為 NULL。
 - **S2c**：子行程測試 `child_lm`／`load_lm_and_set_profile_codes` 用手工的小 SJLM 檔，涵蓋 load_lm 的碼 1、2、3 與失敗時保留原本的 LM、set_profile 的碼 1、2、4（注入 panic）與成功快照、reset 保留 LM 與設定，並檢查子行程輸出不含暫存路徑。
+- **S7c-2a**：子行程測試 `child_rerank`／`rerank_codes_through_the_c_abi` 用真的詞庫與 n-gram 模型、`eval/golden/tinylm-tiny/` 的玩具模型（執行時改寫 n-gram 雜湊與 alpha／tau），涵蓋 load_tinylm 的碼 1、2、3（沒有 n-gram、不存在、壞檔、別的模型的雜湊、資料夾）、set_rerank 的碼、take／run／apply 的所有 NULL 組合、沒有工作時 NULL、還沒 run 就 apply 回 5、run → apply → 同一個工作再 apply 回 5、游標移動後照樣套用、Backspace 刪音節後過期回 5、apply 注入 panic 回 4 之後組字為空、load_tinylm 不改開關、引擎釋放後工作仍可 run 與 free，並檢查子行程輸出不含暫存路徑。`child_rerank_panic`／`r2_rerank_run_panic_is_silent`：第一次 run 成功之後，第二次 run 在注入點 panic（payload 含候選文字）回 4，子行程的 stdout／stderr 不含該文字（預設 hook 的正向對照看得到），之後組字不變、apply 回 5（第一次的結果也不留）。
 
 `core/tests/engine_pack.rs`（acg-pack 契約 A.5）：走出貨的建構子 `new_with_packs`，用會變的輸入（碇源堂、螢火蟲之墓的讀音，聊天與書面）。遮罩 0 且檔案存在、遮罩 1 且檔案不存在，兩者的每一個 `Output`（解碼、候選窗、預測列）都和 `Engine::new` 逐位元相同；遮罩 1 且檔案存在時，兩個名字是第一個候選。把遮罩改成什麼都不做會讓 `on != plain` 的斷言失敗（2026-10-09 實測，exit 101）。
 
@@ -237,6 +278,7 @@ int32_t shanjie_engine_set_candidate_vertical(ShanjieEngine *engine, uint32_t en
   - 依排列送出「你好」的按鍵（標準 `s u 3 c l 3`、倚天 `n e 3 h z 3`），每鍵都 `shanjie_output_free`；送 Enter 後檢查 `handled == 1`、`commit` 是「你好」、`preedit` 是空字串、`cursor_utf16 == 0`、`candidate_count == 0`、`candidates == NULL`、`candidate_selected == -1`。
   - 再送 `ㄋㄧˇ` 的按鍵和空白鍵，檢查候選已開：`candidate_count` 在 1–9、`candidates[0]` 不是 NULL、`candidate_selected == 0`；接著 `shanjie_engine_reset(e, 1, &o)`，檢查 `commit` 為空字串、`preedit` 為空字串。
   - `shanjie_engine_free(e)`；最後呼叫 `shanjie_engine_free(NULL)`、`shanjie_output_free(NULL)`。
+  - S7c-2a（檢查 901–918）：沒有 n-gram 時 `load_tinylm` 回 3、NULL 回 1、不存在的檔案回 3；`set_rerank` 的碼；沒有小模型時打字後 `rerank_take` 回 0 且 `*job` 為 NULL；take、run、apply 的 NULL 組合；`rerank_free(NULL)`。冒煙測試沒有 `.sjtl`，成功的 run／apply 由 §7.3 的子行程測試負責。
   - 全部通過時 exit 0，任何一項不符時印出項目編號（不印任何字串內容）並 exit 1。
 - 指令（在 repo 根目錄，`$T` 是暫存目錄）：
 

@@ -94,10 +94,11 @@ jobs:
 
       # The bigram model is not in git (docs/PLAN.md S2c); it is the model-v5
       # release asset, and its word-class table (S2k) is the classes-v3 asset.
+      # The small model of 語意校正 (S7c-2b) is the tinylm-v3 asset (S7h), paired with model-v5.
       # Checking them here fails the run in seconds with a clear message instead
-      # of after the build. The hashes are checked against data/bigram.sjlm.sha256 and
-      # data/classes.sjc.sha256 (also read by build-app.sh and release.yml); cli/tests/golden.rs
-      # repeats them, so a model switch updates both (docs/data-files.md).
+      # of after the build. The hashes are checked against data/bigram.sjlm.sha256,
+      # data/classes.sjc.sha256 and data/tinylm.sjtl.sha256 (also read by build-app.sh and release.yml); cli/tests/golden.rs
+      # repeats the first two, so a model switch updates both (docs/data-files.md).
       - name: Fetch the language model
         env:
           GH_TOKEN: ${{ github.token }}
@@ -107,6 +108,8 @@ jobs:
           shasum -a 256 -c data/bigram.sjlm.sha256
           gh release download classes-v3 --repo "$GITHUB_REPOSITORY" -p classes.sjc -D data/lm
           shasum -a 256 -c data/classes.sjc.sha256
+          gh release download tinylm-v3 --repo "$GITHUB_REPOSITORY" -p tinylm.sjtl -D data/lm
+          shasum -a 256 -c data/tinylm.sjtl.sha256
 
       - name: Tests (debug)
         run: cargo test --locked
@@ -186,6 +189,34 @@ jobs:
       - name: model-v5 build scripts (Python)
         run: python3 -W ignore -m unittest tools/test_build_lm.py experiments/s2/test_extra_lexicon.py experiments/model-v5/test_compare_counts.py experiments/model-v5/test_count_lexicon.py
 
+      # docs/contracts/kn-core.md: the SJKN0002 writer and lm.py reader, and the kn-tiny golden is the generator's current output.
+      - name: Kneser-Ney side file (Python)
+        run: python3 -W ignore -m unittest tools/test_kn_cont.py
+
+      # docs/contracts/sbench.md and sbench-v2.md: the benchmark tool's guards (frozen set hashes, settings table and tags,
+      # rowstats scoring, dump cross-check, replay consistency) against a fake CLI; no builds, no private data.
+      - name: Benchmark tool (Python)
+        run: python3 -m unittest tools/test_bench.py
+
+      # docs/contracts/zhen-mixed.md section 3.4 and 5.6: the English word list builder (filter, cut, sort, input hash), synthetic input.
+      - name: English word list builder (Python)
+        run: python3 -m unittest tools/test_build_english_words.py
+
+      # tools/build_overlay.py manual words: row checks, and the `manual` tail of overlay-add.tsv equals manual_rows() today (no dumps).
+      - name: Overlay manual words (Python)
+        run: python3 -m unittest tools/test_build_overlay.py
+
+      # docs/contracts/x0c-compare.md acceptance 5: score_0c.py and versus.py against a fake model (input layout, 64-character
+      # context, log10 scale, unscorable rows, covered-only comparison). They need numpy (not onnxruntime, not the weights),
+      # which the runner may not have, so it goes into a throwaway venv.
+      - name: X0c scoring and comparison (Python)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m venv "$RUNNER_TEMP/x0c-venv"
+          "$RUNNER_TEMP/x0c-venv/bin/python" -m pip install --quiet numpy==2.5.4
+          "$RUNNER_TEMP/x0c-venv/bin/python" -W ignore -m unittest experiments/x0c/test_x0c.py
+
   # The Swift input method (docs/contracts/s3b.md section 3): build the ad-hoc
   # app, the Swift tests through the real core and model, the bundled
   # selftest, and acceptance checks 2, 3 and 6 of contract section 10.
@@ -198,6 +229,14 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           persist-credentials: false
+
+      # The input of the English word list (SymSpell, pinned commit; build-app.sh downloads it when missing and checks its SHA-256
+      # either way, so a bad cache is only a miss). The key follows tools/build_english_words.py, where the pins live.
+      - name: Cache the English word list input
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/shanjie/english
+          key: symspell-${{ hashFiles('tools/build_english_words.py') }}
 
       # The same toolchain as the core job and release.yml: libcore.a is built
       # by every job that links it.
@@ -214,6 +253,8 @@ jobs:
           shasum -a 256 -c data/bigram.sjlm.sha256
           gh release download classes-v3 --repo "$GITHUB_REPOSITORY" -p classes.sjc -D data/lm
           shasum -a 256 -c data/classes.sjc.sha256
+          gh release download tinylm-v3 --repo "$GITHUB_REPOSITORY" -p tinylm.sjtl -D data/lm
+          shasum -a 256 -c data/tinylm.sjtl.sha256
 
       # The local entry points (Makefile, docs/verification.md). cargo test
       # already ran in the core job, so only the Swift tests run here.

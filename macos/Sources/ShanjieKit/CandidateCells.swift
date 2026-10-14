@@ -3,7 +3,7 @@ import AppKit
 /// Layout values of one candidate cell (docs/contracts/s3b2-glass-panel.md sections 3 and 9.1). The
 /// cell draws its three strings itself, so every gap below is between the strings' own text origins
 /// and ends (`NSAttributedString.size()`); there is no text-field padding in them. They reproduce the
-/// layout of the earlier NSTextField cells (4b22c30), which s-7 matched against a-3 within 1 pt: that
+/// layout of the earlier NSTextField cells (ddf3e8c), which s-7 matched against a-3 within 1 pt: that
 /// layout was 2 pt of gap on each side of a label frame whose text sat 2 pt inside it, and
 /// `CandidateCellTests` compares the widths of both builds.
 public enum CellMetrics {

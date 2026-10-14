@@ -2,7 +2,7 @@
 //! The Python code is ground truth; float operation order is kept on purpose (no fusing or reordering).
 //! R2: errors carry no content; nothing here formats input text.
 
-use crate::learn::{context_key, Learner, Level};
+use crate::learn::{context_key, record_key, Learner, Level};
 use crate::{Error, Lexicon, PER_KEY};
 use std::collections::{HashMap, HashSet};
 use std::fmt;
@@ -41,6 +41,8 @@ impl Profile {
 pub enum LmError {
     Io,
     Format,
+    /// The Kneser-Ney side file (`kn.sjkn`) exists but cannot be read, or does not match the model (docs/contracts/kn-core.md).
+    KnSide,
 }
 
 impl fmt::Display for LmError {
@@ -48,6 +50,7 @@ impl fmt::Display for LmError {
         f.write_str(match self {
             LmError::Io => "cannot read language model file",
             LmError::Format => "bad language model file",
+            LmError::KnSide => "unreadable or mismatching Kneser-Ney side file (kn.sjkn)",
         })
     }
 }
@@ -69,6 +72,32 @@ pub struct Lm {
     cnt: Vec<u32>,
     /// S2k word-class term (classes.sjc); `None` only for the explicit class-less constructors.
     classes: Option<Classes>,
+    /// SHA-256 (hex) of the model bytes, taken once in `parse`: classes.sjc and kn.sjkn are bound to it.
+    sha: String,
+    /// Kneser-Ney side file (`kn.sjkn` beside the model, docs/contracts/kn-core.md); `None` is off.
+    kn: Option<Kn>,
+}
+
+/// kn.sjkn (SJKN0002, written by tools/kn_cont.py), indexed by model word id. `total` (sum of N') is computed
+/// upstream in Python (lm.kn_total over the variant classes) and only read here.
+struct Kn {
+    beta: f64,
+    theta: u32,
+    total: u64,
+    /// The whole file; N is read in place (little-endian u32 at `KN_N + 4 * id`), so nothing is copied.
+    raw: Vec<u8>,
+    /// `+kn:<side file sha8>:θ<θ>:β<β>`, the suffix of lm_eval.py's summary line; hashed on first use.
+    tag: OnceLock<String>,
+}
+
+const KN_N: usize = 64;
+
+impl Kn {
+    /// N' = N + 1 of word `id`.
+    fn np1(&self, id: usize) -> u64 {
+        let at = KN_N + 4 * id;
+        u32::from_le_bytes([self.raw[at], self.raw[at + 1], self.raw[at + 2], self.raw[at + 3]]) as u64 + 1
+    }
 }
 
 /// classes.sjc (format in tools/build_classes.py), indexed by model word id.
@@ -81,6 +110,7 @@ struct Classes {
 }
 
 const CLASS_MAGIC: &[u8; 8] = b"SJCL0001";
+const KN_MAGIC: &[u8; 8] = b"SJKN0002";
 const NO_CLASS: u16 = 0xFFFF;
 
 /// classes.sjc bytes for `model` (tests only; the real file is written by tools/build_classes.py).
@@ -145,28 +175,92 @@ impl<'a> Rd<'a> {
 }
 
 impl Lm {
+    /// SHA-256 (hex) of the model file this `Lm` was parsed from.
+    pub fn sha256(&self) -> &str {
+        &self.sha
+    }
+
     /// Cheap fingerprint of the loaded model (sizes of its tables), to tell two models apart.
     pub fn identity(&self) -> (u64, usize, usize) {
         (self.n, self.voff.len(), self.nxt.len())
     }
 
     /// The model at `path` and the `classes.sjc` beside it (S2k section 4.3). A missing or mismatching class
-    /// file is an error, never a silent fallback.
+    /// file is an error, never a silent fallback. A `kn.sjkn` beside the model switches the Kneser-Ney term on
+    /// (docs/contracts/kn-core.md); one that does not match the model is an error too.
     pub fn load(path: &Path) -> Result<Lm, LmError> {
-        let model = std::fs::read(path).map_err(|_| LmError::Io)?;
-        let classes = std::fs::read(path.with_file_name("classes.sjc")).map_err(|_| LmError::Io)?;
-        Lm::parse_with_classes(&model, &classes)
+        Lm::load_with(path, true, true)
     }
 
-    /// The model alone, explicitly without the class term (`--no-classes`).
+    /// The model without the class term (`--no-classes`); a `kn.sjkn` beside it is still read.
     pub fn load_without_classes(path: &Path) -> Result<Lm, LmError> {
-        Lm::parse(&std::fs::read(path).map_err(|_| LmError::Io)?)
+        Lm::load_with(path, false, true)
+    }
+
+    /// `load` with the class file (`classes`) and the Kneser-Ney side file (`kn`) each optional (`--no-classes`, `--no-kn`).
+    /// With `kn` on, no `kn.sjkn` path is simply off; one that exists (a dangling symlink included) but cannot be
+    /// read or does not match is `KnSide`, never ignored.
+    pub fn load_with(path: &Path, classes: bool, kn: bool) -> Result<Lm, LmError> {
+        let model = std::fs::read(path).map_err(|_| LmError::Io)?;
+        let mut lm = if classes {
+            let c = std::fs::read(path.with_file_name("classes.sjc")).map_err(|_| LmError::Io)?;
+            Lm::parse_with_classes(&model, &c)?
+        } else {
+            Lm::parse(&model)?
+        };
+        if kn {
+            let side = path.with_file_name("kn.sjkn");
+            match std::fs::symlink_metadata(&side) {
+                Ok(_) => lm.add_kn(&std::fs::read(&side).map_err(|_| LmError::KnSide)?)?,
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(_) => return Err(LmError::KnSide),
+            }
+        }
+        Ok(lm)
+    }
+
+    /// SJKN0002 bytes (docs/contracts/kn-core.md section 1): magic, V, the model's SHA-256, θ, β, sum of N', N[V]. Checked
+    /// (all `KnSide`): magic, V, the hash of the model this `Lm` was parsed from, exact length, β in [0, 1], and the
+    /// header sum of N' between the largest N' and the sum of all N' over ids >= 2 (a correct file always is: the sum counts
+    /// each variant class once). Turns the Kneser-Ney term on.
+    pub fn add_kn(&mut self, side: &[u8]) -> Result<(), LmError> {
+        let bad = |_| LmError::KnSide;
+        let mut r = Rd(side);
+        if r.take(8).map_err(bad)? != KN_MAGIC {
+            return Err(LmError::KnSide);
+        }
+        let v = r.u32().map_err(bad)? as usize;
+        let want: String = r.take(32).map_err(bad)?.iter().map(|b| format!("{b:02x}")).collect();
+        let (theta, beta, total) = (r.u32().map_err(bad)?, r.f64().map_err(bad)?, r.u64().map_err(bad)?);
+        if v != self.uni.len() || want != self.sha || !(0.0..=1.0).contains(&beta) || side.len() != KN_N + 4 * v {
+            return Err(LmError::KnSide);
+        }
+        let kn = Kn { beta, theta, total, raw: side.to_vec(), tag: OnceLock::new() };
+        let (mut max, mut sum) = (0u64, 0u128);
+        for id in 2..v {
+            let n = kn.np1(id);
+            max = max.max(n);
+            sum += n as u128;
+        }
+        if total == 0 || total < max || total as u128 > sum {
+            return Err(LmError::KnSide);
+        }
+        self.kn = Some(kn);
+        Ok(())
+    }
+
+    /// The summary-line suffix `+kn:<side file sha8>:θ<θ>:β<β>` (same text as reference/proto/lm_eval.py); `None` when the
+    /// Kneser-Ney term is off. The side file is hashed on the first call.
+    pub fn kn_tag(&self) -> Option<&str> {
+        self.kn.as_ref().map(|k| {
+            k.tag.get_or_init(|| format!("+kn:{}:θ{}:β{}", &crate::eval::sha256_hex(&k.raw)[..8], k.theta, fmt_g(k.beta))).as_str()
+        })
     }
 
     /// Model bytes plus classes.sjc bytes: magic, the model's SHA-256, the vocabulary size and the exact length must match.
     pub fn parse_with_classes(model: &[u8], classes: &[u8]) -> Result<Lm, LmError> {
         let mut lm = Lm::parse(model)?;
-        let sha = crate::eval::sha256_hex(model);
+        let sha = lm.sha.clone();
         let mut r = Rd(classes);
         if r.take(8)? != CLASS_MAGIC {
             return Err(LmError::Format);
@@ -267,6 +361,8 @@ impl Lm {
             nxt,
             cnt,
             classes: None,
+            sha: crate::eval::sha256_hex(bytes),
+            kn: None,
         })
     }
 
@@ -301,7 +397,18 @@ impl Lm {
     /// caller goes through. A kept bigram is unchanged; every other pair (also a context without entries,
     /// `back` = 1) gets `back * ((1 - mu) * pb + mu * Pc[c(v), c(w)] * emit(w))` when both words have a class
     /// (S2k section 4.2; the operation order is the Python one), else `back * pb`.
+    ///
+    /// Unlike lm.py's `prob`, this includes the Kneser-Ney term below (lm.py applies it in `word()`); decode results are the
+    /// same because every word term here goes through this one formula.
+    ///
+    /// Kneser-Ney (kn.sjkn, docs/contracts/kn-core.md): for a vocabulary word (id >= 2) `pb` first becomes
+    /// `beta * N' / sum(N') + (1 - beta) * pb`, so all three branches see it. Sentence end (id 1) and words outside
+    /// the vocabulary keep `pb`. Done here once because every word term (decode paths, `word`, `eos`) comes through this function.
     fn prob_c(&self, ctx: Ctx, w: Option<u32>, pb: f64) -> f64 {
+        let pb = match (&self.kn, w) {
+            (Some(kn), Some(w)) if w >= 2 => kn.beta * kn.np1(w as usize) as f64 / kn.total as f64 + (1.0 - kn.beta) * pb,
+            _ => pb,
+        };
         let back = match ctx.idx {
             None => 1.0,
             Some(i) => {
@@ -322,6 +429,8 @@ impl Lm {
         back * pb
     }
 
+    /// `prob_c` by word strings. Includes the Kneser-Ney term when a side file is loaded; lm.py's `prob` does not (it applies
+    /// the term in `word()`), so compare whole word terms (`word`, decode), not this value, across the two.
     pub fn prob(&self, v: &str, w: &str, pb: f64) -> f64 {
         self.prob_c(self.ctx_of(self.word_id(v)), self.word_id(w), pb)
     }
@@ -366,6 +475,15 @@ impl Lm {
 /// differently in the last bit (seen as 1-ulp score differences), so the base is hidden from the optimizer.
 fn pow10(lp: f64) -> f64 {
     std::hint::black_box(10.0f64).powf(lp)
+}
+
+/// Python `f"{x:g}"` for a number in [0, 1] (6 significant digits, no trailing zeros): `1`, `0.5`, `0.123457`, `1e-05`.
+fn fmt_g(x: f64) -> String {
+    let e = format!("{x:.5e}");
+    let (m, exp) = e.split_once('e').unwrap_or((&e, "0"));
+    let exp: i32 = exp.parse().unwrap_or(0);
+    let trim = |s: &str| if s.contains('.') { s.trim_end_matches('0').trim_end_matches('.').to_string() } else { s.to_string() };
+    if exp < -4 { format!("{}e-{:02}", trim(m), -exp) } else { trim(&format!("{:.*}", (5 - exp) as usize, x)) }
 }
 
 fn word_term(lam: f64, p: f64, lp: f64) -> f64 {
@@ -594,8 +712,8 @@ struct Hyp<'a> {
     ctx: Ctx,
 }
 
-/// Learned boost (S4 §1.4, §12): which records may boost is decided by `Learner::lookup` (single
-/// characters only at the exact full key and never under "^"). A learned word scores
+/// Learned boost (S4 §1.4, §12, §14): which records may boost is decided by `Learner::lookup` (single
+/// characters only at the exact full two-character key). A learned word scores
 /// `best of its reading + eps * w / (w + 1)`, eps being `LEARN_EPS` (6.0) at the exact and last-character
 /// levels and `LEARN_EPS_GLOBAL` (0, `Learn::eps_global`) at the global level, for weight `w`
 /// (so a heavier record outranks a lighter one: a re-pick halves the displaced word), never
@@ -617,6 +735,10 @@ pub const LEARN_EPS_GLOBAL: f64 = 0.0;
 pub struct Learn<'a> {
     pub learner: &'a Learner,
     pub before: &'a str,
+    /// The first syllable right of the segment (`None`: the segment ends the composition). A word that
+    /// ends the segment is followed by it; under the sentence-start key the reading of the next syllable
+    /// is part of the key (rule 8).
+    pub after: Option<&'a str>,
     pub today: i64,
     /// ε of the global level: `LEARN_EPS_GLOBAL` in production; the integration tests sweep it through
     /// `Engine::set_eps_global` (a feature or cfg(test) cannot reach integration tests, and it is one
@@ -666,7 +788,9 @@ pub fn decode_segment_learned<'a>(
     hyps[0].push(Hyp { score: 0.0, surface: String::new(), words: Vec::new(), last: start_id, ctx: lm.ctx_of(start_id) });
     for i in 1..=n {
         let mut cand: Vec<Hyp<'a>> = Vec::new();
-        let mut idx: HashMap<String, usize> = HashMap::new();
+        // One path per (surface, last word): the next word's score depends on the last word, so a path that
+        // ends in a different word must not be merged away (dec-recombine section 1).
+        let mut idx: HashMap<(String, &str), usize> = HashMap::new();
         for l in 1..=base.max_len.min(i) {
             let Some(r) = base.find(&ids[i - l..i]) else { continue };
             if hyps[i - l].is_empty() {
@@ -696,10 +820,12 @@ pub fn decode_segment_learned<'a>(
             let mut hits: Vec<(Level, Vec<(&str, f64)>)> = Vec::new();
             if let Some(ln) = learned {
                 let mut by_ctx: HashMap<String, usize> = HashMap::new();
+                // Rule 8: at sentence start the key also holds the syllable after the word.
+                let next = syls.get(i).map(String::as_str).or(ln.after);
                 hits_of = hyps[i - l]
                     .iter()
                     .map(|h| {
-                        let key = context_key(&format!("{before_tail}{}", h.surface));
+                        let key = record_key(context_key(&format!("{before_tail}{}", h.surface)), next);
                         *by_ctx.entry(key).or_insert_with_key(|k| {
                             hits.push(ln.learner.lookup(k, span, ln.today));
                             hits.len() - 1
@@ -734,19 +860,25 @@ pub fn decode_segment_learned<'a>(
                         }
                     }
                     let sc = h.score + (word_term(lam, lm.prob_c(h.ctx, wid, pb), lp) - delta);
-                    let surface = format!("{}{word}", h.surface);
-                    match idx.get(&surface) {
-                        Some(&q) if !(sc > cand[q].score) => {}
+                    let key = (format!("{}{word}", h.surface), word);
+                    match idx.get(&key).copied() {
+                        Some(q) if !(sc > cand[q].score) => {}
                         found => {
                             let mut words = h.words.clone();
                             words.push((word, lp, delta));
+                            // The surface is cloned only for a new slot (the index keeps one copy); a replacement moves it.
+                            let surface = match found {
+                                Some(_) => key.0,
+                                None => {
+                                    let s = key.0.clone();
+                                    idx.insert(key, cand.len());
+                                    s
+                                }
+                            };
                             let nh = Hyp { score: sc, surface, words, last: wid, ctx: lm.ctx_of(None) };
                             match found {
-                                Some(&q) => cand[q] = nh,
-                                None => {
-                                    idx.insert(nh.surface.clone(), cand.len());
-                                    cand.push(nh);
-                                }
+                                Some(q) => cand[q] = nh,
+                                None => cand.push(nh),
                             }
                         }
                     }
@@ -765,21 +897,23 @@ pub fn decode_segment_learned<'a>(
         End::Eos => None,
         End::Next { word, lp, delta } => Some((lm.word_id(word), pow10(lp), lp, delta)),
     };
-    let mut out: Vec<Scored<'a>> = last
+    let mut out: Vec<(f64, Vec<(&'a str, f64, f64)>, String)> = last
         .into_iter()
         .map(|h| {
             let term = match closing {
                 None => lam * lm.prob_c(h.ctx, Some(1), lm.p_eos).log10(),
                 Some((wid, pb, lp, delta)) => word_term(lam, lm.prob_c(h.ctx, wid, pb), lp) - delta,
             };
-            (h.score + term, h.words)
+            (h.score + term, h.words, h.surface)
         })
         .collect();
     if out.is_empty() {
         return Err(Error::NoPath { len: n });
     }
     out.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
-    Ok(out)
+    // The n-best has distinct surfaces: keep each surface's best path (dec-recombine section 1.4).
+    let mut seen: HashSet<String> = HashSet::new();
+    Ok(out.into_iter().filter_map(|(sc, ws, s)| seen.insert(s).then_some((sc, ws))).collect())
 }
 
 /// S2h §1: the word that conditions the first word of a composition with no fixed word on its left.
@@ -860,6 +994,14 @@ mod tests {
             b.extend(c.to_le_bytes());
         }
         b
+    }
+
+    /// Python `f"{x:g}"` (the summary line's beta).
+    #[test]
+    fn fmt_g_matches_python() {
+        for (x, want) in [(1.0, "1"), (0.5, "0.5"), (0.0, "0"), (0.25, "0.25"), (0.75, "0.75"), (0.123456789, "0.123457"), (0.0001, "0.0001"), (0.00001234, "1.234e-05"), (1e-5, "1e-05"), (0.999999999, "1")] {
+            assert_eq!(fmt_g(x), want, "{x}");
+        }
     }
 
     #[test]
@@ -1103,5 +1245,85 @@ mod tests {
         assert!(Lm::parse(&magic).err() == Some(LmError::Format));
         assert!(Lm::parse(&good[..good.len() - 1]).err() == Some(LmError::Format));
         assert!(Lm::parse(&[]).err() == Some(LmError::Format));
+    }
+
+    /// A model file from vocabulary (ids from 0; `<s>`, `</s>`, then the words in byte order), unigram counts and
+    /// contexts `(id, total, [(next id, count)])` sorted by id. N 20, `</s>` total 4, D 0.75.
+    fn lm_bytes(words: &[&str], uni: &[u64], ctxs: &[(u32, u64, &[(u32, u32)])]) -> Vec<u8> {
+        let mut b = b"SJLM0001".to_vec();
+        b.extend((words.len() as u32).to_le_bytes());
+        b.extend(20u64.to_le_bytes());
+        b.extend(4u64.to_le_bytes());
+        b.extend(0.75f64.to_le_bytes());
+        for w in words {
+            b.extend((w.len() as u16).to_le_bytes());
+            b.extend(w.as_bytes());
+        }
+        uni.iter().for_each(|u| b.extend(u.to_le_bytes()));
+        b.extend((ctxs.len() as u32).to_le_bytes());
+        ctxs.iter().for_each(|c| b.extend(c.0.to_le_bytes()));
+        ctxs.iter().for_each(|c| b.extend(c.1.to_le_bytes()));
+        let mut at = 0u32;
+        b.extend(0u32.to_le_bytes());
+        for c in ctxs {
+            at += c.2.len() as u32;
+            b.extend(at.to_le_bytes());
+        }
+        b.extend(at.to_le_bytes());
+        ctxs.iter().flat_map(|c| c.2).for_each(|e| b.extend(e.0.to_le_bytes()));
+        ctxs.iter().flat_map(|c| c.2).for_each(|e| b.extend(e.1.to_le_bytes()));
+        b
+    }
+
+    /// dec-recombine section 1: one path per (surface, last word). `下來分析` has two segmentations. After
+    /// two syllables `下來` alone (-0.66) beats `下 | 來` (-1.24), so a decoder that keeps one path per surface
+    /// drops `下 | 來`; but `來 -> 分析` is a seen bigram and `下來 -> 分析` is not, so with `分析` the dropped path wins
+    /// (-2.76 against -3.66). The n-best still lists the surface once.
+    #[test]
+    fn keeps_the_path_whose_last_word_scores_the_next_word_better() {
+        // ids: <s> </s> 下 下來 來 分析
+        let words = ["<s>", "</s>", "下", "下來", "來", "分析"];
+        let model = lm_bytes(
+            &words,
+            &[0, 0, 4, 5, 6, 8],
+            &[(0, 9, &[(2, 4), (3, 5)]), (2, 6, &[(4, 6)]), (4, 8, &[(5, 8)])],
+        );
+        let lm = Lm::parse(&model).unwrap();
+        let lex = Arc::new(Lexicon::parse("ㄒㄧㄚˋ 下 -1.0\nㄌㄞˊ 來 -1.0\nㄒㄧㄚˋ-ㄌㄞˊ 下來 -1.0\nㄈㄣ-ㄒㄧ 分析 -3.0\n").unwrap());
+        let capped = CappedLexicon::new(lex, "", &lm, Some(&Demote::parse("").unwrap())).unwrap();
+        let w = |v, x, lp| lm.word(0.5, v, x, lp);
+        // The premise, straight from the model: the merge in the old rule would keep `下來`, and then lose.
+        let (split, joined) = (w("<s>", "下", -1.0) + w("下", "來", -1.0), w("<s>", "下來", -1.0));
+        assert!(joined > split, "{joined} {split}");
+        let (split_all, joined_all) = (split + w("來", "分析", -3.0), joined + w("下來", "分析", -3.0));
+        assert!(split_all > joined_all, "{split_all} {joined_all}");
+        let syls: Vec<String> = ["ㄒㄧㄚˋ", "ㄌㄞˊ", "ㄈㄣ", "ㄒㄧ"].iter().map(|s| s.to_string()).collect();
+        let out = decode_segment_learned(&capped, &syls, &lm, 0.5, "<s>", End::Eos, 64, None, true).unwrap();
+        assert_eq!(out.len(), 1, "the surface is listed once");
+        let words: Vec<&str> = out[0].1.iter().map(|x| x.0).collect();
+        assert_eq!(words, ["下", "來", "分析"]);
+        assert_eq!(out[0].0, split_all + lm.eos(0.5, "分析"));
+    }
+
+    /// dec-recombine section 1.4: `下來` and `下 | 來` end in different words, so both paths reach the end of
+    /// `ㄒㄧㄚˋ ㄌㄞˊ`; the n-best lists the surface once, with the better of the two closed scores.
+    #[test]
+    fn n_best_lists_a_surface_reached_by_two_last_words_once() {
+        let words = ["<s>", "</s>", "下", "下來", "來", "分析"];
+        let model = lm_bytes(
+            &words,
+            &[0, 0, 4, 5, 6, 8],
+            &[(0, 9, &[(2, 4), (3, 5)]), (2, 6, &[(4, 6)]), (4, 8, &[(5, 8)])],
+        );
+        let lm = Lm::parse(&model).unwrap();
+        let lex = Arc::new(Lexicon::parse("ㄒㄧㄚˋ 下 -1.0\nㄌㄞˊ 來 -1.0\nㄒㄧㄚˋ-ㄌㄞˊ 下來 -1.0\n").unwrap());
+        let capped = CappedLexicon::new(lex, "", &lm, Some(&Demote::parse("").unwrap())).unwrap();
+        let w = |v, x, lp| lm.word(0.5, v, x, lp);
+        let split = w("<s>", "下", -1.0) + w("下", "來", -1.0) + lm.eos(0.5, "來");
+        let joined = w("<s>", "下來", -1.0) + lm.eos(0.5, "下來");
+        let syls: Vec<String> = ["ㄒㄧㄚˋ", "ㄌㄞˊ"].iter().map(|s| s.to_string()).collect();
+        let out = decode_segment_learned(&capped, &syls, &lm, 0.5, "<s>", End::Eos, 64, None, true).unwrap();
+        assert_eq!(out.len(), 1, "two paths, one surface");
+        assert_eq!(out[0].0, split.max(joined));
     }
 }

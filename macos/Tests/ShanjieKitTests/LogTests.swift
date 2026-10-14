@@ -78,14 +78,25 @@ final class LogTests: XCTestCase {
             .appendingPathComponent("shanjie-tests-\(pathMarker)", isDirectory: true)
         try? FileManager.default.createDirectory(at: learning, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: learning) }
+        let runner = HeldRerankRunner()
         let shell = Shell(resources: resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(),
-                          learningDirectory: learning, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore())
+                          learningDirectory: learning, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), englishStore: MemoryEnglishStore(), acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(true), rerankRunner: runner, profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore())
         let c = Controller(shell, bundle: bundleMarker)
         c.client.before = "ab\t\(Self.contextMarker)"
         c.session.activate()                            // profile from a marked bundle ID
-        c.type(Row226.standardKeys)
+        c.type(Row284.standardKeys)
         c.press(Keys.enter)                             // commits the marker sentence
-        XCTAssertEqual(c.client.text, Row226.formal, "the typing path did not commit row 226")
+        XCTAssertEqual(c.client.text, Row284.formal, "the typing path did not commit row 284")
+        // s7c2b: the async rerank path (rerankFinished -> applyRerankJob -> apply) with the job's candidate text, in a chat app
+        // and without left context, where the small model changes the sentence.
+        let chat = Controller(shell, bundle: RerankTests.chatApp)
+        chat.client.selectedOverride = NSRange(location: NSNotFound, length: 0)
+        chat.session.activate()
+        chat.type(RerankRow.standardKeys)
+        runner.drain()
+        XCTAssertEqual(chat.client.marked, RerankRow.reranked, "the rerank result was not applied")
+        chat.press(Keys.esc)
+        c.session.activate()
         c.type("su3 ")
         let first = c.panel.items.first                 // optional, not XCTUnwrap: no throw while captured
         XCTAssertNotNil(first, "no candidate was shown for the mouse-selection path")
@@ -96,16 +107,26 @@ final class LogTests: XCTestCase {
         XCTAssertTrue(c.client.text.hasSuffix("你好"), "deactivate did not commit the composition")
         c.session.activate()
         c.type("su3")
+        runner.drain()
         c.session.selectLayout(.eten) // mode switch commits and rebuilds
         for action: MenuEntry.Action in [.clear, .toggleBackup, .toggleBackup] {
             c.session.perform(action)                   // S4 menu: clear, backup exclusion
         }
+        // profile-choice section 3.1: the per-app switch twice (stored, then removed as equal to the built-in rule), once more
+        // so the window has the marked app to remove, then the window's mode picker and remove button.
+        for _ in 0..<3 { c.session.perform(.toggleAppChat) }
+        let settings = SettingsModel(shell: shell)
+        XCTAssertEqual(settings.appProfiles.map(\.bundle), [bundleMarker], "the menu switch did not store the marked app")
+        settings.setProfileMode(.chat)
+        settings.setProfileMode(.auto)
+        settings.removeAppProfile(bundleMarker)
+        XCTAssertTrue(settings.appProfiles.isEmpty, "the settings window did not remove the marked app")
         XCTAssertGreaterThan(c.client.reads, 0, "the left-context read did not run")
         let broken = FileManager.default.temporaryDirectory.appendingPathComponent(pathMarker, isDirectory: true)
-        let failed = Shell(resources: broken, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(), learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore())  // engine_new fails on a marked path
+        let failed = Shell(resources: broken, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(), learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), englishStore: MemoryEnglishStore(), acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore())  // engine_new fails on a marked path
         XCTAssertNil(failed.engine, "the marked data path did not fail engine creation")
         // s3e: no punctuation table at a marked path -> the fixed fallback line (the path never logged).
-        _ = Shell(resources: resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(), learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(),
+        _ = Shell(resources: resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(), learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), englishStore: MemoryEnglishStore(), acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore(),
                   punctuationTable: broken.appendingPathComponent("punct.plist"))
 
         let stdText = std.finish()
@@ -131,9 +152,10 @@ final class LogTests: XCTestCase {
                       "the punctuation fallback did not log its fixed line")
 
         let negatives = [
-            Row226.formal, Row226.chat, "你好", Row226.zhuyin, "ㄑㄧ", "ㄋㄧ",
-            Row226.standardKeys, String(Row226.standardKeys.prefix(6)), "su3cl3",
+            Row284.formal, Row284.chat, "你好", Row284.zhuyin, "ㄑㄧ", "ㄋㄧ",
+            Row284.standardKeys, String(Row284.standardKeys.prefix(6)), "su3cl3",
             bundleMarker, pathMarker, Self.contextMarker,
+            RerankRow.ngram, RerankRow.reranked, RerankRow.zhuyin, RerankRow.standardKeys, "在過去", "再過去",
         ]
         for marker in negatives {
             XCTAssertFalse(everything.contains(marker), "a negative marker reached the log")

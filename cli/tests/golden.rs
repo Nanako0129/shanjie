@@ -208,19 +208,20 @@ fn sw_probe_matches_python_golden_byte_for_byte() {
     assert_eq!(got, golden("sw-probe.txt"));
 }
 
-/// S2k acceptance 3: `--no-classes` is the arithmetic before the word-class term. The two summary lines are the
-/// ones main's s2h-lm-context.txt held before S2k (dev302, `--context`), and the Python `lm_eval.py --no-classes` prints them too.
+/// S2k acceptance 3: `--no-classes` is the arithmetic without the word-class term. The two summary lines are what the Python
+/// `lm_eval.py --no-classes --profile P --dev 302 --context` prints (regenerated 2026-10-14 for dec-recombine; before it they were the
+/// ones main's s2h-lm-context.txt held before S2k).
 #[test]
-fn no_classes_flag_restores_the_pre_s2k_numbers() {
+fn no_classes_flag_matches_its_pinned_numbers() {
     let lm = lm_path();
     let line = |p: &str| run(&["--lm", &lm, "--no-classes", "--profile", p, "--dev", "302", "--context"]);
     assert_eq!(
         line("chat"),
-        "## dev302  lm-chat+ctx-noclasses  {'n': 302, 'top1': 235, 'oracle@64': 300, 'top1_sha256': 'fb9e1f2a8bdd27922f74a80ca479d55cb55e068194a955204f4b7a01c070c5b4'}\n"
+        "## dev302  lm-chat+ctx-noclasses  {'n': 302, 'top1': 237, 'oracle@64': 300, 'top1_sha256': '87a9aaa2a0f128afc732ce4c9818d74998c4c034a0767bffa050ed6ddecc6910'}\n"
     );
     assert_eq!(
         line("formal"),
-        "## dev302  lm-formal+ctx-noclasses  {'n': 302, 'top1': 240, 'oracle@64': 300, 'top1_sha256': '4f24d0f8a5bf3b188525b54444f92939ae7c5e3bac04bee799c27a6721a427bf'}\n"
+        "## dev302  lm-formal+ctx-noclasses  {'n': 302, 'top1': 244, 'oracle@64': 300, 'top1_sha256': '614b446765d4b9617ac9eaa5ee617046a62d66e5c051484d917bcd0dc168de14'}\n"
     );
 }
 
@@ -301,6 +302,44 @@ fn unparsable_pack_is_a_parse_error() {
     std::fs::remove_dir_all(&dir).unwrap();
     let err = String::from_utf8(out.stderr).unwrap();
     assert!(!out.status.success() && err.contains("cannot parse the lexicon in") && err.contains("data/lexicon"), "{err}");
+}
+
+/// kn-core: the CLI turns the Kneser-Ney term on when a kn.sjkn sits beside the model and prints lm_eval.py's `+kn:` tag;
+/// `--no-kn` turns it off (the toy model of eval/golden/kn-tiny, the real lexicon).
+#[test]
+fn kn_side_file_beside_the_model_is_announced_and_can_be_turned_off() {
+    let root = concat!(env!("CARGO_MANIFEST_DIR"), "/..");
+    let (lm, rows) = (format!("{root}/eval/golden/kn-tiny/bigram.sjlm"), std::env::temp_dir().join(format!("shanjie-kn-rows-{}.txt", std::process::id())));
+    std::fs::write(&rows, "|他占|ㄊㄚ ㄓㄢˋ\n").unwrap();
+    let args = |extra: &[&'static str]| {
+        let mut a = vec!["--lm", lm.as_str(), "--profile", "chat", "--rows", rows.to_str().unwrap(), "--name", "t"];
+        a.extend(extra);
+        run(&a)
+    };
+    let side = std::fs::read(format!("{root}/eval/golden/kn-tiny/kn.sjkn")).unwrap();
+    let tag = format!("+kn:{}:θ1:β1", &core::eval::sha256_hex(&side)[..8]);
+    let (on, off) = (args(&[]), args(&["--no-kn"]));
+    std::fs::remove_file(&rows).unwrap();
+    assert!(on.starts_with(&format!("## t  lm-chat{tag}  {{'n': 1,")), "{on}");
+    assert!(off.starts_with("## t  lm-chat  {'n': 1,"), "{off}");
+}
+
+/// data/lexicon/overlay-manual.tsv: every manual word comes first in the shipping setting, alone and in a sentence, in both profiles
+/// (eval/golden/manual-words-rows.txt; MANUAL_BONUS in tools/build_overlay.py was chosen on its first 9 rows; the last 6 (喵菜子, 哈那口, and 菜菜子 which is a base word) are
+/// first even without the entry, so they only pin the behaviour). A retrained model or a new
+/// rerank that pushes a name below its homophones fails here instead of shipping silently.
+#[test]
+fn manual_words_come_first_in_the_shipping_setting() {
+    let root = concat!(env!("CARGO_MANIFEST_DIR"), "/..");
+    let rows = format!("{root}/eval/golden/manual-words-rows.txt");
+    let tl = format!("{root}/data/lm/tinylm.sjtl");
+    for profile in ["chat", "formal"] {
+        let out = run(&["--lm", &lm_path(), "--profile", profile, "--context", "--packs", "acg", "--tinylm", &tl, "--rows", &rows]);
+        let summary = out.lines().find(|l| l.starts_with("## ")).unwrap_or_default();
+        let num = |key: &str| summary.split(&format!("'{key}': ")).nth(1).and_then(|t| t.split([',', '}']).next()).map(str::to_string);
+        assert_eq!(num("n").as_deref(), Some("15"), "{profile}: {summary}");
+        assert_eq!(num("top1"), num("n"), "{profile}: a manual word is not first: {summary}");
+    }
 }
 
 /// names-lexicon 3.5: `--extra-overlay FILE` makes the file's word the first candidate (and only then), and a

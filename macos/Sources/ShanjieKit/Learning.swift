@@ -2,7 +2,9 @@ import AppKit
 
 // S4 in the shell (docs/contracts/s4-learning.md sections 2-4): the left context, privacyGate, the
 // learning directory and the menu. R2 holds as in docs/contracts/s3b.md section 9: the context,
-// bundle IDs and paths are never logged, stored or shown; logs are static text and codes only.
+// bundle IDs and paths are never logged; the context and paths are never stored or shown, and a bundle ID
+// is stored and shown only for an app the user switched to chat or formal from the menu
+// (docs/contracts/profile-choice.md section 2.5). Logs are static text and codes only.
 
 /// Why learning is paused for a client (section 3).
 public enum LearningPause: Equatable, Sendable {
@@ -50,8 +52,11 @@ public struct MenuEntry: Equatable, Sendable {
         case toggleBackup
         case toggleDemote
         case togglePrediction
+        case toggleEnglish
         case toggleAbbreviation
+        case toggleRerank
         case toggleAcgPack
+        case toggleAppChat
         case openSettings
     }
 
@@ -67,9 +72,13 @@ public struct MenuEntry: Equatable, Sendable {
         public static let pausedApp = "學習已暫停（此 App）"
         public static let demote = "避免把敏感字詞排在前面"
         public static let prediction = "即時預測"
+        public static let english = "中英混打（實驗）"
         public static let abbreviation = "可省略韻母"
+        public static let rerank = "語意校正"
         public static let acgPack = "動漫與遊戲詞"
         public static func acgDataDate(_ date: String) -> String { "資料更新至 \(date)（維基百科）" }
+        /// No app name in the title (profile-choice section 2.3).
+        public static let appChat = "這個 App 用聊天設定"
         public static let settings = "善解設定…"
         public static let clear = "清除選字記憶…"
         public static let excludeBackup = "不要備份選字記憶"
@@ -102,8 +111,9 @@ public enum DialogText {
 }
 
 extension Shell {
-    /// Learning denylist (section 3): password managers. Looked up only, like `chatApps`; never
-    /// passed to the core, logged or stored. Not checked on this machine (section 7.7).
+    /// Learning denylist (section 3): password managers. Looked up only; never passed to the core,
+    /// logged or stored. The user's per-app chat or formal choices (`appProfiles`) do not affect it
+    /// (profile-choice section 2.5). Not checked on this machine (section 7.7).
     static let learningDenylist: Set<String> = [
         "com.1password.1password", "com.agilebits.onepassword7", "com.bitwarden.desktop",
         "org.keepassxc.keepassxc", "com.apple.Passwords", "com.apple.keychainaccess",
@@ -185,7 +195,8 @@ extension Session {
     public var menu: [MenuEntry] {
         typealias T = MenuEntry.Text
         var items: [MenuEntry] = []
-        switch learningPause {
+        let bundle = client.bundleIdentifier  // a synchronous IPC: read once per menu
+        switch shell.learningPause(bundle: bundle) {
         case .secureInput?: items.append(MenuEntry(title: T.pausedSecure))
         case .app?: items.append(MenuEntry(title: T.pausedApp))
         case nil: break
@@ -198,8 +209,19 @@ extension Session {
         if shell.showsAbbreviation {
             items.append(MenuEntry(title: T.abbreviation, action: .toggleAbbreviation, checked: shell.abbreviationOn, enabled: shell.predictionOn))
         }
+        // zhen-mixed section 3.2: after 即時預測 and before 語意校正, where 可省略韻母 sits when it is shown (the app hides it, so there it
+        // follows 即時預測 directly); greyed (checkmark kept) when this engine has no word list or the layout is Eten.
+        items.append(MenuEntry(title: T.english, action: .toggleEnglish, checked: shell.englishOn, enabled: shell.englishEnabled))
+        // s7c2b section 2.3 (F11): greyed while the demotion table is off or the small model did not load, where the core makes
+        // no rerank job.
+        items.append(MenuEntry(title: T.rerank, action: .toggleRerank, checked: shell.rerankOn, enabled: shell.rerankEnabled))
         items.append(MenuEntry(title: T.acgPack, action: .toggleAcgPack, checked: shell.acgPackOn))
         if let date = shell.acgDataDate { items.append(MenuEntry(title: T.acgDataDate(date))) }   // about the data, so shown with the pack off too
+        // profile-choice section 2.3: absent without a bundle ID (nothing to store); greyed outside auto, checked as forced.
+        if let bundle, !bundle.isEmpty {
+            items.append(MenuEntry(title: T.appChat, action: .toggleAppChat, checked: profile(for: bundle) == Shell.chat,
+                                   enabled: shell.profileMode == .auto))
+        }
         items.append(MenuEntry(title: T.settings, action: .openSettings))
         items.append(MenuEntry(title: T.clear, action: .clear))
         items.append(MenuEntry(title: T.excludeBackup, action: .toggleBackup, checked: shell.backupExcluded))
@@ -219,10 +241,18 @@ extension Session {
             applyDemote(!shell.demoteOn)
         case .togglePrediction:
             applyPrediction(!shell.predictionOn)
+        case .toggleEnglish:
+            applyEnglish(!shell.englishOn)
         case .toggleAbbreviation:
             applyAbbreviation(!shell.abbreviationOn)
+        case .toggleRerank:
+            // To the owner of the composition, not this session: the core re-decodes the owner's composition, so this session
+            // could not show the snapshot.
+            shell.applyRerank(!shell.rerankOn)
         case .toggleAcgPack:
             shell.setAcgPack(!shell.acgPackOn)
+        case .toggleAppChat:
+            toggleAppChat()
         case .openSettings:
             shell.openSettings()
         }
