@@ -857,10 +857,10 @@ fn the_word_list_lookups_do_not_scan() {
     // test is right at both ends and in the middle, whatever order the file had its lines in.
     let dir = tmp_dir("sorted");
     let mut words: Vec<String> = (0..2000).map(|i| format!("{}{}", ["zzz", "aaa", "mmm"][i % 3], "abcdefghijklmnopqrstuvwxyz".chars().nth(i % 26).unwrap())).collect();
+    words.push("rust".into());
     words.sort();
     words.dedup();
-    words.reverse(); // unsorted on disk
-    words.push("rust".into());
+    words.reverse(); // descending on disk: a lookup that trusts the file's order finds nothing
     std::fs::write(dir.join("list.txt"), words.join("\n") + "\n").unwrap();
     let mut e = Engine::with_lexicon(real(), Layout::Standard);
     e.load_english(&dir.join("list.txt")).unwrap();
