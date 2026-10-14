@@ -1,6 +1,6 @@
 # 契約：模糊輸入（模糊音、鄰鍵打錯）
 
-狀態：草稿（2026-10-14），plan-verifier 第 1 次 REVISE 已處置（§7），待第 2 次審查。研究見 `docs/contracts/fuzzy-research.md` 與研究紀錄 2026-10-14「模糊輸入的調查與離線量測」（數字以 `8007b25c…` 那次為準）。
+狀態：READY（2026-10-14；plan-verifier 兩次 REVISE 逐項處置後，收尾審查 READY，§7）。研究見 `docs/contracts/fuzzy-research.md` 與研究紀錄 2026-10-14「模糊輸入的調查與離線量測」（數字以 `8007b25c…` 那次為準）。
 
 ## 0. 起因
 
