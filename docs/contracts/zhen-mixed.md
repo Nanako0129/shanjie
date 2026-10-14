@@ -149,7 +149,7 @@ int32_t shanjie_engine_set_english(ShanjieEngine *engine, uint32_t enabled, Shan
 - **選門檻**：套件 v2 的 cvtune 與 wikitune（`tools/bench.py` `SETS2`；`~/.cache/shanjie/s7c2c-public/tune/cvtune.txt` `31de456d66ece98eb5d00154a31c3f7e9c9b38240690f7f76203485ca82acc51`、`wikitune.txt` `8dcfe40c74cce73e0a070b49e166636580ef955da8555ea9ffbd65af20c998f2`）。選 v2 不選 v1：v2 是現行跨版本基準測試用的套件（`CLAUDE.md` 發版一節），v1 凍結給歷史比較。
 - **驗證**：dev302（`eval/bench/suite-v1/dev302.txt` `603850e444efee38b8c121e3d666d6c540acd3a27d5a6a5070a78a962dd98456`）、typing76（`eval/bench/suite-v1/typing76.txt` `c061f66dfade21996803137320aa986a81a3e72e3e4e1dd559abd5dc04b68d08`）。
 - 不在同一個集合上選又評；保留集不碰（§5.8 例外）。
-- 計算量：每個格點兩個集合各 5 個種子的引擎重播，Mac 上預估分鐘級；單一格點超過 10 分鐘就改在 188 跑（`CLAUDE.md`「Mac 不跑重運算」）。
+- 計算量：每個格點兩個集合各 5 個種子的引擎重播，Mac 上預估分鐘級；單一格點超過 10 分鐘就改在 Mac 以外的 Windows 機器跑（`CLAUDE.md`「Mac 不跑重運算」）。
 
 ### 4.4 切法的搜尋與選法
 
@@ -259,9 +259,9 @@ int32_t shanjie_engine_set_english(ShanjieEngine *engine, uint32_t enabled, Shan
 
 ## 8. 負責人、順序、預算、限制
 
-- **main**：第 0 步（已做）、這份契約 → plan-verifier → §3.4 第 1 步的輸入與授權文字 → executor → §4 量測與最終檔（量測在 188 跑，照「Mac 不跑重運算」）→ /code-review＋fresh verifier＋CI → 合併 → 使用者實機 → 保留集。
+- **main**：第 0 步（已做）、這份契約 → plan-verifier → §3.4 第 1 步的輸入與授權文字 → executor → §4 量測與最終檔（量測在 Mac 以外的 Windows 機器跑，照「Mac 不跑重運算」）→ /code-review＋fresh verifier＋CI → 合併 → 使用者實機 → 保留集。
 - **executor**：核心、FFI、CLI、建置程式、殼、測試、文件；預算 1 回合＋1 次修正。
-- **executor 不可以**：連網（輸入檔由 main 放到 `~/.cache/shanjie/english/`）；讀 `eval/holdout/`、`~/side-project/shanjie-private/`、Discord 資料、學習檔、聊天紀錄；安裝、啟動 App，呼叫 TIS 或 lsregister，碰 `~/Library` 與鑰匙圈（殼只改原始碼並跑 `swift test`）；push、開 PR、留言、建 Release、發版；碰其他 worktree；改 `eval/bench/` 的檔或雜湊。
+- **executor 不可以**：連網（輸入檔由 main 放到 `~/.cache/shanjie/english/`）；讀 `eval/holdout/`、維護者的私人資料（Discord 資料、學習檔、聊天紀錄）；安裝、啟動 App，呼叫 TIS 或 lsregister，碰 `~/Library` 與鑰匙圈（殼只改原始碼並跑 `swift test`）；push、開 PR、留言、建 Release、發版；碰其他 worktree；改 `eval/bench/` 的檔或雜湊。
 - **main 不可以**：把第 0 步的任何 token、詞或訊息寫進 repo、紀錄、commit、PR。
 
 ## 9. 審查紀錄
