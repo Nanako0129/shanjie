@@ -30,19 +30,19 @@
   "nsi_no_usable_name": 43,
   "simplified": 1,
   "title_not_han": 75,
-  "type_c_dropped": 1,
+  "type_c_dropped": 15,
   "unreadable": 1
  },
  "files": {
   "names-add.tsv": {
-   "bytes": 132931,
-   "lines": 1629,
-   "sha256": "98ff6f62e2ee174bd9b8ec8a8ebf5bbe3bf933f49558cbc570a9ec02525e6a43"
+   "bytes": 132090,
+   "lines": 1615,
+   "sha256": "77f70524fd1ddd62a29e63103439cde3c3b25f3d40d0b3a6b0300de955e1f010"
   },
   "names-sources.tsv": {
-   "bytes": 120459,
-   "lines": 1742,
-   "sha256": "13e005d8378a1b34d565b0972fd9b86586532f2ce80997902d93d7263e90262a"
+   "bytes": 119314,
+   "lines": 1728,
+   "sha256": "73bd22410bf91dc247478f6bab02a3bd4221901d3fef757efa25f9b663cb47cb"
   }
  },
  "moe": {
@@ -77,21 +77,21 @@
   "shop/supermarket": 11,
   "shop/tea": 0
  },
- "rows": 1629,
+ "rows": 1615,
  "sources": {
-  "category": 650,
+  "category": 649,
   "manual": 1,
   "nsi": 140,
-  "nsi-wikipedia": 87,
+  "nsi-wikipedia": 86,
   "school": 596,
-  "school-abbr": 267
+  "school-abbr": 255
  },
  "unresolved_collision_readings": 0,
- "version": "nsiac22bfd4-moe115.115-98ff6f62",
+ "version": "nsiac22bfd4-moe115.115-77f70524",
  "wiki_revisions": {
   "max": 94910703,
   "min": 700780,
   "pages": 1304
  },
- "words": 1620
+ "words": 1606
 }

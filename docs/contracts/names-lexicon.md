@@ -34,7 +34,7 @@
   - **去重**：字串只要出現在基底詞庫、`overlay-add.tsv`、`sandhi-add.tsv`、`data/packs/acg-add.tsv` 的**任何讀音**下就不收（用 `build_acg_pack.lexicon_words()` 加上 acg-add 的詞）。理由：核心依疊加層的字串封頂該詞所有讀音的詞條（`CappedLexicon::new`），收了會改到既有詞的分數；同一個（讀音, 詞）重複還會讓核心載入失敗（`OverlayDuplicate`）。建置最後檢查輸出和這四份檔的詞集合交集為空，不為空就中止；另外 `make test` 加一條測試讀已提交的檔，斷言同一件事，之後任何一邊改了檔，CI 都會擋。
 - **和 A3 的順序**：A3（`feat/acg-a3`）會重建 `acg-add.tsv`。A3 先合併；這一片 rebase 到含 A3 的 main 之後，用新的 `acg-add.tsv` 離線重建、重跑 §3 的量測再合併。
 - **讀音**：`tools/readings.py`（和評測集合同一套規則）；標 CHECK 的與多音字（樂、行、長、重、藏、都、會、種、朝）由 main 人工核對，結果寫進這一片自己的整名讀音表 `data/lexicon/names-readings.tsv`（名字、讀音；維護者 CC0），`build_names.py` 在 `readings.py` 之後套用、取代該名字的讀音，並檢查音節數等於字數。**這一片不改 `tools/reading_overrides.tsv`**（那張表會改到評測集合與 ACG 詞包的讀音，而且名字已去重、不會整個切成一個詞，整名覆寫在那裡不生效）。拼不出讀音的不收，列在報告裡。
-- **分數**：用 `build_acg_pack.scores()`（各字數 2–10 的第 25 百分位，和詞包相同）。
+- **分數**：用 `build_acg_pack.scores()`（各字數 2–10 的第 25 百分位，和詞包相同）。名單詞的分數是 `scores()[字數]` ＋ `NAMES_BONUS`（2，log10；`tools/build_names.py` 的常數，手動列也加），建置時寫進 `names-add.tsv`、載入端不另外加；model-v6 決定（`docs/contracts/model-v6.md` §2.4，2026-10-11 的探索）。同音衝突偵測讀的是加分後的列。
 - **同音衝突**：`build_names.py` 自己提供 `decode`（CLI 加 `--extra-overlay` 名單層）傳給 `build_acg_pack.detect_collisions`，**不修改** `tools/build_acg_pack.py`（那個檔歸 A3 片）。模型用 model-v5＋classes-v3、扣分 1.0。
   - 類型 (c)（名字把既有詞庫的詞擠下第一名）：不收（和 ACG 詞包的使用者規則相同）。
   - 類型 (a)（名單內同音）：處置檔 `data/lexicon/names-collisions.tsv` 是**人工維護的輸入**（格式與規則照 `acg-collisions.tsv`：讀音、保留的詞、排除的詞、理由），建置只讀它、不改它；沒處置的列寫進報告 `build/names/collisions.txt`。main 依「來源數多的優先」提建議，用選擇題請使用者確認後由 main 寫入。**全部處置完才合併**。

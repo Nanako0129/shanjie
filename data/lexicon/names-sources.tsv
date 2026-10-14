@@ -261,7 +261,6 @@ word	source_kind	sources	qid	note
 中科高中	school-abbr	zhwiki:中科高中->國立中科實驗高級中學@22395202		
 中租控股	category	Category:台灣公司:中租控股@92998073		
 中美製藥	category	Category:台灣公司:中美製藥@94769662		
-中臺科大	school-abbr	zhwiki:中臺科大->中臺科技大學@3613695		
 中臺科技大學	school	moe:u1_new.csv@115		
 中興保全科技	category	Category:台灣公司:中興保全科技@88416677		
 中興商業銀行	category	Category:台灣公司:中興商業銀行@94231655		POLY
@@ -707,7 +706,6 @@ word	source_kind	sources	qid	note
 國立鳳山高中	school	moe:high.csv@115		
 國立鳳新高中	school	moe:high.csv@115		
 國立鹿港高中	school	moe:high.csv@115		
-國臺藝	school-abbr	zhwiki:國臺藝->國立臺灣藝術大學@57033253		
 國賓大飯店	category	Category:台灣公司:國賓大飯店@94432935		
 國際中橡投資控股	category	Category:台灣公司:國際中橡投資控股@90989154		
 圓剛科技	category	Category:台灣公司:圓剛科技@94659203		
@@ -720,7 +718,6 @@ word	source_kind	sources	qid	note
 墨凡商場	category	Category:台灣公司:墨凡商場@94773865		
 士林紙業	category	Category:台灣公司:士林紙業@94433200		
 士林電機	category	Category:台灣公司:士林電機@91488186		
-壹番屋	nsi-wikipedia	zhwiki:壹番屋@90126934+wikidata:Q5986105@2534530262	Q5986105	
 夏都酒店	category	Category:台灣公司:夏都酒店集團@87158582		POLY
 多那之咖啡	nsi	nsi:amenity/cafe/donutescoffee-7d270d@ac22bfd445b7	Q132010304	
 大仁科大	school-abbr	zhwiki:大仁科大->大仁科技大學@3613698		
@@ -742,7 +739,6 @@ word	source_kind	sources	qid	note
 大立光電	category	Category:台灣公司:大立光電@93484185		
 大聯大控股	category	Category:台灣公司:大聯大控股@94867717		
 大茗本位製茶堂	nsi	nsi:amenity/cafe/daming-7d270d@ac22bfd445b7	Q131300307	
-大里高中	school-abbr	zhwiki:大里高中->臺中市立大里高級中學@30006763		
 大陸工程	category	Category:台灣公司:大陸工程@88651268		
 大魯閣實業	category	Category:台灣公司:大魯閣實業@92719682		
 天主教明誠高中	school	moe:high.csv@115		
@@ -1165,7 +1161,6 @@ word	source_kind	sources	qid	note
 治平高中	school-abbr	zhwiki:治平高中->桃園市治平高級中等學校@65030313		
 泓德能源	category	Category:台灣公司:泓德能源@93840253		
 法國巴黎銀行	nsi-wikipedia	zhwiki:法國巴黎銀行@94242351+wikidata:Q499707@2551388944	Q499707	POLY
-法藍瓷	category	Category:台灣公司:法藍瓷@88241760		
 法鼓文理學院	school	moe:u1_new.csv@115		
 泰豐輪胎	category	Category:台灣公司:泰豐輪胎@91284735		
 海底撈	nsi-wikipedia	zhwiki:海底捞@94883182+wikidata:Q5638920@2551766894	Q5638920	
@@ -1484,14 +1479,11 @@ word	source_kind	sources	qid	note
 致理科技大學	school	moe:u1_new.csv@115		
 致茂電子	category	Category:台灣公司:致茂電子@92213987		
 臺中一中	school-abbr	zhwiki:臺中一中->臺中市立臺中第一高級中等學校@42617591		
-臺中二中	school-abbr	zhwiki:臺中二中->臺中市立臺中第二高級中等學校@55404403		
 臺中市大明高中	school	moe:high.csv@115		
 臺中市新民高中	school	moe:high.csv@115		
 臺中快捷巴士	category	Category:台灣公司:臺中快捷巴士公司@92508493		
 臺中捷運	category	Category:台灣公司:臺中捷運公司@94532787		
-臺中教大	school-abbr	zhwiki:臺中教大->國立臺中教育大學@33314336		
 臺中教育大學	school-abbr	zhwiki:臺中教育大學->國立臺中教育大學@32775973		
-臺中科大	school-abbr	zhwiki:臺中科大->國立臺中科技大學@18556909		
 臺中科技大學	school-abbr	zhwiki:臺中科技大學->國立臺中科技大學@30149306		
 臺北商業大學	school-abbr	zhwiki:臺北商業大學->國立臺北商業大學@34829745		
 臺北城市大學	school-abbr	zhwiki:臺北城市大學->臺北城市科技大學@19403910		
@@ -1509,8 +1501,6 @@ word	source_kind	sources	qid	note
 臺北海洋大學	school-abbr	zhwiki:臺北海洋大學->台北海洋科技大學@72021743		
 臺北科技大學	school-abbr	zhwiki:臺北科技大學->國立臺北科技大學@3120831		
 臺北藝	school-abbr	zhwiki:臺北藝->國立臺北藝術大學@57033002		
-臺北藝大	school-abbr	zhwiki:臺北藝大->國立臺北藝術大學@57032999		
-臺北護大	school-abbr	zhwiki:臺北護大->國立臺北護理健康大學@20993693		
 臺北護理健康大學	school-abbr	zhwiki:臺北護理健康大學->國立臺北護理健康大學@20993617		
 臺北農產運銷	category	Category:台灣公司:臺北農產運銷公司@92652791		
 臺北醫學大學	school	moe:u1_new.csv@115		
@@ -1519,14 +1509,11 @@ word	source_kind	sources	qid	note
 臺南市光華高中	school	moe:high.csv@115		
 臺南市崑山高中	school	moe:high.csv@115		
 臺南科技大學	school-abbr	zhwiki:臺南科技大學->台南應用科技大學@14528911		
-臺南藝大	school-abbr	zhwiki:臺南藝大->國立臺南藝術大學@57033044		
 臺南藝術大學	school-abbr	zhwiki:臺南藝術大學->國立臺南藝術大學@36334365		
 臺南護校	school-abbr	zhwiki:臺南護校->國立臺南護理專科學校@15292097		
 臺東大學	school-abbr	zhwiki:臺東大學->國立臺東大學@7589869		
 臺東專校	school-abbr	zhwiki:臺東專校->國立臺東專科學校@25741510		
 臺東縣均一高中	school	moe:high.csv@115		
-臺東高中	school-abbr	zhwiki:臺東高中->國立臺東高級中學@2320496		
-臺海大	school-abbr	zhwiki:臺海大->國立臺灣海洋大學@52795661		
 臺灣不動產投資信託	category	Category:台灣公司:臺灣不動產投資信託@93518652		
 臺灣存託憑證	category	Category:台灣公司:臺灣存託憑證@88243453		
 臺灣師大	school-abbr	zhwiki:臺灣師大->國立臺灣師範大學@5757205		
@@ -1724,7 +1711,6 @@ word	source_kind	sources	qid	note
 魚中魚	category	Category:台灣公司:魚中魚@93850762		
 鮮茶道	nsi	nsi:amenity/cafe/e7db71-7d270d@ac22bfd445b7	Q108166223	
 鳳凰旅遊	category	Category:台灣公司:鳳凰旅遊@93701676		
-鳳商	school-abbr	zhwiki:鳳商->國立鳳山高級商工職業學校@14899580		
 鳳山商工	school-abbr	zhwiki:鳳山商工->國立鳳山高級商工職業學校@14856024		
 鴻海科技	category	Category:台灣公司:鴻海科技集團@94421602		
 鴻海精密	category	Category:台灣公司:鴻海精密@94205153		

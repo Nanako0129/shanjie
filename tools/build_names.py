@@ -38,6 +38,10 @@ LEX = os.path.join(ROOT, "data", "lexicon")
 ACG_ADD = os.path.join(bap.PACKS, "acg-add.tsv")
 CACHE = os.path.expanduser("~/.cache/shanjie/sources/names")
 MAX_REQUESTS, MAX_CACHE = 3000, 500_000_000   # 契約 §2：一次建置的網路請求數、快取位元組數
+# model-v6 契約 §2.4（維護者固定，不在評測集上選）：名單詞的分數 ＝ scores()[字數] ＋ 這個值（log10），在建置時寫進 names-add.tsv，
+# 載入端不另外加；載入端照疊加層規則封頂（語料出現過）或扣 UNSEEN_OVERLAY_PENALTY（沒出現過）。依據：2026-10-11 的探索（研究紀錄
+# 「探索：名單層的分數往上加」，加 2 時「酷澎」兩種設定第一、守門集合改壞 0）。同音衝突偵測讀的是加分後的列。
+NAMES_BONUS = 2
 TAG = "names"
 NSI_COMMIT = "ac22bfd445b729b567070c1b0900be6d0c6ef924"   # 釘住的 NSI commit（和 data/lexicon/names.json 同一個）；--nsi-commit 可覆寫
 NSI_CATEGORIES = [("amenity", v) for v in "cafe restaurant fast_food bank fuel pharmacy".split()] + \
@@ -459,7 +463,7 @@ def build(api, nsi_commit, manual_tsv=MANUAL, readings_tsv=READINGS_TSV, collisi
     unread = sorted(set(cand) - set(rd))
     words = [w for w in cand if w in rd]
     reading = {w: rd[w][0] for w in words}
-    sc = bap.scores(base)
+    sc = {n: round(v + NAMES_BONUS, 8) for n, v in bap.scores(base).items()}    # 手動列也走這裡（NAMES_BONUS）
     pack = pack_scores(acg_add)
     nsrc = lambda w: sum(len(s) for s in cands[w].values())
 

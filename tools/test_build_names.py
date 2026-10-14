@@ -406,7 +406,7 @@ class Build(unittest.TestCase):
         with self.assertRaises(SystemExit):
             B.check_committed(d, acg)
 
-    def test_score_of_a_six_character_name_is_the_length_six_percentile(self):
+    def test_score_of_a_six_character_name_is_the_length_six_percentile_plus_two(self):
         with tiny_simplified():
             self.build()
         sc = B.bap.scores(B.bap.base_lexicon())
@@ -414,7 +414,7 @@ class Build(unittest.TestCase):
         six = [r for r in rows if len(r[1]) == 6 and "ㄧ" not in r[0] and "ㄅㄨ" not in r[0]]
         self.assertTrue(six)
         for r in six:
-            self.assertEqual(float(r[2]), sc[6], r)
+            self.assertAlmostEqual(float(r[2]), sc[6] + 2, places=7, msg=r)    # model-v6 §2.4: scores()[n] + NAMES_BONUS (2)
         self.assertEqual({r[3] for r in rows}, {"names"})
 
     def test_names_readings_replace_the_tool_reading_and_must_have_one_syllable_per_character(self):
