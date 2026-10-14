@@ -148,9 +148,10 @@ fn extra_overlay_checked(extra: Option<String>) -> Result<Option<PathBuf>, Strin
 
 /// The lexicon with the chosen packs and the `--extra-overlay` rows, and the overlay text that caps the LM scores (the
 /// same helpers as the engine's `new` and `load_lm`). The extra rows travel with the pack rows, so they are capped too.
-fn load_with_packs(dir: &Path, packs: u32, pdir: &Path, extra: Option<&Path>) -> Result<(std::sync::Arc<Lexicon>, String), String> {
+/// `names` false is `--no-names`: names-add.tsv stays out of the lexicon (its words are then in no lexicon entry, so capping them changes nothing).
+fn load_with_packs(dir: &Path, packs: u32, pdir: &Path, extra: Option<&Path>, names: bool) -> Result<(std::sync::Arc<Lexicon>, String), String> {
     // The pack rows are read once and reused for the cap; overlay-add.tsv is read again by capping_overlay, as load_lm does.
-    let (lex, pack_text) = load_lexicon_extra_detailed(dir, Some((pdir, packs)), extra).map_err(|e| e.to_string())?;
+    let (lex, pack_text) = load_lexicon_extra_detailed(dir, Some((pdir, packs)), extra, names).map_err(|e| e.to_string())?;
     let overlay = capping_overlay_detailed(dir, &pack_text).map_err(|e| e.to_string())?;
     Ok((lex, overlay))
 }
@@ -214,6 +215,9 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     let (mut limit, mut set, mut dump, mut ctx_mode, mut demote) = (None::<usize>, None, None, false, true);
     let mut dump_words = None::<String>;
     let (mut classes, mut kn) = (true, true);
+    // model-v6 section 2.5: the names layer is always on; `--no-names` (evaluation only: the section 3.1 breakdown, and
+    // tools/build_names.py, which passes its own candidate list as --extra-overlay) leaves it out.
+    let mut names = true;
     let (mut rowstats, mut tinylm, mut tinylm_scores) = (None::<String>, None::<String>, None::<String>);
     let mut level = None::<RerankLevel>;
     // acg-pack contract A.2: `--packs acg` adds data/packs/acg-add.tsv (or `--packs-dir DIR`'s) to the lexicon and the cap; off by default.
@@ -248,6 +252,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
             "--no-demote" => demote = false,
             "--no-classes" => classes = false,
             "--no-kn" => kn = false,
+            "--no-names" => names = false,
             "--packs" => packs |= pack_flag(&val()?)?,
             "--packs-dir" => packs_dir = Some(val()?),
             "--extra-overlay" => extra_overlay = Some(val()?),
@@ -292,7 +297,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     }
     let rss_after = tinylm.is_some().then(rss_kb).flatten();
     let dir = root().join("data/lexicon");
-    let (lex, overlay) = load_with_packs(&dir, packs, &pdir, extra_overlay.as_deref())?;
+    let (lex, overlay) = load_with_packs(&dir, packs, &pdir, extra_overlay.as_deref(), names)?;
     let demote_rows = fs::read_to_string(dir.join("demote.tsv")).map_err(|e| format!("cannot read demote.tsv ({:?})", e.kind()))?;
     let table = Demote::parse(&demote_rows).filter(|d| d.check(&lex)).ok_or("bad demote.tsv")?;
     // The table is always loaded, so a malformed one stops the run even with --no-demote.
@@ -440,7 +445,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
         RerankLevel::Conservative => "+rl:conservative",
         RerankLevel::Aggressive => "+rl:aggressive",
     };
-    println!("## {name}  lm-{profile_name}{}{}{}{}{}{}{}{xo}  {{'n': {}, 'top1': {top1}, 'oracle@64': {o64}, 'top1_sha256': '{sha}'}}", if ctx_mode { "+ctx" } else { "" }, if demote { "" } else { "-nodemote" }, if classes { "" } else { "-noclasses" }, lm.kn_tag().unwrap_or(""), tl.as_ref().map_or(String::new(), |(_, _, sha8)| format!("+tl:{sha8}")), rl_tag, if packs & PACK_ACG != 0 { "+acg" } else { "" }, rows.len());
+    println!("## {name}  lm-{profile_name}{}{}{}{}{}{}{}{}{xo}  {{'n': {}, 'top1': {top1}, 'oracle@64': {o64}, 'top1_sha256': '{sha}'}}", if ctx_mode { "+ctx" } else { "" }, if demote { "" } else { "-nodemote" }, if classes { "" } else { "-noclasses" }, if names { "" } else { "-nonames" }, lm.kn_tag().unwrap_or(""), tl.as_ref().map_or(String::new(), |(_, _, sha8)| format!("+tl:{sha8}")), rl_tag, if packs & PACK_ACG != 0 { "+acg" } else { "" }, rows.len());
     Ok(())
 }
 
@@ -516,7 +521,7 @@ fn run_predict(args: &[String]) -> Result<(), String> {
     // load it, so the sp-predict golden would stop being comparable (docs/contracts/kn-core.md, model-v6 note).
     let lm = Lm::load_with(Path::new(&lm_path.ok_or("--lm is required")?), true, false).map_err(|e| e.to_string())?;
     let dir = root().join("data/lexicon");
-    let (lex, overlay) = load_with_packs(&dir, packs, &pdir, None)?;
+    let (lex, overlay) = load_with_packs(&dir, packs, &pdir, None, true)?;
     // Prediction scores use the capped lp only; demotion applies to decoding (sw §3).
     let capped = CappedLexicon::new(lex.clone(), &overlay, &lm, None).ok_or("cannot build the capped lexicon")?;
     let text = fs::read_to_string(file.ok_or("--predict is required")?).map_err(|e| format!("cannot read file ({:?})", e.kind()))?;
@@ -751,7 +756,8 @@ mod tests {
 
     /// names-lexicon 3.5: `--extra-overlay` rows are capped like pack rows. Goes through the CLI's own load path
     /// (`load_with_packs`, then `CappedLexicon::new`); a word the corpus never saw is scored fixture score minus 1.0.
-    /// If the rows reached only the lexicon and not the capping text, the score would stay -7.5.
+    /// If the rows reached only the lexicon and not the capping text, the score would stay -7.5. 酷澎 is in the shipped names layer
+    /// since model-v6, so both runs leave it out (`--no-names`); loading the same row twice is a parse error.
     #[test]
     fn extra_overlay_rows_are_capped_like_pack_rows() {
         let lm = Lm::load(&root().join("data/lm/bigram.sjlm")).expect("data/lm/bigram.sjlm and classes.sjc are required (see cli/tests/golden.rs)");
@@ -761,7 +767,7 @@ mod tests {
         let (dir, pdir) = (root().join("data/lexicon"), root().join("data/packs"));
         let key = ["ㄎㄨˋ".to_string(), "ㄆㄥˊ".to_string()];
         let score = |extra: Option<&Path>| {
-            let (lex, overlay) = load_with_packs(&dir, 0, &pdir, extra).unwrap();
+            let (lex, overlay) = load_with_packs(&dir, 0, &pdir, extra, false).unwrap();
             CappedLexicon::new(lex, &overlay, &lm, None).unwrap().best_lp(&key, "酷澎")
         };
         let (with, without) = (score(Some(&file)), score(None));

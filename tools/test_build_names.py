@@ -578,10 +578,12 @@ class RealDecode(unittest.TestCase):
         self.assertIn("--packs", cmds[1])
         self.assertEqual(cmds[1][cmds[1].index("--packs") + 1], "acg")
         self.assertIn("--extra-overlay", cmds[1])
+        self.assertTrue(all("--no-names" in c for c in cmds), "the committed names layer stays out of every decode (model-v6 P3-8)")
 
 
     def test_decode_uses_the_extra_overlay_option(self):
-        """The real CLI: without the names layer 酷澎 loses to 酷朋; with a rows file passed as --extra-overlay it wins (needs data/lm and cargo)."""
+        """The real CLI: without the names layer 酷澎 loses to 酷朋; with a rows file passed as --extra-overlay it wins (needs data/lm and cargo).
+        decode passes --no-names, so the committed layer (which has 酷澎 since model-v6) is not in either run."""
         d = tempfile.mkdtemp()
         self.addCleanup(__import__("shutil").rmtree, d, True)
         with open(os.path.join(d, "acg-add.tsv"), "w", encoding="utf-8") as f:
