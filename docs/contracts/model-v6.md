@@ -104,6 +104,23 @@
 6. 以上通過後，**才問使用者**能不能建 Release `model-v6`、`classes-v4`、`kn-v1`（`--latest=false`）；建好後下載回來核對雜湊。接著 §2.7 的 tinylm-v5，保留集過了再問 Release `tinylm-v5`。
 7. PR 1：這份契約、四份 `docs/releases/*.md`、計數詞表與 `force_classes.py`、`build_lm.py`／`build_classes.py`／`kn_cont.py`／`lm_eval.py` 的預設關 `--extra-overlay`（§7 P3-4）、SJTL0004 核心改動與測試（SJTL0001–0003 的行為不變，出貨的 tinylm-v4 照常載入）。PR 2：改引用（model-v6、classes-v4、kn-v1、tinylm-v5 同一個 PR）、**Python 與 Rust 的名單層載入（檔案缺時是錯誤）與 App 內附 `names-add.tsv`（`build-app.sh`、`check-app.sh`）**、側檔、授權、所有 golden。名單層的預設載入、打包與它造成的每一個 golden 改動都在 PR 2，main 不會有「要讀名單檔、App 卻沒附」的狀態。
 
+### 2.8 修訂一：學到的詞不經過 KN、手動詞加分 0.75（維護者 2026-10-14 選擇題，§3.4 停止條件的處置）
+
+- **起因**（PR 2 實作時量到，§3.4 停止條件觸發）：model-v6＋classes-v4＋kn-v1＋名單層上，`core/tests/engine_learn.rs` 的鏡像改選 `a2_mirror_teach_the_other_word` 開 KN 4/8、關 KN 7/8（門檻 80%；學不起來的是 功力／公立、事物／事務、進士／近視、檢察／檢查）；`cli/tests/golden.rs` 的手動詞（出貨設定）開 KN 書面 14/15（`米雅歌唱得很好` 變成 `米亞歌…`）、關 KN 15/15。原因（Fable 分析，用 Python 參考實作在最終檔上重現四個失敗）：學習把詞條的 `lp` 提高到 `best + ε·w/(w+1)` 並令 `pb = 10^lp`（`core/src/lm.rs` `decode_segment_learned`），但開 KN、β = 1 時 `prob_c` 先把詞彙內的 `pb` 換成 `N′/ΣN′`，提高過的 `pb` 被丟掉，加分只剩 `(1−λ)·lp` 那一份（聊天約 1.5、書面約 0.9 log10，原本約 3.0）。手動詞不在模型詞彙裡，KN 改的是它**後面那個詞**的分數；`MANUAL_BONUS = 0.5` 是 model-v5 上剛好過關的最小值，沒有餘裕。
+- **規則**：
+  1. `decode_segment_learned` 裡，詞條被學習加分（`boosted > lp`，`lp` 被改寫）時，這個詞條的語言模型項用**不經過 KN 替換**的 `prob_c`（和沒有側檔時同一個公式，`pb` 是加分後的值）；沒被加分的詞條照舊（KN 開著時照 kn-core 的規則）。`Engine::total_score`（重算整句分數）套同一個例外：路徑上的詞 `lp > capped.best_lp(讀音, 詞)`（和 `Engine::boosted` 同一個判斷）時，這個詞項也不經過 KN 替換，所以 s3a 的「`total_score` 等於解碼第一名的分數」照舊成立（`docs/contracts/s3a.md` 記載這個例外）。其他路徑（評測 CLI、預測、沒有學習的 `word`、`eos`）不變。Python 參考實作沒有學習，不受影響；所有 golden 與 §2.3 的跨語言核對（不含學習）不變。`docs/contracts/kn-core.md` §2 第 3 項「每個詞項都經過同一個函式」加這個例外，`docs/contracts/s4-learning.md` 記載加分在 KN 開著時的算法。
+  2. `tools/build_overlay.py` 的 `MANUAL_BONUS` 0.5 → 0.75，重建 `data/lexicon/overlay-add.tsv`：只有手動列的分數改變（讀音與詞不變）。這是**執行時**（詞庫打分、解碼）的改變。建模與 KN 側檔讀疊加層分數的地方只有變體類的代表詞（`build_lm.variant_classes` 取分數最高的詞）：在 §2.3 之前，用 0.5（`96b8db89…`）與 0.75 兩個疊加層（都加上 `names-add.tsv`）各算一次 `variant_classes`，結果相同才繼續、記進研究紀錄；不同就停（代表詞換了，kn-v1 的 ΣN′ 與 model-v6 都要重做）。疊加層的分數也是計數的輸入（`experiments/s2/build_counts.py` 斷詞與 `--expected` 的權重用到詞條分數），model-v6、classes-v4、kn-v1 的計數是用 0.5 的疊加層（`96b8db89…`，§2.1 的輸入紀錄）做的，**三個檔照原樣保留、不重建**。`experiments/model-v6/README.md` 的輸入表分開列兩個雜湊：計數用的 `96b8db89…`（commit `4d47a50` 的版本），執行時、golden 與評測用的 0.75 版；照 README 重現計數時要用舊檔（`git show 4d47a50:data/lexicon/overlay-add.tsv`），不是 HEAD 的檔。`sp-predict.txt` 等讀疊加層分數的 golden 照 §2.5 重產。
+- **順序**：規則 2 的新 `overlay-add.tsv` 要在 §2.7 的分數檔與選值、§3.1／§3.2 的表與守門、§3.3 的衝突重驗、§3.6 的保留集**之前**定下來。已經用 0.5 的疊加層產生的結果，要在新疊加層下重跑同一條指令，dump 或 rowstats 逐位元組相同才能沿用，否則重做。研究紀錄在這些結果旁邊記它用的 `overlay-add.tsv` SHA-256，全部必須是 0.75 那一份。
+- **驗收**（PR 2，和 §3.4 一起）：
+  1. 188 WSL（降頻後）的 `engine_learn`，`kn.sjkn` 在 `data/lm`：鏡像改選 ≥ 80%、A2 ≥ 80% 且非衝突改壞 0、ㄗㄞˋ 污染 0；`global_eps_table` 記錄數字。
+  2b. 開 KN、最佳路徑上有學到的詞時，`total_score` 等於解碼第一名的分數（測試；突變「`total_score` 不套例外」讓它以斷言失敗）。
+  2. 單元測試（合成小模型＋小側檔，照 `kn_tiny`）：**同一次解碼、同一段、同一個前文（假設）**裡有同讀音的兩個詞條，學習紀錄裡只有其中一個（被加分），另一個不在紀錄裡（沒被加分）；斷言被加分的詞條的詞項等於沒有側檔時的值、沒被加分的等於開 KN 的值。兩個突變都要讓它以斷言失敗（不是編譯錯誤）：「拿掉例外」，以及「例外改成看整段有沒有學習紀錄（`learned.is_some()`）而不是 `boosted > lp`」。
+  3. `golden.rs` 與 §2.3 的跨語言摘要行，除了手動詞分數造成的改變之外不變（改變的列逐一列進研究紀錄）。
+  4. `manual_words_come_first_in_the_shipping_setting` 開 KN、兩種設定 15/15。`咪呀狗在線上嗎` 的 在／再 近乎平手（書面、不開小模型）記進研究紀錄，不在這一片處理。
+  5. 測試的前提隨模型改變（`row_decode_failure_does_not_learn` 的 ㄅㄣ 現在是 奔、`rule8_the_same_next_syllable_still_boosts` 的基準現在是 我再買）：改測試的前提、不改它要證明的行為，研究紀錄寫明。
+  6. 實機（§3.6）：改選一次後重打同一句會出現改選的詞；書面打 `米雅歌唱得很好`。
+- **不做**（之後另開）：書面設定下學習的量測（現有測試只跑聊天）；名字後面 KN 造成的 在／再 近乎平手；β 的重新選值。
+
 ## 3. 驗收
 
 ### 3.1 評測表（照 repo `CLAUDE.md`）
@@ -126,6 +143,7 @@
 ### 3.4 選字記憶與探針
 
 - `make test` 全綠（`core/tests/engine_learn.rs` 的鏡像、A2、污染測試用真模型，側檔在 `data/lm` 時就是開著 KN 跑）。任何一條因為 KN 失敗就停，回報哪一條、差多少，用選擇題問（候選：把學到的加分疊在 KN 之後；β 改小；這一版不開 KN）。
+- 開 KN 時學習失敗的處置見 §2.8（修訂一）。
 - 「大概十分鐘後到」、s2f 的「竈門」、s2h 的「好吧」不退；`eval/probe/s2r-probe.txt` 不退。
 
 ### 3.5 規模
@@ -157,6 +175,10 @@
 | 第 4 次審查（2026-10-14，REVISE） | P3-4 的新參數沒同步到 §2.1 的重現核對、§2.2 的「不改」、§2.6 的建置步驟與 PR 1 清單 | FIX：§2.2 改成只加 `--extra-overlay`；§2.1 寫明它不觸發重現核對的條件（不帶參數時模型 `7961cb9d…`、詞類表等於 classes-v3）；§2.6 第 2、7 項寫出參數 |
 | 收尾審查（2026-10-14，REVISE；維護者選「改完再送一次審查」） | 1. 暫時 `.sjtl` 的指令缺 `--levels`，和 P3-5 的版本規則矛盾；2. P3-4 把 `ime.OVERLAYS` 放 PR 1，和「名單載入與 golden 都在 PR 2」矛盾 | 1 FIX：指令補 `--levels`（tinylm-v4 的值當佔位），§2.7 與 P3-5 的版本規則寫成同一條；2 FIX：PR 1 只給建置工具與 `lm_eval.py` 加預設關的 `--extra-overlay`，`ime.OVERLAYS` 改動移到 PR 2 |
 | plan-verifier 第 2 次（2026-10-14，REVISE；之後逐項處置、收尾審查一次） | 1. PR 1 讓名單層強制載入但 App 沒附檔、golden 也還沒重產，main 會壞；2. SJTL0004 讀檔、`load_paired` 綁定、`kn_sha256` 與新的必要資料檔沒有安全審查 | 1 FIX：名單層載入、打包、golden 全部移到 PR 2（§2.6 第 7 項）；2 FIX：`pilotfish:security-reviewer` 審 §2.7 與 §2.5，結論與處置記在 §7 |
+| 維護者選擇題（2026-10-14，§3.4 停止條件） | 開 KN 時鏡像改選 4/8（關 KN 7/8）、手動詞書面 14/15；Fable 分析原因並提出選項 | 選「學到的詞跳過 KN＋手動詞 0.75」→ 加 §2.8 |
+| plan-verifier（§2.8 第 1 次，REVISE） | 1. 疊加層改動和 §2.7、§3、保留集的先後沒寫；2. 單元測試抓不到「整段跳過 KN」的錯誤實作 | 全部 FIX：加「順序」一條（舊疊加層的結果要重跑或證明逐位元組相同、記雜湊）；測試改成同一段同一前文的兩個詞條，加第二個突變 |
+| plan-verifier（§2.8 第 2 次，REVISE；之後逐項處置、收尾審查一次） | 疊加層分數是計數的輸入，「重建模型雜湊不變」證明不了計數不受影響 | FIX（縮小）：不再宣稱；計數用 0.5 的疊加層（`96b8db89…`，`4d47a50`）照實寫明、三個檔保留；README 分開列計數與執行時的雜湊 |
+| plan-verifier（§2.8 收尾審查，REVISE） | 1. 解碼套例外但 `total_score` 不套，s3a 的「總分等於第一名」會破；2. 變體類代表詞看分數，0.75 可能換掉代表詞、讓 kn-v1 的 ΣN′ 核對失敗 | FIX：`total_score` 套同一個例外並加測試、s3a 記載；§2.3 前先核對兩個疊加層的 `variant_classes` 相同，不同就停 |
 
 ## 7. 安全審查（`pilotfish:security-reviewer`，2026-10-14）與處置
 
