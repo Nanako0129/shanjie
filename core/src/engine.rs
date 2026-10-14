@@ -1363,6 +1363,15 @@ impl Engine {
         Ok(self.view(true, commit))
     }
 
+    /// A run that closed without becoming a token (Esc, Backspace to empty): the composition decodes as one stretch again, since
+    /// the split of section 1.3h holds only while the run is open. Nothing to do while letters are left.
+    fn run_closed(&mut self) -> Result<(), EngineError> {
+        if self.run.is_empty() && !self.syls.is_empty() {
+            self.refresh()?;
+        }
+        Ok(())
+    }
+
     /// A key while the run is open (section 1.3b): letters go on it (no auto-keep, amendment three), Backspace and Esc take
     /// letters off, Space ends it and is eaten, every other key ends it and is then handled as it would be.
     fn run_key(&mut self, k: Key) -> Result<Output, EngineError> {
@@ -1376,11 +1385,13 @@ impl Engine {
             KeyKind::Backspace => {
                 self.run.pop();
                 self.pred_dirty = true;
+                self.run_closed()?;
                 self.handled()
             }
             KeyKind::Esc => {
                 self.run.clear();
                 self.pred_dirty = true;
+                self.run_closed()?;
                 self.handled()
             }
             KeyKind::Space => {

@@ -1899,3 +1899,35 @@ fn a_run_in_the_middle_decodes_its_two_sides_apart() {
         assert!(o.preedit == "W編譯" && fields(&o) == (0, 1), "lm={lm}: {}", o.preedit);
     }
 }
+
+#[test]
+fn a_run_that_is_cancelled_in_the_middle_leaves_one_stretch_again() {
+    // The split of section 1.3h holds while the run is open. Esc, Backspace to empty and a token-reopened run emptied all
+    // leave no run and no token: the composition decodes as one stretch again, on screen and in what Enter sends.
+    let fields = |o: &Output| (o.english_run_utf16_start, o.english_run_utf16_len);
+    for lm in [false, true] {
+        let mk = || if lm { lm_eng() } else { eng_inline() };
+        for cancel in ["Esc", "BS", "token"] {
+            let mut e = mk();
+            syllable(&mut e, "ㄅㄧㄢ");
+            let o = if cancel == "token" {
+                run(&mut e, "r u s t _ 1");
+                syllable(&mut e, "ㄧˋ");
+                run(&mut e, "Left");
+                run(&mut e, "BS") // the run `rus` opens between the two sides
+            } else {
+                syllable(&mut e, "ㄧˋ");
+                run(&mut e, "Left");
+                run(&mut e, "S-w")
+            };
+            assert!(o.preedit.starts_with('邊') && o.preedit.ends_with('意') && fields(&o).1 > 0, "premise (lm={lm}): {}", o.preedit);
+            let o = match cancel {
+                "BS" => run(&mut e, "BS"),
+                "Esc" => run(&mut e, "Esc"),
+                _ => run(&mut e, "BS BS BS"),
+            };
+            assert!(o.preedit == "編譯" && fields(&o) == (0, 0), "lm={lm} {cancel}: {}", o.preedit);
+            assert!(run(&mut e, "Enter").commit == "編譯", "lm={lm} {cancel}");
+        }
+    }
+}
