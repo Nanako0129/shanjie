@@ -4,13 +4,14 @@
 pub mod engine;
 pub mod eval;
 pub mod ffi;
+pub mod fuzzy;
 pub mod learn;
 pub mod learn_store;
 pub mod lm;
 pub mod predict;
 pub mod tinylm;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 
 pub const BEAM: usize = 32;
@@ -62,6 +63,8 @@ pub struct Lexicon {
     words: String,
     /// Entry positions of each distinct word's by_word winner, sorted by word bytes.
     by_word: Vec<u32>,
+    /// Fuzzy input tables (docs/contracts/fuzzy-input.md section 2.1), built once here.
+    tol: fuzzy::Tolerance,
 }
 
 #[derive(Clone, Copy)]
@@ -237,7 +240,8 @@ impl Builder {
         }
         let by_word = winners.iter().map(|&f| pos[f as usize]).collect();
         let ents = order.iter().map(|&f| raw[f as usize].ent).collect();
-        let mut lex = Lexicon { max_len, syl_ids, syl_names, key_pool: fkeys, readings, ents, words, by_word };
+        let tol = fuzzy::Tolerance::build(&syl_names);
+        let mut lex = Lexicon { max_len, syl_ids, syl_names, key_pool: fkeys, readings, ents, words, by_word, tol };
         lex.words.shrink_to_fit();
         Ok(lex)
     }
@@ -272,6 +276,72 @@ impl Lexicon {
     }
     fn reading_of(&self, p: usize) -> usize {
         self.readings.partition_point(|r| r.start as usize <= p) - 1
+    }
+
+    /// Whether `syl` is a syllable of some reading (an interned one; `ids` maps any other to `u32::MAX`).
+    pub fn has_syllable(&self, syl: &str) -> bool {
+        self.syl_ids.contains_key(syl)
+    }
+
+    /// Fuzzy sound (bits 0-3 of `flags`): the other lexicon syllables that read as `syl` once the enabled pairs are merged,
+    /// sorted by name. Empty for a syllable the lexicon does not have.
+    pub fn sound_alts(&self, syl: &str, flags: u32) -> Vec<&str> {
+        let Some(&id) = self.syl_ids.get(syl) else { return Vec::new() };
+        self.tol.sound(id, flags).iter().map(|&i| self.syl_names[i as usize].as_str()).collect()
+    }
+
+    /// Adjacent key: the lexicon syllables that show as `shown` when one key of them is typed as a left/right neighbour in the
+    /// same keyboard row (standard layout, composer columns applied), sorted by name.
+    pub fn adjacent_alts(&self, shown: &str) -> Vec<&str> {
+        self.tol.adjacent(shown).iter().map(|&i| self.syl_names[i as usize].as_str()).collect()
+    }
+
+    /// The readings (syllable ids) of the words a span may be tolerantly read as: exactly one syllable replaced. A span with an
+    /// unknown syllable (id `u32::MAX`) replaces that syllable by its adjacent alternatives (none when it has two or more
+    /// unknown ones); a span of known syllables replaces each syllable by its fuzzy-sound alternatives (`flags` bits 0-3).
+    /// Order: position, then alternative name. The exact reading itself is never among them.
+    pub(crate) fn tolerant_readings(&self, ids: &[u32], syls: &[String], flags: u32) -> Vec<Vec<u32>> {
+        let mut out = Vec::new();
+        let mut put = |j: usize, alts: &[u32]| {
+            for &a in alts {
+                let mut r = ids.to_vec();
+                r[j] = a;
+                out.push(r);
+            }
+        };
+        let unknown: Vec<usize> = (0..ids.len()).filter(|&j| ids[j] == u32::MAX).collect();
+        match unknown[..] {
+            [j] => put(j, self.tol.adjacent(&syls[j])),
+            [] if flags & fuzzy::FUZZY_SOUND != 0 => (0..ids.len()).for_each(|j| put(j, self.tol.sound(ids[j], flags))),
+            _ => {}
+        }
+        out
+    }
+
+    /// Fuzzy input, candidate window: the words of the tolerant readings of `key` (see `tolerant_readings`) that are not words of
+    /// the typed reading, each at its best score, best first, with the lexicon reading each was found under.
+    pub(crate) fn tolerant_words(&self, key: &[String], flags: u32) -> Vec<(&str, Vec<String>)> {
+        let ids = self.ids(key);
+        let readings = self.tolerant_readings(&ids, key, flags);
+        let exact: HashSet<&str> = self.find(&ids).map(|r| self.reading_entries(r).map(|e| e.0).collect()).unwrap_or_default();
+        let mut best: HashMap<&str, (f64, usize)> = HashMap::new();
+        let mut order = Vec::new();
+        for (a, k) in readings.iter().enumerate() {
+            for (w, sc) in self.find(k).into_iter().flat_map(|r| self.reading_entries(r)).filter(|e| !exact.contains(e.0)) {
+                match best.get(w) {
+                    Some(&(b, _)) if b >= sc => {}
+                    Some(_) => {
+                        best.insert(w, (sc, a));
+                    }
+                    None => {
+                        best.insert(w, (sc, a));
+                        order.push(w);
+                    }
+                }
+            }
+        }
+        order.sort_by(|a, b| best[b].0.partial_cmp(&best[a].0).unwrap_or(std::cmp::Ordering::Equal));
+        order.into_iter().map(|w| (w, readings[best[w].1].iter().map(|&i| self.syl_names[i as usize].clone()).collect())).collect()
     }
 
     pub fn reading_count(&self) -> usize {

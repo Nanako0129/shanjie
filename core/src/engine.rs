@@ -4,7 +4,8 @@
 use crate::learn::{context_key, local_day, next_key, record_key, Learner, Level, Record};
 use crate::learn_store::{LearnStore, Opened, StoreError, JOURNAL_MAX};
 use crate::predict::{predict, reading_matches_in, unit_of_syllable, Mode, Unit};
-use crate::lm::{decode_segment_learned, history, CappedLexicon, Demote, End, Learn, Lm, Profile};
+use crate::fuzzy::{FUZZY_ADJACENT, FUZZY_ALL};
+use crate::lm::{decode_segment_fuzzy, history, CappedLexicon, Demote, End, Learn, Lm, Profile};
 use crate::tinylm::{TinyLm, TOPK};
 use crate::{decode_beam, Lexicon, NoLearning, BEAM_S1};
 use std::collections::{HashMap, HashSet};
@@ -374,11 +375,14 @@ struct Cands {
     first: usize,
     /// zhen-mixed section 2.3: the English window (items have syllable length 0, except an optional Chinese last item of 1).
     english: bool,
+    /// Fuzzy input (docs/contracts/fuzzy-input.md section 2.1): list position -> the lexicon reading of a word that was found
+    /// through a tolerant reading. Choosing such a word rewrites the span to that reading. Empty without fuzzy input.
+    alt: HashMap<usize, Vec<String>>,
 }
 
 impl Cands {
     fn new(list: Vec<(String, usize)>, vertical: bool) -> Cands {
-        Cands { list, sel: 0, expanded: false, top: 0, vertical, first: 0, english: false }
+        Cands { list, sel: 0, expanded: false, top: 0, vertical, first: 0, english: false, alt: HashMap::new() }
     }
 
     fn scroll(&mut self) {
@@ -496,6 +500,8 @@ pub struct Engine {
     shadow_over: u32,
     /// Set by `choose_english` for the output of the key or pick that made it: the committed text (section 2.3).
     commit_out: Option<String>,
+    /// Fuzzy input flags (`set_fuzzy`, default 0): bits 0-3 the sound pairs, bit 4 adjacent-key slips.
+    fuzzy: u32,
 }
 
 /// Base lexicon + overlay from `data_dir` (§5), same as the eval CLI default. The overlay rows are
@@ -677,6 +683,7 @@ impl Engine {
             shadow: Vec::new(),
             shadow_over: 0,
             commit_out: None,
+            fuzzy: 0,
         }
     }
 
@@ -1060,6 +1067,26 @@ impl Engine {
             self.close_english();
         }
         self.handled()
+    }
+
+    /// Fuzzy input (docs/contracts/fuzzy-input.md): `flags` bits 0-3 are the sound pairs (ㄣ/ㄥ, ㄓ/ㄗ, ㄔ/ㄘ, ㄕ/ㄙ), bit 4 the
+    /// adjacent-key slips; default 0, and 0 changes nothing. Bit 4 only decides whether `finish_syllable` accepts a syllable the
+    /// lexicon lacks; a syllable already accepted is decoded whatever the flags say. Recomputes the composition and returns the
+    /// snapshot, like `set_demote`; on a decode failure the engine resets itself. Bits above 4 are ignored here (the C ABI refuses them).
+    pub fn set_fuzzy(&mut self, flags: u32) -> Result<Output, EngineError> {
+        self.invalidate();
+        self.fuzzy = flags & FUZZY_ALL;
+        self.clear_pred();
+        if let Err(e) = self.refresh() {
+            self.clear_all();
+            return Err(e);
+        }
+        self.handled()
+    }
+
+    /// The syllables of the composition (test and tool hook): what `finish_syllable` stored, or a choice rewrote.
+    pub fn syllables(&self) -> &[String] {
+        &self.syls
     }
 
     /// Whether the English window is open (test and tool hook).
@@ -1529,8 +1556,8 @@ impl Engine {
                 };
                 let before = format!("{}{out}", self.left);
                 let learn = (!self.learner.is_empty()).then(|| Learn { learner: &self.learner, before: &before, after: self.syls.get(to).map(String::as_str), today, eps_global: self.eps_global });
-                let best = decode_segment_learned(
-                    &st.capped, &self.syls[from..to], &st.lm, lam, prev, end, BEAM_S1, learn.as_ref(), self.demote,
+                let best = decode_segment_fuzzy(
+                    &st.capped, &self.syls[from..to], &st.lm, lam, prev, end, BEAM_S1, learn.as_ref(), self.demote, self.fuzzy,
                 )
                 .map_err(|_| EngineError::Internal)?;
                 let first = &best.first().ok_or(EngineError::Internal)?.1;
@@ -1579,7 +1606,8 @@ impl Engine {
             let span = self.syls.get(at..at + n);
             at += n;
             // A span that does not fit cannot happen (one character per syllable); counted as boosted, the safe side.
-            span.is_none_or(|s| st.capped.best_lp(s, w).is_some_and(|best| lp > best))
+            // A word read through a tolerant syllable (fuzzy input) is not an entry of the typed reading: counted as boosted too.
+            span.is_none_or(|s| st.capped.best_lp(s, w).is_none_or(|best| lp > best))
         })
     }
 
@@ -1932,13 +1960,25 @@ impl Engine {
         let mut syl = self.pending();
         // tone index 1..=4 -> marks[1..=4]; space (0) -> unmarked tone 1
         syl.push_str(TONE_MARKS[tone]);
-        if self.lex.entries(std::slice::from_ref(&syl)).is_empty() {
+        if self.lex.entries(std::slice::from_ref(&syl)).is_empty() && !self.adjacent_accepts(&syl) {
             self.pred = old; // section 1.1: a syllable the lexicon lacks changes nothing
             return self.handled();
         }
         self.clear_pend();
         self.pred_dirty = true;
         self.insert_token(syl, None)
+    }
+
+    /// Fuzzy input, bit 4 (docs/contracts/fuzzy-input.md section 2.1): a syllable the lexicon lacks is accepted when it has a lexicon
+    /// syllable it may have been mistyped from. Needs a language model (the bigram decoder reads the alternatives; `decode_beam`
+    /// does not) and the standard layout (the neighbour table is that layout's keyboard). The alternative must itself be a
+    /// syllable with entries, so the decoder always has a path.
+    fn adjacent_accepts(&self, syl: &str) -> bool {
+        self.fuzzy & FUZZY_ADJACENT != 0
+            && self.lm.is_some()
+            && self.layout == Layout::Standard
+            && !self.lex.has_syllable(syl)
+            && self.lex.adjacent_alts(syl).iter().any(|a| !self.lex.entries(&[a.to_string()]).is_empty())
     }
 
     /// Insert one token (a syllable, or punctuation with its fixed word) at the cursor, shift the
@@ -2027,8 +2067,22 @@ impl Engine {
                 }
             }
         }
+        // Fuzzy input (docs/contracts/fuzzy-input.md section 2.1): after every exact word, the words found through one tolerant
+        // syllable, longer readings first, each reading's by score. Nothing is added with the flags 0 and only known syllables.
+        let mut alt = HashMap::new();
+        for l in (1..=self.lex.max_len.min(avail)).rev() {
+            let key = if a == 0 { &self.syls[..l] } else { &self.syls[a - l..a] };
+            for (w, reading) in self.lex.tolerant_words(key, self.fuzzy) {
+                if seen.insert(w) {
+                    alt.insert(list.len(), reading);
+                    list.push((w.to_string(), l));
+                }
+            }
+        }
         if !list.is_empty() {
-            self.cands = Some(Cands::new(list, self.cand_vertical));
+            let mut c = Cands::new(list, self.cand_vertical);
+            c.alt = alt;
+            self.cands = Some(c);
         }
     }
 
@@ -2066,7 +2120,8 @@ impl Engine {
         if self.is_punct(start) {
             return Ok(());
         }
-        let reading = self.syls[start..end].to_vec();
+        // A word found through a tolerant syllable is recorded under its lexicon reading (fuzzy input, section 2.1).
+        let reading = c.alt.get(&c.sel).cloned().unwrap_or_else(|| self.syls[start..end].to_vec());
         self.forget_entry(&reading, &word);
         self.refresh()
     }
@@ -2100,6 +2155,11 @@ impl Engine {
         let Some(c) = self.cands.take() else { return Ok(()) };
         let Some((word, l)) = c.list.get(idx).cloned() else { return Ok(()) };
         let (start, end) = if self.cursor == 0 { (0, l) } else { (self.cursor - l, self.cursor) };
+        // A word found through a tolerant syllable: the span becomes its lexicon reading, as `choose_pred` replaces the span by the
+        // item's reading, so refresh, `best_lp_delta` and learning read the lexicon reading (fuzzy input, section 2.1).
+        if let Some(reading) = c.alt.get(&idx) {
+            self.syls.splice(start..end, reading.iter().cloned());
+        }
         // Choosing again the word a prediction pick fixed over this exact span keeps that pending learn (section 10.1).
         let again = self.fixed.iter().find(|f| f.start == start && f.end == end && f.word == word && f.pre.as_deref() == Some(""));
         let (pre, key) = match again {

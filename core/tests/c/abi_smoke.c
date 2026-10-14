@@ -360,6 +360,28 @@ static int run_english(const char *dir, const char *missing) {
   return 0;
 }
 
+/* fuzzy input (docs/contracts/fuzzy-input.md section 2.1): the codes of set_fuzzy through the header; the behaviour is in
+ * core/tests/engine_fuzzy.rs. */
+static int run_fuzzy(const char *dir) {
+  static ShanjieOutput dummy;
+  ShanjieEngine *e = 0;
+  ShanjieOutput *o = 0;
+  CHECK(1101, shanjie_engine_new(dir, 0, &e) == 0 && e != 0);
+  CHECK(1102, shanjie_engine_set_fuzzy(0, 1, &o) == 1 && o == 0);
+  CHECK(1103, shanjie_engine_set_fuzzy(e, 1, 0) == 1);
+  o = &dummy;
+  CHECK(1104, shanjie_engine_set_fuzzy(e, 32, &o) == 2 && o == 0);
+  o = &dummy;
+  CHECK(1105, shanjie_engine_set_fuzzy(e, 0xffffffffu, &o) == 2 && o == 0);
+  CHECK(1106, shanjie_engine_set_fuzzy(e, 31, &o) == 0 && o != 0 && o->handled == 1);
+  shanjie_output_free(o);
+  o = 0;
+  CHECK(1107, shanjie_engine_set_fuzzy(e, 0, &o) == 0 && o != 0 && o->handled == 1);
+  shanjie_output_free(o);
+  shanjie_engine_free(e);
+  return 0;
+}
+
 /* acg-pack: argument checks of shanjie_engine_new_packs. The behaviour with a pack is in core/tests/engine_pack.rs. */
 static int run_packs(const char *dir) {
   ShanjieEngine *e = 0;
@@ -426,6 +448,7 @@ int main(int argc, char **argv) {
   if (rc == 0) rc = run_packs(argv[1]);
   if (rc == 0) rc = run_rerank(argv[1], argv[2], "/nonexistent/shanjie-missing.sjtl");
   if (rc == 0) rc = run_english(argv[1], "/nonexistent/shanjie-missing-english.txt");
+  if (rc == 0) rc = run_fuzzy(argv[1]);
   shanjie_engine_free(0);
   shanjie_output_free(0);
   if (rc != 0) {

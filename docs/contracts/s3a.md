@@ -42,6 +42,7 @@
 - 未完成音節有聲母、介音、韻母三欄，各放一個符號；同一欄再按就**取代**原本的符號。
 - 按聲調鍵（含空白鍵）完成音節。音節字串的格式和詞庫、評測檔相同：聲母＋介音＋韻母＋調號，一聲不加調號，˙ 放最後（例：`ㄇㄚ˙`、`ㄕˋ`、`ㄧ`）。
 - **詞庫沒有的音節不收**：完成時若 `lex.entries(&[音節])` 是空的，這個聲調鍵回報「已處理」，未完成音節保持原狀，組字區不變（使用者可用 Backspace 修正）。實測詞庫的 1,417 個音節都有單音節詞條，所以收進來的音節一定解得出來；`decode_beam` 若仍回錯，視為內部錯誤（§6 的回傳碼 4）。
+  - **例外（模糊輸入，`docs/contracts/fuzzy-input.md` §1、§2.1）**：`shanjie_engine_set_fuzzy` 的位元 4 開著、語言模型已載入、標準排列（倚天排列下位元 4 沒有作用）時，詞庫沒有、但有鄰鍵替代讀音（同一個鍵盤列左右各一鍵，欄位規則）的音節，而且至少一個替代讀音有單音節詞條時，**收下**這個音節（存打的讀音，組字區照常顯示解碼出的字）；沒有替代讀音、沒有語言模型、位元 4 關著或倚天排列時照舊不收。收下之後把位元 4 關掉，已收下的音節照樣解碼（詞庫沒有的音節一律用鄰鍵替代讀音解碼，分數減 2），不會進內部錯誤。按鍵規則表不變。
 - 新音節插在游標處，游標移到它右邊。
 - **影子（中英混打，`docs/contracts/zhen-mixed.md` §2.2）**：`set_english(1)`、`set_abbreviation(0)`、標準排列、單字表已載入，四個都成立時，未完成音節從第一個注音鍵起另外記下每個**注音鍵**（第 9、14 條處理的鍵）的鍵帽字元（不含 Shift，最多 32 個）和「覆寫次數」（第 9 條裡那一欄已有符號、被取代的次數）；否則影子一律是空的、不記。聲調鍵與空白鍵不記。第 33 個注音鍵把影子清空（長度 0、覆寫 0），之後的鍵重新開始記。影子跟著 `clear_pend` 一起清（完成音節、Esc、標點、送出、reset、回傳碼 4、第 11 條刪到未完成音節消失）。第 11 條刪最後一個符號時影子丟掉最後一個記下的鍵（覆寫次數不變；影子與欄位在覆寫過的音節上會分歧，但影子只用來查單字表，分歧無害）。倚天排列不記影子。
 
@@ -202,6 +203,10 @@ int32_t shanjie_engine_load_english(ShanjieEngine *engine, const char *path);
 // set_english：0 或 1（其他回 2、狀態不變），建立時預設 0，碼與快照同 set_abbreviation（handled 1、commit ""）；engine 或 out 為 NULL 回 1。
 // 1 且有單字表、標準排列、「可省略韻母」關時，英文打進一個未完成音節後的空白鍵開英文窗（第 10e 條）；關掉時開著的英文窗跟著關。沒有單字表時無作用。殼在每次建 engine 後都要呼叫。
 int32_t shanjie_engine_set_english(ShanjieEngine *engine, uint32_t enabled, ShanjieOutput **out);
+// fuzzy-input 新增（docs/contracts/fuzzy-input.md §2.1）：set_fuzzy 的 flags 位元 0–3 是四對模糊音（ㄣ/ㄥ、ㄓ/ㄗ、ㄔ/ㄘ、ㄕ/ㄙ，依此順序），位元 4 是鄰鍵打錯；其他位元非 0 回 2、狀態不變。
+// 建立時預設 0，0 什麼都不改。回傳碼與快照同 set_english（handled 1、commit ""；engine 或 out 為 NULL 回 1；組字區照新設定重算，快照顯示結果；解碼失敗回 4 並丟棄組字）。
+// 模糊音：每個詞可以有一個音節換成同一對的另一個（讀音替代），分數減 1。位元 4：見 §2 的例外；候選窗在完全吻合的詞之後列出容錯得到的詞，選了以後那一段換成詞的詞庫讀音。殼在每次建 engine 後都要呼叫。
+int32_t shanjie_engine_set_fuzzy(ShanjieEngine *engine, uint32_t flags, ShanjieOutput **out);
 // S7c-2a 新增（docs/contracts/s7c2a-core-rerank.md §2.5）：小模型重排的兩段式 API。每次組字改變可能留下一個重排工作；殼取走、在別的執行緒 run、回到引擎的執行緒 apply。
 #define SHANJIE_NO_CHANGE 5
 typedef struct ShanjieRerankJob ShanjieRerankJob;
@@ -221,7 +226,7 @@ int32_t shanjie_engine_rerank_apply(ShanjieEngine *engine, ShanjieRerankJob *job
 void    shanjie_rerank_free(ShanjieRerankJob *job);
 ```
 
-- **回傳碼**：0 成功、1 必要的指標是 NULL、2 輸入不合法（data_dir、LM 路徑或標點表不是 UTF-8、`ch` 不是合法的 Unicode scalar、layout、mode 或 profile 超出範圍、標點表格式不合法或超過上限，見 s3e §3）、3 資料載入失敗（含 LM 檔讀取或格式錯誤、引擎沒有 data_dir）、4 內部錯誤（攔下的 panic 或解碼錯誤）、5 沒有改變（只有 `rerank_apply`，S7c-2a）。`load_lm` 失敗時 LM 維持原狀；碼 4 時任何函式都照下面的規則丟棄組字（`rerank_run` 例外，見下）。
+- **回傳碼**：0 成功、1 必要的指標是 NULL、2 輸入不合法（data_dir、LM 路徑或標點表不是 UTF-8、`ch` 不是合法的 Unicode scalar、layout、mode 或 profile 超出範圍、fuzzy 旗標有未定義的位元、標點表格式不合法或超過上限，見 s3e §3）、3 資料載入失敗（含 LM 檔讀取或格式錯誤、引擎沒有 data_dir）、4 內部錯誤（攔下的 panic 或解碼錯誤）、5 沒有改變（只有 `rerank_apply`，S7c-2a）。`load_lm` 失敗時 LM 維持原狀；碼 4 時任何函式都照下面的規則丟棄組字（`rerank_run` 例外，見下）。
 - **reset**：mode 0 時 `commit` 是目前組字區的顯示字串（未完成音節丟掉）；mode 1 時 `commit` 為空。兩者都清掉所有組字狀態，之後的輸出必須和新建的 engine 相同；S2c 起是「新建、載入相同 LM、使用相同設定的 engine」，reset 不清 LM 與設定。殼在 `commitComposition:`、`deactivateServer`、組字擁有者改變時呼叫（mode 與時機見 `docs/contracts/s3b.md` §5）。Caps Lock 由系統切換輸入方式，會觸發 `deactivateServer`；「privacyGate 轉為生效時」延到 S4。
 - **記憶體與生命週期**：
   - 回傳非 0 時，`*out` 一律設成 NULL，而且不配置任何記憶體。
@@ -279,6 +284,7 @@ void    shanjie_rerank_free(ShanjieRerankJob *job);
   - 再送 `ㄋㄧˇ` 的按鍵和空白鍵，檢查候選已開：`candidate_count` 在 1–9、`candidates[0]` 不是 NULL、`candidate_selected == 0`；接著 `shanjie_engine_reset(e, 1, &o)`，檢查 `commit` 為空字串、`preedit` 為空字串。
   - `shanjie_engine_free(e)`；最後呼叫 `shanjie_engine_free(NULL)`、`shanjie_output_free(NULL)`。
   - S7c-2a（檢查 901–918）：沒有 n-gram 時 `load_tinylm` 回 3、NULL 回 1、不存在的檔案回 3；`set_rerank` 的碼；沒有小模型時打字後 `rerank_take` 回 0 且 `*job` 為 NULL；take、run、apply 的 NULL 組合；`rerank_free(NULL)`。冒煙測試沒有 `.sjtl`，成功的 run／apply 由 §7.3 的子行程測試負責。
+  - fuzzy-input（檢查 1101–1107）：`set_fuzzy` 的 NULL 組合、位元超出（32、全 1）回 2 且 `*out` 為 NULL、31 與 0 回 0 與快照。
   - 全部通過時 exit 0，任何一項不符時印出項目編號（不印任何字串內容）並 exit 1。
 - 指令（在 repo 根目錄，`$T` 是暫存目錄）：
 

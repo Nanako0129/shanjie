@@ -776,6 +776,86 @@ pub fn decode_segment_learned<'a>(
     learn: Option<&Learn<'_>>,
     demote: bool,
 ) -> Result<Vec<Scored<'a>>, Error> {
+    decode_segment_fuzzy(lex, syls, lm, lam, start, end, beam, learn, demote, 0)
+}
+
+/// One reading a span's words are looked up under (fuzzy input, docs/contracts/fuzzy-input.md section 2.1).
+struct Source {
+    /// Index of the reading in the lexicon.
+    r: usize,
+    /// Taken off the score of every word of this source (`fuzzy::DELTA_*`; 0 for the exact reading).
+    pen: f64,
+    /// The reading's syllables when it is a tolerant one (what learning is looked up under); `None` for the typed one.
+    names: Option<Vec<String>>,
+    /// A tolerant source's words (entry positions), already chosen; unused for the exact one.
+    picked: Vec<usize>,
+}
+
+impl CappedLexicon {
+    /// The readings the words of one span are looked up under: the typed reading, then (a span with an unknown syllable, or the
+    /// sound pairs in `fuzzy` on) the tolerant ones: words of a reading with one syllable replaced, not already words of the typed
+    /// reading, each word at its best score, the best `PER_KEY` over all of them (the research's `tolerant_entries`).
+    fn sources(&self, ids: &[u32], span: &[String], fuzzy: u32) -> Vec<Source> {
+        let base = &*self.base;
+        let exact = base.find(ids);
+        let mut out: Vec<Source> = exact.map(|r| Source { r, pen: 0.0, names: None, picked: Vec::new() }).into_iter().collect();
+        if fuzzy & crate::fuzzy::FUZZY_SOUND == 0 && !ids.contains(&u32::MAX) {
+            return out;
+        }
+        let pen = if ids.contains(&u32::MAX) { crate::fuzzy::DELTA_ADJACENT } else { crate::fuzzy::DELTA_SOUND };
+        let readings: Vec<(usize, Vec<u32>)> =
+            base.tolerant_readings(ids, span, fuzzy).into_iter().filter_map(|k| base.find(&k).map(|r| (r, k))).collect();
+        let exact_words: HashSet<&str> = exact.into_iter().flat_map(|r| base.range(r)).map(|p| self.word_of(&self.ents[p])).collect();
+        // word -> (score, entry position, which reading), the best of its readings
+        let mut best: HashMap<&str, (f64, usize, usize)> = HashMap::new();
+        let mut order: Vec<&str> = Vec::new();
+        for (a, (r, _)) in readings.iter().enumerate() {
+            for p in base.range(*r).filter(|&p| !exact_words.contains(self.word_of(&self.ents[p]))).take(PER_KEY) {
+                let (w, sc) = (self.word_of(&self.ents[p]), self.ents[p].score);
+                match best.get(w) {
+                    Some(&(b, _, _)) if b >= sc => {}
+                    Some(_) => {
+                        best.insert(w, (sc, p, a));
+                    }
+                    None => {
+                        best.insert(w, (sc, p, a));
+                        order.push(w);
+                    }
+                }
+            }
+        }
+        let mut words: Vec<(f64, usize, usize)> = order.iter().map(|w| best[w]).collect();
+        words.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+        words.truncate(PER_KEY);
+        for (a, (r, k)) in readings.iter().enumerate() {
+            let picked: Vec<usize> = words.iter().filter(|w| w.2 == a).map(|w| w.1).collect();
+            if !picked.is_empty() {
+                let names = k.iter().map(|&i| base.syl_names[i as usize].clone()).collect();
+                out.push(Source { r: *r, pen, names: Some(names), picked });
+            }
+        }
+        out
+    }
+}
+
+/// `decode_segment_learned` with fuzzy input (docs/contracts/fuzzy-input.md section 2.1). `fuzzy` holds the sound-pair bits 0-3: a
+/// word may also be read through one syllable replaced by its fuzzy-sound alternative, scored `fuzzy::DELTA_SOUND` lower. A
+/// syllable the lexicon does not have is always read through its adjacent-key alternatives (`fuzzy::DELTA_ADJACENT` lower),
+/// whatever `fuzzy` says: the switch only decides whether such a syllable is accepted when typed. With `fuzzy` 0 and only known
+/// syllables the arithmetic is exactly that of `decode_segment_learned` before this existed.
+#[allow(clippy::too_many_arguments)]
+pub fn decode_segment_fuzzy<'a>(
+    lex: &'a CappedLexicon,
+    syls: &[String],
+    lm: &Lm,
+    lam: f64,
+    start: &str,
+    end: End<'_>,
+    beam: usize,
+    learn: Option<&Learn<'_>>,
+    demote: bool,
+    fuzzy: u32,
+) -> Result<Vec<Scored<'a>>, Error> {
     let base = &*lex.base;
     let n = syls.len();
     let ids = base.ids(syls);
@@ -792,93 +872,101 @@ pub fn decode_segment_learned<'a>(
         // ends in a different word must not be merged away (dec-recombine section 1).
         let mut idx: HashMap<(String, &str), usize> = HashMap::new();
         for l in 1..=base.max_len.min(i) {
-            let Some(r) = base.find(&ids[i - l..i]) else { continue };
             if hyps[i - l].is_empty() {
                 continue;
             }
-            let span = &syls[i - l..i];
-            let learned = learn.filter(|ln| ln.learner.has_reading(span));
-            let range = base.range(r);
-            let best = lex.ents[range.start].score;
-            let dl = if demote { lex.deltas_in(&range) } else { &[] };
-            // Entries to try: the top PER_KEY, plus learned words ranked below it (`extra`: only
-            // usable on a path whose context has a learned record for them).
-            let mut entries: Vec<(usize, bool)> = range.clone().take(PER_KEY).map(|p| (p, false)).collect();
-            if let Some(ln) = learned {
-                let words = ln.learner.words_of(span);
-                let mut seen: HashSet<&str> = entries.iter().map(|&(p, _)| lex.word_of(&lex.ents[p])).collect();
-                for p in range.clone().skip(PER_KEY) {
-                    let w = lex.word_of(&lex.ents[p]);
-                    if words.binary_search(&w).is_ok() && seen.insert(w) {
-                        entries.push((p, true));
-                    }
-                }
-            }
-            // Each hypothesis's learned hits depend only on its context key, not on the entry: look
-            // them up once per hypothesis (shared by key) before trying the entries.
-            let hits_of: Vec<usize>;
-            let mut hits: Vec<(Level, Vec<(&str, f64)>)> = Vec::new();
-            if let Some(ln) = learned {
-                let mut by_ctx: HashMap<String, usize> = HashMap::new();
-                // Rule 8: at sentence start the key also holds the syllable after the word.
-                let next = syls.get(i).map(String::as_str).or(ln.after);
-                hits_of = hyps[i - l]
-                    .iter()
-                    .map(|h| {
-                        let key = record_key(context_key(&format!("{before_tail}{}", h.surface)), next);
-                        *by_ctx.entry(key).or_insert_with_key(|k| {
-                            hits.push(ln.learner.lookup(k, span, ln.today));
-                            hits.len() - 1
-                        })
-                    })
-                    .collect();
-            } else {
-                hits_of = Vec::new();
-            }
-            for (p, extra) in entries {
-                let e = &lex.ents[p];
-                let (word, lp0) = (lex.word_of(e), e.score);
-                let (wid, pb0) = (lm.word_id(word), pow10(lp0));
-                let delta = dl.iter().find(|&&(q, _)| q == p).map_or(0.0, |x| x.1);
-                for (hi, h) in hyps[i - l].iter().enumerate() {
-                    let (mut lp, mut pb) = (lp0, pb0);
-                    if let Some(ln) = learned {
-                        let (lv, ws) = &hits[hits_of[hi]];
-                        let eps = if *lv == Level::Global { ln.eps_global } else { LEARN_EPS };
-                        // eps 0 switches the level off, for `extra` entries too: `best + 0` would
-                        // still lift a word to a tie with the top.
-                        match ws.iter().find(|(w, _)| *w == word) {
-                            Some(&(_, w)) if eps > 0.0 => {
-                                let boosted = best + eps * (w / (w + 1.0));
-                                if boosted > lp {
-                                    lp = boosted;
-                                    pb = pow10(lp);
-                                }
-                            }
-                            _ if extra => continue,
-                            _ => {}
+            for src in lex.sources(&ids[i - l..i], &syls[i - l..i], fuzzy) {
+                // A tolerant source is learned under its lexicon reading (section 2.1): a pick of its word was recorded there.
+                let span = src.names.as_deref().unwrap_or(&syls[i - l..i]);
+                let learned = learn.filter(|ln| ln.learner.has_reading(span));
+                let range = base.range(src.r);
+                let best = lex.ents[range.start].score;
+                let dl = if demote { lex.deltas_in(&range) } else { &[] };
+                // Entries to try: the top PER_KEY, plus learned words ranked below it (`extra`: only
+                // usable on a path whose context has a learned record for them). A tolerant source has its chosen words and no
+                // extras (ponytail: a learned word ranked below its top PER_KEY is not reached through a tolerant reading).
+                let mut entries: Vec<(usize, bool)> = match src.names {
+                    None => range.clone().take(PER_KEY).map(|p| (p, false)).collect(),
+                    Some(_) => src.picked.iter().map(|&p| (p, false)).collect(),
+                };
+                if let (Some(ln), None) = (learned, &src.names) {
+                    let words = ln.learner.words_of(span);
+                    let mut seen: HashSet<&str> = entries.iter().map(|&(p, _)| lex.word_of(&lex.ents[p])).collect();
+                    for p in range.clone().skip(PER_KEY) {
+                        let w = lex.word_of(&lex.ents[p]);
+                        if words.binary_search(&w).is_ok() && seen.insert(w) {
+                            entries.push((p, true));
                         }
                     }
-                    let sc = h.score + (word_term(lam, lm.prob_c(h.ctx, wid, pb), lp) - delta);
-                    let key = (format!("{}{word}", h.surface), word);
-                    match idx.get(&key).copied() {
-                        Some(q) if !(sc > cand[q].score) => {}
-                        found => {
-                            let mut words = h.words.clone();
-                            words.push((word, lp, delta));
-                            // The surface is cloned only for a new slot (the index keeps one copy); a replacement moves it.
-                            let surface = match found {
-                                Some(_) => key.0,
-                                None => {
-                                    let s = key.0.clone();
-                                    idx.insert(key, cand.len());
-                                    s
+                }
+                // Each hypothesis's learned hits depend only on its context key, not on the entry: look
+                // them up once per hypothesis (shared by key) before trying the entries.
+                let hits_of: Vec<usize>;
+                let mut hits: Vec<(Level, Vec<(&str, f64)>)> = Vec::new();
+                if let Some(ln) = learned {
+                    let mut by_ctx: HashMap<String, usize> = HashMap::new();
+                    // Rule 8: at sentence start the key also holds the syllable after the word.
+                    let next = syls.get(i).map(String::as_str).or(ln.after);
+                    hits_of = hyps[i - l]
+                        .iter()
+                        .map(|h| {
+                            let key = record_key(context_key(&format!("{before_tail}{}", h.surface)), next);
+                            *by_ctx.entry(key).or_insert_with_key(|k| {
+                                hits.push(ln.learner.lookup(k, span, ln.today));
+                                hits.len() - 1
+                            })
+                        })
+                        .collect();
+                } else {
+                    hits_of = Vec::new();
+                }
+                for (p, extra) in entries {
+                    let e = &lex.ents[p];
+                    let (word, lp0) = (lex.word_of(e), e.score);
+                    let (wid, pb0) = (lm.word_id(word), pow10(lp0));
+                    // The tolerance penalty rides in the delta (subtracted from the word's term, kept in the path), so that
+                    // `Engine::total_score` and the rerank job see the score the decoder used.
+                    let delta = dl.iter().find(|&&(q, _)| q == p).map_or(0.0, |x| x.1) + src.pen;
+                    for (hi, h) in hyps[i - l].iter().enumerate() {
+                        let (mut lp, mut pb) = (lp0, pb0);
+                        if let Some(ln) = learned {
+                            let (lv, ws) = &hits[hits_of[hi]];
+                            let eps = if *lv == Level::Global { ln.eps_global } else { LEARN_EPS };
+                            // eps 0 switches the level off, for `extra` entries too: `best + 0` would
+                            // still lift a word to a tie with the top.
+                            match ws.iter().find(|(w, _)| *w == word) {
+                                Some(&(_, w)) if eps > 0.0 => {
+                                    let boosted = best + eps * (w / (w + 1.0));
+                                    if boosted > lp {
+                                        lp = boosted;
+                                        pb = pow10(lp);
+                                    }
                                 }
-                            };
-                            let nh = Hyp { score: sc, surface, words, last: wid, ctx: lm.ctx_of(None) };
-                            match found {
-                                Some(q) => cand[q] = nh,
-                                None => cand.push(nh),
+                                _ if extra => continue,
+                                _ => {}
+                            }
+                        }
+                        let sc = h.score + (word_term(lam, lm.prob_c(h.ctx, wid, pb), lp) - delta);
+                        let key = (format!("{}{word}", h.surface), word);
+                        match idx.get(&key).copied() {
+                            Some(q) if !(sc > cand[q].score) => {}
+                            found => {
+                                let mut words = h.words.clone();
+                                words.push((word, lp, delta));
+                                // The surface is cloned only for a new slot (the index keeps one copy); a replacement moves it.
+                                let surface = match found {
+                                    Some(_) => key.0,
+                                    None => {
+                                        let s = key.0.clone();
+                                        idx.insert(key, cand.len());
+                                        s
+                                    }
+                                };
+                                let nh = Hyp { score: sc, surface, words, last: wid, ctx: lm.ctx_of(None) };
+                                match found {
+                                    Some(q) => cand[q] = nh,
+                                    None => cand.push(nh),
+                                }
                             }
                         }
                     }
@@ -951,7 +1039,22 @@ pub fn decode_from(
     start: &str,
     demote: bool,
 ) -> Result<Vec<(f64, Vec<String>)>, Error> {
-    Ok(decode_segment_learned(lex, syls, lm, profile.lambda(), start, End::Eos, beam, None, demote)?
+    decode_from_fuzzy(lex, syls, lm, profile, beam, start, demote, 0)
+}
+
+/// `decode_from` with the fuzzy flags of `decode_segment_fuzzy` (the evaluation CLI's `--fuzzy`).
+#[allow(clippy::too_many_arguments)]
+pub fn decode_from_fuzzy(
+    lex: &CappedLexicon,
+    syls: &[String],
+    lm: &Lm,
+    profile: Profile,
+    beam: usize,
+    start: &str,
+    demote: bool,
+    fuzzy: u32,
+) -> Result<Vec<(f64, Vec<String>)>, Error> {
+    Ok(decode_segment_fuzzy(lex, syls, lm, profile.lambda(), start, End::Eos, beam, None, demote, fuzzy)?
         .into_iter()
         .map(|(s, ws)| (s, ws.into_iter().map(|(w, _, _)| w.to_string()).collect()))
         .collect())

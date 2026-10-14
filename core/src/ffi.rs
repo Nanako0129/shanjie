@@ -690,6 +690,40 @@ pub unsafe extern "C" fn shanjie_engine_set_english(
     rc
 }
 
+/// Fuzzy input (docs/contracts/fuzzy-input.md section 2.1): `flags` bits 0-3 are the sound pairs, bit 4 the adjacent-key slips; any
+/// other bit is 2 with the state unchanged. Codes and snapshot as `shanjie_engine_set_english`.
+///
+/// # Safety
+/// `engine` is NULL or a live handle; `out` is NULL or valid for one pointer write.
+#[no_mangle]
+pub unsafe extern "C" fn shanjie_engine_set_fuzzy(
+    engine: *mut ShanjieEngine,
+    flags: u32,
+    out: *mut *mut ShanjieOutput,
+) -> i32 {
+    let rc = guard(|| {
+        // SAFETY: forwarded caller contract.
+        if !unsafe { clear_out(out) } || engine.is_null() {
+            return SHANJIE_ERR_NULL;
+        }
+        if flags & !crate::fuzzy::FUZZY_ALL != 0 {
+            return SHANJIE_ERR_INVALID;
+        }
+        // SAFETY: live handle, single-threaded use (§6).
+        let e = unsafe { &mut (*engine).0 };
+        match e.set_fuzzy(flags) {
+            // SAFETY: `out` checked non-NULL above.
+            Ok(o) => unsafe { emit(o, out) },
+            Err(_) => SHANJIE_ERR_INTERNAL,
+        }
+    });
+    if rc == SHANJIE_ERR_INTERNAL {
+        // SAFETY: forwarded caller contract.
+        unsafe { discard(engine) };
+    }
+    rc
+}
+
 /// # Safety
 /// `engine` is NULL or a live handle; `dir` is NULL or a NUL-terminated string.
 #[no_mangle]
@@ -1781,6 +1815,78 @@ mod tests {
         assert!(out.contains("1 passed"), "child test actually ran");
         let all = format!("{out}{err}");
         assert!(!all.contains("shanjie-ffi-") && !all.contains("rust") && !all.contains("google"), "a path or a word leaked");
+    }
+
+    // ---- fuzzy input: set_fuzzy (docs/contracts/fuzzy-input.md section 2.1) ----
+
+    /// Calls set_fuzzy; returns (code, out was NULL, handled, preedit, commit) and frees the output.
+    fn fuzzy(e: *mut ShanjieEngine, flags: u32) -> (i32, bool, i32, String, String) {
+        let mut o: *mut ShanjieOutput = sentinel();
+        let rc = unsafe { shanjie_engine_set_fuzzy(e, flags, &mut o) };
+        if o.is_null() {
+            return (rc, true, 0, String::new(), String::new());
+        }
+        // SAFETY: test-only read of a live output.
+        let r = unsafe {
+            let s = |p| CStr::from_ptr(p).to_str().unwrap().to_string();
+            (rc, false, (*o).handled, s((*o).preedit), s((*o).commit))
+        };
+        unsafe { shanjie_output_free(o) };
+        r
+    }
+
+    #[test]
+    fn child_fuzzy() {
+        if !is_child("child_fuzzy") {
+            return;
+        }
+        // 星 (ㄒㄧㄥ) beside 鑫 and 心 (ㄒㄧㄣ); the toy model likes 鑫 (see `tiny_lm`).
+        let dir = tiny_dir("fuzzy", "ㄒㄧㄣ 鑫 -1.0\nㄒㄧㄣ 心 -4.0\nㄒㄧㄥ 星 -3.0\n".as_bytes());
+        let lm_path = dir.join("tiny.sjlm");
+        std::fs::write(&lm_path, tiny_lm()).unwrap();
+        let tiny = tiny_lm();
+        let (cls, emit) = ([1u16, 2, 0xFFFF, 0xFFFF], [1.0, 1.0, 0.0, 0.0]);
+        std::fs::write(dir.join("classes.sjc"), crate::lm::test_classes(&tiny, 0, 0.8, &cls, &emit, &[0.1; 9])).unwrap();
+        let lm_c = CString::new(lm_path.to_str().unwrap()).unwrap();
+        let e = new_engine(&dir, 0);
+        assert!(unsafe { shanjie_engine_load_lm(e, lm_c.as_ptr()) } == 0, "load ok");
+
+        // NULLs are 1 (and *out is NULL for a NULL engine).
+        let mut o: *mut ShanjieOutput = sentinel();
+        assert!(unsafe { shanjie_engine_set_fuzzy(e, 1, ptr::null_mut()) } == 1, "out NULL");
+        assert!(unsafe { shanjie_engine_set_fuzzy(ptr::null_mut(), 1, &mut o) } == 1 && o.is_null(), "engine NULL");
+
+        // Types ㄒㄧㄥ (`v u /`): the toy model's exact answer is 星.
+        for c in ['v', 'u', '/'] {
+            assert!(send(e, key(CHAR, c)).0 == 0, "typing");
+        }
+        let shown = send(e, key(SPACE, '\0')).1;
+        assert!(shown == "星", "exact reading, got {shown}");
+
+        // Any bit above bit 4 is 2 with a NULL out and the state unchanged: 0b1_0001 must not turn bit 0 on.
+        for flags in [32, 33, 0xffff_ffff] {
+            let (rc, null, ..) = fuzzy(e, flags);
+            assert!(rc == 2 && null, "undefined bit {flags}");
+        }
+        assert!(send(e, key(LEFT, '\0')).1 == "星", "a refused call changed nothing");
+        // Bit 0 (ㄣ/ㄥ) is 0 with the snapshot of the recomputed composition: 鑫 is read through ㄒㄧㄥ.
+        let (rc, null, handled, preedit, commit) = fuzzy(e, 1);
+        assert!(rc == 0 && !null && handled == 1 && commit.is_empty(), "snapshot");
+        assert!(preedit == "鑫", "the composition is recomputed with the pair on, got {preedit}");
+        // 0 and 31 are valid; 0 puts the exact answer back.
+        assert!(fuzzy(e, 31).0 == 0);
+        let (rc, _, _, preedit, _) = fuzzy(e, 0);
+        assert!(rc == 0 && preedit == "星", "all off again");
+        unsafe { shanjie_engine_free(e) };
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn fuzzy_codes_through_the_c_abi() {
+        let (ok, out, err) = run_child("child_fuzzy", false);
+        assert!(ok, "fuzzy child failed: {out}{err}");
+        assert!(out.contains("1 passed"), "child test actually ran");
+        assert!(!format!("{out}{err}").contains("shanjie-ffi-"), "a path leaked");
     }
 
     // ---- S7c-2a: load_tinylm, set_rerank, take / run / apply / free (docs/contracts/s7c2a-core-rerank.md section 3 item 3) ----
