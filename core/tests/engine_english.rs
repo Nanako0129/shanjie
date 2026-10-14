@@ -54,6 +54,7 @@ fn key_of(tok: &str) -> Key {
         "Esc" => Key::new(KeyKind::Esc),
         "Tab" => Key::new(KeyKind::Tab),
         "BS" => Key::new(KeyKind::Backspace),
+        "Delete" => Key::new(KeyKind::Delete),
         "Left" => Key::new(KeyKind::Left),
         "Right" => Key::new(KeyKind::Right),
         "Down" => Key::new(KeyKind::Down),
@@ -591,19 +592,21 @@ fn token_next_key_is_the_fixed_en_for_learning_and_lookup() {
 }
 
 #[test]
-fn space_after_the_token_lists_its_three_writings() {
+fn down_after_the_token_lists_its_three_writings_and_space_types_a_space() {
     let mut e = eng();
     run(&mut e, "r u s t _ 1");
-    let o = run(&mut e, "_");
+    let o = run(&mut e, "Down");
     assert!(o.candidates == ["rust", "Rust", "RUST"] && o.selected == Some(0) && o.total == 3, "{:?}", o.candidates);
     let o = run(&mut e, "2");
     assert!(o.preedit == "Rust" && o.commit.is_empty() && o.candidates.is_empty());
     // Again on the new writing (zhen-inline 1.0, revision 2): the text as it stands first, then lower, Capitalised, UPPER, no repeat.
-    assert!(run(&mut e, "_").candidates == ["Rust", "rust", "RUST"]);
-    // Down opens it too (open_candidates), a punctuation mark still lists its own table.
+    assert!(run(&mut e, "Down").candidates == ["Rust", "rust", "RUST"]);
+    // Space at the same place opens nothing (zhen-inline 1.3e, revision 3): it types a space unit after the token.
     let mut e = eng();
     run(&mut e, "r u s t _ 1");
-    assert!(run(&mut e, "Down").candidates == ["rust", "Rust", "RUST"]);
+    let o = run(&mut e, "_");
+    assert!(o.handled && o.candidates.is_empty() && o.selected.is_none() && o.preedit == "rust " && o.commit.is_empty(), "{:?}", o.preedit);
+    // A punctuation mark still lists its own table with Space.
     let mut e = eng();
     run(&mut e, "S-,");
     assert!(run(&mut e, "_").candidates.first().map(String::as_str) == Some("，"), "a mark's table");
@@ -999,23 +1002,188 @@ fn run_after_chinese_ends_with_space_and_the_composition_goes_on() {
 }
 
 #[test]
-fn run_keeps_the_word_when_a_zhuyin_key_cannot_go_on() {
-    // The same composition with Space and without: `Windows` stays, ㄏ is the next syllable (revision 2, 1.3b). Both displays.
+fn run_is_never_auto_kept_and_backspace_takes_one_letter() {
+    // Amendment three (1.3b): `Windows` then an unshifted `c` is the run `Windowsc`, not the token `Windows` and a syllable ㄏ.
+    // Both displays.
     for mk in [win as fn() -> Engine, win_space] {
-        let mut a = mk();
-        let zh = three(&mut a);
-        run(&mut a, "S-w i n d o w s _ c");
-        let mut b = mk();
-        three(&mut b);
-        let ob = run(&mut b, "S-w i n d o w s c");
-        assert!(ob.preedit == format!("{zh}Windowsㄏ") && ob.commit.is_empty(), "{}", ob.preedit);
-        assert!(b.english_autokept());
-        for e in [&mut a, &mut b] {
-            syllable(e, "ㄠˇ");
-        }
-        let (ca, cb) = (run(&mut a, "Enter").commit, run(&mut b, "Enter").commit);
-        assert!(ca == cb && ca.starts_with(&format!("{zh}Windows")), "{ca} {cb}");
+        let mut e = mk();
+        let zh = three(&mut e);
+        run(&mut e, "S-w i n d o w s");
+        let o = run(&mut e, "c");
+        assert!(o.preedit == format!("{zh}Windowsc") && o.commit.is_empty() && !e.english_autokept(), "{}", o.preedit);
+        // One Backspace takes one letter, not the whole word.
+        let o = run(&mut e, "BS");
+        assert!(o.preedit == format!("{zh}Windows"), "{}", o.preedit);
+        // Space ends the run (eaten); 很好 and Enter send everything, no space between.
+        let o = run(&mut e, "_");
+        assert!(o.preedit == format!("{zh}Windows") && o.commit.is_empty() && !e.english_open());
+        syllable(&mut e, "ㄏㄣˇ");
+        let shown = syllable(&mut e, "ㄏㄠˇ").preedit;
+        let tail = shown.strip_prefix(&format!("{zh}Windows")).expect("Windows stays in front").to_string();
+        assert!(tail.chars().count() == 2);
+        let o = run(&mut e, "Enter");
+        assert!(o.commit == format!("{zh}Windows{tail}"), "{}", o.commit);
+        assert!(!e.english_autokept());
     }
+}
+
+#[test]
+fn space_twice_types_a_space_unit_and_one_backspace_takes_it() {
+    // The first Space breaks the run (eaten), the second types a half-width space (1.3e): 我在用Windows 很好.
+    let mut e = win();
+    let zh = three(&mut e);
+    run(&mut e, "S-w i n d o w s _");
+    let o = run(&mut e, "_");
+    assert!(o.handled && o.commit.is_empty() && o.preedit == format!("{zh}Windows ") && o.candidates.is_empty(), "{}", o.preedit);
+    assert!(o.cursor_utf16 as usize == o.preedit.encode_utf16().count(), "the cursor is after the space");
+    syllable(&mut e, "ㄏㄣˇ");
+    let shown = syllable(&mut e, "ㄏㄠˇ").preedit;
+    let tail = shown.strip_prefix(&format!("{zh}Windows ")).expect("the space stays in front").to_string();
+    assert!(tail.chars().count() == 2);
+    let o = run(&mut e, "Enter");
+    assert!(o.commit == format!("{zh}Windows {tail}"), "{}", o.commit);
+    // One Backspace takes the space unit whole; the token is still there.
+    let mut e = win();
+    let zh = three(&mut e);
+    run(&mut e, "S-w i n d o w s _ _");
+    assert!(run(&mut e, "BS").preedit == format!("{zh}Windows"));
+    // A space after a space unit is another space unit; each is one unit.
+    let o = run(&mut e, "_ _ _");
+    assert!(o.preedit == format!("{zh}Windows   "), "{:?}", o.preedit);
+    assert!(run(&mut e, "BS").preedit == format!("{zh}Windows  "));
+    // A single Space (no second one) is not a space: 我在用Windows很好.
+    let mut e = win();
+    let zh = three(&mut e);
+    let o = run(&mut e, "S-w i n d o w s _");
+    assert!(o.preedit == format!("{zh}Windows"));
+    // reset(Commit) sends the space unit like Enter does (a focus loss after the second Space).
+    let mut e = win();
+    run(&mut e, "S-w i n _ _");
+    assert!(e.reset(ResetMode::Commit).commit == "Win ");
+}
+
+#[test]
+fn space_after_chinese_a_mark_or_an_unfinished_syllable_is_as_before() {
+    // Chinese in front: Space lists the candidates (rules 15 and 16), no space unit.
+    let mut e = win();
+    three(&mut e);
+    let o = run(&mut e, "_");
+    assert!(!o.candidates.is_empty(), "the Chinese candidate window");
+    // A mark in front: the mark's own table (s3e).
+    let mut e = win();
+    run(&mut e, "S-,");
+    assert!(run(&mut e, "_").candidates.first().map(String::as_str) == Some("，"));
+    // An unfinished syllable after a token: Space is the tone-one key (rule 10), not a space unit.
+    let mut e = win();
+    run(&mut e, "S-w i n d o w s _");
+    let o = run(&mut e, "c _");
+    assert!(!o.preedit.contains(' ') && o.preedit.starts_with("Windows"), "{:?}", o.preedit);
+    // An open window: Space is the window's.
+    let mut e = win();
+    run(&mut e, "S-w i n d o w s _ Down");
+    assert!(e.english_open() || run(&mut e, "_").preedit == "Windows", "the window takes the Space");
+}
+
+#[test]
+fn space_unit_at_the_unit_limit_and_in_the_middle() {
+    // 38 marks, the token `Win` (the 39th unit): the second Space types the 40th unit, so everything is sent with this key.
+    let mut e = win();
+    let marks = "，".repeat(38);
+    for _ in 0..38 {
+        e.key(Key::ch(',', MOD_SHIFT)).unwrap();
+    }
+    run(&mut e, "S-w i n _");
+    let o = run(&mut e, "_");
+    assert!(o.handled && o.commit == format!("{marks}Win ") && o.preedit.is_empty(), "{:?}", o.commit);
+    assert!(is_empty(&mut e));
+    // The space unit goes in at the cursor, between the token and what follows it, and the arrow keys jump over it whole.
+    let mut e = win();
+    run(&mut e, "S-w i n _ S-, Left");
+    let o = run(&mut e, "_");
+    assert!(o.preedit == "Win ，", "{:?}", o.preedit);
+    let o = run(&mut e, "Left");
+    assert!(o.preedit == "Win ，" && o.cursor_utf16 == 3, "the cursor is before the space unit: {}", o.cursor_utf16);
+    let o = run(&mut e, "Left");
+    assert!(o.cursor_utf16 == 0, "one Left jumps the whole token `Win`: {}", o.cursor_utf16);
+    let o = run(&mut e, "Right Right");
+    assert!(o.cursor_utf16 == 4, "and one Right the whole space unit: {}", o.cursor_utf16);
+}
+
+#[test]
+fn space_unit_is_a_punctuation_token_for_learning() {
+    // 我是 re-picked as 我試, then a space unit: the record is under the space unit's own reading, nothing else, and the
+    // lookup after typing the same finds it (the key is `NEXT_PREFIX` + the unit's reading, like any mark).
+    let dir = tmp_dir("space-unit-key");
+    let mut e = lm_eng();
+    e.learning_open(&dir).unwrap();
+    syllable(&mut e, "ㄨㄛˇ");
+    syllable(&mut e, "ㄕˋ");
+    choose_word(&mut e, "我試");
+    run(&mut e, "r u s t _ 1 _");
+    let o = run(&mut e, "Enter");
+    assert!(o.commit == "我試rust ", "{}", o.commit);
+    assert!(records(&e) == [("^>_punct_en".to_string(), "我試".to_string())], "{:?}", records(&e));
+    // The space unit straight after the word (the token between them deleted): its own reading is the next key, as a mark's is.
+    let dir2 = tmp_dir("space-unit-key2");
+    let mut e = lm_eng();
+    e.learning_open(&dir2).unwrap();
+    syllable(&mut e, "ㄨㄛˇ");
+    syllable(&mut e, "ㄕˋ");
+    choose_word(&mut e, "我試");
+    run(&mut e, "S-w _ _ Left Left Delete");
+    let o = run(&mut e, "Enter");
+    assert!(o.commit == "我試 ", "{:?}", o.commit);
+    assert!(records(&e) == [("^>_punct_ ".to_string(), "我試".to_string())], "{:?}", records(&e));
+    // And it is read back from the file: a new engine on the same directory looks the record up under that key.
+    let mut e = lm_eng();
+    e.learning_open(&dir2).unwrap();
+    assert!(records(&e) == [("^>_punct_ ".to_string(), "我試".to_string())], "after reopening: {:?}", records(&e));
+    let _ = std::fs::remove_dir_all(&dir2);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn run_fields_point_at_the_run() {
+    let mut e = win();
+    let zh = three(&mut e);
+    let o = run(&mut e, "S-,");
+    assert!((o.english_run_utf16_start, o.english_run_utf16_len) == (0, 0), "no run: 0 and 0");
+    // Chinese and a mark in front: the run starts after both, in UTF-16 units of the preedit.
+    let o = run(&mut e, "S-w");
+    assert!(o.preedit == format!("{zh}，W") && (o.english_run_utf16_start, o.english_run_utf16_len) == (4, 1), "{}", o.preedit);
+    let o = run(&mut e, "i n d o w s");
+    assert!((o.english_run_utf16_start, o.english_run_utf16_len) == (4, 7), "{} {}", o.english_run_utf16_start, o.english_run_utf16_len);
+    // The same text with the run's letters as the preedit slice.
+    let units: Vec<u16> = o.preedit.encode_utf16().collect();
+    let (st, len) = (o.english_run_utf16_start as usize, o.english_run_utf16_len as usize);
+    assert!(String::from_utf16(&units[st..st + len]).unwrap() == "Windows");
+    // Backspace shortens it; Backspace down to nothing and Esc close it: 0 and 0.
+    let o = run(&mut e, "BS");
+    assert!((o.english_run_utf16_start, o.english_run_utf16_len) == (4, 6));
+    let o = run(&mut e, "Esc");
+    assert!((o.english_run_utf16_start, o.english_run_utf16_len) == (0, 0) && o.preedit == format!("{zh}，"));
+    run(&mut e, "S-w");
+    let o = run(&mut e, "BS");
+    assert!((o.english_run_utf16_start, o.english_run_utf16_len) == (0, 0));
+    // Every way the run ends leaves 0 and 0: Space, Enter (no preedit), a mark, a tone key.
+    for end in ["_", "S-,", "3", "Down"] {
+        let mut e = win();
+        run(&mut e, "S-w i n");
+        let o = run(&mut e, end);
+        assert!((o.english_run_utf16_start, o.english_run_utf16_len) == (0, 0), "{end}");
+    }
+    // The cursor in the middle: the run sits at the cursor, the rest follows it.
+    let mut e = win();
+    let zh = three(&mut e);
+    run(&mut e, "Left");
+    let o = run(&mut e, "S-w i n");
+    let before = zh.chars().take(2).collect::<String>();
+    assert!(o.preedit.starts_with(&format!("{before}Win")) && (o.english_run_utf16_start, o.english_run_utf16_len) == (2, 3), "{}", o.preedit);
+    // A window and the prediction row never carry a run.
+    let mut e = win();
+    three(&mut e);
+    let o = run(&mut e, "_");
+    assert!(!o.candidates.is_empty() && (o.english_run_utf16_start, o.english_run_utf16_len) == (0, 0));
 }
 
 #[test]
@@ -1140,12 +1308,12 @@ fn run_at_the_unit_limit_sends_in_the_output_of_the_ending_key() {
     let o = run(&mut e, "_");
     assert!(o.handled && o.commit == format!("{marks}Windows") && o.preedit.is_empty(), "{}", o.commit);
     assert!(is_empty(&mut e));
-    // The same ended by ㄏ: the same text, the key starts a syllable in the emptied composition.
+    // The same ended by a mark (amendment three: a letter no longer ends it): the same text, the mark starts the emptied composition.
     let mut e = win();
     let marks = nearly_full(&mut e);
     run(&mut e, "S-w i n d o w s");
-    let o = run(&mut e, "c");
-    assert!(o.handled && o.commit == format!("{marks}Windows") && o.preedit == "ㄏ", "{} / {}", o.commit, o.preedit);
+    let o = run(&mut e, "S-,");
+    assert!(o.handled && o.commit == format!("{marks}Windows") && o.preedit == "，", "{} / {}", o.commit, o.preedit);
     // Enter that ends it: the text is sent, Enter is not passed on.
     let mut e = win();
     let marks = nearly_full(&mut e);
@@ -1307,10 +1475,11 @@ fn token_lists_follow_how_the_token_was_made() {
     let mut e = eng_inline();
     run(&mut e, "g o o g l e _ Enter");
     assert!(run(&mut e, "Down").candidates == ["google", "Google", "GOOGLE"]);
-    // The Space key lists the same as Down.
+    // The Space key lists nothing there (zhen-inline 1.3e): it types a space unit after the token.
     let mut e = eng_inline();
     run(&mut e, "g o o g l e j BS");
-    assert!(run(&mut e, "_").candidates.len() == 4);
+    let o = run(&mut e, "_");
+    assert!(o.candidates.is_empty() && o.preedit == "google ", "{:?}", o.preedit);
 }
 
 #[test]
@@ -1325,13 +1494,13 @@ fn run_tokens_list_their_writings_without_a_chinese_item() {
     let mut e = win();
     let o = run(&mut e, "S-w i n d o w s Down");
     assert!(o.candidates == ["Windows", "windows", "WINDOWS"] && o.selected == Some(0), "{:?}", o.candidates);
-    // Ended by a kept key (ㄏ), then ㄏ deleted: the same list, no Chinese item.
+    // Ended by Space, then ㄏ typed and deleted: the same list, no Chinese item.
     let mut e = win();
-    run(&mut e, "S-w i n d o w s c BS");
+    run(&mut e, "S-w i n d o w s _ c BS");
     assert!(run(&mut e, "Down").candidates == ["Windows", "windows", "WINDOWS"]);
     // With an unfinished syllable Down does nothing to the token.
     let mut e = win();
-    run(&mut e, "S-w i n d o w s c");
+    run(&mut e, "S-w i n d o w s _ c");
     assert!(run(&mut e, "Down").candidates.is_empty());
 }
 

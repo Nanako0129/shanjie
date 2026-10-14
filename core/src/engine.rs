@@ -325,6 +325,10 @@ pub struct Output {
     /// Candidate-vertical contract section 2.2: 0 horizontal (or no candidates), 1 the vertical candidate window (fixed
     /// when it opened), 2 the vertical prediction row, entered or not (it follows the setting on every output, section 2.4).
     pub vertical: u32,
+    /// Zhen-inline section 1.3f: the open English run in `preedit`, start and length in UTF-16 code units; both 0 when no run
+    /// is open.
+    pub english_run_utf16_start: u32,
+    pub english_run_utf16_len: u32,
 }
 
 struct Fixed {
@@ -1129,8 +1133,7 @@ impl Engine {
     }
 
     /// Whether the latest call (a key, a pick, a reset or a setting; each clears it first) made an auto-keep (zhen-inline
-    /// section 1.3: the rule D table row, an English window kept by a Zhuyin key where an English item was selected, an English
-    /// run ended by a letter). Test and tool hook; the simulator counts with it and never repeats the rule.
+    /// section 1.3: the rule D table row, an English window kept by a Zhuyin key where an English item was selected). Test and tool hook; the simulator counts with it and never repeats the rule.
     #[doc(hidden)]
     pub fn english_autokept(&self) -> bool {
         self.autokept
@@ -1337,24 +1340,11 @@ impl Engine {
         Ok(self.view(true, commit))
     }
 
-    /// Whether the unshifted letter `ch` after the run is an auto-keep: the run in lower case is a whole listed word and
-    /// `ch` after it starts no listed word.
-    fn run_autokeeps(&self, ch: char) -> bool {
-        let Some(words) = self.english_words.as_deref() else { return false };
-        let lower = self.run.to_ascii_lowercase();
-        Self::is_word(words, &lower) && !Self::has_prefix(words, &format!("{lower}{ch}"))
-    }
-
-    /// A key while the run is open (section 1.3b): letters go on it, Backspace and Esc take letters off, Space ends it and is
-    /// eaten, a letter that makes the run a kept word ends it and starts a syllable, every other key ends it and is then
-    /// handled as it would be.
+    /// A key while the run is open (section 1.3b): letters go on it (no auto-keep, amendment three), Backspace and Esc take
+    /// letters off, Space ends it and is eaten, every other key ends it and is then handled as it would be.
     fn run_key(&mut self, k: Key) -> Result<Output, EngineError> {
         let m = k.modifiers;
         if k.kind == KeyKind::Char && (m == 0 || m == MOD_SHIFT) && k.ch.is_ascii_alphabetic() {
-            if m == 0 && self.run_autokeeps(k.ch) {
-                self.autokept = true;
-                return self.end_run_then(k);
-            }
             let c = if m == MOD_SHIFT { k.ch.to_ascii_uppercase() } else { k.ch.to_ascii_lowercase() };
             let commit = self.run_push(c)?;
             return Ok(self.view(true, commit));
@@ -1663,9 +1653,9 @@ impl Engine {
         self.pend_prev.iter().chain([&self.pend]).flatten().flatten().collect()
     }
 
-    /// The composition as shown: the display text with the unfinished symbols at the cursor, and the cursor after
-    /// them in UTF-16 code units.
-    fn shown(&self) -> (String, u32) {
+    /// The composition as shown: the display text with the unfinished symbols at the cursor, the cursor after
+    /// them in UTF-16 code units, and the open English run's (start, length) in UTF-16 code units (0, 0 without a run).
+    fn shown(&self) -> (String, u32, (u32, u32)) {
         let chars: Vec<char> = self.display.chars().collect();
         // Zhen-inline section 1.2: with D, the unfinished syllable shows as the shadow's letters. Every path that sends what
         // is shown (Enter, `reset(Commit)`, the 40th token) comes through here.
@@ -1680,14 +1670,16 @@ impl Engine {
         // which can be longer (⋯⋯, s3e §3). Clamped in case the invariant ever breaks.
         let at = (0..self.cursor).map(|i| self.token_width(i)).sum::<usize>().min(chars.len());
         let mut text: String = chars[..at].iter().collect();
+        let run_start = text.encode_utf16().count() as u32;
         text.push_str(&unfinished);
         let cursor_utf16 = text.encode_utf16().count() as u32;
+        let run = if self.run.is_empty() { (0, 0) } else { (run_start, cursor_utf16 - run_start) };
         text.extend(chars[at..].iter());
-        (text, cursor_utf16)
+        (text, cursor_utf16, run)
     }
 
     fn view(&self, handled: bool, commit: String) -> Output {
-        let (preedit, cursor_utf16) = self.shown();
+        let (preedit, cursor_utf16, (english_run_utf16_start, english_run_utf16_len)) = self.shown();
         let (candidates, selected, columns, first, total) = match &self.cands {
             Some(c) => {
                 let (first, n) = c.window();
@@ -1704,7 +1696,7 @@ impl Engine {
             Some(c) => c.vertical as u32,
             None => self.pred_vertical(),
         };
-        Output { handled, commit, preedit, cursor_utf16, candidates, selected, columns, first, total, vertical }
+        Output { handled, commit, preedit, cursor_utf16, candidates, selected, columns, first, total, vertical, english_run_utf16_start, english_run_utf16_len }
     }
 
     /// Recompute the display string: free segments decoded top-1, fixed words in between (§3.1).
@@ -1840,7 +1832,7 @@ impl Engine {
     /// Commit the whole composition as shown, unfinished symbols included (s3a rule 12a), and clear all state. Learning
     /// sees the decoded text only.
     fn take_commit(&mut self) -> String {
-        let (shown, _) = self.shown();
+        let (shown, ..) = self.shown();
         let s = std::mem::take(&mut self.display);
         self.learn_commit(&s);
         self.clear_all();
@@ -2031,6 +2023,10 @@ impl Engine {
         }
         let n = self.syls.len();
         match k.kind {
+            // Zhen-inline section 1.3e: Space right after an English token or a space unit types a space.
+            KeyKind::Space if self.cursor > 0 && self.breaks_with_space(self.cursor - 1) => {
+                return self.insert_token(format!("{PUNCT_PREFIX} "), Some(" ".to_string()), None);
+            }
             KeyKind::Space | KeyKind::Down => self.open_candidates(),
             KeyKind::Up => self.pred = old,
             KeyKind::Char if tone.is_some() => self.pred = old,
@@ -2259,6 +2255,11 @@ impl Engine {
             }
         });
         self.refresh()
+    }
+
+    /// Zhen-inline section 1.3e: whether unit `i` is an English token or a space unit, the two a Space after it types a space for.
+    fn breaks_with_space(&self, i: usize) -> bool {
+        english_of(&self.syls[i]).is_some() || self.syls[i].strip_prefix(PUNCT_PREFIX) == Some(" ")
     }
 
     fn is_punct(&self, i: usize) -> bool {
