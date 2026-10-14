@@ -15,6 +15,7 @@ enum TestData {
         ("mcbpmf-data.txt", "data/lexicon/mcbpmf-data.txt"),
         ("overlay-add.tsv", "data/lexicon/overlay-add.tsv"),
         ("sandhi-add.tsv", "data/lexicon/sandhi-add.tsv"),
+        ("names-add.tsv", "data/lexicon/names-add.tsv"),  // model-v6 section 2.5: the always-on names layer, required by the core
         ("demote.tsv", "data/lexicon/demote.tsv"),
         ("bigram.sjlm", "data/lm/bigram.sjlm"),
         ("classes.sjc", "data/lm/classes.sjc"),

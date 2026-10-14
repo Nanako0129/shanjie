@@ -4,6 +4,8 @@
 
 名單參數：`--extra-overlay data/lexicon/names-add.tsv` 在 `build_lm.py`、`build_classes.py`、`kn_cont.py` 三個都要帶，而且是**同一份**檔（異體類、封頂與產得出的詞三處才一致）；`lm_eval.py` 做跨語言核對時也帶它（契約 §2.3）。重現核對（契約 §2.1）**不帶**這個參數。
 
+PR 2（名單層常開）之後：`ime.OVERLAYS` 與核心的預設載入已經在 `sandhi-add.tsv` 之後讀 `names-add.tsv`，在那之後的 checkout 重跑上面這些指令要**拿掉** `--extra-overlay data/lexicon/names-add.tsv`：同一個檔再給一次是重複的列，`ime.Lexicon` 與核心都會報錯。拿掉之後，Python 工具讀到的疊加層清單和原本帶參數時相同（`ime.overlays()` 的結果是同一串檔案，讀程式碼得知，沒有重跑）；Rust CLI 不開詞包時也相同，開詞包時名單改在詞包之前。要量「沒有名單層」，Rust CLI 用 `--no-names`。
+
 ## 補次數檔（§2.1b）的生成指令
 
 在 Mac 跑（只呼叫 API，計算量小），金鑰只放進這一個程序的環境變數：
