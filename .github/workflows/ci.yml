@@ -94,7 +94,7 @@ jobs:
 
       # The bigram model is not in git (docs/PLAN.md S2c); it is the model-v5
       # release asset, and its word-class table (S2k) is the classes-v3 asset.
-      # The small model of 語意校正 (S7c-2b) is the tinylm-v3 asset (S7h), paired with model-v5.
+      # The small model of 語意校正 (S7c-2b) is the tinylm-v4 asset (S7h; v4 adds the rerank-strength levels), paired with model-v5.
       # Checking them here fails the run in seconds with a clear message instead
       # of after the build. The hashes are checked against data/bigram.sjlm.sha256,
       # data/classes.sjc.sha256 and data/tinylm.sjtl.sha256 (also read by build-app.sh and release.yml); cli/tests/golden.rs
@@ -108,7 +108,7 @@ jobs:
           shasum -a 256 -c data/bigram.sjlm.sha256
           gh release download classes-v3 --repo "$GITHUB_REPOSITORY" -p classes.sjc -D data/lm
           shasum -a 256 -c data/classes.sjc.sha256
-          gh release download tinylm-v3 --repo "$GITHUB_REPOSITORY" -p tinylm.sjtl -D data/lm
+          gh release download tinylm-v4 --repo "$GITHUB_REPOSITORY" -p tinylm.sjtl -D data/lm
           shasum -a 256 -c data/tinylm.sjtl.sha256
 
       - name: Tests (debug)
@@ -177,6 +177,11 @@ jobs:
       # deterministic output) and the committed pack against the lexicon. Builds the evaluation CLI for the collision detection.
       - name: ACG pack builder (Python)
         run: python3 -m unittest tools.test_build_acg_pack
+
+      # docs/contracts/names-lexicon.md section 3 items 6 and 8: the common proper-noun builder against fixtures and a fake API, and the
+      # committed names-add.tsv sharing no word with the base, overlay-add, sandhi-add and acg-add.
+      - name: Names lexicon builder (Python)
+        run: python3 -m unittest tools.test_build_names
 
       # docs/contracts/model-v5.md sections 8-9: the count scripts' --extra-lexicon (additive counting), the
       # out-of-vocabulary bigram filter in tools/build_lm.py, the count comparison and the counting lexicon rule.
@@ -248,7 +253,7 @@ jobs:
           shasum -a 256 -c data/bigram.sjlm.sha256
           gh release download classes-v3 --repo "$GITHUB_REPOSITORY" -p classes.sjc -D data/lm
           shasum -a 256 -c data/classes.sjc.sha256
-          gh release download tinylm-v3 --repo "$GITHUB_REPOSITORY" -p tinylm.sjtl -D data/lm
+          gh release download tinylm-v4 --repo "$GITHUB_REPOSITORY" -p tinylm.sjtl -D data/lm
           shasum -a 256 -c data/tinylm.sjtl.sha256
 
       # The local entry points (Makefile, docs/verification.md). cargo test

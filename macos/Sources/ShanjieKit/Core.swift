@@ -68,6 +68,22 @@ final class CoreEngine {
         return Self.take(shanjie_engine_set_rerank(handle, on ? 1 : 0, &out), out)
     }
 
+    /// Rerank strength (docs/contracts/rerank-strength.md section 2.2): 0 conservative, 1 standard, 2 aggressive; returns the
+    /// snapshot, like `setRerank`. The core remembers it without a small model and keeps it across `loadLM` / `loadTinyLM`.
+    func setRerankLevel(_ level: UInt32) -> CoreResult {
+        var out: UnsafeMutablePointer<ShanjieOutput>?
+        return Self.take(shanjie_engine_set_rerank_level(handle, level, &out), out)
+    }
+
+    /// The levels the loaded small model offers (bit0 conservative, bit1 standard, bit2 aggressive); 0 without one, and on a
+    /// non-zero code (logged; then nothing is offered).
+    func rerankLevels() -> UInt32 {
+        var mask: UInt32 = 0
+        let code = shanjie_engine_rerank_levels(handle, &mask)
+        if code != 0 { Log.shell.error("shanjie_engine_rerank_levels failed, code \(code)") }
+        return code == 0 ? mask : 0
+    }
+
     /// S7c-2a: the job of the last change, once; `(nil, 0)` when there is none, `(nil, code)` on a non-zero code (the header
     /// guarantees `*job` is NULL then, so there is nothing to free). The job is wrapped at once, so the pointer never leaves this
     /// file and is freed exactly once, by `free`, when the wrapper goes.

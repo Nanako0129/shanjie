@@ -426,6 +426,32 @@ static int run_rerank(const char *dir, const char *lm, const char *missing) {
   return 0;
 }
 
+/* Rerank strength (docs/contracts/rerank-strength.md section 2.2): both new functions through the header. No .sjtl here: the
+ * levels themselves are covered by ffi.rs `child_rerank_level`; here the codes and the mask without a small model. */
+static int run_rerank_level(const char *dir, const char *lm) {
+  static ShanjieOutput dummy;
+  ShanjieEngine *e = 0;
+  ShanjieOutput *o = 0;
+  uint32_t m = 99u;
+  CHECK(951, shanjie_engine_new(dir, 0, &e) == 0 && e != 0);
+  CHECK(952, shanjie_engine_rerank_levels(e, &m) == 0 && m == 0u);   /* no small model */
+  CHECK(953, shanjie_engine_rerank_levels(0, &m) == 1);
+  CHECK(954, shanjie_engine_rerank_levels(e, 0) == 1);
+  o = &dummy;
+  CHECK(955, shanjie_engine_set_rerank_level(0, 1, &o) == 1 && o == 0);
+  CHECK(956, shanjie_engine_set_rerank_level(e, 1, 0) == 1);
+  o = &dummy;
+  CHECK(957, shanjie_engine_set_rerank_level(e, 3, &o) == 2 && o == 0);
+  CHECK(958, shanjie_engine_set_rerank_level(e, 2, &o) == 0 && o != 0 && o->handled == 1); /* remembered without a model */
+  shanjie_output_free(o);
+  o = 0;
+  CHECK(959, shanjie_engine_load_lm(e, lm) == 0);
+  m = 99u;
+  CHECK(960, shanjie_engine_rerank_levels(e, &m) == 0 && m == 0u);
+  shanjie_engine_free(e);
+  return 0;
+}
+
 int main(int argc, char **argv) {
   int rc;
   if (argc != 3 && argc != 4) return 2;
@@ -437,6 +463,7 @@ int main(int argc, char **argv) {
   if (rc == 0) rc = run_learn(argv[1], argc == 4 ? argv[3] : 0);
   if (rc == 0) rc = run_packs(argv[1]);
   if (rc == 0) rc = run_rerank(argv[1], argv[2], "/nonexistent/shanjie-missing.sjtl");
+  if (rc == 0) rc = run_rerank_level(argv[1], argv[2]);
   if (rc == 0) rc = run_english(argv[1], "/nonexistent/shanjie-missing-english.txt");
   shanjie_engine_free(0);
   shanjie_output_free(0);

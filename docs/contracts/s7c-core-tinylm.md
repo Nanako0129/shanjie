@@ -21,6 +21,7 @@ S7c 分兩片。這一片（S7c-1）只做**核心的前向、模型檔、`pick`
   - 張量：順序固定（照 `tinylm.py` 的參數名排序規則，寫在 exporter 與 Rust 讀檔處的同一份註解）。二維的矩陣：`int8` 型別時是每列對稱 int8 加 f32 縮放，**直接呼叫 `latency.quantize_int8`**（和 S7b §2.3 量過的同一個量化）；`f32` 型別時原樣。一維的向量一律 f32。
 - 不另外產生 npz 讀取器；Rust 不讀 npz。
 - **修訂（2026-10-12，S7c-2c）**：格式多了版本 2 `SJTL0002`（前 100 bytes 同版本 1，之後是聊天與書面的 δ，檔頭 116 bytes），`pick` 多了 δ 參數（`fusegrid.pick` 的 `delta`）；版本 1 照讀、δ 當 0。規格見 `docs/contracts/s7c2c-delta.md` §2.1、§2.2。
+- **修訂（2026-10-14，語意校正強度）**：格式多了版本 3 `SJTL0003`（前 116 bytes 同版本 2，之後是聊天保守、聊天積極、書面保守、書面積極四組 f64 α、τ、δ，檔頭 212 bytes；每一組都照標準那組檢查：α 有限、τ 不是 NaN、δ ∈ [0, 1000]），`export_sjtl.py --levels` 寫出；版本 1、2 照讀，每個等級都用標準那組。規格見 `docs/contracts/rerank-strength.md` §2.1、§2.2。
 - `int8check.py`（`dequant`）在 S7b 的分支（寫這份契約時尚未合併，PR #114 合併後在 main）。這一片從 main 開，golden 產生器與 exporter 只依賴 main 已有的 `latency.quantize_int8`，還原用同一個算式（`q.astype(float32) * scale`）；第 4 項的 `tinylm-M8.npz` 是 S7b 已經產生的檔（`b84376c3…`）。
 
 ### 2.2 Rust：`core/src/tinylm.rs`

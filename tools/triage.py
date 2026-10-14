@@ -9,7 +9,7 @@
 main bucket (section 3: A1, B1, B2, D1, C; F is the user-reported rows that are right offline) and writes
 eval/bench/triage/<label>.json (counts only). Public sets also get a per-row numbers file under --rows-out (default
 ~/.cache/shanjie/triage), outside the repo; private sets only ever get counts. `table` renders docs/triage.md from the JSON files.
-The holdout is never a set here. Standard library only (plus tools/bench.py's set table and reference/proto/eval.py's `lenient`).
+The holdout is never a set here. Standard library only, except that `tinylm_params` needs numpy (export_sjtl.py's reader), plus tools/bench.py's set table and reference/proto/eval.py's `lenient`).
 """
 import argparse, collections, importlib.util, json, os, struct, subprocess, sys, tempfile
 
@@ -122,15 +122,16 @@ class Lex:
 
 
 def tinylm_params(path):
-    """(alpha, tau, delta) per profile from the .sjtl header (core/src/tinylm.rs parse): alpha, tau at 36/44 (chat) and 52/60 (formal), delta at
-    100/108 in a version 2 file and 0 in version 1."""
-    with open(path, "rb") as f:
-        b = f.read(116)
-    magic, version = b[:8], struct.unpack_from("<I", b, 8)[0]
-    if (magic, version) not in ((b"SJTL0001", 1), (b"SJTL0002", 2)):
-        raise ValueError("not a .sjtl file")
-    d = struct.unpack_from("<dd", b, 100) if version == 2 else (0.0, 0.0)
-    return {"chat": (*struct.unpack_from("<dd", b, 36), d[0]), "formal": (*struct.unpack_from("<dd", b, 52), d[1])}
+    """The standard (alpha, tau, delta) per profile of a .sjtl file (versions 1 to 3; delta is 0 in version 1), read with the exporter's own
+    reader so a header change cannot leave this tool behind (experiments/s7a-tinylm/export_sjtl.py read_sjtl). The version 3 level triples are
+    not needed: the triage runs the standard level."""
+    sys.path.insert(0, os.path.join(ROOT, "experiments", "s7a-tinylm"))
+    import export_sjtl
+    try:
+        head = export_sjtl.read_sjtl(path)[0]
+    except (AssertionError, struct.error):
+        raise ValueError("not a .sjtl file") from None
+    return {p: (*head[p], head["delta"][i]) for i, p in enumerate(PROFILES)}
 
 
 def pick(ng, ll, alpha, tau, delta):

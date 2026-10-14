@@ -45,7 +45,7 @@ enum TestData {
                     \(f.source) is missing. The lexicon is in git; the model is the model-v5 release asset: \
                     gh release download model-v5 -R Nanako0129/shanjie -p bigram.sjlm -D data/lm
                     classes.sjc: gh release download classes-v3 -R Nanako0129/shanjie -p classes.sjc -D data/lm
-                    tinylm.sjtl: gh release download tinylm-v3 -R Nanako0129/shanjie -p tinylm.sjtl -D data/lm
+                    tinylm.sjtl: gh release download tinylm-v4 -R Nanako0129/shanjie -p tinylm.sjtl -D data/lm
                     """, file: file, line: line)
                 return nil
             }
@@ -363,7 +363,7 @@ final class FreeCounter: @unchecked Sendable {
 }
 
 /// dev302 row 65 (s7c2b section 2.5, revised 2026-10-12, the selftest's sentence): in the chat profile the n-gram's first is 在,
-/// the small model picks 再, under tinylm-v2 and tinylm-v3 alike (RerankTests, 2026-10-13). Row 25 (執行這個城市 -> 程式) was this
+/// the small model picks 再, under tinylm-v2, tinylm-v3 and tinylm-v4 alike (RerankTests, 2026-10-13; v4: CLI and these tests, 2026-10-14). Row 25 (執行這個城市 -> 程式) was this
 /// sentence under tinylm-v1; v2's strict chat values did not change it, v3's do again (`DeviceRow` below).
 enum RerankRow {
     static let zhuyin = "ㄨㄛˇ ㄉㄥˇ ㄧ ㄒㄧㄚˋ ㄗㄞˋ ㄍㄨㄛˋ ㄑㄩˋ"

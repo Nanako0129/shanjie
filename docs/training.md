@@ -17,7 +17,7 @@
 |---|---|---|---|
 | `bigram.sjlm` | `model-v5` | 詞與詞相鄰出現的次數（SJLM0001 格式）；含少量用來辨識來源的指紋條目（`docs/data-files.md`、`docs/contracts/model-v4.md` §0） | 語料計數 → `tools/build_lm.py` → 加指紋 |
 | `classes.sjc` | `classes-v3` | 512 個詞類、每個詞的類別與發射機率、類別接續機率、μ = 0.8（SJCL0001 格式；`tools/build_classes.py` 檔頭、`docs/contracts/s2k-word-classes.md` §4.1） | 對計數做詞類分群 → `tools/build_classes.py` |
-| `tinylm.sjtl` | `tinylm-v3` | 1,440 萬參數的字元語言模型，6 層、d 384、字表 9,714 字，int8；檔頭帶聊天與書面各一組融合參數 α、τ、δ（SJTL0002；`docs/releases/tinylm-v3.md`、`experiments/s7a-tinylm/export_sjtl.py` 檔頭） | 訓練 → 匯出 → 調融合參數 |
+| `tinylm.sjtl` | `tinylm-v4` | 1,440 萬參數的字元語言模型，6 層、d 384、字表 9,714 字，int8；檔頭帶聊天與書面各三組（保守、標準、積極）融合參數 α、τ、δ（SJTL0003；`docs/releases/tinylm-v4.md`、`tinylm-v3.md`、`experiments/s7a-tinylm/export_sjtl.py` 檔頭） | 訓練 → 匯出 → 調融合參數 |
 
 ### 1.2 三個檔案怎麼互相綁定
 
@@ -45,7 +45,7 @@
 |---|---|
 | 語料、計數或模型格式 | `model-v6`＋`classes-v4`＋下一個 `tinylm-v…` |
 | 只重新分群 | `classes-v4`＋下一個 `tinylm-v…` |
-| 小模型的訓練、大小、匯出格式或融合參數 | 下一個 `tinylm-v…`（`tinylm-v2`、`tinylm-v3` 都只換融合參數） |
+| 小模型的訓練、大小、匯出格式或融合參數 | 下一個 `tinylm-v…`（`tinylm-v2`、`tinylm-v3` 都只換融合參數；`tinylm-v4` 換檔頭格式） |
 
 ## 2. 語料與輸入
 
@@ -220,18 +220,19 @@ classes-v3 分群在 188 約花多少時間：沒有紀錄（model-v5 README 只
 
 ### 5.4 匯出成 `tinylm.sjtl`（int8）
 
-指令（`experiments/s7a-tinylm/export_sjtl.py` 檔頭、`docs/releases/tinylm-v3.md`「產生」）：
+指令（`experiments/s7a-tinylm/export_sjtl.py` 檔頭、`docs/releases/tinylm-v4.md`「產生」）：
 
 ```sh
 python3 experiments/s7a-tinylm/export_sjtl.py --npz ~/.cache/shanjie/work/s7a/tinylm-M.npz \
   --out <輸出>.sjtl --type int8 --ngram-model data/lm/bigram.sjlm \
-  --chat 0.3 2 0.25 --formal 0.7 1 2
+  --chat 0.3 2 0.25 --formal 0.7 1 2 \
+  --levels 1 2 3 0.3 2 0.25 0.7 0.5 2 0.5 1 0.25
 ```
 
-- 格式 SJTL0001（檔頭 100 bytes：magic、版本、權重型別、形狀、聊天與書面各一組 α、τ、**32 bytes 的 n-gram 模型 SHA-256**）；給 δ 時寫 SJTL0002（再多 16 bytes：聊天 δ、書面 δ）。δ 要兩邊都給或都不給（`export_sjtl.py`、`docs/contracts/s7c-core-tinylm.md` §2.1、`s7c2c-delta.md` §2.1）。
+- 格式 SJTL0001（檔頭 100 bytes：magic、版本、權重型別、形狀、聊天與書面各一組 α、τ、**32 bytes 的 n-gram 模型 SHA-256**）；給 δ 時寫 SJTL0002（再多 16 bytes：聊天 δ、書面 δ）；再給 `--levels` 時寫 SJTL0003（再多 96 bytes：聊天保守、聊天積極、書面保守、書面積極各一組 α、τ、δ，檔頭 212 bytes）。δ 要兩邊都給或都不給（`export_sjtl.py`、`docs/contracts/s7c-core-tinylm.md` §2.1、`s7c2c-delta.md` §2.1）。
 - 二維權重每列對稱 int8 加一個 float32 縮放（`latency.quantize_int8`），載入時還原成 float32；一維向量是 float32（`export_sjtl.py`）。
 - `--ngram-model` 讀的是「加過指紋的發佈版模型」，它的雜湊被寫進檔頭，這就是和 n-gram 的綁定（§1.2）。
-- 重現同一個檔：`tinylm-v3` 用同一個指令匯出，雜湊必須是 `7e73ef67…12ce`，14,638,224 bytes；它和 `tinylm-v2` 的檔只差 9 個 byte（`docs/contracts/s7h-tinylm-v3.md` §2.1）。
+- 重現同一個檔：`tinylm-v4` 用上面的指令（含 `--levels`）匯出，SHA-256 必須是 `7b39c7529071d97fa911380ce96aad93f9f89b69ef554e383eacacca425c0865`，14,638,320 bytes；它和 `tinylm-v3` 的檔只差檔頭（116 變 212 bytes，多 96 bytes），字表與張量逐位元組相同（`docs/releases/tinylm-v4.md`）。`tinylm-v3`（不帶 `--levels`）的雜湊是 `7e73ef67…12ce`，14,638,224 bytes，和 `tinylm-v2` 的檔只差 9 個 byte（`docs/contracts/s7h-tinylm-v3.md` §2.1）。
 - int8 夠用：M 的權重 int8 對 float32 在 12 格都沒有「淨值為負而且 p < 0.05」（研究紀錄 2026-10-11 S7b）。Rust 的 int8 路徑與 numpy 逐列相同（最大 |ΔLL| 約 1.6e-5，門檻 1e-4；研究紀錄 2026-10-11 S7c-1）。
 
 ### 5.5 融合參數 α、τ、δ：怎麼調、每一版怎麼選的
@@ -250,10 +251,11 @@ python3 experiments/s7a-tinylm/export_sjtl.py --npz ~/.cache/shanjie/work/s7a/ti
 | `tinylm-v1` | 0.7／2／（無） | 0.7／2／（無） | S7a：cvtune＋wikitune 合計 top1 最高，同分取 τ 較小、再取 α 較小；選好凍結。S7d 只用和訓練文字沒有整句重疊的調參列重選，M 選到的值完全不變 | `s7a-tinylm.md` §2.3、§8；`s7d-tune-overlap.md`；研究紀錄 2026-10-11 S7a、S7d |
 | `tinylm-v2` | 0.2／1／0.25 | 0.7／1／2 | S7e：在 cvtune＋wikitune 合計（6,618 列）上，照「改對 − 10 × 改壞」選；`fusegrid.py --break-weight 10`。「改壞 1 句 ≈ 改對 10 句」是使用者的權重 | `s7e-fewer-breaks.md` §2.2；研究紀錄 2026-10-12 S7e；`docs/releases/tinylm-v2.md` |
 | `tinylm-v3` | **0.3／2／0.25** | 0.7／1／2（不變） | E2：計分改 1:1 的「改對 − 改壞」、改壞率 ≤ 0.5%；在**維護者自己的聊天訊息**建的調參期（5,761 列）上選，先凍結（`judge.py --select R3p --tuning chatclause --weight 1 --cap 0.005`；`R3p` 只是名稱（輸出那一列與 rowstats 檔名的前綴），值由 `--tuning`、`--weight`、`--cap` 選出），之後只在判斷期 2026-08（6,559 列）算一次 | `e2-chat-eval.md`；`s7h-tinylm-v3.md` §0；研究紀錄 2026-10-13「E2 的新調參期與 R3′」「E2 判斷期（2026-08）的表與結論」 |
+| `tinylm-v4` | 0.3／2／0.25（同 v3） | 0.7／1／2（同 v3） | 標準值不變，另加保守與積極兩檔（SJTL0003）。保守：聊天 1／2／3、書面 0.7／0.5／2；積極：聊天 0.3／2／0.25（選出的 0.5／1／0 在 `lytune` 改對 236 < 改壞 374，沒過出貨門檻，照規則寫成標準值）、書面 0.5／1／0.25。聊天用維護者的聊天訊息建的調參集，書面用 cvtune＋wikitune，依各檔的改壞上限或權重選值，再過契約 §4.3 的門檻 | `rerank-strength.md` §11；`docs/releases/tinylm-v4.md`；研究紀錄 2026-10-14「語意校正強度修訂一」 |
 
 注意事項：
 
-- **v2、v3 與 v1 的權重相同**（同一個 `tinylm-M.npz`），只是檔頭的融合參數不同；v3 與 v2 的檔只差檔頭裡聊天的 α、τ（9 個 byte）（`docs/releases/tinylm-v2.md`、`tinylm-v3.md`）。所以換融合參數不需要重新訓練，只要重新匯出。
+- **v2、v3、v4 與 v1 的權重相同**（同一個 `tinylm-M.npz`），只是檔頭的融合參數不同；v3 與 v2 的檔只差檔頭裡聊天的 α、τ（9 個 byte）（`docs/releases/tinylm-v2.md`、`tinylm-v3.md`）。所以換融合參數不需要重新訓練，只要重新匯出。
 - v3 的聊天值是在維護者私人訊息建的評測集上選的（檔案裡沒有任何訊息的文字，評測集不公開）。**repo 裡只有選出的值、判斷用的程式（`experiments/e2-chateval/judge.py`）與數字，沒有那份評測集**，所以別人無法用 repo 重選這三個數字（`docs/releases/tinylm-v3.md`、`CLAUDE.md`「私有資料」）。
 - 判斷期用過就退役，下一次要用新的月份（`e2-chat-eval.md` §2.1 的順序）。
 - 融合參數是在 model-v5＋classes-v3 上調的；換 n-gram 或詞類表就要重調（§1.2）。

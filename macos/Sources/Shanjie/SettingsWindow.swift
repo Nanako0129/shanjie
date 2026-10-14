@@ -174,6 +174,15 @@ struct SettingsForm: View {
                 // like the menu item: the core makes no rerank job then (s7c2b section 2.3).
                 Toggle(MenuEntry.Text.rerank, isOn: Binding(get: { model.rerank }, set: { model.setRerank($0) }))
                     .disabled(!model.rerankEnabled)
+                // Rerank strength (docs/contracts/rerank-strength.md section 3): always the three choices, greyed with the toggle,
+                // or when the loaded model has only the standard set.
+                Picker("強度", selection: Binding(get: { model.rerankLevel }, set: { model.setRerankLevel($0) })) {
+                    Text("保守").tag(RerankLevel.conservative)
+                    Text("標準").tag(RerankLevel.standard)
+                    Text("積極").tag(RerankLevel.aggressive)
+                }
+                .pickerStyle(.segmented)
+                .disabled(!model.rerankLevelEnabled)
                 Toggle(MenuEntry.Text.acgPack, isOn: Binding(get: { model.acgPack }, set: { model.setAcgPack($0) }))
                 if let line = model.acgDataLine {
                     Text(line).font(.caption).foregroundStyle(.secondary)
