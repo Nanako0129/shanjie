@@ -97,7 +97,7 @@ int32_t shanjie_engine_set_english(ShanjieEngine *engine, uint32_t enabled, Shan
 - `Core.swift`：`loadEnglish(path:) -> Int32`、`setEnglish(_:) -> CoreResult`。
 - `Shell`：`EnglishStore` 協定（`var english: Bool?`；`nil` 是關），`MemoryEnglishStore`（Kit 與測試）、`DefaultsEnglishStore`（只在 `Shanjie` target，UserDefaults 鍵 `english`），`Shell.init` 的必要參數（照 `abbreviationStore`）；`englishOn`（預設關）、`englishAvailable`（這個引擎的單字表載入成功，照 `rerankAvailable`）。
 - `build()`：在 `load_lm`／`load_tinylm` 之後呼叫 `loadEnglish(path: Resources/english-words.txt)`，非 0 只記錄碼（`Log.shell.error`）、`englishAvailable = false`；然後**每次建引擎都送** `setEnglish(englishOn)`（放在 `setAbbreviation` 旁邊；換排列、開關詞包重建後不掉回關）。
-- 選單：`MenuEntry.Text.english = "中英混打（實驗）"`、action `.toggleEnglish`、獨立 selector `toggleEnglish`；位置緊接在「即時預測」之後（可省略韻母隱藏時的那個位置），語意校正之前；預設不打勾；`englishAvailable` 是 false 時反灰（勾選狀態仍顯示）。`applyEnglish(on)` 照 `applyAbbreviation`：有組字擁有者就顯示快照。
+- 選單：`MenuEntry.Text.english = "中英混打（實驗）"`、action `.toggleEnglish`、獨立 selector `toggleEnglish`；位置緊接在「即時預測」之後（可省略韻母隱藏時的那個位置），語意校正之前；預設不打勾；`englishAvailable` 是 false 或排列是倚天時反灰（勾選狀態仍顯示；倚天不記影子，§2.1，開了也沒有作用；`Shell.englishEnabled`）。`applyEnglish(on)` 照 `applyAbbreviation`：有組字擁有者就顯示快照。
 - 設定視窗「選字」區塊同一個位置、同樣反灰、和選單同步。
 - 不加 `showsEnglish` 參數：出貨 App 顯示這個開關、預設關（維護者 2026-10-14 選擇題）。
 - 文件同 PR 改：`docs/contracts/s3b.md` §13.2 的選單順序、`docs/contracts/settings-window.md` §2.2 的「選字」列。
@@ -215,7 +215,7 @@ int32_t shanjie_engine_set_english(ShanjieEngine *engine, uint32_t enabled, Shan
 
 ### 5.3 殼（`swift test`）
 
-- 選單有「中英混打（實驗）」、位置在「即時預測」之後、語意校正之前、預設不打勾；切換後 store 是 true 並送給引擎；打開後換排列、開關詞包重建引擎，新引擎仍收到 1（照 `toggleAbbreviation` 的測試）；`loadEnglish` 回非 0 時 `englishAvailable` 是 false、項目反灰（照 `RerankTests` 對 `rerankAvailable` 的寫法）；設定視窗同一個開關位置、反灰、同步；`build()` 每次都送 `setEnglish`。
+- 選單有「中英混打（實驗）」、位置在「即時預測」之後、語意校正之前、預設不打勾；切換後 store 是 true 並送給引擎；打開後換排列、開關詞包重建引擎，新引擎仍收到 1（照 `toggleAbbreviation` 的測試）；`loadEnglish` 回非 0 時 `englishAvailable` 是 false、項目反灰（照 `RerankTests` 對 `rerankAvailable` 的寫法），倚天排列時也反灰；設定視窗同一個開關位置、反灰、同步；`build()` 每次都送 `setEnglish`。
 - 突變：`build()` 不送 `setEnglish`（重建的測試失敗）；項目放錯位置（位置測試失敗）。
 
 ### 5.4 不變與速度

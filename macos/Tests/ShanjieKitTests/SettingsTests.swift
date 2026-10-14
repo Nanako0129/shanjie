@@ -74,7 +74,7 @@ final class SettingsTests: XCTestCase {
     func testEnglishFromTheWindowReachesStoreAndMenuAndFollowsAvailability() throws {
         let r = rig()
         XCTAssertFalse(r.model.english, "default off")
-        XCTAssertTrue(r.model.englishAvailable)
+        XCTAssertTrue(r.model.englishEnabled)
         r.model.setEnglish(true)
         XCTAssertEqual(r.english.english, true)
         XCTAssertEqual(item(r, .toggleEnglish)?.checked, true)
@@ -88,11 +88,30 @@ final class SettingsTests: XCTestCase {
                           learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), englishStore: english,
                           acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore())
         let model = SettingsModel(shell: shell)
-        XCTAssertFalse(model.englishAvailable)
+        XCTAssertFalse(model.englishEnabled)
         XCTAssertTrue(model.english, "greyed, still showing the setting")
         let entry = Controller(shell).session.menu.first { $0.action == .toggleEnglish }
         XCTAssertEqual(entry?.enabled, false)
         XCTAssertEqual(entry?.checked, true)
+    }
+
+    /// zhen-mixed section 2.1: the Eten layout records no shadow, so with the list loaded the menu item and the window's toggle are
+    /// greyed there too (setting kept), and enabled again back in the standard layout. Both directions of the layout change: the
+    /// window's picker and the menu's item.
+    func testEnglishIsGreyedInTheEtenLayout() {
+        let r = rig()
+        r.model.setEnglish(true)
+        XCTAssertTrue(r.shell.englishAvailable, "the list loaded; only the layout greys it below")
+        XCTAssertEqual(item(r, .toggleEnglish)?.enabled, true)
+        XCTAssertTrue(r.model.englishEnabled)
+        r.model.selectLayout(.eten)
+        XCTAssertEqual(item(r, .toggleEnglish)?.enabled, false, "the menu item in Eten")
+        XCTAssertEqual(item(r, .toggleEnglish)?.checked, true, "greyed, still showing the setting")
+        XCTAssertFalse(r.model.englishEnabled, "the window's toggle in Eten")
+        XCTAssertTrue(r.model.english)
+        r.controller.session.perform(.layout(.standard))
+        XCTAssertEqual(item(r, .toggleEnglish)?.enabled, true)
+        XCTAssertTrue(r.model.englishEnabled, "the window followed the menu's layout change")
     }
 
     /// s7c2b section 2.2: the window's 語意校正 goes through the same setter as the menu item, the two stay in sync, and with the

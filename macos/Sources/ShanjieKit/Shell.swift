@@ -375,6 +375,9 @@ public final class Shell {
     /// The 語意校正 menu item and settings toggle are enabled only when the switch can do something: the demotion table on (the
     /// core makes no job without it, F11) and the small model loaded. The checkmark still shows the stored choice.
     var rerankEnabled: Bool { demoteOn && rerankAvailable }
+    /// The 中英混打（實驗） menu item and settings toggle, likewise: the word list loaded and the standard layout (the core records no
+    /// shadow in the Eten layout, zhen-mixed section 2.1, so the switch would do nothing there). The checkmark still shows the choice.
+    var englishEnabled: Bool { englishAvailable && mode == .standard }
 
     /// A job waiting for the runner, with the session and engine it was taken for. Weak (F3): a waiting job keeps neither alive,
     /// and an identity is never compared by address.

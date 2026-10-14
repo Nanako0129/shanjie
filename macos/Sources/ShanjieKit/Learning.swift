@@ -210,8 +210,8 @@ extension Session {
             items.append(MenuEntry(title: T.abbreviation, action: .toggleAbbreviation, checked: shell.abbreviationOn, enabled: shell.predictionOn))
         }
         // zhen-mixed section 3.2: after 即時預測 and before 語意校正, where 可省略韻母 sits when it is shown (the app hides it, so there it
-        // follows 即時預測 directly); greyed (checkmark kept) when this engine has no word list.
-        items.append(MenuEntry(title: T.english, action: .toggleEnglish, checked: shell.englishOn, enabled: shell.englishAvailable))
+        // follows 即時預測 directly); greyed (checkmark kept) when this engine has no word list or the layout is Eten.
+        items.append(MenuEntry(title: T.english, action: .toggleEnglish, checked: shell.englishOn, enabled: shell.englishEnabled))
         // s7c2b section 2.3 (F11): greyed while the demotion table is off or the small model did not load, where the core makes
         // no rerank job.
         items.append(MenuEntry(title: T.rerank, action: .toggleRerank, checked: shell.rerankOn, enabled: shell.rerankEnabled))

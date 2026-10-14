@@ -20,9 +20,10 @@ public final class SettingsModel: ObservableObject {
     @Published public private(set) var layout = InputMode.standard
     @Published public private(set) var prediction = true
     @Published public private(set) var abbreviation = false
-    /// The 中英混打（實驗） toggle (zhen-mixed section 3.2), and whether the engine has its word list (false: the toggle is greyed).
+    /// The 中英混打（實驗） toggle (zhen-mixed section 3.2), and whether it is enabled: the word list loaded and the standard layout, like
+    /// the menu item (false: the toggle is greyed, the setting kept).
     @Published public private(set) var english = false
-    @Published public private(set) var englishAvailable = true
+    @Published public private(set) var englishEnabled = true
     /// The abbreviation toggle is shown only when the shell offers it (`Shell.showsAbbreviation`).
     public var showsAbbreviation: Bool { shell.showsAbbreviation }
     @Published public private(set) var demote = true
@@ -70,7 +71,7 @@ public final class SettingsModel: ObservableObject {
         prediction = shell.predictionOn
         abbreviation = shell.abbreviationOn
         english = shell.englishOn
-        englishAvailable = shell.englishAvailable
+        englishEnabled = shell.englishEnabled
         demote = shell.demoteOn
         rerank = shell.rerankOn
         rerankEnabled = shell.rerankEnabled
