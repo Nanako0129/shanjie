@@ -201,7 +201,7 @@ def classify(row, lex, par, lenient):
         gold_words, seg = list(truth), "none"   # no path: the difference positions are the segments
     gold = "".join(gold_words)
     segs = diff_segments(cands[c][0], gold_words, lenient)
-    res = {"seg": seg, "b1b": False, "func": False, "source": False, "rank": gold_rank, "margin": None, "d2": None, "sub": None}
+    res = {"seg": seg, "b1b": False, "func": False, "func_any": False, "source": False, "rank": gold_rank, "margin": None, "d2": None, "sub": None}
     # 2 A1: any gold word in a segment that has no entry under the row's reading while the lexicon has it under another
     if seg != "none":
         p = 0
@@ -219,6 +219,10 @@ def classify(row, lex, par, lenient):
     if row["scores"] is not None and lenient(cands[0][0]) == t and c != 0:
         return {**res, "bucket": "D1"}
     res["bucket"] = "C"
+    # Function characters in any C sub-type: every differing character pair is two function characters. The C1 flag alone misses the rows
+    # where the wrong side glues 在 into a word (你在, 不會在, 我再 -> C2/C3): 6 of 16 such rows in the blind label (research log 2026-10-14).
+    x, y = lenient(cands[c][0]), lenient(gold)
+    res["func_any"] = len(x) == len(y) and all(p in FUNCTION_CHARS and q in FUNCTION_CHARS for p, q in zip(x, y) if p != q)
     m = cands[0][1] - cands[gold_rank - 1][1]
     res["margin"] = margin_band(m)
     res["rank"] = gold_rank
@@ -259,7 +263,7 @@ def classify(row, lex, par, lenient):
 
 def empty_counts():
     return {"n": 0, "top1": 0, "errors": 0, "oracle64": 0, "top1_sha256": None, "buckets": dict.fromkeys(MAIN, 0), "F": 0,
-            "b1b": 0, "seg_lex": 0, "seg_none": 0, "c_sub": dict.fromkeys(C_SUBS, 0), "c1_func": 0, "c2_source": 0,
+            "b1b": 0, "seg_lex": 0, "seg_none": 0, "c_sub": dict.fromkeys(C_SUBS, 0), "c1_func": 0, "c_func": 0, "c2_source": 0,
             "c_rank": dict.fromkeys(RANK_BANDS, 0), "c_margin": dict.fromkeys(MARGIN_BANDS, 0), "d2": dict.fromkeys(D2S, 0), "E1": 0, "E2": 0}
 
 
@@ -286,6 +290,7 @@ def triage_rows(rows, ok, ok_nc, lex, par, lenient, report=False):
         if r["bucket"] == "C":
             cn["c_sub"][r["sub"]] += 1
             cn["c1_func"] += r["func"]
+            cn["c_func"] += r["func_any"]
             cn["c2_source"] += r["source"]
             cn["c_rank"][rank_band(r["rank"])] += 1
             cn["c_margin"][r["margin"]] += 1
@@ -424,13 +429,16 @@ def cmd_run(a):
 # those rows a fix is expected to rescue; the sort value is count x ratio / cost, all three printed. 0.3 is a placeholder with no
 # measurement behind it (〔推論〕); the function-word 0.4 is measured: docs/research-log.md "S7b：L 的結果", the rerank repaired 51 of 128 function-word errors.
 UNMEASURED = "〔推論〕未量，暫定 0.3"
+# Contract section 5.3, research log 2026-10-14 (seed 20261014, 60 rows): which buckets the hand labels validated (>= 5 hand-labelled rows each).
+BLIND_NOTE = ("盲標（契約 §5.3，60 列，研究紀錄 2026-10-14）：主桶 60／60、C 子類 58／58 和手標一致；驗證過的是 C 與 C1、C2、C3（手標各 ≥ 5 列）。"
+              "A1、B1、B2、D1、C4、C5 手標不到 5 列，**未驗證**。")
 FAMILIES = [
     ("補讀音（A1）", ["A1"], 0.3, UNMEASURED, 1),
     ("補詞（B1，缺詞）", ["B1"], 0.3, UNMEASURED, 2),
     ("放大候選名單或 beam（B2）", ["B2"], 0.3, UNMEASURED, 2),
     ("重排與融合的取捨（D1、D2b）", ["D1", "D2b"], 0.3, UNMEASURED, 1),
     ("更強的小模型（D2c、D2-none）", ["D2c", "D2-none"], 0.3, UNMEASURED, 3),
-    ("同音功能字（C1 的功能字）", ["c1_func"], 0.4, "量過：S7b，功能字錯 128 處重排修好 51（研究紀錄 2026-10-11）", 2),
+    ("同音功能字（C 裡差異字都是功能字）", ["c_func"], 0.4, "量過：S7b，功能字錯 128 處重排修好 51（研究紀錄 2026-10-11）", 2),
     ("斷詞（C3）", ["C3"], 0.3, UNMEASURED, 2),
     ("來源詞的權重（C2 的來源詞）", ["c2_source"], 0.3, UNMEASURED, 1),
 ]
@@ -487,7 +495,7 @@ def cmd_table(a):
             docs[d["label"]] = d
     text = ["# 錯誤桶（`tools/triage.py` 產生，不手改）", "",
             "規格：`docs/contracts/triage.md`。每個錯列歸一個主桶（A1 讀音不在詞庫、B1 缺詞、B2 不在名單、D1 重排改壞、C 排序錯）；F 是錯字回報裡離線就對的列（不是錯列）；"
-            "E1 有前文才對、E2 有前文反而錯（另計）。不含保留集。重跑：`tools/triage.py run --label L`，再 `tools/triage.py table`。", ""]
+            "E1 有前文才對、E2 有前文反而錯（另計）。不含保留集。重跑：`tools/triage.py run --label L`，再 `tools/triage.py table`。", "", BLIND_NOTE, ""]
     text += [render(d) for d in docs.values()]
     with open(a.out, "w", encoding="utf-8") as o:
         o.write("\n".join(text) + "\n")

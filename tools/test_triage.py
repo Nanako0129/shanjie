@@ -184,6 +184,12 @@ class Buckets(unittest.TestCase):
         res = cls(row("甲", "a", [("乙", -1, "乙"), ("甲", -2, "甲")]))
         self.assertEqual((res["sub"], res["func"]), ("C1", False))
 
+    def test_function_characters_in_any_c_sub_type(self):
+        res = cls(row("你再", "ni zai", [("你在", -1, "你在"), ("你再", -2, "你 再")]))   # 在 glued into 你在: C3, still a function-character error
+        self.assertEqual((res["sub"], res["func"], res["func_any"]), ("C3", False, True))
+        self.assertTrue(cls(row("再", "zai", [("在", -1, "在"), ("再", -2, "再")]))["func_any"])
+        self.assertFalse(cls(row("再甲", "zai a", [("在乙", -1, "在 乙"), ("再甲", -2, "再 甲")]))["func_any"], "one pair is not function characters")
+
     def test_c2_source_flag_is_overlay_or_pack_only_never_sandhi(self):
         def go(truth, other, syls):
             r = row(truth, syls, [(other, -1, other), (truth, -2, truth)])
