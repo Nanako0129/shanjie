@@ -11,6 +11,13 @@ DATA = os.path.join(os.path.dirname(__file__), "data", "mcbpmf-data.txt")
 # 核心 load_lexicon 載入的疊加層，依這個順序接在 data/lexicon/mcbpmf-data.txt 後面（S2r）。
 _LEXDIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "data", "lexicon")
 OVERLAYS = [os.path.join(_LEXDIR, "overlay-add.tsv"), os.path.join(_LEXDIR, "sandhi-add.tsv")]
+
+
+def overlays(extra=None):
+    """OVERLAYS，extra（`--extra-overlay FILE`，預設關）接在最後；沒給時就是 OVERLAYS 本身的內容（Rust 的 load_lexicon_extra_detailed 同一個順序）。"""
+    return OVERLAYS + [extra] if extra else list(OVERLAYS)
+
+
 BEAM = 32          # 每個位置保留的部分路徑數；N-best 上限也是它
 PER_KEY = 12       # 每個讀音只展開前幾高分的詞，控制 lattice 寬度
 

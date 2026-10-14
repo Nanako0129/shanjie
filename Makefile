@@ -36,7 +36,7 @@ test-python:
 	python3 -W ignore -m unittest tools/test_build_lm.py experiments/s2/test_extra_lexicon.py experiments/model-v5/test_compare_counts.py experiments/model-v5/test_count_lexicon.py
 	python3 experiments/s2-classes/test_cluster.py
 	python3 -m unittest discover -s experiments/s7a-tinylm -p test_export_sjtl.py
-	python3 -W ignore -m unittest tools/test_kn_cont.py
+	python3 -W ignore -m unittest tools/test_kn_cont.py tools/test_extra_overlay.py
 	python3 -W ignore -m unittest experiments/p1a-confusion/test_p1a.py
 	python3 -W ignore -m unittest experiments/s7f-corpus/test_s7f.py experiments/s7a-tinylm/test_extra.py
 	python3 -W ignore -m unittest tools/test_evalstats.py experiments/e2-chateval/test_e2.py experiments/e2-chateval/test_judge.py experiments/e2-chateval/test_d2c_split.py
