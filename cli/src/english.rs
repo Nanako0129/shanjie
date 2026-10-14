@@ -23,8 +23,8 @@
 //!   it on its keyboard row, kept only if they are Zhuyin keys of the standard layout. One neighbour or two, drawn uniformly.
 //!   Tone keys, Space, Backspace and the repair keys are never mistyped.
 //! - Repair: `overwrite` presses the right key at once when the wrong key was in the same column (one overwrite), else it
-//!   falls back to `backspace`: Backspace until the shown symbols are a prefix of the wanted ones, then the missing symbols in
-//!   column order. After a repair the shown symbols are the wanted ones.
+//!   falls back to `backspace`: Backspace until the symbols (read from the engine, see `Sim::have`) are a prefix of the wanted
+//!   ones, then the missing symbols in column order. After a repair the symbols are the wanted ones.
 //! - A syllable ends with its tone key, or Space for tone 1. If the engine opened the window at that Space it is counted, then
 //!   Esc (closes it, clears the shadow) and Space again finish the syllable, so engine and simulator stay in step.
 //! - Rows with a reading the lexicon lacks, or a symbol without a key, are skipped (their number goes to stderr).
@@ -87,9 +87,9 @@ struct Sim {
     engine: Engine,
     keys: u64,
     triggers: u64,
-    /// `--inline`: ask the engine for rule D after every key; `shown` is whether it held after any key of this syllable.
+    /// `--inline`: ask the engine for rule D after every key; `d_held` is whether it held after any key of this syllable.
     inline: bool,
-    shown: bool,
+    d_held: bool,
     p: f64,
     repair: Repair,
     rng: Rng,
@@ -100,7 +100,7 @@ impl Sim {
         self.keys += 1;
         self.engine.key(k).map_err(|_| "the engine failed on a key".to_string())?;
         // The rule is the engine's, never repeated here.
-        self.shown |= self.inline && self.engine.english_inline_shown();
+        self.d_held |= self.inline && self.engine.english_inline_shown();
         Ok(())
     }
 
@@ -108,37 +108,43 @@ impl Sim {
         self.send(Key::ch(LAYOUT.key_of_symbol(sym).unwrap(), 0))
     }
 
-    /// One syllable typed; whether rule D held after any of its keys is left in `self.shown` (the caller counts and clears it).
+    /// The symbols of the unfinished syllable in display order, read from the engine: Backspace under rule D rebuilds the columns
+    /// from the letters left (zhen-inline section 1.3), so the simulator does not work them out itself.
+    fn have(&self) -> Vec<char> {
+        self.engine.english_columns().iter().flatten().copied().collect()
+    }
+
+    /// One syllable typed; whether rule D held after any of its keys is left in `self.d_held` (the caller counts and clears it).
     fn syllable(&mut self, syms: &[(usize, char)], tone: Option<char>) -> Result<(), String> {
-        let mut shown: [Option<char>; 3] = [None; 3];
         for (i, &(col, sym)) in syms.iter().enumerate() {
             let key = LAYOUT.key_of_symbol(sym).unwrap();
             let near = neighbours(key);
+            let want: Vec<char> = syms[..=i].iter().map(|s| s.1).collect();
             if self.rng.unit() < self.p && !near.is_empty() {
                 let wrong = near[(self.rng.next() % near.len() as u64) as usize];
-                let (wcol, wsym) = LAYOUT.symbol_of(wrong).unwrap();
+                let (wcol, _) = LAYOUT.symbol_of(wrong).unwrap();
                 self.send(Key::ch(wrong, 0))?;
-                shown[wcol] = Some(wsym);
                 if self.repair == Repair::Overwrite && wcol == col {
                     self.zhuyin(sym)?;
-                    shown[col] = Some(sym);
                 } else {
-                    // Backspace takes the last symbol in display order (final, medial, initial), as engine rule 11 does.
-                    let want: Vec<char> = syms[..=i].iter().map(|s| s.1).collect();
-                    let have = |s: &[Option<char>; 3]| s.iter().flatten().copied().collect::<Vec<char>>();
-                    while !want.starts_with(&have(&shown)) {
+                    // Backspace until the symbols are a prefix of the wanted ones. Which symbol it takes is the engine's: the last
+                    // in display order (final, medial, initial) by rule 11, or, while letters show, the last letter's, with the
+                    // symbols rebuilt from the letters left. Each key is a step that shortens the letters or the symbols, so the
+                    // loop ends with the unfinished syllable empty at the latest.
+                    while !want.starts_with(&self.have()) {
                         self.send(Key::new(KeyKind::Backspace))?;
-                        let last = (0..3).rev().find(|&c| shown[c].is_some()).unwrap();
-                        shown[last] = None;
                     }
-                    for &(c, s) in &syms[have(&shown).len()..=i] {
+                    for &(_, s) in &syms[self.have().len()..=i] {
                         self.zhuyin(s)?;
-                        shown[c] = Some(s);
                     }
                 }
             } else {
                 self.zhuyin(sym)?;
-                shown[col] = Some(sym);
+            }
+            // The simulator's plan and the engine's columns must agree here; if the engine ever repairs differently the run stops
+            // instead of counting a typing the model did not intend.
+            if self.have() != want {
+                return Err("the engine's symbols differ from the typing model's after a key".into());
             }
         }
         match tone {
@@ -160,7 +166,6 @@ fn engine_with(lex: &Arc<Lexicon>, words: &Path) -> Result<Engine, String> {
     let mut e = Engine::with_lexicon(lex.clone(), LAYOUT);
     e.load_english(words).map_err(|_| "cannot load the word list".to_string())?;
     e.set_english(true).map_err(|_| "cannot switch the English window on".to_string())?;
-    e.set_english_inline(true); // the shipped default; only `--inline` asks about it
     Ok(e)
 }
 
@@ -204,11 +209,11 @@ pub fn run(args: &[String], root: &Path) -> Result<(), String> {
     if recall == rows.is_some() {
         return Err("give exactly one of --rows and --recall".into());
     }
+    if recall && inline {
+        return Err("--inline is for the typing mode".into());
+    }
     let lex = load_lexicon(&root.join("data/lexicon")).map_err(|_| "cannot load the lexicon")?;
     if recall {
-        if inline {
-            return Err("--inline is for the typing mode".into());
-        }
         return run_recall(&lex, &words);
     }
 
@@ -237,14 +242,14 @@ pub fn run(args: &[String], root: &Path) -> Result<(), String> {
     }
     let (mut per_1000, mut inline_1000, mut keys, mut triggers) = (Vec::new(), Vec::new(), 0u64, 0u64);
     for i in 0..repeat {
-        let mut sim = Sim { engine: engine_with(&lex, &words)?, keys: 0, triggers: 0, inline, shown: false, p, repair, rng: Rng(seed.wrapping_add(i)) };
+        let mut sim = Sim { engine: engine_with(&lex, &words)?, keys: 0, triggers: 0, inline, d_held: false, p, repair, rng: Rng(seed.wrapping_add(i)) };
         let mut shown_syllables = 0u64;
         for row in &parsed {
             sim.engine.reset(ResetMode::Discard);
             for (syms, tone) in row {
-                sim.shown = false;
+                sim.d_held = false;
                 sim.syllable(syms, *tone)?;
-                shown_syllables += sim.shown as u64;
+                shown_syllables += sim.d_held as u64;
             }
             sim.send(Key::new(KeyKind::Enter))?;
         }
