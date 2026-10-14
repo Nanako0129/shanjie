@@ -99,7 +99,7 @@ class ExtraOverlay(unittest.TestCase):
 
     # --- kn_cont ---
     def run_kn(self, *extra):
-        out = os.path.join(self.tmp.name, "kn.sjkn")
+        out = os.path.join(self.tmp.name, "kn-out.sjkn")   # not kn.sjkn: lm_eval would load that one beside x.sjlm
         with mock.patch.object(sys, "argv", ["kn_cont.py", "--lm", self.path_x, "--theta", "1", "--beta", "1", "--out", out, *extra]), \
                 contextlib.redirect_stdout(io.StringIO()):
             kn_cont.main()
@@ -151,6 +151,21 @@ class ExtraOverlay(unittest.TestCase):
         open(kn, "wb").write(self.run_kn("--extra-overlay", self.extra))
         line = self.run_eval("--extra-overlay", self.extra, "--kn", kn)
         self.assertRegex(line, rf"-noclasses\+kn:[0-9a-f]{{8}}:θ1:β1\+xo:{sha8(open(self.extra, 'rb').read())}  \{{")
+
+    def test_lm_eval_loads_the_kn_side_file_beside_the_model(self):
+        """model-v6 §2.5：沒給 --kn 時，--lm 同目錄的 kn.sjkn 照樣載入（Rust CLI 與 App 同規則）；--no-kn 不載；兩個一起給是錯誤。"""
+        d = os.path.join(self.tmp.name, "beside")
+        os.makedirs(d, exist_ok=True)
+        lm = os.path.join(d, "bigram.sjlm")
+        open(lm, "wb").write(self.model_x)
+        open(os.path.join(d, "kn.sjkn"), "wb").write(self.run_kn("--extra-overlay", self.extra))
+        with mock.patch.object(self, "path_x", lm):
+            on, off = self.run_eval("--extra-overlay", self.extra), self.run_eval("--extra-overlay", self.extra, "--no-kn")
+            self.assertRegex(on, r"-noclasses\+kn:[0-9a-f]{8}:θ1:β1\+xo:")
+            self.assertNotIn("+kn:", off)
+            with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
+                self.run_eval("--kn", os.path.join(d, "kn.sjkn"), "--no-kn")
+        self.assertNotIn("+kn:", self.run_eval())       # path_x 的目錄沒有 kn.sjkn
 
     def test_capping_set_has_the_names_layer(self):
         """model-v6 §2.5：names-add.tsv 的詞進封頂集合（Rust 的 capping_overlay 同一組）。"""
