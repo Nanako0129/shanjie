@@ -631,6 +631,65 @@ pub unsafe extern "C" fn shanjie_engine_set_abbreviation(
     rc
 }
 
+/// zhen-mixed (docs/contracts/zhen-mixed.md section 3.1): the English word list at `path`. 0 ok; 1 engine or path NULL; 2 path
+/// not UTF-8; 3 unreadable, not a regular file, over 4 MiB or 200,000 lines, a line outside `[a-z]{3,32}`, a duplicate, a BOM.
+/// A failure keeps the previous list. Does not change the switch or the display. No path or word in any message.
+///
+/// # Safety
+/// `engine` is NULL or a live handle; `path` is NULL or a NUL-terminated string.
+#[no_mangle]
+pub unsafe extern "C" fn shanjie_engine_load_english(engine: *mut ShanjieEngine, path: *const c_char) -> i32 {
+    guard(|| {
+        if engine.is_null() || path.is_null() {
+            return SHANJIE_ERR_NULL;
+        }
+        // SAFETY: non-NULL, NUL-terminated per the caller contract.
+        let Ok(path) = unsafe { CStr::from_ptr(path) }.to_str() else {
+            return SHANJIE_ERR_INVALID;
+        };
+        // SAFETY: live handle, single-threaded use (§6).
+        match unsafe { &mut (*engine).0 }.load_english(Path::new(path)) {
+            Ok(()) => SHANJIE_OK,
+            Err(_) => SHANJIE_ERR_LOAD,
+        }
+    })
+}
+
+/// zhen-mixed section 3.1. `enabled` 0 or 1 (default 0): whether Space after an English word typed into one unfinished syllable
+/// opens the English window (s3a rule 10e); only with a loaded list, the standard layout and the abbreviation composer off.
+/// Returns the snapshot like `set_abbreviation`; any other value changes nothing and returns 2.
+///
+/// # Safety
+/// `engine` is NULL or a live handle; `out` is NULL or valid for one pointer write.
+#[no_mangle]
+pub unsafe extern "C" fn shanjie_engine_set_english(
+    engine: *mut ShanjieEngine,
+    enabled: u32,
+    out: *mut *mut ShanjieOutput,
+) -> i32 {
+    let rc = guard(|| {
+        // SAFETY: forwarded caller contract.
+        if !unsafe { clear_out(out) } || engine.is_null() {
+            return SHANJIE_ERR_NULL;
+        }
+        if enabled > 1 {
+            return SHANJIE_ERR_INVALID;
+        }
+        // SAFETY: live handle, single-threaded use (§6).
+        let e = unsafe { &mut (*engine).0 };
+        match e.set_english(enabled == 1) {
+            // SAFETY: `out` checked non-NULL above.
+            Ok(o) => unsafe { emit(o, out) },
+            Err(_) => SHANJIE_ERR_INTERNAL,
+        }
+    });
+    if rc == SHANJIE_ERR_INTERNAL {
+        // SAFETY: forwarded caller contract.
+        unsafe { discard(engine) };
+    }
+    rc
+}
+
 /// # Safety
 /// `engine` is NULL or a live handle; `dir` is NULL or a NUL-terminated string.
 #[no_mangle]
@@ -1576,6 +1635,152 @@ mod tests {
         assert!(ok, "LM child failed");
         assert!(out.contains("1 passed"), "child test actually ran");
         assert!(!out.contains("shanjie-ffi-") && !err.contains("shanjie-ffi-"), "a path leaked");
+    }
+
+    // ---- zhen-mixed: load_english, set_english (docs/contracts/zhen-mixed.md section 5.2) ----
+
+    fn load_english(e: *mut ShanjieEngine, p: &Path) -> i32 {
+        let c = CString::new(p.to_str().unwrap()).unwrap();
+        unsafe { shanjie_engine_load_english(e, c.as_ptr()) }
+    }
+
+    /// set_english; returns the code and frees the output.
+    fn set_english(e: *mut ShanjieEngine, on: u32) -> i32 {
+        let mut o: *mut ShanjieOutput = sentinel();
+        let rc = unsafe { shanjie_engine_set_english(e, on, &mut o) };
+        if rc == 0 {
+            unsafe { shanjie_output_free(o) };
+        } else {
+            assert!(o.is_null(), "*out NULL on a non-zero code");
+        }
+        rc
+    }
+
+    /// Types `keys` (Space for `_`); the last output's (candidates, commit, preedit), freed.
+    fn type_out(e: *mut ShanjieEngine, keys: &str) -> (Vec<String>, String, String) {
+        let mut last = (Vec::new(), String::new(), String::new());
+        for c in keys.chars() {
+            let mut o = ptr::null_mut();
+            let k = if c == '_' { key(SPACE, '\0') } else { key(CHAR, c) };
+            assert!(unsafe { shanjie_engine_key(e, k, &mut o) } == 0, "typing");
+            // SAFETY: test-only read of a live output.
+            last = unsafe {
+                let s = |p| CStr::from_ptr(p).to_str().unwrap().to_string();
+                let n = (*o).candidate_count as usize;
+                let cands = (0..n).map(|i| s(*(*o).candidates.add(i))).collect();
+                (cands, s((*o).commit), s((*o).preedit))
+            };
+            unsafe { shanjie_output_free(o) };
+        }
+        last
+    }
+
+    #[test]
+    fn child_english() {
+        if !is_child("child_english") {
+            return;
+        }
+        let dir = tiny_dir("english", "ㄒㄧㄣ 鑫 -1.0\n".as_bytes());
+        let e = new_engine(&dir, 0);
+        let list = |name: &str, bytes: &[u8]| {
+            let p = dir.join(name);
+            std::fs::write(&p, bytes).unwrap();
+            p
+        };
+        let good = list("good.txt", b"rust\ngoogle\n");
+        let bad_utf8 = CString::new(vec![0xffu8, 0xfe]).unwrap();
+        let good_c = CString::new(good.to_str().unwrap()).unwrap();
+
+        // load_english: 1 for NULLs, 2 for a non-UTF-8 path.
+        assert!(unsafe { shanjie_engine_load_english(ptr::null_mut(), good_c.as_ptr()) } == 1, "load engine NULL");
+        assert!(unsafe { shanjie_engine_load_english(e, ptr::null()) } == 1, "load path NULL");
+        assert!(unsafe { shanjie_engine_load_english(e, bad_utf8.as_ptr()) } == 2, "load non-UTF-8");
+
+        // set_english codes, like set_abbreviation.
+        let mut o: *mut ShanjieOutput = sentinel();
+        assert!(unsafe { shanjie_engine_set_english(e, 1, ptr::null_mut()) } == 1, "set_english out NULL");
+        assert!(unsafe { shanjie_engine_set_english(ptr::null_mut(), 1, &mut o) } == 1 && o.is_null(), "set_english engine NULL");
+        for v in [2, u32::MAX] {
+            assert!(set_english(e, v) == 2, "set_english out of range");
+        }
+        // On without a list: only remembered, no window.
+        assert!(set_english(e, 1) == 0);
+        let (cands, _, _) = type_out(e, "rust_");
+        assert!(cands.is_empty(), "no list, no window");
+        assert!(send(e, key(ESC, '\0')).0 == 0);
+
+        // 3 for every file the loader refuses; each leaves no list (none was loaded yet).
+        let words = |n: usize, len: usize| -> Vec<u8> {
+            (0..n)
+                .map(|i| {
+                    let mut w: Vec<u8> = (0..len).map(|j| b'a' + ((i >> (4 * (j % 8))) & 15) as u8 + (j / 8) as u8).collect();
+                    w.push(b'\n');
+                    String::from_utf8(w).unwrap()
+                })
+                .collect::<String>()
+                .into_bytes()
+        };
+        let refused: Vec<(&str, Vec<u8>)> = vec![
+            ("one letter too few", b"rust\nab\n".to_vec()),
+            ("33 letters", [b"rust\n".to_vec(), vec![b'a'; 33], b"\n".to_vec()].concat()),
+            ("upper case", b"rust\nRust\n".to_vec()),
+            ("digit", b"rust\nab1\n".to_vec()),
+            ("blank line", b"rust\n\ngoogle\n".to_vec()),
+            ("duplicate", b"rust\ngoogle\nrust\n".to_vec()),
+            ("BOM", [b"\xef\xbb\xbf".to_vec(), b"rust\n".to_vec()].concat()),
+            ("CRLF", b"rust\r\ngoogle\r\n".to_vec()),
+            ("not UTF-8", b"rust\n\xff\xfe\n".to_vec()),
+            // `rust` first, as in every case above: a loader that kept the lines read before the limit would open the window.
+            ("over 4 MiB", [b"rust\n".to_vec(), words(140_000, 32)].concat()),
+            ("over 200,000 lines", [b"rust\n".to_vec(), words(200_000, 6)].concat()),
+        ];
+        for (what, bytes) in &refused {
+            let p = list("refused.txt", bytes);
+            assert!(load_english(e, &p) == 3, "{what}");
+        }
+        assert!(load_english(e, &dir.join("missing.txt")) == 3, "missing");
+        assert!(load_english(e, &dir) == 3, "a directory");
+        // A FIFO with no writer: 3 at once (not a regular file), not an open that waits for a writer forever.
+        let fifo = dir.join("fifo.txt");
+        assert!(Command::new("/usr/bin/mkfifo").arg(&fifo).status().unwrap().success(), "mkfifo");
+        let (tx, rx) = std::sync::mpsc::channel();
+        let (ep, fp) = (e as usize, fifo.clone());
+        std::thread::spawn(move || tx.send(load_english(ep as *mut ShanjieEngine, &fp)).unwrap());
+        let got = rx.recv_timeout(std::time::Duration::from_secs(10));
+        assert!(got.expect("load_english blocked on a FIFO") == 3, "a FIFO");
+        std::fs::remove_file(fifo).unwrap();
+        let (cands, _, _) = type_out(e, "rust_");
+        assert!(cands.is_empty(), "failed loads left no list");
+        assert!(send(e, key(ESC, '\0')).0 == 0);
+        // The limits themselves are fine: 200,000 lines.
+        assert!(load_english(e, &list("max.txt", &words(200_000, 6))) == 0, "200,000 lines");
+
+        // A good list, then a bad one: the good list stays.
+        assert!(load_english(e, &good) == 0, "good list");
+        for (what, bytes) in &refused {
+            let p = list("refused.txt", bytes);
+            assert!(load_english(e, &p) == 3, "{what}");
+        }
+        // Through the C ABI: rust Space opens the window, 1 commits the word.
+        let (cands, commit, preedit) = type_out(e, "rust_");
+        assert!(cands == ["rust", "Rust", "RUST"] && commit.is_empty() && !preedit.is_empty(), "window");
+        let (cands, commit, preedit) = type_out(e, "1");
+        assert!(cands.is_empty() && commit == "rust" && preedit.is_empty(), "commit");
+        // Off: the same keys no longer open it.
+        assert!(set_english(e, 0) == 0);
+        let (cands, _, _) = type_out(e, "rust_");
+        assert!(cands.is_empty(), "off");
+        unsafe { shanjie_engine_free(e) };
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn english_codes_through_the_c_abi() {
+        let (ok, out, err) = run_child("child_english", false);
+        assert!(ok, "english child failed");
+        assert!(out.contains("1 passed"), "child test actually ran");
+        let all = format!("{out}{err}");
+        assert!(!all.contains("shanjie-ffi-") && !all.contains("rust") && !all.contains("google"), "a path or a word leaked");
     }
 
     // ---- S7c-2a: load_tinylm, set_rerank, take / run / apply / free (docs/contracts/s7c2a-core-rerank.md section 3 item 3) ----

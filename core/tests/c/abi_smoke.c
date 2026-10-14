@@ -337,6 +337,29 @@ static int run_learn(const char *dir, const char *learn_dir) {
   return 0;
 }
 
+/* zhen-mixed (docs/contracts/zhen-mixed.md section 5.2): the codes of load_english and set_english through the header. The window
+ * itself is covered by core/tests/engine_english.rs and the child-process test in ffi.rs. */
+static int run_english(const char *dir, const char *missing) {
+  static ShanjieOutput dummy;
+  ShanjieEngine *e = 0;
+  ShanjieOutput *o = 0;
+  CHECK(1001, shanjie_engine_new(dir, 0, &e) == 0 && e != 0);
+  CHECK(1002, shanjie_engine_load_english(0, missing) == 1);
+  CHECK(1003, shanjie_engine_load_english(e, 0) == 1);
+  CHECK(1004, shanjie_engine_load_english(e, missing) == 3);
+  CHECK(1005, shanjie_engine_set_english(0, 1, &o) == 1 && o == 0);
+  CHECK(1006, shanjie_engine_set_english(e, 1, 0) == 1);
+  o = &dummy;
+  CHECK(1007, shanjie_engine_set_english(e, 2, &o) == 2 && o == 0);
+  CHECK(1008, shanjie_engine_set_english(e, 1, &o) == 0 && o != 0 && o->handled == 1);
+  shanjie_output_free(o);
+  o = 0;
+  CHECK(1009, shanjie_engine_set_english(e, 0, &o) == 0 && o != 0 && o->handled == 1);
+  shanjie_output_free(o);
+  shanjie_engine_free(e);
+  return 0;
+}
+
 /* acg-pack: argument checks of shanjie_engine_new_packs. The behaviour with a pack is in core/tests/engine_pack.rs. */
 static int run_packs(const char *dir) {
   ShanjieEngine *e = 0;
@@ -402,6 +425,7 @@ int main(int argc, char **argv) {
   if (rc == 0) rc = run_learn(argv[1], argc == 4 ? argv[3] : 0);
   if (rc == 0) rc = run_packs(argv[1]);
   if (rc == 0) rc = run_rerank(argv[1], argv[2], "/nonexistent/shanjie-missing.sjtl");
+  if (rc == 0) rc = run_english(argv[1], "/nonexistent/shanjie-missing-english.txt");
   shanjie_engine_free(0);
   shanjie_output_free(0);
   if (rc != 0) {

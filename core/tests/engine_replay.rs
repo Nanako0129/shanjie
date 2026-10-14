@@ -28,7 +28,9 @@ fn keys_of(layout: Layout, syl: &str) -> Vec<Key> {
     v
 }
 
-fn replay(layout: Layout) {
+/// `english`: the standard layout with the zhen-mixed switch on and the synthetic list loaded (docs/contracts/zhen-mixed.md
+/// section 5.1): the same 302 rows, and the English window must never open.
+fn replay(layout: Layout, english: bool) {
     let lex = load_lexicon(&root().join("data/lexicon")).unwrap();
     let mut files: Vec<PathBuf> = std::fs::read_dir(root().join("eval/dev"))
         .unwrap()
@@ -45,6 +47,10 @@ fn replay(layout: Layout) {
     assert!(rows.len() == 302, "dev set has 302 usable rows");
 
     let mut e = Engine::with_lexicon(lex.clone(), layout);
+    if english {
+        e.load_english(&root().join("eval/golden/english-tiny.txt")).unwrap();
+        e.set_english(true).unwrap();
+    }
     let mut times = Vec::new();
     for (i, r) in rows.iter().enumerate() {
         let syls = match &r.reading {
@@ -59,6 +65,7 @@ fn replay(layout: Layout) {
             let t = Instant::now();
             let o = e.key(key).unwrap();
             times.push(t.elapsed());
+            assert!(!e.english_open(), "the English window opened at row {}", i + 1);
             got.push_str(&o.commit);
         }
         assert!(got == want, "replay mismatch at row {}", i + 1);
@@ -72,9 +79,13 @@ fn replay(layout: Layout) {
 
 #[test]
 fn replay_standard_302_of_302() {
-    replay(Layout::Standard);
+    replay(Layout::Standard, false);
 }
 #[test]
 fn replay_eten_302_of_302() {
-    replay(Layout::Eten);
+    replay(Layout::Eten, false);
+}
+#[test]
+fn replay_with_english_on() {
+    replay(Layout::Standard, true);
 }

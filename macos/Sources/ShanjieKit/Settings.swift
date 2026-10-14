@@ -20,6 +20,10 @@ public final class SettingsModel: ObservableObject {
     @Published public private(set) var layout = InputMode.standard
     @Published public private(set) var prediction = true
     @Published public private(set) var abbreviation = false
+    /// The 中英混打（實驗） toggle (zhen-mixed section 3.2), and whether it is enabled: the word list loaded and the standard layout, like
+    /// the menu item (false: the toggle is greyed, the setting kept).
+    @Published public private(set) var english = false
+    @Published public private(set) var englishEnabled = true
     /// The abbreviation toggle is shown only when the shell offers it (`Shell.showsAbbreviation`).
     public var showsAbbreviation: Bool { shell.showsAbbreviation }
     @Published public private(set) var demote = true
@@ -66,6 +70,8 @@ public final class SettingsModel: ObservableObject {
         layout = shell.layout
         prediction = shell.predictionOn
         abbreviation = shell.abbreviationOn
+        english = shell.englishOn
+        englishEnabled = shell.englishEnabled
         demote = shell.demoteOn
         rerank = shell.rerankOn
         rerankEnabled = shell.rerankEnabled
@@ -87,6 +93,7 @@ public final class SettingsModel: ObservableObject {
     public func selectLayout(_ m: InputMode) { shell.selectLayout(m) }
     public func setPrediction(_ on: Bool) { shell.applyPrediction(on) }
     public func setAbbreviation(_ on: Bool) { shell.applyAbbreviation(on) }
+    public func setEnglish(_ on: Bool) { shell.applyEnglish(on) }
     public func setDemote(_ on: Bool) { shell.applyDemote(on) }
     public func setRerank(_ on: Bool) { shell.applyRerank(on) }
     public func setAcgPack(_ on: Bool) { shell.setAcgPack(on) }
