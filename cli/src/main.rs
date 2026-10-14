@@ -1,7 +1,8 @@
 use core::engine::{capping_overlay_detailed, load_lexicon_packs_detailed, PACK_ACG};
 use core::eval::*;
 use core::learn::{context_key, SENTINEL};
-use core::lm::{decode_from, history, CappedLexicon, Demote, Lm, Profile};
+use core::fuzzy::FUZZY_ALL;
+use core::lm::{decode_from_fuzzy, history, CappedLexicon, Demote, Lm, Profile};
 use core::tinylm::{TinyLm, TinyLmError, TOPK};
 use core::predict::{parse_units, predict, units_of, units_str, Index, Mode};
 use core::{decode_beam, Error, Lexicon, NoLearning, Syls, BEAM_S1};
@@ -198,6 +199,9 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     let (mut rowstats, mut tinylm, mut tinylm_scores) = (None::<String>, None::<String>, None::<String>);
     // acg-pack contract A.2: `--packs acg` adds data/packs/acg-add.tsv (or `--packs-dir DIR`'s) to the lexicon and the cap; off by default.
     let (mut packs, mut packs_dir) = (0u32, None::<String>);
+    // docs/contracts/fuzzy-input.md section 2.3: `--fuzzy FLAGS` (the bits of shanjie_engine_set_fuzzy). Given, the summary line gets
+    // `+fz:FLAGS` and a row no reading covers counts as wrong instead of stopping the run.
+    let mut fuzzy = None::<u32>;
     let mut it = args.iter();
     while let Some(a) = it.next() {
         let mut val = || it.next().cloned().ok_or_else(|| "missing option value".to_string());
@@ -221,6 +225,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
             "--no-kn" => kn = false,
             "--packs" => packs |= pack_flag(&val()?)?,
             "--packs-dir" => packs_dir = Some(val()?),
+            "--fuzzy" => fuzzy = Some(val()?.parse::<u32>().ok().filter(|f| f & !FUZZY_ALL == 0).ok_or("--fuzzy takes flags 0-31")?),
             _ => return Err("unknown argument".into()),
         }
     }
@@ -310,7 +315,20 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
         // S2h: the first word is conditioned on the row's context, cut like the engine cuts it.
         let left = if ctx_mode { Some(context_key(ctx)) } else { None };
         let start = left.as_deref().filter(|k| *k != SENTINEL).map_or("<s>", |k| history(k, &lm));
-        let nb = decode_from(&capped, syls, &lm, prof, BEAM_S1, start, demote).map_err(|e| e.to_string())?;
+        let nb = match decode_from_fuzzy(&capped, syls, &lm, prof, BEAM_S1, start, demote, fuzzy.unwrap_or(0)) {
+            Ok(nb) => nb,
+            // --fuzzy: a row no reading covers is a wrong answer with an empty first candidate, and the set goes on.
+            Err(Error::NoPath { .. }) if fuzzy.is_some() => {
+                rs.push((false, String::new(), truth.clone()));
+                firsts.push(String::new());
+                if let Some(d) = dump_words.as_mut() {
+                    let gold = lex.segment_words(truth).map_or("-".to_string(), |ws| ws.iter().map(|(w, _)| w.as_str()).collect::<Vec<_>>().join(" "));
+                    writeln!(d, "{}\t0\t{gold}", i + 1).map_err(|_| "cannot write word dump".to_string())?;
+                }
+                continue;
+            }
+            Err(e) => return Err(e.to_string()),
+        };
         let mut surf: Vec<String> = nb.iter().map(|(_, ws)| ws.concat()).collect();
         let t = len.apply(truth);
         // The row's chosen candidate: the first, or the small model's pick among the first 8 (the dump keeps the n-gram order).
@@ -388,7 +406,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
         f.write_all(format_rowstats(&rs).as_bytes()).map_err(|e| format!("cannot write rowstats ({:?})", e.kind()))?;
     }
     let sha = sha256_hex(firsts.join("\n").as_bytes());
-    println!("## {name}  lm-{profile_name}{}{}{}{}{}{}  {{'n': {}, 'top1': {top1}, 'oracle@64': {o64}, 'top1_sha256': '{sha}'}}", if ctx_mode { "+ctx" } else { "" }, if demote { "" } else { "-nodemote" }, if classes { "" } else { "-noclasses" }, lm.kn_tag().unwrap_or(""), tl.as_ref().map_or(String::new(), |(_, _, sha8)| format!("+tl:{sha8}")), if packs & PACK_ACG != 0 { "+acg" } else { "" }, rows.len());
+    println!("## {name}  lm-{profile_name}{}{}{}{}{}{}{}  {{'n': {}, 'top1': {top1}, 'oracle@64': {o64}, 'top1_sha256': '{sha}'}}", if ctx_mode { "+ctx" } else { "" }, if demote { "" } else { "-nodemote" }, if classes { "" } else { "-noclasses" }, lm.kn_tag().unwrap_or(""), tl.as_ref().map_or(String::new(), |(_, _, sha8)| format!("+tl:{sha8}")), if packs & PACK_ACG != 0 { "+acg" } else { "" }, fuzzy.map_or(String::new(), |f| format!("+fz:{f}")), rows.len());
     Ok(())
 }
 
