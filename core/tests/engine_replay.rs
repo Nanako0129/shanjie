@@ -29,7 +29,8 @@ fn keys_of(layout: Layout, syl: &str) -> Vec<Key> {
 }
 
 /// `english`: the standard layout with the zhen-mixed switch on and the synthetic list loaded (docs/contracts/zhen-mixed.md
-/// section 5.1): the same 302 rows, and the English window must never open.
+/// section 5.1) and the zhen-inline display on (its default): the same 302 rows, and neither the English window nor the letters
+/// (rule D) may ever show: the rows are Chinese typed right.
 fn replay(layout: Layout, english: bool) {
     let lex = load_lexicon(&root().join("data/lexicon")).unwrap();
     let mut files: Vec<PathBuf> = std::fs::read_dir(root().join("eval/dev"))
@@ -66,6 +67,7 @@ fn replay(layout: Layout, english: bool) {
             let o = e.key(key).unwrap();
             times.push(t.elapsed());
             assert!(!e.english_open(), "the English window opened at row {}", i + 1);
+            assert!(!e.english_inline_shown(), "letters showed instead of Zhuyin at row {}", i + 1);
             got.push_str(&o.commit);
         }
         assert!(got == want, "replay mismatch at row {}", i + 1);

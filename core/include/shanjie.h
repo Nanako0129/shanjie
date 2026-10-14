@@ -145,10 +145,19 @@ int32_t shanjie_engine_load_english(ShanjieEngine *engine, const char *path);
 //   the abbreviation composer off, Space after an English word typed into one unfinished syllable (the keys typed are a listed
 //   word and at least one key replaced a symbol in an occupied column; two when the leftover syllable with tone 1 is itself in
 //   the lexicon) opens the English window (s3a rule 10e): the word, Capitalised, UPPER and, when the leftover syllable is in
-//   the lexicon, its first entry. 1-9, Enter or pick(index) commits an English item with the composition, no space; the
-//   Chinese item becomes a fixed word. Turning it off, or the abbreviation composer on, closes the window. No effect without
-//   a list. Call it after every engine creation, like set_abbreviation.
+//   the lexicon, its first entry. 1-9, Enter or pick(index) on an English item does not commit (docs/contracts/zhen-inline.md):
+//   the item becomes an English token at the cursor that stays in the composition (one unit like a punctuation mark: Backspace
+//   and the arrow keys take it whole, the next word starts a new sentence), and it is sent with the rest. The Chinese item
+//   becomes a fixed word. Turning it off, or the abbreviation composer on, closes the window. No effect without a list. Call it
+//   after every engine creation, like set_abbreviation.
 int32_t shanjie_engine_set_english(ShanjieEngine *engine, uint32_t enabled, ShanjieOutput **out); // 0 or 1; returns a snapshot
+// set_english_inline 0 or 1 (zhen-inline), default 1 at engine creation: with 1 (and set_english(1)) the unfinished syllable shows
+//   as the letters typed instead of the Zhuyin while all of these hold: the cursor is at the end with one unfinished unit, at
+//   least 3 letters, the overwrite condition of the English window's trigger, and a listed word starts with the letters. Enter
+//   (and reset with commit) then send the letters. 0 shows the Zhuyin until the English window opens. Returns 0; 1 when engine
+//   is NULL; 2 for any other value (state unchanged). No snapshot: the next output carries the display. Call it after every
+//   engine creation, like set_english.
+int32_t shanjie_engine_set_english_inline(ShanjieEngine *engine, uint32_t enabled);
 // s3e (docs/contracts/s3e-punctuation-candidates.md): punctuation alternatives, UTF-8 lines
 // "mark\talt\talt...", blank lines ignored, a repeated mark overrides; at most 64 KB / 1,000 lines.
 // 2 on any invalid input, keeping the previous table (a built-in default until the first success).

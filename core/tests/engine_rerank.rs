@@ -505,10 +505,11 @@ fn auto_commit_voids_the_job() {
     assert!(e.take_rerank_job().is_none(), "no job after the prediction pick's commit");
 }
 
-/// zhen-mixed section 5.1: an English commit is a commit (`take_commit` renews the generation), so a job taken before it
-/// applies to nothing; closing the window with Esc is not one, and the same job still applies.
+/// zhen-inline section 1.0: choosing an English item inserts a token, and every insertion is a new decode (`refresh` renews the
+/// generation), so a job taken before it applies to nothing; closing the window with Esc changes nothing, and the same job still
+/// applies.
 #[test]
-fn english_commit_voids_the_job() {
+fn english_token_voids_the_job() {
     let list = root().join("eval/golden/english-tiny.txt");
     let after = |last: &str| {
         let mut e = engine();
@@ -523,9 +524,10 @@ fn english_commit_voids_the_job() {
         assert!(e.english_open(), "premise: the window is open");
         let key = if last == "1" { Key::ch('1', 0) } else { k(KeyKind::Esc) };
         let o = e.key(key).unwrap();
-        (e.apply_rerank(result).unwrap().is_some(), o.commit.ends_with("rust"))
+        assert!(o.commit.is_empty(), "nothing is sent either way");
+        (e.apply_rerank(result).unwrap().is_some(), o.preedit.ends_with("rust"))
     };
-    assert!(after("1") == (false, true), "the commit voided the job");
+    assert!(after("1") == (false, true), "the token voided the job");
     assert!(after("Esc") == (true, false), "control: Esc keeps the job");
 }
 
