@@ -244,3 +244,5 @@ DLC
 Miyago
 CabLate
 Hanako
+Nanako
+Nyanako
