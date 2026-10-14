@@ -76,9 +76,12 @@ fn bad_file_and_orphan_scores_option_are_errors() {
     assert!(!orphan.status.success() && text(&orphan.stderr).contains("--tinylm"));
 }
 
-/// Alpha and tau were tuned without the Kneser-Ney side file: with one beside the model, `--tinylm` refuses (and `--no-kn` runs).
+/// model-v6 sections 2.7 and 7 (P4-9): the Kneser-Ney side file beside the model must be the one the `.sjtl` records. Each
+/// mismatch is refused with its own message and remedy: a file tuned without KN (version 1 here) with the side file on suggests
+/// `--no-kn` (which then runs); the version 4 toy (recording kn-tiny/kn.sjkn) runs with that side file on, is refused with another
+/// side file (no `--no-kn` advice) and with `--no-kn` (advice to drop it).
 #[test]
-fn kneser_ney_side_file_is_refused() {
+fn kneser_ney_side_file_must_be_the_recorded_one() {
     let toy = root().join("eval/golden/kn-tiny");
     let (dir, sjtl) = tmp_with_sjtl("kn", &toy.join("bigram.sjlm"));
     for f in ["bigram.sjlm", "classes.sjc", "kn.sjkn"] {
@@ -87,12 +90,30 @@ fn kneser_ney_side_file_is_refused() {
     let rows = dir.join("rows.txt");
     std::fs::write(&rows, "|你好|ㄋㄧˇ ㄏㄠˇ\n").unwrap();
     let lm = dir.join("bigram.sjlm");
-    let base = ["--lm", lm.to_str().unwrap(), "--profile", "chat", "--rows", rows.to_str().unwrap(), "--tinylm", &sjtl];
-    let refused = run(&base);
-    assert!(!refused.status.success() && refused.stdout.is_empty());
-    assert!(text(&refused.stderr).contains(".sjtl") && text(&refused.stderr).contains("Kneser-Ney"), "{}", text(&refused.stderr));
-    let off = run(&[&base[..], &["--no-kn"]].concat());
+    let v4 = root().join("eval/golden/tinylm-tiny/tiny-int8-v4.sjtl");
+    let args = |tl: &str, extra: &[&str]| -> Output {
+        let base = ["--lm", lm.to_str().unwrap(), "--profile", "chat", "--rows", rows.to_str().unwrap(), "--tinylm", tl];
+        run(&[&base[..], extra].concat())
+    };
+    let refused = |o: &Output, has: &[&str], lacks: &[&str]| {
+        let err = text(&o.stderr);
+        assert!(!o.status.success() && o.stdout.is_empty(), "{err}");
+        assert!(err.contains(".sjtl") && err.contains("Kneser-Ney"), "{err}");
+        assert!(has.iter().all(|h| err.contains(h)) && !lacks.iter().any(|l| err.contains(l)), "{err}");
+    };
+    // Tuned without KN, side file on.
+    refused(&args(&sjtl, &[]), &["tuned without", "--no-kn"], &[]);
+    let off = args(&sjtl, &["--no-kn"]);
     assert!(off.status.success(), "{}", text(&off.stderr));
+    // Tuned with this side file: runs with it on.
+    let on = args(v4.to_str().unwrap(), &[]);
+    assert!(on.status.success(), "{}", text(&on.stderr));
+    assert!(text(&on.stdout).contains("+kn:"), "{}", text(&on.stdout));
+    // Tuned with this side file, but it is off.
+    refused(&args(v4.to_str().unwrap(), &["--no-kn"]), &["none is on", "drop --no-kn"], &[]);
+    // Another side file beside the model.
+    std::fs::copy(toy.join("kn-beta075.sjkn"), dir.join("kn.sjkn")).unwrap();
+    refused(&args(v4.to_str().unwrap(), &[]), &["another Kneser-Ney side file"], &["--no-kn"]);
     std::fs::remove_dir_all(dir).unwrap();
 }
 

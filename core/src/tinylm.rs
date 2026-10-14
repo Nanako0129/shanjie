@@ -1,7 +1,8 @@
-//! S7c-1: the small character language model (S7a) in Rust: the SJTL0001 / SJTL0002 / SJTL0003 loader, the forward pass, LL and
-//! `pick` (docs/contracts/s7c-core-tinylm.md section 2; SJTL0002, the per-profile delta, is docs/contracts/s7c2c-delta.md section
-//! 2.1; SJTL0003, a conservative and an aggressive (alpha, tau, delta) per profile beside the standard one, is
-//! docs/contracts/rerank-strength.md section 2.1).
+//! S7c-1: the small character language model (S7a) in Rust: the SJTL0001 / SJTL0002 / SJTL0003 / SJTL0004 loader, the forward
+//! pass, LL and `pick` (docs/contracts/s7c-core-tinylm.md section 2; SJTL0002, the per-profile delta, is
+//! docs/contracts/s7c2c-delta.md section 2.1; SJTL0003, a conservative and an aggressive (alpha, tau, delta) per profile beside
+//! the standard one, is docs/contracts/rerank-strength.md section 2.1; SJTL0004, the SHA-256 of the Kneser-Ney side file the
+//! parameters were tuned with, is docs/contracts/model-v6.md section 2.7).
 //! S7c-2a (docs/contracts/s7c2a-core-rerank.md) reaches it from the engine's rerank
 //! jobs and the C ABI, so the loader is hardened for in-process use (section 2.6): a size cap, a regular-file check, header
 //! bounds and finite restored weights.
@@ -29,6 +30,12 @@ const VERSION_V2: u32 = 2;
 const MAGIC_V3: &[u8; 8] = b"SJTL0003";
 const HEADER_V3: usize = 212;
 const VERSION_V3: u32 = 3;
+/// model-v6 section 2.7: version 4 is version 3's 212 header bytes (magic and version field changed) plus, at 212, the 32-byte
+/// SHA-256 of the Kneser-Ney side file (kn.sjkn) alpha, tau and delta were tuned with; all zero = tuned without one. Versions
+/// 1 to 3 count as all zero.
+const MAGIC_V4: &[u8; 8] = b"SJTL0004";
+const HEADER_V4: usize = 244;
+const VERSION_V4: u32 = 4;
 /// S7c-2c section 2.1: a guard on delta, far above the S7e grid (at most 4).
 const MAX_DELTA: f64 = 1000.0;
 const PAD: u32 = 0;
@@ -56,8 +63,19 @@ pub enum TinyLmError {
     TooLong,
     /// `load_paired`: the file was tuned with another n-gram model (its recorded SHA-256 differs).
     OtherNgram,
-    /// `load_paired`: the n-gram model has the Kneser-Ney side file on; alpha and tau were tuned without it.
-    KneserNey,
+    /// `load_paired`: the Kneser-Ney side file of the n-gram model is not the one the file was tuned with (model-v6 section 2.7).
+    KneserNey(KnPairing),
+}
+
+/// Which way the Kneser-Ney side file and the `.sjtl` disagree (model-v6 section 7, P4-9: each needs another remedy).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum KnPairing {
+    /// The side file is on, but the `.sjtl` was tuned without one (all-zero hash, or a version 1 to 3 file).
+    TunedWithout,
+    /// The side file is on, and the `.sjtl` was tuned with a different one.
+    OtherSideFile,
+    /// The side file is off, but the `.sjtl` was tuned with one.
+    TunedWith,
 }
 
 impl fmt::Display for TinyLmError {
@@ -67,7 +85,11 @@ impl fmt::Display for TinyLmError {
             TinyLmError::Format => "bad tiny language model file (.sjtl)",
             TinyLmError::TooLong => "candidate does not fit the context of the tiny language model (.sjtl)",
             TinyLmError::OtherNgram => "this .sjtl was tuned with another n-gram model (SHA-256 differs)",
-            TinyLmError::KneserNey => "the Kneser-Ney side file is on, but this .sjtl was tuned without it",
+            TinyLmError::KneserNey(KnPairing::TunedWithout) => "the Kneser-Ney side file (kn.sjkn) is on, but this .sjtl was tuned without one",
+            TinyLmError::KneserNey(KnPairing::OtherSideFile) => {
+                "this .sjtl was tuned with another Kneser-Ney side file (the SHA-256 of kn.sjkn differs)"
+            }
+            TinyLmError::KneserNey(KnPairing::TunedWith) => "this .sjtl was tuned with a Kneser-Ney side file (kn.sjkn), but none is on",
         })
     }
 }
@@ -205,9 +227,11 @@ pub struct TinyLm {
     /// the standard triple for all three levels.
     chat: [(f64, f64, f64); 3],
     formal: [(f64, f64, f64); 3],
-    /// A version 3 file (its own conservative and aggressive triples).
+    /// A version 3 or 4 file (its own conservative and aggressive triples).
     levels: bool,
     ng_sha: [u8; 32],
+    /// Version 4: the SHA-256 of the side file it was tuned with; `None` for all zero and for versions 1 to 3.
+    kn_sha: Option<[u8; 32]>,
     ids: HashMap<char, u32>,
     emb: Vec<f32>,
     pos: Vec<f32>,
@@ -291,19 +315,22 @@ impl TinyLm {
     }
 
     /// The one loader of the engine and the evaluation CLI (S7c-2a): `load`'s checks, then the pairing with `lm` — the n-gram
-    /// model hash the file records must be `lm`'s, and `lm` must not have the Kneser-Ney side file on (alpha and tau were tuned
-    /// without it). A pairing check only, not an integrity check of the `.sjtl`. Also returns the bytes it parsed (the CLI
-    /// prints their hash; the engine drops them).
+    /// model hash the file records must be `lm`'s, and the Kneser-Ney side file hash it records (model-v6 section 2.7: none for
+    /// versions 1 to 3 and for an all-zero version 4 field) must be the one `lm` has on, all 32 bytes, or none when `lm` has none.
+    /// A pairing check only, not an integrity check of the `.sjtl`. Also returns the bytes it parsed (the CLI prints their hash;
+    /// the engine drops them).
     pub fn load_paired(path: &Path, lm: &Lm) -> Result<(TinyLm, Vec<u8>), TinyLmError> {
         let bytes = read_bounded(path, MAX_FILE)?;
         let model = TinyLm::parse(&bytes)?;
         if model.ngram_sha256() != lm.sha256() {
             return Err(TinyLmError::OtherNgram);
         }
-        if lm.kn_tag().is_some() {
-            return Err(TinyLmError::KneserNey);
+        match (model.kn_sha, lm.kn_sha256()) {
+            (tuned, on) if tuned == on => Ok((model, bytes)),
+            (None, _) => Err(TinyLmError::KneserNey(KnPairing::TunedWithout)),
+            (Some(_), None) => Err(TinyLmError::KneserNey(KnPairing::TunedWith)),
+            (Some(_), Some(_)) => Err(TinyLmError::KneserNey(KnPairing::OtherSideFile)),
         }
-        Ok((model, bytes))
     }
 
     /// Every check of the format; a bad file is an error, never a partial model.
@@ -314,18 +341,22 @@ impl TinyLm {
         }
         let u32_at = |at: usize| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         let f64_at = |at: usize| f64::from_le_bytes(bytes[at..at + 8].try_into().unwrap());
-        // S7c-2c section 2.1, rerank-strength section 9 (P2-2): magic and version field together choose, in this one match, the
-        // header length (the one length the vocabulary start, the tensor start and `want` use), whether the deltas are there and
-        // whether the levels are; the file must hold the whole header before any field past the version is read.
-        let (header, deltas, levels) = match (&bytes[..8], u32_at(8)) {
-            (m, VERSION) if m == MAGIC => (HEADER, false, false),
-            (m, VERSION_V2) if m == MAGIC_V2 => (HEADER_V2, true, false),
-            (m, VERSION_V3) if m == MAGIC_V3 => (HEADER_V3, true, true),
+        // S7c-2c section 2.1, rerank-strength section 9 (P2-2), model-v6 section 7 (P2-1): magic and version field together
+        // choose, in this one match, the header length (the one length the vocabulary start, the tensor start and `want` use),
+        // whether the deltas are there, whether the levels are and whether the side file hash is; the file must hold the whole
+        // header before any field past the version is read.
+        let (header, deltas, levels, kn) = match (&bytes[..8], u32_at(8)) {
+            (m, VERSION) if m == MAGIC => (HEADER, false, false, false),
+            (m, VERSION_V2) if m == MAGIC_V2 => (HEADER_V2, true, false, false),
+            (m, VERSION_V3) if m == MAGIC_V3 => (HEADER_V3, true, true, false),
+            (m, VERSION_V4) if m == MAGIC_V4 => (HEADER_V4, true, true, true),
             _ => return Err(bad),
         };
         if bytes.len() < header {
             return Err(bad);
         }
+        let kn_sha: Option<[u8; 32]> = if kn { Some(bytes[HEADER_V3..HEADER_V4].try_into().unwrap()) } else { None };
+        let kn_sha = kn_sha.filter(|h| *h != [0; 32]);
         let wtype = u32_at(12);
         let [n_layer, n_head, d, ctx, v] = [16, 20, 24, 28, 32].map(|at| u32_at(at) as usize);
         let (chat_delta, formal_delta) = if deltas { (f64_at(100), f64_at(108)) } else { (0.0, 0.0) };
@@ -393,6 +424,7 @@ impl TinyLm {
             formal,
             levels,
             ng_sha: bytes[68..100].try_into().unwrap(),
+            kn_sha,
             ids,
             emb,
             pos,
@@ -416,9 +448,15 @@ impl TinyLm {
         by_level[level as usize]
     }
 
-    /// Whether the file is version 3, i.e. has its own conservative and aggressive triples (rerank-strength section 2.2).
+    /// Whether the file is version 3 or 4, i.e. has its own conservative and aggressive triples (rerank-strength section 2.2).
     pub fn has_levels(&self) -> bool {
         self.levels
+    }
+
+    /// The SHA-256 of the Kneser-Ney side file the parameters were tuned with (version 4); `None` when tuned without one (an
+    /// all-zero field, or a version 1 to 3 file).
+    pub fn kn_sha256(&self) -> Option<[u8; 32]> {
+        self.kn_sha
     }
 
     /// SHA-256 (hex) of the n-gram model alpha and tau were tuned with.

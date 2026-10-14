@@ -205,7 +205,7 @@ int32_t shanjie_engine_set_english(ShanjieEngine *engine, uint32_t enabled, Shan
 // S7c-2a 新增（docs/contracts/s7c2a-core-rerank.md §2.5）：小模型重排的兩段式 API。每次組字改變可能留下一個重排工作；殼取走、在別的執行緒 run、回到引擎的執行緒 apply。
 #define SHANJIE_NO_CHANGE 5
 typedef struct ShanjieRerankJob ShanjieRerankJob;
-// load_tinylm：讀檔失敗、不是一般檔案、超過 64 MiB、格式錯、沒有載入 n-gram、KN 側檔開著、.sjtl 記的 n-gram 雜湊不同 → 3（只是配對檢查，不是 .sjtl 的完整性檢查），
+// load_tinylm：讀檔失敗、不是一般檔案、超過 64 MiB、格式錯、沒有載入 n-gram、.sjtl 記的 n-gram 雜湊不同、KN 側檔的狀態和 .sjtl 記的不同（v4 記調參時的 kn.sjkn 的 SHA-256、全 0＝沒有；v1～v3 當成沒有；載入的 kn.sjkn 或沒有，32 bytes 都要相同；model-v6 §2.7） → 3（只是配對檢查，不是 .sjtl 的完整性檢查），
 // 引擎維持原狀；NULL → 1、路徑不是 UTF-8 → 2。不改 set_rerank 的開關、不改目前顯示。load_lm 成功會丟掉小模型（要在 load_lm 之後呼叫）。
 int32_t shanjie_engine_load_tinylm(ShanjieEngine *engine, const char *path);
 // set_rerank：0 或 1（其他回 2、狀態不變），建立時預設 0（S7c-2c 起；之前是 1）；碼與快照同 set_demote（重算組字，關掉時畫面回到 n-gram 的結果）。殼每次建 engine 後都要呼叫。
@@ -214,7 +214,7 @@ int32_t shanjie_engine_set_rerank(ShanjieEngine *engine, uint32_t enabled, Shanj
 // 碼與快照同 set_profile（engine 或 out 為 NULL → 1；大於 2 → 2、狀態與世代號都不變；4 → 引擎 discard、新等級保留）。會讓之前取走的工作作廢；工作建立時記下當時的 α、τ、δ。
 // 沒有小模型時記下等級、回 0；v1／v2 的 .sjtl（只有標準一組）任何等級都記下、回 0、實際用標準。load_tinylm、load_lm 保留等級。殼每次建 engine、load_tinylm 之後送一次存起來的等級。
 int32_t shanjie_engine_set_rerank_level(ShanjieEngine *engine, uint32_t level, ShanjieOutput **out);
-// rerank_levels：*levels 是載入的小模型提供的等級遮罩（bit0 保守、bit1 標準、bit2 積極）：沒有小模型 0、v1／v2 檔 2、v3 檔一律 7（不管值是否和標準相同、也不管 profile）。
+// rerank_levels：*levels 是載入的小模型提供的等級遮罩（bit0 保守、bit1 標準、bit2 積極）：沒有小模型 0、v1／v2 檔 2、v3／v4 檔一律 7（不管值是否和標準相同、也不管 profile）。
 // 0 成功；engine 或 levels 為 NULL → 1（不寫 *levels）；4 內部錯誤（不改任何狀態，所以也不 reset）。
 int32_t shanjie_engine_rerank_levels(ShanjieEngine *engine, uint32_t *levels);
 // rerank_take：交出上一次改變的工作（只交一次）；沒有工作時回 0、*job 為 NULL。engine 或 job 為 NULL → 1（job 非 NULL 時先設 *job = NULL）；4 → 引擎 discard。

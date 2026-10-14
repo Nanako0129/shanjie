@@ -654,8 +654,10 @@ fn load_tinylm_errors_and_the_switch() {
     assert!(e.take_rerank_job().is_none(), "load_tinylm left the switch off");
 }
 
-/// Section 2.5: the Kneser-Ney side file on refuses the model (alpha and tau were tuned without it); the same model without
-/// the side file is accepted (eval/golden/kn-tiny, with a one-entry lexicon: only the model's hash and KN state matter here).
+/// Section 2.5 and model-v6 section 2.7: a `.sjtl` tuned without the Kneser-Ney side file (version 1 here) pairs only with the
+/// model without it; the version 4 toy (eval/golden/tinylm-tiny/tiny-int8-v4.sjtl, recording kn-tiny/kn.sjkn's SHA-256) pairs
+/// only with the model with it, and offers the three levels (`rerank_levels` 7). eval/golden/kn-tiny with a one-entry lexicon:
+/// only the model's hash and KN state matter here.
 #[test]
 fn kneser_ney_side_file_refuses_the_model() {
     let kn = root().join("eval/golden/kn-tiny");
@@ -666,13 +668,17 @@ fn kneser_ney_side_file_refuses_the_model() {
     }
     let lex = Arc::new(Lexicon::parse_with("ㄋㄧˇ 你 -1.0\n", None).unwrap());
     let model = sjtl_for(0.7, 2.0, Some(&kn.join("bigram.sjlm")));
-    for (lm_dir, ok) in [(kn.clone(), false), (dir.clone(), true)] {
+    let v4 = root().join("eval/golden/tinylm-tiny/tiny-int8-v4.sjtl");
+    for (lm_dir, kn_off) in [(kn.clone(), false), (dir.clone(), true)] {
         let lm = Lm::load(&lm_dir.join("bigram.sjlm")).unwrap();
-        assert_eq!(lm.kn_tag().is_some(), !ok, "premise: the side file is loaded only from kn-tiny");
+        assert_eq!(lm.kn_tag().is_some(), !kn_off, "premise: the side file is loaded only from kn-tiny");
         let capped = Arc::new(CappedLexicon::new(lex.clone(), "", &lm, None).unwrap());
         let mut e = Engine::with_lexicon(lex.clone(), Layout::Standard);
         e.set_lm(Arc::new(lm), capped);
-        assert_eq!(e.load_tinylm(&model).is_ok(), ok);
+        assert_eq!(e.load_tinylm(&model).is_ok(), kn_off, "version 1, tuned without KN");
+        assert_eq!(e.load_tinylm(&v4).is_ok(), !kn_off, "version 4, tuned with kn-tiny/kn.sjkn");
+        // A failed load keeps the previous model: the version 1 file (2) with KN off, the version 4 file (7) with KN on.
+        assert_eq!(e.rerank_levels(), if kn_off { 2 } else { 7 });
     }
     std::fs::remove_dir_all(dir).unwrap();
 }

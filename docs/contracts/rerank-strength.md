@@ -41,7 +41,7 @@
    - 1：engine 或 out 是 NULL；2：level > 2；狀態都不變。
    - 沒有載入小模型時：記下 level、回 0（和 profile 一樣先記著）。
    - 載入的是 v1／v2 檔、level ≠ 1：記下 level，實際用標準，回 0。
-   - `int32_t shanjie_engine_rerank_levels(ShanjieEngine *engine, uint32_t *levels)`（照 `learning_status` 的形式，包在 `guard` 裡）：engine 或 levels 是 NULL 回 1；成功回 0 並寫入位元遮罩（bit0 保守、bit1 標準、bit2 積極）：沒有小模型 0、v1／v2 檔 2、v3 檔一律 7（不管值是否和標準相同、也不管 profile）。`shanjie.h` 寫同一句定義；核心測試斷言這幾種值。
+   - `int32_t shanjie_engine_rerank_levels(ShanjieEngine *engine, uint32_t *levels)`（照 `learning_status` 的形式，包在 `guard` 裡）：engine 或 levels 是 NULL 回 1；成功回 0 並寫入位元遮罩（bit0 保守、bit1 標準、bit2 積極）：沒有小模型 0、v1／v2 檔 2、v3 檔一律 7〔model-v6 §2.7 的 v4 檔同 v3〕（不管值是否和標準相同、也不管 profile）。`shanjie.h` 寫同一句定義；核心測試斷言這幾種值。
    - `load_tinylm` 或 `load_lm` 之後保留記下的 level。
    - setter 呼叫 `invalidate`：舊的 rerank job 套用時回 `SHANJIE_NO_CHANGE`；job 建立時記下當時的 α、τ、δ。
    - `core/include/shanjie.h` 與 `docs/contracts/s3a.md` 同一個 PR 更新。

@@ -84,15 +84,24 @@ struct Kn {
     beta: f64,
     theta: u32,
     total: u64,
-    /// The whole file; N is read in place (little-endian u32 at `KN_N + 4 * id`), so nothing is copied.
+    /// The whole file, the bytes `add_kn` checked; N is read in place (little-endian u32 at `KN_N + 4 * id`), so nothing is copied.
     raw: Vec<u8>,
-    /// `+kn:<side file sha8>:θ<θ>:β<β>`, the suffix of lm_eval.py's summary line; hashed on first use.
-    tag: OnceLock<String>,
+    /// SHA-256 of `raw` and `+kn:<its sha8>:θ<θ>:β<β>` (the suffix of lm_eval.py's summary line), computed on first use.
+    hashed: OnceLock<([u8; 32], String)>,
 }
 
 const KN_N: usize = 64;
 
 impl Kn {
+    fn hashed(&self) -> &([u8; 32], String) {
+        self.hashed.get_or_init(|| {
+            let sha = crate::eval::sha256(&self.raw);
+            let sha8: String = sha[..4].iter().map(|b| format!("{b:02x}")).collect();
+            let tag = format!("+kn:{sha8}:θ{}:β{}", self.theta, fmt_g(self.beta));
+            (sha, tag)
+        })
+    }
+
     /// N' = N + 1 of word `id`.
     fn np1(&self, id: usize) -> u64 {
         let at = KN_N + 4 * id;
@@ -235,7 +244,7 @@ impl Lm {
         if v != self.uni.len() || want != self.sha || !(0.0..=1.0).contains(&beta) || side.len() != KN_N + 4 * v {
             return Err(LmError::KnSide);
         }
-        let kn = Kn { beta, theta, total, raw: side.to_vec(), tag: OnceLock::new() };
+        let kn = Kn { beta, theta, total, raw: side.to_vec(), hashed: OnceLock::new() };
         let (mut max, mut sum) = (0u64, 0u128);
         for id in 2..v {
             let n = kn.np1(id);
@@ -252,9 +261,14 @@ impl Lm {
     /// The summary-line suffix `+kn:<side file sha8>:θ<θ>:β<β>` (same text as reference/proto/lm_eval.py); `None` when the
     /// Kneser-Ney term is off. The side file is hashed on the first call.
     pub fn kn_tag(&self) -> Option<&str> {
-        self.kn.as_ref().map(|k| {
-            k.tag.get_or_init(|| format!("+kn:{}:θ{}:β{}", &crate::eval::sha256_hex(&k.raw)[..8], k.theta, fmt_g(k.beta))).as_str()
-        })
+        self.kn.as_ref().map(|k| k.hashed().1.as_str())
+    }
+
+    /// SHA-256 of the whole side file, from the bytes `add_kn` checked (never read again); `None` when the Kneser-Ney term is
+    /// off. A version 4 `.sjtl` records this value (docs/contracts/model-v6.md section 2.7; export_sjtl.py `--kn-side` writes
+    /// Python's `hashlib.sha256` of the same file), and `TinyLm::load_paired` compares all 32 bytes.
+    pub fn kn_sha256(&self) -> Option<[u8; 32]> {
+        self.kn.as_ref().map(|k| k.hashed().0)
     }
 
     /// Model bytes plus classes.sjc bytes: magic, the model's SHA-256, the vocabulary size and the exact length must match.
