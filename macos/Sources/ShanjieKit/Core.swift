@@ -73,10 +73,12 @@ final class CoreEngine {
     }
 
     /// The levels the loaded small model offers (bit0 conservative, bit1 standard, bit2 aggressive); 0 without one, and on a
-    /// non-zero code (then nothing is offered).
+    /// non-zero code (logged; then nothing is offered).
     func rerankLevels() -> UInt32 {
         var mask: UInt32 = 0
-        return shanjie_engine_rerank_levels(handle, &mask) == 0 ? mask : 0
+        let code = shanjie_engine_rerank_levels(handle, &mask)
+        if code != 0 { Log.shell.error("shanjie_engine_rerank_levels failed, code \(code)") }
+        return code == 0 ? mask : 0
     }
 
     /// S7c-2a: the job of the last change, once; `(nil, 0)` when there is none, `(nil, code)` on a non-zero code (the header
