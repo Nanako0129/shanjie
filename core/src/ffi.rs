@@ -1730,8 +1730,9 @@ mod tests {
             ("BOM", [b"\xef\xbb\xbf".to_vec(), b"rust\n".to_vec()].concat()),
             ("CRLF", b"rust\r\ngoogle\r\n".to_vec()),
             ("not UTF-8", b"rust\n\xff\xfe\n".to_vec()),
-            ("over 4 MiB", words(140_000, 32)),
-            ("over 200,000 lines", words(200_001, 6)),
+            // `rust` first, as in every case above: a loader that kept the lines read before the limit would open the window.
+            ("over 4 MiB", [b"rust\n".to_vec(), words(140_000, 32)].concat()),
+            ("over 200,000 lines", [b"rust\n".to_vec(), words(200_000, 6)].concat()),
         ];
         for (what, bytes) in &refused {
             let p = list("refused.txt", bytes);
@@ -1739,6 +1740,15 @@ mod tests {
         }
         assert!(load_english(e, &dir.join("missing.txt")) == 3, "missing");
         assert!(load_english(e, &dir) == 3, "a directory");
+        // A FIFO with no writer: 3 at once (not a regular file), not an open that waits for a writer forever.
+        let fifo = dir.join("fifo.txt");
+        assert!(Command::new("/usr/bin/mkfifo").arg(&fifo).status().unwrap().success(), "mkfifo");
+        let (tx, rx) = std::sync::mpsc::channel();
+        let (ep, fp) = (e as usize, fifo.clone());
+        std::thread::spawn(move || tx.send(load_english(ep as *mut ShanjieEngine, &fp)).unwrap());
+        let got = rx.recv_timeout(std::time::Duration::from_secs(10));
+        assert!(got.expect("load_english blocked on a FIFO") == 3, "a FIFO");
+        std::fs::remove_file(fifo).unwrap();
         let (cands, _, _) = type_out(e, "rust_");
         assert!(cands.is_empty(), "failed loads left no list");
         assert!(send(e, key(ESC, '\0')).0 == 0);

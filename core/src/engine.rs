@@ -1035,16 +1035,8 @@ impl Engine {
     /// 4 MiB and 200,000 lines. Any other content, or an unreadable or non-regular file, fails and the previous list (or
     /// none) stays; nothing is loaded in part. Does not touch the switch or the display. No path or word in any error (R2).
     pub fn load_english(&mut self, path: &Path) -> Result<(), EngineError> {
-        use std::io::Read;
-        let file = std::fs::File::open(path).map_err(|_| EngineError::LoadFailed)?;
-        if !file.metadata().is_ok_and(|m| m.is_file()) {
-            return Err(EngineError::LoadFailed);
-        }
-        let mut bytes = Vec::new();
-        file.take(ENGLISH_MAX_BYTES + 1).read_to_end(&mut bytes).map_err(|_| EngineError::LoadFailed)?;
-        if bytes.len() as u64 > ENGLISH_MAX_BYTES {
-            return Err(EngineError::LoadFailed);
-        }
+        // The tiny model's reader (S7c-2a F3): a FIFO is refused at once instead of blocking the shell that builds the engine.
+        let bytes = crate::tinylm::read_bounded(path, ENGLISH_MAX_BYTES).map_err(|_| EngineError::LoadFailed)?;
         let text = String::from_utf8(bytes).map_err(|_| EngineError::LoadFailed)?;
         let mut words = HashSet::new();
         // The last line ends with a line break (stripped once); an empty file is an empty list, a blank line anywhere is bad.
