@@ -170,12 +170,17 @@ def decode_tol(lex, tol, syls, lm, profile, delta, beam=BEAM, start="<s>"):
                 d = L.demote_delta(table, "-".join(k), word) if table else 0.0
                 for s, ws, f in hyps[i - ln]:
                     sc = s + (lm.word(lam, ws[-1] if ws else start, word, lp) - d - pen)
-                    surface = "".join(ws) + word
-                    if surface not in cand or sc > cand[surface][0]:
-                        cand[surface] = (sc, ws + (word,), f or flag)
+                    ck = ("".join(ws) + word, word)  # same recombination as lm.decode: one path per (surface, last word)
+                    if ck not in cand or sc > cand[ck][0]:
+                        cand[ck] = (sc, ws + (word,), f or flag)
         hyps[i] = sorted(cand.values(), key=lambda x: -x[0])[:beam]
     out = [(s + lm.eos(lam, ws[-1] if ws else start), ws, f) for s, ws, f in hyps[n]]
-    return sorted(out, key=lambda x: -x[0])
+    best, seen = [], set()  # distinct surfaces, each with its best path, as lm.decode returns
+    for x in sorted(out, key=lambda x: -x[0]):
+        if "".join(x[1]) not in seen:
+            seen.add("".join(x[1]))
+            best.append(x)
+    return best
 
 
 def gate_lists(exact, tol, failed):

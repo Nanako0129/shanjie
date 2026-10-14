@@ -52,6 +52,7 @@ public struct MenuEntry: Equatable, Sendable {
         case toggleBackup
         case toggleDemote
         case togglePrediction
+        case toggleEnglish
         case toggleAbbreviation
         case toggleRerank
         case toggleAcgPack
@@ -71,6 +72,7 @@ public struct MenuEntry: Equatable, Sendable {
         public static let pausedApp = "學習已暫停（此 App）"
         public static let demote = "避免把敏感字詞排在前面"
         public static let prediction = "即時預測"
+        public static let english = "中英混打（實驗）"
         public static let abbreviation = "可省略韻母"
         public static let rerank = "語意校正"
         public static let acgPack = "動漫與遊戲詞"
@@ -207,6 +209,9 @@ extension Session {
         if shell.showsAbbreviation {
             items.append(MenuEntry(title: T.abbreviation, action: .toggleAbbreviation, checked: shell.abbreviationOn, enabled: shell.predictionOn))
         }
+        // zhen-mixed section 3.2: after 即時預測 and before 語意校正, where 可省略韻母 sits when it is shown (the app hides it, so there it
+        // follows 即時預測 directly); greyed (checkmark kept) when this engine has no word list or the layout is Eten.
+        items.append(MenuEntry(title: T.english, action: .toggleEnglish, checked: shell.englishOn, enabled: shell.englishEnabled))
         // s7c2b section 2.3 (F11): greyed while the demotion table is off or the small model did not load, where the core makes
         // no rerank job.
         items.append(MenuEntry(title: T.rerank, action: .toggleRerank, checked: shell.rerankOn, enabled: shell.rerankEnabled))
@@ -236,6 +241,8 @@ extension Session {
             applyDemote(!shell.demoteOn)
         case .togglePrediction:
             applyPrediction(!shell.predictionOn)
+        case .toggleEnglish:
+            applyEnglish(!shell.englishOn)
         case .toggleAbbreviation:
             applyAbbreviation(!shell.abbreviationOn)
         case .toggleRerank:

@@ -72,19 +72,19 @@ static int run(const char *dir, uint32_t layout, const char *nihao, const char *
   return 0;
 }
 
-/* S2c (docs/PLAN.md S2c acceptance 6), on dev302 row 226 since S2k (the word-class term makes chat pick
- * 期中報告 as formal does, so the old row 10 no longer tells the profiles apart), reading
- *   ㄒㄧㄥˋ ㄏㄠˇ ㄐㄧㄡˋ ㄏㄨˋ ㄔㄜ ㄐㄧˊ ㄕˊ ㄍㄢˇ ㄉㄠˋ
- * standard keys `vu/4cl3ru.4cj4tk_ru6g6e032l4` (_ = space bar). Expected top-1:
- *   no LM (unigram)  幸好救護車即時感到
- *   chat             幸好救護車及時趕到
- *   formal           幸好救護車即時趕到
- * (chat / formal from eval/golden/s2-lm-dev302-top1.tsv row 226, i.e. lm_eval.py --dump; unigram is what
+/* S2c (docs/PLAN.md S2c acceptance 6), on dev302 row 284 (row 226 since S2k, whose chat and formal answers the
+ * one-path-per-(surface, last word) decoder made equal; before that row 10, which the word-class term made equal), reading
+ *   ㄔㄨˊ ㄈㄤˊ ㄒㄧㄣ ㄓㄨㄤ ㄌㄜ˙ ㄧ ㄍㄜ˙ ㄌㄩˋ ㄕㄨㄟˇ ㄏㄨˊ
+ * standard keys `tj6z;6vup_5j;_xk7u_ek7xm4gjo3cj6` (_ = space bar). Expected top-1:
+ *   no LM (unigram)  廚房新莊了一個率水壺
+ *   chat             廚房新裝了一個綠水壺
+ *   formal           廚房新裝了一個濾水壺
+ * (chat / formal from eval/golden/s2-lm-dev302-top1.tsv row 284, i.e. lm_eval.py --dump; unigram is what
  * an engine without LM commits, checked by 302 below.) */
-#define ROW226 "vu/4cl3ru.4cj4tk ru6g6e032l4"
-#define UNIGRAM "\xe5\xb9\xb8\xe5\xa5\xbd\xe6\x95\x91\xe8\xad\xb7\xe8\xbb\x8a\xe5\x8d\xb3\xe6\x99\x82\xe6\x84\x9f\xe5\x88\xb0"
-#define CHAT "\xe5\xb9\xb8\xe5\xa5\xbd\xe6\x95\x91\xe8\xad\xb7\xe8\xbb\x8a\xe5\x8f\x8a\xe6\x99\x82\xe8\xb6\x95\xe5\x88\xb0"
-#define FORMAL "\xe5\xb9\xb8\xe5\xa5\xbd\xe6\x95\x91\xe8\xad\xb7\xe8\xbb\x8a\xe5\x8d\xb3\xe6\x99\x82\xe8\xb6\x95\xe5\x88\xb0"
+#define ROW284 "tj6z;6vup 5j; xk7u ek7xm4gjo3cj6"
+#define UNIGRAM "\xe5\xbb\x9a\xe6\x88\xbf\xe6\x96\xb0\xe8\x8e\x8a\xe4\xba\x86\xe4\xb8\x80\xe5\x80\x8b\xe7\x8e\x87\xe6\xb0\xb4\xe5\xa3\xba"
+#define CHAT "\xe5\xbb\x9a\xe6\x88\xbf\xe6\x96\xb0\xe8\xa3\x9d\xe4\xba\x86\xe4\xb8\x80\xe5\x80\x8b\xe7\xb6\xa0\xe6\xb0\xb4\xe5\xa3\xba"
+#define FORMAL "\xe5\xbb\x9a\xe6\x88\xbf\xe6\x96\xb0\xe8\xa3\x9d\xe4\xba\x86\xe4\xb8\x80\xe5\x80\x8b\xe6\xbf\xbe\xe6\xb0\xb4\xe5\xa3\xba"
 
 /* Press Enter; 1 when it is handled and commits `want` with an empty preedit. */
 static int enter_commits(ShanjieEngine *e, const char *want) {
@@ -98,7 +98,7 @@ static int enter_commits(ShanjieEngine *e, const char *want) {
 
 /* Type the row; 1 when the preedit after the last key is `want`. */
 static int row_shows(ShanjieEngine *e, const char *want) {
-  ShanjieOutput *o = type_last(e, ROW226);
+  ShanjieOutput *o = type_last(e, ROW284);
   int ok = o != 0 && str_eq(o->preedit, want);
   shanjie_output_free(o);
   return ok;
@@ -337,6 +337,29 @@ static int run_learn(const char *dir, const char *learn_dir) {
   return 0;
 }
 
+/* zhen-mixed (docs/contracts/zhen-mixed.md section 5.2): the codes of load_english and set_english through the header. The window
+ * itself is covered by core/tests/engine_english.rs and the child-process test in ffi.rs. */
+static int run_english(const char *dir, const char *missing) {
+  static ShanjieOutput dummy;
+  ShanjieEngine *e = 0;
+  ShanjieOutput *o = 0;
+  CHECK(1001, shanjie_engine_new(dir, 0, &e) == 0 && e != 0);
+  CHECK(1002, shanjie_engine_load_english(0, missing) == 1);
+  CHECK(1003, shanjie_engine_load_english(e, 0) == 1);
+  CHECK(1004, shanjie_engine_load_english(e, missing) == 3);
+  CHECK(1005, shanjie_engine_set_english(0, 1, &o) == 1 && o == 0);
+  CHECK(1006, shanjie_engine_set_english(e, 1, 0) == 1);
+  o = &dummy;
+  CHECK(1007, shanjie_engine_set_english(e, 2, &o) == 2 && o == 0);
+  CHECK(1008, shanjie_engine_set_english(e, 1, &o) == 0 && o != 0 && o->handled == 1);
+  shanjie_output_free(o);
+  o = 0;
+  CHECK(1009, shanjie_engine_set_english(e, 0, &o) == 0 && o != 0 && o->handled == 1);
+  shanjie_output_free(o);
+  shanjie_engine_free(e);
+  return 0;
+}
+
 /* acg-pack: argument checks of shanjie_engine_new_packs. The behaviour with a pack is in core/tests/engine_pack.rs. */
 static int run_packs(const char *dir) {
   ShanjieEngine *e = 0;
@@ -402,6 +425,7 @@ int main(int argc, char **argv) {
   if (rc == 0) rc = run_learn(argv[1], argc == 4 ? argv[3] : 0);
   if (rc == 0) rc = run_packs(argv[1]);
   if (rc == 0) rc = run_rerank(argv[1], argv[2], "/nonexistent/shanjie-missing.sjtl");
+  if (rc == 0) rc = run_english(argv[1], "/nonexistent/shanjie-missing-english.txt");
   shanjie_engine_free(0);
   shanjie_output_free(0);
   if (rc != 0) {

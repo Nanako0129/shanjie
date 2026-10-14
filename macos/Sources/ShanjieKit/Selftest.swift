@@ -2,17 +2,19 @@ import CShanjie
 import Foundation
 
 /// `shanjie --selftest` (docs/contracts/s3b.md section 9): build the engine from Resources, load
-/// the LM, type dev302 row 226 with the standard layout and require the chat and formal top-1
+/// the LM, type dev302 row 284 with the standard layout and require the chat and formal top-1
 /// sentences, then build with the bundled ACG pack (Resources/packs), require the same sentences and one pack word, then load the
 /// small model (Resources/tinylm.sjtl) and require the rerank to change a chat sentence, and the switch off not to (s7c2b section
-/// 2.5). Returns the exit status. Writes nothing but a fixed message and a return code to stderr; touches no file, UserDefaults, TIS, NSApplication or IMK server.
+/// 2.5), then load the word list (Resources/english-words.txt) and require `rust` Space to open the English window with `rust`
+/// first (zhen-mixed section 3.2). Returns the exit status. Writes nothing but a fixed message and a return code to stderr; touches no file, UserDefaults, TIS, NSApplication or IMK server.
 @MainActor
 public enum Selftest {
-    /// Row 226 `ㄒㄧㄥˋ ㄏㄠˇ ㄐㄧㄡˋ ㄏㄨˋ ㄔㄜ ㄐㄧˊ ㄕˊ ㄍㄢˇ ㄉㄠˋ` on the standard layout (s3a section 1);
-    /// it was row 10 before S2k, whose chat and formal answers the word-class term made equal;
+    /// Row 284 `ㄔㄨˊ ㄈㄤˊ ㄒㄧㄣ ㄓㄨㄤ ㄌㄜ˙ ㄧ ㄍㄜ˙ ㄌㄩˋ ㄕㄨㄟˇ ㄏㄨˊ` on the standard layout (s3a section 1);
+    /// it was row 10 before S2k, whose chat and formal answers the word-class term made equal, and row 226
+    /// before dec-recombine, whose chat and formal answers the one-path-per-(surface, last word) decoder made equal;
     /// a space is the first tone. The tests derive the same keys from the zhuyin independently.
-    static let row226Standard = "vu/4cl3ru.4cj4tk ru6g6e032l4"
-    static let expected: [(profile: UInt32, text: String)] = [(0, "幸好救護車及時趕到"), (1, "幸好救護車即時趕到")]
+    static let row284Standard = "tj6z;6vup 5j; xk7u ek7xm4gjo3cj6"
+    static let expected: [(profile: UInt32, text: String)] = [(0, "廚房新裝了一個綠水壺"), (1, "廚房新裝了一個濾水壺")]
 
     /// The bundled word pack (acg-pack contract A.2): 碇源堂 `ㄉㄧㄥˋ ㄩㄢˊ ㄊㄤˊ` on the standard layout. The chat
     /// profile spells it 定元堂 without the pack, so the sentence is the pack word only if the pack loaded.
@@ -30,6 +32,11 @@ public enum Selftest {
     static let rerankRowStandard = "ji32/3u vu84y94eji4fm4"
     static let rerankedText = "我等一下再過去"
     static let ngramText = "我等一下在過去"
+
+    /// zhen-mixed: `rust` then Space on the standard layout opens the English window (the shipped list and the tests' synthetic list
+    /// both have the word; its leftover ㄔㄧ is not in the lexicon, so these are the window's only items).
+    static let englishKeys = "rust "
+    static let englishWindow = ["rust", "Rust", "RUST"]
 
     public static func run(resources: URL) -> Int32 {
         let lmPath = resources.appendingPathComponent("bigram.sjlm").path
@@ -64,6 +71,21 @@ public enum Selftest {
             guard c == 0 else { return fail("selftest: rerank typing failed, code", c) }
             guard shown == text else { return fail("selftest: unexpected rerank composition with the switch", on ? 1 : 0) }
         }
+        // The word list, as the shell loads it: a bundle without it, or with a list the core refuses, fails here, so 中英混打 cannot
+        // ship greyed out or silently doing nothing. The switch goes back off afterwards, as it starts.
+        let english = withPack.loadEnglish(path: resources.appendingPathComponent(Shell.englishFile).path)
+        guard english == 0 else { return fail("selftest: shanjie_engine_load_english failed, code", english) }
+        if case .failed(let c) = withPack.setEnglish(true) { return fail("selftest: shanjie_engine_set_english failed, code", c) }
+        var window: [String] = []
+        for k in keyEvents(englishKeys) {
+            switch withPack.key(k) {
+            case .ok(let o): window = o.candidates
+            case .failed(let c): return fail("selftest: English typing failed, code", c)
+            }
+        }
+        if case .failed(let c) = withPack.reset(mode: 1) { return fail("selftest: shanjie_engine_reset failed, code", c) }
+        if case .failed(let c) = withPack.setEnglish(false) { return fail("selftest: shanjie_engine_set_english (off) failed, code", c) }
+        guard window == englishWindow else { return fail("selftest: the English window did not open, code", 0) }
         return 0
     }
 
@@ -100,13 +122,13 @@ public enum Selftest {
         return (shown, 0)
     }
 
-    /// Row 226 in both profiles; nil when both match, else the exit status.
+    /// Row 284 in both profiles; nil when both match, else the exit status.
     private static func checkSentences(_ engine: CoreEngine) -> Int32? {
         for (profile, text) in expected {
             if case .failed(let c) = engine.setProfile(profile) {
                 return fail("selftest: shanjie_engine_set_profile failed, code", c)
             }
-            let (committed, c) = type(row226Standard, engine)
+            let (committed, c) = type(row284Standard, engine)
             if c != 0 { return fail("selftest: shanjie_engine_key failed, code", c) }
             if committed != text { return fail("selftest: unexpected sentence for profile", Int32(profile)) }
         }

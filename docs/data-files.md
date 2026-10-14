@@ -13,7 +13,14 @@
 - **放在同一個資料夾**（`data/lm/`）。前兩個一起用；`classes.sjc` 不含模型本身，`classes-v3` 這個 Release 也只有這一個檔案。
 - **綁定**：`classes.sjc` 裡記了它是為哪個模型建的（model-v5 的 SHA-256）。缺檔、配到別的模型、或檔案內容不對，載入都會失敗（C ABI 的 `load_lm` 回傳 3），不會靜靜地用錯或不用。
 - **語意校正模型的綁定**：`tinylm.sjtl` 裡記了它調參時用的模型（model-v5 的 SHA-256），配到別的模型時核心拒絕載入、只用 n-gram。它不檢查詞類表，但它的 α、τ 是在 model-v5＋classes-v3 上調的，所以換詞類表也要重新調參、發新的 `tinylm-v…`（見下面的表）。
+- **英文單字表**（中英混打，`docs/contracts/zhen-mixed.md`）不在這張表：它不是 Release 附件，也不進 git，每次建置時由 `scripts/build-app.sh` 產生（見下面「建置時產生的檔案」）。
 - **App 裡**：打包時 `bigram.sjlm`、`classes.sjc` 放進 `善解輸入法.app/Contents/Resources/`，使用者不用另外下載。`tinylm.sjtl` 從語意校正上線（S7c-2b，`docs/contracts/s7c2b-shell-rerank.md`）起也一起放進去。
+
+## 建置時產生的檔案
+
+| 檔案 | 來源 | 雜湊 | 怎麼產生 |
+|---|---|---|---|
+| `english-words.txt`（`Resources/` 裡，中英混打的英文單字表） | SymSpell（`wolfgarbe/SymSpell`）釘住的 commit `c239062ae02961df18ab7da1671d01b4388204e0` 的 `SymSpell/frequency_dictionary_en_82_765.txt`，輸入 SHA-256 `c604e1121e398ae7c7fbf777f11e0a0f2fa66eda932cb9fba1321466cf3acd7b` | 輸出的 SHA-256 記在 `data/english-words.txt.sha256`（`3352d050…`，82,730 詞；切法 `LEN3_CAP` 3000、`LEN4_CAP` 不設上限，由 `docs/contracts/zhen-mixed.md` §4.4 的量測決定，研究紀錄 2026-10-14）；不符就建置失敗 | `scripts/build-app.sh` 在建置時下載輸入（快取在 `~/.cache/shanjie/english/`，有快取且雜湊相符就不再下載；下載失敗或雜湊不符就建置失敗），用 `tools/build_english_words.py`（切法與常數在檔頭；測試 `tools/test_build_english_words.py`）產生，核對輸出雜湊後放進 `Resources/`。授權見 `LICENSES/data.md` 與 `LICENSES/SCOWL.txt`、`LICENSES/SymSpell-MIT.txt` |
 
 ## 下載
 
@@ -30,9 +37,9 @@ shasum -a 256 -c data/bigram.sjlm.sha256 data/classes.sjc.sha256 data/tinylm.sjt
 
 | 改了什麼 | 要發的新 Release |
 |---|---|
-| 語料、計數或模型格式（重建 `bigram.sjlm`） | `model-v6`，而且詞類表也要重建：`classes-v4`（舊的詞類表綁的是舊模型的雜湊，配新模型會載入失敗）；語意校正模型也要重新調參：`tinylm-v4`（舊的綁舊模型的雜湊，配新模型不會載入） |
-| 只重新分群（類別數、μ、分群用的資料） | `classes-v4`，模型不變（`eval/golden/sp-predict.txt`、`sw-probe.txt` 的分數也依賴詞類表，要重產）；語意校正模型的 α、τ、δ 要重新調，發 `tinylm-v4`（雜湊檔不會攔下這種錯配，要靠這張表） |
-| 語意校正模型的訓練、大小、匯出格式或融合參數 | `tinylm-v4`，n-gram 模型與詞類表不變（`tinylm-v2`、`tinylm-v3` 都是只換融合參數） |
+| 語料、計數或模型格式（重建 `bigram.sjlm`） | `model-v6`，而且詞類表也要重建：`classes-v4`（舊的詞類表綁的是舊模型的雜湊，配新模型會載入失敗）；語意校正模型也要重新調參，發下一個 `tinylm-v…`（舊的綁舊模型的雜湊，配新模型不會載入） |
+| 只重新分群（類別數、μ、分群用的資料） | `classes-v4`，模型不變（`eval/golden/sp-predict.txt`、`sw-probe.txt` 的分數也依賴詞類表，要重產）；語意校正模型的 α、τ、δ 要重新調，發下一個 `tinylm-v…`（雜湊檔不會攔下這種錯配，要靠這張表） |
+| 語意校正模型的訓練、大小、匯出格式或融合參數 | 下一個 `tinylm-v…`，n-gram 模型與詞類表不變（`tinylm-v2`、`tinylm-v3` 都是只換融合參數） |
 
 舊的 Release 保留，可以回到那一版；例外是 model-v3 與 classes-v1，在 `docs/contracts/model-v4.md` §4 第 4 步的條件成立後移除。下一次重建模型時，發佈的檔案要先加上指紋條目再算雜湊，詞類表也對加過的檔案建。換版時同一個 PR 更新：雜湊檔（`data/*.sha256`）、CI 兩個 job 與 `release.yml` 的下載、`cli/tests/golden.rs` 的雜湊與訊息、`core/tests/engine_*.rs` 的缺檔訊息、`macos/Tests/ShanjieKitTests/Support.swift`、`scripts/build-app.sh` 的提示與內附的署名文字、README、CONTRIBUTING、`docs/verification.md`、`LICENSES/data.md`、`docs/PLAN.md` 的模型檔那一條，以及這份文件；換 `tinylm.sjtl` 時另外照 `docs/releases/README.md` 的上傳與核對步驟；換 `tinylm.sjtl` 而融合參數有變時，要重新量 selftest 的那一句還會被重排改掉（`Selftest.rerankRowStandard`、`rerankedText`、`ngramText`，與測試的 `RerankRow`），不會就重挑（tinylm-v2 的嚴格聊天值就讓原本的第 25 列不再被改，改用第 65 列；tinylm-v3 下第 65 列仍會被改，第 25 列又會被改，是實機句）；依模型的 golden 照各自的產生方式重產（`docs/contracts/model-v5.md` §2.5 的 PR 2 是完整的例子）。
 

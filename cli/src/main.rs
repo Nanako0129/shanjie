@@ -10,6 +10,8 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
+mod english;
+
 fn root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().to_path_buf()
 }
@@ -496,8 +498,12 @@ fn run_predict(args: &[String]) -> Result<(), String> {
 }
 
 fn run() -> Result<(), String> {
-    let len = load_lenient()?;
     let all: Vec<String> = std::env::args().skip(1).collect();
+    // zhen-mixed section 4: a subcommand of its own, before anything the evaluation modes read.
+    if all.first().map(String::as_str) == Some("english-sim") {
+        return english::run(&all[1..], &root());
+    }
+    let len = load_lenient()?;
     if all.iter().any(|a| a == "--predict") {
         return run_predict(&all);
     }
