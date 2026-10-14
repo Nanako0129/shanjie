@@ -45,6 +45,26 @@ class ManualRows(unittest.TestCase):
                 manual(text, taken)
 
 
+class Cantonese(unittest.TestCase):
+    def test_rule(self):
+        headwords = {"凝睇"}
+        self.assertTrue(B.cantonese("冇陰公", headwords))
+        self.assertTrue(B.cantonese("唔該", headwords))
+        self.assertTrue(B.cantonese("買餸", headwords), "a character the review added")
+        self.assertFalse(B.cantonese("凝睇", headwords), "dictionary headwords stay")
+        for w in ("俾斯麥", "羊咩咩", "口眼喎斜", "好嘞", "沒問題"):
+            self.assertFalse(B.cantonese(w, headwords), f"{w}: no Cantonese-only character")
+
+    def test_the_shipped_overlay_keeps_only_these_cantonese_character_words(self):
+        """The rule's observed result on the committed overlay (the build reads the MOE dictionary, which CI does not have): the
+        non-manual words with a CANTO_CHARS character are exactly these dictionary headwords. Regenerating with another rule or
+        dictionary changes this set and has to update it here on purpose."""
+        with open(B.OUT, encoding="utf-8") as f:
+            words = {l.split("\t")[1] for l in f if l.rstrip("\n").split("\t")[3] != "manual"}
+        self.assertEqual({w for w in words if not B.CANTO_CHARS.isdisjoint(w)},
+                         {"付畀", "凝睇", "咿唔", "唔篤", "噏呷", "投畀豺虎", "曼睩", "睇眄", "迎睇"})
+
+
 class ShippedOverlay(unittest.TestCase):
     def test_the_manual_tail_is_what_manual_rows_makes_today(self):
         """Without the dumps: the `manual` rows of overlay-add.tsv are its last rows and equal manual_rows() over the committed
