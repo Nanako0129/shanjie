@@ -42,10 +42,12 @@ test-python:
 	python3 -m unittest tools/test_bench.py
 	python3 -m unittest tools/test_build_english_words.py
 	python3 -m unittest tools/test_build_overlay.py
+	python3 -W ignore -m unittest tools/test_triage.py
 	python3 -W ignore -m unittest tools/test_build_classes.py experiments/s2/test_expected.py
 	cd experiments/sp && python3 -W ignore -m unittest test_predict test_predict2 test_predict3
 	cd experiments/s7a-tinylm && python3 -W ignore -m unittest test_fusegrid test_runsets
 	python3 -W ignore -m unittest experiments/x0c/test_x0c.py
+	cd experiments/fuzzy && python3 -W ignore -m unittest test_fuzzy
 	python3 -m unittest reference/proto/test_recombine.py
 
 test-swift: rust
