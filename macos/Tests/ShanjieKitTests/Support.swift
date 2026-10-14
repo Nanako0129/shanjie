@@ -19,6 +19,8 @@ enum TestData {
         ("bigram.sjlm", "data/lm/bigram.sjlm"),
         ("classes.sjc", "data/lm/classes.sjc"),
         ("tinylm.sjtl", "data/lm/tinylm.sjtl"),
+        // zhen-mixed: the synthetic list stands in for the generated Resources/english-words.txt (docs/contracts/zhen-mixed.md section 5.3).
+        ("english-words.txt", "eval/golden/english-tiny.txt"),
     ]
 
     /// Adds Resources/packs/acg-add.tsv (a symlink to the repo's pack) like the app bundle has it. Opt-in: tests
@@ -255,12 +257,12 @@ enum Layouts {
     }
 }
 
-/// dev302 row 226 (docs/contracts/s3b.md section 9; row 10 before S2k, see Selftest.swift).
-enum Row226 {
-    static let zhuyin = "ㄒㄧㄥˋ ㄏㄠˇ ㄐㄧㄡˋ ㄏㄨˋ ㄔㄜ ㄐㄧˊ ㄕˊ ㄍㄢˇ ㄉㄠˋ"
+/// dev302 row 284 (docs/contracts/s3b.md section 9; row 10 before S2k, row 226 before dec-recombine, see Selftest.swift).
+enum Row284 {
+    static let zhuyin = "ㄔㄨˊ ㄈㄤˊ ㄒㄧㄣ ㄓㄨㄤ ㄌㄜ˙ ㄧ ㄍㄜ˙ ㄌㄩˋ ㄕㄨㄟˇ ㄏㄨˊ"
     static let standardKeys = Layouts.keys(zhuyin, eten: false)
-    static let chat = "幸好救護車及時趕到"
-    static let formal = "幸好救護車即時趕到"
+    static let chat = "廚房新裝了一個綠水壺"
+    static let formal = "廚房新裝了一個濾水壺"
 }
 
 /// A temporary learning directory (S4 section 4); never the real Application Support.

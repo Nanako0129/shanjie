@@ -40,10 +40,13 @@ test-python:
 	python3 -W ignore -m unittest experiments/s7f-corpus/test_s7f.py experiments/s7a-tinylm/test_extra.py
 	python3 -W ignore -m unittest tools/test_evalstats.py experiments/e2-chateval/test_e2.py experiments/e2-chateval/test_judge.py
 	python3 -m unittest tools/test_bench.py
+	python3 -m unittest tools/test_build_english_words.py
+	python3 -m unittest tools/test_build_overlay.py
 	python3 -W ignore -m unittest tools/test_build_classes.py experiments/s2/test_expected.py
 	cd experiments/sp && python3 -W ignore -m unittest test_predict test_predict2 test_predict3
 	cd experiments/s7a-tinylm && python3 -W ignore -m unittest test_fusegrid test_runsets
 	python3 -W ignore -m unittest experiments/x0c/test_x0c.py
+	python3 -m unittest reference/proto/test_recombine.py
 
 test-swift: rust
 	@$(call relink_if_stale,Debug)

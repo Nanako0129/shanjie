@@ -788,7 +788,9 @@ pub fn decode_segment_learned<'a>(
     hyps[0].push(Hyp { score: 0.0, surface: String::new(), words: Vec::new(), last: start_id, ctx: lm.ctx_of(start_id) });
     for i in 1..=n {
         let mut cand: Vec<Hyp<'a>> = Vec::new();
-        let mut idx: HashMap<String, usize> = HashMap::new();
+        // One path per (surface, last word): the next word's score depends on the last word, so a path that
+        // ends in a different word must not be merged away (dec-recombine section 1).
+        let mut idx: HashMap<(String, &str), usize> = HashMap::new();
         for l in 1..=base.max_len.min(i) {
             let Some(r) = base.find(&ids[i - l..i]) else { continue };
             if hyps[i - l].is_empty() {
@@ -858,19 +860,25 @@ pub fn decode_segment_learned<'a>(
                         }
                     }
                     let sc = h.score + (word_term(lam, lm.prob_c(h.ctx, wid, pb), lp) - delta);
-                    let surface = format!("{}{word}", h.surface);
-                    match idx.get(&surface) {
-                        Some(&q) if !(sc > cand[q].score) => {}
+                    let key = (format!("{}{word}", h.surface), word);
+                    match idx.get(&key).copied() {
+                        Some(q) if !(sc > cand[q].score) => {}
                         found => {
                             let mut words = h.words.clone();
                             words.push((word, lp, delta));
+                            // The surface is cloned only for a new slot (the index keeps one copy); a replacement moves it.
+                            let surface = match found {
+                                Some(_) => key.0,
+                                None => {
+                                    let s = key.0.clone();
+                                    idx.insert(key, cand.len());
+                                    s
+                                }
+                            };
                             let nh = Hyp { score: sc, surface, words, last: wid, ctx: lm.ctx_of(None) };
                             match found {
-                                Some(&q) => cand[q] = nh,
-                                None => {
-                                    idx.insert(nh.surface.clone(), cand.len());
-                                    cand.push(nh);
-                                }
+                                Some(q) => cand[q] = nh,
+                                None => cand.push(nh),
                             }
                         }
                     }
@@ -889,21 +897,23 @@ pub fn decode_segment_learned<'a>(
         End::Eos => None,
         End::Next { word, lp, delta } => Some((lm.word_id(word), pow10(lp), lp, delta)),
     };
-    let mut out: Vec<Scored<'a>> = last
+    let mut out: Vec<(f64, Vec<(&'a str, f64, f64)>, String)> = last
         .into_iter()
         .map(|h| {
             let term = match closing {
                 None => lam * lm.prob_c(h.ctx, Some(1), lm.p_eos).log10(),
                 Some((wid, pb, lp, delta)) => word_term(lam, lm.prob_c(h.ctx, wid, pb), lp) - delta,
             };
-            (h.score + term, h.words)
+            (h.score + term, h.words, h.surface)
         })
         .collect();
     if out.is_empty() {
         return Err(Error::NoPath { len: n });
     }
     out.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
-    Ok(out)
+    // The n-best has distinct surfaces: keep each surface's best path (dec-recombine section 1.4).
+    let mut seen: HashSet<String> = HashSet::new();
+    Ok(out.into_iter().filter_map(|(sc, ws, s)| seen.insert(s).then_some((sc, ws))).collect())
 }
 
 /// S2h §1: the word that conditions the first word of a composition with no fixed word on its left.
@@ -1235,5 +1245,85 @@ mod tests {
         assert!(Lm::parse(&magic).err() == Some(LmError::Format));
         assert!(Lm::parse(&good[..good.len() - 1]).err() == Some(LmError::Format));
         assert!(Lm::parse(&[]).err() == Some(LmError::Format));
+    }
+
+    /// A model file from vocabulary (ids from 0; `<s>`, `</s>`, then the words in byte order), unigram counts and
+    /// contexts `(id, total, [(next id, count)])` sorted by id. N 20, `</s>` total 4, D 0.75.
+    fn lm_bytes(words: &[&str], uni: &[u64], ctxs: &[(u32, u64, &[(u32, u32)])]) -> Vec<u8> {
+        let mut b = b"SJLM0001".to_vec();
+        b.extend((words.len() as u32).to_le_bytes());
+        b.extend(20u64.to_le_bytes());
+        b.extend(4u64.to_le_bytes());
+        b.extend(0.75f64.to_le_bytes());
+        for w in words {
+            b.extend((w.len() as u16).to_le_bytes());
+            b.extend(w.as_bytes());
+        }
+        uni.iter().for_each(|u| b.extend(u.to_le_bytes()));
+        b.extend((ctxs.len() as u32).to_le_bytes());
+        ctxs.iter().for_each(|c| b.extend(c.0.to_le_bytes()));
+        ctxs.iter().for_each(|c| b.extend(c.1.to_le_bytes()));
+        let mut at = 0u32;
+        b.extend(0u32.to_le_bytes());
+        for c in ctxs {
+            at += c.2.len() as u32;
+            b.extend(at.to_le_bytes());
+        }
+        b.extend(at.to_le_bytes());
+        ctxs.iter().flat_map(|c| c.2).for_each(|e| b.extend(e.0.to_le_bytes()));
+        ctxs.iter().flat_map(|c| c.2).for_each(|e| b.extend(e.1.to_le_bytes()));
+        b
+    }
+
+    /// dec-recombine section 1: one path per (surface, last word). `下來分析` has two segmentations. After
+    /// two syllables `下來` alone (-0.66) beats `下 | 來` (-1.24), so a decoder that keeps one path per surface
+    /// drops `下 | 來`; but `來 -> 分析` is a seen bigram and `下來 -> 分析` is not, so with `分析` the dropped path wins
+    /// (-2.76 against -3.66). The n-best still lists the surface once.
+    #[test]
+    fn keeps_the_path_whose_last_word_scores_the_next_word_better() {
+        // ids: <s> </s> 下 下來 來 分析
+        let words = ["<s>", "</s>", "下", "下來", "來", "分析"];
+        let model = lm_bytes(
+            &words,
+            &[0, 0, 4, 5, 6, 8],
+            &[(0, 9, &[(2, 4), (3, 5)]), (2, 6, &[(4, 6)]), (4, 8, &[(5, 8)])],
+        );
+        let lm = Lm::parse(&model).unwrap();
+        let lex = Arc::new(Lexicon::parse("ㄒㄧㄚˋ 下 -1.0\nㄌㄞˊ 來 -1.0\nㄒㄧㄚˋ-ㄌㄞˊ 下來 -1.0\nㄈㄣ-ㄒㄧ 分析 -3.0\n").unwrap());
+        let capped = CappedLexicon::new(lex, "", &lm, Some(&Demote::parse("").unwrap())).unwrap();
+        let w = |v, x, lp| lm.word(0.5, v, x, lp);
+        // The premise, straight from the model: the merge in the old rule would keep `下來`, and then lose.
+        let (split, joined) = (w("<s>", "下", -1.0) + w("下", "來", -1.0), w("<s>", "下來", -1.0));
+        assert!(joined > split, "{joined} {split}");
+        let (split_all, joined_all) = (split + w("來", "分析", -3.0), joined + w("下來", "分析", -3.0));
+        assert!(split_all > joined_all, "{split_all} {joined_all}");
+        let syls: Vec<String> = ["ㄒㄧㄚˋ", "ㄌㄞˊ", "ㄈㄣ", "ㄒㄧ"].iter().map(|s| s.to_string()).collect();
+        let out = decode_segment_learned(&capped, &syls, &lm, 0.5, "<s>", End::Eos, 64, None, true).unwrap();
+        assert_eq!(out.len(), 1, "the surface is listed once");
+        let words: Vec<&str> = out[0].1.iter().map(|x| x.0).collect();
+        assert_eq!(words, ["下", "來", "分析"]);
+        assert_eq!(out[0].0, split_all + lm.eos(0.5, "分析"));
+    }
+
+    /// dec-recombine section 1.4: `下來` and `下 | 來` end in different words, so both paths reach the end of
+    /// `ㄒㄧㄚˋ ㄌㄞˊ`; the n-best lists the surface once, with the better of the two closed scores.
+    #[test]
+    fn n_best_lists_a_surface_reached_by_two_last_words_once() {
+        let words = ["<s>", "</s>", "下", "下來", "來", "分析"];
+        let model = lm_bytes(
+            &words,
+            &[0, 0, 4, 5, 6, 8],
+            &[(0, 9, &[(2, 4), (3, 5)]), (2, 6, &[(4, 6)]), (4, 8, &[(5, 8)])],
+        );
+        let lm = Lm::parse(&model).unwrap();
+        let lex = Arc::new(Lexicon::parse("ㄒㄧㄚˋ 下 -1.0\nㄌㄞˊ 來 -1.0\nㄒㄧㄚˋ-ㄌㄞˊ 下來 -1.0\n").unwrap());
+        let capped = CappedLexicon::new(lex, "", &lm, Some(&Demote::parse("").unwrap())).unwrap();
+        let w = |v, x, lp| lm.word(0.5, v, x, lp);
+        let split = w("<s>", "下", -1.0) + w("下", "來", -1.0) + lm.eos(0.5, "來");
+        let joined = w("<s>", "下來", -1.0) + lm.eos(0.5, "下來");
+        let syls: Vec<String> = ["ㄒㄧㄚˋ", "ㄌㄞˊ"].iter().map(|s| s.to_string()).collect();
+        let out = decode_segment_learned(&capped, &syls, &lm, 0.5, "<s>", End::Eos, 64, None, true).unwrap();
+        assert_eq!(out.len(), 1, "two paths, one surface");
+        assert_eq!(out[0].0, split.max(joined));
     }
 }

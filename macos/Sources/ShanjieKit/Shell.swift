@@ -118,6 +118,20 @@ public final class MemoryAbbreviationStore: AbbreviationStore {
     public init(_ abbreviation: Bool? = nil) { self.abbreviation = abbreviation }
 }
 
+/// Where the "中英混打（實驗）" switch is kept (docs/contracts/zhen-mixed.md section 3.2): `nil` means never chosen, which is off.
+/// Same arrangement as `AbbreviationStore`.
+@MainActor
+public protocol EnglishStore: AnyObject {
+    var english: Bool? { get set }
+}
+
+/// The in-memory EnglishStore.
+@MainActor
+public final class MemoryEnglishStore: EnglishStore {
+    public var english: Bool?
+    public init(_ english: Bool? = nil) { self.english = english }
+}
+
 /// Where the "動漫與遊戲詞" switch is kept (docs/contracts/acg-pack.md A.2): `nil` means never chosen, which is on
 /// (user decision 2026-10-09, after the A.3 numbers). Same arrangement as `PredictionStore`.
 @MainActor
@@ -331,6 +345,13 @@ public final class Shell {
     /// stuck keys are read against V3 section 12.2, not reproduced: Space and tone keys are eaten while two or more units are
     /// pending). Hidden means always off; the stored value is neither read nor written.
     public let showsAbbreviation: Bool
+    private let englishStore: EnglishStore
+    /// zhen-mixed: the experimental English window (default off); sent to every engine `build()` makes. Unlike the abbreviation
+    /// switch it ships (the app shows it).
+    private(set) var englishOn = false
+    /// Whether this engine loaded the word list (`Resources/english-words.txt`); false greys the menu item and the settings toggle
+    /// (the checkmark keeps the setting), as `rerankAvailable` does for the small model.
+    private(set) var englishAvailable = false
     private let acgPackStore: AcgPackStore
     /// The ACG word pack (default on, user decision 2026-10-09): parsed into the lexicon, so a change rebuilds the engine like a layout change.
     private(set) var acgPackOn = true
@@ -352,6 +373,8 @@ public final class Shell {
     /// The small model's file in Resources (section 2.3). The only path it is loaded from: `build()` and the selftest join it to
     /// `resources`; no init parameter, defaults key or environment variable names another.
     static let tinyLMFile = "tinylm.sjtl"
+    /// zhen-mixed section 3.2: the English word list, in Resources next to the model (build-app.sh generates it).
+    static let englishFile = "english-words.txt"
     private let rerankRunner: RerankRunner
     /// A job is with the runner (section 2.1: one at a time).
     private var rerankRunning = false
@@ -382,6 +405,9 @@ public final class Shell {
     /// The settings window's 強度 control (section 3) is enabled only when the switch is on and can do something, and the loaded
     /// model offers the conservative and the aggressive set (a version 3 file); otherwise it shows greyed with the stored choice.
     var rerankLevelEnabled: Bool { rerankOn && rerankEnabled && rerankLevels & 0b101 == 0b101 }
+    /// The 中英混打（實驗） menu item and settings toggle, likewise: the word list loaded and the standard layout (the core records no
+    /// shadow in the Eten layout, zhen-mixed section 2.1, so the switch would do nothing there). The checkmark still shows the choice.
+    var englishEnabled: Bool { englishAvailable && mode == .standard }
 
     /// A job waiting for the runner, with the session and engine it was taken for. Weak (F3): a waiting job keeps neither alive,
     /// and an identity is never compared by address.
@@ -454,6 +480,7 @@ public final class Shell {
     /// its UserDefaults-backed store, tests the in-memory one.
     /// `predictionStore`: the prediction switch (V3 section 10.5). Required, like `demoteStore`.
     /// `abbreviationStore`: the abbreviation switch (V3 section 12.1). Required, like `predictionStore`.
+    /// `englishStore`: the 中英混打 switch (zhen-mixed section 3.2). Required, like `abbreviationStore`.
     /// `acgPackStore`: the ACG word pack switch (acg-pack contract A.2). Required, like `demoteStore`.
     /// `glassTintStore`: the candidate glass tint (settings-window section 2.3). Required, like `demoteStore`.
     /// `candidateOrientationStore`: the candidate window's orientation (candidate-vertical contract section 2.1). Required, like `glassTintStore`.
@@ -468,7 +495,7 @@ public final class Shell {
     /// (v0.4.0). No test sees the app's value: the release device check does (no 可省略韻母 in the menu).
     public init(resources: URL, panel: CandidatePanel, isSecureInput: @escaping () -> Bool,
                 layoutStore: LayoutStore, learningDirectory: URL?, dialogs: LearningDialogs,
-                demoteStore: DemoteStore, predictionStore: PredictionStore, abbreviationStore: AbbreviationStore, acgPackStore: AcgPackStore,
+                demoteStore: DemoteStore, predictionStore: PredictionStore, abbreviationStore: AbbreviationStore, englishStore: EnglishStore, acgPackStore: AcgPackStore,
                 glassTintStore: GlassTintStore, candidateOrientationStore: CandidateOrientationStore,
                 rerankStore: RerankStore, rerankRunner: RerankRunner,
                 profileModeStore: ProfileModeStore, appProfileStore: AppProfileStore,
@@ -498,6 +525,8 @@ public final class Shell {
         self.abbreviationStore = abbreviationStore
         self.showsAbbreviation = showsAbbreviation
         abbreviationOn = showsAbbreviation && abbreviationStore.abbreviation == true
+        self.englishStore = englishStore
+        englishOn = englishStore.english == true
         self.acgPackStore = acgPackStore
         acgDataDate = Shell.readAcgDataDate(resources.appendingPathComponent("packs/acg.json"))
         self.glassTintStore = glassTintStore
@@ -547,6 +576,10 @@ public final class Shell {
 
     func applyAbbreviation(_ on: Bool) {
         if let o = owner { o.applyAbbreviation(on) } else { dropOnFailure(setAbbreviation(on)) }
+    }
+
+    func applyEnglish(_ on: Bool) {
+        if let o = owner { o.applyEnglish(on) } else { dropOnFailure(setEnglish(on)) }
     }
 
     func applyCandidateVertical(_ on: Bool) {
@@ -645,6 +678,15 @@ public final class Shell {
         return engine?.setAbbreviation(on)
     }
 
+    /// The menu's choice (zhen-mixed section 3.2): stored, and sent to the engine; the snapshot is for the caller to show (turning
+    /// it off closes an open English window).
+    func setEnglish(_ on: Bool) -> CoreResult? {
+        englishOn = on
+        englishStore.english = on
+        defer { changed() }
+        return engine?.setEnglish(on)
+    }
+
     /// The settings window's choice (candidate-vertical contract section 2.1): stored, and sent to the engine, which applies it
     /// to the next window that opens. An open candidate window keeps its orientation; a prediction row on screen is re-rendered
     /// in the snapshot, for the caller to show. In the app only the settings window calls this, and a click there is inferred
@@ -730,6 +772,7 @@ public final class Shell {
         engine = nil  // free the old engine first: only one exists at a time
         rerankAvailable = false
         rerankLevels = 0
+        englishAvailable = false
         rerankPending = nil  // the old engine's; one still running is not applied (its engine is gone)
         let packsDir = resources.appendingPathComponent("packs").path
         var (made, code) = CoreEngine.make(dataDir: resources.path, layout: mode.layout, packsDir: acgPackOn ? packsDir : nil)
@@ -753,6 +796,11 @@ public final class Shell {
             if tiny != 0 { Log.shell.error("shanjie_engine_load_tinylm failed, code \(tiny); no rerank") }
             rerankAvailable = tiny == 0
         }
+        // zhen-mixed section 3.2: the word list. A failure leaves the engine without it (the switch then has no effect) and greys the
+        // item; only the code is logged.
+        let english = e.loadEnglish(path: resources.appendingPathComponent(Shell.englishFile).path)
+        if english != 0 { Log.shell.error("shanjie_engine_load_english failed, code \(english)") }
+        englishAvailable = english == 0
         if case .failed(let c) = e.setDemote(demoteOn) {
             Log.shell.error("shanjie_engine_set_demote failed, code \(c)")
         }
@@ -762,6 +810,10 @@ public final class Shell {
         // A rebuilt engine (layout, word pack) starts with the core's default, so this is sent every time (section 12.1).
         if case .failed(let c) = e.setAbbreviation(abbreviationOn) {
             Log.shell.error("shanjie_engine_set_abbreviation failed, code \(c)")
+        }
+        // And the English window's switch, every time: a rebuilt engine (layout, word pack) starts with the core's default, off.
+        if case .failed(let c) = e.setEnglish(englishOn) {
+            Log.shell.error("shanjie_engine_set_english failed, code \(c)")
         }
         // Same for the candidate window's orientation (candidate-vertical contract section 2.2).
         if case .failed(let c) = e.setCandidateVertical(candidateVertical) {
@@ -951,6 +1003,15 @@ public final class Session {
     /// The menu's prediction switch: the snapshot is shown, if this session owns the composition.
     func applyPrediction(_ on: Bool) {
         switch shell.setPrediction(on) {
+        case .ok(let o)? where shell.owner === self: apply(o)
+        case .failed(let c)?: _ = fail(c)
+        default: break
+        }
+    }
+
+    /// The menu's 中英混打 switch: the snapshot is shown, if this session owns the composition.
+    func applyEnglish(_ on: Bool) {
+        switch shell.setEnglish(on) {
         case .ok(let o)? where shell.owner === self: apply(o)
         case .failed(let c)?: _ = fail(c)
         default: break

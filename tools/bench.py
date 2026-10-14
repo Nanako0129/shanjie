@@ -705,6 +705,8 @@ PROFILES2 = ["chat", "formal"]
 VERSIONS2 = {
     "v0.4.0": {"release": "v0.4.0", "flags": ["--context", "--packs", "acg"], "tinylm": False, "tag": "+ctx+acg"},
     "v0.4.1": {"release": "v0.4.1", "flags": ["--context", "--packs", "acg"], "tinylm": True, "tag": "+ctx+tl:{tl8}+acg"},
+    "v0.4.2": {"release": "v0.4.2", "flags": ["--context", "--packs", "acg"], "tinylm": True, "tag": "+ctx+tl:{tl8}+acg"},
+    "v0.4.3": {"release": "v0.4.3", "flags": ["--context", "--packs", "acg"], "tinylm": True, "tag": "+ctx+tl:{tl8}+acg"},
 }
 # Anchor (contract 3.1): S7h's measurement in the research log of 2026-10-13, `--override-packs off`, chat, the CLI's own variants table.
 ANCHOR = {
@@ -1031,7 +1033,7 @@ def render_v2(results):
             n = next((r["accuracy"][c]["n"] for r in vs if "n" in r.get("accuracy", {}).get(c, {})), "—")
             L.append(f"| {c} | {n} | " + " | ".join(cell_text(r, c) if "accuracy" in r else "失敗" for r in vs) + " |")
     L += ["", "### 保留集", "",
-          "照 `CLAUDE.md` 一片只跑一次：由 fresh verifier 以 `evalstats compare --net` 比上一版與新版，main 把 n 與兩版的 top1（可再加 `fixed`、`broken`、`p`）和實際量的 commit 填進 results JSON 的 `holdout`（`{\"commit\": …, \"chat\": {n, top1, fixed, broken, p}, \"formal\": ...}`）。下表版本下面的 commit 是保留集實際量的那一個；它和上面「出貨設定」表被量的 commit 在 `docs/verification.md` 列的路徑上必須沒有差異（契約 §2.3、§5）。", "",
+          "照 `CLAUDE.md` 一片只跑一次：由 fresh verifier 以 `evalstats compare --net` 比上一版與新版，main 把 n 與兩版的 top1（可再加 `fixed`、`broken`、`p`）和實際量的 commit 填進 results JSON 的 `holdout`（`{\"commit\": …, \"chat\": {n, top1, fixed, broken, p}, \"formal\": ...}`）。下表版本下面的 commit 是保留集實際量的那一個；它和上面「出貨設定」表被量的 commit 在 `docs/verification.md` 列的路徑上必須沒有差異，或差異不改輸出（出貨設定的 rowstats 逐位元組相同，記在研究紀錄；契約 §2.3、§5）。", "",
           "| 版本 | chat | formal |", "|---|---|---|"]
     for res in results:
         for rec in res["versions"]:

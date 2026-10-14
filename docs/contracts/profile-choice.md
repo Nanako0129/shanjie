@@ -18,7 +18,7 @@
 - 設定視窗列出改過的 App（名稱、圖示、聊天或書面），可以移除；移除後那個 App 回到內建的判斷。
 - **怎麼看到**：
   - 殼層測試（§3.1）：打同一串注音，結果隨模式與個別設定改變。
-  - 使用者實機（§3.4）：在終端機打自測用的第 226 列，勾選前是書面的「幸好救護車即時趕到」，勾選後是聊天的「幸好救護車及時趕到」。
+  - 使用者實機（§3.4）：在終端機打自測用的第 284 列，勾選前是書面的「廚房新裝了一個濾水壺」，勾選後是聊天的「廚房新裝了一個綠水壺」。
 
 ## 2. 改動
 
@@ -88,11 +88,11 @@
 
 1. **殼層測試**（`ShanjieKitTests`）：
    - `Shell.profile` 的表：三種模式 ×（內建聊天 App、其他 App、nil、空字串、其他 App 設成聊天、內建聊天 App 設成書面）。
-   - 可觀察的結果（照 `testProfileFollowsTheApp` 的做法打 Row226 再 Enter）：TextEdit 按選單切換後送出聊天的結果；Discord 切換後送出書面的結果；模式「一律聊天」時 TextEdit 是聊天、「一律書面」時 Discord 是書面；**組字中按選單**，不用重新啟用，Enter 送出的已經是新設定的結果。
+   - 可觀察的結果（照 `testProfileFollowsTheApp` 的做法打 Row284 再 Enter）：TextEdit 按選單切換後送出聊天的結果；Discord 切換後送出書面的結果；模式「一律聊天」時 TextEdit 是聊天、「一律書面」時 Discord 是書面；**組字中按選單**，不用重新啟用，Enter 送出的已經是新設定的結果。
    - 選單：項目的位置；勾選跟著結果；模式不是 `auto` 時反灰；bundle ID 是 nil 時不出現。
    - 按兩次：其他 App 按兩次後 `appProfiles` 沒有這個 bundle；內建聊天 App 按一次後存的是 `formal`、再按一次就移除。
    - store：`profileMode` 沒設過或是未知字串 → `auto`。`AppProfiles.parse`：nil、根不是 dictionary（字串、陣列）→ 空；值是 NSNumber、巢狀 dictionary、其他字串、鍵是空字串的項目被略過；**一個壞項目和幾個有效項目放在一起時，有效的都留下**。
-   - **啟動時讀回存檔**（照 `ShellTests` 的 `MemoryLayoutStore("eten")`、`SettingsTests` 的 `MemoryGlassTintStore(0.4)` 的做法）：用已經有值的 store 建 `Shell`：(a) `profileMode` 是 `chat` 時 TextEdit 打 Row226＋Enter 是聊天的結果，`formal` 時 Discord 是書面的結果；(b) `appProfiles` 的原始值是 {TextEdit: `chat`, 一個壞項目}：TextEdit 的 Row226 是聊天的結果、選單在 TextEdit 打勾、`SettingsModel` 的清單只有 TextEdit；再對另一個 App 按一次選單之後，store 裡 TextEdit 那一項還在（快取沒有從空的開始、沒有把存檔蓋掉）。
+   - **啟動時讀回存檔**（照 `ShellTests` 的 `MemoryLayoutStore("eten")`、`SettingsTests` 的 `MemoryGlassTintStore(0.4)` 的做法）：用已經有值的 store 建 `Shell`：(a) `profileMode` 是 `chat` 時 TextEdit 打 Row284＋Enter 是聊天的結果，`formal` 時 Discord 是書面的結果；(b) `appProfiles` 的原始值是 {TextEdit: `chat`, 一個壞項目}：TextEdit 的 Row284 是聊天的結果、選單在 TextEdit 打勾、`SettingsModel` 的清單只有 TextEdit；再對另一個 App 按一次選單之後，store 裡 TextEdit 那一項還在（快取沒有從空的開始、沒有把存檔蓋掉）。
    - **擁有者**：A 組字中，對 B 的 session 按 `toggleAppChat`：A 的組字送回 A 的 client（照 s3b §5），B 的 client 沒有收到 A 的組字。
    - 設定視窗的修改會重設擁有者：TextEdit 組字中（不重新啟用），`setProfileMode(.chat)`、之後 `removeAppProfile`，Enter 送出的分別是新設定的結果。
    - `SettingsModel`：選擇器寫進 store 並發通知；清單和 `appProfiles` 一致、排序固定；移除後清單與 store 都少一項；選單切換後 model 收到通知、清單跟著變。
@@ -109,10 +109,10 @@
    - `setProfileMode`／`removeAppProfile` 不重設擁有者的 profile。
 3. `make test`、CI 全綠。
 4. **實機**（使用者；鍵盤操作由 `imeshot` 做，每次 ≤ 15 秒）：
-   - 在終端機打第 226 列（`ㄒㄧㄥˋ ㄏㄠˇ ㄐㄧㄡˋ ㄏㄨˋ ㄔㄜ ㄐㄧˊ ㄕˊ ㄍㄢˇ ㄉㄠˋ`，`Selftest.row226Standard`、測試的 `Row226`）＋Enter，得到書面的「幸好救護車即時趕到」；勾選「這個 App 用聊天設定」後再打一次，得到聊天的「幸好救護車及時趕到」。使用者的選字記憶可能讓實機結果和測試不同，不同時記下來，改用兩種設定結果不同的另一句；
+   - 在終端機打第 284 列（`ㄔㄨˊ ㄈㄤˊ ㄒㄧㄣ ㄓㄨㄤ ㄌㄜ˙ ㄧ ㄍㄜ˙ ㄌㄩˋ ㄕㄨㄟˇ ㄏㄨˊ`，`Selftest.row284Standard`、測試的 `Row284`）＋Enter，得到書面的「廚房新裝了一個濾水壺」；勾選「這個 App 用聊天設定」後再打一次，得到聊天的「廚房新裝了一個綠水壺」。使用者的選字記憶可能讓實機結果和測試不同，不同時記下來，改用兩種設定結果不同的另一句；
    - 設定視窗列出終端機（聊天）；按移除，回到終端機再打，回到書面（同時確認 §2.2 的推論：從設定視窗回到 App 時有重新套用）；
-   - 模式改「一律聊天」，在 TextEdit 打第 226 列得到聊天的結果；改回「依 App 自動」；
-   - **組字中切換**：在終端機打第 226 列但不按 Enter，打開善解選單按「這個 App 用聊天設定」，看組字是不是立刻換成另一種設定的結果。打開選單時組字如果已經被送出，記下來，§1 改成「下一次組字用新的設定」；
+   - 模式改「一律聊天」，在 TextEdit 打第 284 列得到聊天的結果；改回「依 App 自動」；
+   - **組字中切換**：在終端機打第 284 列但不按 Enter，打開善解選單按「這個 App 用聊天設定」，看組字是不是立刻換成另一種設定的結果。打開選單時組字如果已經被送出，記下來，§1 改成「下一次組字用新的設定」；
    - 實機時另開 `log stream`（s3b §10 實測 16 的做法），涵蓋選單切換**與打開清單不是空的設定視窗**（`NSWorkspace` 查 App 名稱在 App target，殼層測試看不到；LaunchServices 會不會用公開等級記下查詢的 ID 沒查證，這一步就是檢查），確認輸出裡沒有 bundle ID。
 
 ## 4. 範圍外

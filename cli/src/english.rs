@@ -1,0 +1,278 @@
+//! `english-sim` (docs/contracts/zhen-mixed.md section 4): how often the English window opens by mistake while typing Chinese,
+//! and how many words of a list open it at all. It drives the real engine (`Engine::load_english`, `set_english(true)`) and
+//! reads `Engine::english_open()` after every Space: the trigger rule is the engine's, never repeated here.
+//!
+//!   english-sim --words FILE --rows FILE [--p 0.02] [--repair overwrite|backspace] [--seed 20261014] [--repeat 5]
+//!   english-sim --words FILE --recall
+//!
+//! Output is one TSV line and no content text (R2). Typing mode:
+//!   rows_sha256  rows  syllables  keys  triggers  per_1000_mean  per_1000_max
+//! `rows` and `syllables` are one pass over the rows; `keys` (every key event sent to the engine, repairs, Esc and Enter
+//! included) and `triggers` are summed over the seeds; `per_1000` is triggers x 1000 / syllables of one seed, mean and max
+//! over the seeds. Recall mode:
+//!   words_sha256  words  opened  top1  overwrite0  overwrite1_leftover_valid  overwrite2plus_leftover_valid  leftover_invalid
+//! (`opened` and `top1`: the window opened / its first item is the word; the four classes partition the words, the last two
+//! open it, the first two never do; the tool stops if the engine and this recount disagree.)
+//!
+//! The typing model (fixed; change it and the number in cli/tests/english_sim.rs together):
+//! - Every Zhuyin key of a syllable is mistyped with probability `p`, but only when it has a neighbour: the keys left and right of
+//!   it on its keyboard row, kept only if they are Zhuyin keys of the standard layout. One neighbour or two, drawn uniformly.
+//!   Tone keys, Space, Backspace and the repair keys are never mistyped.
+//! - Repair: `overwrite` presses the right key at once when the wrong key was in the same column (one overwrite), else it
+//!   falls back to `backspace`: Backspace until the shown symbols are a prefix of the wanted ones, then the missing symbols in
+//!   column order. After a repair the shown symbols are the wanted ones.
+//! - A syllable ends with its tone key, or Space for tone 1. If the engine opened the window at that Space it is counted, then
+//!   Esc (closes it, clears the shadow) and Space again finish the syllable, so engine and simulator stay in step.
+//! - Rows with a reading the lexicon lacks, or a symbol without a key, are skipped (their number goes to stderr).
+//! - Random numbers: splitmix64 from the seed (no crate); one draw decides a mistake, one more picks the neighbour.
+use core::engine::{load_lexicon, Engine, Key, KeyKind, Layout, ResetMode};
+use core::eval::{parse_rows, row_syllables, sha256_hex, usable};
+use core::Lexicon;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+
+const ROWS: [&str; 4] = ["1234567890-=", "qwertyuiop[]", "asdfghjkl;'", "zxcvbnm,./"];
+const TONE_MARKS: [char; 4] = ['ˊ', 'ˇ', 'ˋ', '˙'];
+const LAYOUT: Layout = Layout::Standard;
+
+struct Rng(u64);
+
+impl Rng {
+    fn next(&mut self) -> u64 {
+        self.0 = self.0.wrapping_add(0x9E37_79B9_7F4A_7C15);
+        let mut z = self.0;
+        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+        z ^ (z >> 31)
+    }
+    /// Uniform in [0, 1).
+    fn unit(&mut self) -> f64 {
+        (self.next() >> 11) as f64 / (1u64 << 53) as f64
+    }
+}
+
+/// The Zhuyin keys next to `key` on its row (standard layout), tone keys and non-Zhuyin keys dropped.
+fn neighbours(key: char) -> Vec<char> {
+    let Some(row) = ROWS.iter().find(|r| r.contains(key)) else { return Vec::new() };
+    let cs: Vec<char> = row.chars().collect();
+    let j = cs.iter().position(|&c| c == key).unwrap();
+    [j.checked_sub(1), Some(j + 1)].into_iter().flatten().filter_map(|i| cs.get(i).copied()).filter(|&c| LAYOUT.symbol_of(c).is_some()).collect()
+}
+
+/// A syllable as (column, symbol) pairs in typing order and its tone (None: tone 1, Space); `None` when a character has no key.
+fn parse_syllable(syl: &str) -> Option<(Vec<(usize, char)>, Option<char>)> {
+    let mut syms = Vec::new();
+    let mut tone = None;
+    for c in syl.chars() {
+        if TONE_MARKS.contains(&c) {
+            tone = Some(c);
+        } else {
+            syms.push(LAYOUT.symbol_of(LAYOUT.key_of_symbol(c)?)?);
+        }
+    }
+    Some((syms, tone))
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum Repair {
+    Overwrite,
+    Backspace,
+}
+
+struct Sim {
+    engine: Engine,
+    keys: u64,
+    triggers: u64,
+    p: f64,
+    repair: Repair,
+    rng: Rng,
+}
+
+impl Sim {
+    fn send(&mut self, k: Key) -> Result<(), String> {
+        self.keys += 1;
+        self.engine.key(k).map(|_| ()).map_err(|_| "the engine failed on a key".to_string())
+    }
+
+    fn zhuyin(&mut self, sym: char) -> Result<(), String> {
+        self.send(Key::ch(LAYOUT.key_of_symbol(sym).unwrap(), 0))
+    }
+
+    fn syllable(&mut self, syms: &[(usize, char)], tone: Option<char>) -> Result<(), String> {
+        let mut shown: [Option<char>; 3] = [None; 3];
+        for (i, &(col, sym)) in syms.iter().enumerate() {
+            let key = LAYOUT.key_of_symbol(sym).unwrap();
+            let near = neighbours(key);
+            if self.rng.unit() < self.p && !near.is_empty() {
+                let wrong = near[(self.rng.next() % near.len() as u64) as usize];
+                let (wcol, wsym) = LAYOUT.symbol_of(wrong).unwrap();
+                self.send(Key::ch(wrong, 0))?;
+                shown[wcol] = Some(wsym);
+                if self.repair == Repair::Overwrite && wcol == col {
+                    self.zhuyin(sym)?;
+                    shown[col] = Some(sym);
+                } else {
+                    // Backspace takes the last symbol in display order (final, medial, initial), as engine rule 11 does.
+                    let want: Vec<char> = syms[..=i].iter().map(|s| s.1).collect();
+                    let have = |s: &[Option<char>; 3]| s.iter().flatten().copied().collect::<Vec<char>>();
+                    while !want.starts_with(&have(&shown)) {
+                        self.send(Key::new(KeyKind::Backspace))?;
+                        let last = (0..3).rev().find(|&c| shown[c].is_some()).unwrap();
+                        shown[last] = None;
+                    }
+                    for &(c, s) in &syms[have(&shown).len()..=i] {
+                        self.zhuyin(s)?;
+                        shown[c] = Some(s);
+                    }
+                }
+            } else {
+                self.zhuyin(sym)?;
+                shown[col] = Some(sym);
+            }
+        }
+        match tone {
+            Some(mark) => self.send(Key::ch(LAYOUT.key_of_tone(mark).unwrap(), 0)),
+            None => {
+                self.send(Key::new(KeyKind::Space))?;
+                if self.engine.english_open() {
+                    self.triggers += 1;
+                    self.send(Key::new(KeyKind::Esc))?;
+                    self.send(Key::new(KeyKind::Space))?;
+                }
+                Ok(())
+            }
+        }
+    }
+}
+
+fn engine_with(lex: &Arc<Lexicon>, words: &Path) -> Result<Engine, String> {
+    let mut e = Engine::with_lexicon(lex.clone(), LAYOUT);
+    e.load_english(words).map_err(|_| "cannot load the word list".to_string())?;
+    e.set_english(true).map_err(|_| "cannot switch the English window on".to_string())?;
+    Ok(e)
+}
+
+/// (mean, max) of per-seed values.
+fn mean_max(v: &[f64]) -> (f64, f64) {
+    (v.iter().sum::<f64>() / v.len() as f64, v.iter().cloned().fold(0.0, f64::max))
+}
+
+fn read(path: &Path) -> Result<Vec<u8>, String> {
+    std::fs::read(path).map_err(|e| format!("cannot read file ({:?})", e.kind()))
+}
+
+pub fn run(args: &[String], root: &Path) -> Result<(), String> {
+    let (mut words, mut rows, mut recall) = (None::<PathBuf>, None::<PathBuf>, false);
+    let (mut p, mut repair, mut seed, mut repeat) = (0.02f64, Repair::Overwrite, 20261014u64, 5u64);
+    let mut it = args.iter();
+    while let Some(a) = it.next() {
+        let mut val = || it.next().cloned().ok_or_else(|| "missing option value".to_string());
+        match a.as_str() {
+            "--words" => words = Some(val()?.into()),
+            "--rows" => rows = Some(val()?.into()),
+            "--recall" => recall = true,
+            "--p" => p = val()?.parse().map_err(|_| "bad --p")?,
+            "--repair" => {
+                repair = match val()?.as_str() {
+                    "overwrite" => Repair::Overwrite,
+                    "backspace" => Repair::Backspace,
+                    _ => return Err("--repair must be overwrite or backspace".into()),
+                }
+            }
+            "--seed" => seed = val()?.parse().map_err(|_| "bad --seed")?,
+            "--repeat" => repeat = val()?.parse().map_err(|_| "bad --repeat")?,
+            _ => return Err("unknown argument".into()),
+        }
+    }
+    if !(0.0..=1.0).contains(&p) || repeat == 0 {
+        return Err("--p must be in [0, 1] and --repeat at least 1".into());
+    }
+    let words = words.ok_or("--words is required")?;
+    if recall == rows.is_some() {
+        return Err("give exactly one of --rows and --recall".into());
+    }
+    let lex = load_lexicon(&root.join("data/lexicon")).map_err(|_| "cannot load the lexicon")?;
+    if recall {
+        return run_recall(&lex, &words);
+    }
+
+    let rows_bytes = read(&rows.unwrap())?;
+    let rows_sha = sha256_hex(&rows_bytes);
+    let rows = usable(&lex, parse_rows(&String::from_utf8(rows_bytes).map_err(|_| "rows are not UTF-8")?).map_err(|e| e.to_string())?);
+    let mut parsed = Vec::new();
+    let mut skipped = 0usize;
+    for r in &rows {
+        let syls = row_syllables(&lex, r).map_err(|e| e.to_string())?;
+        let one: Option<Vec<_>> = syls
+            .iter()
+            .map(|s| parse_syllable(s).filter(|_| !lex.entries(std::slice::from_ref(s)).is_empty()))
+            .collect();
+        match one {
+            Some(v) if !v.is_empty() => parsed.push(v),
+            _ => skipped += 1,
+        }
+    }
+    if skipped > 0 {
+        eprintln!("skipped {skipped} rows");
+    }
+    let syllables: usize = parsed.iter().map(Vec::len).sum();
+    if syllables == 0 {
+        return Err("no row to simulate".into());
+    }
+    let (mut per_1000, mut keys, mut triggers) = (Vec::new(), 0u64, 0u64);
+    for i in 0..repeat {
+        let mut sim = Sim { engine: engine_with(&lex, &words)?, keys: 0, triggers: 0, p, repair, rng: Rng(seed.wrapping_add(i)) };
+        for row in &parsed {
+            sim.engine.reset(ResetMode::Discard);
+            for (syms, tone) in row {
+                sim.syllable(syms, *tone)?;
+            }
+            sim.send(Key::new(KeyKind::Enter))?;
+        }
+        per_1000.push(sim.triggers as f64 * 1000.0 / syllables as f64);
+        keys += sim.keys;
+        triggers += sim.triggers;
+    }
+    let (mean, max) = mean_max(&per_1000);
+    println!("{rows_sha}\t{}\t{syllables}\t{keys}\t{triggers}\t{mean:.3}\t{max:.3}", parsed.len());
+    Ok(())
+}
+
+/// Section 4.5: every word of the list typed letter by letter, then Space.
+fn run_recall(lex: &Arc<Lexicon>, words: &Path) -> Result<(), String> {
+    let bytes = read(words)?;
+    let sha = sha256_hex(&bytes);
+    let list: Vec<String> = String::from_utf8(bytes).map_err(|_| "the list is not UTF-8")?.lines().map(String::from).collect();
+    let mut e = engine_with(lex, words)?;
+    let (mut opened, mut top1, mut classes) = (0usize, 0usize, [0usize; 4]);
+    for w in &list {
+        e.reset(ResetMode::Discard);
+        for c in w.chars() {
+            e.key(Key::ch(c, 0)).map_err(|_| "the engine failed on a key")?;
+        }
+        let o = e.key(Key::new(KeyKind::Space)).map_err(|_| "the engine failed on a key")?;
+        let open = e.english_open();
+        opened += open as usize;
+        top1 += (open && o.candidates.first() == Some(w)) as usize;
+        // The recount: overwrites by column, and whether the leftover syllable (tone 1) is in the lexicon.
+        let (mut col, mut over) = ([None::<char>; 3], 0usize);
+        for c in w.chars() {
+            let (i, sym) = LAYOUT.symbol_of(c).ok_or("a letter without a Zhuyin key")?;
+            over += col[i].is_some() as usize;
+            col[i] = Some(sym);
+        }
+        let leftover: String = col.iter().flatten().collect();
+        let valid = !lex.entries(&[leftover]).is_empty();
+        classes[match (over, valid) {
+            (0, _) => 0,
+            (1, true) => 1,
+            (_, true) => 2,
+            (_, false) => 3,
+        }] += 1;
+    }
+    if opened != classes[2] + classes[3] {
+        return Err("the engine and the recount disagree on which words open".into());
+    }
+    println!("{sha}\t{}\t{opened}\t{top1}\t{}\t{}\t{}\t{}", list.len(), classes[0], classes[1], classes[2], classes[3]);
+    Ok(())
+}

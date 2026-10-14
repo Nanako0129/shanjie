@@ -72,6 +72,7 @@ final class ShanjieInputController: IMKInputController {
         case .toggleBackup: #selector(toggleLearningBackup(_:))
         case .toggleDemote: #selector(toggleDemote(_:))
         case .togglePrediction: #selector(togglePrediction(_:))
+        case .toggleEnglish: #selector(toggleEnglish(_:))
         case .toggleAbbreviation: #selector(toggleAbbreviation(_:))
         case .toggleRerank: #selector(toggleRerank(_:))
         case .toggleAcgPack: #selector(toggleAcgPack(_:))
@@ -90,6 +91,7 @@ final class ShanjieInputController: IMKInputController {
     @objc func toggleLearningBackup(_ sender: Any?) { perform(.toggleBackup) }
     @objc func toggleDemote(_ sender: Any?) { perform(.toggleDemote) }
     @objc func togglePrediction(_ sender: Any?) { perform(.togglePrediction) }
+    @objc func toggleEnglish(_ sender: Any?) { perform(.toggleEnglish) }
     @objc func toggleAbbreviation(_ sender: Any?) { perform(.toggleAbbreviation) }
     @objc func toggleRerank(_ sender: Any?) { perform(.toggleRerank) }
     @objc func toggleAcgPack(_ sender: Any?) { perform(.toggleAcgPack) }

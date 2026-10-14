@@ -259,9 +259,10 @@ const O_NONBLOCK: i32 = 0o4000;
 #[cfg(all(unix, not(target_os = "linux")))]
 const O_NONBLOCK: i32 = 0x0004; // macOS and the BSDs
 
-/// S7c-2a section 2.6 (F3): opens first, then checks the opened handle (a regular file of at most `MAX_FILE` bytes) and reads at
-/// most the cap from that same handle, so the file checked is the file read.
-fn read_bounded(path: &Path) -> Result<Vec<u8>, TinyLmError> {
+/// S7c-2a section 2.6 (F3): opens first, then checks the opened handle (a regular file of at most `max` bytes) and reads at
+/// most the cap from that same handle, so the file checked is the file read. Also the zhen-mixed word list's reader
+/// (`Engine::load_english`, with its own cap). `Io`: unopenable or not a regular file; `Format`: over the cap.
+pub(crate) fn read_bounded(path: &Path, max: u64) -> Result<Vec<u8>, TinyLmError> {
     use std::io::Read;
     let mut opts = std::fs::OpenOptions::new();
     opts.read(true);
@@ -272,12 +273,12 @@ fn read_bounded(path: &Path) -> Result<Vec<u8>, TinyLmError> {
     if !meta.is_file() {
         return Err(TinyLmError::Io);
     }
-    if meta.len() > MAX_FILE {
+    if meta.len() > max {
         return Err(TinyLmError::Format);
     }
     let mut bytes = Vec::with_capacity(meta.len() as usize);
-    file.take(MAX_FILE + 1).read_to_end(&mut bytes).map_err(|_| TinyLmError::Io)?;
-    if bytes.len() as u64 > MAX_FILE {
+    file.take(max + 1).read_to_end(&mut bytes).map_err(|_| TinyLmError::Io)?;
+    if bytes.len() as u64 > max {
         return Err(TinyLmError::Format);
     }
     Ok(bytes)
@@ -286,7 +287,7 @@ fn read_bounded(path: &Path) -> Result<Vec<u8>, TinyLmError> {
 impl TinyLm {
     /// Reads only a regular file of at most `MAX_FILE` bytes (`read_bounded`).
     pub fn load(path: &Path) -> Result<TinyLm, TinyLmError> {
-        TinyLm::parse(&read_bounded(path)?)
+        TinyLm::parse(&read_bounded(path, MAX_FILE)?)
     }
 
     /// The one loader of the engine and the evaluation CLI (S7c-2a): `load`'s checks, then the pairing with `lm` — the n-gram
@@ -294,7 +295,7 @@ impl TinyLm {
     /// without it). A pairing check only, not an integrity check of the `.sjtl`. Also returns the bytes it parsed (the CLI
     /// prints their hash; the engine drops them).
     pub fn load_paired(path: &Path, lm: &Lm) -> Result<(TinyLm, Vec<u8>), TinyLmError> {
-        let bytes = read_bounded(path)?;
+        let bytes = read_bounded(path, MAX_FILE)?;
         let model = TinyLm::parse(&bytes)?;
         if model.ngram_sha256() != lm.sha256() {
             return Err(TinyLmError::OtherNgram);
