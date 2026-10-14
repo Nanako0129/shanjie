@@ -1,5 +1,7 @@
-//! S7c-1: the small character language model (S7a) in Rust: the SJTL0001 / SJTL0002 loader, the forward pass, LL and `pick`
-//! (docs/contracts/s7c-core-tinylm.md section 2; SJTL0002, the per-profile delta, is docs/contracts/s7c2c-delta.md section 2.1).
+//! S7c-1: the small character language model (S7a) in Rust: the SJTL0001 / SJTL0002 / SJTL0003 loader, the forward pass, LL and
+//! `pick` (docs/contracts/s7c-core-tinylm.md section 2; SJTL0002, the per-profile delta, is docs/contracts/s7c2c-delta.md section
+//! 2.1; SJTL0003, a conservative and an aggressive (alpha, tau, delta) per profile beside the standard one, is
+//! docs/contracts/rerank-strength.md section 2.1).
 //! S7c-2a (docs/contracts/s7c2a-core-rerank.md) reaches it from the engine's rerank
 //! jobs and the C ABI, so the loader is hardened for in-process use (section 2.6): a size cap, a regular-file check, header
 //! bounds and finite restored weights.
@@ -22,6 +24,11 @@ const VERSION: u32 = 1;
 const MAGIC_V2: &[u8; 8] = b"SJTL0002";
 const HEADER_V2: usize = 116;
 const VERSION_V2: u32 = 2;
+/// Rerank strength: version 3 is version 2's 116 header bytes (magic and version field changed) plus four (alpha, tau, delta)
+/// f64 triples: chat conservative at 116, chat aggressive at 140, formal conservative at 164, formal aggressive at 188.
+const MAGIC_V3: &[u8; 8] = b"SJTL0003";
+const HEADER_V3: usize = 212;
+const VERSION_V3: u32 = 3;
 /// S7c-2c section 2.1: a guard on delta, far above the S7e grid (at most 4).
 const MAX_DELTA: f64 = 1000.0;
 const PAD: u32 = 0;
@@ -65,6 +72,33 @@ impl fmt::Display for TinyLmError {
     }
 }
 impl std::error::Error for TinyLmError {}
+
+/// Which of a profile's (alpha, tau, delta) the rerank uses (docs/contracts/rerank-strength.md section 2.2). The codes are the C
+/// ABI's (`shanjie_engine_set_rerank_level`); a version 1 or 2 file has only the standard one and gives it for every level.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RerankLevel {
+    Conservative = 0,
+    Standard = 1,
+    Aggressive = 2,
+}
+
+impl RerankLevel {
+    pub fn from_code(code: u32) -> Option<RerankLevel> {
+        match code {
+            0 => Some(RerankLevel::Conservative),
+            1 => Some(RerankLevel::Standard),
+            2 => Some(RerankLevel::Aggressive),
+            _ => None,
+        }
+    }
+}
+
+/// The one check of every (alpha, tau, delta) in the header (rerank-strength section 9, P2-4): alpha finite (a NaN alpha would pick
+/// nothing sensible), tau not NaN (it may be infinite: no threshold), delta in [0, `MAX_DELTA`] (the range test also rejects NaN,
+/// the infinities and negatives; -0.0 passes and compares as 0 in `pick`).
+fn valid_params((alpha, tau, delta): (f64, f64, f64)) -> bool {
+    alpha.is_finite() && !tau.is_nan() && (0.0..=MAX_DELTA).contains(&delta)
+}
 
 /// How the matrix products and the tanh / exp vectors are computed. `Plain` is the portable path; `Accelerate` is the one used on macOS.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -167,9 +201,12 @@ pub struct TinyLm {
     n_head: usize,
     d: usize,
     ctx: usize,
-    /// (alpha, tau, delta); version 1 files have delta 0.
-    chat: (f64, f64, f64),
-    formal: (f64, f64, f64),
+    /// (alpha, tau, delta) per `RerankLevel` (indexed by its code); version 1 files have delta 0, and version 1 and 2 files repeat
+    /// the standard triple for all three levels.
+    chat: [(f64, f64, f64); 3],
+    formal: [(f64, f64, f64); 3],
+    /// A version 3 file (its own conservative and aggressive triples).
+    levels: bool,
     ng_sha: [u8; 32],
     ids: HashMap<char, u32>,
     emb: Vec<f32>,
@@ -277,11 +314,13 @@ impl TinyLm {
         }
         let u32_at = |at: usize| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
         let f64_at = |at: usize| f64::from_le_bytes(bytes[at..at + 8].try_into().unwrap());
-        // S7c-2c section 2.1: magic and version field together choose the header length, the one length the vocabulary start,
-        // the tensor start and `want` use; the file must hold the whole header before any field past the version is read.
-        let header = match (&bytes[..8], u32_at(8)) {
-            (m, VERSION) if m == MAGIC => HEADER,
-            (m, VERSION_V2) if m == MAGIC_V2 => HEADER_V2,
+        // S7c-2c section 2.1, rerank-strength section 9 (P2-2): magic and version field together choose, in this one match, the
+        // header length (the one length the vocabulary start, the tensor start and `want` use), whether the deltas are there and
+        // whether the levels are; the file must hold the whole header before any field past the version is read.
+        let (header, deltas, levels) = match (&bytes[..8], u32_at(8)) {
+            (m, VERSION) if m == MAGIC => (HEADER, false, false),
+            (m, VERSION_V2) if m == MAGIC_V2 => (HEADER_V2, true, false),
+            (m, VERSION_V3) if m == MAGIC_V3 => (HEADER_V3, true, true),
             _ => return Err(bad),
         };
         if bytes.len() < header {
@@ -289,12 +328,18 @@ impl TinyLm {
         }
         let wtype = u32_at(12);
         let [n_layer, n_head, d, ctx, v] = [16, 20, 24, 28, 32].map(|at| u32_at(at) as usize);
-        let (chat_delta, formal_delta) = if header == HEADER_V2 { (f64_at(100), f64_at(108)) } else { (0.0, 0.0) };
-        // One range test rejects NaN, the infinities and negatives; -0.0 passes and compares as 0 in `pick`.
-        if !(0.0..=MAX_DELTA).contains(&chat_delta) || !(0.0..=MAX_DELTA).contains(&formal_delta) {
+        let (chat_delta, formal_delta) = if deltas { (f64_at(100), f64_at(108)) } else { (0.0, 0.0) };
+        let (chat_std, formal_std) = ((f64_at(36), f64_at(44), chat_delta), (f64_at(52), f64_at(60), formal_delta));
+        let triple = |at: usize| (f64_at(at), f64_at(at + 8), f64_at(at + 16));
+        // [conservative, standard, aggressive], `RerankLevel`'s codes.
+        let (chat, formal) = if levels {
+            ([triple(116), chat_std, triple(140)], [triple(164), formal_std, triple(188)])
+        } else {
+            ([chat_std; 3], [formal_std; 3])
+        };
+        if !chat.iter().chain(&formal).all(|&t| valid_params(t)) {
             return Err(bad);
         }
-        let (chat, formal) = ((f64_at(36), f64_at(44), chat_delta), (f64_at(52), f64_at(60), formal_delta));
         if wtype > 1 || n_layer == 0 || n_head == 0 || d == 0 || d % n_head != 0 || ctx < 2 || v < 3 {
             return Err(bad);
         }
@@ -307,8 +352,7 @@ impl TinyLm {
         let mat = |r: usize, c: usize| if int8 { r * c + 4 * r } else { 4 * r * c };
         let layer_bytes = 4 * 4 * d + mat(d, 3 * d) + 4 * 3 * d + mat(d, d) + 4 * d + mat(d, 4 * d) + 4 * 4 * d + mat(4 * d, d) + 4 * d;
         let want = header + 4 * (v - 3) + mat(v, d) + mat(ctx, d) + 4 * 2 * d + n_layer * layer_bytes;
-        // A NaN alpha or tau would pick nothing sensible; tau may be infinite (no threshold).
-        if bytes.len() != want || !chat.0.is_finite() || !formal.0.is_finite() || chat.1.is_nan() || formal.1.is_nan() {
+        if bytes.len() != want {
             return Err(bad);
         }
         let mut ids = HashMap::new();
@@ -347,6 +391,7 @@ impl TinyLm {
             ctx,
             chat,
             formal,
+            levels,
             ng_sha: bytes[68..100].try_into().unwrap(),
             ids,
             emb,
@@ -357,12 +402,23 @@ impl TinyLm {
         })
     }
 
-    /// (alpha, tau, delta) tuned for the profile; delta is 0 in a version 1 file.
+    /// The standard (alpha, tau, delta) tuned for the profile; delta is 0 in a version 1 file.
     pub fn alpha_tau_delta(&self, p: Profile) -> (f64, f64, f64) {
-        match p {
-            Profile::Chat => self.chat,
-            Profile::Formal => self.formal,
-        }
+        self.params(p, RerankLevel::Standard)
+    }
+
+    /// (alpha, tau, delta) of the profile at `level`; the standard triple for every level of a version 1 or 2 file.
+    pub fn params(&self, p: Profile, level: RerankLevel) -> (f64, f64, f64) {
+        let by_level = match p {
+            Profile::Chat => &self.chat,
+            Profile::Formal => &self.formal,
+        };
+        by_level[level as usize]
+    }
+
+    /// Whether the file is version 3, i.e. has its own conservative and aggressive triples (rerank-strength section 2.2).
+    pub fn has_levels(&self) -> bool {
+        self.levels
     }
 
     /// SHA-256 (hex) of the n-gram model alpha and tau were tuned with.
@@ -372,9 +428,13 @@ impl TinyLm {
 
     /// The S7a rerank of one n-best list, the one rule the CLI measures and the engine will use: the first `TOPK` candidates,
     /// k = the engine's context key (`learn::context_key`; its `SENTINEL`, no Han character before the cursor, is the empty k as
-    /// in tinylm.row_key), alpha, tau and delta of the profile, then `pick`. Returns the chosen index and, when the model ran (two or more
+    /// in tinylm.row_key), the caller's (alpha, tau, delta) (`params` of the profile and level), then `pick`. Returns the chosen index and, when the model ran (two or more
     /// candidates), the LLs. A candidate longer than ctx - 1 characters is `TooLong`; the caller decides to keep the first.
-    pub fn rerank(&self, ng: &[f64], cands: &[&str], key: &str, p: Profile) -> Result<(usize, Option<Vec<f64>>), TinyLmError> {
+    pub fn rerank(&self, ng: &[f64], cands: &[&str], key: &str, params: (f64, f64, f64)) -> Result<(usize, Option<Vec<f64>>), TinyLmError> {
+        // The header's check, for every caller: a NaN alpha or a negative delta from outside the file must not reach `pick`.
+        if !valid_params(params) {
+            return Err(TinyLmError::Format);
+        }
         let n = cands.len().min(ng.len()).min(TOPK);
         if n < 2 {
             return Ok((0, None));
@@ -382,7 +442,7 @@ impl TinyLm {
         let k = if key == SENTINEL { "" } else { key };
         let items: Vec<(&str, &str)> = cands[..n].iter().map(|c| (k, *c)).collect();
         let ll = self.ll_many(&items)?;
-        let (alpha, tau, delta) = self.alpha_tau_delta(p);
+        let (alpha, tau, delta) = params;
         Ok((pick(&ng[..n], &ll, alpha, tau, delta), Some(ll)))
     }
 
@@ -700,14 +760,21 @@ mod tests {
         let ng: Vec<f64> = (0..10).map(|i| -0.05 * i as f64).collect();
         let with = |k: &str| m.ll_many(&cands[..TOPK].iter().map(|c| (k, *c)).collect::<Vec<_>>()).unwrap();
         let key = "\u{4e01}\u{4e02}";
-        let (chosen, ll) = m.rerank(&ng, &cands, key, Profile::Chat).unwrap();
+        let chat = m.alpha_tau_delta(Profile::Chat);
+        let (chosen, ll) = m.rerank(&ng, &cands, key, chat).unwrap();
         let ll = ll.unwrap();
         assert_eq!(ll, with(key));
         assert_ne!(ll, with(""), "the key is the model's context");
         assert_eq!(m.alpha_tau_delta(Profile::Chat), (0.7, 2.0, 0.0), "a version 1 file");
         assert_eq!(chosen, pick(&ng[..TOPK], &ll, 0.7, 2.0, 0.0));
-        assert_eq!(m.rerank(&ng, &cands, SENTINEL, Profile::Chat).unwrap().1.unwrap(), with(""), "SENTINEL is the empty k");
-        assert_eq!(m.rerank(&ng[..1], &cands[..1], key, Profile::Chat).unwrap(), (0, None));
+        assert_eq!(m.rerank(&ng, &cands, SENTINEL, chat).unwrap().1.unwrap(), with(""), "SENTINEL is the empty k");
+        assert_eq!(m.rerank(&ng[..1], &cands[..1], key, chat).unwrap(), (0, None));
+        // params the header check would refuse are refused here too, even when fewer than two candidates would run nothing
+        for bad in [(f64::NAN, 2.0, 0.0), (f64::INFINITY, 2.0, 0.0), (0.7, f64::NAN, 0.0), (0.7, 2.0, -0.25), (0.7, 2.0, f64::NAN), (0.7, 2.0, MAX_DELTA + 1.0)] {
+            assert_eq!(m.rerank(&ng, &cands, key, bad).unwrap_err(), TinyLmError::Format, "{bad:?}");
+            assert_eq!(m.rerank(&ng[..1], &cands[..1], key, bad).unwrap_err(), TinyLmError::Format, "{bad:?}");
+        }
+        assert!(m.rerank(&ng, &cands, key, (0.7, f64::INFINITY, 0.0)).is_ok(), "an infinite tau is allowed: no threshold");
     }
 
     /// Contract 2.2: the Accelerate path (macOS) and the plain path agree to 1e-5 in LL on random weights; on other targets both

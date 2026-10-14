@@ -80,20 +80,25 @@ class Pick(unittest.TestCase):
         self.assertEqual(T.pick([0, -1, -1], [-2, 0.0, 0.0], 1.0, 9.0, 0.0), 1, "ties go to the better n-gram rank")
 
     def test_header_params(self):
-        def head(v):
-            b = bytearray(116 if v == 2 else 100)
-            b[:8] = b"SJTL0002" if v == 2 else b"SJTL0001"
-            struct.pack_into("<I", b, 8, v)
-            struct.pack_into("<dd", b, 36, 0.3, 2.0)
-            struct.pack_into("<dd", b, 52, 0.7, 1.0)
-            if v == 2:
-                struct.pack_into("<dd", b, 100, 0.25, 2.0)
-            return bytes(b)
+        """Real tiny files from the exporter, one per format version (the version 3 one used to be refused: ValueError 'not a .sjtl file')."""
+        sys.path.insert(0, os.path.join(T.ROOT, "experiments", "s7a-tinylm"))
+        import export_sjtl as ex, tinylm
+        chars = "甲乙丙丁戊己庚辛"
+        chat, formal = (0.3, 2.0), (0.7, 1.0)
+        levels = (0.1, 1.0, 0.5, 0.9, 3.0, 0.5, 0.2, 0.5, 0.25, 0.8, 2.0, 1.0)
         with tempfile.TemporaryDirectory() as td:
-            for v, want in ((1, {"chat": (0.3, 2.0, 0.0), "formal": (0.7, 1.0, 0.0)}), (2, {"chat": (0.3, 2.0, 0.25), "formal": (0.7, 1.0, 2.0)})):
-                p = os.path.join(td, f"v{v}.sjtl")
-                open(p, "wb").write(head(v))
-                self.assertEqual(T.tinylm_params(p), want)
+            npz = os.path.join(td, "m.npz")
+            tinylm.save_params(npz, tinylm.random_params(list(chars), n_layer=1, d=8, n_head=2, seed=1), chars, n_layer=1, n_head=2)
+            cases = [("v1", chat, formal, None, {"chat": (0.3, 2.0, 0.0), "formal": (0.7, 1.0, 0.0)}),
+                     ("v2", chat + (0.25,), formal + (2.0,), None, {"chat": (0.3, 2.0, 0.25), "formal": (0.7, 1.0, 2.0)}),
+                     ("v3", chat + (0.25,), formal + (2.0,), levels, {"chat": (0.3, 2.0, 0.25), "formal": (0.7, 1.0, 2.0)})]
+            for name, c, f, lv, want in cases:
+                out = os.path.join(td, name + ".sjtl")
+                ex.export(npz, out, "int8", c, f, b"\0" * 32, levels=lv)
+                self.assertEqual(T.tinylm_params(out), want, name)
+            junk = os.path.join(td, "junk.sjtl")
+            open(junk, "wb").write(b"x" * 300)
+            self.assertRaises(ValueError, T.tinylm_params, junk)
 
 
 class Segments(unittest.TestCase):
