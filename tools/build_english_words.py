@@ -7,8 +7,8 @@
 
 用法：python3 tools/build_english_words.py --out FILE [--input FILE] [--len3 N] [--len4 N|all]
 印出行數與輸出的 SHA-256。--print-url、--print-input-sha256 只印釘住的下載網址與輸入雜湊（scripts/build-app.sh 用，
-下載與核對的常數只有這裡一份）。--len3、--len4 給 §4 的格點用；LEN3_CAP、LEN4_CAP 是出貨的值（起始值 3000 / 30000，
-最終值由 §4.4 的量測決定後寫回這裡）。
+下載與核對的常數只有這裡一份）。--len3、--len4 給 §4 的格點用；LEN3_CAP、LEN4_CAP 是出貨的值（起始值 3000 / 30000；§4.4 的格點 2026-10-14 量完：每格誤觸都是 0，照「可行格取詞數最多」
+定為 3000 / 不設上限，82,730 詞，研究紀錄同日）。
 """
 import argparse
 import hashlib
@@ -23,7 +23,7 @@ INPUT_SHA256 = "c604e1121e398ae7c7fbf777f11e0a0f2fa66eda932cb9fba1321466cf3acd7b
 DEFAULT_INPUT = os.path.expanduser("~/.cache/shanjie/english/frequency_dictionary_en_82_765.txt")
 
 LEN3_CAP = 3000
-LEN4_CAP = 30000
+LEN4_CAP = None  # 不設上限（§4.4）
 
 WORD = re.compile(r"[a-z]{3,32}")
 
@@ -71,7 +71,7 @@ def main(argv=None):
     ap.add_argument("--print-url", action="store_true")
     ap.add_argument("--print-input-sha256", action="store_true")
     ap.add_argument("--len3", type=int, default=LEN3_CAP)
-    ap.add_argument("--len4", default=str(LEN4_CAP), help="N 或 all")
+    ap.add_argument("--len4", default="all" if LEN4_CAP is None else str(LEN4_CAP), help="N 或 all")
     a = ap.parse_args(argv)
     if a.print_url or a.print_input_sha256:
         print(SYMSPELL_URL if a.print_url else INPUT_SHA256)

@@ -59,15 +59,7 @@ trap 'rm -rf "$EN_TMP"' EXIT
 python3 tools/build_english_words.py --input "$EN_IN" --out "$EN_TMP/english-words.txt" >/dev/null || fail "tools/build_english_words.py failed"
 EN_OUT_SHA="$(shasum -a 256 "$EN_TMP/english-words.txt" | awk '{ print $1 }')"
 EN_RECORDED="$(awk 'NR == 1 { print $1 }' data/english-words.txt.sha256)"
-if [[ "$EN_RECORDED" =~ ^[0-9a-f]{64}$ ]]; then
-  [ "$EN_OUT_SHA" = "$EN_RECORDED" ] || fail "the generated english-words.txt (SHA-256 $EN_OUT_SHA) does not match data/english-words.txt.sha256"
-elif [ "${SHANJIE_ENGLISH_ALLOW_UNPINNED:-}" = 1 ]; then
-  # CI of the branch that adds the feature, before the final caps are chosen (zhen-mixed section 3.4 step 3): the list is built
-  # from the starting caps and its hash is not checked. release.yml never sets this.
-  echo "warning: data/english-words.txt.sha256 is not pinned; english-words.txt is unchecked (SHA-256 $EN_OUT_SHA)" >&2
-else
-  fail "data/english-words.txt.sha256 is not pinned yet (the generated list has SHA-256 $EN_OUT_SHA). Pin it once the caps are final; CI of the feature branch sets SHANJIE_ENGLISH_ALLOW_UNPINNED=1"
-fi
+[ "$EN_OUT_SHA" = "$EN_RECORDED" ] || fail "the generated english-words.txt (SHA-256 $EN_OUT_SHA) does not match data/english-words.txt.sha256"
 
 BUNDLE_ID="${BUNDLE_ID:-com.nyanako.inputmethod.shanjie}"
 [[ "$BUNDLE_ID" =~ ^[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$ ]] || fail "BUNDLE_ID '$BUNDLE_ID' is not a reverse-DNS identifier"

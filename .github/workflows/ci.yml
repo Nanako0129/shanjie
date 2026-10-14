@@ -216,11 +216,6 @@ jobs:
     if: needs.changes.outputs.run == 'true'
     runs-on: xcode-27
     timeout-minutes: 30
-    env:
-      # data/english-words.txt.sha256 is a placeholder until the caps of the English word list are final (docs/contracts/zhen-mixed.md
-      # section 3.4 step 3); build-app.sh then builds the list from the starting caps and does not check its hash. Remove this line
-      # when the hash is pinned: release.yml never sets it.
-      SHANJIE_ENGLISH_ALLOW_UNPINNED: "1"
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:

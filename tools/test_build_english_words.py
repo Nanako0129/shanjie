@@ -47,9 +47,6 @@ class Cut(unittest.TestCase):
     def test_filtered_words_do_not_use_up_the_cap(self):
         self.assertEqual(B.build(lines("it's", "aaa", "b2b", "ccc"), len3=2, len4=0), ["aaa", "ccc"])
 
-    def test_shipping_caps_are_the_contract_start_values_until_main_pins_them(self):
-        self.assertEqual((B.LEN3_CAP, B.LEN4_CAP), (3000, 30000))
-
 
 class Render(unittest.TestCase):
     def test_sorted_by_bytes_and_one_word_per_line(self):
