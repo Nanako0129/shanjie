@@ -151,13 +151,14 @@ int32_t shanjie_engine_load_english(ShanjieEngine *engine, const char *path);
 //   becomes a fixed word. Turning it off, or the abbreviation composer on, closes the window. No effect without a list. Call it
 //   after every engine creation, like set_abbreviation.
 int32_t shanjie_engine_set_english(ShanjieEngine *engine, uint32_t enabled, ShanjieOutput **out); // 0 or 1; returns a snapshot
-// set_english_inline 0 or 1 (zhen-inline), default 1 at engine creation: with 1 (and set_english(1)) the unfinished syllable shows
-//   as the letters typed instead of the Zhuyin while all of these hold: the cursor is at the end with one unfinished unit, at
-//   least 3 letters, the overwrite condition of the English window's trigger, and a listed word starts with the letters. Enter
-//   (and reset with commit) then send the letters. 0 shows the Zhuyin until the English window opens. Returns 0; 1 when engine
-//   is NULL; 2 for any other value (state unchanged). No snapshot: the next output carries the display. Call it after every
-//   engine creation, like set_english.
-int32_t shanjie_engine_set_english_inline(ShanjieEngine *engine, uint32_t enabled);
+// set_english_inline 0 or 1 (2 otherwise, state unchanged), default 1 at engine creation, like set_english in its codes and its
+//   snapshot (handled 1, commit ""); 1 when engine or out is NULL. With 1 (and set_english(1)) the unfinished syllable shows as
+//   the letters typed instead of the Zhuyin while all of these hold: the cursor is at the end with one unfinished unit, at least
+//   3 letters, the overwrite condition of the English window's trigger, and a listed word starts with the letters. Enter (and
+//   reset with commit) then send the letters, and Backspace takes the last letter and rebuilds the symbols from the letters left.
+//   0 shows the Zhuyin until the English window opens. The snapshot shows a composition on screen in the new display. Call it
+//   after every engine creation, like set_english.
+int32_t shanjie_engine_set_english_inline(ShanjieEngine *engine, uint32_t enabled, ShanjieOutput **out); // 0 or 1; returns a snapshot
 // s3e (docs/contracts/s3e-punctuation-candidates.md): punctuation alternatives, UTF-8 lines
 // "mark\talt\talt...", blank lines ignored, a repeated mark overrides; at most 64 KB / 1,000 lines.
 // 2 on any invalid input, keeping the previous table (a built-in default until the first success).

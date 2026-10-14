@@ -493,7 +493,8 @@ pub struct Engine {
     /// replaced a symbol in an occupied column (rule 9). Empty unless `shadow_on`; cleared with `clear_pend`.
     shadow: Vec<char>,
     shadow_over: u32,
-    /// Set by `choose_english` for the output of the key or pick that made it: the committed text (section 2.3).
+    /// Set by `choose_english` when the token it inserted was the 40th unit and sent everything: the committed text, for the
+    /// output of the key or pick that made it. Choosing an English item sends nothing otherwise (zhen-inline section 1.0).
     commit_out: Option<String>,
 }
 
@@ -1073,10 +1074,11 @@ impl Engine {
         self.cands.as_ref().is_some_and(|c| c.english)
     }
 
-    /// zhen-inline: the display option "show the English as it is typed" (default on). Takes effect at the next display; a
-    /// composition already on screen is not re-rendered by this call. No effect without `set_english(true)`.
-    pub fn set_english_inline(&mut self, on: bool) {
+    /// zhen-inline: the display option "show the English as it is typed" (default on). No effect without `set_english(true)`.
+    /// Returns the snapshot, so a composition on screen is drawn again in the new display.
+    pub fn set_english_inline(&mut self, on: bool) -> Result<Output, EngineError> {
         self.english_inline = on;
+        self.handled()
     }
 
     /// zhen-inline section 1.1, the display rule D: whether the unfinished syllable shows as the shadow's letters (test and
@@ -1084,11 +1086,10 @@ impl Engine {
     /// least 3 letters, the trigger's overwrite condition, and a listed word that starts with the letters.
     #[doc(hidden)]
     pub fn english_inline_shown(&self) -> bool {
-        let Some(words) = self.english_words.as_ref().filter(|_| self.english_inline && self.shadow_on()) else { return false };
-        if self.cursor != self.syls.len() || !self.pend_prev.is_empty() || self.shadow.len() < 3 || !self.overwrite_enough() {
+        if !self.english_inline || self.shadow.len() < 3 {
             return false;
         }
-        let prefix: String = self.shadow.iter().collect();
+        let Some((words, prefix)) = self.eligible_shadow() else { return false };
         // Section 1.5: one binary search for the first word not below the prefix; the words that start with it are contiguous.
         let i = words.partition_point(|w| **w < *prefix);
         words.get(i).is_some_and(|w| w.starts_with(&prefix))
@@ -1145,15 +1146,40 @@ impl Engine {
         self.shadow_over >= 2 || (self.shadow_over == 1 && self.lex.entries(&[self.pending()]).is_empty())
     }
 
-    /// Section 2.2, the trigger (Space before rule 10): the shadow is a listed word with `overwrite_enough`. The cursor is at
-    /// the end and there is one unit.
-    fn english_trigger(&self) -> bool {
-        let Some(words) = self.english_words.as_ref().filter(|_| self.shadow_on()) else { return false };
+    /// The shadow as a candidate for an English word, and the list to look it up in: the shadow is recorded (`shadow_on`), the
+    /// cursor is at the end with one unit, and `overwrite_enough`. The one place both the trigger and the display rule D ask.
+    fn eligible_shadow(&self) -> Option<(&[Box<str>], String)> {
+        let words = self.english_words.as_deref().filter(|_| self.shadow_on())?;
         if self.cursor != self.syls.len() || !self.pend_prev.is_empty() || !self.overwrite_enough() {
-            return false;
+            return None;
         }
-        let word: String = self.shadow.iter().collect();
-        words.binary_search_by(|w| (**w).cmp(word.as_str())).is_ok()
+        Some((words, self.shadow.iter().collect()))
+    }
+
+    /// Section 2.2, the trigger (Space before rule 10): the eligible shadow is a whole listed word.
+    fn english_trigger(&self) -> bool {
+        self.eligible_shadow().is_some_and(|(words, word)| words.binary_search_by(|w| (**w).cmp(word.as_str())).is_ok())
+    }
+
+    /// zhen-inline section 1.3, Backspace while D holds (letters are on screen): the last letter goes, and the columns and the
+    /// replacement count are rebuilt by replaying the letters left through rule 9, so the symbols always are what those keys
+    /// type. (Rule 11 would take the last symbol in display order, which is not the last letter's.)
+    fn shadow_backspace(&mut self) {
+        self.shadow.pop();
+        self.pend = [None; 3];
+        self.shadow_over = 0;
+        for ch in self.shadow.clone() {
+            if let Some((col, sym)) = self.layout.symbol_of(ch) {
+                self.shadow_over += self.pend[col].is_some() as u32;
+                self.pend[col] = Some(sym);
+            }
+        }
+    }
+
+    /// The unfinished syllable's columns, for the typing simulator (tool hook; no letters, no tone).
+    #[doc(hidden)]
+    pub fn english_columns(&self) -> [Option<char>; 3] {
+        self.pend
     }
 
     /// The three writings of an English word, in the order of the window: as lower case, Capitalised, UPPER (no repeat).
@@ -1200,7 +1226,8 @@ impl Engine {
         Ok(())
     }
 
-    /// The output of a key or pick that chose a candidate: the English item's commit, or the plain snapshot.
+    /// The output of a key or pick that chose a candidate: the commit of the 40th unit (an item of the English window), or the
+    /// plain snapshot.
     fn chosen(&mut self) -> Result<Output, EngineError> {
         match self.commit_out.take() {
             Some(commit) => Ok(self.view(true, commit)),
@@ -1759,6 +1786,9 @@ impl Engine {
                     return self.finish_syllable(t, old);
                 }
                 self.pred = old; // two or more units: tone and space do nothing (section 12.2)
+            } else if k.kind == KeyKind::Backspace && self.english_inline_shown() {
+                self.shadow_backspace(); // zhen-inline section 1.3: letters are on screen
+                self.pred_dirty = true;
             } else if k.kind == KeyKind::Backspace {
                 // Row 11: the last symbol in display order (final, then medial, then initial), as Apple Zhuyin and
                 // McBopomofo do (measured 2026-10-06: ㄉㄨㄟ, ㄅ replaces ㄉ, then Backspace gives ㄅㄨ, then ㄅ).
@@ -1961,7 +1991,7 @@ impl Engine {
         if r.is_err() {
             self.clear_all();
         } else if std::mem::take(&mut self.pred_dirty) {
-            self.recompute_pred(); // a Chinese item of the English window (zhen-mixed section 2.3)
+            self.recompute_pred(); // an item of the English window: a Chinese item or an English token (zhen-mixed section 2.3, zhen-inline section 1.0)
             if let Ok(o) = &mut r {
                 (o.candidates, o.selected, o.total) = self.pred_view();
                 o.vertical = self.pred_vertical();
@@ -2050,13 +2080,13 @@ impl Engine {
         // s3e §3: right after punctuation (or punctuation first at cursor 0), list the typed mark,
         // then its alternatives.
         let touching = if a == 0 { 0 } else { a - 1 };
-        if avail == 0 && touching < self.syls.len() && english_of(&self.syls[touching]).is_some() {
-            // zhen-inline section 1.0: right after an English token, its three writings; the punctuation table is not asked.
-            let list = Self::english_writings(english_of(&self.syls[touching]).unwrap_or_default());
-            self.cands = Some(Cands::new(list.into_iter().map(|w| (w, 1)).collect(), self.cand_vertical));
-            return;
-        }
         if avail == 0 && touching < self.syls.len() && self.is_punct(touching) {
+            if let Some(word) = english_of(&self.syls[touching]) {
+                // zhen-inline section 1.0: right after an English token, its three writings; the punctuation table is not asked.
+                let list = Self::english_writings(word).into_iter().map(|w| (w, 1)).collect();
+                self.cands = Some(Cands::new(list, self.cand_vertical));
+                return;
+            }
             let typed = self.syls[touching][PUNCT_PREFIX.len()..].to_string();
             let alts = typed.chars().next().and_then(|c| self.punct.get(&c)).cloned().unwrap_or_default();
             let mut listed = HashSet::new();

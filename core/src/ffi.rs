@@ -691,24 +691,38 @@ pub unsafe extern "C" fn shanjie_engine_set_english(
 }
 
 /// zhen-inline section 2. `enabled` 0 or 1 (default 1): whether the English typed into the unfinished syllable shows as its letters
-/// while it can still become a listed word (the display rule D). 0 ok; 1 engine NULL; 2 any other value, state unchanged. No
-/// snapshot: the next output carries the display. Only matters with `set_english(1)`.
+/// while it can still become a listed word (the display rule D). Returns the snapshot like `set_english`, so a composition on screen
+/// is drawn again; any other value changes nothing and returns 2. Only matters with `set_english(1)`.
 ///
 /// # Safety
-/// `engine` is NULL or a live handle.
+/// `engine` is NULL or a live handle; `out` is NULL or valid for one pointer write.
 #[no_mangle]
-pub unsafe extern "C" fn shanjie_engine_set_english_inline(engine: *mut ShanjieEngine, enabled: u32) -> i32 {
-    guard(|| {
-        if engine.is_null() {
+pub unsafe extern "C" fn shanjie_engine_set_english_inline(
+    engine: *mut ShanjieEngine,
+    enabled: u32,
+    out: *mut *mut ShanjieOutput,
+) -> i32 {
+    let rc = guard(|| {
+        // SAFETY: forwarded caller contract.
+        if !unsafe { clear_out(out) } || engine.is_null() {
             return SHANJIE_ERR_NULL;
         }
         if enabled > 1 {
             return SHANJIE_ERR_INVALID;
         }
         // SAFETY: live handle, single-threaded use (§6).
-        unsafe { &mut (*engine).0 }.set_english_inline(enabled == 1);
-        SHANJIE_OK
-    })
+        let e = unsafe { &mut (*engine).0 };
+        match e.set_english_inline(enabled == 1) {
+            // SAFETY: `out` checked non-NULL above.
+            Ok(o) => unsafe { emit(o, out) },
+            Err(_) => SHANJIE_ERR_INTERNAL,
+        }
+    });
+    if rc == SHANJIE_ERR_INTERNAL {
+        // SAFETY: forwarded caller contract.
+        unsafe { discard(engine) };
+    }
+    rc
 }
 
 /// # Safety
@@ -1677,6 +1691,18 @@ mod tests {
         rc
     }
 
+    /// set_english_inline; returns the code and frees the output.
+    fn set_inline(e: *mut ShanjieEngine, on: u32) -> i32 {
+        let mut o: *mut ShanjieOutput = sentinel();
+        let rc = unsafe { shanjie_engine_set_english_inline(e, on, &mut o) };
+        if rc == 0 {
+            unsafe { shanjie_output_free(o) };
+        } else {
+            assert!(o.is_null(), "*out NULL on a non-zero code");
+        }
+        rc
+    }
+
     /// Types `keys` (Space for `_`); the last output's (candidates, commit, preedit), freed.
     fn type_out(e: *mut ShanjieEngine, keys: &str) -> (Vec<String>, String, String) {
         let mut last = (Vec::new(), String::new(), String::new());
@@ -1782,10 +1808,12 @@ mod tests {
             let p = list("refused.txt", bytes);
             assert!(load_english(e, &p) == 3, "{what}");
         }
-        // set_english_inline (zhen-inline section 2): 1 for a NULL engine, 2 out of range, 0 for 0 and 1.
-        assert!(unsafe { shanjie_engine_set_english_inline(ptr::null_mut(), 1) } == 1, "inline engine NULL");
+        // set_english_inline (zhen-inline section 2): the codes of set_english.
+        let mut o: *mut ShanjieOutput = sentinel();
+        assert!(unsafe { shanjie_engine_set_english_inline(ptr::null_mut(), 1, &mut o) } == 1 && o.is_null(), "inline engine NULL");
+        assert!(unsafe { shanjie_engine_set_english_inline(e, 1, ptr::null_mut()) } == 1, "inline out NULL");
         for v in [2, u32::MAX] {
-            assert!(unsafe { shanjie_engine_set_english_inline(e, v) } == 2, "inline out of range");
+            assert!(set_inline(e, v) == 2, "inline out of range");
         }
         // Through the C ABI, "show as typed" (the default): rust shows as the letters, Space opens the window, 1 keeps the word
         // in the composition (nothing is committed), Enter sends it.
@@ -1798,7 +1826,7 @@ mod tests {
         let (_, preedit, commit) = send(e, key(ENTER, '\0'));
         assert!(preedit.is_empty() && commit == "rust", "Enter sends it");
         // "Show on Space": the Zhuyin shows until the window opens.
-        assert!(unsafe { shanjie_engine_set_english_inline(e, 0) } == 0);
+        assert!(set_inline(e, 0) == 0);
         let (_, commit, preedit) = type_out(e, "rust");
         assert!(commit.is_empty() && preedit == "ㄔㄧ", "Zhuyin display");
         let (cands, commit, preedit) = type_out(e, "_");
@@ -1806,7 +1834,17 @@ mod tests {
         let (cands, commit, preedit) = type_out(e, "1");
         assert!(cands.is_empty() && commit.is_empty() && preedit == "rust", "the word stays in the composition");
         assert!(send(e, key(ENTER, '\0')).2 == "rust");
-        assert!(unsafe { shanjie_engine_set_english_inline(e, 1) } == 0);
+        // The snapshot redraws a composition on screen: letters typed, switch to "on Space", the Zhuyin shows, and back.
+        type_out(e, "rus");
+        let mut o: *mut ShanjieOutput = ptr::null_mut();
+        assert!(unsafe { shanjie_engine_set_english_inline(e, 1, &mut o) } == 0);
+        assert!(unsafe { CStr::from_ptr((*o).preedit) }.to_str().unwrap() == "rus", "snapshot, letters");
+        unsafe { shanjie_output_free(o) };
+        assert!(unsafe { shanjie_engine_set_english_inline(e, 0, &mut o) } == 0);
+        assert!(unsafe { CStr::from_ptr((*o).preedit) }.to_str().unwrap() == "ㄋㄧ", "snapshot, Zhuyin");
+        unsafe { shanjie_output_free(o) };
+        assert!(send(e, key(ESC, '\0')).0 == 0);
+        assert!(set_inline(e, 1) == 0);
         // Off: the same keys no longer open it.
         assert!(set_english(e, 0) == 0);
         let (cands, _, _) = type_out(e, "rust_");

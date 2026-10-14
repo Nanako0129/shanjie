@@ -356,11 +356,16 @@ static int run_english(const char *dir, const char *missing) {
   o = 0;
   CHECK(1009, shanjie_engine_set_english(e, 0, &o) == 0 && o != 0 && o->handled == 1);
   shanjie_output_free(o);
-  /* zhen-inline: set_english_inline 0 and 1 are 0, 2 is 2, NULL engine is 1. */
-  CHECK(1010, shanjie_engine_set_english_inline(0, 1) == 1);
-  CHECK(1011, shanjie_engine_set_english_inline(e, 2) == 2);
-  CHECK(1012, shanjie_engine_set_english_inline(e, 0) == 0);
-  CHECK(1013, shanjie_engine_set_english_inline(e, 1) == 0);
+  /* zhen-inline: set_english_inline 0 and 1 give a snapshot (codes like set_english), 2 is 2, NULL engine or out is 1. */
+  CHECK(1010, shanjie_engine_set_english_inline(0, 1, &o) == 1 && o == 0);
+  CHECK(1011, shanjie_engine_set_english_inline(e, 1, 0) == 1);
+  o = &dummy;
+  CHECK(1012, shanjie_engine_set_english_inline(e, 2, &o) == 2 && o == 0);
+  CHECK(1013, shanjie_engine_set_english_inline(e, 0, &o) == 0 && o != 0 && o->handled == 1);
+  shanjie_output_free(o);
+  o = 0;
+  CHECK(1014, shanjie_engine_set_english_inline(e, 1, &o) == 0 && o != 0 && o->handled == 1);
+  shanjie_output_free(o);
   shanjie_engine_free(e);
   return 0;
 }

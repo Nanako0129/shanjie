@@ -36,7 +36,7 @@ fn real() -> Arc<Lexicon> {
 /// Standard layout, the list loaded, the switch on, the display "show on Space" (zhen-mixed).
 fn eng() -> Engine {
     let mut e = eng_inline();
-    e.set_english_inline(false);
+    e.set_english_inline(false).unwrap();
     e
 }
 /// The same with the default display, "show as typed" (zhen-inline).
@@ -286,7 +286,7 @@ fn choose_chinese_item() {
     let mut e = Engine::with_lexicon(lex, Layout::Standard);
     e.load_english(&tiny_list()).unwrap();
     e.set_english(true).unwrap();
-    e.set_english_inline(false);
+    e.set_english_inline(false).unwrap();
     e.set_learning(true);
     e.learning_open(&dir).unwrap();
     assert!(run(&mut e, "1 8 _").preedit == "爸");
@@ -726,9 +726,9 @@ fn show_on_space_shows_the_zhuyin() {
         assert!(o.preedit == want && !e.english_inline_shown(), "{keys}: {}", o.preedit);
     }
     // The option can change between keys; the next display follows (a key that does nothing still shows the composition).
-    e.set_english_inline(true);
+    e.set_english_inline(true).unwrap();
     assert!(run(&mut e, "Left").preedit == "rust");
-    e.set_english_inline(false);
+    e.set_english_inline(false).unwrap();
     assert!(run(&mut e, "Left").preedit == "ㄔㄧ");
 }
 
@@ -761,12 +761,6 @@ fn escape_backspace_tone_and_space_follow_the_old_rules() {
     assert!(!e.english_open() && o.preedit == "ㄍㄠ" && !e.english_inline_shown());
     let o = run(&mut e, "_");
     assert!(o.preedit == shows("ㄍㄠ"), "rule 10 completed it: {}", o.preedit);
-    // Backspace: the shadow is shorter by a letter and D is judged again.
-    let mut e = eng_inline();
-    assert!(run(&mut e, "r u s t").preedit == "rust");
-    let o = run(&mut e, "BS");
-    assert!(o.preedit == "rus" && e.english_inline_shown(), "the shadow lost `t`: {}", o.preedit);
-    assert!(run(&mut e, "BS").preedit.is_empty(), "the syllable is gone");
     // A tone key finishes the syllable: the shadow goes, the character shows.
     let mut e = eng_inline();
     run(&mut e, "r u s");
@@ -779,6 +773,56 @@ fn escape_backspace_tone_and_space_follow_the_old_rules() {
     assert!(!e.english_open() && o.preedit == "rus");
     // Esc without a window clears the unfinished syllable altogether.
     assert!(run(&mut e, "Esc").preedit.is_empty());
+}
+
+#[test]
+fn backspace_under_d_replays_the_letters_left() {
+    // zhen-inline section 1.3: while letters are on screen Backspace takes the last letter, and the columns and the replacement
+    // count are what the letters left would type. Compared with an engine that typed just those letters.
+    let fresh = |keys: &str| {
+        let mut f = eng_inline();
+        run(&mut f, keys);
+        f
+    };
+    let mut e = eng_inline();
+    assert!(run(&mut e, "r u s t").preedit == "rust");
+    let o = run(&mut e, "BS");
+    let f = fresh("r u s");
+    assert!(o.preedit == "rus" && e.english_inline_shown(), "{}", o.preedit);
+    assert!(e.english_columns() == f.english_columns() && e.english_shadow_len() == 3, "the columns are those of `r u s`");
+    let o = run(&mut e, "BS");
+    let f = fresh("r u");
+    assert!(o.preedit == "ㄐㄧ" && !e.english_inline_shown(), "under 3 letters the Zhuyin of the columns: {}", o.preedit);
+    assert!(e.english_columns() == f.english_columns() && e.english_shadow_len() == 2);
+    let o = run(&mut e, "BS");
+    assert!(o.preedit == "ㄐ" && e.english_columns() == fresh("r").english_columns());
+    let o = run(&mut e, "BS");
+    assert!(o.preedit.is_empty() && e.english_shadow_len() == 0, "the syllable is gone");
+    assert!(is_empty(&mut e));
+
+    // Space after `r u s t` Backspace is Space after a fresh `r u s`.
+    let (mut a, mut b) = (eng_inline(), eng_inline());
+    run(&mut a, "r u s t BS");
+    run(&mut b, "r u s");
+    assert!(run(&mut a, "_") == run(&mut b, "_"));
+
+    // The replacement count is rebuilt too: `h e l l` has two replacements, `h e l` one with a leftover that is a syllable, so
+    // D no longer holds after the Backspace and the Zhuyin shows.
+    let (mut a, mut b) = (eng_inline(), eng_inline());
+    assert!(run(&mut a, "h e l l").preedit == "hell");
+    let oa = run(&mut a, "BS");
+    let ob = run(&mut b, "h e l");
+    assert!(oa.preedit == ob.preedit && oa.preedit == "ㄍㄠ" && !a.english_inline_shown(), "{}", oa.preedit);
+    assert!(a.english_columns() == b.english_columns());
+
+    // Not under D (Zhuyin on screen) it is rule 11 as ever: `c u p` has no replacement, so it shows ㄏㄧㄣ; Backspace takes ㄣ.
+    let mut e = eng_inline();
+    assert!(run(&mut e, "c u p").preedit == "ㄏㄧㄣ");
+    assert!(run(&mut e, "BS").preedit == "ㄏㄧ");
+    // And "show on Space" never has letters on screen: rule 11.
+    let mut e = eng();
+    run(&mut e, "r u s t");
+    assert!(run(&mut e, "BS").preedit == "ㄔ");
 }
 
 #[test]
@@ -828,7 +872,7 @@ fn rule_d_needs_the_standard_layout_the_switch_and_no_abbreviation() {
         let mut e = Engine::with_lexicon(real(), Layout::Eten);
         e.load_english(&tiny_list()).unwrap();
         e.set_english(true).unwrap();
-        e.set_english_inline(inline);
+        e.set_english_inline(inline).unwrap();
         e
     };
     let (mut a, mut b) = (mk(true), mk(false));
@@ -852,9 +896,9 @@ fn rule_d_needs_the_standard_layout_the_switch_and_no_abbreviation() {
 }
 
 #[test]
-fn the_word_list_lookups_do_not_scan() {
-    // Section 1.5: a full word and a prefix are binary searches on a sorted list. The behaviour: with a long list the prefix
-    // test is right at both ends and in the middle, whatever order the file had its lines in.
+fn the_word_list_is_sorted_on_load() {
+    // Section 1.5: the lookups are binary searches, which need a sorted list. What this proves is only that the list is sorted
+    // on load, whatever order the file had its lines in (the file here is descending); it does not detect a linear scan.
     let dir = tmp_dir("sorted");
     let mut words: Vec<String> = (0..2000).map(|i| format!("{}{}", ["zzz", "aaa", "mmm"][i % 3], "abcdefghijklmnopqrstuvwxyz".chars().nth(i % 26).unwrap())).collect();
     words.push("rust".into());
