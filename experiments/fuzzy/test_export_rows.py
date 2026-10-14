@@ -19,8 +19,9 @@ class ExportRows(unittest.TestCase):
     def test_score_counts_like_rescue(self):
         flags = [(1, 0), (1, 0), (1, 0), (1, 1), (0, 0)]
         ok = lambda *b: [(x, 0, 1) for x in b]
-        # row 1: clean right, exact wrong, tolerance right -> rescued; row 2: clean wrong -> excluded; row 3: exact right
-        got = X.score(flags, ok(1, 0, 1, 1, 1), ok(0, 0, 1, 0, 1), ok(1, 1, 0, 1, 1))
+        # row 1: clean right, exact wrong, tolerance right -> rescued; row 2: clean wrong -> excluded; row 3: exact right;
+        # row 4 (invalid): EXACT says right (the CLI decoded it through adjacent readings) but the exact decoder has no path -> wrong
+        got = X.score(flags, ok(1, 0, 1, 1, 1), ok(0, 0, 1, 1, 1), ok(1, 1, 0, 1, 1))
         self.assertEqual(got, {"valid": (3, 1, 1, 1), "invalid": (1, 0, 1, 1)})
 
 

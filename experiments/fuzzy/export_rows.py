@@ -6,7 +6,10 @@ ROWS.flags, one `row\tchanged\tinvalid` line per row (digits only).
   python3 experiments/fuzzy/export_rows.py --score ROWS.flags CLEAN EXACT TOL
 CLEAN, EXACT, TOL: shanjie-eval rowstats of the same set on the clean rows, on ROWS with `--fuzzy 0` (exact, a row without a path
 counts as wrong) and on ROWS with `--fuzzy FLAGS`. Prints per class what fuzzy.rescue counts at k = 1: changed rows, excluded
-(wrong on the clean input), wrong (exact wrong on the injected input) and rescued (of the wrong ones, right with tolerance)."""
+(wrong on the clean input), wrong (exact wrong on the injected input) and rescued (of the wrong ones, right with tolerance).
+An invalid row (a syllable the lexicon lacks) is always wrong for the exact decoder, as in the research: the CLI decodes such a
+syllable through its adjacent readings whatever the flags (the switch only gates the engine's finish_syllable), so EXACT is
+used for the valid rows only."""
 import argparse
 import random
 
@@ -34,7 +37,7 @@ def score(flags, clean, exact, tol):
     for name, inv in (("valid", 0), ("invalid", 1)):
         ch = [i for i, (c, v) in enumerate(flags) if c and v == inv]
         kept = [i for i in ch if clean[i][0]]
-        wrong = [i for i in kept if not exact[i][0]]
+        wrong = [i for i in kept if inv or not exact[i][0]]
         out[name] = (len(ch), len(ch) - len(kept), len(wrong), sum(tol[i][0] for i in wrong))
     return out
 
