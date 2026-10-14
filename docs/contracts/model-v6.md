@@ -42,7 +42,7 @@
   - `data/lexicon/names-add.tsv`（衝突讀音＝`names-collisions.tsv`），
   兩份輸出各給一次 `--extra-lexicon`。`count_lexicon.py` 若要改成能吃名單，改動與單元測試在這一片。
 - **輸入固定**：照 model-v5 的輸入表記 SHA-256（維基 dump、`colloquial-train.txt`、`synth.txt`、`mcbpmf-data.txt`、`overlay-add.tsv`、OpenCC 兩個表），除了兩份計數詞表、`overlay-add.tsv`（#152 拿掉粵語詞後的版本，記新雜湊）與 §2.1b 新增的補次數檔，每一列都要等於 model-v5 那次（`experiments/model-v5/README.md` 的表）。
-- **重現核對**：`build_counts.py`、`build_counts_text.py`、`count_lexicon.py`、`experiments/s2-classes/cluster.py`、`tools/build_classes.py` 對 model-v5 建置的 commit（98da9ad）diff 為空、`tools/build_lm.py` 只有 kn-core 片的重構（`merged_counts`）時，不重跑 model-v5 的重現核對；另外用同一份 model-v5 計數跑新的 `build_lm.py`，模型（加指紋前）要等於 `7961cb9d…`。任何一個腳本有別的改動，就照 model-v5 §2.1 跑一次重現核對。
+- **重現核對**：`build_counts.py`、`build_counts_text.py`、`count_lexicon.py`、`experiments/s2-classes/cluster.py`、`tools/build_classes.py` 對 model-v5 建置的 commit（98da9ad）diff 為空、`tools/build_lm.py` 只有 kn-core 片的重構（`merged_counts`）時，不重跑 model-v5 的重現核對；另外用同一份 model-v5 計數跑新的 `build_lm.py`，模型（加指紋前）要等於 `7961cb9d…`。§7 P3-4 給 `build_lm.py`、`build_classes.py` 加的預設關 `--extra-overlay` **不算**需要重跑的改動，條件是：不帶這個參數時，同一份計數建出的模型等於 `7961cb9d…`、`build_classes.py` 建出的詞類表和 classes-v3 逐位元組相同（兩項都在 188 上跑、記進研究紀錄）。任何一個腳本有別的改動，就照 model-v5 §2.1 跑一次重現核對。
 - **覆蓋量測**（計數之前）：在同樣的 20 萬篇維基與兩個口語檔裡，數 A3 新增詞與名單詞至少出現一次的個數，以及「酷澎」「洛琪希」「虎杖悠仁」的次數，寫進研究紀錄（日期在計數之前）。只報告，不設門檻（§0 已知計數救不了的名字由 §2.4 處理）。
 
 ### 2.1b 口語補次數（S7f 生成管線）
@@ -60,7 +60,7 @@
 
 ### 2.2 模型、詞類與私有條目
 
-- `tools/build_lm.py` 不改；指紋條目照 model-v4、v5 的做法由 main 在私有流程加回（不進 repo 與公開文件），在算雜湊、建詞類表、產生 KN 側檔之前加。
+- `tools/build_lm.py` 除了 §7 P3-4 的預設關 `--extra-overlay` 之外不改；指紋條目照 model-v4、v5 的做法由 main 在私有流程加回（不進 repo 與公開文件），在算雜湊、建詞類表、產生 KN 側檔之前加。
 - 詞類：`cluster.py --keep-from` 指向 model-v5 那次分群的輸出（舊詞沿用 classes-v3 的類別，model-v5 §9），新詞貼進最佳類別；`tools/build_classes.py` 對加過私有條目的模型建 `classes.sjc`（classes-v4）。
 
 ### 2.3 KN 側檔（kn-v1）
@@ -97,12 +97,12 @@
 ### 2.6 順序與 PR（照 model-v5 §2.5）
 
 1. 前提：A3、N1、kn-core 合併；本分支從含三者的 main 開出（N1 未合併前，§2.1b 的生成與 §2.2b 的工具可以先做）。
-2. 覆蓋量測、計數詞表（§2.1）、補次數檔（§2.1b），188 計數 → `build_lm.py` → 私有條目 → 分群＋`force_classes.py`＋`build_classes.py` → `kn_cont.py`。三個檔是最終檔，記 SHA-256。
+2. 覆蓋量測、計數詞表（§2.1）、補次數檔（§2.1b），188 計數 → `build_lm.py --extra-overlay data/lexicon/names-add.tsv` → 私有條目 → 分群＋`force_classes.py`＋`build_classes.py --extra-overlay data/lexicon/names-add.tsv` → `kn_cont.py --extra-overlay data/lexicon/names-add.tsv`。三個檔是最終檔，記 SHA-256；完整指令記進 `experiments/model-v6/README.md`。
 3. 跨語言核對（§2.3）；§2.4 的分數規則；§3 的量測、所有 golden 重產，都在最終檔上做。
 4. 詞包與名單的衝突在 model-v6 上重新偵測（§3.3）。
 5. fresh verifier：§3 重跑抽查、**保留集（在問 Release 之前）**；main：私有條目核對（開著 KN）。
 6. 以上通過後，**才問使用者**能不能建 Release `model-v6`、`classes-v4`、`kn-v1`（`--latest=false`）；建好後下載回來核對雜湊。接著 §2.7 的 tinylm-v5，保留集過了再問 Release `tinylm-v5`。
-7. PR 1：這份契約、四份 `docs/releases/*.md`、計數詞表與 `force_classes.py`、SJTL0004 核心改動與測試（SJTL0001–0003 的行為不變，出貨的 tinylm-v4 照常載入）。PR 2：改引用（model-v6、classes-v4、kn-v1、tinylm-v5 同一個 PR）、**Python 與 Rust 的名單層載入（檔案缺時是錯誤）與 App 內附 `names-add.tsv`（`build-app.sh`、`check-app.sh`）**、側檔、授權、所有 golden。名單層的預設載入、打包與它造成的每一個 golden 改動都在 PR 2，main 不會有「要讀名單檔、App 卻沒附」的狀態。
+7. PR 1：這份契約、四份 `docs/releases/*.md`、計數詞表與 `force_classes.py`、`build_lm.py`／`build_classes.py`／`kn_cont.py`／`lm_eval.py` 的預設關 `--extra-overlay`（§7 P3-4）、SJTL0004 核心改動與測試（SJTL0001–0003 的行為不變，出貨的 tinylm-v4 照常載入）。PR 2：改引用（model-v6、classes-v4、kn-v1、tinylm-v5 同一個 PR）、**Python 與 Rust 的名單層載入（檔案缺時是錯誤）與 App 內附 `names-add.tsv`（`build-app.sh`、`check-app.sh`）**、側檔、授權、所有 golden。名單層的預設載入、打包與它造成的每一個 golden 改動都在 PR 2，main 不會有「要讀名單檔、App 卻沒附」的狀態。
 
 ## 3. 驗收
 
@@ -154,6 +154,7 @@
 | 審查 | 要點 | 處置 |
 |---|---|---|
 | plan-verifier 第 1 次（2026-10-14，REVISE） | 1. KN 開著時小模型載不進來（`load_paired` 拒絕），§2.7 照寫跑不起來；2. §2.4 名單分數還是「待定」；3. Python 參考實作沒有名單層，跨語言核對與 golden 對不上；4. 量詞門檻沒說用哪一種計數、輸出寫到哪 | 全部 FIX：1 → §2.7 加 SJTL0004（記 KN 側檔雜湊）、`load_paired` 的新規則與測試、分數檔用暫時的 `.sjtl` 且 KN 開著、App 切 model-v6＋kn-v1 的 PR 同時切 tinylm-v5（維護者同日選「開 KN，核心一起改」）；2 → §2.4 寫成固定規則（建置時 +2 寫進 `names-add.tsv`，載入照疊加層規則）；3 → §2.5 Python 的 `ime.OVERLAYS` 與封頂詞集合讀 `names-add.tsv`，§2.3 三者都開；4 → §2.2b 用 `edges.npz` 的加權 `uni`、不在詞彙的略過、另存新 `cls` 檔並記雜湊 |
+| 第 4 次審查（2026-10-14，REVISE） | P3-4 的新參數沒同步到 §2.1 的重現核對、§2.2 的「不改」、§2.6 的建置步驟與 PR 1 清單 | FIX：§2.2 改成只加 `--extra-overlay`；§2.1 寫明它不觸發重現核對的條件（不帶參數時模型 `7961cb9d…`、詞類表等於 classes-v3）；§2.6 第 2、7 項寫出參數 |
 | 收尾審查（2026-10-14，REVISE；維護者選「改完再送一次審查」） | 1. 暫時 `.sjtl` 的指令缺 `--levels`，和 P3-5 的版本規則矛盾；2. P3-4 把 `ime.OVERLAYS` 放 PR 1，和「名單載入與 golden 都在 PR 2」矛盾 | 1 FIX：指令補 `--levels`（tinylm-v4 的值當佔位），§2.7 與 P3-5 的版本規則寫成同一條；2 FIX：PR 1 只給建置工具與 `lm_eval.py` 加預設關的 `--extra-overlay`，`ime.OVERLAYS` 改動移到 PR 2 |
 | plan-verifier 第 2 次（2026-10-14，REVISE；之後逐項處置、收尾審查一次） | 1. PR 1 讓名單層強制載入但 App 沒附檔、golden 也還沒重產，main 會壞；2. SJTL0004 讀檔、`load_paired` 綁定、`kn_sha256` 與新的必要資料檔沒有安全審查 | 1 FIX：名單層載入、打包、golden 全部移到 PR 2（§2.6 第 7 項）；2 FIX：`pilotfish:security-reviewer` 審 §2.7 與 §2.5，結論與處置記在 §7 |
 
