@@ -5129,3 +5129,8 @@ CLI 重現（Rust，model-v5，`--context`、沒有前文；聊天與書面、�
 - 維護者同意後推 `v0.4.3`（tag 指向 main `c6d0515`；和量基準測試的 `5c9cfef` 相比，`Cargo.toml Cargo.lock core cli data eval/variants.tsv macos scripts` 沒有差異），發佈流程 run 38499012621：gate、build 通過；sign 與 publish 兩個 job 都用 `release` 環境，各要維護者在 GitHub 核准一次（這次 run 記了兩次核准），之後都成功。
 - 核對（下載 Release 的附件到暫存資料夾）：`shanjie-0.4.3.zip`、`shanjie-installer-0.4.3.zip` 的 SHA-256 和各自的 `.sha256` 相同（`fb9aaf35…`、`69e2f9b3…`）；輸入法與安裝程式都是 Developer ID 簽章（`codesign --verify --deep --strict` 通過）、`spctl` 回 `Notarized Developer ID`、`stapler validate` 通過；版本 0.4.3；內附的模型檔和 v0.4.2 相同（`f81a021e…`、`75a5efb3…`、`7e73ef67…`）；Releases 頁的 Latest 是 v0.4.3，說明和 `docs/releases/v0.4.3.md` 相同；Homebrew cask 是 0.4.3，雜湊和 zip 相同。
 - 實機（契約 `docs/contracts/dec-recombine.md` §3.9）：發版前用 `imeshot` 在截圖探測視窗確認書面設定句首打 `ㄒㄧㄚˋ ㄌㄞˊ ㄈㄣ ㄒㄧ` 送出「下來分析」（同日基準測試一節）。§3.9 的另一半「維護者平常打字沒有變慢的感覺」**還沒有確認**：要等維護者用 v0.4.3 打字之後回報；每鍵 p95 3.3 → 4.0 ms 的原因也還是推論（同日基準測試一節）。
+
+## 2026-10-14：錯字回報第 105 列（談起來）
+
+- 維護者截圖 `彈起來蠻愉快的`（「錯字」；正解 `談`）。沒有前文，列為 `|談起來蠻愉快的|ㄊㄢˊ ㄑㄧˇ ㄌㄞˊ ㄇㄢˊ ㄩˊ ㄎㄨㄞˋ ㄉㄜ˙`（讀音由 `tools/readings.py` 產生）。
+- n-gram（`--context`，v0.4.3 的解碼器）：聊天第一名 `彈起來蠻愉快的`（−17.12），正解第 4（−18.28，差 1.16）；書面第一名同樣是 `彈起來…`（−17.13），正解第 2（−18.84，差 1.71）。`彈起來` 在語料裡的次數比 `談起來` 多，前面又沒有前文可以分辨。
