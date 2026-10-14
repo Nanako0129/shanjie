@@ -1,6 +1,6 @@
 # 解碼器依「字串＋最後一個詞」合併（v0.4.3）
 
-狀態：READY（2026-10-14 收尾審查）；plan-verifier 第一次 REVISE（6 點）、第二次 REVISE（2 點：§3.1 改在 Mac 以外的機器跑、第 226 列的 `Selftest.expected` 與相等即停）都照改（FIX）。
+狀態：已合併（PR #147），隨 v0.4.3 發佈（2026-10-14）；READY（2026-10-14 收尾審查）；plan-verifier 第一次 REVISE（6 點）、第二次 REVISE（2 點：§3.1 改在 Mac 以外的機器跑、第 226 列的 `Selftest.expected` 與相等即停）都照改（FIX）。
 
 ## 0. 起因
 

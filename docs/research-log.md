@@ -5074,7 +5074,7 @@ CLI 重現（Rust，model-v5，`--context`、沒有前文；聊天與書面、�
 
 ## 2026-10-14：v0.4.2 發佈與核對
 
-- 維護者同意後推 `v0.4.2`（tag 指向 main `c1323ea`），發佈流程 run 38461475857：gate、build 通過，sign 等維護者在 GitHub 核准 `release` 環境後跑完，publish 成功。
+- 維護者同意後推 `v0.4.2`（tag 指向 main `c1323ea`），發佈流程 run 38461475857：gate、build 通過；sign 與 publish 兩個 job 都用 `release` 環境，各要維護者在 GitHub 核准一次（這次 run 記了兩次核准），之後都成功。
 - 核對（下載 Release 的附件到暫存資料夾）：`shanjie-0.4.2.zip`、`shanjie-installer-0.4.2.zip` 的 SHA-256 和各自的 `.sha256` 相同（`3e4d536f…`、`a65c61ea…`）；輸入法與安裝程式都是 Developer ID 簽章（`codesign --verify --deep --strict` 通過）、`spctl` 回 `Notarized Developer ID`、`stapler validate` 通過；版本 0.4.2；內附的模型檔和 v0.4.1 相同（`f81a021e…`、`75a5efb3…`、`7e73ef67…`）；Releases 頁的 Latest 是 v0.4.2，說明和 `docs/releases/v0.4.2.md` 只差結尾一個空行；Homebrew cask 是 0.4.2，雜湊和 zip 相同。
 - **實機**（契約 `docs/contracts/learn-single-ctx.md` §2.8；裝 main 的本機建置，`imeshot` 一次約 14 秒）：句首打 `我是買新的`、`我在牛與`、`我是打這`，送出的文字三句都正確。
 - **維護者學習檔會被丟掉的紀錄**（§3；維護者同意後只數筆數，用新版的載入程式讀複本，數完刪掉複本）：273 筆裡載入 209 筆、略過 64 筆：單獨 `^` 的 46 筆（都是兩字以上的詞），前面只有一個漢字的單字 18 筆（和契約寫的 18 筆相同）。
@@ -5090,6 +5090,6 @@ CLI 重現（Rust，model-v5，`--context`、沒有前文；聊天與書面、�
 
 ## 2026-10-14：v0.4.3 發佈與核對
 
-- 維護者同意後推 `v0.4.3`（tag 指向 main `c6d0515`；和量基準測試的 `5c9cfef` 相比，`Cargo.toml Cargo.lock core cli data eval/variants.tsv macos scripts` 沒有差異），發佈流程 run 38499012621：gate、build 通過，sign 等維護者在 GitHub 核准 `release` 環境後跑完，publish 成功。
+- 維護者同意後推 `v0.4.3`（tag 指向 main `c6d0515`；和量基準測試的 `5c9cfef` 相比，`Cargo.toml Cargo.lock core cli data eval/variants.tsv macos scripts` 沒有差異），發佈流程 run 38499012621：gate、build 通過；sign 與 publish 兩個 job 都用 `release` 環境，各要維護者在 GitHub 核准一次（這次 run 記了兩次核准），之後都成功。
 - 核對（下載 Release 的附件到暫存資料夾）：`shanjie-0.4.3.zip`、`shanjie-installer-0.4.3.zip` 的 SHA-256 和各自的 `.sha256` 相同（`fb9aaf35…`、`69e2f9b3…`）；輸入法與安裝程式都是 Developer ID 簽章（`codesign --verify --deep --strict` 通過）、`spctl` 回 `Notarized Developer ID`、`stapler validate` 通過；版本 0.4.3；內附的模型檔和 v0.4.2 相同（`f81a021e…`、`75a5efb3…`、`7e73ef67…`）；Releases 頁的 Latest 是 v0.4.3，說明和 `docs/releases/v0.4.3.md` 相同；Homebrew cask 是 0.4.3，雜湊和 zip 相同。
-- 實機在發版前做過（同日「v0.4.3 的跨版本基準測試與保留集」一節）：書面設定句首打 `ㄒㄧㄚˋ ㄌㄞˊ ㄈㄣ ㄒㄧ` 送出「下來分析」。
+- 實機（契約 `docs/contracts/dec-recombine.md` §3.9）：發版前用 `imeshot` 在截圖探測視窗確認書面設定句首打 `ㄒㄧㄚˋ ㄌㄞˊ ㄈㄣ ㄒㄧ` 送出「下來分析」（同日基準測試一節）。§3.9 的另一半「維護者平常打字沒有變慢的感覺」**還沒有確認**：要等維護者用 v0.4.3 打字之後回報；每鍵 p95 3.3 → 4.0 ms 的原因也還是推論（同日基準測試一節）。
