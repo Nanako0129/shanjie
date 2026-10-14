@@ -43,14 +43,14 @@ class ExtraOverlay(unittest.TestCase):
         t = cls.tmp.name
         lexdir = os.path.join(t, "data", "lexicon")
         os.makedirs(lexdir)
-        for name, text in (("mcbpmf-data.txt", BASE), ("overlay-add.tsv", OVERLAY_ADD), ("sandhi-add.tsv", ""), ("extra.tsv", EXTRA)):
+        for name, text in (("mcbpmf-data.txt", BASE), ("overlay-add.tsv", OVERLAY_ADD), ("sandhi-add.tsv", ""), ("names-add.tsv", ""), ("extra.tsv", EXTRA)):
             open(os.path.join(lexdir, name), "w", encoding="utf-8").write(text)
         cls.extra = os.path.join(lexdir, "extra.tsv")
         for name, c in (("counts-200000.pkl", WIKI), ("counts-colloquial3.pkl", COLL)):
             pickle.dump(c, open(os.path.join(t, name), "wb"))
         cls.patches = [mock.patch.object(build_lm, "WORK", t), mock.patch.object(build_lm, "LEXDIR", lexdir),
                        mock.patch.object(build_classes, "ROOT", t), mock.patch.object(lm_eval, "ROOT", t),
-                       mock.patch.object(ime, "OVERLAYS", [os.path.join(lexdir, "overlay-add.tsv"), os.path.join(lexdir, "sandhi-add.tsv")]),
+                       mock.patch.object(ime, "OVERLAYS", [os.path.join(lexdir, f) for f in ("overlay-add.tsv", "sandhi-add.tsv", "names-add.tsv")]),
                        mock.patch.object(L, "cap_overlay", functools.partial(L.cap_overlay, demote_path=None))]   # 真的 demote.tsv 對不上小詞庫
         for p in cls.patches:
             p.start()
@@ -151,6 +151,13 @@ class ExtraOverlay(unittest.TestCase):
         open(kn, "wb").write(self.run_kn("--extra-overlay", self.extra))
         line = self.run_eval("--extra-overlay", self.extra, "--kn", kn)
         self.assertRegex(line, rf"-noclasses\+kn:[0-9a-f]{{8}}:θ1:β1\+xo:{sha8(open(self.extra, 'rb').read())}  \{{")
+
+    def test_capping_set_has_the_names_layer(self):
+        """model-v6 §2.5：names-add.tsv 的詞進封頂集合（Rust 的 capping_overlay 同一組）。"""
+        oa = os.path.join(self.tmp.name, "data", "lexicon", "overlay-add.tsv")
+        names = os.path.join(self.tmp.name, "names.tsv")
+        open(names, "w", encoding="utf-8").write("ㄎㄨˋ-ㄆㄥˊ\t酷澎\t-3.0\tnames\n")
+        self.assertEqual(lm_eval.overlay_words(oa, names=names), {"牠", "酷澎"})
 
     def test_capping_set_has_the_overlay_add_and_the_extra_words(self):
         oa = os.path.join(self.tmp.name, "data", "lexicon", "overlay-add.tsv")

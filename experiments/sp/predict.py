@@ -306,13 +306,15 @@ def samples_of(lex, rows):
 
 
 def build_lm_lex():
-    """和 reference/proto/lm_eval.py 第 49–52 行完全相同的詞庫與模型。"""
+    """和 reference/proto/lm_eval.py 相同的詞庫與封頂（KN 不載，見下）。"""
     path = os.path.join(ROOT, "data", "lm", "bigram.sjlm")
     want = open(os.path.join(ROOT, "data", "bigram.sjlm.sha256")).read().split()[0]
     assert hashlib.sha256(open(path, "rb").read()).hexdigest() == want, "bigram.sjlm hash mismatch"
     lm = L.BigramLM(path)
     base = ime.Lexicon(os.path.join(ROOT, "data", "lexicon", "mcbpmf-data.txt"), overlay=ime.OVERLAYS)
-    ov = {l.split("\t")[1] for l in open(os.path.join(ROOT, "data", "lexicon", "overlay-add.tsv"), encoding="utf-8")}
+    # 封頂詞集合：overlay-add.tsv 與名單層 names-add.tsv（model-v6 §2.5；Rust 的 capping_overlay 同一組）。KN 不載：
+    # CLI 的 --predict 也關著它（cli/src/main.rs）。
+    ov = {l.split("\t")[1] for f in ("overlay-add.tsv", "names-add.tsv") for l in open(os.path.join(ROOT, "data", "lexicon", f), encoding="utf-8")}
     return lm, L.cap_overlay(base, ov, lm)
 
 

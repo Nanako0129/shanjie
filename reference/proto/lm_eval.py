@@ -9,6 +9,7 @@
   舊的 SJKN0001 一定要給 --kn-beta。不論哪種格式都傳 kn_classes（build_lm.variant_classes），讓 lm.py 用 kn_total 重算 ΣN′ 和檔頭比對。
   摘要行的 profile 欄最後加 +kn:<側檔 SHA-256 前 8 碼>:θ<θ>:β<β>（Rust CLI 同格式）。
 --extra-overlay FILE：接在 ime.OVERLAYS 之後的疊加層檔，也併進封頂詞集合（預設關；Rust CLI 同名參數）；摘要行最後加 +xo:<檔案 SHA-256 前 8 碼>。
+  名單層 data/lexicon/names-add.tsv 已在 ime.OVERLAYS 與封頂詞集合裡（model-v6 §2.5），不要再用這個參數給它（重複的列是錯誤）。
 --rowstats FILE：每列一行 `列號\\t對錯\\t錯字數\\t正解字數`（只有數字，見 docs/contracts/eval-stats.md）。
 --dump FILE：每列寫 `列號\\t名次\\tsurface\\t分數(repr)`，前 64 名，給逐分數比對（容許 1e-9 的浮點誤差）。
 用法：python3 reference/proto/lm_eval.py --lm data/lm/bigram.sjlm --profile chat|formal --rows <檔> [--limit N] [--name 名稱] [--dump FILE] [--context] [--no-demote] [--no-classes] [--kn FILE [--kn-beta β]] [--extra-overlay FILE]
@@ -55,9 +56,10 @@ def xo_tag(path):
     return f"+xo:{hashlib.sha256(open(path, 'rb').read()).hexdigest()[:8]}" if path else ""
 
 
-def overlay_words(overlay_add, extra=None):
-    """封頂用的疊加層詞集合：overlay-add.tsv 的詞，加上 --extra-overlay 檔的詞（Rust 的 capping_overlay_detailed 加上 extra 的列）。"""
-    return {l.split("\t")[1] for p in (overlay_add, extra) if p for l in open(p, encoding="utf-8")}
+def overlay_words(overlay_add, extra=None, names=None):
+    """封頂用的疊加層詞集合：overlay-add.tsv 與 names-add.tsv（名單層，model-v6 §2.5）的詞，加上 --extra-overlay 檔的詞
+    （Rust 的 capping_overlay_detailed 加上 extra 的列）。"""
+    return {l.split("\t")[1] for p in (overlay_add, names, extra) if p for l in open(p, encoding="utf-8")}
 
 
 def main():
@@ -84,7 +86,7 @@ def main():
         import build_lm  # tools/，variant_classes 與 build_lm.build 同一套（kn-smoothing.md §2.2）
         kw = dict(kn=a.kn, kn_beta=a.kn_beta, kn_classes=build_lm.variant_classes(base.by_reading))
     lm = L.BigramLM(a.lm, classes=not a.no_classes, **kw)
-    ov = overlay_words(os.path.join(ROOT, "data", "lexicon", "overlay-add.tsv"), a.extra_overlay)
+    ov = overlay_words(os.path.join(ROOT, "data", "lexicon", "overlay-add.tsv"), a.extra_overlay, os.path.join(ROOT, "data", "lexicon", "names-add.tsv"))
     lex = L.cap_overlay(base, ov, lm)
     top1, o64, firsts, rs = 0, 0, [], []
     dump = open(a.dump, "w", encoding="utf-8") if a.dump else None
