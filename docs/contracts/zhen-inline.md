@@ -38,13 +38,14 @@ D 不成立時顯示照舊（注音）。D 每個按鍵重新判斷，不記狀�
 
 `shown()`：D 成立時，游標位置插入影子的字母（`shadow` 依序），不插入 `pending()`；游標在字母之後。候選窗、預測列照現行規則（D 不改變它們）。
 
-### 1.3 按鍵（只有 D 成立時和現在不同的兩個）
+### 1.3 按鍵（D 成立時只有 Enter 與 Backspace 和現在不同）
 
 | 按鍵 | D 成立時 |
 |---|---|
 | 空白鍵 | 不變：`english_trigger()` 成立（影子是完整的單字）就開英文窗；不成立就照第 10 條處理未完成音節（D 之後重新判斷） |
 | Enter（含 Shift+Enter） | 送出組字區顯示的整串：已組好的字（含英文 token）＋影子的字母，**不加空白**；清掉未完成音節與影子；學習照 Enter 的送出規則（英文本身不學）。這和 Enter 平常送出整個組字區相同，只是未完成的部分送字母而不是注音 |
-| 其他所有鍵（注音鍵、聲調鍵、Esc、Backspace、標點、方向鍵…） | 和現在完全相同；處理完再判斷 D（例如 Esc 清影子，D 不成立，回到注音；聲調鍵把音節打完，影子清掉） |
+| Backspace | 畫面上是字母，所以不照第 11 條（它刪顯示位置最後的符號，和最後一個字母不一定對得上）：丟掉影子最後一個字母，再把剩下的字母依第 9 條重放，欄位和覆寫次數都由重放重建（欄位永遠等於那些鍵打出來的）；然後重新判斷 D，不成立就顯示重放出來的欄位的注音。D 不成立時照第 11 條 |
+| 其他所有鍵（注音鍵、聲調鍵、Esc、標點、方向鍵…） | 和現在完全相同；處理完再判斷 D（例如 Esc 清影子，D 不成立，回到注音；聲調鍵把音節打完，影子清掉） |
 
 - **所有「照組字區顯示的樣子送出」的路徑都一樣**：`shown()` 在 D 成立時給字母，所以 Enter 與 `reset(ResetMode::Commit)`（殼在失去焦點時呼叫）都送出字母，不送注音。
 - **有窗開著時，窗的規則優先**：英文窗或候選窗開著時，Enter 照窗的規則（英文窗選中的項目照 1.0 留在組字區），不走上表「D 成立時的 Enter」。
@@ -59,7 +60,7 @@ D 不成立時顯示照舊（注音）。D 每個按鍵重新判斷，不記狀�
 
 ## 2. 設定與介面
 
-- C ABI：`shanjie_engine_set_english_inline(engine, int on)`，回傳碼照 `shanjie_engine_set_english` 的慣例；`core/include/shanjie.h` 與 `docs/contracts/s3a.md` 的 ABI 一節同步。引擎預設 on（`Engine::new` 時的值），殼在每次建引擎時把存的值送進去。
+- C ABI：`shanjie_engine_set_english_inline(engine, uint32_t enabled, ShanjieOutput **out)`，回傳碼與快照照 `shanjie_engine_set_english` 的慣例（0；engine 或 out 為 NULL 回 1；0 與 1 以外回 2、狀態不變；成功回快照，正在顯示的組字區照新的顯示重畫，殼把快照交給擁有組字區的 session 顯示）；`core/include/shanjie.h` 與 `docs/contracts/s3a.md` 的 ABI 一節同步。引擎預設 on（`Engine::new` 時的值），殼在每次建引擎時把存的值送進去。
 - 殼：UserDefaults 鍵 `englishInline`，沒有值時當 true。設定視窗在「中英混打（實驗）」下面加一個選擇「英文的顯示：打字時就顯示／按空白才顯示」；中英混打的開關反灰或關著時，這個選擇也反灰（和開關的 `englishEnabled` 同一個條件再加上開關本身開著）。選單不加項目。
 - 文件：`docs/contracts/s3a.md`（中英混打的規則表加 D 與 Enter 這一列）、`docs/contracts/zhen-mixed.md`（狀態列指到這份）、`docs/contracts/settings-window.md`（新的選擇）、`docs/PLAN.md` 的中英混打一項。
 
