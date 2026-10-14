@@ -1,7 +1,7 @@
 //! S3a key engine (docs/contracts/s3a.md): key events in, preedit / commit / candidates out.
 //! R2: no input text in errors or panics; types holding input text do not derive Debug.
 
-use crate::learn::{context_key, english_of, local_day, next_key, record_key, Learner, Level, Record, PUNCT_PREFIX};
+use crate::learn::{context_key, english_of, english_or_space, is_space_unit, local_day, next_key, record_key, Learner, Level, Record, PUNCT_PREFIX};
 use crate::learn_store::{LearnStore, Opened, StoreError, JOURNAL_MAX};
 use crate::predict::{predict, reading_matches_in, unit_of_syllable, Mode, Unit};
 use crate::lm::{decode_segment_learned, history, CappedLexicon, Demote, End, Learn, Lm, Profile};
@@ -516,7 +516,8 @@ pub struct Engine {
     /// zhen-inline section 1.3b: the English run being typed (Shift+letter starts it): letters shown at the cursor, not yet a
     /// unit. Empty = no run. Never together with an unfinished syllable or a window.
     run: String,
-    /// Whether the key being handled made an auto-keep (zhen-inline section 1.3; tool hook `english_autokept`).
+    /// Whether the latest `key()` made an auto-keep (zhen-inline section 1.3; tool hook `english_autokept`). Cleared at the start
+    /// of `key()` and nowhere else; no other entry point (a pick, a reset, a setting) touches it, so none can leave it stale.
     autokept: bool,
 }
 
@@ -743,7 +744,6 @@ impl Engine {
     /// Whether rerank jobs are made (default off, S7c-2c); recomputes the composition and returns the snapshot like `set_demote`,
     /// so turning it off shows the n-gram result at once. On a decode failure the engine resets itself.
     pub fn set_rerank(&mut self, on: bool) -> Result<Output, EngineError> {
-        self.autokept = false;
         self.invalidate();
         self.rerank_on = on;
         self.clear_pred();
@@ -789,7 +789,6 @@ impl Engine {
     /// prediction row is entered, or every stretch kept its first path. Syllables, cursor, fixed words and the candidate window
     /// are not touched; the prediction row is recomputed only when one is showing (a row the key rules cleared stays cleared).
     pub fn apply_rerank(&mut self, r: RerankResult) -> Result<Option<Output>, EngineError> {
-        self.autokept = false;
         if r.generation != self.generation || self.cands.is_some() || self.pred_sel.is_some() {
             return Ok(None);
         }
@@ -1051,7 +1050,6 @@ impl Engine {
     /// recomputes the composition and returns the snapshot, like `set_profile`. On a decode failure the
     /// engine resets itself.
     pub fn set_demote(&mut self, on: bool) -> Result<Output, EngineError> {
-        self.autokept = false;
         self.invalidate();
         self.demote = on;
         self.clear_pred();
@@ -1065,7 +1063,6 @@ impl Engine {
     /// Whether the prediction row is computed (default on, V3 section 10.5). Off clears the row (an entered row is left);
     /// on recomputes it, so a row that fits section 1.1 shows at once. Returns the snapshot.
     pub fn set_prediction(&mut self, on: bool) -> Result<Output, EngineError> {
-        self.autokept = false;
         self.predict_on = on;
         if !on {
             self.drop_units(); // the units' only way out is the row (section 12.1)
@@ -1079,7 +1076,6 @@ impl Engine {
     /// and follows the setting on every output (section 2.4), so a row on screen is re-rendered in the new orientation in
     /// the returned snapshot; with a candidate window open or nothing shown the snapshot equals the output before the call.
     pub fn set_candidate_vertical(&mut self, on: bool) -> Result<Output, EngineError> {
-        self.autokept = false;
         self.cand_vertical = on;
         self.handled()
     }
@@ -1087,7 +1083,6 @@ impl Engine {
     /// Whether a symbol typed into an occupied column opens a new unfinished unit (default off, V3 engine contract section 12).
     /// Turning it off with two or more units drops them all (as Esc does); otherwise nothing changes. Returns the snapshot.
     pub fn set_abbreviation(&mut self, on: bool) -> Result<Output, EngineError> {
-        self.autokept = false;
         self.abbr = on;
         if !on {
             self.drop_units();
@@ -1127,7 +1122,6 @@ impl Engine {
     /// with a loaded list, the standard layout and the abbreviation composer off (`shadow_on`). Off closes an open English
     /// window and clears the shadow. Returns the snapshot.
     pub fn set_english(&mut self, on: bool) -> Result<Output, EngineError> {
-        self.autokept = false;
         self.english = on;
         if !on {
             self.close_english();
@@ -1145,7 +1139,6 @@ impl Engine {
     /// zhen-inline: the display option "show the English as it is typed" (default on). No effect without `set_english(true)`.
     /// Returns the snapshot, so a composition on screen is drawn again in the new display.
     pub fn set_english_inline(&mut self, on: bool) -> Result<Output, EngineError> {
-        self.autokept = false;
         self.english_inline = on;
         self.handled()
     }
@@ -1174,8 +1167,9 @@ impl Engine {
         words.get(i).is_some_and(|w| w.starts_with(prefix))
     }
 
-    /// Whether the latest call (a key, a pick, a reset or a setting; each clears it first) made an auto-keep (zhen-inline
-    /// section 1.3: the rule D table row, an English window kept by a Zhuyin key where an English item was selected). Test and tool hook; the simulator counts with it and never repeats the rule.
+    /// Whether the latest `key()` made an auto-keep (zhen-inline section 1.3: the rule D table row, an English window kept by a
+    /// Zhuyin or punctuation key, letters kept by punctuation, section 1.3h). Only `key()` sets and clears it. Test and tool
+    /// hook; the simulator asks right after each key and never repeats the rule.
     #[doc(hidden)]
     pub fn english_autokept(&self) -> bool {
         self.autokept
@@ -1317,11 +1311,10 @@ impl Engine {
     }
 
     /// Zhen-inline section 1.3, the auto-keep: when the letters on screen (rule D) are a whole listed word and the Zhuyin key
-    /// `ch` would make something that starts no listed word, that word. (A whole word is also a listed prefix, so D's last
-    /// condition is implied.)
+    /// `ch` would make something that starts no listed word, that word.
     fn autokeep_word(&self, ch: char) -> Option<String> {
-        if !self.english_inline || self.shadow.len() < 3 {
-            return None;
+        if !self.english_inline_shown() {
+            return None; // the letters must be on screen: the rule D, asked of its one function
         }
         let (words, word) = self.eligible_shadow()?;
         (Self::is_word(words, &word) && !Self::has_prefix(words, &format!("{word}{ch}"))).then_some(word)
@@ -1364,6 +1357,9 @@ impl Engine {
         self.clear_pend();
         self.run = keep;
         let commit = self.run_push(upper)?;
+        if self.cursor < self.syls.len() {
+            self.refresh()?; // the run opened in front of units: they decode apart from it (section 1.3h)
+        }
         Ok(self.view(true, commit))
     }
 
@@ -1449,7 +1445,6 @@ impl Engine {
     /// Switch the profile (default chat; remembered even before a model is loaded), recompute the
     /// composition and return the snapshot. On a decode failure the engine resets itself.
     pub fn set_profile(&mut self, profile: Profile) -> Result<Output, EngineError> {
-        self.autokept = false;
         self.invalidate();
         self.profile = profile;
         self.clear_pred();
@@ -1504,7 +1499,6 @@ impl Engine {
     /// §6 reset: Commit returns the composition as shown, unfinished symbols included, like Enter (enter-pending
     /// contract §2; no learning here); both clear everything.
     pub fn reset(&mut self, mode: ResetMode) -> Output {
-        self.autokept = false;
         let commit = if mode == ResetMode::Commit { self.shown().0 } else { String::new() };
         self.clear_all();
         self.view(true, commit)
@@ -1512,7 +1506,7 @@ impl Engine {
 
     pub fn key(&mut self, k: Key) -> Result<Output, EngineError> {
         self.pred_dirty = false;
-        self.autokept = false;
+        self.autokept = false; // the one place it is cleared; `insert_english` may set it again below
         let mut r = self.dispatch(k);
         match &mut r {
             Err(_) => self.clear_all(),
@@ -1726,6 +1720,12 @@ impl Engine {
         Output { handled, commit, preedit, cursor_utf16, candidates, selected, columns, first, total, vertical, english_run_utf16_start, english_run_utf16_len }
     }
 
+    /// Zhen-inline section 1.3h: where the open English run sits among the units (the cursor), if one is open. The decode treats
+    /// it as it does an English token: stretches end and start there, and what follows is not after a Han character.
+    fn run_cut(&self) -> Option<usize> {
+        (!self.run.is_empty()).then_some(self.cursor)
+    }
+
     /// Recompute the display string: free segments decoded top-1, fixed words in between (§3.1).
     fn refresh(&mut self) -> Result<(), EngineError> {
         // Section 2.3, revision 1: every decode is a new generation; its job (if any) is made at the end of `refresh_lm`.
@@ -1735,11 +1735,16 @@ impl Engine {
         }
         let mut out = String::new();
         let mut pos = 0;
+        let cut = self.run_cut();
         let seg =|from: usize, to: usize, out: &mut String| -> Result<(), EngineError> {
-            if from < to {
-                let best = decode_beam(&self.lex, &self.syls[from..to], &mut NoLearning, BEAM_S1)
-                    .map_err(|_| EngineError::Internal)?;
-                out.push_str(&best.first().ok_or(EngineError::Internal)?.1.concat());
+            // Section 1.3h: an open run splits a stretch, as a token does.
+            let mid = cut.filter(|&c| from < c && c < to).unwrap_or(to);
+            for (a, b) in [(from, mid), (mid, to)] {
+                if a < b {
+                    let best = decode_beam(&self.lex, &self.syls[a..b], &mut NoLearning, BEAM_S1)
+                        .map_err(|_| EngineError::Internal)?;
+                    out.push_str(&best.first().ok_or(EngineError::Internal)?.1.concat());
+                }
             }
             Ok(())
         };
@@ -1778,37 +1783,57 @@ impl Engine {
         let mut stretches = Vec::new();
         // Byte offset in `out` after the last stretch put into the job: the text from there on is the next stretch's `gap`.
         let mut job_end = 0;
+        // Section 1.3h: an open English run is a boundary like a token: `cut` is its place among the units, `cut_out` the byte
+        // offset in `out` where it sits (the run's letters are not in `out`).
+        let (cut, mut cut_out) = (self.run_cut(), None);
         for gap in 0..=self.fixed.len() {
             let from = if gap == 0 { 0 } else { self.fixed[gap - 1].end };
             let right = self.fixed.get(gap);
             let to = right.map_or(self.syls.len(), |f| f.start);
-            if from < to {
+            if cut == Some(from) {
+                cut_out = Some(out.len());
+            }
+            let mut start = from;
+            while start < to {
+                // A stretch the run sits inside is decoded in two parts.
+                let stop = cut.filter(|&c| start < c && c < to).unwrap_or(to);
+                // The run before the part: what follows is not after a Han character, whatever stands to the left. The run after
+                // it: the part ends, and its next neighbour is an English token.
+                let (after_run, before_run) = (cut == Some(start), cut == Some(stop));
                 // Punctuation is a sentence boundary, as in the counts the model was built from (s3d §4).
                 // The first stretch (no fixed word on its left) starts from the left context (S2h §1).
                 let prev = match gap.checked_sub(1).map(|g| &self.fixed[g]) {
+                    _ if after_run => "<s>",
                     Some(f) if !self.is_punct(f.start) => f.word.as_str(),
                     Some(_) => "<s>",
                     None => history(&self.left, &st.lm),
                 };
                 let end = match right {
+                    _ if before_run => End::Eos,
                     Some(f) if !self.is_punct(f.start) => End::Next { word: &f.word, lp: lp_fixed[gap], delta: delta_fixed[gap] },
                     _ => End::Eos,
                 };
-                let before = format!("{}{out}", self.left);
-                let learn = (!self.learner.is_empty()).then(|| Learn { learner: &self.learner, before: &before, after: self.syls.get(to).map(String::as_str), today, eps_global: self.eps_global });
+                let before = format!("{}{out}{}", self.left, if after_run { self.run.as_str() } else { "" });
+                let run_next = before_run.then(|| format!("{PUNCT_PREFIX}{}", self.run));
+                let after = run_next.as_deref().or(self.syls.get(stop).map(String::as_str));
+                let learn = (!self.learner.is_empty()).then(|| Learn { learner: &self.learner, before: &before, after, today, eps_global: self.eps_global });
                 let best = decode_segment_learned(
-                    &st.capped, &self.syls[from..to], &st.lm, lam, prev, end, BEAM_S1, learn.as_ref(), self.demote,
+                    &st.capped, &self.syls[start..stop], &st.lm, lam, prev, end, BEAM_S1, learn.as_ref(), self.demote,
                 )
                 .map_err(|_| EngineError::Internal)?;
                 let first = &best.first().ok_or(EngineError::Internal)?.1;
-                let in_job = jobs && best.len() >= 2 && !self.boosted(st, from, first);
+                let in_job = jobs && best.len() >= 2 && !self.boosted(st, start, first);
                 if in_job {
                     let top = &best[..best.len().min(TOPK)];
+                    let mut gap_text = out[job_end..].to_string();
+                    if let Some(o) = cut_out.filter(|&o| o >= job_end) {
+                        gap_text.insert_str(o - job_end, &self.run); // the model sees the run between the Chinese on its two sides
+                    }
                     stretches.push(Stretch {
                         at: path.len(),
                         paths: top.iter().map(|(_, ws)| ws.iter().map(|&(w, lp, delta)| (w.to_string(), lp, delta)).collect()).collect(),
                         ng: top.iter().map(|(score, _)| *score).collect(),
-                        gap: out[job_end..].to_string(),
+                        gap: gap_text,
                     });
                 }
                 for (w, lp, delta) in first {
@@ -1818,6 +1843,10 @@ impl Engine {
                 if in_job {
                     job_end = out.len();
                 }
+                if before_run {
+                    cut_out = Some(out.len());
+                }
+                start = stop;
             }
             if let Some(f) = right {
                 out.push_str(&f.word);
@@ -1952,10 +1981,24 @@ impl Engine {
             None
         };
         if let Some(p) = punct {
+            // Zhen-inline section 1.3h: English on screen (rule D) or selected in an open English window is kept as a token first,
+            // as an auto-keep; what the 40th unit sent goes first in this output. Anything else unfinished is dropped.
+            let kept = if self.english_open() {
+                let sel = self.cands.as_ref().map_or(0, |c| c.sel);
+                self.choose_english(sel, true)?;
+                self.commit_out.take().unwrap_or_default()
+            } else if self.english_inline_shown() {
+                let letters = self.shadow.iter().collect();
+                self.insert_english(letters, true)?
+            } else {
+                String::new()
+            };
             // s3d §1: into the composition at the cursor, not committed.
             self.clear_pend();
             self.cands = None;
-            return self.insert_token(format!("{PUNCT_PREFIX}{p}"), Some(p.to_string()), None);
+            let mut o = self.insert_token(format!("{PUNCT_PREFIX}{p}"), Some(p.to_string()), None)?;
+            o.commit.insert_str(0, &kept);
+            return Ok(o);
         }
         let plain = m == 0;
         // Zhen-inline section 1.3b: Shift+letter starts an English run (the letter in upper case, from the keycap and Shift).
@@ -1971,6 +2014,12 @@ impl Engine {
             let commit = self.commit_out.take().unwrap_or_default();
             self.start_syllable(k.ch, col, sym);
             return Ok(self.view(true, commit));
+        }
+        // Zhen-inline section 1.3h: Backspace with the English window open (letters shown as typed) only closes the window; the
+        // shadow stays, so rule D shows the letters again and the next Backspace is section 1.3g's.
+        if k.kind == KeyKind::Backspace && self.english_inline && self.english_open() {
+            self.cands = None;
+            return self.handled();
         }
         // 3-8: candidates open.
         if self.cands.is_some() && self.candidate_key(k)? {
@@ -2072,12 +2121,13 @@ impl Engine {
             // text without the last letter becomes an English run there (a one-letter token just goes).
             KeyKind::Backspace if self.cursor > 0 && self.shadow_on() && english_of(&self.syls[self.cursor - 1]).is_some() => {
                 let at = self.cursor - 1;
-                let shown = self.fixed.iter().find(|f| f.start == at).map(|f| f.word.clone());
-                let mut letters = shown.unwrap_or_else(|| english_of(&self.syls[at]).unwrap_or_default().to_string());
+                // An English token always has its fixed word (`insert_english` is the only maker, `choose` replaces the word by
+                // another writing and a window can only span one token), and the word is the text it shows.
+                let mut letters = self.fixed.iter().find(|f| f.start == at).ok_or(EngineError::Internal)?.word.clone();
                 letters.pop();
                 self.cursor = at;
+                self.run = letters; // before the removal, so the decode there splits at the run (section 1.3h)
                 self.remove_syllable(at)?;
-                self.run = letters;
                 self.pred_dirty = true;
             }
             KeyKind::Backspace if self.cursor > 0 => {
@@ -2211,7 +2261,6 @@ impl Engine {
     /// the window closed, the V3 prediction row's (entered or not). `Ok(None)` when there is neither or `index` is
     /// outside that output (state unchanged).
     pub fn pick(&mut self, index: usize) -> Result<Option<Output>, EngineError> {
-        self.autokept = false;
         let Some(c) = &self.cands else {
             // V3 section 4: a click on the prediction row selects at once, entered or not.
             if index >= self.pred.len() {
@@ -2304,7 +2353,7 @@ impl Engine {
 
     /// Zhen-inline section 1.3e: whether unit `i` is an English token or a space unit, the two a Space after it types a space for.
     fn breaks_with_space(&self, i: usize) -> bool {
-        english_of(&self.syls[i]).is_some() || self.syls[i].strip_prefix(PUNCT_PREFIX) == Some(" ")
+        english_or_space(&self.syls[i])
     }
 
     fn is_punct(&self, i: usize) -> bool {
@@ -2327,7 +2376,7 @@ impl Engine {
         // then its alternatives.
         let touching = if a == 0 { 0 } else { a - 1 };
         if avail == 0 && touching < self.syls.len() && self.is_punct(touching) {
-            if self.syls[touching].strip_prefix(PUNCT_PREFIX) == Some(" ") {
+            if is_space_unit(&self.syls[touching]) {
                 return; // zhen-inline section 1.3e: a space unit has no list
             }
             if let Some(word) = english_of(&self.syls[touching]) {

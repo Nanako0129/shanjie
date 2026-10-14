@@ -19,6 +19,7 @@
 //! `Right`, `Down`, `S-Enter` and `S-,` with Shift, `Cmd-BS` with Command.
 use core::engine::*;
 use core::lm::{CappedLexicon, Lm};
+use core::tinylm::RerankLevel;
 use core::Lexicon;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
@@ -376,10 +377,13 @@ fn letter_in_window_keeps_the_item_and_starts_a_syllable() {
 
 #[test]
 fn punctuation_in_window() {
-    let mut e = eng();
-    run(&mut e, "r u s t _");
-    let o = run(&mut e, "S-,");
-    assert!(o.preedit == "，" && o.candidates.is_empty() && !e.english_open() && e.english_shadow_len() == 0);
+    // Zhen-inline 1.3h (revision 5): a mark with the window open keeps the selected item first, as a Zhuyin key does (PR #149 lost
+    // the word here). Both displays; the full cases are in `punctuation_with_the_window_open_keeps_the_selected_item`.
+    for mut e in [eng(), eng_inline()] {
+        run(&mut e, "r u s t _");
+        let o = run(&mut e, "S-,");
+        assert!(o.preedit == "rust，" && o.candidates.is_empty() && !e.english_open() && e.english_shadow_len() == 0, "{}", o.preedit);
+    }
 }
 
 #[test]
@@ -1678,8 +1682,9 @@ fn a_zhuyin_key_over_the_chinese_item_is_not_an_autokeep() {
 }
 
 #[test]
-fn autokept_describes_only_the_latest_call() {
-    // After an auto-keep a pick from the prediction row, a reset or a setting is not one.
+fn autokept_describes_only_the_latest_key() {
+    // Only `key()` sets and clears the flag (finding 7 of the revision-five review: set_rerank_level had been missed, so a clear
+    // spread over the entry points could leave it stale). A pick, a reset or a setting neither sets nor clears it; the next key does.
     let inline_lm = || {
         let mut e = lm_eng();
         e.set_english_inline(true).unwrap();
@@ -1689,8 +1694,10 @@ fn autokept_describes_only_the_latest_call() {
     let o = run(&mut e, "r u s t j");
     assert!(e.english_autokept() && !o.candidates.is_empty(), "premise: kept, and the row shows: {:?}", o.candidates);
     assert!(e.pick(0).unwrap().is_some());
-    assert!(!e.english_autokept(), "pick of a prediction");
-    for call in 0..4 {
+    assert!(e.english_autokept(), "a pick is not a key: the latest key's flag stays");
+    run(&mut e, "Esc");
+    assert!(!e.english_autokept(), "the next key clears it");
+    for call in 0..5 {
         let mut e = inline_lm();
         run(&mut e, "r u s t j");
         assert!(e.english_autokept());
@@ -1698,9 +1705,12 @@ fn autokept_describes_only_the_latest_call() {
             0 => drop(e.reset(ResetMode::Discard)),
             1 => drop(e.set_candidate_vertical(true).unwrap()),
             2 => drop(e.set_english_inline(false).unwrap()),
+            3 => drop(e.set_rerank_level(RerankLevel::Standard).unwrap()),
             _ => drop(e.set_prediction(false).unwrap()),
         }
-        assert!(!e.english_autokept(), "call {call}");
+        assert!(e.english_autokept(), "call {call} leaves the latest key's flag");
+        run(&mut e, "Esc");
+        assert!(!e.english_autokept(), "call {call}: the next key clears it");
     }
 }
 
@@ -1742,4 +1752,150 @@ fn space_unit_rule_needs_english_mixing_on() {
     assert!(o.preedit == "Win", "premise: the run became a token: {:?}", o.preedit);
     let o = run(&mut e, "_");
     assert!(o.preedit == "Win" && o.candidates == ["Win", "win", "WIN"], "{:?} {:?}", o.preedit, o.candidates);
+}
+
+// ---------- revision five (docs/contracts/zhen-inline.md section 1.3h) ----------
+
+#[test]
+fn punctuation_keeps_the_letters_that_are_shown() {
+    let fields = |o: &Output| (o.english_run_utf16_start, o.english_run_utf16_len);
+    // `rust` on screen (rule D), then a mark: after 我在用 the composition is 我在用rust，, and `rust` is a token, not a run.
+    let mut e = eng_inline();
+    let zh = three(&mut e);
+    assert!(run(&mut e, "r u s t").preedit == format!("{zh}rust") && e.english_inline_shown());
+    let o = run(&mut e, "S-,");
+    assert!(o.preedit == format!("{zh}rust，") && fields(&o) == (0, 0) && e.english_shadow_len() == 0 && o.commit.is_empty(), "{}", o.preedit);
+    assert!(e.english_autokept(), "kept as an auto-keep is");
+    // A token: Backspace takes the mark (one unit), the next one a letter of the token and opens a run (section 1.3g).
+    let mut t = eng_inline();
+    three(&mut t);
+    run(&mut t, "r u s t S-, BS");
+    let o = run(&mut t, "BS");
+    assert!(o.preedit == format!("{zh}rus") && fields(&o) == (3, 3), "rust was a token: {}", o.preedit);
+    assert!(run(&mut e, "Enter").commit == format!("{zh}rust，"));
+    // Not a whole word: `windo` stays as typed.
+    let mut e = win();
+    run(&mut e, "w i n d o");
+    assert!(e.english_inline_shown(), "premise: the letters show");
+    let o = run(&mut e, "S-,");
+    assert!(o.preedit == "windo，" && !e.english_inline_shown(), "{}", o.preedit);
+    assert!(run(&mut e, "Enter").commit == "windo，");
+    // A mark on a plain key (`[`) goes the same way as one typed with Shift.
+    let mut e = eng_inline();
+    run(&mut e, "r u s t");
+    assert!(run(&mut e, "[").preedit == "rust「");
+    // Letters not on screen (D false: two letters) are a syllable, as before: the mark drops it.
+    let mut e = eng_inline();
+    run(&mut e, "r u");
+    assert!(!e.english_inline_shown());
+    assert!(run(&mut e, "S-,").preedit == "，");
+    // "Show on Space": the Zhuyin is on screen, not letters, and the mark drops the unfinished syllable as it always did.
+    let mut e = eng();
+    run(&mut e, "r u s t");
+    assert!(run(&mut e, "S-,").preedit == "，");
+}
+
+#[test]
+fn punctuation_with_the_window_open_keeps_the_selected_item() {
+    for inline in [true, false] {
+        let mut e = if inline { eng_inline() } else { eng() };
+        let zh = three(&mut e);
+        run(&mut e, "r u s t _");
+        assert!(e.english_open());
+        let o = run(&mut e, "S-,");
+        assert!(o.preedit == format!("{zh}rust，") && !e.english_open() && o.candidates.is_empty(), "inline={inline}: {}", o.preedit);
+        assert!(run(&mut e, "Enter").commit == format!("{zh}rust，"));
+        // The selected item, not the first: Right selects `Rust`.
+        let mut e = if inline { eng_inline() } else { eng() };
+        run(&mut e, "r u s t _ Right");
+        assert!(run(&mut e, "S-,").preedit == "Rust，", "inline={inline}");
+        // A Chinese item stays a Chinese item (the window of `google` has ㄍㄠ's first entry as its fourth).
+        let mut e = if inline { eng_inline() } else { eng() };
+        run(&mut e, "g o o g l e _ Right Right Right");
+        assert!(run(&mut e, "S-,").preedit == format!("{}，", first_entry("ㄍㄠ")), "inline={inline}");
+    }
+}
+
+#[test]
+fn punctuation_after_letters_at_the_unit_limit_sends_in_this_keys_output() {
+    for keys in ["r u s t", "r u s t _"] {
+        let mut e = eng_inline();
+        let marks = nearly_full(&mut e);
+        run(&mut e, keys);
+        let o = run(&mut e, "S-,");
+        assert!(o.handled && o.commit == format!("{marks}rust") && o.preedit == "，", "{keys}: {} / {}", o.commit, o.preedit);
+    }
+}
+
+#[test]
+fn backspace_with_the_window_open_closes_it_and_the_letters_come_back() {
+    let fields = |o: &Output| (o.english_run_utf16_start, o.english_run_utf16_len);
+    let mut e = eng_inline();
+    let zh = three(&mut e);
+    run(&mut e, "r u s t _");
+    assert!(e.english_open());
+    let o = run(&mut e, "BS");
+    assert!(o.preedit == format!("{zh}rust") && fields(&o) == (0, 0) && !e.english_open() && e.english_inline_shown(), "{}", o.preedit);
+    assert!(o.candidates.is_empty() && e.english_shadow_len() == 4);
+    let o = run(&mut e, "BS");
+    assert!(o.preedit == format!("{zh}rus") && fields(&o) == (3, 3), "the next one is section 1.3g's: {}", o.preedit);
+    // "Show on Space": PR #149 stays (the window closes and the shadow goes; the Zhuyin is on screen).
+    let mut e = eng();
+    run(&mut e, "r u s t _");
+    let o = run(&mut e, "BS");
+    assert!(o.preedit == "ㄔㄧ" && fields(&o) == (0, 0) && !e.english_open() && e.english_shadow_len() == 0, "{}", o.preedit);
+}
+
+#[test]
+fn a_run_in_the_middle_decodes_its_two_sides_apart() {
+    let fields = |o: &Output| (o.english_run_utf16_start, o.english_run_utf16_len);
+    // 編譯 is one word; with something between 編 and 譯 the sides decode alone (邊, 意), as with a mark between them.
+    for lm in [false, true] {
+        let mk = || if lm { lm_eng() } else { eng_inline() };
+        let mut merged = mk();
+        syllable(&mut merged, "ㄅㄧㄢ");
+        let joined = syllable(&mut merged, "ㄧˋ").preedit;
+        let mut marked = mk();
+        syllable(&mut marked, "ㄅㄧㄢ");
+        run(&mut marked, "S-,");
+        let split = syllable(&mut marked, "ㄧˋ").preedit;
+        let (left, right) = split.split_once('，').unwrap();
+        assert!(joined == "編譯" && split == "邊，意", "premise (lm={lm}): {joined} / {split}");
+        let width = left.encode_utf16().count() as u32;
+
+        // Opened by Backspace behind a token: the run's two sides are what the mark's two sides are.
+        let mut e = mk();
+        syllable(&mut e, "ㄅㄧㄢ");
+        run(&mut e, "r u s t _ 1");
+        syllable(&mut e, "ㄧˋ");
+        run(&mut e, "Left");
+        let o = run(&mut e, "BS");
+        assert!(o.preedit == format!("{left}rus{right}") && fields(&o) == (width, 3), "lm={lm}: {}", o.preedit);
+        // Letters and Backspace in the run change nothing outside it.
+        let o = run(&mut e, "t");
+        assert!(o.preedit == format!("{left}rust{right}") && fields(&o) == (width, 4), "lm={lm}: {}", o.preedit);
+        let o = run(&mut e, "BS BS");
+        assert!(o.preedit == format!("{left}ru{right}"), "lm={lm}: {}", o.preedit);
+        run(&mut e, "s t");
+        let o = run(&mut e, "_");
+        assert!(o.preedit == format!("{left}rust{right}") && fields(&o) == (0, 0), "lm={lm}: {}", o.preedit);
+        assert!(run(&mut e, "Enter").commit == format!("{left}rust{right}"));
+
+        // Opened by Shift+letter in the middle (the cursor between 編 and 譯).
+        let mut e = mk();
+        syllable(&mut e, "ㄅㄧㄢ");
+        syllable(&mut e, "ㄧˋ");
+        run(&mut e, "Left");
+        let o = run(&mut e, "S-w");
+        assert!(o.preedit == format!("{left}W{right}") && fields(&o) == (width, 1), "lm={lm}: {}", o.preedit);
+        let o = run(&mut e, "i n");
+        assert!(o.preedit == format!("{left}Win{right}"), "lm={lm}: {}", o.preedit);
+        // At the very start, too: the first character is not after the (Han) left context of the app.
+        let mut e = mk();
+        syllable(&mut e, "ㄅㄧㄢ");
+        syllable(&mut e, "ㄧˋ");
+        run(&mut e, "Home");
+        let o = run(&mut e, "S-w");
+        assert!(o.preedit == "W編譯" && fields(&o) == (0, 1), "lm={lm}: {}", o.preedit);
+    }
 }

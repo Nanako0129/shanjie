@@ -55,12 +55,22 @@ pub fn english_of(reading: &str) -> Option<&str> {
     reading.strip_prefix(PUNCT_PREFIX).filter(|w| !w.is_empty() && w.bytes().all(|b| b.is_ascii_alphabetic()))
 }
 
+/// zhen-inline §1.3e: a space unit, the token a Space types after an English token (`_punct_ `).
+pub fn is_space_unit(reading: &str) -> bool {
+    reading.strip_prefix(PUNCT_PREFIX) == Some(" ")
+}
+
+/// The one test "English token or space unit": the two kinds of unit that count as one kind of neighbour (rule 8 key,
+/// `next_key`) and that a Space types a space after (`Engine::breaks_with_space`).
+pub fn english_or_space(reading: &str) -> bool {
+    english_of(reading).is_some() || is_space_unit(reading)
+}
+
 /// Rule 8: the key a word under `SENTINEL` is learned and looked up with; `next` is the reading of the syllable
 /// right after the word (`None`: the word ends the composition). An English token or a space unit after the word counts as
 /// one kind of neighbour, not as the word it holds (zhen-inline §1.0, §1.3e): `^>_punct_en`. Every key of rule 8 comes through here.
 pub fn next_key(next: Option<&str>) -> String {
-    let english_or_space = next.is_some_and(|n| english_of(n).is_some() || n.strip_prefix(PUNCT_PREFIX) == Some(" "));
-    let next = if english_or_space { Some(ENGLISH_NEXT) } else { next };
+    let next = if next.is_some_and(english_or_space) { Some(ENGLISH_NEXT) } else { next };
     format!("{NEXT_PREFIX}{}", next.unwrap_or("$"))
 }
 
