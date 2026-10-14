@@ -185,6 +185,7 @@ fn dump_words_align_with_dump_and_c_is_the_chosen_index() {
     let stats = std::fs::read_to_string(&stats).unwrap();
     let len = core::eval::Lenient::parse(&std::fs::read_to_string(root().join("eval/variants.tsv")).unwrap()).unwrap();
     let gold: Vec<String> = std::fs::read_to_string(&rows).unwrap().lines().map(|l| l.split('|').nth(1).unwrap().to_string()).collect();
+    let (a, t, d) = core::tinylm::TinyLm::load(Path::new(&sjtl)).unwrap().alpha_tau_delta(core::lm::Profile::Chat);
     for (i, (sline, stat)) in scores.lines().zip(stats.lines()).enumerate() {
         assert_eq!(w[at][..2], [(i + 1).to_string(), "0".to_string()], "rank 0 first");
         at += 1;
@@ -195,10 +196,13 @@ fn dump_words_align_with_dump_and_c_is_the_chosen_index() {
             multi |= w[at][2].contains(' ');
             at += 1;
         }
-        let (ng, ll) = (list_of(sline, "ng"), list_of(sline, "ll"));
         let c = sline[sline.find("\"c\": ").unwrap() + 5..].split(|ch| ch == ',' || ch == '}').next().unwrap().parse::<usize>().unwrap();
-        let (a, t, d) = core::tinylm::TinyLm::load(Path::new(&sjtl)).unwrap().alpha_tau_delta(core::lm::Profile::Chat);
-        assert_eq!(c, core::tinylm::pick(&ng, &ll, a, t, d), "row {}", i + 1);
+        // A row has `ll` only when the rerank ran (two or more candidates, none longer than the model's context); otherwise c is 0.
+        if sline.contains("\"ll\": [") {
+            assert_eq!(c, core::tinylm::pick(&list_of(sline, "ng"), &list_of(sline, "ll"), a, t, d), "row {}", i + 1);
+        } else {
+            assert_eq!(c, 0, "row {}: no ll means the rerank did not run, so c must be 0", i + 1);
+        }
         let ok = len.apply(cands[c][2]) == len.apply(&gold[i]);
         assert_eq!(stat.split('\t').nth(1).unwrap(), if ok { "1" } else { "0" }, "row {}: rank c + 1 is the sentence the run judged", i + 1);
         rerank_moved += (c != 0) as usize;
