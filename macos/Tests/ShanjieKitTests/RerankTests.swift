@@ -499,6 +499,7 @@ final class RerankTests: XCTestCase {
         let dirs = (try XCTUnwrap(TestData.resources(only: names)), try XCTUnwrap(TestData.resources(only: names)))
         try v2.write(to: dirs.0.appendingPathComponent(Shell.tinyLMFile))
         try v3.write(to: dirs.1.appendingPathComponent(Shell.tinyLMFile))
+        addTeardownBlock { for d in [dirs.0, dirs.1] { try? FileManager.default.removeItem(at: d) } }  // two 14.6 MB files each
         return dirs
     }
 
@@ -577,9 +578,15 @@ final class RerankTests: XCTestCase {
     }
 
     /// A change mid-composition goes through the owner: the core re-decodes, the owner shows the n-gram snapshot at once, and the
-    /// snapshot's job (with the new level; equal values here) reranks it again.
+    /// snapshot's job reranks it again with the new level. Independent of the shipped values: the file's chat aggressive set gets
+    /// alpha 0 (the small model's LL adds nothing, so the n-gram first always stays), so the job's result tells which level it ran
+    /// with: standard reranks the row, aggressive leaves the n-gram text.
     func testLevelChangeMidCompositionShowsTheSnapshotAndRerunsTheJob() throws {
         let (_, v3) = try versionedResources()
+        let file = v3.appendingPathComponent(Shell.tinyLMFile)
+        var bytes = try Data(contentsOf: file)
+        bytes.replaceSubrange(140..<148, with: Data(count: 8))  // chat aggressive alpha (rerank-strength section 2.1), 0.0
+        try bytes.write(to: file)
         let r = rig(resources: v3)
         r.c.type(RerankRow.standardKeys)
         r.runner.drain()
@@ -589,7 +596,11 @@ final class RerankTests: XCTestCase {
         XCTAssertEqual(r.c.client.marked, RerankRow.ngram, "the snapshot: re-decoded")
         XCTAssertEqual(r.runner.received, received + 1, "the snapshot left a job")
         r.runner.drain()
-        XCTAssertEqual(r.c.client.marked, RerankRow.reranked)
+        XCTAssertEqual(r.c.client.marked, RerankRow.ngram, "the job ran with the aggressive set (alpha 0): nothing moves")
+        SettingsModel(shell: r.shell).setRerankLevel(.standard)
+        XCTAssertEqual(r.c.client.marked, RerankRow.ngram, "the snapshot again")
+        r.runner.drain()
+        XCTAssertEqual(r.c.client.marked, RerankRow.reranked, "back to the standard set: reranked")
         XCTAssertEqual(r.frees.freed, r.shell.rerankTaken)
     }
 

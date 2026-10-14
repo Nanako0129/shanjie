@@ -215,7 +215,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     let mut dump_words = None::<String>;
     let (mut classes, mut kn) = (true, true);
     let (mut rowstats, mut tinylm, mut tinylm_scores) = (None::<String>, None::<String>, None::<String>);
-    let mut level = RerankLevel::Standard;
+    let mut level = None::<RerankLevel>;
     // acg-pack contract A.2: `--packs acg` adds data/packs/acg-add.tsv (or `--packs-dir DIR`'s) to the lexicon and the cap; off by default.
     let (mut packs, mut packs_dir) = (0u32, None::<String>);
     let mut extra_overlay = None::<String>;
@@ -237,12 +237,12 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
             "--tinylm" => tinylm = Some(val()?),
             "--tinylm-scores" => tinylm_scores = Some(val()?),
             "--rerank-level" => {
-                level = match val()?.as_str() {
+                level = Some(match val()?.as_str() {
                     "conservative" => RerankLevel::Conservative,
                     "standard" => RerankLevel::Standard,
                     "aggressive" => RerankLevel::Aggressive,
                     _ => return Err("--rerank-level must be conservative, standard or aggressive".into()),
-                }
+                })
             }
             "--context" => ctx_mode = true,
             "--no-demote" => demote = false,
@@ -258,10 +258,11 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     if tinylm_scores.is_some() && tinylm.is_none() {
         return Err("--tinylm-scores needs --tinylm".into());
     }
-    // Section 9 P3-8: without a small model a level would silently measure the n-gram alone.
-    if level != RerankLevel::Standard && tinylm.is_none() {
+    // Section 9 P3-8: without a small model a level (standard included) would silently measure the n-gram alone.
+    if level.is_some() && tinylm.is_none() {
         return Err("--rerank-level needs --tinylm".into());
     }
+    let level = level.unwrap_or(RerankLevel::Standard);
     if tinylm_scores.is_some() && set.as_deref() == Some("holdout") {
         return Err("--tinylm-scores is not allowed with --set holdout".into());
     }
@@ -433,7 +434,13 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
         f.write_all(format_rowstats(&rs).as_bytes()).map_err(|e| format!("cannot write rowstats ({:?})", e.kind()))?;
     }
     let sha = sha256_hex(firsts.join("\n").as_bytes());
-    println!("## {name}  lm-{profile_name}{}{}{}{}{}{}{xo}  {{'n': {}, 'top1': {top1}, 'oracle@64': {o64}, 'top1_sha256': '{sha}'}}", if ctx_mode { "+ctx" } else { "" }, if demote { "" } else { "-nodemote" }, if classes { "" } else { "-noclasses" }, lm.kn_tag().unwrap_or(""), tl.as_ref().map_or(String::new(), |(_, _, sha8)| format!("+tl:{sha8}")), if packs & PACK_ACG != 0 { "+acg" } else { "" }, rows.len());
+    // A non-standard level is a different setting from the shipping one: tools/bench.py and tools/triage.py compare the whole tag, so it fails their cells.
+    let rl_tag = match level {
+        RerankLevel::Standard => "",
+        RerankLevel::Conservative => "+rl:conservative",
+        RerankLevel::Aggressive => "+rl:aggressive",
+    };
+    println!("## {name}  lm-{profile_name}{}{}{}{}{}{}{}{xo}  {{'n': {}, 'top1': {top1}, 'oracle@64': {o64}, 'top1_sha256': '{sha}'}}", if ctx_mode { "+ctx" } else { "" }, if demote { "" } else { "-nodemote" }, if classes { "" } else { "-noclasses" }, lm.kn_tag().unwrap_or(""), tl.as_ref().map_or(String::new(), |(_, _, sha8)| format!("+tl:{sha8}")), rl_tag, if packs & PACK_ACG != 0 { "+acg" } else { "" }, rows.len());
     Ok(())
 }
 

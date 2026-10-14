@@ -469,6 +469,10 @@ impl TinyLm {
     /// in tinylm.row_key), the caller's (alpha, tau, delta) (`params` of the profile and level), then `pick`. Returns the chosen index and, when the model ran (two or more
     /// candidates), the LLs. A candidate longer than ctx - 1 characters is `TooLong`; the caller decides to keep the first.
     pub fn rerank(&self, ng: &[f64], cands: &[&str], key: &str, params: (f64, f64, f64)) -> Result<(usize, Option<Vec<f64>>), TinyLmError> {
+        // The header's check, for every caller: a NaN alpha or a negative delta from outside the file must not reach `pick`.
+        if !valid_params(params) {
+            return Err(TinyLmError::Format);
+        }
         let n = cands.len().min(ng.len()).min(TOPK);
         if n < 2 {
             return Ok((0, None));
@@ -803,6 +807,12 @@ mod tests {
         assert_eq!(chosen, pick(&ng[..TOPK], &ll, 0.7, 2.0, 0.0));
         assert_eq!(m.rerank(&ng, &cands, SENTINEL, chat).unwrap().1.unwrap(), with(""), "SENTINEL is the empty k");
         assert_eq!(m.rerank(&ng[..1], &cands[..1], key, chat).unwrap(), (0, None));
+        // params the header check would refuse are refused here too, even when fewer than two candidates would run nothing
+        for bad in [(f64::NAN, 2.0, 0.0), (f64::INFINITY, 2.0, 0.0), (0.7, f64::NAN, 0.0), (0.7, 2.0, -0.25), (0.7, 2.0, f64::NAN), (0.7, 2.0, MAX_DELTA + 1.0)] {
+            assert_eq!(m.rerank(&ng, &cands, key, bad).unwrap_err(), TinyLmError::Format, "{bad:?}");
+            assert_eq!(m.rerank(&ng[..1], &cands[..1], key, bad).unwrap_err(), TinyLmError::Format, "{bad:?}");
+        }
+        assert!(m.rerank(&ng, &cands, key, (0.7, f64::INFINITY, 0.0)).is_ok(), "an infinite tau is allowed: no threshold");
     }
 
     /// Contract 2.2: the Accelerate path (macOS) and the plain path agree to 1e-5 in LL on random weights; on other targets both
