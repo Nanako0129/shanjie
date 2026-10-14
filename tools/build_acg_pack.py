@@ -729,12 +729,9 @@ def dedupe(words, have):
 
 def scores(base):
     """長度 → 基底同字數詞條分數的第 25 百分位；某長度的基底詞條少於 1,000 條就沿用上一個長度（5 字以上才會發生）。"""
-    sc = {}
-    for n in range(2, 11):
-        got = sorted(s for syls, ents in base.by_reading.items() if len(syls) == n for _, s in ents)
-        sc[n] = got[len(got) // 4] if len(got) >= 1000 else sc[n - 1]
-        if n in bo.SCORE:
-            assert sc[n] == bo.SCORE[n], (n, sc[n])
+    sc = bo.length_scores(base)
+    for n in bo.SCORE:
+        assert sc[n] == bo.SCORE[n], (n, sc[n])
     return sc
 
 
