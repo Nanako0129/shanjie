@@ -332,8 +332,8 @@ final class CandidatePanelAdapter: CandidatePanel {
     /// The vertical panel's row separators (`VerticalLayout.separators`): one view per gap, kept across keys and only moved,
     /// hidden or shown; added and removed only when the number of rows changes or the content resets.
     private var separators: [FilledView] = []
-    /// True while the one-line English-run hint is what `show` drew (`showHint`): its cell reports no clicks and the bar has
-    /// no expand mark. Cleared by every `show` and by `hide`.
+    /// True while the one-line English-run hint is what `render` drew (`showHint`): its cell has no number's room and the bar has
+    /// no expand mark. Cleared by every `show` and by `hide`. (A click on it is ignored in `Session.candidateSelected`.)
     private var hintShown = false
     /// Widen-only column widths of the open grid (section 9); empty when collapsed or hidden.
     private var columnWidths: [CGFloat] = []
@@ -360,9 +360,7 @@ final class CandidatePanelAdapter: CandidatePanel {
         window.level = NSWindow.Level(rawValue: NSWindow.Level.popUpMenu.rawValue + 1)  // McBopomofo's value
         window.hidesOnDeactivate = false
         window.isReleasedWhenClosed = false
-        cellSet.onSelect = { [weak self] position in
-            if self?.hintShown == false { self?.onSelect?(position) }  // the hint is not a candidate
-        }
+        cellSet.onSelect = { [weak self] position in self?.onSelect?(position) }
         glass.contentView = row
         window.contentView = glass
     }
@@ -415,8 +413,9 @@ final class CandidatePanelAdapter: CandidatePanel {
     /// scroll indicator in a gutter on the right (candidate window only). The reset (`VerticalLayout.resets`, decided in `show`)
     /// has already cleared the content when this runs; the size and the gutter come from `VerticalLayout.plan`.
     private func showVertical(_ candidates: [String], notes: [String?], selected: Int, first: Int, total: Int,
-                              kind: Int, lineRect: NSRect?) {
-        let update = cellSet.update(candidates: candidates, notes: notes, selected: selected, first: first, columns: 0, renumber: true)
+                              kind: Int, lineRect: NSRect?, numbered: Bool = true) {
+        let update = cellSet.update(candidates: candidates, notes: notes, selected: selected, first: first, columns: 0, renumber: true,
+                                    numbered: numbered)
         let cells = update.cells
         // The size comes from the cells that exist now (reused ones keep their measured width), so nothing is measured twice.
         let plan = VerticalLayout.plan(previous: shownPlan, kind: kind, count: candidates.count, total: total,
@@ -519,10 +518,11 @@ final class CandidatePanelAdapter: CandidatePanel {
         decor.clear()
     }
 
-    /// Zhen-inline section 1.3f: the hint is the horizontal bar with one cell, no number, no highlight (selected -1, the
-    /// prediction row's look), no expand mark and no clicks.
-    func showHint(_ text: String, lineRect: NSRect?, appearance: NSAppearance?, glassTint: Double) {
-        render([text], notes: [nil], selected: -1, columns: 0, first: 0, total: 1, vertical: 0, lineRect: lineRect,
+    /// Zhen-inline section 1.3f: the hint is one cell in the prediction row's orientation (`vertical` 0 the bar, 2 the vertical
+    /// row), with no number (not even its room), no highlight (selected -1) and no expand mark. Whatever was on screen before
+    /// (the expanded grid included) is cleared first, so the hint is shown fresh, never as a collapse.
+    func showHint(_ text: String, vertical: Int, lineRect: NSRect?, appearance: NSAppearance?, glassTint: Double) {
+        render([text], notes: [nil], selected: -1, columns: 0, first: 0, total: 1, vertical: vertical, lineRect: lineRect,
                appearance: appearance, glassTint: glassTint, hint: true)
     }
 
@@ -534,17 +534,20 @@ final class CandidatePanelAdapter: CandidatePanel {
 
     private func render(_ candidates: [String], notes: [String?], selected: Int, columns: Int, first: Int, total: Int, vertical: Int,
                         lineRect: NSRect?, appearance: NSAppearance?, glassTint: Double, hint: Bool) {
+        let hintChanged = hintShown != hint
         hintShown = hint
         if window.appearance?.name != appearance?.name { window.appearance = appearance }
         applyTint(glassTint)
         // A change of value (the bar, a prediction row, a vertical window, in any order) clears what was on screen first
         // (`VerticalLayout.resets`); the vertical path then makes its cells and asks `VerticalLayout.plan` for the size.
-        if VerticalLayout.resets(previous: shownPlan, kind: vertical) {
+        // Going to or from the hint clears too: no old candidate lingers, and the expanded grid does not play its collapse.
+        if hintChanged || VerticalLayout.resets(previous: shownPlan, kind: vertical) {
             resetContent()
             shownPlan = nil
         }
         if vertical != 0 {
-            showVertical(candidates, notes: notes, selected: selected, first: first, total: total, kind: vertical, lineRect: lineRect)
+            showVertical(candidates, notes: notes, selected: selected, first: first, total: total, kind: vertical, lineRect: lineRect,
+                         numbered: !hint)
             return
         }
         shownPlan = .horizontal
@@ -561,7 +564,8 @@ final class CandidatePanelAdapter: CandidatePanel {
         let size: NSSize
         let targets: [NSPoint]
         let oldCells = cellSet.cells
-        let update = cellSet.update(candidates: candidates, notes: notes, selected: selected, first: first, columns: columns)
+        let update = cellSet.update(candidates: candidates, notes: notes, selected: selected, first: first, columns: columns,
+                                    numbered: !hint)
         let newCells = update.cells
         var gridWidth: CGFloat = 0
         var widened = false

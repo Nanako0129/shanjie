@@ -189,8 +189,8 @@ final class FakePanel: CandidatePanel {
     /// A mouse click on the cell at `i`, as the app's panel reports it.
     func click(_ i: Int) { onSelect?(i) }
 
-    func showHint(_ text: String, lineRect: NSRect?, appearance: NSAppearance?, glassTint: Double) {
-        show([], notes: [], selected: -1, columns: 0, first: 0, total: 0, vertical: 0, lineRect: lineRect, appearance: appearance,
+    func showHint(_ text: String, vertical: Int, lineRect: NSRect?, appearance: NSAppearance?, glassTint: Double) {
+        show([], notes: [], selected: -1, columns: 0, first: 0, total: 0, vertical: vertical, lineRect: lineRect, appearance: appearance,
              glassTint: glassTint)
         hint = text
     }

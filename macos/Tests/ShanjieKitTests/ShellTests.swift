@@ -616,11 +616,15 @@ final class ShellTests: XCTestCase {
         XCTAssertEqual(again.client.marked, "ㄋㄔ", "a new shell reads the stored on")
     }
 
+    private func englishController(vertical: Bool = false) -> Controller {
+        Controller(Shell(resources: resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(),
+                  learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), englishStore: MemoryEnglishStore(true), acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(vertical), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore()))
+    }
+
     /// zhen-inline section 1.3f: while an English run is open the core's run range gets the thick underline (the rest of the marked
     /// text stays single) and the hint is on the panel; once the run ends both are gone.
     func testEnglishRunHasThickUnderlineAndTheHint() {
-        let c = Controller(Shell(resources: resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(),
-                  learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), englishStore: MemoryEnglishStore(true), acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore()))
+        let c = englishController()
         c.session.activate()
         let single = NSUnderlineStyle.single.rawValue, thick = NSUnderlineStyle.thick.rawValue
         c.type("su3")  // ㄋㄧˇ, one Chinese character before the run
@@ -634,12 +638,66 @@ final class ShellTests: XCTestCase {
                        "thick over the run, single before it")
         XCTAssertEqual(c.panel.hint, "空白：英文斷開")
         XCTAssertTrue(c.panel.visible)
-        c.panel.click(0)  // the hint is no candidate: the shell is not told, and nothing is picked
+        XCTAssertEqual(c.panel.vertical, 0, "horizontal orientation: the bar")
         c.type(" ")  // the run ends
         XCTAssertEqual(c.client.marked, "你Windows")
         XCTAssertEqual(c.client.underlineRuns, [.init(range: NSRange(location: 0, length: 8), style: single)], "all single again")
         XCTAssertNil(c.panel.hint, "the hint goes with the run")
         XCTAssertFalse(c.panel.visible)
+    }
+
+    /// The hint is not a candidate: a click on it never reaches the core (`Session.candidateSelected` returns false and the
+    /// composition is as it was), where a click on a real candidate does (true control).
+    func testClickOnTheHintPicksNothing() {
+        let c = englishController()
+        c.session.activate()
+        c.type("su3 ")  // a candidate window for ㄋㄧˇ
+        XCTAssertTrue(c.panel.visible && c.panel.hint == nil)
+        XCTAssertTrue(c.session.candidateSelected(at: 0), "control: a click on a candidate is a pick")
+        c.type("w", flags: .shift)
+        c.type("in")
+        XCTAssertNotNil(c.panel.hint)
+        let marked = c.client.marked, calls = c.client.calls
+        c.panel.click(0)
+        XCTAssertFalse(c.session.candidateSelected(at: 0), "the hint is on the panel: nothing is sent to the core")
+        XCTAssertEqual(c.client.marked, marked)
+        XCTAssertEqual(c.client.calls, calls, "the client was not touched")
+        XCTAssertNotNil(c.panel.hint)
+        c.type(" ")  // the run ends, the hint goes: a click is a pick again
+        XCTAssertNil(c.panel.hint)
+        c.type("su3 ")
+        XCTAssertNil(c.panel.hint)
+        XCTAssertTrue(c.session.candidateSelected(at: 0), "after the hint, candidates are clickable again")
+    }
+
+    /// The hint is anchored at the run's start and the client is asked for the line only once per run (a synchronous IPC on the
+    /// key path), not at every letter; the next run asks again.
+    func testHintAsksTheClientForTheLineOnlyOncePerRun() {
+        let c = englishController()
+        c.session.activate()
+        c.type("su3")
+        c.type("w", flags: .shift)
+        let asked = c.client.lineAsks
+        XCTAssertEqual(c.client.lineCursor, 1, "anchored at the run's start (after the one Chinese character)")
+        c.type("indows")
+        XCTAssertEqual(c.client.lineAsks, asked, "six more letters, no new question")
+        XCTAssertEqual(c.client.lineCursor, 1)
+        XCTAssertEqual(c.panel.lineRect, c.client.line)
+        c.type(" ")
+        c.type("w", flags: .shift)
+        XCTAssertEqual(c.client.lineAsks, asked + 1, "another run asks again")
+        XCTAssertEqual(c.client.lineCursor, 8, "at the new run's start")
+    }
+
+    /// With the vertical orientation chosen the hint is drawn like the vertical prediction row (kind 2), not the horizontal bar,
+    /// and it is not a vertical candidate window (Page Up / Down stay out of the core).
+    func testHintFollowsTheVerticalOrientation() {
+        let c = englishController(vertical: true)
+        c.session.activate()
+        c.type("w", flags: .shift)
+        XCTAssertEqual(c.panel.hint, "空白：英文斷開")
+        XCTAssertEqual(c.panel.vertical, VerticalLayout.predictions)
+        XCTAssertFalse(c.session.shell.verticalOpen)
     }
 
     /// zhen-mixed section 3.2 / 5.3: "中英混打（實驗）" sits after "即時預測" and before "語意校正", is unchecked by default, is stored,

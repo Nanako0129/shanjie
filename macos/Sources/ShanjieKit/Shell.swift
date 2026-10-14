@@ -43,9 +43,11 @@ public protocol CandidatePanel: AnyObject {
     /// `columns` is 0 for both. The panel draws what it is told and reads no setting.
     func show(_ candidates: [String], notes: [String?], selected: Int, columns: Int, first: Int, total: Int, vertical: Int,
               lineRect: NSRect?, appearance: NSAppearance?, glassTint: Double)
-    /// zhen-inline section 1.3f: a one-line hint in the candidate window's place, drawn like the prediction row but never
-    /// selectable (a click does nothing) and with no expand mark. Hidden by `hide()` like any other content.
-    func showHint(_ text: String, lineRect: NSRect?, appearance: NSAppearance?, glassTint: Double)
+    /// zhen-inline section 1.3f: a one-line hint in the candidate window's place, drawn like the prediction row (`vertical` 2 when
+    /// the vertical orientation is chosen, else 0) but without a number's room, an expand mark or a highlight. It is not a
+    /// candidate: the session ignores a click on it. Replaces whatever was on screen without an animation; hidden by `hide()`
+    /// like any other content.
+    func showHint(_ text: String, vertical: Int, lineRect: NSRect?, appearance: NSAppearance?, glassTint: Double)
     func hide()
     /// Re-applies the tint to what is on screen now, without a new `show` (the slider moved while the panel is up).
     func setGlassTint(_ glassTint: Double)
@@ -435,6 +437,11 @@ public final class Shell {
     /// synchronous IPC on the key path, so a pure selection move (same preedit and cursor) reuses it.
     /// Cleared whenever the panel hides: commit, reset, owner change.
     var lineCache: (preedit: String, cursor: Int, rect: NSRect?)?
+    /// Zhen-inline section 1.3f: the hint is anchored at the start of the open English run, and the `lineRect` answer for that
+    /// start is kept for the run's lifetime, so only a run's first key asks the client. Cleared when the hint goes.
+    var hintAnchor: (start: Int, rect: NSRect?)?
+    /// Whether the hint is what the panel shows now. A click on it is not a candidate pick (`Session.candidateSelected`).
+    private(set) var hintShown = false
 
     /// `latest_source_revision` ("2026-10-06T00:08:14Z") of the manifest at `url` as a UTC "yyyy-MM-dd"; `nil` for anything else.
     static func readAcgDataDate(_ url: URL) -> String? {
@@ -856,6 +863,7 @@ public final class Shell {
         // Only an exact punctuation mark has a name: a word candidate is never a key of the table.
         let notes = list.map { names[$0] }
         shownVertical = vertical
+        hintShown = false
         panel.show(list, notes: notes, selected: selected, columns: columns, first: first, total: total, vertical: vertical,
                    lineRect: lineRect, appearance: appearance, glassTint: glassTint)
     }
@@ -863,14 +871,18 @@ public final class Shell {
     /// The hint shown while an English run is open (zhen-inline section 1.3f).
     static let englishRunHint = "空白：英文斷開"
 
-    /// The hint in the candidate window's place. It is not a candidate list, so Page Up / Down see no vertical window.
+    /// The hint in the candidate window's place, in the prediction row's orientation. It is not a candidate list, so Page Up /
+    /// Down see no vertical window (`verticalOpen` is false for the prediction row).
     func showHint(lineRect: NSRect?, appearance: NSAppearance?) {
-        shownVertical = 0
-        panel.showHint(Self.englishRunHint, lineRect: lineRect, appearance: appearance, glassTint: glassTint)
+        shownVertical = candidateVertical ? VerticalLayout.predictions : 0
+        hintShown = true
+        panel.showHint(Self.englishRunHint, vertical: shownVertical, lineRect: lineRect, appearance: appearance, glassTint: glassTint)
     }
 
     func hideCandidates() {
         lineCache = nil
+        hintAnchor = nil
+        hintShown = false
         shownVertical = 0
         panel.hide()
     }
@@ -949,14 +961,18 @@ public final class Session {
     /// A mouse click on a candidate (s3b2 section 8.3): `i` is its position in the output the panel
     /// shows. The core picks it through the same path as Enter and checks the range (code 2 leaves
     /// everything as it was); the learning gate is sampled first, as for a key.
-    public func candidateSelected(at i: Int) {
-        guard shell.owner === self, let engine = shell.engine else { return }
+    /// Returns whether a pick was sent to the core (false: not the owner, or the hint is what the panel shows).
+    @discardableResult
+    public func candidateSelected(at i: Int) -> Bool {
+        // The hint is on the panel, not a list: a click on it picks nothing and never reaches the core.
+        guard shell.owner === self, let engine = shell.engine, !shell.hintShown else { return false }
         applyLearningGate(engine)
         switch engine.pick(UInt32(truncatingIfNeeded: i)) {
         case .ok(let o): apply(o)
         case .failed(2): Log.shell.error("core call failed, code 2")
         case .failed(let c): _ = fail(c)
         }
+        return true
     }
 
     /// The input method menu (section 13.2).
@@ -1130,8 +1146,8 @@ public final class Session {
         }
     }
 
-    /// Section 7: commit first, then the preedit (single underline, caret at cursor_utf16), then
-    /// the candidates.
+    /// Section 7: commit first, then the preedit (single underline with a thick one over the open English run, caret at
+    /// cursor_utf16), then the candidates.
     private func apply(_ o: CoreOutput) {
         if !o.commit.isEmpty {
             client.insertText(o.commit, replacementRange: NSRange(location: NSNotFound, length: 0))
@@ -1148,16 +1164,26 @@ public final class Session {
             shell.hideCandidates()
         } else {
             let cursor = Int(o.cursorUTF16)
-            let rect: NSRect?
-            if let c = shell.lineCache, c.preedit == o.preedit, c.cursor == cursor {
-                rect = c.rect
-            } else {
-                rect = client.lineRect(cursor: cursor)
-                shell.lineCache = (o.preedit, cursor, rect)
-            }
             if hint {
+                // Anchored at the run's start, asked once per run (the cursor moves a letter per key; the start does not).
+                let start = o.englishRunStart
+                let rect: NSRect?
+                if let a = shell.hintAnchor, a.start == start {
+                    rect = a.rect
+                } else {
+                    rect = client.lineRect(cursor: start)
+                    shell.hintAnchor = (start, rect)
+                }
                 shell.showHint(lineRect: rect, appearance: client.appearance)
             } else {
+                shell.hintAnchor = nil
+                let rect: NSRect?
+                if let c = shell.lineCache, c.preedit == o.preedit, c.cursor == cursor {
+                    rect = c.rect
+                } else {
+                    rect = client.lineRect(cursor: cursor)
+                    shell.lineCache = (o.preedit, cursor, rect)
+                }
                 shell.showCandidates(o.candidates, selected: o.selected, columns: o.columns, first: o.first, total: o.total,
                                      vertical: o.vertical, lineRect: rect, appearance: client.appearance)
             }
