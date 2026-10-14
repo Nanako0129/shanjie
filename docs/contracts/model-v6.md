@@ -77,14 +77,14 @@
 
 ### 2.5 App 與發版
 
-- **名單層常開**：`load_lexicon*` 在 `sandhi-add.tsv` 之後讀 `names-add.tsv`，同時併進封頂用的疊加層文字（和 N1 的 `--extra-overlay` 同一條路，`--extra-overlay` 保留給研究用）；缺檔是錯誤（和 `overlay-add.tsv` 一樣，不靜默略過）。FFI、`core/include/shanjie.h`、`Support.swift`、`check-app.sh` 的檔案清單跟著改。
+- **名單層常開**（安全審查的要求在 §7 的 P2-3、P3-4、P3-6、P3-7、P3-8）：`load_lexicon*` 在 `sandhi-add.tsv` 之後讀 `names-add.tsv`，同時併進封頂用的疊加層文字（和 N1 的 `--extra-overlay` 同一條路，`--extra-overlay` 保留給研究用）；缺檔是錯誤（和 `overlay-add.tsv` 一樣，不靜默略過）。FFI、`core/include/shanjie.h`、`Support.swift`、`check-app.sh` 的檔案清單跟著改。
 - **授權**：`build-app.sh` 寫進 App 的資料授權說明加名單的三方標示（name-suggestion-index 的 BSD-3 版權聲明全文、政府資料開放授權條款第 1 版的標示文字、Wikipedia 貢獻者 CC BY-SA 4.0），`LICENSES/name-suggestion-index-BSD-3-Clause.txt` 隨 App 內附；`LICENSES/data.md` 的「不隨 App 內附」改掉。
 - **KN 側檔**：`build-app.sh` 複製並核對 `data/kn.sjkn.sha256`；`check-app.sh` 檢查它在 Resources；`ci.yml`、`release.yml` 下載 Release `kn-v1` 並核對雜湊。
 - **Python 參考實作**：`ime.OVERLAYS` 在 `sandhi-add.tsv` 之後加 `names-add.tsv`；`lm_eval.py` 與 `predict.py`（`sp-predict.txt` 的產生器）封頂用的疊加層詞集合也讀 `names-add.tsv`（和 Rust 的 `load_lexicon*` 同一個順序與規則），在模型旁邊有 `kn.sjkn` 時照樣載入；所有依模型的 golden 用 Python 產生、Rust 逐位元組相同。
 
 ### 2.7 語意校正重調（tinylm-v5）
 
-- **核心改動：小模型和 KN 一起載入（SJTL0004）**。現在 `TinyLm::load_paired` 在 KN 開著時一律拒絕（`TinyLmError::KneserNey`，因為 α、τ 是在沒有 KN 時調的）。改成：
+- **核心改動：小模型和 KN 一起載入（SJTL0004）**（安全審查的要求在 §7，全部是這一節的驗收）。現在 `TinyLm::load_paired` 在 KN 開著時一律拒絕（`TinyLmError::KneserNey`，因為 α、τ 是在沒有 KN 時調的）。改成：
   - 新版 SJTL0004＝SJTL0003 的 212 bytes 檔頭之後接 32 bytes：調參時用的 KN 側檔 SHA-256（全 0＝沒有開 KN 時調的）；字表與張量不變。SJTL0001–0003 視為全 0。
   - `load_paired`：模型雜湊照舊要相同；KN 開著時，檔裡記的側檔雜湊要等於載入的 `kn.sjkn` 的 SHA-256（`Lm` 加一個 `kn_sha256()`），否則照舊回 `KneserNey`；KN 關著時，檔裡記的必須是全 0（在 KN 開著時調的檔，配沒有 KN 的模型也拒絕，回 `KneserNey`）。CLI 的 `--tinylm` 錯誤訊息照新規則改；`--no-kn` 照舊。
   - `export_sjtl.py` 加 `--kn-side <kn.sjkn>`（寫入它的雜湊、輸出 SJTL0004；不給就寫全 0，仍輸出 SJTL0004）。
@@ -102,7 +102,7 @@
 4. 詞包與名單的衝突在 model-v6 上重新偵測（§3.3）。
 5. fresh verifier：§3 重跑抽查、**保留集（在問 Release 之前）**；main：私有條目核對（開著 KN）。
 6. 以上通過後，**才問使用者**能不能建 Release `model-v6`、`classes-v4`、`kn-v1`（`--latest=false`）；建好後下載回來核對雜湊。接著 §2.7 的 tinylm-v5，保留集過了再問 Release `tinylm-v5`。
-7. PR 1：這份契約、四份 `docs/releases/*.md`、計數詞表與 `force_classes.py`、SJTL0004 核心改動與測試、Python 與 Rust 的名單層載入（檔案缺時是錯誤，這時 `names-add.tsv` 已在 main）。PR 2：改引用（model-v6、classes-v4、kn-v1、tinylm-v5 同一個 PR）、App 內附名單層與側檔、授權、golden。
+7. PR 1：這份契約、四份 `docs/releases/*.md`、計數詞表與 `force_classes.py`、SJTL0004 核心改動與測試（SJTL0001–0003 的行為不變，出貨的 tinylm-v4 照常載入）。PR 2：改引用（model-v6、classes-v4、kn-v1、tinylm-v5 同一個 PR）、**Python 與 Rust 的名單層載入（檔案缺時是錯誤）與 App 內附 `names-add.tsv`（`build-app.sh`、`check-app.sh`）**、側檔、授權、所有 golden。名單層的預設載入、打包與它造成的每一個 golden 改動都在 PR 2，main 不會有「要讀名單檔、App 卻沒附」的狀態。
 
 ## 3. 驗收
 
@@ -154,3 +154,24 @@
 | 審查 | 要點 | 處置 |
 |---|---|---|
 | plan-verifier 第 1 次（2026-10-14，REVISE） | 1. KN 開著時小模型載不進來（`load_paired` 拒絕），§2.7 照寫跑不起來；2. §2.4 名單分數還是「待定」；3. Python 參考實作沒有名單層，跨語言核對與 golden 對不上；4. 量詞門檻沒說用哪一種計數、輸出寫到哪 | 全部 FIX：1 → §2.7 加 SJTL0004（記 KN 側檔雜湊）、`load_paired` 的新規則與測試、分數檔用暫時的 `.sjtl` 且 KN 開著、App 切 model-v6＋kn-v1 的 PR 同時切 tinylm-v5（維護者同日選「開 KN，核心一起改」）；2 → §2.4 寫成固定規則（建置時 +2 寫進 `names-add.tsv`，載入照疊加層規則）；3 → §2.5 Python 的 `ime.OVERLAYS` 與封頂詞集合讀 `names-add.tsv`，§2.3 三者都開；4 → §2.2b 用 `edges.npz` 的加權 `uni`、不在詞彙的略過、另存新 `cls` 檔並記雜湊 |
+| plan-verifier 第 2 次（2026-10-14，REVISE；之後逐項處置、收尾審查一次） | 1. PR 1 讓名單層強制載入但 App 沒附檔、golden 也還沒重產，main 會壞；2. SJTL0004 讀檔、`load_paired` 綁定、`kn_sha256` 與新的必要資料檔沒有安全審查 | 1 FIX：名單層載入、打包、golden 全部移到 PR 2（§2.6 第 7 項）；2 FIX：`pilotfish:security-reviewer` 審 §2.7 與 §2.5，結論與處置記在 §7 |
+
+## 7. 安全審查（`pilotfish:security-reviewer`，2026-10-14）與處置
+
+沒有 P0／P1。下列 FIX 都是 §2.5、§2.7 的實作與驗收要求（測試寫在這裡，executor 照做；每一條的突變都要以斷言失敗）。
+
+| # | 要點 | 處置 |
+|---|---|---|
+| P2-1 | SJTL0004 的版本判斷要帶「有三檔」，否則強度控制靜默反灰；`kn_sha` 要在長度檢查之後讀 | FIX：同一個 match 決定 v4＝檔頭 244 bytes、有 δ、有三檔；`kn_sha`＝`bytes[212..244]`，長度檢查之後才讀；`has_levels()` 對 v4 為真、`rerank_levels` 回 7。測試：v4 小檔 12 個強度欄位填不同值、`params` 逐一相等；v4 與去掉 212..244 的 v3 的標準三元組、`ngram_sha256`、`ll_many` 逐位元組相同；前綴長度 0..=244 都回 `Format` 不 panic。突變：v4 的 levels 設 false、檔頭長度用 212、拿掉長度檢查 |
+| P2-2 | `kn_sha256()` 要用 `add_kn` 驗過的同一份 bytes、比完整 32 bytes | FIX：`Lm::kn_sha256() -> Option<[u8; 32]>`，從 `Kn.raw` 算（可和 `kn_tag` 共用 `OnceLock`），不重讀檔；`load_paired` 比 32 bytes 原始值；定義＝整個 `kn.sjkn` 的 SHA-256（和 `export_sjtl.py` 的 `hashlib.sha256` 相同）。測試：只差最後一個 byte → `KneserNey`；前 4 bytes 相同 → `KneserNey`；Rust 對 `eval/golden/kn-tiny/kn.sjkn` 的值等於 Python `hashlib`。突變：只比前 8 hex |
+| P2-3 | 名單要進 engine 路徑的封頂文字，不能只在 CLI | FIX：名單在 core 共用的 `load_lexicon_packs_detailed` 與 `capping_overlay_detailed` 裡讀，CLI 與 engine 共用。測試：經 `Engine::new_with_packs`＋`load_lm`（或 FFI）斷言合成名單列的分數＝檔案分數 − 1.0（詞彙外）；FFI 缺 `names-add.tsv` 時 `new` 回 3、`load_lm` 回 3。突變：從 `capping_overlay_detailed` 拿掉名單 |
+| P3-4 | `ime.OVERLAYS` 加名單會改到建模的變體類與 ΣN′ | FIX：建置 model-v6 時 `build_lm.py`、`build_classes.py`、`kn_cont.py` 的 `ime.OVERLAYS` **包含** `names-add.tsv`（名單詞已進計數詞彙），這個改動在 §2.6 第 2 步之前就做在分支上（所以 Python 的 `OVERLAYS` 改動屬於 PR 1 的建置部分；Rust 的預設載入與打包仍在 PR 2）；§2.1 的重現核對在改動之前跑；對最終名單算有／無名單的 `variant_classes`，差異寫進研究紀錄 |
+| P3-5 | `export_sjtl.py --kn-side` 的版本規則與輸入驗證 | FIX：給了 `--levels` 就寫 v4（沒有 `--kn-side` 時 32 bytes 全 0）；沒給 `--levels` 時 v1／v2 不變；只給 `--kn-side` 是 usage error；`--kn-side` 的檔要是 `SJKN0002` 而且記的模型雜湊等於 `--ngram-model`，寫檔前驗證；`read_sjtl` 讀得了 v4。測試照這四條 |
+| P3-6 | Swift 的版本改寫測試在 v4＋KN 時會因錯的原因通過 | FIX：`versionedResources()` 處理真檔是 v4 的情況；有 `kn.sjkn` 時只用 v4 配對，v2／v3 的 Resources 不放 `kn.sjkn`；每個衍生檔先斷言 `rerankEnabled == true` 再斷言強度控制；`Support.swift` 與 `resources(only:)` 清單加 `kn.sjkn`、`names-add.tsv` |
+| P3-7 | `check-app.sh` 要核對 `kn.sjkn` 的雜湊；selftest 是 App 裡配對成功的證據 | FIX：`check-app.sh` 比對 `Resources/kn.sjkn` 與 `data/kn.sjkn.sha256`，`names-add.tsv` 加進存在檢查，授權檔列出名單；§3 以帶 KN 的 bundle 上 `--selftest` 通過為「App 裡 model-v6＋kn-v1＋tinylm-v5 配上了」的證據，selftest 的檢查句在新模型上重新確認 |
+| P3-8 | 名單常開後，衝突重驗會重複載入或低報 | FIX：§3.3 的衝突重驗在預設載入改動之前，用 `--extra-overlay` 跑（PR 1 的分支上）；N1 的「名單與 `acg-add.tsv` 交集為空」測試保留不可移除 |
+| P4-9 | 「(use --no-kn)」對新情況是錯的建議 | FIX：錯誤訊息分三種情況寫（KN 開但側檔不符；KN 關但檔是在 KN 開時調的；舊版檔遇到 KN）；`TinyLmError` 的 Display、`experiments/s7a-tinylm/README.md`、`cli/tests/tinylm.rs` 跟著改 |
+| P4-10 | `kn.sjkn`、模型、名單的讀法沒有上限 | 接受：App 只讀簽章過的 bundle；既有行為，這一片不改 |
+| P4-11 | SJTL0004 不綁 `classes.sjc`、名單、詞包 | 接受，記錄為刻意的設計（和現行一致） |
+| P4-12 | 名單分數可能是 NaN／inf | FIX：測試斷言已提交的 `names-add.tsv` 分數都是有限值、音節數等於字數；`triage.py`、`bench.py` 的 v4／KN 支援另開（發版前的跨版本基準要支援 KN，記在 §3.6） |
+
