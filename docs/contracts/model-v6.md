@@ -21,6 +21,7 @@
   - N1 與 ACG 詞包同音的「旗農」（對奇儂）、「錸德」（對萊德）從名單拿掉；丸亀製麵改收台灣寫法「丸龜製麵」。
   - 名單層分數 +2（§2.4，2026-10-11 的探索：兩種設定「酷澎」第一、守門 0 改壞）。
   - tinylm 綁 n-gram 模型的雜湊，換 model-v6 後語意校正的三檔要在新模型上重選，發 `tinylm-v5`（§2.7）。
+- **維護者 2026-10-14（續）**：model-v6 **開 KN，核心一起改**（讓在 KN 開著時調過的語意校正模型能一起載入，§2.7）；今晚照關卡做，明天凌晨發版。
 - **詞庫已變**：拿掉粵語用字的疊加層詞（#152）改了 `overlay-add.tsv`，所以它的雜湊和 model-v5 不同（§2.1 的輸入固定照此放寬）。
 
 ## 1. 要做到什麼、怎麼看到
@@ -54,7 +55,7 @@
 ### 2.2b 量詞詞類（classes-v4）
 
 - 量詞表 `experiments/model-v6/classifiers.txt`（進 git，CC0，main 手寫）：常見中文量詞一行一個。
-- 分群（`cluster.py --keep-from`）之後、`build_classes.py` 之前，新的小工具 `experiments/model-v6/force_classes.py`：量詞表裡**計數少於 1,000** 而且類別和「個」不同的詞，改成「個」的類別；印出搬了哪些詞（詞、原類別、計數）。計數 ≥ 1,000 的量詞不動（它們自己的接續已經夠）。單元測試用合成的分群檔：門檻以下才搬、錨點類別正確、不在表裡的詞不動、錨點不存在就停。
+- 分群（`cluster.py --keep-from`）之後、`build_classes.py` 之前，新的小工具 `experiments/model-v6/force_classes.py`：讀 `cluster.py` 的輸出資料夾（`edges.npz`、`cls-N-K.npz`），量詞表裡 **`edges.npz` 的 `uni` 計數（加權後的計數，維基 ×1＋口語 ×5，`build_classes.py --edges` 讀的同一個欄位）少於 1,000** 而且類別和「個」不同的詞，改成「個」的類別；不在詞彙裡的表列詞印出來、略過。輸出**另存**一個新的 `cls-N-K` 檔（不覆寫 `cluster.py` 的輸出），記 SHA-256，交給 `build_classes.py --cls`；印出搬了哪些詞（詞、原類別、`uni` 計數）。`uni` ≥ 1,000 的量詞不動。單元測試用合成的分群檔：門檻以下才搬、錨點類別正確、不在表裡的詞不動、不在詞彙裡的表列詞略過、錨點不存在就停，以及一個「原始次數 < 1,000 但加權 `uni` ≥ 1,000」的詞不搬。
 - 量到的：「一整坨」兩種設定的名次（目標是第一）；§3.2 的守門照常。
 
 ### 2.2 模型、詞類與私有條目
@@ -66,23 +67,32 @@
 
 - 188：`tools/kn_cont.py --theta 1 --beta 1` 用 model-v6 的計數與**最終模型**（加過私有條目）產生 `SJKN0002`，記 SHA-256。ΣN′ 由 `lm.kn_total`＋`build_lm.variant_classes` 算好寫進檔頭（kn-core §1）；`lm_eval.py` 讀它時用 `kn_classes` 重算比對。
 - 放在模型旁邊（`data/lm/kn.sjkn`、App 的 Resources），Rust 核心自動載入。
-- **跨語言核對**（決定性的一項，照 kn-core §3 第 5 項）：最終檔＋側檔，Rust CLI 與 `lm_eval.py` 在 dev302、打字測驗、錯字回報、cvtune、wikitune × 聊天、書面（`--context`）的摘要行逐字相同（含 `+kn:` 與 `top1_sha256`）。
+- **跨語言核對**（決定性的一項，照 kn-core §3 第 5 項）：最終檔＋側檔＋名單層（三者都開），Rust CLI 與 `lm_eval.py` 在 dev302、打字測驗、錯字回報、cvtune、wikitune × 聊天、書面（`--context`）的摘要行逐字相同（含 `+kn:` 與 `top1_sha256`）。另加一個 golden 例子含只在名單裡的詞（例如「酷澎」）。
 
 ### 2.4 名單層的分數
 
-（待定：依量測結果寫。候選：名單層不扣 `UNSEEN_OVERLAY_PENALTY`；或照固定選法在調參集上選一個加分。）
+- **規則**（維護者固定的選擇，不在 cvtune、wikitune 上選）：名單詞的詞條分數＝`build_names.py` 照 `scores()[字數]` 算出的分數 **＋2**（log10）。加分在建置時寫進 `names-add.tsv`（`build_names.py` 的常數 `NAMES_BONUS = 2`），載入端不另外加：Rust 與 Python 都把 `names-add.tsv` 當成一般疊加層讀，之後照疊加層原本的規則——語料出現過的詞封頂成 `min(檔案分數, log10(c/N))`，沒出現過的扣 `UNSEEN_OVERLAY_PENALTY`（1.0）。所以沒有計數的名字最後是 `scores()[n] + 1`，和 2026-10-11 的探索（N1 研究紀錄同日「探索：名單層的分數往上加」，d＝2 時「酷澎」兩種設定第一、守門集合改壞 0）一致。
+- N1 的 (c) 同音規則照新分數重跑（`build_names.py` 的衝突偵測讀的就是加分後的檔），結果和處置進 N1 合併前的那次重建。
+- 單元測試：`build_names.py` 的測試斷言一個合成名字的輸出分數等於 `scores()[n] + 2`；Rust 與 Python 各一個測試斷言 `names-add.tsv` 的詞照疊加層規則封頂與扣分（同一個合成列，兩邊的詞條分數相同）。
 
 ### 2.5 App 與發版
 
 - **名單層常開**：`load_lexicon*` 在 `sandhi-add.tsv` 之後讀 `names-add.tsv`，同時併進封頂用的疊加層文字（和 N1 的 `--extra-overlay` 同一條路，`--extra-overlay` 保留給研究用）；缺檔是錯誤（和 `overlay-add.tsv` 一樣，不靜默略過）。FFI、`core/include/shanjie.h`、`Support.swift`、`check-app.sh` 的檔案清單跟著改。
 - **授權**：`build-app.sh` 寫進 App 的資料授權說明加名單的三方標示（name-suggestion-index 的 BSD-3 版權聲明全文、政府資料開放授權條款第 1 版的標示文字、Wikipedia 貢獻者 CC BY-SA 4.0），`LICENSES/name-suggestion-index-BSD-3-Clause.txt` 隨 App 內附；`LICENSES/data.md` 的「不隨 App 內附」改掉。
 - **KN 側檔**：`build-app.sh` 複製並核對 `data/kn.sjkn.sha256`；`check-app.sh` 檢查它在 Resources；`ci.yml`、`release.yml` 下載 Release `kn-v1` 並核對雜湊。
-- **Python 參考實作**：`lm_eval.py` 與 `predict.py`（`sp-predict.txt` 的產生器）在模型旁邊有 `kn.sjkn` 時照樣載入，和 Rust 一致；所有依模型的 golden 用 Python 產生、Rust 逐位元組相同。
+- **Python 參考實作**：`ime.OVERLAYS` 在 `sandhi-add.tsv` 之後加 `names-add.tsv`；`lm_eval.py` 與 `predict.py`（`sp-predict.txt` 的產生器）封頂用的疊加層詞集合也讀 `names-add.tsv`（和 Rust 的 `load_lexicon*` 同一個順序與規則），在模型旁邊有 `kn.sjkn` 時照樣載入；所有依模型的 golden 用 Python 產生、Rust 逐位元組相同。
 
 ### 2.7 語意校正重調（tinylm-v5）
 
-- 權重不變（S7a M），只在 model-v6＋classes-v4＋kn-v1＋名單層的候選上照 `docs/contracts/rerank-strength.md` §11 重做：分數檔（188，唯一的 CLI commit 照 §11.1）、§1 選值、§4.2–§4.4、D2c 拆解只記錄；`export_sjtl.py --type int8 --ngram-model <model-v6> --levels …` 匯出 SJTL0003；§4.5 保留集（fresh verifier）。
-- 前提：語意校正強度那一片（`feat/rerank-strength`，SJTL0003 讀檔、設定 UI）先合併；它切換到 `tinylm-v4` 的 PR 若還沒合併，就直接切到 `tinylm-v5`。
+- **核心改動：小模型和 KN 一起載入（SJTL0004）**。現在 `TinyLm::load_paired` 在 KN 開著時一律拒絕（`TinyLmError::KneserNey`，因為 α、τ 是在沒有 KN 時調的）。改成：
+  - 新版 SJTL0004＝SJTL0003 的 212 bytes 檔頭之後接 32 bytes：調參時用的 KN 側檔 SHA-256（全 0＝沒有開 KN 時調的）；字表與張量不變。SJTL0001–0003 視為全 0。
+  - `load_paired`：模型雜湊照舊要相同；KN 開著時，檔裡記的側檔雜湊要等於載入的 `kn.sjkn` 的 SHA-256（`Lm` 加一個 `kn_sha256()`），否則照舊回 `KneserNey`；KN 關著時，檔裡記的必須是全 0（在 KN 開著時調的檔，配沒有 KN 的模型也拒絕，回 `KneserNey`）。CLI 的 `--tinylm` 錯誤訊息照新規則改；`--no-kn` 照舊。
+  - `export_sjtl.py` 加 `--kn-side <kn.sjkn>`（寫入它的雜湊、輸出 SJTL0004；不給就寫全 0，仍輸出 SJTL0004）。
+  - 測試（Rust，用合成的小模型與小側檔，照 rerank-strength §9 的讀檔規矩）：KN 開＋雜湊相符 → 載入成功；KN 開＋不符 → `KneserNey`；KN 開＋SJTL0001–0003 → `KneserNey`；KN 關＋檔裡有非 0 雜湊 → `KneserNey`；KN 關＋全 0 → 成功；SJTL0004 每個前綴長度都回 `Format` 不 panic；`export_sjtl.py` 的單元測試核對寫入的雜湊與位移。讀檔與格式屬安全審查範圍，交 `pilotfish:security-executor`。
+- **重調**：權重不變（S7a M），在 model-v6＋classes-v4＋kn-v1＋名單層的候選上照 `docs/contracts/rerank-strength.md` §11 重做，但**KN 開著**（覆寫 §11.1 的「不載 KN」）：
+  - 分數檔用一個暫時的 `.sjtl`：`export_sjtl.py --type int8 --ngram-model <最終 model-v6> --kn-side <最終 kn.sjkn> --chat 0.3 2 0.25 --formal 0.7 1 2`（分數檔只用到權重，融合參數之後重選），在 188 用唯一的 CLI commit 跑 `--tinylm <暫時檔> --tinylm-scores … --dump …`（側檔在模型旁邊，KN 開著）。
+  - §1 選值（標準那一檔也在新候選上重選，因為模型換了）、§4.2–§4.4、D2c 拆解只記錄；匯出 `tinylm-v5`：`--ngram-model <model-v6> --kn-side <kn-v1> --chat … --formal … --levels …`（SJTL0004）；§4.5 保留集（fresh verifier）。
+- **前提與順序**：語意校正強度那一片（`feat/rerank-strength`，SJTL0003 與設定 UI，切到 tinylm-v4）先合併；SJTL0004 的核心改動在這一片。**App 切到 model-v6＋kn-v1 的 PR 必須同時切到 tinylm-v5**（不留下「KN 開著、小模型載不進來」的合併狀態）。
 
 ### 2.6 順序與 PR（照 model-v5 §2.5）
 
@@ -92,7 +102,7 @@
 4. 詞包與名單的衝突在 model-v6 上重新偵測（§3.3）。
 5. fresh verifier：§3 重跑抽查、**保留集（在問 Release 之前）**；main：私有條目核對（開著 KN）。
 6. 以上通過後，**才問使用者**能不能建 Release `model-v6`、`classes-v4`、`kn-v1`（`--latest=false`）；建好後下載回來核對雜湊。接著 §2.7 的 tinylm-v5，保留集過了再問 Release `tinylm-v5`。
-7. PR 1：這份契約、三份 `docs/releases/*.md`、計數詞表的腳本改動。PR 2：改引用、App 載入名單層與側檔、授權、golden。
+7. PR 1：這份契約、四份 `docs/releases/*.md`、計數詞表與 `force_classes.py`、SJTL0004 核心改動與測試、Python 與 Rust 的名單層載入（檔案缺時是錯誤，這時 `names-add.tsv` 已在 main）。PR 2：改引用（model-v6、classes-v4、kn-v1、tinylm-v5 同一個 PR）、App 內附名單層與側檔、授權、golden。
 
 ## 3. 驗收
 
@@ -138,3 +148,9 @@
 
 - 資訊＋AI 領域詞包（另一片）；Rust 測試改在 188 WSL 跑（另一片，`chore/linux-tests`）。
 - 罕見名字的分數下限（宿儺這類，詞包詞）；疊加層「台」「臺」寫法和官網不同（臺北城大、臺南藝大）；在／再（P1a 已停）；S7a 小模型重排；Pitman–Yor；舊 Release 的刪除。
+
+## 6. 審查紀錄
+
+| 審查 | 要點 | 處置 |
+|---|---|---|
+| plan-verifier 第 1 次（2026-10-14，REVISE） | 1. KN 開著時小模型載不進來（`load_paired` 拒絕），§2.7 照寫跑不起來；2. §2.4 名單分數還是「待定」；3. Python 參考實作沒有名單層，跨語言核對與 golden 對不上；4. 量詞門檻沒說用哪一種計數、輸出寫到哪 | 全部 FIX：1 → §2.7 加 SJTL0004（記 KN 側檔雜湊）、`load_paired` 的新規則與測試、分數檔用暫時的 `.sjtl` 且 KN 開著、App 切 model-v6＋kn-v1 的 PR 同時切 tinylm-v5（維護者同日選「開 KN，核心一起改」）；2 → §2.4 寫成固定規則（建置時 +2 寫進 `names-add.tsv`，載入照疊加層規則）；3 → §2.5 Python 的 `ime.OVERLAYS` 與封頂詞集合讀 `names-add.tsv`，§2.3 三者都開；4 → §2.2b 用 `edges.npz` 的加權 `uni`、不在詞彙的略過、另存新 `cls` 檔並記雜湊 |
