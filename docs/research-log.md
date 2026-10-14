@@ -5074,7 +5074,7 @@ CLI 重現（Rust，model-v5，`--context`、沒有前文；聊天與書面、�
 
 ## 2026-10-14：v0.4.2 發佈與核對
 
-- 維護者同意後推 `v0.4.2`（tag 指向 main `c1323ea`），發佈流程 run 38461475857：gate、build 通過，sign 等維護者在 GitHub 核准 `release` 環境後跑完，publish 成功。
+- 維護者同意後推 `v0.4.2`（tag 指向 main `c1323ea`），發佈流程 run 38461475857：gate、build 通過；sign 與 publish 兩個 job 都用 `release` 環境，各要維護者在 GitHub 核准一次（這次 run 記了兩次核准），之後都成功。
 - 核對（下載 Release 的附件到暫存資料夾）：`shanjie-0.4.2.zip`、`shanjie-installer-0.4.2.zip` 的 SHA-256 和各自的 `.sha256` 相同（`3e4d536f…`、`a65c61ea…`）；輸入法與安裝程式都是 Developer ID 簽章（`codesign --verify --deep --strict` 通過）、`spctl` 回 `Notarized Developer ID`、`stapler validate` 通過；版本 0.4.2；內附的模型檔和 v0.4.1 相同（`f81a021e…`、`75a5efb3…`、`7e73ef67…`）；Releases 頁的 Latest 是 v0.4.2，說明和 `docs/releases/v0.4.2.md` 只差結尾一個空行；Homebrew cask 是 0.4.2，雜湊和 zip 相同。
 - **實機**（契約 `docs/contracts/learn-single-ctx.md` §2.8；裝 main 的本機建置，`imeshot` 一次約 14 秒）：句首打 `我是買新的`、`我在牛與`、`我是打這`，送出的文字三句都正確。
 - **維護者學習檔會被丟掉的紀錄**（§3；維護者同意後只數筆數，用新版的載入程式讀複本，數完刪掉複本）：273 筆裡載入 209 筆、略過 64 筆：單獨 `^` 的 46 筆（都是兩字以上的詞），前面只有一個漢字的單字 18 筆（和契約寫的 18 筆相同）。
@@ -5087,3 +5087,9 @@ CLI 重現（Rust，model-v5，`--context`、沒有前文；聊天與書面、�
   - 量的 commit 和打 tag 的 commit 不同：`git diff 1a640ae 5c9cfef -- Cargo.toml Cargo.lock core cli data eval/variants.tsv macos scripts` 有三個檔：`core/src/lm.rs`（surface 只在新開一格時複製、去重改成移動字串，不改結果；另加去重的測試）、`cli/tests/golden.rs`（測試改名）、`macos/Tests/ShanjieKitTests/RerankTests.swift`（註解）。契約 `docs/contracts/sbench-v2.md` §5 原本要求這個 diff 是空的；/code-review 指出後，用兩個 commit 的 CLI 在出貨設定下跑 dev302、typing76、錯字回報（104 列）兩種設定，六組 rowstats 逐位元組相同（`cmp` 結束碼 0，摘要行的 `top1_sha256` 也相同，例如 dev302 聊天 `5f056fee…`），所以沿用保留集的數字，不重跑；同時照「契約與自訂規則不要訂得過嚴」把 §5 的規則改成允許這種情況（`tools/bench.py` 表頭說明一起改）。
 - **速度**（重播 dev302，不載詞包、沒有前文、沒有語意校正，3 輪取中位數）：v0.4.2 p95 3.328 ms、max 40.21 ms；v0.4.3 p95 3.998 ms、max 16.61 ms；記憶體 288／290 MB；語意校正 p50／p95 9.95／14.57 ms 對 9.27／13.37 ms。v0.4.3 的 p95 多 0.67 ms，可能是負載起伏，也可能是每個位置留的路徑變多（契約 §1.3：beam 數路徑，同一字串可佔多格）；沒有再分開量〔推論〕，離 16 ms 很遠。
 - **實機**（契約 `docs/contracts/dec-recombine.md` §3.7、§3.9）：CLI 書面設定、句首打 `ㄒㄧㄚˋ ㄌㄞˊ ㄈㄣ ㄒㄧ`：v0.4.2 第一名「夏來分析」（-10.350）、「下來分析」第二（-10.426）；v0.4.3 第一名「下來分析」（-9.756）。聊天設定兩版都是「下來分析」。實機（裝 main `5c9cfef` 的本機建置，截圖探測視窗是書面設定）句首打同一組鍵，送出「下來分析」。
+
+## 2026-10-14：v0.4.3 發佈與核對
+
+- 維護者同意後推 `v0.4.3`（tag 指向 main `c6d0515`；和量基準測試的 `5c9cfef` 相比，`Cargo.toml Cargo.lock core cli data eval/variants.tsv macos scripts` 沒有差異），發佈流程 run 38499012621：gate、build 通過；sign 與 publish 兩個 job 都用 `release` 環境，各要維護者在 GitHub 核准一次（這次 run 記了兩次核准），之後都成功。
+- 核對（下載 Release 的附件到暫存資料夾）：`shanjie-0.4.3.zip`、`shanjie-installer-0.4.3.zip` 的 SHA-256 和各自的 `.sha256` 相同（`fb9aaf35…`、`69e2f9b3…`）；輸入法與安裝程式都是 Developer ID 簽章（`codesign --verify --deep --strict` 通過）、`spctl` 回 `Notarized Developer ID`、`stapler validate` 通過；版本 0.4.3；內附的模型檔和 v0.4.2 相同（`f81a021e…`、`75a5efb3…`、`7e73ef67…`）；Releases 頁的 Latest 是 v0.4.3，說明和 `docs/releases/v0.4.3.md` 相同；Homebrew cask 是 0.4.3，雜湊和 zip 相同。
+- 實機（契約 `docs/contracts/dec-recombine.md` §3.9）：發版前用 `imeshot` 在截圖探測視窗確認書面設定句首打 `ㄒㄧㄚˋ ㄌㄞˊ ㄈㄣ ㄒㄧ` 送出「下來分析」（同日基準測試一節）。§3.9 的另一半「維護者平常打字沒有變慢的感覺」**還沒有確認**：要等維護者用 v0.4.3 打字之後回報；每鍵 p95 3.3 → 4.0 ms 的原因也還是推論（同日基準測試一節）。
