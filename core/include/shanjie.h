@@ -128,28 +128,42 @@ int32_t shanjie_engine_set_prediction(ShanjieEngine *engine, uint32_t enabled, S
 //   when vertical). In the entered vertical row Up / Down move the selection (stopping at both ends). Call it after every engine creation, like set_prediction.
 int32_t shanjie_engine_set_candidate_vertical(ShanjieEngine *engine, uint32_t enabled, ShanjieOutput **out); // 0 or 1; returns a snapshot
 // V3 (docs/contracts/v3-engine.md section 12): set_abbreviation 0 or 1 (2 otherwise, state unchanged), default 0, like
-//   set_prediction in its codes and its snapshot (handled 1, commit ""); 1 when engine or out is NULL. With 1 (and the
+//   set_prediction in its codes and its snapshot (handled 1, commit "" unless turning it on ends an English run, below); 1 when engine or out is NULL. With 1 (and the
 //   prediction row on and the cursor at the end of the composition) a zhuyin key whose column already holds a symbol
 //   opens a new unfinished unit instead of replacing it, so ㄋㄔ is two units, and the prediction row reads them as
 //   the initials of a word's syllables (奶茶). With two or more units a tone key and space do nothing, Enter sends the
 //   shown symbols, Esc drops all units (the composition, fixed words and cursor stay) and Backspace takes the last symbol.
 //   Turning it off, or the prediction row off, while there are two or more units drops them all (as Esc) and returns
-//   that state; with one unit nothing changes. Turning it on changes nothing. No effect without a loaded model.
+//   that state; with one unit nothing changes. Turning it on closes an open English window and ends an open English run
+//   (see set_english) as a token; if that is the 40th unit the snapshot carries the composition in `commit`.
+//   No effect without a loaded model.
 int32_t shanjie_engine_set_abbreviation(ShanjieEngine *engine, uint32_t enabled, ShanjieOutput **out); // 0 or 1; returns a snapshot
 // zhen-mixed (docs/contracts/zhen-mixed.md): the English word list. 0 ok; 1 engine or path NULL; 2 path not UTF-8; 3 unreadable,
 //   not a regular file, over 4 MiB or 200,000 lines, a line outside [a-z]{3,32}, a duplicate line, a BOM. Failure keeps the
 //   previous list (or none). Does not change the switch or the current display. Call it once after shanjie_engine_new.
 int32_t shanjie_engine_load_english(ShanjieEngine *engine, const char *path);
 // set_english 0 or 1 (2 otherwise, state unchanged), default 0 at engine creation, like set_abbreviation in its codes and its
-//   snapshot (handled 1, commit ""); 1 when engine or out is NULL. With 1, and only with a loaded list, the standard layout and
+//   snapshot (handled 1; commit "" except as noted for turning it off, below); 1 when engine or out is NULL. With 1, and only with a loaded list, the standard layout and
 //   the abbreviation composer off, Space after an English word typed into one unfinished syllable (the keys typed are a listed
 //   word and at least one key replaced a symbol in an occupied column; two when the leftover syllable with tone 1 is itself in
 //   the lexicon) opens the English window (s3a rule 10e): the word, Capitalised, UPPER and, when the leftover syllable is in
 //   the lexicon, its first entry. 1-9, Enter or pick(index) on an English item does not commit (docs/contracts/zhen-inline.md):
 //   the item becomes an English token at the cursor that stays in the composition (one unit like a punctuation mark: Backspace
 //   and the arrow keys take it whole, the next word starts a new sentence), and it is sent with the rest. The Chinese item
-//   becomes a fixed word. Turning it off, or the abbreviation composer on, closes the window. No effect without a list. Call it
-//   after every engine creation, like set_abbreviation.
+//   becomes a fixed word. No effect without a list. Call it after every engine creation, like set_abbreviation.
+//   Key handling that comes with it (docs/contracts/zhen-inline.md sections 1.3, 1.3b, 1.3c):
+//   - Auto-keep: a Zhuyin key that cannot continue the letters on screen (a whole listed word) keeps the word as an English
+//     token and starts the next syllable; a Zhuyin key with the English window open first keeps the selected item.
+//   - Shift+letter starts an English run (an English token in the making, not a unit until it ends): letters go on it as
+//     typed, Space ends it (the space is eaten), Backspace and Esc take letters off, an unshifted letter that follows a whole
+//     word and starts no longer one auto-keeps it, every other key ends it first. Without set_english the Shift rules (s3a
+//     rules 13, 21, 22) are unchanged.
+//   - With the cursor right after an English token and no unfinished syllable, Space or Down lists its writings (as typed,
+//     lower case, Capitalised, UPPER); a token made by an auto-keep adds a Chinese item, so a wrong keep can be undone.
+//   - An English token (from an item, an auto-keep or a run) that makes the 40th unit sends the whole composition in `commit`
+//     of that call's output (the key that did it, the pick, or the settings call), never in a later one.
+//   Turning it off, like turning the abbreviation composer on, closes the window and ends an open English run as a token
+//   (a run that makes the 40th unit sends the composition in the snapshot's `commit`).
 int32_t shanjie_engine_set_english(ShanjieEngine *engine, uint32_t enabled, ShanjieOutput **out); // 0 or 1; returns a snapshot
 // set_english_inline 0 or 1 (2 otherwise, state unchanged), default 1 at engine creation, like set_english in its codes and its
 //   snapshot (handled 1, commit ""); 1 when engine or out is NULL. With 1 (and set_english(1)) the unfinished syllable shows as
