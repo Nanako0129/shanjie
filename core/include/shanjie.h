@@ -150,12 +150,16 @@ int32_t shanjie_engine_load_english(ShanjieEngine *engine, const char *path);
 //   word and at least one key replaced a symbol in an occupied column; two when the leftover syllable with tone 1 is itself in
 //   the lexicon) opens the English window (s3a rule 10e): the word, Capitalised, UPPER and, when the leftover syllable is in
 //   the lexicon, its first entry. 1-9, Enter or pick(index) on an English item does not commit (docs/contracts/zhen-inline.md):
-//   the item becomes an English token at the cursor that stays in the composition (one unit like a punctuation mark: Backspace
-//   and the arrow keys take it whole, the next word starts a new sentence), and it is sent with the rest. The Chinese item
+//   the item becomes an English token at the cursor that stays in the composition (one unit like a punctuation mark: the arrow
+//   keys take it whole, the next word starts a new sentence; Backspace takes one letter, see below), and it is sent with the rest. The Chinese item
 //   becomes a fixed word. No effect without a list. Call it after every engine creation, like set_abbreviation.
 //   Key handling that comes with it (docs/contracts/zhen-inline.md sections 1.3, 1.3b, 1.3c, 1.3e, 1.3f):
 //   - Auto-keep: a Zhuyin key that cannot continue the letters on screen (a whole listed word) keeps the word as an English
 //     token and starts the next syllable; a Zhuyin key with the English window open first keeps the selected item.
+//   - Backspace deletes English one letter at a time (section 1.3g): with the letters on screen it takes the last letter and the
+//     rest becomes an English run at the cursor (no replay, no Zhuyin); with the cursor right after an English token (no
+//     unfinished syllable, no window, no run) it removes the token and opens a run with its text less the last letter (a
+//     one-letter token just goes). Space units and punctuation tokens still go whole.
 //   - Shift+letter starts an English run (an English token in the making, not a unit until it ends): letters go on it as
 //     typed, shifted or not, and the run is never auto-kept; Space ends it (the space is eaten), Backspace and Esc take
 //     letters off, every other key ends it first. While a run is open the output's english_run_utf16_start and
@@ -176,7 +180,7 @@ int32_t shanjie_engine_set_english(ShanjieEngine *engine, uint32_t enabled, Shan
 //   snapshot (handled 1, commit ""); 1 when engine or out is NULL. With 1 (and set_english(1)) the unfinished syllable shows as
 //   the letters typed instead of the Zhuyin while all of these hold: the cursor is at the end with one unfinished unit, at least
 //   3 letters, the overwrite condition of the English window's trigger, and a listed word starts with the letters. Enter (and
-//   reset with commit) then send the letters, and Backspace takes the last letter and rebuilds the symbols from the letters left.
+//   reset with commit) then send the letters, and Backspace takes the last letter and makes the rest an English run (zhen-inline section 1.3g).
 //   0 shows the Zhuyin until the English window opens. The snapshot shows a composition on screen in the new display. Call it
 //   after every engine creation, like set_english.
 int32_t shanjie_engine_set_english_inline(ShanjieEngine *engine, uint32_t enabled, ShanjieOutput **out); // 0 or 1; returns a snapshot

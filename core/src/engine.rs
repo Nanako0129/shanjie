@@ -1205,21 +1205,6 @@ impl Engine {
         self.eligible_shadow().is_some_and(|(words, word)| Self::is_word(words, &word))
     }
 
-    /// zhen-inline section 1.3, Backspace while D holds (letters are on screen): the last letter goes, and the columns and the
-    /// replacement count are rebuilt by replaying the letters left through rule 9, so the symbols always are what those keys
-    /// type. (Rule 11 would take the last symbol in display order, which is not the last letter's.)
-    fn shadow_backspace(&mut self) {
-        self.shadow.pop();
-        self.pend = [None; 3];
-        self.shadow_over = 0;
-        for ch in self.shadow.clone() {
-            if let Some((col, sym)) = self.layout.symbol_of(ch) {
-                self.shadow_over += self.pend[col].is_some() as u32;
-                self.pend[col] = Some(sym);
-            }
-        }
-    }
-
     /// The unfinished syllable's columns, for the typing simulator (tool hook; no letters, no tone).
     #[doc(hidden)]
     pub fn english_columns(&self) -> [Option<char>; 3] {
@@ -1980,7 +1965,11 @@ impl Engine {
                 }
                 self.pred = old; // two or more units: tone and space do nothing (section 12.2)
             } else if k.kind == KeyKind::Backspace && self.english_inline_shown() {
-                self.shadow_backspace(); // zhen-inline section 1.3: letters are on screen
+                // Zhen-inline section 1.3g: letters are on screen; the last one goes and the rest become an English run.
+                let mut letters: String = self.shadow.iter().collect();
+                letters.pop();
+                self.clear_pend();
+                self.run = letters;
                 self.pred_dirty = true;
             } else if k.kind == KeyKind::Backspace {
                 // Row 11: the last symbol in display order (final, then medial, then initial), as Apple Zhuyin and
@@ -2037,6 +2026,18 @@ impl Engine {
             KeyKind::Right => self.cursor = (self.cursor + 1).min(n),
             KeyKind::Home => self.cursor = 0,
             KeyKind::End => self.cursor = n,
+            // Zhen-inline section 1.3g (English mixing on): the unit before the cursor is an English token. It goes and its
+            // text without the last letter becomes an English run there (a one-letter token just goes).
+            KeyKind::Backspace if self.cursor > 0 && self.shadow_on() && english_of(&self.syls[self.cursor - 1]).is_some() => {
+                let at = self.cursor - 1;
+                let shown = self.fixed.iter().find(|f| f.start == at).map(|f| f.word.clone());
+                let mut letters = shown.unwrap_or_else(|| english_of(&self.syls[at]).unwrap_or_default().to_string());
+                letters.pop();
+                self.cursor = at;
+                self.remove_syllable(at)?;
+                self.run = letters;
+                self.pred_dirty = true;
+            }
             KeyKind::Backspace if self.cursor > 0 => {
                 self.cursor -= 1;
                 self.remove_syllable(self.cursor)?;

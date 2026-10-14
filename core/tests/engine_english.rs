@@ -648,7 +648,7 @@ fn english_stays_and_the_composition_goes_on() {
     assert!(tail.chars().count() == 2);
     assert!(run(&mut e, "Enter").commit == format!("{want}{tail}"));
 
-    // Backspace behind `rust` takes the whole token; Left skips it as one cell.
+    // Left skips it as one cell; Backspace behind `rust` takes one letter (zhen-inline section 1.3g).
     let mut e = eng();
     syllable(&mut e, "ㄨㄛˇ");
     let zh = syllable(&mut e, "ㄗㄞˋ").preedit;
@@ -658,7 +658,7 @@ fn english_stays_and_the_composition_goes_on() {
     let o = run(&mut e, "Right");
     assert!(o.cursor_utf16 as usize == format!("{zh}rust").encode_utf16().count());
     let o = run(&mut e, "BS");
-    assert!(o.preedit == zh && o.cursor_utf16 as usize == zh.encode_utf16().count(), "one Backspace deletes the whole word: {}", o.preedit);
+    assert!(o.preedit == format!("{zh}rus") && (o.english_run_utf16_start, o.english_run_utf16_len) == (zh.encode_utf16().count() as u32, 3), "one Backspace deletes one letter: {}", o.preedit);
 }
 
 #[test]
@@ -783,53 +783,141 @@ fn escape_backspace_tone_and_space_follow_the_old_rules() {
 }
 
 #[test]
-fn backspace_under_d_replays_the_letters_left() {
-    // zhen-inline section 1.3: while letters are on screen Backspace takes the last letter, and the columns and the replacement
-    // count are what the letters left would type. Compared with an engine that typed just those letters.
-    let fresh = |keys: &str| {
-        let mut f = eng_inline();
-        run(&mut f, keys);
-        f
-    };
+fn backspace_under_d_makes_the_letters_left_an_english_run() {
+    // zhen-inline section 1.3g: while letters are on screen Backspace takes the last letter and the rest become a run (no replay,
+    // no Zhuyin). Fields are the run's (start, len) in UTF-16 units of the preedit.
+    let fields = |o: &Output| (o.english_run_utf16_start, o.english_run_utf16_len);
     let mut e = eng_inline();
-    assert!(run(&mut e, "r u s t").preedit == "rust");
+    let zh = three(&mut e);
+    assert!(run(&mut e, "r u s t").preedit == format!("{zh}rust") && e.english_inline_shown());
     let o = run(&mut e, "BS");
-    let f = fresh("r u s");
-    assert!(o.preedit == "rus" && e.english_inline_shown(), "{}", o.preedit);
-    assert!(e.english_columns() == f.english_columns() && e.english_shadow_len() == 3, "the columns are those of `r u s`");
-    let o = run(&mut e, "BS");
-    let f = fresh("r u");
-    assert!(o.preedit == "ㄐㄧ" && !e.english_inline_shown(), "under 3 letters the Zhuyin of the columns: {}", o.preedit);
-    assert!(e.english_columns() == f.english_columns() && e.english_shadow_len() == 2);
-    let o = run(&mut e, "BS");
-    assert!(o.preedit == "ㄐ" && e.english_columns() == fresh("r").english_columns());
-    let o = run(&mut e, "BS");
-    assert!(o.preedit.is_empty() && e.english_shadow_len() == 0, "the syllable is gone");
-    assert!(is_empty(&mut e));
+    assert!(o.preedit == format!("{zh}rus") && o.commit.is_empty(), "{}", o.preedit);
+    assert!(fields(&o) == (3, 3) && !e.english_inline_shown() && e.english_shadow_len() == 0, "an open run, no shadow");
+    let o = run(&mut e, "t");
+    assert!(o.preedit == format!("{zh}rust") && fields(&o) == (3, 4), "the run takes letters: {}", o.preedit);
+    let o = run(&mut e, "_");
+    assert!(o.preedit == format!("{zh}rust") && fields(&o) == (0, 0) && !e.english_open(), "Space ends it as a token");
+    syllable(&mut e, "ㄅㄧㄢ");
+    let o = syllable(&mut e, "ㄧˋ");
+    let tail = o.preedit.strip_prefix(format!("{zh}rust").as_str()).unwrap().to_string();
+    assert!(tail.chars().count() == 2);
+    assert!(run(&mut e, "Enter").commit == format!("{zh}rust{tail}"));
 
-    // Space after `r u s t` Backspace is Space after a fresh `r u s`.
-    let (mut a, mut b) = (eng_inline(), eng_inline());
-    run(&mut a, "r u s t BS");
-    run(&mut b, "r u s");
-    assert!(run(&mut a, "_") == run(&mut b, "_"));
-
-    // The replacement count is rebuilt too: `h e l l` has two replacements, `h e l` one with a leftover that is a syllable, so
-    // D no longer holds after the Backspace and the Zhuyin shows.
-    let (mut a, mut b) = (eng_inline(), eng_inline());
-    assert!(run(&mut a, "h e l l").preedit == "hell");
-    let oa = run(&mut a, "BS");
-    let ob = run(&mut b, "h e l");
-    assert!(oa.preedit == ob.preedit && oa.preedit == "ㄍㄠ" && !a.english_inline_shown(), "{}", oa.preedit);
-    assert!(a.english_columns() == b.english_columns());
+    // `h e l l` is two replacements; the letters left are not replayed (the old replay showed the Zhuyin of `h e l`).
+    let mut e = eng_inline();
+    assert!(run(&mut e, "h e l l").preedit == "hell");
+    let o = run(&mut e, "BS");
+    assert!(o.preedit == "hel" && fields(&o) == (0, 3), "{}", o.preedit);
+    // Esc takes the whole run.
+    assert!(run(&mut e, "Esc").preedit.is_empty());
 
     // Not under D (Zhuyin on screen) it is rule 11 as ever: `c u p` has no replacement, so it shows ㄏㄧㄣ; Backspace takes ㄣ.
     let mut e = eng_inline();
     assert!(run(&mut e, "c u p").preedit == "ㄏㄧㄣ");
-    assert!(run(&mut e, "BS").preedit == "ㄏㄧ");
+    let o = run(&mut e, "BS");
+    assert!(o.preedit == "ㄏㄧ" && fields(&o) == (0, 0));
     // And "show on Space" never has letters on screen: rule 11.
     let mut e = eng();
     run(&mut e, "r u s t");
-    assert!(run(&mut e, "BS").preedit == "ㄔ");
+    let o = run(&mut e, "BS");
+    assert!(o.preedit == "ㄔ" && fields(&o) == (0, 0));
+}
+
+#[test]
+fn backspace_after_an_english_token_deletes_one_letter_at_a_time() {
+    let fields = |o: &Output| (o.english_run_utf16_start, o.english_run_utf16_len);
+    // A token from the English window: the last letter goes and the rest is a run; three more take the run away.
+    let mut e = eng_inline();
+    let zh = three(&mut e);
+    run(&mut e, "r u s t _ 1");
+    let o = run(&mut e, "BS");
+    assert!(o.preedit == format!("{zh}rus") && fields(&o) == (3, 3), "{}", o.preedit);
+    let o = run(&mut e, "BS BS");
+    assert!(o.preedit == format!("{zh}r") && fields(&o) == (3, 1));
+    let o = run(&mut e, "BS");
+    assert!(o.preedit == zh && fields(&o) == (0, 0), "an emptied run closes: {}", o.preedit);
+    assert!(run(&mut e, "Enter").commit == zh);
+    // The reopened run is a run: Esc takes the whole word, Space makes it a token again.
+    let mut e = eng_inline();
+    run(&mut e, "r u s t _ 1 BS");
+    assert!(run(&mut e, "Esc").preedit.is_empty() && is_empty(&mut e));
+    let mut e = eng_inline();
+    run(&mut e, "r u s t _ 1 BS");
+    let o = run(&mut e, "_");
+    assert!(o.preedit == "rus" && fields(&o) == (0, 0));
+    // The case is as it stands: the writing `Rust` chosen with Down gives `Rus`.
+    let mut e = eng_inline();
+    run(&mut e, "r u s t _ 1 Down 2");
+    assert!(run(&mut e, "BS").preedit == "Rus");
+
+    // A one-letter token just goes; no run.
+    let mut e = win();
+    let zh = three(&mut e);
+    run(&mut e, "S-a _");
+    let o = run(&mut e, "BS");
+    assert!(o.preedit == zh && fields(&o) == (0, 0));
+    assert!(run(&mut e, "c").preedit == format!("{zh}ㄏ"), "no run is open");
+    let mut e = win();
+    run(&mut e, "S-a _");
+    run(&mut e, "BS");
+    assert!(is_empty(&mut e));
+
+    // The token has units after it (Left moved the cursor): the run opens in the middle and they stay.
+    let mut e = eng_inline();
+    let zh = three(&mut e);
+    run(&mut e, "r u s t _ 1");
+    syllable(&mut e, "ㄅㄧㄢ");
+    let o = syllable(&mut e, "ㄧˋ");
+    let tail = o.preedit.strip_prefix(format!("{zh}rust").as_str()).unwrap().to_string();
+    run(&mut e, "Left Left");
+    let o = run(&mut e, "BS");
+    assert!(o.preedit == format!("{zh}rus{tail}") && fields(&o) == (3, 3), "{}", o.preedit);
+    assert!(o.cursor_utf16 == 6, "the cursor is after the run");
+    let o = run(&mut e, "_");
+    assert!(o.preedit == format!("{zh}rus{tail}") && fields(&o) == (0, 0));
+    assert!(run(&mut e, "Enter").commit == format!("{zh}rus{tail}"));
+
+    // An auto-kept token (the Chinese item goes with it): `google`, then `j` auto-keeps it; Backspace takes the ㄨ, the next one a letter.
+    let mut e = eng_inline();
+    assert!(run(&mut e, "g o o g l e j").preedit == "googleㄨ");
+    assert!(run(&mut e, "BS").preedit == "google");
+    let o = run(&mut e, "BS");
+    assert!(o.preedit == "googl" && fields(&o) == (0, 5));
+    run(&mut e, "_");
+    let o = run(&mut e, "Down");
+    assert!(o.candidates == ["googl", "Googl", "GOOGL"], "writings only, no Chinese item: {:?}", o.candidates);
+
+    // A run's token (Shift+letter) too.
+    let mut e = win();
+    run(&mut e, "S-w i n d o w s _");
+    let o = run(&mut e, "BS");
+    assert!(o.preedit == "Window" && fields(&o) == (0, 6));
+
+    // "Show on Space" (D never holds): the token rule applies all the same; the pending syllable keeps rule 11.
+    let mut e = eng();
+    run(&mut e, "r u s t _ 1");
+    let o = run(&mut e, "BS");
+    assert!(o.preedit == "rus" && fields(&o) == (0, 3));
+}
+
+#[test]
+fn backspace_still_takes_space_units_punctuation_and_tokens_without_mixing() {
+    // A space unit and a punctuation token go in one Backspace, without opening a run.
+    let fields = |o: &Output| (o.english_run_utf16_start, o.english_run_utf16_len);
+    let mut e = eng_inline();
+    run(&mut e, "r u s t _ 1 _");
+    let o = run(&mut e, "BS");
+    assert!(o.preedit == "rust" && fields(&o) == (0, 0));
+    let mut e = eng_inline();
+    run(&mut e, "r u s t _ 1 S-,");
+    let o = run(&mut e, "BS");
+    assert!(o.preedit == "rust" && fields(&o) == (0, 0));
+    // Mixed typing off: a token that is still there goes whole.
+    let mut e = eng_inline();
+    run(&mut e, "r u s t _ 1");
+    e.set_english(false).unwrap();
+    let o = run(&mut e, "BS");
+    assert!(o.preedit.is_empty() && fields(&o) == (0, 0), "{}", o.preedit);
 }
 
 #[test]
@@ -1275,9 +1363,9 @@ fn run_is_32_letters_and_the_33rd_starts_the_next() {
     assert!(o.preedit == format!("Z{}", "z".repeat(31)));
     let o = run(&mut e, "q");
     assert!(o.preedit == format!("Z{}q", "z".repeat(31)) && o.commit.is_empty());
-    // The 32 letters are a token now and `q` the new run: Backspace takes the `q`, the next one the whole token.
+    // The 32 letters are a token now and `q` the new run: Backspace takes the `q`, the next one a letter of the token.
     assert!(run(&mut e, "BS").preedit == format!("Z{}", "z".repeat(31)));
-    assert!(run(&mut e, "BS").preedit.is_empty());
+    assert!(run(&mut e, "BS").preedit == format!("Z{}", "z".repeat(30)));
 }
 
 #[test]
@@ -1362,11 +1450,11 @@ fn autokeep_keeps_the_word_and_starts_the_next_syllable() {
     // Finish a Chinese syllable (ㄨㄛˇ), one Enter sends it all.
     let (ca, cb) = (run(&mut a, "i 3 Enter").commit, run(&mut b, "i 3 Enter").commit);
     assert!(ca == cb && ca.starts_with(&format!("{zh}rust")) && ca.chars().count() == 2 + 4 + 1, "{ca}");
-    // The kept word is a token: one Backspace takes all of it (the ㄨ first).
+    // The kept word is a token: Backspace takes the ㄨ first, then one letter of it (zhen-inline section 1.3g).
     let (mut a, zh, _) = build("");
     run(&mut a, "r u s t j");
     assert!(run(&mut a, "BS").preedit == format!("{zh}rust"));
-    assert!(run(&mut a, "BS").preedit == zh);
+    assert!(run(&mut a, "BS").preedit == format!("{zh}rus"));
 }
 
 #[test]
@@ -1418,7 +1506,7 @@ fn window_open_and_a_zhuyin_key_keeps_the_selected_item() {
     assert!(oa == ob && oa.preedit == "rustㄨ" && oa.commit.is_empty() && !a.english_open(), "{}", oa.preedit);
     assert!(a.english_autokept());
     assert!(run(&mut a, "BS").preedit == "rust");
-    assert!(run(&mut a, "BS").preedit.is_empty(), "one Backspace takes the whole token");
+    assert!(run(&mut a, "BS").preedit == "rus", "one Backspace takes one letter of the token");
     // The selected item, not the first.
     let mut e = eng_inline();
     assert!(run(&mut e, "r u s t _ Right j").preedit == "Rustㄨ");

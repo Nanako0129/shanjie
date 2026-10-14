@@ -30,7 +30,8 @@
 //! - A syllable ends with its tone key, or Space for tone 1. If the engine opened the window at that Space it is counted, then
 //!   Esc (closes it, clears the shadow) and Space again finish the syllable, so engine and simulator stay in step.
 //! - Auto-keep (`--inline` only counts it; the recovery happens either way, it can only occur with D): the key that made it
-//!   started a new syllable, so Esc clears that symbol, Backspace takes the English token the engine made, and the interrupted
+//!   started a new syllable, so Esc clears that symbol, Backspace and Esc take the English token the engine made (Backspace turns
+//!   it into a run of one letter less, zhen-inline section 1.3g, Esc takes the run), and the interrupted
 //!   syllable (its symbols up to the one being typed) is typed again from the start without a mistake, so the row goes on as if
 //!   the mistake had been caught in time. A retyping that keeps again is counted and recovered again (it cannot happen without
 //!   an overwrite; after three tries the run stops instead of looping).
@@ -128,6 +129,9 @@ impl Sim {
         for _ in 0..3 {
             self.raw(Key::new(KeyKind::Esc))?;
             self.raw(Key::new(KeyKind::Backspace))?;
+            // Backspace behind an English token now takes one letter and opens a run with the rest (zhen-inline section 1.3g;
+            // an auto-kept word has 3 letters at least, so the run is not empty): Esc takes the run, and the token is gone.
+            self.raw(Key::new(KeyKind::Esc))?;
             let mut kept = false;
             for sym in self.want.clone() {
                 if self.raw(Key::ch(LAYOUT.key_of_symbol(sym).unwrap(), 0))? {
@@ -146,8 +150,7 @@ impl Sim {
         self.send(Key::ch(LAYOUT.key_of_symbol(sym).unwrap(), 0))
     }
 
-    /// The symbols of the unfinished syllable in display order, read from the engine: Backspace under rule D rebuilds the columns
-    /// from the letters left (zhen-inline section 1.3), so the simulator does not work them out itself.
+    /// The symbols of the unfinished syllable in display order, read from the engine, so the simulator does not work them out itself.
     fn have(&self) -> Vec<char> {
         self.engine.english_columns().iter().flatten().copied().collect()
     }
@@ -172,11 +175,16 @@ impl Sim {
                         self.zhuyin(sym)?;
                     } else {
                         // Backspace until the symbols are a prefix of the wanted ones. Which symbol it takes is the engine's: the last
-                        // in display order (final, medial, initial) by rule 11, or, while letters show, the last letter's, with the
-                        // symbols rebuilt from the letters left. Each key is a step that shortens the letters or the symbols, so the
-                        // loop ends with the unfinished syllable empty at the latest.
+                        // in display order (final, medial, initial) by rule 11. While letters show (rule D, asked of the engine) the
+                        // Backspace instead turns the letters left into an English run and the unfinished syllable is gone
+                        // (zhen-inline section 1.3g): Esc takes the run, and the symbols are typed again from the start below. Each
+                        // key is a step that shortens the symbols or empties them, so the loop ends with them empty at the latest.
                         while !want.starts_with(&self.have()) {
+                            let letters = self.engine.english_inline_shown();
                             self.send(Key::new(KeyKind::Backspace))?;
+                            if letters {
+                                self.raw(Key::new(KeyKind::Esc))?;
+                            }
                         }
                         for &(_, s) in &syms[self.have().len()..=i] {
                             if self.zhuyin(s)? {
@@ -394,6 +402,12 @@ mod tests {
             assert_eq!(row(&mut sim), clean, "row {i}");
         }
         assert!(sim.autokeeps >= 1, "premise: the rows keep a word");
+        // The same with the Backspace repair: while letters show (rule D) the engine's Backspace opens an English run (section 1.3g),
+        // which the repair must take with Esc and then type the symbols again; the row ends as if typed clean all the same.
+        let mut sim = Sim { repair: Repair::Backspace, ..mk(0.5) };
+        for i in 0..400 {
+            assert_eq!(row(&mut sim), clean, "backspace repair, row {i}");
+        }
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }
