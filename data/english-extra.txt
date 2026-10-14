@@ -243,3 +243,4 @@ DLC
 # 維護者加的名字
 Miyago
 CabLate
+Hanako
