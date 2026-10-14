@@ -24,6 +24,11 @@ public final class SettingsModel: ObservableObject {
     /// the menu item (false: the toggle is greyed, the setting kept).
     @Published public private(set) var english = false
     @Published public private(set) var englishEnabled = true
+    /// The 模糊輸入 flags (fuzzy-input section 2.2): bits 0-3 the four sound pairs, bit 4 the adjacent-key slips, as
+    /// `shanjie_engine_set_fuzzy`. `fuzzyAdjacentEnabled` is false in the Eten layout, which greys the adjacent-key checkbox (the
+    /// value is kept).
+    @Published public private(set) var fuzzyFlags: UInt32 = 0
+    @Published public private(set) var fuzzyAdjacentEnabled = true
     /// The abbreviation toggle is shown only when the shell offers it (`Shell.showsAbbreviation`).
     public var showsAbbreviation: Bool { shell.showsAbbreviation }
     @Published public private(set) var demote = true
@@ -72,6 +77,8 @@ public final class SettingsModel: ObservableObject {
         abbreviation = shell.abbreviationOn
         english = shell.englishOn
         englishEnabled = shell.englishEnabled
+        fuzzyFlags = shell.fuzzyFlags
+        fuzzyAdjacentEnabled = shell.fuzzyAdjacentEnabled
         demote = shell.demoteOn
         rerank = shell.rerankOn
         rerankEnabled = shell.rerankEnabled
@@ -94,6 +101,11 @@ public final class SettingsModel: ObservableObject {
     public func setPrediction(_ on: Bool) { shell.applyPrediction(on) }
     public func setAbbreviation(_ on: Bool) { shell.applyAbbreviation(on) }
     public func setEnglish(_ on: Bool) { shell.applyEnglish(on) }
+    /// One checkbox of 模糊輸入: `bit` is a bit of the flags (0-3 the pairs, 4 the adjacent-key slips).
+    public func setFuzzy(bit: Int, _ on: Bool) {
+        precondition((0..<5).contains(bit))
+        shell.applyFuzzy(on ? shell.fuzzyFlags | (1 << UInt32(bit)) : shell.fuzzyFlags & ~(1 << UInt32(bit)))
+    }
     public func setDemote(_ on: Bool) { shell.applyDemote(on) }
     public func setRerank(_ on: Bool) { shell.applyRerank(on) }
     public func setAcgPack(_ on: Bool) { shell.setAcgPack(on) }

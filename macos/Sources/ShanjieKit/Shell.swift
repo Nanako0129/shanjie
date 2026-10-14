@@ -132,6 +132,20 @@ public final class MemoryEnglishStore: EnglishStore {
     public init(_ english: Bool? = nil) { self.english = english }
 }
 
+/// Where the 模糊輸入 flags are kept (docs/contracts/fuzzy-input.md section 2.2): bits 0-3 the four sound pairs, bit 4 the adjacent-key
+/// slips, as `shanjie_engine_set_fuzzy`; `nil` means never chosen, which is 0 (all off). Same arrangement as `PredictionStore`.
+@MainActor
+public protocol FuzzyStore: AnyObject {
+    var fuzzyFlags: UInt32? { get set }
+}
+
+/// The in-memory FuzzyStore.
+@MainActor
+public final class MemoryFuzzyStore: FuzzyStore {
+    public var fuzzyFlags: UInt32?
+    public init(_ fuzzyFlags: UInt32? = nil) { self.fuzzyFlags = fuzzyFlags }
+}
+
 /// Where the "動漫與遊戲詞" switch is kept (docs/contracts/acg-pack.md A.2): `nil` means never chosen, which is on
 /// (user decision 2026-10-09, after the A.3 numbers). Same arrangement as `PredictionStore`.
 @MainActor
@@ -331,6 +345,12 @@ public final class Shell {
     /// Whether this engine loaded the word list (`Resources/english-words.txt`); false greys the menu item and the settings toggle
     /// (the checkmark keeps the setting), as `rerankAvailable` does for the small model.
     private(set) var englishAvailable = false
+    private let fuzzyStore: FuzzyStore
+    /// fuzzy-input section 2.2: the 模糊輸入 flags (default 0, all off; bits as `shanjie_engine_set_fuzzy`); sent to every engine
+    /// `build()` makes. Only the bits the core knows are kept.
+    private(set) var fuzzyFlags: UInt32 = 0
+    /// What `build()` sent to each engine it made, in order (test hook, like `rerankSent`).
+    private(set) var fuzzySent: [UInt32] = []
     private let acgPackStore: AcgPackStore
     /// The ACG word pack (default on, user decision 2026-10-09): parsed into the lexicon, so a change rebuilds the engine like a layout change.
     private(set) var acgPackOn = true
@@ -378,6 +398,9 @@ public final class Shell {
     /// The 中英混打（實驗） menu item and settings toggle, likewise: the word list loaded and the standard layout (the core records no
     /// shadow in the Eten layout, zhen-mixed section 2.1, so the switch would do nothing there). The checkmark still shows the choice.
     var englishEnabled: Bool { englishAvailable && mode == .standard }
+    /// The adjacent-key checkbox of 模糊輸入: the core's neighbour table is the standard layout's keyboard, so bit 4 does nothing
+    /// in the Eten layout and the checkbox is greyed there (the value is kept; fuzzy-input section 2.2).
+    var fuzzyAdjacentEnabled: Bool { mode == .standard }
 
     /// A job waiting for the runner, with the session and engine it was taken for. Weak (F3): a waiting job keeps neither alive,
     /// and an identity is never compared by address.
@@ -459,6 +482,8 @@ public final class Shell {
     /// `QueueRerankRunner`, the tests a runner they complete by hand.
     /// `profileModeStore`, `appProfileStore`: how chat or formal is chosen and the per-app choices (profile-choice section 2.1).
     /// Required, like `glassTintStore`.
+    /// `fuzzyStore`: the 模糊輸入 flags (fuzzy-input section 2.2). The default (in memory, all off) is for the tests; the app passes its
+    /// UserDefaults-backed store.
     /// `punctuationTable`: Apple's punctuation candidate table (s3e); tests pass another path.
     /// `punctuationNames`: Apple's punctuation names (s3f); tests pass another path.
     /// `showsAbbreviation`: whether the abbreviation switch is offered. The default `true` is for the tests; the app passes `false`
@@ -469,6 +494,7 @@ public final class Shell {
                 glassTintStore: GlassTintStore, candidateOrientationStore: CandidateOrientationStore,
                 rerankStore: RerankStore, rerankRunner: RerankRunner,
                 profileModeStore: ProfileModeStore, appProfileStore: AppProfileStore,
+                fuzzyStore: FuzzyStore = MemoryFuzzyStore(),
                 punctuationTable: URL = PunctuationTable.systemURL,
                 punctuationNames: URL = PunctuationNames.systemURL,
                 showsAbbreviation: Bool = true) {
@@ -497,6 +523,8 @@ public final class Shell {
         abbreviationOn = showsAbbreviation && abbreviationStore.abbreviation == true
         self.englishStore = englishStore
         englishOn = englishStore.english == true
+        self.fuzzyStore = fuzzyStore
+        fuzzyFlags = (fuzzyStore.fuzzyFlags ?? 0) & 0b11111
         self.acgPackStore = acgPackStore
         acgDataDate = Shell.readAcgDataDate(resources.appendingPathComponent("packs/acg.json"))
         self.glassTintStore = glassTintStore
@@ -549,6 +577,10 @@ public final class Shell {
 
     func applyEnglish(_ on: Bool) {
         if let o = owner { o.applyEnglish(on) } else { dropOnFailure(setEnglish(on)) }
+    }
+
+    func applyFuzzy(_ flags: UInt32) {
+        if let o = owner { o.applyFuzzy(flags) } else { dropOnFailure(setFuzzy(flags)) }
     }
 
     func applyCandidateVertical(_ on: Bool) {
@@ -650,6 +682,15 @@ public final class Shell {
         englishStore.english = on
         defer { changed() }
         return engine?.setEnglish(on)
+    }
+
+    /// The settings window's 模糊輸入 flags (fuzzy-input section 2.2): stored, and sent to the engine, which recomputes the composition
+    /// (an accepted syllable keeps decoding whatever the flags are); the snapshot is for the caller to show.
+    func setFuzzy(_ flags: UInt32) -> CoreResult? {
+        fuzzyFlags = flags & 0b11111
+        fuzzyStore.fuzzyFlags = fuzzyFlags
+        defer { changed() }
+        return engine?.setFuzzy(fuzzyFlags)
     }
 
     /// The settings window's choice (candidate-vertical contract section 2.1): stored, and sent to the engine, which applies it
@@ -767,6 +808,11 @@ public final class Shell {
         // And the English window's switch, every time: a rebuilt engine (layout, word pack) starts with the core's default, off.
         if case .failed(let c) = e.setEnglish(englishOn) {
             Log.shell.error("shanjie_engine_set_english failed, code \(c)")
+        }
+        // And the 模糊輸入 flags (fuzzy-input section 2.2), every time: the core's default is 0.
+        fuzzySent.append(fuzzyFlags)
+        if case .failed(let c) = e.setFuzzy(fuzzyFlags) {
+            Log.shell.error("shanjie_engine_set_fuzzy failed, code \(c)")
         }
         // Same for the candidate window's orientation (candidate-vertical contract section 2.2).
         if case .failed(let c) = e.setCandidateVertical(candidateVertical) {
@@ -967,6 +1013,15 @@ public final class Session {
     /// The menu's abbreviation switch: the snapshot is shown, if this session owns the composition.
     func applyAbbreviation(_ on: Bool) {
         switch shell.setAbbreviation(on) {
+        case .ok(let o)? where shell.owner === self: apply(o)
+        case .failed(let c)?: _ = fail(c)
+        default: break
+        }
+    }
+
+    /// The settings window's 模糊輸入 flags: the snapshot is shown, if this session owns the composition.
+    func applyFuzzy(_ flags: UInt32) {
+        switch shell.setFuzzy(flags) {
         case .ok(let o)? where shell.owner === self: apply(o)
         case .failed(let c)?: _ = fail(c)
         default: break
