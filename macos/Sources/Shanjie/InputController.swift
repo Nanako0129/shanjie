@@ -332,6 +332,9 @@ final class CandidatePanelAdapter: CandidatePanel {
     /// The vertical panel's row separators (`VerticalLayout.separators`): one view per gap, kept across keys and only moved,
     /// hidden or shown; added and removed only when the number of rows changes or the content resets.
     private var separators: [FilledView] = []
+    /// True while the one-line English-run hint is what `show` drew (`showHint`): its cell reports no clicks and the bar has
+    /// no expand mark. Cleared by every `show` and by `hide`.
+    private var hintShown = false
     /// Widen-only column widths of the open grid (section 9); empty when collapsed or hidden.
     private var columnWidths: [CGFloat] = []
     /// The cells and the decision which survive an output (ShanjieKit); this class only adds and removes
@@ -357,7 +360,9 @@ final class CandidatePanelAdapter: CandidatePanel {
         window.level = NSWindow.Level(rawValue: NSWindow.Level.popUpMenu.rawValue + 1)  // McBopomofo's value
         window.hidesOnDeactivate = false
         window.isReleasedWhenClosed = false
-        cellSet.onSelect = { [weak self] position in self?.onSelect?(position) }
+        cellSet.onSelect = { [weak self] position in
+            if self?.hintShown == false { self?.onSelect?(position) }  // the hint is not a candidate
+        }
         glass.contentView = row
         window.contentView = glass
     }
@@ -514,8 +519,22 @@ final class CandidatePanelAdapter: CandidatePanel {
         decor.clear()
     }
 
+    /// Zhen-inline section 1.3f: the hint is the horizontal bar with one cell, no number, no highlight (selected -1, the
+    /// prediction row's look), no expand mark and no clicks.
+    func showHint(_ text: String, lineRect: NSRect?, appearance: NSAppearance?, glassTint: Double) {
+        render([text], notes: [nil], selected: -1, columns: 0, first: 0, total: 1, vertical: 0, lineRect: lineRect,
+               appearance: appearance, glassTint: glassTint, hint: true)
+    }
+
     func show(_ candidates: [String], notes: [String?], selected: Int, columns: Int, first: Int, total: Int, vertical: Int,
               lineRect: NSRect?, appearance: NSAppearance?, glassTint: Double) {
+        render(candidates, notes: notes, selected: selected, columns: columns, first: first, total: total, vertical: vertical,
+               lineRect: lineRect, appearance: appearance, glassTint: glassTint, hint: false)
+    }
+
+    private func render(_ candidates: [String], notes: [String?], selected: Int, columns: Int, first: Int, total: Int, vertical: Int,
+                        lineRect: NSRect?, appearance: NSAppearance?, glassTint: Double, hint: Bool) {
+        hintShown = hint
         if window.appearance?.name != appearance?.name { window.appearance = appearance }
         applyTint(glassTint)
         // A change of value (the bar, a prediction row, a vertical window, in any order) clears what was on screen first
@@ -585,7 +604,8 @@ final class CandidatePanelAdapter: CandidatePanel {
                     t.append(NSPoint(x: x, y: (Metrics.barHeight - Metrics.capsuleHeight) / 2))
                     x += cell.contentWidth + Metrics.cellSpacing
                 }
-                size = NSSize(width: x - Metrics.cellSpacing + Metrics.chevronArea, height: Metrics.barHeight)
+                // The hint has no expand mark, so its right padding is the left one (`barInset`) instead of the mark's room.
+                size = NSSize(width: x - Metrics.cellSpacing + (hint ? Metrics.barInset : Metrics.chevronArea), height: Metrics.barHeight)
             }
             targets = t
 
@@ -619,7 +639,7 @@ final class CandidatePanelAdapter: CandidatePanel {
                 cell.setFrameOrigin(starts[i])
                 if !update.reused[i] { row.addSubview(cell) }
             }
-            var newDecor: [NSView] = grid ? [] : chevron(barSize: size)
+            var newDecor: [NSView] = grid || hint ? [] : chevron(barSize: size)
             if grid, total > candidates.count {
                 newDecor.append(scrollThumb(first: first, total: total, columns: columns, count: candidates.count,
                                          width: size.width, height: size.height))
@@ -716,6 +736,7 @@ final class CandidatePanelAdapter: CandidatePanel {
         window.orderOut(nil)
         resetContent()
         shownPlan = nil
+        hintShown = false
     }
 }
 

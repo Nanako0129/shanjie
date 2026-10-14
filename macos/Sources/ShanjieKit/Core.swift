@@ -20,6 +20,9 @@ struct CoreOutput {
     /// candidate-vertical contract section 2.2: 0 horizontal (or no candidates), 1 vertical candidate window, 2 vertical
     /// prediction row (entered or not).
     var vertical: Int
+    /// zhen-inline section 1.3f: the open English run in `preedit`, UTF-16 start and length; both 0 when no run is open.
+    var englishRunStart: Int = 0
+    var englishRunLength: Int = 0
 }
 
 /// The result of a core call: an output, or the non-zero C ABI return code (carries no input).
@@ -197,7 +200,9 @@ final class CoreEngine {
             columns: Int(o.candidate_columns),
             first: Int(o.candidate_first),
             total: Int(o.candidate_total),
-            vertical: Int(o.candidate_vertical)
+            vertical: Int(o.candidate_vertical),
+            englishRunStart: Int(o.english_run_utf16_start),
+            englishRunLength: Int(o.english_run_utf16_len)
         ))
     }
 }

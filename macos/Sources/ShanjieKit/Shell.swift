@@ -43,6 +43,9 @@ public protocol CandidatePanel: AnyObject {
     /// `columns` is 0 for both. The panel draws what it is told and reads no setting.
     func show(_ candidates: [String], notes: [String?], selected: Int, columns: Int, first: Int, total: Int, vertical: Int,
               lineRect: NSRect?, appearance: NSAppearance?, glassTint: Double)
+    /// zhen-inline section 1.3f: a one-line hint in the candidate window's place, drawn like the prediction row but never
+    /// selectable (a click does nothing) and with no expand mark. Hidden by `hide()` like any other content.
+    func showHint(_ text: String, lineRect: NSRect?, appearance: NSAppearance?, glassTint: Double)
     func hide()
     /// Re-applies the tint to what is on screen now, without a new `show` (the slider moved while the panel is up).
     func setGlassTint(_ glassTint: Double)
@@ -857,6 +860,15 @@ public final class Shell {
                    lineRect: lineRect, appearance: appearance, glassTint: glassTint)
     }
 
+    /// The hint shown while an English run is open (zhen-inline section 1.3f).
+    static let englishRunHint = "空白：英文斷開"
+
+    /// The hint in the candidate window's place. It is not a candidate list, so Page Up / Down see no vertical window.
+    func showHint(lineRect: NSRect?, appearance: NSAppearance?) {
+        shownVertical = 0
+        panel.showHint(Self.englishRunHint, lineRect: lineRect, appearance: appearance, glassTint: glassTint)
+    }
+
     func hideCandidates() {
         lineCache = nil
         shownVertical = 0
@@ -1125,14 +1137,14 @@ public final class Session {
             client.insertText(o.commit, replacementRange: NSRange(location: NSNotFound, length: 0))
         }
         if !o.preedit.isEmpty {
-            let marked = NSAttributedString(
-                string: o.preedit, attributes: [.underlineStyle: NSUnderlineStyle.single.rawValue])
-            client.setMarkedText(marked, selectionRange: NSRange(location: o.cursorUTF16, length: 0))
+            client.setMarkedText(Self.marked(o), selectionRange: NSRange(location: o.cursorUTF16, length: 0))
         } else if shell.composing {
             clearMarkedText()
         }
         shell.composing = !o.preedit.isEmpty
-        if o.candidates.isEmpty {
+        // Zhen-inline section 1.3f: an open English run has no candidates, so the hint takes the window's place.
+        let hint = o.candidates.isEmpty && o.englishRunLength > 0
+        if o.candidates.isEmpty && !hint {
             shell.hideCandidates()
         } else {
             let cursor = Int(o.cursorUTF16)
@@ -1143,10 +1155,27 @@ public final class Session {
                 rect = client.lineRect(cursor: cursor)
                 shell.lineCache = (o.preedit, cursor, rect)
             }
-            shell.showCandidates(o.candidates, selected: o.selected, columns: o.columns, first: o.first, total: o.total,
-                                 vertical: o.vertical, lineRect: rect, appearance: client.appearance)
+            if hint {
+                shell.showHint(lineRect: rect, appearance: client.appearance)
+            } else {
+                shell.showCandidates(o.candidates, selected: o.selected, columns: o.columns, first: o.first, total: o.total,
+                                     vertical: o.vertical, lineRect: rect, appearance: client.appearance)
+            }
         }
         takeRerank()
+    }
+
+    /// Section 7 and zhen-inline section 1.3f: the preedit with a single underline, and a thick one over the open English run
+    /// (clamped to the text, so a wrong range from the core can never throw).
+    static func marked(_ o: CoreOutput) -> NSAttributedString {
+        let text = NSMutableAttributedString(
+            string: o.preedit, attributes: [.underlineStyle: NSUnderlineStyle.single.rawValue])
+        let run = NSRange(location: o.englishRunStart, length: o.englishRunLength)
+        let range = NSIntersectionRange(run, NSRange(location: 0, length: text.length))
+        if range.length > 0 {
+            text.addAttribute(.underlineStyle, value: NSUnderlineStyle.thick.rawValue, range: range)
+        }
+        return text
     }
 
     /// Section 7, non-zero return code: the core discards its composition too (reset mode 1; it

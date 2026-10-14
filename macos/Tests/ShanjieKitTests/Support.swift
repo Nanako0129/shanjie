@@ -63,6 +63,13 @@ final class FakeClient: TextClient {
         case mark(String, cursor: Int, underlined: Bool)
     }
 
+    /// One stretch of the last marked text with the same underline style (`NSUnderlineStyle` raw value, 0 for none).
+    struct UnderlineRun: Equatable {
+        let range: NSRange
+        let style: Int
+    }
+    private(set) var underlineRuns: [UnderlineRun] = []
+
     let bundleIdentifier: String?
     private(set) var calls: [Call] = []
     private(set) var text = ""   // committed text
@@ -120,6 +127,11 @@ final class FakeClient: TextClient {
         let underline = text.length == 0
             ? false
             : (text.attribute(.underlineStyle, at: 0, effectiveRange: nil) as? Int) == NSUnderlineStyle.single.rawValue
+        var runs: [UnderlineRun] = []
+        text.enumerateAttribute(.underlineStyle, in: NSRange(location: 0, length: text.length)) { value, range, _ in
+            runs.append(UnderlineRun(range: range, style: value as? Int ?? 0))
+        }
+        underlineRuns = runs
         calls.append(.mark(text.string, cursor: selectionRange.location, underlined: underline))
         marked = text.string
     }
@@ -139,6 +151,8 @@ final class FakeDialogs: LearningDialogs {
 final class FakePanel: CandidatePanel {
     private(set) var visible = false
     private(set) var items: [String] = []
+    /// The text of the one-line hint on screen (zhen-inline section 1.3f); `nil` when none. Any `show` or `hide` clears it.
+    private(set) var hint: String?
     private(set) var notes: [String?] = []
     private(set) var selected = -1
     private(set) var lineRect: NSRect?
@@ -158,6 +172,7 @@ final class FakePanel: CandidatePanel {
 
     func show(_ candidates: [String], notes: [String?], selected: Int, columns: Int, first: Int, total: Int, vertical: Int,
               lineRect: NSRect?, appearance: NSAppearance?, glassTint: Double) {
+        hint = nil
         glassTints.append(glassTint)
         self.lineRect = lineRect
         self.appearance = appearance
@@ -174,8 +189,15 @@ final class FakePanel: CandidatePanel {
     /// A mouse click on the cell at `i`, as the app's panel reports it.
     func click(_ i: Int) { onSelect?(i) }
 
+    func showHint(_ text: String, lineRect: NSRect?, appearance: NSAppearance?, glassTint: Double) {
+        show([], notes: [], selected: -1, columns: 0, first: 0, total: 0, vertical: 0, lineRect: lineRect, appearance: appearance,
+             glassTint: glassTint)
+        hint = text
+    }
+
     func hide() {
         visible = false
+        hint = nil
         items = []
         selected = -1
     }

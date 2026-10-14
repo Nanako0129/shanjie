@@ -616,6 +616,32 @@ final class ShellTests: XCTestCase {
         XCTAssertEqual(again.client.marked, "ㄋㄔ", "a new shell reads the stored on")
     }
 
+    /// zhen-inline section 1.3f: while an English run is open the core's run range gets the thick underline (the rest of the marked
+    /// text stays single) and the hint is on the panel; once the run ends both are gone.
+    func testEnglishRunHasThickUnderlineAndTheHint() {
+        let c = Controller(Shell(resources: resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(),
+                  learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), englishStore: MemoryEnglishStore(true), acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore()))
+        c.session.activate()
+        let single = NSUnderlineStyle.single.rawValue, thick = NSUnderlineStyle.thick.rawValue
+        c.type("su3")  // ㄋㄧˇ, one Chinese character before the run
+        XCTAssertEqual(c.client.underlineRuns, [.init(range: NSRange(location: 0, length: 1), style: single)])
+        XCTAssertNil(c.panel.hint, "no run, no hint")
+        c.type("w", flags: .shift)
+        c.type("indows")
+        XCTAssertEqual(c.client.marked, "你Windows")
+        XCTAssertEqual(c.client.underlineRuns, [.init(range: NSRange(location: 0, length: 1), style: single),
+                                                .init(range: NSRange(location: 1, length: 7), style: thick)],
+                       "thick over the run, single before it")
+        XCTAssertEqual(c.panel.hint, "空白：英文斷開")
+        XCTAssertTrue(c.panel.visible)
+        c.panel.click(0)  // the hint is no candidate: the shell is not told, and nothing is picked
+        c.type(" ")  // the run ends
+        XCTAssertEqual(c.client.marked, "你Windows")
+        XCTAssertEqual(c.client.underlineRuns, [.init(range: NSRange(location: 0, length: 8), style: single)], "all single again")
+        XCTAssertNil(c.panel.hint, "the hint goes with the run")
+        XCTAssertFalse(c.panel.visible)
+    }
+
     /// zhen-mixed section 3.2 / 5.3: "中英混打（實驗）" sits after "即時預測" and before "語意校正", is unchecked by default, is stored,
     /// makes `rust` and Space open the English window (the list is eval/golden/english-tiny.txt), is sent again to every engine a
     /// rebuild makes (the word pack switch and a layout switch rebuild it), and a new shell reads the stored on.
