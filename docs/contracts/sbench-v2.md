@@ -71,7 +71,7 @@
 - **時間預算**（推論）：executor 1 回合加 1 次修正；main 跑兩版（CLI 約 1.6 萬列 × 兩種設定 × 兩版，開語意校正約十幾分鐘）、保留集、/code-review、verifier、CI，整片約 3–4 小時。超過 5 小時先回報。
 - main：放好模型檔（Release 下載＋雜湊核對）；用真的私有資料跑 v0.4.0 與 v0.4.1、commit 結果 JSON 與 `docs/benchmark.md`；請 fresh verifier 量保留集並填入；`docs/verification.md` 那一列改成套件 v2 的指令，`docs/releases/README.md` 與 `CLAUDE.md`「發版」加一句指向它；研究紀錄、PLAN。
 - executor 不可以：讀 `~/side-project/shanjie-private/`、`eval/holdout/`、`~/.cache/shanjie/work/`（每次執行 `--private-root` 指向空的暫存目錄；§3 第 5 項的沙盒拒絕規則把這三處都列進去）；連網、下載 Release；push、開 PR；安裝、開 App、在 `.app` 裡執行；改 `core/`、`cli/`、`macos/`。
-- 停止條件：錨點對不上；同一版兩次結果不同；舊版 build 不起來而且原因不明；超過預算（executor 1 回合加 1 次修正）；保留集 v0.4.1 對 v0.4.0「改對 < 改壞而且 p < 0.05」。
+- 停止條件：錨點對不上；同一版兩次結果不同；舊版 build 不起來而且原因不明；超過預算（executor 1 回合加 1 次修正）；保留集 v0.4.1 對 v0.4.0「改對 < 改壞而且 p < 0.05」。〔2026-10-15 起，每一次發版〕使用者端三個集合（保留集、錯字回報、discordtune）任一種設定「改對 < 改壞而且 p < 0.05」就停、不推 tag；其他集合顯著變差只警示（§2.3 的修訂）。
 - **被量的 commit 要等於出貨的那一版**：結果 JSON 記被量的 commit SHA。推 v0.4.1 tag 之前，`git diff <被量的 commit> <要打 tag 的 commit> -- Cargo.toml Cargo.lock core cli data eval/variants.tsv macos scripts` 必須是空的（`macos` 有殼的預設值，例如語意校正與詞包的 `?? true`；`scripts` 有 `build-app.sh` 包進去的模型；/code-review 2026-10-13 補上），輸出記進研究紀錄；不是空的就停，回報使用者（保留集不重跑第二次；重跑要使用者決定）。〔修訂，2026-10-14〕例外：差異只在不改輸出的地方（重構、測試、註解）時，用兩個 commit 的 CLI 在出貨設定下跑 dev302、typing76、錯字回報兩種設定，rowstats 逐位元組相同（`cmp` 結束碼 0）就可以沿用保留集的數字；diff 清單與比對結果記進研究紀錄（v0.4.3 是第一次用）。
 - **錨點前先確認**：`git diff v0.4.0 1cc5109 -- core cli data/lexicon eval/variants.tsv` 與 `git diff 1cc5109 <v0.4.1 被量的 commit> -- core cli data/lexicon eval/variants.tsv`（1cc5109 是 S7h 量錨點時的 main）沒有改到不開詞包時的解碼；有的話先回報，不直接拿錨點比。
 - 回滾：只新增檔案與工具的新路徑，revert 合併 commit。

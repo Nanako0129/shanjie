@@ -5730,9 +5730,9 @@ formal: alpha 0.7, tau 1, delta 2
 
 ## 2026-10-15：v0.4.4 的跨版本基準測試與保留集
 
-- 照 `docs/verification.md`：在 `tools/bench.py` 的 `VERSIONS2` 加 v0.4.4（`--context --packs acg --tinylm`，加上 `"kn": True`：model-v6 附 kn-v1，摘要行標記 `+kn:cbefbced:θ1:β1`），`tools/bench.py run --suite v2 v0.4.3 39ee205 --as v0.4.4 --private-root …`，再 `tools/bench.py table`。v0.4.4 的模型檔還沒有 Release，從主 checkout 的 `data/lm`（雜湊核對過）複製進工具的模型快取。
-- 結果（`docs/benchmark.md`，v0.4.3 → v0.4.4）：錯字回報書面 +6／−0（p 0.031）；wikitune +24／−16、+32／−18（不顯著）；**lytune 聊天 +40／−85（p 7×10⁻⁵）、書面 +54／−96（p 0.0008），顯著變差**；discordtune +40／−51、+72／−86（不顯著）；其他集合持平。每鍵延遲中位數 2.21 → 2.84 ms、p95 9.76 → 7.62 ms，記憶體 289 → 294 MB。
-- 〔推論〕lytune 的退步主要來自 classes-v4：同日「derisk-1015 的結果」裡，出貨的 model-v6 關掉詞類表在判讀五集（lytune 佔 88%）多對 42／51 句；沒有對 v0.4.3 → v0.4.4 逐列拆。
+- 照 `docs/verification.md`：在 `tools/bench.py` 的 `VERSIONS2` 加 v0.4.4（`--context --packs acg --tinylm`，加上 `"kn": True`：model-v6 附 kn-v1，摘要行標記 `+kn:cbefbced:θ1:β1`），`tools/bench.py run --suite v2 v0.4.3 39ee205 --as v0.4.4 --private-root …`，再 `tools/bench.py table`。v0.4.4 用的模型檔已經有各自的資料 Release（model-v6、classes-v4、kn-v1、tinylm-v5）；這次直接從主 checkout 的 `data/lm` 複製進工具的模型快取，雜湊和 `data/*.sha256` 相同。工具找不到檔時提示「從 Release v0.4.4 下載」，但 v0.4.4 的 Release 只會有 App，要改從那四個資料 Release 下載（v0.4.3 那一列也一樣）。
+- 結果（`docs/benchmark.md`，v0.4.3 → v0.4.4）：錯字回報書面 +6／−0（p 0.031）；wikitune +24／−16、+32／−18（不顯著）；**lytune 聊天 +40／−85（p 7×10⁻⁵）、書面 +54／−96（p 0.0008），顯著變差**；discordtune +40／−51、+72／−86（不顯著）；其他集合持平。每鍵延遲 p95 2.21 → 2.84 ms、最大 9.76 → 7.62 ms，記憶體 289 → 294 MB。
+- 〔推論〕lytune 的退步和詞類項有關：derisk-1015 的拆解（`feat/derisk-1015` 分支的研究紀錄，還沒合併）裡，出貨的 model-v6 關掉詞類項在判讀五集（lytune 佔 88%）多對 42／51 句。那是 model-v6 上詞類開／關，不是 classes-v4 對 classes-v3；聊天設定還有一部分在重排階段（下一節）。沒有對 v0.4.3 → v0.4.4 逐列拆。
 - 保留集（fresh verifier，v0.4.3 對 39ee205，跑一次）：聊天 191 → 191（+3／−3，p 1.0），書面 189 → 186（+2／−5，p 0.45）。不是停止條件（契約 sbench-v2 §2.3：改對 < 改壞且 p < 0.05 才停）。保留集已經用過多次，數字要打折看（同日「保留集換新」）。
 - 維護者 2026-10-15「先出貨吧」：設定視窗改版（PR #163）隨這一版出。
 
