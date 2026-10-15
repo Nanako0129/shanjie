@@ -91,6 +91,7 @@
   - 測試（Rust，用合成的小模型與小側檔，照 rerank-strength §9 的讀檔規矩）：KN 開＋雜湊相符 → 載入成功；KN 開＋不符 → `KneserNey`；KN 開＋SJTL0001–0003 → `KneserNey`；KN 關＋檔裡有非 0 雜湊 → `KneserNey`；KN 關＋全 0 → 成功；SJTL0004 每個前綴長度都回 `Format` 不 panic；`export_sjtl.py` 的單元測試核對寫入的雜湊與位移。讀檔與格式屬安全審查範圍，交 `pilotfish:security-executor`。
 - **重調**：權重不變（S7a M），在 model-v6＋classes-v4＋kn-v1＋名單層的候選上照 `docs/contracts/rerank-strength.md` §11 重做，但**KN 開著**（覆寫 §11.1 的「不載 KN」）：
   - 分數檔用一個暫時的 `.sjtl`：`export_sjtl.py --type int8 --ngram-model <最終 model-v6> --kn-side <最終 kn.sjkn> --chat 0.3 2 0.25 --formal 0.7 1 2 --levels 1 2 3 0.3 2 0.25 0.7 0.5 2 0.5 1 0.25`（輸出 SJTL0004；融合參數用 tinylm-v4 的值當佔位，分數檔只用到權重，之後重選），在 188 用唯一的 CLI commit 跑 `--tinylm <暫時檔> --tinylm-scores … --dump …`（側檔在模型旁邊，KN 開著）。
+  - 跨機器一致（rerank-strength 11.1）〔修訂，2026-10-15〕：開 KN 之後 macOS 與 Linux 的 libm 末位不同，dev302 的 dump 在 n-gram 分數欄差最後一位（量過最大 7.1e-15），雜湊不會相同；改成「候選字串與順序逐行相同、n-gram 分數差 ≤ 1e-9」，小模型分數 ≤ 1e-4 與「每組參數選出的候選相同」照 11.1。照維護者「自訂規則擋到設計就放寬」。
   - §1 選值（標準那一檔也在新候選上重選，因為模型換了）、§4.2–§4.4、D2c 拆解只記錄；匯出 `tinylm-v5`：`--ngram-model <model-v6> --kn-side <kn-v1> --chat … --formal … --levels …`（SJTL0004）；§4.5 保留集（fresh verifier）。
 - **前提與順序**：語意校正強度那一片（`feat/rerank-strength`，SJTL0003 與設定 UI，切到 tinylm-v4）先合併；SJTL0004 的核心改動在這一片。**App 切到 model-v6＋kn-v1 的 PR 必須同時切到 tinylm-v5**（不留下「KN 開著、小模型載不進來」的合併狀態）。
 
