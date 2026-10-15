@@ -257,6 +257,8 @@ class Counting(Base):
             bc.main()
         return out.getvalue()
 
+    @unittest.skipUnless(os.path.isfile(os.path.join(bc.SRC, "opencc", "TWVariants.txt")),
+                         "real Pool workers load the OpenCC tables from ~/.cache (absent on CI)")
     def test_build_counts_main_with_pool(self):
         off = self.main_counts()
         base = pickle.load(open(os.path.join(self.d.name, "counts-3.pkl"), "rb"))

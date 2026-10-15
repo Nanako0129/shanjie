@@ -450,6 +450,7 @@ def main():
     if a.extra_lexicon and not a.expected:
         ap.error("--extra-lexicon 只用在 --expected（加法計數，model-v5 契約 §8）")
     guard = guard_matcher(a.holdout_guard)
+    load_conv()   # in the parent first: a missing or wrong OpenCC file stops here, not in every Pool worker's initializer (which respawns forever)
     os.makedirs(OUT, exist_ok=True)
     uni, bi, tri = collections.Counter(), collections.Counter(), collections.Counter()
     sents = arts = skipped = 0
