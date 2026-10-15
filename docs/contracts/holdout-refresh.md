@@ -1,6 +1,6 @@
 # 契約：保留集換新（公開語料的新聞與口語，一次抽三份）
 
-狀態：READY（2026-10-15 收尾審查）。修訂二：plan-verifier 第一次 REVISE 的 7 項、第二次的 2 項（切換驗收的兩個輸入要同時存在；main 的回填設定寫死）都照改。
+狀態：修訂三（2026-10-15），待 plan-verifier。修訂二在收尾審查 READY；修訂三是 PR #162 的 `/code-review` 找到 §8 的設計放錯層（在轉換前的原文上比對雜湊、子句要完全相等、接不上維基 dump 與列格式的檔），改成在計數那一層做包含比對，雜湊檔拿掉（§3、§4、§5、§6、§8、§9、§12）。
 
 ## 0. 起因
 
@@ -60,6 +60,7 @@
   - 含入侵詞表（commit `cbc7bdc`）任一詞的。
   - 含 `tools/build_overlay.py` 的 `CANTO_CHARS` 的。
   - 含拉丁字母或數字的（CLI 打不出來）。
+  - 句子欄含任何非漢字的（引號、括號、間隔號、空白等）。句子欄只有漢字，§8 的比對才能在計數用的漢字段上做。
   - 在整個來源池裡出現 ≥ 2 次的（樣板句）。
   - 新聞稿的聯絡人、發布日期這類欄位行。
 - **去重**：
@@ -76,37 +77,31 @@
 ## 4. 抽樣程序（誰、什麼時候、讀什麼）
 
 1. main 寫這份契約，READY 後 commit。種子是 20261015。
-2. **executor** 實作 `tools/holdout_guard.py` 與它的單元測試（§8）。它不碰 `eval/holdout/`。合併之後才做第 3 步。
-3. **fresh mech-executor**（之後不做任何實作）負責抓取、清理、過濾（§3）與產生讀音，然後**停下來**交出兩樣東西：
-   - 過濾後的池，放在它自己暫存資料夾裡，不進 repo；
-   - 池裡每個句子的雜湊檔，格式照 §8。
-
-   它只回報每一步的計數。
-4. **main** 把雜湊檔帶到 Mac 以外的機器，用 `tools/holdout_guard.py --hashes <池的雜湊> --report-matches`，對下列文字比對子句雜湊：
-   - 所有公開評測集；
+2. **executor** 實作 §8 的比對（`tools/holdout_guard.py` 與計數程式的開關）和單元測試。它不碰 `eval/holdout/`。合併之後才做第 3 步。
+3. **fresh mech-executor**（之後不做任何實作）負責抓取、清理、過濾（§3）與產生讀音，然後**停下來**，把過濾後的池寫成一個列檔（`前文|句子|讀音`），放在它自己的暫存資料夾裡，不進 repo。它只回報每一步的計數。
+4. **main** 把池的列檔原封不動帶到 Mac 以外的機器（不打開、不印出），用 `tools/holdout_guard.py report --rows <池>`（§8）對下列文字比對：
+   - 所有公開評測集（列檔）；
    - 訓練文字（維基前 20 萬篇、口語訓練檔、`synth.txt`、補次數檔）；
    - S7f 清理後的語料（`986626adaefa`）；
    - 行政院 294 句；
-   - 舊保留集。
+   - 舊保留集（列檔）。
 
-   得到「要丟的雜湊」清單，交回給 mech-executor。整個過程 main 只碰雜湊，不碰句子。
-5. **mech-executor** 丟掉命中的句子，回報「重疊丟掉 N 句」。這個計數出現在抽樣**之前**。接著照 §3 做份量檢查，用固定種子抽樣、切成三份，寫入：
+   工具只輸出命中的池列號與每個來源的命中數。main 把列號清單交回給 mech-executor，然後刪掉那台機器上的池副本。整個過程 main 只看列號與計數，不看句子。
+5. **mech-executor** 丟掉命中的列，回報「重疊丟掉 N 句」。這個計數出現在抽樣**之前**。接著照 §3 做份量檢查，用固定種子抽樣、切成三份，寫入：
    - `eval/holdout/next/shard-{1,2,3}/{news,talk}.txt`
    - `eval/holdout/next/sources.tsv`
-   - `eval/holdout/hashes.sha256`（§8）
 6. **盲後處理**：另一個 fresh agent 做下列檢查，只回數字。
    - 拼不出：把每份的 `news.txt`、`talk.txt` 依這個順序串成一個暫存檔，用 CLI 的 `--lm data/lm/bigram.sjlm --rows <暫存檔> --profile chat` 跑一次。LM 模式的 `--rows` 碰到解不出的列會整個停下來報錯（不是丟列），所以這一步要跑完、而且摘要行的 n 等於 300。這一步不用改 `cli/`。
    - 讀音和詞庫第一名不同的列數：在暫存的 worktree 裡先把 `eval/holdout/holdout.txt` 移走，然後一次放一份：把第 k 份的 `news.txt`、`talk.txt` 複製到 `eval/holdout/` 頂層，跑 `--set holdout --check-readings`，記下數字再換下一份（k＝1、2、3）。這個數字**只回報**，不拿來丟列：多音字與變調的列本來就會不同。
    - 和開發集零重疊。
-   - 把三份的句子欄一行一句餵給 `tools/holdout_guard.py --hashes eval/holdout/hashes.sha256`，回報丟掉的行數。必須等於 900。
+   - 比對自檢：把三份的句子欄一行一句寫成暫存文字檔，用 `tools/holdout_guard.py report --rows <三份串接> --text <那個暫存檔>` 比對，命中的列數必須等於 900（比對沒有默默失效）。
    - 抽完之後如果還驗到和 §4 第 4 步所列文字的重疊：停下來回報，不自己補抽。
-7. main **不讀** `eval/holdout/` 底下的任何內容，包括 `next/`、`sources.tsv` 和雜湊檔裡的句子對應。commit 時只看 `git diff --cached --stat` 與 SHA-256。
+7. main **不讀** `eval/holdout/` 底下的任何內容，包括 `next/` 與 `sources.tsv`。commit 時只看 `git diff --cached --stat` 與 SHA-256。
 
 ## 5. 授權與出處
 
 - **換新 PR** 同時改 `LICENSES/data.md`：
   - 第 27 列的 `eval/holdout/*` 收窄成 `eval/holdout/holdout.txt`、`eval/holdout/oov_words.list`、`eval/holdout/.gitkeep`，授權 CC0。
-  - `eval/holdout/hashes.sha256` 是本專案產生的，CC0。
   - `eval/holdout/next/**/news.txt` 一列：寫明著作權法第 9 條、政府資料開放授權的顯名聲明、CC BY 4.0（維基新聞），以及 PeoPo 的逐篇授權。
   - `eval/holdout/next/**/talk.txt` 一列：整檔 CC BY-SA 4.0，署名 Wikipedia contributors、The Computational Democracy Project，加上提點子的顯名聲明。
   - `eval/holdout/next/sources.tsv`：出處清單，CC0。
@@ -119,9 +114,9 @@
 
 ## 6. 新舊並存與換手（不改 `cli/`、`core/`）
 
-- 事實：`cli/src/main.rs` 的 `load_set` 會讀 `eval/holdout/` 這一層所有的 `.txt`，不讀子資料夾，所以 `next/` 底下的檔案不會被 `--set holdout` 讀到。雜湊檔用 `.sha256` 副檔名，也不會被讀到。
+- 事實：`cli/src/main.rs` 的 `load_set` 會讀 `eval/holdout/` 這一層所有的 `.txt`，不讀子資料夾，所以 `next/` 底下的檔案不會被 `--set holdout` 讀到。
 - **第一步，換新 PR**：只動 `eval/`、`docs/`、`LICENSES/`。
-  - 內容：三份資料、`sources.tsv`、`hashes.sha256`、`eval/README.md` 的雜湊與使用紀錄、`LICENSES/data.md`。
+  - 內容：三份資料、`sources.tsv`、`eval/README.md` 的雜湊與使用紀錄、`LICENSES/data.md`。
   - 這時舊集仍是現役。
   - **審查只用 fresh verifier**。它的 brief 禁止在報告裡引用任何列的文字。這個 PR 不跑 `/code-review`。
   - verifier 要確認，`--set holdout --rowstats` 在這個 PR 上仍然成功，而且 n = 227。
@@ -151,19 +146,25 @@
 - 三份都用完後：把時間窗往後延，用同樣的規則重抽。
 - 這套規則寫進 `eval/README.md`，以及維護者本機的 `CLAUDE.md`「評測與資料」（由 main 改，不進 repo）。
 
-## 8. 雜湊格式與保存期限（不讓新集被下次建模型吸進訓練文字）
+## 8. 比對方式與保存期限（不讓新集被下次建模型吸進訓練文字）
 
-- **雜湊的輸入**：只取句子欄，不含前文、不含讀音。用 UTF-8 編碼，只去掉行尾換行，不做其他正規化。
-- **檔案格式**：`eval/holdout/hashes.sha256` 每行一個小寫 hex 的 SHA-256，不放文字。三份共 900 行。
-- **`tools/holdout_guard.py`** 讀一個文字檔，處理方式如下：
-  - 每一行用和 §3 相同的規則切子句（在 。！？；， 切開），每個子句去掉前後空白後算雜湊。
-  - 只要有一個子句的雜湊和 `--hashes` 檔相符，整行就丟掉。最後回報丟掉幾行。
-  - `--report-matches` 另外輸出命中的雜湊（§4 第 4 步用）。
+- **比對的單位**：計數程式看到的樣子。計數是先轉換（`build_counts.convert`：簡轉繁、台灣字形、用詞），再取漢字段（`build_counts.HAN`）才計數，所以比對也在這一層做：轉換之後的每一段漢字，只要**包含**任何一個保留集句子（整句出現在這段裡），就算命中。
+- **句子從哪裡來**：工具直接讀列檔（預設是 repo 裡 `eval/holdout/` 底下所有的 `.txt`，含 `next/`），取句子欄。main 不需要看到句子，也不需要雜湊檔。
+  - 列的解析照 CLI 的 `parse_rows`：跳過空行與 `#` 開頭的行；剛好三欄；去掉行尾的 `\r`；檔頭的 BOM 去掉。不合格式的列直接報錯，不默默跳過。
+  - 句子本身和它轉換後的樣子都當成比對對象（同 S7f `clean.Filter` 的做法）。
+- **比對器**：重用 `experiments/s7f-corpus/clean.py` 的 `Matcher`（以前兩字建索引，每個位置查一次）。
+- **`tools/holdout_guard.py report`**：`--rows` 給比對對象（池或保留集的列檔），來源用 `--text FILE`（純文字，逐行轉換後取漢字段）、`--row-files FILE`（列檔，取句子欄再轉換）、`--wiki DUMP --articles N --skip M`（照 `build_counts.py` 的條目處理：`TEMPLATE`、`MARKUP`、`SENT`、轉換、漢字段）。
+  - 輸出：命中的比對對象列號（一行一個）與每個來源的命中數。**不輸出任何句子或文字**。
+  - 輸入有非法 UTF-8 時不崩潰：以 `errors="replace"` 讀，壞位元組不會是漢字，不影響比對。
+- **計數程式的開關**：`experiments/s2/build_counts.py` 與 `build_counts_text.py` 加 `--holdout-guard [ROWS…]`，預設關（關著時輸出逐位元組不變）；開著時，命中的漢字段不計數，最後回報跳過幾段（只有數字）。下一次建模型時打開；那一片的契約寫進建置步驟。`experiments/model-v6/README.md` 不改：model-v6 的配方要能照原樣重現。
 - **單元測試**（合成資料）要涵蓋：
-  - 子句命中就丟整行；
-  - 雜湊格式和輸入的定義與上面一致；
-  - 沒命中的行逐位元組保留。
-- `experiments/model-v6/README.md` 的建置步驟加一行：計數之前，所有訓練文字先過這個工具。下一次建模型時才實際執行。
+  - 句子在較長的漢字段中間（包含）也命中；
+  - 外面包了引號、半形標點、空白也命中；
+  - 原文是簡體或異體、轉換後才相同也命中（用一個小的假轉換表）；
+  - 列檔解析：空行、`#` 行、BOM、`\r\n`、欄數不對要報錯；
+  - 非法 UTF-8 的輸入不崩潰；
+  - `report` 只輸出列號與計數；
+  - 計數程式關著時計數不變、開著時跳過命中的段。
 
 ## 9. 驗收
 
@@ -173,14 +174,14 @@
   - 拼不出 0 列，每份 n = 300。
   - 讀音和詞庫第一名不同的列數有記錄，不設門檻。
   - 和開發集零重疊。
-  - `holdout_guard.py` 丟掉 900 行。
+  - 比對自檢命中 900 列（§4 第 6 步）。
   - mech-executor 的計數報告裡，「重疊丟掉 N 句」這一行出現在抽樣之前。
 - 換新 PR 上，`--set holdout` 仍是 n = 227。
 - 回填與雜訊底線的數字記在研究紀錄與 `eval/README.md`。
 - 切換之後：
   - 在切換的 commit 上，`--set holdout` 與 `--rows <串接檔>` 用同一組旗標量出的 rowstats 逐位元組相同（§6 第三步），n = 300。
   - dev302 的前 302 列和切換前逐列相同（用 `cli --dev 302 --dump` 比較 dump）。
-- `tools/holdout_guard.py` 的測試通過，而且包含在 `make test-python` 裡。
+- `tools/holdout_guard.py` 與計數程式開關的測試通過，而且包含在 `make test-python` 裡；開關關著時，`experiments/s2/` 既有的測試結果不變。
 
 ## 10. 停止條件
 
@@ -202,8 +203,8 @@
 
 | 步驟 | 負責人 |
 |---|---|
-| 契約、`LICENSES/data.md`、`eval/README.md` 的規則與使用紀錄、PR、§4 第 4 步的重疊比對（只碰雜湊） | main |
-| §4 第 2 步：`tools/holdout_guard.py` 與測試（不碰 `eval/holdout/`；這個 PR 照程式改動的關卡走） | executor |
+| 契約、`LICENSES/data.md`、`eval/README.md` 的規則與使用紀錄、PR、§4 第 4 步的重疊比對（只看列號與計數） | main |
+| §4 第 2 步：`tools/holdout_guard.py`、計數程式的開關與測試（不碰 `eval/holdout/`；這個 PR 照程式改動的關卡走） | executor |
 | §4 第 3、5 步：抓取到寫檔 | fresh mech-executor |
 | §4 第 6 步：盲後處理 | fresh agent |
 | §6 第一步的審查、第二步的回填與雜訊底線 | fresh verifier |
