@@ -2,6 +2,7 @@
 Run: python3 -m unittest tools/test_triage.py   (from the repo root). No network, no models, no private data.
 
 Syllables are placeholders ("a", "ni", ...): the tool only compares them. A row is built by `row`; `classify` is called directly for wrong rows."""
+import hashlib
 import io, json, os, struct, sys, tempfile, unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -31,11 +32,12 @@ a-b 單 -1
 OVERLAY = "x-y\t新詞\t-2\twikt\nz-w\t舊詞\t-2\twikt\n"   # 舊詞 is also in the base file: not an overlay-only word
 SANDHI = "yi2-ge\t一個\t-2\tsandhi\nm-n\t只變\t-2\tsandhi\n"
 PACK = "k-l\t包詞\t-2\tacg\n"
+NAMES = "p-q\t名店\t-2\tnames\n"
 PAR = (1.0, 2.0, 0.5)   # alpha, tau, delta
 
 
 def lex(sandhi=SANDHI):
-    return T.Lex(BASE, OVERLAY, sandhi, PACK)
+    return T.Lex(BASE, OVERLAY, sandhi, PACK, NAMES)
 
 
 def row(truth, syls, cands, gold0=None, c=0, scores=None, ctx=""):
@@ -63,8 +65,9 @@ class Lexicon(unittest.TestCase):
         self.assertFalse(l.has("字"), "a row with two fields is skipped")
         self.assertFalse(l.has("單"), "a word whose length differs from its syllable count is skipped")
         self.assertEqual(l.by_reading[("yi2", "ge")], {"一個"}, "sandhi-add.tsv rows are entries")
-        self.assertEqual(l.base & {"新詞", "包詞", "只變"}, set())
-        self.assertEqual(l.source, {"新詞", "舊詞", "包詞"}, "overlay and pack words are sources; sandhi readings are not")
+        self.assertEqual(l.base & {"新詞", "包詞", "只變", "名店"}, set())
+        self.assertEqual(l.by_reading[("p", "q")], {"名店"}, "names-add.tsv rows are entries (model-v6: the names layer is always on)")
+        self.assertEqual(l.source, {"新詞", "舊詞", "包詞", "名店"}, "overlay, names and pack words are sources; sandhi readings are not")
 
     def test_bad_overlay_row_is_refused(self):
         with self.assertRaises(ValueError):
@@ -91,14 +94,28 @@ class Pick(unittest.TestCase):
             tinylm.save_params(npz, tinylm.random_params(list(chars), n_layer=1, d=8, n_head=2, seed=1), chars, n_layer=1, n_head=2)
             cases = [("v1", chat, formal, None, {"chat": (0.3, 2.0, 0.0), "formal": (0.7, 1.0, 0.0)}),
                      ("v2", chat + (0.25,), formal + (2.0,), None, {"chat": (0.3, 2.0, 0.25), "formal": (0.7, 1.0, 2.0)}),
-                     ("v3", chat + (0.25,), formal + (2.0,), levels, {"chat": (0.3, 2.0, 0.25), "formal": (0.7, 1.0, 2.0)})]
+                     ("v3", chat + (0.25,), formal + (2.0,), levels, {"chat": (0.3, 2.0, 0.25), "formal": (0.7, 1.0, 2.0)}),
+                     ("v4", chat + (0.25,), formal + (2.0,), levels, {"chat": (0.3, 2.0, 0.25), "formal": (0.7, 1.0, 2.0)})]
             for name, c, f, lv, want in cases:
                 out = os.path.join(td, name + ".sjtl")
-                ex.export(npz, out, "int8", c, f, b"\0" * 32, levels=lv)
+                # version 4 (model-v6 section 2.7): the same header plus the SHA-256 of the kn.sjkn it was tuned with
+                ex.export(npz, out, "int8", c, f, b"\0" * 32, levels=lv, kn_sha=b"\x07" * 32 if name == "v4" else None)
+                self.assertEqual(open(out, "rb").read()[:8], f"SJTL000{name[1]}".encode(), name)
                 self.assertEqual(T.tinylm_params(out), want, name)
             junk = os.path.join(td, "junk.sjtl")
             open(junk, "wb").write(b"x" * 300)
             self.assertRaises(ValueError, T.tinylm_params, junk)
+
+
+class KnTag(unittest.TestCase):
+    def test_kn_tag_is_the_clis(self):
+        """The setting tag the CLI prints for the side file beside the model (core Lm::kn_tag; the eval/golden/kn-tiny files), "" without one."""
+        kn = os.path.join(T.ROOT, "eval/golden/kn-tiny")
+        for f, beta in (("kn.sjkn", "1"), ("kn-beta075.sjkn", "0.75")):
+            b = open(os.path.join(kn, f), "rb").read()
+            self.assertEqual(T.kn_tag(os.path.join(kn, f)), f"+kn:{hashlib.sha256(b).hexdigest()[:8]}:θ1:β{beta}")
+        self.assertEqual(T.kn_tag(os.path.join(kn, "no-such.sjkn")), "")
+        self.assertRaises(ValueError, T.kn_tag, os.path.join(kn, "bigram.sjlm"))
 
 
 class Segments(unittest.TestCase):

@@ -448,7 +448,7 @@ final class RerankTests: XCTestCase {
     /// Without the small model (file missing or corrupt) the switch can do nothing: the menu item and the settings toggle are
     /// greyed, the checkmark still shows the stored choice, and no job is made. With the file both are enabled.
     func testGreyedWithoutTheSmallModel() throws {
-        let names: Set<String> = ["mcbpmf-data.txt", "overlay-add.tsv", "sandhi-add.tsv", "demote.tsv", "bigram.sjlm", "classes.sjc"]
+        let names: Set<String> = ["mcbpmf-data.txt", "overlay-add.tsv", "sandhi-add.tsv", "names-add.tsv", "demote.tsv", "bigram.sjlm", "classes.sjc"]
         let missing = try XCTUnwrap(TestData.resources(only: names))
         let corrupt = try XCTUnwrap(TestData.resources(only: names))
         try Data("not a model".utf8).write(to: corrupt.appendingPathComponent(Shell.tinyLMFile))
@@ -469,9 +469,13 @@ final class RerankTests: XCTestCase {
 
     // MARK: the strength (docs/contracts/rerank-strength.md section 3)
 
-    /// Two Resources directories from the real data/lm/tinylm.sjtl, whichever version ships: one with it as version 2, one as
-    /// version 3 whose four extra sets equal the standard ones (section 3: v2 -> v3 inserts at 116 the chat standard triple twice,
-    /// then the formal one twice, and relabels; v3 -> v2 drops bytes 116..<212 and relabels).
+    /// Two Resources directories from the real data/lm/tinylm.sjtl, whichever version ships: one with it as version 2 (the standard
+    /// sets only), one as version 3. From a version 2 file the version 3 one has four extra sets equal to the standard ones (section 3:
+    /// v2 -> v3 inserts at 116 the chat standard triple twice, then the formal one twice, and relabels; v3 -> v2 drops bytes 116..<212
+    /// and relabels). From a version 3 file it is the file itself. From a version 4 file (SJTL0004, tinylm-v5) it is the file without its
+    /// 32 kn.sjkn hash bytes (212..<244), relabelled, so its conservative and aggressive sets are tinylm-v5's real values, not copies of
+    /// the standard ones (chat conservative 1/2/3, aggressive equal to standard; formal standard 1/1/3, conservative 1/1/4).
+    /// Under model-v6 + kn-v1 + tinylm-v5 (chat standard 0.3/2/0.25) the RerankTests passed on 2026-10-15 (`make test-swift`).
     private func versionedResources() throws -> (v2: URL, v3: URL) {
         let real = try Data(contentsOf: TestData.repo.appendingPathComponent("data/lm/tinylm.sjtl"))
         let label = { (data: Data, version: UInt8) -> Data in
@@ -481,7 +485,15 @@ final class RerankTests: XCTestCase {
             return d
         }
         let v2: Data, v3: Data
+        // model-v6 section 7 P3-6: a version 4 file records the kn.sjkn it was tuned with and pairs only with it; the version 2 and 3
+        // files derived from it record none, so their Resources below carry no kn.sjkn (the model then loads without KN and they pair).
         switch String(decoding: real.prefix(8), as: UTF8.self) {
+        case "SJTL0004":
+            var d3 = real
+            d3.removeSubrange(212..<244)
+            var d2 = d3
+            d2.removeSubrange(116..<212)
+            (v2, v3) = (label(d2, 2), label(d3, 3))
         case "SJTL0002":
             let chat = real[36..<52] + real[100..<108], formal = real[52..<68] + real[108..<116]
             var d = real
@@ -495,11 +507,16 @@ final class RerankTests: XCTestCase {
             throw CocoaError(.fileReadCorruptFile)  // fails the test: neither version 2 nor 3 ships
         }
         XCTAssertEqual(v3.count, v2.count + 96)
-        let names: Set<String> = ["mcbpmf-data.txt", "overlay-add.tsv", "sandhi-add.tsv", "demote.tsv", "bigram.sjlm", "classes.sjc"]
+        let names: Set<String> = ["mcbpmf-data.txt", "overlay-add.tsv", "sandhi-add.tsv", "names-add.tsv", "demote.tsv", "bigram.sjlm", "classes.sjc"]
         let dirs = (try XCTUnwrap(TestData.resources(only: names)), try XCTUnwrap(TestData.resources(only: names)))
         try v2.write(to: dirs.0.appendingPathComponent(Shell.tinyLMFile))
         try v3.write(to: dirs.1.appendingPathComponent(Shell.tinyLMFile))
         addTeardownBlock { for d in [dirs.0, dirs.1] { try? FileManager.default.removeItem(at: d) } }  // two 14.6 MB files each
+        // Each derived file must actually pair (the model loaded): a refused one would grey the strength control for the wrong reason.
+        for d in [dirs.0, dirs.1] {
+            XCTAssertFalse(FileManager.default.fileExists(atPath: d.appendingPathComponent("kn.sjkn").path), "no kn.sjkn beside a version 2 or 3 file")
+            XCTAssertTrue(SettingsModel(shell: rig(resources: d).shell).rerankEnabled, "the derived small model loads")
+        }
         return dirs
     }
 
@@ -547,7 +564,7 @@ final class RerankTests: XCTestCase {
         XCTAssertFalse(model.rerankLevelEnabled, "demotion off")
         model.setDemote(true)
         XCTAssertTrue(model.rerankLevelEnabled)
-        let names: Set<String> = ["mcbpmf-data.txt", "overlay-add.tsv", "sandhi-add.tsv", "demote.tsv", "bigram.sjlm", "classes.sjc"]
+        let names: Set<String> = ["mcbpmf-data.txt", "overlay-add.tsv", "sandhi-add.tsv", "names-add.tsv", "demote.tsv", "bigram.sjlm", "classes.sjc"]
         let none = rig(resources: try XCTUnwrap(TestData.resources(only: names)))
         XCTAssertEqual(none.shell.rerankLevels, 0)
         XCTAssertFalse(SettingsModel(shell: none.shell).rerankLevelEnabled, "no small model")

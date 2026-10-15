@@ -522,8 +522,8 @@ pub struct Engine {
 }
 
 /// Base lexicon + overlay from `data_dir` (§5), same as the eval CLI default. The overlay rows are
-/// `overlay-add.tsv` then `sandhi-add.tsv` (S2r: MOE-standard 一/不 readings derived from the base),
-/// in that fixed order; both are required.
+/// `overlay-add.tsv`, `sandhi-add.tsv` (S2r: MOE-standard 一/不 readings derived from the base), then `names-add.tsv`
+/// (the always-on common proper nouns, docs/contracts/model-v6.md section 2.5), in that fixed order; all three are required.
 pub fn load_lexicon(data_dir: &Path) -> Result<Arc<Lexicon>, EngineError> {
     load_lexicon_packs(data_dir, None).map(|(lex, _)| lex)
 }
@@ -578,7 +578,11 @@ pub fn read_packs_detailed(dir: &Path, mask: u32) -> Result<String, LoadError> {
     Ok(text)
 }
 
-/// `load_lexicon` with the rows of `packs` (`(directory, mask)`, see `read_packs_detailed`) after `sandhi-add.tsv`,
+/// The always-on names layer (docs/contracts/names-lexicon.md, model-v6 section 2.5): read after `sandhi-add.tsv` into the lexicon
+/// and, like `overlay-add.tsv`, into the capping text. Missing is a load failure, as for `overlay-add.tsv`.
+pub const NAMES_FILE: &str = "names-add.tsv";
+
+/// `load_lexicon` with the rows of `packs` (`(directory, mask)`, see `read_packs_detailed`) after `names-add.tsv`,
 /// plus those rows alone (empty with no pack), for `capping_overlay`. `None` or an empty mask: exactly
 /// `load_lexicon`. The engine and the evaluation CLI share this.
 pub fn load_lexicon_packs(data_dir: &Path, packs: Option<(&Path, u32)>) -> Result<(Arc<Lexicon>, String), EngineError> {
@@ -587,17 +591,21 @@ pub fn load_lexicon_packs(data_dir: &Path, packs: Option<(&Path, u32)>) -> Resul
 
 /// `load_lexicon_packs` with the failing file named (the evaluation CLI prints it).
 pub fn load_lexicon_packs_detailed(data_dir: &Path, packs: Option<(&Path, u32)>) -> Result<(Arc<Lexicon>, String), LoadError> {
-    load_lexicon_extra_detailed(data_dir, packs, None)
+    load_lexicon_extra_detailed(data_dir, packs, None, true)
 }
 
 /// `load_lexicon_packs_detailed` plus the evaluation-only `--extra-overlay` file (names-lexicon contract section 3.5):
 /// its rows join the lexicon after the packs' rows and come back in the returned text, so `capping_overlay` caps them
 /// the same way. `None`: exactly `load_lexicon_packs_detailed`. A missing or unreadable file is a load failure naming it.
-pub fn load_lexicon_extra_detailed(data_dir: &Path, packs: Option<(&Path, u32)>, extra_file: Option<&Path>) -> Result<(Arc<Lexicon>, String), LoadError> {
+/// `names` false (the CLI's evaluation-only `--no-names`) leaves `names-add.tsv` out of the lexicon; the engine always passes true.
+pub fn load_lexicon_extra_detailed(data_dir: &Path, packs: Option<(&Path, u32)>, extra_file: Option<&Path>, names: bool) -> Result<(Arc<Lexicon>, String), LoadError> {
     let base = read_file(data_dir.join("mcbpmf-data.txt"))?;
     let overlay = read_file(data_dir.join("overlay-add.tsv"))?;
     let sandhi = read_file(data_dir.join("sandhi-add.tsv"))?;
     let mut text = join_overlays(overlay, &sandhi);
+    if names {
+        text = join_overlays(text, &read_file(data_dir.join(NAMES_FILE))?);
+    }
     let mut extra = match packs {
         Some((dir, mask)) => read_packs_detailed(dir, mask)?,
         None => String::new(),
@@ -612,14 +620,15 @@ pub fn load_lexicon_extra_detailed(data_dir: &Path, packs: Option<(&Path, u32)>,
     Ok((Arc::new(lex), extra))
 }
 
-/// The text `CappedLexicon::new` takes as its overlay: `overlay-add.tsv` (read here, as `load_lm` always
-/// did), then the packs' rows `load_lexicon_packs` returned (no sandhi rows).
+/// The text `CappedLexicon::new` takes as its overlay: `overlay-add.tsv` and `names-add.tsv` (read here, as `load_lm` always
+/// did for the first), then the packs' rows `load_lexicon_packs` returned (no sandhi rows).
 pub fn capping_overlay(data_dir: &Path, pack_text: &str) -> Result<String, EngineError> {
     capping_overlay_detailed(data_dir, pack_text).map_err(|_| EngineError::LoadFailed)
 }
 
 pub fn capping_overlay_detailed(data_dir: &Path, pack_text: &str) -> Result<String, LoadError> {
     let overlay = read_file(data_dir.join("overlay-add.tsv"))?;
+    let overlay = join_overlays(overlay, &read_file(data_dir.join(NAMES_FILE))?);
     Ok(if pack_text.is_empty() { overlay } else { join_overlays(overlay, pack_text) })
 }
 
@@ -730,9 +739,10 @@ impl Engine {
     // ---- S7c-2a rerank (docs/contracts/s7c2a-core-rerank.md) ----
 
     /// Section 2.5: the small model at `path` for this engine's n-gram model. Fails (the previous model, or none, stays) when
-    /// the file cannot be read or is malformed, when no n-gram model is loaded, when the Kneser-Ney side file is on, or when the
-    /// `.sjtl` was tuned with another n-gram model (a pairing check, not an integrity check of the `.sjtl`). Leaves the rerank
-    /// switch and the display as they are.
+    /// the file cannot be read or is malformed, when no n-gram model is loaded, when the `.sjtl` was tuned with another n-gram
+    /// model, or when its recorded Kneser-Ney side file hash is not the loaded side file's (none for a file tuned without KN;
+    /// model-v6 section 2.7). A pairing check, not an integrity check of the `.sjtl`. Leaves the rerank switch and the display as
+    /// they are.
     pub fn load_tinylm(&mut self, path: &Path) -> Result<(), EngineError> {
         self.invalidate();
         let st = self.lm.as_ref().ok_or(EngineError::LoadFailed)?;
@@ -769,7 +779,7 @@ impl Engine {
     }
 
     /// The levels the loaded small model offers, as `shanjie_engine_rerank_levels` reports them (bit0 conservative, bit1 standard,
-    /// bit2 aggressive): 0 without a model, 2 for a version 1 or 2 file, 7 for a version 3 file (whatever its values or the profile).
+    /// bit2 aggressive): 0 without a model, 2 for a version 1 or 2 file, 7 for a version 3 or 4 file (whatever its values or the profile).
     pub fn rerank_levels(&self) -> u32 {
         match &self.tinylm {
             None => 0,
@@ -986,7 +996,7 @@ impl Engine {
         }));
     }
 
-    /// S2c: read the model at `path` and `data_dir/overlay-add.tsv` (plus the pack rows `new` kept), build the capped lexicon with the
+    /// S2c: read the model at `path` and `data_dir/overlay-add.tsv` and `names-add.tsv` (plus the pack rows `new` kept), build the capped lexicon with the
     /// shared constructor. Failure leaves the previous state. The composition display is not recomputed;
     /// the next change to it decodes with the new model.
     pub fn load_lm(&mut self, path: &Path) -> Result<(), EngineError> {
@@ -1493,15 +1503,22 @@ impl Engine {
         let mut prev = history(&self.left, &st.lm);
         let mut total = 0.0;
         let (mut any, mut open) = (false, false);
+        let mut at = 0;
         for (w, lp, is_punct, delta) in &self.path {
             if *is_punct {
+                at += 1;
                 if open {
                     total += st.lm.eos(lam, prev);
                 }
                 (prev, open) = ("<s>", false);
                 continue;
             }
-            total += st.lm.word(lam, prev, w, *lp) - delta;
+            let n = w.chars().count();
+            // model-v6 section 2.8 rule 1: a word the learner boosted (lp above its best capped lp under its reading, the test of
+            // `boosted`) was scored by the decoder without the Kneser-Ney substitution; score it the same way here.
+            let learned = self.syls.get(at..at + n).and_then(|s| st.capped.best_lp(s, w)).is_some_and(|best| *lp > best);
+            at += n;
+            total += if learned { st.lm.word_learned(lam, prev, w, *lp) } else { st.lm.word(lam, prev, w, *lp) } - delta;
             (prev, any, open) = (w, true, true);
         }
         any.then(|| if open { total + st.lm.eos(lam, prev) } else { total })

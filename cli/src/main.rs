@@ -2,7 +2,7 @@ use core::engine::{capping_overlay_detailed, load_lexicon_extra_detailed, load_l
 use core::eval::*;
 use core::learn::{context_key, SENTINEL};
 use core::lm::{decode_from, history, CappedLexicon, Demote, Lm, Profile};
-use core::tinylm::{RerankLevel, TinyLm, TinyLmError, TOPK};
+use core::tinylm::{KnPairing, RerankLevel, TinyLm, TinyLmError, TOPK};
 use core::predict::{parse_units, predict, units_of, units_str, Index, Mode};
 use core::{decode_beam, Error, Lexicon, NoLearning, Syls, BEAM_S1};
 use std::fs;
@@ -148,24 +148,33 @@ fn extra_overlay_checked(extra: Option<String>) -> Result<Option<PathBuf>, Strin
 
 /// The lexicon with the chosen packs and the `--extra-overlay` rows, and the overlay text that caps the LM scores (the
 /// same helpers as the engine's `new` and `load_lm`). The extra rows travel with the pack rows, so they are capped too.
-fn load_with_packs(dir: &Path, packs: u32, pdir: &Path, extra: Option<&Path>) -> Result<(std::sync::Arc<Lexicon>, String), String> {
+/// `names` false is `--no-names`: names-add.tsv stays out of the lexicon (its words are then in no lexicon entry, so capping them changes nothing).
+fn load_with_packs(dir: &Path, packs: u32, pdir: &Path, extra: Option<&Path>, names: bool) -> Result<(std::sync::Arc<Lexicon>, String), String> {
     // The pack rows are read once and reused for the cap; overlay-add.tsv is read again by capping_overlay, as load_lm does.
-    let (lex, pack_text) = load_lexicon_extra_detailed(dir, Some((pdir, packs)), extra).map_err(|e| e.to_string())?;
+    let (lex, pack_text) = load_lexicon_extra_detailed(dir, Some((pdir, packs)), extra, names).map_err(|e| e.to_string())?;
     let overlay = capping_overlay_detailed(dir, &pack_text).map_err(|e| e.to_string())?;
     Ok((lex, overlay))
 }
 
 /// S7c-1 `--tinylm`: alpha and tau hold only for the n-gram scores they were tuned on (S7a: this model, its classes and the demotion
-/// table on, Kneser-Ney off). A different model hash, the KN side file, `--no-classes` or `--no-demote` is refused before anything
-/// is printed. The file is read, checked and paired by the engine's loader (`TinyLm::load_paired`, S7c-2a). Returns the model, the
-/// load time (read + parse + the pairing checks; the hash below is the CLI's, outside it) and the sha8 of the bytes it parsed.
+/// table on, and the Kneser-Ney side file it records, or none: model-v6 section 2.7). A different model hash, another side file
+/// state, `--no-classes` or `--no-demote` is refused before anything is printed. The file is read, checked and paired by the
+/// engine's loader (`TinyLm::load_paired`, S7c-2a). Returns the model, the load time (read + parse + the pairing checks; the hash
+/// below is the CLI's, outside it) and the sha8 of the bytes it parsed.
 fn load_tinylm(path: &str, lm: &Lm, classes: bool, demote: bool) -> Result<(TinyLm, Duration, String), String> {
     if !classes || !demote {
         return Err("--tinylm: this .sjtl was tuned with the class term and the demotion table on (drop --no-classes / --no-demote)".into());
     }
     let t0 = Instant::now();
     let (tl, bytes) = TinyLm::load_paired(Path::new(path), lm).map_err(|e| match e {
-        TinyLmError::KneserNey => format!("--tinylm: {e} (use --no-kn)"),
+        // model-v6 section 7 (P4-9): each mismatch has its own remedy; --no-kn helps only when the file was tuned without KN.
+        TinyLmError::KneserNey(KnPairing::TunedWithout) => {
+            format!("--tinylm: {e} (use --no-kn, or a .sjtl exported with --kn-side for this kn.sjkn)")
+        }
+        TinyLmError::KneserNey(KnPairing::OtherSideFile) => format!("--tinylm: {e} (put the kn.sjkn it was tuned with beside the model)"),
+        TinyLmError::KneserNey(KnPairing::TunedWith) => {
+            format!("--tinylm: {e} (put the kn.sjkn it was tuned with beside the model and drop --no-kn)")
+        }
         TinyLmError::OtherNgram => format!("--tinylm: {e}"),
         _ => e.to_string(),
     })?;
@@ -206,6 +215,9 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     let (mut limit, mut set, mut dump, mut ctx_mode, mut demote) = (None::<usize>, None, None, false, true);
     let mut dump_words = None::<String>;
     let (mut classes, mut kn) = (true, true);
+    // model-v6 section 2.5: the names layer is always on; `--no-names` (evaluation only: the section 3.1 breakdown, and
+    // tools/build_names.py, which passes its own candidate list as --extra-overlay) leaves it out.
+    let mut names = true;
     let (mut rowstats, mut tinylm, mut tinylm_scores) = (None::<String>, None::<String>, None::<String>);
     let mut level = None::<RerankLevel>;
     // acg-pack contract A.2: `--packs acg` adds data/packs/acg-add.tsv (or `--packs-dir DIR`'s) to the lexicon and the cap; off by default.
@@ -240,6 +252,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
             "--no-demote" => demote = false,
             "--no-classes" => classes = false,
             "--no-kn" => kn = false,
+            "--no-names" => names = false,
             "--packs" => packs |= pack_flag(&val()?)?,
             "--packs-dir" => packs_dir = Some(val()?),
             "--extra-overlay" => extra_overlay = Some(val()?),
@@ -279,12 +292,12 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     let tl = tinylm.as_deref().map(|p| load_tinylm(p, &lm, classes, demote)).transpose()?;
     // Section 2.3: a version 1 or 2 file has only the standard set; another level would silently measure the standard one.
     if level != RerankLevel::Standard && tl.as_ref().is_some_and(|(m, _, _)| !m.has_levels()) {
-        eprintln!("error: --rerank-level: this .sjtl (version 1 or 2) has only the standard set; use a version 3 file or --rerank-level standard");
+        eprintln!("error: --rerank-level: this .sjtl (version 1 or 2) has only the standard set; use a version 3 or 4 file or --rerank-level standard");
         std::process::exit(2);
     }
     let rss_after = tinylm.is_some().then(rss_kb).flatten();
     let dir = root().join("data/lexicon");
-    let (lex, overlay) = load_with_packs(&dir, packs, &pdir, extra_overlay.as_deref())?;
+    let (lex, overlay) = load_with_packs(&dir, packs, &pdir, extra_overlay.as_deref(), names)?;
     let demote_rows = fs::read_to_string(dir.join("demote.tsv")).map_err(|e| format!("cannot read demote.tsv ({:?})", e.kind()))?;
     let table = Demote::parse(&demote_rows).filter(|d| d.check(&lex)).ok_or("bad demote.tsv")?;
     // The table is always loaded, so a malformed one stops the run even with --no-demote.
@@ -432,7 +445,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
         RerankLevel::Conservative => "+rl:conservative",
         RerankLevel::Aggressive => "+rl:aggressive",
     };
-    println!("## {name}  lm-{profile_name}{}{}{}{}{}{}{}{xo}  {{'n': {}, 'top1': {top1}, 'oracle@64': {o64}, 'top1_sha256': '{sha}'}}", if ctx_mode { "+ctx" } else { "" }, if demote { "" } else { "-nodemote" }, if classes { "" } else { "-noclasses" }, lm.kn_tag().unwrap_or(""), tl.as_ref().map_or(String::new(), |(_, _, sha8)| format!("+tl:{sha8}")), rl_tag, if packs & PACK_ACG != 0 { "+acg" } else { "" }, rows.len());
+    println!("## {name}  lm-{profile_name}{}{}{}{}{}{}{}{}{xo}  {{'n': {}, 'top1': {top1}, 'oracle@64': {o64}, 'top1_sha256': '{sha}'}}", if ctx_mode { "+ctx" } else { "" }, if demote { "" } else { "-nodemote" }, if classes { "" } else { "-noclasses" }, if names { "" } else { "-nonames" }, lm.kn_tag().unwrap_or(""), tl.as_ref().map_or(String::new(), |(_, _, sha8)| format!("+tl:{sha8}")), rl_tag, if packs & PACK_ACG != 0 { "+acg" } else { "" }, rows.len());
     Ok(())
 }
 
@@ -482,7 +495,7 @@ fn rss_kb() -> Option<u64> {
 /// (RSS before and after one index, and after a second one).
 fn run_predict(args: &[String]) -> Result<(), String> {
     let (mut file, mut lm_path, mut profile, mut time) = (None, None, None, false);
-    let (mut packs, mut packs_dir) = (0u32, None::<String>);
+    let (mut packs, mut packs_dir, mut kn) = (0u32, None::<String>, true);
     let mut it = args.iter();
     while let Some(a) = it.next() {
         let mut val = || it.next().cloned().ok_or_else(|| "missing option value".to_string());
@@ -491,6 +504,7 @@ fn run_predict(args: &[String]) -> Result<(), String> {
             "--lm" => lm_path = Some(val()?),
             "--profile" => profile = Some(val()?),
             "--predict-time" => time = true,
+            "--no-kn" => kn = false,
             "--packs" => packs |= pack_flag(&val()?)?,
             "--packs-dir" => packs_dir = Some(val()?),
             _ => return Err("unknown argument".into()),
@@ -504,11 +518,12 @@ fn run_predict(args: &[String]) -> Result<(), String> {
         _ => return Err("--profile must be chat or formal".into()),
     }
     .lambda();
-    // The Kneser-Ney side file is deliberately off here: the Python predict reference (experiments/sp/predict.py) does not
-    // load it, so the sp-predict golden would stop being comparable (docs/contracts/kn-core.md, model-v6 note).
-    let lm = Lm::load_with(Path::new(&lm_path.ok_or("--lm is required")?), true, false).map_err(|e| e.to_string())?;
+    // A kn.sjkn beside the model turns the Kneser-Ney term on unless --no-kn, as in the other modes: the App's prediction row
+    // scores with it (Engine::recompute_pred -> predict -> Lm::word_by_id -> prob_c), and the Python reference
+    // (experiments/sp/predict.py) loads it the same way.
+    let lm = Lm::load_with(Path::new(&lm_path.ok_or("--lm is required")?), true, kn).map_err(|e| e.to_string())?;
     let dir = root().join("data/lexicon");
-    let (lex, overlay) = load_with_packs(&dir, packs, &pdir, None)?;
+    let (lex, overlay) = load_with_packs(&dir, packs, &pdir, None, true)?;
     // Prediction scores use the capped lp only; demotion applies to decoding (sw §3).
     let capped = CappedLexicon::new(lex.clone(), &overlay, &lm, None).ok_or("cannot build the capped lexicon")?;
     let text = fs::read_to_string(file.ok_or("--predict is required")?).map_err(|e| format!("cannot read file ({:?})", e.kind()))?;
@@ -743,7 +758,8 @@ mod tests {
 
     /// names-lexicon 3.5: `--extra-overlay` rows are capped like pack rows. Goes through the CLI's own load path
     /// (`load_with_packs`, then `CappedLexicon::new`); a word the corpus never saw is scored fixture score minus 1.0.
-    /// If the rows reached only the lexicon and not the capping text, the score would stay -7.5.
+    /// If the rows reached only the lexicon and not the capping text, the score would stay -7.5. 酷澎 is in the shipped names layer
+    /// since model-v6, so both runs leave it out (`--no-names`); loading the same row twice is a parse error.
     #[test]
     fn extra_overlay_rows_are_capped_like_pack_rows() {
         let lm = Lm::load(&root().join("data/lm/bigram.sjlm")).expect("data/lm/bigram.sjlm and classes.sjc are required (see cli/tests/golden.rs)");
@@ -753,7 +769,7 @@ mod tests {
         let (dir, pdir) = (root().join("data/lexicon"), root().join("data/packs"));
         let key = ["ㄎㄨˋ".to_string(), "ㄆㄥˊ".to_string()];
         let score = |extra: Option<&Path>| {
-            let (lex, overlay) = load_with_packs(&dir, 0, &pdir, extra).unwrap();
+            let (lex, overlay) = load_with_packs(&dir, 0, &pdir, extra, false).unwrap();
             CappedLexicon::new(lex, &overlay, &lm, None).unwrap().best_lp(&key, "酷澎")
         };
         let (with, without) = (score(Some(&file)), score(None));

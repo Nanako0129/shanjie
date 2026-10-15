@@ -290,12 +290,14 @@ def read_name_readings(path):
 
 def decode(pairs, profile, packs_dir=None, acg=False):
     """評測 CLI 解碼每個 (詞, 讀音音節串)，回傳第一名。packs_dir 給了就加 `--extra-overlay`（detect_collisions 把名單寫成那個目錄的
-    acg-add.tsv，檔名是 build_acg_pack 寫死的）。acg=True 另開 ACG 詞包（`--packs acg`，用這份 checkout 的 data/packs/acg-add.tsv）。"""
+    acg-add.tsv，檔名是 build_acg_pack 寫死的）。acg=True 另開 ACG 詞包（`--packs acg`，用這份 checkout 的 data/packs/acg-add.tsv）。
+    一律加 `--no-names`：名單層 model-v6 起常開（data/lexicon/names-add.tsv），不關的話「沒有名單」的解碼其實有已提交的名單（低報），
+    候選名單用 --extra-overlay 再給一次也會重複載入而失敗（model-v6 §7 P3-8）。"""
     with tempfile.TemporaryDirectory() as d:
         rows, dump = os.path.join(d, "rows.txt"), os.path.join(d, "dump.txt")
         with open(rows, "w", encoding="utf-8") as f:
             f.writelines(f"|{w}|{' '.join(syls)}\n" for w, syls in pairs)
-        cmd = [bap.eval_bin(), "--lm", bap.LM, "--profile", profile, "--rows", rows, "--dump", dump]
+        cmd = [bap.eval_bin(), "--lm", bap.LM, "--profile", profile, "--no-names", "--rows", rows, "--dump", dump]
         if acg:
             cmd += ["--packs", "acg"]
         if packs_dir:

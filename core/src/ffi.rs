@@ -352,7 +352,7 @@ pub unsafe extern "C" fn shanjie_engine_reset(
 
 /// S2c. Loads the bigram model at `path` (with `classes.sjc` beside it, and a `kn.sjkn` Kneser-Ney side file if one
 /// exists there: a broken or mismatching one fails the load with code 3, a valid one changes the scoring; the app
-/// ships none), reading `data_dir/overlay-add.tsv` (and demote.tsv) again. Does not
+/// ships one since model-v6), reading `data_dir/overlay-add.tsv`, `names-add.tsv` (and demote.tsv) again. Does not
 /// recompute the composition display. Any failure leaves the previous LM state (none or the old model).
 ///
 /// # Safety
@@ -1073,6 +1073,7 @@ mod tests {
         std::fs::write(d.join("mcbpmf-data.txt"), base).unwrap();
         std::fs::write(d.join("overlay-add.tsv"), "").unwrap();
         std::fs::write(d.join("sandhi-add.tsv"), "").unwrap();
+        std::fs::write(d.join("names-add.tsv"), "").unwrap();
         std::fs::write(d.join("demote.tsv"), "").unwrap();
         d
     }
@@ -1276,6 +1277,11 @@ mod tests {
         e = sentinel();
         assert!(unsafe { shanjie_engine_new(dir_c.as_ptr(), 0, &mut e) } == 3 && e.is_null(), "new missing sandhi-add.tsv");
         std::fs::write(dir.join("sandhi-add.tsv"), "").unwrap();
+        // model-v6 section 7 P2-3: the names layer is required like overlay-add.tsv, never silently skipped.
+        std::fs::remove_file(dir.join("names-add.tsv")).unwrap();
+        e = sentinel();
+        assert!(unsafe { shanjie_engine_new(dir_c.as_ptr(), 0, &mut e) } == 3 && e.is_null(), "new missing names-add.tsv");
+        std::fs::write(dir.join("names-add.tsv"), "").unwrap();
         // demote.tsv is required like the other lexicon files, and a malformed one fails the same way.
         std::fs::remove_file(dir.join("demote.tsv")).unwrap();
         e = sentinel();
@@ -1653,11 +1659,14 @@ mod tests {
         let (cls, emit) = ([1u16, 2, 0xFFFF, 0xFFFF], [1.0, 1.0, 0.0, 0.0]);
         std::fs::write(&classes_path, crate::lm::test_classes(&tiny, 0, 0.8, &cls, &emit, &[0.1; 9])).unwrap();
         // An engine without data_dir is not reachable through the ABI (only `new` creates engines);
-        // the closest cases are overlay-add.tsv or demote.tsv vanishing from data_dir after `new`:
-        // load_lm reads both again (capping_overlay and demote.tsv), so either one fails with code 3.
+        // the closest cases are overlay-add.tsv, names-add.tsv or demote.tsv vanishing from data_dir after `new`:
+        // load_lm reads them again (capping_overlay and demote.tsv), so any one fails with code 3.
         std::fs::rename(dir.join("overlay-add.tsv"), dir.join("overlay-add.bak")).unwrap();
         assert!(unsafe { shanjie_engine_load_lm(e, lm_c.as_ptr()) } == 3, "load without overlay-add.tsv");
         std::fs::rename(dir.join("overlay-add.bak"), dir.join("overlay-add.tsv")).unwrap();
+        std::fs::rename(dir.join("names-add.tsv"), dir.join("names-add.bak")).unwrap();
+        assert!(unsafe { shanjie_engine_load_lm(e, lm_c.as_ptr()) } == 3, "load without names-add.tsv");
+        std::fs::rename(dir.join("names-add.bak"), dir.join("names-add.tsv")).unwrap();
         std::fs::rename(dir.join("demote.tsv"), dir.join("demote.bak")).unwrap();
         assert!(unsafe { shanjie_engine_load_lm(e, lm_c.as_ptr()) } == 3, "load without demote.tsv");
         std::fs::rename(dir.join("demote.bak"), dir.join("demote.tsv")).unwrap();
@@ -1941,6 +1950,17 @@ mod tests {
     const RERANK_ROW: usize = 12;
     const RERANK_NGRAM: &str = "我在家";
 
+    /// data/lm/bigram.sjlm and classes.sjc symlinked into `dir` without the kn.sjkn model-v6 puts beside them: the toy `.sjtl`
+    /// files here (versions 1 and 3) were tuned without a side file and pair only with the model loaded without KN (model-v6
+    /// section 2.7). Returns the model path.
+    fn lm_without_kn(dir: &Path) -> PathBuf {
+        for f in ["bigram.sjlm", "classes.sjc"] {
+            let _ = std::fs::remove_file(dir.join(f));
+            std::os::unix::fs::symlink(root().join("data/lm").join(f), dir.join(f)).unwrap();
+        }
+        dir.join("bigram.sjlm")
+    }
+
     /// The toy model of eval/golden/tinylm-tiny/ in `dir`, its n-gram hash patched to data/lm/bigram.sjlm's (offset 68) and alpha
     /// 100 / tau infinite for both profiles (offsets 36, 52), so its LLs decide (core/tests/engine_rerank.rs). `hash: false`
     /// keeps the recorded hash (kn-tiny's), a model for another n-gram model.
@@ -2034,7 +2054,7 @@ mod tests {
         assert!(unsafe { shanjie_engine_load_tinylm(e, ptr::null()) } == 1, "load path NULL");
         assert!(unsafe { shanjie_engine_load_tinylm(e, bad_utf8.as_ptr()) } == 2, "load non-UTF-8");
         assert!(load_tinylm(e, &good) == 3, "no n-gram model yet");
-        let lm = CString::new(root().join("data/lm/bigram.sjlm").to_str().unwrap()).unwrap();
+        let lm = CString::new(lm_without_kn(&dir).to_str().unwrap()).unwrap();
         assert!(unsafe { shanjie_engine_load_lm(e, lm.as_ptr()) } == 0, "load_lm");
         for bad in [dir.join("missing.sjtl"), garbage, other, dir.clone()] {
             assert!(load_tinylm(e, &bad) == 3, "bad tinylm file");
@@ -2227,7 +2247,7 @@ mod tests {
         // No small model: mask 0, and a level is remembered for the model loaded later.
         assert!(levels(e) == 0, "no model");
         assert!(set_level(e, 2) == (0, false), "remembered without a model");
-        let lm = CString::new(root().join("data/lm/bigram.sjlm").to_str().unwrap()).unwrap();
+        let lm = CString::new(lm_without_kn(&dir).to_str().unwrap()).unwrap();
         assert!(unsafe { shanjie_engine_load_lm(e, lm.as_ptr()) } == 0, "load_lm");
         assert!(levels(e) == 0, "no small model after load_lm");
         assert!(load_tinylm(e, &toy_sjtl_v3(&dir, 2)) == 0 && levels(e) == 7, "version 3: 7");
@@ -2326,7 +2346,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let good = toy_sjtl(&dir, "good.sjtl", true);
         let (e, keys) = rerank_engine();
-        let lm = CString::new(root().join("data/lm/bigram.sjlm").to_str().unwrap()).unwrap();
+        let lm = CString::new(lm_without_kn(&dir).to_str().unwrap()).unwrap();
         assert!(unsafe { shanjie_engine_load_lm(e, lm.as_ptr()) } == 0 && load_tinylm(e, &good) == 0, "loads");
         assert!(set_rerank(e, 1).0 == 0, "on (off by default since S7c-2c)");
         for &k in &keys {

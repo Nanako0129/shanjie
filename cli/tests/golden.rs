@@ -53,9 +53,9 @@ fn lenient_dump_uses_the_variant_table() {
     assert_ne!(lines[2], lines[3], "散佈 has no dictionary entry, so it is not a listed variant");
 }
 
-const LM_MISSING: &str = "data/lm/bigram.sjlm is missing: download it with `gh release download model-v5 -R Nanako0129/shanjie -p bigram.sjlm -D data/lm`";
+const LM_MISSING: &str = "data/lm/bigram.sjlm is missing: download it with `gh release download model-v6 -R Nanako0129/shanjie -p bigram.sjlm -D data/lm`";
 
-const CLASSES_MISSING: &str = "data/lm/classes.sjc is missing: download it with `gh release download classes-v3 -R Nanako0129/shanjie -p classes.sjc -D data/lm` (or build it with tools/build_classes.py)";
+const CLASSES_MISSING: &str = "data/lm/classes.sjc is missing: download it with `gh release download classes-v4 -R Nanako0129/shanjie -p classes.sjc -D data/lm` (or build it with tools/build_classes.py)";
 
 fn lm_path() -> String {
     let p = format!("{}/../data/lm/bigram.sjlm", env!("CARGO_MANIFEST_DIR"));
@@ -100,7 +100,8 @@ fn lm_top1_tsv_hashes_match_summary_lines() {
     let summary = golden("s2-lm.txt");
     for (col, p) in ["chat", "formal"].iter().enumerate() {
         let joined = rows.iter().map(|r| r[col]).collect::<Vec<_>>().join("\n");
-        let want = summary.lines().find(|l| l.starts_with(&format!("## dev302  lm-{p}  "))).unwrap();
+        // `lm-chat` or `lm-chat+kn:…` (model-v6: kn.sjkn beside the model); s2-lm.txt has one dev302 line per profile.
+        let want = summary.lines().find(|l| l.starts_with(&format!("## dev302  lm-{p}"))).unwrap();
         assert!(want.contains(&format!("'top1_sha256': '{}'", core::eval::sha256_hex(joined.as_bytes()))));
     }
 }
@@ -116,20 +117,20 @@ fn lm_file_is_the_released_model() {
     let bytes = std::fs::read(lm_path()).unwrap();
     assert_eq!(
         core::eval::sha256_hex(&bytes),
-        "f81a021e5dea08dc48dbca1db0d0f63517bb6f0f3e1b20fdac631542d13f45af",
-        "data/lm/bigram.sjlm differs from the model-v5 release; download it again (a model rebuilt with tools/build_lm.py has no fingerprint entries and never matches)"
+        "fc2bddd1f0c2029deb7e7568f64868c11f535b3d5c5c7c97c3d0599c8b2cde42",
+        "data/lm/bigram.sjlm differs from the model-v6 release; download it again (a model rebuilt with tools/build_lm.py has no fingerprint entries and never matches)"
     );
 }
 
-/// S2k section 4.4: the class table is the classes-v3 release asset (data/classes.sjc.sha256).
+/// S2k section 4.4: the class table is the classes-v4 release asset (data/classes.sjc.sha256).
 #[test]
 fn classes_file_is_the_released_build() {
     let p = std::path::Path::new(&lm_path()).with_file_name("classes.sjc");
-    let bytes = std::fs::read(&p).unwrap_or_else(|_| panic!("{} is missing: gh release download classes-v3 -R Nanako0129/shanjie -p classes.sjc -D data/lm", p.display()));
+    let bytes = std::fs::read(&p).unwrap_or_else(|_| panic!("{} is missing: gh release download classes-v4 -R Nanako0129/shanjie -p classes.sjc -D data/lm", p.display()));
     assert_eq!(
         core::eval::sha256_hex(&bytes),
-        "75a5efb3d050a9b0d21bca707ff6b1fd71945a8e059b869aa856618290e55827",
-        "data/lm/classes.sjc differs from the classes-v3 release; download it again or rebuild with tools/build_classes.py"
+        "efac3184170e9795cef35855fc6615cf5672882bc0e20c624b620597aeab7a56",
+        "data/lm/classes.sjc differs from the classes-v4 release; download it again or rebuild with tools/build_classes.py"
     );
 }
 
@@ -209,19 +210,19 @@ fn sw_probe_matches_python_golden_byte_for_byte() {
 }
 
 /// S2k acceptance 3: `--no-classes` is the arithmetic without the word-class term. The two summary lines are what the Python
-/// `lm_eval.py --no-classes --profile P --dev 302 --context` prints (regenerated 2026-10-14 for dec-recombine; before it they were the
-/// ones main's s2h-lm-context.txt held before S2k).
+/// `lm_eval.py --no-classes --profile P --dev 302 --context` prints (regenerated 2026-10-14 for model-v6: kn.sjkn beside the model is
+/// on in both, names layer on; before it for dec-recombine, and before that they were the ones main's s2h-lm-context.txt held before S2k).
 #[test]
 fn no_classes_flag_matches_its_pinned_numbers() {
     let lm = lm_path();
     let line = |p: &str| run(&["--lm", &lm, "--no-classes", "--profile", p, "--dev", "302", "--context"]);
     assert_eq!(
         line("chat"),
-        "## dev302  lm-chat+ctx-noclasses  {'n': 302, 'top1': 237, 'oracle@64': 300, 'top1_sha256': '87a9aaa2a0f128afc732ce4c9818d74998c4c034a0767bffa050ed6ddecc6910'}\n"
+        "## dev302  lm-chat+ctx-noclasses+kn:cbefbced:θ1:β1  {'n': 302, 'top1': 246, 'oracle@64': 300, 'top1_sha256': 'f061b257afcd622c8eb7375ac143f026a31cd6a062c685603ba63ff7366da4ca'}\n"
     );
     assert_eq!(
         line("formal"),
-        "## dev302  lm-formal+ctx-noclasses  {'n': 302, 'top1': 244, 'oracle@64': 300, 'top1_sha256': '614b446765d4b9617ac9eaa5ee617046a62d66e5c051484d917bcd0dc168de14'}\n"
+        "## dev302  lm-formal+ctx-noclasses+kn:cbefbced:θ1:β1  {'n': 302, 'top1': 249, 'oracle@64': 300, 'top1_sha256': '08de71c89fea87842eab2b828d5728a842b2b7a38a6906b84c0ecc3a083eacdc'}\n"
     );
 }
 
@@ -324,6 +325,18 @@ fn kn_side_file_beside_the_model_is_announced_and_can_be_turned_off() {
     assert!(off.starts_with("## t  lm-chat  {'n': 1,"), "{off}");
 }
 
+/// `--predict` loads the kn.sjkn beside the model like the other modes (the App's prediction row scores with it); `--no-kn` turns it
+/// off. The golden is the KN run; the same queries without it must score differently.
+#[test]
+fn predict_no_kn_scores_differently_from_the_golden() {
+    let path = format!("{}/../eval/golden/sp-predict.txt", env!("CARGO_MANIFEST_DIR"));
+    let (on, off) = (run(&["--predict", &path, "--lm", &lm_path(), "--profile", "chat"]), run(&["--predict", &path, "--lm", &lm_path(), "--profile", "chat", "--no-kn"]));
+    let scores = |t: &str| t.lines().filter(|l| !l.starts_with("#") && !l.starts_with("## ")).map(|l| l.split('\t').nth(1).unwrap().to_string()).collect::<Vec<_>>();
+    let (a, b) = (scores(&on), scores(&off));
+    assert_eq!(a.len(), b.len());
+    assert!(a.iter().zip(&b).filter(|(x, y)| x != y).count() > a.len() / 2, "KN did not change most prediction scores");
+}
+
 /// data/lexicon/overlay-manual.tsv: every manual word comes first in the shipping setting, alone and in a sentence, in both profiles
 /// (eval/golden/manual-words-rows.txt; MANUAL_BONUS in tools/build_overlay.py was chosen on its first 9 rows; the last 6 (喵菜子, 哈那口, and 菜菜子 which is a base word) are
 /// first even without the entry, so they only pin the behaviour). A retrained model or a new
@@ -345,6 +358,8 @@ fn manual_words_come_first_in_the_shipping_setting() {
 /// names-lexicon 3.5: `--extra-overlay FILE` makes the file's word the first candidate (and only then), and a
 /// missing file is a non-zero exit that names the path. (The contract says "appears among the candidates"; the string
 /// 酷澎 is also composable from two single-character words, so it appears in the list either way and only its rank tells.)
+/// 酷澎 is in the shipped names layer since model-v6, so every run here is `--no-names` (marked `-nonames`); the shipped layer
+/// itself is `names_layer_is_on_by_default_and_no_names_turns_it_off`.
 #[test]
 fn extra_overlay_adds_words_and_fails_loudly_when_missing() {
     let dir = std::env::temp_dir().join(format!("shanjie-extra-overlay-cli-{}", std::process::id()));
@@ -355,7 +370,7 @@ fn extra_overlay_adds_words_and_fails_loudly_when_missing() {
     let lm = lm_path();
     let first = |extra_args: &[&str]| {
         let out = Command::new(env!("CARGO_BIN_EXE_shanjie-eval"))
-            .args(["--lm", &lm, "--profile", "chat", "--rows", rows.to_str().unwrap(), "--dump", dump.to_str().unwrap()])
+            .args(["--lm", &lm, "--profile", "chat", "--no-names", "--rows", rows.to_str().unwrap(), "--dump", dump.to_str().unwrap()])
             .args(extra_args)
             .output()
             .unwrap();
@@ -382,5 +397,32 @@ fn extra_overlay_adds_words_and_fails_loudly_when_missing() {
         .unwrap();
     let err = String::from_utf8(out.stderr).unwrap();
     assert!(!out.status.success() && err.contains(missing.to_str().unwrap()), "{err}");
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+/// model-v6 section 2.5: the names layer (data/lexicon/names-add.tsv) is loaded by default, so 酷澎 (a names-only word, in no other
+/// lexicon file) is the first candidate in both profiles with no option; `--no-names` leaves it out and marks the summary line.
+#[test]
+fn names_layer_is_on_by_default_and_no_names_turns_it_off() {
+    let dir = std::env::temp_dir().join(format!("shanjie-names-cli-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let (rows, dump) = (dir.join("rows.txt"), dir.join("dump.tsv"));
+    std::fs::write(&rows, "|酷澎|ㄎㄨˋ ㄆㄥˊ\n").unwrap();
+    let names = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../data/lexicon/names-add.tsv")).unwrap();
+    assert!(names.lines().any(|l| l.split('\t').nth(1) == Some("酷澎")), "premise: 酷澎 is a names-layer word");
+    let lm = lm_path();
+    for profile in ["chat", "formal"] {
+        let first = |extra: &[&str]| {
+            let head = run(&[&["--lm", lm.as_str(), "--profile", profile, "--rows", rows.to_str().unwrap(), "--dump", dump.to_str().unwrap()], extra].concat());
+            let top = std::fs::read_to_string(&dump).unwrap().lines().find(|l| l.split('\t').nth(1) == Some("1")).unwrap().split('\t').nth(2).unwrap().to_string();
+            (head.split("  ").nth(1).unwrap().to_string(), top)
+        };
+        let ((on_tag, on), (off_tag, off)) = (first(&[]), first(&["--no-names"]));
+        assert_eq!(on, "酷澎", "{profile}");
+        assert_ne!(off, "酷澎", "{profile}");
+        // `-nonames` goes after `-noclasses`, before the `+kn:` tag: lm-chat+kn:… becomes lm-chat-nonames+kn:…
+        assert_eq!(off_tag, on_tag.replacen(&format!("lm-{profile}"), &format!("lm-{profile}-nonames"), 1), "{profile}");
+        assert!(!on_tag.contains("nonames"), "{on_tag}");
+    }
     std::fs::remove_dir_all(&dir).unwrap();
 }

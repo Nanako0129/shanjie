@@ -6,6 +6,8 @@
 //! patched (offsets 36 / 44 chat, 52 / 60 formal): alpha 100 with tau infinite lets its LLs decide, so picks other than the
 //! first happen (dev302 rows 12 and 27 below); tau 0 always keeps the first. Every expected choice is computed here from the
 //! decoder and `TinyLm::rerank`, never read back from the engine. Needs data/lm/bigram.sjlm and fails loudly without it.
+//! The toy is version 1 (tuned without a Kneser-Ney side file), so the model is loaded without the kn.sjkn model-v6 puts beside it
+//! (`lm_path`); `kneser_ney_side_file_refuses_the_model` covers the pairing itself.
 use core::engine::*;
 use core::eval::{parse_rows, usable};
 use core::learn::context_key;
@@ -20,10 +22,27 @@ use std::time::{Duration, Instant};
 fn root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().to_path_buf()
 }
-fn lm_path() -> PathBuf {
+/// The shipped model as data/lm holds it (with kn.sjkn since model-v6).
+fn real_lm_path() -> PathBuf {
     let p = root().join("data/lm/bigram.sjlm");
     assert!(p.exists() && root().join("data/lm/classes.sjc").exists(), "data/lm/bigram.sjlm and classes.sjc are needed: see engine_lm.rs");
     p
+}
+/// data/lm/bigram.sjlm and classes.sjc symlinked into a temporary directory without kn.sjkn, for the version 1 toy.
+// ponytail: the directory (two symlinks) is left in the temp dir; a OnceLock never drops.
+fn lm_path() -> PathBuf {
+    static P: OnceLock<PathBuf> = OnceLock::new();
+    P.get_or_init(|| {
+        let real = real_lm_path();
+        let d = std::env::temp_dir().join(format!("shanjie-rerank-nokn-{}", std::process::id()));
+        std::fs::create_dir_all(&d).unwrap();
+        for f in ["bigram.sjlm", "classes.sjc"] {
+            let _ = std::fs::remove_file(d.join(f));
+            std::os::unix::fs::symlink(real.with_file_name(f), d.join(f)).unwrap();
+        }
+        d.join("bigram.sjlm")
+    })
+    .clone()
 }
 
 struct Shared {
@@ -31,18 +50,20 @@ struct Shared {
     lm: Arc<Lm>,
     capped: Arc<CappedLexicon>,
 }
-/// Loaded once per test binary. The capped lexicon has the demotion table, as `Engine::load_lm` builds it.
+/// The capped lexicon has the demotion table, as `Engine::load_lm` builds it.
+fn shared_for(lm_file: &Path) -> Shared {
+    let dir = root().join("data/lexicon");
+    let lex = load_lexicon(&dir).unwrap();
+    let lm = Lm::load(lm_file).unwrap();
+    let overlay = capping_overlay(&dir, "").unwrap(); // as Engine::load_lm: overlay-add.tsv + names-add.tsv
+    let demote = Demote::parse(&std::fs::read_to_string(dir.join("demote.tsv")).unwrap()).unwrap();
+    let capped = Arc::new(CappedLexicon::new(lex.clone(), &overlay, &lm, Some(&demote)).unwrap());
+    Shared { lex, lm: Arc::new(lm), capped }
+}
+/// Loaded once per test binary, without the Kneser-Ney side file (`lm_path`).
 fn shared() -> &'static Shared {
     static S: OnceLock<Shared> = OnceLock::new();
-    S.get_or_init(|| {
-        let dir = root().join("data/lexicon");
-        let lex = load_lexicon(&dir).unwrap();
-        let lm = Lm::load(&lm_path()).unwrap();
-        let overlay = std::fs::read_to_string(dir.join("overlay-add.tsv")).unwrap();
-        let demote = Demote::parse(&std::fs::read_to_string(dir.join("demote.tsv")).unwrap()).unwrap();
-        let capped = Arc::new(CappedLexicon::new(lex.clone(), &overlay, &lm, Some(&demote)).unwrap());
-        Shared { lex, lm: Arc::new(lm), capped }
-    })
+    S.get_or_init(|| shared_for(&lm_path()))
 }
 
 fn sha_bytes(file: &Path) -> Vec<u8> {
@@ -656,8 +677,10 @@ fn load_tinylm_errors_and_the_switch() {
     assert!(e.take_rerank_job().is_none(), "load_tinylm left the switch off");
 }
 
-/// Section 2.5: the Kneser-Ney side file on refuses the model (alpha and tau were tuned without it); the same model without
-/// the side file is accepted (eval/golden/kn-tiny, with a one-entry lexicon: only the model's hash and KN state matter here).
+/// Section 2.5 and model-v6 section 2.7: a `.sjtl` tuned without the Kneser-Ney side file (version 1 here) pairs only with the
+/// model without it; the version 4 toy (eval/golden/tinylm-tiny/tiny-int8-v4.sjtl, recording kn-tiny/kn.sjkn's SHA-256) pairs
+/// only with the model with it, and offers the three levels (`rerank_levels` 7). eval/golden/kn-tiny with a one-entry lexicon:
+/// only the model's hash and KN state matter here.
 #[test]
 fn kneser_ney_side_file_refuses_the_model() {
     let kn = root().join("eval/golden/kn-tiny");
@@ -668,13 +691,17 @@ fn kneser_ney_side_file_refuses_the_model() {
     }
     let lex = Arc::new(Lexicon::parse_with("ㄋㄧˇ 你 -1.0\n", None).unwrap());
     let model = sjtl_for(0.7, 2.0, Some(&kn.join("bigram.sjlm")));
-    for (lm_dir, ok) in [(kn.clone(), false), (dir.clone(), true)] {
+    let v4 = root().join("eval/golden/tinylm-tiny/tiny-int8-v4.sjtl");
+    for (lm_dir, kn_off) in [(kn.clone(), false), (dir.clone(), true)] {
         let lm = Lm::load(&lm_dir.join("bigram.sjlm")).unwrap();
-        assert_eq!(lm.kn_tag().is_some(), !ok, "premise: the side file is loaded only from kn-tiny");
+        assert_eq!(lm.kn_tag().is_some(), !kn_off, "premise: the side file is loaded only from kn-tiny");
         let capped = Arc::new(CappedLexicon::new(lex.clone(), "", &lm, None).unwrap());
         let mut e = Engine::with_lexicon(lex.clone(), Layout::Standard);
         e.set_lm(Arc::new(lm), capped);
-        assert_eq!(e.load_tinylm(&model).is_ok(), ok);
+        assert_eq!(e.load_tinylm(&model).is_ok(), kn_off, "version 1, tuned without KN");
+        assert_eq!(e.load_tinylm(&v4).is_ok(), !kn_off, "version 4, tuned with kn-tiny/kn.sjkn");
+        // A failed load keeps the previous model: the version 1 file (2) with KN off, the version 4 file (7) with KN on.
+        assert_eq!(e.rerank_levels(), if kn_off { 2 } else { 7 });
     }
     std::fs::remove_dir_all(dir).unwrap();
 }
@@ -778,13 +805,14 @@ fn replay_dev302_parity_and_measurements() {
         return;
     };
     const CLOCKS_PER_SEC: f64 = 1_000_000.0; // macOS
+    // The real small model records the shipped kn.sjkn (SJTL0004), so this test runs on data/lm as it is, KN on.
     let mut e = Engine::new(&root().join("data/lexicon"), Layout::Standard).unwrap();
-    e.load_lm(&lm_path()).unwrap();
+    e.load_lm(&real_lm_path()).unwrap();
     e.load_tinylm(Path::new(&model)).unwrap();
     e.set_rerank(true).unwrap();
     let rows = dev302();
     // The CLI's rule in process.
-    let s = shared();
+    let s = &shared_for(&real_lm_path());
     let tl = TinyLm::load(Path::new(&model)).unwrap();
     let rule: Vec<String> = rows
         .iter()
@@ -834,7 +862,7 @@ fn replay_dev302_parity_and_measurements() {
     // Item 5's baseline: the same keys on an engine without the small model, for "job creation adds at most 1 ms to key p95",
     // and the n-gram's own rewrites.
     let mut b = Engine::new(&root().join("data/lexicon"), Layout::Standard).unwrap();
-    b.load_lm(&lm_path()).unwrap();
+    b.load_lm(&real_lm_path()).unwrap();
     let base = replay(&mut b, &rows);
     assert!(base.jobs == 0);
     eprintln!("baseline (no small model): key path p50 {:?} p95 {:?}", pct(&base.keys, 50), pct(&base.keys, 95));

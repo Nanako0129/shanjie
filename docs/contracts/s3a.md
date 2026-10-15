@@ -220,7 +220,7 @@ int32_t shanjie_engine_set_english_inline(ShanjieEngine *engine, uint32_t enable
 // S7c-2a 新增（docs/contracts/s7c2a-core-rerank.md §2.5）：小模型重排的兩段式 API。每次組字改變可能留下一個重排工作；殼取走、在別的執行緒 run、回到引擎的執行緒 apply。
 #define SHANJIE_NO_CHANGE 5
 typedef struct ShanjieRerankJob ShanjieRerankJob;
-// load_tinylm：讀檔失敗、不是一般檔案、超過 64 MiB、格式錯、沒有載入 n-gram、KN 側檔開著、.sjtl 記的 n-gram 雜湊不同 → 3（只是配對檢查，不是 .sjtl 的完整性檢查），
+// load_tinylm：讀檔失敗、不是一般檔案、超過 64 MiB、格式錯、沒有載入 n-gram、.sjtl 記的 n-gram 雜湊不同、KN 側檔的狀態和 .sjtl 記的不同（v4 記調參時的 kn.sjkn 的 SHA-256、全 0＝沒有；v1～v3 當成沒有；載入的 kn.sjkn 或沒有，32 bytes 都要相同；model-v6 §2.7） → 3（只是配對檢查，不是 .sjtl 的完整性檢查），
 // 引擎維持原狀；NULL → 1、路徑不是 UTF-8 → 2。不改 set_rerank 的開關、不改目前顯示。load_lm 成功會丟掉小模型（要在 load_lm 之後呼叫）。
 int32_t shanjie_engine_load_tinylm(ShanjieEngine *engine, const char *path);
 // set_rerank：0 或 1（其他回 2、狀態不變），建立時預設 0（S7c-2c 起；之前是 1）；碼與快照同 set_demote（重算組字，關掉時畫面回到 n-gram 的結果）。殼每次建 engine 後都要呼叫。
@@ -229,7 +229,7 @@ int32_t shanjie_engine_set_rerank(ShanjieEngine *engine, uint32_t enabled, Shanj
 // 碼與快照同 set_profile（engine 或 out 為 NULL → 1；大於 2 → 2、狀態與世代號都不變；4 → 引擎 discard、新等級保留）。會讓之前取走的工作作廢；工作建立時記下當時的 α、τ、δ。
 // 沒有小模型時記下等級、回 0；v1／v2 的 .sjtl（只有標準一組）任何等級都記下、回 0、實際用標準。load_tinylm、load_lm 保留等級。殼每次建 engine、load_tinylm 之後送一次存起來的等級。
 int32_t shanjie_engine_set_rerank_level(ShanjieEngine *engine, uint32_t level, ShanjieOutput **out);
-// rerank_levels：*levels 是載入的小模型提供的等級遮罩（bit0 保守、bit1 標準、bit2 積極）：沒有小模型 0、v1／v2 檔 2、v3 檔一律 7（不管值是否和標準相同、也不管 profile）。
+// rerank_levels：*levels 是載入的小模型提供的等級遮罩（bit0 保守、bit1 標準、bit2 積極）：沒有小模型 0、v1／v2 檔 2、v3／v4 檔一律 7（不管值是否和標準相同、也不管 profile）。
 // 0 成功；engine 或 levels 為 NULL → 1（不寫 *levels）；4 內部錯誤（不改任何狀態，所以也不 reset）。
 int32_t shanjie_engine_rerank_levels(ShanjieEngine *engine, uint32_t *levels);
 // rerank_take：交出上一次改變的工作（只交一次）；沒有工作時回 0、*job 為 NULL。engine 或 job 為 NULL → 1（job 非 NULL 時先設 *job = NULL）；4 → 引擎 discard。
@@ -351,7 +351,7 @@ void    shanjie_rerank_free(ShanjieRerankJob *job);
 - **解碼**：`decode_segment(lex, 音節, lm, λ, 前文詞, End, beam)` 是唯一的實作；`decode` 是前文 `<s>`、`End::Eos` 的特例。組字區第一段（左邊沒有固定詞的那段）的前文詞是 `lm::history(前文, lm)`：`set_left_context` 存的前文（最多 2 個漢字）整段或最後 1 個字，取第一個在模型裡有 bigram 歷史紀錄的，都沒有就是 `<s>`（S2h §1）。其他段照舊：左邊是固定詞就用那個詞，是標點就用 `<s>`。每個候選的 `pb` 與詞 id 在迴圈外算一次，只是提出共同項，沒有改運算順序。路徑同時帶著每個詞實際用的 lp，供 `total_score` 使用。
 - **引擎**：`Engine::new` 記住 `data_dir`；`load_lm(path)` 失敗時（含沒有 `data_dir`）維持原狀並回 `LoadFailed`，成功時不重算顯示。`set_lm(Arc<Lm>, Arc<CappedLexicon>)` 是 `with_lexicon` 引擎專用的注入（測試用）。`set_profile(Profile)` 先記住再重算，解碼失敗時引擎自行清空並回 `Internal`；沒載入 LM 時顯示不變。`Profile::from_code` 供 step 2 的 ABI 使用（0 chat、1 formal）。
 - **`lp_F`**：`CappedLexicon::best_lp(讀音, 詞)`，同讀音下同字串取最大值；找不到（不會發生，候選就來自這個讀音）視為內部錯誤。固定詞之間沒有空白區間時，不需要特別處理：兩個固定詞各自以「前一詞」計分，這件事只出現在 `total_score`（沿路徑逐詞累加）。
-- **`total_score()`**：從第一段的前文詞（同上，S2h §1）開始，沿目前最佳路徑（`refresh_lm` 同時存下的 `(詞, lp)`）依序加 `word(λ, 前一詞, 詞, lp)`，最後加 `eos`；前文本身不計分；沒有 LM 或組字區空時回 `None`。
+- **`total_score()`**：從第一段的前文詞（同上，S2h §1）開始，沿目前最佳路徑（`refresh_lm` 同時存下的 `(詞, lp)`）依序加 `word(λ, 前一詞, 詞, lp)`，最後加 `eos`；前文本身不計分；沒有 LM 或組字區空時回 `None`。例外（model-v6 §2.8 規則 1）：路徑上被學習加分的詞（`lp > best_lp(讀音, 詞)`，和 `Engine::boosted` 同一個判斷）用 `word_learned`（不經過 KN 替換），和解碼時的算法相同，所以總分仍等於解碼第一名的分數。
 - **reset**：`clear_all` 只清組字狀態（含路徑），不碰 `lm`、`profile`、`data_dir`。
 - **評測 CLI 的資料來源**：`--dev N` 與 `--rows` 照 `lm_eval.py` 的 `rows_of`，只收恰好三欄的列，不套 `usable`（dev 的 390 列都是三欄，與 S3a 的 302 列相同）；`--set holdout` 走既有的 `load_set`（`usable` 加 `row_syllables`）。`--name` 缺省時 `--rows` 用檔名。`top1_sha256` 用 `core::eval::sha256_hex`（專案沒有雜湊 crate，自寫 FIPS 180-4，附已知向量測試）。
 - **逐分數對照（驗收 3）的指令**：`python3 reference/proto/lm_eval.py --lm data/lm/bigram.sjlm --profile chat --dev 302 --dump $T/chat.dump`，對 `shanjie-eval --lm … --profile chat --dev 302 --dump $T/r-chat.dump`，formal 同理；`cmp` 兩邊檔案（結果是位元組相同）。這個比對需要 Python，所以沒放進 `cargo test`；`cargo test` 涵蓋的是 4 組參數的摘要行（含 `top1_sha256`）與 `s2-lm-dev302-top1.tsv`。

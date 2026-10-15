@@ -276,6 +276,23 @@ class SuiteV2(Tmp):
         self.assertTrue(v.tl.endswith("tinylm.sjtl"))
         self.assertEqual(v.tl8, "7e73ef67")
 
+    def test_kn_version_gets_its_side_file_and_tag(self):
+        """model-v6 and later (P4-12): a version with "kn" gets its kn.sjkn in the folder and `+kn:{kn8}` in the tag; others never do."""
+        spec = {"release": "vK", "flags": ["--context", "--packs", "acg"], "tinylm": True, "kn": True, "tag": "+ctx+kn:{kn8}:θ1:β1+tl:{tl8}+acg"}
+        HEX["kn.sjkn"] = "cbefbced" + "e" * 56
+        self.addCleanup(HEX.pop, "kn.sjkn")
+        with mock.patch.dict(bench.VERSIONS2, {"vK": spec}):
+            v = self.stage_models("vK", HEX)
+            for n in HEX:
+                self.put_model(n)
+            with mock_hash():
+                bench.setup_models(v, spec, os.path.join(self.td, "mf"))
+            self.assertEqual(sorted(os.listdir(os.path.dirname(v.lm))), ["bigram.sjlm", "classes.sjc", "kn.sjkn"])
+            self.assertEqual(bench.expected_tag(v, "chat", False), "lm-chat+ctx+kn:cbefbced:θ1:β1+tl:7e73ef67+acg")
+            os.remove(os.path.join(v.dir, "data", "kn.sjkn.sha256"))
+            with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
+                bench.setup_models(v, spec, os.path.join(self.td, "mf2"))   # a KN version without data/kn.sjkn.sha256 stops
+
     def test_v040_has_no_tinylm_sha_file_and_needs_none(self):
         v = self.stage_models("v0.4.0", ["bigram.sjlm", "classes.sjc"])
         for n in ("bigram.sjlm", "classes.sjc"):
@@ -372,6 +389,20 @@ class SuiteV2(Tmp):
         s = self.speed(("你好", "改掉的"))  # the comparison cell's row 2 changed
         self.assertIn("replay differs", s["error"])
         self.assertIn("[2]", s["error"])
+
+    def test_replay_cell_of_a_kn_version_carries_its_kn_tag(self):
+        spec = {"release": "vK", "flags": ["--context", "--packs", "acg"], "tinylm": False, "kn": True, "tag": "+ctx+kn:{kn8}:θ1:β1+acg"}
+        with mock.patch.dict(bench.VERSIONS2, {"vK": spec}):
+            v = fake_ver("vK", self.td)
+            v.kn8 = "cbefbced"
+            v.replay = self.replay_script("你好\n世界\n")
+            self.assertEqual(bench.replay_tag(v), "lm-chat+kn:cbefbced:θ1:β1")
+            self.fake_cli("lm-chat+kn:cbefbced:θ1:β1", [True, True], ("你好", "世界"))
+            self.assertEqual(bench.measure_speed2(self.ctx, [v])[v.sha]["rows_match"], "2/2")
+            self.fake_cli("lm-chat", [True, True], ("你好", "世界"))   # a KN version whose cell lost KN is not the replay setting
+            self.assertIn("setting tag", bench.measure_speed2(self.ctx, [v])[v.sha]["error"])
+            self.fake_cli("lm-chat+kn:00000000:θ1:β1", [True, True], ("你好", "世界"))   # nor is another side file
+            self.assertIn("setting tag", bench.measure_speed2(self.ctx, [v])[v.sha]["error"])
 
     def test_comparison_cell_must_carry_the_replay_settings(self):
         v = fake_ver("v0.4.0", self.td)

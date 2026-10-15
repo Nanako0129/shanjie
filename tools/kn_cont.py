@@ -6,7 +6,7 @@ N(w) = |{ v : once(v), v != "<s>", v 在模型詞彙裡, bi[(v, w)] >= theta }|�
 側檔 SJKN0002（docs/contracts/kn-core.md §1，little-endian）：magic b"SJKN0002"、V u32、模型檔 SHA-256 32 bytes、theta u32、beta f64、
 ΣN′ u64、N u32[V]（id 0、1 為 0）。ΣN′ 是預先彙總的值：用 lm.kn_total（和 lm.py 重算時同一個函式）加 build_lm.variant_classes 的類算好寫進檔頭，
 Rust 只讀檔頭；lm_eval.py 照舊傳 kn_classes 重算比對，那是它在上游的檢查。不再產生 SJKN0001（lm.py 仍讀得到舊檔）。
-用法：S2_WORK=計數目錄 python3 tools/kn_cont.py --lm MODEL --theta 1|2|3 --beta β --out FILE
+用法：S2_WORK=計數目錄 python3 tools/kn_cont.py --lm MODEL --theta 1|2|3 --beta β --out FILE [--extra-overlay FILE]
 """
 import argparse
 import hashlib
@@ -52,11 +52,12 @@ def main():
     ap.add_argument("--theta", type=int, required=True, choices=(1, 2, 3))
     ap.add_argument("--beta", type=float, required=True)
     ap.add_argument("--out", required=True)
+    ap.add_argument("--extra-overlay", help="接在 ime.OVERLAYS 之後的疊加層檔（model-v6 §7 P3-4，預設關），影響異體類與 ΣN′")
     a = ap.parse_args()
     if not 0.0 <= a.beta <= 1.0:
         ap.error("--beta must be in [0, 1]")
     vocab = L.BigramLM(a.lm, classes=False).vocab
-    _, bi, cls = build_lm.merged_counts()
+    _, bi, cls = build_lm.merged_counts(extra_overlay=a.extra_overlay)
     data = side_bytes(a.lm, continuation(bi, cls, a.theta, vocab), cls, a.theta, a.beta)
     V = len(vocab)
     np1 = [x + 1 for x in struct.unpack_from(f"<{V}I", data, 64)]

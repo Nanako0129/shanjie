@@ -92,23 +92,26 @@ jobs:
         with:
           toolchain: 1.97.1
 
-      # The bigram model is not in git (docs/PLAN.md S2c); it is the model-v5
-      # release asset, and its word-class table (S2k) is the classes-v3 asset.
-      # The small model of 語意校正 (S7c-2b) is the tinylm-v4 asset (S7h; v4 adds the rerank-strength levels), paired with model-v5.
+      # The bigram model is not in git (docs/PLAN.md S2c); it is the model-v6
+      # release asset, its word-class table (S2k) is the classes-v4 asset and its
+      # Kneser-Ney side file (kn-core) is the kn-v1 asset. The small model of
+      # 語意校正 (S7c-2b) is the tinylm-v5 asset (SJTL0004: it records model-v6's and kn-v1's hashes).
       # Checking them here fails the run in seconds with a clear message instead
       # of after the build. The hashes are checked against data/bigram.sjlm.sha256,
-      # data/classes.sjc.sha256 and data/tinylm.sjtl.sha256 (also read by build-app.sh and release.yml); cli/tests/golden.rs
-      # repeats the first two, so a model switch updates both (docs/data-files.md).
+      # data/classes.sjc.sha256, data/kn.sjkn.sha256 and data/tinylm.sjtl.sha256 (also read by build-app.sh and release.yml);
+      # cli/tests/golden.rs repeats the first two, so a model switch updates both (docs/data-files.md).
       - name: Fetch the language model
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          gh release download model-v5 --repo "$GITHUB_REPOSITORY" -p bigram.sjlm -D data/lm
+          gh release download model-v6 --repo "$GITHUB_REPOSITORY" -p bigram.sjlm -D data/lm
           shasum -a 256 -c data/bigram.sjlm.sha256
-          gh release download classes-v3 --repo "$GITHUB_REPOSITORY" -p classes.sjc -D data/lm
+          gh release download classes-v4 --repo "$GITHUB_REPOSITORY" -p classes.sjc -D data/lm
           shasum -a 256 -c data/classes.sjc.sha256
-          gh release download tinylm-v4 --repo "$GITHUB_REPOSITORY" -p tinylm.sjtl -D data/lm
+          gh release download kn-v1 --repo "$GITHUB_REPOSITORY" -p kn.sjkn -D data/lm
+          shasum -a 256 -c data/kn.sjkn.sha256
+          gh release download tinylm-v5 --repo "$GITHUB_REPOSITORY" -p tinylm.sjtl -D data/lm
           shasum -a 256 -c data/tinylm.sjtl.sha256
 
       - name: Tests (debug)
@@ -249,11 +252,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          gh release download model-v5 --repo "$GITHUB_REPOSITORY" -p bigram.sjlm -D data/lm
+          gh release download model-v6 --repo "$GITHUB_REPOSITORY" -p bigram.sjlm -D data/lm
           shasum -a 256 -c data/bigram.sjlm.sha256
-          gh release download classes-v3 --repo "$GITHUB_REPOSITORY" -p classes.sjc -D data/lm
+          gh release download classes-v4 --repo "$GITHUB_REPOSITORY" -p classes.sjc -D data/lm
           shasum -a 256 -c data/classes.sjc.sha256
-          gh release download tinylm-v4 --repo "$GITHUB_REPOSITORY" -p tinylm.sjtl -D data/lm
+          gh release download kn-v1 --repo "$GITHUB_REPOSITORY" -p kn.sjkn -D data/lm
+          shasum -a 256 -c data/kn.sjkn.sha256
+          gh release download tinylm-v5 --repo "$GITHUB_REPOSITORY" -p tinylm.sjtl -D data/lm
           shasum -a 256 -c data/tinylm.sjtl.sha256
 
       # The local entry points (Makefile, docs/verification.md). cargo test

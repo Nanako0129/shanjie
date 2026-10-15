@@ -4,7 +4,7 @@ import XCTest
 @testable import ShanjieKit
 
 /// The repository's data, laid out like the app's Resources (docs/contracts/s3b.md section 10.4):
-/// a temporary directory of symlinks to data/lexicon/*, data/lm/bigram.sjlm and data/lm/tinylm.sjtl. Missing files fail
+/// a temporary directory of symlinks to data/lexicon/*, data/lm/bigram.sjlm, classes.sjc, kn.sjkn and tinylm.sjtl. Missing files fail
 /// the test with instructions; nothing is ever skipped.
 enum TestData {
     static let repo = URL(fileURLWithPath: #filePath)
@@ -15,9 +15,11 @@ enum TestData {
         ("mcbpmf-data.txt", "data/lexicon/mcbpmf-data.txt"),
         ("overlay-add.tsv", "data/lexicon/overlay-add.tsv"),
         ("sandhi-add.tsv", "data/lexicon/sandhi-add.tsv"),
+        ("names-add.tsv", "data/lexicon/names-add.tsv"),  // model-v6 section 2.5: the always-on names layer, required by the core
         ("demote.tsv", "data/lexicon/demote.tsv"),
         ("bigram.sjlm", "data/lm/bigram.sjlm"),
         ("classes.sjc", "data/lm/classes.sjc"),
+        ("kn.sjkn", "data/lm/kn.sjkn"),  // model-v6: the Kneser-Ney side file the shipped tinylm.sjtl (SJTL0004) records
         ("tinylm.sjtl", "data/lm/tinylm.sjtl"),
         // zhen-mixed: the synthetic list stands in for the generated Resources/english-words.txt (docs/contracts/zhen-mixed.md section 5.3).
         ("english-words.txt", "eval/golden/english-tiny.txt"),
@@ -42,10 +44,11 @@ enum TestData {
             let src = repo.appendingPathComponent(f.source)
             guard FileManager.default.fileExists(atPath: src.path) else {
                 XCTFail("""
-                    \(f.source) is missing. The lexicon is in git; the model is the model-v5 release asset: \
-                    gh release download model-v5 -R Nanako0129/shanjie -p bigram.sjlm -D data/lm
-                    classes.sjc: gh release download classes-v3 -R Nanako0129/shanjie -p classes.sjc -D data/lm
-                    tinylm.sjtl: gh release download tinylm-v4 -R Nanako0129/shanjie -p tinylm.sjtl -D data/lm
+                    \(f.source) is missing. The lexicon is in git; the model is the model-v6 release asset: \
+                    gh release download model-v6 -R Nanako0129/shanjie -p bigram.sjlm -D data/lm
+                    classes.sjc: gh release download classes-v4 -R Nanako0129/shanjie -p classes.sjc -D data/lm
+                    kn.sjkn: gh release download kn-v1 -R Nanako0129/shanjie -p kn.sjkn -D data/lm
+                    tinylm.sjtl: gh release download tinylm-v5 -R Nanako0129/shanjie -p tinylm.sjtl -D data/lm
                     """, file: file, line: line)
                 return nil
             }
@@ -363,7 +366,8 @@ final class FreeCounter: @unchecked Sendable {
 }
 
 /// dev302 row 65 (s7c2b section 2.5, revised 2026-10-12, the selftest's sentence): in the chat profile the n-gram's first is 在,
-/// the small model picks 再, under tinylm-v2, tinylm-v3 and tinylm-v4 alike (RerankTests, 2026-10-13; v4: CLI and these tests, 2026-10-14). Row 25 (執行這個城市 -> 程式) was this
+/// the small model picks 再, under tinylm-v2, tinylm-v3 and tinylm-v4 alike (RerankTests, 2026-10-13; v4: CLI and these tests, 2026-10-14); under model-v6 + kn-v1 +
+/// tinylm-v5 (chat standard 0.3/2/0.25) the RerankTests passed on 2026-10-15 (`make test-swift`). Row 25 (執行這個城市 -> 程式) was this
 /// sentence under tinylm-v1; v2's strict chat values did not change it, v3's do again (`DeviceRow` below).
 enum RerankRow {
     static let zhuyin = "ㄨㄛˇ ㄉㄥˇ ㄧ ㄒㄧㄚˋ ㄗㄞˋ ㄍㄨㄛˋ ㄑㄩˋ"

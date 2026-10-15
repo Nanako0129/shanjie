@@ -36,7 +36,11 @@
  *  - shanjie_engine_load_lm also reads an optional kn.sjkn (Kneser-Ney side file, docs/contracts/kn-core.md) in
  *    the same directory. No such file: nothing changes. A file that exists but cannot be read, or does not
  *    match the model (magic, size, SHA-256, header values), fails the load with 3, never silently ignored.
- *    When it is present and valid it changes the scoring of every vocabulary word. The shipped app has none.
+ *    When it is present and valid it changes the scoring of every vocabulary word. The shipped app has one (kn-v1,
+ *    docs/contracts/model-v6.md).
+ *  - data_dir must hold names-add.tsv (the always-on common proper nouns, model-v6 section 2.5) next to overlay-add.tsv and
+ *    sandhi-add.tsv: shanjie_engine_new / _new_packs read it into the lexicon and shanjie_engine_load_lm reads it again to cap
+ *    its words like overlay-add.tsv's; missing or unreadable, either call fails with 3.
  *  - Load the LM once at startup while the composition is empty: loading does not recompute the
  *    current display; the next change to the composition decodes with the new model.
  *  - shanjie_engine_reset (both modes) and the automatic reset after code 4 clear the composition only;
@@ -256,8 +260,10 @@ int32_t shanjie_engine_learning_status(ShanjieEngine *engine, uint32_t *flags);
 typedef struct ShanjieRerankJob ShanjieRerankJob;
 // load_tinylm: the .sjtl for the loaded n-gram model. Call it after shanjie_engine_load_lm (a successful load_lm drops the small
 //   model: the .sjtl names the n-gram model's hash). 3 when the file cannot be read, is not a regular file, is over 64 MiB or
-//   malformed, when no n-gram model is loaded, when the Kneser-Ney side file is on, or when the .sjtl was tuned with another
-//   n-gram model (a pairing check only, not an integrity check of the .sjtl); the engine keeps its previous model (or none) and
+//   malformed, when no n-gram model is loaded, when the .sjtl was tuned with another n-gram model, or when the Kneser-Ney side
+//   file state differs from the one it records (a version 4 .sjtl records the SHA-256 of the kn.sjkn it was tuned with, all
+//   zero for none; versions 1 to 3 count as none; the loaded kn.sjkn, or none, must match all 32 bytes; docs/contracts/model-v6.md
+//   section 2.7) (a pairing check only, not an integrity check of the .sjtl); the engine keeps its previous model (or none) and
 //   the n-gram keeps working. 1 for a NULL engine or path, 2 for a path that is not UTF-8. Does not change the rerank setting
 //   (set_rerank) or the current display.
 int32_t shanjie_engine_load_tinylm(ShanjieEngine *engine, const char *path);
@@ -275,7 +281,7 @@ int32_t shanjie_engine_set_rerank(ShanjieEngine *engine, uint32_t enabled, Shanj
 //   load_tinylm and load_lm keep the level. The shell sends its stored level after every engine creation, after load_tinylm.
 int32_t shanjie_engine_set_rerank_level(ShanjieEngine *engine, uint32_t level, ShanjieOutput **out);
 // rerank_levels: *levels is a bit mask of the levels the loaded small model offers (bit0 conservative, bit1 standard, bit2
-//   aggressive): 0 without a small model, 2 for a version 1 or 2 .sjtl, 7 for a version 3 .sjtl (always 7, even when a level's
+//   aggressive): 0 without a small model, 2 for a version 1 or 2 .sjtl, 7 for a version 3 or 4 .sjtl (always 7, even when a level's
 //   values equal the standard ones, and whatever the profile). 0 success; 1 when engine or levels is NULL (*levels untouched);
 //   4 internal (nothing is reset: it changes nothing). Changes nothing.
 int32_t shanjie_engine_rerank_levels(ShanjieEngine *engine, uint32_t *levels);

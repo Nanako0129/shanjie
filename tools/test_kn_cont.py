@@ -186,6 +186,7 @@ class KnCont(unittest.TestCase):
         import lm_eval
         p = self.side(beta=0.5)
         self.assertEqual(lm_eval.kn_tag(p, 0.5), f"+kn:{hashlib.sha256(open(p, 'rb').read()).hexdigest()[:8]}:θ1:β0.5")
+        self.assertEqual(lm_eval.kn_tag(p), lm_eval.kn_tag(p, 0.5))   # beta omitted: read from the header
 
 
 if __name__ == "__main__":
