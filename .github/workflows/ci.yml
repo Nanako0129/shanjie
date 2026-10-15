@@ -209,6 +209,10 @@ jobs:
       - name: Overlay manual words (Python)
         run: python3 -m unittest tools/test_build_overlay.py
 
+      # docs/contracts/holdout-refresh.md section 8: the held-out hash guard (clause split, hash definition, byte-for-byte keep), synthetic input.
+      - name: Holdout guard (Python)
+        run: python3 -m unittest tools/test_holdout_guard.py
+
       # docs/contracts/x0c-compare.md acceptance 5: score_0c.py and versus.py against a fake model (input layout, 64-character
       # context, log10 scale, unscorable rows, covered-only comparison). They need numpy (not onnxruntime, not the weights),
       # which the runner may not have, so it goes into a throwaway venv.
