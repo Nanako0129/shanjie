@@ -5805,3 +5805,9 @@ formal: alpha 0.7, tau 1, delta 2
 - 起因：zhen-inline（PR #153，打字時就顯示英文、英文留在組字區、Shift 英文段、逐字母刪除）10-14 就 CONFIRMED、CI 綠、實機第 1–4 步過，修訂四之後最後一次實機沒做完，發 v0.4.4 時沒有帶上（維護者 10-15：「之前已經測試過的，為什麼沒上」）。補做：合併 main（衝突只在設定視窗，選項放進「選字」頁中英混打開關下面），實機時維護者回報 `rusr` 打錯後 Backspace 回不到英文：出貨單字表裡 `rus` 是完整的字，`r u s r` 觸發自動固定，Backspace 只刪掉新的 ㄐ。加契約 §1.3i（修訂六）：「打字時就顯示」時，刪光新音節而左邊是自動固定的 token，token 以全部文字變回英文段；`/code-review` 8 項全修（只限自動固定的 token 與「打字時就顯示」等），fresh verifier CONFIRMED、188 完整 Rust 455／0、CI 綠、維護者實機「沒問題」，merge commit `4956257`。
 - 基準測試（`tools/bench.py run --suite v2 v0.4.4 4956257 --as v0.4.5`，`VERSIONS2` 加 v0.4.5，旗標與模型和 v0.4.4 相同）：十個集合兩種設定都是 +0／−0（中英混打預設關，CLI 不開）；dev302 重播 p95 2.42 → 2.34 ms（同場），最大 50.6 → 9.5 ms（v0.4.4 前一場量的最大是 7.6 ms）；同場語意校正重排 p50／p95 6.80／8.71 → 8.08／12.16 ms，原因沒查。重播不載入單字表，中英混打開著時每鍵的字首查詢沒有量過（PR #153 `/code-review` 第 8 項 DEFER）。
 - 保留集（fresh verifier，v0.4.4 `3560fe5` 對 `4956257`，跑一次）：聊天 191 → 191、書面 186 → 186，兩者 +0／−0，top1 雜湊相同。bench 的匯出沒有 `eval/holdout`，verifier 量時在兩個匯出各放一個指向 repo 的暫時連結、量完拿掉（`git diff v0.4.4 4956257 -- eval/holdout` 為空）。
+
+## 2026-10-16：v0.4.5 發佈
+
+- 維護者同意後推 `v0.4.5`（tag 指向 main `4f0b052`；和量基準測試與保留集的 `4956257` 相比，`Cargo.toml Cargo.lock core cli data eval/variants.tsv macos scripts` 沒有差異），發佈流程 run 38770119171：gate、build、sign、publish 都成功。
+- 核對（下載 Release 附件）：zip 與安裝程式的 SHA-256 和 `.sha256` 相符；兩個 App 的 `codesign --verify --deep --strict` 通過、Team 2LJ882GPY8、`spctl` 判定 Notarized Developer ID、`stapler validate` 通過、版本 0.4.5；Latest 是 v0.4.5；Homebrew cask `0.4.5`、sha256 `f581fa2f…` 和 zip 相同。解壓的副本驗完先 `lsregister -u` 再刪。
+- 發版後：Discord 發版公告（blobhaj，只標善解身分組）、回饋串回 charliie 的中英混打回報；網站加 v0.4.5 一行、中英混打改成已發佈後部署（維護者同意）。
