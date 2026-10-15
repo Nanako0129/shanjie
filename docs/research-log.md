@@ -5711,3 +5711,4 @@ formal: alpha 0.7, tau 1, delta 2
   - 列格式（`前文|句子|讀音`）的評測檔用 `|` 分隔，切子句時切不出句子欄，所以永遠比不到。§4 第 4 步對評測集和舊保留集的比對，會得到假的「零重疊」。
 - 契約修訂三：比對改在轉換之後的漢字段上做**包含**比對，重用 S7f 的 `clean.Matcher`，句子和它轉換後的樣子都比。工具直接讀列檔，只輸出列號與計數，所以雜湊檔拿掉（main 本來就不看句子）。計數程式加一個預設關的開關，下一次建模型時打開。其餘的實作問題跟著重做（非法 UTF-8 會崩潰、BOM、列檔解析、測試只比對自己）。同日「保留集換新」一節講的 `hashes.sha256` 作廢。
 - `tools/holdout_guard.py` 照修訂三重做：`report`（`--rows` 比對對象、`--text`／`--row-files`／`--wiki` 來源）只輸出列號與計數；`build_counts.py`、`build_counts_text.py` 加預設關的 `--holdout-guard`，開著時命中保留集句子的漢字段不計數並回報跳過幾段。關著時輸出不變。`experiments/model-v6/README.md` 沒有改。
+- PR #162 第二輪審查的修正：`--holdout-guard` 的比對器在 `main()` 建好並驗證（壞檔不會讓 Pool 的 worker 一直重啟），載入 0 個比對對象或含非 `HAN` 字元就停下並回報載入／略過（少於 4 字）的數量；比對前兩邊都過 `build_counts.fold`（`MERGE`）；條目與純文字的處理收成 `build_counts.article_runs`／`text_runs` 一份，計數、`report` 與 `experiments/s7a-tinylm/prep.py` 共用，prep 也加了預設關的開關。關著時 `count_batch`、`build_counts_text`、prep `_work` 的輸出和改動前的程式逐位元組相同（合成輸入，真正的轉換表，對照 04e9966）。

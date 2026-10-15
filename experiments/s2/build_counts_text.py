@@ -14,8 +14,9 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import build_counts as bc  # noqa: E402
 
 
-def lines(path):
-    f = bz2.open(path, "rt", encoding="utf-8") if path.endswith(".bz2") else open(path, encoding="utf-8")
+def lines(path, errors="strict"):
+    """errors="replace": bad bytes become U+FFFD (not Han) instead of an exception; holdout_guard --text reads this way."""
+    f = bz2.open(path, "rt", encoding="utf-8", errors=errors) if path.endswith(".bz2") else open(path, encoding="utf-8", errors=errors)
     for line in f:
         line = line.rstrip("\n")
         yield line.split("\t")[-1] if ".tsv" in path else line
@@ -32,16 +33,16 @@ def main(argv=None):
     if a.extra_lexicon and not a.expected:
         ap.error("--extra-lexicon 只用在 --expected（加法計數，model-v5 契約 §8）")
     expected, out, paths = a.expected, a.out, a.paths
-    bc._init(False, expected, extra_lexicons=tuple(dict.fromkeys(os.path.abspath(f) for f in a.extra_lexicon)), holdout_guard=a.holdout_guard)
-    guard, skipped = bc._W["guard"], 0
-    lex, (phrase, char, maxp) = bc._W["lex"], bc._W["conv"]
+    guard, skipped = bc.guard_matcher(a.holdout_guard), 0   # validated before anything else is loaded
+    bc._init(False, expected, extra_lexicons=tuple(dict.fromkeys(os.path.abspath(f) for f in a.extra_lexicon)), holdout_guard=guard)
+    lex, conv = bc._W["lex"], bc._W["conv"]
     uni, bi, tri, runs = collections.Counter(), collections.Counter(), collections.Counter(), 0
     for p in paths:
         for s in lines(p):
-            for run in bc.HAN.findall(bc.convert(s, phrase, char, maxp)):
+            for run in bc.text_runs(s, conv):
                 if len(run) < 2:
                     continue
-                if guard is not None and guard.any(run):
+                if guard is not None and guard.any(bc.fold(run)):
                     skipped += 1
                     continue
                 if expected:

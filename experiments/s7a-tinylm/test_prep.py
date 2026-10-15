@@ -46,6 +46,24 @@ class TestPrepEquivalence(unittest.TestCase):
         self.assertEqual(ours, theirs)
         self.assertTrue(any("台灣" in r for r in ours) and all(len(r) >= 2 for r in ours))     # converted, not raw
 
+    def test_holdout_guard_skips_matching_runs_and_off_is_unchanged(self):
+        """--holdout-guard (docs/contracts/holdout-refresh.md section 8): off, _work is what it was; on, runs holding a held-out sentence are dropped and counted."""
+        import holdout_guard
+        with tempfile.TemporaryDirectory() as td:
+            rows = os.path.join(td, "rows.txt")
+            open(rows, "w", encoding="utf-8").write("a|今天天氣真好|x\n")
+            matcher = holdout_guard.build_matcher([rows], self.conv)[0]
+            lines = ["今天天氣真好", "我们明天去哪里吃饭"]
+            prep._init()
+            off = prep._work(("text", lines))
+            self.assertEqual(off[0].split("\n"), [r for l in lines for r in prep.text_runs(l, self.conv)])
+            self.assertEqual(off[3], 0)
+            prep._init(matcher)
+            on = prep._work(("text", lines))
+            prep._init()
+        self.assertEqual((on[2], on[3]), (off[2] - 1, 1))
+        self.assertNotIn("今天天氣真好", on[0])
+
     def test_colloquial_runs_equal_build_counts_text_runs(self):
         with tempfile.TemporaryDirectory() as td:
             src = os.path.join(td, "c.txt")
