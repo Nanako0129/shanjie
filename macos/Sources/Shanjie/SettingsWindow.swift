@@ -281,6 +281,13 @@ struct SettingsPageForm: View {
                     // or the layout is Eten, like the menu item (zhen-mixed section 3.2).
                     Toggle(MenuEntry.Text.english, isOn: Binding(get: { model.english }, set: { model.setEnglish($0) }))
                         .disabled(!model.englishEnabled)
+                    // Under the toggle (zhen-inline section 2); greyed on the toggle's condition and while the toggle is off.
+                    Picker(MenuEntry.Text.englishDisplay, selection: Binding(get: { model.englishInline }, set: { model.setEnglishInline($0) })) {
+                        Text(MenuEntry.Text.englishDisplayTyped).tag(true)
+                        Text(MenuEntry.Text.englishDisplaySpace).tag(false)
+                    }
+                    .pickerStyle(.segmented)
+                    .disabled(!model.englishInlineEnabled)
                     Toggle(MenuEntry.Text.demote, isOn: Binding(get: { model.demote }, set: { model.setDemote($0) }))
                     // Right after the toggle that greys it. Greyed while 避免把敏感字詞排在前面 is off or the small model did not load,
                     // like the menu item: the core makes no rerank job then (s7c2b section 2.3).

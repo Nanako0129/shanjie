@@ -76,6 +76,11 @@ final class DefaultsEnglishStore: EnglishStore {
         get { UserDefaults.standard.object(forKey: "english") as? Bool }
         set { UserDefaults.standard.set(newValue, forKey: "english") }
     }
+    /// The 英文的顯示 choice (docs/contracts/zhen-inline.md section 2), key `englishInline`; absent means true.
+    var englishInline: Bool? {
+        get { UserDefaults.standard.object(forKey: "englishInline") as? Bool }
+        set { UserDefaults.standard.set(newValue, forKey: "englishInline") }
+    }
 }
 
 /// The "動漫與遊戲詞" switch (docs/contracts/acg-pack.md A.2), key `acgPack` in the same domain; absent means on (user decision 2026-10-09).
