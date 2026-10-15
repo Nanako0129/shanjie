@@ -14,6 +14,11 @@ pub const SENTINEL: &str = "^";
 /// and looked up under `^>` plus the reading of the syllable right after it, `^>$` when nothing follows.
 /// These keys never take part in the last-character level.
 pub const NEXT_PREFIX: &str = "^>";
+/// s3d §2: punctuation in the composition is a one-cell token under this reserved reading prefix (`_punct_，`); the
+/// lexicon has no such reading. An English word kept in the composition (zhen-inline §1.0) is one too (`_punct_rust`).
+pub const PUNCT_PREFIX: &str = "_punct_";
+/// The reading every English token counts as in a rule 8 key.
+const ENGLISH_NEXT: &str = "_punct_en";
 /// The global key (§1.3): created only after ≥ 2 distinct full keys learned the same (reading, word).
 pub const GLOBAL: &str = "";
 /// Half-life in days (user decision 2026-10-05): one teach stays effective about two weeks; words in
@@ -44,9 +49,28 @@ pub fn context_key(prefix: &str) -> String {
     }
 }
 
+/// zhen-inline §1.0: the English word of a token reading (`_punct_rust` -> `rust`): the text after `PUNCT_PREFIX`, when it is
+/// non-empty ASCII letters only (no punctuation mark is).
+pub fn english_of(reading: &str) -> Option<&str> {
+    reading.strip_prefix(PUNCT_PREFIX).filter(|w| !w.is_empty() && w.bytes().all(|b| b.is_ascii_alphabetic()))
+}
+
+/// zhen-inline §1.3e: a space unit, the token a Space types after an English token (`_punct_ `).
+pub fn is_space_unit(reading: &str) -> bool {
+    reading.strip_prefix(PUNCT_PREFIX) == Some(" ")
+}
+
+/// The one test "English token or space unit": the two kinds of unit that count as one kind of neighbour (rule 8 key,
+/// `next_key`) and that a Space types a space after (`Engine::breaks_with_space`).
+pub fn english_or_space(reading: &str) -> bool {
+    english_of(reading).is_some() || is_space_unit(reading)
+}
+
 /// Rule 8: the key a word under `SENTINEL` is learned and looked up with; `next` is the reading of the syllable
-/// right after the word (`None`: the word ends the composition).
+/// right after the word (`None`: the word ends the composition). An English token or a space unit after the word counts as
+/// one kind of neighbour, not as the word it holds (zhen-inline §1.0, §1.3e): `^>_punct_en`. Every key of rule 8 comes through here.
 pub fn next_key(next: Option<&str>) -> String {
+    let next = if next.is_some_and(english_or_space) { Some(ENGLISH_NEXT) } else { next };
     format!("{NEXT_PREFIX}{}", next.unwrap_or("$"))
 }
 
