@@ -5478,7 +5478,7 @@ formal: alpha 0.7, tau 1, delta 2
 - 維護者在 Discord 說「tinylm-v4、model-v6 今天出」，選擇題選「照草稿全做」；之後同意「明天凌晨發」、「開 KN，核心一起改」。契約經 plan-verifier 五輪與安全審查（處置在契約 §6、§7）後 READY。
 - **輸入**（Windows 機器，`work\modelv6\inputs.sha256`）：維基 dump `5db9052e…`、`colloquial-train.txt` `3e833d06…`、`synth.txt` `bec7a6a2…`、`mcbpmf-data.txt` `0deae7b7…`、OpenCC 兩個表都和 model-v5 相同；改了的是 `overlay-add.tsv`（拿掉粵語詞後 `96b8db89…`）、`acg-add.tsv`（A3 `ecd5f263…`）、新加的 `names-add.tsv`（N1，`77f70524…`）與補次數檔（下一條）。
 - **計數詞表**（`count_lexicon.py`）：詞包 44,554 詞排除 465 個（衝突讀音 239 個），`acg-count.tsv` `e8757303…`；名單 1,606 詞排除 4 個（衝突讀音 5 個），`names-count.tsv` `5c14a359…`。
-- **重現核對**（契約 §2.1，兩項都過）：新的 `build_lm.py` 不帶 `--extra-overlay`、用 model-v5 的計數（188 `work\modelv5`）與 model-v5 當時的 `overlay-add.tsv`（`348979c8…`）建出 `7961cb9d…`，和 model-v5 去掉指紋前逐位元組相同；`build_classes.py` 不帶參數、用 classes-v3 的分群輸出（`modelv5-classes-keep`，`cls-40000-512.npz` `af637997…`）建出 `75a5efb3…`，和 classes-v3 逐位元組相同。〔第一次誤用了 `modelv5-final1` 的計數，建出 `4b1fdce4…`，和那個資料夾自己的模型相同、不是出貨的那份，改用 `work\modelv5` 重做。〕
+- **重現核對**（契約 §2.1，兩項都過）：新的 `build_lm.py` 不帶 `--extra-overlay`、用 model-v5 的計數（Windows 機器上 model-v5 正式那次的計數資料夾）與 model-v5 當時的 `overlay-add.tsv`（`348979c8…`）建出 `7961cb9d…`，和 model-v5 去掉指紋前逐位元組相同；`build_classes.py` 不帶參數、用 classes-v3 的分群輸出（`modelv5-classes-keep`，`cls-40000-512.npz` `af637997…`）建出 `75a5efb3…`，和 classes-v3 逐位元組相同。〔第一次誤用了 `modelv5-final1` 的計數，建出 `4b1fdce4…`，和那個資料夾自己的模型相同、不是出貨的那份，改用正式那次的計數重做。〕
 - **維基計數**：20 萬篇、3,107 萬段、32,035,747 種二元組、361,810 種詞；16 個 worker（所有子程序關掉 Windows 的降速）。
 - **補次數檔**（契約 §2.1b）：`generate.py`，Cerebras gpt-oss-120b、種子 `experiments/model-v6/seeds-topup.txt`、上限 US$15、目標 50 萬字；中途一次 HTTP 504 後用 `--resume` 接著跑。結果：23,928 個回應、留下 501,062 字，抽成剛好 500,000 字（22,745 列），帳本 US$2.87（上限 US$15）；濾掉重複 258、評測集重疊 90、入侵詞 312、沒用到種子詞 405、簡體 67、長度 1。輸出 SHA-256 `315939d7…`（指令在 `experiments/model-v6/README.md`）。
 
@@ -5601,7 +5601,7 @@ formal: alpha 0.7, tau 1, delta 2
 - **匯出**（Mac，`export_sjtl.py --type int8 --ngram-model <model-v6> --kn-side <kn-v1> --chat 0.3 2 0.25 --formal 1 1 3 --levels 1 2 3 0.3 2 0.25 1 1 4 1 1 3`，`tinylm-M.npz` `32308122…`）：`tinylm-v5.sjtl` `d07de71d…`，14,638,352 bytes，SJTL0004。切片核對：244 bytes 之後和暫時檔 `f1497ff2…` 逐位元組相同，模型雜湊（位移 68）與 KN 雜湊（位移 212）相同，不同的只有融合參數那幾格。
 - **§4.4 一致性**（Linux 機器，新檔複製過去核對雜湊相同，`--rerank-level` 三檔 × 兩種設定，dev302）：CLI 的 rowstats 和 `judge.py` 最後一次的 rowstats，6 個 `cmp` 都是 0。
 - **§4.5 保留集**（fresh verifier，只跑一次；227 列，對 model-v6 的 n-gram 第一名）：聊天標準 8／1、保守 3／0、積極 8／1；書面標準 2／0、保守 1／0、積極 2／0。六格淨值都 ≥ 0；積極與標準的 rowstats 逐位元組相同。
-- 188 的 WSL 在第二段跑完後、第三段（Python 跨語言核對）中途停了一次（01:11，Windows 記錄只有虛擬網卡被拆掉，沒有錯誤；主機沒有重開）。第二段的 16 個分數檔都已經寫完（每個 `.out` 都有摘要行），第三、四段改用 Windows 的 Python 與重新連線跑完。原因沒查到〔推論：WSL 在沒有連線掛著時自己關機，跑這批的那條 ssh 已經沒有在傳資料〕。
+- Windows 機器的 WSL 在第二段跑完後、第三段（Python 跨語言核對）中途停了一次（01:11，Windows 記錄只有虛擬網卡被拆掉，沒有錯誤；主機沒有重開）。第二段的 16 個分數檔都已經寫完（每個 `.out` 都有摘要行），第三、四段改用 Windows 的 Python 與重新連線跑完。原因沒查到〔推論：WSL 在沒有連線掛著時自己關機，跑這批的那條 ssh 已經沒有在傳資料〕。
 ## 2026-10-14：錯字回報第 111 列（做效能測試）
 
 - 維護者實機：要打「做效能測試」，送出的是「作效能測試」。加成 `|做效能測試|ㄗㄨㄛˋ ㄒㄧㄠˋ ㄋㄥˊ ㄘㄜˋ ㄕˋ`（讀音由 `tools/readings.py` 產生，沒有 CHECK）。
