@@ -1546,7 +1546,8 @@ fn token_lists_follow_how_the_token_was_made() {
     for keys in ["g o o g l e j", "g o o g l e _ j"] {
         let mut e = eng_inline();
         assert!(run(&mut e, keys).preedit == "googleㄨ");
-        run(&mut e, "BS");
+        // Backspace reopens the word as a run (section 1.3i); Space ends it unchanged, and the Chinese item comes back with it.
+        run(&mut e, "BS _");
         let o = run(&mut e, "Down");
         assert!(o.candidates == ["google", "Google", "GOOGLE", zh.as_str()], "{keys}: {:?}", o.candidates);
         // Choosing the Chinese item turns the token into the character.
@@ -1573,7 +1574,8 @@ fn token_lists_follow_how_the_token_was_made() {
     assert!(run(&mut e, "Down").candidates == ["google", "Google", "GOOGLE"]);
     // The Space key lists nothing there (zhen-inline 1.3e): it types a space unit after the token.
     let mut e = eng_inline();
-    run(&mut e, "g o o g l e j BS");
+    // Backspace reopened the word as a run (section 1.3i): the first Space ends it, the second types the space.
+    run(&mut e, "g o o g l e j BS _");
     let o = run(&mut e, "_");
     assert!(o.candidates.is_empty() && o.preedit == "google ", "{:?}", o.preedit);
 }
@@ -1661,7 +1663,7 @@ fn the_chinese_item_of_a_kept_token_is_the_syllable_that_was_on_the_columns() {
     assert!(e.english_open() && o.candidates.len() == 4 && o.candidates[3] == zh, "premise: the window's fourth item: {:?}", o.candidates);
     run(&mut e, "j");
     assert!(e.english_autokept());
-    run(&mut e, "BS");
+    run(&mut e, "BS _"); // section 1.3i: the run again, ended unchanged
     let o = run(&mut e, "Down");
     assert!(o.candidates == ["rust", "Rust", "RUST", zh.as_str()], "{:?}", o.candidates);
     assert!(run(&mut e, "4").preedit == zh);
@@ -1930,4 +1932,36 @@ fn a_run_that_is_cancelled_in_the_middle_leaves_one_stretch_again() {
             assert!(run(&mut e, "Enter").commit == "編譯", "lm={lm} {cancel}");
         }
     }
+}
+
+#[test]
+fn backspace_after_an_auto_keep_opens_the_word_again() {
+    // zhen-inline section 1.3i (maintainer 2026-10-15 on the device: `rusr` kept `rus` and Backspace could not get the English
+    // back): the key that auto-kept the word is the only thing in the new syllable, so Backspace takes it and the kept word
+    // opens again as a run with all its letters.
+    let fields = |o: &Output| (o.english_run_utf16_start, o.english_run_utf16_len);
+    let mut e = eng_inline();
+    let o = run(&mut e, "r u s t r");
+    assert!(o.preedit == "rustㄐ" && fields(&o) == (0, 0), "auto-kept, a new syllable: {}", o.preedit);
+    let o = run(&mut e, "BS");
+    assert!(o.preedit == "rust" && fields(&o) == (0, 4) && o.commit.is_empty(), "the run again: {}", o.preedit);
+    assert!(run(&mut e, "BS").preedit == "rus", "and the next Backspace takes a letter of it");
+    let o = run(&mut e, "t _");
+    assert!(o.preedit == "rust" && fields(&o) == (0, 0), "Space ends it as a token");
+    assert!(run(&mut e, "Enter").commit == "rust");
+
+    // A syllable of two keys keeps the token until both are gone; with English mixing off nothing opens.
+    let mut e = eng_inline();
+    run(&mut e, "r u s t r u");
+    assert!(run(&mut e, "BS").preedit == "rustㄐ");
+    assert!(fields(&run(&mut e, "BS")) == (0, 4));
+
+    // The kept word's Chinese item survives the reopening only when the run ends with the same letters.
+    let zh = first_entry("ㄍㄠ");
+    let mut e = eng_inline();
+    run(&mut e, "g o o g l e j BS _");
+    assert!(run(&mut e, "Down").candidates.last() == Some(&zh), "unchanged: the Chinese item is back");
+    let mut e = eng_inline();
+    run(&mut e, "g o o g l e j BS BS e _");
+    assert!(!run(&mut e, "Down").candidates.contains(&zh), "letters changed: a run's token, writings only");
 }

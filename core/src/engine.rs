@@ -516,6 +516,9 @@ pub struct Engine {
     /// zhen-inline section 1.3b: the English run being typed (Shift+letter starts it): letters shown at the cursor, not yet a
     /// unit. Empty = no run. Never together with an unfinished syllable or a window.
     run: String,
+    /// Zhen-inline section 1.3i: a token reopened as the run, with the Chinese item it had; it comes back when the run ends with
+    /// the same letters.
+    run_zh: Option<(String, String)>,
     /// Whether the latest `key()` made an auto-keep (zhen-inline section 1.3; tool hook `english_autokept`). Cleared at the start
     /// of `key()` and nowhere else; no other entry point (a pick, a reset, a setting) touches it, so none can leave it stale.
     autokept: bool,
@@ -722,6 +725,7 @@ impl Engine {
             shadow_over: 0,
             commit_out: None,
             run: String::new(),
+            run_zh: None,
             autokept: false,
         }
     }
@@ -1343,6 +1347,11 @@ impl Engine {
     /// what the 40th unit sent, if it did.
     fn end_run(&mut self) -> Result<String, EngineError> {
         let word = std::mem::take(&mut self.run);
+        if let Some((_, zh)) = self.run_zh.take().filter(|(w, _)| *w == word) {
+            self.clear_pend();
+            self.pred_dirty = true;
+            return Ok(self.insert_token(format!("{PUNCT_PREFIX}{word}"), Some(word), Some(zh))?.commit);
+        }
         self.insert_english(word, false)
     }
 
@@ -1350,6 +1359,7 @@ impl Engine {
     fn run_push(&mut self, c: char) -> Result<String, EngineError> {
         let commit = if self.run.len() == SHADOW_MAX { self.end_run()? } else { String::new() };
         self.run.push(c);
+        self.run_zh = None; // section 1.3i: other letters, a run's token
         Ok(commit)
     }
 
@@ -1394,12 +1404,14 @@ impl Engine {
         match k.kind {
             KeyKind::Backspace => {
                 self.run.pop();
+                self.run_zh = None;
                 self.pred_dirty = true;
                 self.run_closed()?;
                 self.handled()
             }
             KeyKind::Esc => {
                 self.run.clear();
+                self.run_zh = None;
                 self.pred_dirty = true;
                 self.run_closed()?;
                 self.handled()
@@ -1695,6 +1707,7 @@ impl Engine {
         self.path.clear();
         self.cands = None;
         self.run.clear();
+        self.run_zh = None;
         self.clear_pred();
     }
 
@@ -2101,6 +2114,16 @@ impl Engine {
                     self.pend_prev.pop().into_iter().for_each(|u| self.pend = u); // an emptied unit goes
                     if self.pend.iter().all(Option::is_none) {
                         self.clear_shadow(); // the syllable is gone
+                        // Zhen-inline section 1.3i: right behind an English token (an auto-keep's, typically) the token opens again
+                        // as a run with all its letters, so `r u s r` + Backspace + `t` is `rust`, not `rus` + ㄔ.
+                        if self.shadow_on() && self.cursor > 0 && english_of(&self.syls[self.cursor - 1]).is_some() {
+                            let at = self.cursor - 1;
+                            let f = self.fixed.iter().find(|f| f.start == at).ok_or(EngineError::Internal)?;
+                            self.run_zh = f.zh.clone().map(|zh| (f.word.clone(), zh));
+                            self.run = f.word.clone();
+                            self.cursor = at;
+                            self.remove_syllable(at)?;
+                        }
                     }
                 }
                 self.pred_dirty = true;
