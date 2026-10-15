@@ -5727,3 +5727,21 @@ formal: alpha 0.7, tau 1, delta 2
 - **實作**（PR #163）：左欄四類（一般＝鍵盤＋聊天／書面、選字、外觀、選字記憶），控制項原封不動搬過去（`git diff -w` 只有 `switch`）。每一類各量一次高度取最大值，上限是螢幕 `visibleFrame` 的高度；畫面上的 `Form` 放不下時捲動。
 - **/code-review 的修正**（12 項，11 項照改）：`NavigationSplitView` 的左欄可以收合、沒有東西能叫回來，改成固定寬度的清單；不在視窗裡量的高度每列多約 4.5 pt（審查者的量測：10 列的表單沒有視窗時 480 pt、在視窗裡 435 pt、實際畫出 438 pt），改成把量測用的 view 暫時加進視窗再量、加 4 pt 餘量；選取不會變成空；螢幕參數改變時重算；換類時從最上面開始；夾回的函式移到 ShanjieKit 並加測試。「每次重建四頁」接受，只在開窗、清單改變、螢幕改變時發生。
 - 外觀（左欄寬 160 pt、SF Symbol）是第一輪的值，沒有和「系統設定」量過；照實機回饋一輪改一處。
+
+## 2026-10-15：v0.4.4 的跨版本基準測試與保留集
+
+- 照 `docs/verification.md`：在 `tools/bench.py` 的 `VERSIONS2` 加 v0.4.4（`--context --packs acg --tinylm`，加上 `"kn": True`：model-v6 附 kn-v1，摘要行標記 `+kn:cbefbced:θ1:β1`），`tools/bench.py run --suite v2 v0.4.3 39ee205 --as v0.4.4 --private-root …`，再 `tools/bench.py table`。v0.4.4 用的模型檔已經有各自的資料 Release（model-v6、classes-v4、kn-v1、tinylm-v5）；這次直接從主 checkout 的 `data/lm` 複製進工具的模型快取，雜湊和 `data/*.sha256` 相同。工具找不到檔時提示「從 Release v0.4.4 下載」，但 v0.4.4 的 Release 只會有 App，要改從那四個資料 Release 下載（v0.4.3 那一列也一樣）。
+- 結果（`docs/benchmark.md`，v0.4.3 → v0.4.4）：錯字回報書面 +6／−0（p 0.031）；wikitune +24／−16、+32／−18（不顯著）；**lytune 聊天 +40／−85（p 7×10⁻⁵）、書面 +54／−96（p 0.0008），顯著變差**；discordtune +40／−51、+72／−86（不顯著）；其他集合持平。每鍵延遲 p95 2.21 → 2.84 ms、最大 9.76 → 7.62 ms，記憶體 289 → 294 MB。
+- 〔推論〕lytune 的退步和詞類項有關：derisk-1015 的拆解（`feat/derisk-1015` 分支的研究紀錄，還沒合併）裡，出貨的 model-v6 關掉詞類項在判讀五集（lytune 佔 88%）多對 42／51 句。那是 model-v6 上詞類開／關，不是 classes-v4 對 classes-v3；聊天設定還有一部分在重排階段（下一節）。沒有對 v0.4.3 → v0.4.4 逐列拆。
+- 保留集（fresh verifier，v0.4.3 對 39ee205，跑一次）：聊天 191 → 191（+3／−3，p 1.0），書面 189 → 186（+2／−5，p 0.45）。不是停止條件（契約 sbench-v2 §2.3：改對 < 改壞且 p < 0.05 才停）。保留集已經用過多次，數字要打折看（同日「保留集換新」）。
+- 維護者 2026-10-15「先出貨吧」：設定視窗改版（PR #163）隨這一版出。
+
+## 2026-10-15：v0.4.4 的 lytune 退步（Fable 分析、維護者決定）
+
+- 維護者看到上一節的 lytune 退步後先不推 tag，請 Fable 分析（唯讀）。重點：
+  - 〔推論，由已有的表相減〕書面的 −42 幾乎都在 n-gram 階段，而 model-v6 上關掉詞類項就回來約 +51，指向「詞類項 × model-v6」；聊天 n-gram 階段只掉約 −9（其他 v6 改動約 +30 被詞類項吃掉），另外約 −37 在重排階段（tinylm-v5 權重和 v4 相同，差在候選與 n-gram 分數）。
+  - 沒量過的：model-v5 上 lytune 的詞類開／關、model-v6 上 lytune 的 KN 開／關。詞類權重 μ＝0.8 是 2026-10-08 在 model-v3、dev302 上選的格點下緣，沒在 lytune 上量過。
+  - 最便宜的修法候選：重建 `classes.sjc` 往下掃 μ（不改核心、不重建模型），用出貨設定量；書面關 KN 目前零證據；重調 tinylm-v5 不是病灶。
+  - lytune 是正式語域，多次和聊天方向相反，判讀集裡又佔 88%；建議只擋使用者端三個集合。
+- **維護者選擇題**：「先出 v0.4.4，另開一片歸因（Fable 推薦）」。發版規則同時改成使用者端三集（保留集、錯字回報、discordtune）擋、其他集合只警示（`docs/contracts/sbench-v2.md` §2.3 修訂）；發版說明把 lytune 寫成未歸因的顯著退步。
+- 下一片（歸因）：188 上跑 v5 詞類開／關（lytune 兩種設定）、v6 `--no-kn`、μ 掃描（出貨設定、lytune＋discordtune＋cvtune＋wikitune＋dev302），結果決定 v0.4.5 要不要換 `classes.sjc`。
