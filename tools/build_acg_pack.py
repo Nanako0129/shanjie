@@ -13,7 +13,7 @@
 
 只連 zh.wikipedia.org/w/api.php 與 query.wikidata.org，依序送出、每秒不超過 1 個、帶 User-Agent 與 maxlag=5。
 讀音靠 tools/readings.py（需要萌典與小麥的破音字表，路徑見該檔），同音衝突靠評測 CLI（target/release/shanjie-eval，
-沒有就用 cargo 建，一律加 --no-kn）與 --rule-lm 的規則模型；--recheck 預設用 data/lm/bigram.sjlm。
+沒有就用 cargo 建；規則模型加 --no-kn，出貨的 data/lm 照出貨設定）與 --rule-lm 的規則模型；--recheck 預設用 data/lm/bigram.sjlm。
 """
 import argparse
 import collections
@@ -826,7 +826,9 @@ def top1(pairs, profile, packs_dir=None, lm=LM):
         rows, dump = os.path.join(d, "rows.txt"), os.path.join(d, "dump.txt")
         with open(rows, "w", encoding="utf-8") as f:
             f.writelines(f"|{w}|{' '.join(syls)}\n" for w, syls in pairs)
-        cmd = [eval_bin(), "--lm", lm, "--profile", profile, "--rows", rows, "--dump", dump, "--no-kn"]   # 釘住的模型不含 KN 側檔（模型旁有 kn.sjkn 時 CLI 會開）
+        cmd = [eval_bin(), "--lm", lm, "--profile", profile, "--rows", rows, "--dump", dump]
+        if lm != LM:   # 釘住的規則模型不含 KN 側檔，加 --no-kn 固定結果；出貨的 data/lm（--recheck）照出貨設定，旁邊有 kn.sjkn 就開（model-v6 §3.3）
+            cmd.append("--no-kn")
         if packs_dir:
             cmd += ["--packs", "acg", "--packs-dir", packs_dir]
         subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL)

@@ -585,6 +585,24 @@ class Build(unittest.TestCase):
             self.assertEqual(bad, [], prof)
 
 
+class TopOneKneserNeyTest(unittest.TestCase):
+    """model-v6 §3.3: the pinned rule model decodes with --no-kn; the shipped data/lm (--recheck) decodes like the shipped App."""
+
+    def flags(self, lm):
+        seen = []
+        def fake_run(cmd, **kw):
+            seen.append(cmd)
+            with open(cmd[cmd.index("--dump") + 1], "w", encoding="utf-8") as f:
+                f.write("1\t1\t甲\t-1.0\n")
+        with mock.patch.object(B.subprocess, "run", fake_run), mock.patch.object(B, "eval_bin", lambda: "shanjie-eval"):
+            self.assertEqual(B.top1([("甲", ["ㄐㄧㄚˇ"])], "chat", lm=lm), ["甲"])
+        return seen[0]
+
+    def test_rule_model_turns_kneser_ney_off_and_the_shipped_model_does_not(self):
+        self.assertIn("--no-kn", self.flags(B.RULE_LM_DIR + "/bigram.sjlm"))
+        self.assertNotIn("--no-kn", self.flags(B.LM))
+
+
 # ---- A3 (docs/contracts/acg-pack.md A3.5 item 7): fake HTML and a fake decoder, no network
 
 R_A3 = "ㄚ ㄎㄨˋ ㄌㄟˊ ㄊㄜˋ"          # 阿庫雷特 的讀音
