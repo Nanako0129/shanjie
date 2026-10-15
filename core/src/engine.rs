@@ -711,9 +711,10 @@ impl Engine {
     // ---- S7c-2a rerank (docs/contracts/s7c2a-core-rerank.md) ----
 
     /// Section 2.5: the small model at `path` for this engine's n-gram model. Fails (the previous model, or none, stays) when
-    /// the file cannot be read or is malformed, when no n-gram model is loaded, when the Kneser-Ney side file is on, or when the
-    /// `.sjtl` was tuned with another n-gram model (a pairing check, not an integrity check of the `.sjtl`). Leaves the rerank
-    /// switch and the display as they are.
+    /// the file cannot be read or is malformed, when no n-gram model is loaded, when the `.sjtl` was tuned with another n-gram
+    /// model, or when its recorded Kneser-Ney side file hash is not the loaded side file's (none for a file tuned without KN;
+    /// model-v6 section 2.7). A pairing check, not an integrity check of the `.sjtl`. Leaves the rerank switch and the display as
+    /// they are.
     pub fn load_tinylm(&mut self, path: &Path) -> Result<(), EngineError> {
         self.invalidate();
         let st = self.lm.as_ref().ok_or(EngineError::LoadFailed)?;
@@ -750,7 +751,7 @@ impl Engine {
     }
 
     /// The levels the loaded small model offers, as `shanjie_engine_rerank_levels` reports them (bit0 conservative, bit1 standard,
-    /// bit2 aggressive): 0 without a model, 2 for a version 1 or 2 file, 7 for a version 3 file (whatever its values or the profile).
+    /// bit2 aggressive): 0 without a model, 2 for a version 1 or 2 file, 7 for a version 3 or 4 file (whatever its values or the profile).
     pub fn rerank_levels(&self) -> u32 {
         match &self.tinylm {
             None => 0,

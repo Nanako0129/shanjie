@@ -2,7 +2,7 @@ use core::engine::{capping_overlay_detailed, load_lexicon_extra_detailed, load_l
 use core::eval::*;
 use core::learn::{context_key, SENTINEL};
 use core::lm::{decode_from, history, CappedLexicon, Demote, Lm, Profile};
-use core::tinylm::{RerankLevel, TinyLm, TinyLmError, TOPK};
+use core::tinylm::{KnPairing, RerankLevel, TinyLm, TinyLmError, TOPK};
 use core::predict::{parse_units, predict, units_of, units_str, Index, Mode};
 use core::{decode_beam, Error, Lexicon, NoLearning, Syls, BEAM_S1};
 use std::fs;
@@ -156,16 +156,24 @@ fn load_with_packs(dir: &Path, packs: u32, pdir: &Path, extra: Option<&Path>) ->
 }
 
 /// S7c-1 `--tinylm`: alpha and tau hold only for the n-gram scores they were tuned on (S7a: this model, its classes and the demotion
-/// table on, Kneser-Ney off). A different model hash, the KN side file, `--no-classes` or `--no-demote` is refused before anything
-/// is printed. The file is read, checked and paired by the engine's loader (`TinyLm::load_paired`, S7c-2a). Returns the model, the
-/// load time (read + parse + the pairing checks; the hash below is the CLI's, outside it) and the sha8 of the bytes it parsed.
+/// table on, and the Kneser-Ney side file it records, or none: model-v6 section 2.7). A different model hash, another side file
+/// state, `--no-classes` or `--no-demote` is refused before anything is printed. The file is read, checked and paired by the
+/// engine's loader (`TinyLm::load_paired`, S7c-2a). Returns the model, the load time (read + parse + the pairing checks; the hash
+/// below is the CLI's, outside it) and the sha8 of the bytes it parsed.
 fn load_tinylm(path: &str, lm: &Lm, classes: bool, demote: bool) -> Result<(TinyLm, Duration, String), String> {
     if !classes || !demote {
         return Err("--tinylm: this .sjtl was tuned with the class term and the demotion table on (drop --no-classes / --no-demote)".into());
     }
     let t0 = Instant::now();
     let (tl, bytes) = TinyLm::load_paired(Path::new(path), lm).map_err(|e| match e {
-        TinyLmError::KneserNey => format!("--tinylm: {e} (use --no-kn)"),
+        // model-v6 section 7 (P4-9): each mismatch has its own remedy; --no-kn helps only when the file was tuned without KN.
+        TinyLmError::KneserNey(KnPairing::TunedWithout) => {
+            format!("--tinylm: {e} (use --no-kn, or a .sjtl exported with --kn-side for this kn.sjkn)")
+        }
+        TinyLmError::KneserNey(KnPairing::OtherSideFile) => format!("--tinylm: {e} (put the kn.sjkn it was tuned with beside the model)"),
+        TinyLmError::KneserNey(KnPairing::TunedWith) => {
+            format!("--tinylm: {e} (put the kn.sjkn it was tuned with beside the model and drop --no-kn)")
+        }
         TinyLmError::OtherNgram => format!("--tinylm: {e}"),
         _ => e.to_string(),
     })?;
@@ -279,7 +287,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     let tl = tinylm.as_deref().map(|p| load_tinylm(p, &lm, classes, demote)).transpose()?;
     // Section 2.3: a version 1 or 2 file has only the standard set; another level would silently measure the standard one.
     if level != RerankLevel::Standard && tl.as_ref().is_some_and(|(m, _, _)| !m.has_levels()) {
-        eprintln!("error: --rerank-level: this .sjtl (version 1 or 2) has only the standard set; use a version 3 file or --rerank-level standard");
+        eprintln!("error: --rerank-level: this .sjtl (version 1 or 2) has only the standard set; use a version 3 or 4 file or --rerank-level standard");
         std::process::exit(2);
     }
     let rss_after = tinylm.is_some().then(rss_kb).flatten();

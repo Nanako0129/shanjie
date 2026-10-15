@@ -75,8 +75,9 @@ def merge_variants(uni, bi, cls):
     return uni, bi
 
 
-def merged_counts(cls=None):
-    """計數階段（加權、四捨五入、去 0、異體合併）。回傳 (uni, bi, cls)；build() 與 tools/kn_cont.py 共用。"""
+def merged_counts(cls=None, extra_overlay=None):
+    """計數階段（加權、四捨五入、去 0、異體合併）。回傳 (uni, bi, cls)；build() 與 tools/kn_cont.py 共用。
+    extra_overlay（`--extra-overlay FILE`，預設關）：算異體類時接在 ime.OVERLAYS 之後的疊加層檔；cls 已給時不讀。"""
     uni, bi = {}, {}
     for name, w in CORPORA:
         c = pickle.load(open(os.path.join(WORK, name), "rb"))
@@ -91,14 +92,14 @@ def merged_counts(cls=None):
         sys.path.insert(0, os.path.join(ROOT, "reference", "proto"))
         sys.path.insert(0, os.path.join(ROOT, "experiments", "s2"))
         import ime
-        lex = ime.Lexicon(os.path.join(LEXDIR, "mcbpmf-data.txt"), overlay=ime.OVERLAYS)
+        lex = ime.Lexicon(os.path.join(LEXDIR, "mcbpmf-data.txt"), overlay=ime.overlays(extra_overlay))
         cls = variant_classes(lex.by_reading)
     uni, bi = merge_variants(uni, bi, cls)
     return uni, bi, cls
 
 
-def build(cls=None):
-    uni, bi, cls = merged_counts(cls)
+def build(cls=None, extra_overlay=None):
+    uni, bi, cls = merged_counts(cls, extra_overlay)
     words = sorted(uni, key=lambda s: s.encode("utf-8"))
     vocab = ["<s>", "</s>"] + words
     ids = {w: i for i, w in enumerate(vocab)}
@@ -138,8 +139,9 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", default=os.path.join(ROOT, "data", "lm", "bigram.sjlm"))
     ap.add_argument("--check", action="store_true", help="重建並和現有檔比對 SHA-256，不寫檔")
+    ap.add_argument("--extra-overlay", help="接在 ime.OVERLAYS 之後的疊加層檔（model-v6 §7 P3-4，預設關），影響異體類")
     a = ap.parse_args()
-    data, V, C, E = build()
+    data, V, C, E = build(extra_overlay=a.extra_overlay)
     sha = hashlib.sha256(data).hexdigest()
     print(f"V={V} contexts={C} entries={E} bytes={len(data)} sha256={sha}")
     if a.check:

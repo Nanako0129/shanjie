@@ -6,6 +6,7 @@ a fake API, a fake reading tool and a fake decoder; one test runs the real evalu
 import contextlib
 import hashlib
 import json
+import math
 import os
 import subprocess
 import sys
@@ -392,6 +393,15 @@ class Build(unittest.TestCase):
 
     def test_committed_names_add_shares_no_word_with_the_four_files(self):
         B.check_committed()          # the files in the repo
+
+    def test_committed_names_add_scores_are_finite_and_syllables_match_characters(self):
+        """model-v6 P4-12: a NaN or inf score, or a reading whose syllable count differs from the character count, would load into the lexicon."""
+        rows = [l.rstrip("\n").split("\t") for l in open(os.path.join(B.LEX, "names-add.tsv"), encoding="utf-8")]
+        self.assertGreater(len(rows), 1000)
+        self.assertEqual({len(r) for r in rows}, {4})
+        bad_score = [r for r in rows if not math.isfinite(float(r[2]))]
+        bad_len = [r for r in rows if len(r[0].split("-")) != len(r[1])]
+        self.assertEqual((bad_score, bad_len), ([], []))
 
     def test_committed_check_fails_when_acg_add_gains_a_names_word(self):
         d = tempfile.mkdtemp()

@@ -15,7 +15,7 @@
 總長 = 8 + 32 + 4 + 8 + 4 + 10V + 8(K+3)^2。算法與 experiments/s2-classes/classlm.py 的 ClassLM._load 相同。
 
 對應：classlm.py 依字串查類別，這裡依模型詞 id；有類別但沒有模型 id 的詞（含其中詞庫產得出的）只記錄數目，不套類別項（契約 §4.1）。
-用法：python3 tools/build_classes.py [--edges edges.npz] [--cls cls-40000-512.npz] [--lm data/lm/bigram.sjlm] [--out data/lm/classes.sjc]
+用法：python3 tools/build_classes.py [--edges edges.npz] [--cls cls-40000-512.npz] [--lm data/lm/bigram.sjlm] [--out data/lm/classes.sjc] [--extra-overlay FILE]
 """
 import argparse
 import hashlib
@@ -77,8 +77,9 @@ def main():
     ap.add_argument("--cls", default=os.path.join(WORK, "cls-40000-512.npz"))
     ap.add_argument("--lm", default=os.path.join(ROOT, "data", "lm", "bigram.sjlm"))
     ap.add_argument("--out", default=os.path.join(ROOT, "data", "lm", "classes.sjc"))
+    ap.add_argument("--extra-overlay", help="接在 ime.OVERLAYS 之後的疊加層檔（model-v6 §7 P3-4，預設關），其詞算進產得出的詞")
     a = ap.parse_args()
-    lex = ime.Lexicon(os.path.join(ROOT, "data", "lexicon", "mcbpmf-data.txt"), overlay=ime.OVERLAYS)
+    lex = ime.Lexicon(os.path.join(ROOT, "data", "lexicon", "mcbpmf-data.txt"), overlay=ime.overlays(a.extra_overlay))
     blob, info = build(a.edges, a.cls, a.lm, set(lex.by_word))
     print(info, f"bytes={len(blob)} sha256={hashlib.sha256(blob).hexdigest()}")
     with open(a.out + ".tmp", "wb") as f:

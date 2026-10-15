@@ -8,9 +8,10 @@
 --kn FILE [--kn-beta β]：Kneser-Ney 回退分布的側檔（tools/kn_cont.py）。SJKN0002 的 β 取自檔頭，--kn-beta 可不給（給了和檔頭不同就報錯）；
   舊的 SJKN0001 一定要給 --kn-beta。不論哪種格式都傳 kn_classes（build_lm.variant_classes），讓 lm.py 用 kn_total 重算 ΣN′ 和檔頭比對。
   摘要行的 profile 欄最後加 +kn:<側檔 SHA-256 前 8 碼>:θ<θ>:β<β>（Rust CLI 同格式）。
+--extra-overlay FILE：接在 ime.OVERLAYS 之後的疊加層檔，也併進封頂詞集合（預設關；Rust CLI 同名參數）；摘要行最後加 +xo:<檔案 SHA-256 前 8 碼>。
 --rowstats FILE：每列一行 `列號\\t對錯\\t錯字數\\t正解字數`（只有數字，見 docs/contracts/eval-stats.md）。
 --dump FILE：每列寫 `列號\\t名次\\tsurface\\t分數(repr)`，前 64 名，給逐分數比對（容許 1e-9 的浮點誤差）。
-用法：python3 reference/proto/lm_eval.py --lm data/lm/bigram.sjlm --profile chat|formal --rows <檔> [--limit N] [--name 名稱] [--dump FILE] [--context] [--no-demote] [--no-classes] [--kn FILE [--kn-beta β]]
+用法：python3 reference/proto/lm_eval.py --lm data/lm/bigram.sjlm --profile chat|formal --rows <檔> [--limit N] [--name 名稱] [--dump FILE] [--context] [--no-demote] [--no-classes] [--kn FILE [--kn-beta β]] [--extra-overlay FILE]
   評測檔格式 `前文|句子|讀音`；dev 集要先依檔名排序串接（和 CLI 相同），可用 --dev 302 直接取開發集前 N 列。
 """
 import argparse
@@ -49,6 +50,16 @@ def kn_tag(path, beta):
     return f"+kn:{hashlib.sha256(b).hexdigest()[:8]}:θ{struct.unpack_from('<I', b, 44)[0]}:β{beta:g}"
 
 
+def xo_tag(path):
+    """--extra-overlay 的摘要行標籤 `+xo:<檔案內容 SHA-256 前 8 碼>`，放在最後（cli/src/main.rs 的 xo 同格式、同位置）；沒給時是空字串。"""
+    return f"+xo:{hashlib.sha256(open(path, 'rb').read()).hexdigest()[:8]}" if path else ""
+
+
+def overlay_words(overlay_add, extra=None):
+    """封頂用的疊加層詞集合：overlay-add.tsv 的詞，加上 --extra-overlay 檔的詞（Rust 的 capping_overlay_detailed 加上 extra 的列）。"""
+    return {l.split("\t")[1] for p in (overlay_add, extra) if p for l in open(p, encoding="utf-8")}
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--lm", default=os.path.join(ROOT, "data", "lm", "bigram.sjlm"))
@@ -56,6 +67,7 @@ def main():
     ap.add_argument("--rows"); ap.add_argument("--dev", type=int); ap.add_argument("--limit", type=int)
     ap.add_argument("--name"); ap.add_argument("--dump"); ap.add_argument("--rowstats"); ap.add_argument("--context", action="store_true"); ap.add_argument("--no-demote", action="store_true"); ap.add_argument("--no-classes", action="store_true")
     ap.add_argument("--kn"); ap.add_argument("--kn-beta", type=float)
+    ap.add_argument("--extra-overlay")
     a = ap.parse_args()
     if a.dev:
         rows = rows_of(sorted(glob.glob(os.path.join(ROOT, "eval", "dev", "*.txt"))))[:a.dev]
@@ -66,13 +78,13 @@ def main():
     if not a.kn and a.kn_beta is not None:   # 空字串（未設定的變數）也算沒給
         ap.error("--kn-beta needs --kn")
     base = ime.Lexicon(os.path.join(ROOT, "data", "lexicon", "mcbpmf-data.txt"),
-                       overlay=ime.OVERLAYS)
+                       overlay=ime.overlays(a.extra_overlay))
     kw = {}
     if a.kn:
         import build_lm  # tools/，variant_classes 與 build_lm.build 同一套（kn-smoothing.md §2.2）
         kw = dict(kn=a.kn, kn_beta=a.kn_beta, kn_classes=build_lm.variant_classes(base.by_reading))
     lm = L.BigramLM(a.lm, classes=not a.no_classes, **kw)
-    ov = {l.split("\t")[1] for l in open(os.path.join(ROOT, "data", "lexicon", "overlay-add.tsv"), encoding="utf-8")}
+    ov = overlay_words(os.path.join(ROOT, "data", "lexicon", "overlay-add.tsv"), a.extra_overlay)
     lex = L.cap_overlay(base, ov, lm)
     top1, o64, firsts, rs = 0, 0, [], []
     dump = open(a.dump, "w", encoding="utf-8") if a.dump else None
@@ -93,7 +105,7 @@ def main():
         with rsf:
             rsf.write(format_rowstats(rs))
     sha = hashlib.sha256("\n".join(firsts).encode("utf-8")).hexdigest()
-    print(f"## {name}  lm-{a.profile}{'+ctx' if a.context else ''}{'-nodemote' if a.no_demote else ''}{'-noclasses' if a.no_classes else ''}{kn_tag(a.kn, lm.kn[0]) if a.kn else ''}  {{'n': {len(rows)}, 'top1': {top1}, 'oracle@64': {o64}, 'top1_sha256': '{sha}'}}")
+    print(f"## {name}  lm-{a.profile}{'+ctx' if a.context else ''}{'-nodemote' if a.no_demote else ''}{'-noclasses' if a.no_classes else ''}{kn_tag(a.kn, lm.kn[0]) if a.kn else ''}{xo_tag(a.extra_overlay)}  {{'n': {len(rows)}, 'top1': {top1}, 'oracle@64': {o64}, 'top1_sha256': '{sha}'}}")
 
 
 if __name__ == "__main__":
