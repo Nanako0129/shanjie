@@ -100,6 +100,12 @@ class SetNamesTest(unittest.TestCase):
     def test_order_is_the_contract_order(self):
         self.assertEqual(setnames.ORDER, ["cvtune", "wikitune", "dev302", "typing76", "user-reported", "lytune", "wikitypo"])
 
+    def test_e4_order_appends_the_e4ctx_sets_after_the_judging_sets(self):
+        self.assertEqual(setnames.E4_ORDER, setnames.ORDER + ["e4ctx-punct", "e4ctx-alnum"])
+        path, pin = setnames.location("e4ctx-alnum")
+        self.assertTrue(path.endswith("e4ctx-alnum.txt"))
+        self.assertIsNone(pin)
+
     def test_locations_come_from_bench_and_user_reported_is_unpinned(self):
         for n in setnames.ORDER:
             path, pin = setnames.location(n)

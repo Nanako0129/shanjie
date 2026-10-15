@@ -1,13 +1,13 @@
 """E4 subset report (docs/contracts/derisk-1015.md section 3, E4, "report only"): the rows whose left context holds mid-sentence
 punctuation, a digit or English (the user-reported rows 112/113 type), as 1-based row-index lists; plus a check of the sentence field.
 
-  python3 subset.py --out-dir DIR [--sets NAME ...]        # default: every set of setnames.ORDER (all must exist)
+  python3 subset.py --out-dir DIR [--sets NAME ...]        # default: every set of setnames.E4_ORDER, the seven sets then e4ctx-punct, e4ctx-alnum (all must exist)
   python3 subset.py --out-dir DIR --rows FILE --name NAME  # one file
 
 Writes, per set, DIR/<name>.any.idx (the context contains a MID character, a digit or a letter anywhere) and DIR/<name>.changed.idx
 (the context key differs between lm.context_key and context_key_mid: the rows the E4 (a) change can touch). Also
 DIR/concat.any.idx and DIR/concat.changed.idx: the same rows numbered over the concatenation of the given sets in the order given
-(use setnames.ORDER, as for the rowstats), for `concat_rowstats.py select`. Prints a count table (numbers only; no row text), and
+(use setnames.E4_ORDER, as for the rowstats), for `concat_rowstats.py select`. Prints a count table (numbers only; no row text), and
 for each set the number of rows whose SENTENCE field holds anything but Han characters (decoding such a row is impossible, the
 reading column has syllables only; the table makes the check visible).
 """
@@ -72,7 +72,7 @@ def main():
     if a.rows:
         sets = [(a.name or ap.error("--rows needs --name"), a.rows)]
     else:
-        sets = [(n, setnames.location(n)[0]) for n in (a.sets or setnames.ORDER)]
+        sets = [(n, setnames.location(n)[0]) for n in (a.sets or setnames.E4_ORDER)]
         missing = [n for n, p in sets if not os.path.exists(p)]
         if missing:   # a skipped set would shift every later index of the concatenation
             ap.error(f"set file missing: {' '.join(missing)}")
