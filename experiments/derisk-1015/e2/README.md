@@ -120,11 +120,11 @@ python judge_e2.py compare --base $J/ctl --cand $J/new --work $J/tables
 
 印出的第一列 `MAIN chat discordtune+five`：聊天設定、判讀五集加 discordtune 串接，`evalstats compare --net` 一行；**通過＝改對 > 改壞且精確 McNemar p < 0.05**。接著三列守門：`GUARD formal five`（書面判讀五集串接）、`GUARD lytune chat`、`GUARD lytune formal`，**通過＝不是（改壞 > 改對 且 p < 0.05）**。其後的 `report …` 列（聊天五集不含 discordtune、每個集合單獨、選值集 chatclause／cvtune／wikitune）只報不判。判讀不事後改門檻（契約 §4）。
 
-對照臂對出貨的 tinylm-v5（Rust dump 的分數）另報一行，只報不判：把 Rust CLI 的 `--tinylm-scores` 輸出放成 `$S/v5/v5.<設定>.<集合>.jsonl`，用出貨值各跑一次 `judge.py --fixed`（值取自 `docs/contracts/rerank-strength.md`：聊天 0.3 2 0.25、書面 0.7 1 2；寫進研究紀錄前再核對一次），同一個 `--out`：
+對照臂對出貨的 tinylm-v5（Rust dump 的分數）另報一行，只報不判：把 Rust CLI 的 `--tinylm-scores` 輸出放成 `$S/v5/v5.<設定>.<集合>.jsonl`，用出貨值各跑一次 `judge.py --fixed`（tinylm-v5 的出貨標準值，研究紀錄 2026-10-15「tinylm-v5 的選值」：聊天 0.3 2 0.25、書面 1 1 3；書面不是 rerank-strength 的 0.7 1 2，那是 tinylm-v4 的值），同一個 `--out`：
 
 ```sh
 python ../../e2-chateval/judge.py --scores $S/v5 --sets <同上聊天集合> --setting chat   --model v5 --out $J/v5 --fixed STD 0.3 2 0.25
-python ../../e2-chateval/judge.py --scores $S/v5 --sets <同上書面集合> --setting formal --model v5 --out $J/v5 --fixed STD 0.7 1 2
+python ../../e2-chateval/judge.py --scores $S/v5 --sets <同上書面集合> --setting formal --model v5 --out $J/v5 --fixed STD 1 1 3
 python judge_e2.py compare --base $J/v5 --cand $J/ctl --work $J/tables-v5      # 只看 MAIN 那列，差異反映後端（Rust 對 torch）與選值的不同
 ```
 
