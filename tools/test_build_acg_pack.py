@@ -26,7 +26,7 @@ def lexicon_words():
         f = l.split()
         if len(f) == 3 and l[0] not in "#_":
             words.add(f[1])
-    for f in ("overlay-add.tsv", "sandhi-add.tsv"):
+    for f in ("overlay-add.tsv", "sandhi-add.tsv", "names-add.tsv"):
         words |= second_column(os.path.join(B.LEX, f))
     return words
 
@@ -185,6 +185,16 @@ class Rules(unittest.TestCase):
         open(bad, "w", encoding="utf-8").write("作品\t碇系\tEVA\tincluded\t動畫\n")
         with self.assertRaises(SystemExit):
             B.read_groups(bad)
+
+
+class LexiconWords(unittest.TestCase):
+    def test_names_layer_words_count_as_already_in_the_lexicon(self):
+        """names-add.tsv is always on and loads before the packs: a pack row with a names word would duplicate it."""
+        names = second_column(os.path.join(B.LEX, "names-add.tsv"))
+        self.assertTrue(names)
+        self.assertLessEqual(names, B.lexicon_words())
+        w = sorted(names)[0]
+        self.assertEqual(B.dedupe([w, "碇源堂"], B.lexicon_words()), ["碇源堂"])
 
 
 class Dedupe(unittest.TestCase):
@@ -586,7 +596,7 @@ class Build(unittest.TestCase):
 
 
 class TopOneKneserNeyTest(unittest.TestCase):
-    """model-v6 §3.3: the pinned rule model decodes with --no-kn; the shipped data/lm (--recheck) decodes like the shipped App."""
+    """model-v6 §3.3: the pinned rule model decodes with --no-kn and --no-names; the shipped data/lm (--recheck) decodes like the shipped App."""
 
     def flags(self, lm):
         seen = []
@@ -598,9 +608,13 @@ class TopOneKneserNeyTest(unittest.TestCase):
             self.assertEqual(B.top1([("甲", ["ㄐㄧㄚˇ"])], "chat", lm=lm), ["甲"])
         return seen[0]
 
-    def test_rule_model_turns_kneser_ney_off_and_the_shipped_model_does_not(self):
-        self.assertIn("--no-kn", self.flags(B.RULE_LM_DIR + "/bigram.sjlm"))
-        self.assertNotIn("--no-kn", self.flags(B.LM))
+    def test_rule_model_turns_kneser_ney_and_names_off_and_the_shipped_model_does_not(self):
+        rule = self.flags(B.RULE_LM_DIR + "/bigram.sjlm")
+        self.assertIn("--no-kn", rule)
+        self.assertIn("--no-names", rule)
+        shipped = self.flags(B.LM)
+        self.assertNotIn("--no-kn", shipped)
+        self.assertNotIn("--no-names", shipped)
 
 
 # ---- A3 (docs/contracts/acg-pack.md A3.5 item 7): fake HTML and a fake decoder, no network

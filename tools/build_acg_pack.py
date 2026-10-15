@@ -715,15 +715,15 @@ def base_lexicon():
 
 @functools.lru_cache(maxsize=1)
 def lexicon_words():
-    """基底、overlay-add.tsv、sandhi-add.tsv 的詞（任何讀音下）。"""
+    """基底、overlay-add.tsv、sandhi-add.tsv、names-add.tsv（名單層，常開、先於詞包載入）的詞（任何讀音下）。"""
     have = set(base_lexicon().by_word)
-    for f in ("overlay-add.tsv", "sandhi-add.tsv"):
+    for f in ("overlay-add.tsv", "sandhi-add.tsv", "names-add.tsv"):
         have |= {l.split("\t")[1] for l in open(os.path.join(LEX, f), encoding="utf-8")}
     return frozenset(have)
 
 
 def dedupe(words, have):
-    """任何來源的詞只要字串已在基底、overlay-add.tsv 或 sandhi-add.tsv（任何讀音下）就丟掉。"""
+    """任何來源的詞只要字串已在基底、overlay-add.tsv、sandhi-add.tsv 或 names-add.tsv（任何讀音下）就丟掉。"""
     return sorted(set(words) - have)
 
 
@@ -827,8 +827,8 @@ def top1(pairs, profile, packs_dir=None, lm=LM):
         with open(rows, "w", encoding="utf-8") as f:
             f.writelines(f"|{w}|{' '.join(syls)}\n" for w, syls in pairs)
         cmd = [eval_bin(), "--lm", lm, "--profile", profile, "--rows", rows, "--dump", dump]
-        if lm != LM:   # 釘住的規則模型不含 KN 側檔，加 --no-kn 固定結果；出貨的 data/lm（--recheck）照出貨設定，旁邊有 kn.sjkn 就開（model-v6 §3.3）
-            cmd.append("--no-kn")
+        if lm != LM:   # 釘住的規則模型不含 KN 側檔、名單層也不在它的詞庫裡，加 --no-kn --no-names 固定結果；出貨的 data/lm（--recheck）照出貨設定：旁邊有 kn.sjkn 就開、名單層常開（model-v6 §3.3）
+            cmd += ["--no-kn", "--no-names"]
         if packs_dir:
             cmd += ["--packs", "acg", "--packs-dir", packs_dir]
         subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL)
