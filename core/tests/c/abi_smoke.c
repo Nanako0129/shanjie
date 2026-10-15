@@ -77,13 +77,13 @@ static int run(const char *dir, uint32_t layout, const char *nihao, const char *
  *   ㄔㄨˊ ㄈㄤˊ ㄒㄧㄣ ㄓㄨㄤ ㄌㄜ˙ ㄧ ㄍㄜ˙ ㄌㄩˋ ㄕㄨㄟˇ ㄏㄨˊ
  * standard keys `tj6z;6vup_5j;_xk7u_ek7xm4gjo3cj6` (_ = space bar). Expected top-1:
  *   no LM (unigram)  廚房新莊了一個率水壺
- *   chat             廚房新裝了一個綠水壺
+ *   chat             廚房新裝了一個率水壺 (綠水壺 before classes-v5)
  *   formal           廚房新裝了一個濾水壺
  * (chat / formal from eval/golden/s2-lm-dev302-top1.tsv row 284, i.e. lm_eval.py --dump; unigram is what
  * an engine without LM commits, checked by 302 below.) */
 #define ROW284 "tj6z;6vup 5j; xk7u ek7xm4gjo3cj6"
 #define UNIGRAM "\xe5\xbb\x9a\xe6\x88\xbf\xe6\x96\xb0\xe8\x8e\x8a\xe4\xba\x86\xe4\xb8\x80\xe5\x80\x8b\xe7\x8e\x87\xe6\xb0\xb4\xe5\xa3\xba"
-#define CHAT "\xe5\xbb\x9a\xe6\x88\xbf\xe6\x96\xb0\xe8\xa3\x9d\xe4\xba\x86\xe4\xb8\x80\xe5\x80\x8b\xe7\xb6\xa0\xe6\xb0\xb4\xe5\xa3\xba"
+#define CHAT "\xe5\xbb\x9a\xe6\x88\xbf\xe6\x96\xb0\xe8\xa3\x9d\xe4\xba\x86\xe4\xb8\x80\xe5\x80\x8b\xe7\x8e\x87\xe6\xb0\xb4\xe5\xa3\xba"
 #define FORMAL "\xe5\xbb\x9a\xe6\x88\xbf\xe6\x96\xb0\xe8\xa3\x9d\xe4\xba\x86\xe4\xb8\x80\xe5\x80\x8b\xe6\xbf\xbe\xe6\xb0\xb4\xe5\xa3\xba"
 
 /* Press Enter; 1 when it is handled and commits `want` with an empty preedit. */
