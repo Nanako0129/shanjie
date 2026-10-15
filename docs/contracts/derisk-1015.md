@@ -22,7 +22,7 @@
   - 排序與理由記在研究紀錄同日一節。
 - 體積：
   - model-v6 的模型檔：`bigram.sjlm` 83,445,569 bytes、`tinylm.sjtl` 14,638,352、`classes.sjc` 5,656,826、`kn.sjkn` 1,414,052。
-  - v0.4.3 的安裝 zip 是 52,198,049 bytes。
+  - v0.4.3 的 App zip（`shanjie-0.4.3.zip`）是 52,198,049 bytes。
   - SJLM 的每個 bigram 條目是 `next_id u32 + count u32`，8 bytes、未壓縮。
   - Discord 上有人提議參考壓縮的做法，所以壓縮列為 E1c。
 - 原本建議的「功能字分類器」改成 E4，理由：
@@ -69,7 +69,7 @@
 
 **E1a 計數**
 
-- Colab G4（177 GB 記憶體、48 執行緒）照 model-v6 的配方與輸入（`experiments/model-v6/README.md` 步驟 1）：同一份斷詞詞彙、`--expected`、口語 ×5，**維基 20 萬篇全量**加口語，多算一張 trigram 表。
+- Colab G4（48 執行緒）照 model-v6 的配方與輸入（`experiments/model-v6/README.md` 步驟 1）：同一份斷詞詞彙、`--expected`、口語 ×5，**維基 20 萬篇全量**加口語，多算一張 trigram 表。
 - 計數程式加 trigram 的部分寫在 `experiments/derisk-1015/`，不改 `experiments/s2/` 既有程式的預設行為。
 - 同一次計數輸出兩份：
   - 未對應版：給 E1 與 E4 (b) 的對照。
@@ -181,6 +181,32 @@
   - 兩者都過 → 寫核心契約（s3e 的前文規則與計數）。
   - 沒過 → 記錄；數字前文的錯字列改由錯字回報追蹤。
 - 另外報一個子集合：前文含句中標點、數字或英文的列，也就是錯字回報第 112、113 列那一型。只報，不判。
+- **修訂一（2026-10-15，實作後發現；維護者選擇題「另建跨逗號的公開評測集」）**：
+  - 起因：評測列的句子欄只有漢字，前文也幾乎都是乾淨的漢字。所有集合裡 (a) 能改到前文的只有錯字回報 12 列，discordtune 4,958 列是 0 列（`experiments/derisk-1015/e4/subset.py`）。照上面的主判讀，要 7:0 這種結果才判得出來，等於沒有檢定力。
+  - 加一個公開評測集 **e4ctx**，產生方式如下。
+    - **選哪些文字**：和 `experiments/s2/build_tune.py` 用同一組鍵。
+      - cvtune 取 `is_tune(raw)` 為真的行（判斷時用未轉換的原文）。
+      - wikitune 取 `bc.articles(305_000)` 裡序號 300,000–304,999 的條目。
+    - **文字處理**：完全照 `build_tune.py` 在取 `HAN` 之前的步驟。保留標點、數字、英文。
+      - cv：`bc.convert(raw)`。
+      - wiki：`TEMPLATE` 三次 → `MARKUP` → `bc.SENT` 切分 → `bc.convert`。
+      - 一個 `SENT` 的匹配算一個「原始句子」。
+    - **怎麼切成一列**：句子裡出現句中標點，或出現一段數字或英文、而且後面接漢字時：
+      - 前文＝那個標點、數字或英文之前的文字，加上它本身。
+      - 句子＝後面接著的那一段漢字。
+      - 「句中標點」就是 `experiments/derisk-1015/e4/punct_ctx.py` 的 `MID`；「數字或英文」就是 `experiments/derisk-1015/e4/subset.py` 的 `WORDLIKE` 字元類別。
+      - 句子 2–25 字，讀音照 `tools/readings.py`；CHECK 列與拼不出的列丟掉。
+    - **兩個子集**：`e4ctx-punct`（前文以 `MID` 字元結尾）與 `e4ctx-alnum`（前文以 `WORDLIKE` 字元結尾）。
+      - 每個子集、每個來源最多 1,500 列，固定種子 20261015。
+      - 每個原始句子最多取 1 列。
+    - **程式與測試**：產生程式放在 `experiments/derisk-1015/e4/`。單元測試從上面兩個模組 import `MID` 與 `WORDLIKE`，不自己重新定義。測試要斷言：
+      - 同一個種子產生同一份；
+      - punct 子集的前文結尾是 `MID` 字元，alnum 子集的前文結尾是 `WORDLIKE` 字元；
+      - 句子只有漢字。
+    - 輸出放在 repo 外的快取，雜湊記進 README。
+  - E4 只比兩種解碼或兩種計數，沒有選值，所以用調參集的原始句子不會污染判讀。
+  - 判讀改成：主判讀的串接**加上** e4ctx（`e4ctx-punct` 再接 `e4ctx-alnum`，接在判讀五集後面）。McNemar 只算兩臂結果不同的列，所以沒受影響的列不會稀釋結果。門檻（a = 0.025）與守門格不變；e4ctx 兩個子集各自也是守門格。
+  - (b) 的對照臂與新臂一樣在 e4ctx 上跑（B0、B0m），不另寫規則。
 
 ### E5 英文按鍵序列統計（`feat/zhen-inline` 合併之後才開始）
 
@@ -255,7 +281,7 @@
 - 保留集換新：Fable 估計保留集至少已經用了 7 次。和這片並行另寫契約，E2 的正式那一片開之前一定要做完。
 - P1a 式的功能字分類器：已觸發停止規則。
 - 用資料估的通道模型：Fable 判斷沒有資料來源（研究紀錄 2026-10-15）。
-- kn-rerun 契約裡的 tinylm 四臂與 `--no-classes` 對照：E1 只做 n-gram 的 λ×β。
+- PLAN「Kneser–Ney 平滑重開」一項（還沒寫契約）裡的 tinylm 四臂與 `--no-classes` 對照：E1 只做 n-gram 的 λ×β。
 
 ## 7. 負責人
 

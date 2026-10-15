@@ -66,55 +66,58 @@ def check_inputs(paths):
 
 # ------------------------------------------------------------------ the text functions (tests compare them with build_counts)
 def wiki_runs(raw, conv):
-    """One wiki article's Han runs, in count_batch's order (the --mw branch is not used: model-v5 counts were made without it)."""
-    t = raw.replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&").replace("&quot;", '"')
-    for _ in range(3):
-        t = bc.TEMPLATE.sub("", t)
-    for pat, rep in bc.MARKUP:
-        t = pat.sub(rep, t)
-    for s in bc.SENT.findall(t):
-        for run in bc.HAN.findall(bc.convert(s, *conv)):
-            if len(run) >= 2:
-                yield run
-
-
-def text_runs(line, conv):
-    """One colloquial line's Han runs (build_counts_text.main's loop)."""
-    for run in bc.HAN.findall(bc.convert(line, *conv)):
+    """One wiki article's Han runs, in count_batch's order (the --mw branch is not used: model-v5 counts were made without it).
+    The pipeline is build_counts.article_runs, the one copy the counting scripts and holdout_guard share."""
+    for run in bc.article_runs(raw, conv):
         if len(run) >= 2:
             yield run
 
 
-_CONV = None
+def text_runs(line, conv):
+    """One colloquial line's Han runs (build_counts_text.main's loop)."""
+    for run in bc.text_runs(line, conv):
+        if len(run) >= 2:
+            yield run
 
 
-def _init():
-    global _CONV
-    _CONV = bc.load_conv()
+_CONV = _GUARD = None
+
+
+def _init(guard=None):
+    global _CONV, _GUARD
+    _CONV, _GUARD = bc.load_conv(), guard
 
 
 def _work(args):
     kind, items = args
     f = wiki_runs if kind == "wiki" else text_runs
-    runs = [r for x in items for r in f(x, _CONV)]
+    runs, skipped = [], 0
+    for x in items:
+        for r in f(x, _CONV):
+            if _GUARD is not None and _GUARD.any(bc.fold(r)):   # --holdout-guard: held-out sentence inside the run, not part of the training text
+                skipped += 1
+                continue
+            runs.append(r)
     text = "\n".join(runs)
-    return text, collections.Counter(text.replace("\n", "")), len(runs)
+    return text, collections.Counter(text.replace("\n", "")), len(runs), skipped
 
 
 def cmd_runs(a):
     paths = {"wiki": bc.DUMP, "colloquial-train.txt": a.coll, "synth.txt": a.synth,
              "TWVariants.txt": os.path.join(bc.SRC, "opencc", "TWVariants.txt"), "STCharacters.txt": os.path.join(bc.SRC, "opencc", "STCharacters.txt")}
     hashes = check_inputs(paths)
+    guard = bc.guard_matcher(a.holdout_guard)
     os.makedirs(a.work, exist_ok=True)
+    skipped_runs = 0
     total, report = collections.Counter(), {"input_sha256": hashes, "articles": a.articles}
-    with mp.Pool(a.procs, initializer=_init) as pool:
+    with mp.Pool(a.procs, initializer=_init, initargs=(guard,)) as pool:
         # wiki: imap (ordered), so the training text is the same on every run
         n_runs = n_chars = 0
         with open(os.path.join(a.work, "runs-wiki.txt"), "w", encoding="utf-8", newline="\n") as out:
-            for i, (text, cnt, n) in enumerate(pool.imap(_work, (("wiki", b) for b in bc.batches(bc.articles(a.articles)))), 1):
+            for i, (text, cnt, n, sk) in enumerate(pool.imap(_work, (("wiki", b) for b in bc.batches(bc.articles(a.articles)))), 1):
                 if n:
                     out.write(text + "\n")
-                total.update(cnt); n_runs += n; n_chars += sum(cnt.values())
+                total.update(cnt); n_runs += n; n_chars += sum(cnt.values()); skipped_runs += sk
                 if i % 50 == 0:
                     print(f"~{i * 200} articles, {n_runs} runs, {n_chars} chars", flush=True)
         report["wiki"] = {"runs": n_runs, "chars": n_chars}
@@ -122,13 +125,15 @@ def cmd_runs(a):
         with open(os.path.join(a.work, "runs-coll.txt"), "w", encoding="utf-8", newline="\n") as out:
             for name, p in (("colloquial-train.txt", a.coll), ("synth.txt", a.synth)):
                 r = c = 0
-                for text, cnt, n in pool.imap(_work, (("text", b) for b in bc.batches(bct.lines(p), 2000))):
+                for text, cnt, n, sk in pool.imap(_work, (("text", b) for b in bc.batches(bct.lines(p), 2000))):
                     if n:
                         out.write(text + "\n")
-                    total.update(cnt); r += n; c += sum(cnt.values())
+                    total.update(cnt); r += n; c += sum(cnt.values()); skipped_runs += sk
                 report[name] = {"runs": r, "chars": c}
                 n_runs += r; n_chars += c
         report["coll"] = {"runs": n_runs, "chars": n_chars}
+    if guard is not None:
+        report["holdout_guard_skipped_runs"] = skipped_runs
     report["train_chars_once"] = report["wiki"]["chars"] + report["coll"]["chars"]
     report["train_chars_weighted"] = WIKI_WEIGHT * report["wiki"]["chars"] + COLL_WEIGHT * report["coll"]["chars"]
     json.dump({"report": report, "charcount": dict(total)}, open(os.path.join(a.work, "charcount.json"), "w", encoding="utf-8"), ensure_ascii=False)
@@ -181,29 +186,34 @@ def cmd_encode(a):
     print(json.dumps(rep, indent=1))
 
 
-def encode_extra(src, work, name, conv):
+def encode_extra(src, work, name, conv, guard=None):
     """`text`: src -> DIR/runs-<name>.txt -> DIR/ids-<name>.npy with DIR/vocab.txt. Returns the report dict."""
     if name in ("wiki", "coll"):
         die(f"--name {name} would overwrite the S7a training ids")
     lut = make_lut(load_vocab(work))
     runs_path, ids_path = os.path.join(work, f"runs-{name}.txt"), os.path.join(work, f"ids-{name}.npy")
-    n_lines = 0
+    n_lines = skipped = 0
     with open(src, encoding="utf-8", newline="\n") as f, open(runs_path, "w", encoding="utf-8", newline="\n") as out:
         for line in f:
             n_lines += 1
             for run in text_runs(line.rstrip("\n"), conv):
+                if guard is not None and guard.any(bc.fold(run)):
+                    skipped += 1
+                    continue
                 out.write(run + "\n")
     ids = encode_file(runs_path, lut)
     np.save(ids_path, ids)
     rep = {"input": src, "input_sha256": sha256_file(src), "lines": n_lines, "tokens": int(len(ids)), "runs": int((ids == BOS).sum()),
            "unk_fraction": float((ids == UNK).sum() / max(1, len(ids) - (ids == BOS).sum())),
            "vocab_sha256": sha256_file(os.path.join(work, "vocab.txt")), "runs_sha256": sha256_file(runs_path), "ids_sha256": sha256_file(ids_path)}
+    if guard is not None:
+        rep["holdout_guard_skipped_runs"] = skipped
     json.dump(rep, open(os.path.join(work, f"text-{name}.json"), "w"), indent=1)
     return rep
 
 
 def cmd_text(a):
-    print(json.dumps(encode_extra(a.input, a.work, a.name, bc.load_conv()), indent=1))
+    print(json.dumps(encode_extra(a.input, a.work, a.name, bc.load_conv(), bc.guard_matcher(a.holdout_guard)), indent=1))
 
 
 def load_vocab(work):
@@ -215,11 +225,12 @@ def main(argv=None):
     sub = ap.add_subparsers(dest="cmd", required=True)
     r = sub.add_parser("runs")
     r.add_argument("--work", required=True); r.add_argument("--coll", required=True); r.add_argument("--synth", required=True)
-    r.add_argument("--articles", type=int, default=200_000); r.add_argument("--procs", type=int, default=max(1, (os.cpu_count() or 4) - 2))
+    r.add_argument("--holdout-guard", nargs="*", default=None, metavar="ROWS"); r.add_argument("--articles", type=int, default=200_000); r.add_argument("--procs", type=int, default=max(1, (os.cpu_count() or 4) - 2))
     e = sub.add_parser("encode")
     e.add_argument("--work", required=True); e.add_argument("--min-count", type=int, default=MIN_COUNT)
     t = sub.add_parser("text")
     t.add_argument("--work", required=True); t.add_argument("--in", dest="input", required=True); t.add_argument("--name", required=True)
+    t.add_argument("--holdout-guard", nargs="*", default=None, metavar="ROWS", help="default off: runs containing a held-out sentence are not written (docs/contracts/holdout-refresh.md section 8)")
     a = ap.parse_args(argv)
     {"runs": cmd_runs, "encode": cmd_encode, "text": cmd_text}[a.cmd](a)
 
