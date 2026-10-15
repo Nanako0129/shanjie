@@ -3,10 +3,10 @@ import ShanjieKit
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// The settings window (docs/contracts/settings-window.md section 2.1): one NSWindow with a SwiftUI
-/// grouped Form, in the input method's own process. It has no text field, so it needs no Edit menu and
-/// the input method never types into its own window. Brought forward like `AlertDialogs`: remember the
-/// frontmost app, `NSApp.activate()`, `makeKeyAndOrderFront`; on close the focus goes back.
+/// The settings window (docs/contracts/settings-window.md section 2.1, layout and size from settings-sidebar.md): one
+/// NSWindow with a SwiftUI sidebar of pages and the selected page's grouped Form, in the input method's own process. It
+/// has no text field, so it needs no Edit menu and the input method never types into its own window. Brought forward like
+/// `AlertDialogs`: remember the frontmost app, `NSApp.activate()`, `makeKeyAndOrderFront`; on close the focus goes back.
 @MainActor
 final class SettingsWindowController: NSObject, NSWindowDelegate {
     private let shell: Shell
@@ -19,6 +19,12 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 
     init(shell: Shell) {
         self.shell = shell
+        super.init()
+        // A Dock, resolution or display change while the window is open shrinks the usable area: refit and clamp again
+        // (settings-sidebar section 1, any screen; /code-review).
+        NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.refit() }
+        }
     }
 
     func show() {
@@ -41,43 +47,44 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         w.orderFrontRegardless()
     }
 
+    /// Measured page heights come out this much short of what the window draws: a 10-toggle grouped form measured 435 pt
+    /// in a window and was drawn 438 pt tall (/code-review probe, 2026-10-15). Without it the tallest page would scroll.
+    private static let measureSlack: CGFloat = 4
+
     /// Sizes the window (settings-sidebar section 2.2): the tallest page plus the title bar, at most the usable height of
     /// `screen`, keeping the top edge where it is (`show()` centres it afterwards, `refit()` clamps it). Each page is measured
-    /// in its own off-screen hosting view with a vertical fixedSize: the split view draws only the selected page, and the
-    /// on-screen form has no fixedSize so it can scroll when the cap bites. With `.fullSizeContentView` the content rect is
-    /// the whole frame, so this height is the frame's.
+    /// with a vertical fixedSize in a hidden hosting view attached to the window: the window shows only the selected page, the
+    /// on-screen form has no fixedSize so it can scroll when the cap bites, and a hosting view outside any window measured
+    /// about 4.5 pt per row too tall (/code-review probe). All four pages are rebuilt on every fit; that happens only on
+    /// show, an app-list change and a screen change, so it is not cached. With `.fullSizeContentView` the content rect is the
+    /// whole frame, so this height is the frame's.
     private func fit(_ w: NSWindow, on screen: NSScreen?) {
-        guard let model else { return }
+        guard let model, let container = w.contentView else { return }
         let tallest = SettingsPage.allCases.map { page in
-            NSHostingView(rootView: SettingsPageForm(page: page, model: model, appLabels: appLabels)
-                .fixedSize(horizontal: false, vertical: true)).fittingSize.height
+            let probe = NSHostingView(rootView: SettingsPageForm(page: page, model: model, appLabels: appLabels)
+                .fixedSize(horizontal: false, vertical: true))
+            probe.isHidden = true
+            container.addSubview(probe)
+            defer { probe.removeFromSuperview() }
+            return probe.fittingSize.height
         }.max() ?? 0
         let cap = screen?.visibleFrame.height ?? .greatestFiniteMagnitude
         let top = w.frame.maxY
-        w.setContentSize(NSSize(width: SettingsForm.width, height: min(tallest + Self.titleBarHeight, cap)))
+        w.setContentSize(NSSize(width: SettingsForm.width, height: min(tallest + Self.measureSlack + Self.titleBarHeight, cap)))
         w.setFrameTopLeftPoint(NSPoint(x: w.frame.minX, y: top))
     }
 
-    /// Profile-choice section 2.4: the 個別設定的 App list grew or shrank while the window is open. Called one main-actor turn
-    /// after SwiftUI's onChange (inferred, not measured, to come after the change is laid out; the device check sees it).
-    /// The window grows downward from its top edge, so it is clamped back into its screen's usable area (settings-sidebar
-    /// section 2.2): a window dragged down to the Dock moves up instead of growing under it.
+    /// The 個別設定的 App list changed length (profile-choice section 2.4) or the screen changed, while the window is open.
+    /// The app-list call comes one main-actor turn after SwiftUI's onChange, so the window is not resized in the middle of
+    /// SwiftUI's update. The window grows downward from its top edge, so it is clamped back into its screen's usable area
+    /// (settings-sidebar section 2.2): a window dragged down to the Dock moves up instead of growing under it.
     private func refit() {
         guard let window, window.isVisible else { return }
         let screen = window.screen ?? NSScreen.main
         fit(window, on: screen)
         if let area = screen?.visibleFrame {
-            window.setFrameOrigin(Self.clamped(window.frame, into: area).origin)
+            window.setFrameOrigin(settingsFrame(window.frame, clampedInto: area).origin)
         }
-    }
-
-    /// `frame` moved vertically into `area`: up when it hangs below, down when it sticks out above. `fit` keeps the height
-    /// at most `area`'s, so both never apply at once.
-    static func clamped(_ frame: NSRect, into area: NSRect) -> NSRect {
-        var r = frame
-        if r.minY < area.minY { r.origin.y = area.minY }
-        if r.maxY > area.maxY { r.origin.y = area.maxY - r.height }
-        return r
     }
 
     /// The window's background material (user, 2026-10-10: Liquid Glass was too see-through; a flatter glass).
@@ -182,6 +189,8 @@ enum SettingsPage: CaseIterable, Hashable {
 
 /// The window's content (settings-sidebar section 2.1): the pages in a sidebar, the selected page's form beside it. The
 /// selection is view state in the window's one hosting view, so reopening the window shows the last page in this run.
+/// A plain fixed-width sidebar, not NavigationSplitView: that one's sidebar can be collapsed, and this window has no
+/// toolbar or View menu to bring it back (/code-review probe: canCollapse true, no toolbar).
 struct SettingsForm: View {
     /// The sidebar column; a round number for four short labels, not measured against System Settings (first device round).
     static let sidebarWidth: CGFloat = 160
@@ -190,16 +199,19 @@ struct SettingsForm: View {
     let appLabels: AppLabels
     /// The 個別設定的 App list changed length: the window refits its height.
     let onRowCountChange: () -> Void
-    @State private var page: SettingsPage? = .general
+    @State private var page: SettingsPage = .general
 
     var body: some View {
-        NavigationSplitView {
-            List(SettingsPage.allCases, id: \.self, selection: $page) { p in
+        HStack(spacing: 0) {
+            // A click on the sidebar's empty space or a ⌘-click deselects; keep the page instead of showing none.
+            List(SettingsPage.allCases, id: \.self, selection: Binding(get: { page }, set: { if let p = $0 { page = p } })) { p in
                 Label(p.title, systemImage: p.symbol)
             }
-            .navigationSplitViewColumnWidth(Self.sidebarWidth)
-        } detail: {
-            SettingsPageForm(page: page ?? .general, model: model, appLabels: appLabels)
+            .listStyle(.sidebar)
+            .frame(width: Self.sidebarWidth)
+            // A fresh form per page, so a page opens at its top rather than at the previous page's scroll offset.
+            SettingsPageForm(page: page, model: model, appLabels: appLabels)
+                .id(page)
         }
         .onChange(of: model.appProfiles.count) { onRowCountChange() }
     }

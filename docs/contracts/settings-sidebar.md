@@ -1,6 +1,6 @@
 # 契約：設定視窗改成左側清單
 
-狀態：修訂二（2026-10-15，處理 plan-verifier 兩次 REVISE，見 §6）。
+狀態：修訂二，收尾審查 READY；實作後的 /code-review 修正見 §6（2026-10-15）。
 
 ## 0. 起因
 
@@ -20,7 +20,7 @@
 
 ### 2.1 版面
 
-- `NavigationSplitView`：左欄是 `List(selection:)`，四類，順序與內容如下（每一類右邊仍是 `.grouped` 的 `Form`，原本的段落標題保留）：
+- 左欄是固定寬度的 `List(selection:)`（`.sidebar` 樣式），四類，順序與內容如下（每一類右邊仍是 `.grouped` 的 `Form`，原本的段落標題保留）。不用 `NavigationSplitView`：它的左欄可以收合，而這個視窗沒有工具列或「顯示方式」選單能把它叫回來（/code-review）。選取不會變成空的（點左欄空白處或 ⌘點不會取消選取），換類時右邊從最上面開始：
 
 | 分類 | 內容（原本的段落） |
 |---|---|
@@ -36,9 +36,10 @@
 ### 2.2 尺寸
 
 - 寬度：左欄寬度（具名常數）加上原本的內容寬度 420。
-- **量法**：每一類的 `Form` 各自放進一個不顯示的 `NSHostingView`，加上 `.fixedSize(horizontal: false, vertical: true)` 讀 `fittingSize` 的高度，四類取最大值。畫面上的 `Form` 不加 vertical fixedSize，所以放不下時可以捲動。`NavigationSplitView` 只畫選到的那一類，所以不從畫面上的 hosting view 量。畫面上的 hosting view 不加內容尺寸的限制（`sizingOptions = []`），視窗大小只由下面的規則決定。
+- **量法**：每一類的 `Form` 各自放進一個不顯示的 `NSHostingView`，加上 `.fixedSize(horizontal: false, vertical: true)` 讀 `fittingSize` 的高度，四類取最大值。畫面上的 `Form` 不加 vertical fixedSize，所以放不下時可以捲動。畫面上只畫選到的那一類，所以不從畫面上的 hosting view 量。量測用的 hosting view 暫時加進視窗裡（隱藏）：不在視窗裡量，每列會多算約 4.5 pt；在視窗裡量仍比實際畫的少約 3 pt，所以加 4 pt 的餘量（/code-review 量測）。畫面上的 hosting view 不加內容尺寸的限制（`sizingOptions = []`），視窗大小只由下面的規則決定。
 - **高度**：視窗的 frame 高度（內容加上標題列）＝ min(最高那一類的高度＋標題列高度, 螢幕 `visibleFrame` 的高度)。切換分類時視窗大小不變。
 - **用哪個螢幕**：`show()` 用滑鼠所在的螢幕（和置中相同）；重算時用視窗目前所在的螢幕。
+- 視窗開著時螢幕參數改變（Dock、解析度、文字大小、拔掉螢幕）也重算高度並夾回（/code-review）。
 - **位置**：`show()` 設好大小之後置中。「個別設定的 App」清單變長或變短時重算高度，之後把 frame 夾回那個螢幕的 `visibleFrame` 裡（超出下緣就往上移、超出上緣就往下移），所以長高之後也不會跑到 Dock 下面。
 
 ## 3. 驗收
@@ -75,3 +76,5 @@
 |---|---|---|
 | plan-verifier 第 1 次 REVISE（2026-10-15） | 1. 量法沒寫：畫面上的 `Form` 要能捲動就不能加 fixedSize，`NavigationSplitView` 也只畫選到的那一類；2. 上限沒說是 frame 還是內容（標題列 32 pt），清單變長重算時不重新置中、會往下長到 Dock 下面；3. 驗收碰不到超出上限與重算的路徑。P3：`settings-window.md` §2.2「順序照選單」被這一份改了；回退方式；審查紀錄 | FIX：1、2 → §2.2 寫明量法、frame 高度、用哪個螢幕、重算後夾回 `visibleFrame`；3 → §3 加第 6、7 步。P3：`settings-window.md` §2.2 加註、§5 加回退、加這一節 |
 | plan-verifier 第 2 次 REVISE（2026-10-15） | 第 1、2 項已關；第 7 步從置中的位置開始，多一列也不會越界，有沒有夾回都會過。P3：`settings-window.md` §2.1 仍寫用 `fittingSize` 設內容尺寸 | FIX：第 7 步先把視窗拖到下緣貼著 Dock，預期視窗往上移。P3：`settings-window.md` §2.1 那一句加註由這一份 §2.2 取代 |
+| plan-verifier 收尾審查（2026-10-15） | READY | 開始實作 |
+| 本地 /code-review（2026-10-15，1233948） | 1. `NavigationSplitView` 的左欄可以收合、沒有東西能叫回來；2. 不在視窗裡量的高度每列多約 4.5 pt；3. 選取可以變成空；4. 螢幕參數改變不重算；5. 換頁保留捲動位置；6. `profile-choice.md` §2.4 兩句沒跟著改；7. PLAN 與研究紀錄沒有條目；8. 收尾審查沒記錄；9. `refit` 延後的理由寫錯；10. 檔頭註解過時；11. 每次重建四頁；12. 夾回的函式沒有測試 | FIX 1–10、12：固定寬度的左欄、在視窗裡量加 4 pt 餘量、選取不為空、觀察 `didChangeScreenParametersNotification`、`.id(page)`、兩份契約加註、PLAN 與研究紀錄、這一列、註解改寫、`settingsFrame(_:clampedInto:)` 移到 ShanjieKit 加測試。11 接受：只在開窗、清單改變、螢幕改變時做，註解寫明 |

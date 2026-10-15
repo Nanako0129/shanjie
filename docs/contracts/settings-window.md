@@ -30,7 +30,7 @@
 ### 2.1 視窗
 
 - 選單在「清除選字記憶…」之前加一項「善解設定…」（`MenuEntry.Action.openSettings`）。現有的選單項目不動。
-- 在輸入法自己的程序裡開一個 `NSWindow`，內容是 SwiftUI `Form`（`.grouped` 樣式，系統元件、系統預設動畫）。標題「善解設定」。同時只開一個，再點選單就把已開的那個帶到前面。
+- 在輸入法自己的程序裡開一個 `NSWindow`，內容是 SwiftUI `Form`（`.grouped` 樣式，系統元件、系統預設動畫；〔2026-10-15〕改成左側清單加每一類一個 `Form`，見 `settings-sidebar.md`）。標題「善解設定」。同時只開一個，再點選單就把已開的那個帶到前面。
 - **帶到前面**：照現有 `AlertDialogs` 的做法，記下前景 App，`NSApp.activate()` 後 `makeKeyAndOrderFront`；關窗時把焦點還給記下的 App。
   - **修訂（2026-10-10 實機）**：使用者點「善解設定…」看不到視窗。查視窗列表：視窗有開、在畫面上，但層級是一般視窗（layer 0），`activate()` 被系統拒絕，所以被前景 App 蓋住。改成和 `AlertDialogs`（`.modalPanel`）一樣用較高的層級：視窗 `level = .floating`，`makeKeyAndOrderFront` 之後再 `orderFrontRegardless()`（威注音的做法）。視窗會在最前面，但不一定是 key window；使用者點一下就會成為 key。不改成 `.regular`（fcitx5 的做法會在 Dock 多一個圖示）。
   - 實機上仍然帶不到前面時，才照 fcitx5 的做法改：開窗時暫時切成 `.regular`、關掉後切回。改法寫進這份契約再做（§5）。

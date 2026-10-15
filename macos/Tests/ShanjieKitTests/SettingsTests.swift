@@ -310,4 +310,16 @@ final class SettingsTests: XCTestCase {
         model.refreshExternal()
         XCTAssertTrue(model.pausedSecure)
     }
+
+    // MARK: settings-sidebar section 2.2
+
+    func testFrameIsClampedIntoTheUsableArea() {
+        let area = CGRect(x: 0, y: 80, width: 1470, height: 860)  // Dock below y 80, menu bar above y 940
+        let inside = CGRect(x: 100, y: 200, width: 580, height: 500)
+        XCTAssertEqual(settingsFrame(inside, clampedInto: area), inside)
+        // Grew downward past the Dock: moved up so the bottom edge sits on the area's.
+        XCTAssertEqual(settingsFrame(CGRect(x: 100, y: 30, width: 580, height: 500), clampedInto: area), CGRect(x: 100, y: 80, width: 580, height: 500))
+        // Sticks out above the menu bar: moved down so the top edge sits on the area's.
+        XCTAssertEqual(settingsFrame(CGRect(x: 100, y: 600, width: 580, height: 500), clampedInto: area), CGRect(x: 100, y: 440, width: 580, height: 500))
+    }
 }
