@@ -123,3 +123,13 @@ public final class SettingsModel: ObservableObject {
         shell.confirmAndClear { [weak self] in self?.refreshExternal() }  // the "cannot save" row may change
     }
 }
+
+/// Settings-sidebar section 2.2: the settings window's frame moved vertically into its screen's usable area, up when it
+/// hangs below (the Dock), down when it sticks out above (the menu bar). The window's height is capped to the area's, so
+/// both never apply at once.
+public func settingsFrame(_ frame: CGRect, clampedInto area: CGRect) -> CGRect {
+    var r = frame
+    if r.minY < area.minY { r.origin.y = area.minY }
+    if r.maxY > area.maxY { r.origin.y = area.maxY - r.height }
+    return r
+}
