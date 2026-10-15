@@ -60,7 +60,7 @@
   - 含入侵詞表（commit `cbc7bdc`）任一詞的。
   - 含 `tools/build_overlay.py` 的 `CANTO_CHARS` 的。
   - 含拉丁字母或數字的（CLI 打不出來）。
-  - 句子欄含任何非漢字的（引號、括號、間隔號、空白等）。句子欄只有漢字，§8 的比對才能在計數用的漢字段上做。
+  - 句子欄含任何非漢字的（引號、括號、間隔號、空白等）。「漢字」照 `build_counts.HAN`（`〇` 這類不在範圍內的字也算非漢字）。句子欄只有漢字，§8 的比對才能在計數用的漢字段上做。
   - 在整個來源池裡出現 ≥ 2 次的（樣板句）。
   - 新聞稿的聯絡人、發布日期這類欄位行。
 - **去重**：
@@ -156,10 +156,13 @@
   - **錯誤訊息不帶文字**：`tools/holdout_guard.py` 與計數程式的 `--holdout-guard`，所有錯誤與診斷訊息只寫檔案路徑、行號與欄數，不寫任何列或句子的內容（同 `core/src/eval.rs` 的 `MissingSeparator` 只帶 `line_len`）。
   - 句子本身和它轉換後的樣子都當成比對對象（同 S7f `clean.Filter` 的做法）。
 - **比對器**：重用 `experiments/s7f-corpus/clean.py` 的 `Matcher`（以前兩字建索引，每個位置查一次）。
+  - 比對前，比對對象與漢字段兩邊都照 `build_lm` 的變體合併（`MERGE`：臺／台、佔／占、佈／布等）折疊，因為模型會把這些變體當成同一個詞計數。
+  - 比對對象最短 4 字（同 S7f `clean.Filter` 的 `MIN_LEN`）；較短的不參與比對，回報略過幾個。比對對象不是整段 `HAN`（例如含 `〇`）就報錯停下。載入 0 個比對對象也報錯停下，並回報載入了幾個。
+  - 條目與文字的處理（`TEMPLATE`、`MARKUP`、`SENT`、轉換、漢字段；`.bz2`、`.tsv` 的讀法）只有一份，在 `build_counts` 與 `build_counts_text` 裡；計數、`report` 與小模型的訓練資料準備（`experiments/s7a-tinylm/prep.py`）都呼叫同一份，不另抄。
 - **`tools/holdout_guard.py report`**：`--rows` 給比對對象（池或保留集的列檔），來源用 `--text FILE`（純文字，逐行轉換後取漢字段）、`--row-files FILE`（列檔，取句子欄再轉換）、`--wiki DUMP --articles N --skip M`（照 `build_counts.py` 的條目處理：`TEMPLATE`、`MARKUP`、`SENT`、轉換、漢字段）。
   - 輸出：命中的比對對象列號（一行一個）與每個來源的命中數。**不輸出任何句子或文字**。
   - 輸入有非法 UTF-8 時不崩潰：以 `errors="replace"` 讀，壞位元組不會是漢字，不影響比對。
-- **計數程式的開關**：`experiments/s2/build_counts.py` 與 `build_counts_text.py` 加 `--holdout-guard [ROWS…]`，預設關（關著時輸出逐位元組不變）；開著時，命中的漢字段不計數，最後回報跳過幾段（只有數字）。下一次建模型時打開；那一片的契約寫進建置步驟。`experiments/model-v6/README.md` 不改：model-v6 的配方要能照原樣重現。
+- **計數程式的開關**：`experiments/s2/build_counts.py`、`build_counts_text.py` 與 `experiments/s7a-tinylm/prep.py` 加 `--holdout-guard [ROWS…]`，預設關（關著時輸出逐位元組不變）；開著時，命中的漢字段不計數，最後回報跳過幾段（只有數字）。下一次建模型時打開；那一片的契約寫進建置步驟。`experiments/model-v6/README.md` 不改：model-v6 的配方要能照原樣重現。
 - **單元測試**（合成資料）要涵蓋：
   - 句子在較長的漢字段中間（包含）也命中；
   - 外面包了引號、半形標點、空白也命中；
