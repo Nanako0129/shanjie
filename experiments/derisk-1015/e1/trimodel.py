@@ -100,6 +100,11 @@ class TriTable:
         self.key, self.tot, self.off, self.nxt, self.cnt = d["key"], d["tot"], d["off"], d["nxt"], d["cnt"]
         self.sha_bound = d["model_sha"]
         self._data = data        # keeps a memory map alive
+        if self.key.ctypes.data % 8:
+            # The key array starts 60 bytes into the file, so it is not 8-byte aligned. np.searchsorted silently copies an unaligned
+            # array on EVERY call (192 MB for the unpruned table: 8.5 ms per lookup, measured). One aligned copy at load removes that;
+            # the other arrays are only sliced or indexed per context, so their alignment costs nothing.
+            self.key = np.array(self.key)
         self._back = {}
 
     @classmethod

@@ -362,6 +362,16 @@ class TestTrigramModel(Fixture):
         with self.assertRaises(ValueError):
             trimodel.TriTable.from_path(self.tri_path(1), b"\0" * 32)
 
+    def test_context_key_array_is_aligned_so_searchsorted_does_not_copy_it(self):
+        """The file puts the key array 60 bytes in (not 8-aligned). np.searchsorted copies an unaligned array on every call: 8.5 ms per lookup on a
+        192 MB key array (profiled on the unpruned-size table). TriTable realigns once at load."""
+        tab = self.tri_table(1)
+        self.assertEqual(tab.key.ctypes.data % 8, 0)
+        self.assertTrue(tab.key.flags.aligned)
+        raw = sjlm_io.read_tri(slurp(self.tri_path(1), "rb"))["key"]
+        self.assertNotEqual(raw.ctypes.data % 8, 0)                       # the premise: the file layout itself is misaligned
+        self.assertTrue((tab.key == raw).all())
+
     def test_pick_thresholds_gives_at_least_four(self):
         sizes = {t: (0, 0, int(1e9 / t ** 2)) for t in range(1, 40)}
         for targets in ([100, 200, 400], [1000, 1000, 1000], [1, 2, 3]):

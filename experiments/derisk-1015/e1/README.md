@@ -55,7 +55,8 @@ cd <REPO> && python3 -W ignore experiments/derisk-1015/e1/test_e1.py > /tmp/e1-t
 | 〔未做〕「T_k 接上 tinylm-v5 對 B0 接上 tinylm-v5」（契約 E1b「對照（只報）」） | 沒做。`harness.py --dump` 的格式和 `lm_eval.py` 相同，但 `experiments/s7a-tinylm/run_sets.py` 寫死呼叫 `lm_eval.py`，要換成 `harness.py` 才能對 T_k 的候選重算 tinylm 分數；那是 tinylm 的分數檔流程，不是 E1 的判讀，需要時另開 |
 | 〔未做〕E1 的延遲與載入時間 | 契約本來就不量（屬於 Rust 那一片）|
 | 〔未量〕時間 | 格點的牆鐘時間**沒有量**（Mac 禁止跑重運算）。可用的數字只有：本機 `lm_eval.py` 對出貨模型跑 20 列含載入共 5 秒（含載入，所以每列遠小於 0.25 秒；載入本身約 5–8 秒）；trigram 查詢在 252 MB 的合成隨機表上每次約 2.4（找前文）到 3.7（再找後繼詞）微秒。先用 `grid.py select --limit 50` 在目標機器量一次再排程；整個 E1 超過 8 小時是停止條件（契約 §5）|
-| 〔已量〕每個格點程序的記憶體 | 載入出貨模型（含詞類表與詞庫）的程序峰值 RSS 約 1.6 GB（Mac，`harness.Evaluator`）；16 個程序約 26 GB，記憶體不夠就減 `--procs`。trigram 表是 mmap，各程序共用 |
+| 〔已量〕每個格點程序的記憶體 | 載入出貨模型（含詞類表與詞庫）的程序峰值 RSS 約 1.6 GB（Mac，`harness.Evaluator`）；16 個程序約 26 GB，記憶體不夠就減 `--procs`。trigram 表是 mmap，各程序共用；唯一的例外是前文鍵陣列（8 B／前文，不剪的表約 190 MB），它在檔案裡不是 8 位元組對齊，載入時每個程序複製一份對齊的（見下一列）|
+| 〔已量、已修〕查表變慢的原因 | 第一版 `TriTable` 直接對檔案裡的鍵陣列做 `np.searchsorted`；那段從檔頭 60 位元組處開始、沒有 8 位元組對齊，numpy 每次呼叫都把整個陣列複製一份（不剪的表 190 MB，每次查詢 8.5 ms）。Colab 實測 T1 的格點探測比 B0 慢 39 倍就是這個，慢的程度隨前文數線性增加。現在載入時對齊複製一次（約 0.3 秒），結果逐位元組不變（`test_e1` 有對齊的檢查）。表的格式沒改，舊檔照用 |
 | 〔未量〕Colab 計數的記憶體 | trigram 的 `Counter` 在父程序累加，3 元組鍵每個相異條目約 200 B，相異條目數沒有量過；〔推論〕100–200 M 個、約 40–80 GB。看 RSS，逼近 140 GB 就停下來，改用 `--tri-min 0.05` 並在紀錄寫明 |
 | `--extra-lexicon` 清單 | model-v6 的計數詞表（`acg-count.tsv` 與 names 的 `count_lexicon.py` 輸出，見契約 `docs/contracts/model-v6.md` §2.1）和補次數檔的路徑在 main 的建置機上，我不知道；下面用 `<…>` 代替，要和 model-v6 那次完全相同 |
 | 私人集合 | `discordtune` 只由 main 跑：同一組指令多一個 `--set discordtune=<路徑>`，在放私人資料的機器上，只帶回表格數字 |
