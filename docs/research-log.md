@@ -5745,3 +5745,9 @@ formal: alpha 0.7, tau 1, delta 2
   - lytune 是正式語域，多次和聊天方向相反，判讀集裡又佔 88%；建議只擋使用者端三個集合。
 - **維護者選擇題**：「先出 v0.4.4，另開一片歸因（Fable 推薦）」。發版規則同時改成使用者端三集（保留集、錯字回報、discordtune）擋、其他集合只警示（`docs/contracts/sbench-v2.md` §2.3 修訂）；發版說明把 lytune 寫成未歸因的顯著退步。
 - 下一片（歸因）：188 上跑 v5 詞類開／關（lytune 兩種設定）、v6 `--no-kn`、μ 掃描（出貨設定、lytune＋discordtune＋cvtune＋wikitune＋dev302），結果決定 v0.4.5 要不要換 `classes.sjc`。
+
+## 2026-10-15：v0.4.4 發佈
+
+- 維護者同意後推 `v0.4.4`（tag 指向 main `3560fe5`；和量基準測試的 `39ee205` 相比，`Cargo.toml Cargo.lock core cli data eval/variants.tsv macos scripts` 沒有差異），發佈流程 run 38743475035：gate、build、sign、publish 都成功（sign 與 publish 各由維護者核准一次）。
+- 核對（下載 Release 附件）：zip 與安裝程式的 SHA-256 和 `.sha256` 相符；兩個 App 的 `codesign --verify --deep --strict` 通過、Developer ID（2LJ882GPY8）、`spctl` 判定 Notarized Developer ID、`stapler validate` 通過、版本 0.4.4；Latest 是 v0.4.4；Homebrew cask `0.4.4`、sha256 和 zip 相同。解壓的副本驗完先 `lsregister -u` 再刪（同日輸入法連線問題的教訓）。
+- 發版後：Discord 發版公告（blobhaj，只標善解身分組）、回饋串回報設定頁已修；網站更新保留集數字（v0.4.4 聊天 191／227、書面 186／227）與已發佈項目後部署（維護者同意）。
