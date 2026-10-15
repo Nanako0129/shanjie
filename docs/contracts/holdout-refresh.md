@@ -1,6 +1,6 @@
 # 契約：保留集換新（公開語料的新聞與口語，一次抽三份）
 
-狀態：修訂二（2026-10-15）。plan-verifier 第一次 REVISE 的 7 項、第二次的 2 項（切換驗收的兩個輸入要同時存在；main 的回填設定寫死）都照改；待收尾審查。
+狀態：READY（2026-10-15 收尾審查）。修訂二：plan-verifier 第一次 REVISE 的 7 項、第二次的 2 項（切換驗收的兩個輸入要同時存在；main 的回填設定寫死）都照改。
 
 ## 0. 起因
 
@@ -71,7 +71,7 @@
 - **讀音抽查**：
   - 先隨機抽 40 列，由抽樣的 agent 人工核對，回報錯誤率。
   - 超過 5% 就先修規則再抽其餘，修的內容記進研究紀錄。
-- **份量檢查**：過濾與重疊比對（§4 第 3 步）之後，池小於需求的 3 倍就停下來回報。補救方法是把時間窗往後延，不是放寬過濾。
+- **份量檢查**：過濾與重疊比對（§4 第 4–5 步）之後，池小於需求的 3 倍就停下來回報。補救方法是把時間窗往後延，不是放寬過濾。
 
 ## 4. 抽樣程序（誰、什麼時候、讀什麼）
 
@@ -95,8 +95,8 @@
    - `eval/holdout/next/sources.tsv`
    - `eval/holdout/hashes.sha256`（§8）
 6. **盲後處理**：另一個 fresh agent 做下列檢查，只回數字。
-   - 拼不出：把每份的 `news.txt`、`talk.txt` 依這個順序串成一個暫存檔，用 CLI 的 `--rows <暫存檔> --profile chat` 跑一次。摘要行的 n 必須等於 300，也就是 `usable` 沒有丟列。這一步不用改 `cli/`。
-   - 讀音和詞庫第一名不同的列數：在暫存的 worktree 裡把三份複製到 `eval/holdout/` 頂層，跑 `--set holdout --check-readings`。這個數字**只回報**，不拿來丟列：多音字與變調的列本來就會不同。
+   - 拼不出：把每份的 `news.txt`、`talk.txt` 依這個順序串成一個暫存檔，用 CLI 的 `--lm data/lm/bigram.sjlm --rows <暫存檔> --profile chat` 跑一次。LM 模式的 `--rows` 碰到解不出的列會整個停下來報錯（不是丟列），所以這一步要跑完、而且摘要行的 n 等於 300。這一步不用改 `cli/`。
+   - 讀音和詞庫第一名不同的列數：在暫存的 worktree 裡先把 `eval/holdout/holdout.txt` 移走，然後一次放一份：把第 k 份的 `news.txt`、`talk.txt` 複製到 `eval/holdout/` 頂層，跑 `--set holdout --check-readings`，記下數字再換下一份（k＝1、2、3）。這個數字**只回報**，不拿來丟列：多音字與變調的列本來就會不同。
    - 和開發集零重疊。
    - 把三份的句子欄一行一句餵給 `tools/holdout_guard.py --hashes eval/holdout/hashes.sha256`，回報丟掉的行數。必須等於 900。
    - 抽完之後如果還驗到和 §4 第 4 步所列文字的重疊：停下來回報，不自己補抽。
@@ -105,13 +105,13 @@
 ## 5. 授權與出處
 
 - **換新 PR** 同時改 `LICENSES/data.md`：
-  - 第 27 列的 `eval/holdout/*` 收窄成 `eval/holdout/holdout.txt`、`eval/holdout/oov_words.list`，授權 CC0。
+  - 第 27 列的 `eval/holdout/*` 收窄成 `eval/holdout/holdout.txt`、`eval/holdout/oov_words.list`、`eval/holdout/.gitkeep`，授權 CC0。
   - `eval/holdout/hashes.sha256` 是本專案產生的，CC0。
   - `eval/holdout/next/**/news.txt` 一列：寫明著作權法第 9 條、政府資料開放授權的顯名聲明、CC BY 4.0（維基新聞），以及 PeoPo 的逐篇授權。
   - `eval/holdout/next/**/talk.txt` 一列：整檔 CC BY-SA 4.0，署名 Wikipedia contributors、The Computational Democracy Project，加上提點子的顯名聲明。
   - `eval/holdout/next/sources.tsv`：出處清單，CC0。
 - **切換 PR** 再改一次：
-  - 舊集那一列改寫成 `eval/dev/holdout-2026-10-03/*`，CC0。
+  - 舊集那一列改寫成 `eval/dev/holdout-2026-10-03/*` 與留在原地的 `eval/holdout/.gitkeep`，CC0。
   - 新集的兩列改寫成切換後的確切路徑：shard-1 的 `eval/holdout/news.txt`、`talk.txt`，以及仍在 `next/` 的 shard-2、3。
   - 每個檔案剛好被一列涵蓋。
 - 逐列出處寫在 `sources.tsv`。欄位是：份、檔、列號、來源、頁名加 revid 或網址、授權。先例是 `acg-sources.tsv`、`names-sources.tsv`。
