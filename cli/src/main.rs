@@ -495,7 +495,7 @@ fn rss_kb() -> Option<u64> {
 /// (RSS before and after one index, and after a second one).
 fn run_predict(args: &[String]) -> Result<(), String> {
     let (mut file, mut lm_path, mut profile, mut time) = (None, None, None, false);
-    let (mut packs, mut packs_dir) = (0u32, None::<String>);
+    let (mut packs, mut packs_dir, mut kn) = (0u32, None::<String>, true);
     let mut it = args.iter();
     while let Some(a) = it.next() {
         let mut val = || it.next().cloned().ok_or_else(|| "missing option value".to_string());
@@ -504,6 +504,7 @@ fn run_predict(args: &[String]) -> Result<(), String> {
             "--lm" => lm_path = Some(val()?),
             "--profile" => profile = Some(val()?),
             "--predict-time" => time = true,
+            "--no-kn" => kn = false,
             "--packs" => packs |= pack_flag(&val()?)?,
             "--packs-dir" => packs_dir = Some(val()?),
             _ => return Err("unknown argument".into()),
@@ -517,9 +518,10 @@ fn run_predict(args: &[String]) -> Result<(), String> {
         _ => return Err("--profile must be chat or formal".into()),
     }
     .lambda();
-    // The Kneser-Ney side file is deliberately off here: the Python predict reference (experiments/sp/predict.py) does not
-    // load it, so the sp-predict golden would stop being comparable (docs/contracts/kn-core.md, model-v6 note).
-    let lm = Lm::load_with(Path::new(&lm_path.ok_or("--lm is required")?), true, false).map_err(|e| e.to_string())?;
+    // A kn.sjkn beside the model turns the Kneser-Ney term on unless --no-kn, as in the other modes: the App's prediction row
+    // scores with it (Engine::recompute_pred -> predict -> Lm::word_by_id -> prob_c), and the Python reference
+    // (experiments/sp/predict.py) loads it the same way.
+    let lm = Lm::load_with(Path::new(&lm_path.ok_or("--lm is required")?), true, kn).map_err(|e| e.to_string())?;
     let dir = root().join("data/lexicon");
     let (lex, overlay) = load_with_packs(&dir, packs, &pdir, None, true)?;
     // Prediction scores use the capped lp only; demotion applies to decoding (sw §3).

@@ -325,6 +325,18 @@ fn kn_side_file_beside_the_model_is_announced_and_can_be_turned_off() {
     assert!(off.starts_with("## t  lm-chat  {'n': 1,"), "{off}");
 }
 
+/// `--predict` loads the kn.sjkn beside the model like the other modes (the App's prediction row scores with it); `--no-kn` turns it
+/// off. The golden is the KN run; the same queries without it must score differently.
+#[test]
+fn predict_no_kn_scores_differently_from_the_golden() {
+    let path = format!("{}/../eval/golden/sp-predict.txt", env!("CARGO_MANIFEST_DIR"));
+    let (on, off) = (run(&["--predict", &path, "--lm", &lm_path(), "--profile", "chat"]), run(&["--predict", &path, "--lm", &lm_path(), "--profile", "chat", "--no-kn"]));
+    let scores = |t: &str| t.lines().filter(|l| !l.starts_with("#") && !l.starts_with("## ")).map(|l| l.split('\t').nth(1).unwrap().to_string()).collect::<Vec<_>>();
+    let (a, b) = (scores(&on), scores(&off));
+    assert_eq!(a.len(), b.len());
+    assert!(a.iter().zip(&b).filter(|(x, y)| x != y).count() > a.len() / 2, "KN did not change most prediction scores");
+}
+
 /// data/lexicon/overlay-manual.tsv: every manual word comes first in the shipping setting, alone and in a sentence, in both profiles
 /// (eval/golden/manual-words-rows.txt; MANUAL_BONUS in tools/build_overlay.py was chosen on its first 9 rows; the last 6 (喵菜子, 哈那口, and 菜菜子 which is a base word) are
 /// first even without the entry, so they only pin the behaviour). A retrained model or a new
