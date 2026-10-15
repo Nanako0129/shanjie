@@ -199,9 +199,7 @@ class Ctx:
     def __init__(self, profile="chat", lm_path=None):
         base = ime.Lexicon(os.path.join(ROOT, "data", "lexicon", "mcbpmf-data.txt"), overlay=ime.OVERLAYS)
         self.lm = L.BigramLM(lm_path or os.path.join(ROOT, "data", "lm", "bigram.sjlm"))
-        with open(os.path.join(ROOT, "data", "lexicon", "overlay-add.tsv"), encoding="utf-8") as f:
-            ov = {l.split("\t")[1] for l in f}
-        self.lex = L.cap_overlay(base, ov, self.lm)
+        self.lex = L.cap_overlay(base, ime.capping_words(), self.lm)
         self.profile = profile
         self.tols = {}
 

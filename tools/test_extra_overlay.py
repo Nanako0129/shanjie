@@ -43,14 +43,14 @@ class ExtraOverlay(unittest.TestCase):
         t = cls.tmp.name
         lexdir = os.path.join(t, "data", "lexicon")
         os.makedirs(lexdir)
-        for name, text in (("mcbpmf-data.txt", BASE), ("overlay-add.tsv", OVERLAY_ADD), ("sandhi-add.tsv", ""), ("extra.tsv", EXTRA)):
+        for name, text in (("mcbpmf-data.txt", BASE), ("overlay-add.tsv", OVERLAY_ADD), ("sandhi-add.tsv", ""), ("names-add.tsv", ""), ("extra.tsv", EXTRA)):
             open(os.path.join(lexdir, name), "w", encoding="utf-8").write(text)
         cls.extra = os.path.join(lexdir, "extra.tsv")
         for name, c in (("counts-200000.pkl", WIKI), ("counts-colloquial3.pkl", COLL)):
             pickle.dump(c, open(os.path.join(t, name), "wb"))
         cls.patches = [mock.patch.object(build_lm, "WORK", t), mock.patch.object(build_lm, "LEXDIR", lexdir),
                        mock.patch.object(build_classes, "ROOT", t), mock.patch.object(lm_eval, "ROOT", t),
-                       mock.patch.object(ime, "OVERLAYS", [os.path.join(lexdir, "overlay-add.tsv"), os.path.join(lexdir, "sandhi-add.tsv")]),
+                       mock.patch.object(ime, "OVERLAYS", [os.path.join(lexdir, f) for f in ("overlay-add.tsv", "sandhi-add.tsv", "names-add.tsv")]),
                        mock.patch.object(L, "cap_overlay", functools.partial(L.cap_overlay, demote_path=None))]   # 真的 demote.tsv 對不上小詞庫
         for p in cls.patches:
             p.start()
@@ -99,7 +99,7 @@ class ExtraOverlay(unittest.TestCase):
 
     # --- kn_cont ---
     def run_kn(self, *extra):
-        out = os.path.join(self.tmp.name, "kn.sjkn")
+        out = os.path.join(self.tmp.name, "kn-out.sjkn")   # not kn.sjkn: lm_eval would load that one beside x.sjlm
         with mock.patch.object(sys, "argv", ["kn_cont.py", "--lm", self.path_x, "--theta", "1", "--beta", "1", "--out", out, *extra]), \
                 contextlib.redirect_stdout(io.StringIO()):
             kn_cont.main()
@@ -151,6 +151,36 @@ class ExtraOverlay(unittest.TestCase):
         open(kn, "wb").write(self.run_kn("--extra-overlay", self.extra))
         line = self.run_eval("--extra-overlay", self.extra, "--kn", kn)
         self.assertRegex(line, rf"-noclasses\+kn:[0-9a-f]{{8}}:θ1:β1\+xo:{sha8(open(self.extra, 'rb').read())}  \{{")
+
+    def test_lm_eval_loads_the_kn_side_file_beside_the_model(self):
+        """model-v6 §2.5：沒給 --kn 時，--lm 同目錄的 kn.sjkn 照樣載入（Rust CLI 與 App 同規則）；--no-kn 不載；兩個一起給是錯誤。"""
+        d = os.path.join(self.tmp.name, "beside")
+        os.makedirs(d, exist_ok=True)
+        lm = os.path.join(d, "bigram.sjlm")
+        open(lm, "wb").write(self.model_x)
+        open(os.path.join(d, "kn.sjkn"), "wb").write(self.run_kn("--extra-overlay", self.extra))
+        with mock.patch.object(self, "path_x", lm):
+            on, off = self.run_eval("--extra-overlay", self.extra), self.run_eval("--extra-overlay", self.extra, "--no-kn")
+            self.assertRegex(on, r"-noclasses\+kn:[0-9a-f]{8}:θ1:β1\+xo:")
+            self.assertNotIn("+kn:", off)
+            with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
+                self.run_eval("--kn", os.path.join(d, "kn.sjkn"), "--no-kn")
+        self.assertNotIn("+kn:", self.run_eval())       # path_x 的目錄沒有 kn.sjkn
+
+    def test_capping_set_has_the_names_layer(self):
+        """model-v6 §2.5：names-add.tsv 的詞進封頂集合（Rust 的 capping_overlay 同一組）。"""
+        oa = os.path.join(self.tmp.name, "data", "lexicon", "overlay-add.tsv")
+        names = os.path.join(self.tmp.name, "names.tsv")
+        open(names, "w", encoding="utf-8").write("ㄎㄨˋ-ㄆㄥˊ\t酷澎\t-3.0\tnames\n")
+        self.assertEqual(lm_eval.overlay_words(oa, names=names), {"牠", "酷澎"})
+
+    def test_capping_words_default_is_overlay_add_plus_names_not_sandhi(self):
+        """ime.capping_words() 是 Python 呼叫端共用的封頂集合：overlay-add.tsv + names-add.tsv（Rust 的 capping_overlay），不含 sandhi-add.tsv。"""
+        lexdir = os.path.join(os.path.dirname(os.path.abspath(ime.__file__)), "..", "..", "data", "lexicon")
+        words = lambda f: {l.split("\t")[1] for l in open(os.path.join(lexdir, f), encoding="utf-8")}
+        got = ime.capping_words()
+        self.assertEqual(got, words("overlay-add.tsv") | words("names-add.tsv"))
+        self.assertTrue(words("names-add.tsv") and words("names-add.tsv") <= got)
 
     def test_capping_set_has_the_overlay_add_and_the_extra_words(self):
         oa = os.path.join(self.tmp.name, "data", "lexicon", "overlay-add.tsv")

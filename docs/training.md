@@ -34,8 +34,8 @@
 |---|---|---|
 | 詞類表 → 模型 | `classes.sjc` 檔頭記模型的 SHA-256；缺檔、配到別的模型、內容不對，載入都回 3 | 重建模型就要重建詞類表（`docs/data-files.md`「現在用的檔案」） |
 | 語意校正模型 → 模型 | `tinylm.sjtl` 檔頭記調參時用的模型的 SHA-256；不符時核心拒絕載入、只用 n-gram（`docs/data-files.md`） | 重建模型就要重新匯出、重新調參 |
-| 語意校正模型 → 詞類表 | **沒有檢查**，只在 α、τ、δ 的調法上依賴：它們是在 model-v5＋classes-v3 上調的 | 只換詞類表也要重調，雜湊攔不住這種錯配，只能靠 `docs/data-files.md` 的版本表 |
-| 語意校正 → Kneser–Ney 側檔 | `--tinylm` 要求 `kn.sjkn` 不能開（`experiments/s7a-tinylm/README.md`「S7c-1」）；〔推論〕原因是調參時沒有開，來源只寫了要求 | 之後若開 KN，融合參數要重調（見 §9） |
+| 語意校正模型 → 詞類表 | **沒有檢查**，只在 α、τ、δ 的調法上依賴：它們是在 model-v6＋classes-v4＋kn-v1 上調的（tinylm-v5） | 只換詞類表也要重調，雜湊攔不住這種錯配，只能靠 `docs/data-files.md` 的版本表 |
+| 語意校正 → Kneser–Ney 側檔 | SJTL0004 記調參時用的 `kn.sjkn` 的 SHA-256（全 0＝沒開 KN 時調的）；核心要求載入的側檔狀態和它相同，否則拒絕載入（`docs/contracts/model-v6.md` §2.7） | 換側檔就要重新調參、發新的 `tinylm-v…` |
 
 ### 1.3 改了什麼，要發哪些新 Release
 
@@ -258,7 +258,7 @@ python3 experiments/s7a-tinylm/export_sjtl.py --npz ~/.cache/shanjie/work/s7a/ti
 - **v2、v3、v4 與 v1 的權重相同**（同一個 `tinylm-M.npz`），只是檔頭的融合參數不同；v3 與 v2 的檔只差檔頭裡聊天的 α、τ（9 個 byte）（`docs/releases/tinylm-v2.md`、`tinylm-v3.md`）。所以換融合參數不需要重新訓練，只要重新匯出。
 - v3 的聊天值是在維護者私人訊息建的評測集上選的（檔案裡沒有任何訊息的文字，評測集不公開）。**repo 裡只有選出的值、判斷用的程式（`experiments/e2-chateval/judge.py`）與數字，沒有那份評測集**，所以別人無法用 repo 重選這三個數字（`docs/releases/tinylm-v3.md`、`CLAUDE.md`「私有資料」）。
 - 判斷期用過就退役，下一次要用新的月份（`e2-chat-eval.md` §2.1 的順序）。
-- 融合參數是在 model-v5＋classes-v3 上調的；換 n-gram 或詞類表就要重調（§1.2）。
+- 融合參數是在出貨的 n-gram 上調的（tinylm-v4 以前是 model-v5＋classes-v3，tinylm-v5 是 model-v6＋classes-v4＋kn-v1、KN 開著）；換 n-gram、詞類表或 KN 側檔就要重調（§1.2）。
 - v3 判斷期的結果：聊天改對 125／改壞 16、淨值 +109、改壞率 0.24%（`docs/releases/tinylm-v3.md`）。
 
 ### 5.6 試過、沒有出貨的方向

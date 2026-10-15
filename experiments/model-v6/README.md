@@ -4,6 +4,17 @@
 
 名單參數：`--extra-overlay data/lexicon/names-add.tsv` 在 `build_lm.py`、`build_classes.py`、`kn_cont.py` 三個都要帶，而且是**同一份**檔（異體類、封頂與產得出的詞三處才一致）；`lm_eval.py` 做跨語言核對時也帶它（契約 §2.3）。重現核對（契約 §2.1）**不帶**這個參數。
 
+PR 2（名單層常開）之後：`ime.OVERLAYS` 與核心的預設載入已經在 `sandhi-add.tsv` 之後讀 `names-add.tsv`，在那之後的 checkout 重跑上面這些指令要**拿掉** `--extra-overlay data/lexicon/names-add.tsv`：同一個檔再給一次是重複的列，`ime.Lexicon` 與核心都會報錯。拿掉之後，Python 工具讀到的疊加層清單和原本帶參數時相同（`ime.overlays()` 的結果是同一串檔案，讀程式碼得知，沒有重跑）；Rust CLI 不開詞包時也相同，開詞包時名單改在詞包之前。要量「沒有名單層」，Rust CLI 用 `--no-names`。
+
+## `overlay-add.tsv` 的兩個版本（契約 §2.8 規則 2）
+
+| 用途 | 版本 | SHA-256 |
+|---|---|---|
+| 計數（model-v6、classes-v4、kn-v1 的建置輸入） | commit `4d47a50` 的檔，`MANUAL_BONUS` 0.5 | `96b8db8914d7f71afbc74f3997ac661354997881f50b4aba0f163976bede1620` |
+| 執行時、golden 與評測 | `MANUAL_BONUS` 0.75 重建的檔（只有 7 列手動列的分數不同） | `34f7bbeb281512b912065684af96f7fc42def71e30d586e9af62111bf28e638e` |
+
+照這份 README 重現計數時，疊加層要用舊檔：`git show 4d47a50:data/lexicon/overlay-add.tsv`，不是 HEAD 的檔。兩個版本（都加上 `names-add.tsv`）的 `build_lm.variant_classes` 相同（研究紀錄 2026-10-14「修訂一的疊加層」）。
+
 ## 補次數檔（§2.1b）的生成指令
 
 在 Mac 跑（只呼叫 API，計算量小），金鑰只放進這一個程序的環境變數：

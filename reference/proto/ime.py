@@ -8,9 +8,19 @@ import os
 from collections import defaultdict
 
 DATA = os.path.join(os.path.dirname(__file__), "data", "mcbpmf-data.txt")
-# 核心 load_lexicon 載入的疊加層，依這個順序接在 data/lexicon/mcbpmf-data.txt 後面（S2r）。
+# 核心 load_lexicon 載入的疊加層，依這個順序接在 data/lexicon/mcbpmf-data.txt 後面（S2r；model-v6 §2.5 起名單層 names-add.tsv
+# 常開，接在 sandhi-add.tsv 之後）。建模工具（build_lm、build_classes、kn_cont）的異體類也用這份清單。
 _LEXDIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "data", "lexicon")
-OVERLAYS = [os.path.join(_LEXDIR, "overlay-add.tsv"), os.path.join(_LEXDIR, "sandhi-add.tsv")]
+OVERLAYS = [os.path.join(_LEXDIR, "overlay-add.tsv"), os.path.join(_LEXDIR, "sandhi-add.tsv"), os.path.join(_LEXDIR, "names-add.tsv")]
+
+
+# 封頂（lm.cap_overlay）用的詞集合只取這兩層：Rust 的 capping_overlay 同一組；sandhi-add.tsv 改的是變調讀音，不是新詞。
+CAPPING = [OVERLAYS[0], OVERLAYS[2]]
+
+
+def capping_words(extra=None, files=CAPPING):
+    """封頂詞集合的唯一來源：files（預設 CAPPING）各列第二欄的詞，加上 extra（`--extra-overlay FILE`）的詞。"""
+    return {l.split("\t")[1] for p in [*files, extra] if p for l in open(p, encoding="utf-8")}
 
 
 def overlays(extra=None):

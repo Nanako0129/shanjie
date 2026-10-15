@@ -13,7 +13,7 @@ fn root() -> PathBuf {
 }
 fn lm_path() -> PathBuf {
     let p = root().join("data/lm/bigram.sjlm");
-    assert!(root().join("data/lm/classes.sjc").exists(), "data/lm/classes.sjc is missing: download it with `gh release download classes-v3 -R Nanako0129/shanjie -p classes.sjc -D data/lm` (or build it with tools/build_classes.py)");
+    assert!(root().join("data/lm/classes.sjc").exists(), "data/lm/classes.sjc is missing: download it with `gh release download classes-v4 -R Nanako0129/shanjie -p classes.sjc -D data/lm` (or build it with tools/build_classes.py)");
     assert!(p.exists(), "data/lm/bigram.sjlm is missing (see engine_lm.rs)");
     p
 }
@@ -28,7 +28,7 @@ fn shared() -> &'static Shared {
     S.get_or_init(|| {
         let lex = load_lexicon(&root().join("data/lexicon")).unwrap();
         let lm = Lm::load(&lm_path()).unwrap();
-        let overlay = std::fs::read_to_string(root().join("data/lexicon/overlay-add.tsv")).unwrap();
+        let overlay = capping_overlay(&root().join("data/lexicon"), "").unwrap(); // as Engine::load_lm: overlay-add.tsv + names-add.tsv
         let capped = Arc::new(CappedLexicon::new(lex.clone(), &overlay, &lm, None).unwrap());
         Shared { lex, lm: Arc::new(lm), capped }
     })
@@ -819,7 +819,14 @@ fn row_decode_failure_does_not_learn() {
         failed |= e.key(key).is_err();
     }
     assert!(failed, "decode failure reported");
-    assert_eq!(type_syls(&mut e, "ㄅㄣ").preedit, "犇", "engine was reset");
+    // The engine was reset: ㄅㄣ decodes as on an engine that never failed. Until model-v6 that was 犇; with model-v6 and its
+    // Kneser-Ney side file the unlearned decode is 奔 (model-v6 section 2.8 acceptance 5), so the expectation comes from a fresh engine.
+    let fresh = {
+        let mut f = tiny(&format!("{TINY}ㄆㄧㄥˊ 平 -1.0\n"), TINY);
+        type_syls(&mut f, "ㄅㄣ").preedit
+    };
+    assert_eq!(fresh, "奔", "premise: the unlearned decode of ㄅㄣ on model-v6 with KN");
+    assert_eq!(type_syls(&mut e, "ㄅㄣ").preedit, fresh, "engine was reset");
     e.key(k(KeyKind::Enter)).unwrap();
     assert_eq!(n_records(&e), 0);
 }
@@ -1964,18 +1971,20 @@ fn rule8_zai_taught_at_sentence_start_does_not_bend_other_sentences() {
 
 /// Rule 8 still learns: the same next syllable boosts the word, another one does not. (The contract's
 /// example 我試試看 is already the unlearned default of the real model, so this teaches 我再 before 牛 instead.)
+/// The control sentence was 我在買 (ㄇㄞˇ) until model-v6, whose unlearned default there is already 我再買, so it could no
+/// longer show "not boosted"; 我在家 (ㄐㄧㄚ, unlearned default 我在家) is the control now (model-v6 section 2.8 acceptance 5).
 #[test]
 fn rule8_the_same_next_syllable_still_boosts() {
     const SAME: &str = "ㄨㄛˇ ㄗㄞˋ ㄋㄧㄡˊ ㄩˇ";
-    const OTHER: &str = "ㄨㄛˇ ㄗㄞˋ ㄇㄞˇ";
+    const OTHER: &str = "ㄨㄛˇ ㄗㄞˋ ㄐㄧㄚ";
     assert_eq!(baseline(SAME), "我在牛與", "precondition: the default is not already 我再牛與");
-    assert_eq!(baseline(OTHER), "我在買", "precondition");
+    assert_eq!(baseline(OTHER), "我在家", "precondition: the default is not already 我再家");
     let mut e = engine();
     repick_commit(&mut e, SAME, 2, "我再");
     let keys: Vec<_> = e.learner().records().iter().filter(|r| r.word == "我再").map(|r| r.context.as_str()).collect();
     assert_eq!(keys, ["^>ㄋㄧㄡˊ"], "precondition: recorded under the next syllable");
     assert_eq!(commit_of(&mut e, SAME), "我再牛與");
-    assert_eq!(commit_of(&mut e, OTHER), "我在買");
+    assert_eq!(commit_of(&mut e, OTHER), "我在家");
 }
 
 /// Rule 7: a single character after a one-character context is not learned (the key would be the whole

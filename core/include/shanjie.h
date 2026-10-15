@@ -36,7 +36,11 @@
  *  - shanjie_engine_load_lm also reads an optional kn.sjkn (Kneser-Ney side file, docs/contracts/kn-core.md) in
  *    the same directory. No such file: nothing changes. A file that exists but cannot be read, or does not
  *    match the model (magic, size, SHA-256, header values), fails the load with 3, never silently ignored.
- *    When it is present and valid it changes the scoring of every vocabulary word. The shipped app has none.
+ *    When it is present and valid it changes the scoring of every vocabulary word. The shipped app has one (kn-v1,
+ *    docs/contracts/model-v6.md).
+ *  - data_dir must hold names-add.tsv (the always-on common proper nouns, model-v6 section 2.5) next to overlay-add.tsv and
+ *    sandhi-add.tsv: shanjie_engine_new / _new_packs read it into the lexicon and shanjie_engine_load_lm reads it again to cap
+ *    its words like overlay-add.tsv's; missing or unreadable, either call fails with 3.
  *  - Load the LM once at startup while the composition is empty: loading does not recompute the
  *    current display; the next change to the composition decodes with the new model.
  *  - shanjie_engine_reset (both modes) and the automatic reset after code 4 clear the composition only;

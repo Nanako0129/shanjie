@@ -702,6 +702,9 @@ PROFILES2 = ["chat", "formal"]
 # Shipped settings (contract 2.1). `flags` and `tag` are two independent statements of the same thing on purpose: the CLI summary
 # line must carry `lm-<profile>` + `tag` (`{tl8}` = first 8 hex of the .sjtl), so a dropped flag or an auto-loaded kn.sjkn fails the cell. The comparison is exact, so a run with
 # `--rerank-level` other than standard (the CLI adds `+rl:<level>` after `+tl:`) fails it too: not the shipping setting.
+# A version that ships a Kneser-Ney side file (model-v6 and later) has `"kn": True`: its kn.sjkn (hash from that version's
+# data/kn.sjkn.sha256) goes into the model folder, so the CLI turns KN on as the App does, and its tag spells `+kn:{kn8}:θ<θ>:β<β>`
+# (`{kn8}` = first 8 hex of the side file) before `+tl:`. A version without the key gets no kn.sjkn, so an auto-loaded one still fails.
 # The App also learns locally, re-ranks asynchronously after every key, takes the context from the text field: the CLI does none of that.
 VERSIONS2 = {
     "v0.4.0": {"release": "v0.4.0", "flags": ["--context", "--packs", "acg"], "tinylm": False, "tag": "+ctx+acg"},
@@ -735,7 +738,7 @@ def version_labels(refs, as_):
 def resolve_models(ver, spec):
     """-> {file name: (path, sha256)}: hashes come from the exported version's data/*.sha256, files from MODELS/<sha256>/<name>."""
     out = {}
-    for n in ["bigram.sjlm", "classes.sjc"] + (["tinylm.sjtl"] if spec["tinylm"] else []):
+    for n in ["bigram.sjlm", "classes.sjc"] + (["kn.sjkn"] if spec.get("kn") else []) + (["tinylm.sjtl"] if spec["tinylm"] else []):
         f = os.path.join(ver.dir, "data", n + ".sha256")
         if not os.path.isfile(f):
             die(f"{ver.label}: the export has no data/{n}.sha256")
@@ -750,15 +753,17 @@ def resolve_models(ver, spec):
 
 
 def setup_models(ver, spec, td):
-    """A model folder with only bigram.sjlm and classes.sjc (the CLI loads classes.sjc beside --lm and turns KN on when it sees kn.sjkn)."""
+    """A model folder with only bigram.sjlm and classes.sjc, plus kn.sjkn for a version that ships one (the CLI loads classes.sjc beside
+    --lm and turns KN on when it sees kn.sjkn)."""
     ver.spec, ver.models = spec, resolve_models(ver, spec)
     d = os.path.join(td, ver.label)
     os.makedirs(d)
-    for n in ("bigram.sjlm", "classes.sjc"):
+    for n in ("bigram.sjlm", "classes.sjc") + (("kn.sjkn",) if spec.get("kn") else ()):
         os.symlink(ver.models[n][0], os.path.join(d, n))
     ver.lm = os.path.join(d, "bigram.sjlm")
     ver.tl = ver.models["tinylm.sjtl"][0] if spec["tinylm"] else None
     ver.tl8 = ver.models["tinylm.sjtl"][1][:8] if spec["tinylm"] else ""
+    ver.kn8 = ver.models["kn.sjkn"][1][:8] if spec.get("kn") else ""
 
 
 def ship_flags(ver, anchor):
@@ -770,8 +775,15 @@ def ship_flags(ver, anchor):
 
 
 def expected_tag(ver, prof, anchor):
-    t = ver.spec["tag"].format(tl8=ver.tl8)
+    t = ver.spec["tag"].format(tl8=ver.tl8, kn8=getattr(ver, "kn8", ""))
     return f"lm-{prof}" + (t.replace("+acg", "") if anchor else t)
+
+
+def replay_tag(ver):
+    """Setting tag of the replay-setting CLI cell (version's bigram + classes, nothing else): `lm-chat`, plus the version's own `+kn:...` part
+    when its model folder holds kn.sjkn (the CLI turns KN on beside the model, so the cell carries the same KN tag as the shipping cells)."""
+    kn = re.search(r"\+kn:[^+]*", ver.spec["tag"]) if ver.spec.get("kn") else None
+    return "lm-chat" + (kn.group().format(kn8=ver.kn8) if kn else "")
 
 
 def cli_env(anchor):
@@ -847,7 +859,7 @@ def measure_speed2(ctx, vers):
             try:
                 dump = os.path.join(td, v.label + ".dump")
                 tag = parse_summary(sh([v.cli, "--lm", v.lm, "--profile", "chat", "--rows", rows, "--dump", dump], cwd=v.dir, env=cli_env(False)))["tag"]
-                if tag != "lm-chat":
+                if tag != replay_tag(v):
                     raise RuntimeError("the replay-setting CLI cell carries setting tag " + tag)
                 want[v.sha] = [c[0] for c in read_dump(dump)]
             except Exception as e:
@@ -955,7 +967,7 @@ def cmd_run2(args):
         setup_models(v, VERSIONS2[v.label], td.name)
         rec = {"ref": v.ref, "version": v.label, "sha": v.sha, "lexicon_sha256": v.lexicon_sha,
                "models": {n: h for n, (_, h) in v.models.items()}, "flags": ship_flags(v, anchor) + (["--tinylm", "<file>"] if v.tl else []),
-               "tag": v.spec["tag"].format(tl8=v.tl8), "fingerprints": dict(ctx.fp), "accuracy": {}}
+               "tag": v.spec["tag"].format(tl8=v.tl8, kn8=getattr(v, "kn8", "")), "fingerprints": dict(ctx.fp), "accuracy": {}}
         result["versions"].append(rec)
 
         def one(n, p):
@@ -1056,7 +1068,7 @@ def render_v2(results):
                 L.append(head + f" {s['p95_us'] / 1000:.3f} ms | {s['max_us'] / 1000:.2f} ms | {s['load_ms']:.0f} ms | {s['rss_mb']:.0f} MB | {s['keys']} | {s['rows_match']} | {rr} |")
     L += ["", "### 量測規則（套件 v2）", "",
           "- 集合凍結：dev302、typing76、probe 與套件 v1 同檔；user-reported 是 `eval/dev/user-reported.txt` 76beb24 時的前 80 列、fw 是 `eval/rerank/s7e-function-words.txt`（兩者在 `eval/bench/suite-v2/`）；cvtune、wikitune、lytune、wikitypo 不進 repo；SHA-256 都寫死在工具裡。計分用套件 v1 的 `variants.tsv`。",
-          "- 每一版的模型雜湊取自該版 `data/*.sha256`，檔案由 main 放在 `~/.cache/shanjie/bench/models/<sha256>/`；工具為每版組只含 `bigram.sjlm` 與 `classes.sjc` 的資料夾，不讓 CLI 自動載入 `kn.sjkn`。",
+          "- 每一版的模型雜湊取自該版 `data/*.sha256`，檔案由 main 放在 `~/.cache/shanjie/bench/models/<sha256>/`；工具為每版組只含 `bigram.sjlm` 與 `classes.sjc` 的資料夾（出貨帶 `kn.sjkn` 的版本，model-v6 起，另放它自己的 `kn.sjkn`，CLI 在模型旁自動開 KN；沒有的版本不放，所以自動載入 `kn.sjkn` 會讓該格失敗）。",
           "- 每一格的 CLI 摘要行設定標記必須等於工具裡設定表推出的字串，不符就該格失敗。沒有 `--tinylm` 的格另從 dump 重算 top1，要和 rowstats 逐列相同。",
           "- 重跑：`tools/bench.py run --suite v2 <上一版 tag> <commit> --as <新版> --private-root <目錄>`，再 `tools/bench.py table`。新版要先在工具的 `VERSIONS2` 加一列（Release 名、出貨旗標、摘要行設定標記）。`--override-packs off` 是對 S7h 錨點的檢查（只有 v0.4.0、v0.4.1），不寫結果。", ""]
     return "\n".join(L)

@@ -26,7 +26,7 @@ def lexicon_words():
         f = l.split()
         if len(f) == 3 and l[0] not in "#_":
             words.add(f[1])
-    for f in ("overlay-add.tsv", "sandhi-add.tsv"):
+    for f in ("overlay-add.tsv", "sandhi-add.tsv", "names-add.tsv"):
         words |= second_column(os.path.join(B.LEX, f))
     return words
 
@@ -185,6 +185,16 @@ class Rules(unittest.TestCase):
         open(bad, "w", encoding="utf-8").write("作品\t碇系\tEVA\tincluded\t動畫\n")
         with self.assertRaises(SystemExit):
             B.read_groups(bad)
+
+
+class LexiconWords(unittest.TestCase):
+    def test_names_layer_words_count_as_already_in_the_lexicon(self):
+        """names-add.tsv is always on and loads before the packs: a pack row with a names word would duplicate it."""
+        names = second_column(os.path.join(B.LEX, "names-add.tsv"))
+        self.assertTrue(names)
+        self.assertLessEqual(names, B.lexicon_words())
+        w = sorted(names)[0]
+        self.assertEqual(B.dedupe([w, "碇源堂"], B.lexicon_words()), ["碇源堂"])
 
 
 class Dedupe(unittest.TestCase):
@@ -585,6 +595,28 @@ class Build(unittest.TestCase):
             self.assertEqual(bad, [], prof)
 
 
+class TopOneKneserNeyTest(unittest.TestCase):
+    """model-v6 §3.3: the pinned rule model decodes with --no-kn and --no-names; the shipped data/lm (--recheck) decodes like the shipped App."""
+
+    def flags(self, lm):
+        seen = []
+        def fake_run(cmd, **kw):
+            seen.append(cmd)
+            with open(cmd[cmd.index("--dump") + 1], "w", encoding="utf-8") as f:
+                f.write("1\t1\t甲\t-1.0\n")
+        with mock.patch.object(B.subprocess, "run", fake_run), mock.patch.object(B, "eval_bin", lambda: "shanjie-eval"):
+            self.assertEqual(B.top1([("甲", ["ㄐㄧㄚˇ"])], "chat", lm=lm), ["甲"])
+        return seen[0]
+
+    def test_rule_model_turns_kneser_ney_and_names_off_and_the_shipped_model_does_not(self):
+        rule = self.flags(B.RULE_LM_DIR + "/bigram.sjlm")
+        self.assertIn("--no-kn", rule)
+        self.assertIn("--no-names", rule)
+        shipped = self.flags(B.LM)
+        self.assertNotIn("--no-kn", shipped)
+        self.assertNotIn("--no-names", shipped)
+
+
 # ---- A3 (docs/contracts/acg-pack.md A3.5 item 7): fake HTML and a fake decoder, no network
 
 R_A3 = "ㄚ ㄎㄨˋ ㄌㄟˊ ㄊㄜˋ"          # 阿庫雷特 的讀音
@@ -802,10 +834,13 @@ class A3(unittest.TestCase):
         self.assertEqual(len(kept), 178)                                      # 契約 A3.3a
         self.assertTrue(all(w in pack and r in pack[w] for r, w, _ in kept))
         both = B.read_keep_both(os.path.join(B.PACKS, "acg-keep-both.tsv"))
-        self.assertEqual((len(both), len({r for r, _ in both})), (169, 97))        # 契約 A3.3a 的 49 個詞、28 組讀音，加 A3 修正輪的 120 個詞、69 組讀音（全是新詞的讀音，與 3 組新舊詞包第一名相同的）
+        self.assertEqual((len(both), len({r for r, _ in both})), (235, 129))       # 契約 A3.3a 的 49 個詞、28 組讀音，加 A3 修正輪的 120 個詞、69 組讀音（全是新詞的讀音，與 3 組新舊詞包第一名相同的），加 model-v6 §3.3 的 66 個詞、32 組讀音
         self.assertTrue({(r, w) for r, w in both if w in ("坂木", "阪木", "加米", "嘉米", "愛莉卡", "艾莉卡", "艾利卡")} and len(both) >= 49)
         self.assertTrue(all(r in pack.get(w, ()) for r, w in both), sorted((r, w) for r, w in both if r not in pack.get(w, ())))
-        self.assertTrue(set(B.load_v040()) <= set(pack))                       # v0.4.0 的詞一個都不能少
+        dropped = B.model_v6_dropped()
+        self.assertEqual(len(dropped), 106)                                   # model-v6 §3.3（使用者 2026-10-15）：A2 規則排除的類型 (c)，105 個加第二輪的 1 個
+        self.assertTrue(set(B.load_v040()) - dropped <= set(pack))             # v0.4.0 的詞一個都不能少，A2 規則排除的除外
+        self.assertFalse(dropped & set(pack))
         self.assertIn("ㄩˋ ㄇㄣˊ ㄐㄧㄤ", pack["獄門疆"])                          # 契約 A3.4
         self.assertTrue({"ㄏㄨ ㄓㄤˋ ㄧㄡ ㄖㄣˊ", "ㄏㄨˇ ㄓㄤˋ ㄧㄡ ㄖㄣˊ"} <= pack["虎杖悠仁"])
         self.assertNotIn("艾文斯", pack)                                           # 契約 A3：新詞若在 model-v5 擠下詞庫的詞就不收（kb 例外只給已出貨的詞）

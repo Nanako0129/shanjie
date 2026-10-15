@@ -13,8 +13,8 @@ fn root() -> PathBuf {
 }
 fn lm_path() -> PathBuf {
     let p = root().join("data/lm/bigram.sjlm");
-    assert!(root().join("data/lm/classes.sjc").exists(), "data/lm/classes.sjc is missing: download it with `gh release download classes-v3 -R Nanako0129/shanjie -p classes.sjc -D data/lm` (or build it with tools/build_classes.py)");
-    assert!(p.exists(), "data/lm/bigram.sjlm is missing: download it with `gh release download model-v5 -R Nanako0129/shanjie -p bigram.sjlm -D data/lm`");
+    assert!(root().join("data/lm/classes.sjc").exists(), "data/lm/classes.sjc is missing: download it with `gh release download classes-v4 -R Nanako0129/shanjie -p classes.sjc -D data/lm` (or build it with tools/build_classes.py)");
+    assert!(p.exists(), "data/lm/bigram.sjlm is missing: download it with `gh release download model-v6 -R Nanako0129/shanjie -p bigram.sjlm -D data/lm`");
     p
 }
 
@@ -29,7 +29,7 @@ fn shared() -> &'static Shared {
     S.get_or_init(|| {
         let lex = load_lexicon(&root().join("data/lexicon")).unwrap();
         let lm = Lm::load(&lm_path()).unwrap();
-        let overlay = std::fs::read_to_string(root().join("data/lexicon/overlay-add.tsv")).unwrap();
+        let overlay = capping_overlay(&root().join("data/lexicon"), "").unwrap(); // as Engine::load_lm: overlay-add.tsv + names-add.tsv
         let capped = Arc::new(CappedLexicon::new(lex.clone(), &overlay, &lm, None).unwrap());
         Shared { lex, lm: Arc::new(lm), capped }
     })
@@ -201,8 +201,9 @@ fn row(n: usize) -> (String, Syls) {
 #[test]
 fn fixed_overlay_word_total_equals_whole_sentence_top1() {
     let s = shared();
-    // rows whose chat top-1 contains an overlay word: 洗衣球, 隔熱墊, 防滑墊, 手搖杯, 空氣炸鍋
-    for (n, word) in [(276, "洗衣球"), (278, "隔熱墊"), (281, "防滑墊"), (290, "手搖杯"), (292, "空氣炸鍋")] {
+    // rows whose chat top-1 contains an overlay word: 洗衣球, 隔熱墊, 防滑墊, 空氣炸鍋 (手搖杯, row 290, left in model-v6: its corpus
+    // frequency is now within 0.1 of its overlay score, so the cap no longer moves it)
+    for (n, word) in [(276, "洗衣球"), (278, "隔熱墊"), (281, "防滑墊"), (292, "空氣炸鍋")] {
         let (_, syls) = row(n);
         let (surface, score, spans) = best_path(&syls, Profile::Chat);
         let &(_, a, b) = spans.iter().find(|(w, _, _)| w == word).expect("word is in the top-1 path");
@@ -520,7 +521,8 @@ fn dev302_ctx() -> Vec<String> {
 /// `top1_sha256` of a summary line of eval/golden/s2h-lm-context.txt (Python output, equal to `cli --context`).
 fn context_golden_sha(profile: &str) -> String {
     let t = std::fs::read_to_string(root().join("eval/golden/s2h-lm-context.txt")).unwrap();
-    let line = t.lines().find(|l| l.starts_with(&format!("## dev302  lm-{profile}+ctx  "))).unwrap();
+    // `lm-chat+ctx+kn:…` since model-v6 (kn.sjkn beside the model); the file has one dev302 line per profile.
+    let line = t.lines().find(|l| l.starts_with(&format!("## dev302  lm-{profile}+ctx"))).unwrap();
     line.split("'top1_sha256': '").nth(1).unwrap().trim_end_matches("'}").to_string()
 }
 

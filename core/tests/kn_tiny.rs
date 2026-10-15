@@ -179,3 +179,69 @@ fn decode_matches_python_byte_for_byte() {
     }
     assert_eq!(got, want);
 }
+
+/// model-v6 section 2.8 rule 1 (acceptance 2): in one decode, one segment and one context, the reading ㄓㄢˋ has two vocabulary
+/// entries; only 佔 has a learned record (boosted), 占 has none. The boosted entry's word term is the one without the side file
+/// (the boosted pb is kept), the other one's is the Kneser-Ney one. Each one-word path's score is word term + eos.
+#[test]
+fn learned_entry_skips_kneser_ney_and_its_neighbour_does_not() {
+    use core::learn::{context_key, Learner};
+    use core::lm::{decode_segment_learned, End, Learn, LEARN_EPS_GLOBAL};
+    let (on, off) = (lm_with(Some(&bytes("kn.sjkn")), true).unwrap(), lm_with(None, true).unwrap());
+    let lex = Arc::new(Lexicon::parse_with("ㄓㄢˋ 占 -3.0\nㄓㄢˋ 佔 -3.5\n", None).unwrap());
+    let capped = CappedLexicon::new(lex, "", &on, None).unwrap();
+    let reading = vec!["ㄓㄢˋ".to_string()];
+    let (before, today) = ("我們", 20_000);
+    let mut learner = Learner::from_records(Vec::new());
+    assert!(!learner.teach(&context_key(before), &reading, "佔", "占", today).is_empty(), "premise: a context record for 佔");
+    let learn = Learn { learner: &learner, before, after: None, today, eps_global: LEARN_EPS_GLOBAL };
+    let lam = Profile::Chat.lambda();
+    let nb = decode_segment_learned(&capped, &reading, &on, lam, "<s>", End::Eos, 64, Some(&learn), true).unwrap();
+    let path = |w: &str| nb.iter().find(|(_, ws)| ws.len() == 1 && ws[0].0 == w).map(|(s, ws)| (*s, ws[0].1)).unwrap();
+    let ((s_learned, lp_learned), (s_plain, lp_plain)) = (path("佔"), path("占"));
+    assert!(lp_learned > -3.5 && lp_plain == -3.0, "premise: only 佔 is boosted ({lp_learned}, {lp_plain})");
+    let want_learned = off.word(lam, "<s>", "佔", lp_learned) + on.eos(lam, "佔");
+    let want_plain = on.word(lam, "<s>", "占", lp_plain) + on.eos(lam, "占");
+    assert!((on.word(lam, "<s>", "佔", lp_learned) - off.word(lam, "<s>", "佔", lp_learned)).abs() > 1e-3, "premise: KN changes the term");
+    assert!((on.word(lam, "<s>", "占", lp_plain) - off.word(lam, "<s>", "占", lp_plain)).abs() > 1e-3, "premise: KN changes the term");
+    close(s_learned, want_learned);
+    close(s_plain, want_plain);
+    close(on.word_learned(lam, "<s>", "佔", lp_learned), off.word(lam, "<s>", "佔", lp_learned));
+}
+
+/// model-v6 section 2.8 acceptance 2b: with the side file on and a learned (boosted) word on the best path, `Engine::total_score`
+/// still equals the score of the decoder's first path (s3a), because it applies the same exception. The word is taught through the
+/// engine (pick 佔 over 占 after the context 我們, Enter), then typed again: the decode shows it with a boosted lp.
+#[test]
+fn total_score_equals_the_top_decode_with_a_learned_word_and_kn_on() {
+    use core::engine::{Engine, Key, KeyKind, Layout};
+    use core::lm::{decode_segment_learned, history, End, Learn, LEARN_EPS_GLOBAL};
+    let on = Arc::new(lm_with(Some(&bytes("kn.sjkn")), true).unwrap());
+    let lex = Arc::new(Lexicon::parse_with("ㄓㄢˋ 占 -3.0\nㄓㄢˋ 佔 -3.5\n", None).unwrap());
+    let capped = Arc::new(CappedLexicon::new(lex.clone(), "", &on, None).unwrap());
+    let (left, today, l) = ("我們", 20_000, Layout::Standard);
+    let mut e = Engine::with_lexicon(lex, l);
+    e.set_lm(on.clone(), capped.clone());
+    e.set_learning(true);
+    e.set_today(Some(today));
+    let type_zhan = |e: &mut Engine| {
+        e.set_left_context(left);
+        e.key(Key::ch(l.key_of_symbol('ㄓ').unwrap(), 0)).unwrap();
+        e.key(Key::ch(l.key_of_symbol('ㄢ').unwrap(), 0)).unwrap();
+        e.key(Key::ch(l.key_of_tone('ˋ').unwrap(), 0)).unwrap()
+    };
+    assert_eq!(type_zhan(&mut e).preedit, "占", "premise: unlearned, 占 is first");
+    let o = e.key(Key::new(KeyKind::Down)).unwrap();
+    let at = o.candidates.iter().position(|c| c == "佔").expect("佔 is a candidate");
+    e.pick(at).unwrap();
+    e.key(Key::new(KeyKind::Enter)).unwrap();
+    assert!(e.learner().records().iter().any(|r| r.word == "佔"), "premise: 佔 was learned");
+    assert_eq!(type_zhan(&mut e).preedit, "佔", "premise: the learned word is on the best path");
+    let learn = Learn { learner: e.learner(), before: left, after: None, today, eps_global: LEARN_EPS_GLOBAL };
+    let lam = Profile::Chat.lambda();
+    let reading = vec!["ㄓㄢˋ".to_string()];
+    let nb = decode_segment_learned(&capped, &reading, &on, lam, history(left, &on), End::Eos, 64, Some(&learn), true).unwrap();
+    assert_eq!(nb[0].1[0].0, "佔");
+    assert!(nb[0].1[0].1 > -3.5, "premise: boosted");
+    close(e.total_score().unwrap(), nb[0].0);
+}

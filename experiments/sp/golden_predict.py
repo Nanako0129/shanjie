@@ -1,5 +1,5 @@
 """V3 核心的 golden（docs/contracts/v3-core-predict.md §3）：用 predict3.reference／order_s 產生 eval/golden/sp-predict.txt。
-Rust 的 `shanjie-eval --predict` 讀這個檔的查詢行，輸出同格式，cli/tests/golden.rs 逐項比對。依賴模型（data/lm/bigram.sjlm）；換模型時重產：
+Rust 的 `shanjie-eval --predict` 讀這個檔的查詢行，輸出同格式，cli/tests/golden.rs 逐項比對。依賴模型（data/lm/ 的 bigram.sjlm、classes.sjc 與模型旁邊的 kn.sjkn）；換模型時重產：
   python3 experiments/sp/golden_predict.py
 """
 import os
@@ -12,7 +12,7 @@ from predict import L, ROOT, scores, succ_words  # noqa: E402
 
 OUT = os.path.join(ROOT, "eval", "golden", "sp-predict.txt")
 LIMIT = 9
-HEAD = """# V3 核心預測 golden（experiments/sp/golden_predict.py 產生，chat 設定，lambda 0.5，依賴 data/lm/bigram.sjlm，雜湊見 data/bigram.sjlm.sha256；換模型時重產）
+HEAD = """# V3 核心預測 golden（experiments/sp/golden_predict.py 產生，chat 設定，lambda 0.5，依賴 data/lm/ 的 bigram.sjlm、classes.sjc 與 kn.sjkn（模型旁邊的側檔，載入與 App 的預測列相同），雜湊見 data/*.sha256；換模型時重產）
 # 查詢行：`## <模式>\\t<歷史詞>\\t<按鍵（縮寫單位序列是 -）>\\t<單位序列>`。單位序列：空白分隔的 `字元/完成旗標/聲調`（聲調空白是一聲）。
 # 候選行：`詞\\t分數(Python repr)\\t是否後繼詞(1/0)`，依 S 順序的前 9 個。
 """
