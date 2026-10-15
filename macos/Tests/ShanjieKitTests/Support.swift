@@ -344,7 +344,8 @@ final class FreeCounter: @unchecked Sendable {
 }
 
 /// dev302 row 65 (s7c2b section 2.5, revised 2026-10-12, the selftest's sentence): in the chat profile the n-gram's first is 在,
-/// the small model picks 再, under tinylm-v2, tinylm-v3 and tinylm-v4 alike (RerankTests, 2026-10-13; v4: CLI and these tests, 2026-10-14). Row 25 (執行這個城市 -> 程式) was this
+/// the small model picks 再, under tinylm-v2, tinylm-v3 and tinylm-v4 alike (RerankTests, 2026-10-13; v4: CLI and these tests, 2026-10-14); under model-v6 + kn-v1 +
+/// tinylm-v5 (chat standard 0.3/2/0.25) the RerankTests passed on 2026-10-15 (`make test-swift`). Row 25 (執行這個城市 -> 程式) was this
 /// sentence under tinylm-v1; v2's strict chat values did not change it, v3's do again (`DeviceRow` below).
 enum RerankRow {
     static let zhuyin = "ㄨㄛˇ ㄉㄥˇ ㄧ ㄒㄧㄚˋ ㄗㄞˋ ㄍㄨㄛˋ ㄑㄩˋ"

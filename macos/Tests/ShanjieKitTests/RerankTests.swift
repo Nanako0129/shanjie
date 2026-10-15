@@ -469,9 +469,13 @@ final class RerankTests: XCTestCase {
 
     // MARK: the strength (docs/contracts/rerank-strength.md section 3)
 
-    /// Two Resources directories from the real data/lm/tinylm.sjtl, whichever version ships: one with it as version 2, one as
-    /// version 3 whose four extra sets equal the standard ones (section 3: v2 -> v3 inserts at 116 the chat standard triple twice,
-    /// then the formal one twice, and relabels; v3 -> v2 drops bytes 116..<212 and relabels).
+    /// Two Resources directories from the real data/lm/tinylm.sjtl, whichever version ships: one with it as version 2 (the standard
+    /// sets only), one as version 3. From a version 2 file the version 3 one has four extra sets equal to the standard ones (section 3:
+    /// v2 -> v3 inserts at 116 the chat standard triple twice, then the formal one twice, and relabels; v3 -> v2 drops bytes 116..<212
+    /// and relabels). From a version 3 file it is the file itself. From a version 4 file (SJTL0004, tinylm-v5) it is the file without its
+    /// 32 kn.sjkn hash bytes (212..<244), relabelled, so its conservative and aggressive sets are tinylm-v5's real values, not copies of
+    /// the standard ones (chat conservative 1/2/3, aggressive equal to standard; formal standard 1/1/3, conservative 1/1/4).
+    /// Under model-v6 + kn-v1 + tinylm-v5 (chat standard 0.3/2/0.25) the RerankTests passed on 2026-10-15 (`make test-swift`).
     private func versionedResources() throws -> (v2: URL, v3: URL) {
         let real = try Data(contentsOf: TestData.repo.appendingPathComponent("data/lm/tinylm.sjtl"))
         let label = { (data: Data, version: UInt8) -> Data in

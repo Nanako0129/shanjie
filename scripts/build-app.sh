@@ -131,7 +131,7 @@ names-add.tsv: common proper nouns (brands, shops, companies, schools), always
       Neither the copyright holder nor its contributors endorse this product.
   (2) Wikipedia contributors (CC BY-SA 4.0); Wikidata structured data is CC0.
   (3) 教育部統計處〈大專校院名錄〉（資料集 6091）與〈一般高級中等學校名錄〉（資料集 6089），
-      2026 年 10 月取得，學年度見 names.json 的 moe；此開放資料依政府資料開放授權條款
+      2026 年 10 月取得，兩份名錄皆為 115 學年度（專案儲存庫 data/lexicon/names.json 的 moe 欄記有檔案與學年度）；此開放資料依政府資料開放授權條款
       (Open Government Data License) 進行公眾釋出，使用者於遵守本條款各項規定之前提下，
       得利用之（https://data.gov.tw/license ）。
 demote.tsv: written for this project; no third-party data.

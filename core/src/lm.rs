@@ -894,8 +894,8 @@ pub fn decode_segment_learned<'a>(
                     }
                     // model-v6 section 2.8 rule 1: a boosted entry skips the Kneser-Ney substitution (its boosted pb would be replaced
                     // by N'/sum(N') and the boost would shrink to the (1 - lam) * lp part); every other entry is scored as before.
-                    let p = if was_boosted { lm.prob_learned(h.ctx, wid, pb) } else { lm.prob_c(h.ctx, wid, pb) };
-                    let sc = h.score + (word_term(lam, p, lp) - delta);
+                    let prob = if was_boosted { lm.prob_learned(h.ctx, wid, pb) } else { lm.prob_c(h.ctx, wid, pb) };
+                    let sc = h.score + (word_term(lam, prob, lp) - delta);
                     let key = (format!("{}{word}", h.surface), word);
                     match idx.get(&key).copied() {
                         Some(q) if !(sc > cand[q].score) => {}

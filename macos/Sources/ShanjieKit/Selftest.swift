@@ -24,7 +24,8 @@ public enum Selftest {
     /// s7c2b section 2.5 (revised 2026-10-12): dev302 row 65 `ㄨㄛˇ ㄉㄥˇ ㄧ ㄒㄧㄚˋ ㄗㄞˋ ㄍㄨㄛˋ ㄑㄩˋ` on the standard layout, chat
     /// profile, no left context, the bundled pack loaded; a space is the first tone. The n-gram's first is 我等一下在過去; the small
     /// model picks 我等一下再過去, tinylm-v2 (2026-10-12), tinylm-v3 (2026-10-13) and tinylm-v4 (2026-10-14; its standard level equals v3's) alike: measured by this selftest under these
-    /// conditions (SelftestTests) and by RerankTests without the pack. Row 25 (執行這個城市 -> 程式), the sentence under tinylm-v1,
+    /// conditions (SelftestTests) and by RerankTests without the pack. Under model-v6 + kn-v1 + tinylm-v5 (chat standard 0.3/2/0.25)
+    /// `SelftestTests.testPassesWithTheFullResources` and the RerankTests passed on 2026-10-15 (`make test-swift`). Row 25 (執行這個城市 -> 程式), the sentence under tinylm-v1,
     /// stayed 城市 under v2 in the same XCTest run (14 failures before the swap); v3 changes it again, and it is the device sentence
     /// (s7h section 1, `DeviceRow` in the tests). A different condition, for context only, under v2: the CLI with `--profile chat
     /// --context --tinylm` and no pack gave top1 0 -> 4 on rows 25, 27, 46, 49 and 65, row 25 being the one that did not change.
