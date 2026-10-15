@@ -22,7 +22,7 @@
   - 排序與理由記在研究紀錄同日一節。
 - 體積：
   - model-v6 的模型檔：`bigram.sjlm` 83,445,569 bytes、`tinylm.sjtl` 14,638,352、`classes.sjc` 5,656,826、`kn.sjkn` 1,414,052。
-  - v0.4.3 的安裝 zip 是 52,198,049 bytes。
+  - v0.4.3 的 App zip（`shanjie-0.4.3.zip`）是 52,198,049 bytes。
   - SJLM 的每個 bigram 條目是 `next_id u32 + count u32`，8 bytes、未壓縮。
   - Discord 上有人提議參考壓縮的做法，所以壓縮列為 E1c。
 - 原本建議的「功能字分類器」改成 E4，理由：
@@ -69,7 +69,7 @@
 
 **E1a 計數**
 
-- Colab G4（177 GB 記憶體、48 執行緒）照 model-v6 的配方與輸入（`experiments/model-v6/README.md` 步驟 1）：同一份斷詞詞彙、`--expected`、口語 ×5，**維基 20 萬篇全量**加口語，多算一張 trigram 表。
+- Colab G4（48 執行緒）照 model-v6 的配方與輸入（`experiments/model-v6/README.md` 步驟 1）：同一份斷詞詞彙、`--expected`、口語 ×5，**維基 20 萬篇全量**加口語，多算一張 trigram 表。
 - 計數程式加 trigram 的部分寫在 `experiments/derisk-1015/`，不改 `experiments/s2/` 既有程式的預設行為。
 - 同一次計數輸出兩份：
   - 未對應版：給 E1 與 E4 (b) 的對照。
@@ -255,7 +255,7 @@
 - 保留集換新：Fable 估計保留集至少已經用了 7 次。和這片並行另寫契約，E2 的正式那一片開之前一定要做完。
 - P1a 式的功能字分類器：已觸發停止規則。
 - 用資料估的通道模型：Fable 判斷沒有資料來源（研究紀錄 2026-10-15）。
-- kn-rerun 契約裡的 tinylm 四臂與 `--no-classes` 對照：E1 只做 n-gram 的 λ×β。
+- PLAN「Kneser–Ney 平滑重開」一項（還沒寫契約）裡的 tinylm 四臂與 `--no-classes` 對照：E1 只做 n-gram 的 λ×β。
 
 ## 7. 負責人
 
