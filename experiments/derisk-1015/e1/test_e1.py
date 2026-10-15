@@ -28,6 +28,7 @@ import count  # noqa: E402
 import grid  # noqa: E402
 import harness  # noqa: E402
 import mapping  # noqa: E402
+import prune  # noqa: E402
 import rowstats_concat  # noqa: E402
 import subset_rowstats  # noqa: E402
 import sjlm_io  # noqa: E402
@@ -349,6 +350,31 @@ class TestTrigramModel(Fixture):
                         pb = float(rng.uniform(1e-4, 1e-1))
                         self.assertAlmostEqual(tl.prob(u, v, w, pb), ref._p(v, w, pb, u), delta=1e-12, msg=(thr, u, v, w))
 
+    def test_prune_from_the_stored_table_is_byte_identical_to_building_it(self):
+        rng = np.random.RandomState(7)
+        V, n = 12, 400
+        keys = np.unique(rng.randint(0, V ** 3, n)).astype(np.uint64)
+        u, v, w = (keys // (V * V)).astype(np.uint32), ((keys // V) % V).astype(np.uint32), (keys % V).astype(np.uint32)
+        c = rng.geometric(0.5, len(keys)).astype(np.int64)
+        c[(u == 0) & (v == 0)] = 1                                  # one context whose entries all vanish at thr >= 2
+        tb = trimodel.TriBuild(u, v, w, c, V)
+        sha = bytes(range(32))
+        full = sjlm_io.read_tri(sjlm_io.write_tri(tb.tables(1, sha)))
+        for t in (1, 2, 3, 5, 8, 100):
+            direct = sjlm_io.write_tri(tb.tables(t, sha))
+            self.assertEqual(sjlm_io.write_tri(prune.prune(full, t)), direct, msg=t)
+            again = sjlm_io.read_tri(sjlm_io.write_tri(tb.tables(2, sha)))     # pruning a pruned table also agrees
+            if t >= 2:
+                self.assertEqual(sjlm_io.write_tri(prune.prune(again, t)), direct, msg=t)
+        self.assertLess(tb.stats(3)[0], tb.stats(1)[0])             # some contexts really were emptied
+        self.assertEqual(tb.stats(100)[0], 0)
+        with tempfile.TemporaryDirectory() as d:
+            src, out = os.path.join(d, "t1.sjt3"), os.path.join(d, "t3.sjt3")
+            open(src, "wb").write(sjlm_io.write_tri(tb.tables(1, sha)))
+            prune.main(["--tri", src, "--thr", "3", "--out", out])
+            self.assertEqual(slurp(out, "rb"), sjlm_io.write_tri(tb.tables(3, sha)))
+            self.assertEqual(json.load(open(out + ".json"))["tri_bytes"], tb.size(3))
+
     def test_table_size_formula_is_the_file_size(self):
         d = self.tri_dir
         info = json.loads(slurp(os.path.join(d, "tri-sizes.json")))
@@ -492,6 +518,7 @@ class TestRowstatsAndGrid(Fixture):
         a, b = [(1, 0, 3), (0, 2, 4)], [(1, 0, 5)]
         self.assertEqual(rowstats_concat.concat_rows([a, b]), "1\t1\t0\t3\n2\t0\t2\t4\n3\t1\t0\t5\n")
         self.assertEqual(rowstats_concat.JUDGE5, ("dev302", "typing76", "user-reported", "lytune", "wikitypo"))
+        self.assertEqual(rowstats_concat.GROUPS["judge4"], ("dev302", "typing76", "user-reported", "wikitypo"))
         self.assertEqual(rowstats_concat.GROUPS["all"], ("cvtune", "wikitune") + rowstats_concat.JUDGE5)
         with tempfile.TemporaryDirectory() as d:
             for arm in ("base", "cand"):

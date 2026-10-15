@@ -14,7 +14,8 @@ from evalstats import read_rowstats  # noqa: E402
 
 TUNE = ("cvtune", "wikitune")
 JUDGE5 = ("dev302", "typing76", "user-reported", "lytune", "wikitypo")   # contract §2: dev302, typing test, typo reports, lytune, wikitypo
-GROUPS = {"tune": TUNE, "judge5": JUDGE5, "all": TUNE + JUDGE5}
+JUDGE4 = tuple(n for n in JUDGE5 if n != "lytune")   # E1d, report only: lytune is 88% of judge5
+GROUPS = {"tune": TUNE, "judge5": JUDGE5, "judge4": JUDGE4, "all": TUNE + JUDGE5}
 
 
 def concat_rows(row_lists):

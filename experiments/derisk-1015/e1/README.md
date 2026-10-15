@@ -194,3 +194,87 @@ for P in chat formal; do for S in cvtune wikitune dev302 typing76 user-reported 
 ```
 
 (ii)：每個位元數、每個集合各自 `evalstats compare`（BASE ＝ 同一個選定點的未壓縮 `T$THR`，CAND ＝ `Z8`／`Z4`），每集兩種設定、加 discordtune，全不顯著為負才列為候選格式。B0 的壓縮同理（不帶 `--tri`、用 B0 的選擇 JSON）。`--tri` 的 judge 在 `Z0` 要等於 `T$THR`：多一個保險是 `Z0` 的 `judge.json` 的 `top1_sha256` 和 `T$THR` 的相同。
+
+## E1d 固定出貨點重判（契約 `derisk-1015.md` §3 E1「E1d」，修訂三）
+
+不選值：T_k 在 B0ship 的出貨點（chat λ 0.5、formal λ 0.7、β 1、`--no-classes`），集合檔與 B0ship 逐一相同。BASE ＝ `B0ship`（rowstats 已有）。檔：T1、T2、T3、T15、T5、T8。剪法不需要計數：`prune.py` 從 T1 的表直接剪（保留次數 ≥ 門檻的條目、前文總次數不變、沒有保留條目的前文不存、檔頭不變），和 `TriBuild.tables` 同一條規則（`test_e1` 的 `test_prune_from_the_stored_table_is_byte_identical_to_building_it` 驗逐位元組相同）。
+
+**判讀**：a = 0.05 ÷ 6 檔 ≈ 0.0083。某一檔通過 ＝ 判讀五集（dev302、typing76、user-reported、lytune、wikitypo 依序串接）在兩種設定之一顯著為正（改對 > 改壞、精確 McNemar p < a），另一種不顯著為負（改壞 > 改對 且 p < 0.05 才算顯著為負），而且兩種設定的 discordtune 都不顯著為負。只報不判：每個集合各自一行、判讀五集去掉 lytune 的串接（`--group judge4`）、T1 formal 在 λ 0.8 的一行。
+
+Windows 機器的 WSL，依序執行（`R`、`M`、`REPO`、`E1` 同上面幾節；`B0SHIP=$R/judge/B0ship`；`FROZEN` 是放凍結集合檔的資料夾；`<cvtune.txt>` 等路徑同前面幾節；`<discordtune.txt>` 是私人路徑）。任何一步失敗就停。
+
+```
+set -e
+# (a) 剪枝。T2、T3、T15 必須和 E1b 的檔逐位元組相同，不同就停（set -e）。
+T1=$M/tri/tri-t1.sjt3; BG=$M/b0/bigram.sjlm; mkdir -p $R/e1d/tri
+for THR in 2 3 15; do
+  python3 $E1/prune.py --tri $T1 --thr $THR --out $R/e1d/tri/tri-t$THR.sjt3 --bigram $BG
+  cmp $R/e1d/tri/tri-t$THR.sjt3 $M/tri/tri-t$THR.sjt3
+done
+for THR in 5 8; do python3 $E1/prune.py --tri $T1 --thr $THR --out $R/e1d/tri/tri-t$THR.sjt3 --bigram $BG; done
+cp $T1 $R/e1d/tri/tri-t1.sjt3
+# 大小：每檔的 $R/e1d/tri/tri-t<N>.sjt3.json 有 contexts、entries、tri_bytes、total_bytes（含 bigram）、sha256；T1 的看 $M/tri/tri-sizes.json
+for THR in 2 3 5 8 15; do cat $R/e1d/tri/tri-t$THR.sjt3.json; done
+
+# (b) 凍結集合檔：錯字回報用 E1b 的 commit（114 列），其他沿用原檔
+mkdir -p $FROZEN
+git -C $REPO show 202e41c:eval/dev/user-reported.txt > $FROZEN/user-reported.txt
+wc -l < $FROZEN/user-reported.txt                   # 要是 114
+# 逐一核對 SHA-256 與列數（兩種設定的 B0ship judge.json）。dev302 是 dev:302，沒有檔，列數與雜湊在 D<k> 的 judge 後用 (c) 的核對
+python3 - <<PY
+import json, hashlib, sys
+frozen = {"typing76": "$REPO/eval/dev/user-typing.txt", "user-reported": "$FROZEN/user-reported.txt",
+          "cvtune": "<cvtune.txt>", "wikitune": "<wikitune.txt>", "lytune": "<lytune.txt>", "wikitypo": "<wikitypo.txt>", "discordtune": "<discordtune.txt>"}
+bad = 0
+for P in ("chat", "formal"):
+    for n, m in json.load(open("$B0SHIP/%s/judge.json" % P))["sets"].items():
+        if n not in frozen: continue
+        b = open(frozen[n], "rb").read()
+        ok = hashlib.sha256(b).hexdigest() == m["sha256"] and b.count(b"\n") == m["n"]
+        print(P, n, "OK" if ok else "MISMATCH"); bad += not ok
+sys.exit(bad)
+PY
+
+# (c) judge：每檔 T_k 兩種設定，出貨點。標籤 D<k>
+SETS="--set dev302=dev:302 --set typing76=$REPO/eval/dev/user-typing.txt --set user-reported=$FROZEN/user-reported.txt --set lytune=<lytune.txt> --set wikitypo=<wikitypo.txt> --set discordtune=<discordtune.txt>"
+for K in 1 2 3 5 8 15; do
+  python3 -u $E1/grid.py judge --label D$K --lam 0.5 --beta 1 --lm $BG --tri $R/e1d/tri/tri-t$K.sjt3 --no-classes --profile chat $SETS --procs 16 --out $R/judge
+  python3 -u $E1/grid.py judge --label D$K --lam 0.7 --beta 1 --lm $BG --tri $R/e1d/tri/tri-t$K.sjt3 --no-classes --profile formal $SETS --procs 16 --out $R/judge
+done
+# 只報：T1 formal 在 λ 0.8
+python3 -u $E1/grid.py judge --label D1f08 --lam 0.8 --beta 1 --lm $BG --tri $R/e1d/tri/tri-t1.sjt3 --no-classes --profile formal $SETS --procs 16 --out $R/judge
+# 核對：每個 D<k> 的每個集合 sha256 與 n 和 B0ship 相同（含 dev302），不同就停
+python3 - <<PY
+import json, sys
+bad = 0
+for P in ("chat", "formal"):
+    b = json.load(open("$B0SHIP/%s/judge.json" % P))["sets"]
+    for K in ("1", "2", "3", "5", "8", "15"):
+        c = json.load(open("$R/judge/D%s/%s/judge.json" % (K, P)))["sets"]
+        for n in c:
+            if n in b and (c[n]["sha256"], c[n]["n"]) != (b[n]["sha256"], b[n]["n"]): print("MISMATCH", P, K, n); bad += 1
+sys.exit(bad)
+PY
+
+# (d) 比較。BASE 一律是 B0ship（要有 discordtune 與 cvtune、wikitune 的 rowstats 就已在 B0ship；只用到下面列的集合）
+for ARM in B0ship D1 D2 D3 D5 D8 D15 D1f08; do for P in chat formal; do
+  [ -d $R/judge/$ARM/$P ] || continue
+  python3 $E1/rowstats_concat.py --dir $R/judge/$ARM/$P --group judge5 --out $R/judge/$ARM/$P/judge5.rowstats
+  python3 $E1/rowstats_concat.py --dir $R/judge/$ARM/$P --group judge4 --out $R/judge/$ARM/$P/judge4.rowstats
+done; done
+for K in 1 2 3 5 8 15; do for P in chat formal; do
+  B=$R/judge/B0ship/$P; C=$R/judge/D$K/$P
+  # 判讀：判讀五集串接、discordtune（BASE ＝ B0ship）
+  python3 $REPO/tools/evalstats.py compare $B/judge5.rowstats $C/judge5.rowstats --label "D$K vs B0ship $P judge5 [a=0.05/6]" --net
+  python3 $REPO/tools/evalstats.py compare $B/discordtune.rowstats $C/discordtune.rowstats --label "D$K vs B0ship $P discordtune" --net
+  # 只報：判讀五集去掉 lytune，與每個集合各自一行
+  python3 $REPO/tools/evalstats.py compare $B/judge4.rowstats $C/judge4.rowstats --label "D$K vs B0ship $P judge5-no-lytune" --net
+  for S in dev302 typing76 user-reported lytune wikitypo; do
+    python3 $REPO/tools/evalstats.py compare $B/$S.rowstats $C/$S.rowstats --label "D$K vs B0ship $P $S" --net
+  done
+done; done
+# 只報：T1 formal λ 0.8
+python3 $REPO/tools/evalstats.py compare $R/judge/B0ship/formal/judge5.rowstats $R/judge/D1f08/formal/judge5.rowstats --label "D1f08 vs B0ship formal judge5 (report only)" --net
+```
+
+B0ship 的 `judge.json` 要有 discordtune（契約：同一個檔）；沒有就停，回報 main，不要覆寫 B0ship 目錄。
