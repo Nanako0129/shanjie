@@ -823,7 +823,10 @@ class A3(unittest.TestCase):
         self.assertEqual((len(both), len({r for r, _ in both})), (169, 97))        # 契約 A3.3a 的 49 個詞、28 組讀音，加 A3 修正輪的 120 個詞、69 組讀音（全是新詞的讀音，與 3 組新舊詞包第一名相同的）
         self.assertTrue({(r, w) for r, w in both if w in ("坂木", "阪木", "加米", "嘉米", "愛莉卡", "艾莉卡", "艾利卡")} and len(both) >= 49)
         self.assertTrue(all(r in pack.get(w, ()) for r, w in both), sorted((r, w) for r, w in both if r not in pack.get(w, ())))
-        self.assertTrue(set(B.load_v040()) <= set(pack))                       # v0.4.0 的詞一個都不能少
+        dropped = B.model_v6_dropped()
+        self.assertEqual(len(dropped), 105)                                   # model-v6 §3.3（使用者 2026-10-15）：A2 規則排除的類型 (c)
+        self.assertTrue(set(B.load_v040()) - dropped <= set(pack))             # v0.4.0 的詞一個都不能少，A2 規則排除的除外
+        self.assertFalse(dropped & set(pack))
         self.assertIn("ㄩˋ ㄇㄣˊ ㄐㄧㄤ", pack["獄門疆"])                          # 契約 A3.4
         self.assertTrue({"ㄏㄨ ㄓㄤˋ ㄧㄡ ㄖㄣˊ", "ㄏㄨˇ ㄓㄤˋ ㄧㄡ ㄖㄣˊ"} <= pack["虎杖悠仁"])
         self.assertNotIn("艾文斯", pack)                                           # 契約 A3：新詞若在 model-v5 擠下詞庫的詞就不收（kb 例外只給已出貨的詞）

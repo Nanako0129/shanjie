@@ -225,18 +225,18 @@
   "鼠小弟的小背心"
  ],
  "dropped_by_lexicon_rule": 17,
- "excluded_by_collisions_tsv": 136,
+ "excluded_by_collisions_tsv": 241,
  "excluded_by_exclude_tsv": 2,
  "files": {
   "acg-add.tsv": {
-   "bytes": 2739266,
-   "lines": 45017,
-   "sha256": "ecd5f2633d93842e9e2df98cc8eb658202ab7cfe9217e221e488b272d9f97841"
+   "bytes": 2734766,
+   "lines": 44912,
+   "sha256": "1943f14fd8ec2cef6aeef99cbc93e64d7a7d77f0ba2af5540b14c6d6a4e28d62"
   },
   "acg-sources.tsv": {
-   "bytes": 3148632,
-   "lines": 46313,
-   "sha256": "aa2b3cffcbb251330c2515b1276b3b7082115a683c24d96cca1643f49b9c83e7"
+   "bytes": 3139984,
+   "lines": 46206,
+   "sha256": "b413b928e4eeb2ffb553b97fc13f34d19f99bdf435bde6c01d33655e7316acde"
   }
  },
  "groups": {
@@ -250,7 +250,7 @@
   "min": 22981265,
   "pages": 2189
  },
- "rows": 45017,
+ "rows": 44912,
  "sources": {
   "cgroup": 9872,
   "char": 35618,
@@ -260,8 +260,8 @@
  "unclassified_groups": [],
  "unreadable_dropped": 62,
  "unresolved_collision_readings": 0,
- "version": "20261008-ecd5f263",
- "words": 44554,
+ "version": "20261008-1943f14f",
+ "words": 44449,
  "yearly_lists": {
   "2020": {
    "links": 200,

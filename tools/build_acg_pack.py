@@ -874,6 +874,14 @@ def detect_collisions(words, reading, rows, ref, decode=top1, existing=None, ext
     return dict(found)
 
 
+MODEL_V6_C = "model-v6："      # acg-collisions.tsv 理由欄的開頭：model-v6 §3.3 照 A2 規則排除的類型 (c) 詞（使用者 2026-10-15）
+
+
+def model_v6_dropped(path=os.path.join(PACKS, "acg-collisions.tsv")):
+    """model-v6 上擠下詞庫詞、照 A2 規則排除的詞包詞（含 v0.4.0 出貨過的詞）；契約 A3.5 第 3 項 (ii)「v0.4.0 的詞不能少」不算它們。"""
+    return {r[2] for r in read_tsv(path) if len(r) == 4 and r[3].startswith(MODEL_V6_C)} if os.path.exists(path) else set()
+
+
 def read_collisions(path):
     """acg-collisions.tsv：讀音、保留的詞、排除的詞、理由。排除欄寫 `+詞` 表示兩個都留，`+` 後面是另一個留下的詞
     （使用者決定的處置）。回傳 ({排除的詞: 讀音}, {(讀音, 詞)})：處置列裡點名的兩個詞才算已處置，同讀音的新詞不算。
@@ -1278,8 +1286,8 @@ def main():
     decode = rule_decoder(rule)       # 契約 A3.3：(c) 規則與衝突偵測都用規則模型
     info = {}
     files, manifest, col, unread, ref, ldrop = build(Api(a.cache, a.offline), decode=decode, a3=a.a3 == "on", info=info)
-    lost = sorted(info["v040"] - set(info["words"]))
-    if lost:        # 契約 A3.5 第 3 項 (ii)：v0.4.0 的詞少了就停，不寫檔
+    lost = sorted(info["v040"] - set(info["words"]) - model_v6_dropped())
+    if lost:        # 契約 A3.5 第 3 項 (ii)：v0.4.0 的詞少了就停，不寫檔（model-v6 §3.3 照 A2 規則排除的不算）
         raise SystemExit(f"v0.4.0 words missing from the new pack ({len(lost)}), nothing written: {lost}")
     write_all(files, manifest, a.out)
     os.makedirs(a.report, exist_ok=True)
