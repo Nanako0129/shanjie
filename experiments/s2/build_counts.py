@@ -291,7 +291,17 @@ def expected_counts(lex, text, min_count=EXPECTED_MIN):
 _W = {}
 
 
-def _init(trigram=False, expected=False, mw=False, extra_lexicons=()):
+def guard_matcher(rows, conv):
+    """--holdout-guard (docs/contracts/holdout-refresh.md section 8): None when off, else the Matcher over the held-out rows
+    (`rows` = row files; empty = every .txt under eval/holdout/). Han runs containing a held-out sentence are not counted."""
+    if rows is None:
+        return None
+    sys.path.insert(0, os.path.join(ROOT, "tools"))
+    import holdout_guard
+    return holdout_guard.build_matcher(list(rows), lambda t: convert(t, *conv))[0]
+
+
+def _init(trigram=False, expected=False, mw=False, extra_lexicons=(), holdout_guard=None):
     _W["mw"] = None
     if mw:   # S2w：每個 worker 載一次 mwdata.json（契約 §3.2）
         sys.path.insert(0, os.path.join(ROOT, "experiments", "s2w"))
@@ -311,6 +321,7 @@ def _init(trigram=False, expected=False, mw=False, extra_lexicons=()):
         _W["pack"] = set(_W["lex"].by_word) - set(_W["lex0"].by_word)
         _W["pack_lens"] = sorted({len(w) for w in _W["pack"]})
     _W["conv"] = load_conv()
+    _W["guard"] = guard_matcher(holdout_guard, _W["conv"])
 
 
 def run_expected(run):
@@ -340,7 +351,12 @@ def run_expected(run):
 
 
 def count_batch(texts):
+    return _count(texts)[:4]
+
+
+def _count(texts):
     lex, (phrase, char, maxp) = _W["lex"], _W["conv"]
+    guard, skipped = _W.get("guard"), 0
     uni, bi, tri, sents = collections.Counter(), collections.Counter(), collections.Counter(), 0
     for raw in texts:
         t = raw.replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&").replace("&quot;", '"')
@@ -353,6 +369,9 @@ def count_batch(texts):
         for s in SENT.findall(t):
             for run in HAN.findall(s if _W["mw"] else convert(s, phrase, char, maxp)):
                 if len(run) < 2:
+                    continue
+                if guard is not None and guard.any(run):
+                    skipped += 1
                     continue
                 if _W["expected"]:
                     r = run_expected(run)
@@ -376,7 +395,7 @@ def count_batch(texts):
                     seq = ["<s>", "<s>"] + ws + ["</s>"]
                     for i in range(2, len(seq)):
                         tri[(seq[i - 2], seq[i - 1], seq[i])] += 1
-    return uni, bi, tri, sents
+    return uni, bi, tri, sents, skipped
 
 
 def batches(it, size=200):
@@ -398,6 +417,7 @@ def main():
     ap.add_argument("--expected", action="store_true", help="詞圖上的期望次數（S2n 契約 §6.2），取代最高分切分；不算 trigram")
     ap.add_argument("--mw", action="store_true", help="S2w：用 MediaWiki 的 zh-tw 轉換（zhconv-rs ＋ $S2_WORK/mwdata.json），取代 convert()")
     ap.add_argument("--extra-lexicon", action="append", default=[], metavar="FILE", help="model-v5：疊加層格式（讀音\\t詞\\t分數\\t來源）的檔加進斷詞詞庫，可給多次")
+    ap.add_argument("--holdout-guard", nargs="*", default=None, metavar="ROWS", help="預設關。命中保留集句子的漢字段不計數（契約 holdout-refresh §8）；不給檔＝eval/holdout/ 底下全部 .txt")
     a = ap.parse_args()
     if a.expected and a.trigram:
         ap.error("--expected 不算 trigram")
@@ -405,10 +425,10 @@ def main():
         ap.error("--extra-lexicon 只用在 --expected（加法計數，model-v5 契約 §8）")
     os.makedirs(OUT, exist_ok=True)
     uni, bi, tri = collections.Counter(), collections.Counter(), collections.Counter()
-    sents = arts = 0
-    with mp.Pool(a.procs, initializer=_init, initargs=(a.trigram, a.expected, a.mw, tuple(dict.fromkeys(os.path.abspath(f) for f in a.extra_lexicon)))) as pool:
-        for u, b, t, s_ in pool.imap_unordered(count_batch, batches(articles(a.articles))):
-            uni.update(u); bi.update(b); tri.update(t); sents += s_; arts += 200
+    sents = arts = skipped = 0
+    with mp.Pool(a.procs, initializer=_init, initargs=(a.trigram, a.expected, a.mw, tuple(dict.fromkeys(os.path.abspath(f) for f in a.extra_lexicon)), a.holdout_guard)) as pool:
+        for u, b, t, s_, k_ in pool.imap_unordered(_count, batches(articles(a.articles))):
+            uni.update(u); bi.update(b); tri.update(t); sents += s_; skipped += k_; arts += 200
             if arts % 10000 == 0:
                 print(f"~{arts} articles, {sents} runs, {len(uni)} words, {len(bi)} bigrams", flush=True)
     arts = min(arts, a.articles)
@@ -417,6 +437,8 @@ def main():
         out["tri"] = tri
     pickle.dump(out, open(os.path.join(OUT, f"counts-{arts}{'-tri' if a.trigram else ''}.pkl"), "wb"))
     print(f"done: {arts} articles, {sents} runs, {sum(uni.values())} tokens, {len(uni)} types, {len(bi)} bigram types")
+    if a.holdout_guard is not None:
+        print(f"holdout-guard: skipped {skipped} runs")
 
 
 if __name__ == "__main__":

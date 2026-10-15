@@ -25,19 +25,24 @@ def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--expected", action="store_true", help="詞圖上的期望次數（S2n 契約 §6.2）；不算 trigram")
     ap.add_argument("--extra-lexicon", action="append", default=[], metavar="FILE", help="model-v5：疊加層格式的檔加進斷詞詞庫，可給多次")
+    ap.add_argument("--holdout-guard", nargs="*", default=None, metavar="ROWS", help="預設關。命中保留集句子的漢字段不計數；不給檔＝eval/holdout/ 底下全部 .txt。放在位置參數之後（或用 -- 隔開）")
     ap.add_argument("out")
     ap.add_argument("paths", nargs="+")
     a = ap.parse_args(argv)
     if a.extra_lexicon and not a.expected:
         ap.error("--extra-lexicon 只用在 --expected（加法計數，model-v5 契約 §8）")
     expected, out, paths = a.expected, a.out, a.paths
-    bc._init(False, expected, extra_lexicons=tuple(dict.fromkeys(os.path.abspath(f) for f in a.extra_lexicon)))
+    bc._init(False, expected, extra_lexicons=tuple(dict.fromkeys(os.path.abspath(f) for f in a.extra_lexicon)), holdout_guard=a.holdout_guard)
+    guard, skipped = bc._W["guard"], 0
     lex, (phrase, char, maxp) = bc._W["lex"], bc._W["conv"]
     uni, bi, tri, runs = collections.Counter(), collections.Counter(), collections.Counter(), 0
     for p in paths:
         for s in lines(p):
             for run in bc.HAN.findall(bc.convert(s, phrase, char, maxp)):
                 if len(run) < 2:
+                    continue
+                if guard is not None and guard.any(run):
+                    skipped += 1
                     continue
                 if expected:
                     r = bc.run_expected(run)
@@ -62,6 +67,8 @@ def main(argv=None):
                     tri[(seq[i - 2], seq[i - 1], seq[i])] += 1
     pickle.dump({"uni": uni, "bi": bi, "tri": tri, "articles": 0, "runs": runs}, open(out, "wb"))
     print(f"{runs} runs, {sum(uni.values())} tokens, {len(uni)} types, {len(bi)} bigram types")
+    if guard is not None:
+        print(f"holdout-guard: skipped {skipped} runs")
 
 
 if __name__ == "__main__":

@@ -32,7 +32,6 @@ CEREBRAS_API_KEY=… python3 generate.py --provider cerebras --model gpt-oss-120
 ## 步驟
 
 1. 計數（建置機，配方照 `experiments/model-v5/count.bat`，`<WORK>` 是新目錄，`S2_WORK=<WORK>`）：維基 `build_counts.py --articles 200000 --procs 10 --expected --extra-lexicon <計數詞表>…`、口語 `build_counts_text.py --expected --extra-lexicon <計數詞表>…`（口語訓練檔、`synth.txt` 與補次數檔），各自記 SHA-256。
-   計數之前，每份訓練文字先過 `python3 tools/holdout_guard.py --hashes eval/holdout/hashes.sha256 <輸入> --out <輸出>`（契約 `holdout-refresh.md` §8；下一次建模型時才執行；雜湊檔還不存在，隨保留集換新的資料 PR 一起到）。
 2. 建模型（`PRUNE=2`、`D=0.75` 不變）：
 
    ```

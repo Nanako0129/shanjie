@@ -43,7 +43,7 @@ test-python:
 	python3 -m unittest tools/test_bench.py
 	python3 -m unittest tools/test_build_english_words.py
 	python3 -m unittest tools/test_build_overlay.py
-	python3 -m unittest tools/test_holdout_guard.py
+	python3 -W ignore -m unittest tools/test_holdout_guard.py
 	python3 -W ignore -m unittest experiments/model-v6/test_force_classes.py
 	python3 -W ignore -m unittest tools/test_triage.py
 	python3 -W ignore -m unittest tools/test_build_classes.py experiments/s2/test_expected.py
