@@ -820,11 +820,11 @@ class A3(unittest.TestCase):
         self.assertEqual(len(kept), 178)                                      # 契約 A3.3a
         self.assertTrue(all(w in pack and r in pack[w] for r, w, _ in kept))
         both = B.read_keep_both(os.path.join(B.PACKS, "acg-keep-both.tsv"))
-        self.assertEqual((len(both), len({r for r, _ in both})), (169, 97))        # 契約 A3.3a 的 49 個詞、28 組讀音，加 A3 修正輪的 120 個詞、69 組讀音（全是新詞的讀音，與 3 組新舊詞包第一名相同的）
+        self.assertEqual((len(both), len({r for r, _ in both})), (235, 129))       # 契約 A3.3a 的 49 個詞、28 組讀音，加 A3 修正輪的 120 個詞、69 組讀音（全是新詞的讀音，與 3 組新舊詞包第一名相同的），加 model-v6 §3.3 的 66 個詞、32 組讀音
         self.assertTrue({(r, w) for r, w in both if w in ("坂木", "阪木", "加米", "嘉米", "愛莉卡", "艾莉卡", "艾利卡")} and len(both) >= 49)
         self.assertTrue(all(r in pack.get(w, ()) for r, w in both), sorted((r, w) for r, w in both if r not in pack.get(w, ())))
         dropped = B.model_v6_dropped()
-        self.assertEqual(len(dropped), 105)                                   # model-v6 §3.3（使用者 2026-10-15）：A2 規則排除的類型 (c)
+        self.assertEqual(len(dropped), 106)                                   # model-v6 §3.3（使用者 2026-10-15）：A2 規則排除的類型 (c)，105 個加第二輪的 1 個
         self.assertTrue(set(B.load_v040()) - dropped <= set(pack))             # v0.4.0 的詞一個都不能少，A2 規則排除的除外
         self.assertFalse(dropped & set(pack))
         self.assertIn("ㄩˋ ㄇㄣˊ ㄐㄧㄤ", pack["獄門疆"])                          # 契約 A3.4
