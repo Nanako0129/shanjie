@@ -78,3 +78,4 @@
 | plan-verifier 第 2 次 REVISE（2026-10-15） | 第 1、2 項已關；第 7 步從置中的位置開始，多一列也不會越界，有沒有夾回都會過。P3：`settings-window.md` §2.1 仍寫用 `fittingSize` 設內容尺寸 | FIX：第 7 步先把視窗拖到下緣貼著 Dock，預期視窗往上移。P3：`settings-window.md` §2.1 那一句加註由這一份 §2.2 取代 |
 | plan-verifier 收尾審查（2026-10-15） | READY | 開始實作 |
 | 本地 /code-review（2026-10-15，1233948） | 1. `NavigationSplitView` 的左欄可以收合、沒有東西能叫回來；2. 不在視窗裡量的高度每列多約 4.5 pt；3. 選取可以變成空；4. 螢幕參數改變不重算；5. 換頁保留捲動位置；6. `profile-choice.md` §2.4 兩句沒跟著改；7. PLAN 與研究紀錄沒有條目；8. 收尾審查沒記錄；9. `refit` 延後的理由寫錯；10. 檔頭註解過時；11. 每次重建四頁；12. 夾回的函式沒有測試 | FIX 1–10、12：固定寬度的左欄、在視窗裡量加 4 pt 餘量、選取不為空、觀察 `didChangeScreenParametersNotification`、`.id(page)`、兩份契約加註、PLAN 與研究紀錄、這一列、註解改寫、`settingsFrame(_:clampedInto:)` 移到 ShanjieKit 加測試。11 接受：只在開窗、清單改變、螢幕改變時做，註解寫明 |
+| 實機第一輪（2026-10-15，35bc4f2） | 使用者：§3 第 1–5 步「沒問題OK」；重開停在上次的分類，選擇題確認維持 | 第 6、7 步（超出上限、夾回）待測 |
