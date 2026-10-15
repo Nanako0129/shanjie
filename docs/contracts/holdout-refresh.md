@@ -210,7 +210,7 @@
 
 ## 13. agent 不可以做的事
 
-- 不讀 `~/side-project/shanjie-private`、學習檔、`~/Library`、鑰匙圈。
+- 不讀維護者的私人資料夾、學習檔、`~/Library`、鑰匙圈。
 - 不安裝軟體、不啟動 App、不推 tag、不建 Release。
 - 不登入任何網站、不建帳號、不發信或發文。
 - 抓取只用官方 dump、API 或下載點，遵守 robots.txt 與 crawl-delay，不刮被禁止的路徑。
