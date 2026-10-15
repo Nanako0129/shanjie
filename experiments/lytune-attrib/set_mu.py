@@ -13,6 +13,8 @@ MAGIC, MU_AT = b"SJCL0001", 44
 def set_mu(data: bytes, mu: float) -> bytes:
     if data[:8] != MAGIC:
         raise ValueError("not a classes.sjc (magic)")
+    if len(data) < MU_AT + 8:
+        raise ValueError("truncated classes.sjc")
     if not 0.0 <= mu <= 1.0:
         raise ValueError("mu must be in [0, 1] (core/src/lm.rs refuses anything else)")
     return data[:MU_AT] + struct.pack("<d", mu) + data[MU_AT + 8:]
@@ -27,6 +29,11 @@ def demo():
     out = set_mu(head, 0.4)
     assert get_mu(head) == 0.8 and get_mu(out) == 0.4
     assert len(out) == len(head) and out[:MU_AT] == head[:MU_AT] and out[MU_AT + 8:] == head[MU_AT + 8:]
+    try:
+        set_mu(head[:MU_AT + 4], 0.4)
+        raise AssertionError("truncated input accepted")
+    except ValueError:
+        pass
 
 
 if __name__ == "__main__":
@@ -37,6 +44,7 @@ if __name__ == "__main__":
     src, dst, mu = sys.argv[1], sys.argv[2], float(sys.argv[3])
     with open(src, "rb") as f:
         out = set_mu(f.read(), mu)
+    assert get_mu(out) == mu
     with open(dst, "xb") as f:
         f.write(out)
     print(hashlib.sha256(out).hexdigest(), get_mu(out))
