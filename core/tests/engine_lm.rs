@@ -292,7 +292,7 @@ fn acceptance6_sentence_has_three_different_top1() {
     let uni = type_row(&mut Engine::with_lexicon(shared().lex.clone(), Layout::Standard), Layout::Standard, &syls).preedit;
     let chat = type_row(&mut engine(Layout::Standard, Profile::Chat), Layout::Standard, &syls).preedit;
     let formal = type_row(&mut engine(Layout::Standard, Profile::Formal), Layout::Standard, &syls).preedit;
-    assert_eq!((uni.as_str(), chat.as_str(), formal.as_str()), ("廚房新莊了一個率水壺", "廚房新裝了一個綠水壺", "廚房新裝了一個濾水壺"));
+    assert_eq!((uni.as_str(), chat.as_str(), formal.as_str()), ("廚房新莊了一個率水壺", "廚房新裝了一個率水壺", "廚房新裝了一個濾水壺"));
     assert!(formal == truth);
     assert!(chat == golden_top1(0)[283] && formal == golden_top1(1)[283]);
 }
@@ -302,7 +302,7 @@ fn acceptance6_sentence_has_three_different_top1() {
 fn set_profile_snapshot_and_reset_keeps_lm_and_profile() {
     let (_, syls) = row(284);
     let mut e = engine(Layout::Standard, Profile::Chat);
-    assert!(type_row(&mut e, Layout::Standard, &syls).preedit == "廚房新裝了一個綠水壺");
+    assert!(type_row(&mut e, Layout::Standard, &syls).preedit == "廚房新裝了一個率水壺");
     let o = e.set_profile(Profile::Formal).unwrap();
     assert!(o.handled && o.commit.is_empty() && o.preedit == "廚房新裝了一個濾水壺");
     assert!(e.key(Key::new(KeyKind::Enter)).unwrap().commit == "廚房新裝了一個濾水壺");

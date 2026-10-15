@@ -5872,3 +5872,8 @@ formal: alpha 0.7, tau 1, delta 2
   - 這些是 n-gram 階段（沒有小模型）的數字。錯字回報書面 41 → 36 和 μ 掃描在出貨設定（開小模型）量到的 41 → 37（3／7，p 0.34）同方向，不顯著。`--no-classes` 兩行、unigram 類、`kn-tiny`、`tinylm-tiny` 不變。
 - **手動詞**（`manual_words_come_first_in_the_shipping_setting`，出貨設定，重排後的 rowstats）：聊天 15／15；**書面 14／15**，第 8 列「米雅歌唱得很好」的第一名變成「米亞」（重排前分數 −16.861 對 −16.950）。照契約 §2 是 μ 造成的變化，測試改成釘住這一個例外（書面只有第 8 列不在第一，其他列掉下來仍會失敗）；換回 classes-v4 時這條測試會失敗（第 8 列回到第一），確認它量得到差別。之後要不要用手動詞加分補回來，留給維護者。
 - 先做錯的一步：一開始用 `--dump` 找是哪一列，但 `--dump` 是重排前的候選，v4 時第 7 列「咪呀狗在線上嗎」重排前也不是第一（重排後是）。改用 `--rowstats`（重排後，摘要的 top1 就是它的加總）才確定是第 8 列。
+- **其他寫死期望值的測試**（188 的 `cargo test` 3 個失敗、Mac 的 `make test-swift` 49 個失敗，逐項看過，都是 μ 造成的預期變化）：
+  - dev302 第 284 列（驗收 6）在聊天設定的第一名從「綠水壺」變成「率水壺」；單字詞庫、聊天、書面仍然兩兩不同（引擎重播量過），`engine_lm` 的兩條和 Swift 的 ProfileChoice、Shell 測試只換字串。
+  - `context_key_learned_equals_context_key_queried` (b)：「你好」後面的「ㄅㄣ」預設已經是「奔」，選它不算改選、不記 key。改成選模型沒顯示的那一個（奔／犇），測的仍是「學習寫的 key 等於解碼查的 key」。
+  - 自測與 RerankTests 的句子：第 65 列在 μ 0.2 下 n-gram 自己就給「我等一下再過去」，小模型沒有東西可改。照 `docs/data-files.md` 重挑：CLI 在聊天設定、有無 `--packs acg` 都是「n-gram 錯、開小模型對」的列有 16 列（25、27、46、111、112、123、125、127、140、142、154、183、215、223、284、295），第 25 列是實機句（`DeviceRow`），改用第 27 列「我已經回復你的郵件了 → 回覆」（`Selftest.rerankRowStandard`、`rerankedText`、`ngramText` 與測試的 `RerankRow`）。「不改」的例子（`testNoChangeMakesNoCall`）原本用第 284 列，現在小模型會把它的「率」改成「濾」，改用第 65 列（`NoChangeRow`，n-gram 與小模型都對）。游標位置改用句子長度算，日誌的負向標記換成新句子的片段。
+  - 改完：`make test-swift` 211 項、1 項略過、0 失敗；`engine_lm`、`engine_learn` 的改動在 Mac 單獨跑過。
