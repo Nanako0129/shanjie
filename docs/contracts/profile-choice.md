@@ -54,14 +54,14 @@
 
 ### 2.4 設定視窗
 
-- 在「選字」與「外觀」之間加一個區塊「聊天／書面」：
+- 在「選字」與「外觀」之間加一個區塊「聊天／書面」（〔2026-10-15〕版面改成左側清單後，這個區塊在「一般」那一類；`settings-sidebar.md` §2.1）：
   - 選擇器「切換方式」：「依 App 自動」「一律聊天」「一律書面」。
   - 說明文字（灰色小字）：「依 App 自動：聊天 App（Discord、LINE、訊息等）用聊天設定，其他 App 用書面設定。」
   - 「個別設定的 App」清單：每列是 App 圖示、名稱、右邊「聊天」或「書面」、一個移除按鈕（圖示按鈕，VoiceOver 讀「移除」）。名稱與圖示用 `NSWorkspace.urlForApplication(withBundleIdentifier:)` 找；找不到（App 已刪除）時名稱顯示 bundle ID、用一般 App 圖示。依名稱排序。
   - 清單是空的時候，顯示灰色小字：「在 App 裡打開善解選單，勾選「這個 App 用聊天設定」，就會列在這裡。」
   - 模式不是「依 App 自動」時，清單照常顯示、聊天／書面的文字反灰（個別設定保留，切回自動時生效），**移除按鈕仍然可以按**：清單存的是 bundle ID，刪除不應該要先切回自動（/code-review）。
   - App 名稱與圖示只在清單內容改變時查一次（依 bundle ID 快取），不在每次畫面重繪時查：拖玻璃深淺滑桿也會發通知、讓畫面重繪。
-  - 清單列數改變時，視窗高度跟著內容重新調整（上緣不動）。
+  - 清單列數改變時，視窗高度跟著內容重新調整（上緣不動）。〔2026-10-15〕改成照 `settings-sidebar.md` §2.2：重算高度（有上限）後把視窗夾回螢幕可用範圍，所以上緣可能往上移。
 - `SettingsModel` 加 `profileMode`、`appProfiles`（排好序的列）、`setProfileMode(_:)`、`removeAppProfile(_:)`，都經過 `Shell` 的 setter；收到 `didChangeSettings` 時重讀（`refreshSettings`）。名稱與圖示的查找放在 App target（SwiftUI 畫面），`SettingsModel` 只給 bundle ID 與設定，讓測試不碰 `NSWorkspace`。
 - 視窗仍然沒有文字欄位（`settings-window.md` §2.1）。
 

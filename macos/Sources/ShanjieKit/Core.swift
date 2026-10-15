@@ -20,6 +20,9 @@ struct CoreOutput {
     /// candidate-vertical contract section 2.2: 0 horizontal (or no candidates), 1 vertical candidate window, 2 vertical
     /// prediction row (entered or not).
     var vertical: Int
+    /// zhen-inline section 1.3f: the open English run in `preedit`, UTF-16 start and length; both 0 when no run is open.
+    var englishRunStart: Int = 0
+    var englishRunLength: Int = 0
 }
 
 /// The result of a core call: an output, or the non-zero C ABI return code (carries no input).
@@ -142,6 +145,14 @@ final class CoreEngine {
         return Self.take(shanjie_engine_set_english(handle, on ? 1 : 0, &out), out)
     }
 
+    /// zhen-inline: whether the English typed into the unfinished syllable shows as letters while it can still become a listed word
+    /// (the core's default is true); returns the snapshot, so a composition on screen is drawn again. Sent to every engine
+    /// `Shell.build()` makes.
+    func setEnglishInline(_ on: Bool) -> CoreResult {
+        var out: UnsafeMutablePointer<ShanjieOutput>?
+        return Self.take(shanjie_engine_set_english_inline(handle, on ? 1 : 0, &out), out)
+    }
+
     func setLearning(_ enabled: Bool) -> Int32 { shanjie_engine_set_learning(handle, enabled ? 1 : 0) }
 
     func learningOpen(dir: String) -> Int32 { shanjie_engine_learning_open(handle, dir) }
@@ -205,7 +216,9 @@ final class CoreEngine {
             columns: Int(o.candidate_columns),
             first: Int(o.candidate_first),
             total: Int(o.candidate_total),
-            vertical: Int(o.candidate_vertical)
+            vertical: Int(o.candidate_vertical),
+            englishRunStart: Int(o.english_run_utf16_start),
+            englishRunLength: Int(o.english_run_utf16_len)
         ))
     }
 }

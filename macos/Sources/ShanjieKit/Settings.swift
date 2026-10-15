@@ -24,6 +24,10 @@ public final class SettingsModel: ObservableObject {
     /// the menu item (false: the toggle is greyed, the setting kept).
     @Published public private(set) var english = false
     @Published public private(set) var englishEnabled = true
+    /// The 英文的顯示 choice under it (zhen-inline section 2): true shows the English as it is typed. Enabled when the toggle is
+    /// enabled and on.
+    @Published public private(set) var englishInline = true
+    @Published public private(set) var englishInlineEnabled = false
     /// The abbreviation toggle is shown only when the shell offers it (`Shell.showsAbbreviation`).
     public var showsAbbreviation: Bool { shell.showsAbbreviation }
     @Published public private(set) var demote = true
@@ -75,6 +79,8 @@ public final class SettingsModel: ObservableObject {
         abbreviation = shell.abbreviationOn
         english = shell.englishOn
         englishEnabled = shell.englishEnabled
+        englishInline = shell.englishInlineOn
+        englishInlineEnabled = shell.englishInlineEnabled
         demote = shell.demoteOn
         rerank = shell.rerankOn
         rerankEnabled = shell.rerankEnabled
@@ -99,6 +105,7 @@ public final class SettingsModel: ObservableObject {
     public func setPrediction(_ on: Bool) { shell.applyPrediction(on) }
     public func setAbbreviation(_ on: Bool) { shell.applyAbbreviation(on) }
     public func setEnglish(_ on: Bool) { shell.applyEnglish(on) }
+    public func setEnglishInline(_ on: Bool) { shell.applyEnglishInline(on) }
     public func setDemote(_ on: Bool) { shell.applyDemote(on) }
     public func setRerank(_ on: Bool) { shell.applyRerank(on) }
     public func setRerankLevel(_ level: RerankLevel) { shell.applyRerankLevel(level) }
@@ -115,4 +122,14 @@ public final class SettingsModel: ObservableObject {
     public func clear() {
         shell.confirmAndClear { [weak self] in self?.refreshExternal() }  // the "cannot save" row may change
     }
+}
+
+/// Settings-sidebar section 2.2: the settings window's frame moved vertically into its screen's usable area, up when it
+/// hangs below (the Dock), down when it sticks out above (the menu bar). The window's height is capped to the area's, so
+/// both never apply at once.
+public func settingsFrame(_ frame: CGRect, clampedInto area: CGRect) -> CGRect {
+    var r = frame
+    if r.minY < area.minY { r.origin.y = area.minY }
+    if r.maxY > area.maxY { r.origin.y = area.maxY - r.height }
+    return r
 }

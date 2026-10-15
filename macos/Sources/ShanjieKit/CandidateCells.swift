@@ -175,6 +175,7 @@ public final class CandidateCells {
     public private(set) var cells: [CandidateCell] = []
     private var columns = 0
     private var renumbered = false
+    private var numbered = true
     private var first = 0
 
     public init() {}
@@ -182,20 +183,22 @@ public final class CandidateCells {
     /// `renumber`: the vertical window's rule (candidate-vertical contract section 2.3): a cell survives when the candidate
     /// and its name are the same, and shows its new number, so a one-row scroll keeps eight of nine cells; its cells give the
     /// number a fixed slot. Off (the bar and the grid), the number is part of the key and sizes its own cell as before.
+    /// `numbered` false (the English-run hint, zhen-inline section 1.3f): the cells have no number at all, so no room is kept
+    /// for one either (an empty number text, and no fixed slot).
     public func update(candidates: [String], notes: [String?], selected: Int, first newFirst: Int, columns newColumns: Int,
-                       renumber: Bool = false) -> Update {
+                       renumber: Bool = false, numbered: Bool = true) -> Update {
         let grid = newColumns > 0
         let selectedRow = grid ? selected / newColumns : 0
         // Candidate at global index g sat at old position g - first.
         // The bar and the vertical window both have 0 columns, but their cells differ (a fixed number slot, renumbering), so
         // the rule they were made under is part of the mode. This is CandidateCells' own contract (cells made under one rule
         // are never reused under the other), not something the panel relies on: it also clears everything on a change of kind.
-        let sameMode = newColumns == columns && renumber == renumbered
+        let sameMode = newColumns == columns && renumber == renumbered && numbered == self.numbered
         var next: [CandidateCell] = []
         var reused: [Bool] = []
         var kept = Set<ObjectIdentifier>()
         for (i, text) in candidates.enumerated() {
-            let numberText = String(grid ? i % newColumns + 1 : i + 1)
+            let numberText = numbered ? String(grid ? i % newColumns + 1 : i + 1) : ""
             let shows = selected >= 0 && (!grid || i / newColumns == selectedRow)
             let old = newFirst + i - first
             if sameMode, cells.indices.contains(old), cells[old].text == text, cells[old].note == notes[i],
@@ -208,7 +211,7 @@ public final class CandidateCells {
                 kept.insert(ObjectIdentifier(cell))
             } else {
                 let cell = CandidateCell(position: i, numberText: numberText, showsNumber: shows, text: text,
-                                         note: notes[i], selected: i == selected, fixedNumberSlot: renumber)
+                                         note: notes[i], selected: i == selected, fixedNumberSlot: renumber && numbered)
                 cell.onClick = { [weak self] position in self?.onSelect?(position) }
                 next.append(cell)
                 reused.append(false)
@@ -218,6 +221,7 @@ public final class CandidateCells {
         cells = next
         columns = newColumns
         renumbered = renumber
+        self.numbered = numbered
         first = newFirst
         return Update(cells: next, reused: reused, removed: removed)
     }
@@ -228,6 +232,7 @@ public final class CandidateCells {
         cells = []
         columns = 0
         renumbered = false
+        numbered = true
         first = 0
         return old
     }
