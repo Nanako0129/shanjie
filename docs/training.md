@@ -15,9 +15,9 @@
 
 | 檔案 | 現行 Release | 內容 | 由什麼產生 |
 |---|---|---|---|
-| `bigram.sjlm` | `model-v5` | 詞與詞相鄰出現的次數（SJLM0001 格式）；含少量用來辨識來源的指紋條目（`docs/data-files.md`、`docs/contracts/model-v4.md` §0） | 語料計數 → `tools/build_lm.py` → 加指紋 |
-| `classes.sjc` | `classes-v3` | 512 個詞類、每個詞的類別與發射機率、類別接續機率、μ = 0.8（SJCL0001 格式；`tools/build_classes.py` 檔頭、`docs/contracts/s2k-word-classes.md` §4.1） | 對計數做詞類分群 → `tools/build_classes.py` |
-| `tinylm.sjtl` | `tinylm-v4` | 1,440 萬參數的字元語言模型，6 層、d 384、字表 9,714 字，int8；檔頭帶聊天與書面各三組（保守、標準、積極）融合參數 α、τ、δ（SJTL0003；`docs/releases/tinylm-v4.md`、`tinylm-v3.md`、`experiments/s7a-tinylm/export_sjtl.py` 檔頭） | 訓練 → 匯出 → 調融合參數 |
+| `bigram.sjlm` | `model-v6`（旁邊另有 KN 側檔 `kn.sjkn`，`kn-v1`） | 詞與詞相鄰出現的次數（SJLM0001 格式）；含少量用來辨識來源的指紋條目（`docs/data-files.md`、`docs/contracts/model-v4.md` §0） | 語料計數 → `tools/build_lm.py` → 加指紋 |
+| `classes.sjc` | `classes-v5` | 512 個詞類、每個詞的類別與發射機率、類別接續機率、μ = 0.2（classes-v4 以前是 0.8；SJCL0001 格式；`tools/build_classes.py` 檔頭、`docs/contracts/s2k-word-classes.md` §4.1） | 對計數做詞類分群 → `tools/build_classes.py` |
+| `tinylm.sjtl` | `tinylm-v5`（SJTL0004，檔頭另記 kn-v1 的雜湊） | 1,440 萬參數的字元語言模型，6 層、d 384、字表 9,714 字，int8；檔頭帶聊天與書面各三組（保守、標準、積極）融合參數 α、τ、δ（SJTL0003；`docs/releases/tinylm-v4.md`、`tinylm-v3.md`、`experiments/s7a-tinylm/export_sjtl.py` 檔頭） | 訓練 → 匯出 → 調融合參數 |
 
 ### 1.2 三個檔案怎麼互相綁定
 
@@ -43,7 +43,7 @@
 
 | 改了什麼 | 要發 |
 |---|---|
-| 語料、計數或模型格式 | `model-v6`＋`classes-v4`＋下一個 `tinylm-v…` |
+| 語料、計數或模型格式 | 下一個 `model-v…`＋下一個 `classes-v…`＋下一個 `kn-v…`＋下一個 `tinylm-v…` |
 | 只重新分群 | 下一個 `classes-v…`＋下一個 `tinylm-v…` |
 | 只改詞類權重 μ（開著出貨的小模型量過） | 下一個 `classes-v…`（classes-v5），小模型沿用 |
 | 小模型的訓練、大小、匯出格式或融合參數 | 下一個 `tinylm-v…`（`tinylm-v2`、`tinylm-v3` 都只換融合參數；`tinylm-v4` 換檔頭格式） |

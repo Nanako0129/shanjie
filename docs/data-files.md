@@ -40,7 +40,7 @@ shasum -a 256 -c data/bigram.sjlm.sha256 data/classes.sjc.sha256 data/kn.sjkn.sh
 
 | 改了什麼 | 要發的新 Release |
 |---|---|
-| 語料、計數或模型格式（重建 `bigram.sjlm`） | `model-v7`，而且詞類表也要重建：`classes-v5`（舊的詞類表綁的是舊模型的雜湊，配新模型會載入失敗）；KN 側檔也要重產：下一個 `kn-v…`（綁模型的雜湊）；語意校正模型也要重新調參，發下一個 `tinylm-v…`（舊的綁舊模型與舊側檔的雜湊，配新的不會載入） |
+| 語料、計數或模型格式（重建 `bigram.sjlm`） | `model-v7`，而且詞類表也要重建：下一個 `classes-v…`（舊的詞類表綁的是舊模型的雜湊，配新模型會載入失敗）；KN 側檔也要重產：下一個 `kn-v…`（綁模型的雜湊）；語意校正模型也要重新調參，發下一個 `tinylm-v…`（舊的綁舊模型與舊側檔的雜湊，配新的不會載入） |
 | 只重新分群（類別數、分群用的資料） | 下一個 `classes-v…`，模型不變（`eval/golden/sp-predict.txt`、`sw-probe.txt` 的分數也依賴詞類表，要重產）；語意校正模型的 α、τ、δ 要重新調，發下一個 `tinylm-v…`（雜湊檔不會攔下這種錯配，要靠這張表） |
 | 只改詞類權重 μ（檔頭一個值，`experiments/lytune-attrib/set_mu.py`） | 下一個 `classes-v…`，依詞類表的 golden 一樣重產；μ 是開著出貨的小模型量過才選的，就沿用那個 `tinylm-v…`，沒量過就照上一列重調（classes-v5，`docs/contracts/classes-v5.md` §2 第 3 點） |
 | 語意校正模型的訓練、大小、匯出格式或融合參數 | 下一個 `tinylm-v…`，n-gram 模型與詞類表不變（`tinylm-v2`、`tinylm-v3` 都是只換融合參數；`tinylm-v4` 換檔頭格式、加強度兩檔；`tinylm-v5` 是 SJTL0004，記 KN 側檔的雜湊） |
@@ -54,7 +54,7 @@ shasum -a 256 -c data/bigram.sjlm.sha256 data/classes.sjc.sha256 data/kn.sjkn.sh
 | 檔案 | 工具 | 規格與量測 |
 |---|---|---|
 | `bigram.sjlm` | `tools/build_lm.py`（格式說明在檔頭）；model-v5 起計數加了 `--extra-lexicon`（加法計數，計數詞表由 `experiments/model-v5/count_lexicon.py` 產生），model-v6 另加名單詞的計數詞表、口語補次數；model-v6 是在 PR 1（`feat/model-v6`）的 commit 建的，那時名單層還沒進 `ime.OVERLAYS`，所以建置指令帶 `--extra-overlay data/lexicon/names-add.tsv`；在 HEAD（名單層已常開）重跑**不要**帶這個參數，帶了名單會讀兩次（完整指令與說明在 `experiments/model-v6/README.md`）。發佈的檔案另含指紋條目，加的工具不在 repo，所以自己重建的模型雜湊不同 | `docs/contracts/model-v6.md`、`experiments/model-v6/README.md`、`docs/contracts/model-v5.md`、`experiments/model-v5/README.md`（之前的配方：`docs/contracts/s2f-variant-forms.md`、`experiments/s2f/README.md`） |
-| `classes.sjc` | `tools/build_classes.py`（格式說明在檔頭），輸入是分群結果與加過指紋的模型；classes-v3、classes-v4 的分群用 `experiments/s2-classes/cluster.py --keep-from`（沿用前一版的類別，188 上的資料；classes-v4 另用 `experiments/model-v6/force_classes.py` 把罕見量詞搬進「個」的類別），所以自己從頭分群的結果不同 | `docs/contracts/model-v6.md` §2.2b、`docs/contracts/model-v5.md` §9、`docs/contracts/s2k-word-classes.md`、`experiments/s2-classes/README.md` |
+| `classes.sjc` | `tools/build_classes.py`（格式說明在檔頭），輸入是分群結果與加過指紋的模型；classes-v3、classes-v4 的分群用 `experiments/s2-classes/cluster.py --keep-from`（沿用前一版的類別，188 上的資料；classes-v4 另用 `experiments/model-v6/force_classes.py` 把罕見量詞搬進「個」的類別），所以自己從頭分群的結果不同；classes-v5 是 classes-v4 用 `experiments/lytune-attrib/set_mu.py` 把 μ 改成 0.2（`tools/build_classes.py` 的 `MU` 也跟著改成 0.2） | `docs/contracts/model-v6.md` §2.2b、`docs/contracts/model-v5.md` §9、`docs/contracts/s2k-word-classes.md`、`experiments/s2-classes/README.md` |
 | `tinylm.sjtl` | `experiments/s7a-tinylm/train.py` 訓練、`export_sjtl.py` 匯出（格式說明在檔頭），融合參數由 `fusegrid.py` 調 | `docs/contracts/s7a-tinylm.md`、`docs/contracts/s7c-core-tinylm.md`、`experiments/s7a-tinylm/README.md` |
 
 ## 授權

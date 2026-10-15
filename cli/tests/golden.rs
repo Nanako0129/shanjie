@@ -340,7 +340,7 @@ fn predict_no_kn_scores_differently_from_the_golden() {
 /// data/lexicon/overlay-manual.tsv: every manual word comes first in the shipping setting, alone and in a sentence, in both profiles
 /// (eval/golden/manual-words-rows.txt; MANUAL_BONUS in tools/build_overlay.py was chosen on its first 9 rows; the last 6 (喵菜子, 哈那口, and 菜菜子 which is a base word) are
 /// first even without the entry, so they only pin the behaviour). A retrained model or a new
-/// rerank that pushes a name below its homophones fails here instead of shipping silently.
+/// rerank that pushes another name below its homophones fails here instead of shipping silently; the one known miss is listed below.
 /// Known exception since classes-v5 (μ 0.8 → 0.2, docs/contracts/classes-v5.md): in formal, row 8 `米雅歌唱得很好` comes out as
 /// 米亞 after the rerank. The test pins exactly that miss (rowstats, i.e. after the rerank) so any other row dropping still fails.
 #[test]
