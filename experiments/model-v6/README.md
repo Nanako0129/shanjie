@@ -1,6 +1,6 @@
 # model-v6 建置指令
 
-契約：`docs/contracts/model-v6.md` §2.1、§2.1b、§2.2、§2.2b、§2.3、§2.6 步驟 2。這份只記指令順序；尖括號是建置機上的路徑（`<REPO>` 是含契約 §2.6 前提的 checkout、`<WORK>` 是新的計數目錄、`<M5CLUSTER>` 是 model-v5 那次分群的輸出資料夾），不是現成可跑的批次檔。慣例同 `experiments/model-v5/README.md`：絕對路徑、`PYTHONUTF8=1`、188 綁 P-core。最後三個檔（`bigram.sjlm`、`classes.sjc`、`kn.sjkn`）是最終檔，各記 SHA-256。
+契約：`docs/contracts/model-v6.md` §2.1、§2.1b、§2.2、§2.2b、§2.3、§2.6 步驟 2。這份只記指令順序；尖括號是建置機上的路徑（`<REPO>` 是含契約 §2.6 前提的 checkout、`<WORK>` 是新的計數目錄、`<M5CLUSTER>` 是 model-v5 那次分群的輸出資料夾），不是現成可跑的批次檔。慣例同 `experiments/model-v5/README.md`：絕對路徑、`PYTHONUTF8=1`、建置機綁 P-core。最後三個檔（`bigram.sjlm`、`classes.sjc`、`kn.sjkn`）是最終檔，各記 SHA-256。
 
 名單參數：`--extra-overlay data/lexicon/names-add.tsv` 在 `build_lm.py`、`build_classes.py`、`kn_cont.py` 三個都要帶，而且是**同一份**檔（異體類、封頂與產得出的詞三處才一致）；`lm_eval.py` 做跨語言核對時也帶它（契約 §2.3）。重現核對（契約 §2.1）**不帶**這個參數。
 
@@ -31,7 +31,7 @@ CEREBRAS_API_KEY=… python3 generate.py --provider cerebras --model gpt-oss-120
 
 ## 步驟
 
-1. 計數（188，配方照 `experiments/model-v5/count.bat`，`<WORK>` 是新目錄，`S2_WORK=<WORK>`）：維基 `build_counts.py --articles 200000 --procs 10 --expected --extra-lexicon <計數詞表>…`、口語 `build_counts_text.py --expected --extra-lexicon <計數詞表>…`（口語訓練檔、`synth.txt` 與補次數檔），各自記 SHA-256。
+1. 計數（建置機，配方照 `experiments/model-v5/count.bat`，`<WORK>` 是新目錄，`S2_WORK=<WORK>`）：維基 `build_counts.py --articles 200000 --procs 10 --expected --extra-lexicon <計數詞表>…`、口語 `build_counts_text.py --expected --extra-lexicon <計數詞表>…`（口語訓練檔、`synth.txt` 與補次數檔），各自記 SHA-256。
 2. 建模型（`PRUNE=2`、`D=0.75` 不變）：
 
    ```
@@ -40,7 +40,7 @@ CEREBRAS_API_KEY=… python3 generate.py --provider cerebras --model gpt-oss-120
    ```
 
 3. 私有條目（main 的私有流程）：`<WORK>/bigram-v6-nofp.sjlm` → 加過條目的 `<WORK>/bigram.sjlm`，在算雜湊、分群、建詞類表、產生 KN 側檔之前加。之後三步都用這個最終模型。
-4. 分群（188；`S2K_COUNTS=<WORK>`、`S2K_OUT=<CLUSTER>` 是新資料夾，不能是 `--keep-from` 的那個）：
+4. 分群（建置機；`S2K_COUNTS=<WORK>`、`S2K_OUT=<CLUSTER>` 是新資料夾，不能是 `--keep-from` 的那個）：
 
    ```
    S2K_COUNTS=<WORK> S2K_OUT=<CLUSTER> python3 experiments/s2-classes/cluster.py --N 40000 --K 512 --keep-from <M5CLUSTER>

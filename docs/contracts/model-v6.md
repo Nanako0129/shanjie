@@ -36,20 +36,20 @@
 
 ### 2.1 計數：A3 詞包詞與專有名詞進斷詞詞彙
 
-- 配方照 model-v5（`experiments/model-v5/README.md` 的 `count.bat`）：維基 `build_counts.py --articles 200000 --procs 10 --expected`（×1，不加 `--mw`）、口語 `build_counts_text.py --expected`（×5），加法計數（model-v5 §8），`tools/build_lm.py` 的 `PRUNE=2`、`D=0.75` 不變。在 188 跑，綁 P-core、絕對路徑。
+- 配方照 model-v5（`experiments/model-v5/README.md` 的 `count.bat`）：維基 `build_counts.py --articles 200000 --procs 10 --expected`（×1，不加 `--mw`）、口語 `build_counts_text.py --expected`（×5），加法計數（model-v5 §8），`tools/build_lm.py` 的 `PRUNE=2`、`D=0.75` 不變。在建置用的 Windows 機器跑，綁 P-core、絕對路徑。
 - **計數詞表**：`experiments/model-v5/count_lexicon.py` 的規則（model-v5 §9：有同音衝突的詞與衝突讀音的片段不進計數）分別套用在
   - A3 合併後的 `data/packs/acg-add.tsv`（衝突讀音＝`acg-collisions.tsv`、`collision-readings-v5.txt`、以及 A3 的處置檔），
   - `data/lexicon/names-add.tsv`（衝突讀音＝`names-collisions.tsv`），
   兩份輸出各給一次 `--extra-lexicon`。`count_lexicon.py` 若要改成能吃名單，改動與單元測試在這一片。
 - **輸入固定**：照 model-v5 的輸入表記 SHA-256（維基 dump、`colloquial-train.txt`、`synth.txt`、`mcbpmf-data.txt`、`overlay-add.tsv`、OpenCC 兩個表），除了兩份計數詞表、`overlay-add.tsv`（#152 拿掉粵語詞後的版本，記新雜湊）與 §2.1b 新增的補次數檔，每一列都要等於 model-v5 那次（`experiments/model-v5/README.md` 的表）。
-- **重現核對**：`build_counts.py`、`build_counts_text.py`、`count_lexicon.py`、`experiments/s2-classes/cluster.py`、`tools/build_classes.py` 對 model-v5 建置的 commit（98da9ad）diff 為空、`tools/build_lm.py` 只有 kn-core 片的重構（`merged_counts`）時，不重跑 model-v5 的重現核對；另外用同一份 model-v5 計數跑新的 `build_lm.py`，模型（加指紋前）要等於 `7961cb9d…`。§7 P3-4 給 `build_lm.py`、`build_classes.py` 加的預設關 `--extra-overlay` **不算**需要重跑的改動，條件是：不帶這個參數時，同一份計數建出的模型等於 `7961cb9d…`、`build_classes.py` 建出的詞類表和 classes-v3 逐位元組相同（兩項都在 188 上跑、記進研究紀錄）。任何一個腳本有別的改動，就照 model-v5 §2.1 跑一次重現核對。
+- **重現核對**：`build_counts.py`、`build_counts_text.py`、`count_lexicon.py`、`experiments/s2-classes/cluster.py`、`tools/build_classes.py` 對 model-v5 建置的 commit（98da9ad）diff 為空、`tools/build_lm.py` 只有 kn-core 片的重構（`merged_counts`）時，不重跑 model-v5 的重現核對；另外用同一份 model-v5 計數跑新的 `build_lm.py`，模型（加指紋前）要等於 `7961cb9d…`。§7 P3-4 給 `build_lm.py`、`build_classes.py` 加的預設關 `--extra-overlay` **不算**需要重跑的改動，條件是：不帶這個參數時，同一份計數建出的模型等於 `7961cb9d…`、`build_classes.py` 建出的詞類表和 classes-v3 逐位元組相同（兩項都在建置機上跑、記進研究紀錄）。任何一個腳本有別的改動，就照 model-v5 §2.1 跑一次重現核對。
 - **覆蓋量測**（計數之前）：在同樣的 20 萬篇維基與兩個口語檔裡，數 A3 新增詞與名單詞至少出現一次的個數，以及「酷澎」「洛琪希」「虎杖悠仁」的次數，寫進研究紀錄（日期在計數之前）。只報告，不設門檻（§0 已知計數救不了的名字由 §2.4 處理）。
 
 ### 2.1b 口語補次數（S7f 生成管線）
 
 - **種子詞**：`experiments/model-v6/seeds-topup.txt`（進 git，CC0，main 手寫）：錯字回報與錯誤桶表裡「詞不常見、模型沒見過接續」的口語詞與量詞（坨、一整坨、整坨…），加上 §2.2b 量詞表裡的罕見量詞。只用一般常識寫，不收任何私人聊天裡看到的詞。
 - **生成**：`generate.py --provider cerebras --model gpt-oss-120b`，把關規則照 S7f（簡體字、長度、去重、和評測集重疊的句子拿掉，含 `--dedupe-against` 既有的口語檔）；`--budget-usd 15`、帳本記進研究紀錄；字數上限 `--chars` 由 main 依帳本試跑的單價定，不超過 50 萬字。金鑰只在單一程序的環境變數，不印、不寫檔。
-- **計數**：輸出檔放 repo 外（`~/.cache/shanjie/`、188），記 SHA-256；和口語檔一樣用 `build_counts_text.py --expected`、權重 ×5。
+- **計數**：輸出檔放 repo 外（Mac 的快取與建置用的 Windows 機器），記 SHA-256；和口語檔一樣用 `build_counts_text.py --expected`、權重 ×5。
 - **只記錄**：生成後在補次數檔裡數「坨」「整坨」與種子詞的出現次數，寫進研究紀錄。
 
 ### 2.2b 量詞詞類（classes-v4）
@@ -65,7 +65,7 @@
 
 ### 2.3 KN 側檔（kn-v1）
 
-- 188：`tools/kn_cont.py --theta 1 --beta 1` 用 model-v6 的計數與**最終模型**（加過私有條目）產生 `SJKN0002`，記 SHA-256。ΣN′ 由 `lm.kn_total`＋`build_lm.variant_classes` 算好寫進檔頭（kn-core §1）；`lm_eval.py` 讀它時用 `kn_classes` 重算比對。
+- 建置機：`tools/kn_cont.py --theta 1 --beta 1` 用 model-v6 的計數與**最終模型**（加過私有條目）產生 `SJKN0002`，記 SHA-256。ΣN′ 由 `lm.kn_total`＋`build_lm.variant_classes` 算好寫進檔頭（kn-core §1）；`lm_eval.py` 讀它時用 `kn_classes` 重算比對。
 - 放在模型旁邊（`data/lm/kn.sjkn`、App 的 Resources），Rust 核心自動載入。
 - **跨語言核對**（決定性的一項，照 kn-core §3 第 5 項）：最終檔＋側檔＋名單層（三者都開），Rust CLI 與 `lm_eval.py` 在 dev302、打字測驗、錯字回報、cvtune、wikitune × 聊天、書面（`--context`）的摘要行逐字相同（含 `+kn:` 與 `top1_sha256`）。另加一個 golden 例子含只在名單裡的詞（例如「酷澎」）。
 
@@ -90,7 +90,7 @@
   - `export_sjtl.py` 加 `--kn-side <kn.sjkn>`（寫入它的雜湊）；**只有給了 `--levels` 才輸出 SJTL0004**，這時沒給 `--kn-side` 就寫全 0；沒給 `--levels` 時照舊輸出 v1／v2；只給 `--kn-side` 是 usage error（§7 P3-5，兩處同一個規則）。
   - 測試（Rust，用合成的小模型與小側檔，照 rerank-strength §9 的讀檔規矩）：KN 開＋雜湊相符 → 載入成功；KN 開＋不符 → `KneserNey`；KN 開＋SJTL0001–0003 → `KneserNey`；KN 關＋檔裡有非 0 雜湊 → `KneserNey`；KN 關＋全 0 → 成功；SJTL0004 每個前綴長度都回 `Format` 不 panic；`export_sjtl.py` 的單元測試核對寫入的雜湊與位移。讀檔與格式屬安全審查範圍，交 `pilotfish:security-executor`。
 - **重調**：權重不變（S7a M），在 model-v6＋classes-v4＋kn-v1＋名單層的候選上照 `docs/contracts/rerank-strength.md` §11 重做，但**KN 開著**（覆寫 §11.1 的「不載 KN」）：
-  - 分數檔用一個暫時的 `.sjtl`：`export_sjtl.py --type int8 --ngram-model <最終 model-v6> --kn-side <最終 kn.sjkn> --chat 0.3 2 0.25 --formal 0.7 1 2 --levels 1 2 3 0.3 2 0.25 0.7 0.5 2 0.5 1 0.25`（輸出 SJTL0004；融合參數用 tinylm-v4 的值當佔位，分數檔只用到權重，之後重選），在 188 用唯一的 CLI commit 跑 `--tinylm <暫時檔> --tinylm-scores … --dump …`（側檔在模型旁邊，KN 開著）。
+  - 分數檔用一個暫時的 `.sjtl`：`export_sjtl.py --type int8 --ngram-model <最終 model-v6> --kn-side <最終 kn.sjkn> --chat 0.3 2 0.25 --formal 0.7 1 2 --levels 1 2 3 0.3 2 0.25 0.7 0.5 2 0.5 1 0.25`（輸出 SJTL0004；融合參數用 tinylm-v4 的值當佔位，分數檔只用到權重，之後重選），在建置機用唯一的 CLI commit 跑 `--tinylm <暫時檔> --tinylm-scores … --dump …`（側檔在模型旁邊，KN 開著）。
   - 跨機器一致（rerank-strength 11.1）〔修訂，2026-10-15〕：開 KN 之後 macOS 與 Linux 的 libm 末位不同，dev302 的 dump 在 n-gram 分數欄差最後一位（量過最大 7.1e-15），雜湊不會相同；改成「候選字串與順序逐行相同、n-gram 分數差 ≤ 1e-9」，小模型分數 ≤ 1e-4 與「每組參數選出的候選相同」照 11.1。照維護者「自訂規則擋到設計就放寬」。
   - §1 選值（標準那一檔也在新候選上重選，因為模型換了）、§4.2–§4.4、D2c 拆解只記錄；匯出 `tinylm-v5`：`--ngram-model <model-v6> --kn-side <kn-v1> --chat … --formal … --levels …`（SJTL0004）；§4.5 保留集（fresh verifier）。
 - **前提與順序**：語意校正強度那一片（`feat/rerank-strength`，SJTL0003 與設定 UI，切到 tinylm-v4）先合併；SJTL0004 的核心改動在這一片。**App 切到 model-v6＋kn-v1 的 PR 必須同時切到 tinylm-v5**（不留下「KN 開著、小模型載不進來」的合併狀態）。
@@ -98,7 +98,7 @@
 ### 2.6 順序與 PR（照 model-v5 §2.5）
 
 1. 前提：A3、N1、kn-core 合併；本分支從含三者的 main 開出（N1 未合併前，§2.1b 的生成與 §2.2b 的工具可以先做）。
-2. 覆蓋量測、計數詞表（§2.1）、補次數檔（§2.1b），188 計數 → `build_lm.py --extra-overlay data/lexicon/names-add.tsv` → 私有條目 → 分群＋`force_classes.py`＋`build_classes.py --extra-overlay data/lexicon/names-add.tsv` → `kn_cont.py --extra-overlay data/lexicon/names-add.tsv`。三個檔是最終檔，記 SHA-256；完整指令記進 `experiments/model-v6/README.md`。
+2. 覆蓋量測、計數詞表（§2.1）、補次數檔（§2.1b），建置機計數 → `build_lm.py --extra-overlay data/lexicon/names-add.tsv` → 私有條目 → 分群＋`force_classes.py`＋`build_classes.py --extra-overlay data/lexicon/names-add.tsv` → `kn_cont.py --extra-overlay data/lexicon/names-add.tsv`。三個檔是最終檔，記 SHA-256；完整指令記進 `experiments/model-v6/README.md`。
 3. 跨語言核對（§2.3）；§2.4 的分數規則；§3 的量測、所有 golden 重產，都在最終檔上做。
 4. 詞包與名單的衝突在 model-v6 上重新偵測（§3.3）。
 5. fresh verifier：§3 重跑抽查、**保留集（在問 Release 之前）**；main：私有條目核對（開著 KN）。
@@ -113,7 +113,7 @@
   2. `tools/build_overlay.py` 的 `MANUAL_BONUS` 0.5 → 0.75，重建 `data/lexicon/overlay-add.tsv`：只有手動列的分數改變（讀音與詞不變）。這是**執行時**（詞庫打分、解碼）的改變。建模與 KN 側檔讀疊加層分數的地方只有變體類的代表詞（`build_lm.variant_classes` 取分數最高的詞）：在 §2.3 之前，用 0.5（`96b8db89…`）與 0.75 兩個疊加層（都加上 `names-add.tsv`）各算一次 `variant_classes`，結果相同才繼續、記進研究紀錄；不同就停（代表詞換了，kn-v1 的 ΣN′ 與 model-v6 都要重做）。疊加層的分數也是計數的輸入（`experiments/s2/build_counts.py` 斷詞與 `--expected` 的權重用到詞條分數），model-v6、classes-v4、kn-v1 的計數是用 0.5 的疊加層（`96b8db89…`，§2.1 的輸入紀錄）做的，**三個檔照原樣保留、不重建**。`experiments/model-v6/README.md` 的輸入表分開列兩個雜湊：計數用的 `96b8db89…`（commit `4d47a50` 的版本），執行時、golden 與評測用的 0.75 版；照 README 重現計數時要用舊檔（`git show 4d47a50:data/lexicon/overlay-add.tsv`），不是 HEAD 的檔。`sp-predict.txt` 等讀疊加層分數的 golden 照 §2.5 重產。
 - **順序**：規則 2 的新 `overlay-add.tsv` 要在 §2.7 的分數檔與選值、§3.1／§3.2 的表與守門、§3.3 的衝突重驗、§3.6 的保留集**之前**定下來。已經用 0.5 的疊加層產生的結果，要在新疊加層下重跑同一條指令，dump 或 rowstats 逐位元組相同才能沿用，否則重做。研究紀錄在這些結果旁邊記它用的 `overlay-add.tsv` SHA-256，全部必須是 0.75 那一份。
 - **驗收**（PR 2，和 §3.4 一起）：
-  1. 188 WSL（降頻後）的 `engine_learn`，`kn.sjkn` 在 `data/lm`：鏡像改選 ≥ 80%、A2 ≥ 80% 且非衝突改壞 0、ㄗㄞˋ 污染 0；`global_eps_table` 記錄數字。
+  1. Linux 機器（Windows 機器的 WSL，降頻後）的 `engine_learn`，`kn.sjkn` 在 `data/lm`：鏡像改選 ≥ 80%、A2 ≥ 80% 且非衝突改壞 0、ㄗㄞˋ 污染 0；`global_eps_table` 記錄數字。
   2b. 開 KN、最佳路徑上有學到的詞時，`total_score` 等於解碼第一名的分數（測試；突變「`total_score` 不套例外」讓它以斷言失敗）。
   2. 單元測試（合成小模型＋小側檔，照 `kn_tiny`）：**同一次解碼、同一段、同一個前文（假設）**裡有同讀音的兩個詞條，學習紀錄裡只有其中一個（被加分），另一個不在紀錄裡（沒被加分）；斷言被加分的詞條的詞項等於沒有側檔時的值、沒被加分的等於開 KN 的值。兩個突變都要讓它以斷言失敗（不是編譯錯誤）：「拿掉例外」，以及「例外改成看整段有沒有學習紀錄（`learned.is_some()`）而不是 `boosted > lp`」。
   3. `golden.rs` 與 §2.3 的跨語言摘要行，除了手動詞分數造成的改變之外不變（改變的列逐一列進研究紀錄）。
@@ -159,13 +159,13 @@
 
 ## 4. 停止條件、預算、限制
 
-- **停止條件**：守門否決；輸入雜湊和 model-v5 不同（計數詞表、`overlay-add.tsv`、補次數檔除外）；補次數的帳本達到 US$15；重現核對不成立；跨語言核對有任何一行不同；沒處置的衝突；選字記憶測試失敗；188 單批超過 8 小時；下載回來的雜湊不符。
-- **預算**：生成花費 ≤ US$15（帳本）；計數、建模、側檔、分數檔由 main 在 188 跑（Colab 只在 188 的輸出能逐位元組重現時才用，見 rerank-strength §11.1 的紀錄）；`force_classes.py` 與種子、量詞表交 executor 或 main；App 載入名單層、授權、golden 重產交 executor 1 次＋修正 1 次。
-- **限制**：建 Release 先問使用者；agent 不讀 `eval/holdout`（verifier 照規則除外）、學習檔、`~/Library`、鑰匙圈、`~/side-project/shanjie-private`；私有條目的一切不進 repo；agent 不安裝、不啟動 App。
+- **停止條件**：守門否決；輸入雜湊和 model-v5 不同（計數詞表、`overlay-add.tsv`、補次數檔除外）；補次數的帳本達到 US$15；重現核對不成立；跨語言核對有任何一行不同；沒處置的衝突；選字記憶測試失敗；建置機單批超過 8 小時；下載回來的雜湊不符。
+- **預算**：生成花費 ≤ US$15（帳本）；計數、建模、側檔、分數檔由 main 在建置用的 Windows 機器跑（Colab 只在那台的輸出能逐位元組重現時才用，見 rerank-strength §11.1 的紀錄）；`force_classes.py` 與種子、量詞表交 executor 或 main；App 載入名單層、授權、golden 重產交 executor 1 次＋修正 1 次。
+- **限制**：建 Release 先問使用者；agent 不讀 `eval/holdout`（verifier 照規則除外）、學習檔、`~/Library`、鑰匙圈、維護者的私人資料夾；私有條目的一切不進 repo；agent 不安裝、不啟動 App。
 
 ## 5. 範圍外
 
-- 資訊＋AI 領域詞包（另一片）；Rust 測試改在 188 WSL 跑（另一片，`chore/linux-tests`）。
+- 資訊＋AI 領域詞包（另一片）；Rust 測試改在 Windows 機器的 WSL 跑（另一片，`chore/linux-tests`）。
 - 罕見名字的分數下限（宿儺這類，詞包詞）；疊加層「台」「臺」寫法和官網不同（臺北城大、臺南藝大）；在／再（P1a 已停）；S7a 小模型重排；Pitman–Yor；舊 Release 的刪除。
 
 ## 6. 審查紀錄
