@@ -24,6 +24,7 @@ import common  # noqa: E402
 import anchor  # noqa: E402
 import build_models  # noqa: E402
 import compress  # noqa: E402
+import entropy_prune  # noqa: E402
 import count  # noqa: E402
 import grid  # noqa: E402
 import harness  # noqa: E402
@@ -579,6 +580,99 @@ class TestRowstatsAndGrid(Fixture):
             line = run_main(lm_eval.main, ["--lm", self.lm_path, "--profile", "chat", "--rows", self.rows, "--context", "--no-classes", "--rowstats", ref])
             self.assertEqual(slurp(os.path.join(d, "B0", "chat", "tiny.rowstats")), slurp(ref))   # shipped point = lm_eval.py, bit for bit
             self.assertEqual(slurp(os.path.join(d, "B0", "chat", "tiny.summary")).replace("## tiny", "## rows.txt"), line)
+
+
+class TestEntropyPrune(Fixture):
+    """E1e. T1 of the synthetic fixture is the unpruned table; B0 has its kn.sjkn (beta 1) next to it."""
+
+    def setUp(self):
+        self.kn = os.path.join(self.b0, "kn.sjkn")
+        self.lm = L.BigramLM(self.lm_path, classes=False, kn=self.kn)
+        self.tl = trimodel.TriLM(self.lm, self.tri_table(1))
+        self.d = sjlm_io.read_tri(slurp(self.tri_path(1), "rb"))
+        self.bg, self.pb = entropy_prune.load_pb(slurp(self.lm_path, "rb"), self.d, self.kn)
+
+    def run_prune(self, tri, keep, labels="X"):
+        out = tempfile.mkdtemp(dir=self.tmp.name)
+        entropy_prune.main(["--tri", tri, "--lm", self.lm_path, "--kn", self.kn, "--keep", keep, "--out-dir", out, "--labels", labels])
+        return out
+
+    def direct(self):
+        """Per-entry score from TriLM / BigramLM, one entry at a time."""
+        d, lm, tri = self.d, self.lm, self.tl.tri
+        out = []
+        for ci in range(len(d["key"])):
+            u, v = tri.context_words(ci)
+            for j in range(int(d["off"][ci]), int(d["off"][ci + 1])):
+                w = int(d["nxt"][j])
+                pb = float(self.pb[w])
+                p2 = lm.prob(lm.vocab[v], lm.vocab[w], pb)
+                p3 = self.tl.prob(lm.vocab[u], lm.vocab[v], lm.vocab[w], pb)
+                out.append(int(d["cnt"][j]) * math.log(p3 / (tri.back(ci) * p2)))
+        return np.array(out)
+
+    def test_scores_equal_a_direct_per_entry_computation(self):
+        got = entropy_prune.scores(self.d, self.bg, self.pb)
+        want = self.direct()
+        self.assertGreater(len(want), 20)
+        np.testing.assert_allclose(got, want, rtol=1e-9, atol=1e-12)
+        # a tiny chunk (one context at a time) gives the same scores
+        with mock.patch.object(entropy_prune, "CHUNK", 1):
+            np.testing.assert_array_equal(entropy_prune.scores(self.d, self.bg, self.pb), got)
+
+    def test_kept_contexts_still_sum_to_one(self):
+        E = len(self.d["nxt"])
+        pb = 1.0 / len(self.lm.vocab)
+        for k in (E // 3, E // 2):
+            out = self.run_prune(self.tri_path(1), str(k))
+            tl = trimodel.TriLM(self.lm, trimodel.TriTable.from_path(os.path.join(out, "tri-X.sjt3")))
+            self.assertEqual(tl.tri.entries, k)
+            for ci in range(tl.tri.contexts):
+                u, v = tl.tri.context_words(ci)
+                s = sum(tl.prob(self.lm.vocab[u], self.lm.vocab[v], w, pb) for w in self.lm.vocab)
+                self.assertAlmostEqual(s, 1.0, delta=1e-9)
+
+    def test_keeping_everything_is_byte_identical(self):
+        E = len(self.d["nxt"])
+        out = self.run_prune(self.tri_path(1), str(E))
+        self.assertEqual(slurp(os.path.join(out, "tri-X.sjt3"), "rb"), slurp(self.tri_path(1), "rb"))
+        info = json.loads(slurp(os.path.join(out, "tri-X.sjt3.json")))
+        self.assertEqual((info["entries"], info["keep"]), (E, E))
+
+    def test_several_k_come_from_one_ranking_and_nest(self):
+        E = len(self.d["nxt"])
+        out = self.run_prune(self.tri_path(1), f"{E // 4},{E // 2}", "A,B")
+        a, b = (sjlm_io.read_tri(slurp(os.path.join(out, f"tri-{x}.sjt3"), "rb")) for x in "AB")
+        def entries(d):
+            ctx = np.repeat(d["key"], np.diff(d["off"].astype(np.int64)))
+            return set(zip(ctx.tolist(), d["nxt"].tolist()))
+        self.assertEqual((len(entries(a)), len(entries(b))), (E // 4, E // 2))
+        self.assertTrue(entries(a) <= entries(b))
+        self.assertEqual(json.loads(slurp(os.path.join(out, "tri-A.sjt3.json")))["label"], "A")
+
+    def test_ties_do_not_depend_on_input_order(self):
+        # equal counts everywhere -> many equal scores; the same trigrams inserted in two different orders must give the same file
+        ids = {w: i for i, w in enumerate(self.lm.vocab)}
+        words = ["今天", "天氣", "很", "好", "我", "去"]
+        tri = {(a, b, c): 3 for a in words[:3] for b in words[:3] for c in words}
+        outs = []
+        for items in (list(tri.items()), list(reversed(list(tri.items())))):
+            u, v, w, c = trimodel.tri_arrays(dict(items), ids)
+            b = trimodel.TriBuild(u, v, w, c, len(ids))
+            path = os.path.join(self.tmp.name, f"tie{len(outs)}.sjt3")
+            with open(path, "wb") as f:
+                f.write(sjlm_io.write_tri(b.tables(1, bytes.fromhex(common.sha256_file(self.lm_path)))))
+            outs.append(slurp(os.path.join(self.run_prune(path, "40"), "tri-X.sjt3"), "rb"))
+        self.assertEqual(outs[0], outs[1])
+        # ties keep the earlier (u, v, w) id: among entries scoring exactly the cut value, the kept ones are the first ones
+        d = sjlm_io.read_tri(slurp(path, "rb"))
+        sc = entropy_prune.scores(d, self.bg, self.pb)
+        kept = np.zeros(len(sc), bool)
+        kept[np.argsort(-sc, kind="stable")[:40]] = True
+        cut = sc[kept].min()
+        tied = np.flatnonzero(sc == cut)
+        self.assertGreater(len(tied), 1)
+        self.assertEqual(kept[tied].tolist(), sorted(kept[tied], reverse=True))
 
 
 class TestCompression(Fixture):

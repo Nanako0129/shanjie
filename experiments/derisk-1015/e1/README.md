@@ -22,6 +22,7 @@ cd <REPO> && python3 -W ignore experiments/derisk-1015/e1/test_e1.py > /tmp/e1-t
 | `grid.py` | `select`：15 格 λ×β、凍結選擇 JSON；`judge`：在固定點對各集合寫 rowstats。可多程序 |
 | `rowstats_concat.py` | 依契約順序串接 rowstats（列號從 1 重編） |
 | `subset_rowstats.py` | E4 子集合（前文含句中標點、數字或英文）的 rowstats，只報不判 |
+| `entropy_prune.py` | E1e。相對熵剪枝：從 T1 與 B0（＋`kn.sjkn`）算每個條目的分數，一次排序，輸出多個 K 的 `.sjt3`（`prune.select` 的規則） |
 | `compress.py` | E1c。(i) 無損與 (ii) 8／4 位元對數級距量化的寫出、讀回與大小報告 |
 | `common.py` | 路徑、SHA-256、commit 紀錄 |
 | `test_e1.py` | 單元測試 |
@@ -278,3 +279,20 @@ python3 $REPO/tools/evalstats.py compare $R/judge/B0ship/formal/judge5.rowstats 
 ```
 
 B0ship 的 `judge.json` 要有 discordtune（契約：同一個檔）；沒有就停，回報 main，不要覆寫 B0ship 目錄。
+
+## E1e 相對熵剪枝（契約 `derisk-1015.md` §3 E1「E1e」，修訂四）
+
+分數 `s = c·ln( P3 / (back3·P2) )`：P3、back3 取自**未剪**的 T1，P2 是 B0 在 KN β 1、`--no-classes` 的機率，只由 `bigram.sjlm` 與 `kn.sjkn` 算（β 1 時 pb = N′/ΣN′，與 λ、詞庫無關；`</s>` 用 `eos_total/N`）。留分數最高的 K 個，同分照 (u, v, w) id 順序；保留的前文總次數不變、沒有保留條目的前文不存、檔頭不變。**一階近似**：剪掉一個條目會讓同前文其他詞的 back3 變大，這一項不算（Stolcke 的精確準則有它）；寫進研究紀錄。沒給 `--kn` 時 pb 退成 `uni/N`（近似，只作除錯，正式跑一定要給）。T1 約 1.1 GB 以 mmap 讀，打分一次（以前文為單位分塊），記憶體約 T1 條目數 × 24 bytes（分數、排序索引、工作區）再加 B0 的陣列。
+
+K 讀自 E1d 的 `$R/e1d/tri/tri-t{15,3,2}.sjt3.json` 的 `entries`。在 188 的 WSL（`E1`、`R`、`M`、`BG` 同 E1d 的手冊）：
+
+```
+set -e
+K15=$(python3 -c "import json;print(json.load(open('$R/e1d/tri/tri-t15.sjt3.json'))['entries'])")
+K3=$(python3 -c "import json;print(json.load(open('$R/e1d/tri/tri-t3.sjt3.json'))['entries'])")
+K2=$(python3 -c "import json;print(json.load(open('$R/e1d/tri/tri-t2.sjt3.json'))['entries'])")
+python3 -u $E1/entropy_prune.py --tri $M/tri/tri-t1.sjt3 --lm $BG --kn $M/b0/kn.sjkn --keep $K15,$K3,$K2 --labels H15,H3,H2 --out-dir $R/e1e/tri
+cat $R/e1e/tri/tri-H*.sjt3.json     # contexts、entries、tri_bytes、total_bytes、sha256、score_min_kept
+```
+
+之後和 E1d 的 (b)–(d) 相同：標籤 `H15`、`H3`、`H2`，a = 0.05 ÷ 3；另報 H_k 對同條目數 T_k 的一行與 `compress.py` 的大小。

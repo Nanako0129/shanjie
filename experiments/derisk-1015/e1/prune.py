@@ -16,15 +16,20 @@ import common
 import sjlm_io
 
 
-def prune(d, thr):
-    """d: sjlm_io.read_tri dict -> the same kind of dict at threshold thr."""
-    keep = d["cnt"] >= thr
+def select(d, keep):
+    """d: sjlm_io.read_tri dict, keep: bool mask over its entries -> the same kind of dict with only those entries
+    (totals unchanged, contexts without a kept entry dropped, header unchanged)."""
     ck = np.concatenate(([0], np.cumsum(keep, dtype=np.int64)))
     per_ctx = ck[d["off"][1:]] - ck[d["off"][:-1]]
     sel = per_ctx > 0
     off = np.concatenate(([0], np.cumsum(per_ctx[sel]))).astype(np.uint32)
     return {"V": d["V"], "D": d["D"], "model_sha": d["model_sha"], "key": d["key"][sel], "tot": d["tot"][sel], "off": off,
             "nxt": d["nxt"][keep], "cnt": d["cnt"][keep]}
+
+
+def prune(d, thr):
+    """d: sjlm_io.read_tri dict -> the same kind of dict at threshold thr."""
+    return select(d, d["cnt"] >= thr)
 
 
 def main(argv=None):
