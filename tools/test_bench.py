@@ -390,6 +390,20 @@ class SuiteV2(Tmp):
         self.assertIn("replay differs", s["error"])
         self.assertIn("[2]", s["error"])
 
+    def test_replay_cell_of_a_kn_version_carries_its_kn_tag(self):
+        spec = {"release": "vK", "flags": ["--context", "--packs", "acg"], "tinylm": False, "kn": True, "tag": "+ctx+kn:{kn8}:θ1:β1+acg"}
+        with mock.patch.dict(bench.VERSIONS2, {"vK": spec}):
+            v = fake_ver("vK", self.td)
+            v.kn8 = "cbefbced"
+            v.replay = self.replay_script("你好\n世界\n")
+            self.assertEqual(bench.replay_tag(v), "lm-chat+kn:cbefbced:θ1:β1")
+            self.fake_cli("lm-chat+kn:cbefbced:θ1:β1", [True, True], ("你好", "世界"))
+            self.assertEqual(bench.measure_speed2(self.ctx, [v])[v.sha]["rows_match"], "2/2")
+            self.fake_cli("lm-chat", [True, True], ("你好", "世界"))   # a KN version whose cell lost KN is not the replay setting
+            self.assertIn("setting tag", bench.measure_speed2(self.ctx, [v])[v.sha]["error"])
+            self.fake_cli("lm-chat+kn:00000000:θ1:β1", [True, True], ("你好", "世界"))   # nor is another side file
+            self.assertIn("setting tag", bench.measure_speed2(self.ctx, [v])[v.sha]["error"])
+
     def test_comparison_cell_must_carry_the_replay_settings(self):
         v = fake_ver("v0.4.0", self.td)
         v.replay = self.replay_script("你好\n世界\n")

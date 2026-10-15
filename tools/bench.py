@@ -779,6 +779,13 @@ def expected_tag(ver, prof, anchor):
     return f"lm-{prof}" + (t.replace("+acg", "") if anchor else t)
 
 
+def replay_tag(ver):
+    """Setting tag of the replay-setting CLI cell (version's bigram + classes, nothing else): `lm-chat`, plus the version's own `+kn:...` part
+    when its model folder holds kn.sjkn (the CLI turns KN on beside the model, so the cell carries the same KN tag as the shipping cells)."""
+    kn = re.search(r"\+kn:[^+]*", ver.spec["tag"]) if ver.spec.get("kn") else None
+    return "lm-chat" + (kn.group().format(kn8=ver.kn8) if kn else "")
+
+
 def cli_env(anchor):
     e = dict(os.environ)
     e.pop("SHANJIE_VARIANTS", None)
@@ -852,7 +859,7 @@ def measure_speed2(ctx, vers):
             try:
                 dump = os.path.join(td, v.label + ".dump")
                 tag = parse_summary(sh([v.cli, "--lm", v.lm, "--profile", "chat", "--rows", rows, "--dump", dump], cwd=v.dir, env=cli_env(False)))["tag"]
-                if tag != "lm-chat":
+                if tag != replay_tag(v):
                     raise RuntimeError("the replay-setting CLI cell carries setting tag " + tag)
                 want[v.sha] = [c[0] for c in read_dump(dump)]
             except Exception as e:
@@ -1061,7 +1068,7 @@ def render_v2(results):
                 L.append(head + f" {s['p95_us'] / 1000:.3f} ms | {s['max_us'] / 1000:.2f} ms | {s['load_ms']:.0f} ms | {s['rss_mb']:.0f} MB | {s['keys']} | {s['rows_match']} | {rr} |")
     L += ["", "### 量測規則（套件 v2）", "",
           "- 集合凍結：dev302、typing76、probe 與套件 v1 同檔；user-reported 是 `eval/dev/user-reported.txt` 76beb24 時的前 80 列、fw 是 `eval/rerank/s7e-function-words.txt`（兩者在 `eval/bench/suite-v2/`）；cvtune、wikitune、lytune、wikitypo 不進 repo；SHA-256 都寫死在工具裡。計分用套件 v1 的 `variants.tsv`。",
-          "- 每一版的模型雜湊取自該版 `data/*.sha256`，檔案由 main 放在 `~/.cache/shanjie/bench/models/<sha256>/`；工具為每版組只含 `bigram.sjlm` 與 `classes.sjc` 的資料夾，不讓 CLI 自動載入 `kn.sjkn`。",
+          "- 每一版的模型雜湊取自該版 `data/*.sha256`，檔案由 main 放在 `~/.cache/shanjie/bench/models/<sha256>/`；工具為每版組只含 `bigram.sjlm` 與 `classes.sjc` 的資料夾（出貨帶 `kn.sjkn` 的版本，model-v6 起，另放它自己的 `kn.sjkn`，CLI 在模型旁自動開 KN；沒有的版本不放，所以自動載入 `kn.sjkn` 會讓該格失敗）。",
           "- 每一格的 CLI 摘要行設定標記必須等於工具裡設定表推出的字串，不符就該格失敗。沒有 `--tinylm` 的格另從 dump 重算 top1，要和 rowstats 逐列相同。",
           "- 重跑：`tools/bench.py run --suite v2 <上一版 tag> <commit> --as <新版> --private-root <目錄>`，再 `tools/bench.py table`。新版要先在工具的 `VERSIONS2` 加一列（Release 名、出貨旗標、摘要行設定標記）。`--override-packs off` 是對 S7h 錨點的檢查（只有 v0.4.0、v0.4.1），不寫結果。", ""]
     return "\n".join(L)
