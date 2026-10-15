@@ -174,6 +174,14 @@ class ExtraOverlay(unittest.TestCase):
         open(names, "w", encoding="utf-8").write("ㄎㄨˋ-ㄆㄥˊ\t酷澎\t-3.0\tnames\n")
         self.assertEqual(lm_eval.overlay_words(oa, names=names), {"牠", "酷澎"})
 
+    def test_capping_words_default_is_overlay_add_plus_names_not_sandhi(self):
+        """ime.capping_words() 是 Python 呼叫端共用的封頂集合：overlay-add.tsv + names-add.tsv（Rust 的 capping_overlay），不含 sandhi-add.tsv。"""
+        lexdir = os.path.join(os.path.dirname(os.path.abspath(ime.__file__)), "..", "..", "data", "lexicon")
+        words = lambda f: {l.split("\t")[1] for l in open(os.path.join(lexdir, f), encoding="utf-8")}
+        got = ime.capping_words()
+        self.assertEqual(got, words("overlay-add.tsv") | words("names-add.tsv"))
+        self.assertTrue(words("names-add.tsv") and words("names-add.tsv") <= got)
+
     def test_capping_set_has_the_overlay_add_and_the_extra_words(self):
         oa = os.path.join(self.tmp.name, "data", "lexicon", "overlay-add.tsv")
         self.assertEqual(lm_eval.overlay_words(oa), {"牠"})

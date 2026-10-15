@@ -9,9 +9,9 @@
 main bucket (section 3: A1, B1, B2, D1, C; F is the user-reported rows that are right offline) and writes
 eval/bench/triage/<label>.json (counts only). Public sets also get a per-row numbers file under --rows-out (default
 ~/.cache/shanjie/triage), outside the repo; private sets only ever get counts. `table` renders docs/triage.md from the JSON files.
-The holdout is never a set here. Standard library only, except that `tinylm_params` needs numpy (export_sjtl.py's reader), plus tools/bench.py's set table and reference/proto/eval.py's `lenient`).
+The holdout is never a set here. Standard library only, except that `tinylm_params` needs numpy (export_sjtl.py's reader), plus tools/bench.py's set table, reference/proto/eval.py's `lenient` and reference/proto/lm_eval.py's `kn_tag`).
 """
-import argparse, collections, hashlib, importlib.util, json, os, struct, subprocess, sys, tempfile
+import argparse, collections, importlib.util, json, os, struct, subprocess, sys, tempfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -142,11 +142,9 @@ def kn_tag(path):
     lm_eval.py kn_tag), or "" when there is none (the CLI then runs without KN). SJKN0002: θ u32 at byte 44, β f64 at 48."""
     if not os.path.lexists(path):
         return ""
-    b = open(path, "rb").read()
-    if b[:8] != b"SJKN0002" or len(b) < 56:
-        raise ValueError("not an SJKN0002 side file")
-    theta, beta = struct.unpack_from("<Id", b, 44)
-    return f"+kn:{hashlib.sha256(b).hexdigest()[:8]}:θ{theta}:β{beta:g}"
+    sys.path.insert(0, os.path.join(ROOT, "reference", "proto"))
+    import lm_eval   # the one KN tag format (the Python reference's summary line)
+    return lm_eval.kn_tag(path)
 
 
 def pick(ng, ll, alpha, tau, delta):

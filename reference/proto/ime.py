@@ -14,6 +14,15 @@ _LEXDIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "
 OVERLAYS = [os.path.join(_LEXDIR, "overlay-add.tsv"), os.path.join(_LEXDIR, "sandhi-add.tsv"), os.path.join(_LEXDIR, "names-add.tsv")]
 
 
+# 封頂（lm.cap_overlay）用的詞集合只取這兩層：Rust 的 capping_overlay 同一組；sandhi-add.tsv 改的是變調讀音，不是新詞。
+CAPPING = [OVERLAYS[0], OVERLAYS[2]]
+
+
+def capping_words(extra=None, files=CAPPING):
+    """封頂詞集合的唯一來源：files（預設 CAPPING）各列第二欄的詞，加上 extra（`--extra-overlay FILE`）的詞。"""
+    return {l.split("\t")[1] for p in [*files, extra] if p for l in open(p, encoding="utf-8")}
+
+
 def overlays(extra=None):
     """OVERLAYS，extra（`--extra-overlay FILE`，預設關）接在最後；沒給時就是 OVERLAYS 本身的內容（Rust 的 load_lexicon_extra_detailed 同一個順序）。"""
     return OVERLAYS + [extra] if extra else list(OVERLAYS)

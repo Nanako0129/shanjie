@@ -40,7 +40,7 @@ def setup():
     lm = L.BigramLM(os.path.join(ROOT, "data", "lm", "bigram.sjlm"))
     base = ime.Lexicon(os.path.join(ROOT, "data", "lexicon", "mcbpmf-data.txt"),
                        overlay=os.path.join(ROOT, "data", "lexicon", "overlay-add.tsv"))
-    ov = {l.split("\t")[1] for l in open(os.path.join(ROOT, "data", "lexicon", "overlay-add.tsv"), encoding="utf-8")}
+    ov = ime.capping_words()
     return lm, L.cap_overlay(base, ov, lm), ov
 
 

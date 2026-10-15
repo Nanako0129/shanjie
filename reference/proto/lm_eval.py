@@ -45,10 +45,15 @@ def rows_of(paths):
     return out
 
 
-def kn_tag(path, beta):
-    """摘要行的 KN 標籤：側檔內容的 SHA-256 前 8 碼與檔頭的 θ，同名不同內容的側檔也分得出來；beta 是 lm.kn[0]（SJKN0002 取自檔頭）。"""
+def kn_tag(path, beta=None):
+    """摘要行的 KN 標籤：側檔內容的 SHA-256 前 8 碼與檔頭的 θ，同名不同內容的側檔也分得出來；beta 是 lm.kn[0]（SJKN0002 取自檔頭）。
+    beta 不給時直接從檔頭讀（tools/triage.py 不載模型也要同一個標籤）；不是 SJKN0002 檔就 ValueError。"""
     import struct
     b = open(path, "rb").read()
+    if beta is None:
+        if b[:8] != b"SJKN0002" or len(b) < 56:
+            raise ValueError("not an SJKN0002 side file")
+        beta = struct.unpack_from("<d", b, 48)[0]
     return f"+kn:{hashlib.sha256(b).hexdigest()[:8]}:θ{struct.unpack_from('<I', b, 44)[0]}:β{beta:g}"
 
 
@@ -60,7 +65,23 @@ def xo_tag(path):
 def overlay_words(overlay_add, extra=None, names=None):
     """封頂用的疊加層詞集合：overlay-add.tsv 與 names-add.tsv（名單層，model-v6 §2.5）的詞，加上 --extra-overlay 檔的詞
     （Rust 的 capping_overlay_detailed 加上 extra 的列）。"""
-    return {l.split("\t")[1] for p in (overlay_add, names, extra) if p for l in open(p, encoding="utf-8")}
+    return ime.capping_words(extra, [p for p in (overlay_add, names) if p])
+
+
+def kn_side(lm_path, kn=None, no_kn=False):
+    """KN 側檔路徑或 None：kn 給了就用那個；否則模型旁邊的 kn.sjkn，存在（含壞掉的符號連結，Rust 的 Lm::load_with 同樣當成要載入而失敗）
+    就載入，除非 no_kn（Rust 各模式的 `--no-kn`）。"""
+    side = os.path.join(os.path.dirname(os.path.abspath(lm_path)), "kn.sjkn")
+    return kn or (side if not no_kn and os.path.lexists(side) else None)
+
+
+def load_lm(lm_path, base, classes=True, kn=None, kn_beta=None):
+    """BigramLM，kn（kn_side 的結果）不是 None 時帶 KN；base 是詞庫（variant_classes 用）。lm_eval 與 experiments/sp/predict.py 共用這一份。"""
+    kw = {}
+    if kn:
+        import build_lm  # tools/，variant_classes 與 build_lm.build 同一套（kn-smoothing.md §2.2）
+        kw = dict(kn=kn, kn_beta=kn_beta, kn_classes=build_lm.variant_classes(base.by_reading))
+    return L.BigramLM(lm_path, classes=classes, **kw)
 
 
 def main():
@@ -80,19 +101,13 @@ def main():
         name = a.name or os.path.basename(a.rows)
     if a.kn and a.no_kn:
         ap.error("--kn and --no-kn")
-    # 模型旁邊的 kn.sjkn：存在（含壞掉的符號連結，Rust 的 Lm::load_with 同樣當成要載入而失敗）就載入。
-    side = os.path.join(os.path.dirname(os.path.abspath(a.lm)), "kn.sjkn")
-    kn = a.kn or (side if not a.no_kn and os.path.lexists(side) else None)
+    kn = kn_side(a.lm, a.kn, a.no_kn)
     if not kn and a.kn_beta is not None:   # 空字串（未設定的變數）也算沒給
         ap.error("--kn-beta needs --kn")
     base = ime.Lexicon(os.path.join(ROOT, "data", "lexicon", "mcbpmf-data.txt"),
                        overlay=ime.overlays(a.extra_overlay))
-    kw = {}
-    if kn:
-        import build_lm  # tools/，variant_classes 與 build_lm.build 同一套（kn-smoothing.md §2.2）
-        kw = dict(kn=kn, kn_beta=a.kn_beta, kn_classes=build_lm.variant_classes(base.by_reading))
-    lm = L.BigramLM(a.lm, classes=not a.no_classes, **kw)
-    ov = overlay_words(os.path.join(ROOT, "data", "lexicon", "overlay-add.tsv"), a.extra_overlay, os.path.join(ROOT, "data", "lexicon", "names-add.tsv"))
+    lm = load_lm(a.lm, base, not a.no_classes, kn, a.kn_beta)
+    ov = ime.capping_words(a.extra_overlay)
     lex = L.cap_overlay(base, ov, lm)
     top1, o64, firsts, rs = 0, 0, [], []
     dump = open(a.dump, "w", encoding="utf-8") if a.dump else None
