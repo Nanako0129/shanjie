@@ -5702,3 +5702,13 @@ formal: alpha 0.7, tau 1, delta 2
 - 維護者實機（zhen-inline＋model-v6 的整合版）組字區是「了解我在挑挑看」，要的是「再」。加成 `|了解我再挑挑看|ㄌㄧㄠˇ ㄐㄧㄝˇ ㄨㄛˇ ㄗㄞˋ ㄊㄧㄠ ㄊㄧㄠ ㄎㄢˋ`（讀音由 `tools/readings.py` 產生，沒有 CHECK）。
 - CLI 出貨設定（`--context --packs acg --tinylm`，model-v6＋kn-v1＋tinylm-v5）：聊天第 1 名「了解我在挑挑看」、「再」第 2；書面第 1 名就是「了解我再挑挑看」。和 P1a 找到的 在／再 根因同一類（句首與詞庫分數偏向「在」）。
 - `eval/golden/s2h-lm-context.txt` 的錯字回報兩行改成 n 115（Python 參考實作）：聊天 top1 29 → 29、書面 40 → 41；`eval/README.md` 改成 115 列。
+
+## 2026-10-15：保留集的比對改在計數那一層（更正同日「保留集換新」一節的雜湊檔做法）
+
+- PR #162（`tools/holdout_guard.py` 的第一版，照契約 §8 修訂二）的 `/code-review` 找到 15 項。其中 5 項指向同一個設計問題：比對放錯層。
+  - 雜湊比對做在轉換前的原文上，而且子句要完全相等。計數程式是先轉換（簡轉繁、台灣字形、用詞），再取漢字段才計數。所以下面幾種情況都會漏：句子外面包了引號或半形標點、句子在較長的段落中間、原文是簡體或異體字。
+  - 維基 dump 不是逐行的文字檔，接不上這支工具。
+  - 列格式（`前文|句子|讀音`）的評測檔用 `|` 分隔，切子句時切不出句子欄，所以永遠比不到。§4 第 4 步對評測集和舊保留集的比對，會得到假的「零重疊」。
+- 契約修訂三：比對改在轉換之後的漢字段上做**包含**比對，重用 S7f 的 `clean.Matcher`，句子和它轉換後的樣子都比。工具直接讀列檔，只輸出列號與計數，所以雜湊檔拿掉（main 本來就不看句子）。計數程式加一個預設關的開關，下一次建模型時打開。其餘的實作問題跟著重做（非法 UTF-8 會崩潰、BOM、列檔解析、測試只比對自己）。同日「保留集換新」一節講的 `hashes.sha256` 作廢。
+- `tools/holdout_guard.py` 照修訂三重做：`report`（`--rows` 比對對象、`--text`／`--row-files`／`--wiki` 來源）只輸出列號與計數；`build_counts.py`、`build_counts_text.py` 加預設關的 `--holdout-guard`，開著時命中保留集句子的漢字段不計數並回報跳過幾段。關著時輸出不變。`experiments/model-v6/README.md` 沒有改。
+- PR #162 第二輪審查的修正：`--holdout-guard` 的比對器在 `main()` 建好並驗證（壞檔不會讓 Pool 的 worker 一直重啟），載入 0 個比對對象或含非 `HAN` 字元就停下並回報載入／略過（少於 4 字）的數量；比對前兩邊都過 `build_counts.fold`（`MERGE`）；條目與純文字的處理收成 `build_counts.article_runs`／`text_runs` 一份，計數、`report` 與 `experiments/s7a-tinylm/prep.py` 共用，prep 也加了預設關的開關。關著時 `count_batch`、`build_counts_text`、prep `_work` 的輸出和改動前的程式逐位元組相同（合成輸入，真正的轉換表，對照 04e9966）。
