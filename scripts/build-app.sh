@@ -26,10 +26,10 @@ fail() { echo "error: $*" >&2; exit 1; }
   gh release download model-v6 -R Nanako0129/shanjie -p bigram.sjlm -D data/lm"
 shasum -a 256 -c data/bigram.sjlm.sha256 >/dev/null \
   || fail "data/lm/bigram.sjlm does not match data/bigram.sjlm.sha256; download model-v6 again"
-[ -f data/lm/classes.sjc ] || fail "data/lm/classes.sjc is missing (the word-class term of the model, S2k). Download the classes-v4 release asset:
-  gh release download classes-v4 -R Nanako0129/shanjie -p classes.sjc -D data/lm"
+[ -f data/lm/classes.sjc ] || fail "data/lm/classes.sjc is missing (the word-class term of the model, S2k). Download the classes-v5 release asset:
+  gh release download classes-v5 -R Nanako0129/shanjie -p classes.sjc -D data/lm"
 shasum -a 256 -c data/classes.sjc.sha256 >/dev/null \
-  || fail "data/lm/classes.sjc does not match data/classes.sjc.sha256; download classes-v4 again"
+  || fail "data/lm/classes.sjc does not match data/classes.sjc.sha256; download classes-v5 again"
 # The Kneser-Ney side file (docs/contracts/kn-core.md, model-v6 section 2.3): bound to model-v6's hash; the core turns the term on
 # when it sits beside the model, and the small model below records its SHA-256.
 [ -f data/lm/kn.sjkn ] || fail "data/lm/kn.sjkn is missing (the Kneser-Ney side file of the model). Download the kn-v1 release asset:

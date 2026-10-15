@@ -34,7 +34,7 @@
 |---|---|---|
 | 詞類表 → 模型 | `classes.sjc` 檔頭記模型的 SHA-256；缺檔、配到別的模型、內容不對，載入都回 3 | 重建模型就要重建詞類表（`docs/data-files.md`「現在用的檔案」） |
 | 語意校正模型 → 模型 | `tinylm.sjtl` 檔頭記調參時用的模型的 SHA-256；不符時核心拒絕載入、只用 n-gram（`docs/data-files.md`） | 重建模型就要重新匯出、重新調參 |
-| 語意校正模型 → 詞類表 | **沒有檢查**，只在 α、τ、δ 的調法上依賴：它們是在 model-v6＋classes-v4＋kn-v1 上調的（tinylm-v5） | 只換詞類表也要重調，雜湊攔不住這種錯配，只能靠 `docs/data-files.md` 的版本表 |
+| 語意校正模型 → 詞類表 | **沒有檢查**，只在 α、τ、δ 的調法上依賴：它們是在 model-v6＋classes-v4＋kn-v1 上調的（tinylm-v5） | 重新分群也要重調，雜湊攔不住這種錯配，只能靠 `docs/data-files.md` 的版本表；只改 μ 而且開著出貨的小模型量過，可以沿用（classes-v5 沿用 tinylm-v5） |
 | 語意校正 → Kneser–Ney 側檔 | SJTL0004 記調參時用的 `kn.sjkn` 的 SHA-256（全 0＝沒開 KN 時調的）；核心要求載入的側檔狀態和它相同，否則拒絕載入（`docs/contracts/model-v6.md` §2.7） | 換側檔就要重新調參、發新的 `tinylm-v…` |
 
 ### 1.3 改了什麼，要發哪些新 Release
@@ -44,7 +44,8 @@
 | 改了什麼 | 要發 |
 |---|---|
 | 語料、計數或模型格式 | `model-v6`＋`classes-v4`＋下一個 `tinylm-v…` |
-| 只重新分群 | `classes-v4`＋下一個 `tinylm-v…` |
+| 只重新分群 | 下一個 `classes-v…`＋下一個 `tinylm-v…` |
+| 只改詞類權重 μ（開著出貨的小模型量過） | 下一個 `classes-v…`（classes-v5），小模型沿用 |
 | 小模型的訓練、大小、匯出格式或融合參數 | 下一個 `tinylm-v…`（`tinylm-v2`、`tinylm-v3` 都只換融合參數；`tinylm-v4` 換檔頭格式） |
 
 ## 2. 語料與輸入

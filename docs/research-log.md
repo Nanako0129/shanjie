@@ -5852,3 +5852,23 @@ formal: alpha 0.7, tau 1, delta 2
   - 三個都符合，lytune 淨值合計最大的是 **μ 0.2（+92）**，其次 0.4（+82）、0.6（+50）。照規則建議 μ 0.2。
 - 〔觀察，不改規則〕0.2 和 0.4 在 lytune 只差 10 列；0.4 在其他集合比較好（cvtune＋wikitune＋dev302 +18 對 +6，discordtune +19 對 +2），錯字回報 0.2 是 +4／−4、0.4 是 +1／−3（都不顯著）。
 - 範圍：μ 是一個值、兩種設定共用（§6）；本片沒跑保留集，也沒量延遲（μ 不改計算量）。選定的 μ 要出貨，照契約 §6 另開 PR（新的 `classes.sjc` 資料 Release 等），由維護者決定；v0.4.5 已在本片之前發佈，所以是 v0.4.6 的事。
+
+## 2026-10-16：classes-v5（μ 0.2）的換版
+
+- 維護者在 lytune 歸因之後的選擇題選「換成 μ 0.2（推薦）」。契約 `docs/contracts/classes-v5.md`（plan-verifier READY）。`experiments/lytune-attrib/set_mu.py` 從 classes-v4 產生，SHA-256 `9e36fa1b…`，和 188 上量測用的檔相同。資料 Release `classes-v5` 由維護者同意後建立（不標 Latest），下載回來雜湊與大小（5,656,826 bytes）相符。
+- 換版清單照 `docs/data-files.md`：雜湊檔、CI 兩個 job 與 `release.yml`、`build-app.sh`、`cli/tests/golden.rs`、`core/tests/engine_*.rs` 的缺檔訊息、`Support.swift`、README、CONTRIBUTING、`docs/verification.md`、`LICENSES/data.md`、PLAN、`docs/data-files.md`、`docs/training.md`。tinylm-v5 沿用：契約 §2 第 3 點把「換詞類表就要重調小模型」放寬成只限重新分群，只改 μ 而且開著出貨的小模型量過的可以沿用，`docs/data-files.md`、`docs/training.md` 同步改。
+- **golden**：Python 參考實作在 Mac 重產，Rust 逐位元組相同（`cargo test --release -p cli --test golden`，24 項通過）。
+
+| golden | 變動行數 | 說明 |
+|---|---|---|
+| `s2-lm.txt` | 4／4 | 摘要行：dev302 聊天 247 → 246、書面 250 → 250；typing76 聊天 69 → 70、書面 70 → 70（`top1_sha256` 都變） |
+| `s2-lm-dev302-top1.tsv` | 21／303 | 21 列有一種設定的第一名換了 |
+| `s2-lm-dev302-{chat,formal}.rowstats` | 10／302、13／302 | 同上，每列的對錯與名次 |
+| `s2h-lm-context.txt` | 6／6 | 帶前文：dev302 聊天 246 → 246、書面 250 → 249；typing76 聊天 69 → 70、書面 69 → 69；錯字回報聊天 29 → 29、書面 41 → 36 |
+| `s2r-probe-top1.tsv` | 4／84 | 4 列探針的第一名換了 |
+| `sw-probe.txt` | 48／96 | 4 條摘要行、6 列第一名的字串換了，其餘是分數 |
+| `sp-predict.txt` | 9,436／23,778 | 預測分數（詞類項權重改了，每個詞的分數都漂）；候選順序沒有逐條拆 |
+
+  - 這些是 n-gram 階段（沒有小模型）的數字。錯字回報書面 41 → 36 和 μ 掃描在出貨設定（開小模型）量到的 41 → 37（3／7，p 0.34）同方向，不顯著。`--no-classes` 兩行、unigram 類、`kn-tiny`、`tinylm-tiny` 不變。
+- **手動詞**（`manual_words_come_first_in_the_shipping_setting`，出貨設定，重排後的 rowstats）：聊天 15／15；**書面 14／15**，第 8 列「米雅歌唱得很好」的第一名變成「米亞」（重排前分數 −16.861 對 −16.950）。照契約 §2 是 μ 造成的變化，測試改成釘住這一個例外（書面只有第 8 列不在第一，其他列掉下來仍會失敗）；換回 classes-v4 時這條測試會失敗（第 8 列回到第一），確認它量得到差別。之後要不要用手動詞加分補回來，留給維護者。
+- 先做錯的一步：一開始用 `--dump` 找是哪一列，但 `--dump` 是重排前的候選，v4 時第 7 列「咪呀狗在線上嗎」重排前也不是第一（重排後是）。改用 `--rowstats`（重排後，摘要的 top1 就是它的加總）才確定是第 8 列。

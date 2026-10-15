@@ -46,7 +46,7 @@ enum TestData {
                 XCTFail("""
                     \(f.source) is missing. The lexicon is in git; the model is the model-v6 release asset: \
                     gh release download model-v6 -R Nanako0129/shanjie -p bigram.sjlm -D data/lm
-                    classes.sjc: gh release download classes-v4 -R Nanako0129/shanjie -p classes.sjc -D data/lm
+                    classes.sjc: gh release download classes-v5 -R Nanako0129/shanjie -p classes.sjc -D data/lm
                     kn.sjkn: gh release download kn-v1 -R Nanako0129/shanjie -p kn.sjkn -D data/lm
                     tinylm.sjtl: gh release download tinylm-v5 -R Nanako0129/shanjie -p tinylm.sjtl -D data/lm
                     """, file: file, line: line)

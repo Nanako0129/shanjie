@@ -55,7 +55,7 @@ fn lenient_dump_uses_the_variant_table() {
 
 const LM_MISSING: &str = "data/lm/bigram.sjlm is missing: download it with `gh release download model-v6 -R Nanako0129/shanjie -p bigram.sjlm -D data/lm`";
 
-const CLASSES_MISSING: &str = "data/lm/classes.sjc is missing: download it with `gh release download classes-v4 -R Nanako0129/shanjie -p classes.sjc -D data/lm` (or build it with tools/build_classes.py)";
+const CLASSES_MISSING: &str = "data/lm/classes.sjc is missing: download it with `gh release download classes-v5 -R Nanako0129/shanjie -p classes.sjc -D data/lm` (or build it with tools/build_classes.py)";
 
 fn lm_path() -> String {
     let p = format!("{}/../data/lm/bigram.sjlm", env!("CARGO_MANIFEST_DIR"));
@@ -122,15 +122,15 @@ fn lm_file_is_the_released_model() {
     );
 }
 
-/// S2k section 4.4: the class table is the classes-v4 release asset (data/classes.sjc.sha256).
+/// S2k section 4.4: the class table is the classes-v5 release asset (data/classes.sjc.sha256).
 #[test]
 fn classes_file_is_the_released_build() {
     let p = std::path::Path::new(&lm_path()).with_file_name("classes.sjc");
-    let bytes = std::fs::read(&p).unwrap_or_else(|_| panic!("{} is missing: gh release download classes-v4 -R Nanako0129/shanjie -p classes.sjc -D data/lm", p.display()));
+    let bytes = std::fs::read(&p).unwrap_or_else(|_| panic!("{} is missing: gh release download classes-v5 -R Nanako0129/shanjie -p classes.sjc -D data/lm", p.display()));
     assert_eq!(
         core::eval::sha256_hex(&bytes),
-        "efac3184170e9795cef35855fc6615cf5672882bc0e20c624b620597aeab7a56",
-        "data/lm/classes.sjc differs from the classes-v4 release; download it again or rebuild with tools/build_classes.py"
+        "9e36fa1be4518adb34bcddc2c79761006b0b06c539aa64a4564ba00397cf0262",
+        "data/lm/classes.sjc differs from the classes-v5 release; download it again or rebuild with tools/build_classes.py"
     );
 }
 
@@ -341,18 +341,23 @@ fn predict_no_kn_scores_differently_from_the_golden() {
 /// (eval/golden/manual-words-rows.txt; MANUAL_BONUS in tools/build_overlay.py was chosen on its first 9 rows; the last 6 (喵菜子, 哈那口, and 菜菜子 which is a base word) are
 /// first even without the entry, so they only pin the behaviour). A retrained model or a new
 /// rerank that pushes a name below its homophones fails here instead of shipping silently.
+/// Known exception since classes-v5 (μ 0.8 → 0.2, docs/contracts/classes-v5.md): in formal, row 8 `米雅歌唱得很好` comes out as
+/// 米亞 after the rerank. The test pins exactly that miss (rowstats, i.e. after the rerank) so any other row dropping still fails.
 #[test]
 fn manual_words_come_first_in_the_shipping_setting() {
     let root = concat!(env!("CARGO_MANIFEST_DIR"), "/..");
     let rows = format!("{root}/eval/golden/manual-words-rows.txt");
     let tl = format!("{root}/data/lm/tinylm.sjtl");
-    for profile in ["chat", "formal"] {
-        let out = run(&["--lm", &lm_path(), "--profile", profile, "--context", "--packs", "acg", "--tinylm", &tl, "--rows", &rows]);
-        let summary = out.lines().find(|l| l.starts_with("## ")).unwrap_or_default();
-        let num = |key: &str| summary.split(&format!("'{key}': ")).nth(1).and_then(|t| t.split([',', '}']).next()).map(str::to_string);
-        assert_eq!(num("n").as_deref(), Some("15"), "{profile}: {summary}");
-        assert_eq!(num("top1"), num("n"), "{profile}: a manual word is not first: {summary}");
+    let stats = std::env::temp_dir().join(format!("shanjie-manual-words-{}.rowstats", std::process::id()));
+    for (profile, misses) in [("chat", vec![]), ("formal", vec!["8"])] {
+        let _ = std::fs::remove_file(&stats);
+        run(&["--lm", &lm_path(), "--profile", profile, "--context", "--packs", "acg", "--tinylm", &tl, "--rows", &rows, "--rowstats", stats.to_str().unwrap()]);
+        let got = std::fs::read_to_string(&stats).unwrap();
+        assert_eq!(got.lines().count(), 15, "{profile}");
+        let got: Vec<&str> = got.lines().map(|l| l.split('\t').collect::<Vec<_>>()).filter(|f| f[1] == "0").map(|f| f[0]).collect();
+        assert_eq!(got, misses, "{profile}: rows whose manual word is not first");
     }
+    std::fs::remove_file(&stats).unwrap();
 }
 
 /// names-lexicon 3.5: `--extra-overlay FILE` makes the file's word the first candidate (and only then), and a
