@@ -1663,7 +1663,7 @@ fn the_chinese_item_of_a_kept_token_is_the_syllable_that_was_on_the_columns() {
     assert!(e.english_open() && o.candidates.len() == 4 && o.candidates[3] == zh, "premise: the window's fourth item: {:?}", o.candidates);
     run(&mut e, "j");
     assert!(e.english_autokept());
-    run(&mut e, "BS _"); // section 1.3i: the run again, ended unchanged
+    run(&mut e, "BS"); // "show on Space": section 1.3i does not apply, the token stays
     let o = run(&mut e, "Down");
     assert!(o.candidates == ["rust", "Rust", "RUST", zh.as_str()], "{:?}", o.candidates);
     assert!(run(&mut e, "4").preedit == zh);
@@ -1950,11 +1950,25 @@ fn backspace_after_an_auto_keep_opens_the_word_again() {
     assert!(o.preedit == "rust" && fields(&o) == (0, 0), "Space ends it as a token");
     assert!(run(&mut e, "Enter").commit == "rust");
 
-    // A syllable of two keys keeps the token until both are gone; with English mixing off nothing opens.
+    // A syllable of two keys keeps the token until both are gone.
     let mut e = eng_inline();
     run(&mut e, "r u s t r u");
     assert!(run(&mut e, "BS").preedit == "rustㄐ");
     assert!(fields(&run(&mut e, "BS")) == (0, 4));
+
+    // Only an auto-keep's token reopens: a word chosen from the window stays a token when Backspace takes a Zhuyin key typed
+    // after it, so the next key is Zhuyin again (`j` is ㄨ, not a letter of the word).
+    let mut e = eng_inline();
+    run(&mut e, "r u s t _ 1 5");
+    let o = run(&mut e, "BS");
+    assert!(o.preedit == "rust" && fields(&o) == (0, 0), "the chosen token stays: {}", o.preedit);
+    assert!(run(&mut e, "j").preedit == "rustㄨ");
+    // And "show on Space" never opens a run here (section 1.4: the display of PR #149).
+    let mut e = eng();
+    run(&mut e, "r u s t _ j");
+    assert!(e.english_autokept(), "premise: the window's item kept by a Zhuyin key");
+    let o = run(&mut e, "BS");
+    assert!(o.preedit == "rust" && fields(&o) == (0, 0), "{}", o.preedit);
 
     // The kept word's Chinese item survives the reopening only when the run ends with the same letters.
     let zh = first_entry("ㄍㄠ");

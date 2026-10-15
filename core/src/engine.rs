@@ -518,7 +518,7 @@ pub struct Engine {
     run: String,
     /// Zhen-inline section 1.3i: a token reopened as the run, with the Chinese item it had; it comes back when the run ends with
     /// the same letters.
-    run_zh: Option<(String, String)>,
+    run_zh: Option<(String, String, String)>,
     /// Whether the latest `key()` made an auto-keep (zhen-inline section 1.3; tool hook `english_autokept`). Cleared at the start
     /// of `key()` and nowhere else; no other entry point (a pick, a reset, a setting) touches it, so none can leave it stale.
     autokept: bool,
@@ -1312,16 +1312,43 @@ impl Engine {
         Ok(())
     }
 
-    /// The one place letters become an English token at the cursor (reading `PUNCT_PREFIX` + the word, the word as its fixed
-    /// word): the unfinished syllable and the shadow go. `auto`: an auto-keep (section 1.3), which is reported by
-    /// `english_autokept` and remembers the unfinished syllable (what the window's Chinese item would be) for section 1.3c.
-    /// Returns what the 40th unit sent, if it did (section 1.3: it goes in this key's output).
+    /// Letters become an English token at the cursor (reading `PUNCT_PREFIX` + the word, the word as its fixed word). `auto`: an
+    /// auto-keep (section 1.3), which is reported by `english_autokept` and remembers the unfinished syllable (what the window's
+    /// Chinese item would be) for section 1.3c. Returns what the 40th unit sent, if it did (section 1.3: it goes in this key's output).
     fn insert_english(&mut self, word: String, auto: bool) -> Result<String, EngineError> {
         let zh = auto.then(|| self.pending());
         self.autokept |= auto;
+        self.put_english(format!("{PUNCT_PREFIX}{word}"), word, zh)
+    }
+
+    /// The one place an English token goes in at the cursor: the unfinished syllable and the shadow go.
+    fn put_english(&mut self, reading: String, word: String, zh: Option<String>) -> Result<String, EngineError> {
         self.clear_pend();
         self.pred_dirty = true;
-        Ok(self.insert_token(format!("{PUNCT_PREFIX}{word}"), Some(word), zh)?.commit)
+        Ok(self.insert_token(reading, Some(word), zh)?.commit)
+    }
+
+    /// Sections 1.3g and 1.3i: the English token at `at` goes and an English run opens there (before the removal, so the decode
+    /// splits at the run, section 1.3h). `whole`: with all its letters, and an auto-keep's Chinese item and reading kept for
+    /// `end_run`; else without the last letter (a one-letter token just goes). A token without its fixed word falls back to the
+    /// text of its reading.
+    fn reopen_token(&mut self, at: usize, whole: bool) -> Result<(), EngineError> {
+        let (word, zh) = match self.fixed.iter().find(|f| f.start == at) {
+            Some(f) => (f.word.clone(), f.zh.clone()),
+            None => (english_of(&self.syls[at]).unwrap_or_default().to_string(), None),
+        };
+        if whole {
+            self.run_zh = zh.map(|zh| (word.clone(), zh, self.syls[at].clone()));
+            self.run = word;
+        } else {
+            let mut letters = word;
+            letters.pop();
+            self.run = letters;
+        }
+        self.cursor = at;
+        self.remove_syllable(at)?;
+        self.pred_dirty = true;
+        Ok(())
     }
 
     /// Zhen-inline section 1.3, the auto-keep: when the letters on screen (rule D) are a whole listed word and the Zhuyin key
@@ -1347,10 +1374,8 @@ impl Engine {
     /// what the 40th unit sent, if it did.
     fn end_run(&mut self) -> Result<String, EngineError> {
         let word = std::mem::take(&mut self.run);
-        if let Some((_, zh)) = self.run_zh.take().filter(|(w, _)| *w == word) {
-            self.clear_pend();
-            self.pred_dirty = true;
-            return Ok(self.insert_token(format!("{PUNCT_PREFIX}{word}"), Some(word), Some(zh))?.commit);
+        if let Some((_, zh, reading)) = self.run_zh.take().filter(|(w, _, _)| *w == word) {
+            return self.put_english(reading, word, Some(zh)); // section 1.3i: the auto-keep's token as it was
         }
         self.insert_english(word, false)
     }
@@ -2114,15 +2139,14 @@ impl Engine {
                     self.pend_prev.pop().into_iter().for_each(|u| self.pend = u); // an emptied unit goes
                     if self.pend.iter().all(Option::is_none) {
                         self.clear_shadow(); // the syllable is gone
-                        // Zhen-inline section 1.3i: right behind an English token (an auto-keep's, typically) the token opens again
-                        // as a run with all its letters, so `r u s r` + Backspace + `t` is `rust`, not `rus` + ㄔ.
-                        if self.shadow_on() && self.cursor > 0 && english_of(&self.syls[self.cursor - 1]).is_some() {
-                            let at = self.cursor - 1;
-                            let f = self.fixed.iter().find(|f| f.start == at).ok_or(EngineError::Internal)?;
-                            self.run_zh = f.zh.clone().map(|zh| (f.word.clone(), zh));
-                            self.run = f.word.clone();
-                            self.cursor = at;
-                            self.remove_syllable(at)?;
+                        // Zhen-inline section 1.3i ("show as typed" only): right behind the token an auto-keep made, the token opens
+                        // again as a run with all its letters, so `r u s r` + Backspace + `t` is `rust`, not `rus` + ㄔ. A token
+                        // chosen on purpose stays (the Backspace fixed a Zhuyin key typed after it).
+                        let at = self.cursor.wrapping_sub(1);
+                        if self.english_inline && self.shadow_on() && self.cursor > 0
+                            && self.fixed.iter().any(|f| f.start == at && f.zh.is_some())
+                        {
+                            self.reopen_token(at, true)?;
                         }
                     }
                 }
@@ -2171,15 +2195,7 @@ impl Engine {
             // Zhen-inline section 1.3g (English mixing on): the unit before the cursor is an English token. It goes and its
             // text without the last letter becomes an English run there (a one-letter token just goes).
             KeyKind::Backspace if self.cursor > 0 && self.shadow_on() && english_of(&self.syls[self.cursor - 1]).is_some() => {
-                let at = self.cursor - 1;
-                // An English token always has its fixed word (`insert_english` is the only maker, `choose` replaces the word by
-                // another writing and a window can only span one token), and the word is the text it shows.
-                let mut letters = self.fixed.iter().find(|f| f.start == at).ok_or(EngineError::Internal)?.word.clone();
-                letters.pop();
-                self.cursor = at;
-                self.run = letters; // before the removal, so the decode there splits at the run (section 1.3h)
-                self.remove_syllable(at)?;
-                self.pred_dirty = true;
+                self.reopen_token(self.cursor - 1, false)?;
             }
             KeyKind::Backspace if self.cursor > 0 => {
                 self.cursor -= 1;
