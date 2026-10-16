@@ -6641,3 +6641,29 @@ formal: alpha 0.7, tau 1, delta 2
   - **標注錯誤率超過停止條件**：口語那半 150 句的 157 個位置，main 逐一判讀錯 64 個（40.8%）：「地」43／53（副詞的「地」標成 ㄉㄧˋ）、「得」16／53（「必須」的 ㄉㄟˇ、「獲得」的 ㄉㄜˊ 都標成輕聲）、「還」4／30（歸還標成 ㄏㄞˊ）、「長」1／8、「重」0／4、「行」0／8、「空」0／1（`sample_labels.py rate` 結束碼 3）。維基那半是單程序掃 20 萬篇，跑了 13 分鐘還沒完成就停掉（G4 的 48 執行緒只用到 1 個）。即使維基那半全對，只要它的位置數少於 483 個（150 句通常約 150 多個位置），整體就超過 10%〔推論〕，停止條件不會改變。
   - **結論**：B 照契約結案。這次量不出「前文分讀音」本身有沒有用：wikitune 的進步不能當證據（它的讀音由 `tools/readings.py` 的規則產生，和標注用的主要讀音同一套規則，兩邊一致是必然的），第 88 列改對也是走占比路徑、扣了「啦＋ㄌㄚ」的分，和 A2 是同一種讀音先驗，不是看前文。失敗的原因是三件事疊在一起：語尾字的輕聲規則和實際打法相反、副詞「地」與助動詞「得」的規則錯、占比路徑讓下一個詞失去前文。要再做，得先修標注規則並抽樣確認錯誤率、決定占比路徑之後怎麼接前文，再花錢計數。
 - 私人集合（discordtune）只有上面的數字；它的列檔、探針、傾印與 rowstats 在 VM 上用完即刪，VM 已關閉。
+
+## 2026-10-17：改選後凍結修訂五的實作（契約 `docs/contracts/repick-freeze.md` §11）
+
+- **實作**（`core/src/engine.rs`）：插入音節時只保留 §6.1／§7.4 的放開判斷，拿掉「合併後再凍結」那一段（含 `debug_assert`），放開的鄰居與新音節維持自由。刪除音節（Backspace、Delete，都經 `remove_syllable`）之前，取畫面路徑（`self.path`，位置用音節數）上含該音節的詞，兩個音節以上就把其餘音節就地變成單字 frozen 詞（新的 `pieces`：字數等於音節數，且該音節有這個單字條目，否則交給解碼；`split_frozen` 也改用它）；使用者自己選的詞照舊被移除（待學紀錄跟著消失），拆出來的是 frozen、不學。`recompute_pred` 只排除使用者自己選的固定詞內部（`frozen == false`）。`boosted`、`total_score` 的位置改用路徑詞的音節數。
+- **蘋果情境**（兩種設定都量到，字串是實際解碼）：
+  - 情境 1：他是 → 第一字改選「她」→ End → ㄐㄧˋ「她世紀」→ ㄓㄜˇ「她是記者」（修訂四是「她世紀者」）。
+  - 情境 4：ㄓㄠˇ ㄉㄠˋ「找到」→ 第一字改選「找」→ End → ㄉㄚˊ「找到達」→ ㄢˋ「找到答案」（修訂四是「找到達案」）。
+  - 情境 2：ㄊㄚ ㄕˋ ㄐㄧㄝˋ「他世界」（沒有改選）→ Backspace「他世」；拿掉刪除時的拆法則是「他是」。
+  - 情境 3 與 §9 的蘋果兩例（她世界 ⌫ → 她世、他世界改選第一字後 ⌫ → 他世）沒有改動就過。
+- **新測試**：`engine_repick.rs` 的 `apple_case_1_…`、`apple_case_4_…`、`apple_case_2_…`（聊天、書面各跑）、`prediction_row_starts_inside_a_frozen_word`（教「國家」讀 ㄍㄨㄛˊ ㄐㄧㄚ、前文「是美」；他是美國在「是」改選後，打 ㄐ，預測列第一項「國家」，起點在 frozen 的「美國」內部）；`engine_rerank.rs` 的 `apply_does_not_bring_back_a_cleared_prediction_row` 補第三段（第 27 列在音節 2 改選「以」，再打 ㄉㄜ˙，End，重排工作把「的」變「地」，套用後預測列仍是空的）。
+- **突變**（各自恢復後 `git diff`／`cmp` 與原檔一致；結束碼 101，斷言訊息）：
+  - 恢復插入時的再凍結：`an_insert_inside_a_merged_word_decodes_freely`（「她世介界」≠「她世界界」）、`an_insert_inside_a_merged_word_redecodes_it`、`apple_case_4_…`（「找到達案」）、`apple_case_1_…`、`typing_on_after_a_merge_…` 失敗。
+  - 刪除時不拆：`apple_case_2_…`（「他是」≠「他世」）、`a_candidate_pick_clears_and_a_prediction_pick_keeps_left_records`、`backspace_in_a_merged_or_frozen_word_like_apple`、`deleting_inside_a_frozen_word_keeps_the_rest`、`an_insert_inside_a_merged_word_redecodes_it`、`typing_on_after_…` 失敗。
+  - `recompute_pred` 改回排除所有固定詞內部：`prediction_row_starts_inside_a_frozen_word`（列首是「美國籍」，沒有「國家」）失敗。
+- **因兩條新規則而改變的既有測試期望**（其餘測試沒動）：
+
+  | 測試 | 舊期望 | 新期望 | §11 的列 |
+  |---|---|---|---|
+  | `an_insert_inside_a_merged_word_splits_it`（改名 `…_decodes_freely`） | 她是＋ㄐㄧㄝˋ 在世與界之間再打 ㄐㄧㄝˋ →「她世介界」，尾端 ⌫ →「她世介」 | 「她世界界」，尾端 ⌫ →「她世界」 | 插入（不再凍結合併出的詞） |
+  | `an_insert_inside_a_merged_word_keeps_its_characters`（改名 `…_redecodes_it`） | 她全世界，中間插 ㄉㄜ˙ →「她全世的界」，刪「全」→「她世的界」 | 「她詮釋的界」，刪「詮」→「她釋的界」 | 插入；刪除（解碼出的詞也拆） |
+  | `typing_on_after_a_merge_then_deleting_back_keeps_the_word`（改名 `…_follows_the_display`） | 版監控後再打 ㄉㄨ／ㄕˋ／ㄧㄡˇ，連按兩次 ⌫ 都得「版監控」、「版控」 | ㄉㄨ：版監督控 → 版監控 → 版控；ㄕˋ：版監視控 → 版監控 → 版控；ㄧㄡˇ：版間有空 → 版間空 → 版空 | 插入；刪除 |
+  | `engine_repick.rs::freeze_reported_case_banhkong` | docstring 說改選前會變「版空」 | docstring 改寫，斷言不變（合併 main 後分不出有沒有凍結，由 `freeze_row_133_six_steps` 守 §3 第 1 項） | §11 其他項 |
+
+  `engine_repick.rs` 291 行附近的註解（「控 stays frozen (freely it decodes to 空…)」）一併改成「控 stays」。
+- **結果**：`engine`（33）、`engine_learn`（59）、`engine_predict`（66，8 ignored）、`engine_repick`（27）、`engine_rerank`（22）、`tri_tiny`（12）、`engine_replay`（3）全過；`make test-golden`（25）全過，沒有 golden 檔案改動；`timing_typing76_keys` 系列 p95 最大 6.96 ms（上限 16 ms）。`engine_learn` 的 `perf_full_store_per_key_and_enter_with_write` 在機器負載 29 時有一次 p95 24.5 ms 失敗（空儲存也 13.1 ms），負載下降後重跑 p95 7.09 ms 通過，判讀為機器負載，不是這次改動。
+- **沒做**：main 用第六次 review 的 harness 重量修訂五對 main（§11 最後一項，由 main 在別處跑）。`core/include/shanjie.h` 的註解沒有描述插入再凍結或刪除行為，沒改。

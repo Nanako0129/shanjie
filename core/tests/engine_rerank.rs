@@ -390,6 +390,28 @@ fn apply_does_not_bring_back_a_cleared_prediction_row() {
     let a = e.apply_rerank(r).unwrap().expect("a change");
     assert!(a.candidates.is_empty(), "the row stays cleared after Backspace");
     assert!(!e.set_prediction(true).unwrap().candidates.is_empty(), "premise: a recompute would show a row");
+
+    // Repick-freeze, a pick that still leaves a free stretch: row 27 with 以 picked at syllable 2 (everything else fixed as
+    // shown), then a new syllable typed there is free; End moves the cursor to the end, where the row stays empty. The job
+    // for that free stretch changes the text (measured: the 的 becomes 地), and the apply leaves the row cleared.
+    let mut e = engine();
+    let syls = row(27);
+    type_syls(&mut e, &syls);
+    e.key(k(KeyKind::Home)).unwrap();
+    e.key(k(KeyKind::Right)).unwrap();
+    e.key(k(KeyKind::Right)).unwrap();
+    let o = e.key(k(KeyKind::Space)).unwrap();
+    assert_eq!(o.candidates[o.selected.unwrap()], "以");
+    e.key(k(KeyKind::Enter)).unwrap();
+    let o = type_syls(&mut e, &["ㄉㄜ˙".to_string()]);
+    assert_eq!(o.preedit, "我以的經回復你的郵件了");
+    let o = e.key(k(KeyKind::End)).unwrap();
+    assert!(o.candidates.is_empty(), "premise: the row is cleared");
+    let r = e.take_rerank_job().expect("premise: the free syllable makes a job").run();
+    let a = e.apply_rerank(r).unwrap().expect("a change");
+    assert_eq!(a.preedit, "我以地經回復你的郵件了");
+    assert!(a.candidates.is_empty(), "the row stays cleared after the apply");
+    assert!(!e.set_prediction(true).unwrap().candidates.is_empty(), "premise: a recompute would show a row");
 }
 
 /// Section 2.4, revision 1: a later stretch is scored with the context key of the text as it will be shown, i.e. after the
