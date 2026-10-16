@@ -25,13 +25,15 @@ permissions: {}
 # `build` runs the Rust and Swift toolchains, so it holds no secret. The login keychain of any
 # machine is never involved.
 #
-# Trust model (docs/contracts/about-update.md section 0.1, docs/PLAN.md R10): Sparkle accepts an
-# update whose EdDSA signature verifies OR whose Apple signature satisfies the installed app's
-# designated requirement, and installs it without Gatekeeper or notarization looking at it again.
-# Either key plus write access to the feed can therefore run code in every installed copy. The feed
-# is EdDSA-signed too (SURequireSignedFeed). The Sparkle key appears in exactly two steps of `sign`:
-# the key-pair check (dry runs and tags) and the feed step (tags only, after the signing keychain is
-# gone, handed to Sparkle's own tool on stdin).
+# Trust model (docs/contracts/about-update.md section 0.1, docs/PLAN.md R10): with
+# SUVerifyUpdateBeforeExtraction, Sparkle 2.9.3 checks the downloaded zip's EdDSA signature before
+# extracting it; its fallback, the archive's own Developer ID signature, cannot apply to a zip
+# (a zip carries no code signature), so in practice only the EdDSA key admits an update, and the
+# update then installs without Gatekeeper or notarization looking at it again. The EdDSA key plus
+# write access to main's appcast.xml can therefore run code in every installed copy. The feed is
+# EdDSA-signed too (SURequireSignedFeed). Three steps of `sign` reference the key: the emptiness
+# check of the signing material, the key-pair check (dry runs and tags) and the feed step (tags
+# only, after the signing keychain is gone, handed to Sparkle's own tool on stdin).
 
 jobs:
   # CI does not run on tags: the tagged (or dispatched) commit's own ci.yml run on main must be
@@ -122,9 +124,13 @@ jobs:
           [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "error: tag $GITHUB_REF_NAME is not vMAJOR.MINOR.PATCH" >&2; exit 1; }
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
+      # SHANJIE_RELEASE_BUILD marks the bundle as a release build (Info.plist ShanjieUpdateBuild
+      # release): only such a build and an update test build start the updater; verify_sparkle
+      # requires the marker.
       - name: Build the app (ad-hoc)
         env:
           SHANJIE_VERSION: ${{ steps.version.outputs.version }}
+          SHANJIE_RELEASE_BUILD: "1"
         run: scripts/build-app.sh
 
       # The installer skeleton (docs/contracts/s3c-installer.md section 3): everything except the
@@ -145,8 +151,10 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-  # Developer ID signing, notarization, stapling and verification. Runs no repository code: no
-  # checkout at all, only Apple's tools on the artifact, which is unpacked into RUNNER_TEMP.
+  # Developer ID signing, notarization, stapling and verification, the Sparkle key-pair check and
+  # (tags only) the signed feed. Runs no repository code: Apple's tools on the artifact, which is
+  # unpacked into RUNNER_TEMP, Sparkle's official tools for the feed, and on tags a sparse checkout
+  # of two data files (appcast.xml and this tag's release notes) that are only read.
   sign:
     needs: build
     runs-on: xcode-27
@@ -308,6 +316,7 @@ jobs:
             [ ! -e "$S/Versions/B/XPCServices" ] && [ ! -e "$S/XPCServices" ] || fail "Sparkle.framework has XPCServices"
             P="$V/Contents/Info.plist"
             key() { [ "$(plutil -extract "$1" raw -expect "$2" -o - "$P" 2>/dev/null)" = "$3" ] || fail "Info.plist $1 is not the $2 $3"; }
+            key ShanjieUpdateBuild string release
             key SUFeedURL string "$SPARKLE_FEED_URL"
             key SUPublicEDKey string "$SPARKLE_PUBLIC_KEY"
             key SURequireSignedFeed bool true
@@ -378,12 +387,13 @@ jobs:
           FROM_SECRET=$(cd "$T/edpub" && printf '%s\n' "$SPARKLE_PRIVATE_KEY" | swift edpub.swift)
           IN_ZIP=$(plutil -extract SUPublicEDKey raw -expect string -o - "$T/check/善解輸入法.app/Contents/Info.plist")
           [ "$FROM_SECRET" = "$IN_ZIP" ] || fail "SPARKLE_PRIVATE_KEY does not belong to the SUPublicEDKey in shanjie-$VERSION.zip"
-          [ "$IN_ZIP" = "$SPARKLE_PUBLIC_KEY" ] || fail "the zip's SUPublicEDKey is not this workflow's SPARKLE_PUBLIC_KEY"
           echo "the Sparkle key pair matches"
 
-      # The previous feed, as data only (never executed): generate_appcast reads its items back, so
-      # older versions keep their entries and signatures. Absent before the first Sparkle release.
-      - name: Fetch the current appcast (data only)
+      # Two data files of the tagged commit, only read (never executed): the previous feed, whose items
+      # generate_appcast reads back so older versions keep their entries and signatures (absent before
+      # the first Sparkle release), and this tag's hand-written release notes, which the gate already
+      # required.
+      - name: Fetch the current appcast and the release notes (data only)
         if: github.event_name == 'push'
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
@@ -392,13 +402,18 @@ jobs:
           sparse-checkout-cone-mode: false
           sparse-checkout: |
             /appcast.xml
+            /docs/releases/${{ github.ref_name }}.md
 
       # Tags only, after the signing keychain is gone. Sparkle's own generate_appcast from its official
       # release (the version macos/Package.resolved pins; SHA-256 checked against the literal below,
       # verified by main against GitHub's asset digest), never the build artifact or repo code. Its
-      # input folder holds only the previous feed and shanjie-<V>.zip, the same bytes `publish`
-      # uploads; the key goes to it on stdin. The app has SURequireSignedFeed, so the feed is signed
-      # too. Without --download-url-prefix the enclosure URL would be built from SUFeedURL's folder.
+      # input folder holds the previous feed, shanjie-<V>.zip (the same bytes `publish` uploads) and
+      # the release notes as shanjie-<V>.md, embedded into the new item as markdown (Sparkle shows it
+      # in a text view: no web view, no remote resources, no JavaScript); the key goes to it on stdin.
+      # The app has SURequireSignedFeed, so the feed is signed too. --download-url-prefix: otherwise
+      # the enclosure URL would be built from SUFeedURL's folder. --maximum-versions 0 keeps every
+      # version, and --versions names the new one, so a fix for an older line is neither pruned nor
+      # skipped as older than the feed's newest.
       - name: Sign the update feed
         if: github.event_name == 'push'
         env:
@@ -417,15 +432,40 @@ jobs:
           tar -xJf "$T/sparkle-dl/Sparkle-2.9.3.tar.xz" -C "$T/sparkle"
           GEN="$T/sparkle/bin/generate_appcast"
           [ -x "$GEN" ] || fail "generate_appcast is not in Sparkle-2.9.3.tar.xz"
+          NOTES="$GITHUB_WORKSPACE/feed/docs/releases/$GITHUB_REF_NAME.md"
+          [ -s "$NOTES" ] || fail "docs/releases/$GITHUB_REF_NAME.md is missing or empty"
           cp "$T/out/$ZIP" "$T/feed/$ZIP"
+          cp "$NOTES" "$T/feed/shanjie-$VERSION.md"
           if [ -f "$GITHUB_WORKSPACE/feed/appcast.xml" ]; then cp "$GITHUB_WORKSPACE/feed/appcast.xml" "$T/feed/appcast.xml"; fi
-          printf '%s\n' "$SPARKLE_PRIVATE_KEY" | "$GEN" --ed-key-file - --download-url-prefix "$URL_PREFIX" "$T/feed"
+          printf '%s\n' "$SPARKLE_PRIVATE_KEY" | "$GEN" --ed-key-file - --download-url-prefix "$URL_PREFIX" \
+            --embed-release-notes --maximum-versions 0 --versions "$VERSION" "$T/feed"
           unset SPARKLE_PRIVATE_KEY
           F="$T/feed/appcast.xml"
           cmp -s "$T/feed/$ZIP" "$T/out/$ZIP" || fail "the zip in the feed folder changed"
-          grep -qF "url=\"$URL_PREFIX$ZIP\"" "$F" || fail "appcast.xml has no enclosure at $URL_PREFIX$ZIP"
-          grep -qF "length=\"$(stat -f %z "$T/out/$ZIP")\"" "$F" || fail "appcast.xml has no enclosure of the zip's length"
-          grep -q 'sparkle:edSignature=' "$F" || fail "appcast.xml has no EdDSA signature for the archive"
+          # The new item only (older items keep their own signatures): exactly one item with this
+          # enclosure URL, the zip's length, an EdDSA signature, this version and the embedded notes.
+          python3 -I - "$F" "$URL_PREFIX$ZIP" "$(stat -f %z "$T/out/$ZIP")" "$VERSION" <<'PY'
+          import sys
+          import xml.etree.ElementTree as ET
+          feed, url, length, version = sys.argv[1:5]
+          SP = "{http://www.andymatuschak.org/xml-namespaces/sparkle}"
+          items = [i for i in ET.parse(feed).getroot().iter("item")
+                   if i.find("enclosure") is not None and i.find("enclosure").get("url") == url]
+          if len(items) != 1:
+              sys.exit(f"error: appcast.xml has {len(items)} items with the enclosure {url}")
+          item = items[0]
+          enc = item.find("enclosure")
+          if enc.get("length") != length:
+              sys.exit(f"error: the new item's length is {enc.get('length')}, the zip is {length} bytes")
+          if not enc.get(SP + "edSignature"):
+              sys.exit("error: the new item has no EdDSA signature (does the app's SUPublicEDKey match the key?)")
+          if item.findtext(SP + "version") != version:
+              sys.exit("error: the new item's sparkle:version is not " + version)
+          notes = item.find("description")
+          if notes is None or notes.get(SP + "format") != "markdown" or not (notes.text or "").strip():
+              sys.exit("error: the new item has no embedded markdown release notes")
+          print("the new appcast item is complete")
+          PY
           grep -qF '<!-- sparkle-signatures:' "$F" || fail "appcast.xml is not signed (SURequireSignedFeed would refuse it)"
           cp "$F" "$T/out/appcast.xml"
 
