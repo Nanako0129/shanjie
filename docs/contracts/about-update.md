@@ -88,5 +88,6 @@
 
 | 輪次 | 結果 | 處置 |
 |---|---|---|
+| plan-verifier（修訂二） | READY | — |
 | plan-verifier（修訂一） | REVISE 3 項：`generate_appcast` 沒給下載網址前綴（會拼出不存在的網址）；沒有任何驗收走到正式的 feed、金鑰與下載網址；v0.4.6 以前的 Homebrew 使用者在 cask 加 `auto_updates` 後可能永遠升不到 v0.4.7 | 都 FIX：§2 寫明 `--download-url-prefix` 與輸入資料夾只放那個 zip；§3 加第 6 項（推 tag 後核對 appcast、下載網址、已安裝版本「立即檢查」顯示已是最新）並列入停止條件；第 5 項改成發版說明與 README 一律寫一次性的指名升級指令，VM 實測只報 |
 | security-reviewer（草稿） | 無 P0。P1：EdDSA 或 Developer ID 任一加 feed 寫入權即可推更新且繞過公證，契約沒寫；發版設計和 sign 工作的邊界衝突（巢狀程式只有 ad-hoc、工具與舊 appcast 的來源）。P2：feed 未簽可釣魚／外洩 IP、檢查只看外層 App 與本機版、回滾方式會被 Sparkle 拒絕、乾跑用正式金鑰且沒驗公私鑰成對、隱私文字三處不準確。P3：Sparkle 的 log 與 R2、Package.resolved、agent 不核准部署、外洩處理手冊 | 全部 FIX：§0.1 信任模型與 PLAN R10；Info.plist 加 `SURequireSignedFeed`、`SUVerifyUpdateBeforeExtraction`、`SUAllowsAutomaticUpdates` false，Sparkle `exact: 2.9.3`；內層 Developer ID 簽章寫在 sign 步驟；EdDSA 獨立一步、只在推 tag、官方 tarball 釘雜湊、stdin 給私鑰；`verify()` 逐一檢查四個程式碼位置與 Info.plist 逐字；乾跑只做金鑰成對檢查；回滾與外洩處理改寫；隱私文字照實測寫、驗收加 (f)(g)。P4（XPC 維持移除、不開 JavaScript、feed 凍結重播接受）照建議 |
