@@ -5890,3 +5890,14 @@ formal: alpha 0.7, tau 1, delta 2
 - 保留集（fresh verifier，v0.4.5 `4f0b052` 對 `7c47266`）：聊天 191 → 191（3／3，p 1）、書面 186 → 187（6／5，p 1），擋發版規則沒有觸發。
   - bench 的匯出沒有 `eval/holdout`，verifier 改用 `--rows <repo 的 eval/holdout/holdout.txt>`（227 列都是三欄、都有讀音，和 `--set holdout` 讀到的列與順序相同）；變體表用 `eval/bench/suite-v1/variants.tsv`（工具 `cli_env` 用的同一份，`50cb44bd…`）。
   - **多讀了一次保留集**：verifier 寫暫存指令稿時，session 暫存區裡有一個舊的同名稿（noclobber 擋下新檔），結果執行了舊稿，量了一次 v0.4.4 `3560fe5` 對 `4956257`（都是 classes-v4，v0.4.5 發版時量過的同一組），聊天 191／191、書面 186／186、+0／−0，和當時的紀錄相同。只輸出數字、沒有用來改任何東西；舊稿已刪。教訓：verifier 的暫存檔一律用 `mktemp` 產生的新路徑，不用固定檔名。
+
+## 2026-10-16：trigram-core 第 0 片（H3 重對應到 model-v6，出貨形狀重判）
+
+- 契約 `docs/contracts/trigram-core.md`（修訂二，`9458e48`）。plan-verifier 兩次 REVISE（引擎詞段交界的歷史規則、學到的詞與 trigram、書面預測列不變），都已處置。設計分析由 Fable 做（配對、切片、風險排序），數字由 main 核對。
+- 重對應：`experiments/derisk-1015/e1/remap_tri.py`（`feat/derisk-1015` `6c52e7f`，合成資料的單元測試 5 項通過）把 H3 從 B0 的詞 id 換成 model-v6 的：4,101,808 個前文、7,700,964 條，B0 與 model-v6 的詞彙都是 353,497 個詞，輸出 `fdd3b05d…`（綁 model-v6 `fc2bddd1`）。
+- 量法：188，`grid.py judge`，書面 λ 0.7、β 1、`--context`，集合同 E1g（凍結檔核對通過）。BASE 是出貨的書面形狀（model-v6 `fc2bddd1`＋classes-v5 `9e36fa1b`＋kn-v1 `cbefbced`）；CAND 是 model-v6＋classes-v5＋重對應的 H3，KN 關。2 分鐘。
+- **判讀**（a = 0.05）：調參集 205/141（**+64，p 0.0007**），判讀五集 +36（p 0.040）、discordtune +35（p 0.051），都不是顯著為負 → **通過**，進第 A 片。
+- 只報：
+  - 每個集合：wikitune +51（p 0.0002）、lytune +36（p 0.024）、cvtune +13、dev302 +1、打字測驗 −2、錯字回報 0、wikitypo +1。
+  - 和 E1h 的 FH3k（B0 上量的）逐列比：調參集、判讀五集、discordtune 的 top1 對錯**完全相同**（0 列不同）；BASE 對 E1g 的 F0 也 0 列不同。指紋條目與詞類表的差別在這些集合上沒有影響任何一列。
+- CAND 在 188 的 rowstats 與摘要行（`/mnt/c/Users/Nanako/derisk/e1r/tc0/V6H3k/formal/`，摘要行 `lm-formal+ctx+tri:fdd3b05d`）是第 A 片 Rust 錨點的目標。
