@@ -6352,3 +6352,4 @@ formal: alpha 0.7, tau 1, delta 2
 
 - 判讀：**通過**。footprint (iii) 比 (ii) 少 139.8 MB（中位數 304.3 vs 444.1，門檻 ≥ 100 MB），比 (i) 只多 2.4 MB；契約的推論（映射的乾淨檔案頁不算 footprint）成立。max RSS 照預期沒有下降（載入時的檢查讀過整張表）。(ii) 與 (iii) 的選字輸出三輪都逐列相同。p95 (iii) 比 (i) 低，在上限（+1 ms）內；但這一場 Mac 很忙（load avg 14–20，另一個 worktree 正在編譯），三個臂的 p95 都比第 A 片量的 2.1 ms 高、彼此差異在雜訊內，延遲只看「沒有超過上限」。
 - golden：表在 `data/lm` 時 Mac 的 `cargo test -p cli --test golden` 25／25（表由映射載入）。
+- 完整 Rust 測試（Windows 機器 WSL）：有表 473 過、0 失敗（`4c88bb3`）；沒有表（`NO_TRI=1`，`f559177`）27 個失敗，全部停在缺表的斷言（`cli/tests/golden.rs:66` 11 個、`core/tests/engine_lm.rs:18` 16 個，各印一次下載訊息），沒有其他失敗。第 C 片之後表是必要的檔，契約第 1 項「沒有表時也全過」照此放寬。

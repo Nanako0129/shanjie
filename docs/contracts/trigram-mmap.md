@@ -25,7 +25,7 @@
 
 ## 3. 驗收
 
-1. golden 不改：第 C 片合併後的 main（表在 `data/lm`，書面 golden 已是有表的版本）上全過的 golden，這個分支照樣全過、不改任何 golden 檔：Windows 機器 WSL 的完整 Rust 測試、Mac 的 `cargo test -p cli --test golden`。沒有表時（`NO_TRI=1` 的 WSL 跑法）也全過。
+1. golden 不改：第 C 片合併後的 main（表在 `data/lm`，書面 golden 已是有表的版本）上全過的 golden，這個分支照樣全過、不改任何 golden 檔：Windows 機器 WSL 的完整 Rust 測試、Mac 的 `cargo test -p cli --test golden`。沒有表時（`NO_TRI=1` 的 WSL 跑法）：第 C 片之後表是必要的檔，失敗的測試必須全部停在缺表的斷言、印出下載訊息，沒有任何其他失敗（2026-10-16 放寬：原文「也全過」寫在第 C 片合併之前）。
 2. 單元測試：映射來源與 `Vec<u8>` 來源解析同一張玩具表，各個打分完全相同；長度 0 的檔、截短的檔、壞 magic 的檔經映射載入都回 `LmError::TriTable`；`Lm::load_opts` 載入的表確實是映射（測試看得到來源種類，不是只看結果）。突變：把 `Lm::load_opts` 改回 `std::fs::read`，那個「確實是映射」的測試要以斷言失敗。
 3. **記憶體與延遲（main 在 Mac 量，決定性的一項）**：重播程式是第 C 片 C4 的 `tools/bench/replay`（第五個參數 `formal`），dev302，模型 model-v6＋classes-v5＋kn-v1。三個臂各跑三次、取中位數：(i) 沒表：第 C 片合併後的 main 的重播程式，模型資料夾不放表；(ii) 有表且 `Vec<u8>`：同一個 main 的重播程式，資料夾放表；(iii) 有表且映射：這個分支（已合進那個 main）的重播程式，資料夾放表。(i)、(ii) 用的 main commit 記進研究紀錄。每次用 `/usr/bin/time -l` 取 peak memory footprint 與 maximum resident set size，重播本身印每鍵 p95 與最大值。
    - 通過條件：(iii) 的 peak footprint 比 (ii) 少至少 100 MB；(iii) 的每鍵 p95 比 (i) 多不超過 1 ms（trigram-core 的上限不變）；重播的選字輸出三臂中 (ii) 與 (iii) 逐列相同。
