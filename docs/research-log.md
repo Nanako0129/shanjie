@@ -6410,3 +6410,12 @@ formal: alpha 0.7, tau 1, delta 2
 - 維護者實機的組字區是「但是整體在大一點」，要的是「再」。加成 `g2b|但是整體再大一點|ㄉㄢˋ ㄕˋ ㄓㄥˇ ㄊㄧˇ ㄗㄞˋ ㄉㄚˋ ㄧ ㄉㄧㄢˇ`（讀音由 `tools/readings.py` 產生，沒有 CHECK）。
 - Python 參考實作、golden 設定：聊天第 1 名是「在」、正解第 2；書面第 1 名就是正解。
 - `eval/golden/s2h-lm-context.txt` 的錯字回報兩行用 Python 參考實作重產，n 129：聊天 top1 29 不變、書面 37 → 38，oracle@64 兩種設定都 125 → 126；`eval/README.md` 改成 129 列。
+
+## 2026-10-17：App 圖示（契約 `docs/contracts/app-icon.md`）
+
+- 起因：輸入法 App 與安裝程式沒有圖示鍵，Finder、安裝程式、Sparkle 的更新視窗都是系統的空白圖示。維護者：「善解的 icon 還沒正式定下來」，選擇題選「A 朱印」（和網站 favicon 一致）、「趕進 v0.4.7」。
+- 樣稿（全部用 OFL 字型：Noto Serif／Sans CJK TC、霞鶩文楷 TC）：A 朱印、B 白底朱字、C 鍵帽、D 文楷加小印 → 維護者選 A。macOS 26 起用 Icon Composer 的 `.icon`；這台 Xcode 27 的 `actool` 編得了（`Assets.car`＋`.icns`＋`CFBundleIconName`），CI 的機器由 PR 的 CI 證明。實測：(1) 只給 `fill` 時系統的深色外觀把底色換成黑色，要用 `fill-specializations` 加 `"appearance": "dark"` 才維持朱紅；(2) 陰影種類是 `neutral`／`layer-color`／`none`（從 Icon Composer 框架的字串讀出，`chromatic` 不認得）；(3) `actool` 對相對路徑會解析到別的目錄，腳本一律用絕對路徑；(4) 測試空殼沒有執行檔時系統在圖示上畫禁止符號、編譯失敗過的 bundle 會被圖示快取記住，比較時要換新路徑。
+- 維護者要「更 liquid glass 的感覺」：四個版本（平面、輕微光澤、框與字分兩層玻璃、去框大字）由系統實際畫出（`NSWorkspace.icon(forFile:)`，淺色與深色）→ 選 g2b（兩層玻璃、透光 0.5、邊緣高光、朱紅 `automatic-gradient`；字那一組陰影 `layer-color` 0.6、`lighting` `individual`，框那一組陰影 `neutral` 0.4，這些是 main 做 g2 樣稿時選的值）→「整體再大一點」：+10% 與 +18% → 選 +10%。
+- 定稿：`packaging/AppIcon.icon/`；「解」由 `scripts/make-app-icon.swift` 從 Noto Serif CJK TC Black 轉成路徑（幾何是具名常數，倍數 1.10）。字型用在圖示的授權：OFL FAQ 1.1、1.13（`LICENSES/data.md`）。
+- /code-review（3a7c45ce）11 項全部處理（契約 §7）。實測：`actool` 在 `--app-icon` 和 `.icon` 資料夾名不符時結束碼 0、什麼都不寫；連續兩次編譯 `AppIcon.icns` 相同、`Assets.car` 不同；每次約 5 秒。改用共用的 `scripts/compile-app-icon.sh`，編完確認兩個檔存在。
+

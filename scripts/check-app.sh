@@ -58,6 +58,9 @@ for f in mcbpmf-data.txt overlay-add.tsv sandhi-add.tsv names-add.tsv demote.tsv
          LICENSES/name-suggestion-index-BSD-3-Clause.txt LICENSES/Sparkle-MIT.txt; do
   [ -s "$R/$f" ] || fail "Resources/$f is missing or empty"
 done
+# The app icon (docs/contracts/app-icon.md): compiled by actool, named in Info.plist.
+for f in Assets.car AppIcon.icns; do [ -s "$R/$f" ] || fail "Resources/$f (the app icon) is missing or empty"; done
+for k in CFBundleIconName CFBundleIconFile; do [ "$(pb "$k")" = AppIcon ] || fail "Info.plist $k is not AppIcon"; done
 # The word pack manifest (docs/contracts/acg-pack.md A.2): every file it lists is there with the SHA-256 it records,
 # and the attribution file names the pack.
 python3 - "$R/packs" <<'PY' || fail "packs/acg.json does not match the pack files"
