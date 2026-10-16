@@ -271,6 +271,7 @@ fn measure_newword() {
         top1 += ok as usize;
         let errors = if ok { 0 } else { levenshtein(&shown, gold) };
         rs += &format!("{}\t{}\t{errors}\t{}\n", i + 1, ok as u8, gold.chars().count());
+        if let Some(d) = std::env::var_os("NEWWORD_DUMP") { use std::io::Write; let mut f = std::fs::OpenOptions::new().create(true).append(true).open(d).unwrap(); writeln!(f, "{}\t{}\t{}\t{}", i + 1, ok as u8, shown, gold).unwrap(); }
     }
     std::fs::write(&out, rs).unwrap();
     println!(
