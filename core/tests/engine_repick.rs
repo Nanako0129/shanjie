@@ -96,6 +96,27 @@ fn freeze_reported_case_banhkong() {
     assert_eq!(o.preedit, "版控");
 }
 
+/// Typo row 133 (docs/contracts/repick-freeze.md section 0 and the 2026-10-17 merge note): 可以做第六步 shows as
+/// 可以做第六部; opening the window at the end and choosing the two-character word 六步 used to re-decode the left part
+/// ("可以做地六步" in chat, "可以作地六步" in formal, the maintainer's screen). The words on the left stay as shown.
+#[test]
+fn freeze_row_133_six_steps() {
+    const ROW: &str = "ㄎㄜˇ ㄧˇ ㄗㄨㄛˋ ㄉㄧˋ ㄌㄧㄡˋ ㄅㄨˋ";
+    // Measured on the production lexicon and bigram model: formal and chat both show 可以做第六部; without the freeze the
+    // pick of 六步 gave 可以作地六步 (formal).
+    for prof in [Profile::Formal, Profile::Chat] {
+        for pick in ["六步", "步"] {
+            let mut e = engine();
+            e.set_profile(prof).unwrap();
+            assert_eq!(shown(&mut e, ROW, ""), "可以做第六部");
+            // The cursor is at the end: the window lists the words that end there.
+            let o = e.key(k(KeyKind::Space)).unwrap();
+            highlight(&mut e, o, pick);
+            assert_eq!(e.key(k(KeyKind::Enter)).unwrap().preedit, "可以做第六步", "pick {pick}");
+        }
+    }
+}
+
 /// The learning records, as (context, reading, word).
 fn records(e: &Engine) -> Vec<(String, String, String)> {
     e.learner().records().iter().map(|r| (r.context.clone(), r.reading.join(" "), r.word.clone())).collect()
