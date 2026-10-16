@@ -753,7 +753,7 @@ def resolve_models(ver, spec):
         want = open(f).read().split()[0]
         p = os.path.join(MODELS, want, n)
         if not os.path.isfile(p):
-            die(f"{ver.label}: model file missing: {p}; download {n} from Release {spec['release']}, check its SHA-256 is {want}, and put it there")
+            die(f"{ver.label}: model file missing: {p}; download {n} from its own Release (docs/data-files.md names it; {spec['release']} is the app release, which carries no model files), check its SHA-256 is {want}, and put it there")
         if sha_file(p) != want:
             die(f"{ver.label}: {p} does not match data/{n}.sha256 ({want})")
         out[n] = (p, want)

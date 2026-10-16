@@ -306,7 +306,7 @@ class SuiteV2(Tmp):
         err = io.StringIO()
         with self.assertRaises(SystemExit), contextlib.redirect_stderr(err):  # nothing cached
             bench.setup_models(v, bench.VERSIONS2["v0.4.1"], os.path.join(self.td, "mf1"))
-        self.assertIn("download bigram.sjlm from Release v0.4.1", err.getvalue())
+        self.assertIn("download bigram.sjlm from its own Release (docs/data-files.md names it; v0.4.1 is the app release", err.getvalue())
         for n in HEX:
             self.put_model(n)
         with self.assertRaises(SystemExit), contextlib.redirect_stderr(err):  # files exist, hashes do not match data/*.sha256

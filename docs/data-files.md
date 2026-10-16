@@ -43,9 +43,10 @@ shasum -a 256 -c data/bigram.sjlm.sha256 data/classes.sjc.sha256 data/kn.sjkn.sh
 
 | 改了什麼 | 要發的新 Release |
 |---|---|
-| 語料、計數或模型格式（重建 `bigram.sjlm`） | `model-v7`，而且詞類表也要重建：下一個 `classes-v…`（舊的詞類表綁的是舊模型的雜湊，配新模型會載入失敗）；KN 側檔也要重產：下一個 `kn-v…`（綁模型的雜湊）；語意校正模型也要重新調參，發下一個 `tinylm-v…`（舊的綁舊模型與舊側檔的雜湊，配新的不會載入） |
+| 語料、計數或模型格式（重建 `bigram.sjlm`） | `model-v7`，而且詞類表也要重建：下一個 `classes-v…`（舊的詞類表綁的是舊模型的雜湊，配新模型會載入失敗）；KN 側檔也要重產：下一個 `kn-v…`（綁模型的雜湊）；語意校正模型也要重新調參，發下一個 `tinylm-v…`（舊的綁舊模型與舊側檔的雜湊，配新的不會載入）；trigram 表也要重發，見下面第一列之後的「重建 `bigram.sjlm` 時，trigram 表也要重發」 |
 | 只重新分群（類別數、分群用的資料） | 下一個 `classes-v…`，模型不變（`eval/golden/sp-predict.txt`、`sw-probe.txt` 的分數也依賴詞類表，要重產）；語意校正模型的 α、τ、δ 要重新調，發下一個 `tinylm-v…`（雜湊檔不會攔下這種錯配，要靠這張表） |
 | 只改詞類權重 μ（檔頭一個值，`experiments/lytune-attrib/set_mu.py`） | 下一個 `classes-v…`，依詞類表的 golden 一樣重產；μ 是開著出貨的小模型量過才選的，就沿用那個 `tinylm-v…`，沒量過就照上一列重調（classes-v5，`docs/contracts/classes-v5.md` §2 第 3 點） |
+| 重建 `bigram.sjlm` 時，trigram 表也要重發 | 新的 trigram 表 Release（`sj-cx-…`）：`trigram.sjt3` 綁模型的 SHA-256，配不上的表會讓 `Lm::load_opts` 對每個設定都載入失敗（不只書面），App 就整個沒有語言模型，所以換模型一定要同時換表（`tools/build_trigram.py` 重新對應到新模型的詞 id；`data/trigram.sjt3.sha256`、CI／`release.yml`／`build-app.sh` 的下載與 golden 跟著換） |
 | 語意校正模型的訓練、大小、匯出格式或融合參數 | 下一個 `tinylm-v…`，n-gram 模型與詞類表不變（`tinylm-v2`、`tinylm-v3` 都是只換融合參數；`tinylm-v4` 換檔頭格式、加強度兩檔；`tinylm-v5` 是 SJTL0004，記 KN 側檔的雜湊） |
 
 舊的 Release 保留，可以回到那一版；例外是 model-v3 與 classes-v1，在 `docs/contracts/model-v4.md` §4 第 4 步的條件成立後移除。下一次重建模型時，發佈的檔案要先加上指紋條目再算雜湊，詞類表也對加過的檔案建。換版時同一個 PR 更新：雜湊檔（`data/*.sha256`）、CI 兩個 job 與 `release.yml` 的下載、`cli/tests/golden.rs` 的雜湊與訊息、`core/tests/engine_*.rs` 的缺檔訊息、`macos/Tests/ShanjieKitTests/Support.swift`、`scripts/build-app.sh` 的提示與內附的署名文字、README、CONTRIBUTING、`docs/verification.md`、`LICENSES/data.md`、`docs/PLAN.md` 的模型檔那一條，以及這份文件；換 `tinylm.sjtl` 時另外照 `docs/releases/README.md` 的上傳與核對步驟；換 `tinylm.sjtl` 而融合參數有變時，要重新量 selftest 的那一句還會被重排改掉（`Selftest.rerankRowStandard`、`rerankedText`、`ngramText`，與測試的 `RerankRow`），不會就重挑（tinylm-v2 的嚴格聊天值就讓原本的第 25 列不再被改，改用第 65 列；tinylm-v3 下第 65 列仍會被改，第 25 列又會被改，是實機句；tinylm-v4 的標準值與 v3 相同，第 65 列照樣被改，沒有換列）；換 `tinylm.sjtl` 的檔頭格式時，另外改 `experiments/s7a-tinylm/export_sjtl.py` 的讀檔器與 `tools/triage.py` 的 `tinylm_params`（它用那個讀檔器，不另寫解析），並在 `tools/test_triage.py` 補新版本的案例（SJTL0003 曾因此讓分流工具崩潰）；依模型的 golden 照各自的產生方式重產（`docs/contracts/model-v5.md` §2.5 的 PR 2 是完整的例子）。
