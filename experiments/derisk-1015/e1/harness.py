@@ -47,12 +47,17 @@ def start_state(ctx, lm, context=True, x_context=False):
     return ("<s>", "<s>") if v == "<s>" else (None, v)
 
 
-def decode3(lex, syls, lm, lam, start, tri_lm=None, beam=64, demote=True):
-    """lm.decode with the history (u, v). tri_lm None: exactly lm.decode (state key, arithmetic, order of operations); start is (u, v)."""
+def decode3(lex, syls, lm, lam, start, tri_lm=None, beam=64, demote=True, ctx_u="keep"):
+    """lm.decode with the history (u, v). tri_lm None: exactly lm.decode (state key, arithmetic, order of operations); start is (u, v).
+    ctx_u (trigram-core research, 2026-10-16): when the start came from a left context (su is None, sv the context word), "keep" uses
+    the context word as u for the second word and for a one-word stretch's eos (the shipped rule); "eos" drops it only for a one-word
+    stretch's eos; "none" never uses it as u (u unknown -> bigram for that term)."""
     table = getattr(lex, "demote", None) if demote else None
     su, sv = start
     syls = tuple(syls); n = len(syls)
-    hist = lambda ws: (su, sv) if not ws else ((ws[-2] if len(ws) >= 2 else sv), ws[-1])
+    ctx_start = su is None and sv != "<s>"
+    u1 = None if (ctx_start and ctx_u == "none") else sv
+    hist = lambda ws: (su, sv) if not ws else ((ws[-2] if len(ws) >= 2 else u1), ws[-1])
     hyps = [[] for _ in range(n + 1)]; hyps[0] = [(0.0, ())]
     for i in range(1, n + 1):
         cand = {}
@@ -78,6 +83,8 @@ def decode3(lex, syls, lm, lam, start, tri_lm=None, beam=64, demote=True):
     out = []
     for s, ws in hyps[n]:
         u, v = hist(ws)
+        if ctx_start and ctx_u == "eos" and len(ws) == 1:
+            u = None
         out.append((s + (lm.eos(lam, v) if tri_lm is None else tri_lm.eos(lam, u, v)), ws))
     best, seen = [], set()
     for x in sorted(out, key=lambda x: -x[0]):
@@ -92,10 +99,10 @@ class Evaluator:
     """Everything one process needs to decode rows: lexicon, model, optional trigram table."""
 
     def __init__(self, lm_path, *, tri_path=None, classes=True, kn=None, kn_beta=None, no_kn=False, extra_overlay=None,
-                 demote=True, context=True, x_context=False):
+                 demote=True, context=True, x_context=False, ctx_u="keep"):
         self.kn_path = LE.kn_side(lm_path, kn, no_kn)
         self.classes = classes
-        self.extra_overlay, self.demote, self.context, self.x_context = extra_overlay, demote, context, x_context
+        self.extra_overlay, self.demote, self.context, self.x_context, self.ctx_u = extra_overlay, demote, context, x_context, ctx_u
         base = ime.Lexicon(os.path.join(ROOT, "data", "lexicon", "mcbpmf-data.txt"), overlay=ime.overlays(extra_overlay))
         self.lm = LE.load_lm(lm_path, base, classes, self.kn_path, kn_beta)
         self.lex = L.cap_overlay(base, ime.capping_words(extra_overlay), self.lm)
@@ -118,7 +125,7 @@ class Evaluator:
     def row(self, ctx, syls, lam):
         """Candidates of one row: [(score, words)] sorted, distinct surfaces."""
         start = start_state(ctx, self.lm, self.context, self.x_context)
-        return decode3(self.lex, syls, self.lm, lam, start, self.tri_lm, demote=self.demote)
+        return decode3(self.lex, syls, self.lm, lam, start, self.tri_lm, demote=self.demote, ctx_u=self.ctx_u)
 
     def judge(self, truth, syls, ctx, lam):
         """(ok, first surface, [all surfaces], n-best): the numbers lm_eval.py keeps per row."""
