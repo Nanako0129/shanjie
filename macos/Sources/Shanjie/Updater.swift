@@ -6,11 +6,15 @@ import Sparkle
 /// Sparkle in the input method (docs/contracts/about-update.md sections 1 and 2), modeled on Syrtis's UpdaterService. The
 /// decisions live in `Updates` (ShanjieKit, tested); this class only connects them to Sparkle.
 ///
-/// - Starts only when running from an app bundle (`Updates.runsUpdater`).
+/// - Starts only from an app bundle built by the release workflow or as an update test build (`Updates.runsUpdater`, the
+///   Info.plist key `ShanjieUpdateBuild`): a local build never reads the production feed.
 /// - Sparkle's own scheduler is off (`SUEnableAutomaticChecks` false in Info.plist). A timer here calls `Updates.tick`, which
 ///   runs `checkForUpdateInformation` (no window) at most once a day and only with 自動檢查更新 on: a window popping up while
 ///   the user types would take the focus.
-/// - The interactive flow (`checkForUpdates`) runs only on the user's press: 更新到 X on the 關於 page, or the menu item.
+/// - The interactive flow (`checkForUpdates`) runs only after the user pressed 更新到 X or the menu item and a silent check
+///   just confirmed a newer version (`Updates.install`), so Sparkle's own "you're up to date" or error alert never opens for
+///   a version that is gone. Once the user is in Sparkle's flow, Sparkle's UI can still show modal alerts (a failed download
+///   or install); whether the input method keeps typing around them is a device check (contract section 3.4).
 /// - Started with `startingUpdater: false` and `start()` here, unlike Syrtis: when the standard controller starts the updater
 ///   itself and that fails, it shows a modal NSAlert (`runModal`, SPUStandardUpdaterController.m in Sparkle 2.9.3), which
 ///   would block the input method. A failure here is logged and every check then reads 檢查失敗.
@@ -35,7 +39,8 @@ final class Updater: NSObject, SPUUpdaterDelegate {
     init(updates: Updates) {
         self.updates = updates
         super.init()
-        guard Updates.runsUpdater(bundleURL: Bundle.main.bundleURL) else { return }
+        let build = Bundle.main.object(forInfoDictionaryKey: Updates.buildKey) as? String
+        guard Updates.runsUpdater(bundleURL: Bundle.main.bundleURL, build: build) else { return }
         let c = SPUStandardUpdaterController(startingUpdater: false, updaterDelegate: self, userDriverDelegate: nil)
         controller = c
         do {
@@ -44,8 +49,8 @@ final class Updater: NSObject, SPUUpdaterDelegate {
         } catch {
             Self.log.error("the updater did not start")
         }
-        updates.probe = { [weak self] in self?.probe() ?? false }
-        updates.install = { [weak self] in self?.install() }
+        updates.probe = { [weak self] in self?.probe() ?? .unavailable }
+        updates.interactive = { [weak self] in self?.interactive() }
         let t = Timer(timeInterval: Self.tickEvery, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.updates.tick() }
         }
@@ -54,20 +59,19 @@ final class Updater: NSObject, SPUUpdaterDelegate {
         timer = t
     }
 
-    private func probe() -> Bool {
-        guard started, let updater = controller?.updater, !updater.sessionInProgress else { return false }
-        found = nil
+    private func probe() -> ProbeStart {
+        guard started, let updater = controller?.updater else { return .unavailable }
+        guard !updater.sessionInProgress else { return .busy }
         updater.checkForUpdateInformation()
-        return true
+        return .started
     }
 
-    private func install() {
-        guard started else {
-            updates.finished(.failed)
-            return
+    /// Called from inside the probe's finishing delegate call: deferred one main-queue turn, so the probe session has ended
+    /// before the interactive one starts.
+    private func interactive() {
+        DispatchQueue.main.async { [weak self] in
+            MainActor.assumeIsolated { self?.controller?.checkForUpdates(nil) }
         }
-        found = nil
-        controller?.checkForUpdates(nil)
     }
 
     // MARK: SPUUpdaterDelegate (Sparkle calls it on the main thread)
@@ -78,23 +82,25 @@ final class Updater: NSObject, SPUUpdaterDelegate {
     }
 
     /// One place for every outcome: no error after `didFindValidUpdate` is a newer version, `SUNoUpdateError` is up to date,
-    /// any other error (network, feed signature, appcast) is a failed check.
+    /// any other error (network, feed signature, appcast) is a failed check. `found` is taken before `finished`, which may
+    /// start the interactive cycle; that cycle sets its own.
     nonisolated func updater(_ updater: SPUUpdater, didFinishUpdateCycleFor updateCheck: SPUUpdateCheck, error: (any Error)?) {
         let e = error as NSError?
         let noUpdate = e.map { $0.domain == SUSparkleErrorDomain && $0.code == Int(SUError.noUpdateError.rawValue) } ?? false
         let failed = e != nil && !noUpdate
         MainActor.assumeIsolated {
+            let version = found
+            found = nil
             if failed {
                 Self.log.error("update check failed")
                 updates.finished(.failed)
             } else if noUpdate {
                 updates.finished(.upToDate)
-            } else if let found {
-                updates.finished(.available, version: found)
+            } else if let version {
+                updates.finished(.available, version: version)
             } else {
                 updates.finished(nil)
             }
-            found = nil
         }
     }
 }

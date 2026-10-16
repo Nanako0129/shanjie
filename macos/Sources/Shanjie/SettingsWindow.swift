@@ -387,7 +387,7 @@ private struct AboutSections: View {
         }
         Section {
             Link("shanjie.nyanako.com", destination: Self.site)
-            Text("程式以 Apache-2.0 授權釋出；詞庫與模型的授權與出處在 App 的 Resources/LICENSES。")
+            Text("程式以 Apache-2.0 授權釋出，內含的 Sparkle 是 MIT；詞庫與模型的授權與出處在 App 的 Resources/LICENSES。")
                 .font(.caption).foregroundStyle(.secondary)
         }
     }

@@ -27,17 +27,35 @@ public final class MemoryUpdateStore: UpdateStore {
     public init() {}
 }
 
+/// How a request to start Sparkle's information-only check went (answered by the app's `Updater`).
+public enum ProbeStart: Sendable {
+    /// The check runs and will report back through `Updates.finished`.
+    case started
+    /// A Sparkle session is already running (Sparkle would ignore the call and never report back): nothing happens.
+    case busy
+    /// The updater is not running (it did not start, or this build does not start it): the check fails.
+    case unavailable
+}
+
 /// The update state shared by the 關於 page and the input menu (contract sections 1 and 2). Sparkle stays in the app target
-/// (`Updater`), which sets `probe` and `install` and reports each finished check through `finished`; the decisions (when the
-/// background check runs, what the page and the menu show) are here, so the tests reach them without Sparkle or the network.
+/// (`Updater`), which sets `probe` and `interactive` and reports each finished check through `finished`; the decisions (when
+/// the background check runs, when the interactive flow may start, what the page and the menu show) are here, so the tests
+/// reach them without Sparkle or the network.
 @MainActor
 public final class Updates: ObservableObject {
     /// At most one background check a day (contract section 1).
     public nonisolated static let interval: TimeInterval = 24 * 60 * 60
 
-    /// The updater starts only when the process runs from an app bundle: never in `swift test` or a bare executable, which
-    /// have no Info.plist with the feed and the key.
-    public nonisolated static func runsUpdater(bundleURL: URL) -> Bool { bundleURL.pathExtension == "app" }
+    /// The Info.plist key scripts/build-app.sh writes: `release` for the release workflow's build, `test` for an update test
+    /// build, `local` for every other build. Only `release` and `test` start the updater, so a copy built and installed
+    /// locally never reads the production feed.
+    public nonisolated static let buildKey = "ShanjieUpdateBuild"
+
+    /// The updater starts only when the process runs from an app bundle (never in `swift test` or a bare executable, which
+    /// have no Info.plist with the feed and the key) built as a release or an update test build (`buildKey`).
+    public nonisolated static func runsUpdater(bundleURL: URL, build: String?) -> Bool {
+        bundleURL.pathExtension == "app" && (build == "release" || build == "test")
+    }
 
     /// `CFBundleShortVersionString`; `0.0.0` (a dispatched dry run, a local build without a tag) and a missing value read 開發版.
     public nonisolated static func versionText(_ version: String?) -> String {
@@ -60,16 +78,18 @@ public final class Updates: ObservableObject {
     @Published public private(set) var result: UpdateResult?
     /// The newer version Sparkle found, `nil` when none is known. The 更新到 X button and the menu item exist only while set.
     @Published public private(set) var available: String?
-    /// A check started and has not reported back yet.
+    /// A check started and has not reported back yet. The 立即檢查 and 更新到 X buttons and the menu item are disabled meanwhile.
     @Published public private(set) var checking = false
 
-    /// Starts Sparkle's information-only check (no window); false when it could not start (the updater did not start, or a
-    /// session is already running, in which case Sparkle would ignore the call and never report back).
-    public var probe: () -> Bool = { false }
-    /// Sparkle's interactive flow (download progress, notes, install and relaunch); only ever on the user's press.
-    public var install: () -> Void = {}
+    /// Starts Sparkle's information-only check (no window).
+    public var probe: () -> ProbeStart = { .unavailable }
+    /// Sparkle's interactive flow (download progress, notes, install and relaunch). Called only from `finished`, after a
+    /// silent check the user started with `install` confirmed a newer version.
+    public var interactive: () -> Void = {}
 
     private let store: UpdateStore
+    /// `install` started the running check: open the interactive flow if it finds a newer version.
+    private var installAfterCheck = false
 
     public init(store: UpdateStore, version: String) {
         self.store = store
@@ -92,40 +112,63 @@ public final class Updates: ObservableObject {
         store.autoCheck = on
     }
 
-    /// The background check, called by the app's timer: checks only when `shouldCheck` says so.
+    /// The background check, called by the app's timer: checks only when `shouldCheck` says so; never records a failure.
     public func tick(now: Date = Date()) {
         guard Self.shouldCheck(enabled: autoCheck, lastCheck: lastCheck, now: now) else { return }
-        _ = start(now)
+        _ = begin(now)
     }
 
-    /// 立即檢查: always connects, whatever 自動檢查更新 says (contract section 1).
+    /// 立即檢查: always connects, whatever 自動檢查更新 says (contract section 1). Ignored while a check runs; an updater that is
+    /// not running reads 檢查失敗 with the date.
     public func checkNow(now: Date = Date()) {
-        if !start(now) { finished(.failed) }
+        if begin(now) == .unavailable { failNow(now) }
+    }
+
+    /// 更新到 X and the menu item: a silent check first, and Sparkle's interactive flow only if it confirms a newer version
+    /// (`finished`). Otherwise the state says 已是最新 or 檢查失敗 and no Sparkle window opens.
+    public func install(now: Date = Date()) {
+        switch begin(now) {
+        case .started: installAfterCheck = true
+        case .busy: break
+        case .unavailable: failNow(now)
+        }
     }
 
     /// The start time is recorded only when a check really started, and counts for the daily limit whatever its result.
-    private func start(_ now: Date) -> Bool {
-        guard !checking, probe() else { return false }
-        checking = true
-        lastCheck = now
-        store.lastCheck = now
-        return true
+    private func begin(_ now: Date) -> ProbeStart {
+        guard !checking else { return .busy }
+        let s = probe()
+        if s == .started {
+            checking = true
+            lastCheck = now
+            store.lastCheck = now
+        }
+        return s
     }
 
-    /// A check ended. `available` keeps a version already known when a check fails; `nil` only ends the check (an interactive
-    /// session the user dismissed).
+    private func failNow(_ now: Date) {
+        lastCheck = now
+        store.lastCheck = now
+        finished(.failed)
+    }
+
+    /// A check ended. A version already known stays known when a check fails or when a finished cycle reports a newer version
+    /// without saying which; `nil` only ends the check (an interactive session the user dismissed).
     public func finished(_ r: UpdateResult?, version newer: String? = nil) {
         checking = false
+        let wantsInstall = installAfterCheck
+        installAfterCheck = false
         guard let r else { return }
         result = r
         switch r {
-        case .available: available = newer
+        case .available: if let newer { available = newer }
         case .upToDate: available = nil
         case .failed: break
         }
         var s = ["by": version, "result": r.rawValue]
         if let available { s["available"] = available }
         store.status = s
+        if wantsInstall, r == .available, available != nil { interactive() }
     }
 }
 

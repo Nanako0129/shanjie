@@ -58,7 +58,7 @@ public struct MenuEntry: Equatable, Sendable {
         case toggleAcgPack
         case toggleAppChat
         case openSettings
-        /// docs/contracts/about-update.md section 1: Sparkle's interactive update flow.
+        /// docs/contracts/about-update.md section 1: a silent check, then Sparkle's interactive update flow if it confirms one.
         case installUpdate
     }
 
@@ -229,7 +229,10 @@ extension Session {
                                    enabled: shell.profileMode == .auto))
         }
         // about-update section 1: only while a newer version is known; never shown otherwise.
-        if let v = shell.updates?.available { items.append(MenuEntry(title: UpdateText.menu(v), action: .installUpdate)) }
+        // Greyed while a check runs (the press would be ignored).
+        if let u = shell.updates, let v = u.available {
+            items.append(MenuEntry(title: UpdateText.menu(v), action: .installUpdate, enabled: !u.checking))
+        }
         items.append(MenuEntry(title: T.settings, action: .openSettings))
         items.append(MenuEntry(title: T.clear, action: .clear))
         items.append(MenuEntry(title: T.excludeBackup, action: .toggleBackup, checked: shell.backupExcluded))
