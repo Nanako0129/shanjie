@@ -40,7 +40,7 @@
 
 - **檔案**：沿用 `SJT30001`（`experiments/derisk-1015/e1/sjlm_io.py` 檔頭）。放在模型旁、檔名 `trigram.sjt3`。產生程式從 `experiments/` 移到 `tools/build_trigram.py`（重對應＋寫檔），測試進 `tools/test_*.py`。
 - **Rust `core/src/lm.rs`**：
-  - `Lm::load`：模型旁有 `trigram.sjt3` 就讀（核對 magic、V、綁的模型 SHA-256、長度、`ctx_off` 單調、`next_id` 在前文內遞增），不合就新的 `LmError` 變體（不靜默略過，訊息點名這個檔）；沒有就關閉。整檔 `std::fs::read` 進記憶體（和 bigram 相同；core 不加依賴）。
+  - `Lm::load`：模型旁有 `trigram.sjt3` 就讀（核對 magic、V、綁的模型 SHA-256、長度、`ctx_off` 單調、`next_id` 在前文內遞增），不合就新的 `LmError` 變體（不靜默略過，訊息點名這個檔）；沒有就關閉。整檔 `std::fs::read` 進記憶體（和 bigram 相同；core 不加依賴）。〔2026-10-16 起改成唯讀映射，見 `docs/contracts/trigram-mmap.md`〕
   - 打分：照 `trimodel.py` 的式子，`P3 = max(c − D, 0)/t3 + back3·P2`，D = 0.75（寫在檔頭或常數，和 Python 同一個值；檔頭的 D 不是 0.75 一律拒絕，Rust 與 Python 讀檔都是），back3 在查到前文時現算（H3 平均每前文不到 2 條）。P2 是現在的 `prob_c` 系列（含詞類項；KN 照當次設定）。沒查到前文、u 未知 → P2，逐位元相同。
   - 解碼器：`Hyp` 加前一個詞；有 trigram 時重組鍵從（表面字串, 最後一詞）改成（表面字串, 前一詞, 最後一詞），光束寬度不變。起始狀態照 `harness.py` 的 `start_state`：沒有前文 → (`<s>`, `<s>`)；前文給一個詞 → (未知, 那個詞)，第一個詞只用 bigram。
   - **每個設定各自的打分設定**：把解碼與重算總分時只傳 λ 的地方換成由 `Profile` 導出的設定（λ、KN 開關、trigram 開關）。書面：KN 關、trigram 開（有表時）；聊天：照舊（KN 照側檔、trigram 關，有表也不用）。
@@ -123,7 +123,7 @@
   - 聊天不變：混合兩種設定的檔（`s2-lm.txt`、`s2h-lm-context.txt`、`top1.tsv`），`git diff` 只碰書面的行與欄；只有聊天的檔逐位元組不變。
   - 研究紀錄逐一列出改變的檔、改變的列數，以及每個書面 golden 新舊 top1 的差。
 - **C4 書面重播列**（從第 B 片移來）：`tools/bench/replay` 加第五個參數 `chat|formal`（預設 chat）；`tools/bench.py` 套件 v2 的速度表（`measure_speed2`）在聊天重播之外多一列書面重播，模型資料夾照 `VERSIONS2`（有 `trigram.sjt3` 的版本放表）；書面的「重播＝CLI」核對對一格 `--profile formal` 的 CLI，預期標記在有表時含 `+tri:`；舊的結果 JSON 沒有書面列時表上顯示「—」；套件 v1 的文字逐位元組不變（`test_table_appends_v2_after_unchanged_v1_text` 照舊通過），`test_bench.py` 加書面列的測試。`VERSIONS2` 加下一版的一列（書面帶 `+tri:`）。
-- **C5 發版**：照發版流程（跨版本基準套件 v2、保留集由 fresh verifier 跑一次，現役是 shard-1，n 300）。保留集書面那一行「改壞 > 改對且 p < 0.05」就不出貨，回報維護者。發版說明寫：書面設定改用 trigram（百科、正式文較常一次選對；口語打字的差別不大），安裝檔與記憶體變大的實際數字（安裝 zip 約多 44 MB：表單獨 zip 後 44.3 MB，Mac 量；記憶體多約 136 MB：第 A 片用重播程式量的最大 RSS，App 裡的實際常駐是推論、要另外標明）。推 tag 要維護者當下同意。
+- **C5 發版**：照發版流程（跨版本基準套件 v2、保留集由 fresh verifier 跑一次，現役是 shard-1，n 300）。保留集書面那一行「改壞 > 改對且 p < 0.05」就不出貨，回報維護者。發版說明寫：書面設定改用 trigram（百科、正式文較常一次選對；口語打字的差別不大），安裝檔與記憶體變大的實際數字（安裝 zip 約多 44 MB：表單獨 zip 後 44.3 MB，Mac 量；記憶體：表改用唯讀映射之後，重播的 peak memory footprint 只比沒表多約 2 MB（`docs/contracts/trigram-mmap.md`、研究紀錄 2026-10-16「trigram-mmap」），活動監視器的「記憶體」欄看的是這個數字；max RSS 仍多約 140 MB，那是可以隨時被系統丟掉的檔案頁）。推 tag 要維護者當下同意。
 - 停止條件：有表時失敗、卻不在研究紀錄那份失敗清單上的測試；golden 重產時聊天的任何一個檔或行改變；Rust 與 Python 的書面 golden 不相同；書面重播列超過上限（p95 +1 ms、RSS +150 MB）；保留集書面顯著變差。
 - 預算：C2–C4 executor 1 次＋修正 1 次；C1、C5 由 main 做。
 
@@ -131,7 +131,7 @@
 
 - 聊天設定加 trigram、更小的剪枝檔（H3 與 H15 之間）、用出貨 P2 重新剪枝：之後另開實驗。
 - 重算計數；第 A2 片的下限之外，改 trigram 的平滑式。
-- mmap（第 B 片量到 RSS 超過上限才另議）。
+- mmap：維護者 2026-10-16 選擇題改成先做，另一份契約 `docs/contracts/trigram-mmap.md`。
 
 ## 4. 限制與回滾
 

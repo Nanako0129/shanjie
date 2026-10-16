@@ -1,6 +1,6 @@
 # 契約：三元表改用 mmap（trigram-mmap）
 
-狀態：修訂一（2026-10-16；處理 plan-verifier 的第一次 REVISE：前提與各臂的 build，見 §7）。
+狀態：修訂一（2026-10-16；處理 plan-verifier 的第一次 REVISE：前提與各臂的 build，見 §7）；修訂一 READY，已實作（PR #181）。
 
 ## 0. 依據
 
@@ -54,4 +54,5 @@
 
 | 輪次 | 結果 | 處置 |
 |---|---|---|
+| plan-verifier（修訂一） | READY | — |
 | plan-verifier（第 1 次） | REVISE 1 項：驗收第 1、3 項要靠第 C 片（書面 golden 重產、重播程式的 `formal` 參數），契約沒寫前提，也沒寫各臂用哪個 build | FIX：§2 加前提（第 C 片先合併，否則停），第 1 項改成「在第 C 片合併後的 main 上全過的 golden 照樣全過」，第 3 項寫明三個臂的重播程式與 commit；附帶建議（長度用 `File::metadata()`、`MAP_FAILED` 是 `!0`）一併寫進 §2 |

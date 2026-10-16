@@ -6350,6 +6350,9 @@ formal: alpha 0.7, tau 1, delta 2
 | (ii) 有表、`Vec<u8>` | 445.4／442.9／444.1 MB | 449.9／442.3／442.7 MB | 4.21／6.47／4.43 ms（4.43） |
 | (iii) 有表、映射 | 304.3／302.5／305.3 MB | 452.4／445.4／453.3 MB | 4.47／5.40／5.07 ms（5.07） |
 
-- 判讀：**通過**。footprint (iii) 比 (ii) 少 139.8 MB（中位數 304.3 vs 444.1，門檻 ≥ 100 MB），比 (i) 只多 2.4 MB；契約的推論（映射的乾淨檔案頁不算 footprint）成立。max RSS 照預期沒有下降（載入時的檢查讀過整張表）。(ii) 與 (iii) 的選字輸出三輪都逐列相同。p95 (iii) 比 (i) 低，在上限（+1 ms）內；但這一場 Mac 很忙（load avg 14–20，另一個 worktree 正在編譯），三個臂的 p95 都比第 A 片量的 2.1 ms 高、彼此差異在雜訊內，延遲只看「沒有超過上限」。
+- 判讀：**通過**。footprint (iii) 比 (ii) 少 139.8 MB（中位數 304.3 vs 444.1，門檻 ≥ 100 MB），比 (i) 只多 2.3 MB；契約的推論（映射的乾淨檔案頁不算 footprint）成立。max RSS 照預期沒有下降（載入時的檢查讀過整張表）。(ii) 與 (iii) 的選字輸出三輪都逐列相同。p95 (iii) 比 (i) 低，在上限（+1 ms）內；但這一場 Mac 很忙（load avg 14–20，另一個 worktree 正在編譯），三個臂的 p95 都比第 A 片量的 2.1 ms 高、彼此差異在雜訊內，延遲只看「沒有超過上限」。
+- 只報（契約第 3 項）：載入時間（三輪，中位數）(i) 3898／5003／1619 ms（3898）、(ii) 2367／1408／1746 ms（1746）、(iii) 1075／1830／1507 ms（1507）；最大延遲 (i) 361.7／33.4／97.6 ms（97.6）、(ii) 57.0／345.4／16.5 ms（57.0）、(iii) 127.9／234.9／96.4 ms（127.9）。這一場 Mac 很忙，三個臂的載入與最大延遲彼此差異都在雜訊內，Mac 空閒時重量。
+- 突變（契約第 2 項）：把 `load_opts` 改回 `std::fs::read`，`load_opts_maps_the_trigram_table` 以斷言失敗（`load_opts must map the table, not read it`，左 `Some(false)`、右 `Some(true)`），還原後通過。
 - golden：表在 `data/lm` 時 Mac 的 `cargo test -p cli --test golden` 25／25（表由映射載入）。
+- `/code-review`（PR #181）之後的修正：`Mapped::open` 改成 `unsafe fn`，安全契約寫明「檔案映射期間不可原地截短或改寫」；開檔照 `tinylm` 的做法加 `O_NONBLOCK` 與 `is_file()`；`tools/build_trigram.py` 改成先寫暫存檔再 rename；`docs/data-files.md` 的下載說明改成下載到暫存資料夾再 `mv`；`core/include/shanjie.h` 寫明前提。沒做：記憶體吃緊、頁面被丟掉之後的按鍵延遲（要不要加 `madvise`）沒有資料，記成已知限制。
 - 完整 Rust 測試（Windows 機器 WSL）：有表 473 過、0 失敗（`4c88bb3`）；沒有表（`NO_TRI=1`，`f559177`）27 個失敗，全部停在缺表的斷言（`cli/tests/golden.rs:66` 11 個、`core/tests/engine_lm.rs:18` 16 個，各印一次下載訊息），沒有其他失敗。第 C 片之後表是必要的檔，契約第 1 項「沒有表時也全過」照此放寬。
