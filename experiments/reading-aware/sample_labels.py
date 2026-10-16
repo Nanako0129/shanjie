@@ -30,6 +30,8 @@ STOP_RATE = 0.10
 def candidates(sentence, labeller, lex):
     """[(position, char, label)] of the short-list characters that stand alone in the best cut of their Han run (lex = a lattice lexicon
     with by_word / max_len). Labels come from the variant-merged sentence, as in the counting."""
+    if not any(c in SHORT for c in sentence):
+        return []   # cheap skip before the segmentation
     folded, out, pos = bc.fold(sentence), [], 0
     for kind, raw, _ in mapping.tokenize(sentence):
         if kind == "han" and len(raw) >= 2:

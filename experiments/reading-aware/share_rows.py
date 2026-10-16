@@ -2,8 +2,9 @@
 
   python3 share_rows.py --lm B0u.sjlm --set NAME ROWS BASE.rowstats CAND.rowstats BASE.dump CAND.dump [--set ...]
 prints `set<TAB>broken<TAB>share_rows`: broken = rows BASE gets right and CAND gets wrong; share_rows = of those, rows where the first
-candidates differ at a position whose character stands alone in the CAND first candidate (lexicon-score cut under the row's readings) and
-has reading units in the model but not the unit of this row's reading, so decode_units scored it with the share factor.
+candidates differ at a position whose character stands alone in the BASE or the CAND first candidate (lexicon-score cut under the row's
+readings) and has reading units in the model but not the unit of this row's reading, so decode_units scored it with the share factor.
+(The factor lowers a score, so the affected character is often the BASE one, the gold that lost.)
 """
 import argparse
 import sys
@@ -36,7 +37,7 @@ def report(rows, base_rs, cand_rs, base_first, cand_first, idx, lex):
         if base_rs[k - 1][0] and not cand_rs[k - 1][0]:
             broken += 1
             b, c = base_first[k], cand_first[k]
-            if len(b) == len(c) == len(syls) and set(i for i in range(len(c)) if b[i] != c[i]) & set(share_positions(c, syls, idx, lex)):
+            if len(b) == len(c) == len(syls) and set(i for i in range(len(c)) if b[i] != c[i]) & (set(share_positions(c, syls, idx, lex)) | set(share_positions(b, syls, idx, lex))):
                 share += 1
     return broken, share
 

@@ -143,7 +143,10 @@ def count_batch_units(texts):
     for raw in texts:
         for s in count.wiki_sentences(raw):
             acc.add_text(s)
-    fb = _U["labeller"].fallbacks if _U["labeller"] else collections.Counter()
+    lab = _U["labeller"]
+    fb = collections.Counter(lab.fallbacks) if lab else collections.Counter()
+    if lab:
+        lab.fallbacks.clear()   # per batch: the worker's labeller lives across batches and the parent sums what it gets
     return acc.uni, acc.bi, acc.runs, fb
 
 

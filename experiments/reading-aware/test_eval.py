@@ -4,6 +4,7 @@ repo's real lexicon, once directly and once through the wrapper."""
 import contextlib
 import io
 import os
+import shutil
 import sys
 import tempfile
 import unittest
@@ -129,6 +130,17 @@ class Wrapper(unittest.TestCase):
         self.assertEqual((b[2], b[3]), (t[2], t[3]))                  # the ˙ rows are A1's, unchanged by the tone rows
         self.assertTrue(tone.split("  ")[1].endswith(":t9"), tone)
         self.assertNotEqual(base, tone)
+
+    def test_units_with_a_formal_trigram_stops_the_run(self):
+        with self.assertRaisesRegex(SystemExit, "no-tri"):
+            wrapped(self.argv("formal", "tri-stop", "--units", "--tri", os.path.join(self.d, "any.sjt3")))
+        with tempfile.TemporaryDirectory() as d:                     # a trigram.sjt3 next to the model is loaded by default
+            shutil.copy(self.model, d)
+            open(os.path.join(d, "trigram.sjt3"), "wb").close()
+            argv = self.argv("formal", "tri-stop2", "--units")
+            argv[1] = os.path.join(d, os.path.basename(self.model))
+            with self.assertRaisesRegex(SystemExit, "no-tri"):
+                wrapped(argv)
 
     def test_a_duplicate_key_stops_the_run(self):
         dup = testkit.write(self.d, "dup.tsv", "ㄅㄚ˙\t巴\t0.5\treading-neutral\ttest\n")

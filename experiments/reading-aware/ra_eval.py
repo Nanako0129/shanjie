@@ -90,6 +90,14 @@ def run(argv):
     units_model = model_has_units(a.lm)
     if units_model and not a.units:
         raise SystemExit("ra_eval: the model holds reading units, run with --units")
+    if a.units:
+        tp = argparse.ArgumentParser(add_help=False, allow_abbrev=False)
+        tp.add_argument("--profile")
+        tp.add_argument("--tri")
+        tp.add_argument("--no-tri", action="store_true")
+        t = tp.parse_known_args(rest)[0]
+        if t.profile == "formal" and not t.no_tri and (t.tri or os.path.exists(os.path.join(os.path.dirname(os.path.abspath(a.lm)), "trigram.sjt3"))):
+            raise SystemExit("ra_eval: --units does not extend trigram.decode3, run the formal profile with --no-tri")
     with contextlib.ExitStack() as st:
         st.enter_context(mock.patch.object(L, "cap_overlay", make_cap_overlay(
             L.cap_overlay, a.extra_demote, a.delta_tone, decode_units.CountView if a.units else None)))

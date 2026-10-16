@@ -272,6 +272,21 @@ class Counting(unittest.TestCase):
         u1, b1, _, _, _, runs1 = count.count_batch3(pages)
         self.assertEqual((dict(u), dict(b), runs, dict(fb)), (dict(u1), dict(b1), runs1, {}))
 
+    def test_fallbacks_are_per_batch_so_the_parents_sum_is_exact(self):
+        bc._W["tri_min"] = bc.EXPECTED_MIN
+        lab = SimpleNamespace(fallbacks=collections.Counter(), unit=lambda w, pos, text: w)
+        C._U["labeller"] = lab
+        real = C.UnitAcc
+
+        def acc(labeller):
+            labeller.fallbacks["了"] += 1       # one fallback per batch, as if the labeller hit one
+            return real(labeller)
+        with mock.patch.object(C, "UnitAcc", acc):
+            total = collections.Counter()
+            for _ in range(2):
+                total.update(C.count_batch_units(["你好吧。"])[3])
+        self.assertEqual(total, collections.Counter({"了": 2}))
+
 
 class ModelAnchor(unittest.TestCase):
     """The counting anchor in its unit-test form: identity counts through the wrapper and build_model.py give the model the E1 route gives."""

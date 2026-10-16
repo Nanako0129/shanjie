@@ -1,6 +1,6 @@
 # 讀音感知 n-gram 第一片（reading-aware-0）
 
-契約：`docs/contracts/reading-aware-0.md`（§3 四臂、§4 驗收、§5 停止條件）。這個資料夾是 executor 寫的全部程式與單元測試；188 與 Colab 的執行、雜湊核對、discordtune、人工判讀、研究紀錄由 main 做。不改核心、`reference/proto/`、`tools/`、`data/lexicon/demote.tsv`、`experiments/s2/` 與 `experiments/derisk-1015/` 的既有檔案（只 import）。
+契約：`docs/contracts/reading-aware-0.md`（§3 四臂、§4 驗收、§5 停止條件）。這個資料夾是 executor 寫的全部程式與單元測試；Windows 機器與 Colab 的執行、雜湊核對、discordtune、人工判讀、研究紀錄由 main 做。不改核心、`reference/proto/`、`tools/`、`data/lexicon/demote.tsv`、`experiments/s2/` 與 `experiments/derisk-1015/` 的既有檔案（只 import）。
 
 單元測試（合成資料；Mac 可跑，約 2.5 分鐘，因為有幾支會載入真的詞庫；輸出寫檔、看結束碼）：
 
@@ -41,6 +41,7 @@ python3 -W ignore experiments/derisk-1015/e1/test_e1.py        # 約 2.5 分鐘�
 | 占比的 `P(字｜前一個)` | 這個字**模型裡有的**每個單位 u 的 `lm.prob(前一個, u, 10^lp_u)` 相加（`lp_u` = 詞庫裡那個讀音的分數）；占比 = `10^lp / Σ 10^lp_讀音`，Σ 是詞庫裡這個字的全部讀音（傳給 decode 的那份詞庫，已封頂、未扣降權）。單位不在模型裡的那個讀音，路徑上的「前一個單位」仍是那個不在模型裡的字串，所以**下一個詞沒有二元組前文、直接回退**（契約沒寫，決定） |
 | 次數（封頂用） | 單字的 `count(w)` = 裸鍵次數 + 它所有單位的次數（各自四捨五入後相加）。B0 的單字沒有單位，結果和 B0 相同 |
 | 模型有單位時 | 不可有 `classes.sjc`、KN 側檔（單位不在裡面）：`decode_units.UnitIndex` 載入時丟錯。評測一律 `--no-classes --no-kn --no-tri`（契約本來就這樣）。`ra_eval.py` 對有單位的模型不給 `--units` 就停（否則單位全被當成未知詞，結果錯得很安靜） |
+| 探針列寫檔 | `level1.py probe` 把公開的探針列寫到 `$OUT` 下的檔案（repo 外、不進版控），與契約 §3.3「不寫檔，現算」不同；契約該句已放寬為可寫到 repo 外的暫存目錄 |
 | 書面設定的 trigram | `decode3` 沒有延伸（B 兩臂都 `--no-tri`）。降權表走詞庫物件，`lm.decode` 與 `decode3` 都讀 `lex.demote`，所以 A1／A2 在有 trigram 的出貨形狀上也有效（`test_eval.MergedTable`） |
 | 「單獨成詞」 | 探針、桶表(iii)、桶表(i)(ii)：依該句的讀音，用詞庫分數做最高分切分（`rcommon.segment`），切成單字的位置。BASE 自己的切法不在 `--dump` 裡，所以桶表(i)(ii) 是這個近似；被詞庫多字詞蓋住的字不算 |
 | 第 3 級讀音 | 單獨成詞、字有 ≥ 2 個詞庫讀音、第一名用的讀音不是主要讀音、而且去掉聲調後的音節和主要讀音的不同（長 ㄓㄤˇ 對 ㄔㄤˊ 是；嗎 ㄇㄚˇ 對 ㄇㄚ˙ 不是，那是同音不同調）。主要讀音要 `--hetero` 才含規則 3 |
@@ -57,7 +58,7 @@ python3 -W ignore experiments/derisk-1015/e1/test_e1.py        # 約 2.5 分鐘�
 | 集合 | `python3 $D/common/setnames.py list`（列數、SHA-256、釘死值是否相符）。`user-reported` 用開工時 main 上的全部列，雜湊記進研究紀錄，這一片之內不換 |
 | A1 表 | `sha256sum $OUT/a1.tsv`（再來一份 δ_big 不是 1.0 的就另存另記） |
 | 計數輸入 | 同 `experiments/derisk-1015/e1/README.md` 的表（維基 dump、`colloquial-train.txt`、`synth.txt`、`topup.txt`、4d47a50 的 `overlay-add.tsv`、acg／names 計數詞表）；`count_units` 的 `meta-*.json` 會寫每個輸入的 SHA-256，和 model-v6 建置機的 `inputs.sha256` 逐一比對 |
-| 讀音來源 | `sha256sum $HETERO $REPO/tools/reading_overrides.tsv`（`heterophony1.list` 在維護者機器的 `ime-research` 下，傳到 Colab 要核對雜湊） |
+| 讀音來源 | `sha256sum $HETERO $REPO/tools/reading_overrides.tsv`（`heterophony1.list` 放在 repo 外的私有位置，傳到 Colab 要核對雜湊） |
 | 模型 | `$M/b0id/bigram.sjlm`（要以 `f7777be3` 開頭）、`$M/b0u/bigram.sjlm`；`build.json` 有 V、條目數、位元組、`unit_types`、SHA-256 |
 
 ## 執行手冊
@@ -80,7 +81,7 @@ sha256sum $OUT/a1.tsv
 
 清單送維護者過目後才凍結；改了清單就改 `a1_table.DEMOTE_44` 與契約。
 
-### B. 188（Windows 的 WSL）：評測
+### B. Windows 機器（WSL）：評測
 
 共同函式（所有指令照這個樣子）：
 
@@ -97,7 +98,7 @@ run() { a=$1; p=$2; n=$3; r=$4; shift 4; mkdir -p $OUT/$a
 cat_rs() { out=$1; a=$2; p=$3; shift 3; files=""; for s in "$@"; do files="$files $OUT/$a/$s.$p.rs"; done; $PY $D/common/concat_rowstats.py concat $out $files; }
 ```
 
-BASE 的模型是出貨的（`data/lm`，`classes.sjc`、`kn.sjkn`、`trigram.sjt3` 自動載入）；不加 `--extra-overlay`、不開詞包。每個函式一次一個集合×一種設定；集合多，用 `xargs -P`／多個 shell 分開跑（188 不限程序數；從 SSH 啟動的程序要先關 power throttling，見維護者的記憶 host-188-gpu）。
+BASE 的模型是出貨的（`data/lm`，`classes.sjc`、`kn.sjkn`、`trigram.sjt3` 自動載入）；不加 `--extra-overlay`、不開詞包。每個函式一次一個集合×一種設定；集合多，用 `xargs -P`／多個 shell 分開跑（程序數不限；從 SSH 啟動的程序要先關 power throttling，做法在維護者的私有筆記）。
 
 1. **BASE 與評測錨點（§3.1；全部集合、兩種設定）**
 
@@ -174,7 +175,7 @@ BASE 的模型是出貨的（`data/lm`，`classes.sjc`、`kn.sjkn`、`trigram.sj
 
 5. **B 的評測（§3.4；Colab 算出模型之後）**
 
-   兩臂都 `--no-classes --no-kn --no-tri`。模型 `$M/b0id`（恆等標注，= B0）與 `$M/b0u`（單位）放到 188。
+   兩臂都 `--no-classes --no-kn --no-tri`。模型 `$M/b0id`（恆等標注，= B0）與 `$M/b0u`（單位）放到 Windows 機器。
 
    ```
    B0=$M/b0id/bigram.sjlm; B0U=$M/b0u/bigram.sjlm; FLAGS="--no-classes --no-kn --no-tri"

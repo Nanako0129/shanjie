@@ -8,6 +8,7 @@ import pickle
 import tempfile
 import unittest
 from types import SimpleNamespace
+from unittest import mock
 
 import build_model
 import decode_units
@@ -92,6 +93,17 @@ class SampleLabels(unittest.TestCase):
         self.assertEqual(S.candidates("風和風", self.lab, LAT), [])          # not a short-list character
         self.assertEqual(S.candidates("得", self.lab, LAT), [])               # a run of one character is not counted (the counting skips it too)
 
+    def test_prefilter_skips_segmentation_without_changing_the_sample(self):
+        corpus = ["風和風和風", "他跑得很快，慢慢地走三行。", "風風風風", "他不得很快", "走三行再跑得快"] * 20
+        calls = []
+        real = bc.segment
+        with mock.patch.object(bc, "segment", lambda lex, raw: calls.append(raw) or real(lex, raw)):
+            got = S.reservoir((s for s in corpus if S.candidates(s, self.lab, LAT)), 7, 20261017)
+            self.assertNotIn("風和風和風", calls)
+            self.assertNotIn("風風風風", calls)
+        keep = {"他跑得很快，慢慢地走三行。"}      # the only sentence of the corpus with a candidate; the prefilter must not drop it
+        self.assertEqual(got, S.reservoir((s for s in corpus if s in keep), 7, 20261017))
+
     def test_reservoir_is_fixed_by_the_seed(self):
         a, b = S.reservoir(iter(range(1000)), 10, 20261017), S.reservoir(iter(range(1000)), 10, 20261017)
         self.assertEqual(a, b)
@@ -144,6 +156,16 @@ class ShareRows(unittest.TestCase):
             base_first = {1: "巴", 2: "巴", 3: "好", 4: "吧"}
             cand_first = {1: "吧", 2: "巴", 3: "你", 4: "巴"}
             self.assertEqual(share_rows.report(rows, base_rs, cand_rs, base_first, cand_first, idx, lex), (2, 1))   # rows 1 and 3 broke; only row 1 at a share character
+
+    def test_share_character_on_the_base_side(self):
+        with tempfile.TemporaryDirectory() as d:
+            _, lm = testkit.sjlm(d, {"嘛" + testkit.U + "ㄇㄚ": 9, "麻": 9}, {("<s>", "麻"): 5, ("麻", "</s>"): 5})
+            lex = testkit.lexicon(d, testkit.LEXICON + "ㄇㄚˊ 嘛 -2.0\nㄇㄚˊ 麻 -2.0\nㄇㄚ 嘛 -2.0\n")
+            idx = decode_units.index_of(lm)
+            self.assertEqual(share_rows.share_positions("嘛", ["ㄇㄚˊ"], idx, lex), [0])   # gold 嘛 read ㄇㄚˊ: unit 嘛ㄇㄚˊ is not in the model
+            self.assertEqual(share_rows.share_positions("麻", ["ㄇㄚˊ"], idx, lex), [])
+            rows = [("嘛", ["ㄇㄚˊ"], "")]
+            self.assertEqual(share_rows.report(rows, [(1, 0, 1)], [(0, 1, 1)], {1: "嘛"}, {1: "麻"}, idx, lex), (1, 1))
 
 
 class Verdict(unittest.TestCase):
