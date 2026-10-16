@@ -6385,3 +6385,15 @@ formal: alpha 0.7, tau 1, delta 2
 - 真正的更新走輸入選單「有新版本 0.4.6，按此更新…」→ 安裝更新 → 安裝並重新啟動：伺服器 22:30:18 送出 zip，22:30:22 新程序啟動。(a) 安裝的是 0.4.6，程序路徑仍是 `~/Library/Input Methods/善解輸入法.app/Contents/MacOS/shanjie`；(b) TextEdit 照常打字；(c) Caps Lock 切換輸入法正常（沒有觸發 Caps Lock 的已知問題；Sparkle 2.9.3 的原始碼裡找不到任何 TIS 或 Carbon 輸入法 API 的呼叫，所以預期它換檔時不會註冊輸入法，這是讀原始碼的推論，沒有在更新當下記錄系統呼叫）；(d) 更新前就開著的 TextEdit、Safari、Discord、Orca 都不用重開就能繼續打字（維護者回報）。
 - 實機修正的 /code-review（只審 64395ec6）14 項，處置寫在契約 §7。改了的：再按「更新到 X」時先走 Sparkle 自己的 `checkForUpdates` → `showUpdateInFocus`（流程沒在顯示更新時它只記一筆 log、不會開第二次檢查，讀 `SPUUpdater.m` 確認），再提層級，最小化的視窗一起還原（Sparkle 的更新提示視窗在 xib 裡就是 miniaturizable，狀態視窗在一般 App 更新時也可最小化）；層級共用 `SettingsWindowController.level`；自己的靜默檢查進行中時再按直接略過。沒改的：輪詢（每 0.25 秒掃一次本程序的幾個視窗，只在 Sparkle 流程進行中；要改成每個視窗開啟時才處理，得用自訂的 `SPUUserDriver` 換掉 `SPUStandardUpdaterController`）；換到別的桌面（Space）後按更新叫不叫得回來沒有實測，設定視窗本來就有同樣的情況，記成已知限制。
 - 修正版（5169c755）實機重測（2026-10-17，維護者回報「測試OK」）：測試版不帶任何 ATS 鍵，「立即檢查」照常讀到本機 feed（http://127.0.0.1）並顯示有新版；Sparkle 的視窗在設定視窗上面；最小化後再按「更新到 0.4.6」從 Dock 還原到最前面；安裝更新後 00:03:02 送出 zip、00:03:13 新程序啟動，打字正常。
+
+## 2026-10-17：錯字回報第 126 列（影片同時做）
+
+- 維護者實機的組字區是「影片同時作」，要的是「做」。加成 `|影片同時做|ㄧㄥˇ ㄆㄧㄢˋ ㄊㄨㄥˊ ㄕˊ ㄗㄨㄛˋ`（讀音由 `tools/readings.py` 產生，沒有 CHECK）。
+- Python 參考實作、golden 設定：兩種設定第 1 名都是「影片同時作」，正解第 2。
+- `eval/golden/s2h-lm-context.txt` 的錯字回報兩行用 Python 參考實作重產，n 126：聊天 top1 29、書面 37 不變，oracle@64 兩種設定都 122 → 123；`eval/README.md` 改成 126 列。
+
+## 2026-10-17：錯字回報第 127 列（待辦、比較急）
+
+- 維護者實機的組字區是「這個代辦還有哪些要做的我認為比較級」，要的是「待辦」與「比較急」。加成 `除了|這個待辦還有哪些要做的我認為比較急|ㄓㄜˋ ㄍㄜ˙ ㄉㄞˋ ㄅㄢˋ ㄏㄞˊ ㄧㄡˇ ㄋㄚˇ ㄒㄧㄝ ㄧㄠˋ ㄗㄨㄛˋ ㄉㄜ˙ ㄨㄛˇ ㄖㄣˋ ㄨㄟˊ ㄅㄧˇ ㄐㄧㄠˋ ㄐㄧˊ`（讀音由 `tools/readings.py` 產生，沒有 CHECK）。
+- Python 參考實作、golden 設定：兩種設定第 1 名都是組字區那句（代辦、比較級）；正解聊天第 24、書面第 12。
+- `eval/golden/s2h-lm-context.txt` 的錯字回報兩行用 Python 參考實作重產，n 127：聊天 top1 29、書面 37 不變，oracle@64 兩種設定都 123 → 124；`eval/README.md` 改成 127 列。
