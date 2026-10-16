@@ -10,7 +10,7 @@
 
 ## 1. 要做到什麼、怎麼看到
 
-- 輸入法 App（`善解輸入法.app`）與安裝程式（`安裝善解輸入法.app`）都帶同一個圖示：朱紅（#B83A2E）漸層底；圓角內框與 Noto Serif CJK TC Black 的「解」是兩層白色的玻璃圖層（`glass`、`specular`、透光 0.5），系統畫出來是透著朱紅的乳白（和網站 favicon 的米白 `#F6F1E7` 不同色，favicon 之後另改）；淺色與深色外觀都是朱紅底。
+- 輸入法 App（`善解輸入法.app`）與安裝程式（`安裝善解輸入法.app`）都帶同一個圖示：朱紅（#B83A2E）漸層底；圓角內框與 Noto Serif CJK TC Black 的「解」是兩層白色的玻璃圖層（`glass`、`specular`、透光 0.5），系統畫出來是透著朱紅的乳白（和網站舊 favicon 的米白 `#F6F1E7` 不同色；網站的 favicon 與 OG 圖 2026-10-17 已改用這個圖示，見研究紀錄同日「v0.4.7 發佈」）；淺色與深色外觀都是朱紅底。
 - 視覺參數（維護者選的 g2b，再整體放大 10%；出處見研究紀錄 2026-10-17「App 圖示」）：字那一組陰影 `layer-color` 0.6、`lighting` `individual`；框那一組陰影 `neutral` 0.4；兩組 `specular`、透光 0.5；底色 `automatic-gradient` 加深色外觀的同色。這些是 main 做 g2 樣稿時選的值，不是 Icon Composer 的預設，維護者看過樣稿後選用。
 - 看到它有效：維護者在 Finder 打開 `~/Library/Input Methods/` 看到朱印圖示；安裝程式的 zip 解開後也是；之後 Sparkle 的更新視窗左上角也是這個圖示（隨 about-update 合併後的下一次更新看到）。
 - 選單列圖示（`shanjie.tiff`，單色 template）不變。
@@ -22,7 +22,7 @@
 - 建置：`scripts/build-app.sh` 與 `scripts/build-installer.sh` 都呼叫 `scripts/compile-app-icon.sh <Resources>`：`xcrun actool … --app-icon AppIcon --platform macosx --minimum-deployment-target 26.0` 把 `.icon` 編進 `Resources/`，編完確認 `Assets.car` 與 `AppIcon.icns` 存在（`--app-icon` 和資料夾名不符時 actool 結束碼 0 卻什麼都不寫，實測）；Info.plist 加 `CFBundleIconName` 與 `CFBundleIconFile`（都是 `AppIcon`）。發版的 build 工作跑同一支建置腳本，所以發版路徑也有這個檢查。每次編出的 `Assets.car` 位元組不同（`AppIcon.icns` 相同），只影響外觀檔、不影響其他資源。
 - 檢查：`scripts/check-app.sh` 與 `scripts/check-installer.sh` 檢查 `Resources/Assets.car`、`Resources/AppIcon.icns` 存在、兩個 Info.plist 鍵等於 `AppIcon`。
 - 授權：OFL FAQ 1.1 允許把 OFL 字型用在 logo 與任何設計（「Yes. You are very welcome to do so.」，問題本身寫到依字形外框製作物件），1.13 寫明用 OFL 字型做出的圖不受 OFL 約束（https://openfontlicense.org/ofl-faq/ ）。仍在 `LICENSES/data.md` 註明圖示的「解」取自 Noto Serif CJK TC（SIL Open Font License 1.1）。
-- 文件：`docs/contracts/s3b.md` §2、`docs/contracts/s3c-installer.md` §1、§3、§6、`docs/verification.md`、`docs/PLAN.md`、研究紀錄（樣稿的輪次與選擇）。網站 favicon 不在這片改（另外部署要維護者同意）。
+- 文件：`docs/contracts/s3b.md` §2、`docs/contracts/s3c-installer.md` §1、§3、§6、`docs/verification.md`、`docs/PLAN.md`、研究紀錄（樣稿的輪次與選擇）。網站 favicon 不在這片改（另外部署要維護者同意）；〔2026-10-17〕發版後維護者要網站也換，PR #187 改了 favicon 與 OG 圖。
 
 ## 3. 驗收
 
@@ -37,7 +37,7 @@
 
 ## 5. 範圍外
 
-- 網站 favicon、OG 圖、Release 頁的圖示（之後另外改、部署要問）。
+- 網站 favicon、OG 圖、Release 頁的圖示（之後另外改、部署要問；〔2026-10-17〕favicon 與 OG 圖已在 PR #187 改）。
 - 選單列圖示的樣式。
 - 關於頁顯示圖示（about-update 合併後再說）。
 
