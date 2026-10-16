@@ -10,6 +10,7 @@ import struct
 import sys
 import tempfile
 import unittest
+import unittest.mock
 
 import numpy as np
 
@@ -18,6 +19,7 @@ ROOT = os.path.dirname(HERE)
 for sub in ("tools", "reference/proto"):
     sys.path.insert(0, os.path.join(ROOT, sub))
 import build_trigram  # noqa: E402
+import gen_kn_tiny  # noqa: E402
 import gen_tri_tiny  # noqa: E402
 import lm as L  # noqa: E402
 import trigram  # noqa: E402
@@ -120,6 +122,89 @@ class Scoring(unittest.TestCase):
     def test_start_state(self):
         self.assertEqual(trigram.start_state("<s>"), ("<s>", "<s>"))
         self.assertEqual(trigram.start_state("他"), (None, "他"))
+
+
+class Table(unittest.TestCase):
+    def test_python_reader_accepts_only_the_contracts_discount(self):
+        good = open(os.path.join(gen_tri_tiny.OUT, "trigram.sjt3"), "rb").read()
+        trigram.read_tri(good)
+        for d in (0.5, 0.76, 1.5, -0.1, float("nan")):
+            with self.assertRaises(ValueError, msg=d):
+                trigram.read_tri(good[:12] + struct.pack("<d", d) + good[20:])
+
+
+class LmEvalCli(unittest.TestCase):
+    """reference/proto/lm_eval.py mirrors the Rust CLI's loading rules (cli/src/main.rs `run_lm`): the table loads for formal only, kn.sjkn is read
+    and checked either way, formal with a table scores without Kneser-Ney."""
+
+    def setUp(self):
+        import lm_eval
+        self.lm_eval = lm_eval
+        self.tmp = tempfile.TemporaryDirectory()
+        self.dir = self.tmp.name
+        for src, name in (("kn-tiny", "bigram.sjlm"), ("kn-tiny", "classes.sjc"), ("kn-tiny", "kn.sjkn"), ("tri-tiny", "trigram.sjt3")):
+            open(os.path.join(self.dir, name), "wb").write(open(os.path.join(ROOT, "eval", "golden", src, name), "rb").read())
+        # The toy side file's ΣN' was counted with the toy lexicon's variant classes, not the real lexicon's that lm_eval derives.
+        import build_lm
+        classes = build_lm.variant_classes
+        patch = unittest.mock.patch.object(build_lm, "variant_classes", lambda _: classes(gen_kn_tiny.BY_READING))
+        patch.start()
+        self.addCleanup(patch.stop)
+        self.rows = os.path.join(self.dir, "rows.txt")
+        open(self.rows, "w", encoding="utf-8").write("|他占|ㄊㄚ ㄓㄢˋ\n")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def run_main(self, *argv):
+        """(exit code or exception, stdout)."""
+        import contextlib
+        import io
+        out = io.StringIO()
+        with unittest.mock.patch.object(sys, "argv", ["lm_eval", "--lm", os.path.join(self.dir, "bigram.sjlm"), "--rows", self.rows, *argv]), \
+                contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+            try:
+                self.lm_eval.main()
+                return 0, out.getvalue()
+            except SystemExit as e:
+                return e.code, out.getvalue()
+            except Exception as e:  # noqa: BLE001
+                return type(e), out.getvalue()
+
+    def test_explicit_table_with_chat_is_an_error(self):
+        tri = os.path.join(self.dir, "trigram.sjt3")
+        self.assertEqual(self.run_main("--profile", "chat", "--tri", tri)[0], 2)
+        self.assertEqual(self.run_main("--profile", "formal", "--tri", tri)[0], 0)
+
+    def test_chat_does_not_read_the_table_and_formal_does(self):
+        open(os.path.join(self.dir, "trigram.sjt3"), "wb").write(b"junk")
+        code, out = self.run_main("--profile", "chat")
+        self.assertEqual(code, 0)
+        self.assertTrue("+kn:" in out and "+tri:" not in out, out)
+        self.assertIsNot(self.run_main("--profile", "formal")[0], 0)           # a bad table is never ignored
+        self.assertEqual(self.run_main("--profile", "formal", "--no-tri")[0], 0)
+
+    def test_formal_with_a_table_checks_the_side_file_but_scores_without_it(self):
+        code, out = self.run_main("--profile", "formal")
+        self.assertEqual(code, 0)
+        self.assertTrue("+tri:" in out and "+kn:" not in out, out)
+        # the scores are those without the side file: the same dump with and without --no-kn (the toy KN does move the scores of the chat profile)
+        dumps = []
+        for extra in ([], ["--no-kn"]):
+            path = os.path.join(self.dir, f"dump{len(extra)}.tsv")
+            self.assertEqual(self.run_main("--profile", "formal", "--dump", path, *extra)[0], 0)
+            dumps.append(open(path, encoding="utf-8").read())
+        self.assertEqual(dumps[0], dumps[1])
+        chat = []
+        for extra in ([], ["--no-kn"]):
+            path = os.path.join(self.dir, f"chat{len(extra)}.tsv")
+            self.assertEqual(self.run_main("--profile", "chat", "--dump", path, *extra)[0], 0)
+            chat.append(open(path, encoding="utf-8").read())
+        self.assertNotEqual(chat[0], chat[1], "premise: the side file changes the toy scores")
+        open(os.path.join(self.dir, "kn.sjkn"), "wb").write(b"junk")
+        self.assertIsNot(self.run_main("--profile", "formal")[0], 0)           # the CLI fails on a bad kn.sjkn here too
+        self.assertIsNot(self.run_main("--profile", "chat")[0], 0)
+        self.assertEqual(self.run_main("--profile", "formal", "--no-kn")[0], 0)
 
 
 class Golden(unittest.TestCase):

@@ -325,6 +325,50 @@ fn kn_side_file_beside_the_model_is_announced_and_can_be_turned_off() {
     assert!(off.starts_with("## t  lm-chat  {'n': 1,"), "{off}");
 }
 
+/// trigram-core: the table beside the model is read only for `--profile formal` without `--no-tri` (chat and `--predict` never read it, so a bad one cannot
+/// break them); formal with a table prints `+tri:` and no `+kn:` but still reads and checks kn.sjkn; reference/proto/lm_eval.py mirrors every case
+/// (tools/test_build_trigram.py). The toy model of eval/golden/kn-tiny with the toy table of eval/golden/tri-tiny.
+#[test]
+fn trigram_table_is_read_for_formal_only() {
+    let root = concat!(env!("CARGO_MANIFEST_DIR"), "/..");
+    let dir = std::env::temp_dir().join(format!("shanjie-tri-cli-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    for (src, f) in [("kn-tiny", "bigram.sjlm"), ("kn-tiny", "classes.sjc"), ("kn-tiny", "kn.sjkn"), ("tri-tiny", "trigram.sjt3")] {
+        std::fs::copy(format!("{root}/eval/golden/{src}/{f}"), dir.join(f)).unwrap();
+    }
+    let (lm, rows) = (dir.join("bigram.sjlm"), dir.join("rows.txt"));
+    std::fs::write(&rows, "|他占|ㄊㄚ ㄓㄢˋ\n").unwrap();
+    let go = |extra: &[&str]| {
+        let mut a = vec!["--lm", lm.to_str().unwrap(), "--rows", rows.to_str().unwrap(), "--name", "t"];
+        a.extend(extra);
+        let out = Command::new(env!("CARGO_BIN_EXE_shanjie-eval")).args(&a).output().unwrap();
+        (out.status.success(), String::from_utf8(out.stdout).unwrap())
+    };
+    let tag = |f: &str| format!("+tri:{}", &core::eval::sha256_hex(&std::fs::read(dir.join(f)).unwrap())[..8]);
+    let want = tag("trigram.sjt3");
+    let (ok, formal) = go(&["--profile", "formal"]);
+    assert!(ok && formal.contains(&want) && !formal.contains("+kn:"), "{formal}");
+    let (ok, no_tri) = go(&["--profile", "formal", "--no-tri"]);
+    assert!(ok && !no_tri.contains("+tri:") && no_tri.contains("+kn:"), "{no_tri}");
+    let (ok, chat) = go(&["--profile", "chat"]);
+    assert!(ok && !chat.contains("+tri:") && chat.contains("+kn:"), "{chat}");
+    // a bad table: formal refuses it, everything that does not read it still runs
+    let table = dir.join("trigram.sjt3");
+    std::fs::write(&table, b"junk").unwrap();
+    assert!(!go(&["--profile", "formal"]).0, "a bad table is never ignored");
+    assert!(go(&["--profile", "formal", "--no-tri"]).0);
+    assert!(go(&["--profile", "chat"]).0, "chat does not read the table");
+    let predict = format!("{root}/eval/golden/sp-predict.txt");
+    let predict_runs = Command::new(env!("CARGO_BIN_EXE_shanjie-eval")).args(["--predict", &predict, "--lm", lm.to_str().unwrap(), "--profile", "formal"]).output().unwrap();
+    assert!(predict_runs.status.success(), "--predict does not read the table: {}", String::from_utf8_lossy(&predict_runs.stderr));
+    // a bad kn.sjkn beside a good table still fails the formal run
+    std::fs::copy(format!("{root}/eval/golden/tri-tiny/trigram.sjt3"), &table).unwrap();
+    std::fs::write(dir.join("kn.sjkn"), b"junk").unwrap();
+    assert!(!go(&["--profile", "formal"]).0, "kn.sjkn is read and checked when the table is on");
+    assert!(go(&["--profile", "formal", "--no-kn"]).0);
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
 /// `--predict` loads the kn.sjkn beside the model like the other modes (the App's prediction row scores with it); `--no-kn` turns it
 /// off. The golden is the KN run; the same queries without it must score differently.
 #[test]

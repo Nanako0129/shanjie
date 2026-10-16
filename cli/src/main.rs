@@ -288,8 +288,9 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     let lm_path = lm_path.ok_or("--lm is required")?;
     // S2k: the class term is part of the model; classes.sjc beside it is required unless --no-classes.
     // A kn.sjkn beside the model (docs/contracts/kn-core.md) turns the Kneser-Ney term on unless --no-kn. A trigram.sjt3 beside it
-    // (docs/contracts/trigram-core.md) is read unless --no-tri; only --profile formal scores with it, and then without Kneser-Ney.
-    let lm = Lm::load_opts(std::path::Path::new(&lm_path), classes, kn, tri).map_err(|e| e.to_string())?;
+    // (docs/contracts/trigram-core.md) is read only for --profile formal and without --no-tri (chat never uses it, so it is not read
+    // at all); the formal profile then scores with it and without Kneser-Ney. The kn.sjkn is read and checked either way.
+    let lm = Lm::load_opts(std::path::Path::new(&lm_path), classes, kn, tri && prof == Profile::Formal).map_err(|e| e.to_string())?;
     let scoring = lm.scoring(prof);
     let rss_before = tinylm.is_some().then(rss_kb).flatten();
     let tl = tinylm.as_deref().map(|p| load_tinylm(p, &lm, classes, demote)).transpose()?;
@@ -524,7 +525,8 @@ fn run_predict(args: &[String]) -> Result<(), String> {
     // A kn.sjkn beside the model turns the Kneser-Ney term on unless --no-kn, as in the other modes: the App's prediction row
     // scores with it (Engine::recompute_pred -> predict -> Lm::word_by_id -> prob_c), and the Python reference
     // (experiments/sp/predict.py) loads it the same way.
-    let lm = Lm::load_with(Path::new(&lm_path.ok_or("--lm is required")?), true, kn).map_err(|e| e.to_string())?;
+    // The trigram table is never read here: the prediction row scores with the bigram whatever the profile (trigram-core.md (d)).
+    let lm = Lm::load_opts(Path::new(&lm_path.ok_or("--lm is required")?), true, kn, false).map_err(|e| e.to_string())?;
     let dir = root().join("data/lexicon");
     let (lex, overlay) = load_with_packs(&dir, packs, &pdir, None, true)?;
     // Prediction scores use the capped lp only; demotion applies to decoding (sw §3).
