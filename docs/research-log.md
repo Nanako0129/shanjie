@@ -5890,3 +5890,9 @@ formal: alpha 0.7, tau 1, delta 2
 - 保留集（fresh verifier，v0.4.5 `4f0b052` 對 `7c47266`）：聊天 191 → 191（3／3，p 1）、書面 186 → 187（6／5，p 1），擋發版規則沒有觸發。
   - bench 的匯出沒有 `eval/holdout`，verifier 改用 `--rows <repo 的 eval/holdout/holdout.txt>`（227 列都是三欄、都有讀音，和 `--set holdout` 讀到的列與順序相同）；變體表用 `eval/bench/suite-v1/variants.tsv`（工具 `cli_env` 用的同一份，`50cb44bd…`）。
   - **多讀了一次保留集**：verifier 寫暫存指令稿時，session 暫存區裡有一個舊的同名稿（noclobber 擋下新檔），結果執行了舊稿，量了一次 v0.4.4 `3560fe5` 對 `4956257`（都是 classes-v4，v0.4.5 發版時量過的同一組），聊天 191／191、書面 186／186、+0／−0，和當時的紀錄相同。只輸出數字、沒有用來改任何東西；舊稿已刪。教訓：verifier 的暫存檔一律用 `mktemp` 產生的新路徑，不用固定檔名。
+
+## 2026-10-16：v0.4.6 發佈
+
+- 維護者選擇題「做完直接推」（bench、保留集沒有退步、notes PR 合併後推 tag）。PR #170 合併後推 `v0.4.6`（tag 指向 main `58da6d2`；和量基準測試與保留集的 `7c47266` 相比，`Cargo.toml Cargo.lock core cli data eval/variants.tsv macos scripts` 沒有差異），發佈流程 run 38841516338：gate、build、sign、publish 都成功（sign、publish 由維護者核准）。
+- 核對（下載 Release 附件）：zip 與安裝程式的 SHA-256 和 `.sha256` 相符；兩個 App 的 `codesign --verify --deep --strict` 通過、Team 2LJ882GPY8、`spctl` 判定 Notarized Developer ID、`stapler validate` 通過、版本 0.4.6；App 裡的模型 `bigram.sjlm` `fc2bddd1`、`classes.sjc` `9e36fa1b`（classes-v5）、`kn.sjkn` `cbefbced`、`tinylm.sjtl` `d07de71d`；Latest 是 v0.4.6；Homebrew cask `0.4.6`、sha256 `fba95f0b…` 和 zip 相同。解壓的副本驗完先 `lsregister -u` 再刪。
+- 發版後：Discord 發版公告（blobhaj，只標善解身分組，維護者選擇題同意）；網站的保留集數字與已發佈清單換成 v0.4.6，PR 合併後部署（維護者同意）。
