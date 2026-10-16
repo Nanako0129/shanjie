@@ -5879,3 +5879,14 @@ formal: alpha 0.7, tau 1, delta 2
   - 改完：`make test-swift` 211 項、1 項略過、0 失敗；`engine_lm`、`engine_learn` 的改動在 Mac 單獨跑過。
 - **最終樹的完整測試**（95ee632）：188 WSL `cargo test` 455 通過、0 失敗、9 略過；Mac `make test-python` 全部 OK；`make test-swift` 211 項、1 項略過、0 失敗。
 - **審查**：fresh verifier CONFIRMED（Release 附件雜湊、只差檔頭 μ 的 1 個位元組、沒有遺漏的引用、golden 與 Rust 逐位元組相同、換回 classes-v4 時手動詞測試失敗）。`/code-review` 10 項，8 項照改：`tools/build_classes.py` 的 `MU` 改成 0.2（之後重建詞類表會保持出貨的值）、`docs/data-files.md` 重建模型那一列的「classes-v5」改成「下一個 classes-v…」並在產生方式補上 `set_mu.py`、`docs/training.md` 的現行檔案表與版本表、手動詞測試的說明、這一段的完整測試紀錄；學習測試沒有記下走哪個分支、測試失敗時不清暫存檔兩項是 P4，不處理。
+
+## 2026-10-16：v0.4.6 的跨版本基準測試與保留集（classes-v5）
+
+- 範圍：v0.4.5 之後只合併了 classes-v5（PR #169，μ 0.8 → 0.2，merge commit `7c47266`）與兩個文件 PR；`git diff v0.4.5 7c47266 -- Cargo.toml Cargo.lock core cli data eval/variants.tsv macos scripts` 是詞類表的雜湊、`build-app.sh` 的釘選、App 自我檢查（`Selftest.swift`）換用的例句，其餘是測試（13 個檔）。
+- 基準測試（`tools/bench.py run --suite v2 v0.4.5 7c47266 --as v0.4.6`，`VERSIONS2` 加 v0.4.6，旗標與 v0.4.5 相同；classes-v5 放進工具的模型快取並核對雜湊）：
+  - 顯著的只有 lytune：書面 3,979 → 4,044（改對 130／改壞 65，p 3.77e-6）、聊天 4,010 → 4,037（100／73，p 0.048），方向和 lytune 歸因的 μ 掃描相同。
+  - 其他集合兩種設定都不顯著；擋發版的使用者端集合：錯字回報（套件的 80 列）聊天 24 → 28（5／1，p 0.22）、書面 28 → 26（3／5，p 0.73），discordtune 聊天 +1（50／49）、書面 +1（86／85）。
+  - 速度（同場）：dev302 重播 p95 2.157 → 2.268 ms、最大 6.78 → 7.97 ms、載入 696 → 786 ms，RSS 293 MB 相同；語意校正重排 p50／p95 6.41／8.23 → 6.86／9.10 ms。v0.4.5 這一場的重排（6.41／8.23）比 10-15 那一場（8.08／12.16）快，兩場的機器負載不同（load avg 3.3→5.4 對 3.7→5.1）；同場比較才有意義。
+- 保留集（fresh verifier，v0.4.5 `4f0b052` 對 `7c47266`）：聊天 191 → 191（3／3，p 1）、書面 186 → 187（6／5，p 1），擋發版規則沒有觸發。
+  - bench 的匯出沒有 `eval/holdout`，verifier 改用 `--rows <repo 的 eval/holdout/holdout.txt>`（227 列都是三欄、都有讀音，和 `--set holdout` 讀到的列與順序相同）；變體表用 `eval/bench/suite-v1/variants.tsv`（工具 `cli_env` 用的同一份，`50cb44bd…`）。
+  - **多讀了一次保留集**：verifier 寫暫存指令稿時，session 暫存區裡有一個舊的同名稿（noclobber 擋下新檔），結果執行了舊稿，量了一次 v0.4.4 `3560fe5` 對 `4956257`（都是 classes-v4，v0.4.5 發版時量過的同一組），聊天 191／191、書面 186／186、+0／−0，和當時的紀錄相同。只輸出數字、沒有用來改任何東西；舊稿已刪。教訓：verifier 的暫存檔一律用 `mktemp` 產生的新路徑，不用固定檔名。

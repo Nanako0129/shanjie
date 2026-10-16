@@ -99,6 +99,8 @@
 | v0.4.4 | `39ee205` | bigram.sjlm `fc2bddd1`、classes.sjc `efac3184`、kn.sjkn `cbefbced`、tinylm.sjtl `d07de71d` | `--context --packs acg --tinylm <file>` |
 | v0.4.4 | `3560fe5` | bigram.sjlm `fc2bddd1`、classes.sjc `efac3184`、kn.sjkn `cbefbced`、tinylm.sjtl `d07de71d` | `--context --packs acg --tinylm <file>` |
 | v0.4.5 | `4956257` | bigram.sjlm `fc2bddd1`、classes.sjc `efac3184`、kn.sjkn `cbefbced`、tinylm.sjtl `d07de71d` | `--context --packs acg --tinylm <file>` |
+| v0.4.5 | `4f0b052` | bigram.sjlm `fc2bddd1`、classes.sjc `efac3184`、kn.sjkn `cbefbced`、tinylm.sjtl `d07de71d` | `--context --packs acg --tinylm <file>` |
+| v0.4.6 | `7c47266` | bigram.sjlm `fc2bddd1`、classes.sjc `9e36fa1b`、kn.sjkn `cbefbced`、tinylm.sjtl `d07de71d` | `--context --packs acg --tinylm <file>` |
 
 依據：App 預設開動漫詞包、組字用前文；語意校正從 v0.4.1 起預設開；降權表預設開。**CLI 沒有模擬的 App 行為**：本機學習（CLI 不學）；殼在每個鍵之後非同步重排、CLI 每列只排一次；殼的前文來自輸入框、CLI 用列檔的前文欄；聊天或書面由 App 決定，這裡兩種都量。所以這張表不是「和 App 完全相同」。推論（沒量過）：App 裡在重排結果回來之前就送出的列保留 n-gram 的第一名，所以開著語意校正的版本在 App 裡的改善可能比表上小；本機學習對各版的影響也沒量。
 
@@ -231,6 +233,31 @@
 | discordtune/chat | 4958 | 86.79%<br>4303/4958 | 86.79%<br>4303/4958<br>+0 / −0，p=1 |
 | discordtune/formal | 4958 | 84.25%<br>4177/4958 | 84.25%<br>4177/4958<br>+0 / −0，p=1 |
 
+#### v0.4.5+v0.4.6（2026-10-16）
+
+| 集合／設定 | 列數 | v0.4.5 | v0.4.6 |
+|---|---|---|---|
+| dev302/chat | 302 | 85.76%<br>259/302 | 86.75%<br>262/302<br>+6 / −3，p=0.508 |
+| dev302/formal | 302 | 84.44%<br>255/302 | 83.77%<br>253/302<br>+3 / −5，p=0.727 |
+| typing76/chat | 76 | 92.11%<br>70/76 | 94.74%<br>72/76<br>+2 / −0，p=0.5 |
+| typing76/formal | 76 | 92.11%<br>70/76 | 92.11%<br>70/76<br>+2 / −2，p=1 |
+| probe/chat | 83 | 79.52%<br>66/83 | 83.13%<br>69/83<br>+3 / −0，p=0.25 |
+| probe/formal | 83 | 80.72%<br>67/83 | 78.31%<br>65/83<br>+0 / −2，p=0.5 |
+| user-reported/chat | 80 | 30.00%<br>24/80 | 35.00%<br>28/80<br>+5 / −1，p=0.219 |
+| user-reported/formal | 80 | 35.00%<br>28/80 | 32.50%<br>26/80<br>+3 / −5，p=0.727 |
+| fw/chat | 186 | 84.95%<br>158/186 | 84.41%<br>157/186<br>+0 / −1，p=1 |
+| fw/formal | 186 | 83.87%<br>156/186 | 83.33%<br>155/186<br>+0 / −1，p=1 |
+| cvtune/chat | 3791 | 90.90%<br>3446/3791 | 90.95%<br>3448/3791<br>+18 / −16，p=0.864 |
+| cvtune/formal | 3791 | 89.87%<br>3407/3791 | 90.11%<br>3416/3791<br>+26 / −17，p=0.222 |
+| wikitune/chat | 2827 | 77.54%<br>2192/2827 | 77.57%<br>2193/2827<br>+20 / −19，p=1 |
+| wikitune/formal | 2827 | 77.47%<br>2190/2827 | 77.22%<br>2183/2827<br>+23 / −30，p=0.41 |
+| lytune/chat | 4811 | 83.35%<br>4010/4811 | 83.91%<br>4037/4811<br>+100 / −73，p=0.0478 |
+| lytune/formal | 4811 | 82.71%<br>3979/4811 | 84.06%<br>4044/4811<br>+130 / −65，p=3.77e-06 |
+| wikitypo/chat | 155 | 87.74%<br>136/155 | 87.74%<br>136/155<br>+0 / −0，p=1 |
+| wikitypo/formal | 155 | 87.74%<br>136/155 | 87.74%<br>136/155<br>+0 / −0，p=1 |
+| discordtune/chat | 4958 | 86.79%<br>4303/4958 | 86.81%<br>4304/4958<br>+50 / −49，p=1 |
+| discordtune/formal | 4958 | 84.25%<br>4177/4958 | 84.27%<br>4178/4958<br>+86 / −85，p=1 |
+
 ### 保留集
 
 照 `CLAUDE.md` 一片只跑一次：由 fresh verifier 以 `evalstats compare --net` 比上一版與新版，main 把 n 與兩版的 top1（可再加 `fixed`、`broken`、`p`）和實際量的 commit 填進 results JSON 的 `holdout`（`{"commit": …, "chat": {n, top1, fixed, broken, p}, "formal": ...}`）。下表版本下面的 commit 是保留集實際量的那一個；它和上面「出貨設定」表被量的 commit 在 `docs/verification.md` 列的路徑上必須沒有差異，或差異不改輸出（出貨設定的 rowstats 逐位元組相同，記在研究紀錄；契約 §2.3、§5）。
@@ -247,6 +274,8 @@
 | v0.4.4<br>`39ee205` | 84.14%<br>191/227<br>+3 / −3，p=1 | 81.94%<br>186/227<br>+2 / −5，p=0.453 |
 | v0.4.4<br>`3560fe5` | 84.14%<br>191/227 | 81.94%<br>186/227 |
 | v0.4.5<br>`4956257` | 84.14%<br>191/227<br>+0 / −0，p=1 | 81.94%<br>186/227<br>+0 / −0，p=1 |
+| v0.4.5<br>`4f0b052` | 84.14%<br>191/227 | 81.94%<br>186/227 |
+| v0.4.6<br>`7c47266` | 84.14%<br>191/227<br>+3 / −3，p=1 | 82.38%<br>187/227<br>+6 / −5，p=1 |
 
 ### 速度與記憶體（同場）
 
@@ -264,6 +293,8 @@
 | v0.4.4 | 2026-10-15 | Mac17,3 / 27.0.1 / 5.1→5.2 | 2.843 ms | 7.62 ms | 975 ms | 294 MB | 8336 | 302/302 | 8.55／11.97 ms |
 | v0.4.4 | 2026-10-15 | Mac17,3 / 27.0.1 / 3.7→5.1 | 2.416 ms | 50.60 ms | 789 ms | 293 MB | 8336 | 302/302 | 6.80／8.71 ms |
 | v0.4.5 | 2026-10-15 | Mac17,3 / 27.0.1 / 3.7→5.1 | 2.337 ms | 9.46 ms | 774 ms | 293 MB | 8336 | 302/302 | 8.08／12.16 ms |
+| v0.4.5 | 2026-10-16 | Mac17,3 / 27.0.1 / 3.3→5.4 | 2.157 ms | 6.78 ms | 696 ms | 293 MB | 8336 | 302/302 | 6.41／8.23 ms |
+| v0.4.6 | 2026-10-16 | Mac17,3 / 27.0.1 / 3.3→5.4 | 2.268 ms | 7.97 ms | 786 ms | 293 MB | 8336 | 302/302 | 6.86／9.10 ms |
 
 ### 量測規則（套件 v2）
 
