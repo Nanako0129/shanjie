@@ -121,8 +121,10 @@ class MainTest(unittest.TestCase):
     def run_main(self, out, seed, src):
         def fake_readings(rows, workdir, name):
             return [f"{c}|{s}|{' '.join('ㄅ' for _ in s)}\n" for c, s in rows]
-        with mock.patch.object(bc, "load_conv", lambda: (None, None, 0)), mock.patch.object(bc, "convert", lambda t, *a: t), \
-                mock.patch.object(b, "add_readings", fake_readings), mock.patch.object(sys, "stdout", open(os.devnull, "w")):
+        with open(os.devnull, "w") as devnull, mock.patch.object(bc, "load_conv", lambda: (None, None, 0)), \
+                mock.patch.object(bc, "convert", lambda t, *a: t), mock.patch.object(b, "add_readings", fake_readings), \
+                mock.patch.object(sys, "stdout", devnull), mock.patch.object(bc, "SRC", bc.SRC), mock.patch.object(bt, "SRC", bt.SRC), \
+                mock.patch.object(bc, "DUMP", bc.DUMP):   # main() assigns these three globals from --src; the patches restore them
             b.main(["--out-dir", out, "--src", src, "--part", "cv", "--seed", str(seed), "--cap", "30"])
         return out
 

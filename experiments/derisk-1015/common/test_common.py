@@ -1,15 +1,19 @@
 """Tests for experiments/derisk-1015/common (synthetic data only).
 Run: python3 -W ignore -m unittest experiments/derisk-1015/common/test_common.py -v   (from the repo root)
 """
+import importlib.util
 import os
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-import anchor  # noqa: E402
+spec = importlib.util.spec_from_file_location("common_anchor", os.path.join(HERE, "anchor.py"))   # by path: e1/anchor.py has the same module name
+anchor = importlib.util.module_from_spec(spec); spec.loader.exec_module(anchor)
 import concat_rowstats as cr  # noqa: E402
+import patched_eval  # noqa: E402
 import setnames  # noqa: E402
 from evalstats import compare  # noqa: E402  (concat_rowstats put tools/ on sys.path)
 
@@ -94,6 +98,19 @@ class AnchorTest(unittest.TestCase):
 
     def test_unparsable_line_falls_back_to_character_position(self):
         self.assertIn("character at 5", anchor.first_diff("## abcd", "## abXd"))
+
+
+class PatchedEvalTest(unittest.TestCase):
+    def test_returns_exactly_the_rows_lm_eval_evaluated(self):
+        rows = [("甲", ["ㄅ"], ""), ("乙", ["ㄆ"], ""), ("丙", ["ㄇ"], "")]
+
+        def fake_main():   # lm_eval.main shape: read all rows, evaluate the first 2 (--dev 2 / --limit 2), print the summary line
+            patched_eval.lm_eval.rows_of(["x.txt"])
+            print("## x  lm-chat  {'n': 2, 'top1': 1, 'oracle@64': 2, 'top1_sha256': 'abc'}")
+        with mock.patch.object(patched_eval, "_REAL_ROWS_OF", lambda paths: rows), mock.patch.object(patched_eval.lm_eval, "main", fake_main), \
+                mock.patch("sys.stdout", new=__import__("io").StringIO()):
+            got = patched_eval.run_lm_eval(["--limit", "2"])
+        self.assertEqual(got, rows[:2])
 
 
 class SetNamesTest(unittest.TestCase):

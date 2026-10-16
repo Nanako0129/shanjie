@@ -7,6 +7,7 @@ section-2 anchor is then a real test: the extension's "off" configuration goes t
 import contextlib
 import io
 import os
+import re
 import sys
 from unittest import mock
 
@@ -44,4 +45,6 @@ def run_lm_eval(argv, decode=None, context_key=None, tag=""):
             head, rest = line.split("  {", 1)
             line = f"{head}{tag}  {{{rest}"
         print(line)
-    return seen["rows"]
+    # rows_of returns the whole file; --dev / --limit cut it afterwards, from the front, and the summary line's n is what was evaluated
+    n = int(re.search(r"'n': (\d+)", buf.getvalue()).group(1))
+    return seen["rows"][:n]

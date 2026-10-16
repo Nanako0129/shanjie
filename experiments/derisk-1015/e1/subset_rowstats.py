@@ -4,12 +4,13 @@ cut out of the per-set rowstats of one arm and concatenated in the order given (
   python3 subset_rowstats.py --arm ARM_DIR --set cvtune=PATH --set wikitune=PATH --set dev302=dev:302 ... --out ARM_DIR/subset.rowstats
 
 ARM_DIR/<set>.rowstats comes from grid.py judge; the rows file gives the contexts (row i of the rowstats = row i of the file).
-Mid-sentence punctuation: MID_PUNCT below (comma, enumeration comma, semicolon, colon, full- and half-width). Digit / Latin runs: mapping.tokenize
+Mid-sentence punctuation: e4/punct_ctx.MID (comma, enumeration comma, semicolon, colon, in all their forms). Digit / Latin runs: mapping.tokenize
 (the E4 (b) tokenizer). The condition is on the whole context, not only its tail: the tail case is the one --x-context changes, the rest is reported to
 show that the other rows do not move.
 """
 import argparse
 import os
+import sys
 
 import common  # noqa: F401
 import grid
@@ -17,11 +18,12 @@ import mapping
 import rowstats_concat
 from evalstats import read_rowstats  # noqa: E402
 
-MID_PUNCT = "，、；：,;:"
+sys.path.insert(0, os.path.join(common.HERE, "..", "e4"))
+from punct_ctx import MID  # noqa: E402  (the one definition, shared with E4 (a))
 
 
 def wanted(ctx):
-    return any(c in MID_PUNCT for c in ctx) or any(kind == "x" for kind, _, _ in mapping.tokenize(ctx))
+    return any(c in MID for c in ctx) or any(kind == "x" for kind, _, _ in mapping.tokenize(ctx))
 
 
 def subset_rows(rows):

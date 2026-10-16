@@ -191,12 +191,15 @@ def encode(model, tri=None, bits=0):
     if bits not in MODES:
         raise ValueError("bits must be 0, 8 or 4")
     d = sjlm_io.read_sjlm(model)
+    if tri is not None:
+        t = sjlm_io.read_tri(tri)
+        if t["V"] != d["V"] or t["model_sha"] != hashlib.sha256(model).digest():
+            raise ValueError("the trigram table is not bound to this bigram model (vocabulary size or SHA-256 differs)")
     C, E = len(d["ctx"]), len(d["nxt"])
     parts = [MAGIC, struct.pack("<BB", bits, tri is not None)]
     parts += [blk(struct.pack("<IQQdII", d["V"], d["N"], d["eos_total"], d["D"], C, E)), blk(d["vocab_raw"]), blk(varint_encode(d["uni"])),
               *_structure_blocks(d["ctx"], d["tot"], d["off"], d["nxt"], d["cnt"], bits)]
     if tri is not None:
-        t = sjlm_io.read_tri(tri)
         Ct, Et = len(t["key"]), len(t["nxt"])
         parts += [blk(struct.pack("<Id32sII", t["V"], t["D"], t["model_sha"], Ct, Et)),
                   *_structure_blocks(t["key"], t["tot"], t["off"], t["nxt"], t["cnt"], bits)]
@@ -205,6 +208,12 @@ def encode(model, tri=None, bits=0):
 
 def decode(blob):
     """-> (model bytes, tri bytes or None). A lossy bigram file has a new SHA-256; the returned trigram table is bound to it."""
+    return decode_full(blob)[:2]
+
+
+def decode_full(blob):
+    """-> (model, tri, original model SHA-256 bytes or None). The original hash is known when the decode is lossless (it is the decoded
+    model's) or the container holds a trigram table (its hash field, checked at encode); a lossy bigram-only container does not keep it."""
     if blob[:8] != MAGIC:
         raise ValueError("bad magic")
     bits, has_tri = struct.unpack_from("<BB", blob, 8)
@@ -217,14 +226,30 @@ def decode(blob):
     model = sjlm_io.write_sjlm({"V": V, "N": N, "eos_total": eos, "D": D, "vocab_raw": bl[1], "uni": uni, "ctx": first, "tot": tot, "off": off,
                                 "nxt": nxt, "cnt": cnt})
     if not has_tri:
-        return model, None
+        return model, None, (hashlib.sha256(model).digest() if not bits else None)
     Vt, Dt, sha, Ct, Et = struct.unpack_from("<Id32sII", bl[8])
+    orig = sha
+    if not bits and sha != hashlib.sha256(model).digest():
+        raise ValueError("the container's trigram table is not bound to its bigram model")
     key, ttot, toff, tnxt, tcnt = _structure_unblock(bl[9:14], Ct, Et, bits)
     if bits:
         ttot = fix_totals(ttot, toff, tcnt)
         sha = hashlib.sha256(model).digest()
     tri = sjlm_io.write_tri({"V": Vt, "D": Dt, "model_sha": sha, "key": key.astype(np.uint64), "tot": ttot, "off": toff, "nxt": tnxt, "cnt": tcnt})
-    return model, tri
+    return model, tri, orig
+
+
+def check_sides(model, orig, sides):
+    """sides: [(name, bytes, sha_at, v_at)] (kn.sjkn: 12, 8; classes.sjc: 8, 52). Each must have the model's vocabulary size and the hash
+    of the ORIGINAL bigram `orig` (None: unknown, the side files must then agree with each other). ValueError otherwise."""
+    V = struct.unpack_from("<I", model, 8)[0]
+    ref = orig
+    for name, b, sha_at, v_at in sides:
+        if struct.unpack_from("<I", b, v_at)[0] != V:
+            raise ValueError(f"{name}: vocabulary size differs from the model")
+        ref = ref or b[sha_at:sha_at + 32]
+        if b[sha_at:sha_at + 32] != ref:
+            raise ValueError(f"{name}: not bound to the input bigram model")
 
 
 def rebind(side, new_model, sha_at):
@@ -275,16 +300,18 @@ def main(argv=None):
                 print(f"{k:9s} bytes={v['bytes']:>12,} zip={v['zip']:>12,}")
     else:
         blob = open(a.inp, "rb").read()
-        model, tri = decode(blob)
+        model, tri, orig = decode_full(blob)
+        kn, cls = rd(a.kn), rd(a.classes)
+        check_sides(model, orig, [s for s in (("kn", kn, 12, 8) if kn else None, ("classes", cls, 8, 52) if cls else None) if s])
         os.makedirs(a.out_dir, exist_ok=True)
         w = lambda name, b: open(os.path.join(a.out_dir, name), "wb").write(b)
         w("bigram.sjlm", model)
         if tri is not None:
             w("tri.sjt3", tri)
         if a.kn:
-            w("kn.sjkn", rebind(rd(a.kn), model, 12))
+            w("kn.sjkn", rebind(kn, model, 12))
         if a.classes:
-            w("classes.sjc", rebind(rd(a.classes), model, 8))
+            w("classes.sjc", rebind(cls, model, 8))
         print(f"decoded bigram.sjlm sha256={hashlib.sha256(model).hexdigest()}" + (f" tri.sjt3 sha256={hashlib.sha256(tri).hexdigest()}" if tri else ""))
 
 

@@ -109,9 +109,11 @@ class Evaluator:
     def set_beta(self, beta):
         """KN beta override (the grid's second axis); None restores the side file's own value."""
         if self.base_kn is not None:
-            self.lm.kn = self.base_kn if beta is None else (beta, self.base_kn[1], self.base_kn[2])
-            if self.tri_lm is not None:
-                self.tri_lm.word.cache_clear()   # cached word scores were made with the previous beta
+            new = self.base_kn if beta is None else (beta, self.base_kn[1], self.base_kn[2])
+            if new != self.lm.kn:
+                self.lm.kn = new
+                if self.tri_lm is not None:
+                    self.tri_lm.word.cache_clear()   # cached word scores were made with the previous beta
 
     def row(self, ctx, syls, lam):
         """Candidates of one row: [(score, words)] sorted, distinct surfaces."""
@@ -140,21 +142,24 @@ def evaluate(ev, rows, lam, dump=None):
     return top1, o64, firsts, rs
 
 
-def header_beta(kn_path):
-    """beta in an SJKN0002 side file's header (the value lm.kn[0] holds after loading)."""
+def header_beta(kn_path, kn_beta=None):
+    """beta of a KN side file (the value lm.kn[0] holds after loading): the header's for SJKN0002; SJKN0001 has none, so it is the
+    --kn-beta the model was loaded with."""
     import struct
     with open(kn_path, "rb") as f:
         b = f.read(56)
+    if b[:8] == b"SJKN0001" and kn_beta is not None:
+        return kn_beta
     if b[:8] != b"SJKN0002":
-        raise ValueError("not an SJKN0002 side file")
+        raise ValueError("not an SJKN0002 side file (SJKN0001 needs --kn-beta)")
     return struct.unpack_from("<d", b, 48)[0]
 
 
 def summary_line(name, profile, n, top1, o64, sha, *, kn_path=None, context=True, demote=True, classes=True, extra_overlay=None,
-                 tri_path=None, lam=None, beta=None, x_context=False):
+                 tri_path=None, lam=None, beta=None, x_context=False, kn_beta=None):
     """The line lm_eval.py prints (profile column built the same way); the tags for what this harness adds go last and are empty in the
     null configuration. lam / beta are the overrides (None = the profile's / the side file's own)."""
-    hb = header_beta(kn_path) if kn_path else None
+    hb = header_beta(kn_path, kn_beta) if kn_path else None
     extra = (f"+tri:{common.sha256_file(tri_path)[:8]}" if tri_path else "") \
         + (f"+lam:{lam:g}" if lam is not None and lam != L.PROFILES[profile] else "") \
         + (f"+beta:{beta:g}" if beta is not None and hb is not None and beta != hb else "") \
@@ -201,7 +206,7 @@ def main(argv=None):
             rsf.write(format_rowstats(rs))
     sha = hashlib.sha256("\n".join(firsts).encode("utf-8")).hexdigest()
     print(summary_line(name, a.profile, len(rows), top1, o64, sha, kn_path=ev.kn_path, context=a.context, demote=not a.no_demote,
-                       classes=not a.no_classes, extra_overlay=a.extra_overlay, tri_path=a.tri, lam=a.lam, beta=a.beta, x_context=a.x_context))
+                       classes=not a.no_classes, extra_overlay=a.extra_overlay, tri_path=a.tri, lam=a.lam, beta=a.beta, x_context=a.x_context, kn_beta=a.kn_beta))
 
 
 if __name__ == "__main__":

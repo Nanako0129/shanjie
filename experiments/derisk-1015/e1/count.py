@@ -196,6 +196,7 @@ def cmd_wiki(a):
     import multiprocessing as mp
     uni, bi, tri, dbi = (collections.Counter() for _ in range(4))
     nx = runs = arts = 0
+    init3(tuple(a.extra_lexicon), a.overlay_add, a.tri_min)   # in the parent first (OpenCC tables, lexicon): a failure stops here, not in every Pool worker's initializer (which respawns forever)
     with mp.Pool(a.procs, initializer=init3, initargs=(tuple(a.extra_lexicon), a.overlay_add, a.tri_min)) as pool:
         for u, b, t, d, x, s_ in pool.imap_unordered(count_batch3, bc.batches(bc.articles(a.articles))):
             uni.update(u); bi.update(b); tri.update(t); dbi.update(d); nx += x; runs += s_; arts += 200

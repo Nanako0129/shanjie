@@ -4,6 +4,8 @@ Run: python3 experiments/derisk-1015/e1/test_e1.py   (about a minute: it loads t
 import collections
 import contextlib
 import bz2
+import hashlib
+import importlib.util
 import io
 import json
 import math
@@ -21,7 +23,8 @@ import numpy as np
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import common  # noqa: E402
-import anchor  # noqa: E402
+spec = importlib.util.spec_from_file_location("e1_anchor", os.path.join(HERE, "anchor.py"))   # by path: common/anchor.py has the same module name
+anchor = importlib.util.module_from_spec(spec); spec.loader.exec_module(anchor)
 import build_models  # noqa: E402
 import compress  # noqa: E402
 import entropy_prune  # noqa: E402
@@ -500,6 +503,18 @@ class TestCliAndAnchor(Fixture):
         self.assertNotIn("+lam", base(lam=0.5)); self.assertNotIn("+beta", base(beta=1.0))
         self.assertIn("+lam:0.45", base(lam=0.45)); self.assertIn("+beta:0.5", base(beta=0.5)); self.assertIn("+xctx", base(x_context=True))
 
+    def test_summary_line_with_an_sjkn0001_side_file(self):
+        v2 = slurp(os.path.join(self.b0, "kn.sjkn"), "rb")
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "kn.sjkn")
+            with open(p, "wb") as f:
+                f.write(b"SJKN0001" + v2[8:48] + v2[64:])           # the research-era layout: no beta, no total
+            with self.assertRaises(ValueError):
+                harness.summary_line("n", "chat", 1, 1, 1, "s", kn_path=p)
+            line = harness.summary_line("n", "chat", 1, 1, 1, "s", kn_path=p, kn_beta=0.5)
+            self.assertIn(":β0.5", line); self.assertNotIn("+beta", line)
+            self.assertIn("+beta:0.75", harness.summary_line("n", "chat", 1, 1, 1, "s", kn_path=p, kn_beta=0.5, beta=0.75))
+
     def test_trigram_cli_runs_and_rowstats_has_only_digits(self):
         with tempfile.TemporaryDirectory() as w:
             rs = os.path.join(w, "r.rs")
@@ -559,6 +574,71 @@ class TestRowstatsAndGrid(Fixture):
         self.assertEqual(grid.choose(scores, "chat"), (0.45, 1.0))                                   # nearest the shipped point (1 step vs 2)
         scores[(0.6, 0.5)] = 13
         self.assertEqual(grid.choose(scores, "chat"), (0.6, 0.5))                                    # a strict maximum wins whatever the distance
+
+    def test_tie_break_is_computed_in_integer_steps(self):
+        def pick(profile, a, b):
+            pts = grid.grid_points(profile)
+            scores = {p: 10 for p in pts}
+            scores[a] = scores[b] = 12
+            return grid.choose(scores, profile), grid.choose({a: 12, b: 12}, profile)
+        for got in pick("chat", (0.45, 1.0), (0.5, 0.75)):
+            self.assertEqual(got, (0.5, 0.75))             # 1 step each; the shipped lambda wins the second key
+        for got in pick("formal", (0.6, 1.0), (0.7, 0.5)):
+            self.assertEqual(got, (0.7, 0.5))              # 2 steps each; |dlambda| 2 vs 0
+        for prof, lo, hi in (("chat", 0.45, 0.55), ("formal", 0.65, 0.75)):
+            for b in (0.5, 1.0):
+                for got in pick(prof, (lo, b), (hi, b)):
+                    self.assertEqual(got, (lo, b))         # the mirror pair: float distances differ by 1 ulp, the steps are equal -> lower lambda, both profiles
+        # ties recorded in the frozen selections (T2, T3, chat)
+        self.assertEqual(grid.choose({(0.6, 0.5): 5, (0.6, 0.75): 5}, "chat"), (0.6, 0.75))
+        self.assertEqual(grid.choose({(0.6, 0.75): 5, (0.6, 1.0): 5}, "chat"), (0.6, 1.0))
+
+    def test_beta_without_a_kn_side_file(self):
+        self.assertEqual(grid.beta_of(0.5, "x.sjkn"), 0.5)
+        self.assertIsNone(grid.beta_of(1.0, None)); self.assertIsNone(grid.beta_of(None, None))
+        with self.assertRaises(SystemExit):
+            grid.beta_of(0.75, None)
+        with tempfile.TemporaryDirectory() as d:
+            lm = os.path.join(d, "bigram.sjlm")          # no kn.sjkn next to it
+            with open(lm, "wb") as f:
+                f.write(slurp(self.lm_path, "rb"))
+            args = ["judge", "--label", "N", "--lm", lm, "--no-classes", "--profile", "chat", "--set", f"tiny={self.rows}", "--procs", "1", "--out", d]
+            with self.assertRaises(SystemExit):
+                grid.main(args + ["--lam", "0.5", "--beta", "0.5"])
+            self.assertFalse(os.path.exists(os.path.join(d, "N")))
+            grid.main(args + ["--lam", "0.5", "--beta", "1"])
+            self.assertIsNone(json.loads(slurp(os.path.join(d, "N", "chat", "judge.json")))["beta"])
+            grid.main(["select", "--label", "N", "--lm", lm, "--no-classes", "--profile", "chat", "--set", f"tiny={self.rows}", "--procs", "1", "--out", d])
+            self.assertIsNone(json.loads(slurp(os.path.join(d, "N-chat-selection.json")))["beta"])
+
+    def test_pool_is_terminated_when_a_worker_fails(self):
+        pool = mock.MagicMock()
+        def bad(f, tasks):
+            raise RuntimeError("boom")
+            yield
+        pool.imap_unordered.side_effect = bad
+        with mock.patch.object(grid.mp, "Pool", return_value=pool), self.assertRaises(RuntimeError):
+            grid.decode_points(self.lm_path, {}, {"a": (0.5, 1.0, [("好", ["ㄏㄠˇ"], "")])}, 2)
+        pool.terminate.assert_called_once()
+        pool.join.assert_not_called()
+
+    def test_set_beta_clears_the_word_cache_only_when_beta_changes(self):
+        ev = harness.Evaluator(self.lm_path, tri_path=self.tri_path(2), classes=False, kn=os.path.join(self.b0, "kn.sjkn"), context=True)
+        ev.row("", SYLS["你好嗎"].split(), 0.5)
+        n = ev.tri_lm.word.cache_info().currsize
+        self.assertGreater(n, 0)
+        ev.set_beta(1.0); ev.set_beta(None)                       # the side file's own beta: nothing changes
+        self.assertEqual(ev.tri_lm.word.cache_info().currsize, n)
+        ev.set_beta(0.5)
+        self.assertEqual(ev.tri_lm.word.cache_info().currsize, 0)
+
+    def test_concat_rejects_an_empty_rowstats_file(self):
+        with tempfile.TemporaryDirectory() as d:
+            ok, empty = os.path.join(d, "ok"), os.path.join(d, "empty")
+            self.write(ok, "1\t1\t0\t3\n"); self.write(empty, "")
+            self.assertEqual(rowstats_concat.concat_files([ok]), "1\t1\t0\t3\n")
+            with self.assertRaisesRegex(ValueError, "no rows"):
+                rowstats_concat.concat_files([ok, empty])
 
     def test_parallel_equals_serial_and_judge_equals_the_cli(self):
         rows, _ = harness.load_rows(rows=self.rows)
@@ -741,6 +821,37 @@ class TestCompression(Fixture):
             if bits == 4:
                 self.assertTrue((dec["tot"] > orig["tot"]).any())                                    # the fix-up was needed somewhere
         self.assertLess(sizes[4], sizes[8])
+
+    def test_encode_and_decode_check_what_is_bound_to_the_bigram(self):
+        model = slurp(self.lm_path, "rb")
+        tri = slurp(self.tri_path(1), "rb")
+        other = bytearray(model); other[-1] ^= 1                                  # another bigram file (other SHA-256, same V)
+        with self.assertRaisesRegex(ValueError, "not bound"):
+            compress.encode(bytes(other), tri, 0)
+        kn = slurp(os.path.join(self.b0, "kn.sjkn"), "rb")
+        sjc = b"SJCL0001" + hashlib.sha256(model).digest() + struct.pack("<IdI", 1, 0.0, struct.unpack_from("<I", model, 8)[0])
+        for bits in (0, 4):
+            m2, t2, orig = compress.decode_full(compress.encode(model, tri, bits))
+            self.assertEqual(orig, hashlib.sha256(model).digest())
+            compress.check_sides(m2, orig, [("kn", kn, 12, 8), ("classes", sjc, 8, 52)])
+            for bad in (kn[:12] + bytes(32) + kn[44:], kn[:8] + struct.pack("<I", 7) + kn[12:]):
+                with self.assertRaises(ValueError):
+                    compress.check_sides(m2, orig, [("kn", bad, 12, 8)])
+        # lossy bigram-only: the original hash is unknown, so the side files must agree with each other
+        m2, _, orig = compress.decode_full(compress.encode(model, None, 4))
+        self.assertIsNone(orig)
+        compress.check_sides(m2, orig, [("kn", kn, 12, 8), ("classes", sjc, 8, 52)])
+        with self.assertRaises(ValueError):
+            compress.check_sides(m2, orig, [("kn", kn, 12, 8), ("classes", sjc[:8] + bytes(32) + sjc[40:], 8, 52)])
+        with tempfile.TemporaryDirectory() as d:                                  # the CLI refuses a mismatching side file and writes nothing
+            blob, bad_kn = os.path.join(d, "m.sjz"), os.path.join(d, "bad.sjkn")
+            with open(blob, "wb") as f:
+                f.write(compress.encode(model, tri, 4))
+            with open(bad_kn, "wb") as f:
+                f.write(kn[:12] + bytes(32) + kn[44:])
+            with self.assertRaises(ValueError):
+                compress.main(["decode", "--in", blob, "--out-dir", os.path.join(d, "o"), "--kn", bad_kn])
+            self.assertFalse(os.path.exists(os.path.join(d, "o")))
 
     def test_pack_unpack(self):
         idx = np.array([0, 15, 3, 7, 9], dtype=np.uint8)

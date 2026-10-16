@@ -29,7 +29,14 @@ def concat_rows(row_lists):
 
 
 def concat_files(paths):
-    return concat_rows([read_rowstats(p) for p in paths])
+    """An empty input file is an error (a failed run, not a set with no rows), like common/concat_rowstats.py."""
+    parts = []
+    for p in paths:
+        r = read_rowstats(p)
+        if not r:
+            raise ValueError(f"{p}: no rows")
+        parts.append(r)
+    return concat_rows(parts)
 
 
 def main(argv=None):

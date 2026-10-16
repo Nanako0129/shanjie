@@ -36,15 +36,28 @@ def grid_points(profile):
 
 def distance(point, profile):
     """Distance of a grid point from the shipped point (lambda shipped, beta = 1), in grid steps (L1). The contract says "nearest the shipped
-    value" without a metric; this is the one used. Remaining ties: smaller |lambda - shipped|, then larger beta."""
-    lam0 = L.PROFILES[profile]
-    return (abs(point[0] - lam0) / LAM_STEP + abs(point[1] - 1.0) / BETA_STEP, abs(point[0] - lam0), -point[1])
+    value" without a metric; this is the one used. Remaining ties: smaller |lambda steps|, then larger beta, then smaller lambda (the last
+    one only separates the mirror pair lambda shipped +- k steps at the same beta, which the contract's rule leaves open).
+    Computed in integer steps: raw float differences of the rounded lambdas (0.45 - 0.5 vs 0.55 - 0.5) are not symmetric."""
+    ls = round((point[0] - L.PROFILES[profile]) / LAM_STEP)
+    bs = round((1.0 - point[1]) / BETA_STEP)
+    return (abs(ls) + abs(bs), abs(ls), -point[1], point[0])
 
 
 def choose(scores, profile):
     """scores {(lambda, beta): top1}: the highest top1; ties -> smallest `distance`."""
     best = max(scores.values())
     return min((p for p, s in scores.items() if s == best), key=lambda p: distance(p, profile))
+
+
+def beta_of(beta, kn_path):
+    """The beta to run and record. With a KN side file, as given. Without one beta has no effect, so only the default 1.0 (or none) is
+    accepted, and it is recorded as None, not as a 1.0 that nothing used."""
+    if kn_path:
+        return beta
+    if beta not in (None, 1.0):
+        sys.exit(f"--beta {beta:g} needs a KN side file (none next to the model, none given)")
+    return None
 
 
 def load_set(spec):
@@ -93,9 +106,12 @@ def decode_points(lm_path, kwargs, jobs, procs, chunk=40):
     try:
         for key, i0, out in results:
             parts[key].append((i0, out))
-    finally:
+    except BaseException:
         if procs > 1:
-            pool.close(); pool.join()
+            pool.terminate()   # a worker failed: do not wait for the remaining chunks
+        raise
+    if procs > 1:
+        pool.close(); pool.join()
     return {k: [r for _, out in sorted(v) for r in out] for k, v in parts.items()}
 
 
@@ -123,11 +139,12 @@ def cmd_select(a):
     res = decode_points(a.lm, model_kwargs(a), {p: (p[0], p[1], rows) for p in pts}, a.procs)
     scores = {p: sum(r[0] for r in res[p]) for p in pts}
     pick = choose(scores, a.profile)
-    out = {"label": a.label, "profile": a.profile, "shipped_lambda": L.PROFILES[a.profile], "lambda": pick[0], "beta": pick[1],
+    beta = beta_of(pick[1], harness.LE.kn_side(a.lm, a.kn))
+    out = {"label": a.label, "profile": a.profile, "shipped_lambda": L.PROFILES[a.profile], "lambda": pick[0], "beta": beta,
            "top1": scores[pick], "n": len(rows), "limit": a.limit,
            "scores": [{"lambda": p[0], "beta": p[1], "top1": scores[p]} for p in pts],
            "tuning_sets": {n: i for n, _, i in sets}, "model": model_info(a),
-           "provenance": common.provenance(extra={"distance_metric": "L1 in grid steps (0.05 lambda, 0.25 beta), then |dlambda|, then larger beta"})}
+           "provenance": common.provenance(extra={"distance_metric": "L1 in grid steps (0.05 lambda, 0.25 beta), then |dlambda|, then larger beta, then smaller lambda"})}
     path = os.path.join(a.out, f"{a.label}-{a.profile}-selection.json")
     common.write_json(path, out)
     for p in pts:
@@ -145,9 +162,10 @@ def cmd_judge(a):
         lam, beta = a.lam, a.beta
     else:
         sys.exit("give --selection FILE, or both --lam and --beta (the shipped point is --lam <shipped> --beta 1)")
+    kn_path = harness.LE.kn_side(a.lm, a.kn)
+    beta = beta_of(beta, kn_path)
     sets = [load_set(s) for s in a.set]
     res = decode_points(a.lm, model_kwargs(a), {n: (lam, beta, rows) for n, rows, _ in sets}, a.procs)
-    kn_path = harness.LE.kn_side(a.lm, a.kn)
     d = os.path.join(a.out, a.label, a.profile)
     os.makedirs(d, exist_ok=True)
     info = {}
