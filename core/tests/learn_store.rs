@@ -465,15 +465,18 @@ fn new_word_records_need_two_to_four_han_characters_one_syllable_each() {
 }
 
 /// New-word B §2.3, old versions: before new-word B, `valid()` accepted a context only when `context_key(context)`
-/// equals it (or it is the global ""). `context_key("#")` is "^", so an older version skips every "#" line at load and
-/// its first full rewrite drops them. The rule as it stood is restated here, since the old code is gone.
+/// equals it (or it is the global ""; from s4 §14 on, or `^>` plus a reading, and never a bare "^"). `context_key("#")`
+/// is "^", so an older version skips every "#" line at load and its first full rewrite drops them. Both old rules are
+/// restated here, since the old code is gone.
 #[test]
 fn old_versions_skip_new_word_lines() {
-    use core::learn::{context_key, GLOBAL, NEWWORD};
-    let old_context_ok = |c: &str| c == GLOBAL || context_key(c) == c;
+    use core::learn::{context_key, GLOBAL, NEWWORD, NEXT_PREFIX, SENTINEL};
+    let before_14 = |c: &str| c == GLOBAL || context_key(c) == c;
+    let since_14 = |c: &str| c == GLOBAL || c.starts_with(NEXT_PREFIX) || (c != SENTINEL && context_key(c) == c);
     assert_ne!(context_key(NEWWORD), NEWWORD);
-    assert!(!old_context_ok(NEWWORD), "an old version would load a new-word line");
-    assert!(old_context_ok("管把") && old_context_ok("^") && old_context_ok(""), "the old rule itself");
+    assert!(!before_14(NEWWORD) && !since_14(NEWWORD), "an old version would load a new-word line");
+    assert!(before_14("管把") && before_14("^") && before_14(""), "the rule before §14 itself");
+    assert!(since_14("管把") && since_14("^>ㄅㄚˇ") && !since_14("^") && since_14(""), "the rule since §14 itself");
 }
 
 /// New-word B §2.3: new words are capped at NEWWORD_CAP apart from S4's CAPACITY, lowest weight first, and decay and

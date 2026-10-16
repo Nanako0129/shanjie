@@ -55,6 +55,13 @@ pub const NEWWORD_DIGITS: &str = "〇零一二三四五六七八九十百千萬�
 /// cvtune and wikitune under contract §3.2, never on the dev sets.
 pub const NEWWORD_S_MIN: f64 = -5.0;
 pub const NEWWORD_S_MAX: f64 = -3.0;
+/// Contract §2.2 item 3 (revision one): a run is not learned when the best lexicon word under its reading scores above
+/// this (log10, the file score before capping and demotion), so a learned word never covers a strong lexicon word. -6.5
+/// sits above every wiki-sourced row of overlay-add.tsv ([-7.67, -6.61]) and the base's three count-less modes (-7.47,
+/// -7.17, -7.04), which therefore do not block, and below the manual overlay rows (-6.29 to -5.43), the whole names
+/// layer (-5.54 to -3.75) and the eight base words the 2026-10-10 sweep saw covered (lowest 工黨 -6.09), which do. Chosen
+/// after looking at those 16 rows (in sample); the cvtune and formal sweep of contract §3.2 is its first test.
+pub const NEWWORD_SHADOW: f64 = -6.5;
 /// Contract §2.2 item 5 (variant B, chosen by the user on 2026-10-10 after the measurement in the research log): a run
 /// learned under §2.2 also teaches each contiguous sub-span of NEWWORD_MIN..=NEWWORD_MAX characters that holds a
 /// re-picked character, is not all NEWWORD_DIGITS and whose reading has no lexicon word at all. Off: rule A only.

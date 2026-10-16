@@ -247,7 +247,10 @@ int32_t shanjie_engine_learning_clear(ShanjieEngine *engine);
 // New-word B (docs/contracts/newword-b.md), no new function: at a learning commit, a run of 2-4 single Han
 //   characters on the decoded path that holds a character re-picked in the candidate window (runs split at
 //   punctuation, non-Han characters and a fixed table of function characters; not all numerals; not a word the
-//   lexicon or a loaded pack has under that reading) is stored as a new word, one learning.tsv line
+//   lexicon has under that reading, and no lexicon word under that reading scores above -6.5; the lexicon is the
+//   one the engine loaded: base, overlays, the names layer and the loaded packs, at their file scores) is stored as a
+//   new word, and so is each shorter piece of 2+ characters of it that holds a re-pick, is not all numerals and
+//   whose reading has no lexicon word at all; one learning.tsv line each,
 //   "#<TAB>reading<TAB>word<TAB>weight<TAB>day" (at most 2,000 such lines). A new word decodes on its reading in
 //   any context, is listed first among the candidates of its length, and is forgotten by COMMAND+BACKSPACE (which
 //   also drops the pending re-picks overlapping that reading in the composition) and by learning_clear. A commit

@@ -1,7 +1,7 @@
 //! S3a key engine (docs/contracts/s3a.md): key events in, preedit / commit / candidates out.
 //! R2: no input text in errors or panics; types holding input text do not derive Debug.
 
-use crate::learn::{context_key, english_of, english_or_space, is_han, is_space_unit, local_day, newword_score, next_key, record_key, Learner, Level, Record, NEWWORD, NEWWORD_BREAK, NEWWORD_DIGITS, NEWWORD_MAX, NEWWORD_MIN, PUNCT_PREFIX};
+use crate::learn::{context_key, english_of, english_or_space, is_han, is_space_unit, local_day, newword_score, next_key, record_key, Learner, Level, Record, NEWWORD, NEWWORD_BREAK, NEWWORD_DIGITS, NEWWORD_MAX, NEWWORD_MIN, NEWWORD_SHADOW, PUNCT_PREFIX};
 use crate::learn_store::{LearnStore, Opened, StoreError, JOURNAL_MAX};
 use crate::predict::{predict, reading_matches_in, unit_of_syllable, Mode, Unit};
 use crate::lm::{decode_segment_learned, history, CappedLexicon, Demote, End, Learn, Lm, Profile};
@@ -1054,14 +1054,24 @@ impl Engine {
         }));
     }
 
-    /// Whether the lexicon (base, overlays, packs) has `word` under `reading`.
+    /// Whether the lexicon has `word` under `reading`. New-word B's one lexicon (contract §2.2 item 3, revision two) is
+    /// `self.lex`, what `load_lexicon_packs` loaded: the base, overlay-add.tsv, sandhi-add.tsv, names-add.tsv and the
+    /// packs this engine was built with, at their file scores (before capping and demotion). Rules 3 and 5, the shadow
+    /// gate, the decoder's "the lexicon has it" check and experiments/newword/hijack.py all use it.
     fn in_lexicon(&self, reading: &[String], word: &str) -> bool {
         self.lex.entries(reading).iter().any(|(w, _)| *w == word)
     }
 
+    /// New-word B §2.2 item 3: the reading leaves room for a new word, i.e. no lexicon word under it scores above
+    /// `NEWWORD_SHADOW` (no word at all also does).
+    fn room_for_new_word(&self, reading: &[String]) -> bool {
+        self.lex.entries(reading).iter().all(|&(_, score)| score <= NEWWORD_SHADOW)
+    }
+
     /// New-word B §2.2: the runs of single Han characters on the path at commit (split at punctuation, non-Han and
     /// `NEWWORD_BREAK`) that hold a character re-picked in the candidate window, are NEWWORD_MIN..=NEWWORD_MAX long,
-    /// are not all `NEWWORD_DIGITS` and are not in the lexicon under their reading: (reading, word) each.
+    /// are not all `NEWWORD_DIGITS`, are not in the lexicon under their reading and whose reading has no lexicon word above
+    /// `NEWWORD_SHADOW`: (reading, word) each, plus variant B's sub-spans (§2.2 item 5).
     fn new_word_spans(&self) -> Vec<(Vec<String>, String)> {
         // A re-pick of one character (S4 §1.2: chosen in the window, text before it differed); a prediction pick
         // (`Some("")`) is no re-pick.
@@ -1085,7 +1095,7 @@ impl Engine {
             {
                 let reading = self.syls[take[0].0..take[take.len() - 1].0 + 1].to_vec();
                 let word: String = take.iter().map(|x| x.1).collect();
-                if !self.in_lexicon(&reading, &word) {
+                if !self.in_lexicon(&reading, &word) && self.room_for_new_word(&reading) {
                     out.push((reading, word));
                     // Variant B: the run's shorter pieces holding a re-pick, where the lexicon has no word at all.
                     for (a, b) in (0..take.len()).flat_map(|a| (a + NEWWORD_MIN..=take.len()).map(move |b| (a, b))) {

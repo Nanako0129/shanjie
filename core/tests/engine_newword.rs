@@ -2,7 +2,7 @@
 //! and the measurement tool of §3.1 (`measure_newword`, ignored). Needs data/lm/bigram.sjlm like engine_lm.rs. Store
 //! tests write only into temporary directories.
 use core::engine::*;
-use core::learn::{Record, NEWWORD};
+use core::learn::{Record, NEWWORD, NEWWORD_SHADOW};
 use core::lm::{CappedLexicon, Lm};
 use core::Lexicon;
 use std::path::{Path, PathBuf};
@@ -123,6 +123,9 @@ fn tmp_dir(tag: &str) -> PathBuf {
 }
 
 const PAIGONG: &str = "ㄆㄞˋ ㄍㄨㄥ";
+/// The motivating report: the maintainer's re-picks of the name 正彬 were never learned (no lexicon word under its
+/// reading; S4 learns a single character only after exactly two Han characters, rule 7).
+const ZHENGBIN: &str = "ㄓㄥˋ ㄅㄧㄣ";
 
 /// Re-pick the first character of the composition that differs from `target` (one character per syllable) until
 /// none does, as a user re-picks what the re-decode still shows wrong; the cursor goes back to the end.
@@ -238,10 +241,54 @@ fn teach_row(e: &mut Engine, ctx: &str, gold: &str, syls: &[String]) {
     e.key(k(KeyKind::Enter)).unwrap();
 }
 
+/// The §3.1 run on one engine: teach every `teach` row (learning on, the engine's store), then replay `replay` with
+/// learning off. Returns the rowstats text (`row\tok\terrors\tgold_len`, lenient top-1 like the CLI), the top-1 count and
+/// the new words learned as `newword\t<reading>\t<word>` lines (reading joined by `-`, as in the learning file). With
+/// `dump`, also writes `row\tok\tshown\tgold` per replayed row there (revision one; holds sentence text, so it stays on
+/// the machine that ran it, contract §5).
+fn measure(
+    e: &mut Engine,
+    teach: &[(String, String, Vec<String>)],
+    replay: &[(String, String, Vec<String>)],
+    len: &core::eval::Lenient,
+    dump: Option<&Path>,
+) -> (String, usize, Vec<String>) {
+    for (ctx, gold, syls) in teach {
+        teach_row(e, ctx, gold, syls);
+    }
+    let mut learned: Vec<String> = e
+        .learner()
+        .records()
+        .iter()
+        .filter(|r| r.context == NEWWORD)
+        .map(|r| format!("newword\t{}\t{}", r.reading.join("-"), r.word))
+        .collect();
+    learned.sort();
+    e.set_learning(false);
+    let (mut rs, mut ds, mut top1) = (String::new(), String::new(), 0);
+    for (i, (ctx, gold, syls)) in replay.iter().enumerate() {
+        e.set_left_context(ctx);
+        let shown = type_syls(e, &syls.join(" ")).preedit;
+        e.reset(ResetMode::Discard);
+        let ok = len.apply(&shown) == len.apply(gold);
+        top1 += ok as usize;
+        let errors = if ok { 0 } else { levenshtein(&shown, gold) };
+        rs += &format!("{}\t{}\t{errors}\t{}\n", i + 1, ok as u8, gold.chars().count());
+        ds += &format!("{}\t{}\t{shown}\t{gold}\n", i + 1, ok as u8);
+    }
+    if let Some(d) = dump {
+        std::fs::write(d, ds).unwrap();
+    }
+    (rs, top1, learned)
+}
+
 /// §3.1: `NEWWORD_MODE=base|new` (base: S4 only), `NEWWORD_PROFILE=chat|formal`, `NEWWORD_TEACH` and `NEWWORD_REPLAY`
 /// (comma-separated sources, see `rows_of`; replay defaults to the teach set), `NEWWORD_OUT` (the rowstats file:
 /// `row\tok\terrors\tgold_len`, lenient top-1 against eval/variants.tsv like the CLI). One engine teaches every row
-/// with learning on (in-memory store, fixed day), then replays the replay set with learning off. Prints counts only.
+/// with learning on (in-memory store, fixed day), then replays the replay set with learning off. Prints counts only,
+/// unless `NEWWORD_SHOW=1` (the learned words, `newword\t<reading>\t<word>` lines, for experiments/newword/hijack.py).
+/// `NEWWORD_DUMP=FILE` writes the replay's `row\tok\tshown\tgold` lines there. Both hold text: they stay on the machine
+/// that ran them and are deleted after use (contract §5).
 #[test]
 #[ignore]
 fn measure_newword() {
@@ -266,22 +313,8 @@ fn measure_newword() {
         e.set_newword_subspans(v == "1");
     }
     e.set_profile(profile).unwrap();
-    for (ctx, gold, syls) in &teach {
-        teach_row(&mut e, ctx, gold, syls);
-    }
-    let learned = new_words(&e);
-    e.set_learning(false);
-    let (mut rs, mut top1) = (String::new(), 0);
-    for (i, (ctx, gold, syls)) in replay.iter().enumerate() {
-        e.set_left_context(ctx);
-        let shown = type_syls(&mut e, &syls.join(" ")).preedit;
-        e.reset(ResetMode::Discard);
-        let ok = len.apply(&shown) == len.apply(gold);
-        top1 += ok as usize;
-        let errors = if ok { 0 } else { levenshtein(&shown, gold) };
-        rs += &format!("{}\t{}\t{errors}\t{}\n", i + 1, ok as u8, gold.chars().count());
-        if let Some(d) = std::env::var_os("NEWWORD_DUMP") { use std::io::Write; let mut f = std::fs::OpenOptions::new().create(true).append(true).open(d).unwrap(); writeln!(f, "{}\t{}\t{}\t{}", i + 1, ok as u8, shown, gold).unwrap(); }
-    }
+    let dump = std::env::var_os("NEWWORD_DUMP").filter(|v| !v.is_empty()).map(PathBuf::from);
+    let (rs, top1, learned) = measure(&mut e, &teach, &replay, &len, dump.as_deref());
     std::fs::write(&out, rs).unwrap();
     println!(
         "measure_newword {mode}: teach {} rows, replay {} rows, top1 {top1}, S4 records {}, new words {}",
@@ -291,8 +324,30 @@ fn measure_newword() {
         learned.len()
     );
     if std::env::var_os("NEWWORD_SHOW").is_some() {
-        println!("new words: {}", learned.join(" "));
+        for l in &learned {
+            println!("{l}");
+        }
     }
+}
+
+/// Revision one: the `NEWWORD_DUMP` lines are `row\tok\tshown\tgold`, one per replayed row in order, and the learned list
+/// is `newword\t<reading>\t<word>` (what experiments/newword/hijack.py reads).
+#[test]
+fn measure_dump_and_show_formats() {
+    let row = |c: &str, g: &str, r: &str| (c.to_string(), g.to_string(), r.split(' ').map(String::from).collect::<Vec<_>>());
+    let teach = vec![row("要進", "派工", PAIGONG)];
+    let replay = vec![row("加入", "派工", PAIGONG), row("", "正彬", ZHENGBIN)];
+    let len = core::eval::Lenient::parse(&std::fs::read_to_string(root().join("eval/variants.tsv")).unwrap()).unwrap();
+    let dir = tmp_dir("dump");
+    std::fs::create_dir_all(&dir).unwrap();
+    let dump = dir.join("dump.tsv");
+    let mut e = engine();
+    let (rs, top1, learned) = measure(&mut e, &teach, &replay, &len, Some(&dump));
+    assert_eq!(std::fs::read_to_string(&dump).unwrap(), "1\t1\t派工\t派工\n2\t0\t正賓\t正彬\n");
+    assert_eq!(rs, "1\t1\t0\t2\n2\t0\t1\t2\n");
+    assert_eq!(top1, 1);
+    assert_eq!(learned, vec!["newword\tㄆㄞˋ-ㄍㄨㄥ\t派工".to_string()]);
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 // ---------- tiny lexicons: the §2.2 rules one by one ----------
@@ -382,6 +437,71 @@ fn digits_are_not_learned() {
     assert!(learned.is_empty(), "{c}");
     let (learned, c) = learn_t(d, "ㄧ ㄦˋ ㄅㄢˇ", 1);
     assert_eq!(learned, vec![c], "a digit next to another character is learned");
+}
+
+// ---------- §2.2 item 3, revisions one and two: the shadow gate over the one lexicon ----------
+
+/// The best file score (before capping and demotion) under `reading` in the lexicon the engine loaded.
+fn lexicon_best(reading: &str) -> Option<f64> {
+    let r: Vec<String> = reading.split(' ').map(String::from).collect();
+    shared().lex.entries(&r).iter().map(|x| x.1).reduce(f64::max)
+}
+/// Type `reading` after `ctx` on a production engine, spell `target` by single-character re-picks, Enter; the new words.
+fn spell_and_commit(ctx: &str, reading: &str, target: &str) -> Vec<String> {
+    let mut e = engine();
+    e.set_left_context(ctx);
+    assert_ne!(type_syls(&mut e, reading).preedit, target);
+    spell(&mut e, target);
+    assert_eq!(e.key(k(KeyKind::Enter)).unwrap().commit, target);
+    new_words(&e)
+}
+
+/// Revision one: 為期 (-4.85) is above NEWWORD_SHADOW, so re-picking 期 to 祁 learns no 為祁 that would cover it.
+#[test]
+fn a_strong_lexicon_word_blocks_the_new_word() {
+    assert!(lexicon_best("ㄨㄟˊ ㄑㄧˊ").is_some_and(|b| b > NEWWORD_SHADOW), "fixture: a strong word under the reading");
+    assert_eq!(spell_and_commit("", "ㄨㄟˊ ㄑㄧˊ", "為祁"), Vec::<String>::new());
+}
+
+/// Revision one: 根音 (-7.47, a count-less base mode) is the only word under ㄍㄣ ㄧㄣ and below NEWWORD_SHADOW, so 根因 is
+/// learned.
+#[test]
+fn a_weak_lexicon_word_does_not_block_the_new_word() {
+    assert!(lexicon_best("ㄍㄣ ㄧㄣ").is_some_and(|b| b <= NEWWORD_SHADOW), "fixture: only weak words under the reading");
+    assert_eq!(spell_and_commit("", "ㄍㄣ ㄧㄣ", "根因"), vec!["根因"]);
+}
+
+/// Revision two: the lexicon of the gate includes the names layer. 湯臣 (names-add.tsv, -5.17) is the only lexicon word
+/// under ㄊㄤ ㄔㄣˊ, so re-picking 臣 to 陳 learns no 湯陳 that would cover the name.
+#[test]
+fn a_names_layer_word_blocks_the_new_word() {
+    assert_eq!(spell_and_commit("", "ㄊㄤ ㄔㄣˊ", "湯陳"), Vec::<String>::new());
+    let names = std::fs::read_to_string(root().join("data/lexicon").join(NAMES_FILE)).unwrap();
+    assert!(names.lines().any(|l| l.starts_with("ㄊㄤ-ㄔㄣˊ\t湯臣\t")), "fixture: 湯臣 comes from the names layer");
+    assert!(lexicon_best("ㄊㄤ ㄔㄣˊ").is_some_and(|b| b > NEWWORD_SHADOW), "fixture: the engine's lexicon has it");
+}
+
+/// The motivating report: at sentence start, re-picking 正彬 character by character (ㄓㄥˋ ㄅㄧㄣ, no lexicon word) learns
+/// it as a new word, so the next ㄓㄥˋ ㄅㄧㄣ, at sentence start or after other text, shows 正彬. S4 alone never learned it:
+/// the same re-picks without new-word B leave the next composition at 正賓.
+#[test]
+fn zhengbin_repicked_at_sentence_start_is_learned() {
+    assert_eq!(lexicon_best(ZHENGBIN), None, "fixture: no lexicon word under the reading");
+    for newword in [false, true] {
+        let mut e = engine();
+        e.set_newword(newword);
+        e.set_left_context("");
+        assert_eq!(type_syls(&mut e, ZHENGBIN).preedit, "正賓");
+        spell(&mut e, "正彬");
+        assert_eq!(e.key(k(KeyKind::Enter)).unwrap().commit, "正彬");
+        for ctx in ["", "我們", "跟"] {
+            e.set_left_context(ctx);
+            let shown = type_syls(&mut e, ZHENGBIN).preedit;
+            e.key(k(KeyKind::Esc)).unwrap();
+            assert_eq!(shown, if newword { "正彬" } else { "正賓" }, "new-word B {newword}, after {ctx:?}");
+        }
+        assert_eq!(new_words(&e), if newword { vec!["正彬"] } else { vec![] });
+    }
 }
 
 // ---------- §2.1 when ----------
@@ -889,4 +1009,5 @@ fn perf_two_thousand_new_words_per_key() {
     #[cfg(not(debug_assertions))]
     assert!(pb < pa + std::time::Duration::from_millis(1), "p95 more than 1 ms over (stop condition §5)");
 }
+
 
