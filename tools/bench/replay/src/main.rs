@@ -1,8 +1,9 @@
 //! S-bench key replay (docs/contracts/sbench.md 1.2). Built by tools/bench.py against one exported version of `core`.
-//! usage: replay <lexicon dir> <lm file> <rows file> <commits out>
+//! usage: replay <lexicon dir> <lm file> <rows file> <commits out> [chat|formal]   (the profile defaults to chat)
 //! Types every row's reading as standard-layout key presses plus Enter, times each key, writes one committed
 //! string per row to <commits out>, and prints one JSON line (keys, load_ms, p95_us, max_us).
 use core::engine::*;
+use core::lm::Profile;
 use std::time::Instant;
 
 /// Reading -> key presses; same rule as core/tests/engine_lm.rs `keys_of`.
@@ -30,6 +31,13 @@ fn main() {
     let t = Instant::now();
     let mut e = Engine::new(std::path::Path::new(&a[0]), layout).unwrap();
     e.load_lm(std::path::Path::new(&a[1])).unwrap();
+    match a.get(4).map(String::as_str) {
+        None | Some("chat") => {}
+        Some("formal") => {
+            e.set_profile(Profile::Formal).unwrap();
+        }
+        Some(p) => panic!("profile must be chat or formal, got {p:?}"),
+    }
     let load_ms = t.elapsed().as_secs_f64() * 1e3;
 
     let text = std::fs::read_to_string(&a[2]).unwrap();

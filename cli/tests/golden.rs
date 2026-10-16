@@ -57,10 +57,13 @@ const LM_MISSING: &str = "data/lm/bigram.sjlm is missing: download it with `gh r
 
 const CLASSES_MISSING: &str = "data/lm/classes.sjc is missing: download it with `gh release download classes-v5 -R Nanako0129/shanjie -p classes.sjc -D data/lm` (or build it with tools/build_classes.py)";
 
+const TRIGRAM_MISSING: &str = "data/lm/trigram.sjt3 is missing (the formal profile's trigram table): download it with `gh release download sj-cx-1-7.7m -R Nanako0129/shanjie -p trigram.sjt3 -D data/lm`";
+
 fn lm_path() -> String {
     let p = format!("{}/../data/lm/bigram.sjlm", env!("CARGO_MANIFEST_DIR"));
     assert!(std::path::Path::new(&p).exists(), "{LM_MISSING}");
     assert!(std::path::Path::new(&format!("{}/../data/lm/classes.sjc", env!("CARGO_MANIFEST_DIR"))).exists(), "{CLASSES_MISSING}");
+    assert!(std::path::Path::new(&format!("{}/../data/lm/trigram.sjt3", env!("CARGO_MANIFEST_DIR"))).exists(), "{TRIGRAM_MISSING}");
     p
 }
 
@@ -211,7 +214,8 @@ fn sw_probe_matches_python_golden_byte_for_byte() {
 
 /// S2k acceptance 3: `--no-classes` is the arithmetic without the word-class term. The two summary lines are what the Python
 /// `lm_eval.py --no-classes --profile P --dev 302 --context` prints (regenerated 2026-10-14 for model-v6: kn.sjkn beside the model is
-/// on in both, names layer on; before it for dec-recombine, and before that they were the ones main's s2h-lm-context.txt held before S2k).
+/// on in both, names layer on; the formal line regenerated again for trigram-core slice C3: with trigram.sjt3 beside the model the formal
+/// profile decodes with the table and KN is off there, hence `+tri:` instead of `+kn:`; before it for dec-recombine, and before that they were the ones main's s2h-lm-context.txt held before S2k).
 #[test]
 fn no_classes_flag_matches_its_pinned_numbers() {
     let lm = lm_path();
@@ -222,7 +226,7 @@ fn no_classes_flag_matches_its_pinned_numbers() {
     );
     assert_eq!(
         line("formal"),
-        "## dev302  lm-formal+ctx-noclasses+kn:cbefbced:θ1:β1  {'n': 302, 'top1': 249, 'oracle@64': 300, 'top1_sha256': '08de71c89fea87842eab2b828d5728a842b2b7a38a6906b84c0ecc3a083eacdc'}\n"
+        "## dev302  lm-formal+ctx-noclasses+tri:fdd3b05d  {'n': 302, 'top1': 252, 'oracle@64': 300, 'top1_sha256': '22ff9dc530e4b3dd098f824546784c47eafb775b92b0f9e20702d9c0ee33ab0c'}\n"
     );
 }
 

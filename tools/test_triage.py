@@ -118,6 +118,23 @@ class KnTag(unittest.TestCase):
         self.assertRaises(ValueError, T.kn_tag, os.path.join(kn, "bigram.sjlm"))
 
 
+class SettingTag(unittest.TestCase):
+    def test_formal_with_the_table_has_tri_and_no_kn_chat_keeps_kn(self):
+        """The tag the CLI prints (cli/src/main.rs): trigram.sjt3 beside the model turns KN off for formal and appends +tri: after +acg."""
+        kn, tri = "+kn:cbefbced:θ1:β1", "+tri:fdd3b05d"
+        self.assertEqual(T.expected_tag("formal", "+ctx", "abcd1234", kn, tri), "lm-formal+ctx+tl:abcd1234+acg+tri:fdd3b05d")
+        self.assertEqual(T.expected_tag("formal", "", "abcd1234", kn, tri), "lm-formal+tl:abcd1234+acg+tri:fdd3b05d")
+        self.assertEqual(T.expected_tag("chat", "+ctx", "abcd1234", kn, tri), "lm-chat+ctx+kn:cbefbced:θ1:β1+tl:abcd1234+acg")
+        self.assertEqual(T.expected_tag("formal", "+ctx", "abcd1234", kn, ""), "lm-formal+ctx+kn:cbefbced:θ1:β1+tl:abcd1234+acg")
+
+    def test_tri_tag_is_the_sha8_of_the_file_or_empty(self):
+        with tempfile.TemporaryDirectory() as td:
+            f = os.path.join(td, "trigram.sjt3")
+            open(f, "wb").write(b"table")
+            self.assertEqual(T.tri_tag(f), "+tri:" + hashlib.sha256(b"table").hexdigest()[:8])
+            self.assertEqual(T.tri_tag(os.path.join(td, "no-such.sjt3")), "")
+
+
 class Segments(unittest.TestCase):
     def test_lenient_compare_and_original_fallback(self):
         self.assertEqual(T.diff_segments("她好", ["他", "好"], LEN), [], "她/他 are the same after normalising")
