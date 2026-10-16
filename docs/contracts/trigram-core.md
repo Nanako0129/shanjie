@@ -22,7 +22,7 @@
 
 每片各自 PR，照「改動分級」的程式關卡（`/code-review`＋fresh verifier＋CI）。第 0 片是實驗，不改核心。
 
-### 第 0 片：出貨模型上的前置檢查（188，Python，不改核心）
+### 第 0 片：出貨模型上的前置檢查（Windows 機器，Python，不改核心）
 
 - 程式（`experiments/derisk-1015/e1/` 旁加，或新資料夾 `experiments/trigram-core/`）：
   - `remap_tri.py`：把 `.sjt3` 從 B0 的詞 id 換成 model-v6 的詞 id（照詞串對應），重算 `ctx_key`、重排序，檔頭的模型 SHA-256 改綁 model-v6。B0 有、model-v6 沒有的詞 → 停（B0 是 model-v6 去掉指紋條目，不應該發生）。
@@ -33,7 +33,7 @@
   - 判讀（重現，不是新假設）：調參集 CAND 對 BASE 顯著為正（a = 0.05），判讀五集串接與 discordtune 不顯著為負。
   - 只報：和 E1h 的 FH3k 逐列比 top1，不同的列數（指紋條目與詞類表的差異都會造成）。
 - 不通過 → 停，回報維護者；通過 → 第 A 片。CAND 的 rowstats 與摘要行就是第 A 片 Rust 錨點的目標。
-- 預算：188 一小時。
+- 預算：Windows 機器一小時。
 
 ### 第 A 片：Rust 讀表、解碼器、書面關 KN、CLI 錨點（App 不開）
 
@@ -55,7 +55,7 @@
   1. 沒有 `trigram.sjt3` 時逐位元組不變：現有 golden 全過、不改 golden 檔。
   2. Rust 單元測試（玩具模型＋玩具表）：分數和 Python 手算相同（保留條目、前文有但條目沒有、前文沒有、u 未知四種）；壞檔各回錯誤；突變：拿掉 back3、拿掉重組鍵的前一詞，測試要失敗。
   3. 小模型跨語言 golden（Python 產生、Rust 比對）：前 N 名與分數逐位元組相同。
-  4. **真模型跨語言（決定性的一項，main 在 188 跑）**：model-v6＋classes-v5＋第 0 片重對應的 H3，`--profile formal --context`：dev302、打字測驗、錯字回報、cvtune、wikitune 的摘要行（含 `top1_sha256`）與 rowstats 和第 0 片 CAND 的 Python 輸出逐字相同；`--profile chat` 和 v0.4.6 的 CLI 逐字相同。
+  4. **真模型跨語言（決定性的一項，main 在 Windows 機器跑）**：model-v6＋classes-v5＋第 0 片重對應的 H3，`--profile formal --context`：dev302、打字測驗、錯字回報、cvtune、wikitune 的摘要行（含 `top1_sha256`）與 rowstats 和第 0 片 CAND 的 Python 輸出逐字相同；`--profile chat` 和 v0.4.6 的 CLI 逐字相同。
   5. 延遲：真模型開著表時 `perf_*` 測試照舊通過；另報每鍵 p95 與載入後 RSS（CLI 量，正式的在第 B 片）。
   6. **引擎測試**（玩具模型＋玩具表）：
      - 書面有表、組字區中間有一個固定的字、最佳路徑上有學到的詞：`total_score` 等於解碼第一名的分數；
@@ -70,7 +70,7 @@
 ### 第 B 片：引擎量測與語意校正的配合
 
 - 書面重播：基準工具的速度表現在只重播聊天（`docs/benchmark.md` 的速度一節），加一列書面重播；量每鍵 p95、最大、載入時間、RSS。超過上限（RSS +150 MB 或 p95 +1 ms）→ 先試已知的修法（例如依 u 分段的索引縮小二分搜尋），還超過就停，回報維護者。
-- **選字記憶**（在第 C 片之前，main 在 188 的 WSL 跑）：`engine_learn` 用書面設定、模型旁有重對應的 `trigram.sjt3`：鏡像改選 ≥ 80%、A2 ≥ 80% 且非衝突改壞 0、ㄗㄞˋ 污染 0（門檻同 model-v6 §2.8）；`manual_words_come_first_in_the_shipping_setting` 書面不比 v0.4.6 少。不到門檻 → 停，問維護者（選項包含調整學習加分的例外範圍）。
+- **選字記憶**（在第 C 片之前，main 在 Windows 機器的 WSL 跑）：`engine_learn` 用書面設定、模型旁有重對應的 `trigram.sjt3`：鏡像改選 ≥ 80%、A2 ≥ 80% 且非衝突改壞 0、ㄗㄞˋ 污染 0（門檻同 model-v6 §2.8）；`manual_words_come_first_in_the_shipping_setting` 書面不比 v0.4.6 少。不到門檻 → 停，問維護者（選項包含調整學習加分的例外範圍）。
 - 語意校正（tinylm-v5）：書面的 (α, τ, δ) 是在 bigram＋KN 的分數上選的；trigram 讓 n-gram 分數差距變大。驗收：書面、開 tinylm-v5、標準強度，新對舊在判讀五集、調參集、discordtune 每集都不顯著為負（守門）。不過 → 在 Rust CLI 的候選傾印上重選書面的三個值（照 S7h 的流程），出 tinylm 的新版本；選值與守門用不同的集合，另寫在這一片的修訂。
 - `tinylm.sjtl` 的配對檢查（現在核對模型與 `kn.sjkn` 雜湊）要知道書面不用 KN；同一個 PR 改。
 
@@ -88,7 +88,7 @@
 
 ## 4. 限制與回滾
 
-- executor：不跑 188、不連網；不讀 `eval/holdout`、`~/side-project/shanjie-private`、學習檔、`~/Library`、鑰匙圈；不安裝、不啟動 App；不 push、不開 PR、不碰其他 worktree。私人集合（discordtune）只由 main 跑、只回數字。
+- executor：不跑 Windows 機器、不連網；不讀 `eval/holdout`、`~/side-project/shanjie-private`、學習檔、`~/Library`、鑰匙圈；不安裝、不啟動 App；不 push、不開 PR、不碰其他 worktree。私人集合（discordtune）只由 main 跑、只回數字。
 - 回滾：第 A 片沒有表時本來就關閉；第 C 片之後 revert 打包那個 PR 即回到 v0.4.6 的書面設定。
 
 ## 5. 審查紀錄

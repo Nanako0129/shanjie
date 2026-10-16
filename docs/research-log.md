@@ -5895,9 +5895,9 @@ formal: alpha 0.7, tau 1, delta 2
 
 - 契約 `docs/contracts/trigram-core.md`（修訂二，`9458e48`）。plan-verifier 兩次 REVISE（引擎詞段交界的歷史規則、學到的詞與 trigram、書面預測列不變），都已處置。設計分析由 Fable 做（配對、切片、風險排序），數字由 main 核對。
 - 重對應：`experiments/derisk-1015/e1/remap_tri.py`（`feat/derisk-1015` `6c52e7f`，合成資料的單元測試 5 項通過）把 H3 從 B0 的詞 id 換成 model-v6 的：4,101,808 個前文、7,700,964 條，B0 與 model-v6 的詞彙都是 353,497 個詞，輸出 `fdd3b05d…`（綁 model-v6 `fc2bddd1`）。
-- 量法：188，`grid.py judge`，書面 λ 0.7、β 1、`--context`，集合同 E1g（凍結檔核對通過）。BASE 是出貨的書面形狀（model-v6 `fc2bddd1`＋classes-v5 `9e36fa1b`＋kn-v1 `cbefbced`）；CAND 是 model-v6＋classes-v5＋重對應的 H3，KN 關。2 分鐘。
+- 量法：Windows 機器，`grid.py judge`，書面 λ 0.7、β 1、`--context`，集合同 E1g（凍結檔核對通過）。BASE 是出貨的書面形狀（model-v6 `fc2bddd1`＋classes-v5 `9e36fa1b`＋kn-v1 `cbefbced`）；CAND 是 model-v6＋classes-v5＋重對應的 H3，KN 關。2 分鐘。
 - **判讀**（a = 0.05）：調參集 205/141（**+64，p 0.0007**），判讀五集 +36（p 0.040）、discordtune +35（p 0.051），都不是顯著為負 → **通過**，進第 A 片。
 - 只報：
   - 每個集合：wikitune +51（p 0.0002）、lytune +36（p 0.024）、cvtune +13、dev302 +1、打字測驗 −2、錯字回報 0、wikitypo +1。
   - 和 E1h 的 FH3k（B0 上量的）逐列比：調參集、判讀五集、discordtune 的 top1 對錯**完全相同**（0 列不同）；BASE 對 E1g 的 F0 也 0 列不同。指紋條目與詞類表的差別在這些集合上沒有影響任何一列。
-- CAND 在 188 的 rowstats 與摘要行（`/mnt/c/Users/Nanako/derisk/e1r/tc0/V6H3k/formal/`，摘要行 `lm-formal+ctx+tri:fdd3b05d`）是第 A 片 Rust 錨點的目標。
+- CAND 在 Windows 機器上的 rowstats 與摘要行（摘要行 `lm-formal+ctx+tri:fdd3b05d`）是第 A 片 Rust 錨點的目標。
