@@ -17,12 +17,13 @@ SJT30001 (little-endian), the table bound to one bigram model (tools/build_trigr
 Size = 64 + 20 * C + 8 * E bytes.
 
 Smoothing (interpolated absolute discounting, kept pre-prune totals):
-  P3(w | u, v) = max(c(u,v,w) - D, 0) / t3(u,v) + back3(u,v) * P2(w | v)        if the context (u, v) is stored
+  P3(w | u, v) = max(max(c(u,v,w) - D, 0) / t3(u,v) + back3(u,v) * P2(w | v), TRI_FLOOR * P2(w | v))   if the context (u, v) is stored
   P3(w | u, v) = P2(w | v)                                                       otherwise (also when u is unknown)
   back3(u,v)   = 1 - sum over KEPT entries (c - D) / t3(u,v),   t3 = the context's total BEFORE pruning
 P2 is the bigram model's own probability (lm.py `prob`, class term included); with the Kneser-Ney side file loaded its pb is
 substituted first, exactly as lm.py `word` does. The decoder: `decode3` is lm.decode with the state (u, v) = the last two words and
-paths recombined on (surface, previous word, last word); the closing term is scored from (u, v) too.
+paths recombined on (surface, previous word, last word); the closing term is scored from (u, v) too, except that a one-word sentence that
+starts from a left context (u unknown) closes with the bigram: u of the closing term is unknown as well (slice A2 (b'); two words or more: unchanged).
 """
 import hashlib
 import math
@@ -36,6 +37,9 @@ import lm as L
 MAGIC = b"SJT30001"
 HEAD = struct.calcsize("<8sId32sII")   # 60
 D_TRI = 0.75   # the trigram discount, the same D as the bigram level
+# The floor (docs/contracts/trigram-core.md slice A2; docs/research-log.md "2026-10-16：trigram-core 第 C 片暫停，書面有表的退步與修法"):
+# P3 never goes below TRI_FLOOR * P2, which caps the penalty a stored context gives a word it did not keep. core/src/trigram.rs has the same value.
+TRI_FLOOR = 0.5
 
 
 def read_tri(b):
@@ -124,7 +128,8 @@ class TriLM:
         tri = self.tri
         k = tri.count(idx, self.lm.ids.get(w, -1))
         t, back = float(tri.tot[idx]), tri.back(idx)
-        return (k - tri.D) / t + back * p if k else back * p
+        p3 = (k - tri.D) / t + back * p if k else back * p
+        return max(p3, TRI_FLOOR * p)
 
     def word(self, lam, u, v, w, lp):
         """lm.py BigramLM.word with the trigram level (same KN mix of the back-off distribution)."""
@@ -180,6 +185,8 @@ def decode3(lex, syls, tri_lm, profile, beam=64, start="<s>", demote=True):
     out = []
     for s, ws in hyps[n]:
         u, v = hist(ws)
+        if su is None and len(ws) == 1:   # (b') a one-word stretch from a left context: u of the closing term is unknown too
+            u = None
         out.append((s + tri_lm.eos(lam, u, v), ws))
     best, seen = [], set()
     for x in sorted(out, key=lambda x: -x[0]):

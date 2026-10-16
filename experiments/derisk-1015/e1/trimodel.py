@@ -147,8 +147,10 @@ class TriTable:
 class TriLM:
     """B0 (a lm.BigramLM) plus an optional trigram table; the scoring functions of lm.py with a second history word."""
 
-    def __init__(self, lm, tri=None):
-        self.lm, self.tri = lm, tri
+    def __init__(self, lm, tri=None, floor=0.0):
+        """floor (trigram-core research, 2026-10-16): P3 never goes below floor * P2, which caps the penalty a stored context gives a
+        word it has not kept; 0 is the plain model."""
+        self.lm, self.tri, self.floor = lm, tri, floor
         self._ctx = functools.lru_cache(maxsize=1 << 20)(self._ctx_uncached)
         self.word = functools.lru_cache(maxsize=1 << 20)(self._word)   # pure in (lam, u, v, w, lp) for a fixed KN beta: clear it when beta changes
 
@@ -166,7 +168,8 @@ class TriLM:
         tri = self.tri
         k = tri.count(idx, self.lm.ids.get(w, -1))
         t, back = float(tri.tot[idx]), tri.back(idx)
-        return (k - tri.D) / t + back * p if k else back * p
+        p3 = (k - tri.D) / t + back * p if k else back * p
+        return max(p3, self.floor * p) if self.floor else p3
 
     def _word(self, lam, u, v, w, lp):
         """lm.py BigramLM.word with the trigram level (same KN mix of the back-off distribution)."""

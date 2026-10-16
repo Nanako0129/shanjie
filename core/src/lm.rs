@@ -914,7 +914,8 @@ pub fn decode_segment<'a>(
 /// Trigram level (`scoring.tri` with a table loaded, docs/contracts/trigram-core.md): the state is the last two words, so paths
 /// are recombined on (surface, previous word, last word). `start` is the history (u, v) of the first word: `<s>` is (`<s>`, `<s>`),
 /// any other word is (unknown, that word), so the first word is scored by the bigram alone. The closing term uses the table too:
-/// `Eos` and `End::Next` are scored from (second last word, last word); a segment of one word has the start word as the second last.
+/// `Eos` and `End::Next` are scored from (second last word, last word); a segment of one word has the start word as the second last,
+/// except that a one-word segment with an unknown start (`start` is not `<s>`) closes with the bigram (slice A2 (b'): u is unknown there too).
 /// A learned-boosted entry skips both the Kneser-Ney substitution and the table (model-v6 section 2.8 rule 1 extended: the table's
 /// back-off weight would shrink the boost the same way).
 #[allow(clippy::too_many_arguments)]
@@ -1073,9 +1074,11 @@ pub fn decode_segment_learned<'a>(
     let mut out: Vec<(f64, Vec<(&'a str, f64, f64)>, String)> = last
         .into_iter()
         .map(|h| {
+            // (b') a one-word segment from an unknown start closes without the table.
+            let tri = if start != "<s>" && h.words.len() == 1 { None } else { h.tri };
             let term = match closing {
-                None => lam * lm.prob_tri(h.tri, h.ctx, Some(1), lm.p_eos, cfg.kn).log10(),
-                Some((wid, pb, lp, delta)) => word_term(lam, lm.prob_tri(h.tri, h.ctx, wid, pb, cfg.kn), lp) - delta,
+                None => lam * lm.prob_tri(tri, h.ctx, Some(1), lm.p_eos, cfg.kn).log10(),
+                Some((wid, pb, lp, delta)) => word_term(lam, lm.prob_tri(tri, h.ctx, wid, pb, cfg.kn), lp) - delta,
             };
             (h.score + term, h.words, h.surface)
         })
@@ -1556,6 +1559,32 @@ mod tests {
         assert_eq!(lm.word3(off, Some("<s>"), "<s>", "a", lp), lm.word(0.5, "<s>", "a", lp));
         assert_eq!(lm.word3(Scoring::from(0.5), Some("<s>"), "<s>", "a", lp), lm.word(0.5, "<s>", "a", lp));
         assert_eq!(lm.eos3(Scoring::from(0.5), Some("a"), "b"), lm.eos(0.5, "b"));
+    }
+
+    /// Slice A2 (e), the floor: P3 = max(formula, 0.5 * P2). (<s>, <s>) keeps a 6 of 6, so back3 = 1 - (6 - 0.75) / 6 = 0.125: a word the context did not
+    /// keep (b, and the closing term </s>) would get 0.125 * P2, and the floor lifts it to 0.5 * P2 (active); the kept word a gets 0.875 + 0.125 * P2, far above
+    /// the floor (inactive, the formula is unchanged). The cases above (back3 0.58 to 0.88) are floor-inactive too. The literal 0.5 is on purpose (a changed
+    /// constant must fail here).
+    #[test]
+    fn trigram_floor_lifts_only_what_falls_below_it() {
+        let model = tiny();
+        let mut lm = Lm::parse(&model).unwrap();
+        lm.add_tri(tri_bytes(&model, 0.75, &[((0, 0), 6, &[(2, 6)])])).unwrap();
+        let cfg = Scoring { lam: 0.5, kn: true, tri: true };
+        let (lp, d) = (-1.0, 0.75);
+        let pb = pow10(lp);
+        let back3 = 1.0 - (6.0 - d) / 6.0;
+        // inactive: the kept word
+        let formula = (6.0 - d) / 6.0 + back3 * lm.prob("<s>", "a", pb);
+        assert!(formula > 0.5 * lm.prob("<s>", "a", pb), "premise: the floor is below the formula");
+        assert_eq!(lm.word3(cfg, Some("<s>"), "<s>", "a", lp), word_term(0.5, formula, lp));
+        // active: a word the context did not keep, and the closing term
+        let below = back3 * lm.prob("<s>", "b", pb);
+        assert!(below < 0.5 * lm.prob("<s>", "b", pb), "premise: the formula is below the floor");
+        assert_eq!(lm.word3(cfg, Some("<s>"), "<s>", "b", lp), word_term(0.5, 0.5 * lm.prob("<s>", "b", pb), lp));
+        assert_eq!(lm.eos3(cfg, Some("<s>"), "<s>"), 0.5 * (0.5 * lm.prob("<s>", "</s>", lm.p_eos)).log10());
+        // context not stored: the bigram, bit for bit (no floor)
+        assert_eq!(lm.word3(cfg, Some("a"), "<s>", "b", lp), lm.word(0.5, "<s>", "b", lp));
     }
 
     /// The setting each profile scores with: formal with a table is trigram on and Kneser-Ney off, chat never uses the table.
