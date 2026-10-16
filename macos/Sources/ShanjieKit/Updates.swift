@@ -86,6 +86,8 @@ public final class Updates: ObservableObject {
     /// Sparkle's interactive flow (download progress, notes, install and relaunch). Called only from `finished`, after a
     /// silent check the user started with `install` confirmed a newer version.
     public var interactive: () -> Void = {}
+    /// Brings the open Sparkle windows to the front: 更新到 X or the menu item pressed while a Sparkle session runs.
+    public var focus: () -> Void = {}
 
     private let store: UpdateStore
     /// `install` started the running check: open the interactive flow if it finds a newer version.
@@ -125,11 +127,12 @@ public final class Updates: ObservableObject {
     }
 
     /// 更新到 X and the menu item: a silent check first, and Sparkle's interactive flow only if it confirms a newer version
-    /// (`finished`). Otherwise the state says 已是最新 or 檢查失敗 and no Sparkle window opens.
+    /// (`finished`). Otherwise the state says 已是最新 or 檢查失敗 and no Sparkle window opens. While a session runs, the press
+    /// brings Sparkle's windows back to the front instead: the input method has no Dock icon to do it (device check 2026-10-16).
     public func install(now: Date = Date()) {
         switch begin(now) {
         case .started: installAfterCheck = true
-        case .busy: break
+        case .busy: focus()
         case .unavailable: failNow(now)
         }
     }

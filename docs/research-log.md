@@ -6373,3 +6373,13 @@ formal: alpha 0.7, tau 1, delta 2
 - 維護者實機的組字區是「好你一份草稿」，錯的是「你」，要的是同音的「擬」（ㄋㄧˇ）。加成 `|好擬一份草稿|ㄏㄠˇ ㄋㄧˇ ㄧ ㄈㄣˋ ㄘㄠˇ ㄍㄠˇ`（讀音由 `tools/readings.py` 產生，沒有 CHECK）。
 - Python 參考實作、golden 設定：兩種設定第 1 名都是「好你一份草稿」，正解第 2。
 - `eval/golden/s2h-lm-context.txt` 的錯字回報兩行用 Python 參考實作重產，n 125：聊天 top1 29、書面 37 不變，oracle@64 兩種設定都 121 → 122；`eval/README.md` 改成 125 列。
+
+## 2026-10-16：about-update 實機（驗收第 4 項）
+
+- 做法：一把一次性的測試金鑰；測試版 A（0.4.5）與 B（0.4.6）都是 `ShanjieUpdateBuild` `test`，feed 指向 `http://127.0.0.1:8977/appcast.xml`，由本機的 Python `http.server` 提供並記下每個請求的標頭。`file://` 不能用：Sparkle 2.9.3 回「The download request URL must use http or https」。所以 `scripts/build-app.sh` 的測試 feed 改成收 `https://` 或 `http://127.0.0.1`，後者只在測試版加 ATS 的 `NSAllowsLocalNetworking`，`scripts/check-app.sh` 擋其他組合（本機建置與兩個測試版都跑過）。
+- (g) 把測試 feed 的更新說明改一個字：Sparkle 拒絕（「EdDSA signature does not match… improperly signed」），關於頁不顯示新版。
+- (f) Sparkle 的請求（讀 feed 與下載 zip 相同）：`Host`、`Accept`（feed 是 `application/rss+xml,*/*;q=0.1`，下載是 `*/*`）、`Accept-Language: zh-TW,zh-Hant;q=0.9`（系統的語言偏好）、`Accept-Encoding: gzip, deflate`、`Connection: keep-alive`、`User-Agent: ?????/0.4.5 Sparkle/2.9.3`（App 名稱的五個中文字送出時是五個 0x3f 位元組，看原始位元組確認）。沒有輸入內容、選字記憶或其他系統資訊。目的主機要等正式 feed 才量得到（驗收第 6 項）。
+- 實機發現的問題：Sparkle 的「已有新版本」視窗開在設定視窗後面（設定視窗是 `.floating`）；切到別的 App 之後它沉到後面，再按「更新到 0.4.6」沒有反應（流程還在進行，`install` 收到 `.busy` 就略過），輸入法又沒有 Dock 圖示可以把它叫回來。修正：流程進行中，`Updater` 每 0.25 秒把 Sparkle 的視窗（window controller 屬於 Sparkle 的 bundle）提到 `.floating` 並 `orderFrontRegardless()`；`Updates.install` 遇到 `.busy` 時呼叫 `focus`，把已提上來的也重新叫回最前面（單元測試 `testInstallWhileBusyFocuses`；突變：`.busy` 改回 `break`，這個測試以斷言失敗，focus 次數 0 ≠ 1，還原後通過）。用修正版重建 A、B 後重測：視窗在設定視窗上面、點 TextEdit 後仍在最上面、點設定視窗蓋住後再按一次會回到最前面。
+- (h) 把 zip 移走後按「安裝更新」（伺服器記到 404）：Sparkle 的下載失敗警告在最前面，按掉後在 TextEdit 照常打字。
+- (e) 背景檢查和「立即檢查」用的是同一個 Sparkle 呼叫 `checkForUpdateInformation`（不開視窗）；實機按「立即檢查」查到 0.4.6 時沒有任何 Sparkle 視窗，只有關於頁顯示「有新版本 0.4.6」。測試期間沒有按按鈕時也沒有自己跳出視窗（維護者回報）。背景計時器本身在測試期間沒有到期（當天已經檢查過），決定「查到新版不開視窗」的邏輯由單元測試 `testBackgroundFindDoesNotOpenAWindowOrDropAVersion` 保護。
+- 真正的更新走輸入選單「有新版本 0.4.6，按此更新…」→ 安裝更新 → 安裝並重新啟動：伺服器 22:30:18 送出 zip，22:30:22 新程序啟動。(a) 安裝的是 0.4.6，程序路徑仍是 `~/Library/Input Methods/善解輸入法.app/Contents/MacOS/shanjie`；(b) TextEdit 照常打字；(c) Caps Lock 切換輸入法正常（Sparkle 換檔後沒有呼叫 TIS 註冊，沒有觸發 Caps Lock 的已知問題）；(d) 更新前就開著的 TextEdit、Safari、Discord、Orca 都不用重開就能繼續打字（維護者回報）。

@@ -10,7 +10,7 @@ final class UpdatesTests: XCTestCase {
     private let day = Updates.interval
     private let now = Date(timeIntervalSince1970: 1_800_000_000)
 
-    final class Counter { var probes = 0, interactives = 0 }
+    final class Counter { var probes = 0, interactives = 0, focuses = 0 }
 
     private func updates(_ store: MemoryUpdateStore = MemoryUpdateStore(), version: String = "0.4.7",
                          answer: ProbeStart = .started) -> (Updates, Counter) {
@@ -18,6 +18,7 @@ final class UpdatesTests: XCTestCase {
         let c = Counter()
         u.probe = { c.probes += 1; return answer }
         u.interactive = { c.interactives += 1 }
+        u.focus = { c.focuses += 1 }
         return (u, c)
     }
 
@@ -123,6 +124,17 @@ final class UpdatesTests: XCTestCase {
         XCTAssertEqual(down.result, .failed)
         XCTAssertEqual(down.lastCheck, now)
         XCTAssertEqual(dc.interactives, 0)
+    }
+
+    /// A press while a Sparkle session runs starts no check and brings Sparkle's windows to the front.
+    func testInstallWhileBusyFocuses() {
+        let (u, c) = updates(answer: .busy)
+        u.install(now: now)
+        XCTAssertEqual(c.focuses, 1)
+        XCTAssertFalse(u.checking)
+        XCTAssertNil(u.lastCheck, "no check started")
+        u.checkNow(now: now)
+        XCTAssertEqual(c.focuses, 1, "立即檢查 never brings Sparkle's windows up")
     }
 
     /// Only the check `install` started opens the interactive flow; a background check finding a version does not, and a
