@@ -9,7 +9,7 @@ outside the lexicon get NOREAD.
 
 The per-word rules are a copy of the branches of tools/readings.py main() (they live inside it and cannot be imported); the data
 (lexicon, overrides file, heterophony list) and the word segmentation (ime.segment_words) are the ones that file uses, and
-test_label_readings.py runs both on the same sentences.
+test_e2.py::TestReadingsParity runs both on the same sentences.
 """
 import argparse
 import collections

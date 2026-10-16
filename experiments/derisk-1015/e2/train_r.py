@@ -2,10 +2,10 @@
 same seed and tokens-per-batch, so the same steps as M), same optimiser, schedule and size; only the model (GPTR) and the reading
 channel differ.
 
-  python train_r.py --size M --work DIR --out DIR --split-probs P0 P1 P2     # DIR: S7a work dir + rd-*.npy, rdvocab.txt (label_readings.py)
+  python train_r.py --size M --work DIR --out DIR --split-probs P0 .. P16     # revision 7: 17 values (P0 P1 P2 before); DIR: S7a work dir + rd-*.npy, rdvocab.txt (label_readings.py)
   python train_r.py --size T --work DIR --out DIR --max-steps 20 --split-probs 1 0 0     # smoke test
 
-Each sample (piece of the epoch) is cut at a random point s (context length, 0..2 characters, drawn with --split-probs): the BOS and
+Each sample (piece of the epoch) is cut at a random point s (context length, 0..16 characters in revision 7 (0..2 before), drawn with --split-probs): the BOS and
 the first s characters are the context and get NOREAD, the rest carries readings (tinylm_r.mask_context). The reading input of a position is the
 reading of the character it predicts (tinylm_r.target_aligned). Writes DIR/tinylm-<size>r.npz and DIR/train-<size>r.json.
 Exit code 2 = diverged, as train.py.

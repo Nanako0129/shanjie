@@ -10,6 +10,7 @@ import sys
 import tempfile
 import unittest
 from contextlib import redirect_stdout
+from unittest import mock
 
 import numpy as np
 
@@ -198,6 +199,22 @@ class TestUseLl16(unittest.TestCase):
                 for k in a:
                     self.assertEqual(b[k], a["ll16"] if k == "ll" and "ll16" in a else a[k])
             self.assertIn("2 records changed", err.getvalue()); self.assertIn("1 with key16 > key", err.getvalue())
+            self.assertNotIn(b"\r", open(dst, "rb").read())
+
+    def test_main_stops_when_the_swap_has_no_effect_and_refuses_the_same_path(self):
+        same = [{"i": 1, "n": 2, "ll": [-1.0], "ll16": [-1.0], "key": 2, "key16": 2}]
+        with tempfile.TemporaryDirectory() as t:
+            src, dst = os.path.join(t, "in.jsonl"), os.path.join(t, "out.jsonl")
+            open(src, "w").write("".join(json.dumps(r) + "\n" for r in same))
+            with contextlib.redirect_stderr(io.StringIO()):
+                with self.assertRaises(SystemExit) as e:
+                    use_ll16.main([src, dst])
+                self.assertIn("STOP", str(e.exception))
+                with self.assertRaises(SystemExit):
+                    use_ll16.main([src, src])
+                self.assertEqual(open(src).read(), json.dumps(same[0]) + "\n")      # the input is untouched
+                open(src, "w").write(json.dumps({"i": 1, "n": 2, "ll": [-1.0], "ll16": [-2.0], "key": 0, "key16": 0}) + "\n")
+                use_ll16.main([src, dst])                                            # a changed record is enough
 
 
 class TestScoringItems(unittest.TestCase):
@@ -258,11 +275,11 @@ class TestModel(unittest.TestCase):
         q, _, rt = tr.build_item(r.vocab, "我", "你好是的", [3, 4, 5, 6])
         ids = np.array([q])
         base = r.logp10(ids, tr.target_aligned(np.array([rt])))
-        j = 3                                                      # token index of 好 (the position before it, 2, predicts it)
+        j = 3                                                      # token index of 好 (position 2, the one before it, predicts it)
         rt2 = list(rt); rt2[j] = 9
         alt = r.logp10(ids, tr.target_aligned(np.array([rt2])))
-        self.assertTrue(np.array_equal(base[0, :j - 1], alt[0, :j - 1]))      # positions before the one predicting 是
-        self.assertFalse(np.allclose(base[0, j - 1], alt[0, j - 1]))          # the position that predicts 是 sees its reading
+        self.assertTrue(np.array_equal(base[0, :j - 1], alt[0, :j - 1]))      # positions before the one predicting 好
+        self.assertFalse(np.allclose(base[0, j - 1], alt[0, j - 1]))          # the position that predicts 好 sees its reading
 
     def test_scoring_passes_target_aligned_readings(self):
         seen = []
@@ -335,6 +352,25 @@ class TestScorerAndAnchor(unittest.TestCase):
         # nothing compared is not a pass
         self.assertFalse(anchor.check([{"i": 1, "n": 1, "ng": [0.0]}], [{"i": 1, "n": 1, "ng": [0.0]}])[0])
 
+    def test_anchor_fails_on_nan_and_on_a_missing_column(self):
+        m = tinylm.NumpyLM(self.plain)
+        ref, ctl = self.records(m, False), self.records(m, True)
+        nan = json.loads(json.dumps(ctl)); k = next(i for i, r in enumerate(nan) if "ll" in r); nan[k]["ll"][0] = float("nan")
+        with self.assertRaises(ValueError):
+            anchor.check(ref, nan)
+        gone = json.loads(json.dumps(ctl)); del gone[k]["ll16"]
+        with self.assertRaises(ValueError):
+            anchor.check(ref, gone)
+        ref_file = os.path.join(self.t, "ref.jsonl")
+        open(ref_file, "w").write("".join(json.dumps(r) + "\n" for r in nan))      # the NaN is in the reference; the control is scored fresh
+        out = os.path.join(self.t, "anchor_nan")
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            with self.assertRaises(SystemExit) as e:
+                anchor.main(["--npz", self.plain, "--dump", self.dump_f, "--rows", self.rows_f, "--name", "toy",
+                             "--expect-top1", str(self.top1), "--out", out, "--reference", ref_file])
+        self.assertNotIn("anchor: OK", buf.getvalue()); self.assertIn("STOP", str(e.exception))
+
     def test_anchor_script_end_to_end(self):
         out = os.path.join(self.t, "anchor")
         buf = io.StringIO()
@@ -362,6 +398,20 @@ class TestScorerAndAnchor(unittest.TestCase):
         off, bad = score_r.build_records(r, rows, cands)
         self.assertEqual(bad, sum(len(c) >= 2 for c in cands))
         self.assertEqual([a.get("ll") for a in off], [b.get("ll") for b in ctl])
+
+    def test_sets_accepts_any_positive_reported_rows(self):
+        limits = []
+        os.makedirs(os.path.join(self.t, "dumps"))
+        open(os.path.join(self.t, "dumps", "user-reported.chat.top1"), "w").write("0"); open(os.path.join(self.t, "dumps", "user-reported.formal.top1"), "w").write("0")
+        with mock.patch.object(score_r.run_sets, "check_reported"), mock.patch.object(score_r, "load_model"), \
+                mock.patch.object(score_r, "run_one"), mock.patch.object(score_r.score, "load_rows", side_effect=lambda **k: limits.append(k["limit"])):
+            for n in ("129", "7"):
+                score_r.main(["sets", "--arm", "control", "--npz", "x", "--out", os.path.join(self.t, "o"), "--work", self.t,
+                              "--sets", "user-reported", "--model-name", "M", "--reported-rows", n])
+        self.assertEqual(limits, [129, 7])
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            score_r.main(["sets", "--arm", "control", "--npz", "x", "--out", "o", "--work", "w", "--sets", "dev302", "--model-name", "M",
+                          "--reported-rows", "0"])
 
     def test_scorer_cli_writes_the_score_format(self):
         out = os.path.join(self.t, "E2N.chat.toy.jsonl")
@@ -391,6 +441,19 @@ class TestJudgeGlue(unittest.TestCase):
             self.assertEqual(open(c).read(), "1\t1\t0\t3\n2\t0\t2\t3\n3\t0\t1\t4\n")
             self.assertEqual(judge_e2.concat_rowstats([b, a], c), 3)
             self.assertEqual(open(c).read(), "1\t0\t1\t4\n2\t1\t0\t3\n3\t0\t2\t3\n")
+
+    def test_select_goes_on_after_a_setting_with_no_selectable_value_and_compare_skips_it(self):
+        def fake(argv):
+            if "formal" in argv:
+                raise ValueError("no grid cell within the cap")
+            return ("cfg",)
+        with tempfile.TemporaryDirectory() as t, mock.patch.object(judge_e2.judge, "main", side_effect=fake):
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                self.assertEqual(judge_e2.select(["D"], "E2C", t), {"chat": ("cfg",), "formal": None})
+                judge_e2.compare(os.path.join(t, "a"), os.path.join(t, "b"), os.path.join(t, "work"))   # no rowstats at all: no crash
+            self.assertIn("E2C formal: no selectable value", buf.getvalue())
+            self.assertIn("skipped MAIN chat", buf.getvalue()); self.assertIn("skipped GUARD formal five", buf.getvalue())
 
     def test_select_and_compare_run_end_to_end_on_toy_scores(self):
         with tempfile.TemporaryDirectory() as t:

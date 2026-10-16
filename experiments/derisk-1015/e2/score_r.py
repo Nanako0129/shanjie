@@ -5,7 +5,7 @@ and the same file format (so judge.py, fusegrid.py and parity.py read the output
                          --rows cvtune.txt --name cvtune --expect-top1 N --out scores/E2C.chat.cvtune.jsonl
   all sets:  python score_r.py sets --arm control|new --npz ... --backend ... --work DIR --tune TUNEDIR --model-name E2C --out SCORES \
                          --sets cvtune wikitune dev302 typing76 user-reported [chatclause --chatclause F] [lytune --lytune F] [wikitypo --wikitypo F] \
-                         [discordtune --discord F] [--reported-rows 66]
+                         [discordtune --discord F] [--reported-rows N]
              (reads DIR/dumps/<set>.<setting>.dump and .top1 from run_sets.py dumps; writes SCORES/<model-name>.<setting>.<set>.jsonl)
 
 control: the weights tinylm-v5 was exported from (tinylm-M.npz), a plain NumpyLM / TorchLM: the reading input is off.
@@ -99,12 +99,22 @@ def main_sets(a):
     model = load_model(a.arm, a.npz, a.backend)
     for name in a.sets:
         args = run_sets.rows_args(name, a)
+        limit = int(args[args.index("--limit") + 1]) if "--limit" in args else None
+        if name == "user-reported" and a.reported_rows:
+            limit = a.reported_rows      # run_sets passes 66; any N works here (the revision-7 batch used all 129 rows then)
         rows = score.load_rows(rows=args[args.index("--rows") + 1] if "--rows" in args else None,
-                               dev=302 if "--dev" in args else None, limit=int(args[args.index("--limit") + 1]) if "--limit" in args else None)
+                               dev=302 if "--dev" in args else None, limit=limit)
         for setting in run_sets.SETTINGS:
             base = os.path.join(a.work, "dumps", f"{name}.{setting}")
             run_one(model, rows, base + ".dump", f"{a.model_name} {setting} {name}", int(open(base + ".top1").read().strip()),
                     os.path.join(a.out, f"{a.model_name}.{setting}.{name}.jsonl"), a.bs)
+
+
+def positive_int(s):
+    n = int(s)
+    if n < 1:
+        raise argparse.ArgumentTypeError("must be a positive integer")
+    return n
 
 
 def main(argv=None):
@@ -120,7 +130,7 @@ def main(argv=None):
     o.add_argument("--rows"); o.add_argument("--dev", type=int); o.add_argument("--limit", type=int)
     s = sub.choices["sets"]
     s.add_argument("--work", required=True); s.add_argument("--sets", nargs="+", required=True); s.add_argument("--model-name", required=True)
-    s.add_argument("--tune"); s.add_argument("--discord"); s.add_argument("--reported-rows", type=int, choices=[run_sets.REPORTED_ROWS])
+    s.add_argument("--tune"); s.add_argument("--discord"); s.add_argument("--reported-rows", type=positive_int)
     for e in run_sets.EXTRA_SETS:
         s.add_argument(f"--{e}")
     a = ap.parse_args(argv)

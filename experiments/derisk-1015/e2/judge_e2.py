@@ -44,7 +44,15 @@ def judge_argv(setting, scores, model, out):
 
 
 def select(scores, model, out):
-    return {s: judge.main(judge_argv(s, scores, model, out)) for s in ("chat", "formal")}
+    """{setting: the selected config}; a setting with no grid cell inside the cap is recorded as None ("no selectable value") and the others go on."""
+    cfgs = {}
+    for s in ("chat", "formal"):
+        try:
+            cfgs[s] = judge.main(judge_argv(s, scores, model, out))
+        except ValueError as e:
+            print(f"{model} {s}: no selectable value ({e})")
+            cfgs[s] = None
+    return cfgs
 
 
 def rowstats_path(out, setting, name):
@@ -80,9 +88,15 @@ def compare(base_out, cand_out, work):
             ("GUARD lytune formal (not significantly negative)", "formal", ["lytune"]),
             ("report chat five", "chat", FIVE)]
     plan += [(f"report {s} {n}", s, [n]) for s, names in (("chat", CHAT_SETS), ("formal", FORMAL_SETS)) for n in names]
-    for k, (label, setting, names) in enumerate(plan):
+    first = True
+    for label, setting, names in plan:
+        missing = [rowstats_path(o, setting, n) for o in (base_out, cand_out) for n in names if not os.path.exists(rowstats_path(o, setting, n))]
+        if missing:
+            print(f"skipped {label}: no rowstats ({len(missing)} missing, e.g. {missing[0]}; the arm or setting had no selectable value)")
+            continue
         t = table(base_out, cand_out, setting, names, label, work).split("\n")
-        print("\n".join(t if k == 0 else t[2:]))
+        print("\n".join(t if first else t[2:]))
+        first = False
 
 
 def main(argv=None):

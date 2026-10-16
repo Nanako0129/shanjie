@@ -5,7 +5,7 @@
   python split_dist.py --field key16 --maxlen 16 SCORES/*.jsonl      # revision 7: 17 values, s = 0..16 (`key16` = last <= 16 chars)
 
 `key` in a score record is len(context_key(prefix)): the engine keeps at most the last 2 Han characters, so the context a scored
-sequence [BOS] + k + c carries is 0, 1 or 2 characters. The record holds a number only (no text); the prefixes are identical in the
+sequence [BOS] + k + c carries is 0, 1 or 2 characters (`key16`, the last <= 16 characters: 0..16, revision 7). The record holds a number only (no text); the prefixes are identical in the
 chat and formal setting, so one setting is enough.
 """
 import argparse

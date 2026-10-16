@@ -25,10 +25,10 @@
 | 讀音表 | 詞庫（`data/lexicon/mcbpmf-data.txt`）讀音裡出現過的全部注音音節，排序後 id 從 1 起，存在 `rdvocab.txt` 與 `.npz`（`rd_syl`），模型檔自己就定義了表 |
 | 參數量 | M 的參數加 R × d（R ＝ 音節數 ＋ 1 ＝ 1,419，量過現在的詞庫是 1,418 個音節；× 384 ≈ 0.54 M）。其餘（層數、d、頭數、步數、批次、學習率、暖機、權重 ×1 維基／×5 口語、字表）與 M 完全相同 |
 | 訓練步數與批次 | 直接呼叫 `batching.plan`，同種子（20261010）、同 `--tokens-per-batch`，所以批次內容與順序和 M 相同；`train-Mr.json` 的 `steps` 必須等於 `train-M.json` 的。不加 `--max-steps` |
-| 切點與前文長度分布 | 評分時序列是 `[BOS] + k + c`，k ＝ `context_key`（尾端連續漢字、**最多 2 字**），所以評測的前文長度只有 0、1、2。訓練樣本（epoch 裡的每一片）隨機抽 s ∈ {0, 1, 2}：BOS 與前 s 個字是前文、填「無讀音」，其後帶讀音（`mask_context`）。機率 P(s) ＝ 評測列的 `key` 欄分布：`split_dist.py` 對 v5 的分數檔（聊天設定、各集合）算出，傳給 `train_r.py --split-probs`。公開的 `eval/dev/*.txt` 489 列的分布是 s＝0：351、s＝1：0、s＝2：138（0.718／0／0.282），只作為沒有分數檔時的粗略值。超過 65 個 token 的段切成的後續片沒有 BOS：它的第一個字是上一片的最後一個字，同樣套用規則，所以那些片的有效前文多 1 字（只影響長段，未量測有多少） |
+| 切點與前文長度分布 | 評分時序列是 `[BOS] + k + c`，`ll` 的 k ＝ `context_key`（尾端連續漢字、最多 2 字），`ll16` 的 k 是最後最多 16 個漢字。修訂七（契約 §3 E2）：訓練樣本（epoch 裡的每一片）隨機抽 s ∈ {0, …, 16}：BOS 與前 s 個字是前文、填「無讀音」，其後帶讀音（`mask_context`）。機率 P(s) ＝ 評測列的 `key16` 欄分布（17 個值）：`split_dist.py --field key16 --maxlen 16` 對 C2（控制臂）的分數檔（聊天設定、各集合）算出，傳給 `train_r.py --split-probs`。原 E2 用 `key` 欄、s ∈ {0, 1, 2}（公開的 `eval/dev/*.txt` 489 列的分布是 s＝0：351、s＝1：0、s＝2：138），修訂七取代它。超過 65 個 token 的段切成的後續片沒有 BOS：它的第一個字是上一片的最後一個字，同樣套用規則，所以那些片的有效前文多 1 字（只影響長段，未量測有多少） |
 | 標注規則 | 與 `tools/readings.py` 同一份資料（詞庫、`reading_overrides.tsv`、`heterophony1.list`）與同一個斷詞（`ime.segment_words`），同一條規則順序 0、1、3、4；規則內容是 `main()` 裡分支的複本（它們在函式內，無法 import），`test_e2.py::TestReadingsParity` 在公開句子上跑兩邊、斷言有讀音的位置完全相同（用空的萌典跑 `readings.main`，等於關掉規則 2）。規則 5（CHECK）的詞、人工表讀音不在詞庫（GAP）的詞、詞庫沒有的字：該詞每個字都是無讀音。詞庫沒有的字把句子切開，每一段分別斷詞 |
 | 無讀音比例 | 公開的 `eval/dev/*.txt` 489 句（4,075 字）：3.2%（CHECK 132 字；GAP、詞庫外 0）。訓練文字（維基＋口語）的比例由 `rd-report.json` 記錄；維基的人名、外文音譯會比這個高〔推論，未量測〕 |
-| 評分的讀音 | 候選位置用評測列第三欄（使用者打的讀音），同一列每個候選共用。前文（BOS 與 k）一律無讀音。某列有任何候選的字數 ≠ 讀音音節數，或有音節不在讀音表：該列**所有候選都用無讀音**，同一列的候選不會一部分有讀音一部分沒有；數量印在每個集合的輸出（「rows scored without readings」），要記進研究紀錄 |
+| 評分的讀音 | 候選位置用評測列第三欄（使用者打的讀音），同一列每個候選共用。前文（BOS 與 k，2 字或 16 字）一律無讀音。某列有任何候選的字數 ≠ 讀音音節數，或有音節不在讀音表：該列**所有候選都用無讀音**，同一列的候選不會一部分有讀音一部分沒有；數量印在每個集合的輸出（「rows scored without readings」），要記進研究紀錄 |
 | 分數檔 | 與 `score.py` 同欄位（`ll`、`ll0`、`ll16`、`key`…），所以 `judge.py`、`fusegrid.py`、`parity.py` 直接讀。`ll0`、`ll16` 的讀音規則相同（k 空／16 字，都無讀音）。E2 的選值與判讀只用 `ll` |
 | 控制臂 | `tinylm-M.npz`（tinylm-v5 匯出用的權重）走 S7a 原本的 `NumpyLM`／`TorchLM`，沒有讀音通道；`ll_many_r` 對它退化成 `tinylm.ll_many`（測試：逐位元相同） |
 | 候選來源 | `run_sets.py dumps` 產生的 `dumps/<集合>.<設定>.dump`（`lm_eval.py --dump`，有候選字串）與 `.top1`。Rust 的 `--tinylm-scores` 檔只有數字、沒有字串，不能當候選來源 |
@@ -37,7 +37,7 @@
 ## 測試
 
 ```sh
-cd <repo>   # Mac：/Users/nanako/side-project/shanjie-dr2 或合併後的 checkout
+cd <repo>   # 這個分支或合併後的 checkout
 /opt/homebrew/bin/python3 -W ignore -m unittest discover -s experiments/derisk-1015/e2 -p 'test_e2.py' -v
 ```
 
@@ -54,10 +54,10 @@ python -W ignore -m unittest discover -s experiments/derisk-1015/e2 -p 'test_tor
 | 訓練文字 `runs-wiki.txt`、`runs-coll.txt`、`ids-*.npy`、`vocab.txt` | S7a 的 `prep.py runs/encode`（`experiments/s7a-tinylm/README.md` 的步驟 2；M 當時的同一份，不重做） | `prep.py` 的 `charcount.json`（輸入雜湊）、`encode-report.json`；核對與 M 訓練時相同 |
 | 讀音標注結果 `rd-*.npy`、`rdvocab.txt`、`rd-report.json` | 本資料夾 `label_readings.py` | `rd-report.json` 內（`rd_sha256`、`rdvocab_sha256`、詞庫、`reading_overrides.tsv`、`heterophony1.list` 的 SHA-256） |
 | `heterophony1.list` | McBopomofo `Source/Data/heterophony1.list`；機器上不在預設位置就設 `SHANJIE_HETERO` | 同上 |
-| tinylm-v5 匯出用的權重 `tinylm-M.npz` | S7a 的 M 檢查點（匯出 `tinylm-M8.sjtl` 用的那個） | `tinylm-M.npz` sha256 ＝ `32308122782d3c5aba8a838521f031a466671d47d48ec0f54dcfb9256451815e`（188 的 S7a 工作資料夾，2026-10-17 量） |
+| tinylm-v5 匯出用的權重 `tinylm-M.npz` | S7a 的 M 檢查點（匯出 `tinylm-M8.sjtl` 用的那個） | `tinylm-M.npz` sha256 ＝ `32308122782d3c5aba8a838521f031a466671d47d48ec0f54dcfb9256451815e`（S7a 的工作資料夾，2026-10-17 量） |
 | 候選：`dumps/<集合>.<chat|formal>.dump`、`.top1` | 修訂七：用目前出貨的 n-gram（`data/*.sha256` 釘的四個檔放在 `data/lm/`）以 `run_sets.py dumps` 重產（契約 §3 E2 修訂七「候選」） | `score_r.py` 每個集合印 dump 的 sha256；記進研究紀錄 |
 | 評測列檔 | `cvtune.txt`、`wikitune.txt`（`$TUNE`）、dev302／打字測驗／錯字回報（repo）、`lytune`、`wikitypo`、`chatclause`、`discordtune`（私人，只在 main 放私人資料的機器） | 列檔雜湊照 `docs/contracts/rerank-strength.md` 與 e2-chat-eval 的紀錄 |
-| 錯字回報 | 與 v5 打分時相同（若當時用 `--reported-rows 66` 就同樣給） | `run_sets.py` 核對前 66 列的雜湊 |
+| 錯字回報 | 修訂七用打分當時的全部列（129 列）：不給 `--reported-rows`，或給 `--reported-rows 129` 重跑同一批；任何正整數都收，只取前 N 列 | `run_sets.py` 核對前 66 列的雜湊 |
 
 ## 命令順序
 
@@ -78,9 +78,9 @@ python -u train_r.py --size M --work $W --out $W --split-probs P0 P1 ... P16    
 # 4. 核對：train-Mr.json 的 steps、pieces 等於 train-M.json 的；copy 回 tinylm-Mr.npz、train-Mr.json、rd-report.json
 ```
 
-### Windows 機器（188，torch）：打分
+### Windows 機器（有 torch）：打分
 
-先 `set PYTHONUTF8=1`，`PY` 同 S7a README。兩臂都用同一個 `score_r.py`、同一批候選。`$S`＝分數資料夾。公開集合與私人集合（chatclause、discordtune）都在這台跑，私人的列檔放 `%USERPROFILE%\shanjie-private\`。
+先 `set PYTHONUTF8=1`，`PY` 同 S7a README。兩臂都用同一個 `score_r.py`、同一批候選。`$S`＝分數資料夾。公開集合與私人集合（chatclause、discordtune）都在這台跑，私人的列檔放 repo 外的私人資料夾。
 
 ```bat
 cd /d %REPO%\experiments\derisk-1015\e2
@@ -92,9 +92,9 @@ rem 結束碼 1 或沒印 "anchor: OK"＝停止，不往下做。
 rem 2. 兩臂打分（兩種設定 × 全部集合）。v5 的分數檔也要有的集合照 S7a／e2-chat-eval 同一組
 set SETS=chatclause cvtune wikitune dev302 typing76 user-reported lytune wikitypo discordtune
 %PY% -u score_r.py sets --arm control --npz %W%\tinylm-M.npz  --backend torch --work %W% --tune %TUNE% --model-name E2C --out %S%\ctl ^
-    --sets %SETS% --chatclause <F> --lytune <F> --wikitypo <F> --discord <F> [--reported-rows 66]
+    --sets %SETS% --chatclause <F> --lytune <F> --wikitypo <F> --discord <F> [--reported-rows N]
 %PY% -u score_r.py sets --arm new     --npz %W%\tinylm-Mr.npz --backend torch --work %W% --tune %TUNE% --model-name E2N --out %S%\new ^
-    --sets %SETS% --chatclause <F> --lytune <F> --wikitypo <F> --discord <F> [--reported-rows 66]
+    --sets %SETS% --chatclause <F> --lytune <F> --wikitypo <F> --discord <F> [--reported-rows N]
 ```
 
 每個集合的輸出行記進研究紀錄：`rows scored without readings`（新臂）、dump 的 sha256、`n-gram top1 from the dump`。

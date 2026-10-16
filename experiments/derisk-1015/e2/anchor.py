@@ -9,6 +9,7 @@ reading input off), must give the same LL as experiments/s7a-tinylm/score.py on 
 score.py is run here, with the same backend, to DIR/anchor.reference.jsonl. Both files and the verdict stay in DIR.
 """
 import argparse
+import math
 import os
 import sys
 
@@ -20,8 +21,15 @@ import score  # noqa: E402
 
 
 def check(reference_rows, control_rows):
-    """(passed, {column: (max |dLL|, candidates compared)}). Raises ValueError when the files do not hold the same candidates."""
+    """(passed, {column: (max |dLL|, candidates compared)}). Raises ValueError when the files do not hold the same candidates, or a column is missing on one side or holds a NaN."""
     d = parity.max_delta(reference_rows, control_rows)
+    for a, b in zip(reference_rows, control_rows):      # max_delta skips a NaN (max(0.0, nan) is 0.0) and a column present on one side only
+        for c in parity.COLS:
+            x, y = a.get(c), b.get(c)
+            if (x is None) != (y is None) or (x is not None and len(x) != len(y)):
+                raise ValueError(f"row {a['i']}: column {c} is missing or has another length on one side")
+            if x is not None and any(math.isnan(u - v) for u, v in zip(x, y)):
+                raise ValueError(f"row {a['i']}: column {c} holds a NaN")
     return d["ll"][1] > 0 and max(m for m, _ in d.values()) < parity.LIMIT, d
 
 
@@ -44,7 +52,10 @@ def main(argv=None):
         score.main(["--npz", a.npz, "--backend", a.backend, "--dump", a.dump, "--name", a.name, "--expect-top1", str(a.expect_top1),
                     "--out", ref, "--bs", str(a.bs)]
                    + (["--rows", a.rows] if a.rows else []) + (["--dev", str(a.dev)] if a.dev else []) + (["--limit", str(a.limit)] if a.limit else []))
-    ok, d = check(parity.load(ref), parity.load(ctl))
+    try:
+        ok, d = check(parity.load(ref), parity.load(ctl))
+    except ValueError as e:
+        sys.exit(f"anchor: STOP, {e}")
     for c, (m, n) in d.items():
         print(f"{c}: max |dLL| {m:.3e} over {n} candidates")
     if not ok:
