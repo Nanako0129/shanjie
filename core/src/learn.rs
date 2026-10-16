@@ -51,10 +51,11 @@ pub const NEWWORD_BREAK: &str = "的了是在再嗎呢吧啊喔耶囉啦欸也�
 /// A run made only of these is never learned (§2.2): numbers, codes and amounts.
 pub const NEWWORD_DIGITS: &str = "〇零一二三四五六七八九十百千萬億兩壹貳參肆伍陸柒捌玖拾佰仟";
 /// Entry score (log10) of a new word of decayed weight w: `S_MIN + (S_MAX - S_MIN) * w / (w + 1)` (§2.4).
-/// Provisional values inside the range the pre-study replayed with 0 broken rows (-6 to -1); main tunes both on
-/// cvtune and wikitune under contract §3.2, never on the dev sets.
-pub const NEWWORD_S_MIN: f64 = -5.0;
-pub const NEWWORD_S_MAX: f64 = -3.0;
+/// Chosen by the contract §3.2 sweep (2026-10-17, research log): of [-5,-3], [-4,-2] and [-3,-1], every range passed the
+/// veto, net >= 0 and class (i) = 0 in all four cvtune/wikitune x chat/formal cells; [-3,-1] has the largest summed net
+/// (190 against 186 and 181). Never tuned on the dev sets.
+pub const NEWWORD_S_MIN: f64 = -3.0;
+pub const NEWWORD_S_MAX: f64 = -1.0;
 /// Contract §2.2 item 3 (revision one): a run is not learned when the best lexicon word under its reading scores above
 /// this (log10, the file score before capping and demotion), so a learned word never covers a strong lexicon word. -6.5
 /// sits above every wiki-sourced row of overlay-add.tsv ([-7.67, -6.61]) and the base's three count-less modes (-7.47,
