@@ -2,7 +2,9 @@
 (C.4.2), and the R1/R2 verdicts (C.4.3). Only numbers are printed; the digit-run sets are public text (wiki, Common Voice, Tatoeba) and go to a
 directory outside the repo. Commands and runtimes: experiments/digits/README.md.
 
-  measure.py build-set --out-dir DIR [--src SOURCES_DIR] [--seed N] [--cap N]
+  measure.py build-set --out-dir DIR [--src SOURCES_DIR] [--seed N] [--cap N] [--range LO HI --single NAME]
+      --range LO HI --single NAME: the judging set of digit-context.md C.6 item 4: wiki articles LO..HI-1 only (no colloquial), every row to
+      the one file NAME (no halves), STOP below SINGLE_MIN rows
   measure.py tune  --table digits.tsv --digit-tune F --cvtune F --wikitune F --out REPORT [--procs N]
   measure.py judge --table digits.tsv --theta X --digit-judge F --dev302 F --typing76 F --out REPORT [--procs N]
 Rows: zh rows `前文|句子|讀音`, digit rows `前文|數字串|後接詞|讀音` (reading: syllables separated by spaces).
@@ -24,13 +26,21 @@ import digits_score as DS  # noqa: E402
 import build_digits as bd  # noqa: E402
 
 P1, P3, L, bc = DS.P1, DS.P3, DS.L, bd.bc
-THETAS = (0.0, 0.5, 1.0, 2.0, 3.0, 4.0, 6.0, 8.0)  # 3-8 added after the first run: no theta up to 2 had (c) = 0 (digit-context.md C.4.3)
+THETAS = (0.0, 0.5, 1.0, 2.0, 3.0, 4.0, 6.0, 8.0)  # the one place the grid is written; 3-8 added after the first run (digit-context.md C.4.3)
+THETA_SET = "{" + ", ".join(f"{t:g}" for t in THETAS) + "}"
 SEED = 20261017          # the fixed seed of the digit-run set and of its split into halves
 CAP = 3000               # C.4.1: at most 3,000 rows
 MIN_ROWS = 1000          # C.4.3 stop condition: fewer rows than this
+SINGLE_MIN = 500         # C.6 item 4: the single judging set stops below this
+TUNE_ARTICLES = (300_000, 305_000)   # wikitune's articles: the tuning half of the default set
 LAMBDAS = (("chat", L.PROFILES["chat"]), ("formal", L.PROFILES["formal"]))
 CTX_MAX = 8              # characters of the Han run before the digits kept in a row (context_key uses the last two)
 A_MIN = 0.90             # R2: (a) at least this on the judging half
+
+
+def load_lexicon():
+    """The segmentation lexicon of build_counts (mcbpmf-data + overlay-add)."""
+    return bc.ime.Lexicon(os.path.join(ROOT, "data", "lexicon", "mcbpmf-data.txt"), overlay=[os.path.join(ROOT, "data", "lexicon", "overlay-add.tsv")])
 
 
 # ---------- rows ----------
@@ -137,19 +147,22 @@ def zh_row(env, scorer, row):
 
 
 def digit_row(env, scorer, row):
-    """A digit run followed by a word typed in zhuyin: (a) the final split is digits then zhuyin, (b) display flips."""
+    """A digit run followed by a word typed in zhuyin: (a) the final split is digits then zhuyin, (b) display flips of the run's own keys."""
     left, digits, word, syls = row
     zkeys, _ = keys_of(syls)
     keys = list(digits) + zkeys
     sim = DS.simulate(scorer, env.history, keys, left, list(word))
     want = "D" * len(digits) + "Z" * len(zkeys)
-    out = {"rows": 1, "a_ok": int("".join(sim.cls[:len(keys)]) == want), "flips": collections.Counter([min(sum(ev["flips"] for ev in sim.log[:-1]), 3)])}
+    own = sim.rid_of[0]   # (b) counts the digit run's own keys only: a run started inside the following word is not this row's display
+    flips = sum(1 for ev in sim.log[:-1] for p in ev["flipped"] if sim.rid_of[p] == own)
+    out = {"rows": 1, "a_ok": int("".join(sim.cls[:len(keys)]) == want), "flips": collections.Counter([min(flips, 3)])}
     timing(sim, out)
     return out
 
 
-def pred_row(env, row, lam):
-    """C.4.2 item 1: (i) the digit-context row before any zhuyin key; (ii) hit@9 of the word after its first zhuyin key, digit context vs today's `<s>`."""
+def pred_row(env, row, lams=LAMBDAS):
+    """C.4.2 item 1: (i) the digit-context row before any zhuyin key (once per row, it has no profile); (ii) per profile, hit@9 of the word
+    after its first zhuyin key, digit context vs today's `<s>`: keys `<profile>.base|new|new_only|base_only`."""
     left, digits, word, syls = row
     syls = tuple(syls)
     if not any(w == word for w, _ in env.lex.by_reading.get(syls, ())):
@@ -158,11 +171,13 @@ def pred_row(env, row, lam):
     r_i = DS.digit_rank_empty(env.table, env.lm, env.lex, v, word)
     units = P1.position_units(tuple(P1.parse_syl(s) for s in syls))["P1"]
     cands = P3.reference(env.idx, units, "P")
-    base = P3.rank_s(P3.order_s(cands, P1.scores(cands, env.lm, lam, "<s>"), P1.succ_words(env.lm, "<s>")), word)
-    new = P3.rank_s(DS.digit_tiers(env.table, env.lm, env.idx, units, v, lam), word)
-    h0, h1 = base is not None and base <= 9, new is not None and new <= 9
-    return {"n": 1, "i_hit": int(r_i is not None and r_i <= 9), "i_in_layer": int(r_i is not None),
-            "base": int(h0), "new": int(h1), "new_only": int(h1 and not h0), "base_only": int(h0 and not h1)}
+    out = {"n": 1, "i_hit": int(r_i is not None and r_i <= 9), "i_in_layer": int(r_i is not None)}
+    for prof, lam in lams:
+        base = P3.rank_s(P3.order_s(cands, P1.scores(cands, env.lm, lam, "<s>"), P1.succ_words(env.lm, "<s>")), word)
+        new = P3.rank_s(DS.digit_tiers(env.table, env.lm, env.idx, units, v, lam), word)
+        h0, h1 = base is not None and base <= 9, new is not None and new <= 9
+        out.update({f"{prof}.base": int(h0), f"{prof}.new": int(h1), f"{prof}.new_only": int(h1 and not h0), f"{prof}.base_only": int(h0 and not h1)})
+    return out
 
 
 # ---------- processes ----------
@@ -176,7 +191,7 @@ def _init(table_path):
 
 
 def _task(spec):
-    kind, rows, theta, mode, lam = spec
+    kind, rows, theta, mode = spec
     env = _ENV
     out = {}
     for row in rows:
@@ -185,7 +200,7 @@ def _task(spec):
         elif kind == "digit":
             r = digit_row(env, env.scorer(theta, mode), row)
         else:
-            r = pred_row(env, row, lam)
+            r = pred_row(env, row)
         merge(out, r)
     return out
 
@@ -196,8 +211,8 @@ class Runner:
         if not self.pool:
             _init(table_path)
 
-    def run(self, kind, rows, theta=0.0, mode="score", lam=0.5, chunk=40):
-        specs = [(kind, rows[i:i + chunk], theta, mode, lam) for i in range(0, len(rows), chunk)]
+    def run(self, kind, rows, theta=0.0, mode="score", chunk=40):
+        specs = [(kind, rows[i:i + chunk], theta, mode) for i in range(0, len(rows), chunk)]
         out = {}
         for r in (self.pool.imap_unordered(_task, specs) if self.pool else map(_task, specs)):
             merge(out, r)
@@ -307,32 +322,40 @@ def build_set(a):
     sys.path.insert(0, os.path.join(ROOT, "experiments", "derisk-1015", "e4"))
     import build_e4ctx as e4   # cv_lines and the is_tune cut of build_tune; importing it only defines
     bt = e4.bt
-    bc.SRC = bt.SRC = a.src
+    single = a.range is not None
+    if single and not a.single:
+        sys.exit("--range needs --single NAME")
+    lo, hi = a.range or TUNE_ARTICLES
+    bc.SRC = a.src   # load_conv reads opencc/ under it (build_tune's SRC is only its own main's colloquial directory: cv_lines is given the path)
     bc.DUMP = os.path.join(a.src, os.path.basename(bc.DUMP))
     os.makedirs(a.out_dir, exist_ok=True)
     conv = bc.load_conv()
-    lex = bc.ime.Lexicon(os.path.join(ROOT, "data", "lexicon", "mcbpmf-data.txt"), overlay=[os.path.join(ROOT, "data", "lexicon", "overlay-add.tsv")])
+    lex = load_lexicon()
     cands = {"cv": [], "wiki": []}
-    for n, (_, raw) in enumerate(e4.cv_lines(os.path.join(a.src, "colloquial"))):
-        if bt.is_tune(raw):   # on the unconverted line, as build_tune
-            cands["cv"] += [(("cv", n), r) for r in digit_cuts(bc.convert(raw, *conv), lex)]
+    if not single:   # the default set: the colloquial tuning lines and wikitune's articles; the single judging set is wiki only
+        for n, (_, raw) in enumerate(e4.cv_lines(os.path.join(a.src, "colloquial"))):
+            if bt.is_tune(raw):   # on the unconverted line, as build_tune
+                cands["cv"] += [(("cv", n), r) for r in digit_cuts(bc.convert(raw, *conv), lex)]
     sid = 0
-    for i, raw in enumerate(bc.articles(305_000)):
-        if i < 300_000:
+    for i, raw in enumerate(bc.articles(hi)):
+        if i < lo:
             continue
         for s in bc.article_sentences(raw, conv):
             cands["wiki"] += [(("wiki", sid), r) for r in digit_cuts(s, lex)]
             sid += 1
     kept, (tune, judge), counts = make_rows(cands["cv"] + cands["wiki"], a.seed, a.cap, lambda ws: readings_by_word(ws, a.out_dir))
-    for name, rows in (("digitruns-tune.txt", tune), ("digitruns-judge.txt", judge)):
+    outs = {a.single: kept} if single else {"digitruns-tune.txt": tune, "digitruns-judge.txt": judge}
+    for name, rows in outs.items():
         with open(os.path.join(a.out_dir, name), "w", encoding="utf-8", newline="\n") as f:
             f.writelines(f"{c}|{d}|{w}|{rd}\n" for c, d, w, rd in rows)
-    man = {"seed": a.seed, "cap": a.cap, "candidates": {k: len(v) for k, v in cands.items()}, "counts": counts,
-           "outputs": {n: hashlib.sha256(open(os.path.join(a.out_dir, n), "rb").read()).hexdigest() for n in ("digitruns-tune.txt", "digitruns-judge.txt")}}
-    json.dump(man, open(os.path.join(a.out_dir, "digitruns.manifest.json"), "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+    man = {"seed": a.seed, "cap": a.cap, "articles": [lo, hi], "candidates": {k: len(v) for k, v in cands.items()}, "counts": counts,
+           "outputs": {n: hashlib.sha256(open(os.path.join(a.out_dir, n), "rb").read()).hexdigest() for n in outs}}
+    json.dump(man, open(os.path.join(a.out_dir, a.single.rsplit(".", 1)[0] + ".manifest.json" if single else "digitruns.manifest.json"), "w", encoding="utf-8"),
+              ensure_ascii=False, indent=1)
     print(json.dumps(man, ensure_ascii=False, indent=1))
-    if len(kept) < MIN_ROWS:
-        sys.exit(f"STOP: {len(kept)} digit-run rows, fewer than {MIN_ROWS} (digit-context.md C.5)")
+    need = SINGLE_MIN if single else MIN_ROWS
+    if len(kept) < need:
+        sys.exit(f"STOP: {len(kept)} digit-run rows, fewer than {need} (digit-context.md C.5, C.6 item 4)")
 
 
 # ---------- reports ----------
@@ -372,10 +395,11 @@ def digit_line(name, r):
 
 
 def pred_line(name, prof, r):
-    p = P1.mcnemar(r["new_only"], r["base_only"])
+    new, base, b, c = (r[f"{prof}.{k}"] for k in ("new", "base", "new_only", "base_only"))
+    p = P1.mcnemar(b, c)
     return (f"{name} {prof}: n {r['n']} (dropped {r.get('dropped', 0)}); (i) hit@9 {r['i_hit']}/{r['n']} = {pct(r['i_hit'], r['n'])} "
-            f"(word in the successor layer {pct(r['i_in_layer'], r['n'])}); (ii) hit@9 digit-context {r['new']} = {pct(r['new'], r['n'])}, `<s>` {r['base']} = {pct(r['base'], r['n'])}, "
-            f"right now {r['new_only']}, wrong now {r['base_only']}, McNemar p={p:.4g}")
+            f"(word in the successor layer {pct(r['i_in_layer'], r['n'])}); (ii) hit@9 digit-context {new} = {pct(new, r['n'])}, `<s>` {base} = {pct(base, r['n'])}, "
+            f"right now {b}, wrong now {c}, McNemar p={p:.4g}")
 
 
 class Report:
@@ -396,11 +420,11 @@ def tune(a):
     rep = Report(a.out)
     rep(f"# tune: table sha256 {sha(a.table)}; digit tuning half {a.digit_tune} sha256 {sha(a.digit_tune)}")
     run = Runner(a.table, a.procs)
-    lex = bc.ime.Lexicon(os.path.join(ROOT, "data", "lexicon", "mcbpmf-data.txt"), overlay=[os.path.join(ROOT, "data", "lexicon", "overlay-add.tsv")])
+    lex = load_lexicon()
     zh = {n: load_zh_rows(p, lex) for n, p in (("cvtune", a.cvtune), ("wikitune", a.wikitune))}
     digit = load_digit_rows(a.digit_tune)
     rep(f"digit tuning rows {len(digit)}; zh rows " + ", ".join(f"{n} {len(r)} (dropped {d})" for n, (r, d) in zh.items()))
-    c_by_theta = {}
+    c_by_theta, digit_by_theta = {}, {}
     for th in THETAS:
         tot = 0
         for n, (rows, _) in zh.items():
@@ -408,16 +432,23 @@ def tune(a):
             tot += r["c"]
             rep(f"theta {th}  " + zh_line(n, r))
         c_by_theta[th] = tot
-        rep(f"theta {th}  " + digit_line("digit-tune", run.run("digit", digit, th)))
+        digit_by_theta[th] = run.run("digit", digit, th)
+        rep(f"theta {th}  " + digit_line("digit-tune", digit_by_theta[th]))
+    c_struct = 0
     for n, (rows, _) in zh.items():
-        rep("structural  " + zh_line(n, run.run("zh", rows, mode="structural")))
+        r = run.run("zh", rows, mode="structural")
+        c_struct += r["c"]
+        rep("structural  " + zh_line(n, r))
     rep("structural  " + digit_line("digit-tune", run.run("digit", digit, mode="structural")))
-    r = run.run("digit", digit, THETAS[0])
-    rep("time (theta 0, digit tuning half)  " + time_line(r))
-    for prof, lam in LAMBDAS:
-        rep("tuning half, not for the verdict  " + pred_line("digit-tune", prof, run.run("pred", digit, lam=lam)))
+    if c_struct > 0:
+        rep("STOP: the structural rule has (c) > 0 on cvtune/wikitune, so the key set or the tool is wrong (digit-context.md C.5)")
+        sys.exit(1)
+    rep(f"time (theta {THETAS[0]}, digit tuning half)  " + time_line(digit_by_theta[THETAS[0]]))
+    r = run.run("pred", digit)
+    for prof, _ in LAMBDAS:
+        rep("tuning half, not for the verdict  " + pred_line("digit-tune", prof, r))
     th = choose_theta(c_by_theta)
-    rep(f"R2 theta: {th}" + ("" if th is not None else "  (no theta in {0, 0.5, 1, 2, 3, 4, 6, 8} gives (c) = 0 on cvtune + wikitune: R2 fails, A uses the structural rule)"))
+    rep(f"R2 theta: {th}" + ("" if th is not None else f"  (no theta in {THETA_SET} gives (c) = 0 on cvtune + wikitune: R2 fails, A uses the structural rule)"))
 
 
 def judge(a):
@@ -425,14 +456,13 @@ def judge(a):
     rep(f"# judge: table sha256 {sha(a.table)}; theta {a.theta}; judging half {a.digit_judge} sha256 {sha(a.digit_judge)}; "
         f"dev302 sha256 {sha(a.dev302)}; typing76 sha256 {sha(a.typing76)}")
     run = Runner(a.table, a.procs)
-    lex = bc.ime.Lexicon(os.path.join(ROOT, "data", "lexicon", "mcbpmf-data.txt"), overlay=[os.path.join(ROOT, "data", "lexicon", "overlay-add.tsv")])
+    lex = load_lexicon()
     digit = load_digit_rows(a.digit_judge)
     sets = {n: load_zh_rows(p, lex)[0] for n, p in (("dev302", a.dev302), ("typing76", a.typing76))}
     rep(f"judging rows {len(digit)}; " + ", ".join(f"{n} {len(r)}" for n, r in sets.items()))
-    by = {}
-    for prof, lam in LAMBDAS:
-        r = run.run("pred", digit, lam=lam)
-        by[prof] = (r["new_only"], r["base_only"])
+    by, r = {}, run.run("pred", digit)
+    for prof, _ in LAMBDAS:
+        by[prof] = (r[f"{prof}.new_only"], r[f"{prof}.base_only"])
         rep(pred_line("digit-judge", prof, r))
     v1, ps = r1_verdict(by)
     rep(f"R1: the prediction row uses {v1} (McNemar p " + ", ".join(f"{k} {p:.4g}" for k, p in ps.items()) + ")")
@@ -441,8 +471,10 @@ def judge(a):
     for mode in ("score", "structural"):
         if mode == "score" and th is None:
             continue
-        res[mode] = {"a": run.run("digit", digit, th or 0.0, mode)}
-        rep(f"{mode}  " + digit_line("digit-judge", res[mode]["a"]))
+        res[mode] = {}
+        if th is not None:   # theta none: only R1 and the structural rule's (c) on dev302/typing76 (the stop check), nothing else on the judging set
+            res[mode]["a"] = run.run("digit", digit, th, mode)
+            rep(f"{mode}  " + digit_line("digit-judge", res[mode]["a"]))
         for n, rows in sets.items():
             res[mode][n] = run.run("zh", rows, th or 0.0, mode)
             rep(f"{mode}  " + zh_line(n, res[mode][n]))
@@ -454,6 +486,8 @@ def judge(a):
     rep(f"R2: A uses the {design} design" + ("   STOP: the structural rule has (c) > 0, so the key set or the tool is wrong" if stop else ""))
     if design == "score":
         rep("(d) is report-only: the maintainer decides whether to tighten theta (digits.md A.3.3)")
+    if stop:
+        sys.exit(1)
 
 
 def main(argv=None):
@@ -464,6 +498,8 @@ def main(argv=None):
     b.add_argument("--src", default=bc.SRC)
     b.add_argument("--seed", type=int, default=SEED)
     b.add_argument("--cap", type=int, default=CAP)
+    b.add_argument("--range", type=int, nargs=2, metavar=("LO", "HI"), help="wiki articles LO..HI-1 only (no colloquial); needs --single")
+    b.add_argument("--single", metavar="NAME", help="write every row to out-dir/NAME (no tuning/judging halves)")
     for name in ("tune", "judge"):
         t = sub.add_parser(name)
         t.add_argument("--table", required=True)

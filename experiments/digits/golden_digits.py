@@ -24,12 +24,14 @@ import digits_score as DS  # noqa: E402
 
 SP, EN = "␣", "⏎"
 # (left context, keys, characters shown by the syllables that finish). Cases: digits at once, tone keys, space, a split forced by a key that
-# is not in the digit alphabet (u m , j k o l), a fifth key that flushes the oldest (123456789, 2026/10/15), contexts that need a word before.
+# is not in the digit alphabet (u m , j k o l), a fifth key that flushes the oldest (1258901258: no tone key, so no syllable finishes mid-run;
+# 2026/10/15), contexts that need a word before. A syllable that finishes in the middle of a row and is followed by more keys must have its
+# character in `chars` (the next run's context reads it): `generate(strict=True)` refuses a row that leaves a "?" in the middle of the shown text.
 ROWS = [
     ("", "1", ""), ("", "2026su06", "年"), ("下午", "3", ""), ("下午", "32u03", "點"), ("", "84", ""),
     ("", "84" + SP, ""), ("", "504", ""), ("", "1984", ""), ("", "20u", ""), ("", "101o4", "倍"),
     ("", "100m06", "元"), ("", "1m,4", "月"), ("", "3.14", ""), ("", "25" + SP, ""), ("", "2." + SP, ""),
-    ("", "123456789", ""), ("", "2026/10/15", ""), ("", "1-2", ""), ("價格", "300m06", "元"), ("", "hk4g4123", "測試"),
+    ("", "1258901258", ""), ("", "2026/10/15", ""), ("", "1-2", ""), ("價格", "300m06", "元"), ("", "hk4g4123", "測試"),
     ("你", "5j03", "轉"), ("", "1" + SP, ""), ("", "3", ""), ("", "6.5", ""), ("", "0.5", ""),
     ("我們", "2026su062k7", "年的"), ("", "10", ""), ("下午", "2", ""), ("下午", "20", ""), ("", "2020" + SP, ""),
 ]
@@ -40,10 +42,12 @@ def visible(k):
     return SP if k == DS.SPACE else EN if k == DS.ENTER else k
 
 
-def generate(scorer, history_fn, rows, header_lines):
+def generate(scorer, history_fn, rows, header_lines, strict=False):
     out = ["# " + l for l in header_lines]
     for n, (left, keys, chars) in enumerate(rows, 1):
         sim = DS.simulate(scorer, history_fn, [DS.SPACE if k == SP else k for k in keys], left, list(chars))
+        if strict and "?" in sim.shown[:-1]:   # a "?" is a syllable without its character; one at the very end is read by nobody
+            raise SystemExit(f"row {n} ({keys!r}): a syllable finished mid-row without a character in chars (shown {sim.shown!r})")
         out.append(f"## {n}\tleft={left}\tkeys={keys}{EN}\tchars={chars}")
         for ev in sim.log:
             splits = ";".join(f"{m},{t},{s!r}" for m, t, s in ev["splits"])
@@ -51,6 +55,9 @@ def generate(scorer, history_fn, rows, header_lines):
             out.append(f"{ev['idx']}\t{visible(ev['key'])}\tflush={ev['flush']}\tctx={ev['ctx'] or '-'}\tbuf={ev['buf']}\t"
                        f"splits={splits}\tchoice={choice}\tcls={ev['cls']}")
     return "\n".join(out) + "\n"
+
+
+LEXICON_FILES = ("mcbpmf-data.txt", "overlay-add.tsv", "sandhi-add.tsv", "names-add.tsv", "demote.tsv")
 
 
 def sha(path):
@@ -72,12 +79,13 @@ def main(argv=None):
         "digits-score golden (experiments/digits/golden_digits.py; digit-context.md C.5). Python is the baseline; Rust must match the scores as f64 bits.",
         f"digits.tsv sha256={sha(a.table)}",
         f"models: " + " ".join(f"{n} sha256={sha(os.path.join(lm_dir, n))}" for n in ("bigram.sjlm", "classes.sjc", "kn.sjkn")),
+        "lexicon: " + " ".join(f"{n} sha256={sha(os.path.join(ROOT, 'data', 'lexicon', n))}" for n in LEXICON_FILES),
         f"theta={scorer.theta} beta={scorer.beta} gamma={scorer.gamma} mode={scorer.mode} max_buffer={DS.MAX_BUF}",
         f"generated on {platform.system()} {platform.machine()}, python {platform.python_version()}",
         "format: see the module docstring of experiments/digits/golden_digits.py",
     ]
     with open(a.out, "w", encoding="utf-8", newline="\n") as f:
-        f.write(generate(scorer, env.history, ROWS, header))
+        f.write(generate(scorer, env.history, ROWS, header, strict=True))
 
 
 if __name__ == "__main__":

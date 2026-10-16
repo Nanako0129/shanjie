@@ -12,6 +12,7 @@ import build_digits as bd  # noqa: E402
 import holdout_guard  # noqa: E402
 
 bc = bd.bc
+L = bd.L
 WORDS = ["下午", "點", "開會", "價格", "元", "我", "共", "人", "年", "第", "名", "的", "好", "買", "了"]
 
 
@@ -24,6 +25,19 @@ def mklex(words=WORDS):
 
 
 LEX = mklex()
+
+
+class FakeLM:
+    """What L.history reads of a model: ids and ctx (a word has a history record when its id is in ctx)."""
+
+    def __init__(self, words):
+        self.ids = {w: i for i, w in enumerate(words)}
+        self.ctx = {i: (1,) for i in self.ids.values()}
+
+
+HIST_WORDS = WORDS + ["機"]   # 機 has a history record, 算機 and 計算機 do not
+LM = FakeLM(HIST_WORDS)
+HIST = bd.make_history(LM)
 # Every digits.md A.3.2 situation in 14 lines (hand counts in the tests below).
 CORPUS = [
     "下午3點開會",           # 1  word D word word
@@ -43,10 +57,10 @@ CORPUS = [
 ]
 
 
-def count(lines, lex=LEX, guard=None):
+def count(lines, lex=LEX, guard=None, hist=HIST):
     c = bd.Counts()
     for s in lines:
-        c.add_line(bd.line_items(s, lex, guard))
+        c.add_line(bd.line_items(s, lex, hist, guard))
     return c
 
 
@@ -56,35 +70,70 @@ def table(lines=CORPUS, k=1):
 
 
 class Items(unittest.TestCase):
-    def items(self, s, guard=None):
-        return bd.line_items(s, LEX, guard)
+    def items(self, s, guard=None, lex=LEX, hist=HIST):
+        return bd.line_items(s, lex, hist, guard)
 
     def test_one_char_han_next_to_run(self):
-        self.assertEqual(self.items("共25人"), [("w", "共"), ("D", "25"), ("w", "人")])
+        self.assertEqual(self.items("共25人"), [("w", "共", "<s>"), ("D", "25", "共"), ("w", "人", "<s>")])   # after the run the text ends in digits: no context
 
     def test_unsegmentable_segment_is_boundary(self):
-        self.assertEqual(self.items("嗯嗯嗯5元"), [("D", "5"), ("w", "元")])
-        self.assertEqual(self.items("下午嗯嗯嗯5"), [("D", "5")])        # the whole Han run 下午嗯嗯嗯 has no segmentation
-        self.assertEqual(self.items("下午，嗯嗯嗯5"), [("w", "下午"), bd.BOUNDARY, ("D", "5")])
+        self.assertEqual(self.items("嗯嗯嗯5元"), [("D", "5", "<s>"), ("w", "元", "<s>")])   # 嗯嗯 has no history record
+        self.assertEqual(self.items("下午嗯嗯嗯5"), [("D", "5", "<s>")])        # the whole Han run 下午嗯嗯嗯 has no segmentation
+        self.assertEqual(self.items("下午，嗯嗯嗯5"), [("w", "下午", "<s>"), bd.BOUNDARY, ("D", "5", "<s>")])
 
     def test_boundaries_never_repeat_and_are_implicit_at_the_ends(self):
-        self.assertEqual(self.items("，，25，，"), [("D", "25")])
-        self.assertEqual(self.items("價格 300 元"), [("w", "價格"), bd.BOUNDARY, ("D", "300"), bd.BOUNDARY, ("w", "元")])
+        self.assertEqual(self.items("，，25，，"), [("D", "25", "<s>")])
+        self.assertEqual(self.items("價格 300 元"), [("w", "價格", "<s>"), bd.BOUNDARY, ("D", "300", "<s>"), bd.BOUNDARY, ("w", "元", "<s>")])
 
     def test_run_shapes_and_fullwidth_digits(self):
-        self.assertEqual(self.items("價格１.５的"), [("w", "價格"), ("D", "1.5"), ("w", "的")])
-        self.assertEqual(self.items("2026-10-15年"), [("D", "2026-10-15"), ("w", "年")])
-        self.assertEqual(self.items("3.")[0], ("D", "3"))                      # a trailing separator is not part of the run
-        self.assertEqual(self.items("1,000"), [("D", "1"), bd.BOUNDARY, ("D", "000")])   # `,` ends a run (answer (h))
-        self.assertEqual(self.items("1:30"), [("D", "1"), bd.BOUNDARY, ("D", "30")])    # ... and `:` too
-        self.assertEqual(self.items("A123元"), [("D", "123"), ("w", "元")])   # English is a boundary, and not a unit
+        self.assertEqual(self.items("價格１.５的"), [("w", "價格", "<s>"), ("D", "1.5", "價格"), ("w", "的", "<s>")])
+        self.assertEqual(self.items("2026-10-15年"), [("D", "2026-10-15", "<s>"), ("w", "年", "<s>")])
+        self.assertEqual(self.items("3.")[0], ("D", "3", "<s>"))                      # a trailing separator is not part of the run
+        self.assertEqual(self.items("1,000"), [("D", "1", "<s>"), bd.BOUNDARY, ("D", "000", "<s>")])   # `,` ends a run (answer (h))
+        self.assertEqual(self.items("1:30"), [("D", "1", "<s>"), bd.BOUNDARY, ("D", "30", "<s>")])    # ... and `:` too
+        self.assertEqual(self.items("A123元"), [("D", "123", "<s>"), ("w", "元", "<s>")])   # English is a boundary, and not a unit
+
+    def test_context_is_the_scorers_history_of_the_text_before_the_unit(self):
+        """C.6 item 1: v = L.history(L.context_key(text before the unit on the line), model), not the previous word."""
+        lex = mklex(WORDS + ["計算機", "機"])
+        got = self.items("計算機3台", lex=lex)
+        self.assertEqual(got[0], ("w", "計算機", "<s>"))
+        self.assertEqual(got[1], ("D", "3", "機"))                                   # the three-character word before the run: its last character
+        self.assertEqual(got[1][2], L.history(L.context_key("計算機"), LM))           # ... exactly the function the scorer calls
+        lex2 = mklex(WORDS + ["計算機", "算機"])
+        self.assertEqual(self.items("計算機3", lex=lex2, hist=bd.make_history(FakeLM(HIST_WORDS + ["算機"])))[1][2], "算機")                # the last two characters win when they have a record
+        # segmentation does not decide it: two words 下午 + 開會 give 開會's context 下午 -> its last two characters
+        self.assertEqual(self.items("下午開會")[1], ("w", "開會", "下午"))
+        self.assertEqual(self.items("下午3點開會"), [("w", "下午", "<s>"), ("D", "3", "下午"), ("w", "點", "<s>"), ("w", "開會", "點")])
+        self.assertEqual(self.items("3好")[0], ("D", "3", "<s>"))                     # a line start, and no Han text before: <s>
+
+    def test_history_is_cached_per_context_key(self):
+        calls = []
+
+        class Spy(FakeLM):
+            @property
+            def ctx(self):
+                calls.append(1)
+                return self._ctx
+
+            @ctx.setter
+            def ctx(self, v):
+                self._ctx = v
+        hist = bd.make_history(Spy(HIST_WORDS))
+        for _ in range(5):
+            hist("下午")
+            hist("")
+        self.assertEqual(len(calls), 1)    # "" is answered without a lookup; 下午 once
+        self.assertEqual(hist("下午"), L.history("下午", Spy(HIST_WORDS)))
 
     def test_guarded_han_run_is_not_counted_and_is_a_boundary(self):
         class G:
             def any(self, run):
                 return "開會" in run
         # the run 點開會 contains the guarded text: it becomes a boundary; 下午 (a separate Han run) stays
-        self.assertEqual(self.items("下午3點開會", G()), [("w", "下午"), ("D", "3"), bd.BOUNDARY])
+        self.assertEqual(self.items("下午3點開會", G()), [("w", "下午", "<s>"), ("D", "3", "下午"), bd.BOUNDARY])
+        # ... and its characters are no context for what follows (here the run before 5 would be 開會 -> v 開會 if it were read)
+        self.assertEqual(self.items("下午3點開會5", G())[-1], ("D", "5", "<s>"))
 
     def test_holdout_guard_matcher_from_section_8(self):
         """The real matcher (holdout_guard.build_matcher, an identity conversion table), rows file in the strict 3-field shape."""
@@ -94,12 +143,13 @@ class Items(unittest.TestCase):
             with open(rows, "w", encoding="utf-8") as f:
                 f.write("|價格開會明天|ㄒ\n")
             guard = holdout_guard.build_matcher([rows], conv)[0]
-        self.assertEqual(bd.line_items("下午3價格開會明天5元", LEX, guard), [("w", "下午"), ("D", "3"), bd.BOUNDARY, ("D", "5"), ("w", "元")])
-        self.assertEqual(bd.line_items("下午3點", LEX, guard), [("w", "下午"), ("D", "3"), ("w", "點")])
+        self.assertEqual(self.items("下午3價格開會明天5元", guard), [("w", "下午", "<s>"), ("D", "3", "下午"), bd.BOUNDARY, ("D", "5", "<s>"), ("w", "元", "<s>")])
+        self.assertEqual(self.items("下午3點", guard), [("w", "下午", "<s>"), ("D", "3", "下午"), ("w", "點", "<s>")])
 
 
 class Counting(unittest.TestCase):
-    """Hand counts for CORPUS (comments in the module docstring of the test): T = 42 units, 27 words + 15 runs, 18 paragraphs."""
+    """Hand counts for CORPUS (comments in the module docstring of the test): T = 42 units, 27 words + 15 runs. N(v) counts the units whose
+    context is v: 29 `<s>`, 下午 2, 價格 4, 共 2, 第 1, 了 1 (the run of 我買了12345678901234), 買 1 (了), 我 1 (買), 點 1 (開會)."""
 
     @classmethod
     def setUpClass(cls):
@@ -108,11 +158,11 @@ class Counting(unittest.TestCase):
 
     def test_totals(self):
         c = self.c
-        self.assertEqual((c.t, c.nd, c.paras, c.s), (42, 15, 18, 4))
+        self.assertEqual((c.t, c.nd, c.ctx["<s>"], c.s), (42, 15, 29, 4))
         self.assertEqual((self.t.t, self.t.nd, self.t.s), (42, 15, 4))
 
     def test_D_rows(self):
-        self.assertEqual(self.t.d, {"<s>": (5, 18), "下午": (2, 2), "價格": (4, 5), "第": (1, 1), "共": (2, 2), "了": (1, 1)})
+        self.assertEqual(self.t.d, {"<s>": (5, 29), "下午": (2, 2), "價格": (4, 4), "第": (1, 1), "共": (2, 2), "了": (1, 1)})
         self.assertEqual(sum(n for n, _ in self.t.d.values()), 15)   # every run has exactly one predecessor row
 
     def test_W_Q_P_rows(self):
@@ -135,14 +185,25 @@ class Counting(unittest.TestCase):
         self.assertEqual(len(body), len(set(body)))
         self.assertTrue(text.endswith("\n") and "\r" not in text)
 
-    def test_common_word_keeps_a_D_row_without_a_run(self):
+    def test_common_context_keeps_a_D_row_without_a_run(self):
         t = table(["我好"] * 1000 + ["下午3點"], k=5)
-        self.assertEqual(t.d["我"], (0, 1000))
-        self.assertEqual(t.d["好"], (0, 1000))
-        self.assertNotIn("下午", t.d)                 # N(v->D) = 1 < k = 5: cut, and no Q row either
+        self.assertEqual(t.d["我"], (0, 1000))         # 好 follows 我 a thousand times: N(我) = 1000, never followed by a run
+        self.assertNotIn("好", t.d)                    # nothing follows 好: N(好) = 0
+        self.assertNotIn("下午", t.d)                 # N(下午) = 1 < 1000 and N(v->D) = 1 < k = 5: cut, and no Q row either
         self.assertNotIn("下午", t.q)
-        self.assertIn("<s>", t.d)                      # the paragraph row is never cut
+        self.assertIn("<s>", t.d)                      # the <s> row is never cut
         self.assertNotIn("我", table(["我好"] * 999 + ["下午3點"]).d)   # 999 < 1,000
+
+    def test_truncation_keeps_every_D_row_with_N_v_at_least_1000(self):
+        """C.6 item 2: 1 <= N(v->D) < k with N(v) >= 1000 must not fall back to the global P(D) (it could be larger than the common v's own rate)."""
+        lines = ["好好"] * 1000 + ["好3", "好5", "好7"]           # 好: followed 1000 + 3 times, 3 of them by a run
+        for k in (1, 2, 3, 5, 50):
+            t = table(lines, k=k)
+            self.assertEqual(t.d["好"], (3, 1003), k)            # kept at every k, with its real count
+        t5 = table(lines, k=5)
+        self.assertNotIn("好", t5.q)                              # but D only: Q needs N(v->D) >= k
+        self.assertAlmostEqual(t5.p_D_given("好"), (3 + t5.p_D()) / (1003 + 1))   # its own rate, not the global P(D)
+        self.assertNotIn("下午", table(lines + ["下午3點"], k=5).d)   # N(下午) = 1: below the common threshold, cut as before
 
     def test_k_cuts_D_Q_W_P_together(self):
         t = table(k=2)
@@ -172,7 +233,7 @@ class Counting(unittest.TestCase):
     def test_workers_preprocess_wiki_markup_and_text_lines(self):
         """_work: wiki raw text through bc.article_sentences (entity, TEMPLATE, MARKUP, SENT; empty conversion tables), lines through bc.convert."""
         saved = dict(bc._W)
-        bc._W.update({"lex": LEX, "conv": ({}, {}, 1), "guard": None})
+        bc._W.update({"lex": LEX, "conv": ({}, {}, 1), "guard": None, "hist": HIST})
         try:
             raw = "{{模板|甲}}下午&lt;ref&gt;x&lt;/ref&gt;3點。價格[[甲|300]]元；共25人\n第1名"
             c = bd._work(("wiki", [raw]))
@@ -201,9 +262,9 @@ class Formulas(unittest.TestCase):
 
     def test_P_D_given_C(self):
         pd = 15 / 42
-        self.assertAlmostEqual(self.t.p_D_given("價格", 1.0), (4 + pd) / (5 + 1))
-        self.assertAlmostEqual(self.t.p_D_given("價格", 2.0), (4 + 2 * pd) / (5 + 2))
-        self.assertAlmostEqual(self.t.p_D_given("<s>", 1.0), (5 + pd) / (18 + 1))
+        self.assertAlmostEqual(self.t.p_D_given("價格", 1.0), (4 + pd) / (4 + 1))
+        self.assertAlmostEqual(self.t.p_D_given("價格", 2.0), (4 + 2 * pd) / (4 + 2))
+        self.assertAlmostEqual(self.t.p_D_given("<s>", 1.0), (5 + pd) / (29 + 1))
         self.assertAlmostEqual(self.t.p_D_given("了", 1.0), (1 + pd) / (1 + 1))
         self.assertAlmostEqual(self.t.p_D_given("開會"), pd)         # no D row: P(D)
         self.assertAlmostEqual(self.t.p_D_given("點", 5.0), pd)

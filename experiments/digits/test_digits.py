@@ -1,11 +1,16 @@
 """Unit tests for experiments/digits (digit-context.md C.4): a hand-made lexicon, a stub language model and a hand-made count table.
 No real data, no network.   Run: cd experiments/digits && python3 -W ignore -m unittest test_digits"""
+import argparse
 import collections
+import contextlib
+import io
+import json
 import math
 import os
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
@@ -22,7 +27,7 @@ LEX_ROWS = [
     ("ㄚˋ", "啊", -2.0), ("ㄚˋ", "阿", -2.5), ("ㄓㄢˋ", "戰", -2.5), ("ㄅㄟˋ", "倍", -2.5), ("ㄩㄝˋ", "月", -2.0), ("ㄩㄢˊ", "元", -2.0),
     ("ㄋㄧㄢˊ", "年", -2.0), ("ㄉㄧㄢˇ", "點", -2.0), ("ㄅ", "ㄅ", -5.0), ("ㄉㄢˋ", "蛋", -3.0), ("ㄉㄚ", "搭", -3.0),
     ("ㄋㄧㄢˊ-ㄉㄞˋ", "年代", -3.5), ("ㄉㄧㄢˇ-ㄒㄧㄣ", "點心", -3.0), ("ㄅㄞˇ", "百", -2.0),
-    ("ㄘㄜˋ", "測", -2.5), ("ㄕˋ", "試", -2.5), ("ㄓㄨㄢˇ", "轉", -3.0), ("ㄧㄢˊ", "言", -2.5), ("ㄉㄜ˙", "的", -1.0),
+    ("ㄅㄚˋ", "爸", -2.0), ("ㄘㄜˋ", "測", -2.5), ("ㄕˋ", "試", -2.5), ("ㄓㄨㄢˇ", "轉", -3.0), ("ㄧㄢˊ", "言", -2.5), ("ㄉㄜ˙", "的", -1.0),
 ]
 
 
@@ -213,6 +218,40 @@ class Scoring(unittest.TestCase):
             c2, p2 = s2.decide("<s>", [], ["8", "4"], None, None)
             self.assertEqual(c2[p2][1] == 0, want_digit, th)
 
+    def test_theta_guards_only_the_splits_without_any_digit(self):
+        """C.6 item 3 (the 1984 case): once the run holds a digit, the all-digit split is compared with the zhuyin splits by score alone."""
+        _, _, sc = world(theta=10.0)
+        sc.lp_d = lambda C, dkeys, ended: -1.0 if dkeys else 0.0
+        sc.lp_z = lambda C, digit_ctx, units: -0.5
+        # `1` already emitted, buffer 8 4 (ㄚˋ is legal): all digits -1.0 beats the zhuyin split (holds the 1) -1.5, theta 10 or not
+        c, p = sc.decide("<s>", ["1"], ["8", "4"], None, 3)
+        self.assertEqual([(m, t) for m, t, _ in c], [(2, 0), (0, 2)])
+        self.assertEqual((c[p][0], c[p][1]), (2, 0))
+        # the same keys as a pure-zhuyin split (nothing emitted): theta 10 puts ㄚˋ ahead of the digits; the margin below decides at a small theta
+        c, p = sc.decide("<s>", [], ["8", "4"], None, None)
+        self.assertEqual((c[p][0], c[p][1]), (0, 2))
+        sc.lp_z = lambda C, digit_ctx, units: -1.3     # digits -1.0, pure zhuyin -1.3: zhuyin only because of theta
+        for th, want in ((0.0, (2, 0)), (0.29, (2, 0)), (0.31, (0, 2))):
+            sc.theta = th
+            c, p = sc.decide("<s>", [], ["8", "4"], None, None)
+            self.assertEqual((c[p][0], c[p][1]), want, th)
+
+    def test_theta_among_zhuyin_splits_only_for_the_one_without_a_digit(self):
+        _, _, sc = world()
+        sc.lp_d = lambda C, dkeys, ended: 1.0 if dkeys else 0.0
+        sc.lp_z = lambda C, digit_ctx, units: 0.0
+        # buffer 1 8 4: all digits (1.0), 1 + ㄚˋ (1.0, holds a digit), ㄅㄚˋ (0.0, none)
+        c, _ = sc.decide("<s>", [], ["1", "8", "4"], None, None)
+        self.assertEqual([(m, t) for m, t, _ in c], [(3, 0), (1, 2), (0, 3)])
+        for th, want in ((0.0, (1, 2)), (0.9, (1, 2)), (1.1, (0, 3)), (5.0, (0, 3))):   # a tie with the digits goes to zhuyin; theta lifts only ㄅㄚˋ
+            sc.theta = th
+            c, p = sc.decide("<s>", [], ["1", "8", "4"], None, None)
+            self.assertEqual((c[p][0], c[p][1]), want, th)
+        sc.lp_d = lambda C, dkeys, ended: 1.5 if len(dkeys) == 3 else (1.0 if dkeys else 0.0)   # digits strictly ahead of every effective score
+        sc.theta = 0.4
+        c, p = sc.decide("<s>", [], ["1", "8", "4"], None, None)
+        self.assertEqual((c[p][0], c[p][1]), (3, 0))
+
     def test_structural_rule_takes_the_largest_legal_tail(self):
         _, _, sc = world(mode="structural")
         c, p = sc.decide("<s>", [], ["8", "4"], None, None)
@@ -320,6 +359,17 @@ class Simulation(unittest.TestCase):
         self.assertEqual(r["flips"], collections.Counter([0]))
         self.assertEqual(r["nsplit"][2] > 0, True)                  # timing counters: splits per scored key
 
+    def test_flips_count_only_the_digit_runs_own_keys(self):
+        """C.6 item 5: a run that starts inside the following word flips its own keys; those are not the digit run's display."""
+        lex, lm, sc = world(table_text=TABLE_TEXT.replace("D\t<s>\t5\t100", "D\t<s>\t99\t100"))
+        env = type("E", (), {"history": staticmethod(identity_history), "lex": lex, "idx": sc.idx, "table": sc.tb, "lm": lm})()
+        row = ("", "3", "年代", ["ㄋㄧㄢˊ", "ㄉㄞˋ"])
+        keys = ["3"] + DS.keys_of_syllable("ㄋㄧㄢˊ") + DS.keys_of_syllable("ㄉㄞˋ")
+        sim = DS.simulate(sc, identity_history, keys, "", list("年代"))
+        self.assertEqual(sum(ev["flips"] for ev in sim.log[:-1]), 1)       # the second syllable's own run: 2 shown as ㄉ, then flipped to a digit by the 9
+        self.assertEqual(sim.rid_of[0], 0)
+        self.assertEqual(M.digit_row(env, sc, row)["flips"], collections.Counter([0]))     # ... which the digit run (3) does not count
+
 
 class Prediction(unittest.TestCase):
     def test_digit_scores_and_tiers(self):
@@ -356,9 +406,11 @@ class Prediction(unittest.TestCase):
     def test_pred_row(self):
         lex, lm, sc = world(lm=StubLM(succ=["蛋"]))
         env = type("E", (), {"history": staticmethod(identity_history), "lex": lex, "idx": sc.idx, "table": sc.tb, "lm": lm})()
-        r = M.pred_row(env, ("下午", "3", "點", ["ㄉㄧㄢˇ"]), 0.5)
-        self.assertEqual((r["n"], r["i_hit"], r["i_in_layer"], r["new"], r["base"]), (1, 1, 1, 1, 1))
-        self.assertEqual(M.pred_row(env, ("下午", "3", "沒有", ["ㄇㄟˊ", "ㄧㄡˇ"]), 0.5), {"dropped": 1})   # no lexicon entry with that reading
+        lams = (("chat", 0.5), ("formal", 0.3))
+        r = M.pred_row(env, ("下午", "3", "點", ["ㄉㄧㄢˇ"]), lams)
+        self.assertEqual((r["n"], r["i_hit"], r["i_in_layer"]), (1, 1, 1))                  # (i) once per row, no profile
+        self.assertEqual((r["chat.new"], r["chat.base"], r["formal.new"], r["formal.base"]), (1, 1, 1, 1))
+        self.assertEqual(M.pred_row(env, ("下午", "3", "沒有", ["ㄇㄟˊ", "ㄧㄡˇ"]), lams), {"dropped": 1})   # no lexicon entry with that reading
 
 
 class Verdicts(unittest.TestCase):
@@ -458,6 +510,15 @@ class Golden(unittest.TestCase):
         self.assertTrue(all(f[0].isdigit() and f[7].startswith("cls=") for f in keyl))
         self.assertEqual(text, GD.generate(sc, identity_history, GD.ROWS, ["header sha256=abc", "second line"]))   # deterministic
 
+    def test_strict_refuses_a_syllable_without_its_character_in_the_middle_of_a_row(self):
+        _, _, sc = world()
+        GD.generate(sc, identity_history, [("", "84", "")], ["h"], strict=True)                      # a syllable at the very end is read by nobody
+        with self.assertRaises(SystemExit):
+            GD.generate(sc, identity_history, [("", "841", "")], ["h"], strict=True)                 # ㄚˋ, then a new run: its context needs the character
+        GD.generate(sc, identity_history, [("", "841", "啊")], ["h"], strict=True)
+        self.assertIn(("", "1258901258", ""), GD.ROWS)                                               # the long digit string finishes no syllable
+        self.assertNotIn("123456789", [k for _, k, _ in GD.ROWS])
+
     def test_scores_are_python_reprs(self):
         _, _, sc = world()
         text = GD.generate(sc, identity_history, [("", "84", "")], ["h"])
@@ -465,6 +526,140 @@ class Golden(unittest.TestCase):
         splits = row.split("\t")[5][len("splits="):].split(";")
         self.assertEqual([s.split(",")[:2] for s in splits], [["1", "0"], ["0", "1"]])
         self.assertEqual(float(splits[1].split(",", 2)[2]), math.log10(10 ** -2.0 + 10 ** -2.5))
+
+
+class FakeRunner:
+    """Stands in for measure.Runner: records the calls, answers with canned counts."""
+    calls = []
+    struct_c = 0
+    c_below = 2.0   # theta below this has (c) = 3
+
+    def __init__(self, table_path, procs):
+        pass
+
+    def run(self, kind, rows, theta=0.0, mode="score", chunk=40):
+        FakeRunner.calls.append((kind, theta, mode, len(rows)))
+        if kind == "pred":
+            r = {"n": 10, "i_hit": 5, "i_in_layer": 9}
+            for prof, _ in M.LAMBDAS:
+                r.update({f"{prof}.base": 4, f"{prof}.new": 8, f"{prof}.new_only": 4, f"{prof}.base_only": 0})
+            return r
+        if kind == "digit":
+            return {"rows": 10, "a_ok": 9, "flips": collections.Counter({0: 10}), "nsplit": collections.Counter({2: 5}), "nscan": collections.Counter({1: 5})}
+        c = FakeRunner.struct_c if mode == "structural" else (3 if theta < FakeRunner.c_below else 0)
+        return {"rows": len(rows), "syl": 100, "keys": 400, "c": c, "c_rows": int(bool(c)), "d": 1}
+
+
+class Commands(unittest.TestCase):
+    """measure.judge / tune / build_set end to end on tiny files with a fake Runner (no model, no processes)."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        d = self.tmp.name
+        self.files = {}
+        for name, text in (("table", TABLE_TEXT), ("digits", "下午|3|點|ㄉㄧㄢˇ\n|2026|年|ㄋㄧㄢˊ\n"), ("zh", "|年|ㄋㄧㄢˊ\n|點|ㄉㄧㄢˇ\n")):
+            self.files[name] = os.path.join(d, name + ".txt")
+            open(self.files[name], "w", encoding="utf-8").write(text)
+        FakeRunner.calls, FakeRunner.struct_c, FakeRunner.c_below, self.n = [], 0, 2.0, 0
+        for patch in (mock.patch.object(M, "Runner", FakeRunner), mock.patch.object(M, "load_lexicon", mklex)):
+            patch.start()
+            self.addCleanup(patch.stop)
+
+    def run_cmd(self, name, **kw):
+        f = self.files
+        self.n += 1
+        a = argparse.Namespace(table=f["table"], procs=1, out=os.path.join(self.tmp.name, f"{name}-report{self.n}.txt"), **kw)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            try:
+                getattr(M, name)(a)
+                code = None
+            except SystemExit as e:
+                code = e.code
+        return out.getvalue(), code
+
+    def judge(self, theta):
+        f = self.files
+        return self.run_cmd("judge", theta=theta, digit_judge=f["digits"], dev302=f["zh"], typing76=f["zh"])
+
+    def test_judge_with_theta_none_runs_only_R1_and_the_structural_c(self):
+        text, code = self.judge("none")
+        self.assertIsNone(code)
+        self.assertEqual(sorted(set((k, m) for k, _, m, _ in FakeRunner.calls)), [("pred", "score"), ("zh", "structural")])   # no digit rows, no score mode
+        self.assertEqual(sum(1 for k, *_ in FakeRunner.calls if k == "pred"), 1)               # (i)(ii) both profiles from one pass
+        self.assertIn("R1: the prediction row uses digit-context", text)
+        self.assertIn("R2: A uses the structural design", text)
+        self.assertNotIn("(a)", text)
+        self.assertNotIn("STOP", text)
+
+    def test_judge_with_a_theta_reports_both_rules_and_stops_on_a_structural_c(self):
+        text, code = self.judge("3")
+        self.assertIsNone(code)
+        self.assertIn("score  digit-judge", text)
+        self.assertIn("structural  digit-judge", text)
+        self.assertIn("R2: A uses the score design", text)
+        FakeRunner.struct_c = 2
+        text, code = self.judge("none")
+        self.assertEqual(code, 1)
+        self.assertIn("STOP", text)
+
+    def test_tune_prints_stop_and_exits_nonzero_on_a_structural_c(self):
+        f = self.files
+        kw = dict(digit_tune=f["digits"], cvtune=f["zh"], wikitune=f["zh"])
+        text, code = self.run_cmd("tune", **kw)
+        self.assertIsNone(code)
+        self.assertIn("R2 theta: 2.0", text)                                   # the canned (c) is 3 below theta 2, 0 from 2 on
+        self.assertEqual(sum(1 for k, th, m, _ in FakeRunner.calls if k == "digit" and th == 0.0 and m == "score"), 1)   # the timing line reuses theta 0's pass
+        self.assertIn("time (theta 0.0", text)
+        FakeRunner.calls, FakeRunner.struct_c = [], 1
+        text, code = self.run_cmd("tune", **kw)
+        self.assertEqual(code, 1)
+        self.assertIn("STOP", text)
+        self.assertNotIn("R2 theta", text)
+
+    def test_tune_message_lists_the_theta_grid_from_THETAS(self):
+        self.assertEqual(M.THETA_SET, "{0, 0.5, 1, 2, 3, 4, 6, 8}")
+        FakeRunner.c_below = 100.0
+        with mock.patch.object(M, "THETAS", (9.0, 12.0)), mock.patch.object(M, "THETA_SET", "{9, 12}"):
+            text, code = self.run_cmd("tune", digit_tune=self.files["digits"], cvtune=self.files["zh"], wikitune=self.files["zh"])
+        self.assertIsNone(code)
+        self.assertIn("R2 theta: None  (no theta in {9, 12}", text)
+
+    def build_set(self, articles, lo, hi, cap=1500):
+        import build_counts as bc
+        out_dir = os.path.join(self.tmp.name, "set")
+        args = argparse.Namespace(out_dir=out_dir, src=self.tmp.name, seed=M.SEED, cap=cap, range=[lo, hi], single="judge2.txt")
+        raws = [f"下午{n}點" for n in articles]
+        out = io.StringIO()
+        with mock.patch.object(bc, "load_conv", lambda: ({}, {}, 1)), mock.patch.object(bc, "articles", lambda n: iter(raws[:n])), \
+                mock.patch.object(M, "readings_by_word", lambda ws, d: {w: "ㄉㄧㄢˇ" for w in ws}), contextlib.redirect_stdout(out):
+            try:
+                M.build_set(args)
+                code = None
+            except SystemExit as e:
+                code = str(e.code)
+        return out_dir, code
+
+    def test_build_set_range_cuts_articles_and_writes_one_file(self):
+        out_dir, code = self.build_set(range(1000, 1700), 100, 650)
+        self.assertIsNone(code)
+        rows = open(os.path.join(out_dir, "judge2.txt"), encoding="utf-8").read().splitlines()
+        self.assertEqual(len(rows), 550)                                         # articles 100..649, one row each
+        self.assertEqual(sorted(int(r.split("|")[1]) for r in rows), list(range(1100, 1650)))   # nothing before LO, nothing from HI on
+        self.assertEqual(sorted(os.listdir(out_dir)), ["judge2.manifest.json"] + ["judge2.txt"])
+        man = json.load(open(os.path.join(out_dir, "judge2.manifest.json"), encoding="utf-8"))
+        self.assertEqual((man["articles"], man["candidates"]["cv"], man["counts"]["judging"] + man["counts"]["tuning"], man["seed"]), ([100, 650], 0, 550, 20261017))
+        out_dir2, _ = self.build_set(range(1000, 1700), 100, 650)                # deterministic
+        self.assertEqual(open(os.path.join(out_dir2, "judge2.txt"), "rb").read(), open(os.path.join(out_dir, "judge2.txt"), "rb").read())
+
+    def test_build_set_range_caps_and_stops_below_the_minimum(self):
+        out_dir, code = self.build_set(range(1000, 2400), 0, 1400, cap=520)
+        self.assertIsNone(code)
+        self.assertEqual(len(open(os.path.join(out_dir, "judge2.txt"), encoding="utf-8").read().splitlines()), 520)
+        out_dir, code = self.build_set(range(1000, 1700), 0, 499)                # 499 rows: one below SINGLE_MIN
+        self.assertIn("STOP: 499 digit-run rows, fewer than 500", code)
+        self.assertTrue(os.path.exists(os.path.join(out_dir, "judge2.txt")))     # still written, as before
 
 
 if __name__ == "__main__":

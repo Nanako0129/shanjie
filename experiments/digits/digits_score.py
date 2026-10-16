@@ -10,6 +10,9 @@ A run starts at an alphabet symbol key or a tone key with nothing pending. Its b
 digit tokens first). For every key the buffer is split into (m digits, t tail keys), the tail being a legal zhuyin tail
 (`Legal.tail_units`); `Scorer.decide` scores the splits and picks one.
 
+theta (digits.md A.3.3, digit-context.md C.6 item 3): when the tail closes a syllable, a zhuyin split that holds no digit (emitted + m = 0) is
+scored S + theta; one that holds a digit is scored S; the all-digit split wins only when its S is strictly greater than the best of those.
+
 Scores (log10): S = lpD + lpZ.
   lpD = 0 when d = 0, else log P(D|C) + log P_len(d | ended) + sum of log P_ch over the first d keys of the run (emitted keys included, added in key order);
         d = emitted + m; ended = (t > 0 or the key is a boundary).
@@ -61,15 +64,8 @@ def is_han(c):
 
 
 def base_pb(lm, w, lp):
-    """The backoff term of lm.word (the word's own probability, blended with the KN side file when the model has one)."""
-    pb = 10 ** lp
-    kn = getattr(lm, "kn", None)
-    if kn is not None:
-        wi = lm.ids.get(w, -1)
-        if wi >= 2:
-            beta, np1, total = kn
-            pb = beta * np1[wi] / total + (1 - beta) * pb
-    return pb
+    """The backoff term of lm.word (the word's own probability, blended with the KN side file when the model has one): one function in lm.py."""
+    return L.unigram_back(lm, w, lp)
 
 
 class Legal:
@@ -181,8 +177,10 @@ class Scorer:
         zh = [i for i, c in enumerate(out) if c[1] > 0]
         dg = [i for i, c in enumerate(out) if c[1] == 0]
         if closing and zh and dg:
-            best = max(zh, key=lambda i: (out[i][2], out[i][1]))
-            return out, dg[0] if out[dg[0]][2] > out[best][2] + self.theta else best
+            # theta guards only the splits with no digit at all (pure zhuyin); once the run holds a digit the question is where the run ends
+            eff = {i: out[i][2] + (self.theta if len(emitted) + out[i][0] == 0 else 0.0) for i in zh}
+            best = max(zh, key=lambda i: (eff[i], out[i][1]))
+            return out, dg[0] if out[dg[0]][2] > eff[best] else best
         top = max(c[2] for c in out)
         tied = [i for i, c in enumerate(out) if c[2] == top]
         keep = [i for i in tied if prev_d is not None and len(emitted) + out[i][0] == prev_d]
@@ -259,7 +257,8 @@ class Sim:
         else:
             self._idle(idx, key, ev)
         ev["cls"] = "".join(self.cls)
-        ev["flips"] = sum(1 for p, b in enumerate(before[:idx]) if b != "-" and self.cls[p] != b)
+        ev["flipped"] = [p for p, b in enumerate(before[:idx]) if b != "-" and self.cls[p] != b]   # earlier keys whose class changed
+        ev["flips"] = len(ev["flipped"])
         rid = self.rid_of[idx]
         ev["shows_digit"] = rid is not None and any(self.cls[p] == "D" for p in range(len(self.keys)) if self.rid_of[p] == rid)
         self.log.append(ev)

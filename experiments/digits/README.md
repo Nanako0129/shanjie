@@ -8,9 +8,9 @@
 | `digits_score.py` | 數字字母表、串、緩衝（最多 4 鍵、第 5 鍵吐最舊的）、合法尾段、A.3.3 的評分與 θ、結構規則、`Sim`（逐鍵模擬）、A.3.5 的數字語境預測列 |
 | `measure.py` | `build-set`（C.4.1 的數字串集合）、`tune`（θ 掃描）、`judge`（判讀半＋dev302＋typing76 的判讀）；R1／R2 的判讀函式 |
 | `golden_digits.py` | 產生 `eval/golden/digits-score.txt`（30 列合成按鍵序列，每鍵的切分與分數） |
-| `test_digits.py` | 合成詞庫、替身語言模型、手造計數表的單元測試（42 個） |
+| `test_digits.py` | 合成詞庫、替身語言模型、手造計數表的單元測試（52 個，含 `measure.py` 的 `judge`／`tune`／`build-set` 用替身 Runner 的端到端測試） |
 
-## 指令（main 在 188 的 WSL／Windows 或 Colab 跑；Mac 只跑單元測試）
+## 指令（main 在 Windows 機器或 Colab 跑；Mac 只跑單元測試）
 
 單元測試（Mac 可跑；`make test-python` 已含）：
 
@@ -26,49 +26,58 @@ python3 experiments/s2/build_tune.py --part cv      # colloquial-train.txt、cvt
 python3 experiments/s2/build_tune.py --part wiki    # wikitune.txt，讀 30 萬篇，約 20 分鐘（該檔 docstring）
 ```
 
-1. **建表**（C.3；`--holdout-rows` 不給＝`eval/holdout/` 底下全部 `.txt`，保留集比對一律開著）：
+1. **建表**（C.3、C.6 項 1；表的前文 v 是評分端同一個函式 `lm.history(context_key(前文))` 對「同一行裡這個單位前面的文字」算的，所以建表要載入模型，每個程序載一次；`--holdout-rows` 不給＝`eval/holdout/` 底下全部 `.txt`，保留集比對一律開著）：
 
 ```
 python3 tools/build_digits.py --wiki ~/.cache/shanjie/sources/zhwiki-20261001-pages-articles.xml.bz2 --articles 200000 \
   --colloquial $S2_WORK/tune/colloquial-train.txt --out data/lexicon/digits.tsv --procs 10
 ```
 
-   輸出最後一行：`k=… bytes=… T=… N(D)=… sha256=…`（k 是大小回退選的最小次數，要記進研究紀錄）。檔頭一行記兩份輸入的 SHA-256、斷詞詞庫（`mcbpmf-data.txt`、`overlay-add.tsv`）的 SHA-256。
+   輸出最後一行：`k=… bytes=… T=… N(D)=… sha256=…`（k 是大小回退選的最小次數，要記進研究紀錄）。檔頭一行記兩份輸入的 SHA-256、斷詞詞庫（`mcbpmf-data.txt`、`overlay-add.tsv`）與前文所用模型 `bigram.sjlm` 的 SHA-256。
 2. **數字串集合**（C.4.1；到 repo 外的目錄；需要 `SHANJIE_MOEDICT`、`SHANJIE_HETERO`，同 `tools/readings.py`）：
 
 ```
 python3 experiments/digits/measure.py build-set --out-dir $OUT --src ~/.cache/shanjie/sources
 ```
 
-   寫出 `digitruns-tune.txt`（調參半）、`digitruns-judge.txt`（判讀半）、`digitruns.manifest.json`（種子 20261017、上限 3,000、候選數、輸出雜湊）。不到 1,000 列就以 `STOP` 結束。
-3. **調參**（θ 掃描；判讀半不碰）：
+   寫出 `digitruns-tune.txt`（調參半）、`digitruns-judge.txt`（判讀半）、`digitruns.manifest.json`（種子 20261017、上限 3,000、候選數、輸出雜湊）。不到 1,000 列就以 `STOP` 結束。第一輪的判讀半已經看過兩次，現在當調參資料用（C.6 項 4）。
+
+   **新的判讀集**（C.6 項 4：維基第 305,000–309,999 篇，沒有口語語料，所有列放一個檔，不分兩半；不到 500 列就 `STOP`）：
+
+```
+python3 experiments/digits/measure.py build-set --out-dir $OUT --src ~/.cache/shanjie/sources \
+  --range 305000 310000 --cap 1500 --single digitruns-judge2.txt
+```
+
+   寫出 `digitruns-judge2.txt` 與 `digitruns-judge2.manifest.json`（範圍、種子、上限、候選數、雜湊）。
+3. **調參**（θ 掃描；新判讀集不碰；調參資料＝上面第一輪的調參半＋判讀半，可把兩個檔合併成一個再給 `--digit-tune`）：
 
 ```
 python3 experiments/digits/measure.py tune --table data/lexicon/digits.tsv --digit-tune $OUT/digitruns-tune.txt \
   --cvtune $S2_WORK/tune/cvtune.txt --wikitune $S2_WORK/tune/wikitune.txt --out $OUT/tune-report.txt --procs 8
 ```
 
-   最後一行 `R2 theta: X` 就是 C.4.3 的 θ（沒有 θ 使 cvtune＋wikitune 的 (c)＝0 時印 `None`，R2 不過）。
-4. **判讀**（判讀半只看這一次；報告檔用 `x` 模式開，已存在就拒絕覆蓋）：
+   最後一行 `R2 theta: X` 就是 C.4.3 的 θ（沒有 θ 使 cvtune＋wikitune 的 (c)＝0 時印 `None`，R2 不過）。結構規則在 cvtune／wikitune 的 (c) > 0 時印 `STOP` 並以非零結束（不再往下跑）。
+4. **判讀**（判讀集只看這一次；報告檔用 `x` 模式開，已存在就拒絕覆蓋）：
 
 ```
 python3 experiments/digits/measure.py judge --table data/lexicon/digits.tsv --theta <tune 印的 θ，或 none> \
-  --digit-judge $OUT/digitruns-judge.txt --dev302 eval/bench/suite-v1/dev302.txt --typing76 eval/bench/suite-v1/typing76.txt \
+  --digit-judge $OUT/digitruns-judge2.txt --dev302 eval/bench/suite-v1/dev302.txt --typing76 eval/bench/suite-v1/typing76.txt \
   --out $OUT/judge-report.txt --procs 8
 ```
 
-   印 R1（兩種設定各一行 McNemar）、R2 的 (a)(b)(c)(d)、時間（每鍵切分數與相容掃描次數的 p50／p95／max）與最後的 `R1:` `R2:` 兩行判讀；結構規則自己的 (c) > 0 時加印 `STOP`。
+   印 R1（兩種設定各一行 McNemar）、R2 的 (a)(b)(c)(d)、時間（每鍵切分數與相容掃描次數的 p50／p95／max）與最後的 `R1:` `R2:` 兩行判讀；結構規則自己的 (c) > 0 時加印 `STOP` 並以非零結束。`--theta none`（tune 沒有 θ）只跑 R1 與結構規則在 dev302／typing76 的 (c)（停止條件用），不跑結構規則在判讀集上的 (a)(b)，也不跑評分版。
 5. **golden**（在 macOS 產；Linux 的 libm 末位不同，和 `cli/tests/golden.rs` 的 f64 golden 同一個限制）：
 
 ```
 python3 experiments/digits/golden_digits.py --table data/lexicon/digits.tsv --theta <θ> [--mode structural] --out eval/golden/digits-score.txt
 ```
 
-   R2 判「結構規則」時加 `--mode structural`（分數欄是 `None`，只比切分）；這次判評分切分，用 `--theta 3`。格式在 `golden_digits.py` 的 docstring；檔頭有 `digits.tsv` 與三個模型檔的 SHA-256。
+   R2 判「結構規則」時加 `--mode structural`（分數欄是 `None`，只比切分）；判評分切分就用 tune 印的 θ。格式在 `golden_digits.py` 的 docstring；檔頭有 `digits.tsv`、三個模型檔與五個詞庫檔（`mcbpmf-data.txt`、`overlay-add.tsv`、`sandhi-add.tsv`、`names-add.tsv`、`demote.tsv`）的 SHA-256。有音節在列中途完成、之後還有鍵，卻沒在 `chars` 給字的列，產生器會拒絕（`strict`）。`eval/golden/digits-score.txt` 要在新表出來之後由 main 重產；Python 這邊沒有任何測試去比對已提交的那個檔（Rust 的比對是 A 的事）。
 
-## 執行時間（2026-10-17 實測）
+## 執行時間（**舊的一次跑**，2026-10-17 第一輪，修訂三之前；修訂三的建表要多載模型、每個程序一份，main 重跑後更新）
 
-| 步驟 | Colab G4（48 執行緒，`--procs 46`） | 188 的 WSL（16 執行緒，`--procs 16`） |
+| 步驟 | Colab G4（48 執行緒，`--procs 46`） | Windows 機器（WSL，16 執行緒，`--procs 16`） |
 |---|---|---|
 | 建表（`build_digits.py`，20 萬篇＋口語） | 1 分 57 秒（不含下載 dump） | 沒跑 |
 | `build-set` | 2 分 7 秒（單程序） | 沒跑 |
@@ -76,7 +85,7 @@ python3 experiments/digits/golden_digits.py --table data/lexicon/digits.tsv --th
 | `judge` | 38 秒 | 1 分 27 秒 |
 | `golden_digits.py` | — | Mac 約 8 秒（含載入） |
 
-## 結果（2026-10-17；表 `4efd2acc`，k＝3）
+## 結果（**舊的一次跑**，2026-10-17；表 `4efd2acc`，k＝3；前文是斷詞的前一個詞、θ 無條件加在注音切分上，修訂三之後這些數字都要重量）
 
 | 項目 | 數字 |
 |---|---|
@@ -105,7 +114,7 @@ python3 experiments/digits/golden_digits.py --table data/lexicon/digits.tsv --th
 4. **相容詞的總和**是候選順序（`predict3.reference`，即 `predict.Index` 的桶順序去重）上由左到右的一般浮點加法，不用 `fsum`；Rust 要用同一個順序才會逐位元相同。lpD 的相加順序：`log P(D|C)`、`log P_len`、再依鍵序加 `log P_ch`。
 5. **d＝0 時 lpD＝0**（沒有 `1−P(D|C)` 這一項），照 A.3.3 字面。
 6. **完整音節要有含漢字的詞條**（A.3.1）：取「這個音節出現在某個含漢字的詞條的讀音裡」（任何字數的詞），不要求有單字詞條；注音字母詞（「ㄅ」）不算。尾段的前綴＝詞庫任一去聲調音節的前綴（這也決定聲介韻順序）。
-7. **θ**：只在尾段是完成音節（聲調鍵或空白）時用：全數字切分要**嚴格大於**最好的注音切分＋θ 才贏，否則取最好的注音切分（內部平手取尾段較長者）。其他鍵：取分數最大；平手時**目前顯示的數字總數不變**者優先，沒有就取 t 較大者（偏注音）；串的第一個鍵沒有「目前顯示」，平手取注音。
+7. **θ**（C.6 項 3）：只在尾段是完成音節（聲調鍵或空白）時用，而且只加在「不含任何數字」的注音切分（已吐出的數字＋m＝0）上：這種切分的有效分數＝分數＋θ，含數字的注音切分（d ≥ 1）的有效分數就是分數；全數字切分要**嚴格大於**最好的有效注音分數才贏，否則取最好的注音切分（注音之間先比有效分數，平手取尾段較長者）。θ 的用途是不讓純中文的音節被當成數字；串裡已經有數字時，問題只是串在哪裡結束，加 θ 會把 `1984` 的 `84` 判成「啊」。其他鍵：取分數最大；平手時**目前顯示的數字總數不變**者優先，沒有就取 t 較大者（偏注音）；串的第一個鍵沒有「目前顯示」，平手取注音。
 8. **結構規則**（`mode="structural"`）：合法切分裡取 t 最大者，不用表也不算分數（分數欄是 `None`）。
 9. **不在字母表的注音鍵**：尾段＝緩衝最後 ≤3 個鍵＋這個鍵，前段吐成數字、尾段進入未完成音節、串結束；沒有任何合法尾段就把緩衝全吐成數字、這個鍵開新音節。空白鍵：尾段以空白完成（一聲）對「全數字＋邊界」；數字贏時空白是分隔（類別 `S`），不是數字。
 10. **聲調鍵單獨起頭**（沒有緩衝）：直接是數字 token，並開一個串（`run_ctx` 依當時的前文）。
@@ -114,9 +123,9 @@ python3 experiments/digits/golden_digits.py --table data/lexicon/digits.tsv --th
 
 **表（C.3）**
 
-13. **N(`<s>`)**＝段落數（連續單位序列，被邊界隔開；行首與行尾是邊界）；`D\t<s>` 列永遠寫，不受 k 影響。
+13. **N(v)**（C.6 項 1）＝前文是 v 的單位（詞與數字串）個數；`<s>` 是行首、前面沒有漢字、或前面的漢字沒有歷史紀錄的單位。`D\t<s>` 列永遠寫，不受 k 影響。v 是 `lm.history(context_key(前文))`：三字以上的詞接數字串時，v 是它最後兩字或最後一字（看哪個在模型有歷史紀錄），和評分端一致；保留集比對命中的漢字段在前文裡當邊界。
 14. **Q 列**：N(v→D) ≥ k 的 v 都寫，N(v,D→·)＝0 也寫（0 與沒有這一列算出的值相同，照契約字面）。
-15. **大小回退**：k 依 1、2、3、5、10、20、30、50 試，2 MB 取 2,000,000 位元組（較嚴的讀法，也滿足 2 MiB）。D／Q 需要 N(v→D) ≥ k，W 需要 N(D→w) ≥ k，P 需要 ≥ max(2, k)；N(v→D)＝0 且 N(v) ≥ 1,000 的 D 列照留。N(v→D) 在 1 到 k−1 之間、N(v) ≥ 1,000 的詞，D 列被截掉（字面；那時用 P(D)）。
+15. **大小回退**：k 依 1、2、3、5、10、20、30、50 試，2 MB 取 2,000,000 位元組（較嚴的讀法，也滿足 2 MiB）。D／Q 需要 N(v→D) ≥ k，W 需要 N(D→w) ≥ k，P 需要 ≥ max(2, k)；N(v) ≥ 1,000 的 D 列照留，不論 N(v→D)（C.6 項 2；原本 1 ≤ N(v→D) < k 的被截掉而退回 P(D)，常見詞反而比沒接過數字的詞大）。這些保留的 D 列沒有 Q 列（Q 要 N(v→D) ≥ k）。
 16. **L 列**：長度是串的字元數（含 `.` `/` `-`），10 以上合計成 `10+`；`C` 列的 `ch` 是這 12 個字元。
 17. 前處理：`experiments/s2/build_counts.py` 的 `article_runs` 拆出前半段 `article_sentences`（逐句、轉換後、取漢字段之前），`article_runs` 改成呼叫它再 `HAN.findall`；輸出逐位元不變（`test_build_digits.py` 與既有測試覆蓋）。`build_digits.py` 用同一個函式，只把最後一步換成保留數字串的切法。口語行照 `build_counts_text` 再 `bc.convert` 一次。
 18. 保留集比對：命中的漢字段不計數，也當成邊界（`holdout_guard.build_matcher` 的比對器，`bc.fold` 兩邊折疊）。
@@ -126,6 +135,7 @@ python3 experiments/digits/golden_digits.py --table data/lexicon/digits.tsv --th
 19. **預測列的排序**：候選＝`predict3.reference`（前綴解讀）；分數＝`λ·log10 P(w|v,D) + (1−λ)·lp`（`lm.word` 的形狀，P 換成 A.3.2 的 `P(w|v,D)`，`P(w)` 用第 3 點的 `pb`）；後繼層＝W 列的詞∪`P` 列 (v, ·) 的詞，其餘候選在第二層；`predict3.order_s`／`rank_s`（悲觀名次，hit@9）。(i)（還沒打注音）：後繼層依 `P(w|v,D)` 排名（沒有尾段，不混詞庫 lp），詞不在後繼層算沒中。基準＝歷史詞 `<s>`、`predict3` 的 S 順序，第一個注音鍵（`position_units` 的 P1）。R1 的 McNemar：「改對」＝數字語境中、基準沒中；「改壞」相反；顯著變差＝p < 0.05 且改壞 > 改對。
 20. **數字串集合**：每個數字串（照 `build_digits.TOKEN`）若緊接一段能斷詞的漢字段，就是一列：前文＝它前面緊鄰的漢字段的最後 8 字（可空；前面是標點或英文則空）、後接詞＝後面那段的第一個詞；每句最多一列（種子隨機取），去重後取樣到上限 3,000，讀音用 `tools/readings.py`（CHECK 與讀不出的丟掉），再以種子 20261017 分成調參半與判讀半（各自保持輸入順序）。來源與切法同 `build_e4ctx.py`：Common Voice／Tatoeba 的 `is_tune` 行、維基第 300,000–304,999 篇（轉換後的原句）。
 21. **(a)** 全部按鍵（數字串＋後接詞的注音）送完加 Enter 後，各鍵的類別＝前 len(串) 個是 `D`、其餘全是 `Z`；**(b)** 該列所有按鍵（不含最後的 Enter）每個鍵之後，先前已有類別的鍵改變類別的次數，分布 0／1／2／3+；**(c)** 一個音節只要有任何一個鍵最後是 `D` 就算一個（每千音節）；**(d)** 按鍵之後，這個鍵所屬的串（含剛結束的）顯示著數字的按鍵數（每千音節，含最後留成數字的）；時間＝每個有切分的鍵的切分數、其中 t＞0 的個數（每個要一次相容掃描，不算快取）。
+21b. **效能與統計的細節**（C.6 項 5）：(b) 只數數字串自己那個串的鍵的翻轉（`sim.rid_of`），後接詞裡另起的串不算；(i) 每列只算一次（沒有設定之分），(ii) 兩個設定在同一趟裡算；`Table.successors` 依 v 快取；`tune` 的時間行取 θ 0 那一趟的結果；θ 的集合只寫在 `measure.THETAS`（訊息由它產生）。
 22. θ 在 `tune` 只用 (c) 選（cvtune＋wikitune 合計 (c)＝0 的最小 θ）；調參半的 (a)(b) 與預測列一起印出來參考，但不進判讀。判讀半、dev302、typing76 都在 `judge` 一次看完。
 
 **沒有做、留給 A 的 Rust 或 main 的**
