@@ -3,7 +3,7 @@
 以「選字正確」為第一優先的開源 macOS 注音輸入法（持續開發中）。
 
 - 計畫：`docs/PLAN.md`
-- 授權：程式碼 Apache-2.0（`LICENSE`）；資料見 `LICENSES/data.md`
+- 授權：程式碼 Apache-2.0（`LICENSE`）；App 內含的 Sparkle（自動更新）是 MIT（`LICENSES/Sparkle-MIT.txt`，含它附帶的第三方授權）；資料見 `LICENSES/data.md`
 - 想參與開發：見 [`CONTRIBUTING.md`](CONTRIBUTING.md)
 
 ## 進度

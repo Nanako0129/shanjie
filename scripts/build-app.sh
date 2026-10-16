@@ -17,6 +17,10 @@
 #                    section 3.4) with a test feed URL and a test EdDSA public key instead of the production ones below.
 #                    Refused when CI is set. scripts/check-app.sh rejects such a build unless given the same two
 #                    variables; release.yml's verify always rejects it.
+#   SHANJIE_RELEASE_BUILD
+#                    1 only in release.yml's build job: marks the bundle as a release build. The updater starts only in
+#                    a release or an update test build (Info.plist ShanjieUpdateBuild: release, test, or local for
+#                    every other build), so a copy built here and installed never reads the production feed.
 #
 # The folder name is the user-facing name; the executable (Contents/MacOS/shanjie), the bundle ID and
 # the release asset (shanjie-<version>.zip) keep the ASCII name.
@@ -57,7 +61,7 @@ shasum -a 256 -c data/tinylm.sjtl.sha256 >/dev/null \
   gh release download sj-cx-1-7.7m -R Nanako0129/shanjie -p trigram.sjt3 -D data/lm"
 shasum -a 256 -c data/trigram.sjt3.sha256 >/dev/null \
   || fail "data/lm/trigram.sjt3 does not match data/trigram.sjt3.sha256; download sj-cx-1-7.7m again"
-for f in data/lexicon/mcbpmf-data.txt data/lexicon/overlay-add.tsv data/lexicon/sandhi-add.tsv data/lexicon/names-add.tsv data/lexicon/demote.tsv data/packs/acg-add.tsv data/packs/acg-sources.tsv data/packs/acg.json LICENSE LICENSES/McBopomofo-MIT.txt LICENSES/data.md LICENSES/SCOWL.txt LICENSES/SymSpell-MIT.txt LICENSES/name-suggestion-index-BSD-3-Clause.txt; do
+for f in data/lexicon/mcbpmf-data.txt data/lexicon/overlay-add.tsv data/lexicon/sandhi-add.tsv data/lexicon/names-add.tsv data/lexicon/demote.tsv data/packs/acg-add.tsv data/packs/acg-sources.tsv data/packs/acg.json LICENSE LICENSES/McBopomofo-MIT.txt LICENSES/data.md LICENSES/SCOWL.txt LICENSES/SymSpell-MIT.txt LICENSES/name-suggestion-index-BSD-3-Clause.txt LICENSES/Sparkle-MIT.txt; do
   [ -f "$f" ] || fail "$f is missing"
 done
 
@@ -108,6 +112,14 @@ if [ -n "${SHANJIE_UPDATE_TEST_FEED:-}${SHANJIE_UPDATE_TEST_KEY:-}" ]; then
   FEED_URL="$SHANJIE_UPDATE_TEST_FEED"
   ED_KEY="$SHANJIE_UPDATE_TEST_KEY"
 fi
+UPDATE_BUILD=local
+case "${SHANJIE_RELEASE_BUILD:-}" in
+  "") ;;
+  1) [ "$ED_KEY" = "$SPARKLE_PUBLIC_KEY" ] || fail "SHANJIE_RELEASE_BUILD and the update test build exclude each other"
+     UPDATE_BUILD=release ;;
+  *) fail "SHANJIE_RELEASE_BUILD must be 1 or unset" ;;
+esac
+[ "$ED_KEY" = "$SPARKLE_PUBLIC_KEY" ] || UPDATE_BUILD="test"
 # An EdDSA public key is 32 bytes: 44 base64 characters ending in one '='.
 [[ "$ED_KEY" =~ ^[A-Za-z0-9+/]{43}=$ ]] || fail "the Sparkle public key is not 44 base64 characters"
 
@@ -154,6 +166,8 @@ swift scripts/make-icon.swift "$RES/shanjie.tiff"
 
 cp LICENSE "$RES/LICENSES/LICENSE"
 cp LICENSES/McBopomofo-MIT.txt LICENSES/data.md LICENSES/SCOWL.txt LICENSES/SymSpell-MIT.txt LICENSES/name-suggestion-index-BSD-3-Clause.txt "$RES/LICENSES/"
+# Sparkle.framework ships in Contents/Frameworks: its MIT notice with the bundled third-party notices (Sparkle's LICENSE, 2.9.3).
+cp LICENSES/Sparkle-MIT.txt "$RES/LICENSES/"
 cat > "$RES/LICENSES/CC-BY-SA-4.0-attribution.txt" <<'EOF'
 overlay-add.tsv, names-add.tsv, packs/acg-add.tsv, packs/acg-sources.tsv, packs/acg.json, demote.tsv, bigram.sjlm,
 classes.sjc, kn.sjkn, trigram.sjt3 and tinylm.sjtl are licensed under the Creative Commons Attribution-ShareAlike 4.0 International license
@@ -278,6 +292,7 @@ cat > "$APP/Contents/Info.plist" <<EOF
   <key>TISInputSourceID</key><string>$BUNDLE_ID</string>
   <key>TISIntendedLanguage</key><string>zh-Hant</string>
   <!-- Sparkle (docs/contracts/about-update.md section 2). No SUEnableJavaScript. -->
+  <key>ShanjieUpdateBuild</key><string>$UPDATE_BUILD</string>
   <key>SUFeedURL</key><string>$FEED_URL</string>
   <key>SUPublicEDKey</key><string>$ED_KEY</string>
   <key>SURequireSignedFeed</key><true/>
@@ -313,8 +328,8 @@ for code in "$SPARKLE/Versions/B/Autoupdate" "$SPARKLE/Versions/B/Updater.app" "
   codesign --force --sign - "$code"
 done
 codesign --verify --strict --deep "$APP"
-if [ "$ED_KEY" = "$SPARKLE_PUBLIC_KEY" ]; then
-  echo "built $APP ($BUNDLE_ID $VERSION, ad-hoc)"
-else
-  echo "built $APP ($BUNDLE_ID $VERSION, ad-hoc, UPDATE TEST BUILD: test feed and key)"
-fi
+case "$UPDATE_BUILD" in
+  release) echo "built $APP ($BUNDLE_ID $VERSION, ad-hoc, release build: the updater starts)" ;;
+  test) echo "built $APP ($BUNDLE_ID $VERSION, ad-hoc, UPDATE TEST BUILD: test feed and key, the updater starts)" ;;
+  *) echo "built $APP ($BUNDLE_ID $VERSION, ad-hoc, local build: the updater never starts)" ;;
+esac
