@@ -344,7 +344,6 @@ struct PathWord {
     syllables: usize,
 }
 
-#[derive(Clone)]
 struct Fixed {
     start: usize,
     end: usize,
