@@ -3,11 +3,90 @@
 //!   magic `SJT30001` | V u32 | D f64 | SHA-256 of the bigram model 32 | C u32 | E u32
 //!   | key u64[C] (u * V + v, ascending) | total u64[C] (the context's count before pruning) | off u32[C+1]
 //!   | next u32[E] (ascending inside a context) | count u32[E]
-//! The file is kept as read (nothing is copied into typed arrays) and every field is read in place; `parse` checks all the
+//! The file is kept as it is (nothing is copied into typed arrays) and every field is read in place; `parse` checks all the
 //! invariants the lookups rely on, so no index can panic. R2: errors carry no content.
+//! The bytes are a read-only mapping of the file (docs/contracts/trigram-mmap.md) or, in tests, a `Vec<u8>`.
 
 use crate::lm::LmError;
+use std::ffi::c_void;
+use std::fs::File;
+use std::ops::Deref;
+use std::os::fd::AsRawFd;
+use std::path::Path;
 use std::sync::OnceLock;
+
+// <sys/mman.h>: PROT_READ and MAP_PRIVATE have the same values on macOS and x86_64 Linux (learn_store.rs refuses to build elsewhere);
+// `off_t` is 64 bits on both. std has no names for them and the crate has no libc dependency.
+const PROT_READ: i32 = 1;
+const MAP_PRIVATE: i32 = 2;
+/// `mmap` returns this (all bits set), not null, on failure.
+const MAP_FAILED: *mut c_void = !0usize as *mut c_void;
+
+extern "C" {
+    fn mmap(addr: *mut c_void, len: usize, prot: i32, flags: i32, fd: i32, off: i64) -> *mut c_void;
+    fn munmap(addr: *mut c_void, len: usize) -> i32;
+}
+
+/// A whole file mapped read-only. The pages are clean file-backed pages: the system can drop them under memory pressure and read
+/// them back, and they are not part of the process's phys_footprint (the point of docs/contracts/trigram-mmap.md).
+/// If the file is truncated or rewritten in place while it is mapped, reading a page past the new end is a SIGBUS. The install
+/// paths never do that: scripts/install-ime.sh, the installer and the Homebrew cask replace the whole bundle by rename.
+pub(crate) struct Mapped {
+    ptr: *mut c_void,
+    len: usize,
+}
+
+// SAFETY: the mapping is read-only and never changes through this handle, so sharing it between threads is a plain shared read.
+unsafe impl Send for Mapped {}
+unsafe impl Sync for Mapped {}
+
+impl Mapped {
+    /// An empty file, a file that cannot be opened and a failed `mmap` are all `TriTable` (what a failed read is today).
+    pub(crate) fn open(path: &Path) -> Result<Mapped, LmError> {
+        let f = File::open(path).map_err(|_| LmError::TriTable)?;
+        let len = f.metadata().map_err(|_| LmError::TriTable)?.len() as usize;
+        if len == 0 {
+            return Err(LmError::TriTable);
+        }
+        // SAFETY: a valid descriptor and a non-zero length; the kernel keeps the mapping after the descriptor is closed (dropped below).
+        let ptr = unsafe { mmap(std::ptr::null_mut(), len, PROT_READ, MAP_PRIVATE, f.as_raw_fd(), 0) };
+        if ptr == MAP_FAILED {
+            return Err(LmError::TriTable);
+        }
+        Ok(Mapped { ptr, len })
+    }
+}
+
+impl Deref for Mapped {
+    type Target = [u8];
+    fn deref(&self) -> &[u8] {
+        // SAFETY: `ptr` maps `len` readable bytes until `drop`.
+        unsafe { std::slice::from_raw_parts(self.ptr as *const u8, self.len) }
+    }
+}
+
+impl Drop for Mapped {
+    fn drop(&mut self) {
+        // SAFETY: exactly the range `mmap` returned, unmapped once.
+        unsafe { munmap(self.ptr, self.len) };
+    }
+}
+
+/// Where a table's bytes live: the mapping the shipping path uses, or memory (tests, `Lm::add_tri`).
+pub(crate) enum TriBytes {
+    Map(Mapped),
+    Mem(Vec<u8>),
+}
+
+impl Deref for TriBytes {
+    type Target = [u8];
+    fn deref(&self) -> &[u8] {
+        match self {
+            TriBytes::Map(m) => m,
+            TriBytes::Mem(v) => v,
+        }
+    }
+}
 
 const MAGIC: &[u8; 8] = b"SJT30001";
 const HEAD: usize = 60;
@@ -22,7 +101,7 @@ pub(crate) struct Tri {
     v: u64,
     d: f64,
     c: usize,
-    raw: Vec<u8>,
+    raw: TriBytes,
     /// Section offsets into `raw`: key, total, off, next, count.
     at: [usize; 5],
     /// `+tri:<sha8 of the file>` (the summary-line tag), hashed on first use.
@@ -43,7 +122,7 @@ pub(crate) struct TriMemo(pub(crate) std::collections::HashMap<(u32, u32), Optio
 
 impl Tri {
     /// `raw` is the whole file; `v` and `model_sha` (hex) are the bigram model it must be bound to.
-    pub(crate) fn parse(raw: Vec<u8>, v: usize, model_sha: &str) -> Result<Tri, LmError> {
+    pub(crate) fn parse(raw: TriBytes, v: usize, model_sha: &str) -> Result<Tri, LmError> {
         let bad = LmError::TriTable;
         let u32_at = |p: usize| raw.get(p..p + 4).map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]));
         if raw.len() < HEAD + 4 || &raw[..8] != MAGIC {
@@ -110,6 +189,12 @@ impl Tri {
     }
     fn count(&self, j: usize) -> u32 {
         self.u32_at(self.at[4] + 4 * j)
+    }
+
+    /// Whether the bytes are a file mapping (what `Lm::load_opts` must give; the tests look at it).
+    #[cfg(test)]
+    pub(crate) fn is_mapped(&self) -> bool {
+        matches!(self.raw, TriBytes::Map(_))
     }
 
     /// The tag `+tri:<sha8 of the file>` (same text as reference/proto/lm_eval.py).

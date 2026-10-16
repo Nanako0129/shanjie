@@ -3,7 +3,7 @@
 //! R2: errors carry no content; nothing here formats input text.
 
 use crate::learn::{context_key, record_key, Learner, Level};
-use crate::trigram::{Tri, TriCtx, TriMemo};
+use crate::trigram::{Mapped, Tri, TriBytes, TriCtx, TriMemo};
 use crate::{Error, Lexicon, PER_KEY};
 use std::collections::{HashMap, HashSet};
 use std::fmt;
@@ -263,8 +263,12 @@ impl Lm {
             }
         }
         if tri {
-            if let Some(table) = read_beside(path, "trigram.sjt3").map_err(|_| LmError::TriTable)? {
-                lm.add_tri(table)?;
+            // Mapped, not read: the table is 143.6 MB (docs/contracts/trigram-mmap.md). The same "exists" test as `read_beside`.
+            let side = path.with_file_name("trigram.sjt3");
+            match std::fs::symlink_metadata(&side) {
+                Ok(_) => lm.add_tri_bytes(TriBytes::Map(Mapped::open(&side)?))?,
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(_) => return Err(LmError::TriTable),
             }
         }
         Ok(lm)
@@ -313,12 +317,22 @@ impl Lm {
         self.kn.as_ref().map(|k| k.hashed().0)
     }
 
-    /// SJT30001 bytes (docs/contracts/trigram-core.md; layout in core/src/trigram.rs), taken over without a copy. Checked (all `TriTable`): magic,
+    /// SJT30001 bytes (docs/contracts/trigram-core.md; layout in core/src/trigram.rs), taken over without a copy (`load_opts` maps the file instead). Checked (all `TriTable`): magic,
     /// V, the hash of the model this `Lm` was parsed from, D, exact length, and the order and range of every key, offset and next id.
     /// Turns the trigram level on for the formal profile.
     pub fn add_tri(&mut self, table: Vec<u8>) -> Result<(), LmError> {
+        self.add_tri_bytes(TriBytes::Mem(table))
+    }
+
+    fn add_tri_bytes(&mut self, table: TriBytes) -> Result<(), LmError> {
         self.tri = Some(Tri::parse(table, self.uni.len(), &self.sha)?);
         Ok(())
+    }
+
+    /// Whether the loaded trigram table is a file mapping (`None`: no table). For the tests of `load_opts`.
+    #[cfg(test)]
+    pub(crate) fn tri_is_mapped(&self) -> Option<bool> {
+        self.tri.as_ref().map(Tri::is_mapped)
     }
 
     /// The summary-line suffix `+tri:<table sha8>` (same text as reference/proto/lm_eval.py); `None` without a table. The file is
@@ -1642,5 +1656,46 @@ mod tests {
         let mut other = model.clone();
         other[20] ^= 1;
         assert_eq!(Lm::parse(&other).unwrap().add_tri(good).err(), Some(LmError::TriTable));
+    }
+
+    /// docs/contracts/trigram-mmap.md section 3.2: `load_opts` maps `trigram.sjt3` (the source kind is checked, not only the result), the mapped
+    /// table scores exactly like the same bytes in memory, and a file that is empty, cut short or has a bad magic is `TriTable` through the mapping.
+    #[test]
+    fn load_opts_maps_the_trigram_table() {
+        let dir = std::env::temp_dir().join(format!("shanjie-lm-mmap-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let (m, t) = (dir.join("tiny.sjlm"), dir.join("trigram.sjt3"));
+        let model = tiny();
+        let good = tiny_tri(&model);
+        std::fs::write(&m, &model).unwrap();
+        let _ = std::fs::remove_file(&t);
+        assert_eq!(Lm::load_opts(&m, false, true, true).unwrap().tri_is_mapped(), None, "no file: no table");
+        std::fs::write(&t, &good).unwrap();
+        let mapped = Lm::load_opts(&m, false, true, true).unwrap();
+        assert_eq!(mapped.tri_is_mapped(), Some(true), "load_opts must map the table, not read it");
+        assert_eq!(Lm::load_opts(&m, false, true, false).unwrap().tri_is_mapped(), None, "--no-tri: not read");
+        let mut mem = Lm::parse(&model).unwrap();
+        mem.add_tri(good.clone()).unwrap();
+        assert_eq!(mem.tri_is_mapped(), Some(false));
+        assert_eq!(mapped.tri_tag(), mem.tri_tag());
+        let cfg = Scoring { lam: 0.5, kn: true, tri: true };
+        for u in [None, Some("<s>"), Some("a"), Some("b")] {
+            for v in ["<s>", "a", "b"] {
+                for w in ["a", "b", "<s>"] {
+                    assert_eq!(mapped.word3(cfg, u, v, w, -1.0).to_bits(), mem.word3(cfg, u, v, w, -1.0).to_bits(), "{u:?} {v} {w}");
+                }
+                assert_eq!(mapped.eos3(cfg, u, v).to_bits(), mem.eos3(cfg, u, v).to_bits(), "eos {u:?} {v}");
+            }
+        }
+        let mut bad_magic = good.clone();
+        bad_magic[7] = b'2';
+        for (name, bytes) in [("empty", vec![]), ("truncated", good[..good.len() - 4].to_vec()), ("bad magic", bad_magic)] {
+            std::fs::write(&t, &bytes).unwrap();
+            assert_eq!(Lm::load_opts(&m, false, true, true).err(), Some(LmError::TriTable), "{name}");
+        }
+        std::fs::remove_file(&t).unwrap();
+        std::os::unix::fs::symlink(dir.join("nowhere"), &t).unwrap();
+        assert_eq!(Lm::load_opts(&m, false, true, true).err(), Some(LmError::TriTable), "dangling symlink");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
