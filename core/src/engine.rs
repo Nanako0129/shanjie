@@ -1534,10 +1534,13 @@ impl Engine {
     /// `<s>`, and the punctuation itself scores nothing. `None` without a model or without words.
     pub fn total_score(&self) -> Option<f64> {
         let st = self.lm.as_ref()?;
-        let lam = self.profile.lambda();
+        let cfg = st.lm.scoring(self.profile);
         // S2h §1: the first sentence starts from the history word of the left context; `open` is whether
         // the current sentence has a word (the history word is not one, and its own eos is not scored).
         let mut prev = history(&self.left, &st.lm);
+        // The word before `prev` for the trigram level (docs/contracts/trigram-core.md (a)-(c)), as the decoder starts a stretch:
+        // `<s>` after `<s>`, unknown after a real word (a left context or a fixed word supplies one word only).
+        let mut before = (prev == "<s>").then_some("<s>");
         let mut total = 0.0;
         let (mut any, mut open) = (false, false);
         let mut at = 0;
@@ -1545,20 +1548,23 @@ impl Engine {
             if *is_punct {
                 at += 1;
                 if open {
-                    total += st.lm.eos(lam, prev);
+                    total += st.lm.eos3(cfg, before, prev);
                 }
-                (prev, open) = ("<s>", false);
+                (before, prev, open) = (Some("<s>"), "<s>", false);
                 continue;
             }
             let n = w.chars().count();
             // model-v6 section 2.8 rule 1: a word the learner boosted (lp above its best capped lp under its reading, the test of
             // `boosted`) was scored by the decoder without the Kneser-Ney substitution; score it the same way here.
             let learned = self.syls.get(at..at + n).and_then(|s| st.capped.best_lp(s, w)).is_some_and(|best| *lp > best);
+            // A learned word is scored by P2 alone (no Kneser-Ney substitution, no table), as in the decoder.
+            total += if learned { st.lm.word_learned(cfg.lam, prev, w, *lp) } else { st.lm.word3(cfg, before, prev, w, *lp) } - delta;
+            // The stretch after a fixed word starts from (unknown, that word); inside a stretch the history is the last two words.
+            before = if self.fixed.iter().any(|f| f.start == at) { None } else { Some(prev) };
             at += n;
-            total += if learned { st.lm.word_learned(lam, prev, w, *lp) } else { st.lm.word(lam, prev, w, *lp) } - delta;
             (prev, any, open) = (w, true, true);
         }
-        any.then(|| if open { total + st.lm.eos(lam, prev) } else { total })
+        any.then(|| if open { total + st.lm.eos3(cfg, before, prev) } else { total })
     }
 
     /// §6 reset: Commit returns the composition as shown, unfinished symbols included, like Enter (enter-pending
@@ -1828,7 +1834,7 @@ impl Engine {
     /// its left (`<s>` if none); it closes with the transition into the fixed word on its right, or with
     /// the sentence end when there is none. Fixed words score with `lp_F`, the capped score under their reading.
     fn refresh_lm(&mut self, st: &LmState) -> Result<(), EngineError> {
-        let lam = self.profile.lambda();
+        let cfg = st.lm.scoring(self.profile);
         // The clock (a libc time conversion) is read only when a record could use it.
         let today = if self.learner.is_empty() { 0 } else { self.today() };
         let mut lp_fixed = Vec::with_capacity(self.fixed.len());
@@ -1884,7 +1890,7 @@ impl Engine {
                 let after = run_next.as_deref().or(self.syls.get(stop).map(String::as_str));
                 let learn = (!self.learner.is_empty()).then(|| Learn { learner: &self.learner, before: &before, after, today, eps_global: self.eps_global });
                 let best = decode_segment_learned(
-                    &st.capped, &self.syls[start..stop], &st.lm, lam, prev, end, BEAM_S1, learn.as_ref(), self.demote,
+                    &st.capped, &self.syls[start..stop], &st.lm, cfg, prev, end, BEAM_S1, learn.as_ref(), self.demote,
                 )
                 .map_err(|_| EngineError::Internal)?;
                 let first = &best.first().ok_or(EngineError::Internal)?.1;
