@@ -1889,7 +1889,6 @@ App 沙盒那一片寫契約之前，先量契約要依賴的系統行為。
   - 合進排除清單之後重組、重裝，新 bundle 的 `Resources/packs/acg-add.tsv` 已經沒有這個字串。
   - 重裝之後，使用者還沒回報在畫面上確認。
 
-
 ## 2026-10-09：ACG 詞包的審查修正（第三輪）
 
 PR #90 的審查意見逐項處理。
@@ -2257,7 +2256,6 @@ PR #90 的審查意見逐項處理。
   - 決定（使用者 2026-10-10）：先擱置，近年作品靠維基百科的年度清單（A2）。契約 §1 與 `LICENSES/data.md` 的授權版本更正為 4.0。
 - **宿儺**：A2 的門檻原本要求「宿儺」改對；實作後仍輸給「素」＋「娜」。根因見同日盤點。使用者決定不在 A2 加分，交給下一片模型重建（model-v5）；A2 的門檻照契約 A2.6 的修訂。
 
-
 ## 2026-10-10：A2 片的 /code-review 修正（PR #96）
 
 - **使用者定的順序被 TIE 翻掉**：基基獸／嘰嘰獸、西莉卡／希莉卡、混沌之治／混沌之智三列（2026-10-09 使用者決定前者在前）被「來源數多的在前」排反。現在 `acg-collisions.tsv` 同讀音的列順序優先（保留的詞在前，`read_collisions` 回傳每個讀音第一列的保留的詞，`ordered` 的 `rank`），之後才看來源數；已處置的讀音，開詞包後的第一名必須是那個保留的詞，否則仍列為未處置。用出貨詞包解碼：基基獸、混沌之治、愛蜜莉雅在聊天與書面都是第一名，西莉卡聊天第一、書面第一名是西利卡（詞庫的詞，不開詞包也是它，和 A 片相同，保留的詞贏不了語言模型）。
@@ -2318,7 +2316,6 @@ PR #90 的審查意見逐項處理。
   - 更早在負載 8–12 量到的 40 ms、76 ms 最大值，同一台機器在負載 21 時基準也量到 261 ms；高負載的最大值不能用。
 - **測試**：`make test` 第一次在負載 40–98 時只有 `perf_full_store_per_key_and_enter_with_write` 的 p95 超過 16 ms（31.5 ms，空的記憶也有 11 ms），分段重跑在負載 22 時通過。code review 之後的最終提交在負載 5.8（前）、7.8（後）整段 `make test` 一次跑完，結束碼 0。
 - 還沒做：使用者實機（§12.4 第 9 項）、保留集（收尾的 fresh verifier）。
-
 
 ## 2026-10-10：A2 片第二輪 /code-review 的修正（更正上面幾節）
 
@@ -2524,7 +2521,6 @@ PR #90 的審查意見逐項處理。
   - 修：發版說明的「一般打字不變」改成照實寫；契約的標題、狀態、§2.2「build_lm.py 不改」加更正；`count.bat` 與 README 改成實際流程（計數詞表、`--keep-from`）並填輸入雜湊；`cluster.py` 擋 `--keep-from` 等於輸出資料夾、舊分群沒有類別的詞不再暫時貼進類別（188 重跑輸出仍是 `af637997…`，逐位元組相同）；`--extra-lexicon` 只收 `--expected`、同一個檔給兩次只讀一次；新測試（含 `count_lexicon.py` 的）進 `make test` 與 CI；方法論補一節；詞包 (c) 規則的待辦寫進契約 §9 與 PLAN。
   - 延後：在計數源頭保證二元組兩端都有單詞（會改變計數，要重建模型）；`build_counts.py` 一個到不了的分支、測試與 `read_tsv` 的重複、`compare_counts.py` 的記憶體；§8、§9 沒有另送 plan-verifier（契約 §6 記了）。
 
-
 ## 2026-10-10：model-v5／classes-v3 的引用與 golden 重產（PR 2，分支 `feat/model-v5-refs`）
 
 契約 `docs/contracts/model-v5.md` §2.5 的 PR 2。引用從 `model-v4`／`classes-v2` 改成 `model-v5`／`classes-v3`（雜湊檔、CI、`release.yml`、`build-app.sh`、`cli/tests/golden.rs`、各測試的缺檔訊息、`Support.swift`、README、CONTRIBUTING、`docs/data-files.md`、`docs/verification.md`、`LICENSES/data.md`、`docs/PLAN.md` 的模型檔那一條）。`UNSEEN_OVERLAY_PENALTY` 維持 1.0，沒有動。Release `model-v5`、`classes-v3` 還沒建，雜湊與大小取自 188 產出的最終檔（`f81a021e…`、`75a5efb3…`）。〔更新：兩個 Release 在 PR #101 合併後建好（使用者同意，不標 Latest），main 下載回來核對，雜湊與大小都相符。〕
@@ -2548,7 +2544,6 @@ PR #90 的審查意見逐項處理。
   - 實測（`shanjie-eval`，聊天設定）：「佩德羅」在模型詞彙裡（計數 1,034，是「主席」的後繼詞），不在 `mcbpmf-data.txt` 與 `overlay-add.tsv`，只在詞包。`--predict` 前文「主席」、輸入 ㄆㄟˋ ㄉㄜˊ ㄌㄨㄛˊ：詞包關閉時 0 個候選，開啟時第一名是「佩德羅」（後繼詞旗標 1）；只輸入 ㄆㄟˋ 時，關閉的前 9 名沒有它，開啟的有。
   - 解碼「佩德羅」的讀音：兩邊第一名的字串都是「佩德羅」，但關閉時是單字拼出來的（分數 −9.943），開啟時是詞包詞（分數 −6.101），表示關閉時模型裡「佩德羅」這個詞的分數沒被用到。
 - **PR #102 的 /code-review**（11 項，都是文件與可維護性）：修了 `docs/data-files.md`（下一版改成 model-v6／classes-v4、重建配方指向 model-v5 契約、換版要改的地方列完整）、PLAN 的 S2k 釘選說明、App 內附署名文字加上詞包詞的來源、ci.yml 雜湊來源的註解、上面兩處數字與 Release 狀態。延後：測試的缺檔訊息還叫人用 `build_classes.py` 自己建詞類表（classes-v3 要 188 上的分群資料才建得出同一份）、Release tag 寫死在約 20 處（要抽成共用的測試 helper 或單一設定檔）、`sp-predict.txt` 檔頭只說依賴模型（也依賴詞類表；改檔頭會動到 golden）。
-
 
 ## 2026-10-10：候選窗直排（分支 `feat/candidate-vertical`，契約 `docs/contracts/candidate-vertical.md`）
 
@@ -2616,7 +2611,6 @@ PR #90 的審查意見逐項處理。
 - **原因**（main 對照 model-v5 最終檔重驗的清單）：193 是那次**完整重建**的 (c)，候選詞和出貨的詞包不同。178 個兩邊都有；9 個（涅薩、拉斐亞、卡札克、小馬鎮、朱涅、座布團、歐兜賣、伊普西龍、亞美莉亞）不在 v0.4.0 詞包，就是 A2 的 (c) 規則丟掉的那 9 個；6 個（阪木、芙蘭、愛蓮、艾連、渥茲、御陵）在詞包裡，但同讀音的另一個詞包詞（坂木、弗蘭、艾蓮、沃茲、御靈）排第一，算 (a)。
 - **更正**：出貨的詞包在 model-v5 上「從詞庫的同音詞手上拿到第一名」的詞包名字是 178 個。上面 model-v5 那一節的「(c) 193 個」是完整重建的數字，不是出貨詞包的；A3 契約、PLAN、model-v5 契約 §9 改成 178。
 - **出貨詞包上沒處置的同音衝突**（同一天，A3 重新派工前）：同樣用出貨的 `acg-add.tsv` 在 model-v5 上跑 `detect_collisions`，照建置時同一套已處置的判斷（`acg-collisions.tsv` 的點名與 `first_named`），參考名單是同一份快取的 56,957 個名字：(a) 100、(b) 47、(c) 272 個條目；扣掉已處置的與「一律都留」的 7 組，還有 22 組讀音、47 個條目（a 28、b 19）沒處置，例如 坂木／阪木、沃茲／渥茲、木戶（不開詞包時是 木戸）、阿布（阿部）。model-v5 那一節最終檔重驗的「沒處置的讀音 5 個」是完整重建的數字；出貨的詞包在 v0.4.0 就是這 22 組照 model-v5 的順序。使用者決定一律都留、順序照 model-v5（A3 契約 A3.3a）。
-
 
 ## 2026-10-10：A3 executor 第二輪的量測（停在新的 (a)(b) 衝突超過 50 組）
 
@@ -3175,7 +3169,6 @@ CLI 重現（model-v5、動漫詞包開、沒有前文；小模型是 `tinylm.sj
 | M8 formal discordtune | 4958 | 4143 | 4172 | 30 | 1 | 0.0000 | 2.74% | 2.61% | [19, 40] | [-0.18, -0.09] |
 | M8 formal discordtune (vs shipped) | 4958 | 4228 | 4172 | 146 | 202 | 0.0031 | 2.41% | 2.61% | [-93, -20] | [0.07, 0.33] |
 
-
 **L、XL（使用者要求，契約範圍外）**：使用者 2026-10-11 決定用 Colab 訓練 L 與 XL，「用同一條規則比，再決定」。`train.py --size L|XL` 的預設設定、和 S7b 同一份訓練資料（`ids-wiki.npy` `80ad1949…`、`ids-coll.npy` `996b9ffc…`、`vocab.txt` `85cd05b0…`），在 Colab 的 A100 80GB 上訓練：L 30,227,968 參數、8,836 步、904 秒，最後 loss 3.886；XL 65,343,360 參數、8,836 步、1,622 秒，3.803。公開集合的打分也在 Colab 上做（只上傳公開的程式與資料）；discordtune 只在 Mac 本機打分。選法、格點與判斷規則和 M 相同。
 
 | 模型 | 聊天 α／τ／δ | 調參集（聊天） | discordtune 聊天 | 改對 − 10 × 改壞 | Δtop1 | 書面 α／τ／δ | discordtune 書面 |
@@ -3221,7 +3214,6 @@ CLI 重現（model-v5、動漫詞包開、沒有前文；小模型是 `tinylm.sj
   - VM 直接抓：Hugging Face 約 54.5、GitHub clone 約 12.5、維基 dump 官方站單線 4.8 MiB/s（8 路平行分段有些被截短）、your.org 鏡像 8 路平行約 39.5 MiB/s。
 - **結論**：540 MB 從 Mac 到 VM，S4 與 Drive 都約 50 秒，`colab upload` 約 4 分鐘。S4 不需要使用者介入（Mac 上產生有時效的網址，金鑰不離開 Mac）；Drive 每個 session 都要使用者在終端機授權一次。
 - **使用者定案**：公開資料讓 VM 自己抓；只在 Mac 上的檔案走 S4；結果用 `colab download`。做法寫在 `experiments/s7a-tinylm/README.md`。測試檔照使用者同意刪除：S4 與 rclone 上傳到 Drive 的那份由 main 刪；VM 透過掛載寫進 Drive 的那份，rclone 的 `drive.file` 權限看不到，由使用者在網頁上刪。
-
 
 ## 2026-10-12：CC0／CC BY 的中文小說（調查，沒有下載）
 
@@ -3874,7 +3866,6 @@ CLI 重現（Rust，model-v5，`--context`、沒有前文；聊天與書面、�
 - 計算：`experiments/e2-chateval/judge.py --fixed`，對 n-gram 第一名；R1 是 S7a 的值（兩種設定都是 0.7／2／0），R2 是 `tinylm-v2` 的值（聊天 0.2／1／0.25、書面 0.7／1／2）。R3 與判斷期等維護者的匯出。
 - **讀法**（這是守門集合，不是判斷）：R1 在 cvtune、wikitune 上淨值 +140、+181，在口語的 `lytune` 上卻是改對 266／改壞 485、淨值 −219、改壞率 10.08%（書面 −126、7.69%）。選值用的集合看不到這個方向，和使用者 10-11 用 v1 的值實際打字時回報的改壞一致（推論：兩者同方向，`lytune` 不是使用者的聊天）。R2 在每個集合都 ≥ 0：`lytune` 聊天 63／7、淨值 +56、改壞率 0.15%（改壞數 95% 上界 13.1，即 0.27%），書面 36／3、+33。
 
-
 R1: alpha 0.7, tau 2, delta 0
 | 集合 | n | top1 基準 | top1 新 | 改對 | 改壞 | p | CER 基準 | CER 新 | Δtop1 95%（列） | ΔCER 95%（百分點） | 淨值 | 改壞率 | 改壞數 95% 上界 |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|
@@ -3898,7 +3889,6 @@ R2: alpha 0.2, tau 1, delta 0.25
 | R2 chat fw | 186 | 154 | 156 | 3 | 1 | 0.6250 | 2.66% | 2.42% | [-2, 6] | [-0.69, 0.15] | 2 | 0.54% | 4.7 |
 | R2 chat lytune | 4811 | 3986 | 4042 | 63 | 7 | 0.0000 | 2.08% | 1.94% | [40, 73] | [-0.20, -0.10] | 56 | 0.15% | 13.1 |
 | R2 chat wikitypo | 155 | 136 | 136 | 0 | 0 | 1.0000 | 7.35% | 7.35% | [0, 0] | [0.00, 0.00] | 0 | 0.00% | 3.0 |
-
 
 R1: alpha 0.7, tau 2, delta 0
 | 集合 | n | top1 基準 | top1 新 | 改對 | 改壞 | p | CER 基準 | CER 新 | Δtop1 95%（列） | ΔCER 95%（百分點） | 淨值 | 改壞率 | 改壞數 95% 上界 |
@@ -4896,7 +4886,6 @@ CLI 重現（Rust，model-v5，`--context`、沒有前文；聊天與書面、�
 - 維護者截圖 `幹opencc是不是很累啊`（「錯字」；正解 `雷`）。前文 `幹opencc`（以英數結尾，等於句首），句子 `是不是很雷啊`。讀音工具給 `不` 變調 ㄅㄨˊ，照第 89 列的做法手動改成本調 ㄅㄨˋ（維護者打的是本調）。聊天選對（`雷` −14.19 對 `累` −14.80），書面選 `累`（−13.87 對 −13.99）。golden：n 102，top1 聊天 20 → 21，oracle@64 100。
 - 維護者問「opencc 是不是很雷」：OpenCC 的 `TWPhrases` 是給「大陸用語 → 台灣用語」用的，問題在我們把它套到本來就是台灣繁體的句子上（上一節）；另外它只查字串、不看上下文（`對象` 是程式的 object 還是交往的對象分不出來），只能用在確定是大陸用語的文字。
 
-
 ## 2026-10-14：解碼器依「字串＋最後一個詞」合併的評測（契約 §3.1–§3.4）
 
 - **在哪裡跑**：另一台 Windows 機器（照「Mac 不跑重運算」）。Rust 的 `core` 在 Windows 編不過（`learn_store.rs` 用 Unix 的檔案權限與 `fcntl`，`learn.rs` 用 `localtime_r`），評測時在那台機器的兩份副本（基準 `0ca19a9`、新版 `76f74a3`）把 `learn_store.rs` 換成只回錯誤的空殼、補一個 `localtime_r` 符號；評測 CLI 不開學習檔，空殼不進 repo。空殼不影響選字的證據：基準在那台機器上的數字和 X0c 對照表（v0.4.1）完全相同（例如 dev302 聊天 241／開語意校正 259、cvtune 聊天 3364／3443），新版 dev302 聊天的 `top1_sha256` 和 Mac 上的 Rust 相同（`b20071da…`）。輸入檔在那台機器上核對過雜湊（cvtune `31de456d…`、wikitune `8dcfe40c…`、lytune `0e0fdbed…`、wikitypo `50f4ceb8…`、三個模型檔與 v0.4.1 出貨的相同）。
@@ -4961,7 +4950,6 @@ CLI 重現（Rust，model-v5，`--context`、沒有前文；聊天與書面、�
 - 維護者同意後，在 Mac 上用 `experiments/e2-chateval/build_chatclause.py` 的讀取函式（Discord 只讀公開頻道類型；Threads、Facebook 貼文；2026-09 排除）數自己的訊息，只輸出數字：含中文的訊息 58,451 則，含純字母 ≥ 3 個字母英文 token（網址除外、不黏數字）的佔 **22.8%**，每百則 **79.5** 個；token 後面接空白 36%、中文 28%、標點與其他 30%、訊息結尾 5%；在訊息開頭的 5%。兩個數字都遠超過契約 §1 的 5% 門檻。
 - 「送出英文不加空白」：不需要空白的情況合計 63%（中文、標點、結尾），需要的 36% 多按一次空白。
 - 契約 `docs/contracts/zhen-mixed.md` 第一次 plan-verifier REVISE（9 點：影子在 Backspace 等編輯下的規則、只限標準排列、英文候選窗的實作、游標位置與學習、介面、授權與散布、量測工具與錯打模型、召回分母、測試清單），交給 Fable 起草修訂版。
-
 
 ## 2026-10-14：學習前文修正（S4 修訂四，規則 7、8）的實作
 
@@ -5667,7 +5655,6 @@ formal: alpha 0.7, tau 1, delta 2
 - 第 114 列：同一則訊息的「接下賴繼續還要趕進度呢」，要的是「接下來」。加成 `|接下來繼續還要趕進度呢|ㄐㄧㄝ ㄒㄧㄚˋ ㄌㄞˊ ㄐㄧˋ ㄒㄩˋ ㄏㄞˊ ㄧㄠˋ ㄍㄢˇ ㄐㄧㄣˋ ㄉㄨˋ ㄋㄜ`；CLI 整句解碼兩種設定都對，實機的錯不是整句解碼（推論：逐字選字、學習或前文，沒有讀學習檔）。
 - 兩列讀音都由 `tools/readings.py` 產生、沒有 CHECK；`eval/golden/s2h-lm-context.txt` 的錯字回報兩行改成 n 114（Python 參考實作）；`eval/README.md` 改成 114 列。
 
-
 ## 2026-10-15：下一輪的方向（Fable 排序、維護者選擇）與去風險契約 derisk-1015
 
 - **Fable 5.1 的排序**（只讀分析；收到維護者在 Discord 說「先把 n-gram 做好應該更重要」之後重排過一次）。依據是 repo 裡量過的數字：
@@ -6356,6 +6343,24 @@ formal: alpha 0.7, tau 1, delta 2
 - golden：表在 `data/lm` 時 Mac 的 `cargo test -p cli --test golden` 25／25（表由映射載入）。
 - `/code-review`（PR #181）之後的修正：`Mapped::open` 改成 `unsafe fn`，安全契約寫明「檔案映射期間不可原地截短或改寫」；開檔照 `tinylm` 的做法加 `O_NONBLOCK` 與 `is_file()`；`tools/build_trigram.py` 改成先寫暫存檔再 rename；`docs/data-files.md` 的下載說明改成下載到暫存資料夾再 `mv`；`core/include/shanjie.h` 寫明前提。沒做：記憶體吃緊、頁面被丟掉之後的按鍵延遲（要不要加 `madvise`）沒有資料，記成已知限制。
 - 完整 Rust 測試（Windows 機器 WSL）：有表 473 過、0 失敗（`4c88bb3`）；沒有表（`NO_TRI=1`，`f559177`）27 個失敗，全部停在缺表的斷言（`cli/tests/golden.rs:66` 11 個、`core/tests/engine_lm.rs:18` 16 個，各印一次下載訊息），沒有其他失敗。第 C 片之後表是必要的檔，契約第 1 項「沒有表時也全過」照此放寬。
+## 2026-10-16：about-update（關於頁與 Sparkle 自動更新）實作
+
+契約 `docs/contracts/about-update.md`。
+
+- **ad-hoc 建置與 hardened runtime 不相容**：`scripts/build-app.sh` 照 s3b §2 用 `codesign --force --sign - --options runtime` 簽好內嵌 Sparkle 2.9.3 的 App 之後，`scripts/check-app.sh` 的 `--selftest` 以 134（Abort trap）結束。dyld 的訊息：`Library not loaded: @rpath/Sparkle.framework/Versions/B/Sparkle … code signature in <…> '…/Contents/Frameworks/Sparkle.framework/Versions/B/Sparkle' not valid for use in process: mapping process and mapped file (non-platform) have different Team IDs`。App 與 framework 都是 ad-hoc（`TeamIdentifier=not set`），hardened runtime 的 library validation 仍然拒絕。不加 runtime 重簽之後 `--selftest` 通過。處置（維護者經 main 選 A）：本機與 CI 的 ad-hoc 建置不加 runtime；`release.yml` 的 Developer ID 簽章對 App、framework、`Autoupdate`、`Updater.app` 四處都加，`verify_sparkle` 缺一就失敗。不加 `disable-library-validation`。
+- **Sparkle 啟動失敗會跳模態視窗**：讀 Sparkle 2.9.3 的 `SPUStandardUpdaterController.m`，`startingUpdater: true` 啟動失敗時一秒後 `[alert runModal]`。輸入法程序裡會卡住打字，所以改成 `startingUpdater: false` 再自己 `start()`，失敗只記一行靜態 log，「立即檢查」顯示「檢查失敗」。
+- **`generate_appcast` 的實際輸出**（本機，SwiftPM 解析出的 2.9.3 工具、程序內產生的一次性金鑰、測試版 zip，`HOME` 指到暫存區）：一個項目，enclosure 網址等於 `--download-url-prefix` 加 zip 檔名，`length` 等於 zip 大小，有 `sparkle:edSignature`；feed 的簽章區塊接在 `</rss>` 同一行後面（`</rss><!-- sparkle-signatures:`），所以 workflow 用 `grep -F` 不用 `grep -x`。用 CryptoKit 從同一個種子推出的公鑰驗得過它的壓縮檔簽章，所以 workflow 的金鑰成對檢查和 Sparkle 的算法一致。沒有舊的 `appcast.xml` 時它自己建一份新的，不需要先放空的 feed。
+- **Info.plist 的布林值要連型別一起比**：`PlistBuddy -c Print` 把字串 `"true"` 和布林 true 印成一樣，`check-app.sh` 改用 `plutil -extract … -expect bool`。
+- 還沒做（要維護者或 main）：`workflow_dispatch` 乾跑、實機的更新流程與請求錄製（契約 §3 第 4 項）、Homebrew 的 VM 實測（第 5 項）、推 tag 後的正式路徑核對（第 6 項）。
+
+## 2026-10-16：about-update 修訂三（實作的 /code-review）
+
+- **Developer ID 的備援對 zip 不成立**（讀 Sparkle 2.9.3）：`AppInstaller.m` 在 `SUVerifyUpdateBeforeExtraction` 開著、一般 App 更新時，呼叫 `SUUpdateValidator` 的 `validateDownloadPathWithFallbackOnCodeSigning:YES`：先驗 EdDSA，失敗才用 `SUCodeSigningVerifier codeSignatureIsValidAtDownloadURL:` 驗**下載的壓縮檔本身**的程式碼簽章與舊版的 Team。zip 帶不了程式碼簽章，所以我們的更新只有 EdDSA 這一條路。EdDSA 通過之後，`passesBasicUpdatePolicy` 只禁止拿掉 `SUPublicEDKey` 或拿掉程式碼簽章，不比對 Team（ad-hoc 也行）。契約 §0.1、PLAN R10、`release.yml` 檔頭與輪換手冊照這個改寫。
+- **輪換版做不到全自動**：`generate_appcast`（`Appcast.swift`）只在 App 的 `SUPublicEDKey` 等於簽章私鑰的公鑰時才簽壓縮檔，不符只印「does not match」的警告、項目沒有簽章。帶新公鑰、用舊私鑰簽的輪換版因此要用 `sign_update` 手動補，寫進 `docs/releases/README.md`。
+- **保留所有版本**：`--maximum-versions` 的說明與程式碼都是「0 代表保留全部」（轉成 `Int.max`），預設 3。本機用一次性金鑰實測 `--embed-release-notes --maximum-versions 0 --versions 0.4.91`：feed 裡已有較新的 0.4.95 時，0.4.91 仍加進去（兩個項目都在）；新項目的 `<description sparkle:format="markdown">` 是 `docs/releases/v0.4.6.md` 的全文（測試用的說明檔）。Sparkle 用 `SUTextViewReleaseNotesView`（NSTextView，`prefersMarkdown:YES`）顯示 markdown，不是網頁檢視。workflow 的新項目檢查（Python，只看 enclosure 網址等於這次 zip 的那一項）在這份 feed 上通過，拿掉說明、改長度、拿掉簽章、找不到項目各以 exit 1 失敗。
+- **互動流程前先靜默檢查**：按「更新到 X」或選單項時先 `checkForUpdateInformation`，確認有新版才在下一個 main queue 回合呼叫 `checkForUpdates`；沒有就只更新狀態。理由：直接呼叫 `checkForUpdates` 時，版本已經不在（或檢查失敗）會由 Sparkle 跳出它自己的提示。使用者進了 Sparkle 的流程之後，下載或安裝出錯時 Sparkle 仍可能跳模態警告，這是實機驗收 4(h)。
+- **本機建置不啟動更新服務**：Info.plist `ShanjieUpdateBuild`（`release` 只在 `release.yml` 的 build 工作、`test` 是更新測試版、其他 `local`），`Updates.runsUpdater` 只在前兩者回 true。
+- **CI 關卡**：publish 用 `GITHUB_TOKEN` 寫進 main 的 appcast commit 不觸發 `ci.yml`；`scripts/check-ci-gate.sh` 改成往回跳過只改 `appcast.xml` 的單親 commit，`scripts/test-check-ci-gate.sh` 用假的 `gh` 測（另外兩個突變：不往回走、只要有改 `appcast.xml` 就往回走，都讓測試失敗）。
 
 ## 2026-10-16：錯字回報第 122–124 列（做齊、什麼是、圖示）
 
@@ -6368,6 +6373,18 @@ formal: alpha 0.7, tau 1, delta 2
 - 維護者實機的組字區是「好你一份草稿」，錯的是「你」，要的是同音的「擬」（ㄋㄧˇ）。加成 `|好擬一份草稿|ㄏㄠˇ ㄋㄧˇ ㄧ ㄈㄣˋ ㄘㄠˇ ㄍㄠˇ`（讀音由 `tools/readings.py` 產生，沒有 CHECK）。
 - Python 參考實作、golden 設定：兩種設定第 1 名都是「好你一份草稿」，正解第 2。
 - `eval/golden/s2h-lm-context.txt` 的錯字回報兩行用 Python 參考實作重產，n 125：聊天 top1 29、書面 37 不變，oracle@64 兩種設定都 121 → 122；`eval/README.md` 改成 125 列。
+
+## 2026-10-16：about-update 實機（驗收第 4 項）
+
+- 做法：一把一次性的測試金鑰；測試版 A（0.4.5）與 B（0.4.6）都是 `ShanjieUpdateBuild` `test`，feed 指向 `http://127.0.0.1:8977/appcast.xml`，由本機的 Python `http.server` 提供並記下每個請求的標頭。`file://` 不能用：Sparkle 2.9.3 回「The download request URL must use http or https」。所以 `scripts/build-app.sh` 的測試 feed 改成收 `https://` 或 `http://127.0.0.1`。一開始還替測試版加了 ATS 的 `NSAllowsLocalNetworking`，但沒有實測過需不需要；review 之後實測：同一支帶內嵌 Info.plist、沒有任何 ATS 鍵的小程式，連 `http://127.0.0.1` 回 200，連 `http://example.com` 是 `NSURLErrorDomain -1022`（ATS 有在作用），加了 `NSAllowsLocalNetworking` 結果一樣。所以 ATS 例外與 `scripts/check-app.sh` 對應的檢查都刪掉。
+- (g) 把測試 feed 的更新說明改一個字：Sparkle 拒絕（「EdDSA signature does not match… improperly signed」），關於頁不顯示新版。
+- (f) Sparkle 的請求（讀 feed 與下載 zip 相同）：`Host`、`Accept`（feed 是 `application/rss+xml,*/*;q=0.1`，下載是 `*/*`）、`Accept-Language: zh-TW,zh-Hant;q=0.9`（系統的語言偏好）、`Accept-Encoding: gzip, deflate`、`Connection: keep-alive`、`User-Agent: ?????/0.4.5 Sparkle/2.9.3`（App 名稱的五個中文字送出時是五個 0x3f 位元組，看原始位元組確認）。沒有輸入內容、選字記憶或其他系統資訊。目的主機要等正式 feed 才量得到（驗收第 6 項）。
+- 實機發現的問題：Sparkle 的「已有新版本」視窗開在設定視窗後面（設定視窗是 `.floating`）；切到別的 App 之後它沉到後面，再按「更新到 0.4.6」沒有反應（流程還在進行，`install` 收到 `.busy` 就略過），輸入法又沒有 Dock 圖示可以把它叫回來。修正：流程進行中，`Updater` 每 0.25 秒把 Sparkle 的視窗（window controller 屬於 Sparkle 的 bundle）提到 `.floating` 並 `orderFrontRegardless()`；`Updates.install` 遇到 `.busy` 時呼叫 `focus`，把已提上來的也重新叫回最前面（單元測試 `testInstallWhileBusyFocuses`；突變：`.busy` 改回 `break`，這個測試以斷言失敗，focus 次數 0 ≠ 1，還原後通過）。用修正版重建 A、B 後重測：視窗在設定視窗上面、點 TextEdit 後仍在最上面、點設定視窗蓋住後再按一次會回到最前面。
+- (h) 把 zip 移走後按「安裝更新」（伺服器記到 404）：Sparkle 的下載失敗警告在最前面，按掉後在 TextEdit 照常打字。
+- (e) 背景檢查和「立即檢查」用的是同一個 Sparkle 呼叫 `checkForUpdateInformation`（不開視窗）；實機按「立即檢查」查到 0.4.6 時沒有任何 Sparkle 視窗，只有關於頁顯示「有新版本 0.4.6」。測試期間沒有按按鈕時也沒有自己跳出視窗（維護者回報）。背景計時器本身在測試期間沒有到期（當天已經檢查過），決定「查到新版不開視窗」的邏輯由單元測試 `testBackgroundFindDoesNotOpenAWindowOrDropAVersion` 保護。
+- 真正的更新走輸入選單「有新版本 0.4.6，按此更新…」→ 安裝更新 → 安裝並重新啟動：伺服器 22:30:18 送出 zip，22:30:22 新程序啟動。(a) 安裝的是 0.4.6，程序路徑仍是 `~/Library/Input Methods/善解輸入法.app/Contents/MacOS/shanjie`；(b) TextEdit 照常打字；(c) Caps Lock 切換輸入法正常（沒有觸發 Caps Lock 的已知問題；Sparkle 2.9.3 的原始碼裡找不到任何 TIS 或 Carbon 輸入法 API 的呼叫，所以預期它換檔時不會註冊輸入法，這是讀原始碼的推論，沒有在更新當下記錄系統呼叫）；(d) 更新前就開著的 TextEdit、Safari、Discord、Orca 都不用重開就能繼續打字（維護者回報）。
+- 實機修正的 /code-review（只審 64395ec6）14 項，處置寫在契約 §7。改了的：再按「更新到 X」時先走 Sparkle 自己的 `checkForUpdates` → `showUpdateInFocus`（流程沒在顯示更新時它只記一筆 log、不會開第二次檢查，讀 `SPUUpdater.m` 確認），再提層級，最小化的視窗一起還原（Sparkle 的更新提示視窗在 xib 裡就是 miniaturizable，狀態視窗在一般 App 更新時也可最小化）；層級共用 `SettingsWindowController.level`；自己的靜默檢查進行中時再按直接略過。沒改的：輪詢（每 0.25 秒掃一次本程序的幾個視窗，只在 Sparkle 流程進行中；要改成每個視窗開啟時才處理，得用自訂的 `SPUUserDriver` 換掉 `SPUStandardUpdaterController`）；換到別的桌面（Space）後按更新叫不叫得回來沒有實測，設定視窗本來就有同樣的情況，記成已知限制。
+- 修正版（5169c755）實機重測（2026-10-17，維護者回報「測試OK」）：測試版不帶任何 ATS 鍵，「立即檢查」照常讀到本機 feed（http://127.0.0.1）並顯示有新版；Sparkle 的視窗在設定視窗上面；最小化後再按「更新到 0.4.6」從 Dock 還原到最前面；安裝更新後 00:03:02 送出 zip、00:03:13 新程序啟動，打字正常。
 
 ## 2026-10-17：錯字回報第 126 列（影片同時做）
 

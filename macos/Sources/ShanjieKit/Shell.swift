@@ -585,6 +585,9 @@ public final class Shell {
 
     /// Set by the app to show the settings window; the menu's 善解設定… calls it.
     public var onOpenSettings: (() -> Void)?
+    /// Set by the app (docs/contracts/about-update.md): the update state the menu and the 關於 page read; `nil` in the tests
+    /// that do not set it.
+    public var updates: Updates?
     func openSettings() { onOpenSettings?() }
 
     /// The menu's switches, for a caller with no session (the settings window): the owner of the

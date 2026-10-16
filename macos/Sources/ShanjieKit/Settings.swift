@@ -30,6 +30,8 @@ public final class SettingsModel: ObservableObject {
     @Published public private(set) var englishInlineEnabled = false
     /// The abbreviation toggle is shown only when the shell offers it (`Shell.showsAbbreviation`).
     public var showsAbbreviation: Bool { shell.showsAbbreviation }
+    /// The 關於 page's update state (docs/contracts/about-update.md section 1); it publishes its own changes.
+    public var updates: Updates? { shell.updates }
     @Published public private(set) var demote = true
     /// 語意校正 (s7c2b section 2.2).
     @Published public private(set) var rerank = true

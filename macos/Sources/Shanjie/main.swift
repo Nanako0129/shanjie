@@ -152,6 +152,24 @@ final class DefaultsAppProfileStore: AppProfileStore {
     }
 }
 
+/// The update settings and the last check (docs/contracts/about-update.md section 2): keys `updateAutoCheck` (Bool, absent
+/// means on), `updateLastCheck` (Date) and `updateStatus` (a dictionary of strings, see `UpdateStore`) in the same domain.
+@MainActor
+final class DefaultsUpdateStore: UpdateStore {
+    var autoCheck: Bool? {
+        get { UserDefaults.standard.object(forKey: "updateAutoCheck") as? Bool }
+        set { UserDefaults.standard.set(newValue, forKey: "updateAutoCheck") }
+    }
+    var lastCheck: Date? {
+        get { UserDefaults.standard.object(forKey: "updateLastCheck") as? Date }
+        set { UserDefaults.standard.set(newValue, forKey: "updateLastCheck") }
+    }
+    var status: [String: String]? {
+        get { UserDefaults.standard.dictionary(forKey: "updateStatus") as? [String: String] }
+        set { UserDefaults.standard.set(newValue, forKey: "updateStatus") }
+    }
+}
+
 @MainActor
 func runServer() -> Never {
     guard let bundleID = Bundle.main.bundleIdentifier,
@@ -178,9 +196,14 @@ func runServer() -> Never {
         // This argument alone hides it (Shell's default true is for the tests) and the app target has no tests: the release
         // device check confirms the menu has no 可省略韻母.
         showsAbbreviation: false)
+    // about-update section 2: the state always exists (the 關於 page shows the version); Sparkle starts only inside the .app.
+    let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0.0"
+    let updates = Updates(store: DefaultsUpdateStore(), version: version)
+    App.shell?.updates = updates
+    let updater = Updater(updates: updates)
     let settings = SettingsWindowController(shell: App.shell)
     App.shell?.onOpenSettings = { settings.show() }
-    withExtendedLifetime(server) { app.run() }
+    withExtendedLifetime((server, updater)) { app.run() }
     exit(0)
 }
 

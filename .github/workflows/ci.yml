@@ -288,6 +288,10 @@ jobs:
       - name: Build the app (ad-hoc)
         run: make bundle
 
+      # release.yml's CI gate against a stub gh: a tag on an appcast.xml-only commit uses its parent's run.
+      - name: CI gate script
+        run: scripts/test-check-ci-gate.sh
+
       # install-ime.sh file handling with a stub app in a temporary HOME; nothing can be registered.
       - name: Install script file handling
         run: scripts/test-install-ime.sh
@@ -295,7 +299,7 @@ jobs:
       # Includes the log-stream test (acceptance 5): it needs /usr/bin/log
       # stream, which the runner's user can run.
       - name: Swift tests
-        run: swift test --package-path macos
+        run: swift test --package-path macos --force-resolved-versions
 
       # The empty override builds with the shipping bundle ID: an ephemeral
       # runner has no installation to collide with (see the Makefile).
