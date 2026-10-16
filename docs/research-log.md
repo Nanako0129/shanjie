@@ -6302,3 +6302,13 @@ formal: alpha 0.7, tau 1, delta 2
 - 維護者實機的組字區是「自動更新也坐上去」，要的是「做」。加成 `|自動更新也做上去|ㄗˋ ㄉㄨㄥˋ ㄍㄥ ㄒㄧㄣ ㄧㄝˇ ㄗㄨㄛˋ ㄕㄤˋ ㄑㄩˋ`（讀音由 `tools/readings.py` 產生，沒有 CHECK）。
 - CLI 出貨設定（`--context --packs acg --tinylm`）兩種設定都是「坐」第 1、「作」第 2、「做」第 3；書面加上 trigram 表也是「坐」第 1、「作」第 2。
 - `eval/golden/s2h-lm-context.txt` 的錯字回報兩行用 Python 參考實作重產，n 121：聊天 top1 29、書面 36 不變，oracle@64 兩種設定都 117 → 118；`eval/README.md` 改成 121 列。
+
+## 2026-10-16：about-update（關於頁與 Sparkle 自動更新）實作
+
+契約 `docs/contracts/about-update.md`。
+
+- **ad-hoc 建置與 hardened runtime 不相容**：`scripts/build-app.sh` 照 s3b §2 用 `codesign --force --sign - --options runtime` 簽好內嵌 Sparkle 2.9.3 的 App 之後，`scripts/check-app.sh` 的 `--selftest` 以 134（Abort trap）結束。dyld 的訊息：`Library not loaded: @rpath/Sparkle.framework/Versions/B/Sparkle … code signature in <…> '…/Contents/Frameworks/Sparkle.framework/Versions/B/Sparkle' not valid for use in process: mapping process and mapped file (non-platform) have different Team IDs`。App 與 framework 都是 ad-hoc（`TeamIdentifier=not set`），hardened runtime 的 library validation 仍然拒絕。不加 runtime 重簽之後 `--selftest` 通過。處置（維護者經 main 選 A）：本機與 CI 的 ad-hoc 建置不加 runtime；`release.yml` 的 Developer ID 簽章對 App、framework、`Autoupdate`、`Updater.app` 四處都加，`verify_sparkle` 缺一就失敗。不加 `disable-library-validation`。
+- **Sparkle 啟動失敗會跳模態視窗**：讀 Sparkle 2.9.3 的 `SPUStandardUpdaterController.m`，`startingUpdater: true` 啟動失敗時一秒後 `[alert runModal]`。輸入法程序裡會卡住打字，所以改成 `startingUpdater: false` 再自己 `start()`，失敗只記一行靜態 log，「立即檢查」顯示「檢查失敗」。
+- **`generate_appcast` 的實際輸出**（本機，SwiftPM 解析出的 2.9.3 工具、程序內產生的一次性金鑰、測試版 zip，`HOME` 指到暫存區）：一個項目，enclosure 網址等於 `--download-url-prefix` 加 zip 檔名，`length` 等於 zip 大小，有 `sparkle:edSignature`；feed 的簽章區塊接在 `</rss>` 同一行後面（`</rss><!-- sparkle-signatures:`），所以 workflow 用 `grep -F` 不用 `grep -x`。用 CryptoKit 從同一個種子推出的公鑰驗得過它的壓縮檔簽章，所以 workflow 的金鑰成對檢查和 Sparkle 的算法一致。沒有舊的 `appcast.xml` 時它自己建一份新的，不需要先放空的 feed。
+- **Info.plist 的布林值要連型別一起比**：`PlistBuddy -c Print` 把字串 `"true"` 和布林 true 印成一樣，`check-app.sh` 改用 `plutil -extract … -expect bool`。
+- 還沒做（要維護者或 main）：`workflow_dispatch` 乾跑、實機的更新流程與請求錄製（契約 §3 第 4 項）、Homebrew 的 VM 實測（第 5 項）、推 tag 後的正式路徑核對（第 6 項）。

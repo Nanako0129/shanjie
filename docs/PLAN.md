@@ -25,10 +25,10 @@ v4 日期 2026-10-03。v1 經 `pilotfish:plan-verifier`（REVISE，4 項）與 `
 | A3 | 延遲（M5 Mac）：同步路徑每鍵 p95 < 16 ms；神經驗證 p95 < 300 ms、非同步、不阻塞按鍵。雲端主力模式（選用，§2 S6）另訂：送出前等待 p95 ≤ 1 秒（使用者 2026-10-03 核定），硬逾時就送本機結果 | 核心 bench＋殼內打點 |
 | A7 | 不拖慢電腦（v5，使用者 2026-10-03 在 Mac 量測時回報「電腦很卡」）：本機模型推論期間，按鍵到組字區顯示的 p95 仍 < 16 ms；推論用低 QoS、新按鍵就取消進行中的推論；使用者實測打字時不卡。〔S7c-2b：殼內沒有打點量測。證據是 S7c-2a 的引擎重播（按鍵 p95 約 2.6 ms、套用 p95 約 0.3 ms）與使用者實機；小模型在 `.utility` 佇列跑、一次一個，核心的 run 不能取消，新按鍵只讓結果作廢〕 | 殼內打點＋使用者實測 |
 | A4 | 前綴穩定：已鎖定的字（顯示超過一個驗證週期且使用者未回頭改）後續按鍵 0 次被改寫。〔使用者 2026-10-11：語意校正（S7c-2b）先顯示 n-gram 的字、小模型算完再換字，這種短暫的閃回另外計，不算在這一條；要不要加規則，由實機打字的感受決定〕 | 按鍵重播測試 |
-| A5 | 隱私：見 §7 的 R1–R9；其中可自動測的全部有測試，需人眼的交給使用者 | 自動測試＋使用者實測清單 |
+| A5 | 隱私：見 §7 的 R1–R10；其中可自動測的全部有測試，需人眼的交給使用者 | 自動測試＋使用者實測清單 |
 | A6 | 授權：每份資料、模型都有授權清單，且可合法再散布，或在執行期另行下載並顯示授權 | `LICENSES/` 清單審查 |
 
-**非目標（v1）。** iOS、Windows；拼音、倉頡；從使用者指定的檔案或資料夾學習；下一詞預測；帳號同步；自動更新；雲端或模型回傳的自由文字。（縮寫打字與首碼快打原本列在這裡，使用者 2026-10-07 改為要做，契約待補。）
+**非目標（v1）。** iOS、Windows；拼音、倉頡；從使用者指定的檔案或資料夾學習；下一詞預測；帳號同步；雲端或模型回傳的自由文字。（自動更新原本列在這裡，維護者 2026-10-16 改為要做：Sparkle，`docs/contracts/about-update.md`，規則見 §7 R10。）（縮寫打字與首碼快打原本列在這裡，使用者 2026-10-07 改為要做，契約待補。）
 
 **已定的架構決策。**
 
@@ -816,7 +816,7 @@ S3a 不需要外觀參考，可以先做；S3b 等使用者提供 macOS 內建�
 
 ### S8：打包與釋出
 
-- Developer ID 簽章＋公證、hardened runtime、Release 附件與授權檔已在 S3b 的 `release.yml` 完成（2026-10-03）；S8 剩 README、對外說明與更新檢查；Homebrew cask 移到 S3b 契約 §14（使用者 2026-10-04）。外部動作每一步都要使用者當次同意。
+- Developer ID 簽章＋公證、hardened runtime、Release 附件與授權檔已在 S3b 的 `release.yml` 完成（2026-10-03）；S8 剩 README、對外說明與更新檢查。〔2026-10-16〕更新檢查改成 Sparkle 自動更新，契約 `docs/contracts/about-update.md`（設定的「關於」頁、每天最多一次的背景檢查、按下才安裝、release 簽 feed，進 v0.4.7）；Homebrew cask 移到 S3b 契約 §14（使用者 2026-10-04）。外部動作每一步都要使用者當次同意。
 
 ## 3. 風險
 
@@ -829,7 +829,7 @@ S3a 不需要外觀參考，可以先做；S3b 等使用者提供 macOS 內建�
 | 64 名候選讓判斷器更容易挑錯（N1／N0 是用 16／32 名量的） | S5、S6 量 A1b 時改用 64 名，必要時再決定判斷器實際看幾名 |
 | 疊加層以 CC BY-SA 釋出（share-alike） | 只限 `overlay-add.tsv` 這個檔；程式碼仍是 Apache-2.0；`LICENSES/data.md` 註明署名 |
 | 詞庫補詞過度擬合評測集 | S1 禁止從 `eval/` 挑詞、每筆有來源標籤；保留集由 verifier 量 |
-| 輸入法看得到所有按鍵 | §7 R1–R9 |
+| 輸入法看得到所有按鍵 | §7 R1–R10 |
 | 保留集被看過 | 片 E 的流程規則；每片報告揭露 |
 
 ## 4. 使用者決定（2026-10-03）
@@ -914,7 +914,8 @@ S3a 不需要外觀參考，可以先做；S3b 等使用者提供 macOS 內建�
 | R6 | P2 | Keychain：service＝bundle ID、`SecItemUpdate` 並檢查狀態、key 不進 URL／log／錯誤訊息；agent 測試用記憶體 store；真 Keychain 交給使用者實測；預告 ad-hoc 簽章可能跳授權提示 | 採納 | S6 |
 | R7 | P2 | `URLSessionConfiguration.ephemeral`、系統 ATS／TLS、硬逾時 2 秒、只在送出或驗證時送；opt-in 對話框列出送出內容範例與所選供應商現行的資料保留政策（v5：供應商可切換；S6 時逐家核對最新條款） | 採納 | S6 |
 | R8 | P2 | 模型清單內建 HF repo＋commit SHA＋每檔 SHA-256，下載到暫存檔驗證後才改名；只收 safetensors／GGUF／JSON；權重在無網路的沙盒 XPC helper 解析 | 採納；XPC 從條件式改成 S5 必做（但書：S7 的自訓字元模型照第 36 行的例外在主程序以嚴格讀檔器載入，條件見 `docs/contracts/s7c2a-core-rerank.md` §2.6；下載的、第三方的或使用者指定的權重仍照本條） | S5 |
-| R9 | P3 | hardened runtime、不加 `disable-library-validation`、不需 root、v1 不做自動安裝（只檢查版本開瀏覽器） | 採納 | S3b（簽章、hardened runtime、無 entitlements、安裝不用 sudo）；S8（更新檢查） |
+| R9 | P3 | hardened runtime、不加 `disable-library-validation`、不需 root、~~v1 不做自動安裝（只檢查版本開瀏覽器）~~（〔2026-10-16〕這一句由 R10 取代，其餘不變；hardened runtime 指出貨的 Developer ID 版本，內嵌 Sparkle 之後本機與 CI 的 ad-hoc 建置不加，見 s3b §2） | 採納 | S3b（簽章、hardened runtime、無 entitlements、安裝不用 sudo）；S8（更新檢查） |
+| R10 | P2 | 〔2026-10-16，維護者選擇題，`docs/contracts/about-update.md` §0.1、§2〕Sparkle 自動更新。信任模型照實寫：Sparkle 接受「EdDSA 簽章通過」或「新版的 Apple 簽章符合舊版的 designated requirement（同一個 Team ID）」任一成立的更新，安裝時拿掉隔離屬性、不再過 Gatekeeper 與公證，所以 EdDSA 私鑰或 Developer ID 憑證，加上 feed 的寫入權，就能在所有使用者的輸入法程序裡執行程式；不 fork Sparkle 改成兩者皆要。降低方法：Sparkle `exact: 2.9.3`、`Package.resolved` 進版控；Info.plist `SURequireSignedFeed` 與 `SUVerifyUpdateBeforeExtraction` 為 true，`SUAllowsAutomaticUpdates`、`SUEnableAutomaticChecks`、`SUEnableInstallerLauncherService`、`SUEnableSystemProfiling` 為 false，不設 `SUEnableJavaScript`，正式值寫死在 `build-app.sh`、`check-app.sh` 與 `release.yml` 逐字比對；只有使用者按下才安裝；背景檢查每天最多一次、只查資訊不開視窗、可在設定關掉；私鑰只在 release Environment，只在 sign 工作的金鑰成對檢查與推 tag 的 feed 步驟出現，經 stdin 交給 Sparkle 官方 tarball（雜湊釘住）的 `generate_appcast`；Sparkle 的四個程式碼位置都用同一個 Team 簽、開 runtime、沒有 entitlements，`verify()` 逐一檢查；XPC 服務移除。**R2 例外**：`Updater.swift` 照 R2 只記靜態字串，但 Sparkle 自己的 log 用 `%{public}` 並寫到磁碟，內容是路徑、網址與錯誤，沒有輸入內容。**R7 不套用**：更新的連線用 Sparkle 的預設 session，不是 ephemeral。 | 採納 | about-update（v0.4.7） |
 
 ### plan-verifier（v5 第一次：REVISE）
 
