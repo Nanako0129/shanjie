@@ -42,6 +42,8 @@ def read_tri(b):
     magic, V, D, sha, C, E = struct.unpack_from("<8sId32sII", b, 0)
     if magic != MAGIC:
         raise ValueError("bad trigram magic")
+    if D != D_TRI:   # the contract's constant (core/src/trigram.rs refuses any other value too)
+        raise ValueError("trigram table has a discount other than 0.75")
     p = HEAD
     d = {"V": V, "D": D, "model_sha": sha}
     d["key"] = np.frombuffer(b, "<u8", C, p); p += 8 * C

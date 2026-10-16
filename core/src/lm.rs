@@ -3,7 +3,7 @@
 //! R2: errors carry no content; nothing here formats input text.
 
 use crate::learn::{context_key, record_key, Learner, Level};
-use crate::trigram::{Tri, TriCtx};
+use crate::trigram::{Tri, TriCtx, TriMemo};
 use crate::{Error, Lexicon, PER_KEY};
 use std::collections::{HashMap, HashSet};
 use std::fmt;
@@ -538,9 +538,12 @@ impl Lm {
     }
 
     /// The stored trigram context (u, v), if `cfg` scores with the table. `u` `None` is unknown (a left context supplies one word).
-    fn tri_of(&self, cfg: Scoring, u: Option<u32>, v: Option<u32>) -> Option<TriCtx> {
+    /// `memo` keeps what was found in this call (a context's back-off weight sums all its entries; the same pair comes back at
+    /// many positions), so the answer is the one `Tri::context` gives, computed once.
+    fn tri_of(&self, cfg: Scoring, u: Option<u32>, v: Option<u32>, memo: &mut TriMemo) -> Option<TriCtx> {
         let t = self.tri.as_ref().filter(|_| cfg.tri)?;
-        t.context(u?, v?)
+        let key = (u?, v?);
+        *memo.0.entry(key).or_insert_with(|| t.context(key.0, key.1))
     }
 
     /// P3(w | u, v) (trimodel.py `prob`) with the P2 of this model under `cfg.kn`; `tri` is the context `tri_of` found, `None`
@@ -556,15 +559,25 @@ impl Lm {
     /// `word` under `cfg` with two history words (`u` first, `None` unknown): trimodel.py `_word`. With `cfg` from a plain lambda
     /// it is `word`.
     pub fn word3(&self, cfg: Scoring, u: Option<&str>, v: &str, w: &str, lp: f64) -> f64 {
-        let (vid, wid) = (self.word_id(v), self.word_id(w));
-        let tri = self.tri_of(cfg, u.and_then(|u| self.word_id(u)), vid);
-        word_term(cfg.lam, self.prob_tri(tri, self.ctx_of(vid), wid, pow10(lp), cfg.kn), lp)
+        self.word3_in(&mut TriMemo::default(), cfg, u, v, w, lp)
     }
 
     /// `eos` under `cfg` with two history words: trimodel.py `eos`.
     pub fn eos3(&self, cfg: Scoring, u: Option<&str>, v: &str) -> f64 {
+        self.eos3_in(&mut TriMemo::default(), cfg, u, v)
+    }
+
+    /// `word3` sharing `memo` with the other terms of one pass (`Engine::total_score`).
+    pub(crate) fn word3_in(&self, memo: &mut TriMemo, cfg: Scoring, u: Option<&str>, v: &str, w: &str, lp: f64) -> f64 {
+        let (vid, wid) = (self.word_id(v), self.word_id(w));
+        let tri = self.tri_of(cfg, u.and_then(|u| self.word_id(u)), vid, memo);
+        word_term(cfg.lam, self.prob_tri(tri, self.ctx_of(vid), wid, pow10(lp), cfg.kn), lp)
+    }
+
+    /// `eos3` sharing `memo`.
+    pub(crate) fn eos3_in(&self, memo: &mut TriMemo, cfg: Scoring, u: Option<&str>, v: &str) -> f64 {
         let vid = self.word_id(v);
-        let tri = self.tri_of(cfg, u.and_then(|u| self.word_id(u)), vid);
+        let tri = self.tri_of(cfg, u.and_then(|u| self.word_id(u)), vid, memo);
         cfg.lam * self.prob_tri(tri, self.ctx_of(vid), Some(1), self.p_eos, cfg.kn).log10()
     }
 
@@ -920,6 +933,7 @@ pub fn decode_segment_learned<'a>(
     let cfg: Scoring = scoring.into();
     let lam = cfg.lam;
     let tri_on = cfg.tri && lm.tri.is_some();
+    let mut memo = TriMemo::default();
     let n = syls.len();
     let ids = base.ids(syls);
     let start_id = lm.word_id(start);
@@ -936,7 +950,7 @@ pub fn decode_segment_learned<'a>(
         prev: start_prev,
         last: start_id,
         ctx: lm.ctx_of(start_id),
-        tri: lm.tri_of(cfg, start_prev, start_id),
+        tri: lm.tri_of(cfg, start_prev, start_id, &mut memo),
     });
     for i in 1..=n {
         let mut cand: Vec<Hyp<'a>> = Vec::new();
@@ -1047,7 +1061,7 @@ pub fn decode_segment_learned<'a>(
         cand.truncate(beam);
         for h in &mut cand {
             h.ctx = lm.ctx_of(h.last);
-            h.tri = lm.tri_of(cfg, h.prev, h.last);
+            h.tri = lm.tri_of(cfg, h.prev, h.last, &mut memo);
         }
         hyps[i] = cand;
     }
@@ -1576,6 +1590,8 @@ mod tests {
             ("D above 1", patch(12, &1.5f64.to_le_bytes())),
             ("D negative", patch(12, &(-0.1f64).to_le_bytes())),
             ("D NaN", patch(12, &f64::NAN.to_le_bytes())),
+            ("D 0.5", patch(12, &0.5f64.to_le_bytes())),
+            ("D 0.76", patch(12, &0.76f64.to_le_bytes())),
             ("short", good[..good.len() - 4].to_vec()),
             ("trailing byte", [good.as_slice(), &[0]].concat()),
             ("header only", good[..60].to_vec()),

@@ -11,6 +11,8 @@ use std::sync::OnceLock;
 
 const MAGIC: &[u8; 8] = b"SJT30001";
 const HEAD: usize = 60;
+/// The discount (the contract's constant): a table with any other D is refused, so the back-off sums stay exact.
+const D: f64 = 0.75;
 
 pub(crate) struct Tri {
     v: u64,
@@ -31,6 +33,10 @@ pub(crate) struct TriCtx {
     back: f64,
 }
 
+/// The contexts one decode (or one `total_score` pass) has looked up: (u, v) -> what `Tri::context` found. Not kept between calls.
+#[derive(Default)]
+pub(crate) struct TriMemo(pub(crate) std::collections::HashMap<(u32, u32), Option<TriCtx>>);
+
 impl Tri {
     /// `raw` is the whole file; `v` and `model_sha` (hex) are the bigram model it must be bound to.
     pub(crate) fn parse(raw: Vec<u8>, v: usize, model_sha: &str) -> Result<Tri, LmError> {
@@ -42,7 +48,7 @@ impl Tri {
         let (vv, d) = (u32_at(8).ok_or(bad)? as usize, f64::from_le_bytes(raw[12..20].try_into().map_err(|_| bad)?));
         let sha: String = raw[20..52].iter().map(|b| format!("{b:02x}")).collect();
         let (c, e) = (u32_at(52).ok_or(bad)? as usize, u32_at(56).ok_or(bad)? as usize);
-        if vv != v || sha != model_sha || !(0.0..1.0).contains(&d) {
+        if vv != v || sha != model_sha || d != D {
             return Err(bad);
         }
         let want = c.checked_mul(20).and_then(|x| x.checked_add(e.checked_mul(8)?)).and_then(|x| x.checked_add(HEAD + 4)).ok_or(bad)?;
@@ -111,8 +117,8 @@ impl Tri {
     }
 
     /// The context (u, v) if it is stored. Back-off weight as trimodel.py `back`: 1 - sum over the kept entries (c - D) / total,
-    /// summed in file order (counts are integers and D is a multiple of 1/4 in every table built so far, so the sum is exact
-    /// whatever the order and equals numpy's).
+    /// summed in file order (counts are integers and D is 3/4, so the sum is exact whatever
+    /// the order and equals numpy's).
     pub(crate) fn context(&self, u: u32, v: u32) -> Option<TriCtx> {
         let k = u as u64 * self.v + v as u64;
         let (mut lo, mut hi) = (0, self.c);
