@@ -33,9 +33,11 @@ gh release download model-v6 -R Nanako0129/shanjie -p bigram.sjlm -D data/lm
 gh release download classes-v5 -R Nanako0129/shanjie -p classes.sjc -D data/lm
 gh release download kn-v1 -R Nanako0129/shanjie -p kn.sjkn -D data/lm
 gh release download tinylm-v5 -R Nanako0129/shanjie -p tinylm.sjtl -D data/lm
-gh release download sj-cx-1-7.7m -R Nanako0129/shanjie -p trigram.sjt3 -D data/lm
+t=$(mktemp -d) && gh release download sj-cx-1-7.7m -R Nanako0129/shanjie -p trigram.sjt3 -D "$t" && mv "$t/trigram.sjt3" data/lm/ && rmdir "$t"
 shasum -a 256 -c data/bigram.sjlm.sha256 data/classes.sjc.sha256 data/kn.sjkn.sha256 data/tinylm.sjtl.sha256 data/trigram.sjt3.sha256
 ```
+
+`trigram.sjt3` 先下載到暫存目錄再 `mv` 進 `data/lm`，不要用 `--clobber` 原地覆蓋：核心以 mmap 讀這個檔，正在執行的程序（測試、CLI）映射著它時原地改寫會讓它們收到 SIGBUS 或讀到壞資料，rename 則不會。
 
 沒有登入 `gh` 的話，改用 `https://github.com/Nanako0129/shanjie/releases/download/<Release>/<檔名>` 下載。
 
