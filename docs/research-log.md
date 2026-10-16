@@ -6276,3 +6276,13 @@ formal: alpha 0.7, tau 1, delta 2
 - **B2 選字記憶重量**（WSL，表在 `data/lm`）：鏡像改選 8/10（門檻 80%，過）、ㄗㄞˋ 污染 0（過）。A2 的同前文改選照舊只有 2 列可計數（2/2 學會），和第 B 片相同，照維護者的決定以鏡像改選取代。`global_eps_table` 只記：ε 6 時鏡像 8/10。
 - **手動詞**：`manual_words_come_first_in_the_shipping_setting`（釘「書面只錯第 8 列」）在表也在的情況下**通過**。第 B 片時同一個測試因為第 4、8 列都錯而失敗（「米雅歌」）；加了下限之後書面回到 14／15，和 v0.4.6 相同。第 C 片原本要把例外改成第 4、8 列的那一步因此不用做，發版說明也不用寫「米雅歌」要改選。
 - 第 C 片 C3 的失敗清單作廢，第 A2 片合併後重新觀察。
+
+## 2026-10-16：trigram-core 第 C 片 C3，第 A2 片之後重新觀察
+
+- 表放進 `data/lm`（`fdd3b05d`），分支 `feat/trigram-switch` 合進第 A2 片之後（`f9bf94d`），改任何 golden 之前跑完整測試。之前的清單作廢。
+- **Rust（Windows 機器 WSL，`wsltest.sh`，472 項）**：463 過、9 失敗。
+  - `cli/tests/golden.rs`：`lm_mode_matches_golden_byte_for_byte`、`lm_context_mode_matches_golden_byte_for_byte`、`lm_rowstats_match_python_byte_for_byte`、`no_classes_flag_matches_its_pinned_numbers`。
+  - `core/tests/engine_lm.rs`：`acceptance6_sentence_has_three_different_top1`、`set_profile_snapshot_and_reset_keeps_lm_and_profile`、`replay_standard_formal`、`replay_with_left_context_matches_cli_context`、`fixed_word_total_equals_top1_on_first_rows`。
+  - 第 A2 片之前失敗、現在通過的：`names_layer`、手動詞、`engine_demote` 兩項、`left_context_turns_ba_into_the_particle`（前文「好」＋ㄅㄚ˙ 回到「吧」）。
+- **Mac（`cargo test -p cli --test golden`）**：上面四項，加上 WSL 跳過的 `sw_probe_matches_python_golden_byte_for_byte`。
+- **Swift（Mac，`make test-swift`）**：13 個測試案例失敗，原因都是同一對釘選：dev 第 284 列聊天「廚房新裝了一個率水壺」、書面「廚房新裝了一個濾水壺」（`Support.swift`、App 的 `Selftest.swift`）。有表時書面是「廚房新裝了一個律水壺」，仍和聊天不同。案例：LogTests 1、ProfileChoiceTests 7、SelftestTests 的 `testPassesWithTheFullResources`、ShellTests 4。
