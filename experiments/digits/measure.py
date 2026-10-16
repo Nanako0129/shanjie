@@ -35,7 +35,6 @@ SINGLE_MIN = 500         # C.6 item 4: the single judging set stops below this
 TUNE_ARTICLES = (300_000, 305_000)   # wikitune's articles: the tuning half of the default set
 LAMBDAS = (("chat", L.PROFILES["chat"]), ("formal", L.PROFILES["formal"]))
 CTX_MAX = 8              # characters of the Han run before the digits kept in a row (context_key uses the last two)
-A_MIN = 0.90             # R2: (a) at least this on the judging half
 
 
 def load_lexicon():
@@ -238,14 +237,15 @@ def r1_verdict(by_setting):
     return ("<s>" if worse else "digit-context"), ps
 
 
-def r2_verdict(theta, a_ok, a_n, c_dev, c_typing, c_struct):
-    """R2 on the judging half, dev302 and typing76. theta None: no theta passed the tuning keys, so the structural rule, without
-    looking at the judging data. -> (design, stop) design "score" (digits.md A.3.3) or "structural"; stop True when the structural rule itself
-    has (c) > 0 (it cannot with legal readings: the tool or the key set is wrong)."""
+def r2_verdict(theta, a_ok, a_n, c_dev, c_typing, c_struct, a_struct_ok):
+    """R2 on the judging set, dev302 and typing76 (digit-context.md C.4.3 as revised in C.7: the scored split must be at least as right
+    as the structural rule on the same rows, a_ok >= a_struct_ok, instead of the fixed 90%). theta None: no theta passed the tuning
+    keys, so the structural rule, without looking at the judging data. -> (design, stop) design "score" (digits.md A.3.3) or
+    "structural"; stop True when the structural rule itself has (c) > 0 (it cannot with legal readings: the tool or the key set is wrong)."""
     stop = c_struct > 0
     if theta is None:
         return "structural", stop
-    ok = a_n > 0 and a_ok / a_n >= A_MIN and c_dev == 0 and c_typing == 0
+    ok = a_n > 0 and a_ok >= a_struct_ok and c_dev == 0 and c_typing == 0
     return ("score" if ok else "structural"), stop
 
 
@@ -482,7 +482,8 @@ def judge(a):
     if sc:
         rep("time (score, judging half)  " + time_line(sc["a"]))
     design, stop = r2_verdict(th, sc["a"]["a_ok"] if sc else 0, sc["a"]["rows"] if sc else 0, sc["dev302"]["c"] if sc else 0,
-                              sc["typing76"]["c"] if sc else 0, st["dev302"]["c"] + st["typing76"]["c"])
+                              sc["typing76"]["c"] if sc else 0, st["dev302"]["c"] + st["typing76"]["c"],
+                              st["a"]["a_ok"] if "a" in st else 0)
     rep(f"R2: A uses the {design} design" + ("   STOP: the structural rule has (c) > 0, so the key set or the tool is wrong" if stop else ""))
     if design == "score":
         rep("(d) is report-only: the maintainer decides whether to tighten theta (digits.md A.3.3)")

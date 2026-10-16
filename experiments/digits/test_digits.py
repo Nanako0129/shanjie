@@ -428,13 +428,14 @@ class Verdicts(unittest.TestCase):
         self.assertEqual(M.r1_verdict({"chat": (3, 8), "formal": (3, 8)})[1]["chat"], P1.mcnemar(3, 8))
 
     def test_r2(self):
-        self.assertEqual(M.r2_verdict(0.5, 90, 100, 0, 0, 0), ("score", False))
-        self.assertEqual(M.r2_verdict(0.5, 89, 100, 0, 0, 0), ("structural", False))        # (a) < 90%
-        self.assertEqual(M.r2_verdict(0.5, 95, 100, 1, 0, 0), ("structural", False))        # dev302 (c) > 0
-        self.assertEqual(M.r2_verdict(0.5, 95, 100, 0, 1, 0), ("structural", False))        # typing76 (c) > 0
-        self.assertEqual(M.r2_verdict(None, 99, 100, 0, 0, 0), ("structural", False))       # no theta passed the tuning keys
-        self.assertTrue(M.r2_verdict(0.5, 95, 100, 0, 0, 2)[1])                              # the structural rule itself misjudges: stop
-        self.assertEqual(M.r2_verdict(0.0, 0, 0, 0, 0, 0), ("structural", False))           # nothing measured
+        self.assertEqual(M.r2_verdict(0.5, 90, 100, 0, 0, 0, 85), ("score", False))
+        self.assertEqual(M.r2_verdict(0.5, 85, 100, 0, 0, 0, 85), ("score", False))        # as right as the structural rule
+        self.assertEqual(M.r2_verdict(0.5, 84, 100, 0, 0, 0, 85), ("structural", False))   # (a) below the structural rule
+        self.assertEqual(M.r2_verdict(0.5, 95, 100, 1, 0, 0, 85), ("structural", False))   # dev302 (c) > 0
+        self.assertEqual(M.r2_verdict(0.5, 95, 100, 0, 1, 0, 85), ("structural", False))   # typing76 (c) > 0
+        self.assertEqual(M.r2_verdict(None, 99, 100, 0, 0, 0, 85), ("structural", False))  # no theta passed the tuning keys
+        self.assertTrue(M.r2_verdict(0.5, 95, 100, 0, 0, 2, 85)[1])                         # the structural rule itself misjudges: stop
+        self.assertEqual(M.r2_verdict(0.0, 0, 0, 0, 0, 0, 0), ("structural", False))       # nothing measured
 
     def test_merge_adds_counters_and_numbers(self):
         a = {"x": 1, "h": collections.Counter({1: 2})}

@@ -30,7 +30,7 @@
 
 | 檔案 | 來源 | 雜湊 | 重建 |
 |---|---|---|---|
-| `data/lexicon/digits.tsv`（數字語境，`docs/contracts/digit-context.md`；1,657,406 bytes，k＝3） | 中文維基百科 `zhwiki-20261001-pages-articles.xml.bz2`（SHA-256 `5db9052e…`）前 200,000 篇與 `colloquial-train.txt`（`3e833d06…`）；兩者的完整雜湊與工具版本在檔頭 | `4efd2acc1bb0f4867e91569051746edc82c5c212811a5e2339c2bf7b88461530` | `python3 tools/build_digits.py --wiki <dump> --articles 200000 --colloquial <colloquial-train.txt> --out data/lexicon/digits.tsv --procs N`（`experiments/digits/README.md`；保留集的句子照 `docs/contracts/holdout-refresh.md` §8 不計入） |
+| `data/lexicon/digits.tsv`（數字語境，`docs/contracts/digit-context.md`；1,555,575 bytes，k＝3，格式 v2） | 中文維基百科 `zhwiki-20261001-pages-articles.xml.bz2`（SHA-256 `5db9052e…`）前 200,000 篇與 `colloquial-train.txt`（`3e833d06…`）；前文用 model-v6 的歷史詞（`bigram.sjlm` 的雜湊也在檔頭）；完整雜湊與工具版本在檔頭 | `a75a328ba4e30d13d5773cdc6f4c5e61a606bfc35e7459d16114c288dc6a6800` | `python3 tools/build_digits.py --wiki <dump> --articles 200000 --colloquial <colloquial-train.txt> --out data/lexicon/digits.tsv --procs N`（`experiments/digits/README.md`；保留集的句子照 `docs/contracts/holdout-refresh.md` §8 不計入） |
 
 ## 下載
 
