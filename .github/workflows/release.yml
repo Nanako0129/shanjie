@@ -87,7 +87,7 @@ jobs:
           set -euo pipefail
           gh release download model-v6 --repo "$GITHUB_REPOSITORY" -p bigram.sjlm -D data/lm
           shasum -a 256 -c data/bigram.sjlm.sha256
-          gh release download classes-v4 --repo "$GITHUB_REPOSITORY" -p classes.sjc -D data/lm
+          gh release download classes-v5 --repo "$GITHUB_REPOSITORY" -p classes.sjc -D data/lm
           shasum -a 256 -c data/classes.sjc.sha256
           gh release download kn-v1 --repo "$GITHUB_REPOSITORY" -p kn.sjkn -D data/lm
           shasum -a 256 -c data/kn.sjkn.sha256

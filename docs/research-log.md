@@ -6058,3 +6058,47 @@ formal: alpha 0.7, tau 1, delta 2
   - 小檔在 dev302、打字測驗、wikitypo 有幾句的退步（T15 dev302 −6、wikitypo −3，都不顯著）。
 - **判讀結果**：E1h 只有 H3 通過。E1g 與 E1h 通過的檔裡總大小最小的是 **H3：總大小 227.1 MB（bigram 83.4 MB＋trigram 表 143.6 MB）**，比 T2 小 80 MB。照契約，核心契約從 H3 開始（書面設定不開 KN、加 trigram），記憶體與延遲上限交維護者決定。
 - 〔推論〕KN 關之後，trigram 表大小和增益大致單調（T15 → T3 → T2 → T1：−2、+35、+65、+106）；相對熵剪枝讓同樣大小多保留有用的條目。若要更小，下一步是在 H3 與 H15 之間多剪幾檔（例如 K 等於 T5、T8 的條目數），不在本片。
+
+## 2026-10-16：classes-v5（μ 0.2）的換版
+
+- 維護者在 lytune 歸因之後的選擇題選「換成 μ 0.2（推薦）」。契約 `docs/contracts/classes-v5.md`（plan-verifier READY）。`experiments/lytune-attrib/set_mu.py` 從 classes-v4 產生，SHA-256 `9e36fa1b…`，和 188 上量測用的檔相同。資料 Release `classes-v5` 由維護者同意後建立（不標 Latest），下載回來雜湊與大小（5,656,826 bytes）相符。
+- 換版清單照 `docs/data-files.md`：雜湊檔、CI 兩個 job 與 `release.yml`、`build-app.sh`、`cli/tests/golden.rs`、`core/tests/engine_*.rs` 的缺檔訊息、`Support.swift`、README、CONTRIBUTING、`docs/verification.md`、`LICENSES/data.md`、PLAN、`docs/data-files.md`、`docs/training.md`。tinylm-v5 沿用：契約 §2 第 3 點把「換詞類表就要重調小模型」放寬成只限重新分群，只改 μ 而且開著出貨的小模型量過的可以沿用，`docs/data-files.md`、`docs/training.md` 同步改。
+- **golden**：Python 參考實作在 Mac 重產，Rust 逐位元組相同（`cargo test --release -p cli --test golden`，24 項通過）。
+
+| golden | 變動行數 | 說明 |
+|---|---|---|
+| `s2-lm.txt` | 4／4 | 摘要行：dev302 聊天 247 → 246、書面 250 → 250；typing76 聊天 69 → 70、書面 70 → 70（`top1_sha256` 都變） |
+| `s2-lm-dev302-top1.tsv` | 21／303 | 21 列有一種設定的第一名換了 |
+| `s2-lm-dev302-{chat,formal}.rowstats` | 10／302、13／302 | 同上，每列的對錯與名次 |
+| `s2h-lm-context.txt` | 6／6 | 帶前文：dev302 聊天 246 → 246、書面 250 → 249；typing76 聊天 69 → 70、書面 69 → 69；錯字回報聊天 29 → 29、書面 41 → 36 |
+| `s2r-probe-top1.tsv` | 4／84 | 4 列探針的第一名換了 |
+| `sw-probe.txt` | 48／96 | 4 條摘要行、6 列第一名的字串換了，其餘是分數 |
+| `sp-predict.txt` | 9,436／23,778 | 預測分數（詞類項權重改了，每個詞的分數都漂）；候選順序沒有逐條拆 |
+
+  - 這些是 n-gram 階段（沒有小模型）的數字。錯字回報書面 41 → 36 和 μ 掃描在出貨設定（開小模型）量到的 41 → 37（3／7，p 0.34）同方向，不顯著。`--no-classes` 兩行、unigram 類、`kn-tiny`、`tinylm-tiny` 不變。
+- **手動詞**（`manual_words_come_first_in_the_shipping_setting`，出貨設定，重排後的 rowstats）：聊天 15／15；**書面 14／15**，第 8 列「米雅歌唱得很好」的第一名變成「米亞」（重排前分數 −16.861 對 −16.950）。照契約 §2 是 μ 造成的變化，測試改成釘住這一個例外（書面只有第 8 列不在第一，其他列掉下來仍會失敗）；換回 classes-v4 時這條測試會失敗（第 8 列回到第一），確認它量得到差別。之後要不要用手動詞加分補回來，留給維護者。
+- 先做錯的一步：一開始用 `--dump` 找是哪一列，但 `--dump` 是重排前的候選，v4 時第 7 列「咪呀狗在線上嗎」重排前也不是第一（重排後是）。改用 `--rowstats`（重排後，摘要的 top1 就是它的加總）才確定是第 8 列。
+- **其他寫死期望值的測試**（188 的 `cargo test` 3 個失敗、Mac 的 `make test-swift` 49 個失敗，逐項看過，都是 μ 造成的預期變化）：
+  - dev302 第 284 列（驗收 6）在聊天設定的第一名從「綠水壺」變成「率水壺」；單字詞庫、聊天、書面仍然兩兩不同（引擎重播量過），`engine_lm` 的兩條和 Swift 的 ProfileChoice、Shell 測試只換字串。
+  - `context_key_learned_equals_context_key_queried` (b)：「你好」後面的「ㄅㄣ」預設已經是「奔」，選它不算改選、不記 key。改成選模型沒顯示的那一個（奔／犇），測的仍是「學習寫的 key 等於解碼查的 key」。
+  - 自測與 RerankTests 的句子：第 65 列在 μ 0.2 下 n-gram 自己就給「我等一下再過去」，小模型沒有東西可改。照 `docs/data-files.md` 重挑：CLI 在聊天設定、有無 `--packs acg` 都是「n-gram 錯、開小模型對」的列有 16 列（25、27、46、111、112、123、125、127、140、142、154、183、215、223、284、295），第 25 列是實機句（`DeviceRow`），改用第 27 列「我已經回復你的郵件了 → 回覆」（`Selftest.rerankRowStandard`、`rerankedText`、`ngramText` 與測試的 `RerankRow`）。「不改」的例子（`testNoChangeMakesNoCall`）原本用第 284 列，現在小模型會把它的「率」改成「濾」，改用第 65 列（`NoChangeRow`，n-gram 與小模型都對）。游標位置改用句子長度算，日誌的負向標記換成新句子的片段。
+  - 改完：`make test-swift` 211 項、1 項略過、0 失敗；`engine_lm`、`engine_learn` 的改動在 Mac 單獨跑過。
+- **最終樹的完整測試**（95ee632）：188 WSL `cargo test` 455 通過、0 失敗、9 略過；Mac `make test-python` 全部 OK；`make test-swift` 211 項、1 項略過、0 失敗。
+- **審查**：fresh verifier CONFIRMED（Release 附件雜湊、只差檔頭 μ 的 1 個位元組、沒有遺漏的引用、golden 與 Rust 逐位元組相同、換回 classes-v4 時手動詞測試失敗）。`/code-review` 10 項，8 項照改：`tools/build_classes.py` 的 `MU` 改成 0.2（之後重建詞類表會保持出貨的值）、`docs/data-files.md` 重建模型那一列的「classes-v5」改成「下一個 classes-v…」並在產生方式補上 `set_mu.py`、`docs/training.md` 的現行檔案表與版本表、手動詞測試的說明、這一段的完整測試紀錄；學習測試沒有記下走哪個分支、測試失敗時不清暫存檔兩項是 P4，不處理。
+
+## 2026-10-16：v0.4.6 的跨版本基準測試與保留集（classes-v5）
+
+- 範圍：v0.4.5 之後只合併了 classes-v5（PR #169，μ 0.8 → 0.2，merge commit `7c47266`）、文件 PR #167 與 lytune 歸因 PR #168（文件與 `experiments/` 的 `set_mu.py`）；`git diff v0.4.5 7c47266 -- Cargo.toml Cargo.lock core cli data eval/variants.tsv macos scripts` 共 13 個檔：詞類表的雜湊（`data/classes.sjc.sha256`）、`build-app.sh` 缺檔訊息裡的下載版本、App 自我檢查（`Selftest.swift`）換用的例句，其餘 10 個是測試。
+- 基準測試（`tools/bench.py run --suite v2 v0.4.5 7c47266 --as v0.4.6`，`VERSIONS2` 加 v0.4.6，旗標與 v0.4.5 相同；classes-v5 放進工具的模型快取並核對雜湊）：
+  - 顯著的只有 lytune：書面 3,979 → 4,044（改對 130／改壞 65，p 3.77e-6）、聊天 4,010 → 4,037（100／73，p 0.048），方向和 lytune 歸因的 μ 掃描相同。對 v0.4.3（4,055／4,021）：書面多 23 句、已全數補回；聊天仍少 18 句（v0.4.4 少的 45 句補回 27 句），歸因推論聊天的退步大多在重排階段。
+  - 其他集合兩種設定都不顯著；擋發版的使用者端集合：錯字回報（套件的 80 列）聊天 24 → 28（5／1，p 0.22）、書面 28 → 26（3／5，p 0.73），discordtune 聊天 +1（50／49）、書面 +1（86／85）。
+  - 速度（同場）：dev302 重播 p95 2.157 → 2.268 ms、最大 6.78 → 7.97 ms、載入 696 → 786 ms，RSS 293 MB 相同；語意校正重排 p50／p95 6.41／8.23 → 6.86／9.10 ms。v0.4.5 這一場的重排（6.41／8.23）比 10-15 那一場（8.08／12.16）快，兩場的機器負載不同（load avg 3.3→5.4 對 3.7→5.1）；同場比較才有意義。
+- 保留集（fresh verifier，v0.4.5 `4f0b052` 對 `7c47266`）：聊天 191 → 191（3／3，p 1）、書面 186 → 187（6／5，p 1），擋發版規則沒有觸發。
+  - bench 的匯出沒有 `eval/holdout`，verifier 改用 `--rows <repo 的 eval/holdout/holdout.txt>`（227 列都是三欄、都有讀音，和 `--set holdout` 讀到的列與順序相同）；變體表用 `eval/bench/suite-v1/variants.tsv`（工具 `cli_env` 用的同一份，`50cb44bd…`）。
+  - **多讀了一次保留集**：verifier 寫暫存指令稿時，session 暫存區裡有一個舊的同名稿（noclobber 擋下新檔），結果執行了舊稿，量了一次 v0.4.4 `3560fe5` 對 `4956257`（都是 classes-v4，v0.4.5 發版時量過的同一組），聊天 191／191、書面 186／186、+0／−0，和當時的紀錄相同。只輸出數字、沒有用來改任何東西；舊稿已刪。教訓：verifier 的暫存檔一律用 `mktemp` 產生的新路徑，不用固定檔名。
+
+## 2026-10-16：v0.4.6 發佈
+
+- 維護者選擇題「做完直接推」（bench、保留集沒有退步、notes PR 合併後推 tag）。PR #170 合併後推 `v0.4.6`（tag 指向 main `58da6d2`；和量基準測試與保留集的 `7c47266` 相比，`Cargo.toml Cargo.lock core cli data eval/variants.tsv macos scripts` 沒有差異），發佈流程 run 38841516338：gate、build、sign、publish 都成功（sign、publish 由維護者核准）。
+- 核對（下載 Release 附件）：zip 與安裝程式的 SHA-256 和 `.sha256` 相符；兩個 App 的 `codesign --verify --deep --strict` 通過、Team 2LJ882GPY8、`spctl` 判定 Notarized Developer ID、`stapler validate` 通過、版本 0.4.6；App 裡的模型 `bigram.sjlm` `fc2bddd1`、`classes.sjc` `9e36fa1b`（classes-v5）、`kn.sjkn` `cbefbced`、`tinylm.sjtl` `d07de71d`；Latest 是 v0.4.6；Homebrew cask `0.4.6`、sha256 `fba95f0b…` 和 zip 相同。解壓的副本驗完先 `lsregister -u` 再刪。
+- 發版後：Discord 發版公告（blobhaj，只標善解身分組，維護者選擇題同意）；網站的保留集數字與已發佈清單換成 v0.4.6，PR 合併後部署（維護者同意）。

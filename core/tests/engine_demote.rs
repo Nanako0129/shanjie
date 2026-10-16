@@ -25,7 +25,7 @@ fn shared() -> &'static Shared {
         let lex = load_lexicon(&dir).unwrap();
         let lm_file = root().join("data/lm/bigram.sjlm");
         assert!(lm_file.exists(), "data/lm/bigram.sjlm is missing: download it with `gh release download model-v6 -R Nanako0129/shanjie -p bigram.sjlm -D data/lm`");
-        assert!(root().join("data/lm/classes.sjc").exists(), "data/lm/classes.sjc is missing: download it with `gh release download classes-v4 -R Nanako0129/shanjie -p classes.sjc -D data/lm` (or build it with tools/build_classes.py)");
+        assert!(root().join("data/lm/classes.sjc").exists(), "data/lm/classes.sjc is missing: download it with `gh release download classes-v5 -R Nanako0129/shanjie -p classes.sjc -D data/lm` (or build it with tools/build_classes.py)");
         let lm = Lm::load(&lm_file).unwrap();
         let overlay = capping_overlay(&dir, "").unwrap(); // as Engine::load_lm: overlay-add.tsv + names-add.tsv
         let table = Demote::parse(&std::fs::read_to_string(dir.join("demote.tsv")).unwrap()).unwrap();

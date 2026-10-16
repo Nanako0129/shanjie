@@ -46,7 +46,7 @@ enum TestData {
                 XCTFail("""
                     \(f.source) is missing. The lexicon is in git; the model is the model-v6 release asset: \
                     gh release download model-v6 -R Nanako0129/shanjie -p bigram.sjlm -D data/lm
-                    classes.sjc: gh release download classes-v4 -R Nanako0129/shanjie -p classes.sjc -D data/lm
+                    classes.sjc: gh release download classes-v5 -R Nanako0129/shanjie -p classes.sjc -D data/lm
                     kn.sjkn: gh release download kn-v1 -R Nanako0129/shanjie -p kn.sjkn -D data/lm
                     tinylm.sjtl: gh release download tinylm-v5 -R Nanako0129/shanjie -p tinylm.sjtl -D data/lm
                     """, file: file, line: line)
@@ -286,7 +286,7 @@ enum Layouts {
 enum Row284 {
     static let zhuyin = "ㄔㄨˊ ㄈㄤˊ ㄒㄧㄣ ㄓㄨㄤ ㄌㄜ˙ ㄧ ㄍㄜ˙ ㄌㄩˋ ㄕㄨㄟˇ ㄏㄨˊ"
     static let standardKeys = Layouts.keys(zhuyin, eten: false)
-    static let chat = "廚房新裝了一個綠水壺"
+    static let chat = "廚房新裝了一個率水壺"
     static let formal = "廚房新裝了一個濾水壺"
 }
 
@@ -365,16 +365,24 @@ final class FreeCounter: @unchecked Sendable {
     }
 }
 
-/// dev302 row 65 (s7c2b section 2.5, revised 2026-10-12, the selftest's sentence): in the chat profile the n-gram's first is 在,
+/// dev302 row 27 since classes-v5 (2026-10-16; the selftest's sentence): in the chat profile the n-gram's first is 回復 and tinylm-v5
+/// picks 回覆, with and without the pack (CLI rowstats). Before: dev302 row 65 (s7c2b section 2.5, revised 2026-10-12): in the chat profile the n-gram's first is 在,
 /// the small model picks 再, under tinylm-v2, tinylm-v3 and tinylm-v4 alike (RerankTests, 2026-10-13; v4: CLI and these tests, 2026-10-14); under model-v6 + kn-v1 +
 /// tinylm-v5 (chat standard 0.3/2/0.25) the RerankTests passed on 2026-10-15 (`make test-swift`). Row 25 (執行這個城市 -> 程式) was this
 /// sentence under tinylm-v1; v2's strict chat values did not change it, v3's do again (`DeviceRow` below).
+/// dev302 row 65: under classes-v5 the chat n-gram already gives 我等一下再過去 and the small model keeps it (CLI rowstats: right with
+/// and without `--tinylm`), so a finished job changes nothing (RerankTests.testNoChangeMakesNoCall).
+enum NoChangeRow {
+    static let standardKeys = Layouts.keys("ㄨㄛˇ ㄉㄥˇ ㄧ ㄒㄧㄚˋ ㄗㄞˋ ㄍㄨㄛˋ ㄑㄩˋ", eten: false)
+    static let text = "我等一下再過去"
+}
+
 enum RerankRow {
-    static let zhuyin = "ㄨㄛˇ ㄉㄥˇ ㄧ ㄒㄧㄚˋ ㄗㄞˋ ㄍㄨㄛˋ ㄑㄩˋ"
+    static let zhuyin = "ㄨㄛˇ ㄧˇ ㄐㄧㄥ ㄏㄨㄟˊ ㄈㄨˋ ㄋㄧˇ ㄉㄜ˙ ㄧㄡˊ ㄐㄧㄢˋ ㄌㄜ˙"
     static let standardKeys = Layouts.keys(zhuyin, eten: false)
     static let etenKeys = Layouts.keys(zhuyin, eten: true)
-    static let ngram = "我等一下在過去"
-    static let reranked = "我等一下再過去"
+    static let ngram = "我已經回復你的郵件了"
+    static let reranked = "我已經回覆你的郵件了"
 }
 
 /// dev302 row 25, the device sentence of docs/contracts/s7h-tinylm-v3.md section 1: in the chat profile with no left context and
