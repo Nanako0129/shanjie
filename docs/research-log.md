@@ -6368,3 +6368,9 @@ formal: alpha 0.7, tau 1, delta 2
 - 維護者實機的組字區是「好你一份草稿」，錯的是「你」，要的是同音的「擬」（ㄋㄧˇ）。加成 `|好擬一份草稿|ㄏㄠˇ ㄋㄧˇ ㄧ ㄈㄣˋ ㄘㄠˇ ㄍㄠˇ`（讀音由 `tools/readings.py` 產生，沒有 CHECK）。
 - Python 參考實作、golden 設定：兩種設定第 1 名都是「好你一份草稿」，正解第 2。
 - `eval/golden/s2h-lm-context.txt` 的錯字回報兩行用 Python 參考實作重產，n 125：聊天 top1 29、書面 37 不變，oracle@64 兩種設定都 121 → 122；`eval/README.md` 改成 125 列。
+
+## 2026-10-17：錯字回報第 126 列（影片同時做）
+
+- 維護者實機的組字區是「影片同時作」，要的是「做」。加成 `|影片同時做|ㄧㄥˇ ㄆㄧㄢˋ ㄊㄨㄥˊ ㄕˊ ㄗㄨㄛˋ`（讀音由 `tools/readings.py` 產生，沒有 CHECK）。
+- Python 參考實作、golden 設定：兩種設定第 1 名都是「影片同時作」，正解第 2。
+- `eval/golden/s2h-lm-context.txt` 的錯字回報兩行用 Python 參考實作重產，n 126：聊天 top1 29、書面 37 不變，oracle@64 兩種設定都 122 → 123；`eval/README.md` 改成 126 列。
