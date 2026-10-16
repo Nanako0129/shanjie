@@ -5901,3 +5901,13 @@ formal: alpha 0.7, tau 1, delta 2
   - 每個集合：wikitune +51（p 0.0002）、lytune +36（p 0.024）、cvtune +13、dev302 +1、打字測驗 −2、錯字回報 0、wikitypo +1。
   - 和 E1h 的 FH3k（B0 上量的）逐列比：調參集、判讀五集、discordtune 的 top1 對錯**完全相同**（0 列不同）；BASE 對 E1g 的 F0 也 0 列不同。指紋條目與詞類表的差別在這些集合上沒有影響任何一列。
 - CAND 在 Windows 機器上的 rowstats 與摘要行（摘要行 `lm-formal+ctx+tri:fdd3b05d`）是第 A 片 Rust 錨點的目標。
+
+## 2026-10-16：trigram-core 第 A 片（Rust 讀表、解碼器、書面關 KN）
+
+- 實作（executor，`feat/trigram-core` `97a4a5b`–`23211ca`）：`core/src/trigram.rs` 讀 `SJT30001`（整檔 `std::fs::read`、綁模型 SHA-256，載入時核對格式與「保留次數總和 ≤ 前文總次數」，不合就 `LmError::TriTable`）；`Lm::scoring(profile)` 導出 `Scoring { lam, kn, tri }`，書面有表時 trigram 開、KN 關，聊天照舊；解碼器有表時重組鍵加前一詞；詞段交界照契約 (a)–(d)；學到的詞不經過表；`Engine::total_score` 帶兩個歷史詞；預測列不變。CLI 摘要行 `+tri:<sha8>`、`--no-tri`。Python 參考實作 `reference/proto/trigram.py`、`lm_eval.py --tri`；產生工具 `tools/build_trigram.py`。
+- executor 在 Mac 上跑的驗收：沒有表時 golden 與既有 core 測試逐位元組不變（golden 24 項）；玩具模型的跨語言 golden（Python 產生、Rust 比對）相同；契約的突變 10 個都以斷言失敗（其中「只有 `End::Next` 不用 trigram」一開始存活，補了一個到固定詞的玩具條目之後才被抓到）。
+- **真模型跨語言（契約第 4 項，main 在 Windows 機器）**：model-v6＋classes-v5＋kn-v1＋重對應的 H3（`fdd3b05d`）放在同一個資料夾。
+  - 書面 `--context`：dev302、打字測驗、錯字回報（114 列凍結檔）、cvtune、wikitune 的 rowstats 與第 0 片 Python CAND **逐位元組相同**，`top1_sha256` 相同（摘要行 `lm-formal+ctx+tri:fdd3b05d`，沒有 `+kn:`）。
+  - 聊天 `--context`：同樣 5 個集合，新 CLI（模型旁有表）和 v0.4.6 的 CLI（`58da6d2`，沒有表）的 rowstats 與摘要行**逐位元組相同**。
+- 完整 Rust 測試（Windows 機器的 WSL，`166cc44`）：465 通過、0 失敗、9 略過（照例略過的 4 個交給 Mac 與 CI）。
+- 還沒做：延遲與 RSS（契約第 5 項，第 B 片正式量）；書面有表的選字記憶與語意校正（第 B 片）。
