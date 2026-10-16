@@ -6337,3 +6337,18 @@ formal: alpha 0.7, tau 1, delta 2
 - 維護者實機的組字區是「自動更新也坐上去」，要的是「做」。加成 `|自動更新也做上去|ㄗˋ ㄉㄨㄥˋ ㄍㄥ ㄒㄧㄣ ㄧㄝˇ ㄗㄨㄛˋ ㄕㄤˋ ㄑㄩˋ`（讀音由 `tools/readings.py` 產生，沒有 CHECK）。
 - CLI 出貨設定（`--context --packs acg --tinylm`）兩種設定都是「坐」第 1、「作」第 2、「做」第 3；書面加上 trigram 表也是「坐」第 1、「作」第 2。
 - `eval/golden/s2h-lm-context.txt` 的錯字回報兩行用 Python 參考實作重產，n 121：聊天 top1 29、書面 36 不變，oracle@64 兩種設定都 117 → 118；`eval/README.md` 改成 121 列。
+
+## 2026-10-16：trigram-mmap（三元表改用唯讀映射）
+
+- 起因：第 A 片量到書面有表時重播的最大 RSS 多 136 MB；維護者問 RSS 與壓縮後，選「現在就做、擋住 v0.4.7」。契約 `docs/contracts/trigram-mmap.md`（修訂一，plan-verifier READY）。
+- 實作：`core/src/trigram.rs` 的 `Tri` 改持有整個 `trigram.sjt3` 的唯讀映射（`extern "C"` 的 `mmap`／`munmap`，不加 crate）；解析、檢查、打分、`+tri:` 標記不變。`Lm::load_opts` 讀表走映射，其他模型檔不變。
+- **記憶體與延遲（契約第 3 項，Mac，同一場三輪交錯）**：重播程式是第 C 片 C4 的 `tools/bench/replay`（`formal`），dev302 共 8,336 鍵，模型 model-v6＋classes-v5＋kn-v1。(i) 沒表、(ii) 有表且 `Vec<u8>`：第 C 片合併後的 main（`f3b5d6ce`）的重播程式；(iii) 有表且映射：這個分支（`4c88bb36`，已合進那個 main）。`/usr/bin/time -l` 取 peak memory footprint 與 maximum resident set size。
+
+| 臂 | peak footprint（三輪） | max RSS（三輪） | 每鍵 p95（三輪，中位數） |
+|---|---|---|---|
+| (i) 沒表 | 302.1／301.7／302.0 MB | 299.9／301.0／299.9 MB | 8.23／4.71／6.99 ms（6.99） |
+| (ii) 有表、`Vec<u8>` | 445.4／442.9／444.1 MB | 449.9／442.3／442.7 MB | 4.21／6.47／4.43 ms（4.43） |
+| (iii) 有表、映射 | 304.3／302.5／305.3 MB | 452.4／445.4／453.3 MB | 4.47／5.40／5.07 ms（5.07） |
+
+- 判讀：**通過**。footprint (iii) 比 (ii) 少 139.8 MB（中位數 304.3 vs 444.1，門檻 ≥ 100 MB），比 (i) 只多 2.4 MB；契約的推論（映射的乾淨檔案頁不算 footprint）成立。max RSS 照預期沒有下降（載入時的檢查讀過整張表）。(ii) 與 (iii) 的選字輸出三輪都逐列相同。p95 (iii) 比 (i) 低，在上限（+1 ms）內；但這一場 Mac 很忙（load avg 14–20，另一個 worktree 正在編譯），三個臂的 p95 都比第 A 片量的 2.1 ms 高、彼此差異在雜訊內，延遲只看「沒有超過上限」。
+- golden：表在 `data/lm` 時 Mac 的 `cargo test -p cli --test golden` 25／25（表由映射載入）。
