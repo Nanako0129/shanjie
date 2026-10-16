@@ -195,3 +195,32 @@ review 在 aa8456c 上讀出（第 2 項已用測試實測）：
 - 文件：`s3a.md` §3.1 與第 18 列、`s4-learning.md` §1.5、`core/include/shanjie.h`（有提到的話）、研究紀錄（含蘋果實測）。
 
 停止條件：任何 golden 或評測摘要行改變；上面「照舊」的任一項改變；合併後再凍結改變了顯示。
+
+## 10. 合併 main（2026-10-17）
+
+分支停在舊的 main（落後 893 個 commit），這次用 merge 接上 origin/main；契約的規則（§1、§6–§9）不變，只照 main 現在的介面調整。動機的新例子是錯字回報第 133 列：「可以做第六部」開窗在尾端選雙字詞「六步」，main 現在重新解碼左邊變成「可以做地六步」（聊天）／「可以作地六步」（書面），有凍結時兩種設定都是「可以做第六步」（`engine_repick.rs` 的 `freeze_row_133_six_steps`；拿掉 `freeze_outside` 時書面設定失敗，結果是「可以作地六步」）。
+
+**跟著 main 改的介面**
+
+| 項目 | main 現在的樣子 | 這個分支的處置 |
+|---|---|---|
+| `lm::Scored` 的詞 | 三元表加了 `Hyp.prev`、解碼多一層 trigram | 詞多帶第四個數字（佔幾個音節 `l`），`Hyp.words` 同；`prev`、`tri` 欄位照 main |
+| `Engine.path` | main 仍是 `(String, f64, bool, f64)` | 具名 struct `PathWord`（詞、lp、是否標點、降權、音節數）；`total_score`、`apply_rerank`、`recompute_pred` 讀它 |
+| 語意校正 | `Stretch.paths`、`Choice.words` 是 `(詞, lp, 降權)`，`apply_rerank` 把選中的詞換進 `path` | 兩者多帶音節數；換進 `path` 的詞也有正確的音節數，重排之後再改選，凍結依畫面上的字 |
+| `path_starts()` | 用字數推算每個詞的起點 | 改用音節數（和 `recompute_pred` 相同，§1） |
+| `Fixed` | 多了 `pick_key`（規則 8 的句首 key）、`zh`（自動保留的英文 token） | `frozen` 和它們並存；`Fixed::frozen(start, end, word)` 建構，`pick_key`、`zh` 是 `None`。英文 token 與空白單位是「標點」固定詞（`is_punct`），本來就在 `fixed` 裡，不會被凍結，也不當放開的候選 |
+| `insert_token` | 多一個 `zh` 參數 | 照 main；插入後呼叫 `release_frozen` |
+| `learned_weight` | 預測列用，句首 key 的下一個音節是 `None` | 多一個 `next` 參數；候選窗 ⌘⌫ 的「生效」檢查傳範圍後面那個音節（規則 8：句首的紀錄 key 是 `^>下一音節`，和解碼器查的一致） |
+
+**測試期望的改動（逐項，其餘既有凍結測試沒改）**
+
+1. `engine_repick.rs::freeze_keeps_a_word_with_fewer_characters_than_syllables`：玩具詞庫的 大／達 分數 -1.0／-2.0 改成 -0.5／-5.0。新的模型讓「巴」後面預設變「達」，原本的前提（預設是「巴大」）不成立；測的東西不變。
+2. `candidate_forget_of_an_entry_not_in_effect_keeps_the_frozen_words`：教「空」的前文由「遙」改成「遙遠」。S4 規則 7：單字只在完整的兩字前文下學，前文只有一個字時沒有紀錄。
+3. `candidate_forget_of_an_entry_in_effect_frees_the_frozen_word`：前文「我」改成「我們」，同一原因。
+4. `engine_learn.rs::forget_a_frozen_word_redecodes_it_without_the_record`、`forget_a_cut_learned_word_leaves_no_pieces`：教「警官」時 A 後面要接著 B（打 A＋B 再改選 A 的範圍）。規則 8：句首的紀錄 key 帶著後面的音節，單獨教 A（後面是句尾）的紀錄在 A＋B 裡不生效。
+5. `engine_rerank.rs`：`fix_word` 改成先在固定詞自己的音節上選字、再把左右兩邊打在旁邊（改選會凍結範圍外的詞，旁邊就沒有自由段落可以重排；測的是「兩個自由段落夾一個固定詞」，狀態不變）；`learned_stretch_is_not_reranked` 的教學改成在前文「我已經」之後只打「回覆」的兩個音節選字（紀錄的前文 key 和原本相同）；`apply_does_not_bring_back_a_cleared_prediction_row` 的候選窗那一半改成斷言「改選之後沒有自由段落，沒有重排工作」（凍結的直接結果），前提「重新計算會顯示預測列」保留；Backspace 那一半沒改。
+6. `tri_tiny.rs`：同樣的 `fix_word`（先選字、再打兩邊）；`two_word_stretches_keep_the_table_closing_term` 的兩個固定詞也這樣打出來。手算的分數沒改，狀態和原本相同。
+
+**結果**：`engine_repick.rs`（23 個）、`engine_learn.rs`（59）、`engine_predict.rs`（16）、`engine_rerank.rs`（22）、`tri_tiny.rs`（12）和其他引擎測試檔全過；`make test-golden` 全過；`timing_typing76_keys` 每鍵 p95 最大 6.6 ms（上限 16 ms）。
+
+**限制（沒處理）**：PLAN 裡「改選固定暫停、之後照蘋果實測重新評估」的狀態沒動。改選會重新解碼（新的世代），改選前做好但還沒套用的重排結果因此作廢；凍結依的是當下畫面上的路徑（含已套用的重排）。
