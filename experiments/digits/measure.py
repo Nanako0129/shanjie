@@ -24,7 +24,7 @@ import digits_score as DS  # noqa: E402
 import build_digits as bd  # noqa: E402
 
 P1, P3, L, bc = DS.P1, DS.P3, DS.L, bd.bc
-THETAS = (0.0, 0.5, 1.0, 2.0)
+THETAS = (0.0, 0.5, 1.0, 2.0, 3.0, 4.0, 6.0, 8.0)  # 3-8 added after the first run: no theta up to 2 had (c) = 0 (digit-context.md C.4.3)
 SEED = 20261017          # the fixed seed of the digit-run set and of its split into halves
 CAP = 3000               # C.4.1: at most 3,000 rows
 MIN_ROWS = 1000          # C.4.3 stop condition: fewer rows than this
@@ -417,7 +417,7 @@ def tune(a):
     for prof, lam in LAMBDAS:
         rep("tuning half, not for the verdict  " + pred_line("digit-tune", prof, run.run("pred", digit, lam=lam)))
     th = choose_theta(c_by_theta)
-    rep(f"R2 theta: {th}" + ("" if th is not None else "  (no theta in {0, 0.5, 1, 2} gives (c) = 0 on cvtune + wikitune: R2 fails, A uses the structural rule)"))
+    rep(f"R2 theta: {th}" + ("" if th is not None else "  (no theta in {0, 0.5, 1, 2, 3, 4, 6, 8} gives (c) = 0 on cvtune + wikitune: R2 fails, A uses the structural rule)"))
 
 
 def judge(a):
