@@ -102,6 +102,7 @@ final class UpdatesTests: XCTestCase {
         XCTAssertTrue(u.checking)
         u.install(now: now)
         XCTAssertEqual(c.probes, 1, "ignored while checking")
+        XCTAssertEqual(c.focuses, 0, "our own silent check has no Sparkle window to bring up")
         u.finished(.available, version: "0.4.9")
         XCTAssertEqual(c.interactives, 1, "confirmed: the interactive flow opens")
         XCTAssertEqual(u.available, "0.4.9")

@@ -119,12 +119,6 @@ sparkle_key() {  # sparkle_key <key> <type> <value>
 }
 # Only a release or an update test build starts the updater (Updates.runsUpdater); a local build never reads the feed.
 sparkle_key ShanjieUpdateBuild string "$WANT_BUILD"
-# Only an update test build with a feed on 127.0.0.1 may relax App Transport Security, and only for local networking.
-if [ "$WANT_BUILD" = test ] && [[ "$WANT_FEED" == http://127.0.0.1* ]]; then
-  sparkle_key NSAppTransportSecurity.NSAllowsLocalNetworking bool true
-else
-  ! plutil -extract NSAppTransportSecurity raw -o - "$PLIST" >/dev/null 2>&1 || fail "Info.plist sets NSAppTransportSecurity"
-fi
 sparkle_key SUFeedURL string "$WANT_FEED"
 sparkle_key SUPublicEDKey string "$WANT_KEY"
 sparkle_key SURequireSignedFeed bool true

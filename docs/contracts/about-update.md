@@ -30,7 +30,7 @@
   - 網站連結、一行授權說明（程式 Apache-2.0、內含的 Sparkle 是 MIT、詞庫與模型見 `Resources/LICENSES`）。
 - **輸入選單**：有新版本時多一項「有新版本 X，按此更新…」，按下同樣走互動流程；沒有新版本時不出現；檢查進行中反灰。
 - 〔修訂三〕按「更新到 X」或選單項時，先跑一次靜默的 `checkForUpdateInformation`，確認還有更新的版本才開 Sparkle 的互動流程；沒有（已是最新）或檢查失敗就只更新關於頁與選單的狀態，不出現 Sparkle 的警告視窗。使用者進了 Sparkle 的流程之後，下載或安裝出錯時 Sparkle 自己的介面仍可能跳模態警告（驗收 4(h)）。
-- 〔實機修正，2026-10-16〕流程進行中，Sparkle 的視窗和設定視窗同層（`.floating`），浮在一般視窗之上；流程已在進行時按「更新到 X」或選單項，把 Sparkle 的視窗叫回最前面。原因：輸入法沒有 Dock 圖示，macOS 又會擋掉它切到前景的要求，Sparkle 的視窗原本開在設定視窗後面、切到別的 App 之後就叫不回來（驗收 4 實機發現）。
+- 〔實機修正，2026-10-16〕流程進行中，Sparkle 的視窗和設定視窗同層（`.floating`），浮在一般視窗之上；流程已在進行時按「更新到 X」或選單項，走 Sparkle 自己的「把進行中的更新叫到前面」，再把它的視窗（含最小化的）叫回最前面。原因：輸入法沒有 Dock 圖示，macOS 又會擋掉它切到前景的要求，Sparkle 的視窗原本開在設定視窗後面、切到別的 App 之後就叫不回來（驗收 4 實機發現）。
 - 〔修訂三〕只有正式版（release workflow 建的）與更新測試版會啟動更新服務；本機用 `build-app.sh`、`install-ime.sh` 裝的版本永遠不讀正式 feed（Info.plist `ShanjieUpdateBuild`：`release`、`test`、`local`）。
 - **背景檢查不彈窗**：輸入法程序在使用者打字時跳出視窗會搶焦點，所以 Sparkle 自己的排程關掉（`SUEnableAutomaticChecks` false），改由我們每天最多一次呼叫 `checkForUpdateInformation`（只查資訊、不顯示任何視窗，Syrtis 的做法）；查到新版只更新關於頁與選單，不主動開視窗。開關關掉就不做背景檢查；「立即檢查」不受開關影響。
 - 怎麼看到：
@@ -59,7 +59,7 @@
 2. `scripts/check-app.sh` 在本機建出的 App 上通過：Sparkle framework 在、簽章有效、XPC 服務不在、Info.plist 的 Sparkle 鍵逐字等於正式值；四個程式碼位置都沒有 entitlements。突變：把 `SURequireSignedFeed` 拿掉或改值，檢查要失敗。
 3. release 乾跑（`workflow_dispatch`）：建置、簽章（含 Sparkle 內層）、公證、`verify()` 通過；金鑰成對檢查通過；不簽 appcast、不發佈任何東西。
 4. **實機（決定性的一項，維護者與 main）**：
-   - 測試用的 feed 與一把測試金鑰（不用正式金鑰）：本機先裝一個測試版 A，再提供一個測試版 B（版本較新）的 appcast。本機 feed 用 `http://127.0.0.1:埠/`：Sparkle 2.9.3 拒絕 `file://`（「The download request URL must use http or https」，實測），所以 `SHANJIE_UPDATE_TEST_FEED` 只收 `https://` 或 `http://127.0.0.1`，後者只在測試版的 Info.plist 加 ATS 的 `NSAllowsLocalNetworking`（`scripts/check-app.sh` 擋其他情況）。結果（2026-10-16）：(a)–(h) 通過，見研究紀錄。
+   - 測試用的 feed 與一把測試金鑰（不用正式金鑰）：本機先裝一個測試版 A，再提供一個測試版 B（版本較新）的 appcast。本機 feed 用 `http://127.0.0.1:埠/`：Sparkle 2.9.3 拒絕 `file://`（「The download request URL must use http or https」，實測），所以 `SHANJIE_UPDATE_TEST_FEED` 只收 `https://` 或 `http://127.0.0.1`；ATS 不擋 http 連 127.0.0.1，不用任何例外（實測，見研究紀錄）。結果（2026-10-16）：(a)–(h) 通過，見研究紀錄。
    - 在關於頁按「立即檢查」→ 出現「更新到 B」→ 按下 → Sparkle 顯示下載進度與說明 → 安裝並重新啟動。
    - 量：(a) 安裝後輸入法是 B（關於頁版本、`ps` 的程序路徑）；(b) 在 TextEdit 照常打得出字；(c) Caps Lock 切換輸入法仍然有效（之前的已知問題：換 bundle 後再註冊會壞；Sparkle 不呼叫 TIS 註冊，預期不會壞）；(d) 更新前就開著的 Discord、終端機、TextEdit、Safari，各自能不能繼續打字、要不要重開（2026-10-15 的「舊連線」問題，結果寫進研究紀錄）；(e) 背景檢查查到新版時沒有彈出任何視窗；(f) 錄下檢查與下載的實際請求（目的主機、標頭），網站隱私段照這份寫；(g) 把測試 feed 改一個字（簽章失效），檢查要被拒、不顯示新版；(h) 使用者按下更新之後，下載或安裝出錯時 Sparkle 自己的警告視窗是否出現在最前面、按掉之後輸入法照常打字（模態視窗期間輸入法程序的主執行緒被佔住）。
    - 這一項不通過（例如 B 沒有接手、Caps Lock 壞掉、需要登出）→ 停，回報維護者再決定（例如更新後由輸入法自己呼叫既有的安裝流程）。
@@ -91,6 +91,7 @@
 
 | 輪次 | 結果 | 處置 |
 |---|---|---|
+| 實機修正 64395ec6 的 /code-review（2026-10-16） | 14 項：最小化的 Sparkle 視窗叫不回來；隱私段標頭是本機 HTTP/1.1 量的、正式走 HTTPS；層級寫死、沒和設定視窗共用；`.busy` 的說明三處沒跟上、自己的檢查中再按沒測；ATS 例外沒實測過；check-app.sh 的 ATS 檢查不夠嚴；「沒有每個視窗的呼叫」說法不準；focus 重做了 Sparkle 的 `showUpdateInFocus`；整個流程每秒輪詢四次；`hidesOnDeactivate` 沒作用；focus 裡多餘的 `watch()`；輪詢間隔沒命名；換到別的桌面（Space）叫不回來；研究紀錄 (c) 把推論寫成事實 | FIX 11 項：focus 改走 Sparkle 的 `showUpdateInFocus` 再提層級、含最小化視窗；層級共用 `SettingsWindowController.level`；`install` 在自己的檢查中直接略過並測；ATS 實測後整段刪掉（127.0.0.1 不擋，對照 http://example.com 是 -1022），check-app.sh 的分支一起刪；隱私段標頭改標〔發版後核對〕；註解與命名常數；(c) 改引 Sparkle 原始碼。DEFER 2 項：輪詢（成本是每 0.25 秒掃一次自己的幾個視窗；要拿掉得換掉 `SPUStandardUpdaterController`）；Space（設定視窗本來就有同樣的限制，沒有實測，記成已知限制）。〔ATS 檢查不夠嚴那項隨 ATS 刪除消失〕 |
 | 實作的 /code-review（修訂三，2026-10-16） | 15 項：Developer ID 輪換對 zip 不成立；沒附 Sparkle 授權；按更新直接開互動流程會跳 Sparkle 的警告；檢查中選單可按、清掉 `found` 的時機；起不來時「立即檢查」沒日期、檢查中再按算失敗；appcast commit 沒有 CI 會卡下一次發版的關卡；`generate_appcast` 預設只留 3 版；網站在 PR 裡先改；feed 檢查看整份而不是新項目；feed 沒有發版說明；追蹤檔案裡的私人路徑；sign 工作與金鑰出現位置的描述不一致；本機建置會讀正式 feed；`settings-sidebar.md` 量法的分類數；多餘的公鑰比對 | 全部 FIX，見狀態列與 §0.1、§1、§2、§3、§6、附錄 A |
 | plan-verifier（修訂二） | READY | — |
 | plan-verifier（修訂一） | REVISE 3 項：`generate_appcast` 沒給下載網址前綴（會拼出不存在的網址）；沒有任何驗收走到正式的 feed、金鑰與下載網址；v0.4.6 以前的 Homebrew 使用者在 cask 加 `auto_updates` 後可能永遠升不到 v0.4.7 | 都 FIX：§2 寫明 `--download-url-prefix` 與輸入資料夾只放那個 zip；§3 加第 6 項（推 tag 後核對 appcast、下載網址、已安裝版本「立即檢查」顯示已是最新）並列入停止條件；第 5 項改成發版說明與 README 一律寫一次性的指名升級指令，VM 實測只報 |
@@ -98,8 +99,8 @@
 
 ## 附錄 A：網站隱私段草稿（發版時照實機錄下的請求定稿）
 
-取代 `site/index.html` 隱私段的第一項（「目前版本沒有連網功能。……」）。標頭照驗收 4(f) 實機錄下的請求寫（2026-10-16，本機 feed）；標〔發版後核對〕的主機要等正式 feed 才量得到，在驗收第 6 項核對後定稿，再部署（要維護者當下同意）。
+取代 `site/index.html` 隱私段的第一項（「目前版本沒有連網功能。……」）。標頭照驗收 4(f) 實機錄下的請求寫（2026-10-16，本機 feed，HTTP/1.1 明文）；正式 feed 走 HTTPS（可能是 HTTP/2，Accept-Encoding 可能多 `br`、沒有 Connection），所以標頭和主機都標〔發版後核對〕，在驗收第 6 項對正式 feed 核對後定稿，再部署（要維護者當下同意）。
 
-> 更新檢查（v0.4.7 起）：設定→關於的「自動檢查更新」開著時，每天最多一次連到 GitHub 讀取更新清單 `appcast.xml`（〔發版後核對：目的主機〕`raw.githubusercontent.com`）。GitHub 會看到你的 IP 位址與請求標頭：User-Agent 裡有善解與 Sparkle 的版本號，Accept-Language 是你系統的語言偏好（例如 `zh-TW`），其餘是一般的 Accept、Accept-Encoding、Connection。不送出任何輸入內容、選字記憶或其他系統資訊。自動檢查可以在設定→關於關掉；按「立即檢查」時一定會連線。按「更新到 X」時〔發版後核對：下載經過的主機〕從 GitHub Releases 下載新版（標頭同上），安裝前驗證 EdDSA 簽章；正式版另經 Apple 公證。
+> 更新檢查（v0.4.7 起）：設定→關於的「自動檢查更新」開著時，每天最多一次連到 GitHub 讀取更新清單 `appcast.xml`（〔發版後核對：目的主機〕`raw.githubusercontent.com`）。GitHub 會看到你的 IP 位址與請求標頭〔發版後核對：標頭〕：User-Agent 裡有善解與 Sparkle 的版本號，Accept-Language 是你系統的語言偏好（例如 `zh-TW`），其餘是一般的 Accept、Accept-Encoding、Connection。不送出任何輸入內容、選字記憶或其他系統資訊。自動檢查可以在設定→關於關掉；按「立即檢查」時一定會連線。按「更新到 X」時〔發版後核對：下載經過的主機〕從 GitHub Releases 下載新版（標頭同上），安裝前驗證 EdDSA 簽章；正式版另經 Apple 公證。
 >
 > 除了更新檢查，目前版本沒有其他連網功能。之後如果加入雲端校正，會在上線前寫在這一頁：什麼時候連線、送出什麼、能不能關閉。

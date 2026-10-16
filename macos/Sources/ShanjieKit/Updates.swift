@@ -31,14 +31,15 @@ public final class MemoryUpdateStore: UpdateStore {
 public enum ProbeStart: Sendable {
     /// The check runs and will report back through `Updates.finished`.
     case started
-    /// A Sparkle session is already running (Sparkle would ignore the call and never report back): nothing happens.
+    /// A Sparkle session is already running (Sparkle would ignore the call and never report back): no check starts; `install`
+    /// brings Sparkle's windows to the front instead (`focus`).
     case busy
     /// The updater is not running (it did not start, or this build does not start it): the check fails.
     case unavailable
 }
 
 /// The update state shared by the 關於 page and the input menu (contract sections 1 and 2). Sparkle stays in the app target
-/// (`Updater`), which sets `probe` and `interactive` and reports each finished check through `finished`; the decisions (when
+/// (`Updater`), which sets `probe`, `interactive` and `focus` and reports each finished check through `finished`; the decisions (when
 /// the background check runs, when the interactive flow may start, what the page and the menu show) are here, so the tests
 /// reach them without Sparkle or the network.
 @MainActor
@@ -130,6 +131,7 @@ public final class Updates: ObservableObject {
     /// (`finished`). Otherwise the state says 已是最新 or 檢查失敗 and no Sparkle window opens. While a session runs, the press
     /// brings Sparkle's windows back to the front instead: the input method has no Dock icon to do it (device check 2026-10-16).
     public func install(now: Date = Date()) {
+        guard !checking else { return }  // our own silent check runs and decides; no Sparkle window to bring up
         switch begin(now) {
         case .started: installAfterCheck = true
         case .busy: focus()

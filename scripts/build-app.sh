@@ -108,7 +108,9 @@ if [ -n "${SHANJIE_UPDATE_TEST_FEED:-}${SHANJIE_UPDATE_TEST_KEY:-}" ]; then
   [ -n "${SHANJIE_UPDATE_TEST_FEED:-}" ] && [ -n "${SHANJIE_UPDATE_TEST_KEY:-}" ] \
     || fail "SHANJIE_UPDATE_TEST_FEED and SHANJIE_UPDATE_TEST_KEY go together"
   # Sparkle 2.9.3 refuses file:// for the feed and the download ("The download request URL must use http or https",
-  # measured 2026-10-16), so a local test feed is served over http from this machine only.
+  # measured 2026-10-16), so a local test feed is served over http from this machine only. App Transport Security does
+  # not block http to 127.0.0.1 without any NSAppTransportSecurity key (measured 2026-10-16: 200 from 127.0.0.1,
+  # NSURLErrorDomain -1022 from http://example.com, same binary).
   [[ "$SHANJIE_UPDATE_TEST_FEED" =~ ^(https://|http://127\.0\.0\.1(:[0-9]+)?/)[^[:space:]\<\>\&]+$ ]] \
     || fail "SHANJIE_UPDATE_TEST_FEED is not an https:// or http://127.0.0.1 URL"
   [ "$SHANJIE_UPDATE_TEST_KEY" != "$SPARKLE_PUBLIC_KEY" ] || fail "the update test build must not use the production key"
@@ -123,12 +125,6 @@ case "${SHANJIE_RELEASE_BUILD:-}" in
   *) fail "SHANJIE_RELEASE_BUILD must be 1 or unset" ;;
 esac
 [ "$ED_KEY" = "$SPARKLE_PUBLIC_KEY" ] || UPDATE_BUILD="test"
-# App Transport Security blocks plain http; only an update test build with a feed on this machine gets the local-network
-# exception. Release and local builds carry no NSAppTransportSecurity at all (scripts/check-app.sh).
-ATS_PLIST=""
-if [ "$UPDATE_BUILD" = test ] && [[ "$FEED_URL" == http://127.0.0.1* ]]; then
-  ATS_PLIST="<key>NSAppTransportSecurity</key><dict><key>NSAllowsLocalNetworking</key><true/></dict>"
-fi
 # An EdDSA public key is 32 bytes: 44 base64 characters ending in one '='.
 [[ "$ED_KEY" =~ ^[A-Za-z0-9+/]{43}=$ ]] || fail "the Sparkle public key is not 44 base64 characters"
 
@@ -302,7 +298,6 @@ cat > "$APP/Contents/Info.plist" <<EOF
   <key>TISIntendedLanguage</key><string>zh-Hant</string>
   <!-- Sparkle (docs/contracts/about-update.md section 2). No SUEnableJavaScript. -->
   <key>ShanjieUpdateBuild</key><string>$UPDATE_BUILD</string>
-  $ATS_PLIST
   <key>SUFeedURL</key><string>$FEED_URL</string>
   <key>SUPublicEDKey</key><string>$ED_KEY</string>
   <key>SURequireSignedFeed</key><true/>

@@ -29,6 +29,8 @@ final class Updater: NSObject, SPUUpdaterDelegate {
     /// The hour only bounds how late a due check runs (the daily rule is `Updates.shouldCheck`); neither value was measured.
     private static let firstTick: TimeInterval = 60
     private static let tickEvery: TimeInterval = 60 * 60
+    /// How often `watch` looks for a newly opened Sparkle window, so at most this long behind the settings window. Not measured.
+    private static let raiseEvery: TimeInterval = 0.25
 
     private let updates: Updates
     private var controller: SPUStandardUpdaterController?
@@ -54,10 +56,7 @@ final class Updater: NSObject, SPUUpdaterDelegate {
         }
         updates.probe = { [weak self] in self?.probe() ?? .unavailable }
         updates.interactive = { [weak self] in self?.interactive() }
-        updates.focus = { [weak self] in
-            self?.raise(all: true)
-            self?.watch()
-        }
+        updates.focus = { [weak self] in self?.focus() }
         let t = Timer(timeInterval: Self.tickEvery, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.updates.tick() }
         }
@@ -84,15 +83,24 @@ final class Updater: NSObject, SPUUpdaterDelegate {
         }
     }
 
+    /// 更新到 X or the menu item pressed while Sparkle's session runs: Sparkle's own path for a running update
+    /// (`checkForUpdates` → `showUpdateInFocus`, which shows the current alert or progress window; while no update is shown it
+    /// logs and does nothing, never starting a second check), then `raise`, because the activation it asks for may be refused.
+    private func focus() {
+        controller?.checkForUpdates(nil)
+        raise(all: true)
+    }
+
     /// The input method is an agent app (LSUIElement) whose `NSApp.activate()` macOS may refuse, so Sparkle's normal-level
     /// windows opened behind the floating settings window, and once the user went to another app nothing brought them back:
     /// no Dock icon, and a second press of 更新到 X found the session busy (device check 2026-10-16). Sparkle opens its windows
-    /// when it gets there (the alert after its own feed check, the progress window after 安裝更新) without a delegate call for
-    /// each, so a timer looks for them while the session runs.
-    // ponytail: a 0.25 s poll while a session runs; a per-window hook if Sparkle ever reports each window it opens.
+    /// when it gets there (the alert after its own feed check, the progress window after 安裝更新); the standard user driver's
+    /// delegate has no call for each window, so a timer looks for them while the session runs.
+    // ponytail: polls every raiseEvery for the whole session; a custom SPUUserDriver wrapping the standard one could raise
+    // each window as it opens, at the cost of replacing SPUStandardUpdaterController.
     private func watch() {
         guard raiser == nil else { return }
-        let t = Timer(timeInterval: 0.25, repeats: true) { [weak self] _ in
+        let t = Timer(timeInterval: Self.raiseEvery, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self else { return }
                 self.raise(all: false)
@@ -106,16 +114,16 @@ final class Updater: NSObject, SPUUpdaterDelegate {
         raiser = t
     }
 
-    /// Sparkle's visible windows go to the settings window's level (`.floating`, SettingsWindow.makeWindow) and to the front,
-    /// even when the input method is not active. `all`: also the windows already lifted, which the settings window may cover
-    /// again after a click on it.
+    /// Sparkle's windows go to the settings window's level (`SettingsWindowController.level`) and to the front, even when the
+    /// input method is not active. `all` (a press of 更新到 X): also the windows already lifted, which the settings window may
+    /// cover again after a click on it, and minimized ones (Sparkle's alert and progress windows can be minimized).
     private func raise(all: Bool) {
         let sparkle = Bundle(for: SPUUpdater.self)
-        for w in NSApp.windows where w.isVisible {
+        for w in NSApp.windows where w.isVisible || (all && w.isMiniaturized) {
             guard let c = w.windowController, Bundle(for: type(of: c)) == sparkle else { continue }
-            guard all || w.level != .floating else { continue }
-            w.level = .floating
-            w.hidesOnDeactivate = false
+            guard all || w.level != SettingsWindowController.level else { continue }
+            if w.isMiniaturized { w.deminiaturize(nil) }
+            w.level = SettingsWindowController.level
             w.orderFrontRegardless()
         }
     }

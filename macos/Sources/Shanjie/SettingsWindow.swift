@@ -90,6 +90,9 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     /// The window's background material (user, 2026-10-10: Liquid Glass was too see-through; a flatter glass).
     /// `.popover` was picked by eye on the system's list, not measured; the user's device check passed (2026-10-10).
     static let backgroundMaterial: NSVisualEffectView.Material = .popover
+    /// Above ordinary app windows even when the input method is not active, as AlertDialogs does with .modalPanel (contract
+    /// section 2.1, device check 2026-10-10). Sparkle's windows use the same level (`Updater`), so they can sit above it.
+    static let level: NSWindow.Level = .floating
 
     /// The glass runs under the title bar, as in Syrtis's settings window (TokenBar SettingsWindowController.swift):
     /// with the window's background clear, a title bar outside the glass was see-through (user, 2026-10-10, third
@@ -130,9 +133,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         w.isOpaque = false
         w.backgroundColor = .clear
         w.isReleasedWhenClosed = false
-        // Above ordinary app windows even when the input method is not active, as AlertDialogs does with
-        // .modalPanel (contract section 2.1, device check 2026-10-10).
-        w.level = .floating
+        w.level = Self.level
         w.delegate = self
         return w
     }
