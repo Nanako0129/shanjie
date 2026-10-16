@@ -4,12 +4,12 @@
 //!   | key u64[C] (u * V + v, ascending) | total u64[C] (the context's count before pruning) | off u32[C+1]
 //!   | next u32[E] (ascending inside a context) | count u32[E]
 //! The file is kept as it is (nothing is copied into typed arrays) and every field is read in place; `parse` checks all the
-//! invariants the lookups rely on, so no index can panic. R2: errors carry no content.
+//! invariants the lookups rely on, so no index can panic as long as the bytes do not change afterwards (`Mapped::open`'s contract: the
+//! file is never rewritten in place while mapped). R2: errors carry no content.
 //! The bytes are a read-only mapping of the file (docs/contracts/trigram-mmap.md) or, in tests, a `Vec<u8>`.
 
 use crate::lm::LmError;
 use std::ffi::c_void;
-use std::fs::File;
 use std::ops::Deref;
 use std::os::fd::AsRawFd;
 use std::path::Path;
@@ -36,16 +36,25 @@ pub(crate) struct Mapped {
     len: usize,
 }
 
-// SAFETY: the mapping is read-only and never changes through this handle, so sharing it between threads is a plain shared read.
+// SAFETY: this handle only reads, so sharing it between threads is a plain shared read; that the bytes stay the same is the
+// caller's contract (`Mapped::open`: no in-place rewrite or truncation while mapped).
 unsafe impl Send for Mapped {}
 unsafe impl Sync for Mapped {}
 
 impl Mapped {
-    /// An empty file, a file that cannot be opened and a failed `mmap` are all `TriTable` (what a failed read is today).
-    pub(crate) fn open(path: &Path) -> Result<Mapped, LmError> {
-        let f = File::open(path).map_err(|_| LmError::TriTable)?;
-        let len = f.metadata().map_err(|_| LmError::TriTable)?.len() as usize;
-        if len == 0 {
+    /// Maps the regular file at `path`. A file that cannot be opened, is not a regular file (a FIFO or a directory: opened with
+    /// O_NONBLOCK so a FIFO does not block, then refused), is empty, or fails `mmap` is `TriTable` (what a failed read is today).
+    ///
+    /// # Safety
+    /// The file must not be truncated or rewritten in place while the mapping is alive: a page past a new end is a SIGBUS, and
+    /// bytes that change after `Tri::parse` checked them break the invariants the lookups rely on (an index could panic).
+    /// Replacing the file by rename is fine (the mapping keeps the old inode).
+    pub(crate) unsafe fn open(path: &Path) -> Result<Mapped, LmError> {
+        use std::os::unix::fs::OpenOptionsExt;
+        let f = std::fs::OpenOptions::new().read(true).custom_flags(crate::tinylm::O_NONBLOCK).open(path).map_err(|_| LmError::TriTable)?;
+        let meta = f.metadata().map_err(|_| LmError::TriTable)?;
+        let len = meta.len() as usize;
+        if !meta.is_file() || len == 0 {
             return Err(LmError::TriTable);
         }
         // SAFETY: a valid descriptor and a non-zero length; the kernel keeps the mapping after the descriptor is closed (dropped below).
@@ -170,10 +179,12 @@ impl Tri {
     }
 
     fn u32_at(&self, p: usize) -> u32 {
-        u32::from_le_bytes([self.raw[p], self.raw[p + 1], self.raw[p + 2], self.raw[p + 3]])
+        let r: &[u8] = &self.raw;
+        u32::from_le_bytes(r[p..p + 4].try_into().unwrap())
     }
     fn u64_at(&self, p: usize) -> u64 {
-        u64::from_le_bytes(self.raw[p..p + 8].try_into().unwrap())
+        let r: &[u8] = &self.raw;
+        u64::from_le_bytes(r[p..p + 8].try_into().unwrap())
     }
     fn key(&self, i: usize) -> u64 {
         self.u64_at(self.at[0] + 8 * i)

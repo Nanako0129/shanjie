@@ -55,13 +55,22 @@ impl From<f64> for Scoring {
     }
 }
 
-/// `dir/name` read whole: `None` when the path does not exist; a path that exists (a dangling symlink included) but cannot be read is an error.
-fn read_beside(model: &Path, name: &str) -> Result<Option<Vec<u8>>, ()> {
+/// `dir/name` beside the model: `None` when the path does not exist; a path that exists (a dangling symlink included) is `Some`,
+/// and one that cannot even be examined is an error.
+fn beside(model: &Path, name: &str) -> Result<Option<std::path::PathBuf>, ()> {
     let side = model.with_file_name(name);
     match std::fs::symlink_metadata(&side) {
-        Ok(_) => std::fs::read(&side).map(Some).map_err(|_| ()),
+        Ok(_) => Ok(Some(side)),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(_) => Err(()),
+    }
+}
+
+/// `beside`, then read whole (an existing path that cannot be read is an error).
+fn read_beside(model: &Path, name: &str) -> Result<Option<Vec<u8>>, ()> {
+    match beside(model, name)? {
+        Some(side) => std::fs::read(side).map(Some).map_err(|_| ()),
+        None => Ok(None),
     }
 }
 
@@ -264,11 +273,12 @@ impl Lm {
         }
         if tri {
             // Mapped, not read: the table is 143.6 MB (docs/contracts/trigram-mmap.md). The same "exists" test as `read_beside`.
-            let side = path.with_file_name("trigram.sjt3");
-            match std::fs::symlink_metadata(&side) {
-                Ok(_) => lm.add_tri_bytes(TriBytes::Map(Mapped::open(&side)?))?,
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-                Err(_) => return Err(LmError::TriTable),
+            if let Some(side) = beside(path, "trigram.sjt3").map_err(|_| LmError::TriTable)? {
+                // SAFETY: nothing rewrites this file in place while an `Lm` has it mapped. The App's Resources and a user's data/lm are
+                // replaced only by rename (scripts/install-ime.sh, the installer, the Homebrew cask), and tools/build_trigram.py writes a
+                // temp file and renames it onto the target.
+                let map = unsafe { Mapped::open(&side)? };
+                lm.add_tri_bytes(TriBytes::Map(map))?;
             }
         }
         Ok(lm)
@@ -1687,6 +1697,7 @@ mod tests {
                 assert_eq!(mapped.eos3(cfg, u, v).to_bits(), mem.eos3(cfg, u, v).to_bits(), "eos {u:?} {v}");
             }
         }
+        drop(mapped); // the loop below rewrites the file in place: nothing may still map it
         let mut bad_magic = good.clone();
         bad_magic[7] = b'2';
         for (name, bytes) in [("empty", vec![]), ("truncated", good[..good.len() - 4].to_vec()), ("bad magic", bad_magic)] {
@@ -1696,6 +1707,9 @@ mod tests {
         std::fs::remove_file(&t).unwrap();
         std::os::unix::fs::symlink(dir.join("nowhere"), &t).unwrap();
         assert_eq!(Lm::load_opts(&m, false, true, true).err(), Some(LmError::TriTable), "dangling symlink");
+        std::fs::remove_file(&t).unwrap();
+        std::fs::create_dir(&t).unwrap();
+        assert_eq!(Lm::load_opts(&m, false, true, true).err(), Some(LmError::TriTable), "directory");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
