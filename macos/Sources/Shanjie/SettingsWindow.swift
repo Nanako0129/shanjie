@@ -55,7 +55,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     /// `screen`, keeping the top edge where it is (`show()` centres it afterwards, `refit()` clamps it). Each page is measured
     /// with a vertical fixedSize in a hidden hosting view attached to the window: the window shows only the selected page, the
     /// on-screen form has no fixedSize so it can scroll when the cap bites, and a hosting view outside any window measured
-    /// about 4.5 pt per row too tall (/code-review probe). All four pages are rebuilt on every fit; that happens only on
+    /// about 4.5 pt per row too tall (/code-review probe). Every page is rebuilt on every fit; that happens only on
     /// show, an app-list change and a screen change, so it is not cached. With `.fullSizeContentView` the content rect is the
     /// whole frame, so this height is the frame's.
     private func fit(_ w: NSWindow, on screen: NSScreen?) {
@@ -165,7 +165,8 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 
 /// The sidebar pages (settings-sidebar section 2.1), in sidebar order.
 enum SettingsPage: CaseIterable, Hashable {
-    case general, candidates, appearance, memory
+    /// 關於 last (docs/contracts/about-update.md section 1).
+    case general, candidates, appearance, memory, about
 
     var title: String {
         switch self {
@@ -173,6 +174,7 @@ enum SettingsPage: CaseIterable, Hashable {
         case .candidates: "選字"
         case .appearance: "外觀"
         case .memory: "選字記憶"
+        case .about: "關於"
         }
     }
 
@@ -183,6 +185,7 @@ enum SettingsPage: CaseIterable, Hashable {
         case .candidates: "character.cursor.ibeam"
         case .appearance: "paintpalette"
         case .memory: "brain"
+        case .about: "info.circle"
         }
     }
 }
@@ -192,7 +195,7 @@ enum SettingsPage: CaseIterable, Hashable {
 /// A plain fixed-width sidebar, not NavigationSplitView: that one's sidebar can be collapsed, and this window has no
 /// toolbar or View menu to bring it back (/code-review probe: canCollapse true, no toolbar).
 struct SettingsForm: View {
-    /// The sidebar column; a round number for four short labels, not measured against System Settings (first device round).
+    /// The sidebar column; a round number for the short labels, not measured against System Settings (first device round).
     static let sidebarWidth: CGFloat = 160
     static var width: CGFloat { sidebarWidth + SettingsPageForm.formWidth }
     @ObservedObject var model: SettingsModel
@@ -345,11 +348,56 @@ struct SettingsPageForm: View {
                     Toggle(MenuEntry.Text.excludeBackup, isOn: Binding(get: { model.backupExcluded }, set: { model.setBackupExcluded($0) }))
                     Button(MenuEntry.Text.clear) { model.clear() }
                 }
+            case .about:
+                if let updates = model.updates { AboutSections(updates: updates) }
             }
         }
         .formStyle(.grouped)
         .scrollContentBackground(.hidden)  // the window's glass shows through
         .frame(width: Self.formWidth)
+    }
+}
+
+/// The 關於 page (docs/contracts/about-update.md section 1): version, the update controls, the site and the licence line. The
+/// decisions behind it (what the version reads, when a check runs, what the result says) are `Updates`, in ShanjieKit.
+private struct AboutSections: View {
+    /// The site's front page, also the cask's homepage (packaging/Casks/shanjie.rb).
+    private static let site = URL(string: "https://shanjie.nyanako.com/")!
+    @ObservedObject var updates: Updates
+
+    var body: some View {
+        Section("善解輸入法") {
+            LabeledContent("版本", value: updates.versionText)
+        }
+        Section("更新") {
+            Toggle("自動檢查更新", isOn: Binding(get: { updates.autoCheck }, set: { updates.setAutoCheck($0) }))
+            Text("開著時每天最多連線一次，到 GitHub 讀取有沒有新版本；有新版本只在這裡和輸入選單顯示，按下才更新。")
+                .font(.caption).foregroundStyle(.secondary)
+            LabeledContent("上次檢查") {
+                Text(status).foregroundStyle(.secondary)
+            }
+            HStack {
+                Button("立即檢查") { updates.checkNow() }
+                    .disabled(updates.checking)
+                if let v = updates.available {
+                    Button(UpdateText.install(v)) { updates.install() }
+                        .disabled(updates.checking)
+                }
+            }
+        }
+        Section {
+            Link("shanjie.nyanako.com", destination: Self.site)
+            Text("程式以 Apache-2.0 授權釋出；詞庫與模型的授權與出處在 App 的 Resources/LICENSES。")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    /// 「日期 時間・結果」, 檢查中… while a check runs, — before any check.
+    private var status: String {
+        if updates.checking { return UpdateText.checking }
+        guard let date = updates.lastCheck else { return "—" }
+        let when = date.formatted(date: .numeric, time: .shortened)
+        return UpdateText.result(updates.result, available: updates.available).map { "\(when)・\($0)" } ?? when
     }
 }
 

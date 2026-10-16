@@ -78,6 +78,7 @@ final class ShanjieInputController: IMKInputController {
         case .toggleAcgPack: #selector(toggleAcgPack(_:))
         case .toggleAppChat: #selector(toggleAppChat(_:))
         case .openSettings: #selector(openSettings(_:))
+        case .installUpdate: #selector(installUpdate(_:))
         }
     }
 
@@ -97,6 +98,7 @@ final class ShanjieInputController: IMKInputController {
     @objc func toggleAcgPack(_ sender: Any?) { perform(.toggleAcgPack) }
     @objc func toggleAppChat(_ sender: Any?) { perform(.toggleAppChat) }
     @objc func openSettings(_ sender: Any?) { perform(.openSettings) }
+    @objc func installUpdate(_ sender: Any?) { perform(.installUpdate) }
 }
 
 /// The controller's current IMKTextInput client.

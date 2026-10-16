@@ -58,6 +58,8 @@ public struct MenuEntry: Equatable, Sendable {
         case toggleAcgPack
         case toggleAppChat
         case openSettings
+        /// docs/contracts/about-update.md section 1: Sparkle's interactive update flow.
+        case installUpdate
     }
 
     public var title: String
@@ -226,6 +228,8 @@ extension Session {
             items.append(MenuEntry(title: T.appChat, action: .toggleAppChat, checked: profile(for: bundle) == Shell.chat,
                                    enabled: shell.profileMode == .auto))
         }
+        // about-update section 1: only while a newer version is known; never shown otherwise.
+        if let v = shell.updates?.available { items.append(MenuEntry(title: UpdateText.menu(v), action: .installUpdate)) }
         items.append(MenuEntry(title: T.settings, action: .openSettings))
         items.append(MenuEntry(title: T.clear, action: .clear))
         items.append(MenuEntry(title: T.excludeBackup, action: .toggleBackup, checked: shell.backupExcluded))
@@ -259,6 +263,8 @@ extension Session {
             toggleAppChat()
         case .openSettings:
             shell.openSettings()
+        case .installUpdate:
+            shell.updates?.install()
         }
     }
 }
