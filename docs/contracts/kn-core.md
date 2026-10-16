@@ -23,6 +23,7 @@ little-endian：magic `b"SJKN0002"`、V（u32）、模型檔 SHA-256（32 bytes�
 3. **Rust `core/src/lm.rs`**：
    - `Lm::load(path)`：模型旁邊有 `kn.sjkn` 就讀（`SJKN0002`，核對 magic、V、模型 SHA-256、長度、β ∈ [0, 1]、ΣN′ > 0、N 的長度），不合就 `LmError::KnSide`（不靜默略過；實作時加的變體，讀不到與格式不合都用它，訊息點名側檔；FFI 的 `load_lm` 照舊把所有載入失敗回 3）。另外核對檔頭 ΣN′ 夾在 max N′ 與 Σ N′ 之間（O(V)，正確的檔一定通過），側檔綁的是這個 `Lm` 解析時算的模型 SHA-256；`kn.sjkn` 這個路徑存在（含壞掉的 symlink）卻讀不了也是 `KnSide`；沒有這個檔就是關閉。
    - 作用位置和 `lm.py` 一致：詞項的 `pb`（id ≥ 2）換成 `β·N′/ΣN′ + (1−β)·pb`；句尾（id 1）、不在詞彙裡的詞（`None`）不變。所有詞項都經過同一個函式（現在是 `prob_c`），在那裡做一次，不在各個呼叫端各做一次。例外（`docs/contracts/model-v6.md` §2.8 規則 1）：解碼時被學習加分的詞條、與 `Engine::total_score` 裡同樣被加分的路徑詞，用不經過 KN 替換的 `prob_learned`（沒有側檔時的公式，`pb` 是加分後的值）；其他路徑（評測 CLI、預測、`word`、`eos`）不變。
+   - trigram 層（`docs/contracts/trigram-core.md`）：KN 是共用 `Lm` 上的欄位，「書面有 trigram 表時 KN 關」只在解碼與 `Engine::total_score` 裡生效（由 `Lm::scoring(profile)` 導出的 `Scoring.kn`，進 `prob_c_kn` 的 `kn_on`）；預測列（V3，`word_by_id` → `prob_c`）兩種設定都照側檔開著。CLI 書面有表時摘要行不加 `+kn:`（加 `+tri:`）。
    - `Lm::kn_enabled()`（或同等）讓評測 CLI 在摘要行加 `+kn`，和 `lm_eval.py` 同一個格式（`+kn:<側檔 sha8>:θ<θ>:β<β>`），這樣 golden 與比對看得出有沒有開。
 4. **評測 CLI `cli/`**：載入時照上面規則（旁邊有 `kn.sjkn` 就開）；`--no-kn` 明確關閉（研究用）。
 5. **App 與發版**：這一片**不放**側檔（`scripts/build-app.sh`、`check-app.sh`、CI、`release.yml` 不動）；model-v6 那一片才加釘選與檢查。

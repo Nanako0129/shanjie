@@ -3,7 +3,7 @@ import XCTest
 @testable import ShanjieKit
 
 /// docs/contracts/s7c2b-shell-rerank.md section 3 items 1-2: the shell's rerank queue with the real core, the real n-gram model
-/// and the real small model, in a chat app (the selftest's sentence, dev302 row 65). The runner is held by the test, except in
+/// and the real small model, in a chat app (the selftest's sentence, dev302 row 27 since classes-v5). The runner is held by the test, except in
 /// the last test, which uses the app's queue runner.
 @MainActor
 final class RerankTests: XCTestCase {
@@ -94,23 +94,24 @@ final class RerankTests: XCTestCase {
         XCTAssertEqual(r.runner.received, 2, "the waiting job starts once the first is done")
         r.runner.complete()
         XCTAssertEqual(marks(r.c), before + 1)
-        XCTAssertEqual(r.c.client.calls.last, .mark(RerankRow.reranked, cursor: 7, underlined: true))
+        XCTAssertEqual(r.c.client.calls.last, .mark(RerankRow.reranked, cursor: RerankRow.reranked.count, underlined: true))
         XCTAssertEqual(r.c.client.marked, RerankRow.reranked)
         XCTAssertTrue(r.runner.held.isEmpty)
         r.c.press(Keys.enter)
         XCTAssertEqual(r.c.client.text, RerankRow.reranked, "Enter sends what is shown")
     }
 
-    /// A finished job that changes nothing (code 5): no extra client call. Row 284 keeps its n-gram first in the chat profile.
+    /// A finished job that changes nothing (code 5): no extra client call. `NoChangeRow` keeps its n-gram first in the chat profile
+    /// (row 284 did until classes-v5, whose chat first 率 the small model now changes to 濾).
     func testNoChangeMakesNoCall() {
         let r = rig()
-        r.c.type(Row284.standardKeys)
-        XCTAssertEqual(r.c.client.marked, Row284.chat)
+        r.c.type(NoChangeRow.standardKeys)
+        XCTAssertEqual(r.c.client.marked, NoChangeRow.text)
         let before = marks(r.c)
         r.runner.drain()
         XCTAssertGreaterThanOrEqual(r.runner.received, 2)
         XCTAssertEqual(marks(r.c), before)
-        XCTAssertEqual(r.c.client.marked, Row284.chat)
+        XCTAssertEqual(r.c.client.marked, NoChangeRow.text)
     }
 
     /// A key that re-decodes after the job was taken makes its result stale; a key that does not (←) keeps it valid.
@@ -132,9 +133,9 @@ final class RerankTests: XCTestCase {
         s.c.type(RerankRow.standardKeys)
         s.runner.complete()
         s.c.press(Self.leftArrow)  // does not re-decode
-        XCTAssertEqual(s.c.client.calls.last, .mark(RerankRow.ngram, cursor: 6, underlined: true))
+        XCTAssertEqual(s.c.client.calls.last, .mark(RerankRow.ngram, cursor: RerankRow.ngram.count - 1, underlined: true))
         s.runner.complete()
-        XCTAssertEqual(s.c.client.calls.last, .mark(RerankRow.reranked, cursor: 6, underlined: true), "applied after a cursor move")
+        XCTAssertEqual(s.c.client.calls.last, .mark(RerankRow.reranked, cursor: RerankRow.reranked.count - 1, underlined: true), "applied after a cursor move")
     }
 
     /// Completion after another session took the composition, or after the engine was rebuilt: not applied, and the next job

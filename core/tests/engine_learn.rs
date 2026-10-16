@@ -13,7 +13,7 @@ fn root() -> PathBuf {
 }
 fn lm_path() -> PathBuf {
     let p = root().join("data/lm/bigram.sjlm");
-    assert!(root().join("data/lm/classes.sjc").exists(), "data/lm/classes.sjc is missing: download it with `gh release download classes-v4 -R Nanako0129/shanjie -p classes.sjc -D data/lm` (or build it with tools/build_classes.py)");
+    assert!(root().join("data/lm/classes.sjc").exists(), "data/lm/classes.sjc is missing: download it with `gh release download classes-v5 -R Nanako0129/shanjie -p classes.sjc -D data/lm` (or build it with tools/build_classes.py)");
     assert!(p.exists(), "data/lm/bigram.sjlm is missing (see engine_lm.rs)");
     p
 }
@@ -33,11 +33,50 @@ fn shared() -> &'static Shared {
         Shared { lex, lm: Arc::new(lm), capped }
     })
 }
+/// SHANJIE_TEST_PROFILE=formal (docs/contracts/trigram-core.md, B2): run the engine under the formal profile and require the
+/// trigram table beside the model, so a missing `trigram.sjt3` fails here instead of silently scoring the bigram. Unset: no-op;
+/// any other value panics. Only the four B2 tests (a2_mirror_teach_the_other_word, a2_candidate_pick_learning_on_cases_tsv,
+/// pollution_zai_taught_under_two_contexts, global_eps_table) are meant to run with it; the others call `chat_only`.
+/// Call after the model is in place.
+fn use_test_profile(e: &mut Engine) {
+    match std::env::var("SHANJIE_TEST_PROFILE") {
+        Err(_) => {}
+        Ok(v) if v == "formal" => {
+            assert!(lm_path().with_file_name("trigram.sjt3").exists(), "SHANJIE_TEST_PROFILE=formal needs data/lm/trigram.sjt3 (trigram table missing)");
+            e.set_profile(lm::Profile::Formal).unwrap();
+        }
+        Ok(v) => panic!("SHANJIE_TEST_PROFILE={v:?}: only the exact value \"formal\" is understood"),
+    }
+}
+/// Chat-pinned tests: the formal profile would change their expectations.
+fn chat_only() {
+    assert!(
+        std::env::var("SHANJIE_TEST_PROFILE").is_err(),
+        "SHANJIE_TEST_PROFILE changes this test's expectations (chat profile): run only the four B2 tests under SHANJIE_TEST_PROFILE=formal"
+    );
+}
+/// `Engine::new` + `load_lm` (reads `trigram.sjt3` beside the model itself) + fixed clock, learning on, test profile.
+fn loaded_engine() -> Engine {
+    let mut e = Engine::new(&root().join("data/lexicon"), L).unwrap();
+    e.load_lm(&lm_path()).unwrap();
+    use_test_profile(&mut e);
+    e.set_today(Some(DAY));
+    e.set_learning(true);
+    e
+}
+/// `use_test_profile` for engines built on `shared()`: the table must be in the shared model itself.
+fn shared_profile_check(e: &mut Engine) {
+    use_test_profile(e);
+    if std::env::var("SHANJIE_TEST_PROFILE").is_ok() {
+        assert!(shared().lm.scoring(lm::Profile::Formal).tri, "SHANJIE_TEST_PROFILE=formal needs data/lm/trigram.sjt3 (trigram table missing)");
+    }
+}
 /// Production lexicon + model, learning on, fixed clock (day 20000).
 fn engine() -> Engine {
     let s = shared();
     let mut e = Engine::with_lexicon(s.lex.clone(), Layout::Standard);
     e.set_lm(s.lm.clone(), s.capped.clone());
+    shared_profile_check(&mut e);
     e.set_today(Some(DAY));
     e.set_learning(true);
     e
@@ -54,6 +93,7 @@ fn tiny(engine_text: &str, capped_text: &str) -> Engine {
     let capped = Arc::new(CappedLexicon::new(cl, "", &s.lm, None).unwrap());
     let mut e = Engine::with_lexicon(lex, L);
     e.set_lm(s.lm.clone(), capped);
+    shared_profile_check(&mut e);
     e.set_today(Some(DAY));
     e.set_learning(true);
     e
@@ -202,6 +242,7 @@ fn ok(e: &mut Engine, row: &Row) -> bool {
 
 #[test]
 fn step0_ceiling_collisions_baselines() {
+    chat_only();
     let gs = groups();
     assert_eq!(gs.len(), 14);
     let mut ceiling = 0;
@@ -255,10 +296,7 @@ fn judge(e: &mut Engine, g: &Group, row: &Row) -> (bool, bool) {
 #[test]
 fn a2_candidate_pick_learning_on_cases_tsv() {
     let t = std::time::Instant::now();
-    let mut e = Engine::new(&root().join("data/lexicon"), L).unwrap();
-    e.load_lm(&lm_path()).unwrap();
-    e.set_today(Some(DAY));
-    e.set_learning(true);
+    let mut e = loaded_engine();
     println!("engine new + load_lm {:?}", t.elapsed());
     let gs = groups();
     // same-context rare rows wrong before: learned / total, all and only those with a reachable key (§1.1)
@@ -345,10 +383,7 @@ fn a2_mirror_teach_the_other_word() {
 
 /// (learned reachable, wrong reachable, learned, wrong) of the mirror run with global ε `eps`.
 fn mirror(eps: f64) -> (usize, usize, usize, usize) {
-    let mut e = Engine::new(&root().join("data/lexicon"), L).unwrap();
-    e.load_lm(&lm_path()).unwrap();
-    e.set_today(Some(DAY));
-    e.set_learning(true);
+    let mut e = loaded_engine();
     e.set_eps_global(eps);
     let (mut learned, mut wrong, mut learned_reach, mut wrong_reach) = (0, 0, 0, 0);
     for g in &groups() {
@@ -398,16 +433,17 @@ fn context_key_learned_equals_context_key_queried() {
     assert_eq!(type_syls(&mut e, "ㄒㄧㄣ").preedit, "鑫", "key ^ is not the key 他他");
     e.key(k(KeyKind::Esc)).unwrap();
 
-    // (b) after a fixed word (single characters learn only under two Han characters, §14 rule 7, so 奔 takes 你好)
+    // (b) after a fixed word (single characters learn only under two Han characters, §14 rule 7, so the first character takes 你好).
+    // The pick is whichever of 奔／犇 the model does not show, so it is a correction under any class weight (classes-v5 shows 奔).
     let mut e = tiny(TINY, TINY);
     e.set_left_context("你好");
-    type_syls(&mut e, "ㄅㄣ ㄒㄧㄣ");
-    pick(&mut e, 2, 1, "奔");
+    let b = if type_syls(&mut e, "ㄅㄣ ㄒㄧㄣ").preedit.starts_with('奔') { "犇" } else { "奔" };
+    pick(&mut e, 2, 1, b);
     pick(&mut e, 2, 2, "欣");
-    assert_eq!(e.key(k(KeyKind::Enter)).unwrap().commit, "奔欣");
-    assert_eq!(keys(&e), ["你好", "好奔"], "奔 after 你好, 欣 after 好 and the fixed word 奔");
+    assert_eq!(e.key(k(KeyKind::Enter)).unwrap().commit, format!("{b}欣"));
+    assert_eq!(keys(&e), ["你好".to_string(), format!("好{b}")], "{b} after 你好, 欣 after 好 and the fixed word {b}");
     e.set_left_context("你好");
-    assert_eq!(type_syls(&mut e, "ㄅㄣ ㄒㄧㄣ").preedit, "奔欣");
+    assert_eq!(type_syls(&mut e, "ㄅㄣ ㄒㄧㄣ").preedit, format!("{b}欣"));
     e.key(k(KeyKind::Esc)).unwrap();
 
     // (c) after punctuation the key is ^ (rule 8: ^> and the next reading): a single character is not learned there (rule 6) ...
@@ -568,6 +604,7 @@ fn commit_syls(e: &mut Engine, s: &Syls) -> String {
 /// empty learner and a learning-off engine commit the same dev302 rows: learning alone changes nothing.
 #[test]
 fn empty_learner_matches_goldens() {
+    chat_only();
     let gold: Vec<String> = std::fs::read_to_string(root().join("eval/golden/s2-lm-dev302-top1.tsv"))
         .unwrap()
         .lines()
@@ -693,10 +730,7 @@ fn command_backspace_forgets_the_highlighted_word() {
     let g = gs.iter().find(|g| g.name == "警官/景觀").unwrap();
     let teach = &g.rows[0];
     let same = g.rows.iter().find(|r| r.same == Some(true)).unwrap();
-    let mut e = Engine::new(&root().join("data/lexicon"), L).unwrap();
-    e.load_lm(&lm_path()).unwrap();
-    e.set_today(Some(DAY));
-    e.set_learning(true);
+    let mut e = loaded_engine();
     let plain = type_syls(&mut e, &same.reading).preedit;
     e.key(k(KeyKind::Esc)).unwrap();
     assert!(plain.contains(&g.other) && !plain.contains(&g.word), "baseline shows the common word");

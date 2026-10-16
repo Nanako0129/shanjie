@@ -77,14 +77,14 @@ static int run(const char *dir, uint32_t layout, const char *nihao, const char *
  *   ㄔㄨˊ ㄈㄤˊ ㄒㄧㄣ ㄓㄨㄤ ㄌㄜ˙ ㄧ ㄍㄜ˙ ㄌㄩˋ ㄕㄨㄟˇ ㄏㄨˊ
  * standard keys `tj6z;6vup_5j;_xk7u_ek7xm4gjo3cj6` (_ = space bar). Expected top-1:
  *   no LM (unigram)  廚房新莊了一個率水壺
- *   chat             廚房新裝了一個綠水壺
- *   formal           廚房新裝了一個濾水壺
+ *   chat             廚房新裝了一個率水壺 (綠水壺 before classes-v5)
+ *   formal           廚房新裝了一個律水壺 (with data/lm/trigram.sjt3, as CI and the App ship it; 濾水壺 without the table)
  * (chat / formal from eval/golden/s2-lm-dev302-top1.tsv row 284, i.e. lm_eval.py --dump; unigram is what
  * an engine without LM commits, checked by 302 below.) */
 #define ROW284 "tj6z;6vup 5j; xk7u ek7xm4gjo3cj6"
 #define UNIGRAM "\xe5\xbb\x9a\xe6\x88\xbf\xe6\x96\xb0\xe8\x8e\x8a\xe4\xba\x86\xe4\xb8\x80\xe5\x80\x8b\xe7\x8e\x87\xe6\xb0\xb4\xe5\xa3\xba"
-#define CHAT "\xe5\xbb\x9a\xe6\x88\xbf\xe6\x96\xb0\xe8\xa3\x9d\xe4\xba\x86\xe4\xb8\x80\xe5\x80\x8b\xe7\xb6\xa0\xe6\xb0\xb4\xe5\xa3\xba"
-#define FORMAL "\xe5\xbb\x9a\xe6\x88\xbf\xe6\x96\xb0\xe8\xa3\x9d\xe4\xba\x86\xe4\xb8\x80\xe5\x80\x8b\xe6\xbf\xbe\xe6\xb0\xb4\xe5\xa3\xba"
+#define CHAT "\xe5\xbb\x9a\xe6\x88\xbf\xe6\x96\xb0\xe8\xa3\x9d\xe4\xba\x86\xe4\xb8\x80\xe5\x80\x8b\xe7\x8e\x87\xe6\xb0\xb4\xe5\xa3\xba"
+#define FORMAL "\xe5\xbb\x9a\xe6\x88\xbf\xe6\x96\xb0\xe8\xa3\x9d\xe4\xba\x86\xe4\xb8\x80\xe5\x80\x8b\xe5\xbe\x8b\xe6\xb0\xb4\xe5\xa3\xba"
 
 /* Press Enter; 1 when it is handled and commits `want` with an empty preedit. */
 static int enter_commits(ShanjieEngine *e, const char *want) {
@@ -229,6 +229,8 @@ static int run_lm(const char *dir, const char *lm, const char *missing) {
   shanjie_output_free(o);
   o = type_last(e, "s");
   CHECK(839, o != 0 && o->candidate_count >= 1 && o->candidate_vertical == 0);
+  /* The two appended fields (zhen-inline section 1.3f) are 0 without an English run; their non-zero values are the Rust FFI test's. */
+  CHECK(841, o->english_run_utf16_start == 0 && o->english_run_utf16_len == 0);
   shanjie_output_free(o);
   o = 0;
   CHECK(840, shanjie_engine_reset(e, 1, &o) == 0 && o != 0);
@@ -337,7 +339,7 @@ static int run_learn(const char *dir, const char *learn_dir) {
   return 0;
 }
 
-/* zhen-mixed (docs/contracts/zhen-mixed.md section 5.2): the codes of load_english and set_english through the header. The window
+/* zhen-mixed (docs/contracts/zhen-mixed.md section 5.2): the codes of load_english, set_english and set_english_inline through the header. The window
  * itself is covered by core/tests/engine_english.rs and the child-process test in ffi.rs. */
 static int run_english(const char *dir, const char *missing) {
   static ShanjieOutput dummy;
@@ -355,6 +357,16 @@ static int run_english(const char *dir, const char *missing) {
   shanjie_output_free(o);
   o = 0;
   CHECK(1009, shanjie_engine_set_english(e, 0, &o) == 0 && o != 0 && o->handled == 1);
+  shanjie_output_free(o);
+  /* zhen-inline: set_english_inline 0 and 1 give a snapshot (codes like set_english), 2 is 2, NULL engine or out is 1. */
+  CHECK(1010, shanjie_engine_set_english_inline(0, 1, &o) == 1 && o == 0);
+  CHECK(1011, shanjie_engine_set_english_inline(e, 1, 0) == 1);
+  o = &dummy;
+  CHECK(1012, shanjie_engine_set_english_inline(e, 2, &o) == 2 && o == 0);
+  CHECK(1013, shanjie_engine_set_english_inline(e, 0, &o) == 0 && o != 0 && o->handled == 1);
+  shanjie_output_free(o);
+  o = 0;
+  CHECK(1014, shanjie_engine_set_english_inline(e, 1, &o) == 0 && o != 0 && o->handled == 1);
   shanjie_output_free(o);
   shanjie_engine_free(e);
   return 0;

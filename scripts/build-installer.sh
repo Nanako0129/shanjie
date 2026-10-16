@@ -32,8 +32,8 @@ if [ -n "$ZIP" ]; then
   [ "$(basename "$ZIP")" = "shanjie-$VERSION.zip" ] || fail "the zip must be named shanjie-$VERSION.zip"
 fi
 
-swift build -c release --package-path macos --product ShanjieInstaller
-BIN="$(swift build -c release --package-path macos --show-bin-path)/ShanjieInstaller"
+swift build -c release --package-path macos --force-resolved-versions --product ShanjieInstaller
+BIN="$(swift build -c release --package-path macos --force-resolved-versions --show-bin-path)/ShanjieInstaller"
 [ -x "$BIN" ] || fail "the Swift build produced no installer executable"
 
 mkdir -p "$ROOT/$OUT_DIR"

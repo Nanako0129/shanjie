@@ -30,12 +30,12 @@
 ### 2.1 視窗
 
 - 選單在「清除選字記憶…」之前加一項「善解設定…」（`MenuEntry.Action.openSettings`）。現有的選單項目不動。
-- 在輸入法自己的程序裡開一個 `NSWindow`，內容是 SwiftUI `Form`（`.grouped` 樣式，系統元件、系統預設動畫）。標題「善解設定」。同時只開一個，再點選單就把已開的那個帶到前面。
+- 在輸入法自己的程序裡開一個 `NSWindow`，內容是 SwiftUI `Form`（`.grouped` 樣式，系統元件、系統預設動畫；〔2026-10-15〕改成左側清單加每一類一個 `Form`，見 `settings-sidebar.md`）。標題「善解設定」。同時只開一個，再點選單就把已開的那個帶到前面。
 - **帶到前面**：照現有 `AlertDialogs` 的做法，記下前景 App，`NSApp.activate()` 後 `makeKeyAndOrderFront`；關窗時把焦點還給記下的 App。
   - **修訂（2026-10-10 實機）**：使用者點「善解設定…」看不到視窗。查視窗列表：視窗有開、在畫面上，但層級是一般視窗（layer 0），`activate()` 被系統拒絕，所以被前景 App 蓋住。改成和 `AlertDialogs`（`.modalPanel`）一樣用較高的層級：視窗 `level = .floating`，`makeKeyAndOrderFront` 之後再 `orderFrontRegardless()`（威注音的做法）。視窗會在最前面，但不一定是 key window；使用者點一下就會成為 key。不改成 `.regular`（fcitx5 的做法會在 Dock 多一個圖示）。
   - 實機上仍然帶不到前面時，才照 fcitx5 的做法改：開窗時暫時切成 `.regular`、關掉後切回。改法寫進這份契約再做（§5）。
 - **第一輪實機回饋（2026-10-10）**：
-  - **置中**：視窗出現在螢幕上方（CGWindowList：X=1279、Y=31、420×532），推論是 `center()` 在內容撐出尺寸之前就跑了。改成每次 `show()` 先設內容尺寸（`NSHostingView.fittingSize`）再置中，置中在滑鼠所在的螢幕（使用者剛在那裡點了選單；`NSScreen.main` 是 key window 所在的螢幕，輸入法的程序沒有）。
+  - **置中**：視窗出現在螢幕上方（CGWindowList：X=1279、Y=31、420×532），推論是 `center()` 在內容撐出尺寸之前就跑了。改成每次 `show()` 先設內容尺寸（`NSHostingView.fittingSize`）再置中（〔2026-10-15〕尺寸的量法與上限改由 `settings-sidebar.md` §2.2 決定），置中在滑鼠所在的螢幕（使用者剛在那裡點了選單；`NSScreen.main` 是 key window 所在的螢幕，輸入法的程序沒有）。
   - **視窗背景是系統的毛玻璃**（結構照 Syrtis 的設定視窗：玻璃在內容後面、延伸到標題列底下；材質不同，Syrtis 用 `.hudWindow`）：`NSVisualEffectView`（材質 `.popover`、`.behindWindow`）放在內容**後面**填滿整個視窗，連標題列底下也是（`.fullSizeContentView`、`titlebarAppearsTransparent`），SwiftUI 的 `Form` 從標題列下面開始、`.scrollContentBackground(.hidden)` 隱藏自己的不透明背景。玻璃不包住內容，否則內容會套 vibrancy、文字變淡。視窗 `isOpaque = false`、背景透明，標題文字與關閉鈕維持系統的。只用系統樣式，沒有自訂的模糊或透明度數值。
     - 修訂（2026-10-10 第三、四輪實機）：原本是 Liquid Glass（`NSGlassEffectView`），使用者覺得設定視窗太透，換成較平的毛玻璃；標題列原本在玻璃外面、視窗背景透明，所以幾乎全透（「標題列不要做那麼透」），改成玻璃延伸到標題列底下。材質 `.popover` 是看系統的清單挑的，沒有量測；使用者實機看過 OK。
 - 視窗裡**沒有文字欄位**：只有選擇器、開關、滑桿與按鈕。所以不需要自己裝 Edit 選單，也不會讓善解在自己的視窗裡處理打字。
@@ -43,10 +43,12 @@
 
 ### 2.2 內容（順序照選單）
 
+〔2026-10-15〕版面與分組由 `settings-sidebar.md` 取代（左側清單四類，「聊天／書面」併進「一般」）；下表的項目與寫到哪裡不變。
+
 | 區塊 | 項目 | 寫到哪裡 |
 |---|---|---|
 | 鍵盤 | 鍵盤排列：標準／倚天（選擇器） | `Shell.selectLayout`，和選單相同 |
-| 選字 | 即時預測、可省略韻母（緊接在即時預測之後；即時預測關閉時反灰，勾選狀態仍顯示；**v0.4.0 起隱藏**：`Shell.showsAbbreviation` 是 false 時不顯示，使用者 2026-10-10）、中英混打（實驗）（和選單同一個位置：即時預測之後，可省略韻母顯示時在它之後；單字表沒載入成功或排列是倚天時反灰、勾選狀態仍顯示；預設關；`docs/contracts/zhen-mixed.md` §3.2）、避免把敏感字詞排在前面、動漫與遊戲詞（開關） | `Shell` 現有的 setter，和選單相同 |
+| 選字 | 即時預測、可省略韻母（緊接在即時預測之後；即時預測關閉時反灰，勾選狀態仍顯示；**v0.4.0 起隱藏**：`Shell.showsAbbreviation` 是 false 時不顯示，使用者 2026-10-10）、中英混打（實驗）（和選單同一個位置：即時預測之後，可省略韻母顯示時在它之後；單字表沒載入成功或排列是倚天時反灰、勾選狀態仍顯示；預設關；`docs/contracts/zhen-mixed.md` §3.2）；其下一個選擇「英文的顯示：打字時就顯示／按空白才顯示」（預設前者，UserDefaults 鍵 `englishInline`，沒有值當 true；中英混打的開關反灰或關著時也反灰、設定值仍顯示；`docs/contracts/zhen-inline.md` §2）、避免把敏感字詞排在前面、動漫與遊戲詞（開關） | `Shell` 現有的 setter，和選單相同 |
 | 聊天／書面 | 切換方式：依 App 自動／一律聊天／一律書面（選擇器）、說明文字、個別設定的 App 清單（圖示、名稱、聊天或書面、移除按鈕）。選單的「這個 App 用聊天設定」不在視窗裡：它切換的是那個 App 的 session 的 client，視窗不屬於任何 session（`profile-choice.md` §2.4） | UserDefaults 鍵 `profileMode`、`appProfiles`；`Shell.setProfileMode`、`Shell.removeAppProfile`，改完對組字擁有者重設設定 |
 | 外觀 | 候選窗方向（分段控制「橫排／直排」，放在玻璃深淺之前；下一次出現的候選窗用新的方向，開著的候選窗不變；核心的 setter 快照會把正在顯示的即時預測列換成新方向，但從設定視窗改時看不到（點設定視窗會讓組字被送出、候選窗收起，是推論、沒量過），所以只有 API 與測試走得到這條；`docs/contracts/candidate-vertical.md` §2.1、§2.4） | UserDefaults 鍵 `candidateVertical`（Bool，沒設過是 false＝橫排）；`Shell.applyCandidateVertical`，核心每次建 engine 與設定改變時收到 |
 | 外觀 | 候選窗玻璃深淺（滑桿 0–1，兩端是 Syrtis 的圖示：左邊中空的 `rectangle.on.rectangle`、右邊實心的 `rectangle.fill.on.rectangle.fill`，只是裝飾、VoiceOver 不讀） | UserDefaults 鍵 `glassTint`（Double，沒設過是 0） |

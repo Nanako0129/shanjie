@@ -93,12 +93,13 @@ jobs:
           toolchain: 1.97.1
 
       # The bigram model is not in git (docs/PLAN.md S2c); it is the model-v6
-      # release asset, its word-class table (S2k) is the classes-v4 asset and its
+      # release asset, its word-class table (S2k) is the classes-v5 asset and its
       # Kneser-Ney side file (kn-core) is the kn-v1 asset. The small model of
       # 語意校正 (S7c-2b) is the tinylm-v5 asset (SJTL0004: it records model-v6's and kn-v1's hashes).
+      # The trigram table of the formal profile (trigram-core) is the sj-cx-1-7.7m asset (bound to model-v6's hash).
       # Checking them here fails the run in seconds with a clear message instead
       # of after the build. The hashes are checked against data/bigram.sjlm.sha256,
-      # data/classes.sjc.sha256, data/kn.sjkn.sha256 and data/tinylm.sjtl.sha256 (also read by build-app.sh and release.yml);
+      # data/classes.sjc.sha256, data/kn.sjkn.sha256, data/tinylm.sjtl.sha256 and data/trigram.sjt3.sha256 (also read by build-app.sh and release.yml);
       # cli/tests/golden.rs repeats the first two, so a model switch updates both (docs/data-files.md).
       - name: Fetch the language model
         env:
@@ -107,12 +108,14 @@ jobs:
           set -euo pipefail
           gh release download model-v6 --repo "$GITHUB_REPOSITORY" -p bigram.sjlm -D data/lm
           shasum -a 256 -c data/bigram.sjlm.sha256
-          gh release download classes-v4 --repo "$GITHUB_REPOSITORY" -p classes.sjc -D data/lm
+          gh release download classes-v5 --repo "$GITHUB_REPOSITORY" -p classes.sjc -D data/lm
           shasum -a 256 -c data/classes.sjc.sha256
           gh release download kn-v1 --repo "$GITHUB_REPOSITORY" -p kn.sjkn -D data/lm
           shasum -a 256 -c data/kn.sjkn.sha256
           gh release download tinylm-v5 --repo "$GITHUB_REPOSITORY" -p tinylm.sjtl -D data/lm
           shasum -a 256 -c data/tinylm.sjtl.sha256
+          gh release download sj-cx-1-7.7m --repo "$GITHUB_REPOSITORY" -p trigram.sjt3 -D data/lm
+          shasum -a 256 -c data/trigram.sjt3.sha256
 
       - name: Tests (debug)
         run: cargo test --locked
@@ -163,8 +166,19 @@ jobs:
           python3 reference/proto/check_unigram_overlay.py
           python3 reference/proto/test_demote.py
 
+      # numpy for the Python steps that need it. The runner's python3 has none; with trigram.sjt3 beside the model,
+      # lm_eval.py --profile formal imports reference/proto/trigram.py (numpy), and the X0c and trigram-table tests need it too.
+      # Steps that do not need numpy keep the runner's python3.
+      - name: Python venv with numpy
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m venv "$RUNNER_TEMP/x0c-venv"
+          "$RUNNER_TEMP/x0c-venv/bin/python" -m pip install --quiet numpy==2.5.4
+
       # docs/contracts/eval-stats.md: the statistics tests, and the Python rowstats of dev302 equal
       # the golden the Rust CLI is compared with (cli/tests/golden.rs), so both writers are held.
+      # The formal pass reads the trigram table beside the model, so both passes run in the numpy venv.
       - name: Eval statistics (Python)
         shell: bash
         run: |
@@ -172,7 +186,7 @@ jobs:
           T="$RUNNER_TEMP"
           python3 -m unittest tools.test_evalstats
           for p in chat formal; do
-            python3 reference/proto/lm_eval.py --profile "$p" --dev 302 --rowstats "$T/$p.rowstats" > /dev/null
+            "$T/x0c-venv/bin/python" reference/proto/lm_eval.py --profile "$p" --dev 302 --rowstats "$T/$p.rowstats" > /dev/null
             cmp "$T/$p.rowstats" "eval/golden/s2-lm-dev302-$p.rowstats"
           done
 
@@ -209,16 +223,22 @@ jobs:
       - name: Overlay manual words (Python)
         run: python3 -m unittest tools/test_build_overlay.py
 
+      # docs/contracts/holdout-refresh.md section 8: the held-out containment guard (tools/holdout_guard.py report, build_counts --holdout-guard), synthetic input and a fake conversion table.
+      - name: Holdout guard (Python)
+        run: python3 -W ignore -m unittest tools/test_holdout_guard.py
+
       # docs/contracts/x0c-compare.md acceptance 5: score_0c.py and versus.py against a fake model (input layout, 64-character
       # context, log10 scale, unscorable rows, covered-only comparison). They need numpy (not onnxruntime, not the weights),
-      # which the runner may not have, so it goes into a throwaway venv.
-      - name: X0c scoring and comparison (Python)
+      # which the runner may not have, so it runs in the throwaway venv built earlier in the job ("Python venv with numpy").
+      #
+      # docs/contracts/trigram-core.md slice A: tools/test_build_trigram.py (the SJT30001 builder, reader and scorer, the toy golden
+      # file check, and lm_eval.py's loading rules) needs numpy too, so it runs in the same venv.
+      - name: X0c scoring and comparison, trigram table (Python)
         shell: bash
         run: |
           set -euo pipefail
-          python3 -m venv "$RUNNER_TEMP/x0c-venv"
-          "$RUNNER_TEMP/x0c-venv/bin/python" -m pip install --quiet numpy==2.5.4
           "$RUNNER_TEMP/x0c-venv/bin/python" -W ignore -m unittest experiments/x0c/test_x0c.py
+          "$RUNNER_TEMP/x0c-venv/bin/python" -W ignore -m unittest tools/test_build_trigram.py
 
   # The Swift input method (docs/contracts/s3b.md section 3): build the ad-hoc
   # app, the Swift tests through the real core and model, the bundled
@@ -254,17 +274,23 @@ jobs:
           set -euo pipefail
           gh release download model-v6 --repo "$GITHUB_REPOSITORY" -p bigram.sjlm -D data/lm
           shasum -a 256 -c data/bigram.sjlm.sha256
-          gh release download classes-v4 --repo "$GITHUB_REPOSITORY" -p classes.sjc -D data/lm
+          gh release download classes-v5 --repo "$GITHUB_REPOSITORY" -p classes.sjc -D data/lm
           shasum -a 256 -c data/classes.sjc.sha256
           gh release download kn-v1 --repo "$GITHUB_REPOSITORY" -p kn.sjkn -D data/lm
           shasum -a 256 -c data/kn.sjkn.sha256
           gh release download tinylm-v5 --repo "$GITHUB_REPOSITORY" -p tinylm.sjtl -D data/lm
           shasum -a 256 -c data/tinylm.sjtl.sha256
+          gh release download sj-cx-1-7.7m --repo "$GITHUB_REPOSITORY" -p trigram.sjt3 -D data/lm
+          shasum -a 256 -c data/trigram.sjt3.sha256
 
       # The local entry points (Makefile, docs/verification.md). cargo test
       # already ran in the core job, so only the Swift tests run here.
       - name: Build the app (ad-hoc)
         run: make bundle
+
+      # release.yml's CI gate against a stub gh: a tag on an appcast.xml-only commit uses its parent's run.
+      - name: CI gate script
+        run: scripts/test-check-ci-gate.sh
 
       # install-ime.sh file handling with a stub app in a temporary HOME; nothing can be registered.
       - name: Install script file handling
@@ -273,7 +299,7 @@ jobs:
       # Includes the log-stream test (acceptance 5): it needs /usr/bin/log
       # stream, which the runner's user can run.
       - name: Swift tests
-        run: swift test --package-path macos
+        run: swift test --package-path macos --force-resolved-versions
 
       # The empty override builds with the shipping bundle ID: an ephemeral
       # runner has no installation to collide with (see the Makefile).

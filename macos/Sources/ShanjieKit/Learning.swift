@@ -58,6 +58,8 @@ public struct MenuEntry: Equatable, Sendable {
         case toggleAcgPack
         case toggleAppChat
         case openSettings
+        /// docs/contracts/about-update.md section 1: a silent check, then Sparkle's interactive update flow if it confirms one.
+        case installUpdate
     }
 
     public var title: String
@@ -73,6 +75,10 @@ public struct MenuEntry: Equatable, Sendable {
         public static let demote = "避免把敏感字詞排在前面"
         public static let prediction = "即時預測"
         public static let english = "中英混打（實驗）"
+        /// The choice under it in the settings window (zhen-inline section 2): the label and its two values.
+        public static let englishDisplay = "英文的顯示"
+        public static let englishDisplayTyped = "打字時就顯示"
+        public static let englishDisplaySpace = "按空白才顯示"
         public static let abbreviation = "可省略韻母"
         public static let rerank = "語意校正"
         public static let acgPack = "動漫與遊戲詞"
@@ -222,6 +228,11 @@ extension Session {
             items.append(MenuEntry(title: T.appChat, action: .toggleAppChat, checked: profile(for: bundle) == Shell.chat,
                                    enabled: shell.profileMode == .auto))
         }
+        // about-update section 1: only while a newer version is known; never shown otherwise.
+        // Greyed while a check runs (the press would be ignored).
+        if let u = shell.updates, let v = u.available {
+            items.append(MenuEntry(title: UpdateText.menu(v), action: .installUpdate, enabled: !u.checking))
+        }
         items.append(MenuEntry(title: T.settings, action: .openSettings))
         items.append(MenuEntry(title: T.clear, action: .clear))
         items.append(MenuEntry(title: T.excludeBackup, action: .toggleBackup, checked: shell.backupExcluded))
@@ -255,6 +266,8 @@ extension Session {
             toggleAppChat()
         case .openSettings:
             shell.openSettings()
+        case .installUpdate:
+            shell.updates?.install()
         }
     }
 }

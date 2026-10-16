@@ -147,6 +147,19 @@ def kn_tag(path):
     return lm_eval.kn_tag(path)
 
 
+def tri_tag(path):
+    """The CLI's `+tri:<sha8>` for the trigram table beside the model (Lm::tri_tag), or "" without one. Stdlib only: the tag is the file's SHA-256."""
+    return f"+tri:{bench.sha_file(path)[:8]}" if os.path.lexists(path) else ""
+
+
+def expected_tag(prof, ctx_tag, tl8, kn, tri):
+    """The setting tag the CLI prints in the shipping setting (--packs acg --tinylm). With a trigram table the formal profile reads it,
+    scores without Kneser-Ney (no `+kn:`) and ends the tag with `+tri:`; chat ignores the table and keeps `+kn:`."""
+    if prof == "formal" and tri:
+        return f"lm-{prof}{ctx_tag}+tl:{tl8}+acg{tri}"
+    return f"lm-{prof}{ctx_tag}{kn}+tl:{tl8}+acg"
+
+
 def pick(ng, ll, alpha, tau, delta):
     """core/src/tinylm.rs pick, line for line."""
     if len(ng) < 2 or ng[0] - ng[1] >= tau:
@@ -339,7 +352,7 @@ def read_cli_files(dump, words, scores, n):
     return cands, gold0, recs
 
 
-def run_cell(cli, lm, tl, prof, rows_file, lex, par, lenient, report, td, kn=""):
+def run_cell(cli, lm, tl, prof, rows_file, lex, par, lenient, report, td, kn="", tri=""):
     rows = parse_rows(read_text(rows_file))
     f = lambda n: os.path.join(td, n)
     env = dict(os.environ, SHANJIE_VARIANTS=os.path.join(ROOT, "eval/variants.tsv"))
@@ -349,7 +362,7 @@ def run_cell(cli, lm, tl, prof, rows_file, lex, par, lenient, report, td, kn="")
     m0 = bench.parse_summary(bench.sh(cli_cmd(cli, lm, tl, prof, rows_file, False, ["--rowstats", f("r0")]), env=env))
     # The setting tag the CLI prints: a dropped flag (no context, no pack, no small model) must fail the cell, as in bench.run_cell2.
     for got, ctx_tag in ((m["tag"], "+ctx"), (m0["tag"], "")):
-        if got != f"lm-{prof}{ctx_tag}{kn}+tl:{tl8}+acg":
+        if got != expected_tag(prof, ctx_tag, tl8, kn, tri):
             raise RuntimeError(f"{prof}: CLI setting tag {got} is not the shipping setting")
     n, top1, o64, sha = m["n"], m["top1"], m["oracle64"], m["top1_sha256"]
     if not (len(rows) == n == m0["n"]):
@@ -402,10 +415,11 @@ def cmd_run(a):
     lm, tl = os.path.join(ROOT, "data/lm/bigram.sjlm"), os.path.join(ROOT, "data/lm/tinylm.sjtl")
     lenient, lex, par = load_lenient(), Lex.load(), tinylm_params(tl)
     kn = kn_tag(os.path.join(ROOT, "data/lm/kn.sjkn"))   # the CLI turns KN on when the side file is beside the model
+    tri = tri_tag(os.path.join(ROOT, "data/lm/trigram.sjt3"))   # the CLI reads it for the formal profile only
     path = os.path.join(OUT_DIR, a.label + ".json")
     doc = json.load(open(path, encoding="utf-8")) if os.path.isfile(path) else {"label": a.label, "sets": {}}
     meta = {"commit": git_head(), "setting": "--context --packs acg --tinylm", "cli_sha256": bench.sha_file(cli),
-            "models": {n: bench.sha_file(os.path.join(ROOT, "data/lm", n)) for n in ("bigram.sjlm", "classes.sjc") + (("kn.sjkn",) if kn else ()) + ("tinylm.sjtl",)},
+            "models": {n: bench.sha_file(os.path.join(ROOT, "data/lm", n)) for n in ("bigram.sjlm", "classes.sjc") + (("kn.sjkn",) if kn else ()) + ("tinylm.sjtl",) + (("trigram.sjt3",) if tri else ())},
             "alpha_tau_delta": {p: list(v) for p, v in par.items()}}
     check_same_run(doc, meta)
     doc.update(meta)
@@ -414,7 +428,7 @@ def cmd_run(a):
         doc["sets"][name] = {"private": private, "file_sha256": bench.sha_file(f), "profiles": {}}
         for prof in PROFILES:
             with tempfile.TemporaryDirectory() as td:   # the dump and the word dump hold sentences: they are deleted here
-                cn, per = run_cell(cli, lm, tl, prof, f, lex, par[prof], lenient, name == "user-reported", td, kn)
+                cn, per = run_cell(cli, lm, tl, prof, f, lex, par[prof], lenient, name == "user-reported", td, kn, tri)
             doc["sets"][name]["profiles"][prof] = cn
             if not private:
                 os.makedirs(a.rows_out, exist_ok=True)

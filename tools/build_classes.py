@@ -31,7 +31,9 @@ import ime  # noqa: E402
 import lm as L  # noqa: E402
 
 WORK = os.path.expanduser("~/.cache/shanjie/work/s2k")
-EPS, MU = 0.1, 0.8
+# MU is the class-term weight written to the header: 0.8 through classes-v4, 0.2 from classes-v5 (docs/contracts/classes-v5.md,
+# chosen by the lytune-attrib sweep); rebuilding with this tool keeps the shipped value.
+EPS, MU = 0.1, 0.2
 NONE = 0xFFFF
 
 

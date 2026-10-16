@@ -3,23 +3,28 @@ import ShanjieKit
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// The settings window (docs/contracts/settings-window.md section 2.1): one NSWindow with a SwiftUI
-/// grouped Form, in the input method's own process. It has no text field, so it needs no Edit menu and
-/// the input method never types into its own window. Brought forward like `AlertDialogs`: remember the
-/// frontmost app, `NSApp.activate()`, `makeKeyAndOrderFront`; on close the focus goes back.
+/// The settings window (docs/contracts/settings-window.md section 2.1, layout and size from settings-sidebar.md): one
+/// NSWindow with a SwiftUI sidebar of pages and the selected page's grouped Form, in the input method's own process. It
+/// has no text field, so it needs no Edit menu and the input method never types into its own window. Brought forward like
+/// `AlertDialogs`: remember the frontmost app, `NSApp.activate()`, `makeKeyAndOrderFront`; on close the focus goes back.
 @MainActor
 final class SettingsWindowController: NSObject, NSWindowDelegate {
     private let shell: Shell
     /// Built on the first `show()`, so a user who never opens the window pays nothing.
     private var model: SettingsModel?
     private var window: NSWindow?
-    private var host: NSHostingView<SettingsForm>?
     private var previous: NSRunningApplication?
     /// The 個別設定的 App names and icons, kept across window updates (profile-choice section 2.4).
     private let appLabels = AppLabels()
 
     init(shell: Shell) {
         self.shell = shell
+        super.init()
+        // A Dock, resolution or display change while the window is open shrinks the usable area: refit and clamp again
+        // (settings-sidebar section 1, any screen; /code-review).
+        NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.refit() }
+        }
     }
 
     func show() {
@@ -31,8 +36,9 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         m.refreshExternal()
         let w = window ?? makeWindow(m)
         window = w
-        fit(w)
-        center(w)
+        let screen = Self.screenUnderMouse()
+        fit(w, on: screen)
+        center(w, on: screen)
         NSApp.activate()
         w.makeKeyAndOrderFront(nil)
         // activate() is only a request (cooperative activation, macOS 14+); on the user's machine it was
@@ -41,26 +47,52 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         w.orderFrontRegardless()
     }
 
-    /// Sizes the window to the form, keeping its top edge where it is (`show()` centres it afterwards).
-    private func fit(_ w: NSWindow) {
-        guard let host else { return }
+    /// Measured page heights come out this much short of what the window draws: a 10-toggle grouped form measured 435 pt
+    /// in a window and was drawn 438 pt tall (/code-review probe, 2026-10-15). Without it the tallest page would scroll.
+    private static let measureSlack: CGFloat = 4
+
+    /// Sizes the window (settings-sidebar section 2.2): the tallest page plus the title bar, at most the usable height of
+    /// `screen`, keeping the top edge where it is (`show()` centres it afterwards, `refit()` clamps it). Each page is measured
+    /// with a vertical fixedSize in a hidden hosting view attached to the window: the window shows only the selected page, the
+    /// on-screen form has no fixedSize so it can scroll when the cap bites, and a hosting view outside any window measured
+    /// about 4.5 pt per row too tall (/code-review probe). Every page is rebuilt on every fit; that happens only on
+    /// show, an app-list change and a screen change, so it is not cached. With `.fullSizeContentView` the content rect is the
+    /// whole frame, so this height is the frame's.
+    private func fit(_ w: NSWindow, on screen: NSScreen?) {
+        guard let model, let container = w.contentView else { return }
+        let tallest = SettingsPage.allCases.map { page in
+            let probe = NSHostingView(rootView: SettingsPageForm(page: page, model: model, appLabels: appLabels)
+                .fixedSize(horizontal: false, vertical: true))
+            probe.isHidden = true
+            container.addSubview(probe)
+            defer { probe.removeFromSuperview() }
+            return probe.fittingSize.height
+        }.max() ?? 0
+        let cap = screen?.visibleFrame.height ?? .greatestFiniteMagnitude
         let top = w.frame.maxY
-        let size = host.fittingSize
-        w.setContentSize(NSSize(width: size.width, height: size.height + Self.titleBarHeight))
+        w.setContentSize(NSSize(width: SettingsForm.width, height: min(tallest + Self.measureSlack + Self.titleBarHeight, cap)))
         w.setFrameTopLeftPoint(NSPoint(x: w.frame.minX, y: top))
     }
 
-    /// Profile-choice section 2.4: the 個別設定的 App list grew or shrank while the window is open. Called one main-actor turn
-    /// after SwiftUI's onChange, so the hosting view's fitting size is read after the change is laid out (inferred, not measured;
-    /// the device check sees it).
+    /// The 個別設定的 App list changed length (profile-choice section 2.4) or the screen changed, while the window is open.
+    /// The app-list call comes one main-actor turn after SwiftUI's onChange, so the window is not resized in the middle of
+    /// SwiftUI's update. The window grows downward from its top edge, so it is clamped back into its screen's usable area
+    /// (settings-sidebar section 2.2): a window dragged down to the Dock moves up instead of growing under it.
     private func refit() {
         guard let window, window.isVisible else { return }
-        fit(window)
+        let screen = window.screen ?? NSScreen.main
+        fit(window, on: screen)
+        if let area = screen?.visibleFrame {
+            window.setFrameOrigin(settingsFrame(window.frame, clampedInto: area).origin)
+        }
     }
 
     /// The window's background material (user, 2026-10-10: Liquid Glass was too see-through; a flatter glass).
     /// `.popover` was picked by eye on the system's list, not measured; the user's device check passed (2026-10-10).
     static let backgroundMaterial: NSVisualEffectView.Material = .popover
+    /// Above ordinary app windows even when the input method is not active, as AlertDialogs does with .modalPanel (contract
+    /// section 2.1, device check 2026-10-10). Sparkle's windows use the same level (`Updater`), so they can sit above it.
+    static let level: NSWindow.Level = .floating
 
     /// The glass runs under the title bar, as in Syrtis's settings window (TokenBar SettingsWindowController.swift):
     /// with the window's background clear, a title bar outside the glass was see-through (user, 2026-10-10, third
@@ -83,7 +115,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             Task { @MainActor in self?.refit() }
         }))
         host.safeAreaRegions = []  // placed below the title bar by its top constraint, so no second inset
-        self.host = host
+        host.sizingOptions = []  // the window's size comes from fit() alone (settings-sidebar section 2.2), not the content's
         let container = NSView()
         let layers: [(NSView, CGFloat)] = [(glass, 0), (host, Self.titleBarHeight)]
         for (v, top) in layers {
@@ -101,20 +133,22 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         w.isOpaque = false
         w.backgroundColor = .clear
         w.isReleasedWhenClosed = false
-        // Above ordinary app windows even when the input method is not active, as AlertDialogs does with
-        // .modalPanel (contract section 2.1, device check 2026-10-10).
-        w.level = .floating
+        w.level = Self.level
         w.delegate = self
         return w
     }
 
-    /// Centred on the screen the mouse is on: the user just clicked the menu there, and `NSScreen.main`
-    /// is the screen of the key window, which an input method's process does not have. Done after the
-    /// content size is set (`center()` before layout put the window at the top, device check 2026-10-10).
-    private func center(_ w: NSWindow) {
+    /// The screen the mouse is on: the user just clicked the menu there, and `NSScreen.main` is the screen of the key
+    /// window, which an input method's process does not have.
+    private static func screenUnderMouse() -> NSScreen? {
         let mouse = NSEvent.mouseLocation
-        guard let screen = NSScreen.screens.first(where: { NSMouseInRect(mouse, $0.frame, false) }) ?? NSScreen.main else { return }
-        let area = screen.visibleFrame
+        return NSScreen.screens.first(where: { NSMouseInRect(mouse, $0.frame, false) }) ?? NSScreen.main
+    }
+
+    /// Centred on `screen`'s usable area. Done after the size is set (`center()` before layout put the window at the
+    /// top, device check 2026-10-10); the size is capped to that area, so the whole window is inside it.
+    private func center(_ w: NSWindow, on screen: NSScreen?) {
+        guard let area = screen?.visibleFrame else { return }
         w.setFrameOrigin(NSPoint(x: area.midX - w.frame.width / 2, y: area.midY - w.frame.height / 2))
     }
 
@@ -130,129 +164,241 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     }
 }
 
-/// System controls only. Order follows the menu (section 2.2); each control writes through `SettingsModel`.
+/// The sidebar pages (settings-sidebar section 2.1), in sidebar order.
+enum SettingsPage: CaseIterable, Hashable {
+    /// 關於 last (docs/contracts/about-update.md section 1).
+    case general, candidates, appearance, memory, about
+
+    var title: String {
+        switch self {
+        case .general: "一般"
+        case .candidates: "選字"
+        case .appearance: "外觀"
+        case .memory: "選字記憶"
+        case .about: "關於"
+        }
+    }
+
+    /// SF Symbols picked by name from the system catalogue, not measured against a reference (first device round).
+    var symbol: String {
+        switch self {
+        case .general: "gearshape"
+        case .candidates: "character.cursor.ibeam"
+        case .appearance: "paintpalette"
+        case .memory: "brain"
+        case .about: "info.circle"
+        }
+    }
+}
+
+/// The window's content (settings-sidebar section 2.1): the pages in a sidebar, the selected page's form beside it. The
+/// selection is view state in the window's one hosting view, so reopening the window shows the last page in this run.
+/// A plain fixed-width sidebar, not NavigationSplitView: that one's sidebar can be collapsed, and this window has no
+/// toolbar or View menu to bring it back (/code-review probe: canCollapse true, no toolbar).
 struct SettingsForm: View {
-    /// Chosen to fit the controls and their labels on one line each; not measured against any reference.
-    private static let formWidth: CGFloat = 420
-    /// Icon-to-slider gap, Syrtis's value (TokenBar GlassTintControl.swift `HStack(spacing: 8)`); not measured.
-    private static let tintIconSpacing: CGFloat = 8
-    /// The app icons in the 個別設定的 App list: one line of body text; not measured against any reference.
-    private static let appIconSize: CGFloat = 16
+    /// The sidebar column; a round number for the short labels, not measured against System Settings (first device round).
+    static let sidebarWidth: CGFloat = 160
+    static var width: CGFloat { sidebarWidth + SettingsPageForm.formWidth }
     @ObservedObject var model: SettingsModel
     let appLabels: AppLabels
     /// The 個別設定的 App list changed length: the window refits its height.
     let onRowCountChange: () -> Void
+    @State private var page: SettingsPage = .general
+
+    var body: some View {
+        HStack(spacing: 0) {
+            // A click on the sidebar's empty space or a ⌘-click deselects; keep the page instead of showing none.
+            List(SettingsPage.allCases, id: \.self, selection: Binding(get: { page }, set: { if let p = $0 { page = p } })) { p in
+                Label(p.title, systemImage: p.symbol)
+            }
+            .listStyle(.sidebar)
+            .frame(width: Self.sidebarWidth)
+            // A fresh form per page, so a page opens at its top rather than at the previous page's scroll offset.
+            SettingsPageForm(page: page, model: model, appLabels: appLabels)
+                .id(page)
+        }
+        .onChange(of: model.appProfiles.count) { onRowCountChange() }
+    }
+}
+
+/// One page's controls, system controls only; each control writes through `SettingsModel`. The sections are the single
+/// form's (settings-window section 2.2), grouped by page; `fit()` measures each page on its own.
+struct SettingsPageForm: View {
+    /// Chosen to fit the controls and their labels on one line each; not measured against any reference.
+    static let formWidth: CGFloat = 420
+    /// Icon-to-slider gap, Syrtis's value (TokenBar GlassTintControl.swift `HStack(spacing: 8)`); not measured.
+    private static let tintIconSpacing: CGFloat = 8
+    /// The app icons in the 個別設定的 App list: one line of body text; not measured against any reference.
+    private static let appIconSize: CGFloat = 16
+    let page: SettingsPage
+    @ObservedObject var model: SettingsModel
+    let appLabels: AppLabels
 
     var body: some View {
         Form {
-            Section("鍵盤") {
-                Picker("鍵盤排列", selection: Binding(get: { model.layout }, set: { model.selectLayout($0) })) {
-                    Text("標準").tag(InputMode.standard)
-                    Text("倚天").tag(InputMode.eten)
+            switch page {
+            case .general:
+                Section("鍵盤") {
+                    Picker("鍵盤排列", selection: Binding(get: { model.layout }, set: { model.selectLayout($0) })) {
+                        Text("標準").tag(InputMode.standard)
+                        Text("倚天").tag(InputMode.eten)
+                    }
                 }
-            }
-            Section("選字") {
-                Toggle(MenuEntry.Text.prediction, isOn: Binding(get: { model.prediction }, set: { model.setPrediction($0) }))
-                // Greyed while the prediction row is off, like the menu item (v3-engine section 12.1).
-                if model.showsAbbreviation {
-                    Toggle(MenuEntry.Text.abbreviation, isOn: Binding(get: { model.abbreviation }, set: { model.setAbbreviation($0) }))
-                        .disabled(!model.prediction)
-                }
-                // Same place as in the menu (after 即時預測 and 可省略韻母 when shown); greyed (setting kept) when the word list did not load
-                // or the layout is Eten, like the menu item (zhen-mixed section 3.2).
-                Toggle(MenuEntry.Text.english, isOn: Binding(get: { model.english }, set: { model.setEnglish($0) }))
-                    .disabled(!model.englishEnabled)
-                Toggle(MenuEntry.Text.demote, isOn: Binding(get: { model.demote }, set: { model.setDemote($0) }))
-                // Right after the toggle that greys it. Greyed while 避免把敏感字詞排在前面 is off or the small model did not load,
-                // like the menu item: the core makes no rerank job then (s7c2b section 2.3).
-                Toggle(MenuEntry.Text.rerank, isOn: Binding(get: { model.rerank }, set: { model.setRerank($0) }))
-                    .disabled(!model.rerankEnabled)
-                // Rerank strength (docs/contracts/rerank-strength.md section 3): always the three choices, greyed with the toggle,
-                // or when the loaded model has only the standard set.
-                Picker("強度", selection: Binding(get: { model.rerankLevel }, set: { model.setRerankLevel($0) })) {
-                    Text("保守").tag(RerankLevel.conservative)
-                    Text("標準").tag(RerankLevel.standard)
-                    Text("積極").tag(RerankLevel.aggressive)
-                }
-                .pickerStyle(.segmented)
-                .disabled(!model.rerankLevelEnabled)
-                Toggle(MenuEntry.Text.acgPack, isOn: Binding(get: { model.acgPack }, set: { model.setAcgPack($0) }))
-                if let line = model.acgDataLine {
-                    Text(line).font(.caption).foregroundStyle(.secondary)
-                }
-            }
-            // profile-choice section 2.4, between 選字 and 外觀.
-            Section("聊天／書面") {
-                Picker("切換方式", selection: Binding(get: { model.profileMode }, set: { model.setProfileMode($0) })) {
-                    Text("依 App 自動").tag(ProfileMode.auto)
-                    Text("一律聊天").tag(ProfileMode.chat)
-                    Text("一律書面").tag(ProfileMode.formal)
-                }
-                Text("依 App 自動：聊天 App（Discord、LINE、訊息等）用聊天設定，其他 App 用書面設定。")
-                    .font(.caption).foregroundStyle(.secondary)
-                Text("個別設定的 App")
-                if model.appProfiles.isEmpty {
-                    Text("在 App 裡打開善解選單，勾選「\(MenuEntry.Text.appChat)」，就會列在這裡。")
+                Section("聊天／書面") {
+                    Picker("切換方式", selection: Binding(get: { model.profileMode }, set: { model.setProfileMode($0) })) {
+                        Text("依 App 自動").tag(ProfileMode.auto)
+                        Text("一律聊天").tag(ProfileMode.chat)
+                        Text("一律書面").tag(ProfileMode.formal)
+                    }
+                    Text("依 App 自動：聊天 App（Discord、LINE、訊息等）用聊天設定，其他 App 用書面設定。")
                         .font(.caption).foregroundStyle(.secondary)
-                } else {
-                    ForEach(appLabels.sorted(model.appProfiles), id: \.row.bundle) { item in
-                        HStack {
-                            Image(nsImage: item.label.icon).resizable().frame(width: Self.appIconSize, height: Self.appIconSize)
-                                .accessibilityHidden(true)
-                            Text(item.label.name)
-                            Spacer()
-                            // Dimmed outside 依 App 自動, where the choice is kept but not used; removing stays possible.
-                            Text(item.row.chat ? "聊天" : "書面")
-                                .foregroundStyle(model.profileMode == .auto ? .secondary : .tertiary)
-                            Button { model.removeAppProfile(item.row.bundle) } label: { Image(systemName: "minus.circle") }
-                                .buttonStyle(.borderless)
-                                .accessibilityLabel("移除")
+                    Text("個別設定的 App")
+                    if model.appProfiles.isEmpty {
+                        Text("在 App 裡打開善解選單，勾選「\(MenuEntry.Text.appChat)」，就會列在這裡。")
+                            .font(.caption).foregroundStyle(.secondary)
+                    } else {
+                        ForEach(appLabels.sorted(model.appProfiles), id: \.row.bundle) { item in
+                            HStack {
+                                Image(nsImage: item.label.icon).resizable().frame(width: Self.appIconSize, height: Self.appIconSize)
+                                    .accessibilityHidden(true)
+                                Text(item.label.name)
+                                Spacer()
+                                // Dimmed outside 依 App 自動, where the choice is kept but not used; removing stays possible.
+                                Text(item.row.chat ? "聊天" : "書面")
+                                    .foregroundStyle(model.profileMode == .auto ? .secondary : .tertiary)
+                                Button { model.removeAppProfile(item.row.bundle) } label: { Image(systemName: "minus.circle") }
+                                    .buttonStyle(.borderless)
+                                    .accessibilityLabel("移除")
+                            }
                         }
                     }
                 }
-            }
-            Section("外觀") {
-                // Before the glass tint (candidate-vertical contract section 2.1). A candidate window already open keeps its orientation, so the next one uses the new setting. (The core also turns a prediction row on screen, but a click in this window is inferred, not measured, to commit the composition and hide the panel first.)
-                Picker("候選窗方向", selection: Binding(get: { model.candidateVertical }, set: { model.setCandidateVertical($0) })) {
-                    Text("橫排").tag(false)
-                    Text("直排").tag(true)
-                }
-                .pickerStyle(.segmented)
-                // The end icons are Syrtis's (TokenBar GlassTintControl.swift): outline at the clear end, filled at the deep
-                // end, in an HStack beside the slider. As the Slider's own value labels inside a grouped Form both came out
-                // filled on device (user, 2026-10-10). The slider keeps the regular size (Syrtis's is .small), as checked on
-                // device. The icons are decoration, hidden from VoiceOver; the slider carries the label.
-                LabeledContent("候選窗玻璃深淺") {
-                    HStack(spacing: Self.tintIconSpacing) {
-                        Image(systemName: "rectangle.on.rectangle")
-                            .foregroundStyle(.secondary)
-                            .accessibilityHidden(true)
-                        Slider(value: Binding(get: { model.glassTint }, set: { model.setGlassTint($0) }), in: 0...1)
-                            .accessibilityLabel("候選窗玻璃深淺")
-                        Image(systemName: "rectangle.fill.on.rectangle.fill")
-                            .foregroundStyle(.secondary)
-                            .accessibilityHidden(true)
+            case .candidates:
+                Section("選字") {
+                    Toggle(MenuEntry.Text.prediction, isOn: Binding(get: { model.prediction }, set: { model.setPrediction($0) }))
+                    // Greyed while the prediction row is off, like the menu item (v3-engine section 12.1).
+                    if model.showsAbbreviation {
+                        Toggle(MenuEntry.Text.abbreviation, isOn: Binding(get: { model.abbreviation }, set: { model.setAbbreviation($0) }))
+                            .disabled(!model.prediction)
+                    }
+                    // Same place as in the menu (after 即時預測 and 可省略韻母 when shown); greyed (setting kept) when the word list did not load
+                    // or the layout is Eten, like the menu item (zhen-mixed section 3.2).
+                    Toggle(MenuEntry.Text.english, isOn: Binding(get: { model.english }, set: { model.setEnglish($0) }))
+                        .disabled(!model.englishEnabled)
+                    // Under the toggle (zhen-inline section 2); greyed on the toggle's condition and while the toggle is off.
+                    Picker(MenuEntry.Text.englishDisplay, selection: Binding(get: { model.englishInline }, set: { model.setEnglishInline($0) })) {
+                        Text(MenuEntry.Text.englishDisplayTyped).tag(true)
+                        Text(MenuEntry.Text.englishDisplaySpace).tag(false)
+                    }
+                    .pickerStyle(.segmented)
+                    .disabled(!model.englishInlineEnabled)
+                    Toggle(MenuEntry.Text.demote, isOn: Binding(get: { model.demote }, set: { model.setDemote($0) }))
+                    // Right after the toggle that greys it. Greyed while 避免把敏感字詞排在前面 is off or the small model did not load,
+                    // like the menu item: the core makes no rerank job then (s7c2b section 2.3).
+                    Toggle(MenuEntry.Text.rerank, isOn: Binding(get: { model.rerank }, set: { model.setRerank($0) }))
+                        .disabled(!model.rerankEnabled)
+                    // Rerank strength (docs/contracts/rerank-strength.md section 3): always the three choices, greyed with the toggle,
+                    // or when the loaded model has only the standard set.
+                    Picker("強度", selection: Binding(get: { model.rerankLevel }, set: { model.setRerankLevel($0) })) {
+                        Text("保守").tag(RerankLevel.conservative)
+                        Text("標準").tag(RerankLevel.standard)
+                        Text("積極").tag(RerankLevel.aggressive)
+                    }
+                    .pickerStyle(.segmented)
+                    .disabled(!model.rerankLevelEnabled)
+                    Toggle(MenuEntry.Text.acgPack, isOn: Binding(get: { model.acgPack }, set: { model.setAcgPack($0) }))
+                    if let line = model.acgDataLine {
+                        Text(line).font(.caption).foregroundStyle(.secondary)
                     }
                 }
-                // The real bar's glass, cells and tint decision (the depth over an app while typing was not compared).
-                HStack {
-                    Spacer()
-                    TintPreview(value: model.glassTint)
-                    Spacer()
+            case .appearance:
+                Section("外觀") {
+                    // Before the glass tint (candidate-vertical contract section 2.1). A candidate window already open keeps its orientation, so the next one uses the new setting. (The core also turns a prediction row on screen, but a click in this window is inferred, not measured, to commit the composition and hide the panel first.)
+                    Picker("候選窗方向", selection: Binding(get: { model.candidateVertical }, set: { model.setCandidateVertical($0) })) {
+                        Text("橫排").tag(false)
+                        Text("直排").tag(true)
+                    }
+                    .pickerStyle(.segmented)
+                    // The end icons are Syrtis's (TokenBar GlassTintControl.swift): outline at the clear end, filled at the deep
+                    // end, in an HStack beside the slider. As the Slider's own value labels inside a grouped Form both came out
+                    // filled on device (user, 2026-10-10). The slider keeps the regular size (Syrtis's is .small), as checked on
+                    // device. The icons are decoration, hidden from VoiceOver; the slider carries the label.
+                    LabeledContent("候選窗玻璃深淺") {
+                        HStack(spacing: Self.tintIconSpacing) {
+                            Image(systemName: "rectangle.on.rectangle")
+                                .foregroundStyle(.secondary)
+                                .accessibilityHidden(true)
+                            Slider(value: Binding(get: { model.glassTint }, set: { model.setGlassTint($0) }), in: 0...1)
+                                .accessibilityLabel("候選窗玻璃深淺")
+                            Image(systemName: "rectangle.fill.on.rectangle.fill")
+                                .foregroundStyle(.secondary)
+                                .accessibilityHidden(true)
+                        }
+                    }
+                    // The real bar's glass, cells and tint decision (the depth over an app while typing was not compared).
+                    HStack {
+                        Spacer()
+                        TintPreview(value: model.glassTint)
+                        Spacer()
+                    }
                 }
-            }
-            Section("選字記憶") {
-                if model.pausedSecure { Text(MenuEntry.Text.pausedSecure).foregroundStyle(.secondary) }
-                if model.unavailable { Text(MenuEntry.Text.unavailable).foregroundStyle(.secondary) }
-                Toggle(MenuEntry.Text.excludeBackup, isOn: Binding(get: { model.backupExcluded }, set: { model.setBackupExcluded($0) }))
-                Button(MenuEntry.Text.clear) { model.clear() }
+            case .memory:
+                Section("選字記憶") {
+                    if model.pausedSecure { Text(MenuEntry.Text.pausedSecure).foregroundStyle(.secondary) }
+                    if model.unavailable { Text(MenuEntry.Text.unavailable).foregroundStyle(.secondary) }
+                    Toggle(MenuEntry.Text.excludeBackup, isOn: Binding(get: { model.backupExcluded }, set: { model.setBackupExcluded($0) }))
+                    Button(MenuEntry.Text.clear) { model.clear() }
+                }
+            case .about:
+                if let updates = model.updates { AboutSections(updates: updates) }
             }
         }
-        .onChange(of: model.appProfiles.count) { onRowCountChange() }
         .formStyle(.grouped)
         .scrollContentBackground(.hidden)  // the window's glass shows through
         .frame(width: Self.formWidth)
-        .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
+/// The 關於 page (docs/contracts/about-update.md section 1): version, the update controls, the site and the licence line. The
+/// decisions behind it (what the version reads, when a check runs, what the result says) are `Updates`, in ShanjieKit.
+private struct AboutSections: View {
+    /// The site's front page, also the cask's homepage (packaging/Casks/shanjie.rb).
+    private static let site = URL(string: "https://shanjie.nyanako.com/")!
+    @ObservedObject var updates: Updates
+
+    var body: some View {
+        Section("善解輸入法") {
+            LabeledContent("版本", value: updates.versionText)
+        }
+        Section("更新") {
+            Toggle("自動檢查更新", isOn: Binding(get: { updates.autoCheck }, set: { updates.setAutoCheck($0) }))
+            Text("開著時每天最多連線一次，到 GitHub 讀取有沒有新版本；有新版本只在這裡和輸入選單顯示，按下才更新。")
+                .font(.caption).foregroundStyle(.secondary)
+            LabeledContent("上次檢查") {
+                Text(status).foregroundStyle(.secondary)
+            }
+            HStack {
+                Button("立即檢查") { updates.checkNow() }
+                    .disabled(updates.checking)
+                if let v = updates.available {
+                    Button(UpdateText.install(v)) { updates.install() }
+                        .disabled(updates.checking)
+                }
+            }
+        }
+        Section {
+            Link("shanjie.nyanako.com", destination: Self.site)
+            Text("程式以 Apache-2.0 授權釋出，內含的 Sparkle 是 MIT；詞庫與模型的授權與出處在 App 的 Resources/LICENSES。")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    /// 「日期 時間・結果」, 檢查中… while a check runs, — before any check.
+    private var status: String {
+        if updates.checking { return UpdateText.checking }
+        guard let date = updates.lastCheck else { return "—" }
+        let when = date.formatted(date: .numeric, time: .shortened)
+        return UpdateText.result(updates.result, available: updates.available).map { "\(when)・\($0)" } ?? when
     }
 }
 

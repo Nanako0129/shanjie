@@ -15,9 +15,9 @@
 
 | 檔案 | 現行 Release | 內容 | 由什麼產生 |
 |---|---|---|---|
-| `bigram.sjlm` | `model-v5` | 詞與詞相鄰出現的次數（SJLM0001 格式）；含少量用來辨識來源的指紋條目（`docs/data-files.md`、`docs/contracts/model-v4.md` §0） | 語料計數 → `tools/build_lm.py` → 加指紋 |
-| `classes.sjc` | `classes-v3` | 512 個詞類、每個詞的類別與發射機率、類別接續機率、μ = 0.8（SJCL0001 格式；`tools/build_classes.py` 檔頭、`docs/contracts/s2k-word-classes.md` §4.1） | 對計數做詞類分群 → `tools/build_classes.py` |
-| `tinylm.sjtl` | `tinylm-v4` | 1,440 萬參數的字元語言模型，6 層、d 384、字表 9,714 字，int8；檔頭帶聊天與書面各三組（保守、標準、積極）融合參數 α、τ、δ（SJTL0003；`docs/releases/tinylm-v4.md`、`tinylm-v3.md`、`experiments/s7a-tinylm/export_sjtl.py` 檔頭） | 訓練 → 匯出 → 調融合參數 |
+| `bigram.sjlm` | `model-v6`（旁邊另有 KN 側檔 `kn.sjkn`，`kn-v1`） | 詞與詞相鄰出現的次數（SJLM0001 格式）；含少量用來辨識來源的指紋條目（`docs/data-files.md`、`docs/contracts/model-v4.md` §0） | 語料計數 → `tools/build_lm.py` → 加指紋 |
+| `classes.sjc` | `classes-v5` | 512 個詞類、每個詞的類別與發射機率、類別接續機率、μ = 0.2（classes-v4 以前是 0.8；SJCL0001 格式；`tools/build_classes.py` 檔頭、`docs/contracts/s2k-word-classes.md` §4.1） | 對計數做詞類分群 → `tools/build_classes.py` |
+| `tinylm.sjtl` | `tinylm-v5`（SJTL0004，檔頭另記 kn-v1 的雜湊） | 1,440 萬參數的字元語言模型，6 層、d 384、字表 9,714 字，int8；檔頭帶聊天與書面各三組（保守、標準、積極）融合參數 α、τ、δ（SJTL0003；`docs/releases/tinylm-v4.md`、`tinylm-v3.md`、`experiments/s7a-tinylm/export_sjtl.py` 檔頭） | 訓練 → 匯出 → 調融合參數 |
 
 ### 1.2 三個檔案怎麼互相綁定
 
@@ -34,7 +34,7 @@
 |---|---|---|
 | 詞類表 → 模型 | `classes.sjc` 檔頭記模型的 SHA-256；缺檔、配到別的模型、內容不對，載入都回 3 | 重建模型就要重建詞類表（`docs/data-files.md`「現在用的檔案」） |
 | 語意校正模型 → 模型 | `tinylm.sjtl` 檔頭記調參時用的模型的 SHA-256；不符時核心拒絕載入、只用 n-gram（`docs/data-files.md`） | 重建模型就要重新匯出、重新調參 |
-| 語意校正模型 → 詞類表 | **沒有檢查**，只在 α、τ、δ 的調法上依賴：它們是在 model-v6＋classes-v4＋kn-v1 上調的（tinylm-v5） | 只換詞類表也要重調，雜湊攔不住這種錯配，只能靠 `docs/data-files.md` 的版本表 |
+| 語意校正模型 → 詞類表 | **沒有檢查**，只在 α、τ、δ 的調法上依賴：它們是在 model-v6＋classes-v4＋kn-v1 上調的（tinylm-v5） | 重新分群也要重調，雜湊攔不住這種錯配，只能靠 `docs/data-files.md` 的版本表；只改 μ 而且開著出貨的小模型量過，可以沿用（classes-v5 沿用 tinylm-v5） |
 | 語意校正 → Kneser–Ney 側檔 | SJTL0004 記調參時用的 `kn.sjkn` 的 SHA-256（全 0＝沒開 KN 時調的）；核心要求載入的側檔狀態和它相同，否則拒絕載入（`docs/contracts/model-v6.md` §2.7） | 換側檔就要重新調參、發新的 `tinylm-v…` |
 
 ### 1.3 改了什麼，要發哪些新 Release
@@ -43,8 +43,9 @@
 
 | 改了什麼 | 要發 |
 |---|---|
-| 語料、計數或模型格式 | `model-v6`＋`classes-v4`＋下一個 `tinylm-v…` |
-| 只重新分群 | `classes-v4`＋下一個 `tinylm-v…` |
+| 語料、計數或模型格式 | 下一個 `model-v…`＋下一個 `classes-v…`＋下一個 `kn-v…`＋下一個 `tinylm-v…` |
+| 只重新分群 | 下一個 `classes-v…`＋下一個 `tinylm-v…` |
+| 只改詞類權重 μ（開著出貨的小模型量過） | 下一個 `classes-v…`（classes-v5），小模型沿用 |
 | 小模型的訓練、大小、匯出格式或融合參數 | 下一個 `tinylm-v…`（`tinylm-v2`、`tinylm-v3` 都只換融合參數；`tinylm-v4` 換檔頭格式） |
 
 ## 2. 語料與輸入

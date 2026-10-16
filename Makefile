@@ -17,7 +17,7 @@ rust:
 build: rust
 	@$(call relink_if_stale,Debug)
 	@$(call rebuild_if_header_stale,Debug)
-	swift build --package-path macos
+	swift build --package-path macos --force-resolved-versions
 
 # Everything, in the order it always ran. CLAUDE.md says which part a change runs before a commit. CI runs cargo test, swift test
 # and only part of test-python: the experiments/ tests run only here, so any Python change runs test-python locally.
@@ -43,8 +43,10 @@ test-python:
 	python3 -m unittest tools/test_bench.py
 	python3 -m unittest tools/test_build_english_words.py
 	python3 -m unittest tools/test_build_overlay.py
+	python3 -W ignore -m unittest tools/test_holdout_guard.py
 	python3 -W ignore -m unittest experiments/model-v6/test_force_classes.py
 	python3 -W ignore -m unittest tools/test_triage.py
+	python3 -W ignore -m unittest tools/test_build_trigram.py
 	python3 -W ignore -m unittest tools/test_build_classes.py experiments/s2/test_expected.py
 	cd experiments/sp && python3 -W ignore -m unittest test_predict test_predict2 test_predict3
 	cd experiments/s7a-tinylm && python3 -W ignore -m unittest test_fusegrid test_runsets
@@ -55,7 +57,7 @@ test-python:
 test-swift: rust
 	@$(call relink_if_stale,Debug)
 	@$(call rebuild_if_header_stale,Debug)
-	swift test --package-path macos
+	swift test --package-path macos --force-resolved-versions
 
 # The shipping bundle: build/$(APP_NAME) with the shipping bundle ID.
 bundle: rust
