@@ -6220,7 +6220,7 @@ formal: alpha 0.7, tau 1, delta 2
 ## 2026-10-16：trigram-core 第 C 片暫停，書面有表的退步與修法
 
 - 起因：第 C 片 C3 把表放進測試資料夾後，Rust 與 Swift 有一批測試失敗。其中一條是退步：前文「好」、讀音 ㄅㄚ˙，出貨的書面選「吧」，有表選「爸」。維護者選「先停下來研究」，第 C 片暫停。
-- 量法：Windows 機器，Python 參考解碼（`experiments/derisk-1015/e1/harness.py`，與 Rust 逐位元組一致的那一份），書面 λ 0.7、關 KN、model-v6 與重對應的 H3（`fdd3b05d`）。調參集＝cvtune＋wikitune（6,618 列），判讀五集（5,458 列），discordtune（4,958 列）。BASE 是出貨的書面（有 KN、沒有表，調參集 top1 5540）。
+- 量法：Windows 機器，Python 研究解碼（`experiments/derisk-1015/e1/harness.py`；預設值與第 A 片的 Rust 逐位元組一致，加 `--ctx-u eos --tri-floor 0.5` 是第 A2 片之後的出貨規則），書面 λ 0.7、關 KN、model-v6 與重對應的 H3（`fdd3b05d`）。調參集＝cvtune＋wikitune（6,618 列），判讀五集（5,458 列），discordtune（4,958 列）。BASE 是出貨的書面（有 KN、沒有表，調參集 top1 5540）。
 
 ### 一、前文的詞當 u（規則 (b)）
 

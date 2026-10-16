@@ -148,9 +148,6 @@ class FloorAndClosing(unittest.TestCase):
     def tearDownClass(cls):
         cls._tmp.cleanup()
 
-    def test_floor_value(self):
-        self.assertEqual(trigram.TRI_FLOOR, 0.5)
-
     def test_floor_active_inactive_and_context_not_stored(self):
         lm, tri, pb = self.lm, self.floor_lm, 10 ** -3.0
         # active: the context is stored and keeps only 他, so 占 would get 0.125 * P2; the floor lifts it to 0.5 * P2

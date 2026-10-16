@@ -50,8 +50,10 @@ def start_state(ctx, lm, context=True, x_context=False):
 def decode3(lex, syls, lm, lam, start, tri_lm=None, beam=64, demote=True, ctx_u="keep"):
     """lm.decode with the history (u, v). tri_lm None: exactly lm.decode (state key, arithmetic, order of operations); start is (u, v).
     ctx_u (trigram-core research, 2026-10-16): when the start came from a left context (su is None, sv the context word), "keep" uses
-    the context word as u for the second word and for a one-word stretch's eos (the shipped rule); "eos" drops it only for a one-word
-    stretch's eos; "none" never uses it as u (u unknown -> bigram for that term)."""
+    the context word as u for the second word and for a one-word stretch's eos (slice A's rule); "eos" drops it only for a one-word
+    stretch's eos (slice A2 (b'), the rule core and reference/proto/trigram.py follow since then); "none" never uses it as u (u unknown ->
+    bigram for that term). The defaults (keep, and TriLM floor 0) reproduce the runs made before slice A2; the shipped formal profile is
+    `--ctx-u eos --tri-floor 0.5`."""
     table = getattr(lex, "demote", None) if demote else None
     su, sv = start
     syls = tuple(syls); n = len(syls)

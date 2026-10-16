@@ -173,21 +173,10 @@ fn type_syls(e: &mut Engine, s: &str) -> Output {
 /// Type `s`, put the cursor after syllable `end`, open the candidates and choose `word` (as engine_lm.rs does).
 fn fix_word(e: &mut Engine, s: &str, end: usize, word: &str) -> Output {
     type_syls(e, s);
-    for _ in 0..s.split(' ').count() - end {
-        e.key(Key::new(KeyKind::Left)).unwrap();
-    }
-    let mut o = e.key(Key::new(KeyKind::Space)).unwrap();
-    for _ in 0..50 {
-        if o.candidates[o.selected.unwrap()] == word {
-            return e.key(Key::new(KeyKind::Enter)).unwrap();
-        }
-        o = e.key(Key::new(KeyKind::Right)).unwrap();
-    }
-    panic!("candidate not found");
+    fix_at(e, end, word)
 }
 
 /// Choose `word` for the syllables ending at `end` of what is typed: the cursor goes Home and Right `end` times, then the candidate window.
-/// Used for a second fixed word (`fix_word` moves the cursor from the end).
 fn fix_at(e: &mut Engine, end: usize, word: &str) -> Output {
     e.key(Key::new(KeyKind::Home)).unwrap();
     for _ in 0..end {
@@ -244,27 +233,10 @@ fn fixed_word_in_the_middle_hand_values_and_total_score() {
     assert!((f.lm.eos3(cfg, Some("他"), "占") - t4).abs() > 1e-3, "premise: the table's closing term (u = the start word) would score differently");
 }
 
-/// Slice A2 (b') in the engine: a stretch of one word whose start is unknown closes with the bigram. Every case checks `total_score` against the top
-/// decode score of the stretch, the decode against a hand value, and has a premise that the table's closing term from (the start word, the last word)
-/// is a different number, so the test fails if the rule is not applied. ㄓㄢˋ ㄊㄚ ㄓㄢˋ with 他 fixed in the middle: the stretch 占 after 他 closes
-/// with `Eos` (the first stretch and the fixed word's own term are covered by `fixed_word_in_the_middle_hand_values_and_total_score`).
-#[test]
-fn one_word_stretch_after_a_fixed_word_closes_with_the_bigram_eos() {
-    let f = fx(true);
-    let mut e = engine(&f, Profile::Formal);
-    assert_eq!(fix_word(&mut e, "ㄓㄢˋ ㄊㄚ ㄓㄢˋ", 2, "他").preedit, "占他占");
-    let cfg = f.lm.scoring(Profile::Formal);
-    let b = decode_segment_learned(&f.capped, &syls("ㄓㄢˋ"), &f.lm, cfg, "他", End::Eos, core::BEAM_S1, None, true).unwrap();
-    assert_eq!(b[0].1[0].0, "占");
-    let (bigram, table) = (f.lm.eos3(cfg, None, "占"), f.lm.eos3(cfg, Some("他"), "占"));
-    assert!((bigram - table).abs() > 1e-3, "premise: the table changes the closing term");
-    // the first word (unknown u: bigram) plus the bigram eos
-    close(b[0].0, f.lm.word3(cfg, None, "他", "占", -3.0) + bigram);
-    let a = decode_segment_learned(&f.capped, &syls("ㄓㄢˋ"), &f.lm, cfg, "<s>", End::Next { word: "他", lp: -2.0, delta: 0.0 }, core::BEAM_S1, None, true).unwrap();
-    close(e.total_score().unwrap(), a[0].0 + b[0].0);
-}
-
-/// The same stretch closed by `End::Next`: 他 ㄓㄢˋ 他 with both 他 fixed. Stretch 占 starts after the first 他 and is closed by the second 他.
+/// Slice A2 (b') in the engine: a stretch of one word whose start is unknown closes with the bigram (with `Eos`:
+/// `fixed_word_in_the_middle_hand_values_and_total_score`). Each case checks the decode against a hand value and `total_score` against the decodes,
+/// with a premise that the table's closing term from (the start word, the last word) is a different number. Closed by `End::Next`: 他 ㄓㄢˋ 他 with
+/// both 他 fixed; stretch 占 starts after the first 他 and is closed by the second.
 #[test]
 fn one_word_stretch_between_two_fixed_words_closes_with_the_bigram_next() {
     let f = fx(true);
@@ -314,10 +286,38 @@ fn one_word_stretch_after_an_input_box_context_closes_with_the_bigram() {
     let (bigram, table) = (f.lm.word3(cfg, None, "占", "他", -2.0), f.lm.word3(cfg, Some("他"), "占", "他", -2.0));
     assert!((bigram - table).abs() > 1e-3, "premise: the table changes the closing term");
     close(s[0].0, f.lm.word3(cfg, None, "他", "占", -3.0) + bigram);
-    // total_score: the transition 占 -> 他 is the closing term above; the fixed 他 at the end has no stretch after it, only total_score scores its eos
     // a fixed word at the end has no stretch after it: only `total_score` scores its closing term (u unknown, bigram)
     let last = f.lm.eos3(cfg, None, "他");
     close(e.total_score().unwrap(), s[0].0 + last);
+}
+
+/// (b') belongs to the stretch: after punctuation or an open English run the next stretch starts from (<s>, <s>), so its one word closes with the
+/// table again. Left context 他, then 占 | 占 with "，" or an English run between: the left part closes with the bigram (unknown start, one word), the
+/// right part with the table ((<s>, 占) is stored without </s>, so the floored table term is half the bigram's).
+#[test]
+fn unknown_start_ends_at_punctuation_and_at_an_english_run() {
+    let f = fx(true);
+    let cfg = f.lm.scoring(Profile::Formal);
+    let part = |start: &str| decode_segment_learned(&f.capped, &syls("ㄓㄢˋ"), &f.lm, cfg, start, End::Eos, core::BEAM_S1, None, true).unwrap()[0].0;
+    assert!((f.lm.eos3(cfg, Some("<s>"), "占") - f.lm.eos3(cfg, None, "占")).abs() > 1e-3, "premise: the right part's closing term is the table's");
+    let want = part("他") + part("<s>");
+    // punctuation
+    let mut e = engine(&f, Profile::Formal);
+    e.set_left_context("他");
+    type_syls(&mut e, "ㄓㄢˋ");
+    e.key(Key::ch(',', core::engine::MOD_SHIFT)).unwrap();
+    assert_eq!(type_syls(&mut e, "ㄓㄢˋ").preedit, "占，占");
+    close(e.total_score().unwrap(), want);
+    // an open English run at the cursor
+    let mut e = engine(&f, Profile::Formal);
+    e.load_english(&dir("").join("english-tiny.txt")).unwrap();
+    e.set_english(true).unwrap();
+    e.set_left_context("他");
+    type_syls(&mut e, "ㄓㄢˋ ㄓㄢˋ");
+    e.key(Key::new(KeyKind::Left)).unwrap();
+    let o = e.key(Key::ch('x', core::engine::MOD_SHIFT)).unwrap();
+    assert_eq!(o.preedit.replace('X', ""), "占占", "premise: the run is open between the two syllables ({})", o.preedit);
+    close(e.total_score().unwrap(), want);
 }
 
 /// Two words or more are unchanged: the second word's u is the start word and the closing term is (second last, last), from the table. Left context 他
