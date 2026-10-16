@@ -279,9 +279,9 @@ impl Cursor<'_> {
 
 /// `O_NONBLOCK`: opening a FIFO for reading must not wait for a writer (it is rejected right after, as not a regular file).
 #[cfg(target_os = "linux")]
-const O_NONBLOCK: i32 = 0o4000;
+pub(crate) const O_NONBLOCK: i32 = 0o4000;
 #[cfg(all(unix, not(target_os = "linux")))]
-const O_NONBLOCK: i32 = 0x0004; // macOS and the BSDs
+pub(crate) const O_NONBLOCK: i32 = 0x0004; // macOS and the BSDs
 
 /// S7c-2a section 2.6 (F3): opens first, then checks the opened handle (a regular file of at most `max` bytes) and reads at
 /// most the cap from that same handle, so the file checked is the file read. Also the zhen-mixed word list's reader

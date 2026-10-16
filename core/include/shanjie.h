@@ -39,7 +39,9 @@
  *    When it is present and valid it changes the scoring of every vocabulary word. The shipped app has one (kn-v1,
  *    docs/contracts/model-v6.md).
  *  - It reads an optional trigram.sjt3 (docs/contracts/trigram-core.md) the same way (a bad one fails the load with 3).
- *    A valid one is used by the formal profile only, which then scores without kn.sjkn; the shipped app has none yet.
+ *    A valid one is used by the formal profile only, which then scores without kn.sjkn.
+ *    The file is memory-mapped (docs/contracts/trigram-mmap.md): while an engine has it loaded it must not be truncated or
+ *    rewritten in place (a truncated page is a SIGBUS); replace it by rename, as the install paths do.
  *  - data_dir must hold names-add.tsv (the always-on common proper nouns, model-v6 section 2.5) next to overlay-add.tsv and
  *    sandhi-add.tsv: shanjie_engine_new / _new_packs read it into the lexicon and shanjie_engine_load_lm reads it again to cap
  *    its words like overlay-add.tsv's; missing or unreadable, either call fails with 3.

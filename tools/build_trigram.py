@@ -89,8 +89,11 @@ def main(argv=None):
         out, vs, vd = remap(rd(a.src_lm), rd(a.tri), rd(a.dst_lm))
     except (ValueError, AssertionError) as e:
         sys.exit(f"error: {e}")
-    with open(a.out, "wb") as f:
+    # Temp file + rename: a core process may have the old table mapped, and rewriting it in place would corrupt or SIGBUS that mapping.
+    tmp = f"{a.out}.tmp{os.getpid()}"
+    with open(tmp, "wb") as f:
         f.write(out)
+    os.replace(tmp, a.out)
     t = trigram.read_tri(out)
     print(json.dumps({"contexts": len(t["key"]), "entries": len(t["nxt"]), "V_src": vs, "V_dst": vd, "out_sha256": hashlib.sha256(out).hexdigest()}))
 
