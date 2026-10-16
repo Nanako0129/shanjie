@@ -11,26 +11,18 @@ import argparse
 import hashlib
 import json
 import os
-import struct
 import sys
 
 import numpy as np
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "reference", "proto"))
+import lm as L  # noqa: E402
 import trigram  # noqa: E402
 
 
 def vocab_of(b):
-    """The words of an .sjlm file in id order."""
-    if b[:8] != b"SJLM0001":
-        raise ValueError("bad magic")
-    (V,) = struct.unpack_from("<I", b, 8)
-    p, out = 8 + struct.calcsize("<IQQd"), []
-    for _ in range(V):
-        (n,) = struct.unpack_from("<H", b, p)
-        out.append(b[p + 2:p + 2 + n].decode("utf-8"))
-        p += 2 + n
-    return out
+    """The words of an .sjlm file in id order (reference/proto/lm.py's parser)."""
+    return L.read_header(b)[4]
 
 
 def remap(src_lm, tri, dst_lm):
@@ -95,7 +87,7 @@ def main(argv=None):
     rd = lambda p: open(p, "rb").read()
     try:
         out, vs, vd = remap(rd(a.src_lm), rd(a.tri), rd(a.dst_lm))
-    except ValueError as e:
+    except (ValueError, AssertionError) as e:
         sys.exit(f"error: {e}")
     with open(a.out, "wb") as f:
         f.write(out)
