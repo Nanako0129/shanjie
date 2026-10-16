@@ -1,7 +1,7 @@
 #!/bin/bash
 # Build build/善解輸入法.app (docs/contracts/s3b.md sections 2 and 13): the Rust core, the Swift shell, the
-# bundle with its data, model and licenses, then an ad-hoc signature with the hardened runtime and
-# no entitlements. Used locally and in CI; it never touches a keychain, installs or launches the
+# bundle with its data, model and licenses and Sparkle.framework, then an ad-hoc signature (without the hardened runtime,
+# see the signing step) and no entitlements. Used locally and in CI; it never touches a keychain, installs or launches the
 # app. Developer ID signing happens only in .github/workflows/release.yml.
 #
 #   scripts/build-app.sh
@@ -12,10 +12,20 @@
 #                    spelled for builds; `make selftest-bundled` passes a throwaway one locally).
 #                    The input mode ID and the connection name derive from it.
 #   OUT_DIR          default build, relative to the repository; the app is $OUT_DIR/善解輸入法.app
+#   SHANJIE_UPDATE_TEST_FEED, SHANJIE_UPDATE_TEST_KEY
+#                    both or neither: a local test build for the update device check (docs/contracts/about-update.md
+#                    section 3.4) with a test feed URL and a test EdDSA public key instead of the production ones below.
+#                    Refused when CI is set; scripts/check-app.sh and release.yml reject such a build unless told it is one.
 #
 # The folder name is the user-facing name; the executable (Contents/MacOS/shanjie), the bundle ID and
 # the release asset (shanjie-<version>.zip) keep the ASCII name.
 set -euo pipefail
+
+# Sparkle (docs/contracts/about-update.md section 2). Production values, written here and nowhere else in this script; no
+# environment variable overrides them (the test build above is a separate, local-only option). scripts/check-app.sh and
+# release.yml compare the bundle's Info.plist with their own copies of these literals.
+SPARKLE_PUBLIC_KEY='cM3S7qQf78Hi2yH5gwD+nZm5T/6Vw05tD9ZWET3Rcew='
+SPARKLE_FEED_URL='https://raw.githubusercontent.com/Nanako0129/shanjie/main/appcast.xml'
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
@@ -81,10 +91,27 @@ fi
 VERSION="${VERSION:-0.0.0}"
 [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail "version '$VERSION' is not MAJOR.MINOR.PATCH"
 
+FEED_URL="$SPARKLE_FEED_URL"
+ED_KEY="$SPARKLE_PUBLIC_KEY"
+if [ -n "${SHANJIE_UPDATE_TEST_FEED:-}${SHANJIE_UPDATE_TEST_KEY:-}" ]; then
+  [ -z "${CI:-}" ] || fail "the update test build is local only (CI is set)"
+  [ -n "${SHANJIE_UPDATE_TEST_FEED:-}" ] && [ -n "${SHANJIE_UPDATE_TEST_KEY:-}" ] \
+    || fail "SHANJIE_UPDATE_TEST_FEED and SHANJIE_UPDATE_TEST_KEY go together"
+  [[ "$SHANJIE_UPDATE_TEST_FEED" =~ ^(https|file)://[^[:space:]\<\>\&]+$ ]] || fail "SHANJIE_UPDATE_TEST_FEED is not an https:// or file:// URL"
+  [ "$SHANJIE_UPDATE_TEST_KEY" != "$SPARKLE_PUBLIC_KEY" ] || fail "the update test build must not use the production key"
+  FEED_URL="$SHANJIE_UPDATE_TEST_FEED"
+  ED_KEY="$SHANJIE_UPDATE_TEST_KEY"
+fi
+# An EdDSA public key is 32 bytes: 44 base64 characters ending in one '='.
+[[ "$ED_KEY" =~ ^[A-Za-z0-9+/]{43}=$ ]] || fail "the Sparkle public key is not 44 base64 characters"
+
 cargo build --release --locked -p core
-swift build -c release --package-path macos
-BIN="$(swift build -c release --package-path macos --show-bin-path)/Shanjie"
+# --force-resolved-versions: Sparkle exactly as macos/Package.resolved pins it, never re-resolved.
+swift build -c release --package-path macos --force-resolved-versions
+BIN_DIR="$(swift build -c release --package-path macos --force-resolved-versions --show-bin-path)"
+BIN="$BIN_DIR/Shanjie"
 [ -x "$BIN" ] || fail "the Swift build produced no executable"
+[ -d "$BIN_DIR/Sparkle.framework" ] || fail "the Swift build left no Sparkle.framework beside the executable"
 
 mkdir -p "$ROOT/$OUT_DIR"
 # Keeps Spotlight and LaunchServices from indexing local bundles, so the system never finds (or
@@ -95,6 +122,18 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources/zh-Hant.lproj" "$APP/Contents/Resources/en.lproj" \
   "$APP/Contents/Resources/LICENSES"
 cp "$BIN" "$APP/Contents/MacOS/shanjie"
+
+# Sparkle.framework in Contents/Frameworks (the executable's rpath is @executable_path/../Frameworks, macos/Package.swift).
+# Its XPC services are only for sandboxed apps; this app is not sandboxed and leaves SUEnableInstallerLauncherService off,
+# so they never run, and Sparkle's documentation allows removing them (as Syrtis's scripts/bundle.sh does). Removing them
+# also leaves no nested code that would need its own entitlements.
+mkdir -p "$APP/Contents/Frameworks"
+ditto "$BIN_DIR/Sparkle.framework" "$APP/Contents/Frameworks/Sparkle.framework"
+SPARKLE="$APP/Contents/Frameworks/Sparkle.framework"
+rm -rf "$SPARKLE/Versions/B/XPCServices" "$SPARKLE/XPCServices"
+for code in "$SPARKLE/Versions/B/Autoupdate" "$SPARKLE/Versions/B/Updater.app"; do
+  [ -e "$code" ] || fail "$code is missing; Sparkle's layout changed"
+done
 
 RES="$APP/Contents/Resources"
 # names-add.tsv: the always-on common proper nouns (model-v6 section 2.5); the core fails to start without it.
@@ -230,6 +269,15 @@ cat > "$APP/Contents/Info.plist" <<EOF
   <key>TICapsLockLanguageSwitchCapable</key><true/>
   <key>TISInputSourceID</key><string>$BUNDLE_ID</string>
   <key>TISIntendedLanguage</key><string>zh-Hant</string>
+  <!-- Sparkle (docs/contracts/about-update.md section 2). No SUEnableJavaScript. -->
+  <key>SUFeedURL</key><string>$FEED_URL</string>
+  <key>SUPublicEDKey</key><string>$ED_KEY</string>
+  <key>SURequireSignedFeed</key><true/>
+  <key>SUVerifyUpdateBeforeExtraction</key><true/>
+  <key>SUAllowsAutomaticUpdates</key><false/>
+  <key>SUEnableAutomaticChecks</key><false/>
+  <key>SUEnableInstallerLauncherService</key><false/>
+  <key>SUEnableSystemProfiling</key><false/>
   <key>tsInputMethodCharacterRepertoireKey</key><array><string>Hant</string></array>
   <key>tsInputMethodIconFileKey</key><string>shanjie.tiff</string>
   <key>ComponentInputModeDict</key>
@@ -248,7 +296,17 @@ $(mode "$MODE")
 EOF
 plutil -lint "$APP/Contents/Info.plist" >/dev/null
 
-# Ad-hoc, hardened runtime, and deliberately no --entitlements (R9).
-codesign --force --sign - --options runtime "$APP"
+# Ad-hoc and deliberately no --entitlements (R9, R10). Inside out, in Sparkle's documented order, as release.yml signs with
+# the Developer ID: removing XPCServices broke the framework's own seal. No hardened runtime here: with it, library
+# validation refuses the ad-hoc Sparkle.framework (dyld: "mapping process and mapped file (non-platform) have different Team
+# IDs", measured 2026-10-16 with --selftest), since ad-hoc code has no Team ID to match. The shipped app gets the runtime
+# from release.yml's Developer ID signature, and its verify() requires the flag on all four code locations.
+for code in "$SPARKLE/Versions/B/Autoupdate" "$SPARKLE/Versions/B/Updater.app" "$SPARKLE" "$APP"; do
+  codesign --force --sign - "$code"
+done
 codesign --verify --strict --deep "$APP"
-echo "built $APP ($BUNDLE_ID $VERSION, ad-hoc)"
+if [ "$ED_KEY" = "$SPARKLE_PUBLIC_KEY" ]; then
+  echo "built $APP ($BUNDLE_ID $VERSION, ad-hoc)"
+else
+  echo "built $APP ($BUNDLE_ID $VERSION, ad-hoc, UPDATE TEST BUILD: test feed and key)"
+fi

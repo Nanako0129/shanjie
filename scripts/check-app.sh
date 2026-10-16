@@ -5,6 +5,10 @@
 # input method: it runs only with `--selftest` and with arguments it must refuse.
 #
 #   scripts/check-app.sh [build/善解輸入法.app]
+#
+# The Sparkle keys are compared with the production values below (docs/contracts/about-update.md section 3.2). An update
+# test build (scripts/build-app.sh with SHANJIE_UPDATE_TEST_FEED and SHANJIE_UPDATE_TEST_KEY) passes only when the same two
+# variables are set here, and never with the production key.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -14,6 +18,9 @@ PLIST="$APP/Contents/Info.plist"
 fail() { echo "error: $*" >&2; exit 1; }
 pb() { /usr/libexec/PlistBuddy -c "Print :$1" "${2:-$PLIST}" 2>/dev/null; }
 MODE=com.nyanako.inputmethod.shanjie.zhuyin
+# Production Sparkle values, written out again rather than read from build-app.sh, so a wrong value there fails here.
+SPARKLE_PUBLIC_KEY='cM3S7qQf78Hi2yH5gwD+nZm5T/6Vw05tD9ZWET3Rcew='
+SPARKLE_FEED_URL='https://raw.githubusercontent.com/Nanako0129/shanjie/main/appcast.xml'
 
 # --- 2: Info.plist and Resources (with section 13: one input mode, the 善解輸入法.app folder and
 # the zh-Hant / en names)
@@ -95,14 +102,46 @@ KN_RECORDED="$(awk 'NR == 1 { print $1 }' "$ROOT/data/kn.sjkn.sha256")"
 [[ "$KN_RECORDED" =~ ^[0-9a-f]{64}$ ]] || fail "data/kn.sjkn.sha256 holds no SHA-256"
 [ "$(shasum -a 256 "$R/kn.sjkn" | awk '{ print $1 }')" = "$KN_RECORDED" ] \
   || fail "Resources/kn.sjkn does not match data/kn.sjkn.sha256"
+# Sparkle's keys, verbatim (docs/contracts/about-update.md section 2). A key missing from Info.plist reads as empty and fails.
+WANT_FEED="$SPARKLE_FEED_URL"; WANT_KEY="$SPARKLE_PUBLIC_KEY"
+if [ -n "${SHANJIE_UPDATE_TEST_FEED:-}${SHANJIE_UPDATE_TEST_KEY:-}" ]; then
+  [ -n "${SHANJIE_UPDATE_TEST_FEED:-}" ] && [ -n "${SHANJIE_UPDATE_TEST_KEY:-}" ] || fail "SHANJIE_UPDATE_TEST_FEED and SHANJIE_UPDATE_TEST_KEY go together"
+  [ "$SHANJIE_UPDATE_TEST_KEY" != "$SPARKLE_PUBLIC_KEY" ] || fail "an update test build must not carry the production key"
+  WANT_FEED="$SHANJIE_UPDATE_TEST_FEED"; WANT_KEY="$SHANJIE_UPDATE_TEST_KEY"
+  echo "note: checking an UPDATE TEST BUILD (test feed and key); it must never ship"
+fi
+# plutil -expect checks the type too: a string "true" is not the boolean Sparkle reads.
+sparkle_key() {  # sparkle_key <key> <type> <value>
+  [ "$(plutil -extract "$1" raw -expect "$2" -o - "$PLIST" 2>/dev/null)" = "$3" ] || fail "Info.plist $1 is not the $2 $3"
+}
+sparkle_key SUFeedURL string "$WANT_FEED"
+sparkle_key SUPublicEDKey string "$WANT_KEY"
+sparkle_key SURequireSignedFeed bool true
+sparkle_key SUVerifyUpdateBeforeExtraction bool true
+sparkle_key SUAllowsAutomaticUpdates bool false
+sparkle_key SUEnableAutomaticChecks bool false
+sparkle_key SUEnableInstallerLauncherService bool false
+sparkle_key SUEnableSystemProfiling bool false
+# An EdDSA public key is 32 bytes: 44 base64 characters ending in one '='; an empty or placeholder value fails.
+[[ "$(pb SUPublicEDKey)" =~ ^[A-Za-z0-9+/]{43}=$ ]] || fail "SUPublicEDKey is not a 44-character base64 key"
+! pb SUEnableJavaScript >/dev/null || fail "Info.plist sets SUEnableJavaScript"
 echo "check 2: ok"
 
-# --- 3: signature: valid, hardened runtime, no entitlements at all
+# --- 3: signature: valid, no entitlements at all. The ad-hoc build has no hardened runtime (scripts/build-app.sh: library
+# validation refuses the ad-hoc Sparkle.framework); release.yml's verify() requires it on the Developer ID build that ships.
 codesign --verify --strict --deep "$APP" || fail "codesign --verify --strict --deep"
 ENT="$(codesign -d --entitlements - "$APP" 2>/dev/null || true)"
 [ -z "$ENT" ] || fail "the app carries entitlements"
-INFO="$(codesign -dv "$APP" 2>&1)"
-grep -Eq 'flags=0x[0-9a-f]+\([^)]*runtime' <<<"$INFO" || fail "hardened runtime flag missing"
+# Sparkle (docs/contracts/about-update.md section 3.2): the framework is there without its XPC services, and none of the four
+# code locations carries entitlements. A path that is gone fails rather than reading as "no entitlements".
+SPARKLE="$APP/Contents/Frameworks/Sparkle.framework"
+[ ! -e "$SPARKLE/Versions/B/XPCServices" ] && [ ! -e "$SPARKLE/XPCServices" ] || fail "Sparkle.framework still has XPCServices"
+for code in "$APP" "$SPARKLE" "$SPARKLE/Versions/B/Autoupdate" "$SPARKLE/Versions/B/Updater.app"; do
+  [ -e "$code" ] || fail "$code is missing"
+  codesign --verify --strict "$code" || fail "codesign --verify --strict: $code"
+  ENT="$(codesign -d --entitlements - "$code" 2>/dev/null || true)"
+  [ -z "$ENT" ] || fail "$code carries entitlements"
+done
 echo "check 3: ok"
 
 # --- 6: selftest and refused arguments, with no side effects
