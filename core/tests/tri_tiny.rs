@@ -265,6 +265,34 @@ fn learned_word_skips_the_table_and_its_neighbour_does_not() {
     assert_eq!(nb[0].1[1].0, "佔");
 }
 
+/// An open English run inside a stretch (zhen-inline 1.3h): `refresh_lm` decodes the part on the left of the run to its end with `eos` and the part
+/// on the right from (<s>, <s>), so `total_score` is the sum of those two decodes. 他占 | run | 他占 on ㄊㄚ ㄓㄢˋ ㄊㄚ ㄓㄢˋ with the cursor in the middle.
+/// The premise is that one continuous decode scores differently (the table has (占, 他) -> 占 and the end of the left part is not the end of the sentence),
+/// so a `total_score` that ignored the run would not equal the sum.
+#[test]
+fn english_run_inside_a_stretch_cuts_the_total_like_the_decoder() {
+    let f = fx(true);
+    let mut e = engine(&f, Profile::Formal);
+    e.load_english(&dir("").join("english-tiny.txt")).unwrap();
+    e.set_english(true).unwrap();
+    type_syls(&mut e, "ㄊㄚ ㄓㄢˋ ㄊㄚ ㄓㄢˋ");
+    for _ in 0..2 {
+        e.key(Key::new(KeyKind::Left)).unwrap();
+    }
+    let o = e.key(Key::ch('x', core::engine::MOD_SHIFT)).unwrap();
+    assert!(o.preedit.contains('X'), "premise: the run is open at the cursor ({})", o.preedit);
+    assert_eq!(o.preedit.replace('X', ""), "他占他占", "premise: both parts decode as one word pair each");
+    let cfg = f.lm.scoring(Profile::Formal);
+    let part = |start: &str| decode_segment_learned(&f.capped, &syls("ㄊㄚ ㄓㄢˋ"), &f.lm, cfg, start, End::Eos, core::BEAM_S1, None, true).unwrap()[0].0;
+    let continuous = decode_segment_learned(&f.capped, &syls("ㄊㄚ ㄓㄢˋ ㄊㄚ ㄓㄢˋ"), &f.lm, cfg, "<s>", End::Eos, core::BEAM_S1, None, true).unwrap()[0].0;
+    let want = part("<s>") + part("<s>");
+    assert!((want - continuous).abs() > 1e-3, "premise: the cut changes the score ({want} vs {continuous})");
+    close(e.total_score().unwrap(), want);
+    // Closing the run (Esc) decodes one stretch again, and the total is the continuous decode.
+    e.key(Key::new(KeyKind::Esc)).unwrap();
+    close(e.total_score().unwrap(), continuous);
+}
+
 /// Acceptance 6, chat: with and without the table the decode output, `total_score`, the candidates and the prediction row are bit for bit the same.
 #[test]
 fn chat_is_the_same_with_and_without_the_table() {
