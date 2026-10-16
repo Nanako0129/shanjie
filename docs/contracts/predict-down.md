@@ -1,6 +1,6 @@
 # 契約：預測列與 ↓ 候選一致、未進入的預測列前面放 Tab 提示（predict-down）
 
-狀態：修訂一（2026-10-17；plan-verifier 第一次 REVISE：有未完成音節時的 ↓、Tab 進出時橫排的第 0 格、v3-engine 要改的段落）。
+狀態：修訂二（2026-10-17；plan-verifier 第一次 REVISE：有未完成音節時的 ↓、Tab 進出時橫排的第 0 格、v3-engine 要改的段落；第二次 REVISE：既有測試怎麼改、哪些格子的數字欄加寬）。
 
 讀過的程式與行號是 main `af78dedc`（到 `d52949b3` 為止 `core/`、`macos/`、`cli/`、`tools/`、`experiments/` 都沒有改動）。標〔推論〕的沒有量過。三片的順序是 B → C → A（A 是 `docs/contracts/digits.md`，等 C 的判讀定稿後再送審）。
 
@@ -35,7 +35,7 @@
 - `CandidateCells.update`（188）：`selected < 0 && numbered`（未進入的預測列；候選窗一律 `selected ≥ 0`，英文段提示傳 `numbered: false`）時，第 0 格的 `numberText` 是 `CellMetrics.tabGlyph`、`showsNumber` 為 true；其他格照今天。進入後第 0 格回到 "1"。
 - `CellMetrics.tabGlyph`：具名常數，起始值 `"⇥"`（U+21E5，macOS 選單對 Tab 鍵用的符號；字型與顏色先用數字欄的 `numberFont` 9 pt、secondary），註解寫出處；大小、顏色、位置由維護者實機輪次決定。
 - 直排的數字欄固定寬度 `numberSlot`（74）改成「數字 1–9 與 `tabGlyph` 量到的最寬者」，進入時候選的字才不會左右移動（〔推論〕"⇥" 在 9 pt 比 "8" 寬，執行者在測試裡量）。
-- **進出預測列時第 0 格重用**：橫排的重用規則（204–205）把數字當成鍵的一部分，Tab 進入時第 0 格的數字從圖示變成 1 會被重建；而 `render` 這時走 `inPlace`（InputController.swift 560–561、575–577：候選、first、total、columns 都沒變，只有 selected 從 −1 變 0），`inPlace` 不加新格、不拿掉舊格（641、646 只在非 inPlace 時做），畫面會留下舊的「⇥」格。所以改 `CandidateCells.update`：只差在「⇥」與「1」（未進入↔進入）時第 0 格算同一格，重用並 `setNumber`；第 0 格的數字欄寬度取「1」與 `tabGlyph` 較寬者，換字不移位。`render` 不改，靠第 0 格重用讓 `inPlace` 路徑正確；Shift+Tab／Esc 退回未進入時同理。
+- **進出預測列時第 0 格重用**：橫排的重用規則（204–205）把數字當成鍵的一部分，Tab 進入時第 0 格的數字從圖示變成 1 會被重建；而 `render` 這時走 `inPlace`（InputController.swift 560–561、575–577：候選、first、total、columns 都沒變，只有 selected 從 −1 變 0），`inPlace` 不加新格、不拿掉舊格（641、646 只在非 inPlace 時做），畫面會留下舊的「⇥」格。所以改 `CandidateCells.update`：只差在「⇥」與「1」（未進入↔進入）時第 0 格算同一格，重用並 `setNumber`；**橫排裡每一個帶數字的第 0 格**（未進入的預測列、已進入的預測列、候選窗的第一格都算）數字欄寬度都取「1」與 `tabGlyph` 較寬者，換字不移位、格子的寬度不變。候選窗的第一格因此比今天略寬，這是接受的外觀變化，由維護者在實機輪次看。`render` 不改，靠第 0 格重用讓 `inPlace` 路徑正確；Shift+Tab／Esc 退回未進入時同理。
 - 點圖示那一格仍是點第 0 項（155）；核心、C ABI、`Session` 都不用改。
 
 ### B.3.3 文件（同一個 PR）
@@ -62,8 +62,10 @@
    | `vertical_window_lists_the_row_first`（`engine_vertical.rs`） | `set_candidate_vertical(1)`、同第一列、↓ | `vertical == 1`、前 R.len() 項等於 R |
    | `the_row_is_cleared_by_other_state_changes`（既有 606） | 只改 617 行的註解 | 仍通過 |
 
+   **既有測試**：預測列預設開，載入模型、沒有未完成音節時按 ↓／空白開窗的既有測試，清單前面會多出預測項目。主題是詞庫清單的測試在設定時加 `set_prediction(false)`，不刪、不放寬任何斷言；至少 `engine_learn.rs` 的 `tiny`／`highlight`／`pick_open`／`row_expanded_pick_equals_enter` 一帶（`engine_learn.rs:790` 仍斷言 `candidates[1] == "欣"`）與 `engine_pack.rs` 的 `the_pack_switch_changes_the_result…`（它第四段「未完成 ㄋ 再按 ↓」從忽略變成開窗，也一併關掉預測）。執行者用 grep 找出 `engine_lm`、`engine_rerank`、`engine_demote`、`kn_tiny`、`tri_tiny`、`engine_vertical` 裡同樣情形的測試照辦。真正要改預期的，PR 逐項列出並說明；既有測試檔的 diff 只有 `set_prediction(false)` 與列出的預期變更。
+
    **突變**（每項讓某個測試以斷言失敗；看結束碼與斷言數）：不放預測項目；放在詞庫項目之後；不去重；`choose` 把預測項目當詞庫項目；⌘⌫ 對預測項目不遺忘；有未完成音節時 ↓ 照舊忽略；列是空的時 ↓ 也開窗。
-2. **殼**（`swift test`）：`CandidateCellTests.testPassiveRowShowsTheTabGlyphOnTheFirstCell`（`update(selected: -1, numbered: true)` → `cells[0].numberText == tabGlyph`、`showsNumber`；`cells[1].showsNumber == false`；`update(selected: 0)` → "1"；`numbered: false` → ""）；`testNumberSlotCoversTheTabGlyph`；`testEnteringTheRowReusesTheFirstCell`（**同一個** `CandidateCells` 先 `update(selected: -1)` 再 `update(selected: 0)`，候選相同：`reused[0] == true`、`removed` 是空的、`cells[0].numberText == "1"`；反過來 0 → −1 同理；今天的程式會失敗）；`ShellTests.testPredictionRowShowsNoNumbersUntilTabEnters`（73）加圖示斷言。突變：圖示不設；`numberSlot` 不含圖示；第 0 格不重用（`testEnteringTheRowReusesTheFirstCell` 失敗）。
+2. **殼**（`swift test`）：`CandidateCellTests.testPassiveRowShowsTheTabGlyphOnTheFirstCell`（`update(selected: -1, numbered: true)` → `cells[0].numberText == tabGlyph`、`showsNumber`；`cells[1].showsNumber == false`；`update(selected: 0)` → "1"；`numbered: false` → ""）；`testNumberSlotCoversTheTabGlyph`；`testEnteringTheRowReusesTheFirstCell`（**同一個** `CandidateCells` 先 `update(selected: -1)` 再 `update(selected: 0)`，候選相同：`reused[0] == true`、`removed` 是空的、`cells[0].numberText == "1"`；另一個新的 `CandidateCells` 從 `selected: 0` 開始再到 −1，同樣斷言；兩個方向前後的 `cells[0].contentWidth` 與 `candidateMinX` 都相同；今天的程式會失敗，只加寬未進入時建出的格子也會失敗）；`ShellTests.testPredictionRowShowsNoNumbersUntilTabEnters`（73）加圖示斷言。突變：圖示不設；`numberSlot` 不含圖示；第 0 格不重用（`testEnteringTheRowReusesTheFirstCell` 失敗）。
 3. **不變**：`eval/golden/` 一個位元組不改；`engine_replay.rs` 三個 run 302／302；`cli/tests/golden.rs` 不變；`timing_typing76_keys` p95 < 16 ms。
 4. `make test-rust`（188 WSL）、`make test-swift`、CI 全綠；`/code-review` 無未處置；fresh verifier CONFIRMED。
 5. 實機（B.2）。
