@@ -6441,6 +6441,6 @@ formal: alpha 0.7, tau 1, delta 2
 - 維護者 10-17「測試OK可以發版了」。PR #184（說明、bench、保留集）合併後推 `v0.4.7`（tag 指向 main `207b4b49`；和量基準測試與保留集的 `af78dedc` 相比，`Cargo.toml Cargo.lock core cli data eval/variants.tsv macos scripts` 沒有差異），發佈流程 run 38948222592：gate、build、sign、publish 都成功（sign 由維護者核准）。
 - 核對（下載 Release 附件）：zip 與安裝程式的 SHA-256 和 `.sha256` 相符；輸入法 App `codesign --verify --deep --strict` 通過、Team 2LJ882GPY8、`spctl` 判定 Notarized Developer ID、`stapler validate` 通過、版本 0.4.7；Sparkle.framework 同 Team、有 hardened runtime；App 裡的模型 `bigram.sjlm` `fc2bddd1`、`classes.sjc` `9e36fa1b`、`kn.sjkn` `cbefbced`、`trigram.sjt3` `fdd3b05d`、`tinylm.sjtl` `d07de71d`，`Resources/` 有 `Assets.car` 與 `AppIcon.icns`；`SUFeedURL` 是 main 上的 `appcast.xml`；Latest 是 v0.4.7。解壓的副本驗完先 `lsregister -u` 再刪。
 - appcast（about-update §3 第 6 項的前兩點）：main 上的 `appcast.xml` 有一個 0.4.7 項目，feed 帶簽章、項目帶 EdDSA 簽章；下載網址回 200，長度 101,439,494 與 SHA-256 `2ad0ae6c…` 都和 Release 的 zip 相同。Homebrew cask `0.4.7`、`auto_updates true`、sha256 和 zip 相同。已安裝版「立即檢查」顯示已是最新，要維護者裝上後看（還沒看）。
-- 更正：說明原本寫「安裝檔多約 44 MB」，是用演練產物推估的；實際輸入法 zip 多 48.1 MB、安裝程式多 46.1 MB。說明檔與 GitHub Release 頁已改成約 48 MB（維護者同意改 Release 頁）。
+- 更正：說明原本寫「安裝檔多約 44 MB」，是用演練產物推估的；實際輸入法 zip 多 48.1 MB、安裝程式多 46.1 MB。說明檔與 GitHub Release 頁已改成約 48 MB（維護者同意改 Release 頁）。main 上 `appcast.xml` 嵌入的說明仍是 44 MB：改它要重簽 feed，而會在更新視窗看到這段的只有「已經有 Sparkle、版本低於 0.4.7」的安裝，這樣的安裝不存在（Sparkle 從 0.4.7 起才有），所以不重簽。
 - 發版後：Discord 發版公告（blobhaj，只標善解身分組，維護者選擇題同意）。
 - 發版過程的延誤：等 PR CI 的背景監看用了 `gh run list --commit <短 SHA>`，短 SHA 查不到任何 run，監看一直空轉、沒有通知；CI 綠了約 10 分鐘後才發現。之後一律用完整 SHA 或 run 編號監看。
