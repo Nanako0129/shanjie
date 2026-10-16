@@ -296,7 +296,7 @@ python3 experiments/s7a-tinylm/export_sjtl.py --npz ~/.cache/shanjie/work/s7a/ti
 
 1. **PR 1（不換檔）**：契約、`docs/releases/<tag>.md` 說明檔、研究紀錄；本地驗收（§6）通過後開，`/code-review`、fresh verifier、CI 全綠後 merge。保留集在這個階段、**建 Release 之前**跑（`s7h-tinylm-v3.md` §2.1）。
 2. **建 Release（對外動作，先問使用者）**：指令、核對步驟與規則（資料類 Release 不標 Latest、上傳前後用說明檔的雜湊核對、說明檔不能留草稿標記）只寫在 `docs/releases/README.md`（`CLAUDE.md`「發版」），照那裡做，這裡不另抄一份。
-3. **PR 2（換引用）**：同一個 PR 更新 `docs/data-files.md`「換版時同一個 PR 更新」那一串：雜湊檔（`data/*.sha256`）、CI 兩個 job 與 `release.yml` 的下載、`cli/tests/golden.rs` 的雜湊與訊息、`core/tests/engine_*.rs` 的缺檔訊息、`macos/Tests/ShanjieKitTests/Support.swift`、`scripts/build-app.sh`、README、CONTRIBUTING、`docs/verification.md`、`LICENSES/data.md`、`docs/PLAN.md` 的模型檔那一條與 `docs/data-files.md` 本身；換 `tinylm.sjtl` 時另外照 `docs/releases/README.md`，融合參數有變時要重量 selftest 的那一句（`Selftest.rerankRowStandard` 等）；依模型的 golden 重產。
+3. **PR 2（換引用）**：同一個 PR 更新 `docs/data-files.md`「換版時同一個 PR 更新」那一串：雜湊檔（`data/*.sha256`）、CI 三個 job（core、core-debug、shell）與 `release.yml` 的下載、`cli/tests/golden.rs` 的雜湊與訊息、`core/tests/engine_*.rs` 的缺檔訊息、`macos/Tests/ShanjieKitTests/Support.swift`、`scripts/build-app.sh`、README、CONTRIBUTING、`docs/verification.md`、`LICENSES/data.md`、`docs/PLAN.md` 的模型檔那一條與 `docs/data-files.md` 本身；換 `tinylm.sjtl` 時另外照 `docs/releases/README.md`，融合參數有變時要重量 selftest 的那一句（`Selftest.rerankRowStandard` 等）；依模型的 golden 重產。
 4. **舊 Release**：保留，可以回到那一版；model-v3 與 classes-v1 是依 `docs/contracts/model-v4.md` §4 第 4 步的條件移除的例外（`docs/data-files.md`）。
 5. **換檔順序**：先把新雜湊合進 main 會讓 CI 拿舊檔對新雜湊而失敗，所以雜湊檔和 CI 下載在**同一個切換的 PR** 裡改；第一次加的新檔沒有人讀，雜湊檔可以和說明檔一起先進 main（`docs/releases/README.md`「雜湊檔什麼時候改」）。
 
