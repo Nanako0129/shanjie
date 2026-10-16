@@ -77,7 +77,7 @@
   - main 在 WSL 的 clone 裡把重對應的 H3 放成 `data/lm/trigram.sjt3`（只在那台機器、只為這次，量完刪掉），以 `SHANJIE_TEST_PROFILE=formal cargo test --release -p core --test engine_learn -- --include-ignored <名稱>` 逐一跑：`a2_mirror_teach_the_other_word`（鏡像改選 ≥ 80%）、`a2_candidate_pick_learning_on_cases_tsv`（A2 ≥ 80% 且非衝突改壞 0）、`pollution_zai_taught_under_two_contexts`（ㄗㄞˋ 污染 0）、`global_eps_table`（只記數字）。門檻同 model-v6 §2.8；判讀看測試印出的數字對門檻，不只看測試過不過。
   - 手動詞另外跑：`cargo test --release -p cli --test golden manual_words_come_first_in_the_shipping_setting`（同一個 clone、表在 `data/lm`）。這個測試現在釘死「書面只錯第 8 列」，有表時錯的列換了就會失敗；判讀看書面錯幾列（由測試的輸出或對應的 rowstats 算）：**≤ 1 列**就算通過，錯的是哪一列不限（v0.4.6 書面 14／15）。若通過但錯的列變了，第 C 片打包時同一個 PR 更新這個測試釘的例外。
   - 不到門檻 → 停，問維護者（選項包含調整學習加分的例外範圍）。
-  - 〔結果與放寬，2026-10-16〕鏡像 8/10、ㄗㄞˋ 污染 0 過；A2 因為書面有表時多數詞組預設就對、可計數的列只剩 2 列（兩列都學會）而沒有判讀；手動詞書面錯 2／15（「米雅歌」單獨與在句中），不到門檻。維護者選擇題「記為已知問題、繼續」：手動詞這一條放寬（依「契約不要訂得過嚴」），第 C 片打包時把 `manual_words_come_first_in_the_shipping_setting` 釘的書面例外改成實際錯的列（WSL 量到第 4、8 列；**macOS 還沒量**，釘之前先在 Mac 量），發版說明寫明書面打「米雅歌」要改選一次。A2 的比率沒有判讀（可計數的列只剩 2 列，都學會），非衝突改壞那一半是 0；維護者選擇題「當作通過」：書面有表時 A2 以鏡像改選（8/10）取代。
+  - 〔結果與放寬，2026-10-16〕鏡像 8/10、ㄗㄞˋ 污染 0 過；A2 因為書面有表時多數詞組預設就對、可計數的列只剩 2 列（兩列都學會）而沒有判讀；手動詞書面錯 2／15（「米雅歌」單獨與在句中），不到門檻。維護者選擇題「記為已知問題、繼續」：手動詞這一條放寬（依「契約不要訂得過嚴」），第 C 片打包時把 `manual_words_come_first_in_the_shipping_setting` 釘的書面例外改成實際錯的列（WSL 與 Mac 都量到第 4、8 列），發版說明寫明書面打「米雅歌」要改選一次。A2 的比率沒有判讀（可計數的列只剩 2 列，都學會），非衝突改壞那一半是 0；維護者選擇題「當作通過」：書面有表時 A2 以鏡像改選（8/10）取代。
   - 驗收（executor 在 Mac）：沒設環境變數時 `engine_learn` 照舊通過；設成 `formal`、`data/lm` 沒有表時，上面四個測試都在建立引擎時失敗（斷言，不是編譯錯誤）。
 - **B3 語意校正的守門**（main 在 Windows 機器跑 Rust CLI）：
   - BASE：v0.4.6 的 CLI（`58da6d2`），模型 model-v6＋classes-v5＋kn-v1，`--profile formal --context --packs acg --tinylm <tinylm-v5>`（出貨的書面形狀，標準強度）。
