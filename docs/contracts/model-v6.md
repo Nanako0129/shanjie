@@ -86,7 +86,7 @@
 
 - **核心改動：小模型和 KN 一起載入（SJTL0004）**（安全審查的要求在 §7，全部是這一節的驗收）。現在 `TinyLm::load_paired` 在 KN 開著時一律拒絕（`TinyLmError::KneserNey`，因為 α、τ 是在沒有 KN 時調的）。改成：
   - 新版 SJTL0004＝SJTL0003 的 212 bytes 檔頭之後接 32 bytes：調參時用的 KN 側檔 SHA-256（全 0＝沒有開 KN 時調的）；字表與張量不變。SJTL0001–0003 視為全 0。
-  - `load_paired`：模型雜湊照舊要相同；KN 開著時，檔裡記的側檔雜湊要等於載入的 `kn.sjkn` 的 SHA-256（`Lm` 加一個 `kn_sha256()`），否則照舊回 `KneserNey`；KN 關著時，檔裡記的必須是全 0（在 KN 開著時調的檔，配沒有 KN 的模型也拒絕，回 `KneserNey`）。CLI 的 `--tinylm` 錯誤訊息照新規則改；`--no-kn` 照舊。
+  - `load_paired`：模型雜湊照舊要相同；KN 開著時，檔裡記的側檔雜湊要等於載入的 `kn.sjkn` 的 SHA-256（`Lm` 加一個 `kn_sha256()`），否則照舊回 `KneserNey`；KN 關著時，檔裡記的必須是全 0（在 KN 開著時調的檔，配沒有 KN 的模型也拒絕，回 `KneserNey`）。CLI 的 `--tinylm` 錯誤訊息照新規則改；`--no-kn` 照舊。〔2026-10-16，trigram-core 第 B 片 B4〕這裡的「KN 開著」指模型旁載入了 `kn.sjkn`（`Lm` 有側檔）；書面有 trigram 表時打分不用 KN，但側檔照樣載入、照樣參與配對，所以 tinylm-v5 照常配對。
   - `export_sjtl.py` 加 `--kn-side <kn.sjkn>`（寫入它的雜湊）；**只有給了 `--levels` 才輸出 SJTL0004**，這時沒給 `--kn-side` 就寫全 0；沒給 `--levels` 時照舊輸出 v1／v2；只給 `--kn-side` 是 usage error（§7 P3-5，兩處同一個規則）。
   - 測試（Rust，用合成的小模型與小側檔，照 rerank-strength §9 的讀檔規矩）：KN 開＋雜湊相符 → 載入成功；KN 開＋不符 → `KneserNey`；KN 開＋SJTL0001–0003 → `KneserNey`；KN 關＋檔裡有非 0 雜湊 → `KneserNey`；KN 關＋全 0 → 成功；SJTL0004 每個前綴長度都回 `Format` 不 panic；`export_sjtl.py` 的單元測試核對寫入的雜湊與位移。讀檔與格式屬安全審查範圍，交 `pilotfish:security-executor`。
 - **重調**：權重不變（S7a M），在 model-v6＋classes-v4＋kn-v1＋名單層的候選上照 `docs/contracts/rerank-strength.md` §11 重做，但**KN 開著**（覆寫 §11.1 的「不載 KN」）：

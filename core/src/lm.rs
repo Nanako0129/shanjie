@@ -306,8 +306,8 @@ impl Lm {
         self.kn.as_ref().map(|k| k.hashed().1.as_str())
     }
 
-    /// SHA-256 of the whole side file, from the bytes `add_kn` checked (never read again); `None` when the Kneser-Ney term is
-    /// off. A version 4 `.sjtl` records this value (docs/contracts/model-v6.md section 2.7; export_sjtl.py `--kn-side` writes
+    /// SHA-256 of the whole side file, from the bytes `add_kn` checked (never read again); `None` when no `kn.sjkn` is
+    /// loaded. A version 4 `.sjtl` records this value (docs/contracts/model-v6.md section 2.7; export_sjtl.py `--kn-side` writes
     /// Python's `hashlib.sha256` of the same file), and `TinyLm::load_paired` compares all 32 bytes.
     pub fn kn_sha256(&self) -> Option<[u8; 32]> {
         self.kn.as_ref().map(|k| k.hashed().0)

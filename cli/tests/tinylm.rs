@@ -125,7 +125,7 @@ fn kneser_ney_side_file_must_be_the_recorded_one() {
     assert!(on.status.success(), "{}", text(&on.stderr));
     assert!(text(&on.stdout).contains("+kn:"), "{}", text(&on.stdout));
     // Tuned with this side file, but it is off.
-    refused(&args(v4.to_str().unwrap(), &["--no-kn"]), &["none is on", "drop --no-kn"], &[]);
+    refused(&args(v4.to_str().unwrap(), &["--no-kn"]), &["none is loaded", "drop --no-kn"], &[]);
     // Another side file beside the model.
     std::fs::copy(toy.join("kn-beta075.sjkn"), dir.join("kn.sjkn")).unwrap();
     refused(&args(v4.to_str().unwrap(), &[]), &["another Kneser-Ney side file"], &["--no-kn"]);

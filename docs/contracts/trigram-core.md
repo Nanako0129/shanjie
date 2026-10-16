@@ -1,6 +1,6 @@
 # 契約：trigram 進核心，只用在書面設定（trigram-core）
 
-狀態：修訂二（2026-10-16；修訂一處理 plan-verifier 第一次 REVISE 的兩項，修訂二處理第二次的一項，見 §5）。
+狀態：修訂三（2026-10-16；修訂一、二處理 plan-verifier 的兩次 REVISE，見 §5；修訂三把第 B 片寫細）。
 
 ## 0. 依據
 
@@ -67,16 +67,32 @@
 - 停止條件：沒有表時任何 golden 改變；第 4 項任一行不同且原因不在本片；聊天設定任一行改變。
 - 預算：executor 實作 1 次＋修正 1 次。
 
-### 第 B 片：引擎量測與語意校正的配合
+### 第 B 片：引擎量測與語意校正的配合（修訂三寫細）
 
-- 書面重播：基準工具的速度表現在只重播聊天（`docs/benchmark.md` 的速度一節），加一列書面重播；量每鍵 p95、最大、載入時間、RSS。超過上限（RSS +150 MB 或 p95 +1 ms）→ 先試已知的修法（例如依 u 分段的索引縮小二分搜尋），還超過就停，回報維護者。
-- **選字記憶**（在第 C 片之前，main 在 Windows 機器的 WSL 跑）：`engine_learn` 用書面設定、模型旁有重對應的 `trigram.sjt3`：鏡像改選 ≥ 80%、A2 ≥ 80% 且非衝突改壞 0、ㄗㄞˋ 污染 0（門檻同 model-v6 §2.8）；`manual_words_come_first_in_the_shipping_setting` 書面不比 v0.4.6 少。不到門檻 → 停，問維護者（選項包含調整學習加分的例外範圍）。
-- 語意校正（tinylm-v5）：書面的 (α, τ, δ) 是在 bigram＋KN 的分數上選的；trigram 讓 n-gram 分數差距變大。驗收：書面、開 tinylm-v5、標準強度，新對舊在判讀五集、調參集、discordtune 每集都不顯著為負（守門）。不過 → 在 Rust CLI 的候選傾印上重選書面的三個值（照 S7h 的流程），出 tinylm 的新版本；選值與守門用不同的集合，另寫在這一片的修訂。
-- `tinylm.sjtl` 的配對檢查（現在核對模型與 `kn.sjkn` 雜湊）要知道書面不用 KN；同一個 PR 改。
+第 A 片已經在 Mac 量過延遲與 RSS（研究紀錄 2026-10-16「trigram-core 第 A 片」：書面有表 p95 +0.01 ms、RSS +136 MB，在上限內），這一片不重做那個量測，只把它變成基準工具的固定一列。
+
+- **B1 書面重播列**：移到第 C 片。基準工具的模型資料夾來自 `data/*.sha256` 與 `VERSIONS2`，這兩個都是第 C 片才加；在那之前放表進去，不是量到「沒有表的書面」，就是書面格的設定標記核對失敗。延遲與 RSS 在第 A 片已經用同一個重播程式（加書面參數）量過、在上限內。
+- **B2 選字記憶**（main 在 Windows 機器的 WSL 跑）：
+  - `core/tests/engine_learn.rs` 讀環境變數 `SHANJIE_TEST_PROFILE`：所有建立引擎的地方（`engine()` 的 `Lm::load`＋`set_lm`，以及各測試裡的 `Engine::new`＋`load_lm`）都在 LM 就位之後 `set_profile(Formal)`；同時斷言載入的 `Lm` 有 trigram 表（`lm.scoring(Profile::Formal)` 的 tri 開著），沒有表就讓測試失敗，不會在「書面沒表」下默默通過。沒設環境變數時行為不變，不改任何斷言。
+  - main 在 WSL 的 clone 裡把重對應的 H3 放成 `data/lm/trigram.sjt3`（只在那台機器、只為這次，量完刪掉），以 `SHANJIE_TEST_PROFILE=formal cargo test --release -p core --test engine_learn -- --include-ignored <名稱>` 逐一跑：`a2_mirror_teach_the_other_word`（鏡像改選 ≥ 80%）、`a2_candidate_pick_learning_on_cases_tsv`（A2 ≥ 80% 且非衝突改壞 0）、`pollution_zai_taught_under_two_contexts`（ㄗㄞˋ 污染 0）、`global_eps_table`（只記數字）。門檻同 model-v6 §2.8；判讀看測試印出的數字對門檻，不只看測試過不過。
+  - 手動詞另外跑：`cargo test --release -p cli --test golden manual_words_come_first_in_the_shipping_setting`（同一個 clone、表在 `data/lm`）。這個測試現在釘死「書面只錯第 8 列」，有表時錯的列換了就會失敗；判讀看書面錯幾列（由測試的輸出或對應的 rowstats 算）：**≤ 1 列**就算通過，錯的是哪一列不限（v0.4.6 書面 14／15）。若通過但錯的列變了，第 C 片打包時同一個 PR 更新這個測試釘的例外。
+  - 不到門檻 → 停，問維護者（選項包含調整學習加分的例外範圍）。
+  - 〔結果與放寬，2026-10-16〕鏡像 8/10、ㄗㄞˋ 污染 0 過；A2 因為書面有表時多數詞組預設就對、可計數的列只剩 2 列（兩列都學會）而沒有判讀；手動詞書面錯 2／15（「米雅歌」單獨與在句中），不到門檻。維護者選擇題「記為已知問題、繼續」：手動詞這一條放寬（依「契約不要訂得過嚴」），第 C 片打包時把 `manual_words_come_first_in_the_shipping_setting` 釘的書面例外改成實際錯的列（WSL 與 Mac 都量到第 4、8 列），發版說明寫明書面打「米雅歌」要改選一次。A2 的比率沒有判讀（可計數的列只剩 2 列，都學會），非衝突改壞那一半是 0；維護者選擇題「當作通過」：書面有表時 A2 以鏡像改選（8/10）取代。
+  - 驗收（executor 在 Mac）：沒設環境變數時 `engine_learn` 照舊通過；設成 `formal`、`data/lm` 沒有表時，上面四個測試都在建立引擎時失敗（斷言，不是編譯錯誤）。
+- **B3 語意校正的守門**（main 在 Windows 機器跑 Rust CLI）：
+  - BASE：v0.4.6 的 CLI（`58da6d2`），模型 model-v6＋classes-v5＋kn-v1，`--profile formal --context --packs acg --tinylm <tinylm-v5>`（出貨的書面形狀，標準強度）。
+  - CAND：本分支的 CLI，同樣的模型資料夾再加重對應的 H3，同樣旗標。摘要行要有 `+tri:fdd3b05d` 與 `+tl:d07de71d`。
+  - 集合：判讀五集（dev302、打字測驗、錯字回報 114 列凍結檔、lytune、wikitypo）、調參集（cvtune、wikitune）、discordtune（只回數字）。
+  - 判讀：每個集合各自 `evalstats compare BASE CAND --net`；任一集合「改壞 > 改對而且 p < 0.05」→ 不通過。只報：判讀五集串接、調參集串接各一行。
+  - 不通過 → 停，寫第 B 片的修訂四：在 Rust CLI 的候選傾印上重選書面的 (α, τ, δ)（照 S7h 的流程），選值與守門用不同的集合，出新的 tinylm 版本；這個修訂要另外送審。
+- **B4 `tinylm.sjtl` 的配對檢查**：`tinylm::load_paired` 現在核對模型與 `kn.sjkn` 的雜湊。書面有表時 KN 關，但 tinylm-v5 的檔頭仍記著 kn-v1 的雜湊；這一片不改配對規則（側檔照樣在、照樣核對），只在 `docs/contracts/trigram-core.md` 與 model-v6 契約的配對規則寫明「書面有表時 KN 不參與打分，但 `kn.sjkn` 仍是配對的一部分」。B3 通過，不出新的 tinylm。〔結果，2026-10-16〕B3 八個集合都沒有顯著變差（數字在研究紀錄）。
+- 停止條件：B2 不到門檻；B3 不通過（轉修訂四）。
+- 預算：B2 的測試開關 executor 1 次＋修正 1 次；B2、B3 的量測 main 在 Windows 機器各半小時以內。
 
 ### 第 C 片：資料 Release、打包、發版
 
 - 資料 Release `trigram-v1`（`trigram.sjt3` 與說明檔，授權和 model-v6 相同），`data/trigram.sjt3.sha256`、`scripts/build-app.sh`、CI、`release.yml` 的下載與核對；`tools/bench.py` 的 `VERSIONS2` 加列（書面帶 `+tri:`）。
+- **書面重播列**（從第 B 片移來）：`tools/bench/replay` 加第五個參數 `chat|formal`（預設 chat）；`tools/bench.py` 套件 v2 的速度表（`measure_speed2`）在聊天重播之外多一列書面重播，模型資料夾照 `VERSIONS2`（有 `trigram.sjt3` 的版本放表）；書面的「重播＝CLI」核對對一格 `--profile formal` 的 CLI，預期標記在有表時含 `+tri:`；舊的結果 JSON 沒有書面列時表上顯示「—」；套件 v1 的文字逐位元組不變（`test_table_appends_v2_after_unchanged_v1_text` 照舊通過），`test_bench.py` 加書面列的測試。
 - 跨版本基準（含書面重播列）與保留集照發版流程；保留集書面那一行顯著為負就不出貨。
 - 安裝檔會變大（〔推論〕trigram 表壓縮後約 40 MB，沒量），發版說明寫實際大小。
 
@@ -95,5 +111,6 @@
 
 | 輪次 | 結果 | 處置 |
 |---|---|---|
+| plan-verifier（修訂三，第 B 片） | 第一次 REVISE 2 項：B1 書面重播列在第 C 片之前做不到（模型資料夾來自 `VERSIONS2` 與雜湊檔）；B2 把 CLI 的手動詞測試當成 `engine_learn` 的、只在 `load_lm` 處切設定、沒有檢查表真的載入 | 都 FIX：B1 移到第 C 片；B2 每個建立引擎的地方都切書面並斷言有表、手動詞另跑並用錯幾列判讀。收尾審查 READY |
 | plan-verifier（第 2 次） | REVISE 1 項：(d) 書面預測列不變沒有驗收（KN 是共用 `Lm` 上的欄位，改成依設定關 KN 時容易連預測列一起關） | FIX：引擎測試加書面預測列有表／沒有表逐位元組相同與對應突變；(a)、(b) 兩處措辭照建議補清楚。第二次 REVISE 後逐項處置完，照維護者對同類情況的決定（收尾只差規格就進實作）不再送審 |
 | plan-verifier（第 1 次） | REVISE 2 項：引擎詞段交界的歷史規則沒定（u、收尾項、`total_score`、預測列的 KN）；學到的詞照樣經過 trigram 時加分會被 back3 縮小，沒有驗收量書面有表時的選字記憶 | 兩項都 FIX：第 A 片加 (a)–(d) 與學到的詞不經過 trigram 的例外、引擎測試與四個突變；第 B 片加書面有表的 `engine_learn` 門檻與停止條件 |

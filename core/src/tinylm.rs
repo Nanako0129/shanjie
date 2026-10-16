@@ -70,11 +70,11 @@ pub enum TinyLmError {
 /// Which way the Kneser-Ney side file and the `.sjtl` disagree (model-v6 section 7, P4-9: each needs another remedy).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum KnPairing {
-    /// The side file is on, but the `.sjtl` was tuned without one (all-zero hash, or a version 1 to 3 file).
+    /// The side file is loaded, but the `.sjtl` was tuned without one (all-zero hash, or a version 1 to 3 file).
     TunedWithout,
-    /// The side file is on, and the `.sjtl` was tuned with a different one.
+    /// The side file is loaded, and the `.sjtl` was tuned with a different one.
     OtherSideFile,
-    /// The side file is off, but the `.sjtl` was tuned with one.
+    /// The side file is not loaded, but the `.sjtl` was tuned with one.
     TunedWith,
 }
 
@@ -85,11 +85,11 @@ impl fmt::Display for TinyLmError {
             TinyLmError::Format => "bad tiny language model file (.sjtl)",
             TinyLmError::TooLong => "candidate does not fit the context of the tiny language model (.sjtl)",
             TinyLmError::OtherNgram => "this .sjtl was tuned with another n-gram model (SHA-256 differs)",
-            TinyLmError::KneserNey(KnPairing::TunedWithout) => "the Kneser-Ney side file (kn.sjkn) is on, but this .sjtl was tuned without one",
+            TinyLmError::KneserNey(KnPairing::TunedWithout) => "the Kneser-Ney side file (kn.sjkn) is loaded, but this .sjtl was tuned without one",
             TinyLmError::KneserNey(KnPairing::OtherSideFile) => {
                 "this .sjtl was tuned with another Kneser-Ney side file (the SHA-256 of kn.sjkn differs)"
             }
-            TinyLmError::KneserNey(KnPairing::TunedWith) => "this .sjtl was tuned with a Kneser-Ney side file (kn.sjkn), but none is on",
+            TinyLmError::KneserNey(KnPairing::TunedWith) => "this .sjtl was tuned with a Kneser-Ney side file (kn.sjkn), but none is loaded",
         })
     }
 }
@@ -316,7 +316,7 @@ impl TinyLm {
 
     /// The one loader of the engine and the evaluation CLI (S7c-2a): `load`'s checks, then the pairing with `lm` — the n-gram
     /// model hash the file records must be `lm`'s, and the Kneser-Ney side file hash it records (model-v6 section 2.7: none for
-    /// versions 1 to 3 and for an all-zero version 4 field) must be the one `lm` has on, all 32 bytes, or none when `lm` has none.
+    /// versions 1 to 3 and for an all-zero version 4 field) must be the one `lm` has loaded, all 32 bytes, or none when `lm` has none ("loaded" is about the file beside the model, not whether the formal profile scores with it).
     /// A pairing check only, not an integrity check of the `.sjtl`. Also returns the bytes it parsed (the CLI prints their hash;
     /// the engine drops them).
     pub fn load_paired(path: &Path, lm: &Lm) -> Result<(TinyLm, Vec<u8>), TinyLmError> {
