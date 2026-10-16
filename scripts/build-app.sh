@@ -168,6 +168,11 @@ cp data/packs/acg-add.tsv data/packs/acg-sources.tsv data/packs/acg.json "$RES/p
 cp -L data/lm/bigram.sjlm data/lm/classes.sjc data/lm/kn.sjkn data/lm/tinylm.sjtl data/lm/trigram.sjt3 "$RES/"   # -L: the worktree's model may be a symlink
 cp "$EN_TMP/english-words.txt" "$RES/"   # generated above (docs/contracts/zhen-mixed.md section 3.4)
 swift scripts/make-icon.swift "$RES/shanjie.tiff"
+# The app icon (docs/contracts/app-icon.md): actool compiles the Icon Composer document into Assets.car and AppIcon.icns,
+# named by CFBundleIconName and CFBundleIconFile in Info.plist. Absolute paths only: actool resolved relative ones against
+# another directory (measured 2026-10-17).
+xcrun actool "$ROOT/packaging/AppIcon.icon" --compile "$RES" --platform macosx --minimum-deployment-target 26.0 \
+  --app-icon AppIcon --output-partial-info-plist "$EN_TMP/icon.plist" >/dev/null || fail "actool could not compile packaging/AppIcon.icon"
 
 cp LICENSE "$RES/LICENSES/LICENSE"
 cp LICENSES/McBopomofo-MIT.txt LICENSES/data.md LICENSES/SCOWL.txt LICENSES/SymSpell-MIT.txt LICENSES/name-suggestion-index-BSD-3-Clause.txt "$RES/LICENSES/"
@@ -283,6 +288,8 @@ cat > "$APP/Contents/Info.plist" <<EOF
   <!-- Finder applies the localized names only when this base display name equals the folder name
        (善解輸入法.app); the English name comes from en.lproj. Unverified on a real system. -->
   <key>CFBundleDisplayName</key><string>善解輸入法</string>
+  <key>CFBundleIconFile</key><string>AppIcon</string>
+  <key>CFBundleIconName</key><string>AppIcon</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>$VERSION</string>
   <key>CFBundleVersion</key><string>$VERSION</string>

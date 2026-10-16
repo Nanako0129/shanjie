@@ -46,6 +46,13 @@ cp "$BIN" "$APP/Contents/MacOS/shanjie-installer"
 cp scripts/install-ime.sh "$RES/install-ime.sh"
 cp LICENSE "$RES/LICENSES/LICENSE"
 cp LICENSES/McBopomofo-MIT.txt LICENSES/data.md "$RES/LICENSES/"
+ICON_TMP="$(mktemp -d)"
+# The app icon (docs/contracts/app-icon.md): actool compiles the Icon Composer document into Assets.car and AppIcon.icns,
+# named by CFBundleIconName and CFBundleIconFile in Info.plist. Absolute paths only: actool resolved relative ones against
+# another directory (measured 2026-10-17).
+xcrun actool "$ROOT/packaging/AppIcon.icon" --compile "$RES" --platform macosx --minimum-deployment-target 26.0 \
+  --app-icon AppIcon --output-partial-info-plist "$ICON_TMP/icon.plist" >/dev/null || fail "actool could not compile packaging/AppIcon.icon"
+rm -rf "$ICON_TMP"
 
 printf '"CFBundleName" = "%s";\n"CFBundleDisplayName" = "%s";\n' 安裝善解輸入法 安裝善解輸入法 > "$RES/zh-Hant.lproj/InfoPlist.strings"
 printf '"CFBundleName" = "%s";\n"CFBundleDisplayName" = "%s";\n' "Shanjie Installer" "Shanjie Installer" > "$RES/en.lproj/InfoPlist.strings"
@@ -62,6 +69,8 @@ cat > "$APP/Contents/Info.plist" <<EOF
   <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
   <key>CFBundleName</key><string>Shanjie Installer</string>
   <key>CFBundleDisplayName</key><string>安裝善解輸入法</string>
+  <key>CFBundleIconFile</key><string>AppIcon</string>
+  <key>CFBundleIconName</key><string>AppIcon</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>$VERSION</string>
   <key>CFBundleVersion</key><string>$VERSION</string>
