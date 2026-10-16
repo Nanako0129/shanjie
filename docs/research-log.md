@@ -6444,3 +6444,9 @@ formal: alpha 0.7, tau 1, delta 2
 - 更正：說明原本寫「安裝檔多約 44 MB」，是用演練產物推估的；實際輸入法 zip 多 48.1 MB、安裝程式多 46.1 MB。說明檔與 GitHub Release 頁已改成約 48 MB（維護者同意改 Release 頁）。main 上 `appcast.xml` 嵌入的說明仍是 44 MB：改它要重簽 feed，而會在更新視窗看到這段的只有「已經有 Sparkle、版本低於 0.4.7」的安裝，這樣的安裝不存在（Sparkle 從 0.4.7 起才有），所以不重簽。
 - 發版後：Discord 發版公告（blobhaj，只標善解身分組，維護者選擇題同意）。網站（PR #186）隱私段寫上更新檢查、保留集換新數字，維護者同意後部署。維護者要網站圖示也跟著換（app-icon 契約 §5 原本排除）：用 repo 的 `packaging/AppIcon.icon` 經 `scripts/compile-app-icon.sh` 編進一個測試空殼，`NSWorkspace.icon(forFile:)` 以淺色外觀畫出 1024 px；`site/favicon.png` 是圖示本體（824 px 圓角方形）縮成 64 px，取代舊的 `favicon.svg`（平面的初版印章）；`site/og.png` 版面與文字不變，左側的平面印章換成同一張圖，圖示本體 300 px，位置和舊印章相同。
 - 發版過程的延誤：等 PR CI 的背景監看用了 `gh run list --commit <短 SHA>`，短 SHA 查不到任何 run，監看一直空轉、沒有通知；CI 綠了約 10 分鐘後才發現。之後一律用完整 SHA 或 run 編號監看。
+
+## 2026-10-17：錯字回報第 131 列（該記的教訓）
+
+- 維護者實機的組字區是「你該季的教訓是這個」，要的是「記」。加成 `就直接開始操作所以搶電腦，|你該記的教訓是這個|ㄋㄧˇ ㄍㄞ ㄐㄧˋ ㄉㄜ˙ ㄐㄧㄠˋ ㄒㄩㄣˋ ㄕˋ ㄓㄜˋ ㄍㄜ˙`（前文是同一則訊息的前一個子句；讀音由 `tools/readings.py` 產生，沒有 CHECK）。
+- Python 參考實作、golden 設定：兩種設定的第 1 名都是「該季」、第 2 名「該計」；正解聊天第 3、書面第 4。
+- `eval/golden/s2h-lm-context.txt` 的錯字回報兩行用 Python 參考實作重產，n 131：聊天 top1 29、書面 38 不變，oracle@64 兩種設定都 127 → 128；`eval/README.md` 改成 131 列。
