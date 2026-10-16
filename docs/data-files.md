@@ -26,6 +26,12 @@
 |---|---|---|---|
 | `english-words.txt`（`Resources/` 裡，中英混打的英文單字表） | SymSpell（`wolfgarbe/SymSpell`）釘住的 commit `c239062ae02961df18ab7da1671d01b4388204e0` 的 `SymSpell/frequency_dictionary_en_82_765.txt`，輸入 SHA-256 `c604e1121e398ae7c7fbf777f11e0a0f2fa66eda932cb9fba1321466cf3acd7b` | 輸出的 SHA-256 記在 `data/english-words.txt.sha256`（`3352d050…`，82,730 詞；切法 `LEN3_CAP` 3000、`LEN4_CAP` 不設上限，由 `docs/contracts/zhen-mixed.md` §4.4 的量測決定，研究紀錄 2026-10-14）；不符就建置失敗 | `scripts/build-app.sh` 在建置時下載輸入（快取在 `~/.cache/shanjie/english/`，有快取且雜湊相符就不再下載；下載失敗或雜湊不符就建置失敗），用 `tools/build_english_words.py`（切法與常數在檔頭；測試 `tools/test_build_english_words.py`）產生，核對輸出雜湊後放進 `Resources/`。授權見 `LICENSES/data.md` 與 `LICENSES/SCOWL.txt`、`LICENSES/SymSpell-MIT.txt` |
 
+## 進 git 的計數表
+
+| 檔案 | 來源 | 雜湊 | 重建 |
+|---|---|---|---|
+| `data/lexicon/digits.tsv`（數字語境，`docs/contracts/digit-context.md`；1,657,406 bytes，k＝3） | 中文維基百科 `zhwiki-20261001-pages-articles.xml.bz2`（SHA-256 `5db9052e…`）前 200,000 篇與 `colloquial-train.txt`（`3e833d06…`）；兩者的完整雜湊與工具版本在檔頭 | `4efd2acc1bb0f4867e91569051746edc82c5c212811a5e2339c2bf7b88461530` | `python3 tools/build_digits.py --wiki <dump> --articles 200000 --colloquial <colloquial-train.txt> --out data/lexicon/digits.tsv --procs N`（`experiments/digits/README.md`；保留集的句子照 `docs/contracts/holdout-refresh.md` §8 不計入） |
+
 ## 下載
 
 ```sh

@@ -64,17 +64,29 @@ python3 experiments/digits/measure.py judge --table data/lexicon/digits.tsv --th
 python3 experiments/digits/golden_digits.py --table data/lexicon/digits.tsv --theta <θ> [--mode structural] --out eval/golden/digits-score.txt
 ```
 
-   R2 判「結構規則」時加 `--mode structural`（分數欄是 `None`，只比切分）。格式在 `golden_digits.py` 的 docstring；檔頭有 `digits.tsv` 與三個模型檔的 SHA-256。
+   R2 判「結構規則」時加 `--mode structural`（分數欄是 `None`，只比切分）；這次判評分切分，用 `--theta 3`。格式在 `golden_digits.py` 的 docstring；檔頭有 `digits.tsv` 與三個模型檔的 SHA-256。
 
-## 執行時間〔估〕
+## 執行時間（2026-10-17 實測）
 
-| 步驟 | 估計 | 依據 |
+| 步驟 | Colab G4（48 執行緒，`--procs 46`） | 188 的 WSL（16 執行緒，`--procs 16`） |
 |---|---|---|
-| 建表 | 〔估〕和一趟 `build_counts.py`（非 `--expected`）同量級，10 個程序約 30–90 分鐘 | 實測：合成句上 `line_items`＋計數 18 萬字／秒／程序（不含 bz2、標記清除、`convert`，那些和 `build_counts.py` 共用、沒量） |
-| `build-set` | 〔估〕約 25–30 分鐘（單程序讀 305,000 篇，同 `build_e4ctx.py` 的 docstring：約 20 分鐘）＋`readings.py` 幾十秒 | 沿用該檔的說明，沒重量 |
-| `tune` | 〔估〕單程序 10–20 分鐘 | 實測：載入模型與詞庫約 8 秒；dev302 的 40 列（285 個音節）評分模式第一趟 1.3 秒（約 4.5 ms／音節，之後同樣的尾段與語境走快取）；cvtune＋wikitune 約 7,000 列、〔估〕5 萬音節。`--procs` 每個程序各有快取，不共用 |
-| `judge` | 〔估〕3–6 分鐘 | 同上，列數少很多（判讀半約 1,500 列＋dev302＋typing76） |
-| `golden_digits.py` | 實測約 8 秒（含載入） | 用合成的小表跑 |
+| 建表（`build_digits.py`，20 萬篇＋口語） | 1 分 57 秒（不含下載 dump） | 沒跑 |
+| `build-set` | 2 分 7 秒（單程序） | 沒跑 |
+| `tune`（θ 4 格＋結構規則＋預測列） | 1 分 22 秒 | θ 8 格：4 分 29 秒 |
+| `judge` | 38 秒 | 1 分 27 秒 |
+| `golden_digits.py` | — | Mac 約 8 秒（含載入） |
+
+## 結果（2026-10-17；表 `4efd2acc`，k＝3）
+
+| 項目 | 數字 |
+|---|---|
+| 數字串集合 | 調參半 1,495 列、判讀半 1,496 列（`digitruns.manifest.json` 記雜湊） |
+| R1 預測列（判讀半 hit@9） | 聊天 `<s>` 55.9% → 數字語境 84.4%（改對 427／改壞 2，McNemar p 1.3e-124）；書面 59.4% → 86.2%（408／7，p 9.6e-111）→ **數字語境** |
+| (i) 還沒打注音時的數字語境列 hit@9 | 判讀半 60.6%（後接詞在後繼層 98.3%） |
+| R2 θ（調參資料） | θ 0／0.5／1／2 的 (c) 合計 58／28／4／2，θ 3 起 0 → **θ＝3**（格點在第一次跑之後由 2 延伸到 8，契約 C.4.3） |
+| R2 判讀（θ＝3） | (a) 91.0%（結構規則 86.8%）；dev302、typing76 的 (c) 都是 0；(d) 每千音節 2.74、7.95 → **評分切分** |
+| 翻轉次數（判讀半，0／1／2／3+） | 評分 677／446／299／74；結構規則 216／427／402／451 |
+| 時間（每鍵） | 切分數 p95 3、相容掃描 p95 2 |
 
 ## 停止條件（C.5）
 
