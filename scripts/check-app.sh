@@ -51,7 +51,7 @@ for lp in "zh-Hant 善解輸入法" "en Shanjie"; do
     [ "$(pb "$k" "$S")" = "$name" ] || fail "$l InfoPlist.strings: $k"
   done
 done
-for f in mcbpmf-data.txt overlay-add.tsv sandhi-add.tsv names-add.tsv demote.tsv bigram.sjlm classes.sjc kn.sjkn tinylm.sjtl shanjie.tiff \
+for f in mcbpmf-data.txt overlay-add.tsv sandhi-add.tsv names-add.tsv demote.tsv bigram.sjlm classes.sjc kn.sjkn trigram.sjt3 tinylm.sjtl shanjie.tiff \
          packs/acg-add.tsv packs/acg-sources.tsv packs/acg.json LICENSES/LICENSE LICENSES/McBopomofo-MIT.txt LICENSES/data.md LICENSES/CC-BY-SA-4.0-attribution.txt \
          english-words.txt LICENSES/SCOWL.txt LICENSES/SymSpell-MIT.txt LICENSES/english-words-attribution.txt \
          LICENSES/name-suggestion-index-BSD-3-Clause.txt; do
@@ -125,6 +125,12 @@ sparkle_key SUEnableSystemProfiling bool false
 # An EdDSA public key is 32 bytes: 44 base64 characters ending in one '='; an empty or placeholder value fails.
 [[ "$(pb SUPublicEDKey)" =~ ^[A-Za-z0-9+/]{43}=$ ]] || fail "SUPublicEDKey is not a 44-character base64 key"
 ! pb SUEnableJavaScript >/dev/null || fail "Info.plist sets SUEnableJavaScript"
+# The trigram table of the formal profile (trigram-core): against the hash recorded in git, like kn.sjkn.
+grep -q 'trigram.sjt3' "$R/LICENSES/CC-BY-SA-4.0-attribution.txt" || fail "the attribution file does not list trigram.sjt3"
+TRI_RECORDED="$(awk 'NR == 1 { print $1 }' "$ROOT/data/trigram.sjt3.sha256")"
+[[ "$TRI_RECORDED" =~ ^[0-9a-f]{64}$ ]] || fail "data/trigram.sjt3.sha256 holds no SHA-256"
+[ "$(shasum -a 256 "$R/trigram.sjt3" | awk '{ print $1 }')" = "$TRI_RECORDED" ] \
+  || fail "Resources/trigram.sjt3 does not match data/trigram.sjt3.sha256"
 echo "check 2: ok"
 
 # --- 3: signature: valid, no entitlements at all. The ad-hoc build has no hardened runtime (scripts/build-app.sh: library

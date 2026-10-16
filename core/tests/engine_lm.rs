@@ -15,6 +15,7 @@ fn lm_path() -> PathBuf {
     let p = root().join("data/lm/bigram.sjlm");
     assert!(root().join("data/lm/classes.sjc").exists(), "data/lm/classes.sjc is missing: download it with `gh release download classes-v5 -R Nanako0129/shanjie -p classes.sjc -D data/lm` (or build it with tools/build_classes.py)");
     assert!(p.exists(), "data/lm/bigram.sjlm is missing: download it with `gh release download model-v6 -R Nanako0129/shanjie -p bigram.sjlm -D data/lm`");
+    assert!(root().join("data/lm/trigram.sjt3").exists(), "data/lm/trigram.sjt3 is missing (the formal profile's trigram table): download it with `gh release download sj-cx-1-7.7m -R Nanako0129/shanjie -p trigram.sjt3 -D data/lm`");
     p
 }
 
@@ -177,8 +178,11 @@ fn fix_word(e: &mut Engine, layout: Layout, syls: &Syls, end: usize, word: &str)
 
 /// Whole-sentence LM top-1: (surface, score, words with their (start, end) syllable spans).
 fn best_path(syls: &Syls, profile: Profile) -> (String, f64, Vec<(String, usize, usize)>) {
+    best_path_in(&shared().lm, syls, profile)
+}
+fn best_path_in(lm: &Lm, syls: &Syls, profile: Profile) -> (String, f64, Vec<(String, usize, usize)>) {
     let s = shared();
-    let (score, words) = decode(&s.capped, syls, &s.lm, profile, 64).unwrap().swap_remove(0);
+    let (score, words) = decode(&s.capped, syls, lm, profile, 64).unwrap().swap_remove(0);
     let mut pos = 0;
     let spans = words
         .iter()
@@ -221,16 +225,26 @@ fn fixed_overlay_word_total_equals_whole_sentence_top1() {
 
 /// 5(a), breadth: every word of the top-1 path of the first rows, both profiles. A beam of 64 is an
 /// approximation, so a row may legitimately differ; at most 2 of the checked words may.
+/// Both sides run on the model without `trigram.sjt3` (`Lm::load_opts(.., tri: false)`). With the table the formal profile
+/// legitimately scores a path with a fixed word differently from the same string without one: trigram-core rule (a) gives the
+/// first word after a fixed word an unknown u (bigram only), while the whole-sentence top-1 has the real u there (measured
+/// 2026-10-16: 39 of 97 checked words differ in the formal profile, all with the same surface and a score off by 0.02 to 1.4;
+/// the decoder helper `best_path` already scores with `lm.scoring(profile)`, so it is not a lambda-only helper). The table's
+/// own `total_score` rules are tested against hand-computed values in tri_tiny.rs.
 #[test]
 fn fixed_word_total_equals_top1_on_first_rows() {
+    let s = shared();
+    let lm = Arc::new(Lm::load_opts(&lm_path(), true, true, false).unwrap());
     let (mut ok, mut bad) = (0, 0);
     for profile in [Profile::Chat, Profile::Formal] {
         for n in 1..=12 {
             let (_, syls) = row(n);
-            let (surface, score, spans) = best_path(&syls, profile);
+            let (surface, score, spans) = best_path_in(&lm, &syls, profile);
             for (w, a, b) in spans.iter().filter(|(_, a, b)| !(*a == 0 && *b == syls.len())) {
                 let _ = a;
-                let mut e = engine(Layout::Standard, profile);
+                let mut e = Engine::with_lexicon(s.lex.clone(), Layout::Standard);
+                e.set_lm(lm.clone(), s.capped.clone());
+                e.set_profile(profile).unwrap();
                 let o = fix_word(&mut e, Layout::Standard, &syls, *b, w);
                 if o.preedit == surface && (e.total_score().unwrap() - score).abs() <= 1e-9 {
                     ok += 1;
@@ -283,35 +297,42 @@ fn type_row(e: &mut Engine, layout: Layout, syls: &Syls) -> Output {
     last.unwrap()
 }
 
-/// Acceptance 6 sentence (dev302 row 284): unigram, chat and formal top-1 are pairwise different, the truth being the formal one.
-/// It was row 10 before the word-class term (S2k), then row 226; each stopped telling the profiles apart (the class term made chat
-/// pick 期中報告 as formal does; the one-path-per-(surface, last word) decoder of dec-recombine made row 226 `及時趕到` in both).
+/// Acceptance 6 sentence (dev302 row 127): unigram, chat and formal top-1 are pairwise different, the truth being the formal one.
+/// It was row 10 before the word-class term (S2k), then row 226, then row 284; each stopped telling the profiles apart (the class term made
+/// chat pick 期中報告 as formal does; the one-path-per-(surface, last word) decoder of dec-recombine made row 226 `及時趕到` in both; with
+/// trigram.sjt3 beside the model the formal profile gives 律水壺 on row 284, no longer the truth 濾水壺). Row 127 (道士在廟裡設壇作法) is the
+/// first dev302 row where the three differ and formal equals the truth: measured 2026-10-16 by typing all 302 rows through this engine setup
+/// (unigram engine, chat, formal) with trigram.sjt3 beside the model; the rows where all three differ are 118, 127, 183, 215, 284 and the
+/// formal one is the truth only on 127 and 215 (118, 183 and 284 have a formal top-1 that is not the truth). The chat and formal strings below
+/// are also the golden's (checked by the last assert), the unigram one is the decoder's.
 #[test]
 fn acceptance6_sentence_has_three_different_top1() {
-    let (truth, syls) = row(284);
+    let (truth, syls) = row(127);
     let uni = type_row(&mut Engine::with_lexicon(shared().lex.clone(), Layout::Standard), Layout::Standard, &syls).preedit;
     let chat = type_row(&mut engine(Layout::Standard, Profile::Chat), Layout::Standard, &syls).preedit;
     let formal = type_row(&mut engine(Layout::Standard, Profile::Formal), Layout::Standard, &syls).preedit;
-    assert_eq!((uni.as_str(), chat.as_str(), formal.as_str()), ("廚房新莊了一個率水壺", "廚房新裝了一個率水壺", "廚房新裝了一個濾水壺"));
+    assert_eq!((uni.as_str(), chat.as_str(), formal.as_str()), ("到是在廟裡社談作法", "到是在廟裡設壇作法", "道士在廟裡設壇作法"));
     assert!(formal == truth);
-    assert!(chat == golden_top1(0)[283] && formal == golden_top1(1)[283]);
+    assert!(chat == golden_top1(0)[126] && formal == golden_top1(1)[126]);
 }
 
 /// set_profile recomputes the composition and returns the snapshot; reset keeps the model and the profile.
+/// Row 284: chat 率水壺, formal 律水壺 with trigram.sjt3 beside the model (濾水壺 without the table, which is the truth; the test only
+/// needs the two profiles to differ).
 #[test]
 fn set_profile_snapshot_and_reset_keeps_lm_and_profile() {
     let (_, syls) = row(284);
     let mut e = engine(Layout::Standard, Profile::Chat);
     assert!(type_row(&mut e, Layout::Standard, &syls).preedit == "廚房新裝了一個率水壺");
     let o = e.set_profile(Profile::Formal).unwrap();
-    assert!(o.handled && o.commit.is_empty() && o.preedit == "廚房新裝了一個濾水壺");
-    assert!(e.key(Key::new(KeyKind::Enter)).unwrap().commit == "廚房新裝了一個濾水壺");
+    assert!(o.handled && o.commit.is_empty() && o.preedit == "廚房新裝了一個律水壺");
+    assert!(e.key(Key::new(KeyKind::Enter)).unwrap().commit == "廚房新裝了一個律水壺");
     for mode in [ResetMode::Commit, ResetMode::Discard] {
         type_row(&mut e, Layout::Standard, &syls);
         e.reset(mode);
         // Same output as a fresh engine with the same model and profile.
         let o = type_row(&mut e, Layout::Standard, &syls);
-        assert!(o.preedit == "廚房新裝了一個濾水壺", "reset must keep the model and the profile");
+        assert!(o.preedit == "廚房新裝了一個律水壺", "reset must keep the model and the profile");
         assert!(e.total_score().is_some());
         e.reset(ResetMode::Discard);
         assert!(e.total_score().is_none());
