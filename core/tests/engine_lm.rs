@@ -15,6 +15,7 @@ fn lm_path() -> PathBuf {
     let p = root().join("data/lm/bigram.sjlm");
     assert!(root().join("data/lm/classes.sjc").exists(), "data/lm/classes.sjc is missing: download it with `gh release download classes-v5 -R Nanako0129/shanjie -p classes.sjc -D data/lm` (or build it with tools/build_classes.py)");
     assert!(p.exists(), "data/lm/bigram.sjlm is missing: download it with `gh release download model-v6 -R Nanako0129/shanjie -p bigram.sjlm -D data/lm`");
+    assert!(root().join("data/lm/trigram.sjt3").exists(), "data/lm/trigram.sjt3 is missing (the formal profile's trigram table): download it with `gh release download sj-cx-1-7.7m -R Nanako0129/shanjie -p trigram.sjt3 -D data/lm`");
     p
 }
 
@@ -300,8 +301,10 @@ fn type_row(e: &mut Engine, layout: Layout, syls: &Syls) -> Output {
 /// It was row 10 before the word-class term (S2k), then row 226, then row 284; each stopped telling the profiles apart (the class term made
 /// chat pick 期中報告 as formal does; the one-path-per-(surface, last word) decoder of dec-recombine made row 226 `及時趕到` in both; with
 /// trigram.sjt3 beside the model the formal profile gives 律水壺 on row 284, no longer the truth 濾水壺). Row 127 (道士在廟裡設壇作法) is the
-/// first row of the dev302 golden where the three differ and formal equals the truth (found by scanning the Python-derived golden top-1 columns);
-/// the chat and formal strings below are the golden's, the unigram one is the decoder's.
+/// first dev302 row where the three differ and formal equals the truth: measured 2026-10-16 by typing all 302 rows through this engine setup
+/// (unigram engine, chat, formal) with trigram.sjt3 beside the model; the rows where all three differ are 118, 127, 183, 215, 284 and the
+/// formal one is the truth only on 127 and 215 (118, 183 and 284 have a formal top-1 that is not the truth). The chat and formal strings below
+/// are also the golden's (checked by the last assert), the unigram one is the decoder's.
 #[test]
 fn acceptance6_sentence_has_three_different_top1() {
     let (truth, syls) = row(127);

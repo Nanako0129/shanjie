@@ -5,7 +5,7 @@ import XCTest
 
 /// The repository's data, laid out like the app's Resources (docs/contracts/s3b.md section 10.4):
 /// a temporary directory of symlinks to data/lexicon/*, data/lm/bigram.sjlm, classes.sjc, kn.sjkn, trigram.sjt3 and tinylm.sjtl. Missing files fail
-/// the test with instructions; nothing is ever skipped.
+/// the test with instructions; nothing is skipped for a missing file (the one opt-in benchmark, CandidateCellTests.testBenchmark, is skipped without SHANJIE_BENCH=1).
 enum TestData {
     static let repo = URL(fileURLWithPath: #filePath)
         .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()

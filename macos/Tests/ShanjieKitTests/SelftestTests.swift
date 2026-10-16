@@ -73,6 +73,14 @@ final class SelftestTests: XCTestCase {
         XCTAssertNotEqual(Selftest.run(resources: res), 0)
     }
 
+    /// trigram-core: the formal profile's table is read from beside the model. Without it the model still loads and formal gives 濾水壺 on the
+    /// selftest sentence instead of the expected 律水壺, so a bundle without trigram.sjt3 must fail the selftest.
+    func testFailsWithoutTheTrigramTable() throws {
+        let res = try XCTUnwrap(TestData.resources(only: Set(TestData.files.map(\.name)).subtracting(["trigram.sjt3"])))
+        try TestData.addBundledPack(to: res)
+        XCTAssertNotEqual(Selftest.run(resources: res), 0)
+    }
+
     func testFailsWithoutTheLexicon() throws {
         let res = try XCTUnwrap(TestData.resources(only: ["overlay-add.tsv", "bigram.sjlm", "classes.sjc"]))
         XCTAssertNotEqual(Selftest.run(resources: res), 0)
