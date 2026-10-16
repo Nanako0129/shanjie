@@ -5,9 +5,18 @@
 --context：第一個詞的歷史用每列的前文（S2h：context_key 截尾 → history），摘要行的 profile 欄寫成 lm-<profile>+ctx。
 --no-classes：不用詞類別項（預設載入 --lm 同目錄的 classes.sjc，沒有就報錯）；摘要行的 profile 欄後面加 -noclasses（接在 -nodemote 後）。
 --no-demote：不套降權（預設套用 data/lexicon/demote.tsv）；摘要行的 profile 欄後面加 -nodemote（和 +ctx 一樣接在 lm-<profile> 後，兩個都有時 +ctx 在前）。
+--kn FILE [--kn-beta β]：Kneser-Ney 回退分布的側檔（tools/kn_cont.py）。沒給 --kn 時，--lm 同目錄有 kn.sjkn 就載入（和 Rust CLI、App 相同，
+  model-v6 §2.5）；--no-kn 不載。SJKN0002 的 β 取自檔頭，--kn-beta 可不給（給了和檔頭不同就報錯）；
+  舊的 SJKN0001 一定要給 --kn-beta。不論哪種格式都傳 kn_classes（build_lm.variant_classes），讓 lm.py 用 kn_total 重算 ΣN′ 和檔頭比對。
+  摘要行的 profile 欄最後加 +kn:<側檔 SHA-256 前 8 碼>:θ<θ>:β<β>（Rust CLI 同格式）。
+--tri FILE | --no-tri：trigram 表（SJT30001，docs/contracts/trigram-core.md，reference/proto/trigram.py）。沒給 --tri 時，--lm 同目錄有 trigram.sjt3 就載入（和 Rust CLI 相同）；
+  --no-tri 不載。只有 --profile formal 載入它（chat 不載、不讀檔、不加標籤，和 Rust CLI 相同；chat 給 --tri 是錯誤）：書面有表時 kn.sjkn 照 Rust 的規則仍然載入並驗證
+  （壞了就報錯，不能給 --kn），但計分時 KN 關，摘要行不加 +kn:；解碼用兩個歷史詞（trigram.decode3），摘要行的 profile 欄最後（+xo 之後）加 +tri:<表檔 SHA-256 前 8 碼>。
+--extra-overlay FILE：接在 ime.OVERLAYS 之後的疊加層檔，也併進封頂詞集合（預設關；Rust CLI 同名參數）；摘要行最後加 +xo:<檔案 SHA-256 前 8 碼>。
+  名單層 data/lexicon/names-add.tsv 已在 ime.OVERLAYS 與封頂詞集合裡（model-v6 §2.5），不要再用這個參數給它（重複的列是錯誤）。
 --rowstats FILE：每列一行 `列號\\t對錯\\t錯字數\\t正解字數`（只有數字，見 docs/contracts/eval-stats.md）。
 --dump FILE：每列寫 `列號\\t名次\\tsurface\\t分數(repr)`，前 64 名，給逐分數比對（容許 1e-9 的浮點誤差）。
-用法：python3 reference/proto/lm_eval.py --lm data/lm/bigram.sjlm --profile chat|formal --rows <檔> [--limit N] [--name 名稱] [--dump FILE] [--context] [--no-demote] [--no-classes]
+用法：python3 reference/proto/lm_eval.py --lm data/lm/bigram.sjlm --profile chat|formal --rows <檔> [--limit N] [--name 名稱] [--dump FILE] [--context] [--no-demote] [--no-classes] [--kn FILE [--kn-beta β] | --no-kn] [--tri FILE | --no-tri] [--extra-overlay FILE]
   評測檔格式 `前文|句子|讀音`；dev 集要先依檔名排序串接（和 CLI 相同），可用 --dev 302 直接取開發集前 N 列。
 """
 import argparse
@@ -25,6 +34,7 @@ import lm as L  # noqa: E402
 from eval import lenient  # noqa: E402  單字對照＋異體詞表（§S2v）
 
 sys.path.insert(0, os.path.join(ROOT, "tools"))
+sys.path.insert(0, os.path.join(ROOT, "experiments", "s2"))  # build_counts，variant_classes 要用
 from evalstats import format_rowstats  # noqa: E402  逐列統計檔的唯一寫出函式（docs/contracts/eval-stats.md §1）
 
 
@@ -38,12 +48,60 @@ def rows_of(paths):
     return out
 
 
+def kn_tag(path, beta=None):
+    """摘要行的 KN 標籤：側檔內容的 SHA-256 前 8 碼與檔頭的 θ，同名不同內容的側檔也分得出來；beta 是 lm.kn[0]（SJKN0002 取自檔頭）。
+    beta 不給時直接從檔頭讀（tools/triage.py 不載模型也要同一個標籤）；不是 SJKN0002 檔就 ValueError。"""
+    import struct
+    b = open(path, "rb").read()
+    if beta is None:
+        if b[:8] != b"SJKN0002" or len(b) < 56:
+            raise ValueError("not an SJKN0002 side file")
+        beta = struct.unpack_from("<d", b, 48)[0]
+    return f"+kn:{hashlib.sha256(b).hexdigest()[:8]}:θ{struct.unpack_from('<I', b, 44)[0]}:β{beta:g}"
+
+
+def xo_tag(path):
+    """--extra-overlay 的摘要行標籤 `+xo:<檔案內容 SHA-256 前 8 碼>`，放在最後（cli/src/main.rs 的 xo 同格式、同位置）；沒給時是空字串。"""
+    return f"+xo:{hashlib.sha256(open(path, 'rb').read()).hexdigest()[:8]}" if path else ""
+
+
+def overlay_words(overlay_add, extra=None, names=None):
+    """封頂用的疊加層詞集合：overlay-add.tsv 與 names-add.tsv（名單層，model-v6 §2.5）的詞，加上 --extra-overlay 檔的詞
+    （Rust 的 capping_overlay_detailed 加上 extra 的列）。"""
+    return ime.capping_words(extra, [p for p in (overlay_add, names) if p])
+
+
+def kn_side(lm_path, kn=None, no_kn=False):
+    """KN 側檔路徑或 None：kn 給了就用那個；否則模型旁邊的 kn.sjkn，存在（含壞掉的符號連結，Rust 的 Lm::load_with 同樣當成要載入而失敗）
+    就載入，除非 no_kn（Rust 各模式的 `--no-kn`）。"""
+    side = os.path.join(os.path.dirname(os.path.abspath(lm_path)), "kn.sjkn")
+    return kn or (side if not no_kn and os.path.lexists(side) else None)
+
+
+def tri_side(lm_path, tri=None, no_tri=False):
+    """trigram 表路徑或 None：tri 給了就用那個；否則模型旁邊的 trigram.sjt3，存在（含壞掉的符號連結）就載入，除非 no_tri。"""
+    side = os.path.join(os.path.dirname(os.path.abspath(lm_path)), "trigram.sjt3")
+    return tri or (side if not no_tri and os.path.lexists(side) else None)
+
+
+def load_lm(lm_path, base, classes=True, kn=None, kn_beta=None):
+    """BigramLM，kn（kn_side 的結果）不是 None 時帶 KN；base 是詞庫（variant_classes 用）。lm_eval 與 experiments/sp/predict.py 共用這一份。"""
+    kw = {}
+    if kn:
+        import build_lm  # tools/，variant_classes 與 build_lm.build 同一套（kn-smoothing.md §2.2）
+        kw = dict(kn=kn, kn_beta=kn_beta, kn_classes=build_lm.variant_classes(base.by_reading))
+    return L.BigramLM(lm_path, classes=classes, **kw)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--lm", default=os.path.join(ROOT, "data", "lm", "bigram.sjlm"))
     ap.add_argument("--profile", choices=sorted(L.PROFILES), required=True)
     ap.add_argument("--rows"); ap.add_argument("--dev", type=int); ap.add_argument("--limit", type=int)
     ap.add_argument("--name"); ap.add_argument("--dump"); ap.add_argument("--rowstats"); ap.add_argument("--context", action="store_true"); ap.add_argument("--no-demote", action="store_true"); ap.add_argument("--no-classes", action="store_true")
+    ap.add_argument("--kn"); ap.add_argument("--kn-beta", type=float); ap.add_argument("--no-kn", action="store_true")
+    ap.add_argument("--tri"); ap.add_argument("--no-tri", action="store_true")
+    ap.add_argument("--extra-overlay")
     a = ap.parse_args()
     if a.dev:
         rows = rows_of(sorted(glob.glob(os.path.join(ROOT, "eval", "dev", "*.txt"))))[:a.dev]
@@ -51,17 +109,35 @@ def main():
     else:
         rows = rows_of([a.rows])[:a.limit] if a.limit else rows_of([a.rows])
         name = a.name or os.path.basename(a.rows)
-    lm = L.BigramLM(a.lm, classes=not a.no_classes)
+    if a.kn and a.no_kn:
+        ap.error("--kn and --no-kn")
+    if a.tri and a.no_tri:
+        ap.error("--tri and --no-tri")
+    if a.tri and a.profile != "formal":
+        ap.error("--tri needs --profile formal (chat never uses the table)")
+    tri = tri_side(a.lm, a.tri, a.no_tri) if a.profile == "formal" else None   # chat does not even read the table, like the CLI
+    if tri and a.kn:
+        ap.error("--kn with the formal profile's trigram table (it scores without Kneser-Ney)")
+    kn = kn_side(a.lm, a.kn, a.no_kn)   # loaded and validated in every case the CLI loads it, the table or not
+    if not kn and a.kn_beta is not None:   # 空字串（未設定的變數）也算沒給
+        ap.error("--kn-beta needs --kn")
     base = ime.Lexicon(os.path.join(ROOT, "data", "lexicon", "mcbpmf-data.txt"),
-                       overlay=ime.OVERLAYS)
-    ov = {l.split("\t")[1] for l in open(os.path.join(ROOT, "data", "lexicon", "overlay-add.tsv"), encoding="utf-8")}
+                       overlay=ime.overlays(a.extra_overlay))
+    lm = load_lm(a.lm, base, not a.no_classes, kn, a.kn_beta)
+    if tri:
+        lm.kn = None   # formal with a table scores without Kneser-Ney (Rust Lm::scoring); the side file was checked above
+    ov = ime.capping_words(a.extra_overlay)
     lex = L.cap_overlay(base, ov, lm)
+    if tri:
+        from trigram import TriLM, TriTable, decode3, sha8   # numpy: only when a table is in use (CI runs this file without it)
+        tri_lm = TriLM(lm, TriTable.from_path(tri, hashlib.sha256(open(a.lm, "rb").read()).digest()))
     top1, o64, firsts, rs = 0, 0, [], []
     dump = open(a.dump, "w", encoding="utf-8") if a.dump else None
     # Opened before decoding, like the CLI: an unwritable path fails now, not after the whole run.
     rsf = open(a.rowstats, "w", encoding="utf-8", newline="") if a.rowstats else None
     for i, (t, syls, ctx) in enumerate(rows, 1):
-        nb = L.decode(lex, syls, lm, a.profile, start=L.history(L.context_key(ctx), lm) if a.context else "<s>", demote=not a.no_demote)
+        start = L.history(L.context_key(ctx), lm) if a.context else "<s>"
+        nb = decode3(lex, syls, tri_lm, a.profile, start=start, demote=not a.no_demote) if tri else L.decode(lex, syls, lm, a.profile, start=start, demote=not a.no_demote)
         surf = ["".join(ws) for _, ws in nb]
         firsts.append(surf[0])
         ok = lenient(surf[0]) == lenient(t)
@@ -75,7 +151,7 @@ def main():
         with rsf:
             rsf.write(format_rowstats(rs))
     sha = hashlib.sha256("\n".join(firsts).encode("utf-8")).hexdigest()
-    print(f"## {name}  lm-{a.profile}{'+ctx' if a.context else ''}{'-nodemote' if a.no_demote else ''}{'-noclasses' if a.no_classes else ''}  {{'n': {len(rows)}, 'top1': {top1}, 'oracle@64': {o64}, 'top1_sha256': '{sha}'}}")
+    print(f"## {name}  lm-{a.profile}{'+ctx' if a.context else ''}{'-nodemote' if a.no_demote else ''}{'-noclasses' if a.no_classes else ''}{kn_tag(kn, lm.kn[0]) if kn and not tri else ''}{xo_tag(a.extra_overlay)}{'+tri:' + sha8(tri) if tri else ''}  {{'n': {len(rows)}, 'top1': {top1}, 'oracle@64': {o64}, 'top1_sha256': '{sha}'}}")
 
 
 if __name__ == "__main__":

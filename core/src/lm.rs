@@ -2,7 +2,8 @@
 //! The Python code is ground truth; float operation order is kept on purpose (no fusing or reordering).
 //! R2: errors carry no content; nothing here formats input text.
 
-use crate::learn::{context_key, newword_score, Learner, Level, NEWWORD_MAX};
+use crate::learn::{context_key, newword_score, record_key, Learner, Level, NEWWORD_MAX};
+use crate::trigram::{Mapped, Tri, TriBytes, TriCtx, TriMemo};
 use crate::{Error, Lexicon, PER_KEY};
 use std::collections::{HashMap, HashSet};
 use std::fmt;
@@ -37,10 +38,50 @@ impl Profile {
     }
 }
 
+/// What the decoder and `Engine::total_score` score a word with (docs/contracts/trigram-core.md): lambda, whether the
+/// Kneser-Ney side file is applied (when one is loaded), and whether the trigram table is used (when one is loaded). `Lm::scoring`
+/// derives it from the profile; a bare lambda (`From<f64>`) is the bigram with the side file as loaded, which is what every caller
+/// scored with before the trigram level existed.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Scoring {
+    pub lam: f64,
+    pub kn: bool,
+    pub tri: bool,
+}
+
+impl From<f64> for Scoring {
+    fn from(lam: f64) -> Scoring {
+        Scoring { lam, kn: true, tri: false }
+    }
+}
+
+/// `dir/name` beside the model: `None` when the path does not exist; a path that exists (a dangling symlink included) is `Some`,
+/// and one that cannot even be examined is an error.
+fn beside(model: &Path, name: &str) -> Result<Option<std::path::PathBuf>, ()> {
+    let side = model.with_file_name(name);
+    match std::fs::symlink_metadata(&side) {
+        Ok(_) => Ok(Some(side)),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(_) => Err(()),
+    }
+}
+
+/// `beside`, then read whole (an existing path that cannot be read is an error).
+fn read_beside(model: &Path, name: &str) -> Result<Option<Vec<u8>>, ()> {
+    match beside(model, name)? {
+        Some(side) => std::fs::read(side).map(Some).map_err(|_| ()),
+        None => Ok(None),
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LmError {
     Io,
     Format,
+    /// The Kneser-Ney side file (`kn.sjkn`) exists but cannot be read, or does not match the model (docs/contracts/kn-core.md).
+    KnSide,
+    /// The trigram table (`trigram.sjt3`) exists but cannot be read, or does not match the model (docs/contracts/trigram-core.md).
+    TriTable,
 }
 
 impl fmt::Display for LmError {
@@ -48,6 +89,8 @@ impl fmt::Display for LmError {
         f.write_str(match self {
             LmError::Io => "cannot read language model file",
             LmError::Format => "bad language model file",
+            LmError::KnSide => "unreadable or mismatching Kneser-Ney side file (kn.sjkn)",
+            LmError::TriTable => "unreadable or mismatching trigram table (trigram.sjt3)",
         })
     }
 }
@@ -69,6 +112,44 @@ pub struct Lm {
     cnt: Vec<u32>,
     /// S2k word-class term (classes.sjc); `None` only for the explicit class-less constructors.
     classes: Option<Classes>,
+    /// SHA-256 (hex) of the model bytes, taken once in `parse`: classes.sjc and kn.sjkn are bound to it.
+    sha: String,
+    /// Kneser-Ney side file (`kn.sjkn` beside the model, docs/contracts/kn-core.md); `None` is off.
+    kn: Option<Kn>,
+    /// Trigram table (`trigram.sjt3` beside the model, docs/contracts/trigram-core.md); `None` is off. Only the formal profile
+    /// scores with it (`Lm::scoring`).
+    tri: Option<Tri>,
+}
+
+/// kn.sjkn (SJKN0002, written by tools/kn_cont.py), indexed by model word id. `total` (sum of N') is computed
+/// upstream in Python (lm.kn_total over the variant classes) and only read here.
+struct Kn {
+    beta: f64,
+    theta: u32,
+    total: u64,
+    /// The whole file, the bytes `add_kn` checked; N is read in place (little-endian u32 at `KN_N + 4 * id`), so nothing is copied.
+    raw: Vec<u8>,
+    /// SHA-256 of `raw` and `+kn:<its sha8>:θ<θ>:β<β>` (the suffix of lm_eval.py's summary line), computed on first use.
+    hashed: OnceLock<([u8; 32], String)>,
+}
+
+const KN_N: usize = 64;
+
+impl Kn {
+    fn hashed(&self) -> &([u8; 32], String) {
+        self.hashed.get_or_init(|| {
+            let sha = crate::eval::sha256(&self.raw);
+            let sha8: String = sha[..4].iter().map(|b| format!("{b:02x}")).collect();
+            let tag = format!("+kn:{sha8}:θ{}:β{}", self.theta, fmt_g(self.beta));
+            (sha, tag)
+        })
+    }
+
+    /// N' = N + 1 of word `id`.
+    fn np1(&self, id: usize) -> u64 {
+        let at = KN_N + 4 * id;
+        u32::from_le_bytes([self.raw[at], self.raw[at + 1], self.raw[at + 2], self.raw[at + 3]]) as u64 + 1
+    }
 }
 
 /// classes.sjc (format in tools/build_classes.py), indexed by model word id.
@@ -81,6 +162,7 @@ struct Classes {
 }
 
 const CLASS_MAGIC: &[u8; 8] = b"SJCL0001";
+const KN_MAGIC: &[u8; 8] = b"SJKN0002";
 const NO_CLASS: u16 = 0xFFFF;
 
 /// classes.sjc bytes for `model` (tests only; the real file is written by tools/build_classes.py).
@@ -145,28 +227,142 @@ impl<'a> Rd<'a> {
 }
 
 impl Lm {
+    /// SHA-256 (hex) of the model file this `Lm` was parsed from.
+    pub fn sha256(&self) -> &str {
+        &self.sha
+    }
+
     /// Cheap fingerprint of the loaded model (sizes of its tables), to tell two models apart.
     pub fn identity(&self) -> (u64, usize, usize) {
         (self.n, self.voff.len(), self.nxt.len())
     }
 
     /// The model at `path` and the `classes.sjc` beside it (S2k section 4.3). A missing or mismatching class
-    /// file is an error, never a silent fallback.
+    /// file is an error, never a silent fallback. A `kn.sjkn` beside the model switches the Kneser-Ney term on
+    /// (docs/contracts/kn-core.md); one that does not match the model is an error too.
     pub fn load(path: &Path) -> Result<Lm, LmError> {
-        let model = std::fs::read(path).map_err(|_| LmError::Io)?;
-        let classes = std::fs::read(path.with_file_name("classes.sjc")).map_err(|_| LmError::Io)?;
-        Lm::parse_with_classes(&model, &classes)
+        Lm::load_with(path, true, true)
     }
 
-    /// The model alone, explicitly without the class term (`--no-classes`).
+    /// The model without the class term (`--no-classes`); a `kn.sjkn` beside it is still read.
     pub fn load_without_classes(path: &Path) -> Result<Lm, LmError> {
-        Lm::parse(&std::fs::read(path).map_err(|_| LmError::Io)?)
+        Lm::load_with(path, false, true)
+    }
+
+    /// `load` with the class file (`classes`) and the Kneser-Ney side file (`kn`) each optional (`--no-classes`, `--no-kn`).
+    /// With `kn` on, no `kn.sjkn` path is simply off; one that exists (a dangling symlink included) but cannot be
+    /// read or does not match is `KnSide`, never ignored. A `trigram.sjt3` beside the model is read the same way.
+    pub fn load_with(path: &Path, classes: bool, kn: bool) -> Result<Lm, LmError> {
+        Lm::load_opts(path, classes, kn, true)
+    }
+
+    /// `load_with` with the trigram table optional too (`--no-tri`): off, the table is not read. On, a `trigram.sjt3` that exists
+    /// (a dangling symlink included) but cannot be read or does not match the model is `TriTable`; no such path is off.
+    pub fn load_opts(path: &Path, classes: bool, kn: bool, tri: bool) -> Result<Lm, LmError> {
+        let model = std::fs::read(path).map_err(|_| LmError::Io)?;
+        let mut lm = if classes {
+            let c = std::fs::read(path.with_file_name("classes.sjc")).map_err(|_| LmError::Io)?;
+            Lm::parse_with_classes(&model, &c)?
+        } else {
+            Lm::parse(&model)?
+        };
+        if kn {
+            if let Some(side) = read_beside(path, "kn.sjkn").map_err(|_| LmError::KnSide)? {
+                lm.add_kn(&side)?;
+            }
+        }
+        if tri {
+            // Mapped, not read: the table is 143.6 MB (docs/contracts/trigram-mmap.md). The same "exists" test as `read_beside`.
+            if let Some(side) = beside(path, "trigram.sjt3").map_err(|_| LmError::TriTable)? {
+                // SAFETY: nothing rewrites this file in place while an `Lm` has it mapped. The App's Resources and a user's data/lm are
+                // replaced only by rename (scripts/install-ime.sh, the installer, the Homebrew cask), and tools/build_trigram.py writes a
+                // temp file and renames it onto the target.
+                let map = unsafe { Mapped::open(&side)? };
+                lm.add_tri_bytes(TriBytes::Map(map))?;
+            }
+        }
+        Ok(lm)
+    }
+
+    /// SJKN0002 bytes (docs/contracts/kn-core.md section 1): magic, V, the model's SHA-256, θ, β, sum of N', N[V]. Checked
+    /// (all `KnSide`): magic, V, the hash of the model this `Lm` was parsed from, exact length, β in [0, 1], and the
+    /// header sum of N' between the largest N' and the sum of all N' over ids >= 2 (a correct file always is: the sum counts
+    /// each variant class once). Turns the Kneser-Ney term on.
+    pub fn add_kn(&mut self, side: &[u8]) -> Result<(), LmError> {
+        let bad = |_| LmError::KnSide;
+        let mut r = Rd(side);
+        if r.take(8).map_err(bad)? != KN_MAGIC {
+            return Err(LmError::KnSide);
+        }
+        let v = r.u32().map_err(bad)? as usize;
+        let want: String = r.take(32).map_err(bad)?.iter().map(|b| format!("{b:02x}")).collect();
+        let (theta, beta, total) = (r.u32().map_err(bad)?, r.f64().map_err(bad)?, r.u64().map_err(bad)?);
+        if v != self.uni.len() || want != self.sha || !(0.0..=1.0).contains(&beta) || side.len() != KN_N + 4 * v {
+            return Err(LmError::KnSide);
+        }
+        let kn = Kn { beta, theta, total, raw: side.to_vec(), hashed: OnceLock::new() };
+        let (mut max, mut sum) = (0u64, 0u128);
+        for id in 2..v {
+            let n = kn.np1(id);
+            max = max.max(n);
+            sum += n as u128;
+        }
+        if total == 0 || total < max || total as u128 > sum {
+            return Err(LmError::KnSide);
+        }
+        self.kn = Some(kn);
+        Ok(())
+    }
+
+    /// The summary-line suffix `+kn:<side file sha8>:θ<θ>:β<β>` (same text as reference/proto/lm_eval.py); `None` when the
+    /// Kneser-Ney term is off. The side file is hashed on the first call.
+    pub fn kn_tag(&self) -> Option<&str> {
+        self.kn.as_ref().map(|k| k.hashed().1.as_str())
+    }
+
+    /// SHA-256 of the whole side file, from the bytes `add_kn` checked (never read again); `None` when no `kn.sjkn` is
+    /// loaded. A version 4 `.sjtl` records this value (docs/contracts/model-v6.md section 2.7; export_sjtl.py `--kn-side` writes
+    /// Python's `hashlib.sha256` of the same file), and `TinyLm::load_paired` compares all 32 bytes.
+    pub fn kn_sha256(&self) -> Option<[u8; 32]> {
+        self.kn.as_ref().map(|k| k.hashed().0)
+    }
+
+    /// SJT30001 bytes (docs/contracts/trigram-core.md; layout in core/src/trigram.rs), taken over without a copy (`load_opts` maps the file instead). Checked (all `TriTable`): magic,
+    /// V, the hash of the model this `Lm` was parsed from, D, exact length, and the order and range of every key, offset and next id.
+    /// Turns the trigram level on for the formal profile.
+    pub fn add_tri(&mut self, table: Vec<u8>) -> Result<(), LmError> {
+        self.add_tri_bytes(TriBytes::Mem(table))
+    }
+
+    fn add_tri_bytes(&mut self, table: TriBytes) -> Result<(), LmError> {
+        self.tri = Some(Tri::parse(table, self.uni.len(), &self.sha)?);
+        Ok(())
+    }
+
+    /// Whether the loaded trigram table is a file mapping (`None`: no table). For the tests of `load_opts`.
+    #[cfg(test)]
+    pub(crate) fn tri_is_mapped(&self) -> Option<bool> {
+        self.tri.as_ref().map(Tri::is_mapped)
+    }
+
+    /// The summary-line suffix `+tri:<table sha8>` (same text as reference/proto/lm_eval.py); `None` without a table. The file is
+    /// hashed on the first call. Whether a profile scores with the table is `scoring(profile).tri`.
+    pub fn tri_tag(&self) -> Option<&str> {
+        self.tri.as_ref().map(Tri::tag)
+    }
+
+    /// How `profile` scores a decoded word (docs/contracts/trigram-core.md): formal with a table is trigram on, Kneser-Ney off;
+    /// everything else is the bigram with the side file as loaded (chat never uses the table). Only decoding and
+    /// `Engine::total_score` take this; the prediction row scores with `word_by_id` and keeps the side file whatever the profile.
+    pub fn scoring(&self, profile: Profile) -> Scoring {
+        let tri = profile == Profile::Formal && self.tri.is_some();
+        Scoring { lam: profile.lambda(), kn: !tri, tri }
     }
 
     /// Model bytes plus classes.sjc bytes: magic, the model's SHA-256, the vocabulary size and the exact length must match.
     pub fn parse_with_classes(model: &[u8], classes: &[u8]) -> Result<Lm, LmError> {
         let mut lm = Lm::parse(model)?;
-        let sha = crate::eval::sha256_hex(model);
+        let sha = lm.sha.clone();
         let mut r = Rd(classes);
         if r.take(8)? != CLASS_MAGIC {
             return Err(LmError::Format);
@@ -267,6 +463,9 @@ impl Lm {
             nxt,
             cnt,
             classes: None,
+            sha: crate::eval::sha256_hex(bytes),
+            kn: None,
+            tri: None,
         })
     }
 
@@ -301,7 +500,30 @@ impl Lm {
     /// caller goes through. A kept bigram is unchanged; every other pair (also a context without entries,
     /// `back` = 1) gets `back * ((1 - mu) * pb + mu * Pc[c(v), c(w)] * emit(w))` when both words have a class
     /// (S2k section 4.2; the operation order is the Python one), else `back * pb`.
+    ///
+    /// Unlike lm.py's `prob`, this includes the Kneser-Ney term below (lm.py applies it in `word()`); decode results are the
+    /// same because every word term here goes through this one formula.
+    ///
+    /// Kneser-Ney (kn.sjkn, docs/contracts/kn-core.md): for a vocabulary word (id >= 2) `pb` first becomes
+    /// `beta * N' / sum(N') + (1 - beta) * pb`, so all three branches see it. Sentence end (id 1) and words outside
+    /// the vocabulary keep `pb`. Done here once because every word term (decode paths, `word`, `eos`) comes through this function.
+    /// The one exception (model-v6 section 2.8 rule 1): a lexicon entry the learner boosted is scored by `prob_learned`, which skips
+    /// this substitution so the boosted `pb` is not thrown away.
     fn prob_c(&self, ctx: Ctx, w: Option<u32>, pb: f64) -> f64 {
+        self.prob_c_kn(ctx, w, pb, true)
+    }
+
+    /// `prob_c` for a learned-boosted entry (model-v6 section 2.8 rule 1): the same formula as with no side file loaded, `pb` the
+    /// boosted value. Without a side file it equals `prob_c`.
+    fn prob_learned(&self, ctx: Ctx, w: Option<u32>, pb: f64) -> f64 {
+        self.prob_c_kn(ctx, w, pb, false)
+    }
+
+    fn prob_c_kn(&self, ctx: Ctx, w: Option<u32>, pb: f64, kn_on: bool) -> f64 {
+        let pb = match (&self.kn, w) {
+            (Some(kn), Some(w)) if kn_on && w >= 2 => kn.beta * kn.np1(w as usize) as f64 / kn.total as f64 + (1.0 - kn.beta) * pb,
+            _ => pb,
+        };
         let back = match ctx.idx {
             None => 1.0,
             Some(i) => {
@@ -322,6 +544,8 @@ impl Lm {
         back * pb
     }
 
+    /// `prob_c` by word strings. Includes the Kneser-Ney term when a side file is loaded; lm.py's `prob` does not (it applies
+    /// the term in `word()`), so compare whole word terms (`word`, decode), not this value, across the two.
     pub fn prob(&self, v: &str, w: &str, pb: f64) -> f64 {
         self.prob_c(self.ctx_of(self.word_id(v)), self.word_id(w), pb)
     }
@@ -329,6 +553,56 @@ impl Lm {
     /// lm.py `word`: lam * log10 P(w|v) + (1 - lam) * lp.
     pub fn word(&self, lam: f64, v: &str, w: &str, lp: f64) -> f64 {
         word_term(lam, self.prob(v, w, pow10(lp)), lp)
+    }
+
+    /// `word` for a word the learner boosted (model-v6 section 2.8 rule 1): no Kneser-Ney substitution. `Engine::total_score` uses it
+    /// for the path words `decode_segment_learned` scored that way, so the total still equals the top decode score.
+    pub fn word_learned(&self, lam: f64, v: &str, w: &str, lp: f64) -> f64 {
+        word_term(lam, self.prob_learned(self.ctx_of(self.word_id(v)), self.word_id(w), pow10(lp)), lp)
+    }
+
+    /// The stored trigram context (u, v), if `cfg` scores with the table. `u` `None` is unknown (a left context supplies one word).
+    /// `memo` keeps what was found in this call (a context's back-off weight sums all its entries; the same pair comes back at
+    /// many positions), so the answer is the one `Tri::context` gives, computed once.
+    fn tri_of(&self, cfg: Scoring, u: Option<u32>, v: Option<u32>, memo: &mut TriMemo) -> Option<TriCtx> {
+        let t = self.tri.as_ref().filter(|_| cfg.tri)?;
+        let key = (u?, v?);
+        *memo.0.entry(key).or_insert_with(|| t.context(key.0, key.1))
+    }
+
+    /// P3(w | u, v) (trimodel.py `prob`) with the P2 of this model under `cfg.kn`; `tri` is the context `tri_of` found, `None`
+    /// is P2 itself, bit for bit what `prob_c` returns with the side file on (`kn`) or off.
+    fn prob_tri(&self, tri: Option<TriCtx>, ctx: Ctx, w: Option<u32>, pb: f64, kn: bool) -> f64 {
+        let p2 = self.prob_c_kn(ctx, w, pb, kn);
+        match (&self.tri, tri) {
+            (Some(t), Some(c)) => t.prob(c, w, p2),
+            _ => p2,
+        }
+    }
+
+    /// `word` under `cfg` with two history words (`u` first, `None` unknown): trimodel.py `_word`. With `cfg` from a plain lambda
+    /// it is `word`.
+    pub fn word3(&self, cfg: Scoring, u: Option<&str>, v: &str, w: &str, lp: f64) -> f64 {
+        self.word3_in(&mut TriMemo::default(), cfg, u, v, w, lp)
+    }
+
+    /// `eos` under `cfg` with two history words: trimodel.py `eos`.
+    pub fn eos3(&self, cfg: Scoring, u: Option<&str>, v: &str) -> f64 {
+        self.eos3_in(&mut TriMemo::default(), cfg, u, v)
+    }
+
+    /// `word3` sharing `memo` with the other terms of one pass (`Engine::total_score`).
+    pub(crate) fn word3_in(&self, memo: &mut TriMemo, cfg: Scoring, u: Option<&str>, v: &str, w: &str, lp: f64) -> f64 {
+        let (vid, wid) = (self.word_id(v), self.word_id(w));
+        let tri = self.tri_of(cfg, u.and_then(|u| self.word_id(u)), vid, memo);
+        word_term(cfg.lam, self.prob_tri(tri, self.ctx_of(vid), wid, pow10(lp), cfg.kn), lp)
+    }
+
+    /// `eos3` sharing `memo`.
+    pub(crate) fn eos3_in(&self, memo: &mut TriMemo, cfg: Scoring, u: Option<&str>, v: &str) -> f64 {
+        let vid = self.word_id(v);
+        let tri = self.tri_of(cfg, u.and_then(|u| self.word_id(u)), vid, memo);
+        cfg.lam * self.prob_tri(tri, self.ctx_of(vid), Some(1), self.p_eos, cfg.kn).log10()
     }
 
     /// lm.py `eos`: lam * log10 P(</s>|v).
@@ -366,6 +640,15 @@ impl Lm {
 /// differently in the last bit (seen as 1-ulp score differences), so the base is hidden from the optimizer.
 fn pow10(lp: f64) -> f64 {
     std::hint::black_box(10.0f64).powf(lp)
+}
+
+/// Python `f"{x:g}"` for a number in [0, 1] (6 significant digits, no trailing zeros): `1`, `0.5`, `0.123457`, `1e-05`.
+fn fmt_g(x: f64) -> String {
+    let e = format!("{x:.5e}");
+    let (m, exp) = e.split_once('e').unwrap_or((&e, "0"));
+    let exp: i32 = exp.parse().unwrap_or(0);
+    let trim = |s: &str| if s.contains('.') { s.trim_end_matches('0').trim_end_matches('.').to_string() } else { s.to_string() };
+    if exp < -4 { format!("{}e-{:02}", trim(m), -exp) } else { trim(&format!("{:.*}", (5 - exp) as usize, x)) }
 }
 
 fn word_term(lam: f64, p: f64, lp: f64) -> f64 {
@@ -590,12 +873,16 @@ struct Hyp<'a> {
     score: f64,
     surface: String,
     words: Vec<(&'a str, f64, f64)>,
+    /// The two history words (docs/contracts/trigram-core.md): `prev` the one before `last`, `None` when unknown.
+    prev: Option<u32>,
     last: Option<u32>,
     ctx: Ctx,
+    /// The stored trigram context (`prev`, `last`), looked up once per hypothesis; always `None` when the table is not in use.
+    tri: Option<TriCtx>,
 }
 
-/// Learned boost (S4 §1.4, §12): which records may boost is decided by `Learner::lookup` (single
-/// characters only at the exact full key and never under "^"). A learned word scores
+/// Learned boost (S4 §1.4, §12, §14): which records may boost is decided by `Learner::lookup` (single
+/// characters only at the exact full two-character key). A learned word scores
 /// `best of its reading + eps * w / (w + 1)`, eps being `LEARN_EPS` (6.0) at the exact and last-character
 /// levels and `LEARN_EPS_GLOBAL` (0, `Learn::eps_global`) at the global level, for weight `w`
 /// (so a heavier record outranks a lighter one: a re-pick halves the displaced word), never
@@ -618,6 +905,10 @@ pub const LEARN_EPS_GLOBAL: f64 = 0.0;
 pub struct Learn<'a> {
     pub learner: &'a Learner,
     pub before: &'a str,
+    /// The first syllable right of the segment (`None`: the segment ends the composition). A word that
+    /// ends the segment is followed by it; under the sentence-start key the reading of the next syllable
+    /// is part of the key (rule 8).
+    pub after: Option<&'a str>,
     pub today: i64,
     /// ε of the global level: `LEARN_EPS_GLOBAL` in production; the integration tests sweep it through
     /// `Engine::set_eps_global` (a feature or cfg(test) cannot reach integration tests, and it is one
@@ -626,17 +917,18 @@ pub struct Learn<'a> {
 }
 
 /// lm.decode generalized to a segment: `start` is the word before the segment (`<s>` for a sentence),
-/// `end` the closing term. Best first; `Err(NoPath)` when nothing covers the segment.
+/// `end` the closing term. Best first; `Err(NoPath)` when nothing covers the segment. `scoring` is a `Scoring` (from
+/// `Lm::scoring`) or a bare lambda.
 pub fn decode_segment<'a>(
     lex: &'a CappedLexicon,
     syls: &[String],
     lm: &Lm,
-    lam: f64,
+    scoring: impl Into<Scoring>,
     start: &str,
     end: End<'_>,
     beam: usize,
 ) -> Result<Vec<Scored<'a>>, Error> {
-    decode_segment_learned(lex, syls, lm, lam, start, end, beam, None, true)
+    decode_segment_learned(lex, syls, lm, scoring, start, end, beam, None, true)
 }
 
 /// `decode_segment` with learning (S4 §1.4). With `learn` `None`, or a learner without a record for a
@@ -646,12 +938,20 @@ pub fn decode_segment<'a>(
 /// lexicon already has that word under that reading. `demote` switches the
 /// lexicon's demotion table on (a delta is subtracted from the word's term, after learning; lp, the
 /// backoff and the entries tried are unchanged) or off (bit-identical to a lexicon without the table).
+///
+/// Trigram level (`scoring.tri` with a table loaded, docs/contracts/trigram-core.md): the state is the last two words, so paths
+/// are recombined on (surface, previous word, last word). `start` is the history (u, v) of the first word: `<s>` is (`<s>`, `<s>`),
+/// any other word is (unknown, that word), so the first word is scored by the bigram alone. The closing term uses the table too:
+/// `Eos` and `End::Next` are scored from (second last word, last word); a segment of one word has the start word as the second last,
+/// except that a one-word segment with an unknown start (`start` is not `<s>`) closes with the bigram (slice A2 (b'): u is unknown there too).
+/// A learned-boosted entry skips both the Kneser-Ney substitution and the table (model-v6 section 2.8 rule 1 extended: the table's
+/// back-off weight would shrink the boost the same way).
 #[allow(clippy::too_many_arguments)]
 pub fn decode_segment_learned<'a>(
     lex: &'a CappedLexicon,
     syls: &[String],
     lm: &Lm,
-    lam: f64,
+    scoring: impl Into<Scoring>,
     start: &str,
     end: End<'_>,
     beam: usize,
@@ -662,25 +962,41 @@ pub fn decode_segment_learned<'a>(
     // New words are 2..=NEWWORD_MAX syllables and their reading may be no lexicon reading at all.
     let fresh_on = learn.filter(|ln| ln.learner.has_new_words());
     let max_l = if fresh_on.is_some() { base.max_len.max(NEWWORD_MAX) } else { base.max_len };
+    let cfg: Scoring = scoring.into();
+    let lam = cfg.lam;
+    let tri_on = cfg.tri && lm.tri.is_some();
+    let mut memo = TriMemo::default();
     let n = syls.len();
     let ids = base.ids(syls);
     let start_id = lm.word_id(start);
+    let start_prev = if start == "<s>" { start_id } else { None };
     let before_tail: String = {
         let t: Vec<char> = learn.map_or("", |l| l.before).chars().rev().take(crate::learn::MAX_CONTEXT).collect();
         t.into_iter().rev().collect()
     };
     let mut hyps: Vec<Vec<Hyp<'a>>> = (0..=n).map(|_| Vec::new()).collect();
-    hyps[0].push(Hyp { score: 0.0, surface: String::new(), words: Vec::new(), last: start_id, ctx: lm.ctx_of(start_id) });
+    hyps[0].push(Hyp {
+        score: 0.0,
+        surface: String::new(),
+        words: Vec::new(),
+        prev: start_prev,
+        last: start_id,
+        ctx: lm.ctx_of(start_id),
+        tri: lm.tri_of(cfg, start_prev, start_id, &mut memo),
+    });
     for i in 1..=n {
         let mut cand: Vec<Hyp<'a>> = Vec::new();
-        let mut idx: HashMap<String, usize> = HashMap::new();
+        // One path per (surface, last word): the next word's score depends on the last word, so a path that
+        // ends in a different word must not be merged away (dec-recombine section 1). With the trigram level it depends on the last
+        // two, so the previous word is part of the key too (empty without the table: the key is the old one).
+        let mut idx: HashMap<(String, &str, &str), usize> = HashMap::new();
         for l in 1..=max_l.min(i) {
             if hyps[i - l].is_empty() {
                 continue;
             }
             let span = &syls[i - l..i];
             let found = base.find(&ids[i - l..i]);
-            // New words of this span the lexicon lacks under it (new-word B §2.4).
+            // New words of this span the lexicon lacks under it (new-word B §2.4), tried after the lexicon's entries.
             let fresh: Vec<(&'a str, f64)> = match fresh_on {
                 Some(ln) => ln
                     .learner
@@ -691,78 +1007,99 @@ pub fn decode_segment_learned<'a>(
                     .collect(),
                 None => Vec::new(),
             };
-            if let Some(r) = found {
-                let learned = learn.filter(|ln| ln.learner.has_reading(span));
-                let range = base.range(r);
-                let best = lex.ents[range.start].score;
-                let dl = if demote { lex.deltas_in(&range) } else { &[] };
-                // Entries to try: the top PER_KEY, plus learned words ranked below it (`extra`: only
-                // usable on a path whose context has a learned record for them).
-                let mut entries: Vec<(usize, bool)> = range.clone().take(PER_KEY).map(|p| (p, false)).collect();
-                if let Some(ln) = learned {
-                    let words = ln.learner.words_of(span);
-                    let mut seen: HashSet<&str> = entries.iter().map(|&(p, _)| lex.word_of(&lex.ents[p])).collect();
-                    for p in range.clone().skip(PER_KEY) {
-                        let w = lex.word_of(&lex.ents[p]);
-                        if words.binary_search(&w).is_ok() && seen.insert(w) {
-                            entries.push((p, true));
-                        }
-                    }
-                }
-                // Each hypothesis's learned hits depend only on its context key, not on the entry: look
-                // them up once per hypothesis (shared by key) before trying the entries.
-                let hits_of: Vec<usize>;
-                let mut hits: Vec<(Level, Vec<(&str, f64)>)> = Vec::new();
-                if let Some(ln) = learned {
-                    let mut by_ctx: HashMap<String, usize> = HashMap::new();
-                    hits_of = hyps[i - l]
-                        .iter()
-                        .map(|h| {
-                            let key = context_key(&format!("{before_tail}{}", h.surface));
-                            *by_ctx.entry(key).or_insert_with_key(|k| {
-                                hits.push(ln.learner.lookup(k, span, ln.today));
-                                hits.len() - 1
-                            })
-                        })
-                        .collect();
-                } else {
-                    hits_of = Vec::new();
-                }
-                for (p, extra) in entries {
-                    let e = &lex.ents[p];
-                    let (word, lp0) = (lex.word_of(e), e.score);
-                    let (wid, pb0) = (lm.word_id(word), pow10(lp0));
-                    let delta = dl.iter().find(|&&(q, _)| q == p).map_or(0.0, |x| x.1);
-                    for (hi, h) in hyps[i - l].iter().enumerate() {
-                        let (mut lp, mut pb) = (lp0, pb0);
-                        if let Some(ln) = learned {
-                            let (lv, ws) = &hits[hits_of[hi]];
-                            let eps = if *lv == Level::Global { ln.eps_global } else { LEARN_EPS };
-                            // eps 0 switches the level off, for `extra` entries too: `best + 0` would
-                            // still lift a word to a tie with the top.
-                            match ws.iter().find(|(w, _)| *w == word) {
-                                Some(&(_, w)) if eps > 0.0 => {
-                                    let boosted = best + eps * (w / (w + 1.0));
-                                    if boosted > lp {
-                                        lp = boosted;
-                                        pb = pow10(lp);
-                                    }
-                                }
-                                _ if extra => continue,
-                                _ => {}
-                            }
-                        }
-                        let sc = h.score + (word_term(lam, lm.prob_c(h.ctx, wid, pb), lp) - delta);
-                        extend(&mut cand, &mut idx, h, word, lp, delta, sc, wid, lm);
+            if found.is_none() && fresh.is_empty() {
+                continue;
+            }
+            let learned = learn.filter(|ln| found.is_some() && ln.learner.has_reading(span));
+            let range = found.map_or(0..0, |r| base.range(r));
+            let best = lex.ents.get(range.start).map_or(0.0, |e| e.score);
+            let dl = if demote { lex.deltas_in(&range) } else { &[] };
+            // Entries to try: the top PER_KEY, plus learned words ranked below it (`extra`: only
+            // usable on a path whose context has a learned record for them).
+            let mut entries: Vec<(usize, bool)> = range.clone().take(PER_KEY).map(|p| (p, false)).collect();
+            if let Some(ln) = learned {
+                let words = ln.learner.words_of(span);
+                let mut seen: HashSet<&str> = entries.iter().map(|&(p, _)| lex.word_of(&lex.ents[p])).collect();
+                for p in range.clone().skip(PER_KEY) {
+                    let w = lex.word_of(&lex.ents[p]);
+                    if words.binary_search(&w).is_ok() && seen.insert(w) {
+                        entries.push((p, true));
                     }
                 }
             }
-            for &(word, lp) in &fresh {
-                let wid = lm.word_id(word);
-                let pb = pow10(lp);
-                for h in &hyps[i - l] {
-                    let sc = h.score + word_term(lam, lm.prob_c(h.ctx, wid, pb), lp);
-                    extend(&mut cand, &mut idx, h, word, lp, 0.0, sc, wid, lm);
+            // Each hypothesis's learned hits depend only on its context key, not on the entry: look
+            // them up once per hypothesis (shared by key) before trying the entries.
+            let hits_of: Vec<usize>;
+            let mut hits: Vec<(Level, Vec<(&str, f64)>)> = Vec::new();
+            if let Some(ln) = learned {
+                let mut by_ctx: HashMap<String, usize> = HashMap::new();
+                // Rule 8: at sentence start the key also holds the syllable after the word.
+                let next = syls.get(i).map(String::as_str).or(ln.after);
+                hits_of = hyps[i - l]
+                    .iter()
+                    .map(|h| {
+                        let key = record_key(context_key(&format!("{before_tail}{}", h.surface)), next);
+                        *by_ctx.entry(key).or_insert_with_key(|k| {
+                            hits.push(ln.learner.lookup(k, span, ln.today));
+                            hits.len() - 1
+                        })
+                    })
+                    .collect();
+            } else {
+                hits_of = Vec::new();
+            }
+            // Lexicon entries (`Some(position)`), then the new words (`None`: no learned boost, no demotion).
+            let items = entries.into_iter().map(|(p, extra)| (Some(p), extra, lex.word_of(&lex.ents[p]), lex.ents[p].score));
+            for (p, extra, word, lp0) in items.chain(fresh.iter().map(|&(w, lp)| (None, false, w, lp))) {
+                let (wid, pb0) = (lm.word_id(word), pow10(lp0));
+                let delta = p.and_then(|p| dl.iter().find(|&&(q, _)| q == p)).map_or(0.0, |x| x.1);
+                for (hi, h) in hyps[i - l].iter().enumerate() {
+                    let (mut lp, mut pb, mut was_boosted) = (lp0, pb0, false);
+                    if let Some(ln) = learned.filter(|_| p.is_some()) {
+                        let (lv, ws) = &hits[hits_of[hi]];
+                        let eps = if *lv == Level::Global { ln.eps_global } else { LEARN_EPS };
+                        // eps 0 switches the level off, for `extra` entries too: `best + 0` would
+                        // still lift a word to a tie with the top.
+                        match ws.iter().find(|(w, _)| *w == word) {
+                            Some(&(_, w)) if eps > 0.0 => {
+                                let boosted = best + eps * (w / (w + 1.0));
+                                if boosted > lp {
+                                    lp = boosted;
+                                    pb = pow10(lp);
+                                    was_boosted = true;
+                                }
+                            }
+                            _ if extra => continue,
+                            _ => {}
+                        }
+                    }
+                    // model-v6 section 2.8 rule 1: a boosted entry skips the Kneser-Ney substitution (its boosted pb would be replaced
+                    // by N'/sum(N') and the boost would shrink to the (1 - lam) * lp part); every other entry is scored as before.
+                    let prob = if was_boosted { lm.prob_learned(h.ctx, wid, pb) } else { lm.prob_tri(h.tri, h.ctx, wid, pb, cfg.kn) };
+                    let sc = h.score + (word_term(lam, prob, lp) - delta);
+                    let before = if tri_on { h.words.last().map_or(start, |w| w.0) } else { "" };
+                    let key = (format!("{}{word}", h.surface), before, word);
+                    match idx.get(&key).copied() {
+                        Some(q) if !(sc > cand[q].score) => {}
+                        found => {
+                            let mut words = h.words.clone();
+                            words.push((word, lp, delta));
+                            // The surface is cloned only for a new slot (the index keeps one copy); a replacement moves it.
+                            let surface = match found {
+                                Some(_) => key.0,
+                                None => {
+                                    let s = key.0.clone();
+                                    idx.insert(key, cand.len());
+                                    s
+                                }
+                            };
+                            let nh = Hyp { score: sc, surface, words, prev: h.last, last: wid, ctx: lm.ctx_of(None), tri: None };
+                            match found {
+                                Some(q) => cand[q] = nh,
+                                None => cand.push(nh),
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -770,6 +1107,7 @@ pub fn decode_segment_learned<'a>(
         cand.truncate(beam);
         for h in &mut cand {
             h.ctx = lm.ctx_of(h.last);
+            h.tri = lm.tri_of(cfg, h.prev, h.last, &mut memo);
         }
         hyps[i] = cand;
     }
@@ -778,43 +1116,25 @@ pub fn decode_segment_learned<'a>(
         End::Eos => None,
         End::Next { word, lp, delta } => Some((lm.word_id(word), pow10(lp), lp, delta)),
     };
-    let mut out: Vec<Scored<'a>> = last
+    let mut out: Vec<(f64, Vec<(&'a str, f64, f64)>, String)> = last
         .into_iter()
         .map(|h| {
+            // (b') a one-word segment from an unknown start closes without the table.
+            let tri = if start != "<s>" && h.words.len() == 1 { None } else { h.tri };
             let term = match closing {
-                None => lam * lm.prob_c(h.ctx, Some(1), lm.p_eos).log10(),
-                Some((wid, pb, lp, delta)) => word_term(lam, lm.prob_c(h.ctx, wid, pb), lp) - delta,
+                None => lam * lm.prob_tri(tri, h.ctx, Some(1), lm.p_eos, cfg.kn).log10(),
+                Some((wid, pb, lp, delta)) => word_term(lam, lm.prob_tri(tri, h.ctx, wid, pb, cfg.kn), lp) - delta,
             };
-            (h.score + term, h.words)
+            (h.score + term, h.words, h.surface)
         })
         .collect();
     if out.is_empty() {
         return Err(Error::NoPath { len: n });
     }
     out.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
-    Ok(out)
-}
-
-/// One hypothesis `h` extended by `word` with score `sc`: kept unless a hypothesis with the same surface already
-/// scores at least as much.
-#[allow(clippy::too_many_arguments)]
-fn extend<'a>(cand: &mut Vec<Hyp<'a>>, idx: &mut HashMap<String, usize>, h: &Hyp<'a>, word: &'a str, lp: f64, delta: f64, sc: f64, wid: Option<u32>, lm: &Lm) {
-    let surface = format!("{}{word}", h.surface);
-    match idx.get(&surface) {
-        Some(&q) if !(sc > cand[q].score) => {}
-        found => {
-            let mut words = h.words.clone();
-            words.push((word, lp, delta));
-            let nh = Hyp { score: sc, surface, words, last: wid, ctx: lm.ctx_of(None) };
-            match found {
-                Some(&q) => cand[q] = nh,
-                None => {
-                    idx.insert(nh.surface.clone(), cand.len());
-                    cand.push(nh);
-                }
-            }
-        }
-    }
+    // The n-best has distinct surfaces: keep each surface's best path (dec-recombine section 1.4).
+    let mut seen: HashSet<String> = HashSet::new();
+    Ok(out.into_iter().filter_map(|(sc, ws, s)| seen.insert(s).then_some((sc, ws))).collect())
 }
 
 /// S2h §1: the word that conditions the first word of a composition with no fixed word on its left.
@@ -852,7 +1172,7 @@ pub fn decode_from(
     start: &str,
     demote: bool,
 ) -> Result<Vec<(f64, Vec<String>)>, Error> {
-    Ok(decode_segment_learned(lex, syls, lm, profile.lambda(), start, End::Eos, beam, None, demote)?
+    Ok(decode_segment_learned(lex, syls, lm, lm.scoring(profile), start, End::Eos, beam, None, demote)?
         .into_iter()
         .map(|(s, ws)| (s, ws.into_iter().map(|(w, _, _)| w.to_string()).collect()))
         .collect())
@@ -895,6 +1215,14 @@ mod tests {
             b.extend(c.to_le_bytes());
         }
         b
+    }
+
+    /// Python `f"{x:g}"` (the summary line's beta).
+    #[test]
+    fn fmt_g_matches_python() {
+        for (x, want) in [(1.0, "1"), (0.5, "0.5"), (0.0, "0"), (0.25, "0.25"), (0.75, "0.75"), (0.123456789, "0.123457"), (0.0001, "0.0001"), (0.00001234, "1.234e-05"), (1e-5, "1e-05"), (0.999999999, "1")] {
+            assert_eq!(fmt_g(x), want, "{x}");
+        }
     }
 
     #[test]
@@ -1138,5 +1466,271 @@ mod tests {
         assert!(Lm::parse(&magic).err() == Some(LmError::Format));
         assert!(Lm::parse(&good[..good.len() - 1]).err() == Some(LmError::Format));
         assert!(Lm::parse(&[]).err() == Some(LmError::Format));
+    }
+
+    /// A model file from vocabulary (ids from 0; `<s>`, `</s>`, then the words in byte order), unigram counts and
+    /// contexts `(id, total, [(next id, count)])` sorted by id. N 20, `</s>` total 4, D 0.75.
+    fn lm_bytes(words: &[&str], uni: &[u64], ctxs: &[(u32, u64, &[(u32, u32)])]) -> Vec<u8> {
+        let mut b = b"SJLM0001".to_vec();
+        b.extend((words.len() as u32).to_le_bytes());
+        b.extend(20u64.to_le_bytes());
+        b.extend(4u64.to_le_bytes());
+        b.extend(0.75f64.to_le_bytes());
+        for w in words {
+            b.extend((w.len() as u16).to_le_bytes());
+            b.extend(w.as_bytes());
+        }
+        uni.iter().for_each(|u| b.extend(u.to_le_bytes()));
+        b.extend((ctxs.len() as u32).to_le_bytes());
+        ctxs.iter().for_each(|c| b.extend(c.0.to_le_bytes()));
+        ctxs.iter().for_each(|c| b.extend(c.1.to_le_bytes()));
+        let mut at = 0u32;
+        b.extend(0u32.to_le_bytes());
+        for c in ctxs {
+            at += c.2.len() as u32;
+            b.extend(at.to_le_bytes());
+        }
+        b.extend(at.to_le_bytes());
+        ctxs.iter().flat_map(|c| c.2).for_each(|e| b.extend(e.0.to_le_bytes()));
+        ctxs.iter().flat_map(|c| c.2).for_each(|e| b.extend(e.1.to_le_bytes()));
+        b
+    }
+
+    /// dec-recombine section 1: one path per (surface, last word). `下來分析` has two segmentations. After
+    /// two syllables `下來` alone (-0.66) beats `下 | 來` (-1.24), so a decoder that keeps one path per surface
+    /// drops `下 | 來`; but `來 -> 分析` is a seen bigram and `下來 -> 分析` is not, so with `分析` the dropped path wins
+    /// (-2.76 against -3.66). The n-best still lists the surface once.
+    #[test]
+    fn keeps_the_path_whose_last_word_scores_the_next_word_better() {
+        // ids: <s> </s> 下 下來 來 分析
+        let words = ["<s>", "</s>", "下", "下來", "來", "分析"];
+        let model = lm_bytes(
+            &words,
+            &[0, 0, 4, 5, 6, 8],
+            &[(0, 9, &[(2, 4), (3, 5)]), (2, 6, &[(4, 6)]), (4, 8, &[(5, 8)])],
+        );
+        let lm = Lm::parse(&model).unwrap();
+        let lex = Arc::new(Lexicon::parse("ㄒㄧㄚˋ 下 -1.0\nㄌㄞˊ 來 -1.0\nㄒㄧㄚˋ-ㄌㄞˊ 下來 -1.0\nㄈㄣ-ㄒㄧ 分析 -3.0\n").unwrap());
+        let capped = CappedLexicon::new(lex, "", &lm, Some(&Demote::parse("").unwrap())).unwrap();
+        let w = |v, x, lp| lm.word(0.5, v, x, lp);
+        // The premise, straight from the model: the merge in the old rule would keep `下來`, and then lose.
+        let (split, joined) = (w("<s>", "下", -1.0) + w("下", "來", -1.0), w("<s>", "下來", -1.0));
+        assert!(joined > split, "{joined} {split}");
+        let (split_all, joined_all) = (split + w("來", "分析", -3.0), joined + w("下來", "分析", -3.0));
+        assert!(split_all > joined_all, "{split_all} {joined_all}");
+        let syls: Vec<String> = ["ㄒㄧㄚˋ", "ㄌㄞˊ", "ㄈㄣ", "ㄒㄧ"].iter().map(|s| s.to_string()).collect();
+        let out = decode_segment_learned(&capped, &syls, &lm, 0.5, "<s>", End::Eos, 64, None, true).unwrap();
+        assert_eq!(out.len(), 1, "the surface is listed once");
+        let words: Vec<&str> = out[0].1.iter().map(|x| x.0).collect();
+        assert_eq!(words, ["下", "來", "分析"]);
+        assert_eq!(out[0].0, split_all + lm.eos(0.5, "分析"));
+    }
+
+    /// dec-recombine section 1.4: `下來` and `下 | 來` end in different words, so both paths reach the end of
+    /// `ㄒㄧㄚˋ ㄌㄞˊ`; the n-best lists the surface once, with the better of the two closed scores.
+    #[test]
+    fn n_best_lists_a_surface_reached_by_two_last_words_once() {
+        let words = ["<s>", "</s>", "下", "下來", "來", "分析"];
+        let model = lm_bytes(
+            &words,
+            &[0, 0, 4, 5, 6, 8],
+            &[(0, 9, &[(2, 4), (3, 5)]), (2, 6, &[(4, 6)]), (4, 8, &[(5, 8)])],
+        );
+        let lm = Lm::parse(&model).unwrap();
+        let lex = Arc::new(Lexicon::parse("ㄒㄧㄚˋ 下 -1.0\nㄌㄞˊ 來 -1.0\nㄒㄧㄚˋ-ㄌㄞˊ 下來 -1.0\n").unwrap());
+        let capped = CappedLexicon::new(lex, "", &lm, Some(&Demote::parse("").unwrap())).unwrap();
+        let w = |v, x, lp| lm.word(0.5, v, x, lp);
+        let split = w("<s>", "下", -1.0) + w("下", "來", -1.0) + lm.eos(0.5, "來");
+        let joined = w("<s>", "下來", -1.0) + lm.eos(0.5, "下來");
+        let syls: Vec<String> = ["ㄒㄧㄚˋ", "ㄌㄞˊ"].iter().map(|s| s.to_string()).collect();
+        let out = decode_segment_learned(&capped, &syls, &lm, 0.5, "<s>", End::Eos, 64, None, true).unwrap();
+        assert_eq!(out.len(), 1, "two paths, one surface");
+        assert_eq!(out[0].0, split.max(joined));
+    }
+    /// SJT30001 bytes for `model` (V 4): contexts `((u, v), total before pruning, [(next id, count)])` sorted by (u, v).
+    fn tri_bytes(model: &[u8], d: f64, ctxs: &[((u32, u32), u64, &[(u32, u32)])]) -> Vec<u8> {
+        let mut b = b"SJT30001".to_vec();
+        b.extend(4u32.to_le_bytes());
+        b.extend(d.to_le_bytes());
+        b.extend(crate::eval::sha256(model));
+        b.extend((ctxs.len() as u32).to_le_bytes());
+        b.extend((ctxs.iter().map(|c| c.2.len()).sum::<usize>() as u32).to_le_bytes());
+        ctxs.iter().for_each(|c| b.extend((c.0 .0 as u64 * 4 + c.0 .1 as u64).to_le_bytes()));
+        ctxs.iter().for_each(|c| b.extend(c.1.to_le_bytes()));
+        let mut at = 0u32;
+        b.extend(0u32.to_le_bytes());
+        for c in ctxs {
+            at += c.2.len() as u32;
+            b.extend(at.to_le_bytes());
+        }
+        ctxs.iter().flat_map(|c| c.2).for_each(|e| b.extend(e.0.to_le_bytes()));
+        ctxs.iter().flat_map(|c| c.2).for_each(|e| b.extend(e.1.to_le_bytes()));
+        b
+    }
+
+    /// The tiny model's table: (<s>,<s>) -> a 3, b 1 (total 6, two counts pruned); (<s>,a) -> b 2 (total 4); (a,b) -> </s> 1 (total 2).
+    fn tiny_tri(model: &[u8]) -> Vec<u8> {
+        tri_bytes(model, 0.75, &[((0, 0), 6, &[(2, 3), (3, 1)]), ((0, 2), 4, &[(3, 2)]), ((2, 3), 2, &[(1, 1)])])
+    }
+
+    /// docs/contracts/trigram-core.md section 2, acceptance 2: the four situations by hand (kept entry, stored context without the entry,
+    /// context not stored, u unknown), for a word and for the closing term. Without the back-off term `back3 * P2` the first two fail.
+    #[test]
+    fn trigram_terms_follow_the_formula() {
+        let model = tiny();
+        let mut lm = Lm::parse(&model).unwrap();
+        lm.add_tri(tiny_tri(&model)).unwrap();
+        let cfg = Scoring { lam: 0.5, kn: true, tri: true };
+        let (lp, d) = (-1.0, 0.75);
+        let pb = pow10(lp);
+        // kept entry: (<s>, <s>) -> a
+        let back3 = 1.0 - ((3.0 - d) + (1.0 - d)) / 6.0;
+        assert_eq!(lm.word3(cfg, Some("<s>"), "<s>", "a", lp), word_term(0.5, (3.0 - d) / 6.0 + back3 * lm.prob("<s>", "a", pb), lp));
+        // the context is stored, the entry is not: (<s>, a) -> a
+        let back3 = 1.0 - (2.0 - d) / 4.0;
+        assert_eq!(lm.word3(cfg, Some("<s>"), "a", "a", lp), word_term(0.5, back3 * lm.prob("a", "a", pb), lp));
+        // the context is not stored: (b, a) -> a, and u unknown: (?, <s>) -> a; both are the bigram term, bit for bit
+        assert_eq!(lm.word3(cfg, Some("b"), "a", "a", lp), lm.word(0.5, "a", "a", lp));
+        assert_eq!(lm.word3(cfg, None, "<s>", "a", lp), lm.word(0.5, "<s>", "a", lp));
+        assert_eq!(lm.word3(cfg, Some("zzz"), "<s>", "a", lp), lm.word(0.5, "<s>", "a", lp), "a word outside the vocabulary is unknown too");
+        // the closing term: (a, b) -> </s> is kept, (<s>, a) -> </s> is not
+        let back3 = 1.0 - (1.0 - d) / 2.0;
+        assert_eq!(lm.eos3(cfg, Some("a"), "b"), 0.5 * ((1.0 - d) / 2.0 + back3 * lm.prob("b", "</s>", lm.p_eos)).log10());
+        let back3 = 1.0 - (2.0 - d) / 4.0;
+        assert_eq!(lm.eos3(cfg, Some("<s>"), "a"), 0.5 * (back3 * lm.prob("a", "</s>", lm.p_eos)).log10());
+        assert_eq!(lm.eos3(cfg, None, "b"), lm.eos(0.5, "b"));
+        // a scoring without the table, or a bare lambda, is the bigram
+        let off = Scoring { tri: false, ..cfg };
+        assert_eq!(lm.word3(off, Some("<s>"), "<s>", "a", lp), lm.word(0.5, "<s>", "a", lp));
+        assert_eq!(lm.word3(Scoring::from(0.5), Some("<s>"), "<s>", "a", lp), lm.word(0.5, "<s>", "a", lp));
+        assert_eq!(lm.eos3(Scoring::from(0.5), Some("a"), "b"), lm.eos(0.5, "b"));
+    }
+
+    /// Slice A2 (e), the floor: P3 = max(formula, 0.5 * P2). (<s>, <s>) keeps a 6 of 6, so back3 = 1 - (6 - 0.75) / 6 = 0.125: a word the context did not
+    /// keep (b, and the closing term </s>) would get 0.125 * P2, and the floor lifts it to 0.5 * P2 (active); the kept word a gets 0.875 + 0.125 * P2, far above
+    /// the floor (inactive, the formula is unchanged). The cases above (back3 0.58 to 0.88) are floor-inactive too. The literal 0.5 is on purpose (a changed
+    /// constant must fail here).
+    #[test]
+    fn trigram_floor_lifts_only_what_falls_below_it() {
+        let model = tiny();
+        let mut lm = Lm::parse(&model).unwrap();
+        lm.add_tri(tri_bytes(&model, 0.75, &[((0, 0), 6, &[(2, 6)])])).unwrap();
+        let cfg = Scoring { lam: 0.5, kn: true, tri: true };
+        let (lp, d) = (-1.0, 0.75);
+        let pb = pow10(lp);
+        let back3 = 1.0 - (6.0 - d) / 6.0;
+        // inactive: the kept word
+        let formula = (6.0 - d) / 6.0 + back3 * lm.prob("<s>", "a", pb);
+        assert!(formula > 0.5 * lm.prob("<s>", "a", pb), "premise: the floor is below the formula");
+        assert_eq!(lm.word3(cfg, Some("<s>"), "<s>", "a", lp), word_term(0.5, formula, lp));
+        // active: a word the context did not keep, and the closing term
+        let below = back3 * lm.prob("<s>", "b", pb);
+        assert!(below < 0.5 * lm.prob("<s>", "b", pb), "premise: the formula is below the floor");
+        assert_eq!(lm.word3(cfg, Some("<s>"), "<s>", "b", lp), word_term(0.5, 0.5 * lm.prob("<s>", "b", pb), lp));
+        assert_eq!(lm.eos3(cfg, Some("<s>"), "<s>"), 0.5 * (0.5 * lm.prob("<s>", "</s>", lm.p_eos)).log10());
+        // context not stored: the bigram, bit for bit (no floor)
+        assert_eq!(lm.word3(cfg, Some("a"), "<s>", "b", lp), lm.word(0.5, "<s>", "b", lp));
+    }
+
+    /// The setting each profile scores with: formal with a table is trigram on and Kneser-Ney off, chat never uses the table.
+    #[test]
+    fn scoring_follows_the_profile() {
+        let model = tiny();
+        let mut lm = Lm::parse(&model).unwrap();
+        assert_eq!(lm.scoring(Profile::Formal), Scoring { lam: LAMBDA_FORMAL, kn: true, tri: false }, "no table: as before");
+        assert_eq!(lm.scoring(Profile::Chat), Scoring { lam: LAMBDA_CHAT, kn: true, tri: false });
+        lm.add_tri(tiny_tri(&model)).unwrap();
+        assert_eq!(lm.scoring(Profile::Formal), Scoring { lam: LAMBDA_FORMAL, kn: false, tri: true });
+        assert_eq!(lm.scoring(Profile::Chat), Scoring { lam: LAMBDA_CHAT, kn: true, tri: false }, "chat ignores the table");
+        assert!(lm.tri_tag().unwrap().starts_with("+tri:") && lm.tri_tag().unwrap().len() == 13);
+    }
+
+    /// A table that is not exactly what the format and the model allow is `TriTable`, never read.
+    #[test]
+    fn bad_trigram_tables_are_refused() {
+        let model = tiny();
+        let good = tiny_tri(&model);
+        assert!(Lm::parse(&model).unwrap().add_tri(good.clone()).is_ok());
+        let patch = |at: usize, with: &[u8]| {
+            let mut b = good.clone();
+            b[at..at + with.len()].copy_from_slice(with);
+            b
+        };
+        // Layout: head 60, key u64[3] at 60, total u64[3] at 84, off u32[4] at 108, next u32[4] at 124, count u32[4] at 140.
+        let cases: Vec<(&str, Vec<u8>)> = vec![
+            ("magic", patch(7, b"2")),
+            ("V", patch(8, &5u32.to_le_bytes())),
+            ("model hash", patch(20, &[0xAB])),
+            ("D above 1", patch(12, &1.5f64.to_le_bytes())),
+            ("D negative", patch(12, &(-0.1f64).to_le_bytes())),
+            ("D NaN", patch(12, &f64::NAN.to_le_bytes())),
+            ("D 0.5", patch(12, &0.5f64.to_le_bytes())),
+            ("D 0.76", patch(12, &0.76f64.to_le_bytes())),
+            ("short", good[..good.len() - 4].to_vec()),
+            ("trailing byte", [good.as_slice(), &[0]].concat()),
+            ("header only", good[..60].to_vec()),
+            ("empty", vec![]),
+            ("keys not ascending", patch(60, &9u64.to_le_bytes())),
+            ("key out of range", patch(76, &16u64.to_le_bytes())),
+            ("zero total", patch(84, &0u64.to_le_bytes())),
+            ("counts above the total", patch(84, &3u64.to_le_bytes())), // context 0 keeps 3 + 1
+            ("first offset", patch(108, &1u32.to_le_bytes())),
+            ("last offset", patch(120, &3u32.to_le_bytes())),
+            ("offsets decrease", patch(112, &4u32.to_le_bytes())),
+            ("next id out of range", patch(124, &4u32.to_le_bytes())),
+            ("next ids not ascending", patch(124, &3u32.to_le_bytes())),
+        ];
+        for (name, b) in cases {
+            assert_eq!(Lm::parse(&model).unwrap().add_tri(b).err(), Some(LmError::TriTable), "{name}");
+        }
+        // Another model with the same V.
+        let mut other = model.clone();
+        other[20] ^= 1;
+        assert_eq!(Lm::parse(&other).unwrap().add_tri(good).err(), Some(LmError::TriTable));
+    }
+
+    /// docs/contracts/trigram-mmap.md section 3.2: `load_opts` maps `trigram.sjt3` (the source kind is checked, not only the result), the mapped
+    /// table scores exactly like the same bytes in memory, and a file that is empty, cut short or has a bad magic is `TriTable` through the mapping.
+    #[test]
+    fn load_opts_maps_the_trigram_table() {
+        let dir = std::env::temp_dir().join(format!("shanjie-lm-mmap-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let (m, t) = (dir.join("tiny.sjlm"), dir.join("trigram.sjt3"));
+        let model = tiny();
+        let good = tiny_tri(&model);
+        std::fs::write(&m, &model).unwrap();
+        let _ = std::fs::remove_file(&t);
+        assert_eq!(Lm::load_opts(&m, false, true, true).unwrap().tri_is_mapped(), None, "no file: no table");
+        std::fs::write(&t, &good).unwrap();
+        let mapped = Lm::load_opts(&m, false, true, true).unwrap();
+        assert_eq!(mapped.tri_is_mapped(), Some(true), "load_opts must map the table, not read it");
+        assert_eq!(Lm::load_opts(&m, false, true, false).unwrap().tri_is_mapped(), None, "--no-tri: not read");
+        let mut mem = Lm::parse(&model).unwrap();
+        mem.add_tri(good.clone()).unwrap();
+        assert_eq!(mem.tri_is_mapped(), Some(false));
+        assert_eq!(mapped.tri_tag(), mem.tri_tag());
+        let cfg = Scoring { lam: 0.5, kn: true, tri: true };
+        for u in [None, Some("<s>"), Some("a"), Some("b")] {
+            for v in ["<s>", "a", "b"] {
+                for w in ["a", "b", "<s>"] {
+                    assert_eq!(mapped.word3(cfg, u, v, w, -1.0).to_bits(), mem.word3(cfg, u, v, w, -1.0).to_bits(), "{u:?} {v} {w}");
+                }
+                assert_eq!(mapped.eos3(cfg, u, v).to_bits(), mem.eos3(cfg, u, v).to_bits(), "eos {u:?} {v}");
+            }
+        }
+        drop(mapped); // the loop below rewrites the file in place: nothing may still map it
+        let mut bad_magic = good.clone();
+        bad_magic[7] = b'2';
+        for (name, bytes) in [("empty", vec![]), ("truncated", good[..good.len() - 4].to_vec()), ("bad magic", bad_magic)] {
+            std::fs::write(&t, &bytes).unwrap();
+            assert_eq!(Lm::load_opts(&m, false, true, true).err(), Some(LmError::TriTable), "{name}");
+        }
+        std::fs::remove_file(&t).unwrap();
+        std::os::unix::fs::symlink(dir.join("nowhere"), &t).unwrap();
+        assert_eq!(Lm::load_opts(&m, false, true, true).err(), Some(LmError::TriTable), "dangling symlink");
+        std::fs::remove_file(&t).unwrap();
+        std::fs::create_dir(&t).unwrap();
+        assert_eq!(Lm::load_opts(&m, false, true, true).err(), Some(LmError::TriTable), "directory");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

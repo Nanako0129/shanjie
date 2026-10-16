@@ -60,12 +60,113 @@ final class DefaultsPredictionStore: PredictionStore {
     }
 }
 
+/// The "可省略韻母" switch (docs/contracts/v3-engine.md section 12.1), key `abbreviation` in the same domain; absent means off.
+@MainActor
+final class DefaultsAbbreviationStore: AbbreviationStore {
+    var abbreviation: Bool? {
+        get { UserDefaults.standard.object(forKey: "abbreviation") as? Bool }
+        set { UserDefaults.standard.set(newValue, forKey: "abbreviation") }
+    }
+}
+
+/// The "中英混打（實驗）" switch (docs/contracts/zhen-mixed.md section 3.2), key `english` in the same domain; absent means off.
+@MainActor
+final class DefaultsEnglishStore: EnglishStore {
+    var english: Bool? {
+        get { UserDefaults.standard.object(forKey: "english") as? Bool }
+        set { UserDefaults.standard.set(newValue, forKey: "english") }
+    }
+    /// The 英文的顯示 choice (docs/contracts/zhen-inline.md section 2), key `englishInline`; absent means true.
+    var englishInline: Bool? {
+        get { UserDefaults.standard.object(forKey: "englishInline") as? Bool }
+        set { UserDefaults.standard.set(newValue, forKey: "englishInline") }
+    }
+}
+
 /// The "動漫與遊戲詞" switch (docs/contracts/acg-pack.md A.2), key `acgPack` in the same domain; absent means on (user decision 2026-10-09).
 @MainActor
 final class DefaultsAcgPackStore: AcgPackStore {
     var acgPack: Bool? {
         get { UserDefaults.standard.object(forKey: "acgPack") as? Bool }
         set { UserDefaults.standard.set(newValue, forKey: "acgPack") }
+    }
+}
+
+/// The candidate glass tint slider (docs/contracts/settings-window.md section 2.3), key `glassTint` (Double); absent means 0.
+@MainActor
+final class DefaultsGlassTintStore: GlassTintStore {
+    var glassTint: Double? {
+        get { UserDefaults.standard.object(forKey: "glassTint") as? Double }
+        set { UserDefaults.standard.set(newValue, forKey: "glassTint") }
+    }
+}
+
+/// The candidate window's orientation (docs/contracts/candidate-vertical.md section 2.1), key `candidateVertical` (Bool); absent means
+/// horizontal.
+@MainActor
+final class DefaultsCandidateOrientationStore: CandidateOrientationStore {
+    var candidateVertical: Bool? {
+        get { UserDefaults.standard.object(forKey: "candidateVertical") as? Bool }
+        set { UserDefaults.standard.set(newValue, forKey: "candidateVertical") }
+    }
+}
+
+/// The "語意校正" switch (docs/contracts/s7c2b-shell-rerank.md section 2.2), key `rerank` in the same domain; absent means on
+/// (docs/contracts/s7h-tinylm-v3.md section 2.3).
+@MainActor
+final class DefaultsRerankStore: RerankStore {
+    var rerank: Bool? {
+        get { UserDefaults.standard.object(forKey: "rerank") as? Bool }
+        set { UserDefaults.standard.set(newValue, forKey: "rerank") }
+    }
+    /// docs/contracts/rerank-strength.md section 3: key `rerankLevel` (`conservative`, `standard` or `aggressive`); absent or any
+    /// other value is standard.
+    var rerankLevel: String? {
+        get { UserDefaults.standard.string(forKey: "rerankLevel") }
+        set { UserDefaults.standard.set(newValue, forKey: "rerankLevel") }
+    }
+}
+
+/// How chat or formal is chosen (docs/contracts/profile-choice.md section 2.1), key `profileMode` (`auto`, `chat` or `formal`);
+/// absent or anything else means `auto`.
+@MainActor
+final class DefaultsProfileModeStore: ProfileModeStore {
+    var profileMode: String? {
+        get { UserDefaults.standard.string(forKey: "profileMode") }
+        set { UserDefaults.standard.set(newValue, forKey: "profileMode") }
+    }
+}
+
+/// The per-app choices (profile-choice section 2.1), key `appProfiles`: bundle ID to `chat` or `formal`, only for apps switched
+/// from the menu. Read back raw (`AppProfiles.parse` filters it entry by entry); an empty dictionary removes the key. One
+/// top-level key, not a key path: a bundle ID has dots.
+@MainActor
+final class DefaultsAppProfileStore: AppProfileStore {
+    var appProfiles: Any? { UserDefaults.standard.object(forKey: "appProfiles") }
+    func setAppProfiles(_ profiles: [String: String]) {
+        if profiles.isEmpty {
+            UserDefaults.standard.removeObject(forKey: "appProfiles")
+        } else {
+            UserDefaults.standard.set(profiles, forKey: "appProfiles")
+        }
+    }
+}
+
+/// The update settings and the last check (docs/contracts/about-update.md section 2): keys `updateAutoCheck` (Bool, absent
+/// means on), `updateLastCheck` (Date) and `updateStatus` (a dictionary of strings, see `UpdateStore`) in the same domain.
+@MainActor
+final class DefaultsUpdateStore: UpdateStore {
+    var autoCheck: Bool? {
+        get { UserDefaults.standard.object(forKey: "updateAutoCheck") as? Bool }
+        set { UserDefaults.standard.set(newValue, forKey: "updateAutoCheck") }
+    }
+    var lastCheck: Date? {
+        get { UserDefaults.standard.object(forKey: "updateLastCheck") as? Date }
+        set { UserDefaults.standard.set(newValue, forKey: "updateLastCheck") }
+    }
+    var status: [String: String]? {
+        get { UserDefaults.standard.dictionary(forKey: "updateStatus") as? [String: String] }
+        set { UserDefaults.standard.set(newValue, forKey: "updateStatus") }
     }
 }
 
@@ -87,8 +188,22 @@ func runServer() -> Never {
     App.shell = Shell(
         resources: resources.absoluteURL, panel: CandidatePanelAdapter(),
         isSecureInput: { IsSecureEventInputEnabled() }, layoutStore: DefaultsLayoutStore(),
-        learningDirectory: Shell.learningURL(), dialogs: AlertDialogs(), demoteStore: DefaultsDemoteStore(), predictionStore: DefaultsPredictionStore(), acgPackStore: DefaultsAcgPackStore())
-    withExtendedLifetime(server) { app.run() }
+        learningDirectory: Shell.learningURL(), dialogs: AlertDialogs(), demoteStore: DefaultsDemoteStore(), predictionStore: DefaultsPredictionStore(), abbreviationStore: DefaultsAbbreviationStore(), englishStore: DefaultsEnglishStore(), acgPackStore: DefaultsAcgPackStore(),
+        glassTintStore: DefaultsGlassTintStore(), candidateOrientationStore: DefaultsCandidateOrientationStore(),
+        rerankStore: DefaultsRerankStore(), rerankRunner: QueueRerankRunner(),
+        profileModeStore: DefaultsProfileModeStore(), appProfileStore: DefaultsAppProfileStore(),
+        // 可省略韻母 does not ship in v0.4.0 (user, 2026-10-10); see Shell.showsAbbreviation. Flip to true to offer it again.
+        // This argument alone hides it (Shell's default true is for the tests) and the app target has no tests: the release
+        // device check confirms the menu has no 可省略韻母.
+        showsAbbreviation: false)
+    // about-update section 2: the state always exists (the 關於 page shows the version); Sparkle starts only inside the .app.
+    let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0.0"
+    let updates = Updates(store: DefaultsUpdateStore(), version: version)
+    App.shell?.updates = updates
+    let updater = Updater(updates: updates)
+    let settings = SettingsWindowController(shell: App.shell)
+    App.shell?.onOpenSettings = { settings.show() }
+    withExtendedLifetime((server, updater)) { app.run() }
     exit(0)
 }
 

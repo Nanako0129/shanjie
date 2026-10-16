@@ -24,10 +24,10 @@ fn shared() -> &'static Shared {
         let dir = root().join("data/lexicon");
         let lex = load_lexicon(&dir).unwrap();
         let lm_file = root().join("data/lm/bigram.sjlm");
-        assert!(lm_file.exists(), "data/lm/bigram.sjlm is missing: download it with `gh release download model-v4 -R Nanako0129/shanjie -p bigram.sjlm -D data/lm`");
-        assert!(root().join("data/lm/classes.sjc").exists(), "data/lm/classes.sjc is missing: download it with `gh release download classes-v2 -R Nanako0129/shanjie -p classes.sjc -D data/lm` (or build it with tools/build_classes.py)");
+        assert!(lm_file.exists(), "data/lm/bigram.sjlm is missing: download it with `gh release download model-v6 -R Nanako0129/shanjie -p bigram.sjlm -D data/lm`");
+        assert!(root().join("data/lm/classes.sjc").exists(), "data/lm/classes.sjc is missing: download it with `gh release download classes-v5 -R Nanako0129/shanjie -p classes.sjc -D data/lm` (or build it with tools/build_classes.py)");
         let lm = Lm::load(&lm_file).unwrap();
-        let overlay = std::fs::read_to_string(dir.join("overlay-add.tsv")).unwrap();
+        let overlay = capping_overlay(&dir, "").unwrap(); // as Engine::load_lm: overlay-add.tsv + names-add.tsv
         let table = Demote::parse(&std::fs::read_to_string(dir.join("demote.tsv")).unwrap()).unwrap();
         let on = Arc::new(CappedLexicon::new(lex.clone(), &overlay, &lm, Some(&table)).unwrap());
         let off = Arc::new(CappedLexicon::new(lex.clone(), &overlay, &lm, None).unwrap());
@@ -181,7 +181,7 @@ fn data_dir_with(tag: &str, demote: &str) -> PathBuf {
     let d = std::env::temp_dir().join(format!("shanjie-demote-{}-{tag}", std::process::id()));
     let _ = std::fs::remove_dir_all(&d);
     std::fs::create_dir_all(&d).unwrap();
-    for f in ["mcbpmf-data.txt", "overlay-add.tsv", "sandhi-add.tsv"] {
+    for f in ["mcbpmf-data.txt", "overlay-add.tsv", "sandhi-add.tsv", "names-add.tsv"] {
         std::os::unix::fs::symlink(root().join("data/lexicon").join(f), d.join(f)).unwrap();
     }
     std::fs::write(d.join("demote.tsv"), demote).unwrap();

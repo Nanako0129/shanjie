@@ -12,13 +12,20 @@ let libcore = repoRoot + "/target/release/libcore.a"
 let package = Package(
     name: "Shanjie",
     platforms: [.macOS("26.0")],
+    // The first external dependency (docs/contracts/about-update.md section 2): Sparkle, pinned exactly. 2.9.0 added signed
+    // feeds and 2.9.2 fixed two security issues. The official prebuilt framework, whose binary is pinned by the checksum in
+    // Sparkle's own Package.swift; Package.resolved is committed and every build resolves with --force-resolved-versions.
+    dependencies: [
+        .package(url: "https://github.com/sparkle-project/Sparkle", exact: "2.9.3"),
+    ],
     targets: [
         // Header-only module over core/include/shanjie.h; see Sources/CShanjie/module.modulemap.
         .systemLibrary(name: "CShanjie", path: "Sources/CShanjie"),
         .target(
             name: "ShanjieKit",
             dependencies: ["CShanjie"],
-            linkerSettings: [.unsafeFlags([libcore])]
+            // Accelerate: core/src/tinylm.rs declares its symbols, and Rust's #[link(kind = "framework")] does not travel in the staticlib.
+            linkerSettings: [.unsafeFlags([libcore]), .linkedFramework("Accelerate")]
         ),
         // TIS registration shared by `shanjie install` and the installer (docs/contracts/s3c-installer.md
         // section 2.3). ShanjieKit stays free of TIS.
@@ -28,12 +35,15 @@ let package = Package(
         ),
         .executableTarget(
             name: "Shanjie",
-            dependencies: ["ShanjieKit", "ShanjieInstall"],
+            // Sparkle only here: ShanjieKit and the tests stay free of it (the update decisions they test live in ShanjieKit).
+            dependencies: ["ShanjieKit", "ShanjieInstall", .product(name: "Sparkle", package: "Sparkle")],
             // The IMK glue only: IMKInputController's overrides cannot be main-actor isolated in
             // the Swift 6 mode, so the main-thread requirement is checked at run time instead
             // (MainActor.assumeIsolated). ShanjieKit and the tests stay in the Swift 6 mode.
             swiftSettings: [.swiftLanguageMode(.v5)],
-            linkerSettings: [.linkedFramework("Carbon"), .linkedFramework("InputMethodKit")]
+            // Sparkle.framework sits in Contents/Frameworks of the bundle (scripts/build-app.sh).
+            linkerSettings: [.linkedFramework("Carbon"), .linkedFramework("InputMethodKit"),
+                             .unsafeFlags(["-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks"])]
         ),
         // 安裝善解輸入法.app; AppKit only, the window is built in code.
         .executableTarget(

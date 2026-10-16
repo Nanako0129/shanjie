@@ -1,0 +1,231 @@
+{
+ "name": "0c-sequence-d512（Funmula／BigGo 靈犀注音，MIT，commit 66eb4a81）",
+ "date": "2026-10-13",
+ "label": "0c",
+ "ours_label": "tinylm-v3",
+ "conditions": "候選：v0.4.1 的 CLI（`--context`，不開詞包、不載 KN）n-gram 前 8 名；兩個模型在同一批候選上重排。選值方法和 tinylm-v3 當初相同：聊天在 E2 調參期（私人，5,761 列）以「改對 − 改壞」、改壞率 ≤ 0.5% 選，0c 選到 α 1.5、τ 1、δ 2，tinylm-v3 是 R3′（0.3、2、0.25）；書面在 cvtune＋wikitune 以「改對 − 10 × 改壞」選，0c 選到 0.2、0.5、0.5，tinylm-v3 是 0.7、1、2。0c 不能打分的列（候選含字表外的字，或讀音少於 2 個音節）留 n-gram 第一名。p 是兩個模型之間的精確 McNemar。檔案大小 0c 130.7 MB（fp32）、tinylm-v3 約 14.6 MB（int8）。契約 `docs/contracts/x0c-compare.md`，細節與限制在研究紀錄 2026-10-13「X0c」。",
+ "rows": [
+  {
+   "setting": "chat",
+   "set": "dev302",
+   "n": 302,
+   "ngram": 241,
+   "ours": 259,
+   "external": 259,
+   "fixed": 12,
+   "broken": 12,
+   "p": 1.0
+  },
+  {
+   "setting": "chat",
+   "set": "typing76",
+   "n": 76,
+   "ngram": 66,
+   "ours": 69,
+   "external": 72,
+   "fixed": 5,
+   "broken": 2,
+   "p": 0.4531
+  },
+  {
+   "setting": "chat",
+   "set": "錯字回報（前 84 列）",
+   "n": 84,
+   "ngram": 17,
+   "ours": 25,
+   "external": 36,
+   "fixed": 16,
+   "broken": 5,
+   "p": 0.0266
+  },
+  {
+   "setting": "chat",
+   "set": "fw",
+   "n": 186,
+   "ngram": 154,
+   "ours": 157,
+   "external": 161,
+   "fixed": 7,
+   "broken": 3,
+   "p": 0.3438
+  },
+  {
+   "setting": "chat",
+   "set": "cvtune",
+   "n": 3791,
+   "ngram": 3364,
+   "ours": 3443,
+   "external": 3435,
+   "fixed": 54,
+   "broken": 62,
+   "p": 0.5159
+  },
+  {
+   "setting": "chat",
+   "set": "wikitune",
+   "n": 2827,
+   "ngram": 2067,
+   "ours": 2170,
+   "external": 2082,
+   "fixed": 46,
+   "broken": 134,
+   "p": 0.0
+  },
+  {
+   "setting": "chat",
+   "set": "lytune",
+   "n": 4811,
+   "ngram": 3986,
+   "ours": 4044,
+   "external": 3988,
+   "fixed": 191,
+   "broken": 247,
+   "p": 0.0085
+  },
+  {
+   "setting": "chat",
+   "set": "wikitypo",
+   "n": 155,
+   "ngram": 136,
+   "ours": 134,
+   "external": 136,
+   "fixed": 3,
+   "broken": 1,
+   "p": 0.625
+  },
+  {
+   "setting": "chat",
+   "set": "discordtune（私人）",
+   "n": 4958,
+   "ngram": 4209,
+   "ours": 4299,
+   "external": 4426,
+   "fixed": 189,
+   "broken": 62,
+   "p": 0.0
+  },
+  {
+   "setting": "chat",
+   "set": "E2 判斷期 2026-08（私人）",
+   "n": 6559,
+   "ngram": 5703,
+   "ours": 5812,
+   "external": 5954,
+   "fixed": 200,
+   "broken": 58,
+   "p": 0.0
+  },
+  {
+   "setting": "formal",
+   "set": "dev302",
+   "n": 302,
+   "ngram": 248,
+   "ours": 252,
+   "external": 252,
+   "fixed": 2,
+   "broken": 2,
+   "p": 1.0
+  },
+  {
+   "setting": "formal",
+   "set": "typing76",
+   "n": 76,
+   "ngram": 69,
+   "ours": 70,
+   "external": 69,
+   "fixed": 0,
+   "broken": 1,
+   "p": 1.0
+  },
+  {
+   "setting": "formal",
+   "set": "錯字回報（前 84 列）",
+   "n": 84,
+   "ngram": 21,
+   "ours": 22,
+   "external": 23,
+   "fixed": 2,
+   "broken": 1,
+   "p": 1.0
+  },
+  {
+   "setting": "formal",
+   "set": "fw",
+   "n": 186,
+   "ngram": 154,
+   "ours": 156,
+   "external": 154,
+   "fixed": 0,
+   "broken": 2,
+   "p": 0.5
+  },
+  {
+   "setting": "formal",
+   "set": "cvtune",
+   "n": 3791,
+   "ngram": 3370,
+   "ours": 3409,
+   "external": 3393,
+   "fixed": 16,
+   "broken": 32,
+   "p": 0.0293,
+   "tuning": true
+  },
+  {
+   "setting": "formal",
+   "set": "wikitune",
+   "n": 2827,
+   "ngram": 2131,
+   "ours": 2165,
+   "external": 2154,
+   "fixed": 17,
+   "broken": 28,
+   "p": 0.1352,
+   "tuning": true
+  },
+  {
+   "setting": "formal",
+   "set": "lytune",
+   "n": 4811,
+   "ngram": 3971,
+   "ours": 4004,
+   "external": 4065,
+   "fixed": 87,
+   "broken": 26,
+   "p": 0.0
+  },
+  {
+   "setting": "formal",
+   "set": "wikitypo",
+   "n": 155,
+   "ngram": 135,
+   "ours": 135,
+   "external": 136,
+   "fixed": 1,
+   "broken": 0,
+   "p": 1.0
+  },
+  {
+   "setting": "formal",
+   "set": "discordtune（私人）",
+   "n": 4958,
+   "ngram": 4143,
+   "ours": 4172,
+   "external": 4223,
+   "fixed": 68,
+   "broken": 17,
+   "p": 0.0
+  },
+  {
+   "setting": "formal",
+   "set": "E2 判斷期 2026-08（私人）",
+   "n": 6559,
+   "ngram": 5627,
+   "ours": 5656,
+   "external": 5704,
+   "fixed": 67,
+   "broken": 19,
+   "p": 0.0
+  }
+ ]
+}

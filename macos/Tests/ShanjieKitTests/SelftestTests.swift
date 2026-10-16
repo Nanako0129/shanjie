@@ -25,14 +25,59 @@ final class SelftestTests: XCTestCase {
         XCTAssertNotEqual(Selftest.run(resources: res), 0)
     }
 
+    /// s7c2b section 2.5: the switch can be turned on, and without the model it would silently do nothing, so a bundle without it
+    /// must fail the selftest (the switch ships on by default since S7h, so such a bundle would silently do nothing for most users).
+    func testFailsWithoutTheSmallModel() throws {
+        let res = try XCTUnwrap(TestData.resources(only: ["mcbpmf-data.txt", "overlay-add.tsv", "sandhi-add.tsv", "names-add.tsv", "demote.tsv", "bigram.sjlm", "classes.sjc"]))
+        try TestData.addBundledPack(to: res)
+        XCTAssertNotEqual(Selftest.run(resources: res), 0)
+    }
+
+    func testFailsWithACorruptSmallModel() throws {
+        let res = try XCTUnwrap(TestData.resources(only: ["mcbpmf-data.txt", "overlay-add.tsv", "sandhi-add.tsv", "names-add.tsv", "demote.tsv", "bigram.sjlm", "classes.sjc"]))
+        try TestData.addBundledPack(to: res)
+        try Data("not a model".utf8).write(to: res.appendingPathComponent("tinylm.sjtl"))
+        XCTAssertNotEqual(Selftest.run(resources: res), 0)
+    }
+
+    /// zhen-mixed section 3.2: the word list ships in the bundle and the switch can be turned on, so a bundle without it, with a list
+    /// the core refuses, or with one where `rust` Space opens no English window must fail the selftest.
+    func testFailsWithoutTheEnglishList() throws {
+        let res = try XCTUnwrap(TestData.resources(only: Set(TestData.files.map(\.name)).subtracting(["english-words.txt"])))
+        try TestData.addBundledPack(to: res)
+        XCTAssertNotEqual(Selftest.run(resources: res), 0)
+    }
+
+    func testFailsWithARefusedEnglishList() throws {
+        let res = try XCTUnwrap(TestData.resources())
+        try TestData.addBundledPack(to: res)
+        try "AB\n".write(to: res.appendingPathComponent("english-words.txt"), atomically: true, encoding: .utf8)
+        XCTAssertNotEqual(Selftest.run(resources: res), 0)
+    }
+
+    func testFailsWhenTheEnglishWindowDoesNotOpen() throws {
+        let res = try XCTUnwrap(TestData.resources())
+        try TestData.addBundledPack(to: res)
+        try "google\nhello\n".write(to: res.appendingPathComponent("english-words.txt"), atomically: true, encoding: .utf8)
+        XCTAssertNotEqual(Selftest.run(resources: res), 0)
+    }
+
     func testFailsWithoutTheModel() throws {
-        let res = try XCTUnwrap(TestData.resources(only: ["mcbpmf-data.txt", "overlay-add.tsv", "sandhi-add.tsv", "demote.tsv"]))
+        let res = try XCTUnwrap(TestData.resources(only: ["mcbpmf-data.txt", "overlay-add.tsv", "sandhi-add.tsv", "names-add.tsv", "demote.tsv"]))
         XCTAssertNotEqual(Selftest.run(resources: res), 0)
     }
 
     /// S2k: the class file is part of the model; without it the model does not load (no silent fallback).
     func testFailsWithoutTheClasses() throws {
-        let res = try XCTUnwrap(TestData.resources(only: ["mcbpmf-data.txt", "overlay-add.tsv", "sandhi-add.tsv", "demote.tsv", "bigram.sjlm"]))
+        let res = try XCTUnwrap(TestData.resources(only: ["mcbpmf-data.txt", "overlay-add.tsv", "sandhi-add.tsv", "names-add.tsv", "demote.tsv", "bigram.sjlm"]))
+        XCTAssertNotEqual(Selftest.run(resources: res), 0)
+    }
+
+    /// trigram-core: the formal profile's table is read from beside the model. Without it the model still loads and formal gives 濾水壺 on the
+    /// selftest sentence instead of the expected 律水壺, so a bundle without trigram.sjt3 must fail the selftest.
+    func testFailsWithoutTheTrigramTable() throws {
+        let res = try XCTUnwrap(TestData.resources(only: Set(TestData.files.map(\.name)).subtracting(["trigram.sjt3"])))
+        try TestData.addBundledPack(to: res)
         XCTAssertNotEqual(Selftest.run(resources: res), 0)
     }
 
@@ -42,7 +87,7 @@ final class SelftestTests: XCTestCase {
     }
 
     func testFailsWithAModelThatIsNotOne() throws {
-        let res = try XCTUnwrap(TestData.resources(only: ["mcbpmf-data.txt", "overlay-add.tsv", "sandhi-add.tsv", "demote.tsv"]))
+        let res = try XCTUnwrap(TestData.resources(only: ["mcbpmf-data.txt", "overlay-add.tsv", "sandhi-add.tsv", "names-add.tsv", "demote.tsv"]))
         try Data("not a model".utf8).write(to: res.appendingPathComponent("bigram.sjlm"))
         XCTAssertNotEqual(Selftest.run(resources: res), 0)
     }

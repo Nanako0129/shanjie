@@ -240,7 +240,7 @@ def main():
     sets = {k: v for k, v in all_sets().items() if k in a.sets.split(",")}
     commit = subprocess.run(["git", "-C", ROOT, "rev-parse", "--short", "HEAD"], capture_output=True, text=True).stdout.strip()
     dirty = subprocess.run(["git", "-C", ROOT, "status", "--porcelain", "--", "experiments", "data", "reference"], capture_output=True, text=True).stdout.strip()
-    overlay_words = {l.split("\t")[1] for l in open(os.path.join(ROOT, "data", "lexicon", "overlay-add.tsv"), encoding="utf-8")}
+    overlay_words = ime.capping_words()
     prev_corpora, uni, bi, tri = None, None, None, None
     for cfg in cfgs:
         t1 = time.time()

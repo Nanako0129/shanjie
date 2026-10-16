@@ -56,7 +56,8 @@ final class ShanjieInputController: IMKInputController {
         let entries = MainActor.assumeIsolated { session.menu }
         let menu = NSMenu()
         for entry in entries {
-            let item = NSMenuItem(title: entry.title, action: entry.action.map(Self.selector(for:)), keyEquivalent: "")
+            // A disabled entry keeps its checkmark but has no action, so the menu greys it.
+            let item = NSMenuItem(title: entry.title, action: entry.enabled ? entry.action.map(Self.selector(for:)) : nil, keyEquivalent: "")
             item.state = entry.checked ? .on : .off
             menu.addItem(item)
         }
@@ -71,7 +72,13 @@ final class ShanjieInputController: IMKInputController {
         case .toggleBackup: #selector(toggleLearningBackup(_:))
         case .toggleDemote: #selector(toggleDemote(_:))
         case .togglePrediction: #selector(togglePrediction(_:))
+        case .toggleEnglish: #selector(toggleEnglish(_:))
+        case .toggleAbbreviation: #selector(toggleAbbreviation(_:))
+        case .toggleRerank: #selector(toggleRerank(_:))
         case .toggleAcgPack: #selector(toggleAcgPack(_:))
+        case .toggleAppChat: #selector(toggleAppChat(_:))
+        case .openSettings: #selector(openSettings(_:))
+        case .installUpdate: #selector(installUpdate(_:))
         }
     }
 
@@ -85,7 +92,13 @@ final class ShanjieInputController: IMKInputController {
     @objc func toggleLearningBackup(_ sender: Any?) { perform(.toggleBackup) }
     @objc func toggleDemote(_ sender: Any?) { perform(.toggleDemote) }
     @objc func togglePrediction(_ sender: Any?) { perform(.togglePrediction) }
+    @objc func toggleEnglish(_ sender: Any?) { perform(.toggleEnglish) }
+    @objc func toggleAbbreviation(_ sender: Any?) { perform(.toggleAbbreviation) }
+    @objc func toggleRerank(_ sender: Any?) { perform(.toggleRerank) }
     @objc func toggleAcgPack(_ sender: Any?) { perform(.toggleAcgPack) }
+    @objc func toggleAppChat(_ sender: Any?) { perform(.toggleAppChat) }
+    @objc func openSettings(_ sender: Any?) { perform(.openSettings) }
+    @objc func installUpdate(_ sender: Any?) { perform(.installUpdate) }
 }
 
 /// The controller's current IMKTextInput client.
@@ -166,7 +179,7 @@ private final class PanelWindow: NSPanel {
 /// Layout values of the candidate bar (docs/contracts/s3b2-glass-panel.md section 3). The "Apple"
 /// column was measured on 1x screenshots (1 px = 1 pt) of Apple Zhuyin, kept in main's scratchpad;
 /// these are first values, to be corrected against our own screenshots.
-private enum Metrics {
+enum Metrics {
     /// Section 3 "candidate bar": the view height (the corner radius is half the panel height). Measured
     /// 2026-10-08 in a light app at 1 px = 1 pt: Apple's bar is 30 pt rim to rim (lap-4; a-3 and la-3 only said
     /// "about 30"); at 30 ours drew 32 (msj-6, 4 pt above and below the 24 pt capsule against Apple's 3), so
@@ -210,12 +223,70 @@ private enum Metrics {
     /// last cell's capsule), and the chevron 3 pt, so the chevron's ink is centred in the rest of the area.
     static let chevronSeparatorInset: CGFloat = 2
     static let chevronImageInset: CGFloat = 3
+    /// The vertical panel's row separators (candidate-vertical contract, appearance round 1): one device pixel thick. Measured on
+    /// Apple Zhuyin at 1x (1 px = 1 pt); the thickness at 2x is inferred, not measured.
+    static let separatorPixels: CGFloat = 1
+    /// Their colour is the system's `separatorColor`, which follows light and dark. Apple's line measured about +12 brightness
+    /// over its glass in dark mode (41 -> 53); ours was not compared with that number, and light mode was not measured at all.
+    static var separatorColor: NSColor { .separatorColor }
     /// Section 9: a column widening while the grid is open, the system's default 0.2 s.
     static let widenDuration: TimeInterval = 0.2
     /// bv.mov 420-438: about 0.3 s, system default timing (no custom curve).
     static let expandDuration: TimeInterval = 0.3
     /// cv.mov 499-514 (Apple, 60 fps): the grid folds back into the bar in about 15 frames.
     static let collapseDuration: TimeInterval = 0.25
+}
+
+extension NSGlassEffectView {
+    /// Assigns what `GlassTint.Applier` decided: a colour, nil to remove, or nothing.
+    func apply(_ change: GlassTint.Change?) {
+        switch change {
+        case .set(let t)?: tintColor = NSColor(white: t.black ? 0 : 1, alpha: t.opacity)
+        case .clear?: tintColor = nil
+        case nil: break
+        }
+    }
+}
+
+/// The settings window's sample of the candidate bar (contract settings-window section 2.3): the same
+/// glass, the same cells (`CandidateCells`), the same bar metrics, corner radius and tint decision
+/// (`GlassTint.Applier`) as the real panel's collapsed bar. The real bar's expand chevron is left out
+/// (the sample has nothing to expand). It follows its own effective appearance.
+@MainActor
+final class SampleCandidateBar: NSGlassEffectView {
+    private var applier = GlassTint.Applier()
+    private var value = 0.0
+    private let size: NSSize
+
+    init() {
+        let row = GridView()
+        let update = CandidateCells().update(candidates: ["善", "解", "輸入法"], notes: [nil, nil, nil], selected: 0, first: 0, columns: 0)
+        var x = Metrics.barInset
+        for cell in update.cells {
+            cell.setFrameOrigin(NSPoint(x: x, y: (Metrics.barHeight - Metrics.capsuleHeight) / 2))
+            row.addSubview(cell)
+            x += cell.contentWidth + Metrics.cellSpacing
+        }
+        size = NSSize(width: x - Metrics.cellSpacing + Metrics.barInset, height: Metrics.barHeight)
+        row.frame = NSRect(origin: .zero, size: size)
+        super.init(frame: NSRect(origin: .zero, size: size))
+        contentView = row
+        cornerRadius = size.height / 2
+    }
+
+    required init?(coder: NSCoder) { fatalError("not used") }
+
+    override var intrinsicContentSize: NSSize { size }
+
+    func setTint(_ v: Double) {
+        value = v
+        apply(applier.update(value: v, dark: GlassTint.isDark(effectiveAppearance)))
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        apply(applier.update(value: value, dark: GlassTint.isDark(effectiveAppearance)))
+    }
 }
 
 /// The glass's one content view. Flipped, so cells are placed from the top-left and a window that
@@ -233,12 +304,15 @@ final class CandidatePanelAdapter: CandidatePanel {
     var onSelect: ((Int) -> Void)?
     private let window: PanelWindow
     private let glass = NSGlassEffectView()
+    private var tintApplier = GlassTint.Applier()
     /// The glass's one content view, kept for the panel's lifetime: replacing the glass's content,
     /// resizing or re-ordering the window on every selection move made the glass's glow flicker
     /// (user report 2026-10-05). Since 9.1 a move updates the existing cells and a scroll swaps only
     /// the entering and leaving rows.
     private let row = GridView()
-    private var lastOrigin: NSPoint?
+    /// The last line rectangle the client gave. A shown panel's corner is worked out from it again for each panel's size
+    /// (`PanelPlacement.topLeft`); the corner itself is not remembered, as it depends on the size of the panel it was made for.
+    private var lastLine: NSRect?
     /// The last shown output, to animate the collapsed -> expanded change from where the bar's cells
     /// were, and to update only the selection when nothing else changed.
     private var shownColumns = 0
@@ -249,6 +323,20 @@ final class CandidatePanelAdapter: CandidatePanel {
     private var shownSize = NSSize.zero
     private var shownFrame = NSRect.zero
     private var shownTargets: [NSPoint] = []
+    /// The last output's `VerticalLayout.Plan` (its kind 0, 1 or 2, row count and width so far); `nil` while the panel is
+    /// hidden. `VerticalLayout.resets` decides from its kind whether the next output clears the content, and
+    /// `VerticalLayout.plan` how big the vertical panel is (candidate-vertical contract section 2.4).
+    private var shownPlan: VerticalLayout.Plan?
+    /// The vertical panel's scroll indicator: kept while it is needed and only moved and resized, so a scroll does not add and
+    /// remove a view on every key; removed when the list fits or the content resets. Whether a new view each time would
+    /// flicker was not measured.
+    private var thumb: FilledView?
+    /// The vertical panel's row separators (`VerticalLayout.separators`): one view per gap, kept across keys and only moved,
+    /// hidden or shown; added and removed only when the number of rows changes or the content resets.
+    private var separators: [FilledView] = []
+    /// True while the one-line English-run hint is what `render` drew (`showHint`): its cell has no number's room and the bar has
+    /// no expand mark. Cleared by every `show` and by `hide`. (A click on it is ignored in `Session.candidateSelected`.)
+    private var hintShown = false
     /// Widen-only column widths of the open grid (section 9); empty when collapsed or hidden.
     private var columnWidths: [CGFloat] = []
     /// The cells and the decision which survive an output (ShanjieKit); this class only adds and removes
@@ -323,10 +411,149 @@ final class CandidatePanelAdapter: CandidatePanel {
         }
     }
 
-    func show(_ candidates: [String], notes: [String?], selected: Int, columns: Int, first: Int, total: Int,
-              lineRect: NSRect?, appearance: NSAppearance?) {
-        let grid = columns > 0
+    /// Candidate-vertical contract sections 2.3 and 2.4: one column of up to nine rows, a capsule across the row's width, the
+    /// scroll indicator in a gutter on the right (candidate window only). The reset (`VerticalLayout.resets`, decided in `show`)
+    /// has already cleared the content when this runs; the size and the gutter come from `VerticalLayout.plan`.
+    private func showVertical(_ candidates: [String], notes: [String?], selected: Int, first: Int, total: Int,
+                              kind: Int, lineRect: NSRect?, numbered: Bool = true) {
+        let update = cellSet.update(candidates: candidates, notes: notes, selected: selected, first: first, columns: 0, renumber: true,
+                                    numbered: numbered)
+        let cells = update.cells
+        // The size comes from the cells that exist now (reused ones keep their measured width), so nothing is measured twice.
+        let plan = VerticalLayout.plan(previous: shownPlan, kind: kind, count: candidates.count, total: total,
+                                       contentWidths: cells.map(\.contentWidth))
+        shownPlan = plan
+        let size = plan.size
+        let gutter = plan.gutter
+        update.removed.forEach { $0.removeFromSuperview() }
+        let rowWidth = size.width - VerticalLayout.sideInset * 2 - gutter
+        for (i, cell) in cells.enumerated() {
+            cell.frame = NSRect(x: VerticalLayout.sideInset, y: VerticalLayout.rowY(i, capsuleHeight: Metrics.capsuleHeight),
+                                width: rowWidth, height: Metrics.capsuleHeight)
+            if !update.reused[i] { row.addSubview(cell) }
+        }
+        if let t = VerticalLayout.thumb(first: first, total: total, visible: candidates.count, height: size.height) {
+            let frame = NSRect(x: size.width - VerticalLayout.sideInset - VerticalLayout.thumbWidth, y: t.y,
+                               width: VerticalLayout.thumbWidth, height: t.height)
+            if let thumb {
+                if thumb.frame != frame { thumb.frame = frame }
+            } else {
+                let view = FilledView(frame: frame, color: .tertiaryLabelColor, cornerRadius: VerticalLayout.thumbWidth / 2)
+                row.addSubview(view)
+                thumb = view
+            }
+        } else {
+            thumb?.removeFromSuperview()
+            thumb = nil
+        }
+        if shownSize != size {
+            row.frame = NSRect(origin: .zero, size: size)
+            glass.cornerRadius = VerticalLayout.cornerRadius
+            shownSize = size
+        }
+
+        // The first row's candidate glyph under the composed text, as the bar does. A first guess for the vertical window.
+        let alignOffset = VerticalLayout.sideInset + (cells.first?.candidateMinX ?? 0)
+        let placement = place(lineRect: lineRect, size: size, alignOffset: alignOffset, sideHeight: VerticalLayout.sideHeight(kind: kind))
+        // Cells and separators are laid out together even when there is no screen to put the panel on (a device pixel of the
+        // screen it goes to; 1x without one).
+        updateSeparators(rows: cells.count, selected: selected, rowWidth: rowWidth, scale: placement?.scale ?? 1)
+        guard let origin = placement?.origin else { return }
+        // No animation: a vertical window never expands or collapses, and a widening is rare (a wider name scrolls in). One
+        // setFrame with the final rect anchored at its top-left, so a change of height (the prediction row) is not made in two
+        // steps (size, then origin).
+        let frame = NSRect(x: origin.x, y: origin.y - size.height, width: size.width, height: size.height)
+        if window.frame != frame { window.setFrame(frame, display: true) }
+        if !window.isVisible { window.orderFrontRegardless() }
+    }
+
+    /// Where a panel of `size` goes: the origin `PanelPlacement.topLeft` works out for this size from the client's line, else
+    /// the last one it gave (`lastLine`, remembered here), with the scale of the screen it chose; `nil` without a screen.
+    private func place(lineRect: NSRect?, size: NSSize, alignOffset: CGFloat, sideHeight: CGFloat? = nil) -> (origin: NSPoint, scale: CGFloat)? {
+        let screens = NSScreen.screens
+        guard !screens.isEmpty else { return nil }
+        let main = NSScreen.main.flatMap { m in screens.firstIndex(of: m) } ?? 0
+        let p = PanelPlacement.topLeft(line: lineRect, last: lastLine, size: size, sideHeight: sideHeight, alignOffset: alignOffset,
+                                       screens: screens.map { PanelPlacement.Screen(frame: $0.frame, visibleFrame: $0.visibleFrame) },
+                                       main: main)
+        if let lineRect { lastLine = lineRect }
+        return (p.origin, screens[p.screen].backingScaleFactor)
+    }
+
+    /// Puts the separators where `VerticalLayout.separators` says; a view is made only for a gap that has none yet.
+    private func updateSeparators(rows: Int, selected: Int, rowWidth: CGFloat, scale: CGFloat) {
+        let lines = VerticalLayout.separators(rows: rows, selected: selected, rowWidth: rowWidth,
+                                              capsuleHeight: Metrics.capsuleHeight,
+                                              thickness: Metrics.separatorPixels / max(scale, 1))
+        while separators.count > lines.count { separators.removeLast().removeFromSuperview() }
+        while separators.count < lines.count {
+            let view = FilledView(frame: .zero, color: Metrics.separatorColor)
+            row.addSubview(view)
+            separators.append(view)
+        }
+        for (view, line) in zip(separators, lines) {
+            let frame = NSRect(x: line.x, y: line.y, width: line.width, height: line.height)
+            if view.frame != frame { view.frame = frame }
+            if view.isHidden == line.visible { view.isHidden = !line.visible }
+        }
+    }
+
+    /// Forgets everything on screen without hiding the window: the value of `candidate_vertical` changed (the bar, a prediction
+    /// row, a vertical window, in any order) or the panel is hiding. The horizontal path's `shown*` and the vertical path's
+    /// thumb, separators and size all go; the next output starts from nothing.
+    private func resetContent() {
+        // A running expand or collapse would keep moving the window after its content is gone; end it first.
+        if animating { settle(frame: shownFrame) }
+        shownColumns = 0
+        shownFirst = 0
+        shownTotal = 0
+        shownCandidates = []
+        shownNotes = []
+        shownSize = .zero
+        shownTargets = []
+        columnWidths = []
+        thumb?.removeFromSuperview()
+        thumb = nil
+        separators.forEach { $0.removeFromSuperview() }
+        separators = []
+        cellSet.reset().forEach { $0.removeFromSuperview() }
+        decor.clear()
+    }
+
+    /// Zhen-inline section 1.3f: the hint is one cell in the prediction row's orientation (`vertical` 0 the bar, 2 the vertical
+    /// row), with no number (not even its room), no highlight (selected -1) and no expand mark. Whatever was on screen before
+    /// (the expanded grid included) is cleared first, so the hint is shown fresh, never as a collapse.
+    func showHint(_ text: String, vertical: Int, lineRect: NSRect?, appearance: NSAppearance?, glassTint: Double) {
+        render([text], notes: [nil], selected: -1, columns: 0, first: 0, total: 1, vertical: vertical, lineRect: lineRect,
+               appearance: appearance, glassTint: glassTint, hint: true)
+    }
+
+    func show(_ candidates: [String], notes: [String?], selected: Int, columns: Int, first: Int, total: Int, vertical: Int,
+              lineRect: NSRect?, appearance: NSAppearance?, glassTint: Double) {
+        render(candidates, notes: notes, selected: selected, columns: columns, first: first, total: total, vertical: vertical,
+               lineRect: lineRect, appearance: appearance, glassTint: glassTint, hint: false)
+    }
+
+    private func render(_ candidates: [String], notes: [String?], selected: Int, columns: Int, first: Int, total: Int, vertical: Int,
+                        lineRect: NSRect?, appearance: NSAppearance?, glassTint: Double, hint: Bool) {
+        let hintChanged = hintShown != hint
+        hintShown = hint
         if window.appearance?.name != appearance?.name { window.appearance = appearance }
+        applyTint(glassTint)
+        // A change of value (the bar, a prediction row, a vertical window, in any order) clears what was on screen first
+        // (`VerticalLayout.resets`); the vertical path then makes its cells and asks `VerticalLayout.plan` for the size.
+        // Going to or from the hint clears too: no old candidate lingers, and the expanded grid does not play its collapse.
+        if hintChanged || VerticalLayout.resets(previous: shownPlan, kind: vertical) {
+            resetContent()
+            shownPlan = nil
+        }
+        if vertical != 0 {
+            showVertical(candidates, notes: notes, selected: selected, first: first, total: total, kind: vertical, lineRect: lineRect,
+                         numbered: !hint)
+            return
+        }
+        shownPlan = .horizontal
+        let grid = columns > 0
 
         // Only the selection moved (section 8.7): keep the cells, change which one is selected and which
         // row shows numbers. The glass's content view is never replaced either way.
@@ -339,7 +566,8 @@ final class CandidatePanelAdapter: CandidatePanel {
         let size: NSSize
         let targets: [NSPoint]
         let oldCells = cellSet.cells
-        let update = cellSet.update(candidates: candidates, notes: notes, selected: selected, first: first, columns: columns)
+        let update = cellSet.update(candidates: candidates, notes: notes, selected: selected, first: first, columns: columns,
+                                    numbered: !hint)
         let newCells = update.cells
         var gridWidth: CGFloat = 0
         var widened = false
@@ -353,7 +581,7 @@ final class CandidatePanelAdapter: CandidatePanel {
             var gridXs: [CGFloat] = []
             if grid {
                 let current = shownColumns > 0 ? columnWidths : []
-                let lay = GridLayout.layout(cellWidths: newCells.map(\.frame.width), columns: columns, current: current,
+                let lay = GridLayout.layout(cellWidths: newCells.map(\.contentWidth), columns: columns, current: current,
                                             inset: Metrics.barInset, spacing: Metrics.cellSpacing,
                                             trailing: Metrics.barInset + Metrics.scrollGutter)
                 gridXs = lay.xs
@@ -380,9 +608,10 @@ final class CandidatePanelAdapter: CandidatePanel {
                 var x = Metrics.barInset
                 for cell in newCells {
                     t.append(NSPoint(x: x, y: (Metrics.barHeight - Metrics.capsuleHeight) / 2))
-                    x += cell.frame.width + Metrics.cellSpacing
+                    x += cell.contentWidth + Metrics.cellSpacing
                 }
-                size = NSSize(width: x - Metrics.cellSpacing + Metrics.chevronArea, height: Metrics.barHeight)
+                // The hint has no expand mark, so its right padding is the left one (`barInset`) instead of the mark's room.
+                size = NSSize(width: x - Metrics.cellSpacing + (hint ? Metrics.barInset : Metrics.chevronArea), height: Metrics.barHeight)
             }
             targets = t
 
@@ -416,7 +645,7 @@ final class CandidatePanelAdapter: CandidatePanel {
                 cell.setFrameOrigin(starts[i])
                 if !update.reused[i] { row.addSubview(cell) }
             }
-            var newDecor: [NSView] = grid ? [] : chevron(barSize: size)
+            var newDecor: [NSView] = grid || hint ? [] : chevron(barSize: size)
             if grid, total > candidates.count {
                 newDecor.append(scrollThumb(first: first, total: total, columns: columns, count: candidates.count,
                                          width: size.width, height: size.height))
@@ -437,15 +666,8 @@ final class CandidatePanelAdapter: CandidatePanel {
             shownTargets = targets
         }
 
-        let screens = NSScreen.screens
-        let rectScreen = lineRect.flatMap { r in screens.firstIndex { $0.frame.contains(r.origin) } }
-        let main = NSScreen.main.flatMap { m in screens.firstIndex(of: m) } ?? 0
-        guard !screens.isEmpty else { return }
         let alignOffset = Metrics.barInset + (newCells.first?.candidateMinX ?? 0)
-        let origin = PanelPlacement.topLeft(
-            lineRect: lineRect, lastOrigin: lastOrigin, size: size, alignOffset: alignOffset,
-            screens: screens.map(\.visibleFrame), rectScreen: rectScreen, main: main)
-        lastOrigin = origin
+        guard let origin = place(lineRect: lineRect, size: size, alignOffset: alignOffset)?.origin else { return }
         let frame = NSRect(x: origin.x, y: origin.y - size.height, width: size.width, height: size.height)
         // Only the selection moved while an expand or collapse runs (autorepeat on the arrow keys):
         // the cells were updated above and the running animation already goes to this frame and these
@@ -471,6 +693,19 @@ final class CandidatePanelAdapter: CandidatePanel {
         }
         if !window.isVisible { window.orderFrontRegardless() }
     }
+
+    /// settings-window section 2.3, on every show and including no tint, so going back to 0 removes it.
+    /// `NSGlassEffectView.tintColor` (AppKit/NSGlassEffectView.h line 34, SDK 27.0 as measured, available
+    /// since macOS 26.0: "The color the glass effect view uses to tint the background and glass effect
+    /// toward"). `tintApplier` decides what to assign (nothing when unchanged, nil to clear); with 0 and
+    /// never tinted nothing is assigned, so the default look stays bit-identical. Its effect on macOS 26
+    /// is not measured.
+    private func applyTint(_ value: Double) {
+        glass.apply(tintApplier.update(value: value, dark: GlassTint.isDark(window.effectiveAppearance)))
+    }
+
+    func setGlassTint(_ glassTint: Double) { applyTint(glassTint) }
+
 
     /// a-3's expand mark at the bar's right end: a separator line and a chevron, both secondary.
     /// Display only: the bar expands with the down arrow; a click on it does nothing.
@@ -505,16 +740,9 @@ final class CandidatePanelAdapter: CandidatePanel {
         // at its animated frame next time; end it first.
         if animating { settle(frame: shownFrame) }
         window.orderOut(nil)
-        shownColumns = 0
-        shownFirst = 0
-        shownTotal = 0
-        shownCandidates = []
-        shownNotes = []
-        shownSize = .zero
-        shownTargets = []
-        columnWidths = []
-        cellSet.reset().forEach { $0.removeFromSuperview() }
-        decor.clear()
+        resetContent()
+        shownPlan = nil
+        hintShown = false
     }
 }
 

@@ -75,7 +75,9 @@ def merge_variants(uni, bi, cls):
     return uni, bi
 
 
-def build(cls=None):
+def merged_counts(cls=None, extra_overlay=None):
+    """計數階段（加權、四捨五入、去 0、異體合併）。回傳 (uni, bi, cls)；build() 與 tools/kn_cont.py 共用。
+    extra_overlay（`--extra-overlay FILE`，預設關）：算異體類時接在 ime.OVERLAYS 之後的疊加層檔；cls 已給時不讀。"""
     uni, bi = {}, {}
     for name, w in CORPORA:
         c = pickle.load(open(os.path.join(WORK, name), "rb"))
@@ -90,12 +92,20 @@ def build(cls=None):
         sys.path.insert(0, os.path.join(ROOT, "reference", "proto"))
         sys.path.insert(0, os.path.join(ROOT, "experiments", "s2"))
         import ime
-        lex = ime.Lexicon(os.path.join(LEXDIR, "mcbpmf-data.txt"), overlay=ime.OVERLAYS)
+        lex = ime.Lexicon(os.path.join(LEXDIR, "mcbpmf-data.txt"), overlay=ime.overlays(extra_overlay))
         cls = variant_classes(lex.by_reading)
     uni, bi = merge_variants(uni, bi, cls)
+    return uni, bi, cls
+
+
+def build(cls=None, extra_overlay=None):
+    uni, bi, cls = merged_counts(cls, extra_overlay)
     words = sorted(uni, key=lambda s: s.encode("utf-8"))
     vocab = ["<s>", "</s>"] + words
     ids = {w: i for i, w in enumerate(vocab)}
+    # model-v5 §8（加法計數）：詞包詞旁邊的一般詞可能留下二元組計數、單詞計數卻四捨五入成 0，不在詞彙表裡；
+    # 這種二元組沒有前文可存，丟掉。沒有加法計數的輸入不會出現（二元組的期望次數不超過兩端的單詞），輸出逐位元組不變。
+    bi = {k: c for k, c in bi.items() if k[0] in ids and k[1] in ids}
     # S2f 修訂二 7.2.2：類只算一次（只算代表成員的 unigram 與代表成員前文的 </s>）；影響約 0.006 log10
     once = lambda w: w not in cls or cls[w][0] == w
     N = sum(c for w, c in uni.items() if once(w))
@@ -129,8 +139,9 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", default=os.path.join(ROOT, "data", "lm", "bigram.sjlm"))
     ap.add_argument("--check", action="store_true", help="重建並和現有檔比對 SHA-256，不寫檔")
+    ap.add_argument("--extra-overlay", help="接在 ime.OVERLAYS 之後的疊加層檔（model-v6 §7 P3-4，預設關），影響異體類")
     a = ap.parse_args()
-    data, V, C, E = build()
+    data, V, C, E = build(extra_overlay=a.extra_overlay)
     sha = hashlib.sha256(data).hexdigest()
     print(f"V={V} contexts={C} entries={E} bytes={len(data)} sha256={sha}")
     if a.check:

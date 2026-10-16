@@ -38,6 +38,10 @@ def prepare():
     vocab = sorted(uni, key=lambda s: (-uni[s], s))
     ids = {w: i for i, w in enumerate(vocab)}
     V = len(vocab); ids["<s>"], ids["</s>"] = V, V + 1
+    # model-v5 §8（加法計數）：詞包詞旁邊的一般詞可能只有二元組、沒有單詞計數，丟掉這種二元組（和 tools/build_lm.py 相同）。
+    # 沒有加法計數的輸入不會出現（期望次數的二元組不會比兩端的單詞多），edges 應該逐位元組不變（推論，沒有量；
+    # 量過的是 tools/build_lm.py 同一個過濾重建 model-v3 仍是 5c7d5a94…）。
+    bi = {k: v for k, v in bi.items() if k[0] in ids and k[1] in ids}
     n = len(bi)
     src = np.fromiter((ids[a] for a, b in bi), np.int32, n)
     dst = np.fromiter((ids[b] for a, b in bi), np.int32, n)
@@ -145,6 +149,27 @@ class Clusterer:
                 log(f"init {w}/{N} {time.time() - t:.0f}s")
         log(f"init done MI={self.objective():.5f}")
 
+    def init_from(self, old, vocab, log):
+        """model-v5 契約 §9：前 N 詞裡舊分群的詞沿用舊類別（舊分群沒有類別的仍沒有，不進 M），
+        其餘（新詞）依頻率順序貪婪貼進最佳類別（同 init 的分數）。"""
+        new = []
+        for w in range(self.N):
+            b = old.get(vocab[w])
+            if b is None:
+                new.append(w)
+                continue
+            if b < 0:
+                continue
+            out, inn, s = self.neighbors(w)
+            self.cls[w] = b
+            self.apply(b, out, inn, s, +1)
+        for w in new:
+            out, inn, s = self.neighbors(w)
+            b = int(np.argmax(self.scores(out, inn, s)))
+            self.cls[w] = b
+            self.apply(b, out, inn, s, +1)
+        log(f"kept {self.N - len(new)} old, placed {len(new)} new; MI={self.objective():.5f}")
+
     def exchange(self, log):
         moved = 0
         for w in range(self.N):
@@ -166,7 +191,7 @@ def assign_rare(cl, vocab_n, src, dst, cnt, V, N):
     """N 之外的詞：用和已分類詞（前 N 詞）的 bigram 貼進最佳類別。回傳長度 V 的類別陣列（−1＝無）。"""
     full = np.full(V + 2, -1, np.int32)
     full[:N] = cl.cls[:N]; full[V], full[V + 1] = cl.K + 1, cl.K + 2
-    ok = np.zeros(V + 2, bool); ok[:N] = True; ok[V:] = True
+    ok = np.zeros(V + 2, bool); ok[:N] = cl.cls[:N] >= 0; ok[V:] = True   # --keep-from 時前 N 詞可能有沒有類別的舊詞
     so = np.argsort(src, kind="stable"); ptr_o = np.zeros(V + 3, np.int64); np.cumsum(np.bincount(src, minlength=V + 2), out=ptr_o[1:])
     do = np.argsort(dst, kind="stable"); ptr_i = np.zeros(V + 3, np.int64); np.cumsum(np.bincount(dst, minlength=V + 2), out=ptr_i[1:])
     K3 = cl.K3
@@ -182,10 +207,21 @@ def assign_rare(cl, vocab_n, src, dst, cnt, V, N):
     return res[:V]
 
 
+def load_old(d, N, K):
+    """另一次分群的資料夾（edges.npz 的詞彙順序對上 cls-N-K.npz）→ {詞: 類別}；沒有類別的詞是 −1，照樣沿用。"""
+    vocab = np.load(os.path.join(d, "edges.npz"), allow_pickle=True)["vocab"]
+    c = np.load(os.path.join(d, f"cls-{N}-{K}.npz"))
+    assert int(c["K"]) == K and len(c["cls"]) == len(vocab)
+    return {w: int(k) for w, k in zip(vocab, c["cls"])}
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--N", type=int, default=40000); ap.add_argument("--K", type=int, default=256)
     ap.add_argument("--passes", type=int, default=6)
+    # model-v5 契約 §9：舊分群的詞沿用它的類別（不跑交換），只替新詞找類別。重新分群會讓一般詞的詞類整體漂移
+    # （s2r 探針書面 69→66 句，只差在詞類），計數沒變的詞就不該換類別。
+    ap.add_argument("--keep-from", help="另一次分群的輸出資料夾（edges.npz、cls-N-K.npz）")
     a = ap.parse_args()
     t0 = time.time()
     trace = []
@@ -194,15 +230,23 @@ def main():
     vocab, uni, src, dst, cnt = prepare()
     V = len(vocab)
     log(f"loaded V={V} edges={len(src)} {time.time() - t0:.0f}s")
+    if a.keep_from and os.path.abspath(a.keep_from) == os.path.abspath(OUT):
+        ap.error("--keep-from 不能是輸出資料夾（S2K_OUT）：會用到舊的 edges.npz、覆寫舊的分群")
     cl = Clusterer(a.N, a.K, src, dst, cnt, V)
-    cl.init(log)
+    old = load_old(a.keep_from, a.N, a.K) if a.keep_from else None
+    if old is None:
+        cl.init(log)
+    else:
+        cl.init_from(old, vocab, log)
     mis = [cl.objective()]
-    for p in range(a.passes):
+    for p in range(0 if old else a.passes):
         t = time.time(); mv = cl.exchange(log); mis.append(cl.objective())
         log(f"pass {p + 1}: moved {mv} MI={mis[-1]:.5f} {time.time() - t:.0f}s")
         if mv < a.N * 0.002:
             break
     res = assign_rare(cl, V, src, dst, cnt, V, a.N)
+    if old:
+        res = np.array([old.get(w, r) for w, r in zip(vocab, res)], np.int32)
     log(f"rare assigned: {int((res[a.N:] >= 0).sum())}/{V - a.N} total {time.time() - t0:.0f}s")
     np.savez(os.path.join(OUT, f"cls-{a.N}-{a.K}.npz"), cls=res, K=a.K, N=a.N, mi=np.array(mis))
     json.dump(trace, open(os.path.join(OUT, f"cls-{a.N}-{a.K}.log.json"), "w"))

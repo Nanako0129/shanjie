@@ -11,8 +11,8 @@ fn root() -> PathBuf {
 }
 fn lm_path() -> PathBuf {
     let p = root().join("data/lm/bigram.sjlm");
-    assert!(root().join("data/lm/classes.sjc").exists(), "data/lm/classes.sjc is missing: gh release download classes-v2 -R Nanako0129/shanjie -p classes.sjc -D data/lm");
-    assert!(p.exists(), "data/lm/bigram.sjlm is missing: gh release download model-v4 -R Nanako0129/shanjie -p bigram.sjlm -D data/lm");
+    assert!(root().join("data/lm/classes.sjc").exists(), "data/lm/classes.sjc is missing: gh release download classes-v5 -R Nanako0129/shanjie -p classes.sjc -D data/lm");
+    assert!(p.exists(), "data/lm/bigram.sjlm is missing: gh release download model-v6 -R Nanako0129/shanjie -p bigram.sjlm -D data/lm");
     p
 }
 
@@ -106,5 +106,34 @@ fn the_pack_switch_changes_the_result_and_off_is_identical_to_no_pack_file() {
 fn an_unknown_pack_bit_is_refused() {
     let d = tempdir("bit", None);
     assert!(matches!(Engine::new_with_packs(&root().join("data/lexicon"), L, Some((&d, 2))), Err(EngineError::LoadFailed)));
+    let _ = std::fs::remove_dir_all(d);
+}
+
+/// model-v6 section 7 P2-3: the always-on names layer reaches the engine's capping text, not only the CLI's. Through the
+/// shipping path (`Engine::new_with_packs`, then `load_lm`) with a data directory whose names-add.tsv holds one synthetic word
+/// the corpus never saw: its lexicon score is the file score minus 1.0 (UNSEEN_OVERLAY_PENALTY), checked through
+/// `total_score` against the model's own arithmetic. Without names-add.tsv the engine is not created.
+#[test]
+fn the_names_layer_is_capped_on_the_engine_path() {
+    let d = tempdir("names", None);
+    for f in ["mcbpmf-data.txt", "overlay-add.tsv", "sandhi-add.tsv", "demote.tsv"] {
+        std::os::unix::fs::symlink(root().join("data/lexicon").join(f), d.join(f)).unwrap();
+    }
+    assert!(matches!(Engine::new_with_packs(&d, L, None), Err(EngineError::LoadFailed)), "a missing names-add.tsv must fail");
+    std::fs::write(d.join("names-add.tsv"), "ㄒㄧㄣ-ㄅㄣ\t鑫犇\t-0.5\tnames\n").unwrap();
+    let mut e = Engine::new_with_packs(&d, L, None).unwrap();
+    e.load_lm(&lm_path()).unwrap();
+    e.set_profile(Profile::Chat).unwrap();
+    let mut out = None;
+    for k in ["ㄒㄧㄣ", "ㄅㄣ"].iter().flat_map(|s| syl_keys(s)) {
+        out = Some(e.key(k).unwrap());
+    }
+    assert_eq!(out.unwrap().preedit, "鑫犇", "the synthetic name must be the decode");
+    let lm = core::lm::Lm::load(&lm_path()).unwrap();
+    assert_eq!(lm.count("鑫犇"), 0, "the fixture word must be one the corpus never saw");
+    let lam = Profile::Chat.lambda();
+    let total = |lp: f64| lm.word(lam, "<s>", "鑫犇", lp) + lm.eos(lam, "鑫犇");
+    let got = e.total_score().unwrap();
+    assert!((got - total(-1.5)).abs() < 1e-12, "names row not capped: {got} vs {} (uncapped {})", total(-1.5), total(-0.5));
     let _ = std::fs::remove_dir_all(d);
 }

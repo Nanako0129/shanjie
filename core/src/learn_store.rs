@@ -2,11 +2,13 @@
 //! passes (`~/Library/Application Support/shanjie/` in the app; a temporary directory in tests).
 //!
 //! Format: the header `#shanjie-learning v1`, then one record per line, five tab-separated fields:
-//! context key (≤ 2 Han characters, "^", "" for global, or "#" for a new word of new-word B), reading
+//! context key (≤ 2 Han characters, `^>` plus a reading, "" for global, or "#" for a new word of new-word B), reading
 //! (syllables joined by `-`, as in the lexicon), word, weight, day. A record
 //! that would not read back as itself (a tab, newline or control character in a field, a `-` or an
 //! empty syllable in the reading, a bad context, weight or day) is never written and is skipped one
-//! line at a time on load. When a (context, reading, word) appears on several lines, the last one
+//! line at a time on load. A bad context includes the ones contract §14 retired: a single character
+//! under a one-Han key or a synthetic key, and every bare "^" (sentence-start records are `^>` plus
+//! the next syllable's reading, `^>$` when none follows). When a (context, reading, word) appears on several lines, the last one
 //! wins: `append` adds newer versions of records at the end (revision one, §4 and §11).
 //!
 //! Directory 0700 with an owner check. Two write paths (the engine picks one, §4):
@@ -20,7 +22,7 @@
 //! bad header or an oversized file is renamed to `learning.tsv.corrupt` (0600, one copy). Nothing
 //! here logs: no path and no record ever leaves this module except as data.
 
-use crate::learn::{context_key, is_han, is_single, Record, GLOBAL, NEWWORD, NEWWORD_MAX, NEWWORD_MIN, SENTINEL};
+use crate::learn::{context_key, is_full_context, is_han, is_single, Record, GLOBAL, NEWWORD, NEWWORD_MAX, NEWWORD_MIN, NEXT_PREFIX, SENTINEL};
 use std::fmt::Write as _;
 use std::fs::{self, DirBuilder, File, OpenOptions, Permissions};
 use std::io::{ErrorKind, Read, Write};
@@ -52,6 +54,16 @@ const ELOOP: i32 = 62;
 const F_FULLFSYNC: i32 = 51;
 #[cfg(target_os = "macos")]
 const F_BARRIERFSYNC: i32 = 85;
+// Linux (x86_64) values, only so the test suite can run off the Mac (the Windows box's WSL); nothing
+// ships for Linux. The same symlink and FIFO tests check them there.
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+const O_NOFOLLOW: i32 = 0o400000;
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+const O_NONBLOCK: i32 = 0o4000;
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+const ELOOP: i32 = 40;
+#[cfg(all(target_os = "linux", not(target_arch = "x86_64")))]
+compile_error!("learn_store.rs has <fcntl.h> values only for macOS and x86_64 Linux (O_NOFOLLOW differs by architecture)");
 
 extern "C" {
     fn geteuid() -> u32;
@@ -61,9 +73,16 @@ extern "C" {
 /// F_BARRIERFSYNC, else F_FULLFSYNC (§4): orders the data before the rename without waiting for the
 /// drive's cache flush on the key path (Rust's `sync_all` is F_FULLFSYNC on macOS, p99 35 ms in
 /// §11). False when both fail.
+#[cfg(target_os = "macos")]
 fn barrier(f: &File) -> bool {
     // SAFETY: a valid open descriptor; neither command takes an argument.
     unsafe { fcntl(f.as_raw_fd(), F_BARRIERFSYNC) != -1 || fcntl(f.as_raw_fd(), F_FULLFSYNC) != -1 }
+}
+
+/// Linux has neither command; fdatasync gives the same ordering for the off-Mac test runs.
+#[cfg(target_os = "linux")]
+fn barrier(f: &File) -> bool {
+    f.sync_data().is_ok()
 }
 
 /// Latest accepted day (9999-12-31 as days since 1970-01-01); earlier than 0 is rejected too.
@@ -116,22 +135,34 @@ fn clean(s: &str) -> bool {
     !s.is_empty() && !s.chars().any(char::is_control)
 }
 
-/// Whether `r` survives a write and a read unchanged; the one rule for both directions. A
-/// single-character record under "^" or the global key (written before contract §12) is invalid:
-/// skipped at load, so it counts toward nothing (capacity, has_reading, words_of, is_empty) and is
-/// absent after the first full rewrite. The one place that migrates them.
-///
-/// A new-word record (context exactly `NEWWORD`, new-word B §2.3) needs a word of NEWWORD_MIN..=NEWWORD_MAX Han
-/// characters and one syllable per character; the single-character rules above are not relaxed for it.
+/// A legal context key for `r` (s4-learning §14): `GLOBAL` for words of 2+ characters; one or two Han
+/// characters (a single-character word only with exactly two, rule 7); `NEXT_PREFIX` plus a clean,
+/// non-empty reading (`$` when nothing follows) for words of 2+ characters (rule 8). A bare "^" is
+/// never legal: sentence-start records live under the synthetic keys. A new-word record (context exactly
+/// `NEWWORD`, new-word B §2.3) needs a word of NEWWORD_MIN..=NEWWORD_MAX Han characters and one syllable per
+/// character; the single-character rules above are not relaxed for it.
+fn legal_context(r: &Record) -> bool {
+    let c = r.context.as_str();
+    if c == GLOBAL {
+        return !is_single(&r.word);
+    }
+    if c == NEWWORD {
+        let n = r.word.chars().count();
+        return (NEWWORD_MIN..=NEWWORD_MAX).contains(&n) && r.word.chars().all(is_han) && r.reading.len() == n;
+    }
+    if let Some(next) = c.strip_prefix(NEXT_PREFIX) {
+        return !is_single(&r.word) && clean(next);
+    }
+    c != SENTINEL && context_key(c) == c && (!is_single(&r.word) || is_full_context(c))
+}
+
+/// Whether `r` survives a write and a read unchanged; the one rule for both directions. A record under
+/// an illegal context key (`legal_context`) is invalid: skipped at load, so it counts toward nothing
+/// (capacity, has_reading, words_of, is_empty) and is absent after the first full rewrite. This is the
+/// one place that migrates the records written before contract §12 (single character under "^" or the
+/// global key) and before §14 (single character under a one-character key, every bare "^").
 fn valid(r: &Record) -> bool {
-    let n = r.word.chars().count();
-    let context_ok = if r.context == NEWWORD {
-        (NEWWORD_MIN..=NEWWORD_MAX).contains(&n) && r.word.chars().all(is_han) && r.reading.len() == n
-    } else {
-        r.context == GLOBAL || context_key(&r.context) == r.context
-    };
-    context_ok
-        && !((r.context == GLOBAL || r.context == SENTINEL) && is_single(&r.word))
+    legal_context(r)
         && !r.reading.is_empty()
         && r.reading.iter().all(|s| clean(s) && !s.contains('-'))
         && clean(&r.word)

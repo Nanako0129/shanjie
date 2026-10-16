@@ -24,6 +24,16 @@ import readings  # noqa: E402  萌典路徑
 
 BASE = os.path.join(ROOT, "data", "lexicon", "mcbpmf-data.txt")
 OUT = os.path.join(ROOT, "data", "lexicon", "overlay-add.tsv")
+MANUAL = os.path.join(ROOT, "data", "lexicon", "overlay-manual.tsv")   # 維護者手動加的詞，接在產生的列後面（來源 manual）
+PACK = os.path.join(ROOT, "data", "packs", "acg-add.tsv")   # 手動詞也不能是詞包的詞：引擎把詞包接在疊加層後面，同詞同讀音重複就整個載入失敗
+# 手動詞的分數＝同字數的 length_scores ＋ 這個值（log10）。2026-10-14 量的：書面設定下「米雅歌」輸給「米亞哥」0.25（加 0.25 仍輸，
+# 加 0.5 時四個名字（五列）單獨打與放在句子裡，兩種設定 9 句都是第一名；研究紀錄同日）。手動加的是維護者明確要的詞，所以比一般疊加層詞高一點。
+# model-v6 §2.8 規則 2（維護者 2026-10-14）：0.5 是 model-v5 上剛好過關的最小值；開 KN 的 model-v6 書面「米雅歌唱得很好」輸，改 0.75。
+MANUAL_BONUS = 0.75
+# canto-prune（docs/contracts/canto-prune.md，維護者 2026-10-14）：含這些粵語用字、又不是教育部國語辭典詞目（build() 本來就讀的
+# moe_titles()）的標題不進候選。「俾」「咩」「喎」（喎斜）「嘞」（好嘞）國語也用，不在內；審查補了嗮 噏 揸 攞 餸 嚫 撳 搣 嗌 掟 喐 睩 嗱。
+CANTO_CHARS = frozenset("冇嘅啲喺佢嘢唔咁嚟搵睇畀乜啱攰嗰哋嚿諗噉嗮噏揸攞餸嚫撳搣嗌掟喐睩嗱")
+MANUAL_WORD = re.compile(r"^[一-鿿]+$")   # 純漢字，範圍和 S1 的 HAN 相同（U+4E00–U+9FFF），字數不限 2–4
 REMOVED = os.path.join(ROOT, "experiments", "s2n", "overlay-removed.tsv")   # S2n：被拿掉的簡體寫法（詞、轉換後的寫法、讀音）
 VARIANT_REMOVED = os.path.join(ROOT, "experiments", "s2f", "overlay-variant-removed.tsv")   # S2f §2.5：被拿掉的異體寫法（詞、基底寫法、讀音）
 CACHE = os.path.expanduser("~/.cache/shanjie/sources")
@@ -126,8 +136,8 @@ def build():
     wikt = titles("enwiktionary") | titles("zhwiktionary")
     compounds = {t for t in titles("zhwiki") if t[:-1] in multi or t[1:] in multi}
     rows, removed, variant_removed = [], [], []
-    cand = wikt | compounds
     moe = moe_titles()
+    cand = {w for w in wikt | compounds if not cantonese(w, moe)}   # canto-prune：在候選階段拿掉，S2n／S2f 的落點不會指向被拿掉的詞
     fold = {**bc.MERGE, **bc.TW_VARIANTS}           # S2f §2.5：套到兩邊後字串相同，就是同一個詞的異體寫法
     fold_w = lambda t: "".join(fold.get(c, c) for c in t)
     # 第一輪：哪些詞條符合 (i)(iii)，目標寫法是什麼；第二輪由落點決定（修訂二 7.2.4：避免 A→B 而 B 不在了）
@@ -185,8 +195,61 @@ def build():
             continue
         src = "wikt" if w in wikt else "zhwiki"
         rows += overlay_rows(w, syls, SCORE[len(w)], src)
-    assert not {r.split("\t")[1] for r in rows} & words   # 疊加層和基底的詞表交集必須是 0
+    overlay_words = {r.split("\t")[1] for r in rows}
+    assert not overlay_words & words                # 疊加層和基底的詞表交集必須是 0（手動詞由 manual_rows 自己檢查）
+    rows += manual_rows(words | overlay_words | pack_words(), length_scores(base), base_syllables(base))
     return rows, removed, variant_removed
+
+
+def cantonese(w, headwords):
+    """canto-prune：詞含 CANTO_CHARS 任一字、又不是 headwords（萌典詞目）裡的詞。手動詞不套用（manual_rows 不呼叫它）。"""
+    return not CANTO_CHARS.isdisjoint(w) and w not in headwords
+
+
+def length_scores(base):
+    """長度 → 基底同字數詞條分數的第 25 百分位；某長度的基底詞條少於 1,000 條就沿用上一個長度（5 字以上才會發生）。
+    2–4 字就是 SCORE；build_acg_pack.scores 也用這一個。"""
+    sc = {}
+    for n in range(2, 11):
+        got = sorted(s for syls, ents in base.by_reading.items() if len(syls) == n for _, s in ents)
+        sc[n] = got[len(got) // 4] if len(got) >= 1000 else sc[n - 1]
+    return sc
+
+
+def base_syllables(base):
+    return {s for syls in base.by_reading for s in syls}
+
+
+def pack_words(path=PACK):
+    with open(path, encoding="utf-8") as f:
+        return {l.split("\t")[1] for l in f}
+
+
+def manual_rows(taken, scores, syllables, path=MANUAL):
+    """overlay-manual.tsv 的列（詞、讀音、備註；# 開頭與空行略過），照檔案順序。每列都要：三欄；詞是純漢字、字數在 scores 裡（2 字以上）、
+    不在 taken（基底、疊加層、詞包）；讀音的音節數等於字數，每個音節都是基底有的音節。產生的列（含 overlay_rows 自動加的變調列）
+    同一個（讀音, 詞）不能出現兩次。不符就中止並指出行號。分數＝scores[字數]＋MANUAL_BONUS。"""
+    rows, seen = [], set()
+    with open(path, encoding="utf-8-sig") as f:
+        lines = f.read().splitlines()
+    for n, line in enumerate(lines, 1):
+        if line.startswith("#") or not line.strip():
+            continue
+        fields = line.split("\t")
+        ok = len(fields) == 3
+        if ok:
+            w, reading, _note = fields
+            syls = reading.split(" ")
+            ok = bool(MANUAL_WORD.match(w)) and len(w) in scores and len(syls) == len(w) and all(s in syllables for s in syls) and w not in taken
+        if not ok:
+            raise SystemExit(f"{path}:{n}: bad manual row")
+        for r in overlay_rows(w, syls, round(scores[len(w)] + MANUAL_BONUS, 8), "manual"):
+            key = tuple(r.split("\t")[:2])
+            if key in seen:
+                raise SystemExit(f"{path}:{n}: {w!r} repeats a reading already listed (sandhi rows count)")
+            seen.add(key)
+            rows.append(r)
+    return rows
 
 
 def main():
