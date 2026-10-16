@@ -5896,3 +5896,11 @@ formal: alpha 0.7, tau 1, delta 2
 - 維護者選擇題「做完直接推」（bench、保留集沒有退步、notes PR 合併後推 tag）。PR #170 合併後推 `v0.4.6`（tag 指向 main `58da6d2`；和量基準測試與保留集的 `7c47266` 相比，`Cargo.toml Cargo.lock core cli data eval/variants.tsv macos scripts` 沒有差異），發佈流程 run 38841516338：gate、build、sign、publish 都成功（sign、publish 由維護者核准）。
 - 核對（下載 Release 附件）：zip 與安裝程式的 SHA-256 和 `.sha256` 相符；兩個 App 的 `codesign --verify --deep --strict` 通過、Team 2LJ882GPY8、`spctl` 判定 Notarized Developer ID、`stapler validate` 通過、版本 0.4.6；App 裡的模型 `bigram.sjlm` `fc2bddd1`、`classes.sjc` `9e36fa1b`（classes-v5）、`kn.sjkn` `cbefbced`、`tinylm.sjtl` `d07de71d`；Latest 是 v0.4.6；Homebrew cask `0.4.6`、sha256 `fba95f0b…` 和 zip 相同。解壓的副本驗完先 `lsregister -u` 再刪。
 - 發版後：Discord 發版公告（blobhaj，只標善解身分組，維護者選擇題同意）；網站的保留集數字與已發佈清單換成 v0.4.6，PR 合併後部署（維護者同意）。
+
+## 2026-10-16：保留集換新，三份新集抽出（契約 holdout-refresh §4 第 4–6 步）
+
+- 第 4 步（main，Windows 機器）：候選池（`df009107…`，7,460 列）用 `tools/holdout_guard.py report`（main `161053b`）對下列文字做包含比對：維基 dump 前 200,000 篇（命中 6,977 篇）、口語訓練檔（90 行）、`synth.txt`（566 行）、補次數檔（0）、S7f 清理後的討論頁語料 `986626ad…`（12,296 句）、`moedict.txt`（1）、`eval/dev/**` 等 15 個公開列檔（`user-typing.txt` 1、`s7e-function-words.txt` 1，其餘 0）、行政院 294 句（0）、舊保留集（0）。命中的池列 **508** 列；main 只拿到列號，比對完刪掉那台機器上的池副本。
+- 第 5 步（fresh mech-executor）：丟掉 508 列，剩 6,952 列；份量檢查過（新聞 3,940、口語 3,012 列，都超過需求 450 的 3 倍；套上每個單位的上限後新聞 1,834、口語 1,810）。PeoPo 只有 5 篇（三份合計最多 10 列）、vTaiwan 88 則，照 §2 的補足規則分別由新聞稿與討論頁補。單位上限按三份**合計**算（比「每份各算」嚴，契約沒寫明，取較嚴的讀法）。種子 20261015 抽出三份互斥的 shard，每份新聞 150（新聞稿 116–117、維基新聞 30、PeoPo 3–4）、口語 150（vTaiwan 29–30、提點子 50、討論頁 70–71）。
+- 讀音：步驟 3 時 `tools/readings.py` 產生，抽查 40 列錯 1 列（2.5%，門檻 5%）；另抽的 40 列錯 2 列（5.0%）。
+- 第 6 步（另一個 fresh agent，只回數字）：三份各自用 CLI `--rows` 解碼都跑完、n = 300；`--check-readings` 讀音與詞庫第一名不同的列數 43、29、26（只報）；和開發集 1,094 列的句子零重疊、900 列內零重複；比對自檢 900／900 命中。
+- 雜湊記在 `eval/README.md`；授權寫進 `LICENSES/data.md`。下一步：fresh verifier 審這個 PR（確認 `--set holdout` 仍是舊集、n = 227），之後回填 v0.4.0–v0.4.3 與 main 在 shard-1 上的數字、量三份之間的雜訊底線，再開切換 PR（契約 §6）。
