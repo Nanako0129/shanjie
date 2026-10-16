@@ -4,10 +4,15 @@
 //
 //   swift scripts/make-app-icon.swift <NotoSerifCJKtc-Black.otf> packaging/AppIcon.icon/Assets
 //
-// The font (SIL Open Font License 1.1) is not in the repo:
+// The font (SIL Open Font License 1.1) is not in the repo. The committed SVGs came from this file, downloaded 2026-10-17:
 // https://github.com/notofonts/noto-cjk/raw/main/Serif/OTF/TraditionalChinese/NotoSerifCJKtc-Black.otf
+// The script refuses any other file (fontSHA256), so a later upstream revision cannot change the glyph unnoticed.
 import AppKit
 import CoreText
+import CryptoKit
+
+let fontSHA256 = "3ad2c936d8757c8c4d661394592a40d29bd66351d0e6971310f19b159d380db7"
+let fontName = "NotoSerifCJKtc-Black"
 
 /// Icon Composer's canvas, in points; the system masks it to the macOS app icon shape.
 let canvas: CGFloat = 1024
@@ -22,9 +27,11 @@ guard args.count == 3 else {
     FileHandle.standardError.write(Data("usage: make-app-icon.swift <NotoSerifCJKtc-Black.otf> <out dir>\n".utf8))
     exit(64)
 }
-guard let descs = CTFontManagerCreateFontDescriptorsFromURL(URL(fileURLWithPath: args[1]) as CFURL) as? [CTFontDescriptor],
-      let desc = descs.first else {
-    FileHandle.standardError.write(Data("cannot read the font \(args[1])\n".utf8))
+guard let data = FileManager.default.contents(atPath: args[1]),
+      SHA256.hash(data: data).map({ String(format: "%02x", $0) }).joined() == fontSHA256,
+      let descs = CTFontManagerCreateFontDescriptorsFromURL(URL(fileURLWithPath: args[1]) as CFURL) as? [CTFontDescriptor],
+      let desc = descs.first(where: { CTFontDescriptorCopyAttribute($0, kCTFontNameAttribute) as? String == fontName }) else {
+    FileHandle.standardError.write(Data("\(args[1]) is not the pinned \(fontName) (SHA-256 \(fontSHA256))\n".utf8))
     exit(66)
 }
 let font = CTFontCreateWithFontDescriptor(desc, glyphSize * scale, nil)
