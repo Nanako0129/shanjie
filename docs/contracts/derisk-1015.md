@@ -242,7 +242,8 @@
   - N2：新模型（讀音開），`ll`。
   - N16：新模型，`ll16`。
   - 16 字那兩臂的判讀：把分數檔每筆的 `ll` 換成 `ll16` 另存（新的小工具 `use_ll16.py`，只換這一欄，其他欄逐位元組不動），再照原本的 `judge.py` 流程；不改 S7a 與 `judge.py` 的程式。
-- 新模型只訓練一次，訓練切點的分布改成 16 字前文的長度分布：`split_dist.py` 加 `--field key16 --maxlen 16`，用 v5 分數檔的 `key16` 算 P(s)，s＝0..16，傳給 `train_r.py --split-probs`（17 個值）。這樣同一個模型的 N2 與 N16 都在訓練看過的前文長度內。其餘訓練設定照原 E2（同資料、同大小、同步數、同種子）。
+- 候選（2026-10-17 放寬，原 E2 寫「tinylm-v5 分數檔的同一批 dump」）：那批是 v0.4.4 的 n-gram 產的（書面沒有三元表），錯字回報只有 114 列（現在 130 列），`score_r.py` 的列數核對對不上。改成用目前出貨的 n-gram（`data/*.sha256` 釘的 model-v6、classes-v5、kn-v1，書面加 trigram-v1）以 `run_sets.py dumps` 同一個 `lm_eval.py` 指令重產，錯字回報用當時的全部列；四臂共用這一批，dump 的雜湊記進研究紀錄。「對照臂對出貨 tinylm-v5」那一行（只報）的 Rust 分數改用同一組模型重跑，沒跑就註明。
+- 新模型只訓練一次，訓練切點的分布改成 16 字前文的長度分布：`split_dist.py` 加 `--field key16 --maxlen 16`，用 C2 分數檔（上面重產的候選；`key16` 只看每列的前文，和候選無關）的 `key16` 算 P(s)，s＝0..16，傳給 `train_r.py --split-probs`（17 個值）。這樣同一個模型的 N2 與 N16 都在訓練看過的前文長度內。其餘訓練設定照原 E2（同資料、同大小、同步數、同種子）。
 - 選值：四臂各自呼叫 `judge.py` 一次（兩種設定），選完凍結。
   - 聊天：照原 E2（`--tuning chatclause --weight 1 --cap 0.005`）。
   - 書面：改成 `--tuning cvtune wikitune --weight 1 --cap 0.005`（維護者 2026-10-17）。程式：`judge_e2.py` 的 `FORMAL_ARGS` 改成這組參數，鎖定呼叫參數的 `test_exact_judge_invocations` 跟著改，README 的書面指令跟著改。

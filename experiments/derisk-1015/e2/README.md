@@ -54,8 +54,8 @@ python -W ignore -m unittest discover -s experiments/derisk-1015/e2 -p 'test_tor
 | 訓練文字 `runs-wiki.txt`、`runs-coll.txt`、`ids-*.npy`、`vocab.txt` | S7a 的 `prep.py runs/encode`（`experiments/s7a-tinylm/README.md` 的步驟 2；M 當時的同一份，不重做） | `prep.py` 的 `charcount.json`（輸入雜湊）、`encode-report.json`；核對與 M 訓練時相同 |
 | 讀音標注結果 `rd-*.npy`、`rdvocab.txt`、`rd-report.json` | 本資料夾 `label_readings.py` | `rd-report.json` 內（`rd_sha256`、`rdvocab_sha256`、詞庫、`reading_overrides.tsv`、`heterophony1.list` 的 SHA-256） |
 | `heterophony1.list` | McBopomofo `Source/Data/heterophony1.list`；機器上不在預設位置就設 `SHANJIE_HETERO` | 同上 |
-| tinylm-v5 匯出用的權重 `tinylm-M.npz` | S7a 的 M 檢查點（匯出 `tinylm-M8.sjtl` 用的那個） | **main 填**：`tinylm-M.npz` sha256 ＝ `________` |
-| 候選：`dumps/<集合>.<chat|formal>.dump`、`.top1` | tinylm-v5 打分時用的那批（`run_sets.py dumps`），不重產 | `score_r.py` 每個集合印 dump 的 sha256；記進研究紀錄 |
+| tinylm-v5 匯出用的權重 `tinylm-M.npz` | S7a 的 M 檢查點（匯出 `tinylm-M8.sjtl` 用的那個） | `tinylm-M.npz` sha256 ＝ `32308122782d3c5aba8a838521f031a466671d47d48ec0f54dcfb9256451815e`（188 的 S7a 工作資料夾，2026-10-17 量） |
+| 候選：`dumps/<集合>.<chat|formal>.dump`、`.top1` | 修訂七：用目前出貨的 n-gram（`data/*.sha256` 釘的四個檔放在 `data/lm/`）以 `run_sets.py dumps` 重產（契約 §3 E2 修訂七「候選」） | `score_r.py` 每個集合印 dump 的 sha256；記進研究紀錄 |
 | 評測列檔 | `cvtune.txt`、`wikitune.txt`（`$TUNE`）、dev302／打字測驗／錯字回報（repo）、`lytune`、`wikitypo`、`chatclause`、`discordtune`（私人，只在 main 放私人資料的機器） | 列檔雜湊照 `docs/contracts/rerank-strength.md` 與 e2-chat-eval 的紀錄 |
 | 錯字回報 | 與 v5 打分時相同（若當時用 `--reported-rows 66` 就同樣給） | `run_sets.py` 核對前 66 列的雜湊 |
 
@@ -71,8 +71,8 @@ cd $E2
 python -W ignore -m unittest discover -s . -p 'test_*.py' -v
 # 1. 標注（CPU，48 執行緒；SHANJIE_HETERO 指向 heterophony1.list）。印出並寫 $W/rd-report.json：記下 noread_fraction（wiki、coll 各一）
 SHANJIE_HETERO=/content/heterophony1.list python label_readings.py --work $W --procs 46
-# 2. 前文長度分布：用 v5 的分數檔（聊天設定、各集合；私人集合的 key 欄只是 0／1／2 的數字）
-python split_dist.py --field key16 --maxlen 16 $SCORES_V5/M.chat.cvtune.jsonl $SCORES_V5/M.chat.wikitune.jsonl $SCORES_V5/M.chat.dev302.jsonl ...   # 修訂七：印 P0..P16（17 個值）
+# 2. 前文長度分布：修訂七用 C2（控制臂）的分數檔（聊天設定、各集合；key16 只是 0..16 的數字），所以控制臂先在 Windows 機器打分
+python split_dist.py --field key16 --maxlen 16 $S/ctl/E2C.chat.cvtune.jsonl $S/ctl/E2C.chat.wikitune.jsonl $S/ctl/E2C.chat.dev302.jsonl ...   # 印 P0..P16（17 個值）
 # 3. 訓練（M 的大小，一次，不調超參數）。結束碼 2＝發散，停下來回報。G4 一次不得超過 4 小時（契約 §5）
 python -u train_r.py --size M --work $W --out $W --split-probs P0 P1 ... P16      # 17 個值
 # 4. 核對：train-Mr.json 的 steps、pieces 等於 train-M.json 的；copy 回 tinylm-Mr.npz、train-Mr.json、rd-report.json
