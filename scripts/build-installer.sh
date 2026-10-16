@@ -46,6 +46,7 @@ cp "$BIN" "$APP/Contents/MacOS/shanjie-installer"
 cp scripts/install-ime.sh "$RES/install-ime.sh"
 cp LICENSE "$RES/LICENSES/LICENSE"
 cp LICENSES/McBopomofo-MIT.txt LICENSES/data.md "$RES/LICENSES/"
+scripts/compile-app-icon.sh "$RES"   # the app icon (docs/contracts/app-icon.md): Assets.car and AppIcon.icns
 
 printf '"CFBundleName" = "%s";\n"CFBundleDisplayName" = "%s";\n' 安裝善解輸入法 安裝善解輸入法 > "$RES/zh-Hant.lproj/InfoPlist.strings"
 printf '"CFBundleName" = "%s";\n"CFBundleDisplayName" = "%s";\n' "Shanjie Installer" "Shanjie Installer" > "$RES/en.lproj/InfoPlist.strings"
@@ -62,6 +63,8 @@ cat > "$APP/Contents/Info.plist" <<EOF
   <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
   <key>CFBundleName</key><string>Shanjie Installer</string>
   <key>CFBundleDisplayName</key><string>安裝善解輸入法</string>
+  <key>CFBundleIconFile</key><string>AppIcon</string>
+  <key>CFBundleIconName</key><string>AppIcon</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>$VERSION</string>
   <key>CFBundleVersion</key><string>$VERSION</string>

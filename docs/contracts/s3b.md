@@ -32,6 +32,7 @@
   - `Info.plist`：照小麥的鍵（`InputMethodConnectionName`、`InputMethodServerControllerClass`、`InputMethodServerDelegateClass`、`LSUIElement`、`ComponentInputModeDict`、`tsVisibleInputModeOrderedArrayKey`），bundle ID `com.nyanako.inputmethod.shanjie`，版本號來自 git tag（沒有 tag 時用 `0.0.0`）。
   - **兩個輸入模式**（§13 改為單一模式 `<bundle ID>.zhuyin`，排列改在選單切換）：`com.nyanako.inputmethod.shanjie.standard`（「善解（標準）」）與 `com.nyanako.inputmethod.shanjie.eten`（「善解（倚天）」），`TISIntendedLanguage` 為 `zh-Hant`，`tsInputModeScriptKey` 為 `smTradChinese`。
 - 選單列圖示：單色 template 圖，「解」字加圓角方框（呼應網站的印章），由腳本用 CoreText 產生 TIFF，不下載字型或圖。
+- App 圖示（2026-10-17，`docs/contracts/app-icon.md`）：朱紅漸層底、白色的圓角框與「解」各是一層玻璃（系統畫出來是透著朱紅的乳白），原始檔 `packaging/AppIcon.icon/`（Icon Composer 文件），建置時 `actool` 編成 `Resources/Assets.car` 與 `AppIcon.icns`，Info.plist 的 `CFBundleIconName`／`CFBundleIconFile` 是 `AppIcon`；安裝程式帶同一個。
 - **entitlements：一律沒有**（不提供 entitlements 檔，所以也不會有 `get-task-allow` 或 `disable-library-validation`）；hardened runtime 一定要開（R9；〔2026-10-16〕指出貨的 Developer ID 版本，本機與 CI 的 ad-hoc 建置見上面的修訂）。
 
 ### 2.1 本機建置與測試流程（仿 syrtis，使用者 2026-10-03 要求）

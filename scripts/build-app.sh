@@ -168,6 +168,7 @@ cp data/packs/acg-add.tsv data/packs/acg-sources.tsv data/packs/acg.json "$RES/p
 cp -L data/lm/bigram.sjlm data/lm/classes.sjc data/lm/kn.sjkn data/lm/tinylm.sjtl data/lm/trigram.sjt3 "$RES/"   # -L: the worktree's model may be a symlink
 cp "$EN_TMP/english-words.txt" "$RES/"   # generated above (docs/contracts/zhen-mixed.md section 3.4)
 swift scripts/make-icon.swift "$RES/shanjie.tiff"
+scripts/compile-app-icon.sh "$RES"   # the app icon (docs/contracts/app-icon.md): Assets.car and AppIcon.icns
 
 cp LICENSE "$RES/LICENSES/LICENSE"
 cp LICENSES/McBopomofo-MIT.txt LICENSES/data.md LICENSES/SCOWL.txt LICENSES/SymSpell-MIT.txt LICENSES/name-suggestion-index-BSD-3-Clause.txt "$RES/LICENSES/"
@@ -283,6 +284,8 @@ cat > "$APP/Contents/Info.plist" <<EOF
   <!-- Finder applies the localized names only when this base display name equals the folder name
        (善解輸入法.app); the English name comes from en.lproj. Unverified on a real system. -->
   <key>CFBundleDisplayName</key><string>善解輸入法</string>
+  <key>CFBundleIconFile</key><string>AppIcon</string>
+  <key>CFBundleIconName</key><string>AppIcon</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>$VERSION</string>
   <key>CFBundleVersion</key><string>$VERSION</string>

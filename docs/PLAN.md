@@ -818,6 +818,7 @@ S3a 不需要外觀參考，可以先做；S3b 等使用者提供 macOS 內建�
 ### S8：打包與釋出
 
 - Developer ID 簽章＋公證、hardened runtime、Release 附件與授權檔已在 S3b 的 `release.yml` 完成（2026-10-03）；S8 剩 README、對外說明與更新檢查。〔2026-10-16〕更新檢查改成 Sparkle 自動更新，契約 `docs/contracts/about-update.md`（設定的「關於」頁、每天最多一次的背景檢查、按下才安裝、release 簽 feed，進 v0.4.7）；Homebrew cask 移到 S3b 契約 §14（使用者 2026-10-04）。外部動作每一步都要使用者當次同意。
+- 〔2026-10-17〕App 圖示（`docs/contracts/app-icon.md`，進 v0.4.7）：朱紅印章「解」，框與字是兩層玻璃（Icon Composer 的 `.icon`，`actool` 編進輸入法與安裝程式）；維護者在樣稿中選定。網站 favicon 與 OG 圖也改用這個圖示（PR #187，2026-10-17）。
 
 ## 3. 風險
 
