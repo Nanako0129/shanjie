@@ -1,6 +1,6 @@
 # 契約：trigram 進核心，只用在書面設定（trigram-core）
 
-狀態：修訂四（2026-10-16；修訂一、二處理 plan-verifier 的兩次 REVISE，見 §5；修訂三把第 B 片寫細；修訂四把第 C 片寫細）。
+狀態：修訂五（2026-10-16；修訂一、二處理 plan-verifier 的兩次 REVISE，見 §5；修訂三把第 B 片寫細；修訂四把第 C 片寫細；修訂五加第 A2 片：三元分數的下限與單詞段落的收尾項，第 C 片在它之後）。
 
 ## 0. 依據
 
@@ -9,6 +9,7 @@
 - 那些數字都是 Python 參考實作（`experiments/derisk-1015/e1/`）在 **B0** 上量的：B0 是照 model-v6 配方重算的 bigram，和 model-v6 步驟 2 的無指紋版逐位元組相同（研究紀錄「derisk-1015 的結果」的重現一節）；詞類表是用 model-v6 的分群檔為 B0 重建的（μ 0.2）。出貨的是 model-v6（多了指紋條目）＋classes-v5。trigram 表的 c、t3、back3 只依 trigram 計數、不依低階的 P2（`trimodel.py` 檔頭），所以表可以重新對應到 model-v6 的詞 id 直接用；但「增益在出貨模型上還在」要先量（§2 第 0 片）。
 - 維護者 2026-10-16 的選擇題：核心契約從 H3 開始；上限 **RSS +150 MB、每鍵 p95 +1 ms**（現在 RSS 約 293 MB、dev302 重播 p95 約 2.3 ms）。
 - 設計分析：Fable（2026-10-16），配對、切片與風險排序照它的建議，數字由 main 核對過。
+- 修訂五的依據：研究紀錄 2026-10-16「trigram-core 第 C 片暫停，書面有表的退步與修法」。第 C 片 C3 量到書面有表時「好」＋ㄅㄚ˙ 從「吧」變「爸」，另有「搞完這波」→「睪丸這波」等退步；原因是單詞段落的收尾項用了前文的詞，以及有存的語境對沒留下的接續詞一律乘退回權重。量過的兩個修法（Windows 機器，Python）：收尾規則所有集合 0 列變動、修好「吧」；下限 0.5 照調參集選出，對出貨的書面調參集 +73（193／120）、判讀五集 +42（141／99）、discordtune +33（140／107），改壞的列比沒有下限時少。維護者選擇題「兩個都採用」。
 
 ## 1. 要做到什麼、怎麼看到
 
@@ -45,7 +46,7 @@
   - **每個設定各自的打分設定**：把解碼與重算總分時只傳 λ 的地方換成由 `Profile` 導出的設定（λ、KN 開關、trigram 開關）。書面：KN 關、trigram 開（有表時）；聊天：照舊（KN 照側檔、trigram 關，有表也不用）。
   - **引擎的詞段交界**（`refresh_lm` 把組字區切成一段一段解；Python 參考實作只有整句，這幾條是本契約定的）：
     - (a) 每段第一個詞的歷史 (u, v)：左邊是固定的字（非標點）→ (未知, 那個字)；左邊是標點或英文段 → (`<s>`, `<s>`)，和計數時一段漢字從句首開始相同；沒有固定的字、從輸入框前文開始 → (未知, `history(前文)`)；`history` 給的是 `<s>` 時是 (`<s>`, `<s>`)，和 `harness.py` 的 `start_state` 相同。u 未知時第一個詞只用 bigram。
-    - (b) 收尾項：`Eos` 用 trigram（(倒數第二詞, 最後一詞) → `</s>`，和 `harness.py` 的 `eos` 相同）；`End::Next`（右邊是固定的字）也用 trigram（(倒數第二詞, 最後一詞) → 那個字）。段內只有一個詞時，收尾項的 u 是起始狀態的 v（`harness.py` 的 `hist`）。
+    - (b) 收尾項（修訂五改了單詞段落的情形，見第 A2 片）：`Eos` 用 trigram（(倒數第二詞, 最後一詞) → `</s>`，和 `harness.py` 的 `eos` 相同）；`End::Next`（右邊是固定的字）也用 trigram（(倒數第二詞, 最後一詞) → 那個字）。段內只有一個詞時，收尾項的 u 是起始狀態的 v（`harness.py` 的 `hist`）。
     - (c) `Engine::total_score` 照 (a)、(b) 逐詞算（帶兩個歷史詞），s3a 的「`total_score` 等於解碼第一名的分數」在書面有表時照舊成立；`docs/contracts/s3a.md` 記載。
     - (d) 預測列（V3）與它的重算完全不變：兩種設定都照 v0.4.6（KN 照側檔、不用 trigram）。契約與 `docs/contracts/s3a.md` 寫明。
   - **學習加分的詞條**（比照 model-v6 §2.8 規則 1）：詞條被學習加分（`boosted > lp`）時，這個詞項**不經過 trigram**，用沒有表時的 P2（加分後的 `pb`；書面本來就關 KN）。理由：trigram 開著時加分只透過 `back3·P2` 進分數，會被 back3 縮小，和 KN 吃掉加分是同一類問題。沒被加分的詞條照常用 trigram。`total_score` 套同一個例外。Python 參考實作沒有學習，不受影響。
@@ -89,7 +90,27 @@
 - 停止條件：B2 不到門檻；B3 不通過（轉修訂四）。
 - 預算：B2 的測試開關 executor 1 次＋修正 1 次；B2、B3 的量測 main 在 Windows 機器各半小時以內。
 
+### 第 A2 片：三元分數的下限與單詞段落的收尾項（修訂五）
+
+書面有表時的兩條規則改動，Rust 與 Python 參考實作一起改。沒有表時（目前的 main 與 App）逐位元組不變。
+
+- **(e) 下限**：`P3 = max(max(c − D, 0)/t3 + back3·P2, F·P2)`，**F = 0.5**。Rust 在 `core/src/trigram.rs` 的 `Tri::prob`、Python 在 `reference/proto/trigram.py` 的 `TriLM.prob`，兩邊各一個具名常數（`TRI_FLOOR`），同一個值，註解指向本契約與研究紀錄。經過 trigram 的每一項都走這個函式（解碼的詞項、`Eos`、`End::Next`、`Engine::total_score`），所以只改這一處。沒查到前文、u 未知、學到的詞照舊是 P2，逐位元相同。F 不進表檔：表、雜湊與 Release `sj-cx-1-7.7m` 都不變。
+- **(b′) 單詞段落的收尾項**：段落的起始狀態 u 未知（左邊是固定的字，或從輸入框前文開始；(a) 的兩種情形），而且段內只有一個詞時，收尾項（`Eos`、`End::Next`）的 u 也當作未知，也就是用 bigram。段內兩個詞以上不變：第二個詞的 u 仍是起始狀態的 v，收尾項仍是（倒數第二詞, 最後一詞）。起始狀態是（`<s>`, `<s>`）的段落不變。
+  - Rust：`decode_segment_learned` 算收尾項時照這條（假設的詞數是 1 而且起始的 u 未知 → 不查表）；`Engine::total_score` 同一條（從一段開始數詞數，段落的開頭照 (a)：句首、標點後、英文段切開後、固定的字之後、輸入框前文）。
+  - Python：`reference/proto/trigram.py` 的 `decode3` 在句尾項照這條（整句解碼只有輸入框前文這一種 u 未知的起始）。研究用的 `experiments/derisk-1015/e1/harness.py` 的 `--ctx-u eos` 就是這條。
+- 驗收：
+  1. 沒有 `trigram.sjt3` 時逐位元組不變：現有 golden 全過、不改 golden 檔。
+  2. Python 單元測試（`reference/proto/` 的 trigram 測試）：下限生效（P3 < F·P2，結果等於 F·P2）、不生效（結果等於原式）、前文沒存（等於 P2）；`decode3` 的單詞段落在輸入框前文起始時句尾項等於 bigram 的句尾項、兩個詞時照舊用 trigram。
+  3. Rust 單元測試：`trigram_terms_follow_the_formula` 加下限生效與不生效兩種，和手算相同；引擎測試（玩具模型＋玩具表）：固定的字之後只有一個詞、輸入框前文之後只有一個詞時，收尾項（`Eos` 與 `End::Next` 各一）等於 bigram 的收尾項；兩個詞時照舊；`total_score` 在這幾個情境等於解碼第一名的分數。
+  4. 突變各要讓測試以斷言失敗（不是編譯錯誤）：拿掉下限的 max、F 改成 0、解碼器的收尾項不套 (b′)、`total_score` 不套 (b′)、Python 的 `decode3` 不套 (b′)。
+  5. **真模型跨語言（main 在 Windows 機器跑）**：model-v6＋classes-v5＋重對應的 H3，Rust CLI `--profile formal --context`：dev302、打字測驗、錯字回報、cvtune、wikitune 的摘要行（含 `top1_sha256`）與 rowstats，和 Python 參考實作（`reference/proto/lm_eval.py`）逐字相同，也和研究用 harness 的下限 0.5（`V6H3e-f50`）逐列相同；`--profile chat` 和 v0.4.6 的 CLI 逐字相同。
+  6. 第 B 片重量（main 在 Windows 機器）：B2 的鏡像改選（≥ 80%）與 ㄗㄞˋ 污染（0）、手動詞（記錄錯幾列，已知問題不設門檻）；B3 八個集合各自沒有「改壞 > 改對而且 p < 0.05」。量法同第 B 片，CAND 換成本片的 CLI。
+- 停止條件：沒有表時任何 golden 改變；第 5 項任一行不同且原因不在本片；聊天任一行改變；B2 鏡像或污染不到門檻；B3 不通過。都停下來回報維護者。
+- 預算：executor 實作 1 次＋修正 1 次；第 5、6 項 main 在 Windows 機器一小時以內。
+
 ### 第 C 片：資料 Release、打包、golden、發版（修訂四寫細）
+
+第 A2 片合併之後才做 C3：C3 的「先觀察」照第 A2 片之後的程式重做，2026-10-16 記下的那份失敗清單作廢。
 
 照 model-v6 的換檔做法（kn-v1 的五處）：表從此在 CI、建置與 App 裡都存在，書面設定的輸出因此改變。
 
@@ -108,7 +129,7 @@
 ## 3. 範圍外
 
 - 聊天設定加 trigram、更小的剪枝檔（H3 與 H15 之間）、用出貨 P2 重新剪枝：之後另開實驗。
-- 重算計數、改 trigram 的平滑式。
+- 重算計數；第 A2 片的下限之外，改 trigram 的平滑式。
 - mmap（第 B 片量到 RSS 超過上限才另議）。
 
 ## 4. 限制與回滾
