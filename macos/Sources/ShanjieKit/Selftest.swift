@@ -14,7 +14,8 @@ public enum Selftest {
     /// before dec-recombine, whose chat and formal answers the one-path-per-(surface, last word) decoder made equal;
     /// a space is the first tone. The tests derive the same keys from the zhuyin independently.
     static let row284Standard = "tj6z;6vup 5j; xk7u ek7xm4gjo3cj6"
-    static let expected: [(profile: UInt32, text: String)] = [(0, "廚房新裝了一個率水壺"), (1, "廚房新裝了一個濾水壺")]
+    /// Formal is 律水壺 with trigram.sjt3 beside the model and 濾水壺 without it, so this also catches a missing table.
+    static let expected: [(profile: UInt32, text: String)] = [(0, "廚房新裝了一個率水壺"), (1, "廚房新裝了一個律水壺")]
 
     /// The bundled word pack (acg-pack contract A.2): 碇源堂 `ㄉㄧㄥˋ ㄩㄢˊ ㄊㄤˊ` on the standard layout. The chat
     /// profile spells it 定元堂 without the pack, so the sentence is the pack word only if the pack loaded.

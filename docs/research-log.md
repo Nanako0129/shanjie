@@ -6277,6 +6277,41 @@ formal: alpha 0.7, tau 1, delta 2
 - **手動詞**：`manual_words_come_first_in_the_shipping_setting`（釘「書面只錯第 8 列」）在表也在的情況下**通過**。第 B 片時同一個測試因為第 4、8 列都錯而失敗（「米雅歌」）；加了下限之後書面回到 14／15，和 v0.4.6 相同。第 C 片原本要把例外改成第 4、8 列的那一步因此不用做，發版說明也不用寫「米雅歌」要改選。
 - 第 C 片 C3 的失敗清單作廢，第 A2 片合併後重新觀察。
 
+## 2026-10-16：trigram-core 第 C 片 C3，第 A2 片之後重新觀察
+
+- 表放進 `data/lm`（`fdd3b05d`），分支 `feat/trigram-switch` 合進第 A2 片之後（`f9bf94d`），改任何 golden 之前跑完整測試。之前的清單作廢。
+- **Rust（Windows 機器 WSL，`wsltest.sh`，472 項）**：463 過、9 失敗。
+  - `cli/tests/golden.rs`：`lm_mode_matches_golden_byte_for_byte`、`lm_context_mode_matches_golden_byte_for_byte`、`lm_rowstats_match_python_byte_for_byte`、`no_classes_flag_matches_its_pinned_numbers`。
+  - `core/tests/engine_lm.rs`：`acceptance6_sentence_has_three_different_top1`、`set_profile_snapshot_and_reset_keeps_lm_and_profile`、`replay_standard_formal`、`replay_with_left_context_matches_cli_context`、`fixed_word_total_equals_top1_on_first_rows`。
+  - 第 A2 片之前失敗、現在通過的：`names_layer`、手動詞、`engine_demote` 兩項、`left_context_turns_ba_into_the_particle`（前文「好」＋ㄅㄚ˙ 回到「吧」）。
+- **Mac（`cargo test -p cli --test golden`）**：上面四項，加上 WSL 跳過的 `sw_probe_matches_python_golden_byte_for_byte`。
+- **Swift（Mac，`make test-swift`）**：13 個測試案例失敗，原因都是同一對釘選：dev 第 284 列聊天「廚房新裝了一個率水壺」、書面「廚房新裝了一個濾水壺」（`Support.swift`、App 的 `Selftest.swift`）。有表時書面是「廚房新裝了一個律水壺」，仍和聊天不同。案例：LogTests 1、ProfileChoiceTests 7、SelftestTests 的 `testPassesWithTheFullResources`、ShellTests 4。
+- **C 標頭冒煙測試**（`core/tests/c/abi_smoke.c`，只在 CI 的「C header smoke test」步驟跑，上面兩個觀察都沒涵蓋到；Mac 照 CI 的指令補跑）：檢查 307 失敗，原因同一句（切到書面後組字區等於 `FORMAL`）。C3 一併把 `FORMAL` 改成「律水壺」，兩種跑法（有、沒有學習資料夾）都過。
+
+## 2026-10-16：trigram-core 第 C 片 C3，golden 重產
+
+- 做法：golden 由 Python 參考實作（`reference/proto/lm_eval.py`，讀模型旁的 `trigram.sjt3`）在 Mac 重產，Rust 逐位元組比對。書面設定有表時 KN 關，摘要行的標記從 `+kn:cbefbced:θ1:β1` 變成 `+tri:fdd3b05d`。聊天沒變：混合兩種設定的檔，`git diff` 只碰書面的行與欄（聊天的行 0 行、`top1.tsv` 聊天欄 0 列、`s2-lm-dev302-chat.rowstats` 沒動）；只有聊天的檔沒動。
+- 改變的檔與列數（行數是 `git diff --numstat` 的新增／刪除，兩邊相同）：
+
+| 檔 | 改變 | 書面 top1 舊 → 新 |
+|---|---|---|
+| `eval/golden/s2-lm.txt` | 2 行（書面 dev302、typing76 的摘要行） | dev302 250 → 254；typing76 70 → 69 |
+| `eval/golden/s2h-lm-context.txt` | 3 行（書面 dev302、typing76、user-reported 的摘要行） | dev302 249 → 253；typing76 69 → 68；user-reported 36 → 36（雜湊變了，答案集合不同；合併 main 的第 117–121 列之後，n 121 的書面有表是 top1 37、oracle@64 118，無表是 36、118（n 120 時是 37／117 與 36／117，n 119 時同為 37／117 與 36／117），每次合併都用 Python 參考實作重產這一行） |
+| `eval/golden/s2-lm-dev302-formal.rowstats` | 16 列（302 列中；10 列錯→對，6 列對→錯） | ok 欄總和 250 → 254 |
+| `eval/golden/s2-lm-dev302-top1.tsv` | 23 列的書面欄（聊天欄 0 列） | 與 `s2-lm.txt` 的書面雜湊相同（`lm_top1_tsv_hashes_match_summary_lines`） |
+| `eval/golden/sw-probe.txt` | 48 行（44 行探針第一名與分數、4 行書面摘要） | 開降權（on）11 → 11（雜湊同）；關降權（off）8 → 9（無前文與有前文各一） |
+| `cli/tests/golden.rs` | `no_classes_flag_matches_its_pinned_numbers` 的書面行：標記 `+tri:fdd3b05d`，top1 249 → 252，雜湊換新（Python `lm_eval.py --no-classes --profile formal --dev 302 --context` 推出） | 249 → 252 |
+
+- 手寫釘死的字串（`core/tests/engine_lm.rs`）：
+  - `acceptance6_sentence_has_three_different_top1`：第 284 列有表時書面是「廚房新裝了一個律水壺」，不再等於正解「濾水壺」，「書面等於正解」的前提失效；換成第 127 列（`道士在廟裡設壇作法`）：unigram「到是在廟裡社談作法」、聊天「到是在廟裡設壇作法」、書面「道士在廟裡設壇作法」三者不同、書面等於正解。這一列是 dev302 第一個符合的列：golden 沒有 unigram 欄，所以用引擎量（2026-10-16，同一個測試設定，有表）：302 列逐列打過 unigram 引擎、聊天、書面，三者互不相同的是第 118、127、183、215、284 列，書面等於正解的只有 127 和 215（118、183、284 的書面第一名不是正解），所以 127 是第一個；聊天與書面兩串同時由測試對 golden 檔斷言，unigram 由解碼器給。
+  - `set_profile_snapshot_and_reset_keeps_lm_and_profile`：仍用第 284 列，書面釘「廚房新裝了一個律水壺」（Python golden 與 CLI `--profile formal --context` 都是這串；這個測試只要求兩個設定不同）。
+  - `fixed_word_total_equals_top1_on_first_rows`：之前的判斷「測試的 `best_path` 只用 λ」不成立，`best_path` 本來就用 `decode(.., profile, ..)`（`lm.scoring(profile)`）。實際原因：有表時書面設定固定一個字，其後第一個詞的 u 未知、只用 bigram（契約規則 (a)），所以含固定字的路徑和整句第一名（那裡有真的 u）分數不同。量到 97 個詞中書面 39 個不等（聊天 0 個），39 個的字串都相同，分數差 0.02 到 1.41。修法：這個測試的兩邊都用不讀表的模型（`Lm::load_opts(.., tri: false)`），保住原本要驗的性質（固定字的 `total_score` 等於整句第一名），有表時 `total_score` 的規則由 `tri_tiny.rs` 的手算值負責。
+  - `replay_standard_formal`、`replay_with_left_context_matches_cli_context`：只需 golden 更新（`s2-lm-dev302-top1.tsv`、`s2h-lm-context.txt`），不改測試。
+- Swift：`Support.swift` 的 `Row284.formal` 與 App 的 `Selftest.swift` 的 `expected` 書面改釘「廚房新裝了一個律水壺」（CLI `--profile formal --context` 第 284 列確認：聊天「率水壺」−25.820、書面「律水壺」−26.717）；聊天不變。沒有表時書面是「濾水壺」，所以自測也擋得到缺表。`docs/contracts/s3b.md`、`docs/contracts/profile-choice.md` 引用書面釘選的三處跟著改。
+- 驗證（Mac）：`cargo test --release -p cli --test golden` 25 過；`cargo test --release -p core --test engine_lm` 16 過；`cargo test --release -p core --test engine_learn` 57 過（讀 `s2-lm-dev302-top1.tsv` 的聊天欄）；`make test-swift` 211 項、1 項跳過、0 失敗；跳過的那一項是 `CandidateCellTests.testBenchmark`（要設 `SHANJIE_BENCH=1` 才跑的效能量測，不是書面或表的測試，沒有該跑而沒跑的；`Support.swift` 的「nothing is ever skipped」只指缺資料檔，註解已改）。review 之後加了 `SelftestTests.testFailsWithoutTheTrigramTable`（缺表時自測非 0），Swift 共 212 項、1 項跳過、0 失敗。完整 Rust 套件由 main 在 WSL 跑。
+- **`make test-python`（Mac，有表在 `data/lm`，2026-10-16）**：結束碼 0，21 個 unittest 區段共 534 項，0 失敗、0 錯誤；沒有新的 C3 失敗項（需要表的 Python 測試是 `tools/test_build_trigram.py`、`lm_eval.py` 的書面格，Mac 有 numpy，都過）。CI 的 runner 沒有 numpy：`Eval statistics (Python)` 的書面那一遍會 import `reference/proto/trigram.py` 而失敗（run 38873047206），已改成先建 numpy venv（原本只有 X0c 那一步建）、這一步用 venv 的 python；`tools/triage.py` 的出貨設定標記檢查改為有表時書面預期 `lm-formal+ctx+tl:…+acg+tri:<sha8>`（沒有 `+kn:`），聊天不變。
+- 合併 main 的第 117–119 列與第 120 列之後，書面 user-reported 那一行用 Python 參考實作重產（見上面表格那一列與下面的合併紀錄）。
+
 ## 2026-10-16：錯字回報第 117 列（臨時捷徑）
 
 - 維護者實機的組字區是「大量的臨時潔淨與執行檔」，要的是「捷徑」（同音 ㄐㄧㄝˊ ㄐㄧㄥˋ）。加成 `|大量的臨時捷徑與執行檔|ㄉㄚˋ ㄌㄧㄤˋ ㄉㄜ˙ ㄌㄧㄣˊ ㄕˊ ㄐㄧㄝˊ ㄐㄧㄥˋ ㄩˇ ㄓˊ ㄒㄧㄥˊ ㄉㄤˇ`（讀音由 `tools/readings.py` 產生，沒有 CHECK）。

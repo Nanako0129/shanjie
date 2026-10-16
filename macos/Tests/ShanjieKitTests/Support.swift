@@ -4,8 +4,8 @@ import XCTest
 @testable import ShanjieKit
 
 /// The repository's data, laid out like the app's Resources (docs/contracts/s3b.md section 10.4):
-/// a temporary directory of symlinks to data/lexicon/*, data/lm/bigram.sjlm, classes.sjc, kn.sjkn and tinylm.sjtl. Missing files fail
-/// the test with instructions; nothing is ever skipped.
+/// a temporary directory of symlinks to data/lexicon/*, data/lm/bigram.sjlm, classes.sjc, kn.sjkn, trigram.sjt3 and tinylm.sjtl. Missing files fail
+/// the test with instructions; nothing is skipped for a missing file (the one opt-in benchmark, CandidateCellTests.testBenchmark, is skipped without SHANJIE_BENCH=1).
 enum TestData {
     static let repo = URL(fileURLWithPath: #filePath)
         .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
@@ -20,6 +20,7 @@ enum TestData {
         ("bigram.sjlm", "data/lm/bigram.sjlm"),
         ("classes.sjc", "data/lm/classes.sjc"),
         ("kn.sjkn", "data/lm/kn.sjkn"),  // model-v6: the Kneser-Ney side file the shipped tinylm.sjtl (SJTL0004) records
+        ("trigram.sjt3", "data/lm/trigram.sjt3"),  // trigram-core: the formal profile's table, loaded from beside the model
         ("tinylm.sjtl", "data/lm/tinylm.sjtl"),
         // zhen-mixed: the synthetic list stands in for the generated Resources/english-words.txt (docs/contracts/zhen-mixed.md section 5.3).
         ("english-words.txt", "eval/golden/english-tiny.txt"),
@@ -48,6 +49,7 @@ enum TestData {
                     gh release download model-v6 -R Nanako0129/shanjie -p bigram.sjlm -D data/lm
                     classes.sjc: gh release download classes-v5 -R Nanako0129/shanjie -p classes.sjc -D data/lm
                     kn.sjkn: gh release download kn-v1 -R Nanako0129/shanjie -p kn.sjkn -D data/lm
+                    trigram.sjt3: gh release download sj-cx-1-7.7m -R Nanako0129/shanjie -p trigram.sjt3 -D data/lm
                     tinylm.sjtl: gh release download tinylm-v5 -R Nanako0129/shanjie -p tinylm.sjtl -D data/lm
                     """, file: file, line: line)
                 return nil
@@ -287,7 +289,9 @@ enum Row284 {
     static let zhuyin = "ㄔㄨˊ ㄈㄤˊ ㄒㄧㄣ ㄓㄨㄤ ㄌㄜ˙ ㄧ ㄍㄜ˙ ㄌㄩˋ ㄕㄨㄟˇ ㄏㄨˊ"
     static let standardKeys = Layouts.keys(zhuyin, eten: false)
     static let chat = "廚房新裝了一個率水壺"
-    static let formal = "廚房新裝了一個濾水壺"
+    // With trigram.sjt3 beside the model the formal profile gives 律水壺; without the table it gives 濾水壺, so a test
+    // (and the App selftest) that expects 律水壺 also catches a missing table. Checked with the CLI `--profile formal --context`.
+    static let formal = "廚房新裝了一個律水壺"
 }
 
 /// A temporary learning directory (S4 section 4); never the real Application Support.
