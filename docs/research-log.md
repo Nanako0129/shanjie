@@ -6286,3 +6286,25 @@ formal: alpha 0.7, tau 1, delta 2
   - 第 A2 片之前失敗、現在通過的：`names_layer`、手動詞、`engine_demote` 兩項、`left_context_turns_ba_into_the_particle`（前文「好」＋ㄅㄚ˙ 回到「吧」）。
 - **Mac（`cargo test -p cli --test golden`）**：上面四項，加上 WSL 跳過的 `sw_probe_matches_python_golden_byte_for_byte`。
 - **Swift（Mac，`make test-swift`）**：13 個測試案例失敗，原因都是同一對釘選：dev 第 284 列聊天「廚房新裝了一個率水壺」、書面「廚房新裝了一個濾水壺」（`Support.swift`、App 的 `Selftest.swift`）。有表時書面是「廚房新裝了一個律水壺」，仍和聊天不同。案例：LogTests 1、ProfileChoiceTests 7、SelftestTests 的 `testPassesWithTheFullResources`、ShellTests 4。
+
+## 2026-10-16：trigram-core 第 C 片 C3，golden 重產
+
+- 做法：golden 由 Python 參考實作（`reference/proto/lm_eval.py`，讀模型旁的 `trigram.sjt3`）在 Mac 重產，Rust 逐位元組比對。書面設定有表時 KN 關，摘要行的標記從 `+kn:cbefbced:θ1:β1` 變成 `+tri:fdd3b05d`。聊天沒變：混合兩種設定的檔，`git diff` 只碰書面的行與欄（聊天的行 0 行、`top1.tsv` 聊天欄 0 列、`s2-lm-dev302-chat.rowstats` 沒動）；只有聊天的檔沒動。
+- 改變的檔與列數（行數是 `git diff --numstat` 的新增／刪除，兩邊相同）：
+
+| 檔 | 改變 | 書面 top1 舊 → 新 |
+|---|---|---|
+| `eval/golden/s2-lm.txt` | 2 行（書面 dev302、typing76 的摘要行） | dev302 250 → 254；typing76 70 → 69 |
+| `eval/golden/s2h-lm-context.txt` | 3 行（書面 dev302、typing76、user-reported 的摘要行） | dev302 249 → 253；typing76 69 → 68；user-reported 36 → 36（雜湊變了，答案集合不同） |
+| `eval/golden/s2-lm-dev302-formal.rowstats` | 16 列（302 列中；10 列錯→對，6 列對→錯） | ok 欄總和 250 → 254 |
+| `eval/golden/s2-lm-dev302-top1.tsv` | 23 列的書面欄（聊天欄 0 列） | 與 `s2-lm.txt` 的書面雜湊相同（`lm_top1_tsv_hashes_match_summary_lines`） |
+| `eval/golden/sw-probe.txt` | 48 行（44 行探針第一名與分數、4 行書面摘要） | 開降權（on）11 → 11（雜湊同）；關降權（off）8 → 9（無前文與有前文各一） |
+| `cli/tests/golden.rs` | `no_classes_flag_matches_its_pinned_numbers` 的書面行：標記 `+tri:fdd3b05d`，top1 249 → 252，雜湊換新（Python `lm_eval.py --no-classes --profile formal --dev 302 --context` 推出） | 249 → 252 |
+
+- 手寫釘死的字串（`core/tests/engine_lm.rs`）：
+  - `acceptance6_sentence_has_three_different_top1`：第 284 列有表時書面是「廚房新裝了一個律水壺」，不再等於正解「濾水壺」，「書面等於正解」的前提失效；換成第 127 列（`道士在廟裡設壇作法`）：unigram「到是在廟裡社談作法」、聊天「到是在廟裡設壇作法」、書面「道士在廟裡設壇作法」三者不同、書面等於正解。這一列是 dev302 golden 書面欄第一個符合的列（掃新的 golden 欄位找到；聊天與書面兩串同時由測試對 golden 檔斷言，unigram 由解碼器給）。
+  - `set_profile_snapshot_and_reset_keeps_lm_and_profile`：仍用第 284 列，書面釘「廚房新裝了一個律水壺」（Python golden 與 CLI `--profile formal --context` 都是這串；這個測試只要求兩個設定不同）。
+  - `fixed_word_total_equals_top1_on_first_rows`：之前的判斷「測試的 `best_path` 只用 λ」不成立，`best_path` 本來就用 `decode(.., profile, ..)`（`lm.scoring(profile)`）。實際原因：有表時書面設定固定一個字，其後第一個詞的 u 未知、只用 bigram（契約規則 (a)），所以含固定字的路徑和整句第一名（那裡有真的 u）分數不同。量到 97 個詞中書面 39 個不等（聊天 0 個），39 個的字串都相同，分數差 0.02 到 1.41。修法：這個測試的兩邊都用不讀表的模型（`Lm::load_opts(.., tri: false)`），保住原本要驗的性質（固定字的 `total_score` 等於整句第一名），有表時 `total_score` 的規則由 `tri_tiny.rs` 的手算值負責。
+  - `replay_standard_formal`、`replay_with_left_context_matches_cli_context`：只需 golden 更新（`s2-lm-dev302-top1.tsv`、`s2h-lm-context.txt`），不改測試。
+- Swift：`Support.swift` 的 `Row284.formal` 與 App 的 `Selftest.swift` 的 `expected` 書面改釘「廚房新裝了一個律水壺」（CLI `--profile formal --context` 第 284 列確認：聊天「率水壺」−25.820、書面「律水壺」−26.717）；聊天不變。沒有表時書面是「濾水壺」，所以自測也擋得到缺表。`docs/contracts/s3b.md`、`docs/contracts/profile-choice.md` 引用書面釘選的三處跟著改。
+- 驗證（Mac）：`cargo test --release -p cli --test golden` 25 過；`cargo test --release -p core --test engine_lm` 16 過；`cargo test --release -p core --test engine_learn` 57 過（讀 `s2-lm-dev302-top1.tsv` 的聊天欄）；`make test-swift` 211 項、1 項跳過（未查是哪一項）、0 失敗。完整 Rust 套件由 main 在 WSL 跑。
