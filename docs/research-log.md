@@ -6109,3 +6109,46 @@ formal: alpha 0.7, tau 1, delta 2
 - **`grid.py` 的同分規則**：距離用浮點數，同分時可能由誤差決定。核對 E1b 的十份凍結選擇：只有 T2 聊天（λ 0.6 時 β 0.5 與 0.75 同分）與 T3 聊天（λ 0.6 時 β 0.75 與 1 同分）有同分，兩者都在同一個 λ，照文件的規則選到的點和實際選的相同；選值沒有受影響。程式改成用整數格距。
 - **`patched_eval.run_lm_eval` 的 n**：`--dev`、`--limit` 時回傳的是切片前的列，`#E3`、`#E4` 行的 n 與每列平均會錯；研究紀錄沒有引用這些欄位（E3、E4 的判讀用的是 `evalstats compare` 的 rowstats），數字不受影響。程式已修。
 - 其餘是程式的穩健性與效能（平行計數在父程序先檢查轉換表、壓縮工具核對綁定的模型、沒有 KN 時拒絕 β 覆寫、子集合用同一份句中標點表、測試還原全域變數等），隨 PR 修正；重複的維基前處理（`count.py`、`build_e4ctx.py` 各有一份）記為之後的整理，不在本片。
+
+## 2026-10-16：保留集換新，三份新集抽出（契約 holdout-refresh §4 第 4–6 步）
+
+- 第 4 步（main，Windows 機器）：候選池（`df009107…`，7,460 列）用 `tools/holdout_guard.py report`（main `161053b`）對下列文字做包含比對：維基 dump 前 200,000 篇（命中 6,977 篇）、口語訓練檔（90 行）、`synth.txt`（566 行）、補次數檔（0）、S7f 清理後的討論頁語料 `986626ad…`（12,296 句）、`moedict.txt`（1）、`eval/dev/**` 等 15 個公開列檔（`user-typing.txt` 1、`s7e-function-words.txt` 1，其餘 0）、行政院 294 句（0）、舊保留集（0）。命中的池列 **508** 列；main 只拿到列號，比對完刪掉那台機器上的池副本。
+- 第 5 步（fresh mech-executor）：丟掉 508 列，剩 6,952 列；份量檢查過（新聞 3,940、口語 3,012 列，都超過需求 450 的 3 倍；套上每個單位的上限後新聞 1,834、口語 1,810）。PeoPo 只有 5 篇（三份合計最多 10 列）、vTaiwan 88 則，照 §2 的補足規則分別由新聞稿與討論頁補。單位上限按三份**合計**算（比「每份各算」嚴，契約沒寫明，取較嚴的讀法）。種子 20261015 抽出三份互斥的 shard，每份新聞 150（新聞稿 116–117、維基新聞 30、PeoPo 3–4）、口語 150（vTaiwan 29–30、提點子 50、討論頁 70–71）。
+- 讀音：步驟 3 時 `tools/readings.py` 產生，抽查 40 列錯 1 列（2.5%，門檻 5%）；另抽的 40 列錯 2 列（5.0%）。
+- 第 6 步（另一個 fresh agent，只回數字）：三份各自用 CLI `--rows` 解碼都跑完、n = 300；`--check-readings` 讀音與詞庫第一名不同的列數 43、29、26（只報）；和開發集 1,094 列的句子零重疊、900 列內零重複；比對自檢 900／900 命中。
+- 條款頁快照（步驟 3 抓取時記錄，2026-10-15 UTC；照 S7f 的寫法：網址、取得時間、內容 SHA-256 前 12 碼）：
+
+| 頁 | 網址 | 取得時間（UTC） | SHA-256 前 12 碼 | HTTP |
+|---|---|---|---|---|
+| data-gov-tw-license | https://data.gov.tw/license | 2026-10-15 05:49 | `4b3fb69e0957` | 200 |
+| data-gov-tw-dataset-163760-moda | https://data.gov.tw/dataset/163760 | 2026-10-15 05:49 | `114e219ad14b` | 200 |
+| data-gov-tw-dataset-11060-fda | https://data.gov.tw/dataset/11060 | 2026-10-15 05:49 | `580afe81091f` | 200 |
+| data-gov-tw-dataset-58036-join | https://data.gov.tw/dataset/58036 | 2026-10-15 05:49 | `51ca642161a2` | 200 |
+| copyright-act-art9 | https://law.moj.gov.tw/LawClass/LawSingle.aspx?pcode=J0070017&flno=9 | 2026-10-15 05:49 | `d2616a3fdc88` | 200 |
+| zhwiki-rightsinfo | https://zh.wikipedia.org/w/api.php?action=query&format=json&meta=siteinfo&siprop=rightsinfo&formatversion=2 | 2026-10-15 05:49 | `e113e25ced1a` | 200 |
+| zhwikinews-rightsinfo | https://zh.wikinews.org/w/api.php?action=query&format=json&meta=siteinfo&siprop=rightsinfo&formatversion=2 | 2026-10-15 05:49 | `50f2c6e0192f` | 200 |
+| wikimedia-terms-of-use | https://foundation.wikimedia.org/wiki/Policy:Terms_of_Use | 2026-10-15 05:49 | `3b4950a8434c` | 200 |
+| wikimedia-dumps-legal | https://dumps.wikimedia.org/legal.html | 2026-10-15 05:49 | `104242365285` | 200 |
+| cc-by-4.0 | https://creativecommons.org/licenses/by/4.0/deed.zh-hant | 2026-10-15 05:49 | `903f782bb187` | 200 |
+| cc-by-sa-4.0 | https://creativecommons.org/licenses/by-sa/4.0/deed.zh-hant | 2026-10-15 05:49 | `7ede15af9f84` | 200 |
+| cc-by-3.0-tw | https://creativecommons.org/licenses/by/3.0/tw/deed.zh_TW | 2026-10-15 05:49 | `4c7daf1d542b` | 200 |
+| compdemocracy-openData-readme | https://raw.githubusercontent.com/compdemocracy/openData/master/README.md | 2026-10-15 05:49 | `a8e6434c91fe` | 200 |
+| compdemocracy-openData-license | https://raw.githubusercontent.com/compdemocracy/openData/master/LICENSE | 2026-10-15 05:49 | `d5558cd419c8` | 404 |
+| compdemocracy-vtaiwan-uberx-readme | https://raw.githubusercontent.com/compdemocracy/openData/master/vtaiwan.uberx/README.md | 2026-10-15 05:49 | `d5558cd419c8` | 404 |
+| peopo-robots | https://www.peopo.org/robots.txt | 2026-10-15 05:49 | `773fb8d35bb9` | 200 |
+| join-gov-tw-robots | https://join.gov.tw/robots.txt | 2026-10-15 05:49 | `dfeef7147c87` | 200 |
+| gov-tw-robots | https://www.gov.tw/robots.txt | 2026-10-15 05:50 | `55ce2e892752` | 404 |
+| dumps-wikimedia-zhwikinews-20261001 | https://dumps.wikimedia.org/zhwikinews/20261001/ | 2026-10-15 05:50 | `7c17ccb608b1` | 200 |
+| dumps-wikimedia-zhwiki-20261001-status | https://dumps.wikimedia.org/zhwiki/20261001/dumpstatus.json | 2026-10-15 05:50 | `f8e6648ce975` | 200 |
+
+- 機關新聞稿資料集頁（data.gov.tw，23 個，2026-10-15 07:04–07:05 UTC 取得，都是 HTTP 200）：8372 `c777e6b2ce70`、7404 `f8b49382dfb4`、44954 `824ad6677b32`、30143 `ee15f869f9a3`、6040 `f614a2a36fb0`、7308 `d2f715f55ecd`、46112 `e8acfa74d55b`、6420 `211fed4d89b0`、162571 `56b7d8818cd5`、95226 `6a2b677d00b8`、169967 `849a110fe3c3`、94024 `00b4448bfb36`、11205 `9eec5852ee77`、171979 `4375c4fa7459`、25848 `6a630b52f197`、22927 `91870db462df`、7505 `e4c5ea46d45a`、68551 `7ae272e2da19`、95057 `f36fdfb6fd33`、48672 `4c660c77bbab`、48659 `ea62d4ae156f`、48504 `f84a10e963eb`、6298 `785187033776`。
+- 各機關網站的 robots.txt 另記 17 個（12 個 HTTP 200，其餘 403／404 視為沒有限制），完整清單在步驟 3 的 manifest。
+- 雜湊記在 `eval/README.md`；授權寫進 `LICENSES/data.md`。下一步：fresh verifier 審這個 PR（確認 `--set holdout` 仍是舊集、n = 227），之後回填 v0.4.0–v0.4.3 與 main 在 shard-1 上的數字、量三份之間的雜訊底線，再開切換 PR（契約 §6）。
+
+## 2026-10-16：保留集換新，回填與切換（契約 holdout-refresh §6 第二、三步）
+
+- PR #173（三份新集，舊集仍現役）由 fresh verifier 審查：只改 `eval/`、`docs/`、`LICENSES/`，雜湊、格式、出處表覆蓋都對，`--set holdout` 仍是舊集 n 227；唯一的阻擋是收窄的 CC0 列漏了 `eval/holdout/.gitkeep`，補上後合併（`2dbec4f`）。
+- **回填**（fresh verifier，只回數字，量完刪 rowstats）：shard-1 在 v0.4.0–v0.4.6 的聊天與書面 top1，表在 `eval/README.md`。和契約的表相比多量了 v0.4.4–v0.4.6（契約寫的是 v0.4.0–v0.4.3 加 main；v0.4.6 用 `7c47266`，和 tag 及當時的 main 在引擎與資料路徑上沒有差異，所以那一列就是 main）。顯著的只有 v0.4.0 → v0.4.1 聊天 +12（12／0，p 0.0005），和舊集當時量到的方向相同（v0.4.1 語意校正預設開）；其他相鄰兩版都不顯著。v0.4.0 的 CLI 在 bench 快取裡寫死了一個已刪掉的建置目錄（`01a3455`，和 v0.4.0 在引擎與資料路徑上相同），main 暫時建了指向 v0.4.0 目錄的符號連結量完再移除。
+- **雜訊底線**（v0.4.6 在三份上）：聊天 234／247／236、書面 230／239／229。份與份之間的差可到 13 句（約 4%），所以換份時前後的數字只能各自和同一份上的基準比，不能跨份比。
+- **切換**：shard-1 的 `news.txt`、`talk.txt` 移到 `eval/holdout/` 頂層（現役，n 300）；舊集移到 `eval/dev/holdout-2026-10-03/`（可讀的挑戰集；子資料夾，dev302 不變）。`LICENSES/data.md`、`eval/README.md`、`docs/contracts/eval-stats.md` 契約 D 同步改。使用次數從這一刻起算（`eval/README.md` 的使用紀錄）。
+- 之後的影響：`docs/benchmark.md` 的保留集表到 v0.4.6 都是舊集（n 227）；下一次發版起是 shard-1（n 300），表上要分開兩段，不能跨集比。
