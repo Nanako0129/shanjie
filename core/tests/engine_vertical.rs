@@ -417,3 +417,20 @@ fn page_keys_with_a_modifier_in_the_vertical_window_pass_through_and_keep_it() {
     }
     assert_view(&kk(&mut e, KeyKind::PageDown), &all, 12, 12);
 }
+
+/// Predict-down contract B.3.1: the vertical window is the same list, the row's items in front.
+#[test]
+fn vertical_window_lists_the_row_first() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+    let mut e = Engine::new(&root.join("data/lexicon"), Layout::Standard).unwrap();
+    e.load_lm(&root.join("data/lm/bigram.sjlm")).unwrap();
+    e.set_candidate_vertical(true).unwrap();
+    e.set_left_context("我想");
+    let o = typ(&mut e, "su3"); // ㄋㄧˇ
+    assert!(o.selected.is_none() && !o.candidates.is_empty() && o.vertical == 2, "precondition: the passive vertical row");
+    let r = o.candidates.clone();
+    let d = kk(&mut e, KeyKind::Down);
+    assert_eq!(d.vertical, 1);
+    assert!(d.selected == Some(0) && d.total as usize > r.len());
+    assert_eq!(d.candidates[..r.len()], r[..], "the row's items first");
+}

@@ -80,13 +80,17 @@ final class ShellTests: XCTestCase {
         let passive = CandidateCells()
         let before = passive.update(candidates: c.panel.items, notes: c.panel.items.map { _ in nil },
                                     selected: c.panel.selected, first: c.panel.first, columns: c.panel.columns)
-        XCTAssertTrue(before.cells.allSatisfy { !$0.showsNumber }, "no number on the not-entered row")
+        // Predict-down contract B.3.2: the first cell shows the Tab glyph where its number goes; nothing else shows a number.
+        XCTAssertEqual(before.cells[0].numberText, CellMetrics.tabGlyph)
+        XCTAssertTrue(before.cells[0].showsNumber, "the Tab glyph shows on the not-entered row")
+        XCTAssertTrue(before.cells.dropFirst().allSatisfy { !$0.showsNumber }, "no number on the not-entered row")
         XCTAssertTrue(c.press(48))  // Tab
         XCTAssertEqual(c.panel.selected, 0)
         let entered = CandidateCells()
         let after = entered.update(candidates: c.panel.items, notes: c.panel.items.map { _ in nil },
                                    selected: c.panel.selected, first: c.panel.first, columns: c.panel.columns)
         XCTAssertTrue(after.cells.allSatisfy(\.showsNumber), "numbers show once entered")
+        XCTAssertEqual(after.cells[0].numberText, "1", "the glyph is the number 1 once entered")
     }
 
     func testLineRectReachesThePanel() {
@@ -407,9 +411,12 @@ final class ShellTests: XCTestCase {
         XCTAssertEqual(a.client.calls, aCalls)
         XCTAssertTrue(b.panel.visible, "B's candidates stay open")
         XCTAssertFalse(b.panel.items.isEmpty, "and its candidates are intact")
+        // Predict-down contract B.4 (expectation change): the window's first candidate is the prediction row's first item now
+        // (it was the lexicon's first, 你), so the test names it from the panel instead of by its text.
+        let first = b.panel.items[0]
         b.press(Keys.enter)
         b.press(Keys.enter)
-        XCTAssertEqual(b.client.text, "你")
+        XCTAssertEqual(b.client.text, first)
     }
 
     func testOwnerDeactivateCommitsUnlessSecure() {

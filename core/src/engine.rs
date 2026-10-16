@@ -383,11 +383,15 @@ struct Cands {
     /// zhen-inline section 1.3c: the window of an English token that an auto-keep made; its last item is the Chinese
     /// syllable the keys typed, and this is that syllable's reading (the token's reading is replaced by it when it is chosen).
     zh: Option<String>,
+    /// Predict-down contract B.3.1: the prediction row's items the window opened with. They are the first `rows.len()`
+    /// entries of `list` (the length field of a list entry cannot mark them: the English window uses 0), and choosing
+    /// one is choosing it from the row. They go with the window when it closes.
+    rows: Vec<Pred>,
 }
 
 impl Cands {
     fn new(list: Vec<(String, usize)>, vertical: bool) -> Cands {
-        Cands { list, sel: 0, expanded: false, top: 0, vertical, first: 0, english: false, zh: None }
+        Cands { list, sel: 0, expanded: false, top: 0, vertical, first: 0, english: false, zh: None, rows: Vec::new() }
     }
 
     fn scroll(&mut self) {
@@ -1081,6 +1085,7 @@ impl Engine {
         self.predict_on = on;
         if !on {
             self.drop_units(); // the units' only way out is the row (section 12.1)
+            self.close_row_window();
         }
         self.recompute_pred(); // clears first; returns empty while off
         self.handled()
@@ -1507,6 +1512,7 @@ impl Engine {
         self.invalidate();
         self.profile = profile;
         self.clear_pred();
+        self.close_row_window();
         if let Err(e) = self.refresh() {
             self.clear_all();
             return Err(e);
@@ -1736,7 +1742,13 @@ impl Engine {
     /// Section 2: replace `syls[start..cursor]` by the item's reading, fix the word over it, move the cursor behind
     /// it. With learning on `pre` is `Some("")` (section 10.1): taught at commit like a re-pick, with nothing displaced.
     fn choose_pred(&mut self, i: usize) -> Result<Output, EngineError> {
-        let Pred { word, reading, start, key, .. } = self.pred.swap_remove(i);
+        let p = self.pred.swap_remove(i);
+        self.apply_pred(p)
+    }
+
+    /// `choose_pred` for an item already taken out of the row (or out of a window that carried the row, predict-down B.3.1).
+    fn apply_pred(&mut self, p: Pred) -> Result<Output, EngineError> {
+        let Pred { word, reading, start, key, .. } = p;
         let pre = self.learning.then(String::new);
         self.clear_pred();
         self.clear_pend();
@@ -2191,6 +2203,10 @@ impl Engine {
                 self.clear_pend();
             } else if k.kind == KeyKind::Enter {
                 return self.commit_enter(m); // 12a, 12b
+            } else if k.kind == KeyKind::Down && self.pend_prev.is_empty() {
+                // Predict-down contract B.3.1: one unfinished syllable has no lexicon candidates; the window lists the row
+                // (an empty row opens nothing, so the key is ignored as before).
+                self.open_with_rows(old);
             } else {
                 self.pred = old; // the key does nothing
             }
@@ -2220,7 +2236,7 @@ impl Engine {
             }
             // In front of one (cursor 0) Space opens nothing: the writings list opens with Down only.
             KeyKind::Space if self.shadow_on() && self.cursor == 0 && self.breaks_with_space(0) => self.pred = old,
-            KeyKind::Space | KeyKind::Down => self.open_candidates(),
+            KeyKind::Space | KeyKind::Down => self.open_candidates(old),
             KeyKind::Up => self.pred = old,
             KeyKind::Char if tone.is_some() => self.pred = old,
             KeyKind::Right | KeyKind::End if self.cursor == n => self.pred = old, // nothing moves
@@ -2466,14 +2482,11 @@ impl Engine {
     /// §3.1 candidate range: readings ending at the cursor (or starting at 0 when the cursor is 0),
     /// within the run of syllables that touches it; punctuation bounds the run (s3d §3). An empty
     /// run lists nothing, so space and down are ignored.
-    fn open_candidates(&mut self) {
+    ///
+    /// Predict-down contract B.3.1: `rows` is the prediction row shown before this key; the lexicon window lists its items first.
+    fn open_candidates(&mut self, rows: Vec<Pred>) {
         let a = self.cursor;
-        let avail = if a == 0 {
-            (0..self.syls.len()).take_while(|&i| !self.is_punct(i)).count()
-        } else {
-            (0..a).rev().take_while(|&i| !self.is_punct(i)).count()
-        };
-        let mut seen = HashSet::new();
+        let avail = self.avail();
         let mut list = Vec::new();
         // s3e §3: right after punctuation (or punctuation first at cursor 0), list the typed mark,
         // then its alternatives.
@@ -2509,7 +2522,29 @@ impl Engine {
             self.cands = Some(Cands::new(list, self.cand_vertical));
             return;
         }
-        for l in (1..=self.lex.max_len.min(avail)).rev() {
+        self.open_with_rows(rows);
+    }
+
+    /// The length of the run of syllables that touches the cursor and holds no punctuation (§3.1).
+    fn avail(&self) -> usize {
+        if self.cursor == 0 {
+            (0..self.syls.len()).take_while(|&i| !self.is_punct(i)).count()
+        } else {
+            (0..self.cursor).rev().take_while(|&i| !self.is_punct(i)).count()
+        }
+    }
+
+    /// Predict-down contract B.3.1: the window's list: the row's items in their order, then (without an unfinished
+    /// syllable, which has no lexicon candidates) the lexicon's entries for the syllables before the cursor, longest
+    /// first, minus the words already listed.
+    fn window_list(&self, rows: &[Pred]) -> Vec<(String, usize)> {
+        let mut seen: HashSet<&str> = rows.iter().map(|p| p.word.as_str()).collect();
+        let mut list: Vec<(String, usize)> = rows.iter().map(|p| (p.word.clone(), p.reading.len())).collect();
+        if self.pend.iter().any(Option::is_some) {
+            return list;
+        }
+        let a = self.cursor;
+        for l in (1..=self.lex.max_len.min(self.avail())).rev() {
             let key = if a == 0 { &self.syls[..l] } else { &self.syls[a - l..a] };
             for (w, _) in self.lex.entries(key) {
                 if seen.insert(w) {
@@ -2517,8 +2552,24 @@ impl Engine {
                 }
             }
         }
+        list
+    }
+
+    /// Predict-down contract B.3.1: a window that carries row items closes (as Esc) when the row's inputs change under it
+    /// (prediction off, another profile); its items' keys and filter were made for the old decoding.
+    fn close_row_window(&mut self) {
+        if self.cands.as_ref().is_some_and(|c| !c.rows.is_empty()) {
+            self.cands = None;
+        }
+    }
+
+    /// Opens the window on `window_list`; an empty list opens nothing (and the row is gone, as before this contract).
+    fn open_with_rows(&mut self, rows: Vec<Pred>) {
+        let list = self.window_list(&rows);
         if !list.is_empty() {
-            self.cands = Some(Cands::new(list, self.cand_vertical));
+            let mut c = Cands::new(list, self.cand_vertical);
+            c.rows = rows;
+            self.cands = Some(c);
         }
     }
 
@@ -2552,6 +2603,34 @@ impl Engine {
     fn forget_highlighted(&mut self) -> Result<(), EngineError> {
         let Some(c) = self.cands.as_ref().filter(|c| !c.english) else { return Ok(()) }; // an English item has nothing to forget
         let Some((word, l)) = c.list.get(c.sel).cloned() else { return Ok(()) };
+        if c.sel < c.rows.len() {
+            // Predict-down contract B.3.1: a row item forgets as in the entered row (§10.3): re-decode, recompute the row
+            // (its keys and its "not the shown word" filter follow the new decoding), then the window stays open on the
+            // rebuilt list, selected on the same word if it is still there.
+            let reading = c.rows[c.sel].reading.clone();
+            self.forget_entry(&reading, &word);
+            self.refresh()?;
+            let Some(mut c) = self.cands.take() else { return Ok(()) };
+            self.recompute_pred();
+            c.rows = std::mem::take(&mut self.pred);
+            c.rows.retain(|p| p.word != word);
+            c.list = self.window_list(&c.rows);
+            if c.list.is_empty() {
+                return Ok(()); // closed, as by Esc
+            }
+            c.sel = c.list.iter().position(|(w, _)| *w == word).unwrap_or(0);
+            // Keep `first` within what ↑, ↓ and Page Down reach (the last row shows the last item).
+            c.first = c.first.min(c.sel).min(c.list.len().saturating_sub(PAGE_SIZE));
+            if c.sel >= c.first + PAGE_SIZE {
+                c.first = c.sel + 1 - PAGE_SIZE;
+            }
+            c.top = c.top.min((c.list.len() - 1) / PAGE_SIZE);
+            if c.expanded {
+                c.scroll();
+            }
+            self.cands = Some(c);
+            return Ok(());
+        }
         let (start, end) = if self.cursor == 0 { (0, l) } else { (self.cursor - l, self.cursor) };
         if self.is_punct(start) {
             return Ok(());
@@ -2587,7 +2666,16 @@ impl Engine {
         if self.english_open() {
             return self.choose_english(idx, false);
         }
-        let Some(c) = self.cands.take() else { return Ok(()) };
+        let Some(mut c) = self.cands.take() else { return Ok(()) };
+        if idx < c.rows.len() {
+            // Predict-down contract B.3.1: a row item chosen from the window is chosen from the row; the 40th unit's commit
+            // waits in `commit_out` for `chosen`, as an English item's does.
+            let o = self.apply_pred(c.rows.swap_remove(idx))?;
+            if !o.commit.is_empty() {
+                self.commit_out = Some(o.commit);
+            }
+            return Ok(());
+        }
         let Some((word, l)) = c.list.get(idx).cloned() else { return Ok(()) };
         let (start, end) = if self.cursor == 0 { (0, l) } else { (self.cursor - l, self.cursor) };
         // Choosing again the word a prediction pick fixed over this exact span keeps that pending learn (section 10.1).
