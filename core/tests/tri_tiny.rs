@@ -27,6 +27,7 @@ fn lm_of(classes: bool, kn: bool, tri: bool) -> Lm {
     }
     lm
 }
+#[track_caller]
 fn close(a: f64, b: f64) {
     assert!((a - b).abs() < 1e-12, "{a} != {b}");
 }
@@ -172,8 +173,14 @@ fn type_syls(e: &mut Engine, s: &str) -> Output {
 /// Type `s`, put the cursor after syllable `end`, open the candidates and choose `word` (as engine_lm.rs does).
 fn fix_word(e: &mut Engine, s: &str, end: usize, word: &str) -> Output {
     type_syls(e, s);
-    for _ in 0..s.split(' ').count() - end {
-        e.key(Key::new(KeyKind::Left)).unwrap();
+    fix_at(e, end, word)
+}
+
+/// Choose `word` for the syllables ending at `end` of what is typed: the cursor goes Home and Right `end` times, then the candidate window.
+fn fix_at(e: &mut Engine, end: usize, word: &str) -> Output {
+    e.key(Key::new(KeyKind::Home)).unwrap();
+    for _ in 0..end {
+        e.key(Key::new(KeyKind::Right)).unwrap();
     }
     let mut o = e.key(Key::new(KeyKind::Space)).unwrap();
     for _ in 0..50 {
@@ -187,8 +194,9 @@ fn fix_word(e: &mut Engine, s: &str, end: usize, word: &str) -> Output {
 
 /// Acceptance 6, rules (a), (b), (c): ㄓㄢˋ ㄊㄚ ㄓㄢˋ with 他 fixed in the middle. The first word of the first stretch starts from (<s>, <s>), the
 /// transition into the fixed word is scored from (the word before, the last word), the stretch after the fixed word starts from (unknown, 他) so its
-/// first word is bigram only, and its closing term is scored from (the start word, the last word). `total_score` is the hand value and the sum of
-/// the two stretch decodes; the premises at the end show that a known u after the fixed word, or no u in the closing term, would score differently.
+/// first word is bigram only, and its closing term is the bigram too: the stretch has one word, so slice A2 (b') takes u of the closing term as
+/// unknown. `total_score` is the hand value and the sum of the two stretch decodes; the premises at the end show that a known u after the fixed
+/// word, or the table in the closing term, would score differently. The first word's term is floored (slice A2 (e): back3 0.175 < 0.5).
 #[test]
 fn fixed_word_in_the_middle_hand_values_and_total_score() {
     let f = fx(true);
@@ -198,17 +206,17 @@ fn fixed_word_in_the_middle_hand_values_and_total_score() {
     assert_eq!(o.preedit, "占他占");
     let (lam, d) = (Profile::Formal.lambda(), 0.75);
     let pb = |lp: f64| 10f64.powf(lp);
-    // (a) the first word, (<s>, <s>) -> 占: the context is stored, the entry is not
+    // (a) the first word, (<s>, <s>) -> 占: the context is stored, the entry is not; back3 is 0.175, below the floor, so the term is 0.5 * P2
     let back3 = 1.0 - ((12.0 - d) + (6.0 - d)) / 20.0;
-    let t1 = lam * (back3 * plain.prob("<s>", "占", pb(-3.0))).log10() + (1.0 - lam) * -3.0;
+    assert!(back3 < 0.5, "premise: the floor is active");
+    let t1 = lam * (0.5 * plain.prob("<s>", "占", pb(-3.0))).log10() + (1.0 - lam) * -3.0;
     // (b) the transition into the fixed word, (<s>, 占) -> 他 5 of 6 is kept
     let back3 = 1.0 - (5.0 - d) / 6.0;
     let t2 = lam * ((5.0 - d) / 6.0 + back3 * plain.prob("占", "他", pb(-2.0))).log10() + (1.0 - lam) * -2.0;
     // (a) after the fixed word: (unknown, 他) -> 占 is the bigram, although (占, 他) -> 占 is stored (9 of 10)
     let t3 = plain.word(lam, "他", "占", -3.0);
-    // (b) the closing term, (他, 占) -> </s> is kept: the start word 他 is the second last word of a one-word stretch
-    let back3 = 1.0 - (2.0 - d) / 9.0;
-    let t4 = lam * ((2.0 - d) / 9.0 + back3 * plain.prob("占", "</s>", 14.0 / 64.0)).log10();
+    // (b') the closing term of the one-word stretch: (他, 占) -> </s> is kept in the table, but u is unknown here, so it is the bigram
+    let t4 = lam * plain.prob("占", "</s>", 14.0 / 64.0).log10();
     let total = e.total_score().unwrap();
     close(total, t1 + t2 + t3 + t4);
     // (c) the engine's total is the decoders' scores: stretch one closes into 他, stretch two starts after it
@@ -221,7 +229,126 @@ fn fixed_word_in_the_middle_hand_values_and_total_score() {
     // the premise that makes (a) and (b) tell something: the table changes these terms
     let wrong_u = f.lm.word3(cfg, Some("占"), "他", "占", -3.0);
     assert!((wrong_u - t3).abs() > 1e-3, "premise: a known u after the fixed word would score differently");
-    assert!((f.lm.eos3(cfg, None, "占") - t4).abs() > 1e-3, "premise: the closing term depends on u");
+    assert_eq!(f.lm.eos3(cfg, None, "占"), t4);
+    assert!((f.lm.eos3(cfg, Some("他"), "占") - t4).abs() > 1e-3, "premise: the table's closing term (u = the start word) would score differently");
+}
+
+/// Slice A2 (b') in the engine: a stretch of one word whose start is unknown closes with the bigram (with `Eos`:
+/// `fixed_word_in_the_middle_hand_values_and_total_score`). Each case checks the decode against a hand value and `total_score` against the decodes,
+/// with a premise that the table's closing term from (the start word, the last word) is a different number. Closed by `End::Next`: 他 ㄓㄢˋ 他 with
+/// both 他 fixed; stretch 占 starts after the first 他 and is closed by the second.
+#[test]
+fn one_word_stretch_between_two_fixed_words_closes_with_the_bigram_next() {
+    let f = fx(true);
+    let mut e = engine(&f, Profile::Formal);
+    type_syls(&mut e, "ㄊㄚ ㄓㄢˋ ㄊㄚ");
+    fix_at(&mut e, 1, "他");
+    let o = fix_at(&mut e, 3, "他");
+    assert_eq!(o.preedit, "他占他", "premise: both 他 are fixed and 占 is between them");
+    let cfg = f.lm.scoring(Profile::Formal);
+    let next = End::Next { word: "他", lp: -2.0, delta: 0.0 };
+    let s = decode_segment_learned(&f.capped, &syls("ㄓㄢˋ"), &f.lm, cfg, "他", next, core::BEAM_S1, None, true).unwrap();
+    assert_eq!(s[0].1[0].0, "占");
+    // the closing term: the transition 占 -> 他; the bigram has u unknown, the table's would be (他, 占) -> 他 (a stored context without that entry)
+    let bigram = f.lm.word3(cfg, None, "占", "他", -2.0);
+    let table = f.lm.word3(cfg, Some("他"), "占", "他", -2.0);
+    assert!((bigram - table).abs() > 1e-3, "premise: the table changes the closing term");
+    close(s[0].0, f.lm.word3(cfg, None, "他", "占", -3.0) + bigram);
+    // total_score: the first fixed word's own term (it is in no stretch), the stretch, and the last fixed word's closing term
+    let first = f.lm.word3(cfg, Some("<s>"), "<s>", "他", -2.0);
+    // a fixed word at the end has no stretch after it: only `total_score` scores its closing term (u unknown, bigram)
+    let last = f.lm.eos3(cfg, None, "他");
+    close(e.total_score().unwrap(), first + s[0].0 + last);
+}
+
+/// The unknown start that comes from the input-box text before the composition (left context 他): one word closes with the bigram, with `Eos` and with
+/// `End::Next`.
+#[test]
+fn one_word_stretch_after_an_input_box_context_closes_with_the_bigram() {
+    let f = fx(true);
+    let cfg = f.lm.scoring(Profile::Formal);
+    // Eos: 占 alone
+    let mut e = engine(&f, Profile::Formal);
+    e.set_left_context("他");
+    assert_eq!(type_syls(&mut e, "ㄓㄢˋ").preedit, "占");
+    let s = decode_segment_learned(&f.capped, &syls("ㄓㄢˋ"), &f.lm, cfg, "他", End::Eos, core::BEAM_S1, None, true).unwrap();
+    let (bigram, table) = (f.lm.eos3(cfg, None, "占"), f.lm.eos3(cfg, Some("他"), "占"));
+    assert!((bigram - table).abs() > 1e-3, "premise: the table changes the closing term");
+    close(s[0].0, f.lm.word3(cfg, None, "他", "占", -3.0) + bigram);
+    close(e.total_score().unwrap(), s[0].0);
+    // End::Next: 占 then a fixed 他
+    let mut e = engine(&f, Profile::Formal);
+    e.set_left_context("他");
+    type_syls(&mut e, "ㄓㄢˋ ㄊㄚ");
+    assert_eq!(fix_at(&mut e, 2, "他").preedit, "占他");
+    let next = End::Next { word: "他", lp: -2.0, delta: 0.0 };
+    let s = decode_segment_learned(&f.capped, &syls("ㄓㄢˋ"), &f.lm, cfg, "他", next, core::BEAM_S1, None, true).unwrap();
+    let (bigram, table) = (f.lm.word3(cfg, None, "占", "他", -2.0), f.lm.word3(cfg, Some("他"), "占", "他", -2.0));
+    assert!((bigram - table).abs() > 1e-3, "premise: the table changes the closing term");
+    close(s[0].0, f.lm.word3(cfg, None, "他", "占", -3.0) + bigram);
+    // a fixed word at the end has no stretch after it: only `total_score` scores its closing term (u unknown, bigram)
+    let last = f.lm.eos3(cfg, None, "他");
+    close(e.total_score().unwrap(), s[0].0 + last);
+}
+
+/// (b') belongs to the stretch: after punctuation or an open English run the next stretch starts from (<s>, <s>), so its one word closes with the
+/// table again. Left context 他, then 占 | 占 with "，" or an English run between: the left part closes with the bigram (unknown start, one word), the
+/// right part with the table ((<s>, 占) is stored without </s>, so the floored table term is half the bigram's).
+#[test]
+fn unknown_start_ends_at_punctuation_and_at_an_english_run() {
+    let f = fx(true);
+    let cfg = f.lm.scoring(Profile::Formal);
+    let part = |start: &str| decode_segment_learned(&f.capped, &syls("ㄓㄢˋ"), &f.lm, cfg, start, End::Eos, core::BEAM_S1, None, true).unwrap()[0].0;
+    assert!((f.lm.eos3(cfg, Some("<s>"), "占") - f.lm.eos3(cfg, None, "占")).abs() > 1e-3, "premise: the right part's closing term is the table's");
+    let want = part("他") + part("<s>");
+    // punctuation
+    let mut e = engine(&f, Profile::Formal);
+    e.set_left_context("他");
+    type_syls(&mut e, "ㄓㄢˋ");
+    e.key(Key::ch(',', core::engine::MOD_SHIFT)).unwrap();
+    assert_eq!(type_syls(&mut e, "ㄓㄢˋ").preedit, "占，占");
+    close(e.total_score().unwrap(), want);
+    // an open English run at the cursor
+    let mut e = engine(&f, Profile::Formal);
+    e.load_english(&dir("").join("english-tiny.txt")).unwrap();
+    e.set_english(true).unwrap();
+    e.set_left_context("他");
+    type_syls(&mut e, "ㄓㄢˋ ㄓㄢˋ");
+    e.key(Key::new(KeyKind::Left)).unwrap();
+    let o = e.key(Key::ch('x', core::engine::MOD_SHIFT)).unwrap();
+    assert_eq!(o.preedit.replace('X', ""), "占占", "premise: the run is open between the two syllables ({})", o.preedit);
+    close(e.total_score().unwrap(), want);
+}
+
+/// Two words or more are unchanged: the second word's u is the start word and the closing term is (second last, last), from the table. Left context 他
+/// with 他占 (Eos), and 他占 between two fixed 他 (End::Next).
+#[test]
+fn two_word_stretches_keep_the_table_closing_term() {
+    let f = fx(true);
+    let cfg = f.lm.scoring(Profile::Formal);
+    // Eos, from the input-box context: (unknown, 他) -> 他, (他, 他) -> 占, (他, 占) -> </s>
+    let mut e = engine(&f, Profile::Formal);
+    e.set_left_context("他");
+    assert_eq!(type_syls(&mut e, "ㄊㄚ ㄓㄢˋ").preedit, "他占");
+    let s = decode_segment_learned(&f.capped, &syls("ㄊㄚ ㄓㄢˋ"), &f.lm, cfg, "他", End::Eos, core::BEAM_S1, None, true).unwrap();
+    let (table, bigram) = (f.lm.eos3(cfg, Some("他"), "占"), f.lm.eos3(cfg, None, "占"));
+    assert!((table - bigram).abs() > 1e-3, "premise: the table changes the closing term");
+    close(s[0].0, f.lm.word3(cfg, None, "他", "他", -2.0) + f.lm.word3(cfg, Some("他"), "他", "占", -3.0) + table);
+    close(e.total_score().unwrap(), s[0].0);
+    // End::Next, between two fixed words: 他 | 他占 | 他 would put the stretch 他占 between fixed 他, so use ㄊㄚ ㄊㄚ ㄓㄢˋ ㄊㄚ with the ends fixed
+    let mut e = engine(&f, Profile::Formal);
+    type_syls(&mut e, "ㄊㄚ ㄊㄚ ㄓㄢˋ ㄊㄚ");
+    fix_at(&mut e, 1, "他");
+    assert_eq!(fix_at(&mut e, 4, "他").preedit, "他他占他");
+    let next = End::Next { word: "他", lp: -2.0, delta: 0.0 };
+    let s = decode_segment_learned(&f.capped, &syls("ㄊㄚ ㄓㄢˋ"), &f.lm, cfg, "他", next, core::BEAM_S1, None, true).unwrap();
+    let (table, bigram) = (f.lm.word3(cfg, Some("他"), "占", "他", -2.0), f.lm.word3(cfg, None, "占", "他", -2.0));
+    assert!((table - bigram).abs() > 1e-3, "premise: the table changes the closing term");
+    close(s[0].0, f.lm.word3(cfg, None, "他", "他", -2.0) + f.lm.word3(cfg, Some("他"), "他", "占", -3.0) + table);
+    let first = f.lm.word3(cfg, Some("<s>"), "<s>", "他", -2.0);
+    // a fixed word at the end has no stretch after it: only `total_score` scores its closing term (u unknown, bigram)
+    let last = f.lm.eos3(cfg, None, "他");
+    close(e.total_score().unwrap(), first + s[0].0 + last);
 }
 
 /// Acceptance 6, learned words: the word the learner boosted is scored by P2 alone (the value without the table), the unboosted entry of the same
