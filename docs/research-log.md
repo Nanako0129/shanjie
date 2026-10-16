@@ -6185,3 +6185,15 @@ formal: alpha 0.7, tau 1, delta 2
   - 只報：這個重播沒有前文、詞包、語意校正，dev302 完全相符（不經變體表）書面有表 235、沒表 239，和 Python 判讀的設定（`--context`、寬鬆比對）不同，不拿來判讀；語意校正接上之後的效果是第 B 片。
 - 還沒做：書面有表的選字記憶與語意校正（第 B 片）。
 - fresh verifier（PR #175）：CONFIRMED。沒有表時 golden 不變（25 項）、聊天與預測列不受表影響、(a)–(d) 與學到的詞的例外照契約、公式與載入規則兩種語言一致。附一項 P3：英文段緊貼在固定的字旁邊時，`total_score` 和解碼第一名的分數差一項（固定的字的句尾項或詞項），和 main 上「固定的字在最後」本來就有的差異同類；`total_score` 只有測試在用，記成已知例外（`docs/contracts/s3a.md`），修法另開一片。
+
+## 2026-10-16：trigram-core 第 B 片 B2（書面有表的選字記憶）
+
+- 契約修訂三（第 B 片寫細；plan-verifier REVISE 一次後 READY，`c3bc651`）。`engine_learn.rs` 加 `SHANJIE_TEST_PROFILE=formal` 開關（`d9dd6b3`）：每個建立引擎的地方切到書面，並斷言模型旁有 trigram 表（Mac 上沒放表時四個測試都以這個斷言失敗）。
+- 量法：Windows 機器的 WSL，clone 在 `d9dd6b3`，`data/lm` 放出貨的四個檔加重對應的 H3（量完刪掉）。
+- 結果（門檻同 model-v6 §2.8）：
+  - 鏡像改選（`a2_mirror_teach_the_other_word`）：**8/10**（門檻 80%，過）。學不起來的是 戰機/戰績、檢察/檢查。
+  - ㄗㄞˋ 污染（`pollution_zai_taught_under_two_contexts`）：非衝突改壞 **0**（過）。
+  - A2（`a2_candidate_pick_learning_on_cases_tsv`）：**沒有判讀**。書面有表時 12 組裡多數「預設就已經是要教的詞」（不計），能計數的同前文列只剩 2 列（兩列都學會），測試要求至少 3 列才算比率而失敗。
+  - `global_eps_table`：只記數字，ε 6 時 8/8、鏡像 8/10。
+  - **手動詞**（`manual_words_come_first_in_the_shipping_setting`，書面有表）：錯 **2／15**（第 4 列「米雅歌」單獨、第 8 列「米雅歌唱得很好」），門檻是 ≤ 1 → **不通過**。v0.4.6 書面只錯第 8 列。
+- 照契約停下來問維護者（B3 的結果出來後一起問）。
