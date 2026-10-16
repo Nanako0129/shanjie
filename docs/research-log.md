@@ -6286,6 +6286,7 @@ formal: alpha 0.7, tau 1, delta 2
   - 第 A2 片之前失敗、現在通過的：`names_layer`、手動詞、`engine_demote` 兩項、`left_context_turns_ba_into_the_particle`（前文「好」＋ㄅㄚ˙ 回到「吧」）。
 - **Mac（`cargo test -p cli --test golden`）**：上面四項，加上 WSL 跳過的 `sw_probe_matches_python_golden_byte_for_byte`。
 - **Swift（Mac，`make test-swift`）**：13 個測試案例失敗，原因都是同一對釘選：dev 第 284 列聊天「廚房新裝了一個率水壺」、書面「廚房新裝了一個濾水壺」（`Support.swift`、App 的 `Selftest.swift`）。有表時書面是「廚房新裝了一個律水壺」，仍和聊天不同。案例：LogTests 1、ProfileChoiceTests 7、SelftestTests 的 `testPassesWithTheFullResources`、ShellTests 4。
+- **C 標頭冒煙測試**（`core/tests/c/abi_smoke.c`，只在 CI 的「C header smoke test」步驟跑，上面兩個觀察都沒涵蓋到；Mac 照 CI 的指令補跑）：檢查 307 失敗，原因同一句（切到書面後組字區等於 `FORMAL`）。C3 一併把 `FORMAL` 改成「律水壺」，兩種跑法（有、沒有學習資料夾）都過。
 
 ## 2026-10-16：trigram-core 第 C 片 C3，golden 重產
 
