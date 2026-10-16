@@ -6296,3 +6296,9 @@ formal: alpha 0.7, tau 1, delta 2
 - 兩個詞庫缺口：詞庫沒有「一鍵」（只有「一件」），「部署」沒有 ㄅㄨˋ-ㄕㄨˇ（同第 119 列）。正解只能由單字組出來。
 - CLI 出貨設定（`--context --packs acg --tinylm`）兩種設定第 1 名都是「說是他做的一件部屬腳本」；正解不在前 64 名。
 - `eval/golden/s2h-lm-context.txt` 的錯字回報兩行用 Python 參考實作重產，n 120：聊天 top1 29、書面 36 不變，oracle@64 兩種設定都 117 → 117；`eval/README.md` 改成 120 列，手動讀音加上第 120 列。
+
+## 2026-10-16：錯字回報第 121 列（做上去）
+
+- 維護者實機的組字區是「自動更新也坐上去」，要的是「做」。加成 `|自動更新也做上去|ㄗˋ ㄉㄨㄥˋ ㄍㄥ ㄒㄧㄣ ㄧㄝˇ ㄗㄨㄛˋ ㄕㄤˋ ㄑㄩˋ`（讀音由 `tools/readings.py` 產生，沒有 CHECK）。
+- CLI 出貨設定（`--context --packs acg --tinylm`）兩種設定都是「坐」第 1、「作」第 2、「做」第 3；書面加上 trigram 表也是「坐」第 1、「作」第 2。
+- `eval/golden/s2h-lm-context.txt` 的錯字回報兩行用 Python 參考實作重產，n 121：聊天 top1 29、書面 36 不變，oracle@64 兩種設定都 117 → 118；`eval/README.md` 改成 121 列。
