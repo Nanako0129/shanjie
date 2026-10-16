@@ -49,7 +49,7 @@ enum TestData {
                     gh release download model-v6 -R Nanako0129/shanjie -p bigram.sjlm -D data/lm
                     classes.sjc: gh release download classes-v5 -R Nanako0129/shanjie -p classes.sjc -D data/lm
                     kn.sjkn: gh release download kn-v1 -R Nanako0129/shanjie -p kn.sjkn -D data/lm
-                    trigram.sjt3: gh release download trigram-v1 -R Nanako0129/shanjie -p trigram.sjt3 -D data/lm
+                    trigram.sjt3: gh release download sj-cx-1-7.7m -R Nanako0129/shanjie -p trigram.sjt3 -D data/lm
                     tinylm.sjtl: gh release download tinylm-v5 -R Nanako0129/shanjie -p tinylm.sjtl -D data/lm
                     """, file: file, line: line)
                 return nil

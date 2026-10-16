@@ -42,10 +42,10 @@ shasum -a 256 -c data/kn.sjkn.sha256 >/dev/null \
 shasum -a 256 -c data/tinylm.sjtl.sha256 >/dev/null \
   || fail "data/lm/tinylm.sjtl does not match data/tinylm.sjtl.sha256; download tinylm-v5 again"
 # The trigram table of the formal profile (docs/contracts/trigram-core.md): bound to model-v6's hash; the core loads it from beside the model.
-[ -f data/lm/trigram.sjt3 ] || fail "data/lm/trigram.sjt3 is missing (the trigram table of the formal profile). Download the trigram-v1 release asset:
-  gh release download trigram-v1 -R Nanako0129/shanjie -p trigram.sjt3 -D data/lm"
+[ -f data/lm/trigram.sjt3 ] || fail "data/lm/trigram.sjt3 is missing (the trigram table of the formal profile). Download the sj-cx-1-7.7m release asset:
+  gh release download sj-cx-1-7.7m -R Nanako0129/shanjie -p trigram.sjt3 -D data/lm"
 shasum -a 256 -c data/trigram.sjt3.sha256 >/dev/null \
-  || fail "data/lm/trigram.sjt3 does not match data/trigram.sjt3.sha256; download trigram-v1 again"
+  || fail "data/lm/trigram.sjt3 does not match data/trigram.sjt3.sha256; download sj-cx-1-7.7m again"
 for f in data/lexicon/mcbpmf-data.txt data/lexicon/overlay-add.tsv data/lexicon/sandhi-add.tsv data/lexicon/names-add.tsv data/lexicon/demote.tsv data/packs/acg-add.tsv data/packs/acg-sources.tsv data/packs/acg.json LICENSE LICENSES/McBopomofo-MIT.txt LICENSES/data.md LICENSES/SCOWL.txt LICENSES/SymSpell-MIT.txt LICENSES/name-suggestion-index-BSD-3-Clause.txt; do
   [ -f "$f" ] || fail "$f is missing"
 done
