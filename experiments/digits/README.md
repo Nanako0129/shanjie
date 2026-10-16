@@ -83,7 +83,7 @@ python3 experiments/digits/golden_digits.py --table data/lexicon/digits.tsv --th
 | `build-set --range 305000 310000 --single`（新判讀集） | 2 分 9 秒（單程序） |
 | `tune`（θ 8 格＋結構規則＋預測列，2,991 列調參資料） | 2 分 13 秒 |
 | `judge` | 44 秒 |
-| `golden_digits.py` | Mac 約 8 秒（含載入） |
+| `golden_digits.py` | Mac 8–13 秒（含載入；兩次實測） |
 
 修訂三之前的一次（表 `4efd2acc`）：建表 1 分 57 秒、`tune`（θ 4 格）1 分 22 秒、`judge` 38 秒，Windows 機器的 WSL（16 執行緒）θ 8 格 `tune` 4 分 29 秒、`judge` 1 分 27 秒。
 

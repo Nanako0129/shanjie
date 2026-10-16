@@ -323,8 +323,8 @@ def build_set(a):
     import build_e4ctx as e4   # cv_lines and the is_tune cut of build_tune; importing it only defines
     bt = e4.bt
     single = a.range is not None
-    if single and not a.single:
-        sys.exit("--range needs --single NAME")
+    if single != bool(a.single):
+        sys.exit("--range and --single go together")
     lo, hi = a.range or TUNE_ARTICLES
     bc.SRC = a.src   # load_conv reads opencc/ under it (build_tune's SRC is only its own main's colloquial directory: cv_lines is given the path)
     bc.DUMP = os.path.join(a.src, os.path.basename(bc.DUMP))
