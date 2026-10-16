@@ -15,7 +15,8 @@
 #   SHANJIE_UPDATE_TEST_FEED, SHANJIE_UPDATE_TEST_KEY
 #                    both or neither: a local test build for the update device check (docs/contracts/about-update.md
 #                    section 3.4) with a test feed URL and a test EdDSA public key instead of the production ones below.
-#                    Refused when CI is set; scripts/check-app.sh and release.yml reject such a build unless told it is one.
+#                    Refused when CI is set. scripts/check-app.sh rejects such a build unless given the same two
+#                    variables; release.yml's verify always rejects it.
 #
 # The folder name is the user-facing name; the executable (Contents/MacOS/shanjie), the bundle ID and
 # the release asset (shanjie-<version>.zip) keep the ASCII name.
