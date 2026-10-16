@@ -5895,3 +5895,4 @@ formal: alpha 0.7, tau 1, delta 2
 
 - 維護者選擇題「做完直接推」（bench、保留集沒有退步、notes PR 合併後推 tag）。PR #170 合併後推 `v0.4.6`（tag 指向 main `58da6d2`；和量基準測試與保留集的 `7c47266` 相比，`Cargo.toml Cargo.lock core cli data eval/variants.tsv macos scripts` 沒有差異），發佈流程 run 38841516338：gate、build、sign、publish 都成功（sign、publish 由維護者核准）。
 - 核對（下載 Release 附件）：zip 與安裝程式的 SHA-256 和 `.sha256` 相符；兩個 App 的 `codesign --verify --deep --strict` 通過、Team 2LJ882GPY8、`spctl` 判定 Notarized Developer ID、`stapler validate` 通過、版本 0.4.6；App 裡的模型 `bigram.sjlm` `fc2bddd1`、`classes.sjc` `9e36fa1b`（classes-v5）、`kn.sjkn` `cbefbced`、`tinylm.sjtl` `d07de71d`；Latest 是 v0.4.6；Homebrew cask `0.4.6`、sha256 `fba95f0b…` 和 zip 相同。解壓的副本驗完先 `lsregister -u` 再刪。
+- 發版後：Discord 發版公告（blobhaj，只標善解身分組，維護者選擇題同意）；網站的保留集數字與已發佈清單換成 v0.4.6，PR 合併後部署（維護者同意）。
