@@ -5910,4 +5910,15 @@ formal: alpha 0.7, tau 1, delta 2
   - 書面 `--context`：dev302、打字測驗、錯字回報（114 列凍結檔）、cvtune、wikitune 的 rowstats 與第 0 片 Python CAND **逐位元組相同**，`top1_sha256` 相同（摘要行 `lm-formal+ctx+tri:fdd3b05d`，沒有 `+kn:`）。
   - 聊天 `--context`：同樣 5 個集合，新 CLI（模型旁有表）和 v0.4.6 的 CLI（`58da6d2`，沒有表）的 rowstats 與摘要行**逐位元組相同**。
 - 完整 Rust 測試（Windows 機器的 WSL，`166cc44`）：465 通過、0 失敗、9 略過（照例略過的 4 個交給 Mac 與 CI）。
-- 還沒做：延遲與 RSS（契約第 5 項，第 B 片正式量）；書面有表的選字記憶與語意校正（第 B 片）。
+- `/code-review` 12 項，executor 修 9 項（`69d901f`–`995477f`）：每次解碼記住前文的 back3（不常駐陣列，預算裡表本身就佔 144 MB）；CLI 只在書面評測、沒有 `--no-tri` 時讀表，`--predict` 不讀，Python 同一套規則、`kn.sjkn` 照樣載入與核對；Python 聊天給 `--tri` 報錯；D 只接受 0.75；`total_score` 有表時在英文段照解碼的方式切開（新測試與突變）；`build_trigram.py` 共用 `lm.py` 的檔頭解析；CI 在 x0c 的 numpy 環境跑 `test_build_trigram.py`；PLAN 加 trigram-core 一項。新的突變 17 個都以斷言失敗。
+- **延遲與 RSS（契約第 5 項，Mac M5，同一場三輪、取中位數，load avg 4.5–4.7）**：臨時的重播程式（`tools/bench/replay` 加一個設定參數，scratchpad，不進 repo）用 dev302 302 列、8,336 個按鍵，模型 model-v6＋classes-v5＋kn-v1，書面有表時資料夾裡多放重對應的 H3：
+
+| 臂 | 每鍵 p95 | 最大 | 載入 | 最大 RSS |
+|---|---|---|---|---|
+| 書面＋表 | 2.15 ms | 8.6 ms | 826 ms | 423 MB |
+| 書面、沒表 | 2.13 ms | 6.3 ms | 750 ms | 287 MB |
+| 聊天（資料夾有表） | 2.11 ms | 6.5 ms | 833 ms | 423 MB |
+
+  - 上限是 RSS +150 MB、每鍵 p95 +1 ms：書面有表 p95 多 0.01 ms、RSS 多 136 MB，**都在上限內**；最大值多約 2 ms。聊天設定也載入整張表（App 執行中會換設定），所以 RSS 同樣多 136 MB。
+  - 只報：這個重播沒有前文、詞包、語意校正，dev302 完全相符（不經變體表）書面有表 235、沒表 239，和 Python 判讀的設定（`--context`、寬鬆比對）不同，不拿來判讀；語意校正接上之後的效果是第 B 片。
+- 還沒做：書面有表的選字記憶與語意校正（第 B 片）。
