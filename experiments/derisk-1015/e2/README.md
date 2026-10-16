@@ -12,7 +12,8 @@
 | `score_r.py` | `score.py` 的延伸：同樣的候選（`lm_eval.py --dump` 前 8 名）、同樣的記錄與檔案格式；`--arm control`（v5 權重、不開讀音）或 `--arm new`；`one`（單一集合）、`sets`（`run_sets.py` 那組集合 × 兩種設定） | 否（`--backend torch` 才要） |
 | `anchor.py` | E2 錨點：控制臂設定的延伸版對 `score.py`，用 `parity.py`，max \|ΔLL\| < 1e-4，不符結束碼 1 | 否 |
 | `judge_e2.py` | 選值（兩次 `judge.py` 呼叫，一種設定一次）與判讀（串接 rowstats、`evalstats compare --net`） | 否 |
-| `split_dist.py` | 評測列的前文長度分布（給 `--split-probs`） | 否 |
+| `split_dist.py` | 評測列的前文長度分布（給 `--split-probs`）；`--field key16 --maxlen 16` 讀 `key16`、印 17 個機率（修訂七） | 否 |
+| `use_ll16.py` | 修訂七：分數檔每筆的 `ll` 換成 `ll16`、其他欄位不動（C16、N16 臂用）；`IN OUT` 可以是檔或資料夾 | 否 |
 | `test_e2.py`、`test_torch_r.py` | 單元測試（合成小資料）；後者沒有 torch 整檔跳過 | 後者 |
 
 ## 設計（契約沒寫死、我做的決定）
@@ -71,9 +72,9 @@ python -W ignore -m unittest discover -s . -p 'test_*.py' -v
 # 1. 標注（CPU，48 執行緒；SHANJIE_HETERO 指向 heterophony1.list）。印出並寫 $W/rd-report.json：記下 noread_fraction（wiki、coll 各一）
 SHANJIE_HETERO=/content/heterophony1.list python label_readings.py --work $W --procs 46
 # 2. 前文長度分布：用 v5 的分數檔（聊天設定、各集合；私人集合的 key 欄只是 0／1／2 的數字）
-python split_dist.py $SCORES_V5/M.chat.cvtune.jsonl $SCORES_V5/M.chat.wikitune.jsonl $SCORES_V5/M.chat.dev302.jsonl ...   # 印 P0 P1 P2
+python split_dist.py --field key16 --maxlen 16 $SCORES_V5/M.chat.cvtune.jsonl $SCORES_V5/M.chat.wikitune.jsonl $SCORES_V5/M.chat.dev302.jsonl ...   # 修訂七：印 P0..P16（17 個值）
 # 3. 訓練（M 的大小，一次，不調超參數）。結束碼 2＝發散，停下來回報。G4 一次不得超過 4 小時（契約 §5）
-python -u train_r.py --size M --work $W --out $W --split-probs P0 P1 P2
+python -u train_r.py --size M --work $W --out $W --split-probs P0 P1 ... P16      # 17 個值
 # 4. 核對：train-Mr.json 的 steps、pieces 等於 train-M.json 的；copy 回 tinylm-Mr.npz、train-Mr.json、rd-report.json
 ```
 
@@ -107,7 +108,7 @@ python judge_e2.py select --scores $S/ctl --model E2C --out $J/ctl
 python judge_e2.py select --scores $S/new --model E2N --out $J/new
 # 等於（每臂各兩次）：
 #   judge.py --scores DIR --sets chatclause cvtune wikitune dev302 typing76 user-reported lytune wikitypo discordtune --setting chat   --model M --out OUT --select STD --tuning chatclause --weight 1 --cap 0.005
-#   judge.py --scores DIR --sets cvtune wikitune dev302 typing76 user-reported lytune wikitypo                       --setting formal --model M --out OUT --select STD --tuning cvtune wikitune --weight 10
+#   judge.py --scores DIR --sets cvtune wikitune dev302 typing76 user-reported lytune wikitypo                       --setting formal --model M --out OUT --select STD --tuning cvtune wikitune --weight 1 --cap 0.005     # 修訂七：書面 1:1 加改壞率上限（原為 --weight 10）
 ```
 
 - 印出的 `STD: selected on ...: alpha, tau, delta` 是兩臂各自的選值，**只記錄**（不與出貨值比、不停）。保守、積極不跑。
@@ -139,3 +140,28 @@ python judge_e2.py compare --base $J/v5 --cand $J/ctl --work $J/tables-v5      #
 | `rd-*.npy` 與 `ids-*.npy` 不對齊 | `label_readings.py`、`train_r.py` 都會停 |
 | 訓練發散 | `train_r.py` 結束碼 2 |
 | Colab 一次超過 4 小時、計算超過 8 小時 | main 看 `train-Mr.json` 的 `seconds`；超過就停 |
+
+## 修訂七：讀音 × 前文長度 2×2（2026-10-17）
+
+四臂：C2＝對照權重 `ll`（現況）、C16＝對照權重 `ll16`、N2＝新模型 `ll`、N16＝新模型 `ll16`。分數檔 `score_r.py` 已同時有 `ll` 與 `ll16`，打分一次就夠；訓練只一次（切點用 `key16` 的 17 值分布，見上面 Colab 步驟 2、3）。
+
+```sh
+# 16 字那兩臂：先把 ll 換成 ll16（資料夾形式，檔名 MODEL.setting.set.jsonl 不變），再用同樣的 judge_e2.py
+python use_ll16.py $S/ctl $S/ctl16
+python use_ll16.py $S/new $S/new16
+for A in ctl ctl16 new new16; do   # 各臂 judge.py 兩次（聊天、書面），選完凍結
+  python judge_e2.py select --scores $S/$A --model <E2C|E2N> --out $J/$A
+done
+python judge_e2.py compare --base $J/ctl   --cand $J/new   --work $J/t-read     # 讀音：N2 對 C2
+python judge_e2.py compare --base $J/ctl   --cand $J/ctl16 --work $J/t-len-c    # 前文長度：C16 對 C2
+python judge_e2.py compare --base $J/new   --cand $J/new16 --work $J/t-len-n    # 前文長度：N16 對 N2
+python judge_e2.py compare --base $J/ctl   --cand $J/new16 --work $J/t-total    # 合計：N16 對 C2，只報
+```
+
+某一臂某種設定在 0.5% 上限內選不出任何格（`judge.py` 丟 ValueError）：記錄為「沒有可選的值」、不算成立，不停止其他臂。
+
+只報一行「規則改變本身的效果」（只報不判）：
+
+1. `judge.py --scores <C2 的書面分數檔> --sets cvtune wikitune dev302 typing76 user-reported lytune wikitypo --setting formal --model E2C --fixed STD 1 1 3 --out OUT_FIX`（1、1、3 是出貨 tinylm-v5 書面標準的 α、τ、δ，當初用 1:10 選的；分數檔就是 C2 的，同一個打分後端）。
+2. BASE＝`OUT_FIX/rowstats/STD.formal.<集合>.new.txt`、CAND＝C2 新規則那次的 `OUT/rowstats/STD.formal.<集合>.new.txt`，各自依 §2 的順序（dev302、typing76、user-reported、lytune、wikitypo）用 `judge_e2.concat_rowstats` 串成一個檔。
+3. `tools/evalstats.py compare BASE CAND --net`，一行。

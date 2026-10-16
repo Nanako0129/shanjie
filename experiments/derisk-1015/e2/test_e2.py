@@ -2,6 +2,7 @@
 Run from the repo root:  python3 -W ignore -m unittest discover -s experiments/derisk-1015/e2 -p 'test_e2.py' -v
 The tools/readings.py parity test needs the real lexicon and the McBopomofo heterophony list (SHANJIE_HETERO); it is skipped without them.
 """
+import contextlib
 import io
 import json
 import os
@@ -20,6 +21,7 @@ import score_r  # noqa: E402
 import anchor  # noqa: E402
 import judge_e2  # noqa: E402
 import split_dist  # noqa: E402
+import use_ll16  # noqa: E402
 import tinylm  # noqa: E402
 import score  # noqa: E402
 import parity  # noqa: E402
@@ -167,6 +169,35 @@ class TestTrainingSamples(unittest.TestCase):
             open(p, "w").write("\n".join(json.dumps({"key": k}) for k in (0, 0, 2, 1, 2, 0, 0, 0)) + "\n")
             probs, counts = split_dist.split_probs([p])
             self.assertEqual(counts, [5, 1, 2]); self.assertAlmostEqual(sum(probs), 1)
+
+    def test_split_dist_key16_17_values(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            p = os.path.join(tmp, "a.jsonl")
+            open(p, "w").write("".join(json.dumps({"key": 2, "key16": 10}) + "\n" for _ in range(4)))
+            probs, counts = split_dist.split_probs([p], maxlen=16, field="key16")
+            self.assertEqual(len(probs), 17); self.assertEqual(counts[10], 4); self.assertEqual(probs[10], 1.0)
+            probs, counts = split_dist.split_probs([p])              # default call: key, 3 values
+            self.assertEqual(counts, [0, 0, 4]); self.assertEqual(len(probs), 3)
+
+
+class TestUseLl16(unittest.TestCase):
+    def test_swaps_ll_only(self):
+        recs = [{"i": 1, "n": 3, "ll": [-1.0, -2.0], "ll0": [-1.5, -2.5], "ll16": [-0.5, -3.0], "key": 2, "key16": 7},
+                {"i": 2, "n": 1}, {"i": 3, "n": 2, "ll": [-4.0], "ll16": [-4.0], "key": 1, "key16": 1},
+                {"i": 4, "n": 2, "ll": [-1.0], "ll16": [-2.0], "key": 0, "key16": 0}]
+        with tempfile.TemporaryDirectory() as t:
+            src, dst = os.path.join(t, "in.jsonl"), os.path.join(t, "out.jsonl")
+            open(src, "w").write("".join(json.dumps(r) + "\n" for r in recs))
+            with contextlib.redirect_stderr(io.StringIO()) as err:
+                use_ll16.convert(src, dst)
+            out = [json.loads(l) for l in open(dst)]
+            self.assertEqual([r["i"] for r in out], [1, 2, 3, 4])
+            self.assertEqual(out[1], recs[1])
+            for a, b in zip(recs, out):
+                self.assertEqual(set(a), set(b))
+                for k in a:
+                    self.assertEqual(b[k], a["ll16"] if k == "ll" and "ll16" in a else a[k])
+            self.assertIn("2 records changed", err.getvalue()); self.assertIn("1 with key16 > key", err.getvalue())
 
 
 class TestScoringItems(unittest.TestCase):
@@ -346,8 +377,8 @@ class TestJudgeGlue(unittest.TestCase):
     def test_exact_judge_invocations(self):
         self.assertEqual(judge_e2.judge_argv("chat", ["D"], "E2C", "O")[-8:],
                          ["--select", "STD", "--tuning", "chatclause", "--weight", "1", "--cap", "0.005"])
-        self.assertEqual(judge_e2.judge_argv("formal", ["D"], "E2C", "O")[-7:],
-                         ["--select", "STD", "--tuning", "cvtune", "wikitune", "--weight", "10"])
+        self.assertEqual(judge_e2.judge_argv("formal", ["D"], "E2C", "O")[-9:],
+                         ["--select", "STD", "--tuning", "cvtune", "wikitune", "--weight", "1", "--cap", "0.005"])
         self.assertEqual(judge_e2.judge_argv("chat", ["D"], "E2C", "O")[:15],
                          ["--scores", "D", "--sets", "chatclause", "cvtune", "wikitune", "dev302", "typing76", "user-reported", "lytune",
                           "wikitypo", "discordtune", "--setting", "chat", "--model"])

@@ -7,7 +7,7 @@ the private score files (chatclause, discordtune), or on the Mac for the selecti
 
 select = exactly the two judge.py invocations of the contract (each setting once, selection frozen by that call):
   chat:   judge.py --scores DIR.. --sets <nine sets> --setting chat   --model M --out OUT --select STD --tuning chatclause --weight 1 --cap 0.005
-  formal: judge.py --scores DIR.. --sets <seven sets> --setting formal --model M --out OUT --select STD --tuning cvtune wikitune --weight 10
+  formal: judge.py --scores DIR.. --sets <seven sets> --setting formal --model M --out OUT --select STD --tuning cvtune wikitune --weight 1 --cap 0.005   (revision 7; was --weight 10)
 The selected (alpha, tau, delta) is printed and only recorded: the shipped values are not checked (rerank-strength 11.2).
 
 compare writes, per judgement, the concatenation of the arms' STD rowstats (`STD.<setting>.<set>.new.txt` = the picks of the selected point)
@@ -35,7 +35,7 @@ CHAT_SETS = ["chatclause", "cvtune", "wikitune"] + FIVE + ["discordtune"]
 FORMAL_SETS = ["cvtune", "wikitune"] + FIVE
 LABEL = "STD"
 CHAT_ARGS = ["--select", LABEL, "--tuning", "chatclause", "--weight", "1", "--cap", "0.005"]
-FORMAL_ARGS = ["--select", LABEL, "--tuning", "cvtune", "wikitune", "--weight", "10"]
+FORMAL_ARGS = ["--select", LABEL, "--tuning", "cvtune", "wikitune", "--weight", "1", "--cap", "0.005"]
 
 
 def judge_argv(setting, scores, model, out):
