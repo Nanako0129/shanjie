@@ -360,6 +360,7 @@ fn learned_word_skips_the_table_and_its_neighbour_does_not() {
     let mut e = engine(&f, Profile::Formal);
     e.set_learning(true);
     e.set_today(Some(20_000));
+    e.set_prediction(false).unwrap(); // predict-down B.4: ↓ lists the lexicon only, so 佔 is a re-pick
     e.set_left_context("我們"); // outside the toy vocabulary: the first word starts from (<s>, <s>)
     let o = type_syls(&mut e, "ㄊㄚ ㄓㄢˋ");
     assert_eq!(o.preedit, "他占", "premise: unlearned, 占 is first");
