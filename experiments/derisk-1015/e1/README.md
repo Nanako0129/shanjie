@@ -24,6 +24,7 @@ cd <REPO> && python3 -W ignore experiments/derisk-1015/e1/test_e1.py > /tmp/e1-t
 | `subset_rowstats.py` | E4 子集合（前文含句中標點、數字或英文）的 rowstats，只報不判 |
 | `entropy_prune.py` | E1e。相對熵剪枝：從 T1 與 B0（＋`kn.sjkn`）算每個條目的分數，一次排序，輸出多個 K 的 `.sjt3`（`prune.select` 的規則） |
 | `compress.py` | E1c。(i) 無損與 (ii) 8／4 位元對數級距量化的寫出、讀回與大小報告 |
+| `remap_tri.py` | 把 `.sjt3` 從一個 bigram 模型的詞 id 換成另一個的（照詞串對應），重算 `ctx_key`、重排序、檔頭改綁目標模型的 SHA-256；來源有、目標沒有的詞 → 非零結束。`--src-lm B0.sjlm --tri IN.sjt3 --dst-lm V6.sjlm --out OUT.sjt3`，印一行 JSON。測試在 `test_remap.py` |
 | `common.py` | 路徑、SHA-256、commit 紀錄 |
 | `test_e1.py` | 單元測試 |
 
