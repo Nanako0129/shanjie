@@ -45,16 +45,19 @@
 契約 `docs/contracts/about-update.md`；信任模型在它的 §0.1 與 `docs/PLAN.md` R10。
 
 - **金鑰**：EdDSA 私鑰只在 GitHub 的 `release` Environment secret `SPARKLE_PRIVATE_KEY`（Sparkle `generate_keys` 匯出的 32 位元組種子，base64）；公鑰寫在三處，要一起改：`scripts/build-app.sh` 的 `SPARKLE_PUBLIC_KEY`、`scripts/check-app.sh` 的 `SPARKLE_PUBLIC_KEY`、`.github/workflows/release.yml` sign 工作的 `env.SPARKLE_PUBLIC_KEY`。
-- **發版時 `release.yml` 做的事**：sign 工作由內而外簽 Sparkle 的 `Autoupdate`、`Updater.app`、framework 與 App；`verify_sparkle` 檢查四處的 Team ID、runtime、沒有 entitlements、沒有 XPC 服務、Info.plist 的 Sparkle 鍵逐字相符；乾跑與推 tag 都從 secret 推出公鑰，和 zip 裡的 `SUPublicEDKey` 比對。只有推 tag 時，在刪掉簽章鑰匙圈之後，用 Sparkle 官方 2.9.3 tarball（SHA-256 寫在 workflow）的 `generate_appcast` 產生並簽 `appcast.xml`；publish 先確認 main 的 `appcast.xml` 從 tag 之後沒被改過，建好 Release 後用 contents API 寫回 main（帶 main 目前的 blob SHA，期間被改過就被拒）。
+- **發版時 `release.yml` 做的事**：build 工作以 `SHANJIE_RELEASE_BUILD=1` 建置（Info.plist `ShanjieUpdateBuild` 是 `release`，只有這種建置與更新測試版會啟動更新服務）。sign 工作由內而外簽 Sparkle 的 `Autoupdate`、`Updater.app`、framework 與 App；`verify_sparkle` 檢查四處的 Team ID、runtime、沒有 entitlements、沒有 XPC 服務、Info.plist 的 Sparkle 鍵逐字相符；乾跑與推 tag 都從 secret 推出公鑰，和 zip 裡的 `SUPublicEDKey` 比對。只有推 tag 時，在刪掉簽章鑰匙圈之後，sparse checkout `appcast.xml` 與 `docs/releases/<tag>.md`（只當資料讀），用 Sparkle 官方 2.9.3 tarball（SHA-256 寫在 workflow）的 `generate_appcast` 產生並簽 `appcast.xml`：發版說明嵌進新項目、保留所有版本（`--maximum-versions 0`）、指名新版本（`--versions`），然後只檢查新項目。publish 先確認 main 的 `appcast.xml` 從 tag 之後沒被改過，建好 Release 後用 contents API 寫回 main（帶 main 目前的 blob SHA，期間被改過就被拒）。
+- **appcast 的 commit 沒有 CI**：它是 `GITHUB_TOKEN` 做的，不會觸發 `ci.yml`。下一次發版的 CI 關卡（`scripts/check-ci-gate.sh`）會跳過只改 `appcast.xml` 的 commit，看它前一個 commit 的 CI。
 - **推 tag 之後要核對**（契約 §3 第 6 項）：main 的 `appcast.xml` 有這一版的項目，enclosure 網址是 `https://github.com/Nanako0129/shanjie/releases/download/v<V>/shanjie-<V>.zip`、`length` 等於上傳的 zip 大小；那個網址下載下來的 SHA-256 等於 `shanjie-<V>.zip.sha256`；已安裝的這一版在設定→關於按「立即檢查」顯示「已是最新」。任一項不對就當場修 appcast 或 workflow，所有這一版的使用者都靠它更新。
 - **Homebrew 舊使用者**：cask 是 `auto_updates true`。v0.4.6 以前用 brew 裝的人還沒有 Sparkle，v0.4.7 的發版說明要寫一次性的 `brew upgrade --cask nanako0129/tap/shanjie`。
 
 ### 金鑰外洩或要輪換
 
-先記住限制：Sparkle 接受「EdDSA 簽章通過」**或**「新版的 Apple 簽章符合已安裝版本的 designated requirement（同一個 Team ID）」任一成立的更新；EdDSA 沒有撤銷機制。
+先記住限制（契約 §0.1，讀 Sparkle 2.9.3 原始碼）：我們的更新是 zip，開了 `SUVerifyUpdateBeforeExtraction`。Sparkle 解壓前驗 zip 的 EdDSA 簽章；它的備援是驗壓縮檔本身的 Developer ID 簽章，zip 帶不了程式碼簽章，所以**只有 EdDSA 能讓更新被接受**，Developer ID 幫不了輪換。EdDSA 也沒有撤銷機制。已安裝的 App 只認自己 Info.plist 裡的那把公鑰，驗 feed 與壓縮檔都用它。
 
-1. **EdDSA 私鑰外洩**：產生新的金鑰對（維護者在自己的終端機跑 `generate_keys`），新私鑰換進 `SPARKLE_PRIVATE_KEY`，新公鑰改進上面三處；發一個新版本。這一版的壓縮檔用新私鑰簽，舊用戶端的公鑰是舊的、驗不過 EdDSA，所以靠第二條路接受它：新版要用同一個 Team（`2LJ882GPY8`）的 Developer ID 簽（`release.yml` 本來就這樣做）。Sparkle 允許新版帶不同的 `SUPublicEDKey`（輪換），不允許拿掉它。
-2. **feed 有簽章**（`SURequireSignedFeed`）：輪換那一版的 `appcast.xml` 由新私鑰簽，舊用戶端用舊公鑰驗 feed 會失敗。依契約 §6 的評估，舊用戶端最多約 20 天收不到新 feed（這個數字來自審查，沒有實測）；這段期間請使用者用安裝程式或 `brew upgrade --cask nanako0129/tap/shanjie` 手動更新，發版說明與網站都要寫。
-3. **還沒更新的使用者仍有風險**：攻擊者同時有舊私鑰與 feed 的寫入權（main 的 `appcast.xml`）時，可以對還沒換到新公鑰的使用者推更新。外洩後檢查 main 的 `appcast.xml` 歷史與 repo 的寫入權限（branch 規則、deploy key、Actions 權杖）。
-4. **Developer ID 憑證外洩**：同樣能推更新（第二條路），處理方式是向 Apple 撤銷憑證、換新的 P12，並照 1 換 EdDSA 金鑰。
-5. **要拿掉 Sparkle**：新版仍要保留 `SUPublicEDKey` 並用同一個 Team 簽；或讓 appcast 不再有新項目，使用者改用安裝程式更新。
+1. **計畫中的輪換（舊私鑰還在、沒外洩）**：維護者在自己的終端機用 `generate_keys` 產生新的金鑰對。發一個「輪換版」：App 帶**新**公鑰（改上面三處），但壓縮檔與 feed 用**舊**私鑰簽，已安裝的舊版才驗得過。之後的版本才換成新私鑰（`SPARKLE_PRIVATE_KEY` 在輪換版發完之後才換）。
+   - 現在的 workflow 做不到輪換版，要另開 PR 改一次：`generate_appcast` 只在 App 的 `SUPublicEDKey` 和簽章用的私鑰相符時才簽壓縮檔（不符只印警告，新項目沒有 `sparkle:edSignature`），而金鑰成對檢查與新項目檢查都會擋下。輪換版要用舊私鑰跑 `sign_update` 簽 zip、把簽章與長度填進新項目，再用 `sign_update` 簽整份 feed；那個 PR 要寫清楚只用一次、下一版改回來。
+   - 還沒裝到輪換版的使用者，在 feed 換成新私鑰簽之後就驗不過 feed，收不到之後的更新；發版說明與網站要請他們手動更新（安裝程式，或 `brew upgrade --cask nanako0129/tap/shanjie`）。
+2. **舊私鑰外洩**：照 1 盡快發輪換版（攻擊者也有舊私鑰，所以同時檢查並收緊 main 的 `appcast.xml` 的寫入權：branch 規則、deploy key、Actions 權杖；契約 §0.1：私鑰加上 feed 寫入權就能推更新）。還沒換到新公鑰的使用者，在攻擊者同時有舊私鑰與 feed 寫入權時仍有風險；發版說明與網站要寫明，請大家盡快更新。
+3. **舊私鑰遺失**：Sparkle 推不了任何更新（沒有私鑰簽不出已安裝版本驗得過的東西）。只能請使用者手動重裝新版（新公鑰），網站、README 與發版說明都要寫。
+4. **Developer ID 憑證外洩**：它單獨推不了 Sparkle 更新（zip 沒有備援），但仍能簽出讓 Gatekeeper 放行的程式；照 Apple 的流程撤銷憑證、換新的 P12。
+5. **要拿掉 Sparkle**：Sparkle 拒絕「新版拿掉 `SUPublicEDKey`」或拿掉程式碼簽章的更新，所以拿掉 Sparkle 的那一版仍要帶 `SUPublicEDKey`、用目前的私鑰簽；或讓 appcast 不再有新項目，使用者改用安裝程式更新。

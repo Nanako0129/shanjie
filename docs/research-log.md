@@ -6347,3 +6347,12 @@ formal: alpha 0.7, tau 1, delta 2
 - **`generate_appcast` 的實際輸出**（本機，SwiftPM 解析出的 2.9.3 工具、程序內產生的一次性金鑰、測試版 zip，`HOME` 指到暫存區）：一個項目，enclosure 網址等於 `--download-url-prefix` 加 zip 檔名，`length` 等於 zip 大小，有 `sparkle:edSignature`；feed 的簽章區塊接在 `</rss>` 同一行後面（`</rss><!-- sparkle-signatures:`），所以 workflow 用 `grep -F` 不用 `grep -x`。用 CryptoKit 從同一個種子推出的公鑰驗得過它的壓縮檔簽章，所以 workflow 的金鑰成對檢查和 Sparkle 的算法一致。沒有舊的 `appcast.xml` 時它自己建一份新的，不需要先放空的 feed。
 - **Info.plist 的布林值要連型別一起比**：`PlistBuddy -c Print` 把字串 `"true"` 和布林 true 印成一樣，`check-app.sh` 改用 `plutil -extract … -expect bool`。
 - 還沒做（要維護者或 main）：`workflow_dispatch` 乾跑、實機的更新流程與請求錄製（契約 §3 第 4 項）、Homebrew 的 VM 實測（第 5 項）、推 tag 後的正式路徑核對（第 6 項）。
+
+## 2026-10-16：about-update 修訂三（實作的 /code-review）
+
+- **Developer ID 的備援對 zip 不成立**（讀 Sparkle 2.9.3）：`AppInstaller.m` 在 `SUVerifyUpdateBeforeExtraction` 開著、一般 App 更新時，呼叫 `SUUpdateValidator` 的 `validateDownloadPathWithFallbackOnCodeSigning:YES`：先驗 EdDSA，失敗才用 `SUCodeSigningVerifier codeSignatureIsValidAtDownloadURL:` 驗**下載的壓縮檔本身**的程式碼簽章與舊版的 Team。zip 帶不了程式碼簽章，所以我們的更新只有 EdDSA 這一條路。EdDSA 通過之後，`passesBasicUpdatePolicy` 只禁止拿掉 `SUPublicEDKey` 或拿掉程式碼簽章，不比對 Team（ad-hoc 也行）。契約 §0.1、PLAN R10、`release.yml` 檔頭與輪換手冊照這個改寫。
+- **輪換版做不到全自動**：`generate_appcast`（`Appcast.swift`）只在 App 的 `SUPublicEDKey` 等於簽章私鑰的公鑰時才簽壓縮檔，不符只印「does not match」的警告、項目沒有簽章。帶新公鑰、用舊私鑰簽的輪換版因此要用 `sign_update` 手動補，寫進 `docs/releases/README.md`。
+- **保留所有版本**：`--maximum-versions` 的說明與程式碼都是「0 代表保留全部」（轉成 `Int.max`），預設 3。本機用一次性金鑰實測 `--embed-release-notes --maximum-versions 0 --versions 0.4.91`：feed 裡已有較新的 0.4.95 時，0.4.91 仍加進去（兩個項目都在）；新項目的 `<description sparkle:format="markdown">` 是 `docs/releases/v0.4.6.md` 的全文（測試用的說明檔）。Sparkle 用 `SUTextViewReleaseNotesView`（NSTextView，`prefersMarkdown:YES`）顯示 markdown，不是網頁檢視。workflow 的新項目檢查（Python，只看 enclosure 網址等於這次 zip 的那一項）在這份 feed 上通過，拿掉說明、改長度、拿掉簽章、找不到項目各以 exit 1 失敗。
+- **互動流程前先靜默檢查**：按「更新到 X」或選單項時先 `checkForUpdateInformation`，確認有新版才在下一個 main queue 回合呼叫 `checkForUpdates`；沒有就只更新狀態。理由：直接呼叫 `checkForUpdates` 時，版本已經不在（或檢查失敗）會由 Sparkle 跳出它自己的提示。使用者進了 Sparkle 的流程之後，下載或安裝出錯時 Sparkle 仍可能跳模態警告，這是實機驗收 4(h)。
+- **本機建置不啟動更新服務**：Info.plist `ShanjieUpdateBuild`（`release` 只在 `release.yml` 的 build 工作、`test` 是更新測試版、其他 `local`），`Updates.runsUpdater` 只在前兩者回 true。
+- **CI 關卡**：publish 用 `GITHUB_TOKEN` 寫進 main 的 appcast commit 不觸發 `ci.yml`；`scripts/check-ci-gate.sh` 改成往回跳過只改 `appcast.xml` 的單親 commit，`scripts/test-check-ci-gate.sh` 用假的 `gh` 測（另外兩個突變：不往回走、只要有改 `appcast.xml` 就往回走，都讓測試失敗）。
