@@ -352,7 +352,7 @@ pub unsafe extern "C" fn shanjie_engine_reset(
 
 /// S2c. Loads the bigram model at `path` (with `classes.sjc` beside it, and a `kn.sjkn` Kneser-Ney side file if one
 /// exists there: a broken or mismatching one fails the load with code 3, a valid one changes the scoring; the app
-/// ships one since model-v6), reading `data_dir/overlay-add.tsv`, `names-add.tsv` (and demote.tsv) again. Does not
+/// ships one since model-v6; likewise an optional `trigram.sjt3`, which only the formal profile uses, the app ships none yet), reading `data_dir/overlay-add.tsv`, `names-add.tsv` (and demote.tsv) again. Does not
 /// recompute the composition display. Any failure leaves the previous LM state (none or the old model).
 ///
 /// # Safety

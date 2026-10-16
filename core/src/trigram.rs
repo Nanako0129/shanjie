@@ -1,0 +1,157 @@
+//! trigram.sjt3 (SJT30001, docs/contracts/trigram-core.md): the trigram level of the formal profile, read beside bigram.sjlm.
+//! Layout (little-endian; tools/build_trigram.py writes it, reference/proto/trigram.py reads it):
+//!   magic `SJT30001` | V u32 | D f64 | SHA-256 of the bigram model 32 | C u32 | E u32
+//!   | key u64[C] (u * V + v, ascending) | total u64[C] (the context's count before pruning) | off u32[C+1]
+//!   | next u32[E] (ascending inside a context) | count u32[E]
+//! The file is kept as read (nothing is copied into typed arrays) and every field is read in place; `parse` checks all the
+//! invariants the lookups rely on, so no index can panic. R2: errors carry no content.
+
+use crate::lm::LmError;
+use std::sync::OnceLock;
+
+const MAGIC: &[u8; 8] = b"SJT30001";
+const HEAD: usize = 60;
+
+pub(crate) struct Tri {
+    v: u64,
+    d: f64,
+    c: usize,
+    raw: Vec<u8>,
+    /// Section offsets into `raw`: key, total, off, next, count.
+    at: [usize; 5],
+    /// `+tri:<sha8 of the file>` (the summary-line tag), hashed on first use.
+    tag: OnceLock<String>,
+}
+
+/// A stored context (u, v) with what the score needs from it: the pre-prune total and the back-off weight.
+#[derive(Clone, Copy)]
+pub(crate) struct TriCtx {
+    idx: usize,
+    tot: f64,
+    back: f64,
+}
+
+impl Tri {
+    /// `raw` is the whole file; `v` and `model_sha` (hex) are the bigram model it must be bound to.
+    pub(crate) fn parse(raw: Vec<u8>, v: usize, model_sha: &str) -> Result<Tri, LmError> {
+        let bad = LmError::TriTable;
+        let u32_at = |p: usize| raw.get(p..p + 4).map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]));
+        if raw.len() < HEAD + 4 || &raw[..8] != MAGIC {
+            return Err(bad);
+        }
+        let (vv, d) = (u32_at(8).ok_or(bad)? as usize, f64::from_le_bytes(raw[12..20].try_into().map_err(|_| bad)?));
+        let sha: String = raw[20..52].iter().map(|b| format!("{b:02x}")).collect();
+        let (c, e) = (u32_at(52).ok_or(bad)? as usize, u32_at(56).ok_or(bad)? as usize);
+        if vv != v || sha != model_sha || !(0.0..1.0).contains(&d) {
+            return Err(bad);
+        }
+        let want = c.checked_mul(20).and_then(|x| x.checked_add(e.checked_mul(8)?)).and_then(|x| x.checked_add(HEAD + 4)).ok_or(bad)?;
+        if raw.len() != want {
+            return Err(bad);
+        }
+        let key = HEAD;
+        let tot = key + 8 * c;
+        let off = tot + 8 * c;
+        let nxt = off + 4 * (c + 1);
+        let cnt = nxt + 4 * e;
+        let t = Tri { v: v as u64, d, c, raw, at: [key, tot, off, nxt, cnt], tag: OnceLock::new() };
+        let vv = v as u64 * v as u64;
+        if t.off(0) != 0 || t.off(c) as usize != e {
+            return Err(bad);
+        }
+        for i in 0..c {
+            let (lo, hi) = (t.off(i) as usize, t.off(i + 1) as usize);
+            if (i > 0 && t.key(i - 1) >= t.key(i)) || t.key(i) >= vv || t.total(i) == 0 || lo > hi || hi > e {
+                return Err(bad);
+            }
+            let mut sum = 0u64;
+            for j in lo..hi {
+                if t.next(j) as usize >= v || (j > lo && t.next(j - 1) >= t.next(j)) {
+                    return Err(bad);
+                }
+                sum += t.count(j) as u64;
+            }
+            // The total is taken before pruning, so the kept counts cannot exceed it (a correct file always passes);
+            // a larger sum would make the back-off weight negative.
+            if sum > t.total(i) {
+                return Err(bad);
+            }
+        }
+        Ok(t)
+    }
+
+    fn u32_at(&self, p: usize) -> u32 {
+        u32::from_le_bytes([self.raw[p], self.raw[p + 1], self.raw[p + 2], self.raw[p + 3]])
+    }
+    fn u64_at(&self, p: usize) -> u64 {
+        u64::from_le_bytes(self.raw[p..p + 8].try_into().unwrap())
+    }
+    fn key(&self, i: usize) -> u64 {
+        self.u64_at(self.at[0] + 8 * i)
+    }
+    fn total(&self, i: usize) -> u64 {
+        self.u64_at(self.at[1] + 8 * i)
+    }
+    fn off(&self, i: usize) -> u32 {
+        self.u32_at(self.at[2] + 4 * i)
+    }
+    fn next(&self, j: usize) -> u32 {
+        self.u32_at(self.at[3] + 4 * j)
+    }
+    fn count(&self, j: usize) -> u32 {
+        self.u32_at(self.at[4] + 4 * j)
+    }
+
+    /// The tag `+tri:<sha8 of the file>` (same text as reference/proto/lm_eval.py).
+    pub(crate) fn tag(&self) -> &str {
+        self.tag.get_or_init(|| {
+            let sha = crate::eval::sha256_hex(&self.raw);
+            format!("+tri:{}", &sha[..8])
+        })
+    }
+
+    /// The context (u, v) if it is stored. Back-off weight as trimodel.py `back`: 1 - sum over the kept entries (c - D) / total,
+    /// summed in file order (counts are integers and D is a multiple of 1/4 in every table built so far, so the sum is exact
+    /// whatever the order and equals numpy's).
+    pub(crate) fn context(&self, u: u32, v: u32) -> Option<TriCtx> {
+        let k = u as u64 * self.v + v as u64;
+        let (mut lo, mut hi) = (0, self.c);
+        while lo < hi {
+            let mid = (lo + hi) / 2;
+            match self.key(mid).cmp(&k) {
+                std::cmp::Ordering::Less => lo = mid + 1,
+                std::cmp::Ordering::Greater => hi = mid,
+                std::cmp::Ordering::Equal => {
+                    let mut kept = 0.0f64;
+                    for j in self.off(mid) as usize..self.off(mid + 1) as usize {
+                        kept += self.count(j) as f64 - self.d;
+                    }
+                    let tot = self.total(mid) as f64;
+                    return Some(TriCtx { idx: mid, tot, back: 1.0 - kept / tot });
+                }
+            }
+        }
+        None
+    }
+
+    /// P3(w | u, v) given P2 = `p2` (trimodel.py `prob`): an entry adds `(c - D) / total`, and every word gets `back * P2`.
+    pub(crate) fn prob(&self, ctx: TriCtx, w: Option<u32>, p2: f64) -> f64 {
+        let (lo, hi) = (self.off(ctx.idx) as usize, self.off(ctx.idx + 1) as usize);
+        let found = w.and_then(|w| {
+            let (mut a, mut b) = (lo, hi);
+            while a < b {
+                let mid = (a + b) / 2;
+                match self.next(mid).cmp(&w) {
+                    std::cmp::Ordering::Less => a = mid + 1,
+                    std::cmp::Ordering::Greater => b = mid,
+                    std::cmp::Ordering::Equal => return Some(self.count(mid)),
+                }
+            }
+            None
+        });
+        match found.filter(|&k| k != 0) {
+            Some(k) => (k as f64 - self.d) / ctx.tot + ctx.back * p2,
+            None => ctx.back * p2,
+        }
+    }
+}
