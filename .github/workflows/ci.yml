@@ -92,6 +92,19 @@ jobs:
         with:
           toolchain: 1.97.1
 
+      # Rust build cache (docs/contracts/ci-speed.md): crates and target/, per job, keyed by the pinned toolchain and Cargo.lock.
+      # Cargo's fingerprints decide what to rebuild, so a restored target/ only saves compile time. Pull requests read main's
+      # caches but cannot write ones main reads.
+      - name: Cache the Rust build
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: rust-${{ runner.os }}-${{ runner.arch }}-1.97.1-${{ github.job }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: rust-${{ runner.os }}-${{ runner.arch }}-1.97.1-${{ github.job }}-
+
       # The bigram model is not in git (docs/PLAN.md S2c); it is the model-v6
       # release asset, its word-class table (S2k) is the classes-v5 asset and its
       # Kneser-Ney side file (kn-core) is the kn-v1 asset. The small model of
@@ -116,9 +129,6 @@ jobs:
           shasum -a 256 -c data/tinylm.sjtl.sha256
           gh release download sj-cx-1-7.7m --repo "$GITHUB_REPOSITORY" -p trigram.sjt3 -D data/lm
           shasum -a 256 -c data/trigram.sjt3.sha256
-
-      - name: Tests (debug)
-        run: cargo test --locked
 
       # Release also enforces the per-key p95 < 16 ms assertions in the replays.
       - name: Tests (release)
@@ -241,6 +251,69 @@ jobs:
           "$RUNNER_TEMP/x0c-venv/bin/python" -W ignore -m unittest tools/test_build_trigram.py
 
   # The Swift input method (docs/contracts/s3b.md section 3): build the ad-hoc
+  # docs/contracts/ci-speed.md: the debug test run, beside `core` instead of before it (debug 455 s and release 252 s used to run
+  # one after the other). Skipped exactly when `core` is.
+  core-debug:
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
+    # Xcode 27 / macOS 27, the same image the Swift shell (S3b) will need.
+    runs-on: xcode-27
+    # A full run takes about 3 minutes; a hung FFI child process should not
+    # hold the runner for the 6-hour default.
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+
+      # Pinned to the toolchain the golden files were generated with: scores
+      # must be bit-identical to the Python reference, and a codegen change
+      # has already moved one result by 1 ulp (docs/contracts/s3a.md section 9,
+      # powf lowered to exp10). The action is pinned to a master commit, as its
+      # README recommends; the `stable` branch is regenerated on every merge.
+      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
+        with:
+          toolchain: 1.97.1
+
+      # Rust build cache (docs/contracts/ci-speed.md): crates and target/, per job, keyed by the pinned toolchain and Cargo.lock.
+      # Cargo's fingerprints decide what to rebuild, so a restored target/ only saves compile time. Pull requests read main's
+      # caches but cannot write ones main reads.
+      - name: Cache the Rust build
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: rust-${{ runner.os }}-${{ runner.arch }}-1.97.1-${{ github.job }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: rust-${{ runner.os }}-${{ runner.arch }}-1.97.1-${{ github.job }}-
+
+      # The bigram model is not in git (docs/PLAN.md S2c); it is the model-v6
+      # release asset, its word-class table (S2k) is the classes-v5 asset and its
+      # Kneser-Ney side file (kn-core) is the kn-v1 asset. The small model of
+      # 語意校正 (S7c-2b) is the tinylm-v5 asset (SJTL0004: it records model-v6's and kn-v1's hashes).
+      # The trigram table of the formal profile (trigram-core) is the sj-cx-1-7.7m asset (bound to model-v6's hash).
+      # Checking them here fails the run in seconds with a clear message instead
+      # of after the build. The hashes are checked against data/bigram.sjlm.sha256,
+      # data/classes.sjc.sha256, data/kn.sjkn.sha256, data/tinylm.sjtl.sha256 and data/trigram.sjt3.sha256 (also read by build-app.sh and release.yml);
+      # cli/tests/golden.rs repeats the first two, so a model switch updates both (docs/data-files.md).
+      - name: Fetch the language model
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release download model-v6 --repo "$GITHUB_REPOSITORY" -p bigram.sjlm -D data/lm
+          shasum -a 256 -c data/bigram.sjlm.sha256
+          gh release download classes-v5 --repo "$GITHUB_REPOSITORY" -p classes.sjc -D data/lm
+          shasum -a 256 -c data/classes.sjc.sha256
+          gh release download kn-v1 --repo "$GITHUB_REPOSITORY" -p kn.sjkn -D data/lm
+          shasum -a 256 -c data/kn.sjkn.sha256
+          gh release download tinylm-v5 --repo "$GITHUB_REPOSITORY" -p tinylm.sjtl -D data/lm
+          shasum -a 256 -c data/tinylm.sjtl.sha256
+          gh release download sj-cx-1-7.7m --repo "$GITHUB_REPOSITORY" -p trigram.sjt3 -D data/lm
+          shasum -a 256 -c data/trigram.sjt3.sha256
+
+      - name: Tests (debug)
+        run: cargo test --locked
+
   # app, the Swift tests through the real core and model, the bundled
   # selftest, and acceptance checks 2, 3 and 6 of contract section 10.
   shell:
@@ -267,6 +340,19 @@ jobs:
         with:
           toolchain: 1.97.1
 
+      # Rust build cache (docs/contracts/ci-speed.md): crates and target/, per job, keyed by the pinned toolchain and Cargo.lock.
+      # Cargo's fingerprints decide what to rebuild, so a restored target/ only saves compile time. Pull requests read main's
+      # caches but cannot write ones main reads.
+      - name: Cache the Rust build
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: rust-${{ runner.os }}-${{ runner.arch }}-1.97.1-${{ github.job }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: rust-${{ runner.os }}-${{ runner.arch }}-1.97.1-${{ github.job }}-
+
       - name: Fetch the language model
         env:
           GH_TOKEN: ${{ github.token }}
@@ -284,7 +370,7 @@ jobs:
           shasum -a 256 -c data/trigram.sjt3.sha256
 
       # The local entry points (Makefile, docs/verification.md). cargo test
-      # already ran in the core job, so only the Swift tests run here.
+      # runs in the core and core-debug jobs, so only the Swift tests run here.
       - name: Build the app (ad-hoc)
         run: make bundle
 
@@ -298,8 +384,15 @@ jobs:
 
       # Includes the log-stream test (acceptance 5): it needs /usr/bin/log
       # stream, which the runner's user can run.
+      # --parallel runs the test classes in worker processes (docs/contracts/ci-speed.md). It drops XCTest's `Executed N tests`
+      # summary, so the counts come from the xUnit file: testcases and skipped ones, printed for comparison with the serial run.
       - name: Swift tests
-        run: swift test --package-path macos --force-resolved-versions
+        run: |
+          set -euo pipefail
+          swift test --package-path macos --force-resolved-versions --parallel --xunit-output "$RUNNER_TEMP/swift-tests.xml"
+          python3 -c 'import sys, xml.etree.ElementTree as E
+          cases = list(E.parse(sys.argv[1]).iter("testcase"))
+          print("swift tests: %d testcases, %d skipped, %d failed" % (len(cases), sum(c.find("skipped") is not None for c in cases), sum(c.find("failure") is not None or c.find("error") is not None for c in cases)))' "$RUNNER_TEMP/swift-tests.xml"
 
       # The empty override builds with the shipping bundle ID: an ephemeral
       # runner has no installation to collide with (see the Makefile).
