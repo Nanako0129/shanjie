@@ -37,6 +37,7 @@ import rowstats_concat  # noqa: E402
 import subset_rowstats  # noqa: E402
 import sjlm_io  # noqa: E402
 import trimodel  # noqa: E402
+import tri_mintotal  # noqa: E402
 
 import build_counts as bc  # noqa: E402
 import build_lm  # noqa: E402
@@ -353,6 +354,34 @@ class TestTrigramModel(Fixture):
                     for w in words[:12]:
                         pb = float(rng.uniform(1e-4, 1e-1))
                         self.assertAlmostEqual(tl.prob(u, v, w, pb), ref._p(v, w, pb, u), delta=1e-12, msg=(thr, u, v, w))
+
+    def test_floor_caps_only_the_penalty(self):
+        lm = self.load_lm()
+        plain, floored = trimodel.TriLM(lm, self.tri_table(1)), trimodel.TriLM(lm, self.tri_table(1), floor=0.5)
+        words, pb, raised = list(lm.vocab)[:12], 1e-3, 0
+        for u in words:
+            for v in words:
+                for w in words:
+                    p2, p3, pf = lm.prob(v, w, pb), plain.prob(u, v, w, pb), floored.prob(u, v, w, pb)
+                    self.assertEqual(pf, max(p3, 0.5 * p2))
+                    raised += pf > p3
+        self.assertGreater(raised, 0)
+
+    def test_min_total_drops_small_contexts_and_copies_the_rest(self):
+        rng = np.random.RandomState(5)
+        V = 12
+        keys = np.unique(rng.randint(0, V ** 3, 400)).astype(np.uint64)
+        u, v, w = (keys // (V * V)).astype(np.uint32), ((keys // V) % V).astype(np.uint32), (keys % V).astype(np.uint32)
+        full = sjlm_io.write_tri(trimodel.TriBuild(u, v, w, rng.geometric(0.3, len(keys)).astype(np.int64), V).tables(1, bytes(32)))
+        a, T = sjlm_io.read_tri(full), 9
+        b = sjlm_io.read_tri(tri_mintotal.min_total(full, T))
+        ent = lambda d, i: (d["nxt"][d["off"][i]:d["off"][i + 1]].tolist(), d["cnt"][d["off"][i]:d["off"][i + 1]].tolist())
+        kept = [i for i in range(len(a["key"])) if a["tot"][i] >= T]
+        self.assertTrue(0 < len(kept) < len(a["key"]))
+        self.assertEqual(b["key"].tolist(), [int(a["key"][i]) for i in kept])
+        for j, i in enumerate(kept):
+            self.assertEqual(int(b["tot"][j]), int(a["tot"][i])); self.assertEqual(ent(b, j), ent(a, i))
+        self.assertEqual((b["V"], b["D"], b["model_sha"]), (a["V"], a["D"], a["model_sha"]))
 
     def test_prune_from_the_stored_table_is_byte_identical_to_building_it(self):
         rng = np.random.RandomState(7)

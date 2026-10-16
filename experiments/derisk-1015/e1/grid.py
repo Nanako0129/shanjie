@@ -118,7 +118,7 @@ def decode_points(lm_path, kwargs, jobs, procs, chunk=40):
 # ---------- commands ----------
 def model_kwargs(a):
     return dict(tri_path=a.tri, classes=not a.no_classes, kn=a.kn, no_kn=False, extra_overlay=a.extra_overlay, context=True,
-                x_context=getattr(a, "x_context", False), ctx_u=getattr(a, "ctx_u", "keep"))
+                x_context=getattr(a, "x_context", False), ctx_u=getattr(a, "ctx_u", "keep"), tri_floor=getattr(a, "tri_floor", 0.0))
 
 
 def model_info(a):
@@ -127,7 +127,7 @@ def model_info(a):
     return {"lm": a.lm, "lm_sha256": common.sha256_file(a.lm), "tri": a.tri, "tri_sha256": common.sha256_file(a.tri) if a.tri else None,
             "kn": kn, "kn_sha256": common.sha256_file(kn) if kn else None, "no_classes": a.no_classes,
             "classes_sha256": common.sha256_file(classes) if not a.no_classes and os.path.exists(classes) else None,
-            "x_context": getattr(a, "x_context", False), "ctx_u": getattr(a, "ctx_u", "keep"), "extra_overlay": a.extra_overlay}
+            "x_context": getattr(a, "x_context", False), "ctx_u": getattr(a, "ctx_u", "keep"), "tri_floor": getattr(a, "tri_floor", 0.0), "extra_overlay": a.extra_overlay}
 
 
 def cmd_select(a):
@@ -202,6 +202,7 @@ def main(argv=None):
     j.add_argument("--selection"); j.add_argument("--lam", type=float); j.add_argument("--beta", type=float)
     j.add_argument("--x-context", action="store_true", help="E4 (b): digit / English in the left context starts from <X> (mapped model only)")
     j.add_argument("--ctx-u", choices=("keep", "eos", "none"), default="keep", help="trigram-core research: the context word as u (harness.decode3)")
+    j.add_argument("--tri-floor", type=float, default=0.0, help="trigram-core research: P3 >= F * P2 (trimodel.TriLM floor)")
     a = ap.parse_args(argv)
     (cmd_select if a.cmd == "select" else cmd_judge)(a)
 

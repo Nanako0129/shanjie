@@ -99,7 +99,7 @@ class Evaluator:
     """Everything one process needs to decode rows: lexicon, model, optional trigram table."""
 
     def __init__(self, lm_path, *, tri_path=None, classes=True, kn=None, kn_beta=None, no_kn=False, extra_overlay=None,
-                 demote=True, context=True, x_context=False, ctx_u="keep"):
+                 demote=True, context=True, x_context=False, ctx_u="keep", tri_floor=0.0):
         self.kn_path = LE.kn_side(lm_path, kn, no_kn)
         self.classes = classes
         self.extra_overlay, self.demote, self.context, self.x_context, self.ctx_u = extra_overlay, demote, context, x_context, ctx_u
@@ -108,7 +108,7 @@ class Evaluator:
         self.lex = L.cap_overlay(base, ime.capping_words(extra_overlay), self.lm)
         self.lm_sha = hashlib.sha256(open(lm_path, "rb").read()).digest()
         self.tri = TriTable.from_path(tri_path, self.lm_sha) if tri_path else None
-        self.tri_lm = TriLM(self.lm, self.tri) if self.tri else None
+        self.tri_lm = TriLM(self.lm, self.tri, tri_floor) if self.tri else None
         self.base_kn = self.lm.kn
         if x_context and self.lm.ids.get(X) is None:
             raise ValueError("--x-context needs a model built from the mapped counts: its vocabulary has no <X>")
