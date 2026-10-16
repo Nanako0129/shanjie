@@ -6316,6 +6316,7 @@ formal: alpha 0.7, tau 1, delta 2
 
 - 維護者實機的組字區是「Aaron說是他做的一件部屬腳本」，要的是「一鍵部署腳本」。加成 `Aaron|說是他做的一鍵部署腳本|ㄕㄨㄛ ㄕˋ ㄊㄚ ㄗㄨㄛˋ ㄉㄜ˙ ㄧ ㄐㄧㄢˋ ㄅㄨˋ ㄕㄨˇ ㄐㄧㄠˇ ㄅㄣˇ`。讀音由 `tools/readings.py` 產生，「署」照第 119 列的理由手動改成 ㄕㄨˇ（工具給 ㄕㄨˋ；組字區出現「部屬」，維護者打的是 ㄕㄨˇ）。
 - 兩個詞庫缺口：詞庫沒有「一鍵」（只有「一件」），「部署」沒有 ㄅㄨˋ-ㄕㄨˇ（同第 119 列）。正解只能由單字組出來。
+- 〔2026-10-17 更正〕「一鍵」其實在疊加層（`data/lexicon/overlay-add.tsv`：ㄧ-ㄐㄧㄢˋ 一鍵 −7.17，來源 wikt），上一條寫「詞庫沒有」是錯的。缺口只有「部署」沒有 ㄅㄨˋ-ㄕㄨˇ；單字「部」「署 ㄕㄨˇ」都在，正解組得出來，這一列錯在排序（正解不在前 64 名）。
 - CLI 出貨設定（`--context --packs acg --tinylm`）兩種設定第 1 名都是「說是他做的一件部屬腳本」；正解不在前 64 名。
 - `eval/golden/s2h-lm-context.txt` 的錯字回報兩行用 Python 參考實作重產，n 120：聊天 top1 29、書面 36 不變，oracle@64 兩種設定都 117 → 117；`eval/README.md` 改成 120 列，手動讀音加上第 120 列。
 
@@ -6401,7 +6402,7 @@ formal: alpha 0.7, tau 1, delta 2
 ## 2026-10-17：錯字回報第 128 列（沖煮頭）
 
 - 維護者實機的組字區是「但好像我的衝主投沒那麼高」，要的是「沖煮頭」（維護者補充）。加成 `|但好像我的沖煮頭沒那麼高|ㄉㄢˋ ㄏㄠˇ ㄒㄧㄤˋ ㄨㄛˇ ㄉㄜ˙ ㄔㄨㄥ ㄓㄨˇ ㄊㄡˊ ㄇㄟˊ ㄋㄚˋ ㄇㄜ˙ ㄍㄠ`（讀音由 `tools/readings.py` 產生，沒有 CHECK）。
-- 詞庫缺口：「沖煮」「沖煮頭」都不在基底詞庫與疊加層（和第 119、120 列的「部署」「一鍵」同一類，排進詞庫缺口小片）。
+- 詞庫缺口：「沖煮」「沖煮頭」都不在基底詞庫與疊加層（和第 119、120 列的「部署」同一類，排進詞庫缺口小片；「一鍵」其實在疊加層，見第 120 列的更正）。
 - Python 參考實作、golden 設定：兩種設定第 1 名都是「衝主投」；正解聊天第 8、書面第 10。
 - `eval/golden/s2h-lm-context.txt` 的錯字回報兩行用 Python 參考實作重產，n 128：聊天 top1 29、書面 37 不變，oracle@64 兩種設定都 124 → 125；`eval/README.md` 改成 128 列。
 
@@ -6424,6 +6425,38 @@ formal: alpha 0.7, tau 1, delta 2
 - 維護者實機的組字區是「有人說這個充起來很像點滴法」，要的是「沖」（沖咖啡；接著第 128 列「沖煮頭」的話題）。加成 `|有人說這個沖起來很像點滴法|ㄧㄡˇ ㄖㄣˊ ㄕㄨㄛ ㄓㄜˋ ㄍㄜ˙ ㄔㄨㄥ ㄑㄧˇ ㄌㄞˊ ㄏㄣˇ ㄒㄧㄤˋ ㄉㄧㄢˇ ㄉㄧ ㄈㄚˇ`（讀音由 `tools/readings.py` 產生，沒有 CHECK）。
 - Python 參考實作、golden 設定：聊天第 1 名「衝起來」、書面第 1 名「充起來」，正解兩種設定都第 3。
 - `eval/golden/s2h-lm-context.txt` 的錯字回報兩行用 Python 參考實作重產，n 130：聊天 top1 29、書面 38 不變，oracle@64 兩種設定都 126 → 127；`eval/README.md` 改成 130 列。
+
+## 2026-10-17：v0.4.7 發版前的核對
+
+- **發版演練**（`release.yml` 在 main `af78dedc` 手動觸發，run 38938870361）：gate、build、sign 都通過，publish 照設計跳過。輸入法與安裝程式都公證 Accepted、驗證通過（含 Sparkle 四處的 hardened runtime），Sparkle 金鑰對相符。簽好的兩個 zip 合計 195.6 MB；v0.4.6 的兩個是 106.1 MB，每個約多 44 MB（三元表）。〔2026-10-17 發佈後更正〕這是用演練產物的總大小推估的，不準：正式發佈的輸入法 zip 是 101,439,494 bytes（v0.4.6 53,299,449，多 48.1 MB），安裝程式 98,900,441 bytes（v0.4.6 52,836,749，多 46.1 MB）；說明與 Release 頁已改成約 48 MB。
+- **跨版本基準測試**（套件 v2，v0.4.6 `58da6d2` 對 v0.4.7 `af78dedc`，`eval/bench/results/v2-v0.4.6+v0.4.7.json`）：聊天設定每個集合都和 v0.4.6 相同；書面設定 wikitune +49（101／52，p 9.2e-5）、lytune +36（117／81，p 0.013）、discordtune +40（138／98，p 0.011）、cvtune +24（75／51，p 0.04）顯著變好，其他集合不顯著，沒有集合顯著變差。
+- **保留集**（shard-1 第 1 次使用，fresh verifier，出貨設定）：聊天 234 → 234（0／0）、書面 230 → 233（7／4，p 0.55）。
+- **速度欄不可比**：bench 量速度時，另一個專案的 Rust 建置與測試同時在 Mac 上跑（約兩顆核心滿載），量到 v0.4.7 聊天每鍵 p95 6.82 ms、v0.4.6 2.90 ms（v0.4.6 上一次是 2.27 ms）。聊天設定不讀三元表，於是另外核對：
+  - Mac 上同樣負載下交錯跑三組（v0.4.6、v0.4.7 有表、v0.4.7 沒表），各三輪的 p95 分別是 2.9／3.9／4.0、4.0／9.0／3.5、2.8／5.2／7.2 ms，高低不一致，雜訊比差異大。
+  - 在 Linux 機器（WSL，閒置）用兩個 commit 各自建重播程式、同一組模型，交錯 5 輪：聊天 p95 中位數 v0.4.6 2.94、v0.4.7 有表 2.85、沒表 2.75 ms；書面 v0.4.6 2.83、v0.4.7 有表 2.86 ms。第 1 輪兩版都偏慢（30 ms 以上，快取還沒熱），之後穩定。三組聊天的輸出逐字相同。
+  - 結論：沒有延遲退步；`docs/benchmark.md` 這一版的速度欄是在負載下量的，兩版都偏慢。記憶體欄的 426 MB 是最大 RSS，含三元表的映射頁；活動監視器看的 peak footprint 只多約 2 MB（trigram-mmap 的量測）。
+
+## 2026-10-17：v0.4.7 發佈
+
+- 維護者 10-17「測試OK可以發版了」。PR #184（說明、bench、保留集）合併後推 `v0.4.7`（tag 指向 main `207b4b49`；和量基準測試與保留集的 `af78dedc` 相比，`Cargo.toml Cargo.lock core cli data eval/variants.tsv macos scripts` 沒有差異），發佈流程 run 38948222592：gate、build、sign、publish 都成功（sign 由維護者核准）。
+- 核對（下載 Release 附件）：zip 與安裝程式的 SHA-256 和 `.sha256` 相符；輸入法 App `codesign --verify --deep --strict` 通過、Team 2LJ882GPY8、`spctl` 判定 Notarized Developer ID、`stapler validate` 通過、版本 0.4.7；Sparkle.framework 同 Team、有 hardened runtime；App 裡的模型 `bigram.sjlm` `fc2bddd1`、`classes.sjc` `9e36fa1b`、`kn.sjkn` `cbefbced`、`trigram.sjt3` `fdd3b05d`、`tinylm.sjtl` `d07de71d`，`Resources/` 有 `Assets.car` 與 `AppIcon.icns`；`SUFeedURL` 是 main 上的 `appcast.xml`；Latest 是 v0.4.7。解壓的副本驗完先 `lsregister -u` 再刪。
+- appcast（about-update §3 第 6 項的前兩點）：main 上的 `appcast.xml` 有一個 0.4.7 項目，feed 帶簽章、項目帶 EdDSA 簽章；下載網址回 200，長度 101,439,494 與 SHA-256 `2ad0ae6c…` 都和 Release 的 zip 相同。Homebrew cask `0.4.7`、`auto_updates true`、sha256 和 zip 相同。已安裝版「立即檢查」顯示已是最新，要維護者裝上後看（還沒看）。
+- 更正：說明原本寫「安裝檔多約 44 MB」，是用演練產物推估的；實際輸入法 zip 多 48.1 MB、安裝程式多 46.1 MB。說明檔與 GitHub Release 頁已改成約 48 MB（維護者同意改 Release 頁）。main 上 `appcast.xml` 嵌入的說明仍是 44 MB：改它要重簽 feed，而會在更新視窗看到這段的只有「已經有 Sparkle、版本低於 0.4.7」的安裝，這樣的安裝不存在（Sparkle 從 0.4.7 起才有），所以不重簽。
+- 發版後：Discord 發版公告（blobhaj，只標善解身分組，維護者選擇題同意）。網站（PR #186）隱私段寫上更新檢查、保留集換新數字，維護者同意後部署。維護者要網站圖示也跟著換（app-icon 契約 §5 原本排除）：用 repo 的 `packaging/AppIcon.icon` 經 `scripts/compile-app-icon.sh` 編進一個測試空殼，`NSWorkspace.icon(forFile:)` 以淺色外觀畫出 1024 px；`site/favicon.png` 是圖示本體（824 px 圓角方形）縮成 64 px，取代舊的 `favicon.svg`（平面的初版印章）；`site/og.png` 版面與文字不變，左側的平面印章換成同一張圖，圖示本體 300 px，位置和舊印章相同。
+- 發版過程的延誤：等 PR CI 的背景監看用了 `gh run list --commit <短 SHA>`，短 SHA 查不到任何 run，監看一直空轉、沒有通知；CI 綠了約 10 分鐘後才發現。之後一律用完整 SHA 或 run 編號監看。
+
+## 2026-10-17：錯字回報第 131 列（該記的教訓）
+
+- 維護者實機的組字區是「你該季的教訓是這個」，要的是「記」。加成 `就直接開始操作所以搶電腦，|你該記的教訓是這個|ㄋㄧˇ ㄍㄞ ㄐㄧˋ ㄉㄜ˙ ㄐㄧㄠˋ ㄒㄩㄣˋ ㄕˋ ㄓㄜˋ ㄍㄜ˙`（前文是同一則訊息的前一個子句；讀音由 `tools/readings.py` 產生，沒有 CHECK）。
+- Python 參考實作、golden 設定：兩種設定的第 1 名都是「該季」、第 2 名「該計」；正解聊天第 3、書面第 4。
+- `eval/golden/s2h-lm-context.txt` 的錯字回報兩行用 Python 參考實作重產，n 131：聊天 top1 29、書面 38 不變，oracle@64 兩種設定都 127 → 128；`eval/README.md` 改成 131 列。
+
+## 2026-10-17：錯字回報第 132 列（遍歷、正規化）
+
+- 維護者實機的組字區是「那要片票所有端點的分類然後自己正規劃成5h或是1week」，要的是「遍歷」與「正規化」（維護者在選擇題選「遍歷」）。加成 `|那要遍歷所有端點的分類然後自己正規化成|ㄋㄚˋ ㄧㄠˋ ㄅㄧㄢˋ ㄌㄧˋ ㄙㄨㄛˇ ㄧㄡˇ ㄉㄨㄢ ㄉㄧㄢˇ ㄉㄜ˙ ㄈㄣ ㄌㄟˋ ㄖㄢˊ ㄏㄡˋ ㄗˋ ㄐㄧˇ ㄓㄥˋ ㄍㄨㄟ ㄏㄨㄚˋ ㄔㄥˊ`（讀音由 `tools/readings.py` 產生，沒有 CHECK；`5h或是1week` 是英數，句子切在「成」）。
+- 「片票」在詞庫裡只有 ㄆㄧㄢˋ ㄆㄧㄠˋ 這個讀法，「遍歷」的讀音只有 ㄅㄧㄢˋ ㄌㄧˋ（`overlay-add.tsv`），兩者對不上；當時實際按的鍵不知道，這列用詞庫讀音。
+- Python 參考實作、golden 設定：聊天第 1 名「便利……正規劃成」，正解第 8；書面第 1 名「遍歷……正規劃成」，正解第 11。
+- `eval/golden/s2h-lm-context.txt` 的錯字回報兩行用 Python 參考實作重產，n 132：聊天 top1 29、書面 38 不變，oracle@64 兩種設定都 128 → 129；`eval/README.md` 改成 132 列。
 
 ## 2026-10-17：讀音感知 n-gram（分析與第一片契約）
 
