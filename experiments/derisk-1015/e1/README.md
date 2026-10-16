@@ -122,7 +122,7 @@ python3 $E1/anchor.py --lm $M/b0m/bigram.sjlm --no-classes
 
 預設 dev302、聊天與書面、`--context`；最後一行要印 `ANCHOR OK`（結束碼 0）。輸出裡有 commit 與模型雜湊，貼進研究紀錄。冒煙版：加 `--rows <檔> --limit 20`。
 
-### 4. λ×β 格點與凍結選擇（E1b；每個 模型×設定 一個獨立工作，可分給 188 與 Colab）
+### 4. λ×β 格點與凍結選擇（E1b；每個 模型×設定 一個獨立工作，可分給 Windows 機器與 Colab）
 
 ```
 SETS="--set cvtune=<cvtune.txt> --set wikitune=<wikitune.txt>"
@@ -285,7 +285,7 @@ B0ship 的 `judge.json` 要有 discordtune（契約：同一個檔）；沒有�
 
 分數 `s = c·ln( P3 / (back3·P2) )`：P3、back3 取自**未剪**的 T1，P2 是 B0 在 KN β 1、`--no-classes` 的機率，只由 `bigram.sjlm` 與 `kn.sjkn` 算（β 1 時 pb = N′/ΣN′，與 λ、詞庫無關；`</s>` 用 `eos_total/N`）。留分數最高的 K 個，同分照 (u, v, w) id 順序；保留的前文總次數不變、沒有保留條目的前文不存、檔頭不變。**一階近似**：剪掉一個條目會讓同前文其他詞的 back3 變大，這一項不算（Stolcke 的精確準則有它）；寫進研究紀錄。沒給 `--kn` 時 pb 退成 `uni/N`（近似，只作除錯，正式跑一定要給）。T1 約 1.1 GB 以 mmap 讀，打分一次（以前文為單位分塊），記憶體約 T1 條目數 × 24 bytes（分數、排序索引、工作區）再加 B0 的陣列。
 
-K 讀自 E1d 的 `$R/e1d/tri/tri-t{15,3,2}.sjt3.json` 的 `entries`。在 188 的 WSL（`E1`、`R`、`M`、`BG` 同 E1d 的手冊）：
+K 讀自 E1d 的 `$R/e1d/tri/tri-t{15,3,2}.sjt3.json` 的 `entries`。在 Windows 機器的 WSL（`E1`、`R`、`M`、`BG` 同 E1d 的手冊）：
 
 ```
 set -e

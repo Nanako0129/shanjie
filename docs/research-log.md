@@ -5974,7 +5974,7 @@ formal: alpha 0.7, tau 1, delta 2
 
 ## 2026-10-16：E1e 相對熵剪枝與 E1f 出貨詞類設定上的重判（derisk-1015 修訂四）
 
-- 契約修訂四（plan-verifier 第一次 REVISE 一項：停止條件和下一步的規則衝突，改成只是結論標籤；第二次 READY）。程式 `experiments/derisk-1015/e1/entropy_prune.py`（9e6b5c8，executor 寫，單元測試 47 項通過）。計算在 Windows 機器的 WSL，`/root/dr1e`（9e6b5c8）與 `/root/dr1`（7eea869，E1f 前五臂）。集合檔和 B0ship 逐一核對 SHA-256 與列數，全部相同。
+- 契約修訂四（plan-verifier 第一次 REVISE 一項：停止條件和下一步的規則衝突，改成只是結論標籤；第二次 READY）。程式 `experiments/derisk-1015/e1/entropy_prune.py`（9e6b5c8，executor 寫，單元測試 47 項通過）。計算在 Windows 機器的 WSL，`<clone>`（9e6b5c8）與 `<clone>`（7eea869，E1f 前五臂）。集合檔和 B0ship 逐一核對 SHA-256 與列數，全部相同。
 - **E1e 剪枝**：從 T1 的表（7,186 萬條目）一次打分，65 秒、峰值 RSS 3.8 GB。分數 `c·ln(P3/(back3·P2))`，P2 用 B0＋KN（β 1、不開詞類）。
 
 | 檔 | 條目（＝同名 T 檔） | 前文數（T 檔） | 總大小（T 檔） | 最低保留分數 |
@@ -6017,7 +6017,7 @@ formal: alpha 0.7, tau 1, delta 2
 ## 2026-10-16：derisk-1015 E1g（書面設定不開 KN、加 trigram）
 
 - 起因：E1f 只報的那一臂（書面、KN 關、T2）在判讀五集 +45。維護者選擇題選「書面設定關 KN 加 trigram」，契約修訂五加 E1g（plan-verifier 第一次 REVISE：增益可能只來自關 KN；加「CAND 對 F0k 也要顯著」與單獨的「書面只關 KN」一行後 READY，`151e94a`）。
-- 量法：188，`grid.py judge`，書面 λ 0.7、β 1、`--context`、詞類 μ 0.2（E1f 的 `b0c` 與 `b0c-nokn`），判讀用調參集（cvtune `31de456d…` 3,791 列＋wikitune `8dcfe40c…` 2,827 列）。凍結集合核對通過（`set check OK`）。調參集五臂約 6 分鐘。
+- 量法：Windows 機器，`grid.py judge`，書面 λ 0.7、β 1、`--context`、詞類 μ 0.2（E1f 的 `b0c` 與 `b0c-nokn`），判讀用調參集（cvtune `31de456d…` 3,791 列＋wikitune `8dcfe40c…` 2,827 列）。凍結集合核對通過（`set check OK`）。調參集五臂約 6 分鐘。
 - **判讀**（調參集串接 6,618 列，a = 0.05 ÷ 3 ≈ 0.0167；守門是判讀五集串接與 discordtune 不顯著為負）：
 
 | 檔 | 對 F0（改對／改壞，淨值，p） | 對 F0k（只看 trigram） | 判讀五集對 F0 | discordtune 對 F0 | 結果 |
@@ -6040,7 +6040,7 @@ formal: alpha 0.7, tau 1, delta 2
 ## 2026-10-16：derisk-1015 E1h（書面關 KN、加 trigram 的較小檔）
 
 - 起因：E1g 通過的最小檔是 T2（306.6 MB）。維護者選擇題「先量更小的表」，契約修訂六加 E1h（plan-verifier REVISE 一次：跑的腳本沒核對調參集和 E1g 的 F0 是同一份；補上逐臂核對後執行）。
-- 量法同 E1g（188，書面 λ 0.7、β 1、`--context`、詞類 μ 0.2、KN 關），F0、F0k 沿用 E1g 的 rowstats；11 臂的 cvtune／wikitune 雜湊與列數都和 F0 相同（`31de456d` 3,791、`8dcfe40c` 2,827），凍結集合核對通過。8 分鐘。
+- 量法同 E1g（Windows 機器，書面 λ 0.7、β 1、`--context`、詞類 μ 0.2、KN 關），F0、F0k 沿用 E1g 的 rowstats；11 臂的 cvtune／wikitune 雜湊與列數都和 F0 相同（`31de456d` 3,791、`8dcfe40c` 2,827），凍結集合核對通過。8 分鐘。
 - **判讀**（調參集 6,618 列，a = 0.05 ÷ 6 ≈ 0.0083）：
 
 | 檔 | trigram 表 | 對 F0（改對／改壞，淨值，p） | 對 F0k | 判讀五集對 F0 | discordtune 對 F0 | 結果 |
@@ -6102,3 +6102,10 @@ formal: alpha 0.7, tau 1, delta 2
 - 維護者選擇題「做完直接推」（bench、保留集沒有退步、notes PR 合併後推 tag）。PR #170 合併後推 `v0.4.6`（tag 指向 main `58da6d2`；和量基準測試與保留集的 `7c47266` 相比，`Cargo.toml Cargo.lock core cli data eval/variants.tsv macos scripts` 沒有差異），發佈流程 run 38841516338：gate、build、sign、publish 都成功（sign、publish 由維護者核准）。
 - 核對（下載 Release 附件）：zip 與安裝程式的 SHA-256 和 `.sha256` 相符；兩個 App 的 `codesign --verify --deep --strict` 通過、Team 2LJ882GPY8、`spctl` 判定 Notarized Developer ID、`stapler validate` 通過、版本 0.4.6；App 裡的模型 `bigram.sjlm` `fc2bddd1`、`classes.sjc` `9e36fa1b`（classes-v5）、`kn.sjkn` `cbefbced`、`tinylm.sjtl` `d07de71d`；Latest 是 v0.4.6；Homebrew cask `0.4.6`、sha256 `fba95f0b…` 和 zip 相同。解壓的副本驗完先 `lsregister -u` 再刪。
 - 發版後：Discord 發版公告（blobhaj，只標善解身分組，維護者選擇題同意）；網站的保留集數字與已發佈清單換成 v0.4.6，PR 合併後部署（維護者同意）。
+
+## 2026-10-16：derisk-1015 合併前 `/code-review` 的更正（PR #172）
+
+- **E4 (b) 的 KN 側檔有混淆**（更正）：B0m 的 KN 側檔用對應後的 bigram 算接續次數，`kn_cont.continuation` 只略過 `<s>` 當前詞，所以每個 (`<X>`, a) 都讓 a 的 N′ 與 ΣN′ 多 1；B0 裡同樣的出現是 (`<s>`, a)，不算。E4 (b) 的兩臂除了對應這一步，KN 的回退分布也不同（β 1 時每一列都受影響，包含前文沒有數字或英文的列）。E4 (b) 的結論照紀錄是「不過」，這個混淆不改變「不採用」；但「對應本身的效果」那一行要讀成「對應＋KN 接續次數的改變」合起來的效果。
+- **`grid.py` 的同分規則**：距離用浮點數，同分時可能由誤差決定。核對 E1b 的十份凍結選擇：只有 T2 聊天（λ 0.6 時 β 0.5 與 0.75 同分）與 T3 聊天（λ 0.6 時 β 0.75 與 1 同分）有同分，兩者都在同一個 λ，照文件的規則選到的點和實際選的相同；選值沒有受影響。程式改成用整數格距。
+- **`patched_eval.run_lm_eval` 的 n**：`--dev`、`--limit` 時回傳的是切片前的列，`#E3`、`#E4` 行的 n 與每列平均會錯；研究紀錄沒有引用這些欄位（E3、E4 的判讀用的是 `evalstats compare` 的 rowstats），數字不受影響。程式已修。
+- 其餘是程式的穩健性與效能（平行計數在父程序先檢查轉換表、壓縮工具核對綁定的模型、沒有 KN 時拒絕 β 覆寫、子集合用同一份句中標點表、測試還原全域變數等），隨 PR 修正；重複的維基前處理（`count.py`、`build_e4ctx.py` 各有一份）記為之後的整理，不在本片。
