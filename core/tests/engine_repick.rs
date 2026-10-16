@@ -135,7 +135,7 @@ fn freeze_words_outside_stay() {
 
 /// Acceptance 4: overlay entries whose character count differs from their syllable count (the overlay has no such
 /// filter). A one-character word over two syllables next to another word: picking the other word freezes it as is.
-const MISMATCH: &str = "ㄅㄚ 吧 -3.0\nㄅㄛ 玻 -3.0\nㄉㄚ 大 -1.0\nㄉㄚ 達 -2.0\nㄅㄚ 巴 -9.0\nㄅㄛ 波 -9.0\n";
+const MISMATCH: &str = "ㄅㄚ 吧 -3.0\nㄅㄛ 玻 -3.0\nㄉㄚ 大 -0.5\nㄉㄚ 達 -5.0\nㄅㄚ 巴 -9.0\nㄅㄛ 波 -9.0\n";
 fn mismatch_engine(overlay: &str) -> Engine {
     let s = shared();
     let lex = Arc::new(Lexicon::parse_with(MISMATCH, Some(overlay)).unwrap());
@@ -377,13 +377,13 @@ fn an_insert_inside_a_merged_word_splits_it() {
 }
 
 /// Section 9: the candidate window's ⌘⌫ frees frozen words only for an entry in effect over the span. 空 is taught for
-/// ㄎㄨㄥˋ after 遙 (a one-character word has the exact-context level only; with no left text it is not learned at all,
-/// s4-learning section 12), so it is not in effect for 要進 + 版監控: forgetting it (records 1 -> 0) changes nothing,
+/// ㄎㄨㄥˋ after 遙遠 (a one-character word has the exact-context level only and is learned only under a full
+/// two-character context, s4-learning section 12 and rule 7: after 遙 alone nothing is learned), so it is not in effect for 要進 + 版監控: forgetting it (records 1 -> 0) changes nothing,
 /// and deleting 監 still keeps 控 (fa0ae06 gave 版空).
 #[test]
 fn candidate_forget_of_an_entry_not_in_effect_keeps_the_frozen_words() {
     let mut e = engine();
-    assert_eq!(shown(&mut e, "ㄎㄨㄥˋ", "遙"), "控");
+    assert_eq!(shown(&mut e, "ㄎㄨㄥˋ", "遙遠"), "控");
     assert_eq!(repick(&mut e, 1, "空").preedit, "空");
     assert_eq!(commit(&mut e), "空");
     assert_eq!(e.learner().records().len(), 1);
@@ -405,16 +405,17 @@ fn candidate_forget_of_an_entry_not_in_effect_keeps_the_frozen_words() {
     assert_eq!(o.preedit, "版控");
 }
 
-/// Section 9: 她 is taught for ㄊㄚ after 我 (records: that one), so the next 我 + ㄊㄚ ㄕˋ shows 她是; re-picking 是 freezes
-/// 她. ⌘⌫ on 她 forgets an entry in effect there (exact level under 我), so 她 decodes again without it: 他是.
+/// Section 9: 她 is taught for ㄊㄚ after 我們 (records: that one; a one-character word is learned only under a full
+/// two-character context), so the next 我們 + ㄊㄚ ㄕˋ shows 她是; re-picking 是 freezes 她. ⌘⌫ on 她 forgets an entry in
+/// effect there (exact level under 我們), so 她 decodes again without it: 他是.
 #[test]
 fn candidate_forget_of_an_entry_in_effect_frees_the_frozen_word() {
     let mut e = engine();
-    assert_eq!(shown(&mut e, "ㄊㄚ ㄕˋ", "我"), "他是");
+    assert_eq!(shown(&mut e, "ㄊㄚ ㄕˋ", "我們"), "他是");
     repick(&mut e, 1, "她");
     assert_eq!(commit(&mut e), "她是");
-    assert_eq!(records(&e), vec![("我".to_string(), "ㄊㄚ".to_string(), "她".to_string())]);
-    assert_eq!(shown(&mut e, "ㄊㄚ ㄕˋ", "我"), "她是");
+    assert_eq!(records(&e), vec![("我們".to_string(), "ㄊㄚ".to_string(), "她".to_string())]);
+    assert_eq!(shown(&mut e, "ㄊㄚ ㄕˋ", "我們"), "她是");
     assert_eq!(repick(&mut e, 2, "是").preedit, "她是");
     e.key(k(KeyKind::Home)).unwrap();
     e.key(k(KeyKind::Right)).unwrap();

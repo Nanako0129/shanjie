@@ -6,14 +6,18 @@
  *    other logging; never interpolate input text into fatalError / precondition / assert messages.
  *  - Copy every field you need into Swift `String`s in the same call that received the output, then
  *    call shanjie_output_free immediately. Do not keep ShanjieOutput pointers around.
- *  - A handle is not thread-safe: make every call on one thread (the IMK main thread).
- *  - Any non-zero return: treat the key as not handled (pass it through) and do not record it.
+ *  - A handle is not thread-safe: make every call on one thread (the IMK main thread). The exceptions are
+ *    shanjie_rerank_run and shanjie_rerank_free, which take no engine (S7c-2a, below).
+ *  - Any non-zero return of shanjie_engine_key / shanjie_engine_pick: treat the key as not handled (pass it
+ *    through) and do not record it. The non-zero codes of shanjie_engine_rerank_take, shanjie_rerank_run and
+ *    shanjie_engine_rerank_apply do NOT mean pass-through: they have no key.
  *
  * Return codes: 0 success, 1 a required pointer is NULL, 2 invalid input (data_dir or LM path not
- * UTF-8, ch not a Unicode scalar, kind / layout / mode / profile out of range), 3 data load failed
+ * UTF-8, ch not a Unicode scalar, kind / layout / mode / profile / rerank level out of range), 3 data load failed
  * (including an unreadable or malformed LM file, and since S2k a missing or mismatching classes.sjc beside
  * it), 4 internal error (caught panic or decode/encode
- * error; the engine has already been reset in discard mode). shanjie_engine_load_lm failing leaves the
+ * error; the engine has already been reset in discard mode; exception: shanjie_rerank_run has no engine and
+ * resets nothing), 5 SHANJIE_NO_CHANGE (shanjie_engine_rerank_apply only). shanjie_engine_load_lm failing leaves the
  * LM state as it was (no LM, or the previously loaded one).
  *
  * Memory and lifetime:
@@ -29,6 +33,18 @@
  *    keeps no app identity. A profile set before any LM is loaded is remembered and applies once loaded.
  *  - shanjie_engine_load_lm needs classes.sjc (the word-class term, docs/contracts/s2k-word-classes.md) in
  *    the same directory as the model file, built for that model; without it the load fails with 3.
+ *  - shanjie_engine_load_lm also reads an optional kn.sjkn (Kneser-Ney side file, docs/contracts/kn-core.md) in
+ *    the same directory. No such file: nothing changes. A file that exists but cannot be read, or does not
+ *    match the model (magic, size, SHA-256, header values), fails the load with 3, never silently ignored.
+ *    When it is present and valid it changes the scoring of every vocabulary word. The shipped app has one (kn-v1,
+ *    docs/contracts/model-v6.md).
+ *  - It reads an optional trigram.sjt3 (docs/contracts/trigram-core.md) the same way (a bad one fails the load with 3).
+ *    A valid one is used by the formal profile only, which then scores without kn.sjkn.
+ *    The file is memory-mapped (docs/contracts/trigram-mmap.md): while an engine has it loaded it must not be truncated or
+ *    rewritten in place (a truncated page is a SIGBUS); replace it by rename, as the install paths do.
+ *  - data_dir must hold names-add.tsv (the always-on common proper nouns, model-v6 section 2.5) next to overlay-add.tsv and
+ *    sandhi-add.tsv: shanjie_engine_new / _new_packs read it into the lexicon and shanjie_engine_load_lm reads it again to cap
+ *    its words like overlay-add.tsv's; missing or unreadable, either call fails with 3.
  *  - Load the LM once at startup while the composition is empty: loading does not recompute the
  *    current display; the next change to the composition decodes with the new model.
  *  - shanjie_engine_reset (both modes) and the automatic reset after code 4 clear the composition only;
@@ -45,7 +61,10 @@ extern "C" {
 #endif
 
 typedef struct { uint32_t kind; uint32_t ch; uint32_t modifiers; } ShanjieKey;
-// kind: 1 CHAR, 2 SPACE, 3 ENTER, 4 BACKSPACE, 5 DELETE, 6 ESC, 7 LEFT, 8 RIGHT, 9 UP, 10 DOWN, 11 HOME, 12 END, 13 TAB
+// kind: 1 CHAR, 2 SPACE, 3 ENTER, 4 BACKSPACE, 5 DELETE, 6 ESC, 7 LEFT, 8 RIGHT, 9 UP, 10 DOWN, 11 HOME, 12 END, 13 TAB, 14 PAGE_UP, 15 PAGE_DOWN
+// PAGE_UP / PAGE_DOWN (candidate-vertical contract section 2.2): the shell sends them only while the last output had
+//   candidate_vertical 1 and no modifier is held. They move the vertical window by nine. With any other state of the
+//   engine (no vertical window open, or a modifier) they are not handled (handled 0), change nothing and commit nothing.
 // ch: Unicode scalar of the keycap without Shift when kind is CHAR; ignored for other kinds
 // modifiers: bit0 SHIFT, bit1 CONTROL, bit2 OPTION, bit3 COMMAND, bit4 CAPSLOCK
 typedef struct {
@@ -59,12 +78,28 @@ typedef struct {
   uint32_t candidate_columns; // 0 = collapsed single row; > 0 = expanded, always 9 (one row = one page, the selected page on top; s3b2 9)
   uint32_t candidate_first;   // position of candidates[0] in the whole list; 0 when closed (and for the prediction row)
   uint32_t candidate_total;   // length of the whole list; 0 when closed (the prediction row: its length)
+  uint32_t candidate_vertical; // 0 = horizontal, or no candidates; 1 = vertical candidate window (candidate_columns is then 0; up to 9 rows from candidate_first; fixed when the window opened); 2 = vertical prediction row, entered or not (follows the current setting on every output; candidate_columns 0, first 0). Appended last.
+  uint32_t english_run_utf16_start; // UTF-16 offset in preedit where the open English run starts (zhen-inline section 1.3f); 0 when no run is open. Appended last.
+  uint32_t english_run_utf16_len;   // UTF-16 length of the open English run in preedit; 0 when no run is open. Appended last.
 } ShanjieOutput;
 typedef struct ShanjieEngine ShanjieEngine;
 
 int32_t shanjie_engine_new(const char *data_dir, uint32_t layout, ShanjieEngine **out); // layout 0 standard, 1 ETen
+#define SHANJIE_PACK_ACG 1u   // bit0 of the packs mask below
+// acg-pack (docs/contracts/acg-pack.md A.2): word packs. packs is a bit mask (SHANJIE_PACK_ACG = ACG, packs_dir/acg-add.tsv);
+//   the rows are parsed into the lexicon, so the set is fixed for the engine's life: the shell turns a pack on or
+//   off by freeing the engine and creating another, like a layout change. packs 0 ignores packs_dir (may be NULL)
+//   and is exactly shanjie_engine_new; a missing pack file contributes nothing (same engine as without it).
+//   2 for a bit outside the mask or a non-UTF-8 data_dir or packs_dir, 1 for a NULL packs_dir with a non-zero mask, 3 when a pack file exists but cannot
+//   be read or parsed. The pack's words are capped like overlay-add.tsv's when the LM is loaded.
+int32_t shanjie_engine_new_packs(const char *data_dir, uint32_t layout, const char *packs_dir, uint32_t packs, ShanjieEngine **out);
 void    shanjie_engine_free(ShanjieEngine *engine);
 int32_t shanjie_engine_key(ShanjieEngine *engine, ShanjieKey key, ShanjieOutput **out);
+// ENTER (docs/contracts/s3a.md section 3; docs/contracts/enter-pending.md): with the candidate window open or the
+//   prediction row entered, ENTER and SHIFT+ENTER select (rules 6, 1d). Otherwise ENTER commits the composition as
+//   shown, unfinished zhuyin symbols included (rules 12a, 19), and SHIFT+ENTER commits the same and then passes the
+//   key on (handled = 0, commit non-empty; rules 12b, 19a), so the app gets its line break. COMMAND, OPTION and
+//   CONTROL+ENTER pass through unchanged (rule 1).
 // s3b2 (docs/contracts/s3b2-glass-panel.md section 8): mouse pick. index is a position in the last
 //   output's candidates; the core chooses candidate_first + index through the same path as ENTER, so
 //   learning behaves identically (a candidate pick also keeps the words outside its span as they were shown:
@@ -75,7 +110,7 @@ int32_t shanjie_engine_key(ShanjieEngine *engine, ShanjieKey key, ShanjieOutput 
 //   1 when engine or out is NULL; 2 when there is neither a candidate window nor a prediction row, or
 //   index is outside that output (state unchanged); 4 internal (engine reset). *out is NULL on any error.
 int32_t shanjie_engine_pick(ShanjieEngine *engine, uint32_t index, ShanjieOutput **out);
-int32_t shanjie_engine_reset(ShanjieEngine *engine, uint32_t mode, ShanjieOutput **out); // mode 0 commit then clear, 1 discard
+int32_t shanjie_engine_reset(ShanjieEngine *engine, uint32_t mode, ShanjieOutput **out); // mode 0 commit what is shown (unfinished zhuyin included, like ENTER) then clear, 1 discard
 void    shanjie_output_free(ShanjieOutput *output);
 // S2c (docs/PLAN.md S2c)
 int32_t shanjie_engine_load_lm(ShanjieEngine *engine, const char *path);               // does not change the current display
@@ -95,6 +130,69 @@ int32_t shanjie_engine_set_demote(ShanjieEngine *engine, uint32_t enabled, Shanj
 //   0 clears the prediction row (an entered row is left) and computes none; 1 recomputes it, so a row that
 //   fits the display conditions shows in the returned snapshot. No effect without a loaded model.
 int32_t shanjie_engine_set_prediction(ShanjieEngine *engine, uint32_t enabled, ShanjieOutput **out); // 0 or 1; returns a snapshot
+// candidate-vertical (docs/contracts/candidate-vertical.md section 2.2): set_candidate_vertical 0 or 1 (2 otherwise, state
+//   unchanged), default 0, like set_prediction in its codes and its snapshot (handled 1, commit ""); 1 when engine or out is
+//   NULL. It sets the orientation of the candidate windows that open from now on (the Space/Down that opens the window,
+//   and the punctuation window). A window that is already open (including an expanded grid) keeps the orientation it
+//   opened with, so the snapshot equals the output before the call. The prediction row has no opening: it follows the
+//   current setting on every output, so a row on screen is re-rendered in the new orientation in the snapshot (value 2
+//   when vertical). In the entered vertical row Up / Down move the selection (stopping at both ends). Call it after every engine creation, like set_prediction.
+int32_t shanjie_engine_set_candidate_vertical(ShanjieEngine *engine, uint32_t enabled, ShanjieOutput **out); // 0 or 1; returns a snapshot
+// V3 (docs/contracts/v3-engine.md section 12): set_abbreviation 0 or 1 (2 otherwise, state unchanged), default 0, like
+//   set_prediction in its codes and its snapshot (handled 1, commit "" unless turning it on ends an English run, below); 1 when engine or out is NULL. With 1 (and the
+//   prediction row on and the cursor at the end of the composition) a zhuyin key whose column already holds a symbol
+//   opens a new unfinished unit instead of replacing it, so ㄋㄔ is two units, and the prediction row reads them as
+//   the initials of a word's syllables (奶茶). With two or more units a tone key and space do nothing, Enter sends the
+//   shown symbols, Esc drops all units (the composition, fixed words and cursor stay) and Backspace takes the last symbol.
+//   Turning it off, or the prediction row off, while there are two or more units drops them all (as Esc) and returns
+//   that state; with one unit nothing changes. Turning it on closes an open English window and ends an open English run
+//   (see set_english) as a token; if that is the 40th unit the snapshot carries the composition in `commit`.
+//   No effect without a loaded model.
+int32_t shanjie_engine_set_abbreviation(ShanjieEngine *engine, uint32_t enabled, ShanjieOutput **out); // 0 or 1; returns a snapshot
+// zhen-mixed (docs/contracts/zhen-mixed.md): the English word list. 0 ok; 1 engine or path NULL; 2 path not UTF-8; 3 unreadable,
+//   not a regular file, over 4 MiB or 200,000 lines, a line outside [a-z]{3,32}, a duplicate line, a BOM. Failure keeps the
+//   previous list (or none). Does not change the switch or the current display. Call it once after shanjie_engine_new.
+int32_t shanjie_engine_load_english(ShanjieEngine *engine, const char *path);
+// set_english 0 or 1 (2 otherwise, state unchanged), default 0 at engine creation, like set_abbreviation in its codes and its
+//   snapshot (handled 1; commit "" except as noted for turning it off, below); 1 when engine or out is NULL. With 1, and only with a loaded list, the standard layout and
+//   the abbreviation composer off, Space after an English word typed into one unfinished syllable (the keys typed are a listed
+//   word and at least one key replaced a symbol in an occupied column; two when the leftover syllable with tone 1 is itself in
+//   the lexicon) opens the English window (s3a rule 10e): the word, Capitalised, UPPER and, when the leftover syllable is in
+//   the lexicon, its first entry. 1-9, Enter or pick(index) on an English item does not commit (docs/contracts/zhen-inline.md):
+//   the item becomes an English token at the cursor that stays in the composition (one unit like a punctuation mark: the arrow
+//   keys take it whole, the next word starts a new sentence; Backspace takes one letter, see below), and it is sent with the rest. The Chinese item
+//   becomes a fixed word. No effect without a list. Call it after every engine creation, like set_abbreviation.
+//   Key handling that comes with it (docs/contracts/zhen-inline.md sections 1.3, 1.3b, 1.3c, 1.3e, 1.3f):
+//   - Auto-keep: a Zhuyin key that cannot continue the letters on screen (a whole listed word) keeps the word as an English
+//     token and starts the next syllable; a Zhuyin key with the English window open first keeps the selected item.
+//   - Backspace deletes English one letter at a time (section 1.3g): with the letters on screen it takes the last letter and the
+//     rest becomes an English run at the cursor (no replay, no Zhuyin); with the cursor right after an English token (no
+//     unfinished syllable, no window, no run) it removes the token and opens a run with its text less the last letter (a
+//     one-letter token just goes). Space units and punctuation tokens still go whole.
+//   - Shift+letter starts an English run (an English token in the making, not a unit until it ends): letters go on it as
+//     typed, shifted or not, and the run is never auto-kept; Space ends it (the space is eaten), Backspace and Esc take
+//     letters off, every other key ends it first. While a run is open the output's english_run_utf16_start and
+//     english_run_utf16_len mark it in preedit (0 and 0 otherwise). Without set_english the Shift rules (s3a rules 13, 21,
+//     22) are unchanged.
+//   - With the cursor right after an English token or a space unit, no unfinished syllable and no window open, Space inserts
+//     a half-width space as one unit (like a punctuation mark): the first Space after a run ends it, the second types a space.
+//     With the cursor at 0 in front of one of them Space opens nothing; a space unit has no list at all (Down opens nothing).
+//     A space unit is learned under the same neighbour key as an English token (`^>_punct_en`).
+//   - With the cursor right after an English token and no unfinished syllable, only Down lists its writings (as typed, lower
+//     case, Capitalised, UPPER); a token made by an auto-keep adds a Chinese item, so a wrong keep can be undone.
+//   - An English token or space unit (from an item, an auto-keep, a run or Space) that makes the 40th unit sends the whole
+//     composition in `commit` of that call's output (the key that did it, the pick, or the settings call), never in a later one.
+//   Turning it off, like turning the abbreviation composer on, closes the window and ends an open English run as a token
+//   (a run that makes the 40th unit sends the composition in the snapshot's `commit`).
+int32_t shanjie_engine_set_english(ShanjieEngine *engine, uint32_t enabled, ShanjieOutput **out); // 0 or 1; returns a snapshot
+// set_english_inline 0 or 1 (2 otherwise, state unchanged), default 1 at engine creation, like set_english in its codes and its
+//   snapshot (handled 1, commit ""); 1 when engine or out is NULL. With 1 (and set_english(1)) the unfinished syllable shows as
+//   the letters typed instead of the Zhuyin while all of these hold: the cursor is at the end with one unfinished unit, at least
+//   3 letters, the overwrite condition of the English window's trigger, and a listed word starts with the letters. Enter (and
+//   reset with commit) then send the letters, and Backspace takes the last letter and makes the rest an English run (zhen-inline section 1.3g).
+//   0 shows the Zhuyin until the English window opens. The snapshot shows a composition on screen in the new display. Call it
+//   after every engine creation, like set_english.
+int32_t shanjie_engine_set_english_inline(ShanjieEngine *engine, uint32_t enabled, ShanjieOutput **out); // 0 or 1; returns a snapshot
 // s3e (docs/contracts/s3e-punctuation-candidates.md): punctuation alternatives, UTF-8 lines
 // "mark\talt\talt...", blank lines ignored, a repeated mark overrides; at most 64 KB / 1,000 lines.
 // 2 on any invalid input, keeping the previous table (a built-in default until the first success).
@@ -132,13 +230,20 @@ int32_t shanjie_engine_learning_open(ShanjieEngine *engine, const char *dir);
 //   and pending learns are dropped anyway.
 int32_t shanjie_engine_learning_clear(ShanjieEngine *engine);
 // A single-character pick is learned, and a single-character record looked up, only under a full
-//   context key made of Han characters: the last <= 2 Han characters before the word, taken from the
-//   composition text before it AND the left context from set_left_context. When no Han character
-//   precedes the word (sentence start, after punctuation or ASCII) the key is "^" and a single
-//   character is neither learned nor looked up. With a NULL left context, or a paused gate that makes
-//   the shell pass NULL, keys that follow Han characters typed in the same composition still teach
-//   (if learning is on) and look up. set_learning(0) stops teaching only; it does not stop lookup.
-//   Words of 2+ characters are unaffected (docs/contracts/s4-learning.md section 12).
+//   context key made of exactly two Han characters: the last 2 Han characters before the word, taken
+//   from the composition text before it AND the left context from set_left_context. When fewer than
+//   two Han characters precede the word (sentence start, after punctuation or ASCII, or only one
+//   Han character) a single character is neither learned nor looked up. With a NULL left context, or a
+//   paused gate that makes the shell pass NULL, keys that follow two Han characters typed in the same
+//   composition still teach (if learning is on) and look up. set_learning(0) stops teaching only; it
+//   does not stop lookup (docs/contracts/s4-learning.md sections 12 and 14).
+// A word of 2+ characters picked with no Han character before it (context key "^") is learned, and
+//   looked up, under the key "^>" plus the reading of the syllable right after the word ("^>$" when the
+//   word ends the composition): it boosts the same word only where the next syllable is the same.
+//   A prediction-row pick is always stored under "^>$" (it is made at the end of the composition), and a
+//   re-pick halves the displaced word under the key it was shown under when it was picked as well as
+//   under the key at the commit.
+//   The shell computes none of this; it only passes the left-context text (section 14).
 // Learning happens only at a commit (Enter, a key the engine passes through after committing, or the
 //   40-syllable auto-commit), never on shanjie_engine_reset or Esc, and never for punctuation picks.
 // Writes: a learning commit appends only the records it changed; a full rewrite happens on a forget,
@@ -148,6 +253,66 @@ int32_t shanjie_engine_learning_clear(ShanjieEngine *engine);
 //   fails falls back to a full rewrite, so it counts only through that rewrite). Set by a failed full
 //   rewrite; cleared only by a successful full rewrite or a successful learning_clear.
 int32_t shanjie_engine_learning_status(ShanjieEngine *engine, uint32_t *flags);
+
+// S7c-2a (docs/contracts/s7c2a-core-rerank.md): the small character model reranks the n-gram's first 8 candidates of each free
+//   stretch of the composition, off the key path. Every change of the composition may leave a rerank job; the shell takes it,
+//   runs it on another thread, and applies it back on the engine's thread. The composition shows the n-gram result first and may
+//   change once when the result applies. Only a change that re-decodes the composition makes the result stale (apply drops it):
+//   a completed syllable, a deletion, a candidate or prediction pick, punctuation (it does not commit: it enters the composition,
+//   re-decodes and leaves a new job), a learning forget, and the settings that change decoding (profile, demote, rerank, rerank
+//   level, a new model, learning open / clear; set_learning never makes the job stale: it does not change decoding, S7c-2b). Keys that do not re-decode (cursor moves, unfinished zhuyin symbols, entering the
+//   prediction row, pass-through keys) keep the job valid. Commits (ENTER, the auto-commit at 40 tokens, reset) send what is
+//   shown; a job not yet applied is dropped.
+// Logging: a job and its result hold candidate text. Never log them, their pointers, or the .sjtl path (the rules at the top).
+#define SHANJIE_NO_CHANGE 5
+typedef struct ShanjieRerankJob ShanjieRerankJob;
+// load_tinylm: the .sjtl for the loaded n-gram model. Call it after shanjie_engine_load_lm (a successful load_lm drops the small
+//   model: the .sjtl names the n-gram model's hash). 3 when the file cannot be read, is not a regular file, is over 64 MiB or
+//   malformed, when no n-gram model is loaded, when the .sjtl was tuned with another n-gram model, or when the Kneser-Ney side
+//   file state differs from the one it records (a version 4 .sjtl records the SHA-256 of the kn.sjkn it was tuned with, all
+//   zero for none; versions 1 to 3 count as none; the loaded kn.sjkn, or none, must match all 32 bytes; docs/contracts/model-v6.md
+//   section 2.7) (a pairing check only, not an integrity check of the .sjtl); the engine keeps its previous model (or none) and
+//   the n-gram keeps working. 1 for a NULL engine or path, 2 for a path that is not UTF-8. Does not change the rerank setting
+//   (set_rerank) or the current display.
+int32_t shanjie_engine_load_tinylm(ShanjieEngine *engine, const char *path);
+// set_rerank 0 or 1 (2 otherwise, state unchanged), default 0 at engine creation (S7c-2c), like set_demote in its codes and its
+//   snapshot (handled 1, commit ""): it recomputes the composition, so turning it off shows the n-gram result at once; 1 when engine or
+//   out is NULL. Call it after every engine creation, like set_candidate_vertical. With 0, or without a small model, or with
+//   set_demote 0 (alpha and tau hold only with the table on), no job is ever made.
+int32_t shanjie_engine_set_rerank(ShanjieEngine *engine, uint32_t enabled, ShanjieOutput **out);
+// Rerank strength (docs/contracts/rerank-strength.md section 2.2): set_rerank_level 0 conservative, 1 standard (default at engine
+//   creation), 2 aggressive: which of the small model's (alpha, tau, delta) the jobs use. Codes and snapshot like set_profile
+//   (handled 1, commit ""): 1 when engine or out is NULL, 2 for a level above 2 (state unchanged, the job of the last change
+//   stays valid), 4 internal (the engine is reset in discard mode, the new level kept). It makes a job taken before stale; a job
+//   keeps the values of the level it was made with. Without a small model the level is remembered and 0 returned; with a
+//   version 1 or 2 .sjtl (only the standard set) any level is remembered, 0 returned, and the standard set used.
+//   load_tinylm and load_lm keep the level. The shell sends its stored level after every engine creation, after load_tinylm.
+int32_t shanjie_engine_set_rerank_level(ShanjieEngine *engine, uint32_t level, ShanjieOutput **out);
+// rerank_levels: *levels is a bit mask of the levels the loaded small model offers (bit0 conservative, bit1 standard, bit2
+//   aggressive): 0 without a small model, 2 for a version 1 or 2 .sjtl, 7 for a version 3 or 4 .sjtl (always 7, even when a level's
+//   values equal the standard ones, and whatever the profile). 0 success; 1 when engine or levels is NULL (*levels untouched);
+//   4 internal (nothing is reset: it changes nothing). Changes nothing.
+int32_t shanjie_engine_rerank_levels(ShanjieEngine *engine, uint32_t *levels);
+// rerank_take: hands out the job of the last change, once; 0 with *job NULL when there is none. 1 when engine or job is NULL
+//   (*job is set to NULL first whenever job is non-NULL); 4 internal (the engine is reset in discard mode, *job NULL).
+//   Every job handed out must be freed exactly once with shanjie_rerank_free.
+int32_t shanjie_engine_rerank_take(ShanjieEngine *engine, ShanjieRerankJob **job);
+// rerank_run: computes the result and keeps it in the job. Callable on any thread; it needs no engine and the job does not
+//   borrow one, so it may run (or be freed) after shanjie_engine_free. It cannot be cancelled: a newer key only makes the
+//   result stale. 0 success, 1 job NULL, 4 caught panic: no engine is touched (the composition is unchanged) and no result
+//   is kept, not even an earlier run's (a later apply returns SHANJIE_NO_CHANGE).
+int32_t shanjie_rerank_run(ShanjieRerankJob *job);
+// rerank_apply: on the engine's thread, after run returned. Takes the job's result: 0 and a snapshot (handled 1, commit "")
+//   when the composition changed; SHANJIE_NO_CHANGE with *out NULL when there is no result (not run, or run returned 4), the
+//   result is stale, the composition no longer holds the words the job was made from, the candidate window is open, the
+//   prediction row is entered, every stretch kept its first candidate, or the job was applied before (a second apply of the
+//   same job never changes anything). The prediction row in the snapshot is recomputed only if one was showing. Does not free
+//   the job. 1 when engine, job or out is NULL (*out NULL); 4 internal (the engine is reset in discard mode, *out NULL).
+int32_t shanjie_engine_rerank_apply(ShanjieEngine *engine, ShanjieRerankJob *job, ShanjieOutput **out);
+// rerank_free(NULL) does nothing. Like run, it may be called on any thread, once run has returned (never while run is running on
+//   the same job). Undefined behaviour: freeing a job twice, run or apply after free, freeing a pointer rerank_take did not hand
+//   out, and using one job from two threads at once (apply or free while run is still running).
+void    shanjie_rerank_free(ShanjieRerankJob *job);
 
 #ifdef __cplusplus
 }

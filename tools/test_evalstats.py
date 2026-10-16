@@ -1,5 +1,5 @@
 """Tests for tools/evalstats.py. Run: python3 -m unittest tools.test_evalstats   (from the repo root). No network, no data files."""
-import os, sys, tempfile, unittest
+import math, os, sys, tempfile, unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import bench  # noqa: E402
@@ -24,6 +24,24 @@ class Mcnemar(unittest.TestCase):
         for b in range(13):
             for c in range(13):
                 self.assertEqual(E.mcnemar_exact(b, c), bench.mcnemar(b, c), (b, c))
+
+
+class PoissonUpper(unittest.TestCase):
+    def test_known_values(self):
+        # one-sided exact 95% upper limits (Garwood; the standard table: 2.996, 4.744, 6.296, 10.513, 15.705 at 9)
+        for k, want in ((0, 2.9957), (1, 4.7439), (2, 6.2958), (5, 10.5130), (9, 15.7052), (10, 16.9622)):
+            self.assertAlmostEqual(E.poisson_upper95(k), want, places=3, msg=k)
+
+    def test_large_k_does_not_underflow(self):
+        # roots of the cdf = 0.05, checked once with 60-digit Decimal arithmetic; exp(-lam) underflows for lam > 745 (k = 1000 gave 745.13)
+        for k, want in ((1000, 1053.6031), (5000, 5117.8861)):
+            self.assertAlmostEqual(E.poisson_upper95(k), want, places=3, msg=k)
+
+    def test_is_the_cdf_root(self):
+        for k in (0, 3, 40):
+            lam = E.poisson_upper95(k)
+            cdf = sum(math.exp(-lam) * lam ** i / math.factorial(i) for i in range(k + 1))
+            self.assertAlmostEqual(cdf, 0.05, places=9)
 
 
 class Lev(unittest.TestCase):
@@ -105,6 +123,31 @@ class Compare(unittest.TestCase):
         out = E.compare(self.good("a"), self.good("b"), "dev302|chat", resamples=100)
         self.assertIn("dev302\\|chat", out)
         self.assertEqual(out.splitlines()[-1].count("|") - out.count("\\|"), out.splitlines()[0].count("|"))
+
+
+class Net(unittest.TestCase):
+    """E2: --net appends three columns; without it the output is the old one."""
+    def setUp(self):
+        d = tempfile.mkdtemp()
+        # 10 rows: base right on 1-5; cand fixes rows 6, 7, 8 and breaks row 1
+        self.base = write(d, "b", "".join(f"{i}\t{int(i <= 5)}\t{0 if i <= 5 else 1}\t4\n" for i in range(1, 11)))
+        self.cand = write(d, "c", "".join(f"{i}\t{int(i in (2, 3, 4, 5, 6, 7, 8))}\t{0 if i in (2, 3, 4, 5, 6, 7, 8) else 1}\t4\n" for i in range(1, 11)))
+
+    def test_default_is_unchanged(self):
+        a = E.compare(self.base, self.cand, "x", resamples=100)
+        self.assertEqual(a, E.compare(self.base, self.cand, "x", resamples=100, net=False))
+        self.assertEqual(a.splitlines()[0].count("|"), 12)           # the old 11 columns
+        self.assertTrue(a.splitlines()[0].endswith("ΔCER 95%（百分點） |"))
+
+    def test_net_columns(self):
+        out = E.compare(self.base, self.cand, "x", resamples=100, net=True).splitlines()
+        plain = E.compare(self.base, self.cand, "x", resamples=100).splitlines()
+        self.assertEqual(out[0], plain[0] + " 淨值 | 改壞率 | 改壞數 95% 上界 |")
+        self.assertTrue(out[2].startswith(plain[2]))
+        cells = [c.strip() for c in out[2].strip("|").split("|")]
+        self.assertEqual(cells[4:6], ["3", "1"])                      # fixed, broken
+        self.assertEqual(cells[-3:], ["2", "10.00%", "4.7"])         # net 3 - 1, 1 / 10, upper limit of 1 event
+        self.assertEqual(out[1].count("|"), out[0].count("|"))
 
 
 if __name__ == "__main__":

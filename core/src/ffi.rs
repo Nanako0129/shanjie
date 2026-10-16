@@ -5,19 +5,22 @@
 #[cfg(panic = "abort")]
 compile_error!("C ABI requires panic=unwind");
 
-use crate::engine::{Engine, EngineError, Key, KeyKind, Layout, Output, ResetMode};
+use crate::engine::{Engine, EngineError, Key, KeyKind, Layout, Output, RerankJob, RerankResult, ResetMode, PACK_ALL};
 use crate::lm::Profile;
+use crate::tinylm::RerankLevel;
 use std::ffi::{c_char, CStr, CString};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::Path;
 use std::ptr;
-use std::sync::Once;
+use std::sync::{Mutex, Once, PoisonError};
 
 pub const SHANJIE_OK: i32 = 0;
 pub const SHANJIE_ERR_NULL: i32 = 1;
 pub const SHANJIE_ERR_INVALID: i32 = 2;
 pub const SHANJIE_ERR_LOAD: i32 = 3;
 pub const SHANJIE_ERR_INTERNAL: i32 = 4;
+/// S7c-2a section 2.5: `shanjie_engine_rerank_apply` changed nothing (stale, not run, already applied, every stretch kept its first).
+pub const SHANJIE_NO_CHANGE: i32 = 5;
 
 /// Holds a typed character, so no `Debug` (R2).
 #[repr(C)]
@@ -40,10 +43,33 @@ pub struct ShanjieOutput {
     pub candidate_columns: u32,
     pub candidate_first: u32,
     pub candidate_total: u32,
+    /// Appended last (candidate-vertical contract section 2.2): 0 horizontal or none, 1 vertical candidate window, 2 vertical prediction row.
+    pub candidate_vertical: u32,
+    /// Appended last (zhen-inline section 1.3f): the open English run in `preedit`, UTF-16 start and length; both 0 without a run.
+    pub english_run_utf16_start: u32,
+    pub english_run_utf16_len: u32,
 }
 
 /// Opaque to C.
 pub struct ShanjieEngine(Engine);
+
+/// Opaque to C (S7c-2a section 2.5): a rerank job and the result `shanjie_rerank_run` leaves in it, taken by the first apply.
+/// The job and the result are owned data only (no engine borrow), so the job outlives the engine. Holds candidate text: no
+/// `Debug`. Only shared references are ever made to it, and the result sits behind the mutex, so even a shell that broke the
+/// one-thread-at-a-time rule could not race on the result.
+pub struct ShanjieRerankJob {
+    job: RerankJob,
+    result: Mutex<Option<RerankResult>>,
+}
+
+// F8: Send and Sync from the field types, never from an `unsafe impl`.
+const _: () = {
+    fn send_sync<T: Send + Sync>() {}
+    #[allow(dead_code)]
+    fn assertion() {
+        send_sync::<ShanjieRerankJob>();
+    }
+};
 
 /// What a `*mut ShanjieOutput` really points to: the C struct first (repr(C) => offset 0), then the
 /// buffers it points into. Moving a CString / Vec does not move its heap buffer.
@@ -111,6 +137,9 @@ fn to_c(o: Output) -> Option<*mut ShanjieOutput> {
         candidate_columns: o.columns,
         candidate_first: o.first,
         candidate_total: o.total,
+        candidate_vertical: o.vertical,
+        english_run_utf16_start: o.english_run_utf16_start,
+        english_run_utf16_len: o.english_run_utf16_len,
     };
     Some(Box::into_raw(Box::new(OwnedOutput { out, _strings: strings, _ptrs: ptrs })).cast())
 }
@@ -151,9 +180,29 @@ pub unsafe extern "C" fn shanjie_engine_new(
     layout: u32,
     out: *mut *mut ShanjieEngine,
 ) -> i32 {
+    // SAFETY: forwarded caller contract; mask 0 ignores the NULL packs_dir.
+    unsafe { shanjie_engine_new_packs(data_dir, layout, std::ptr::null(), 0, out) }
+}
+
+/// Like `shanjie_engine_new`, with word packs (docs/contracts/acg-pack.md A.2): `packs_dir` holds the pack
+/// files and `packs` is the bit mask of the packs to enable (bit 0 ACG). Mask 0 ignores `packs_dir` (may be
+/// NULL) and is exactly `shanjie_engine_new`. A pack whose file is missing contributes nothing. A bit outside
+/// the known ones returns 2.
+///
+/// # Safety
+/// `data_dir` is NULL or a NUL-terminated string; `packs_dir` is NULL (mask 0 only) or a NUL-terminated
+/// string; `out` is NULL or valid for one pointer write.
+#[no_mangle]
+pub unsafe extern "C" fn shanjie_engine_new_packs(
+    data_dir: *const c_char,
+    layout: u32,
+    packs_dir: *const c_char,
+    packs: u32,
+    out: *mut *mut ShanjieEngine,
+) -> i32 {
     guard(|| {
         // SAFETY: forwarded caller contract.
-        if !unsafe { clear_out(out) } || data_dir.is_null() {
+        if !unsafe { clear_out(out) } || data_dir.is_null() || (packs != 0 && packs_dir.is_null()) {
             return SHANJIE_ERR_NULL;
         }
         let layout = match layout {
@@ -161,11 +210,23 @@ pub unsafe extern "C" fn shanjie_engine_new(
             1 => Layout::Eten,
             _ => return SHANJIE_ERR_INVALID,
         };
+        if packs & !PACK_ALL != 0 {
+            return SHANJIE_ERR_INVALID;
+        }
         // SAFETY: non-NULL, NUL-terminated per the caller contract.
         let Ok(dir) = unsafe { CStr::from_ptr(data_dir) }.to_str() else {
             return SHANJIE_ERR_INVALID;
         };
-        match Engine::new(Path::new(dir), layout) {
+        let pdir = if packs == 0 {
+            None
+        } else {
+            // SAFETY: non-NULL (checked above), NUL-terminated per the caller contract.
+            let Ok(p) = unsafe { CStr::from_ptr(packs_dir) }.to_str() else {
+                return SHANJIE_ERR_INVALID;
+            };
+            Some((Path::new(p), packs))
+        };
+        match Engine::new_with_packs(Path::new(dir), layout, pdir) {
             Ok(e) => {
                 // SAFETY: `out` checked non-NULL above.
                 unsafe { *out = Box::into_raw(Box::new(ShanjieEngine(e))) };
@@ -289,7 +350,9 @@ pub unsafe extern "C" fn shanjie_engine_reset(
     rc
 }
 
-/// S2c. Loads the bigram model at `path` with `data_dir/overlay-add.tsv` of this engine. Does not
+/// S2c. Loads the bigram model at `path` (with `classes.sjc` beside it, and a `kn.sjkn` Kneser-Ney side file if one
+/// exists there: a broken or mismatching one fails the load with code 3, a valid one changes the scoring; the app
+/// ships one since model-v6; likewise an optional `trigram.sjt3`, which only the formal profile uses, the app ships none yet), reading `data_dir/overlay-add.tsv`, `names-add.tsv` (and demote.tsv) again. Does not
 /// recompute the composition display. Any failure leaves the previous LM state (none or the old model).
 ///
 /// # Safety
@@ -500,6 +563,174 @@ pub unsafe extern "C" fn shanjie_engine_set_prediction(
     rc
 }
 
+/// Candidate-vertical contract section 2.2. `enabled` 0 or 1 (default 0): the orientation of the candidate windows that
+/// open from now on. Returns the snapshot like `set_prediction`: an open candidate window keeps its orientation, a
+/// prediction row on screen is re-rendered in the new one (`candidate_vertical` 2 or 0); any other value changes nothing
+/// and returns 2.
+///
+/// # Safety
+/// `engine` is NULL or a live handle; `out` is NULL or valid for one pointer write.
+#[no_mangle]
+pub unsafe extern "C" fn shanjie_engine_set_candidate_vertical(
+    engine: *mut ShanjieEngine,
+    enabled: u32,
+    out: *mut *mut ShanjieOutput,
+) -> i32 {
+    let rc = guard(|| {
+        // SAFETY: forwarded caller contract.
+        if !unsafe { clear_out(out) } || engine.is_null() {
+            return SHANJIE_ERR_NULL;
+        }
+        if enabled > 1 {
+            return SHANJIE_ERR_INVALID;
+        }
+        // SAFETY: live handle, single-threaded use (§6).
+        let e = unsafe { &mut (*engine).0 };
+        match e.set_candidate_vertical(enabled == 1) {
+            // SAFETY: `out` checked non-NULL above.
+            Ok(o) => unsafe { emit(o, out) },
+            Err(_) => SHANJIE_ERR_INTERNAL,
+        }
+    });
+    if rc == SHANJIE_ERR_INTERNAL {
+        // SAFETY: forwarded caller contract.
+        unsafe { discard(engine) };
+    }
+    rc
+}
+
+/// V3 engine contract section 12.1. `enabled` 0 or 1 (default 0): whether a symbol in an occupied column opens a new
+/// unfinished unit. Returns the snapshot like `set_prediction`; any other value changes nothing and returns 2.
+///
+/// # Safety
+/// `engine` is NULL or a live handle; `out` is NULL or valid for one pointer write.
+#[no_mangle]
+pub unsafe extern "C" fn shanjie_engine_set_abbreviation(
+    engine: *mut ShanjieEngine,
+    enabled: u32,
+    out: *mut *mut ShanjieOutput,
+) -> i32 {
+    let rc = guard(|| {
+        // SAFETY: forwarded caller contract.
+        if !unsafe { clear_out(out) } || engine.is_null() {
+            return SHANJIE_ERR_NULL;
+        }
+        if enabled > 1 {
+            return SHANJIE_ERR_INVALID;
+        }
+        // SAFETY: live handle, single-threaded use (§6).
+        let e = unsafe { &mut (*engine).0 };
+        match e.set_abbreviation(enabled == 1) {
+            Ok(o) => {
+                #[cfg(test)]
+                tests::inject(&o);
+                // SAFETY: `out` checked non-NULL above.
+                unsafe { emit(o, out) }
+            }
+            Err(_) => SHANJIE_ERR_INTERNAL,
+        }
+    });
+    if rc == SHANJIE_ERR_INTERNAL {
+        // SAFETY: forwarded caller contract.
+        unsafe { discard(engine) };
+    }
+    rc
+}
+
+/// zhen-mixed (docs/contracts/zhen-mixed.md section 3.1): the English word list at `path`. 0 ok; 1 engine or path NULL; 2 path
+/// not UTF-8; 3 unreadable, not a regular file, over 4 MiB or 200,000 lines, a line outside `[a-z]{3,32}`, a duplicate, a BOM.
+/// A failure keeps the previous list. Does not change the switch or the display. No path or word in any message.
+///
+/// # Safety
+/// `engine` is NULL or a live handle; `path` is NULL or a NUL-terminated string.
+#[no_mangle]
+pub unsafe extern "C" fn shanjie_engine_load_english(engine: *mut ShanjieEngine, path: *const c_char) -> i32 {
+    guard(|| {
+        if engine.is_null() || path.is_null() {
+            return SHANJIE_ERR_NULL;
+        }
+        // SAFETY: non-NULL, NUL-terminated per the caller contract.
+        let Ok(path) = unsafe { CStr::from_ptr(path) }.to_str() else {
+            return SHANJIE_ERR_INVALID;
+        };
+        // SAFETY: live handle, single-threaded use (§6).
+        match unsafe { &mut (*engine).0 }.load_english(Path::new(path)) {
+            Ok(()) => SHANJIE_OK,
+            Err(_) => SHANJIE_ERR_LOAD,
+        }
+    })
+}
+
+/// zhen-mixed section 3.1. `enabled` 0 or 1 (default 0): whether Space after an English word typed into one unfinished syllable
+/// opens the English window (s3a rule 10e); only with a loaded list, the standard layout and the abbreviation composer off.
+/// Returns the snapshot like `set_abbreviation`; any other value changes nothing and returns 2.
+///
+/// # Safety
+/// `engine` is NULL or a live handle; `out` is NULL or valid for one pointer write.
+#[no_mangle]
+pub unsafe extern "C" fn shanjie_engine_set_english(
+    engine: *mut ShanjieEngine,
+    enabled: u32,
+    out: *mut *mut ShanjieOutput,
+) -> i32 {
+    let rc = guard(|| {
+        // SAFETY: forwarded caller contract.
+        if !unsafe { clear_out(out) } || engine.is_null() {
+            return SHANJIE_ERR_NULL;
+        }
+        if enabled > 1 {
+            return SHANJIE_ERR_INVALID;
+        }
+        // SAFETY: live handle, single-threaded use (§6).
+        let e = unsafe { &mut (*engine).0 };
+        match e.set_english(enabled == 1) {
+            // SAFETY: `out` checked non-NULL above.
+            Ok(o) => unsafe { emit(o, out) },
+            Err(_) => SHANJIE_ERR_INTERNAL,
+        }
+    });
+    if rc == SHANJIE_ERR_INTERNAL {
+        // SAFETY: forwarded caller contract.
+        unsafe { discard(engine) };
+    }
+    rc
+}
+
+/// zhen-inline section 2. `enabled` 0 or 1 (default 1): whether the English typed into the unfinished syllable shows as its letters
+/// while it can still become a listed word (the display rule D). Returns the snapshot like `set_english`, so a composition on screen
+/// is drawn again; any other value changes nothing and returns 2. Only matters with `set_english(1)`.
+///
+/// # Safety
+/// `engine` is NULL or a live handle; `out` is NULL or valid for one pointer write.
+#[no_mangle]
+pub unsafe extern "C" fn shanjie_engine_set_english_inline(
+    engine: *mut ShanjieEngine,
+    enabled: u32,
+    out: *mut *mut ShanjieOutput,
+) -> i32 {
+    let rc = guard(|| {
+        // SAFETY: forwarded caller contract.
+        if !unsafe { clear_out(out) } || engine.is_null() {
+            return SHANJIE_ERR_NULL;
+        }
+        if enabled > 1 {
+            return SHANJIE_ERR_INVALID;
+        }
+        // SAFETY: live handle, single-threaded use (§6).
+        let e = unsafe { &mut (*engine).0 };
+        match e.set_english_inline(enabled == 1) {
+            // SAFETY: `out` checked non-NULL above.
+            Ok(o) => unsafe { emit(o, out) },
+            Err(_) => SHANJIE_ERR_INTERNAL,
+        }
+    });
+    if rc == SHANJIE_ERR_INTERNAL {
+        // SAFETY: forwarded caller contract.
+        unsafe { discard(engine) };
+    }
+    rc
+}
+
 /// # Safety
 /// `engine` is NULL or a live handle; `dir` is NULL or a NUL-terminated string.
 #[no_mangle]
@@ -550,6 +781,209 @@ pub unsafe extern "C" fn shanjie_engine_learning_status(engine: *mut ShanjieEngi
     })
 }
 
+// S7c-2a (docs/contracts/s7c2a-core-rerank.md section 2.5): the small character model and the two-phase rerank. See
+// core/include/shanjie.h for the semantics, ownership and threading rules.
+
+/// # Safety
+/// `engine` is NULL or a live handle; `path` is NULL or a NUL-terminated string.
+#[no_mangle]
+pub unsafe extern "C" fn shanjie_engine_load_tinylm(engine: *mut ShanjieEngine, path: *const c_char) -> i32 {
+    let rc = guard(|| {
+        if engine.is_null() || path.is_null() {
+            return SHANJIE_ERR_NULL;
+        }
+        // SAFETY: non-NULL, NUL-terminated per the caller contract.
+        let Ok(path) = unsafe { CStr::from_ptr(path) }.to_str() else {
+            return SHANJIE_ERR_INVALID;
+        };
+        // SAFETY: live handle, single-threaded use (§6).
+        let e = unsafe { &mut (*engine).0 };
+        match e.load_tinylm(Path::new(path)) {
+            Ok(()) => SHANJIE_OK,
+            Err(EngineError::LoadFailed) => SHANJIE_ERR_LOAD,
+            Err(EngineError::Internal) => SHANJIE_ERR_INTERNAL,
+        }
+    });
+    if rc == SHANJIE_ERR_INTERNAL {
+        // SAFETY: forwarded caller contract.
+        unsafe { discard(engine) };
+    }
+    rc
+}
+
+/// # Safety
+/// `engine` is NULL or a live handle; `out` is NULL or valid for one pointer write.
+#[no_mangle]
+pub unsafe extern "C" fn shanjie_engine_set_rerank(engine: *mut ShanjieEngine, enabled: u32, out: *mut *mut ShanjieOutput) -> i32 {
+    let rc = guard(|| {
+        // SAFETY: forwarded caller contract.
+        if !unsafe { clear_out(out) } || engine.is_null() {
+            return SHANJIE_ERR_NULL;
+        }
+        if enabled > 1 {
+            return SHANJIE_ERR_INVALID;
+        }
+        // SAFETY: live handle, single-threaded use (§6).
+        let e = unsafe { &mut (*engine).0 };
+        match e.set_rerank(enabled == 1) {
+            // SAFETY: `out` checked non-NULL above.
+            Ok(o) => unsafe { emit(o, out) },
+            Err(_) => SHANJIE_ERR_INTERNAL,
+        }
+    });
+    if rc == SHANJIE_ERR_INTERNAL {
+        // SAFETY: forwarded caller contract.
+        unsafe { discard(engine) };
+    }
+    rc
+}
+
+/// Rerank strength (docs/contracts/rerank-strength.md section 2.2): level 0 conservative, 1 standard (default), 2 aggressive; codes
+/// and snapshot like `set_profile`. The out pointer is cleared and the range checked before the engine is touched, so 1 and 2
+/// leave the level and the generation as they were.
+///
+/// # Safety
+/// `engine` is NULL or a live handle; `out` is NULL or valid for one pointer write.
+#[no_mangle]
+pub unsafe extern "C" fn shanjie_engine_set_rerank_level(engine: *mut ShanjieEngine, level: u32, out: *mut *mut ShanjieOutput) -> i32 {
+    let rc = guard(|| {
+        // SAFETY: forwarded caller contract.
+        if !unsafe { clear_out(out) } || engine.is_null() {
+            return SHANJIE_ERR_NULL;
+        }
+        let Some(level) = RerankLevel::from_code(level) else { return SHANJIE_ERR_INVALID };
+        // SAFETY: live handle, single-threaded use (§6).
+        let e = unsafe { &mut (*engine).0 };
+        match e.set_rerank_level(level) {
+            Ok(o) => {
+                #[cfg(test)]
+                tests::inject(&o);
+                // SAFETY: `out` checked non-NULL above.
+                unsafe { emit(o, out) }
+            }
+            Err(_) => SHANJIE_ERR_INTERNAL,
+        }
+    });
+    if rc == SHANJIE_ERR_INTERNAL {
+        // SAFETY: forwarded caller contract.
+        unsafe { discard(engine) };
+    }
+    rc
+}
+
+/// Rerank strength section 2.2 (P2-1: an out parameter, so NULL, a panic's 4 and "no model" stay apart): `*levels` is the mask
+/// of `Engine::rerank_levels`. Like `learning_status`, it changes nothing, so a 4 resets nothing.
+///
+/// # Safety
+/// `engine` is NULL or a live handle; `levels` is NULL or writable.
+#[no_mangle]
+pub unsafe extern "C" fn shanjie_engine_rerank_levels(engine: *mut ShanjieEngine, levels: *mut u32) -> i32 {
+    guard(|| {
+        if engine.is_null() || levels.is_null() {
+            return SHANJIE_ERR_NULL;
+        }
+        // SAFETY: live handle; `levels` non-NULL and writable per the caller contract.
+        unsafe { *levels = (*engine).0.rerank_levels() };
+        SHANJIE_OK
+    })
+}
+
+/// # Safety
+/// `engine` is NULL or a live handle; `job` is NULL or valid for one pointer write.
+#[no_mangle]
+pub unsafe extern "C" fn shanjie_engine_rerank_take(engine: *mut ShanjieEngine, job: *mut *mut ShanjieRerankJob) -> i32 {
+    let rc = guard(|| {
+        // SAFETY: forwarded caller contract.
+        if !unsafe { clear_out(job) } || engine.is_null() {
+            return SHANJIE_ERR_NULL;
+        }
+        // SAFETY: live handle, single-threaded use (§6).
+        if let Some(j) = unsafe { &mut (*engine).0 }.take_rerank_job() {
+            // SAFETY: `job` checked non-NULL above.
+            unsafe { *job = Box::into_raw(Box::new(ShanjieRerankJob { job: j, result: Mutex::new(None) })) };
+        }
+        SHANJIE_OK
+    });
+    if rc == SHANJIE_ERR_INTERNAL {
+        // SAFETY: forwarded caller contract.
+        unsafe { discard(engine) };
+    }
+    rc
+}
+
+/// No engine is touched: a 4 here resets nothing and leaves no result (an earlier run's result is cleared first).
+///
+/// # Safety
+/// `job` is NULL or a job from `shanjie_engine_rerank_take` not yet freed, not in use by another call.
+#[no_mangle]
+pub unsafe extern "C" fn shanjie_rerank_run(job: *mut ShanjieRerankJob) -> i32 {
+    guard(|| {
+        if job.is_null() {
+            return SHANJIE_ERR_NULL;
+        }
+        // SAFETY: live job per the caller contract; shared reference only.
+        let j = unsafe { &*job };
+        // A run that panics leaves no result, not even one of an earlier run of this job.
+        *j.result.lock().unwrap_or_else(PoisonError::into_inner) = None;
+        #[cfg(test)]
+        tests::inject_run(&j.job);
+        let r = j.job.run();
+        *j.result.lock().unwrap_or_else(PoisonError::into_inner) = Some(r);
+        SHANJIE_OK
+    })
+}
+
+/// # Safety
+/// `engine` is NULL or a live handle; `job` is NULL or a job from `shanjie_engine_rerank_take` not yet freed, not in use by
+/// another call; `out` is NULL or valid for one pointer write.
+#[no_mangle]
+pub unsafe extern "C" fn shanjie_engine_rerank_apply(
+    engine: *mut ShanjieEngine,
+    job: *mut ShanjieRerankJob,
+    out: *mut *mut ShanjieOutput,
+) -> i32 {
+    let rc = guard(|| {
+        // SAFETY: forwarded caller contract.
+        if !unsafe { clear_out(out) } || engine.is_null() || job.is_null() {
+            return SHANJIE_ERR_NULL;
+        }
+        // SAFETY: live job per the caller contract; shared reference only. Taking the result makes a second apply a no-op.
+        let Some(r) = unsafe { &*job }.result.lock().unwrap_or_else(PoisonError::into_inner).take() else {
+            return SHANJIE_NO_CHANGE;
+        };
+        // SAFETY: live handle, single-threaded use (§6).
+        let e = unsafe { &mut (*engine).0 };
+        match e.apply_rerank(r) {
+            Ok(Some(o)) => {
+                #[cfg(test)]
+                tests::inject(&o);
+                // SAFETY: `out` checked non-NULL above.
+                unsafe { emit(o, out) }
+            }
+            Ok(None) => SHANJIE_NO_CHANGE,
+            Err(_) => SHANJIE_ERR_INTERNAL,
+        }
+    });
+    if rc == SHANJIE_ERR_INTERNAL {
+        // SAFETY: forwarded caller contract.
+        unsafe { discard(engine) };
+    }
+    rc
+}
+
+/// # Safety
+/// `job` is NULL or a job from `shanjie_engine_rerank_take` not yet freed, not in use by another call.
+#[no_mangle]
+pub unsafe extern "C" fn shanjie_rerank_free(job: *mut ShanjieRerankJob) {
+    guard(|| {
+        if !job.is_null() {
+            // SAFETY: allocated by `Box::into_raw` in `shanjie_engine_rerank_take`, freed once (header).
+            drop(unsafe { Box::from_raw(job) });
+        }
+        SHANJIE_OK
+    });
+}
+
 /// # Safety
 /// `output` is NULL or an output from this library not yet freed.
 #[no_mangle]
@@ -596,6 +1030,15 @@ mod tests {
         }
     }
 
+    /// Injection point in `shanjie_rerank_run`: when armed, panic once with the job's candidate text in the payload.
+    pub(super) fn inject_run(j: &RerankJob) {
+        if ARMED.with(|a| a.replace(false)) {
+            let msg = format!("injected panic: {}", j.texts());
+            PAYLOAD.with(|p| *p.borrow_mut() = msg.clone());
+            std::panic::panic_any(msg);
+        }
+    }
+
     fn is_child(name: &str) -> bool {
         std::env::var(CHILD_ENV).is_ok_and(|v| v == name)
     }
@@ -618,6 +1061,7 @@ mod tests {
     const CHAR: u32 = 1;
     const SPACE: u32 = 2;
     const ENTER: u32 = 3;
+    const BACKSPACE: u32 = 4;
     const ESC: u32 = 6;
     /// Leaves a composition intact, so an empty preedit after it proves the reset.
     const LEFT: u32 = 7;
@@ -629,6 +1073,7 @@ mod tests {
         std::fs::write(d.join("mcbpmf-data.txt"), base).unwrap();
         std::fs::write(d.join("overlay-add.tsv"), "").unwrap();
         std::fs::write(d.join("sandhi-add.tsv"), "").unwrap();
+        std::fs::write(d.join("names-add.tsv"), "").unwrap();
         std::fs::write(d.join("demote.tsv"), "").unwrap();
         d
     }
@@ -832,6 +1277,11 @@ mod tests {
         e = sentinel();
         assert!(unsafe { shanjie_engine_new(dir_c.as_ptr(), 0, &mut e) } == 3 && e.is_null(), "new missing sandhi-add.tsv");
         std::fs::write(dir.join("sandhi-add.tsv"), "").unwrap();
+        // model-v6 section 7 P2-3: the names layer is required like overlay-add.tsv, never silently skipped.
+        std::fs::remove_file(dir.join("names-add.tsv")).unwrap();
+        e = sentinel();
+        assert!(unsafe { shanjie_engine_new(dir_c.as_ptr(), 0, &mut e) } == 3 && e.is_null(), "new missing names-add.tsv");
+        std::fs::write(dir.join("names-add.tsv"), "").unwrap();
         // demote.tsv is required like the other lexicon files, and a malformed one fails the same way.
         std::fs::remove_file(dir.join("demote.tsv")).unwrap();
         e = sentinel();
@@ -879,11 +1329,29 @@ mod tests {
             unsafe { shanjie_output_free(o) };
         }
 
+        // engine_set_abbreviation (V3 engine contract section 12.1): codes like set_prediction.
+        o = sentinel();
+        assert!(unsafe { shanjie_engine_set_abbreviation(e, 1, ptr::null_mut()) } == 1, "set_abbreviation out NULL");
+        assert!(unsafe { shanjie_engine_set_abbreviation(ptr::null_mut(), 1, &mut o) } == 1 && o.is_null(), "set_abbreviation engine NULL");
+        for v in [2, u32::MAX] {
+            o = sentinel();
+            assert!(unsafe { shanjie_engine_set_abbreviation(e, v, &mut o) } == 2 && o.is_null(), "set_abbreviation out of range");
+        }
+        for v in [0, 1] {
+            o = sentinel();
+            assert!(unsafe { shanjie_engine_set_abbreviation(e, v, &mut o) } == 0 && !o.is_null(), "set_abbreviation 0/1");
+            unsafe { shanjie_output_free(o) };
+        }
+        // On (the loop ended with 1), but this engine has no model and so no row to resolve units with: ㄋ then ㄔ replace.
+        send(e, key(CHAR, 's'));
+        assert!(send(e, key(CHAR, 't')).1.chars().count() == 1, "no model: one unit");
+        assert!(send(e, key(ESC, '\0')).0 == 0, "esc");
+
         // engine_key
         o = sentinel();
         assert!(unsafe { shanjie_engine_key(e, key(ESC, '\0'), ptr::null_mut()) } == 1, "key out NULL");
         assert!(unsafe { shanjie_engine_key(ptr::null_mut(), key(ESC, '\0'), &mut o) } == 1 && o.is_null(), "key engine NULL");
-        for (kind, ch) in [(0, 0x61), (14, 0x61), (CHAR, 0xD800), (CHAR, 0x110000)] {
+        for (kind, ch) in [(0, 0x61), (16, 0x61), (CHAR, 0xD800), (CHAR, 0x110000)] {
             o = sentinel();
             let k = ShanjieKey { kind, ch, modifiers: 0 };
             assert!(unsafe { shanjie_engine_key(e, k, &mut o) } == 2 && o.is_null(), "key invalid");
@@ -1003,6 +1471,101 @@ mod tests {
         assert!(out.contains("1 passed"), "child test actually ran");
     }
 
+    // ---- candidate-vertical contract section 2.2 / 3.1: set_candidate_vertical, kinds 14 / 15, candidate_vertical ----
+
+    const PAGE_UP: u32 = 14;
+    const PAGE_DOWN: u32 = 15;
+    const DOWN: u32 = 10;
+
+    /// (code, handled, candidates, selected, columns, first, total, candidate_vertical) of one key; frees the output.
+    fn vkey(e: *mut ShanjieEngine, k: ShanjieKey) -> (i32, i32, Vec<String>, i32, u32, u32, u32, u32) {
+        let mut o = ptr::null_mut();
+        let rc = unsafe { shanjie_engine_key(e, k, &mut o) };
+        if rc != 0 {
+            assert!(o.is_null(), "*out NULL on error");
+            return (rc, 0, vec![], 0, 0, 0, 0, 0);
+        }
+        let (c, sel, cols, first, total, _) = read_out(o);
+        // SAFETY: test-only read of a live output.
+        let (handled, vert) = unsafe { ((*o).handled, (*o).candidate_vertical) };
+        unsafe { shanjie_output_free(o) };
+        (rc, handled, c, sel, cols, first, total, vert)
+    }
+
+    #[test]
+    fn child_vertical() {
+        if !is_child("child_vertical") {
+            return;
+        }
+        let base: String = (0..30).map(|i| format!("ㄋㄧˇ {} -1.0\n", char::from_u32(0x4E00 + i).unwrap())).collect();
+        let dir = tiny_dir("vertical", base.as_bytes());
+        let e = new_engine(&dir, 0);
+
+        // Codes, like set_prediction.
+        let mut o: *mut ShanjieOutput = sentinel();
+        assert!(unsafe { shanjie_engine_set_candidate_vertical(e, 1, ptr::null_mut()) } == 1, "out NULL");
+        assert!(unsafe { shanjie_engine_set_candidate_vertical(ptr::null_mut(), 1, &mut o) } == 1 && o.is_null(), "engine NULL");
+        for v in [2, u32::MAX] {
+            o = sentinel();
+            assert!(unsafe { shanjie_engine_set_candidate_vertical(e, v, &mut o) } == 2 && o.is_null(), "out of range");
+        }
+        // The failed calls changed nothing: the window still opens horizontal.
+        for c in ['s', 'u', '3'] {
+            send(e, key(CHAR, c));
+        }
+        let h = vkey(e, key(SPACE, '\0'));
+        assert!(h.1 == 1 && h.2.len() == 9 && h.4 == 0 && h.7 == 0, "default horizontal, candidate_vertical 0");
+        send(e, key(ESC, '\0'));
+        // 1 turns it on; the snapshot (no window open) is handled 1 with no candidates.
+        o = sentinel();
+        assert!(unsafe { shanjie_engine_set_candidate_vertical(e, 1, &mut o) } == 0 && !o.is_null(), "set 1");
+        let snap = read_out(o);
+        assert!(unsafe { (*o).handled == 1 && (*o).candidate_vertical == 0 } && snap.0.is_empty() && snap.1 == -1);
+        unsafe { shanjie_output_free(o) };
+
+        // Kinds 14 / 15 are accepted (not code 2); 16 is not. With no vertical window they are not handled.
+        for kind in [PAGE_UP, PAGE_DOWN] {
+            let r = vkey(e, key(kind, '\0'));
+            assert!(r.0 == 0 && r.1 == 0, "no window: accepted, not handled");
+        }
+        o = sentinel();
+        assert!(unsafe { shanjie_engine_key(e, key(16, '\0'), &mut o) } == 2 && o.is_null(), "kind 16");
+
+        // Vertical window: nine rows, columns 0, candidate_vertical 1; Down moves, Page Down turns by nine.
+        let v = vkey(e, key(SPACE, '\0'));
+        assert!(v.1 == 1 && v.2.len() == 9 && v.3 == 0 && v.4 == 0 && v.5 == 0 && v.6 == 30 && v.7 == 1, "vertical open");
+        let d = vkey(e, key(DOWN, '\0'));
+        assert!(d.2 == v.2 && d.3 == 1 && d.4 == 0 && d.7 == 1, "Down moves the selection, no grid");
+        let p = vkey(e, key(PAGE_DOWN, '\0'));
+        assert!(p.1 == 1 && p.3 == 0 && p.5 == 9 && p.2.len() == 9 && p.2 != v.2 && p.7 == 1, "Page Down by nine");
+        let u = vkey(e, key(PAGE_UP, '\0'));
+        assert!(u.2 == v.2 && u.5 == 0 && u.3 == 0 && u.7 == 1, "Page Up back");
+        // Page Down with a modifier is not handled and the window stays.
+        let m = vkey(e, ShanjieKey { kind: PAGE_DOWN, ch: 0, modifiers: 8 });
+        assert!(m.1 == 0 && m.2 == v.2 && m.7 == 1, "COMMAND+Page Down passes through");
+        // set_candidate_vertical(0) while the window is open: the snapshot is the open window, orientation kept.
+        o = sentinel();
+        assert!(unsafe { shanjie_engine_set_candidate_vertical(e, 0, &mut o) } == 0);
+        let snap = read_out(o);
+        assert!(unsafe { (*o).candidate_vertical } == 1 && snap.0 == v.2 && snap.2 == 0 && snap.4 == 30, "open window unchanged");
+        unsafe { shanjie_output_free(o) };
+        let d = vkey(e, key(DOWN, '\0'));
+        assert!(d.4 == 0 && d.7 == 1, "still vertical after the switch");
+        send(e, key(ESC, '\0'));
+        let h = vkey(e, key(SPACE, '\0'));
+        assert!(h.2.len() == 9 && h.4 == 0 && h.7 == 0, "reopened horizontal");
+        assert!(vkey(e, key(DOWN, '\0')).4 == 9, "horizontal Down expands the grid");
+        unsafe { shanjie_engine_free(e) };
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn candidate_vertical_through_the_c_abi() {
+        let (ok, out, _) = run_child("child_vertical", false);
+        assert!(ok, "vertical child failed");
+        assert!(out.contains("1 passed"), "child test actually ran");
+    }
+
     // ---- S2c: load_lm / set_profile ----
 
     /// SJLM0001 (tools/build_lm.py): vocab `<s> </s> 心 鑫`, N 10, eos 4, D 0.75; one context `<s>`
@@ -1096,10 +1659,17 @@ mod tests {
         let (cls, emit) = ([1u16, 2, 0xFFFF, 0xFFFF], [1.0, 1.0, 0.0, 0.0]);
         std::fs::write(&classes_path, crate::lm::test_classes(&tiny, 0, 0.8, &cls, &emit, &[0.1; 9])).unwrap();
         // An engine without data_dir is not reachable through the ABI (only `new` creates engines);
-        // the closest case is the overlay vanishing from data_dir after `new`.
-        std::fs::rename(dir.join("overlay-add.tsv"), dir.join("overlay.bak")).unwrap();
-        assert!(unsafe { shanjie_engine_load_lm(e, lm_c.as_ptr()) } == 3, "load without overlay");
-        std::fs::rename(dir.join("overlay.bak"), dir.join("overlay-add.tsv")).unwrap();
+        // the closest cases are overlay-add.tsv, names-add.tsv or demote.tsv vanishing from data_dir after `new`:
+        // load_lm reads them again (capping_overlay and demote.tsv), so any one fails with code 3.
+        std::fs::rename(dir.join("overlay-add.tsv"), dir.join("overlay-add.bak")).unwrap();
+        assert!(unsafe { shanjie_engine_load_lm(e, lm_c.as_ptr()) } == 3, "load without overlay-add.tsv");
+        std::fs::rename(dir.join("overlay-add.bak"), dir.join("overlay-add.tsv")).unwrap();
+        std::fs::rename(dir.join("names-add.tsv"), dir.join("names-add.bak")).unwrap();
+        assert!(unsafe { shanjie_engine_load_lm(e, lm_c.as_ptr()) } == 3, "load without names-add.tsv");
+        std::fs::rename(dir.join("names-add.bak"), dir.join("names-add.tsv")).unwrap();
+        std::fs::rename(dir.join("demote.tsv"), dir.join("demote.bak")).unwrap();
+        assert!(unsafe { shanjie_engine_load_lm(e, lm_c.as_ptr()) } == 3, "load without demote.tsv");
+        std::fs::rename(dir.join("demote.bak"), dir.join("demote.tsv")).unwrap();
         assert!(type_xin(e) == "鑫" && profile(e, 1).3 == "鑫", "failed loads left no LM");
         assert!(profile(e, 0).0 == 0 && enter(e) == "鑫", "still unigram");
 
@@ -1113,6 +1683,17 @@ mod tests {
         let (rc, null, handled, preedit, commit) = profile(e, 1);
         assert!(rc == 0 && !null && handled == 1 && preedit == "心" && commit.is_empty(), "formal snapshot");
         assert!(enter(e) == "心", "formal commit");
+
+        // set_abbreviation with a model: two initials are two units, turning it off drops them (V3 engine section 12.1).
+        let mut o: *mut ShanjieOutput = sentinel();
+        assert!(unsafe { shanjie_engine_set_abbreviation(e, 1, &mut o) } == 0 && !o.is_null(), "abbreviation on");
+        unsafe { shanjie_output_free(o) };
+        assert!(send(e, key(CHAR, 'v')).0 == 0, "typing");
+        assert!(send(e, key(CHAR, 'q')).1.chars().count() == 2, "two units");
+        o = sentinel();
+        assert!(unsafe { shanjie_engine_set_abbreviation(e, 0, &mut o) } == 0 && !o.is_null(), "abbreviation off with two units");
+        assert!(unsafe { CStr::from_ptr((*o).preedit) }.to_bytes().is_empty(), "off drops the units");
+        unsafe { shanjie_output_free(o) };
 
         // A failed load keeps the loaded model.
         assert!(unsafe { shanjie_engine_load_lm(e, garbage_c.as_ptr()) } == 3, "garbage after success");
@@ -1154,5 +1735,648 @@ mod tests {
         assert!(ok, "LM child failed");
         assert!(out.contains("1 passed"), "child test actually ran");
         assert!(!out.contains("shanjie-ffi-") && !err.contains("shanjie-ffi-"), "a path leaked");
+    }
+
+    // ---- zhen-mixed: load_english, set_english (docs/contracts/zhen-mixed.md section 5.2) ----
+
+    fn load_english(e: *mut ShanjieEngine, p: &Path) -> i32 {
+        let c = CString::new(p.to_str().unwrap()).unwrap();
+        unsafe { shanjie_engine_load_english(e, c.as_ptr()) }
+    }
+
+    /// set_english; returns the code and frees the output.
+    fn set_english(e: *mut ShanjieEngine, on: u32) -> i32 {
+        let mut o: *mut ShanjieOutput = sentinel();
+        let rc = unsafe { shanjie_engine_set_english(e, on, &mut o) };
+        if rc == 0 {
+            unsafe { shanjie_output_free(o) };
+        } else {
+            assert!(o.is_null(), "*out NULL on a non-zero code");
+        }
+        rc
+    }
+
+    /// set_english_inline; returns the code and frees the output.
+    fn set_inline(e: *mut ShanjieEngine, on: u32) -> i32 {
+        let mut o: *mut ShanjieOutput = sentinel();
+        let rc = unsafe { shanjie_engine_set_english_inline(e, on, &mut o) };
+        if rc == 0 {
+            unsafe { shanjie_output_free(o) };
+        } else {
+            assert!(o.is_null(), "*out NULL on a non-zero code");
+        }
+        rc
+    }
+
+    /// Types `keys` (Space for `_`); the last output's (candidates, commit, preedit), freed.
+    fn type_out(e: *mut ShanjieEngine, keys: &str) -> (Vec<String>, String, String) {
+        let mut last = (Vec::new(), String::new(), String::new());
+        for c in keys.chars() {
+            let mut o = ptr::null_mut();
+            let k = if c == '_' { key(SPACE, '\0') } else { key(CHAR, c) };
+            assert!(unsafe { shanjie_engine_key(e, k, &mut o) } == 0, "typing");
+            // SAFETY: test-only read of a live output.
+            last = unsafe {
+                let s = |p| CStr::from_ptr(p).to_str().unwrap().to_string();
+                let n = (*o).candidate_count as usize;
+                let cands = (0..n).map(|i| s(*(*o).candidates.add(i))).collect();
+                (cands, s((*o).commit), s((*o).preedit))
+            };
+            unsafe { shanjie_output_free(o) };
+        }
+        last
+    }
+
+    #[test]
+    fn child_english() {
+        if !is_child("child_english") {
+            return;
+        }
+        let dir = tiny_dir("english", "ㄒㄧㄣ 鑫 -1.0\n".as_bytes());
+        let e = new_engine(&dir, 0);
+        let list = |name: &str, bytes: &[u8]| {
+            let p = dir.join(name);
+            std::fs::write(&p, bytes).unwrap();
+            p
+        };
+        let good = list("good.txt", b"rust\ngoogle\n");
+        let bad_utf8 = CString::new(vec![0xffu8, 0xfe]).unwrap();
+        let good_c = CString::new(good.to_str().unwrap()).unwrap();
+
+        // load_english: 1 for NULLs, 2 for a non-UTF-8 path.
+        assert!(unsafe { shanjie_engine_load_english(ptr::null_mut(), good_c.as_ptr()) } == 1, "load engine NULL");
+        assert!(unsafe { shanjie_engine_load_english(e, ptr::null()) } == 1, "load path NULL");
+        assert!(unsafe { shanjie_engine_load_english(e, bad_utf8.as_ptr()) } == 2, "load non-UTF-8");
+
+        // set_english codes, like set_abbreviation.
+        let mut o: *mut ShanjieOutput = sentinel();
+        assert!(unsafe { shanjie_engine_set_english(e, 1, ptr::null_mut()) } == 1, "set_english out NULL");
+        assert!(unsafe { shanjie_engine_set_english(ptr::null_mut(), 1, &mut o) } == 1 && o.is_null(), "set_english engine NULL");
+        for v in [2, u32::MAX] {
+            assert!(set_english(e, v) == 2, "set_english out of range");
+        }
+        // On without a list: only remembered, no window.
+        assert!(set_english(e, 1) == 0);
+        let (cands, _, _) = type_out(e, "rust_");
+        assert!(cands.is_empty(), "no list, no window");
+        assert!(send(e, key(ESC, '\0')).0 == 0);
+
+        // 3 for every file the loader refuses; each leaves no list (none was loaded yet).
+        let words = |n: usize, len: usize| -> Vec<u8> {
+            (0..n)
+                .map(|i| {
+                    let mut w: Vec<u8> = (0..len).map(|j| b'a' + ((i >> (4 * (j % 8))) & 15) as u8 + (j / 8) as u8).collect();
+                    w.push(b'\n');
+                    String::from_utf8(w).unwrap()
+                })
+                .collect::<String>()
+                .into_bytes()
+        };
+        let refused: Vec<(&str, Vec<u8>)> = vec![
+            ("one letter too few", b"rust\nab\n".to_vec()),
+            ("33 letters", [b"rust\n".to_vec(), vec![b'a'; 33], b"\n".to_vec()].concat()),
+            ("upper case", b"rust\nRust\n".to_vec()),
+            ("digit", b"rust\nab1\n".to_vec()),
+            ("blank line", b"rust\n\ngoogle\n".to_vec()),
+            ("duplicate", b"rust\ngoogle\nrust\n".to_vec()),
+            ("BOM", [b"\xef\xbb\xbf".to_vec(), b"rust\n".to_vec()].concat()),
+            ("CRLF", b"rust\r\ngoogle\r\n".to_vec()),
+            ("not UTF-8", b"rust\n\xff\xfe\n".to_vec()),
+            // `rust` first, as in every case above: a loader that kept the lines read before the limit would open the window.
+            ("over 4 MiB", [b"rust\n".to_vec(), words(140_000, 32)].concat()),
+            ("over 200,000 lines", [b"rust\n".to_vec(), words(200_000, 6)].concat()),
+        ];
+        for (what, bytes) in &refused {
+            let p = list("refused.txt", bytes);
+            assert!(load_english(e, &p) == 3, "{what}");
+        }
+        assert!(load_english(e, &dir.join("missing.txt")) == 3, "missing");
+        assert!(load_english(e, &dir) == 3, "a directory");
+        // A FIFO with no writer: 3 at once (not a regular file), not an open that waits for a writer forever.
+        let fifo = dir.join("fifo.txt");
+        assert!(Command::new("/usr/bin/mkfifo").arg(&fifo).status().unwrap().success(), "mkfifo");
+        let (tx, rx) = std::sync::mpsc::channel();
+        let (ep, fp) = (e as usize, fifo.clone());
+        std::thread::spawn(move || tx.send(load_english(ep as *mut ShanjieEngine, &fp)).unwrap());
+        let got = rx.recv_timeout(std::time::Duration::from_secs(10));
+        assert!(got.expect("load_english blocked on a FIFO") == 3, "a FIFO");
+        std::fs::remove_file(fifo).unwrap();
+        let (cands, _, _) = type_out(e, "rust_");
+        assert!(cands.is_empty(), "failed loads left no list");
+        assert!(send(e, key(ESC, '\0')).0 == 0);
+        // The limits themselves are fine: 200,000 lines.
+        assert!(load_english(e, &list("max.txt", &words(200_000, 6))) == 0, "200,000 lines");
+
+        // A good list, then a bad one: the good list stays.
+        assert!(load_english(e, &good) == 0, "good list");
+        for (what, bytes) in &refused {
+            let p = list("refused.txt", bytes);
+            assert!(load_english(e, &p) == 3, "{what}");
+        }
+        // set_english_inline (zhen-inline section 2): the codes of set_english.
+        let mut o: *mut ShanjieOutput = sentinel();
+        assert!(unsafe { shanjie_engine_set_english_inline(ptr::null_mut(), 1, &mut o) } == 1 && o.is_null(), "inline engine NULL");
+        assert!(unsafe { shanjie_engine_set_english_inline(e, 1, ptr::null_mut()) } == 1, "inline out NULL");
+        for v in [2, u32::MAX] {
+            assert!(set_inline(e, v) == 2, "inline out of range");
+        }
+        // Through the C ABI, "show as typed" (the default): rust shows as the letters, Space opens the window, 1 keeps the word
+        // in the composition (nothing is committed), Enter sends it.
+        let (cands, commit, preedit) = type_out(e, "rust");
+        assert!(cands.is_empty() && commit.is_empty() && preedit == "rust", "inline display");
+        let (cands, commit, preedit) = type_out(e, "_");
+        assert!(cands == ["rust", "Rust", "RUST"] && commit.is_empty() && preedit == "rust", "window");
+        let (cands, commit, preedit) = type_out(e, "1");
+        assert!(cands.is_empty() && commit.is_empty() && preedit == "rust", "the word stays in the composition");
+        let (_, preedit, commit) = send(e, key(ENTER, '\0'));
+        assert!(preedit.is_empty() && commit == "rust", "Enter sends it");
+        // "Show on Space": the Zhuyin shows until the window opens.
+        assert!(set_inline(e, 0) == 0);
+        let (_, commit, preedit) = type_out(e, "rust");
+        assert!(commit.is_empty() && preedit == "ㄔㄧ", "Zhuyin display");
+        let (cands, commit, preedit) = type_out(e, "_");
+        assert!(cands == ["rust", "Rust", "RUST"] && commit.is_empty() && preedit == "ㄔㄧ", "window");
+        let (cands, commit, preedit) = type_out(e, "1");
+        assert!(cands.is_empty() && commit.is_empty() && preedit == "rust", "the word stays in the composition");
+        assert!(send(e, key(ENTER, '\0')).2 == "rust");
+        // The snapshot redraws a composition on screen: letters typed, switch to "on Space", the Zhuyin shows, and back.
+        type_out(e, "rus");
+        let mut o: *mut ShanjieOutput = ptr::null_mut();
+        assert!(unsafe { shanjie_engine_set_english_inline(e, 1, &mut o) } == 0);
+        assert!(unsafe { CStr::from_ptr((*o).preedit) }.to_str().unwrap() == "rus", "snapshot, letters");
+        unsafe { shanjie_output_free(o) };
+        assert!(unsafe { shanjie_engine_set_english_inline(e, 0, &mut o) } == 0);
+        assert!(unsafe { CStr::from_ptr((*o).preedit) }.to_str().unwrap() == "ㄋㄧ", "snapshot, Zhuyin");
+        unsafe { shanjie_output_free(o) };
+        assert!(send(e, key(ESC, '\0')).0 == 0);
+        assert!(set_inline(e, 1) == 0);
+        // The last two fields (zhen-inline section 1.3f): an open English run, in UTF-16 units of `preedit`; 0 and 0 otherwise.
+        let fields = |k: ShanjieKey| {
+            let mut o = ptr::null_mut();
+            assert!(unsafe { shanjie_engine_key(e, k, &mut o) } == 0, "typing");
+            // SAFETY: test-only read of a live output.
+            let r = unsafe { (CStr::from_ptr((*o).preedit).to_str().unwrap().to_string(), (*o).english_run_utf16_start, (*o).english_run_utf16_len) };
+            unsafe { shanjie_output_free(o) };
+            r
+        };
+        type_out(e, "vup_"); // ㄒㄧㄣ with tone 1: one Chinese character in front
+        let r = fields(ShanjieKey { kind: CHAR, ch: 'w' as u32, modifiers: 1 });
+        assert!(r.0.chars().count() == 2 && r.1 == 1 && r.2 == 1, "the run `W` after the character: {r:?}");
+        let r = fields(key(CHAR, 'i'));
+        assert!(r.1 == 1 && r.2 == 2, "{r:?}");
+        let r = fields(key(SPACE, '\0'));
+        assert!(r.1 == 0 && r.2 == 0, "the run ended: 0 and 0, {r:?}");
+        assert!(send(e, key(ESC, '\0')).0 == 0);
+        // Off: the same keys no longer open it.
+        assert!(set_english(e, 0) == 0);
+        let (cands, _, _) = type_out(e, "rust_");
+        assert!(cands.is_empty(), "off");
+        unsafe { shanjie_engine_free(e) };
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn english_codes_through_the_c_abi() {
+        let (ok, out, err) = run_child("child_english", false);
+        assert!(ok, "english child failed");
+        assert!(out.contains("1 passed"), "child test actually ran");
+        let all = format!("{out}{err}");
+        assert!(!all.contains("shanjie-ffi-") && !all.contains("rust") && !all.contains("google"), "a path or a word leaked");
+    }
+
+    // ---- S7c-2a: load_tinylm, set_rerank, take / run / apply / free (docs/contracts/s7c2a-core-rerank.md section 3 item 3) ----
+
+    /// dev302 row 12 (as engine_lm.rs counts it): the n-gram shows RERANK_NGRAM, and the toy model below changes it.
+    const RERANK_ROW: usize = 12;
+    const RERANK_NGRAM: &str = "我在家";
+
+    /// data/lm/bigram.sjlm and classes.sjc symlinked into `dir` without the kn.sjkn model-v6 puts beside them: the toy `.sjtl`
+    /// files here (versions 1 and 3) were tuned without a side file and pair only with the model loaded without KN (model-v6
+    /// section 2.7). Returns the model path.
+    fn lm_without_kn(dir: &Path) -> PathBuf {
+        for f in ["bigram.sjlm", "classes.sjc"] {
+            let _ = std::fs::remove_file(dir.join(f));
+            std::os::unix::fs::symlink(root().join("data/lm").join(f), dir.join(f)).unwrap();
+        }
+        dir.join("bigram.sjlm")
+    }
+
+    /// The toy model of eval/golden/tinylm-tiny/ in `dir`, its n-gram hash patched to data/lm/bigram.sjlm's (offset 68) and alpha
+    /// 100 / tau infinite for both profiles (offsets 36, 52), so its LLs decide (core/tests/engine_rerank.rs). `hash: false`
+    /// keeps the recorded hash (kn-tiny's), a model for another n-gram model.
+    fn toy_sjtl(dir: &Path, name: &str, hash: bool) -> PathBuf {
+        let mut b = std::fs::read(root().join("eval/golden/tinylm-tiny/tiny-int8.sjtl")).unwrap();
+        if hash {
+            let h = crate::eval::sha256_hex(&std::fs::read(root().join("data/lm/bigram.sjlm")).unwrap());
+            for i in 0..32 {
+                b[68 + i] = u8::from_str_radix(&h[2 * i..2 * i + 2], 16).unwrap();
+            }
+        }
+        for at in [36, 52] {
+            b[at..at + 8].copy_from_slice(&100f64.to_le_bytes());
+            b[at + 8..at + 16].copy_from_slice(&f64::INFINITY.to_le_bytes());
+        }
+        let p = dir.join(name);
+        std::fs::write(&p, b).unwrap();
+        p
+    }
+
+    /// The real data, its model, and the keys of RERANK_ROW (standard layout).
+    fn rerank_engine() -> (*mut ShanjieEngine, Vec<ShanjieKey>) {
+        let data = root().join("data/lexicon");
+        let lex = crate::engine::load_lexicon(&data).unwrap();
+        let mut rows = Vec::new();
+        for t in dev_texts() {
+            rows.extend(parse_rows(&t).unwrap());
+        }
+        let r = usable(&lex, rows).swap_remove(RERANK_ROW - 1);
+        let syls = r.reading.clone().unwrap_or_else(|| lex.to_syllables(&r.sent).unwrap());
+        let keys = syls.iter().flat_map(|s| keys_of(Layout::Standard, s)).collect();
+        (new_engine(&data, 0), keys)
+    }
+
+    fn load_tinylm(e: *mut ShanjieEngine, p: &Path) -> i32 {
+        let c = CString::new(p.to_str().unwrap()).unwrap();
+        unsafe { shanjie_engine_load_tinylm(e, c.as_ptr()) }
+    }
+
+    /// take; returns (code, job).
+    fn take(e: *mut ShanjieEngine) -> (i32, *mut ShanjieRerankJob) {
+        let mut j: *mut ShanjieRerankJob = sentinel();
+        let rc = unsafe { shanjie_engine_rerank_take(e, &mut j) };
+        (rc, j)
+    }
+
+    /// apply; returns (code, preedit when 0). `*out` is NULL on every non-zero code.
+    fn apply(e: *mut ShanjieEngine, j: *mut ShanjieRerankJob) -> (i32, String) {
+        let mut o: *mut ShanjieOutput = sentinel();
+        let rc = unsafe { shanjie_engine_rerank_apply(e, j, &mut o) };
+        if rc != 0 {
+            assert!(o.is_null(), "*out NULL on a non-zero code");
+            return (rc, String::new());
+        }
+        let p = read_out(o).5;
+        unsafe { shanjie_output_free(o) };
+        (rc, p)
+    }
+
+    /// set_rerank; returns (code, preedit when 0).
+    fn set_rerank(e: *mut ShanjieEngine, on: u32) -> (i32, String) {
+        let mut o: *mut ShanjieOutput = sentinel();
+        let rc = unsafe { shanjie_engine_set_rerank(e, on, &mut o) };
+        if rc != 0 {
+            assert!(o.is_null(), "*out NULL on a non-zero code");
+            return (rc, String::new());
+        }
+        let p = read_out(o).5;
+        unsafe { shanjie_output_free(o) };
+        (rc, p)
+    }
+
+    #[test]
+    fn child_rerank() {
+        if !is_child("child_rerank") {
+            return;
+        }
+        let dir = std::env::temp_dir().join(format!("shanjie-ffi-{}-rerank", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let good = toy_sjtl(&dir, "good.sjtl", true);
+        let other = toy_sjtl(&dir, "other.sjtl", false);
+        let garbage = dir.join("garbage.sjtl");
+        std::fs::write(&garbage, b"SJTL0001 not a model").unwrap();
+        let (e, keys) = rerank_engine();
+        let bad_utf8 = CString::new(vec![0xffu8, 0xfe]).unwrap();
+        let good_c = CString::new(good.to_str().unwrap()).unwrap();
+        unsafe { shanjie_rerank_free(ptr::null_mut()) };
+
+        // load_tinylm: 1 for NULLs, 2 for a non-UTF-8 path, 3 before the n-gram model and for bad files.
+        assert!(unsafe { shanjie_engine_load_tinylm(ptr::null_mut(), good_c.as_ptr()) } == 1, "load engine NULL");
+        assert!(unsafe { shanjie_engine_load_tinylm(e, ptr::null()) } == 1, "load path NULL");
+        assert!(unsafe { shanjie_engine_load_tinylm(e, bad_utf8.as_ptr()) } == 2, "load non-UTF-8");
+        assert!(load_tinylm(e, &good) == 3, "no n-gram model yet");
+        let lm = CString::new(lm_without_kn(&dir).to_str().unwrap()).unwrap();
+        assert!(unsafe { shanjie_engine_load_lm(e, lm.as_ptr()) } == 0, "load_lm");
+        for bad in [dir.join("missing.sjtl"), garbage, other, dir.clone()] {
+            assert!(load_tinylm(e, &bad) == 3, "bad tinylm file");
+        }
+
+        // set_rerank codes, like set_demote.
+        let mut o: *mut ShanjieOutput = sentinel();
+        assert!(unsafe { shanjie_engine_set_rerank(ptr::null_mut(), 1, &mut o) } == 1 && o.is_null(), "set_rerank engine NULL");
+        assert!(unsafe { shanjie_engine_set_rerank(e, 1, ptr::null_mut()) } == 1, "set_rerank out NULL");
+        for v in [2, u32::MAX] {
+            assert!(set_rerank(e, v).0 == 2, "set_rerank out of range");
+        }
+
+        // NULL combinations of take, run and apply.
+        let mut j: *mut ShanjieRerankJob = sentinel();
+        assert!(unsafe { shanjie_engine_rerank_take(ptr::null_mut(), &mut j) } == 1 && j.is_null(), "take engine NULL");
+        assert!(unsafe { shanjie_engine_rerank_take(e, ptr::null_mut()) } == 1, "take job NULL");
+        assert!(unsafe { shanjie_rerank_run(ptr::null_mut()) } == 1, "run NULL");
+        assert!(apply(ptr::null_mut(), sentinel()).0 == 1, "apply engine NULL");
+        assert!(apply(e, ptr::null_mut()).0 == 1, "apply job NULL");
+
+        // Failed loads left no model: typing makes no job, even with the switch on.
+        assert!(set_rerank(e, 1).0 == 0, "switch on");
+        for &k in &keys {
+            assert!(send(e, k).0 == 0, "typing");
+            let (rc, j) = take(e);
+            assert!(rc == 0 && j.is_null(), "no job without a model");
+        }
+        assert!(send(e, key(ESC, '\0')).0 == 0);
+
+        // load_tinylm does not turn rerank back on.
+        assert!(set_rerank(e, 0).0 == 0);
+        assert!(load_tinylm(e, &good) == 0, "load ok");
+        for &k in &keys {
+            send(e, k);
+            assert!(take(e).1.is_null(), "off after load_tinylm");
+        }
+        // On again: set_rerank recomputes, and that refresh makes a job.
+        let (rc, shown) = set_rerank(e, 1);
+        assert!(rc == 0 && shown == RERANK_NGRAM, "snapshot");
+        let (rc, j) = take(e);
+        assert!(rc == 0 && !j.is_null(), "a job");
+        assert!(take(e).1.is_null(), "taken once");
+
+        // apply before run: no result yet; apply's out NULL: 1.
+        assert!(apply(e, j).0 == SHANJIE_NO_CHANGE, "apply before run");
+        assert!(unsafe { shanjie_engine_rerank_apply(e, j, ptr::null_mut()) } == 1, "apply out NULL");
+        assert!(unsafe { shanjie_rerank_run(j) } == 0, "run");
+        let (rc, after) = apply(e, j);
+        assert!(rc == 0 && after != RERANK_NGRAM && after.chars().count() == RERANK_NGRAM.chars().count(), "applied a change");
+        assert!(apply(e, j).0 == SHANJIE_NO_CHANGE, "second apply");
+        assert!(unsafe { shanjie_rerank_run(j) } == 0 && apply(e, j).0 == SHANJIE_NO_CHANGE, "run again after the apply: stale");
+        unsafe { shanjie_rerank_free(j) };
+        let (rc, _, commit) = send(e, key(ENTER, '\0'));
+        assert!(rc == 0 && commit == after, "Enter sends the applied text");
+
+        // A key that does not re-decode (a cursor move) keeps the job; one that does (Backspace deleting a syllable) makes it stale.
+        for &k in &keys {
+            send(e, k);
+        }
+        let (_, j) = take(e);
+        assert!(send(e, key(LEFT, '\0')).1 == RERANK_NGRAM);
+        assert!(unsafe { shanjie_rerank_run(j) } == 0);
+        let (rc, moved) = apply(e, j);
+        assert!(rc == 0 && moved == after, "applied after a cursor move");
+        unsafe { shanjie_rerank_free(j) };
+        assert!(send(e, key(ESC, '\0')).0 == 0);
+        for &k in &keys {
+            send(e, k);
+        }
+        let (_, j) = take(e);
+        assert!(unsafe { shanjie_rerank_run(j) } == 0);
+        assert!(send(e, key(BACKSPACE, '\0')).1 != RERANK_NGRAM, "Backspace re-decodes");
+        assert!(apply(e, j).0 == SHANJIE_NO_CHANGE, "stale");
+        unsafe { shanjie_rerank_free(j) };
+        assert!(send(e, key(ESC, '\0')).0 == 0);
+
+        // apply code 4 (injected panic after the change): NULL out, composition discarded.
+        for &k in &keys {
+            send(e, k);
+        }
+        let (_, j) = take(e);
+        assert!(unsafe { shanjie_rerank_run(j) } == 0);
+        ARMED.with(|a| a.set(true));
+        assert!(apply(e, j).0 == 4, "apply panic maps to 4");
+        let (rc, preedit, _) = send(e, key(LEFT, '\0'));
+        assert!(rc == 0 && preedit.is_empty(), "discarded after apply's 4");
+        unsafe { shanjie_rerank_free(j) };
+
+        // A job outlives its engine: run and free after engine_free.
+        for &k in &keys {
+            send(e, k);
+        }
+        let (_, j) = take(e);
+        unsafe { shanjie_engine_free(e) };
+        assert!(unsafe { shanjie_rerank_run(j) } == 0, "run after engine_free");
+        unsafe { shanjie_rerank_free(j) };
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn rerank_codes_through_the_c_abi() {
+        let (ok, out, err) = run_child("child_rerank", false);
+        assert!(ok, "rerank child failed");
+        assert!(out.contains("1 passed"), "child test actually ran");
+        assert!(!out.contains("shanjie-ffi-") && !err.contains("shanjie-ffi-"), "a path leaked");
+    }
+
+    // ---- Rerank strength: set_rerank_level, rerank_levels (docs/contracts/rerank-strength.md sections 2.2 and 9) ----
+
+    /// alpha 0: the fused score is the n-gram score, so the first always stays (`pick` moves only on a strictly higher score).
+    const KEEP: (f64, f64, f64) = (0.0, f64::INFINITY, 0.0);
+    /// alpha 100, tau infinite, delta 0: the toy model's LLs decide, and RERANK_ROW changes (as `toy_sjtl`).
+    const MOVE: (f64, f64, f64) = (100.0, f64::INFINITY, 0.0);
+
+    /// The synthetic version 3 file eval/golden/tinylm-tiny/tiny-int8-v3.sjtl in `dir`, its n-gram hash patched to
+    /// data/lm/bigram.sjlm's, with MOVE for both profiles at level `moving` (`RerankLevel` code) and KEEP at the other two: which
+    /// level the rerank used then shows in whether RERANK_ROW changes. Offsets: rerank-strength section 2.1.
+    fn toy_sjtl_v3(dir: &Path, moving: u32) -> PathBuf {
+        let mut b = std::fs::read(root().join("eval/golden/tinylm-tiny/tiny-int8-v3.sjtl")).unwrap();
+        let h = crate::eval::sha256_hex(&std::fs::read(root().join("data/lm/bigram.sjlm")).unwrap());
+        for i in 0..32 {
+            b[68 + i] = u8::from_str_radix(&h[2 * i..2 * i + 2], 16).unwrap();
+        }
+        let t = |level: u32| if level == moving { MOVE } else { KEEP };
+        // (alpha, tau, delta offsets, level): the standard sets (chat, formal), then chat conservative, chat aggressive, formal
+        // conservative, formal aggressive.
+        let sets = [(36, 44, 100, 1), (52, 60, 108, 1), (116, 124, 132, 0), (140, 148, 156, 2), (164, 172, 180, 0), (188, 196, 204, 2)];
+        for (a, tau, d, level) in sets {
+            let (x, y, z) = t(level);
+            b[a..a + 8].copy_from_slice(&x.to_le_bytes());
+            b[tau..tau + 8].copy_from_slice(&y.to_le_bytes());
+            b[d..d + 8].copy_from_slice(&z.to_le_bytes());
+        }
+        let p = dir.join(format!("v3-moving-{moving}.sjtl"));
+        std::fs::write(&p, b).unwrap();
+        p
+    }
+
+    /// set_rerank_level; returns (code, out was NULL) and frees the output.
+    fn set_level(e: *mut ShanjieEngine, level: u32) -> (i32, bool) {
+        let mut o: *mut ShanjieOutput = sentinel();
+        let rc = unsafe { shanjie_engine_set_rerank_level(e, level, &mut o) };
+        let null = o.is_null();
+        unsafe { shanjie_output_free(o) };
+        (rc, null)
+    }
+
+    fn levels(e: *mut ShanjieEngine) -> u32 {
+        let mut m = 0xdead_beef;
+        assert!(unsafe { shanjie_engine_rerank_levels(e, &mut m) } == 0, "rerank_levels");
+        m
+    }
+
+    /// With RERANK_ROW composed: set the level (its snapshot re-decodes the n-gram text and leaves a job), take, run, apply;
+    /// true when the composition changed.
+    fn moves_at(e: *mut ShanjieEngine, level: u32) -> bool {
+        assert!(set_level(e, level) == (0, false), "set level {level}");
+        let (rc, j) = take(e);
+        assert!(rc == 0 && !j.is_null(), "a job after set level {level}");
+        assert!(unsafe { shanjie_rerank_run(j) } == 0);
+        let (rc, shown) = apply(e, j);
+        unsafe { shanjie_rerank_free(j) };
+        assert!(rc == 0 || rc == SHANJIE_NO_CHANGE, "apply {rc}");
+        assert!(rc == SHANJIE_NO_CHANGE || shown != RERANK_NGRAM);
+        rc == 0
+    }
+
+    #[test]
+    fn child_rerank_level() {
+        if !is_child("child_rerank_level") {
+            return;
+        }
+        let dir = std::env::temp_dir().join(format!("shanjie-ffi-{}-rerank-level", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let v1 = toy_sjtl(&dir, "v1.sjtl", true);
+        let (e, keys) = rerank_engine();
+
+        // Codes: 1 for a NULL engine or out, 2 out of range with *out NULL; rerank_levels 1 for a NULL engine or levels.
+        let mut o: *mut ShanjieOutput = sentinel();
+        assert!(unsafe { shanjie_engine_set_rerank_level(ptr::null_mut(), 1, &mut o) } == 1 && o.is_null(), "engine NULL");
+        assert!(unsafe { shanjie_engine_set_rerank_level(e, 1, ptr::null_mut()) } == 1, "out NULL");
+        for v in [3, 7, u32::MAX] {
+            assert!(set_level(e, v) == (2, true), "level {v} out of range");
+        }
+        let mut m = 0u32;
+        assert!(unsafe { shanjie_engine_rerank_levels(ptr::null_mut(), &mut m) } == 1, "levels engine NULL");
+        assert!(unsafe { shanjie_engine_rerank_levels(e, ptr::null_mut()) } == 1, "levels out NULL");
+
+        // No small model: mask 0, and a level is remembered for the model loaded later.
+        assert!(levels(e) == 0, "no model");
+        assert!(set_level(e, 2) == (0, false), "remembered without a model");
+        let lm = CString::new(lm_without_kn(&dir).to_str().unwrap()).unwrap();
+        assert!(unsafe { shanjie_engine_load_lm(e, lm.as_ptr()) } == 0, "load_lm");
+        assert!(levels(e) == 0, "no small model after load_lm");
+        assert!(load_tinylm(e, &toy_sjtl_v3(&dir, 2)) == 0 && levels(e) == 7, "version 3: 7");
+        assert!(set_rerank(e, 1).0 == 0);
+        for &k in &keys {
+            send(e, k);
+        }
+        let (_, j) = take(e);
+        assert!(unsafe { shanjie_rerank_run(j) } == 0);
+        let (rc, shown) = apply(e, j);
+        assert!(rc == 0 && shown != RERANK_NGRAM, "the level set before the load is used");
+        unsafe { shanjie_rerank_free(j) };
+
+        // Out of range leaves level and generation alone: a job run before still applies (aggressive moves).
+        assert!(set_level(e, 2) == (0, false));
+        let (_, j) = take(e);
+        assert!(!j.is_null() && unsafe { shanjie_rerank_run(j) } == 0);
+        assert!(set_level(e, 3) == (2, true));
+        let (rc, shown) = apply(e, j);
+        assert!(rc == 0 && shown != RERANK_NGRAM, "level 3 changed neither the generation nor the level");
+        unsafe { shanjie_rerank_free(j) };
+
+        // A valid level makes a job already run stale (the job fixed its own (alpha, tau, delta) when it was made).
+        assert!(set_level(e, 2) == (0, false));
+        let (_, j) = take(e);
+        assert!(unsafe { shanjie_rerank_run(j) } == 0);
+        assert!(set_level(e, 2) == (0, false), "even the same level");
+        assert!(apply(e, j).0 == SHANJIE_NO_CHANGE, "stale after set_rerank_level");
+        unsafe { shanjie_rerank_free(j) };
+
+        // Each level uses its own set, in both profiles: with MOVE at exactly one level, only that level changes the row.
+        for moving in 0..3 {
+            assert!(load_tinylm(e, &toy_sjtl_v3(&dir, moving)) == 0 && levels(e) == 7);
+            for p in [1, 0] {
+                assert!(profile(e, p).0 == 0);
+                for level in 0..3 {
+                    assert!(moves_at(e, level) == (level == moving), "MOVE at {moving}, level {level}, profile {p}");
+                }
+            }
+        }
+
+        // load_lm keeps the level (and drops the model: mask 0); the reloaded model uses it at once.
+        assert!(set_level(e, 0) == (0, false));
+        assert!(unsafe { shanjie_engine_load_lm(e, lm.as_ptr()) } == 0 && levels(e) == 0);
+        assert!(load_tinylm(e, &toy_sjtl_v3(&dir, 0)) == 0);
+        assert!(set_rerank(e, 1).0 == 0);
+        let (_, j) = take(e);
+        assert!(unsafe { shanjie_rerank_run(j) } == 0 && apply(e, j).0 == 0, "conservative kept across load_lm and load_tinylm");
+        unsafe { shanjie_rerank_free(j) };
+
+        // A version 1 or 2 file: mask 2, and every level uses the standard set (the toy's alpha 100: it moves).
+        let mut v2 = std::fs::read(&v1).unwrap();
+        v2.splice(100..100, [0f64, 0f64].iter().flat_map(|d| d.to_le_bytes()));
+        v2[7] = b'2';
+        v2[8..12].copy_from_slice(&2u32.to_le_bytes());
+        let v2_path = dir.join("v2.sjtl");
+        std::fs::write(&v2_path, v2).unwrap();
+        for f in [&v1, &v2_path] {
+            assert!(load_tinylm(e, f) == 0 && levels(e) == 2, "version 1 or 2: 2");
+            for level in 0..3 {
+                assert!(moves_at(e, level), "level {level} uses the standard set");
+            }
+        }
+
+        // Code 4 (injected panic): NULL out, composition discarded, the new level kept.
+        assert!(load_tinylm(e, &toy_sjtl_v3(&dir, 2)) == 0);
+        ARMED.with(|a| a.set(true));
+        assert!(set_level(e, 2) == (4, true), "panic maps to 4 with NULL out");
+        let (rc, preedit, _) = send(e, key(LEFT, '\0'));
+        assert!(rc == 0 && preedit.is_empty(), "composition discarded after code 4");
+        for &k in &keys {
+            send(e, k);
+        }
+        let (_, j) = take(e);
+        assert!(unsafe { shanjie_rerank_run(j) } == 0);
+        assert!(apply(e, j).0 == 0, "the level set by the call that returned 4 is kept");
+        unsafe { shanjie_rerank_free(j) };
+        unsafe { shanjie_engine_free(e) };
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn rerank_level_through_the_c_abi() {
+        let (ok, out, err) = run_child("child_rerank_level", false);
+        assert!(ok, "rerank level child failed: {err}");
+        assert!(out.contains("1 passed"), "child test actually ran");
+        assert!(!out.contains("shanjie-ffi-") && !err.contains("shanjie-ffi-"), "a path leaked");
+    }
+
+    #[test]
+    fn child_rerank_panic() {
+        if !is_child("child_rerank_panic") {
+            return;
+        }
+        let dir = std::env::temp_dir().join(format!("shanjie-ffi-{}-rerank-panic", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let good = toy_sjtl(&dir, "good.sjtl", true);
+        let (e, keys) = rerank_engine();
+        let lm = CString::new(lm_without_kn(&dir).to_str().unwrap()).unwrap();
+        assert!(unsafe { shanjie_engine_load_lm(e, lm.as_ptr()) } == 0 && load_tinylm(e, &good) == 0, "loads");
+        assert!(set_rerank(e, 1).0 == 0, "on (off by default since S7c-2c)");
+        for &k in &keys {
+            send(e, k);
+        }
+        let (_, j) = take(e);
+        assert!(!j.is_null(), "a job");
+        // A first run succeeds; the second panics and must leave no result behind (not even the first one's).
+        assert!(unsafe { shanjie_rerank_run(j) } == 0, "first run");
+        ARMED.with(|a| a.set(true));
+        assert!(unsafe { shanjie_rerank_run(j) } == 4, "run panic maps to 4");
+        assert!(PAYLOAD.with(|p| p.borrow().contains(RERANK_NGRAM)), "payload carries the candidate text");
+        // run has no engine: the composition is unchanged, and no result was stored.
+        let (rc, preedit, _) = send(e, key(LEFT, '\0'));
+        assert!(rc == 0 && preedit == RERANK_NGRAM, "composition unchanged after run's 4");
+        assert!(apply(e, j).0 == SHANJIE_NO_CHANGE, "no result after run's 4");
+        unsafe { shanjie_rerank_free(j) };
+        unsafe { shanjie_engine_free(e) };
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn r2_rerank_run_panic_is_silent() {
+        let (ok, out, err) = run_child("child_rerank_panic", false);
+        assert!(ok, "quiet child failed");
+        assert!(!out.contains(RERANK_NGRAM) && !err.contains(RERANK_NGRAM), "candidate text leaked with the silent hook");
+        assert!(out.contains("1 passed"), "child test actually ran");
+        // Positive control: the same child with the default hook must show the text.
+        let (ok, out, err) = run_child("child_rerank_panic", true);
+        assert!(ok && out.contains("1 passed"), "default-hook child failed");
+        assert!(err.contains(RERANK_NGRAM), "positive control: default hook did not print the text");
     }
 }

@@ -3,7 +3,7 @@
 use core::engine::*;
 use core::learn::context_key;
 use core::lm::{decode_segment, history, CappedLexicon, End, Lm, Profile};
-use core::predict::{predict, units_of, Mode};
+use core::predict::{predict, reading_matches_in, units_of, Mode, Unit};
 use core::Lexicon;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
@@ -14,8 +14,8 @@ fn root() -> PathBuf {
 }
 fn lm_path() -> PathBuf {
     let p = root().join("data/lm/bigram.sjlm");
-    assert!(root().join("data/lm/classes.sjc").exists(), "data/lm/classes.sjc is missing: download it with `gh release download classes-v1 -R Nanako0129/shanjie -p classes.sjc -D data/lm` (or build it with tools/build_classes.py)");
-    assert!(p.exists(), "data/lm/bigram.sjlm is missing: gh release download model-v3 -R Nanako0129/shanjie -p bigram.sjlm -D data/lm");
+    assert!(root().join("data/lm/classes.sjc").exists(), "data/lm/classes.sjc is missing: download it with `gh release download classes-v5 -R Nanako0129/shanjie -p classes.sjc -D data/lm` (or build it with tools/build_classes.py)");
+    assert!(p.exists(), "data/lm/bigram.sjlm is missing: gh release download model-v6 -R Nanako0129/shanjie -p bigram.sjlm -D data/lm");
     p
 }
 
@@ -27,9 +27,13 @@ struct Shared {
 fn shared() -> &'static Shared {
     static S: OnceLock<Shared> = OnceLock::new();
     S.get_or_init(|| {
-        let lex = load_lexicon(&root().join("data/lexicon")).unwrap();
         let lm = Lm::load(&lm_path()).unwrap();
-        let overlay = std::fs::read_to_string(root().join("data/lexicon/overlay-add.tsv")).unwrap();
+        let dir = root().join("data/lexicon");
+        // `ACG_PACK` (only for `measure_start_range_acg`) is the word pack's acg-add.tsv; its directory is the packs dir.
+        let pack = std::env::var("ACG_PACK").ok().map(PathBuf::from);
+        let packs = pack.as_deref().map(|f| (f.parent().unwrap(), PACK_ACG));
+        let (lex, pack_text) = load_lexicon_packs(&dir, packs).unwrap();
+        let overlay = capping_overlay(&dir, &pack_text).unwrap();
         let capped = Arc::new(CappedLexicon::new(lex.clone(), &overlay, &lm, None).unwrap());
         Shared { lex, lm: Arc::new(lm), capped }
     })
@@ -126,7 +130,8 @@ use Tok::*;
 struct Oracle {
     /// Final row: (word, reading, start).
     items: Vec<(String, Vec<String>, usize)>,
-    /// Start positions that were queried (far to near, cursor start last), and those skipped for punctuation.
+    /// Start positions in the order they were queried (long starts far to near, then the cursor start, then with `mid`
+    /// 3 the positions inside words), and those skipped for punctuation.
     queried: Vec<usize>,
     skipped: Vec<usize>,
     /// Long-start items after step 2 (before the cap), and items that the filter of step 1 removed.
@@ -135,6 +140,9 @@ struct Oracle {
     /// L (contract section 10.2 step 4: the long starts' items far to near, duplicates removed) and the cursor start's.
     long: Vec<(String, Vec<String>, usize)>,
     cursor: Vec<(String, Vec<String>, usize)>,
+    /// Section 11: the decoded words' starts used as long starts, and the positions inside words.
+    word_starts: Vec<usize>,
+    mid_starts: Vec<usize>,
 }
 
 /// Syllable keys for `predict`'s `units_of`: neutral tone goes last.
@@ -183,6 +191,14 @@ fn ref_path(left: &str, toks: &[Tok]) -> Vec<(String, usize, bool)> {
 }
 
 fn oracle(left: &str, toks: &[Tok], pending: &str) -> Oracle {
+    oracle_with(left, toks, pending, PREDICT_BACK, 3)
+}
+
+/// `back`: the start of every decoded word that begins at most that many tokens before the cursor is a long start
+/// too (the last two words always are). `mid`: positions inside words within `back`; 0 none, 1 merged with the word
+/// starts far to near, 2 after all word starts (far to near), 3 after everything (far to near; section 11, what
+/// `oracle` and the engine use). No fixed words: the oracle decodes free text only.
+fn oracle_with(left: &str, toks: &[Tok], pending: &str, back: usize, mid: u8) -> Oracle {
     let s = shared();
     let idx = s.capped.predict_index(&s.lm);
     let lam = Profile::Chat.lambda();
@@ -194,11 +210,23 @@ fn oracle(left: &str, toks: &[Tok], pending: &str) -> Oracle {
     let is_punct = |i: usize| matches!(toks[i], Punct(_));
     let mut long_starts = Vec::new();
     let mut pos = n;
-    for (_, c, _) in path.iter().rev().take(2) {
+    for (i, (_, c, _)) in path.iter().rev().enumerate() {
         pos -= c;
-        long_starts.push(pos);
+        if i < 2 || pos + back >= n {
+            long_starts.push(pos);
+        }
     }
     long_starts.reverse();
+    let extra: Vec<usize> = (n.saturating_sub(back)..n).filter(|p| !long_starts.contains(p)).collect();
+    let (word_starts, mid_starts) = (long_starts.clone(), extra.clone());
+    match mid {
+        1 => {
+            long_starts.extend(extra.iter().copied());
+            long_starts.sort_unstable();
+        }
+        2 => long_starts.extend(extra.iter().copied()),
+        _ => {}
+    }
     let (mut skipped, mut queried, mut filtered) = (Vec::new(), Vec::new(), Vec::new());
     let mut query = |st: usize, skipped: &mut Vec<usize>, queried: &mut Vec<usize>| -> Vec<(String, Vec<String>, usize)> {
         if (st..n).any(is_punct) {
@@ -241,10 +269,15 @@ fn oracle(left: &str, toks: &[Tok], pending: &str) -> Oracle {
     let mut merged: Vec<_> = long.iter().take(3).cloned().collect();
     merged.extend(cursor_items);
     merged.extend(long.iter().skip(3).cloned());
+    if mid == 3 {
+        for st in extra {
+            merged.extend(query(st, &mut skipped, &mut queried));
+        }
+    }
     let mut seen = std::collections::HashSet::new();
     merged.retain(|x| seen.insert(x.0.clone()));
     merged.truncate(9);
-    Oracle { items: merged, queried, skipped, long_total, filtered, long, cursor }
+    Oracle { items: merged, queried, skipped, long_total, filtered, long, cursor, word_starts, mid_starts }
 }
 
 fn words(o: &Oracle) -> Vec<String> {
@@ -303,11 +336,28 @@ fn row_equals_the_independent_computation_in_states_a_to_e() {
     let d = check_state("d", D);
     assert!(d.filtered.iter().any(|w| w == "奶茶"), "d: the filter removed nothing: {:?}", d.filtered);
     assert!(!words(&d).contains(&"奶茶".to_string()));
-    // (e) two long starts plus the cursor start with more than three long items: the cap works.
-    let e = check_state("e", E);
-    assert!(e.long_total > 3 && e.queried.len() == 3, "e: long items {} queried {:?}", e.long_total, e.queried);
-    let f = check_state("f", F);
-    assert!(f.long_total > 3 && f.queried.len() == 3, "f: long items {} queried {:?}", f.long_total, f.queried);
+    // (e) two word starts plus the cursor start with more than three long items: the cap works. Section 11: the
+    // position inside the first word is queried too.
+    for (name, st) in [("e", E), ("f", F)] {
+        let o = check_state(name, st);
+        assert!(o.long_total > 3 && o.word_starts.len() == 2, "{name}: long items {} word starts {:?}", o.long_total, o.word_starts);
+        assert!(!o.mid_starts.is_empty() && o.mid_starts.iter().all(|s| o.queried.contains(s)), "{name}: {:?} {:?}", o.mid_starts, o.queried);
+    }
+}
+
+#[test]
+fn enter_commits_with_a_passive_row_and_selects_with_an_entered_one() {
+    // enter-pending contract §2: with the row passive, Enter is rule 12a (commit what is shown); entered, rule 1d.
+    let (mut e, o) = build(A.0, A.1, A.2);
+    assert_passive(&o);
+    let o = e.key(kind(KeyKind::Enter)).unwrap();
+    assert!(o.handled && o.commit == "ㄋ" && o.preedit.is_empty(), "{}", o.commit);
+    assert_no_row(&o);
+    let (mut e, o) = build(A.0, A.1, A.2);
+    let first = row(&o)[0].clone();
+    e.key(kind(KeyKind::Tab)).unwrap();
+    let o = e.key(kind(KeyKind::Enter)).unwrap();
+    assert!(o.commit.is_empty() && o.preedit == first, "{} {}", o.preedit, first);
 }
 
 #[test]
@@ -678,6 +728,13 @@ fn timing_typing76_keys() {
     time_typing76(None);
 }
 
+/// The same with the abbreviation composer on (section 12.4 item 6).
+#[test]
+#[ignore]
+fn timing_typing76_keys_abbreviation() {
+    time_typing76_in(None, true);
+}
+
 /// Real picks from the typing76 rows: for each sample, two short sessions (after the first key of the first
 /// syllable, and after the first key of the second) pick the row's second item, then commit, so the store holds
 /// records that match the situations the timed pass visits and the promotion and sorting run on them.
@@ -746,6 +803,20 @@ fn timing_typing76_keys_with_taught_picks_and_50k() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// Taught picks plus synthetic records up to the capacity, with the abbreviation composer on.
+#[test]
+#[ignore]
+fn timing_typing76_keys_with_taught_picks_and_50k_abbreviation() {
+    let dir = tmp_dir("timing-taught50k-abbr");
+    let taught = teach_typing76_picks(&dir);
+    let (store, mut records, _) = LearnStore::open(&dir).unwrap();
+    records.extend(synthetic_records(core::learn::CAPACITY - taught));
+    store.save(&records).unwrap();
+    println!("taught records: {taught}, total {}", records.len());
+    time_typing76_in(Some(&dir), true);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 fn synthetic_records(count: usize) -> Vec<Record> {
     let text = std::fs::read_to_string(root().join("eval/dev/user-typing.txt")).unwrap();
     let mut readings: Vec<Vec<String>> = Vec::new();
@@ -776,6 +847,41 @@ fn timing_typing76_keys_with_50k_records() {
 }
 
 fn time_typing76(dir: Option<&Path>) {
+    time_typing76_in(dir, false);
+}
+
+/// Section 12.4 item 6: the keys of the abbreviation variant, fully determined. The reading is cut into groups of two
+/// syllables (the last group one when the count is odd); each group's target is the sentence's characters at those
+/// positions. Per group: the first zhuyin key of each syllable, then, if the target is in the row, Tab and its digit,
+/// else Esc and the group's full syllables. The sentence ends with Enter.
+fn abbreviation_keys(e: &mut Engine, sent: &str, reading: &str, mut each: impl FnMut(&mut Engine, Key) -> Output) {
+    let syls: Vec<&str> = reading.split(' ').collect();
+    let chars: Vec<char> = sent.chars().collect();
+    assert_eq!(chars.len(), syls.len());
+    for (g, group) in syls.chunks(2).enumerate() {
+        let target: String = chars[g * 2..g * 2 + group.len()].iter().collect();
+        let mut o = None;
+        for y in group {
+            // The first zhuyin key; a neutral tone written in front (`˙ㄅㄚ`) is a tone key, not a symbol.
+            let k = syl_keys(y).into_iter().find(|k| L.symbol_of(k.ch).is_some()).unwrap();
+            o = Some(each(e, k));
+        }
+        let row = o.unwrap().candidates;
+        match row.iter().position(|w| *w == target) {
+            Some(i) => {
+                each(e, kind(KeyKind::Tab));
+                each(e, digit(i + 1));
+            }
+            None => {
+                each(e, kind(KeyKind::Esc));
+                group.iter().flat_map(|y| syl_keys(y)).for_each(|k| drop(each(e, k)));
+            }
+        }
+    }
+    each(e, kind(KeyKind::Enter));
+}
+
+fn time_typing76_in(dir: Option<&Path>, abbr: bool) {
     let s = shared();
     let rss0 = rss_kb();
     let t = Instant::now();
@@ -783,7 +889,7 @@ fn time_typing76(dir: Option<&Path>) {
     println!("index build {:?}; rss {} -> {} KiB", t.elapsed(), rss0, rss_kb());
     let text = std::fs::read_to_string(root().join("eval/dev/user-typing.txt")).unwrap();
     let mut times: Vec<Duration> = Vec::new();
-    let mut slow: Vec<(Duration, usize, usize)> = Vec::new();
+    let mut slow: Vec<(Duration, usize, usize, KeyKind)> = Vec::new();
     let mut rows = 0;
     for line in text.lines().filter(|l| !l.is_empty()) {
         let f: Vec<&str> = line.split('|').collect();
@@ -794,27 +900,37 @@ fn time_typing76(dir: Option<&Path>) {
             e.learning_open(d).unwrap();
         }
         e.set_left_context(left);
-        let mut keys: Vec<Key> = reading.split(' ').flat_map(syl_keys).collect();
-        keys.push(kind(KeyKind::Enter));
-        for (ki, k) in keys.into_iter().enumerate() {
+        let mut ki = 0;
+        let mut timed = |e: &mut Engine, k: Key| {
             let t = Instant::now();
-            e.key(k).unwrap();
+            let o = e.key(k).unwrap();
             let d = t.elapsed();
             times.push(d);
-            slow.push((d, rows, ki));
+            slow.push((d, rows, ki, k.kind));
+            ki += 1;
+            o
+        };
+        if abbr {
+            e.set_abbreviation(true).unwrap();
+            abbreviation_keys(&mut e, f[1], reading, &mut timed);
+        } else {
+            let mut keys: Vec<Key> = reading.split(' ').flat_map(syl_keys).collect();
+            keys.push(kind(KeyKind::Enter));
+            keys.into_iter().for_each(|k| drop(timed(&mut e, k)));
         }
         rows += 1;
     }
     times.sort();
     let ms = |d: Duration| d.as_secs_f64() * 1000.0;
-    slow.sort();
-    for (d, r, k) in slow.iter().rev().take(3) {
-        println!("slowest: {:.3} ms at row {r} key {k}", ms(*d));
+    slow.sort_by_key(|x| x.0);
+    for (d, r, k, kd) in slow.iter().rev().take(3) {
+        println!("slowest: {:.3} ms at row {r} key {k}{}", ms(*d), if *kd == KeyKind::Enter { " (Enter: commit, learning write)" } else { "" });
     }
     println!("keys over 16 ms: {}", times.iter().filter(|d| **d > Duration::from_millis(16)).count());
     println!(
-        "typing76{}: rows {rows} keys {} p50 {:.3} ms p95 {:.3} ms max {:.3} ms",
+        "typing76{}{}: rows {rows} keys {} p50 {:.3} ms p95 {:.3} ms max {:.3} ms",
         if dir.is_some() { " + store" } else { "" },
+        if abbr { " + abbreviation" } else { "" },
         times.len(),
         ms(times[times.len() / 2]),
         ms(times[times.len() * 95 / 100]),
@@ -888,8 +1004,10 @@ fn t1_the_written_milk_case() {
     let mut e = learner_engine(Profile::Formal, None);
     e.set_left_context("我想喝一杯");
     let base = row(&typ(&mut e, &[], "ㄋ"));
-    assert_eq!(&base[..2], &["奶茶", "牛奶"], "precondition: the written row is [奶茶, 牛奶, ...]");
-    send(&mut e, vec![kind(KeyKind::Tab), kind(KeyKind::Right)]);
+    // On model-v6 the written row is [奶茶, 那, ...] (it was [奶茶, 牛奶, ...]): move to 牛奶 wherever it is.
+    assert_eq!(base[0], "奶茶", "precondition: {base:?}");
+    assert!(base.iter().skip(1).any(|w| w == "牛奶"), "precondition: 牛奶 in the row after the first item {base:?}");
+    enter_on(&mut e, "牛奶");
     let o = e.key(kind(KeyKind::Enter)).unwrap();
     assert_eq!(o.preedit, "牛奶");
     let o = e.key(kind(KeyKind::Enter)).unwrap();
@@ -973,6 +1091,36 @@ fn t3_a_single_character_needs_a_han_context() {
     assert_eq!(row(&typ(&mut e, &[], "ㄋ")), other, "another key is untouched");
 }
 
+/// S4 section 14 rule 8 on the prediction row: with no Han text before, the pick is stored under the synthetic key
+/// `^>` + the next syllable (`^>$` when it ends the composition), and the row looks the same key up (`^>$`: a
+/// predicted word ends at the cursor), so the record reorders the row in the same situation.
+#[test]
+fn t3b_a_sentence_start_pick_is_stored_under_the_next_syllable_and_reorders_the_row() {
+    let base = fresh_row(Profile::Chat, "", "ㄋ");
+    let word = base.iter().skip(1).find(|w| w.chars().count() > 1).expect("a two-character item below the first").clone();
+    let mut e = learner_engine(Profile::Chat, None);
+    teach(&mut e, "", "ㄋ", &word);
+    let r = e.learner().records();
+    assert_eq!(r.iter().map(|x| (x.context.as_str(), x.word.as_str())).collect::<Vec<_>>(), [("^>$", word.as_str())]);
+    assert_eq!(row(&typ(&mut e, &[], "ㄋ"))[0], word, "the learned item first (lookup key ^>$)");
+}
+
+/// Point 3: a sentence-start prediction pick is stored under `^>$` whatever is typed after it, the key the row looks up.
+#[test]
+fn t3c_a_sentence_start_pick_followed_by_more_typing_is_still_stored_under_the_end_key() {
+    let base = fresh_row(Profile::Chat, "", "ㄋ");
+    let word = base.iter().skip(1).find(|w| w.chars().count() > 1).expect("a two-character item below the first").clone();
+    let mut e = learner_engine(Profile::Chat, None);
+    typ(&mut e, &[], "ㄋ");
+    pick_word(&mut e, &word);
+    typ(&mut e, &["ㄏㄠˇ"], "");
+    e.key(kind(KeyKind::Enter)).unwrap();
+    let r = e.learner().records();
+    assert_eq!(r.iter().map(|x| (x.context.as_str(), x.word.as_str())).collect::<Vec<_>>(), [("^>$", word.as_str())]);
+    e.reset(ResetMode::Discard);
+    assert_eq!(row(&typ(&mut e, &[], "ㄋ"))[0], word, "the row in the same situation reflects the record");
+}
+
 /// Index of `word` in `predict(..., 27)` for the situation "after `left`, `pending` typed", chat profile.
 fn reach(left: &str, pending: &str, word: &str) -> Option<usize> {
     let s = shared();
@@ -1011,9 +1159,9 @@ fn t4b_a_context_sharing_the_last_character_is_promoted() {
 
 #[test]
 fn t5_a_global_record_does_not_move_the_row() {
-    // 能夠 is in the row after 這杯, 學校 and (at position 7) 請問你, a third key with no last character in common.
+    // 能夠 is in the row after 這杯, 學校 and 請問你, a third key with no last character in common.
     let third = fresh_row(Profile::Chat, "請問你", "ㄋ");
-    assert_eq!(third.iter().position(|w| w == "能夠"), Some(7), "precondition: {third:?}");
+    assert!(third.iter().any(|w| w == "能夠"), "precondition: {third:?}");
     let mut e = learner_engine(Profile::Chat, None);
     teach(&mut e, "我想喝這杯", "ㄋ", "能夠");
     teach(&mut e, "我想去學校", "ㄋ", "能夠");
@@ -1324,6 +1472,12 @@ fn t16c_inserting_or_removing_a_syllable_before_the_pick_moves_the_record_to_the
         let before = key_before_last(&commit);
         assert_ne!(before, "以備", "precondition: the edit changed the text before 時 ({commit})");
         let r = e.learner().records();
+        if !insert {
+            // The commit is two characters, so 時 is under a one-Han key: after rules 7/8 a one-character context
+            // no longer learns a single character (s4-learning section 14).
+            assert!(r.iter().all(|x| x.word != "時"), "the one-character key learns nothing: {:?}", r.iter().map(|x| (&x.context, &x.word)).collect::<Vec<_>>());
+            continue;
+        }
         let pred = r.iter().find(|x| x.word == "時").expect("the prediction pick is learned");
         assert_eq!(pred.context, before, "insert={insert}: records {:?}", r.iter().map(|x| (&x.context, &x.word)).collect::<Vec<_>>());
     }
@@ -1423,4 +1577,596 @@ fn t20_the_scan_gate_changes_nothing_but_time() {
         assert_eq!(row_of(on, st), row_of(off, st), "state {name}");
         let _ = std::fs::remove_dir_all(&dir);
     }
+}
+
+// ---------- section 11: starts up to five syllables back ----------
+
+/// A long word decoded as three words: its start is the third word back.
+const G: (&str, &[Tok], &str) = ("", &[Syl("ㄅㄚ"), Syl("ㄐㄧ"), Syl("ㄙ")], "ㄊ");
+/// Five syllables before the cursor, the fourth word back.
+const H: (&str, &[Tok], &str) = ("", &[Syl("ㄅㄚ"), Syl("ㄍㄢ"), Syl("ㄗ˙"), Syl("ㄉㄚˇ"), Syl("ㄅㄨˋ")], "ㄓ");
+/// typing76 「週末本來想在家耍廢」 up to 在: 在 sits inside the last decoded word.
+const I: (&str, &[Tok], &str) = ("", &[Syl("ㄓㄡ"), Syl("ㄇㄛˋ"), Syl("ㄅㄣˇ"), Syl("ㄌㄞˊ"), Syl("ㄒㄧㄤˇ"), Syl("ㄗㄞˋ")], "");
+/// typing76 「我們中午可以…」: a position inside 中午 has items, the cursor start has 可以.
+const J: (&str, &[Tok], &str) =
+    ("明天早上我要先去銀行辦事回來再順便買早餐你如果有空的話", &[Syl("ㄨㄛˇ"), Syl("ㄇㄣ˙"), Syl("ㄓㄨㄥ"), Syl("ㄨˇ")], "ㄎ");
+
+fn has(o: &Oracle, w: &str) -> bool {
+    words(o).iter().any(|x| x == w)
+}
+
+#[test]
+fn a_word_start_three_words_back_is_a_long_start() {
+    let path: Vec<String> = ref_path(G.0, G.1).into_iter().map(|x| x.0).collect();
+    assert_eq!(path, ["巴", "基", "斯"], "precondition: three decoded words");
+    let g = check_state("g", G);
+    assert!(has(&g, "巴基斯坦"), "{:?}", words(&g));
+    assert!(!has(&oracle_with(G.0, G.1, G.2, 0, 0), "巴基斯坦"), "section 1.2 alone already finds it: the state proves nothing");
+}
+
+#[test]
+fn a_word_start_exactly_five_syllables_back_is_a_long_start() {
+    let path = ref_path(H.0, H.1);
+    assert!(path.len() >= 4, "precondition: the start at 0 is the fourth word back or further: {path:?}");
+    let h = check_state("h", H);
+    assert!(has(&h, "八竿子打不著"), "{:?}", words(&h));
+    let h4 = oracle_with(H.0, H.1, H.2, 4, 3);
+    assert!(!has(&h4, "八竿子打不著") && words(&h4) != words(&h), "four back: {:?}", words(&h4));
+}
+
+#[test]
+fn a_position_inside_a_word_adds_its_items_after_the_others() {
+    let path = ref_path(I.0, I.1);
+    let (w, c, _) = path.last().unwrap();
+    assert!(6 - c == 4 && *c >= 2, "precondition: the last word {w} starts at 4 and covers 5: {path:?}");
+    let i = check_state("i", I);
+    assert!(i.mid_starts.contains(&5) && has(&i, "在家"), "{:?} {:?}", i.mid_starts, words(&i));
+    assert!(!has(&oracle_with(I.0, I.1, I.2, PREDICT_BACK, 0), "在家"), "without the positions inside words");
+}
+
+#[test]
+fn positions_inside_words_come_last_so_the_cursor_start_keeps_its_items() {
+    let j = check_state("j", J);
+    assert!(has(&j, "可以"), "{:?}", words(&j));
+    let merged = oracle_with(J.0, J.1, J.2, PREDICT_BACK, 1);
+    assert!(words(&merged) != words(&j) && !has(&merged, "可以"), "merged far to near: {:?}", words(&merged));
+}
+
+#[test]
+fn a_learned_item_of_a_position_inside_a_word_comes_first() {
+    let reading = vec!["ㄗㄞˋ".to_string(), "ㄐㄧㄚ".to_string()];
+    // (b) untaught, 在家 is in the row but not first.
+    let plain = row_of(engine(), I);
+    let at = plain.iter().position(|w| w == "在家").expect("在家 is in the untaught row");
+    assert!(at > 0, "{plain:?}");
+    let (e, dir) = seeded("s11-mid", &[rec("來想", &reading, "在家")]);
+    let (mut e, o) = build_in(e, I.0, I.1, I.2);
+    // (a) in this decode the position of 在 (5) is not a word start, so not a long start; no pending unit, so no cursor
+    // start either.
+    assert!(!e.path_starts().contains(&5), "{:?}", e.path_starts());
+    assert_eq!(row(&o).first().map(String::as_str), Some("在家"), "{:?}", row(&o));
+    // The item is that position's: picking it ends the composition at 5 + 2.
+    let picked = pick_word(&mut e, "在家");
+    assert_eq!(picked.cursor_utf16, 7, "{}", picked.preedit);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn positions_inside_a_word_the_user_fixed_are_not_starts() {
+    // 我們中午, then ㄎ and Backspace: a recompute with no pending unit. Free, 中午 is a decoded word and the position
+    // of 午 (3) inside it is a start (section 11). Fixed through the candidate window, 中午 is the user's choice: no item
+    // starts inside it (an item from the fixed word's own start replaces it whole, as before section 11).
+    let syls = ["ㄨㄛˇ", "ㄇㄣ˙", "ㄓㄨㄥ", "ㄨˇ"];
+    let state = |fix: bool| {
+        let mut e = engine();
+        typ(&mut e, &syls, "");
+        if fix {
+            let mut o = e.key(kind(KeyKind::Space)).unwrap();
+            while o.candidates[o.selected.unwrap()] != "中午" {
+                o = e.key(kind(KeyKind::Right)).unwrap();
+            }
+            e.key(kind(KeyKind::Enter)).unwrap();
+        }
+        typ(&mut e, &[], "ㄎ");
+        let o = e.key(kind(KeyKind::Backspace)).unwrap();
+        assert_eq!(o.preedit, "我們中午");
+        (e, row(&o))
+    };
+    // Each item's start: picking it leaves the cursor at start + length.
+    let starts = |fix: bool| -> Vec<(String, usize)> {
+        let (_, items) = state(fix);
+        assert!(!items.is_empty(), "fixed {fix}: no row");
+        (0..items.len())
+            .map(|i| {
+                let (mut e, _) = state(fix);
+                let p = e.pick(i).unwrap().unwrap();
+                (items[i].clone(), p.cursor_utf16 as usize - items[i].chars().count())
+            })
+            .collect()
+    };
+    let free = starts(false);
+    assert!(free.iter().any(|x| x.1 == 3), "precondition: free, an item starts at 3: {free:?}");
+    let fixed = starts(true);
+    assert!(fixed.iter().all(|x| x.1 != 3), "an item starts inside the fixed 中午: {fixed:?}");
+}
+
+#[test]
+fn reading_matches_compares_the_first_syllable_as_before() {
+    // Section 11.2: the char comparison against the old `starts_with` on a collected String, with expected values.
+    let old = |units: &[core::predict::Unit], reading: &[String]| {
+        let head: String = units[0].chars.iter().collect();
+        reading.len() >= units.len() && reading[0].trim_start_matches('˙').starts_with(&head)
+    };
+    let r = |s: &str| s.split(' ').map(String::from).collect::<Vec<_>>();
+    // (keys, reading, expected): the same syllable, a prefix, a shorter first syllable, the neutral tone in front,
+    // the last character differing, a different initial, too few syllables.
+    let cases = [
+        ("ㄋㄧㄡˊ", "ㄋㄧㄡˊ ㄋㄞˇ", true),
+        ("ㄋ", "ㄋㄧㄡˊ ㄋㄞˇ", true),
+        ("ㄋㄧㄡ", "ㄋㄧ", false),
+        ("ㄉㄜ", "˙ㄉㄜ", true),
+        ("ㄋㄧㄡ", "ㄋㄧㄠˇ", false),
+        ("ㄇ", "ㄋㄧ", false),
+        ("ㄋㄧㄡˊㄋ", "ㄋㄧㄡˊ", false),
+    ];
+    for (keys, reading, want) in cases {
+        let u = units_of(keys);
+        assert_eq!(reading_matches_in(&u, &r(reading), Mode::P), want, "{keys} {reading}");
+        assert_eq!(old(&u, &r(reading)), want, "the old first-syllable test: {keys} {reading}");
+    }
+}
+
+// ---------- research: how far back a word start is guessed (amendment two, contract section 11.3) ----------
+
+/// (name, back, mid) for `oracle_with`; "now" is section 1.2, "w5m3" is section 11 (the shipping rule).
+const RULES: [(&str, usize, u8); 7] =
+    [("now", 0, 0), ("w5", 5, 0), ("w4m3", 4, 3), ("w5m3", 5, 3), ("w6m3", 6, 3), ("w5m2", 5, 2), ("w5m1", 5, 1)];
+const SHIPPING: usize = 3;
+
+/// hit@9 of every word of two or more characters (the answer segmented by `segment_words`), at the first key and at
+/// the end of each of its syllables but the last. Chat profile, the row's own left context, the whole sentence in one
+/// composition. `SHOW_CHANGES=1` prints every state where the shipping rule and "now" differ.
+/// `cargo test --release -p core --test engine_predict -- --ignored --nocapture --exact measure_start_range`
+#[test]
+#[ignore]
+fn measure_start_range() {
+    assert!(RULES[SHIPPING].1 == PREDICT_BACK && RULES[SHIPPING].2 == 3);
+    assert!(std::env::var("ACG_PACK").is_err(), "ACG_PACK puts the word pack into every test of this binary: unset it");
+    for set in ["user-typing", "user-reported"] {
+        let text = std::fs::read_to_string(root().join(format!("eval/dev/{set}.txt"))).unwrap();
+        let mut table = Table::default();
+        for line in text.lines().filter(|l| !l.is_empty()) {
+            let f: Vec<&str> = line.split('|').collect();
+            let (left, sent) = (f[0], f[1]);
+            let syls = leak_syls(f[2].split(' '));
+            let seg = shared().lex.segment_words(sent).filter(|_| sent.chars().count() == syls.len()).expect("every row segments");
+            let mut a = 0;
+            for (w, _) in seg {
+                let m = w.chars().count();
+                if m >= 2 {
+                    table.word(&format!("{set} {left}|{sent}"), left, &w, &syls[..a + m], a, 0);
+                }
+                a += m;
+            }
+        }
+        table.print(set);
+    }
+}
+
+/// The word pack's names of three or more characters (every 20th), typed alone and after `我最喜歡`, from the second
+/// syllable on. `ACG_PACK` is a pack file named `acg-add.tsv` (its directory is the packs dir `load_lexicon_packs`
+/// reads), e.g. the shipped one:
+/// `ACG_PACK=$PWD/data/packs/acg-add.tsv cargo test --release -p core --test engine_predict -- --ignored --nocapture --exact measure_start_range_acg`
+#[test]
+#[ignore]
+fn measure_start_range_acg() {
+    let pack = std::env::var("ACG_PACK").expect("set ACG_PACK to the word pack's acg-add.tsv");
+    let text = std::fs::read_to_string(pack).unwrap();
+    let names: Vec<(String, Vec<&'static str>)> = text
+        .lines()
+        .filter(|l| !l.starts_with('#'))
+        .filter_map(|l| {
+            let f: Vec<&str> = l.split('\t').collect();
+            let syls = leak_syls(f[0].split('-'));
+            (f[1].chars().count() >= 3 && f[1].chars().count() == syls.len()).then(|| (f[1].to_string(), syls))
+        })
+        .step_by(20)
+        .collect();
+    let lead = leak_syls(["ㄨㄛˇ", "ㄗㄨㄟˋ", "ㄒㄧˇ", "ㄏㄨㄢ"].into_iter());
+    for (label, pre) in [("alone", Vec::new()), ("after 我最喜歡", lead)] {
+        let mut table = Table::default();
+        for (w, syls) in &names {
+            let all: Vec<&'static str> = pre.iter().chain(syls.iter()).copied().collect();
+            table.word(&format!("{label} {w}"), "", w, &all, pre.len(), 1);
+        }
+        table.print(&format!("acg names ({}) {label}", names.len()));
+    }
+}
+
+fn leak_syls<'a>(it: impl Iterator<Item = &'a str>) -> Vec<&'static str> {
+    it.map(|x| &*Box::leak(x.to_string().into_boxed_str())).collect()
+}
+
+#[derive(Default)]
+struct Table {
+    /// stage -> per state, hit under each rule
+    hits: std::collections::BTreeMap<String, Vec<Vec<bool>>>,
+    queries: [usize; RULES.len()],
+    changed: [usize; RULES.len()],
+    /// States whose row is empty under "now" and not under the rule (Tab then enters the row instead of rule 13/21).
+    filled: [usize; RULES.len()],
+    states: usize,
+}
+
+impl Table {
+    /// The word `w` over `syls[a..]` (all of `syls` is typed in one composition after `left`): its states from syllable
+    /// `from` on.
+    fn word(&mut self, label: &str, left: &str, w: &str, syls: &[&'static str], a: usize, from: usize) {
+        let m = syls.len() - a;
+        for k in from..m {
+            for done in [false, true] {
+                if done && k == m - 1 {
+                    continue;
+                }
+                let (upto, pending) = if done {
+                    (a + k + 1, String::new())
+                } else {
+                    (a + k, syls[a + k].chars().find(|c| !is_tone(*c)).unwrap().to_string())
+                };
+                let toks: Vec<Tok> = syls[..upto].iter().map(|y| Syl(y)).collect();
+                let rows: Vec<Oracle> = RULES.iter().map(|&(_, b, md)| oracle_with(left, &toks, &pending, b, md)).collect();
+                let hv: Vec<bool> = rows.iter().map(|o| words(o).iter().any(|x| x == w)).collect();
+                for (i, o) in rows.iter().enumerate() {
+                    self.queries[i] += o.queried.len();
+                    self.changed[i] += (words(o) != words(&rows[0])) as usize;
+                    self.filled[i] += (words(&rows[0]).is_empty() && !words(o).is_empty()) as usize;
+                }
+                if std::env::var("SHOW_CHANGES").is_ok() && hv[0] != hv[SHIPPING] {
+                    let tag = if hv[SHIPPING] { "GAIN" } else { "LOSS" };
+                    println!("{tag} {label} {w} upto {upto} pending {pending}\n  now  {:?}\n  ship {:?}", words(&rows[0]), words(&rows[SHIPPING]));
+                }
+                let stage = format!("s{}{}", (k + 1).min(5), if done { " done" } else { " key1" });
+                self.hits.entry(stage).or_default().push(hv);
+                self.states += 1;
+            }
+        }
+    }
+
+    fn print(&self, name: &str) {
+        let per = |v: &[usize]| RULES.iter().zip(v).map(|(r, x)| format!("{} {:.2}", r.0, *x as f64 / self.states as f64)).collect::<Vec<_>>();
+        println!("\n## {name}: states {}", self.states);
+        println!("predict calls per state: {:?}", per(&self.queries));
+        println!("rows that differ from now: {:?}", RULES.iter().zip(&self.changed).map(|(r, c)| format!("{} {c}", r.0)).collect::<Vec<_>>());
+        println!("rows empty under now, not empty under the rule: {:?}", RULES.iter().zip(&self.filled).map(|(r, c)| format!("{} {c}", r.0)).collect::<Vec<_>>());
+        println!("stage\tn\t{}", RULES.iter().map(|r| format!("{} (+/-)", r.0)).collect::<Vec<_>>().join("\t"));
+        let mut all = Vec::new();
+        for (stage, v) in &self.hits {
+            println!("{stage}\t{}", cells(v));
+            all.extend(v.iter().cloned());
+        }
+        println!("all\t{}", cells(&all));
+    }
+}
+
+/// n, then hit% (gained/lost against "now") for each rule.
+fn cells(v: &[Vec<bool>]) -> String {
+    let c: Vec<String> = (0..RULES.len())
+        .map(|i| {
+            let hit = v.iter().filter(|h| h[i]).count();
+            let (gain, loss) = (v.iter().filter(|h| h[i] && !h[0]).count(), v.iter().filter(|h| !h[i] && h[0]).count());
+            format!("{:.1} (+{gain}/-{loss})", 100.0 * hit as f64 / v.len() as f64)
+        })
+        .collect();
+    format!("{}\t{}", v.len(), c.join("\t"))
+}
+
+// ---------- the abbreviation composer (contract section 12) ----------
+
+/// A chat engine with the abbreviation setting on and `left` before the insertion point.
+fn abbr_engine(left: &str) -> Engine {
+    let mut e = engine();
+    e.set_abbreviation(true).unwrap();
+    e.set_left_context(left);
+    e
+}
+/// `predict` in `PA` mode for these unfinished units, as the row of an empty composition (no long starts), first nine.
+fn abbr_oracle(left: &str, units: &[&str]) -> Vec<(String, Vec<String>)> {
+    let s = shared();
+    let key = context_key(left);
+    let v = history(if key == "^" { "" } else { &key }, &s.lm);
+    let u: Vec<Unit> = units.iter().map(|c| Unit { chars: c.chars().collect(), done: false, tone: None }).collect();
+    predict(s.capped.predict_index(&s.lm), &s.lm, Profile::Chat.lambda(), v, &u, Mode::PA, 9).into_iter().map(|x| (x.0, x.3)).collect()
+}
+fn milk_tea_reading() -> Vec<String> {
+    vec!["ㄋㄞˇ".to_string(), "ㄔㄚˊ".to_string()]
+}
+
+#[test]
+fn abbreviation_two_units_show_and_select_milk_tea() {
+    let mut e = abbr_engine(A.0);
+    e.set_learning(true);
+    let o = typ(&mut e, &[], "ㄋㄔ");
+    assert_eq!(o.preedit, "ㄋㄔ", "two units show in order");
+    assert_passive(&o);
+    let want = abbr_oracle(A.0, &["ㄋ", "ㄔ"]);
+    assert_eq!(row(&o), want.iter().map(|x| x.0.clone()).collect::<Vec<_>>(), "the row is predict in PA mode");
+    assert!(row(&o).contains(&"奶茶".to_string()), "{:?}", row(&o));
+    let o = pick_word(&mut e, "奶茶");
+    assert_eq!((o.preedit.as_str(), o.cursor_utf16), ("奶茶", 2));
+    assert_no_row(&o);
+    assert_eq!(e.key(kind(KeyKind::Enter)).unwrap().commit, "奶茶");
+    let r = e.learner().records();
+    assert_eq!(r.len(), 1);
+    assert_eq!((r[0].reading.clone(), r[0].word.as_str()), (milk_tea_reading(), "奶茶"), "the syllables are the word's reading");
+    assert_eq!(want.iter().find(|x| x.0 == "奶茶").unwrap().1, milk_tea_reading());
+}
+
+#[test]
+fn abbreviation_needs_the_setting_the_row_and_the_end_of_the_composition() {
+    // setting off: the second key replaces the first
+    let mut e = engine();
+    e.set_left_context(A.0);
+    assert_eq!(typ(&mut e, &[], "ㄋㄔ").preedit, "ㄔ");
+    // setting on, row off
+    let mut e = abbr_engine(A.0);
+    e.set_prediction(false).unwrap();
+    assert_eq!(typ(&mut e, &[], "ㄋㄔ").preedit, "ㄔ");
+    // setting on, cursor not at the end
+    let mut e = abbr_engine("");
+    typ(&mut e, &["ㄋㄧˇ", "ㄏㄠˇ"], "");
+    e.key(kind(KeyKind::Left)).unwrap();
+    let o = send(&mut e, pend_keys("ㄋㄔ"));
+    assert!(o.preedit.contains('ㄔ') && !o.preedit.contains('ㄋ'), "{}", o.preedit);
+}
+
+#[test]
+fn abbreviation_needs_a_model_and_stops_at_the_unit_cap() {
+    // No model, so no row to resolve units with: the second key replaces the first although the setting and the row are on.
+    let mut e = Engine::with_lexicon(shared().lex.clone(), L);
+    e.set_abbreviation(true).unwrap();
+    assert_eq!(typ(&mut e, &[], "ㄋㄔ").preedit, "ㄔ");
+    // The cap: ten presses make ten units, the next ones replace the last unit.
+    let mut e = abbr_engine("");
+    let o = send(&mut e, (0..12).map(|_| Key::ch('s', 0)).collect());
+    assert_eq!(o.preedit, "ㄋ".repeat(ABBR_MAX_UNITS));
+    let o = e.key(Key::ch('t', 0)).unwrap();
+    assert_eq!(o.preedit, format!("{}ㄔ", "ㄋ".repeat(ABBR_MAX_UNITS - 1)));
+}
+
+#[test]
+fn abbreviation_keys_with_two_units() {
+    let mut e = abbr_engine(A.0);
+    let before = typ(&mut e, &[], "ㄋㄔ");
+    for k in [Key::ch('3', 0), kind(KeyKind::Space)] {
+        assert!(e.key(k).unwrap() == before, "tone and space do nothing");
+    }
+    assert_eq!(e.key(kind(KeyKind::Backspace)).unwrap().preedit, "ㄋ", "one Backspace leaves one unit");
+    // Enter and Shift+Enter send the shown symbols
+    let mut e = abbr_engine(A.0);
+    typ(&mut e, &[], "ㄋㄔ");
+    let o = e.key(kind(KeyKind::Enter)).unwrap();
+    assert_eq!((o.commit.as_str(), o.handled), ("ㄋㄔ", true));
+    typ(&mut e, &[], "ㄋㄔ");
+    let o = e.key(Key { kind: KeyKind::Enter, ch: '\0', modifiers: MOD_SHIFT }).unwrap();
+    assert_eq!((o.commit.as_str(), o.handled), ("ㄋㄔ", false));
+    // punctuation drops the units, then inserts the mark (rule 2)
+    typ(&mut e, &[], "ㄋㄔ");
+    assert_eq!(e.key(comma()).unwrap().preedit, "，");
+    // the known gap: a syllable without an initial joins the unit before it
+    e.reset(ResetMode::Discard);
+    let o = typ(&mut e, &[], "ㄋㄢ");
+    assert_eq!(o.preedit, "ㄋㄢ");
+    let o = e.key(Key::ch('6', 0)).unwrap(); // ˊ: one unit, so the tone completes ㄋㄢˊ
+    assert!(!o.preedit.contains('ㄋ') && !o.preedit.is_empty(), "{}", o.preedit);
+}
+
+#[test]
+fn abbreviation_esc_drops_only_the_units() {
+    let mut e = abbr_engine(A.0);
+    e.set_learning(true);
+    typ(&mut e, &[], "ㄋ");
+    let o = pick_word(&mut e, "奶茶");
+    assert_eq!(o.preedit, "奶茶");
+    let o = send(&mut e, pend_keys("ㄋㄔ"));
+    assert_eq!(o.preedit, "奶茶ㄋㄔ");
+    let o = e.key(kind(KeyKind::Esc)).unwrap();
+    assert_eq!((o.preedit.as_str(), o.cursor_utf16), ("奶茶", 2), "the word and the cursor stay");
+    assert_eq!(e.key(kind(KeyKind::Enter)).unwrap().commit, "奶茶");
+    assert_eq!(e.learner().records().len(), 1, "the fixed word is still there to be learned");
+}
+
+#[test]
+fn abbreviation_off_or_row_off_drops_two_units_only() {
+    for row_off in [false, true] {
+        let mut e = abbr_engine(A.0);
+        let two = typ(&mut e, &[], "ㄋㄔ");
+        assert_eq!(two.preedit, "ㄋㄔ");
+        let o = if row_off { e.set_prediction(false) } else { e.set_abbreviation(false) }.unwrap();
+        assert_eq!(o.preedit, "", "row_off {row_off}");
+        assert_no_row(&o);
+    }
+    let mut e = abbr_engine(A.0);
+    let one = typ(&mut e, &[], "ㄋ");
+    assert!(e.set_abbreviation(false).unwrap() == one, "one unit: nothing changes");
+    let mut e = abbr_engine(A.0);
+    let one = typ(&mut e, &[], "ㄋ");
+    assert!(e.set_prediction(false).unwrap().preedit == one.preedit);
+    // switching it on changes nothing
+    let mut e = engine();
+    e.set_left_context(A.0);
+    let one = typ(&mut e, &[], "ㄋ");
+    assert!(e.set_abbreviation(true).unwrap() == one);
+}
+
+#[test]
+fn abbreviation_picks_are_learned_like_prefix_picks_and_come_first_next_time() {
+    // the same record as the prefix completion
+    let mut e = learner_engine(Profile::Chat, None);
+    e.set_abbreviation(true).unwrap();
+    teach(&mut e, A.0, "ㄋㄔ", "奶茶");
+    let abbr_rec = e.learner().records().to_vec();
+    let mut p = learner_engine(Profile::Chat, None);
+    teach(&mut p, A.0, "ㄋ", "奶茶");
+    assert_eq!(abbr_rec.len(), 1);
+    assert_eq!(abbr_rec[0].context, p.learner().records()[0].context);
+    assert_eq!(abbr_rec[0].reading, p.learner().records()[0].reading);
+    assert_eq!(abbr_rec[0].word, p.learner().records()[0].word);
+    // an item that was not first comes first after it was chosen
+    let mut e = learner_engine(Profile::Chat, None);
+    e.set_abbreviation(true).unwrap();
+    e.set_left_context(A.0);
+    let base = row(&typ(&mut e, &[], "ㄋㄔ"));
+    assert!(base.len() > 2, "{base:?}");
+    let word = base[2].clone();
+    pick_word(&mut e, &word);
+    assert_eq!(e.key(kind(KeyKind::Enter)).unwrap().commit, word);
+    e.set_left_context(A.0);
+    let again = row(&typ(&mut e, &[], "ㄋㄔ"));
+    assert_eq!(again[0], word, "{base:?} -> {again:?}");
+}
+
+#[test]
+fn reading_matches_follows_the_query_mode() {
+    let r = |s: &str| s.split(' ').map(String::from).collect::<Vec<_>>();
+    let u = |ch: &[&str]| -> Vec<Unit> { ch.iter().map(|c| Unit { chars: c.chars().collect(), done: false, tone: None }).collect() };
+    // (units, reading, in P, in PA)
+    let cases = [
+        (u(&["ㄋ", "ㄔ"]), "ㄋㄞˇ ㄔㄚˊ", false, true),
+        (u(&["ㄋ", "ㄔ"]), "ㄋㄞˇ ㄔㄚˊ ㄗ", false, false), // an abbreviation is as long as its word
+        (u(&["ㄋ", "ㄔ"]), "ㄋㄞˇ ㄇㄚ", false, false),
+        (u(&["ㄋ"]), "ㄋㄞˇ ㄔㄚˊ", true, true),
+        (u(&["ㄋ", "ㄔ", "ㄗ"]), "˙ㄋㄜ ㄔㄚˊ ㄗㄨㄛˋ", false, true),
+    ];
+    for (units, reading, p, pa) in cases {
+        assert_eq!(reading_matches_in(&units, &r(reading), Mode::P), p, "P {reading}");
+        assert_eq!(reading_matches_in(&units, &r(reading), Mode::PA), pa, "PA {reading}");
+    }
+    // done + undone: only the prefix reading
+    let mixed = units_of("ㄋㄧˇㄏ");
+    assert_eq!(reading_matches_in(&mixed, &r("ㄋㄧˇ ㄏㄠˇ"), Mode::PA), true);
+    assert_eq!(reading_matches_in(&mixed, &r("ㄋㄧㄡˊ ㄏㄠˇ"), Mode::PA), false);
+    // never false for a reading predict returns, in either mode
+    let s = shared();
+    let idx = s.capped.predict_index(&s.lm);
+    let sep = |keys: &str| -> Vec<Unit> { keys.chars().map(|c| u(&[&c.to_string()])).flatten().collect() };
+    for (units, abbr_only) in [(sep("ㄋ"), false), (sep("ㄋㄔ"), true), (sep("ㄅㄐㄙ"), true), (units_of("ㄇㄧㄥˊㄊ"), false), (units_of("ㄉㄜ"), false)] {
+        let mut returned = 0;
+        for mode in [Mode::P, Mode::PA] {
+            let got = predict(idx, &s.lm, Profile::Chat.lambda(), "", &units, mode, 200);
+            returned += got.len();
+            assert!(mode == Mode::PA || !abbr_only || got.is_empty());
+            for (w, _, _, reading) in got {
+                assert!(reading_matches_in(&units, &reading, mode), "{w} {reading:?}");
+            }
+        }
+        assert!(returned > 0);
+    }
+}
+
+// ---------- candidate-vertical contract section 2.4 (revision three): the prediction row follows the setting ----------
+
+#[test]
+fn the_prediction_row_carries_two_when_vertical_and_zero_when_horizontal() {
+    for (vertical, want) in [(false, 0), (true, 2)] {
+        let mut e = engine();
+        e.set_candidate_vertical(vertical).unwrap();
+        let (mut e, o) = build_in(e, A.0, A.1, A.2);
+        assert_passive(&o);
+        assert_eq!(o.vertical, want, "passive row, vertical {vertical}");
+        let entered = e.key(kind(KeyKind::Tab)).unwrap();
+        assert_eq!((entered.selected, entered.columns, entered.first), (Some(0), 0, 0));
+        assert_eq!(entered.vertical, want, "entered row, vertical {vertical}");
+        // No row, no mark: leaving to an empty composition.
+        assert_eq!(e.reset(ResetMode::Discard).vertical, 0);
+    }
+}
+
+#[test]
+fn the_setter_snapshot_re_renders_a_shown_row_in_the_new_orientation() {
+    let (mut e, o) = build(A.0, A.1, A.2);
+    assert_eq!(o.vertical, 0);
+    let v = e.set_candidate_vertical(true).unwrap();
+    assert_passive(&v);
+    assert_eq!((row(&v), v.vertical), (row(&o), 2), "same row, now vertical");
+    let h = e.set_candidate_vertical(false).unwrap();
+    assert!(h == o, "back to the horizontal output of before");
+    // Entered: the selection survives the switch.
+    e.key(kind(KeyKind::Tab)).unwrap();
+    e.key(kind(KeyKind::Right)).unwrap();
+    let v = e.set_candidate_vertical(true).unwrap();
+    assert_eq!((v.vertical, v.selected), (2, Some(1)));
+    // No row on screen: nothing to re-render.
+    e.reset(ResetMode::Discard);
+    assert_eq!(e.set_candidate_vertical(false).unwrap().vertical, 0);
+    assert_eq!(e.set_candidate_vertical(true).unwrap().vertical, 0);
+}
+
+#[test]
+fn the_entered_vertical_row_moves_with_up_and_down_and_stops_at_both_ends() {
+    let mut e = engine();
+    e.set_candidate_vertical(true).unwrap();
+    let (mut e, o) = build_in(e, A.0, A.1, A.2);
+    let r = row(&o);
+    assert!(r.len() >= 3);
+    assert_eq!(e.key(kind(KeyKind::Tab)).unwrap().selected, Some(0));
+    // Up at the first item stays.
+    let o = e.key(kind(KeyKind::Up)).unwrap();
+    assert!(o.handled && o.commit.is_empty());
+    assert_eq!((row(&o), o.selected, o.vertical), (r.clone(), Some(0), 2));
+    for i in 1..r.len() {
+        let o = e.key(kind(KeyKind::Down)).unwrap();
+        assert!(o.handled);
+        assert_eq!((row(&o), o.selected, o.vertical), (r.clone(), Some(i), 2), "Down {i}");
+    }
+    let last = r.len() - 1;
+    assert_eq!(e.key(kind(KeyKind::Down)).unwrap().selected, Some(last), "Down at the last item stays");
+    assert_eq!(e.key(kind(KeyKind::Up)).unwrap().selected, Some(last - 1));
+    // Tab, Left, Right and Shift+Tab keep their rules next to it.
+    assert_eq!(e.key(kind(KeyKind::Left)).unwrap().selected, Some(last - 2));
+    assert_eq!(e.key(kind(KeyKind::Right)).unwrap().selected, Some(last - 1));
+    let o = e.key(shift_tab()).unwrap();
+    assert_eq!((row(&o), o.selected), (r, None), "Shift+Tab still leaves, the row stays");
+    // Page Down / Up are not handled and change nothing.
+    e.key(kind(KeyKind::Tab)).unwrap();
+    let entered = e.key(kind(KeyKind::Down)).unwrap();
+    for k in [KeyKind::PageDown, KeyKind::PageUp] {
+        let o = e.key(Key::new(k)).unwrap();
+        assert!(!o.handled && o.commit.is_empty());
+        assert!(o == Output { handled: false, ..entered.clone() });
+    }
+}
+
+#[test]
+fn the_passive_vertical_row_keeps_down_as_open_and_up_as_ignore() {
+    let mut e = engine();
+    e.set_candidate_vertical(true).unwrap();
+    let (mut e, o) = build_in(e, D.0, D.1, D.2);
+    assert_passive(&o);
+    assert_eq!(o.vertical, 2);
+    // Up (rule 16): handled, ignored, the row stays as it was.
+    let u = e.key(kind(KeyKind::Up)).unwrap();
+    assert!(u.handled);
+    assert!(u == o);
+    // Down (rule 15): opens the candidate window, vertical (1), the row is gone.
+    let d = e.key(kind(KeyKind::Down)).unwrap();
+    assert!(d.handled);
+    assert_eq!((d.vertical, d.columns, d.selected, d.first), (1, 0, Some(0), 0));
+    assert!(d.total as usize > 0 && d.candidates.len() == (d.total as usize).min(9));
+}
+
+#[test]
+fn the_horizontal_prediction_row_keeps_its_keys_and_output() {
+    // Entered horizontal row: Up / Down are not row keys; they leave it and run from rule 2, as before this slice.
+    let (mut e, o) = build(D.0, D.1, D.2);
+    let r = row(&o);
+    assert_eq!(o.vertical, 0);
+    e.key(kind(KeyKind::Tab)).unwrap();
+    let d = e.key(kind(KeyKind::Down)).unwrap();
+    assert_eq!((d.vertical, d.columns, d.selected), (0, 0, Some(0)));
+    assert_ne!(row(&d), r, "Down left the row and opened the candidate window");
+    let (mut e, _) = build(D.0, D.1, D.2);
+    e.key(kind(KeyKind::Tab)).unwrap();
+    let u = e.key(kind(KeyKind::Up)).unwrap();
+    assert!(u.handled);
+    assert_eq!((u.selected, u.vertical), (None, 0), "Up left the row (rule 16 then ignored): not entered any more");
 }

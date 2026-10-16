@@ -8,22 +8,38 @@ cask "shanjie" do
   desc "Zhuyin input method that converts whole sentences on the device"
   homepage "https://shanjie.nyanako.com/"
 
+  # The input method updates itself with Sparkle (docs/contracts/about-update.md section 2).
+  # What a plain `brew upgrade` then does with this cask is to be measured (contract section
+  # 3.5); naming it upgrades it (documented for auto_updates):
+  # `brew upgrade --cask nanako0129/tap/shanjie`.
+  auto_updates true
   depends_on arch: :arm64
   depends_on macos: :tahoe
 
   input_method "善解輸入法.app"
 
-  # Also on upgrade: the running old copy must exit so the system starts the new one.
-  uninstall on_upgrade: :signal,
-            signal:     ["TERM", "com.nyanako.inputmethod.shanjie"]
+  # Upgrade and reinstall: stop the running old copy only once the new bundle is in place, so the
+  # system starts the new one. Homebrew skips `uninstall signal` on upgrade, and `on_upgrade` did
+  # not take effect when the installed cask was read back from its receipt (measured 2026-10-08,
+  # Homebrew 7.0.7; docs/contracts/s3b.md section 15). The system starts the input method with no
+  # arguments; `[^ ]*` keeps a command that merely names this path as an argument from matching
+  # (a home directory containing a space is not matched either). An empty prefix covers a
+  # system-wide /Library/Input Methods install.
+  postflight_steps do
+    terminate_process '^[^ ]*/Library/Input Methods/(善解輸入法|shanjie)\.app/Contents/MacOS/shanjie$',
+                      match:   :full,
+                      notices: ["Stopping any running copy of the input method so the new version is used"]
+  end
+
+  uninstall signal: ["TERM", "com.nyanako.inputmethod.shanjie"]
 
   zap trash: "~/Library/Preferences/com.nyanako.inputmethod.shanjie.plist"
 
   caveats <<~EOS
     After the first install, register and enable the input method:
       "$HOME/Library/Input Methods/善解輸入法.app/Contents/MacOS/shanjie" install
-    The first install usually needs a log out and log in before macOS accepts
-    the input method: if the command exits with 3, log out, log back in, and
-    run it again.
+    If the command exits with 3, macOS has not accepted the input method yet:
+    add 善解輸入法 in System Settings > Keyboard > Input Sources (+ → 繁體中文 →
+    善解輸入法 → Add).
   EOS
 end

@@ -6,7 +6,7 @@ Spec: `docs/contracts/s5c-clef-cloud.md` (conditions, hashes, decision rules and
 |---|---|
 | `clef_run.py` | Driver. `--sets cvtune,dev302,typing76 [--limit N] [--model clef-flash\|clef]` (`clef` is the 27B, files `clef27-*`). Resumable. Requests carry `cf-aig-gateway-id`. HTTP layer is injectable (`Client(post=...)`). |
 | `clef_score.py` | Offline scorer: S5j's metrics for C-sent-fwd, C-sent-rev, C-pos and (as a control) J-*, plus the C-vs-J pairs and the section 3 verdict. |
-| `test_clef.py` | Offline tests (fake HTTP, decoding, scorer reproduction of S5j's Jev rows). |
+| `test_clef.py`, `test_clef27.py`, `test_gateway.py` | Removed 2026-10-14 (research concluded, never in `make test`). Restore all three before any rerun of the scripts below: `for f in test_clef test_clef27 test_gateway; do git show 4517db7:experiments/s5-clef/$f.py > experiments/s5-clef/$f.py; done` (`test_clef27.py` imports `test_clef`; `test_gateway.py` checks that only Clef requests carry the gateway header). |
 | `results/` | Per-row results for dev302 and typing76 only (created by the run). |
 
 S5j's constants and pure functions (`INSTR`, `POS_INSTR`, `BATCH`, `positions`, `pos_decision`, `mcnemar`, `pct`, `lenient`) are imported from `experiments/s5-judges/s5.py`. Its `set_dir`, `read_rows`, `score_set`, `prep` are never called; the `jev_conds`/`score_set` arithmetic is copied into the scorer. `sys.dont_write_bytecode` is set so no `__pycache__` appears in S5j's folders.
@@ -88,9 +88,9 @@ Stdout and stderr carry counts, numbers, HTTP statuses and fixed strings. An une
 `CF_AI_TOKEN` and `CF_ACCOUNT_ID` come from the environment. Only main runs paid calls; agent briefs forbid running `clef_run.py`.
 
 ```sh
-cd /Users/nanako/side-project/shanjie-s5c
+# run from the repository root
 
-# offline tests (no network)
+# offline tests (no network); restore them first, see the file table above
 python3 -B -m unittest discover -s experiments/s5-clef -p 'test_*.py'
 
 # 1. real smoke: dev302 first 20 rows, every condition (about a dozen requests)

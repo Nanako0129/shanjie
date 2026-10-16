@@ -66,12 +66,12 @@
   - 保留集表；
   - 速度表（同場）；
   - 量測規則：哪些集合被調參數看過、dev302 只當參考、保留集是唯一沒被看過的集合、怎麼重跑。
-- `docs/verification.md` 加一列：發版前跑 `tools/bench.py run <新版 commit>`，再請 verifier 量保留集，兩者的結果隨發版前的 PR 進 repo。
+- `docs/verification.md` 加一列：發版前跑 `tools/bench.py run <新版 commit>`，再請 verifier 量保留集，兩者的結果隨發版前的 PR 進 repo。〔2026-10-13 起發版改跑套件 v2：`docs/contracts/sbench-v2.md`〕
 
 ## 3. 驗收
 
 1. **決定性**：同一版跑兩次，results JSON 的準確率欄與 `top1_sha256` 完全相同；`table` 重產的 `docs/benchmark.md` 逐位元組相同。
-2. **對得上研究紀錄**（main）：v0.1.2（ef20c40；研究紀錄的 B 是分支 2f4f684，詞庫與 CLI 和 ef20c40 相同，不同就照停止條件處理）chat 的 cvtune 3,121／3,677、wikitune 1,860／2,733、dev302＋typing76 合計 303／378（研究紀錄 S2r-2 一節）；discordtune 4,172／4,958。對不上就停下來回報。
+2. **對得上研究紀錄**（main）：v0.1.2（eae57e2；研究紀錄的 B 是分支 6472e3f，詞庫與 CLI 和 eae57e2 相同，不同就照停止條件處理）chat 的 cvtune 3,121／3,677、wikitune 1,860／2,733、dev302＋typing76 合計 303／378（研究紀錄 S2r-2 一節）；discordtune 4,172／4,958。對不上就停下來回報。
 3. **逐列比較正確**：
    - executor：工具的列數與上一版 top1 檢查在每一格都通過；另外用套件的 rows 檔自己跑兩版 CLI 的 dump、獨立重算 v0.1.1 → v0.1.2 在 cvtune、wikitune 的修好／弄壞，和工具一致（不經過 `s2r_eval.py`，它會讀私有檔）。
    - main：同一組數字和 `experiments/s2/s2r_eval.py ab <v0.1.1 CLI> <v0.1.2 CLI> --which orig --all --sets cvtune,wikitune` 一致。
@@ -91,7 +91,7 @@
 ## 4. 範圍外
 
 - 實打對照（`tools/imetype.swift`，要使用者放開鍵盤）：使用者這次沒選。
-- S4 學習的效果：靜態集合量不到。S4 合併後另加套件 v2（例如用使用者聊天的前半段模擬改選、量後半段）。
+- S4 學習的效果：靜態集合量不到。S4 合併後另加學習用的套件（例如用使用者聊天的前半段模擬改選、量後半段）。〔2026-10-13：「套件 v2」這個名字已給出貨設定的套件（`docs/contracts/sbench-v2.md`）〕
 - 保留集自動化、CI 每次跑（太慢，私有資料也不在 CI）。
 
 ## 5. 負責人、預算、停止條件
@@ -168,7 +168,7 @@
 
 ### 7.4 落地
 
-- 分支先 rebase 到 main，再照 CLAUDE.md 的合併關卡落地。套件 v1 仍釘 model-v1；model-v2 出貨時另寫套件 v2。
+- 分支先 rebase 到 main，再照 CLAUDE.md 的合併關卡落地。套件 v1 仍釘 model-v1；model-v2 出貨時另寫套件 v2。〔model-v2 出貨時沒寫；2026-10-13 補上，`docs/contracts/sbench-v2.md`，每一版用自己出貨的設定〕
 - **負責人與順序**：
   1. 分支先 rebase 到 main。
   2. `pilotfish:executor` 在 rebase 後的分支上做 7.1 的 CLI 改動、`unigram_eval.py` 與 golden、`reference` 子命令、7.2 的程式部分（`table` 的新節、讀 JSON、依欄位位置的檢查邏輯，用 fixture 測）。

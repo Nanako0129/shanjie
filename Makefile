@@ -1,7 +1,7 @@
 # Local entry point (docs/verification.md), modeled on syrtis's Makefile. Run from the repo root.
 # Build order matters: the Rust staticlib must exist before the Swift package links it.
 
-.PHONY: rust build test bundle installer selftest-bundled clean-bundle
+.PHONY: rust build test test-rust test-golden test-python test-swift bundle installer selftest-bundled clean-bundle
 
 SWIFT_OUT := macos/.build/out
 # The bundle folder (docs/contracts/s3b.md section 13.1). LEGACY_APP_NAME is the name before
@@ -17,13 +17,47 @@ rust:
 build: rust
 	@$(call relink_if_stale,Debug)
 	@$(call rebuild_if_header_stale,Debug)
-	swift build --package-path macos
+	swift build --package-path macos --force-resolved-versions
 
-test: rust
+# Everything, in the order it always ran. CLAUDE.md says which part a change runs before a commit. CI runs cargo test, swift test
+# and only part of test-python: the experiments/ tests run only here, so any Python change runs test-python locally.
+test: test-rust test-python test-swift
+
+test-rust:
+	cargo test --release --locked
+
+# Only the golden comparisons (eval/golden/): enough for a change that only adds rows to eval/dev/.
+test-golden:
+	cargo test --release --locked -p cli --test golden
+
+test-python:
+	python3 -m unittest tools/test_build_acg_pack.py
+	python3 -m unittest tools/test_build_names.py
+	python3 -W ignore -m unittest tools/test_build_lm.py experiments/s2/test_extra_lexicon.py experiments/model-v5/test_compare_counts.py experiments/model-v5/test_count_lexicon.py
+	python3 experiments/s2-classes/test_cluster.py
+	python3 -m unittest discover -s experiments/s7a-tinylm -p test_export_sjtl.py
+	python3 -W ignore -m unittest tools/test_kn_cont.py tools/test_extra_overlay.py
+	python3 -W ignore -m unittest experiments/p1a-confusion/test_p1a.py
+	python3 -W ignore -m unittest experiments/s7f-corpus/test_s7f.py experiments/s7a-tinylm/test_extra.py
+	python3 -W ignore -m unittest tools/test_evalstats.py experiments/e2-chateval/test_e2.py experiments/e2-chateval/test_judge.py experiments/e2-chateval/test_d2c_split.py
+	python3 -m unittest tools/test_bench.py
+	python3 -m unittest tools/test_build_english_words.py
+	python3 -m unittest tools/test_build_overlay.py
+	python3 -W ignore -m unittest tools/test_holdout_guard.py
+	python3 -W ignore -m unittest experiments/model-v6/test_force_classes.py
+	python3 -W ignore -m unittest tools/test_triage.py
+	python3 -W ignore -m unittest tools/test_build_trigram.py
+	python3 -W ignore -m unittest tools/test_build_classes.py experiments/s2/test_expected.py
+	cd experiments/sp && python3 -W ignore -m unittest test_predict test_predict2 test_predict3
+	cd experiments/s7a-tinylm && python3 -W ignore -m unittest test_fusegrid test_runsets
+	python3 -W ignore -m unittest experiments/x0c/test_x0c.py
+	cd experiments/fuzzy && python3 -W ignore -m unittest test_fuzzy
+	python3 -m unittest reference/proto/test_recombine.py
+
+test-swift: rust
 	@$(call relink_if_stale,Debug)
 	@$(call rebuild_if_header_stale,Debug)
-	cargo test --release --locked
-	swift test --package-path macos
+	swift test --package-path macos --force-resolved-versions
 
 # The shipping bundle: build/$(APP_NAME) with the shipping bundle ID.
 bundle: rust

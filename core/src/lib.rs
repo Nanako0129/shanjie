@@ -8,6 +8,8 @@ pub mod learn;
 pub mod learn_store;
 pub mod lm;
 pub mod predict;
+pub mod tinylm;
+mod trigram;
 
 use std::collections::HashMap;
 use std::fmt;

@@ -72,19 +72,19 @@ static int run(const char *dir, uint32_t layout, const char *nihao, const char *
   return 0;
 }
 
-/* S2c (docs/PLAN.md S2c acceptance 6), on dev302 row 226 since S2k (the word-class term makes chat pick
- * 期中報告 as formal does, so the old row 10 no longer tells the profiles apart), reading
- *   ㄒㄧㄥˋ ㄏㄠˇ ㄐㄧㄡˋ ㄏㄨˋ ㄔㄜ ㄐㄧˊ ㄕˊ ㄍㄢˇ ㄉㄠˋ
- * standard keys `vu/4cl3ru.4cj4tk_ru6g6e032l4` (_ = space bar). Expected top-1:
- *   no LM (unigram)  幸好救護車即時感到
- *   chat             幸好救護車及時趕到
- *   formal           幸好救護車即時趕到
- * (chat / formal from eval/golden/s2-lm-dev302-top1.tsv row 226, i.e. lm_eval.py --dump; unigram is what
+/* S2c (docs/PLAN.md S2c acceptance 6), on dev302 row 284 (row 226 since S2k, whose chat and formal answers the
+ * one-path-per-(surface, last word) decoder made equal; before that row 10, which the word-class term made equal), reading
+ *   ㄔㄨˊ ㄈㄤˊ ㄒㄧㄣ ㄓㄨㄤ ㄌㄜ˙ ㄧ ㄍㄜ˙ ㄌㄩˋ ㄕㄨㄟˇ ㄏㄨˊ
+ * standard keys `tj6z;6vup_5j;_xk7u_ek7xm4gjo3cj6` (_ = space bar). Expected top-1:
+ *   no LM (unigram)  廚房新莊了一個率水壺
+ *   chat             廚房新裝了一個率水壺 (綠水壺 before classes-v5)
+ *   formal           廚房新裝了一個律水壺 (with data/lm/trigram.sjt3, as CI and the App ship it; 濾水壺 without the table)
+ * (chat / formal from eval/golden/s2-lm-dev302-top1.tsv row 284, i.e. lm_eval.py --dump; unigram is what
  * an engine without LM commits, checked by 302 below.) */
-#define ROW226 "vu/4cl3ru.4cj4tk ru6g6e032l4"
-#define UNIGRAM "\xe5\xb9\xb8\xe5\xa5\xbd\xe6\x95\x91\xe8\xad\xb7\xe8\xbb\x8a\xe5\x8d\xb3\xe6\x99\x82\xe6\x84\x9f\xe5\x88\xb0"
-#define CHAT "\xe5\xb9\xb8\xe5\xa5\xbd\xe6\x95\x91\xe8\xad\xb7\xe8\xbb\x8a\xe5\x8f\x8a\xe6\x99\x82\xe8\xb6\x95\xe5\x88\xb0"
-#define FORMAL "\xe5\xb9\xb8\xe5\xa5\xbd\xe6\x95\x91\xe8\xad\xb7\xe8\xbb\x8a\xe5\x8d\xb3\xe6\x99\x82\xe8\xb6\x95\xe5\x88\xb0"
+#define ROW284 "tj6z;6vup 5j; xk7u ek7xm4gjo3cj6"
+#define UNIGRAM "\xe5\xbb\x9a\xe6\x88\xbf\xe6\x96\xb0\xe8\x8e\x8a\xe4\xba\x86\xe4\xb8\x80\xe5\x80\x8b\xe7\x8e\x87\xe6\xb0\xb4\xe5\xa3\xba"
+#define CHAT "\xe5\xbb\x9a\xe6\x88\xbf\xe6\x96\xb0\xe8\xa3\x9d\xe4\xba\x86\xe4\xb8\x80\xe5\x80\x8b\xe7\x8e\x87\xe6\xb0\xb4\xe5\xa3\xba"
+#define FORMAL "\xe5\xbb\x9a\xe6\x88\xbf\xe6\x96\xb0\xe8\xa3\x9d\xe4\xba\x86\xe4\xb8\x80\xe5\x80\x8b\xe5\xbe\x8b\xe6\xb0\xb4\xe5\xa3\xba"
 
 /* Press Enter; 1 when it is handled and commits `want` with an empty preedit. */
 static int enter_commits(ShanjieEngine *e, const char *want) {
@@ -98,7 +98,7 @@ static int enter_commits(ShanjieEngine *e, const char *want) {
 
 /* Type the row; 1 when the preedit after the last key is `want`. */
 static int row_shows(ShanjieEngine *e, const char *want) {
-  ShanjieOutput *o = type_last(e, ROW226);
+  ShanjieOutput *o = type_last(e, ROW284);
   int ok = o != 0 && str_eq(o->preedit, want);
   shanjie_output_free(o);
   return ok;
@@ -203,6 +203,55 @@ static int run_lm(const char *dir, const char *lm, const char *missing) {
   o = 0;
   CHECK(816, shanjie_engine_reset(e, 1, &o) == 0 && o != 0);
   shanjie_output_free(o);
+  /* set_candidate_vertical (candidate-vertical contract section 2.2): codes like set_prediction; candidate_vertical is the
+   * struct's last field (read through the header, so the C layout is checked): 0 horizontal, 2 the vertical prediction row,
+   * 1 the vertical candidate window. The window keeps its orientation when the setting changes. */
+  o = 0;
+  CHECK(830, shanjie_engine_set_candidate_vertical(0, 1, &o) == 1 && o == 0);
+  CHECK(831, shanjie_engine_set_candidate_vertical(e, 1, 0) == 1);
+  o = &dummy;
+  CHECK(832, shanjie_engine_set_candidate_vertical(e, 2, &o) == 2 && o == 0);
+  o = type_last(e, "s");
+  CHECK(833, o != 0 && o->candidate_count >= 1 && o->candidate_selected == -1 && o->candidate_vertical == 0);
+  shanjie_output_free(o);
+  o = 0;
+  CHECK(834, shanjie_engine_set_candidate_vertical(e, 1, &o) == 0 && o != 0 && o->candidate_count >= 1);
+  CHECK(835, o->candidate_selected == -1 && o->candidate_columns == 0 && o->candidate_first == 0 && o->candidate_vertical == 2);
+  shanjie_output_free(o);
+  o = type_last(e, "u3 "); /* ㄋㄧˇ, then space opens the window */
+  CHECK(836, o != 0 && o->candidate_selected == 0 && o->candidate_columns == 0 && o->candidate_vertical == 1);
+  shanjie_output_free(o);
+  o = 0;
+  CHECK(837, shanjie_engine_set_candidate_vertical(e, 0, &o) == 0 && o != 0 && o->candidate_vertical == 1);
+  shanjie_output_free(o);
+  o = 0;
+  CHECK(838, shanjie_engine_reset(e, 1, &o) == 0 && o != 0 && o->candidate_vertical == 0);
+  shanjie_output_free(o);
+  o = type_last(e, "s");
+  CHECK(839, o != 0 && o->candidate_count >= 1 && o->candidate_vertical == 0);
+  /* The two appended fields (zhen-inline section 1.3f) are 0 without an English run; their non-zero values are the Rust FFI test's. */
+  CHECK(841, o->english_run_utf16_start == 0 && o->english_run_utf16_len == 0);
+  shanjie_output_free(o);
+  o = 0;
+  CHECK(840, shanjie_engine_reset(e, 1, &o) == 0 && o != 0);
+  shanjie_output_free(o);
+  /* set_abbreviation (v3-engine section 12.1): codes like set_prediction; with it on, s then t are two units (preedit ㄋㄔ), and turning it off drops them. */
+  o = 0;
+  CHECK(820, shanjie_engine_set_abbreviation(0, 1, &o) == 1 && o == 0);
+  CHECK(821, shanjie_engine_set_abbreviation(e, 1, 0) == 1);
+  o = &dummy;
+  CHECK(822, shanjie_engine_set_abbreviation(e, 2, &o) == 2 && o == 0);
+  CHECK(823, shanjie_engine_set_abbreviation(e, 1, &o) == 0 && o != 0);
+  shanjie_output_free(o);
+  o = type_last(e, "st");
+  CHECK(824, o != 0 && str_eq(o->preedit, "\xe3\x84\x8b\xe3\x84\x94"));
+  shanjie_output_free(o);
+  o = 0;
+  CHECK(825, shanjie_engine_set_abbreviation(e, 0, &o) == 0 && o != 0 && str_eq(o->preedit, ""));
+  shanjie_output_free(o);
+  o = 0;
+  CHECK(826, shanjie_engine_reset(e, 1, &o) == 0 && o != 0);
+  shanjie_output_free(o);
   shanjie_engine_free(e);
   return 0;
 }
@@ -290,6 +339,119 @@ static int run_learn(const char *dir, const char *learn_dir) {
   return 0;
 }
 
+/* zhen-mixed (docs/contracts/zhen-mixed.md section 5.2): the codes of load_english, set_english and set_english_inline through the header. The window
+ * itself is covered by core/tests/engine_english.rs and the child-process test in ffi.rs. */
+static int run_english(const char *dir, const char *missing) {
+  static ShanjieOutput dummy;
+  ShanjieEngine *e = 0;
+  ShanjieOutput *o = 0;
+  CHECK(1001, shanjie_engine_new(dir, 0, &e) == 0 && e != 0);
+  CHECK(1002, shanjie_engine_load_english(0, missing) == 1);
+  CHECK(1003, shanjie_engine_load_english(e, 0) == 1);
+  CHECK(1004, shanjie_engine_load_english(e, missing) == 3);
+  CHECK(1005, shanjie_engine_set_english(0, 1, &o) == 1 && o == 0);
+  CHECK(1006, shanjie_engine_set_english(e, 1, 0) == 1);
+  o = &dummy;
+  CHECK(1007, shanjie_engine_set_english(e, 2, &o) == 2 && o == 0);
+  CHECK(1008, shanjie_engine_set_english(e, 1, &o) == 0 && o != 0 && o->handled == 1);
+  shanjie_output_free(o);
+  o = 0;
+  CHECK(1009, shanjie_engine_set_english(e, 0, &o) == 0 && o != 0 && o->handled == 1);
+  shanjie_output_free(o);
+  /* zhen-inline: set_english_inline 0 and 1 give a snapshot (codes like set_english), 2 is 2, NULL engine or out is 1. */
+  CHECK(1010, shanjie_engine_set_english_inline(0, 1, &o) == 1 && o == 0);
+  CHECK(1011, shanjie_engine_set_english_inline(e, 1, 0) == 1);
+  o = &dummy;
+  CHECK(1012, shanjie_engine_set_english_inline(e, 2, &o) == 2 && o == 0);
+  CHECK(1013, shanjie_engine_set_english_inline(e, 0, &o) == 0 && o != 0 && o->handled == 1);
+  shanjie_output_free(o);
+  o = 0;
+  CHECK(1014, shanjie_engine_set_english_inline(e, 1, &o) == 0 && o != 0 && o->handled == 1);
+  shanjie_output_free(o);
+  shanjie_engine_free(e);
+  return 0;
+}
+
+/* acg-pack: argument checks of shanjie_engine_new_packs. The behaviour with a pack is in core/tests/engine_pack.rs. */
+static int run_packs(const char *dir) {
+  ShanjieEngine *e = 0;
+  CHECK(701, shanjie_engine_new_packs(0, 0, 0, 0u, &e) == 1 && e == 0);
+  CHECK(702, shanjie_engine_new_packs(dir, 0, 0, 1u, &e) == 1 && e == 0); /* a pack without a directory */
+  CHECK(703, shanjie_engine_new_packs(dir, 0, dir, 2u, &e) == 2 && e == 0); /* a bit outside the mask */
+  CHECK(704, shanjie_engine_new_packs(dir, 2u, 0, 0u, &e) == 2 && e == 0);   /* layout out of range */
+  CHECK(705, shanjie_engine_new_packs(dir, 0, 0, 0u, &e) == 0 && e != 0);    /* mask 0: packs_dir may be NULL */
+  shanjie_engine_free(e);
+  e = 0;
+  CHECK(706, shanjie_engine_new_packs(dir, 0, "/nonexistent/shanjie-packs", 1u, &e) == 0 && e != 0); /* a missing pack file adds nothing */
+  shanjie_engine_free(e);
+  return 0;
+}
+
+/* S7c-2a (docs/contracts/s7c2a-core-rerank.md section 2.5): every new function at least once, through the header. There is no
+ * .sjtl here, so a successful run / apply is covered by the child-process tests in ffi.rs; here: the NULL paths, load errors,
+ * set_rerank's codes, and take on an engine without a small model (0 with *job NULL). */
+static int run_rerank(const char *dir, const char *lm, const char *missing) {
+  static ShanjieOutput dummy;
+  static ShanjieRerankJob *job_dummy = (ShanjieRerankJob *)&dummy; /* non-NULL sentinel, never dereferenced */
+  ShanjieEngine *e = 0;
+  ShanjieOutput *o = 0;
+  ShanjieRerankJob *j = 0;
+  CHECK(901, shanjie_engine_new(dir, 0, &e) == 0 && e != 0);
+  CHECK(902, shanjie_engine_load_tinylm(e, missing) == 3);         /* no n-gram model yet */
+  CHECK(903, shanjie_engine_load_tinylm(0, missing) == 1);
+  CHECK(904, shanjie_engine_load_tinylm(e, 0) == 1);
+  CHECK(905, shanjie_engine_load_lm(e, lm) == 0);
+  CHECK(906, shanjie_engine_load_tinylm(e, missing) == 3);         /* missing file */
+  CHECK(907, shanjie_engine_set_rerank(0, 1, &o) == 1 && o == 0);
+  CHECK(908, shanjie_engine_set_rerank(e, 1, 0) == 1);
+  o = &dummy;
+  CHECK(909, shanjie_engine_set_rerank(e, 2, &o) == 2 && o == 0);
+  CHECK(910, shanjie_engine_set_rerank(e, 1, &o) == 0 && o != 0 && o->handled == 1);
+  shanjie_output_free(o);
+  o = 0;
+  CHECK(911, type(e, "su3cl3"));
+  j = job_dummy;
+  CHECK(912, shanjie_engine_rerank_take(e, &j) == 0 && j == 0);    /* no small model: no job */
+  j = job_dummy;
+  CHECK(913, shanjie_engine_rerank_take(0, &j) == 1 && j == 0);
+  CHECK(914, shanjie_engine_rerank_take(e, 0) == 1);
+  CHECK(915, shanjie_rerank_run(0) == 1);
+  o = &dummy;
+  CHECK(916, shanjie_engine_rerank_apply(0, job_dummy, &o) == 1 && o == 0);
+  o = &dummy;
+  CHECK(917, shanjie_engine_rerank_apply(e, 0, &o) == 1 && o == 0);
+  CHECK(918, shanjie_engine_rerank_apply(e, job_dummy, 0) == 1 && SHANJIE_NO_CHANGE == 5);
+  shanjie_rerank_free(0);
+  shanjie_engine_free(e);
+  return 0;
+}
+
+/* Rerank strength (docs/contracts/rerank-strength.md section 2.2): both new functions through the header. No .sjtl here: the
+ * levels themselves are covered by ffi.rs `child_rerank_level`; here the codes and the mask without a small model. */
+static int run_rerank_level(const char *dir, const char *lm) {
+  static ShanjieOutput dummy;
+  ShanjieEngine *e = 0;
+  ShanjieOutput *o = 0;
+  uint32_t m = 99u;
+  CHECK(951, shanjie_engine_new(dir, 0, &e) == 0 && e != 0);
+  CHECK(952, shanjie_engine_rerank_levels(e, &m) == 0 && m == 0u);   /* no small model */
+  CHECK(953, shanjie_engine_rerank_levels(0, &m) == 1);
+  CHECK(954, shanjie_engine_rerank_levels(e, 0) == 1);
+  o = &dummy;
+  CHECK(955, shanjie_engine_set_rerank_level(0, 1, &o) == 1 && o == 0);
+  CHECK(956, shanjie_engine_set_rerank_level(e, 1, 0) == 1);
+  o = &dummy;
+  CHECK(957, shanjie_engine_set_rerank_level(e, 3, &o) == 2 && o == 0);
+  CHECK(958, shanjie_engine_set_rerank_level(e, 2, &o) == 0 && o != 0 && o->handled == 1); /* remembered without a model */
+  shanjie_output_free(o);
+  o = 0;
+  CHECK(959, shanjie_engine_load_lm(e, lm) == 0);
+  m = 99u;
+  CHECK(960, shanjie_engine_rerank_levels(e, &m) == 0 && m == 0u);
+  shanjie_engine_free(e);
+  return 0;
+}
+
 int main(int argc, char **argv) {
   int rc;
   if (argc != 3 && argc != 4) return 2;
@@ -299,6 +461,10 @@ int main(int argc, char **argv) {
   if (rc == 0) rc = run_punct(argv[1]);
   if (rc == 0) rc = run_grid(argv[1]);
   if (rc == 0) rc = run_learn(argv[1], argc == 4 ? argv[3] : 0);
+  if (rc == 0) rc = run_packs(argv[1]);
+  if (rc == 0) rc = run_rerank(argv[1], argv[2], "/nonexistent/shanjie-missing.sjtl");
+  if (rc == 0) rc = run_rerank_level(argv[1], argv[2]);
+  if (rc == 0) rc = run_english(argv[1], "/nonexistent/shanjie-missing-english.txt");
   shanjie_engine_free(0);
   shanjie_output_free(0);
   if (rc != 0) {

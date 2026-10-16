@@ -1,0 +1,104 @@
+{
+ "items": [
+  {
+   "displayName": "CoCo壱番屋 (臺灣)",
+   "id": "cocoichibanya-aafd63",
+   "locationSet": {
+    "include": [
+     "tw"
+    ]
+   },
+   "tags": {
+    "amenity": "restaurant",
+    "brand": "CoCo壱番屋",
+    "brand:en": "CoCo Ichibanya",
+    "brand:ja": "CoCo壱番屋",
+    "brand:wikidata": "Q5986105",
+    "brand:zh": "CoCo壱番屋",
+    "cuisine": "curry;japanese",
+    "name": "CoCo壱番屋",
+    "name:en": "CoCo Ichibanya",
+    "name:ja": "CoCo壱番屋",
+    "name:zh": "CoCo壹番屋",
+    "operator": "壹番屋股份有限公司",
+    "operator:en": "KABUSHIKI KAISHA ICHIBANYA",
+    "operator:zh": "壹番屋股份有限公司",
+    "takeaway": "yes"
+   }
+  },
+  {
+   "displayName": "Haidilao Hot Pot",
+   "id": "haidilaohotpot-ce6bab",
+   "locationSet": {
+    "include": [
+     "001"
+    ],
+    "exclude": [
+     "cn",
+     "tw"
+    ]
+   },
+   "tags": {
+    "amenity": "restaurant",
+    "brand": "Haidilao Hot Pot",
+    "brand:en": "Haidilao Hot Pot",
+    "brand:wikidata": "Q5638920",
+    "brand:zh": "海底捞火锅",
+    "cuisine": "chinese;hotpot",
+    "name": "Haidilao Hot Pot",
+    "name:en": "Haidilao Hot Pot",
+    "name:zh": "海底捞火锅"
+   }
+  },
+  {
+   "displayName": "やよい軒",
+   "id": "yayoiken-73219d",
+   "locationSet": {
+    "include": [
+     "au",
+     "jp",
+     "lb",
+     "ph",
+     "sg",
+     "th",
+     "tw",
+     "us"
+    ]
+   },
+   "tags": {
+    "amenity": "restaurant",
+    "brand": "やよい軒",
+    "brand:en": "Yayoiken",
+    "brand:ja": "やよい軒",
+    "brand:th": "ยาโยอิ",
+    "brand:wikidata": "Q11280577",
+    "cuisine": "japanese",
+    "name": "やよい軒",
+    "name:en": "Yayoiken",
+    "name:ja": "やよい軒",
+    "name:th": "ยาโยอิ"
+   }
+  },
+  {
+   "displayName": "らーめん山頭火",
+   "id": "hokkaidoramensantouka-d30421",
+   "locationSet": {
+    "include": [
+     "jp",
+     "tw"
+    ]
+   },
+   "tags": {
+    "amenity": "restaurant",
+    "brand": "らーめん山頭火",
+    "brand:en": "Hokkaido Ramen Santouka",
+    "brand:ja": "らーめん山頭火",
+    "brand:wikidata": "Q17210103",
+    "cuisine": "ramen",
+    "name": "らーめん山頭火",
+    "name:en": "Hokkaido Ramen Santouka",
+    "name:ja": "らーめん山頭火"
+   }
+  }
+ ]
+}

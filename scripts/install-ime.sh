@@ -135,13 +135,16 @@ fi
 
 # 4. Register, enable the input mode and disable the old two modes, from the installed copy. The
 #    exit code is kept, not swallowed: 3 means the system has not accepted the input method yet
-#    (usual on a first install) or has not loaded the new input mode list.
+#    (add it in System Settings > Keyboard > Input Sources) or has not loaded the new input mode
+#    list. installer-v2.md section 9: `install` registers only when the system does not know the
+#    mode yet, so an update of an enabled copy changes nothing and prints "registration skipped".
 rc=0
 "$DEST/Contents/MacOS/shanjie" install || rc=$?
 if [ "$rc" -eq 3 ]; then
-  # Rerunning the whole script would keep the version just installed as the previous one and
-  # delete the real previous version, so only `install` is to be run again.
-  echo "系統還沒接受新的輸入法（第一次安裝通常如此）：請登出再登入，然後只執行 ~/Library/Input\\ Methods/善解輸入法.app/Contents/MacOS/shanjie install" >&2
+  # Not accepted yet is fixed in System Settings, not by running anything again; rerunning the
+  # whole script would keep the version just installed as the previous one and delete the real
+  # previous version.
+  echo "系統還沒接受新的輸入法：請打開「系統設定 → 鍵盤 → 輸入方式」，按「+」，選「繁體中文」裡的「善解輸入法」，按「加入」。" >&2
   exit 3
 fi
 if [ "$rc" -ne 0 ]; then
@@ -167,5 +170,5 @@ if [ "$rc" -ne 0 ]; then
 fi
 
 echo
-echo "Next: open System Settings > Keyboard > Input Sources and check that 善解輸入法 is listed."
-echo "If it is not, log out and log back in."
+echo "Next: if 善解輸入法 is not in System Settings > Keyboard > Input Sources yet, open it, press +,"
+echo "choose 善解輸入法 under 繁體中文 and press 加入. Nothing to do if it is already there."

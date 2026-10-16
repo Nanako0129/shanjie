@@ -37,9 +37,20 @@ public protocol CandidatePanel: AnyObject {
     /// (the scroll indicator).
     /// `lineRect`: where the composition's line is (s3b2 section 2.3), `nil` if unknown.
     /// `appearance`: the client's (s3b2 section 10), `nil` for the system's.
-    func show(_ candidates: [String], notes: [String?], selected: Int, columns: Int, first: Int, total: Int,
-              lineRect: NSRect?, appearance: NSAppearance?)
+    /// `glassTint`: the 0...1 slider value (settings-window section 2.3), applied on every show, 0 included.
+    /// `vertical`: the core's `candidate_vertical` of this output (candidate-vertical contract sections 2.2 and 2.4): 0
+    /// horizontal, 1 the vertical candidate window (a single column of up to nine rows), 2 the vertical prediction row;
+    /// `columns` is 0 for both. The panel draws what it is told and reads no setting.
+    func show(_ candidates: [String], notes: [String?], selected: Int, columns: Int, first: Int, total: Int, vertical: Int,
+              lineRect: NSRect?, appearance: NSAppearance?, glassTint: Double)
+    /// zhen-inline section 1.3f: a one-line hint in the candidate window's place, drawn like the prediction row (`vertical` 2 when
+    /// the vertical orientation is chosen, else 0) but without a number's room, an expand mark or a highlight. It is not a
+    /// candidate: the session ignores a click on it. Replaces whatever was on screen without an animation; hidden by `hide()`
+    /// like any other content.
+    func showHint(_ text: String, vertical: Int, lineRect: NSRect?, appearance: NSAppearance?, glassTint: Double)
     func hide()
+    /// Re-applies the tint to what is on screen now, without a new `show` (the slider moved while the panel is up).
+    func setGlassTint(_ glassTint: Double)
     /// A mouse click on a cell, by position in what `show` last received.
     var onSelect: ((Int) -> Void)? { get set }
 }
@@ -98,18 +109,233 @@ public final class MemoryPredictionStore: PredictionStore {
     public init(_ prediction: Bool? = nil) { self.prediction = prediction }
 }
 
+/// Where the "可省略韻母" switch is kept (docs/contracts/v3-engine.md section 12.1): `nil` means never chosen, which is off.
+/// Same arrangement as `PredictionStore`.
+@MainActor
+public protocol AbbreviationStore: AnyObject {
+    var abbreviation: Bool? { get set }
+}
+
+/// The in-memory AbbreviationStore.
+@MainActor
+public final class MemoryAbbreviationStore: AbbreviationStore {
+    public var abbreviation: Bool?
+    public init(_ abbreviation: Bool? = nil) { self.abbreviation = abbreviation }
+}
+
+/// Where the "中英混打（實驗）" switch is kept (docs/contracts/zhen-mixed.md section 3.2): `nil` means never chosen, which is off.
+/// Same arrangement as `AbbreviationStore`.
+@MainActor
+public protocol EnglishStore: AnyObject {
+    var english: Bool? { get set }
+    /// The display choice under it (docs/contracts/zhen-inline.md section 2): true shows the English as it is typed, false only
+    /// when Space opens the window. `nil` means never chosen, which is true.
+    var englishInline: Bool? { get set }
+}
+
+/// The in-memory EnglishStore.
+@MainActor
+public final class MemoryEnglishStore: EnglishStore {
+    public var english: Bool?
+    public var englishInline: Bool?
+    public init(_ english: Bool? = nil, inline: Bool? = nil) {
+        self.english = english
+        self.englishInline = inline
+    }
+}
+
+/// Where the "動漫與遊戲詞" switch is kept (docs/contracts/acg-pack.md A.2): `nil` means never chosen, which is on
+/// (user decision 2026-10-09, after the A.3 numbers). Same arrangement as `PredictionStore`.
+@MainActor
+public protocol AcgPackStore: AnyObject {
+    var acgPack: Bool? { get set }
+}
+
+/// The in-memory AcgPackStore.
+@MainActor
+public final class MemoryAcgPackStore: AcgPackStore {
+    public var acgPack: Bool?
+    public init(_ acgPack: Bool? = nil) { self.acgPack = acgPack }
+}
+
+/// Where the candidate glass tint slider is kept (docs/contracts/settings-window.md section 2.3): 0...1,
+/// `nil` means never set, which is 0 (no tint). Same arrangement as `DemoteStore`.
+@MainActor
+public protocol GlassTintStore: AnyObject {
+    var glassTint: Double? { get set }
+}
+
+/// The in-memory GlassTintStore.
+@MainActor
+public final class MemoryGlassTintStore: GlassTintStore {
+    public var glassTint: Double?
+    public init(_ glassTint: Double? = nil) { self.glassTint = glassTint }
+}
+
+/// Where the "候選窗方向" choice is kept (docs/contracts/candidate-vertical.md section 2.1): `true` is the vertical window, `nil`
+/// means never set, which is horizontal. Same arrangement as `GlassTintStore`.
+@MainActor
+public protocol CandidateOrientationStore: AnyObject {
+    var candidateVertical: Bool? { get set }
+}
+
+/// The in-memory CandidateOrientationStore.
+@MainActor
+public final class MemoryCandidateOrientationStore: CandidateOrientationStore {
+    public var candidateVertical: Bool?
+    public init(_ candidateVertical: Bool? = nil) { self.candidateVertical = candidateVertical }
+}
+
+/// Where the "語意校正" switch is kept (docs/contracts/s7c2b-shell-rerank.md section 2.2): `nil` means never chosen, which is on
+/// (docs/contracts/s7h-tinylm-v3.md section 2.3; off before S7h).
+/// Same arrangement as `PredictionStore`. `rerankLevel` is the strength (docs/contracts/rerank-strength.md section 3): the raw
+/// value of a `RerankLevel`; `nil` or any other string is standard, like `ProfileModeStore`.
+@MainActor
+public protocol RerankStore: AnyObject {
+    var rerank: Bool? { get set }
+    var rerankLevel: String? { get set }
+}
+
+/// The in-memory RerankStore.
+@MainActor
+public final class MemoryRerankStore: RerankStore {
+    public var rerank: Bool?
+    public var rerankLevel: String?
+    public init(_ rerank: Bool? = nil, level: String? = nil) {
+        self.rerank = rerank
+        rerankLevel = level
+    }
+}
+
+/// 語意校正的強度 (docs/contracts/rerank-strength.md section 3): stored by raw value; `code` is the C ABI's level, fixed per case.
+public enum RerankLevel: String, CaseIterable, Sendable {
+    case conservative
+    case standard
+    case aggressive
+
+    var code: UInt32 {
+        switch self {
+        case .conservative: return 0
+        case .standard: return 1
+        case .aggressive: return 2
+        }
+    }
+}
+
+/// Runs a rerank job off the main thread (s7c2b section 2.1): `job.run()` on another thread, then `done` with its code on the
+/// main thread. The app passes `QueueRerankRunner`; the tests pass runners they complete by hand.
+@MainActor
+public protocol RerankRunner: AnyObject {
+    func run(_ job: RerankJob, done: @escaping @MainActor @Sendable (Int32) -> Void)
+}
+
+/// The app's runner (F2): one serial `.utility` queue with a fixed label. The closure holds the job wrapper (never its
+/// pointer) until run returns; the code comes back through `DispatchQueue.main.async`, which orders the run before the
+/// main-thread apply. The main thread never waits for the queue.
+public final class QueueRerankRunner: RerankRunner {
+    private let queue = DispatchQueue(label: "com.nyanako.inputmethod.shanjie.rerank", qos: .utility)
+
+    public init() {}
+
+    public func run(_ job: RerankJob, done: @escaping @MainActor @Sendable (Int32) -> Void) {
+        queue.async {
+            let code = job.run()
+            DispatchQueue.main.async { done(code) }
+        }
+    }
+}
+
+/// How the chat or formal profile is chosen (docs/contracts/profile-choice.md section 2.2): by the app (`chatApps` and the
+/// user's per-app choices), or always one of the two.
+public enum ProfileMode: String, Sendable {
+    case auto
+    case chat
+    case formal
+}
+
+/// Where the profile mode is kept (profile-choice section 2.1): the raw value of a `ProfileMode`; `nil` or any other string is
+/// `auto`. Same arrangement as `LayoutStore`.
+@MainActor
+public protocol ProfileModeStore: AnyObject {
+    var profileMode: String? { get set }
+}
+
+/// The in-memory ProfileModeStore.
+@MainActor
+public final class MemoryProfileModeStore: ProfileModeStore {
+    public var profileMode: String?
+    public init(_ profileMode: String? = nil) { self.profileMode = profileMode }
+}
+
+/// Where the per-app choices are kept (profile-choice section 2.1): bundle ID to `chat` or `formal`, only for apps the user
+/// switched from the menu. Read back raw, exactly as stored, and filtered entry by entry by `AppProfiles.parse`; written as a
+/// whole, an empty dictionary removing the value. Same arrangement as `LayoutStore` otherwise.
+@MainActor
+public protocol AppProfileStore: AnyObject {
+    var appProfiles: Any? { get }
+    func setAppProfiles(_ profiles: [String: String])
+}
+
+/// The in-memory AppProfileStore. `appProfiles` is whatever the test put there, so a malformed value can be tried.
+@MainActor
+public final class MemoryAppProfileStore: AppProfileStore {
+    public private(set) var appProfiles: Any?
+    public init(_ appProfiles: Any? = nil) { self.appProfiles = appProfiles }
+    public func setAppProfiles(_ profiles: [String: String]) { appProfiles = profiles.isEmpty ? nil : profiles }
+}
+
+/// The stored per-app choices, converted both ways (profile-choice section 2.1).
+@MainActor
+public enum AppProfiles {
+    /// Entry by entry: a root that is not a dictionary is empty; only a non-empty string key with the string value `chat` or
+    /// `formal` (`ProfileMode`'s raw values, the one string table) is kept, and any other entry is skipped without affecting the
+    /// valid ones (a whole-dictionary cast would drop them all, and the next write would erase them).
+    public static func parse(_ raw: Any?) -> [String: UInt32] {
+        guard let dict = raw as? [AnyHashable: Any] else { return [:] }
+        var out: [String: UInt32] = [:]
+        for (key, value) in dict {
+            guard let bundle = key.base as? String, !bundle.isEmpty,
+                  let mode = (value as? String).flatMap(ProfileMode.init(rawValue:)) else { continue }
+            switch mode {
+            case .chat: out[bundle] = Shell.chat
+            case .formal: out[bundle] = Shell.formal
+            case .auto: continue
+            }
+        }
+        return out
+    }
+
+    /// What `parse` reads back.
+    static func stored(_ profiles: [String: UInt32]) -> [String: String] {
+        profiles.mapValues { ($0 == Shell.chat ? ProfileMode.chat : ProfileMode.formal).rawValue }
+    }
+}
+
 /// Process-wide state: the single engine (about 240 MB each, so never two at once), the single
 /// candidate panel and the page it shows, and which session owns the composition (section 5).
 /// All calls happen on the main thread.
 @MainActor
 public final class Shell {
-    /// Built-in chat apps (section 9); every other app gets the formal profile. The bundle ID is
-    /// only looked up here: it is never passed to the core, logged or stored.
+    /// Built-in chat apps (section 9); every other app gets the formal profile, unless the user switched it
+    /// (profile-choice section 2.5). A bundle ID is never passed to the core or logged; it is stored only for an
+    /// app the user switched from the menu (`appProfiles`).
     static let chatApps: Set<String> = [
         "com.hnc.Discord", "jp.naver.line.mac", "com.apple.MobileSMS", "com.tinyspeck.slackmacgap",
         "ru.keepcoder.Telegram", "com.tdesktop.Telegram", "net.whatsapp.WhatsApp", "com.facebook.archon",
     ]
     static let chat: UInt32 = 0, formal: UInt32 = 1
+
+    /// The one place the profile is decided (profile-choice section 2.2). `auto`: no bundle ID is formal, as before; then the
+    /// user's choice for the app; then `chatApps`.
+    static func profile(bundle: String?, mode: ProfileMode, overrides: [String: UInt32]) -> UInt32 {
+        switch mode {
+        case .chat: return chat
+        case .formal: return formal
+        case .auto:
+            guard let bundle, !bundle.isEmpty else { return formal }
+            return overrides[bundle] ?? (chatApps.contains(bundle) ? chat : formal)
+        }
+    }
 
     private let resources: URL
     /// s3e: the converted system punctuation table, `nil` when unavailable (the core keeps its own).
@@ -123,6 +349,103 @@ public final class Shell {
     private let predictionStore: PredictionStore
     /// V3: whether the prediction row is computed (default on); sent to every engine `build()` makes.
     private(set) var predictionOn = true
+    private let abbreviationStore: AbbreviationStore
+    /// V3 section 12: the abbreviation composer (default off); sent to every engine `build()` makes, next to the prediction switch.
+    private(set) var abbreviationOn = false
+    /// Whether the abbreviation switch is offered at all (menu item, settings toggle). The app passes false: the feature does not
+    /// ship in v0.4.0 (user, 2026-10-10, after a device check: a whole sentence cannot be abbreviated, and keys seemed stuck; the
+    /// stuck keys are read against V3 section 12.2, not reproduced: Space and tone keys are eaten while two or more units are
+    /// pending). Hidden means always off; the stored value is neither read nor written.
+    public let showsAbbreviation: Bool
+    private let englishStore: EnglishStore
+    /// zhen-mixed: the experimental English window (default off); sent to every engine `build()` makes. Unlike the abbreviation
+    /// switch it ships (the app shows it).
+    private(set) var englishOn = false
+    /// zhen-inline section 2: how the English shows while it is typed (default true: as letters, `UserDefaults` key
+    /// `englishInline`, absent is true); sent to every engine `build()` makes. Only matters while `englishOn`.
+    private(set) var englishInlineOn = true
+    /// Whether this engine loaded the word list (`Resources/english-words.txt`); false greys the menu item and the settings toggle
+    /// (the checkmark keeps the setting), as `rerankAvailable` does for the small model.
+    private(set) var englishAvailable = false
+    private let acgPackStore: AcgPackStore
+    /// The ACG word pack (default on, user decision 2026-10-09): parsed into the lexicon, so a change rebuilds the engine like a layout change.
+    private(set) var acgPackOn = true
+    /// The pack's source date for the grey menu line (acg-pack contract A2.4): `latest_source_revision` of `Resources/packs/acg.json`
+    /// as a UTC date, read once at init. `nil` (file or field missing or unreadable) means no line.
+    let acgDataDate: String?
+    private let glassTintStore: GlassTintStore
+    private let candidateOrientationStore: CandidateOrientationStore
+    /// The orientation setting (default horizontal); sent to every engine `build()` makes and on every change (candidate-vertical
+    /// contract section 2.1). A candidate window already open keeps the orientation it opened with, so a change reaches the
+    /// next window. The core also re-renders a prediction row that is on screen in the new orientation (section 2.4); with the
+    /// setting only in the settings window, where clicking is inferred (not measured) to commit the composition and hide the
+    /// panel, that is reachable through the API and the tests but not observable from the window as shipped.
+    public private(set) var candidateVertical = false
+    private let rerankStore: RerankStore
+    /// s7c2b section 2.2: whether the core makes rerank jobs (default on since S7h, the maintainer's decision 2026-10-12: on, with a
+    /// break rate <= 0.5%); sent to every engine `build()` makes and on every change.
+    private(set) var rerankOn: Bool
+    /// The small model's file in Resources (section 2.3). The only path it is loaded from: `build()` and the selftest join it to
+    /// `resources`; no init parameter, defaults key or environment variable names another.
+    static let tinyLMFile = "tinylm.sjtl"
+    /// zhen-mixed section 3.2: the English word list, in Resources next to the model (build-app.sh generates it).
+    static let englishFile = "english-words.txt"
+    private let rerankRunner: RerankRunner
+    /// A job is with the runner (section 2.1: one at a time).
+    private var rerankRunning = false
+    /// The latest job taken while another ran. A newer one replaces it, and the replaced job is freed as it is dropped here.
+    private var rerankPending: PendingRerank?
+    /// Jobs taken from the core; the tests compare it with the frees.
+    private(set) var rerankTaken = 0
+    /// Frees a job; every wrapper calls it once from its deinit. The tests count here.
+    var rerankFree: @Sendable (OpaquePointer) -> Void = { shanjie_rerank_free($0) }
+    /// `CoreEngine.rerankTake`; the tests replace it to see a non-zero take handled (F5).
+    var rerankTake: (CoreEngine, @escaping @Sendable (OpaquePointer) -> Void) -> (RerankJob?, Int32) = { $0.rerankTake(free: $1) }
+    /// `RerankJob.apply(on:)`; the tests replace it to see apply's non-zero codes other than 5 handled.
+    var rerankApply: (RerankJob, CoreEngine) -> CoreResult = { $0.apply(on: $1) }
+    /// Every value `build()` passed to `setRerank`, in order (the tests read it: a nil store must send true, not nothing).
+    private(set) var rerankSent: [Bool] = []
+    /// Rerank strength (section 3): the stored level, sent to every engine `build()` makes and on every change.
+    private(set) var rerankLevel: RerankLevel
+    /// Every level code sent to an engine, by `build()` and by `setRerankLevel`, in order (the tests read it, as `rerankSent`).
+    private(set) var rerankLevelSent: [UInt32] = []
+    /// `shanjie_engine_rerank_levels` of the current engine after `build()` loaded the small model (0 without one).
+    private(set) var rerankLevels: UInt32 = 0
+    /// Whether the current engine has the small model (set by every `build()`): false when there is no engine, when load_lm
+    /// failed (load_tinylm is then skipped) or when load_tinylm returned non-zero. Without it no job is ever made.
+    private(set) var rerankAvailable = false
+    /// The 語意校正 menu item and settings toggle are enabled only when the switch can do something: the demotion table on (the
+    /// core makes no job without it, F11) and the small model loaded. The checkmark still shows the stored choice.
+    var rerankEnabled: Bool { demoteOn && rerankAvailable }
+    /// The settings window's 強度 control (section 3) is enabled only when the switch is on and can do something, and the loaded
+    /// model offers the conservative and the aggressive set (a version 3 file); otherwise it shows greyed with the stored choice.
+    var rerankLevelEnabled: Bool { rerankOn && rerankEnabled && rerankLevels & 0b101 == 0b101 }
+    /// The 中英混打（實驗） menu item and settings toggle, likewise: the word list loaded and the standard layout (the core records no
+    /// shadow in the Eten layout, zhen-mixed section 2.1, so the switch would do nothing there). The checkmark still shows the choice.
+    var englishEnabled: Bool { englishAvailable && mode == .standard }
+    /// The 英文的顯示 choice under it is enabled on the same condition and while the switch itself is on.
+    var englishInlineEnabled: Bool { englishEnabled && englishOn }
+
+    /// A job waiting for the runner, with the session and engine it was taken for. Weak (F3): a waiting job keeps neither alive,
+    /// and an identity is never compared by address.
+    private struct PendingRerank {
+        let job: RerankJob
+        weak var session: Session?
+        weak var engine: CoreEngine?
+    }
+    private let profileModeStore: ProfileModeStore
+    private let appProfileStore: AppProfileStore
+    /// profile-choice section 2.1: both read once at init, then changed only through the setters below.
+    public private(set) var profileMode = ProfileMode.auto
+    /// Bundle ID to profile, only where it differs from `chatApps` (section 2.3).
+    public private(set) var appProfiles: [String: UInt32] = [:]
+    /// The `vertical` value (0, 1 or 2) of what the panel shows now; 0 once it hid. Page Up / Down go to the core only while
+    /// it is 1, the vertical candidate window (section 2.2); the vertical prediction row, 2, does not count.
+    private(set) var shownVertical = 0
+    var verticalOpen: Bool { shownVertical == VerticalLayout.candidates }
+    /// Posted (object: this shell) after any setting changes, from the menu or the settings window;
+    /// the window's model re-reads on it (settings-window section 2.2).
+    public static let didChangeSettings = Notification.Name("ShanjieShellDidChangeSettings")
     let panel: CandidatePanel
     let isSecureInput: () -> Bool
     private(set) var engine: CoreEngine?
@@ -144,6 +467,24 @@ public final class Shell {
     /// synchronous IPC on the key path, so a pure selection move (same preedit and cursor) reuses it.
     /// Cleared whenever the panel hides: commit, reset, owner change.
     var lineCache: (preedit: String, cursor: Int, rect: NSRect?)?
+    /// Zhen-inline section 1.3f: the hint is anchored at the start of the open English run, and the `lineRect` answer for that
+    /// start is kept for the run's lifetime, so only a run's first key asks the client. Cleared when the hint goes.
+    var hintAnchor: (start: Int, rect: NSRect?)?
+    /// Whether the hint is what the panel shows now. A click on it is not a candidate pick (`Session.candidateSelected`).
+    private(set) var hintShown = false
+
+    /// `latest_source_revision` ("2026-10-06T00:08:14Z") of the manifest at `url` as a UTC "yyyy-MM-dd"; `nil` for anything else.
+    static func readAcgDataDate(_ url: URL) -> String? {
+        guard let data = try? Data(contentsOf: url),
+              let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              let stamp = json["latest_source_revision"] as? String,
+              let date = ISO8601DateFormatter().date(from: stamp) else { return nil }
+        let utc = DateFormatter()
+        utc.locale = Locale(identifier: "en_US_POSIX")
+        utc.timeZone = TimeZone(identifier: "UTC")
+        utc.dateFormat = "yyyy-MM-dd"
+        return utc.string(from: date)
+    }
 
     /// `resources`: the absolute Resources directory holding the lexicon files and bigram.sjlm.
     /// `panel`: the one candidate panel (an NSPanel in the app).
@@ -160,13 +501,29 @@ public final class Shell {
     /// `demoteStore`: the demotion switch (sw). Required, with no default, like `layoutStore`: the app passes
     /// its UserDefaults-backed store, tests the in-memory one.
     /// `predictionStore`: the prediction switch (V3 section 10.5). Required, like `demoteStore`.
+    /// `abbreviationStore`: the abbreviation switch (V3 section 12.1). Required, like `predictionStore`.
+    /// `englishStore`: the 中英混打 switch (zhen-mixed section 3.2). Required, like `abbreviationStore`.
+    /// `acgPackStore`: the ACG word pack switch (acg-pack contract A.2). Required, like `demoteStore`.
+    /// `glassTintStore`: the candidate glass tint (settings-window section 2.3). Required, like `demoteStore`.
+    /// `candidateOrientationStore`: the candidate window's orientation (candidate-vertical contract section 2.1). Required, like `glassTintStore`.
+    /// `rerankStore`: the 語意校正 switch (s7c2b section 2.2). Required, like `predictionStore`.
+    /// `rerankRunner`: runs rerank jobs off the main thread (section 2.1). Required, with no default: the app passes
+    /// `QueueRerankRunner`, the tests a runner they complete by hand.
+    /// `profileModeStore`, `appProfileStore`: how chat or formal is chosen and the per-app choices (profile-choice section 2.1).
+    /// Required, like `glassTintStore`.
     /// `punctuationTable`: Apple's punctuation candidate table (s3e); tests pass another path.
     /// `punctuationNames`: Apple's punctuation names (s3f); tests pass another path.
+    /// `showsAbbreviation`: whether the abbreviation switch is offered. The default `true` is for the tests; the app passes `false`
+    /// (v0.4.0). No test sees the app's value: the release device check does (no 可省略韻母 in the menu).
     public init(resources: URL, panel: CandidatePanel, isSecureInput: @escaping () -> Bool,
                 layoutStore: LayoutStore, learningDirectory: URL?, dialogs: LearningDialogs,
-                demoteStore: DemoteStore, predictionStore: PredictionStore,
+                demoteStore: DemoteStore, predictionStore: PredictionStore, abbreviationStore: AbbreviationStore, englishStore: EnglishStore, acgPackStore: AcgPackStore,
+                glassTintStore: GlassTintStore, candidateOrientationStore: CandidateOrientationStore,
+                rerankStore: RerankStore, rerankRunner: RerankRunner,
+                profileModeStore: ProfileModeStore, appProfileStore: AppProfileStore,
                 punctuationTable: URL = PunctuationTable.systemURL,
-                punctuationNames: URL = PunctuationNames.systemURL) {
+                punctuationNames: URL = PunctuationNames.systemURL,
+                showsAbbreviation: Bool = true) {
         self.resources = resources
         self.learningDirectory = learningDirectory
         self.dialogs = dialogs
@@ -187,6 +544,27 @@ public final class Shell {
         demoteOn = demoteStore.demote ?? true
         self.predictionStore = predictionStore
         predictionOn = predictionStore.prediction ?? true
+        self.abbreviationStore = abbreviationStore
+        self.showsAbbreviation = showsAbbreviation
+        abbreviationOn = showsAbbreviation && abbreviationStore.abbreviation == true
+        self.englishStore = englishStore
+        englishOn = englishStore.english == true
+        englishInlineOn = englishStore.englishInline ?? true
+        self.acgPackStore = acgPackStore
+        acgDataDate = Shell.readAcgDataDate(resources.appendingPathComponent("packs/acg.json"))
+        self.glassTintStore = glassTintStore
+        glassTint = glassTintStore.glassTint ?? 0
+        self.candidateOrientationStore = candidateOrientationStore
+        candidateVertical = candidateOrientationStore.candidateVertical ?? false
+        self.rerankStore = rerankStore
+        rerankOn = rerankStore.rerank ?? true
+        rerankLevel = rerankStore.rerankLevel.flatMap(RerankLevel.init(rawValue:)) ?? .standard
+        self.rerankRunner = rerankRunner
+        self.profileModeStore = profileModeStore
+        profileMode = profileModeStore.profileMode.flatMap(ProfileMode.init(rawValue:)) ?? .auto
+        self.appProfileStore = appProfileStore
+        appProfiles = AppProfiles.parse(appProfileStore.appProfiles)
+        acgPackOn = acgPackStore.acgPack ?? true
         // The preference is read before the one engine is built (about 240 MB): building first
         // and switching after would build twice.
         mode = layoutStore.layout.flatMap(InputMode.init(rawValue:)) ?? .standard
@@ -202,6 +580,106 @@ public final class Shell {
     public func selectLayout(_ newMode: InputMode) {
         switchMode(to: newMode)
         layoutStore.layout = newMode.rawValue
+        changed()
+    }
+
+    /// Set by the app to show the settings window; the menu's 善解設定… calls it.
+    public var onOpenSettings: (() -> Void)?
+    /// Set by the app (docs/contracts/about-update.md): the update state the menu and the 關於 page read; `nil` in the tests
+    /// that do not set it.
+    public var updates: Updates?
+    func openSettings() { onOpenSettings?() }
+
+    /// The menu's switches, for a caller with no session (the settings window): the owner of the
+    /// composition, if any, shows the re-ranked snapshot exactly as for the menu; otherwise just the setter.
+    func applyDemote(_ on: Bool) {
+        if let o = owner { o.applyDemote(on) } else { dropOnFailure(setDemote(on)) }
+    }
+
+    func applyPrediction(_ on: Bool) {
+        if let o = owner { o.applyPrediction(on) } else { dropOnFailure(setPrediction(on)) }
+    }
+
+    func applyAbbreviation(_ on: Bool) {
+        if let o = owner { o.applyAbbreviation(on) } else { dropOnFailure(setAbbreviation(on)) }
+    }
+
+    func applyEnglish(_ on: Bool) {
+        if let o = owner { o.applyEnglish(on) } else { dropOnFailure(setEnglish(on)) }
+    }
+
+    func applyCandidateVertical(_ on: Bool) {
+        if let o = owner { o.applyCandidateVertical(on) } else { dropOnFailure(setCandidateVertical(on)) }
+    }
+
+    func applyEnglishInline(_ on: Bool) {
+        if let o = owner { o.applyEnglishInline(on) } else { dropOnFailure(setEnglishInline(on)) }
+    }
+
+    func applyRerank(_ on: Bool) {
+        if let o = owner { o.applyRerank(on) } else { dropOnFailure(setRerank(on)) }
+    }
+
+    func applyRerankLevel(_ level: RerankLevel) {
+        if let o = owner { o.applyRerankLevel(level) } else { dropOnFailure(setRerankLevel(level)) }
+    }
+
+    /// No session to ask: a failed core call is logged and the composition dropped, as `Session.fail` does.
+    private func dropOnFailure(_ r: CoreResult?) {
+        guard case .failed(let c)? = r else { return }
+        Log.shell.error("core call failed, code \(c)")
+        discardOrphan()
+    }
+
+    /// The clear with its confirmation window (S4 section 4), for the menu and the settings window.
+    /// `done` runs after the answer, cleared or not.
+    func confirmAndClear(done: (@MainActor () -> Void)? = nil) {
+        dialogs.confirmClear { [weak self] clear in
+            if clear { self?.clearLearning() }
+            done?()
+        }
+    }
+
+    func changed() { NotificationCenter.default.post(name: Shell.didChangeSettings, object: self) }
+
+    /// The slider value 0...1 (settings-window section 2.3); unset is 0. Cached like the other settings.
+    public private(set) var glassTint: Double = 0
+
+    public func setGlassTint(_ value: Double) {
+        glassTint = value
+        glassTintStore.glassTint = value
+        panel.setGlassTint(value)  // section 2.3: a panel that is up changes at once
+        changed()
+    }
+
+    /// The settings window's 切換方式 (profile-choice section 2.2): stored, posted, then re-applied to the owner of the
+    /// composition, if any, so what Enter commits matches the menu's checkmark at once.
+    public func setProfileMode(_ m: ProfileMode) {
+        profileMode = m
+        profileModeStore.profileMode = m.rawValue
+        changed()
+        reapplyProfileToOwner()
+    }
+
+    /// The settings window's remove button: the app goes back to `chatApps`; re-applied like `setProfileMode`.
+    public func removeAppProfile(_ bundle: String) {
+        appProfiles[bundle] = nil
+        appProfileStore.setAppProfiles(AppProfiles.stored(appProfiles))
+        changed()
+        reapplyProfileToOwner()
+    }
+
+    /// Section 2.2: no claim, the owner already owns the composition (as the window's other switches go through the owner).
+    private func reapplyProfileToOwner() {
+        guard let o = owner else { return }
+        o.applyProfile(bundle: o.client.bundleIdentifier)
+    }
+
+    /// The menu's choice for one app (section 2.3): a value equal to `chatApps`' removes the entry, so the list keeps only the
+    /// apps that differ. The caller re-applies the profile and posts the change.
+    func setAppProfile(_ bundle: String, _ p: UInt32) {
+        appProfiles[bundle] = p == (Shell.chatApps.contains(bundle) ? Shell.chat : Shell.formal) ? nil : p
+        appProfileStore.setAppProfiles(AppProfiles.stored(appProfiles))
     }
 
     /// The menu's choice (sw): stored, and sent to the engine, which recomputes the composition; the
@@ -209,6 +687,7 @@ public final class Shell {
     func setDemote(_ on: Bool) -> CoreResult? {
         demoteOn = on
         demoteStore.demote = on
+        defer { changed() }
         return engine?.setDemote(on)
     }
 
@@ -216,26 +695,186 @@ public final class Shell {
     func setPrediction(_ on: Bool) -> CoreResult? {
         predictionOn = on
         predictionStore.prediction = on
+        defer { changed() }
         return engine?.setPrediction(on)
+    }
+
+    /// The menu's choice (V3 section 12.1): stored, and sent to the engine; the snapshot is for the caller to show.
+    func setAbbreviation(_ on: Bool) -> CoreResult? {
+        guard showsAbbreviation else { return nil }
+        abbreviationOn = on
+        abbreviationStore.abbreviation = on
+        defer { changed() }
+        return engine?.setAbbreviation(on)
+    }
+
+    /// The menu's choice (zhen-mixed section 3.2): stored, and sent to the engine; the snapshot is for the caller to show (turning
+    /// it off closes an open English window).
+    func setEnglish(_ on: Bool) -> CoreResult? {
+        englishOn = on
+        englishStore.english = on
+        defer { changed() }
+        return engine?.setEnglish(on)
+    }
+
+    /// The settings window's 英文的顯示 choice (zhen-inline section 2): stored, and sent to the engine; the snapshot is for the
+    /// caller to show, so a composition on screen is drawn again in the new display.
+    func setEnglishInline(_ on: Bool) -> CoreResult? {
+        englishInlineOn = on
+        englishStore.englishInline = on
+        defer { changed() }
+        return engine?.setEnglishInline(on)
+    }
+
+    /// The settings window's choice (candidate-vertical contract section 2.1): stored, and sent to the engine, which applies it
+    /// to the next window that opens. An open candidate window keeps its orientation; a prediction row on screen is re-rendered
+    /// in the snapshot, for the caller to show. In the app only the settings window calls this, and a click there is inferred
+    /// (not measured) to commit the composition and hide the panel, so the row case is reachable through the API and the tests
+    /// but not observable from the window as shipped.
+    func setCandidateVertical(_ on: Bool) -> CoreResult? {
+        candidateVertical = on
+        candidateOrientationStore.candidateVertical = on
+        defer { changed() }
+        return engine?.setCandidateVertical(on)
+    }
+
+    /// The menu's choice (s7c2b section 2.2): stored, and sent to the engine, which recomputes the composition (off: the n-gram
+    /// result at once); the snapshot is for the caller to show. A job waiting for the runner is dropped; one running is not applied.
+    func setRerank(_ on: Bool) -> CoreResult? {
+        rerankOn = on
+        rerankStore.rerank = on
+        if !on { rerankPending = nil }
+        defer { changed() }
+        return engine?.setRerank(on)
+    }
+
+    /// The settings window's 強度 (rerank-strength section 3): stored, and sent to the engine, which recomputes the composition;
+    /// the snapshot is for the caller to show (its job uses the new level; one already taken is stale in the core).
+    func setRerankLevel(_ level: RerankLevel) -> CoreResult? {
+        rerankLevel = level
+        rerankStore.rerankLevel = level.rawValue
+        defer { changed() }
+        guard let engine else { return nil }
+        rerankLevelSent.append(level.code)
+        return engine.setRerankLevel(level.code)
+    }
+
+    /// Section 2.1: a job taken for `session` from `engine` runs now, or waits if another is running (only the latest waits).
+    func enqueueRerank(_ job: RerankJob, session: Session, engine: CoreEngine) {
+        rerankTaken += 1
+        let pending = PendingRerank(job: job, session: session, engine: engine)
+        if rerankRunning { rerankPending = pending } else { startRerank(pending) }
+    }
+
+    private func startRerank(_ p: PendingRerank) {
+        rerankRunning = true
+        let job = p.job, session = p.session, engine = p.engine
+        rerankRunner.run(job) { [weak self, weak session, weak engine] code in
+            self?.rerankFinished(job, code: code, session: session, engine: engine)
+        }
+    }
+
+    /// On the main thread once run returned. Applied only while the switch is on, the session still owns the composition and the
+    /// engine is still the current one (weak references compared with ===, F3); the core's generation check is the second line.
+    private func rerankFinished(_ job: RerankJob, code: Int32, session: Session?, engine: CoreEngine?) {
+        // F4: whatever is returned below, the running flag is cleared and a waiting job starts.
+        defer {
+            rerankRunning = false
+            if let next = rerankPending {
+                rerankPending = nil
+                startRerank(next)
+            }
+        }
+        guard code == 0 else {
+            Log.shell.error("shanjie_rerank_run failed, code \(code)")
+            return
+        }
+        guard rerankOn, let session, session === owner, let engine, engine === self.engine else { return }
+        session.applyRerankJob(job, on: engine)
+    }
+
+    /// The menu's choice (acg-pack contract A.2): the pack is part of the lexicon, so like a layout change the
+    /// composition is committed and the engine rebuilt; the choice is stored. Same value: nothing happens.
+    func setAcgPack(_ on: Bool) {
+        guard on != acgPackOn else { return }
+        commitThenRebuild {
+            acgPackOn = on
+            acgPackStore.acgPack = on
+        }
+        changed()
+        Log.shell.debug("word pack switched")
     }
 
     /// Creates the engine for the current mode, then loads the LM and the current profile. A
     /// failure leaves an engine without the LM (still usable) or no engine (every key passes).
     private func build() {
         engine = nil  // free the old engine first: only one exists at a time
-        let (e, code) = CoreEngine.make(dataDir: resources.path, layout: mode.layout)
-        guard let e else {
+        rerankAvailable = false
+        rerankLevels = 0
+        englishAvailable = false
+        rerankPending = nil  // the old engine's; one still running is not applied (its engine is gone)
+        let packsDir = resources.appendingPathComponent("packs").path
+        var (made, code) = CoreEngine.make(dataDir: resources.path, layout: mode.layout, packsDir: acgPackOn ? packsDir : nil)
+        if made == nil && acgPackOn {
+            // Any build failure retries without the pack, so the first code alone does not say whose fault it is:
+            // blame the pack only if the pack-less build works; otherwise the second code is the real cause.
+            // The stored choice is untouched and nothing is shown; the next rebuild tries the pack again.
+            let packCode = code
+            (made, code) = CoreEngine.make(dataDir: resources.path, layout: mode.layout)
+            if made != nil { Log.shell.error("shanjie_engine_new_packs failed, code \(packCode); built without the pack") }
+        }
+        guard let e = made else {
             Log.shell.error("shanjie_engine_new failed, code \(code)")
             return
         }
         let lm = e.loadLM(path: resources.appendingPathComponent("bigram.sjlm").path)
         if lm != 0 { Log.shell.error("shanjie_engine_load_lm failed, code \(lm)") }
+        // s7c2b section 2.3: after load_lm (which drops a small model). Missing or failed: the n-gram alone, no rerank.
+        if lm == 0 {
+            let tiny = e.loadTinyLM(path: resources.appendingPathComponent(Shell.tinyLMFile).path)
+            if tiny != 0 { Log.shell.error("shanjie_engine_load_tinylm failed, code \(tiny); no rerank") }
+            rerankAvailable = tiny == 0
+        }
+        // zhen-mixed section 3.2: the word list. A failure leaves the engine without it (the switch then has no effect) and greys the
+        // item; only the code is logged.
+        let english = e.loadEnglish(path: resources.appendingPathComponent(Shell.englishFile).path)
+        if english != 0 { Log.shell.error("shanjie_engine_load_english failed, code \(english)") }
+        englishAvailable = english == 0
         if case .failed(let c) = e.setDemote(demoteOn) {
             Log.shell.error("shanjie_engine_set_demote failed, code \(c)")
         }
         if case .failed(let c) = e.setPrediction(predictionOn) {
             Log.shell.error("shanjie_engine_set_prediction failed, code \(c)")
         }
+        // A rebuilt engine (layout, word pack) starts with the core's default, so this is sent every time (section 12.1).
+        if case .failed(let c) = e.setAbbreviation(abbreviationOn) {
+            Log.shell.error("shanjie_engine_set_abbreviation failed, code \(c)")
+        }
+        // And the English window's switch, every time: a rebuilt engine (layout, word pack) starts with the core's default, off.
+        if case .failed(let c) = e.setEnglish(englishOn) {
+            Log.shell.error("shanjie_engine_set_english failed, code \(c)")
+        }
+        // And its display choice (zhen-inline section 2), every time for the same reason: the core's default is true.
+        if case .failed(let c) = e.setEnglishInline(englishInlineOn) {
+            Log.shell.error("shanjie_engine_set_english_inline failed, code \(c)")
+        }
+        // Same for the candidate window's orientation (candidate-vertical contract section 2.2).
+        if case .failed(let c) = e.setCandidateVertical(candidateVertical) {
+            Log.shell.error("shanjie_engine_set_candidate_vertical failed, code \(c)")
+        }
+        // A rebuilt engine starts with the core's default (off since S7c-2c), and load_tinylm leaves the switch alone: the shell's
+        // own value is sent every time, so the core's default never decides.
+        rerankSent.append(rerankOn)
+        if case .failed(let c) = e.setRerank(rerankOn) {
+            Log.shell.error("shanjie_engine_set_rerank failed, code \(c)")
+        }
+        // Rerank strength (section 3, P4-13): after load_tinylm and before `engine = e`, the stored level, every build (the core
+        // starts at standard); then what the loaded model offers, for the settings window.
+        rerankLevelSent.append(rerankLevel.code)
+        if case .failed(let c) = e.setRerankLevel(rerankLevel.code) {
+            Log.shell.error("shanjie_engine_set_rerank_level failed, code \(c)")
+        }
+        rerankLevels = e.rerankLevels()
         if case .failed(let c) = e.setProfile(profile) {
             Log.shell.error("shanjie_engine_set_profile failed, code \(c)")
         }
@@ -257,12 +896,18 @@ public final class Shell {
     /// layout, reload the LM and the current profile.
     func switchMode(to newMode: InputMode) {
         guard newMode != mode else { return }
+        commitThenRebuild { mode = newMode }
+        Log.shell.debug("input mode switched")
+    }
+
+    /// What a setting that lives in the engine's construction (layout, word pack) does: commit the
+    /// composition to its owner (or drop an orphan), apply the change, build a new engine.
+    private func commitThenRebuild(_ apply: () -> Void) {
         if composing {
             if let o = owner { o.finish(mode: 0) } else { discardOrphan() }
         }
-        mode = newMode
+        apply()
         build()
-        Log.shell.debug("input mode switched")
     }
 
     func setProfile(_ p: UInt32) -> CoreResult? {
@@ -270,16 +915,32 @@ public final class Shell {
         return engine?.setProfile(p)
     }
 
-    func showCandidates(_ list: [String], selected: Int, columns: Int, first: Int, total: Int, lineRect: NSRect?,
+    func showCandidates(_ list: [String], selected: Int, columns: Int, first: Int, total: Int, vertical: Int, lineRect: NSRect?,
                         appearance: NSAppearance?) {
         // Only an exact punctuation mark has a name: a word candidate is never a key of the table.
         let notes = list.map { names[$0] }
-        panel.show(list, notes: notes, selected: selected, columns: columns, first: first, total: total,
-                   lineRect: lineRect, appearance: appearance)
+        shownVertical = vertical
+        hintShown = false
+        panel.show(list, notes: notes, selected: selected, columns: columns, first: first, total: total, vertical: vertical,
+                   lineRect: lineRect, appearance: appearance, glassTint: glassTint)
+    }
+
+    /// The hint shown while an English run is open (zhen-inline section 1.3f).
+    static let englishRunHint = "空白：英文斷開"
+
+    /// The hint in the candidate window's place, in the prediction row's orientation. It is not a candidate list, so Page Up /
+    /// Down see no vertical window (`verticalOpen` is false for the prediction row).
+    func showHint(lineRect: NSRect?, appearance: NSAppearance?) {
+        shownVertical = candidateVertical ? VerticalLayout.predictions : 0
+        hintShown = true
+        panel.showHint(Self.englishRunHint, vertical: shownVertical, lineRect: lineRect, appearance: appearance, glassTint: glassTint)
     }
 
     func hideCandidates() {
         lineCache = nil
+        hintAnchor = nil
+        hintShown = false
+        shownVertical = 0
         panel.hide()
     }
 
@@ -318,7 +979,12 @@ public final class Session {
     public func handle(_ event: NSEvent?) -> Bool {
         guard shell.engine != nil else { return false }
         guard event == nil || event?.type == .keyDown else { return false }
-        if claim() { applyProfile() }
+        if claim() { applyProfile(bundle: client.bundleIdentifier) }
+        // candidate-vertical contract section 2.2: Page Up / Down reach the core only while the vertical window is on screen
+        // and no modifier (Shift, Control, Option, Command, Caps Lock) is held; otherwise they are keys outside the tables.
+        if let event, shell.verticalOpen, KeyMap.modifiers(event.modifierFlags) == 0, let kind = KeyMap.pageKeys[event.keyCode] {
+            return send(ShanjieKey(kind: kind, ch: 0, modifiers: 0))
+        }
         guard let event,
               let key = KeyMap.translate(keyCode: event.keyCode, flags: event.modifierFlags)
         else {
@@ -332,7 +998,7 @@ public final class Session {
     /// Section 5 order: ownership first, then the profile for this client's app.
     public func activate() {
         claim()
-        applyProfile()
+        applyProfile(bundle: client.bundleIdentifier)
     }
 
     /// Only the owner acts; a late call from any other controller does nothing at all.
@@ -352,14 +1018,18 @@ public final class Session {
     /// A mouse click on a candidate (s3b2 section 8.3): `i` is its position in the output the panel
     /// shows. The core picks it through the same path as Enter and checks the range (code 2 leaves
     /// everything as it was); the learning gate is sampled first, as for a key.
-    public func candidateSelected(at i: Int) {
-        guard shell.owner === self, let engine = shell.engine else { return }
+    /// Returns whether a pick was sent to the core (false: not the owner, or the hint is what the panel shows).
+    @discardableResult
+    public func candidateSelected(at i: Int) -> Bool {
+        // The hint is on the panel, not a list: a click on it picks nothing and never reaches the core.
+        guard shell.owner === self, let engine = shell.engine, !shell.hintShown else { return false }
         applyLearningGate(engine)
         switch engine.pick(UInt32(truncatingIfNeeded: i)) {
         case .ok(let o): apply(o)
         case .failed(2): Log.shell.error("core call failed, code 2")
         case .failed(let c): _ = fail(c)
         }
+        return true
     }
 
     /// The input method menu (section 13.2).
@@ -400,10 +1070,109 @@ public final class Session {
         }
     }
 
-    /// The profile for this client's app, from its bundle ID (looked up, never kept).
-    private func applyProfile() {
-        let chat = client.bundleIdentifier.map { Shell.chatApps.contains($0) } ?? false
-        switch shell.setProfile(chat ? Shell.chat : Shell.formal) {
+    /// The menu's 中英混打 switch: the snapshot is shown, if this session owns the composition.
+    func applyEnglish(_ on: Bool) {
+        switch shell.setEnglish(on) {
+        case .ok(let o)? where shell.owner === self: apply(o)
+        case .failed(let c)?: _ = fail(c)
+        default: break
+        }
+    }
+
+    /// The settings window's 英文的顯示 choice: the snapshot is shown, if this session owns the composition (letters turn into
+    /// Zhuyin or back on screen).
+    func applyEnglishInline(_ on: Bool) {
+        switch shell.setEnglishInline(on) {
+        case .ok(let o)? where shell.owner === self: apply(o)
+        case .failed(let c)?: _ = fail(c)
+        default: break
+        }
+    }
+
+    /// The menu's abbreviation switch: the snapshot is shown, if this session owns the composition.
+    func applyAbbreviation(_ on: Bool) {
+        switch shell.setAbbreviation(on) {
+        case .ok(let o)? where shell.owner === self: apply(o)
+        case .failed(let c)?: _ = fail(c)
+        default: break
+        }
+    }
+
+    /// The orientation setting: the snapshot is shown, if this session owns the composition, but only when its `vertical` value
+    /// differs from what the panel shows, i.e. a prediction row that turns (candidate-vertical contract section 2.4). An open
+    /// candidate window keeps its orientation and nothing is on screen otherwise, so those outputs are not applied again: a
+    /// horizontal composition sees no client or panel call at all. The row case is reachable only through the API and the
+    /// tests: the setting is only in the settings window, where a click is inferred (not measured) to commit the composition
+    /// and hide the panel first.
+    func applyCandidateVertical(_ on: Bool) {
+        switch shell.setCandidateVertical(on) {
+        case .ok(let o)? where shell.owner === self && o.vertical != shell.shownVertical: apply(o)
+        case .failed(let c)?: _ = fail(c)
+        default: break
+        }
+    }
+
+    /// The menu's 語意校正 switch: the snapshot is shown, if this session owns the composition.
+    func applyRerank(_ on: Bool) {
+        switch shell.setRerank(on) {
+        case .ok(let o)? where shell.owner === self: apply(o)
+        case .failed(let c)?: _ = fail(c)
+        default: break
+        }
+    }
+
+    /// The settings window's 強度: the snapshot is shown, if this session owns the composition.
+    func applyRerankLevel(_ level: RerankLevel) {
+        switch shell.setRerankLevel(level) {
+        case .ok(let o)? where shell.owner === self: apply(o)
+        case .failed(let c)?: _ = fail(c)
+        default: break
+        }
+    }
+
+    /// Section 2.1: a finished job, for the engine it was taken from (the shell checked that it is current). 0 shows the
+    /// snapshot like any output; 5 changes nothing; anything else (4: the engine has reset itself) is handled like a failed key.
+    func applyRerankJob(_ job: RerankJob, on engine: CoreEngine) {
+        switch shell.rerankApply(job, engine) {
+        case .ok(let o): apply(o)
+        case .failed(let c) where c == SHANJIE_NO_CHANGE: break
+        case .failed(let c): _ = fail(c)
+        }
+    }
+
+    /// Section 2.1: the job the output just applied left, if any, goes to the shell's runner. A non-zero take is handled like
+    /// apply's 4 (F5): composition and panel cleared, only the code logged.
+    private func takeRerank() {
+        guard let engine = shell.engine else { return }
+        let (job, code) = shell.rerankTake(engine, shell.rerankFree)
+        if code != 0 {
+            _ = fail(code)
+        } else if let job {
+            shell.enqueueRerank(job, session: self, engine: engine)
+        }
+    }
+
+    /// The menu's 這個 App 用聊天設定 (profile-choice section 2.3): the opposite of this client's profile is stored for its
+    /// app, then it is re-applied in `activate()`'s order: `claim()` first sends another session's composition back to its
+    /// own client, so `applyProfile` recomputes only this session's (security review P2-1). The bundle ID is read once (a
+    /// synchronous IPC) and passed on. Nothing to store without a bundle ID, and the item is greyed outside `auto`.
+    func toggleAppChat() {
+        guard let bundle = client.bundleIdentifier, !bundle.isEmpty, shell.profileMode == .auto else { return }
+        shell.setAppProfile(bundle, profile(for: bundle) == Shell.chat ? Shell.formal : Shell.chat)
+        claim()
+        applyProfile(bundle: bundle)
+        shell.changed()
+    }
+
+    /// The profile `bundle` (this client's, read by the caller) gets now (profile-choice section 2.2).
+    func profile(for bundle: String?) -> UInt32 {
+        Shell.profile(bundle: bundle, mode: shell.profileMode, overrides: shell.appProfiles)
+    }
+
+    /// The profile for this client's app, `bundle` being its bundle ID as the caller read it. No owner check: callers claim
+    /// first (`activate`, `handle`, `toggleAppChat`) or are the owner (`Shell.reapplyProfileToOwner`).
+    fileprivate func applyProfile(bundle: String?) {
+        switch shell.setProfile(profile(for: bundle)) {
         case .ok(let o)?: apply(o)
         case .failed(let c)?: _ = fail(c)
         case nil: break
@@ -443,34 +1212,62 @@ public final class Session {
         }
     }
 
-    /// Section 7: commit first, then the preedit (single underline, caret at cursor_utf16), then
-    /// the candidates.
+    /// Section 7: commit first, then the preedit (single underline with a thick one over the open English run, caret at
+    /// cursor_utf16), then the candidates.
     private func apply(_ o: CoreOutput) {
         if !o.commit.isEmpty {
             client.insertText(o.commit, replacementRange: NSRange(location: NSNotFound, length: 0))
         }
         if !o.preedit.isEmpty {
-            let marked = NSAttributedString(
-                string: o.preedit, attributes: [.underlineStyle: NSUnderlineStyle.single.rawValue])
-            client.setMarkedText(marked, selectionRange: NSRange(location: o.cursorUTF16, length: 0))
+            client.setMarkedText(Self.marked(o), selectionRange: NSRange(location: o.cursorUTF16, length: 0))
         } else if shell.composing {
             clearMarkedText()
         }
         shell.composing = !o.preedit.isEmpty
-        if o.candidates.isEmpty {
+        // Zhen-inline section 1.3f: an open English run has no candidates, so the hint takes the window's place.
+        let hint = o.candidates.isEmpty && o.englishRunLength > 0
+        if o.candidates.isEmpty && !hint {
             shell.hideCandidates()
         } else {
             let cursor = Int(o.cursorUTF16)
-            let rect: NSRect?
-            if let c = shell.lineCache, c.preedit == o.preedit, c.cursor == cursor {
-                rect = c.rect
+            if hint {
+                // Anchored at the run's start, asked once per run (the cursor moves a letter per key; the start does not).
+                let start = o.englishRunStart
+                let rect: NSRect?
+                if let a = shell.hintAnchor, a.start == start {
+                    rect = a.rect
+                } else {
+                    rect = client.lineRect(cursor: start)
+                    shell.hintAnchor = (start, rect)
+                }
+                shell.showHint(lineRect: rect, appearance: client.appearance)
             } else {
-                rect = client.lineRect(cursor: cursor)
-                shell.lineCache = (o.preedit, cursor, rect)
+                shell.hintAnchor = nil
+                let rect: NSRect?
+                if let c = shell.lineCache, c.preedit == o.preedit, c.cursor == cursor {
+                    rect = c.rect
+                } else {
+                    rect = client.lineRect(cursor: cursor)
+                    shell.lineCache = (o.preedit, cursor, rect)
+                }
+                shell.showCandidates(o.candidates, selected: o.selected, columns: o.columns, first: o.first, total: o.total,
+                                     vertical: o.vertical, lineRect: rect, appearance: client.appearance)
             }
-            shell.showCandidates(o.candidates, selected: o.selected, columns: o.columns, first: o.first, total: o.total,
-                                 lineRect: rect, appearance: client.appearance)
         }
+        takeRerank()
+    }
+
+    /// Section 7 and zhen-inline section 1.3f: the preedit with a single underline, and a thick one over the open English run
+    /// (clamped to the text, so a wrong range from the core can never throw).
+    static func marked(_ o: CoreOutput) -> NSAttributedString {
+        let text = NSMutableAttributedString(
+            string: o.preedit, attributes: [.underlineStyle: NSUnderlineStyle.single.rawValue])
+        let run = NSRange(location: o.englishRunStart, length: o.englishRunLength)
+        let range = NSIntersectionRange(run, NSRange(location: 0, length: text.length))
+        if range.length > 0 {
+            text.addAttribute(.underlineStyle, value: NSUnderlineStyle.thick.rawValue, range: range)
+        }
+        return text
     }
 
     /// Section 7, non-zero return code: the core discards its composition too (reset mode 1; it

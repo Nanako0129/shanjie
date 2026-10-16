@@ -18,6 +18,9 @@ ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 sys.path.insert(0, os.path.join(ROOT, "reference", "proto"))
 import ime  # noqa: E402
 
+if __name__ == "__main__":   # run as a script, holdout_guard's `import build_counts` must see this module (convert() reads load_conv()'s globals), not a second copy
+    sys.modules["build_counts"] = sys.modules["__main__"]
+
 SRC = os.path.expanduser("~/.cache/shanjie/sources")
 OUT = os.environ.get("S2_WORK") or os.path.expanduser("~/.cache/shanjie/work/s2")   # S2_WORK：寫到別處（S2n 重建時不蓋掉舊的計數）
 DUMP = os.path.join(SRC, "zhwiki-20261001-pages-articles.xml.bz2")
@@ -188,10 +191,34 @@ SENT = re.compile(r"[^。！？；\n]+")
 HAN = re.compile(r"[一-鿿]+")
 
 
-def articles(limit):
+def fold(text):
+    """MERGE (臺/台、佔/占...) applied to every character: the holdout guard compares on this fold, as the model counts variants as one word."""
+    return "".join(MERGE.get(c, c) for c in text)
+
+
+def text_runs(line, conv):
+    """One plain-text line's Han runs (build_counts_text.main's loop, before its length filter). conv = load_conv()'s tuple."""
+    return HAN.findall(convert(line, *conv))
+
+
+def article_runs(raw, conv, mw=None, mwconv=None):
+    """One wiki article's Han runs, in count_batch's order: entity unescape, [mw conversion], TEMPLATE x3, MARKUP, SENT, convert, HAN.
+    The one copy of this pipeline: count_batch, build_counts_text, holdout_guard and s7a prep.py all call it (docs/contracts/holdout-refresh.md section 8)."""
+    t = raw.replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&").replace("&quot;", '"')
+    if mw:   # S2w：整篇先交給 MediaWiki 的 zh-tw 轉換（站上轉換表、NoteTA 群組、條目規則），之後的句子不再呼叫 convert()
+        t = mwconv.convert(t, mw)
+    for _ in range(3):
+        t = TEMPLATE.sub("", t)
+    for pat, rep in MARKUP:
+        t = pat.sub(rep, t)
+    for s in SENT.findall(t):
+        yield from HAN.findall(s if mw else convert(s, *conv))
+
+
+def articles(limit, dump=None):
     text_re = re.compile(r"<text[^>]*>(.*?)</text>", re.S)
     buf, n = "", 0
-    with bz2.open(DUMP, "rt", encoding="utf-8") as f:
+    with bz2.open(dump or DUMP, "rt", encoding="utf-8") as f:
         for line in f:
             buf += line
             if "</page>" in line:
@@ -291,7 +318,24 @@ def expected_counts(lex, text, min_count=EXPECTED_MIN):
 _W = {}
 
 
-def _init(trigram=False, expected=False, mw=False):
+def guard_matcher(rows):
+    """--holdout-guard (docs/contracts/holdout-refresh.md section 8), called once in main() before any Pool exists: None when off, else the
+    Matcher over the held-out rows (`rows` = row files; empty = every .txt under eval/holdout/). Prints how many rows were loaded and skipped.
+    A bad rows file stops here (SystemExit, message = path, line, field count only), never inside a worker initializer."""
+    if rows is None:
+        return None
+    sys.path.insert(0, os.path.join(ROOT, "tools"))
+    import holdout_guard
+    try:
+        matcher, _, loaded, skipped = holdout_guard.build_matcher(list(rows), load_conv())
+    except (holdout_guard.GuardError, OSError) as e:
+        sys.exit(f"holdout-guard: {e}")
+    print(f"holdout-guard: {loaded} rows loaded, {skipped} skipped as shorter than {holdout_guard.MIN_LEN} characters", flush=True)
+    return matcher
+
+
+def _init(trigram=False, expected=False, mw=False, extra_lexicons=(), holdout_guard=None):
+    """holdout_guard: None, or the Matcher guard_matcher() built in main (already validated)."""
     _W["mw"] = None
     if mw:   # S2w：每個 worker 載一次 mwdata.json（契約 §3.2）
         sys.path.insert(0, os.path.join(ROOT, "experiments", "s2w"))
@@ -301,48 +345,83 @@ def _init(trigram=False, expected=False, mw=False):
     _W["trigram"] = trigram
     _W["expected"] = expected
     _W["lex"] = ime.Lexicon(os.path.join(ROOT, "data", "lexicon", "mcbpmf-data.txt"),
-                            overlay=os.path.join(ROOT, "data", "lexicon", "overlay-add.tsv"))
+                            overlay=[os.path.join(ROOT, "data", "lexicon", "overlay-add.tsv"), *extra_lexicons])   # --extra-lexicon：疊加層格式，接在 overlay-add.tsv 後面
+    _W["pack"] = set()
+    if extra_lexicons:
+        # model-v5 契約 §8（加法計數）：一般的詞與二元組照沒有詞包的詞庫算（lex0），詞包詞只「加上」自己的單詞與
+        # 含它的二元組（lex1）。直接用 lex1 會讓詞包裡的兩字片段（拉斯、萊恩）吃掉常用字對的計數，不開詞包時打不出來。
+        _W["lex0"] = ime.Lexicon(os.path.join(ROOT, "data", "lexicon", "mcbpmf-data.txt"),
+                                 overlay=[os.path.join(ROOT, "data", "lexicon", "overlay-add.tsv")])
+        _W["pack"] = set(_W["lex"].by_word) - set(_W["lex0"].by_word)
+        _W["pack_lens"] = sorted({len(w) for w in _W["pack"]})
     _W["conv"] = load_conv()
+    _W["guard"] = holdout_guard
+
+
+def run_expected(run):
+    """--expected 的一段連續漢字：沒有詞包時就是 expected_counts(lex, run)。有詞包時是加法計數（契約 §8）：
+    lex0（不含詞包）的全部單詞與二元組，加上 lex1（含詞包）裡詞包詞的單詞、以及一端是詞包詞的二元組。
+    lex0 切不開的段落整段不計（和沒有詞包時相同）；段落裡沒有詞包詞的字串時不必算 lex1。"""
+    pack = _W["pack"]
+    if not pack:
+        return expected_counts(_W["lex"], run)
+    r0 = expected_counts(_W["lex0"], run)
+    if r0 is None:
+        return None
+    n = len(run)
+    if not any(run[i:i + L] in pack for i in range(n) for L in _W["pack_lens"] if i + L <= n):
+        return r0
+    r1 = expected_counts(_W["lex"], run)
+    if r1 is None:
+        return r0
+    uni, bi = r0
+    for w, e in r1[0].items():
+        if w in pack:
+            uni[w] += e
+    for k, e in r1[1].items():
+        if k[0] in pack or k[1] in pack:
+            bi[k] += e
+    return uni, bi
 
 
 def count_batch(texts):
-    lex, (phrase, char, maxp) = _W["lex"], _W["conv"]
+    return _count(texts)[:4]
+
+
+def _count(texts):
+    lex = _W["lex"]
+    guard, skipped = _W.get("guard"), 0
     uni, bi, tri, sents = collections.Counter(), collections.Counter(), collections.Counter(), 0
     for raw in texts:
-        t = raw.replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&").replace("&quot;", '"')
-        if _W["mw"]:   # S2w：整篇先交給 MediaWiki 的 zh-tw 轉換（站上轉換表、NoteTA 群組、條目規則），之後的句子不再呼叫 convert()
-            t = _W["mwconv"].convert(t, _W["mw"])
-        for _ in range(3):
-            t = TEMPLATE.sub("", t)
-        for pat, rep in MARKUP:
-            t = pat.sub(rep, t)
-        for s in SENT.findall(t):
-            for run in HAN.findall(s if _W["mw"] else convert(s, phrase, char, maxp)):
-                if len(run) < 2:
-                    continue
-                if _W["expected"]:
-                    r = expected_counts(lex, run)
-                    if r is None:
-                        continue
-                    sents += 1
-                    for w, e in r[0].items():
-                        uni[w] += e
-                    for k, e in r[1].items():
-                        bi[k] += e
-                    continue
-                ws = segment(lex, run)
-                if not ws:
+        for run in article_runs(raw, _W["conv"], _W["mw"], _W.get("mwconv")):
+            if len(run) < 2:
+                continue
+            if guard is not None and guard.any(fold(run)):
+                skipped += 1
+                continue
+            if _W["expected"]:
+                r = run_expected(run)
+                if r is None:
                     continue
                 sents += 1
-                prev = "<s>"
-                for w in ws:
-                    uni[w] += 1; bi[(prev, w)] += 1; prev = w
-                bi[(prev, "</s>")] += 1
-                if _W.get("trigram"):
-                    seq = ["<s>", "<s>"] + ws + ["</s>"]
-                    for i in range(2, len(seq)):
-                        tri[(seq[i - 2], seq[i - 1], seq[i])] += 1
-    return uni, bi, tri, sents
+                for w, e in r[0].items():
+                    uni[w] += e
+                for k, e in r[1].items():
+                    bi[k] += e
+                continue
+            ws = segment(lex, run)
+            if not ws:
+                continue
+            sents += 1
+            prev = "<s>"
+            for w in ws:
+                uni[w] += 1; bi[(prev, w)] += 1; prev = w
+            bi[(prev, "</s>")] += 1
+            if _W.get("trigram"):
+                seq = ["<s>", "<s>"] + ws + ["</s>"]
+                for i in range(2, len(seq)):
+                    tri[(seq[i - 2], seq[i - 1], seq[i])] += 1
+    return uni, bi, tri, sents, skipped
 
 
 def batches(it, size=200):
@@ -363,15 +442,21 @@ def main():
     ap.add_argument("--trigram", action="store_true", help="也算 trigram（記憶體用量大，請搭配較少的篇數）")
     ap.add_argument("--expected", action="store_true", help="詞圖上的期望次數（S2n 契約 §6.2），取代最高分切分；不算 trigram")
     ap.add_argument("--mw", action="store_true", help="S2w：用 MediaWiki 的 zh-tw 轉換（zhconv-rs ＋ $S2_WORK/mwdata.json），取代 convert()")
+    ap.add_argument("--extra-lexicon", action="append", default=[], metavar="FILE", help="model-v5：疊加層格式（讀音\\t詞\\t分數\\t來源）的檔加進斷詞詞庫，可給多次")
+    ap.add_argument("--holdout-guard", nargs="*", default=None, metavar="ROWS", help="預設關。命中保留集句子的漢字段不計數（契約 holdout-refresh §8）；不給檔＝eval/holdout/ 底下全部 .txt")
     a = ap.parse_args()
     if a.expected and a.trigram:
         ap.error("--expected 不算 trigram")
+    if a.extra_lexicon and not a.expected:
+        ap.error("--extra-lexicon 只用在 --expected（加法計數，model-v5 契約 §8）")
+    guard = guard_matcher(a.holdout_guard)
+    load_conv()   # in the parent first: a missing or wrong OpenCC file stops here, not in every Pool worker's initializer (which respawns forever)
     os.makedirs(OUT, exist_ok=True)
     uni, bi, tri = collections.Counter(), collections.Counter(), collections.Counter()
-    sents = arts = 0
-    with mp.Pool(a.procs, initializer=_init, initargs=(a.trigram, a.expected, a.mw)) as pool:
-        for u, b, t, s_ in pool.imap_unordered(count_batch, batches(articles(a.articles))):
-            uni.update(u); bi.update(b); tri.update(t); sents += s_; arts += 200
+    sents = arts = skipped = 0
+    with mp.Pool(a.procs, initializer=_init, initargs=(a.trigram, a.expected, a.mw, tuple(dict.fromkeys(os.path.abspath(f) for f in a.extra_lexicon)), guard)) as pool:
+        for u, b, t, s_, k_ in pool.imap_unordered(_count, batches(articles(a.articles))):
+            uni.update(u); bi.update(b); tri.update(t); sents += s_; skipped += k_; arts += 200
             if arts % 10000 == 0:
                 print(f"~{arts} articles, {sents} runs, {len(uni)} words, {len(bi)} bigrams", flush=True)
     arts = min(arts, a.articles)
@@ -380,6 +465,8 @@ def main():
         out["tri"] = tri
     pickle.dump(out, open(os.path.join(OUT, f"counts-{arts}{'-tri' if a.trigram else ''}.pkl"), "wb"))
     print(f"done: {arts} articles, {sents} runs, {sum(uni.values())} tokens, {len(uni)} types, {len(bi)} bigram types")
+    if a.holdout_guard is not None:
+        print(f"holdout-guard: skipped {skipped} runs")
 
 
 if __name__ == "__main__":
