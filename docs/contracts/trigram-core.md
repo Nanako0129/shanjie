@@ -46,7 +46,7 @@
   - **每個設定各自的打分設定**：把解碼與重算總分時只傳 λ 的地方換成由 `Profile` 導出的設定（λ、KN 開關、trigram 開關）。書面：KN 關、trigram 開（有表時）；聊天：照舊（KN 照側檔、trigram 關，有表也不用）。
   - **引擎的詞段交界**（`refresh_lm` 把組字區切成一段一段解；Python 參考實作只有整句，這幾條是本契約定的）：
     - (a) 每段第一個詞的歷史 (u, v)：左邊是固定的字（非標點）→ (未知, 那個字)；左邊是標點或英文段 → (`<s>`, `<s>`)，和計數時一段漢字從句首開始相同；沒有固定的字、從輸入框前文開始 → (未知, `history(前文)`)；`history` 給的是 `<s>` 時是 (`<s>`, `<s>`)，和 `harness.py` 的 `start_state` 相同。u 未知時第一個詞只用 bigram。
-    - (b) 收尾項（修訂五改了單詞段落的情形，見第 A2 片）：`Eos` 用 trigram（(倒數第二詞, 最後一詞) → `</s>`，和 `harness.py` 的 `eos` 相同）；`End::Next`（右邊是固定的字）也用 trigram（(倒數第二詞, 最後一詞) → 那個字）。段內只有一個詞時，收尾項的 u 是起始狀態的 v（`harness.py` 的 `hist`）。
+    - (b) 收尾項（修訂五改了單詞段落的情形，見第 A2 片）：`Eos` 用 trigram（(倒數第二詞, 最後一詞) → `</s>`，和 `harness.py` 的 `eos` 相同）；`End::Next`（右邊是固定的字）也用 trigram（(倒數第二詞, 最後一詞) → 那個字）。段內只有一個詞時，收尾項的 u 是起始狀態的 v（`harness.py` 的 `hist`）；起始的 u 未知時改由第 A2 片 (b′) 規定（u 也是未知，用 bigram）。
     - (c) `Engine::total_score` 照 (a)、(b) 逐詞算（帶兩個歷史詞），s3a 的「`total_score` 等於解碼第一名的分數」在書面有表時照舊成立；`docs/contracts/s3a.md` 記載。
     - (d) 預測列（V3）與它的重算完全不變：兩種設定都照 v0.4.6（KN 照側檔、不用 trigram）。契約與 `docs/contracts/s3a.md` 寫明。
   - **學習加分的詞條**（比照 model-v6 §2.8 規則 1）：詞條被學習加分（`boosted > lp`）時，這個詞項**不經過 trigram**，用沒有表時的 P2（加分後的 `pb`；書面本來就關 KN）。理由：trigram 開著時加分只透過 `back3·P2` 進分數，會被 back3 縮小，和 KN 吃掉加分是同一類問題。沒被加分的詞條照常用 trigram。`total_score` 套同一個例外。Python 參考實作沒有學習，不受影響。
