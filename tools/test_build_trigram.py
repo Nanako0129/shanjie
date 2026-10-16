@@ -21,6 +21,7 @@ for sub in ("tools", "reference/proto"):
 import build_trigram  # noqa: E402
 import gen_kn_tiny  # noqa: E402
 import gen_tri_tiny  # noqa: E402
+import ime  # noqa: E402
 import lm as L  # noqa: E402
 import trigram  # noqa: E402
 
@@ -122,6 +123,74 @@ class Scoring(unittest.TestCase):
     def test_start_state(self):
         self.assertEqual(trigram.start_state("<s>"), ("<s>", "<s>"))
         self.assertEqual(trigram.start_state("他"), (None, "他"))
+
+
+class FloorAndClosing(unittest.TestCase):
+    """Slice A2 (docs/contracts/trigram-core.md): the floor of P3, and the closing term of a one-word sentence that starts from a left context."""
+
+    @classmethod
+    def setUpClass(cls):
+        model = open(os.path.join(gen_tri_tiny.KN_TINY, "bigram.sjlm"), "rb").read()
+        cls._tmp = tempfile.TemporaryDirectory()
+        tmp = cls._tmp.name
+        for name, b in (("bigram.sjlm", model), ("classes.sjc", open(os.path.join(gen_tri_tiny.KN_TINY, "classes.sjc"), "rb").read()),
+                        ("lexicon.txt", open(os.path.join(gen_tri_tiny.OUT, "lexicon.txt"), "rb").read()),
+                        # (<s>, <s>) keeps 他 6 of 6: back3 = 1 - 5.25 / 6 = 0.125, far below the floor for every other word
+                        ("floor.sjt3", build_trigram.from_counts({("<s>", "<s>", "他"): 6}, {("<s>", "<s>"): 6}, model))):
+            open(os.path.join(tmp, name), "wb").write(b)
+        sha = hashlib.sha256(model).digest()
+        cls.lm = L.BigramLM(os.path.join(tmp, "bigram.sjlm"))
+        cls.floor_lm = trigram.TriLM(cls.lm, trigram.TriTable.from_path(os.path.join(tmp, "floor.sjt3"), sha))
+        cls.tri_lm = trigram.TriLM(cls.lm, trigram.TriTable.from_path(os.path.join(gen_tri_tiny.OUT, "trigram.sjt3"), sha))
+        cls.lex = L.cap_overlay(ime.Lexicon(os.path.join(tmp, "lexicon.txt")), set(), cls.lm, demote_path=None)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._tmp.cleanup()
+
+    def test_floor_value(self):
+        self.assertEqual(trigram.TRI_FLOOR, 0.5)
+
+    def test_floor_active_inactive_and_context_not_stored(self):
+        lm, tri, pb = self.lm, self.floor_lm, 10 ** -3.0
+        # active: the context is stored and keeps only 他, so 占 would get 0.125 * P2; the floor lifts it to 0.5 * P2
+        p2 = lm.prob("<s>", "占", pb)
+        self.assertLess(0.125 * p2, 0.5 * p2)
+        self.assertEqual(tri.prob("<s>", "<s>", "占", pb), 0.5 * p2)
+        # inactive: the kept word is (6 - 0.75) / 6 + 0.125 * P2, above the floor, unchanged
+        p2 = lm.prob("<s>", "他", pb)
+        self.assertEqual(tri.prob("<s>", "<s>", "他", pb), (6 - 0.75) / 6 + (1.0 - (6 - 0.75) / 6) * p2)
+        # the context is not stored (or u is unknown): P2, no floor
+        self.assertEqual(tri.prob("占", "<s>", "占", pb), lm.prob("<s>", "占", pb))
+        self.assertEqual(tri.prob(None, "<s>", "占", pb), lm.prob("<s>", "占", pb))
+        # the closing term goes through the same function
+        self.assertEqual(tri.eos(0.7, "<s>", "<s>"), 0.7 * math.log10(0.5 * lm.prob("<s>", "</s>", lm.p_eos)))
+
+    def lp(self, syls, word):
+        return dict(self.lex.by_reading[tuple(syls)])[word]
+
+    def test_one_word_sentence_from_a_left_context_closes_with_the_bigram(self):
+        t, lam = self.tri_lm, L.PROFILES["formal"]
+        best = trigram.decode3(self.lex, ["ㄑㄧˇ", "ㄔㄨㄤˊ"], t, "formal", start="他")
+        sc, ws = best[0]
+        self.assertEqual(ws, ("起床",))
+        lp = self.lp(["ㄑㄧˇ", "ㄔㄨㄤˊ"], "起床")
+        want = t.word(lam, None, "他", "起床", lp) + t.eos(lam, None, "起床")
+        self.assertEqual(sc, want)
+        # premise: the table has (他, 起床) -> </s>, so the old closing term was a different number
+        self.assertNotEqual(t.eos(lam, "他", "起床"), t.eos(lam, None, "起床"))
+        # from the sentence start (<s>, <s>) the one-word sentence is unchanged: the table's closing term
+        sc, ws = trigram.decode3(self.lex, ["ㄑㄧˇ", "ㄔㄨㄤˊ"], t, "formal", start="<s>")[0]
+        self.assertEqual(sc, t.word(lam, "<s>", "<s>", "起床", lp) + t.eos(lam, "<s>", "起床"))
+
+    def test_two_word_sentence_from_a_left_context_keeps_the_table_closing_term(self):
+        t, lam = self.tri_lm, L.PROFILES["formal"]
+        sc, ws = trigram.decode3(self.lex, ["ㄊㄚ", "ㄑㄧˇ", "ㄔㄨㄤˊ"], t, "formal", start="他")[0]
+        self.assertEqual(ws, ("他", "起床"))
+        lp_ta, lp_qc = self.lp(["ㄊㄚ"], "他"), self.lp(["ㄑㄧˇ", "ㄔㄨㄤˊ"], "起床")
+        want = t.word(lam, None, "他", "他", lp_ta) + t.word(lam, "他", "他", "起床", lp_qc) + t.eos(lam, "他", "起床")
+        self.assertEqual(sc, want)
+        self.assertNotEqual(t.eos(lam, "他", "起床"), t.eos(lam, None, "起床"))
 
 
 class Table(unittest.TestCase):

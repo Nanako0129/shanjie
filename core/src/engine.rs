@@ -1542,6 +1542,8 @@ impl Engine {
     /// open English run (`run_cut`) cuts the composition at the cursor the way `refresh_lm` decodes it: the part on the left closes with `eos`
     /// and the part on the right restarts from (`<s>`, `<s>`), like after punctuation. Only the trigram level does this; without it the run is
     /// not a boundary here (the bigram total has never cut there). `total_score` then equals the top decode score of a single stretch.
+    /// Slice A2 (b'): a stretch that starts from an unknown u (after a fixed word, or from the left context) and holds exactly one word closes
+    /// with the bigram: its `eos`, or the transition into the next fixed word, takes u as unknown (`close_u`), as `decode_segment_learned` does.
     pub fn total_score(&self) -> Option<f64> {
         let st = self.lm.as_ref()?;
         let cfg = st.lm.scoring(self.profile);
@@ -1556,19 +1558,25 @@ impl Engine {
         let mut total = 0.0;
         let (mut any, mut open) = (false, false);
         let mut at = 0;
+        // (b') whether the stretch started from an unknown u, and how many decoded words it holds so far; a one-word stretch of that kind closes
+        // with u unknown.
+        let (mut unknown, mut count) = (before.is_none(), 0usize);
+        fn close_u<'a>(before: Option<&'a str>, unknown: bool, count: usize) -> Option<&'a str> {
+            if unknown && count == 1 { None } else { before }
+        }
         for (w, lp, is_punct, delta) in &self.path {
             if cut == Some(at) {
                 if open {
-                    total += st.lm.eos3_in(&mut memo, cfg, before, prev);
+                    total += st.lm.eos3_in(&mut memo, cfg, close_u(before, unknown, count), prev);
                 }
-                (before, prev, open) = (Some("<s>"), "<s>", false);
+                (before, prev, open, unknown, count) = (Some("<s>"), "<s>", false, false, 0);
             }
             if *is_punct {
                 at += 1;
                 if open {
-                    total += st.lm.eos3_in(&mut memo, cfg, before, prev);
+                    total += st.lm.eos3_in(&mut memo, cfg, close_u(before, unknown, count), prev);
                 }
-                (before, prev, open) = (Some("<s>"), "<s>", false);
+                (before, prev, open, unknown, count) = (Some("<s>"), "<s>", false, false, 0);
                 continue;
             }
             let n = w.chars().count();
@@ -1576,13 +1584,17 @@ impl Engine {
             // `boosted`) was scored by the decoder without the Kneser-Ney substitution; score it the same way here.
             let learned = self.syls.get(at..at + n).and_then(|s| st.capped.best_lp(s, w)).is_some_and(|best| *lp > best);
             // A learned word is scored by P2 alone (no Kneser-Ney substitution, no table), as in the decoder.
-            total += if learned { st.lm.word_learned(cfg.lam, prev, w, *lp) } else { st.lm.word3_in(&mut memo, cfg, before, prev, w, *lp) } - delta;
+            // A fixed word is the right neighbour that closes the stretch before it (`End::Next`), so (b') applies to its term.
+            let fixed_here = self.fixed.iter().any(|f| f.start == at);
+            let u = if fixed_here { close_u(before, unknown, count) } else { before };
+            total += if learned { st.lm.word_learned(cfg.lam, prev, w, *lp) } else { st.lm.word3_in(&mut memo, cfg, u, prev, w, *lp) } - delta;
             // The stretch after a fixed word starts from (unknown, that word); inside a stretch the history is the last two words.
-            before = if self.fixed.iter().any(|f| f.start == at) { None } else { Some(prev) };
+            before = if fixed_here { None } else { Some(prev) };
+            (unknown, count) = if fixed_here { (true, 0) } else { (unknown, count + 1) };
             at += n;
             (prev, any, open) = (w, true, true);
         }
-        any.then(|| if open { total + st.lm.eos3_in(&mut memo, cfg, before, prev) } else { total })
+        any.then(|| if open { total + st.lm.eos3_in(&mut memo, cfg, close_u(before, unknown, count), prev) } else { total })
     }
 
     /// §6 reset: Commit returns the composition as shown, unfinished symbols included, like Enter (enter-pending

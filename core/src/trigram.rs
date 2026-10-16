@@ -13,6 +13,10 @@ const MAGIC: &[u8; 8] = b"SJT30001";
 const HEAD: usize = 60;
 /// The discount (the contract's constant): a table with any other D is refused, so the back-off sums stay exact.
 const D: f64 = 0.75;
+/// The floor (docs/contracts/trigram-core.md slice A2; docs/research-log.md "2026-10-16：trigram-core 第 C 片暫停，書面有表的退步與修法"):
+/// a stored context never gives a word less than this share of its P2, which caps the penalty for a word the context did not keep.
+/// reference/proto/trigram.py has the same value (`TRI_FLOOR`); it is not in the table file.
+const TRI_FLOOR: f64 = 0.5;
 
 pub(crate) struct Tri {
     v: u64,
@@ -140,7 +144,8 @@ impl Tri {
         None
     }
 
-    /// P3(w | u, v) given P2 = `p2` (trimodel.py `prob`): an entry adds `(c - D) / total`, and every word gets `back * P2`.
+    /// P3(w | u, v) given P2 = `p2` (trimodel.py `prob`): an entry adds `(c - D) / total`, and every word gets `back * P2`; the result
+    /// is never below `TRI_FLOOR * p2`.
     pub(crate) fn prob(&self, ctx: TriCtx, w: Option<u32>, p2: f64) -> f64 {
         let (lo, hi) = (self.off(ctx.idx) as usize, self.off(ctx.idx + 1) as usize);
         let found = w.and_then(|w| {
@@ -155,9 +160,10 @@ impl Tri {
             }
             None
         });
-        match found.filter(|&k| k != 0) {
+        let p3 = match found.filter(|&k| k != 0) {
             Some(k) => (k as f64 - self.d) / ctx.tot + ctx.back * p2,
             None => ctx.back * p2,
-        }
+        };
+        p3.max(TRI_FLOOR * p2)
     }
 }
