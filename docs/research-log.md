@@ -5882,9 +5882,9 @@ formal: alpha 0.7, tau 1, delta 2
 
 ## 2026-10-16：v0.4.6 的跨版本基準測試與保留集（classes-v5）
 
-- 範圍：v0.4.5 之後只合併了 classes-v5（PR #169，μ 0.8 → 0.2，merge commit `7c47266`）與兩個文件 PR；`git diff v0.4.5 7c47266 -- Cargo.toml Cargo.lock core cli data eval/variants.tsv macos scripts` 是詞類表的雜湊、`build-app.sh` 的釘選、App 自我檢查（`Selftest.swift`）換用的例句，其餘是測試（13 個檔）。
+- 範圍：v0.4.5 之後只合併了 classes-v5（PR #169，μ 0.8 → 0.2，merge commit `7c47266`）、文件 PR #167 與 lytune 歸因 PR #168（文件與 `experiments/` 的 `set_mu.py`）；`git diff v0.4.5 7c47266 -- Cargo.toml Cargo.lock core cli data eval/variants.tsv macos scripts` 共 13 個檔：詞類表的雜湊（`data/classes.sjc.sha256`）、`build-app.sh` 缺檔訊息裡的下載版本、App 自我檢查（`Selftest.swift`）換用的例句，其餘 10 個是測試。
 - 基準測試（`tools/bench.py run --suite v2 v0.4.5 7c47266 --as v0.4.6`，`VERSIONS2` 加 v0.4.6，旗標與 v0.4.5 相同；classes-v5 放進工具的模型快取並核對雜湊）：
-  - 顯著的只有 lytune：書面 3,979 → 4,044（改對 130／改壞 65，p 3.77e-6）、聊天 4,010 → 4,037（100／73，p 0.048），方向和 lytune 歸因的 μ 掃描相同。
+  - 顯著的只有 lytune：書面 3,979 → 4,044（改對 130／改壞 65，p 3.77e-6）、聊天 4,010 → 4,037（100／73，p 0.048），方向和 lytune 歸因的 μ 掃描相同。對 v0.4.3（4,055／4,021）：書面多 23 句、已全數補回；聊天仍少 18 句（v0.4.4 少的 45 句補回 27 句），歸因推論聊天的退步大多在重排階段。
   - 其他集合兩種設定都不顯著；擋發版的使用者端集合：錯字回報（套件的 80 列）聊天 24 → 28（5／1，p 0.22）、書面 28 → 26（3／5，p 0.73），discordtune 聊天 +1（50／49）、書面 +1（86／85）。
   - 速度（同場）：dev302 重播 p95 2.157 → 2.268 ms、最大 6.78 → 7.97 ms、載入 696 → 786 ms，RSS 293 MB 相同；語意校正重排 p50／p95 6.41／8.23 → 6.86／9.10 ms。v0.4.5 這一場的重排（6.41／8.23）比 10-15 那一場（8.08／12.16）快，兩場的機器負載不同（load avg 3.3→5.4 對 3.7→5.1）；同場比較才有意義。
 - 保留集（fresh verifier，v0.4.5 `4f0b052` 對 `7c47266`）：聊天 191 → 191（3／3，p 1）、書面 186 → 187（6／5，p 1），擋發版規則沒有觸發。
