@@ -5891,6 +5891,55 @@ formal: alpha 0.7, tau 1, delta 2
   - bench 的匯出沒有 `eval/holdout`，verifier 改用 `--rows <repo 的 eval/holdout/holdout.txt>`（227 列都是三欄、都有讀音，和 `--set holdout` 讀到的列與順序相同）；變體表用 `eval/bench/suite-v1/variants.tsv`（工具 `cli_env` 用的同一份，`50cb44bd…`）。
   - **多讀了一次保留集**：verifier 寫暫存指令稿時，session 暫存區裡有一個舊的同名稿（noclobber 擋下新檔），結果執行了舊稿，量了一次 v0.4.4 `3560fe5` 對 `4956257`（都是 classes-v4，v0.4.5 發版時量過的同一組），聊天 191／191、書面 186／186、+0／−0，和當時的紀錄相同。只輸出數字、沒有用來改任何東西；舊稿已刪。教訓：verifier 的暫存檔一律用 `mktemp` 產生的新路徑，不用固定檔名。
 
+## 2026-10-16：v0.4.6 發佈
+
+- 維護者選擇題「做完直接推」（bench、保留集沒有退步、notes PR 合併後推 tag）。PR #170 合併後推 `v0.4.6`（tag 指向 main `58da6d2`；和量基準測試與保留集的 `7c47266` 相比，`Cargo.toml Cargo.lock core cli data eval/variants.tsv macos scripts` 沒有差異），發佈流程 run 38841516338：gate、build、sign、publish 都成功（sign、publish 由維護者核准）。
+- 核對（下載 Release 附件）：zip 與安裝程式的 SHA-256 和 `.sha256` 相符；兩個 App 的 `codesign --verify --deep --strict` 通過、Team 2LJ882GPY8、`spctl` 判定 Notarized Developer ID、`stapler validate` 通過、版本 0.4.6；App 裡的模型 `bigram.sjlm` `fc2bddd1`、`classes.sjc` `9e36fa1b`（classes-v5）、`kn.sjkn` `cbefbced`、`tinylm.sjtl` `d07de71d`；Latest 是 v0.4.6；Homebrew cask `0.4.6`、sha256 `fba95f0b…` 和 zip 相同。解壓的副本驗完先 `lsregister -u` 再刪。
+- 發版後：Discord 發版公告（blobhaj，只標善解身分組，維護者選擇題同意）；網站的保留集數字與已發佈清單換成 v0.4.6，PR 合併後部署（維護者同意）。
+
+## 2026-10-16：保留集換新，三份新集抽出（契約 holdout-refresh §4 第 4–6 步）
+
+- 第 4 步（main，Windows 機器）：候選池（`df009107…`，7,460 列）用 `tools/holdout_guard.py report`（main `161053b`）對下列文字做包含比對：維基 dump 前 200,000 篇（命中 6,977 篇）、口語訓練檔（90 行）、`synth.txt`（566 行）、補次數檔（0）、S7f 清理後的討論頁語料 `986626ad…`（12,296 句）、`moedict.txt`（1）、`eval/dev/**` 等 15 個公開列檔（`user-typing.txt` 1、`s7e-function-words.txt` 1，其餘 0）、行政院 294 句（0）、舊保留集（0）。命中的池列 **508** 列；main 只拿到列號，比對完刪掉那台機器上的池副本。
+- 第 5 步（fresh mech-executor）：丟掉 508 列，剩 6,952 列；份量檢查過（新聞 3,940、口語 3,012 列，都超過需求 450 的 3 倍；套上每個單位的上限後新聞 1,834、口語 1,810）。PeoPo 只有 5 篇（三份合計最多 10 列）、vTaiwan 88 則，照 §2 的補足規則分別由新聞稿與討論頁補。單位上限按三份**合計**算（比「每份各算」嚴，契約沒寫明，取較嚴的讀法）。種子 20261015 抽出三份互斥的 shard，每份新聞 150（新聞稿 116–117、維基新聞 30、PeoPo 3–4）、口語 150（vTaiwan 29–30、提點子 50、討論頁 70–71）。
+- 讀音：步驟 3 時 `tools/readings.py` 產生，抽查 40 列錯 1 列（2.5%，門檻 5%）；另抽的 40 列錯 2 列（5.0%）。
+- 第 6 步（另一個 fresh agent，只回數字）：三份各自用 CLI `--rows` 解碼都跑完、n = 300；`--check-readings` 讀音與詞庫第一名不同的列數 43、29、26（只報）；和開發集 1,094 列的句子零重疊、900 列內零重複；比對自檢 900／900 命中。
+- 條款頁快照（步驟 3 抓取時記錄，2026-10-15 UTC；照 S7f 的寫法：網址、取得時間、內容 SHA-256 前 12 碼）：
+
+| 頁 | 網址 | 取得時間（UTC） | SHA-256 前 12 碼 | HTTP |
+|---|---|---|---|---|
+| data-gov-tw-license | https://data.gov.tw/license | 2026-10-15 05:49 | `4b3fb69e0957` | 200 |
+| data-gov-tw-dataset-163760-moda | https://data.gov.tw/dataset/163760 | 2026-10-15 05:49 | `114e219ad14b` | 200 |
+| data-gov-tw-dataset-11060-fda | https://data.gov.tw/dataset/11060 | 2026-10-15 05:49 | `580afe81091f` | 200 |
+| data-gov-tw-dataset-58036-join | https://data.gov.tw/dataset/58036 | 2026-10-15 05:49 | `51ca642161a2` | 200 |
+| copyright-act-art9 | https://law.moj.gov.tw/LawClass/LawSingle.aspx?pcode=J0070017&flno=9 | 2026-10-15 05:49 | `d2616a3fdc88` | 200 |
+| zhwiki-rightsinfo | https://zh.wikipedia.org/w/api.php?action=query&format=json&meta=siteinfo&siprop=rightsinfo&formatversion=2 | 2026-10-15 05:49 | `e113e25ced1a` | 200 |
+| zhwikinews-rightsinfo | https://zh.wikinews.org/w/api.php?action=query&format=json&meta=siteinfo&siprop=rightsinfo&formatversion=2 | 2026-10-15 05:49 | `50f2c6e0192f` | 200 |
+| wikimedia-terms-of-use | https://foundation.wikimedia.org/wiki/Policy:Terms_of_Use | 2026-10-15 05:49 | `3b4950a8434c` | 200 |
+| wikimedia-dumps-legal | https://dumps.wikimedia.org/legal.html | 2026-10-15 05:49 | `104242365285` | 200 |
+| cc-by-4.0 | https://creativecommons.org/licenses/by/4.0/deed.zh-hant | 2026-10-15 05:49 | `903f782bb187` | 200 |
+| cc-by-sa-4.0 | https://creativecommons.org/licenses/by-sa/4.0/deed.zh-hant | 2026-10-15 05:49 | `7ede15af9f84` | 200 |
+| cc-by-3.0-tw | https://creativecommons.org/licenses/by/3.0/tw/deed.zh_TW | 2026-10-15 05:49 | `4c7daf1d542b` | 200 |
+| compdemocracy-openData-readme | https://raw.githubusercontent.com/compdemocracy/openData/master/README.md | 2026-10-15 05:49 | `a8e6434c91fe` | 200 |
+| compdemocracy-openData-license | https://raw.githubusercontent.com/compdemocracy/openData/master/LICENSE | 2026-10-15 05:49 | `d5558cd419c8` | 404 |
+| compdemocracy-vtaiwan-uberx-readme | https://raw.githubusercontent.com/compdemocracy/openData/master/vtaiwan.uberx/README.md | 2026-10-15 05:49 | `d5558cd419c8` | 404 |
+| peopo-robots | https://www.peopo.org/robots.txt | 2026-10-15 05:49 | `773fb8d35bb9` | 200 |
+| join-gov-tw-robots | https://join.gov.tw/robots.txt | 2026-10-15 05:49 | `dfeef7147c87` | 200 |
+| gov-tw-robots | https://www.gov.tw/robots.txt | 2026-10-15 05:50 | `55ce2e892752` | 404 |
+| dumps-wikimedia-zhwikinews-20261001 | https://dumps.wikimedia.org/zhwikinews/20261001/ | 2026-10-15 05:50 | `7c17ccb608b1` | 200 |
+| dumps-wikimedia-zhwiki-20261001-status | https://dumps.wikimedia.org/zhwiki/20261001/dumpstatus.json | 2026-10-15 05:50 | `f8e6648ce975` | 200 |
+
+- 機關新聞稿資料集頁（data.gov.tw，23 個，2026-10-15 07:04–07:05 UTC 取得，都是 HTTP 200）：8372 `c777e6b2ce70`、7404 `f8b49382dfb4`、44954 `824ad6677b32`、30143 `ee15f869f9a3`、6040 `f614a2a36fb0`、7308 `d2f715f55ecd`、46112 `e8acfa74d55b`、6420 `211fed4d89b0`、162571 `56b7d8818cd5`、95226 `6a2b677d00b8`、169967 `849a110fe3c3`、94024 `00b4448bfb36`、11205 `9eec5852ee77`、171979 `4375c4fa7459`、25848 `6a630b52f197`、22927 `91870db462df`、7505 `e4c5ea46d45a`、68551 `7ae272e2da19`、95057 `f36fdfb6fd33`、48672 `4c660c77bbab`、48659 `ea62d4ae156f`、48504 `f84a10e963eb`、6298 `785187033776`。
+- 各機關網站的 robots.txt 另記 17 個（12 個 HTTP 200，其餘 403／404 視為沒有限制），完整清單在步驟 3 的 manifest。
+- 雜湊記在 `eval/README.md`；授權寫進 `LICENSES/data.md`。下一步：fresh verifier 審這個 PR（確認 `--set holdout` 仍是舊集、n = 227），之後回填 v0.4.0–v0.4.3 與 main 在 shard-1 上的數字、量三份之間的雜訊底線，再開切換 PR（契約 §6）。
+
+## 2026-10-16：保留集換新，回填與切換（契約 holdout-refresh §6 第二、三步）
+
+- PR #173（三份新集，舊集仍現役）由 fresh verifier 審查：只改 `eval/`、`docs/`、`LICENSES/`，雜湊、格式、出處表覆蓋都對，`--set holdout` 仍是舊集 n 227；唯一的阻擋是收窄的 CC0 列漏了 `eval/holdout/.gitkeep`，補上後合併（`2dbec4f`）。
+- **回填**（fresh verifier，只回數字，量完刪 rowstats）：shard-1 在 v0.4.0–v0.4.6 的聊天與書面 top1，表在 `eval/README.md`。和契約的表相比多量了 v0.4.4–v0.4.6（契約寫的是 v0.4.0–v0.4.3 加 main；v0.4.6 用 `7c47266`，和 tag 及當時的 main 在引擎與資料路徑上沒有差異，所以那一列就是 main）。顯著的只有 v0.4.0 → v0.4.1 聊天 +12（12／0，p 0.0005），和舊集當時量到的方向相同（v0.4.1 語意校正預設開）；其他相鄰兩版都不顯著。v0.4.0 的 CLI 在 bench 快取裡寫死了一個已刪掉的建置目錄（`01a3455`，和 v0.4.0 在引擎與資料路徑上相同），main 暫時建了指向 v0.4.0 目錄的符號連結量完再移除。
+- **雜訊底線**（v0.4.6 在三份上）：聊天 234／247／236、書面 230／239／229。份與份之間的差可到 13 句（約 4%），所以換份時前後的數字只能各自和同一份上的基準比，不能跨份比。
+- **切換**：shard-1 的 `news.txt`、`talk.txt` 移到 `eval/holdout/` 頂層（現役，n 300）；舊集移到 `eval/dev/holdout-2026-10-03/`（可讀的挑戰集；子資料夾，dev302 不變）。`LICENSES/data.md`、`eval/README.md`、`docs/contracts/eval-stats.md` 契約 D 同步改。使用次數從這一刻起算（`eval/README.md` 的使用紀錄）。
+- 之後的影響：`docs/benchmark.md` 的保留集表到 v0.4.6 都是舊集（n 227）；下一次發版起是 shard-1（n 300），表上要分開兩段，不能跨集比。
+
 ## 2026-10-16：trigram-core 第 0 片（H3 重對應到 model-v6，出貨形狀重判）
 
 - 契約 `docs/contracts/trigram-core.md`（修訂二，`9458e48`）。plan-verifier 兩次 REVISE（引擎詞段交界的歷史規則、學到的詞與 trigram、書面預測列不變），都已處置。設計分析由 Fable 做（配對、切片、風險排序），數字由 main 核對。
