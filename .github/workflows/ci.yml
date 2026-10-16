@@ -216,13 +216,17 @@ jobs:
       # docs/contracts/x0c-compare.md acceptance 5: score_0c.py and versus.py against a fake model (input layout, 64-character
       # context, log10 scale, unscorable rows, covered-only comparison). They need numpy (not onnxruntime, not the weights),
       # which the runner may not have, so it goes into a throwaway venv.
-      - name: X0c scoring and comparison (Python)
+      #
+      # docs/contracts/trigram-core.md slice A: tools/test_build_trigram.py (the SJT30001 builder, reader and scorer, the toy golden
+      # file check, and lm_eval.py's loading rules) needs numpy too, so it runs in the same venv.
+      - name: X0c scoring and comparison, trigram table (Python)
         shell: bash
         run: |
           set -euo pipefail
           python3 -m venv "$RUNNER_TEMP/x0c-venv"
           "$RUNNER_TEMP/x0c-venv/bin/python" -m pip install --quiet numpy==2.5.4
           "$RUNNER_TEMP/x0c-venv/bin/python" -W ignore -m unittest experiments/x0c/test_x0c.py
+          "$RUNNER_TEMP/x0c-venv/bin/python" -W ignore -m unittest tools/test_build_trigram.py
 
   # The Swift input method (docs/contracts/s3b.md section 3): build the ad-hoc
   # app, the Swift tests through the real core and model, the bundled

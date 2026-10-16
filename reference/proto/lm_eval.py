@@ -9,11 +9,14 @@
   model-v6 §2.5）；--no-kn 不載。SJKN0002 的 β 取自檔頭，--kn-beta 可不給（給了和檔頭不同就報錯）；
   舊的 SJKN0001 一定要給 --kn-beta。不論哪種格式都傳 kn_classes（build_lm.variant_classes），讓 lm.py 用 kn_total 重算 ΣN′ 和檔頭比對。
   摘要行的 profile 欄最後加 +kn:<側檔 SHA-256 前 8 碼>:θ<θ>:β<β>（Rust CLI 同格式）。
+--tri FILE | --no-tri：trigram 表（SJT30001，docs/contracts/trigram-core.md，reference/proto/trigram.py）。沒給 --tri 時，--lm 同目錄有 trigram.sjt3 就載入（和 Rust CLI 相同）；
+  --no-tri 不載。只有 --profile formal 載入它（chat 不載、不讀檔、不加標籤，和 Rust CLI 相同；chat 給 --tri 是錯誤）：書面有表時 kn.sjkn 照 Rust 的規則仍然載入並驗證
+  （壞了就報錯，不能給 --kn），但計分時 KN 關，摘要行不加 +kn:；解碼用兩個歷史詞（trigram.decode3），摘要行的 profile 欄最後（+xo 之後）加 +tri:<表檔 SHA-256 前 8 碼>。
 --extra-overlay FILE：接在 ime.OVERLAYS 之後的疊加層檔，也併進封頂詞集合（預設關；Rust CLI 同名參數）；摘要行最後加 +xo:<檔案 SHA-256 前 8 碼>。
   名單層 data/lexicon/names-add.tsv 已在 ime.OVERLAYS 與封頂詞集合裡（model-v6 §2.5），不要再用這個參數給它（重複的列是錯誤）。
 --rowstats FILE：每列一行 `列號\\t對錯\\t錯字數\\t正解字數`（只有數字，見 docs/contracts/eval-stats.md）。
 --dump FILE：每列寫 `列號\\t名次\\tsurface\\t分數(repr)`，前 64 名，給逐分數比對（容許 1e-9 的浮點誤差）。
-用法：python3 reference/proto/lm_eval.py --lm data/lm/bigram.sjlm --profile chat|formal --rows <檔> [--limit N] [--name 名稱] [--dump FILE] [--context] [--no-demote] [--no-classes] [--kn FILE [--kn-beta β] | --no-kn] [--extra-overlay FILE]
+用法：python3 reference/proto/lm_eval.py --lm data/lm/bigram.sjlm --profile chat|formal --rows <檔> [--limit N] [--name 名稱] [--dump FILE] [--context] [--no-demote] [--no-classes] [--kn FILE [--kn-beta β] | --no-kn] [--tri FILE | --no-tri] [--extra-overlay FILE]
   評測檔格式 `前文|句子|讀音`；dev 集要先依檔名排序串接（和 CLI 相同），可用 --dev 302 直接取開發集前 N 列。
 """
 import argparse
@@ -75,6 +78,12 @@ def kn_side(lm_path, kn=None, no_kn=False):
     return kn or (side if not no_kn and os.path.lexists(side) else None)
 
 
+def tri_side(lm_path, tri=None, no_tri=False):
+    """trigram 表路徑或 None：tri 給了就用那個；否則模型旁邊的 trigram.sjt3，存在（含壞掉的符號連結）就載入，除非 no_tri。"""
+    side = os.path.join(os.path.dirname(os.path.abspath(lm_path)), "trigram.sjt3")
+    return tri or (side if not no_tri and os.path.lexists(side) else None)
+
+
 def load_lm(lm_path, base, classes=True, kn=None, kn_beta=None):
     """BigramLM，kn（kn_side 的結果）不是 None 時帶 KN；base 是詞庫（variant_classes 用）。lm_eval 與 experiments/sp/predict.py 共用這一份。"""
     kw = {}
@@ -91,6 +100,7 @@ def main():
     ap.add_argument("--rows"); ap.add_argument("--dev", type=int); ap.add_argument("--limit", type=int)
     ap.add_argument("--name"); ap.add_argument("--dump"); ap.add_argument("--rowstats"); ap.add_argument("--context", action="store_true"); ap.add_argument("--no-demote", action="store_true"); ap.add_argument("--no-classes", action="store_true")
     ap.add_argument("--kn"); ap.add_argument("--kn-beta", type=float); ap.add_argument("--no-kn", action="store_true")
+    ap.add_argument("--tri"); ap.add_argument("--no-tri", action="store_true")
     ap.add_argument("--extra-overlay")
     a = ap.parse_args()
     if a.dev:
@@ -101,20 +111,33 @@ def main():
         name = a.name or os.path.basename(a.rows)
     if a.kn and a.no_kn:
         ap.error("--kn and --no-kn")
-    kn = kn_side(a.lm, a.kn, a.no_kn)
+    if a.tri and a.no_tri:
+        ap.error("--tri and --no-tri")
+    if a.tri and a.profile != "formal":
+        ap.error("--tri needs --profile formal (chat never uses the table)")
+    tri = tri_side(a.lm, a.tri, a.no_tri) if a.profile == "formal" else None   # chat does not even read the table, like the CLI
+    if tri and a.kn:
+        ap.error("--kn with the formal profile's trigram table (it scores without Kneser-Ney)")
+    kn = kn_side(a.lm, a.kn, a.no_kn)   # loaded and validated in every case the CLI loads it, the table or not
     if not kn and a.kn_beta is not None:   # 空字串（未設定的變數）也算沒給
         ap.error("--kn-beta needs --kn")
     base = ime.Lexicon(os.path.join(ROOT, "data", "lexicon", "mcbpmf-data.txt"),
                        overlay=ime.overlays(a.extra_overlay))
     lm = load_lm(a.lm, base, not a.no_classes, kn, a.kn_beta)
+    if tri:
+        lm.kn = None   # formal with a table scores without Kneser-Ney (Rust Lm::scoring); the side file was checked above
     ov = ime.capping_words(a.extra_overlay)
     lex = L.cap_overlay(base, ov, lm)
+    if tri:
+        from trigram import TriLM, TriTable, decode3, sha8   # numpy: only when a table is in use (CI runs this file without it)
+        tri_lm = TriLM(lm, TriTable.from_path(tri, hashlib.sha256(open(a.lm, "rb").read()).digest()))
     top1, o64, firsts, rs = 0, 0, [], []
     dump = open(a.dump, "w", encoding="utf-8") if a.dump else None
     # Opened before decoding, like the CLI: an unwritable path fails now, not after the whole run.
     rsf = open(a.rowstats, "w", encoding="utf-8", newline="") if a.rowstats else None
     for i, (t, syls, ctx) in enumerate(rows, 1):
-        nb = L.decode(lex, syls, lm, a.profile, start=L.history(L.context_key(ctx), lm) if a.context else "<s>", demote=not a.no_demote)
+        start = L.history(L.context_key(ctx), lm) if a.context else "<s>"
+        nb = decode3(lex, syls, tri_lm, a.profile, start=start, demote=not a.no_demote) if tri else L.decode(lex, syls, lm, a.profile, start=start, demote=not a.no_demote)
         surf = ["".join(ws) for _, ws in nb]
         firsts.append(surf[0])
         ok = lenient(surf[0]) == lenient(t)
@@ -128,7 +151,7 @@ def main():
         with rsf:
             rsf.write(format_rowstats(rs))
     sha = hashlib.sha256("\n".join(firsts).encode("utf-8")).hexdigest()
-    print(f"## {name}  lm-{a.profile}{'+ctx' if a.context else ''}{'-nodemote' if a.no_demote else ''}{'-noclasses' if a.no_classes else ''}{kn_tag(kn, lm.kn[0]) if kn else ''}{xo_tag(a.extra_overlay)}  {{'n': {len(rows)}, 'top1': {top1}, 'oracle@64': {o64}, 'top1_sha256': '{sha}'}}")
+    print(f"## {name}  lm-{a.profile}{'+ctx' if a.context else ''}{'-nodemote' if a.no_demote else ''}{'-noclasses' if a.no_classes else ''}{kn_tag(kn, lm.kn[0]) if kn and not tri else ''}{xo_tag(a.extra_overlay)}{'+tri:' + sha8(tri) if tri else ''}  {{'n': {len(rows)}, 'top1': {top1}, 'oracle@64': {o64}, 'top1_sha256': '{sha}'}}")
 
 
 if __name__ == "__main__":

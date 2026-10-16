@@ -6152,3 +6152,36 @@ formal: alpha 0.7, tau 1, delta 2
 - **雜訊底線**（v0.4.6 在三份上）：聊天 234／247／236、書面 230／239／229。份與份之間的差可到 13 句（約 4%），所以換份時前後的數字只能各自和同一份上的基準比，不能跨份比。
 - **切換**：shard-1 的 `news.txt`、`talk.txt` 移到 `eval/holdout/` 頂層（現役，n 300）；舊集移到 `eval/dev/holdout-2026-10-03/`（可讀的挑戰集；子資料夾，dev302 不變）。`LICENSES/data.md`、`eval/README.md`、`docs/contracts/eval-stats.md` 契約 D 同步改。使用次數從這一刻起算（`eval/README.md` 的使用紀錄）。
 - 之後的影響：`docs/benchmark.md` 的保留集表到 v0.4.6 都是舊集（n 227）；下一次發版起是 shard-1（n 300），表上要分開兩段，不能跨集比。
+
+## 2026-10-16：trigram-core 第 0 片（H3 重對應到 model-v6，出貨形狀重判）
+
+- 契約 `docs/contracts/trigram-core.md`（修訂二，`9458e48`）。plan-verifier 兩次 REVISE（引擎詞段交界的歷史規則、學到的詞與 trigram、書面預測列不變），都已處置。設計分析由 Fable 做（配對、切片、風險排序），數字由 main 核對。
+- 重對應：`experiments/derisk-1015/e1/remap_tri.py`（`feat/derisk-1015` `6c52e7f`，合成資料的單元測試 5 項通過）把 H3 從 B0 的詞 id 換成 model-v6 的：4,101,808 個前文、7,700,964 條，B0 與 model-v6 的詞彙都是 353,497 個詞，輸出 `fdd3b05d…`（綁 model-v6 `fc2bddd1`）。
+- 量法：Windows 機器，`grid.py judge`，書面 λ 0.7、β 1、`--context`，集合同 E1g（凍結檔核對通過）。BASE 是出貨的書面形狀（model-v6 `fc2bddd1`＋classes-v5 `9e36fa1b`＋kn-v1 `cbefbced`）；CAND 是 model-v6＋classes-v5＋重對應的 H3，KN 關。2 分鐘。
+- **判讀**（a = 0.05）：調參集 205/141（**+64，p 0.0007**），判讀五集 +36（p 0.040）、discordtune +35（p 0.051），都不是顯著為負 → **通過**，進第 A 片。
+- 只報：
+  - 每個集合：wikitune +51（p 0.0002）、lytune +36（p 0.024）、cvtune +13、dev302 +1、打字測驗 −2、錯字回報 0、wikitypo +1。
+  - 和 E1h 的 FH3k（B0 上量的）逐列比：調參集、判讀五集、discordtune 的 top1 對錯**完全相同**（0 列不同）；BASE 對 E1g 的 F0 也 0 列不同。指紋條目與詞類表的差別在這些集合上沒有影響任何一列。
+- CAND 在 Windows 機器上的 rowstats 與摘要行（摘要行 `lm-formal+ctx+tri:fdd3b05d`）是第 A 片 Rust 錨點的目標。
+
+## 2026-10-16：trigram-core 第 A 片（Rust 讀表、解碼器、書面關 KN）
+
+- 實作（executor，`feat/trigram-core` `97a4a5b`–`23211ca`）：`core/src/trigram.rs` 讀 `SJT30001`（整檔 `std::fs::read`、綁模型 SHA-256，載入時核對格式與「保留次數總和 ≤ 前文總次數」，不合就 `LmError::TriTable`）；`Lm::scoring(profile)` 導出 `Scoring { lam, kn, tri }`，書面有表時 trigram 開、KN 關，聊天照舊；解碼器有表時重組鍵加前一詞；詞段交界照契約 (a)–(d)；學到的詞不經過表；`Engine::total_score` 帶兩個歷史詞；預測列不變。CLI 摘要行 `+tri:<sha8>`、`--no-tri`。Python 參考實作 `reference/proto/trigram.py`、`lm_eval.py --tri`；產生工具 `tools/build_trigram.py`。
+- executor 在 Mac 上跑的驗收：沒有表時 golden 與既有 core 測試逐位元組不變（golden 24 項）；玩具模型的跨語言 golden（Python 產生、Rust 比對）相同；契約的突變 10 個都以斷言失敗（其中「只有 `End::Next` 不用 trigram」一開始存活，補了一個到固定詞的玩具條目之後才被抓到）。
+- **真模型跨語言（契約第 4 項，main 在 Windows 機器）**：model-v6＋classes-v5＋kn-v1＋重對應的 H3（`fdd3b05d`）放在同一個資料夾。
+  - 書面 `--context`：dev302、打字測驗、錯字回報（114 列凍結檔）、cvtune、wikitune 的 rowstats 與第 0 片 Python CAND **逐位元組相同**，`top1_sha256` 相同（摘要行 `lm-formal+ctx+tri:fdd3b05d`，沒有 `+kn:`）。
+  - 聊天 `--context`：同樣 5 個集合，新 CLI（模型旁有表）和 v0.4.6 的 CLI（`58da6d2`，沒有表）的 rowstats 與摘要行**逐位元組相同**。
+- 完整 Rust 測試（Windows 機器的 WSL，`166cc44`）：465 通過、0 失敗、9 略過（照例略過的 4 個交給 Mac 與 CI）。
+- `/code-review` 12 項，executor 修 9 項（`69d901f`–`995477f`）：每次解碼記住前文的 back3（不常駐陣列，預算裡表本身就佔 144 MB）；CLI 只在書面評測、沒有 `--no-tri` 時讀表，`--predict` 不讀，Python 同一套規則、`kn.sjkn` 照樣載入與核對；Python 聊天給 `--tri` 報錯；D 只接受 0.75；`total_score` 有表時在英文段照解碼的方式切開（新測試與突變）；`build_trigram.py` 共用 `lm.py` 的檔頭解析；CI 在 x0c 的 numpy 環境跑 `test_build_trigram.py`；PLAN 加 trigram-core 一項。新的突變 17 個都以斷言失敗。
+- **延遲與 RSS（契約第 5 項，Mac M5，同一場三輪、取中位數，load avg 4.5–4.7）**：臨時的重播程式（`tools/bench/replay` 加一個設定參數，scratchpad，不進 repo）用 dev302 302 列、8,336 個按鍵，模型 model-v6＋classes-v5＋kn-v1，書面有表時資料夾裡多放重對應的 H3：
+
+| 臂 | 每鍵 p95 | 最大 | 載入 | 最大 RSS |
+|---|---|---|---|---|
+| 書面＋表 | 2.15 ms | 8.6 ms | 826 ms | 423 MB |
+| 書面、沒表 | 2.13 ms | 6.3 ms | 750 ms | 287 MB |
+| 聊天（資料夾有表） | 2.11 ms | 6.5 ms | 833 ms | 423 MB |
+
+  - 上限是 RSS +150 MB、每鍵 p95 +1 ms：書面有表 p95 多 0.01 ms、RSS 多 136 MB，**都在上限內**；最大值多約 2 ms。聊天設定也載入整張表（App 執行中會換設定），所以 RSS 同樣多 136 MB。
+  - 只報：這個重播沒有前文、詞包、語意校正，dev302 完全相符（不經變體表）書面有表 235、沒表 239，和 Python 判讀的設定（`--context`、寬鬆比對）不同，不拿來判讀；語意校正接上之後的效果是第 B 片。
+- 還沒做：書面有表的選字記憶與語意校正（第 B 片）。
+- fresh verifier（PR #175）：CONFIRMED。沒有表時 golden 不變（25 項）、聊天與預測列不受表影響、(a)–(d) 與學到的詞的例外照契約、公式與載入規則兩種語言一致。附一項 P3：英文段緊貼在固定的字旁邊時，`total_score` 和解碼第一名的分數差一項（固定的字的句尾項或詞項），和 main 上「固定的字在最後」本來就有的差異同類；`total_score` 只有測試在用，記成已知例外（`docs/contracts/s3a.md`），修法另開一片。

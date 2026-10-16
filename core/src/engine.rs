@@ -5,6 +5,7 @@ use crate::learn::{context_key, english_of, english_or_space, is_space_unit, loc
 use crate::learn_store::{LearnStore, Opened, StoreError, JOURNAL_MAX};
 use crate::predict::{predict, reading_matches_in, unit_of_syllable, Mode, Unit};
 use crate::lm::{decode_segment_learned, history, CappedLexicon, Demote, End, Learn, Lm, Profile};
+use crate::trigram::TriMemo;
 use crate::tinylm::{RerankLevel, TinyLm, TOPK};
 use crate::{decode_beam, Lexicon, NoLearning, BEAM_S1};
 use std::collections::{HashMap, HashSet};
@@ -1532,33 +1533,56 @@ impl Engine {
     /// their capped `lp_F`) adds `word(λ, previous, w, lp) − δ` (δ: the demotion of the entry, 0 when demotion is off), then `eos` of the last word. Punctuation
     /// splits it into sentences (s3d §4): the stretch before it closes with `eos`, the next starts from
     /// `<s>`, and the punctuation itself scores nothing. `None` without a model or without words.
+    ///
+    /// With the trigram level on (`Lm::scoring`: formal with a table, docs/contracts/trigram-core.md (a)-(c)) every term carries two history
+    /// words, as the decoder starts and joins its stretches: `before` is the word before `prev`. A sentence start (`<s>` history, after punctuation,
+    /// or after an English run) is (`<s>`, `<s>`); the first word after a fixed word is (unknown, that word), so it is scored by the bigram alone;
+    /// every other word is (the word before the previous one, the previous one). A learned-boosted word is the exception (model-v6 §2.8 rule 1
+    /// extended): `word_learned`, no table and no Kneser-Ney, as the decoder scores it; it still becomes the history of the next word. The
+    /// open English run (`run_cut`) cuts the composition at the cursor the way `refresh_lm` decodes it: the part on the left closes with `eos`
+    /// and the part on the right restarts from (`<s>`, `<s>`), like after punctuation. Only the trigram level does this; without it the run is
+    /// not a boundary here (the bigram total has never cut there). `total_score` then equals the top decode score of a single stretch.
     pub fn total_score(&self) -> Option<f64> {
         let st = self.lm.as_ref()?;
-        let lam = self.profile.lambda();
+        let cfg = st.lm.scoring(self.profile);
+        let mut memo = TriMemo::default();
+        let cut = self.run_cut().filter(|_| cfg.tri);
         // S2h §1: the first sentence starts from the history word of the left context; `open` is whether
         // the current sentence has a word (the history word is not one, and its own eos is not scored).
         let mut prev = history(&self.left, &st.lm);
+        // The word before `prev` for the trigram level (docs/contracts/trigram-core.md (a)-(c)), as the decoder starts a stretch:
+        // `<s>` after `<s>`, unknown after a real word (a left context or a fixed word supplies one word only).
+        let mut before = (prev == "<s>").then_some("<s>");
         let mut total = 0.0;
         let (mut any, mut open) = (false, false);
         let mut at = 0;
         for (w, lp, is_punct, delta) in &self.path {
+            if cut == Some(at) {
+                if open {
+                    total += st.lm.eos3_in(&mut memo, cfg, before, prev);
+                }
+                (before, prev, open) = (Some("<s>"), "<s>", false);
+            }
             if *is_punct {
                 at += 1;
                 if open {
-                    total += st.lm.eos(lam, prev);
+                    total += st.lm.eos3_in(&mut memo, cfg, before, prev);
                 }
-                (prev, open) = ("<s>", false);
+                (before, prev, open) = (Some("<s>"), "<s>", false);
                 continue;
             }
             let n = w.chars().count();
             // model-v6 section 2.8 rule 1: a word the learner boosted (lp above its best capped lp under its reading, the test of
             // `boosted`) was scored by the decoder without the Kneser-Ney substitution; score it the same way here.
             let learned = self.syls.get(at..at + n).and_then(|s| st.capped.best_lp(s, w)).is_some_and(|best| *lp > best);
+            // A learned word is scored by P2 alone (no Kneser-Ney substitution, no table), as in the decoder.
+            total += if learned { st.lm.word_learned(cfg.lam, prev, w, *lp) } else { st.lm.word3_in(&mut memo, cfg, before, prev, w, *lp) } - delta;
+            // The stretch after a fixed word starts from (unknown, that word); inside a stretch the history is the last two words.
+            before = if self.fixed.iter().any(|f| f.start == at) { None } else { Some(prev) };
             at += n;
-            total += if learned { st.lm.word_learned(lam, prev, w, *lp) } else { st.lm.word(lam, prev, w, *lp) } - delta;
             (prev, any, open) = (w, true, true);
         }
-        any.then(|| if open { total + st.lm.eos(lam, prev) } else { total })
+        any.then(|| if open { total + st.lm.eos3_in(&mut memo, cfg, before, prev) } else { total })
     }
 
     /// §6 reset: Commit returns the composition as shown, unfinished symbols included, like Enter (enter-pending
@@ -1828,7 +1852,7 @@ impl Engine {
     /// its left (`<s>` if none); it closes with the transition into the fixed word on its right, or with
     /// the sentence end when there is none. Fixed words score with `lp_F`, the capped score under their reading.
     fn refresh_lm(&mut self, st: &LmState) -> Result<(), EngineError> {
-        let lam = self.profile.lambda();
+        let cfg = st.lm.scoring(self.profile);
         // The clock (a libc time conversion) is read only when a record could use it.
         let today = if self.learner.is_empty() { 0 } else { self.today() };
         let mut lp_fixed = Vec::with_capacity(self.fixed.len());
@@ -1884,7 +1908,7 @@ impl Engine {
                 let after = run_next.as_deref().or(self.syls.get(stop).map(String::as_str));
                 let learn = (!self.learner.is_empty()).then(|| Learn { learner: &self.learner, before: &before, after, today, eps_global: self.eps_global });
                 let best = decode_segment_learned(
-                    &st.capped, &self.syls[start..stop], &st.lm, lam, prev, end, BEAM_S1, learn.as_ref(), self.demote,
+                    &st.capped, &self.syls[start..stop], &st.lm, cfg, prev, end, BEAM_S1, learn.as_ref(), self.demote,
                 )
                 .map_err(|_| EngineError::Internal)?;
                 let first = &best.first().ok_or(EngineError::Internal)?.1;
