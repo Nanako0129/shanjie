@@ -6296,7 +6296,7 @@ formal: alpha 0.7, tau 1, delta 2
 | 檔 | 改變 | 書面 top1 舊 → 新 |
 |---|---|---|
 | `eval/golden/s2-lm.txt` | 2 行（書面 dev302、typing76 的摘要行） | dev302 250 → 254；typing76 70 → 69 |
-| `eval/golden/s2h-lm-context.txt` | 3 行（書面 dev302、typing76、user-reported 的摘要行） | dev302 249 → 253；typing76 69 → 68；user-reported 36 → 36（雜湊變了，答案集合不同；合併 main 的第 117–120 列之後，n 120 的書面有表是 top1 37、oracle@64 117，無表是 36、117（n 119 時同為 37／117 與 36／117），這一行在合併時用 Python 參考實作重產） |
+| `eval/golden/s2h-lm-context.txt` | 3 行（書面 dev302、typing76、user-reported 的摘要行） | dev302 249 → 253；typing76 69 → 68；user-reported 36 → 36（雜湊變了，答案集合不同；合併 main 的第 117–121 列之後，n 121 的書面有表是 top1 37、oracle@64 118，無表是 36、118（n 120 時是 37／117 與 36／117，n 119 時同為 37／117 與 36／117），每次合併都用 Python 參考實作重產這一行） |
 | `eval/golden/s2-lm-dev302-formal.rowstats` | 16 列（302 列中；10 列錯→對，6 列對→錯） | ok 欄總和 250 → 254 |
 | `eval/golden/s2-lm-dev302-top1.tsv` | 23 列的書面欄（聊天欄 0 列） | 與 `s2-lm.txt` 的書面雜湊相同（`lm_top1_tsv_hashes_match_summary_lines`） |
 | `eval/golden/sw-probe.txt` | 48 行（44 行探針第一名與分數、4 行書面摘要） | 開降權（on）11 → 11（雜湊同）；關降權（off）8 → 9（無前文與有前文各一） |
