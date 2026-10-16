@@ -6460,21 +6460,24 @@ formal: alpha 0.7, tau 1, delta 2
 
 ## 2026-10-17：CI 加速（契約 `docs/contracts/ci-speed.md`）
 
-- 三次 run（xcode-27-arm64 runner；時間是每個 job 自己的開始到結束）：
+- 四次 run（xcode-27-arm64 runner；時間是每個 job 自己的開始到結束）：
 
   | run | 內容 | core | core-debug | shell | 最慢的 job |
   |---|---|---|---|---|---|
   | 38945349011（基準，PR #184） | debug＋release 串在 core | 904 秒 | — | 683 秒 | 904 秒 |
-  | 38954775625（本片，冷快取） | 拆出 core-debug、快取、Swift 並行 | 624 秒 | 278 秒 | 380 秒 | 624 秒 |
-  | 38956299697（本片，熱快取） | 同上（空 commit） | 476 秒 | 292 秒 | 363 秒 | 476 秒 |
+  | 38954775625（本片第 1 次） | 拆出 core-debug、Rust 快取（冷）、Swift 並行 | 624 秒 | 278 秒 | 380 秒 | 624 秒 |
+  | 38956299697（第 2 次，空 commit） | 同上，快取命中 | 476 秒 | 292 秒 | 363 秒 | 476 秒 |
+  | 38959341648（第 3 次） | 快取只留 core | 459 秒 | 385 秒 | 640 秒 | 640 秒 |
 
-- 各步驟（基準 → 冷 → 熱）：
-  - debug 測試：455 → 251 → 262 秒（移到 core-debug；其中編譯 52.6 → 29.4 → 32.0 秒）。
-  - release 測試：252 → 355 → 259 秒（編譯 41.7 → 58.0 → 42.7 秒；基準的 release 接在 debug 之後，依賴已經下載）。
-  - Swift 測試：467 → 203 → 197 秒（`--parallel`；編譯 28.5 → 19.9 → 19.3 秒）。
-  - `make bundle` 87 → 70 → 67 秒，Homebrew cask 46 → 25 → 22 秒（沒改這兩步，差的是 runner 本身）。
-- **快取只留在 core**：還原 1–3 秒、儲存 1–4 秒。熱快取只讓 core 的 release 編譯從 58 秒變 43 秒；core-debug 的編譯（29 → 32 秒）與 shell（`make bundle` 70 → 67 秒、Swift 編譯 19.9 → 19.3 秒）看不出差別，照契約 §2 拿掉。工作區自己的 crate 每次都重編（checkout 的檔案時間是新的），快取省到的只有依賴。
-- **測試數量不變**：Rust 的 debug 與 release 各 477 個通過、9 個略過、20 個測試執行檔，三次 run 相同。Swift 依序執行時印兩個 bundle 的總計（223 個、1 個略過＋24 個），合計 247；並行的 xunit 有 247 個 testcase，名稱逐一相同。SwiftPM 並行時 xunit 不標 XCTSkip：唯一的 XCTSkip（`CandidateCellTests.testBenchmark`）在 xunit 裡沒有 skipped，所以只比名稱（契約 §3.1 同日放寬）。
+- **runner 本身的快慢差很大**：這片沒改的步驟在四次 run 之間差到將近兩倍（`make bundle` 87、70、67、124 秒；C 標頭冒煙測試 20、29、20、20 秒；Homebrew cask 46、25、22、42 秒）。單次 run 的差距不能直接算成改動的效果；下面的結論只寫跨 run 都成立的部分。
+- 各步驟（基準 → 第 1、2、3 次）：
+  - debug 測試：455 → 251、262、357 秒（移到 core-debug，和 release 同時跑；編譯 52.6 → 29.4、32.0、47.3 秒）。
+  - release 測試：252 → 355、259、262 秒（編譯 41.7 → 58.0、42.7、45.5 秒）。
+  - Swift 測試：467 → 203、197、359 秒（`--parallel`；編譯 28.5 → 19.9、19.3、37.5 秒）。依序執行時最慢的一組就 126 秒，並行之後整步在快的 runner 上約 200 秒、慢的 runner 上約 360 秒，都比依序的 467 秒少。
+- **拆 job 的效果跨 run 成立**：core 不再等 debug 測試，四次裡 core 都在 459–624 秒之間；最慢的 job 從 904 秒變成 476–640 秒，取決於 runner。
+- **Rust 快取拿掉（更正）**：先前寫「熱快取讓 release 編譯 58 → 43 秒、省到的是依賴」是錯的。workspace 沒有外部 crate（`Cargo.lock` 只有 `core`、`cli`），快取命中時 log 照樣是 `Compiling core`、`Compiling cli`，沒有東西被沿用；58 → 43 秒是 runner 的快慢，沒有快取的基準本來就是 41.7 秒（`/code-review` 指出，Cargo.lock 與 log 核對過）。照契約 §2「量不出變快就拿掉」，三個 job 都不快取。
+- **測試數量不變**：Rust 的 debug 與 release 各 477 個通過、9 個略過、20 個測試執行檔，四次 run 相同。Swift 依序執行時印兩個 bundle 的總計（223 個、1 個略過，加上 24 個），合計 247；並行的 xunit 有 247 個 testcase，名稱逐一相同。SwiftPM 並行時 xunit 不標 XCTSkip（唯一的 XCTSkip `CandidateCellTests.testBenchmark` 在 xunit 裡沒有 skipped），所以只比名稱（契約 §3.1 同日放寬），CI 只印 testcase 數。
+- **並行的代價**：`--parallel` 每個測試方法開一個 xctest 行程（log 是 `[n/247] Testing Class/method`），一個測試留下的狀態（static、偏好設定、通知觀察者）害到下一個測試的情況，CI 不再抓得到；只有依序跑的 `make test-swift` 抓得到。輸入法出貨時是長時間跑的單一行程，所以這是實際的取捨；這片照契約保留 `--parallel`（Swift 測試約少一半時間），改 Swift 的 PR 本機照舊跑依序的 `make test-swift`。
 - **略過名單**：PR #189（只改 `eval/bench/results/` 的一個檔，base 是本片分支）的 run 38958992283：`changes` 印 `run=false`，core、core-debug、shell 都是 skipped，run 的結論是 success。PR 關閉、不合併。
 - **gate 不變**：`scripts/check-ci-gate.sh` 看整個 `ci.yml` run 的結論，不看 job 名稱，多一個 job 不會漏檢。
-- 現在最慢的是 core（release 測試約 260 秒＋Python 各步約 200 秒）。再快要把 Python 步驟拆到另一個 job，這片不做。
+- 現在 core 與 shell 誰最慢看 runner。再快的方向：core 的 Python 步驟拆成另一個 job、三份「下載並核對模型」合成一份（現在換模型要改 ci.yml 三處），這片不做。

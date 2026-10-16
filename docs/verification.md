@@ -36,9 +36,9 @@
 
 | 工作流程 | 觸發 | 內容 |
 |---|---|---|
-| `ci.yml` core | 每個 PR、每次推到 main（只改文件、網站、`eval/bench/results/` 時略過，`scripts/ci-changes.sh`） | 下載並比對模型、`cargo test --release`、C 標頭冒煙測試、寬鬆比對一致性、Python 各步 |
+| `ci.yml` core | 每個 PR、每次推到 main（只改文件、網站、`eval/bench/results/` 時略過，`scripts/ci-changes.sh`；推到 main 時還要前一個 main 的 run 是 success 才略過） | 下載並比對模型、`cargo test --release`、C 標頭冒煙測試、寬鬆比對一致性、Python 各步 |
 | `ci.yml` core-debug | 同上，和 core 同時跑 | 下載並比對模型、`cargo test`（debug；`docs/contracts/ci-speed.md`） |
-| `ci.yml` shell | 同上 | `make bundle`、`scripts/test-install-ime.sh`、`swift test --parallel`（測試數從 xUnit 檔印出）、`make selftest-bundled SELFTEST_BUNDLE_ID=`、`scripts/check-app.sh` |
+| `ci.yml` shell | 同上 | `make bundle`、`scripts/test-check-ci-gate.sh`、`scripts/test-install-ime.sh`、`swift test --parallel`（測試數從 xUnit 檔印出）、`make selftest-bundled SELFTEST_BUNDLE_ID=`、`scripts/check-app.sh`、`make installer`＋`scripts/check-installer.sh`、Homebrew cask（`scripts/test-render-cask.sh`、`brew style`） |
 | `release.yml` | 推 `v*` tag；或在 main 手動觸發（演練） | gate（這個 commit 在 main 的 ci.yml 必須全綠）→ build → 在 `release` environment 用一次性鑰匙圈以 Developer ID 簽章、公證、staple、驗證 → 只有 tag 才發布 Release。推 tag 時 `docs/releases/<tag>.md` 必須存在而且有內容（在等 CI 之前檢查），發布用它當說明；版本號最大時標成 Latest（`docs/releases/README.md`） |
 
 ## build/ 的 bundle
