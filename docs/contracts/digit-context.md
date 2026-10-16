@@ -16,13 +16,13 @@
 ## C.2 要做到什麼、怎麼看到它有效
 
 - 交付一張表 `data/lexicon/digits.tsv`（進 git，文字，≤ 2 MB）與離線量到的數字；判讀規則（C.4.3）決定 A（`docs/contracts/digits.md`）用哪一版的設計。
-- **誰看**：main 跑（188 或 Colab，照「Mac 不跑重運算」）；fresh verifier 重跑一次抽查；維護者看 C.4 的表與判讀。
+- **誰看**：main 跑（Windows 機器或 Colab，照「Mac 不跑重運算」）；fresh verifier 重跑一次抽查；維護者看 C.4 的表與判讀。
 
 ## C.3 表的內容與建法（`tools/build_digits.py`＋`tools/test_build_digits.py`）
 
 - **輸入（封閉清單）**：(1) model-v6 用的維基 dump（`zhwiki-20261001-pages-articles.xml.bz2`）經 `bc.articles(200000)` 取前 200,000 篇 ns0 條目、走 `article_runs` 前處理；(2) `experiments/s2/build_tune.py` 寫出的 `colloquial-train.txt`（不含 `is_tune` 的行）。兩份的 SHA-256 記在表的檔頭。沒有其他輸入。
 - **數字串**：全形數字先折成半形；串＝`[0-9]+([./-][0-9]+)*`（和引擎的數字字母表 `0-9 . / -` 一致；`,` `:` 結束一串，答覆 (h)）。
-- 走 `article_runs`／`text_runs` 同一條前處理，但在切出漢字段**之前**先找數字串；每一行裡的單位序列＝漢字段（用 `segment(lex, text)` 切成詞）、數字串 `D`、其他非漢字（標點、空白、英文）當段落邊界 `<s>`。和模型計數不同的兩點：**一個字的漢字段也算**（`_count` 的 `len(run) < 2` 不套用：元、點、第、共這類單字正是數字前後的訊號）；`segment` 切不出來（回傳 None）的漢字段當成邊界 `<s>`。
+- 前處理用 `experiments/s2/build_counts.py` 現有的函式（import，不複製：模板與標記清除、轉換、實體反轉義），只把最後「取漢字段」那一步（`article_runs` 215 行的 `HAN.findall`）換成保留數字串的切法；保留集句子照 `docs/contracts/holdout-refresh.md` §8 的比對排除。在切出漢字段**之前**先找數字串；每一行裡的單位序列＝漢字段（用 `segment(lex, text)` 切成詞）、數字串 `D`、其他非漢字（標點、空白、英文）當段落邊界 `<s>`。和模型計數不同的兩點：**一個字的漢字段也算**（`_count` 的 `len(run) < 2` 不套用：元、點、第、共這類單字正是數字前後的訊號）；`segment` 切不出來（回傳 None）的漢字段當成邊界 `<s>`。
 - 計數（都是整數；「單位」＝漢字段切出的詞與數字串 `D`，`<s>` 不算單位）：
   - `T\tN`：全部單位的出現次數總和 ΣN(u)（`digits.md` A.3.2 的 P(D) 分母）。`N\tN(D)`：數字串總數。
   - `D\tv\tN(v→D)\tN(v)`：詞 v 緊接著數字串的次數，與 v 出現的總次數（同一趟數，不依賴模型內部的總數）；另一列 `D\t<s>\tN(<s>→D)\tN(<s>)`（串在段落開頭、含行首）。**哪些 v 有這一列**：N(v→D) ≥ 1 的全部，加上 N(v) ≥ 1,000 的詞（常見詞從不接數字也要記，它的 P(D | v) 才會比全域的 P(D) 小）；都不是的 v 用 P(D)。
@@ -33,7 +33,7 @@
   - `C\tch\tN`：串裡每個字元的次數（0–9 . / -）。
   - `S\tN(D→end)`：串後面是邊界（標點、空白、英文、行尾）的次數。
 - `digits.md` A.3.2 的每個量都寫成這張表的公式（P(D)＝N(D)／T；P(D | C) 用 `D` 列，沒有列時用 P(D)；P_len、P_ch 用 `L`、`C` 列；P(w | D)＝(N(D→w)＋γ·P(w))／(N(D)＋γ)；P(w | v, D) 的分母是 `Q` 列；沒有 `W` 列時分子是 0；沒有 `Q` 列時 P(w | v, D)＝P(w | D)），`tools/test_build_digits.py` 在合成小語料上逐一斷言，語料裡要有一個字的漢字段緊鄰數字串、切不出來的漢字段、串後面是邊界、10 字以上的串四種情形，並逐一測「沒有 `D`／`W`／`Q`／`P` 列」時的公式。
-- 輸出照位元組排序，檔頭一行記來源快照與工具版本；`docs/data-files.md` 加一列（來源、雜湊、重建指令）；`LICENSES/data.md` 加一列 `data/lexicon/digits.tsv`，照 `data/lm/kn.sjkn` 那一列寫：由 `tools/build_digits.py` 從和 `bigram.sjlm` 相同的公開來源建出，CC BY-SA 4.0，署名 Wikipedia contributors、Tatoeba contributors，不含任何私人對話資料。
+- 輸出照位元組排序，檔頭一行記來源快照與工具版本；`docs/data-files.md` 加一列（來源、雜湊、重建指令）；`LICENSES/data.md` 加一列 `data/lexicon/digits.tsv`，照 `data/lm/kn.sjkn` 那一列的格式寫：由 `tools/build_digits.py` 從維基 zh-tw（前 200,000 篇）與 `colloquial-train.txt`（Common Voice、Tatoeba 的句子）建出，CC BY-SA 4.0，署名 Wikipedia contributors、Tatoeba contributors，不含任何私人對話資料、不含合成句。
 - **只有一版表**（進 git，量測與出貨同一份）：C.4 的數字串集合本來就不在計數的來源裡，不另做排除。cvtune 的行是口語語料 `is_tune` 那 20%，`colloquial-train` 不含它們（`experiments/s2/build_tune.py`）；wikitune 是維基第 300,000–304,999 篇，計數用前 200,000 篇（`--articles 200000`，`docs/contracts/model-v6.md`）。
 
 ## C.4 量測（Python，`experiments/digits/`；Python 是基準，A 的 Rust 要和它逐位元相同）
@@ -53,13 +53,13 @@
 ### C.4.3 判讀規則（事先寫死，用判讀半）
 
 - **R1 預測列**：(ii) 的 hit@9 對基準用 McNemar 精確檢定；兩種設定都**不顯著變差**（p ≥ 0.05 或改對 ≥ 改壞）→ A 的預測列用數字語境；任一設定顯著變差 → A 的預測列維持 `<s>`，只報 (i)。(i) 只報數字，不設門檻（今天是空的）。
-- **R2 判斷**：在調參半選 θ＝{0, 0.5, 1, 2} 裡**最小的**、使 dev302 的 (c) 為 0 者；在判讀半與 typing76 上：(a) ≥ 90%、typing76 的 (c) 為 0、(d) ≤ 20 → A 用評分切分（`digits.md` A.3.3）。調參半上**沒有任何 θ** 讓 dev302 的 (c) 為 0 → R2 不過，A 用結構規則，不看判讀半。(a) < 90% 或 (c) > 0 → A 退回 `digits.md` A.3.3 末段的結構規則（`P(D|C)` 不用）；(d) > 20 只報，由維護者決定要不要收緊 θ。
+- **R2 判斷**：θ 用調參資料選：θ＝{0, 0.5, 1, 2} 裡**最小的**、使 cvtune 與 wikitune 的純中文按鍵上 (c) 為 0 者（不用 dev302 調）。**沒有任何 θ** 做到 → R2 不過，A 用結構規則，不看判讀資料。有 θ 時，在判讀半（數字串集合）與 dev302、typing76 上：(a) ≥ 90%、dev302 與 typing76 的 (c) 都是 0 → A 用評分切分（`digits.md` A.3.3）；否則退回結構規則。(d) 只報，由維護者決定要不要收緊 θ。(a) < 90% 或 (c) > 0 → A 退回 `digits.md` A.3.3 末段的結構規則（`P(D|C)` 不用）；(d) > 20 只報，由維護者決定要不要收緊 θ。
 - 全部數字與雜湊進研究紀錄；判讀半的數字只在最後看一次。
 
 ## C.5 交付、停止條件、範圍外、限制
 
 - **交付**：`tools/build_digits.py`＋測試；`data/lexicon/digits.tsv`（進 git 的唯一一版）與它的 SHA-256；`experiments/digits/`（計分、量測、README 的表）；`eval/golden/digits-score.txt`（合成 30 列、每列每鍵的切分與分數，給 A 的 Rust 比對；檔頭記所用 `digits.tsv` 的 SHA-256；至少一列走到第 5 鍵吐出、一列由不在字母表的注音鍵逼出切分）；研究紀錄；`docs/data-files.md` 一列；`LICENSES/data.md` 一列；`docs/PLAN.md` 一行。
-- **表的大小**：先不截斷 `D`、`Q`、`W` 量一次。超過 2 MB 時，`D`／`Q` 依 N(v→D)、`W` 依 N(D→w)、`P` 依次數，一起設最小次數 k（2、3、5、10…依序試），取第一個 ≤ 2 MB 的 k，記進研究紀錄；被截掉的列照上面「沒有那一列」的公式算，所以表變小不需要改公式。
+- **表的大小**：先不截斷 `D`、`Q`、`W` 量一次。超過 2 MB 時，`D`／`Q` 依 N(v→D)、`W` 依 N(D→w)、`P` 依次數，一起設最小次數 k（2、3、5、10…依序試；N(v) ≥ 1,000 而 N(v→D)＝0 的 `D` 列不受 k 影響，照留），取第一個 ≤ 2 MB 的 k，記進研究紀錄；被截掉的列照上面「沒有那一列」的公式算，所以表變小不需要改公式。
 - **停止條件**：k 到 50 仍超過 2 MB；數字串集合不到 1,000 列；R2 兩種設計都 (c) > 0（結構規則在合法讀音上 (c) 一定是 0，這表示合成按鍵集合或工具有錯）。
 - **範圍外**：解碼用數字語境；英文段的語境；全形數字的輸出；維護者私人資料的任何使用。
-- **限制**：同 `docs/contracts/predict-down.md` B.7；另外 executor 不碰 `~/.cache/shanjie/` 以外的語料位置、不讀保留集語料池；main 在 188／Colab 跑計數並核對雜湊。
+- **限制**：同 `docs/contracts/predict-down.md` B.7；另外 executor 不碰 `~/.cache/shanjie/` 以外的語料位置、不讀保留集語料池；main 在 Windows 機器或 Colab 跑計數並核對雜湊。

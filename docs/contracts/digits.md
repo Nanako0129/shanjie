@@ -174,7 +174,7 @@
 
 - 關著時（核心的預設）：所有 golden、`cli/tests/golden.rs`、既有測試一個位元組不改；`eval/golden/` 只多 C 的 `digits-score.txt`。殼的預設改開的測試另列（A.4.3）。
 - 開著：`timing_typing76_keys`、`…_with_taught_picks_and_50k`、重播的 p95 < 16 ms（release、低負載、PR 附數字與負載）；引擎建構時間多讀一張表的差（量一次，只報）。
-- `make test-rust`（188 WSL）、`make test-swift`、CI 全綠；`/code-review`；fresh verifier CONFIRMED。
+- `make test-rust`（Windows 機器的 WSL）、`make test-swift`、CI 全綠；`/code-review`；fresh verifier CONFIRMED。
 - 保留集不另外跑（解碼沒改）。
 - 實機（A.2）。
 
@@ -191,7 +191,20 @@
 
 ## A.7 限制與順序
 
-- **順序**：B、C 合併 → A 契約（依 C 的判讀定稿 A.3.3／A.3.5）送 fresh `pilotfish:plan-verifier` → executor → main 跑模擬器（A.4.2）、`make test-rust` 在 188 WSL、`/code-review`＋fresh verifier＋CI → 合併 → 實機。
-- **executor 不可以**：同 B.7；另外不改 `data/lexicon/digits.tsv` 與 `eval/golden/digits-score.txt`（C 的交付；Rust 要配合 Python，不是反過來）；不看私人逆向筆記。
-- **main 不可以**：把另一個輸入法的名字或程式寫進 repo、紀錄、commit、PR；把維護者訊息的統計以外的內容寫進任何地方。
+- **順序**：B、C 合併 → A 契約（依 C 的判讀定稿 A.3.3／A.3.5）送 fresh `pilotfish:plan-verifier` → executor → main 跑模擬器（A.4.2）、`make test-rust` 在 Windows 機器 WSL、`/code-review`＋fresh verifier＋CI → 合併 → 實機。
+- **executor 不可以**：同 B.7；另外不改 `data/lexicon/digits.tsv` 與 `eval/golden/digits-score.txt`（C 的交付；Rust 要配合 Python，不是反過來）。
+- **main 不可以**：把維護者訊息的統計以外的內容寫進任何地方。
 - 預算：executor 1 回合＋1 次修正。
+
+## A.8 送審前要處理（PR #192 的 `/code-review`，2026-10-17）
+
+A 等 C 的判讀才定稿，下面幾項在定稿時一起改，再送 plan-verifier：
+
+1. 「數字後」延續串時，注音切分 m＝0 的語境要用數字語境 (v, D)，不是 C；同一串的切分分數要可比（A.3.3 與 A.3.4 第 63 行矛盾）。
+2. 字母表鍵的注音尾段留在緩衝、不進 `pend`，`recompute_pred` 只讀 `pend`：要規定尾段怎麼餵預測列（否則中英混打開著時，今天以 ㄅ ㄉ ㄓ… 開頭的部分注音預測列會消失），A.3.5 的 `predict_digits` 也要說單位從哪裡來；加測試。
+3. `digits.tsv` 不能當必要檔：關著時既有測試要逐位元相同，而 FFI 子行程測試逐一拿掉必要檔斷言回傳 3。改成可有可無，缺檔時數字功能不生效。
+4. A.3.5 說「今天沒有未完成音節時列是空的（1714），這是唯一的例外」不對：長起點照樣產生列（`engine_predict.rs` 608–609）。
+5. #37 的預期和 A.3.4 不合（第二個字母表鍵只進緩衝，不會產生第 40 個單位）。
+6. #40 拿 `set_english(0)` 的引擎比 `set_english(0)` 的基準，是同義反覆；基準要是不含這一片的行為（今天的程式記下的輸出）。
+7. #49 的 golden 要規定在哪個平台產生（Linux 與 macOS 的 libm 末位不同，Windows 機器的 WSL 已經跳過兩個同類的 golden 測試）。
+8. 「數字後｜空白鍵」引用第 16a 條，但 16a 要求單字表已載入（`shadow_on`），A.3.1 又說數字功能不要求單字表；要另訂數字後空白的規則。

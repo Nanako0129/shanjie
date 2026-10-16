@@ -54,7 +54,7 @@
    | `down_with_a_pending_syllable_and_no_row_is_ignored` | 未完成音節、列是空的；↓ | 輸出和今天相同（第 13 條） |
    | `a_row_item_chosen_with_a_pending_syllable_equals_tab_then_the_digit` | 狀態 (b)，引擎 1：↓、`2`；引擎 2：Tab、`2` | 兩個 `Output` 相等 |
    | `a_row_item_chosen_from_the_window_equals_tab_then_the_digit` | 引擎 1：↓、`2`；引擎 2：Tab、`2` | 兩個 `Output` 相等；學習開著時各自 Enter 後 `learner().records()` 相等 |
-   | `a_lexicon_item_chosen_from_the_window_is_a_repick` | ↓、`R.len()+1` | 固定詞區間 `[cursor−L, cursor)`、`pre` 是被取代的顯示字 |
+   | `a_lexicon_item_chosen_from_the_window_is_a_repick` | ↓ 後 `pick(R.len())`（第一個詞庫項目；R 可能有 9 項，不用數字鍵） | 固定詞區間 `[cursor−L, cursor)`、`pre` 是被取代的顯示字 |
    | `pick_on_a_row_item_in_the_window_equals_the_digit` | ↓ 後 `pick(0)` 對 `1` | 相等 |
    | `the_window_after_punctuation_has_no_row_items` | 「，」之後 ↓ | 清單同今天 |
    | `esc_closes_the_window_and_the_row_stays_gone` | ↓、Esc | 沒有候選、沒有預測列 |
@@ -63,12 +63,12 @@
    | `vertical_window_lists_the_row_first`（`engine_vertical.rs`） | `set_candidate_vertical(1)`、同第一列、↓ | `vertical == 1`、前 R.len() 項等於 R |
    | `the_row_is_cleared_by_other_state_changes`（既有 606） | 只改 617 行的註解 | 仍通過 |
 
-   **既有測試**：預測列預設開，載入模型、沒有未完成音節時按 ↓／空白開窗的既有測試，清單前面會多出預測項目。主題是詞庫清單的測試在設定時加 `set_prediction(false)`，不刪、不放寬任何斷言；至少 `engine_learn.rs` 的 `tiny`／`highlight`／`pick_open`／`row_expanded_pick_equals_enter` 一帶（`engine_learn.rs:790` 仍斷言 `candidates[1] == "欣"`）與 `engine_pack.rs` 的 `the_pack_switch_changes_the_result…`（它第四段「未完成 ㄋ 再按 ↓」從忽略變成開窗，也一併關掉預測）。執行者用 grep 找出 `engine_lm`、`engine_rerank`、`engine_demote`、`kn_tiny`、`tri_tiny`、`engine_vertical` 裡同樣情形的測試照辦。真正要改預期的，PR 逐項列出並說明；既有測試檔的 diff 只有 `set_prediction(false)` 與列出的預期變更。
+   **既有測試**：預測列預設開，載入模型、沒有未完成音節時按 ↓／空白開窗的既有測試，清單前面會多出預測項目。主題是詞庫清單的測試在設定時加 `set_prediction(false)`，不刪、不放寬任何斷言；至少 `engine_learn.rs` 的 `tiny`／`highlight`／`pick_open`／`row_expanded_pick_equals_enter` 一帶、`engine_predict.rs` 的 `a_prediction_pick_is_learned_like_a_repick`（570–578，要測的是詞庫改選）、`engine_english.rs` 用真模型的 `choose_word`／`repick_two`（`engine_learn.rs:790` 仍斷言 `candidates[1] == "欣"`）與 `engine_pack.rs` 的 `the_pack_switch_changes_the_result…`（它第四段「未完成 ㄋ 再按 ↓」從忽略變成開窗，也一併關掉預測）。執行者用 grep 找出 `engine_lm`、`engine_rerank`、`engine_demote`、`kn_tiny`、`tri_tiny`、`engine_vertical` 裡同樣情形的測試照辦。真正要改預期的，PR 逐項列出並說明；既有測試檔的 diff 只有 `set_prediction(false)` 與列出的預期變更。
 
    **突變**（每項讓某個測試以斷言失敗；看結束碼與斷言數）：不放預測項目；放在詞庫項目之後；不去重；`choose` 把預測項目當詞庫項目；⌘⌫ 對預測項目不遺忘；有未完成音節時 ↓ 照舊忽略；列是空的時 ↓ 也開窗。
 2. **殼**（`swift test`）：`CandidateCellTests.testPassiveRowShowsTheTabGlyphOnTheFirstCell`（`update(selected: -1, numbered: true)` → `cells[0].numberText == tabGlyph`、`showsNumber`；`cells[1].showsNumber == false`；`update(selected: 0)` → "1"；`numbered: false` → ""）；`testNumberSlotCoversTheTabGlyph`；`testEnteringTheRowReusesTheFirstCell`（**同一個** `CandidateCells` 先 `update(selected: -1)` 再 `update(selected: 0)`，候選相同：`reused[0] == true`、`removed` 是空的、`cells[0].numberText == "1"`；另一個新的 `CandidateCells` 從 `selected: 0` 開始再到 −1，同樣斷言；兩個方向前後的 `cells[0].contentWidth` 與 `candidateMinX` 都相同；今天的程式會失敗，只加寬未進入時建出的格子也會失敗）；`ShellTests.testPredictionRowShowsNoNumbersUntilTabEnters`（73）加圖示斷言。突變：圖示不設；`numberSlot` 不含圖示；第 0 格不重用（`testEnteringTheRowReusesTheFirstCell` 失敗）。
 3. **不變**：`eval/golden/` 一個位元組不改；`engine_replay.rs` 三個 run 302／302；`cli/tests/golden.rs` 不變；`timing_typing76_keys` p95 < 16 ms。
-4. `make test-rust`（188 WSL）、`make test-swift`、CI 全綠；`/code-review` 無未處置；fresh verifier CONFIRMED。
+4. `make test-rust`（Windows 機器的 WSL）、`make test-swift`、CI 全綠；`/code-review` 無未處置；fresh verifier CONFIRMED。
 5. 實機（B.2）。
 6. 保留集：不跑（不碰解碼，第一名不變；每跑一次算一次使用）。
 
@@ -82,4 +82,4 @@
 
 ## B.7 限制
 
-executor 不連網；不讀 `eval/holdout/`、`shanjie-private/`、Discord 資料、學習檔、聊天紀錄；不安裝、不啟動 App、不執行 `.app` 裡的程式、不呼叫 TIS／lsregister、不碰 `~/Library` 與鑰匙圈；不 push、不開 PR、不碰其他 worktree；Mac 只跑改到的測試檔（`cargo test -p core --test engine_predict --test engine_vertical`、`make test-swift`），完整 `make test-rust` 由 main 在 188 WSL 跑；不改 `recompute_pred`、`predict`、解碼。預算：executor 1 回合＋1 次修正；外觀由維護者輪次決定。
+executor 不連網；不讀 `eval/holdout/`、`shanjie-private/`、Discord 資料、學習檔、聊天紀錄；不安裝、不啟動 App、不執行 `.app` 裡的程式、不呼叫 TIS／lsregister、不碰 `~/Library` 與鑰匙圈；不 push、不開 PR、不碰其他 worktree；Mac 只跑改到的測試檔（`cargo test -p core --test engine_predict --test engine_vertical`、`make test-swift`），完整 `make test-rust` 由 main 在 Windows 機器的 WSL 跑；不改 `recompute_pred`、`predict`、解碼。預算：executor 1 回合＋1 次修正；外觀由維護者輪次決定。
