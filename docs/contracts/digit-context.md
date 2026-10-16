@@ -1,6 +1,6 @@
 # 契約：數字語境——公開語料的計數表與離線量測（digit-context，研究片，不改核心）
 
-狀態：修訂二（2026-10-17；plan-verifier 第一次 REVISE：表的總數、排除方式、Python 要重做的規則範圍、R2 沒有 θ 可選時；第二次 REVISE：輸入清單、P_len 在 10 字以上、表的大小）。
+狀態：READY（2026-10-17 收尾審查，唯一一項「`LICENSES/data.md` 要加一列」照它的最小修改改完）。修訂二（2026-10-17；plan-verifier 第一次 REVISE：表的總數、排除方式、Python 要重做的規則範圍、R2 沒有 θ 可選時；第二次 REVISE：輸入清單、P_len 在 10 字以上、表的大小）。
 
 讀過的程式與行號是 main `af78dedc`（到 `d52949b3` 為止 `core/`、`macos/`、`cli/`、`tools/`、`experiments/` 都沒有改動）。標〔推論〕的沒有量過。三片的順序是 B → C → A（A 是 `docs/contracts/digits.md`，等 C 的判讀定稿後再送審）。
 
@@ -33,7 +33,7 @@
   - `C\tch\tN`：串裡每個字元的次數（0–9 . / -）。
   - `S\tN(D→end)`：串後面是邊界（標點、空白、英文、行尾）的次數。
 - `digits.md` A.3.2 的每個量都寫成這張表的公式（P(D)＝N(D)／T；P(D | C) 用 `D` 列，沒有列時用 P(D)；P_len、P_ch 用 `L`、`C` 列；P(w | D)＝(N(D→w)＋γ·P(w))／(N(D)＋γ)；P(w | v, D) 的分母是 `Q` 列；沒有 `W` 列時分子是 0；沒有 `Q` 列時 P(w | v, D)＝P(w | D)），`tools/test_build_digits.py` 在合成小語料上逐一斷言，語料裡要有一個字的漢字段緊鄰數字串、切不出來的漢字段、串後面是邊界、10 字以上的串四種情形，並逐一測「沒有 `D`／`W`／`Q`／`P` 列」時的公式。
-- 輸出照位元組排序，檔頭一行記來源快照與工具版本；`docs/data-files.md` 加一列（來源、雜湊、重建指令）；`LICENSES/data.md` 不用新列（來源同模型）。
+- 輸出照位元組排序，檔頭一行記來源快照與工具版本；`docs/data-files.md` 加一列（來源、雜湊、重建指令）；`LICENSES/data.md` 加一列 `data/lexicon/digits.tsv`，照 `data/lm/kn.sjkn` 那一列寫：由 `tools/build_digits.py` 從和 `bigram.sjlm` 相同的公開來源建出，CC BY-SA 4.0，署名 Wikipedia contributors、Tatoeba contributors，不含任何私人對話資料。
 - **只有一版表**（進 git，量測與出貨同一份）：C.4 的數字串集合本來就不在計數的來源裡，不另做排除。cvtune 的行是口語語料 `is_tune` 那 20%，`colloquial-train` 不含它們（`experiments/s2/build_tune.py`）；wikitune 是維基第 300,000–304,999 篇，計數用前 200,000 篇（`--articles 200000`，`docs/contracts/model-v6.md`）。
 
 ## C.4 量測（Python，`experiments/digits/`；Python 是基準，A 的 Rust 要和它逐位元相同）
@@ -58,7 +58,7 @@
 
 ## C.5 交付、停止條件、範圍外、限制
 
-- **交付**：`tools/build_digits.py`＋測試；`data/lexicon/digits.tsv`（進 git 的唯一一版）與它的 SHA-256；`experiments/digits/`（計分、量測、README 的表）；`eval/golden/digits-score.txt`（合成 30 列、每列每鍵的切分與分數，給 A 的 Rust 比對；檔頭記所用 `digits.tsv` 的 SHA-256；至少一列走到第 5 鍵吐出、一列由不在字母表的注音鍵逼出切分）；研究紀錄；`docs/data-files.md` 一列；`docs/PLAN.md` 一行。
+- **交付**：`tools/build_digits.py`＋測試；`data/lexicon/digits.tsv`（進 git 的唯一一版）與它的 SHA-256；`experiments/digits/`（計分、量測、README 的表）；`eval/golden/digits-score.txt`（合成 30 列、每列每鍵的切分與分數，給 A 的 Rust 比對；檔頭記所用 `digits.tsv` 的 SHA-256；至少一列走到第 5 鍵吐出、一列由不在字母表的注音鍵逼出切分）；研究紀錄；`docs/data-files.md` 一列；`LICENSES/data.md` 一列；`docs/PLAN.md` 一行。
 - **表的大小**：先不截斷 `D`、`Q`、`W` 量一次。超過 2 MB 時，`D`／`Q` 依 N(v→D)、`W` 依 N(D→w)、`P` 依次數，一起設最小次數 k（2、3、5、10…依序試），取第一個 ≤ 2 MB 的 k，記進研究紀錄；被截掉的列照上面「沒有那一列」的公式算，所以表變小不需要改公式。
 - **停止條件**：k 到 50 仍超過 2 MB；數字串集合不到 1,000 列；R2 兩種設計都 (c) > 0（結構規則在合法讀音上 (c) 一定是 0，這表示合成按鍵集合或工具有錯）。
 - **範圍外**：解碼用數字語境；英文段的語境；全形數字的輸出；維護者私人資料的任何使用。
