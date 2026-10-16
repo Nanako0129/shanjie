@@ -6356,3 +6356,9 @@ formal: alpha 0.7, tau 1, delta 2
 - golden：表在 `data/lm` 時 Mac 的 `cargo test -p cli --test golden` 25／25（表由映射載入）。
 - `/code-review`（PR #181）之後的修正：`Mapped::open` 改成 `unsafe fn`，安全契約寫明「檔案映射期間不可原地截短或改寫」；開檔照 `tinylm` 的做法加 `O_NONBLOCK` 與 `is_file()`；`tools/build_trigram.py` 改成先寫暫存檔再 rename；`docs/data-files.md` 的下載說明改成下載到暫存資料夾再 `mv`；`core/include/shanjie.h` 寫明前提。沒做：記憶體吃緊、頁面被丟掉之後的按鍵延遲（要不要加 `madvise`）沒有資料，記成已知限制。
 - 完整 Rust 測試（Windows 機器 WSL）：有表 473 過、0 失敗（`4c88bb3`）；沒有表（`NO_TRI=1`，`f559177`）27 個失敗，全部停在缺表的斷言（`cli/tests/golden.rs:66` 11 個、`core/tests/engine_lm.rs:18` 16 個，各印一次下載訊息），沒有其他失敗。第 C 片之後表是必要的檔，契約第 1 項「沒有表時也全過」照此放寬。
+
+## 2026-10-16：錯字回報第 122–124 列（做齊、什麼是、圖示）
+
+- 維護者實機的三個錯字：「功能有沒有坐騎」要「做齊」、「概念什麼事完整」要「什麼是」、「app圖是在dock」要「圖示」。加成 `是都只做MVP最基本的東西，|還要我一直追你功能有沒有做齊`、`我們的目標是做完整的client|你應該要有概念什麼是完整`、`底下也沒有app|圖示在`（讀音由 `tools/readings.py` 產生，沒有 CHECK）。
+- Python 參考實作、golden 設定（`--context`，沒有詞包與語意校正）：三列兩種設定第 1 名都是錯的那個（坐騎、什麼事、圖是）。正解名次：做齊 聊天第 12、書面第 18；什麼是、圖示 兩種設定都第 2。
+- `eval/golden/s2h-lm-context.txt` 的錯字回報兩行用 Python 參考實作重產，n 124：聊天 top1 29、書面 37 不變，oracle@64 兩種設定都 118 → 121；`eval/README.md` 改成 124 列。
