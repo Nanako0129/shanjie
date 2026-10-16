@@ -9,15 +9,16 @@
 | `bigram.sjlm` | [`model-v6`](https://github.com/Nanako0129/shanjie/releases/tag/model-v6) | bigram 語言模型：詞與詞相鄰出現的機率；含少量用來辨識來源的指紋條目 | 83,445,569 bytes | `data/bigram.sjlm.sha256` |
 | `classes.sjc` | [`classes-v5`](https://github.com/Nanako0129/shanjie/releases/tag/classes-v5) | 詞類表（S2k）：512 個詞類、每個詞屬於哪一類、「這類詞後面接那類詞」的機率。兩個詞沒在語料一起出現過時，用它補估計；classes-v5 和 classes-v4 只差權重 μ（0.8 → 0.2） | 5,656,826 bytes | `data/classes.sjc.sha256` |
 | `kn.sjkn` | [`kn-v1`](https://github.com/Nanako0129/shanjie/releases/tag/kn-v1) | Kneser–Ney 側檔（SJKN0002，`docs/contracts/kn-core.md`）：每個詞的接續次數，θ 1、β 1；放在模型旁邊時核心就開 KN 回退分布 | 1,414,052 bytes | `data/kn.sjkn.sha256` |
+| `trigram.sjt3` | [`trigram-v1`](https://github.com/Nanako0129/shanjie/releases/tag/trigram-v1) | 書面設定用的 trigram 表（SJT30001，`docs/contracts/trigram-core.md`）：4,101,808 個兩詞前文、7,700,964 條剪枝後的次數，綁 model-v6 | 143,643,936 bytes | `data/trigram.sjt3.sha256` |
 | `tinylm.sjtl` | [`tinylm-v5`](https://github.com/Nanako0129/shanjie/releases/tag/tinylm-v5) | 「語意校正」用的小型字元語言模型（S7，SJTL0004）：6 層、字表 9,714 字，二維權重 int8；在 n-gram 的前幾名裡重新排序；檔頭除了標準的融合參數，還有語意校正強度的保守與積極兩檔，以及調參時用的 `kn.sjkn` 的 SHA-256 | 14,638,352 bytes | `data/tinylm.sjtl.sha256` |
 
 - **放在同一個資料夾**（`data/lm/`）。前三個一起用；`classes.sjc` 不含模型本身，`classes-v5` 這個 Release 也只有這一個檔案。
 - **綁定**：`classes.sjc` 裡記了它是為哪個模型建的（model-v6 的 SHA-256）。缺檔、配到別的模型、或檔案內容不對，載入都會失敗（C ABI 的 `load_lm` 回傳 3），不會靜靜地用錯或不用。
 - **Kneser–Ney 側檔的綁定**：`kn.sjkn` 裡記了模型的 SHA-256（model-v6）；模型旁邊有它，核心就開 KN，缺了就不開；檔案壞掉或配到別的模型時載入失敗（C ABI 的 `load_lm` 回傳 3）。
-- **trigram 表（`trigram.sjt3`，尚未出貨）**：SJT30001（`docs/contracts/trigram-core.md`、`reference/proto/trigram.py`），放在模型旁邊；檔頭綁模型的 SHA-256，核心載入時核對（壞了或配到別的模型回傳 3，沒有這個檔就關閉）。只有書面設定用它（書面有表時 KN 關）。由 `tools/build_trigram.py` 把研究用的表重新對應到出貨模型的詞 id。目前沒有 Release 附件、`data/` 沒有雜湊檔、App 與 CI 不放（第 C 片才加）；Rust CLI 只在 `--profile formal` 且模型旁有它時載入（聊天與預測模式不讀），`--no-tri` 關閉，摘要行加 `+tri:<sha8>`。
+- **trigram 表（`trigram.sjt3`）**：SJT30001（`docs/contracts/trigram-core.md`、`reference/proto/trigram.py`），放在模型旁邊；檔頭綁模型的 SHA-256，核心載入時核對（壞了或配到別的模型回傳 3，沒有這個檔就關閉）。只有書面設定用它（書面有表時 KN 關）。由 `tools/build_trigram.py` 把研究用的表重新對應到出貨模型的詞 id。附件在 `trigram-v1`，`data/trigram.sjt3.sha256` 記雜湊，CI、發布與 App 都放；缺檔時 `cli/tests/golden.rs`、Swift 測試與 `scripts/build-app.sh` 以下載訊息失敗；Rust CLI 只在 `--profile formal` 且模型旁有它時載入（聊天與預測模式不讀），`--no-tri` 關閉，摘要行加 `+tri:<sha8>`。
 - **語意校正模型的綁定**：`tinylm.sjtl` 裡記了它調參時用的模型（model-v6 的 SHA-256）與 KN 側檔（kn-v1 的 SHA-256，SJTL0004），任何一個配不上，核心就拒絕載入、只用 n-gram。它不檢查詞類表，但它的 α、τ、δ 是在 model-v6＋classes-v4＋kn-v1 上調的，所以重新分群也要重新調參、發新的 `tinylm-v…`（見下面的表）；classes-v5 只改 μ，是開著 tinylm-v5 量過才選的，沿用 tinylm-v5。
 - **英文單字表**（中英混打，`docs/contracts/zhen-mixed.md`）不在這張表：它不是 Release 附件，也不進 git，每次建置時由 `scripts/build-app.sh` 產生（見下面「建置時產生的檔案」）。
-- **App 裡**：打包時 `bigram.sjlm`、`classes.sjc`、`kn.sjkn`（model-v6 起）放進 `善解輸入法.app/Contents/Resources/`，使用者不用另外下載。`tinylm.sjtl` 從語意校正上線（S7c-2b，`docs/contracts/s7c2b-shell-rerank.md`）起也一起放進去。
+- **App 裡**：打包時 `bigram.sjlm`、`classes.sjc`、`kn.sjkn`（model-v6 起）、`trigram.sjt3` 放進 `善解輸入法.app/Contents/Resources/`，使用者不用另外下載。`tinylm.sjtl` 從語意校正上線（S7c-2b，`docs/contracts/s7c2b-shell-rerank.md`）起也一起放進去。
 
 ## 建置時產生的檔案
 
@@ -32,7 +33,8 @@ gh release download model-v6 -R Nanako0129/shanjie -p bigram.sjlm -D data/lm
 gh release download classes-v5 -R Nanako0129/shanjie -p classes.sjc -D data/lm
 gh release download kn-v1 -R Nanako0129/shanjie -p kn.sjkn -D data/lm
 gh release download tinylm-v5 -R Nanako0129/shanjie -p tinylm.sjtl -D data/lm
-shasum -a 256 -c data/bigram.sjlm.sha256 data/classes.sjc.sha256 data/kn.sjkn.sha256 data/tinylm.sjtl.sha256
+gh release download trigram-v1 -R Nanako0129/shanjie -p trigram.sjt3 -D data/lm
+shasum -a 256 -c data/bigram.sjlm.sha256 data/classes.sjc.sha256 data/kn.sjkn.sha256 data/tinylm.sjtl.sha256 data/trigram.sjt3.sha256
 ```
 
 沒有登入 `gh` 的話，改用 `https://github.com/Nanako0129/shanjie/releases/download/<Release>/<檔名>` 下載。

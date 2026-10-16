@@ -4,7 +4,7 @@ import XCTest
 @testable import ShanjieKit
 
 /// The repository's data, laid out like the app's Resources (docs/contracts/s3b.md section 10.4):
-/// a temporary directory of symlinks to data/lexicon/*, data/lm/bigram.sjlm, classes.sjc, kn.sjkn and tinylm.sjtl. Missing files fail
+/// a temporary directory of symlinks to data/lexicon/*, data/lm/bigram.sjlm, classes.sjc, kn.sjkn, trigram.sjt3 and tinylm.sjtl. Missing files fail
 /// the test with instructions; nothing is ever skipped.
 enum TestData {
     static let repo = URL(fileURLWithPath: #filePath)
@@ -20,6 +20,7 @@ enum TestData {
         ("bigram.sjlm", "data/lm/bigram.sjlm"),
         ("classes.sjc", "data/lm/classes.sjc"),
         ("kn.sjkn", "data/lm/kn.sjkn"),  // model-v6: the Kneser-Ney side file the shipped tinylm.sjtl (SJTL0004) records
+        ("trigram.sjt3", "data/lm/trigram.sjt3"),  // trigram-core: the formal profile's table, loaded from beside the model
         ("tinylm.sjtl", "data/lm/tinylm.sjtl"),
         // zhen-mixed: the synthetic list stands in for the generated Resources/english-words.txt (docs/contracts/zhen-mixed.md section 5.3).
         ("english-words.txt", "eval/golden/english-tiny.txt"),
@@ -48,6 +49,7 @@ enum TestData {
                     gh release download model-v6 -R Nanako0129/shanjie -p bigram.sjlm -D data/lm
                     classes.sjc: gh release download classes-v5 -R Nanako0129/shanjie -p classes.sjc -D data/lm
                     kn.sjkn: gh release download kn-v1 -R Nanako0129/shanjie -p kn.sjkn -D data/lm
+                    trigram.sjt3: gh release download trigram-v1 -R Nanako0129/shanjie -p trigram.sjt3 -D data/lm
                     tinylm.sjtl: gh release download tinylm-v5 -R Nanako0129/shanjie -p tinylm.sjtl -D data/lm
                     """, file: file, line: line)
                 return nil

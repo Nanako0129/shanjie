@@ -96,9 +96,10 @@ jobs:
       # release asset, its word-class table (S2k) is the classes-v5 asset and its
       # Kneser-Ney side file (kn-core) is the kn-v1 asset. The small model of
       # 語意校正 (S7c-2b) is the tinylm-v5 asset (SJTL0004: it records model-v6's and kn-v1's hashes).
+      # The trigram table of the formal profile (trigram-core) is the trigram-v1 asset (bound to model-v6's hash).
       # Checking them here fails the run in seconds with a clear message instead
       # of after the build. The hashes are checked against data/bigram.sjlm.sha256,
-      # data/classes.sjc.sha256, data/kn.sjkn.sha256 and data/tinylm.sjtl.sha256 (also read by build-app.sh and release.yml);
+      # data/classes.sjc.sha256, data/kn.sjkn.sha256, data/tinylm.sjtl.sha256 and data/trigram.sjt3.sha256 (also read by build-app.sh and release.yml);
       # cli/tests/golden.rs repeats the first two, so a model switch updates both (docs/data-files.md).
       - name: Fetch the language model
         env:
@@ -113,6 +114,8 @@ jobs:
           shasum -a 256 -c data/kn.sjkn.sha256
           gh release download tinylm-v5 --repo "$GITHUB_REPOSITORY" -p tinylm.sjtl -D data/lm
           shasum -a 256 -c data/tinylm.sjtl.sha256
+          gh release download trigram-v1 --repo "$GITHUB_REPOSITORY" -p trigram.sjt3 -D data/lm
+          shasum -a 256 -c data/trigram.sjt3.sha256
 
       - name: Tests (debug)
         run: cargo test --locked
@@ -268,6 +271,8 @@ jobs:
           shasum -a 256 -c data/kn.sjkn.sha256
           gh release download tinylm-v5 --repo "$GITHUB_REPOSITORY" -p tinylm.sjtl -D data/lm
           shasum -a 256 -c data/tinylm.sjtl.sha256
+          gh release download trigram-v1 --repo "$GITHUB_REPOSITORY" -p trigram.sjt3 -D data/lm
+          shasum -a 256 -c data/trigram.sjt3.sha256
 
       # The local entry points (Makefile, docs/verification.md). cargo test
       # already ran in the core job, so only the Swift tests run here.

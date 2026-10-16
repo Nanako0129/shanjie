@@ -57,10 +57,13 @@ const LM_MISSING: &str = "data/lm/bigram.sjlm is missing: download it with `gh r
 
 const CLASSES_MISSING: &str = "data/lm/classes.sjc is missing: download it with `gh release download classes-v5 -R Nanako0129/shanjie -p classes.sjc -D data/lm` (or build it with tools/build_classes.py)";
 
+const TRIGRAM_MISSING: &str = "data/lm/trigram.sjt3 is missing (the formal profile's trigram table): download it with `gh release download trigram-v1 -R Nanako0129/shanjie -p trigram.sjt3 -D data/lm`";
+
 fn lm_path() -> String {
     let p = format!("{}/../data/lm/bigram.sjlm", env!("CARGO_MANIFEST_DIR"));
     assert!(std::path::Path::new(&p).exists(), "{LM_MISSING}");
     assert!(std::path::Path::new(&format!("{}/../data/lm/classes.sjc", env!("CARGO_MANIFEST_DIR"))).exists(), "{CLASSES_MISSING}");
+    assert!(std::path::Path::new(&format!("{}/../data/lm/trigram.sjt3", env!("CARGO_MANIFEST_DIR"))).exists(), "{TRIGRAM_MISSING}");
     p
 }
 
