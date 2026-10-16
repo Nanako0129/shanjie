@@ -1,6 +1,6 @@
 # 契約：trigram 進核心，只用在書面設定（trigram-core）
 
-狀態：修訂三（2026-10-16；修訂一、二處理 plan-verifier 的兩次 REVISE，見 §5；修訂三把第 B 片寫細）。
+狀態：修訂四（2026-10-16；修訂一、二處理 plan-verifier 的兩次 REVISE，見 §5；修訂三把第 B 片寫細；修訂四把第 C 片寫細）。
 
 ## 0. 依據
 
@@ -89,12 +89,21 @@
 - 停止條件：B2 不到門檻；B3 不通過（轉修訂四）。
 - 預算：B2 的測試開關 executor 1 次＋修正 1 次；B2、B3 的量測 main 在 Windows 機器各半小時以內。
 
-### 第 C 片：資料 Release、打包、發版
+### 第 C 片：資料 Release、打包、golden、發版（修訂四寫細）
 
-- 資料 Release `trigram-v1`（`trigram.sjt3` 與說明檔，授權和 model-v6 相同），`data/trigram.sjt3.sha256`、`scripts/build-app.sh`、CI、`release.yml` 的下載與核對；`tools/bench.py` 的 `VERSIONS2` 加列（書面帶 `+tri:`）。
-- **書面重播列**（從第 B 片移來）：`tools/bench/replay` 加第五個參數 `chat|formal`（預設 chat）；`tools/bench.py` 套件 v2 的速度表（`measure_speed2`）在聊天重播之外多一列書面重播，模型資料夾照 `VERSIONS2`（有 `trigram.sjt3` 的版本放表）；書面的「重播＝CLI」核對對一格 `--profile formal` 的 CLI，預期標記在有表時含 `+tri:`；舊的結果 JSON 沒有書面列時表上顯示「—」；套件 v1 的文字逐位元組不變（`test_table_appends_v2_after_unchanged_v1_text` 照舊通過），`test_bench.py` 加書面列的測試。
-- 跨版本基準（含書面重播列）與保留集照發版流程；保留集書面那一行顯著為負就不出貨。
-- 安裝檔會變大（〔推論〕trigram 表壓縮後約 40 MB，沒量），發版說明寫實際大小。
+照 model-v6 的換檔做法（kn-v1 的五處）：表從此在 CI、建置與 App 裡都存在，書面設定的輸出因此改變。
+
+- **C1 資料 Release `trigram-v1`**（建 Release 要維護者當下同意）：附件是第 0 片重對應的 H3（`trigram.sjt3`，`fdd3b05d…`，143,643,936 bytes，綁 model-v6 `fc2bddd1`）；說明檔 `docs/releases/trigram-v1.md`（來源：derisk-1015 E1a 的維基 20 萬篇與口語計數、E1e 相對熵剪枝、`tools/build_trigram.py` 重對應；授權 CC BY-SA 4.0，和 model-v6 相同；不含私人對話資料）。照 `docs/releases/README.md` 的換檔流程：上傳前後用說明檔裡的雜湊核對，`--latest=false`。
+- **C2 釘選與打包**：`data/trigram.sjt3.sha256`；`.github/workflows/ci.yml` 兩處下載（同 kn-v1）、`release.yml` 一處；`scripts/build-app.sh` 檢查、複製進 `Resources/`、授權歸屬檔加一行；`scripts/check-app.sh` 檔案清單、雜湊、歸屬；Windows 機器的測試腳本從模型庫複製（把檔放進模型庫，雜湊核對）。App 端不改程式：`Engine::load_lm` 讀模型旁的 `trigram.sjt3`，書面設定自動用上。另外：`macos/Tests/ShanjieKitTests/Support.swift` 組測試資源時連結 `trigram.sjt3`（缺檔時的訊息比照其他模型檔），讓 Swift 測試跑的是出貨的形狀；`LICENSES/data.md` 加 `trigram.sjt3` 一列（CC BY-SA 4.0，來源歸屬同 model-v6，不含私人資料）；`CONTRIBUTING.md` 與 `docs/data-files.md` 加 `trigram-v1` 的下載與 `data/trigram.sjt3.sha256` 核對；`cli/tests/golden.rs` 的 `lm_path()`（或書面的 golden 測試）斷言表在，缺表時給下載訊息（比照 `CLASSES_MISSING`），不是 golden 差異。驗收：刪掉 `data/lm/trigram.sjt3` 時書面 golden 測試以下載訊息失敗；`make test-swift` 有一個書面的測試或紀錄看得到表被讀到；`grep -l trigram.sjt3` 找得到 `LICENSES/data.md`、`CONTRIBUTING.md`、`docs/data-files.md`、`Support.swift`。
+- **C3 golden 重產**（表在 `data/lm` 之後）：書面設定的 golden 會變，聊天不變。
+  - **先觀察、再處置**：表放進 `data/lm` 之後、改任何 golden 之前，跑完整的 Rust 測試（Windows 機器的 WSL，`wsltest.sh` 的模型庫加入表）與 `make test-swift`（Mac，表在 `data/lm`），把每一個失敗的測試記進研究紀錄。已知會變的（這份清單是下限，不是全部）：`eval/golden/s2-lm*.txt`、`s2-lm-dev302-formal.rowstats`、`s2-lm-dev302-top1.tsv` 的書面欄、`s2h-lm-context.txt`、`sw-probe.txt` 的書面段（有無 `--context`）、`cli/tests/golden.rs` 寫死的書面摘要行（含 `no_classes_flag_matches_its_pinned_numbers` 的 `lm-formal+ctx-noclasses+kn:…` 那行）、手動詞測試釘的例外（第 4、8 列，WSL 與 Mac 都量過）、`core/tests/engine_lm.rs` 手寫釘死的書面字串（`acceptance6_sentence_has_three_different_top1`、`set_profile_snapshot…`、`profile_before_load…`、`right_fixed_word_transition…`）、`engine_demote`／`engine_pack`／`engine_predict`／`engine_rerank` 用真模型的書面測試、Swift 的書面釘選（例如 `Support.swift` 附近）。
+  - 重產：golden 檔由 Python 參考實作（`reference/proto/lm_eval.py`，自動讀模型旁的表）在 Mac 重產，Rust 逐位元組比對；手寫釘死的字串由解碼器或 Python 重新推出，不是直接抄新的輸出；某個測試的前提（例如「聊天與書面三個第一名不同」、第 10 列的轉移前提）有表之後不成立，就換一列並在測試註解寫明原因（比照之前兩次換列）。
+  - 聊天不變：混合兩種設定的檔（`s2-lm.txt`、`s2h-lm-context.txt`、`top1.tsv`），`git diff` 只碰書面的行與欄；只有聊天的檔逐位元組不變。
+  - 研究紀錄逐一列出改變的檔、改變的列數，以及每個書面 golden 新舊 top1 的差。
+- **C4 書面重播列**（從第 B 片移來）：`tools/bench/replay` 加第五個參數 `chat|formal`（預設 chat）；`tools/bench.py` 套件 v2 的速度表（`measure_speed2`）在聊天重播之外多一列書面重播，模型資料夾照 `VERSIONS2`（有 `trigram.sjt3` 的版本放表）；書面的「重播＝CLI」核對對一格 `--profile formal` 的 CLI，預期標記在有表時含 `+tri:`；舊的結果 JSON 沒有書面列時表上顯示「—」；套件 v1 的文字逐位元組不變（`test_table_appends_v2_after_unchanged_v1_text` 照舊通過），`test_bench.py` 加書面列的測試。`VERSIONS2` 加下一版的一列（書面帶 `+tri:`）。
+- **C5 發版**：照發版流程（跨版本基準套件 v2、保留集由 fresh verifier 跑一次，現役是 shard-1，n 300）。保留集書面那一行「改壞 > 改對且 p < 0.05」就不出貨，回報維護者。發版說明寫：書面設定改用 trigram（百科、正式文較常一次選對；口語打字的差別不大），安裝檔與記憶體變大的實際數字（安裝 zip 約多 44 MB：表單獨 zip 後 44.3 MB，Mac 量；記憶體多約 136 MB：第 A 片用重播程式量的最大 RSS，App 裡的實際常駐是推論、要另外標明），手動詞「米雅歌」書面要改選一次（已知問題）。推 tag 要維護者當下同意。
+- 停止條件：有表時失敗、卻不在研究紀錄那份失敗清單上的測試；golden 重產時聊天的任何一個檔或行改變；Rust 與 Python 的書面 golden 不相同；書面重播列超過上限（p95 +1 ms、RSS +150 MB）；保留集書面顯著變差。
+- 預算：C2–C4 executor 1 次＋修正 1 次；C1、C5 由 main 做。
 
 ## 3. 範圍外
 
@@ -111,6 +120,7 @@
 
 | 輪次 | 結果 | 處置 |
 |---|---|---|
+| plan-verifier（修訂四，第 C 片） | 第一次 REVISE 2 項：C3 會變的 golden 與釘死的測試沒列全、也沒有「先觀察有表時哪些測試失敗」的步驟；C2 漏了 Swift 測試資源、授權表、貢獻與資料說明、缺表時的明確訊息 | 都 FIX：C3 改成先跑完整 Rust（WSL）與 Swift（Mac）記下失敗清單再逐項處置、手寫釘死的字串重新推出、前提失效就換列；C2 加四處與驗收；停止條件加「不在清單上的失敗」 |
 | plan-verifier（修訂三，第 B 片） | 第一次 REVISE 2 項：B1 書面重播列在第 C 片之前做不到（模型資料夾來自 `VERSIONS2` 與雜湊檔）；B2 把 CLI 的手動詞測試當成 `engine_learn` 的、只在 `load_lm` 處切設定、沒有檢查表真的載入 | 都 FIX：B1 移到第 C 片；B2 每個建立引擎的地方都切書面並斷言有表、手動詞另跑並用錯幾列判讀。收尾審查 READY |
 | plan-verifier（第 2 次） | REVISE 1 項：(d) 書面預測列不變沒有驗收（KN 是共用 `Lm` 上的欄位，改成依設定關 KN 時容易連預測列一起關） | FIX：引擎測試加書面預測列有表／沒有表逐位元組相同與對應突變；(a)、(b) 兩處措辭照建議補清楚。第二次 REVISE 後逐項處置完，照維護者對同類情況的決定（收尾只差規格就進實作）不再送審 |
 | plan-verifier（第 1 次） | REVISE 2 項：引擎詞段交界的歷史規則沒定（u、收尾項、`total_score`、預測列的 KN）；學到的詞照樣經過 trigram 時加分會被 back3 縮小，沒有驗收量書面有表時的選字記憶 | 兩項都 FIX：第 A 片加 (a)–(d) 與學到的詞不經過 trigram 的例外、引擎測試與四個突變；第 B 片加書面有表的 `engine_learn` 門檻與停止條件 |
