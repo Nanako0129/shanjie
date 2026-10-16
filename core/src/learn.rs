@@ -42,11 +42,12 @@ pub const NEWWORD: &str = "#";
 /// Syllables (= characters) of a learned new word (§2.2).
 pub const NEWWORD_MIN: usize = 2;
 pub const NEWWORD_MAX: usize = 4;
-/// At most this many new-word records, trimmed lowest weight first apart from `CAPACITY` (§2.3).
+/// At most this many new-word records, trimmed lowest weight first apart from `CAPACITY` (§2.3): in memory at every
+/// new-word learn (`learn_new`), on load and at every full rewrite (`prune`).
 pub const NEWWORD_CAP: usize = 2_000;
-/// Characters that split a run of re-picked single characters (§2.2): high-frequency function characters. The
-/// table the pre-study simulation used; it was picked after looking at dev, so main re-chooses it on cvtune and
-/// wikitune (contract §3.2) and records the sweep in the research log.
+/// Characters that split a run of re-picked single characters (§2.2): high-frequency function characters. Table T1,
+/// the one the pre-study simulation used (picked after looking at dev, so in sample). It was not swept in this slice:
+/// contract §3.2 and §7 keep T1 and leave other tables out of scope.
 pub const NEWWORD_BREAK: &str = "的了是在再嗎呢吧啊喔耶囉啦欸也而就和或與及跟你我他她它們這那有沒要會很都還又給把被讓";
 /// A run made only of these is never learned (§2.2): numbers, codes and amounts.
 pub const NEWWORD_DIGITS: &str = "〇零一二三四五六七八九十百千萬億兩壹貳參肆伍陸柒捌玖拾佰仟";
@@ -223,22 +224,23 @@ impl Learner {
     }
     /// §2.4: new words of `reading` with decayed weight ≥ `ACTIVE`, heaviest first (ties by word).
     pub fn new_words(&self, reading: &[String], today: i64) -> Vec<(&str, f64)> {
-        if self.new_count == 0 {
-            return Vec::new();
-        }
-        let mut v: Vec<(&str, f64)> = self.new_records(reading).map(|r| (r.word.as_str(), decayed(r, today))).filter(|x| x.1 >= ACTIVE).collect();
-        v.sort_by(|a, b| b.1.total_cmp(&a.1).then(a.0.cmp(b.0)));
+        let mut v = self.new_words_weighed(reading, today);
+        v.retain(|x| x.1 >= ACTIVE);
         v
     }
     /// Every new word of `reading` whatever its weight, heaviest first: what the candidate window lists, so ⌘⌫ can
     /// reach any record still on disk.
     pub fn new_words_all(&self, reading: &[String], today: i64) -> Vec<&str> {
+        self.new_words_weighed(reading, today).into_iter().map(|x| x.0).collect()
+    }
+    /// The new words of `reading` with their decayed weights, heaviest first (ties by word).
+    fn new_words_weighed(&self, reading: &[String], today: i64) -> Vec<(&str, f64)> {
         if self.new_count == 0 {
             return Vec::new();
         }
         let mut v: Vec<(&str, f64)> = self.new_records(reading).map(|r| (r.word.as_str(), decayed(r, today))).collect();
         v.sort_by(|a, b| b.1.total_cmp(&a.1).then(a.0.cmp(b.0)));
-        v.into_iter().map(|x| x.0).collect()
+        v
     }
     fn new_records(&self, reading: &[String]) -> impl Iterator<Item = &Record> {
         self.index.get(&reading_key(reading)).into_iter().flatten().map(|&i| &self.records[i]).filter(|r| r.context == NEWWORD)
@@ -259,8 +261,17 @@ impl Learner {
         self.find(NEWWORD, reading, word).map(|i| self.records[i].day)
     }
     /// §2.2 step 4: learn (or strengthen by 1 after decay) the new word (reading, word); returns the record.
+    /// Past `NEWWORD_CAP` the lowest new words go at once, as `prune` would trim them (§2.3), so appends between full
+    /// rewrites never grow the new words in memory past the cap (the returned record can be among those dropped).
     pub fn learn_new(&mut self, reading: &[String], word: &str, today: i64) -> Record {
-        self.bump(NEWWORD, reading, word, today, 1.0)
+        let r = self.bump(NEWWORD, reading, word, today, 1.0);
+        if self.new_count > NEWWORD_CAP {
+            let w: Vec<f64> = self.records.iter().map(|r| decayed(r, today)).collect();
+            let mut new: Vec<usize> = (0..w.len()).filter(|&i| self.records[i].context == NEWWORD).collect();
+            let drop = over_cap(&mut new, NEWWORD_CAP, &w).to_vec();
+            self.remove_at(drop);
+        }
+        r
     }
     /// §2.5 "used": +1 after decay. `None` without a record: a use never creates one. The caller counts a word at
     /// most once per local day (the engine passes only records not dated today).
@@ -450,13 +461,8 @@ impl Learner {
         let w: Vec<f64> = self.records.iter().map(|r| decayed(r, today)).collect();
         let (live, mut drop): (Vec<usize>, Vec<usize>) = (0..w.len()).partition(|&i| w[i] >= PRUNE_FLOOR);
         let (mut new, mut old): (Vec<usize>, Vec<usize>) = live.into_iter().partition(|&i| self.records[i].context == NEWWORD);
-        for (live, cap) in [(&mut old, CAPACITY), (&mut new, NEWWORD_CAP)] {
-            if live.len() > cap {
-                // A partition, not a sort: on a full store a save trims about one record.
-                live.select_nth_unstable_by(cap, |&a, &b| w[b].total_cmp(&w[a]).then(a.cmp(&b)));
-                drop.extend_from_slice(&live[cap..]);
-            }
-        }
+        drop.extend_from_slice(over_cap(&mut old, CAPACITY, &w));
+        drop.extend_from_slice(over_cap(&mut new, NEWWORD_CAP, &w));
         self.remove_at(drop);
     }
     pub fn clear(&mut self) {
@@ -464,6 +470,16 @@ impl Learner {
         self.index.clear();
         self.new_count = 0;
     }
+}
+
+/// The records of `live` past the `cap` heaviest (decayed weights `w`; among equal weights the later record goes
+/// first); empty when `live` fits. A partition, not a sort: on a full store a save trims about one record.
+fn over_cap<'a>(live: &'a mut [usize], cap: usize, w: &[f64]) -> &'a [usize] {
+    if live.len() <= cap {
+        return &[];
+    }
+    live.select_nth_unstable_by(cap, |&a, &b| w[b].total_cmp(&w[a]).then(a.cmp(&b)));
+    &live[cap..]
 }
 
 #[cfg(test)]
@@ -534,5 +550,26 @@ mod tests {
         assert!(newword_score(1e9) < NEWWORD_S_MAX && newword_score(1.0) == (NEWWORD_S_MIN + NEWWORD_S_MAX) / 2.0);
         l.forget(&r, "版控");
         assert!(!l.has_new_words());
+    }
+
+    /// §2.3 (review of PR #196, finding 9): learning a new word past NEWWORD_CAP drops the lowest new word from memory at
+    /// once (appends between full rewrites never call `prune`); S4 records are not counted or touched.
+    #[test]
+    fn learning_past_the_cap_trims_new_words_in_memory() {
+        let mut recs: Vec<Record> = (0..NEWWORD_CAP)
+            .map(|i| Record { context: NEWWORD.into(), reading: rd("ㄅㄢˇ ㄎㄨㄥˋ"), word: format!("版{}", char::from_u32(0x4e00 + i as u32).unwrap()), weight: 2.0, day: 20_000 })
+            .collect();
+        recs[7].weight = 0.6;
+        let low = recs[7].word.clone();
+        recs.push(Record { context: "要進".into(), reading: rd("ㄅㄢˇ"), word: "版".into(), weight: 0.2, day: 20_000 });
+        let mut l = Learner::from_records(recs);
+        l.learn_new(&rd("ㄆㄞˋ ㄍㄨㄥ"), "派工", 20_000);
+        let new: Vec<&Record> = l.records().iter().filter(|r| r.context == NEWWORD).collect();
+        assert_eq!(new.len(), NEWWORD_CAP);
+        assert!(!new.iter().any(|r| r.word == low), "the lowest new word went");
+        assert!(new.iter().any(|r| r.word == "派工"));
+        assert_eq!(l.records().len(), NEWWORD_CAP + 1, "the S4 record stays");
+        assert!(l.has_new_words());
+        assert_eq!(l.new_words(&rd("ㄆㄞˋ ㄍㄨㄥ"), 20_000), vec![("派工", 1.0)], "index rebuilt");
     }
 }

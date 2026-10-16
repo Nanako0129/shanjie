@@ -583,6 +583,47 @@ fn a_pause_during_the_composition_blocks_new_words() {
     assert_eq!(new_words(&e).len(), 1, "the flag went with the composition");
 }
 
+/// §2.1 (review of PR #196, finding 1): the shell sends set_learning before every key, so learning can be off for the
+/// first key of a composition, when set_learning(false) still sees it empty. That key marks the composition too.
+#[test]
+fn a_key_handled_while_learning_is_off_marks_the_composition() {
+    let mut e = tiny(T);
+    let first = keys_of("ㄅㄢˇ");
+    e.set_learning(false);
+    e.key(first[0]).unwrap();
+    e.set_learning(true);
+    for key in &first[1..] {
+        e.key(*key).unwrap();
+    }
+    type_syls(&mut e, "ㄎㄨㄥˋ");
+    repick_char(&mut e, 2, 0);
+    e.key(k(KeyKind::Enter)).unwrap();
+    assert!(new_words(&e).is_empty(), "a '#' record from a composition begun with learning off");
+}
+
+/// §2.1 (finding 5): the mark goes when the composition empties by any path, here Backspace over everything, so the
+/// next composition, typed with learning on, learns again.
+#[test]
+fn the_pause_goes_when_backspace_empties_the_composition() {
+    let mut e = tiny(T);
+    type_syls(&mut e, "ㄅㄢˇ");
+    e.set_learning(false);
+    type_syls(&mut e, "ㄎㄨㄥˋ");
+    e.set_learning(true);
+    let mut emptied = false;
+    for _ in 0..10 {
+        if e.key(k(KeyKind::Backspace)).unwrap().preedit.is_empty() {
+            emptied = true;
+            break;
+        }
+    }
+    assert!(emptied);
+    t_composition(&mut e);
+    repick_char(&mut e, 2, 0);
+    e.key(k(KeyKind::Enter)).unwrap();
+    assert_eq!(new_words(&e).len(), 1, "the pause outlived the composition Backspace emptied");
+}
+
 // ---------- §2.3 storage ----------
 
 fn raw(dir: &Path) -> String {
@@ -809,6 +850,71 @@ fn a_repick_over_a_new_word_halves_it() {
     pick(&mut e, 2, 2, "公");
     e.key(k(KeyKind::Enter)).unwrap();
     assert_eq!(new_record(&e, "派工").unwrap().weight, 0.5);
+}
+
+/// §2.5 (finding 2): choosing the character already shown over part of a new word changes no text (S4's pre == word),
+/// so it re-picks nothing away: 派工 keeps its weight.
+#[test]
+fn choosing_the_shown_character_inside_a_new_word_does_not_halve_it() {
+    let mut e = engine();
+    teach_paigong(&mut e);
+    e.set_left_context("加入");
+    assert_eq!(type_syls(&mut e, PAIGONG).preedit, "派工");
+    pick(&mut e, 2, 1, "派");
+    e.key(k(KeyKind::Enter)).unwrap();
+    assert_eq!(new_record(&e, "派工").unwrap().weight, 1.0);
+}
+
+/// T plus a weak two-syllable lexicon word (板空 -9.0, under NEWWORD_SHADOW) under ㄅㄢˇ ㄎㄨㄥˋ, with 版控 learned as a
+/// new word; a fresh ㄅㄢˇ ㄎㄨㄥˋ shows it.
+fn banpkong() -> Engine {
+    let mut e = tiny(&format!("{T}ㄅㄢˇ-ㄎㄨㄥˋ 板空 -9.0\n"));
+    assert_ne!(type_syls(&mut e, "ㄅㄢˇ ㄎㄨㄥˋ").preedit, "版控");
+    spell(&mut e, "版控");
+    e.key(k(KeyKind::Enter)).unwrap();
+    assert_eq!(new_words(&e), vec!["版控"]);
+    assert_eq!(type_syls(&mut e, "ㄅㄢˇ ㄎㄨㄥˋ").preedit, "版控");
+    e
+}
+
+/// §2.5 (finding 3): picking the lexicon's 板空 over the new word 版控 displaces it; choosing 版控 back over the same
+/// span takes that back, so the commit does not halve it. Picking 板空 alone does.
+#[test]
+fn choosing_a_new_word_back_over_its_span_does_not_halve_it() {
+    let mut e = banpkong();
+    pick(&mut e, 2, 2, "板空");
+    assert_eq!(pick(&mut e, 2, 2, "版控").preedit, "版控");
+    e.key(k(KeyKind::Enter)).unwrap();
+    assert_eq!(new_record(&e, "版控").unwrap().weight, 1.0, "chosen back");
+    assert_eq!(type_syls(&mut e, "ㄅㄢˇ ㄎㄨㄥˋ").preedit, "版控");
+    assert_eq!(pick(&mut e, 2, 2, "板空").preedit, "板空");
+    e.key(k(KeyKind::Enter)).unwrap();
+    assert_eq!(new_record(&e, "版控").unwrap().weight, 0.5, "re-picked away");
+}
+
+/// §2.5 (finding 6): 板 over the 版 of 版控 displaces 版控; a later pick of 板空 over both syllables replaces that pick
+/// (it overlaps, not the same span) and must hand on what it displaced: the commit halves 版控.
+#[test]
+fn a_pick_over_an_earlier_overlapping_pick_keeps_what_it_displaced() {
+    let mut e = banpkong();
+    assert_eq!(pick(&mut e, 2, 1, "板").preedit.chars().next(), Some('板'));
+    assert_eq!(pick(&mut e, 2, 2, "板空").preedit, "板空");
+    e.key(k(KeyKind::Enter)).unwrap();
+    assert_eq!(new_record(&e, "版控").unwrap().weight, 0.5);
+}
+
+/// §2.2 item 5 (finding 7): with variant B, a run that spells the same sub-span twice (版空版空 → 版空 at 0..2 and
+/// 2..4) learns it once, at weight 1, not bumped twice by one commit.
+#[test]
+fn a_sub_span_spelled_twice_in_one_commit_is_learned_once() {
+    let mut e = tiny(T);
+    e.set_newword_subspans(true);
+    let shown = type_syls(&mut e, "ㄅㄢˇ ㄎㄨㄥˋ ㄅㄢˇ ㄎㄨㄥˋ").preedit;
+    assert_eq!(shown, "板控板空", "measured: spelling 版空版空 re-picks 版 in both halves");
+    spell(&mut e, "版空版空");
+    assert_eq!(e.key(k(KeyKind::Enter)).unwrap().commit, "版空版空");
+    assert!(new_words(&e).contains(&"版空版空".to_string()), "{:?}", new_words(&e));
+    assert_eq!(new_record(&e, "版空").unwrap().weight, 1.0);
 }
 
 // ---------- §2.6 forgetting and clearing ----------

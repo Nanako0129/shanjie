@@ -466,8 +466,9 @@ pub struct Engine {
     /// S4: the Han tail (≤ 2 chars) of the text before the insertion point, from `set_left_context`.
     left: String,
     learning: bool,
-    /// New-word B §2.1: learning was turned off at some point of this composition, so its commit learns no new word.
-    /// Set by `set_learning(false)` while composing, cleared with the composition (`clear_all`).
+    /// New-word B §2.1: learning was off at some point of this composition, so its commit learns no new word. Set by
+    /// `set_learning(false)` while composing and by any key handled with learning off; cleared by `clear_all` and by
+    /// the first key on an empty composition (`key`).
     paused: bool,
     /// Test hook: false turns new-word B's learning off (S4 alone), the baseline of `measure_newword`.
     newword: bool,
@@ -854,8 +855,9 @@ impl Engine {
     /// on both when it was chosen and at commit. It never makes a rerank job stale (S7c-2b section 2.1, corrected
     /// 2026-10-11): the flag does not change decoding, which reads the learner whenever it is non-empty; it only decides
     /// whether picks are recorded. The shell sends it before every key (s4-learning.md section 3).
-    /// New-word B §2.1: turning it off while composing also marks the composition, so its commit learns no new word
-    /// even when learning is back on by then (text typed during the pause is never stored next to a later re-pick).
+    /// New-word B §2.1: turning it off while composing, or any key handled while it is off (`key`), marks the
+    /// composition, so its commit learns no new word even when learning is back on by then (text typed during the pause
+    /// is never stored next to a later re-pick). The mark goes when the composition is empty again.
     pub fn set_learning(&mut self, on: bool) {
         self.learning = on;
         if !on {
@@ -874,7 +876,7 @@ impl Engine {
         self.newword = on;
     }
 
-    /// Test hook: variant B (`NEWWORD_SUBSPANS`, default off) on or off.
+    /// Test hook: variant B (`NEWWORD_SUBSPANS`, on by default since the user's decision of 2026-10-10) on or off.
     pub fn set_newword_subspans(&mut self, on: bool) {
         self.subspans = on;
     }
@@ -997,9 +999,7 @@ impl Engine {
             return;
         }
         let new_on = self.newword && !self.paused;
-        let today = if new_on && self.learner.has_new_words() { self.today() } else { 0 };
-        let uses = if new_on { self.new_word_uses(today) } else { Vec::new() };
-        if uses.is_empty() && self.fixed.iter().all(|f| f.pre.is_none() && f.displaced_new.is_empty()) {
+        if !(new_on && self.learner.has_new_words()) && self.fixed.iter().all(|f| f.pre.is_none() && f.displaced_new.is_empty()) {
             return;
         }
         let _ = catch_unwind(AssertUnwindSafe(|| {
@@ -1007,6 +1007,7 @@ impl Engine {
                 panic!("injected learning panic");
             }
             let today = self.today();
+            let uses = if new_on { self.new_word_uses(today) } else { Vec::new() };
             let plans: Vec<_> = self
                 .fixed
                 .iter()
@@ -1046,8 +1047,9 @@ impl Engine {
             }
             // Nothing touched (e.g. a single character under "^" or a one-character key, §12, §14): no write, unless a full
             // rewrite is pending (a failed forget or rewrite). It is retried only by commits that reach
-            // this point: learning on and at least one re-pick, displaced new word, or new word not yet
-            // counted today on the path (the early return above); other commits leave it pending.
+            // this point: learning on and at least one re-pick or displaced new word, or new-word B learning on
+            // (no pause) with any new-word record in the learner (the early return above); other commits leave it
+            // pending.
             if !touched.is_empty() || self.must_rewrite {
                 self.persist(&touched);
             }
@@ -1059,7 +1061,7 @@ impl Engine {
     /// packs this engine was built with, at their file scores (before capping and demotion). Rules 3 and 5, the shadow
     /// gate, the decoder's "the lexicon has it" check and experiments/newword/hijack.py all use it.
     fn in_lexicon(&self, reading: &[String], word: &str) -> bool {
-        self.lex.entries(reading).iter().any(|(w, _)| *w == word)
+        self.lex.has(reading, word)
     }
 
     /// New-word B §2.2 item 3: the reading leaves room for a new word, i.e. no lexicon word under it scores above
@@ -1123,6 +1125,9 @@ impl Engine {
             }
         }
         flush(&mut run);
+        // One commit learns a (reading, word) once, however many runs or sub-spans spell it (e.g. 板空板空 → 板空 twice).
+        let mut seen = HashSet::new();
+        out.retain(|x| seen.insert(x.clone()));
         out
     }
 
@@ -1765,6 +1770,14 @@ impl Engine {
     pub fn key(&mut self, k: Key) -> Result<Output, EngineError> {
         self.pred_dirty = false;
         self.autokept = false; // the one place it is cleared; `insert_english` may set it again below
+        // New-word B §2.1: `paused` marks a composition with a key handled while learning was off. A key on an empty
+        // composition starts a new one (however the last one emptied: commit, Esc, Backspace), so the mark goes first.
+        if self.syls.is_empty() && self.run.is_empty() && self.pending().is_empty() {
+            self.paused = false;
+        }
+        if !self.learning {
+            self.paused = true;
+        }
         let mut r = self.dispatch(k);
         match &mut r {
             Err(_) => self.clear_all(),
@@ -2036,7 +2049,7 @@ impl Engine {
                 let r = &syls[f.start..f.end];
                 syls[f.start].starts_with(PUNCT_PREFIX)
                     || learner.new_word_day(r, &f.word).is_some()
-                    || lex.entries(r).iter().any(|(w, _)| *w == f.word)
+                    || lex.has(r, &f.word)
             });
         }
         let mut lp_fixed = Vec::with_capacity(self.fixed.len());
@@ -2692,7 +2705,8 @@ impl Engine {
             let lexicon = self.lex.entries(key);
             // New-word B §2.4: new words first among the same length, so ⌘⌫ reaches them (any weight: a record
             // under ACTIVE is still on disk); one the lexicon has is listed where the lexicon puts it.
-            for w in self.learner.new_words_all(key, today) {
+            let new = if (NEWWORD_MIN..=NEWWORD_MAX).contains(&l) { self.learner.new_words_all(key, today) } else { Vec::new() };
+            for w in new {
                 if !lexicon.iter().any(|(x, _)| *x == w) && seen.insert(w) {
                     list.push((w.to_string(), l));
                 }
@@ -2717,9 +2731,14 @@ impl Engine {
         if let Some(f) = self.fixed.iter().find(|f| f.start == start && f.end == end && f.pre.as_ref().is_some_and(|p| !p.is_empty())) {
             return f.pre.clone();
         }
+        Some(self.span_text(start, end))
+    }
+
+    /// The text shown now over the syllables [start, end).
+    fn span_text(&self, start: usize, end: usize) -> String {
         let off: usize = (0..start).map(|i| self.token_width(i)).sum();
         let len: usize = (start..end).map(|i| self.token_width(i)).sum();
-        Some(self.display.chars().skip(off).take(len).collect())
+        self.display.chars().skip(off).take(len).collect()
     }
 
     /// Rule 8: the synthetic key (`^>` + `syls[end]`, `^>$` at the end) the span [start, end) is shown under now, when
@@ -2791,16 +2810,23 @@ impl Engine {
         if !self.is_punct(start) && !self.in_lexicon(&self.syls[start..end], &word) {
             pre = None;
         }
-        // §2.5: new words of the path this pick overlaps are halved at the commit; a re-pick of the same span keeps
-        // what the earlier pick displaced.
+        // §2.5: new words of the path this pick overlaps are halved at the commit. The earlier picks this one replaces
+        // (every one it overlaps: the retain below drops them) hand on what they displaced, except the word chosen now
+        // over this span (chosen back, not away). A pick that keeps the text shown over the span (S4's pre == word)
+        // displaces nothing more.
         let mut displaced_new: Vec<(Vec<String>, String)> = Vec::new();
         if self.learning {
-            if let Some(f) = self.fixed.iter().find(|f| f.start == start && f.end == end) {
-                displaced_new.clone_from(&f.displaced_new);
+            let reading = &self.syls[start..end];
+            for x in self.fixed.iter().filter(|f| f.start < end && start < f.end).flat_map(|f| &f.displaced_new) {
+                if !(x.0 == reading && x.1 == word) && !displaced_new.contains(x) {
+                    displaced_new.push(x.clone());
+                }
             }
-            for (s, e, r, w) in self.path_new_words() {
-                if s < end && start < e && !(s == start && e == end && w == word) && !displaced_new.contains(&(r.clone(), w.clone())) {
-                    displaced_new.push((r, w));
+            if self.span_text(start, end) != word {
+                for (s, e, r, w) in self.path_new_words() {
+                    if s < end && start < e && !displaced_new.contains(&(r.clone(), w.clone())) {
+                        displaced_new.push((r, w));
+                    }
                 }
             }
         }

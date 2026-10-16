@@ -2,7 +2,7 @@
 //! The Python code is ground truth; float operation order is kept on purpose (no fusing or reordering).
 //! R2: errors carry no content; nothing here formats input text.
 
-use crate::learn::{context_key, newword_score, record_key, Learner, Level, NEWWORD_MAX};
+use crate::learn::{context_key, newword_score, record_key, Learner, Level, NEWWORD_MAX, NEWWORD_MIN};
 use crate::trigram::{Mapped, Tri, TriBytes, TriCtx, TriMemo};
 use crate::{Error, Lexicon, PER_KEY};
 use std::collections::{HashMap, HashSet};
@@ -998,14 +998,14 @@ pub fn decode_segment_learned<'a>(
             let found = base.find(&ids[i - l..i]);
             // New words of this span the lexicon lacks under it (new-word B §2.4), tried after the lexicon's entries.
             let fresh: Vec<(&'a str, f64)> = match fresh_on {
-                Some(ln) => ln
+                Some(ln) if (NEWWORD_MIN..=NEWWORD_MAX).contains(&l) => ln
                     .learner
                     .new_words(span, ln.today)
                     .into_iter()
-                    .filter(|(w, _)| found.is_none_or(|r| !base.range(r).any(|p| lex.word_of(&lex.ents[p]) == *w)))
+                    .filter(|(w, _)| found.is_none() || !base.has(span, w))
                     .map(|(w, wt)| (w, newword_score(wt)))
                     .collect(),
-                None => Vec::new(),
+                _ => Vec::new(),
             };
             if found.is_none() && fresh.is_empty() {
                 continue;

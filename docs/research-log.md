@@ -6695,3 +6695,28 @@ formal: alpha 0.7, tau 1, delta 2
 | 探針 | 書面 | 7 → 17 | 10／0 | 0.0020 | +10 |
 
 - §3.3 第 1 項（三個集合改壞 0）與第 2 項（探針新版多對、基準對的句子新版沒有打錯）都過。學到的新詞：dev302 2–3 個、打字測驗 4、錯字回報 23–27、探針那次 28–33。第 3 項的汙染測試在完整的 `cargo test` 裡（41ee9189 在 WSL 重跑中，結果補在 PR）；第 4 項保留集由收尾的 fresh verifier 跑。
+
+## 2026-10-17：新詞 B：`/code-review` 修正（PR #196）
+
+- 本地 `/code-review`（唯讀）對 3986e646 列了 15 項，維護者核定處置。每一項先對照程式確認成立，再改；沒有一項判定為誤報。
+
+| 項 | 問題（核對結果） | 改了什麼 | 測試與突變 |
+|---|---|---|---|
+| 1 | 暫停旗標只在 `set_learning(0)` 遇到非空組字時設。殼在每個按鍵前都呼叫 `set_learning`，第一個鍵在旗標 0 時處理的組字不會被標記（成立） | `Engine::key` 開頭：組字區空就先清旗標，學習關著就設旗標；`set_learning(0)` 遇到非空組字照舊設 | `a_key_handled_while_learning_is_off_marks_the_composition`：空組字時 `set_learning(0)`、打第一個鍵、恢復、打完、改選、Enter → 沒有 `#` 列。突變「只留 `set_learning` 的標記」→ 斷言失敗（exit 101） |
+| 5 | 旗標只在 `clear_all` 清，Backspace 刪光之後下一段組字還帶著（成立） | 同上，下一個按鍵看到空組字就清，不論怎麼清空的 | `the_pause_goes_when_backspace_empties_the_composition`：組字中暫停、Backspace 刪光、學習開著打新的一段、改選、Enter → 學到。突變「空組字不清」→ 斷言失敗（學到 0 個，exit 101） |
+| 2 | 選到的字和畫面上那一段相同時，重疊的新詞仍進 `displaced_new` 而被減半（成立） | `choose()`：畫面上這一段的字（新的 `span_text`，`pre_pick` 也改用它）等於選到的詞時，不加路徑上的新詞 | `choosing_the_shown_character_inside_a_new_word_does_not_halve_it`（派工，往回一格選「派」、Enter → 權重 1.0）。突變「一律加」→ 斷言失敗（0.5） |
+| 3 | 沿用的 `displaced_new` 沒丟掉「現在選回來的那個詞」（成立） | 沿用時丟掉（這一段的讀音, 選到的詞） | `choosing_a_new_word_back_over_its_span_does_not_halve_it`：T＋「板空」−9.0，學到「版控」；選「板空」再選回「版控」、Enter → 1.0；只選「板空」→ 0.5。突變「不丟」→ 斷言失敗（0.5） |
+| 6 | 只從同一段的先前改選沿用，蓋掉的重疊改選（不同段）帶的減半會掉（成立） | 沿用所有被這次改選移除（重疊）的先前改選的 `displaced_new`，再套 2、3 | `a_pick_over_an_earlier_overlapping_pick_keeps_what_it_displaced`：顯示「版控」，第 1 字選「板」，再對兩字選「板空」（畫面量到「板空」）、Enter → 0.5。突變「只沿用同一段」→ 斷言失敗（1.0） |
+| 7 | 變體 B 的子段重複時，同一次送出把同一詞加兩次（成立） | `new_word_spans` 回傳前依（讀音, 詞）去重 | `a_sub_span_spelled_twice_in_one_commit_is_learned_once`：T 打 ㄅㄢˇ ㄎㄨㄥˋ ×2（量到「板控板空」），逐字改成「版空版空」→「版空」權重 1.0。突變「不去重」→ 斷言失敗（2.0） |
+| 8 | `learn_commit` 的 `new_word_uses`／`path_new_words` 在 `catch_unwind` 外，這裡 panic 會丟掉整個按鍵而不只是學習（成立） | 移進 `catch_unwind`；外面只留便宜的提早返回（學習關、或沒有待學改選／被改走的新詞而且新詞 B 不能用或學習器沒有新詞）。`must_rewrite` 重試的註解跟著改：有新詞紀錄時，沒有改選的送出也會走到重試 | 沒加測試：既有的 `inject_learn_panic` 在 `catch_unwind` 一開頭就 panic，打不到 `new_word_uses` 裡面；要測得另加一個只為這條路徑的注入點，這次不加。現有的 panic 測試（`engine_learn`）照樣過 |
+| 9 | `NEWWORD_CAP` 只在 `prune`（載入、完整重寫）套用，兩次完整重寫之間追加的新詞可以讓記憶體超過上限（成立） | `Learner::learn_new` 超過上限就立刻刪掉權重最低的新詞（和 `prune` 同一個比較，共用新的 `over_cap`）；`shanjie.h` 寫明記憶體永遠 ≤ 2,000，檔案在完整重寫後 ≤ 2,000、追加之間可能暫時超過、載入時修剪 | `learn::tests::learning_past_the_cap_trims_new_words_in_memory`：2,000 筆新詞（一筆 0.6、其餘 2.0）＋1 筆 S4，學一個新詞 → 新詞仍 2,000、0.6 那筆刪掉、S4 那筆在。突變「不在 `learn_new` 修剪」→ 斷言失敗（2,001） |
+| 10 | 解碼器與候選窗對每個長度都查新詞，含 1 與 > 4（成立；結果是空的，只是白查） | `lm.rs` 與 `open_candidates` 只在 `NEWWORD_MIN..=NEWWORD_MAX` 查 | 行為不變，既有測試涵蓋（含 store 有 2,000 筆時與沒學過時逐鍵相同的測試） |
+| 11 | `set_newword_subspans` 的註解寫「預設關」（成立） | 改成預設開（使用者 2026-10-10 決定） | 註解 |
+| 12 | `NEWWORD_BREAK` 的註解說 main 會在 cvtune、wikitune 重定（成立；契約 §3.2、§7 決定沿用 T1、不掃） | 改寫成：T1、樣本內、這一片沒有掃 | 註解 |
+| 13 | 契約 §5 有私人本機路徑（成立） | 改成「repo 外的私人資料」 | 文件 |
+| 14 | 詞庫判斷寫了三份：引擎 `in_lexicon`、`refresh_lm` 的解除固定、`lm.rs` 的過濾（成立；目前三份結果相同，因為封頂只改分數不刪詞） | 新的 `Lexicon::has`，三處都用它 | 既有測試涵蓋 |
+| 15 | `new_words` 與 `new_words_all` 各自收集、排序（成立） | 共用 `new_words_weighed`；`new_words` 是它再濾 `ACTIVE` | 既有測試涵蓋 |
+
+- 契約 §2.1、§2.2 第 5 條、§2.3、§2.5 的文字照上面改，§6 加一列；`core/include/shanjie.h` 的 `set_learning` 與新詞段落同步。
+- 測試（Mac，`cargo test --release --locked -p core --test engine_newword --test learn_store --test engine_learn --lib`）：lib 66、engine_learn 57、engine_newword 38（1 個 ignored 是量測工具）、learn_store 24 全過，exit 0；`make test-golden` 25 過，exit 0。突變 7 個都由斷言失敗（exit 101），每個還原後 `git diff` 和突變前逐位元組相同。
+- 沒有重跑 §3.2、§3.3 的量測：第 2、3、6、7 項可能改變教學時的權重，本機不跑重運算；這幾項對那些數字有沒有影響**沒有量過**，要的話由 main 在 Windows 機器重跑 §3.3。
