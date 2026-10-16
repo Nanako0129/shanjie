@@ -1,6 +1,6 @@
 # 契約：CI 加速（ci-speed）
 
-狀態：修訂一（2026-10-17；plan-verifier 第一次 REVISE：基準數字、Swift 並行時的測試數量、`docs/verification.md` 的 CI 表）。
+狀態：修訂一（2026-10-17；plan-verifier 第一次 REVISE：基準數字、Swift 並行時的測試數量、`docs/verification.md` 的 CI 表）。實作後放寬兩處（研究紀錄 2026-10-17「CI 加速」）：§3.1 的 Swift 略過數改用測試名稱核對；§2.3 的快取只留在 core。
 
 ## 0. 依據
 
@@ -24,7 +24,7 @@
 
 1. **略過名單**：`scripts/ci-changes.sh` 把 `eval/bench/results/*` 當成文件（和 `docs/*`、`*.md` 同一類）。
 2. **core 拆成兩個並行的 job**：`core` 留下 release 測試、C 標頭冒煙測試與所有 Python 步驟；新 job `core-debug` 只跑 `cargo test --locked`（debug）。兩個 job 各自下載並核對模型（同一段步驟）。`needs`、`if` 條件和 `timeout-minutes` 照 `core`。
-3. **Rust 編譯快取**：`actions/cache`（repo 已在用、已釘 SHA）快取 `~/.cargo/registry`、`~/.cargo/git` 與 `target/`，鍵含 runner 作業系統與架構、工具鏈版本（1.97.1）、`Cargo.lock` 的雜湊與 job 名稱。只快取編譯產物，不快取模型檔或測試輸出。
+3. **Rust 編譯快取**：`actions/cache`（repo 已在用、已釘 SHA）快取 `~/.cargo/registry`、`~/.cargo/git` 與 `target/`，鍵含 runner 作業系統與架構、工具鏈版本（1.97.1）、`Cargo.lock` 的雜湊與 job 名稱。只快取編譯產物，不快取模型檔或測試輸出。量過之後只留在 `core`：release 編譯冷 58 秒、熱 43 秒；`core-debug`（29 → 32 秒）與 `shell` 沒有變快，照本節開頭拿掉。
 4. **Swift 測試並行**：`swift test --parallel --xunit-output <暫存檔>`。並行時不會印 XCTest 的 `Executed N tests` 總計，測試數量改從 xunit 檔數（testcase 與 skipped 的個數）。如果出現原本沒有的失敗（例如共用偏好設定或暫存檔），這一項拿掉，記下原因。
 5. **文件**：`docs/verification.md` 的 CI 表（core、shell 兩列）改成 `core`、`core-debug`、`shell` 三列，每列的內容和 `ci.yml` 一致；`ci.yml` 裡「cargo test already ran in the core job」這類提到 job 分工的註解跟著改。
 
@@ -32,7 +32,7 @@
 
 1. 測試數量不變：
    - Rust：拆分前後，debug 與 release 各自的 `test result: ok. N passed` 加總相同，`ignored` 的數量也相同。
-   - Swift：改動前（依序執行）的 `Executed N tests, with M tests skipped` 總計，和並行時 xunit 檔裡的 testcase 總數與 skipped 數相同（目前唯一的 XCTSkip 在 `CandidateCellTests`）。
+   - Swift：改動前（依序執行）每個測試 bundle 的 `Executed N tests` 加總，和並行時 xunit 檔裡的 testcase 總數相同，而且兩邊的測試名稱逐一相同。SwiftPM 並行時 xunit 不標 XCTSkip（實測：唯一的 XCTSkip `CandidateCellTests.testBenchmark` 在 xunit 裡沒有 skipped），所以略過數不比，改看那個測試仍在名稱清單裡。
    - 其他步驟（C 冒煙、Python 各步、`make bundle` 等）照樣執行，結束碼都是 0。
 2. 時間：本片 PR 上兩次 run（冷、熱快取）的每個 job 時間與「最慢 job 結束時間」寫進研究紀錄，和基準並列；每一項改動各自的效果盡量分開報（同一個 run 看各步驟時間）。
 3. 略過名單：在本片 PR 之外，用一個只改 `eval/bench/results/` 的檔的分支測一次，`changes` 的輸出是 `run=false`、macOS job 是 skipped。

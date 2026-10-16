@@ -92,7 +92,9 @@ jobs:
         with:
           toolchain: 1.97.1
 
-      # Rust build cache (docs/contracts/ci-speed.md): crates and target/, per job, keyed by the pinned toolchain and Cargo.lock.
+      # Rust build cache (docs/contracts/ci-speed.md): crates and target/, keyed by the pinned toolchain and Cargo.lock.
+      # Only this job has one: its release build went from 58 s cold to 43 s warm, while core-debug and shell measured no
+      # gain (research log 2026-10-17, CI speed).
       # Cargo's fingerprints decide what to rebuild, so a restored target/ only saves compile time. Pull requests read main's
       # caches but cannot write ones main reads.
       - name: Cache the Rust build
@@ -273,19 +275,6 @@ jobs:
         with:
           toolchain: 1.97.1
 
-      # Rust build cache (docs/contracts/ci-speed.md): crates and target/, per job, keyed by the pinned toolchain and Cargo.lock.
-      # Cargo's fingerprints decide what to rebuild, so a restored target/ only saves compile time. Pull requests read main's
-      # caches but cannot write ones main reads.
-      - name: Cache the Rust build
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: rust-${{ runner.os }}-${{ runner.arch }}-1.97.1-${{ github.job }}-${{ hashFiles('Cargo.lock') }}
-          restore-keys: rust-${{ runner.os }}-${{ runner.arch }}-1.97.1-${{ github.job }}-
-
       # The bigram model is not in git (docs/PLAN.md S2c); it is the model-v6
       # release asset, its word-class table (S2k) is the classes-v5 asset and its
       # Kneser-Ney side file (kn-core) is the kn-v1 asset. The small model of
@@ -339,19 +328,6 @@ jobs:
       - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
         with:
           toolchain: 1.97.1
-
-      # Rust build cache (docs/contracts/ci-speed.md): crates and target/, per job, keyed by the pinned toolchain and Cargo.lock.
-      # Cargo's fingerprints decide what to rebuild, so a restored target/ only saves compile time. Pull requests read main's
-      # caches but cannot write ones main reads.
-      - name: Cache the Rust build
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: rust-${{ runner.os }}-${{ runner.arch }}-1.97.1-${{ github.job }}-${{ hashFiles('Cargo.lock') }}
-          restore-keys: rust-${{ runner.os }}-${{ runner.arch }}-1.97.1-${{ github.job }}-
 
       - name: Fetch the language model
         env:

@@ -6457,3 +6457,24 @@ formal: alpha 0.7, tau 1, delta 2
 - 「片票」在詞庫裡只有 ㄆㄧㄢˋ ㄆㄧㄠˋ 這個讀法，「遍歷」的讀音只有 ㄅㄧㄢˋ ㄌㄧˋ（`overlay-add.tsv`），兩者對不上；當時實際按的鍵不知道，這列用詞庫讀音。
 - Python 參考實作、golden 設定：聊天第 1 名「便利……正規劃成」，正解第 8；書面第 1 名「遍歷……正規劃成」，正解第 11。
 - `eval/golden/s2h-lm-context.txt` 的錯字回報兩行用 Python 參考實作重產，n 132：聊天 top1 29、書面 38 不變，oracle@64 兩種設定都 128 → 129；`eval/README.md` 改成 132 列。
+
+## 2026-10-17：CI 加速（契約 `docs/contracts/ci-speed.md`）
+
+- 三次 run（xcode-27-arm64 runner；時間是每個 job 自己的開始到結束）：
+
+  | run | 內容 | core | core-debug | shell | 最慢的 job |
+  |---|---|---|---|---|---|
+  | 38945349011（基準，PR #184） | debug＋release 串在 core | 904 秒 | — | 683 秒 | 904 秒 |
+  | 38954775625（本片，冷快取） | 拆出 core-debug、快取、Swift 並行 | 624 秒 | 278 秒 | 380 秒 | 624 秒 |
+  | 38956299697（本片，熱快取） | 同上（空 commit） | 476 秒 | 292 秒 | 363 秒 | 476 秒 |
+
+- 各步驟（基準 → 冷 → 熱）：
+  - debug 測試：455 → 251 → 262 秒（移到 core-debug；其中編譯 52.6 → 29.4 → 32.0 秒）。
+  - release 測試：252 → 355 → 259 秒（編譯 41.7 → 58.0 → 42.7 秒；基準的 release 接在 debug 之後，依賴已經下載）。
+  - Swift 測試：467 → 203 → 197 秒（`--parallel`；編譯 28.5 → 19.9 → 19.3 秒）。
+  - `make bundle` 87 → 70 → 67 秒，Homebrew cask 46 → 25 → 22 秒（沒改這兩步，差的是 runner 本身）。
+- **快取只留在 core**：還原 1–3 秒、儲存 1–4 秒。熱快取只讓 core 的 release 編譯從 58 秒變 43 秒；core-debug 的編譯（29 → 32 秒）與 shell（`make bundle` 70 → 67 秒、Swift 編譯 19.9 → 19.3 秒）看不出差別，照契約 §2 拿掉。工作區自己的 crate 每次都重編（checkout 的檔案時間是新的），快取省到的只有依賴。
+- **測試數量不變**：Rust 的 debug 與 release 各 477 個通過、9 個略過、20 個測試執行檔，三次 run 相同。Swift 依序執行時印兩個 bundle 的總計（223 個、1 個略過＋24 個），合計 247；並行的 xunit 有 247 個 testcase，名稱逐一相同。SwiftPM 並行時 xunit 不標 XCTSkip：唯一的 XCTSkip（`CandidateCellTests.testBenchmark`）在 xunit 裡沒有 skipped，所以只比名稱（契約 §3.1 同日放寬）。
+- **略過名單**：PR #189（只改 `eval/bench/results/` 的一個檔，base 是本片分支）的 run 38958992283：`changes` 印 `run=false`，core、core-debug、shell 都是 skipped，run 的結論是 success。PR 關閉、不合併。
+- **gate 不變**：`scripts/check-ci-gate.sh` 看整個 `ci.yml` run 的結論，不看 job 名稱，多一個 job 不會漏檢。
+- 現在最慢的是 core（release 測試約 260 秒＋Python 各步約 200 秒）。再快要把 Python 步驟拆到另一個 job，這片不做。
