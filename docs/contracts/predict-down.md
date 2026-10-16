@@ -1,6 +1,6 @@
 # 契約：預測列與 ↓ 候選一致、未進入的預測列前面放 Tab 提示（predict-down）
 
-狀態：修訂二（2026-10-17；plan-verifier 第一次 REVISE：有未完成音節時的 ↓、Tab 進出時橫排的第 0 格、v3-engine 要改的段落；第二次 REVISE：既有測試怎麼改、哪些格子的數字欄加寬）。
+狀態：READY（2026-10-17 收尾審查，唯一一項「⌘⌫ 後清單變空要關窗」照它的最小修改改完）。修訂二（2026-10-17；plan-verifier 第一次 REVISE：有未完成音節時的 ↓、Tab 進出時橫排的第 0 格、v3-engine 要改的段落；第二次 REVISE：既有測試怎麼改、哪些格子的數字欄加寬）。
 
 讀過的程式與行號是 main `af78dedc`（到 `d52949b3` 為止 `core/`、`macos/`、`cli/`、`tools/`、`experiments/` 都沒有改動）。標〔推論〕的沒有量過。三片的順序是 B → C → A（A 是 `docs/contracts/digits.md`，等 C 的判讀定稿後再送審）。
 
@@ -26,7 +26,7 @@
 - 只有詞庫清單那一支（2512）才加；標點、英文 token、空白單位那幾支（2481–2511）不變（那時預測列本來就是空的，1671）。游標不在尾端時預測列是空的（1647），清單同今天。
 - `Cands` 另存這些項目（`Vec<Pred>`，從 `old` 搬進去；`self.pred` 在窗開著時仍是空的，`view` 1813 照舊只顯示窗；關窗（第 7 條 `close_cands` 1218）時項目跟著窗丟掉——「關掉後也不恢復」不變）。**不要**用 `list` 的長度欄位標記（英文窗用 0 表示英文項，2489；`forget_highlighted` 2555 用長度算區間，長度 0 在尾端會索引 `syls[cursor]`，越界）。用「索引 < 預測項目數」判斷。
 - **選取**（`choose` 2586；1–9、Enter、滑鼠 `pick` 2383 都經過它）：索引落在預測項目 → 和在預測列選同一項完全相同（`choose_pred` 1738：讀音換掉 `syls[start..cursor]`、固定詞、游標、學習開著時 `pre = Some("")` 與起點鍵，§10.1），關窗。落在詞庫項目 → 今天的改選。
-- **⌘⌫**（`forget_highlighted` 2552）：反白在預測項目時照已進入預測列的 ⌘⌫（§10.3）：`forget_entry(讀音, 詞)`、重新解碼、重建清單（等於關窗後用同樣的 `old` 去掉那個詞再開一次；預測列不重算）、選取移到同一個詞的新位置（不在就 0）、窗保持開著（維護者 2026-10-17 選擇題）。反白在詞庫項目照今天。
+- **⌘⌫**（`forget_highlighted` 2552）：反白在預測項目時照已進入預測列的 ⌘⌫（§10.3）：`forget_entry(讀音, 詞)`、重新解碼、重建清單（等於關窗後用同樣的 `old` 去掉那個詞再開一次；預測列不重算）、選取移到同一個詞的新位置（不在就 0）、窗保持開著（維護者 2026-10-17 選擇題）；重建後清單是空的（有未完成音節、預測列只有那一項時）就關窗，同 Esc。反白在詞庫項目照今天。
 - 直排候選窗（3v–5p）：清單同樣是「預測項目＋詞庫項目」（有未完成音節時只有預測項目），其他不變。
 - 不改：`recompute_pred`、預測列的順序與內容、開窗時預測列被清掉、Tab／Shift+Tab／1–9／Esc 在預測列的規則、`pick` 在未進入預測列上的行為。
 
@@ -59,6 +59,7 @@
    | `the_window_after_punctuation_has_no_row_items` | 「，」之後 ↓ | 清單同今天 |
    | `esc_closes_the_window_and_the_row_stays_gone` | ↓、Esc | 沒有候選、沒有預測列 |
    | `cmd_backspace_on_a_row_item_in_the_window_forgets_it` | 先教「牛奶」；前文「我想喝一杯」、音節 [ㄋㄧㄡˊ]、沒有未完成音節（斷言 R 第 0 項是「牛奶」）；↓、⌘⌫ | 該（讀音、詞）0 筆；窗仍開；清單＝`old` 去掉那個詞＋詞庫項目；選取 0；新引擎讀到 0 筆 |
+   | `cmd_backspace_on_the_only_row_item_closes_the_window` | 未完成音節、預測列只有一項；↓、⌘⌫ | 沒有候選、沒有預測列、那一項遺忘了 |
    | `vertical_window_lists_the_row_first`（`engine_vertical.rs`） | `set_candidate_vertical(1)`、同第一列、↓ | `vertical == 1`、前 R.len() 項等於 R |
    | `the_row_is_cleared_by_other_state_changes`（既有 606） | 只改 617 行的註解 | 仍通過 |
 
