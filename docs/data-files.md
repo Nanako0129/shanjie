@@ -14,6 +14,7 @@
 - **放在同一個資料夾**（`data/lm/`）。前三個一起用；`classes.sjc` 不含模型本身，`classes-v5` 這個 Release 也只有這一個檔案。
 - **綁定**：`classes.sjc` 裡記了它是為哪個模型建的（model-v6 的 SHA-256）。缺檔、配到別的模型、或檔案內容不對，載入都會失敗（C ABI 的 `load_lm` 回傳 3），不會靜靜地用錯或不用。
 - **Kneser–Ney 側檔的綁定**：`kn.sjkn` 裡記了模型的 SHA-256（model-v6）；模型旁邊有它，核心就開 KN，缺了就不開；檔案壞掉或配到別的模型時載入失敗（C ABI 的 `load_lm` 回傳 3）。
+- **trigram 表（`trigram.sjt3`，尚未出貨）**：SJT30001（`docs/contracts/trigram-core.md`、`reference/proto/trigram.py`），放在模型旁邊；檔頭綁模型的 SHA-256，核心載入時核對（壞了或配到別的模型回傳 3，沒有這個檔就關閉）。只有書面設定用它（書面有表時 KN 關）。由 `tools/build_trigram.py` 把研究用的表重新對應到出貨模型的詞 id。目前沒有 Release 附件、`data/` 沒有雜湊檔、App 與 CI 不放（第 C 片才加）；Rust CLI 在模型旁有它時自動載入，`--no-tri` 關閉，摘要行加 `+tri:<sha8>`。
 - **語意校正模型的綁定**：`tinylm.sjtl` 裡記了它調參時用的模型（model-v6 的 SHA-256）與 KN 側檔（kn-v1 的 SHA-256，SJTL0004），任何一個配不上，核心就拒絕載入、只用 n-gram。它不檢查詞類表，但它的 α、τ、δ 是在 model-v6＋classes-v4＋kn-v1 上調的，所以重新分群也要重新調參、發新的 `tinylm-v…`（見下面的表）；classes-v5 只改 μ，是開著 tinylm-v5 量過才選的，沿用 tinylm-v5。
 - **英文單字表**（中英混打，`docs/contracts/zhen-mixed.md`）不在這張表：它不是 Release 附件，也不進 git，每次建置時由 `scripts/build-app.sh` 產生（見下面「建置時產生的檔案」）。
 - **App 裡**：打包時 `bigram.sjlm`、`classes.sjc`、`kn.sjkn`（model-v6 起）放進 `善解輸入法.app/Contents/Resources/`，使用者不用另外下載。`tinylm.sjtl` 從語意校正上線（S7c-2b，`docs/contracts/s7c2b-shell-rerank.md`）起也一起放進去。
