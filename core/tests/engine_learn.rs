@@ -33,11 +33,21 @@ fn shared() -> &'static Shared {
         Shared { lex, lm: Arc::new(lm), capped }
     })
 }
+/// SHANJIE_TEST_PROFILE=formal (docs/contracts/trigram-core.md, B2): run the engine under the formal profile and require the
+/// trigram table beside the model, so a missing `trigram.sjt3` fails here instead of silently scoring the bigram. Unset: no-op.
+/// Call after the model is in place.
+fn use_test_profile(e: &mut Engine) {
+    if std::env::var("SHANJIE_TEST_PROFILE").as_deref() == Ok("formal") {
+        assert!(shared().lm.scoring(lm::Profile::Formal).tri, "SHANJIE_TEST_PROFILE=formal needs data/lm/trigram.sjt3 (trigram table missing)");
+        e.set_profile(lm::Profile::Formal).unwrap();
+    }
+}
 /// Production lexicon + model, learning on, fixed clock (day 20000).
 fn engine() -> Engine {
     let s = shared();
     let mut e = Engine::with_lexicon(s.lex.clone(), Layout::Standard);
     e.set_lm(s.lm.clone(), s.capped.clone());
+    use_test_profile(&mut e);
     e.set_today(Some(DAY));
     e.set_learning(true);
     e
@@ -54,6 +64,7 @@ fn tiny(engine_text: &str, capped_text: &str) -> Engine {
     let capped = Arc::new(CappedLexicon::new(cl, "", &s.lm, None).unwrap());
     let mut e = Engine::with_lexicon(lex, L);
     e.set_lm(s.lm.clone(), capped);
+    use_test_profile(&mut e);
     e.set_today(Some(DAY));
     e.set_learning(true);
     e
@@ -257,6 +268,7 @@ fn a2_candidate_pick_learning_on_cases_tsv() {
     let t = std::time::Instant::now();
     let mut e = Engine::new(&root().join("data/lexicon"), L).unwrap();
     e.load_lm(&lm_path()).unwrap();
+    use_test_profile(&mut e);
     e.set_today(Some(DAY));
     e.set_learning(true);
     println!("engine new + load_lm {:?}", t.elapsed());
@@ -347,6 +359,7 @@ fn a2_mirror_teach_the_other_word() {
 fn mirror(eps: f64) -> (usize, usize, usize, usize) {
     let mut e = Engine::new(&root().join("data/lexicon"), L).unwrap();
     e.load_lm(&lm_path()).unwrap();
+    use_test_profile(&mut e);
     e.set_today(Some(DAY));
     e.set_learning(true);
     e.set_eps_global(eps);
@@ -696,6 +709,7 @@ fn command_backspace_forgets_the_highlighted_word() {
     let same = g.rows.iter().find(|r| r.same == Some(true)).unwrap();
     let mut e = Engine::new(&root().join("data/lexicon"), L).unwrap();
     e.load_lm(&lm_path()).unwrap();
+    use_test_profile(&mut e);
     e.set_today(Some(DAY));
     e.set_learning(true);
     let plain = type_syls(&mut e, &same.reading).preedit;
