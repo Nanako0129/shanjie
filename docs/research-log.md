@@ -6419,3 +6419,8 @@ formal: alpha 0.7, tau 1, delta 2
 - 定稿：`packaging/AppIcon.icon/`；「解」由 `scripts/make-app-icon.swift` 從 Noto Serif CJK TC Black 轉成路徑（幾何是具名常數，倍數 1.10）。字型用在圖示的授權：OFL FAQ 1.1、1.13（`LICENSES/data.md`）。
 - /code-review（3a7c45ce）11 項全部處理（契約 §7）。實測：`actool` 在 `--app-icon` 和 `.icon` 資料夾名不符時結束碼 0、什麼都不寫；連續兩次編譯 `AppIcon.icns` 相同、`Assets.car` 不同；每次約 5 秒。改用共用的 `scripts/compile-app-icon.sh`，編完確認兩個檔存在。
 
+## 2026-10-17：錯字回報第 130 列（沖起來）
+
+- 維護者實機的組字區是「有人說這個充起來很像點滴法」，要的是「沖」（沖咖啡；接著第 128 列「沖煮頭」的話題）。加成 `|有人說這個沖起來很像點滴法|ㄧㄡˇ ㄖㄣˊ ㄕㄨㄛ ㄓㄜˋ ㄍㄜ˙ ㄔㄨㄥ ㄑㄧˇ ㄌㄞˊ ㄏㄣˇ ㄒㄧㄤˋ ㄉㄧㄢˇ ㄉㄧ ㄈㄚˇ`（讀音由 `tools/readings.py` 產生，沒有 CHECK）。
+- Python 參考實作、golden 設定：聊天第 1 名「衝起來」、書面第 1 名「充起來」，正解兩種設定都第 3。
+- `eval/golden/s2h-lm-context.txt` 的錯字回報兩行用 Python 參考實作重產，n 130：聊天 top1 29、書面 38 不變，oracle@64 兩種設定都 126 → 127；`eval/README.md` 改成 130 列。
