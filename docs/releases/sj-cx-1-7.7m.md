@@ -1,4 +1,4 @@
-善解的 trigram 表（`trigram.sjt3`，SJT30001 格式），**要和 [model-v6](https://github.com/Nanako0129/shanjie/releases/tag/model-v6) 的 `bigram.sjlm` 一起用**，放在同一個資料夾，核心會自動載入；只有書面設定用它（同時關掉 KN），聊天設定與預測列不用。CI 與發布版從這裡下載。**這不是輸入法的發行版，也不含語言模型本身。**
+善解的連文模型 **SJ-CX-1-7.7M**（trigram 表，檔案 `trigram.sjt3`，SJT30001 格式；模型命名見 `docs/releases/README.md`），**要和 [model-v6](https://github.com/Nanako0129/shanjie/releases/tag/model-v6) 的 `bigram.sjlm` 一起用**，放在同一個資料夾，核心會自動載入；只有書面設定用它（同時關掉 KN），聊天設定與預測列不用。CI 與發布版從這裡下載。**這不是輸入法的發行版，也不含語言模型本身。**
 
 - 檔案：`trigram.sjt3`，143,643,936 bytes
 - SHA-256：`fdd3b05d8c18cf85da434443d4fabbbfebf31e8c97a04e00e4a339bbe19eec84`
@@ -14,5 +14,5 @@
 gh release download model-v6 -R Nanako0129/shanjie -p bigram.sjlm -D data/lm
 gh release download classes-v5 -R Nanako0129/shanjie -p classes.sjc -D data/lm
 gh release download kn-v1 -R Nanako0129/shanjie -p kn.sjkn -D data/lm
-gh release download trigram-v1 -R Nanako0129/shanjie -p trigram.sjt3 -D data/lm
+gh release download sj-cx-1-7.7m -R Nanako0129/shanjie -p trigram.sjt3 -D data/lm
 ```
