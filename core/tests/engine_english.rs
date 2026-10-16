@@ -547,6 +547,13 @@ fn lm_eng() -> Engine {
     e.set_learning(true);
     e
 }
+/// `lm_eng` for the tests that pick from the lexicon window with `choose_word`: that window now lists a prediction row first
+/// (predict-down contract B.4), so the row is off.
+fn lm_eng_lexicon() -> Engine {
+    let mut e = lm_eng();
+    e.set_prediction(false).unwrap();
+    e
+}
 /// Opens the candidates for the syllables before the cursor (the longest words first) and chooses `word`: it is fixed in the
 /// composition.
 fn choose_word(e: &mut Engine, word: &str) {
@@ -568,7 +575,7 @@ fn records(e: &Engine) -> Vec<(String, String)> {
 fn token_next_key_is_the_fixed_en_for_learning_and_lookup() {
     // 我是 (the default) re-picked as 我試, then `rust` kept after it: the record's key holds the fixed reading, not the word.
     let dir = tmp_dir("token-key");
-    let mut e = lm_eng();
+    let mut e = lm_eng_lexicon();
     e.learning_open(&dir).unwrap();
     syllable(&mut e, "ㄨㄛˇ");
     let shown = syllable(&mut e, "ㄕˋ").preedit;
@@ -1210,7 +1217,7 @@ fn space_unit_is_a_punctuation_token_for_learning() {
     // 我是 re-picked as 我試, then a space unit: the record is under `^>_punct_en`, the key every English token
     // has, and the lookup after typing the same finds it.
     let dir = tmp_dir("space-unit-key");
-    let mut e = lm_eng();
+    let mut e = lm_eng_lexicon();
     e.learning_open(&dir).unwrap();
     syllable(&mut e, "ㄨㄛˇ");
     syllable(&mut e, "ㄕˋ");
@@ -1221,7 +1228,7 @@ fn space_unit_is_a_punctuation_token_for_learning() {
     assert!(records(&e) == [("^>_punct_en".to_string(), "我試".to_string())], "{:?}", records(&e));
     // The space unit straight after the word (the token between them deleted): it is the same kind of neighbour as an English token.
     let dir2 = tmp_dir("space-unit-key2");
-    let mut e = lm_eng();
+    let mut e = lm_eng_lexicon();
     e.learning_open(&dir2).unwrap();
     syllable(&mut e, "ㄨㄛˇ");
     syllable(&mut e, "ㄕˋ");

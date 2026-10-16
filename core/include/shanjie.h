@@ -106,6 +106,9 @@ int32_t shanjie_engine_key(ShanjieEngine *engine, ShanjieKey key, ShanjieOutput 
 //   closed and a prediction row showing (entered or not), pick(index) selects that row's item (index
 //   counts from 0 in the row; the click is an explicit choice). Section 10: the pick is learned like a
 //   candidate-window re-pick (nothing displaced) at the commit, when learning is on at the pick and at the commit.
+//   Predict-down (docs/contracts/predict-down.md B.3.1): a window opened while a passive prediction row was showing lists
+//   the row's items first, in the row's order; picking one of them (or its digit, or ENTER on it) is picking it from the
+//   row, the same as the call above, then the window closes.
 //   1 when engine or out is NULL; 2 when there is neither a candidate window nor a prediction row, or
 //   index is outside that output (state unchanged); 4 internal (engine reset). *out is NULL on any error.
 int32_t shanjie_engine_pick(ShanjieEngine *engine, uint32_t index, ShanjieOutput **out);

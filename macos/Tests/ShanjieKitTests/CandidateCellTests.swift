@@ -31,6 +31,73 @@ final class CandidateCellTests: XCTestCase {
         XCTAssertEqual(Set(b.removed.map(ObjectIdentifier.init)), Set(a.cells[0..<9].map(ObjectIdentifier.init)))
     }
 
+    // MARK: predict-down contract B.3.2 (the Tab glyph on the not-entered prediction row)
+
+    private func bar(_ cells: CandidateCells, selected: Int, numbered: Bool = true) -> CandidateCells.Update {
+        let page = list(4)
+        return cells.update(candidates: page.texts, notes: page.notes, selected: selected, first: 0, columns: 0, numbered: numbered)
+    }
+
+    func testPassiveRowShowsTheTabGlyphOnTheFirstCell() {
+        let cells = CandidateCells()
+        let passive = bar(cells, selected: -1)
+        XCTAssertEqual(passive.cells[0].numberText, CellMetrics.tabGlyph)
+        XCTAssertTrue(passive.cells[0].showsNumber)
+        XCTAssertTrue(passive.cells.dropFirst().allSatisfy { !$0.showsNumber }, "only the first cell shows anything")
+        let entered = bar(cells, selected: 0)
+        XCTAssertEqual(entered.cells[0].numberText, "1")
+        XCTAssertTrue(entered.cells.allSatisfy(\.showsNumber))
+        // The English-run hint has no number, so no glyph either.
+        let hint = bar(CandidateCells(), selected: -1, numbered: false)
+        XCTAssertTrue(hint.cells.allSatisfy { $0.numberText == "" && !$0.showsNumber })
+    }
+
+    func testNumberSlotCoversTheTabGlyph() {
+        let width = { (s: String) in NSAttributedString(string: s, attributes: [.font: CellMetrics.numberFont]).size().width }
+        XCTAssertGreaterThanOrEqual(CandidateCell.numberSlot, width(CellMetrics.tabGlyph))
+        for d in 1...9 { XCTAssertGreaterThanOrEqual(CandidateCell.numberSlot, width(String(d))) }
+        // A vertical cell has the same number room whatever its number is, the glyph included.
+        let glyph = CandidateCell(position: 0, numberText: CellMetrics.tabGlyph, showsNumber: true, text: "你", note: nil, selected: false,
+                                  fixedNumberSlot: true)
+        let one = CandidateCell(position: 0, numberText: "1", showsNumber: true, text: "你", note: nil, selected: false, fixedNumberSlot: true)
+        XCTAssertEqual(glyph.candidateMinX, one.candidateMinX)
+        XCTAssertEqual(glyph.contentWidth, one.contentWidth)
+    }
+
+    func testEnteringTheRowReusesTheFirstCell() {
+        // Widths are read right after each update: a reused cell is the same object, so reading it later would compare it with itself.
+        func shape(_ u: CandidateCells.Update) -> [CGFloat] { [u.cells[0].contentWidth, u.cells[0].candidateMinX] }
+        // Passive then entered (the candidates are the same, only the selection moved, which `render` draws in place).
+        let cells = CandidateCells()
+        let a = bar(cells, selected: -1)
+        let passive = shape(a)
+        let b = bar(cells, selected: 0)
+        XCTAssertTrue(b.reused[0], "the first cell is the same cell")
+        XCTAssertEqual(b.reused, Array(repeating: true, count: 4))
+        XCTAssertTrue(b.removed.isEmpty)
+        XCTAssertTrue(b.cells[0] === a.cells[0])
+        XCTAssertEqual(b.cells[0].numberText, "1")
+        let entered = shape(b)
+        XCTAssertEqual(entered, passive, "the candidate does not move when the row is entered")
+        // Back (Shift+Tab, Esc).
+        let c = bar(cells, selected: -1)
+        XCTAssertTrue(c.reused[0] && c.removed.isEmpty)
+        XCTAssertEqual(c.cells[0].numberText, CellMetrics.tabGlyph)
+        XCTAssertEqual(shape(c), entered)
+        // The other way round: a set that started entered (a cell built with "1") and then leaves the row.
+        let fresh = CandidateCells()
+        let d = bar(fresh, selected: 0)
+        let started = shape(d)
+        let e = bar(fresh, selected: -1)
+        XCTAssertTrue(e.reused[0] && e.removed.isEmpty)
+        XCTAssertTrue(e.cells[0] === d.cells[0])
+        XCTAssertEqual(e.cells[0].numberText, CellMetrics.tabGlyph)
+        XCTAssertEqual(shape(e), started)
+        // Built entered or built passive, the first cell is the same size; the other cells are not widened.
+        XCTAssertEqual(started, passive)
+        XCTAssertEqual(d.cells[1].contentWidth, bar(CandidateCells(), selected: 0).cells[1].contentWidth)
+    }
+
     func testClickAfterScrollReportsPositionInTheNewOutputAndOneSelection() {
         let cells = CandidateCells()
         var clicked: [Int] = []

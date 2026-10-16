@@ -6481,3 +6481,9 @@ formal: alpha 0.7, tau 1, delta 2
 - **略過名單**：PR #189（只改 `eval/bench/results/` 的一個檔，base 是本片分支）的 run 38958992283：`changes` 印 `run=false`，core、core-debug、shell 都是 skipped，run 的結論是 success。PR 關閉、不合併。
 - **gate 不變**：`scripts/check-ci-gate.sh` 看整個 `ci.yml` run 的結論，不看 job 名稱，多一個 job 不會漏檢。
 - 現在 core 與 shell 誰最慢看 runner。再快的方向：core 的 Python 步驟拆成另一個 job、三份「下載並核對模型」合成一份（現在換模型要改 ci.yml 三處），這片不做。
+
+## 2026-10-17：預測列與 ↓ 候選一致、Tab 圖示（契約 `docs/contracts/predict-down.md` B）
+
+- **做了什麼**：核心 `engine.rs`：`Cands` 多一個 `rows`（開窗時從 `old` 搬進來的預測項目），`window_list` 照「預測項目、再接去掉已出現詞的詞庫清單」排；`dispatch` 的第 15 條（空白、↓）把 `old` 交給 `open_candidates`，第 13 條對恰好一個未完成單位且預測列非空的 ↓ 開只有預測項目的窗（`open_with_rows`）。`choose`／`forget_highlighted` 用「索引 < `rows.len()`」判斷預測項目：選取走 `apply_pred`（`choose_pred` 的本體），⌘⌫ 遺忘後原地重建清單、選取移到同一個詞（不在是 0）、清單空了就關窗。殼 `CandidateCells.swift`：`CellMetrics.tabGlyph`（⇥），未進入的預測列第 0 格顯示它；進出預測列時第 0 格重用（⇥ 與 1 算同一格），橫排帶數字的第 0 格數字欄寬取「1」與圖示較寬者，直排的 `numberSlot` 涵蓋圖示。
+- **既有測試的改動**：沒有刪斷言。載入模型、主題是詞庫清單的測試加 `set_prediction(false)`（`engine_learn.rs` 的 `engine()`／`tiny()`；`engine_english.rs` 新增 `lm_eng_lexicon()`，只給三個用 `choose_word` 的測試；`engine_pack.rs` 的 `run` 只在最後一段保留預測列；`engine_predict.rs` 的 t19 與 `a_prediction_pick_is_learned_like_a_repick` 的詞庫改選那一段）。真正改預期的三處：`the_horizontal_prediction_row_keeps_its_keys_and_output`（`assert_ne!(row(&d), r)` 改成窗前面是預測列、總數大於預測列）；`VerticalLayoutTests.testVerticalCandidateXIsTheSameForNumbersOneToNine`（槽寬是數字與圖示較寬者）；`ShellTests.testOwnerC_lateDeactivateOfANonOwner`（窗的第一項是預測列的第一項，不再是詞庫的「你」）；`testPredictionRowShowsNoNumbersUntilTabEnters` 加圖示斷言。
+- **還沒有的**：實機（B.2，`imeshot`）、`make test-rust`（188 的 WSL）、保留集（不跑）。

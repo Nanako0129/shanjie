@@ -24,6 +24,10 @@ public enum CellMetrics {
     nonisolated(unsafe) static let numberFont = NSFont.systemFont(ofSize: 9)
     /// 12, not 11: at 11 pt the name 「全形逗號」 measured 42 pt of ink in s-11 against 46 in p-1.
     nonisolated(unsafe) static let nameFont = NSFont.systemFont(ofSize: 12)
+    /// Predict-down contract B.3.2: the not-entered prediction row's first cell shows this where the number 1 goes, to tell
+    /// that Tab enters the row (it turns into "1" when entered). U+21E5 is the symbol macOS menus use for the Tab key; it is
+    /// drawn in the number font and colour for now, and its size, colour and place wait for the maintainer's on-screen rounds.
+    public static let tabGlyph = "⇥"
 }
 
 /// One cell of the bar or grid: number, candidate, optional name, all drawn in `draw(_:)`. The
@@ -46,6 +50,9 @@ public final class CandidateCell: NSView {
     private var numberWidth: CGFloat
     /// The vertical window's numbers take a fixed slot (`numberSlot`); the bar and the grid size each number by itself.
     private let fixedNumberSlot: Bool
+    /// The least room the number gets (the bar's first cell: wide enough for both "1" and `tabGlyph`, so the candidate does not
+    /// move when the prediction row is entered or left).
+    private let minNumberWidth: CGFloat
     private let candidateWidth: CGFloat, nameWidth: CGFloat
     /// The width the content needs (number, candidate, name), whatever the frame is now: the vertical window stretches every
     /// cell to the row's width, so the layout code reads this, never `frame.width`.
@@ -68,12 +75,18 @@ public final class CandidateCell: NSView {
         return width + CellMetrics.trailing
     }
 
-    /// The widest of the digits 1-9 in the number font. The vertical window gives every number this much room: the system
-    /// font's digits are proportional (measured 2026-10-10: '1' 4.34 pt, '8' 5.92 pt at 9 pt), so with each number's own
-    /// width the candidate column would shift between rows and move when a scroll renumbers a cell.
-    static let numberSlot: CGFloat = (1...9).map { measure(String($0), CellMetrics.numberFont) }.max() ?? 0
+    /// The widest of the digits 1-9 and `CellMetrics.tabGlyph` in the number font. The vertical window gives every number this
+    /// much room: the system font's digits are proportional (measured 2026-10-10: '1' 4.34 pt, '8' 5.92 pt at 9 pt), so with
+    /// each number's own width the candidate column would shift between rows and move when a scroll renumbers a cell; the
+    /// glyph is in because the passive row's first cell turns from it into "1" (predict-down contract B.3.2).
+    static let numberSlot: CGFloat = ((1...9).map(String.init) + [CellMetrics.tabGlyph]).map { measure($0, CellMetrics.numberFont) }.max() ?? 0
 
-    private var numberRoom: CGFloat { fixedNumberSlot ? Self.numberSlot : Self.measure(numberText, CellMetrics.numberFont) }
+    /// The room of the bar's first cell: "1" or `tabGlyph`, whichever is wider.
+    static let firstCellNumberRoom: CGFloat = ["1", CellMetrics.tabGlyph].map { measure($0, CellMetrics.numberFont) }.max() ?? 0
+
+    private var numberRoom: CGFloat {
+        fixedNumberSlot ? Self.numberSlot : max(Self.measure(numberText, CellMetrics.numberFont), minNumberWidth)
+    }
 
     private static func lineHeight(_ font: NSFont) -> CGFloat { ceil(font.ascender - font.descender + font.leading) }
     private static let numberHeight = lineHeight(CellMetrics.numberFont)
@@ -83,15 +96,16 @@ public final class CandidateCell: NSView {
     /// The cell is as wide as its content; `showsNumber` false keeps the number's room but hides it
     /// (grid rows other than the selected one, so the rows line up).
     init(position: Int, numberText: String, showsNumber: Bool, text: String, note: String?, selected: Bool,
-         fixedNumberSlot: Bool = false) {
+         fixedNumberSlot: Bool = false, minNumberWidth: CGFloat = 0) {
         self.fixedNumberSlot = fixedNumberSlot
+        self.minNumberWidth = minNumberWidth
         self.position = position
         self.numberText = numberText
         self.showsNumber = showsNumber
         self.text = text
         self.note = note
         self.isSelected = selected
-        numberWidth = fixedNumberSlot ? Self.numberSlot : Self.measure(numberText, CellMetrics.numberFont)
+        numberWidth = fixedNumberSlot ? Self.numberSlot : max(Self.measure(numberText, CellMetrics.numberFont), minNumberWidth)
         candidateWidth = Self.measure(text, CellMetrics.candidateFont)
         nameWidth = note.map { Self.measure($0, CellMetrics.nameFont) } ?? 0
         let width = Self.width(numberWidth: numberWidth, candidateWidth: candidateWidth, nameWidth: nameWidth, hasNote: note != nil)
@@ -198,11 +212,17 @@ public final class CandidateCells {
         var reused: [Bool] = []
         var kept = Set<ObjectIdentifier>()
         for (i, text) in candidates.enumerated() {
-            let numberText = numbered ? String(grid ? i % newColumns + 1 : i + 1) : ""
-            let shows = selected >= 0 && (!grid || i / newColumns == selectedRow)
+            // Predict-down contract B.3.2: the not-entered prediction row (no selection, never a grid) shows the Tab glyph where the
+            // first cell's number goes.
+            let tab = numbered && selected < 0 && i == 0
+            let numberText = numbered ? (tab ? CellMetrics.tabGlyph : String(grid ? i % newColumns + 1 : i + 1)) : ""
+            let shows = tab || (selected >= 0 && (!grid || i / newColumns == selectedRow))
             let old = newFirst + i - first
+            // The first cell is the same cell entered or not: the glyph and "1" are the two states of one number, so `render`'s
+            // in-place path (the candidates did not change, only the selection) finds the cell it has on screen.
+            let firstNumber = { (s: String) in s == CellMetrics.tabGlyph || s == "1" }
             if sameMode, cells.indices.contains(old), cells[old].text == text, cells[old].note == notes[i],
-               renumber || cells[old].numberText == numberText {
+               renumber || cells[old].numberText == numberText || (i == 0 && firstNumber(cells[old].numberText) && firstNumber(numberText)) {
                 let cell = cells[old]
                 cell.setNumber(numberText)
                 cell.update(position: i, selected: i == selected, showsNumber: shows)
@@ -211,7 +231,8 @@ public final class CandidateCells {
                 kept.insert(ObjectIdentifier(cell))
             } else {
                 let cell = CandidateCell(position: i, numberText: numberText, showsNumber: shows, text: text,
-                                         note: notes[i], selected: i == selected, fixedNumberSlot: renumber && numbered)
+                                         note: notes[i], selected: i == selected, fixedNumberSlot: renumber && numbered,
+                                         minNumberWidth: numbered && !grid && i == 0 ? CandidateCell.firstCellNumberRoom : 0)
                 cell.onClick = { [weak self] position in self?.onSelect?(position) }
                 next.append(cell)
                 reused.append(false)

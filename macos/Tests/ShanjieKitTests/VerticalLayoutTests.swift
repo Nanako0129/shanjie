@@ -103,7 +103,9 @@ final class VerticalLayoutTests: XCTestCase {
         XCTAssertEqual(Set(vertical.map(\.candidateMinX)).count, 1, "one x for every number")
         XCTAssertEqual(Set(vertical.map(\.contentWidth)).count, 1)
         let widest = numbers.map { CandidateCell(position: 0, numberText: $0, showsNumber: true, text: "字", note: nil, selected: false).candidateMinX }.max()
-        XCTAssertEqual(vertical[0].candidateMinX, widest, "the slot is the widest digit")
+        // Predict-down contract B.3.2: the slot also covers the Tab glyph (the passive row's first cell turns from it into "1").
+        let glyph = CandidateCell(position: 0, numberText: CellMetrics.tabGlyph, showsNumber: true, text: "字", note: nil, selected: false).candidateMinX
+        XCTAssertEqual(vertical[0].candidateMinX, max(widest ?? 0, glyph), "the slot is the widest of the digits and the Tab glyph")
         let cell = vertical[0]
         let x = cell.candidateMinX
         for n in numbers { cell.setNumber(n); XCTAssertEqual(cell.candidateMinX, x, "renumbered to \(n)") }
