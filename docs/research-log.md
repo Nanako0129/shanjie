@@ -6458,6 +6458,30 @@ formal: alpha 0.7, tau 1, delta 2
 - Python 參考實作、golden 設定：聊天第 1 名「便利……正規劃成」，正解第 8；書面第 1 名「遍歷……正規劃成」，正解第 11。
 - `eval/golden/s2h-lm-context.txt` 的錯字回報兩行用 Python 參考實作重產，n 132：聊天 top1 29、書面 38 不變，oracle@64 兩種設定都 128 → 129；`eval/README.md` 改成 132 列。
 
+## 2026-10-17：CI 加速（契約 `docs/contracts/ci-speed.md`）
+
+- 四次 run（xcode-27-arm64 runner；時間是每個 job 自己的開始到結束）：
+
+  | run | 內容 | core | core-debug | shell | 最慢的 job |
+  |---|---|---|---|---|---|
+  | 38945349011（基準，PR #184） | debug＋release 串在 core | 904 秒 | — | 683 秒 | 904 秒 |
+  | 38954775625（本片第 1 次） | 拆出 core-debug、Rust 快取（冷）、Swift 並行 | 624 秒 | 278 秒 | 380 秒 | 624 秒 |
+  | 38956299697（第 2 次，空 commit） | 同上，快取命中 | 476 秒 | 292 秒 | 363 秒 | 476 秒 |
+  | 38959341648（第 3 次） | 快取只留 core | 459 秒 | 385 秒 | 640 秒 | 640 秒 |
+
+- **runner 本身的快慢差很大**：這片沒改的步驟在四次 run 之間差到將近兩倍（`make bundle` 87、70、67、124 秒；C 標頭冒煙測試 20、29、20、20 秒；Homebrew cask 46、25、22、42 秒）。單次 run 的差距不能直接算成改動的效果；下面的結論只寫跨 run 都成立的部分。
+- 各步驟（基準 → 第 1、2、3 次）：
+  - debug 測試：455 → 251、262、357 秒（移到 core-debug，和 release 同時跑；編譯 52.6 → 29.4、32.0、47.3 秒）。
+  - release 測試：252 → 355、259、262 秒（編譯 41.7 → 58.0、42.7、45.5 秒）。
+  - Swift 測試：467 → 203、197、359 秒（`--parallel`；編譯 28.5 → 19.9、19.3、37.5 秒）。依序執行時最慢的一組就 126 秒，並行之後整步在快的 runner 上約 200 秒、慢的 runner 上約 360 秒，都比依序的 467 秒少。
+- **拆 job 的效果跨 run 成立**：core 不再等 debug 測試，四次裡 core 都在 459–624 秒之間；最慢的 job 從 904 秒變成 476–640 秒，取決於 runner。
+- **Rust 快取拿掉（更正）**：先前寫「熱快取讓 release 編譯 58 → 43 秒、省到的是依賴」是錯的。workspace 沒有外部 crate（`Cargo.lock` 只有 `core`、`cli`），快取命中時 log 照樣是 `Compiling core`、`Compiling cli`，沒有東西被沿用；58 → 43 秒是 runner 的快慢，沒有快取的基準本來就是 41.7 秒（`/code-review` 指出，Cargo.lock 與 log 核對過）。照契約 §2「量不出變快就拿掉」，三個 job 都不快取。
+- **測試數量不變**：Rust 的 debug 與 release 各 477 個通過、9 個略過、20 個測試執行檔，四次 run 相同。Swift 依序執行時印兩個 bundle 的總計（223 個、1 個略過，加上 24 個），合計 247；並行的 xunit 有 247 個 testcase，名稱逐一相同。SwiftPM 並行時 xunit 不標 XCTSkip（唯一的 XCTSkip `CandidateCellTests.testBenchmark` 在 xunit 裡沒有 skipped），所以只比名稱（契約 §3.1 同日放寬），CI 只印 testcase 數。
+- **並行的代價**：`--parallel` 每個測試方法開一個 xctest 行程（log 是 `[n/247] Testing Class/method`），一個測試留下的狀態（static、偏好設定、通知觀察者）害到下一個測試的情況，CI 不再抓得到；只有依序跑的 `make test-swift` 抓得到。輸入法出貨時是長時間跑的單一行程，所以這是實際的取捨；這片照契約保留 `--parallel`（Swift 測試約少一半時間），改 Swift 的 PR 本機照舊跑依序的 `make test-swift`。
+- **略過名單**：PR #189（只改 `eval/bench/results/` 的一個檔，base 是本片分支）的 run 38958992283：`changes` 印 `run=false`，core、core-debug、shell 都是 skipped，run 的結論是 success。PR 關閉、不合併。
+- **gate 不變**：`scripts/check-ci-gate.sh` 看整個 `ci.yml` run 的結論，不看 job 名稱，多一個 job 不會漏檢。
+- 現在 core 與 shell 誰最慢看 runner。再快的方向：core 的 Python 步驟拆成另一個 job、三份「下載並核對模型」合成一份（現在換模型要改 ci.yml 三處），這片不做。
+
 ## 2026-10-17：derisk-1015 E2 修訂七的結果（讀音 × 前文長度 2×2）
 
 - **候選**：照修訂七的放寬，用目前出貨的 n-gram（model-v6、classes-v5、kn-v1，書面加 trigram-v1）在 Windows 機器以 `run_sets.py dumps` 的同一個 `lm_eval.py` 指令重產，18 個 dump 全部 rc 0；錯字回報用這個分支當時的 129 列（聊天 top1 29、書面 38，和 golden 相同）。
