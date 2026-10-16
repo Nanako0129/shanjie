@@ -40,7 +40,7 @@
 - **檔案**：沿用 `SJT30001`（`experiments/derisk-1015/e1/sjlm_io.py` 檔頭）。放在模型旁、檔名 `trigram.sjt3`。產生程式從 `experiments/` 移到 `tools/build_trigram.py`（重對應＋寫檔），測試進 `tools/test_*.py`。
 - **Rust `core/src/lm.rs`**：
   - `Lm::load`：模型旁有 `trigram.sjt3` 就讀（核對 magic、V、綁的模型 SHA-256、長度、`ctx_off` 單調、`next_id` 在前文內遞增），不合就新的 `LmError` 變體（不靜默略過，訊息點名這個檔）；沒有就關閉。整檔 `std::fs::read` 進記憶體（和 bigram 相同；core 不加依賴）。
-  - 打分：照 `trimodel.py` 的式子，`P3 = max(c − D, 0)/t3 + back3·P2`，D = 0.75（寫在檔頭或常數，和 Python 同一個值），back3 在查到前文時現算（H3 平均每前文不到 2 條）。P2 是現在的 `prob_c` 系列（含詞類項；KN 照當次設定）。沒查到前文、u 未知 → P2，逐位元相同。
+  - 打分：照 `trimodel.py` 的式子，`P3 = max(c − D, 0)/t3 + back3·P2`，D = 0.75（寫在檔頭或常數，和 Python 同一個值；檔頭的 D 不是 0.75 一律拒絕，Rust 與 Python 讀檔都是），back3 在查到前文時現算（H3 平均每前文不到 2 條）。P2 是現在的 `prob_c` 系列（含詞類項；KN 照當次設定）。沒查到前文、u 未知 → P2，逐位元相同。
   - 解碼器：`Hyp` 加前一個詞；有 trigram 時重組鍵從（表面字串, 最後一詞）改成（表面字串, 前一詞, 最後一詞），光束寬度不變。起始狀態照 `harness.py` 的 `start_state`：沒有前文 → (`<s>`, `<s>`)；前文給一個詞 → (未知, 那個詞)，第一個詞只用 bigram。
   - **每個設定各自的打分設定**：把解碼與重算總分時只傳 λ 的地方換成由 `Profile` 導出的設定（λ、KN 開關、trigram 開關）。書面：KN 關、trigram 開（有表時）；聊天：照舊（KN 照側檔、trigram 關，有表也不用）。
   - **引擎的詞段交界**（`refresh_lm` 把組字區切成一段一段解；Python 參考實作只有整句，這幾條是本契約定的）：
@@ -49,7 +49,7 @@
     - (c) `Engine::total_score` 照 (a)、(b) 逐詞算（帶兩個歷史詞），s3a 的「`total_score` 等於解碼第一名的分數」在書面有表時照舊成立；`docs/contracts/s3a.md` 記載。
     - (d) 預測列（V3）與它的重算完全不變：兩種設定都照 v0.4.6（KN 照側檔、不用 trigram）。契約與 `docs/contracts/s3a.md` 寫明。
   - **學習加分的詞條**（比照 model-v6 §2.8 規則 1）：詞條被學習加分（`boosted > lp`）時，這個詞項**不經過 trigram**，用沒有表時的 P2（加分後的 `pb`；書面本來就關 KN）。理由：trigram 開著時加分只透過 `back3·P2` 進分數，會被 back3 縮小，和 KN 吃掉加分是同一類問題。沒被加分的詞條照常用 trigram。`total_score` 套同一個例外。Python 參考實作沒有學習，不受影響。
-- **CLI**：`--profile formal` 時摘要行加 `+tri:<sha8>`、不加 `+kn:`；`--no-tri` 明確關閉（研究用）。
+- **CLI**：`--profile formal` 時摘要行加 `+tri:<sha8>`、不加 `+kn:`；`--no-tri` 明確關閉（研究用）。只有 `--profile formal` 且沒有 `--no-tri` 時才讀 `trigram.sjt3`：聊天與 `--predict`／`--predict-time` 不讀（表壞了也不影響）；`kn.sjkn` 不論哪個設定都照舊讀並核對（書面有表時只是計分關 KN）。Python 的 `lm_eval.py` 同規則，另外 `--tri FILE` 配 `--profile chat` 是錯誤。
 - **App**：這一片**不放** `trigram.sjt3`（`build-app.sh`、CI、`release.yml` 不動），App 行為不變。
 - 驗收：
   1. 沒有 `trigram.sjt3` 時逐位元組不變：現有 golden 全過、不改 golden 檔。
@@ -88,7 +88,7 @@
 
 ## 4. 限制與回滾
 
-- executor：不跑 Windows 機器、不連網；不讀 `eval/holdout`、`~/side-project/shanjie-private`、學習檔、`~/Library`、鑰匙圈；不安裝、不啟動 App；不 push、不開 PR、不碰其他 worktree。私人集合（discordtune）只由 main 跑、只回數字。
+- executor：不跑 Windows 機器、不連網；不讀 `eval/holdout`、repo 外的私人資料、學習檔、`~/Library`、鑰匙圈；不安裝、不啟動 App；不 push、不開 PR、不碰其他 worktree。私人集合（discordtune）只由 main 跑、只回數字。
 - 回滾：第 A 片沒有表時本來就關閉；第 C 片之後 revert 打包那個 PR 即回到 v0.4.6 的書面設定。
 
 ## 5. 審查紀錄
