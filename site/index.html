@@ -375,7 +375,7 @@
   <details open>
     <summary>設計原則</summary>
     <ul>
-      <li>更新檢查（v0.4.7 起）：設定→關於的「自動檢查更新」開著時，每天最多一次連到 GitHub（<code>raw.githubusercontent.com</code>）讀取更新清單 <code>appcast.xml</code>。GitHub 會看到你的 IP 位址與請求標頭：User-Agent 裡有善解與 Sparkle 的版本號，Accept-Language 是你系統的語言偏好（例如 <code>zh-TW</code>），其餘是一般的連線標頭。不送出任何輸入內容、選字記憶或其他系統資訊。自動檢查可以在設定→關於關掉；按「立即檢查」時一定會連線。按「更新到 X」時從 GitHub Releases 下載新版（<code>github.com</code>，轉到 <code>release-assets.githubusercontent.com</code>），安裝前驗證 EdDSA 簽章；正式版另經 Apple 公證。</li>
+      <li>更新檢查（v0.4.7 起）：設定→關於的「自動檢查更新」開著時，每天最多一次連到 GitHub（<code>raw.githubusercontent.com</code>）讀取更新清單 <code>appcast.xml</code>。GitHub 會看到你的 IP 位址與請求標頭：User-Agent 裡有善解與 Sparkle 的版本號，Accept-Language 是你系統的語言偏好（例如 <code>zh-TW</code>），其餘是一般的連線標頭。不送出任何輸入內容、選字記憶或其他系統資訊。自動檢查可以在設定→關於關掉；按「立即檢查」時一定會連線。按「更新到 X」時先再讀一次更新清單，然後從 GitHub Releases 下載新版（<code>github.com</code>，轉到 <code>release-assets.githubusercontent.com</code>），安裝前驗證 EdDSA 簽章；正式版另經 Apple 公證。</li>
       <li>除了更新檢查，目前版本沒有其他連網功能。之後如果加入雲端校正，會在上線前寫在這一頁：什麼時候連線、送出什麼、能不能關閉。</li>
       <li>不申請「輸入監控」與「輔助使用」權限。系統的輸入法框架本來就會把按鍵交給輸入法，不需要監看整個系統。</li>
       <li>用了哪些資料與模型、各自的授權，下載前就寫在這一頁（見「開源與授權」）。</li>
