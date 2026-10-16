@@ -540,5 +540,5 @@ fn load_paired_binds_the_kn_side_file() {
     let msgs: Vec<String> =
         [KnPairing::TunedWithout, KnPairing::OtherSideFile, KnPairing::TunedWith].map(|e| TinyLmError::KneserNey(e).to_string()).to_vec();
     assert!(msgs.iter().all(|m| m.contains(".sjtl") && m.contains("kn.sjkn")), "{msgs:?}");
-    assert!(msgs[0].contains("tuned without") && msgs[1].contains("another") && msgs[2].contains("none is on"), "{msgs:?}");
+    assert!(msgs[0].contains("tuned without") && msgs[1].contains("another") && msgs[2].contains("none is loaded"), "{msgs:?}");
 }
