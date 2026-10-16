@@ -678,6 +678,7 @@ fn english_token_is_a_boundary_for_the_context_and_for_learning() {
     // so what was taught there is found there, and the same word after 他 alone (key 他) is another key.
     let other = |shown: &str| if shown == "權力" { "全力" } else { "權力" };
     let mut e = lm_eng();
+    e.set_prediction(false).unwrap(); // predict-down B.4: choose_word picks the lexicon entry, not the row's copy
     syllable(&mut e, "ㄊㄚ");
     run(&mut e, "r u s t _ 1");
     syllable(&mut e, "ㄑㄩㄢˊ");

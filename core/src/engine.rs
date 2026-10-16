@@ -1085,6 +1085,7 @@ impl Engine {
         self.predict_on = on;
         if !on {
             self.drop_units(); // the units' only way out is the row (section 12.1)
+            self.close_row_window();
         }
         self.recompute_pred(); // clears first; returns empty while off
         self.handled()
@@ -1511,6 +1512,7 @@ impl Engine {
         self.invalidate();
         self.profile = profile;
         self.clear_pred();
+        self.close_row_window();
         if let Err(e) = self.refresh() {
             self.clear_all();
             return Err(e);
@@ -2201,8 +2203,9 @@ impl Engine {
                 self.clear_pend();
             } else if k.kind == KeyKind::Enter {
                 return self.commit_enter(m); // 12a, 12b
-            } else if k.kind == KeyKind::Down && !old.is_empty() && self.pend_prev.is_empty() {
-                // Predict-down contract B.3.1: one unfinished syllable has no lexicon candidates; the window lists the row.
+            } else if k.kind == KeyKind::Down && self.pend_prev.is_empty() {
+                // Predict-down contract B.3.1: one unfinished syllable has no lexicon candidates; the window lists the row
+                // (an empty row opens nothing, so the key is ignored as before).
                 self.open_with_rows(old);
             } else {
                 self.pred = old; // the key does nothing
@@ -2552,6 +2555,14 @@ impl Engine {
         list
     }
 
+    /// Predict-down contract B.3.1: a window that carries row items closes (as Esc) when the row's inputs change under it
+    /// (prediction off, another profile); its items' keys and filter were made for the old decoding.
+    fn close_row_window(&mut self) {
+        if self.cands.as_ref().is_some_and(|c| !c.rows.is_empty()) {
+            self.cands = None;
+        }
+    }
+
     /// Opens the window on `window_list`; an empty list opens nothing (and the row is gone, as before this contract).
     fn open_with_rows(&mut self, rows: Vec<Pred>) {
         let list = self.window_list(&rows);
@@ -2593,19 +2604,23 @@ impl Engine {
         let Some(c) = self.cands.as_ref().filter(|c| !c.english) else { return Ok(()) }; // an English item has nothing to forget
         let Some((word, l)) = c.list.get(c.sel).cloned() else { return Ok(()) };
         if c.sel < c.rows.len() {
-            // Predict-down contract B.3.1: a row item forgets as in the entered row (§10.3); the window stays open on the
-            // rebuilt list (the row without the word, then the lexicon's), selected on the same word if it is still there.
+            // Predict-down contract B.3.1: a row item forgets as in the entered row (§10.3): re-decode, recompute the row
+            // (its keys and its "not the shown word" filter follow the new decoding), then the window stays open on the
+            // rebuilt list, selected on the same word if it is still there.
             let reading = c.rows[c.sel].reading.clone();
             self.forget_entry(&reading, &word);
             self.refresh()?;
             let Some(mut c) = self.cands.take() else { return Ok(()) };
-            c.rows.remove(c.sel);
+            self.recompute_pred();
+            c.rows = std::mem::take(&mut self.pred);
+            c.rows.retain(|p| p.word != word);
             c.list = self.window_list(&c.rows);
             if c.list.is_empty() {
                 return Ok(()); // closed, as by Esc
             }
             c.sel = c.list.iter().position(|(w, _)| *w == word).unwrap_or(0);
-            c.first = c.first.min(c.sel);
+            // Keep `first` within what ↑, ↓ and Page Down reach (the last row shows the last item).
+            c.first = c.first.min(c.sel).min(c.list.len().saturating_sub(PAGE_SIZE));
             if c.sel >= c.first + PAGE_SIZE {
                 c.first = c.sel + 1 - PAGE_SIZE;
             }

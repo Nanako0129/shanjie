@@ -497,6 +497,7 @@ fn pre_after_apply_is_the_reranked_text() {
     assert!(e.learner().is_empty(), "the pick displaced nothing");
     let mut c = engine_with(Some(&model));
     c.set_learning(true);
+    c.set_prediction(false).unwrap(); // predict-down B.4: the control is a lexicon re-pick, not the row's copy of the word
     type_syls(&mut c, &syls);
     choose_at_cursor(&mut c, &word);
     c.key(k(KeyKind::Enter)).unwrap();

@@ -2234,6 +2234,7 @@ fn down_opens_the_window_with_the_row_in_front() {
     let d = e.key(kind(KeyKind::Down)).unwrap();
     assert_eq!(d.candidates[..r.len()], r[..], "the row's items first, in the row's order");
     assert_eq!(d.selected, Some(0));
+    assert!(r.iter().any(|w| lexicon_list(&["ㄋㄧˇ"]).contains(w)), "precondition: the row and the lexicon share a word, so dropping the dedup shows");
     let want = row_then_lexicon(&r, &["ㄋㄧˇ"]);
     assert!(want.len() > r.len(), "precondition: the lexicon adds items");
     assert_eq!(d.total as usize, want.len(), "row + the lexicon list without the row's words");
@@ -2389,6 +2390,46 @@ fn cmd_backspace_on_a_row_item_in_the_window_forgets_it() {
     drop(e);
     assert_eq!(learner_engine(Profile::Formal, Some(&dir)).learner().records().len(), 0, "the file was rewritten");
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// B.3.1 ⌘⌫: a forgotten row word that is also a lexicon entry of the span moves to its place in the lexicon part, and the
+/// selection follows it there.
+#[test]
+fn cmd_backspace_on_a_row_word_the_lexicon_also_has_selects_it_in_the_lexicon_part() {
+    let (mut e, o) = completed_row();
+    let r = row(&o);
+    let lexl = lexicon_list(&["ㄋㄧˇ"]);
+    let (i, w) = r.iter().enumerate().find(|(_, w)| lexl.contains(w)).map(|(i, w)| (i, w.clone())).expect("precondition: a row word in the lexicon");
+    let mut d = down(&mut e);
+    for _ in 0..i {
+        d = e.key(kind(KeyKind::Right)).unwrap();
+    }
+    assert_eq!(d.candidates[d.selected.unwrap()], w);
+    let x = e.key(cmd_bs()).unwrap();
+    let rest: Vec<String> = r.iter().filter(|x| **x != w).cloned().collect();
+    let want = row_then_lexicon(&rest, &["ㄋㄧˇ"]);
+    let at = want.iter().position(|x| *x == w).unwrap();
+    assert!(at >= rest.len(), "the word is in the lexicon part now");
+    assert_eq!(x.total as usize, want.len());
+    assert_eq!((x.first as usize + x.selected.unwrap(), x.candidates[x.selected.unwrap()].clone()), (at, w), "selected on the word's new place");
+}
+
+/// B.3.1: prediction off or another profile closes a window that carries row items (as Esc); a lexicon-only window stays.
+#[test]
+fn prediction_off_or_a_profile_change_closes_a_window_with_row_items() {
+    let (mut a, _) = completed_row();
+    assert!(down(&mut a).total > 1);
+    let x = a.set_prediction(false).unwrap();
+    assert!(x.candidates.is_empty() && x.selected.is_none(), "prediction off closes the window");
+    let (mut b, _) = completed_row();
+    down(&mut b);
+    let y = b.set_profile(Profile::Formal).unwrap();
+    assert!(y.selected.is_none(), "a profile change closes the window");
+    let mut e = engine();
+    e.set_prediction(false).unwrap();
+    let (mut c, _) = build_in(e, "我想", &[Syl("ㄋㄧˇ")], "");
+    let d = down(&mut c);
+    assert_eq!(c.set_profile(Profile::Formal).unwrap().total, d.total, "a lexicon-only window stays open");
 }
 
 #[test]

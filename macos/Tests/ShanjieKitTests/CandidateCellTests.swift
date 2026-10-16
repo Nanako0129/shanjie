@@ -95,7 +95,9 @@ final class CandidateCellTests: XCTestCase {
         XCTAssertEqual(shape(e), started)
         // Built entered or built passive, the first cell is the same size; the other cells are not widened.
         XCTAssertEqual(started, passive)
-        XCTAssertEqual(d.cells[1].contentWidth, bar(CandidateCells(), selected: 0).cells[1].contentWidth)
+        let page = list(4)
+        let plain = CandidateCell(position: 1, numberText: "2", showsNumber: true, text: page.texts[1], note: page.notes[1], selected: false)
+        XCTAssertEqual(d.cells[1].contentWidth, plain.contentWidth, "the second cell is as wide as a cell without the first cell's room")
     }
 
     func testClickAfterScrollReportsPositionInTheNewOutputAndOneSelection() {

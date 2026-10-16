@@ -218,11 +218,11 @@ public final class CandidateCells {
             let numberText = numbered ? (tab ? CellMetrics.tabGlyph : String(grid ? i % newColumns + 1 : i + 1)) : ""
             let shows = tab || (selected >= 0 && (!grid || i / newColumns == selectedRow))
             let old = newFirst + i - first
-            // The first cell is the same cell entered or not: the glyph and "1" are the two states of one number, so `render`'s
-            // in-place path (the candidates did not change, only the selection) finds the cell it has on screen.
-            let firstNumber = { (s: String) in s == CellMetrics.tabGlyph || s == "1" }
+            // In the bar a cell that stays at its position keeps its number's slot: only the first cell's number changes (the Tab
+            // glyph and "1" are the two states of one number), so `render`'s in-place path (the candidates did not change, only
+            // the selection) finds the cell it has on screen; `setNumber` handles the width.
             if sameMode, cells.indices.contains(old), cells[old].text == text, cells[old].note == notes[i],
-               renumber || cells[old].numberText == numberText || (i == 0 && firstNumber(cells[old].numberText) && firstNumber(numberText)) {
+               renumber || cells[old].numberText == numberText || (!grid && old == i) {
                 let cell = cells[old]
                 cell.setNumber(numberText)
                 cell.update(position: i, selected: i == selected, showsNumber: shows)

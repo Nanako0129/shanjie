@@ -74,7 +74,7 @@ typedef struct {
   uint32_t cursor_utf16;      // cursor in preedit, in UTF-16 code units (for NSRange); after the pending syllable
   uint32_t candidate_count;   // candidates in this output: collapsed one page (0-9), expanded the visible rows (up to 5 x candidate_columns); also the prediction row (1-9, see candidate_selected)
   const char *const *candidates; // NULL when candidate_count is 0
-  int32_t candidate_selected; // selection within this output's candidates; -1 when candidates are closed. -1 with candidate_count > 0 is the V3 prediction row, not entered (no number, no highlight; columns 0, first 0, total = count); >= 0 is the candidate window or the entered prediction row
+  int32_t candidate_selected; // selection within this output's candidates; -1 when candidates are closed. -1 with candidate_count > 0 is the V3 prediction row, not entered (no highlight; the shell numbers only the first cell, with the Tab glyph, predict-down B.3.2; columns 0, first 0, total = count); >= 0 is the candidate window or the entered prediction row
   uint32_t candidate_columns; // 0 = collapsed single row; > 0 = expanded, always 9 (one row = one page, the selected page on top; s3b2 9)
   uint32_t candidate_first;   // position of candidates[0] in the whole list; 0 when closed (and for the prediction row)
   uint32_t candidate_total;   // length of the whole list; 0 when closed (the prediction row: its length)
@@ -218,7 +218,10 @@ int32_t shanjie_engine_set_learning(ShanjieEngine *engine, uint32_t enabled);
 int32_t shanjie_engine_learning_open(ShanjieEngine *engine, const char *dir);
 // Forgetting: KEY with COMMAND (bit3) and kind BACKSPACE (4) while candidates are open removes the
 //   highlighted word's learned records for that reading (all contexts) and re-decodes; the output
-//   shows the new composition with the candidates still open. Without candidates the key passes through,
+//   shows the new composition with the candidates still open. On a prediction-row item at the front of the
+//   window (predict-down B.3.1) the row is recomputed and the list rebuilt without that word, the selection
+//   on the word if it is still listed, else on the first item; a rebuilt list that is empty closes the
+//   window (as Esc). Without candidates the key passes through,
 //   except while the V3 prediction row is entered: there it forgets the selected item the same way (and drops a
 //   pending learn of it), recomputes the row, and the row stays entered with the selection on that word.
 //   After a successful learning_open a forget ALWAYS rewrites the whole learning file, even when
