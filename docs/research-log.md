@@ -5903,4 +5903,31 @@ formal: alpha 0.7, tau 1, delta 2
 - 第 5 步（fresh mech-executor）：丟掉 508 列，剩 6,952 列；份量檢查過（新聞 3,940、口語 3,012 列，都超過需求 450 的 3 倍；套上每個單位的上限後新聞 1,834、口語 1,810）。PeoPo 只有 5 篇（三份合計最多 10 列）、vTaiwan 88 則，照 §2 的補足規則分別由新聞稿與討論頁補。單位上限按三份**合計**算（比「每份各算」嚴，契約沒寫明，取較嚴的讀法）。種子 20261015 抽出三份互斥的 shard，每份新聞 150（新聞稿 116–117、維基新聞 30、PeoPo 3–4）、口語 150（vTaiwan 29–30、提點子 50、討論頁 70–71）。
 - 讀音：步驟 3 時 `tools/readings.py` 產生，抽查 40 列錯 1 列（2.5%，門檻 5%）；另抽的 40 列錯 2 列（5.0%）。
 - 第 6 步（另一個 fresh agent，只回數字）：三份各自用 CLI `--rows` 解碼都跑完、n = 300；`--check-readings` 讀音與詞庫第一名不同的列數 43、29、26（只報）；和開發集 1,094 列的句子零重疊、900 列內零重複；比對自檢 900／900 命中。
+- 條款頁快照（步驟 3 抓取時記錄，2026-10-15 UTC；照 S7f 的寫法：網址、取得時間、內容 SHA-256 前 12 碼）：
+
+| 頁 | 網址 | 取得時間（UTC） | SHA-256 前 12 碼 | HTTP |
+|---|---|---|---|---|
+| data-gov-tw-license | https://data.gov.tw/license | 2026-10-15 05:49 | `4b3fb69e0957` | 200 |
+| data-gov-tw-dataset-163760-moda | https://data.gov.tw/dataset/163760 | 2026-10-15 05:49 | `114e219ad14b` | 200 |
+| data-gov-tw-dataset-11060-fda | https://data.gov.tw/dataset/11060 | 2026-10-15 05:49 | `580afe81091f` | 200 |
+| data-gov-tw-dataset-58036-join | https://data.gov.tw/dataset/58036 | 2026-10-15 05:49 | `51ca642161a2` | 200 |
+| copyright-act-art9 | https://law.moj.gov.tw/LawClass/LawSingle.aspx?pcode=J0070017&flno=9 | 2026-10-15 05:49 | `d2616a3fdc88` | 200 |
+| zhwiki-rightsinfo | https://zh.wikipedia.org/w/api.php?action=query&format=json&meta=siteinfo&siprop=rightsinfo&formatversion=2 | 2026-10-15 05:49 | `e113e25ced1a` | 200 |
+| zhwikinews-rightsinfo | https://zh.wikinews.org/w/api.php?action=query&format=json&meta=siteinfo&siprop=rightsinfo&formatversion=2 | 2026-10-15 05:49 | `50f2c6e0192f` | 200 |
+| wikimedia-terms-of-use | https://foundation.wikimedia.org/wiki/Policy:Terms_of_Use | 2026-10-15 05:49 | `3b4950a8434c` | 200 |
+| wikimedia-dumps-legal | https://dumps.wikimedia.org/legal.html | 2026-10-15 05:49 | `104242365285` | 200 |
+| cc-by-4.0 | https://creativecommons.org/licenses/by/4.0/deed.zh-hant | 2026-10-15 05:49 | `903f782bb187` | 200 |
+| cc-by-sa-4.0 | https://creativecommons.org/licenses/by-sa/4.0/deed.zh-hant | 2026-10-15 05:49 | `7ede15af9f84` | 200 |
+| cc-by-3.0-tw | https://creativecommons.org/licenses/by/3.0/tw/deed.zh_TW | 2026-10-15 05:49 | `4c7daf1d542b` | 200 |
+| compdemocracy-openData-readme | https://raw.githubusercontent.com/compdemocracy/openData/master/README.md | 2026-10-15 05:49 | `a8e6434c91fe` | 200 |
+| compdemocracy-openData-license | https://raw.githubusercontent.com/compdemocracy/openData/master/LICENSE | 2026-10-15 05:49 | `d5558cd419c8` | 404 |
+| compdemocracy-vtaiwan-uberx-readme | https://raw.githubusercontent.com/compdemocracy/openData/master/vtaiwan.uberx/README.md | 2026-10-15 05:49 | `d5558cd419c8` | 404 |
+| peopo-robots | https://www.peopo.org/robots.txt | 2026-10-15 05:49 | `773fb8d35bb9` | 200 |
+| join-gov-tw-robots | https://join.gov.tw/robots.txt | 2026-10-15 05:49 | `dfeef7147c87` | 200 |
+| gov-tw-robots | https://www.gov.tw/robots.txt | 2026-10-15 05:50 | `55ce2e892752` | 404 |
+| dumps-wikimedia-zhwikinews-20261001 | https://dumps.wikimedia.org/zhwikinews/20261001/ | 2026-10-15 05:50 | `7c17ccb608b1` | 200 |
+| dumps-wikimedia-zhwiki-20261001-status | https://dumps.wikimedia.org/zhwiki/20261001/dumpstatus.json | 2026-10-15 05:50 | `f8e6648ce975` | 200 |
+
+- 機關新聞稿資料集頁（data.gov.tw，23 個，2026-10-15 07:04–07:05 UTC 取得，都是 HTTP 200）：8372 `c777e6b2ce70`、7404 `f8b49382dfb4`、44954 `824ad6677b32`、30143 `ee15f869f9a3`、6040 `f614a2a36fb0`、7308 `d2f715f55ecd`、46112 `e8acfa74d55b`、6420 `211fed4d89b0`、162571 `56b7d8818cd5`、95226 `6a2b677d00b8`、169967 `849a110fe3c3`、94024 `00b4448bfb36`、11205 `9eec5852ee77`、171979 `4375c4fa7459`、25848 `6a630b52f197`、22927 `91870db462df`、7505 `e4c5ea46d45a`、68551 `7ae272e2da19`、95057 `f36fdfb6fd33`、48672 `4c660c77bbab`、48659 `ea62d4ae156f`、48504 `f84a10e963eb`、6298 `785187033776`。
+- 各機關網站的 robots.txt 另記 17 個（12 個 HTTP 200，其餘 403／404 視為沒有限制），完整清單在步驟 3 的 manifest。
 - 雜湊記在 `eval/README.md`；授權寫進 `LICENSES/data.md`。下一步：fresh verifier 審這個 PR（確認 `--set holdout` 仍是舊集、n = 227），之後回填 v0.4.0–v0.4.3 與 main 在 shard-1 上的數字、量三份之間的雜訊底線，再開切換 PR（契約 §6）。
