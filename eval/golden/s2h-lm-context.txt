@@ -1,6 +1,6 @@
-## dev302  lm-chat+ctx+kn:cbefbced:θ1:β1  {'n': 302, 'top1': 246, 'oracle@64': 300, 'top1_sha256': '5664a79b45619e510672cb490e8daf4c1dc8200383139f0dbe9a3dc7cb5bb919'}
-## typing76  lm-chat+ctx+kn:cbefbced:θ1:β1  {'n': 76, 'top1': 69, 'oracle@64': 76, 'top1_sha256': 'ee035613eff03a5dcffc87024cc70603d0301294e8a9a14212fea46367f6d751'}
-## user-reported  lm-chat+ctx+kn:cbefbced:θ1:β1  {'n': 116, 'top1': 29, 'oracle@64': 114, 'top1_sha256': '3d173d1b4a1ce634a2be7d16b49e15331d904d622b65ce9873cee19b3ac00f74'}
-## dev302  lm-formal+ctx+kn:cbefbced:θ1:β1  {'n': 302, 'top1': 250, 'oracle@64': 300, 'top1_sha256': 'b24eb542757cfd0906046771d6505776fdb41a8a6deee39c19b5f47f859b8359'}
-## typing76  lm-formal+ctx+kn:cbefbced:θ1:β1  {'n': 76, 'top1': 69, 'oracle@64': 76, 'top1_sha256': '462abfcc039eb02ad6598b4190962db3044b4380cb0391173d7949fd28984d49'}
-## user-reported  lm-formal+ctx+kn:cbefbced:θ1:β1  {'n': 116, 'top1': 41, 'oracle@64': 114, 'top1_sha256': 'fd5f10de872e3a53525eceb37efcfcd8d554018d5810a7f091e47236779c1171'}
+## dev302  lm-chat+ctx+kn:cbefbced:θ1:β1  {'n': 302, 'top1': 246, 'oracle@64': 300, 'top1_sha256': 'd8ac58795e5649a557bcd62e7639cee2a9bbdbbe13860f13794ff95092ce5be8'}
+## typing76  lm-chat+ctx+kn:cbefbced:θ1:β1  {'n': 76, 'top1': 70, 'oracle@64': 76, 'top1_sha256': '192b2bf3c1d59ba9a35586cf21292ffee7c54590dba16ef0e246a45557bb292c'}
+## user-reported  lm-chat+ctx+kn:cbefbced:θ1:β1  {'n': 116, 'top1': 29, 'oracle@64': 114, 'top1_sha256': 'e588bbc3126e3654c1e73a4ee8c9687d672cf4078eb4049ec7e3b3034062e5a9'}
+## dev302  lm-formal+ctx+kn:cbefbced:θ1:β1  {'n': 302, 'top1': 249, 'oracle@64': 300, 'top1_sha256': '3cd198d63b2efa6696ecf7fae1d3f6a1fb063f3c1b7b6cc32c86606685eb3292'}
+## typing76  lm-formal+ctx+kn:cbefbced:θ1:β1  {'n': 76, 'top1': 69, 'oracle@64': 76, 'top1_sha256': '2daa33f7c4446ab23f79a86534506f66da9629ac7b316f15e1a77e02d2b5e19f'}
+## user-reported  lm-formal+ctx+kn:cbefbced:θ1:β1  {'n': 116, 'top1': 36, 'oracle@64': 114, 'top1_sha256': '40aedcba9d021d517f0f8722c0ea235ecadcee60ee10dd4fd35ec4da1f44f908'}

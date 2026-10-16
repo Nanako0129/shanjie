@@ -14,14 +14,18 @@ public enum Selftest {
     /// before dec-recombine, whose chat and formal answers the one-path-per-(surface, last word) decoder made equal;
     /// a space is the first tone. The tests derive the same keys from the zhuyin independently.
     static let row284Standard = "tj6z;6vup 5j; xk7u ek7xm4gjo3cj6"
-    static let expected: [(profile: UInt32, text: String)] = [(0, "廚房新裝了一個綠水壺"), (1, "廚房新裝了一個濾水壺")]
+    static let expected: [(profile: UInt32, text: String)] = [(0, "廚房新裝了一個率水壺"), (1, "廚房新裝了一個濾水壺")]
 
     /// The bundled word pack (acg-pack contract A.2): 碇源堂 `ㄉㄧㄥˋ ㄩㄢˊ ㄊㄤˊ` on the standard layout. The chat
     /// profile spells it 定元堂 without the pack, so the sentence is the pack word only if the pack loaded.
     static let packWordStandard = "2u/4m06w;6"
     static let packWord = "碇源堂"
 
-    /// s7c2b section 2.5 (revised 2026-10-12): dev302 row 65 `ㄨㄛˇ ㄉㄥˇ ㄧ ㄒㄧㄚˋ ㄗㄞˋ ㄍㄨㄛˋ ㄑㄩˋ` on the standard layout, chat
+    /// classes-v5 (2026-10-16, docs/contracts/classes-v5.md): dev302 row 27 `ㄨㄛˇ ㄧˇ ㄐㄧㄥ ㄏㄨㄟˊ ㄈㄨˋ ㄋㄧˇ ㄉㄜ˙ ㄧㄡˊ ㄐㄧㄢˋ ㄌㄜ˙` on the
+    /// standard layout, chat profile, no left context, the bundled pack loaded: the n-gram's first is 我已經回復你的郵件了 and
+    /// tinylm-v5 picks 回覆. Measured with the CLI (chat dev302 rowstats, with and without `--packs acg`: wrong without
+    /// `--tinylm`, right with it) and by SelftestTests/RerankTests. Row 65 below stopped working because μ 0.2 makes the n-gram
+    /// itself give 再過去. History: s7c2b section 2.5 (revised 2026-10-12): dev302 row 65 `ㄨㄛˇ ㄉㄥˇ ㄧ ㄒㄧㄚˋ ㄗㄞˋ ㄍㄨㄛˋ ㄑㄩˋ` on the standard layout, chat
     /// profile, no left context, the bundled pack loaded; a space is the first tone. The n-gram's first is 我等一下在過去; the small
     /// model picks 我等一下再過去, tinylm-v2 (2026-10-12), tinylm-v3 (2026-10-13) and tinylm-v4 (2026-10-14; its standard level equals v3's) alike: measured by this selftest under these
     /// conditions (SelftestTests) and by RerankTests without the pack. Under model-v6 + kn-v1 + tinylm-v5 (chat standard 0.3/2/0.25)
@@ -30,9 +34,9 @@ public enum Selftest {
     /// (s7h section 1, `DeviceRow` in the tests). A different condition, for context only, under v2: the CLI with `--profile chat
     /// --context --tinylm` and no pack gave top1 0 -> 4 on rows 25, 27, 46, 49 and 65, row 25 being the one that did not change.
     /// The tests derive the same keys from the zhuyin independently.
-    static let rerankRowStandard = "ji32/3u vu84y94eji4fm4"
-    static let rerankedText = "我等一下再過去"
-    static let ngramText = "我等一下在過去"
+    static let rerankRowStandard = "ji3u3ru/ cjo6zj4su32k7u.6ru04xk7"
+    static let rerankedText = "我已經回覆你的郵件了"
+    static let ngramText = "我已經回復你的郵件了"
 
     /// zhen-mixed: `rust` then Space on the standard layout opens the English window (the shipped list and the tests' synthetic list
     /// both have the word; its leftover ㄔㄧ is not in the lexicon, so these are the window's only items).

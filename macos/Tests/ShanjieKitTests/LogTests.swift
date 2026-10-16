@@ -155,7 +155,7 @@ final class LogTests: XCTestCase {
             Row284.formal, Row284.chat, "你好", Row284.zhuyin, "ㄑㄧ", "ㄋㄧ",
             Row284.standardKeys, String(Row284.standardKeys.prefix(6)), "su3cl3",
             bundleMarker, pathMarker, Self.contextMarker,
-            RerankRow.ngram, RerankRow.reranked, RerankRow.zhuyin, RerankRow.standardKeys, "在過去", "再過去",
+            RerankRow.ngram, RerankRow.reranked, RerankRow.zhuyin, RerankRow.standardKeys, "回復你", "回覆你",
         ]
         for marker in negatives {
             XCTAssertFalse(everything.contains(marker), "a negative marker reached the log")

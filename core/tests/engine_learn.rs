@@ -13,7 +13,7 @@ fn root() -> PathBuf {
 }
 fn lm_path() -> PathBuf {
     let p = root().join("data/lm/bigram.sjlm");
-    assert!(root().join("data/lm/classes.sjc").exists(), "data/lm/classes.sjc is missing: download it with `gh release download classes-v4 -R Nanako0129/shanjie -p classes.sjc -D data/lm` (or build it with tools/build_classes.py)");
+    assert!(root().join("data/lm/classes.sjc").exists(), "data/lm/classes.sjc is missing: download it with `gh release download classes-v5 -R Nanako0129/shanjie -p classes.sjc -D data/lm` (or build it with tools/build_classes.py)");
     assert!(p.exists(), "data/lm/bigram.sjlm is missing (see engine_lm.rs)");
     p
 }
@@ -398,16 +398,17 @@ fn context_key_learned_equals_context_key_queried() {
     assert_eq!(type_syls(&mut e, "ㄒㄧㄣ").preedit, "鑫", "key ^ is not the key 他他");
     e.key(k(KeyKind::Esc)).unwrap();
 
-    // (b) after a fixed word (single characters learn only under two Han characters, §14 rule 7, so 奔 takes 你好)
+    // (b) after a fixed word (single characters learn only under two Han characters, §14 rule 7, so the first character takes 你好).
+    // The pick is whichever of 奔／犇 the model does not show, so it is a correction under any class weight (classes-v5 shows 奔).
     let mut e = tiny(TINY, TINY);
     e.set_left_context("你好");
-    type_syls(&mut e, "ㄅㄣ ㄒㄧㄣ");
-    pick(&mut e, 2, 1, "奔");
+    let b = if type_syls(&mut e, "ㄅㄣ ㄒㄧㄣ").preedit.starts_with('奔') { "犇" } else { "奔" };
+    pick(&mut e, 2, 1, b);
     pick(&mut e, 2, 2, "欣");
-    assert_eq!(e.key(k(KeyKind::Enter)).unwrap().commit, "奔欣");
-    assert_eq!(keys(&e), ["你好", "好奔"], "奔 after 你好, 欣 after 好 and the fixed word 奔");
+    assert_eq!(e.key(k(KeyKind::Enter)).unwrap().commit, format!("{b}欣"));
+    assert_eq!(keys(&e), ["你好".to_string(), format!("好{b}")], "{b} after 你好, 欣 after 好 and the fixed word {b}");
     e.set_left_context("你好");
-    assert_eq!(type_syls(&mut e, "ㄅㄣ ㄒㄧㄣ").preedit, "奔欣");
+    assert_eq!(type_syls(&mut e, "ㄅㄣ ㄒㄧㄣ").preedit, format!("{b}欣"));
     e.key(k(KeyKind::Esc)).unwrap();
 
     // (c) after punctuation the key is ^ (rule 8: ^> and the next reading): a single character is not learned there (rule 6) ...
