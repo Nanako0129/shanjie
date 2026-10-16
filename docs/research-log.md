@@ -6296,7 +6296,7 @@ formal: alpha 0.7, tau 1, delta 2
 | 檔 | 改變 | 書面 top1 舊 → 新 |
 |---|---|---|
 | `eval/golden/s2-lm.txt` | 2 行（書面 dev302、typing76 的摘要行） | dev302 250 → 254；typing76 70 → 69 |
-| `eval/golden/s2h-lm-context.txt` | 3 行（書面 dev302、typing76、user-reported 的摘要行） | dev302 249 → 253；typing76 69 → 68；user-reported 36 → 36（雜湊變了，答案集合不同） |
+| `eval/golden/s2h-lm-context.txt` | 3 行（書面 dev302、typing76、user-reported 的摘要行） | dev302 249 → 253；typing76 69 → 68；user-reported 36 → 36（雜湊變了，答案集合不同；合併 main 的第 117–119 列之後，n 119 的書面有表是 top1 37、oracle@64 117，無表是 36、117，這一行在合併時用 Python 參考實作重產） |
 | `eval/golden/s2-lm-dev302-formal.rowstats` | 16 列（302 列中；10 列錯→對，6 列對→錯） | ok 欄總和 250 → 254 |
 | `eval/golden/s2-lm-dev302-top1.tsv` | 23 列的書面欄（聊天欄 0 列） | 與 `s2-lm.txt` 的書面雜湊相同（`lm_top1_tsv_hashes_match_summary_lines`） |
 | `eval/golden/sw-probe.txt` | 48 行（44 行探針第一名與分數、4 行書面摘要） | 開降權（on）11 → 11（雜湊同）；關降權（off）8 → 9（無前文與有前文各一） |
@@ -6309,3 +6309,16 @@ formal: alpha 0.7, tau 1, delta 2
   - `replay_standard_formal`、`replay_with_left_context_matches_cli_context`：只需 golden 更新（`s2-lm-dev302-top1.tsv`、`s2h-lm-context.txt`），不改測試。
 - Swift：`Support.swift` 的 `Row284.formal` 與 App 的 `Selftest.swift` 的 `expected` 書面改釘「廚房新裝了一個律水壺」（CLI `--profile formal --context` 第 284 列確認：聊天「率水壺」−25.820、書面「律水壺」−26.717）；聊天不變。沒有表時書面是「濾水壺」，所以自測也擋得到缺表。`docs/contracts/s3b.md`、`docs/contracts/profile-choice.md` 引用書面釘選的三處跟著改。
 - 驗證（Mac）：`cargo test --release -p cli --test golden` 25 過；`cargo test --release -p core --test engine_lm` 16 過；`cargo test --release -p core --test engine_learn` 57 過（讀 `s2-lm-dev302-top1.tsv` 的聊天欄）；`make test-swift` 211 項、1 項跳過（未查是哪一項）、0 失敗。完整 Rust 套件由 main 在 WSL 跑。
+
+## 2026-10-16：錯字回報第 117 列（臨時捷徑）
+
+- 維護者實機的組字區是「大量的臨時潔淨與執行檔」，要的是「捷徑」（同音 ㄐㄧㄝˊ ㄐㄧㄥˋ）。加成 `|大量的臨時捷徑與執行檔|ㄉㄚˋ ㄌㄧㄤˋ ㄉㄜ˙ ㄌㄧㄣˊ ㄕˊ ㄐㄧㄝˊ ㄐㄧㄥˋ ㄩˇ ㄓˊ ㄒㄧㄥˊ ㄉㄤˇ`（讀音由 `tools/readings.py` 產生，沒有 CHECK）。
+- CLI 出貨設定（`--context --packs acg --tinylm`，model-v6＋kn-v1＋tinylm-v5）兩種設定第 1 名都是「大量的臨時潔淨與執行檔」，「捷徑」第 2。書面加上 trigram 表（第 C 片的形狀，`+tri:fdd3b05d`）也一樣。
+- `eval/golden/s2h-lm-context.txt` 的錯字回報兩行用 Python 參考實作重產，n 117：聊天 top1 29 → 29、書面 36 → 36，oracle@64 兩種設定都 114 → 115；`eval/README.md` 改成 117 列。
+
+## 2026-10-16：錯字回報第 118、119 列（再由、部署）
+
+- 維護者實機的組字區是「v在由owner決定是否部屬到main」，要的是「再由 owner 決定是否部署到 main」。英文把組字切成兩段，照之前的做法（英文進前文、句子是英文之後的漢字）加成兩列：`v|再由|ㄗㄞˋ ㄧㄡˊ`、`再由owner|決定是否部署到|ㄐㄩㄝˊ ㄉㄧㄥˋ ㄕˋ ㄈㄡˇ ㄅㄨˋ ㄕㄨˇ ㄉㄠˋ`。
+- 第 119 列的讀音是手動定的：`tools/readings.py` 依萌典給「部署」ㄅㄨˋ ㄕㄨˋ，但組字區出現「部屬」，而詞庫的「部屬」只有 ㄅㄨˋ-ㄕㄨˇ，所以維護者打的是 ㄕㄨˇ。詞庫的「部署」只收 ㄅㄨˋ-ㄕㄨˋ；單字「署」反而以 ㄕㄨˇ 為主（−4.05，ㄕㄨˋ −6.80）。所以照維護者的打法，「部署」這個詞條不在候選裡，只能由單字組出來（詞庫缺讀音，之後的詞庫片可以考慮在疊加層補 ㄅㄨˋ-ㄕㄨˇ）。
+- CLI 出貨設定（`--context --packs acg --tinylm`，model-v6＋kn-v1＋tinylm-v5）：第 118 列兩種設定第 1 名都是「在由」，「再由」第 2；第 119 列聊天第 1 名「部屬到」、第 2「佈署到」，書面第 1「佈署到」、第 2「部屬到」，正解「部署到」聊天第 18、書面第 17（`佈署` 不在異體表，寬鬆比對不算對）。
+- `eval/golden/s2h-lm-context.txt` 的錯字回報兩行用 Python 參考實作重產，n 119：聊天 top1 29 → 29、書面 36 → 36，oracle@64 兩種設定都 115 → 117；`eval/README.md` 改成 119 列，手動讀音加上第 119 列。
