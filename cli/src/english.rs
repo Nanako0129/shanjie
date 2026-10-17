@@ -60,6 +60,8 @@ use std::sync::Arc;
 const ROWS: [&str; 4] = ["1234567890-=", "qwertyuiop[]", "asdfghjkl;'", "zxcvbnm,./"];
 const TONE_MARKS: [char; 4] = ['ˊ', 'ˇ', 'ˋ', '˙'];
 const LAYOUT: Layout = Layout::Standard;
+/// The most Backspaces one repair presses (a composition holds 40 units at most, and each press takes one symbol or one unit).
+const MAX_REPAIR_BACKSPACES: u32 = 64;
 
 struct Rng(u64);
 
@@ -221,7 +223,14 @@ impl Sim {
                         // Backspace instead turns the letters left into an English run and the unfinished syllable is gone
                         // (zhen-inline section 1.3g): Esc takes the run, and the symbols are typed again from the start below. Each
                         // key is a step that shortens the symbols or empties them, so the loop ends with them empty at the latest.
-                        while !want.starts_with(&self.repair_have()) {
+                        // An empty preedit ends it as well: a slip that made the 40th unit sent the whole composition (A.10), so the preedit
+                        // never starts with `base_preedit` again, and the syllable is typed again from its first symbol below.
+                        let mut presses = 0;
+                        while !want.starts_with(&self.repair_have()) && !self.last_preedit.is_empty() {
+                            presses += 1;
+                            if presses > MAX_REPAIR_BACKSPACES {
+                                return Err("the Backspace repair did not settle".into());
+                            }
                             if self.digits && want.starts_with(&self.have()) {
                                 self.extra_bs += 1; // the symbol model would stop here; the screen still shows something before the syllable
                             }
@@ -230,6 +239,9 @@ impl Sim {
                             if letters {
                                 self.raw(Key::new(KeyKind::Esc))?;
                             }
+                        }
+                        if self.last_preedit.is_empty() {
+                            self.base_preedit.clear();
                         }
                         for &(_, s) in &syms[self.repair_have().len()..=i] {
                             if self.zhuyin(s)? {
@@ -441,6 +453,7 @@ fn run_recall(lex: &Arc<Lexicon>, words: &Path) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use core::engine::MOD_SHIFT;
 
     /// Zhen-inline section 4.1, simulator: a row that triggers auto-keeps ends with the same text as the same row typed without a
     /// mistake (a text is checked here, in the module, because the tool's output never carries content, R2).
@@ -532,5 +545,41 @@ mod tests {
             }
         }
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// Digits.md A.10, the Backspace repair when a slip makes the 40th unit: the slip after the ㄅ turns the `1` into a digit token, which is
+    /// the 40th unit, so the engine sends the whole composition and the preedit never again starts with `base_preedit`. The repair stops
+    /// at the empty composition and types the syllable again (it used to press Backspace for ever).
+    #[test]
+    fn backspace_repair_ends_when_the_40th_unit_sent_the_composition() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+        let mut sim = Sim {
+            engine: engine_digits(root, &root.join("data/lm/bigram.sjlm"), &root.join("eval/golden/english-tiny.txt")).unwrap(),
+            keys: 0,
+            triggers: 0,
+            inline: false,
+            d_held: false,
+            autokeeps: 0,
+            want: Vec::new(),
+            last_preedit: String::new(),
+            base_preedit: String::new(),
+            extra_bs: 0,
+            digits: true,
+            final_digits: 0,
+            shown_keys: 0,
+            p: 1.0,
+            repair: Repair::Backspace,
+            rng: Rng(20261014),
+        };
+        let (syms, tone) = parse_syllable("ㄅㄨˋ").unwrap();
+        for _ in 0..20 {
+            sim.engine.reset(ResetMode::Discard);
+            sim.last_preedit.clear();
+            for _ in 0..39 {
+                sim.raw(Key::ch(',', MOD_SHIFT)).unwrap();
+            }
+            sim.syllable(&syms, tone).unwrap();
+        }
+        assert!(sim.final_digits > 0, "premise: a slip made a digit the 40th unit, and it was sent");
     }
 }

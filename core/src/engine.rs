@@ -2463,6 +2463,7 @@ impl Engine {
             if index >= self.pred.len() {
                 return Ok(None);
             }
+            self.last_digits = None; // digits.md A.3.6: the next state-changing key clears the other reading of the syllable that closed
             let r = self.choose_pred(index);
             if r.is_err() {
                 self.clear_all();
@@ -2712,10 +2713,19 @@ impl Engine {
             self.forget_entry(&reading, &word);
             self.refresh()?;
             let Some(mut c) = self.cands.take() else { return Ok(()) };
+            // Digits.md A.3.6: the items the window had behind the row that are not the lexicon's (the other reading of the digit keys,
+            // and after digit tokens the digit and its full-width form) stay its last items; `dalt` still says what the last one is.
+            let after_digit_token = self.avail() == 0 && self.cursor > 0 && digit_of(&self.syls[self.cursor - 1]).is_some();
+            let kept: Vec<(String, usize)> = match &c.dalt {
+                _ if after_digit_token => c.list[c.rows.len()..].to_vec(),
+                Some(_) => c.list[c.list.len() - 1..].to_vec(),
+                None => Vec::new(),
+            };
             self.recompute_pred();
             c.rows = std::mem::take(&mut self.pred);
             c.rows.retain(|p| p.word != word);
             c.list = self.window_list(&c.rows);
+            c.list.extend(kept);
             if c.list.is_empty() {
                 return Ok(()); // closed, as by Esc
             }

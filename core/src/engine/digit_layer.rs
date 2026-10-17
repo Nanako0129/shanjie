@@ -179,8 +179,13 @@ impl Engine {
         (group > 0).then(|| self.history_of(st, &self.text_before(self.cursor - group)))
     }
 
-    /// The keys as digit tokens at the cursor, one unit each. Returns what a 40th unit sent, if it did.
+    /// The keys as digit tokens at the cursor, one unit each. Returns what a 40th unit sent, if it did. The previous key's tail is not part
+    /// of that commit (`take_commit` sends what `shown` shows, unfinished symbols included): it is dropped first, and every caller sets
+    /// the tail it wants after this call (`set_pend_from`, `clear_pend`, or `apply_pred_at` which clears it).
     fn emit_tokens(&mut self, keys: &[char]) -> Result<String, EngineError> {
+        if !keys.is_empty() {
+            self.clear_pend();
+        }
         let mut commit = String::new();
         for &k in keys {
             self.d_emitted += 1;
@@ -220,6 +225,7 @@ impl Engine {
     /// The buffered keys become tokens and the run ends (a setting that ends English mixing, `reset(Commit)`, a boundary key). Returns what a
     /// 40th unit sent and whether there was a run.
     pub(super) fn digit_flush(&mut self) -> Result<(String, bool), EngineError> {
+        self.last_digits = None; // A.3.6: the other reading of a syllable that closed goes with a setting that ends the feature
         let Some(run) = self.drun.take() else { return Ok((String::new(), false)) };
         let commit = self.emit_tokens(&run.buf)?;
         self.d_shown = run.emitted.len() + run.buf.len();
@@ -275,6 +281,11 @@ impl Engine {
             (KeyKind::Space, _) => self.drun_space(k),
             (KeyKind::Char, Some(c)) if Layout::Standard.symbol_of(c).is_some() => self.drun_tail_key(c),
             (KeyKind::Backspace, _) => self.drun_backspace(k),
+            // Not in A.3.4's list of boundary keys, so as today: behind an unfinished syllable the key does nothing.
+            (KeyKind::Up, _) => {
+                self.pred_dirty = true; // the row was taken at the top of `dispatch`
+                self.handled()
+            }
             (KeyKind::Esc, _) => {
                 // Same as rule 12: the buffer and the tail go, the tokens stay.
                 self.drun = None;
@@ -404,8 +415,8 @@ impl Engine {
     /// recomputed for them (a window opened by this key lists it), and the key is handled as it would be.
     fn drun_boundary(&mut self, k: Key) -> Result<Output, EngineError> {
         let (commit, _) = self.digit_flush()?;
-        if k.kind == KeyKind::Enter && !commit.is_empty() {
-            return Ok(self.view(true, commit)); // Enter that sent everything stops there
+        if k.kind == KeyKind::Enter && !commit.is_empty() && self.syls.is_empty() {
+            return Ok(self.view(true, commit)); // Enter that sent everything stops there (a 40th unit can leave tokens in a new composition)
         }
         self.pred_dirty = false;
         self.recompute_pred();
@@ -422,6 +433,9 @@ impl Engine {
         if run.m > 0 {
             commit = self.emit_tokens(&run.buf[..run.m])?;
             p.start = self.cursor; // only the cursor start is queried while digits are buffered
+            // The item was keyed under the word before the buffered digits; behind digit tokens that is SENTINEL (the digits are not
+            // Han), which is how `recompute_pred` keys an item once they are tokens.
+            p.key = context_key(&self.text_before(self.cursor));
         }
         self.d_shown = run.emitted.len() + run.m;
         Ok(commit)

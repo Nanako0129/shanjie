@@ -721,3 +721,145 @@ fn goldens_name_the_files_they_were_made_with() {
         assert!(text.contains(&format!("digits.tsv sha256={sha}")), "{f}: the table changed; regenerate the golden on macOS");
     }
 }
+
+// ---------- local review of PR #201: regressions ----------
+
+fn commas(n: usize) -> String {
+    vec!["S-,"; n].join(" ")
+}
+fn all_commit(os: &[Output]) -> String {
+    os.iter().map(|o| o.commit.as_str()).collect()
+}
+fn cmd_bs() -> Key {
+    Key { kind: KeyKind::Backspace, ch: '\0', modifiers: MOD_COMMAND }
+}
+
+/// P2-1: the 40th unit that a flushed digit sends does not take the previous key's unfinished tail along (the 5 still in `pend` as ㄓ).
+#[test]
+fn review_p2_1_the_40th_unit_sends_no_stale_tail() {
+    let mut e = eng();
+    let os = run_all(&mut e, &format!("{} 1 2 3 4 5 8", commas(38)));
+    assert!(os[os.len() - 2].preedit.ends_with("234ㄓ"), "premise: the tail of the 5 is on screen before the 8");
+    let o = os.last().unwrap();
+    assert_eq!(o.commit, format!("{}12", "，".repeat(38)), "{:?}", o.commit);
+    assert!(!o.commit.contains('ㄓ') && !o.preedit.contains('ㄓ'));
+    assert_eq!(o.preedit, "3458", "the rest of the buffer, shown as the baseline scores it");
+    // Enter and Space behind 1 2 3 4 5: nothing but the keys typed (the ㄓ of the 5 is a digit key, not a syllable that was finished).
+    for tail in ["Enter", "_ Enter"] {
+        let mut e = eng();
+        let os = run_all(&mut e, &format!("{} 1 2 3 4 5 {tail}", commas(38)));
+        let all = all_commit(&os);
+        assert!(!all.contains('ㄓ'), "{tail}: {all:?}");
+        assert!(all.starts_with(&"，".repeat(38)) && all.contains("12345"), "{tail}: {all:?}");
+    }
+}
+
+/// P2-2: Enter ends a run whose flush reaches the 40th unit while more of the buffer is left: everything is sent, nothing stays behind.
+#[test]
+fn review_p2_2_enter_sends_the_rest_of_the_buffer_after_the_40th_unit() {
+    let mut e = eng();
+    let os = run_all(&mut e, &format!("{} 1 2 3 4 Enter", commas(38)));
+    let o = os.last().unwrap();
+    assert_eq!(all_commit(&os), format!("{}1234", "，".repeat(38)));
+    assert_eq!(o.preedit, "");
+    assert!(syls(&e).is_empty());
+}
+
+/// P3-1: ⌘⌫ on a row item of the window after `8 4 _` rebuilds the list; the digits (A.3.6) stay its last item, so the last lexicon item
+/// is still a lexicon item.
+#[test]
+fn review_p3_1_forget_in_the_window_keeps_the_digits_item() {
+    let mut e = eng();
+    let o = run(&mut e, "8 4 _");
+    let list = items(&mut e, &o);
+    assert_eq!(list.last().map(String::as_str), Some("84"));
+    assert!(list.len() > 5, "premise: row items before the lexicon's: {list:?}");
+    let o = e.key(cmd_bs()).unwrap();
+    let after = items(&mut e, &o);
+    assert_eq!(after.last().map(String::as_str), Some("84"), "{after:?}");
+    assert_eq!(after.len() + 1, list.len(), "one row item gone: {after:?}");
+    // Choosing the word before the digits item is the lexicon's candidate, not the other reading.
+    let at = after.iter().position(|w| w.chars().count() == 1 && w != "84").expect("a single-character lexicon item");
+    let o = e.pick(at).unwrap().unwrap();
+    assert_eq!(syls(&e), toks(&["ㄚˋ"]), "{:?}", o.preedit);
+    assert_eq!(o.preedit, after[at]);
+}
+
+/// P3-2: a mouse pick on the prediction row ends the "digits of the syllable that just closed" reading: the Space after it lists no `84`.
+#[test]
+fn review_p3_2_a_row_pick_clears_the_digits_of_the_last_syllable() {
+    let mut e = eng();
+    let o = run(&mut e, "8 4");
+    assert_eq!(syls(&e), toks(&["ㄚˋ"]));
+    assert!(!o.candidates.is_empty(), "premise: a prediction row");
+    let word = o.candidates[0].clone();
+    let o = e.pick(0).unwrap().unwrap();
+    assert!(o.preedit.starts_with(&word));
+    let o = run(&mut e, "_");
+    assert!(!o.candidates.is_empty() && !o.candidates.contains(&"84".to_string()), "{:?}", o.candidates);
+    assert_ne!(items(&mut e, &o).last().map(String::as_str), Some("84"));
+}
+
+/// P3-3: a row item chosen after buffered digits is learned under the same key as after the digits became tokens (SENTINEL, the digits are
+/// not Han), not under the word in front of them.
+#[test]
+fn review_p3_3_the_learning_key_of_an_item_after_buffered_digits() {
+    let learned = |digits: &str| -> Vec<String> {
+        let mut e = eng();
+        e.set_learning(true);
+        run(&mut e, &format!("{} {}", zh("ㄒㄧㄚˋ"), zh("ㄨˇ")));
+        let o = run(&mut e, digits);
+        assert!(!o.candidates.is_empty() && o.preedit.starts_with("下午"), "{:?}", o.preedit);
+        run(&mut e, "Tab");
+        run(&mut e, "Enter");
+        run(&mut e, "Enter");
+        e.learner().records().iter().map(|r| r.context.clone()).collect()
+    };
+    // The 2 is still in the buffer (shown as a digit): the item sits behind it.
+    let buffered = learned("2");
+    // Under the sentinel key a one-character item (the first item is one) teaches nothing, so the right answer here is no record at all.
+    assert!(buffered.iter().all(|c| !c.starts_with("下午")), "the word before the digits is not the key: {buffered:?}");
+}
+
+/// P4-1: ↑ is not in A.3.4's list of boundary keys; behind an unfinished syllable it changes nothing today, so it changes nothing in a run.
+#[test]
+fn review_p4_1_up_does_nothing_in_a_run() {
+    let mut e = eng();
+    let before = run(&mut e, "1 0");
+    let o = run(&mut e, "Up");
+    assert!(o.handled && o.commit.is_empty());
+    assert_eq!((o.preedit.as_str(), o.cursor_utf16), (before.preedit.as_str(), before.cursor_utf16));
+    assert!(syls(&e).is_empty(), "no token was made: {:?}", syls(&e));
+    assert!(e.digits_typed().is_some(), "the run is still open");
+    // The same key with the feature off, behind an unfinished syllable: handled, nothing changes.
+    let mut off = make(true, false);
+    let before = run(&mut off, "1 0");
+    let o = run(&mut off, "Up");
+    assert!(o.handled && o.commit.is_empty() && o.preedit == before.preedit);
+}
+
+/// P4-2: the digits of a syllable that just closed do not survive turning the switch off and on (or the abbreviation composer on and off).
+#[test]
+fn review_p4_2_settings_clear_the_last_digits() {
+    let list_after = |toggle: &dyn Fn(&mut Engine)| -> Vec<String> {
+        let mut e = eng();
+        run(&mut e, "8 4");
+        toggle(&mut e);
+        let o = run(&mut e, "_");
+        items(&mut e, &o)
+    };
+    for (name, t) in [
+        ("english off/on", Box::new(|e: &mut Engine| {
+            e.set_english(false).unwrap();
+            e.set_english(true).unwrap();
+        }) as Box<dyn Fn(&mut Engine)>),
+        ("abbreviation on/off", Box::new(|e: &mut Engine| {
+            e.set_abbreviation(true).unwrap();
+            e.set_abbreviation(false).unwrap();
+            e.set_english(true).unwrap();
+        })),
+    ] {
+        let l = list_after(&*t);
+        assert!(!l.is_empty() && !l.contains(&"84".to_string()), "{name}: {l:?}");
+    }
+}

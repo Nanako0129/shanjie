@@ -13,6 +13,7 @@ pub fn key_of(tok: &str) -> Key {
         "Left" => Key::new(KeyKind::Left),
         "Right" => Key::new(KeyKind::Right),
         "Down" => Key::new(KeyKind::Down),
+        "Up" => Key::new(KeyKind::Up),
         "Tab" => Key::new(KeyKind::Tab),
         "C-\\" => Key::ch('\\', MOD_CONTROL),
         t if t.starts_with("S-") => Key::ch(t[2..].chars().next().unwrap(), MOD_SHIFT),
