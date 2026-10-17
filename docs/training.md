@@ -17,7 +17,7 @@
 |---|---|---|---|
 | `bigram.sjlm` | `model-v6`（旁邊另有 KN 側檔 `kn.sjkn`，`kn-v1`） | 詞與詞相鄰出現的次數（SJLM0001 格式）；含少量用來辨識來源的指紋條目（`docs/data-files.md`、`docs/contracts/model-v4.md` §0） | 語料計數 → `tools/build_lm.py` → 加指紋 |
 | `classes.sjc` | `classes-v5` | 512 個詞類、每個詞的類別與發射機率、類別接續機率、μ = 0.2（classes-v4 以前是 0.8；SJCL0001 格式；`tools/build_classes.py` 檔頭、`docs/contracts/s2k-word-classes.md` §4.1） | 對計數做詞類分群 → `tools/build_classes.py` |
-| `tinylm.sjtl` | `tinylm-v5`（SJTL0004，檔頭另記 kn-v1 的雜湊） | 1,440 萬參數的字元語言模型，6 層、d 384、字表 9,714 字，int8；檔頭帶聊天與書面各三組（保守、標準、積極）融合參數 α、τ、δ（SJTL0003；`docs/releases/tinylm-v4.md`、`tinylm-v3.md`、`experiments/s7a-tinylm/export_sjtl.py` 檔頭） | 訓練 → 匯出 → 調融合參數 |
+| `tinylm.sjtl` | `sj-sr-6-14m`（會意 SJ-SR-6-14M；SJTL0004，檔頭另記 kn-v1 的雜湊；權重同 `tinylm-v5`，書面融合參數重選） | 1,440 萬參數的字元語言模型，6 層、d 384、字表 9,714 字，int8；檔頭帶聊天與書面各三組（保守、標準、積極）融合參數 α、τ、δ（SJTL0003；`docs/releases/tinylm-v4.md`、`tinylm-v3.md`、`experiments/s7a-tinylm/export_sjtl.py` 檔頭） | 訓練 → 匯出 → 調融合參數 |
 
 ### 1.2 三個檔案怎麼互相綁定
 
@@ -34,7 +34,8 @@
 |---|---|---|
 | 詞類表 → 模型 | `classes.sjc` 檔頭記模型的 SHA-256；缺檔、配到別的模型、內容不對，載入都回 3 | 重建模型就要重建詞類表（`docs/data-files.md`「現在用的檔案」） |
 | 語意校正模型 → 模型 | `tinylm.sjtl` 檔頭記調參時用的模型的 SHA-256；不符時核心拒絕載入、只用 n-gram（`docs/data-files.md`） | 重建模型就要重新匯出、重新調參 |
-| 語意校正模型 → 詞類表 | **沒有檢查**，只在 α、τ、δ 的調法上依賴：它們是在 model-v6＋classes-v4＋kn-v1 上調的（tinylm-v5） | 重新分群也要重調，雜湊攔不住這種錯配，只能靠 `docs/data-files.md` 的版本表；只改 μ 而且開著出貨的小模型量過，可以沿用（classes-v5 沿用 tinylm-v5） |
+| 語意校正模型 → 詞類表 | **沒有檢查**，只在 α、τ、δ 的調法上依賴：聊天三檔是在 model-v6＋classes-v4＋kn-v1 上調的（tinylm-v5），書面三檔在 model-v6＋classes-v5＋`sj-cx-1-7.7m` 上重選（書面有表時 KN 關；`sj-sr-6-14m`） | 重新分群也要重調，雜湊攔不住這種錯配，只能靠 `docs/data-files.md` 的版本表；只改 μ 而且開著出貨的小模型量過，可以沿用（classes-v5 沿用 tinylm-v5） |
+| 語意校正 → trigram 表 | **沒有檢查**：`sj-sr-6-14m` 的書面三檔是在 `sj-cx-1-7.7m` 上選的，檔頭不記表的雜湊 | 換 trigram 表（下一個 `sj-cx-…`）時，開著出貨的小模型重量書面；沒量過就重調書面三檔、發下一個 `sj-sr-…` |
 | 語意校正 → Kneser–Ney 側檔 | SJTL0004 記調參時用的 `kn.sjkn` 的 SHA-256（全 0＝沒開 KN 時調的）；核心要求載入的側檔狀態和它相同，否則拒絕載入（`docs/contracts/model-v6.md` §2.7） | 換側檔就要重新調參、發新的 `tinylm-v…` |
 
 ### 1.3 改了什麼，要發哪些新 Release
@@ -253,13 +254,15 @@ python3 experiments/s7a-tinylm/export_sjtl.py --npz ~/.cache/shanjie/work/s7a/ti
 | `tinylm-v2` | 0.2／1／0.25 | 0.7／1／2 | S7e：在 cvtune＋wikitune 合計（6,618 列）上，照「改對 − 10 × 改壞」選；`fusegrid.py --break-weight 10`。「改壞 1 句 ≈ 改對 10 句」是使用者的權重 | `s7e-fewer-breaks.md` §2.2；研究紀錄 2026-10-12 S7e；`docs/releases/tinylm-v2.md` |
 | `tinylm-v3` | **0.3／2／0.25** | 0.7／1／2（不變） | E2：計分改 1:1 的「改對 − 改壞」、改壞率 ≤ 0.5%；在**維護者自己的聊天訊息**建的調參期（5,761 列）上選，先凍結（`judge.py --select R3p --tuning chatclause --weight 1 --cap 0.005`；`R3p` 只是名稱（輸出那一列與 rowstats 檔名的前綴），值由 `--tuning`、`--weight`、`--cap` 選出），之後只在判斷期 2026-08（6,559 列）算一次 | `e2-chat-eval.md`；`s7h-tinylm-v3.md` §0；研究紀錄 2026-10-13「E2 的新調參期與 R3′」「E2 判斷期（2026-08）的表與結論」 |
 | `tinylm-v4` | 0.3／2／0.25（同 v3） | 0.7／1／2（同 v3） | 標準值不變，另加保守與積極兩檔（SJTL0003）。保守：聊天 1／2／3、書面 0.7／0.5／2；積極：聊天 0.3／2／0.25（選出的 0.5／1／0 在 `lytune` 改對 236 < 改壞 374，沒過出貨門檻，照規則寫成標準值）、書面 0.5／1／0.25。聊天用維護者的聊天訊息建的調參集，書面用 cvtune＋wikitune，依各檔的改壞上限或權重選值，再過契約 §4.3 的門檻 | `rerank-strength.md` §11；`docs/releases/tinylm-v4.md`；研究紀錄 2026-10-14「語意校正強度修訂一」 |
+| `tinylm-v5` | 0.3／2／0.25（同 v4） | 1／1／3 | model-v6 §2.7：換 model-v6＋kn-v1 後在新候選上重選。聊天照 E2 的 1:1＋改壞上限（chatclause 調參期）；書面照「改對 − 10 × 改壞」（`--weight 10`），那時書面還沒有三元表。保守：聊天 1／2／3、書面 1／1／4；積極＝標準 | `model-v6.md` §2.7；研究紀錄 2026-10-15；`docs/releases/tinylm-v5.md` |
+| `sj-sr-6-14m` | 0.3／2／0.25（同 v5） | **0.7／2／1** | 只重選書面：在現在的書面解碼器（三元表、KN 關）上 1:1＋改壞上限選，篩選後在沒看過的 wikijudge2 上確認（對出貨 +39／−11，改壞率 0.35%）。保守 1／1／4（同 v5）、積極＝標準；聊天三檔同 v5 | `rerank-formal.md` §8–§10；研究紀錄 2026-10-17；`docs/releases/sj-sr-6-14m.md` |
 
 注意事項：
 
 - **v2、v3、v4 與 v1 的權重相同**（同一個 `tinylm-M.npz`），只是檔頭的融合參數不同；v3 與 v2 的檔只差檔頭裡聊天的 α、τ（9 個 byte）（`docs/releases/tinylm-v2.md`、`tinylm-v3.md`）。所以換融合參數不需要重新訓練，只要重新匯出。
 - v3 的聊天值是在維護者私人訊息建的評測集上選的（檔案裡沒有任何訊息的文字，評測集不公開）。**repo 裡只有選出的值、判斷用的程式（`experiments/e2-chateval/judge.py`）與數字，沒有那份評測集**，所以別人無法用 repo 重選這三個數字（`docs/releases/tinylm-v3.md`、`CLAUDE.md`「私有資料」）。
 - 判斷期用過就退役，下一次要用新的月份（`e2-chat-eval.md` §2.1 的順序）。
-- 融合參數是在出貨的 n-gram 上調的（tinylm-v4 以前是 model-v5＋classes-v3，tinylm-v5 是 model-v6＋classes-v4＋kn-v1、KN 開著）；換 n-gram、詞類表或 KN 側檔就要重調（§1.2）。
+- 融合參數是在出貨的 n-gram 上調的（tinylm-v4 以前是 model-v5＋classes-v3，tinylm-v5 是 model-v6＋classes-v4＋kn-v1、KN 開著；`sj-sr-6-14m` 的書面三檔是 model-v6＋classes-v5＋`sj-cx-1-7.7m`、KN 關）；換 n-gram、詞類表、KN 側檔或 trigram 表就要重量或重調（§1.2）。
 - v3 判斷期的結果：聊天改對 125／改壞 16、淨值 +109、改壞率 0.24%（`docs/releases/tinylm-v3.md`）。
 
 ### 5.6 試過、沒有出貨的方向
