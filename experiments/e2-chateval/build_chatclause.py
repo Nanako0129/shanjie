@@ -34,7 +34,8 @@ decode_tree undoes it. Comments are kept only when the author is --self-name. Ea
 a post or comment's first segment is blank, later segments follow the previous one.
 
 Corrections file (optional, UTF-8, tab separated, applied before spelling; the proofreading itself is main's job):
-  OLD<TAB>NEW           the sentence OLD becomes NEW
+  OLD<TAB>NEW           the sentence OLD becomes NEW; NEW is spelled again, and a CHECK spelling drops the row (freeze warns and counts
+                        it as corrected_then_check), so give READ with every changed sentence
   OLD<TAB>              drop the row
   OLD<TAB>NEW<TAB>READ  as the first, and READ (space separated syllables) is taken as the confirmed reading of NEW, so a CHECK row stays.
 """
@@ -387,7 +388,8 @@ def read_clauses(work):
 
 
 def period_rows(work, period):
-    """[(context, sentence)] before corrections: the whole judge months, or the seeded tuning sample of the pool."""
+    """[(context, sentence)] before corrections: the whole judge months, the seeded tuning sample of the pool, or (chatjudge)
+    a sample of the pool rows whose sentence the tuning sample does not hold, with a seed of its own."""
     split = json.load(open(os.path.join(work, "split.json"), encoding="utf-8"))
     months = set(split["judge_months"] if period == "judge" else split["pool_months"])
     rows = [(x, s) for mon, _src, x, s in read_clauses(work) if mon in months]
@@ -395,11 +397,10 @@ def period_rows(work, period):
     if period == "tune":
         rows = random.Random(c.SEED).sample(rows, min(TUNE_MAX, len(rows)))
     elif period == "chatjudge":
-        # The tuning sample's positions, drawn exactly as above (sample picks by position, so sampling the indices picks the same
-        # rows), and every sentence it holds, are left out; the rest is sampled with a seed of its own.
-        drawn = set(random.Random(c.SEED).sample(range(len(rows)), min(TUNE_MAX, len(rows))))
-        tuned = {rows[i][1] for i in drawn}
-        rest = [r for i, r in enumerate(rows) if i not in drawn and r[1] not in tuned]
+        # Every sentence of the tuning sample (drawn exactly as above) is left out wherever it sits, its own rows included; freeze
+        # then checks the corrected rows against the frozen chatclause sentences.
+        tuned = {s for _x, s in random.Random(c.SEED).sample(rows, min(TUNE_MAX, len(rows)))}
+        rest = [r for r in rows if r[1] not in tuned]
         rows = random.Random(CHATJUDGE_SEED).sample(rest, min(CHATJUDGE_MAX, len(rest)))
     return rows, pool
 
@@ -415,7 +416,8 @@ def load_corrections(path):
 
 def build_period(rows, corrections, readings=c.readings):
     """-> (frozen rows [(ctx, sentence, reading)], draft rows [(ctx, sentence, reading, status)], stats)."""
-    st = {"rows_in": len(rows), "corrected": 0, "dropped_by_correction": 0, "dropped_check": 0, "dropped_unreadable": 0}
+    st = {"rows_in": len(rows), "corrected": 0, "dropped_by_correction": 0, "dropped_check": 0, "corrected_then_check": 0,
+          "dropped_unreadable": 0}
     work = []
     for x, s in rows:
         if s in corrections:
@@ -424,14 +426,15 @@ def build_period(rows, corrections, readings=c.readings):
                 st["dropped_by_correction"] += 1
                 continue
             st["corrected"] += new != s
-            work.append((x, new, rd))
+            work.append((x, new, rd, new != s))
         else:
-            work.append((x, s, None))
-    rd = readings([s for _, s, _ in work])
+            work.append((x, s, None, False))
+    rd = readings([s for _, s, _, _ in work])
     draft = []
-    for x, s, given in work:
+    for x, s, given, changed in work:
         status, reading = ("ok", given) if given else rd[s]
         draft.append((x, s, reading, status))
+        st["corrected_then_check"] += changed and status == "check"
     frozen = [(x, s, r) for x, s, r, status in draft if status == "ok"]
     st["dropped_check"] = sum(d[3] == "check" for d in draft)
     st["dropped_unreadable"] = sum(d[3] == "unreadable" for d in draft)
@@ -453,7 +456,14 @@ def freeze(work, period, corrections_file=None, draft=False, readings=c.readings
         return st
     if check_share > CHECK_MAX:
         sys.exit(f"build_chatclause: STOP, {check_share:.1%} of the {period} rows are CHECK (> {CHECK_MAX:.0%}); report to main (contract 2.1)")
-    text = "".join(f"{x}|{s}|{r}\n" for x, s, r in frozen)
+    if st["corrected_then_check"]:
+        print(f"build_chatclause: WARNING, {st['corrected_then_check']} corrected {period} rows spell as CHECK and are dropped; give READ",
+              file=sys.stderr)
+    if period == "chatjudge":
+        tuned = {l.split("|")[1] for l in open(os.path.join(work, "tune.rows.txt"), encoding="utf-8") if l.strip()}
+        if any(s in tuned for _x, s, _r in frozen):
+            sys.exit("build_chatclause: STOP, a chatjudge sentence is also in the frozen chatclause; report to main (rerank-size 3.4)")
+    text ="".join(f"{x}|{s}|{r}\n" for x, s, r in frozen)
     sha = c.sha256_bytes(text.encode("utf-8"))
     sf = os.path.join(work, f"{period}.sha256")
     if os.path.isfile(sf) and open(sf).read().split()[0] != sha:
