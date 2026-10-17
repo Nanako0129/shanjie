@@ -366,3 +366,20 @@ def digit_rank_empty(table, lm, lex, v, W, gamma=1.0):
         return None
     ps = {w: table.p_w_given_vD(w, v, base_pb(lm, w, lex.by_word[w][1]), gamma) for w in table.successors(v) if w in lex.by_word}
     return sum(1 for x in ps.values() if x >= ps[W])
+
+
+def digit_row(table, lm, lex, idx, v, units, lam, limit=9, gamma=1.0):
+    """The row of digits.md A.3.5 as a list of (word, score), best first, at most `limit`. Both cases go through the code paths above.
+    Units given (an unfinished syllable): `digit_tiers`, the successor layer then the rest, each by predict.det_key, score
+    lam log10 P(w | v, D) + (1 - lam) lp. No units: the successor layer that is in the lexicon, score log10 P(w | v, D) (no lexicon blend,
+    the score of `digit_rank_empty`), by predict.det_key with the word's best reading (lex.by_word) as the reading."""
+    if units:
+        t0, t1 = digit_tiers(table, lm, idx, units, v, lam, gamma)
+        return [(e[0], s) for e, s in (t0 + t1)[:limit]]
+    rows = []
+    for w in table.successors(v):
+        if w in lex.by_word:
+            syls, lp = lex.by_word[w]
+            rows.append(((w, lp, None, "-".join(syls)), math.log10(table.p_w_given_vD(w, v, base_pb(lm, w, lp), gamma))))
+    rows.sort(key=lambda x: P1.det_key(x[0], x[1]))
+    return [(e[0], s) for e, s in rows[:limit]]

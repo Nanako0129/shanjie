@@ -57,6 +57,39 @@ def generate(scorer, history_fn, rows, header_lines, strict=False):
     return "\n".join(out) + "\n"
 
 
+# digits.md A.3.5 prediction rows: (left context, digit keys, unfinished-syllable symbols). The context is `lm.history(context_key(left))`; with
+# symbols the row is the tiers of `digit_row`, without them the successor layer.
+PRED_ROWS = [
+    ("", "3", ""), ("", "20", ""), ("", "101", ""), ("", "34", ""), ("", "10", "ㄅ"),
+    ("下午", "3", ""), ("下午", "2", ""), ("下午", "20", ""), ("下午", "101", ""),
+    ("價格", "3", ""), ("價格", "20", ""), ("價格", "300", "ㄩ"),
+]
+assert len(PRED_ROWS) == 12
+PRED_PROFILE, PRED_LIMIT = "chat", 9
+
+
+def generate_pred(env, table_path):
+    """The text of eval/golden/digits-pred.txt: per row the first 9 items of `digit_row` (word and Python's repr of the score)."""
+    lam = DS.L.PROFILES[PRED_PROFILE]
+    header = [
+        "digits-pred golden (experiments/digits/golden_digits.py --pred; digits.md A.3.5). Python is the baseline; Rust must match words and score bits.",
+        f"digits.tsv sha256={sha(table_path)}",
+        "models: " + " ".join(f"{n} sha256={sha(os.path.join(ROOT, 'data', 'lm', n))}" for n in ("bigram.sjlm", "classes.sjc", "kn.sjkn")),
+        "lexicon: " + " ".join(f"{n} sha256={sha(os.path.join(ROOT, 'data', 'lexicon', n))}" for n in LEXICON_FILES),
+        f"profile={PRED_PROFILE} lambda={lam!r} limit={PRED_LIMIT} gamma=1.0",
+        f"generated on {platform.system()} {platform.machine()}, python {platform.python_version()}",
+        "format: `## <n>\\tleft=\\tdigits=\\tsyms=\\tv=`, then `<rank>\\t<word>\\t<score repr>` per item; syms are the unfinished symbols (none: the row of a finished digit run)",
+    ]
+    out = ["# " + l for l in header]
+    for n, (left, digits, syms) in enumerate(PRED_ROWS, 1):
+        v = env.history(left)
+        units = DS.P1.units_of(list(syms)) if syms else []
+        out.append(f"## {n}\tleft={left}\tdigits={digits}\tsyms={syms}\tv={v}")
+        for r, (w, s) in enumerate(DS.digit_row(env.table, env.lm, env.lex, env.idx, v, units, lam, PRED_LIMIT), 1):
+            out.append(f"{r}\t{w}\t{s!r}")
+    return "\n".join(out) + "\n"
+
+
 LEXICON_FILES = ("mcbpmf-data.txt", "overlay-add.tsv", "sandhi-add.tsv", "names-add.tsv", "demote.tsv")
 
 
@@ -70,9 +103,14 @@ def main(argv=None):
     ap.add_argument("--theta", type=float, default=0.0)
     ap.add_argument("--mode", choices=("score", "structural"), default="score", help="structural: C's R2 verdict was `structural` (scores are None)")
     ap.add_argument("--out", required=True)
+    ap.add_argument("--pred", action="store_true", help="write the prediction-row golden (digits.md A.3.5, eval/golden/digits-pred.txt) instead")
     a = ap.parse_args(argv)
     import measure
     env = measure.Env(a.table)
+    if a.pred:
+        with open(a.out, "w", encoding="utf-8", newline="\n") as f:
+            f.write(generate_pred(env, a.table))
+        return
     scorer = env.scorer(a.theta, a.mode)
     lm_dir = os.path.join(ROOT, "data", "lm")
     header = [
