@@ -387,8 +387,9 @@ struct Cands {
     /// syllable the keys typed, and this is that syllable's reading (the token's reading is replaced by it when it is chosen).
     zh: Option<String>,
     /// Predict-down contract B.3.1: the prediction row's items the window opened with. They are the first `rows.len()`
-    /// entries of `list` (the length field of a list entry cannot mark them: the English window uses 0), and choosing
-    /// one is choosing it from the row. They go with the window when it closes.
+    /// entries of `list` (the length field of a list entry cannot mark them: the English window uses 0). Choosing one whose
+    /// reading is longer than or differs from the typed syllables is choosing it from the row; one over exactly those
+    /// syllables is a re-pick (`choose`). They go with the window when it closes.
     rows: Vec<Pred>,
 }
 
@@ -2877,9 +2878,12 @@ impl Engine {
             return self.choose_english(idx, false);
         }
         let Some(mut c) = self.cands.take() else { return Ok(()) };
-        if idx < c.rows.len() {
-            // Predict-down contract B.3.1: a row item chosen from the window is chosen from the row; the 40th unit's commit
-            // waits in `commit_out` for `chosen`, as an English item's does.
+        // Predict-down contract B.3.1 (revision 2026-10-17): a row item over exactly the typed syllables before the cursor is
+        // the lexicon's candidate for that span and falls through to the re-pick below (`list[idx]` is the same word and
+        // length); one whose reading is longer or differs (it completes an unfinished unit or an abbreviation, or runs past the
+        // typed syllables) is chosen from the row, and the 40th unit's commit waits in `commit_out` for `chosen`, as an English
+        // item's does.
+        if c.rows.get(idx).is_some_and(|p| p.reading[..] != self.syls[p.start..self.cursor]) {
             let o = self.apply_pred(c.rows.swap_remove(idx))?;
             if !o.commit.is_empty() {
                 self.commit_out = Some(o.commit);

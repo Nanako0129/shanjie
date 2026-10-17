@@ -30,15 +30,13 @@ fn shared() -> &'static Shared {
 const DAY: i64 = 20_000;
 const L: Layout = Layout::Standard;
 
-/// Production lexicon and model, learning on, fixed clock, prediction row off (predict-down B.4: the subject is the
-/// lexicon window, which with the row on lists the row's copies of a word first).
+/// Production lexicon and model, learning on, fixed clock.
 fn engine() -> Engine {
     let s = shared();
     let mut e = Engine::with_lexicon(s.lex.clone(), L);
     e.set_lm(s.lm.clone(), s.capped.clone());
     e.set_today(Some(DAY));
     e.set_learning(true);
-    e.set_prediction(false).unwrap();
     e
 }
 
@@ -363,7 +361,6 @@ fn tiny(text: &str) -> Engine {
     e.set_lm(s.lm.clone(), capped);
     e.set_today(Some(DAY));
     e.set_learning(true);
-    e.set_prediction(false).unwrap(); // as in `engine`
     e
 }
 /// Syllables of T (each one character, two homophones apart from 的 and Ａ).
@@ -665,6 +662,7 @@ fn a_learned_word_wins_in_any_context_and_leads_its_length_in_the_window() {
     assert_eq!(type_syls(&mut e, PAIGONG).preedit, "派工");
     e.key(k(KeyKind::Esc)).unwrap();
     e.set_left_context("");
+    e.set_prediction(false).unwrap(); // predict-down B.4: the window's lexicon part is the subject; the row's items come first
     assert_eq!(type_syls(&mut e, &format!("ㄐㄧˋ ㄉㄜ˙ ㄐㄧㄚ ㄖㄨˋ {PAIGONG}")).preedit, "記得加入派工");
     let o = e.key(k(KeyKind::Space)).unwrap();
     assert_eq!(o.candidates[0], "派工", "first among the two-syllable candidates (none longer here)");
@@ -748,9 +746,6 @@ fn new_word_records_that_are_never_enumerated_change_nothing() {
     let (mut a, mut b) = (engine(), engine());
     a.set_learning(false);
     b.set_learning(false);
-    // This one compares the prediction rows too.
-    a.set_prediction(true).unwrap();
-    b.set_prediction(true).unwrap();
     b.learning_open(&dir).unwrap();
     assert!(b.learner().records().iter().all(|r| r.context == NEWWORD) && b.learner().records().len() == records.len().min(2000));
     let mut diff = Vec::new();
