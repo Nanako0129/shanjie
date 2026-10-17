@@ -1,6 +1,6 @@
 # 契約：數字列直接打數字（digits；評分切分、數字後的預測列、共用中英混打開關）
 
-狀態：定稿，送 plan-verifier（2026-10-17）。C（`docs/contracts/digit-context.md`，PR #195 合併 f3f287c5）已判：R1 → 數字後的預測列用數字語境；R2（照 C.7）→ 評分切分，θ＝3。A.8 的八項在本次定稿處理（各項標在 A.8）。行號是 main `af78dedc` 讀的；之後 PR #193（預測列與 ↓ 候選窗）改了 `engine.rs`，行號可能偏移，以函式名為準。標〔推論〕的沒有量過。
+狀態：定稿，修訂一（2026-10-17，plan-verifier 第一次 REVISE：打包、預測列順序、尾段時的選取），再送 plan-verifier。C（`docs/contracts/digit-context.md`，PR #195 合併 f3f287c5）已判：R1 → 數字後的預測列用數字語境；R2（照 C.7）→ 評分切分，θ＝3。A.8 的八項在本次定稿處理（各項標在 A.8）。行號是 main `af78dedc` 讀的；之後 PR #193（預測列與 ↓ 候選窗）改了 `engine.rs`，行號可能偏移，以函式名為準。標〔推論〕的沒有量過。
 
 
 ## A.1 依據
@@ -61,7 +61,7 @@
 | 緩衝非空 | Esc | 清掉緩衝與尾段（已吐出的 token 留著），同第 12 條 | 核心 |
 | 緩衝非空、預測列非空 | Tab | 照第 8a 條進入預測列（2066；在一切之前判斷，不吐） | 核心，不改 |
 | 緩衝非空 | Enter、Shift+Enter、第 2 條的標點、Shift＋字母（開英文段）、↓、←→ Home End Delete、Tab（列空）、Shift＋非標點、`reset(Commit)`、40 單位 | **邊界**：緩衝全部吐成 token（尾段沒有聲調就不是詞，所以字母表鍵一律當數字），再照原規則處理這個鍵。例：`2 0 2 6 ⏎` → 2026；`1` Ctrl+\ → 1、；`1 0 0` Shift+5 → `commit` 100、`handled` 0（第 21 條）；`2` Shift+B → 2 ＋英文段 | 核心 |
-| 數字後（左邊是數字串 token、無緩衝） | 字母表裡的注音鍵 | 開新串？**不是**：同一串延續（`run_len` 繼續、`run_ctx` 不變），緩衝＝這個鍵；評分裡 d 含已吐出的數字，所以 m＝0 的注音切分也用數字語境 (v, D)，P_len 用整串長度（A.3.3、A.8-1）：`1984` 的 8 4 與 `A123456789` 靠 P_len 收回來，`10倍` 的 ㄅ 靠 Σ P(ㄅ…| v, D) 贏 | 核心 |
+| 數字後（左邊是數字串 token、無緩衝，而且上一個鍵就是這一串的鍵，中間沒有邊界鍵） | 字母表裡的注音鍵 | 開新串？**不是**：同一串延續（`run_len` 繼續、`run_ctx` 不變；中間有過邊界鍵，例如 ← →，就是新串、`run_ctx` 重算，同 Python 基準），緩衝＝這個鍵；評分裡 d 含已吐出的數字，所以 m＝0 的注音切分也用數字語境 (v, D)，P_len 用整串長度（A.3.3、A.8-1）：`1984` 的 8 4 與 `A123456789` 靠 P_len 收回來，`10倍` 的 ㄅ 靠 Σ P(ㄅ…| v, D) 贏 | 核心 |
 | 數字後 | 3 4 6 7 | 延續串、緩衝＝它，只有全數字切分 → 數字 | 核心 |
 | 數字後 | ↓ | 開候選窗：B 的預測項目（數字語境列，A.3.5）在前；再接 s3e 標點那一支（2481–2511）的「那個半形字、它的全形（０–９ ．／－，寫死在引擎，不走 `self.punct`）」；再接 A.3.6 的注音讀法項 | 核心 |
 | 數字後 | 空白鍵 | 插入一個空白單位（和第 16a 條的空白單位相同，但**不要求單字表**：數字功能生效就成立，A.8-8；`breaks_with_space` 加數字串 token；學習鍵仍 `^>_punct_en`） | 核心 |
@@ -77,10 +77,11 @@
 ### A.3.5 數字後的預測列（答覆 1；C 的 R1 已過）
 
 - **尾段怎麼餵預測列**（A.8-2）：字母表鍵的注音尾段在緩衝裡、不在 `pend`。被選的切分 t > 0 時，尾段的鍵就是預測列的未完成單位（`recompute_pred` 把它當成 `pend` 一樣用）：d＝0（串裡還沒有數字）時就是今天的預測列（歷史照舊、單位＝尾段），所以中英混打開著時以 ㄅ ㄉ ㄓ… 開頭的部分注音預測列照舊出現；d ≥ 1 時用數字語境（下一條）。
-- `recompute_pred`（1644）的游標起點：串前的顯示以數字串 token（或被選切分的數字）結尾時，歷史不是 `<s>` 而是**數字語境 (v, D)**，v＝`run_ctx`；分數用 A.3.2 的 `P(w | v, D)`，後繼層＝N(v,D→w) > 0 或 N(D→w) > 0 的詞。實作：`predict.rs` 加 `predict_digits(idx, lm, table, v, units, limit)`，和 `predict` 同一套相容、桶、去重、排序，只換分數與後繼層；`recompute_pred` 的其他步驟（學習權重、過濾、去重、截 9）照舊。Python 基準是 `digits_score.digit_tiers`／`digit_rank_empty`（C 的 R1 就是用它量的）。
-- **沒有未完成單位**（串剛打完、切分是全數字、或剛吐完 token）時也有列：`predict_digits` 的單位序列是空的就列 N(v,D→w)／N(D→w) 最高的 9 個詞（這是「下午3 → 點」的時機）。今天沒有未完成音節時，游標起點不出列、只有長起點的列（V3 §11，`engine_predict.rs` 608–609 一帶；A.8-4 更正）；數字後的空單位列是游標起點新增的一種。
+- `recompute_pred`（1644）的游標起點：串前的顯示以數字串 token（或被選切分的數字）結尾時，歷史不是 `<s>` 而是**數字語境 (v, D)**，v＝`run_ctx`；後繼層＝N(v,D→w) > 0 或 N(D→w) > 0 的詞（`Table.successors(v)`）。**順序**（修訂一寫死，和 Python 基準相同）：有未完成單位時照 `digits_score.digit_tiers`：候選同 `predict` 的相容與桶，分數＝λ·log10 P(w | v, D) ＋ (1−λ)·lp（λ 是設定的 λ，lp 是詞庫分數），後繼層一層、其餘一層，各層照 `predict.det_key`（分數由大到小，同分依字數、讀音序、詞）排。實作：`predict.rs` 加 `predict_digits(idx, lm, table, v, units, limit)`，和 `predict` 同一套相容、桶、去重、排序，只換分數與後繼層；`recompute_pred` 的其他步驟（學習權重、過濾、去重、截 9）照舊。
+- **沒有未完成單位**（串剛打完、切分是全數字、或剛吐完 token）時也有列（這是「下午3 → 點」的時機）：後繼層裡是詞庫詞的那些，分數＝log10 P(w | v, D)（不混詞庫分數，同 `digits_score.digit_rank_empty`），照 `det_key` 排，取前 9。
+- **Python 參考與 fixture**：executor 在 `experiments/digits/digits_score.py` 加 `digit_row(table, lm, lex, idx, v, units, lam, limit=9)`，兩種情形都回傳排好的詞（用上面兩條的程式路徑，`digit_rank_empty` 的名次和它的位置一致，單元測試斷言），並在 `golden_digits.py` 加 `--pred` 產 `eval/golden/digits-pred.txt`（macOS 產；固定 12 個情境：前文空／「下午」／「價格」各配 `3`、`2 0`、`1 0 1` 加一個注音尾段等，檔頭記表、模型、詞庫的雜湊）。Rust 的預測列和它逐項相同（A.4.1 #44、#45）。這個 fixture 是 A 新增的，C 的 `digits-score.txt` 不動。今天沒有未完成音節時，游標起點不出列、只有長起點的列（V3 §11，`engine_predict.rs` 608–609 一帶；A.8-4 更正）；數字後的空單位列是游標起點新增的一種。
 - 長起點照舊略過含 token 的範圍（1671）。
-- 列的項目選了（Tab／數字／`pick`／B 的 ↓ 清單）：緩衝先吐成 token，再照 `choose_pred`（1738）插入。
+- 列的項目選了（Tab／數字／`pick`／B 的 ↓ 清單）：被選切分的**前 m 個鍵**吐成 token（數字留下）；尾段（t 個鍵）照 `pend` 一樣被選到的詞消化掉、清空，不吐成數字；項目的 `start` 指吐完 token 之後的位置，再照 `choose_pred` 插入（修訂一；草稿寫「緩衝先吐成 token」會把尾段也變成數字）。
 
 ### A.3.6 ↓ 清單裡的另一種讀法（答覆 4「另一種讀法留在 ↓」；(d)）
 
@@ -97,7 +98,7 @@
 
 ### A.3.8 文件（同一個 PR）
 
-`docs/contracts/zhen-mixed.md`、`zhen-inline.md`（預設改開）；`docs/contracts/s3a.md`：§2 加「串、緩衝、切分」一段；§3 表第 2、9、10、11、12a、13、14、16、22a 加「中英混打開著時」的例外、新增「數字後」各列與 A.3.6；§6 的 `set_english` 註解。`shanjie.h`；`s3b.md` §13.2；`settings-window.md` §2.2；`docs/PLAN.md` 一行；研究紀錄（決定、模擬器與計時數字）；`docs/methodology.md` 若有教訓。
+**打包**：`scripts/build-app.sh` 把 `data/lexicon/digits.tsv` 複製進 `Resources/`（兩處逐檔列名的清單都加），`scripts/check-app.sh` 的必要檔清單加 `digits.tsv`，並和 repo 的那一份 `cmp`（修訂一：表是可有可無，沒打包就會靜靜失效）。`docs/contracts/zhen-mixed.md`、`zhen-inline.md`（預設改開）；`docs/contracts/s3a.md`：§2 加「串、緩衝、切分」一段；§3 表第 2、9、10、11、12a、13、14、16、22a 加「中英混打開著時」的例外、新增「數字後」各列與 A.3.6；§6 的 `set_english` 註解。`shanjie.h`；`s3b.md` §13.2；`settings-window.md` §2.2；`docs/PLAN.md` 一行；研究紀錄（決定、模擬器與計時數字）；`docs/methodology.md` 若有教訓。
 
 ## A.4 驗收
 
@@ -150,8 +151,10 @@
 | 41 | `set_abbreviation(1)` 後 `1 2` | 照縮寫規則開第二個單位 | 互斥 |
 | 42 | 倚天引擎 `set_english(1)` 與 `(0)` 同按鍵 | 每個輸出相等 | |
 | 43 | 學習開、句首兩字詞改選後接 `1 ⏎` | 學習檔的鍵是 `^>_punct_num` | |
-| 44 | 前文「下午」、`3` | 預測列非空、含「點」（C 量到的那幾個詞之一；斷言和 Python 的 `predict_digits` 列逐項相同） | A.3.5 |
-| 45 | 前文空、`3 4` | 預測列＝N(D→w) 前 9 | |
+| 44 | 前文「下午」、`3` | 預測列含「點」，而且和 `eval/golden/digits-pred.txt` 的同一情境逐項相同 | A.3.5 |
+| 45 | 前文空、`3 4` | 預測列和 `digits-pred.txt` 的同一情境逐項相同（v＝`<s>`，照 log10 P(w | `<s>`, D) 排） | |
+| 45a | 被選切分 d＝0、t > 0 時選預測列第 1 項（例子以實際引擎為準，例如句首一個顯示成注音的字母表鍵） | `syls` 沒有數字 token，是那個詞的讀音 | A.3.5 選取（修訂一） |
+| 45b | 被選切分 m ≥ 1、t > 0 時選預測列第 1 項（例子以實際引擎為準） | 前 m 個鍵是數字 token、後面接那個詞，`syls` 逐項斷言；突變「選取前把整個緩衝吐成 token」讓 45a 或 45b 以斷言失敗 | 同上 |
 | 46 | 前文「下午」、`2`（評分：預期顯示 2）；再 `0`；再 `3` | 每鍵的顯示與 golden 相同；最後 `syls` 是三個 token（或 golden 說的） | 翻轉與 θ |
 | 47 | 緩衝非空時 `set_english(0)` | 快照：緩衝吐成 token；之後打字同關著 | |
 | 48 | `engine_replay.rs` 的三個 run（`set_english(1)` 的那個加上表） | 302／302；全程最後沒有任何數字串 token；release p95 < 16 ms | 純中文的最後誤判 0（C 的 R2 在真引擎上重現） |
@@ -178,6 +181,7 @@
 - 關著時（核心的預設）：所有 golden、`cli/tests/golden.rs`、既有測試一個位元組不改；`eval/golden/` 只多 C 的 `digits-score.txt`。殼的預設改開的測試另列（A.4.3）。
 - 開著：`timing_typing76_keys`、`…_with_taught_picks_and_50k`、重播的 p95 < 16 ms（release、低負載、PR 附數字與負載）；引擎建構時間多讀一張表的差（量一次，只報）。
 - `make test-rust`（Windows 機器的 WSL）、`make test-swift`、CI 全綠；`/code-review`；fresh verifier CONFIRMED。
+- 打包：`scripts/build-app.sh` 建出的 App 跑 `scripts/check-app.sh` 通過；拿掉 `Resources/digits.tsv` 或改一個位元組時 `check-app.sh` 失敗（修訂一）。
 - 保留集不另外跑（解碼沒改）。
 - 實機（A.2）。
 
