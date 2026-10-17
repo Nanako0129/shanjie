@@ -210,7 +210,10 @@ int32_t shanjie_engine_set_punctuation(ShanjieEngine *engine, const char *table)
 //   one, whichever has bigram history; none: the sentence start).
 int32_t shanjie_engine_set_left_context(ShanjieEngine *engine, const char *utf8);
 // set_learning: 0 or 1 (2 otherwise). Default 0 at engine creation (fail-closed). 0 drops pending
-//   learns; a span is learned only if the flag was 1 both when it was chosen and at commit.
+//   learns; a span is learned only if the flag was 1 both when it was chosen and at commit. 0 while a
+//   composition is open, or any key the engine handles while it is 0, also marks the composition: its commit learns
+//   no new word and counts no use (new-word B section 2.1). The mark goes when the composition is empty again
+//   (commit, Esc, reset, or Backspace/Delete of everything).
 int32_t shanjie_engine_set_learning(ShanjieEngine *engine, uint32_t enabled);
 // learning_open: dir is the learning directory (.../Application Support/shanjie); created 0700 if
 //   missing. A missing file starts empty; a corrupt one is renamed learning.tsv.corrupt and starts
@@ -249,6 +252,21 @@ int32_t shanjie_engine_learning_clear(ShanjieEngine *engine);
 //   The shell computes none of this; it only passes the left-context text (section 14).
 // Learning happens only at a commit (Enter, a key the engine passes through after committing, or the
 //   40-syllable auto-commit), never on shanjie_engine_reset or Esc, and never for punctuation picks.
+// New-word B (docs/contracts/newword-b.md), no new function: at a learning commit, a run of 2-4 single Han
+//   characters on the decoded path that holds a character re-picked in the candidate window (runs split at
+//   punctuation, non-Han characters and a fixed table of function characters; not all numerals; not a word the
+//   lexicon has under that reading, and no lexicon word under that reading scores above -6.5; the lexicon is the
+//   one the engine loaded: base, overlays, the names layer and the loaded packs, at their file scores) is stored as a
+//   new word, and so is each shorter piece of 2+ characters of it that holds a re-pick, is not all numerals and
+//   whose reading has no lexicon word at all; one learning.tsv line each,
+//   "#<TAB>reading<TAB>word<TAB>weight<TAB>day". Memory never holds more than 2,000 new words: learning one past
+//   that drops the lowest weights at once. The file holds at most 2,000 "#" lines after a full rewrite; lines appended
+//   since can pass that until the next full rewrite, and a load keeps at most 2,000 (lowest weights dropped). A new
+//   word decodes on its reading in any context, is listed first among the candidates of its length, and is forgotten by COMMAND+BACKSPACE (which
+//   also drops the pending re-picks overlapping that reading in the composition) and by learning_clear. A commit
+//   with learning on that shows a new word adds to its weight and dates it today, at most once per local day; a
+//   re-pick that changes the text shown over it halves it (choosing it back over the same span undoes that). Choosing a new word in the window teaches no context record. A fixed new word whose
+//   record is gone is unfixed and decoded again, never an error. Older versions skip "#" lines at load.
 // Writes: a learning commit appends only the records it changed; a full rewrite happens on a forget,
 //   on the first write after learning_open or a clear, on the first write of each day, every 1,024
 //   appended lines, after any failed append, and after a failed full rewrite or forget.
