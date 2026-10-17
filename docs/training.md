@@ -287,7 +287,7 @@ python3 experiments/s7a-tinylm/export_sjtl.py --npz ~/.cache/shanjie/work/s7a/ti
 | 規模 | 模型 < 100 MB；每一批計數 < 8 小時、記憶體 < 48 GB（model-v5 的記憶體沒有量）；每鍵延遲照既有的 perf 測試 | model-v5 契約 §3.5 |
 | 指紋核對 | 見 §3.3 | model-v4 契約 §2、model-v5 契約 §3.6 |
 | golden | 所有依模型的 golden 用 Python 參考實作重產，Rust 逐位元組相同；`sp-predict.txt` 照它的程序 | model-v5 契約 §2.5 PR 2；`docs/data-files.md` |
-| 保留集 `eval/holdout/` | 只在一片收尾時由 **fresh verifier** 跑一次、只回數字：基準與新版各跑一次 `--set holdout --rowstats`（寫到它自己的暫存目錄、檔內只能有 `[0-9\t\n]`），再跑 `tools/evalstats.py compare`，只回那一行表格，然後刪掉兩個 rowstats。其他時候不讀、不用來調參 | `CLAUDE.md`「評測與資料」 |
+| 保留集 `eval/holdout/` | 只在推 `v*` tag 前由 **fresh verifier** 跑一次（2026-10-18 起；之前是每片收尾時）、只回數字：基準與新版各跑一次 `--set holdout --rowstats`（寫到它自己的暫存目錄、檔內只能有 `[0-9\t\n]`），再跑 `tools/evalstats.py compare`，只回那一行表格，然後刪掉兩個 rowstats。其他時候不讀、不用來調參 | `CLAUDE.md`「評測與資料」 |
 | 私人資料 | 使用者的聊天評測集、Discord 調參集由維護者（main）跑，只貼表格數字；agent 一律不讀。2026-10-13 起重運算不在 Mac 上跑，私人評測集可以放 188 或 Colab，搬過去要核對雜湊、只用來評測 | `CLAUDE.md`「評測與資料」 |
 | 語意校正專屬 | 判斷期淨值 > 0、改壞率點估計 ≤ 0.5%、公開與守門集合沒有「改對 < 改壞而且 p < 0.05」的格；保留集在建 Release 之前跑一次 | `s7h-tinylm-v3.md` §0、§3 |
 | 合併關卡 | 本地 `/code-review` 沒有未處置的問題、fresh `pilotfish:verifier` CONFIRMED、CI 全綠，merge commit（repo 未滿 100 顆星） | `CLAUDE.md`「一片工作的流程」第 4 項 |
