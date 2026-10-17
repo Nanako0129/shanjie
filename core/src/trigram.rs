@@ -105,6 +105,11 @@ const D: f64 = 0.75;
 /// a stored context never gives a word less than this share of its P2, which caps the penalty for a word the context did not keep.
 /// reference/proto/trigram.py has the same value (`TRI_FLOOR`); it is not in the table file.
 const TRI_FLOOR: f64 = 0.5;
+static TRI_FLOOR_ENV: std::sync::OnceLock<Option<f64>> = std::sync::OnceLock::new();
+/// E-C probe (experiment branch only): `SHANJIE_TRI_FLOOR` overrides the floor.
+fn tri_floor() -> f64 {
+    crate::lm::env_f64("SHANJIE_TRI_FLOOR", &TRI_FLOOR_ENV, TRI_FLOOR)
+}
 
 pub(crate) struct Tri {
     v: u64,
@@ -260,6 +265,6 @@ impl Tri {
             Some(k) => (k as f64 - self.d) / ctx.tot + ctx.back * p2,
             None => ctx.back * p2,
         };
-        p3.max(TRI_FLOOR * p2)
+        p3.max(tri_floor() * p2)
     }
 }

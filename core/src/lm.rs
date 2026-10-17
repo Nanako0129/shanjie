@@ -12,6 +12,18 @@ use std::sync::{Arc, OnceLock};
 
 pub const LAMBDA_CHAT: f64 = 0.5;
 pub const LAMBDA_FORMAL: f64 = 0.7;
+
+/// E-C probe (experiment branch only, never merged): an environment variable overrides one decoding weight; unset or
+/// unparsable, the shipped value stays.
+pub(crate) fn env_f64(name: &'static str, cell: &'static OnceLock<Option<f64>>, shipped: f64) -> f64 {
+    cell.get_or_init(|| std::env::var(name).ok().and_then(|v| v.parse().ok())).unwrap_or(shipped)
+}
+static LAMBDA_CHAT_ENV: OnceLock<Option<f64>> = OnceLock::new();
+static LAMBDA_FORMAL_ENV: OnceLock<Option<f64>> = OnceLock::new();
+static KN_BETA_ENV: OnceLock<Option<f64>> = OnceLock::new();
+fn kn_beta(file: f64) -> f64 {
+    env_f64("SHANJIE_KN_BETA", &KN_BETA_ENV, file)
+}
 /// Words the corpus never saw are pushed down by this much (lm.py UNSEEN_OVERLAY_PENALTY).
 const UNSEEN_OVERLAY_PENALTY: f64 = 1.0;
 
@@ -24,8 +36,8 @@ pub enum Profile {
 impl Profile {
     pub fn lambda(self) -> f64 {
         match self {
-            Profile::Chat => LAMBDA_CHAT,
-            Profile::Formal => LAMBDA_FORMAL,
+            Profile::Chat => env_f64("SHANJIE_LAMBDA_CHAT", &LAMBDA_CHAT_ENV, LAMBDA_CHAT),
+            Profile::Formal => env_f64("SHANJIE_LAMBDA_FORMAL", &LAMBDA_FORMAL_ENV, LAMBDA_FORMAL),
         }
     }
     /// ABI code: 0 chat, 1 formal.
@@ -521,7 +533,7 @@ impl Lm {
 
     fn prob_c_kn(&self, ctx: Ctx, w: Option<u32>, pb: f64, kn_on: bool) -> f64 {
         let pb = match (&self.kn, w) {
-            (Some(kn), Some(w)) if kn_on && w >= 2 => kn.beta * kn.np1(w as usize) as f64 / kn.total as f64 + (1.0 - kn.beta) * pb,
+            (Some(kn), Some(w)) if kn_on && w >= 2 => kn_beta(kn.beta) * kn.np1(w as usize) as f64 / kn.total as f64 + (1.0 - kn_beta(kn.beta)) * pb,
             _ => pb,
         };
         let back = match ctx.idx {
@@ -556,7 +568,7 @@ impl Lm {
     pub fn unigram_back(&self, w: Option<u32>, lp: f64) -> f64 {
         let pb = pow10(lp);
         match (&self.kn, w) {
-            (Some(kn), Some(w)) if w >= 2 => kn.beta * kn.np1(w as usize) as f64 / kn.total as f64 + (1.0 - kn.beta) * pb,
+            (Some(kn), Some(w)) if w >= 2 => kn_beta(kn.beta) * kn.np1(w as usize) as f64 / kn.total as f64 + (1.0 - kn_beta(kn.beta)) * pb,
             _ => pb,
         }
     }
