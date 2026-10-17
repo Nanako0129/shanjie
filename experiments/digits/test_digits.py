@@ -252,6 +252,23 @@ class Scoring(unittest.TestCase):
         c, p = sc.decide("<s>", [], ["1", "8", "4"], None, None)
         self.assertEqual((c[p][0], c[p][1]), (3, 0))
 
+    def test_theta_at_a_non_alphabet_key(self):
+        """A.3.3 revision three: a non-alphabet key decides the run on the spot, so its digit-free zhuyin split gets theta too
+        (dev302 row 196: 嗎 on screen before 碼 resolved, `1` then `u`, digit + ㄧ beat ㄅㄧ by plain score)."""
+        _, _, sc = world()
+        sc.lp_d = lambda C, dkeys, ended: -1.0 if dkeys else 0.0
+        sc.lp_z = lambda C, digit_ctx, units: 0.0 if digit_ctx else -1.3     # 2 + ㄧ -1.0, ㄉㄧ -1.3
+        for th, want in ((0.0, (1, 1)), (0.29, (1, 1)), (0.31, (0, 2))):
+            sc.theta = th
+            c, p = sc.decide("<s>", [], ["2"], "u", None)
+            self.assertEqual([(m, t) for m, t, _ in c], [(1, 1), (0, 2)])
+            self.assertEqual((c[p][0], c[p][1]), want, th)
+        # a digit already emitted: every split holds one, theta guards nothing (5 2 + ㄧ -0.6 beats 5 + ㄉㄧ -0.8 by score alone)
+        sc.lp_d = lambda C, dkeys, ended: -1.0 + 0.2 * len(dkeys) if dkeys else 0.0
+        sc.theta = 10.0
+        c, p = sc.decide("<s>", ["5"], ["2"], "u", 1)
+        self.assertEqual((c[p][0], c[p][1]), (1, 1))
+
     def test_structural_rule_takes_the_largest_legal_tail(self):
         _, _, sc = world(mode="structural")
         c, p = sc.decide("<s>", [], ["8", "4"], None, None)
@@ -518,12 +535,12 @@ class DigitRunSet(unittest.TestCase):
 
 
 class Golden(unittest.TestCase):
-    def test_thirty_rows_with_a_fifth_key_flush_and_a_split_forced_by_a_non_alphabet_key(self):
+    def test_thirty_one_rows_with_a_fifth_key_flush_and_a_split_forced_by_a_non_alphabet_key(self):
         _, _, sc = world()
         text = GD.generate(sc, identity_history, GD.ROWS, ["header sha256=abc", "second line"])
         lines = text.split("\n")
         self.assertEqual(lines[:2], ["# header sha256=abc", "# second line"])
-        self.assertEqual(sum(l.startswith("## ") for l in lines), 30)
+        self.assertEqual(sum(l.startswith("## ") for l in lines), 31)
         keyl = [l.split("\t") for l in lines if l and l[0].isdigit()]
         self.assertTrue(any(f[2] == "flush=1" and f[1] != GD.EN for f in keyl))            # the fifth key pushed the oldest out
         forced = [f for f in keyl if f[1] in "umj,ok" and f[5] != "splits=" and f[6] != "choice=-"]

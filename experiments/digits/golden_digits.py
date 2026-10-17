@@ -1,4 +1,4 @@
-"""Generates eval/golden/digits-score.txt: the Python baseline's per-key splits and scores for 30 synthetic key sequences
+"""Generates eval/golden/digits-score.txt: the Python baseline's per-key splits and scores for 31 synthetic key sequences
 (docs/contracts/digit-context.md C.5; the Rust port in docs/contracts/digits.md A.4.1 #49 compares against it, scores as f64 bits).
 
   python3 experiments/digits/golden_digits.py --table data/lexicon/digits.tsv --theta 0 [--mode structural] --out eval/golden/digits-score.txt
@@ -34,8 +34,10 @@ ROWS = [
     ("", "1258901258", ""), ("", "2026/10/15", ""), ("", "1-2", ""), ("價格", "300m06", "元"), ("", "hk4g4123", "測試"),
     ("你", "5j03", "轉"), ("", "1" + SP, ""), ("", "3", ""), ("", "6.5", ""), ("", "0.5", ""),
     ("我們", "2026su062k7", "年的"), ("", "10", ""), ("下午", "2", ""), ("下午", "20", ""), ("", "2020" + SP, ""),
+    # digits.md A.3.3 revision three: dev302 row 196 as the engine shows it (嗎, before 表 turns it into 碼); u decides on the spot
+    ("比賽用嗎", "1ul3", "表"),
 ]
-assert len(ROWS) == 30
+assert len(ROWS) == 31
 
 
 def visible(k):

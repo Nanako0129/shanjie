@@ -191,3 +191,9 @@
 3	0	flush=0	ctx=<s>	buf=2020	splits=4,0,-4.549865592941837;3,1,-8.278786200278482;2,2,-6.6909514212737795	choice=4,0	cls=DDDD
 4	␣	flush=0	ctx=<s>	buf=2020	splits=3,2,-8.40184893435148;2,3,-7.095402721069531;4,0,-4.600180405311366	choice=4,0	cls=DDDDS
 5	⏎	flush=0	ctx=-	buf=	splits=	choice=-	cls=DDDDSS
+## 31	left=比賽用嗎	keys=1ul3⏎	chars=表
+0	1	flush=0	ctx=嗎	buf=1	splits=1,0,-1.9167278944195933;0,1,-3.5476556592448327	choice=1,0	cls=D
+1	u	flush=0	ctx=嗎	buf=1	splits=1,1,-4.53164739467095;0,2,-5.013976401031936	choice=0,2	cls=ZZ
+2	l	flush=0	ctx=-	buf=	splits=	choice=-	cls=ZZZ
+3	3	flush=0	ctx=-	buf=	splits=	choice=-	cls=ZZZZ
+4	⏎	flush=0	ctx=-	buf=	splits=	choice=-	cls=ZZZZS
