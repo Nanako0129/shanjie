@@ -193,6 +193,15 @@ final class LearningTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: dir.path), "the directory stays")
         XCTAssertEqual(try excluded(), true, "a clear keeps the flag")
         c.session.perform(.toggleBackup)
+        // Clearing the flag soon after setting it can reach the file system a few ms after setResourceValues returns
+        // (measured for PR #198: a fresh read right after said true in 12 of 400 runs with no gap, none with 50 ms or more;
+        // the slowest clear seen, under load, landed after about 740 ms), so wait for it to land before the two reads.
+        let deadline = Date().addingTimeInterval(5)
+        while try excluded() != false && Date() < deadline {
+            var d = dir
+            d.removeAllCachedResourceValues()
+            usleep(2_000)
+        }
         XCTAssertEqual(try excluded(), false)
         XCTAssertEqual(toggle()?.checked, false)
     }
