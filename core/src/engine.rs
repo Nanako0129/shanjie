@@ -2667,9 +2667,11 @@ impl Engine {
             return self.choose_english(idx, false);
         }
         let Some(mut c) = self.cands.take() else { return Ok(()) };
-        if idx < c.rows.len() {
-            // Predict-down contract B.3.1: a row item chosen from the window is chosen from the row; the 40th unit's commit
-            // waits in `commit_out` for `chosen`, as an English item's does.
+        // Predict-down contract B.3.1 (revision 2026-10-17): a row item over exactly the typed syllables before the cursor is
+        // the lexicon's candidate for that span and falls through to the re-pick below (`list[idx]` is the same word and
+        // length); one that completes an unfinished unit or an abbreviation is chosen from the row, and the 40th unit's
+        // commit waits in `commit_out` for `chosen`, as an English item's does.
+        if c.rows.get(idx).is_some_and(|p| p.reading[..] != self.syls[p.start..self.cursor]) {
             let o = self.apply_pred(c.rows.swap_remove(idx))?;
             if !o.commit.is_empty() {
                 self.commit_out = Some(o.commit);
