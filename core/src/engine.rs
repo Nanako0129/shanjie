@@ -1777,7 +1777,11 @@ impl Engine {
         self.clear_pred();
         self.clear_pend();
         let (m, end) = (reading.len(), self.cursor);
+        // repick-freeze section 13: a row pick keeps the words outside `[start, end)` as shown, as a window re-pick does.
+        // Rows exist only with the cursor at the end, so no index right of it moves.
+        let frozen = self.freeze_outside(start, end);
         self.fixed.retain(|f| !(f.start < end && start < f.end));
+        self.fixed.extend(frozen);
         self.syls.splice(start..end, reading);
         let key = pre.is_some().then_some(key);
         self.fixed.push(Fixed { start, end: start + m, word, pre, key, pick_key: None, zh: None, frozen: false });

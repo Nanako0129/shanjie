@@ -110,7 +110,8 @@ int32_t shanjie_engine_key(ShanjieEngine *engine, ShanjieKey key, ShanjieOutput 
 //   Predict-down (docs/contracts/predict-down.md B.3.1): a window opened while a passive prediction row was showing lists
 //   the row's items first, in the row's order; picking one of them (or its digit, or ENTER on it) is picking it from the
 //   row, the same as the call above, then the window closes. One whose reading is exactly the typed syllables before the
-//   cursor is the lexicon's candidate for that span, and picking it is a re-pick (B.3.1 revision of 2026-10-17).
+//   cursor is the lexicon's candidate for that span, and picking it is a re-pick (B.3.1 revision of 2026-10-17). Any
+//   prediction pick, from the row or the window, keeps the words left of its span as shown (repick-freeze section 13).
 //   1 when engine or out is NULL; 2 when there is neither a candidate window nor a prediction row, or
 //   index is outside that output (state unchanged); 4 internal (engine reset). *out is NULL on any error.
 int32_t shanjie_engine_pick(ShanjieEngine *engine, uint32_t index, ShanjieOutput **out);

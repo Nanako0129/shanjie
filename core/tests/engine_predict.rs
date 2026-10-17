@@ -1410,13 +1410,13 @@ fn t15_a_word_found_from_two_starts_is_listed_once() {
 
 #[test]
 fn t16_a_prediction_pick_is_recorded_under_the_key_of_the_pick() {
-    // ㄧˇ ㄅㄟˋ decode to 以備; picking 時 for the pending ㄕ re-decodes the free syllables to 已被. The record must carry
-    // the key the row was built with (以備), not the one the display has at the commit (已被).
+    // ㄧˇ ㄅㄟˋ decode to 以備; picking 時 for the pending ㄕ keeps 以備 (repick-freeze section 13; before it the free syllables
+    // re-decoded to 已被). The record carries the key the row was built with (以備), which is now also the text at the commit.
     let mut e = learner_engine(Profile::Chat, None);
     typ(&mut e, &["ㄧˇ", "ㄅㄟˋ"], "ㄕ");
     let o = pick_word(&mut e, "時");
-    assert!(o.preedit.starts_with("已被"), "precondition: the pick changed the text before it: {}", o.preedit);
-    assert_eq!(e.key(kind(KeyKind::Enter)).unwrap().commit, "已被時");
+    assert_eq!(o.preedit, "以備時", "the words left of the pick stay as shown");
+    assert_eq!(e.key(kind(KeyKind::Enter)).unwrap().commit, "以備時");
     let r = e.learner().records();
     assert_eq!((r.len(), r[0].context.as_str(), r[0].word.as_str()), (1, "以備", "時"));
     let o = typ(&mut e, &["ㄧˇ", "ㄅㄟˋ"], "ㄕ");
