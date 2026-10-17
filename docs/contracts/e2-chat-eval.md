@@ -127,6 +127,7 @@
 - **`judge.py`**（新）：
   - 輸入：分數資料夾、集合清單、一組或多組 `--fixed LABEL α τ δ`、`--select LABEL --tuning SET... --weight 1 --cap 0.005`。
   - 對每一組值與每個集合，用 `fusegrid.pick` 算出選擇、寫 rowstats，跑 `evalstats compare --net`，印出 §1 的表。
+  - 〔2026-10-18 加，`docs/methodology.md`「2026-10-18：研究流程改版」#3、#4〕`--cap-ub R`（和 `--cap` 擇一）：格子的改壞數 95% 精確 Poisson 上界 ÷ 調參列總數 ≤ R 才可選（分母和 R3′ 相同，只把點估計換成上界）；沒有格子可選就印訊息結束。`--frontier`：在選值前印上限 0.1%–0.5% 下各自會選到的格（同一個選值規則）。`--jsubsets`：每組值、每個集合印 J-對／J-錯在前 8／J-錯在 8 外的列數與改壞、改對數（只有列數，子集照分數檔的 `ok[0]` 切）。`--diagnose`：不跑格點，印可改列數（融合上限）、小模型單獨挑對、留住第一名與 oracle@8。判讀表的區間仍逐列重抽；要叢集區間，對 `OUT/rowstats` 另跑 `evalstats compare --cluster`。
   - 只讀聊天（或指定的）設定的分數檔；不需要 discordtune 的格，也不跑 S7e 的判斷。
 - **`run_sets.py`**：加集合名 `chatclause`（`--chatclause FILE`）、`lytune`（`--lytune FILE`）、`wikitypo`（`--wikitypo FILE`），少了路徑就結束碼非 0。
 

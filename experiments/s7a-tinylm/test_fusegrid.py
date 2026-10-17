@@ -190,6 +190,108 @@ class TestE2NamesAndCap(unittest.TestCase):
             fg.select_weighted(s, 1, cap=-1)
 
 
+class TestCapUb(unittest.TestCase):
+    """cap_ub: poisson_upper95(broken) / n (all pooled rows, as `evalstats compare --net`) must be <= cap_ub."""
+    FIX = staticmethod(lambda i: rec(i, [-1.0, -1.5], [-4.0, -1.0], [0, 1]))
+    BRK = staticmethod(lambda i: rec(i, [-1.0, -1.5], [-4.0, -1.0], [1, 0]))
+    OK = staticmethod(lambda i: rec(i, [-1.0, -1.5], [-4.0, -1.0], [1, 1]))
+
+    def sets(self, n_ok):
+        # 40 fixes and 1 break with the same gap (no cell fixes without breaking); n_ok rows right either way; n = 41 + n_ok
+        rows = [self.FIX(i) for i in range(40)] + [self.BRK(100)] + [self.OK(200 + i) for i in range(n_ok)]
+        return {"cvtune": rows, "wikitune": []}
+
+    def test_bound_bites_where_the_point_rate_does_not(self):
+        s = self.sets(199)                                   # n 240: 1 broken = 0.42% point, bound 4.7439 / 240 = 1.98%; 0 broken 1.25%
+        self.assertEqual(fg.select_weighted(s, 1, cap=0.005)[3:], (40, 1))
+        with self.assertRaises(ValueError):                   # even 0 broken has a bound of 1.25% over 240 rows
+            fg.select_weighted(s, 1, cap_ub=0.005)
+        self.assertEqual(fg.select_weighted(s, 1, cap=0.0125)[3:], (40, 1))      # same number as a point cap: the fusing cell
+        self.assertEqual(fg.select_weighted(s, 1, cap_ub=0.0125)[3:], (0, 0))    # as a bound: only 0 broken passes (1.248%)
+        self.assertEqual(fg.select_weighted(s, 1, cap_ub=0.02)[3:], (40, 1))     # a looser bound admits it
+
+    def test_bound_value_is_poisson_over_all_rows(self):
+        s = self.sets(959)                                   # n 1000
+        ub = evalstats.poisson_upper95(1) / 1000
+        self.assertEqual(fg.select_weighted(s, 1, cap_ub=ub + 1e-6)[3:], (40, 1))
+        self.assertEqual(fg.select_weighted(s, 1, cap_ub=ub - 1e-6)[3:], (0, 0))
+        # rows whose n-gram first is wrong DO count in the denominator (6000 rows now): the same cell passes a much tighter cap
+        s2 = {"cvtune": s["cvtune"] + [rec(900 + i, [-1.0, -1.5], [-1.0, -4.0], [0, 0]) for i in range(5000)], "wikitune": []}
+        self.assertEqual(fg.select_weighted(s2, 1, cap_ub=0.001)[3:], (40, 1))
+        with self.assertRaises(ValueError):
+            fg.select_weighted(s, 1, cap_ub=0.001)
+
+    def test_none_keeps_the_old_behaviour_and_the_two_caps_exclude_each_other(self):
+        s = self.sets(10)
+        self.assertEqual(fg.select_weighted(s, 1), fg.select_weighted(s, 1, cap=None, cap_ub=None))
+        with self.assertRaises(ValueError):
+            fg.select_weighted(s, 1, cap=0.1, cap_ub=0.1)
+        with self.assertRaises(ValueError):
+            fg.select_weighted(s, 1, cap_ub=-1)              # nothing admissible
+
+    def test_single_row_bound_is_above_one(self):
+        s = {"cvtune": [rec(1, [-1.0, -1.5], [-1.0, -4.0], [0, 0])], "wikitune": []}
+        self.assertEqual(fg.select_weighted(s, 1, cap_ub=3.0)[3:], (0, 0))      # 2.9957 / 1
+        with self.assertRaises(ValueError):
+            fg.select_weighted(s, 1, cap_ub=1.0)
+
+
+class TestFrontier(unittest.TestCase):
+    def test_one_row_per_cap_with_the_best_cell_or_none(self):
+        t = TestCapUb
+        rows = [t.FIX(i) for i in range(40)] + [t.BRK(100)] + [t.OK(200 + i) for i in range(959)]
+        s = {"cvtune": rows, "wikitune": []}                  # n 1000
+        pt = fg.frontier(s, 1)
+        self.assertEqual([c for c, _ in pt], list(fg.FRONTIER_CAPS))
+        self.assertEqual([cell[3:] for _, cell in pt], [(40, 1)] * 5)      # 1 <= 0.001 * 1000
+        ub = fg.frontier(s, 1, ub=True)       # bounds / 1000: 0 broken 0.2996%, 1 broken 0.4744%, 2 broken 0.6296%
+        self.assertEqual([cell and cell[3:] for _, cell in ub], [None, None, (0, 0), (0, 0), (40, 1)])
+        for c, cell in ub:                    # every returned cell really meets its cap and equals select_weighted's pick
+            if cell:
+                self.assertLessEqual(evalstats.poisson_upper95(cell[4]) / 1000, c)
+                self.assertEqual(cell, fg.select_weighted(s, 1, cap_ub=c))
+        for c, cell in pt:
+            self.assertEqual(cell, fg.select_weighted(s, 1, cap=c))
+
+
+class TestJsubsetsAndDiagnose(unittest.TestCase):
+    def rows(self):
+        return [rec(1, [-1.0, -1.5], [-1.0, -2.0], [1, 0]),    # J-right; model alone keeps 0
+                rec(2, [-1.0, -1.5], [-3.0, -1.0], [1, 0]),    # J-right; model alone picks 1 (wrong)
+                rec(3, [-1.0, -1.5], [-3.0, -1.0], [0, 1]),    # headroom; model alone right
+                rec(4, [-1.0, -1.5], [-1.0, -3.0], [0, 1]),    # headroom; model alone wrong
+                rec(5, [-1.0, -1.5], [-1.0, -2.0], [0, 0]),    # truth outside the top 8
+                rec(6, [-1.0, -1.5], [-1.0, -2.0], [1, 1])]    # J-right, both right
+
+    def test_jsubsets_counts_on_a_hand_made_file(self):
+        j = fg.jsubsets(self.rows(), [1, 0, 1, 0, 1, 0])      # breaks row 1, fixes row 3, keeps rows 2 and 6 right
+        self.assertEqual((j["n"], j["n_right"], j["broken"]), (6, 3, 1))
+        self.assertNotIn("rate", j)                           # counts only: no rate over J-right next to the cap over n
+        self.assertEqual((j["n_wrong_in8"], j["fixed"], j["n_wrong_out8"]), (2, 1, 1))
+        self.assertEqual(sum((j["n_right"], j["n_wrong_in8"], j["n_wrong_out8"])), 6)    # the three subsets partition the rows
+
+    def test_jsubsets_consistent_with_fixed_broken(self):
+        rows = self.rows()
+        for a, t, d in ((0.5, math.inf, 0), (1.0, 1.0, 0.25), (0.1, 0.5, 0)):
+            picks = [fg.pick(r, a, t, "ll", d) for r in rows]
+            j = fg.jsubsets(rows, picks)
+            self.assertEqual((j["fixed"], j["broken"]), fg.fixed_broken(rows, a, t, d))
+
+    def test_jsubsets_empty(self):
+        j = fg.jsubsets([], [])
+        self.assertEqual((j["n_right"], j["broken"], j["n_wrong_in8"], j["n_wrong_out8"]), (0, 0, 0, 0))
+
+    def test_diagnose_on_a_hand_made_file(self):
+        d = fg.diagnose(self.rows())
+        self.assertEqual((d["n"], d["headroom"], d["alone_head"]), (6, 2, 1))
+        self.assertAlmostEqual(d["share"], 2 / 6)
+        self.assertEqual((d["n_right"], d["keep"], d["oracle8"]), (3, 2, 5))   # rows 1 and 6 keep candidate 0 (row 6 ties to the better rank)
+
+    def test_diagnose_single_candidate_rows(self):
+        r = rec(1, [-1.0], [], [1])                           # one candidate: no ll, kept by definition
+        self.assertEqual(fg.diagnose([r])["keep"], 1)
+
+
 class TestSelect(unittest.TestCase):
     def sets(self):
         # margin 1.5: tau in {2, 3, 5, inf} lets fusion in; candidate 1 beats 0 iff 4a > 1.5 (a >= 0.5)
