@@ -41,7 +41,7 @@ def readings(rows, name):
     print(f"{name}: {len(rows)} clauses → {len(kept)} rows (dropped {len(rows) - len(kept)} CHECK/unreadable)")
 
 
-def main():
+def parser():
     ap = argparse.ArgumentParser()
     ap.add_argument("--cv-rows", type=int, default=4000)
     ap.add_argument("--wiki-rows", type=int, default=3000)
@@ -49,7 +49,14 @@ def main():
                     help="cv：只做 Common Voice／Tatoeba（colloquial-train、cvtune，幾分鐘）；wiki：只做 wikitune（要讀 30 萬篇，約 20 分鐘）。"
                          "wiki 會重算 cv 的取樣來接上同一個亂數狀態，結果和 all 逐位元組相同")
     ap.add_argument("--mw", action="store_true", help="S2w：wikitune 的參考句改用 MediaWiki 的 zh-tw 轉換（只影響 --part wiki；cvtune 與 colloquial-train 不變）")
-    a = ap.parse_args()
+    ap.add_argument("--wiki-range", type=int, nargs=2, default=[300_000, 305_000], metavar=("LO", "HI"),
+                    help="維基第 LO..HI-1 篇（預設是 wikitune 的 300,000–304,999；rerank-formal 的 wikijudge 用 310000 315000）")
+    ap.add_argument("--wiki-name", default="wikitune", help="輸出檔名（不含 .txt）")
+    return ap
+
+
+def main():
+    a = parser().parse_args()
     os.makedirs(OUT, exist_ok=True)
     phrase, char, maxp = bc.load_conv()
     train, tune = [], set()
@@ -76,8 +83,9 @@ def main():
         sys.path.insert(0, os.path.join(ROOT, "experiments", "s2w"))
         import mwconv
         mw = mwconv.load()
-    for i, raw in enumerate(bc.articles(305_000)):
-        if i < 300_000:
+    lo, hi = a.wiki_range
+    for i, raw in enumerate(bc.articles(hi)):
+        if i < lo:
             continue
         t = raw
         if a.mw:
@@ -88,7 +96,7 @@ def main():
             t = pat.sub(rep, t)
         for s in bc.SENT.findall(t):
             wiki.extend(HAN.findall(s if a.mw else bc.convert(s, phrase, char, maxp)))
-    readings(rnd.sample(sorted(set(wiki)), min(a.wiki_rows, len(set(wiki)))), "wikitune")
+    readings(rnd.sample(sorted(set(wiki)), min(a.wiki_rows, len(set(wiki)))), a.wiki_name)
 
 
 if __name__ == "__main__":
