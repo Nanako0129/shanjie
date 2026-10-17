@@ -183,7 +183,11 @@ final class LearningTests: XCTestCase {
         let dir = TestLearning.directory()
         let c = Controller(makeShell(learning: dir))
         let toggle = { c.session.menu.first { $0.action == .toggleBackup } }
-        let excluded = { try dir.resourceValues(forKeys: [.isExcludedFromBackupKey]).isExcludedFromBackup }
+        let excluded = { () throws -> Bool? in
+            var d = dir
+            d.removeAllCachedResourceValues()   // a URL caches resource values within a run-loop pass
+            return try d.resourceValues(forKeys: [.isExcludedFromBackupKey]).isExcludedFromBackup
+        }
         XCTAssertEqual(toggle()?.checked, false, "backed up by default (user decision, section 9.3)")
         XCTAssertEqual(try excluded(), false)
         c.session.perform(.toggleBackup)
@@ -195,6 +199,22 @@ final class LearningTests: XCTestCase {
         c.session.perform(.toggleBackup)
         XCTAssertEqual(try excluded(), false)
         XCTAssertEqual(toggle()?.checked, false)
+    }
+
+    /// The flag is read fresh: set through another URL in the same run-loop pass, the menu still sees it (before the fix the
+    /// cached value came back and a second toggle flipped the wrong way, the CI flake of testBackupIsOnByDefault...).
+    func testBackupFlagIsReadFreshWithinOnePass() throws {
+        let dir = TestLearning.directory()
+        let shell = makeShell(learning: dir)
+        XCTAssertFalse(shell.backupExcluded)
+        var other = URL(fileURLWithPath: dir.path, isDirectory: true)
+        var values = URLResourceValues()
+        values.isExcludedFromBackup = true
+        try other.setResourceValues(values)
+        XCTAssertTrue(shell.backupExcluded)
+        let c = Controller(shell)
+        c.session.perform(.toggleBackup)
+        XCTAssertFalse(shell.backupExcluded, "the toggle saw the flag that is set and cleared it")
     }
 
     func testAppLearningDirectoryIsApplicationSupportShanjie() throws {
