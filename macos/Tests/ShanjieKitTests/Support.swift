@@ -17,6 +17,7 @@ enum TestData {
         ("sandhi-add.tsv", "data/lexicon/sandhi-add.tsv"),
         ("names-add.tsv", "data/lexicon/names-add.tsv"),  // model-v6 section 2.5: the always-on names layer, required by the core
         ("demote.tsv", "data/lexicon/demote.tsv"),
+        ("digits.tsv", "data/lexicon/digits.tsv"),  // digits.md A.3.2: optional for the core, but the app bundles it
         ("bigram.sjlm", "data/lm/bigram.sjlm"),
         ("classes.sjc", "data/lm/classes.sjc"),
         ("kn.sjkn", "data/lm/kn.sjkn"),  // model-v6: the Kneser-Ney side file the shipped tinylm.sjtl (SJTL0004) records
@@ -50,7 +51,7 @@ enum TestData {
                     classes.sjc: gh release download classes-v5 -R Nanako0129/shanjie -p classes.sjc -D data/lm
                     kn.sjkn: gh release download kn-v1 -R Nanako0129/shanjie -p kn.sjkn -D data/lm
                     trigram.sjt3: gh release download sj-cx-1-7.7m -R Nanako0129/shanjie -p trigram.sjt3 -D data/lm
-                    tinylm.sjtl: gh release download tinylm-v5 -R Nanako0129/shanjie -p tinylm.sjtl -D data/lm
+                    tinylm.sjtl: gh release download sj-sr-6-14m -R Nanako0129/shanjie -p tinylm.sjtl -D data/lm
                     """, file: file, line: line)
                 return nil
             }

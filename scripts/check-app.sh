@@ -52,12 +52,14 @@ for lp in "zh-Hant 善解輸入法" "en Shanjie"; do
     [ "$(pb "$k" "$S")" = "$name" ] || fail "$l InfoPlist.strings: $k"
   done
 done
-for f in mcbpmf-data.txt overlay-add.tsv sandhi-add.tsv names-add.tsv demote.tsv bigram.sjlm classes.sjc kn.sjkn trigram.sjt3 tinylm.sjtl shanjie.tiff \
+for f in mcbpmf-data.txt overlay-add.tsv sandhi-add.tsv names-add.tsv demote.tsv digits.tsv bigram.sjlm classes.sjc kn.sjkn trigram.sjt3 tinylm.sjtl shanjie.tiff \
          packs/acg-add.tsv packs/acg-sources.tsv packs/acg.json LICENSES/LICENSE LICENSES/McBopomofo-MIT.txt LICENSES/data.md LICENSES/CC-BY-SA-4.0-attribution.txt \
          english-words.txt LICENSES/SCOWL.txt LICENSES/SymSpell-MIT.txt LICENSES/english-words-attribution.txt \
          LICENSES/name-suggestion-index-BSD-3-Clause.txt LICENSES/Sparkle-MIT.txt; do
   [ -s "$R/$f" ] || fail "Resources/$f is missing or empty"
 done
+# digits.tsv is optional for the core (a missing table turns the feature off without a word), so the bundle must carry exactly the repo's.
+cmp -s "$R/digits.tsv" "$(dirname "$0")/../data/lexicon/digits.tsv" || fail "Resources/digits.tsv differs from data/lexicon/digits.tsv"
 # The app icon (docs/contracts/app-icon.md): compiled by actool, named in Info.plist.
 for f in Assets.car AppIcon.icns; do [ -s "$R/$f" ] || fail "Resources/$f (the app icon) is missing or empty"; done
 for k in CFBundleIconName CFBundleIconFile; do [ "$(pb "$k")" = AppIcon ] || fail "Info.plist $k is not AppIcon"; done

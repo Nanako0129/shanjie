@@ -2,7 +2,7 @@
 //! The Python code is ground truth; float operation order is kept on purpose (no fusing or reordering).
 //! R2: errors carry no content; nothing here formats input text.
 
-use crate::learn::{context_key, record_key, Learner, Level};
+use crate::learn::{context_key, newword_score, record_key, Learner, Level, NEWWORD_MAX, NEWWORD_MIN};
 use crate::trigram::{Mapped, Tri, TriBytes, TriCtx, TriMemo};
 use crate::{Error, Lexicon, PER_KEY};
 use std::collections::{HashMap, HashSet};
@@ -550,6 +550,22 @@ impl Lm {
         self.prob_c(self.ctx_of(self.word_id(v)), self.word_id(w), pb)
     }
 
+    /// lm.py `unigram_back`: the single-word back-off term of `word` for a word with model id `w` and score `lp`: 10^lp, blended with the
+    /// Kneser-Ney side file's continuation probability when the model has one. For callers that need `pb` apart from `prob`
+    /// (docs/contracts/digits.md A.3.2: the digit scores sum probabilities over many words, in an order Python fixes).
+    pub fn unigram_back(&self, w: Option<u32>, lp: f64) -> f64 {
+        let pb = pow10(lp);
+        match (&self.kn, w) {
+            (Some(kn), Some(w)) if w >= 2 => kn.beta * kn.np1(w as usize) as f64 / kn.total as f64 + (1.0 - kn.beta) * pb,
+            _ => pb,
+        }
+    }
+
+    /// lm.py `prob`: P(w | context) for a `pb` that is already `unigram_back`'s value (the side file is not applied again, unlike `prob`).
+    pub fn prob_back(&self, ctx: Ctx, w: Option<u32>, pb: f64) -> f64 {
+        self.prob_c_kn(ctx, w, pb, false)
+    }
+
     /// lm.py `word`: lam * log10 P(w|v) + (1 - lam) * lp.
     pub fn word(&self, lam: f64, v: &str, w: &str, lp: f64) -> f64 {
         word_term(lam, self.prob(v, w, pow10(lp)), lp)
@@ -867,12 +883,13 @@ pub enum End<'a> {
 }
 
 /// A path: total score and its words with the lp each was scored with and its demotion delta.
-pub type Scored<'a> = (f64, Vec<(&'a str, f64, f64)>);
+/// The last number of a word is the count of syllables it covers.
+pub type Scored<'a> = (f64, Vec<(&'a str, f64, f64, usize)>);
 
 struct Hyp<'a> {
     score: f64,
     surface: String,
-    words: Vec<(&'a str, f64, f64)>,
+    words: Vec<(&'a str, f64, f64, usize)>,
     /// The two history words (docs/contracts/trigram-core.md): `prev` the one before `last`, `None` when unknown.
     prev: Option<u32>,
     last: Option<u32>,
@@ -900,7 +917,8 @@ pub const LEARN_EPS: f64 = 6.0;
 pub const LEARN_EPS_GLOBAL: f64 = 0.0;
 
 /// What decoding needs to apply learning: the learner, the text just before the segment (only its
-/// last two characters matter) and today's day number.
+/// last two characters matter) and today's day number. The decoded path borrows new words (new-word B) from the
+/// learner, so the learner lives as long as the lexicon borrow of the result.
 pub struct Learn<'a> {
     pub learner: &'a Learner,
     pub before: &'a str,
@@ -931,7 +949,10 @@ pub fn decode_segment<'a>(
 }
 
 /// `decode_segment` with learning (S4 §1.4). With `learn` `None`, or a learner without a record for a
-/// span's reading, the arithmetic is exactly that of the unlearned decoder. `demote` switches the
+/// span's reading, the arithmetic is exactly that of the unlearned decoder. New words (new-word B §2.4) are
+/// enumerated on their reading whatever the context, after the lexicon's entries, scored `newword_score` of their
+/// decayed weight (no S4 boost, no demotion; the model sees them like a pack word it never saw), unless the
+/// lexicon already has that word under that reading. `demote` switches the
 /// lexicon's demotion table on (a delta is subtracted from the word's term, after learning; lp, the
 /// backoff and the entries tried are unchanged) or off (bit-identical to a lexicon without the table).
 ///
@@ -951,10 +972,13 @@ pub fn decode_segment_learned<'a>(
     start: &str,
     end: End<'_>,
     beam: usize,
-    learn: Option<&Learn<'_>>,
+    learn: Option<&Learn<'a>>,
     demote: bool,
 ) -> Result<Vec<Scored<'a>>, Error> {
     let base = &*lex.base;
+    // New words are 2..=NEWWORD_MAX syllables and their reading may be no lexicon reading at all.
+    let fresh_on = learn.filter(|ln| ln.learner.has_new_words());
+    let max_l = if fresh_on.is_some() { base.max_len.max(NEWWORD_MAX) } else { base.max_len };
     let cfg: Scoring = scoring.into();
     let lam = cfg.lam;
     let tri_on = cfg.tri && lm.tri.is_some();
@@ -983,15 +1007,29 @@ pub fn decode_segment_learned<'a>(
         // ends in a different word must not be merged away (dec-recombine section 1). With the trigram level it depends on the last
         // two, so the previous word is part of the key too (empty without the table: the key is the old one).
         let mut idx: HashMap<(String, &str, &str), usize> = HashMap::new();
-        for l in 1..=base.max_len.min(i) {
-            let Some(r) = base.find(&ids[i - l..i]) else { continue };
+        for l in 1..=max_l.min(i) {
             if hyps[i - l].is_empty() {
                 continue;
             }
             let span = &syls[i - l..i];
-            let learned = learn.filter(|ln| ln.learner.has_reading(span));
-            let range = base.range(r);
-            let best = lex.ents[range.start].score;
+            let found = base.find(&ids[i - l..i]);
+            // New words of this span the lexicon lacks under it (new-word B §2.4), tried after the lexicon's entries.
+            let fresh: Vec<(&'a str, f64)> = match fresh_on {
+                Some(ln) if (NEWWORD_MIN..=NEWWORD_MAX).contains(&l) => ln
+                    .learner
+                    .new_words(span, ln.today)
+                    .into_iter()
+                    .filter(|(w, _)| found.is_none() || !base.has(span, w))
+                    .map(|(w, wt)| (w, newword_score(wt)))
+                    .collect(),
+                _ => Vec::new(),
+            };
+            if found.is_none() && fresh.is_empty() {
+                continue;
+            }
+            let learned = learn.filter(|ln| found.is_some() && ln.learner.has_reading(span));
+            let range = found.map_or(0..0, |r| base.range(r));
+            let best = lex.ents.get(range.start).map_or(0.0, |e| e.score);
             let dl = if demote { lex.deltas_in(&range) } else { &[] };
             // Entries to try: the top PER_KEY, plus learned words ranked below it (`extra`: only
             // usable on a path whose context has a learned record for them).
@@ -1027,14 +1065,14 @@ pub fn decode_segment_learned<'a>(
             } else {
                 hits_of = Vec::new();
             }
-            for (p, extra) in entries {
-                let e = &lex.ents[p];
-                let (word, lp0) = (lex.word_of(e), e.score);
+            // Lexicon entries (`Some(position)`), then the new words (`None`: no learned boost, no demotion).
+            let items = entries.into_iter().map(|(p, extra)| (Some(p), extra, lex.word_of(&lex.ents[p]), lex.ents[p].score));
+            for (p, extra, word, lp0) in items.chain(fresh.iter().map(|&(w, lp)| (None, false, w, lp))) {
                 let (wid, pb0) = (lm.word_id(word), pow10(lp0));
-                let delta = dl.iter().find(|&&(q, _)| q == p).map_or(0.0, |x| x.1);
+                let delta = p.and_then(|p| dl.iter().find(|&&(q, _)| q == p)).map_or(0.0, |x| x.1);
                 for (hi, h) in hyps[i - l].iter().enumerate() {
                     let (mut lp, mut pb, mut was_boosted) = (lp0, pb0, false);
-                    if let Some(ln) = learned {
+                    if let Some(ln) = learned.filter(|_| p.is_some()) {
                         let (lv, ws) = &hits[hits_of[hi]];
                         let eps = if *lv == Level::Global { ln.eps_global } else { LEARN_EPS };
                         // eps 0 switches the level off, for `extra` entries too: `best + 0` would
@@ -1062,7 +1100,7 @@ pub fn decode_segment_learned<'a>(
                         Some(q) if !(sc > cand[q].score) => {}
                         found => {
                             let mut words = h.words.clone();
-                            words.push((word, lp, delta));
+                            words.push((word, lp, delta, l));
                             // The surface is cloned only for a new slot (the index keeps one copy); a replacement moves it.
                             let surface = match found {
                                 Some(_) => key.0,
@@ -1095,7 +1133,7 @@ pub fn decode_segment_learned<'a>(
         End::Eos => None,
         End::Next { word, lp, delta } => Some((lm.word_id(word), pow10(lp), lp, delta)),
     };
-    let mut out: Vec<(f64, Vec<(&'a str, f64, f64)>, String)> = last
+    let mut out: Vec<(f64, Vec<(&'a str, f64, f64, usize)>, String)> = last
         .into_iter()
         .map(|h| {
             // (b') a one-word segment from an unknown start closes without the table.
@@ -1153,7 +1191,7 @@ pub fn decode_from(
 ) -> Result<Vec<(f64, Vec<String>)>, Error> {
     Ok(decode_segment_learned(lex, syls, lm, lm.scoring(profile), start, End::Eos, beam, None, demote)?
         .into_iter()
-        .map(|(s, ws)| (s, ws.into_iter().map(|(w, _, _)| w.to_string()).collect()))
+        .map(|(s, ws)| (s, ws.into_iter().map(|(w, ..)| w.to_string()).collect()))
         .collect())
 }
 
@@ -1266,7 +1304,7 @@ mod tests {
         let capped = CappedLexicon::new(lex, "", &lm, Some(&Demote::parse("").unwrap())).unwrap();
         let syls = ["ㄅ".to_string()];
         let run = |end| decode_segment_learned(&capped, &syls, &lm, 0.5, "<s>", end, 64, None, true).unwrap();
-        let score = |v: &[(f64, Vec<(&str, f64, f64)>)], w: &str| v.iter().find(|(_, ws)| ws[0].0 == w).unwrap().0;
+        let score = |v: &[Scored], w: &str| v.iter().find(|(_, ws)| ws[0].0 == w).unwrap().0;
         let eos = run(End::Eos);
         assert_eq!(score(&eos, "b"), lm.word(0.5, "<s>", "b", -2.0) + lm.eos(0.5, "b"));
         assert_eq!(score(&eos, "a"), lm.word(0.5, "<s>", "a", -1.0) + lm.eos(0.5, "a"));

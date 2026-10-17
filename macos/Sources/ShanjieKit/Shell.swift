@@ -123,7 +123,8 @@ public final class MemoryAbbreviationStore: AbbreviationStore {
     public init(_ abbreviation: Bool? = nil) { self.abbreviation = abbreviation }
 }
 
-/// Where the "中英混打（實驗）" switch is kept (docs/contracts/zhen-mixed.md section 3.2): `nil` means never chosen, which is off.
+/// Where the "中英混打（實驗）" switch is kept (docs/contracts/zhen-mixed.md section 3.2): `nil` means never chosen, which is on (digits.md A.3.7;
+/// it was off before). A saved value, either way, wins.
 /// Same arrangement as `AbbreviationStore`.
 @MainActor
 public protocol EnglishStore: AnyObject {
@@ -358,7 +359,7 @@ public final class Shell {
     /// pending). Hidden means always off; the stored value is neither read nor written.
     public let showsAbbreviation: Bool
     private let englishStore: EnglishStore
-    /// zhen-mixed: the experimental English window (default off); sent to every engine `build()` makes. Unlike the abbreviation
+    /// zhen-mixed: the experimental English window (default on since digits.md A.3.7; absent in the store is on, a saved off stays off); sent to every engine `build()` makes. Unlike the abbreviation
     /// switch it ships (the app shows it).
     private(set) var englishOn = false
     /// zhen-inline section 2: how the English shows while it is typed (default true: as letters, `UserDefaults` key
@@ -548,7 +549,7 @@ public final class Shell {
         self.showsAbbreviation = showsAbbreviation
         abbreviationOn = showsAbbreviation && abbreviationStore.abbreviation == true
         self.englishStore = englishStore
-        englishOn = englishStore.english == true
+        englishOn = englishStore.english ?? true // digits.md A.3.7: on unless the person turned it off (a saved value wins)
         englishInlineOn = englishStore.englishInline ?? true
         self.acgPackStore = acgPackStore
         acgDataDate = Shell.readAcgDataDate(resources.appendingPathComponent("packs/acg.json"))

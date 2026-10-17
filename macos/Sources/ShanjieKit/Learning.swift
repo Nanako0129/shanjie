@@ -75,6 +75,8 @@ public struct MenuEntry: Equatable, Sendable {
         public static let demote = "避免把敏感字詞排在前面"
         public static let prediction = "即時預測"
         public static let english = "中英混打（實驗）"
+        /// The line under that toggle in the settings window (docs/contracts/digits.md A.3.7).
+        public static let englishDigitsNote = "打英文不用切換輸入法；數字列的鍵也會打出數字（例如 2026年、3.14），由前文判斷是數字還是注音。"
         /// The choice under it in the settings window (zhen-inline section 2): the label and its two values.
         public static let englishDisplay = "英文的顯示"
         public static let englishDisplayTyped = "打字時就顯示"
@@ -108,7 +110,8 @@ public protocol LearningDialogs: AnyObject {
 /// Fixed strings of those windows (R2: no app name, path or count).
 public enum DialogText {
     public static let clearTitle = "要清除選字記憶嗎？"
-    public static let clearMessage = "會刪除這台電腦上記住的改選與預測列選取紀錄，之後要重新學。清除只刪本機檔案；已經進 Time Machine 備份或本機快照的副本不受影響。"
+    /// Names the new words too (new-word B, docs/contracts/newword-b.md section 2.7).
+    public static let clearMessage = "會刪除這台電腦上記住的改選、預測列選取，以及從逐字改選學到的新詞，之後要重新學。清除只刪本機檔案；已經進 Time Machine 備份或本機快照的副本不受影響。"
     public static let clearButton = "清除"
     public static let cancel = "取消"
     public static let failedTitle = "清除選字記憶失敗"

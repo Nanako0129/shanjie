@@ -69,7 +69,7 @@ final class DefaultsAbbreviationStore: AbbreviationStore {
     }
 }
 
-/// The "中英混打（實驗）" switch (docs/contracts/zhen-mixed.md section 3.2), key `english` in the same domain; absent means off.
+/// The "中英混打（實驗）" switch (docs/contracts/zhen-mixed.md section 3.2), key `english` in the same domain; absent means on (digits.md A.3.7), a saved value wins.
 @MainActor
 final class DefaultsEnglishStore: EnglishStore {
     var english: Bool? {

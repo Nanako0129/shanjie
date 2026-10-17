@@ -91,3 +91,68 @@ fn replay_eten_302_of_302() {
 fn replay_with_english_on() {
     replay(Layout::Standard, true);
 }
+
+/// Digits.md A.4.1 #48 (C's R2 on the real engine): the 302 rows are Chinese typed right. With the English-mixing switch on, the word list
+/// and the digit table loaded (and the model: the digit feature needs the scores), every row commits what the same engine commits with the
+/// switch off, no key puts a digit token into the composition, and the keys stay under 16 ms at p95 (release).
+#[test]
+fn replay_with_english_and_digits_on() {
+    use core::digits::DigitTable;
+    use core::engine::capping_overlay;
+    use core::lm::{CappedLexicon, Lm};
+    use std::sync::Arc;
+    let lex = load_lexicon(&root().join("data/lexicon")).unwrap();
+    let lm = Lm::load(&root().join("data/lm/bigram.sjlm")).unwrap();
+    let overlay = capping_overlay(&root().join("data/lexicon"), "").unwrap();
+    let capped = Arc::new(CappedLexicon::new(lex.clone(), &overlay, &lm, None).unwrap());
+    let lm = Arc::new(lm);
+    let table = Arc::new(DigitTable::parse(&std::fs::read_to_string(root().join("data/lexicon/digits.tsv")).unwrap()).unwrap());
+    let mut files: Vec<PathBuf> = std::fs::read_dir(root().join("eval/dev"))
+        .unwrap()
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| p.extension().is_some_and(|x| x == "txt"))
+        .collect();
+    files.sort();
+    let mut rows = Vec::new();
+    for f in files {
+        rows.extend(parse_rows(&std::fs::read_to_string(f).unwrap()).unwrap());
+    }
+    let mut rows = usable(&lex, rows);
+    rows.truncate(302);
+    assert!(rows.len() == 302, "dev set has 302 usable rows");
+
+    let build = |on: bool| {
+        let mut e = Engine::with_lexicon(lex.clone(), Layout::Standard);
+        e.set_lm(lm.clone(), capped.clone());
+        e.set_digit_table(Some(table.clone()));
+        e.load_english(&root().join("eval/golden/english-tiny.txt")).unwrap();
+        e.set_english(on).unwrap();
+        e
+    };
+    let (mut on, mut off) = (build(true), build(false));
+    let (mut times, mut tokens) = (Vec::new(), 0);
+    for (i, r) in rows.iter().enumerate() {
+        let syls = match &r.reading {
+            Some(s) => s.clone(),
+            None => lex.to_syllables(&r.sent).expect("usable row"),
+        };
+        let mut keys: Vec<Key> = syls.iter().flat_map(|s| keys_of(Layout::Standard, s)).collect();
+        keys.push(Key::new(KeyKind::Enter));
+        let (mut got, mut want) = (String::new(), String::new());
+        for key in keys {
+            want.push_str(&off.key(key).unwrap().commit);
+            let t = Instant::now();
+            let o = on.key(key).unwrap();
+            times.push(t.elapsed());
+            tokens += on.digits_emitted();
+            got.push_str(&o.commit);
+        }
+        assert!(got == want, "replay mismatch at row {}", i + 1);
+    }
+    assert_eq!(tokens, 0, "a digit token was made while typing Chinese");
+    times.sort();
+    let p95 = times[times.len() * 95 / 100];
+    println!("digits on: keys {} p95 {:?} max {:?}", times.len(), p95, times[times.len() - 1]);
+    #[cfg(not(debug_assertions))]
+    assert!(p95 < std::time::Duration::from_millis(16), "p95 over 16 ms");
+}

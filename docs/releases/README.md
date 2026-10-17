@@ -11,7 +11,7 @@
   | 辨類（詞類） | SJ-WC | `classes-vN` | `classes.sjc` | 詞類數 | classes-v5 ＝ SJ-WC-5-512C |
   | 承接（平滑） | SJ-KN | `kn-vN` | `kn.sjkn` | 詞彙數 | kn-v1 ＝ SJ-KN-1-353K |
   | 連文（前兩個詞） | SJ-CX | （新） | `trigram.sjt3` | 三元組合條數 | `sj-cx-1-7.7m` ＝ SJ-CX-1-7.7M（7,700,964 條） |
-  | 會意（語意校正） | SJ-SR | `tinylm-vN` | `tinylm.sjtl` | 參數數 | tinylm-v5 ＝ SJ-SR-5-14M（1,440 萬參數） |
+  | 會意（語意校正） | SJ-SR | `tinylm-vN` | `tinylm.sjtl` | 參數數 | `sj-sr-6-14m` ＝ SJ-SR-6-14M（1,440 萬參數；tinylm-v5 ＝ SJ-SR-5-14M） |
 
   連文的第一版原本以 `trigram-v1` 建立，還沒有任何地方下載就改成 `sj-cx-1-7.7m`（舊的 Release 刪除）。
 

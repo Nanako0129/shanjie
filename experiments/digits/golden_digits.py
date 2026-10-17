@@ -1,4 +1,4 @@
-"""Generates eval/golden/digits-score.txt: the Python baseline's per-key splits and scores for 30 synthetic key sequences
+"""Generates eval/golden/digits-score.txt: the Python baseline's per-key splits and scores for 31 synthetic key sequences
 (docs/contracts/digit-context.md C.5; the Rust port in docs/contracts/digits.md A.4.1 #49 compares against it, scores as f64 bits).
 
   python3 experiments/digits/golden_digits.py --table data/lexicon/digits.tsv --theta 0 [--mode structural] --out eval/golden/digits-score.txt
@@ -34,8 +34,10 @@ ROWS = [
     ("", "1258901258", ""), ("", "2026/10/15", ""), ("", "1-2", ""), ("價格", "300m06", "元"), ("", "hk4g4123", "測試"),
     ("你", "5j03", "轉"), ("", "1" + SP, ""), ("", "3", ""), ("", "6.5", ""), ("", "0.5", ""),
     ("我們", "2026su062k7", "年的"), ("", "10", ""), ("下午", "2", ""), ("下午", "20", ""), ("", "2020" + SP, ""),
+    # digits.md A.3.3 revision three: dev302 row 196 as the engine shows it (嗎, before 表 turns it into 碼); u decides on the spot
+    ("比賽用嗎", "1ul3", "表"),
 ]
-assert len(ROWS) == 30
+assert len(ROWS) == 31
 
 
 def visible(k):
@@ -57,6 +59,41 @@ def generate(scorer, history_fn, rows, header_lines, strict=False):
     return "\n".join(out) + "\n"
 
 
+# digits.md A.3.5 prediction rows: (left context, digit keys, unfinished-syllable symbols; the symbols are keys outside the digit alphabet, so
+# the Rust engine can be put in exactly this state: digits, then the key of ㄩ). Every digit string is one the baseline shows as digits
+# (a string like 20 at the sentence start shows as ㄉㄢ, which is the unfinished-syllable row of today, not a digit row). The context is `lm.history(context_key(left))`; with
+# symbols the row is the tiers of `digit_row`, without them the successor layer.
+PRED_ROWS = [
+    ("", "3", ""), ("", "202", ""), ("", "101", ""), ("", "34", ""), ("", "10", "ㄩ"),
+    ("下午", "3", ""), ("下午", "2", ""), ("下午", "20", ""), ("下午", "101", ""),
+    ("價格", "3", ""), ("價格", "202", ""), ("價格", "300", "ㄩ"),
+]
+assert len(PRED_ROWS) == 12
+PRED_PROFILE, PRED_LIMIT = "chat", 9
+
+
+def generate_pred(env, table_path):
+    """The text of eval/golden/digits-pred.txt: per row the first 9 items of `digit_row` (word and Python's repr of the score)."""
+    lam = DS.L.PROFILES[PRED_PROFILE]
+    header = [
+        "digits-pred golden (experiments/digits/golden_digits.py --pred; digits.md A.3.5). Python is the baseline; Rust must match words and score bits.",
+        f"digits.tsv sha256={sha(table_path)}",
+        "models: " + " ".join(f"{n} sha256={sha(os.path.join(ROOT, 'data', 'lm', n))}" for n in ("bigram.sjlm", "classes.sjc", "kn.sjkn")),
+        "lexicon: " + " ".join(f"{n} sha256={sha(os.path.join(ROOT, 'data', 'lexicon', n))}" for n in LEXICON_FILES),
+        f"profile={PRED_PROFILE} lambda={lam!r} limit={PRED_LIMIT} gamma=1.0",
+        f"generated on {platform.system()} {platform.machine()}, python {platform.python_version()}",
+        "format: `## <n>\\tleft=\\tdigits=\\tsyms=\\tv=`, then `<rank>\\t<word>\\t<score repr>` per item; syms are the unfinished symbols (none: the row of a finished digit run)",
+    ]
+    out = ["# " + l for l in header]
+    for n, (left, digits, syms) in enumerate(PRED_ROWS, 1):
+        v = env.history(left)
+        units = DS.P1.units_of(list(syms)) if syms else []
+        out.append(f"## {n}\tleft={left}\tdigits={digits}\tsyms={syms}\tv={v}")
+        for r, (w, s) in enumerate(DS.digit_row(env.table, env.lm, env.lex, env.idx, v, units, lam, PRED_LIMIT), 1):
+            out.append(f"{r}\t{w}\t{s!r}")
+    return "\n".join(out) + "\n"
+
+
 LEXICON_FILES = ("mcbpmf-data.txt", "overlay-add.tsv", "sandhi-add.tsv", "names-add.tsv", "demote.tsv")
 
 
@@ -70,9 +107,14 @@ def main(argv=None):
     ap.add_argument("--theta", type=float, default=0.0)
     ap.add_argument("--mode", choices=("score", "structural"), default="score", help="structural: C's R2 verdict was `structural` (scores are None)")
     ap.add_argument("--out", required=True)
+    ap.add_argument("--pred", action="store_true", help="write the prediction-row golden (digits.md A.3.5, eval/golden/digits-pred.txt) instead")
     a = ap.parse_args(argv)
     import measure
     env = measure.Env(a.table)
+    if a.pred:
+        with open(a.out, "w", encoding="utf-8", newline="\n") as f:
+            f.write(generate_pred(env, a.table))
+        return
     scorer = env.scorer(a.theta, a.mode)
     lm_dir = os.path.join(ROOT, "data", "lm")
     header = [

@@ -1,6 +1,7 @@
 //! S0 core: port of reference/proto/ime.py (lexicon, to_syllables, beam decode, learners).
 //! R2 (contract section 8): errors carry a kind and a length only, never input text.
 
+pub mod digits;
 pub mod engine;
 pub mod eval;
 pub mod ffi;
@@ -281,6 +282,11 @@ impl Lexicon {
     /// Sorted (word, score) list of one reading; empty when the reading is unknown.
     pub fn entries(&self, key: &[String]) -> Vec<(&str, f64)> {
         self.find(&self.ids(key)).map(|r| self.reading_entries(r).collect()).unwrap_or_default()
+    }
+    /// Whether `word` is an entry of the reading `key`: the one lexicon-membership test of new-word B (the engine's
+    /// rules and refresh, and the decoder's "the lexicon has it" filter), so the three cannot drift apart.
+    pub fn has(&self, key: &[String], word: &str) -> bool {
+        self.find(&self.ids(key)).is_some_and(|r| self.range(r).any(|p| self.word(p) == word))
     }
     /// by_word[word]: the winning reading and score.
     pub fn word_info(&self, word: &str) -> Option<(Syls, f64)> {

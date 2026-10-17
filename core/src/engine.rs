@@ -1,11 +1,14 @@
 //! S3a key engine (docs/contracts/s3a.md): key events in, preedit / commit / candidates out.
 //! R2: no input text in errors or panics; types holding input text do not derive Debug.
 
-use crate::learn::{context_key, english_of, english_or_space, is_space_unit, local_day, next_key, record_key, Learner, Level, Record, PUNCT_PREFIX};
+use crate::learn::{context_key, digit_of, english_of, english_or_space, is_han, is_space_unit, local_day, newword_score, next_key, record_key, Learner, Level, Record, NEWWORD, NEWWORD_BREAK, NEWWORD_DIGITS, NEWWORD_MAX, NEWWORD_MIN, NEWWORD_SHADOW, PUNCT_PREFIX};
 use crate::learn_store::{LearnStore, Opened, StoreError, JOURNAL_MAX};
-use crate::predict::{predict, reading_matches_in, unit_of_syllable, Mode, Unit};
+use crate::predict::{predict, predict_digits, reading_matches_in, unit_of_syllable, Mode, Unit};
 use crate::lm::{decode_segment_learned, history, CappedLexicon, Demote, End, Learn, Lm, Profile};
 use crate::trigram::TriMemo;
+use crate::digits::DigitTable;
+mod digit_layer;
+use digit_layer::{DRun, DigitAlt, DigitCache, DigitEvent};
 use crate::tinylm::{RerankLevel, TinyLm, TOPK};
 use crate::{decode_beam, Lexicon, NoLearning, BEAM_S1};
 use std::collections::{HashMap, HashSet};
@@ -26,9 +29,9 @@ fn next_generation() -> u64 {
 struct Stretch {
     /// Index in `Engine::path` of the stretch's first word.
     at: usize,
-    /// The first `TOPK` paths of the n-best: (word, lp, demotion delta), as `path` holds them. `paths[0]` is what `path` holds at
+    /// The first `TOPK` paths of the n-best: (word, lp, demotion delta, syllables), as `path` holds them. `paths[0]` is what `path` holds at
     /// `at..at + len` when the job is made; apply checks that it still does (section 2.3, revision 1).
-    paths: Vec<Vec<(String, f64, f64)>>,
+    paths: Vec<Vec<(String, f64, f64, usize)>>,
     /// Their n-gram scores.
     ng: Vec<f64>,
     /// The shown text between the previous stretch of the job (or the composition's start) and this one: fixed words, and the
@@ -55,7 +58,7 @@ struct Choice {
     /// The words `path` must still hold at `at..` (the n-gram first path the job was made from).
     expect: Vec<String>,
     pick: usize,
-    words: Vec<(String, f64, f64)>,
+    words: Vec<(String, f64, f64, usize)>,
     /// The context key the stretch was scored with.
     key: String,
 }
@@ -233,6 +236,10 @@ impl Layout {
     fn tone_of(self, key: char) -> Option<usize> {
         self.tone_keys().iter().position(|&c| c == key).map(|i| i + 1)
     }
+    /// Mark (ˊˇˋ˙) of a tone key; `None` for any other key (Space, tone 1, is the caller's).
+    pub(crate) fn key_tone_mark(self, key: char) -> Option<char> {
+        self.tone_of(key).and_then(|i| TONE_MARKS[i].chars().next())
+    }
     /// Inverse of `symbol_of`, for building key presses from a reading.
     pub fn key_of_symbol(self, sym: char) -> Option<char> {
         let i = SYMBOLS.chars().position(|c| c == sym)?;
@@ -334,6 +341,16 @@ pub struct Output {
     pub english_run_utf16_len: u32,
 }
 
+/// One word of the displayed best path.
+struct PathWord {
+    word: String,
+    lp: f64,
+    is_punct: bool,
+    delta: f64,
+    /// Syllables the word covers (punctuation is 1).
+    syllables: usize,
+}
+
 struct Fixed {
     start: usize,
     end: usize,
@@ -345,6 +362,15 @@ struct Fixed {
     /// The context key a prediction pick is recorded under, fixed when the row was built: re-decoding after the pick can
     /// change the text before the start, so the commit must not recompute it (section 10.1). `None` for candidate picks.
     key: Option<String>,
+    /// Fixed by the engine, not chosen by the user (repick-freeze): the words outside a candidate re-pick (section 1) or a
+    /// prediction pick (section 13), and the pieces a Backspace leaves of a deleted word (section 11). Never learned.
+    /// Released when a newly typed syllable merges with it into a lexicon word (section 6.1; the merged word decodes
+    /// freely since section 11) and when the candidate window's ⌘⌫ forgets an entry in effect over a span it overlaps
+    /// (sections 7.2, 9); the Backspace pieces also when any syllable is typed (`split_off`, section 15).
+    frozen: bool,
+    /// A frozen single character a Backspace or Delete left of the word it deleted from (section 11). Any newly typed
+    /// syllable drops all of these before it decodes (section 15); nothing else does.
+    split_off: bool,
     /// The synthetic sentence-start key (`^>` + the next reading) the displaced word was shown under when this candidate
     /// pick was made, when the span's context key was `^`. The commit halves the displaced word there too if the key
     /// at the commit differs (the user may have typed on after the pick). `None` otherwise.
@@ -352,7 +378,18 @@ struct Fixed {
     /// zhen-inline section 1.3c: for an English token made by an auto-keep, the unfinished syllable (tone 1) that was on the
     /// columns when it was made, so the token can be turned back into that Chinese syllable. `None` for every other fixed word.
     zh: Option<String>,
+    /// New-word B §2.5: the new words (reading, word) of the path this pick displaced, chosen while learning was on;
+    /// each is halved at a commit with learning on.
+    displaced_new: Vec<(Vec<String>, String)>,
 }
+
+impl Fixed {
+    /// A word the engine fixed on its own (repick-freeze): not learned, not a user choice.
+    fn frozen(start: usize, end: usize, word: String) -> Self {
+        Fixed { start, end, word, pre: None, key: None, pick_key: None, zh: None, frozen: true, split_off: false, displaced_new: Vec::new() }
+    }
+}
+
 
 /// One item of the prediction row: the word, the compatible reading that scored it, and the syllable index where
 /// the word starts.
@@ -388,11 +425,14 @@ struct Cands {
     /// reading is longer than or differs from the typed syllables is choosing it from the row; one over exactly those
     /// syllables is a re-pick (`choose`). They go with the window when it closes.
     rows: Vec<Pred>,
+    /// Digits contract A.3.6: the last item is not a lexicon entry but the other reading of digit keys (the digits of a syllable
+    /// that just closed, or the syllable of the last digit tokens). Judged by the item's index, never by a length field.
+    dalt: Option<DigitAlt>,
 }
 
 impl Cands {
     fn new(list: Vec<(String, usize)>, vertical: bool) -> Cands {
-        Cands { list, sel: 0, expanded: false, top: 0, vertical, first: 0, english: false, zh: None, rows: Vec::new() }
+        Cands { list, sel: 0, expanded: false, top: 0, vertical, first: 0, english: false, zh: None, rows: Vec::new(), dalt: None }
     }
 
     fn scroll(&mut self) {
@@ -402,6 +442,20 @@ impl Cands {
         } else if row >= self.top + GRID_ROWS {
             self.top = row + 1 - GRID_ROWS;
         }
+    }
+
+    /// After the list changed under an open window (a ⌘⌫ that removed or reordered items), with `sel` already set
+    /// inside the new list: keep `first` within what ↑, ↓ and Page Down reach (the last row shows the last item).
+    fn reclamped(mut self) -> Self {
+        self.first = self.first.min(self.sel).min(self.list.len().saturating_sub(PAGE_SIZE));
+        if self.sel >= self.first + PAGE_SIZE {
+            self.first = self.sel + 1 - PAGE_SIZE;
+        }
+        self.top = self.top.min((self.list.len() - 1) / PAGE_SIZE);
+        if self.expanded {
+            self.scroll();
+        }
+        self
     }
 
     /// (position of the first output candidate, how many are output).
@@ -439,7 +493,7 @@ pub struct Engine {
     demote: bool,
     /// Words of the current best path with the lp each was scored with, whether the word is a
     /// punctuation token, and its demotion delta (LM mode only).
-    path: Vec<(String, f64, bool, f64)>,
+    path: Vec<PathWord>,
     /// s3e: punctuation mark -> its alternatives (built-in default until `set_punctuation`).
     punct: HashMap<char, Vec<String>>,
     layout: Layout,
@@ -468,6 +522,14 @@ pub struct Engine {
     /// S4: the Han tail (≤ 2 chars) of the text before the insertion point, from `set_left_context`.
     left: String,
     learning: bool,
+    /// New-word B §2.1: learning was off at some point of this composition, so its commit learns no new word. Set by
+    /// `set_learning(false)` while composing and by any key handled with learning off; cleared by `clear_all` and by
+    /// the first key on an empty composition (`key`).
+    paused: bool,
+    /// Test hook: false turns new-word B's learning off (S4 alone), the baseline of `measure_newword`.
+    newword: bool,
+    /// Variant B of new-word learning (`NEWWORD_SUBSPANS`); a test hook switches it for measurement.
+    subspans: bool,
     /// ε of the global learning level (§12); a test hook sweeps it.
     eps_global: f64,
     learner: Learner,
@@ -528,6 +590,17 @@ pub struct Engine {
     /// Whether the latest `key()` made an auto-keep (zhen-inline section 1.3; tool hook `english_autokept`). Cleared at the start
     /// of `key()` and nowhere else; no other entry point (a pick, a reset, a setting) touches it, so none can leave it stale.
     autokept: bool,
+    /// Digits (docs/contracts/digits.md): the count table (`digits.tsv`, optional), what is built from it and the model once, the run
+    /// of digit-alphabet keys being typed, the keys of the syllable that just closed (A.3.6; `ld_now` is what the current key saw), and
+    /// the counters and trace of the simulator and the golden test. All idle unless `digits_active`.
+    digit_table: Option<Arc<DigitTable>>,
+    digit_cache: Option<Arc<DigitCache>>,
+    drun: Option<DRun>,
+    last_digits: Option<String>,
+    ld_now: Option<String>,
+    d_shown: usize,
+    d_emitted: usize,
+    dtrace: Option<Vec<DigitEvent>>,
 }
 
 /// Base lexicon + overlay from `data_dir` (§5), same as the eval CLI default. The overlay rows are
@@ -678,6 +751,8 @@ impl Engine {
             return Err(EngineError::LoadFailed);
         }
         e.data_dir = Some(data_dir.to_path_buf());
+        // Optional (digits.md A.3.2): a missing or malformed table leaves the digit feature off and says nothing.
+        e.digit_table = std::fs::read_to_string(data_dir.join("digits.tsv")).ok().and_then(|t| DigitTable::parse(&t)).map(Arc::new);
         Ok(e)
     }
 
@@ -709,6 +784,9 @@ impl Engine {
             pred_dirty: false,
             left: String::new(),
             learning: false,
+            paused: false,
+            newword: true,
+            subspans: crate::learn::NEWWORD_SUBSPANS,
             eps_global: crate::lm::LEARN_EPS_GLOBAL,
             learner: Learner::default(),
             store: None,
@@ -733,6 +811,14 @@ impl Engine {
             run: String::new(),
             run_zh: None,
             autokept: false,
+            digit_table: None,
+            digit_cache: None,
+            drun: None,
+            last_digits: None,
+            ld_now: None,
+            d_shown: 0,
+            d_emitted: 0,
+            dtrace: None,
         }
     }
 
@@ -813,7 +899,7 @@ impl Engine {
             return Ok(None);
         }
         let holds = |c: &Choice| {
-            self.path.get(c.at..c.at + c.expect.len()).is_some_and(|ws| ws.iter().map(|w| &w.0).eq(c.expect.iter()))
+            self.path.get(c.at..c.at + c.expect.len()).is_some_and(|ws| ws.iter().map(|w| &w.word).eq(c.expect.iter()))
         };
         if !r.choices.iter().all(holds) {
             return Ok(None);
@@ -824,10 +910,10 @@ impl Engine {
         }
         // Right to left, so the earlier ranges still point at their words.
         for c in changes.into_iter().rev() {
-            self.path.splice(c.at..c.at + c.expect.len(), c.words.into_iter().map(|(w, lp, delta)| (w, lp, false, delta)));
+            self.path.splice(c.at..c.at + c.expect.len(), c.words.into_iter().map(|(word, lp, delta, syllables)| PathWord { word, lp, is_punct: false, delta, syllables }));
         }
         // `refresh_lm` builds the display from exactly the strings of `path`.
-        self.display = self.path.iter().map(|p| p.0.as_str()).collect();
+        self.display = self.path.iter().map(|p| p.word.as_str()).collect();
         if !self.pred.is_empty() {
             self.recompute_pred();
         }
@@ -846,11 +932,30 @@ impl Engine {
     /// on both when it was chosen and at commit. It never makes a rerank job stale (S7c-2b section 2.1, corrected
     /// 2026-10-11): the flag does not change decoding, which reads the learner whenever it is non-empty; it only decides
     /// whether picks are recorded. The shell sends it before every key (s4-learning.md section 3).
+    /// New-word B §2.1: turning it off while composing, or any key handled while it is off (`key`), marks the
+    /// composition, so its commit learns no new word even when learning is back on by then (text typed during the pause
+    /// is never stored next to a later re-pick). The mark goes when the composition is empty again.
     pub fn set_learning(&mut self, on: bool) {
         self.learning = on;
         if !on {
-            self.fixed.iter_mut().for_each(|f| f.pre = None);
+            self.fixed.iter_mut().for_each(|f| {
+                f.pre = None;
+                f.displaced_new.clear();
+            });
+            if !self.syls.is_empty() || self.pend.iter().any(Option::is_some) {
+                self.paused = true;
+            }
         }
+    }
+
+    /// Test hook: whether new-word B learns (default on). Off is S4 alone (contract §3.1 baseline).
+    pub fn set_newword(&mut self, on: bool) {
+        self.newword = on;
+    }
+
+    /// Test hook: variant B (`NEWWORD_SUBSPANS`, on by default since the user's decision of 2026-10-10) on or off.
+    pub fn set_newword_subspans(&mut self, on: bool) {
+        self.subspans = on;
     }
 
     /// §4: load `dir/learning.tsv` (memory pruned only; the file is tidied by the first write, which
@@ -876,7 +981,10 @@ impl Engine {
             self.must_rewrite = true;
         }
         self.learner.clear();
-        self.fixed.iter_mut().for_each(|f| f.pre = None);
+        self.fixed.iter_mut().for_each(|f| {
+            f.pre = None;
+            f.displaced_new.clear();
+        });
         let store = self.store.as_ref().ok_or(StoreError::Io)?;
         store.clear()?;
         // The next write starts a new file from the header by the day rule, not by finding none.
@@ -964,7 +1072,11 @@ impl Engine {
     /// only costs this learn. `display` is the decoded composition text, without the unfinished symbols that the
     /// commit itself may carry (s3a rule 12a): the context keys are offsets into it.
     fn learn_commit(&mut self, display: &str) {
-        if !self.learning || self.fixed.iter().all(|f| f.pre.is_none()) {
+        if !self.learning {
+            return;
+        }
+        let new_on = self.newword && !self.paused;
+        if !(new_on && self.learner.has_new_words()) && self.fixed.iter().all(|f| f.pre.is_none() && f.displaced_new.is_empty()) {
             return;
         }
         let _ = catch_unwind(AssertUnwindSafe(|| {
@@ -972,6 +1084,7 @@ impl Engine {
                 panic!("injected learning panic");
             }
             let today = self.today();
+            let uses = if new_on { self.new_word_uses(today) } else { Vec::new() };
             let plans: Vec<_> = self
                 .fixed
                 .iter()
@@ -996,14 +1109,135 @@ impl Engine {
                     touched.extend(self.learner.halve(k, reading, displaced, today));
                 }
             }
+            // New-word B: learn (§2.2), halve what re-picks displaced (§2.5), count the uses (§2.5, once a day).
+            let halves: Vec<(Vec<String>, String)> =
+                if self.newword { self.fixed.iter().flat_map(|f| f.displaced_new.clone()).collect() } else { Vec::new() };
+            let learns = if new_on { self.new_word_spans() } else { Vec::new() };
+            for (reading, word) in &learns {
+                touched.push(self.learner.learn_new(reading, word, today));
+            }
+            for (reading, word) in &halves {
+                touched.extend(self.learner.halve_new(reading, word, today));
+            }
+            for (reading, word) in &uses {
+                touched.extend(self.learner.use_new(reading, word, today));
+            }
             // Nothing touched (e.g. a single character under "^" or a one-character key, §12, §14): no write, unless a full
             // rewrite is pending (a failed forget or rewrite). It is retried only by commits that reach
-            // this point: learning on and at least one re-pick (the early return above); other commits
-            // leave it pending.
+            // this point: learning on and at least one re-pick or displaced new word, or new-word B learning on
+            // (no pause) with any new-word record in the learner (the early return above); other commits leave it
+            // pending.
             if !touched.is_empty() || self.must_rewrite {
                 self.persist(&touched);
             }
         }));
+    }
+
+    /// Whether the lexicon has `word` under `reading`. New-word B's one lexicon (contract §2.2 item 3, revision two) is
+    /// `self.lex`, what `load_lexicon_packs` loaded: the base, overlay-add.tsv, sandhi-add.tsv, names-add.tsv and the
+    /// packs this engine was built with, at their file scores (before capping and demotion). Rules 3 and 5, the shadow
+    /// gate, the decoder's "the lexicon has it" check and experiments/newword/hijack.py all use it.
+    fn in_lexicon(&self, reading: &[String], word: &str) -> bool {
+        self.lex.has(reading, word)
+    }
+
+    /// New-word B §2.2 item 3: the reading leaves room for a new word, i.e. no lexicon word under it scores above
+    /// `NEWWORD_SHADOW` (no word at all also does).
+    fn room_for_new_word(&self, reading: &[String]) -> bool {
+        self.lex.entries(reading).iter().all(|&(_, score)| score <= NEWWORD_SHADOW)
+    }
+
+    /// New-word B §2.2: the runs of single Han characters on the path at commit (split at punctuation, non-Han and
+    /// `NEWWORD_BREAK`) that hold a character re-picked in the candidate window, are NEWWORD_MIN..=NEWWORD_MAX long,
+    /// are not all `NEWWORD_DIGITS`, are not in the lexicon under their reading and whose reading has no lexicon word above
+    /// `NEWWORD_SHADOW`: (reading, word) each, plus variant B's sub-spans (§2.2 item 5).
+    fn new_word_spans(&self) -> Vec<(Vec<String>, String)> {
+        // A re-pick of one character (S4 §1.2: chosen in the window, text before it differed); a prediction pick
+        // (`Some("")`) is no re-pick.
+        let picked: HashSet<usize> = self
+            .fixed
+            .iter()
+            .filter(|f| f.end == f.start + 1 && f.word.chars().count() == 1 && !self.is_punct(f.start))
+            .filter(|f| f.pre.as_ref().is_some_and(|p| !p.is_empty() && *p != f.word))
+            .map(|f| f.start)
+            .collect();
+        let mut out = Vec::new();
+        if picked.is_empty() {
+            return out;
+        }
+        let mut run: Vec<(usize, char)> = Vec::new();
+        let mut flush = |run: &mut Vec<(usize, char)>| {
+            let take = std::mem::take(run);
+            if (NEWWORD_MIN..=NEWWORD_MAX).contains(&take.len())
+                && take.iter().any(|(s, _)| picked.contains(s))
+                && !take.iter().all(|(_, c)| NEWWORD_DIGITS.contains(*c))
+            {
+                let reading = self.syls[take[0].0..take[take.len() - 1].0 + 1].to_vec();
+                let word: String = take.iter().map(|x| x.1).collect();
+                if !self.in_lexicon(&reading, &word) && self.room_for_new_word(&reading) {
+                    out.push((reading, word));
+                    // Variant B: the run's shorter pieces holding a re-pick, where the lexicon has no word at all.
+                    for (a, b) in (0..take.len()).flat_map(|a| (a + NEWWORD_MIN..=take.len()).map(move |b| (a, b))) {
+                        let sub = &take[a..b];
+                        if !self.subspans
+                            || sub.len() == take.len()
+                            || !sub.iter().any(|(s, _)| picked.contains(s))
+                            || sub.iter().all(|(_, c)| NEWWORD_DIGITS.contains(*c))
+                        {
+                            continue;
+                        }
+                        let r = self.syls[sub[0].0..sub[sub.len() - 1].0 + 1].to_vec();
+                        if self.lex.entries(&r).is_empty() {
+                            out.push((r, sub.iter().map(|x| x.1).collect()));
+                        }
+                    }
+                }
+            }
+        };
+        for (p, s) in self.path.iter().zip(self.path_starts()) {
+            let mut cs = p.word.chars();
+            match (cs.next(), cs.next()) {
+                (Some(c), None) if !p.is_punct && is_han(c) && !NEWWORD_BREAK.contains(c) => run.push((s, c)),
+                _ => flush(&mut run),
+            }
+        }
+        flush(&mut run);
+        // One commit learns a (reading, word) once, however many runs or sub-spans spell it (e.g. 板空板空 → 板空 twice).
+        let mut seen = HashSet::new();
+        out.retain(|x| seen.insert(x.clone()));
+        out
+    }
+
+    /// New-word B §2.5: the new words on the path (not lexicon words under their reading) whose record is not dated
+    /// `today` yet: each is "used" once by this commit.
+    fn new_word_uses(&self, today: i64) -> Vec<(Vec<String>, String)> {
+        if !self.learner.has_new_words() {
+            return Vec::new();
+        }
+        self.path_new_words()
+            .into_iter()
+            .filter(|(_, _, r, w)| self.learner.new_word_day(r, w).is_some_and(|d| d != today))
+            .map(|(_, _, r, w)| (r, w))
+            .collect()
+    }
+
+    /// The path's tokens that are new words: (start, end, reading, word), with a record and not in the lexicon.
+    fn path_new_words(&self) -> Vec<(usize, usize, Vec<String>, String)> {
+        if !self.learner.has_new_words() {
+            return Vec::new();
+        }
+        let mut out = Vec::new();
+        for (p, s) in self.path.iter().zip(self.path_starts()) {
+            let (w, n) = (&p.word, p.word.chars().count());
+            if p.is_punct || !(NEWWORD_MIN..=NEWWORD_MAX).contains(&n) || s + n > self.syls.len() {
+                continue;
+            }
+            let reading = &self.syls[s..s + n];
+            if self.learner.new_word_day(reading, w).is_some() && !self.in_lexicon(reading, w) {
+                out.push((s, s + n, reading.to_vec(), w.clone()));
+            }
+        }
+        out
     }
 
     /// S2c: read the model at `path` and `data_dir/overlay-add.tsv` and `names-add.tsv` (plus the pack rows `new` kept), build the capped lexicon with the
@@ -1021,6 +1255,8 @@ impl Engine {
         capped.predict_index(&lm);
         self.lm = Some(LmState { lm: Arc::new(lm), capped: Arc::new(capped) });
         self.tinylm = None; // S7c-2a section 2.3: tuned for the previous model
+        self.digit_cache = None;
+        self.digit_env(); // built now, not at the first digit key (a table loaded and a model: the legal tails and the word readings)
         Ok(())
     }
 
@@ -1108,8 +1344,9 @@ impl Engine {
         if !on {
             self.drop_units();
         } else {
+            let flushed = self.digit_flush()?; // digits.md A.3.7: the buffered digits become tokens
             self.close_english(); // zhen-mixed section 2.1: the two are exclusive
-            return self.settle_run();
+            return self.settle_with(flushed);
         }
         self.handled()
     }
@@ -1145,8 +1382,9 @@ impl Engine {
     pub fn set_english(&mut self, on: bool) -> Result<Output, EngineError> {
         self.english = on;
         if !on {
+            let flushed = self.digit_flush()?; // digits.md A.3.7: the buffered digits become tokens
             self.close_english();
-            return self.settle_run();
+            return self.settle_with(flushed);
         }
         self.handled()
     }
@@ -1528,9 +1766,9 @@ impl Engine {
         let mut pos = 0;
         self.path
             .iter()
-            .map(|(w, _, is_punct, _)| {
+            .map(|pw| {
                 let s = pos;
-                pos += if *is_punct { 1 } else { w.chars().count() };
+                pos += pw.syllables;
                 s
             })
             .collect()
@@ -1571,7 +1809,7 @@ impl Engine {
         fn close_u<'a>(before: Option<&'a str>, unknown: bool, count: usize) -> Option<&'a str> {
             if unknown && count == 1 { None } else { before }
         }
-        for (w, lp, is_punct, delta) in &self.path {
+        for PathWord { word: w, lp, is_punct, delta, syllables: n } in &self.path {
             if cut == Some(at) {
                 if open {
                     total += st.lm.eos3_in(&mut memo, cfg, close_u(before, unknown, count), prev);
@@ -1586,7 +1824,7 @@ impl Engine {
                 (before, prev, open, unknown, count) = (Some("<s>"), "<s>", false, false, 0);
                 continue;
             }
-            let n = w.chars().count();
+            let n = *n;
             // model-v6 section 2.8 rule 1: a word the learner boosted (lp above its best capped lp under its reading, the test of
             // `boosted`) was scored by the decoder without the Kneser-Ney substitution; score it the same way here.
             let learned = self.syls.get(at..at + n).and_then(|s| st.capped.best_lp(s, w)).is_some_and(|best| *lp > best);
@@ -1607,14 +1845,27 @@ impl Engine {
     /// §6 reset: Commit returns the composition as shown, unfinished symbols included, like Enter (enter-pending
     /// contract §2; no learning here); both clear everything.
     pub fn reset(&mut self, mode: ResetMode) -> Output {
-        let commit = if mode == ResetMode::Commit { self.shown().0 } else { String::new() };
+        // Digits.md A.3.4: the buffered digits are tokens before the composition is sent (Commit); Discard drops them with the rest.
+        let digits = if mode == ResetMode::Commit { self.digit_flush().unwrap_or_default().0 } else { String::new() };
+        let commit = if mode == ResetMode::Commit { digits + &self.shown().0 } else { String::new() };
         self.clear_all();
         self.view(true, commit)
     }
 
     pub fn key(&mut self, k: Key) -> Result<Output, EngineError> {
         self.pred_dirty = false;
+        self.ld_now = self.last_digits.take();
+        self.d_emitted = 0;
+        self.d_shown = self.drun.as_ref().map_or(0, |r| r.emitted.len() + r.m);
         self.autokept = false; // the one place it is cleared; `insert_english` may set it again below
+        // New-word B §2.1: `paused` marks a composition with a key handled while learning was off. A key on an empty
+        // composition starts a new one (however the last one emptied: commit, Esc, Backspace), so the mark goes first.
+        if self.syls.is_empty() && self.run.is_empty() && self.pending().is_empty() {
+            self.paused = false;
+        }
+        if !self.learning {
+            self.paused = true;
+        }
         let mut r = self.dispatch(k);
         match &mut r {
             Err(_) => self.clear_all(),
@@ -1654,6 +1905,14 @@ impl Engine {
         let (Some(st), true) = (self.lm.clone(), self.predict_on && self.cursor == n && self.cands.is_none() && self.run.is_empty()) else { return };
         let idx = st.capped.predict_index(&st.lm);
         let lam = self.profile.lambda();
+        // Digits.md A.3.5: right behind digits (tokens, or buffered keys that show as digits) the cursor start is read in the digit
+        // context (v, D); buffered digits are not syllables, so no start in front of them is queried (choosing one would splice over them).
+        let (dv, dcache) = match self.digit_pred_v(&st) {
+            Some(v) => (Some(v), self.digit_env().map(|e| e.cache)),
+            None => (None, None),
+        };
+        let dtable = self.digit_table.clone();
+        let isolated = self.drun.as_ref().is_some_and(|r| r.m >= 1);
         // The unfinished units in order (one without the abbreviation composer); two or more can only read as an abbreviation.
         let pending: Vec<Vec<char>> =
             self.pend_prev.iter().chain([&self.pend]).map(|u| u.iter().flatten().copied().collect::<Vec<_>>()).filter(|u| !u.is_empty()).collect();
@@ -1661,15 +1920,16 @@ impl Engine {
         // One unit reads the same in both modes; only two or more can be an abbreviation.
         let mode = if multi { Mode::PA } else { Mode::P };
         // Section 11: the last two path tokens' starts, and the start of every earlier one within `PREDICT_BACK`, far to
-        // near. Positions inside words within `PREDICT_BACK` come last, except inside a word the user fixed: choosing
-        // such an item would take the user's choice (and its pending learn) apart.
+        // near. Positions inside words within `PREDICT_BACK` come last, except inside a word the user fixed (`frozen == false`):
+        // choosing such an item would take the user's choice (and its pending learn) apart. Inside a frozen word a start is
+        // fine (repick-freeze section 11): the pick takes the frozen word apart, which is not the user's choice.
         // Two or more units match nothing that holds a complete syllable (section 12.3): only the cursor start is queried.
-        let starts = if multi { Vec::new() } else { self.path_starts() };
+        let starts = if multi || isolated { Vec::new() } else { self.path_starts() };
         let k = starts.len();
         let long_starts: Vec<usize> =
             starts.iter().enumerate().filter(|&(i, &s)| i + 2 >= k || s + PREDICT_BACK >= n).map(|(_, &s)| s).collect();
-        let mid: Vec<usize> = (n.saturating_sub(PREDICT_BACK)..if multi { 0 } else { n })
-            .filter(|&p| !long_starts.contains(&p) && !self.fixed.iter().any(|f| f.start < p && p < f.end))
+        let mid: Vec<usize> = (n.saturating_sub(PREDICT_BACK)..if multi || isolated { 0 } else { n })
+            .filter(|&p| !long_starts.contains(&p) && !self.fixed.iter().any(|f| !f.frozen && f.start < p && p < f.end))
             .collect();
         let disp: Vec<char> = self.display.chars().collect();
         let off = |i: usize| (0..i).map(|j| self.token_width(j)).sum::<usize>().min(disp.len());
@@ -1683,7 +1943,8 @@ impl Engine {
                 return Vec::new();
             }
             units.extend(pending.iter().map(|chars| Unit { chars: chars.clone(), done: false, tone: None }));
-            if units.is_empty() {
+            let digits_here = s == n && dv.is_some() && dcache.is_some() && dtable.is_some();
+            if units.is_empty() && !digits_here {
                 return Vec::new();
             }
             let before: String = disp[..off(s)].iter().collect();
@@ -1691,13 +1952,22 @@ impl Engine {
             let v = history(if key == crate::learn::SENTINEL { "" } else { &key }, &st.lm);
             let shown: String = disp[off(s)..off(n)].iter().collect();
             // A start no record can match scans 9 and weighs nothing: its row is the slice-1 one, cheaper.
-            let gate = learned && (!self.scan_gate || self.learner.records().iter().any(|r| reading_matches_in(&units, &r.reading, mode)));
-            predict(idx, &st.lm, lam, v, &units, mode, if gate { PREDICT_SCAN } else { PREDICT_MAX })
-                .into_iter()
+            // New-word records are no context record (new-word B §2.4): they never open the wider scan.
+            let gate = learned
+                && (!self.scan_gate
+                    || self.learner.records().iter().any(|r| r.context != NEWWORD && reading_matches_in(&units, &r.reading, mode)));
+            let limit = if gate { PREDICT_SCAN } else { PREDICT_MAX };
+            let hits: Vec<(String, Vec<String>)> = match (&dv, &dcache, &dtable) {
+                (Some(dv), Some(c), Some(t)) if digits_here => {
+                    predict_digits(idx, &st.lm, t, &c.words, lam, dv, &units, limit).into_iter().map(|(w, _, r)| (w, r)).collect()
+                }
+                _ => predict(idx, &st.lm, lam, v, &units, mode, limit).into_iter().map(|(w, _, _, r)| (w, r)).collect(),
+            };
+            hits.into_iter()
                 .enumerate()
-                .filter_map(|(i, (word, _, _, reading))| {
+                .filter_map(|(i, (word, reading))| {
                     // Step 2: keep the slice-1 window and anything learned; the index counts before step 3 filters.
-                    let weight = if gate { self.learned_weight(&key, &reading, &word, today) } else { 0.0 };
+                    let weight = if gate { self.learned_weight(&key, None, &reading, &word, today) } else { 0.0 };
                     (i < PREDICT_MAX || weight > 0.0).then_some(Pred { word, reading, start: s, key: key.clone(), weight })
                 })
                 .filter(|p| p.word != shown)
@@ -1718,7 +1988,7 @@ impl Engine {
         // stable sort below puts the learned ones first, so a partition gives the same row as "learned, then L[0..3]".
         let (head, tail): (Vec<_>, Vec<_>) = long.into_iter().enumerate().partition(|(i, p)| p.weight > 0.0 || *i < PREDICT_LONG_CAP);
         let (head, tail) = (head.into_iter().map(|x| x.1), tail.into_iter().map(|x| x.1));
-        let cursor_items = if pending.is_empty() { Vec::new() } else { query(n) };
+        let cursor_items = if pending.is_empty() && dv.is_none() { Vec::new() } else { query(n) };
         // Section 11: the positions inside words come last, far to near.
         let mid_items = mid.into_iter().flat_map(&query);
         let mut all: Vec<Pred> = head.chain(cursor_items).chain(tail).chain(mid_items).collect();
@@ -1729,11 +1999,11 @@ impl Engine {
         self.pred = all;
     }
 
-    /// Weight of `word` for `reading` under context `key` at the exact or last-character level; the global level
+    /// Weight of `word` for `reading` under context `key` (rule 8: `next` is the syllable after the word, `None` for a
+    /// predicted word, which ends at the cursor) at the exact or last-character level; the global level
     /// counts 0 (s4-learning section 12: it never overrides what the model is sure of).
-    fn learned_weight(&self, key: &str, reading: &[String], word: &str, today: i64) -> f64 {
-        // Rule 8: a predicted word ends at the cursor, with no syllable after it.
-        let key = record_key(key.to_string(), None);
+    fn learned_weight(&self, key: &str, next: Option<&str>, reading: &[String], word: &str, today: i64) -> f64 {
+        let key = record_key(key.to_string(), next);
         match self.learner.lookup(&key, reading, today) {
             (Level::Global, _) => 0.0,
             (_, hits) => hits.iter().find(|h| h.0 == word).map_or(0.0, |h| h.1),
@@ -1748,16 +2018,27 @@ impl Engine {
     }
 
     /// `choose_pred` for an item already taken out of the row (or out of a window that carried the row, predict-down B.3.1).
-    fn apply_pred(&mut self, p: Pred) -> Result<Output, EngineError> {
+    fn apply_pred(&mut self, mut p: Pred) -> Result<Output, EngineError> {
+        let digits = self.digit_pre_pick(&mut p)?;
+        let mut o = self.apply_pred_at(p)?;
+        o.commit.insert_str(0, &digits);
+        Ok(o)
+    }
+
+    fn apply_pred_at(&mut self, p: Pred) -> Result<Output, EngineError> {
         let Pred { word, reading, start, key, .. } = p;
         let pre = self.learning.then(String::new);
         self.clear_pred();
         self.clear_pend();
         let (m, end) = (reading.len(), self.cursor);
+        // repick-freeze section 13: a row pick keeps the words outside `[start, end)` as shown, as a window re-pick does.
+        // Rows exist only with the cursor at the end, so no index right of it moves.
+        let frozen = self.freeze_outside(start, end);
         self.fixed.retain(|f| !(f.start < end && start < f.end));
+        self.fixed.extend(frozen);
         self.syls.splice(start..end, reading);
         let key = pre.is_some().then_some(key);
-        self.fixed.push(Fixed { start, end: start + m, word, pre, key, pick_key: None, zh: None });
+        self.fixed.push(Fixed { start, end: start + m, word, pre, key, pick_key: None, zh: None, frozen: false, split_off: false, displaced_new: Vec::new() });
         self.fixed.sort_by_key(|f| f.start);
         self.cursor = start + m;
         self.refresh()?;
@@ -1782,7 +2063,10 @@ impl Engine {
         self.cands = None;
         self.run.clear();
         self.run_zh = None;
+        self.drun = None;
+        self.last_digits = None;
         self.clear_pred();
+        self.paused = false;
     }
 
     fn pending(&self) -> String {
@@ -1806,6 +2090,10 @@ impl Engine {
         // which can be longer (⋯⋯, s3e §3). Clamped in case the invariant ever breaks.
         let at = (0..self.cursor).map(|i| self.token_width(i)).sum::<usize>().min(chars.len());
         let mut text: String = chars[..at].iter().collect();
+        // Digits.md A.3.1: the buffered keys that show as digits sit before the unfinished syllable (the tail, mirrored in `pend`).
+        if let Some(r) = &self.drun {
+            text.extend(&r.buf[..r.m]);
+        }
         let run_start = text.encode_utf16().count() as u32;
         text.push_str(&unfinished);
         let cursor_utf16 = text.encode_utf16().count() as u32;
@@ -1880,14 +2168,29 @@ impl Engine {
         let cfg = st.lm.scoring(self.profile);
         // The clock (a libc time conversion) is read only when a record could use it.
         let today = if self.learner.is_empty() { 0 } else { self.today() };
+        // New-word B §2.4: a fixed word the lexicon lacks is a new word picked in the window; once its record is
+        // gone (forgotten, cleared) the span is unfixed and decoded again, never an error.
+        if self.fixed.iter().any(|f| f.end - f.start >= NEWWORD_MIN) {
+            let (syls, learner, lex) = (&self.syls, &self.learner, &self.lex);
+            self.fixed.retain(|f| {
+                let r = &syls[f.start..f.end];
+                syls[f.start].starts_with(PUNCT_PREFIX)
+                    || learner.new_word_day(r, &f.word).is_some()
+                    || lex.has(r, &f.word)
+            });
+        }
         let mut lp_fixed = Vec::with_capacity(self.fixed.len());
         let mut delta_fixed = Vec::with_capacity(self.fixed.len());
         for f in &self.fixed {
             // Punctuation has no reading in the lexicon; 0.0 only keeps `path` aligned (s3d §4).
+            let r = &self.syls[f.start..f.end];
             let (lp, delta) = if self.is_punct(f.start) {
                 (0.0, 0.0)
+            } else if let Some(x) = st.capped.best_lp_delta(r, &f.word) {
+                x
             } else {
-                st.capped.best_lp_delta(&self.syls[f.start..f.end], &f.word).ok_or(EngineError::Internal)?
+                // A fixed new word scores S(w) of its record, below ACTIVE too (new-word B §2.4).
+                (newword_score(self.learner.new_word_weight(r, &f.word, today).ok_or(EngineError::Internal)?), 0.0)
             };
             lp_fixed.push(lp);
             delta_fixed.push(if self.demote { delta } else { 0.0 });
@@ -1946,14 +2249,14 @@ impl Engine {
                     }
                     stretches.push(Stretch {
                         at: path.len(),
-                        paths: top.iter().map(|(_, ws)| ws.iter().map(|&(w, lp, delta)| (w.to_string(), lp, delta)).collect()).collect(),
+                        paths: top.iter().map(|(_, ws)| ws.iter().map(|&(w, lp, delta, l)| (w.to_string(), lp, delta, l)).collect()).collect(),
                         ng: top.iter().map(|(score, _)| *score).collect(),
                         gap: gap_text,
                     });
                 }
-                for (w, lp, delta) in first {
+                for (w, lp, delta, l) in first {
                     out.push_str(w);
-                    path.push((w.to_string(), *lp, false, *delta));
+                    path.push(PathWord { word: w.to_string(), lp: *lp, is_punct: false, delta: *delta, syllables: *l });
                 }
                 if in_job {
                     job_end = out.len();
@@ -1965,7 +2268,7 @@ impl Engine {
             }
             if let Some(f) = right {
                 out.push_str(&f.word);
-                path.push((f.word.clone(), lp_fixed[gap], self.is_punct(f.start), delta_fixed[gap]));
+                path.push(PathWord { word: f.word.clone(), lp: lp_fixed[gap], is_punct: self.is_punct(f.start), delta: delta_fixed[gap], syllables: f.end - f.start });
             }
         }
         self.display = out;
@@ -1980,17 +2283,17 @@ impl Engine {
     /// S7c-2a section 2.2, the learning guard: whether a word of a stretch's first path (the stretch starts at syllable `from`)
     /// was scored with a learned boost, i.e. with an lp above the best capped lp of that word under its reading (the decoder
     /// raises lp only that way). Such a stretch is not reranked, so a choice the user taught is never undone by the model.
-    fn boosted(&self, st: &LmState, from: usize, words: &[(&str, f64, f64)]) -> bool {
+    fn boosted(&self, st: &LmState, from: usize, words: &[(&str, f64, f64, usize)]) -> bool {
         if self.learner.is_empty() {
             return false;
         }
         let mut at = from;
-        words.iter().any(|&(w, lp, _)| {
-            let n = w.chars().count();
+        words.iter().any(|&(w, lp, _, n)| {
             let span = self.syls.get(at..at + n);
             at += n;
             // A span that does not fit cannot happen (one character per syllable); counted as boosted, the safe side.
-            span.is_none_or(|s| st.capped.best_lp(s, w).is_some_and(|best| lp > best))
+            // A word the capped lexicon lacks under its reading is a learned new word (new-word B §2.4): taught, so boosted.
+            span.is_none_or(|s| st.capped.best_lp(s, w).is_none_or(|best| lp > best))
         })
     }
 
@@ -2030,7 +2333,9 @@ impl Engine {
             let Pred { word, reading, .. } = &self.pred[sel];
             let (word, reading) = (word.clone(), reading.clone());
             self.forget_entry(&reading, &word);
-            self.refresh()?; // the free segments decode without the forgotten record, as after the candidate window's ⌘⌫
+            // The free segments decode without the forgotten record; unlike the candidate window's ⌘⌫ no frozen word
+            // is freed (repick-freeze section 7.2).
+            self.refresh()?;
             self.recompute_pred();
             if !self.pred.is_empty() {
                 self.pred_sel = Some(self.pred.iter().position(|p| p.word == word).unwrap_or(0));
@@ -2080,6 +2385,11 @@ impl Engine {
             self.pred = old;
             self.pred_sel = Some(0);
             return self.handled();
+        }
+        // Digits.md A.3.4: an open run of digit-alphabet keys sees the key before anything else (the entered row and the Tab
+        // that enters it came first; a window cannot be open while a run is).
+        if self.drun.is_some() {
+            return self.digit_run_key(k);
         }
         // Zhen-inline section 1.3b: an open English run sees the key before anything else.
         if !self.run.is_empty() {
@@ -2139,6 +2449,10 @@ impl Engine {
         // 3-8: candidates open.
         if self.cands.is_some() && self.candidate_key(k)? {
             return self.chosen();
+        }
+        // Digits.md A.3.4: a digit-alphabet key with nothing unfinished opens a run.
+        if let Some(o) = self.digit_start(k)? {
+            return Ok(o);
         }
         let tone = match k.kind {
             KeyKind::Space => Some(0),
@@ -2232,11 +2546,11 @@ impl Engine {
         let n = self.syls.len();
         match k.kind {
             // Zhen-inline section 1.3e (English mixing on): Space right after an English token or a space unit types a space.
-            KeyKind::Space if self.shadow_on() && self.cursor > 0 && self.breaks_with_space(self.cursor - 1) => {
+            KeyKind::Space if self.cursor > 0 && self.breaks_with_space(self.cursor - 1) => {
                 return self.insert_token(format!("{PUNCT_PREFIX} "), Some(" ".to_string()), None);
             }
             // In front of one (cursor 0) Space opens nothing: the writings list opens with Down only.
-            KeyKind::Space if self.shadow_on() && self.cursor == 0 && self.breaks_with_space(0) => self.pred = old,
+            KeyKind::Space if self.cursor == 0 && self.breaks_with_space(0) => self.pred = old,
             KeyKind::Space | KeyKind::Down => self.open_candidates(old),
             KeyKind::Up => self.pred = old,
             KeyKind::Char if tone.is_some() => self.pred = old,
@@ -2386,6 +2700,7 @@ impl Engine {
             if index >= self.pred.len() {
                 return Ok(None);
             }
+            self.last_digits = None; // digits.md A.3.6: the next state-changing key clears the other reading of the syllable that closed
             let r = self.choose_pred(index);
             if r.is_err() {
                 self.clear_all();
@@ -2427,7 +2742,14 @@ impl Engine {
     /// Insert one token (a syllable, or punctuation with its fixed word) at the cursor, shift the
     /// fixed words on its right, recompute; at MAX_SYLLABLES tokens commit everything (s3d §1).
     fn insert_token(&mut self, reading: String, fixed_word: Option<String>, zh: Option<String>) -> Result<Output, EngineError> {
+        // repick-freeze section 15: a newly typed syllable frees the pieces a deletion split off, before anything decodes.
+        // Punctuation, English tokens and spaces are not syllables and leave them.
+        if fixed_word.is_none() {
+            self.fixed.retain(|f| !f.split_off);
+        }
         let c = self.cursor;
+        // repick-freeze section 7.3: a frozen word the insertion cuts is kept per syllable (shifted below like the rest).
+        let pieces = self.split_frozen(|f| f.start < c && c < f.end);
         self.fixed.retain_mut(|f| {
             if f.end <= c {
                 true
@@ -2440,13 +2762,14 @@ impl Engine {
                 false
             }
         });
+        let excluded: Vec<usize> = pieces.iter().map(|&s| if s >= c { s + 1 } else { s }).collect();
         self.syls.insert(c, reading);
         if let Some(word) = fixed_word {
-            self.fixed.push(Fixed { start: c, end: c + 1, word, pre: None, key: None, pick_key: None, zh });
+            self.fixed.push(Fixed { start: c, end: c + 1, word, pre: None, key: None, pick_key: None, zh, frozen: false, split_off: false, displaced_new: Vec::new() });
             self.fixed.sort_by_key(|f| f.start);
         }
         self.cursor += 1;
-        self.refresh()?;
+        self.release_frozen(c, &excluded)?;
         if self.syls.len() >= MAX_SYLLABLES {
             let commit = self.take_commit();
             return Ok(self.view(true, commit));
@@ -2454,7 +2777,96 @@ impl Engine {
         self.handled()
     }
 
+    /// repick-freeze sections 6.1 and 7.4: after a syllable was inserted at `c`, decode (and set `display`/`path`). A
+    /// frozen neighbour (left one ending at `c`, right one starting at `c + 1`; not punctuation, not a piece split off
+    /// by this insertion, whose post-shift start is in `excluded`) stays fixed unless a word of the decode without it
+    /// covers all its syllables plus the new one. Section 11: a released neighbour and the new syllable stay free (a later
+    /// syllable can still rewrite them).
+    fn release_frozen(&mut self, c: usize, excluded: &[usize]) -> Result<(), EngineError> {
+        let is_cand = |s: &Self, f: &Fixed| {
+            f.frozen && !s.is_punct(f.start) && !s.is_punct(c) && !excluded.contains(&f.start) && (f.end == c || f.start == c + 1)
+        };
+        let (cands, rest): (Vec<Fixed>, Vec<Fixed>) = std::mem::take(&mut self.fixed).into_iter().partition(|f| is_cand(self, f));
+        self.fixed = rest;
+        self.refresh()?; // tentative decode (the only one when there is no candidate)
+        let (mut released, mut kept): (Vec<Fixed>, Vec<Fixed>) = cands.into_iter().partition(|f| self.merged(f, c));
+        // At most two candidates, so at most two more decodes: put back what does not merge, then recheck (7.4).
+        for _ in 0..2 {
+            if kept.is_empty() {
+                break;
+            }
+            self.fixed.append(&mut kept);
+            self.fixed.sort_by_key(|f| f.start);
+            self.refresh()?;
+            let (still, lost): (Vec<Fixed>, Vec<Fixed>) = released.into_iter().partition(|f| self.merged(f, c));
+            released = still;
+            kept = lost;
+        }
+        Ok(())
+    }
+
+    /// Section 6.1: a word of the current path covers all of `f`'s syllables plus the new one at `c`.
+    fn merged(&self, f: &Fixed, c: usize) -> bool {
+        let (from, to) = if f.end == c { (f.start, c + 1) } else { (c, f.end) };
+        let mut pos = 0;
+        self.path.iter().any(|w| {
+            let (a, b) = (pos, pos + w.syllables);
+            pos = b;
+            a <= from && to <= b
+        })
+    }
+
+    /// Sections 7.3 and 9: replace each frozen word `cut` selects by its syllables as single-character frozen words, in
+    /// place (before the edit's shift), where the word has one character per syllable and the syllable has that character
+    /// as an entry; the rest is left to the decoder. Returns the pieces' starts.
+    fn split_frozen(&mut self, cut: impl Fn(&Fixed) -> bool) -> Vec<usize> {
+        let mut starts = Vec::new();
+        for f in std::mem::take(&mut self.fixed) {
+            if !(f.frozen && cut(&f)) {
+                self.fixed.push(f);
+                continue;
+            }
+            for p in self.pieces(f.start, f.end, &f.word, None) {
+                starts.push(p.start);
+                self.fixed.push(p);
+            }
+        }
+        self.fixed.sort_by_key(|f| f.start);
+        starts
+    }
+
+    /// The single-character frozen words of `word` over `[start, end)` (one character per syllable, and the character an
+    /// entry for its syllable), leaving out syllable `skip`; the rest of the word is left to the decoder.
+    fn pieces(&self, start: usize, end: usize, word: &str, skip: Option<usize>) -> Vec<Fixed> {
+        let Some(st) = &self.lm else { return Vec::new() };
+        if word.chars().count() != end - start {
+            return Vec::new();
+        }
+        (start..end)
+            .zip(word.chars())
+            .filter(|&(i, ch)| Some(i) != skip && st.capped.best_lp_delta(&self.syls[i..=i], &ch.to_string()).is_some())
+            .map(|(i, ch)| Fixed::frozen(i, i + 1, ch.to_string()))
+            .collect()
+    }
+
     fn remove_syllable(&mut self, i: usize) -> Result<(), EngineError> {
+        // repick-freeze section 11: the displayed word that holds syllable `i` (decoded, frozen or user-chosen) keeps its
+        // other syllables as single-character frozen words. A user-chosen word itself is removed below, with its pending learn.
+        if self.path.iter().map(|p| p.syllables).sum::<usize>() == self.syls.len() {
+            let mut p = 0;
+            for w in &self.path {
+                let q = p + w.syllables;
+                if p <= i && i < q && q - p > 1 {
+                    let mut pieces = self.pieces(p, q, &w.word, Some(i));
+                    pieces.iter_mut().for_each(|f| f.split_off = true);
+                    self.fixed.retain(|f| !(f.frozen && f.start == p && f.end == q));
+                    self.fixed.extend(pieces);
+                    self.fixed.sort_by_key(|f| f.start);
+                    break;
+                }
+                p = q;
+            }
+        }
         self.syls.remove(i);
         self.fixed.retain_mut(|f| {
             if f.end <= i {
@@ -2472,8 +2884,9 @@ impl Engine {
     }
 
     /// Zhen-inline section 1.3e: whether unit `i` is an English token or a space unit, the two a Space after it types a space for.
+    /// Digits.md A.3.4 adds the digit-string token (and a space unit), when the digit feature is on, without needing the word list.
     fn breaks_with_space(&self, i: usize) -> bool {
-        english_or_space(&self.syls[i])
+        (self.shadow_on() && english_or_space(&self.syls[i])) || (self.digits_active() && (digit_of(&self.syls[i]).is_some() || is_space_unit(&self.syls[i])))
     }
 
     fn is_punct(&self, i: usize) -> bool {
@@ -2512,6 +2925,22 @@ impl Engine {
                 self.cands = Some(c);
                 return;
             }
+            if let Some(d) = digit_of(&self.syls[touching]) {
+                // Digits.md A.3.4 (Down): the row of the digit context first, then the digit and its full-width form, then (A.3.6)
+                // the syllable the last digit tokens could have been. The punctuation table is not asked.
+                let mut list: Vec<(String, usize)> = rows.iter().map(|p| (p.word.clone(), p.reading.len())).collect();
+                list.push((d.to_string(), 1));
+                list.push((digit_layer::full_width(d).to_string(), 1));
+                let mut c = Cands::new(Vec::new(), self.cand_vertical);
+                if let Some((n, syl, word)) = self.digit_syllable_alt(touching + 1) {
+                    list.push((word, 1));
+                    c.dalt = Some(DigitAlt::Syllable { n, syl });
+                }
+                c.list = list;
+                c.rows = rows;
+                self.cands = Some(c);
+                return;
+            }
             let typed = self.syls[touching][PUNCT_PREFIX.len()..].to_string();
             let alts = typed.chars().next().and_then(|c| self.punct.get(&c)).cloned().unwrap_or_default();
             let mut listed = HashSet::new();
@@ -2545,9 +2974,19 @@ impl Engine {
             return list;
         }
         let a = self.cursor;
-        for l in (1..=self.lex.max_len.min(self.avail())).rev() {
+        let today = if self.learner.has_new_words() { self.today() } else { 0 };
+        for l in (1..=self.lex.max_len.max(NEWWORD_MAX).min(self.avail())).rev() {
             let key = if a == 0 { &self.syls[..l] } else { &self.syls[a - l..a] };
-            for (w, _) in self.lex.entries(key) {
+            let lexicon = self.lex.entries(key);
+            // New-word B §2.4: new words first among the same length, so ⌘⌫ reaches them (any weight: a record
+            // under ACTIVE is still on disk); one the lexicon has is listed where the lexicon puts it.
+            let new = if (NEWWORD_MIN..=NEWWORD_MAX).contains(&l) { self.learner.new_words_all(key, today) } else { Vec::new() };
+            for w in new {
+                if !lexicon.iter().any(|(x, _)| *x == w) && seen.insert(w) {
+                    list.push((w.to_string(), l));
+                }
+            }
+            for (w, _) in lexicon {
                 if seen.insert(w) {
                     list.push((w.to_string(), l));
                 }
@@ -2566,10 +3005,16 @@ impl Engine {
 
     /// Opens the window on `window_list`; an empty list opens nothing (and the row is gone, as before this contract).
     fn open_with_rows(&mut self, rows: Vec<Pred>) {
-        let list = self.window_list(&rows);
+        let mut list = self.window_list(&rows);
+        // Digits.md A.3.6: right after a syllable the digit keys closed, its digits are the last item.
+        let digits = self.ld_now.take().filter(|_| !list.is_empty());
+        if let Some(keys) = &digits {
+            list.push((keys.clone(), 1));
+        }
         if !list.is_empty() {
             let mut c = Cands::new(list, self.cand_vertical);
             c.rows = rows;
+            c.dalt = digits.map(DigitAlt::Digits);
             self.cands = Some(c);
         }
     }
@@ -2583,9 +3028,14 @@ impl Engine {
         if let Some(f) = self.fixed.iter().find(|f| f.start == start && f.end == end && f.pre.as_ref().is_some_and(|p| !p.is_empty())) {
             return f.pre.clone();
         }
+        Some(self.span_text(start, end))
+    }
+
+    /// The text shown now over the syllables [start, end).
+    fn span_text(&self, start: usize, end: usize) -> String {
         let off: usize = (0..start).map(|i| self.token_width(i)).sum();
         let len: usize = (start..end).map(|i| self.token_width(i)).sum();
-        Some(self.display.chars().skip(off).take(len).collect())
+        self.display.chars().skip(off).take(len).collect()
     }
 
     /// Rule 8: the synthetic key (`^>` + `syls[end]`, `^>$` at the end) the span [start, end) is shown under now, when
@@ -2612,24 +3062,24 @@ impl Engine {
             self.forget_entry(&reading, &word);
             self.refresh()?;
             let Some(mut c) = self.cands.take() else { return Ok(()) };
+            // Digits.md A.3.6: the items the window had behind the row that are not the lexicon's (the other reading of the digit keys,
+            // and after digit tokens the digit and its full-width form) stay its last items; `dalt` still says what the last one is.
+            let after_digit_token = self.avail() == 0 && self.cursor > 0 && digit_of(&self.syls[self.cursor - 1]).is_some();
+            let kept: Vec<(String, usize)> = match &c.dalt {
+                _ if after_digit_token => c.list[c.rows.len()..].to_vec(),
+                Some(_) => c.list[c.list.len() - 1..].to_vec(),
+                None => Vec::new(),
+            };
             self.recompute_pred();
             c.rows = std::mem::take(&mut self.pred);
             c.rows.retain(|p| p.word != word);
             c.list = self.window_list(&c.rows);
+            c.list.extend(kept);
             if c.list.is_empty() {
                 return Ok(()); // closed, as by Esc
             }
             c.sel = c.list.iter().position(|(w, _)| *w == word).unwrap_or(0);
-            // Keep `first` within what ↑, ↓ and Page Down reach (the last row shows the last item).
-            c.first = c.first.min(c.sel).min(c.list.len().saturating_sub(PAGE_SIZE));
-            if c.sel >= c.first + PAGE_SIZE {
-                c.first = c.sel + 1 - PAGE_SIZE;
-            }
-            c.top = c.top.min((c.list.len() - 1) / PAGE_SIZE);
-            if c.expanded {
-                c.scroll();
-            }
-            self.cands = Some(c);
+            self.cands = Some(c.reclamped());
             return Ok(());
         }
         let (start, end) = if self.cursor == 0 { (0, l) } else { (self.cursor - l, self.cursor) };
@@ -2637,8 +3087,31 @@ impl Engine {
             return Ok(());
         }
         let reading = self.syls[start..end].to_vec();
+        // repick-freeze section 9: the frozen words over this span decode again only when the forgotten entry is in
+        // effect here (exact or last-character level under this span's context; the global level adds nothing).
+        let off: usize = (0..start).map(|i| self.token_width(i)).sum();
+        let shown_before: String = self.display.chars().take(off).collect();
+        let key = context_key(&format!("{}{shown_before}", self.left));
+        // Rule 8: under the sentence-start key the record also holds the syllable after the word, as in the decoder.
+        let in_effect = self.learned_weight(&key, self.syls.get(end).map(String::as_str), &reading, &word, self.today()) > 0.0;
         self.forget_entry(&reading, &word);
-        self.refresh()
+        if in_effect {
+            self.fixed.retain(|f| !(f.frozen && f.start < end && start < f.end));
+        }
+        self.refresh()?;
+        // New-word B §2.6: a forgotten new word is no longer a candidate, so it leaves the open window (a lexicon
+        // word stays: only its learned weight went). The window stays on the item that took its place.
+        if self.in_lexicon(&reading, &word) {
+            return Ok(());
+        }
+        let Some(mut c) = self.cands.take() else { return Ok(()) };
+        c.list.retain(|(w, n)| !(*w == word && *n == l));
+        if c.list.is_empty() {
+            return Ok(()); // closed, as by Esc
+        }
+        c.sel = c.sel.min(c.list.len() - 1);
+        self.cands = Some(c.reclamped());
+        Ok(())
     }
 
     /// Forget (reading, word) everywhere: pending learns of it are dropped and its records go, then the file is
@@ -2649,9 +3122,14 @@ impl Engine {
         }
         // A pending learn of the same word would teach it again at the next commit and append it
         // back (§1.5), as learning_clear's pending-learn drop prevents for clear.
+        // New-word B §2.6: forgetting a new word also drops the pending re-pick of every fixed span overlapping any
+        // place this reading occurs, or the re-picked character on screen would teach the word again at the Enter.
+        let new = self.learner.new_word_day(reading, word).is_some() || !self.in_lexicon(reading, word);
         let syls = &self.syls;
+        let n = reading.len();
+        let spots: Vec<usize> = if new { (0..(syls.len() + 1).saturating_sub(n)).filter(|&p| syls[p..p + n] == *reading).collect() } else { Vec::new() };
         for f in self.fixed.iter_mut() {
-            if f.word == word && syls[f.start..f.end] == *reading {
+            if (f.word == word && syls[f.start..f.end] == *reading) || spots.iter().any(|&p| f.start < p + n && p < f.end) {
                 f.pre = None;
             }
         }
@@ -2662,12 +3140,50 @@ impl Engine {
         self.rewrite(true);
     }
 
+    /// repick-freeze: from the path displayed before a pick over `[start, end)`, the words outside it (whole ones, and
+    /// the outside syllables of a word the range cuts, when that syllable has the shown character as a single-character
+    /// entry) as frozen fixed words. Without a model there is no path and nothing freezes.
+    fn freeze_outside(&self, start: usize, end: usize) -> Vec<Fixed> {
+        let Some(st) = &self.lm else { return Vec::new() };
+        if self.path.iter().map(|p| p.syllables).sum::<usize>() != self.syls.len() {
+            return Vec::new();
+        }
+        let mut out = Vec::new();
+        let mut p = 0;
+        for PathWord { word, syllables: len, .. } in &self.path {
+            let q = p + len;
+            if q <= start || p >= end {
+                if !self.fixed.iter().any(|f| f.start == p && f.end == q) {
+                    out.push(Fixed::frozen(p, q, word.clone()));
+                }
+            } else if word.chars().count() == *len {
+                // A word with another character count than syllables has no per-syllable characters: left to the decoder.
+                for (i, ch) in (p..q).zip(word.chars()).filter(|(i, _)| !(start..end).contains(i)) {
+                    let ch = ch.to_string();
+                    if st.capped.best_lp_delta(&self.syls[i..=i], &ch).is_some() {
+                        out.push(Fixed::frozen(i, i + 1, ch));
+                    }
+                }
+            }
+            p = q;
+        }
+        out
+    }
+
     /// Fix candidate `idx` over its range, close candidates, recompute.
     fn choose(&mut self, idx: usize) -> Result<(), EngineError> {
         if self.english_open() {
             return self.choose_english(idx, false);
         }
         let Some(mut c) = self.cands.take() else { return Ok(()) };
+        if let Some(alt) = c.dalt.take().filter(|_| idx + 1 == c.list.len() && idx >= c.rows.len()) {
+            let word = c.list[idx].0.clone();
+            let commit = self.choose_digit_alt(alt, word)?;
+            if !commit.is_empty() {
+                self.commit_out = Some(commit);
+            }
+            return Ok(());
+        }
         // Predict-down contract B.3.1 (revision 2026-10-17): a row item over exactly the typed syllables before the cursor is
         // the lexicon's candidate for that span and falls through to the re-pick below (`list[idx]` is the same word and
         // length); one whose reading is longer or differs (it completes an unfinished unit or an abbreviation, or runs past the
@@ -2684,10 +3200,35 @@ impl Engine {
         let (start, end) = if self.cursor == 0 { (0, l) } else { (self.cursor - l, self.cursor) };
         // Choosing again the word a prediction pick fixed over this exact span keeps that pending learn (section 10.1).
         let again = self.fixed.iter().find(|f| f.start == start && f.end == end && f.word == word && f.pre.as_deref() == Some(""));
-        let (pre, key) = match again {
+        let (mut pre, key) = match again {
             Some(f) if self.learning => (f.pre.clone(), f.key.clone()),
             _ => (self.learning.then(|| self.pre_pick(start, end)).flatten(), None),
         };
+        let frozen = self.freeze_outside(start, end);
+        // New-word B §2.4: picking a new word is no S4 teach (it is counted as used at the commit, §2.5).
+        if !self.is_punct(start) && !self.in_lexicon(&self.syls[start..end], &word) {
+            pre = None;
+        }
+        // §2.5: new words of the path this pick overlaps are halved at the commit. The earlier picks this one replaces
+        // (every one it overlaps: the retain below drops them) hand on what they displaced, except the word chosen now
+        // over this span (chosen back, not away). A pick that keeps the text shown over the span (S4's pre == word)
+        // displaces nothing more.
+        let mut displaced_new: Vec<(Vec<String>, String)> = Vec::new();
+        if self.learning {
+            let reading = &self.syls[start..end];
+            for x in self.fixed.iter().filter(|f| f.start < end && start < f.end).flat_map(|f| &f.displaced_new) {
+                if !(x.0 == reading && x.1 == word) && !displaced_new.contains(x) {
+                    displaced_new.push(x.clone());
+                }
+            }
+            if self.span_text(start, end) != word {
+                for (s, e, r, w) in self.path_new_words() {
+                    if s < end && start < e && !displaced_new.contains(&(r.clone(), w.clone())) {
+                        displaced_new.push((r, w));
+                    }
+                }
+            }
+        }
         // Re-picking the span of an earlier pick keeps that pick's key along with its displaced text.
         let pick_key = match self.fixed.iter().find(|f| f.start == start && f.end == end && f.pre.as_ref().is_some_and(|p| !p.is_empty())) {
             Some(f) if self.learning => f.pick_key.clone(),
@@ -2704,12 +3245,13 @@ impl Engine {
             }
         }
         self.fixed.retain(|f| !(f.start < end && start < f.end));
+        self.fixed.extend(frozen);
         // A candidate pick changes the text before every fixed word to its right: their prediction keys no longer
         // describe what the user sees, so those records fall back to the key at the commit (section 10.1).
         for f in self.fixed.iter_mut().filter(|f| f.start >= end) {
             f.key = None;
         }
-        self.fixed.push(Fixed { start, end, word, pre, key, pick_key, zh });
+        self.fixed.push(Fixed { start, end, word, pre, key, pick_key, zh, frozen: false, split_off: false, displaced_new });
         self.fixed.sort_by_key(|f| f.start);
         self.refresh()
     }

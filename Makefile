@@ -55,6 +55,7 @@ test-python:
 	python3 -W ignore -m unittest experiments/x0c/test_x0c.py
 	cd experiments/fuzzy && python3 -W ignore -m unittest test_fuzzy
 	python3 -m unittest reference/proto/test_recombine.py
+	python3 -W ignore -m unittest experiments/newword/test_hijack.py
 
 test-swift: rust
 	@$(call relink_if_stale,Debug)

@@ -102,14 +102,16 @@ int32_t shanjie_engine_key(ShanjieEngine *engine, ShanjieKey key, ShanjieOutput 
 //   CONTROL+ENTER pass through unchanged (rule 1).
 // s3b2 (docs/contracts/s3b2-glass-panel.md section 8): mouse pick. index is a position in the last
 //   output's candidates; the core chooses candidate_first + index through the same path as ENTER, so
-//   learning behaves identically. V3 (docs/contracts/v3-engine.md section 4): with the candidate window
+//   learning behaves identically (a candidate pick also keeps the words outside its span as they were shown:
+//   docs/contracts/repick-freeze.md). V3 (docs/contracts/v3-engine.md section 4): with the candidate window
 //   closed and a prediction row showing (entered or not), pick(index) selects that row's item (index
 //   counts from 0 in the row; the click is an explicit choice). Section 10: the pick is learned like a
 //   candidate-window re-pick (nothing displaced) at the commit, when learning is on at the pick and at the commit.
 //   Predict-down (docs/contracts/predict-down.md B.3.1): a window opened while a passive prediction row was showing lists
 //   the row's items first, in the row's order; picking one of them (or its digit, or ENTER on it) is picking it from the
 //   row, the same as the call above, then the window closes. One whose reading is exactly the typed syllables before the
-//   cursor is the lexicon's candidate for that span, and picking it is a re-pick (B.3.1 revision of 2026-10-17).
+//   cursor is the lexicon's candidate for that span, and picking it is a re-pick (B.3.1 revision of 2026-10-17). Any
+//   prediction pick, from the row or the window, keeps the words left of its span as shown (repick-freeze section 13).
 //   1 when engine or out is NULL; 2 when there is neither a candidate window nor a prediction row, or
 //   index is outside that output (state unchanged); 4 internal (engine reset). *out is NULL on any error.
 int32_t shanjie_engine_pick(ShanjieEngine *engine, uint32_t index, ShanjieOutput **out);
@@ -187,6 +189,13 @@ int32_t shanjie_engine_load_english(ShanjieEngine *engine, const char *path);
 //     composition in `commit` of that call's output (the key that did it, the pick, or the settings call), never in a later one.
 //   Turning it off, like turning the abbreviation composer on, closes the window and ends an open English run as a token
 //   (a run that makes the 40th unit sends the composition in the snapshot's `commit`).
+//   Digits (docs/contracts/digits.md): with it on (standard layout, abbreviation composer off, a model and `digits.tsv` in the data
+//   directory; the table is optional, without it nothing below happens) the keys 0-9 . / - type half-width digit-string tokens
+//   into the composition: each key is scored as digit or Zhuyin from the text before it, a run keeps its last four keys unsettled,
+//   and a Zhuyin key outside the alphabet, a tone key or Space settles the syllable when it wins. DOWN, ENTER and SHIFT+ENTER end
+//   the run as the screen shows it (digits.md A.12: the keys shown as digits become tokens, the keys shown as Zhuyin stay an
+//   unfinished syllable); every other key first turns the unsettled keys into digits. Turning it off (or the abbreviation composer on) does that too; the snapshot's `commit` may carry
+//   the 40th-unit composition.
 int32_t shanjie_engine_set_english(ShanjieEngine *engine, uint32_t enabled, ShanjieOutput **out); // 0 or 1; returns a snapshot
 // set_english_inline 0 or 1 (2 otherwise, state unchanged), default 1 at engine creation, like set_english in its codes and its
 //   snapshot (handled 1, commit ""); 1 when engine or out is NULL. With 1 (and set_english(1)) the unfinished syllable shows as
@@ -210,7 +219,10 @@ int32_t shanjie_engine_set_punctuation(ShanjieEngine *engine, const char *table)
 //   one, whichever has bigram history; none: the sentence start).
 int32_t shanjie_engine_set_left_context(ShanjieEngine *engine, const char *utf8);
 // set_learning: 0 or 1 (2 otherwise). Default 0 at engine creation (fail-closed). 0 drops pending
-//   learns; a span is learned only if the flag was 1 both when it was chosen and at commit.
+//   learns; a span is learned only if the flag was 1 both when it was chosen and at commit. 0 while a
+//   composition is open, or any key the engine handles while it is 0, also marks the composition: its commit learns
+//   no new word and counts no use (new-word B section 2.1). The mark goes when the composition is empty again
+//   (commit, Esc, reset, or Backspace/Delete of everything).
 int32_t shanjie_engine_set_learning(ShanjieEngine *engine, uint32_t enabled);
 // learning_open: dir is the learning directory (.../Application Support/shanjie); created 0700 if
 //   missing. A missing file starts empty; a corrupt one is renamed learning.tsv.corrupt and starts
@@ -219,12 +231,16 @@ int32_t shanjie_engine_set_learning(ShanjieEngine *engine, uint32_t enabled);
 int32_t shanjie_engine_learning_open(ShanjieEngine *engine, const char *dir);
 // Forgetting: KEY with COMMAND (bit3) and kind BACKSPACE (4) while candidates are open removes the
 //   highlighted word's learned records for that reading (all contexts) and re-decodes; the output
-//   shows the new composition with the candidates still open. On a prediction-row item at the front of the
-//   window (predict-down B.3.1) the row is recomputed and the list rebuilt without that word, the selection
-//   on the word if it is still listed, else on the first item; a rebuilt list that is empty closes the
-//   window (as Esc). Without candidates the key passes through,
+//   shows the new composition with the candidates still open. When the forgotten word was in effect over that span
+//   (exact or last-character level under its context), words the engine fixed (repick-freeze: around a re-pick or a
+//   prediction pick, or the pieces a Backspace left) over that span are freed and decode again; other fixed words stay.
+//   (The pieces a Backspace or Delete left are also all freed by the next typed syllable, repick-freeze section 15.)
+//   On a prediction-row item at the front of the window (predict-down B.3.1) the row is recomputed and the list
+//   rebuilt without that word, the selection on the word if it is still listed, else on the first item; a rebuilt
+//   list that is empty closes the window (as Esc). Without candidates the key passes through,
 //   except while the V3 prediction row is entered: there it forgets the selected item the same way (and drops a
-//   pending learn of it), recomputes the row, and the row stays entered with the selection on that word.
+//   pending learn of it), recomputes the row, and the row stays entered with the selection on that word;
+//   it never frees fixed words.
 //   After a successful learning_open a forget ALWAYS rewrites the whole learning file, even when
 //   memory held no record of the word (a record pruned on load can still be in the file); before any
 //   successful learning_open it changes memory only. A failed rewrite sets status bit0.
@@ -249,6 +265,21 @@ int32_t shanjie_engine_learning_clear(ShanjieEngine *engine);
 //   The shell computes none of this; it only passes the left-context text (section 14).
 // Learning happens only at a commit (Enter, a key the engine passes through after committing, or the
 //   40-syllable auto-commit), never on shanjie_engine_reset or Esc, and never for punctuation picks.
+// New-word B (docs/contracts/newword-b.md), no new function: at a learning commit, a run of 2-4 single Han
+//   characters on the decoded path that holds a character re-picked in the candidate window (runs split at
+//   punctuation, non-Han characters and a fixed table of function characters; not all numerals; not a word the
+//   lexicon has under that reading, and no lexicon word under that reading scores above -6.5; the lexicon is the
+//   one the engine loaded: base, overlays, the names layer and the loaded packs, at their file scores) is stored as a
+//   new word, and so is each shorter piece of 2+ characters of it that holds a re-pick, is not all numerals and
+//   whose reading has no lexicon word at all; one learning.tsv line each,
+//   "#<TAB>reading<TAB>word<TAB>weight<TAB>day". Memory never holds more than 2,000 new words: learning one past
+//   that drops the lowest weights at once. The file holds at most 2,000 "#" lines after a full rewrite; lines appended
+//   since can pass that until the next full rewrite, and a load keeps at most 2,000 (lowest weights dropped). A new
+//   word decodes on its reading in any context, is listed first among the candidates of its length, and is forgotten by COMMAND+BACKSPACE (which
+//   also drops the pending re-picks overlapping that reading in the composition) and by learning_clear. A commit
+//   with learning on that shows a new word adds to its weight and dates it today, at most once per local day; a
+//   re-pick that changes the text shown over it halves it (choosing it back over the same span undoes that). Choosing a new word in the window teaches no context record. A fixed new word whose
+//   record is gone is unfixed and decoded again, never an error. Older versions skip "#" lines at load.
 // Writes: a learning commit appends only the records it changed; a full rewrite happens on a forget,
 //   on the first write after learning_open or a clear, on the first write of each day, every 1,024
 //   appended lines, after any failed append, and after a failed full rewrite or forget.
