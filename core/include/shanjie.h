@@ -74,7 +74,7 @@ typedef struct {
   uint32_t cursor_utf16;      // cursor in preedit, in UTF-16 code units (for NSRange); after the pending syllable
   uint32_t candidate_count;   // candidates in this output: collapsed one page (0-9), expanded the visible rows (up to 5 x candidate_columns); also the prediction row (1-9, see candidate_selected)
   const char *const *candidates; // NULL when candidate_count is 0
-  int32_t candidate_selected; // selection within this output's candidates; -1 when candidates are closed. -1 with candidate_count > 0 is the V3 prediction row, not entered (no number, no highlight; columns 0, first 0, total = count); >= 0 is the candidate window or the entered prediction row
+  int32_t candidate_selected; // selection within this output's candidates; -1 when candidates are closed. -1 with candidate_count > 0 is the V3 prediction row, not entered (no highlight; the shell numbers only the first cell, with the Tab glyph, predict-down B.3.2; columns 0, first 0, total = count); >= 0 is the candidate window or the entered prediction row
   uint32_t candidate_columns; // 0 = collapsed single row; > 0 = expanded, always 9 (one row = one page, the selected page on top; s3b2 9)
   uint32_t candidate_first;   // position of candidates[0] in the whole list; 0 when closed (and for the prediction row)
   uint32_t candidate_total;   // length of the whole list; 0 when closed (the prediction row: its length)
@@ -107,6 +107,10 @@ int32_t shanjie_engine_key(ShanjieEngine *engine, ShanjieKey key, ShanjieOutput 
 //   closed and a prediction row showing (entered or not), pick(index) selects that row's item (index
 //   counts from 0 in the row; the click is an explicit choice). Section 10: the pick is learned like a
 //   candidate-window re-pick (nothing displaced) at the commit, when learning is on at the pick and at the commit.
+//   Predict-down (docs/contracts/predict-down.md B.3.1): a window opened while a passive prediction row was showing lists
+//   the row's items first, in the row's order; picking one of them (or its digit, or ENTER on it) is picking it from the
+//   row, the same as the call above, then the window closes, except that, being a window pick, it keeps the words
+//   outside its span as they were shown (repick-freeze section 12); a pick from the row itself does not.
 //   1 when engine or out is NULL; 2 when there is neither a candidate window nor a prediction row, or
 //   index is outside that output (state unchanged); 4 internal (engine reset). *out is NULL on any error.
 int32_t shanjie_engine_pick(ShanjieEngine *engine, uint32_t index, ShanjieOutput **out);
@@ -218,7 +222,10 @@ int32_t shanjie_engine_learning_open(ShanjieEngine *engine, const char *dir);
 //   highlighted word's learned records for that reading (all contexts) and re-decodes; the output
 //   shows the new composition with the candidates still open. When the forgotten word was in effect over that span
 //   (exact or last-character level under its context), words the engine fixed after a re-pick (repick-freeze) over
-//   that span are freed and decode again; other fixed words stay. Without candidates the key passes through,
+//   that span are freed and decode again; other fixed words stay.
+//   On a prediction-row item at the front of the window (predict-down B.3.1) the row is recomputed and the list
+//   rebuilt without that word, the selection on the word if it is still listed, else on the first item; a rebuilt
+//   list that is empty closes the window (as Esc). Without candidates the key passes through,
 //   except while the V3 prediction row is entered: there it forgets the selected item the same way (and drops a
 //   pending learn of it), recomputes the row, and the row stays entered with the selection on that word;
 //   it never frees fixed words.

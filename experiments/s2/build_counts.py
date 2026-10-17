@@ -204,6 +204,13 @@ def text_runs(line, conv):
 def article_runs(raw, conv, mw=None, mwconv=None):
     """One wiki article's Han runs, in count_batch's order: entity unescape, [mw conversion], TEMPLATE x3, MARKUP, SENT, convert, HAN.
     The one copy of this pipeline: count_batch, build_counts_text, holdout_guard and s7a prep.py all call it (docs/contracts/holdout-refresh.md section 8)."""
+    for s in article_sentences(raw, conv, mw, mwconv):
+        yield from HAN.findall(s)
+
+
+def article_sentences(raw, conv, mw=None, mwconv=None):
+    """article_runs' steps up to (not including) the HAN split: one converted sentence per SENT match. tools/build_digits.py swaps the
+    HAN split for one that keeps digit runs (docs/contracts/digit-context.md C.3); article_runs itself is unchanged."""
     t = raw.replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&").replace("&quot;", '"')
     if mw:   # S2w：整篇先交給 MediaWiki 的 zh-tw 轉換（站上轉換表、NoteTA 群組、條目規則），之後的句子不再呼叫 convert()
         t = mwconv.convert(t, mw)
@@ -212,7 +219,7 @@ def article_runs(raw, conv, mw=None, mwconv=None):
     for pat, rep in MARKUP:
         t = pat.sub(rep, t)
     for s in SENT.findall(t):
-        yield from HAN.findall(s if mw else convert(s, *conv))
+        yield s if mw else convert(s, *conv)
 
 
 def articles(limit, dump=None):

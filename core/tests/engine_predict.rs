@@ -566,7 +566,9 @@ fn a_prediction_pick_is_learned_like_a_repick() {
     assert_eq!(r.len(), 1, "a prediction pick is recorded");
     assert_eq!((r[0].context.as_str(), r[0].reading.join("-"), r[0].word.as_str(), r[0].weight), ("一杯", "ㄋㄞˇ-ㄔㄚˊ".to_string(), "奶茶", 1.0));
 
-    // Re-picking the same span in the candidate window is learned as before.
+    // Re-picking the same span in the candidate window is learned as before. The subject is the lexicon list, which now has the
+    // row's items in front (predict-down contract B.4): the row is off.
+    e.set_prediction(false).unwrap();
     e.set_left_context("我想喝一杯");
     typ(&mut e, &["ㄋㄞˇ", "ㄔㄚˊ"], "");
     send(&mut e, vec![kind(KeyKind::Space)]);
@@ -621,7 +623,7 @@ fn the_row_is_cleared_by_other_state_changes() {
     let (mut e, o) = build("我想", &[Syl("ㄋㄧˇ"), Syl("ㄏㄠˇ")], "");
     assert_passive(&o);
     let o = e.key(kind(KeyKind::Space)).unwrap();
-    assert!(o.selected == Some(0) && o.candidates.len() > 1, "the candidate window is open and is not the row");
+    assert!(o.selected == Some(0) && o.candidates.len() > 1, "the candidate window is open: the row's items first, then the lexicon's");
     let o = e.key(kind(KeyKind::Esc)).unwrap();
     assert_no_row(&o);
     // Enter commits
@@ -1533,6 +1535,7 @@ fn t19_a_word_in_two_long_starts_keeps_the_largest_weight() {
     learned.weight = 2.0;
     let state = |mut e: Engine| {
         e.set_left_context("我想");
+        e.set_prediction(false).unwrap(); // predict-down contract B.4: picking in the lexicon window; the row is on again for the state below
         for _ in 0..2 {
             typ(&mut e, &["ㄅㄚˋ"], "");
             let mut o = e.key(kind(KeyKind::Space)).unwrap();
@@ -1541,6 +1544,7 @@ fn t19_a_word_in_two_long_starts_keeps_the_largest_weight() {
             }
             e.key(kind(KeyKind::Enter)).unwrap();
         }
+        e.set_prediction(true).unwrap();
         let o = send(&mut e, pend_keys("ㄅ"));
         assert_eq!(o.preedit, "爸爸ㄅ", "precondition: two fixed words");
         row(&o)
@@ -2163,10 +2167,298 @@ fn the_horizontal_prediction_row_keeps_its_keys_and_output() {
     e.key(kind(KeyKind::Tab)).unwrap();
     let d = e.key(kind(KeyKind::Down)).unwrap();
     assert_eq!((d.vertical, d.columns, d.selected), (0, 0, Some(0)));
-    assert_ne!(row(&d), r, "Down left the row and opened the candidate window");
+    // Predict-down contract B.4 (expectation change): the window now opens with the row's items in front, so the first page
+    // can equal the row; what shows it is the window is the lexicon candidates after the row (total above the row's length).
+    assert_eq!(d.candidates[..r.len()], r[..], "the window starts with the row's items");
+    assert!(d.total as usize > r.len(), "Down left the row and opened the candidate window: the lexicon candidates follow the row");
     let (mut e, _) = build(D.0, D.1, D.2);
     e.key(kind(KeyKind::Tab)).unwrap();
     let u = e.key(kind(KeyKind::Up)).unwrap();
     assert!(u.handled);
     assert_eq!((u.selected, u.vertical), (None, 0), "Up left the row (rule 16 then ignored): not entered any more");
+}
+
+// ---------- predict-down contract (docs/contracts/predict-down.md B.4): the window carries the row ----------
+
+/// The whole list of the open horizontal window: the highlighted word at each position, moving Right from the first.
+fn whole_window(e: &mut Engine, mut o: Output) -> Vec<String> {
+    let mut v = Vec::new();
+    for _ in 0..o.total {
+        v.push(o.candidates[o.selected.unwrap()].clone());
+        o = e.key(kind(KeyKind::Right)).unwrap();
+    }
+    v
+}
+/// s3a section 3.1 without the row, computed from `Lexicon::entries` alone: the entries of the last L of `syls` for L from
+/// the longest down, one per word string.
+fn lexicon_list(syls: &[&str]) -> Vec<String> {
+    let lex = &shared().lex;
+    let mut seen = std::collections::HashSet::new();
+    let mut v = Vec::new();
+    for l in (1..=lex.max_len.min(syls.len())).rev() {
+        let key: Vec<String> = syls[syls.len() - l..].iter().map(|y| y.to_string()).collect();
+        for (w, _) in lex.entries(&key) {
+            if seen.insert(w.to_string()) {
+                v.push(w.to_string());
+            }
+        }
+    }
+    v
+}
+/// `row` followed by the lexicon list without the words the row has.
+fn row_then_lexicon(row: &[String], syls: &[&str]) -> Vec<String> {
+    let mut v = row.to_vec();
+    v.extend(lexicon_list(syls).into_iter().filter(|w| !row.contains(w)));
+    v
+}
+/// The value of an engine call that must succeed, as an assertion (a choice that leaves the engine in error is a failed
+/// assertion here, not a bare unwrap panic).
+fn must<T>(r: Result<T, EngineError>) -> T {
+    assert!(r.is_ok(), "the engine call failed: {:?}", r.as_ref().err());
+    r.unwrap()
+}
+fn down(e: &mut Engine) -> Output {
+    e.key(kind(KeyKind::Down)).unwrap()
+}
+/// "我想" before the cursor, ㄋㄧˇ typed, nothing pending: a state with a row that the window opens from.
+fn completed_row() -> (Engine, Output) {
+    build("我想", &[Syl("ㄋㄧˇ")], "")
+}
+
+#[test]
+fn down_opens_the_window_with_the_row_in_front() {
+    let (mut e, o) = completed_row();
+    let r = row(&o);
+    assert!(!r.is_empty(), "precondition: a row");
+    assert_passive(&o);
+    let d = e.key(kind(KeyKind::Down)).unwrap();
+    assert_eq!(d.candidates[..r.len()], r[..], "the row's items first, in the row's order");
+    assert_eq!(d.selected, Some(0));
+    assert!(r.iter().any(|w| lexicon_list(&["ㄋㄧˇ"]).contains(w)), "precondition: the row and the lexicon share a word, so dropping the dedup shows");
+    let want = row_then_lexicon(&r, &["ㄋㄧˇ"]);
+    assert!(want.len() > r.len(), "precondition: the lexicon adds items");
+    assert_eq!(d.total as usize, want.len(), "row + the lexicon list without the row's words");
+    assert_eq!(whole_window(&mut e, d), want);
+}
+
+#[test]
+fn space_opens_the_same_window_as_down() {
+    let (mut a, _) = completed_row();
+    let (mut b, _) = completed_row();
+    let (da, sb) = (a.key(kind(KeyKind::Down)).unwrap(), b.key(kind(KeyKind::Space)).unwrap());
+    assert!(da.selected == Some(0) && da.total > 1);
+    assert!(da == sb);
+}
+
+#[test]
+fn down_with_a_pending_syllable_lists_only_the_row() {
+    let (mut e, o) = build(B.0, B.1, B.2);
+    let r = row(&o);
+    assert!(!r.is_empty(), "precondition: a row");
+    assert!(o.preedit.ends_with('ㄋ'));
+    let d = e.key(kind(KeyKind::Down)).unwrap();
+    assert!(d.handled);
+    assert_eq!((d.candidates.clone(), d.selected, d.total as usize), (r.clone(), Some(0), r.len()), "the row and nothing else");
+    assert_eq!(d.preedit, o.preedit, "the unfinished syllable is still there");
+    // Esc closes the window, the row stays gone, and the unfinished syllable is still pending.
+    let x = e.key(kind(KeyKind::Esc)).unwrap();
+    assert_no_row(&x);
+    assert_eq!(x.preedit, o.preedit);
+}
+
+#[test]
+fn down_with_a_pending_syllable_and_no_row_is_ignored() {
+    let mut e = engine();
+    e.set_prediction(false).unwrap();
+    let (mut e, o) = build_in(e, B.0, B.1, B.2);
+    assert_no_row(&o);
+    assert!(o.preedit.ends_with('ㄋ'));
+    let d = e.key(kind(KeyKind::Down)).unwrap();
+    assert!(d.handled);
+    assert!(d == o, "rule 13: Down changes nothing");
+}
+
+#[test]
+fn a_row_item_chosen_with_a_pending_syllable_equals_tab_then_the_digit() {
+    let (mut a, o) = build(B.0, B.1, B.2);
+    let (mut b, _) = build(B.0, B.1, B.2);
+    assert!(row(&o).len() >= 2);
+    down(&mut a);
+    b.key(kind(KeyKind::Tab)).unwrap();
+    let (oa, ob) = (must(a.key(digit(2))), must(b.key(digit(2))));
+    assert_eq!(oa.preedit, ob.preedit);
+    assert_ne!(oa.preedit, o.preedit, "something was chosen");
+    assert!(oa == ob);
+}
+
+#[test]
+fn a_row_item_chosen_from_the_window_equals_tab_then_the_digit() {
+    let mk = || build_in(learner_engine(Profile::Chat, None), "我想", &[Syl("ㄋㄧˇ")], "");
+    let (mut a, o) = mk();
+    let (mut b, _) = mk();
+    assert!(row(&o).len() >= 2);
+    down(&mut a);
+    let oa = must(a.key(digit(2)));
+    b.key(kind(KeyKind::Tab)).unwrap();
+    let ob = must(b.key(digit(2)));
+    assert_eq!(oa.preedit, row(&o)[1], "the second item of the row was chosen");
+    assert!(oa == ob);
+    let (ca, cb) = (a.key(kind(KeyKind::Enter)).unwrap(), b.key(kind(KeyKind::Enter)).unwrap());
+    assert_eq!(ca.commit, row(&o)[1]);
+    assert!(ca == cb);
+    assert_eq!(a.learner().records().len(), 1, "the choice is learned");
+    assert!(a.learner().records() == b.learner().records(), "and learned the same");
+}
+
+#[test]
+fn a_lexicon_item_chosen_from_the_window_is_a_repick() {
+    let mk = |predict: bool| {
+        let mut e = learner_engine(Profile::Chat, None);
+        e.set_prediction(predict).unwrap();
+        build_in(e, "我想", &[Syl("ㄋㄧˇ")], "")
+    };
+    let (mut a, o) = mk(true);
+    let r = row(&o);
+    assert!(r.len() < 9, "precondition: the first lexicon item is on the first page");
+    down(&mut a);
+    let oa = a.pick(r.len()).unwrap().expect("a click on the first lexicon item");
+    // The same item chosen in the window of an engine without the row (a repick of the span): same display and same learning.
+    let want = lexicon_list(&["ㄋㄧˇ"]).into_iter().find(|w| !r.contains(w)).unwrap();
+    let (mut b, _) = mk(false);
+    let mut ob = down(&mut b);
+    while ob.candidates[ob.selected.unwrap()] != want {
+        ob = b.key(kind(KeyKind::Right)).unwrap();
+    }
+    ob = b.key(kind(KeyKind::Enter)).unwrap();
+    assert_eq!(oa.preedit, want);
+    assert!(oa == ob);
+    let (ca, cb) = (a.key(kind(KeyKind::Enter)).unwrap(), b.key(kind(KeyKind::Enter)).unwrap());
+    assert!(ca == cb);
+    assert!(a.learner().records() == b.learner().records(), "a repick is learned as before, with the displaced word");
+}
+
+#[test]
+fn pick_on_a_row_item_in_the_window_equals_the_digit() {
+    let (mut a, o) = completed_row();
+    let (mut b, _) = completed_row();
+    down(&mut a);
+    down(&mut b);
+    let (oa, ob) = (must(a.pick(0)).unwrap(), must(b.key(digit(1))));
+    assert_eq!(oa.preedit, row(&o)[0]);
+    assert!(oa == ob);
+}
+
+#[test]
+fn the_window_after_punctuation_has_no_row_items() {
+    let mut e = engine();
+    e.set_prediction(false).unwrap();
+    let (mut off, _) = build_in(e, "我想", &[Syl("ㄋㄧˇ"), Punct("，")], "");
+    let (mut on, _) = build("我想", &[Syl("ㄋㄧˇ"), Punct("，")], "");
+    let (a, b) = (on.key(kind(KeyKind::Down)).unwrap(), off.key(kind(KeyKind::Down)).unwrap());
+    assert_eq!(a.candidates.first().map(String::as_str), Some("，"));
+    assert!(a == b, "the list is the punctuation window, as without the row");
+}
+
+#[test]
+fn esc_closes_the_window_and_the_row_stays_gone() {
+    let (mut e, o) = completed_row();
+    assert!(!row(&o).is_empty());
+    assert!(down(&mut e).total > 1);
+    let x = e.key(kind(KeyKind::Esc)).unwrap();
+    assert_no_row(&x);
+}
+
+#[test]
+fn cmd_backspace_on_a_row_item_in_the_window_forgets_it() {
+    let dir = tmp_dir("pdown-forget");
+    let mut e = learner_engine(Profile::Formal, Some(&dir));
+    teach(&mut e, "我想喝一杯", "ㄋ", "牛奶");
+    e.set_left_context("我想喝一杯");
+    let o = typ(&mut e, &["ㄋㄧㄡˊ"], "");
+    let r = row(&o);
+    assert_eq!(r[0], "牛奶", "precondition: the taught word leads the row {r:?}");
+    let learned = |e: &Engine| e.learner().records().iter().filter(|x| x.reading == milk_reading() && x.word == "牛奶").count();
+    assert_eq!(learned(&e), 1);
+    down(&mut e);
+    let d = e.key(cmd_bs()).unwrap();
+    assert!(d.handled);
+    assert_eq!(learned(&e), 0, "forgotten");
+    assert_eq!(d.selected, Some(0), "the window is still open, on the first item");
+    let want = row_then_lexicon(&r[1..], &["ㄋㄧㄡˊ"]);
+    assert_eq!(d.total as usize, want.len());
+    assert_eq!(whole_window(&mut e, d), want, "the row without the word, then the lexicon's");
+    drop(e);
+    assert_eq!(learner_engine(Profile::Formal, Some(&dir)).learner().records().len(), 0, "the file was rewritten");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// B.3.1 ⌘⌫: a forgotten row word that is also a lexicon entry of the span moves to its place in the lexicon part, and the
+/// selection follows it there.
+#[test]
+fn cmd_backspace_on_a_row_word_the_lexicon_also_has_selects_it_in_the_lexicon_part() {
+    let (mut e, o) = completed_row();
+    let r = row(&o);
+    let lexl = lexicon_list(&["ㄋㄧˇ"]);
+    let (i, w) = r.iter().enumerate().find(|(_, w)| lexl.contains(w)).map(|(i, w)| (i, w.clone())).expect("precondition: a row word in the lexicon");
+    let mut d = down(&mut e);
+    for _ in 0..i {
+        d = e.key(kind(KeyKind::Right)).unwrap();
+    }
+    assert_eq!(d.candidates[d.selected.unwrap()], w);
+    let x = e.key(cmd_bs()).unwrap();
+    let rest: Vec<String> = r.iter().filter(|x| **x != w).cloned().collect();
+    let want = row_then_lexicon(&rest, &["ㄋㄧˇ"]);
+    let at = want.iter().position(|x| *x == w).unwrap();
+    assert!(at >= rest.len(), "the word is in the lexicon part now");
+    assert_eq!(x.total as usize, want.len());
+    assert_eq!((x.first as usize + x.selected.unwrap(), x.candidates[x.selected.unwrap()].clone()), (at, w), "selected on the word's new place");
+}
+
+/// B.3.1: prediction off or another profile closes a window that carries row items (as Esc); a lexicon-only window stays.
+#[test]
+fn prediction_off_or_a_profile_change_closes_a_window_with_row_items() {
+    let (mut a, _) = completed_row();
+    assert!(down(&mut a).total > 1);
+    let x = a.set_prediction(false).unwrap();
+    assert!(x.candidates.is_empty() && x.selected.is_none(), "prediction off closes the window");
+    let (mut b, _) = completed_row();
+    down(&mut b);
+    let y = b.set_profile(Profile::Formal).unwrap();
+    assert!(y.selected.is_none(), "a profile change closes the window");
+    let mut e = engine();
+    e.set_prediction(false).unwrap();
+    let (mut c, _) = build_in(e, "我想", &[Syl("ㄋㄧˇ")], "");
+    let d = down(&mut c);
+    assert_eq!(c.set_profile(Profile::Formal).unwrap().total, d.total, "a lexicon-only window stays open");
+}
+
+#[test]
+fn cmd_backspace_on_the_only_row_item_closes_the_window() {
+    // A lexicon with the one entry ㄒㄧㄣ 鑫: the row for an unfinished ㄒ is [鑫] alone.
+    let s = shared();
+    let lex = Arc::new(Lexicon::parse("ㄒㄧㄣ 鑫 -1.0\n").unwrap());
+    let capped = Arc::new(CappedLexicon::new(lex.clone(), "", &s.lm, None).unwrap());
+    let mk = || {
+        let mut e = Engine::with_lexicon(lex.clone(), L);
+        e.set_lm(s.lm.clone(), capped.clone());
+        e.set_today(Some(DAY));
+        e.set_learning(true);
+        e
+    };
+    let mut e = mk();
+    e.set_left_context("他們");
+    typ(&mut e, &[], "ㄒ");
+    pick_word(&mut e, "鑫");
+    assert_eq!(e.key(kind(KeyKind::Enter)).unwrap().commit, "鑫");
+    assert_eq!(e.learner().records().len(), 1, "precondition: 鑫 is taught");
+    e.set_left_context("他們");
+    let o = typ(&mut e, &[], "ㄒ");
+    assert_eq!(row(&o), ["鑫"], "precondition: a row of one item");
+    let d = down(&mut e);
+    assert_eq!((d.candidates.clone(), d.selected), (vec!["鑫".to_string()], Some(0)));
+    let x = e.key(cmd_bs()).unwrap();
+    assert!(x.handled);
+    assert_no_row(&x);
+    assert!(x.preedit.ends_with('ㄒ'), "the unfinished syllable stays: {}", x.preedit);
+    assert_eq!(e.learner().records().len(), 0, "forgotten");
 }

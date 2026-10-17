@@ -66,6 +66,9 @@ fn run(packs: Option<(&Path, u32)>) -> Vec<Output> {
             ("我想喝一杯", vec![], "ㄋ"),
         ] {
             e.reset(ResetMode::Discard);
+            // Predict-down contract B.4: the window is the subject of the first three sequences, and it now lists a prediction
+            // row first; only the last sequence (the row, with a pending syllable) keeps the row on.
+            e.set_prediction(!pending.is_empty()).unwrap();
             e.set_left_context(left);
             let mut keys: Vec<Key> = syls.iter().flat_map(|s| syl_keys(s)).collect();
             keys.extend(pending.chars().map(|c| Key::ch(L.key_of_symbol(c).unwrap(), 0)));
