@@ -170,10 +170,21 @@ fn type_syls(e: &mut Engine, s: &str) -> Output {
     }
     last.unwrap()
 }
-/// Type `s`, put the cursor after syllable `end`, open the candidates and choose `word` (as engine_lm.rs does).
-fn fix_word(e: &mut Engine, s: &str, end: usize, word: &str) -> Output {
-    type_syls(e, s);
-    fix_at(e, end, word)
+/// A fixed one-syllable `word` (the syllable `mid`) with `left` and `right` typed around it. A candidate pick freezes the words
+/// outside its span (docs/contracts/repick-freeze.md), so the word is picked over its own syllable first and the stretches are typed
+/// afterwards: they stay free, which is the state these tests score.
+fn fix_word(e: &mut Engine, left: &str, mid: &str, word: &str, right: &str) -> Output {
+    type_syls(e, mid);
+    let mut o = fix_at(e, 1, word);
+    if !right.is_empty() {
+        e.key(Key::new(KeyKind::End)).unwrap();
+        o = type_syls(e, right);
+    }
+    if !left.is_empty() {
+        e.key(Key::new(KeyKind::Home)).unwrap();
+        o = type_syls(e, left);
+    }
+    o
 }
 
 /// Choose `word` for the syllables ending at `end` of what is typed: the cursor goes Home and Right `end` times, then the candidate window.
@@ -202,7 +213,7 @@ fn fixed_word_in_the_middle_hand_values_and_total_score() {
     let f = fx(true);
     let plain = lm_of(false, false, false); // P2 without Kneser-Ney
     let mut e = engine(&f, Profile::Formal);
-    let o = fix_word(&mut e, "ㄓㄢˋ ㄊㄚ ㄓㄢˋ", 2, "他");
+    let o = fix_word(&mut e, "ㄓㄢˋ", "ㄊㄚ", "他", "ㄓㄢˋ");
     assert_eq!(o.preedit, "占他占");
     let (lam, d) = (Profile::Formal.lambda(), 0.75);
     let pb = |lp: f64| 10f64.powf(lp);
@@ -337,9 +348,12 @@ fn two_word_stretches_keep_the_table_closing_term() {
     close(e.total_score().unwrap(), s[0].0);
     // End::Next, between two fixed words: 他 | 他占 | 他 would put the stretch 他占 between fixed 他, so use ㄊㄚ ㄊㄚ ㄓㄢˋ ㄊㄚ with the ends fixed
     let mut e = engine(&f, Profile::Formal);
-    type_syls(&mut e, "ㄊㄚ ㄊㄚ ㄓㄢˋ ㄊㄚ");
+    // (typed around the picks, see fix_word: the second pick would freeze the stretch between)
+    fix_word(&mut e, "", "ㄊㄚ", "他", "");
+    e.key(Key::new(KeyKind::Home)).unwrap();
+    type_syls(&mut e, "ㄊㄚ");
     fix_at(&mut e, 1, "他");
-    assert_eq!(fix_at(&mut e, 4, "他").preedit, "他他占他");
+    assert_eq!(type_syls(&mut e, "ㄊㄚ ㄓㄢˋ").preedit, "他他占他");
     let next = End::Next { word: "他", lp: -2.0, delta: 0.0 };
     let s = decode_segment_learned(&f.capped, &syls("ㄊㄚ ㄓㄢˋ"), &f.lm, cfg, "他", next, core::BEAM_S1, None, true).unwrap();
     let (table, bigram) = (f.lm.word3(cfg, Some("他"), "占", "他", -2.0), f.lm.word3(cfg, None, "占", "他", -2.0));
@@ -445,7 +459,7 @@ fn chat_is_the_same_with_and_without_the_table() {
     // the same for the fixed word case
     let fixed = |f: &Fx| {
         let mut e = engine(f, Profile::Chat);
-        let o = fix_word(&mut e, "ㄓㄢˋ ㄊㄚ ㄓㄢˋ", 2, "他");
+        let o = fix_word(&mut e, "ㄓㄢˋ", "ㄊㄚ", "他", "ㄓㄢˋ");
         (o.preedit, e.total_score().map(f64::to_bits))
     };
     assert_eq!(fixed(&with), fixed(&without));

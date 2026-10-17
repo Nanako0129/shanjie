@@ -102,14 +102,16 @@ int32_t shanjie_engine_key(ShanjieEngine *engine, ShanjieKey key, ShanjieOutput 
 //   CONTROL+ENTER pass through unchanged (rule 1).
 // s3b2 (docs/contracts/s3b2-glass-panel.md section 8): mouse pick. index is a position in the last
 //   output's candidates; the core chooses candidate_first + index through the same path as ENTER, so
-//   learning behaves identically. V3 (docs/contracts/v3-engine.md section 4): with the candidate window
+//   learning behaves identically (a candidate pick also keeps the words outside its span as they were shown:
+//   docs/contracts/repick-freeze.md). V3 (docs/contracts/v3-engine.md section 4): with the candidate window
 //   closed and a prediction row showing (entered or not), pick(index) selects that row's item (index
 //   counts from 0 in the row; the click is an explicit choice). Section 10: the pick is learned like a
 //   candidate-window re-pick (nothing displaced) at the commit, when learning is on at the pick and at the commit.
 //   Predict-down (docs/contracts/predict-down.md B.3.1): a window opened while a passive prediction row was showing lists
 //   the row's items first, in the row's order; picking one of them (or its digit, or ENTER on it) is picking it from the
 //   row, the same as the call above, then the window closes. One whose reading is exactly the typed syllables before the
-//   cursor is the lexicon's candidate for that span, and picking it is a re-pick (B.3.1 revision of 2026-10-17).
+//   cursor is the lexicon's candidate for that span, and picking it is a re-pick (B.3.1 revision of 2026-10-17). Any
+//   prediction pick, from the row or the window, keeps the words left of its span as shown (repick-freeze section 13).
 //   1 when engine or out is NULL; 2 when there is neither a candidate window nor a prediction row, or
 //   index is outside that output (state unchanged); 4 internal (engine reset). *out is NULL on any error.
 int32_t shanjie_engine_pick(ShanjieEngine *engine, uint32_t index, ShanjieOutput **out);
@@ -229,12 +231,16 @@ int32_t shanjie_engine_set_learning(ShanjieEngine *engine, uint32_t enabled);
 int32_t shanjie_engine_learning_open(ShanjieEngine *engine, const char *dir);
 // Forgetting: KEY with COMMAND (bit3) and kind BACKSPACE (4) while candidates are open removes the
 //   highlighted word's learned records for that reading (all contexts) and re-decodes; the output
-//   shows the new composition with the candidates still open. On a prediction-row item at the front of the
-//   window (predict-down B.3.1) the row is recomputed and the list rebuilt without that word, the selection
-//   on the word if it is still listed, else on the first item; a rebuilt list that is empty closes the
-//   window (as Esc). Without candidates the key passes through,
+//   shows the new composition with the candidates still open. When the forgotten word was in effect over that span
+//   (exact or last-character level under its context), words the engine fixed (repick-freeze: around a re-pick or a
+//   prediction pick, or the pieces a Backspace left) over that span are freed and decode again; other fixed words stay.
+//   (The pieces a Backspace or Delete left are also all freed by the next typed syllable, repick-freeze section 15.)
+//   On a prediction-row item at the front of the window (predict-down B.3.1) the row is recomputed and the list
+//   rebuilt without that word, the selection on the word if it is still listed, else on the first item; a rebuilt
+//   list that is empty closes the window (as Esc). Without candidates the key passes through,
 //   except while the V3 prediction row is entered: there it forgets the selected item the same way (and drops a
-//   pending learn of it), recomputes the row, and the row stays entered with the selection on that word.
+//   pending learn of it), recomputes the row, and the row stays entered with the selection on that word;
+//   it never frees fixed words.
 //   After a successful learning_open a forget ALWAYS rewrites the whole learning file, even when
 //   memory held no record of the word (a record pruned on load can still be in the file); before any
 //   successful learning_open it changes memory only. A failed rewrite sets status bit0.

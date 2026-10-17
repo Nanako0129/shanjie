@@ -1938,6 +1938,83 @@ fn global_eps_table() {
     }
 }
 
+// ---------- repick-freeze: forgetting a frozen word (s4-learning section 1.5, repick-freeze section 2) ----------
+
+/// Two words A+B. A is taught (警官 over the default 景觀), B is re-picked so A is frozen, then ⌘⌫ on A's learned word.
+/// Expected display: A's syllables decoded alone without the record (`lm::decode_segment`, same profile, same start,
+/// closing into the picked B), then B. Measured: A reads 景觀 again, B stays the picked 公座.
+#[test]
+fn forget_a_frozen_word_redecodes_it_without_the_record() {
+    let (a_reading, b_reading) = ("ㄐㄧㄥˇ ㄍㄨㄢ", "ㄍㄨㄥ ㄗㄨㄛˋ");
+    let (a_taught, b_picked) = ("警官", "公座");
+    let s = shared();
+    let mut e = engine();
+    // teach A (in front of B: a sentence-start record holds the syllable after the word, rule 8): type, re-pick A's span, commit
+    type_syls(&mut e, &format!("{a_reading} {b_reading}"));
+    pick(&mut e, 4, 2, a_taught);
+    e.key(k(KeyKind::Enter)).unwrap();
+    assert!(e.learner().records().iter().any(|r| r.word == a_taught), "A is taught");
+    // A+B: A shows the learned word; re-pick B so A is frozen
+    let o = type_syls(&mut e, &format!("{a_reading} {b_reading}"));
+    assert!(o.preedit.starts_with(a_taught), "learned A shown: {}", o.preedit);
+    pick(&mut e, 4, 4, b_picked);
+    // ⌘⌫ on A's learned word
+    e.key(k(KeyKind::Home)).unwrap();
+    e.key(k(KeyKind::Right)).unwrap();
+    e.key(k(KeyKind::Right)).unwrap();
+    let o = e.key(k(KeyKind::Space)).unwrap();
+    highlight(&mut e, o, a_taught);
+    let o = e.key(Key { kind: KeyKind::Backspace, ch: '\0', modifiers: MOD_COMMAND }).unwrap();
+    assert!(e.learner().records().iter().all(|r| r.word != a_taught));
+    let a_syls = syls(a_reading);
+    let (lp, delta) = s.capped.best_lp_delta(&syls(b_reading), b_picked).unwrap();
+    let want = lm::decode_segment(
+        &s.capped, &a_syls, &s.lm, lm::Profile::Chat.lambda(), "<s>", lm::End::Next { word: b_picked, lp, delta }, 64,
+    )
+    .unwrap()[0]
+        .1
+        .iter()
+        .map(|w| w.0)
+        .collect::<String>();
+    assert_ne!(want, a_taught, "the unlearned decode differs from the taught word");
+    println!("forget on frozen A: {} (taught {a_taught}, unlearned {want})", o.preedit);
+    assert_eq!(o.preedit, format!("{want}{b_picked}"));
+}
+
+/// Repick-freeze section 7.2: a re-pick cuts the learned word 警官 (井 over the first syllable); the left-over 官 and
+/// 工作 are frozen. ⌘⌫ on 警官 (records go) frees the frozen words over its span (官) only: ㄍㄨㄢ decodes again between
+/// the user's 井 and the still frozen 工作, without the record.
+#[test]
+fn forget_a_cut_learned_word_leaves_no_pieces() {
+    let reading = "ㄐㄧㄥˇ ㄍㄨㄢ ㄍㄨㄥ ㄗㄨㄛˋ";
+    let mut e = engine();
+    // Taught in front of 工作 (a sentence-start record holds the syllable after the word, rule 8).
+    type_syls(&mut e, reading);
+    pick(&mut e, 4, 2, "警官");
+    e.key(k(KeyKind::Enter)).unwrap();
+    assert!(type_syls(&mut e, reading).preedit.starts_with("警官"));
+    pick(&mut e, 4, 1, "井");
+    e.key(k(KeyKind::Home)).unwrap();
+    e.key(k(KeyKind::Right)).unwrap();
+    e.key(k(KeyKind::Right)).unwrap();
+    let o = e.key(k(KeyKind::Space)).unwrap();
+    highlight(&mut e, o, "警官");
+    let got = e.key(Key { kind: KeyKind::Backspace, ch: '\0', modifiers: MOD_COMMAND }).unwrap().preedit;
+    assert!(e.learner().records().iter().all(|r| r.word != "警官"));
+    let s = shared();
+    let (lp, delta) = s.capped.best_lp_delta(&syls("ㄍㄨㄥ ㄗㄨㄛˋ"), "工作").unwrap();
+    let mid = lm::decode_segment(
+        &s.capped, &syls("ㄍㄨㄢ"), &s.lm, lm::Profile::Chat.lambda(), "井", lm::End::Next { word: "工作", lp, delta }, 64,
+    )
+    .unwrap()[0]
+        .1
+        .iter()
+        .map(|w| w.0)
+        .collect::<String>();
+    println!("cut learned word, forgotten: {got} (shown with the record: 井官工作)");
+    assert_eq!(got, format!("井{mid}工作"));
+}
+
 /// enter-pending contract §3 item 2: an unfinished syllable before a re-picked word, committed by Enter, changes nothing
 /// in what is learned (learn_commit sees the decoded text, not the shown one).
 #[test]
