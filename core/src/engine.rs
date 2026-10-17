@@ -406,8 +406,9 @@ struct Cands {
     /// syllable the keys typed, and this is that syllable's reading (the token's reading is replaced by it when it is chosen).
     zh: Option<String>,
     /// Predict-down contract B.3.1: the prediction row's items the window opened with. They are the first `rows.len()`
-    /// entries of `list` (the length field of a list entry cannot mark them: the English window uses 0), and choosing
-    /// one is choosing it from the row. They go with the window when it closes.
+    /// entries of `list` (the length field of a list entry cannot mark them: the English window uses 0). Choosing one whose
+    /// reading is longer than or differs from the typed syllables is choosing it from the row; one over exactly those
+    /// syllables is a re-pick (`choose`). They go with the window when it closes.
     rows: Vec<Pred>,
 }
 
@@ -1766,21 +1767,17 @@ impl Engine {
     /// it. With learning on `pre` is `Some("")` (section 10.1): taught at commit like a re-pick, with nothing displaced.
     fn choose_pred(&mut self, i: usize) -> Result<Output, EngineError> {
         let p = self.pred.swap_remove(i);
-        self.apply_pred(p, false)
+        self.apply_pred(p)
     }
 
     /// `choose_pred` for an item already taken out of the row (or out of a window that carried the row, predict-down B.3.1).
-    /// `freeze`: the item came from the candidate window, a re-pick, so the words outside `[start, cursor)` stay as shown
-    /// (repick-freeze section 12). Rows exist only with the cursor at the end: no index right of it moves.
-    fn apply_pred(&mut self, p: Pred, freeze: bool) -> Result<Output, EngineError> {
+    fn apply_pred(&mut self, p: Pred) -> Result<Output, EngineError> {
         let Pred { word, reading, start, key, .. } = p;
         let pre = self.learning.then(String::new);
         self.clear_pred();
         self.clear_pend();
         let (m, end) = (reading.len(), self.cursor);
-        let frozen = if freeze { self.freeze_outside(start, end) } else { Vec::new() };
         self.fixed.retain(|f| !(f.start < end && start < f.end));
-        self.fixed.extend(frozen);
         self.syls.splice(start..end, reading);
         let key = pre.is_some().then_some(key);
         self.fixed.push(Fixed { start, end: start + m, word, pre, key, pick_key: None, zh: None, frozen: false });
@@ -2826,10 +2823,13 @@ impl Engine {
             return self.choose_english(idx, false);
         }
         let Some(mut c) = self.cands.take() else { return Ok(()) };
-        if idx < c.rows.len() {
-            // Predict-down contract B.3.1: a row item chosen from the window is chosen from the row; the 40th unit's commit
-            // waits in `commit_out` for `chosen`, as an English item's does.
-            let o = self.apply_pred(c.rows.swap_remove(idx), true)?;
+        // Predict-down contract B.3.1 (revision 2026-10-17): a row item over exactly the typed syllables before the cursor is
+        // the lexicon's candidate for that span and falls through to the re-pick below (`list[idx]` is the same word and
+        // length); one whose reading is longer or differs (it completes an unfinished unit or an abbreviation, or runs past the
+        // typed syllables) is chosen from the row, and the 40th unit's commit waits in `commit_out` for `chosen`, as an English
+        // item's does.
+        if c.rows.get(idx).is_some_and(|p| p.reading[..] != self.syls[p.start..self.cursor]) {
+            let o = self.apply_pred(c.rows.swap_remove(idx))?;
             if !o.commit.is_empty() {
                 self.commit_out = Some(o.commit);
             }
