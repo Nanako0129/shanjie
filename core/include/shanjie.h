@@ -190,8 +190,9 @@ int32_t shanjie_engine_load_english(ShanjieEngine *engine, const char *path);
 //   Digits (docs/contracts/digits.md): with it on (standard layout, abbreviation composer off, a model and `digits.tsv` in the data
 //   directory; the table is optional, without it nothing below happens) the keys 0-9 . / - type half-width digit-string tokens
 //   into the composition: each key is scored as digit or Zhuyin from the text before it, a run keeps its last four keys unsettled,
-//   and a Zhuyin key outside the alphabet, a tone key or Space settles the syllable when it wins. Every other key first turns the
-//   unsettled keys into digits. Turning it off (or the abbreviation composer on) does that too; the snapshot's `commit` may carry
+//   and a Zhuyin key outside the alphabet, a tone key or Space settles the syllable when it wins. DOWN, ENTER and SHIFT+ENTER end
+//   the run as the screen shows it (digits.md A.12: the keys shown as digits become tokens, the keys shown as Zhuyin stay an
+//   unfinished syllable); every other key first turns the unsettled keys into digits. Turning it off (or the abbreviation composer on) does that too; the snapshot's `commit` may carry
 //   the 40th-unit composition.
 int32_t shanjie_engine_set_english(ShanjieEngine *engine, uint32_t enabled, ShanjieOutput **out); // 0 or 1; returns a snapshot
 // set_english_inline 0 or 1 (2 otherwise, state unchanged), default 1 at engine creation, like set_english in its codes and its

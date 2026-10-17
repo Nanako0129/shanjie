@@ -744,14 +744,18 @@ fn review_p2_1_the_40th_unit_sends_no_stale_tail() {
     assert_eq!(o.commit, format!("{}12", "，".repeat(38)), "{:?}", o.commit);
     assert!(!o.commit.contains('ㄓ') && !o.preedit.contains('ㄓ'));
     assert_eq!(o.preedit, "3458", "the rest of the buffer, shown as the baseline scores it");
-    // Enter and Space behind 1 2 3 4 5: nothing but the keys typed (the ㄓ of the 5 is a digit key, not a syllable that was finished).
-    for tail in ["Enter", "_ Enter"] {
-        let mut e = eng();
-        let os = run_all(&mut e, &format!("{} 1 2 3 4 5 {tail}", commas(38)));
-        let all = all_commit(&os);
-        assert!(!all.contains('ㄓ'), "{tail}: {all:?}");
-        assert!(all.starts_with(&"，".repeat(38)) && all.contains("12345"), "{tail}: {all:?}");
-    }
+    // Space then Enter behind 1 2 3 4 5: nothing but the keys typed (the ㄓ of the 5 is a digit key, not a syllable that was finished).
+    let mut e = eng();
+    let os = run_all(&mut e, &format!("{} 1 2 3 4 5 _ Enter", commas(38)));
+    let all = all_commit(&os);
+    assert!(!all.contains('ㄓ'), "{all:?}");
+    assert!(all.starts_with(&"，".repeat(38)) && all.contains("12345"), "{all:?}");
+    // A.12 (was: no ㄓ either): Enter sends what the screen shows, the ㄓ of the 5 included.
+    let mut e = eng();
+    let os = run_all(&mut e, &format!("{} 1 2 3 4 5 Enter", commas(38)));
+    let shown = &os[os.len() - 2].preedit;
+    assert!(shown.ends_with("234ㄓ"), "premise: {shown:?}");
+    assert_eq!(all_commit(&os), format!("{}{}", "，".repeat(38), shown.trim_start_matches('，')), "{:?}", all_commit(&os));
 }
 
 /// P2-2: Enter ends a run whose flush reaches the 40th unit while more of the buffer is left: everything is sent, nothing stays behind.
@@ -862,4 +866,69 @@ fn review_p4_2_settings_clear_the_last_digits() {
         let l = list_after(&*t);
         assert!(!l.is_empty() && !l.contains(&"84".to_string()), "{name}: {l:?}");
     }
+}
+
+// ---------- A.12: Down, Enter and Shift+Enter end the run as the screen shows it ----------
+
+/// A.12: `1` alone shows as ㄅ; Down opens the list of the unfinished ㄅ, the same one the engine without the feature opens.
+#[test]
+fn a12_down_on_a_lone_key_opens_the_list_of_the_unfinished_syllable() {
+    let mut e = eng();
+    let shown = run(&mut e, "1");
+    assert_eq!(shown.preedit, "ㄅ", "premise: the screen shows the Zhuyin");
+    let o = run(&mut e, "Down");
+    let mut off = make(true, false);
+    run(&mut off, "1");
+    let want = run(&mut off, "Down");
+    assert!(!want.candidates.is_empty(), "premise: the list of ㄅ");
+    assert_eq!((o.candidates.clone(), o.total, o.selected, o.preedit.clone()), (want.candidates.clone(), want.total, want.selected, want.preedit.clone()));
+    assert_eq!(items(&mut e, &o), items(&mut off, &want));
+    assert!(syls(&e).is_empty(), "no digit token was made: {:?}", syls(&e));
+}
+
+/// A.12: `2` alone shows as ㄉ; Enter sends what the screen showed, not "2".
+#[test]
+fn a12_enter_on_a_lone_key_sends_what_the_screen_showed() {
+    let mut e = eng();
+    let shown = run(&mut e, "2");
+    assert_eq!(shown.preedit, "ㄉ", "premise");
+    let o = run(&mut e, "Enter");
+    assert_eq!(o.commit, shown.preedit);
+    assert_ne!(o.commit, "2");
+    assert!(syls(&e).is_empty() && o.preedit.is_empty());
+}
+
+/// A.12: with t = 0 (all digits on the screen) nothing changes.
+#[test]
+fn a12_enter_on_digits_on_the_screen_sends_the_digits() {
+    assert_eq!(typed("2 0 2 6 Enter"), "2026");
+}
+
+/// A.12: the screen shows digits and then a Zhuyin tail; Enter sends exactly that, Down turns the digits into tokens and lists the tail.
+#[test]
+fn a12_digits_then_a_tail_on_the_screen() {
+    let mut e = eng();
+    let shown = run(&mut e, "1 2 3 4 5");
+    assert!(shown.preedit.starts_with("1234") && shown.preedit.ends_with('ㄓ'), "premise: digits then a tail: {:?}", shown.preedit);
+    let o = run(&mut e, "Enter");
+    assert_eq!(o.commit, shown.preedit);
+    assert!(syls(&e).is_empty() && o.preedit.is_empty());
+
+    let mut e = eng();
+    let shown = run(&mut e, "1 2 3 4 5");
+    let o = run(&mut e, "Down");
+    assert_eq!(syls(&e), toks(&["_punct_1", "_punct_2", "_punct_3", "_punct_4"]), "the digit part became tokens");
+    assert!(!o.candidates.is_empty(), "the list of the tail");
+    assert!(o.preedit.starts_with("1234") && o.preedit.ends_with('ㄓ'), "{:?} (was {:?})", o.preedit, shown.preedit);
+}
+
+/// A.12: Shift+Enter sends the shown string (rule 12b) and passes the key through.
+#[test]
+fn a12_shift_enter_sends_the_shown_string_and_passes_through() {
+    let mut e = eng();
+    let shown = run(&mut e, "1 2 3 4 5");
+    let o = run(&mut e, "S-Enter");
+    assert_eq!(o.commit, shown.preedit);
+    assert!(!o.handled);
+    assert!(syls(&e).is_empty());
 }

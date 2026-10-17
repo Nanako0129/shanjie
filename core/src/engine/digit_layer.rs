@@ -225,11 +225,18 @@ impl Engine {
     /// The buffered keys become tokens and the run ends (a setting that ends English mixing, `reset(Commit)`, a boundary key). Returns what a
     /// 40th unit sent and whether there was a run.
     pub(super) fn digit_flush(&mut self) -> Result<(String, bool), EngineError> {
+        self.digit_end(false)
+    }
+
+    /// `digit_flush`, or (`by_screen`, digits.md A.12) the run ends as the screen shows it: the first `m` keys become tokens and the tail
+    /// stays the unfinished syllable (`pend`); with no tail that is the same as flushing everything.
+    fn digit_end(&mut self, by_screen: bool) -> Result<(String, bool), EngineError> {
         self.last_digits = None; // A.3.6: the other reading of a syllable that closed goes with a setting that ends the feature
         let Some(run) = self.drun.take() else { return Ok((String::new(), false)) };
-        let commit = self.emit_tokens(&run.buf)?;
-        self.d_shown = run.emitted.len() + run.buf.len();
-        self.clear_pend();
+        let m = if by_screen { run.m.min(run.buf.len()) } else { run.buf.len() };
+        let commit = self.emit_tokens(&run.buf[..m])?;
+        self.d_shown = run.emitted.len() + m;
+        self.set_pend_from(&run.buf[m..]);
         self.pred_dirty = true;
         Ok((commit, true))
     }
@@ -412,10 +419,12 @@ impl Engine {
     }
 
     /// Any other key ends the run: the buffer becomes tokens (a tail without a tone is not a word, so its keys are digits), the row is
-    /// recomputed for them (a window opened by this key lists it), and the key is handled as it would be.
+    /// recomputed for them (a window opened by this key lists it), and the key is handled as it would be. Down, Enter and Shift+Enter
+    /// (digits.md A.12) end it as the screen shows it instead: the tail that shows as Zhuyin stays an unfinished syllable.
     fn drun_boundary(&mut self, k: Key) -> Result<Output, EngineError> {
-        let (commit, _) = self.digit_flush()?;
-        if k.kind == KeyKind::Enter && !commit.is_empty() && self.syls.is_empty() {
+        let (commit, _) = self.digit_end(matches!(k.kind, KeyKind::Down | KeyKind::Enter))?;
+        let tail = self.pend.iter().any(Option::is_some);
+        if k.kind == KeyKind::Enter && !commit.is_empty() && self.syls.is_empty() && !tail {
             return Ok(self.view(true, commit)); // Enter that sent everything stops there (a 40th unit can leave tokens in a new composition)
         }
         self.pred_dirty = false;
