@@ -2,7 +2,8 @@
 //! passes (`~/Library/Application Support/shanjie/` in the app; a temporary directory in tests).
 //!
 //! Format: the header `#shanjie-learning v1`, then one record per line, five tab-separated fields:
-//! context key, reading (syllables joined by `-`, as in the lexicon), word, weight, day. A record
+//! context key (≤ 2 Han characters, `^>` plus a reading, "" for global, or "#" for a new word of new-word B), reading
+//! (syllables joined by `-`, as in the lexicon), word, weight, day. A record
 //! that would not read back as itself (a tab, newline or control character in a field, a `-` or an
 //! empty syllable in the reading, a bad context, weight or day) is never written and is skipped one
 //! line at a time on load. A bad context includes the ones contract §14 retired: a single character
@@ -21,7 +22,7 @@
 //! bad header or an oversized file is renamed to `learning.tsv.corrupt` (0600, one copy). Nothing
 //! here logs: no path and no record ever leaves this module except as data.
 
-use crate::learn::{context_key, is_full_context, is_single, Record, GLOBAL, NEXT_PREFIX, SENTINEL};
+use crate::learn::{context_key, is_full_context, is_han, is_single, Record, GLOBAL, NEWWORD, NEWWORD_MAX, NEWWORD_MIN, NEXT_PREFIX, SENTINEL};
 use std::fmt::Write as _;
 use std::fs::{self, DirBuilder, File, OpenOptions, Permissions};
 use std::io::{ErrorKind, Read, Write};
@@ -36,7 +37,8 @@ pub const HEADER: &str = "#shanjie-learning v1";
 pub const MAX_BYTES: u64 = 16 * 1024 * 1024;
 /// Lines appended since the last full rewrite that force the next write to be a full rewrite (§4):
 /// bounds how many superseded lines the file and the load carry. Each re-picked span appends at most
-/// 3 lines (taught, displaced, global); one Enter can carry several spans.
+/// 3 lines (taught, displaced, global), each new word learned, used or halved one (new-word B); one Enter can carry
+/// several.
 pub const JOURNAL_MAX: usize = 1024;
 
 // <fcntl.h> values. std has no names for them and the crate has no libc dependency; the shipping
@@ -136,11 +138,17 @@ fn clean(s: &str) -> bool {
 /// A legal context key for `r` (s4-learning §14): `GLOBAL` for words of 2+ characters; one or two Han
 /// characters (a single-character word only with exactly two, rule 7); `NEXT_PREFIX` plus a clean,
 /// non-empty reading (`$` when nothing follows) for words of 2+ characters (rule 8). A bare "^" is
-/// never legal: sentence-start records live under the synthetic keys.
+/// never legal: sentence-start records live under the synthetic keys. A new-word record (context exactly
+/// `NEWWORD`, new-word B §2.3) needs a word of NEWWORD_MIN..=NEWWORD_MAX Han characters and one syllable per
+/// character; the single-character rules above are not relaxed for it.
 fn legal_context(r: &Record) -> bool {
     let c = r.context.as_str();
     if c == GLOBAL {
         return !is_single(&r.word);
+    }
+    if c == NEWWORD {
+        let n = r.word.chars().count();
+        return (NEWWORD_MIN..=NEWWORD_MAX).contains(&n) && r.word.chars().all(is_han) && r.reading.len() == n;
     }
     if let Some(next) = c.strip_prefix(NEXT_PREFIX) {
         return !is_single(&r.word) && clean(next);

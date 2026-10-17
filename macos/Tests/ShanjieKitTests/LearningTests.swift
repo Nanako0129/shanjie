@@ -167,6 +167,12 @@ final class LearningTests: XCTestCase {
         XCTAssertEqual(c.session.menu.map(\.title), ["標準鍵盤", "倚天鍵盤", "避免把敏感字詞排在前面", "即時預測", "可省略韻母", "中英混打（實驗）", "語意校正", "動漫與遊戲詞", "這個 App 用聊天設定", "善解設定…", "清除選字記憶…", "不要備份選字記憶"])
     }
 
+    /// The clear window's disclosure (new-word B section 2.7): the words learned from character re-picks are named
+    /// along with re-picks and prediction picks, and the Time Machine caveat stays.
+    func testClearMessageNamesNewWords() {
+        XCTAssertEqual(DialogText.clearMessage, "會刪除這台電腦上記住的改選、預測列選取，以及從逐字改選學到的新詞，之後要重新學。清除只刪本機檔案；已經進 Time Machine 備份或本機快照的副本不受影響。")
+    }
+
     /// A clear that does not succeed is shown, never passed off as done (here: no engine at all).
     func testFailedClearIsShown() {
         let dialogs = FakeDialogs()

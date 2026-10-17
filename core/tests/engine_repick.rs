@@ -127,14 +127,16 @@ fn records(e: &Engine) -> Vec<(String, String, String)> {
     e.learner().records().iter().map(|r| (r.context.clone(), r.reading.join(" "), r.word.clone())).collect()
 }
 
-/// Acceptance 5 (with 1): the commit teaches the re-picked span only; the frozen word teaches nothing.
+/// Acceptance 5 (with 1): the commit teaches the re-picked span only; the frozen word teaches nothing. New-word B
+/// (newword-b.md §2.2, merged 2026-10-17) also learns the run 版控 under its own `#` key: a run with at least one
+/// re-picked character, including the characters committed with it, by design; that record is not an S4 teach.
 #[test]
 fn freeze_teaches_only_the_picked_span() {
     let mut e = engine();
     shown(&mut e, "ㄅㄢˇ ㄎㄨㄥˋ", "要進");
     repick(&mut e, 1, "版");
     assert_eq!(commit(&mut e), "版控");
-    let r = records(&e);
+    let r: Vec<_> = records(&e).into_iter().filter(|(context, _, _)| context != "#").collect();
     assert!(r.iter().all(|(_, reading, word)| reading == "ㄅㄢˇ" && word == "版"), "{r:?}");
     assert!(!r.is_empty());
 }
