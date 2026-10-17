@@ -224,6 +224,7 @@ fn total_score_equals_the_top_decode_with_a_learned_word_and_kn_on() {
     e.set_lm(on.clone(), capped.clone());
     e.set_learning(true);
     e.set_today(Some(today));
+    e.set_prediction(false).unwrap(); // predict-down B.4: ↓ lists the lexicon only, so 佔 is a re-pick (model-v6 §2.8)
     let type_zhan = |e: &mut Engine| {
         e.set_left_context(left);
         e.key(Key::ch(l.key_of_symbol('ㄓ').unwrap(), 0)).unwrap();

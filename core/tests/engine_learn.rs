@@ -79,6 +79,7 @@ fn engine() -> Engine {
     shared_profile_check(&mut e);
     e.set_today(Some(DAY));
     e.set_learning(true);
+    e.set_prediction(false).unwrap(); // predict-down contract B.4: the subject is the lexicon window, which now lists a prediction row first
     e
 }
 const DAY: i64 = 20_000;
@@ -96,6 +97,7 @@ fn tiny(engine_text: &str, capped_text: &str) -> Engine {
     shared_profile_check(&mut e);
     e.set_today(Some(DAY));
     e.set_learning(true);
+    e.set_prediction(false).unwrap(); // predict-down contract B.4: as in `engine`
     e
 }
 /// Single characters learn only after exactly two Han characters (§12 rule 6, §14 rule 7), so the one-syllable

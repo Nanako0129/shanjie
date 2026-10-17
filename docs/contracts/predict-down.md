@@ -26,7 +26,7 @@
 - 只有詞庫清單那一支（2512）才加；標點、英文 token、空白單位那幾支（2481–2511）不變（那時預測列本來就是空的，1671）。游標不在尾端時預測列是空的（1647），清單同今天。
 - `Cands` 另存這些項目（`Vec<Pred>`，從 `old` 搬進去；`self.pred` 在窗開著時仍是空的，`view` 1813 照舊只顯示窗；關窗（第 7 條 `close_cands` 1218）時項目跟著窗丟掉——「關掉後也不恢復」不變）。**不要**用 `list` 的長度欄位標記（英文窗用 0 表示英文項，2489；`forget_highlighted` 2555 用長度算區間，長度 0 在尾端會索引 `syls[cursor]`，越界）。用「索引 < 預測項目數」判斷。
 - **選取**（`choose` 2586；1–9、Enter、滑鼠 `pick` 2383 都經過它）：索引落在預測項目 → 和在預測列選同一項完全相同（`choose_pred` 1738：讀音換掉 `syls[start..cursor]`、固定詞、游標、學習開著時 `pre = Some("")` 與起點鍵，§10.1），關窗。落在詞庫項目 → 今天的改選。
-- **⌘⌫**（`forget_highlighted` 2552）：反白在預測項目時照已進入預測列的 ⌘⌫（§10.3）：`forget_entry(讀音, 詞)`、重新解碼、重建清單（等於關窗後用同樣的 `old` 去掉那個詞再開一次；預測列不重算）、選取移到同一個詞的新位置（不在就 0）、窗保持開著（維護者 2026-10-17 選擇題）；重建後清單是空的（有未完成音節、預測列只有那一項時）就關窗，同 Esc。反白在詞庫項目照今天。
+- **⌘⌫**（`forget_highlighted` 2552）：反白在預測項目時照已進入預測列的 ⌘⌫（§10.3）：`forget_entry(讀音, 詞)`、重新解碼、重算預測列（同已進入預測列的 ⌘⌫；它的前文 key 與「去掉和顯示字相同的詞」跟著新的解碼）、去掉那個詞後重建清單〔2026-10-17 本地 review 後改：原本寫「預測列不重算、用同樣的 `old`」，遺忘改到前段解碼時，其他項目會帶著舊的前文 key 被選〕、選取移到同一個詞的新位置（不在就 0）、窗保持開著（維護者 2026-10-17 選擇題）；重建後清單是空的（有未完成音節、預測列只有那一項時）就關窗，同 Esc。反白在詞庫項目照今天。窗開著時關掉預測或換設定（`set_prediction(false)`、`set_profile`），帶預測項目的窗照 Esc 關掉，只有詞庫項目的窗不動（2026-10-17 本地 review 後加）。
 - 直排候選窗（3v–5p）：清單同樣是「預測項目＋詞庫項目」（有未完成音節時只有預測項目），其他不變。
 - 不改：`recompute_pred`、預測列的順序與內容、開窗時預測列被清掉、Tab／Shift+Tab／1–9／Esc 在預測列的規則、`pick` 在未進入預測列上的行為。
 
@@ -65,7 +65,7 @@
 
    **既有測試**：預測列預設開，載入模型、沒有未完成音節時按 ↓／空白開窗的既有測試，清單前面會多出預測項目。主題是詞庫清單的測試在設定時加 `set_prediction(false)`，不刪、不放寬任何斷言；至少 `engine_learn.rs` 的 `tiny`／`highlight`／`pick_open`／`row_expanded_pick_equals_enter` 一帶、`engine_predict.rs` 的 `a_prediction_pick_is_learned_like_a_repick`（570–578，要測的是詞庫改選）、`engine_english.rs` 用真模型的 `choose_word`／`repick_two`（`engine_learn.rs:790` 仍斷言 `candidates[1] == "欣"`）與 `engine_pack.rs` 的 `the_pack_switch_changes_the_result…`（它第四段「未完成 ㄋ 再按 ↓」從忽略變成開窗，也一併關掉預測）。執行者用 grep 找出 `engine_lm`、`engine_rerank`、`engine_demote`、`kn_tiny`、`tri_tiny`、`engine_vertical` 裡同樣情形的測試照辦。真正要改預期的，PR 逐項列出並說明；既有測試檔的 diff 只有 `set_prediction(false)` 與列出的預期變更。
 
-   **突變**（每項讓某個測試以斷言失敗；看結束碼與斷言數）：不放預測項目；放在詞庫項目之後；不去重；`choose` 把預測項目當詞庫項目；⌘⌫ 對預測項目不遺忘；有未完成音節時 ↓ 照舊忽略；列是空的時 ↓ 也開窗。
+   **突變**（每項讓某個測試以斷言失敗；看結束碼與斷言數）：不放預測項目；放在詞庫項目之後；不去重；`choose` 把預測項目當詞庫項目；⌘⌫ 對預測項目不遺忘；有未完成音節時 ↓ 照舊忽略。〔「列是空的時 ↓ 也開窗」是等價突變：列是空的時清單也是空的、什麼都不開，2026-10-17 review 後拿掉，程式裡的對應判斷也拿掉。〕
 2. **殼**（`swift test`）：`CandidateCellTests.testPassiveRowShowsTheTabGlyphOnTheFirstCell`（`update(selected: -1, numbered: true)` → `cells[0].numberText == tabGlyph`、`showsNumber`；`cells[1].showsNumber == false`；`update(selected: 0)` → "1"；`numbered: false` → ""）；`testNumberSlotCoversTheTabGlyph`；`testEnteringTheRowReusesTheFirstCell`（**同一個** `CandidateCells` 先 `update(selected: -1)` 再 `update(selected: 0)`，候選相同：`reused[0] == true`、`removed` 是空的、`cells[0].numberText == "1"`；另一個新的 `CandidateCells` 從 `selected: 0` 開始再到 −1，同樣斷言；兩個方向前後的 `cells[0].contentWidth` 與 `candidateMinX` 都相同；今天的程式會失敗，只加寬未進入時建出的格子也會失敗）；`ShellTests.testPredictionRowShowsNoNumbersUntilTabEnters`（73）加圖示斷言。突變：圖示不設；`numberSlot` 不含圖示；第 0 格不重用（`testEnteringTheRowReusesTheFirstCell` 失敗）。
 3. **不變**：`eval/golden/` 一個位元組不改；`engine_replay.rs` 三個 run 302／302；`cli/tests/golden.rs` 不變；`timing_typing76_keys` p95 < 16 ms。
 4. `make test-rust`（Windows 機器的 WSL）、`make test-swift`、CI 全綠；`/code-review` 無未處置；fresh verifier CONFIRMED。
