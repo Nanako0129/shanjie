@@ -469,6 +469,54 @@ class Freeze(unittest.TestCase):
         self.assertIn("a chatjudge2 sentence is also in the frozen chatjudge", str(e.exception.code))
         self.assertFalse(os.path.exists(os.path.join(self.work, "chatjudge2.rows.txt")))
 
+    def test_chatjudge2_leaves_out_repeated_and_corrected_sentences(self):
+        # A sentence chatjudge drew also sits at another pool position, and a chatjudge correction turns a row into a sentence that
+        # sits elsewhere in the pool: chatjudge2 holds neither.
+        td = tempfile.mkdtemp()
+        texts = {"2026-05": "甲乙丙丁", "2026-06": "甲乙丙丁", "2026-07": "戊己庚辛", "2026-08": "壬癸子丑", "2026-09": "寅卯辰巳"}
+        msgs = [(f"{i}{j}", f"{mon}-10 {10 + j}:00:00.000000+00:00", ch + "字") for i, (mon, t) in enumerate(texts.items()) for j, ch in enumerate(t)]
+        work = os.path.join(td, "w")
+        bc.prepare(package(td, {"c1": msgs}), None, None, [], work)
+        with contextlib.redirect_stdout(io.StringIO()):
+            bc.main(["split", "--work", work])
+        pool = [(x, s) for m, _src, x, s in bc.read_clauses(work) if m in ("2026-05", "2026-06", "2026-07")]
+        with mock.patch.object(bc, "TUNE_MAX", 2), mock.patch.object(bc, "CHATJUDGE_MAX", 2), mock.patch.object(bc, "CHATJUDGE2_MAX", 100):
+            bc.freeze(work, "tune", readings=fake_readings)
+            drawn, _ = bc.period_rows(work, "chatjudge")
+            tuned = bc.frozen_sentences(work, "tune")
+            target = next(s for _x, s in pool if s not in tuned and s not in {d for _x, d in drawn})
+            corr = os.path.join(td, "c.tsv")
+            open(corr, "w", encoding="utf-8").write(f"{drawn[0][1]}\t{target}\n")
+            bc.freeze(work, "chatjudge", corrections_file=corr, readings=fake_readings)
+            bc.freeze(work, "chatjudge2", readings=fake_readings)
+        got = [l.split("|")[1] for l in open(os.path.join(work, "chatjudge2.rows.txt"), encoding="utf-8") if l.strip()]
+        read = tuned | {s for _x, s in drawn} | {target}
+        self.assertTrue([s for _x, s in pool if s in {d for _x, d in drawn}][1:])          # a drawn sentence repeats in the pool
+        self.assertEqual(sorted(got), sorted(s for _x, s in pool if s not in read))
+
+    def test_chatjudge2_stops_on_a_tune_sentence_a_changed_pool_or_a_missing_rows_file(self):
+        with mock.patch.object(bc, "CHATJUDGE_MAX", 2), mock.patch.object(bc, "CHATJUDGE2_MAX", 2):
+            bc.freeze(self.work, "tune", readings=fake_readings)
+            bc.freeze(self.work, "chatjudge", readings=fake_readings)
+            rows, _pool = bc.period_rows(self.work, "chatjudge2")
+            corr = os.path.join(self.td, "c3.tsv")
+            open(corr, "w", encoding="utf-8").write(f"{rows[0][1]}\t{sorted(bc.frozen_sentences(self.work, 'tune'))[0]}\n")
+            with self.assertRaises(SystemExit) as e:
+                bc.freeze(self.work, "chatjudge2", corrections_file=corr, readings=fake_readings)
+            self.assertIn("a chatjudge2 sentence is also in the frozen chatclause; report to main (iteration plan", str(e.exception.code))
+            man = os.path.join(self.work, "chatjudge.manifest.json")
+            m = json.load(open(man, encoding="utf-8"))
+            m["clauses_before_sampling_or_corrections"] += 1
+            open(man, "w", encoding="utf-8").write(json.dumps(m))
+            with self.assertRaises(SystemExit) as e:
+                bc.freeze(self.work, "chatjudge2", readings=fake_readings)
+            self.assertIn("cannot be replayed", str(e.exception.code))
+            os.remove(os.path.join(self.work, "chatjudge.rows.txt"))
+            with self.assertRaises(SystemExit) as e:
+                bc.freeze(self.work, "chatjudge2", readings=fake_readings)
+            self.assertIn("chatjudge.rows.txt is missing", str(e.exception.code))
+        self.assertFalse(os.path.exists(os.path.join(self.work, "chatjudge2.rows.txt")))
+
     def test_a_corrected_row_that_spells_as_check_is_counted(self):
         def readings(sentences):
             return {s: ("check", "") if s == "新句" else ("ok", " ".join("ㄅ" for _ in s)) for s in set(sentences)}

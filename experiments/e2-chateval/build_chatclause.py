@@ -392,10 +392,16 @@ def read_clauses(work):
     return [tuple(l.rstrip("\n").split("\t")) for l in open(os.path.join(work, "clauses.tsv"), encoding="utf-8")]
 
 
+def frozen_sentences(work, period):
+    return {l.split("|")[1] for l in open(os.path.join(work, f"{period}.rows.txt"), encoding="utf-8") if l.strip()}
+
+
 def period_rows(work, period):
     """[(context, sentence)] before corrections: the whole judge months, the seeded tuning sample of the pool, (chatjudge) a sample
     of the pool rows whose sentence the tuning sample does not hold, with a seed of its own, or (chatjudge2) a sample of the pool
-    rows whose sentence neither the tuning sample nor the chatjudge sample holds, with a third seed."""
+    rows whose sentence neither the tuning sample nor the chatjudge sample holds, nor any frozen file main has read (tune,
+    chatjudge and, when frozen here, judge; corrected sentences included), with a third seed. chatjudge2 stops when the pool
+    size differs from the one tune and chatjudge were drawn from (the replayed samples would not be theirs)."""
     split = json.load(open(os.path.join(work, "split.json"), encoding="utf-8"))
     months = set(split["judge_months"] if period == "judge" else split["pool_months"])
     rows = [(x, s) for mon, _src, x, s in read_clauses(work) if mon in months]
@@ -411,7 +417,13 @@ def period_rows(work, period):
         if period == "chatjudge":
             rows = drawn
         else:   # the chatjudge sample's sentences go the same way; freeze checks against the frozen chatjudge rows too
-            seen = {s for _x, s in drawn}
+            for p in ("tune", "chatjudge"):
+                was = json.load(open(os.path.join(work, f"{p}.manifest.json"), encoding="utf-8"))["clauses_before_sampling_or_corrections"]
+                if was != pool:
+                    sys.exit(f"build_chatclause: STOP, the pool has {pool} rows but {p} was drawn from {was}; clauses.tsv changed since "
+                             f"that freeze, so its sample cannot be replayed")
+            seen = {s for _x, s in drawn}.union(*(frozen_sentences(work, p) for p in ("tune", "chatjudge", "judge")
+                                                  if os.path.isfile(os.path.join(work, f"{p}.rows.txt"))))
             rest = [r for r in rest if r[1] not in seen]
             rows = random.Random(CHATJUDGE2_SEED).sample(rest, min(CHATJUDGE2_MAX, len(rest)))
     return rows, pool
@@ -459,6 +471,8 @@ def freeze(work, period, corrections_file=None, draft=False, readings=c.readings
         if not os.path.isfile(os.path.join(work, f"{p}.sha256")):
             sys.exit("build_chatclause: STOP, freeze the tuning period first (contract 2.1 order (1) before (3))" if p == "tune" else
                      f"build_chatclause: STOP, freeze the {p} period before {period}")
+        if period.startswith("chatjudge") and not os.path.isfile(os.path.join(work, f"{p}.rows.txt")):
+            sys.exit(f"build_chatclause: STOP, {p}.rows.txt is missing; {period} is checked against it")
     rows, pool_rows = period_rows(work, period)
     frozen, drafted, st = build_period(rows, load_corrections(corrections_file), readings)
     check_share = st["dropped_check"] / st["rows_in"] if st["rows_in"] else 0
@@ -474,10 +488,10 @@ def freeze(work, period, corrections_file=None, draft=False, readings=c.readings
         print(f"build_chatclause: WARNING, {st['corrected_then_check']} corrected {period} rows spell as CHECK and are dropped; give READ",
               file=sys.stderr)
     for p in (PRIOR[period] if period.startswith("chatjudge") else ()):     # judge months never meet the pool
-        seen = {l.split("|")[1] for l in open(os.path.join(work, f"{p}.rows.txt"), encoding="utf-8") if l.strip()}
+        seen = frozen_sentences(work, p)
         if any(s in seen for _x, s, _r in frozen):
             sys.exit(f"build_chatclause: STOP, a {period} sentence is also in the frozen {'chatclause' if p == 'tune' else p}; "
-                     "report to main (rerank-size 3.4)")
+                     f"report to main ({'rerank-size 3.4' if period == 'chatjudge' else 'iteration plan Phase 0 item 7'})")
     text = "".join(f"{x}|{s}|{r}\n" for x, s, r in frozen)
     sha = c.sha256_bytes(text.encode("utf-8"))
     sf = os.path.join(work, f"{period}.sha256")
