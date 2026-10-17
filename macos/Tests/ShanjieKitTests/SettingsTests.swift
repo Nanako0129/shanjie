@@ -24,7 +24,7 @@ final class SettingsTests: XCTestCase {
 
     private func rig(secure: Bool = false, learning: URL? = nil) -> Rig {
         let layout = MemoryLayoutStore(), demote = MemoryDemoteStore(), prediction = MemoryPredictionStore(), abbreviation = MemoryAbbreviationStore()
-        let acg = MemoryAcgPackStore(), tint = MemoryGlassTintStore(), dialogs = FakeDialogs(), english = MemoryEnglishStore()
+        let acg = MemoryAcgPackStore(), tint = MemoryGlassTintStore(), dialogs = FakeDialogs(), english = MemoryEnglishStore(false)  // saved off: the default is on (digits.md A.3.7), the tests below start from off
         let shell = Shell(resources: resources, panel: FakePanel(), isSecureInput: { secure }, layoutStore: layout,
                           learningDirectory: learning, dialogs: dialogs, demoteStore: demote, predictionStore: prediction, abbreviationStore: abbreviation, englishStore: english,
                           acgPackStore: acg, glassTintStore: tint, candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore())
@@ -68,12 +68,23 @@ final class SettingsTests: XCTestCase {
         XCTAssertEqual(item(r, .toggleAbbreviation)?.enabled, true)
     }
 
+    /// Digits.md A.3.7: nothing saved is on; a saved off stays off; the line under the toggle is the contract's. (Its place in the window,
+    /// right under the toggle, is in the app target's form, which has no tests: the shipping layout cannot be observed here.)
+    func testEnglishMixingDefaultsOnAndTheNoteIsTheContractsLine() throws {
+        let shell = Shell(resources: resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(),
+                          learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), englishStore: MemoryEnglishStore(),
+                          acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore())
+        XCTAssertTrue(SettingsModel(shell: shell).english, "nothing saved is on")
+        XCTAssertFalse(rig().model.english, "a saved off stays off")
+        XCTAssertEqual(MenuEntry.Text.englishDigitsNote, "打英文不用切換輸入法；數字列的鍵也會打出數字（例如 2026年、3.14），由前文判斷是數字還是注音。")
+    }
+
     /// zhen-mixed section 3.2 / 5.3: the window's 中英混打（實驗） goes through the same setter and store as the menu item, the two stay in
     /// sync, and it is greyed (setting kept) when the engine has no word list, which the window's toggle follows. The toggle's
     /// place in the window (right after 即時預測, as in the menu) is in the app target's form, which has no tests.
     func testEnglishFromTheWindowReachesStoreAndMenuAndFollowsAvailability() throws {
         let r = rig()
-        XCTAssertFalse(r.model.english, "default off")
+        XCTAssertFalse(r.model.english, "saved off")
         XCTAssertTrue(r.model.englishEnabled)
         r.model.setEnglish(true)
         XCTAssertEqual(r.english.english, true)
