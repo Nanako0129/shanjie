@@ -504,6 +504,11 @@ class Freeze(unittest.TestCase):
             with self.assertRaises(SystemExit) as e:
                 bc.freeze(self.work, "chatjudge2", corrections_file=corr, readings=fake_readings)
             self.assertIn("a chatjudge2 sentence is also in the frozen chatclause; report to main (iteration plan", str(e.exception.code))
+            tman = os.path.join(self.work, "tune.manifest.json")       # as the 2026-10-12 tune freeze wrote it: the sample size
+            m = json.load(open(tman, encoding="utf-8"))
+            m["clauses_before_sampling_or_corrections"] = m["rows_in"]
+            open(tman, "w", encoding="utf-8").write(json.dumps(m))
+            self.assertEqual(bc.period_rows(self.work, "chatjudge2")[0], rows)      # not a reason to stop
             man = os.path.join(self.work, "chatjudge.manifest.json")
             m = json.load(open(man, encoding="utf-8"))
             m["clauses_before_sampling_or_corrections"] += 1

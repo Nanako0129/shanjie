@@ -401,7 +401,7 @@ def period_rows(work, period):
     of the pool rows whose sentence the tuning sample does not hold, with a seed of its own, or (chatjudge2) a sample of the pool
     rows whose sentence neither the tuning sample nor the chatjudge sample holds, nor any frozen file main has read (tune,
     chatjudge and, when frozen here, judge; corrected sentences included), with a third seed. chatjudge2 stops when the pool
-    size differs from the one tune and chatjudge were drawn from (the replayed samples would not be theirs)."""
+    size differs from the one chatjudge was drawn from (the replayed samples would not be theirs)."""
     split = json.load(open(os.path.join(work, "split.json"), encoding="utf-8"))
     months = set(split["judge_months"] if period == "judge" else split["pool_months"])
     rows = [(x, s) for mon, _src, x, s in read_clauses(work) if mon in months]
@@ -417,11 +417,12 @@ def period_rows(work, period):
         if period == "chatjudge":
             rows = drawn
         else:   # the chatjudge sample's sentences go the same way; freeze checks against the frozen chatjudge rows too
-            for p in ("tune", "chatjudge"):
-                was = json.load(open(os.path.join(work, f"{p}.manifest.json"), encoding="utf-8"))["clauses_before_sampling_or_corrections"]
-                if was != pool:
-                    sys.exit(f"build_chatclause: STOP, the pool has {pool} rows but {p} was drawn from {was}; clauses.tsv changed since "
-                             f"that freeze, so its sample cannot be replayed")
+            # chatjudge replayed the tuning sample from the same pool before drawing, so its recorded pool covers both replays. The
+            # tune manifest cannot serve: the 2026-10-12 freeze wrote the sample size (6,000) in this field, not the pool.
+            was = json.load(open(os.path.join(work, "chatjudge.manifest.json"), encoding="utf-8"))["clauses_before_sampling_or_corrections"]
+            if was != pool:
+                sys.exit(f"build_chatclause: STOP, the pool has {pool} rows but chatjudge was drawn from {was}; clauses.tsv changed since "
+                         f"that freeze, so its sample cannot be replayed")
             seen = {s for _x, s in drawn}.union(*(frozen_sentences(work, p) for p in ("tune", "chatjudge", "judge")
                                                   if os.path.isfile(os.path.join(work, f"{p}.rows.txt"))))
             rest = [r for r in rest if r[1] not in seen]
