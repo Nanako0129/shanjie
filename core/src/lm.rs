@@ -5,6 +5,13 @@
 use crate::learn::{context_key, newword_score, record_key, Learner, Level, NEWWORD_MAX, NEWWORD_MIN};
 use crate::trigram::{Mapped, Tri, TriBytes, TriCtx, TriMemo};
 use crate::{Error, Lexicon, PER_KEY};
+
+/// E-D probe (experiment branch only, never merged): `SHANJIE_PER_KEY` overrides how many lexicon entries per reading the LM
+/// decoder tries; unset, it is PER_KEY.
+fn per_key() -> usize {
+    static N: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *N.get_or_init(|| std::env::var("SHANJIE_PER_KEY").ok().and_then(|v| v.parse().ok()).unwrap_or(PER_KEY))
+}
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::path::Path;
@@ -1033,11 +1040,11 @@ pub fn decode_segment_learned<'a>(
             let dl = if demote { lex.deltas_in(&range) } else { &[] };
             // Entries to try: the top PER_KEY, plus learned words ranked below it (`extra`: only
             // usable on a path whose context has a learned record for them).
-            let mut entries: Vec<(usize, bool)> = range.clone().take(PER_KEY).map(|p| (p, false)).collect();
+            let mut entries: Vec<(usize, bool)> = range.clone().take(per_key()).map(|p| (p, false)).collect();
             if let Some(ln) = learned {
                 let words = ln.learner.words_of(span);
                 let mut seen: HashSet<&str> = entries.iter().map(|&(p, _)| lex.word_of(&lex.ents[p])).collect();
-                for p in range.clone().skip(PER_KEY) {
+                for p in range.clone().skip(per_key()) {
                     let w = lex.word_of(&lex.ents[p]);
                     if words.binary_search(&w).is_ok() && seen.insert(w) {
                         entries.push((p, true));
