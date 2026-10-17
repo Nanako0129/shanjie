@@ -7,12 +7,14 @@ Private data: run by main on the maintainer's machine with --work in the private
       exclusions, in time order) and DIR/counts.json, prints the per-month counts table (numbers only).
   split --work DIR
       fixes the judge months from the mechanical counts (DIR/split.json; written once, a later run must give the same file).
-  freeze --work DIR --period tune|judge [--corrections FILE] [--draft]
-      tune: min(6,000, pool) clauses of the pool months, seed 20261012; judge: every clause of the judge months. Applies the optional
+  freeze --work DIR --period tune|judge|chatjudge [--corrections FILE] [--draft]
+      tune: min(6,000, pool) clauses of the pool months, seed 20261012; judge: every clause of the judge months; chatjudge
+      (docs/contracts/rerank-size.md section 3.4): min(3,000, rest) clauses of the pool months that the tuning sample neither drew
+      nor repeats as a sentence, seed 20261017 (needs the tune freeze, like judge). Applies the optional
       corrections, spells with tools/readings.py, drops CHECK and unreadable rows, writes DIR/<period>.rows.txt (`context|sentence|reading`),
       DIR/<period>.manifest.json and DIR/<period>.sha256. With --draft only DIR/<period>.draft.txt (readings marked CHECK) for proofreading.
       A frozen period is never rewritten with other content; judge needs the tune freeze first (contract order (1) before (3)).
-  emit --work DIR --period tune|judge --out FILE
+  emit --work DIR --period tune|judge|chatjudge --out FILE
       copies the frozen rows to FILE for run_sets.py dumps, and refuses (exit 1, nothing written) when the rows no longer hash to
       the frozen SHA-256.
 
@@ -55,6 +57,8 @@ JUDGE_START = "2026-09"                # the judge months run back from here; ne
 JUDGE_MIN = 2950                       # mechanical rows (2,500 plus about 15% for proofreading and reading losses)
 MIN_USABLE = 2500                      # fewer mechanical rows than this before SHANJIE_FROM: stop and ask
 TUNE_MAX = 6000
+CHATJUDGE_MAX = 3000       # rerank-size section 3.4: the unseen chat judge set
+CHATJUDGE_SEED = 20261017
 CHECK_MAX = 0.10   # contract 2.1: more CHECK readings than this stops the freeze
 URL = re.compile(r"https?://|www\.", re.I)
 FENCE = "```"
@@ -390,6 +394,13 @@ def period_rows(work, period):
     pool = len(rows)
     if period == "tune":
         rows = random.Random(c.SEED).sample(rows, min(TUNE_MAX, len(rows)))
+    elif period == "chatjudge":
+        # The tuning sample's positions, drawn exactly as above (sample picks by position, so sampling the indices picks the same
+        # rows), and every sentence it holds, are left out; the rest is sampled with a seed of its own.
+        drawn = set(random.Random(c.SEED).sample(range(len(rows)), min(TUNE_MAX, len(rows))))
+        tuned = {rows[i][1] for i in drawn}
+        rest = [r for i, r in enumerate(rows) if i not in drawn and r[1] not in tuned]
+        rows = random.Random(CHATJUDGE_SEED).sample(rest, min(CHATJUDGE_MAX, len(rest)))
     return rows, pool
 
 
@@ -429,7 +440,7 @@ def build_period(rows, corrections, readings=c.readings):
 
 
 def freeze(work, period, corrections_file=None, draft=False, readings=c.readings):
-    if period == "judge" and not os.path.isfile(os.path.join(work, "tune.sha256")):
+    if period in ("judge", "chatjudge") and not os.path.isfile(os.path.join(work, "tune.sha256")):
         sys.exit("build_chatclause: STOP, freeze the tuning period first (contract 2.1 order (1) before (3))")
     rows, pool_rows = period_rows(work, period)
     frozen, drafted, st = build_period(rows, load_corrections(corrections_file), readings)
@@ -485,7 +496,7 @@ def main(argv=None):
         if name == "prepare":
             p.add_argument("--discord"); p.add_argument("--meta"); p.add_argument("--self-name"); p.add_argument("--exclude", nargs="*", default=[])
         if name in ("freeze", "emit"):
-            p.add_argument("--period", choices=["tune", "judge"], required=True)
+            p.add_argument("--period", choices=["tune", "judge", "chatjudge"], required=True)
         if name == "split":
             # Maintainer 2026-10-13: 2026-09 is skipped (never read or used); the judge period starts at 2026-08. Months from the start
             # up to SHANJIE_FROM are in neither the judge period nor the pool.

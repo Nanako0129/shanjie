@@ -392,6 +392,27 @@ class Freeze(unittest.TestCase):
         self.assertEqual(judge["months"], ["2026-08", "2026-09"])
         self.assertFalse({s for _x, s in want} & {l.split("|")[1] for l in open(os.path.join(self.work, "judge.rows.txt"), encoding="utf-8") if l.strip()})
 
+    def test_chatjudge_leaves_out_the_tuning_sample_and_its_sentences(self):
+        # rerank-size section 3.4: the unseen chat set is drawn from the pool without the tuning sample, with its own seed.
+        pool = [(x, s) for m, _src, x, s in bc.read_clauses(self.work) if m in ("2026-05", "2026-06", "2026-07")]
+        idx = random.Random(20261012).sample(range(len(pool)), 4)
+        self.assertEqual([pool[i] for i in idx], random.Random(20261012).sample(pool, 4))   # sampling indices picks the same rows
+        tuned = {pool[i][1] for i in idx}
+        rest = [r for i, r in enumerate(pool) if i not in idx and r[1] not in tuned]
+        with mock.patch.object(bc, "CHATJUDGE_MAX", 3):
+            bc.freeze(self.work, "tune", readings=fake_readings)
+            st = bc.freeze(self.work, "chatjudge", readings=fake_readings)
+        got = [tuple(l.split("|")[:2]) for l in open(os.path.join(self.work, "chatjudge.rows.txt"), encoding="utf-8").read().split("\n") if l]
+        self.assertEqual(got, random.Random(20261017).sample(rest, 3))
+        tune = {l.split("|")[1] for l in open(os.path.join(self.work, "tune.rows.txt"), encoding="utf-8") if l.strip()}
+        self.assertFalse(tune & {s for _x, s in got})
+        self.assertEqual((st["rows"], st["months"]), (3, ["2026-05", "2026-06", "2026-07"]))
+
+    def test_chatjudge_needs_the_tune_freeze_first(self):
+        with self.assertRaises(SystemExit) as e:
+            bc.freeze(self.work, "chatjudge", readings=fake_readings)
+        self.assertIn("tuning period first", str(e.exception.code))
+
     def test_judge_needs_the_tune_freeze_first(self):
         with self.assertRaises(SystemExit) as e:
             bc.freeze(self.work, "judge", readings=fake_readings)
