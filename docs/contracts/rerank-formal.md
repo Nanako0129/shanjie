@@ -11,7 +11,7 @@
 
 ## 2. 要做到什麼、怎麼看到
 
-- 交付：書面三檔重選的值；判讀過才匯出新檔 `tinylm-v6.sjtl`（模型權重、聊天參數與 tinylm-v5 逐位元組相同，只有書面那幾格不同），Release `tinylm-v6` 要維護者同意；`data/tinylm.sjtl.sha256` 換成新檔；研究紀錄、`docs/data-files.md`、`LICENSES/data.md`。〔名稱：E2 把讀音條件模型暫稱 v6，那是去風險的標籤，沒有發佈也結案了，這裡用掉 v6；研究紀錄註明。〕
+- 交付：書面三檔重選的值；判讀過才匯出新檔 `tinylm-v6.sjtl`〔2026-10-17 更正：照 2026-10-16 的模型命名規則，Release 代號是 `sj-sr-6-14m`（會意 SJ-SR-6-14M），附件檔名照舊是 `tinylm.sjtl`；下文的「tinylm-v6」都指它〕（模型權重、聊天參數與 tinylm-v5 逐位元組相同，只有書面那幾格不同），Release `tinylm-v6` 要維護者同意；`data/tinylm.sjtl.sha256` 換成新檔；研究紀錄、`docs/data-files.md`、`LICENSES/data.md`。〔名稱：E2 把讀音條件模型暫稱 v6，那是去風險的標籤，沒有發佈也結案了，這裡用掉 v6；研究紀錄註明。〕
 - 判讀沒過：不匯出、不發佈，出貨的值不變，結果寫進研究紀錄（這也是一個結論）。
 - 誰看、怎麼看：main 在 Windows 機器跑選值與判讀；fresh verifier 跑保留集一次並重跑抽查；維護者看表與實機（§4.6）。
 

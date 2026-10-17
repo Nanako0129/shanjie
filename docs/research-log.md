@@ -6668,3 +6668,5 @@ formal: alpha 0.7, tau 1, delta 2
 - **§3.6 一致性**（Windows 機器，新檔，dev302）：書面標準與積極的 CLI rowstats 和 `OUT_R4/rowstats/S20.formal.dev302.new.txt` 逐位元組相同、書面保守和 `C114.formal.dev302.new.txt` 相同；聊天三檔新檔對 tinylm-v5 都相同（`cmp` 全為 0）。
 - **保留集**（fresh verifier，shard-1 第 2 次使用，300 列）：書面標準與積極對只用 n-gram +12／−0（p 0.0005）、對 tinylm-v5 +8／−0（p 0.008）；書面保守對 n-gram +3／−0、對 tinylm-v5 0／0（逐句相同）。三檔都沒有對 tinylm-v5 顯著變差。
 - Release 代號 `sj-sr-6-14m`（會意 SJ-SR-6-14M，維護者同意關卡都過就建）；說明檔 `docs/releases/sj-sr-6-14m.md` 先進 main。
+- **說明檔用到的各集合數字**（`OUT_R4` 與篩選時 `sel_S20` 的 rowstats，對只用 n-gram 的改對／改壞）：新標準 0.7、2、1：cvtune 76／4、wikitune 66／6、dev302 14／2、typing76 1／0、user-reported 8／1、wikijudge 84／6、wikijudge2 67／10、lytune 96／35、wikitypo 0／0。保守 1、1、4：dev302 2／0、typing76 0／0、user-reported 0／0、wikijudge 15／0、wikijudge2 16／1、lytune 7／1、wikitypo 0／0（cvtune、wikitune 這次沒有跑 1、1、4）。
+- **PR #199 審查**（4 項 P3，照改）：`build_tune.py` 的範圍抽成 `articles_in(lo, hi)`，測試用假的文章來源斷言挑到第 lo 到 hi−1 篇（把範圍寫死時測試失敗）；說明檔寫明 0.7、2、1 在已看過的資料上是 0.53%、是放寬篩選後才進確認；這一段補上說明檔的各集合數字；契約交付那一句補上新的 Release 代號；`eval/README.md` 的 PR 欄填 #199。

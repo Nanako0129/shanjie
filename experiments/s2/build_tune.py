@@ -83,10 +83,7 @@ def main():
         sys.path.insert(0, os.path.join(ROOT, "experiments", "s2w"))
         import mwconv
         mw = mwconv.load()
-    lo, hi = a.wiki_range
-    for i, raw in enumerate(bc.articles(hi)):
-        if i < lo:
-            continue
+    for raw in articles_in(*a.wiki_range):
         t = raw
         if a.mw:
             t = mwconv.convert(mwconv.unescape(t), mw)
@@ -98,6 +95,12 @@ def main():
             wiki.extend(HAN.findall(s if a.mw else bc.convert(s, phrase, char, maxp)))
     readings(rnd.sample(sorted(set(wiki)), min(a.wiki_rows, len(set(wiki)))), a.wiki_name)
 
+
+def articles_in(lo, hi):
+    """Wiki articles lo..hi-1 (0-based, in dump order)."""
+    for i, raw in enumerate(bc.articles(hi)):
+        if i >= lo:
+            yield raw
 
 if __name__ == "__main__":
     main()
