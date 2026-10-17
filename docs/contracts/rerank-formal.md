@@ -76,8 +76,8 @@
 **確認門檻（都要過，跑之前寫死）**：
 1. wikijudge2 上 NEW 對 SHIP（`OUT_R2/rowstats/SHIP.formal.wikijudge2.new.txt` 對 `OUT_R2/rowstats/NEW.formal.wikijudge2.new.txt`，`evalstats compare --net`）顯著為正（a＝0.05）。
 2. wikijudge2 上 NEW 的改壞率（`OUT_R2/rowstats/NEW.formal.wikijudge2.base.txt` 對 `.new.txt` 的改壞 ÷ 列數）≤ 0.5%。
-4. 保守檔：每個集合 C114 的改壞數（`C114.formal.<集合>.base.txt` 對 `.new.txt`）和 NEW 的（同樣算法）並列成表進研究紀錄，照上面的規則決定保守＝1、1、4 或＝標準。
 3. 已量過的守門照 §3.4 的數字（不重跑）。
+4. 保守檔：每個集合 C114 的改壞數（`C114.formal.<集合>.base.txt` 對 `.new.txt`）和 NEW 的（同樣算法）並列成表進研究紀錄，照上面的規則決定保守＝1、1、4 或＝標準。
 
 **之後**：確認過才照 §3.5 匯出（`--formal 0.7 1 1.5`，`--levels` 的書面三格照上面的三檔）、§3.6 一致性（這次的比對對象：標準與積極 → `OUT_R2/rowstats/NEW.formal.dev302.new.txt`；保守留 1、1、4 → `OUT_R2/rowstats/C114.formal.dev302.new.txt`，寫成標準 → 同 NEW 那一份；聊天三檔照 §3.6 對 tinylm-v5）、§4.4 保留集（fresh verifier，書面三檔對只用 n-gram 與對 tinylm-v5 各一行，shard-1 第 2 次）、§4.6 實機；Release 要維護者同意。確認沒過 → 結案、不匯出，研究紀錄照記。
 
