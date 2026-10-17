@@ -6,6 +6,7 @@
 |---|---|
 | 怎麼貢獻、怎麼建置與測試 | [`CONTRIBUTING.md`](CONTRIBUTING.md) |
 | 計畫、每一片的狀態與驗收 | [`docs/PLAN.md`](docs/PLAN.md) |
+| 研究方向與迭代計畫（2026-10-18 起） | [`docs/iteration-plan.md`](docs/iteration-plan.md) |
 | 每一片的規格（契約） | [`docs/contracts/`](docs/contracts/) |
 | 評測方法、方法上的教訓 | [`docs/methodology.md`](docs/methodology.md)、[`docs/verification.md`](docs/verification.md) |
 | 實驗、決定與更正（時間序） | [`docs/research-log.md`](docs/research-log.md) |
