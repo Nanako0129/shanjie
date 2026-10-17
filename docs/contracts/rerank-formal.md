@@ -62,3 +62,20 @@
 - Mac 不跑打分與大量評測（Windows 機器的 WSL）；私人集合只帶回數字、逐列檔用完刪；保留集只由 fresh verifier 跑。
 - Release 建立、推 tag、網站部署都要維護者當下同意。
 - executor（若有）不可以：push、開 PR、讀保留集或 repo 外的私人資料、啟動 App、碰 `~/Library` 與鑰匙圈、連網。
+
+## 8. 修訂二（2026-10-17，判讀之後；維護者選擇題「傾向 1」）
+
+**起因**：§3.4 的判讀（研究紀錄同日）標準檔 0.5、2、0.25 主判讀過、守門 3 不過（改壞率 1.72%），依 §5 不匯出。保守檔 0.7、1、1.5（照 §3.3 的保守規則選出）四項全過：wikijudge 對出貨 +20／−0、五集＋私人集 +56／−13、lytune +27／−4、改壞率 0.14%。維護者選：保守那格當新的書面標準，用沒看過的資料再確認一次。**這是看過判讀數字之後改的規則**，所以下面的確認用全新的資料，門檻在跑之前寫死。
+
+**新的書面三檔（候選）**：標準＝0.7、1、1.5（固定，不重選）；積極＝標準（同 tinylm-v5 的做法；這次選出的積極檔守門不過）；保守＝出貨的 1、1、4，前提是它在 wikijudge、wikijudge2、判讀五集、私人集每一個集合的改壞數（對只用 n-gram）都 ≤ 新標準，否則保守＝新標準。
+
+**確認資料 wikijudge2**：`build_tune.py --part wiki --wiki-range 315000 320000 --wiki-name wikijudge2`（同一套做法；第 315,000–319,999 篇沒有任何集合用過），用 §3.1 的同一個 CLI 與模型產分數檔 `RF.formal.wikijudge2.jsonl`，`judge.py` 照 §3.3 的 `--fixed` 跑 SHIP 1 1 3、NEW 0.7 1 1.5、CONS 1 1 4 三格。
+
+**確認門檻（都要過，跑之前寫死）**：
+1. wikijudge2 上 NEW 對 SHIP（`OUT_SHIP/…/SHIP.formal.wikijudge2.new.txt` 對 `OUT_NEW/…/NEW.formal.wikijudge2.new.txt`，`evalstats compare --net`）顯著為正（a＝0.05）。
+2. wikijudge2 上 NEW 的改壞率（NEW 的 `.base.txt` 對 `.new.txt`）≤ 0.5%。
+3. 已量過的守門照 §3.4 的數字（不重跑）。
+
+**之後**：確認過才照 §3.5 匯出（`--formal 0.7 1 1.5`，`--levels` 的書面三格照上面的三檔）、§3.6 一致性、§4.4 保留集（fresh verifier，書面三檔對只用 n-gram 與對 tinylm-v5 各一行，shard-1 第 2 次）、§4.6 實機；Release 要維護者同意。確認沒過 → 結案、不匯出，研究紀錄照記。
+
+**預算**：Windows 機器 1 小時內（建 wikijudge2 約 2 分鐘、單一集合評分、判讀）；不用 Colab。
