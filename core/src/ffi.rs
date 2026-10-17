@@ -1737,6 +1737,52 @@ mod tests {
         assert!(!out.contains("shanjie-ffi-") && !err.contains("shanjie-ffi-"), "a path leaked");
     }
 
+    /// Digits (docs/contracts/digits.md A.4.3) through the C ABI: a data directory with a tiny `digits.tsv`, the tiny model, `set_english(1)`:
+    /// 2 0 2 6 Enter commits "2026"; with `set_english(0)` the same keys are the old Zhuyin keys.
+    #[test]
+    fn child_digits() {
+        if !is_child("child_digits") {
+            return;
+        }
+        let dir = tiny_dir("digits", "ㄒㄧㄣ 鑫 -1.0\n".as_bytes());
+        let mut table = String::from("T\t1000\nN\t100\nS\t10\nD\t<s>\t5\t100\n");
+        for k in 1..=9 {
+            table += &format!("L\t{k}\t10\n");
+        }
+        table += "L\t10+\t10\n";
+        for c in "0123456789./-".chars() {
+            table += &format!("C\t{c}\t10\n");
+        }
+        std::fs::write(dir.join("digits.tsv"), table).unwrap();
+        let lm_path = dir.join("tiny.sjlm");
+        let tiny = tiny_lm();
+        std::fs::write(&lm_path, &tiny).unwrap();
+        let (cls, emit) = ([1u16, 2, 0xFFFF, 0xFFFF], [1.0, 1.0, 0.0, 0.0]);
+        std::fs::write(dir.join("classes.sjc"), crate::lm::test_classes(&tiny, 0, 0.8, &cls, &emit, &[0.1; 9])).unwrap();
+        let e = new_engine(&dir, 0);
+        let c = CString::new(lm_path.to_str().unwrap()).unwrap();
+        assert!(unsafe { shanjie_engine_load_lm(e, c.as_ptr()) } == 0, "load_lm");
+        let keys = |e, s: &str| s.chars().map(|ch| send(e, key(CHAR, ch))).last().unwrap();
+        assert!(set_english(e, 1) == 0);
+        keys(e, "2026");
+        let (rc, _, commit) = send(e, key(ENTER, '\0'));
+        assert!(rc == 0 && commit == "2026", "set_english(1): 2026 Enter commits the digits");
+        assert!(set_english(e, 0) == 0);
+        let (rc, preedit, _) = send(e, key(CHAR, '2'));
+        assert!(rc == 0 && preedit == "ㄉ", "set_english(0): the old Zhuyin key");
+        unsafe { shanjie_engine_free(e) };
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn digits_through_the_c_abi() {
+        let (ok, out, err) = run_child("child_digits", false);
+        assert!(ok, "digits child failed: {out} {err}");
+        assert!(out.contains("1 passed"), "child test actually ran");
+        assert!(!out.contains("shanjie-ffi-") && !err.contains("shanjie-ffi-"), "a path leaked");
+        assert!(!out.contains("2026") && !err.contains("2026"), "the keys leaked");
+    }
+
     // ---- zhen-mixed: load_english, set_english (docs/contracts/zhen-mixed.md section 5.2) ----
 
     fn load_english(e: *mut ShanjieEngine, p: &Path) -> i32 {
