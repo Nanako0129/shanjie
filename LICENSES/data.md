@@ -43,7 +43,7 @@
 
 ## 研究語料（未出貨）
 
-S7f（`docs/contracts/s7f-colloquial.md`）研究訓練用的文字。**沒有進任何已發佈的檔案**；上面 `tinylm.sjtl` 那一列描述的是 `tinylm-v4`（訓練文字與 v1～v3 相同；已發佈為 `tinylm-v4` Release 附件，從語意校正強度切換的 PR 合併後的第一個 App 版本起隨 App 打包；之前的 App 版本打包 `tinylm-v3`，更早是 `tinylm-v2`），不受 S7f 影響。清理用的程式在 `experiments/s7f-corpus/`；文字本身不進 git。條款頁的快照（HTML 或原始檔）存在維護者機器上，這裡記網址、取得時間、SHA-256 前 12 碼與原文摘錄。量是 2026-10-12 修正清理規則（研究紀錄同日）之後重跑的版本。
+S7f（`docs/contracts/s7f-colloquial.md`）研究訓練用的文字。**沒有進任何已發佈的檔案**；上面 `tinylm.sjtl` 那一列描述的是 `sj-sr-6-14m`（權重與訓練文字和 `tinylm-v1`～`v5` 相同；已發佈為 `sj-sr-6-14m` Release 附件，從切換到它的 PR #200 合併後的第一個 App 版本起隨 App 打包；v0.4.4～v0.4.7 打包 `tinylm-v5`，更早依序是 `tinylm-v4`、`v3`、`v2`），不受 S7f 影響。清理用的程式在 `experiments/s7f-corpus/`；文字本身不進 git。條款頁的快照（HTML 或原始檔）存在維護者機器上，這裡記網址、取得時間、SHA-256 前 12 碼與原文摘錄。量是 2026-10-12 修正清理規則（研究紀錄同日）之後重跑的版本。
 
 | 來源 | 取用範圍與版本 | 取得 | 授權與條款摘錄 | 用在 S7f 的量 |
 |---|---|---|---|---|

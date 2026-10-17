@@ -105,7 +105,7 @@ pkill -f '^[^ ]*/Library/Input Methods/(善解輸入法|shanjie)\.app/Contents/M
 
 **手動**
 
-從 [Releases](https://github.com/Nanako0129/shanjie/releases) 下載 `shanjie-<版本>.zip`（`v` 開頭的那幾個；`model-v…`、`classes-v…`、`tinylm-v…` 是語言模型、詞類表與語意校正用的小模型，已經包在 App 裡（`tinylm-v…` 從語意校正上線的版本起），不用另外下載，說明見 `docs/data-files.md`），用 Finder 解壓，然後在這個 repo 的根目錄執行：
+從 [Releases](https://github.com/Nanako0129/shanjie/releases) 下載 `shanjie-<版本>.zip`（`v` 開頭的那幾個；`model-v…`、`classes-v…`、`kn-v…`、`tinylm-v…` 與之後改用新名稱的 `sj-…`（例如 `sj-cx-…`、`sj-sr-…`）是語言模型、詞類表、平滑側檔、三元表與語意校正用的小模型，已經包在 App 裡（`tinylm-v…` 從語意校正上線的版本起），不用另外下載，說明見 `docs/data-files.md`），用 Finder 解壓，然後在這個 repo 的根目錄執行：
 
 ```sh
 scripts/install-ime.sh <解壓出來的 善解輸入法.app 路徑>
