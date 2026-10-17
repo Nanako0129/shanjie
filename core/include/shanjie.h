@@ -222,8 +222,8 @@ int32_t shanjie_engine_learning_open(ShanjieEngine *engine, const char *dir);
 // Forgetting: KEY with COMMAND (bit3) and kind BACKSPACE (4) while candidates are open removes the
 //   highlighted word's learned records for that reading (all contexts) and re-decodes; the output
 //   shows the new composition with the candidates still open. When the forgotten word was in effect over that span
-//   (exact or last-character level under its context), words the engine fixed after a re-pick (repick-freeze) over
-//   that span are freed and decode again; other fixed words stay.
+//   (exact or last-character level under its context), words the engine fixed (repick-freeze: around a re-pick or a
+//   prediction pick, or the pieces a Backspace left) over that span are freed and decode again; other fixed words stay.
 //   On a prediction-row item at the front of the window (predict-down B.3.1) the row is recomputed and the list
 //   rebuilt without that word, the selection on the word if it is still listed, else on the first item; a rebuilt
 //   list that is empty closes the window (as Esc). Without candidates the key passes through,

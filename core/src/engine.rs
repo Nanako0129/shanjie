@@ -355,9 +355,11 @@ struct Fixed {
     /// The context key a prediction pick is recorded under, fixed when the row was built: re-decoding after the pick can
     /// change the text before the start, so the commit must not recompute it (section 10.1). `None` for candidate picks.
     key: Option<String>,
-    /// Fixed by a candidate re-pick of another span (repick-freeze), not chosen by the user: never learned. Released
-    /// when a newly typed syllable merges with it (section 6.1; the merged word is then frozen in its place, section
-    /// 9) and when the candidate window's ⌘⌫ forgets an entry in effect over a span it overlaps (sections 7.2, 9).
+    /// Fixed by the engine, not chosen by the user (repick-freeze): the words outside a candidate re-pick (section 1) or a
+    /// prediction pick (section 13), and the pieces a Backspace leaves of a deleted word (section 11). Never learned.
+    /// Released when a newly typed syllable merges with it into a lexicon word (section 6.1; the merged word decodes
+    /// freely since section 11) and when the candidate window's ⌘⌫ forgets an entry in effect over a span it overlaps
+    /// (sections 7.2, 9).
     frozen: bool,
     /// The synthetic sentence-start key (`^>` + the next reading) the displaced word was shown under when this candidate
     /// pick was made, when the span's context key was `^`. The commit halves the displaced word there too if the key
