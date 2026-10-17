@@ -17,7 +17,7 @@
 |---|---|---|---|
 | `bigram.sjlm` | `model-v6`（旁邊另有 KN 側檔 `kn.sjkn`，`kn-v1`） | 詞與詞相鄰出現的次數（SJLM0001 格式）；含少量用來辨識來源的指紋條目（`docs/data-files.md`、`docs/contracts/model-v4.md` §0） | 語料計數 → `tools/build_lm.py` → 加指紋 |
 | `classes.sjc` | `classes-v5` | 512 個詞類、每個詞的類別與發射機率、類別接續機率、μ = 0.2（classes-v4 以前是 0.8；SJCL0001 格式；`tools/build_classes.py` 檔頭、`docs/contracts/s2k-word-classes.md` §4.1） | 對計數做詞類分群 → `tools/build_classes.py` |
-| `tinylm.sjtl` | `tinylm-v5`（SJTL0004，檔頭另記 kn-v1 的雜湊） | 1,440 萬參數的字元語言模型，6 層、d 384、字表 9,714 字，int8；檔頭帶聊天與書面各三組（保守、標準、積極）融合參數 α、τ、δ（SJTL0003；`docs/releases/tinylm-v4.md`、`tinylm-v3.md`、`experiments/s7a-tinylm/export_sjtl.py` 檔頭） | 訓練 → 匯出 → 調融合參數 |
+| `tinylm.sjtl` | `sj-sr-6-14m`（會意 SJ-SR-6-14M；SJTL0004，檔頭另記 kn-v1 的雜湊；權重同 `tinylm-v5`，書面融合參數重選） | 1,440 萬參數的字元語言模型，6 層、d 384、字表 9,714 字，int8；檔頭帶聊天與書面各三組（保守、標準、積極）融合參數 α、τ、δ（SJTL0003；`docs/releases/tinylm-v4.md`、`tinylm-v3.md`、`experiments/s7a-tinylm/export_sjtl.py` 檔頭） | 訓練 → 匯出 → 調融合參數 |
 
 ### 1.2 三個檔案怎麼互相綁定
 

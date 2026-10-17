@@ -52,10 +52,10 @@ shasum -a 256 -c data/classes.sjc.sha256 >/dev/null \
 shasum -a 256 -c data/kn.sjkn.sha256 >/dev/null \
   || fail "data/lm/kn.sjkn does not match data/kn.sjkn.sha256; download kn-v1 again"
 # The small model behind 語意校正 (docs/contracts/s7c2b-shell-rerank.md section 2.4), paired with model-v6's and kn-v1's hashes (SJTL0004).
-[ -f data/lm/tinylm.sjtl ] || fail "data/lm/tinylm.sjtl is missing (the small model of 語意校正, S7c). Download the tinylm-v5 release asset:
-  gh release download tinylm-v5 -R Nanako0129/shanjie -p tinylm.sjtl -D data/lm"
+[ -f data/lm/tinylm.sjtl ] || fail "data/lm/tinylm.sjtl is missing (the small model of 語意校正, S7c). Download the sj-sr-6-14m release asset:
+  gh release download sj-sr-6-14m -R Nanako0129/shanjie -p tinylm.sjtl -D data/lm"
 shasum -a 256 -c data/tinylm.sjtl.sha256 >/dev/null \
-  || fail "data/lm/tinylm.sjtl does not match data/tinylm.sjtl.sha256; download tinylm-v5 again"
+  || fail "data/lm/tinylm.sjtl does not match data/tinylm.sjtl.sha256; download sj-sr-6-14m again"
 # The trigram table of the formal profile (docs/contracts/trigram-core.md): bound to model-v6's hash; the core loads it from beside the model.
 [ -f data/lm/trigram.sjt3 ] || fail "data/lm/trigram.sjt3 is missing (the trigram table of the formal profile). Download the sj-cx-1-7.7m release asset:
   gh release download sj-cx-1-7.7m -R Nanako0129/shanjie -p trigram.sjt3 -D data/lm"

@@ -37,13 +37,13 @@
 gh release download model-v6 -R Nanako0129/shanjie -p bigram.sjlm -D data/lm
 gh release download classes-v5 -R Nanako0129/shanjie -p classes.sjc -D data/lm
 gh release download kn-v1 -R Nanako0129/shanjie -p kn.sjkn -D data/lm
-gh release download tinylm-v5 -R Nanako0129/shanjie -p tinylm.sjtl -D data/lm
+gh release download sj-sr-6-14m -R Nanako0129/shanjie -p tinylm.sjtl -D data/lm
 gh release download sj-cx-1-7.7m -R Nanako0129/shanjie -p trigram.sjt3 -D data/lm
 # 沒有登入 gh 的話改用：
 # curl -L --create-dirs -o data/lm/bigram.sjlm https://github.com/Nanako0129/shanjie/releases/download/model-v6/bigram.sjlm
 # curl -L --create-dirs -o data/lm/classes.sjc https://github.com/Nanako0129/shanjie/releases/download/classes-v5/classes.sjc
 # curl -L --create-dirs -o data/lm/kn.sjkn https://github.com/Nanako0129/shanjie/releases/download/kn-v1/kn.sjkn
-# curl -L --create-dirs -o data/lm/tinylm.sjtl https://github.com/Nanako0129/shanjie/releases/download/tinylm-v5/tinylm.sjtl
+# curl -L --create-dirs -o data/lm/tinylm.sjtl https://github.com/Nanako0129/shanjie/releases/download/sj-sr-6-14m/tinylm.sjtl
 # curl -L --create-dirs -o data/lm/trigram.sjt3 https://github.com/Nanako0129/shanjie/releases/download/sj-cx-1-7.7m/trigram.sjt3
 shasum -a 256 -c data/bigram.sjlm.sha256 data/classes.sjc.sha256 data/kn.sjkn.sha256 data/tinylm.sjtl.sha256 data/trigram.sjt3.sha256
 
