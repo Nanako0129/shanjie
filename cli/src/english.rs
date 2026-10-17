@@ -20,6 +20,14 @@
 //! (`opened` and `top1`: the window opened / its first item is the word; the four classes partition the words, the last two
 //! open it, the first two never do; the tool stops if the engine and this recount disagree.)
 //!
+//! With `--digits` (docs/contracts/digits.md A.4.2) the engine is `Engine::new` on data/lexicon (digits.tsv read) with the model
+//! (`--lm`, default data/lm/bigram.sjlm), and four columns follow (mean and max over the seeds, per 1000 syllables of one seed):
+//!   digits_final_mean  digits_final_max  digits_shown_mean  digits_shown_max
+//! `final` counts the digit characters (0-9 . / -) in what the rows commit, which is the digit tokens left at the end (the rows are
+//! Chinese); `shown` counts the keys after which `Engine::digits_shown()` was not 0, the keys that for a moment show a digit. The
+//! engine decides what is a digit; the simulator only reads `Engine::digits_typed()` (the buffered keys) where it reads the columns
+//! otherwise, and does not insist on its own plan for the symbols (a key may be a digit).
+//!
 //! The typing model (fixed; change it and the number in cli/tests/english_sim.rs together):
 //! - Every Zhuyin key of a syllable is mistyped with probability `p`, but only when it has a neighbour: the keys left and right of
 //!   it on its keyboard row, kept only if they are Zhuyin keys of the standard layout. One neighbour or two, drawn uniformly.
@@ -102,6 +110,10 @@ struct Sim {
     /// up to the key in progress: what a recovery types again.
     autokeeps: u64,
     want: Vec<char>,
+    /// `--digits`: the engine is the digit-feature one; the counters below are read after every key.
+    digits: bool,
+    final_digits: u64,
+    shown_keys: u64,
     p: f64,
     repair: Repair,
     rng: Rng,
@@ -112,7 +124,11 @@ impl Sim {
     /// before the symbols are compared, and never worked out here.
     fn raw(&mut self, k: Key) -> Result<bool, String> {
         self.keys += 1;
-        self.engine.key(k).map_err(|_| "the engine failed on a key".to_string())?;
+        let o = self.engine.key(k).map_err(|_| "the engine failed on a key".to_string())?;
+        if self.digits {
+            self.final_digits += o.commit.chars().filter(|c| core::digits::is_alphabet(*c)).count() as u64;
+            self.shown_keys += (self.engine.digits_shown() > 0) as u64;
+        }
         // The rules are the engine's, never repeated here.
         self.d_held |= self.inline && self.engine.english_inline_shown();
         let kept = self.engine.english_autokept();
@@ -152,6 +168,9 @@ impl Sim {
 
     /// The symbols of the unfinished syllable in display order, read from the engine, so the simulator does not work them out itself.
     fn have(&self) -> Vec<char> {
+        if let Some(typed) = self.engine.digits_typed() {
+            return typed;
+        }
         self.engine.english_columns().iter().flatten().copied().collect()
     }
 
@@ -198,7 +217,7 @@ impl Sim {
             }
             // The simulator's plan and the engine's columns must agree here; if the engine ever repairs differently the run stops
             // instead of counting a typing the model did not intend.
-            if self.have() != want {
+            if !self.digits && self.have() != want {
                 return Err("the engine's symbols differ from the typing model's after a key".into());
             }
         }
@@ -215,6 +234,15 @@ impl Sim {
             }
         }
     }
+}
+
+/// `--digits`: the whole engine as the shell builds it (the table is read from the data directory), with the model.
+fn engine_digits(root: &Path, lm: &Path, words: &Path) -> Result<Engine, String> {
+    let mut e = Engine::new(&root.join("data/lexicon"), LAYOUT).map_err(|_| "cannot build the engine")?;
+    e.load_lm(lm).map_err(|_| "cannot load the model")?;
+    e.load_english(words).map_err(|_| "cannot load the word list".to_string())?;
+    e.set_english(true).map_err(|_| "cannot switch the English window on".to_string())?;
+    Ok(e)
 }
 
 fn engine_with(lex: &Arc<Lexicon>, words: &Path) -> Result<Engine, String> {
@@ -235,6 +263,7 @@ fn read(path: &Path) -> Result<Vec<u8>, String> {
 
 pub fn run(args: &[String], root: &Path) -> Result<(), String> {
     let (mut words, mut rows, mut recall, mut inline) = (None::<PathBuf>, None::<PathBuf>, false, false);
+    let (mut digits, mut lm) = (false, None::<PathBuf>);
     let (mut p, mut repair, mut seed, mut repeat) = (0.02f64, Repair::Overwrite, 20261014u64, 5u64);
     let mut it = args.iter();
     while let Some(a) = it.next() {
@@ -244,6 +273,8 @@ pub fn run(args: &[String], root: &Path) -> Result<(), String> {
             "--rows" => rows = Some(val()?.into()),
             "--recall" => recall = true,
             "--inline" => inline = true,
+            "--digits" => digits = true,
+            "--lm" => lm = Some(val()?.into()),
             "--p" => p = val()?.parse().map_err(|_| "bad --p")?,
             "--repair" => {
                 repair = match val()?.as_str() {
@@ -263,6 +294,12 @@ pub fn run(args: &[String], root: &Path) -> Result<(), String> {
     let words = words.ok_or("--words is required")?;
     if recall == rows.is_some() {
         return Err("give exactly one of --rows and --recall".into());
+    }
+    if (digits || lm.is_some()) && recall {
+        return Err("--digits is for the typing mode".into());
+    }
+    if lm.is_some() && !digits {
+        return Err("--lm goes with --digits".into());
     }
     if recall && inline {
         return Err("--inline is for the typing mode".into());
@@ -296,8 +333,11 @@ pub fn run(args: &[String], root: &Path) -> Result<(), String> {
         return Err("no row to simulate".into());
     }
     let (mut per_1000, mut inline_1000, mut autokeep_1000, mut keys, mut triggers) = (Vec::new(), Vec::new(), Vec::new(), 0u64, 0u64);
+    let (mut final_1000, mut shown_1000) = (Vec::new(), Vec::new());
+    let lm = lm.unwrap_or_else(|| root.join("data/lm/bigram.sjlm"));
     for i in 0..repeat {
-        let mut sim = Sim { engine: engine_with(&lex, &words)?, keys: 0, triggers: 0, inline, d_held: false, autokeeps: 0, want: Vec::new(), p, repair, rng: Rng(seed.wrapping_add(i)) };
+        let engine = if digits { engine_digits(root, &lm, &words)? } else { engine_with(&lex, &words)? };
+        let mut sim = Sim { engine, keys: 0, triggers: 0, inline, d_held: false, autokeeps: 0, want: Vec::new(), digits, final_digits: 0, shown_keys: 0, p, repair, rng: Rng(seed.wrapping_add(i)) };
         let mut shown_syllables = 0u64;
         for row in &parsed {
             sim.engine.reset(ResetMode::Discard);
@@ -311,16 +351,22 @@ pub fn run(args: &[String], root: &Path) -> Result<(), String> {
         per_1000.push(sim.triggers as f64 * 1000.0 / syllables as f64);
         inline_1000.push(shown_syllables as f64 * 1000.0 / syllables as f64);
         autokeep_1000.push(sim.autokeeps as f64 * 1000.0 / syllables as f64);
+        final_1000.push(sim.final_digits as f64 * 1000.0 / syllables as f64);
+        shown_1000.push(sim.shown_keys as f64 * 1000.0 / syllables as f64);
         keys += sim.keys;
         triggers += sim.triggers;
     }
     let (mean, max) = mean_max(&per_1000);
-    let extra = if inline {
+    let mut extra = if inline {
         let ((imean, imax), (amean, amax)) = (mean_max(&inline_1000), mean_max(&autokeep_1000));
         format!("\t{imean:.3}\t{imax:.3}\t{amean:.3}\t{amax:.3}")
     } else {
         String::new()
     };
+    if digits {
+        let ((fmean, fmax), (smean, smax)) = (mean_max(&final_1000), mean_max(&shown_1000));
+        extra += &format!("\t{fmean:.3}\t{fmax:.3}\t{smean:.3}\t{smax:.3}");
+    }
     println!("{rows_sha}\t{}\t{syllables}\t{keys}\t{triggers}\t{mean:.3}\t{max:.3}{extra}", parsed.len());
     Ok(())
 }
@@ -386,6 +432,9 @@ mod tests {
             d_held: false,
             autokeeps: 0,
             want: Vec::new(),
+            digits: false,
+            final_digits: 0,
+            shown_keys: 0,
             p,
             repair: Repair::Overwrite,
             rng: Rng(20261014),
@@ -424,6 +473,9 @@ mod tests {
             d_held: false,
             autokeeps: 0,
             want: Vec::new(),
+            digits: false,
+            final_digits: 0,
+            shown_keys: 0,
             p: 0.0,
             repair: Repair::Backspace,
             rng: Rng(20261014),

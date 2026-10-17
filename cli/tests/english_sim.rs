@@ -108,3 +108,29 @@ fn autokeep_columns() {
     assert_eq!(cols(&["--p", "0.5", "--repair", "overwrite"]).len(), 7);
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+/// `--digits` (docs/contracts/digits.md A.4.2): the engine with the digit table and the model; two more columns pairs, mean and max per 1000
+/// syllables over the seeds: the digit characters left in what the rows commit, and the keys after which a digit showed. Three synthetic
+/// rows (ㄉㄢˋ ㄅㄚ ㄅㄞˇ, all keys in the digit alphabet or next to it), seed 20261014, two seeds. Typed right: no digit is left and none
+/// shows. Mistakes repaired by Backspace leave none; by overwriting (the key replaces nothing in the buffer) digits are left and shown. The
+/// real sets are run by main (the contract's numbers); these only pin the columns and the determinism.
+#[test]
+fn digits_columns() {
+    let dir = std::env::temp_dir().join(format!("shanjie-english-sim-{}-digits", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let rows = dir.join("rows.txt");
+    std::fs::write(&rows, "|蛋|ㄉㄢˋ\n|八|ㄅㄚ\n|百|ㄅㄞˇ\n").unwrap();
+    let list = concat!(env!("CARGO_MANIFEST_DIR"), "/../eval/golden/english-tiny.txt");
+    let rows = rows.to_str().unwrap();
+    let go = |p: &str, repair: &str| run(&["--words", list, "--rows", rows, "--digits", "--repeat", "2", "--p", p, "--repair", repair]);
+    let sha = "1265d1e6ad6805a31af90872f00b75447742d3a261cdfab90a0073fd6d30d348";
+    assert_eq!(go("0", "overwrite"), format!("{sha}\t3\t3\t24\t0\t0.000\t0.000\t0.000\t0.000\t0.000\t0.000\n"));
+    assert_eq!(go("0.3", "backspace"), format!("{sha}\t3\t3\t34\t0\t0.000\t0.000\t0.000\t0.000\t333.333\t666.667\n"));
+    let over = go("0.3", "overwrite");
+    assert_eq!(over, format!("{sha}\t3\t3\t29\t0\t0.000\t0.000\t2666.667\t4000.000\t2333.333\t3666.667\n"));
+    assert_eq!(go("0.3", "overwrite"), over, "the output depends on nothing but the arguments");
+    // `--digits` is for the typing mode, and `--lm` goes with it.
+    let out = Command::new(env!("CARGO_BIN_EXE_shanjie-eval")).arg("english-sim").args(["--words", list, "--recall", "--digits"]).output().unwrap();
+    assert!(!out.status.success() && out.stdout.is_empty());
+    std::fs::remove_dir_all(&dir).unwrap();
+}

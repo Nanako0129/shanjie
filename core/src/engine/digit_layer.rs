@@ -110,6 +110,13 @@ impl Engine {
         self.d_shown
     }
 
+    /// Simulator hook: the symbols of the open run's buffered keys in typing order (the keys the person typed for the unfinished
+    /// syllable, whichever way they are shown); `None` without a run.
+    #[doc(hidden)]
+    pub fn digits_typed(&self) -> Option<Vec<char>> {
+        self.drun.as_ref().map(|r| r.buf.iter().filter_map(|&k| Layout::Standard.symbol_of(k).map(|x| x.1)).collect())
+    }
+
     /// Simulator hook: digit tokens that the latest `key()` put into the composition. Cleared at the start of every `key()`.
     #[doc(hidden)]
     pub fn digits_emitted(&self) -> usize {
