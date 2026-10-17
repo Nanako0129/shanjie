@@ -38,6 +38,10 @@ fn shared() -> &'static Shared {
         Shared { lex, lm: Arc::new(lm), capped }
     })
 }
+fn digit_table() -> Arc<core::digits::DigitTable> {
+    static T: OnceLock<Arc<core::digits::DigitTable>> = OnceLock::new();
+    T.get_or_init(|| Arc::new(core::digits::DigitTable::parse(&std::fs::read_to_string(root().join("data/lexicon/digits.tsv")).unwrap()).unwrap())).clone()
+}
 const L: Layout = Layout::Standard;
 const DAY: i64 = 20_000;
 
@@ -884,6 +888,87 @@ fn abbreviation_keys(e: &mut Engine, sent: &str, reading: &str, mut each: impl F
 }
 
 fn time_typing76_in(dir: Option<&Path>, abbr: bool) {
+    time_typing76_with(dir, abbr, false);
+}
+
+/// The same pass with the English-mixing switch on, the word list and the digit table loaded (docs/contracts/digits.md A.4.4): the keys of
+/// Chinese typed right, every key through the digit layer's scoring.
+#[test]
+#[ignore]
+fn timing_typing76_keys_digits() {
+    time_typing76_with(None, false, true);
+}
+
+#[test]
+#[ignore]
+fn timing_typing76_keys_with_taught_picks_and_50k_digits() {
+    let dir = tmp_dir("timing-taught50k-digits");
+    let taught = teach_typing76_picks(&dir);
+    let (store, mut records, _) = LearnStore::open(&dir).unwrap();
+    records.extend(synthetic_records(core::learn::CAPACITY - taught));
+    store.save(&records).unwrap();
+    println!("taught records: {taught}, total {}", records.len());
+    time_typing76_with(Some(&dir), false, true);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// What the digit table adds to building an engine: `Engine::new` + `load_lm` without and with `data/lexicon/digits.tsv` (the legal tails of
+/// the lexicon and the best entry of every word the table names are built in `load_lm`). Printed, not asserted.
+#[test]
+#[ignore]
+fn digits_engine_load_cost() {
+    let dir = root().join("data/lexicon");
+    let tmp = std::env::temp_dir().join(format!("shanjie-digits-load-{}", std::process::id()));
+    std::fs::create_dir_all(&tmp).unwrap();
+    for f in std::fs::read_dir(&dir).unwrap().map(|f| f.unwrap().file_name()) {
+        if f != "digits.tsv" {
+            std::os::unix::fs::symlink(dir.join(&f), tmp.join(&f)).unwrap();
+        }
+    }
+    for round in 0..2 {
+        for (name, d) in [("without digits.tsv", &tmp), ("with digits.tsv", &dir)] {
+            let t = Instant::now();
+            let mut e = Engine::new(d, L).unwrap();
+            let t_new = t.elapsed();
+            let t = Instant::now();
+            e.load_lm(&root().join("data/lm/bigram.sjlm")).unwrap();
+            println!("round {round} {name}: Engine::new {:?}, load_lm {:?}", t_new, t.elapsed());
+        }
+    }
+    std::fs::remove_dir_all(&tmp).unwrap();
+}
+
+/// The keys of digit strings (the work the digit layer adds: scoring five splits per key): 200 passes over a few strings with Zhuyin
+/// after them, per key. Printed; the assertion is the contract's p95 < 16 ms.
+#[test]
+#[ignore]
+fn timing_digit_keys() {
+    let mut e = engine();
+    e.set_digit_table(Some(digit_table()));
+    e.load_english(&root().join("eval/golden/english-tiny.txt")).unwrap();
+    e.set_english(true).unwrap();
+    e.key(Key::ch('2', 0)).unwrap();
+    e.reset(ResetMode::Discard);
+    let scripts = ["2026su06", "2026/10/15", "1984", "3.14", "101o4", "100m06", "1258901258", "84", "504"];
+    let mut times = Vec::new();
+    for _ in 0..200 {
+        for sc in scripts {
+            e.set_left_context("下午");
+            for c in sc.chars().chain(['\n']) {
+                let k = if c == '\n' { kind(KeyKind::Enter) } else { Key::ch(c, 0) };
+                let t = Instant::now();
+                e.key(k).unwrap();
+                times.push(t.elapsed());
+            }
+        }
+    }
+    times.sort();
+    let ms = |d: Duration| d.as_secs_f64() * 1000.0;
+    println!("digit keys: {} keys p50 {:.3} ms p95 {:.3} ms max {:.3} ms", times.len(), ms(times[times.len() / 2]), ms(times[times.len() * 95 / 100]), ms(times[times.len() - 1]));
+    assert!(times[times.len() * 95 / 100] < Duration::from_millis(16), "p95 over 16 ms");
+}
+
+fn time_typing76_with(dir: Option<&Path>, abbr: bool, digits: bool) {
     let s = shared();
     let rss0 = rss_kb();
     let t = Instant::now();
@@ -897,6 +982,15 @@ fn time_typing76_in(dir: Option<&Path>, abbr: bool) {
         let f: Vec<&str> = line.split('|').collect();
         let (left, reading) = (f[0], f[2]);
         let mut e = engine();
+        if digits {
+            e.set_digit_table(Some(digit_table()));
+            e.load_english(&root().join("eval/golden/english-tiny.txt")).unwrap();
+            e.set_english(true).unwrap();
+            // The shell builds what the digit layer needs once, in `load_lm`; this engine got its model by `set_lm`, so it is built by the
+            // first digit key. That key is pressed here, untimed, and the composition dropped (see `digits_engine_load_cost` for its time).
+            e.key(Key::ch('2', 0)).unwrap();
+            e.reset(ResetMode::Discard);
+        }
         if let Some(d) = dir {
             e.set_learning(true);
             e.learning_open(d).unwrap();
@@ -930,9 +1024,10 @@ fn time_typing76_in(dir: Option<&Path>, abbr: bool) {
     }
     println!("keys over 16 ms: {}", times.iter().filter(|d| **d > Duration::from_millis(16)).count());
     println!(
-        "typing76{}{}: rows {rows} keys {} p50 {:.3} ms p95 {:.3} ms max {:.3} ms",
+        "typing76{}{}{}: rows {rows} keys {} p50 {:.3} ms p95 {:.3} ms max {:.3} ms",
         if dir.is_some() { " + store" } else { "" },
         if abbr { " + abbreviation" } else { "" },
+        if digits { " + digits" } else { "" },
         times.len(),
         ms(times[times.len() / 2]),
         ms(times[times.len() * 95 / 100]),
