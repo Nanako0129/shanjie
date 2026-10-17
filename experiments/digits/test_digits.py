@@ -567,7 +567,7 @@ class PredGolden(unittest.TestCase):
         want = DS.digit_row(sc.tb, lm, lex, sc.idx, "下午", [], DS.L.PROFILES["chat"])
         self.assertEqual([float(l.split("\t")[2]) for l in block[:len(want)]], [s for _, s in want])
         with_tail = [l for l in lines if l.startswith("## 5\t")][0]
-        self.assertIn("syms=ㄅ", with_tail)
+        self.assertIn("syms=ㄩ", with_tail)
 
 
 class FakeRunner:

@@ -1,11 +1,14 @@
 //! S3a key engine (docs/contracts/s3a.md): key events in, preedit / commit / candidates out.
 //! R2: no input text in errors or panics; types holding input text do not derive Debug.
 
-use crate::learn::{context_key, english_of, english_or_space, is_space_unit, local_day, next_key, record_key, Learner, Level, Record, PUNCT_PREFIX};
+use crate::learn::{context_key, digit_of, english_of, english_or_space, is_space_unit, local_day, next_key, record_key, Learner, Level, Record, PUNCT_PREFIX};
 use crate::learn_store::{LearnStore, Opened, StoreError, JOURNAL_MAX};
-use crate::predict::{predict, reading_matches_in, unit_of_syllable, Mode, Unit};
+use crate::predict::{predict, predict_digits, reading_matches_in, unit_of_syllable, Mode, Unit};
 use crate::lm::{decode_segment_learned, history, CappedLexicon, Demote, End, Learn, Lm, Profile};
 use crate::trigram::TriMemo;
+use crate::digits::DigitTable;
+mod digit_layer;
+use digit_layer::{DRun, DigitAlt, DigitCache, DigitEvent};
 use crate::tinylm::{RerankLevel, TinyLm, TOPK};
 use crate::{decode_beam, Lexicon, NoLearning, BEAM_S1};
 use std::collections::{HashMap, HashSet};
@@ -233,6 +236,10 @@ impl Layout {
     fn tone_of(self, key: char) -> Option<usize> {
         self.tone_keys().iter().position(|&c| c == key).map(|i| i + 1)
     }
+    /// Mark (ˊˇˋ˙) of a tone key; `None` for any other key (Space, tone 1, is the caller's).
+    pub(crate) fn key_tone_mark(self, key: char) -> Option<char> {
+        self.tone_of(key).and_then(|i| TONE_MARKS[i].chars().next())
+    }
     /// Inverse of `symbol_of`, for building key presses from a reading.
     pub fn key_of_symbol(self, sym: char) -> Option<char> {
         let i = SYMBOLS.chars().position(|c| c == sym)?;
@@ -387,11 +394,14 @@ struct Cands {
     /// entries of `list` (the length field of a list entry cannot mark them: the English window uses 0), and choosing
     /// one is choosing it from the row. They go with the window when it closes.
     rows: Vec<Pred>,
+    /// Digits contract A.3.6: the last item is not a lexicon entry but the other reading of digit keys (the digits of a syllable
+    /// that just closed, or the syllable of the last digit tokens). Judged by the item's index, never by a length field.
+    dalt: Option<DigitAlt>,
 }
 
 impl Cands {
     fn new(list: Vec<(String, usize)>, vertical: bool) -> Cands {
-        Cands { list, sel: 0, expanded: false, top: 0, vertical, first: 0, english: false, zh: None, rows: Vec::new() }
+        Cands { list, sel: 0, expanded: false, top: 0, vertical, first: 0, english: false, zh: None, rows: Vec::new(), dalt: None }
     }
 
     fn scroll(&mut self) {
@@ -527,6 +537,17 @@ pub struct Engine {
     /// Whether the latest `key()` made an auto-keep (zhen-inline section 1.3; tool hook `english_autokept`). Cleared at the start
     /// of `key()` and nowhere else; no other entry point (a pick, a reset, a setting) touches it, so none can leave it stale.
     autokept: bool,
+    /// Digits (docs/contracts/digits.md): the count table (`digits.tsv`, optional), what is built from it and the model once, the run
+    /// of digit-alphabet keys being typed, the keys of the syllable that just closed (A.3.6; `ld_now` is what the current key saw), and
+    /// the counters and trace of the simulator and the golden test. All idle unless `digits_active`.
+    digit_table: Option<Arc<DigitTable>>,
+    digit_cache: Option<Arc<DigitCache>>,
+    drun: Option<DRun>,
+    last_digits: Option<String>,
+    ld_now: Option<String>,
+    d_shown: usize,
+    d_emitted: usize,
+    dtrace: Option<Vec<DigitEvent>>,
 }
 
 /// Base lexicon + overlay from `data_dir` (§5), same as the eval CLI default. The overlay rows are
@@ -677,6 +698,8 @@ impl Engine {
             return Err(EngineError::LoadFailed);
         }
         e.data_dir = Some(data_dir.to_path_buf());
+        // Optional (digits.md A.3.2): a missing or malformed table leaves the digit feature off and says nothing.
+        e.digit_table = std::fs::read_to_string(data_dir.join("digits.tsv")).ok().and_then(|t| DigitTable::parse(&t)).map(Arc::new);
         Ok(e)
     }
 
@@ -732,6 +755,14 @@ impl Engine {
             run: String::new(),
             run_zh: None,
             autokept: false,
+            digit_table: None,
+            digit_cache: None,
+            drun: None,
+            last_digits: None,
+            ld_now: None,
+            d_shown: 0,
+            d_emitted: 0,
+            dtrace: None,
         }
     }
 
@@ -1020,6 +1051,8 @@ impl Engine {
         capped.predict_index(&lm);
         self.lm = Some(LmState { lm: Arc::new(lm), capped: Arc::new(capped) });
         self.tinylm = None; // S7c-2a section 2.3: tuned for the previous model
+        self.digit_cache = None;
+        self.digit_env(); // built now, not at the first digit key (a table loaded and a model: the legal tails and the word readings)
         Ok(())
     }
 
@@ -1107,8 +1140,9 @@ impl Engine {
         if !on {
             self.drop_units();
         } else {
+            let flushed = self.digit_flush()?; // digits.md A.3.7: the buffered digits become tokens
             self.close_english(); // zhen-mixed section 2.1: the two are exclusive
-            return self.settle_run();
+            return self.settle_with(flushed);
         }
         self.handled()
     }
@@ -1144,8 +1178,9 @@ impl Engine {
     pub fn set_english(&mut self, on: bool) -> Result<Output, EngineError> {
         self.english = on;
         if !on {
+            let flushed = self.digit_flush()?; // digits.md A.3.7: the buffered digits become tokens
             self.close_english();
-            return self.settle_run();
+            return self.settle_with(flushed);
         }
         self.handled()
     }
@@ -1606,13 +1641,18 @@ impl Engine {
     /// §6 reset: Commit returns the composition as shown, unfinished symbols included, like Enter (enter-pending
     /// contract §2; no learning here); both clear everything.
     pub fn reset(&mut self, mode: ResetMode) -> Output {
-        let commit = if mode == ResetMode::Commit { self.shown().0 } else { String::new() };
+        // Digits.md A.3.4: the buffered digits are tokens before the composition is sent (Commit); Discard drops them with the rest.
+        let digits = if mode == ResetMode::Commit { self.digit_flush().unwrap_or_default().0 } else { String::new() };
+        let commit = if mode == ResetMode::Commit { digits + &self.shown().0 } else { String::new() };
         self.clear_all();
         self.view(true, commit)
     }
 
     pub fn key(&mut self, k: Key) -> Result<Output, EngineError> {
         self.pred_dirty = false;
+        self.ld_now = self.last_digits.take();
+        self.d_emitted = 0;
+        self.d_shown = self.drun.as_ref().map_or(0, |r| r.emitted.len() + r.m);
         self.autokept = false; // the one place it is cleared; `insert_english` may set it again below
         let mut r = self.dispatch(k);
         match &mut r {
@@ -1653,6 +1693,14 @@ impl Engine {
         let (Some(st), true) = (self.lm.clone(), self.predict_on && self.cursor == n && self.cands.is_none() && self.run.is_empty()) else { return };
         let idx = st.capped.predict_index(&st.lm);
         let lam = self.profile.lambda();
+        // Digits.md A.3.5: right behind digits (tokens, or buffered keys that show as digits) the cursor start is read in the digit
+        // context (v, D); buffered digits are not syllables, so no start in front of them is queried (choosing one would splice over them).
+        let (dv, dcache) = match self.digit_pred_v(&st) {
+            Some(v) => (Some(v), self.digit_env().map(|e| e.cache)),
+            None => (None, None),
+        };
+        let dtable = self.digit_table.clone();
+        let isolated = self.drun.as_ref().is_some_and(|r| r.m >= 1);
         // The unfinished units in order (one without the abbreviation composer); two or more can only read as an abbreviation.
         let pending: Vec<Vec<char>> =
             self.pend_prev.iter().chain([&self.pend]).map(|u| u.iter().flatten().copied().collect::<Vec<_>>()).filter(|u| !u.is_empty()).collect();
@@ -1663,11 +1711,11 @@ impl Engine {
         // near. Positions inside words within `PREDICT_BACK` come last, except inside a word the user fixed: choosing
         // such an item would take the user's choice (and its pending learn) apart.
         // Two or more units match nothing that holds a complete syllable (section 12.3): only the cursor start is queried.
-        let starts = if multi { Vec::new() } else { self.path_starts() };
+        let starts = if multi || isolated { Vec::new() } else { self.path_starts() };
         let k = starts.len();
         let long_starts: Vec<usize> =
             starts.iter().enumerate().filter(|&(i, &s)| i + 2 >= k || s + PREDICT_BACK >= n).map(|(_, &s)| s).collect();
-        let mid: Vec<usize> = (n.saturating_sub(PREDICT_BACK)..if multi { 0 } else { n })
+        let mid: Vec<usize> = (n.saturating_sub(PREDICT_BACK)..if multi || isolated { 0 } else { n })
             .filter(|&p| !long_starts.contains(&p) && !self.fixed.iter().any(|f| f.start < p && p < f.end))
             .collect();
         let disp: Vec<char> = self.display.chars().collect();
@@ -1682,7 +1730,8 @@ impl Engine {
                 return Vec::new();
             }
             units.extend(pending.iter().map(|chars| Unit { chars: chars.clone(), done: false, tone: None }));
-            if units.is_empty() {
+            let digits_here = s == n && dv.is_some() && dcache.is_some() && dtable.is_some();
+            if units.is_empty() && !digits_here {
                 return Vec::new();
             }
             let before: String = disp[..off(s)].iter().collect();
@@ -1691,10 +1740,16 @@ impl Engine {
             let shown: String = disp[off(s)..off(n)].iter().collect();
             // A start no record can match scans 9 and weighs nothing: its row is the slice-1 one, cheaper.
             let gate = learned && (!self.scan_gate || self.learner.records().iter().any(|r| reading_matches_in(&units, &r.reading, mode)));
-            predict(idx, &st.lm, lam, v, &units, mode, if gate { PREDICT_SCAN } else { PREDICT_MAX })
-                .into_iter()
+            let limit = if gate { PREDICT_SCAN } else { PREDICT_MAX };
+            let hits: Vec<(String, Vec<String>)> = match (&dv, &dcache, &dtable) {
+                (Some(dv), Some(c), Some(t)) if digits_here => {
+                    predict_digits(idx, &st.lm, t, &c.words, lam, dv, &units, limit).into_iter().map(|(w, _, r)| (w, r)).collect()
+                }
+                _ => predict(idx, &st.lm, lam, v, &units, mode, limit).into_iter().map(|(w, _, _, r)| (w, r)).collect(),
+            };
+            hits.into_iter()
                 .enumerate()
-                .filter_map(|(i, (word, _, _, reading))| {
+                .filter_map(|(i, (word, reading))| {
                     // Step 2: keep the slice-1 window and anything learned; the index counts before step 3 filters.
                     let weight = if gate { self.learned_weight(&key, &reading, &word, today) } else { 0.0 };
                     (i < PREDICT_MAX || weight > 0.0).then_some(Pred { word, reading, start: s, key: key.clone(), weight })
@@ -1717,7 +1772,7 @@ impl Engine {
         // stable sort below puts the learned ones first, so a partition gives the same row as "learned, then L[0..3]".
         let (head, tail): (Vec<_>, Vec<_>) = long.into_iter().enumerate().partition(|(i, p)| p.weight > 0.0 || *i < PREDICT_LONG_CAP);
         let (head, tail) = (head.into_iter().map(|x| x.1), tail.into_iter().map(|x| x.1));
-        let cursor_items = if pending.is_empty() { Vec::new() } else { query(n) };
+        let cursor_items = if pending.is_empty() && dv.is_none() { Vec::new() } else { query(n) };
         // Section 11: the positions inside words come last, far to near.
         let mid_items = mid.into_iter().flat_map(&query);
         let mut all: Vec<Pred> = head.chain(cursor_items).chain(tail).chain(mid_items).collect();
@@ -1747,7 +1802,14 @@ impl Engine {
     }
 
     /// `choose_pred` for an item already taken out of the row (or out of a window that carried the row, predict-down B.3.1).
-    fn apply_pred(&mut self, p: Pred) -> Result<Output, EngineError> {
+    fn apply_pred(&mut self, mut p: Pred) -> Result<Output, EngineError> {
+        let digits = self.digit_pre_pick(&mut p)?;
+        let mut o = self.apply_pred_at(p)?;
+        o.commit.insert_str(0, &digits);
+        Ok(o)
+    }
+
+    fn apply_pred_at(&mut self, p: Pred) -> Result<Output, EngineError> {
         let Pred { word, reading, start, key, .. } = p;
         let pre = self.learning.then(String::new);
         self.clear_pred();
@@ -1781,6 +1843,8 @@ impl Engine {
         self.cands = None;
         self.run.clear();
         self.run_zh = None;
+        self.drun = None;
+        self.last_digits = None;
         self.clear_pred();
     }
 
@@ -1805,6 +1869,10 @@ impl Engine {
         // which can be longer (⋯⋯, s3e §3). Clamped in case the invariant ever breaks.
         let at = (0..self.cursor).map(|i| self.token_width(i)).sum::<usize>().min(chars.len());
         let mut text: String = chars[..at].iter().collect();
+        // Digits.md A.3.1: the buffered keys that show as digits sit before the unfinished syllable (the tail, mirrored in `pend`).
+        if let Some(r) = &self.drun {
+            text.extend(&r.buf[..r.m]);
+        }
         let run_start = text.encode_utf16().count() as u32;
         text.push_str(&unfinished);
         let cursor_utf16 = text.encode_utf16().count() as u32;
@@ -2080,6 +2148,11 @@ impl Engine {
             self.pred_sel = Some(0);
             return self.handled();
         }
+        // Digits.md A.3.4: an open run of digit-alphabet keys sees the key before anything else (the entered row and the Tab
+        // that enters it came first; a window cannot be open while a run is).
+        if self.drun.is_some() {
+            return self.digit_run_key(k);
+        }
         // Zhen-inline section 1.3b: an open English run sees the key before anything else.
         if !self.run.is_empty() {
             return self.run_key(k);
@@ -2138,6 +2211,10 @@ impl Engine {
         // 3-8: candidates open.
         if self.cands.is_some() && self.candidate_key(k)? {
             return self.chosen();
+        }
+        // Digits.md A.3.4: a digit-alphabet key with nothing unfinished opens a run.
+        if let Some(o) = self.digit_start(k)? {
+            return Ok(o);
         }
         let tone = match k.kind {
             KeyKind::Space => Some(0),
@@ -2231,11 +2308,11 @@ impl Engine {
         let n = self.syls.len();
         match k.kind {
             // Zhen-inline section 1.3e (English mixing on): Space right after an English token or a space unit types a space.
-            KeyKind::Space if self.shadow_on() && self.cursor > 0 && self.breaks_with_space(self.cursor - 1) => {
+            KeyKind::Space if self.cursor > 0 && self.breaks_with_space(self.cursor - 1) => {
                 return self.insert_token(format!("{PUNCT_PREFIX} "), Some(" ".to_string()), None);
             }
             // In front of one (cursor 0) Space opens nothing: the writings list opens with Down only.
-            KeyKind::Space if self.shadow_on() && self.cursor == 0 && self.breaks_with_space(0) => self.pred = old,
+            KeyKind::Space if self.cursor == 0 && self.breaks_with_space(0) => self.pred = old,
             KeyKind::Space | KeyKind::Down => self.open_candidates(old),
             KeyKind::Up => self.pred = old,
             KeyKind::Char if tone.is_some() => self.pred = old,
@@ -2471,8 +2548,9 @@ impl Engine {
     }
 
     /// Zhen-inline section 1.3e: whether unit `i` is an English token or a space unit, the two a Space after it types a space for.
+    /// Digits.md A.3.4 adds the digit-string token (and a space unit), when the digit feature is on, without needing the word list.
     fn breaks_with_space(&self, i: usize) -> bool {
-        english_or_space(&self.syls[i])
+        (self.shadow_on() && english_or_space(&self.syls[i])) || (self.digits_active() && (digit_of(&self.syls[i]).is_some() || is_space_unit(&self.syls[i])))
     }
 
     fn is_punct(&self, i: usize) -> bool {
@@ -2508,6 +2586,22 @@ impl Engine {
                     c.zh = Some(syl);
                 }
                 c.list = list;
+                self.cands = Some(c);
+                return;
+            }
+            if let Some(d) = digit_of(&self.syls[touching]) {
+                // Digits.md A.3.4 (Down): the row of the digit context first, then the digit and its full-width form, then (A.3.6)
+                // the syllable the last digit tokens could have been. The punctuation table is not asked.
+                let mut list: Vec<(String, usize)> = rows.iter().map(|p| (p.word.clone(), p.reading.len())).collect();
+                list.push((d.to_string(), 1));
+                list.push((digit_layer::full_width(d).to_string(), 1));
+                let mut c = Cands::new(Vec::new(), self.cand_vertical);
+                if let Some((n, syl, word)) = self.digit_syllable_alt(touching + 1) {
+                    list.push((word, 1));
+                    c.dalt = Some(DigitAlt::Syllable { n, syl });
+                }
+                c.list = list;
+                c.rows = rows;
                 self.cands = Some(c);
                 return;
             }
@@ -2565,10 +2659,16 @@ impl Engine {
 
     /// Opens the window on `window_list`; an empty list opens nothing (and the row is gone, as before this contract).
     fn open_with_rows(&mut self, rows: Vec<Pred>) {
-        let list = self.window_list(&rows);
+        let mut list = self.window_list(&rows);
+        // Digits.md A.3.6: right after a syllable the digit keys closed, its digits are the last item.
+        let digits = self.ld_now.take().filter(|_| !list.is_empty());
+        if let Some(keys) = &digits {
+            list.push((keys.clone(), 1));
+        }
         if !list.is_empty() {
             let mut c = Cands::new(list, self.cand_vertical);
             c.rows = rows;
+            c.dalt = digits.map(DigitAlt::Digits);
             self.cands = Some(c);
         }
     }
@@ -2667,6 +2767,14 @@ impl Engine {
             return self.choose_english(idx, false);
         }
         let Some(mut c) = self.cands.take() else { return Ok(()) };
+        if let Some(alt) = c.dalt.take().filter(|_| idx + 1 == c.list.len() && idx >= c.rows.len()) {
+            let word = c.list[idx].0.clone();
+            let commit = self.choose_digit_alt(alt, word)?;
+            if !commit.is_empty() {
+                self.commit_out = Some(commit);
+            }
+            return Ok(());
+        }
         if idx < c.rows.len() {
             // Predict-down contract B.3.1: a row item chosen from the window is chosen from the row; the 40th unit's commit
             // waits in `commit_out` for `chosen`, as an English item's does.

@@ -57,12 +57,14 @@ def generate(scorer, history_fn, rows, header_lines, strict=False):
     return "\n".join(out) + "\n"
 
 
-# digits.md A.3.5 prediction rows: (left context, digit keys, unfinished-syllable symbols). The context is `lm.history(context_key(left))`; with
+# digits.md A.3.5 prediction rows: (left context, digit keys, unfinished-syllable symbols; the symbols are keys outside the digit alphabet, so
+# the Rust engine can be put in exactly this state: digits, then the key of ㄩ). Every digit string is one the baseline shows as digits
+# (a string like 20 at the sentence start shows as ㄉㄢ, which is the unfinished-syllable row of today, not a digit row). The context is `lm.history(context_key(left))`; with
 # symbols the row is the tiers of `digit_row`, without them the successor layer.
 PRED_ROWS = [
-    ("", "3", ""), ("", "20", ""), ("", "101", ""), ("", "34", ""), ("", "10", "ㄅ"),
+    ("", "3", ""), ("", "202", ""), ("", "101", ""), ("", "34", ""), ("", "10", "ㄩ"),
     ("下午", "3", ""), ("下午", "2", ""), ("下午", "20", ""), ("下午", "101", ""),
-    ("價格", "3", ""), ("價格", "20", ""), ("價格", "300", "ㄩ"),
+    ("價格", "3", ""), ("價格", "202", ""), ("價格", "300", "ㄩ"),
 ]
 assert len(PRED_ROWS) == 12
 PRED_PROFILE, PRED_LIMIT = "chat", 9
