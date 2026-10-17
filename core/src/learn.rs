@@ -31,8 +31,50 @@ pub const ACTIVE: f64 = 0.5;
 /// Records decayed below this are dropped on load and on a full rewrite (§1.3): about 60 days unused, so a
 /// repeated teach still has room to accumulate, while long-dead entries do not linger on disk.
 pub const PRUNE_FLOOR: f64 = 0.05;
-/// At most this many records; the lowest weights go first (§1.3).
+/// At most this many records; the lowest weights go first (§1.3). New words (`NEWWORD`) are counted apart.
 pub const CAPACITY: usize = 50_000;
+
+// ---- New-word B (docs/contracts/newword-b.md) ----
+
+/// Context field of a new-word record (§2.3): a sentinel distinct from the sentence-start keys (`NEXT_PREFIX`) and
+/// the global "". Neither `context_key` nor `record_key` returns it, so the S4 lookups never match it; versions
+/// without new-word B skip these lines at load, because their `legal_context` requires `context_key(c) == c` and
+/// `context_key("#")` is "^".
+pub const NEWWORD: &str = "#";
+/// Syllables (= characters) of a learned new word (§2.2).
+pub const NEWWORD_MIN: usize = 2;
+pub const NEWWORD_MAX: usize = 4;
+/// At most this many new-word records, trimmed lowest weight first apart from `CAPACITY` (§2.3): in memory at every
+/// new-word learn (`learn_new`), on load and at every full rewrite (`prune`).
+pub const NEWWORD_CAP: usize = 2_000;
+/// Characters that split a run of re-picked single characters (§2.2): high-frequency function characters. Table T1,
+/// the one the pre-study simulation used (picked after looking at dev, so in sample). It was not swept in this slice:
+/// contract §3.2 and §7 keep T1 and leave other tables out of scope.
+pub const NEWWORD_BREAK: &str = "的了是在再嗎呢吧啊喔耶囉啦欸也而就和或與及跟你我他她它們這那有沒要會很都還又給把被讓";
+/// A run made only of these is never learned (§2.2): numbers, codes and amounts.
+pub const NEWWORD_DIGITS: &str = "〇零一二三四五六七八九十百千萬億兩壹貳參肆伍陸柒捌玖拾佰仟";
+/// Entry score (log10) of a new word of decayed weight w: `S_MIN + (S_MAX - S_MIN) * w / (w + 1)` (§2.4).
+/// Chosen by the contract §3.2 sweep (2026-10-17, research log): of [-5,-3], [-4,-2] and [-3,-1], every range passed the
+/// veto, net >= 0 and class (i) = 0 in all four cvtune/wikitune x chat/formal cells; [-3,-1] has the largest summed net
+/// (190 against 186 and 181). Never tuned on the dev sets.
+pub const NEWWORD_S_MIN: f64 = -3.0;
+pub const NEWWORD_S_MAX: f64 = -1.0;
+/// Contract §2.2 item 3 (revision one): a run is not learned when the best lexicon word under its reading scores above
+/// this (log10, the file score before capping and demotion), so a learned word never covers a strong lexicon word. -6.5
+/// sits above every wiki-sourced row of overlay-add.tsv ([-7.67, -6.61]) and the base's three count-less modes (-7.47,
+/// -7.17, -7.04), which therefore do not block, and below the manual overlay rows (-6.29 to -5.43), the whole names
+/// layer (-5.54 to -3.75) and the eight base words the 2026-10-10 sweep saw covered (lowest 工黨 -6.09), which do. Chosen
+/// after looking at those 16 rows (in sample); the cvtune and formal sweep of contract §3.2 is its first test.
+pub const NEWWORD_SHADOW: f64 = -6.5;
+/// Contract §2.2 item 5 (variant B, chosen by the user on 2026-10-10 after the measurement in the research log): a run
+/// learned under §2.2 also teaches each contiguous sub-span of NEWWORD_MIN..=NEWWORD_MAX characters that holds a
+/// re-picked character, is not all NEWWORD_DIGITS and whose reading has no lexicon word at all. Off: rule A only.
+pub const NEWWORD_SUBSPANS: bool = true;
+
+/// §2.4: the entry score of a new word of decayed weight `w`.
+pub fn newword_score(w: f64) -> f64 {
+    NEWWORD_S_MIN + (NEWWORD_S_MAX - NEWWORD_S_MIN) * (w / (w + 1.0))
+}
 
 pub(crate) fn is_han(c: char) -> bool {
     matches!(c as u32,
@@ -176,11 +218,13 @@ fn reading_key(reading: &[String]) -> String {
 pub struct Learner {
     records: Vec<Record>,
     index: std::collections::HashMap<String, Vec<usize>>,
+    /// How many records are new words (`NEWWORD`): with none, decoding skips the new-word lookups entirely.
+    new_count: usize,
 }
 
 impl Learner {
     pub fn from_records(records: Vec<Record>) -> Learner {
-        let mut l = Learner { records, index: Default::default() };
+        let mut l = Learner { records, index: Default::default(), new_count: 0 };
         l.reindex();
         l
     }
@@ -189,6 +233,76 @@ impl Learner {
         for (i, r) in self.records.iter().enumerate() {
             self.index.entry(reading_key(&r.reading)).or_default().push(i);
         }
+        self.new_count = self.records.iter().filter(|r| r.context == NEWWORD).count();
+    }
+    /// True when any new-word record exists.
+    pub fn has_new_words(&self) -> bool {
+        self.new_count > 0
+    }
+    /// §2.4: new words of `reading` with decayed weight ≥ `ACTIVE`, heaviest first (ties by word).
+    pub fn new_words(&self, reading: &[String], today: i64) -> Vec<(&str, f64)> {
+        let mut v = self.new_words_weighed(reading, today);
+        v.retain(|x| x.1 >= ACTIVE);
+        v
+    }
+    /// Every new word of `reading` whatever its weight, heaviest first: what the candidate window lists, so ⌘⌫ can
+    /// reach any record still on disk.
+    pub fn new_words_all(&self, reading: &[String], today: i64) -> Vec<&str> {
+        self.new_words_weighed(reading, today).into_iter().map(|x| x.0).collect()
+    }
+    /// The new words of `reading` with their decayed weights, heaviest first (ties by word).
+    fn new_words_weighed(&self, reading: &[String], today: i64) -> Vec<(&str, f64)> {
+        if self.new_count == 0 {
+            return Vec::new();
+        }
+        let mut v: Vec<(&str, f64)> = self.new_records(reading).map(|r| (r.word.as_str(), decayed(r, today))).collect();
+        v.sort_by(|a, b| b.1.total_cmp(&a.1).then(a.0.cmp(b.0)));
+        v
+    }
+    fn new_records(&self, reading: &[String]) -> impl Iterator<Item = &Record> {
+        self.index.get(&reading_key(reading)).into_iter().flatten().map(|&i| &self.records[i]).filter(|r| r.context == NEWWORD)
+    }
+    /// Decayed weight of the new word (reading, word), whatever it is (§2.4: a fixed new word scores from its record
+    /// without the `ACTIVE` threshold); `None` without a record.
+    pub fn new_word_weight(&self, reading: &[String], word: &str, today: i64) -> Option<f64> {
+        if self.new_count == 0 {
+            return None;
+        }
+        self.find(NEWWORD, reading, word).map(|i| decayed(&self.records[i], today))
+    }
+    /// Day of the new word (reading, word)'s record; `None` without one.
+    pub fn new_word_day(&self, reading: &[String], word: &str) -> Option<i64> {
+        if self.new_count == 0 {
+            return None;
+        }
+        self.find(NEWWORD, reading, word).map(|i| self.records[i].day)
+    }
+    /// §2.2 step 4: learn (or strengthen by 1 after decay) the new word (reading, word); returns the record.
+    /// Past `NEWWORD_CAP` the lowest new words go at once, as `prune` would trim them (§2.3), so appends between full
+    /// rewrites never grow the new words in memory past the cap (the returned record can be among those dropped).
+    pub fn learn_new(&mut self, reading: &[String], word: &str, today: i64) -> Record {
+        let r = self.bump(NEWWORD, reading, word, today, 1.0);
+        if self.new_count > NEWWORD_CAP {
+            let w: Vec<f64> = self.records.iter().map(|r| decayed(r, today)).collect();
+            let mut new: Vec<usize> = (0..w.len()).filter(|&i| self.records[i].context == NEWWORD).collect();
+            let drop = over_cap(&mut new, NEWWORD_CAP, &w).to_vec();
+            self.remove_at(drop);
+        }
+        r
+    }
+    /// §2.5 "used": +1 after decay. `None` without a record: a use never creates one. The caller counts a word at
+    /// most once per local day (the engine passes only records not dated today).
+    pub fn use_new(&mut self, reading: &[String], word: &str, today: i64) -> Option<Record> {
+        self.find(NEWWORD, reading, word)?;
+        Some(self.bump(NEWWORD, reading, word, today, 1.0))
+    }
+    /// §2.5 "re-picked away": halve the decayed weight; `None` without a record.
+    pub fn halve_new(&mut self, reading: &[String], word: &str, today: i64) -> Option<Record> {
+        let i = self.find(NEWWORD, reading, word)?;
+        let r = &mut self.records[i];
+        r.weight = decayed(r, today) * 0.5;
+        r.day = today;
+        Some(r.clone())
     }
     pub fn records(&self) -> &[Record] {
         &self.records
@@ -230,6 +344,7 @@ impl Learner {
             }
             None => {
                 self.index.entry(reading_key(reading)).or_default().push(self.records.len());
+                self.new_count += (context == NEWWORD) as usize;
                 let r = Record {
                     context: context.to_string(),
                     reading: reading.to_vec(),
@@ -270,12 +385,12 @@ impl Learner {
             return touched; // never globalizes (§12 rule 1)
         }
         // §1.3 globalize: ≥ 2 distinct full keys with an active record. All sentence-start keys (`NEXT_PREFIX`)
-        // count as one key, as the single "^" did before rule 8.
+        // count as one key, as the single "^" did before rule 8. A new-word record is never a context (new-word B §2.4).
         let Some(ix) = self.index.get(&reading_key(reading)) else { return touched };
         let keys: std::collections::HashSet<&str> = ix
             .iter()
             .map(|&i| &self.records[i])
-            .filter(|r| r.word == word && r.context != GLOBAL && decayed(r, today) >= ACTIVE)
+            .filter(|r| r.word == word && r.context != GLOBAL && r.context != NEWWORD && decayed(r, today) >= ACTIVE)
             .map(|r| if r.context.starts_with(NEXT_PREFIX) { NEXT_PREFIX } else { r.context.as_str() })
             .collect();
         if keys.len() >= 2 {
@@ -335,6 +450,7 @@ impl Learner {
         drop.sort_unstable_by(|a, b| b.cmp(a));
         for i in drop {
             let last = self.records.len() - 1;
+            self.new_count -= (self.records[i].context == NEWWORD) as usize;
             let key = reading_key(&self.records[i].reading);
             let bucket = self.index.get_mut(&key).expect("indexed");
             bucket.retain(|&j| j != i);
@@ -356,21 +472,31 @@ impl Learner {
         self.remove_at(drop);
     }
     /// §1.3: drop below PRUNE_FLOOR once decayed to `today`, then trim to CAPACITY (lowest first;
-    /// among equal weights the later record goes first).
+    /// among equal weights the later record goes first). New words are trimmed to NEWWORD_CAP the same way, apart
+    /// from the S4 records (new-word B §2.3).
     pub fn prune(&mut self, today: i64) {
         let w: Vec<f64> = self.records.iter().map(|r| decayed(r, today)).collect();
-        let (mut live, mut drop): (Vec<usize>, Vec<usize>) = (0..w.len()).partition(|&i| w[i] >= PRUNE_FLOOR);
-        if live.len() > CAPACITY {
-            // A partition, not a sort: on a full store a save trims about one record.
-            live.select_nth_unstable_by(CAPACITY, |&a, &b| w[b].total_cmp(&w[a]).then(a.cmp(&b)));
-            drop.extend_from_slice(&live[CAPACITY..]);
-        }
+        let (live, mut drop): (Vec<usize>, Vec<usize>) = (0..w.len()).partition(|&i| w[i] >= PRUNE_FLOOR);
+        let (mut new, mut old): (Vec<usize>, Vec<usize>) = live.into_iter().partition(|&i| self.records[i].context == NEWWORD);
+        drop.extend_from_slice(over_cap(&mut old, CAPACITY, &w));
+        drop.extend_from_slice(over_cap(&mut new, NEWWORD_CAP, &w));
         self.remove_at(drop);
     }
     pub fn clear(&mut self) {
         self.records.clear();
         self.index.clear();
+        self.new_count = 0;
     }
+}
+
+/// The records of `live` past the `cap` heaviest (decayed weights `w`; among equal weights the later record goes
+/// first); empty when `live` fits. A partition, not a sort: on a full store a save trims about one record.
+fn over_cap<'a>(live: &'a mut [usize], cap: usize, w: &[f64]) -> &'a [usize] {
+    if live.len() <= cap {
+        return &[];
+    }
+    live.select_nth_unstable_by(cap, |&a, &b| w[b].total_cmp(&w[a]).then(a.cmp(&b)));
+    &live[cap..]
 }
 
 #[cfg(test)]
@@ -389,5 +515,78 @@ mod tests {
         assert_eq!(context_key("好😀"), SENTINEL);
         assert_eq!(context_key("吃飯了。"), SENTINEL);
         assert_ne!(SENTINEL, GLOBAL);
+    }
+
+    fn rd(s: &str) -> Vec<String> {
+        s.split(' ').map(String::from).collect()
+    }
+
+    /// New-word B §2.4: a "#" record answers no S4 lookup level (exact, last character, global) for any context key
+    /// decoding can ask with (`context_key` never returns "#").
+    #[test]
+    fn new_words_never_answer_a_context_lookup() {
+        let mut l = Learner::default();
+        let r = rd("ㄅㄢˇ ㄎㄨㄥˋ");
+        l.learn_new(&r, "版控", 20_000);
+        for ctx in ["要進", "進", SENTINEL, GLOBAL, "加入"] {
+            assert!(l.lookup(ctx, &r, 20_000).1.is_empty(), "{ctx}");
+        }
+        assert_eq!(l.new_words(&r, 20_000), vec![("版控", 1.0)]);
+    }
+
+    /// New-word B §2.4: S4's globalization counts full contexts; "#" is never one, so one S4 teach next to a new-word
+    /// record of the same (reading, word) makes no global record.
+    #[test]
+    fn globalization_does_not_count_the_new_word_record() {
+        let mut l = Learner::default();
+        let r = rd("ㄅㄢˇ ㄎㄨㄥˋ");
+        l.learn_new(&r, "版控", 20_000);
+        l.teach("要進", &r, "版控", "板控", 20_000);
+        assert!(!l.records().iter().any(|x| x.context == GLOBAL), "a global record from one context");
+        l.teach("加入", &r, "版控", "板控", 20_000);
+        assert!(l.records().iter().any(|x| x.context == GLOBAL), "two real contexts still globalize");
+    }
+
+    /// §2.4 threshold, §2.5 once a day and halving.
+    #[test]
+    fn new_word_weights() {
+        let mut l = Learner::default();
+        let r = rd("ㄅㄢˇ ㄎㄨㄥˋ");
+        assert!(l.use_new(&r, "版控", 20_000).is_none(), "a use never creates a record");
+        l.learn_new(&r, "版控", 20_000);
+        assert_eq!(l.new_word_day(&r, "版控"), Some(20_000));
+        let u = l.use_new(&r, "版控", 20_014).unwrap();
+        assert_eq!((u.weight, u.day), (1.5, 20_014), "decayed 14 days, plus one");
+        let h = l.halve_new(&r, "版控", 20_014).unwrap();
+        assert_eq!(h.weight, 0.75);
+        l.halve_new(&r, "版控", 20_014);
+        assert!(l.new_words(&r, 20_014).is_empty(), "under ACTIVE: not enumerated");
+        assert_eq!(l.new_words_all(&r, 20_014), vec!["版控"], "still listed for the window");
+        assert!(l.new_word_weight(&r, "版控", 20_014).is_some());
+        assert_eq!(newword_score(0.0), NEWWORD_S_MIN);
+        assert!(newword_score(1e9) < NEWWORD_S_MAX && newword_score(1.0) == (NEWWORD_S_MIN + NEWWORD_S_MAX) / 2.0);
+        l.forget(&r, "版控");
+        assert!(!l.has_new_words());
+    }
+
+    /// §2.3 (review of PR #196, finding 9): learning a new word past NEWWORD_CAP drops the lowest new word from memory at
+    /// once (appends between full rewrites never call `prune`); S4 records are not counted or touched.
+    #[test]
+    fn learning_past_the_cap_trims_new_words_in_memory() {
+        let mut recs: Vec<Record> = (0..NEWWORD_CAP)
+            .map(|i| Record { context: NEWWORD.into(), reading: rd("ㄅㄢˇ ㄎㄨㄥˋ"), word: format!("版{}", char::from_u32(0x4e00 + i as u32).unwrap()), weight: 2.0, day: 20_000 })
+            .collect();
+        recs[7].weight = 0.6;
+        let low = recs[7].word.clone();
+        recs.push(Record { context: "要進".into(), reading: rd("ㄅㄢˇ"), word: "版".into(), weight: 0.2, day: 20_000 });
+        let mut l = Learner::from_records(recs);
+        l.learn_new(&rd("ㄆㄞˋ ㄍㄨㄥ"), "派工", 20_000);
+        let new: Vec<&Record> = l.records().iter().filter(|r| r.context == NEWWORD).collect();
+        assert_eq!(new.len(), NEWWORD_CAP);
+        assert!(!new.iter().any(|r| r.word == low), "the lowest new word went");
+        assert!(new.iter().any(|r| r.word == "派工"));
+        assert_eq!(l.records().len(), NEWWORD_CAP + 1, "the S4 record stays");
+        assert!(l.has_new_words());
+        assert_eq!(l.new_words(&rd("ㄆㄞˋ ㄍㄨㄥ"), 20_000), vec![("派工", 1.0)], "index rebuilt");
     }
 }
