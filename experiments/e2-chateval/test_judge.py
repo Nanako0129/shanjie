@@ -88,6 +88,81 @@ class Fixed(unittest.TestCase):
         self.assertEqual(cells(out, "R2")["judge"][1], "2")
 
 
+class NewOptions(unittest.TestCase):
+    """--cap-ub, --frontier, --jsubsets, --diagnose; every default output stays as it was."""
+    def setUp(self):
+        self.d, self.o = tempfile.mkdtemp(), tempfile.mkdtemp()
+        ok = lambda i: rec(i, [-1.0, -1.5], [-4.0, -1.0], [1, 1])
+        self.tune = [FIX(i) for i in range(1, 41)] + [BRK(41)] + [ok(42 + i) for i in range(199)]
+        self.other = [FIX(1), BRK(2), rec(3, [-1.0, -1.5], [-1.0, -2.0], [0, 0])]
+        write_scores(self.d, "chat", "tune", self.tune)
+        write_scores(self.d, "chat", "other", self.other)
+        self.base = ["--scores", self.d, "--sets", "tune", "other", "--setting", "chat", "--out", self.o]
+        self.sel = self.base + ["--select", "R", "--tuning", "tune", "--weight", "1"]
+
+    def test_defaults_print_nothing_new(self):
+        out = run(self.sel + ["--cap", "0.01"])[0]
+        for word in ("J-right", "n_Jright", "diagnose", "| cap |"):
+            self.assertNotIn(word, out)
+
+    def test_cap_ub_picks_a_stricter_cell_than_cap_at_the_same_number(self):
+        _, c1 = run(self.sel + ["--cap", "0.0125"])              # point rate 1 / 240 = 0.42%: the fusing cell is allowed
+        self.assertEqual(fg.fixed_broken(self.tune, *c1[-1][1]), (40, 1))
+        with self.assertRaises(ValueError):                      # bound of 0 broken over 240 rows is 1.248%; of 1, 1.977%
+            run(self.sel + ["--cap-ub", "0.01"])
+        _, c2 = run(self.sel + ["--cap-ub", "0.0125"])           # only the zero-broken cell (fusion off) passes
+        self.assertEqual(fg.fixed_broken(self.tune, *c2[-1][1]), (0, 0))
+
+    def test_cap_ub_output_line(self):
+        out, cfg = run(self.sel + ["--cap-ub", "0.02"])
+        self.assertEqual(fg.fixed_broken(self.tune, *cfg[-1][1]), (40, 1))
+        ub = 100 * evalstats.poisson_upper95(1) / 240
+        self.assertIn(f"n 240, n_Jright 200, broken 1, point rate 0.417%, 95% upper bound {ub:.3f}%", out)
+
+    def test_cap_ub_too_strict_raises_and_cap_ub_excludes_cap(self):
+        with self.assertRaises(ValueError):
+            run(self.sel + ["--cap-ub", "0.005"])
+        for extra in (["--cap", "0.1", "--cap-ub", "0.1"], ["--cap-ub", "1.5"]):
+            with self.assertRaises(SystemExit) as e, contextlib.redirect_stderr(io.StringIO()):
+                run(self.sel + extra)
+            self.assertEqual(e.exception.code, 2)
+        with self.assertRaises(SystemExit) as e, contextlib.redirect_stderr(io.StringIO()):
+            run(self.base + ["--fixed", "A", "1", "1", "0", "--frontier"])
+        self.assertEqual(e.exception.code, 2)
+
+    def test_frontier_rows(self):
+        out, _ = run(self.sel + ["--cap-ub", "0.03", "--frontier"])
+        rows = [l for l in out.splitlines() if l.startswith("| 0.")]
+        self.assertEqual([r.split("|")[1].strip() for r in rows], ["0.1%", "0.2%", "0.3%", "0.4%", "0.5%"])
+        self.assertTrue(all("no cell" in r for r in rows))        # even 0 broken has a bound of 1.25% over 240 rows
+        out, _ = run(self.sel + ["--cap", "0.01", "--frontier"])
+        rows = [l.split("|") for l in out.splitlines() if l.startswith("| 0.")]
+        self.assertEqual([r[1].strip() for r in rows], ["0.1%", "0.2%", "0.3%", "0.4%", "0.5%"])
+        want = fg.frontier({"tune": self.tune}, 1, names=("tune",))
+        for r, (c, cell) in zip(rows, want):
+            if cell is None:
+                self.assertIn("no cell", r[2])
+            else:
+                self.assertEqual((int(r[5]), int(r[6]), int(r[7])), (cell[3], cell[4], 240))
+
+    def test_jsubsets_lines(self):
+        out, _ = run(self.base + ["--fixed", "A", "1", "inf", "0", "--jsubsets"])
+        lines = [l for l in out.splitlines() if "J-right n" in l]
+        self.assertEqual(len(lines), 2)
+        self.assertIn("A chat tune: J-right n 200, broken 1 (0.50%, 95% upper 2.", lines[0])
+        self.assertIn("J-wrong-in-top-8 n 40, fixed 40; J-wrong-outside-top-8 n 0", lines[0])
+        self.assertIn("A chat other: J-right n 1, broken 1", lines[1])
+        self.assertIn("J-wrong-outside-top-8 n 1", lines[1])
+        plain, _ = run(self.base + ["--fixed", "A", "1", "inf", "0"])
+        self.assertEqual("\n".join(l for l in out.splitlines() if "J-right n" not in l), plain.rstrip("\n"))
+
+    def test_diagnose_lines_and_standalone(self):
+        out, cfg = run(self.base + ["--diagnose"])               # no --fixed, no --select: allowed
+        self.assertEqual(cfg, [])
+        self.assertIn("chat tune: n 240, headroom 40 (16.67%), model alone right on headroom 40, keeps candidate 0 on J-right 0 of 200, oracle@8 240", out)
+        self.assertIn("chat other: n 3, headroom 1 (33.33%)", out)
+
+
 class Select(unittest.TestCase):
     def test_selection_reads_only_the_tuning_sets_and_honours_the_cap(self):
         d, o = tempfile.mkdtemp(), tempfile.mkdtemp()
