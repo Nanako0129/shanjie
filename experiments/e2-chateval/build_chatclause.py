@@ -400,8 +400,9 @@ def period_rows(work, period):
     """[(context, sentence)] before corrections: the whole judge months, the seeded tuning sample of the pool, (chatjudge) a sample
     of the pool rows whose sentence the tuning sample does not hold, with a seed of its own, or (chatjudge2) a sample of the pool
     rows whose sentence neither the tuning sample nor the chatjudge sample holds, nor any frozen file main has read (tune,
-    chatjudge and, when frozen here, judge; corrected sentences included), with a third seed. chatjudge2 stops when the pool
-    size differs from the one tune and chatjudge were drawn from (the replayed samples would not be theirs)."""
+    chatjudge and, when frozen here, judge; corrected sentences included), with a third seed. chatjudge2 stops when a replayed
+    sample is not the frozen one: more frozen tune (chatjudge) sentences fall outside the replayed sample than that period's
+    manifest counts corrections."""
     split = json.load(open(os.path.join(work, "split.json"), encoding="utf-8"))
     months = set(split["judge_months"] if period == "judge" else split["pool_months"])
     rows = [(x, s) for mon, _src, x, s in read_clauses(work) if mon in months]
@@ -417,11 +418,15 @@ def period_rows(work, period):
         if period == "chatjudge":
             rows = drawn
         else:   # the chatjudge sample's sentences go the same way; freeze checks against the frozen chatjudge rows too
-            for p in ("tune", "chatjudge"):
-                was = json.load(open(os.path.join(work, f"{p}.manifest.json"), encoding="utf-8"))["clauses_before_sampling_or_corrections"]
-                if was != pool:
-                    sys.exit(f"build_chatclause: STOP, the pool has {pool} rows but {p} was drawn from {was}; clauses.tsv changed since "
-                             f"that freeze, so its sample cannot be replayed")
+            # The replays must be the samples that were frozen: a frozen sentence outside its replayed sample can only be a corrected
+            # one. Checked on content, not on the recorded pool size: a reshuffled clauses.tsv keeps the size, and the work-v2 tune
+            # freeze (2026-10-13, 81c035b0) wrote its sample size, 6,000, in clauses_before_sampling_or_corrections.
+            for p, sample in (("tune", tuned), ("chatjudge", {s for _x, s in drawn})):
+                corrected = json.load(open(os.path.join(work, f"{p}.manifest.json"), encoding="utf-8"))["corrected"]
+                stray = len(frozen_sentences(work, p) - sample)
+                if stray > corrected:
+                    sys.exit(f"build_chatclause: STOP, {stray} frozen {p} sentences are not in its replayed sample (it has {corrected} "
+                             f"corrections); clauses.tsv changed since that freeze, so its sample cannot be replayed")
             seen = {s for _x, s in drawn}.union(*(frozen_sentences(work, p) for p in ("tune", "chatjudge", "judge")
                                                   if os.path.isfile(os.path.join(work, f"{p}.rows.txt"))))
             rest = [r for r in rest if r[1] not in seen]
