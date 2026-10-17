@@ -156,12 +156,7 @@ class BigramLM:
         return back * pb
 
     def word(self, lam, v, w, lp):
-        pb = 10 ** lp
-        if self.kn is not None:
-            wi = self.ids.get(w, -1)
-            if wi >= 2:
-                beta, np1, total = self.kn
-                pb = beta * np1[wi] / total + (1 - beta) * pb
+        pb = unigram_back(self, w, lp)
         return lam * math.log10(self.prob(v, w, pb)) + (1 - lam) * lp
 
     def eos(self, lam, v):
@@ -170,6 +165,18 @@ class BigramLM:
     def count(self, w):
         i = self.ids.get(w)
         return self.uni[i] if i is not None else 0
+
+
+def unigram_back(lm, w, lp):
+    """The single-word back-off term of `word`: 10^lp, blended with the KN side file's continuation probability when the model has one.
+    Takes any object with `kn` and `ids` (experiments/digits uses it with the same model)."""
+    pb = 10 ** lp
+    if lm.kn is not None:
+        wi = lm.ids.get(w, -1)
+        if wi >= 2:
+            beta, np1, total = lm.kn
+            pb = beta * np1[wi] / total + (1 - beta) * pb
+    return pb
 
 
 DEMOTE_TSV = os.path.join(ime._LEXDIR, "demote.tsv")
