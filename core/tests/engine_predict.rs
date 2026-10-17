@@ -2557,3 +2557,30 @@ fn cmd_backspace_on_the_only_row_item_closes_the_window() {
     assert!(x.preedit.ends_with('ㄒ'), "the unfinished syllable stays: {}", x.preedit);
     assert_eq!(e.learner().records().len(), 0, "forgotten");
 }
+
+/// B.3.1 revision (2026-10-17): a row item over exactly the typed syllables is the lexicon's candidate for that span, so
+/// choosing it in the window is a re-pick: the commit halves the learned word it displaced (S4 section 1.3), which a row
+/// pick (nothing displaced) does not. Taught first: the window's first lexicon item over ㄋㄧˇ after 我想.
+#[test]
+fn an_exact_row_item_chosen_from_the_window_is_a_repick() {
+    let (mut e, o) = build_in(learner_engine(Profile::Chat, None), "我想", &[Syl("ㄋㄧˇ")], "");
+    let r = row(&o);
+    let taught = lexicon_list(&["ㄋㄧˇ"]).into_iter().find(|w| !r.contains(w) && *w != o.preedit).unwrap();
+    let mut d = down(&mut e);
+    while d.candidates[d.selected.unwrap()] != taught {
+        d = e.key(kind(KeyKind::Right)).unwrap();
+    }
+    must(e.key(kind(KeyKind::Enter)));
+    assert_eq!(e.key(kind(KeyKind::Enter)).unwrap().commit, taught);
+    let weight = |e: &Engine, w: &str| e.learner().records().iter().find(|x| x.word == w).map(|x| x.weight);
+    assert_eq!(weight(&e, &taught), Some(1.0));
+    // The same situation again: the taught word is shown, and the row offers another word over the same syllable.
+    let (mut e, o) = build_in(e, "我想", &[Syl("ㄋㄧˇ")], "");
+    assert_eq!(o.preedit, taught, "precondition: the taught word is shown");
+    let other = row(&o).into_iter().next().expect("precondition: a row");
+    let d = down(&mut e);
+    assert_eq!(d.candidates[0], other, "the row's first item is first in the window");
+    assert_eq!(must(e.key(kind(KeyKind::Enter))).preedit, other);
+    assert_eq!(e.key(kind(KeyKind::Enter)).unwrap().commit, other);
+    assert_eq!(weight(&e, &taught), Some(0.5), "the re-pick halved the displaced word");
+}
