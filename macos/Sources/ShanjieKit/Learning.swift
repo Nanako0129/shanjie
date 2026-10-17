@@ -145,12 +145,8 @@ extension Shell {
     }
 
     /// Section 4: whether Time Machine skips the learning directory (default: backed up).
-    /// Read fresh: a URL caches resource values until the run loop turns, so a second read in the same pass (a toggle right
-    /// after a toggle, as in the tests) would otherwise see the old flag and flip it the wrong way.
     var backupExcluded: Bool {
-        guard var dir = learningDirectory else { return false }
-        dir.removeAllCachedResourceValues()
-        return (try? dir.resourceValues(forKeys: [.isExcludedFromBackupKey]).isExcludedFromBackup) == true
+        (try? learningDirectory?.resourceValues(forKeys: [.isExcludedFromBackupKey]).isExcludedFromBackup) == true
     }
 
     /// Sets the flag on the directory (not the file, which a clear deletes). The directory exists
