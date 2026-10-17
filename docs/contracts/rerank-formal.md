@@ -100,3 +100,11 @@ PICK 不過時：CONS 照 §8 的兩條門檻（換成 `CONS.formal.wikijudge2.*
 **三檔**：標準＝通過的那格；積極＝標準；保守＝1、1、4，前提是在 wikijudge、wikijudge2、dev302、typing76、user-reported、lytune、wikitypo 每個集合的改壞數（對只用 n-gram，`C114.formal.<集合>.*`）都 ≤ 標準的，否則保守＝標準。§3.6 的比對對象：標準與積極 → `OUT_R3/rowstats/<標準的標籤>.formal.dev302.new.txt`；保守 → `C114.formal.dev302.new.txt`（寫成標準時同標準）。其餘照 §8「之後」（匯出、一致性、保留集、實機、Release 要維護者同意）。
 
 **預算**：Windows 機器 1 小時內；不用 Colab。
+
+## 10. 修訂四（2026-10-17，維護者選擇題「0.2% 那格也進確認，標準不變」；在看 §9 確認結果之前寫）
+
+**起因**：§9 的篩選只有 S10（0.7、1、1.5，即 CONS）通過；S20（0.7、2、1，選值上限 0.2%）在已看過的資料上改壞率 0.53%，只差 0.03 個百分點，改對 203（S10 是 118），守門 (b)(c) 都過。維護者選：讓 S20 也進確認，確認的標準不變。§9 的確認指令已經跑完、結果還沒有人讀。
+
+**規則**：篩選 (a) 對 S20 一格放寬到 ≤ 0.6%（只為了讓它進確認，其他候選不變）。確認改用一個指令，四格一起跑：`judge.py --scores <分數> --sets wikijudge wikijudge2 dev302 typing76 user-reported lytune wikitypo --setting formal --model RF --fixed SHIP 1 1 3 --fixed CONS 0.7 1 1.5 --fixed S20 0.7 2 1 --fixed C114 1 1 4 --out OUT_R4`。CONS 與 S20 各自照 §9 的兩條門檻判（wikijudge2 上對 SHIP 顯著為正 a＝0.05；wikijudge2 上對只用 n-gram 的改壞率 ≤ 0.5%），路徑換成 `OUT_R4/rowstats/<CONS|S20>.formal.wikijudge2.*`。
+
+**決定**：兩格都過 → 標準＝S20（改對較多）；只有一格過 → 標準＝那一格；都不過 → 結案、不匯出。保守檔規則與 §3.6 的比對對象照 §9，「標準」換成這裡選出的那格、路徑換成 `OUT_R4`。兩格各判一次，等於在 wikijudge2 上做兩次 a＝0.05 的檢定，研究紀錄註明。§9 的 `OUT_R3` 只報，不用來決定。
