@@ -657,6 +657,21 @@ fn row45b_choosing_a_row_item_after_buffered_digits() {
     assert_eq!(o.preedit, format!("10{first}"));
 }
 
+/// #45b, the tail made of buffered keys: 12345 shows 234 and the unfinished ㄓ (the 5 is still in the buffer); choosing the first item
+/// makes tokens of the shown digits only, and the word replaces the ㄓ (no token for the 5).
+#[test]
+fn row45b_a_tail_that_is_still_in_the_buffer_is_consumed_not_flushed() {
+    let mut e = eng();
+    let o = run(&mut e, "1 2 3 4 5");
+    assert_eq!(o.preedit, "1234ㄓ", "one token (the 1), 234 shown as digits, the 5 is the unfinished ㄓ");
+    let first = o.candidates[0].clone();
+    run(&mut e, "Tab");
+    run(&mut e, "Enter");
+    let s = syls(&e);
+    assert_eq!(&s[..4], ["_punct_1", "_punct_2", "_punct_3", "_punct_4"], "{s:?}");
+    assert!(s.len() == 4 + first.chars().count() && s[4..].iter().all(|x| !x.starts_with("_punct_")), "{s:?}");
+}
+
 /// #45c: digits in the buffer after two typed syllables: the row is the digit-context row only (no start at 下午).
 #[test]
 fn row45c_buffered_digits_count_as_tokens_for_the_long_starts() {
