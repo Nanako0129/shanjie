@@ -556,6 +556,59 @@ fn apple_case_2_backspace_keeps_the_rest_of_a_decoded_word() {
     }
 }
 
+/// Section 15, Apple Zhuyin (measured with imeshot 2026-10-17): 他世界, Backspace shows 他世, and the next syllable ㄏㄣˇ gives
+/// 他是很 (the pieces the deletion split off are free again). The same engine must show what a fresh one shows for
+/// ㄊㄚ ㄕˋ ㄏㄣˇ typed without any deletion, and not 他世很 (the pieces kept fixed, section 14's P2).
+#[test]
+fn section_15_a_new_syllable_frees_the_pieces_a_backspace_split_off() {
+    for (name, prof) in [("formal", Profile::Formal), ("chat", Profile::Chat)] {
+        let mut fresh = engine();
+        fresh.set_profile(prof).unwrap();
+        let want = shown(&mut fresh, "ㄊㄚ ㄕˋ ㄏㄣˇ", "");
+        let mut e = engine();
+        e.set_profile(prof).unwrap();
+        assert_eq!(shown(&mut e, "ㄊㄚ ㄕˋ ㄐㄧㄝˋ", ""), "他世界");
+        assert_eq!(backspace(&mut e), "他世", "{name}");
+        let got = type_syls(&mut e, "ㄏㄣˇ").preedit;
+        assert_eq!(got, want, "{name}");
+        assert_ne!(got, "他世很", "{name}");
+    }
+}
+
+/// Section 15: only a typed syllable frees the pieces. Arrow keys leave them (the screen still shows 他世 after Left and
+/// Right), and the next syllable then frees them as without the arrows.
+#[test]
+fn section_15_arrow_keys_do_not_free_the_pieces_but_the_next_syllable_does() {
+    for (name, prof) in [("formal", Profile::Formal), ("chat", Profile::Chat)] {
+        let mut fresh = engine();
+        fresh.set_profile(prof).unwrap();
+        let want = shown(&mut fresh, "ㄊㄚ ㄕˋ ㄏㄣˇ", "");
+        let mut e = engine();
+        e.set_profile(prof).unwrap();
+        assert_eq!(shown(&mut e, "ㄊㄚ ㄕˋ ㄐㄧㄝˋ", ""), "他世界");
+        assert_eq!(backspace(&mut e), "他世", "{name}");
+        e.key(k(KeyKind::Left)).unwrap();
+        e.key(k(KeyKind::Home)).unwrap();
+        assert_eq!(e.key(k(KeyKind::End)).unwrap().preedit, "他世", "{name}");
+        assert_eq!(type_syls(&mut e, "ㄏㄣˇ").preedit, want, "{name}");
+    }
+}
+
+/// Section 15 does not touch a re-pick's freeze (section 1): 經歷 re-picked to 精 shows 精歷, and a syllable typed on the
+/// right leaves 歷 as it was shown (the two pieces of that freeze are not Backspace pieces).
+#[test]
+fn section_15_a_repick_freeze_is_not_released_by_a_new_syllable() {
+    for (name, prof) in [("formal", Profile::Formal), ("chat", Profile::Chat)] {
+        let mut e = engine();
+        e.set_profile(prof).unwrap();
+        assert_eq!(shown(&mut e, "ㄐㄧㄥ ㄌㄧˋ", ""), "經歷");
+        assert_eq!(repick(&mut e, 1, "精").preedit, "精歷");
+        e.key(k(KeyKind::End)).unwrap();
+        let got = type_syls(&mut e, "ㄏㄣˇ").preedit;
+        assert_eq!(got.chars().take(2).collect::<String>(), "精歷", "{name}: {got}");
+    }
+}
+
 /// Section 11: a prediction start may lie inside a frozen word (only a word the user chose keeps its inside). 國家 is
 /// learned for ㄍㄨㄛˊ ㄐㄧㄚ after 是美; in 他是美國, re-picked at 是 (美國 frozen), the first key of the next syllable lists
 /// 國家 first, from the start inside 美國 (picking it would take the frozen word apart). Measured: row [國家, 美國籍, 美國郡, ...].

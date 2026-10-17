@@ -359,8 +359,11 @@ struct Fixed {
     /// prediction pick (section 13), and the pieces a Backspace leaves of a deleted word (section 11). Never learned.
     /// Released when a newly typed syllable merges with it into a lexicon word (section 6.1; the merged word decodes
     /// freely since section 11) and when the candidate window's ⌘⌫ forgets an entry in effect over a span it overlaps
-    /// (sections 7.2, 9).
+    /// (sections 7.2, 9); the Backspace pieces also when any syllable is typed (`split_off`, section 15).
     frozen: bool,
+    /// A frozen single character a Backspace or Delete left of the word it deleted from (section 11). Any newly typed
+    /// syllable drops all of these before it decodes (section 15); nothing else does.
+    split_off: bool,
     /// The synthetic sentence-start key (`^>` + the next reading) the displaced word was shown under when this candidate
     /// pick was made, when the span's context key was `^`. The commit halves the displaced word there too if the key
     /// at the commit differs (the user may have typed on after the pick). `None` otherwise.
@@ -376,7 +379,7 @@ struct Fixed {
 impl Fixed {
     /// A word the engine fixed on its own (repick-freeze): not learned, not a user choice.
     fn frozen(start: usize, end: usize, word: String) -> Self {
-        Fixed { start, end, word, pre: None, key: None, pick_key: None, zh: None, frozen: true, displaced_new: Vec::new() }
+        Fixed { start, end, word, pre: None, key: None, pick_key: None, zh: None, frozen: true, split_off: false, displaced_new: Vec::new() }
     }
 }
 
@@ -1973,7 +1976,7 @@ impl Engine {
         self.fixed.extend(frozen);
         self.syls.splice(start..end, reading);
         let key = pre.is_some().then_some(key);
-        self.fixed.push(Fixed { start, end: start + m, word, pre, key, pick_key: None, zh: None, frozen: false, displaced_new: Vec::new() });
+        self.fixed.push(Fixed { start, end: start + m, word, pre, key, pick_key: None, zh: None, frozen: false, split_off: false, displaced_new: Vec::new() });
         self.fixed.sort_by_key(|f| f.start);
         self.cursor = start + m;
         self.refresh()?;
@@ -2661,6 +2664,11 @@ impl Engine {
     /// Insert one token (a syllable, or punctuation with its fixed word) at the cursor, shift the
     /// fixed words on its right, recompute; at MAX_SYLLABLES tokens commit everything (s3d §1).
     fn insert_token(&mut self, reading: String, fixed_word: Option<String>, zh: Option<String>) -> Result<Output, EngineError> {
+        // repick-freeze section 15: a newly typed syllable frees the pieces a deletion split off, before anything decodes.
+        // Punctuation, English tokens and spaces are not syllables and leave them.
+        if fixed_word.is_none() {
+            self.fixed.retain(|f| !f.split_off);
+        }
         let c = self.cursor;
         // repick-freeze section 7.3: a frozen word the insertion cuts is kept per syllable (shifted below like the rest).
         let pieces = self.split_frozen(|f| f.start < c && c < f.end);
@@ -2679,7 +2687,7 @@ impl Engine {
         let excluded: Vec<usize> = pieces.iter().map(|&s| if s >= c { s + 1 } else { s }).collect();
         self.syls.insert(c, reading);
         if let Some(word) = fixed_word {
-            self.fixed.push(Fixed { start: c, end: c + 1, word, pre: None, key: None, pick_key: None, zh, frozen: false, displaced_new: Vec::new() });
+            self.fixed.push(Fixed { start: c, end: c + 1, word, pre: None, key: None, pick_key: None, zh, frozen: false, split_off: false, displaced_new: Vec::new() });
             self.fixed.sort_by_key(|f| f.start);
         }
         self.cursor += 1;
@@ -2771,7 +2779,8 @@ impl Engine {
             for w in &self.path {
                 let q = p + w.syllables;
                 if p <= i && i < q && q - p > 1 {
-                    let pieces = self.pieces(p, q, &w.word, Some(i));
+                    let mut pieces = self.pieces(p, q, &w.word, Some(i));
+                    pieces.iter_mut().for_each(|f| f.split_off = true);
                     self.fixed.retain(|f| !(f.frozen && f.start == p && f.end == q));
                     self.fixed.extend(pieces);
                     self.fixed.sort_by_key(|f| f.start);
@@ -3124,7 +3133,7 @@ impl Engine {
         for f in self.fixed.iter_mut().filter(|f| f.start >= end) {
             f.key = None;
         }
-        self.fixed.push(Fixed { start, end, word, pre, key, pick_key, zh, frozen: false, displaced_new });
+        self.fixed.push(Fixed { start, end, word, pre, key, pick_key, zh, frozen: false, split_off: false, displaced_new });
         self.fixed.sort_by_key(|f| f.start);
         self.refresh()
     }

@@ -227,6 +227,7 @@ int32_t shanjie_engine_learning_open(ShanjieEngine *engine, const char *dir);
 //   shows the new composition with the candidates still open. When the forgotten word was in effect over that span
 //   (exact or last-character level under its context), words the engine fixed (repick-freeze: around a re-pick or a
 //   prediction pick, or the pieces a Backspace left) over that span are freed and decode again; other fixed words stay.
+//   (The pieces a Backspace or Delete left are also all freed by the next typed syllable, repick-freeze section 15.)
 //   On a prediction-row item at the front of the window (predict-down B.3.1) the row is recomputed and the list
 //   rebuilt without that word, the selection on the word if it is still listed, else on the first item; a rebuilt
 //   list that is empty closes the window (as Esc). Without candidates the key passes through,
