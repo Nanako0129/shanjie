@@ -7,14 +7,16 @@ Private data: run by main on the maintainer's machine with --work in the private
       exclusions, in time order) and DIR/counts.json, prints the per-month counts table (numbers only).
   split --work DIR
       fixes the judge months from the mechanical counts (DIR/split.json; written once, a later run must give the same file).
-  freeze --work DIR --period tune|judge|chatjudge [--corrections FILE] [--draft]
+  freeze --work DIR --period tune|judge|chatjudge|chatjudge2 [--corrections FILE] [--draft]
       tune: min(6,000, pool) clauses of the pool months, seed 20261012; judge: every clause of the judge months; chatjudge
       (docs/contracts/rerank-size.md section 3.4): min(3,000, rest) clauses of the pool months that the tuning sample neither drew
-      nor repeats as a sentence, seed 20261017 (needs the tune freeze, like judge). Applies the optional
+      nor repeats as a sentence, seed 20261017 (needs the tune freeze, like judge); chatjudge2 (docs/iteration-plan.md Phase 0
+      item 7): min(6,000, rest) clauses of the pool months whose sentence neither the tuning sample nor the chatjudge sample holds,
+      seed 20261018 (needs the tune and chatjudge freezes). Applies the optional
       corrections, spells with tools/readings.py, drops CHECK and unreadable rows, writes DIR/<period>.rows.txt (`context|sentence|reading`),
       DIR/<period>.manifest.json and DIR/<period>.sha256. With --draft only DIR/<period>.draft.txt (readings marked CHECK) for proofreading.
       A frozen period is never rewritten with other content; judge needs the tune freeze first (contract order (1) before (3)).
-  emit --work DIR --period tune|judge|chatjudge --out FILE
+  emit --work DIR --period tune|judge|chatjudge|chatjudge2 --out FILE
       copies the frozen rows to FILE for run_sets.py dumps, and refuses (exit 1, nothing written) when the rows no longer hash to
       the frozen SHA-256.
 
@@ -60,6 +62,9 @@ MIN_USABLE = 2500                      # fewer mechanical rows than this before 
 TUNE_MAX = 6000
 CHATJUDGE_MAX = 3000       # rerank-size section 3.4: the unseen chat judge set
 CHATJUDGE_SEED = 20261017
+CHATJUDGE2_MAX = 6000      # maintainer 2026-10-18: a private judge set is at most 6,000 rows (one a month)
+CHATJUDGE2_SEED = 20261018
+PRIOR = {"judge": ("tune",), "chatjudge": ("tune",), "chatjudge2": ("tune", "chatjudge")}   # periods frozen before this one
 CHECK_MAX = 0.10   # contract 2.1: more CHECK readings than this stops the freeze
 URL = re.compile(r"https?://|www\.", re.I)
 FENCE = "```"
@@ -387,21 +392,40 @@ def read_clauses(work):
     return [tuple(l.rstrip("\n").split("\t")) for l in open(os.path.join(work, "clauses.tsv"), encoding="utf-8")]
 
 
+def frozen_sentences(work, period):
+    return {l.split("|")[1] for l in open(os.path.join(work, f"{period}.rows.txt"), encoding="utf-8") if l.strip()}
+
+
 def period_rows(work, period):
-    """[(context, sentence)] before corrections: the whole judge months, the seeded tuning sample of the pool, or (chatjudge)
-    a sample of the pool rows whose sentence the tuning sample does not hold, with a seed of its own."""
+    """[(context, sentence)] before corrections: the whole judge months, the seeded tuning sample of the pool, (chatjudge) a sample
+    of the pool rows whose sentence the tuning sample does not hold, with a seed of its own, or (chatjudge2) a sample of the pool
+    rows whose sentence neither the tuning sample nor the chatjudge sample holds, nor any frozen file main has read (tune,
+    chatjudge and, when frozen here, judge; corrected sentences included), with a third seed. chatjudge2 stops when the pool
+    size differs from the one tune and chatjudge were drawn from (the replayed samples would not be theirs)."""
     split = json.load(open(os.path.join(work, "split.json"), encoding="utf-8"))
     months = set(split["judge_months"] if period == "judge" else split["pool_months"])
     rows = [(x, s) for mon, _src, x, s in read_clauses(work) if mon in months]
     pool = len(rows)
     if period == "tune":
         rows = random.Random(c.SEED).sample(rows, min(TUNE_MAX, len(rows)))
-    elif period == "chatjudge":
+    elif period in ("chatjudge", "chatjudge2"):
         # Every sentence of the tuning sample (drawn exactly as above) is left out wherever it sits, its own rows included; freeze
         # then checks the corrected rows against the frozen chatclause sentences.
         tuned = {s for _x, s in random.Random(c.SEED).sample(rows, min(TUNE_MAX, len(rows)))}
         rest = [r for r in rows if r[1] not in tuned]
-        rows = random.Random(CHATJUDGE_SEED).sample(rest, min(CHATJUDGE_MAX, len(rest)))
+        drawn = random.Random(CHATJUDGE_SEED).sample(rest, min(CHATJUDGE_MAX, len(rest)))
+        if period == "chatjudge":
+            rows = drawn
+        else:   # the chatjudge sample's sentences go the same way; freeze checks against the frozen chatjudge rows too
+            for p in ("tune", "chatjudge"):
+                was = json.load(open(os.path.join(work, f"{p}.manifest.json"), encoding="utf-8"))["clauses_before_sampling_or_corrections"]
+                if was != pool:
+                    sys.exit(f"build_chatclause: STOP, the pool has {pool} rows but {p} was drawn from {was}; clauses.tsv changed since "
+                             f"that freeze, so its sample cannot be replayed")
+            seen = {s for _x, s in drawn}.union(*(frozen_sentences(work, p) for p in ("tune", "chatjudge", "judge")
+                                                  if os.path.isfile(os.path.join(work, f"{p}.rows.txt"))))
+            rest = [r for r in rest if r[1] not in seen]
+            rows = random.Random(CHATJUDGE2_SEED).sample(rest, min(CHATJUDGE2_MAX, len(rest)))
     return rows, pool
 
 
@@ -443,8 +467,12 @@ def build_period(rows, corrections, readings=c.readings):
 
 
 def freeze(work, period, corrections_file=None, draft=False, readings=c.readings):
-    if period in ("judge", "chatjudge") and not os.path.isfile(os.path.join(work, "tune.sha256")):
-        sys.exit("build_chatclause: STOP, freeze the tuning period first (contract 2.1 order (1) before (3))")
+    for p in PRIOR.get(period, ()):
+        if not os.path.isfile(os.path.join(work, f"{p}.sha256")):
+            sys.exit("build_chatclause: STOP, freeze the tuning period first (contract 2.1 order (1) before (3))" if p == "tune" else
+                     f"build_chatclause: STOP, freeze the {p} period before {period}")
+        if period.startswith("chatjudge") and not os.path.isfile(os.path.join(work, f"{p}.rows.txt")):
+            sys.exit(f"build_chatclause: STOP, {p}.rows.txt is missing; {period} is checked against it")
     rows, pool_rows = period_rows(work, period)
     frozen, drafted, st = build_period(rows, load_corrections(corrections_file), readings)
     check_share = st["dropped_check"] / st["rows_in"] if st["rows_in"] else 0
@@ -459,10 +487,11 @@ def freeze(work, period, corrections_file=None, draft=False, readings=c.readings
     if st["corrected_then_check"]:
         print(f"build_chatclause: WARNING, {st['corrected_then_check']} corrected {period} rows spell as CHECK and are dropped; give READ",
               file=sys.stderr)
-    if period == "chatjudge":
-        tuned = {l.split("|")[1] for l in open(os.path.join(work, "tune.rows.txt"), encoding="utf-8") if l.strip()}
-        if any(s in tuned for _x, s, _r in frozen):
-            sys.exit("build_chatclause: STOP, a chatjudge sentence is also in the frozen chatclause; report to main (rerank-size 3.4)")
+    for p in (PRIOR[period] if period.startswith("chatjudge") else ()):     # judge months never meet the pool
+        seen = frozen_sentences(work, p)
+        if any(s in seen for _x, s, _r in frozen):
+            sys.exit(f"build_chatclause: STOP, a {period} sentence is also in the frozen {'chatclause' if p == 'tune' else p}; "
+                     f"report to main ({'rerank-size 3.4' if period == 'chatjudge' else 'iteration plan Phase 0 item 7'})")
     text = "".join(f"{x}|{s}|{r}\n" for x, s, r in frozen)
     sha = c.sha256_bytes(text.encode("utf-8"))
     sf = os.path.join(work, f"{period}.sha256")
@@ -506,7 +535,7 @@ def main(argv=None):
         if name == "prepare":
             p.add_argument("--discord"); p.add_argument("--meta"); p.add_argument("--self-name"); p.add_argument("--exclude", nargs="*", default=[])
         if name in ("freeze", "emit"):
-            p.add_argument("--period", choices=["tune", "judge", "chatjudge"], required=True)
+            p.add_argument("--period", choices=["tune", "judge", "chatjudge", "chatjudge2"], required=True)
         if name == "split":
             # Maintainer 2026-10-13: 2026-09 is skipped (never read or used); the judge period starts at 2026-08. Months from the start
             # up to SHANJIE_FROM are in neither the judge period nor the pool.
