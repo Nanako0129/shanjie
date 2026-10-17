@@ -21,12 +21,18 @@
 //! open it, the first two never do; the tool stops if the engine and this recount disagree.)
 //!
 //! With `--digits` (docs/contracts/digits.md A.4.2) the engine is `Engine::new` on data/lexicon (digits.tsv read) with the model
-//! (`--lm`, default data/lm/bigram.sjlm), and four columns follow (mean and max over the seeds, per 1000 syllables of one seed):
-//!   digits_final_mean  digits_final_max  digits_shown_mean  digits_shown_max
+//! (`--lm`, default data/lm/bigram.sjlm), and six columns follow (mean and max over the seeds, per 1000 syllables of one seed):
+//!   digits_final_mean  digits_final_max  digits_shown_mean  digits_shown_max  digits_extra_bs_mean  digits_extra_bs_max
 //! `final` counts the digit characters (0-9 . / -) in what the rows commit, which is the digit tokens left at the end (the rows are
-//! Chinese); `shown` counts the keys after which `Engine::digits_shown()` was not 0, the keys that for a moment show a digit. The
+//! Chinese); `extra_bs` (report only) counts the Backspaces the repair pressed because the screen still showed something in front of
+//! the syllable (a digit token left by an illegal neighbour typo) when the symbol model of section 4.2 would have stopped; `shown` counts the keys after which `Engine::digits_shown()` was not 0, the keys that for a moment show a digit. The
 //! engine decides what is a digit; the simulator only reads `Engine::digits_typed()` (the buffered keys) where it reads the columns
 //! otherwise, and does not insist on its own plan for the symbols (a key may be a digit).
+//!
+//! With `--digits` the `backspace` repair reads the engine's preedit (digits.md A.10) instead of the model of section 4.2: it presses
+//! Backspace until the preedit minus what it was when the syllable began is a prefix of the wanted symbols (or empty), and goes on while
+//! the preedit no longer starts with that base. A person sees a digit token the engine made of a first key (ㄅ, ㄉ, ㄓ followed by a key that
+//! cannot continue it) and presses Backspace once more. Without `--digits` the repair is exactly section 4.2's; `overwrite` presses no Backspace.
 //!
 //! The typing model (fixed; change it and the number in cli/tests/english_sim.rs together):
 //! - Every Zhuyin key of a syllable is mistyped with probability `p`, but only when it has a neighbour: the keys left and right of
@@ -112,6 +118,11 @@ struct Sim {
     want: Vec<char>,
     /// `--digits`: the engine is the digit-feature one; the counters below are read after every key.
     digits: bool,
+    /// `--digits` (digits.md A.10): the preedit after the latest key, and the preedit when the syllable began; the Backspace repair reads
+    /// what the person sees. `extra_bs` counts the Backspaces the engine's screen needed beyond the symbol model's (a digit token left in front).
+    last_preedit: String,
+    base_preedit: String,
+    extra_bs: u64,
     final_digits: u64,
     shown_keys: u64,
     p: f64,
@@ -125,6 +136,7 @@ impl Sim {
     fn raw(&mut self, k: Key) -> Result<bool, String> {
         self.keys += 1;
         let o = self.engine.key(k).map_err(|_| "the engine failed on a key".to_string())?;
+        self.last_preedit = o.preedit;
         if self.digits {
             self.final_digits += o.commit.chars().filter(|c| core::digits::is_alphabet(*c)).count() as u64;
             self.shown_keys += (self.engine.digits_shown() > 0) as u64;
@@ -174,8 +186,19 @@ impl Sim {
         self.engine.english_columns().iter().flatten().copied().collect()
     }
 
+    /// The symbols the Backspace repair counts as typed. Without `--digits`: the engine's columns (zhen-mixed section 4.2). With it
+    /// (digits.md A.10): the preedit behind where the syllable began, as the person sees it; a preedit that no longer starts with that
+    /// base is not a prefix of anything wanted, so the repair goes on.
+    fn repair_have(&self) -> Vec<char> {
+        if !self.digits {
+            return self.have();
+        }
+        self.last_preedit.strip_prefix(self.base_preedit.as_str()).map_or(vec!['\0'], |r| r.chars().collect())
+    }
+
     /// One syllable typed; whether rule D held after any of its keys is left in `self.d_held` (the caller counts and clears it).
     fn syllable(&mut self, syms: &[(usize, char)], tone: Option<char>) -> Result<(), String> {
+        self.base_preedit = self.last_preedit.clone();
         for (i, &(col, sym)) in syms.iter().enumerate() {
             let key = LAYOUT.key_of_symbol(sym).unwrap();
             let near = neighbours(key);
@@ -198,14 +221,17 @@ impl Sim {
                         // Backspace instead turns the letters left into an English run and the unfinished syllable is gone
                         // (zhen-inline section 1.3g): Esc takes the run, and the symbols are typed again from the start below. Each
                         // key is a step that shortens the symbols or empties them, so the loop ends with them empty at the latest.
-                        while !want.starts_with(&self.have()) {
+                        while !want.starts_with(&self.repair_have()) {
+                            if self.digits && want.starts_with(&self.have()) {
+                                self.extra_bs += 1; // the symbol model would stop here; the screen still shows something before the syllable
+                            }
                             let letters = self.engine.english_inline_shown();
                             self.send(Key::new(KeyKind::Backspace))?;
                             if letters {
                                 self.raw(Key::new(KeyKind::Esc))?;
                             }
                         }
-                        for &(_, s) in &syms[self.have().len()..=i] {
+                        for &(_, s) in &syms[self.repair_have().len()..=i] {
                             if self.zhuyin(s)? {
                                 break 'symbol;
                             }
@@ -333,14 +359,15 @@ pub fn run(args: &[String], root: &Path) -> Result<(), String> {
         return Err("no row to simulate".into());
     }
     let (mut per_1000, mut inline_1000, mut autokeep_1000, mut keys, mut triggers) = (Vec::new(), Vec::new(), Vec::new(), 0u64, 0u64);
-    let (mut final_1000, mut shown_1000) = (Vec::new(), Vec::new());
+    let (mut final_1000, mut shown_1000, mut extra_1000) = (Vec::new(), Vec::new(), Vec::new());
     let lm = lm.unwrap_or_else(|| root.join("data/lm/bigram.sjlm"));
     for i in 0..repeat {
         let engine = if digits { engine_digits(root, &lm, &words)? } else { engine_with(&lex, &words)? };
-        let mut sim = Sim { engine, keys: 0, triggers: 0, inline, d_held: false, autokeeps: 0, want: Vec::new(), digits, final_digits: 0, shown_keys: 0, p, repair, rng: Rng(seed.wrapping_add(i)) };
+        let mut sim = Sim { last_preedit: String::new(), base_preedit: String::new(), extra_bs: 0, engine, keys: 0, triggers: 0, inline, d_held: false, autokeeps: 0, want: Vec::new(), digits, final_digits: 0, shown_keys: 0, p, repair, rng: Rng(seed.wrapping_add(i)) };
         let mut shown_syllables = 0u64;
         for row in &parsed {
             sim.engine.reset(ResetMode::Discard);
+            sim.last_preedit.clear();
             for (syms, tone) in row {
                 sim.d_held = false;
                 sim.syllable(syms, *tone)?;
@@ -353,6 +380,7 @@ pub fn run(args: &[String], root: &Path) -> Result<(), String> {
         autokeep_1000.push(sim.autokeeps as f64 * 1000.0 / syllables as f64);
         final_1000.push(sim.final_digits as f64 * 1000.0 / syllables as f64);
         shown_1000.push(sim.shown_keys as f64 * 1000.0 / syllables as f64);
+        extra_1000.push(sim.extra_bs as f64 * 1000.0 / syllables as f64);
         keys += sim.keys;
         triggers += sim.triggers;
     }
@@ -364,8 +392,8 @@ pub fn run(args: &[String], root: &Path) -> Result<(), String> {
         String::new()
     };
     if digits {
-        let ((fmean, fmax), (smean, smax)) = (mean_max(&final_1000), mean_max(&shown_1000));
-        extra += &format!("\t{fmean:.3}\t{fmax:.3}\t{smean:.3}\t{smax:.3}");
+        let ((fmean, fmax), (smean, smax), (emean, emax)) = (mean_max(&final_1000), mean_max(&shown_1000), mean_max(&extra_1000));
+        extra += &format!("\t{fmean:.3}\t{fmax:.3}\t{smean:.3}\t{smax:.3}\t{emean:.3}\t{emax:.3}");
     }
     println!("{rows_sha}\t{}\t{syllables}\t{keys}\t{triggers}\t{mean:.3}\t{max:.3}{extra}", parsed.len());
     Ok(())
@@ -432,6 +460,9 @@ mod tests {
             d_held: false,
             autokeeps: 0,
             want: Vec::new(),
+            last_preedit: String::new(),
+            base_preedit: String::new(),
+            extra_bs: 0,
             digits: false,
             final_digits: 0,
             shown_keys: 0,
@@ -473,6 +504,9 @@ mod tests {
             d_held: false,
             autokeeps: 0,
             want: Vec::new(),
+            last_preedit: String::new(),
+            base_preedit: String::new(),
+            extra_bs: 0,
             digits: false,
             final_digits: 0,
             shown_keys: 0,
