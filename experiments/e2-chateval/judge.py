@@ -23,8 +23,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(HERE), "s7a-tinylm"))
 import fusegrid as fg  # noqa: E402  (also puts tools/ on sys.path)
 import evalstats  # noqa: E402
 
-FRONTIER_CAPS = fg.FRONTIER_CAPS
-
 
 def find_scores(dirs, model, setting, name):
     for d in dirs:
@@ -55,8 +53,8 @@ def jsubset_lines(label, setting, sets, params):
     out = []
     for name, rows in sets.items():
         j = fg.jsubsets(rows, [fg.pick(r, alpha, tau, "ll", delta) for r in rows])
-        out.append(f"  {label} {setting} {name}: J-right n {j['n_right']}, broken {j['broken']} ({100 * j['rate']:.2f}%, 95% upper "
-                   f"{100 * j['ub']:.2f}%); J-wrong-in-top-8 n {j['n_wrong_in8']}, fixed {j['fixed']}; J-wrong-outside-top-8 n {j['n_wrong_out8']}")
+        out.append(f"  {label} {setting} {name}: J-right n {j['n_right']}, broken {j['broken']}; J-wrong-in-top-8 n {j['n_wrong_in8']}, "
+                   f"fixed {j['fixed']}; J-wrong-outside-top-8 n {j['n_wrong_out8']}")
     return out
 
 
@@ -64,7 +62,7 @@ def diagnose_lines(setting, sets):
     out = []
     for name, rows in sets.items():
         d = fg.diagnose(rows)
-        out.append(f"  {setting} {name}: n {d['n']}, headroom {d['headroom']} ({100 * d['share']:.2f}%), model alone right on headroom "
+        out.append(f"  {setting} {name}: n {d['n']}, headroom (fusion ceiling) {d['headroom']} ({100 * d['share']:.2f}%), model alone right on headroom "
                    f"{d['alone_head']}, keeps candidate 0 on J-right {d['keep']} of {d['n_right']}, oracle@8 {d['oracle8']}")
     return out
 
@@ -80,7 +78,7 @@ def main(argv=None):
     ap.add_argument("--cap-ub", type=float, dest="cap_ub"); ap.add_argument("--frontier", action="store_true")
     ap.add_argument("--jsubsets", action="store_true"); ap.add_argument("--diagnose", action="store_true")
     a = ap.parse_args(argv)
-    if bool(a.select) != bool(a.tuning) or (a.select and not a.weight > 0):
+    if bool(a.select) != bool(a.tuning) or (a.select and not (a.weight or 0) > 0):
         ap.error("--select needs --tuning and --weight (> 0), and the other way round")
     if not a.select and (a.weight is not None or a.cap is not None or a.cap_ub is not None or a.frontier):
         ap.error("--weight, --cap, --cap-ub and --frontier only apply with --select")
@@ -94,22 +92,16 @@ def main(argv=None):
         ap.error("--tuning sets must be among --sets")
     if not a.fixed and not a.select and not a.diagnose:
         ap.error("nothing to do: give --fixed and/or --select (or --diagnose)")
+    if a.jsubsets and not a.fixed and not a.select:
+        ap.error("--jsubsets needs --fixed or --select")
     sets = {n: fg.load_scores(find_scores(a.scores, a.model, a.setting, n)) for n in a.sets}
     os.makedirs(os.path.join(a.out, "rowstats"), exist_ok=True)
     configs = [(lab, (float(al), float(ta), float(de))) for lab, al, ta, de in a.fixed]
     if a.select:
         if not sum(len(sets[t]) for t in a.tuning):
             ap.error("no tuning rows")
-        al, ta, de, f, b = fg.select_weighted(sets, a.weight, names=tuple(a.tuning), cap=a.cap, cap_ub=a.cap_ub)
         n = sum(len(sets[t]) for t in a.tuning)
-        crit = (f', broken / rows <= {a.cap:g}' if a.cap is not None else
-                f', 95% upper bound of broken (Poisson) / n <= {a.cap_ub:g}' if a.cap_ub is not None else '')
-        print(f"\n{a.select}: selected on {'+'.join(a.tuning)} ({n} rows) by fixed - {a.weight:g} x broken"
-              f"{crit}: alpha {al}, tau {ta}, delta {de}; fixed {f}, broken {b}")
-        nj = fg.n_jright([r for t in a.tuning for r in sets[t]])
-        if a.cap_ub is not None:
-            print(f"  n {n}, n_Jright {nj}, broken {b}, point rate {100 * b / n:.3f}%, 95% upper bound {100 * evalstats.poisson_upper95(b) / n:.3f}%")
-        if a.frontier:
+        if a.frontier:      # before the selection, so an infeasible cap still shows which caps have a cell
             print("\n| cap | alpha | tau | delta | fixed | broken | n | point rate | 95% upper bound |\n|---|---|---|---|---|---|---|---|---|")
             for c, cell in fg.frontier(sets, a.weight, names=tuple(a.tuning), ub=a.cap_ub is not None):
                 if cell is None:
@@ -118,6 +110,17 @@ def main(argv=None):
                     cb = cell[4]
                     print(f"| {100 * c:.1f}% | {cell[0]:g} | {cell[1]:g} | {cell[2]:g} | {cell[3]} | {cb} | {n} | "
                           f"{100 * cb / n:.3f}% | {100 * evalstats.poisson_upper95(cb) / n:.3f}% |")
+        try:
+            al, ta, de, f, b = fg.select_weighted(sets, a.weight, names=tuple(a.tuning), cap=a.cap, cap_ub=a.cap_ub)
+        except ValueError as e:     # no cell passes the cap
+            sys.exit(f"judge: {e}")
+        crit = (f', broken / rows <= {a.cap:g}' if a.cap is not None else
+                f', 95% upper bound of broken (Poisson) / n <= {a.cap_ub:g}' if a.cap_ub is not None else '')
+        print(f"\n{a.select}: selected on {'+'.join(a.tuning)} ({n} rows) by fixed - {a.weight:g} x broken"
+              f"{crit}: alpha {al}, tau {ta}, delta {de}; fixed {f}, broken {b}")
+        if a.cap_ub is not None:
+            nj = fg.n_jright([r for t in a.tuning for r in sets[t]])
+            print(f"  n {n}, n_Jright {nj}, broken {b}, point rate {100 * b / n:.3f}%, 95% upper bound {100 * evalstats.poisson_upper95(b) / n:.3f}%")
         configs.append((a.select, (al, ta, de)))
     for label, params in configs:
         print(f"\n{label}: alpha {params[0]:g}, tau {params[1]:g}, delta {params[2]:g}")

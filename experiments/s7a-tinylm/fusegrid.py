@@ -116,7 +116,7 @@ def select_weighted(sets, weight, col="ll", names=TUNING, cap=None, cap_ub=None)
     best = _choose(grid_cells(rows, col), weight, len(rows), cap, cap_ub)
     if best is None:  # cap excluded every cell
         raise ValueError(f"select_weighted: no grid cell has " + (f"broken / rows <= {cap}" if cap is not None else
-                         f"upper bound of broken / J-right <= {cap_ub}"))
+                         f"95% upper bound of broken / rows <= {cap_ub}"))
     return best
 
 
@@ -124,9 +124,9 @@ FRONTIER_CAPS = (0.001, 0.002, 0.003, 0.004, 0.005)
 
 
 def frontier(sets, weight, col="ll", names=TUNING, ub=False, caps=FRONTIER_CAPS):
-    """[(cap, cell or None)] where cell = (alpha, tau, delta, fixed, broken): the best cell under each cap, with the cap judged as
-    broken / rows (point rate) or, with `ub`, as the 95% Poisson upper bound of broken / rows (select_weighted's `cap` / `cap_ub`).
-    One grid pass."""
+    """[(cap, cell or None)] where cell = (alpha, tau, delta, fixed, broken): the cell select_weighted would choose under each cap
+    (maximum fixed - weight * broken, same ties), with the cap judged as broken / rows (point rate) or, with `ub`, as the 95% Poisson
+    upper bound of broken / rows (select_weighted's `cap` / `cap_ub`). Not the most-fixed cell per cap. One grid pass."""
     rows = [r for name in names for r in sets[name]]
     cells, n = grid_cells(rows, col), len(rows)
     return [(c, _choose(cells, weight, n, None if ub else c, c if ub else None)) for c in caps]
@@ -134,13 +134,12 @@ def frontier(sets, weight, col="ll", names=TUNING, ub=False, caps=FRONTIER_CAPS)
 
 def jsubsets(rows, picks):
     """The three fixed judgement subsets of the rows against the n-gram first, for the given picks (one index per row):
-    J-right (ok[0]): n_right, broken (pick wrong), the 95% upper bound of broken / n_right; J-wrong-in-top-8 (ok[0] false, some
-    candidate right): n_wrong_in8, fixed (pick right); J-wrong-outside-top-8 (no candidate right): n_wrong_out8."""
+    J-right (ok[0]): n_right, broken (pick wrong); J-wrong-in-top-8 (ok[0] false, some candidate right): n_wrong_in8, fixed (pick
+    right); J-wrong-outside-top-8 (no candidate right): n_wrong_out8. Counts only: the break-rate cap is judged over all rows
+    (methodology 2026-10-18 #3, #4), so no rate over n_right is offered. The subsets follow ok[0] of the score file given."""
     right = [(r, p) for r, p in zip(rows, picks) if r["ok"][0]]
     w_in = [(r, p) for r, p in zip(rows, picks) if not r["ok"][0] and any(r["ok"])]
-    broken = sum(not r["ok"][p] for r, p in right)
-    return {"n": len(rows), "n_right": len(right), "broken": broken,
-            "rate": broken / len(right) if right else 0.0, "ub": evalstats.poisson_upper95(broken) / len(right) if right else 1.0,
+    return {"n": len(rows), "n_right": len(right), "broken": sum(not r["ok"][p] for r, p in right),
             "n_wrong_in8": len(w_in), "fixed": sum(bool(r["ok"][p]) for r, p in w_in),
             "n_wrong_out8": sum(not any(r["ok"]) for r in rows)}
 

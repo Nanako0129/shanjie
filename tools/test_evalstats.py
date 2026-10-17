@@ -209,14 +209,16 @@ class Mde(unittest.TestCase):
             finally:
                 sys.argv = old
             self.assertTrue(buf.getvalue().startswith(want), buf.getvalue())
-        old = sys.argv
-        sys.argv = ["evalstats.py", "mde", "--alpha", "0.05"]
-        try:
-            with self.assertRaises(SystemExit) as e, contextlib.redirect_stderr(io.StringIO()):
-                E.main()
-        finally:
-            sys.argv = old
-        self.assertEqual(e.exception.code, 2)
+        for bad in ([], ["--discordant", "61", "--base", b], ["--discordant", "61", "--base", b, "--cand", c], ["--base", b],
+                    ["--discordant", "-5"]):
+            old = sys.argv
+            sys.argv = ["evalstats.py", "mde", "--alpha", "0.05"] + bad
+            try:
+                with self.assertRaises(SystemExit) as e, contextlib.redirect_stderr(io.StringIO()):
+                    E.main()
+            finally:
+                sys.argv = old
+            self.assertEqual(e.exception.code, 2, bad)
 
 
 class ClusterBootstrap(unittest.TestCase):
@@ -251,7 +253,7 @@ class ClusterBootstrap(unittest.TestCase):
         clus = E.compare(bp, cp, "x", resamples=200, cluster_path=cl).splitlines()
         self.assertIn("x (clustered, 20 clusters)", clus[2])
         self.assertNotIn("clustered", plain[2])
-        cut = lambda row: row.split("|")[4:9]          # n .. p, untouched by the bootstrap
+        cut = lambda row: row.split("|")[2:9]          # n, top1 base and new, fixed, broken, p, CER base: untouched by the bootstrap
         self.assertEqual(cut(plain[2]), cut(clus[2]))
         self.assertNotEqual(plain[2].split("|")[-3], clus[2].split("|")[-3])
         self.assertEqual(E.compare(bp, cp, "x", resamples=200), "\n".join(plain))      # default path unchanged

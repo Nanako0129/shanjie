@@ -108,8 +108,9 @@ class NewOptions(unittest.TestCase):
     def test_cap_ub_picks_a_stricter_cell_than_cap_at_the_same_number(self):
         _, c1 = run(self.sel + ["--cap", "0.0125"])              # point rate 1 / 240 = 0.42%: the fusing cell is allowed
         self.assertEqual(fg.fixed_broken(self.tune, *c1[-1][1]), (40, 1))
-        with self.assertRaises(ValueError):                      # bound of 0 broken over 240 rows is 1.248%; of 1, 1.977%
+        with self.assertRaises(SystemExit) as e:                 # bound of 0 broken over 240 rows is 1.248%; of 1, 1.977%
             run(self.sel + ["--cap-ub", "0.01"])
+        self.assertIn("95% upper bound of broken / rows <= 0.01", str(e.exception.code))
         _, c2 = run(self.sel + ["--cap-ub", "0.0125"])           # only the zero-broken cell (fusion off) passes
         self.assertEqual(fg.fixed_broken(self.tune, *c2[-1][1]), (0, 0))
 
@@ -119,9 +120,12 @@ class NewOptions(unittest.TestCase):
         ub = 100 * evalstats.poisson_upper95(1) / 240
         self.assertIn(f"n 240, n_Jright 200, broken 1, point rate 0.417%, 95% upper bound {ub:.3f}%", out)
 
-    def test_cap_ub_too_strict_raises_and_cap_ub_excludes_cap(self):
-        with self.assertRaises(ValueError):
-            run(self.sel + ["--cap-ub", "0.005"])
+    def test_cap_ub_too_strict_exits_and_cap_ub_excludes_cap(self):
+        buf = io.StringIO()
+        with self.assertRaises(SystemExit) as e, contextlib.redirect_stdout(buf):
+            judge.main(self.sel + ["--cap-ub", "0.005", "--frontier"])
+        self.assertTrue(str(e.exception.code).startswith("judge: "))      # a message, not a traceback
+        self.assertEqual(len([l for l in buf.getvalue().splitlines() if l.startswith("| 0.")]), 5)   # the frontier is still printed
         for extra in (["--cap", "0.1", "--cap-ub", "0.1"], ["--cap-ub", "1.5"]):
             with self.assertRaises(SystemExit) as e, contextlib.redirect_stderr(io.StringIO()):
                 run(self.sel + extra)
@@ -149,8 +153,8 @@ class NewOptions(unittest.TestCase):
         out, _ = run(self.base + ["--fixed", "A", "1", "inf", "0", "--jsubsets"])
         lines = [l for l in out.splitlines() if "J-right n" in l]
         self.assertEqual(len(lines), 2)
-        self.assertIn("A chat tune: J-right n 200, broken 1 (0.50%, 95% upper 2.", lines[0])
-        self.assertIn("J-wrong-in-top-8 n 40, fixed 40; J-wrong-outside-top-8 n 0", lines[0])
+        self.assertIn("A chat tune: J-right n 200, broken 1; J-wrong-in-top-8 n 40, fixed 40; J-wrong-outside-top-8 n 0", lines[0])
+        self.assertNotIn("%", lines[0])                       # counts only: no rate over J-right
         self.assertIn("A chat other: J-right n 1, broken 1", lines[1])
         self.assertIn("J-wrong-outside-top-8 n 1", lines[1])
         plain, _ = run(self.base + ["--fixed", "A", "1", "inf", "0"])
@@ -159,8 +163,8 @@ class NewOptions(unittest.TestCase):
     def test_diagnose_lines_and_standalone(self):
         out, cfg = run(self.base + ["--diagnose"])               # no --fixed, no --select: allowed
         self.assertEqual(cfg, [])
-        self.assertIn("chat tune: n 240, headroom 40 (16.67%), model alone right on headroom 40, keeps candidate 0 on J-right 0 of 200, oracle@8 240", out)
-        self.assertIn("chat other: n 3, headroom 1 (33.33%)", out)
+        self.assertIn("chat tune: n 240, headroom (fusion ceiling) 40 (16.67%), model alone right on headroom 40, keeps candidate 0 on J-right 0 of 200, oracle@8 240", out)
+        self.assertIn("chat other: n 3, headroom (fusion ceiling) 1 (33.33%)", out)
 
 
 class Select(unittest.TestCase):
@@ -195,7 +199,8 @@ class Select(unittest.TestCase):
         write_scores(d, "chat", "empty", [])
         base = ["--scores", d, "--sets", "tune", "--setting", "chat", "--out", o]
         sel = base + ["--select", "R3", "--tuning", "tune"]
-        for extra in (sel + ["--weight", "-1"], sel + ["--weight", "nan"], sel + ["--weight", "1", "--cap", "nan"],
+        for extra in (sel, base + ["--diagnose", "--jsubsets"],
+                      sel + ["--weight", "-1"], sel + ["--weight", "nan"], sel + ["--weight", "1", "--cap", "nan"],
                       sel + ["--weight", "1", "--cap", "1.5"], sel + ["--weight", "1", "--cap", "-0.1"],
                       base + ["--fixed", "A", "1", "1", "0", "--weight", "1"], base + ["--fixed", "A", "1", "1", "0", "--cap", "0.1"]):
             with self.assertRaises(SystemExit) as e, contextlib.redirect_stderr(io.StringIO()):

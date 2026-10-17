@@ -188,8 +188,11 @@ def main():
     a = ap.parse_args()
     try:
         if a.cmd == "mde":
-            if (a.discordant is None) == (a.base is None or a.cand is None) or (a.discordant is None and a.base is None):
+            files = (a.base is not None) + (a.cand is not None)
+            if (a.discordant is None) != (files == 2) or (a.discordant is not None and files):
                 ap.error("give --discordant D, or --base and --cand")
+            if a.discordant is not None and a.discordant < 0:
+                ap.error("--discordant must be >= 0")
             if not 0 < a.alpha < 1 or not 0 < a.power < 1:
                 ap.error("--alpha and --power must be within (0, 1)")
             if a.discordant is None:

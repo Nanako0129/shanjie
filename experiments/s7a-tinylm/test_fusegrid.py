@@ -266,8 +266,7 @@ class TestJsubsetsAndDiagnose(unittest.TestCase):
     def test_jsubsets_counts_on_a_hand_made_file(self):
         j = fg.jsubsets(self.rows(), [1, 0, 1, 0, 1, 0])      # breaks row 1, fixes row 3, keeps rows 2 and 6 right
         self.assertEqual((j["n"], j["n_right"], j["broken"]), (6, 3, 1))
-        self.assertAlmostEqual(j["rate"], 1 / 3)
-        self.assertAlmostEqual(j["ub"], evalstats.poisson_upper95(1) / 3)     # informational
+        self.assertNotIn("rate", j)                           # counts only: no rate over J-right next to the cap over n
         self.assertEqual((j["n_wrong_in8"], j["fixed"], j["n_wrong_out8"]), (2, 1, 1))
         self.assertEqual(sum((j["n_right"], j["n_wrong_in8"], j["n_wrong_out8"])), 6)    # the three subsets partition the rows
 
@@ -280,7 +279,7 @@ class TestJsubsetsAndDiagnose(unittest.TestCase):
 
     def test_jsubsets_empty(self):
         j = fg.jsubsets([], [])
-        self.assertEqual((j["n_right"], j["broken"], j["rate"], j["ub"]), (0, 0, 0.0, 1.0))
+        self.assertEqual((j["n_right"], j["broken"], j["n_wrong_in8"], j["n_wrong_out8"]), (0, 0, 0, 0))
 
     def test_diagnose_on_a_hand_made_file(self):
         d = fg.diagnose(self.rows())
