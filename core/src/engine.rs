@@ -407,6 +407,20 @@ impl Cands {
         }
     }
 
+    /// After the list changed under an open window (a ⌘⌫ that removed or reordered items), with `sel` already set
+    /// inside the new list: keep `first` within what ↑, ↓ and Page Down reach (the last row shows the last item).
+    fn reclamped(mut self) -> Self {
+        self.first = self.first.min(self.sel).min(self.list.len().saturating_sub(PAGE_SIZE));
+        if self.sel >= self.first + PAGE_SIZE {
+            self.first = self.sel + 1 - PAGE_SIZE;
+        }
+        self.top = self.top.min((self.list.len() - 1) / PAGE_SIZE);
+        if self.expanded {
+            self.scroll();
+        }
+        self
+    }
+
     /// (position of the first output candidate, how many are output).
     fn window(&self) -> (usize, usize) {
         let len = self.list.len();
@@ -2825,16 +2839,7 @@ impl Engine {
                 return Ok(()); // closed, as by Esc
             }
             c.sel = c.list.iter().position(|(w, _)| *w == word).unwrap_or(0);
-            // Keep `first` within what ↑, ↓ and Page Down reach (the last row shows the last item).
-            c.first = c.first.min(c.sel).min(c.list.len().saturating_sub(PAGE_SIZE));
-            if c.sel >= c.first + PAGE_SIZE {
-                c.first = c.sel + 1 - PAGE_SIZE;
-            }
-            c.top = c.top.min((c.list.len() - 1) / PAGE_SIZE);
-            if c.expanded {
-                c.scroll();
-            }
-            self.cands = Some(c);
+            self.cands = Some(c.reclamped());
             return Ok(());
         }
         let (start, end) = if self.cursor == 0 { (0, l) } else { (self.cursor - l, self.cursor) };
@@ -2843,7 +2848,20 @@ impl Engine {
         }
         let reading = self.syls[start..end].to_vec();
         self.forget_entry(&reading, &word);
-        self.refresh()
+        self.refresh()?;
+        // New-word B §2.6: a forgotten new word is no longer a candidate, so it leaves the open window (a lexicon
+        // word stays: only its learned weight went). The window stays on the item that took its place.
+        if self.in_lexicon(&reading, &word) {
+            return Ok(());
+        }
+        let Some(mut c) = self.cands.take() else { return Ok(()) };
+        c.list.retain(|(w, n)| !(*w == word && *n == l));
+        if c.list.is_empty() {
+            return Ok(()); // closed, as by Esc
+        }
+        c.sel = c.sel.min(c.list.len() - 1);
+        self.cands = Some(c.reclamped());
+        Ok(())
     }
 
     /// Forget (reading, word) everywhere: pending learns of it are dropped and its records go, then the file is

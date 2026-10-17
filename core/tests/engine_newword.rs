@@ -920,7 +920,8 @@ fn a_sub_span_spelled_twice_in_one_commit_is_learned_once() {
 
 // ---------- §2.6 forgetting and clearing ----------
 
-/// §2.6: ⌘⌫ on a new word removes its "#" line (full rewrite) and decoding goes back to the unlearned output.
+/// §2.6: ⌘⌫ on a new word removes its "#" line (full rewrite) and decoding goes back to the unlearned output; the
+/// open window stops listing it.
 #[test]
 fn forgetting_a_new_word_removes_its_line() {
     let dir = tmp_dir("forget");
@@ -932,6 +933,8 @@ fn forgetting_a_new_word_removes_its_line() {
     open_at(&mut e, 2, 2, "派工");
     let o = e.key(FORGET).unwrap();
     assert_eq!(o.preedit, "派公");
+    assert!(!o.candidates.is_empty(), "the window stays open");
+    assert!(!o.candidates.iter().any(|c| c == "派工"), "a forgotten new word is no longer listed");
     assert!(!raw(&dir).contains("派工"));
     let _ = std::fs::remove_dir_all(&dir);
 }
