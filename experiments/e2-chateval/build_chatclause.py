@@ -463,7 +463,7 @@ def freeze(work, period, corrections_file=None, draft=False, readings=c.readings
         tuned = {l.split("|")[1] for l in open(os.path.join(work, "tune.rows.txt"), encoding="utf-8") if l.strip()}
         if any(s in tuned for _x, s, _r in frozen):
             sys.exit("build_chatclause: STOP, a chatjudge sentence is also in the frozen chatclause; report to main (rerank-size 3.4)")
-    text ="".join(f"{x}|{s}|{r}\n" for x, s, r in frozen)
+    text = "".join(f"{x}|{s}|{r}\n" for x, s, r in frozen)
     sha = c.sha256_bytes(text.encode("utf-8"))
     sf = os.path.join(work, f"{period}.sha256")
     if os.path.isfile(sf) and open(sf).read().split()[0] != sha:
