@@ -6618,3 +6618,10 @@ formal: alpha 0.7, tau 1, delta 2
 - 結果（Mac，seed 20261014，repeat 5，`--digits`；欄位：最後數字 token／瞬間顯示數字的鍵／多按的 Backspace，各為每千音節平均）：dev302 `--p 0`：0／3.517／0；`--p 0.02 --repair backspace`：**0**／4.611／0.860（最大 1.563）；`--p 0.02 --repair overwrite`：8.050（最大 11.333）／13.755／1.016。typing76 `--p 0`：0／0／0；backspace：**0**／1.589／1.589（最大 2.649）；overwrite：14.570（最大 25.166）／17.748／1.325。overwrite 的兩個數字只報；它在換欄時退回 Backspace 修正，所以隨這次修正從舊的 8.988／15.894 變成 8.050／14.570。cvtune、wikitune 由 main 在 Windows 機器重跑。
 - 產品上的意思：ㄅ、ㄉ、ㄓ 開頭的音節，第二個鍵打錯成不合法的組合時，前面的鍵會先變成數字，要多按一次 Backspace（dev302 約 0.9／千音節，typing76 約 1.6／千音節）。
 - 測試：`cli/tests/english_sim.rs::digits_backspace_repair_reads_the_screen`（100 列 ㄅㄨˋ、p 0.5：最後數字 0、多按的 Backspace 535／千音節）；把修正改回只看欄位模型時它以斷言失敗（最後數字 535）。`cargo test -p cli` 通過。
+
+## 2026-10-17：數字輸入 A 修訂三的量測（θ 也加在當場決定的鍵；main 在 Windows 機器跑）
+
+- Python 基準 f8e2fcd3、表 `a75a328b…`、θ 3；C 的調參資料（`digitruns-all` `7462969a…`、cvtune `31de456d…`、wikitune `8dcfe40c…`）與判讀集（`digitruns-judge2` `8fb8f758…`）和 C 修訂三完全相同，只差這條規則。
+- 調參資料：數字正確率 (a) 2717／2991＝90.8%（舊規則 2721＝91.0%）；cvtune、wikitune 的純中文誤判 (c) 都是 0；結構規則 87.0%。
+- 判讀集（第二次使用，只報）：(a) 1339／1494＝89.6%（舊 1342＝89.8%），結構規則 85.2%；dev302、typing76 的 (c) 0，(d) 每千音節 2.74、7.95；R1 的數字和 C 相同。
+- 事先定的保留標準（數字正確率 ≥ 90.0% 且不低於結構規則、(c) 0）都過；真引擎重播 #48 302／302、0 個數字（Rust 移植後）。
