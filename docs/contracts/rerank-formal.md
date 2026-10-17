@@ -82,3 +82,21 @@
 **之後**：確認過才照 §3.5 匯出（`--formal 0.7 1 1.5`，`--levels` 的書面三格照上面的三檔）、§3.6 一致性（這次的比對對象：標準與積極 → `OUT_R2/rowstats/NEW.formal.dev302.new.txt`；保守留 1、1、4 → `OUT_R2/rowstats/C114.formal.dev302.new.txt`，寫成標準 → 同 NEW 那一份；聊天三檔照 §3.6 對 tinylm-v5）、§4.4 保留集（fresh verifier，書面三檔對只用 n-gram 與對 tinylm-v5 各一行，shard-1 第 2 次）、§4.6 實機；Release 要維護者同意。確認沒過 → 結案、不匯出，研究紀錄照記。
 
 **預算**：Windows 機器 1 小時內（建 wikijudge2 約 2 分鐘、單一集合評分、判讀）；不用 Colab。
+
+## 9. 修訂三（2026-10-17，維護者選擇題「守 0.5% 上限，找改對最多的那格」；取代 §8 的候選）
+
+**起因**：維護者要的是改對的總量更高（保守檔在 wikijudge 對出貨只 +20），但預設檔仍守改壞率 ≤ 0.5%。標準檔失敗是因為選值集上的 0.5% 上限沒有轉移到其他來源；所以在選值時收緊上限，找一格介於標準與保守之間、在其他來源也守得住 0.5% 的值。§8 的確認資料 wikijudge2 照用（建好、還沒有人看過它的判讀）。
+
+**候選**（只用選值集 cvtune＋wikitune，1:1）：`judge.py --scores <分數> --sets cvtune wikitune wikijudge dev302 typing76 user-reported lytune wikitypo --setting formal --model RF --select S<k> --tuning cvtune wikitune --weight 1 --cap <c> --out OUT_S<k>`，c ∈ {0.005, 0.004, 0.003, 0.002, 0.001}，k＝50、40、30、20、10。私人集不在這裡（§5 只讀一次）。
+
+**篩選與挑選**（用已看過的資料，事先寫死）：每個候選在 wikijudge＋判讀五集（依 §3.4 的順序串接，`OUT_S<k>/rowstats/S<k>.formal.<集合>.{base,new}.txt`）對只用 n-gram 的改壞率 ≤ 0.5% 才留下；留下的裡面取同一串接上改對最多的那格（平手取上限較小的）。全部不過就沿用 §8（保守檔 0.7、1、1.5）。挑到的那格記為 PICK。
+
+**確認（wikijudge2，沒看過的資料）**：唯一的 judge 指令 `judge.py --scores <分數> --sets wikijudge wikijudge2 dev302 typing76 user-reported lytune wikitypo --setting formal --model RF --fixed SHIP 1 1 3 --fixed PICK <α τ δ> --fixed CONS 0.7 1 1.5 --fixed C114 1 1 4 --out OUT_R3`。門檻（都要過）：
+1. wikijudge2 上 PICK 對 SHIP（`OUT_R3/rowstats/SHIP.formal.wikijudge2.new.txt` 對 `PICK.formal.wikijudge2.new.txt`，`evalstats compare --net`）顯著為正（a＝0.05）。
+2. wikijudge2 上 PICK 的改壞率（`PICK.formal.wikijudge2.base.txt` 對 `.new.txt`）≤ 0.5%。
+
+PICK 不過時：CONS 照 §8 的兩條門檻（換成 `CONS.formal.wikijudge2.*`）判，過了就用 CONS；也不過就結案、不匯出。PICK 就是 CONS 時只判一次。
+
+**三檔**：標準＝通過的那格；積極＝標準；保守＝1、1、4，前提是在 wikijudge、wikijudge2、dev302、typing76、user-reported、lytune、wikitypo 每個集合的改壞數（對只用 n-gram，`C114.formal.<集合>.*`）都 ≤ 標準的，否則保守＝標準。§3.6 的比對對象：標準與積極 → `OUT_R3/rowstats/<標準的標籤>.formal.dev302.new.txt`；保守 → `C114.formal.dev302.new.txt`（寫成標準時同標準）。其餘照 §8「之後」（匯出、一致性、保留集、實機、Release 要維護者同意）。
+
+**預算**：Windows 機器 1 小時內；不用 Colab。
