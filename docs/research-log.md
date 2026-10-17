@@ -6646,3 +6646,7 @@ formal: alpha 0.7, tau 1, delta 2
 - **決定**（§10）：兩格都過 → 新的書面標準＝0.7、2、1；積極＝標準；保守＝1、1、4（每個集合的改壞數都 ≤ 新標準：wikijudge 0／6、wikijudge2 1／10、dev302 0／2、typing76 0／0、user-reported 0／1、lytune 1／35、wikitypo 0／0）。
 - 只報（新標準對出貨）：wikijudge +47／−6、dev302 +9／−1、user-reported +7／−1、lytune +74／−32、typing76 與 wikitypo 0／0。§9 的 `OUT_R3`（只有保守檔）只報不用。
 - 下一步：匯出新檔（Release 代號 `sj-sr-6-14m`，維護者同意關卡都過就建）、切片核對、§3.6 一致性、保留集（fresh verifier）、實機。
+- **匯出**（Mac，`export_sjtl.py --type int8 --ngram-model <model-v6> --kn-side <kn-v1> --chat 0.3 2 0.25 --formal 0.7 2 1 --levels 1 2 3 0.3 2 0.25 1 1 4 0.7 2 1`，`tinylm-M.npz` `32308122…`）：14,638,352 bytes，SHA-256 `e7c179d8…568ed5e`，SJTL0004。對 tinylm-v5 逐欄比對：只有檔頭的書面 α、τ（1、1 → 0.7、2）、書面 δ（3 → 1）與書面積極檔（1、1、3 → 0.7、2、1）不同；字表與 76 個張量相同；`cmp` 只有 22 個位元組不同，全在檔頭前 244 bytes 內。
+- **§3.6 一致性**（Windows 機器，新檔，dev302）：書面標準與積極的 CLI rowstats 和 `OUT_R4/rowstats/S20.formal.dev302.new.txt` 逐位元組相同、書面保守和 `C114.formal.dev302.new.txt` 相同；聊天三檔新檔對 tinylm-v5 都相同（`cmp` 全為 0）。
+- **保留集**（fresh verifier，shard-1 第 2 次使用，300 列）：書面標準與積極對只用 n-gram +12／−0（p 0.0005）、對 tinylm-v5 +8／−0（p 0.008）；書面保守對 n-gram +3／−0、對 tinylm-v5 0／0（逐句相同）。三檔都沒有對 tinylm-v5 顯著變差。
+- Release 代號 `sj-sr-6-14m`（會意 SJ-SR-6-14M，維護者同意關卡都過就建）；說明檔 `docs/releases/sj-sr-6-14m.md` 先進 main。
