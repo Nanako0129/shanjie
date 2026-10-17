@@ -87,9 +87,9 @@
 
 **起因**：維護者要的是改對的總量更高（保守檔在 wikijudge 對出貨只 +20），但預設檔仍守改壞率 ≤ 0.5%。標準檔失敗是因為選值集上的 0.5% 上限沒有轉移到其他來源；所以在選值時收緊上限，找一格介於標準與保守之間、在其他來源也守得住 0.5% 的值。§8 的確認資料 wikijudge2 照用（建好、還沒有人看過它的判讀）。
 
-**候選**（只用選值集 cvtune＋wikitune，1:1）：`judge.py --scores <分數> --sets cvtune wikitune wikijudge dev302 typing76 user-reported lytune wikitypo --setting formal --model RF --select S<k> --tuning cvtune wikitune --weight 1 --cap <c> --out OUT_S<k>`，c ∈ {0.005, 0.004, 0.003, 0.002, 0.001}，k＝50、40、30、20、10。私人集不在這裡（§5 只讀一次）。
+**候選**（只用選值集 cvtune＋wikitune，1:1）：`judge.py --scores <分數> --sets cvtune wikitune wikijudge dev302 typing76 user-reported lytune wikitypo --setting formal --model RF --fixed SHIP 1 1 3 --select S<k> --tuning cvtune wikitune --weight 1 --cap <c> --out OUT_S<k>`，c ∈ {0.005, 0.004, 0.003, 0.002, 0.001}，k＝50、40、30、20、10。私人集不在這裡（§5 只讀一次）。
 
-**篩選與挑選**（用已看過的資料，事先寫死）：每個候選在 wikijudge＋判讀五集（依 §3.4 的順序串接，`OUT_S<k>/rowstats/S<k>.formal.<集合>.{base,new}.txt`）對只用 n-gram 的改壞率 ≤ 0.5% 才留下；留下的裡面取同一串接上改對最多的那格（平手取上限較小的）。全部不過就沿用 §8（保守檔 0.7、1、1.5）。挑到的那格記為 PICK。
+**篩選與挑選**（用已看過的資料，事先寫死；都只用公開集合，私人集照 §5 不再讀，和 §3.4 守門 3 含私人集不同）：每個候選三條都過才留下——(a) wikijudge＋判讀五集（依 §3.4 的順序 wikijudge、dev302、typing76、user-reported、lytune、wikitypo 串接，`OUT_S<k>/rowstats/S<k>.formal.<集合>.{base,new}.txt`）對只用 n-gram 的改壞率 ≤ 0.5%；(b) 判讀五集串接（同順序、不含 wikijudge），BASE＝`OUT_S<k>/rowstats/SHIP.formal.<集合>.new.txt` 串接、CAND＝`S<k>.formal.<集合>.new.txt` 串接，`evalstats compare --net` 不是顯著為負（不是「改壞 > 改對且 p < 0.05」）；(c) lytune 單獨，BASE＝`SHIP.formal.lytune.new.txt`、CAND＝`S<k>.formal.lytune.new.txt`，同樣不是顯著為負。留下的裡面取 (a) 那個串接上改對最多的那格（平手取上限較小的）。全部不過就沿用 §8（保守檔 0.7、1、1.5）。挑到的那格記為 PICK。
 
 **確認（wikijudge2，沒看過的資料）**：唯一的 judge 指令 `judge.py --scores <分數> --sets wikijudge wikijudge2 dev302 typing76 user-reported lytune wikitypo --setting formal --model RF --fixed SHIP 1 1 3 --fixed PICK <α τ δ> --fixed CONS 0.7 1 1.5 --fixed C114 1 1 4 --out OUT_R3`。門檻（都要過）：
 1. wikijudge2 上 PICK 對 SHIP（`OUT_R3/rowstats/SHIP.formal.wikijudge2.new.txt` 對 `PICK.formal.wikijudge2.new.txt`，`evalstats compare --net`）顯著為正（a＝0.05）。
