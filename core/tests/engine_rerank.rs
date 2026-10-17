@@ -207,13 +207,21 @@ fn cycle(e: &mut Engine) -> Option<Output> {
     e.apply_rerank(job.run()).unwrap()
 }
 
-/// Type `syls`, put the cursor after syllable `end`, open the candidates and choose `word`; the snapshot after the choice.
+/// A fixed word with a free stretch on each side: `word` covers `syls[end - n..end]` (one syllable per character). A candidate
+/// pick freezes the words outside its span (docs/contracts/repick-freeze.md), so the stretches around it would not be free
+/// (nothing to rerank); the word is picked over its own syllables first and the rest is typed around it.
 fn fix_word(e: &mut Engine, syls: &[String], end: usize, word: &str) -> Output {
-    type_syls(e, syls);
-    for _ in 0..syls.len() - end {
-        e.key(k(KeyKind::Left)).unwrap();
+    let a = end - word.chars().count();
+    type_syls(e, &syls[a..end]);
+    let mut o = choose_at_cursor(e, word);
+    if end < syls.len() {
+        o = type_syls(e, &syls[end..]);
     }
-    choose_at_cursor(e, word)
+    if a > 0 {
+        e.key(k(KeyKind::Home)).unwrap();
+        o = type_syls(e, &syls[..a]);
+    }
+    o
 }
 fn choose_at_cursor(e: &mut Engine, word: &str) -> Output {
     let mut o = e.key(k(KeyKind::Space)).unwrap();
@@ -367,10 +375,9 @@ fn apply_does_not_bring_back_a_cleared_prediction_row() {
     type_syls(&mut e, &row(27));
     let o = choose_at_cursor(&mut e, "了");
     assert!(o.candidates.is_empty(), "premise: the pick cleared the row");
-    let r = e.take_rerank_job().unwrap().run();
-    assert!(r.picks().iter().any(|&p| p != 0), "premise: the stretch before 了 changes");
-    let a = e.apply_rerank(r).unwrap().expect("a change");
-    assert!(a.candidates.is_empty(), "the row stays cleared after a candidate pick");
+    // Repick-freeze: the pick fixes every word before 了 as shown, so no stretch is left to rerank and no result can bring
+    // the row back (before the freeze this stretch changed under the rerank and the apply had to leave the row cleared).
+    assert!(e.take_rerank_job().is_none(), "nothing free after a candidate pick");
     assert!(!e.set_prediction(true).unwrap().candidates.is_empty(), "premise: a recompute would show a row");
 
     let mut e = engine();
@@ -382,6 +389,28 @@ fn apply_does_not_bring_back_a_cleared_prediction_row() {
     let r = e.take_rerank_job().unwrap().run();
     let a = e.apply_rerank(r).unwrap().expect("a change");
     assert!(a.candidates.is_empty(), "the row stays cleared after Backspace");
+    assert!(!e.set_prediction(true).unwrap().candidates.is_empty(), "premise: a recompute would show a row");
+
+    // Repick-freeze, a pick that still leaves a free stretch: row 27 with 以 picked at syllable 2 (everything else fixed as
+    // shown), then a new syllable typed there is free; End moves the cursor to the end, where the row stays empty. The job
+    // for that free stretch changes the text (measured: the 的 becomes 地), and the apply leaves the row cleared.
+    let mut e = engine();
+    let syls = row(27);
+    type_syls(&mut e, &syls);
+    e.key(k(KeyKind::Home)).unwrap();
+    e.key(k(KeyKind::Right)).unwrap();
+    e.key(k(KeyKind::Right)).unwrap();
+    let o = e.key(k(KeyKind::Space)).unwrap();
+    assert_eq!(o.candidates[o.selected.unwrap()], "以");
+    e.key(k(KeyKind::Enter)).unwrap();
+    let o = type_syls(&mut e, &["ㄉㄜ˙".to_string()]);
+    assert_eq!(o.preedit, "我以的經回復你的郵件了");
+    let o = e.key(k(KeyKind::End)).unwrap();
+    assert!(o.candidates.is_empty(), "premise: the row is cleared");
+    let r = e.take_rerank_job().expect("premise: the free syllable makes a job").run();
+    let a = e.apply_rerank(r).unwrap().expect("a change");
+    assert_eq!(a.preedit, "我以地經回復你的郵件了");
+    assert!(a.candidates.is_empty(), "the row stays cleared after the apply");
     assert!(!e.set_prediction(true).unwrap().candidates.is_empty(), "premise: a recompute would show a row");
 }
 
@@ -616,8 +645,12 @@ fn learned_stretch_is_not_reranked() {
     let syls = row(27);
     let mut e = engine();
     e.set_learning(true);
-    fix_word(&mut e, &syls, 5, "回覆");
+    // The pick is made over its own syllables, after the text it follows on screen (the context its record is kept under).
+    e.set_left_context("我已經");
+    type_syls(&mut e, &syls[3..5]);
+    choose_at_cursor(&mut e, "回覆");
     e.key(k(KeyKind::Enter)).unwrap();
+    e.set_left_context("");
     assert!(!e.learner().is_empty(), "premise: taught");
     let o = fix_word(&mut e, &syls, 9, "郵件");
     assert!(o.preedit.starts_with("我已經回覆你的郵件"), "premise: the learned word is in the first path");
