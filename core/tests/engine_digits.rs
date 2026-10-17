@@ -130,7 +130,7 @@ fn golden_key(k: &str) -> Key {
 }
 
 /// #49: every scoring call of the engine (the splits, their scores as f64 bits, the pick, the buffer, the flushes, the context) is the
-/// Python baseline's, key by key, on the 30 rows of eval/golden/digits-score.txt. macOS only (Linux's libm differs in the last bit of
+/// Python baseline's, key by key, on the 31 rows of eval/golden/digits-score.txt. macOS only (Linux's libm differs in the last bit of
 /// log10, as for the other f64 goldens): the Windows machine's WSL skips it, CI's macOS runs it.
 #[test]
 fn row49_scores_match_the_python_golden_bit_for_bit() {
@@ -138,7 +138,7 @@ fn row49_scores_match_the_python_golden_bit_for_bit() {
         return;
     }
     let rows = golden_score();
-    assert_eq!(rows.len(), 30);
+    assert_eq!(rows.len(), 31);
     let mut compared = 0;
     let mut e = eng();
     e.set_digits_trace(true);

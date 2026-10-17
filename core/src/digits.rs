@@ -291,32 +291,31 @@ impl Scorer<'_> {
             };
             splits.push(Split { m: *m, t: *t, score: lpd + lpz });
         }
-        let pick = Self::choose(&splits, emitted.len(), prev_d, closing);
+        let pick = Self::choose(&splits, emitted.len(), prev_d, closing, closing || extra.is_some());
         Decision { splits, pick: Some(pick) }
     }
 
-    /// The pick among scored splits: theta against the all-digit split when a syllable closes, else the best score with the ties of digits.md A.3.3.
-    fn choose(out: &[Split], emitted: usize, prev_d: Option<usize>, closing: bool) -> usize {
+    /// The pick among scored splits (digits.md A.3.3, revision three A.9). `final`: the key decides on the spot (a closing key, or a Zhuyin key
+    /// outside the alphabet), so a pure-Zhuyin split with a tail gets theta. `closing`: theta against the all-digit split; else the best
+    /// effective score, ties keeping the displayed digit count, else the larger tail.
+    fn choose(out: &[Split], emitted: usize, prev_d: Option<usize>, closing: bool, is_final: bool) -> usize {
+        let eff: Vec<f64> = out.iter().map(|s| s.score + if is_final && s.t > 0 && emitted + s.m == 0 { THETA } else { 0.0 }).collect();
         let zh: Vec<usize> = (0..out.len()).filter(|&i| out[i].t > 0).collect();
         let dg: Vec<usize> = (0..out.len()).filter(|&i| out[i].t == 0).collect();
         if closing && !zh.is_empty() && !dg.is_empty() {
-            // theta guards only the splits with no digit at all (pure Zhuyin).
-            let eff = |i: usize| out[i].score + if emitted + out[i].m == 0 { THETA } else { 0.0 };
             let mut best = zh[0];
             for &i in &zh[1..] {
-                let (a, b) = (eff(i), eff(best));
-                if a > b || (a == b && out[i].t > out[best].t) {
+                if eff[i] > eff[best] || (eff[i] == eff[best] && out[i].t > out[best].t) {
                     best = i;
                 }
             }
-            return if out[dg[0]].score > eff(best) { dg[0] } else { best };
+            return if out[dg[0]].score > eff[best] { dg[0] } else { best };
         }
-        let top = out.iter().map(|s| s.score).fold(f64::NEG_INFINITY, f64::max);
-        let tied: Vec<usize> = (0..out.len()).filter(|&i| out[i].score == top).collect();
+        let top = eff.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+        let tied: Vec<usize> = (0..out.len()).filter(|&i| eff[i] == top).collect();
         if let Some(&i) = tied.iter().find(|&&i| prev_d.is_some_and(|p| emitted + out[i].m == p)) {
             return i;
         }
-        // Largest t, then the smallest index.
         let mut best = tied[0];
         for &i in &tied[1..] {
             if out[i].t > out[best].t {
