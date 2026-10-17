@@ -12,6 +12,7 @@ digit tokens first). For every key the buffer is split into (m digits, t tail ke
 
 theta (digits.md A.3.3, digit-context.md C.6 item 3): when the tail closes a syllable, a zhuyin split that holds no digit (emitted + m = 0) is
 scored S + theta; one that holds a digit is scored S; the all-digit split wins only when its S is strictly greater than the best of those.
+A non-alphabet symbol key decides the run on the spot, so its digit-free zhuyin split gets the same + theta (A.3.3 revision three).
 
 Scores (log10): S = lpD + lpZ.
   lpD = 0 when d = 0, else log P(D|C) + log P_len(d | ended) + sum of log P_ch over the first d keys of the run (emitted keys included, added in key order);
@@ -176,13 +177,16 @@ class Scorer:
         closing = boundary or (extra is None and buf and buf[-1] in TONE_KEYS)
         zh = [i for i, c in enumerate(out) if c[1] > 0]
         dg = [i for i, c in enumerate(out) if c[1] == 0]
+        # theta guards only the splits with no digit at all (pure zhuyin); once the run holds a digit the question is where the run ends.
+        # A non-alphabet key decides on the spot (the front part flushes, the tail becomes the pending syllable), so it is guarded like a
+        # closing key (digits.md A.3.3, revision three); its splits all hold the key, so none is all digits.
+        final = closing or extra is not None
+        eff = [s + (self.theta if final and t > 0 and len(emitted) + m == 0 else 0.0) for m, t, s in out]
         if closing and zh and dg:
-            # theta guards only the splits with no digit at all (pure zhuyin); once the run holds a digit the question is where the run ends
-            eff = {i: out[i][2] + (self.theta if len(emitted) + out[i][0] == 0 else 0.0) for i in zh}
             best = max(zh, key=lambda i: (eff[i], out[i][1]))
             return out, dg[0] if out[dg[0]][2] > eff[best] else best
-        top = max(c[2] for c in out)
-        tied = [i for i, c in enumerate(out) if c[2] == top]
+        top = max(eff)
+        tied = [i for i, e in enumerate(eff) if e == top]
         keep = [i for i in tied if prev_d is not None and len(emitted) + out[i][0] == prev_d]
         return out, keep[0] if keep else max(tied, key=lambda i: (out[i][1], -i))
 
@@ -366,3 +370,20 @@ def digit_rank_empty(table, lm, lex, v, W, gamma=1.0):
         return None
     ps = {w: table.p_w_given_vD(w, v, base_pb(lm, w, lex.by_word[w][1]), gamma) for w in table.successors(v) if w in lex.by_word}
     return sum(1 for x in ps.values() if x >= ps[W])
+
+
+def digit_row(table, lm, lex, idx, v, units, lam, limit=9, gamma=1.0):
+    """The row of digits.md A.3.5 as a list of (word, score), best first, at most `limit`. Both cases go through the code paths above.
+    Units given (an unfinished syllable): `digit_tiers`, the successor layer then the rest, each by predict.det_key, score
+    lam log10 P(w | v, D) + (1 - lam) lp. No units: the successor layer that is in the lexicon, score log10 P(w | v, D) (no lexicon blend,
+    the score of `digit_rank_empty`), by predict.det_key with the word's best reading (lex.by_word) as the reading."""
+    if units:
+        t0, t1 = digit_tiers(table, lm, idx, units, v, lam, gamma)
+        return [(e[0], s) for e, s in (t0 + t1)[:limit]]
+    rows = []
+    for w in table.successors(v):
+        if w in lex.by_word:
+            syls, lp = lex.by_word[w]
+            rows.append(((w, lp, None, "-".join(syls)), math.log10(table.p_w_given_vD(w, v, base_pb(lm, w, lp), gamma))))
+    rows.sort(key=lambda x: P1.det_key(x[0], x[1]))
+    return [(e[0], s) for e, s in rows[:limit]]

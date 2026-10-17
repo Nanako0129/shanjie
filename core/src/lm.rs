@@ -550,6 +550,22 @@ impl Lm {
         self.prob_c(self.ctx_of(self.word_id(v)), self.word_id(w), pb)
     }
 
+    /// lm.py `unigram_back`: the single-word back-off term of `word` for a word with model id `w` and score `lp`: 10^lp, blended with the
+    /// Kneser-Ney side file's continuation probability when the model has one. For callers that need `pb` apart from `prob`
+    /// (docs/contracts/digits.md A.3.2: the digit scores sum probabilities over many words, in an order Python fixes).
+    pub fn unigram_back(&self, w: Option<u32>, lp: f64) -> f64 {
+        let pb = pow10(lp);
+        match (&self.kn, w) {
+            (Some(kn), Some(w)) if w >= 2 => kn.beta * kn.np1(w as usize) as f64 / kn.total as f64 + (1.0 - kn.beta) * pb,
+            _ => pb,
+        }
+    }
+
+    /// lm.py `prob`: P(w | context) for a `pb` that is already `unigram_back`'s value (the side file is not applied again, unlike `prob`).
+    pub fn prob_back(&self, ctx: Ctx, w: Option<u32>, pb: f64) -> f64 {
+        self.prob_c_kn(ctx, w, pb, false)
+    }
+
     /// lm.py `word`: lam * log10 P(w|v) + (1 - lam) * lp.
     pub fn word(&self, lam: f64, v: &str, w: &str, lp: f64) -> f64 {
         word_term(lam, self.prob(v, w, pow10(lp)), lp)

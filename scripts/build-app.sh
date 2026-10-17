@@ -61,7 +61,7 @@ shasum -a 256 -c data/tinylm.sjtl.sha256 >/dev/null \
   gh release download sj-cx-1-7.7m -R Nanako0129/shanjie -p trigram.sjt3 -D data/lm"
 shasum -a 256 -c data/trigram.sjt3.sha256 >/dev/null \
   || fail "data/lm/trigram.sjt3 does not match data/trigram.sjt3.sha256; download sj-cx-1-7.7m again"
-for f in data/lexicon/mcbpmf-data.txt data/lexicon/overlay-add.tsv data/lexicon/sandhi-add.tsv data/lexicon/names-add.tsv data/lexicon/demote.tsv data/packs/acg-add.tsv data/packs/acg-sources.tsv data/packs/acg.json LICENSE LICENSES/McBopomofo-MIT.txt LICENSES/data.md LICENSES/SCOWL.txt LICENSES/SymSpell-MIT.txt LICENSES/name-suggestion-index-BSD-3-Clause.txt LICENSES/Sparkle-MIT.txt; do
+for f in data/lexicon/mcbpmf-data.txt data/lexicon/overlay-add.tsv data/lexicon/sandhi-add.tsv data/lexicon/names-add.tsv data/lexicon/demote.tsv data/lexicon/digits.tsv data/packs/acg-add.tsv data/packs/acg-sources.tsv data/packs/acg.json LICENSE LICENSES/McBopomofo-MIT.txt LICENSES/data.md LICENSES/SCOWL.txt LICENSES/SymSpell-MIT.txt LICENSES/name-suggestion-index-BSD-3-Clause.txt LICENSES/Sparkle-MIT.txt; do
   [ -f "$f" ] || fail "$f is missing"
 done
 
@@ -161,6 +161,9 @@ done
 RES="$APP/Contents/Resources"
 # names-add.tsv: the always-on common proper nouns (model-v6 section 2.5); the core fails to start without it.
 cp data/lexicon/mcbpmf-data.txt data/lexicon/overlay-add.tsv data/lexicon/sandhi-add.tsv data/lexicon/names-add.tsv data/lexicon/demote.tsv "$RES/"
+# digits.tsv: the count table of digits in the composition (docs/contracts/digits.md A.3.2). Optional for the core, but a bundle without it
+# silently loses the feature, so check-app.sh requires it and compares it with this file.
+cp data/lexicon/digits.tsv "$RES/"
 # The optional word packs (docs/contracts/acg-pack.md A.2): the runtime files only, not the build inputs
 # (acg-groups.tsv, acg-collisions.tsv, acg-exclude.tsv, acg-manual.tsv). The shell passes Resources/packs to shanjie_engine_new_packs.
 mkdir -p "$RES/packs"
@@ -175,7 +178,7 @@ cp LICENSES/McBopomofo-MIT.txt LICENSES/data.md LICENSES/SCOWL.txt LICENSES/SymS
 # Sparkle.framework ships in Contents/Frameworks: its MIT notice with the bundled third-party notices (Sparkle's LICENSE, 2.9.3).
 cp LICENSES/Sparkle-MIT.txt "$RES/LICENSES/"
 cat > "$RES/LICENSES/CC-BY-SA-4.0-attribution.txt" <<'EOF'
-overlay-add.tsv, names-add.tsv, packs/acg-add.tsv, packs/acg-sources.tsv, packs/acg.json, demote.tsv, bigram.sjlm,
+overlay-add.tsv, names-add.tsv, packs/acg-add.tsv, packs/acg-sources.tsv, packs/acg.json, demote.tsv, digits.tsv, bigram.sjlm,
 classes.sjc, kn.sjkn, trigram.sjt3 and tinylm.sjtl are licensed under the Creative Commons Attribution-ShareAlike 4.0 International license
 (CC BY-SA 4.0):
 https://creativecommons.org/licenses/by-sa/4.0/

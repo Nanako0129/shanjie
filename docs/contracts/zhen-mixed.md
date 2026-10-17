@@ -1,4 +1,4 @@
-# 中英混打（實驗功能，預設關）第一片
+# 中英混打（實驗功能，預設開（`digits.md` A.3.7 起））第一片
 
 狀態：**§2.3 的「英文項送出」與組字區顯示已被第二片 `docs/contracts/zhen-inline.md` 取代**（選了英文項改成英文留在組字區，新增「打字時就顯示」的選項；其餘照本份）。**§2.3 英文窗表的「其他鍵（含注音鍵…）：關窗、清影子」一列，注音鍵的部分又被第二片修訂二改了**（注音鍵先把選中的項目固定成 token，見 zhen-inline §1.3；Shift＋字母開英文段見 §1.3b、token 改選見 §1.3c）。以下是第一片的原文。修訂版（2026-10-14，plan-verifier 第 1、2 次 REVISE 逐項處置在 §9；維護者三個選擇題已答，§3.4、§3.2、§2.3），READY（2026-10-14 收尾審查，唯一一點是 §3.4 第 3 步殘留的「覆蓋」，已刪）；第 0 步已量（§1）。
 
@@ -95,11 +95,11 @@ int32_t shanjie_engine_set_english(ShanjieEngine *engine, uint32_t enabled, Shan
 ### 3.2 殼（`macos/`）
 
 - `Core.swift`：`loadEnglish(path:) -> Int32`、`setEnglish(_:) -> CoreResult`。
-- `Shell`：`EnglishStore` 協定（`var english: Bool?`；`nil` 是關），`MemoryEnglishStore`（Kit 與測試）、`DefaultsEnglishStore`（只在 `Shanjie` target，UserDefaults 鍵 `english`），`Shell.init` 的必要參數（照 `abbreviationStore`）；`englishOn`（預設關）、`englishAvailable`（這個引擎的單字表載入成功，照 `rerankAvailable`）。
+- `Shell`：`EnglishStore` 協定（`var english: Bool?`；`nil` 是開，`digits.md` A.3.7 起；存過的值優先），`MemoryEnglishStore`（Kit 與測試）、`DefaultsEnglishStore`（只在 `Shanjie` target，UserDefaults 鍵 `english`），`Shell.init` 的必要參數（照 `abbreviationStore`）；`englishOn`（預設開，存過關的仍是關）、`englishAvailable`（這個引擎的單字表載入成功，照 `rerankAvailable`）。
 - `build()`：在 `load_lm`／`load_tinylm` 之後呼叫 `loadEnglish(path: Resources/english-words.txt)`，非 0 只記錄碼（`Log.shell.error`）、`englishAvailable = false`；然後**每次建引擎都送** `setEnglish(englishOn)`（放在 `setAbbreviation` 旁邊；換排列、開關詞包重建後不掉回關）。
 - 選單：`MenuEntry.Text.english = "中英混打（實驗）"`、action `.toggleEnglish`、獨立 selector `toggleEnglish`；位置緊接在「即時預測」之後（可省略韻母隱藏時的那個位置），語意校正之前；預設不打勾；`englishAvailable` 是 false 或排列是倚天時反灰（勾選狀態仍顯示；倚天不記影子，§2.1，開了也沒有作用；`Shell.englishEnabled`）。`applyEnglish(on)` 照 `applyAbbreviation`：有組字擁有者就顯示快照。
 - 設定視窗「選字」區塊同一個位置、同樣反灰、和選單同步。
-- 不加 `showsEnglish` 參數：出貨 App 顯示這個開關、預設關（維護者 2026-10-14 選擇題）。
+- 不加 `showsEnglish` 參數：出貨 App 顯示這個開關；預設原本是關（維護者 2026-10-14 選擇題），**2026-10-17 起預設開**（維護者選擇題「一起改成預設開」，`digits.md` A.3.7：數字列的功能共用這個開關）。核心的預設不變（沒呼叫 `set_english` 時是關）。
 - 文件同 PR 改：`docs/contracts/s3b.md` §13.2 的選單順序、`docs/contracts/settings-window.md` §2.2 的「選字」列。
 
 ### 3.3 評測 CLI（`cli`）

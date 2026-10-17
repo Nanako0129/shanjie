@@ -372,6 +372,30 @@ static int run_english(const char *dir, const char *missing) {
   return 0;
 }
 
+/* digits (docs/contracts/digits.md A.4.3): with the switch on, the model and data/lexicon/digits.tsv in the data directory, 2 0 2 6 Enter commits the
+ * digits; with the switch off the same keys are the old Zhuyin keys. The behaviour itself is in core/tests/engine_digits.rs. */
+static int run_digits(const char *dir, const char *lm) {
+  ShanjieEngine *e = 0;
+  ShanjieOutput *o = 0;
+  CHECK(1101, shanjie_engine_new(dir, 0, &e) == 0 && e != 0);
+  CHECK(1102, shanjie_engine_load_lm(e, lm) == 0);
+  CHECK(1103, shanjie_engine_set_english(e, 1, &o) == 0 && o != 0);
+  shanjie_output_free(o);
+  o = 0;
+  CHECK(1104, type(e, "2026"));
+  CHECK(1105, shanjie_engine_key(e, kind_key(3), &o) == 0 && o != 0 && o->handled == 1 && str_eq(o->commit, "2026"));
+  shanjie_output_free(o);
+  o = 0;
+  CHECK(1106, shanjie_engine_set_english(e, 0, &o) == 0 && o != 0);
+  shanjie_output_free(o);
+  o = 0;
+  o = type_last(e, "2");
+  CHECK(1107, o != 0 && str_eq(o->preedit, "\xe3\x84\x89")); /* ㄉ */
+  shanjie_output_free(o);
+  shanjie_engine_free(e);
+  return 0;
+}
+
 /* acg-pack: argument checks of shanjie_engine_new_packs. The behaviour with a pack is in core/tests/engine_pack.rs. */
 static int run_packs(const char *dir) {
   ShanjieEngine *e = 0;
@@ -465,6 +489,7 @@ int main(int argc, char **argv) {
   if (rc == 0) rc = run_rerank(argv[1], argv[2], "/nonexistent/shanjie-missing.sjtl");
   if (rc == 0) rc = run_rerank_level(argv[1], argv[2]);
   if (rc == 0) rc = run_english(argv[1], "/nonexistent/shanjie-missing-english.txt");
+  if (rc == 0) rc = run_digits(argv[1], argv[2]);
   shanjie_engine_free(0);
   shanjie_output_free(0);
   if (rc != 0) {

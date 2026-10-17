@@ -75,6 +75,8 @@ public struct MenuEntry: Equatable, Sendable {
         public static let demote = "避免把敏感字詞排在前面"
         public static let prediction = "即時預測"
         public static let english = "中英混打（實驗）"
+        /// The line under that toggle in the settings window (docs/contracts/digits.md A.3.7).
+        public static let englishDigitsNote = "打英文不用切換輸入法；數字列的鍵也會打出數字（例如 2026年、3.14），由前文判斷是數字還是注音。"
         /// The choice under it in the settings window (zhen-inline section 2): the label and its two values.
         public static let englishDisplay = "英文的顯示"
         public static let englishDisplayTyped = "打字時就顯示"

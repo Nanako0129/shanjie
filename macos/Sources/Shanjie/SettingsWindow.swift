@@ -285,6 +285,9 @@ struct SettingsPageForm: View {
                     // or the layout is Eten, like the menu item (zhen-mixed section 3.2).
                     Toggle(MenuEntry.Text.english, isOn: Binding(get: { model.english }, set: { model.setEnglish($0) }))
                         .disabled(!model.englishEnabled)
+                    // Digits.md A.3.7: one line under the toggle, as the 聊天／書面 note above is written.
+                    Text(MenuEntry.Text.englishDigitsNote)
+                        .font(.caption).foregroundStyle(.secondary)
                     // Under the toggle (zhen-inline section 2); greyed on the toggle's condition and while the toggle is off.
                     Picker(MenuEntry.Text.englishDisplay, selection: Binding(get: { model.englishInline }, set: { model.setEnglishInline($0) })) {
                         Text(MenuEntry.Text.englishDisplayTyped).tag(true)

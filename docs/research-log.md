@@ -6964,3 +6964,41 @@ formal: alpha 0.7, tau 1, delta 2
 - 實作：`apply_pred`（預測列與窗裡預測項目的選取都經過它）在換掉音節前呼叫 `freeze_outside(start, 游標)`。
 - T16 改成新行為（「以備時」，紀錄的前文照舊是「以備」）。拿掉凍結時 T16 失敗（變回「已被時」）。
 - 原本另外要加的「左邊有使用者自己選的詞」測試沒有加：量過十二種前綴，有固定詞在左邊時打字當下就依前綴解好，選字前後都不變，拿掉凍結也通過，沒有分辨力（契約 §13 驗收 2 已照改）。
+
+## 2026-10-17：數字列直接打數字的實作（契約 `docs/contracts/digits.md` A，執行者）
+
+**做了什麼。** `core/src/digits.rs`（計數表 `DigitTable`、合法尾段 `Legal`、`Scorer::decide`，Python `digits_score.py` 的逐位元移植）、`core/src/engine/digit_layer.rs`（串、緩衝、吐 token、尾段鏡射進 `pend`、↓ 清單的兩種另一讀法）、`predict::predict_digits`（數字後的預測列）、`learn::next_key`（數字 token 正規化成 `^>_punct_num`）；`Engine::new` 讀 `digits.tsv`（缺或壞＝功能不生效、不報錯）。殼：中英混打沒存過值時預設開，設定視窗加一行說明；`build-app.sh` 打包 `digits.tsv`、`check-app.sh` 要有並與 repo 的 `cmp`（只做了 `bash -n`，沒有建 App 驗證）；`english-sim --digits`；`shanjie.h`、`abi_smoke.c` 1101–1107、`ffi.rs` 子行程測試。Python：`digit_row`、`golden_digits.py --pred`、`eval/golden/digits-pred.txt`。
+
+**修訂三（A.9）。** 真引擎重播 #48 第一次是 301／302（dev302 第 196 列，按 `u` 當場決定而沒有 θ，前文是畫面上的「嗎」而不是正解「碼」），停下回報；維護者選擇題決定不在字母表的注音鍵也套 θ，契約 A.3.3、A.9，Python 基準與 golden 第 31 列由 main 改。Rust 照改後 #49 比 31 列逐位元相同，#48 變成 302／302、0 個數字 token。修訂三的保留與否（C 的調參資料與其他重播上的數字）由 main 量，這裡不寫數字。
+
+**測試與契約列對照**（`core/tests/engine_digits.rs`，除非另註；全部 release、macOS）：#1 `row01`、#2 `row02`、#3 `row03`、#4 `row04`、#5 `row05`、#6 `row06`、#7 `row07`、#8 `row08`、#9 `row09`、#10 `row10`、#11 `row11`、#12 `row12`、#13 `row13`、#14 `row14`、#15 `row15`、#16 `row16`、#17 `row17`、#18 `row18`、#19 `row19`、#20–#25 `row20_to_row25`、#26 `row26`、#27 `row27`、#28 `row28`、#29 `row29`、#30 `row30`、#31 `row31`、#32 `row32`、#33 `row33`、#34 `row34`、#35 `row35`、#36 `row36`、#37 `row37`、#38 `row38`、#39 `row39`、#40 `engine_digits_off.rs::row40`、#41 `row41`、#42 `row42`、#43 `row43`、#44＋#45 `row44_row45`（引擎的列等於 `digits-pred.txt` 十二個情境的詞）、核心函式的詞與分數位元 `predict_digits_matches_the_python_golden_bit_for_bit`、#45a `row45a`、#45b `row45b`（兩個：緩衝裡的數字加尾段 ㄩ；尾段還在緩衝的 `12345`）、#45c `row45c`、#46 `row46`、#47 `row47`、#48 `engine_replay.rs::replay_with_english_and_digits_on`、#49 `row49`（31 列、97 次評分呼叫逐位元）、#50 `engine_digits_off.rs::row50`。A.3.6 另有 `a36_the_syllable_of_the_last_digits`；既有 `engine.rs::row22a` 加變體（標準排列開著時是數字、倚天仍是符號）。FFI：`ffi.rs::digits_through_the_c_abi`、`abi_smoke` 1101–1107（編譯並執行，rc 0）。`english-sim --digits`：`cli/tests/english_sim.rs::digits_columns`。
+
+**和契約字面不同的列**（以 Python 基準／golden 為準）：#27 的 `A123456789` 在評分下是 `A1234直789`（5 6 讀成 ㄓˊ），改用沒有聲調鍵的 `1 2 5 8 9 0 1 2 5 8` 並逐鍵斷言 token 數；#37 第 5 鍵後緩衝顯示 `234ㄓ`（Python 對 `12345` 同）；#43 要先關預測列，視窗最前面才是詞庫詞；#46 的第三鍵讓 `203` 成為 ㄉㄢˇ（golden 第 28、29 列的前兩鍵顯示為數字）；預測列 golden 的數字串選的是基準顯示成數字的（`20` 在句首顯示 ㄉㄢ，換成 `202`），帶尾段的情境用 ㄩ 鍵（ㄅ 在字母表裡接不到數字後面）。#40、#50 的基準檔在 `f3f287c52e3ac5753a658771263981dbd78ab134`（base）的拋棄式 worktree 產生，指令：`CARGO_TARGET_DIR=<目錄> DIGITS_FIXTURE_DIR=<輸出目錄> cargo test --release --locked -p core --test engine_digits_off -- --test-threads=1`（同一個測試檔，只用 base 就有的 API；worktree 已移除）。
+
+**突變**（每項 `cargo test --release --locked -p core --test engine_digits --test engine_digits_off --no-fail-fast`，結束碼都是 101、都不是建置錯誤，失敗的是斷言，改回後 `git diff` 空）：不檢查尾段合法（順序＋前綴）、只查順序不查前綴、完成音節不要求含漢字詞條 → 只有 #49 的 golden 比對失敗（`number of splits`；結構列 #5、#19、#31 本來就靠評分排除，單獨抓不到）；邊界不吐 token → #1–#3、#6–#9、#13、#27、#29 等失敗；第 5 個鍵不吐 → #27、#37、#49；`P_len` 固定 → #10、#37、#45c、#44、#46、#49；數字語境列改回 `<s>` → #44、#45c；`next_key` 不正規化 → #43；開關不共用 → #40；倚天也生效 → #42；A.3.6 項目不加 → #11、#15；θ 不套用 → #46、#49；θ 也加在含數字的注音切分 → #13、#14、#18、#30、a36、#49；`lpZ` 用 `word_by_id` 混合分數 → #49；缺表回錯誤碼 → #50；緩衝裡的數字不算 token → #45c；選取前整個緩衝吐成 token → #45b（尾段還在緩衝的那個）；不在字母表的注音鍵不套 θ（修訂三）→ #49 第 31 列 `u`。第一次跑「選取前整個緩衝吐成 token」存活（#45a/#45b 的尾段都不在緩衝裡），所以加了 `12345` 那個 #45b。
+
+**時間**（Mac，release，單程序，低負載）：重播 #48 開著 8,336 鍵 p95 7.5 ms；`timing_typing76_keys_digits`（2,483 鍵）p50 1.07／p95 4.28／max 8.0 ms（沒開：1.12／4.04／7.1）；加 5 萬筆學習紀錄的 `…_with_taught_picks_and_50k_digits` p95 4.41 ms（沒開 3.14）；`timing_digit_keys`（9 串×200 遍＝12,200 鍵）p50 1.91／p95 5.04／max 11.1 ms；`digits_engine_load_cost`：`load_lm` 沒有 `digits.tsv` 0.60 s、有 0.72–0.83 s（多建合法尾段與詞的最佳條目，做在 `load_lm`，不在第一個數字鍵）。第一次量時每列新建引擎、第一個數字鍵才建，所以 74 鍵超過 16 ms（max 367 ms），那是量法，現在先暖一個鍵。
+
+**A.10：模擬器的 Backspace 修正看畫面（修訂四）。** 在 Windows 機器上 `english-sim --digits --p 0.02 --repair backspace` 的最後數字 token 每千音節 cvtune 1.13、wikitune 1.13、dev302 0.86、typing76 1.59（要求 0）。本地追 dev302 與 typing76 的 17 列（11＋6，每列 1 個），全是同一類：ㄅ、ㄉ、ㄓ 開頭的音節，第二個鍵鄰鍵打錯成不合法的組合（ㄅㄜ、ㄅㄘ、ㄅㄗ、ㄉㄗ、ㄉㄘ、ㄓㄝ），打錯的鍵當場決定，前一鍵變成數字 token；模擬器照自己推算的欄位只退掉打錯的鍵，看不到畫面上的「1」。例（dev302 種子 0 第 127 列）：`1`→ㄅ、`k`→`1ㄜ`、Backspace→`1`、重打 `1 j`→`1ㄅㄨ`，數字留在前面。沒有任何一列是看畫面也修不掉的。`--digits` 的 backspace 修正改成讀引擎的組字區（記下音節開始時的組字區，退到「現在的組字區去掉那段開頭」是預期符號的前綴或空的；不再以那段開頭時繼續退）；沒有 `--digits` 照 zhen-mixed §4.2。輸出多兩欄（報告用）：因為畫面上還有數字而多按的 Backspace 每千音節（平均、最大）。
+- 結果（Mac，seed 20261014，repeat 5，`--digits`；欄位：最後數字 token／瞬間顯示數字的鍵／多按的 Backspace，各為每千音節平均）：dev302 `--p 0`：0／3.517／0；`--p 0.02 --repair backspace`：**0**／4.611／0.860（最大 1.563）；`--p 0.02 --repair overwrite`：8.050（最大 11.333）／13.755／1.016。typing76 `--p 0`：0／0／0；backspace：**0**／1.589／1.589（最大 2.649）；overwrite：14.570（最大 25.166）／17.748／1.325。overwrite 的兩個數字只報；它在換欄時退回 Backspace 修正，所以隨這次修正從舊的 8.988／15.894 變成 8.050／14.570。cvtune、wikitune 由 main 在 Windows 機器重跑。
+- 產品上的意思：ㄅ、ㄉ、ㄓ 開頭的音節，第二個鍵打錯成不合法的組合時，前面的鍵會先變成數字，要多按一次 Backspace（dev302 約 0.9／千音節，typing76 約 1.6／千音節）。
+- 測試：`cli/tests/english_sim.rs::digits_backspace_repair_reads_the_screen`（100 列 ㄅㄨˋ、p 0.5：最後數字 0、多按的 Backspace 535／千音節）；把修正改回只看欄位模型時它以斷言失敗（最後數字 535）。`cargo test -p cli` 通過。
+
+## 2026-10-17：數字輸入 A 修訂三的量測（θ 也加在當場決定的鍵；main 在 Windows 機器跑）
+
+- Python 基準 f8e2fcd3、表 `a75a328b…`、θ 3；C 的調參資料（`digitruns-all` `7462969a…`、cvtune `31de456d…`、wikitune `8dcfe40c…`）與判讀集（`digitruns-judge2` `8fb8f758…`）和 C 修訂三完全相同，只差這條規則。
+- 調參資料：數字正確率 (a) 2717／2991＝90.8%（舊規則 2721＝91.0%）；cvtune、wikitune 的純中文誤判 (c) 都是 0；結構規則 87.0%。
+- 判讀集（第二次使用，只報）：(a) 1339／1494＝89.6%（舊 1342＝89.8%），結構規則 85.2%；dev302、typing76 的 (c) 0，(d) 每千音節 2.74、7.95；R1 的數字和 C 相同。
+- 事先定的保留標準（數字正確率 ≥ 90.0% 且不低於結構規則、(c) 0）都過；真引擎重播 #48 302／302、0 個數字（Rust 移植後）。
+- **A.4.2 模擬器，四個集合**（Windows 機器的 WSL，feat/digits `cbf2a32b`，A.10 的修正，seed 20261014、repeat 5、`--digits`；欄位：最後數字 token／瞬間顯示數字的鍵／多按的 Backspace，每千音節平均，括號是五個種子的最大）：
+
+  | 集合 | `--p 0` | `--p 0.02 --repair backspace` | `--p 0.02 --repair overwrite`（只報） |
+  |---|---|---|---|
+  | cvtune（3,791 列） | 0／4.974／0 | **0**／6.422／1.133（1.543） | 7.461（8.878）／14.753／1.064 |
+  | wikitune（2,827 列） | 0／6.350／0 | **0**／7.906／1.130（1.431） | 8.493（9.322）／17.610／1.013 |
+  | dev302 | 0／3.517／0 | **0**／4.611／0.860（1.563） | 8.050（11.333）／13.755／1.016 |
+  | typing76 | 0／0／0 | **0**／1.589／1.589（2.649） | 14.570（25.166）／17.748／1.325 |
+
+  A.4.2 的要求（`--p 0` 與 `backspace` 的最後數字 token 都是 0）四個集合都過；dev302、typing76 和 Mac 上量的逐欄相同。多按的 Backspace 在四個集合是每千音節 0.86–1.59。
+- `make test-rust`（Windows 機器的 WSL，`cbf2a32b`）：544 通過、0 失敗、13 略過（略過的照 `wsltest.sh` 交給 CI 的 macOS）。
+- 合併 main（`6a947fd0`）後 WSL 545／0。PR #201 的本地 code review：2 個 P2、3 個 P3、3 個 P4，都照改並各加一個在舊程式上失敗的測試（契約 A.11）。另有一題要維護者決定：畫面顯示單一字母表注音鍵（例如「ㄅ」）時按 ↓ 或 Enter，照 A.3.4 會先變成數字。

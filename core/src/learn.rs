@@ -19,6 +19,8 @@ pub const NEXT_PREFIX: &str = "^>";
 pub const PUNCT_PREFIX: &str = "_punct_";
 /// The reading every English token counts as in a rule 8 key.
 const ENGLISH_NEXT: &str = "_punct_en";
+/// The reading every digit-string token counts as in a rule 8 key.
+const DIGIT_NEXT: &str = "_punct_num";
 /// The global key (§1.3): created only after ≥ 2 distinct full keys learned the same (reading, word).
 pub const GLOBAL: &str = "";
 /// Half-life in days (user decision 2026-10-05): one teach stays effective about two weeks; words in
@@ -97,6 +99,15 @@ pub fn english_of(reading: &str) -> Option<&str> {
     reading.strip_prefix(PUNCT_PREFIX).filter(|w| !w.is_empty() && w.bytes().all(|b| b.is_ascii_alphabetic()))
 }
 
+/// The key of a digit-string token (`_punct_2` -> `2`, also `.` `/` `-`; docs/contracts/digits.md A.3.1): the text after `PUNCT_PREFIX`
+/// is exactly one character of the digit alphabet. No other token is one: single marks are `[ ] \\ ' = \``, Shift marks are full-width,
+/// English tokens are letters, a space unit is a space and the tone-key marks of rule 22a are tone symbols.
+pub fn digit_of(reading: &str) -> Option<char> {
+    let mut cs = reading.strip_prefix(PUNCT_PREFIX)?.chars();
+    let (c, None) = (cs.next()?, cs.next()) else { return None };
+    crate::digits::is_alphabet(c).then_some(c)
+}
+
 /// zhen-inline §1.3e: a space unit, the token a Space types after an English token (`_punct_ `).
 pub fn is_space_unit(reading: &str) -> bool {
     reading.strip_prefix(PUNCT_PREFIX) == Some(" ")
@@ -112,7 +123,13 @@ pub fn english_or_space(reading: &str) -> bool {
 /// right after the word (`None`: the word ends the composition). An English token or a space unit after the word counts as
 /// one kind of neighbour, not as the word it holds (zhen-inline §1.0, §1.3e): `^>_punct_en`. Every key of rule 8 comes through here.
 pub fn next_key(next: Option<&str>) -> String {
-    let next = if next.is_some_and(english_or_space) { Some(ENGLISH_NEXT) } else { next };
+    let next = if next.is_some_and(english_or_space) {
+        Some(ENGLISH_NEXT)
+    } else if next.is_some_and(|r| digit_of(r).is_some()) {
+        Some(DIGIT_NEXT) // digits.md A.3.4: a digit string counts as one kind of neighbour, whichever digit it is
+    } else {
+        next
+    };
     format!("{NEXT_PREFIX}{}", next.unwrap_or("$"))
 }
 

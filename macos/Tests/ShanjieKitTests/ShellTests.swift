@@ -14,8 +14,8 @@ final class ShellTests: XCTestCase {
         resources = try XCTUnwrap(TestData.resources())
     }
 
-    private func makeShell(secure: Bool = false, store: LayoutStore = MemoryLayoutStore()) -> Shell {
-        let shell = Shell(resources: resources, panel: FakePanel(), isSecureInput: { secure }, layoutStore: store, learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), englishStore: MemoryEnglishStore(), acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore())
+    private func makeShell(secure: Bool = false, store: LayoutStore = MemoryLayoutStore(), english: EnglishStore = MemoryEnglishStore()) -> Shell {
+        let shell = Shell(resources: resources, panel: FakePanel(), isSecureInput: { secure }, layoutStore: store, learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), englishStore: english, acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore())
         XCTAssertNotNil(shell.engine)
         return shell
     }
@@ -38,7 +38,7 @@ final class ShellTests: XCTestCase {
     /// enter-pending contract §2: Shift+Enter commits what is shown and passes the key on, so the app gets its line
     /// break (rules 12b, 19a); Enter with an unfinished syllable commits it as shown (12a).
     func testShiftEnterCommitsThenPassesTheKeyOn() {
-        let c = Controller(makeShell())
+        let c = Controller(makeShell(english: MemoryEnglishStore(false)))  // saved off: with it on the 1 may show as a digit
         c.session.activate()
         c.type("su3cl3")
         XCTAssertFalse(c.press(Keys.enter, flags: .shift))
@@ -201,13 +201,24 @@ final class ShellTests: XCTestCase {
     /// s3a rule 22a: on an empty composition a tone key types its mark (3 gives "ˇ", not "3") into
     /// the composition; Enter sends it.
     func testToneKeyOnEmptyCompositionTypesItsMark() {
-        let c = Controller(makeShell())
+        let c = Controller(makeShell(english: MemoryEnglishStore(false)))  // the switch saved off: rule 22a as before
         c.session.activate()
         XCTAssertEqual(c.type("3"), [true])
         XCTAssertEqual(c.client.marked, "ˇ")
         XCTAssertEqual(c.client.text, "")
         _ = c.session.handle(Keys.event(36))  // Return
         XCTAssertEqual(c.client.text, "ˇ")
+    }
+
+    /// Digits.md A.3.4 / A.3.7: with 中英混打 on (the default now: nothing saved) and digits.tsv in Resources, the same key on an empty
+    /// composition is the digit "3"; a saved off keeps the mark (the test above).
+    func testToneKeyOnEmptyCompositionTypesTheDigitWhenEnglishMixingIsOn() {
+        let c = Controller(makeShell())
+        c.session.activate()
+        XCTAssertEqual(c.type("3"), [true])
+        XCTAssertEqual(c.client.marked, "3")
+        _ = c.session.handle(Keys.event(36))  // Return
+        XCTAssertEqual(c.client.text, "3")
     }
 
     func testCapsLockKeyPassesWithoutChangingAnything() {
@@ -711,7 +722,7 @@ final class ShellTests: XCTestCase {
     /// makes `rust` and Space open the English window (the list is eval/golden/english-tiny.txt), is sent again to every engine a
     /// rebuild makes (the word pack switch and a layout switch rebuild it), and a new shell reads the stored on.
     func testEnglishMenuItemTogglesStoresRebuildsAndSurvivesRestart() {
-        let store = MemoryEnglishStore()
+        let store = MemoryEnglishStore(false)  // saved off; the default is on since digits.md A.3.7
         let make = {
             Shell(resources: self.resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(),
                   learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), englishStore: store, acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore())
@@ -724,7 +735,7 @@ final class ShellTests: XCTestCase {
         let at = try! XCTUnwrap(titles.firstIndex(of: "中英混打（實驗）"))
         XCTAssertGreaterThan(at, try! XCTUnwrap(titles.firstIndex(of: "即時預測")))
         XCTAssertEqual(titles.firstIndex(of: "語意校正"), at + 1)
-        XCTAssertEqual(item()?.checked, false, "default off")
+        XCTAssertEqual(item()?.checked, false, "saved off")
         XCTAssertEqual(item()?.enabled, true, "the list loaded")
         let window = { (c: Controller) -> [String] in c.type("rust "); return c.panel.items }
         XCTAssertEqual(window(c), [], "off: Space is rule 10, and ㄔㄧ is not a syllable")

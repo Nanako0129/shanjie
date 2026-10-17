@@ -252,6 +252,23 @@ class Scoring(unittest.TestCase):
         c, p = sc.decide("<s>", [], ["1", "8", "4"], None, None)
         self.assertEqual((c[p][0], c[p][1]), (3, 0))
 
+    def test_theta_at_a_non_alphabet_key(self):
+        """A.3.3 revision three: a non-alphabet key decides the run on the spot, so its digit-free zhuyin split gets theta too
+        (dev302 row 196: 嗎 on screen before 碼 resolved, `1` then `u`, digit + ㄧ beat ㄅㄧ by plain score)."""
+        _, _, sc = world()
+        sc.lp_d = lambda C, dkeys, ended: -1.0 if dkeys else 0.0
+        sc.lp_z = lambda C, digit_ctx, units: 0.0 if digit_ctx else -1.3     # 2 + ㄧ -1.0, ㄉㄧ -1.3
+        for th, want in ((0.0, (1, 1)), (0.29, (1, 1)), (0.31, (0, 2))):
+            sc.theta = th
+            c, p = sc.decide("<s>", [], ["2"], "u", None)
+            self.assertEqual([(m, t) for m, t, _ in c], [(1, 1), (0, 2)])
+            self.assertEqual((c[p][0], c[p][1]), want, th)
+        # a digit already emitted: every split holds one, theta guards nothing (5 2 + ㄧ -0.6 beats 5 + ㄉㄧ -0.8 by score alone)
+        sc.lp_d = lambda C, dkeys, ended: -1.0 + 0.2 * len(dkeys) if dkeys else 0.0
+        sc.theta = 10.0
+        c, p = sc.decide("<s>", ["5"], ["2"], "u", 1)
+        self.assertEqual((c[p][0], c[p][1]), (1, 1))
+
     def test_structural_rule_takes_the_largest_legal_tail(self):
         _, _, sc = world(mode="structural")
         c, p = sc.decide("<s>", [], ["8", "4"], None, None)
@@ -403,6 +420,26 @@ class Prediction(unittest.TestCase):
         self.assertIsNone(DS.digit_rank_empty(sc.tb, lm, lex, "下午", "蛋"))       # not a successor of a digit run
         self.assertIsNone(DS.digit_rank_empty(sc.tb, lm, lex, "下午", "沒有"))
 
+    def test_digit_row_both_cases(self):
+        """digits.md A.3.5: with units the two tiers in order, without units the successor layer; `digit_rank_empty` agrees with the position."""
+        lex, lm, sc = world(lm=StubLM(succ=["蛋"]))
+        units = P1.units_of(["ㄉ"])
+        t0, t1 = DS.digit_tiers(sc.tb, lm, sc.idx, units, "下午", 0.5)
+        row = DS.digit_row(sc.tb, lm, lex, sc.idx, "下午", units, 0.5)
+        self.assertEqual([w for w, _ in row], [e[0] for e, _ in t0 + t1])
+        self.assertEqual([s for _, s in row], [s for _, s in t0 + t1])
+        self.assertEqual(len(DS.digit_row(sc.tb, lm, lex, sc.idx, "下午", units, 0.5, limit=2)), 2)
+        empty = DS.digit_row(sc.tb, lm, lex, sc.idx, "下午", [], 0.5)
+        words = [w for w, _ in empty]
+        self.assertEqual(set(words), {"點", "年", "元"})                      # the successor layer, all in the lexicon
+        self.assertEqual(words[0], "點")
+        for pos, w in enumerate(words):
+            self.assertLessEqual(pos + 1, DS.digit_rank_empty(sc.tb, lm, lex, "下午", w))   # the pessimistic rank counts equal scores ahead
+        self.assertEqual([DS.digit_rank_empty(sc.tb, lm, lex, "下午", w) for w in words], [1, 3, 3])      # 年 and 元 tie (W 10 each)
+        scores = [s for _, s in empty]
+        self.assertEqual(scores, sorted(scores, reverse=True))
+        self.assertAlmostEqual(scores[0], math.log10(sc.tb.p_w_given_vD("點", "下午", 10 ** lex.by_word["點"][1], 1.0)))
+
     def test_pred_row(self):
         lex, lm, sc = world(lm=StubLM(succ=["蛋"]))
         env = type("E", (), {"history": staticmethod(identity_history), "lex": lex, "idx": sc.idx, "table": sc.tb, "lm": lm})()
@@ -498,12 +535,12 @@ class DigitRunSet(unittest.TestCase):
 
 
 class Golden(unittest.TestCase):
-    def test_thirty_rows_with_a_fifth_key_flush_and_a_split_forced_by_a_non_alphabet_key(self):
+    def test_thirty_one_rows_with_a_fifth_key_flush_and_a_split_forced_by_a_non_alphabet_key(self):
         _, _, sc = world()
         text = GD.generate(sc, identity_history, GD.ROWS, ["header sha256=abc", "second line"])
         lines = text.split("\n")
         self.assertEqual(lines[:2], ["# header sha256=abc", "# second line"])
-        self.assertEqual(sum(l.startswith("## ") for l in lines), 30)
+        self.assertEqual(sum(l.startswith("## ") for l in lines), 31)
         keyl = [l.split("\t") for l in lines if l and l[0].isdigit()]
         self.assertTrue(any(f[2] == "flush=1" and f[1] != GD.EN for f in keyl))            # the fifth key pushed the oldest out
         forced = [f for f in keyl if f[1] in "umj,ok" and f[5] != "splits=" and f[6] != "choice=-"]
@@ -527,6 +564,27 @@ class Golden(unittest.TestCase):
         splits = row.split("\t")[5][len("splits="):].split(";")
         self.assertEqual([s.split(",")[:2] for s in splits], [["1", "0"], ["0", "1"]])
         self.assertEqual(float(splits[1].split(",", 2)[2]), math.log10(10 ** -2.0 + 10 ** -2.5))
+
+
+class PredGolden(unittest.TestCase):
+    def test_twelve_rows_with_a_header_and_the_row_of_digit_row(self):
+        lex, lm, sc = world(lm=StubLM(succ=["蛋"]))
+        env = type("E", (), {"history": staticmethod(identity_history), "lex": lex, "idx": sc.idx, "table": sc.tb, "lm": lm})()
+        with tempfile.NamedTemporaryFile("w", suffix=".tsv", delete=False, encoding="utf-8") as f:
+            f.write(TABLE_TEXT)
+        self.addCleanup(os.unlink, f.name)
+        text = GD.generate_pred(env, f.name)
+        lines = text.split("\n")
+        self.assertEqual(sum(l.startswith("## ") for l in lines), 12)
+        self.assertEqual(text, GD.generate_pred(env, f.name))                                 # deterministic
+        self.assertTrue(lines[1].startswith("# digits.tsv sha256=") and "bigram.sjlm sha256=" in lines[2])
+        block = lines[lines.index([l for l in lines if l.startswith("## 6\t")][0]) + 1:]
+        first = block[0].split("\t")                                                          # 下午, no symbols: the successor layer
+        self.assertEqual((first[0], first[1]), ("1", "點"))
+        want = DS.digit_row(sc.tb, lm, lex, sc.idx, "下午", [], DS.L.PROFILES["chat"])
+        self.assertEqual([float(l.split("\t")[2]) for l in block[:len(want)]], [s for _, s in want])
+        with_tail = [l for l in lines if l.startswith("## 5\t")][0]
+        self.assertIn("syms=ㄩ", with_tail)
 
 
 class FakeRunner:
