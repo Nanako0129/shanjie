@@ -6707,3 +6707,4 @@ formal: alpha 0.7, tau 1, delta 2
 
   A.4.2 的要求（`--p 0` 與 `backspace` 的最後數字 token 都是 0）四個集合都過；dev302、typing76 和 Mac 上量的逐欄相同。多按的 Backspace 在四個集合是每千音節 0.86–1.59。
 - `make test-rust`（Windows 機器的 WSL，`cbf2a32b`）：544 通過、0 失敗、13 略過（略過的照 `wsltest.sh` 交給 CI 的 macOS）。
+- 合併 main（`6a947fd0`）後 WSL 545／0。PR #201 的本地 code review：2 個 P2、3 個 P3、3 個 P4，都照改並各加一個在舊程式上失敗的測試（契約 A.11）。另有一題要維護者決定：畫面顯示單一字母表注音鍵（例如「ㄅ」）時按 ↓ 或 Enter，照 A.3.4 會先變成數字。
