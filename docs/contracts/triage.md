@@ -23,7 +23,7 @@
 - 出貨設定 S：`--lm data/lm/bigram.sjlm --profile <chat|formal> --context --packs acg --tinylm data/lm/tinylm.sjtl`（App 預設；`tools/bench.py` 的 `VERSIONS2` 最新一版）。
 - 每個（集合, 設定）跑兩次：S 加 `--dump --dump-words --rowstats --tinylm-scores`；S 去掉 `--context` 只加 `--rowstats`（§3 的 E）。
 - 集合：套件 v2（`tools/bench.py` 的 `SETS2`）：dev302、typing76、probe、錯字回報（全部列）、fw、cvtune、wikitune、lytune、wikitypo、discordtune。**保留集不跑、不分桶**，`docs/triage.md` 不列保留集（照保留集規則，只由 fresh verifier 跑：2026-10-18 起只在推 `v*` tag 前，之前是每片收尾；要看保留集照 `docs/benchmark.md`）。
-- 在哪裡跑：重的評測一律在 Mac 以外的機器（Windows 主機或 Colab）；cvtune、wikitune、lytune、wikitypo 與 discordtune 一定在那裡跑，先在那台機器上確認 dev302 兩種設定的 `top1_sha256` 和 Mac 相同才用。dev302、typing76、probe、錯字回報、fw（合計約 750 列）也可以在 Mac 上跑，但只當快速檢查。私人集合的 dump 與切分只留在那台機器，分桶在那裡算完只帶回計數。（2026-10-18 起）`run --jobs N` 讓每個（集合, 設定）各開一個程序同時跑，寫出的 JSON 與逐列檔和依序跑逐位元組相同；`--cli tools/shardcli.py`（環境變數 `SHANJIE_EVAL_BIN` 指向真的 CLI）再把大集合按列切片同時跑，輸出與不切片相同。
+- 在哪裡跑：重的評測一律在 Mac 以外的機器（Windows 主機或 Colab）；cvtune、wikitune、lytune、wikitypo 與 discordtune 一定在那裡跑，先在那台機器上確認 dev302 兩種設定的 `top1_sha256` 和 Mac 相同才用。dev302、typing76、probe、錯字回報、fw（合計約 750 列）也可以在 Mac 上跑，但只當快速檢查。私人集合的 dump 與切分只留在那台機器，分桶在那裡算完只帶回計數。（2026-10-18 起）CLI 的 `--threads N`（只有 LM 模式，預設 1）用 N 條執行緒共用同一份模型解碼各列，輸出檔與摘要行和 N = 1 逐位元組相同，只有 stderr 小模型延遲行的時間數字不同（次數相同）；`run --cli-threads K` 把 `--threads K` 傳給每一次 CLI 呼叫（K = 1 不傳）。`run --jobs N` 讓每個（集合, 設定）各開一個 fork 出來的程序同時跑（沒有 fork 的平台，例如原生 Windows，會停下來請改用 `--cli-threads`），寫出的 JSON 與逐列檔和依序跑逐位元組相同；某一格失敗時，還沒開始的格取消、正在跑的跑完（它們的暫存目錄含句子，由它們自己刪），再丟出第一個錯。每一格的逐列檔在該格結果回到主程序時就寫出，JSON 最後一次寫。
 
 ## 3. 分桶（每個錯列一個主桶，依序判定；E、子標記另計）
 

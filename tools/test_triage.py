@@ -378,7 +378,7 @@ class Jobs(unittest.TestCase):
                     f.write("x" * size)
                 files[name] = (p, private)
 
-            def fake_cell(cli, lm, tl, prof, f, lex, par, lenient, report, tdir, kn, tri):
+            def fake_cell(cli, lm, tl, prof, f, lex, par, lenient, report, tdir, kn, tri, threads):
                 cn = T.empty_counts()
                 cn["n"], cn["errors"] = os.path.getsize(f) + len(prof), len(prof)
                 return cn, [("C", 1, "0.5", 0), ("A1", 2, "1-2", 1)]
@@ -391,13 +391,116 @@ class Jobs(unittest.TestCase):
                         mock.patch.object(T.Lex, "load", lambda: None), mock.patch.object(T.bench, "sha_file", lambda p: "h"), \
                         mock.patch("sys.stderr", io.StringIO()):
                     rows_out = os.path.join(td, f"rows{jobs}")
-                    T.cmd_run(argparse.Namespace(label="L", set=list(files), private_root=td, cli="cli", rows_out=rows_out, jobs=jobs))
+                    T.cmd_run(argparse.Namespace(label="L", set=list(files), private_root=td, cli="cli", rows_out=rows_out, jobs=jobs, cli_threads=1))
                 got = {"json": open(os.path.join(td, f"out{jobs}", "L.json"), encoding="utf-8").read()}
                 got.update({n: open(os.path.join(rows_out, n), encoding="utf-8").read() for n in sorted(os.listdir(rows_out))})
                 out[jobs] = got
             self.assertEqual(out[1], out[3])
             self.assertEqual(sorted(out[1]), ["L-dev302-chat.tsv", "L-dev302-formal.tsv", "L-fw-chat.tsv", "L-fw-formal.tsv", "json"])
             self.assertEqual(list(json.loads(out[3]["json"])["sets"]), ["dev302", "fw", "discordtune"])
+
+
+class FailingCell(unittest.TestCase):
+    def test_a_failing_cell_cancels_the_rest_and_leaves_no_temp_dir(self):
+        """--jobs 2: cell A fails once B's result is in and C is still running; the later cells never start, C's temp dir is deleted,
+        B's rows file is there, and the error is A's. Sync is by marker files (the workers are forked processes)."""
+        import argparse, time
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as td:
+            files, marks, tmp = {}, os.path.join(td, "marks"), os.path.join(td, "tmp")
+            os.makedirs(marks), os.makedirs(tmp)
+            for i, name in enumerate(("n0", "n1", "n2", "n3", "n4")):   # decreasing size: the pool's order is n0 chat, n0 formal, n1 chat, ...
+                p = os.path.join(td, name + ".txt")
+                with open(p, "w", encoding="utf-8") as f:
+                    f.write("x" * (50 - i))
+                files[name] = (p, False)
+            mark = lambda n: os.path.join(marks, n)
+
+            def wait_for(n):
+                for _ in range(1000):
+                    if os.path.exists(mark(n)):
+                        return
+                    time.sleep(0.01)
+                raise AssertionError(f"no marker {n}")
+
+            def fake_cell(cli, lm, tl, prof, f, lex, par, lenient, report, tdir, kn, tri, threads):
+                name = os.path.basename(f)[:-4]
+                open(os.path.join(tdir, "sentences"), "w").close()   # something a cell leaves in its temp dir
+                open(mark(f"started-{name}-{prof}"), "w").close()
+                if (name, prof) == ("n0", "chat"):
+                    wait_for("b-done")
+                    time.sleep(0.3)   # B's result reaches the parent before this failure does
+                    open(mark("failed"), "w").close()
+                    raise RuntimeError("boom")
+                if (name, prof) == ("n1", "chat"):
+                    wait_for("failed")   # still running when the failure arrives
+                elif (name, prof) == ("n0", "formal"):
+                    open(mark("b-done"), "w").close()
+                else:
+                    time.sleep(1)
+                cn = T.empty_counts()
+                return cn, [("C", 1, "0.5", 0)]
+
+            rows_out = os.path.join(td, "rows")
+            with mock.patch.multiple(T, OUT_DIR=os.path.join(td, "out"), load_lenient=lambda: None, kn_tag=lambda p: "",
+                                     tinylm_params=lambda p: {"chat": (0.3, 2.0, 0.25), "formal": (0.7, 2.0, 1.0)},
+                                     tri_tag=lambda p: "", git_head=lambda: "abc", run_cell=fake_cell, set_file=lambda n, r: files[n]), \
+                    mock.patch.object(T.Lex, "load", lambda: None), mock.patch.object(T.bench, "sha_file", lambda p: "h"), \
+                    mock.patch.object(tempfile, "tempdir", tmp), mock.patch("sys.stderr", io.StringIO()):
+                with self.assertRaisesRegex(RuntimeError, "boom"):
+                    T.cmd_run(argparse.Namespace(label="L", set=list(files), private_root=td, cli="cli", rows_out=rows_out, jobs=2, cli_threads=1))
+            self.assertEqual(os.listdir(tmp), [])
+            self.assertTrue(os.path.exists(os.path.join(rows_out, "L-n0-formal.tsv")))
+            self.assertFalse(os.path.exists(os.path.join(td, "out", "L.json")))
+            self.assertFalse(os.path.exists(mark("started-n4-formal")), "the last cell must have been cancelled")
+
+    def test_a_killed_worker_raises_instead_of_hanging(self):
+        import argparse
+        from concurrent.futures.process import BrokenProcessPool
+        from unittest import mock
+
+        def fake_cell(*args):
+            os._exit(9)   # what the OS killing a worker looks like to the parent
+        with tempfile.TemporaryDirectory() as td:
+            p = os.path.join(td, "n0.txt")
+            open(p, "w").close()
+            with mock.patch.multiple(T, OUT_DIR=td, load_lenient=lambda: None, kn_tag=lambda p: "", tri_tag=lambda p: "", git_head=lambda: "abc",
+                                     tinylm_params=lambda p: {"chat": (0.3, 2.0, 0.25), "formal": (0.7, 2.0, 1.0)}, run_cell=fake_cell,
+                                     set_file=lambda n, r: (p, False)), \
+                    mock.patch.object(T.Lex, "load", lambda: None), mock.patch.object(T.bench, "sha_file", lambda p: "h"), mock.patch("sys.stderr", io.StringIO()):
+                with self.assertRaises(BrokenProcessPool):
+                    T.cmd_run(argparse.Namespace(label="L", set=["n0"], private_root=td, cli="cli", rows_out=td, jobs=2, cli_threads=1))
+
+    def test_fork_is_required_for_jobs(self):
+        import argparse
+        from unittest import mock
+        with mock.patch("multiprocessing.get_all_start_methods", lambda: ["spawn"]):
+            with self.assertRaisesRegex(SystemExit, "--cli-threads"):
+                T.cmd_run(argparse.Namespace(label="L", set=[], private_root="", cli="cli", rows_out="", jobs=2, cli_threads=1))
+
+
+class CliThreads(unittest.TestCase):
+    def test_threads_reach_both_cli_calls_of_a_cell(self):
+        from unittest import mock
+        calls = []
+        line = "## r.txt  lm-chat+ctx  {'n': 1, 'top1': 0, 'oracle@64': 0, 'top1_sha256': '" + "0" * 64 + "'}\n"
+
+        def fake_sh(cmd, **kw):
+            calls.append(cmd)
+            return line
+        with tempfile.TemporaryDirectory() as td:
+            rows = os.path.join(td, "r.txt")
+            with open(rows, "w", encoding="utf-8") as f:
+                f.write("|你|ni\n")
+            for threads, want in ((3, ["--threads", "3"]), (1, [])):
+                calls.clear()
+                with mock.patch.object(T.bench, "sh", fake_sh), mock.patch.object(T.bench, "sha_file", lambda p: "h" * 64):
+                    with self.assertRaisesRegex(RuntimeError, "setting tag"):   # the fake summary's tag is not the shipping one; both calls are made first
+                        T.run_cell("cli", "lm", "tl", "chat", rows, None, PAR, LEN, False, td, "", "", threads)
+                self.assertEqual(len(calls), 2)
+                for cmd in calls:
+                    self.assertEqual(cmd[cmd.index("--tinylm") + 2:][:len(want)], want)
+                    self.assertEqual("--threads" in cmd, bool(want))
 
 
 class Render(unittest.TestCase):

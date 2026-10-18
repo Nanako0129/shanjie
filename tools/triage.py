@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Error-bucket triage (docs/contracts/triage.md): where does the shipping setting go wrong, and how many rows is each cause?
 
-  tools/triage.py run --label L [--set NAME ...] [--private-root DIR] [--cli FILE] [--rows-out DIR] [--jobs N]
+  tools/triage.py run --label L [--set NAME ...] [--private-root DIR] [--cli FILE] [--rows-out DIR] [--jobs N] [--cli-threads K]
   tools/triage.py table [JSON ...] [--out docs/triage.md]
 
 `run` decodes each set in both profiles with the CLI (shipping setting S: --context --packs acg --tinylm, plus --dump --dump-words
@@ -11,7 +11,7 @@ eval/bench/triage/<label>.json (counts only). Public sets also get a per-row num
 ~/.cache/shanjie/triage), outside the repo; private sets only ever get counts. `table` renders docs/triage.md from the JSON files.
 The holdout is never a set here. Standard library only, except that `tinylm_params` needs numpy (export_sjtl.py's reader), plus tools/bench.py's set table, reference/proto/eval.py's `lenient` and reference/proto/lm_eval.py's `kn_tag`).
 """
-import argparse, collections, importlib.util, json, multiprocessing, os, struct, subprocess, sys, tempfile
+import argparse, collections, concurrent.futures, importlib.util, json, multiprocessing, os, struct, subprocess, sys, tempfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -324,8 +324,10 @@ def triage_rows(rows, ok, ok_nc, lex, par, lenient, report=False):
 
 # ---------------------------------------------------------------- the CLI
 
-def cli_cmd(cli, lm, tl, prof, rows, context, extra):
-    return [cli, "--lm", lm, "--profile", prof, "--rows", rows] + (["--context"] if context else []) + ["--packs", "acg", "--tinylm", tl] + extra
+def cli_cmd(cli, lm, tl, prof, rows, context, extra, threads=1):
+    """`--threads` is added only above 1, so a CLI built before it still works with the default."""
+    return ([cli, "--lm", lm, "--profile", prof, "--rows", rows] + (["--context"] if context else []) + ["--packs", "acg", "--tinylm", tl]
+            + (["--threads", str(threads)] if threads > 1 else []) + extra)
 
 
 def read_cli_files(dump, words, scores, n):
@@ -352,14 +354,14 @@ def read_cli_files(dump, words, scores, n):
     return cands, gold0, recs
 
 
-def run_cell(cli, lm, tl, prof, rows_file, lex, par, lenient, report, td, kn="", tri=""):
+def run_cell(cli, lm, tl, prof, rows_file, lex, par, lenient, report, td, kn="", tri="", threads=1):
     rows = parse_rows(read_text(rows_file))
     f = lambda n: os.path.join(td, n)
     env = dict(os.environ, SHANJIE_VARIANTS=os.path.join(ROOT, "eval/variants.tsv"))
     tl8 = bench.sha_file(tl)[:8]
     # bench.sh raises with the tail of the CLI's stderr; bench.parse_summary checks there is exactly one summary line.
-    m = bench.parse_summary(bench.sh(cli_cmd(cli, lm, tl, prof, rows_file, True, ["--dump", f("d"), "--dump-words", f("w"), "--rowstats", f("r"), "--tinylm-scores", f("s")]), env=env))
-    m0 = bench.parse_summary(bench.sh(cli_cmd(cli, lm, tl, prof, rows_file, False, ["--rowstats", f("r0")]), env=env))
+    m = bench.parse_summary(bench.sh(cli_cmd(cli, lm, tl, prof, rows_file, True, ["--dump", f("d"), "--dump-words", f("w"), "--rowstats", f("r"), "--tinylm-scores", f("s")], threads), env=env))
+    m0 = bench.parse_summary(bench.sh(cli_cmd(cli, lm, tl, prof, rows_file, False, ["--rowstats", f("r0")], threads), env=env))
     # The setting tag the CLI prints: a dropped flag (no context, no pack, no small model) must fail the cell, as in bench.run_cell2.
     for got, ctx_tag in ((m["tag"], "+ctx"), (m0["tag"], "")):
         if got != expected_tag(prof, ctx_tag, tl8, kn, tri):
@@ -418,6 +420,10 @@ def _run_cell_job(job):
 
 
 def cmd_run(a):
+    if a.jobs > 1 and "fork" not in multiprocessing.get_all_start_methods():
+        raise SystemExit("triage: --jobs needs fork, which this platform does not have; use --cli-threads K instead")
+    if a.jobs < 1 or a.cli_threads < 1:
+        raise SystemExit("triage: --jobs and --cli-threads take a whole number of at least 1")
     cli = a.cli or os.path.join(ROOT, "target/release/shanjie-eval")
     lm, tl = os.path.join(ROOT, "data/lm/bigram.sjlm"), os.path.join(ROOT, "data/lm/tinylm.sjtl")
     lenient, lex, par = load_lenient(), Lex.load(), tinylm_params(tl)
@@ -437,29 +443,42 @@ def cmd_run(a):
     def cell(job):
         name, prof = job
         with tempfile.TemporaryDirectory() as td:   # the dump and the word dump hold sentences: they are deleted here
-            cn, per = run_cell(cli, lm, tl, prof, files[name][0], lex, par[prof], lenient, name == "user-reported", td, kn, tri)
+            cn, per = run_cell(cli, lm, tl, prof, files[name][0], lex, par[prof], lenient, name == "user-reported", td, kn, tri, a.cli_threads)
         print(f"triage: {name} {prof}: n={cn['n']} errors={cn['errors']} {cn['buckets']}", file=sys.stderr, flush=True)
         return job, (cn, per)
 
-    if a.jobs > 1:
-        # One process per (set, profile) cell, biggest file first; fork shares the loaded lexicon and `lenient` (not picklable).
+    def write_rows(job, per):
+        """A public cell's per-row file, written as soon as its result is in the parent."""
+        name, prof = job
+        if not files[name][1]:
+            os.makedirs(a.rows_out, exist_ok=True)
+            with open(os.path.join(a.rows_out, f"{a.label}-{name}-{prof}.tsv"), "w", encoding="utf-8") as o:
+                o.write("".join(f"{i}\t{code}\t{r}\t{m}\t{e}\n" for i, (code, r, m, e) in enumerate(per, 1)))
+
+    got = {}
+    if a.jobs == 1:
+        for job, (cn, per) in map(cell, cells):
+            got[job] = cn
+            write_rows(job, per)
+    else:
+        # One process per cell at a time, biggest file first; fork shares the loaded lexicon and `lenient` (not picklable). When a cell
+        # fails, the cells not yet started are cancelled, the running ones finish (their temp dirs hold sentences and are deleted by
+        # them), and the first error is raised. A worker killed by the OS makes the pool raise BrokenProcessPool instead of hanging.
         global _CELL
         _CELL = cell
         order = sorted(cells, key=lambda j: -os.path.getsize(files[j[0]][0]))
-        with multiprocessing.get_context("fork").Pool(min(a.jobs, len(cells))) as pool:
-            got = dict(pool.imap_unordered(_run_cell_job, order))
-    else:
-        got = dict(map(cell, cells))
+        with concurrent.futures.ProcessPoolExecutor(max_workers=min(a.jobs, len(cells)), mp_context=multiprocessing.get_context("fork")) as ex:
+            try:
+                for fut in concurrent.futures.as_completed([ex.submit(_run_cell_job, j) for j in order]):
+                    job, (cn, per) = fut.result()
+                    got[job] = cn
+                    write_rows(job, per)
+            except BaseException:
+                ex.shutdown(wait=True, cancel_futures=True)
+                raise
     for name in names:
         f, private = files[name]
-        doc["sets"][name] = {"private": private, "file_sha256": bench.sha_file(f), "profiles": {}}
-        for prof in PROFILES:
-            cn, per = got[(name, prof)]
-            doc["sets"][name]["profiles"][prof] = cn
-            if not private:
-                os.makedirs(a.rows_out, exist_ok=True)
-                with open(os.path.join(a.rows_out, f"{a.label}-{name}-{prof}.tsv"), "w", encoding="utf-8") as o:
-                    o.write("".join(f"{i}\t{code}\t{r}\t{m}\t{e}\n" for i, (code, r, m, e) in enumerate(per, 1)))
+        doc["sets"][name] = {"private": private, "file_sha256": bench.sha_file(f), "profiles": {prof: got[(name, prof)] for prof in PROFILES}}
     os.makedirs(OUT_DIR, exist_ok=True)
     with open(path, "w", encoding="utf-8") as o:
         json.dump(doc, o, ensure_ascii=False, indent=1)
@@ -561,6 +580,7 @@ def main():
     r.add_argument("--cli")
     r.add_argument("--rows-out", default=os.path.expanduser("~/.cache/shanjie/triage"))
     r.add_argument("--jobs", type=int, default=1, help="run the (set, profile) cells in this many processes (fork; the JSON is the same)")
+    r.add_argument("--cli-threads", type=int, default=1, help="passes --threads K to every CLI call (rows decoded on K threads; the outputs are the same)")
     t = sub.add_parser("table")
     t.add_argument("json", nargs="*")
     t.add_argument("--out", default=DOC)
