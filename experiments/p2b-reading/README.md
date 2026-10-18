@@ -2,6 +2,51 @@
 
 計畫：維護者 2026-10-19 凌晨的選擇題。P2 沒過（學生對 M 出貨值 −2）；0c 不出貨（維護者：代價太大、無法宣稱是自己的東西），只當教師。這一片在 P2 上只改一個變項：讓學生看得到讀音。之後從 P2 學生和這一片的學生裡挑一個最好的，另外先登記規則，再用 chatjudge-2 確認。研究紀錄 2026-10-18 有 L0、P1、P2 三節。
 
+## 檔案
+
+這個資料夾是 `exp/p2b-reading` 分支上 executor 寫的程式與單元測試；資料準備、教師打分與評測由 main 在 GCP 執行，訓練在 Colab（Mac 不跑重運算）。S7a 與 P2 的程式一律不改，只 import（`train_b.py` 補好 `sys.path`）；P2 的資料串接、補齊、候選分數、KL、排程、發散規則都是直接呼叫 `train_p2.py`，B 只加讀音這一段。下面「登記」一節是跑之前凍結的規格，這一段與「命令」「決定」是實作說明。
+
+| 檔 | 做什麼 | 需要 torch |
+|---|---|---|
+| `p2bana.py` | 讀數（main 寫的，不是這一批的內容） | 否 |
+| `train_b.py` | 音節表、`join_rows_b`（P2 的過濾加 `len_mismatch`）、`PackedB`／`collate_b`（P2 的批次加 `rd` 讀音張量）、`ReadingGPT`（S7a GPT 加 R）、訓練；寫 `tinylm-B.npz` 與 `train-B.json`；結束碼 2＝發散 | 串接、音節表與 `rd` 不要；模型與訓練要 |
+| `score_b.py` | 用 B 打分，輸出和 `s7a-tinylm/score.py` 同格式的 JSONL（`fusegrid.load_scores` 讀得進去） | 要（CPU 即可） |
+| `test_b.py` | 單元測試（合成小資料）；8 個 torch 測試沒有 torch 時跳過 | 部分 |
+
+## 命令
+
+記號同 P2：`M`＝`tinylm-M.npz`；`wiki.txt`、`pool.txt`＝L0 的訓練列；`wiki.dump8`、`pool.dump8`＝出貨設定的 CLI 對這些列的 `--dump`；`X0C.*.jsonl`＝P1 打的教師分數。
+
+```bash
+# 冒煙（CPU，幾秒；Mac 沒有 torch，torch 的 8 個測試要 main 在 Colab 先跑）：
+python3 -m unittest discover -s experiments/p2b-reading -p 'test_*.py' -v
+# 訓練（Colab G4，1 個種子，登記的預算 <= 2 單元）
+python experiments/p2b-reading/train_b.py --npz M.npz \
+    --data wiki.txt wiki.dump8 X0C.wiki.jsonl pool.txt pool.dump8 X0C.pool.jsonl \
+    --out OUT --seed 20261018 --epochs 3 --batch 64 --lr 1e-4 --warmup 100 --val-frac 0.02
+#   → OUT/tinylm-B.npz、OUT/train-B.json；結束碼 2＝發散（不寫檔）
+# 打分（GCP c4d，和 M 同一種 CPU；每個集合一次，N＝該集合 CLI 摘要行的 top1，和 score.py 同一個核對）
+python experiments/p2b-reading/score_b.py --npz OUT/tinylm-B.npz --backend torch \
+    --dump SET.chat.dump --rows SET.txt --name SET --expect-top1 N --out scores/B.chat.SET.jsonl
+```
+
+`train-B.json` 同 `train-S.json`（計數、步數、訓練曲線、留出曲線、秒數、輸入檔 SHA-256、種子、`train_order_sha256`），`counts.unusable` 多一項 `len_mismatch`，另有 `n_syl`。`tinylm-B.npz` 是 S7a 的所有陣列加 `rd_emb`（n_syl × d，第 0 列恆為 0）與 `rd_syl`（n_syl 個名字，第 0、1 列是 `<none>`、`<unk>`）。
+
+## 登記沒寫死、我做的決定
+
+| 項目 | 做法與理由 |
+|---|---|
+| 重用 P2 | `join_rows`（三方核對與 P2 的三個原因）、`Packed`、`collate`、`cand_scores`（用一個把 `rd` 帶進去的 lambda 當模型）、`kl_rows`、`plan`、`diverged`、`to_tensors` 都是 import；只有 `run`（資料與模型不同）、`evaluate`、`prefetch`（要用 `collate_b`）是照 P2 複製後改，改的地方只有讀音 |
+| 不可用的原因順序 | P2 的 `n<2`、`skip`、`too_long`，最後才是 `len_mismatch`；任一候選的字數不等於該列的音節數就算。打分時的原因順序是 `len_mismatch` 先於 `too_long`（打分不看 `skip`，教師不在這一步） |
+| 音節表 | 只用可用列（過完全部原因之後）的讀音欄建，含留出列；排序後從第 2 列開始。不可用列才有的音節不進表，打分時走「未知」。「未知」那一列訓練時從不出現，所以永遠是 0，等於「無」；登記只要求它存在 |
+| R 的第 0 列 | `nn.Embedding(padding_idx=0)`：梯度恆為 0，起始為 0，AdamW 的衰減與更新對 0 仍是 0，所以保持精確 0（測試跑 3 步後檢查）。其他列照 P2 的規則歸在 `ndim ≥ 2`，權重衰減 0.1 |
+| 讀音在哪個位置 | `collate_b` 在被打分的位置（預測第 j 個候選字的那一欄）放第 j 個音節的 id，其餘為 0；前文被左截斷時 `st` 跟著變，位置仍是 `st-1+j`。空前文時 c_1 的音節放在 BOS 那一欄 |
+| 打分程式重用訓練的函式 | `score_b.py` 用同一個 `PackedB`／`collate_b`／`cand_scores_b` 算 ln 分數再除以 ln 10，所以訓練與打分是同一個函式；`ll0` 是空前文（prefix 給空字串），`ll16` **直接複製 `ll`**（E-B 也是這樣；B 沒有 16 字前文的欄位意義，融合只讀 `ll`） |
+| 不能打分的列 | `n >= 2` 但字數與音節數不合（`len_mismatch`）或有候選超過 63 字（`too_long`）：`ll`、`ll0`、`ll16` 全是 0.0，`noll: 1`，`fusegrid.pick` 保留 n-gram 第一名；`score_b` 印各原因的列數與表外音節數。沒有另寫 `skip` 欄，`p2bana.alone` 的「單獨挑對率」會把這些列算進去（全 0 時挑第 1 名），要排除的話請看 `noll` |
+| 打分批次與精度 | CPU、float32、關 TF32；`--bs` 是每批的列數（預設 16，每列最多 8 條序列），不是 `score.py` 的序列數 |
+| `rd_syl` 是字串陣列 | `tinylm.NumpyLM` 把所有陣列轉成數字，讀這個檔會報錯。這是刻意的：numpy 後端若悄悄忽略 R，打出來的就是 M 的分數 |
+| 沒量過的 | 吞吐量；R 的加入多一次 embedding 查表，預期可忽略。**這份程式在 Mac 上沒有 torch，ReadingGPT、儲存／載入、打分程式與訓練只在 `test_b.py` 的 8 個 torch 測試裡，要由 main 在有 torch 的機器上先跑過再開訓練** |
+
 ## 登記（2026-10-19，main 寫，跑之前 commit）
 
 探索片：只用調參層與開發層，不出貨，結論只寫方向；私人集合只記數字。不碰判讀集、保留集、chatjudge-2。
