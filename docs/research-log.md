@@ -7647,7 +7647,7 @@ XL 比 `MAX_FILE`（67,108,864）小 1,168,880 位元組。錨點：4 個模型 
     - 第 0 層 `Split` 之後的結構原本寫成已觀察到，改標〔推論〕。
   - 第二次審查 READY（`eeede2da`）。
   - 這一片只做轉檔、numpy 參考實作、Rust 推論與量測；接線、開關、署名是下一片。
-- A1 轉檔（`tools/convert_oc.py`，分支 `ac2db3c3`）。在 GCP 上用 onnx 套件印出整張圖（403 個節點），契約裡標〔推論〕的點都確認了：
+- A1 轉檔（`tools/convert_oc.py`，分支 `feat/oc-experimental` 的 commit `ac2db3c3`）。在 GCP 上用 onnx 套件印出整張圖（404 個節點），契約裡標〔推論〕的點都確認了：
   - 第 1–7 層注意力前有 LayerNorm，第 0 層沒有。
   - GELU（erf）套在前饋層 `Split` 的前半，再乘後半。
   - 輸出頭的 dense 沒有 bias，先 GELU 再 LayerNorm。
