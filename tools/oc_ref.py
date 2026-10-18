@@ -1,7 +1,8 @@
 """0c slice A (docs/contracts/oc-experimental.md section 2, A2): the SJOC0001 model file (read and write) and a numpy forward of the 0c
 model, written from the graph (tools/convert_oc.py reads the graph; every op below is one the graph has, in the same order).
 
-  python3 tools/oc_ref.py --compare MODEL_DIR FILE.sjoc --dump D --dev 302      # A2 / A4: this forward vs ONNX Runtime on the same rows
+  python3 tools/oc_ref.py --compare MODEL_DIR FILE.sjoc --dump D --dev 302 [--rust SCORES.jsonl]   # A2 / A4: vs ONNX Runtime (and Rust)
+  python3 tools/oc_ref.py --export ITEMS.tsv --dump D --dev 302                                      # rows for core/examples/oc_score.rs
 
 `Session(load(path))` has the ONNX Runtime session's `run(names, feeds)`, so experiments/x0c/score_0c.py's `Zuin`, `score` and
 `feeds_for` drive it unchanged (`zuin(path)`): the inputs are built by the same code for both. Computation is float32, as ORT's, or
@@ -20,7 +21,7 @@ Layout (little-endian):
           file as f32 slices without copying (core/src/trigram.rs `Mapped`); M = a 2-D matrix stored as the forward multiplies it, x @ M
 """
 import argparse
-import hashlib
+import json
 import math
 import os
 import struct
@@ -176,35 +177,74 @@ def zuin(path, x0c_dir=None, dtype=np.float32):
     return score_0c, score_0c.Zuin(Session(m, dtype), {"characters": m["chars"], "bases": m["bases"]}, {"neutral_tolerant_last": m["neutral"]})
 
 
-def compare(model_dir, path, dump, dev):
-    """A2 / A4: log10 differences of score() between this forward (the SJOC file) and ONNX Runtime (model_dir, pinned files), per
-    candidate, over the scorable rows with n >= 2 of the first `dev` rows; and the share of rows whose best candidate is the same."""
+def items(dump, dev, x0c_dir=None):
+    """[(row number, prefix, syllables, candidates)] of the first `dev` dev rows with n >= 2 candidates in `dump` (score_0c's readers)."""
+    sys.path.insert(0, x0c_dir or os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "experiments", "x0c"))
+    import score_0c
+    rows = score_0c.read_rows(dev=dev)
+    return [(i, prefix, syl, cs) for i, ((gold, syl, prefix), cs) in enumerate(zip(rows, score_0c.read_dump(dump, len(rows))), 1)
+            if len(cs) >= 2]
+
+
+def export(dump, dev, out):
+    """ITEMS.tsv for core/examples/oc_score.rs: row<TAB>prefix<TAB>syllables (space-separated)<TAB>candidates (|-separated)."""
+    with open(out, "w", encoding="utf-8", newline="\n") as f:
+        for i, prefix, syl, cs in items(dump, dev):
+            if any(c in x for x in [prefix, *syl, *cs] for c in "\t\n|"):
+                raise SystemExit(f"oc_ref: row {i} has a tab, newline or | in a field")
+            f.write(f"{i}\t{prefix}\t{' '.join(syl)}\t{'|'.join(cs)}\n")
+
+
+def stats(name, x, y):
+    d = np.sort(np.abs(np.concatenate([a - b for a, b in zip(x, y)])))
+    same = sum(int(np.argmax(a) == np.argmax(b)) for a, b in zip(x, y))
+    print(f"{name}: rows {len(x)}, candidates {len(d)}; log10 |diff| max {d.max():.3g}, p99 {d[int(len(d) * 0.99)]:.3g}, "
+          f"median {np.median(d):.3g}; same best candidate {same}/{len(x)} ({same / len(x):.2%})")
+
+
+def compare(model_dir, path, dump, dev, rust=None):
+    """A2 / A4: log10 score() of this forward (the SJOC file) against ONNX Runtime (model_dir, pinned files), per candidate, over the
+    scorable rows with n >= 2 of the first `dev` rows; with `rust` (oc_score's SCORES.jsonl) also Rust against both. A row Rust scores
+    and score_0c does not (or the reverse) is a stop."""
     s0, ref = zuin(path)
     ort = s0.load_model(model_dir, 1)
-    rows = s0.read_rows(dev=dev)
-    cands = s0.read_dump(dump, len(rows))
-    diffs, same, n = [], 0, 0
-    for (gold, syl, prefix), cs in zip(rows, cands):
-        if len(cs) < 2:
-            continue
+    r = {}
+    if rust:
+        for line in open(rust, encoding="utf-8"):
+            if line.strip():
+                rec = json.loads(line)
+                r[rec["i"]] = rec["ll"]
+    A, B, R = [], [], []
+    for i, prefix, syl, cs in items(dump, dev):
         try:
             s0.check_row(ort, syl, cs)
         except s0.Unscorable:
+            if rust and r.get(i) is not None:
+                raise SystemExit(f"oc_ref: Rust scored row {i}, score_0c does not")
             continue
-        a = np.array(s0.score(ort, prefix, syl, cs)) / math.log(10)
-        b = np.array(s0.score(ref, prefix, syl, cs)) / math.log(10)
-        diffs += list(np.abs(a - b))
-        same += int(np.argmax(a) == np.argmax(b))
-        n += 1
-    d = np.sort(np.array(diffs))
-    print(f"{os.path.basename(path)}: rows {n}, candidates {len(d)}; log10 |diff| "
-          f"max {d.max():.3g}, p99 {d[int(len(d) * 0.99)]:.3g}, median {np.median(d):.3g}; same best candidate {same}/{n} ({same / n:.2%})")
+        A.append(np.array(s0.score(ort, prefix, syl, cs)) / math.log(10))
+        B.append(np.array(s0.score(ref, prefix, syl, cs)) / math.log(10))
+        if rust:
+            if r.get(i) is None or len(r[i]) != len(cs):
+                raise SystemExit(f"oc_ref: row {i} is scorable but Rust gave {r.get(i)!r}")
+            R.append(np.array(r[i]))
+    stats(f"{os.path.basename(path)} numpy vs ORT", B, A)
+    if rust:
+        stats("Rust vs numpy", R, B)
+        stats("Rust vs ORT", R, A)
 
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("--compare", nargs=2, metavar=("MODEL_DIR", "SJOC"), required=True)
+    ap.add_argument("--compare", nargs=2, metavar=("MODEL_DIR", "SJOC"))
+    ap.add_argument("--rust", metavar="SCORES", help="with --compare: core/examples/oc_score.rs scores to check against both")
+    ap.add_argument("--export", metavar="ITEMS", help="write ITEMS.tsv for core/examples/oc_score.rs")
     ap.add_argument("--dump", required=True)
     ap.add_argument("--dev", type=int, default=302)
     a = ap.parse_args()
-    compare(*a.compare, a.dump, a.dev)
+    if bool(a.compare) == bool(a.export) or (a.rust and not a.compare):
+        ap.error("exactly one of --compare / --export; --rust only with --compare")
+    if a.export:
+        export(a.dump, a.dev, a.export)
+    else:
+        compare(*a.compare, a.dump, a.dev, a.rust)
