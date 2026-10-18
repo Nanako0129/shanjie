@@ -1,6 +1,8 @@
 """P2B readout (experiments/p2b-reading/README.md registration): the reading-aware student B against M's shipped values; 0c as a reference. Numbers only.
 
-  python3 experiments/p2b-reading/p2bana.py SCORE_DIR   # M / S (score.py), B (score_b.py), X0C (score_0c.py) files
+  python3 experiments/p2b-reading/p2bana.py SCORE_DIR [STUDENT]   # M / S (score.py), B (score_b.py), X0C (score_0c.py) files
+
+STUDENT (default B) is the file prefix of the judged student; distillation C (experiments/p2c-data) passes C.
 """
 import os
 import sys
@@ -46,10 +48,10 @@ def select(rows):
         return None
 
 
-def main(d):
+def main(d, student="B"):
     sets = [TUNE] + DEV
     arms = {name: {s: fg.load_scores(os.path.join(d, f"{f}.{s}.jsonl")) for s in sets}
-            for name, f in (("student", "B"), ("P2 student", "S"), ("0c", "X0C"), ("M same rule", "M"))}
+            for name, f in (("student", student), ("P2 student", "S"), ("0c", "X0C"), ("M same rule", "M"))}
     m = arms["M same rule"]
     for name, src in arms.items():
         for s in sets:
@@ -102,4 +104,4 @@ def main(d):
 
 
 if __name__ == "__main__":
-    main(sys.argv[1])
+    main(*sys.argv[1:3])
