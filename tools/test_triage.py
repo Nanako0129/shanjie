@@ -3,7 +3,7 @@ Run: python3 -m unittest tools/test_triage.py   (from the repo root). No network
 
 Syllables are placeholders ("a", "ni", ...): the tool only compares them. A row is built by `row`; `classify` is called directly for wrong rows."""
 import hashlib
-import io, json, os, struct, sys, tempfile, unittest
+import concurrent.futures, io, json, os, struct, sys, tempfile, unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import triage as T  # noqa: E402
@@ -461,6 +461,55 @@ class FailingCell(unittest.TestCase):
             self.assertEqual(sorted(finished), [("n0", "formal"), ("n1", "chat")])
             self.assertEqual(os.listdir(tmp), [])
             self.assertFalse(os.path.exists(os.path.join(td, "out", "L.json")))
+
+    def test_a_failing_temp_dir_cleanup_also_stops_the_later_cells(self):
+        """--jobs 2: cell A's run_cell succeeds but removing its temp dir raises; cell B is held until A's future is done (a done
+        callback, added by wrapping submit), so the worker B frees finds the stop event set: no third cell runs."""
+        import argparse, threading
+        from unittest import mock
+
+        class Dir(tempfile.TemporaryDirectory):
+            def cleanup(self):
+                super().cleanup()
+                if self.name == a_dir[0]:
+                    raise OSError("cannot remove the temp dir")
+
+        with tempfile.TemporaryDirectory() as td:
+            files, tmp = {}, os.path.join(td, "tmp")
+            os.makedirs(tmp)
+            for i, name in enumerate(("n0", "n1", "n2")):
+                p = os.path.join(td, name + ".txt")
+                with open(p, "w", encoding="utf-8") as f:
+                    f.write("x" * (50 - i))
+                files[name] = (p, False)
+            a_dir, b_started, a_done, ran = [None], threading.Event(), threading.Event(), []
+
+            def fake_cell(cli, lm, tl, prof, f, lex, par, lenient, report, tdir, kn, tri, threads):
+                job = (os.path.basename(f)[:-4], prof)
+                ran.append(job)
+                if job == ("n0", "chat"):
+                    a_dir[0] = tdir
+                    self.assertTrue(b_started.wait(10))
+                else:
+                    self.assertEqual(job, ("n0", "formal"), "a cell started after the failure")
+                    b_started.set()
+                    self.assertTrue(a_done.wait(10))
+                return T.empty_counts(), []
+
+            real_submit = concurrent.futures.ThreadPoolExecutor.submit
+
+            def submit(self, fn, job):
+                fut = real_submit(self, fn, job)
+                if job == ("n0", "chat"):
+                    fut.add_done_callback(lambda _: a_done.set())
+                return fut
+
+            with _patched(td, files, fake_cell), mock.patch.object(tempfile, "tempdir", tmp), mock.patch.object(tempfile, "TemporaryDirectory", Dir), \
+                    mock.patch.object(concurrent.futures.ThreadPoolExecutor, "submit", submit):
+                with self.assertRaisesRegex(OSError, "cannot remove"):
+                    T.cmd_run(argparse.Namespace(label="L", set=list(files), private_root=td, cli="cli", rows_out=os.path.join(td, "rows"), jobs=2, cli_threads=1))
+            self.assertEqual(sorted(ran), [("n0", "chat"), ("n0", "formal")])
+            self.assertEqual(os.listdir(tmp), [])
 
     def test_a_repeated_set_name_runs_once(self):
         import argparse
