@@ -67,6 +67,10 @@ pub fn enter() -> Key {
     Key::new(KeyKind::Enter)
 }
 
+pub fn space() -> Key {
+    Key::new(KeyKind::Space)
+}
+
 /// Keys to bring the cursor from `from` to `to` among `n` syllables: Left/Right one syllable each, or Home / End first.
 pub fn move_cost(from: usize, to: usize, n: usize) -> usize {
     from.abs_diff(to).min(1 + to).min(1 + (n - to))

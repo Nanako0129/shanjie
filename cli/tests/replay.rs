@@ -3,7 +3,7 @@
 //! test states the display it relies on, so a model change fails there first. Each engine is about 700 MB, so the tests take turns.
 use cli::common::{load_lenient, root};
 use cli::replay::{build_engine, keys_of, move_cost, replay_row, Cfg, Rerank, RowOut};
-use core::engine::Engine;
+use core::engine::{Engine, Key, KeyKind};
 use core::eval::Lenient;
 use core::lm::Profile;
 use std::process::Command;
@@ -35,6 +35,10 @@ fn zai() -> Row {
 /// 這加速度很快你看一下 is shown; the gold text has 家 at the second place. Fix: Home, Right, Right (3 keys, not 8 Lefts), Space, digit.
 fn jia() -> Row {
     row("|這家速度很快你看一下|ㄓㄜˋ ㄐㄧㄚ ㄙㄨˋ ㄉㄨˋ ㄏㄣˇ ㄎㄨㄞˋ ㄋㄧˇ ㄎㄢˋ ㄧˊ ㄒㄧㄚˋ")
+}
+/// The gold 奕 sits on the third page of the window for ㄧˋ (checked by hand in the test), so the re-pick pages twice.
+fn yi() -> Row {
+    row("|奕|ㄧˋ")
 }
 /// Several rewrites of the small model while it is typed (3 with `Rerank::Each`, measured).
 fn guqi() -> Row {
@@ -82,12 +86,22 @@ fn cursor_move_cost_takes_the_shortest_route() {
 
 /// Rule (section 4): a wrong first display with the gold word in the window at the cursor is fixed by moving the cursor (the
 /// shortest way), Space to open, Space for each page before the item, and the item's digit; `actual` is the typed keys plus those plus
-/// Enter, and what is sent is the gold text. 我再重打: Left, Left, Space, digit = 4; the 這家 row: Home, Right, Right, Space, digit = 5.
+/// Enter, and what is sent is the gold text. 我再重打: Left, Left, Space, digit = 4; the 這家 row: Home, Right, Right, Space, digit = 5;
+/// 奕 on the third page: Space, Space, Space, digit = 4 (no move: the cursor is already at the end).
 #[test]
 fn a_repick_costs_the_moves_the_window_and_the_digit() {
     let (_g, mut e) = engine(false);
     let len = load_lenient().unwrap();
-    for (r, extra) in [(zai(), 4), (jia(), 5)] {
+    // The page by hand: the first Space opens page one, two more page to the third, which lists 奕 (18 items before it).
+    let mut third = None;
+    for k in keys_of("ㄧˋ").unwrap().into_iter().chain([cli::replay::space(); 3]) {
+        let o = e.key(k).unwrap();
+        third = Some((o.first, o.candidates.iter().any(|w| w == "奕")));
+    }
+    assert_eq!(third, Some((18, true)), "奕 is on the third page");
+    e.key(Key::new(KeyKind::Esc)).unwrap();
+    e.key(Key::new(KeyKind::Esc)).unwrap(); // clears the composition
+    for (r, extra) in [(zai(), 4), (jia(), 5), (yi(), 4)] {
         let o = go(&mut e, &r, &len, FIX);
         assert!(!o.first_ok, "the model shows the wrong word first");
         assert!(o.final_ok && !o.unfixable && o.committed == r.gold, "sent text is the gold text");
