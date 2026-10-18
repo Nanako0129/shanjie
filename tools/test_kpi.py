@@ -87,9 +87,21 @@ class TableRules(Tmp):
         _, rows = self.table()
         c = self.col(rows, "速度與記憶體")
         self.assertIn("RSS 426 MB", c["v0.a"])  # exactly 2.0 still counts
-        self.assertEqual(c["v0.b"], "—（負載 2.0）")
-        self.assertEqual(c["v0.c"], "—（負載 2.0）")
-        self.assertEqual(c["v0.d"], "—（負載 37.5）")
+        self.assertEqual(c["v0.b"], "—（負載 2.01）")  # two decimals: 2.01 is not shown as the threshold itself
+        self.assertEqual(c["v0.c"], "—（負載 2.01）")
+        self.assertEqual(c["v0.d"], "—（負載 37.52）")
+
+    def test_speed_columns_split_per_machine(self):
+        for name, machine in (("a", "Mac17,3"), ("b", "gcp-c4d")):
+            d = v2_file("2026-10-01", [v2_version("v0." + name, speed=SPEED)])
+            d["env"]["machine"] = machine
+            self.put(self.res, f"v2-{name}.json", d)
+        head, rows = self.table()
+        cols = [h for h in head if h.startswith("速度與記憶體")]
+        self.assertEqual(len(cols), 2, head)
+        a, b = (next(h for h in cols if m in h) for m in ("Mac17,3", "gcp-c4d"))
+        self.assertEqual((rows["v0.b"][a], rows["v0.a"][b]), ("—", "—"))
+        self.assertIn("RSS", rows["v0.a"][a])
 
     def test_version_without_replay_gets_dashes_not_an_error(self):
         self.put(self.res, "v2-A.json", v2_file("2026-10-01", [v2_version("v0.4.0")]))
@@ -132,14 +144,24 @@ class TableRules(Tmp):
         self.assertEqual(self.col(rows, "錯字回報重播 top1")["v0.4.7"], "62.50%（50/80）")
         self.assertEqual(self.col(rows, "錯字回報重播 學習開改壞")["v0.4.7"], "3")
         self.assertEqual(self.col(rows, "按鍵分數 KySS（錯字")["v0.4.7"], "0.9123")
-        self.assertEqual(self.col(rows, "顯示後被改掉")["v0.4.7"], "1.32%（4/302）")  # dev302 rewrites / dev302 rows
+        self.assertEqual(self.col(rows, "顯示後被改掉")["v0.4.7"], "1.3 次／百列（4/302）")  # dev302 rewrites per 100 rows, a count not a share of rows
 
     def test_holdout_halves_from_kpi_json(self):
-        self.put(self.kp, "v0.4.7.json", {"holdout_talk_chat": {"n": 150, "top1": 120, "fixed": 3, "broken": 1, "p": 0.6},
-                                          "holdout_news_formal": {"n": 150, "top1": 135, "fixed": 2, "broken": 0, "p": 0.5}})
+        self.put(self.kp, "v0.4.7.json", {"holdout_talk_chat": {"n": 150, "top1": 120, "fixed": 3, "broken": 1, "p": 0.6, "rows_sha256": H1},
+                                          "holdout_news_formal": {"n": 150, "top1": 135, "fixed": 2, "broken": 0, "p": 0.5, "rows_sha256": H1}})
         head, rows = self.table()
         self.assertEqual(self.col(rows, "保留集口語半邊（聊天）")["v0.4.7"], "80.00%（120/150）")
         self.assertEqual(self.col(rows, "保留集新聞半邊（書面）")["v0.4.7"], "90.00%（135/150）")
+
+    def test_holdout_columns_split_by_rows_hash_even_with_equal_n(self):
+        for v, h in (("v0.4.7", H1), ("v0.4.8", H2)):  # two shards, both 150 rows
+            self.put(self.kp, v + ".json", {"holdout_talk_chat": {"n": 150, "top1": 120, "rows_sha256": h}, "holdout_news_formal": {"n": 150, "top1": 135, "rows_sha256": h}})
+        head, rows = self.table()
+        for p in ("保留集口語半邊", "保留集新聞半邊"):
+            cols = [h for h in head if h.startswith(p)]
+            self.assertEqual(len(cols), 2, head)
+            a, b = (next(h for h in cols if x in h) for x in ("#11111111", "#22222222"))
+            self.assertEqual((rows["v0.4.7"][a] != "—", rows["v0.4.7"][b], rows["v0.4.8"][a], rows["v0.4.8"][b] != "—"), (True, "—", "—", True), p)
 
     def test_table_is_byte_identical_across_runs(self):
         for i, h in enumerate((H1, H2, "3" * 64)):  # several column groups, so an unordered iteration would show
@@ -188,9 +210,95 @@ class ReplayModels(Tmp):
         self.assertIn("kn.sjkn", err.getvalue())
 
     def test_missing_model_file_fails(self):
-        root = make_root(self.td, ("bigram.sjlm", "classes.sjc"))
-        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises((SystemExit, FileNotFoundError)):
+        root = make_root(self.td)
+        os.remove(os.path.join(root, "data/lm/tinylm.sjtl"))  # its data/tinylm.sjtl.sha256 is there: the model file itself is missing
+        with contextlib.redirect_stderr(io.StringIO()) as err, self.assertRaises(SystemExit):
             kpi.check_models(root, SPEC)
+        self.assertIn("data/lm/tinylm.sjtl is missing", err.getvalue())
+
+    def test_missing_hash_file_fails_clearly(self):
+        root = make_root(self.td)
+        os.remove(os.path.join(root, "data/tinylm.sjtl.sha256"))
+        with contextlib.redirect_stderr(io.StringIO()) as err, self.assertRaises(SystemExit):
+            kpi.check_models(root, SPEC)
+        self.assertIn("data/tinylm.sjtl.sha256 is missing", err.getvalue())
+
+
+def git(root, *a):
+    return subprocess.run(["git", "-C", root, "-c", "user.name=t", "-c", "user.email=t@t", *a], check=True, capture_output=True, text=True).stdout.strip()
+
+
+class ReplayGit(Tmp):
+    def setUp(self):
+        super().setUp()
+        self.repo = os.path.join(self.td, "repo")
+        os.makedirs(self.repo)
+        git(self.repo, "init", "-q")
+        open(os.path.join(self.repo, "a.txt"), "w").write("1")
+        git(self.repo, "add", "a.txt")
+        git(self.repo, "commit", "-q", "-m", "one")
+        self.first = git(self.repo, "rev-parse", "HEAD")
+
+    def head(self, version="v9.9.9"):
+        with contextlib.redirect_stderr(io.StringIO()):
+            return kpi.git_clean_head(self.repo, version)
+
+    def test_clean_tree_returns_head(self):
+        self.assertEqual(self.head(), self.first)
+
+    def test_untracked_results_do_not_block(self):  # what bench.py / kpi.py run write beside the checkout's tracked files
+        os.makedirs(os.path.join(self.repo, "eval/bench/kpi"))
+        open(os.path.join(self.repo, "eval/bench/kpi/v9.9.9.json"), "w").write("{}")
+        self.assertEqual(self.head(), self.first)
+
+    def test_tracked_change_blocks(self):
+        open(os.path.join(self.repo, "a.txt"), "w").write("2")
+        with self.assertRaises(SystemExit):
+            self.head()
+
+    def test_existing_tag_must_be_head(self):
+        git(self.repo, "tag", "v9.9.9")
+        self.assertEqual(self.head(), self.first)  # tag at HEAD: fine
+        open(os.path.join(self.repo, "a.txt"), "w").write("2")
+        git(self.repo, "commit", "-q", "-am", "two")
+        with self.assertRaises(SystemExit):
+            self.head()  # the tag is one commit behind HEAD
+        self.assertNotEqual(self.head("v9.9.10"), self.first)  # no such tag yet: any HEAD
+
+
+class ReplayBuild(unittest.TestCase):
+    def test_executable_comes_from_the_compiler_artifact_message(self):
+        out = "\n".join(json.dumps(m) for m in (
+            {"reason": "compiler-artifact", "target": {"name": "cli", "kind": ["lib"]}, "executable": None},
+            {"reason": "compiler-artifact", "target": {"name": "shanjie-eval", "kind": ["bin"]}, "executable": "/x/shanjie-eval"},
+            {"reason": "compiler-artifact", "target": {"name": "shanjie-replay", "kind": ["bin"]}, "executable": "/x/shanjie-replay"},
+            {"reason": "build-finished", "success": True})) + "\nnot json\n"
+        r = subprocess.CompletedProcess([], 0, out, "")
+        with mock.patch.object(subprocess, "run", return_value=r) as run:
+            self.assertEqual(kpi.build_replay("/root"), "/x/shanjie-replay")
+        self.assertIn("--locked", run.call_args.args[0])
+        self.assertIn("--message-format=json", run.call_args.args[0])
+
+    def test_no_artifact_fails(self):
+        with mock.patch.object(subprocess, "run", return_value=subprocess.CompletedProcess([], 0, "", "")), \
+                contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            kpi.build_replay("/root")
+
+
+class Counts(Tmp):
+    def test_fixed_broken_from_rowstats(self):
+        def rs(name, oks):
+            p = os.path.join(self.td, name)
+            open(p, "w").write("".join(f"{i}\t{int(o)}\t0\t3\n" for i, o in enumerate(oks, 1)))
+            return p
+        # rows: kept right, fixed, broken, broken, kept wrong
+        self.assertEqual(kpi.fixed_broken(rs("b", [1, 0, 1, 1, 0]), rs("c", [1, 1, 0, 0, 0]), 5), (1, 2))
+
+    def test_write_is_atomic(self):
+        self.put(self.td, "v0.4.0.json", {"keep": 1})
+        with mock.patch.object(kpi.json, "dump", side_effect=OSError("disk")), self.assertRaises(OSError):
+            kpi.write_kpi(self.td, "v0.4.0", {"x": 2})
+        self.assertEqual(json.load(open(os.path.join(self.td, "v0.4.0.json"))), {"keep": 1})
 
 
 FAKE = """#!{py}
@@ -256,10 +364,6 @@ class ReplayRun(Tmp):
         with self.assertRaises(SystemExit):
             self.replay(FAKE_TAG="replay-formal+whatever")
 
-    def test_dirty_tree_is_refused(self):
-        with mock.patch.object(bench, "sh", return_value=" M core/src/lib.rs\n"), contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
-            kpi.git_clean_head(self.root)
-
 
 # ---------- run ----------
 CLI = """#!{py}
@@ -287,14 +391,15 @@ class RunWikitune(Tmp):
             self.ref, self.sha = ref, "c" * 40
 
         def build(self):
-            self.cli, self.lm, self.tl, self.dir = self.fake_cli, "lm", None, "."
+            self.cli, self.lm, self.tl, self.dir = self.fake_cli, "lm", None, self.vdir
 
-    def run_cmd(self, **env):
-        ver = type("V", (self.Ver,), {"fake_cli": self.cli})
+    def run_cmd(self, rows=None, **env):
+        os.makedirs(os.path.join(self.td, "vdir"), exist_ok=True)  # the CLI runs in the version's directory, not where the rows file is
+        ver = type("V", (self.Ver,), {"fake_cli": self.cli, "vdir": os.path.join(self.td, "vdir")})
 
         def setup(v, spec, td):
             v.spec, v.tl8, v.kn8, v.tri8 = spec, "", "", ""
-        a = types.SimpleNamespace(refs=["abc"], as_="v0.4.0", wikitune_clean=self.rows)
+        a = types.SimpleNamespace(refs=["abc"], as_="v0.4.0", wikitune_clean=rows or self.rows)
         with mock.patch.object(bench, "Ver", ver), mock.patch.object(bench, "setup_models", setup), mock.patch.dict(os.environ, env), \
                 contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
             kpi.cmd_run(a, kpi_dir=self.kp)
@@ -310,6 +415,23 @@ class RunWikitune(Tmp):
             with self.subTest(env), self.assertRaises(SystemExit):
                 self.run_cmd(**env)
         self.assertFalse(os.path.exists(os.path.join(self.kp, "v0.4.0.json")))
+
+    def test_relative_rows_path_is_made_absolute(self):
+        old = os.getcwd()
+        os.chdir(self.td)
+        try:
+            d = self.run_cmd(rows="wikitune-clean.txt")
+        finally:
+            os.chdir(old)
+        self.assertEqual(d["wikitune_clean"]["n"], 5)
+
+    def test_rows_under_eval_holdout_are_refused(self):
+        link = os.path.join(self.td, "innocent.txt")
+        os.symlink(os.path.join(kpi.ROOT, "eval/holdout/news.txt"), link)  # only the resolved path is looked at, nothing is read
+        for path in (os.path.join(kpi.ROOT, "eval/holdout/talk.txt"), link):
+            with self.subTest(path), mock.patch.object(kpi, "die", side_effect=SystemExit) as die, self.assertRaises(SystemExit):
+                self.run_cmd(rows=path)
+            self.assertIn("eval/holdout", die.call_args.args[0])
 
     def test_unknown_version_name_is_refused(self):
         with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):

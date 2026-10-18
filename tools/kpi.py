@@ -8,8 +8,8 @@
 `run` has the arguments of `tools/bench.py run --suite v2`: it exports and builds each ref with bench.py's own `Ver`, sets up the version's
 shipped models, scores FILE (the wikitune-clean rows) with the shipped flags in the formal profile and writes the result into
 eval/bench/kpi/<version>.json. It builds old versions: run it on the Windows machine or GCP, not on the Mac.
-`replay` runs in the CURRENT checkout (clean tree only): `cargo build --release -p cli --bin shanjie-replay` (the binary is
-<target dir>/release/shanjie-replay, CARGO_TARGET_DIR honoured) types the pinned user-reported and dev302 rows through the real engine
+`replay` runs in the CURRENT checkout (no changes to tracked files; if the tag --as exists it must be HEAD):
+`cargo build --release --locked -p cli --bin shanjie-replay --message-format=json` (the binary path is the compiler's own report) types the pinned user-reported and dev302 rows through the real engine
 with data/lm models and writes the `replay` field of eval/bench/kpi/<version>.json.
 `table` regenerates docs/kpi.md from eval/bench/results/v2-*.json and eval/bench/kpi/*.json.
 tools/bench.py is imported, never changed. Never reads eval/holdout/ (the holdout halves are typed into the kpi JSON by hand).
@@ -18,7 +18,6 @@ import argparse, ast, json, os, re, subprocess, sys, tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import bench  # noqa: E402
-import evalstats  # noqa: E402
 
 ROOT = bench.ROOT
 KPI_DIR = os.path.join(ROOT, "eval/bench/kpi")
@@ -40,15 +39,17 @@ def write_kpi(kpi_dir, version, update):
     d = json.load(open(p, encoding="utf-8")) if os.path.isfile(p) else {}
     d.update(update)
     os.makedirs(kpi_dir, exist_ok=True)
-    with open(p, "w", encoding="utf-8") as f:
+    with open(p + ".tmp", "w", encoding="utf-8") as f:  # same directory, so os.replace is atomic: a crash never leaves a half-written record
         json.dump(d, f, ensure_ascii=False, indent=1, sort_keys=True)
         f.write("\n")
+    os.replace(p + ".tmp", p)
     return p
 
 
 # ---------- run: wikitune-clean, shipped flags, formal profile ----------
 def wikitune_cell(v, rows, rowstats):
-    """The checks of bench.run_cell2 (setting tag, row count, rowstats top1 == summary top1) for a set SETS2 does not know."""
+    """The checks of bench.run_cell2 (setting tag, row count, rowstats top1 == summary top1) for a set SETS2 does not know. Not
+    run_cell2's dump cross-check (the CLI is run without --dump)."""
     m = bench.parse_summary(bench.sh(bench.cell_cmd(v, "formal", rows, None, rowstats, False), cwd=v.dir, env=bench.cli_env(False)))
     want = bench.expected_tag(v, "formal", False)
     if m["tag"] != want:
@@ -65,6 +66,9 @@ def cmd_run(a, kpi_dir=KPI_DIR):
     labels = bench.version_labels(a.refs, a.as_)
     if bench.sha_file(bench.VARIANTS) != bench.VARIANTS_SHA:
         die("suite variants.tsv does not match its pinned SHA-256")
+    a.wikitune_clean = os.path.abspath(a.wikitune_clean)
+    if os.path.realpath(a.wikitune_clean).startswith(os.path.realpath(os.path.join(ROOT, "eval/holdout")) + os.sep):
+        die("the rows file is under eval/holdout/: the holdout is measured only by the verifier, once")
     if not os.path.isfile(a.wikitune_clean):
         die(f"missing rows file {a.wikitune_clean}")
     rows_sha = bench.sha_file(a.wikitune_clean)
@@ -87,10 +91,16 @@ def cmd_run(a, kpi_dir=KPI_DIR):
 
 
 # ---------- replay: current checkout, data/lm models ----------
-def git_clean_head(root):
-    if bench.sh(["git", "-C", root, "status", "--porcelain"]).strip():
-        die("the working tree is not clean: replay measures the commit it records")
-    return bench.sh(["git", "-C", root, "rev-parse", "HEAD"]).strip()
+def git_clean_head(root, version):
+    """HEAD of `root`, if no tracked file changed (untracked files, such as the results bench.py / kpi.py run just wrote, do not count)
+    and, when the tag `version` already exists, it points at HEAD."""
+    if bench.sh(["git", "-C", root, "status", "--porcelain", "--untracked-files=no"]).strip():
+        die("a tracked file has changes: replay measures the commit it records")
+    head = bench.sh(["git", "-C", root, "rev-parse", "HEAD"]).strip()
+    t = subprocess.run(["git", "-C", root, "rev-parse", "--verify", "--quiet", version + "^{commit}"], capture_output=True, text=True)
+    if t.returncode == 0 and t.stdout.strip() != head:
+        die(f"tag {version} is {t.stdout.strip()[:8]}, HEAD is {head[:8]}: check out the tagged commit")
+    return head
 
 
 def check_models(root, spec):
@@ -102,7 +112,10 @@ def check_models(root, spec):
         die(f"data/lm holds files the version does not ship: {', '.join(extra)}")
     out = {}
     for n in names:
-        want = open(os.path.join(root, "data", n + ".sha256")).read().split()[0]
+        hf = os.path.join(root, "data", n + ".sha256")
+        if not os.path.isfile(hf):
+            die(f"data/{n}.sha256 is missing")
+        want = open(hf).read().split()[0]
         p = os.path.join(lm, n)
         if not os.path.isfile(p):
             die(f"data/lm/{n} is missing")
@@ -119,8 +132,19 @@ def models_line(models):
 
 
 def build_replay(root):
-    subprocess.run(["cargo", "build", "--release", "-p", "cli", "--bin", "shanjie-replay"], cwd=root, check=True)
-    return os.path.join(os.environ.get("CARGO_TARGET_DIR") or os.path.join(root, "target"), "release/shanjie-replay")
+    """cargo build --locked; -> the executable path the compiler reports for the shanjie-replay bin."""
+    r = subprocess.run(["cargo", "build", "--release", "--locked", "-p", "cli", "--bin", "shanjie-replay", "--message-format=json"],
+                       cwd=root, capture_output=True, text=True)
+    if r.returncode:
+        die(f"cargo build failed ({r.returncode}): {r.stderr[-400:]}")
+    for line in r.stdout.split("\n"):
+        try:
+            m = json.loads(line)
+        except ValueError:
+            continue
+        if m.get("reason") == "compiler-artifact" and get(m, "target", "name") == "shanjie-replay" and "bin" in get(m, "target", "kind") and m.get("executable"):
+            return m["executable"]
+    die("cargo reported no shanjie-replay executable")
 
 
 def replay_cell(binary, root, rows, models, learn, rowstats):
@@ -150,10 +174,10 @@ def replay_cell(binary, root, rows, models, learn, rowstats):
     return s
 
 
-def fixed_broken(base, cand):
-    """Fixed / broken counts of `evalstats.py compare` (its table's 5th and 6th columns)."""
-    row = evalstats.compare(base, cand, resamples=1).split("\n")[-1].split("|")  # resamples only feed the intervals
-    return int(row[5]), int(row[6])
+def fixed_broken(base, cand, n):
+    """Fixed / broken counts of `evalstats.py compare` (a row right only in cand / only in base), from the two rowstats files."""
+    b, c = bench.parse_rowstats(base, n), bench.parse_rowstats(cand, n)
+    return sum(y and not x for x, y in zip(b, c)), sum(x and not y for x, y in zip(b, c))
 
 
 def cmd_replay(a, root=ROOT, kpi_dir=KPI_DIR, build=build_replay):
@@ -162,7 +186,7 @@ def cmd_replay(a, root=ROOT, kpi_dir=KPI_DIR, build=build_replay):
         die(f"{label!r} is not in VERSIONS2 ({', '.join(bench.VERSIONS2)})")
     if bench.sha_file(bench.VARIANTS) != bench.VARIANTS_SHA:
         die("suite variants.tsv does not match its pinned SHA-256")
-    sha = git_clean_head(root)
+    sha = git_clean_head(root, label)
     models = check_models(root, bench.VERSIONS2[label])
     for name, (f, want) in REPLAY_ROWS.items():
         if bench.sha_file(f) != want:
@@ -181,7 +205,7 @@ def cmd_replay(a, root=ROOT, kpi_dir=KPI_DIR, build=build_replay):
             rep[name] = {"rows_sha256": REPLAY_ROWS[name][1], "n": off["n"], "off": off}
             if name == "user-reported":
                 rep[name]["on"], rs_on = cell(name, True)
-                rep[name]["learn_fixed"], rep[name]["learn_broken"] = fixed_broken(rs_off, rs_on)
+                rep[name]["learn_fixed"], rep[name]["learn_broken"] = fixed_broken(rs_off, rs_on, off["n"])
     print(f"kpi: {label} replay -> {write_kpi(kpi_dir, label, {'version': label, 'replay': rep})}")
 
 
@@ -252,21 +276,21 @@ def kpi_col(title, path, text):
 def holdout_col(title, field):
     def f(x):
         h = get(x["kpi"], field)
-        return (str(h["n"]), h["n"], pct(h["top1"], h["n"])) if isinstance(h, dict) and "top1" in h and "n" in h else None
+        return (h.get("rows_sha256"), h["n"], pct(h["top1"], h["n"])) if isinstance(h, dict) and "top1" in h and "n" in h else None
     return title, f
 
 
 def speed(x):
-    s, env = get(x["rec"], "speed"), get(x["res"], "env")
+    s, env = get(x["rec"], "speed"), get(x["res"], "env")  # the column splits per machine (env.machine)
     if not s or "p95_us" not in s or not env or "load_avg_start" not in env or "load_avg_end" not in env:
         return None
     load = max(env["load_avg_start"], env["load_avg_end"])
     if load > LOAD_MAX:
-        return None, None, f"—（負載 {load:.1f}）"
+        return env.get("machine"), None, f"—（負載 {load:.2f}）"
     t = f"按鍵 p95 {s['p95_us'] / 1000:.2f} ms"
     if "rerank_p95_ms" in s:
         t += f"／重排 p95 {s['rerank_p95_ms']:.1f} ms"
-    return None, None, t + f"／RSS {s['rss_mb']:.0f} MB"
+    return env.get("machine"), None, t + f"／RSS {s['rss_mb']:.0f} MB"
 
 
 COLUMNS = [
@@ -276,7 +300,7 @@ COLUMNS = [
     kpi_col("錯字回報重播 學習開改壞", ("replay", "user-reported"), lambda b: str(b["learn_broken"]) if "learn_broken" in b else None),
     kpi_col("按鍵分數 KySS（dev302 聊天）", ("replay", "dev302"), lambda b: f"{b['off']['kyss']:.4f}" if get(b, "off", "kyss") is not None else None),
     kpi_col("按鍵分數 KySS（錯字回報聊天）", ("replay", "user-reported"), lambda b: f"{b['off']['kyss']:.4f}" if get(b, "off", "kyss") is not None else None),
-    kpi_col("顯示後被改掉（dev302 聊天，改字數÷列數）", ("replay", "dev302"), lambda b: f"{100 * b['off']['rewrites'] / b['n']:.2f}%（{b['off']['rewrites']}/{b['n']}）" if get(b, "off", "rewrites") is not None and b.get("n") else None),
+    kpi_col("顯示後被改掉（dev302 聊天，每百列次數）", ("replay", "dev302"), lambda b: f"{100 * b['off']['rewrites'] / b['n']:.1f} 次／百列（{b['off']['rewrites']}/{b['n']}）" if get(b, "off", "rewrites") is not None and b.get("n") else None),
     holdout_col("保留集口語半邊（聊天）", "holdout_talk_chat"),
     holdout_col("保留集新聞半邊（書面）", "holdout_news_formal"),
     kpi_col("wikitune-clean 書面 top1", ("wikitune_clean",), lambda b: pct(b["top1"], b["n"]) if "top1" in b and "n" in b else None),
@@ -292,7 +316,7 @@ def render(results_dir, kpi_dir):
     for v in sorted(versions, key=lambda v: (vkey(v), v), reverse=True):
         p = pick_v2(v, v2)
         rows.append((v, {"rec": p[3] if p else {}, "res": p[2] if p else {}, "kpi": kpi.get(v, {})}, p[1] if p else None))
-    cols = []  # (header, {version: cell}); a column splits into one per distinct set (key = its hash, or its n for the holdout halves)
+    cols = []  # (header, {version: cell}); a column splits into one per distinct set (key = its hash, or the machine for the speed column)
     for title, f in COLUMNS:
         groups = {}
         for v, x, _ in rows:
@@ -300,7 +324,7 @@ def render(results_dir, kpi_dir):
             if r:
                 groups.setdefault(r[0], (r[1], {}))[1][v] = r[2]
         for key, (n, cells) in groups.items() or [(None, (None, {}))]:
-            head = ([f"n={n}"] if n is not None else []) + ([sha8(key)] if key and len(key) == 64 else [])
+            head = ([f"n={n}"] if n is not None else []) + ([sha8(key) if re.fullmatch("[0-9a-f]{64}", key) else key] if key else [])
             cols.append((title + ("<br>" + "，".join(head) if head else ""), cells))
     L = ["# 每版 KPI（`tools/kpi.py table` 產生，不手改）", "",
          "規格：`docs/contracts/kpi.md`。最新的版本在上。欄位的來源是 `eval/bench/results/v2-*.json`（套件 v2）與 `eval/bench/kpi/<版本>.json`（`tools/kpi.py run`、`replay` 與保留集兩個半邊）；"
