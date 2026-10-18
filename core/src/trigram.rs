@@ -43,24 +43,25 @@ unsafe impl Sync for Mapped {}
 
 impl Mapped {
     /// Maps the regular file at `path`. A file that cannot be opened, is not a regular file (a FIFO or a directory: opened with
-    /// O_NONBLOCK so a FIFO does not block, then refused), is empty, or fails `mmap` is `TriTable` (what a failed read is today).
+    /// O_NONBLOCK so a FIFO does not block, then refused), is empty, or fails `mmap` is `Err(())`; each caller names it (the trigram
+    /// table's `LmError::TriTable`, what a failed read is today; 0c's `OcError::Io`).
     ///
     /// # Safety
     /// The file must not be truncated or rewritten in place while the mapping is alive: a page past a new end is a SIGBUS, and
     /// bytes that change after `Tri::parse` checked them break the invariants the lookups rely on (an index could panic).
     /// Replacing the file by rename is fine (the mapping keeps the old inode).
-    pub(crate) unsafe fn open(path: &Path) -> Result<Mapped, LmError> {
+    pub(crate) unsafe fn open(path: &Path) -> Result<Mapped, ()> {
         use std::os::unix::fs::OpenOptionsExt;
-        let f = std::fs::OpenOptions::new().read(true).custom_flags(crate::tinylm::O_NONBLOCK).open(path).map_err(|_| LmError::TriTable)?;
-        let meta = f.metadata().map_err(|_| LmError::TriTable)?;
+        let f = std::fs::OpenOptions::new().read(true).custom_flags(crate::tinylm::O_NONBLOCK).open(path).map_err(|_| ())?;
+        let meta = f.metadata().map_err(|_| ())?;
         let len = meta.len() as usize;
         if !meta.is_file() || len == 0 {
-            return Err(LmError::TriTable);
+            return Err(());
         }
         // SAFETY: a valid descriptor and a non-zero length; the kernel keeps the mapping after the descriptor is closed (dropped below).
         let ptr = unsafe { mmap(std::ptr::null_mut(), len, PROT_READ, MAP_PRIVATE, f.as_raw_fd(), 0) };
         if ptr == MAP_FAILED {
-            return Err(LmError::TriTable);
+            return Err(());
         }
         Ok(Mapped { ptr, len })
     }

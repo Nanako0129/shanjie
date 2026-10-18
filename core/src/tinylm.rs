@@ -149,7 +149,7 @@ extern "C" {
 }
 
 /// c (m x n) += a (m x k) . b, with b (k x n), or b (n x k) transposed when `trans_b`. All row-major.
-fn gemm(be: Backend, a: &[f32], b: &[f32], c: &mut [f32], (m, k, n): (usize, usize, usize), trans_b: bool) {
+pub(crate) fn gemm(be: Backend, a: &[f32], b: &[f32], c: &mut [f32], (m, k, n): (usize, usize, usize), trans_b: bool) {
     // Checked in release too (F6): the Accelerate call reads and writes through raw pointers with these lengths.
     assert!(a.len() == m * k && b.len() == k * n && c.len() == m * n, "gemm: matrix lengths do not match");
     match be {
@@ -195,7 +195,7 @@ fn tanh_into(be: Backend, x: &[f32], y: &mut [f32]) {
 }
 
 /// y = exp(x), elementwise, out of place.
-fn exp_into(be: Backend, x: &[f32], y: &mut [f32]) {
+pub(crate) fn exp_into(be: Backend, x: &[f32], y: &mut [f32]) {
     assert!(x.len() == y.len() && x.len() < i32::MAX as usize, "exp: lengths do not match");
     match be {
         #[cfg(target_os = "macos")]
