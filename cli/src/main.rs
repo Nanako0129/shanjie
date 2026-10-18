@@ -1,3 +1,4 @@
+use cli::common::{format_rowstats, levenshtein, load_lenient, root};
 use core::engine::{capping_overlay_detailed, load_lexicon_extra_detailed, load_lexicon_packs_detailed, PACK_ACG};
 use core::eval::*;
 use core::learn::{context_key, SENTINEL};
@@ -15,10 +16,6 @@ use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 mod english;
-
-fn root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().to_path_buf()
-}
 
 /// (display name, rows). Messages never include row text (R2).
 fn load_set(lex: &Lexicon, name: &str) -> Result<(&'static str, Vec<Row>), String> {
@@ -56,17 +53,6 @@ fn oov_words(name: &str) -> Vec<String> {
     fs::read_to_string(p).unwrap_or_default().lines().filter(|l| !l.is_empty()).map(String::from).collect()
 }
 
-/// S2v lenient table: SHANJIE_VARIANTS if set, else the repo's eval/variants.tsv; missing or bad is an error.
-fn load_lenient() -> Result<Lenient, String> {
-    // An empty value counts as unset, same as the Python reference (`os.environ.get(...) or default`).
-    let p = std::env::var_os("SHANJIE_VARIANTS")
-        .filter(|v| !v.is_empty())
-        .map(PathBuf::from)
-        .unwrap_or_else(|| root().join("eval/variants.tsv"));
-    let text = fs::read_to_string(p).map_err(|e| format!("cannot read variants table ({:?})", e.kind()))?;
-    Lenient::parse(&text).map_err(|e| e.to_string())
-}
-
 /// lm_eval.py `rows_of`: only lines with exactly three `|` fields (context|sentence|reading).
 /// Each row is (sentence, reading, context text).
 fn three_field_rows(text: &str) -> Vec<(String, Syls, String)> {
@@ -76,36 +62,6 @@ fn three_field_rows(text: &str) -> Vec<(String, Syls, String)> {
             (p.len() == 3).then(|| (p[1].to_string(), p[2].split_whitespace().map(String::from).collect(), p[0].to_string()))
         })
         .collect()
-}
-
-/// Levenshtein distance over Unicode scalar values.
-fn levenshtein(a: &str, b: &str) -> u32 {
-    let b: Vec<char> = b.chars().collect();
-    let mut prev: Vec<u32> = (0..=b.len() as u32).collect();
-    for (i, x) in a.chars().enumerate() {
-        let mut cur = vec![i as u32 + 1];
-        for (j, y) in b.iter().enumerate() {
-            cur.push((prev[j + 1] + 1).min(cur[j] + 1).min(prev[j] + (x != *y) as u32));
-        }
-        prev = cur;
-    }
-    prev[b.len()]
-}
-
-/// (errors, gold length) of one row (docs/contracts/eval-stats.md §1). `ok` is the lenient top-1 judgment made by the
-/// caller; a row that is ok has 0 errors even when the first candidate differs from the gold text.
-fn row_stats(top1: &str, gold: &str, ok: bool) -> (u32, u32) {
-    (if ok { 0 } else { levenshtein(top1, gold) }, gold.chars().count() as u32)
-}
-
-/// The one writer of a rowstats file: `row\tok\terrors\tgold_len` per row, rows counted from 1. Digits only.
-fn format_rowstats(rows: &[(bool, String, String)]) -> String {
-    let mut out = String::new();
-    for (i, (ok, top1, gold)) in rows.iter().enumerate() {
-        let (e, n) = row_stats(top1, gold, *ok);
-        out += &format!("{}\t{}\t{e}\t{n}\n", i + 1, *ok as u8);
-    }
-    out
 }
 
 /// Option combinations of `lm`, checked before any file is read. The holdout never prints its sentences, so
@@ -869,18 +825,6 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn row_stats_zero_for_ok_rows() {
-        assert_eq!(row_stats("他很好", "她很好", true), (0, 3));
-        assert_eq!(row_stats("他很好", "她很好", false), (1, 3));
-        assert_eq!(row_stats("", "𠮷野家", false), (3, 3));
-    }
-
-    #[test]
-    fn rowstats_rows_count_from_one() {
-        assert_eq!(format_rowstats(&[(true, "a".into(), "a".into()), (false, "ab".into(), "ac".into())]), "1\t1\t0\t1\n2\t0\t1\t2\n");
-    }
 
     #[test]
     fn lm_opts_holdout_allows_rowstats_not_dump() {
