@@ -10,11 +10,13 @@
 //!       int(n * 0.95) of the sorted times, as the CLI); with --tinylm the same rows' M scoring (`ll_many` of the row's prefix and
 //!       candidates) is timed the same way; --no-context replaces every prefix by the empty string
 //!   cargo run --release -p core --example oc_score -- --sjoc F.sjoc --items ITEMS.tsv --mem --tinylm M.sjtl     (macOS only)
-//!       resident_size (MACH_TASK_BASIC_INFO) and phys_footprint (TASK_VM_INFO) at the start, after loading 0c and scoring one row, after
-//!       also loading M and scoring one row
+//!       resident_size and resident_size_max (MACH_TASK_BASIC_INFO) and phys_footprint (TASK_VM_INFO) at the start, after loading 0c and
+//!       scoring every scorable row, after also loading M and scoring every one of those rows with M; the 0c, combined and peak RSS
+//!       increases, and the 250 MiB gate on the peak increase
+//!   Flags that do not belong to the chosen mode (--no-context with --out/--mem, --tinylm with --out) are an error (exit 2); so is a
+//!   non-finite score (the row number is named, nothing more is written).
 use core::oc::Oc;
 use core::tinylm::TinyLm;
-use std::io::Write;
 use std::path::Path;
 use std::time::Instant;
 
@@ -48,8 +50,9 @@ fn refs(v: &[String]) -> Vec<&str> {
     v.iter().map(String::as_str).collect()
 }
 
+/// A non-finite score is fatal here (it must never reach SCORES.jsonl or a timing).
 fn score(oc: &Oc, it: &Item, prefix: &str) -> Vec<Option<f64>> {
-    oc.score(prefix, &refs(&it.syllables), &refs(&it.cands))
+    oc.try_score(prefix, &refs(&it.syllables), &refs(&it.cands)).unwrap_or_else(|e| die(&format!("row {}: {e}", it.row)))
 }
 
 /// M's scoring of one row: the row's prefix is k (M drops what does not fit), every candidate is c.
@@ -91,7 +94,7 @@ fn report(name: &str, (p50, p95): (Vec<f64>, Vec<f64>)) {
 #[cfg(target_os = "macos")]
 mod mach {
     //! task_info (<mach/task_info.h>): the two numbers the contract's memory gate names, read by offset in an 8-byte-aligned buffer.
-    //! mach_task_basic_info is { u64 virtual_size; u64 resident_size; ... }, so resident_size is u64 index 1. task_vm_info is
+    //! mach_task_basic_info is { u64 virtual_size; u64 resident_size; u64 resident_size_max; ... }, so those are u64 index 1 and 2. task_vm_info is
     //! { u64 virtual_size; i32 region_count; i32 page_size; u64 resident_size; ... } with phys_footprint at byte 144 (u64 index 18);
     //! checked on this macOS by reading a 150 MiB file into the heap: both numbers rose by 150 MiB.
     extern "C" {
@@ -110,9 +113,10 @@ mod mach {
         buf
     }
 
-    /// (resident_size, phys_footprint) in bytes.
-    pub fn now() -> (u64, u64) {
-        (info(MACH_TASK_BASIC_INFO)[1], info(TASK_VM_INFO)[18])
+    /// (resident_size, phys_footprint, resident_size_max) in bytes.
+    pub fn now() -> (u64, u64, u64) {
+        let b = info(MACH_TASK_BASIC_INFO);
+        (b[1], info(TASK_VM_INFO)[18], b[2])
     }
 }
 
@@ -121,22 +125,26 @@ fn mem(sjoc: &str, items: &[Item], tinylm: &str) {
     const MIB: f64 = (1 << 20) as f64;
     let p0 = mach::now();
     let oc = Oc::load(Path::new(sjoc)).unwrap_or_else(|_| die("cannot load the .sjoc"));
-    // the first row 0c can score (an unscorable row returns before the forward pass)
-    let it = items.iter().find(|it| score(&oc, it, &it.prefix)[0].is_some()).unwrap_or_else(|| die("no scorable row in the items"));
+    // every row 0c can score (an unscorable row returns before the forward pass)
+    let scorable: Vec<&Item> = items.iter().filter(|it| score(&oc, it, &it.prefix)[0].is_some()).collect();
+    if scorable.is_empty() {
+        die("no scorable row in the items");
+    }
     let p1 = mach::now();
     let m = TinyLm::load(Path::new(tinylm)).unwrap_or_else(|_| die("cannot load the .sjtl"));
-    score_m(&m, it, &it.prefix);
+    scorable.iter().for_each(|it| score_m(&m, it, &it.prefix));
     let p2 = mach::now();
     let mib = |x: u64| x as f64 / MIB;
-    println!("{:<28}{:>12}{:>20}", "point", "RSS MiB", "phys_footprint MiB");
-    for (name, p) in [("start", p0), ("0c loaded, one row scored", p1), ("M loaded, one row scored", p2)] {
-        println!("{name:<28}{:>12.1}{:>20.1}", mib(p.0), mib(p.1));
+    println!("rows scored {} of {}", scorable.len(), items.len());
+    println!("{:<30}{:>10}{:>20}{:>16}", "point", "RSS MiB", "phys_footprint MiB", "RSS max MiB");
+    for (name, p) in [("start", p0), ("0c loaded, all rows scored", p1), ("M loaded, all rows scored", p2)] {
+        println!("{name:<30}{:>10.1}{:>20.1}{:>16.1}", mib(p.0), mib(p.1), mib(p.2));
     }
-    let d = |a: (u64, u64), b: (u64, u64)| (mib(b.0) - mib(a.0), mib(b.1) - mib(a.1));
-    let (one, both) = (d(p0, p1), d(p0, p2));
+    let (one, both, peak) = ((mib(p1.0) - mib(p0.0), mib(p1.1) - mib(p0.1)), (mib(p2.0) - mib(p0.0), mib(p2.1) - mib(p0.1)), mib(p2.2) - mib(p0.0));
     println!("0c alone:      RSS +{:.1} MiB, phys_footprint +{:.1} MiB", one.0, one.1);
     println!("0c and M:      RSS +{:.1} MiB, phys_footprint +{:.1} MiB", both.0, both.1);
-    println!("gate (RSS increment of both <= 250 MiB): {}", if both.0 <= 250.0 { "within" } else { "EXCEEDED" });
+    println!("peak:          RSS max {:.1} MiB = start RSS +{peak:.1} MiB", mib(p2.2));
+    println!("gate (peak RSS increase <= 250 MiB): {}", if peak <= 250.0 { "within" } else { "EXCEEDED" });
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -160,6 +168,12 @@ fn main() {
     if [out.is_some(), latency, mem_mode].iter().filter(|x| **x).count() != 1 {
         die("exactly one of --out FILE / --latency / --mem");
     }
+    if flag("--no-context") && !latency {
+        die("--no-context only goes with --latency");
+    }
+    if opt("--tinylm").is_some() && out.is_some() {
+        die("--tinylm does not go with --out");
+    }
     let items = read_items(&items_path);
     let tinylm = opt("--tinylm");
     if mem_mode {
@@ -168,15 +182,17 @@ fn main() {
     }
     let oc = Oc::load(Path::new(&sjoc)).unwrap_or_else(|e| die(&e.to_string()));
     if let Some(out) = out {
-        let mut f = std::io::BufWriter::new(std::fs::File::create(&out).unwrap_or_else(|_| die(&format!("cannot create {out}"))));
+        // all rows first: a non-finite score exits before the file is created
+        let mut text = String::new();
         for it in &items {
+            // `score` is all Some (finite, so valid JSON) or all None
             let ll = match score(&oc, it, &it.prefix).as_slice() {
                 xs @ [Some(_), ..] => format!("[{}]", xs.iter().map(|x| x.unwrap().to_string()).collect::<Vec<_>>().join(", ")),
                 _ => "null".to_string(),
             };
-            writeln!(f, "{{\"i\": {}, \"ll\": {ll}}}", it.row).unwrap();
+            text += &format!("{{\"i\": {}, \"ll\": {ll}}}\n", it.row);
         }
-        f.flush().unwrap();
+        std::fs::write(&out, text).unwrap_or_else(|_| die(&format!("cannot write {out}")));
         return;
     }
     let no_context = flag("--no-context");

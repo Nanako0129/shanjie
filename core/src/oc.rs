@@ -2,7 +2,7 @@
 //! reading) of the 0c model (`Funmula/0c-sequence-d512`, MIT; an external model, not one of ours).
 //!
 //! The file is written only by tools/oc_ref.py (`write`), whose module docstring is the layout, and `tools/oc_ref.py`'s
-//! `Session.run` is the forward this file repeats (float32 here, float64 there). The sequence layout and the scoring rules are
+//! `Session.run` is the forward this file repeats (oc_ref computes in float32 by default; only its cross-language golden uses float64). The sequence layout and the scoring rules are
 //! experiments/x0c/score_0c.py's (`feeds_for`, `score`, `check_row`), one sequence per candidate (the model card's layout):
 //!   [BOS] context[-64:] [SEP] reading x n [OUT] candidate[:-1]   at positions 0..L-1, causal attention,
 //! scored at the n positions from [OUT] on. The last syllable is also tried as neutral tone when its base is in the file's
@@ -13,7 +13,7 @@
 //! length and the 4-byte alignment of every tensor, and refuses anything else; it does not read the weights (no scan for NaN: that
 //! would page the whole file in). R2: errors carry a kind only.
 
-use crate::tinylm::{exp_into, gemm, Backend, BATCH};
+use crate::tinylm::{exp_into, gemm, layer_norm, Backend, BATCH};
 use crate::trigram::Mapped;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
@@ -52,6 +52,8 @@ pub enum OcError {
     Io,
     /// Not an SJOC0001 file as tools/oc_ref.py writes it.
     Format,
+    /// A score came out NaN or infinite (`try_score`; `score` turns it into all `None`).
+    NonFinite,
 }
 
 impl std::fmt::Display for OcError {
@@ -59,6 +61,7 @@ impl std::fmt::Display for OcError {
         f.write_str(match self {
             OcError::Io => "cannot read 0c model file (.sjoc)",
             OcError::Format => "bad 0c model file (.sjoc)",
+            OcError::NonFinite => "0c produced a non-finite score",
         })
     }
 }
@@ -111,9 +114,11 @@ pub struct Oc {
 /// `n` f32 at byte offset `at` of `b`, or `None` out of range or misaligned (the part of the range that does not fit f32 slices).
 fn f32_at(b: &[u8], at: usize, n: usize) -> Option<&[f32]> {
     let part = b.get(at..at.checked_add(n.checked_mul(4)?)?)?;
-    // SAFETY: every bit pattern is a valid f32; `align_to` only hands back the aligned middle, and the ends must be empty.
-    let (pre, mid, post) = unsafe { part.align_to::<f32>() };
-    (pre.is_empty() && post.is_empty()).then_some(mid)
+    if !(part.as_ptr() as usize).is_multiple_of(align_of::<f32>()) {
+        return None;
+    }
+    // SAFETY: `part` is exactly 4 * n readable bytes, its address is 4-aligned (checked), and every bit pattern is a valid f32.
+    Some(unsafe { std::slice::from_raw_parts(part.as_ptr().cast::<f32>(), n) })
 }
 
 /// The tone mark of the last character (2 to 5) or 1, and the base without it (score_0c.syllable).
@@ -256,12 +261,24 @@ impl Oc {
     /// the vocabulary, a candidate whose length is not the syllable count, a syllable count outside 2..=32, or a syllable whose base
     /// the model does not know (score_0c.check_row). Context characters outside the vocabulary are UNK; only the last `CONTEXT`
     /// count. Syllables are zhuyin with an optional tone mark last (`ˊˇˋ˙`, none = first tone).
+    ///
+    /// A non-finite score is never returned: the whole row becomes `None`, as an unscorable one. A caller that must tell the two
+    /// apart uses `try_score`.
     pub fn score(&self, context: &str, syllables: &[&str], candidates: &[&str]) -> Vec<Option<f64>> {
         self.score_with(Backend::DEFAULT, context, syllables, candidates)
     }
 
     pub fn score_with(&self, be: Backend, context: &str, syllables: &[&str], candidates: &[&str]) -> Vec<Option<f64>> {
-        let none = vec![None; candidates.len()];
+        self.try_score_with(be, context, syllables, candidates).unwrap_or_else(|_| vec![None; candidates.len()])
+    }
+
+    /// `score`, but `Err(OcError::NonFinite)` when any log10 is NaN or infinite (a corrupt weight file, or an overflow).
+    pub fn try_score(&self, context: &str, syllables: &[&str], candidates: &[&str]) -> Result<Vec<Option<f64>>, OcError> {
+        self.try_score_with(Backend::DEFAULT, context, syllables, candidates)
+    }
+
+    pub fn try_score_with(&self, be: Backend, context: &str, syllables: &[&str], candidates: &[&str]) -> Result<Vec<Option<f64>>, OcError> {
+        let none = Ok(vec![None; candidates.len()]);
         let n = syllables.len();
         if candidates.is_empty() || !(MIN_SYL..=MAX_SYL).contains(&n) {
             return none;
@@ -284,7 +301,11 @@ impl Oc {
             sounds[n - 1].1 = NEUTRAL;
             ll = ll.iter().zip(run(&sounds)).map(|(a, b)| a.max(b)).collect();
         }
-        ll.into_iter().map(|x| Some(x / LN10)).collect()
+        let ll: Vec<f64> = ll.into_iter().map(|x| x / LN10).collect();
+        if ll.iter().any(|x| !x.is_finite()) {
+            return Err(OcError::NonFinite);
+        }
+        Ok(ll.into_iter().map(Some).collect())
     }
 
     /// (base id, tone id) of one syllable; `None` when the base is not in the file.
@@ -319,7 +340,7 @@ impl Oc {
                 x[(bi * l + p) * d..][..d].iter_mut().zip(e.iter().zip(&ty[t * d..][..d])).for_each(|(o, (a, b))| *o = a + b);
             }
         }
-        let mut x = layer_norm(&x, self.w(self.emb_norm));
+        let mut x = layer_norm(&x, self.w(self.emb_norm), None);
         let nr = self.n_rope;
         let inv_freq = self.w(self.inv_freq);
         let (mut cos, mut sin) = (vec![0f32; l * nr], vec![0f32; l * nr]);
@@ -331,15 +352,19 @@ impl Oc {
         }
         let ffn = self.ffn;
         for ly in &self.layers {
-            let h = match ly.attn_norm {
-                Some(w) => layer_norm(&x, self.w(w)),
-                None => x.clone(),
+            let normed;
+            let h: &[f32] = match ly.attn_norm {
+                Some(w) => {
+                    normed = layer_norm(&x, self.w(w), None);
+                    &normed
+                }
+                None => &x,
             };
-            let (q, k, v) = (mm(be, &h, self.w(ly.wq), (rows, d, d)), mm(be, &h, self.w(ly.wk), (rows, d, d)), mm(be, &h, self.w(ly.wv), (rows, d, d)));
+            let (q, k, v) = (mm(be, h, self.w(ly.wq), (rows, d, d)), mm(be, h, self.w(ly.wk), (rows, d, d)), mm(be, h, self.w(ly.wv), (rows, d, d)));
             let att = self.attention(be, (&q, &k, &v), (&cos, &sin), (nb, l));
             let o = mm(be, &att, self.w(ly.wo), (rows, d, d));
             x.iter_mut().zip(&o).for_each(|(a, b)| *a += b);
-            let u = mm(be, &layer_norm(&x, self.w(ly.mlp_norm)), self.w(ly.w1), (rows, d, 2 * ffn));
+            let u = mm(be, &layer_norm(&x, self.w(ly.mlp_norm), None), self.w(ly.w1), (rows, d, 2 * ffn));
             // the first `ffn` columns through GELU, times the other `ffn` (the graph's Split)
             let g: Vec<f32> = u.chunks_exact(2 * ffn).flat_map(|r| r[..ffn].iter().zip(&r[ffn..]).map(|(a, b)| gelu(*a) * b)).collect();
             let o = mm(be, &g, self.w(ly.w2), (rows, ffn, d));
@@ -347,24 +372,28 @@ impl Oc {
         }
         // the n positions from [OUT] on, of each sequence
         let proj: Vec<f32> = (0..nb).flat_map(|bi| x[(bi * l + l - n) * d..(bi * l + l) * d].iter().copied()).collect();
-        let h = layer_norm(&proj, self.w(self.final_norm));
+        let h = layer_norm(&proj, self.w(self.final_norm), None);
         let mut h = mm(be, &h, self.w(self.head_w), (nb * n, d, d));
         h.iter_mut().for_each(|v| *v = gelu(*v));
-        let h = layer_norm(&h, self.w(self.head_norm));
+        let h = layer_norm(&h, self.w(self.head_norm), None);
         let nt = self.n_tok;
-        let mut logits = vec![0f32; nb * n * nt];
-        gemm(be, &h, dec, &mut logits, (nb * n, d, nt), true);
         let dec_b = self.w(self.dec_b);
+        // one sequence's n x n_tok logits at a time (not nb of them at once)
+        let mut logits = vec![0f32; n * nt];
         let (mut ll, mut z, mut e) = (vec![0f64; nb], vec![0f32; self.out_ids.len()], vec![0f32; self.out_ids.len()]);
-        for (r, row) in logits.chunks_exact_mut(nt).enumerate() {
-            row.iter_mut().zip(dec_b).for_each(|(a, b)| *a += b);
-            // log-softmax over the output columns; a candidate's character id is its own column (checked by `parse`)
-            z.iter_mut().zip(&self.out_ids).for_each(|(o, &id)| *o = row[id as usize]);
-            let m = z.iter().copied().fold(f32::NEG_INFINITY, f32::max);
-            z.iter_mut().for_each(|a| *a -= m);
-            exp_into(be, &z, &mut e);
-            let lse = m as f64 + e.iter().map(|&a| a as f64).sum::<f64>().ln();
-            ll[r / n] += row[cands[r / n][r % n] as usize] as f64 - lse;
+        for (bi, hs) in h.chunks_exact(n * d).enumerate() {
+            gemm(be, hs, dec, &mut logits, (n, d, nt), true);
+            for (r, row) in logits.chunks_exact_mut(nt).enumerate() {
+                row.iter_mut().zip(dec_b).for_each(|(a, b)| *a += b);
+                // log-softmax over the output columns; a candidate's character id is its own column (checked by `parse`)
+                z.iter_mut().zip(&self.out_ids).for_each(|(o, &id)| *o = row[id as usize]);
+                let m = z.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+                z.iter_mut().for_each(|a| *a -= m);
+                exp_into(be, &z, &mut e);
+                let lse = m as f64 + e.iter().map(|&a| a as f64).sum::<f64>().ln();
+                ll[bi] += row[cands[bi][r] as usize] as f64 - lse;
+            }
+            logits.fill(0.0);
         }
         ll
     }
@@ -413,19 +442,6 @@ fn mm(be: Backend, a: &[f32], w: &[f32], dims: (usize, usize, usize)) -> Vec<f32
     let mut c = vec![0f32; dims.0 * dims.2];
     gemm(be, a, w, &mut c, dims, false);
     c
-}
-
-/// LayerNorm over the last axis (the row length is `w`'s), eps 1e-5, weight only: (x - mean) / sqrt(var + eps) * w, as numpy.
-fn layer_norm(x: &[f32], w: &[f32]) -> Vec<f32> {
-    let d = w.len();
-    let mut out = Vec::with_capacity(x.len());
-    for row in x.chunks_exact(d) {
-        let mu = row.iter().map(|&v| v as f64).sum::<f64>() / d as f64;
-        let var = row.iter().map(|&v| (v as f64 - mu).powi(2)).sum::<f64>() / d as f64;
-        let inv = 1.0 / (var + 1e-5).sqrt();
-        out.extend(row.iter().zip(w).map(|(&v, &w)| ((v as f64 - mu) * inv) as f32 * w));
-    }
-    out
 }
 
 /// Exact (erf) GELU: x * 0.5 * (1 + erf(x / sqrt 2)).
