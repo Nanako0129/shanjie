@@ -1,6 +1,6 @@
 # E-E 真引擎重播 `shanjie-replay`（研究工具，不出貨）
 
-狀態：草稿（2026-10-18）；plan-verifier 第一次 REVISE（4 項）已照改，送第二次審查。
+狀態：READY（2026-10-18 第二次審查）；plan-verifier 第一次 REVISE 的 4 項照改。
 
 ## 0. 起因
 
