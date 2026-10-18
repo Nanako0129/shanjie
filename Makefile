@@ -45,7 +45,7 @@ test-python:
 	python3 -m unittest tools/test_build_overlay.py
 	python3 -W ignore -m unittest tools/test_holdout_guard.py
 	python3 -W ignore -m unittest experiments/model-v6/test_force_classes.py
-	python3 -W ignore -m unittest tools/test_triage.py
+	python3 -W ignore -m unittest tools/test_triage.py tools/test_shardcli.py
 	python3 -W ignore -m unittest tools/test_build_trigram.py
 	python3 -W ignore -m unittest tools/test_build_digits.py
 	cd experiments/digits && python3 -W ignore -m unittest test_digits

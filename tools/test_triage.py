@@ -365,6 +365,41 @@ class Run(unittest.TestCase):
                 T.check_same_run({**new, k: v}, new)
 
 
+class Jobs(unittest.TestCase):
+    def test_parallel_cells_write_the_same_json_and_rows(self):
+        """`run --jobs 3` writes byte for byte the JSON and rows files of `--jobs 1` (the CLI, models and lexicon are faked)."""
+        import argparse
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as td:
+            files = {}
+            for name, size, private in (("dev302", 30, False), ("fw", 10, False), ("discordtune", 20, True)):
+                p = os.path.join(td, name + ".txt")
+                with open(p, "w", encoding="utf-8") as f:
+                    f.write("x" * size)
+                files[name] = (p, private)
+
+            def fake_cell(cli, lm, tl, prof, f, lex, par, lenient, report, tdir, kn, tri):
+                cn = T.empty_counts()
+                cn["n"], cn["errors"] = os.path.getsize(f) + len(prof), len(prof)
+                return cn, [("C", 1, "0.5", 0), ("A1", 2, "1-2", 1)]
+
+            out = {}
+            for jobs in (1, 3):
+                with mock.patch.multiple(T, OUT_DIR=os.path.join(td, f"out{jobs}"), load_lenient=lambda: None, kn_tag=lambda p: "",
+                                         tinylm_params=lambda p: {"chat": (0.3, 2.0, 0.25), "formal": (0.7, 2.0, 1.0)},
+                                         tri_tag=lambda p: "", git_head=lambda: "abc", run_cell=fake_cell, set_file=lambda n, r: files[n]), \
+                        mock.patch.object(T.Lex, "load", lambda: None), mock.patch.object(T.bench, "sha_file", lambda p: "h"), \
+                        mock.patch("sys.stderr", io.StringIO()):
+                    rows_out = os.path.join(td, f"rows{jobs}")
+                    T.cmd_run(argparse.Namespace(label="L", set=list(files), private_root=td, cli="cli", rows_out=rows_out, jobs=jobs))
+                got = {"json": open(os.path.join(td, f"out{jobs}", "L.json"), encoding="utf-8").read()}
+                got.update({n: open(os.path.join(rows_out, n), encoding="utf-8").read() for n in sorted(os.listdir(rows_out))})
+                out[jobs] = got
+            self.assertEqual(out[1], out[3])
+            self.assertEqual(sorted(out[1]), ["L-dev302-chat.tsv", "L-dev302-formal.tsv", "L-fw-chat.tsv", "L-fw-formal.tsv", "json"])
+            self.assertEqual(list(json.loads(out[3]["json"])["sets"]), ["dev302", "fw", "discordtune"])
+
+
 class Render(unittest.TestCase):
     def test_table_refuses_a_file_with_other_fields(self):
         cn = T.empty_counts()

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Error-bucket triage (docs/contracts/triage.md): where does the shipping setting go wrong, and how many rows is each cause?
 
-  tools/triage.py run --label L [--set NAME ...] [--private-root DIR] [--cli FILE] [--rows-out DIR]
+  tools/triage.py run --label L [--set NAME ...] [--private-root DIR] [--cli FILE] [--rows-out DIR] [--jobs N]
   tools/triage.py table [JSON ...] [--out docs/triage.md]
 
 `run` decodes each set in both profiles with the CLI (shipping setting S: --context --packs acg --tinylm, plus --dump --dump-words
@@ -11,7 +11,7 @@ eval/bench/triage/<label>.json (counts only). Public sets also get a per-row num
 ~/.cache/shanjie/triage), outside the repo; private sets only ever get counts. `table` renders docs/triage.md from the JSON files.
 The holdout is never a set here. Standard library only, except that `tinylm_params` needs numpy (export_sjtl.py's reader), plus tools/bench.py's set table, reference/proto/eval.py's `lenient` and reference/proto/lm_eval.py's `kn_tag`).
 """
-import argparse, collections, importlib.util, json, os, struct, subprocess, sys, tempfile
+import argparse, collections, importlib.util, json, multiprocessing, os, struct, subprocess, sys, tempfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -410,6 +410,13 @@ def check_same_run(old, new):
         raise SystemExit(f"triage: the existing file was made with a different {', '.join(bad)}; use another --label or delete it")
 
 
+_CELL = None
+
+
+def _run_cell_job(job):
+    return _CELL(job)
+
+
 def cmd_run(a):
     cli = a.cli or os.path.join(ROOT, "target/release/shanjie-eval")
     lm, tl = os.path.join(ROOT, "data/lm/bigram.sjlm"), os.path.join(ROOT, "data/lm/tinylm.sjtl")
@@ -423,18 +430,36 @@ def cmd_run(a):
             "alpha_tau_delta": {p: list(v) for p, v in par.items()}}
     check_same_run(doc, meta)
     doc.update(meta)
-    for name in a.set or SMALL_SETS:
-        f, private = set_file(name, a.private_root)
+    names = a.set or SMALL_SETS
+    files = {name: set_file(name, a.private_root) for name in names}
+    cells = [(name, prof) for name in names for prof in PROFILES]
+
+    def cell(job):
+        name, prof = job
+        with tempfile.TemporaryDirectory() as td:   # the dump and the word dump hold sentences: they are deleted here
+            cn, per = run_cell(cli, lm, tl, prof, files[name][0], lex, par[prof], lenient, name == "user-reported", td, kn, tri)
+        print(f"triage: {name} {prof}: n={cn['n']} errors={cn['errors']} {cn['buckets']}", file=sys.stderr, flush=True)
+        return job, (cn, per)
+
+    if a.jobs > 1:
+        # One process per (set, profile) cell, biggest file first; fork shares the loaded lexicon and `lenient` (not picklable).
+        global _CELL
+        _CELL = cell
+        order = sorted(cells, key=lambda j: -os.path.getsize(files[j[0]][0]))
+        with multiprocessing.get_context("fork").Pool(min(a.jobs, len(cells))) as pool:
+            got = dict(pool.imap_unordered(_run_cell_job, order))
+    else:
+        got = dict(map(cell, cells))
+    for name in names:
+        f, private = files[name]
         doc["sets"][name] = {"private": private, "file_sha256": bench.sha_file(f), "profiles": {}}
         for prof in PROFILES:
-            with tempfile.TemporaryDirectory() as td:   # the dump and the word dump hold sentences: they are deleted here
-                cn, per = run_cell(cli, lm, tl, prof, f, lex, par[prof], lenient, name == "user-reported", td, kn, tri)
+            cn, per = got[(name, prof)]
             doc["sets"][name]["profiles"][prof] = cn
             if not private:
                 os.makedirs(a.rows_out, exist_ok=True)
                 with open(os.path.join(a.rows_out, f"{a.label}-{name}-{prof}.tsv"), "w", encoding="utf-8") as o:
                     o.write("".join(f"{i}\t{code}\t{r}\t{m}\t{e}\n" for i, (code, r, m, e) in enumerate(per, 1)))
-            print(f"triage: {name} {prof}: n={cn['n']} errors={cn['errors']} {cn['buckets']}", file=sys.stderr)
     os.makedirs(OUT_DIR, exist_ok=True)
     with open(path, "w", encoding="utf-8") as o:
         json.dump(doc, o, ensure_ascii=False, indent=1)
@@ -535,6 +560,7 @@ def main():
     r.add_argument("--private-root", default=bench.DEFAULT_PRIVATE)
     r.add_argument("--cli")
     r.add_argument("--rows-out", default=os.path.expanduser("~/.cache/shanjie/triage"))
+    r.add_argument("--jobs", type=int, default=1, help="run the (set, profile) cells in this many processes (fork; the JSON is the same)")
     t = sub.add_parser("table")
     t.add_argument("json", nargs="*")
     t.add_argument("--out", default=DOC)
