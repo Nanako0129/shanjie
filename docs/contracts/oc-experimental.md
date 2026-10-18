@@ -72,10 +72,10 @@
   - **量測程式**（修訂二）`core/examples/oc_score.rs`，`cargo run --release -p core --example oc_score -- …`；不改 CLI、不改引擎：
     - `--sjoc PATH --items ITEMS.tsv --out SCORES.jsonl`：每列一行 `{"i": 列號, "ll": [每個候選的 log10] 或 null}`（整列打不了是 null），規則和 `score()` 相同。給 A4 的一致性用。
     - `--sjoc PATH --items ITEMS.tsv --latency [--no-context] [--tinylm M.sjtl]`（`--no-context` 把每列的前文換成空字串）：單執行緒，每列計時一次 `score()`（給 `--tinylm` 時同一批列也計時 M 的打分），跑 3 輪，報每輪的 p50／p95 與 3 輪的中位數；p95 取排序後第 int(n × 0.95) 個，和 CLI 相同。
-    - `--sjoc PATH --items ITEMS.tsv --mem --tinylm M.sjtl`（只在 macOS）：用 `task_info` 讀 `MACH_TASK_BASIC_INFO` 的 `resident_size`（RSS）與 `TASK_VM_INFO` 的 `phys_footprint`（libc 的 extern 宣告，零套件）。量三個點：程式開始、載入 0c 並打一列之後、再載入 M 並打一列之後；報 0c 一個的增量與兩個合計的增量。
+    - `--sjoc PATH --items ITEMS.tsv --mem --tinylm M.sjtl`（只在 macOS）：用 `task_info` 讀 `MACH_TASK_BASIC_INFO` 的 `resident_size`（RSS）與 `TASK_VM_INFO` 的 `phys_footprint`（libc 的 extern 宣告，零套件）。量三個點：程式開始、載入 0c 並打完所有列之後、再載入 M 並打完所有列之後；每個點報當下的 RSS 與 phys_footprint，另報 `MACH_TASK_BASIC_INFO` 的 `resident_size_max`（RSS 峰值，含打分時的暫時緩衝；`/code-review` 指出只量打完一列後的值會漏掉長列的峰值）。報 0c 一個的增量與兩個合計的增量，峰值另列。
 - **A4 量測**（main 做）：
   - **一致性**（GCP，一台 VM 上做完）：重新轉檔、`oc_ref.py --export` 產 dev302 聊天的 `ITEMS.tsv`、`oc_score --out` 產 Rust 分數、`oc_ref.py --compare … --rust SCORES.jsonl` 比對。(1) Rust 對 numpy（同一份 f32 檔）：log10 最大差；(2) Rust 對 ORT：log10 差的 p99 與最大值，以及「8 個候選裡分數最高的那個」相同的列數比例。
-  - **延遲**（Mac，空閒、單執行緒）：不給前文是 `oc_score --sjoc … --items ITEMS.tsv --latency --no-context --tinylm data/lm/tinylm.sjtl`；給 64 字前文是 `oc_score --sjoc … --items ITEMS-64.tsv --latency --tinylm data/lm/tinylm.sjtl`。M 在同一場當基準。這是少量的單句量測，允許在 Mac 上做。
+  - **延遲**（Mac，空閒、單執行緒；用 `VECLIB_MAXIMUM_THREADS=1` 跑，Accelerate 才不會自己開多執行緒）：不給前文是 `oc_score --sjoc … --items ITEMS.tsv --latency --no-context --tinylm data/lm/tinylm.sjtl`；給 64 字前文是 `oc_score --sjoc … --items ITEMS-64.tsv --latency --tinylm data/lm/tinylm.sjtl`。M 在同一場當基準。這是少量的單句量測，允許在 Mac 上做。
   - **大小與記憶體**（Mac）：檔案大小；`oc_score --mem` 的 RSS 與 phys_footprint 增量（映射讓兩者分家：RSS 會算映射頁，footprint 不算）。
 
 ## 3. 驗收
@@ -85,7 +85,7 @@
   - 用 numpy 參考實作算出分數表。`core/tests/oc_tiny.rs` 讀同一份檔，分數要和表一致：容差 1×10⁻⁵（log10），沿用 tinylm golden 的做法。
   - 項目要涵蓋：字表外的字、空前文、需要截掉的長前文、單音節（不打分）、輕聲另試、33 個音節（超過上限，不打分）。
 - **真模型一致性**（不在 CI；main 跑，數字寫進研究紀錄）：A2 的 numpy 對 ORT ≤ 1×10⁻⁴；Rust 對 numpy（同一份 f32 檔）≤ 1×10⁻⁴；dev302 上 Rust「分數最高的候選」和 ORT 相同的列 ≥ 99%。（修訂二：int8 門檻刪掉，因為不出 int8。）
-- **記憶體門檻**：`oc_score --mem` 量到的 RSS 增量合計（程式開始 → M 和 0c 都載入並各打一列）≤ 250 MiB（維護者 2026-10-18 定的重排模型上限；指標用 RSS，因為它把映射頁也算進去，是比較嚴的那個）；phys_footprint 只報。
+- **記憶體門檻**：`oc_score --mem` 量到的 RSS 峰值增量（程式開始的 RSS → M 和 0c 都載入並打完所有列之後的 `resident_size_max`）≤ 250 MiB（維護者 2026-10-18 定的重排模型上限；指標用 RSS，因為它把映射頁也算進去，是比較嚴的那個）；phys_footprint 只報。
 - **延遲門檻**：照 `rerank-size` §4，每列 8 個候選的重排 p95 ≤ 50 ms（Mac 空閒、單執行緒，用 `ITEMS-64.tsv` 那一場：每列都是 64 字前文）。
 - **突變**（每一項都要讓 golden 測試失敗，build error 不算）：
   - 拿掉 RoPE；
@@ -95,7 +95,7 @@
   - GELU 改成 tanh 近似；
   - 輸出頭少一個 LayerNorm；
   - 輕聲不另試。
-- `make test-rust`（在 188 的 WSL 跑完整的）、CI 全綠；Swift 與殼都沒改。
+- `make test-rust`（完整的在另一台 Linux 機器上跑）、CI 全綠；Swift 與殼都沒改。
 
 ## 4. 停止條件、預算
 
@@ -117,6 +117,7 @@
 - 設定開關、融合值（α／τ／δ）、關於頁與 LICENSES 的 MIT 署名、模型檔怎麼發佈、CLI 與重播工具支援。
 - 書面設定（照研究顧問的建議只接聊天，B 再確認）。
 - 閒置後第一鍵的延遲（映射頁被系統丟掉再讀回；三元表已有同樣性質，KPI 有這一欄）：B 片在實機量。
+- **R8 的衝突（`/code-review` 2026-10-19 指出）**：`docs/PLAN.md` 開頭與 §7 R8 規定「下載的、第三方的或使用者指定的權重放在 XPC helper」，例外只涵蓋自己訓練、自寫格式、隨 App 打包的 S7 字元模型。0c 是第三方權重，若照研究顧問的建議在開關打開時才下載，就同時是下載的權重。這一片只寫離線的推論模組、不接進引擎，所以不違反 R8；B 片接線之前要先決定：照 R8 放進 helper，或放寬 R8（放寬要先過 security-reviewer，再由維護者決定，同一個 PR 改 R8 的文字）。
 - 模型檔怎麼發佈：研究顧問建議開關打開時才下載（資料類 Release、SHA-256 釘在 `data/*.sha256`），不包進 App；B 片定。
 - int8、f16 等其他格式：修訂二不做；要做另開一片。
 
@@ -130,3 +131,4 @@
 | plan-verifier（修訂二，2026-10-19） | REVISE：沒有任何交付物能讓 main 在真實的列上跑 Rust，A4 與 §3 的一致性、延遲、記憶體都量不到；RSS 怎麼讀沒寫 | 照最小修改：A3 加量測程式 `core/examples/oc_score.rs`（分數檔、延遲、記憶體三種模式，記憶體用 `task_info`）；A2 加 `oc_ref.py --export／--rust`；A4 與記憶體門檻指向它們 |
 | plan-verifier 收尾（修訂二，2026-10-19） | REVISE：延遲門檻要「給 64 字前文」，但 dev302 的前文幾乎都很短，量測程式產生不出這個條件；P3：`--rust` 的指令寫法不完整 | 第二次 REVISE 逐項處置，兩項都 FIX：`oc_ref.py --export --pad-context 64` 產 `ITEMS-64.tsv`（固定公開文字補到 64 字），A4 與延遲門檻寫明用它；指令改成完整寫法 |
 | plan-verifier 收尾（修訂二，第 2 次，2026-10-19） | READY | — |
+| `/code-review`（2026-10-19，786fc165） | 14 項 | 修：test_oc_ref 接進 make test-python、Rust 對 numpy 改用逐候選的 numpy、非有限值與重複字表要停、延遲加 VECLIB_MAXIMUM_THREADS=1、記憶體門檻改量峰值、對齊檢查不靠 align_to、契約拿掉主機名、convert_oc 說明、oc.rs 註解與小重構、量測程式拒絕無關旗標。延後：R8 的衝突寫進 §5，B 片接線前決定 |

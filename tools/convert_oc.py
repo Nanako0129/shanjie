@@ -2,7 +2,9 @@
 
   python3 tools/convert_oc.py --model-dir M --out oc.sjoc      (needs the onnx package: Colab or GCP, not the Mac)
 
-Read from the graph (2026-10-19 full dump, commit 66eb4a81) and checked here, so a different export stops instead of converting wrong:
+Read from the graph (2026-10-19 full dump, commit 66eb4a81). The pinned SHA-256 already stops any other export; the checks below
+confirm that this graph is the structure the converter assumes (the output bias val_779 and the RoPE table `expand` are taken by name
+and only the A2 comparison with ONNX Runtime checks their roles):
 - named initializers: the embeddings, every LayerNorm weight (layers.N.attn_norm only for N >= 1; layer 0's attention has none), the
   head (lm_head.dense, lm_head.norm), the tied decoder.weight; `out_ids` = every token id but 0-3, 5 and 7 (so 4, 6, 8, 9, ...: each
   character id c at position c - 6, score_0c.py's target_ids); the output bias is `val_779`, gathered by out_ids; RoPE's inverse

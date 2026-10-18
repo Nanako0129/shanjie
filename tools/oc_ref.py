@@ -62,6 +62,8 @@ def write(path, cfg, T, chars, bases, neutral, out_ids, src_sha):
         raise ValueError("tensor names differ from the layout")
     if len(chars) != c["n_tok"] - 8 or any(len(ch) != 1 for ch in chars) or len(bases) != c["n_base"] - 2:
         raise ValueError("vocabulary sizes differ from the header")
+    if len(set(chars)) != len(chars) or len(set(bases)) != len(bases) or any("\n" in w or not w for w in [*bases, *neutral]):
+        raise ValueError("duplicate characters or bases, or an empty / multi-line base (core/src/oc.rs refuses them too)")
     if c["d"] % c["n_head"] or 2 * c["n_rope"] != c["d"] // c["n_head"]:
         raise ValueError(f"bad config {c}")
     o = np.asarray(out_ids)
@@ -228,7 +230,7 @@ def compare(model_dir, path, dump, dev, rust=None):
             if line.strip():
                 rec = json.loads(line)
                 r[rec["i"]] = rec["ll"]
-    A, B, R = [], [], []
+    A, B, U, R = [], [], [], []   # ORT, numpy (prefix tree, as ORT), numpy one sequence per candidate (as Rust), Rust
     for i, prefix, syl, cs in items(dump, dev):
         try:
             s0.check_row(ort, syl, cs)
@@ -239,12 +241,13 @@ def compare(model_dir, path, dump, dev, rust=None):
         A.append(np.array(s0.score(ort, prefix, syl, cs)) / math.log(10))
         B.append(np.array(s0.score(ref, prefix, syl, cs)) / math.log(10))
         if rust:
-            if r.get(i) is None or len(r[i]) != len(cs):
+            if r.get(i) is None or len(r[i]) != len(cs) or not all(isinstance(x, (int, float)) and math.isfinite(x) for x in r[i]):
                 raise SystemExit(f"oc_ref: row {i} is scorable but Rust gave {r.get(i)!r}")
             R.append(np.array(r[i]))
+            U.append(np.array(s0.score(ref, prefix, syl, cs, packed=False)) / math.log(10))
     stats(f"{os.path.basename(path)} numpy vs ORT", B, A)
     if rust:
-        stats("Rust vs numpy", R, B)
+        stats("Rust vs numpy (one sequence per candidate, as Rust)", R, U)
         stats("Rust vs ORT", R, A)
 
 

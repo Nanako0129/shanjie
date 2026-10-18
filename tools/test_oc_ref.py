@@ -1,12 +1,15 @@
 """tools/oc_ref.py on a tiny random model: the file round trip with 4-byte aligned tensors, and the forward's mask / positions logic
 (one run per row as a prefix tree must equal one run per candidate, through experiments/x0c/score_0c.py's own feeds)."""
 import os
+import sys
 import tempfile
 import unittest
 
 import numpy as np
 
-import oc_ref
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+import oc_ref  # noqa: E402
 
 CFG = {"n_layer": 2, "n_head": 2, "d": 16, "ffn": 12, "n_tok": 8 + 6, "n_out": 8, "n_base": 2 + 3, "n_tone": 6, "n_type": 3,
        "n_rope": 4}
