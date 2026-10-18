@@ -374,9 +374,6 @@ public final class Shell {
     private let spacingStore: SpacingStore
     /// cjk-spacing: space between Han and ASCII letters or digits in the text the shell commits (default off).
     private(set) var spacingOn = false
-    /// cjk-spacing section 1: the character before the cursor, read with the left context at composition start and then the last
-    /// character of each spaced commit; `nil` when unknown. Never logged.
-    var spacingPrev: Character?
     private let englishStore: EnglishStore
     /// zhen-mixed: the experimental English window (default on since digits.md A.3.7; absent in the store is on, a saved off stays off); sent to every engine `build()` makes. Unlike the abbreviation
     /// switch it ships (the app shows it).
@@ -533,7 +530,7 @@ public final class Shell {
     /// Required, like `glassTintStore`.
     /// `punctuationTable`: Apple's punctuation candidate table (s3e); tests pass another path.
     /// `punctuationNames`: Apple's punctuation names (s3f); tests pass another path.
-    /// `spacingStore`: the 中英文之間自動加空格 switch (cjk-spacing section 2). The default is for the tests; the app passes its own.
+    /// `spacingStore`: the 中英文之間自動加空格 switch (cjk-spacing section 2). Required, with no default, like the other stores.
     /// `showsAbbreviation`: whether the abbreviation switch is offered. The default `true` is for the tests; the app passes `false`
     /// (v0.4.0). No test sees the app's value: the release device check does (no 可省略韻母 in the menu).
     public init(resources: URL, panel: CandidatePanel, isSecureInput: @escaping () -> Bool,
@@ -545,7 +542,7 @@ public final class Shell {
                 punctuationTable: URL = PunctuationTable.systemURL,
                 punctuationNames: URL = PunctuationNames.systemURL,
                 showsAbbreviation: Bool = true,
-                spacingStore: SpacingStore = MemorySpacingStore()) {
+                spacingStore: SpacingStore) {
         self.resources = resources
         self.learningDirectory = learningDirectory
         self.dialogs = dialogs
@@ -992,6 +989,10 @@ public final class Shell {
 public final class Session {
     let shell: Shell
     let client: TextClient
+    /// cjk-spacing section 1: the character before the cursor as far as this session knows it; `nil` when unknown. Cleared when
+    /// a composition may start, read from the client by the key that may start it, set to the last character of every commit,
+    /// cleared by a pass-through key, a deactivation and an owner change. Never logged.
+    private var spacingPrev: Character?
 
     public init(shell: Shell, client: TextClient) {
         self.shell = shell
@@ -1034,6 +1035,7 @@ public final class Session {
 
     /// Only the owner acts; a late call from any other controller does nothing at all.
     public func deactivate() {
+        spacingPrev = nil
         guard shell.owner === self else { return }
         // Never send the composition into a field that has just turned secure.
         if shell.composing { finish(mode: shell.isSecureInput() ? 1 : 0) }
@@ -1078,6 +1080,8 @@ public final class Session {
         if shell.composing {
             if let previous = shell.owner { previous.finish(mode: 0) } else { shell.discardOrphan() }
         }
+        shell.owner?.spacingPrev = nil
+        spacingPrev = nil
         shell.owner = self
         return true
     }
@@ -1217,16 +1221,24 @@ public final class Session {
         // Section 2: once per composition, before the key that may start it and so before its
         // first setMarkedText. Only a character key without Control, Option, Command or Caps Lock
         // can start one, so pass-through keys outside a composition never read the client.
-        if !shell.composing && key.kind == KeyMap.char && key.modifiers & ~1 == 0 {
-            shell.spacingPrev = nil
-            let code = engine.setLeftContext(paused ? nil : leftContext())
-            if code != 0 { Log.shell.error("shanjie_engine_set_left_context failed, code \(code)") }
+        // cjk-spacing section 1: p starts as unknown for every key that may start a composition, modifiers or not, and is
+        // taken from the same read.
+        if !shell.composing {
+            spacingPrev = nil
+            if key.kind == KeyMap.char && key.modifiers & ~1 == 0 {
+                let read = paused ? nil : leftContext()
+                spacingPrev = read?.last
+                let code = engine.setLeftContext(read?.han)
+                if code != 0 { Log.shell.error("shanjie_engine_set_left_context failed, code \(code)") }
+            }
         }
         switch engine.key(key) {
         case .ok(let o):
             // handled 0 with nothing to commit is a pure pass-through (s3a rules 1 and 22): the
-            // core's state is unchanged, so the client is not touched either.
+            // core's state is unchanged, so the client is not touched either. The app inserts or moves
+            // the cursor by itself then, so p is unknown (cjk-spacing section 1).
             if o.handled || !o.commit.isEmpty { apply(o) }
+            if !o.handled { spacingPrev = nil }
             return o.handled
         case .failed(let c):
             return fail(c)
@@ -1250,9 +1262,9 @@ public final class Session {
         if !o.commit.isEmpty {
             var text = o.commit
             if shell.spacingOn {
-                text = CJKSpacing.apply(previous: shell.spacingPrev, text: text)
-                shell.spacingPrev = text.last
+                text = CJKSpacing.apply(previous: spacingPrev, text: text)
             }
+            spacingPrev = text.last
             client.insertText(text, replacementRange: NSRange(location: NSNotFound, length: 0))
         }
         if !o.preedit.isEmpty {

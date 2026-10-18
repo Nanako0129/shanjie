@@ -5,7 +5,8 @@ enum CJKSpacing {
 
     private static func kind(_ c: Character) -> Kind {
         if c.isASCII { return c.isLetter || c.isNumber ? .ascii : .other }  // A-Z a-z 0-9 only
-        if c.unicodeScalars.count == 1, let s = c.unicodeScalars.first, LeftContext.isHan(s) { return .han }
+        // The first scalar, like the core's per-scalar is_han: a Han character with a variation selector is still Han.
+        if let s = c.unicodeScalars.first, LeftContext.isHan(s) { return .han }
         return .other
     }
 

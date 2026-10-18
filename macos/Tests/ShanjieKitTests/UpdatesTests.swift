@@ -194,7 +194,7 @@ final class UpdatesTests: XCTestCase {
                           abbreviationStore: MemoryAbbreviationStore(), englishStore: MemoryEnglishStore(), acgPackStore: MemoryAcgPackStore(),
                           glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(),
                           rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(),
-                          appProfileStore: MemoryAppProfileStore())
+                          appProfileStore: MemoryAppProfileStore(), spacingStore: MemorySpacingStore())
         let session = Controller(shell).session
         func updateItems() -> [MenuEntry] { session.menu.filter { $0.action == .installUpdate } }
         XCTAssertTrue(updateItems().isEmpty, "no update state")

@@ -21,6 +21,9 @@ final class CJKSpacingFunctionTests: XCTestCase {
             // supplementary-plane Han (U+20000) on both sides
             (nil, "\u{20000}a", "\u{20000} a"), (nil, "a\u{20000}", "a \u{20000}"),
             ("a", "\u{20000}", " \u{20000}"), ("\u{20000}", "a", " a"),
+            // Han with a variation selector (U+845B U+E0100) is one grapheme whose first scalar is Han, on both sides
+            (nil, "\u{845B}\u{E0100}a", "\u{845B}\u{E0100} a"), (nil, "a\u{845B}\u{E0100}", "a \u{845B}\u{E0100}"),
+            ("\u{845B}\u{E0100}", "a", " a"), ("a", "\u{845B}\u{E0100}", " \u{845B}\u{E0100}"),
             // only punctuation, empty
             (nil, "，。！", "，。！"), ("e", "，", "，"), ("寫", "，", "，"),
             (nil, "", ""), ("e", "", ""),
@@ -82,8 +85,9 @@ final class CJKSpacingShellTests: XCTestCase {
     }
 
     func testOnAddsLeadingSpaceFromTheCharacterBeforeTheCursor() {
+        let shell = makeShell(spacing: true)
         for (before, want) in [("claude", " 你好"), ("2026", " 你好"), ("今天", "你好"), ("今天 ", "你好"), ("今天，", "你好"), ("", "你好")] {
-            let c = Controller(makeShell(spacing: true))
+            let c = Controller(shell)
             c.client.before = before
             c.session.activate()
             c.type("su3cl3")
@@ -138,5 +142,79 @@ final class CJKSpacingShellTests: XCTestCase {
         c.type("2u3")
         c.press(Keys.enter)
         XCTAssertEqual(inserts(c).last, "你 Claude 底")
+    }
+
+    /// Revision one: p is the Han character with a variation selector (U+845B U+E0100), a single grapheme whose first scalar is Han.
+    func testVariationSelectorHanCountsAsHanForTheLeadingSpace() {
+        let c = Controller(makeShell(spacing: true))
+        c.client.before = "\u{845B}\u{E0100}"
+        c.session.activate()
+        c.type("c", flags: .shift)
+        c.type("laude")
+        c.press(Keys.enter)
+        XCTAssertEqual(inserts(c), [" Claude"])
+    }
+
+    /// The leftover of a finished composition: 39 x 你 + Claude is committed by the 40th unit and the pending ㄉ stays in the
+    /// composition (p is the e of Claude). Returns the controller with that first commit made.
+    private func afterTheFirstCommitOfOneComposition() -> Controller {
+        let c = Controller(makeShell(spacing: true))
+        c.session.activate()
+        for _ in 0..<39 { c.type("su3") }
+        c.type("c", flags: .shift)
+        c.type("laude")
+        c.type("2")
+        XCTAssertEqual(inserts(c), [String(repeating: "你", count: 39) + " Claude"])
+        return c
+    }
+
+    /// A commit straight from the candidates, with no key in between, follows the last committed character (the e of Claude).
+    func testPickAfterACommitUsesTheLastCommittedCharacter() {
+        let c = afterTheFirstCommitOfOneComposition()
+        XCTAssertTrue(c.session.candidateSelected(at: 0))
+        c.press(Keys.enter)
+        XCTAssertEqual(inserts(c).count, 2)
+        XCTAssertTrue(inserts(c).last?.hasPrefix(" ") == true, "\(inserts(c).last ?? "")")
+    }
+
+    /// A pass-through key (Cmd+C: the app acts on it, the cursor may move) forgets p, so the same commit gets no leading space.
+    func testPassThroughKeyClearsPBeforeAPick() {
+        let c = afterTheFirstCommitOfOneComposition()
+        XCTAssertFalse(c.type("c", flags: .command)[0], "Cmd+C is not handled")
+        XCTAssertTrue(c.session.candidateSelected(at: 0))
+        c.press(Keys.enter)
+        XCTAssertEqual(inserts(c).count, 2)
+        XCTAssertFalse(inserts(c).last?.hasPrefix(" ") == true, "\(inserts(c).last ?? "")")
+    }
+
+    /// Ctrl+\ starts a composition without reading the client (a modifier), and the composition's first key still clears p: the
+    /// Zhuyin typed to the left of 、 commits as 你好、 with no space after the previous commit that ended in a letter.
+    func testControlKeyStartingACompositionClearsAnOldP() {
+        let c = Controller(makeShell(spacing: true))
+        c.session.activate()
+        c.type("su3")
+        c.type("c", flags: .shift)
+        c.type("laude")
+        c.press(Keys.enter)
+        XCTAssertEqual(inserts(c), ["你 Claude"])
+        c.type("\\", flags: .control)  // 、 starts a composition
+        c.press(123)  // left arrow: the cursor goes before 、
+        c.type("su3cl3")
+        c.press(Keys.enter)
+        XCTAssertEqual(inserts(c).last, "你好、")
+    }
+
+    /// Revision one: the settings model reads the shell's switch, the setter changes it, and the line under it is the contract's.
+    func testSettingsModelFollowsTheShellAndTheNoteIsTheContractsLine() {
+        let shell = makeShell(spacing: true)
+        let model = SettingsModel(shell: shell)
+        XCTAssertTrue(model.spacing)
+        model.setSpacing(false)
+        XCTAssertFalse(shell.spacingOn)
+        XCTAssertFalse(model.spacing)
+        shell.setSpacing(true)
+        XCTAssertTrue(model.spacing)
+        XCTAssertEqual(MenuEntry.Text.spacing, "中英文之間自動加空格")
+        XCTAssertEqual(MenuEntry.Text.spacingNote, "在漢字和半形英文、數字之間自動加一個空格（俗稱「盤古之白」）。只改善解送出的文字。")
     }
 }

@@ -7521,3 +7521,37 @@ XL 比 `MAX_FILE`（67,108,864）小 1,168,880 位元組。錨點：4 個模型 
   - lytune 上 L0 的改壞率低很多（上界 0.13–0.33%，M 出貨值 2.41%），對 M 出貨值淨值 +26 到 +27，但 lytune 只當警示。
   - 〔推論〕訓練列是維基與字幕，n-gram 第一名本來就對約八成，又把 n-gram 分差和名次當特徵給它，模型很容易只靠這兩個特徵判斷「要不要換」，沒學到聊天上 M 的似然本來分得出的差別。這只是推論：沒有做拿掉特徵的對照，照規則也不在這一片補做；要試的話是新的探索片。
 - 方向：照維護者同日的決定，Phase 2 全套不做，預算改投資料與前文回傳。這次 M@64 只多 2 pt，前文回傳單靠更長的前文，增益可能有限，要和資料一起看。
+
+## 2026-10-19：中英文之間自動加空格（PR #217），審查後的修訂一
+
+- 起因：Discord 回饋串 2026-10-18，三位使用者想要漢字和英文、數字之間自動有空格。維護者 2026-10-18 用兩個選擇題決定：
+  - 範圍：英文和數字都加。
+  - 開頭：送出時也看游標前一個字，需要就補一個空格。
+- 做了什麼（契約 `docs/contracts/cjk-spacing.md`，核心與 `core/include/shanjie.h` 沒改）：
+  - 設定視窗「選字」的開關，預設關，UserDefaults 鍵 `cjkSpacing`；殼在 `Session.apply` 送出前呼叫 `CJKSpacing.apply(previous:text:)`，只改善解送出的文字，核心的學習與前文用的字串不變。
+  - 第一版（`945f0522`）之後 `/code-review` 找到 13 項，修訂一（`74abbd9c` 契約、本次實作）處理：
+    - 游標前一個字元 p 改存在每個 `Session`，不放在共用的 `Shell`。每個沒在組字的鍵先把 p 清掉（帶不帶修飾鍵都一樣），能讀 client 的字元鍵用同一次讀取取 p；`leftContext()` 改成回傳（漢字尾巴、最後一個字元）、不改任何狀態。
+    - 每次送出後 p 是這次送出（加空格之後）的最後一個字元；核心回「不處理」的鍵、`deactivate`、換擁有者都清成「無」。
+    - 漢字看一個字的第一個 scalar（U+845B U+E0100 這類異體字選擇符也算漢字），和核心逐 scalar 的 `is_han` 一致。
+    - `Shell.init` 的 `spacingStore:` 必填、沒有預設值，所有呼叫處（含測試）都傳 `MemorySpacingStore()`。
+- 測試：
+  - `CJKSpacingTests.swift` 共 13 個（純函式表格 1 個，Shell／Session 12 個）。修訂一新增：異體字選擇符當 p、送出後直接選字用上一次送出的最後一個字、直通鍵清 p、Ctrl+\ 開始組字清 p、`SettingsModel` 與說明文字；「開著時加開頭空格」那個測試改成六個情況共用一個 Shell。
+  - `make test-swift`：`ShanjieKitTests` 242 個（1 個跳過）、`ShanjieInstallTests` 24 個，0 失敗。
+- 八項突變（一次只改一處；每項先 commit、套用、跑 `swift test --filter CJKSpacing`，結束碼 1，失敗的是斷言不是 build error 或當掉，跑完 `git checkout -- macos` 還原）：
+
+  | # | 突變 | 抓到的測試 |
+  |---|---|---|
+  | 1 | 拿掉開頭的判斷（p 一律當「無」） | `testTable`、`testOnAddsLeadingSpaceFromTheCharacterBeforeTheCursor`、`testLeadingSpaceUsesTheRawLastCharacter`、`testSecondCommitInTheSameCompositionUsesTheLastCommittedCharacter`、`testPickAfterACommitUsesTheLastCommittedCharacter`、`testVariationSelectorHanCountsAsHanForTheLeadingSpace` |
+  | 2 | 拿掉數字（只算字母） | `testTable`、`testOnAddsLeadingSpaceFromTheCharacterBeforeTheCursor` |
+  | 3 | 標點旁邊也加 | `testTable` |
+  | 4 | 關著時也加 | `testOffIsByteIdentical` |
+  | 5 | 部分送出後不更新 p | `testSecondCommitInTheSameCompositionUsesTheLastCommittedCharacter`、`testPickAfterACommitUsesTheLastCommittedCharacter` |
+  | 6（修訂一） | 沒在組字時不清 p | `testControlKeyStartingACompositionClearsAnOldP` |
+  | 7（修訂一） | 核心不處理的鍵不清 p | `testPassThroughKeyClearsPBeforeAPick` |
+  | 8（修訂一） | 漢字判斷改回「整個字只有一個 scalar」 | `testTable`、`testVariationSelectorHanCountsAsHanForTheLeadingSpace` |
+
+- 觀察到的一件事：6 和 7 各只有一個測試抓得到，因為只有「p 從上一次送出留下來」才看得出差別。
+  - 沒在組字的下一個鍵一定先清 p，字元鍵再從 client 重讀；p 會活到下一次送出的只有同一個組字裡的第二次送出（碰到 40 個單位的上限、組字還在），以及用滑鼠點候選這類不經過 `send` 的送出。
+  - 測試因此用「40 個單位上限之後組字還在」的情境：第一次送出以 e 結尾，之後直接選字（`candidateSelected`）或先按一個 Cmd 組合鍵再選字。
+  - 預測列（V3）是組字開始的第一個鍵才出現，選它不是獨立的一次送出。
+- 還沒做、已列在契約：實機驗收（契約 §3，含 Chrome 與 VS Code 的開頭空白），合併前還要 fresh verifier 與 CI。

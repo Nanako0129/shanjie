@@ -195,13 +195,15 @@ extension Session {
     /// "No marked text" is an empty marked range at any location: on 2026-10-06 VS Code, Chrome,
     /// Finder's search field and others reported {insertion, 0} rather than NSTextInputClient's
     /// {NSNotFound, 0}, and one reported {NSNotFound, NSNotFound} (numbers-only log on device).
-    func leftContext() -> String? {
+    ///
+    /// Returns the trailing Han characters for the core and, from the same read, the raw last character for cjk-spacing section 1.
+    /// Changes no state.
+    func leftContext() -> (han: String?, last: Character?) {
         let selected = client.selectedRange(), marked = client.markedRange()
-        guard selected.location != NSNotFound, marked.location == NSNotFound || marked.length == 0 else { return nil }
+        guard selected.location != NSNotFound, marked.location == NSNotFound || marked.length == 0 else { return (nil, nil) }
         let range = LeftContext.range(insertion: selected.location)
-        guard range.length > 0, let text = client.attributedSubstring(from: range)?.string else { return nil }
-        shell.spacingPrev = text.last  // cjk-spacing section 1: the same read, not only the Han tail
-        return LeftContext.han(text, truncated: range.location > 0)
+        guard range.length > 0, let text = client.attributedSubstring(from: range)?.string else { return (nil, nil) }
+        return (LeftContext.han(text, truncated: range.location > 0), text.last)
     }
 
     /// The menu (s3b section 13.2, sw section 3 and S4 sections 3-4), in order.
