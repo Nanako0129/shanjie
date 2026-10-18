@@ -1,4 +1,5 @@
 """p2cdiag on synthetic records: pair extraction, agreement on fixable rows, and the seen / unseen split of separating pairs."""
+import json
 import os
 import sys
 import tempfile
@@ -37,6 +38,29 @@ class TestDiag(unittest.TestCase):
         r = d.diagnose(s, t, cands, {("再", "在")})
         self.assertEqual((r["n_all"], r["agree_all"], r["n_fix"], r["agree_fix"]), (4, 2, 3, 1))
         self.assertEqual((r["n_tr"], r["first_seen"], r["all_seen"]), (2, 1, 1))
+
+
+class TestStudentOption(unittest.TestCase):
+    def run_main(self, td, args):
+        import io
+        from contextlib import redirect_stdout
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            d.main(["--scores", td, "--dumps", td, "--train", os.path.join(td, "t.dump8"), "--sets", "x", *args])
+        return buf.getvalue()
+
+    def test_student_prefix_selects_the_score_file(self):
+        with tempfile.TemporaryDirectory() as td:
+            with open(os.path.join(td, "t.dump8"), "w", encoding="utf-8") as f:
+                f.write("1\t1\t甲乙\t-1\n")
+            with open(os.path.join(td, "x.dump"), "w", encoding="utf-8") as f:
+                f.write("1\t1\t再家\t-1\n1\t2\t在家\t-2\n")
+            recs = {"S": rec(1, [0, 1], [-1, -2]), "T": rec(1, [0, 1], [-2, -1]), "X0C": rec(1, [0, 1], [-2, -1])}
+            for name, r in recs.items():
+                with open(os.path.join(td, f"{name}.x.jsonl"), "w", encoding="utf-8") as f:
+                    f.write(json.dumps(r) + "\n")
+            self.assertIn("S x: student and 0c pick the same candidate on fixable rows 0/1", self.run_main(td, []))      # default S
+            self.assertIn("T x: student and 0c pick the same candidate on fixable rows 1/1", self.run_main(td, ["--student", "T"]))
 
 
 if __name__ == "__main__":

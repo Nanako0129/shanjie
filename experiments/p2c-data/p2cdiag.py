@@ -1,9 +1,9 @@
 """Distillation C, step 0 (experiments/p2c-data/README.md registration): zero-training diagnosis of the P2 student against 0c.
 Numbers only.
 
-  python3 experiments/p2c-data/p2cdiag.py --scores DIR --dumps DIR --train wiki.dump8 pool.dump8 [--sets discordtune chatclause]
+  python3 experiments/p2c-data/p2cdiag.py --scores DIR --dumps DIR --train wiki.dump8 pool.dump8 [--sets discordtune chatclause] [--student S]
 
-DIR/S.SET.jsonl (P2 student, score.py), DIR/X0C.SET.jsonl (0c, score_0c.py), DUMPS/SET.dump (the CLI dump both were scored on).
+DIR/STUDENT.SET.jsonl (STUDENT defaults to S, the P2 student; score.py), DIR/X0C.SET.jsonl (0c, score_0c.py), DUMPS/SET.dump (the CLI dump both were scored on).
 (a) agreement of the two models' own first picks (argmax of ll), on the fixable rows and on all rows with n >= 2;
 (b) on rows 0c alone gets right and the student alone gets wrong, whether the character pair that separates their picks ever
     stands at the same position in two candidates of one training row (the L0 rows' dumps).
@@ -79,13 +79,14 @@ def main(argv=None):
     ap.add_argument("--dumps", required=True)
     ap.add_argument("--train", nargs="+", required=True)
     ap.add_argument("--sets", nargs="+", default=["discordtune", "chatclause"])
+    ap.add_argument("--student", default="S", help="file prefix of the judged student's score files (S = P2, T / R = position-level arms)")
     a = ap.parse_args(argv)
     seen = train_pairs(a.train)
     print(f"training character pairs (same position, two candidates of one row): {len(seen)}")
     for name in a.sets:
-        d = diagnose(read_scores(f"{a.scores}/S.{name}.jsonl"), read_scores(f"{a.scores}/X0C.{name}.jsonl"),
+        d = diagnose(read_scores(f"{a.scores}/{a.student}.{name}.jsonl"), read_scores(f"{a.scores}/X0C.{name}.jsonl"),
                      read_dump(f"{a.dumps}/{name}.dump"), seen)
-        print(f"{name}: student and 0c pick the same candidate on fixable rows {pct(d['agree_fix'], d['n_fix'])}, "
+        print(f"{a.student} {name}: student and 0c pick the same candidate on fixable rows {pct(d['agree_fix'], d['n_fix'])}, "
               f"on all rows with n >= 2 {pct(d['agree_all'], d['n_all'])}; 0c right and student wrong on {d['n_tr']} fixable rows: "
               f"first separating pair seen in training {pct(d['first_seen'], d['n_tr'])}, every separating pair seen "
               f"{pct(d['all_seen'], d['n_tr'])}")
