@@ -1,6 +1,6 @@
 # 每版 KPI 表 `tools/kpi.py`（研究工具，不出貨）
 
-狀態：草稿（2026-10-18）；plan-verifier 第一次 REVISE（5 項）已照改，送第二次審查。
+狀態：草稿（2026-10-18）；plan-verifier 第一次 REVISE（5 項）、第二次 REVISE（1 項）都已照改，送收尾審查。
 
 ## 0. 起因
 
@@ -55,6 +55,7 @@
    - `replay` 遇到 `data/lm/` 的模型檔雜湊不符或多一個檔時失敗；
    - `table` 兩次輸出逐位元組相同。
 2. `kpi.py run v0.4.0 … v0.4.7` 在 Windows 機器或 GCP 跑完（不在 Mac），8 個 JSON 進 repo；`kpi.py table` 產生的 `docs/kpi.md` 進 repo。抽一版用 CLI 手動跑同一個指令，top1 與 sha256 相同。
+   - `kpi.py replay` 的成功路徑也真跑一次：在 Windows 機器或 GCP 對目前的 main（乾淨的 checkout）跑 `kpi.py replay --as <任一名稱>`，輸出寫到暫存、不進 repo；同一台機器直接執行同樣的 `shanjie-replay` 指令與 `evalstats compare`，`replay` 欄的每一個數字（學習關的 top1、學習開對學習關的改壞數、兩個 KySS、`rewrites`、`rows_sha256`、`n`）都和直接執行的相同。結果寫進研究紀錄。
 3. 研究紀錄記下回填結果與「從下一版起」的欄位。
 4. `/code-review` ＋ fresh verifier ＋ CI（程式改動的關卡）。
 
@@ -78,3 +79,4 @@
 ## 8. 審查紀錄
 
 - plan-verifier 第一次 REVISE 5 項，全照改：重用 bench.py 的低階函式而不是 `run_cell2`（§1.1）；`run` 收 `REF --as VERSION`、JSON 記 `sha`（§1.1、§1.3）；`replay` 在目前的 checkout 跑，寫清楚模型、異體字表與雜湊核對（§1.1）；列檔固定並記 `rows_sha256`、表頭分欄也看 kpi JSON（§1.1、§2、§4）；保留集兩個半邊的設定、列號範圍與存放欄位（§3）。
+- plan-verifier 第二次 REVISE 1 項（`replay` 的成功路徑沒有驗收會跑到），照改：§4.2 加一次真跑，逐欄對照直接執行的結果。
