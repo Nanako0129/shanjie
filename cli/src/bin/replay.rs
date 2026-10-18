@@ -3,8 +3,8 @@
 //!
 //! shanjie-replay (--rows FILE | --dev N) [--profile chat|formal] [--no-tinylm] [--learn off|on] [--rerank each|final]
 //!                [--correct] [--rowstats FILE] [--keys FILE] [--firsts FILE]
-use cli::common::{format_rowstats, load_lenient, root};
-use cli::replay::{build_engine, format_keys, load_rows, replay_row, summary_line, Cfg, Rerank};
+use cli::common::{dev_rows, format_rowstats, load_lenient, read_rows, root};
+use cli::replay::{build_engine, format_keys, replay_row, summary_line, Cfg, Rerank, RowIn};
 use core::eval::sha256_hex;
 use core::lm::Profile;
 use std::fs;
@@ -54,10 +54,27 @@ fn run() -> Result<(), String> {
     };
     let root = root();
     let len = load_lenient()?;
-    // Opened before the run, like the CLI's outputs: an unwritable path fails now, not after the whole set.
+    // An output that is the rows file would be emptied before the rows are read: refuse, comparing the files themselves.
+    if let Some(rows) = rows_file.as_deref().and_then(|f| fs::canonicalize(f).ok()) {
+        for (opt, f) in [("--rowstats", &rowstats), ("--keys", &keys), ("--firsts", &firsts)] {
+            if f.as_deref().and_then(|f| fs::canonicalize(f).ok()) == Some(rows.clone()) {
+                eprintln!("error: {opt} is the same file as --rows");
+                std::process::exit(2);
+            }
+        }
+    }
+    // The CLI's own readers (shared in cli::common), so the rows and their numbers are shanjie-eval's.
+    let rows: Vec<RowIn> = match (&rows_file, dev) {
+        (Some(f), None) => read_rows(f)?,
+        (None, Some(n)) => dev_rows(n)?,
+        _ => return Err("need exactly one of --rows, --dev".into()),
+    }
+    .into_iter()
+    .map(|(sent, syls, ctx)| RowIn { ctx, sent, syls })
+    .collect();
+    // Opened after the rows are read, like the CLI's outputs are not touched by a failed start.
     let create = |f: Option<String>| f.map(|f| fs::File::create(f).map_err(|e| format!("cannot create output file ({:?})", e.kind()))).transpose();
     let (rowstats, keys, firsts) = (create(rowstats)?, create(keys)?, create(firsts)?);
-    let rows = load_rows(&root, rows_file.as_deref(), dev)?;
     let name = match (&rows_file, dev) {
         (Some(f), _) => Path::new(f).file_name().map_or(String::new(), |s| s.to_string_lossy().into_owned()),
         (_, n) => format!("dev{}", n.unwrap_or(0)),

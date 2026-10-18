@@ -1,14 +1,11 @@
 //! E-E real-engine replay (docs/contracts/engine-replay.md): rows typed key by key through one `core::engine::Engine`
 //! built like the App's `Shell.build()`, with the user's re-picks simulated on request. Numbers only come out of here.
-use core::engine::{
-    load_lexicon_packs_detailed, Engine, Key, KeyKind, Layout, Output, PACK_ACG, PAGE_SIZE,
-};
-use core::eval::{parse_rows, pyround, row_syllables, sha256_hex, usable, Lenient};
+use core::engine::{Engine, Key, KeyKind, Layout, Output, PACK_ACG, PAGE_SIZE};
+use core::eval::{pyround, sha256_hex, Lenient};
 use core::lm::Profile;
 use core::tinylm::RerankLevel;
 use core::Syls;
-use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 /// When the small model's work is applied (contract section 3).
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -37,6 +34,8 @@ pub struct RowOut {
     pub final_ok: bool,
     /// `--correct` was asked for and the committed text is still not the gold text (no pick could fix it).
     pub unfixable: bool,
+    /// The engine committed text before Enter (the composition limit); `first` and `committed` include it.
+    pub autocommit: bool,
     /// `apply_rerank` calls that changed the preedit (contract section 3).
     pub rewrites: usize,
     /// `apply_rerank` calls that returned `Some` after a typing key other than the last one.
@@ -60,15 +59,6 @@ pub fn keys_of(syl: &str) -> Option<Vec<Key>> {
         v.push(Key::new(KeyKind::Space));
     }
     Some(v)
-}
-
-/// The Enter key (the replay's last key; also for hand-written loops in tests).
-pub fn enter() -> Key {
-    Key::new(KeyKind::Enter)
-}
-
-pub fn space() -> Key {
-    Key::new(KeyKind::Space)
 }
 
 /// Keys to bring the cursor from `from` to `to` among `n` syllables: Left/Right one syllable each, or Home / End first.
@@ -106,6 +96,10 @@ pub fn build_engine(root: &Path, lm: &Path, tinylm: Option<&Path>, profile: Prof
 struct Session<'a> {
     e: &'a mut Engine,
     cur: Option<Output>,
+    /// Text the engine committed before Enter (the composition limit, digit rows), in order.
+    committed: String,
+    /// The longest word a window can list: no window further right than `i` + this can cover `i`.
+    max_len: usize,
     keys: usize,
     rewrites: usize,
     cursor: usize,
@@ -119,7 +113,11 @@ impl Session<'_> {
 
     /// One key into the engine; only `counted` keys are part of `actual` (a scanning key is the tool looking, not the user typing).
     fn press(&mut self, k: Key, counted: bool) -> Result<(), String> {
-        self.cur = Some(self.e.key(k).map_err(|_| "engine error on a key".to_string())?);
+        let o = self.e.key(k).map_err(|_| "engine error on a key".to_string())?;
+        if k.kind != KeyKind::Enter {
+            self.committed.push_str(&o.commit);
+        }
+        self.cur = Some(o);
         self.keys += counted as usize;
         Ok(())
     }
@@ -150,33 +148,32 @@ impl Session<'_> {
         Ok(())
     }
 
-    /// Contract section 4: from j = i + 1 rightwards, the first cursor position whose window lists an item that covers syllable `i`
-    /// and spells the gold text over its own span; `(j, index in the window's list)`. The scan opens and closes windows (uncounted);
-    /// it leaves the cursor at the position it stopped on and the window closed.
+    /// Contract section 4: from j = i + 1 rightwards (to `i` + the longest word at most), the first cursor position whose window lists an
+    /// item that covers syllable `i` and spells the gold text over its own span; `(j, index in the window's list)`. The scan opens
+    /// windows page by page up to the first such item and closes them (uncounted); it leaves the cursor at the position it stopped on.
     fn find(&mut self, i: usize, gold: &[char], len: &Lenient) -> Result<Option<(usize, usize)>, String> {
-        for j in i + 1..=self.n {
+        for j in i + 1..=self.n.min(i + self.max_len) {
             self.move_to(j)?;
             self.press(Key::new(KeyKind::Space), false)?;
             if self.cur().selected.is_none() {
                 continue;
             }
-            let mut list = vec![String::new(); self.cur().total as usize];
+            let (total, mut hit) = (self.cur().total as usize, None);
             loop {
-                let (first, page) = (self.cur().first as usize, self.cur().candidates.clone());
-                let end = first + page.len();
-                for (k, w) in page.into_iter().enumerate() {
-                    list[first + k] = w;
-                }
-                if end >= list.len() {
+                let (first, page) = (self.cur().first as usize, &self.cur().candidates);
+                hit = hit.or_else(|| {
+                    page.iter().position(|w| {
+                        let l = w.chars().count();
+                        l >= j - i && l <= j && len.apply(w) == len.apply(&gold[j - l..j].iter().collect::<String>())
+                    })
+                    .map(|k| first + k)
+                });
+                if hit.is_some() || first + page.len() >= total {
                     break;
                 }
                 self.press(Key::new(KeyKind::Space), false)?; // next page
             }
             self.press(Key::new(KeyKind::Esc), false)?;
-            let hit = list.iter().position(|w| {
-                let l = w.chars().count();
-                l >= j - i && l <= j && len.apply(w) == len.apply(&gold[j - l..j].iter().collect::<String>())
-            });
             if let Some(idx) = hit {
                 return Ok(Some((j, idx)));
             }
@@ -184,7 +181,8 @@ impl Session<'_> {
         Ok(None)
     }
 
-    /// Contract section 4: re-pick until the shown text is the gold text (lenient) or no pick can fix the first difference.
+    /// Contract section 4: re-pick until the shown text is the gold text (lenient) or no pick can fix the first difference. `gold` is
+    /// the part of the sentence the composition holds (what was committed before is not in it), the cursor is at its end.
     fn correct(&mut self, gold: &str, len: &Lenient, rerank: Rerank, picks: &mut usize) -> Result<(), String> {
         let (graw, gl): (Vec<char>, Vec<char>) = (gold.chars().collect(), len.apply(gold).chars().collect());
         for _ in 0..2 * graw.len() {
@@ -197,7 +195,7 @@ impl Session<'_> {
                 break;
             }
             let i = (0..gl.len()).find(|&i| shown[i] != gl[i]).expect("the texts differ");
-            let c0 = self.cursor;
+            let (c0, before) = (self.cursor, self.cur().preedit.clone());
             let Some((j, idx)) = self.find(i, &graw, len)? else { break };
             self.keys += move_cost(c0, j, self.n);
             self.press(Key::new(KeyKind::Space), true)?; // opens on the first page
@@ -209,27 +207,38 @@ impl Session<'_> {
             if rerank == Rerank::Each {
                 self.rerank()?;
             }
+            // A pick that leaves the text as it was would be chosen again: not fixable.
+            if self.cur().preedit == before {
+                break;
+            }
         }
         Ok(())
     }
 }
 
 /// One row through `e` (contract section 1): left context, the reading key by key, the first display, the re-picks when asked for, Enter.
-/// `gold` is the row's sentence, compared with the display through `len`. Errors carry no row text.
+/// `gold` is the row's sentence, compared with the display through `len`. Errors carry no row text. Text the engine commits while the
+/// row is typed (composition limit) is kept: it is part of the first display and of what is sent, and no pick can change it.
 pub fn replay_row(e: &mut Engine, ctx: &str, syls: &[String], gold: &str, len: &Lenient, cfg: Cfg) -> Result<RowOut, String> {
-    let typed: Vec<Key> = syls
-        .iter()
-        .map(|s| keys_of(s).ok_or("a reading symbol has no key"))
-        .collect::<Result<Vec<_>, _>>()?
-        .concat();
+    let per: Vec<Vec<Key>> = syls.iter().map(|s| keys_of(s).ok_or("a reading symbol has no key")).collect::<Result<_, _>>()?;
+    // ends[s]: how many keys have been typed when syllable s is complete.
+    let ends: Vec<usize> = per.iter().scan(0, |t, v| Some({ *t += v.len(); *t })).collect();
+    let typed = per.concat();
     if typed.is_empty() {
         return Err("a row without a reading".into());
     }
     e.set_left_context(ctx);
-    let mut s = Session { e, cur: None, keys: 0, rewrites: 0, cursor: syls.len(), n: syls.len() };
+    let max_len = e.max_window_len();
+    let mut s = Session { e, cur: None, committed: String::new(), max_len, keys: 0, rewrites: 0, cursor: syls.len(), n: syls.len() };
     let (mut out, last) = (RowOut { ideal: typed.len() + 1, ..RowOut::default() }, typed.len() - 1);
+    let mut committed_syls = 0; // syllables complete when the engine last committed
     for (k, key) in typed.into_iter().enumerate() {
+        let before = s.committed.len();
         s.press(key, true)?;
+        if s.committed.len() > before {
+            out.autocommit = true;
+            committed_syls = ends.iter().filter(|&&end| end <= k + 1).count();
+        }
         match cfg.rerank {
             Rerank::Each => out.typing_applies += (s.rerank()? && k != last) as usize,
             Rerank::Final if k == last => {
@@ -238,13 +247,16 @@ pub fn replay_row(e: &mut Engine, ctx: &str, syls: &[String], gold: &str, len: &
             Rerank::Final => {}
         }
     }
-    out.first = s.cur().preedit.clone();
+    out.first = format!("{}{}", s.committed, s.cur().preedit);
     out.first_ok = len.apply(&out.first) == len.apply(gold);
-    if cfg.correct {
-        s.correct(gold, len, cfg.rerank, &mut out.picks)?;
+    // The composition holds the syllables after the committed ones, one character each, or the row is not fixable.
+    if cfg.correct && s.committed.chars().count() == committed_syls {
+        (s.n, s.cursor) = (syls.len() - committed_syls, syls.len() - committed_syls);
+        let rest: String = gold.chars().skip(committed_syls).collect();
+        s.correct(&rest, len, cfg.rerank, &mut out.picks)?;
     }
     s.press(Key::new(KeyKind::Enter), true)?;
-    out.committed = s.cur().commit.clone();
+    out.committed = format!("{}{}", s.committed, s.cur().commit);
     out.final_ok = len.apply(&out.committed) == len.apply(gold);
     out.unfixable = cfg.correct && !out.final_ok;
     (out.actual, out.rewrites) = (s.keys, s.rewrites);
@@ -255,34 +267,6 @@ pub struct RowIn {
     pub ctx: String,
     pub sent: String,
     pub syls: Syls,
-}
-
-/// `--rows FILE` or `--dev N` (the first N usable rows of eval/dev/*.txt in name order), read by `core::eval::parse_rows` and `usable`
-/// with the lexicon the engine uses (acg pack on). Messages carry no row text.
-pub fn load_rows(root: &Path, file: Option<&str>, dev: Option<usize>) -> Result<Vec<RowIn>, String> {
-    let read = |p: &Path| fs::read_to_string(p).map_err(|e| format!("cannot read file ({:?})", e.kind()));
-    let mut rows = Vec::new();
-    match (file, dev) {
-        (Some(f), None) => rows = parse_rows(&read(Path::new(f))?).map_err(|e| e.to_string())?,
-        (None, Some(_)) => {
-            let mut files: Vec<PathBuf> = fs::read_dir(root.join("eval/dev"))
-                .map_err(|e| format!("cannot read directory ({:?})", e.kind()))?
-                .filter_map(|e| e.ok().map(|e| e.path()))
-                .filter(|p| p.extension().is_some_and(|x| x == "txt"))
-                .collect();
-            files.sort();
-            for f in files {
-                rows.extend(parse_rows(&read(&f)?).map_err(|e| e.to_string())?);
-            }
-        }
-        _ => return Err("need exactly one of --rows, --dev".into()),
-    }
-    let (lex, _) = load_lexicon_packs_detailed(&root.join("data/lexicon"), Some((&root.join("data/packs"), PACK_ACG))).map_err(|e| e.to_string())?;
-    let mut rows = usable(&lex, rows);
-    rows.truncate(dev.unwrap_or(usize::MAX));
-    rows.iter()
-        .map(|r| Ok(RowIn { ctx: r.ctx.clone(), sent: r.sent.clone(), syls: row_syllables(&lex, r).map_err(|e| e.to_string())? }))
-        .collect()
 }
 
 /// `--keys` file: `row\tideal\tactual\tpicks\tfinal_ok\trewrites` per row, rows counted from 1. Digits only.
@@ -301,11 +285,12 @@ pub fn summary_line(name: &str, tag: &str, outs: &[RowOut], gold_chars: usize) -
     let ratio = |a: usize, b: usize, k: f64| if b == 0 { 0.0 } else { a as f64 * k / b as f64 };
     let firsts: Vec<&str> = outs.iter().map(|o| o.first.as_str()).collect();
     format!(
-        "## {name}  {tag}  {{'n': {}, 'top1': {}, 'final_ok': {}, 'unfixable': {}, 'kyss': {}, 'picks_per100': {}, 'rewrites': {}, 'top1_sha256': '{}'}}",
+        "## {name}  {tag}  {{'n': {}, 'top1': {}, 'final_ok': {}, 'unfixable': {}, 'autocommits': {}, 'kyss': {}, 'picks_per100': {}, 'rewrites': {}, 'top1_sha256': '{}'}}",
         outs.len(),
         sum(|o| o.first_ok as usize),
         sum(|o| o.final_ok as usize),
         sum(|o| o.unfixable as usize),
+        sum(|o| o.autocommit as usize),
         pyround(ratio(ideal, actual, 1.0), 4),
         pyround(ratio(picks, gold_chars, 100.0), 2),
         sum(|o| o.rewrites),

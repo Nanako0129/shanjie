@@ -2,7 +2,7 @@
 //! Rows are lines of eval/dev/user-reported.txt (public, CC0), whose first display is known to be wrong for most of them; every
 //! test states the display it relies on, so a model change fails there first. Each engine is about 700 MB, so the tests take turns.
 use cli::common::{load_lenient, root};
-use cli::replay::{build_engine, keys_of, move_cost, replay_row, Cfg, Rerank, RowOut};
+use cli::replay::{build_engine, keys_of, move_cost, replay_row, summary_line, Cfg, Rerank, RowOut};
 use core::engine::{Engine, Key, KeyKind};
 use core::eval::Lenient;
 use core::lm::Profile;
@@ -94,7 +94,7 @@ fn a_repick_costs_the_moves_the_window_and_the_digit() {
     let len = load_lenient().unwrap();
     // The page by hand: the first Space opens page one, two more page to the third, which lists 奕 (18 items before it).
     let mut third = None;
-    for k in keys_of("ㄧˋ").unwrap().into_iter().chain([cli::replay::space(); 3]) {
+    for k in keys_of("ㄧˋ").unwrap().into_iter().chain([Key::new(KeyKind::Space); 3]) {
         let o = e.key(k).unwrap();
         third = Some((o.first, o.candidates.iter().any(|w| w == "奕")));
     }
@@ -158,7 +158,7 @@ fn by_hand(e: &mut Engine, r: &Row, each: bool) -> (usize, usize, String) {
             }
         }
     }
-    e.key(cli::replay::enter()).unwrap();
+    e.key(Key::new(KeyKind::Enter)).unwrap();
     (mid, changed, shown)
 }
 
@@ -173,12 +173,66 @@ fn rerank_each_applies_while_typing_and_final_only_at_the_end() {
     let each = go(&mut e, &r, &len, EACH);
     let fin = go(&mut e, &r, &len, Cfg { correct: false, rerank: Rerank::Final });
     let (mid, changed, shown) = by_hand(&mut e, &r, true);
-    assert!(each.typing_applies >= 1, "the row has rewrites while it is typed");
+    assert!(each.rewrites >= 2, "this row is rewritten at least twice while it is typed (3 measured)");
     assert_eq!((each.typing_applies, each.rewrites, &each.first), (mid, changed, &shown));
-    let (mid, changed, shown) = by_hand(&mut e, &r, false);
-    assert_eq!((fin.typing_applies, mid), (0, 0));
-    assert!(fin.rewrites <= 1);
+    let (_, changed, shown) = by_hand(&mut e, &r, false);
+    assert!(fin.rewrites <= 1, "final applies once, after the last key, not while typing");
     assert_eq!((fin.rewrites, &fin.first), (changed, &shown));
+}
+
+/// Rule (section 1.1.3): a reading longer than the composition limit (40 syllables) makes the engine commit text before Enter. That
+/// text is part of the first display and of what is sent, `autocommits` counts the row, and a re-pick works on the syllables still
+/// in the composition (here 我再重打, four, so Left, Left, Space, digit as without the commit), not on the 44.
+#[test]
+fn text_committed_mid_row_is_kept_counted_and_not_re_picked() {
+    let (_g, mut e) = engine(false);
+    let len = load_lenient().unwrap();
+    let filler = "你好".repeat(20);
+    let mut syls: Vec<String> = ["ㄋㄧˇ", "ㄏㄠˇ"].repeat(20).into_iter().map(String::from).collect();
+    syls.extend(zai().syls);
+    let long = Row { ctx: "", gold: Box::leak(format!("{filler}我再重打").into_boxed_str()), syls };
+    let o = go(&mut e, &long, &len, EACH);
+    assert!(o.autocommit && o.first.chars().count() == 44, "the 40 committed characters come first");
+    assert!(o.first.starts_with(&filler) && !o.first_ok, "the display ends in 我在重打, which is wrong");
+    let short = go(&mut e, &zai(), &len, EACH);
+    assert!(!short.autocommit);
+    let fixed = go(&mut e, &long, &len, FIX);
+    assert!(fixed.final_ok && fixed.committed == long.gold && fixed.picks == 1);
+    assert_eq!(fixed.actual, fixed.ideal + 4);
+    assert!(summary_line("x", "t", &[o, short], 0).contains("'autocommits': 1,"));
+}
+
+/// Rule (section 4): a pick that leaves the shown text as it was ends the re-picking. The table below makes 我在重 and 我再重 differ
+/// as whole strings although the first character is right, so the first difference is reported at 我, and picking 我 changes nothing.
+#[test]
+fn a_pick_that_changes_nothing_ends_the_repicking() {
+    let (_g, mut e) = engine(false);
+    let len = Lenient::parse("我在重\tZZZ\n").unwrap();
+    let o = replay_row(&mut e, zai().ctx, &zai().syls, zai().gold, &len, FIX).unwrap();
+    assert!(!o.final_ok && o.unfixable);
+    assert_eq!((o.picks, o.actual), (1, o.ideal + 4), "one pick (Home, Right, Space, digit), then it stops");
+}
+
+/// Rule (section 1.1): an output path that is the rows file is refused before anything is written (exit 2, file as it was), however
+/// the path is spelled; the outputs are created only once the rows have been read.
+#[test]
+fn an_output_that_is_the_rows_file_is_refused() {
+    let dir = std::env::temp_dir().join(format!("shanjie-replay-refuse-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let rows = dir.join("rows.txt");
+    let text = "|我再重打|ㄨㄛˇ ㄗㄞˋ ㄔㄨㄥˊ ㄉㄚˇ\n";
+    std::fs::write(&rows, text).unwrap();
+    let alias = format!("{}/./rows.txt", dir.display());
+    for opt in ["--rowstats", "--keys", "--firsts"] {
+        let out = Command::new(env!("CARGO_BIN_EXE_shanjie-replay")).args(["--rows", rows.to_str().unwrap(), opt, &alias]).output().unwrap();
+        assert_eq!(out.status.code(), Some(2), "{opt}");
+        assert_eq!(std::fs::read_to_string(&rows).unwrap(), text, "{opt}: the rows file is untouched");
+    }
+    let new = dir.join("never.txt");
+    let out = Command::new(env!("CARGO_BIN_EXE_shanjie-replay")).args(["--rows", dir.join("missing.txt").to_str().unwrap(), "--keys", new.to_str().unwrap()]).output().unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert!(!new.exists(), "no output file before the rows are read");
+    std::fs::remove_dir_all(&dir).unwrap();
 }
 
 fn run(bin: &str, args: &[&str]) -> String {

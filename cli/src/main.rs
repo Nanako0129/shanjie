@@ -1,4 +1,4 @@
-use cli::common::{format_rowstats, levenshtein, load_lenient, root};
+use cli::common::{dev_rows, format_rowstats, levenshtein, load_lenient, read_rows, root, three_field_rows};
 use core::engine::{capping_overlay_detailed, load_lexicon_extra_detailed, load_lexicon_packs_detailed, PACK_ACG};
 use core::eval::*;
 use core::learn::{context_key, SENTINEL};
@@ -51,17 +51,6 @@ fn load_set(lex: &Lexicon, name: &str) -> Result<(&'static str, Vec<Row>), Strin
 fn oov_words(name: &str) -> Vec<String> {
     let p = root().join(format!("eval/{name}/oov_words.list"));
     fs::read_to_string(p).unwrap_or_default().lines().filter(|l| !l.is_empty()).map(String::from).collect()
-}
-
-/// lm_eval.py `rows_of`: only lines with exactly three `|` fields (context|sentence|reading).
-/// Each row is (sentence, reading, context text).
-fn three_field_rows(text: &str) -> Vec<(String, Syls, String)> {
-    text.lines()
-        .filter_map(|l| {
-            let p: Vec<&str> = l.split('|').collect();
-            (p.len() == 3).then(|| (p[1].to_string(), p[2].split_whitespace().map(String::from).collect(), p[0].to_string()))
-        })
-        .collect()
 }
 
 /// Option combinations of `lm`, checked before any file is read. The holdout never prints its sentences, so
@@ -304,25 +293,11 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     // The table is always loaded, so a malformed one stops the run even with --no-demote.
     let capped = CappedLexicon::new(lex.clone(), &overlay, &lm, Some(&table)).ok_or("bad demote.tsv")?;
 
-    let read = |p: &Path| fs::read_to_string(p).map_err(|e| format!("cannot read file ({:?})", e.kind()));
     // (display name, [(truth, reading)])
     let (default_name, rows): (String, Vec<(String, Syls, String)>) = match (dev, rows_file, set.as_deref()) {
-        (Some(n), None, None) => {
-            let mut files: Vec<PathBuf> = fs::read_dir(root().join("eval/dev"))
-                .map_err(|e| format!("cannot read directory ({:?})", e.kind()))?
-                .filter_map(|e| e.ok().map(|e| e.path()))
-                .filter(|p| p.extension().is_some_and(|x| x == "txt"))
-                .collect();
-            files.sort();
-            let mut rows = Vec::new();
-            for f in files {
-                rows.extend(three_field_rows(&read(&f)?));
-            }
-            rows.truncate(n);
-            (format!("dev{n}"), rows)
-        }
+        (Some(n), None, None) => (format!("dev{n}"), dev_rows(n)?),
         (None, Some(f), None) => {
-            let mut rows = three_field_rows(&read(Path::new(&f))?);
+            let mut rows = read_rows(&f)?;
             if let Some(n) = limit.filter(|&n| n != 0) {
                 rows.truncate(n);
             }
