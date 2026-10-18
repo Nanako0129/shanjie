@@ -3,7 +3,7 @@ Run: python3 -m unittest tools/test_triage.py   (from the repo root). No network
 
 Syllables are placeholders ("a", "ni", ...): the tool only compares them. A row is built by `row`; `classify` is called directly for wrong rows."""
 import hashlib
-import concurrent.futures, io, json, os, struct, sys, tempfile, unittest
+import io, json, os, struct, sys, tempfile, unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import triage as T  # noqa: E402
@@ -365,47 +365,12 @@ class Run(unittest.TestCase):
                 T.check_same_run({**new, k: v}, new)
 
 
-class Jobs(unittest.TestCase):
-    def test_parallel_cells_write_the_same_json_and_rows(self):
-        """`run --jobs 3` writes byte for byte the JSON and rows files of `--jobs 1` (the CLI, models and lexicon are faked)."""
-        import argparse
-        from unittest import mock
-        with tempfile.TemporaryDirectory() as td:
-            files = {}
-            for name, size, private in (("dev302", 30, False), ("fw", 10, False), ("discordtune", 20, True)):
-                p = os.path.join(td, name + ".txt")
-                with open(p, "w", encoding="utf-8") as f:
-                    f.write("x" * size)
-                files[name] = (p, private)
-
-            def fake_cell(cli, lm, tl, prof, f, lex, par, lenient, report, tdir, kn, tri, threads):
-                cn = T.empty_counts()
-                cn["n"], cn["errors"] = os.path.getsize(f) + len(prof), len(prof)
-                return cn, [("C", 1, "0.5", 0), ("A1", 2, "1-2", 1)]
-
-            out = {}
-            for jobs in (1, 3):
-                with mock.patch.multiple(T, OUT_DIR=os.path.join(td, f"out{jobs}"), load_lenient=lambda: None, kn_tag=lambda p: "",
-                                         tinylm_params=lambda p: {"chat": (0.3, 2.0, 0.25), "formal": (0.7, 2.0, 1.0)},
-                                         tri_tag=lambda p: "", git_head=lambda: "abc", run_cell=fake_cell, set_file=lambda n, r: files[n]), \
-                        mock.patch.object(T.Lex, "load", lambda: None), mock.patch.object(T.bench, "sha_file", lambda p: "h"), \
-                        mock.patch("sys.stderr", io.StringIO()):
-                    rows_out = os.path.join(td, f"rows{jobs}")
-                    T.cmd_run(argparse.Namespace(label="L", set=list(files), private_root=td, cli="cli", rows_out=rows_out, jobs=jobs, cli_threads=1))
-                got = {"json": open(os.path.join(td, f"out{jobs}", "L.json"), encoding="utf-8").read()}
-                got.update({n: open(os.path.join(rows_out, n), encoding="utf-8").read() for n in sorted(os.listdir(rows_out))})
-                out[jobs] = got
-            self.assertEqual(out[1], out[3])
-            self.assertEqual(sorted(out[1]), ["L-dev302-chat.tsv", "L-dev302-formal.tsv", "L-fw-chat.tsv", "L-fw-formal.tsv", "json"])
-            self.assertEqual(list(json.loads(out[3]["json"])["sets"]), ["dev302", "fw", "discordtune"])
-
-
-def _patched(td, files, fake_cell):
+def _patched(td, files, fake_cell, out=None):
     """The patches under which `cmd_run` runs the fake cell on the given set files: no CLI, models or lexicon."""
     from unittest import mock
     import contextlib
     stack = contextlib.ExitStack()
-    stack.enter_context(mock.patch.multiple(T, OUT_DIR=os.path.join(td, "out"), load_lenient=lambda: None, kn_tag=lambda p: "",
+    stack.enter_context(mock.patch.multiple(T, OUT_DIR=out or os.path.join(td, "out"), load_lenient=lambda: None, kn_tag=lambda p: "",
                                             tinylm_params=lambda p: {"chat": (0.3, 2.0, 0.25), "formal": (0.7, 2.0, 1.0)},
                                             tri_tag=lambda p: "", git_head=lambda: "abc", run_cell=fake_cell, set_file=lambda n, r: files[n]))
     stack.enter_context(mock.patch.object(T.Lex, "load", lambda: None))
@@ -414,13 +379,56 @@ def _patched(td, files, fake_cell):
     return stack
 
 
+class Jobs(unittest.TestCase):
+    def test_parallel_cells_write_the_same_json_and_rows(self):
+        """`run --jobs 3` writes byte for byte the JSON and rows files of `--jobs 1` (the CLI, models and lexicon are faked)."""
+        import argparse
+        with tempfile.TemporaryDirectory() as td:
+            files = {}
+            for name, size, private in (("dev302", 30, False), ("fw", 10, False), ("discordtune", 20, True)):
+                p = os.path.join(td, name + ".txt")
+                with open(p, "w", encoding="utf-8") as f:
+                    f.write("x" * size)
+                files[name] = (p, private)
+
+            seen = []
+
+            def fake_cell(cli, lm, tl, prof, f, lex, par, lenient, report, tdir, kn, tri, threads):
+                seen.append(threads)
+                cn = T.empty_counts()
+                cn["n"], cn["errors"] = os.path.getsize(f) + len(prof), len(prof)
+                return cn, [("C", 1, "0.5", 0), ("A1", 2, "1-2", 1)]
+
+            out = {}
+            for jobs in (1, 3):
+                rows_out = os.path.join(td, f"rows{jobs}")
+                with _patched(td, files, fake_cell, out=os.path.join(td, f"out{jobs}")):
+                    T.cmd_run(argparse.Namespace(label="L", set=list(files), private_root=td, cli="cli", rows_out=rows_out, jobs=jobs, cli_threads=3))
+                got = {"json": open(os.path.join(td, f"out{jobs}", "L.json"), encoding="utf-8").read()}
+                got.update({n: open(os.path.join(rows_out, n), encoding="utf-8").read() for n in sorted(os.listdir(rows_out))})
+                out[jobs] = got
+            self.assertEqual(seen, [3] * 12, "cmd_run passes --cli-threads to every cell")
+            self.assertEqual(out[1], out[3])
+            self.assertEqual(sorted(out[1]), ["L-dev302-chat.tsv", "L-dev302-formal.tsv", "L-fw-chat.tsv", "L-fw-formal.tsv", "json"])
+            self.assertEqual(list(json.loads(out[3]["json"])["sets"]), ["dev302", "fw", "discordtune"])
+
+
 class FailingCell(unittest.TestCase):
     def test_a_failing_cell_starts_no_later_cell_and_leaves_no_temp_dir(self):
-        """--jobs 2 on threads: cell A fails while cell B is running; no cell starts after the failure, B finishes and its temp dir is
-        deleted, the error is A's. Synchronised by events: A waits until B has started; B waits until the parent has handled A's
-        failure (the pool's shutdown, patched to release it); the other cells must never reach run_cell."""
-        import argparse, threading
+        """--jobs 3 on threads: cell A fails while B and C are running; no cell starts after the failure, B and C finish and their temp
+        dirs are deleted, the error is A's. Synchronised by events: A waits until B and C have started; B and C wait until A's temp dir
+        has been removed (the test's TemporaryDirectory subclass sets the event), which happens after the stop event is set, so the
+        two workers that become free find it set. The other cells must never reach run_cell."""
+        import argparse, threading, time
         from unittest import mock
+
+        class Dir(tempfile.TemporaryDirectory):
+            def cleanup(self):
+                super().cleanup()
+                if self.name == a_dir[0]:
+                    a_cleaned.set()
+                    time.sleep(0.05)   # not a synchronisation: it widens the window in which a stop set only after the cleanup would be late
+
         with tempfile.TemporaryDirectory() as td:
             files, tmp = {}, os.path.join(td, "tmp")
             os.makedirs(tmp)
@@ -429,33 +437,28 @@ class FailingCell(unittest.TestCase):
                 with open(p, "w", encoding="utf-8") as f:
                     f.write("x" * (50 - i))
                 files[name] = (p, False)
-            b_started, release, ran, finished = threading.Event(), threading.Event(), [], []
+            a_dir, a_cleaned, started, ran, finished = [None], threading.Event(), [threading.Event(), threading.Event()], [], []
 
             def fake_cell(cli, lm, tl, prof, f, lex, par, lenient, report, tdir, kn, tri, threads):
                 job = (os.path.basename(f)[:-4], prof)
                 ran.append(job)
                 open(os.path.join(tdir, "sentences"), "w").close()   # something a cell leaves in its temp dir
                 if job == ("n0", "chat"):
-                    self.assertTrue(b_started.wait(10))
+                    a_dir[0] = tdir
+                    for e in started:
+                        self.assertTrue(e.wait(10))
                     raise RuntimeError("boom")
-                self.assertEqual(job, ("n0", "formal"), "a cell started after the failure")
-                b_started.set()
-                self.assertTrue(release.wait(10))
+                self.assertIn(job, [("n0", "formal"), ("n1", "chat")], "a cell started after the failure")
+                started[job == ("n1", "chat")].set()
+                self.assertTrue(a_cleaned.wait(10))
                 finished.append(job)
                 return T.empty_counts(), [("C", 1, "0.5", 0)]
 
-            real_shutdown = concurrent.futures.ThreadPoolExecutor.shutdown
-
-            def shutdown(self, *args, **kw):
-                release.set()
-                return real_shutdown(self, *args, **kw)
-
-            with _patched(td, files, fake_cell), mock.patch.object(tempfile, "tempdir", tmp), \
-                    mock.patch.object(concurrent.futures.ThreadPoolExecutor, "shutdown", shutdown):
+            with _patched(td, files, fake_cell), mock.patch.object(tempfile, "tempdir", tmp), mock.patch.object(tempfile, "TemporaryDirectory", Dir):
                 with self.assertRaisesRegex(RuntimeError, "boom"):
-                    T.cmd_run(argparse.Namespace(label="L", set=list(files), private_root=td, cli="cli", rows_out=os.path.join(td, "rows"), jobs=2, cli_threads=1))
-            self.assertEqual(sorted(ran), [("n0", "chat"), ("n0", "formal")])
-            self.assertEqual(finished, [("n0", "formal")])
+                    T.cmd_run(argparse.Namespace(label="L", set=list(files), private_root=td, cli="cli", rows_out=os.path.join(td, "rows"), jobs=3, cli_threads=1))
+            self.assertEqual(sorted(ran), [("n0", "chat"), ("n0", "formal"), ("n1", "chat")])
+            self.assertEqual(sorted(finished), [("n0", "formal"), ("n1", "chat")])
             self.assertEqual(os.listdir(tmp), [])
             self.assertFalse(os.path.exists(os.path.join(td, "out", "L.json")))
 

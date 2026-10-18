@@ -431,15 +431,23 @@ def cmd_run(a):
     files = {name: set_file(name, a.private_root) for name in names}
     cells = [(name, prof) for name in names for prof in PROFILES]
 
+    stop = threading.Event()   # set by the first failure: a cell that has not started then does not run (--jobs above 1)
+
     def cell(job):
+        if stop.is_set():
+            return None
         name, prof = job
         with tempfile.TemporaryDirectory() as td:   # the dump and the word dump hold sentences: they are deleted here
-            cn, per = run_cell(cli, lm, tl, prof, files[name][0], lex, par[prof], lenient, name == "user-reported", td, kn, tri, a.cli_threads)
+            try:
+                cn, per = run_cell(cli, lm, tl, prof, files[name][0], lex, par[prof], lenient, name == "user-reported", td, kn, tri, a.cli_threads)
+            except BaseException:
+                stop.set()   # before the temp dir is removed and before the future is done: no cell starts after the failure
+                raise
         print(f"triage: {name} {prof}: n={cn['n']} errors={cn['errors']} {cn['buckets']}", file=sys.stderr, flush=True)
         return job, (cn, per)
 
     def write_rows(job, per):
-        """A public cell's per-row file, written as soon as its result is in the parent."""
+        """A public cell's per-row file, written as soon as its result is in the main thread."""
         name, prof = job
         if not files[name][1]:
             os.makedirs(a.rows_out, exist_ok=True)
@@ -453,29 +461,18 @@ def cmd_run(a):
             write_rows(job, per)
     else:
         # The work is the CLI subprocess, so threads run the cells in parallel (as tools/bench.py does); `lex` and `lenient` are shared.
-        # Biggest file first. A failing cell sets `stop` before its future is done, so no cell starts after it; the cells already
-        # running finish (their temp dirs hold sentences and are deleted by them), then the first error is raised.
-        stop = threading.Event()
-
-        def guarded(job):
-            if stop.is_set():
-                return None
-            try:
-                return cell(job)
-            except BaseException:
-                stop.set()
-                raise
+        # Biggest file first. After a failure (`stop`) the cells not yet started return without running; the running ones finish (their
+        # temp dirs hold sentences and are deleted by them) when the `with` waits for the pool, then the first error is raised.
         order = sorted(cells, key=lambda j: -os.path.getsize(files[j[0]][0]))
         with concurrent.futures.ThreadPoolExecutor(max_workers=min(a.jobs, len(cells))) as ex:
             try:
-                for fut in concurrent.futures.as_completed([ex.submit(guarded, j) for j in order]):
-                    if (r := fut.result()) is not None:
+                for fut in concurrent.futures.as_completed([ex.submit(cell, j) for j in order]):
+                    if (r := fut.result()) is not None:   # None: skipped after a failure, whose error is raised when its future comes
                         job, (cn, per) = r
                         got[job] = cn
                         write_rows(job, per)
             except BaseException:
-                stop.set()
-                ex.shutdown(wait=True, cancel_futures=True)
+                stop.set()   # an error of the main thread itself (writing a rows file, Ctrl-C): the cells left must not run either
                 raise
     for name in names:
         f, private = files[name]
