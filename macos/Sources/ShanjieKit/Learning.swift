@@ -81,6 +81,9 @@ public struct MenuEntry: Equatable, Sendable {
         public static let englishDisplay = "英文的顯示"
         public static let englishDisplayTyped = "打字時就顯示"
         public static let englishDisplaySpace = "按空白才顯示"
+        /// The spacing toggle in the settings window and the line under it (docs/contracts/cjk-spacing.md section 2).
+        public static let spacing = "中英文之間自動加空格"
+        public static let spacingNote = "在漢字和半形英文、數字之間自動加一個空格（俗稱「盤古之白」）。只改善解送出的文字。"
         public static let abbreviation = "可省略韻母"
         public static let rerank = "語意校正"
         public static let acgPack = "動漫與遊戲詞"
@@ -197,6 +200,7 @@ extension Session {
         guard selected.location != NSNotFound, marked.location == NSNotFound || marked.length == 0 else { return nil }
         let range = LeftContext.range(insertion: selected.location)
         guard range.length > 0, let text = client.attributedSubstring(from: range)?.string else { return nil }
+        shell.spacingPrev = text.last  // cjk-spacing section 1: the same read, not only the Han tail
         return LeftContext.han(text, truncated: range.location > 0)
     }
 

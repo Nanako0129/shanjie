@@ -123,6 +123,19 @@ public final class MemoryAbbreviationStore: AbbreviationStore {
     public init(_ abbreviation: Bool? = nil) { self.abbreviation = abbreviation }
 }
 
+/// Where the "中英文之間自動加空格" switch is kept (docs/contracts/cjk-spacing.md section 2): `nil` means never chosen, which is off.
+@MainActor
+public protocol SpacingStore: AnyObject {
+    var spacing: Bool? { get set }
+}
+
+/// The in-memory SpacingStore.
+@MainActor
+public final class MemorySpacingStore: SpacingStore {
+    public var spacing: Bool?
+    public init(_ spacing: Bool? = nil) { self.spacing = spacing }
+}
+
 /// Where the "中英混打（實驗）" switch is kept (docs/contracts/zhen-mixed.md section 3.2): `nil` means never chosen, which is on (digits.md A.3.7;
 /// it was off before). A saved value, either way, wins.
 /// Same arrangement as `AbbreviationStore`.
@@ -358,6 +371,12 @@ public final class Shell {
     /// stuck keys are read against V3 section 12.2, not reproduced: Space and tone keys are eaten while two or more units are
     /// pending). Hidden means always off; the stored value is neither read nor written.
     public let showsAbbreviation: Bool
+    private let spacingStore: SpacingStore
+    /// cjk-spacing: space between Han and ASCII letters or digits in the text the shell commits (default off).
+    private(set) var spacingOn = false
+    /// cjk-spacing section 1: the character before the cursor, read with the left context at composition start and then the last
+    /// character of each spaced commit; `nil` when unknown. Never logged.
+    var spacingPrev: Character?
     private let englishStore: EnglishStore
     /// zhen-mixed: the experimental English window (default on since digits.md A.3.7; absent in the store is on, a saved off stays off); sent to every engine `build()` makes. Unlike the abbreviation
     /// switch it ships (the app shows it).
@@ -514,6 +533,7 @@ public final class Shell {
     /// Required, like `glassTintStore`.
     /// `punctuationTable`: Apple's punctuation candidate table (s3e); tests pass another path.
     /// `punctuationNames`: Apple's punctuation names (s3f); tests pass another path.
+    /// `spacingStore`: the 中英文之間自動加空格 switch (cjk-spacing section 2). The default is for the tests; the app passes its own.
     /// `showsAbbreviation`: whether the abbreviation switch is offered. The default `true` is for the tests; the app passes `false`
     /// (v0.4.0). No test sees the app's value: the release device check does (no 可省略韻母 in the menu).
     public init(resources: URL, panel: CandidatePanel, isSecureInput: @escaping () -> Bool,
@@ -524,7 +544,8 @@ public final class Shell {
                 profileModeStore: ProfileModeStore, appProfileStore: AppProfileStore,
                 punctuationTable: URL = PunctuationTable.systemURL,
                 punctuationNames: URL = PunctuationNames.systemURL,
-                showsAbbreviation: Bool = true) {
+                showsAbbreviation: Bool = true,
+                spacingStore: SpacingStore = MemorySpacingStore()) {
         self.resources = resources
         self.learningDirectory = learningDirectory
         self.dialogs = dialogs
@@ -548,6 +569,8 @@ public final class Shell {
         self.abbreviationStore = abbreviationStore
         self.showsAbbreviation = showsAbbreviation
         abbreviationOn = showsAbbreviation && abbreviationStore.abbreviation == true
+        self.spacingStore = spacingStore
+        spacingOn = spacingStore.spacing == true
         self.englishStore = englishStore
         englishOn = englishStore.english ?? true // digits.md A.3.7: on unless the person turned it off (a saved value wins)
         englishInlineOn = englishStore.englishInline ?? true
@@ -698,6 +721,13 @@ public final class Shell {
         predictionStore.prediction = on
         defer { changed() }
         return engine?.setPrediction(on)
+    }
+
+    /// The settings window's 中英文之間自動加空格 (cjk-spacing section 2): the shell's own switch, nothing goes to the core.
+    func setSpacing(_ on: Bool) {
+        spacingOn = on
+        spacingStore.spacing = on
+        changed()
     }
 
     /// The menu's choice (V3 section 12.1): stored, and sent to the engine; the snapshot is for the caller to show.
@@ -1188,6 +1218,7 @@ public final class Session {
         // first setMarkedText. Only a character key without Control, Option, Command or Caps Lock
         // can start one, so pass-through keys outside a composition never read the client.
         if !shell.composing && key.kind == KeyMap.char && key.modifiers & ~1 == 0 {
+            shell.spacingPrev = nil
             let code = engine.setLeftContext(paused ? nil : leftContext())
             if code != 0 { Log.shell.error("shanjie_engine_set_left_context failed, code \(code)") }
         }
@@ -1217,7 +1248,12 @@ public final class Session {
     /// cursor_utf16), then the candidates.
     private func apply(_ o: CoreOutput) {
         if !o.commit.isEmpty {
-            client.insertText(o.commit, replacementRange: NSRange(location: NSNotFound, length: 0))
+            var text = o.commit
+            if shell.spacingOn {
+                text = CJKSpacing.apply(previous: shell.spacingPrev, text: text)
+                shell.spacingPrev = text.last
+            }
+            client.insertText(text, replacementRange: NSRange(location: NSNotFound, length: 0))
         }
         if !o.preedit.isEmpty {
             client.setMarkedText(Self.marked(o), selectionRange: NSRange(location: o.cursorUTF16, length: 0))
