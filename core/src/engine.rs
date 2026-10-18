@@ -884,6 +884,11 @@ impl Engine {
         }
     }
 
+    /// The longest word a candidate window can list (the bound `window_list` uses). Read-only; the replay tool stops its scan there.
+    pub fn max_window_len(&self) -> usize {
+        self.lex.max_len.max(NEWWORD_MAX)
+    }
+
     /// The job of the last change, if it has one (none without a model, with rerank or demotion off, or with nothing to rerank).
     pub fn take_rerank_job(&mut self) -> Option<RerankJob> {
         self.rerank_job.take()
