@@ -213,8 +213,9 @@ fn a_pick_that_changes_nothing_ends_the_repicking() {
     assert_eq!((o.picks, o.actual), (1, o.ideal + 4), "one pick (Home, Right, Space, digit), then it stops");
 }
 
-/// Rule (section 1.1): an output path that is the rows file is refused before anything is written (exit 2, file as it was), however
-/// the path is spelled; the outputs are created only once the rows have been read.
+/// Rule (section 1.1): an output path that is the rows file is refused before anything is written (exit 2, file as it was), also
+/// when spelled with `..` or through a symlink (paths are canonicalized; a hard link is not caught, contract section 10); the
+/// outputs are created only once the rows have been read.
 #[test]
 fn an_output_that_is_the_rows_file_is_refused() {
     let dir = std::env::temp_dir().join(format!("shanjie-replay-refuse-{}", std::process::id()));
