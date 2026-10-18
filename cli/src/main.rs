@@ -10,7 +10,7 @@ use std::fmt::Write as _;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
@@ -390,7 +390,10 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
         None => None,
     };
     let (want_scores, want_dump, want_words) = (scores.is_some(), dump.is_some(), dump_words.is_some());
-    let threads = threads.min(rows.len().max(1));
+    // `--threads N`: the rows are decoded in blocks of BLOCK contiguous rows; no more workers than blocks.
+    const BLOCK: usize = 32;
+    let (nrows, nblocks) = (rows.len(), rows.len().div_ceil(BLOCK));
+    let threads = threads.min(nblocks.max(1));
     // One row, a function of the row alone (nothing carries over from one row to the next), so the rows can be decoded in any
     // order or at once. Everything the row writes is built here as text; the loop below puts it in the files, in row order.
     let work = |i: usize| -> Result<RowOut, String> {
@@ -472,35 +475,69 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
             emit(i, work(i)?)?;
         }
     } else {
-        // `--threads N`: N workers take the next block of BLOCK contiguous rows from a shared counter and send its outputs back; the
-        // main thread writes the blocks in row order, holding the ones that arrive early. The first error in row order is the error
-        // (dropping `rx` on return stops the workers at their next send). An early block waits in memory behind a slow earlier one.
-        const BLOCK: usize = 32;
-        let (n, next) = (rows.len(), AtomicUsize::new(0));
-        std::thread::scope(|sc| {
+        // N workers take the next block of BLOCK rows from a shared counter and send its outputs back; the main thread writes the
+        // blocks in row order, holding the ones that arrive early. The first error in row order is the error: a block stops at its
+        // first error, workers claim no new block once any error is seen (a block already claimed is still decoded, so an earlier
+        // error is not missed), and returning drops `rx`, which stops the workers at their next send. A panic in a row is turned into
+        // that row's error. The early blocks held in memory are bounded: a worker does not start block b while
+        // b >= written + LOOKAHEAD (the lowest unwritten block is always within it, so the wait cannot deadlock).
+        let lookahead = 4 * threads;
+        let (next, written, failed, closed) = (AtomicUsize::new(0), AtomicUsize::new(0), AtomicBool::new(false), AtomicBool::new(false));
+        let decoded = std::thread::scope(|sc| {
             let (tx, rx) = mpsc::channel::<(usize, Vec<Result<RowOut, String>>)>();
             for _ in 0..threads {
-                let (tx, work, next) = (tx.clone(), &work, &next);
-                sc.spawn(move || loop {
-                    let b = next.fetch_add(1, Ordering::Relaxed);
-                    if b * BLOCK >= n || tx.send((b, (b * BLOCK..((b + 1) * BLOCK).min(n)).map(work).collect())).is_err() {
-                        break;
+                let (tx, work, next, written, failed, closed) = (tx.clone(), &work, &next, &written, &failed, &closed);
+                sc.spawn(move || {
+                    while !failed.load(Ordering::Relaxed) {
+                        let b = next.fetch_add(1, Ordering::Relaxed);
+                        if b >= nblocks {
+                            return;
+                        }
+                        while b >= written.load(Ordering::Acquire) + lookahead {
+                            if closed.load(Ordering::Relaxed) {
+                                return;
+                            }
+                            std::thread::sleep(Duration::from_millis(1));
+                        }
+                        let mut outs = Vec::new();
+                        for i in b * BLOCK..((b + 1) * BLOCK).min(nrows) {
+                            let out = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| work(i)))
+                                .unwrap_or_else(|_| Err(format!("row {} panicked in a --threads worker", i + 1)));
+                            let bad = out.is_err();
+                            outs.push(out);
+                            if bad {
+                                failed.store(true, Ordering::Relaxed);
+                                break;
+                            }
+                        }
+                        if tx.send((b, outs)).is_err() {
+                            return;
+                        }
                     }
                 });
             }
             drop(tx);
-            let (mut early, mut want) = (BTreeMap::new(), 0);
-            for (b, outs) in rx {
-                early.insert(b, outs);
-                while let Some(outs) = early.remove(&want) {
-                    for (i, out) in (want * BLOCK..).zip(outs) {
-                        emit(i, out?)?;
+            let mut run = || -> Result<usize, String> {
+                let (mut early, mut want) = (BTreeMap::new(), 0);
+                for (b, outs) in &rx {
+                    early.insert(b, outs);
+                    while let Some(outs) = early.remove(&want) {
+                        for (i, out) in (want * BLOCK..).zip(outs) {
+                            emit(i, out?)?;
+                        }
+                        want += 1;
+                        written.store(want, Ordering::Release);
                     }
-                    want += 1;
                 }
-            }
-            Ok::<(), String>(())
+                Ok(want)
+            };
+            let r = run();
+            closed.store(true, Ordering::Relaxed);
+            r
         })?;
+        if decoded != nblocks {
+            return Err(format!("--threads: only {decoded} of {nblocks} blocks of rows were decoded"));
+        }
     }
     if let Some(mut w) = scores {
         w.flush().map_err(|_| "cannot write tinylm scores".to_string())?;
@@ -511,13 +548,15 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
         rerank.sort();
         let ms = |d: Duration| d.as_secs_f64() * 1000.0;
         eprintln!(
-            "tinylm: rerank n={} p50={:.3} ms p95={:.3} ms; rows kept first (candidate over the context) {long}; load {:.0} ms, rss {:?} -> {:?} KiB around the .sjtl load",
+            "tinylm: rerank n={} p50={:.3} ms p95={:.3} ms; rows kept first (candidate over the context) {long}; load {:.0} ms, rss {:?} -> {:?} KiB around the .sjtl load{}",
             rerank.len(),
             ms(rerank[rerank.len() / 2]),
             ms(rerank[(rerank.len() as f64 * 0.95) as usize]),
             ms(*load),
             rss_before,
-            rss_after
+            rss_after,
+            // The percentiles of a parallel run are measured under contention; N = 1 prints the line as before (tools/bench.py parses it).
+            if threads > 1 { format!(" (threads {threads}: measured under contention)") } else { String::new() }
         );
     }
     if let Some(mut d) = dump {

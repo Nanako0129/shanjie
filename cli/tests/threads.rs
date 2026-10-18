@@ -71,5 +71,55 @@ fn bad_threads_exit_2_and_other_modes_refuse_it() {
     for args in [vec!["--rows", &rows, "--threads", "2"], vec!["--predict", &rows, "--lm", &lm, "--profile", "chat", "--threads", "2"]] {
         let out = run(&args);
         assert!(!out.status.success() && out.stdout.is_empty(), "{args:?}");
+        assert!(String::from_utf8_lossy(&out.stderr).contains("unknown argument"), "{args:?}");
     }
+}
+
+/// Two rows with no decode path (a nonsense syllable): one in block 0 (row 10, one syllable) and one in block 1 (row 40, two syllables,
+/// so its message differs). With any number of threads the error is the first in row order (row 10's), nothing is printed on stdout,
+/// and the partial --dump, --dump-words and --tinylm-scores files are those of the one-thread run (rows 1 to 9).
+#[test]
+fn the_first_error_in_row_order_wins_with_the_same_partial_files() {
+    let tl = model("tinylm.sjtl");
+    let dir = std::env::temp_dir().join(format!("shanjie-cli-threads-err-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut n = 0;
+    let rows: String = std::fs::read_to_string(root().join("eval/dev/user-typing.txt"))
+        .unwrap()
+        .lines()
+        .map(|l| {
+            let mut f: Vec<&str> = l.split('|').collect();
+            if f.len() == 3 {
+                n += 1;
+                match n {
+                    10 => f[2] = "zzz",
+                    40 => f[2] = "zzz zzz",
+                    _ => {}
+                }
+            }
+            f.join("|") + "\n"
+        })
+        .collect();
+    assert!(n >= 64, "the rows file needs a block 1 and a row 40");
+    let rows_path = dir.join("rows.txt");
+    std::fs::write(&rows_path, rows).unwrap();
+    let lm = model("bigram.sjlm");
+    let one_run = |threads: &str| {
+        let f = |name: &str| dir.join(format!("{threads}-{name}")).to_string_lossy().into_owned();
+        let (dump, words, sc) = (f("dump"), f("words"), f("scores"));
+        let out = run(&[
+            "--threads", threads, "--lm", &lm, "--profile", "chat", "--context", "--tinylm", &tl, "--rows", rows_path.to_str().unwrap(),
+            "--dump", &dump, "--dump-words", &words, "--tinylm-scores", &sc,
+        ]);
+        let stderr: Vec<String> = String::from_utf8_lossy(&out.stderr).lines().filter(|l| !l.starts_with("tinylm:")).map(String::from).collect();
+        let files: Vec<String> = [&dump, &words, &sc].iter().map(|p| std::fs::read_to_string(p).unwrap()).collect();
+        (out.status.code(), out.stdout, stderr, files)
+    };
+    let one = one_run("1");
+    assert_eq!(one.0, Some(1));
+    assert!(one.1.is_empty() && one.2 == ["error: no decode path (input length 1)"], "{:?}", one.2);
+    assert!(one.3.iter().all(|s| s.lines().next().is_some()), "the rows before the error are written");
+    assert_eq!(one, one_run("3"));
+    assert_eq!(one, one_run("2"));
+    std::fs::remove_dir_all(dir).unwrap();
 }
