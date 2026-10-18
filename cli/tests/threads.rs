@@ -123,3 +123,25 @@ fn the_first_error_in_row_order_wins_with_the_same_partial_files() {
     assert_eq!(one, one_run("2"));
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+/// `--dev 302` is 10 blocks of rows, more than the window of 4 blocks per worker ahead of the writer for 2 workers (8): the bounded
+/// reorder buffer can make a worker wait in it, and the outputs are still those of the one-thread run. No small model, so it is quick.
+#[test]
+fn dev302_is_unchanged_across_the_lookahead_window() {
+    let lm = model("bigram.sjlm");
+    let dir = std::env::temp_dir().join(format!("shanjie-cli-threads-dev-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let one_run = |threads: &str| {
+        let f = |name: &str| dir.join(format!("{threads}-{name}")).to_string_lossy().into_owned();
+        let (dump, rs) = (f("dump"), f("rowstats"));
+        let out = run(&["--threads", threads, "--lm", &lm, "--profile", "chat", "--dev", "302", "--dump", &dump, "--rowstats", &rs]);
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        (out.stdout, std::fs::read_to_string(dump).unwrap(), std::fs::read_to_string(rs).unwrap())
+    };
+    let one = one_run("1");
+    assert_eq!(one.2.lines().count(), 302);
+    for t in ["2", "3"] {
+        assert_eq!(one, one_run(t), "{t} threads");
+    }
+    std::fs::remove_dir_all(dir).unwrap();
+}

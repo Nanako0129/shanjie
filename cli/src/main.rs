@@ -208,6 +208,15 @@ fn scores_line(i: usize, ng: &[f64], ok: &[bool], ed: &[u32], glen: usize, chose
     Ok(s + "}\n")
 }
 
+/// Sets the flag when dropped, panic included: the threaded `run_lm` uses it to release workers that wait for the writer.
+struct Release<'a>(&'a AtomicBool);
+
+impl Drop for Release<'_> {
+    fn drop(&mut self) {
+        self.0.store(true, Ordering::Relaxed);
+    }
+}
+
 /// What one row of `run_lm` hands to the writers: the counters it adds to and the text it adds to each output file.
 #[derive(Default)]
 struct RowOut {
@@ -228,8 +237,11 @@ struct RowOut {
 /// word split of every `--dump` line (`row\trank\twords`, same ranks and order) after rank 0, the gold sentence split by the core's
 /// `segment_words` (`-` when it cannot be split). `--rerank-level conservative|standard|aggressive` (default standard) picks which of
 /// the file's (alpha, tau, delta) the rerank uses (docs/contracts/rerank-strength.md section 2.3). `--threads N` (default 1) decodes the
-/// rows on N threads sharing one copy of the models; the output files and the summary line are byte for byte those of N = 1, only the
-/// timing numbers of the tinylm latency line on stderr differ (its counts do not). Only the `lm` mode takes it: the other modes refuse it
+/// rows on N threads sharing one copy of the models; the output files and the summary line are byte for byte those of N = 1. With N
+/// above 1 the stderr tinylm latency line has other timings (measured under contention) and ends with " (threads N: measured under
+/// contention)", N being the worker count after capping it at the number of 32-row blocks; its counts are the same, and with one
+/// worker the line is as for N = 1. A panic in a row exits 101 on the inline path (N = 1, or one block) and exits 1 with "row N
+/// panicked in a --threads worker" on the threaded path. Only the `lm` mode takes it: the other modes refuse it
 /// as an unknown argument.
 fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     let (mut lm_path, mut profile, mut name, mut dev, mut rows_file) = (None, None, None, None, None);
@@ -480,10 +492,10 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
         // first error, workers claim no new block once any error is seen (a block already claimed is still decoded, so an earlier
         // error is not missed), and returning drops `rx`, which stops the workers at their next send. A panic in a row is turned into
         // that row's error. The early blocks held in memory are bounded: a worker does not start block b while
-        // b >= written + LOOKAHEAD (the lowest unwritten block is always within it, so the wait cannot deadlock).
+        // b >= written + lookahead (the lowest unwritten block is always within it, so the wait cannot deadlock).
         let lookahead = 4 * threads;
         let (next, written, failed, closed) = (AtomicUsize::new(0), AtomicUsize::new(0), AtomicBool::new(false), AtomicBool::new(false));
-        let decoded = std::thread::scope(|sc| {
+        std::thread::scope(|sc| {
             let (tx, rx) = mpsc::channel::<(usize, Vec<Result<RowOut, String>>)>();
             for _ in 0..threads {
                 let (tx, work, next, written, failed, closed) = (tx.clone(), &work, &next, &written, &failed, &closed);
@@ -517,27 +529,20 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
                 });
             }
             drop(tx);
-            let mut run = || -> Result<usize, String> {
-                let (mut early, mut want) = (BTreeMap::new(), 0);
-                for (b, outs) in &rx {
-                    early.insert(b, outs);
-                    while let Some(outs) = early.remove(&want) {
-                        for (i, out) in (want * BLOCK..).zip(outs) {
-                            emit(i, out?)?;
-                        }
-                        want += 1;
-                        written.store(want, Ordering::Release);
+            let _release = Release(&closed);   // also on a panic of this thread: the workers waiting in the lookahead loop leave
+            let (mut early, mut want) = (BTreeMap::new(), 0);
+            for (b, outs) in &rx {
+                early.insert(b, outs);
+                while let Some(outs) = early.remove(&want) {
+                    for (i, out) in (want * BLOCK..).zip(outs) {
+                        emit(i, out?)?;
                     }
+                    want += 1;
+                    written.store(want, Ordering::Release);
                 }
-                Ok(want)
-            };
-            let r = run();
-            closed.store(true, Ordering::Relaxed);
-            r
+            }
+            Ok::<(), String>(())
         })?;
-        if decoded != nblocks {
-            return Err(format!("--threads: only {decoded} of {nblocks} blocks of rows were decoded"));
-        }
     }
     if let Some(mut w) = scores {
         w.flush().map_err(|_| "cannot write tinylm scores".to_string())?;
