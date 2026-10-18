@@ -29,7 +29,7 @@ def fb(new, base):
 def alone(rows, col="ll"):
     fix = fixable = keep = keepable = 0
     for r in rows:
-        if r["n"] < 2 or r.get("skip"):
+        if r["n"] < 2 or r.get("skip") or r.get("noll"):   # 0c skip rows and B noll rows are not rescored
             continue
         j = max(range(r["n"]), key=lambda i: (r[col][i], -i))
         if r["ok"][0]:
