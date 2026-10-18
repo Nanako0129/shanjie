@@ -2,7 +2,7 @@
 model, written from the graph (tools/convert_oc.py reads the graph; every op below is one the graph has, in the same order).
 
   python3 tools/oc_ref.py --compare MODEL_DIR FILE.sjoc --dump D --dev 302 [--rust SCORES.jsonl]   # A2 / A4: vs ONNX Runtime (and Rust)
-  python3 tools/oc_ref.py --export ITEMS.tsv --dump D --dev 302                                      # rows for core/examples/oc_score.rs
+  python3 tools/oc_ref.py --export ITEMS.tsv --dump D --dev 302 [--pad-context 64]                   # rows for core/examples/oc_score.rs
 
 `Session(load(path))` has the ONNX Runtime session's `run(names, feeds)`, so experiments/x0c/score_0c.py's `Zuin`, `score` and
 `feeds_for` drive it unchanged (`zuin(path)`): the inputs are built by the same code for both. Computation is float32, as ORT's, or
@@ -186,10 +186,24 @@ def items(dump, dev, x0c_dir=None):
             if len(cs) >= 2]
 
 
-def export(dump, dev, out):
-    """ITEMS.tsv for core/examples/oc_score.rs: row<TAB>prefix<TAB>syllables (space-separated)<TAB>candidates (|-separated)."""
+def pad_text(n):
+    """The first n characters of eval/dev/existing.txt's sentence fields joined in file order: a fixed public text that gives every
+    timed row exactly n characters of context (the latency gate's 64-character condition; dev302's own prefixes are mostly empty)."""
+    path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "eval", "dev", "existing.txt")
+    text = "".join(p[1] for p in (l.rstrip("\n").split("|") for l in open(path, encoding="utf-8")) if len(p) == 3)
+    if len(text) < n:
+        raise SystemExit(f"oc_ref: existing.txt has only {len(text)} characters")
+    return text[:n]
+
+
+def export(dump, dev, out, pad=0):
+    """ITEMS.tsv for core/examples/oc_score.rs: row<TAB>prefix<TAB>syllables (space-separated)<TAB>candidates (|-separated). With
+    pad = n, every prefix becomes the last n characters of pad_text(n) + the row's own prefix."""
+    head = pad_text(pad) if pad else ""
     with open(out, "w", encoding="utf-8", newline="\n") as f:
         for i, prefix, syl, cs in items(dump, dev):
+            if pad:
+                prefix = (head + prefix)[-pad:]
             if any(c in x for x in [prefix, *syl, *cs] for c in "\t\n|"):
                 raise SystemExit(f"oc_ref: row {i} has a tab, newline or | in a field")
             f.write(f"{i}\t{prefix}\t{' '.join(syl)}\t{'|'.join(cs)}\n")
@@ -239,12 +253,13 @@ if __name__ == "__main__":
     ap.add_argument("--compare", nargs=2, metavar=("MODEL_DIR", "SJOC"))
     ap.add_argument("--rust", metavar="SCORES", help="with --compare: core/examples/oc_score.rs scores to check against both")
     ap.add_argument("--export", metavar="ITEMS", help="write ITEMS.tsv for core/examples/oc_score.rs")
+    ap.add_argument("--pad-context", type=int, default=0, metavar="N", help="with --export: every prefix exactly N characters (pad_text)")
     ap.add_argument("--dump", required=True)
     ap.add_argument("--dev", type=int, default=302)
     a = ap.parse_args()
     if bool(a.compare) == bool(a.export) or (a.rust and not a.compare):
         ap.error("exactly one of --compare / --export; --rust only with --compare")
     if a.export:
-        export(a.dump, a.dev, a.export)
+        export(a.dump, a.dev, a.export, a.pad_context)
     else:
         compare(*a.compare, a.dump, a.dev, a.rust)

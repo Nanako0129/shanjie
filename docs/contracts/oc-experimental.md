@@ -60,7 +60,10 @@
   - 照 §1 寫前向，讀 `SJOC0001`（f32）。
   - 在 dev302（公開）上和 ONNX Runtime 的分數比：log10 的最大絕對差 ≤ 1×10⁻⁴（f32 檔）。2026-10-19 已量：最大 3.15×10⁻⁵，300/300 列分數最高的候選相同（研究紀錄同日）。修訂二加了 4 位元組對齊，轉檔要重跑一次，這個比對也重跑一次。
   - 這一步確認轉檔與結構理解都對；不過就停（§4）。
-  - 修訂二（main 寫）：`oc_ref.py --export ITEMS` 從 dev302 列與候選 dump 寫出 `ITEMS.tsv`（`列號<TAB>前文<TAB>以空白分隔的讀音<TAB>以 | 分隔的候選`，只含 n ≥ 2 的列）；`oc_ref.py --rust SCORES` 讀 Rust 量測程式的分數檔，報 Rust 對 numpy、Rust 對 ORT 的 log10 差（最大、p99）與「分數最高的候選」相同的列數比例。ORT 現場跑，所以 `--rust` 在 GCP 上跑。
+  - 修訂二（main 寫）：
+    - `oc_ref.py --export ITEMS.tsv --dump D --dev 302` 從 dev302 列與候選 dump 寫出 `ITEMS.tsv`（`列號<TAB>前文<TAB>以空白分隔的讀音<TAB>以 | 分隔的候選`，只含 n ≥ 2 的列）。
+    - 加 `--pad-context 64` 寫出 `ITEMS-64.tsv`：每列的前文都剛好 64 字，等於固定的公開文字（`eval/dev/existing.txt` 句子欄依檔案順序接起來的前 64 字）接上這一列自己的前文，再取最後 64 字。dev302 自己的前文幾乎都是空的或只有幾個字，延遲門檻的「給 64 字前文」靠這個檔。
+    - `oc_ref.py --compare MODEL_DIR SJOC --dump D --dev 302 --rust SCORES.jsonl` 讀 Rust 量測程式的分數檔，報 Rust 對 numpy、Rust 對 ORT 的 log10 差（最大、p99）與「分數最高的候選」相同的列數比例。ORT 現場跑，所以這一步在 GCP 上跑。
 - **A3 Rust 推論**（`core/src/oc.rs`，新模組，照 `tinylm.rs` 的寫法）：
   - 修訂二：用 `trigram.rs` 的 `Mapped`（唯讀整檔映射，三元表已在用，契約 `trigram-mmap.md`）載入 `SJOC0001`，權重直接從映射讀成 `&[f32]`、不複製進堆積；不受 `tinylm::MAX_FILE` 限制（真模型 f32 約 131 MB）。載入時檢查檔頭、版面算出的總長度和檔案大小完全相同、每個張量對齊 4 位元組，任一不符就拒絕。`Mapped::open` 回傳的錯誤型別要能給 0c 用（executor 決定怎麼泛化）。
   - `score(context, syllables, candidates) -> Vec<Option<f64>>`：每個候選一個 log10 P，打不了的是 `None`；規則和 §1 最後一點相同。
@@ -68,11 +71,11 @@
   - 先不做前綴共用與 KV 快取：8 個候選補齊成一批（和 tinylm 一樣）。
   - **量測程式**（修訂二）`core/examples/oc_score.rs`，`cargo run --release -p core --example oc_score -- …`；不改 CLI、不改引擎：
     - `--sjoc PATH --items ITEMS.tsv --out SCORES.jsonl`：每列一行 `{"i": 列號, "ll": [每個候選的 log10] 或 null}`（整列打不了是 null），規則和 `score()` 相同。給 A4 的一致性用。
-    - `--sjoc PATH --items ITEMS.tsv --latency [--no-context] [--tinylm M.sjtl]`：單執行緒，每列計時一次 `score()`（給 `--tinylm` 時同一批列也計時 M 的打分），跑 3 輪，報每輪的 p50／p95 與 3 輪的中位數；p95 取排序後第 int(n × 0.95) 個，和 CLI 相同。
+    - `--sjoc PATH --items ITEMS.tsv --latency [--no-context] [--tinylm M.sjtl]`（`--no-context` 把每列的前文換成空字串）：單執行緒，每列計時一次 `score()`（給 `--tinylm` 時同一批列也計時 M 的打分），跑 3 輪，報每輪的 p50／p95 與 3 輪的中位數；p95 取排序後第 int(n × 0.95) 個，和 CLI 相同。
     - `--sjoc PATH --items ITEMS.tsv --mem --tinylm M.sjtl`（只在 macOS）：用 `task_info` 讀 `MACH_TASK_BASIC_INFO` 的 `resident_size`（RSS）與 `TASK_VM_INFO` 的 `phys_footprint`（libc 的 extern 宣告，零套件）。量三個點：程式開始、載入 0c 並打一列之後、再載入 M 並打一列之後；報 0c 一個的增量與兩個合計的增量。
 - **A4 量測**（main 做）：
-  - **一致性**（GCP，一台 VM 上做完）：重新轉檔、`oc_ref.py --export` 產 dev302 聊天的 `ITEMS.tsv`、`oc_score --out` 產 Rust 分數、`oc_ref.py --rust` 比對。(1) Rust 對 numpy（同一份 f32 檔）：log10 最大差；(2) Rust 對 ORT：log10 差的 p99 與最大值，以及「8 個候選裡分數最高的那個」相同的列數比例。
-  - **延遲**（Mac，空閒、單執行緒）：`oc_score --latency`，不給前文與給 64 字前文各一次，同一場用 `--tinylm data/lm/tinylm.sjtl` 量 M 當基準。這是少量的單句量測，允許在 Mac 上做。
+  - **一致性**（GCP，一台 VM 上做完）：重新轉檔、`oc_ref.py --export` 產 dev302 聊天的 `ITEMS.tsv`、`oc_score --out` 產 Rust 分數、`oc_ref.py --compare … --rust SCORES.jsonl` 比對。(1) Rust 對 numpy（同一份 f32 檔）：log10 最大差；(2) Rust 對 ORT：log10 差的 p99 與最大值，以及「8 個候選裡分數最高的那個」相同的列數比例。
+  - **延遲**（Mac，空閒、單執行緒）：不給前文是 `oc_score --sjoc … --items ITEMS.tsv --latency --no-context --tinylm data/lm/tinylm.sjtl`；給 64 字前文是 `oc_score --sjoc … --items ITEMS-64.tsv --latency --tinylm data/lm/tinylm.sjtl`。M 在同一場當基準。這是少量的單句量測，允許在 Mac 上做。
   - **大小與記憶體**（Mac）：檔案大小；`oc_score --mem` 的 RSS 與 phys_footprint 增量（映射讓兩者分家：RSS 會算映射頁，footprint 不算）。
 
 ## 3. 驗收
@@ -83,7 +86,7 @@
   - 項目要涵蓋：字表外的字、空前文、需要截掉的長前文、單音節（不打分）、輕聲另試、33 個音節（超過上限，不打分）。
 - **真模型一致性**（不在 CI；main 跑，數字寫進研究紀錄）：A2 的 numpy 對 ORT ≤ 1×10⁻⁴；Rust 對 numpy（同一份 f32 檔）≤ 1×10⁻⁴；dev302 上 Rust「分數最高的候選」和 ORT 相同的列 ≥ 99%。（修訂二：int8 門檻刪掉，因為不出 int8。）
 - **記憶體門檻**：`oc_score --mem` 量到的 RSS 增量合計（程式開始 → M 和 0c 都載入並各打一列）≤ 250 MiB（維護者 2026-10-18 定的重排模型上限；指標用 RSS，因為它把映射頁也算進去，是比較嚴的那個）；phys_footprint 只報。
-- **延遲門檻**：照 `rerank-size` §4，每列 8 個候選的重排 p95 ≤ 50 ms（Mac 空閒、單執行緒、給 64 字前文）。
+- **延遲門檻**：照 `rerank-size` §4，每列 8 個候選的重排 p95 ≤ 50 ms（Mac 空閒、單執行緒，用 `ITEMS-64.tsv` 那一場：每列都是 64 字前文）。
 - **突變**（每一項都要讓 golden 測試失敗，build error 不算）：
   - 拿掉 RoPE；
   - 拿掉因果遮罩；
@@ -125,3 +128,4 @@
 | plan-verifier 第 2 次（2026-10-19） | READY | — |
 | 修訂二（2026-10-19） | A4 量到逐列 int8 296/300、p99 0.437，照 §4 停下；診斷最好的 int8 變體 p99 0.109、約 76 MB | 維護者選擇題：改出 f32、用 `Mapped` 唯讀映射載入，int8 拿掉；改 §2 A1／A3／A4、§3、§4、§5。等 plan-verifier |
 | plan-verifier（修訂二，2026-10-19） | REVISE：沒有任何交付物能讓 main 在真實的列上跑 Rust，A4 與 §3 的一致性、延遲、記憶體都量不到；RSS 怎麼讀沒寫 | 照最小修改：A3 加量測程式 `core/examples/oc_score.rs`（分數檔、延遲、記憶體三種模式，記憶體用 `task_info`）；A2 加 `oc_ref.py --export／--rust`；A4 與記憶體門檻指向它們 |
+| plan-verifier 收尾（修訂二，2026-10-19） | REVISE：延遲門檻要「給 64 字前文」，但 dev302 的前文幾乎都很短，量測程式產生不出這個條件；P3：`--rust` 的指令寫法不完整 | 第二次 REVISE 逐項處置，兩項都 FIX：`oc_ref.py --export --pad-context 64` 產 `ITEMS-64.tsv`（固定公開文字補到 64 字），A4 與延遲門檻寫明用它；指令改成完整寫法 |

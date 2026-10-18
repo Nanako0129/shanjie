@@ -71,6 +71,10 @@ class TestOcRef(unittest.TestCase):
         self.assertEqual([l[0] for l in lines], ["1", "3"])                     # row 2 has one candidate; rank 9 is past the top 8
         self.assertEqual([l[3] for l in lines], ["甲乙|丙丁", "庚辛|壬癸"])
         self.assertTrue(all(len(l) == 4 and l[2] for l in lines))
+        oc_ref.export(dump, 3, out, pad=64)
+        padded = [l.rstrip("\n").split("\t") for l in open(out, encoding="utf-8")]
+        self.assertTrue(all(len(l[1]) == 64 for l in padded))
+        self.assertEqual([l[1][len(l[1]) - len(o[1]):] for l, o in zip(padded, lines)], [o[1] for o in lines])   # own prefix kept last
 
 
 if __name__ == "__main__":
