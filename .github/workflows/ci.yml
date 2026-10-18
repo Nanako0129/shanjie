@@ -212,6 +212,10 @@ jobs:
       - name: Benchmark tool (Python)
         run: python3 -m unittest tools/test_bench.py
 
+      # docs/contracts/kpi.md: the per-version KPI table rules and the replay model checks, synthetic JSON and fake binaries.
+      - name: KPI table tool (Python)
+        run: python3 -W ignore -m unittest tools/test_kpi.py
+
       # docs/contracts/zhen-mixed.md section 3.4 and 5.6: the English word list builder (filter, cut, sort, input hash), synthetic input.
       - name: English word list builder (Python)
         run: python3 -m unittest tools/test_build_english_words.py

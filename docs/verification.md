@@ -23,10 +23,13 @@
 | 指令 | 什麼時候 | 內容 |
 |---|---|---|
 | `tools/bench.py run --suite v2 <上一版 tag> <要打 tag 的 commit> --as <新版> --private-root ~/side-project/shanjie-private`，再 `tools/bench.py table` | 發版前（推 `v*` tag 之前） | 套件 v2（`docs/contracts/sbench-v2.md`）：每一版用自己出貨的模型、詞類表、小模型與旗標量準確率與速度，結果寫 `eval/bench/results/v2-<label>.json`；要打 tag 的 commit 定下來之後，請 fresh verifier 照 CLAUDE.md 量保留集（上一版對新版的 `evalstats compare` 一行），填進同一個 JSON（可以在最後幾個只改綁定路徑以外檔案的 PR 合併前就量，條件見 `docs/contracts/sbench-v2.md` §2.3 的修訂）。兩者隨發版前的 PR 進 repo；推 tag 前核對被量的 commit 和要打 tag 的 commit 在 `Cargo.toml Cargo.lock core cli data eval/variants.tsv macos scripts` 上沒有差異。新版要先在 `tools/bench.py` 的 `VERSIONS2` 加一列（Release 名、出貨旗標、摘要行設定標記，照 App 的預設值與 `scripts/build-app.sh` 包進去的模型） |
+| `tools/kpi.py run <要打 tag 的 commit> --as <新版> --wikitune-clean <列檔>`（Windows 機器或 GCP，不在 Mac），在那個 commit 的乾淨 checkout 上 `tools/kpi.py replay --as <新版>`，再 `tools/kpi.py table` | 套件 v2 跑完之後、推 tag 之前 | 每版 KPI（`docs/contracts/kpi.md`）：`run` 用 `bench.py` 的匯出、編譯與模型設定，以出貨旗標、書面設定量 wikitune-clean，寫 `eval/bench/kpi/<版本>.json` 的 `sha` 與 `wikitune_clean`；`replay` 在目前的 checkout 用 `data/lm/` 的模型（要和 `VERSIONS2[新版]` 出貨的那一組完全一致、雜湊符合 `data/*.sha256`，工作區不乾淨就拒絕），先 `cargo build --release -p cli --bin shanjie-replay`，再以真引擎重播 `eval/bench/suite-v2/user-reported.txt`（學習關與開）和 `eval/bench/suite-v1/dev302.txt`（學習關），寫同一個 JSON 的 `replay`；`table` 重產 `docs/kpi.md`，不手改。三者的結果和上一列的基準測試結果同一個 PR 進 repo |
 | `tools/bench.py run <commit> --private-root ~/side-project/shanjie-private` | 不再用於發版 | 套件 v1（固定 model-v1），保留給 v0.1.x 的歷史表 |
 | `tools/bench.py reference --private-root ~/side-project/shanjie-private` | commit 或指紋改變時 | 「小麥資料基準」列（`--no-overlay`、不帶 `--lm` 的 unigram） |
 | `tools/bench.py check-static` | 改動 `eval/bench/static/typing-test.json` 或 `docs/typing-test.md` 時 | 實打對照表逐格對照原文 |
 | `tools/bench.py table` | 上面任一個之後 | 重產 `docs/benchmark.md`，不手改 |
+
+**保留集的兩個半邊（從下一個發版起，`docs/contracts/kpi.md` §3）**：保留集規則不變（只在推 `v*` tag 前由 fresh verifier 跑一次，基準與新版各跑 `--set holdout --rowstats`，聊天、書面各一次）。全集合照舊每種設定一行，存在 v2 JSON 的 `holdout.chat`、`holdout.formal`。另加兩行：口語半邊用**聊天**設定、新聞半邊用**書面**設定。`--set holdout` 依檔名排序讀，`news.txt` 是第 1–150 列、`talk.txt` 是第 151–300 列；基準與新版的 rowstats 用同樣的方式切出那一段、列號從 1 重編（`evalstats` 要求列號從 1 連續），再跑 `evalstats compare --net`。兩個半邊存進 `eval/bench/kpi/<版本>.json` 的 `holdout_talk_chat`、`holdout_news_formal`（欄位同 v2 JSON 的 `holdout`：`n`、`top1`、`fixed`、`broken`、`p`），`kpi.py table` 從這兩個欄位畫口語與新聞半邊的 top1。同一次發版前量的這四行算一次「使用」。
 
 ## bundled selftest 的 bundle ID
 

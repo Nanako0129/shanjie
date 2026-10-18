@@ -41,6 +41,7 @@ test-python:
 	python3 -W ignore -m unittest experiments/s7f-corpus/test_s7f.py experiments/s7a-tinylm/test_extra.py
 	python3 -W ignore -m unittest tools/test_evalstats.py experiments/e2-chateval/test_e2.py experiments/e2-chateval/test_judge.py experiments/e2-chateval/test_d2c_split.py
 	python3 -m unittest tools/test_bench.py
+	python3 -W ignore -m unittest tools/test_kpi.py
 	python3 -m unittest tools/test_build_english_words.py
 	python3 -m unittest tools/test_build_overlay.py
 	python3 -W ignore -m unittest tools/test_holdout_guard.py
