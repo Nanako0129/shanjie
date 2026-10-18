@@ -5,7 +5,10 @@
 //! `Session.run` is the forward this file repeats (oc_ref computes in float32 by default; only its cross-language golden uses float64). The sequence layout and the scoring rules are
 //! experiments/x0c/score_0c.py's (`feeds_for`, `score`, `check_row`), one sequence per candidate (the model card's layout):
 //!   [BOS] context[-64:] [SEP] reading x n [OUT] candidate[:-1]   at positions 0..L-1, causal attention,
-//! scored at the n positions from [OUT] on. The last syllable is also tried as neutral tone when its base is in the file's
+//! scored at the n positions from [OUT] on. The candidates of a row share everything up to and including [OUT], so that part runs once
+//! per `score` (and once more for the neutral-tone retry, whose reading differs): its K and V are kept per layer and each candidate
+//! only runs its own n - 1 characters on top (A3 "prefix sharing"; the results are those of the one-sequence-per-candidate forward).
+//! The last syllable is also tried as neutral tone when its base is in the file's
 //! `neutral_tolerant_last` (and it is not neutral already); the larger score is kept, per candidate.
 //!
 //! The file is kept as it is: a read-only mapping (`trigram::Mapped`), the weights read in place as `&[f32]` (never copied into the
@@ -314,64 +317,77 @@ impl Oc {
         Some((*self.bases.get(base)?, tone))
     }
 
-    /// ln P(candidate | context, reading) for each candidate id list (all of length `sounds.len()`), one sequence per candidate, all in
-    /// one batch.
+    /// ln P(candidate | context, reading) for each candidate id list (all of length `sounds.len()`). The candidates share
+    /// `[BOS] context [SEP] reading x n [OUT]` (the same tokens, and the causal mask hides what follows), so that part is computed
+    /// once (`prefix`) and each candidate then only adds its own n - 1 characters (`suffix`).
     fn log_probs(&self, be: Backend, ctx: &[u32], sounds: &[(u32, u32)], cands: &[Vec<u32>]) -> Vec<f64> {
-        let (d, n, nb) = (self.d, sounds.len(), cands.len());
+        let pre = self.prefix(be, ctx, sounds);
+        cands.chunks(BATCH).flat_map(|ch| self.suffix(be, &pre, ch)).collect()
+    }
+
+    /// The shared part of a row: the K (after RoPE) and V of every layer, and the hidden state at [OUT].
+    fn prefix(&self, be: Backend, ctx: &[u32], sounds: &[(u32, u32)]) -> Prefix {
+        let (d, n) = (self.d, sounds.len());
         let head = ctx.len() + 2; // [BOS] context [SEP]
-        let l = head + 2 * n; // ... reading x n, [OUT], candidate[:-1]
-        let rows = nb * l;
+        let len = head + n + 1; // ... reading x n, [OUT]
         let (dec, base, tone, ty) = (self.w(self.dec), self.w(self.base), self.w(self.tone), self.w(self.ty));
-        let mut x = vec![0f32; rows * d];
-        for (bi, cand) in cands.iter().enumerate() {
-            for p in 0..l {
-                // (the row to start from, the type id): the reading positions take base + tone embeddings instead of a character's
-                let (e, t): (Vec<f32>, usize) = if p < head {
-                    let id = if p == 0 { BOS } else if p == head - 1 { SEP } else { ctx[p - 1] };
-                    (dec[id as usize * d..][..d].to_vec(), 0)
-                } else if p < head + n {
-                    let (bs, tn) = sounds[p - head];
-                    (base[bs as usize * d..][..d].iter().zip(&tone[tn as usize * d..][..d]).map(|(a, b)| a + b).collect(), 1)
-                } else if p == head + n {
-                    (dec[OUT as usize * d..][..d].to_vec(), 0)
-                } else {
-                    (dec[cand[p - head - n - 1] as usize * d..][..d].to_vec(), 2)
-                };
-                x[(bi * l + p) * d..][..d].iter_mut().zip(e.iter().zip(&ty[t * d..][..d])).for_each(|(o, (a, b))| *o = a + b);
+        let mut x = Vec::with_capacity(len * d);
+        for p in 0..len {
+            if p < head {
+                let id = if p == 0 { BOS } else if p == head - 1 { SEP } else { ctx[p - 1] };
+                x.extend(dec[id as usize * d..][..d].iter().zip(&ty[..d]).map(|(a, b)| a + b));
+            } else if p < head + n {
+                // the reading positions take base + tone embeddings instead of a character's
+                let (bs, tn) = sounds[p - head];
+                x.extend(base[bs as usize * d..][..d].iter().zip(&tone[tn as usize * d..][..d]).zip(&ty[d..2 * d]).map(|((a, b), c)| a + b + c));
+            } else {
+                x.extend(dec[OUT as usize * d..][..d].iter().zip(&ty[..d]).map(|(a, b)| a + b));
             }
         }
         let mut x = layer_norm(&x, self.w(self.emb_norm), None);
-        let nr = self.n_rope;
-        let inv_freq = self.w(self.inv_freq);
-        let (mut cos, mut sin) = (vec![0f32; l * nr], vec![0f32; l * nr]);
-        for p in 0..l {
+        let (nr, inv_freq) = (self.n_rope, self.w(self.inv_freq));
+        let total = len + n - 1; // the positions of the longest sequence, the candidates' characters included
+        let (mut cos, mut sin) = (vec![0f32; total * nr], vec![0f32; total * nr]);
+        for p in 0..total {
             for j in 0..nr {
                 let f = p as f64 * inv_freq[j] as f64;
                 (cos[p * nr + j], sin[p * nr + j]) = (f.cos() as f32, f.sin() as f32);
             }
         }
-        let ffn = self.ffn;
+        let mut kv = Vec::with_capacity(self.layers.len());
         for ly in &self.layers {
-            let normed;
-            let h: &[f32] = match ly.attn_norm {
-                Some(w) => {
-                    normed = layer_norm(&x, self.w(w), None);
-                    &normed
-                }
-                None => &x,
-            };
-            let (q, k, v) = (mm(be, h, self.w(ly.wq), (rows, d, d)), mm(be, h, self.w(ly.wk), (rows, d, d)), mm(be, h, self.w(ly.wv), (rows, d, d)));
-            let att = self.attention(be, (&q, &k, &v), (&cos, &sin), (nb, l));
-            let o = mm(be, &att, self.w(ly.wo), (rows, d, d));
-            x.iter_mut().zip(&o).for_each(|(a, b)| *a += b);
-            let u = mm(be, &layer_norm(&x, self.w(ly.mlp_norm), None), self.w(ly.w1), (rows, d, 2 * ffn));
-            // the first `ffn` columns through GELU, times the other `ffn` (the graph's Split)
-            let g: Vec<f32> = u.chunks_exact(2 * ffn).flat_map(|r| r[..ffn].iter().zip(&r[ffn..]).map(|(a, b)| gelu(*a) * b)).collect();
-            let o = mm(be, &g, self.w(ly.w2), (rows, ffn, d));
-            x.iter_mut().zip(&o).for_each(|(a, b)| *a += b);
+            self.block(be, ly, &mut x, len, |q, k, v| {
+                let (q, k) = (self.rope_rows(q, (len, 0), (&cos, &sin)), self.rope_rows(k, (len, 0), (&cos, &sin)));
+                let att = self.attention(be, (&q, &k, v), (1, len), None);
+                kv.push((k, v.to_vec()));
+                att
+            });
+        }
+        Prefix { kv, out: x[(len - 1) * d..].to_vec(), len, cos, sin }
+    }
+
+    /// ln P of each candidate given the prefix: the candidate's characters but the last go at positions len.., attending to the
+    /// prefix and to their own earlier ones; the scored positions are [OUT] (from the prefix) and those characters.
+    fn suffix(&self, be: Backend, pre: &Prefix, cands: &[Vec<u32>]) -> Vec<f64> {
+        let (d, nb, n) = (self.d, cands.len(), cands[0].len());
+        let m = n - 1;
+        let (dec, ty) = (self.w(self.dec), self.w(self.ty));
+        let mut x = Vec::with_capacity(nb * m * d);
+        for cand in cands {
+            for &id in &cand[..m] {
+                x.extend(dec[id as usize * d..][..d].iter().zip(&ty[2 * d..3 * d]).map(|(a, b)| a + b));
+            }
+        }
+        let mut x = layer_norm(&x, self.w(self.emb_norm), None);
+        for (ly, (pk, pv)) in self.layers.iter().zip(&pre.kv) {
+            self.block(be, ly, &mut x, nb * m, |q, k, v| {
+                let cs = (&pre.cos[..], &pre.sin[..]);
+                let (q, k) = (self.rope_rows(q, (m, pre.len), cs), self.rope_rows(k, (m, pre.len), cs));
+                self.attention(be, (&q, &k, v), (nb, m), Some((pk, pv)))
+            });
         }
         // the n positions from [OUT] on, of each sequence
-        let proj: Vec<f32> = (0..nb).flat_map(|bi| x[(bi * l + l - n) * d..(bi * l + l) * d].iter().copied()).collect();
+        let proj: Vec<f32> = (0..nb).flat_map(|bi| pre.out.iter().chain(&x[bi * m * d..(bi + 1) * m * d]).copied()).collect();
         let h = layer_norm(&proj, self.w(self.final_norm), None);
         let mut h = mm(be, &h, self.w(self.head_w), (nb * n, d, d));
         h.iter_mut().for_each(|v| *v = gelu(*v));
@@ -398,43 +414,102 @@ impl Oc {
         ll
     }
 
-    /// Multi-head causal attention with RoPE on q and k, per sequence and head: scores by one product, softmax over the lower triangle,
-    /// then the product with v. `qkv` are the (nb * l) x d projections, `cs` the cos and sin tables (l x n_rope).
-    fn attention(&self, be: Backend, (q, k, v): (&[f32], &[f32], &[f32]), (cos, sin): (&[f32], &[f32]), (nb, l): (usize, usize)) -> Vec<f32> {
-        let (d, nh, nr) = (self.d, self.n_head, self.n_rope);
+    /// One transformer layer over `rows` x d hidden states `x` (updated in place); `attn` turns the q, k, v projections into the
+    /// attention output (RoPE and the mask are its business).
+    fn block(&self, be: Backend, ly: &Layer, x: &mut [f32], rows: usize, attn: impl FnOnce(&[f32], &[f32], &[f32]) -> Vec<f32>) {
+        let (d, ffn) = (self.d, self.ffn);
+        let normed;
+        let h: &[f32] = match ly.attn_norm {
+            Some(w) => {
+                normed = layer_norm(x, self.w(w), None);
+                &normed
+            }
+            None => x,
+        };
+        let (q, k, v) = (mm(be, h, self.w(ly.wq), (rows, d, d)), mm(be, h, self.w(ly.wk), (rows, d, d)), mm(be, h, self.w(ly.wv), (rows, d, d)));
+        let att = attn(&q, &k, &v);
+        let o = mm(be, &att, self.w(ly.wo), (rows, d, d));
+        x.iter_mut().zip(&o).for_each(|(a, b)| *a += b);
+        let u = mm(be, &layer_norm(x, self.w(ly.mlp_norm), None), self.w(ly.w1), (rows, d, 2 * ffn));
+        // the first `ffn` columns through GELU, times the other `ffn` (the graph's Split)
+        let g: Vec<f32> = u.chunks_exact(2 * ffn).flat_map(|r| r[..ffn].iter().zip(&r[ffn..]).map(|(a, b)| gelu(*a) * b)).collect();
+        let o = mm(be, &g, self.w(ly.w2), (rows, ffn, d));
+        x.iter_mut().zip(&o).for_each(|(a, b)| *a += b);
+    }
+
+    /// RoPE on every head of every row of `x` (sequences of `m` rows each, the first at absolute position `pos0`).
+    fn rope_rows(&self, x: &[f32], (m, pos0): (usize, usize), (cos, sin): (&[f32], &[f32])) -> Vec<f32> {
+        let (d, nr) = (self.d, self.n_rope);
+        let hd = d / self.n_head;
+        let mut out = vec![0f32; x.len()];
+        for (r, (row, o)) in x.chunks_exact(d).zip(out.chunks_exact_mut(d)).enumerate() {
+            let p = pos0 + r % m;
+            for h in 0..self.n_head {
+                rope(&row[h * hd..][..hd], &cos[p * nr..][..nr], &sin[p * nr..][..nr], &mut o[h * hd..][..hd]);
+            }
+        }
+        out
+    }
+
+    /// Multi-head attention, per sequence and head: scores by one product, softmax, then the product with v. `q`, `k` are after RoPE,
+    /// (nseq * m) x d; each sequence's m rows attend causally to themselves and all of `past`'s (k, v) rows (np x d, shared by every
+    /// sequence, all earlier positions).
+    fn attention(&self, be: Backend, (q, k, v): (&[f32], &[f32], &[f32]), (nseq, m): (usize, usize), past: Option<(&[f32], &[f32])>) -> Vec<f32> {
+        let (d, nh) = (self.d, self.n_head);
         let hd = d / nh;
         let scale = 1.0 / (hd as f32).sqrt();
-        let mut att = vec![0f32; nb * l * d];
-        let (mut qh, mut kh, mut vh) = (vec![0f32; l * hd], vec![0f32; l * hd], vec![0f32; l * hd]);
-        let (mut s, mut e, mut o) = (vec![0f32; l * l], vec![0f32; l * l], vec![0f32; l * hd]);
-        for bi in 0..nb {
-            for h in 0..nh {
-                for p in 0..l {
-                    let at = (bi * l + p) * d + h * hd;
-                    rope(&q[at..at + hd], &cos[p * nr..][..nr], &sin[p * nr..][..nr], &mut qh[p * hd..][..hd]);
-                    rope(&k[at..at + hd], &cos[p * nr..][..nr], &sin[p * nr..][..nr], &mut kh[p * hd..][..hd]);
-                    vh[p * hd..][..hd].copy_from_slice(&v[at..at + hd]);
+        let np = past.map_or(0, |(pk, _)| pk.len() / d);
+        let tot = np + m;
+        let mut att = vec![0f32; nseq * m * d];
+        let (mut qh, mut kh, mut vh) = (vec![0f32; m * hd], vec![0f32; tot * hd], vec![0f32; tot * hd]);
+        let (mut s, mut e, mut o) = (vec![0f32; m * tot], vec![0f32; m * tot], vec![0f32; m * hd]);
+        for h in 0..nh {
+            if let Some((pk, pv)) = past {
+                for p in 0..np {
+                    kh[p * hd..][..hd].copy_from_slice(&pk[p * d + h * hd..][..hd]);
+                    vh[p * hd..][..hd].copy_from_slice(&pv[p * d + h * hd..][..hd]);
+                }
+            }
+            for bi in 0..nseq {
+                for p in 0..m {
+                    let at = (bi * m + p) * d + h * hd;
+                    qh[p * hd..][..hd].copy_from_slice(&q[at..at + hd]);
+                    kh[(np + p) * hd..][..hd].copy_from_slice(&k[at..at + hd]);
+                    vh[(np + p) * hd..][..hd].copy_from_slice(&v[at..at + hd]);
                 }
                 s.fill(0.0);
-                gemm(be, &qh, &kh, &mut s, (l, hd, l), true);
-                for i in 0..l {
-                    let row = &mut s[i * l..(i + 1) * l];
-                    row[..=i].iter_mut().for_each(|a| *a *= scale);
-                    let m = row[..=i].iter().copied().fold(f32::NEG_INFINITY, f32::max);
-                    row[..=i].iter_mut().for_each(|a| *a -= m);
-                    row[i + 1..].fill(f32::NEG_INFINITY);
+                gemm(be, &qh, &kh, &mut s, (m, hd, tot), true);
+                for i in 0..m {
+                    let row = &mut s[i * tot..(i + 1) * tot];
+                    let seen = np + i + 1; // the past and the sequence up to itself
+                    row[..seen].iter_mut().for_each(|a| *a *= scale);
+                    let mx = row[..seen].iter().copied().fold(f32::NEG_INFINITY, f32::max);
+                    row[..seen].iter_mut().for_each(|a| *a -= mx);
+                    row[seen..].fill(f32::NEG_INFINITY);
                 }
                 exp_into(be, &s, &mut e);
                 o.fill(0.0);
-                gemm(be, &e, &vh, &mut o, (l, l, hd), false);
-                for p in 0..l {
-                    let sum: f32 = e[p * l..(p + 1) * l].iter().sum();
-                    att[(bi * l + p) * d + h * hd..][..hd].iter_mut().zip(&o[p * hd..][..hd]).for_each(|(a, b)| *a = b / sum);
+                gemm(be, &e, &vh, &mut o, (m, tot, hd), false);
+                for p in 0..m {
+                    let sum: f32 = e[p * tot..(p + 1) * tot].iter().sum();
+                    att[(bi * m + p) * d + h * hd..][..hd].iter_mut().zip(&o[p * hd..][..hd]).for_each(|(a, b)| *a = b / sum);
                 }
             }
         }
         att
     }
+}
+
+/// What the candidates of one row share (`Oc::prefix`).
+struct Prefix {
+    /// per layer: K (after RoPE) and V of the `len` prefix positions
+    kv: Vec<(Vec<f32>, Vec<f32>)>,
+    /// the hidden state at [OUT] after the last layer
+    out: Vec<f32>,
+    len: usize,
+    /// RoPE tables for every position of the longest sequence
+    cos: Vec<f32>,
+    sin: Vec<f32>,
 }
 
 /// a (m x k) . w (k x n) as a new matrix.
