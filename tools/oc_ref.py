@@ -8,16 +8,16 @@ model, written from the graph (tools/convert_oc.py reads the graph; every op bel
 float64 (`Session(model, np.float64)`: the cross-language golden's reference, as tools/gen_tinylm_tiny.py's).
 
 Layout (little-endian):
-  header (120 bytes)  magic "SJOC0001" | u32 version (1), weight type (0 f32, 1 int8), n_layer, n_head, d, ffn, n_tok, n_out, n_base,
+  header (120 bytes)  magic "SJOC0001" | u32 version (1), weight type (0 = f32, the only one), n_layer, n_head, d, ffn, n_tok, n_out, n_base,
                       n_tone, n_type, n_rope | 32 bytes SHA-256 of the source model.onnx | 32 bytes SHA-256 of the source vocab.json
   vocab               (n_tok - 8) x u32 code points: token ids 8 on (0-7 special, 4 = UNK; vocab.json "characters" in order)
-                      u32 byte length + UTF-8 of the n_base - 2 bases joined by "\\n" (base ids 2 on; vocab.json "bases" in order)
-                      u32 byte length + UTF-8 of manifest.json "neutral_tolerant_last" joined by "\\n"
+                      u32 byte length + UTF-8 of the n_base - 2 bases joined by "\\n" (base ids 2 on; vocab.json "bases" in order),
+                      then zero bytes up to a multiple of 4
+                      u32 byte length + UTF-8 of manifest.json "neutral_tolerant_last" joined by "\\n", zero-padded the same way
                       n_out x u32 output token ids, ascending (the graph's `out_ids`: every id but 0-3, 5, 7); the log-softmax runs over
                       these columns, and a candidate character's column is its position here (character id - 6)
-  tensors (TENSORS order; M = a 2-D matrix stored as the forward multiplies it, x @ M: f32 row-major, or int8 row-major followed by one
-          f32 scale per row, the tinylm rule: scale = max(|row|, 1e-12) / 127, q = round(row / scale), restored as q * scale;
-          V = a vector, always f32)
+  tensors (`tensors()` order), f32 row-major, each starting at a multiple of 4 bytes so a reader can use a read-only mapping of the
+          file as f32 slices without copying (core/src/trigram.rs `Mapped`); M = a 2-D matrix stored as the forward multiplies it, x @ M
 """
 import argparse
 import hashlib
@@ -29,7 +29,7 @@ import sys
 import numpy as np
 
 MAGIC, VERSION = b"SJOC0001", 1
-F32, INT8 = 0, 1
+F32 = 0
 HEADER = struct.Struct("<8s12I32s32s")
 EPS = 1e-5            # every LayerNormalization in the graph (weight only, no bias)
 NEG = np.float32(-3.4028234663852886e38)   # the graph's masked_fill value (val_21)
@@ -47,16 +47,14 @@ def tensors(n_layer, d, ffn, n_tok, n_base, n_tone, n_type, n_rope):
     return out + [("final_norm", (d,), "V"), ("head_w", (d, d), "M"), ("head_norm", (d,), "V")]
 
 
-def quantize(a):
-    """The tinylm int8 rule (experiments/s7a-tinylm/latency.py quantize_int8): per-row symmetric."""
-    scale = (np.maximum(np.abs(a).max(axis=1, keepdims=True), 1e-12) / 127.0).astype(np.float32)
-    return np.round(a / scale).astype(np.int8), scale
+def pad4(b):
+    return b + bytes(-len(b) % 4)
 
 
-def write(path, cfg, T, chars, bases, neutral, out_ids, wtype, src_sha):
+def write(path, cfg, T, chars, bases, neutral, out_ids, src_sha):
     """cfg: dict n_layer n_head d ffn n_tok n_out n_base n_tone n_type n_rope; T: name -> float32 array; chars: n_tok - 8 strings of
     one code point; bases: n_base - 2 strings; neutral: base strings; out_ids: n_out ascending token ids, each character id c at
-    position c - 6; wtype "f32" | "int8"; src_sha: (onnx, vocab) 32 bytes each."""
+    position c - 6; src_sha: (onnx, vocab) 32 bytes each."""
     c = cfg
     layout = tensors(c["n_layer"], c["d"], c["ffn"], c["n_tok"], c["n_base"], c["n_tone"], c["n_type"], c["n_rope"])
     if sorted(T) != sorted(n for n, _, _ in layout):
@@ -69,32 +67,28 @@ def write(path, cfg, T, chars, bases, neutral, out_ids, wtype, src_sha):
     if (len(o) != c["n_out"] or (np.diff(o) <= 0).any() or o.min() < 0 or o.max() >= c["n_tok"]
             or c["n_out"] < c["n_tok"] - 6 or not (o[np.arange(8, c["n_tok"]) - 6] == np.arange(8, c["n_tok"])).all()):
         raise ValueError("out_ids: not ascending ids with every character id c at position c - 6")
-    parts = [HEADER.pack(MAGIC, VERSION, INT8 if wtype == "int8" else F32, *(c[k] for k in (
+    parts = [HEADER.pack(MAGIC, VERSION, F32, *(c[k] for k in (
         "n_layer", "n_head", "d", "ffn", "n_tok", "n_out", "n_base", "n_tone", "n_type", "n_rope")), *src_sha),
         struct.pack(f"<{len(chars)}I", *(ord(ch) for ch in chars))]
     for words in (bases, neutral):
         b = "\n".join(words).encode("utf-8")
-        parts += [struct.pack("<I", len(b)), b]
+        parts += [struct.pack("<I", len(b)), pad4(b)]
     parts.append(struct.pack(f"<{len(o)}I", *o.tolist()))
     for name, shape, kind in layout:
         a = np.asarray(T[name], dtype=np.float32)
         if a.shape != shape or not np.isfinite(a).all():
             raise ValueError(f"{name}: shape {a.shape}, expected {shape}, or not finite")
-        if kind == "M" and wtype == "int8":
-            q, s = quantize(a)
-            parts += [q.tobytes(), s.tobytes()]
-        else:
-            parts.append(a.tobytes())
+        parts.append(a.tobytes())
     with open(path, "wb") as f:
         f.write(b"".join(parts))
 
 
 def load(path):
-    """-> dict: cfg, int8 (bool), T (float32 arrays, int8 restored as q * scale), chars, bases, neutral, out_ids, src_sha."""
+    """-> dict: cfg, T (float32 arrays), chars, bases, neutral, out_ids, src_sha."""
     with open(path, "rb") as f:
         b = f.read()
     h = HEADER.unpack_from(b)
-    if h[0] != MAGIC or h[1] != VERSION or h[2] not in (F32, INT8):
+    if h[0] != MAGIC or h[1] != VERSION or h[2] != F32:
         raise ValueError("not an SJOC0001 file")
     keys = ("n_layer", "n_head", "d", "ffn", "n_tok", "n_out", "n_base", "n_tone", "n_type", "n_rope")
     cfg = dict(zip(keys, h[3:13]))
@@ -106,21 +100,18 @@ def load(path):
     for _ in range(2):
         (k,), at = struct.unpack_from("<I", b, at), at + 4
         words.append(b[at:at + k].decode("utf-8").split("\n") if k else [])
-        at += k
+        at += k + -k % 4
     out_ids = np.frombuffer(b, np.uint32, cfg["n_out"], at).astype(np.int64)
     at += 4 * cfg["n_out"]
     T = {}
     for name, shape, kind in tensors(*(cfg[k] for k in ("n_layer", "d", "ffn", "n_tok", "n_base", "n_tone", "n_type", "n_rope"))):
+        if at % 4:
+            raise ValueError(f"{name} starts at {at}, not a multiple of 4")
         size = int(np.prod(shape))
-        if kind == "M" and h[2] == INT8:
-            q = np.frombuffer(b, np.int8, size, at).reshape(shape)
-            s = np.frombuffer(b, np.float32, shape[0], at + size).reshape(-1, 1)
-            T[name], at = q.astype(np.float32) * s, at + size + 4 * shape[0]
-        else:
-            T[name], at = np.frombuffer(b, np.float32, size, at).reshape(shape), at + 4 * size
+        T[name], at = np.frombuffer(b, np.float32, size, at).reshape(shape), at + 4 * size
     if at != len(b):
         raise ValueError(f"file is {len(b)} bytes, the layout ends at {at}")
-    return {"cfg": cfg, "int8": h[2] == INT8, "T": T, "chars": chars, "bases": words[0], "neutral": words[1], "out_ids": out_ids,
+    return {"cfg": cfg, "T": T, "chars": chars, "bases": words[0], "neutral": words[1], "out_ids": out_ids,
             "src_sha": h[13:15]}
 
 
@@ -206,7 +197,7 @@ def compare(model_dir, path, dump, dev):
         same += int(np.argmax(a) == np.argmax(b))
         n += 1
     d = np.sort(np.array(diffs))
-    print(f"{os.path.basename(path)} ({'int8' if load(path)['int8'] else 'f32'}): rows {n}, candidates {len(d)}; log10 |diff| "
+    print(f"{os.path.basename(path)}: rows {n}, candidates {len(d)}; log10 |diff| "
           f"max {d.max():.3g}, p99 {d[int(len(d) * 0.99)]:.3g}, median {np.median(d):.3g}; same best candidate {same}/{n} ({same / n:.2%})")
 
 

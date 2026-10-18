@@ -1,6 +1,6 @@
 """0c slice A (docs/contracts/oc-experimental.md section 2, A1): Funmula/0c-sequence-d512 model.onnx -> SJOC0001 (tools/oc_ref.py).
 
-  python3 tools/convert_oc.py --model-dir M --out oc.sjoc --type int8      (needs the onnx package: Colab or GCP, not the Mac)
+  python3 tools/convert_oc.py --model-dir M --out oc.sjoc      (needs the onnx package: Colab or GCP, not the Mac)
 
 Read from the graph (2026-10-19 full dump, commit 66eb4a81) and checked here, so a different export stops instead of converting wrong:
 - named initializers: the embeddings, every LayerNorm weight (layers.N.attn_norm only for N >= 1; layer 0's attention has none), the
@@ -28,7 +28,7 @@ PINNED = {"model.onnx": "71af1f0e77b2752cc71cbc04bf19c8e8f2e765662246f766e65a282
 P = "m.network.model."
 
 
-def convert(model_dir, out, wtype):
+def convert(model_dir, out):
     import onnx
     from onnx import numpy_helper
     sha = {}
@@ -81,15 +81,14 @@ def convert(model_dir, out, wtype):
         raise SystemExit("convert_oc: STOP, layer 0 has an attention LayerNorm")
     cfg = {"n_layer": n_layer, "n_head": H, "d": d, "ffn": ffn, "n_tok": n_tok, "n_out": len(init["out_ids"]),
            "n_base": T["base"].shape[0], "n_tone": T["tone"].shape[0], "n_type": T["type"].shape[0], "n_rope": len(inv)}
-    oc_ref.write(out, cfg, T, vocab["characters"], vocab["bases"], manifest["neutral_tolerant_last"], init["out_ids"], wtype,
+    oc_ref.write(out, cfg, T, vocab["characters"], vocab["bases"], manifest["neutral_tolerant_last"], init["out_ids"],
                  (sha["model.onnx"], sha["vocab.json"]))
-    print(f"wrote {out} ({wtype}, {os.path.getsize(out)} bytes, sha256 {hashlib.sha256(open(out, 'rb').read()).hexdigest()})")
+    print(f"wrote {out} ({os.path.getsize(out)} bytes, sha256 {hashlib.sha256(open(out, 'rb').read()).hexdigest()})")
 
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--model-dir", required=True)
     ap.add_argument("--out", required=True)
-    ap.add_argument("--type", choices=("f32", "int8"), required=True)
     a = ap.parse_args()
-    convert(a.model_dir, a.out, a.type)
+    convert(a.model_dir, a.out)
