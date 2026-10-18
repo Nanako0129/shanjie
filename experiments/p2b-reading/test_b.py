@@ -206,7 +206,9 @@ class TestTorch(unittest.TestCase):
         keep = [i for i in range(len(rows)) if i != 10]
         import score as s7
         recs = s7.build_records(NumpyLM(os.path.join(td, "m.npz")), [rows[i] for i in keep], [cands[i] for i in keep])
-        return {i + 1: r for i, r in zip(keep, recs)}
+        for i, r in zip(keep, recs):                                             # build_records numbers its own input; restore row numbers
+            r["i"] = i + 1
+        return {r["i"]: r for r in recs}
 
     def write_eval(self, td, n_rows=40, seed=3):
         rows, cands, teacher = make_data_b(n_rows, seed)
