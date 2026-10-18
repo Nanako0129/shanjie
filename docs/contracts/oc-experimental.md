@@ -1,6 +1,6 @@
 # 0c 實驗開關（第一片：Rust 推論試做）
 
-狀態：修訂二（2026-10-19，維護者選擇題：int8 沒過門檻之後改出 f32、用唯讀映射載入），plan-verifier READY，實作中。A1、A2 已完成（研究紀錄 2026-10-19）。
+狀態：修訂三（2026-10-19，維護者選擇題：A4 的延遲與記憶體沒過門檻之後，加前綴共用再量），等 plan-verifier。A1、A2、A3 已完成；A4 的一致性已過、延遲與記憶體沒過（研究紀錄 2026-10-19）。A1、A2 已完成（研究紀錄 2026-10-19）。
 
 ## 0. 起因與範圍
 
@@ -68,7 +68,10 @@
   - 修訂二：用 `trigram.rs` 的 `Mapped`（唯讀整檔映射，三元表已在用，契約 `trigram-mmap.md`）載入 `SJOC0001`，權重直接從映射讀成 `&[f32]`、不複製進堆積；不受 `tinylm::MAX_FILE` 限制（真模型 f32 約 131 MB）。載入時檢查檔頭、版面算出的總長度和檔案大小完全相同、每個張量對齊 4 位元組，任一不符就拒絕。`Mapped::open` 回傳的錯誤型別要能給 0c 用（executor 決定怎麼泛化）。
   - `score(context, syllables, candidates) -> Vec<Option<f64>>`：每個候選一個 log10 P，打不了的是 `None`；規則和 §1 最後一點相同。
   - 矩陣乘法用 `tinylm` 既有的 `gemm`（macOS 是 Accelerate，其他平台是純 Rust）；GELU 用 erf，要自己實作或用既有的函式，精度要過 A2 的比對。
-  - 先不做前綴共用與 KV 快取：8 個候選補齊成一批（和 tinylm 一樣）。
+  - **前綴共用**（修訂三）：同一列的所有候選共用 `[BOS] 前文 [SEP] 讀音×n [OUT]` 這一段（輸入完全相同，因果遮罩下也不看後面的字），每一層的 K、V 只算一次並快取；每個候選只再算自己的 n−1 個字，注意力讀快取的前綴加上自己前面的字。輕聲另試時讀音不同，前綴另算一次。
+    - 結果必須和逐候選算整條序列相同：golden 照舊用 numpy 的逐候選分數（`packed=False`），容差 1×10⁻⁵ 不變。
+    - 不跨列快取（每列重算前綴）；跨列、跨按鍵的快取是 B 片的事。
+    - 修訂二之前的逐候選算法（8 條整序列補齊成一批）2026-10-19 已量過：64 字前文時 p95 74.5 ms、RSS 峰值增量 +273.2 MiB，兩條都沒過；這是修訂三的起因。
   - **量測程式**（修訂二）`core/examples/oc_score.rs`，`cargo run --release -p core --example oc_score -- …`；不改 CLI、不改引擎：
     - `--sjoc PATH --items ITEMS.tsv --out SCORES.jsonl`：每列一行 `{"i": 列號, "ll": [每個候選的 log10] 或 null}`（整列打不了是 null），規則和 `score()` 相同。給 A4 的一致性用。
     - `--sjoc PATH --items ITEMS.tsv --latency [--no-context] [--tinylm M.sjtl]`（`--no-context` 把每列的前文換成空字串）：單執行緒，每列計時一次 `score()`（給 `--tinylm` 時同一批列也計時 M 的打分），跑 3 輪，報每輪的 p50／p95 與 3 輪的中位數；p95 取排序後第 int(n × 0.95) 個，和 CLI 相同。
@@ -132,3 +135,4 @@
 | plan-verifier 收尾（修訂二，2026-10-19） | REVISE：延遲門檻要「給 64 字前文」，但 dev302 的前文幾乎都很短，量測程式產生不出這個條件；P3：`--rust` 的指令寫法不完整 | 第二次 REVISE 逐項處置，兩項都 FIX：`oc_ref.py --export --pad-context 64` 產 `ITEMS-64.tsv`（固定公開文字補到 64 字），A4 與延遲門檻寫明用它；指令改成完整寫法 |
 | plan-verifier 收尾（修訂二，第 2 次，2026-10-19） | READY | — |
 | `/code-review`（2026-10-19，786fc165） | 14 項 | 修：test_oc_ref 接進 make test-python、Rust 對 numpy 改用逐候選的 numpy、非有限值與重複字表要停、延遲加 VECLIB_MAXIMUM_THREADS=1、記憶體門檻改量峰值、對齊檢查不靠 align_to、契約拿掉主機名、convert_oc 說明、oc.rs 註解與小重構、量測程式拒絕無關旗標。延後：R8 的衝突寫進 §5，B 片接線前決定 |
+| 修訂三（2026-10-19） | A4：一致性過（Rust 對 numpy 2.33×10⁻⁵、對 ORT 4.07×10⁻⁵、300/300）；延遲 p95 74.5 ms（64 字前文）、RSS 峰值增量 +273.2 MiB，照 §4 停下 | 維護者選擇題：加前綴共用（每列的前綴只算一次、K／V 快取），門檻不動；改 §2 A3。等 plan-verifier |
