@@ -1,6 +1,6 @@
 # 每版 KPI 表 `tools/kpi.py`（研究工具，不出貨）
 
-狀態：草稿（2026-10-18）；plan-verifier 第一次 REVISE（5 項）、第二次 REVISE（1 項）都已照改，送收尾審查。
+狀態：READY（2026-10-18 收尾審查）；plan-verifier 第一次 REVISE（5 項）、第二次 REVISE（1 項）都已照改。
 
 ## 0. 起因
 
