@@ -204,12 +204,29 @@ fn scores_line(i: usize, ng: &[f64], ok: &[bool], ed: &[u32], glen: usize, chose
     Ok(s + "}\n")
 }
 
+/// What one row of `run_lm` hands to the writers: the counters it adds to and the text it adds to each output file.
+#[derive(Default)]
+struct RowOut {
+    ok: bool,
+    in64: bool,
+    long: bool,
+    rerank: Option<Duration>,
+    /// The row's chosen candidate (the `top1_sha256` input and the rowstats `top1`).
+    first: String,
+    scores: String,
+    dump: String,
+    words: String,
+}
+
 /// S2c LM mode (docs/PLAN.md S2c): the one summary line of lm_eval.py, plus the optional `--dump` and `--rowstats`.
 /// S7c-1: `--tinylm FILE.sjtl` reranks the first 8 candidates of every row with the small character model (docs/contracts/s7c-core-tinylm.md);
 /// `--tinylm-scores OUT` writes score.py's numbers-only records for them. `--dump-words OUT` (tools/triage.py) writes, per row, the
 /// word split of every `--dump` line (`row\trank\twords`, same ranks and order) after rank 0, the gold sentence split by the core's
 /// `segment_words` (`-` when it cannot be split). `--rerank-level conservative|standard|aggressive` (default standard) picks which of
-/// the file's (alpha, tau, delta) the rerank uses (docs/contracts/rerank-strength.md section 2.3).
+/// the file's (alpha, tau, delta) the rerank uses (docs/contracts/rerank-strength.md section 2.3). `--threads N` (default 1) decodes the
+/// rows on N threads sharing one copy of the models; the output files and the summary line are byte for byte those of N = 1, only the
+/// timing numbers of the tinylm latency line on stderr differ (its counts do not). Only the `lm` mode takes it: the other modes refuse it
+/// as an unknown argument.
 fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     let (mut lm_path, mut profile, mut name, mut dev, mut rows_file) = (None, None, None, None, None);
     let (mut limit, mut set, mut dump, mut ctx_mode, mut demote) = (None::<usize>, None, None, false, true);
@@ -223,11 +240,19 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     // acg-pack contract A.2: `--packs acg` adds data/packs/acg-add.tsv (or `--packs-dir DIR`'s) to the lexicon and the cap; off by default.
     let (mut packs, mut packs_dir) = (0u32, None::<String>);
     let mut extra_overlay = None::<String>;
+    let mut threads = 1usize;
     let mut it = args.iter();
     while let Some(a) = it.next() {
         let mut val = || it.next().cloned().ok_or_else(|| "missing option value".to_string());
         let num = |v: String| v.parse::<usize>().map_err(|_| format!("bad number (length {})", v.chars().count()));
         match a.as_str() {
+            "--threads" => match val()?.parse::<usize>() {
+                Ok(n) if n >= 1 => threads = n,
+                _ => {
+                    eprintln!("error: --threads takes a whole number of at least 1");
+                    std::process::exit(2);
+                }
+            },
             "--lm" => lm_path = Some(val()?),
             "--profile" => profile = Some(val()?),
             "--name" => name = Some(val()?),
@@ -360,14 +385,19 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
         Some(f) => Some(std::io::BufWriter::new(fs::File::create(f).map_err(|e| format!("cannot create tinylm scores ({:?})", e.kind()))?)),
         None => None,
     };
-    let (mut top1, mut o64, mut firsts, mut rs, mut rerank, mut long) = (0usize, 0usize, Vec::new(), Vec::new(), Vec::new(), 0usize);
-    for (i, (truth, syls, ctx)) in rows.iter().enumerate() {
+    let (want_scores, want_dump, want_words) = (scores.is_some(), dump.is_some(), dump_words.is_some());
+    let threads = threads.min(rows.len().max(1));
+    // One row, a function of the row alone (nothing carries over from one row to the next), so the rows can be decoded in any
+    // order or at once. Everything the row writes is built here as text; the loop below puts it in the files, in row order.
+    let work = |i: usize| -> Result<RowOut, String> {
+        let (truth, syls, ctx) = &rows[i];
         // S2h: the first word is conditioned on the row's context, cut like the engine cuts it.
         let left = if ctx_mode { Some(context_key(ctx)) } else { None };
         let start = left.as_deref().filter(|k| *k != SENTINEL).map_or("<s>", |k| history(k, &lm));
         let nb = decode_from(&capped, syls, &lm, prof, BEAM_S1, start, demote).map_err(|e| e.to_string())?;
         let mut surf: Vec<String> = nb.iter().map(|(_, ws)| ws.concat()).collect();
         let t = len.apply(truth);
+        let mut out = RowOut::default();
         // The row's chosen candidate: the first, or the small model's pick among the first 8 (the dump keeps the n-gram order).
         let mut chosen = 0;
         if let Some((tl, _, _)) = &tl {
@@ -382,38 +412,77 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
                 }
                 // A candidate longer than the model's context: this row keeps the n-gram first (counted on stderr), the set goes on.
                 Err(TinyLmError::TooLong) => {
-                    long += 1;
+                    out.long = true;
                     None
                 }
                 Err(e) => return Err(e.to_string()),
             };
             if ll.is_some() {
-                rerank.push(t0.elapsed());
+                out.rerank = Some(t0.elapsed());
             }
-            if let Some(w) = scores.as_mut() {
+            if want_scores {
                 let oks: Vec<bool> = top.iter().map(|s| len.apply(s) == t).collect();
                 let ed: Vec<u32> = top.iter().zip(&oks).map(|(s, &ok)| if ok { 0 } else { levenshtein(s, truth) }).collect();
-                w.write_all(scores_line(i + 1, &ng, &oks, &ed, truth.chars().count(), chosen, ll.as_deref())?.as_bytes())
-                    .map_err(|_| "cannot write tinylm scores".to_string())?;
+                out.scores = scores_line(i + 1, &ng, &oks, &ed, truth.chars().count(), chosen, ll.as_deref())?;
             }
         }
-        let ok = len.apply(&surf[chosen]) == t;
-        top1 += ok as usize;
-        rs.push((ok, surf[chosen].clone(), truth.clone()));
-        o64 += surf.iter().any(|s| len.apply(s) == t) as usize;
-        if let Some(d) = dump.as_mut() {
+        out.ok = len.apply(&surf[chosen]) == t;
+        out.in64 = surf.iter().any(|s| len.apply(s) == t);
+        if want_dump {
             for (r, ((sc, _), s)) in nb.iter().zip(&surf).enumerate() {
-                writeln!(d, "{}\t{}\t{s}\t{sc:?}", i + 1, r + 1).map_err(|_| "cannot write dump".to_string())?;
+                out.dump += &format!("{}\t{}\t{s}\t{sc:?}\n", i + 1, r + 1);
             }
         }
-        if let Some(d) = dump_words.as_mut() {
+        if want_words {
             let gold = lex.segment_words(truth).map_or("-".to_string(), |ws| ws.iter().map(|(w, _)| w.as_str()).collect::<Vec<_>>().join(" "));
-            writeln!(d, "{}\t0\t{gold}", i + 1).map_err(|_| "cannot write word dump".to_string())?;
+            out.words += &format!("{}\t0\t{gold}\n", i + 1);
             for (r, (_, ws)) in nb.iter().enumerate() {
-                writeln!(d, "{}\t{}\t{}", i + 1, r + 1, ws.join(" ")).map_err(|_| "cannot write word dump".to_string())?;
+                out.words += &format!("{}\t{}\t{}\n", i + 1, r + 1, ws.join(" "));
             }
         }
-        firsts.push(surf.swap_remove(chosen));
+        out.first = surf.swap_remove(chosen);
+        Ok(out)
+    };
+    let (mut top1, mut o64, mut firsts, mut rs, mut rerank, mut long) = (0usize, 0usize, Vec::new(), Vec::new(), Vec::new(), 0usize);
+    // `--threads N`: the rows go in batches of N blocks of BLOCK rows; the N workers each decode one block, and the batch is written
+    // in row order before the next one starts. So every file and the summary line are the same as with N = 1, whatever N is, and
+    // the memory held is one batch of output, not the whole set.
+    const BLOCK: usize = 32;
+    let batch = threads * BLOCK;
+    for start in (0..rows.len()).step_by(batch) {
+        let end = (start + batch).min(rows.len());
+        let outs: Vec<Result<RowOut, String>> = if threads == 1 {
+            (start..end).map(&work).collect()
+        } else {
+            std::thread::scope(|sc| {
+                let handles: Vec<_> = (start..end)
+                    .step_by(BLOCK)
+                    .map(|b| sc.spawn({
+                        let work = &work;
+                        move || (b..(b + BLOCK).min(end)).map(work).collect::<Vec<_>>()
+                    }))
+                    .collect();
+                handles.into_iter().flat_map(|h| h.join().expect("a --threads worker panicked")).collect()
+            })
+        };
+        for (i, out) in (start..end).zip(outs) {
+            let out = out?;
+            top1 += out.ok as usize;
+            o64 += out.in64 as usize;
+            long += out.long as usize;
+            rerank.extend(out.rerank);
+            if let Some(w) = scores.as_mut() {
+                w.write_all(out.scores.as_bytes()).map_err(|_| "cannot write tinylm scores".to_string())?;
+            }
+            if let Some(d) = dump.as_mut() {
+                d.write_all(out.dump.as_bytes()).map_err(|_| "cannot write dump".to_string())?;
+            }
+            if let Some(d) = dump_words.as_mut() {
+                d.write_all(out.words.as_bytes()).map_err(|_| "cannot write word dump".to_string())?;
+            }
+            rs.push((out.ok, out.first.clone(), rows[i].0.clone()));
+            firsts.push(out.first);
+        }
     }
     if let Some(mut w) = scores {
         w.flush().map_err(|_| "cannot write tinylm scores".to_string())?;
