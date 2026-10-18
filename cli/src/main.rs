@@ -5,9 +5,13 @@ use core::lm::{decode_from, history, CappedLexicon, Demote, Lm, Profile};
 use core::tinylm::{KnPairing, RerankLevel, TinyLm, TinyLmError, TOPK};
 use core::predict::{parse_units, predict, units_of, units_str, Index, Mode};
 use core::{decode_beam, Error, Lexicon, NoLearning, Syls, BEAM_S1};
+use std::collections::BTreeMap;
+use std::fmt::Write as _;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 mod english;
@@ -204,12 +208,41 @@ fn scores_line(i: usize, ng: &[f64], ok: &[bool], ed: &[u32], glen: usize, chose
     Ok(s + "}\n")
 }
 
+/// Sets the flag when dropped, panic included: the threaded `run_lm` uses it to release workers that wait for the writer.
+struct Release<'a>(&'a AtomicBool);
+
+impl Drop for Release<'_> {
+    fn drop(&mut self) {
+        self.0.store(true, Ordering::Relaxed);
+    }
+}
+
+/// What one row of `run_lm` hands to the writers: the counters it adds to and the text it adds to each output file.
+#[derive(Default)]
+struct RowOut {
+    ok: bool,
+    in64: bool,
+    long: bool,
+    rerank: Option<Duration>,
+    /// The row's chosen candidate (the `top1_sha256` input and the rowstats `top1`).
+    first: String,
+    scores: String,
+    dump: String,
+    words: String,
+}
+
 /// S2c LM mode (docs/PLAN.md S2c): the one summary line of lm_eval.py, plus the optional `--dump` and `--rowstats`.
 /// S7c-1: `--tinylm FILE.sjtl` reranks the first 8 candidates of every row with the small character model (docs/contracts/s7c-core-tinylm.md);
 /// `--tinylm-scores OUT` writes score.py's numbers-only records for them. `--dump-words OUT` (tools/triage.py) writes, per row, the
 /// word split of every `--dump` line (`row\trank\twords`, same ranks and order) after rank 0, the gold sentence split by the core's
 /// `segment_words` (`-` when it cannot be split). `--rerank-level conservative|standard|aggressive` (default standard) picks which of
-/// the file's (alpha, tau, delta) the rerank uses (docs/contracts/rerank-strength.md section 2.3).
+/// the file's (alpha, tau, delta) the rerank uses (docs/contracts/rerank-strength.md section 2.3). `--threads N` (default 1) decodes the
+/// rows on N threads sharing one copy of the models; the output files and the summary line are byte for byte those of N = 1. With N
+/// above 1 the stderr tinylm latency line has other timings (measured under contention) and ends with " (threads N: measured under
+/// contention)", N being the worker count after capping it at the number of 32-row blocks; its counts are the same, and with one
+/// worker the line is as for N = 1. A panic in a row exits 101 on the inline path (N = 1, or one block) and exits 1 with "row N
+/// panicked in a --threads worker" on the threaded path. Only the `lm` mode takes it: the other modes refuse it
+/// as an unknown argument.
 fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     let (mut lm_path, mut profile, mut name, mut dev, mut rows_file) = (None, None, None, None, None);
     let (mut limit, mut set, mut dump, mut ctx_mode, mut demote) = (None::<usize>, None, None, false, true);
@@ -223,11 +256,19 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     // acg-pack contract A.2: `--packs acg` adds data/packs/acg-add.tsv (or `--packs-dir DIR`'s) to the lexicon and the cap; off by default.
     let (mut packs, mut packs_dir) = (0u32, None::<String>);
     let mut extra_overlay = None::<String>;
+    let mut threads = 1usize;
     let mut it = args.iter();
     while let Some(a) = it.next() {
         let mut val = || it.next().cloned().ok_or_else(|| "missing option value".to_string());
         let num = |v: String| v.parse::<usize>().map_err(|_| format!("bad number (length {})", v.chars().count()));
         match a.as_str() {
+            "--threads" => match val().ok().and_then(|v| v.parse::<usize>().ok()) {
+                Some(n) if n >= 1 => threads = n,
+                _ => {
+                    eprintln!("error: --threads takes a whole number of at least 1");
+                    std::process::exit(2);
+                }
+            },
             "--lm" => lm_path = Some(val()?),
             "--profile" => profile = Some(val()?),
             "--name" => name = Some(val()?),
@@ -360,14 +401,22 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
         Some(f) => Some(std::io::BufWriter::new(fs::File::create(f).map_err(|e| format!("cannot create tinylm scores ({:?})", e.kind()))?)),
         None => None,
     };
-    let (mut top1, mut o64, mut firsts, mut rs, mut rerank, mut long) = (0usize, 0usize, Vec::new(), Vec::new(), Vec::new(), 0usize);
-    for (i, (truth, syls, ctx)) in rows.iter().enumerate() {
+    let (want_scores, want_dump, want_words) = (scores.is_some(), dump.is_some(), dump_words.is_some());
+    // `--threads N`: the rows are decoded in blocks of BLOCK contiguous rows; no more workers than blocks.
+    const BLOCK: usize = 32;
+    let (nrows, nblocks) = (rows.len(), rows.len().div_ceil(BLOCK));
+    let threads = threads.min(nblocks.max(1));
+    // One row, a function of the row alone (nothing carries over from one row to the next), so the rows can be decoded in any
+    // order or at once. Everything the row writes is built here as text; the loop below puts it in the files, in row order.
+    let work = |i: usize| -> Result<RowOut, String> {
+        let (truth, syls, ctx) = &rows[i];
         // S2h: the first word is conditioned on the row's context, cut like the engine cuts it.
         let left = if ctx_mode { Some(context_key(ctx)) } else { None };
         let start = left.as_deref().filter(|k| *k != SENTINEL).map_or("<s>", |k| history(k, &lm));
         let nb = decode_from(&capped, syls, &lm, prof, BEAM_S1, start, demote).map_err(|e| e.to_string())?;
         let mut surf: Vec<String> = nb.iter().map(|(_, ws)| ws.concat()).collect();
         let t = len.apply(truth);
+        let mut out = RowOut::default();
         // The row's chosen candidate: the first, or the small model's pick among the first 8 (the dump keeps the n-gram order).
         let mut chosen = 0;
         if let Some((tl, _, _)) = &tl {
@@ -382,38 +431,118 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
                 }
                 // A candidate longer than the model's context: this row keeps the n-gram first (counted on stderr), the set goes on.
                 Err(TinyLmError::TooLong) => {
-                    long += 1;
+                    out.long = true;
                     None
                 }
                 Err(e) => return Err(e.to_string()),
             };
             if ll.is_some() {
-                rerank.push(t0.elapsed());
+                out.rerank = Some(t0.elapsed());
             }
-            if let Some(w) = scores.as_mut() {
+            if want_scores {
                 let oks: Vec<bool> = top.iter().map(|s| len.apply(s) == t).collect();
                 let ed: Vec<u32> = top.iter().zip(&oks).map(|(s, &ok)| if ok { 0 } else { levenshtein(s, truth) }).collect();
-                w.write_all(scores_line(i + 1, &ng, &oks, &ed, truth.chars().count(), chosen, ll.as_deref())?.as_bytes())
-                    .map_err(|_| "cannot write tinylm scores".to_string())?;
+                out.scores = scores_line(i + 1, &ng, &oks, &ed, truth.chars().count(), chosen, ll.as_deref())?;
             }
         }
-        let ok = len.apply(&surf[chosen]) == t;
-        top1 += ok as usize;
-        rs.push((ok, surf[chosen].clone(), truth.clone()));
-        o64 += surf.iter().any(|s| len.apply(s) == t) as usize;
-        if let Some(d) = dump.as_mut() {
+        out.ok = len.apply(&surf[chosen]) == t;
+        out.in64 = surf.iter().any(|s| len.apply(s) == t);
+        if want_dump {
             for (r, ((sc, _), s)) in nb.iter().zip(&surf).enumerate() {
-                writeln!(d, "{}\t{}\t{s}\t{sc:?}", i + 1, r + 1).map_err(|_| "cannot write dump".to_string())?;
+                writeln!(out.dump, "{}\t{}\t{s}\t{sc:?}", i + 1, r + 1).unwrap();   // a String: cannot fail
             }
+        }
+        if want_words {
+            let gold = lex.segment_words(truth).map_or("-".to_string(), |ws| ws.iter().map(|(w, _)| w.as_str()).collect::<Vec<_>>().join(" "));
+            writeln!(out.words, "{}\t0\t{gold}", i + 1).unwrap();
+            for (r, (_, ws)) in nb.iter().enumerate() {
+                writeln!(out.words, "{}\t{}\t{}", i + 1, r + 1, ws.join(" ")).unwrap();
+            }
+        }
+        out.first = surf.swap_remove(chosen);
+        Ok(out)
+    };
+    let (mut top1, mut o64, mut firsts, mut rs, mut rerank, mut long) = (0usize, 0usize, Vec::new(), Vec::new(), Vec::new(), 0usize);
+    // Puts one row's output in the files and the counters; called in row order, so every file and the summary line are those of N = 1.
+    let mut emit = |i: usize, out: RowOut| -> Result<(), String> {
+        top1 += out.ok as usize;
+        o64 += out.in64 as usize;
+        long += out.long as usize;
+        rerank.extend(out.rerank);
+        if let Some(w) = scores.as_mut() {
+            w.write_all(out.scores.as_bytes()).map_err(|_| "cannot write tinylm scores".to_string())?;
+        }
+        if let Some(d) = dump.as_mut() {
+            d.write_all(out.dump.as_bytes()).map_err(|_| "cannot write dump".to_string())?;
         }
         if let Some(d) = dump_words.as_mut() {
-            let gold = lex.segment_words(truth).map_or("-".to_string(), |ws| ws.iter().map(|(w, _)| w.as_str()).collect::<Vec<_>>().join(" "));
-            writeln!(d, "{}\t0\t{gold}", i + 1).map_err(|_| "cannot write word dump".to_string())?;
-            for (r, (_, ws)) in nb.iter().enumerate() {
-                writeln!(d, "{}\t{}\t{}", i + 1, r + 1, ws.join(" ")).map_err(|_| "cannot write word dump".to_string())?;
-            }
+            d.write_all(out.words.as_bytes()).map_err(|_| "cannot write word dump".to_string())?;
         }
-        firsts.push(surf.swap_remove(chosen));
+        rs.push((out.ok, out.first.clone(), rows[i].0.clone()));
+        firsts.push(out.first);
+        Ok(())
+    };
+    if threads == 1 {
+        for i in 0..rows.len() {
+            emit(i, work(i)?)?;
+        }
+    } else {
+        // N workers take the next block of BLOCK rows from a shared counter and send its outputs back; the main thread writes the
+        // blocks in row order, holding the ones that arrive early. The first error in row order is the error: a block stops at its
+        // first error, workers claim no new block once any error is seen (a block already claimed is still decoded, so an earlier
+        // error is not missed), and returning drops `rx`, which stops the workers at their next send. A panic in a row is turned into
+        // that row's error. The early blocks held in memory are bounded: a worker does not start block b while
+        // b >= written + lookahead (the lowest unwritten block is always within it, so the wait cannot deadlock).
+        let lookahead = 4 * threads;
+        let (next, written, failed, closed) = (AtomicUsize::new(0), AtomicUsize::new(0), AtomicBool::new(false), AtomicBool::new(false));
+        std::thread::scope(|sc| {
+            let (tx, rx) = mpsc::channel::<(usize, Vec<Result<RowOut, String>>)>();
+            for _ in 0..threads {
+                let (tx, work, next, written, failed, closed) = (tx.clone(), &work, &next, &written, &failed, &closed);
+                sc.spawn(move || {
+                    while !failed.load(Ordering::Relaxed) {
+                        let b = next.fetch_add(1, Ordering::Relaxed);
+                        if b >= nblocks {
+                            return;
+                        }
+                        while b >= written.load(Ordering::Acquire) + lookahead {
+                            if closed.load(Ordering::Relaxed) {
+                                return;
+                            }
+                            std::thread::sleep(Duration::from_millis(1));
+                        }
+                        let mut outs = Vec::new();
+                        for i in b * BLOCK..((b + 1) * BLOCK).min(nrows) {
+                            let out = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| work(i)))
+                                .unwrap_or_else(|_| Err(format!("row {} panicked in a --threads worker", i + 1)));
+                            let bad = out.is_err();
+                            outs.push(out);
+                            if bad {
+                                failed.store(true, Ordering::Relaxed);
+                                break;
+                            }
+                        }
+                        if tx.send((b, outs)).is_err() {
+                            return;
+                        }
+                    }
+                });
+            }
+            drop(tx);
+            let _release = Release(&closed);   // also on a panic of this thread: the workers waiting in the lookahead loop leave
+            let (mut early, mut want) = (BTreeMap::new(), 0);
+            for (b, outs) in &rx {
+                early.insert(b, outs);
+                while let Some(outs) = early.remove(&want) {
+                    for (i, out) in (want * BLOCK..).zip(outs) {
+                        emit(i, out?)?;
+                    }
+                    want += 1;
+                    written.store(want, Ordering::Release);
+                }
+            }
+            Ok::<(), String>(())
+        })?;
     }
     if let Some(mut w) = scores {
         w.flush().map_err(|_| "cannot write tinylm scores".to_string())?;
@@ -424,13 +553,15 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
         rerank.sort();
         let ms = |d: Duration| d.as_secs_f64() * 1000.0;
         eprintln!(
-            "tinylm: rerank n={} p50={:.3} ms p95={:.3} ms; rows kept first (candidate over the context) {long}; load {:.0} ms, rss {:?} -> {:?} KiB around the .sjtl load",
+            "tinylm: rerank n={} p50={:.3} ms p95={:.3} ms; rows kept first (candidate over the context) {long}; load {:.0} ms, rss {:?} -> {:?} KiB around the .sjtl load{}",
             rerank.len(),
             ms(rerank[rerank.len() / 2]),
             ms(rerank[(rerank.len() as f64 * 0.95) as usize]),
             ms(*load),
             rss_before,
-            rss_after
+            rss_after,
+            // The percentiles of a parallel run are measured under contention; N = 1 prints the line as before (tools/bench.py parses it).
+            if threads > 1 { format!(" (threads {threads}: measured under contention)") } else { String::new() }
         );
     }
     if let Some(mut d) = dump {
