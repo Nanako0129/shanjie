@@ -36,7 +36,7 @@ final class RerankTests: XCTestCase {
                           learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: demote, predictionStore: MemoryPredictionStore(),
                           abbreviationStore: MemoryAbbreviationStore(), englishStore: MemoryEnglishStore(), acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore(),
                           candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: store, rerankRunner: runner,
-                          profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore())
+                          profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore(), spacingStore: MemorySpacingStore())
         XCTAssertNotNil(shell.engine)
         shell.rerankFree = frees.free  // before any job is taken (build() takes none)
         return shell

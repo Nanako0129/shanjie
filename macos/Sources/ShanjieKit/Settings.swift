@@ -28,6 +28,8 @@ public final class SettingsModel: ObservableObject {
     /// enabled and on.
     @Published public private(set) var englishInline = true
     @Published public private(set) var englishInlineEnabled = false
+    /// 中英文之間自動加空格 (cjk-spacing section 2).
+    @Published public private(set) var spacing = false
     /// The abbreviation toggle is shown only when the shell offers it (`Shell.showsAbbreviation`).
     public var showsAbbreviation: Bool { shell.showsAbbreviation }
     /// The 關於 page's update state (docs/contracts/about-update.md section 1); it publishes its own changes.
@@ -79,6 +81,7 @@ public final class SettingsModel: ObservableObject {
         layout = shell.layout
         prediction = shell.predictionOn
         abbreviation = shell.abbreviationOn
+        spacing = shell.spacingOn
         english = shell.englishOn
         englishEnabled = shell.englishEnabled
         englishInline = shell.englishInlineOn
@@ -106,6 +109,7 @@ public final class SettingsModel: ObservableObject {
     public func selectLayout(_ m: InputMode) { shell.selectLayout(m) }
     public func setPrediction(_ on: Bool) { shell.applyPrediction(on) }
     public func setAbbreviation(_ on: Bool) { shell.applyAbbreviation(on) }
+    public func setSpacing(_ on: Bool) { shell.setSpacing(on) }
     public func setEnglish(_ on: Bool) { shell.applyEnglish(on) }
     public func setEnglishInline(_ on: Bool) { shell.applyEnglishInline(on) }
     public func setDemote(_ on: Bool) { shell.applyDemote(on) }

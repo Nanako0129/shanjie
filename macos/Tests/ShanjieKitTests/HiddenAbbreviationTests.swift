@@ -12,7 +12,7 @@ final class HiddenAbbreviationTests: XCTestCase {
                           learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(),
                           predictionStore: MemoryPredictionStore(), abbreviationStore: store, englishStore: MemoryEnglishStore(), acgPackStore: MemoryAcgPackStore(),
                           glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore(),
-                          showsAbbreviation: false)
+                          showsAbbreviation: false, spacingStore: MemorySpacingStore())
         let c = Controller(shell)
         c.session.activate()
         XCTAssertFalse(shell.abbreviationOn, "the stored on is not read")

@@ -91,7 +91,7 @@
 ## 7. 輸出套用
 
 - **回傳碼非 0**：先 `shanjie_engine_reset(1)` 讓核心也丟棄組字（核心只在碼 4 時自己丟棄，碼 1、2 不會），再 `setMarkedText("")`、隱藏候選窗、清掉候選陣列，回傳 `false`；不記錄按鍵內容。
-- `commit` 非空：`insertText(commit, replacementRange: NSRange(location: NSNotFound, length: 0))`。
+- `commit` 非空：`insertText(commit, replacementRange: NSRange(location: NSNotFound, length: 0))`。「中英文之間自動加空格」開著時（預設關），先把 `commit` 交給 `CJKSpacing.apply` 再送出（`cjk-spacing.md`）。
 - `preedit`：非空時 `setMarkedText`，整段單線底線（中英混打的英文段開著時，那一段改用粗底線，見 `zhen-inline.md` §1.3f），選取範圍 `NSRange(location: cursor_utf16, length: 0)`；變成空字串時用空字串清掉組字。
 - `handled = 0`：先套用 commit 與 preedit，再回傳 `false` 讓 App 處理這個鍵。
 - 收到輸出後在同一個呼叫裡把字串複製成 Swift `String`，立刻 `shanjie_output_free`。
