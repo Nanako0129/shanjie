@@ -2,6 +2,104 @@
 
 計畫：`docs/iteration-plan.md` §4.1（維護者 2026-10-18 晚上選擇題：下一個研究片做 L0；過門檻才接 Phase 2 全套，沒過就把預算改投資料與前文回傳）。這個資料夾是 `exp/l0-listwise` 分支上的程式與單元測試；資料準備與打分由 main 在 GCP 執行，訓練在 Colab（Mac 不跑重運算）。S7a（`experiments/s7a-tinylm/`）的程式一律不改，只 import。
 
+## 檔案
+
+這個資料夾是 `exp/l0-listwise` 分支上 executor 寫的全部程式與單元測試；資料準備與打分由 main 在 GCP 執行，訓練在 Colab（Mac 不跑重運算）。S7a 與 tools 的程式一律不改，只 import（`sys.path` 由 `l0core.py` 補好）。下面「登記」一節是跑之前凍結的規格，這一段與後面幾段是實作說明。
+
+| 檔 | 做什麼 | 需要 torch |
+|---|---|---|
+| `rows.py`、`test_rows.py` | 訓練列的建法（main 寫的，不是這一批的內容） | 否 |
+| `l0core.py` | `k_cross`、`context_for`（兩種前文）、選項與正解（`ok_flags`、`target_of`、`untrainable_reason`）、特徵 `features`、`pack_row`／`collate`（預先編成 token、補齊成陣列）、決策規則 `pick`、`select_t`（上界規則選 t）、`alone_retain`（單獨挑對率與留住率）、`m_view`（把 `score.py` 紀錄當成分數表） | 否 |
+| `torch_l0.py` | `L0Model`（M 的 GPT 到最後的 LayerNorm，加兩個線性頭）、`list_loss`、`save_l0`／`load_l0`、`score_packs` | 是 |
+| `train_l0.py` | 訓練，每格 w 一個 epoch；寫 `l0-w<w>.pt`、`train-w<w>.json` | 是 |
+| `score_l0.py` | `l0`（L0 打分，`--context 64\|2`）、`m64`（M 的似然、前文取到 64 個漢字）；分數檔只有數字 | `l0` 要；`m64` 用 numpy 後端就不要 |
+| `gate.py` | 讀分數檔，印登記裡的讀數與 (A)(B) 的 PASS／FAIL | 否 |
+| `test_l0.py` | 單元測試（合成小資料）；6 個 torch 測試沒有 torch 時跳過 | 部分 |
+
+## 命令順序
+
+記號：`M`＝`work/s7a/tinylm-M.npz`；`R_<集>`＝各集合的列檔；`D`＝dump 資料夾；`SCORES`＝分數檔資料夾；訓練列用 `rows.py` 建好、去重後的 `wiki.txt`、`pool.txt`（做法見 `rows.py` 開頭的說明）。同一次比較的所有臂放在同一種 CPU 上：第 1–3 與第 5 步在同一種 VM（C4D Spot）上跑。VM 先裝 `libopenblas0-pthread`，用 `readlink -f /etc/alternatives/libblas.so.3-x86_64-linux-gnu` 確認，啟動長工作前先量 100 列估時間。
+
+```bash
+# 1. 候選 dump（GCP，出貨設定的 Rust CLI；四個聊天集合加兩份訓練列。每份 summary line 的 top1 記下來，當下面的 N_<集>）
+cargo run --release -q -p cli -- --lm data/lm/bigram.sjlm --profile chat --context --packs acg --rows R_chatclause.txt --dump D/chatclause.dump --name chatclause --threads 32
+#   同樣跑 discordtune、chatjudge、lytune（聊天）、wiki.txt（→ D/wiki.dump）、pool.txt（→ D/pool.dump）
+
+# 2. M 出貨前文的 LL（S7a 的 score.py，不改；--out 的檔名照 gate.py 的命名）
+python experiments/s7a-tinylm/score.py --npz M --backend numpy --dump D/chatclause.dump --rows R_chatclause.txt --name chatclause --expect-top1 N_chatclause --out SCORES/M.chatclause.jsonl
+#   discordtune、chatjudge、lytune 一樣 → SCORES/M.<集>.jsonl
+
+# 3. M 的似然、前文取到 64（只要調參層）
+python experiments/l0/score_l0.py m64 --npz M --backend numpy --rows R_chatclause.txt --dump D/chatclause.dump --name chatclause --expect-top1 N_chatclause --out SCORES/M64.chatclause.jsonl
+
+# 4. 訓練（Colab G4，兩格合計 ≤ 3 單元；先在 CPU 上跑過 test_l0.py 的 torch 測試）
+python experiments/l0/train_l0.py --npz M --data wiki.txt D/wiki.dump pool.txt D/pool.dump --w 1 3 --out OUT
+#   → OUT/l0-w1.pt、l0-w3.pt、train-w1.json、train-w3.json；結束碼 2＝發散
+
+# 5. L0 打分（GCP，兩格 w × 兩種前文 × 四個集合）
+python experiments/l0/score_l0.py l0 --model OUT/l0-w1.pt --rows R_chatclause.txt --dump D/chatclause.dump --name chatclause --expect-top1 N_chatclause --context 64 --device cpu --out SCORES/L0w1.c64.chatclause.jsonl
+#   --context 2 → SCORES/L0w1.c2.<集>.jsonl；w3 同；discordtune、chatjudge、lytune 同
+
+# 6. 讀數
+python experiments/l0/gate.py --tune chatclause --dev discordtune chatjudge lytune --dir SCORES
+```
+
+`gate.py` 的檔名約定（聊天設定；調參集與每個開發集都要有）：
+
+| 檔名 | 來源 |
+|---|---|
+| `L0w<w>.c64.<集>.jsonl`、`L0w<w>.c2.<集>.jsonl` | `score_l0.py l0 --context 64`／`2`（模型 `l0-w<w>.pt`） |
+| `M.<集>.jsonl` | S7a 的 `score.py`（欄位 `n`、`ok`、`ng`、`ll`），M 出貨值用 `fusegrid.pick(r, 0.3, 2, col="ll", delta=0.25)` |
+| `M64.<調參集>.jsonl` | `score_l0.py m64`（只有調參集） |
+
+每個集合的所有檔列數與 `ok` 必須相同，不同就停。輸出全是數字表（除了集合名沒有別的文字）：(A) 的單獨挑對率與留住率（L0 的四格、M、M@64）、每格選到的 t 與 16 格的完整表、每個開發集的 L0 對 n-gram（改對、改壞、淨值、改壞數上界、上界 ÷ n、error ratio）與對 M 出貨值（兩邊各自的對錯、淨值、精確 McNemar p）、最後的 (A)(B) 判定。判定只看前文 64；前文 2 的列照報、不判。
+
+## 契約沒寫死、我做的決定
+
+| 項目 | 做法與理由 |
+|---|---|
+| 選項與索引 | 選項個數＝候選個數 n（≤ 8），選項 i 就是候選 i（0 起算，0＝維持第一＝第 1 名）。模型為每個候選各編一次碼（第 1 名也編，給 `keep_head`），一列最多 8 條序列 |
+| 特徵 | 8 維：`[ng_i − ng_0]` 加名次 2..8 的 one-hot（名次 i+1 對應第 i 個 one-hot 欄）。`ng` 直接用 dump 的分數，沒有重新換算（登記寫 log10，dump 的單位沒有在這裡驗，見下方） |
+| 序列 | `[BOS] + enc(k) + [BOS] + enc(c)`，字表外的字走 UNK；總長 ≤ 64。k 的長度由候選長度決定（`62 − len(c)`），所以每個候選的 k 不同。前文 2：`tinylm.context_key`（≤ 2 個漢字，遇標點就停），再從左邊截到放得下 |
+| 向量取法 | 最後一個真實位置的最終 LayerNorm 輸出；右邊補 PAD，因果注意力讓補的位置碰不到前面（測試對照一次一列的結果，atol 1e-5） |
+| 兩個頭的初始化 | 權重 N(0, 0.02)、偏差 0（和 GPT 其餘線性層同一種）。兩格 w 在建模型前都 `torch.manual_seed(seed)`，所以頭的初始值與 M 的權重完全相同 |
+| 學習率 | 全部參數（M 與兩個頭）同一個峰值 1e-4、同一個排程（`train.lr_at`，暖機 100）；登記沒有分，所以沒有給頭另外的學習率 |
+| 衰減 | 權重衰減 0.1 加在 `ndim ≥ 2` 的參數（含兩個頭的權重），偏差與 LayerNorm 不加 |
+| 損失的正規化 | 批內加權平均：`Σ(權重 × 交叉熵) / Σ權重`，權重＝w（目標是維持第一）或 1。分母用權重和而不是列數，w = 3 才不會順便把整體學習率放大；登記只寫「乘 w」，沒有說分母 |
+| 可訓練列 | 依序檢查：候選 < 2（`n<2`）、有候選超過 62 個字（`too_long`）、前 n 名沒有寬鬆比對（`no_match`）；三種都只計數。正解取第一個寬鬆相符的候選（`eval.lenient`；兩個都對時取名次前的） |
+| 超長候選（> 62 字） | 不訓練；打分時整列 `noscore: 1`，決策維持第一，單獨挑對率與留住率把它當「選了第 1 名」算進分母。`m64` 的上限是 63（`ll_many` 放得下的長度） |
+| 只有一個候選的列 | 不訓練；分數檔寫 `s: [0.0]`（不編碼），決策恆為維持第一 |
+| 留出列 | 在可訓練列中用 `default_rng(seed)` 的一個排列，前 `round(0.02 × N)` 個（至少 1 個）當留出列，其餘依同一個排列的順序成批（最後一批可以不滿）。留出的損失是不加權的交叉熵（不同 w 的格才可比），另報列表正確率；只畫曲線。`--max-steps` 只取前 N 批，排程在那裡結束（冒煙測試用） |
+| 兩格同批 | 批次由 `split` 一次決定，兩格共用；`train-w<w>.json` 記 `train_order_sha256`，兩格相同；測試另外攔截 `prefetch`，驗證兩格收到的批次逐項相同 |
+| 發散 | 記錄點（每 100 步的平均損失）不是有限值，或暖機之後的記錄點高於第一個記錄點，就印 `DIVERGED`、結束碼 2（不寫 `.pt`，整個程序停，不繼續下一格） |
+| 預取 | `collate` 在一條背景執行緒上領先 4 批，GPU 不等補齊；每步的工作只有搬進裝置與前向、反向 |
+| 精度 | 訓練：CUDA 上 bf16 autocast（損失用 float32），CPU 用 fp32。打分：fp32、關 TF32、不 autocast（和 `TorchLM` 一樣） |
+| 存檔 | 一個 `.pt`：`state`（整個 `L0Model` 的權重）、`cfg`（GPT 的 V、層數、寬度、頭數、ctx）、`chars`、來源 npz 的 SHA-256、`extra`（w、種子、步數）；`torch.load(weights_only=True)` 可讀 |
+| 決策規則的邊界 | 邊際 `m > t` 嚴格大於；`t = 0` 時 `m = 0`（打平）維持第一。第 2..n 名並列最高時取名次前的 |
+| 無門檻（沒有任何 t 符合上限） | 登記只說「記無門檻」。實作：gate 印「無門檻」，開發集上該格視為 t = ∞（不換，等於 n-gram），(B) 判 FAIL。t = 8 幾乎不會換，這一條實務上幾乎碰不到 |
+| 單獨挑對率 | 沒有門檻時的選項 argmax（並列取名次前）；M 與 M@64 用 `ll` 的 argmax，同一個函式，「維持第一」＝索引 0。`noscore` 的列算選第 1 名 |
+| (A) 的條件 | 單獨挑對率 ≥ 55% **且**留住率 ≥ 92%（登記的兩條都要），整數比較（`n × 100 ≥ 55 × d`）。在調參集、前文 64、每格 w 各判一次 |
+| (B) 的條件 | 前文 64 的 discordtune：L0（選到的 t）對 M 出貨值的淨值（L0 對 M 錯 − L0 錯 M 對）≥ +40，**且**L0 對 n-gram 的改壞數上界 ÷ n ≤ 0.5%。M 出貨值＝`fusegrid.pick(r, 0.3, 2, col="ll", delta=0.25)` |
+| 總判定 | 任一格 w 通過 (A) 或 (B) 就印 PASS（登記「任一格 w 符合任一條」）。(A)、(B) 的 overall 也各印一行，看得出是哪一邊過 |
+| 分數檔 | `i, n, ok, s` 或 `noscore`；`ok` 是每個候選的寬鬆比對，所以 gate 不需要列檔、dump 或任何文字 |
+| `--expect-top1` | 必填，用 `score.top1_from_dump` 從 dump 第一名重算，不同就在載入模型之前 `sys.exit`（同 `score.py`） |
+
+## 要知道的後果（不是 bug）
+
+- **torch 的程式沒有在 Mac 上跑過**（Mac 沒有 torch）：`torch_l0.py`、`train_l0.py`、`score_l0.py l0` 與 `test_l0.py` 的 `TestTorch` 在 main 第一次 CPU 試跑之前沒有被執行過。非 torch 的部分（`l0core`、`gate`、`score_l0.py m64`）有跑；`train_l0.py` 的資料建構與分批（`build_data`、`split`、`prefetch`、`diverged`）用臨時腳本抽出函式驗過。先在 GCP 或 Colab 上跑 `python -m unittest discover -s experiments/l0 -p 'test_*.py' -v`，6 個 torch 測試全過再開訓練。
+- dump 的 n-gram 分數是不是 log10（登記這樣寫）沒有在這裡驗證。特徵 `ng_i − ng_0` 的尺度由 dump 決定，頭只能線性使用它。
+- k 取到 62 − len(c) 個字，所以長候選的 k 比短候選短；同一列裡各候選看到的前文量不同，這是登記的設計。
+- 前文 2 用的是**同一個**以前文 64 訓練的 `.pt`，只在打分時換 k（登記的「App 現況」不重訓）。
+- 調參集上的 M 只報單獨挑對率與留住率；M 出貨值只在開發集上當比較對象。
+
+## 測試
+
+```bash
+python3 -m unittest discover -s experiments/l0 -p 'test_*.py' -v
+```
+
+沒有 torch 時（Mac 的 `python3`）跑 `test_l0.py` 的非 torch 測試與 `test_rows.py`，6 個 torch 測試跳過。非 torch 的測試：`k_cross`；選項與正解（寬鬆變體 她／他、兩個都對取前面的、三種不可訓練的原因）；特徵；token 序列與補齊（兩種前文、長度邊界 62／63／64）；決策規則的邊界；選 t（上限、並列取大、無門檻、小集合）；單獨挑對率與留住率（含 `noscore`、M 的 `ll`）；`gate.py` 在手造的 1000 列集合上的精確數字與 PASS／FAIL；檔案不對齊就停；`--expect-top1` 不符就停（`m64` 與 `l0`）；`m64` 端到端（對 `ll_many` 的暴力算法、一列超長候選、一個候選的列）。torch 測試：補齊不改分數、損失等於手算的遮罩加權交叉熵、存檔再讀分數相同、`train_l0.py` 在 T 尺寸隨機模型上兩格端到端（兩格批次相同、計數、留出曲線、同種子重跑權重逐位相同、兩格權重不同）、發散規則、`score_l0.py l0` 端到端（逐列用一次一個候選、手寫序列的前向對照；前文 64 與 2 的分數不同）。都不需要 GPU。
+
 ## 登記（2026-10-18，main 寫，跑之前 commit）
 
 探索片：只用調參層與開發層，不出貨，結論只寫方向；私人集合只記數字。不碰判讀集、保留集、chatjudge-2。
