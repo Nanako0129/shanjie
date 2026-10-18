@@ -5,9 +5,13 @@ use core::lm::{decode_from, history, CappedLexicon, Demote, Lm, Profile};
 use core::tinylm::{KnPairing, RerankLevel, TinyLm, TinyLmError, TOPK};
 use core::predict::{parse_units, predict, units_of, units_str, Index, Mode};
 use core::{decode_beam, Error, Lexicon, NoLearning, Syls, BEAM_S1};
+use std::collections::BTreeMap;
+use std::fmt::Write as _;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 mod english;
@@ -246,8 +250,8 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
         let mut val = || it.next().cloned().ok_or_else(|| "missing option value".to_string());
         let num = |v: String| v.parse::<usize>().map_err(|_| format!("bad number (length {})", v.chars().count()));
         match a.as_str() {
-            "--threads" => match val()?.parse::<usize>() {
-                Ok(n) if n >= 1 => threads = n,
+            "--threads" => match val().ok().and_then(|v| v.parse::<usize>().ok()) {
+                Some(n) if n >= 1 => threads = n,
                 _ => {
                     eprintln!("error: --threads takes a whole number of at least 1");
                     std::process::exit(2);
@@ -430,59 +434,73 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
         out.in64 = surf.iter().any(|s| len.apply(s) == t);
         if want_dump {
             for (r, ((sc, _), s)) in nb.iter().zip(&surf).enumerate() {
-                out.dump += &format!("{}\t{}\t{s}\t{sc:?}\n", i + 1, r + 1);
+                writeln!(out.dump, "{}\t{}\t{s}\t{sc:?}", i + 1, r + 1).unwrap();   // a String: cannot fail
             }
         }
         if want_words {
             let gold = lex.segment_words(truth).map_or("-".to_string(), |ws| ws.iter().map(|(w, _)| w.as_str()).collect::<Vec<_>>().join(" "));
-            out.words += &format!("{}\t0\t{gold}\n", i + 1);
+            writeln!(out.words, "{}\t0\t{gold}", i + 1).unwrap();
             for (r, (_, ws)) in nb.iter().enumerate() {
-                out.words += &format!("{}\t{}\t{}\n", i + 1, r + 1, ws.join(" "));
+                writeln!(out.words, "{}\t{}\t{}", i + 1, r + 1, ws.join(" ")).unwrap();
             }
         }
         out.first = surf.swap_remove(chosen);
         Ok(out)
     };
     let (mut top1, mut o64, mut firsts, mut rs, mut rerank, mut long) = (0usize, 0usize, Vec::new(), Vec::new(), Vec::new(), 0usize);
-    // `--threads N`: the rows go in batches of N blocks of BLOCK rows; the N workers each decode one block, and the batch is written
-    // in row order before the next one starts. So every file and the summary line are the same as with N = 1, whatever N is, and
-    // the memory held is one batch of output, not the whole set.
-    const BLOCK: usize = 32;
-    let batch = threads * BLOCK;
-    for start in (0..rows.len()).step_by(batch) {
-        let end = (start + batch).min(rows.len());
-        let outs: Vec<Result<RowOut, String>> = if threads == 1 {
-            (start..end).map(&work).collect()
-        } else {
-            std::thread::scope(|sc| {
-                let handles: Vec<_> = (start..end)
-                    .step_by(BLOCK)
-                    .map(|b| sc.spawn({
-                        let work = &work;
-                        move || (b..(b + BLOCK).min(end)).map(work).collect::<Vec<_>>()
-                    }))
-                    .collect();
-                handles.into_iter().flat_map(|h| h.join().expect("a --threads worker panicked")).collect()
-            })
-        };
-        for (i, out) in (start..end).zip(outs) {
-            let out = out?;
-            top1 += out.ok as usize;
-            o64 += out.in64 as usize;
-            long += out.long as usize;
-            rerank.extend(out.rerank);
-            if let Some(w) = scores.as_mut() {
-                w.write_all(out.scores.as_bytes()).map_err(|_| "cannot write tinylm scores".to_string())?;
-            }
-            if let Some(d) = dump.as_mut() {
-                d.write_all(out.dump.as_bytes()).map_err(|_| "cannot write dump".to_string())?;
-            }
-            if let Some(d) = dump_words.as_mut() {
-                d.write_all(out.words.as_bytes()).map_err(|_| "cannot write word dump".to_string())?;
-            }
-            rs.push((out.ok, out.first.clone(), rows[i].0.clone()));
-            firsts.push(out.first);
+    // Puts one row's output in the files and the counters; called in row order, so every file and the summary line are those of N = 1.
+    let mut emit = |i: usize, out: RowOut| -> Result<(), String> {
+        top1 += out.ok as usize;
+        o64 += out.in64 as usize;
+        long += out.long as usize;
+        rerank.extend(out.rerank);
+        if let Some(w) = scores.as_mut() {
+            w.write_all(out.scores.as_bytes()).map_err(|_| "cannot write tinylm scores".to_string())?;
         }
+        if let Some(d) = dump.as_mut() {
+            d.write_all(out.dump.as_bytes()).map_err(|_| "cannot write dump".to_string())?;
+        }
+        if let Some(d) = dump_words.as_mut() {
+            d.write_all(out.words.as_bytes()).map_err(|_| "cannot write word dump".to_string())?;
+        }
+        rs.push((out.ok, out.first.clone(), rows[i].0.clone()));
+        firsts.push(out.first);
+        Ok(())
+    };
+    if threads == 1 {
+        for i in 0..rows.len() {
+            emit(i, work(i)?)?;
+        }
+    } else {
+        // `--threads N`: N workers take the next block of BLOCK contiguous rows from a shared counter and send its outputs back; the
+        // main thread writes the blocks in row order, holding the ones that arrive early. The first error in row order is the error
+        // (dropping `rx` on return stops the workers at their next send). An early block waits in memory behind a slow earlier one.
+        const BLOCK: usize = 32;
+        let (n, next) = (rows.len(), AtomicUsize::new(0));
+        std::thread::scope(|sc| {
+            let (tx, rx) = mpsc::channel::<(usize, Vec<Result<RowOut, String>>)>();
+            for _ in 0..threads {
+                let (tx, work, next) = (tx.clone(), &work, &next);
+                sc.spawn(move || loop {
+                    let b = next.fetch_add(1, Ordering::Relaxed);
+                    if b * BLOCK >= n || tx.send((b, (b * BLOCK..((b + 1) * BLOCK).min(n)).map(work).collect())).is_err() {
+                        break;
+                    }
+                });
+            }
+            drop(tx);
+            let (mut early, mut want) = (BTreeMap::new(), 0);
+            for (b, outs) in rx {
+                early.insert(b, outs);
+                while let Some(outs) = early.remove(&want) {
+                    for (i, out) in (want * BLOCK..).zip(outs) {
+                        emit(i, out?)?;
+                    }
+                    want += 1;
+                }
+            }
+            Ok::<(), String>(())
+        })?;
     }
     if let Some(mut w) = scores {
         w.flush().map_err(|_| "cannot write tinylm scores".to_string())?;

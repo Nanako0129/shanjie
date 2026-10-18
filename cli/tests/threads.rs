@@ -41,28 +41,29 @@ fn lm_run(tag: &str, rows: &str, extra: &[&str], scores: bool, threads: &str) ->
     got
 }
 
-/// user-reported has 135 rows, so 4 threads make two batches (128 + 7 rows) with a short last block, and 3 threads make two as well.
+/// `--limit 70` keeps 70 rows: two full blocks of 32 and a short one of 6, so 2 threads take turns on the blocks and 3 threads
+/// leave one worker without a full block. Each output is compared with the one-thread run.
 #[test]
 fn threads_leave_every_output_unchanged() {
     let tl = model("tinylm.sjtl");
-    for rows in ["user-reported.txt", "user-typing.txt"] {
-        let chat = ["--profile", "chat", "--context", "--packs", "acg", "--tinylm", &tl];
-        let formal = ["--profile", "formal"];
-        let (one, four, three) = (lm_run("c", rows, &chat, true, "1"), lm_run("c", rows, &chat, true, "4"), lm_run("c", rows, &chat, true, "3"));
-        assert!(one.iter().all(|s| !s.is_empty()), "chat {rows}: an output file is empty");
-        assert_eq!(one, four, "chat {rows}, 4 threads");
-        assert_eq!(one, three, "chat {rows}, 3 threads");
-        let (one, four) = (lm_run("f", rows, &formal, false, "1"), lm_run("f", rows, &formal, false, "4"));
-        assert_eq!(one, four, "formal {rows}, 4 threads");
+    let chat = ["--profile", "chat", "--context", "--packs", "acg", "--tinylm", &tl, "--limit", "70"];
+    let one = lm_run("c", "user-reported.txt", &chat, true, "1");
+    assert!(one.iter().all(|s| !s.is_empty()), "chat: an output file is empty");
+    for t in ["2", "3"] {
+        assert_eq!(one, lm_run("c", "user-reported.txt", &chat, true, t), "chat, {t} threads");
     }
+    let formal = ["--profile", "formal", "--limit", "70"];
+    assert_eq!(lm_run("f", "user-typing.txt", &formal, false, "1"), lm_run("f", "user-typing.txt", &formal, false, "3"), "formal, 3 threads");
 }
 
 #[test]
 fn bad_threads_exit_2_and_other_modes_refuse_it() {
     let lm = model("bigram.sjlm");
     let rows = root().join("eval/dev/user-typing.txt").to_string_lossy().into_owned();
-    for bad in ["0", "x", "-1", ""] {
-        let out = run(&["--lm", &lm, "--profile", "chat", "--rows", &rows, "--threads", bad]);
+    let head = ["--lm", lm.as_str(), "--profile", "chat", "--rows", rows.as_str()];
+    // the last: `--threads` with no value
+    for bad in [Some("0"), Some("x"), Some("-1"), Some(""), None] {
+        let out = run(&[&head[..], &["--threads"], bad.as_slice()].concat());
         assert_eq!(out.status.code(), Some(2), "--threads {bad:?}");
         assert!(out.stdout.is_empty() && String::from_utf8_lossy(&out.stderr).contains("--threads"));
     }
