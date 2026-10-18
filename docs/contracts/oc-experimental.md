@@ -1,6 +1,6 @@
 # 0c 實驗開關（第一片：Rust 推論試做）
 
-狀態：修訂三（2026-10-19，維護者選擇題：A4 的延遲與記憶體沒過門檻之後，加前綴共用再量），等 plan-verifier。A1、A2、A3 已完成；A4 的一致性已過、延遲與記憶體沒過（研究紀錄 2026-10-19）。A1、A2 已完成（研究紀錄 2026-10-19）。
+狀態：修訂三（2026-10-19，維護者選擇題：A4 的延遲與記憶體沒過門檻之後，加前綴共用再量），等 plan-verifier。A1、A2 已完成；A3 因前綴共用重開；A4 的三項量測都要在修訂三的程式上重跑（修訂二的數字在研究紀錄 2026-10-19，PR #221）。A1、A2 已完成（研究紀錄 2026-10-19）。
 
 ## 0. 起因與範圍
 
@@ -71,12 +71,12 @@
   - **前綴共用**（修訂三）：同一列的所有候選共用 `[BOS] 前文 [SEP] 讀音×n [OUT]` 這一段（輸入完全相同，因果遮罩下也不看後面的字），每一層的 K、V 只算一次並快取；每個候選只再算自己的 n−1 個字，注意力讀快取的前綴加上自己前面的字。輕聲另試時讀音不同，前綴另算一次。
     - 結果必須和逐候選算整條序列相同：golden 照舊用 numpy 的逐候選分數（`packed=False`），容差 1×10⁻⁵ 不變。
     - 不跨列快取（每列重算前綴）；跨列、跨按鍵的快取是 B 片的事。
-    - 修訂二之前的逐候選算法（8 條整序列補齊成一批）2026-10-19 已量過：64 字前文時 p95 74.5 ms、RSS 峰值增量 +273.2 MiB，兩條都沒過；這是修訂三的起因。
+    - 修訂二的逐候選算法（8 條整序列補齊成一批）2026-10-19 已量過：64 字前文時 p95 74.5 ms、RSS 峰值增量 +273.2 MiB，兩條都沒過；這是修訂三的起因。
   - **量測程式**（修訂二）`core/examples/oc_score.rs`，`cargo run --release -p core --example oc_score -- …`；不改 CLI、不改引擎：
     - `--sjoc PATH --items ITEMS.tsv --out SCORES.jsonl`：每列一行 `{"i": 列號, "ll": [每個候選的 log10] 或 null}`（整列打不了是 null），規則和 `score()` 相同。給 A4 的一致性用。
     - `--sjoc PATH --items ITEMS.tsv --latency [--no-context] [--tinylm M.sjtl]`（`--no-context` 把每列的前文換成空字串）：單執行緒，每列計時一次 `score()`（給 `--tinylm` 時同一批列也計時 M 的打分），跑 3 輪，報每輪的 p50／p95 與 3 輪的中位數；p95 取排序後第 int(n × 0.95) 個，和 CLI 相同。
     - `--sjoc PATH --items ITEMS.tsv --mem --tinylm M.sjtl`（只在 macOS）：用 `task_info` 讀 `MACH_TASK_BASIC_INFO` 的 `resident_size`（RSS）與 `TASK_VM_INFO` 的 `phys_footprint`（libc 的 extern 宣告，零套件）。量三個點：程式開始、載入 0c 並打完所有列之後、再載入 M 並打完所有列之後；每個點報當下的 RSS 與 phys_footprint，另報 `MACH_TASK_BASIC_INFO` 的 `resident_size_max`（RSS 峰值，含打分時的暫時緩衝；`/code-review` 指出只量打完一列後的值會漏掉長列的峰值）。報 0c 一個的增量與兩個合計的增量，峰值另列。
-- **A4 量測**（main 做）：
+- **A4 量測**（main 做；修訂三：三項都在修訂三的 commit 上重跑，§3 的門檻一律用重跑的數字判，修訂二的數字只留在研究紀錄）：
   - **一致性**（GCP，一台 VM 上做完）：重新轉檔、`oc_ref.py --export` 產 dev302 聊天的 `ITEMS.tsv`、`oc_score --out` 產 Rust 分數、`oc_ref.py --compare … --rust SCORES.jsonl` 比對。(1) Rust 對 numpy（同一份 f32 檔）：log10 最大差；(2) Rust 對 ORT：log10 差的 p99 與最大值，以及「8 個候選裡分數最高的那個」相同的列數比例。
   - **延遲**（Mac，空閒、單執行緒；用 `VECLIB_MAXIMUM_THREADS=1` 跑，Accelerate 才不會自己開多執行緒）：不給前文是 `oc_score --sjoc … --items ITEMS.tsv --latency --no-context --tinylm data/lm/tinylm.sjtl`；給 64 字前文是 `oc_score --sjoc … --items ITEMS-64.tsv --latency --tinylm data/lm/tinylm.sjtl`。M 在同一場當基準。這是少量的單句量測，允許在 Mac 上做。
   - **大小與記憶體**（Mac）：檔案大小；`oc_score --mem` 的 RSS 與 phys_footprint 增量（映射讓兩者分家：RSS 會算映射頁，footprint 不算）。
@@ -136,3 +136,4 @@
 | plan-verifier 收尾（修訂二，第 2 次，2026-10-19） | READY | — |
 | `/code-review`（2026-10-19，786fc165） | 14 項 | 修：test_oc_ref 接進 make test-python、Rust 對 numpy 改用逐候選的 numpy、非有限值與重複字表要停、延遲加 VECLIB_MAXIMUM_THREADS=1、記憶體門檻改量峰值、對齊檢查不靠 align_to、契約拿掉主機名、convert_oc 說明、oc.rs 註解與小重構、量測程式拒絕無關旗標。延後：R8 的衝突寫進 §5，B 片接線前決定 |
 | 修訂三（2026-10-19） | A4：一致性過（Rust 對 numpy 2.33×10⁻⁵、對 ORT 4.07×10⁻⁵、300/300）；延遲 p95 74.5 ms（64 字前文）、RSS 峰值增量 +273.2 MiB，照 §4 停下 | 維護者選擇題：加前綴共用（每列的前綴只算一次、K／V 快取），門檻不動；改 §2 A3。等 plan-verifier |
+| plan-verifier（修訂三，2026-10-19） | REVISE：狀態行仍寫 A3 完成、A4 一致性已過，但那是修訂二的程式；契約沒要求在前綴共用的程式上重量一致性；狀態行指向的研究紀錄還沒有 A4 的數字 | 照最小修改：狀態寫 A3 重開、A4 三項都在修訂三的 commit 上重跑並以重跑的數字判；修訂二的 A4 數字進研究紀錄（PR #221，合併後併進這個分支）；「修訂二之前」改成「修訂二的逐候選算法」 |
