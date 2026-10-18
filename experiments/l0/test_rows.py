@@ -20,6 +20,9 @@ class Rows(unittest.TestCase):
         self.assertEqual(len(p), rows.PREFIX_KEEP)
         self.assertNotIn("|", p); self.assertNotIn("\n", p)
 
+    def test_prefix_never_starts_with_a_comment_mark(self):
+        self.assertEqual(rows.clauses_with_prefix(["#重定向，今天天氣很好"])[0], ("重定向，", "今天天氣很好"))
+
     def test_pool_context_only_within_one_document(self):
         lines = ["yodas\tvidA:0\t大家好我是老師\n", "yodas\tvidA:2\t今天來分享運勢\n", "yodas\tvidB:0\t歡迎回到頻道\n",
                  "wildchat\th1:0\t請幫我寫一封信\n", "wildchat\th1:0:1\t內容是感謝老師\n", "wildchat\th1:2\t謝謝你的幫忙\n",

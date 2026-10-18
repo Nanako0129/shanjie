@@ -40,7 +40,9 @@ def sha256(path):
 
 
 def clean_prefix(text):
-    return re.sub(r"[|\r\n]", " ", text)[-PREFIX_KEEP:]
+    """`|` and line breaks become spaces; a leading `#` is dropped (readings.py and the row readers treat `#` lines as comments:
+    34 wiki rows were lost that way on 2026-10-18)."""
+    return re.sub(r"[|\r\n]", " ", text)[-PREFIX_KEEP:].lstrip("#")
 
 
 def clauses_with_prefix(sentences):
