@@ -11,7 +11,7 @@ eval/bench/triage/<label>.json (counts only). Public sets also get a per-row num
 ~/.cache/shanjie/triage), outside the repo; private sets only ever get counts. `table` renders docs/triage.md from the JSON files.
 The holdout is never a set here. Standard library only, except that `tinylm_params` needs numpy (export_sjtl.py's reader), plus tools/bench.py's set table, reference/proto/eval.py's `lenient` and reference/proto/lm_eval.py's `kn_tag`).
 """
-import argparse, collections, concurrent.futures, importlib.util, json, multiprocessing, os, struct, subprocess, sys, tempfile
+import argparse, collections, concurrent.futures, importlib.util, json, os, struct, subprocess, sys, tempfile, threading
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -412,16 +412,7 @@ def check_same_run(old, new):
         raise SystemExit(f"triage: the existing file was made with a different {', '.join(bad)}; use another --label or delete it")
 
 
-_CELL = None
-
-
-def _run_cell_job(job):
-    return _CELL(job)
-
-
 def cmd_run(a):
-    if a.jobs > 1 and "fork" not in multiprocessing.get_all_start_methods():
-        raise SystemExit("triage: --jobs needs fork, which this platform does not have; use --cli-threads K instead")
     if a.jobs < 1 or a.cli_threads < 1:
         raise SystemExit("triage: --jobs and --cli-threads take a whole number of at least 1")
     cli = a.cli or os.path.join(ROOT, "target/release/shanjie-eval")
@@ -436,7 +427,7 @@ def cmd_run(a):
             "alpha_tau_delta": {p: list(v) for p, v in par.items()}}
     check_same_run(doc, meta)
     doc.update(meta)
-    names = a.set or SMALL_SETS
+    names = list(dict.fromkeys(a.set or SMALL_SETS))   # a repeated --set would run its cells twice
     files = {name: set_file(name, a.private_root) for name in names}
     cells = [(name, prof) for name in names for prof in PROFILES]
 
@@ -461,19 +452,29 @@ def cmd_run(a):
             got[job] = cn
             write_rows(job, per)
     else:
-        # One process per cell at a time, biggest file first; fork shares the loaded lexicon and `lenient` (not picklable). When a cell
-        # fails, the cells not yet started are cancelled, the running ones finish (their temp dirs hold sentences and are deleted by
-        # them), and the first error is raised. A worker killed by the OS makes the pool raise BrokenProcessPool instead of hanging.
-        global _CELL
-        _CELL = cell
-        order = sorted(cells, key=lambda j: -os.path.getsize(files[j[0]][0]))
-        with concurrent.futures.ProcessPoolExecutor(max_workers=min(a.jobs, len(cells)), mp_context=multiprocessing.get_context("fork")) as ex:
+        # The work is the CLI subprocess, so threads run the cells in parallel (as tools/bench.py does); `lex` and `lenient` are shared.
+        # Biggest file first. A failing cell sets `stop` before its future is done, so no cell starts after it; the cells already
+        # running finish (their temp dirs hold sentences and are deleted by them), then the first error is raised.
+        stop = threading.Event()
+
+        def guarded(job):
+            if stop.is_set():
+                return None
             try:
-                for fut in concurrent.futures.as_completed([ex.submit(_run_cell_job, j) for j in order]):
-                    job, (cn, per) = fut.result()
-                    got[job] = cn
-                    write_rows(job, per)
+                return cell(job)
             except BaseException:
+                stop.set()
+                raise
+        order = sorted(cells, key=lambda j: -os.path.getsize(files[j[0]][0]))
+        with concurrent.futures.ThreadPoolExecutor(max_workers=min(a.jobs, len(cells))) as ex:
+            try:
+                for fut in concurrent.futures.as_completed([ex.submit(guarded, j) for j in order]):
+                    if (r := fut.result()) is not None:
+                        job, (cn, per) = r
+                        got[job] = cn
+                        write_rows(job, per)
+            except BaseException:
+                stop.set()
                 ex.shutdown(wait=True, cancel_futures=True)
                 raise
     for name in names:
@@ -579,7 +580,7 @@ def main():
     r.add_argument("--private-root", default=bench.DEFAULT_PRIVATE)
     r.add_argument("--cli")
     r.add_argument("--rows-out", default=os.path.expanduser("~/.cache/shanjie/triage"))
-    r.add_argument("--jobs", type=int, default=1, help="run the (set, profile) cells in this many processes (fork; the JSON is the same)")
+    r.add_argument("--jobs", type=int, default=1, help="run the (set, profile) cells in this many threads (each runs the CLI as a subprocess; the JSON is the same)")
     r.add_argument("--cli-threads", type=int, default=1, help="passes --threads K to every CLI call (rows decoded on K threads; the outputs are the same)")
     t = sub.add_parser("table")
     t.add_argument("json", nargs="*")
