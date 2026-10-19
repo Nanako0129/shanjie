@@ -69,6 +69,15 @@ final class DefaultsAbbreviationStore: AbbreviationStore {
     }
 }
 
+/// The "中英文之間自動加空格" switch (docs/contracts/cjk-spacing.md section 2), key `cjkSpacing`; absent means off.
+@MainActor
+final class DefaultsSpacingStore: SpacingStore {
+    var spacing: Bool? {
+        get { UserDefaults.standard.object(forKey: "cjkSpacing") as? Bool }
+        set { UserDefaults.standard.set(newValue, forKey: "cjkSpacing") }
+    }
+}
+
 /// The "中英混打（實驗）" switch (docs/contracts/zhen-mixed.md section 3.2), key `english` in the same domain; absent means on (digits.md A.3.7), a saved value wins.
 @MainActor
 final class DefaultsEnglishStore: EnglishStore {
@@ -195,7 +204,7 @@ func runServer() -> Never {
         // 可省略韻母 does not ship in v0.4.0 (user, 2026-10-10); see Shell.showsAbbreviation. Flip to true to offer it again.
         // This argument alone hides it (Shell's default true is for the tests) and the app target has no tests: the release
         // device check confirms the menu has no 可省略韻母.
-        showsAbbreviation: false)
+        showsAbbreviation: false, spacingStore: DefaultsSpacingStore())
     // about-update section 2: the state always exists (the 關於 page shows the version); Sparkle starts only inside the .app.
     let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0.0"
     let updates = Updates(store: DefaultsUpdateStore(), version: version)

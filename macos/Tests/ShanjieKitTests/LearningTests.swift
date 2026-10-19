@@ -19,7 +19,7 @@ final class LearningTests: XCTestCase {
 
     private func makeShell(gate: Gate = Gate(), learning: URL? = nil, dialogs: FakeDialogs = FakeDialogs()) -> Shell {
         let shell = Shell(resources: resources, panel: FakePanel(), isSecureInput: { gate.secure },
-                          layoutStore: MemoryLayoutStore(), learningDirectory: learning, dialogs: dialogs, demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), englishStore: MemoryEnglishStore(), acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore())
+                          layoutStore: MemoryLayoutStore(), learningDirectory: learning, dialogs: dialogs, demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), englishStore: MemoryEnglishStore(), acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore(), spacingStore: MemorySpacingStore())
         XCTAssertNotNil(shell.engine)
         return shell
     }
@@ -35,17 +35,17 @@ final class LearningTests: XCTestCase {
         for (before, expected) in cases {
             c.client.before = before
             XCTAssertEqual(c.client.markedRange().location, NSNotFound, "no marked text: {NSNotFound, 0}")
-            XCTAssertEqual(c.session.leftContext(), expected, "case \(cases.firstIndex { $0.0 == before }!)")
+            XCTAssertEqual(c.session.leftContext().han, expected, "case \(cases.firstIndex { $0.0 == before }!)")
         }
     }
 
     func testRangeIsAtMost32UnitsBeforeTheInsertion() {
         let c = Controller(makeShell())
         c.client.before = String(repeating: "中", count: 10_000)
-        XCTAssertEqual(c.session.leftContext(), "中中")
+        XCTAssertEqual(c.session.leftContext().han, "中中")
         XCTAssertEqual(c.client.requested, [NSRange(location: 10_000 - 32, length: 32)])
         c.client.before = "ab中"
-        XCTAssertEqual(c.session.leftContext(), "中")
+        XCTAssertEqual(c.session.leftContext().han, "中")
         XCTAssertEqual(c.client.requested.last, NSRange(location: 0, length: 3))
         XCTAssertTrue(c.client.requested.allSatisfy { $0.length <= LeftContext.maxUTF16 })
     }
@@ -54,10 +54,10 @@ final class LearningTests: XCTestCase {
         let c = Controller(makeShell())
         c.client.before = "ab\t中"
         c.client.selectedOverride = NSRange(location: NSNotFound, length: 0)
-        XCTAssertNil(c.session.leftContext())
+        XCTAssertNil(c.session.leftContext().han)
         c.client.selectedOverride = nil
         c.client.markedOverride = NSRange(location: 3, length: 1)
-        XCTAssertNil(c.session.leftContext())
+        XCTAssertNil(c.session.leftContext().han)
         XCTAssertEqual(c.client.requested, [], "nothing read in either case")
     }
 
@@ -69,7 +69,7 @@ final class LearningTests: XCTestCase {
         for marked in [NSRange(location: 4, length: 0), NSRange(location: 0, length: 0),
                        NSRange(location: NSNotFound, length: NSNotFound)] {
             c.client.markedOverride = marked
-            XCTAssertEqual(c.session.leftContext(), "中", "\(marked)")
+            XCTAssertEqual(c.session.leftContext().han, "中", "\(marked)")
         }
     }
 
@@ -178,7 +178,7 @@ final class LearningTests: XCTestCase {
         let dialogs = FakeDialogs()
         let shell = Shell(resources: resources.appendingPathComponent("missing"), panel: FakePanel(),
                           isSecureInput: { false }, layoutStore: MemoryLayoutStore(),
-                          learningDirectory: TestLearning.directory(), dialogs: dialogs, demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), englishStore: MemoryEnglishStore(), acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore())
+                          learningDirectory: TestLearning.directory(), dialogs: dialogs, demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), englishStore: MemoryEnglishStore(), acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore(), spacingStore: MemorySpacingStore())
         XCTAssertNil(shell.engine)
         let c = Controller(shell)
         c.session.perform(.clear)

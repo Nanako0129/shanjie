@@ -24,7 +24,7 @@
   - `Shanjie`（executable）：`IMKInputController` 子類別、`main.swift`、`install` 與 `--selftest` 的參數處理、TIS 註冊。只有這個 target 連結 Carbon 的 TIS。
   - `ShanjieKitTests`（XCTest）。
   - 連結 `libcore.a` 與 `core/include/shanjie.h` 的方式（module map 等）由 executor 決定，寫進 §11。
-- `scripts/build-app.sh`：`cargo build --release --locked -p core` → `swift build -c release`（在 `macos/`）→ 組出 `build/善解輸入法.app` → **ad-hoc 簽章**：`codesign --force --sign - --options runtime`，不給任何 entitlements 檔。〔2026-10-16 修訂，`about-update.md`：App 內嵌 `Sparkle.framework` 之後，ad-hoc 建置由內而外簽章、**不加** `--options runtime`：加了的話 library validation 拒絕載入 ad-hoc 的 framework（dyld：「mapping process and mapped file (non-platform) have different Team IDs」，`--selftest` 實測），ad-hoc 的程式沒有 Team ID 可以相符。出貨的 Developer ID 版本由 `release.yml` 對四個程式碼位置都加 runtime，`verify()` 缺一就失敗。〕本機與 CI 都用這支；agent 執行它不碰任何鑰匙圈。不安裝、不啟動 app。
+- `scripts/build-app.sh`：`cargo build --release --locked -p core` → `swift build -c release`（在 `macos/`）→ 組出 `build/善解輸入法.app` → **ad-hoc 簽章**：`codesign --force --sign - --options runtime`，不給任何 entitlements 檔。〔2026-10-16 修訂，`about-update.md`：App 內嵌 `Sparkle.framework` 之後，ad-hoc 建置由內而外簽章、**不加** `--options runtime`：加了的話 library validation 拒絕載入 ad-hoc 的 framework（dyld：「mapping process and mapped file (non-platform) have different Team IDs」，`--selftest` 實測），ad-hoc 的程式沒有 Team ID 可以相符。出貨的 Developer ID 版本由 `release.yml` 對四個程式碼位置都加 runtime，`verify()` 缺一就失敗。〕〔2026-10-19 修訂，`app-sandbox.md` §2.1、§2.3、§2.8：App 本身改帶 App 沙盒的四個 entitlements（只有 App 用 `--entitlements`，Sparkle 的程式碼位置沒有），Sparkle 保留 `Installer.xpc`、程式碼位置變成五個；資料夾與名稱依 bundle ID，預設是開發版 ID 的 `善解（開發版）.app`。〕本機與 CI 都用這支；agent 執行它不碰任何鑰匙圈。不安裝、不啟動 app。
 - `善解輸入法.app/Contents`：
   - `MacOS/shanjie`
   - `Resources/`：`mcbpmf-data.txt`、`overlay-add.tsv`、`sandhi-add.tsv`（從 `data/lexicon/` 複製；`sandhi-add.tsv` 是 S2r 加入的）、`packs/`（動漫與遊戲詞包：`acg-add.tsv`、`acg-sources.tsv`、`acg.json`，從 `data/packs/` 複製，建置輸入不進 App；`docs/contracts/acg-pack.md` A.2）、`bigram.sjlm`（從 `data/lm/` 複製；不存在、或 SHA-256 和 repo 追蹤的 `data/bigram.sjlm.sha256` 不符，就建置失敗，訊息說明可從 `model-v1` Release 下載）、選單列圖示、`zh-Hant.lproj/InfoPlist.strings`。
@@ -34,13 +34,15 @@
 - 選單列圖示：單色 template 圖，「解」字加圓角方框（呼應網站的印章），由腳本用 CoreText 產生 TIFF，不下載字型或圖。
 - App 圖示（2026-10-17，`docs/contracts/app-icon.md`）：朱紅漸層底、白色的圓角框與「解」各是一層玻璃（系統畫出來是透著朱紅的乳白），原始檔 `packaging/AppIcon.icon/`（Icon Composer 文件），建置時 `actool` 編成 `Resources/Assets.car` 與 `AppIcon.icns`，Info.plist 的 `CFBundleIconName`／`CFBundleIconFile` 是 `AppIcon`；安裝程式帶同一個。
 - **entitlements：一律沒有**（不提供 entitlements 檔，所以也不會有 `get-task-allow` 或 `disable-library-validation`）；hardened runtime 一定要開（R9；〔2026-10-16〕指出貨的 Developer ID 版本，本機與 CI 的 ad-hoc 建置見上面的修訂）。
+  - **2026-10-19 修訂（`app-sandbox.md` §2.1）**：輸入法本體改成**恰好四個** entitlements：`com.apple.security.app-sandbox`、`com.apple.security.network.client`（只為了 Sparkle）、mach-register 例外 `[<bundle ID>_Connection]`（等於 `InputMethodConnectionName`）、mach-lookup 例外 `[<bundle ID>-spks, <bundle ID>-spki]`（Sparkle 的安裝服務）。仍然沒有 `get-task-allow` 或 `disable-library-validation`；`scripts/check-entitlements.sh` 整份比對，多一個鍵就失敗。Sparkle 的程式碼位置與安裝程式仍然沒有任何 entitlements。沙盒是縱深防禦，不是硬邊界（`app-sandbox.md` §2.8）。
 
 ### 2.1 本機建置與測試流程（仿 syrtis，使用者 2026-10-03 要求）
 
-- repo 根目錄的 `Makefile` 是本機入口：`rust`、`build`、`test`（`cargo test --release --locked`＋`swift test`）、`bundle`（`build/善解輸入法.app`，出貨 bundle ID）、`selftest-bundled`、`clean-bundle`。
+- repo 根目錄的 `Makefile` 是本機入口：`rust`、`build`、`test`（`cargo test --release --locked`＋`swift test`）、`bundle`（`build/善解輸入法.app`，出貨 bundle ID；〔2026-10-19，`app-sandbox.md` §2.3〕不帶參數時是開發版 ID 的 `build/善解（開發版）.app`，出貨 ID 要 `make bundle BUNDLE_ID=com.nyanako.inputmethod.shanjie`）、`selftest-bundled`、`clean-bundle`。
 - **過期防護**（SwiftPM 不追蹤這兩樣）：`target/release/libcore.a` 比 Swift 執行檔新，就刪掉執行檔強迫重新連結；`core/include/shanjie.h` 比較新，就刪掉 module cache 與匯入它的 target 的建置產物。不加的話，Swift 沒改時會沿用舊的執行檔，悄悄包進舊的核心。
-- `scripts/build-app.sh` 有 `BUNDLE_ID`（預設 `com.nyanako.inputmethod.shanjie`）與 `OUT_DIR`（預設 `build`）兩個環境變數；輸入模式的 ID 由 `BUNDLE_ID` 衍生；組裝前先 `touch "$OUT_DIR/.metadata_never_index"`，避免 Spotlight 與 LaunchServices 登記本機的 bundle（對輸入法也避免系統依 bundle ID 啟動到 `build/` 裡那份）。
+- `scripts/build-app.sh` 有 `BUNDLE_ID`（預設 `com.nyanako.inputmethod.shanjie`；**2026-10-19 起預設 `com.nyanako.inputmethod.shanjie.dev`**，正式 ID 要明確傳，`SHANJIE_RELEASE_BUILD=1` 只接受正式 ID，`app-sandbox.md` §2.3）與 `OUT_DIR`（預設 `build`）兩個環境變數；輸入模式的 ID 由 `BUNDLE_ID` 衍生；組裝前先 `touch "$OUT_DIR/.metadata_never_index"`，避免 Spotlight 與 LaunchServices 登記本機的 bundle（對輸入法也避免系統依 bundle ID 啟動到 `build/` 裡那份）。
 - **bundled selftest**：`make selftest-bundled` 在 `build/selftest/` 組一份 release bundle 再跑 `--selftest`。本機預設用拋棄式的 `com.nyanako.inputmethod.shanjie.selftest`（不碰正式版的偏好，但 gate 較弱）；CI 用 `make selftest-bundled SELFTEST_BUNDLE_ID=`（空值＝出貨 ID，runner 是拋棄式的）。
+  - **2026-10-19 修訂（`app-sandbox.md` §2.3、§2.6）**：一律用沒有移轉清單的拋棄式 ID，bundle 在 `build/selftest/善解（開發版）.app`；CI 每次用 `…selftest-$GITHUB_RUN_ID`，前後檢查那個 ID 的 container「之前沒有、之後有」。正式 ID 的 selftest 只在 CI 的移轉測試（`scripts/test-sandbox-migration.sh`）與 `check-app.sh` 跑。
 - **本機 bundle 邊界**：`build/` 裡的 bundle 不得啟動或註冊；實際使用與驗收以 `~/Library/Input Methods/善解輸入法.app` 為準。用完以 `make clean-bundle`（`lsregister -u` 後刪除）清掉。
 - `docs/verification.md` 記錄本機 gate、CI 跑什麼、selftest 的 ID 取捨與清理指令。
 
@@ -49,10 +51,12 @@
 - **模型雜湊只有一份**：`data/bigram.sjlm.sha256`（進 git）。`build-app.sh`、`ci.yml` 的兩個 job、`release.yml` 都讀它，不得各自寫死（原本 `ci.yml` 的 `LM_SHA256` 環境變數已移除）。
 - **Rust 工具鏈**：所有會建 `libcore.a` 的 job（`ci.yml` 的 `core` 與 `shell`、`release.yml` 的 `build`）都用和 `core` job 相同的 `dtolnay/rust-toolchain` 步驟，固定 1.97.1。
 - **`ci.yml`**（已在 main）加一個 `shell` 工作：下載 `model-v1` 的模型並比對雜湊 → `scripts/build-app.sh` → `swift test`（`macos/`）→ `build/善解輸入法.app/Contents/MacOS/shanjie --selftest` → §10 的驗收 2、3、6。
+  - **2026-10-19 修訂**：`shell` 工作的步驟與順序改照 `app-sandbox.md` §2.6（三種 ID 的組建、本機防呆、移轉測試、拒絕測試、selftest、驗收、entitlements 與 Sparkle 的突變、安裝程式）。
 - **`release.yml`**（新增，仿 syrtis 的 `release.yml`）：推 `v*` tag 時：
   1. **gate**：要求這個 commit 在 main 上 `ci.yml` 的 run 全綠（善解只有 `ci.yml`，不得照抄 syrtis 的 `ci-release.yml`），否則拒絕。
   2. **build**（`xcode-27`）：先從 `model-v1` 下載 `bigram.sjlm` 並以 `shasum -a 256 -c data/bigram.sjlm.sha256` 比對，再跑 `scripts/build-app.sh`，把 ad-hoc 簽章的 app 打包成 artifact。
   3. **sign**（`environment: release`，只接受 `refs/tags/v*`）：從 secrets `DEVELOPER_ID_P12_BASE64`、`DEVELOPER_ID_P12_PASSWORD`、`NOTARY_KEY_P8` 與 variables `NOTARY_KEY_ID`、`NOTARY_ISSUER_ID`、`APPLE_TEAM_ID` 建**一次性的鑰匙圈**（隨機密碼、結束時刪除），用 `Developer ID Application`（Team `2LJ882GPY8`）、`--options runtime --timestamp` 簽章，`notarytool submit --wait` 公證，`stapler staple`；再驗證：`codesign --verify --strict --deep`、`spctl -a -t exec -vv`、entitlements 為空、flags 含 `runtime`、Team ID 相符。缺任何一項材料就失敗，不得退回 ad-hoc。
+     - **2026-10-19 修訂（`app-sandbox.md` §2.4）**：build 明確傳 `BUNDLE_ID=com.nyanako.inputmethod.shanjie`；sign 由內而外重簽（`Installer.xpc`、`Autoupdate`、`Updater.app`、framework 不帶 entitlements，最後 App 用 workflow 裡以字面值寫的四個 entitlements），任何一步都不用 `--deep` 簽；`verify()` 依 bundle 給預期值：輸入法的 bundle ID 是正式 ID、entitlements 整份等於那四個鍵（和 `scripts/check-entitlements.sh` 相同的比對，寫在 workflow 裡）；安裝程式的 bundle ID 是 `com.nyanako.shanjie.installer`、沒有任何 entitlements。dry run 的兩個 zip 留在一天的 `signed` artifact。
   4. **publish**（只在 `v*` tag）：建立 GitHub Release，附件 `shanjie-<版本>.zip`（`ditto -c -k --keepParent` 打包公證後的 app，app 內含 `Resources/LICENSES/`）與它的 SHA-256。
 - **試跑**：`workflow_dispatch`（只接受 `main`）跑 gate、build、sign 與驗證，不 publish；讓使用者設好材料後先確認簽章與公證可行，再推 tag。
 - 簽章材料由**使用者**放進 repo 的 `release` environment（值和 syrtis 用的相同）；agent 不讀、不寫、不轉貼任何 secret。variables 可由 agent 從 syrtis 複製（不是秘密），但要先問。
@@ -61,6 +65,7 @@
 ## 4. 安裝（由使用者執行）
 
 - `scripts/install-ime.sh <善解輸入法.app 的路徑>`（通常是解壓後的 Release 附件；也接受 `build/善解輸入法.app` 自己建的 ad-hoc 版）：
+  - **2026-10-19 修訂（`app-sandbox.md` §2.3、§5）**：目的地改依 bundle ID（正式 ID → `善解輸入法.app`，開發版 ID → `善解（開發版）.app`，其他 ID 拒絕），下面「固定為字面路徑」與「接受自己建的 ad-hoc 版」都已被取代。正式 ID 只接受本專案 Developer ID（`Developer ID Application`、Team `2LJ882GPY8`，`codesign -dv` 讀不到簽章也拒絕）簽章的版本，在複製任何東西之前檢查；只有 files-only 測試模式跳過。自己建的版本一律用開發版 ID（`make bundle` → `build/善解（開發版）.app`）。正式 ID 的本機組建不要在維護者的機器上執行或安裝：它第一次啟動就會建立正式版的 container、把學習資料搬進去。
   - `#!/bin/bash`、`set -euo pipefail`；`$HOME` 為空就中止；不用 sudo（R9）。
   - 目的地固定為字面路徑 `"$HOME/Library/Input Methods/善解輸入法.app"`。腳本只刪除或搬移 `~/Library/Input Methods` 裡的四個位置（§13.3）：這個目的地、舊名稱 `shanjie.app`、這次執行用 `mktemp` 建的暫存資料夾、保留上一版的 `.shanjie-previous`。輔助資料夾的名稱不是 `.app`（暫存資料夾在複製期間裡面有一個 `善解輸入法.app`）。不要同時執行兩次安裝（未加鎖）；被直接砍掉的執行可能留下 `.shanjie-staging-*`，不會自動清（同時執行的另一份看起來一樣），要手動刪。**HOME 不是這個帳號真正的家目錄時，除非設了 `SHANJIE_INSTALL_FILES_ONLY=1`，腳本一開始就拒絕執行**；files-only 模式完全不呼叫 lsregister、pkill 或註冊。
   - 順序（修訂 13 與 PR #5 審查後）：`ditto` 到暫存資料夾（複製失敗時什麼都不放上去）→ 刪掉更早保留的 `.shanjie-previous`（先 `chmod -R u+w`）→ 舊版（`善解輸入法.app`，沒有時是舊名稱 `shanjie.app`）**先改名**為 `.shanjie-previous`、成功後才 `lsregister -u`（改名失敗時舊版仍維持登記）→ 新版改名就位 → 新舊名稱並存時刪除舊名稱那份（失敗只警告）→ 新版 `lsregister -f` → 結束舊行程並等它退出 → 執行已安裝那一份的 `install`（**2026-10-09 起只在系統還不認得或有舊模式時註冊**，見 `installer-v2.md` §9；原文：一律重新註冊，見 §13.3）。`trap` 只在舊版**確實已改名移開**之後、新版就位之前被中斷時，才把新版放上去，並印出只重跑 `lsregister -f` 與 `install` 的指令（不要重跑整個腳本）。其餘描述（HOME 檢查、files-only、測試、未實測項目）見 §13.3 與 §11。
@@ -91,7 +96,7 @@
 ## 7. 輸出套用
 
 - **回傳碼非 0**：先 `shanjie_engine_reset(1)` 讓核心也丟棄組字（核心只在碼 4 時自己丟棄，碼 1、2 不會），再 `setMarkedText("")`、隱藏候選窗、清掉候選陣列，回傳 `false`；不記錄按鍵內容。
-- `commit` 非空：`insertText(commit, replacementRange: NSRange(location: NSNotFound, length: 0))`。
+- `commit` 非空：`insertText(commit, replacementRange: NSRange(location: NSNotFound, length: 0))`。「中英文之間自動加空格」開著時（預設關），先把 `commit` 交給 `CJKSpacing.apply` 再送出（`cjk-spacing.md`）。
 - `preedit`：非空時 `setMarkedText`，整段單線底線（中英混打的英文段開著時，那一段改用粗底線，見 `zhen-inline.md` §1.3f），選取範圍 `NSRange(location: cursor_utf16, length: 0)`；變成空字串時用空字串清掉組字。
 - `handled = 0`：先套用 commit 與 preedit，再回傳 `false` 讓 App 處理這個鍵。
 - 收到輸出後在同一個呼叫裡把字串複製成 Swift `String`，立刻 `shanjie_output_free`。
@@ -117,13 +122,14 @@
   - 再用 `Resources/packs`（預設就是開）建一個帶詞包的引擎，標準排列、`set_profile(0)` 打 `ㄉㄧㄥˋ ㄩㄢˊ ㄊㄤˊ`，等於 `碇源堂`（不帶詞包時聊天設定是 `定元堂`）才 exit 0；詞包缺檔、壞檔、或沒有生效都 exit 非 0（`acg-pack.md` A.2）。
   - 再在帶詞包的引擎載入 `Resources/english-words.txt`（回傳 0）、開中英混打，標準排列打 `rust` 加空白鍵，英文窗要打開、項目依序是 `rust`、`Rust`、`RUST` 才 exit 0，之後把開關關回去；單字表缺檔、被核心拒絕、或英文窗沒打開都 exit 非 0（`zhen-mixed.md` §3.2）。
   - 不得呼叫 TIS、不得寫任何檔案或 UserDefaults、不得建立 NSApplication 或 IMK server。
+  - **2026-10-19 修訂（`app-sandbox.md` §2.3）**：selftest 本身仍然不寫任何檔案或 UserDefaults，但 bundle 在沙盒裡，第一次執行時系統會建立那個 bundle ID 的 container；正式 ID 的組建第一次執行時，系統還會把學習資料與偏好設定搬進去。
 
 ## 10. 驗收
 
 **agent 可做的（executor 做、verifier 重做；CI 也跑 1–6）：**
 1. `scripts/build-app.sh` 成功，產出 `build/善解輸入法.app`。
 2. `plutil -lint` 通過；兩個輸入模式、bundle ID、`InputMethodConnectionName`、`InputMethodServerControllerClass` 都在；`Resources/` 有四個資料檔（S2r 加入 `sandhi-add.tsv`）、`packs/`（`acg-add.tsv`、`acg-sources.tsv`、`acg.json`，`acg.json` 裡的 SHA-256 與實際檔案相符）、圖示與 `LICENSES/`（含 Apache-2.0、小麥 MIT、`data.md`、CC BY-SA 署名說明）。
-3. `codesign --verify --strict --deep` 通過；`codesign -d --entitlements - build/善解輸入法.app` 的輸出沒有任何 entitlement；`codesign -dv` 的 flags 含 `runtime`。〔2026-10-16 修訂：ad-hoc 建置不再檢查 `runtime`（見 §2），改由 `release.yml` 的 `verify()` 對出貨版本檢查；另加 `about-update.md` §3.2 的 Sparkle 檢查。〕
+3. `codesign --verify --strict --deep` 通過；`codesign -d --entitlements - build/善解輸入法.app` 的輸出沒有任何 entitlement；`codesign -dv` 的 flags 含 `runtime`。〔2026-10-16 修訂：ad-hoc 建置不再檢查 `runtime`（見 §2），改由 `release.yml` 的 `verify()` 對出貨版本檢查；另加 `about-update.md` §3.2 的 Sparkle 檢查。〕〔2026-10-19 起改為 `scripts/check-entitlements.sh` 通過：恰好是 App 沙盒的四個 entitlements；`XPCServices` 只有 `Installer.xpc`，`app-sandbox.md` §2.1、§2.8。〕
 4. Swift 測試（`swift test`，在 `macos/`），全部經由真正的 C 核心（`Resources` 等同的 `data/lexicon` 與 `data/lm/bigram.sjlm`；測試資料目錄由 `Support.swift` 的 `TestData.files` 列出，含 `sandhi-add.tsv`；缺檔就失敗並說明怎麼取得）：
    - 按鍵翻譯：ANSI 表每個鍵、兩種排列的 37 個注音鍵與 5 個聲調鍵、各特殊鍵、修飾鍵位元、`nil` 事件。
    - 假 client：打「你好」＋Enter → `insertText("你好")` 且組字清空；打 ㄋㄧˇ＋空白 → 候選顯示（2–9 個，因為接著要按 2）、按 2 → 組字更新、候選隱藏；帶 Caps Lock 的鍵 → 回傳 false 且輸出不變；組字中按表外的鍵 → 先送出再回傳 false；`commitComposition` → 送出並清空；回傳碼非 0 的路徑 → 組字清空、候選隱藏、回傳 false。
@@ -144,6 +150,7 @@
    - 斷言：擷取結果不含任何負向標記（送出的漢字、它的注音 preedit、按鍵字元序列、bundle ID 標記、路徑標記），而且殼的 subsystem 輸出裡沒有 `<private>`（殼只准記靜態字串與回傳碼）。
    - verifier 在殼的輸出套用路徑暫時加一行 `logger.debug("\(commit, privacy: .public)")` 時，這個測試必須失敗；改成 `.private` 時，`<private>` 斷言必須失敗；改成 `NSLog("%@", commit)` 時也必須失敗。
 6. `make selftest-bundled` 與 `build/善解輸入法.app/Contents/MacOS/shanjie --selftest` 都 exit 0（自測在不帶詞包之外，也用 `Resources/packs` 建一個帶詞包的引擎並要求打出詞包詞「碇源堂」，詞包缺檔或壞檔就失敗）；`make` 的過期防護有效（只動 `core/` 後 `make build`，執行檔會重新連結）；執行前後 `~/Library/Input Methods/`、`~/Library/Preferences/com.nyanako.inputmethod.shanjie.plist`、TIS 的輸入法清單都沒有變化。verifier 把 `build/善解輸入法.app/Contents/Resources/bigram.sjlm` 改名後再跑，必須 exit 非 0；還原後 exit 0。
+   - **2026-10-19 修訂（`app-sandbox.md` §2.3、§2.6、§5）**：本機只跑拋棄式 ID 的 `make selftest-bundled`（bundle 在 `build/selftest/善解（開發版）.app`，改名 `bigram.sjlm` 的反向檢查也用這一份）；selftest 第一次執行會建立那個 ID 的 `~/Library/Containers/<ID>`，這是預期的，不算在「沒有變化」裡。不在維護者的機器上執行 `build/善解輸入法.app` 的 `--selftest`：正式 ID 的 selftest 只在 CI 跑（移轉測試與 `check-app.sh`）。在 App 沙盒那一片的 CI 證明「沒有移轉清單就不搬」之前，拋棄式 ID 的也不在本機跑（§5）。
 7. 核心的 `cargo test` 與 PR #1 的 CI 步驟照舊全綠。
 8. `release.yml`：在 PR 上無法真正簽章，所以 agent 只驗證結構：gate 只等 `ci.yml`；有 `workflow_dispatch` 試跑（不 publish）；build 工作用固定的 Rust 1.97.1，並在 `build-app.sh` 之前下載模型、以 `data/bigram.sjlm.sha256` 比對；sign 工作的 `environment: release`、只接受 `refs/tags/v*`、缺材料就失敗的檢查、一次性鑰匙圈在結束時刪除、驗證步驟齊全。第一次真正的發布由使用者推 tag 觸發（見下）。
 

@@ -164,17 +164,44 @@ public enum Registration {
             return result
         }
 
-        // Carry over an ETen-only setup from the two-mode versions, unless a layout was chosen.
-        let enabled = { (id: String) in sources.contains { inputModeID($0) == id && isEnabled($0) } }
-        if defaults.string(forKey: "layout") == nil,
-           enabled("\(bundleID).eten"), !enabled("\(bundleID).standard") {
-            defaults.set("eten", forKey: "layout")
-        }
+        // Kept for `shanjie install`, which runs sandboxed and so writes the container's domain; the
+        // installer also calls it before the files are swapped (app-sandbox.md section 2.7).
+        carryOverEten(enabledModeIDs: Set(sources.filter(isEnabled).compactMap(inputModeID)), bundleID: bundleID, defaults: defaults)
         let legacy: Set<String> = ["\(bundleID).standard", "\(bundleID).eten"]
         for source in sources where inputModeID(source).map(legacy.contains) ?? false {
             if TISDisableInputSource(source) != noErr { result.legacyDisableFailed = true }
         }
         return result
+    }
+
+    /// Carry over an ETen-only setup from the two-mode versions: no layout chosen yet, and of the two
+    /// earlier modes only `.eten` is enabled.
+    public static func carriesOverEten(layout: String?, enabledModeIDs: Set<String>, bundleID: String) -> Bool {
+        layout == nil && enabledModeIDs.contains("\(bundleID).eten") && !enabledModeIDs.contains("\(bundleID).standard")
+    }
+
+    /// Writes `layout=eten` when `carriesOverEten`; never rewrites a chosen layout.
+    /// app-sandbox.md section 2.7: the installer calls this before the files are swapped, with the
+    /// state it read at its start, while the unsandboxed old version is installed and the container
+    /// does not exist yet, so the first sandboxed launch moves the value along with the preferences.
+    /// `synchronize` hands the value to cfprefsd; the installer then waits until the file on disk
+    /// holds it (`InstallerFlow.copy`).
+    /// When the container already exists (upgrading from a sandboxed version), a value written here
+    /// from outside is never read: the input method reads its container's domain. Nothing is done
+    /// about it: by then the input method already has its own `layout`, or the user has used the
+    /// sandboxed version, so there is nothing left to carry over.
+    /// Returns whether it wrote the value.
+    @discardableResult
+    public static func carryOverEten(enabledModeIDs: Set<String>, bundleID: String, defaults: UserDefaults) -> Bool {
+        guard carriesOverEten(layout: defaults.string(forKey: "layout"), enabledModeIDs: enabledModeIDs, bundleID: bundleID) else { return false }
+        defaults.set("eten", forKey: "layout")
+        defaults.synchronize()
+        return true
+    }
+
+    /// The input mode IDs of this bundle ID that are enabled (read only).
+    public static func enabledModeIDs(bundleID: String) -> Set<String> {
+        Set(inputSources(bundleID: bundleID, includeAllInstalled: true).filter(isEnabled).compactMap(inputModeID))
     }
 
     /// Measured 2026-10-04: before the first log out after registration, both enable calls return

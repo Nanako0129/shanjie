@@ -13,10 +13,11 @@ let package = Package(
     name: "Shanjie",
     platforms: [.macOS("26.0")],
     // The first external dependency (docs/contracts/about-update.md section 2): Sparkle, pinned exactly. 2.9.0 added signed
-    // feeds and 2.9.2 fixed two security issues. The official prebuilt framework, whose binary is pinned by the checksum in
+    // feeds, 2.9.2 fixed two security issues and 2.9.5 and 2.9.6 three more (2.10.0: docs/contracts/app-sandbox.md section
+    // 2.8, where a sandboxed input method drives Sparkle's installer outside the sandbox). The official prebuilt framework, whose binary is pinned by the checksum in
     // Sparkle's own Package.swift; Package.resolved is committed and every build resolves with --force-resolved-versions.
     dependencies: [
-        .package(url: "https://github.com/sparkle-project/Sparkle", exact: "2.9.3"),
+        .package(url: "https://github.com/sparkle-project/Sparkle", exact: "2.10.0"),
     ],
     targets: [
         // Header-only module over core/include/shanjie.h; see Sources/CShanjie/module.modulemap.
@@ -41,9 +42,11 @@ let package = Package(
             // the Swift 6 mode, so the main-thread requirement is checked at run time instead
             // (MainActor.assumeIsolated). ShanjieKit and the tests stay in the Swift 6 mode.
             swiftSettings: [.swiftLanguageMode(.v5)],
-            // Sparkle.framework sits in Contents/Frameworks of the bundle (scripts/build-app.sh).
+            // Sparkle.framework sits in Contents/Frameworks/Updater of the bundle (scripts/build-app.sh, app-sandbox.md
+            // section 2.8). Contents/Frameworks itself is no longer searched, so a framework left there fails at launch;
+            // SwiftPM adds @loader_path (Contents/MacOS) on its own, where the build puts nothing but the executable.
             linkerSettings: [.linkedFramework("Carbon"), .linkedFramework("InputMethodKit"),
-                             .unsafeFlags(["-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks"])]
+                             .unsafeFlags(["-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks/Updater"])]
         ),
         // 安裝善解輸入法.app; AppKit only, the window is built in code.
         .executableTarget(

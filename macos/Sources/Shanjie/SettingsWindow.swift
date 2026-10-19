@@ -212,6 +212,10 @@ struct SettingsForm: View {
                 Label(p.title, systemImage: p.symbol)
             }
             .listStyle(.sidebar)
+            // Hidden like the form's, so the window's glass shows through both columns: with the list's own sidebar
+            // background the two read as a different tint and opacity (maintainer's screenshots, 2026-10-19; checked in a
+            // VM, the device check is app-sandbox.md section 4.3 B).
+            .scrollContentBackground(.hidden)
             .frame(width: Self.sidebarWidth)
             // A fresh form per page, so a page opens at its top rather than at the previous page's scroll offset.
             SettingsPageForm(page: page, model: model, appLabels: appLabels)
@@ -295,6 +299,10 @@ struct SettingsPageForm: View {
                     }
                     .pickerStyle(.segmented)
                     .disabled(!model.englishInlineEnabled)
+                    // cjk-spacing section 2: always enabled, independent of the 中英混打 switch.
+                    Toggle(MenuEntry.Text.spacing, isOn: Binding(get: { model.spacing }, set: { model.setSpacing($0) }))
+                    Text(MenuEntry.Text.spacingNote)
+                        .font(.caption).foregroundStyle(.secondary)
                     Toggle(MenuEntry.Text.demote, isOn: Binding(get: { model.demote }, set: { model.setDemote($0) }))
                     // Right after the toggle that greys it. Greyed while 避免把敏感字詞排在前面 is off or the small model did not load,
                     // like the menu item: the core makes no rerank job then (s7c2b section 2.3).

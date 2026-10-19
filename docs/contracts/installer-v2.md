@@ -235,7 +235,7 @@
    - fresh verifier 讀 `Controller`：每一條在接受後到 `showTry` 的路都經過 `Registration.run`；「重新檢查」在未接受時不會走到任何 TIS 修改函式。
 2. 實機（使用者操作，main 準備）：
    - 用新安裝程式「重新安裝」：試打能打字；回到原本的 App 按 Caps Lock，能切換。
-   - 再用 `scripts/install-ime.sh` 裝一次：Caps Lock 仍能切換；輸出有「registration skipped」。要裝的 bundle 由本分支 `make bundle` 組出（`build/善解輸入法.app`），不是 0.3.0 正式版，因為 0.3.0 的 `install` 早於 §9，每次都會註冊。
+   - 再用 `scripts/install-ime.sh` 裝一次：Caps Lock 仍能切換；輸出有「registration skipped」。要裝的 bundle 由本分支 `make bundle` 組出（`build/善解輸入法.app`），不是 0.3.0 正式版，因為 0.3.0 的 `install` 早於 §9，每次都會註冊。〔2026-10-19，`app-sandbox.md` §2.3：之後 `install-ime.sh` 拒絕沒有 Developer ID 簽章的正式 ID 組建；要重做這一項，用開發版 ID 的 `make bundle`（`build/善解（開發版）.app`），不要在本機安裝正式 ID 的組建。〕
 3. **虛擬機全新安裝**，取代 §3 第 5 項的步驟與通過條件：
    - 安裝後如果走到「啟用」步驟：按「打開輸入方式設定」，照三步加入，再按「重新檢查」。
    - 通過：到試打頁並打出中文，目前的輸入方式是 `com.nyanako.inputmethod.shanjie.zhuyin`。
