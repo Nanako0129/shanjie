@@ -277,7 +277,7 @@ impl Lm {
                 // SAFETY: nothing rewrites this file in place while an `Lm` has it mapped. The App's Resources and a user's data/lm are
                 // replaced only by rename (scripts/install-ime.sh, the installer, the Homebrew cask), and tools/build_trigram.py writes a
                 // temp file and renames it onto the target.
-                let map = unsafe { Mapped::open(&side)? };
+                let map = unsafe { Mapped::open(&side) }.map_err(|()| LmError::TriTable)?;
                 lm.add_tri_bytes(TriBytes::Map(map))?;
             }
         }
