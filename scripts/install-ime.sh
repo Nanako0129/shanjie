@@ -21,6 +21,13 @@
 # already exists). Sparkle never downgrades, and neither does the installer (InstallerPlan.decide): going back takes this
 # script, or removing the installed copy first. To move the data back: docs/sandbox-restore.md.
 #
+# docs/contracts/system-install.md: the installer can also put the shipping ID into /Library/Input Methods ("This Mac").
+# This script never installs there. It refuses to put the shipping ID into ~/Library while /Library holds a copy (one copy
+# of the shipping ID per Mac), printing the removal command. With SHANJIE_INSTALL_NO_COPY=1 and the argument
+# "/Library/Input Methods/善解輸入法.app" it copies nothing: the installer's user stage after its root stage (section 2.4)
+# moves this account's copy (and shanjie.app) to .shanjie-previous, runs lsregister -f on the /Library copy and stops this
+# account's old processes in both locations; registration is the installer's.
+#
 # The shipping ID is installed only from a Developer ID build of this project's team (app-sandbox.md section 2.3): an
 # ad-hoc local build with that ID would create the shipping container and move the user's data into it. Local builds use
 # the development ID (`make bundle`).
@@ -43,6 +50,8 @@ case "$ID" in
   *) fail "$SRC has bundle ID '$ID'; only $SHIPPING_ID and $SHIPPING_ID.dev are installed" ;;
 esac
 DEST="$IM/$NAME.app"
+SYSTEM_IM="/Library/Input Methods"
+NO_COPY="${SHANJIE_INSTALL_NO_COPY:-}"
 # Before anything else touches the system. Files-only mode (the tests) installs stubs that are not signed.
 if [ "$ID" = "$SHIPPING_ID" ] && [ "${SHANJIE_INSTALL_FILES_ONLY:-}" != 1 ]; then
   SIG="$(codesign -dv --verbose=2 "$SRC" 2>&1)" \
@@ -65,8 +74,21 @@ else
   # Tests point this at a stand-in that only records calls, as a tripwire: files-only mode must
   # never call lsregister. Ignored outside files-only mode.
   LSREGISTER="${SHANJIE_TEST_LSREGISTER:-$LSREGISTER}"
+  # A stand-in for /Library/Input Methods (tests only; ignored outside files-only mode).
+  SYSTEM_IM="${SHANJIE_TEST_SYSTEM_IM:-$SYSTEM_IM}"
 fi
 unregister() { [ "$FILES_ONLY" = 1 ] || "$LSREGISTER" -u "$1" 2>/dev/null || true; }
+
+if [ "$NO_COPY" = 1 ]; then
+  [ "$ID" = "$SHIPPING_ID" ] && [ "$SRC" = "$SYSTEM_IM/善解輸入法.app" ] \
+    || fail "SHANJIE_INSTALL_NO_COPY=1 takes only $SYSTEM_IM/善解輸入法.app (the installer's user stage)"
+elif [ "$ID" = "$SHIPPING_ID" ] && { [ -e "$SYSTEM_IM/善解輸入法.app" ] || [ -L "$SYSTEM_IM/善解輸入法.app" ]; }; then
+  # system-install.md section 2.1: one copy of the shipping ID per Mac. Nothing is changed.
+  echo "error: 善解輸入法 is already installed for this Mac in $SYSTEM_IM, so it is not installed into your account too." >&2
+  echo "To install it for your account only, remove this Mac's copy first (an administrator password is needed), then run this again:" >&2
+  echo "  sudo rm -rf \"$SYSTEM_IM/善解輸入法.app\" \"$SYSTEM_IM/.shanjie-previous\"" >&2
+  exit 1
+fi
 
 # The only paths this script removes or moves, all inside ~/Library/Input Methods: the installed
 # bundle (DEST), the bundle under its name before section 13 (LEGACY, shipping ID only; empty for
@@ -79,7 +101,8 @@ mkdir -p "$IM"
 
 # 1. Copy the new bundle to a fresh staging directory next to the destination. A failed copy
 #    leaves the installed bundle untouched.
-STAGE="$(mktemp -d "$IM/.shanjie-staging-XXXXXX")"
+STAGE=
+[ "$NO_COPY" = 1 ] || STAGE="$(mktemp -d "$IM/.shanjie-staging-XXXXXX")"
 MOVED=
 KEPT=
 cleanup() {
@@ -88,17 +111,17 @@ cleanup() {
   # left without an installed copy. Never on a failed copy, where the staged bundle may be
   # incomplete; and not keyed on "$DEST is missing", which is also true when only the legacy
   # shanjie.app was installed.
-  if [ -n "$MOVED" ] && [ ! -e "$DEST" ] && [ -d "$STAGE/$NAME.app" ]; then
+  if [ -n "$STAGE" ] && [ -n "$MOVED" ] && [ ! -e "$DEST" ] && [ -d "$STAGE/$NAME.app" ]; then
     mv "$STAGE/$NAME.app" "$DEST" || true
     # Not "rerun the script": that would keep this version as the previous one and drop the real one.
     echo "interrupted: the new version is in place but not registered. Run:" >&2
     echo "  $LSREGISTER -f ~/Library/Input\\ Methods/$NAME.app" >&2
     echo "  ~/Library/Input\\ Methods/$NAME.app/Contents/MacOS/shanjie install" >&2
   fi
-  rm -rf "$STAGE"
+  [ -z "$STAGE" ] || rm -rf "$STAGE"
 }
 trap cleanup EXIT
-ditto "$SRC" "$STAGE/$NAME.app"
+[ "$NO_COPY" = 1 ] || ditto "$SRC" "$STAGE/$NAME.app"
 
 # 2. Keep the previous version as PREV (replacing an older one kept there), then move the new
 #    bundle into place. The previous version is the installed DEST, or, when only the legacy
@@ -113,13 +136,20 @@ if [ -n "$OLD" ]; then
     chmod -R u+w "$PREV"   # a read-only directory must not block upgrades
     rm -rf "$PREV"
   fi
-  # Move first, unregister after: if the move fails, the old bundle stays registered where it is.
-  mv "$OLD" "$PREV"
-  MOVED=1
-  unregister "$PREV"
+  if [ "$NO_COPY" = 1 ]; then
+    # The user stage (system-install.md section 2.4 item 1): unregistered where it is, then moved;
+    # the /Library copy is already in place and is registered below.
+    unregister "$OLD"
+    mv "$OLD" "$PREV"
+  else
+    # Move first, unregister after: if the move fails, the old bundle stays registered where it is.
+    mv "$OLD" "$PREV"
+    MOVED=1
+    unregister "$PREV"
+  fi
   KEPT=1
 fi
-mv "$STAGE/$NAME.app" "$DEST"
+[ "$NO_COPY" = 1 ] || mv "$STAGE/$NAME.app" "$DEST"
 MOVED=
 [ "$KEPT" = 1 ] && echo "previous version kept at ~/Library/Input Methods/$(basename "$PREV")"
 # Both names were installed: the new-name copy was kept above, so the legacy one is only removed.
@@ -136,7 +166,7 @@ fi
 # Test hook (scripts/test-install-ime.sh): stop after the file swap, before touching running
 # processes or the input source registry.
 if [ "$FILES_ONLY" = 1 ]; then
-  echo "files only: installed to $DEST"
+  if [ "$NO_COPY" = 1 ]; then echo "files only: moved this account's copy aside for $SRC"; else echo "files only: installed to $DEST"; fi
   exit 0
 fi
 
@@ -144,24 +174,31 @@ fi
 #    anything), then stop the running old copy, matched by its full path (regex characters in HOME
 #    escaped): for the shipping ID under either name, for the development ID only its own folder,
 #    so installing a development build never stops the shipping copy. None running is fine.
-"$LSREGISTER" -f "$DEST" 2>/dev/null \
+REGISTERED="$DEST"
+[ "$NO_COPY" = 1 ] && REGISTERED="$SRC"
+"$LSREGISTER" -f "$REGISTERED" 2>/dev/null \
   || echo "warning: lsregister -f failed; log out and back in if the old version keeps running" >&2
 REAL_HOME="$(cd "$HOME" && pwd -P)"
 NAMES='(善解輸入法|shanjie)'
 [ "$ID" = "$SHIPPING_ID" ] || NAMES="$NAME"   # full-width parentheses are not regex characters
-PATTERN="^$(printf '%s' "$REAL_HOME/Library/Input Methods/" | sed 's/[][\.*^$+?(){}|]/\\&/g')$NAMES\\.app/Contents/MacOS/shanjie( |\$)"
+esc() { printf '%s' "$1" | sed 's/[][\.*^$+?(){}|]/\\&/g'; }
+LOCATIONS="$(esc "$REAL_HOME/Library/Input Methods/")"
+# The shipping ID may also run from /Library (system-install.md section 2.4 item 3); -U keeps it to this account.
+[ "$ID" = "$SHIPPING_ID" ] && LOCATIONS="($LOCATIONS|$(esc "$SYSTEM_IM/"))"
+PATTERN="^$LOCATIONS$NAMES\\.app/Contents/MacOS/shanjie( |\$)"
+ME="$(id -u)"
 rc=0
-pkill -f "$PATTERN" || rc=$?
+pkill -U "$ME" -f "$PATTERN" || rc=$?
 [ "$rc" -eq 0 ] || [ "$rc" -eq 1 ] || fail "pkill failed ($rc)"
 # Wait for it to exit, so the new process can take over the input method's connection name.
-for _ in 1 2 3 4 5 6 7 8 9 10; do pgrep -f "$PATTERN" >/dev/null || break; sleep 0.5; done
-pgrep -f "$PATTERN" >/dev/null \
+for _ in 1 2 3 4 5 6 7 8 9 10; do pgrep -U "$ME" -f "$PATTERN" >/dev/null || break; sleep 0.5; done
+pgrep -U "$ME" -f "$PATTERN" >/dev/null \
   && echo "warning: a shanjie process is still running after 5 s; if the old version keeps serving input, log out and back in" >&2
 
 # The installer app (docs/contracts/s3c-installer.md section 4) registers and enables in its own
 # process, so it stops here, after the file swap, lsregister -f and stopping the old process.
 # Files-only mode exits earlier, before step 3, so it takes precedence.
-if [ "${SHANJIE_INSTALL_SKIP_REGISTER:-}" = 1 ]; then
+if [ "${SHANJIE_INSTALL_SKIP_REGISTER:-}" = 1 ] || [ "$NO_COPY" = 1 ]; then
   echo "files and processes done; registration skipped"
   exit 0
 fi
