@@ -23,6 +23,7 @@ python experiments/p2-distill/train_p2.py --npz M.npz \
     --data wiki.txt wiki.dump wiki.0c.jsonl pool.txt pool.dump pool.0c.jsonl \
     --out OUT --seed 20261018 --epochs 3 --batch 64 --lr 1e-4 --warmup 100 --val-frac 0.02
 #   → OUT/tinylm-S.npz、OUT/train-S.json；結束碼 2＝發散（不寫檔）
+# P3：前文 64 字（跨標點）只加 --context 64，其餘不變；train-S.json 記 context
 # 打分（GCP，和 M 同一種 CPU）：experiments/s7a-tinylm/score.py --npz OUT/tinylm-S.npz --backend torch … 其餘照登記
 ```
 

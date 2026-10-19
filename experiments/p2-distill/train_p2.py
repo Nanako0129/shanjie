@@ -1,10 +1,12 @@
 """P2 training (torch, Colab GPU): distil the 0c candidate distribution into the S7a student (M) by KL(q || p) over the n-gram's top-8.
 
   python train_p2.py --npz tinylm-M.npz --data wiki.txt wiki.dump wiki.0c.jsonl pool.txt pool.dump pool.0c.jsonl --out DIR \
-         [--seed 20261018 --epochs 3 --batch 64 --lr 1e-4 --warmup 100 --val-frac 0.02 --max-steps N --device cuda]
+         [--context 2|64] [--seed 20261018 --epochs 3 --batch 64 --lr 1e-4 --warmup 100 --val-frac 0.02 --max-steps N --device cuda]
 
 --data is ROWS / DUMP / TEACHER triples: rows `prefix|sentence|reading`, the `--dump` of those rows (top 8, n-gram order), and the
 score_0c.py JSONL of the same run (one record per row: i, n, skip, and for n >= 2 `ll` = 0c log10 per candidate in the dump's order).
+--context 64 (P3): k = k_cross(prefix, CTX - 1 - len(c)) instead, the last Han characters of the prefix with every non-Han character skipped
+(across punctuation); the default 2 is the P2 behaviour unchanged.
 Student score of a candidate = sum_i ln p(c_i | [BOS] k c_<i) with k = tinylm.context_key(prefix) and the truncation of tinylm.ll_many
 (natural log, differentiable); q = softmax(ll_0c * ln 10), p = softmax(student score), both over the row's own candidates.
 Writes DIR/tinylm-S.npz (torch_model.export_npz, scored unchanged by s7a-tinylm/score.py) and DIR/train-S.json.
@@ -41,6 +43,17 @@ if torch is not None:
 TOPK = 8
 NEG = -1e9           # score of a missing candidate slot: finite, so softmax / products never meet inf - inf
 LOG_EVERY, VAL_EVERY = 100, 500
+
+
+def is_han(c):
+    return any(a <= ord(c) <= b for a, b in tinylm._HAN)
+
+
+def k_cross(prefix, n):
+    """The last n Han characters of prefix, punctuation and other characters skipped over; "" when n <= 0. (Same as l0core.k_cross, exp/l0-listwise.)"""
+    if n <= 0:
+        return ""
+    return "".join(c for c in prefix if is_han(c))[-n:]
 
 
 class Mismatch(ValueError):
@@ -90,13 +103,13 @@ class Packed:
     """Every usable row pre-tokenised once. Sequence = [BOS] + k + c (k truncated from the left exactly as tinylm.ll_many does), start st =
     1 + len(k): positions st-1 .. len-2 of the logits predict the characters of c."""
 
-    def __init__(self, items, vocab):
+    def __init__(self, items, vocab, context=2):
         tok, off, st, rowseq = array.array("i"), [0], [], [0]
         self.q, self.logq, self.n = np.zeros((len(items), TOPK)), np.zeros((len(items), TOPK)), np.zeros(len(items), dtype=np.int64)
         for r, (prefix, surfs, ll) in enumerate(items):
             key = tinylm.row_key(prefix, 2)
             for c in surfs:
-                k = key[max(0, len(key) - (CTX - 1 - len(c))):]
+                k = k_cross(prefix, CTX - 1 - len(c)) if context == 64 else key[max(0, len(key) - (CTX - 1 - len(c))):]
                 tok.extend([BOS] + vocab.enc(k) + vocab.enc(c))
                 off.append(len(tok)); st.append(1 + len(k))
             rowseq.append(len(st))
@@ -216,7 +229,7 @@ def run(a):
             counts["unusable"][k] += v
     if not items:
         sys.exit("train_p2: no usable rows")
-    P = Packed(items, vocab)
+    P = Packed(items, vocab, a.context)
     val_idx, batches = plan(len(P), a.val_frac, a.batch, a.epochs, a.seed, a.max_steps)
     total = len(batches)
     order_sha = hashlib.sha256(np.concatenate(batches).tobytes()).hexdigest()
@@ -265,7 +278,7 @@ def run(a):
             print(f"step {end} val KL {v:.4f} top1 agreement {va:.4f}", flush=True)
     secs = time.time() - t0
     torch_model.export_npz(model, vocab.chars, os.path.join(a.out, "tinylm-S.npz"))
-    json.dump({"seed": a.seed, "epochs": a.epochs, "batch": a.batch, "lr": a.lr, "warmup": a.warmup, "val_frac": a.val_frac,
+    json.dump({"context": a.context, "seed": a.seed, "epochs": a.epochs, "batch": a.batch, "lr": a.lr, "warmup": a.warmup, "val_frac": a.val_frac,
                "max_steps": a.max_steps, "steps": total, "counts": counts, "val_rows": int(len(val_idx)),
                "train_order_sha256": order_sha, "curve": curve, "val_curve": val_curve, "seconds": secs, "input_sha256": input_sha},
               open(os.path.join(a.out, "train-S.json"), "w"), indent=1)
@@ -277,6 +290,7 @@ def main(argv=None):
     ap.add_argument("--npz", required=True)
     ap.add_argument("--data", nargs="+", required=True, help="ROWS DUMP TEACHER [ROWS DUMP TEACHER ...]")
     ap.add_argument("--out", required=True)
+    ap.add_argument("--context", type=int, choices=[2, 64], default=2, help="2 = context_key (P2); 64 = k_cross, across punctuation (P3)")
     ap.add_argument("--seed", type=int, default=20261018); ap.add_argument("--epochs", type=int, default=3)
     ap.add_argument("--batch", type=int, default=64); ap.add_argument("--lr", type=float, default=1e-4)
     ap.add_argument("--warmup", type=int, default=100); ap.add_argument("--val-frac", type=float, default=0.02)
