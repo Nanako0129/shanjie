@@ -248,39 +248,41 @@ jobs:
           [ -n "$IDENTITY" ] || fail "no Developer ID Application identity for team $EXPECTED_TEAM"
 
           mkdir -p "$T/work" "$T/out" "$T/check"
-          tar -xf "$T/unsigned/unsigned.tar" -C "$T/work"
+          # -p: this step's umask 077 would otherwise make the bundle 0700/0600, which a root-owned copy in /Library
+          # cannot load for the user (system-install.md section 1); then every file readable and nothing group- or
+          # other-writable (standalone-updater.md section 2.4). Measured 2026-10-20: tar -xf applies the umask, tar -xpf and
+          # ditto -x -k keep the stored modes.
+          tar -xpf "$T/unsigned/unsigned.tar" -C "$T/work"
           APP="$T/work/善解輸入法.app"
-          # Inside out, in Sparkle's documented order (docs/contracts/about-update.md section 2, app-sandbox.md
-          # sections 2.4 and 2.8), never --deep: Installer.xpc, Autoupdate, Updater.app and the framework with
-          # the hardened runtime, a secure timestamp and no entitlements; then the app with the runtime, a
-          # timestamp and the four App Sandbox entitlements written here from literals, not taken from the
-          # build artifact (security review F7), so what ships does not depend on the build job and verify()
-          # is a second check. (The ad-hoc build from `build` has no runtime: library validation refuses an
-          # ad-hoc framework there; here all five share the team, and verify_sparkle requires the flag on
-          # each.) build-app.sh kept only Installer.xpc; a bundle with any other XPC service stops here.
-          # framework_place <app>: Contents/Frameworks holds exactly Updater/Sparkle.framework (app-sandbox.md section
-          # 2.8), a path v0.4.7's framework without XPC services never used. The same check as scripts/check-app.sh;
-          # verify_sparkle calls it too.
-          framework_place() {
-            [ "$(ls -A "$1/Contents/Frameworks" 2>/dev/null)" = Updater ] \
-              && [ "$(ls -A "$1/Contents/Frameworks/Updater" 2>/dev/null)" = Sparkle.framework ]
-          }
-          framework_place "$APP" || fail "Contents/Frameworks is not exactly Updater/Sparkle.framework"
+          chmod -R a+rX,go-w "$APP"
+          # The layout of standalone-updater.md section 2.4, checked before signing and again by verify_sparkle on what
+          # ships: no XPC service anywhere (the input method drives no installer service; the system has nothing to remember
+          # by path), Contents/Helpers exactly 善解更新.app, the input method's Sparkle.framework (Contents/Frameworks/Updater)
+          # without Autoupdate and Updater.app, the helper's own framework with both. The same assertions as
+          # scripts/check-app.sh (this job runs no repository code; a change there goes here too).
+          HELPER="$APP/Contents/Helpers/善解更新.app"
           SPARKLE="$APP/Contents/Frameworks/Updater/Sparkle.framework"
-          XPC="$SPARKLE/Versions/B/XPCServices"
-          [ "$(ls -A "$XPC" 2>/dev/null)" = Installer.xpc ] || fail "Sparkle's XPCServices is not exactly Installer.xpc"
-          # xpc_layout <Sparkle.framework>: the only .xpc anywhere in the framework (find does not follow symlinks) is
-          # Versions/B/XPCServices/Installer.xpc, Versions/Current is a symlink to B, and a top-level XPCServices, if present, is the
-          # symlink Versions/Current/XPCServices. The same function as scripts/check-app.sh (this job runs no repository code; a change there goes here too).
-          xpc_layout() {
-            [ "$(cd "$1" && find . -name '*.xpc')" = ./Versions/B/XPCServices/Installer.xpc ] \
-              && [ -L "$1/Versions/Current" ] && [ "$(readlink "$1/Versions/Current")" = B ] \
-              && { { [ ! -e "$1/XPCServices" ] && [ ! -L "$1/XPCServices" ]; } \
-                   || { [ -L "$1/XPCServices" ] && [ "$(readlink "$1/XPCServices")" = Versions/Current/XPCServices ]; }; }
+          HSPARKLE="$HELPER/Contents/Frameworks/Sparkle.framework"
+          # layout <app>
+          layout() {
+            local S="$1/Contents/Frameworks/Updater/Sparkle.framework" HS="$1/Contents/Helpers/善解更新.app/Contents/Frameworks/Sparkle.framework"
+            [ -z "$(find "$1" -name '*.xpc')" ] || fail "the bundle contains an .xpc: $1"
+            [ "$(ls -A "$1/Contents/Helpers" 2>/dev/null)" = 善解更新.app ] || fail "Contents/Helpers is not exactly 善解更新.app: $1"
+            [ -d "$S" ] || fail "$S is missing"
+            [ -z "$(find "$S" \( -name Autoupdate -o -name Updater.app \))" ] || fail "the input method's Sparkle.framework contains Autoupdate or Updater.app: $1"
+            for code in "$HS" "$HS/Versions/B/Autoupdate" "$HS/Versions/B/Updater.app"; do
+              [ -e "$code" ] || fail "$code is missing"
+            done
           }
-          xpc_layout "$SPARKLE" || fail "Sparkle.framework's XPC layout is not exactly Versions/B/XPCServices/Installer.xpc"
-          for code in "$XPC/Installer.xpc" "$SPARKLE/Versions/B/Autoupdate" "$SPARKLE/Versions/B/Updater.app" "$SPARKLE"; do
-            [ -e "$code" ] || fail "$code is missing; Sparkle's layout changed"
+          layout "$APP"
+          # Inside out, never --deep (standalone-updater.md section 2.4): the helper's Autoupdate, Updater.app and
+          # framework, the helper, the input method's framework, each with the hardened runtime, a secure timestamp and no
+          # entitlements; then the input method with the runtime, a timestamp and the three App Sandbox entitlements
+          # written here from literals, not taken from the build artifact (security review F7), so what ships does not
+          # depend on the build job and verify() is a second check. (The ad-hoc build from `build` has no runtime: library
+          # validation refuses an ad-hoc framework there; here all share the team, and verify_sparkle requires the flag on
+          # each.)
+          for code in "$HSPARKLE/Versions/B/Autoupdate" "$HSPARKLE/Versions/B/Updater.app" "$HSPARKLE" "$HELPER" "$SPARKLE"; do
             codesign --force --options runtime --timestamp --sign "$IDENTITY" --keychain "$KC" "$code"
           done
           printf '%s\n' '<?xml version="1.0" encoding="UTF-8"?>' \
@@ -290,8 +292,6 @@ jobs:
             '<key>com.apple.security.network.client</key><true/>' \
             '<key>com.apple.security.temporary-exception.mach-register.global-name</key>' \
             '<array><string>com.nyanako.inputmethod.shanjie_Connection</string></array>' \
-            '<key>com.apple.security.temporary-exception.mach-lookup.global-name</key>' \
-            '<array><string>com.nyanako.inputmethod.shanjie-spks</string><string>com.nyanako.inputmethod.shanjie-spki</string></array>' \
             '</dict></plist>' > "$T/sign-entitlements.plist"
           plutil -lint "$T/sign-entitlements.plist" > /dev/null
           codesign --force --options runtime --timestamp --entitlements "$T/sign-entitlements.plist" --sign "$IDENTITY" --keychain "$KC" "$APP"
@@ -326,7 +326,7 @@ jobs:
           # verify <app> <ime|installer>: what ships, as extracted from its final zip, with the expected
           # values by bundle (app-sandbox.md section 2.4). The input method: the shipping ID, and its
           # entitlements equal, as a whole plutil-normalized property list (an extra key fails, F7), the
-          # four App Sandbox keys with the mach names derived from that ID; the same comparison as
+          # three App Sandbox keys with the connection name derived from that ID; the same comparison as
           # scripts/check-entitlements.sh, written out here because this job runs no repository code (a
           # change there goes here too; this copy has no mutation test of its own, since `sign` runs only
           # on main, while CI mutates the script's copy). The installer: its ID and no entitlements.
@@ -358,13 +358,11 @@ jobs:
                   '<key>com.apple.security.network.client</key><true/>' \
                   '<key>com.apple.security.temporary-exception.mach-register.global-name</key>' \
                   "<array><string>${ID}_Connection</string></array>" \
-                  '<key>com.apple.security.temporary-exception.mach-lookup.global-name</key>' \
-                  "<array><string>${ID}-spks</string><string>${ID}-spki</string></array>" \
                   '</dict></plist>' > "$T/ent-expected.plist"
                 plutil -convert xml1 "$T/ent-actual.plist" || fail "the entitlements are not a property list: $V"
                 plutil -convert xml1 "$T/ent-expected.plist"
                 cmp -s "$T/ent-actual.plist" "$T/ent-expected.plist" \
-                  || fail "the entitlements are not exactly the four keys for $ID: $(plutil -p "$T/ent-actual.plist")"
+                  || fail "the entitlements are not exactly the three keys for $ID: $(plutil -p "$T/ent-actual.plist")"
                 ;;
               installer)
                 [ "$ID" = com.nyanako.shanjie.installer ] || fail "bundle ID is $ID, not the installer's: $V"
@@ -378,27 +376,38 @@ jobs:
             GK=$(spctl -a -t exec -vv "$V" 2>&1 || true)
             grep -qx 'source=Notarized Developer ID' <<<"$GK" || fail "Gatekeeper does not report Notarized Developer ID: $GK"
           }
-          # verify_sparkle <app>: the input method's Sparkle parts (docs/contracts/about-update.md section 2,
-          # app-sandbox.md sections 2.4 and 2.8). Five code locations, each present (a missing path fails,
-          # never reads as "no entitlements") with the expected team and the hardened runtime: the app
-          # (its entitlements are verify()'s), and Installer.xpc, Autoupdate, Updater.app and the framework,
-          # which carry no entitlements. XPCServices holds exactly Installer.xpc. Info.plist's Sparkle keys
-          # verbatim, with their types, against the values in this job's env; SUEnableDownloaderService absent.
+          # verify_sparkle <app>: the input method's Sparkle parts and 善解更新 (docs/contracts/about-update.md section 2,
+          # standalone-updater.md section 2.4): the layout above; the helper, its framework with Autoupdate and Updater.app,
+          # and the input method's framework, each present (a missing path fails, never reads as "no entitlements") with
+          # the expected team, the hardened runtime and no entitlements; the app's team and runtime (its entitlements are
+          # verify()'s); the helper's ID and an Info.plist without SUFeedURL, SUPublicEDKey or any SUEnable* key; the input
+          # method's Sparkle keys verbatim, with their types, against the values in this job's env (the installer launcher
+          # off), SUEnableDownloaderService absent; and the permissions: every path o+r, directories and executables o+x,
+          # nothing but symlinks writable by group or others, nothing setuid or setgid.
           verify_sparkle() {
             V="$1"
-            framework_place "$V" || fail "Contents/Frameworks is not exactly Updater/Sparkle.framework: $V"
+            layout "$V"
+            H="$V/Contents/Helpers/善解更新.app"
             S="$V/Contents/Frameworks/Updater/Sparkle.framework"
-            for code in "$V" "$S" "$S/Versions/B/XPCServices/Installer.xpc" "$S/Versions/B/Autoupdate" "$S/Versions/B/Updater.app"; do
+            HS="$H/Contents/Frameworks/Sparkle.framework"
+            for code in "$V" "$S" "$H" "$HS" "$HS/Versions/B/Autoupdate" "$HS/Versions/B/Updater.app"; do
               [ -e "$code" ] || fail "$code is missing"
               C_INFO=$(codesign -dv --verbose=2 "$code" 2>&1)
               grep -qx "TeamIdentifier=$EXPECTED_TEAM" <<<"$C_INFO" || fail "team identifier is not $EXPECTED_TEAM: $code"
               grep -Eq 'flags=0x[0-9a-f]+\([^)]*runtime' <<<"$C_INFO" || fail "hardened runtime flag missing: $code"
               [ "$code" = "$V" ] && continue
+              codesign --verify --strict "$code" || fail "codesign --verify --strict: $code"
               C_ENT=$(codesign -d --entitlements - "$code" 2>/dev/null || true)
               [ -z "$C_ENT" ] || fail "$code carries entitlements"
             done
-            [ "$(ls -A "$S/Versions/B/XPCServices" 2>/dev/null)" = Installer.xpc ] || fail "Sparkle's XPCServices is not exactly Installer.xpc"
-            xpc_layout "$S" || fail "Sparkle.framework's XPC layout is not exactly Versions/B/XPCServices/Installer.xpc: $S"
+            HP="$H/Contents/Info.plist"
+            [ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$HP")" = com.nyanako.inputmethod.shanjie.updater ] \
+              || fail "the helper's bundle ID is not com.nyanako.inputmethod.shanjie.updater: $V"
+            HKEY=$(python3 -I -c 'import plistlib, sys
+          d = plistlib.load(open(sys.argv[1], "rb"))
+          print(" ".join(sorted(k for k in d if k in ("SUFeedURL", "SUPublicEDKey", "LSUIElement") or k.startswith("SUEnable"))))' "$HP") \
+              || fail "the helper's Info.plist cannot be read: $V"
+            [ -z "$HKEY" ] || fail "the helper's Info.plist sets $HKEY"
             P="$V/Contents/Info.plist"
             key() { [ "$(plutil -extract "$1" raw -expect "$2" -o - "$P" 2>/dev/null)" = "$3" ] || fail "Info.plist $1 is not the $2 $3"; }
             key ShanjieUpdateBuild string release
@@ -408,11 +417,16 @@ jobs:
             key SUVerifyUpdateBeforeExtraction bool true
             key SUAllowsAutomaticUpdates bool false
             key SUEnableAutomaticChecks bool false
-            key SUEnableInstallerLauncherService bool true
+            key SUEnableInstallerLauncherService bool false
             ! plutil -extract SUEnableDownloaderService raw -o - "$P" > /dev/null 2>&1 || fail "Info.plist sets SUEnableDownloaderService"
             key SUEnableSystemProfiling bool false
             [[ "$SPARKLE_PUBLIC_KEY" =~ ^[A-Za-z0-9+/]{43}=$ ]] || fail "SPARKLE_PUBLIC_KEY is not a 44-character base64 key"
             ! plutil -extract SUEnableJavaScript raw -o - "$P" > /dev/null 2>&1 || fail "Info.plist sets SUEnableJavaScript"
+            [ -z "$(find "$V" ! -perm -o+r)" ] || fail "a file in the bundle lacks o+r: $V"
+            [ -z "$(find "$V" -type d ! -perm -o+x)" ] || fail "a directory in the bundle lacks o+x: $V"
+            [ -z "$(find "$V" -type f -perm -u+x ! -perm -o+x)" ] || fail "an executable in the bundle lacks o+x: $V"
+            [ -z "$(find "$V" ! -type l \( -perm -g+w -o -perm -o+w \))" ] || fail "a file in the bundle is writable by group or others: $V"
+            [ -z "$(find "$V" \( -perm -u+s -o -perm -g+s \))" ] || fail "a file in the bundle is setuid or setgid: $V"
           }
           ditto -x -k "$T/out/$ZIP" "$T/check"
           verify "$T/check/善解輸入法.app" ime
