@@ -156,7 +156,9 @@ mkdir -p "$ROOT/$OUT_DIR"
 # launches) a build/ copy of the input method by its bundle ID.
 touch "$ROOT/$OUT_DIR/.metadata_never_index"
 APP="$ROOT/$OUT_DIR/$NAME_ZH.app"
-rm -rf "$APP"
+# Both folder names, not only this ID's: a bundle left from a build with the other ID would otherwise sit next to this one
+# and be checked, wrapped by `make installer` or run by mistake.
+rm -rf "$ROOT/$OUT_DIR/善解輸入法.app" "$ROOT/$OUT_DIR/善解（開發版）.app"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources/zh-Hant.lproj" "$APP/Contents/Resources/en.lproj" \
   "$APP/Contents/Resources/LICENSES"
 cp "$BIN" "$APP/Contents/MacOS/shanjie"

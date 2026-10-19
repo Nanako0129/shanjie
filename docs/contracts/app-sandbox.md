@@ -150,6 +150,10 @@
 - `Makefile`：
   - 加 `DEV_APP_NAME := 善解（開發版）.app`，`selftest-bundled` 與 `clean-bundle` 用它；
   - `make installer` 只接受正式 ID 的組建：`build/善解輸入法.app` 不存在就報錯，訊息寫要先 `make bundle BUNDLE_ID=com.nyanako.inputmethod.shanjie`。
+  - `make installer` 打包前另外斷言 `build/善解輸入法.app` 的 `CFBundleIdentifier` 是正式 ID、通過 `scripts/check-entitlements.sh`；
+  - `make selftest-bundled` 執行的是剛組好的那一份（資料夾名稱依 `SELFTEST_BUNDLE_ID`，規則和 `build-app.sh` 相同）；
+  - `clean-bundle` 也清 `build/default/`、`build/nomanifest/` 的 bundle 與 `build-app.sh` 寫在各 `OUT_DIR` 的 `.entitlements-*.plist`。
+- `build-app.sh` 組裝前刪掉 `OUT_DIR` 裡**兩個**資料夾名稱（`善解輸入法.app`、`善解（開發版）.app`），換 ID 重建時不會留下另一個 ID 的舊 bundle。
 - **`scripts/install-ime.sh`**（安裝程式裡附的是同一份，`check-installer.sh` 逐位元比對）：從傳入的 bundle 讀 `CFBundleIdentifier` 決定目的地，不寫死開發版的名稱。
   - 正式 ID：目的地 `善解輸入法.app`、舊版 `shanjie.app` 的升級、`.shanjie-previous`，和現在逐行相同。
     - 只接受本專案 Developer ID（`Developer ID Application`、`TeamIdentifier=2LJ882GPY8`，從 `codesign -dv --verbose=2` 讀）簽章的 bundle；`codesign` 讀不到簽章也拒絕。在複製任何東西之前檢查，訊息指向開發版 ID 的 `make bundle`。只有 files-only 測試模式（`SHANJIE_INSTALL_FILES_ONLY=1`，假 app 沒有簽章）跳過。

@@ -11,6 +11,7 @@ APP_NAME := 善解輸入法.app
 DEV_APP_NAME := 善解（開發版）.app
 LEGACY_APP_NAME := shanjie.app
 INSTALLER_NAME := 安裝善解輸入法.app
+SHIPPING_ID := com.nyanako.inputmethod.shanjie
 LSREGISTER := /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
 
 rust:
@@ -77,9 +78,12 @@ bundle: rust
 
 # The installer (docs/contracts/s3c-installer.md section 3) around the existing build/$(APP_NAME), the shipping-ID build only
 # (run `make bundle BUNDLE_ID=com.nyanako.inputmethod.shanjie` first; not rebuilt here, so the app check-app.sh verified is
-# the one wrapped), zipped the way release.yml zips it. Never launched; scripts/check-installer.sh inspects it.
+# the one wrapped), zipped the way release.yml zips it. Before packaging, the bundle must carry the shipping ID and pass
+# scripts/check-entitlements.sh. Never launched; scripts/check-installer.sh inspects it.
 installer:
 	@[ -d 'build/$(APP_NAME)' ] || { echo "error: build/$(APP_NAME) is missing; run make bundle BUNDLE_ID=com.nyanako.inputmethod.shanjie first (the installer wraps only the shipping-ID build)" >&2; exit 1; }
+	@[ "$$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' 'build/$(APP_NAME)/Contents/Info.plist' 2>/dev/null)" = '$(SHIPPING_ID)' ] || { echo "error: build/$(APP_NAME) does not have the bundle ID $(SHIPPING_ID); run make bundle BUNDLE_ID=$(SHIPPING_ID)" >&2; exit 1; }
+	scripts/check-entitlements.sh 'build/$(APP_NAME)'
 	@V=$$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' 'build/$(APP_NAME)/Contents/Info.plist'); \
 	rm -f build/shanjie-$$V.zip; \
 	ditto -c -k --keepParent 'build/$(APP_NAME)' build/shanjie-$$V.zip; \
@@ -92,20 +96,26 @@ installer:
 # ~/Library/Containers/<that ID> (docs/contracts/s3b.md section 9). Until CI has shown that a build without a migration list
 # moves no data, this is not run on a maintainer's machine (app-sandbox.md section 5).
 SELFTEST_BUNDLE_ID ?= com.nyanako.inputmethod.shanjie.selftest
+# The folder the ID builds into, by the same rule as scripts/build-app.sh (the shipping ID, else the development name).
+SELFTEST_APP = build/selftest/$(if $(filter $(SHIPPING_ID),$(SELFTEST_BUNDLE_ID)),$(APP_NAME),$(DEV_APP_NAME))
 selftest-bundled: rust
 	@$(call relink_if_stale,Release)
 	@$(call rebuild_if_header_stale,Release)
 	BUNDLE_ID=$(SELFTEST_BUNDLE_ID) OUT_DIR=build/selftest scripts/build-app.sh
-	'build/selftest/$(DEV_APP_NAME)/Contents/MacOS/shanjie' --selftest
+	'$(SELFTEST_APP)/Contents/MacOS/shanjie' --selftest
 
 # Unregisters the local bundles, under the current and the legacy name, from LaunchServices
-# (errors ignored: usually never registered or not there) and deletes them. Touches nothing else.
-CLEAN_APPS := $(foreach d,build build/selftest,$(d)/$(APP_NAME) $(d)/$(DEV_APP_NAME) $(d)/$(LEGACY_APP_NAME)) build/$(INSTALLER_NAME)
+# (errors ignored: usually never registered or not there) and deletes them, with the entitlement files build-app.sh writes
+# next to them. Every OUT_DIR used here and in ci.yml: build, build/selftest, build/default, build/nomanifest. Touches
+# nothing else.
+CLEAN_DIRS := build build/selftest build/default build/nomanifest
+CLEAN_APPS := $(foreach d,$(CLEAN_DIRS),$(d)/$(APP_NAME) $(d)/$(DEV_APP_NAME) $(d)/$(LEGACY_APP_NAME)) build/$(INSTALLER_NAME)
 clean-bundle:
 	@for a in $(CLEAN_APPS); do \
 		echo "$(LSREGISTER) -u $$a"; $(LSREGISTER) -u "$$a" 2>/dev/null || true; \
 	done
 	rm -rf $(CLEAN_APPS) build/shanjie-*.zip
+	rm -f $(foreach d,$(CLEAN_DIRS),$(d)/.entitlements-*.plist)
 
 # SwiftPM may not treat the Rust staticlib as an input. Measured 2026-10-03 with Swift 6.4: it
 # does relink when libcore.a changes, so this guard is a backstop for other toolchains; it costs
