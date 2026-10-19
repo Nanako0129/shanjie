@@ -587,13 +587,11 @@ final class Controller: NSObject, NSApplicationDelegate, NSWindowDelegate {
         // app-sandbox.md section 2.7: the ETen carry-over with the state read at the start, before
         // the swap (the fullFlow call after enabling stays; it does not rewrite a chosen layout).
         let (bundleID, modes) = (startBundleID, startModes)
-        let carryOver = {
-            guard let bundleID, let defaults = UserDefaults(suiteName: bundleID) else { return }
-            Registration.carryOverEten(enabledModeIDs: modes, bundleID: bundleID, defaults: defaults)
-        }
         // The controller lives as long as the app (it is the application delegate).
         DispatchQueue.global(qos: .userInitiated).async {
-            let failure = InstallerFlow.copy(carryOver: carryOver, swap: copyFiles)
+            let failure = InstallerFlow.copy(bundleID: bundleID, modes: modes,
+                                             layoutOnDisk: { InstallerFlow.layoutOnDisk(bundleID: $0, home: Paths.home) },
+                                             swap: copyFiles)
             DispatchQueue.main.async {
                 if let failure { self.fail(failure) } else { self.enable(afterCopy: true) }
             }

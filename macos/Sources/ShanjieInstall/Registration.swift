@@ -184,16 +184,19 @@ public enum Registration {
     /// app-sandbox.md section 2.7: the installer calls this before the files are swapped, with the
     /// state it read at its start, while the unsandboxed old version is installed and the container
     /// does not exist yet, so the first sandboxed launch moves the value along with the preferences.
-    /// `synchronize` hands the value to cfprefsd before the swap; whether it is needed was not
-    /// measured.
+    /// `synchronize` hands the value to cfprefsd; the installer then waits until the file on disk
+    /// holds it (`InstallerFlow.copy`).
     /// When the container already exists (upgrading from a sandboxed version), a value written here
     /// from outside is never read: the input method reads its container's domain. Nothing is done
     /// about it: by then the input method already has its own `layout`, or the user has used the
     /// sandboxed version, so there is nothing left to carry over.
-    public static func carryOverEten(enabledModeIDs: Set<String>, bundleID: String, defaults: UserDefaults) {
-        guard carriesOverEten(layout: defaults.string(forKey: "layout"), enabledModeIDs: enabledModeIDs, bundleID: bundleID) else { return }
+    /// Returns whether it wrote the value.
+    @discardableResult
+    public static func carryOverEten(enabledModeIDs: Set<String>, bundleID: String, defaults: UserDefaults) -> Bool {
+        guard carriesOverEten(layout: defaults.string(forKey: "layout"), enabledModeIDs: enabledModeIDs, bundleID: bundleID) else { return false }
         defaults.set("eten", forKey: "layout")
         defaults.synchronize()
+        return true
     }
 
     /// The input mode IDs of this bundle ID that are enabled (read only).
