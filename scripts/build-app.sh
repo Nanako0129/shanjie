@@ -163,13 +163,16 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources/zh-Hant.lproj" "$APP/Con
   "$APP/Contents/Resources/LICENSES"
 cp "$BIN" "$APP/Contents/MacOS/shanjie"
 
-# Sparkle.framework in Contents/Frameworks (the executable's rpath is @executable_path/../Frameworks, macos/Package.swift).
+# Sparkle.framework in Contents/Frameworks/Updater (the executable's only rpath, macos/Package.swift). Not
+# Contents/Frameworks: macOS remembers per framework path that a Sparkle.framework had no XPC services (v0.4.7's had none)
+# and, until a reboot, does not register the Installer.xpc a later build brings there, so the first sandboxed update would
+# fail (app-sandbox.md sections 1 and 2.8, measured 2026-10-19). Never put a Sparkle without XPC services in Updater either.
 # app-sandbox.md section 2.8: the sandboxed app reaches the network itself (com.apple.security.network.client), so only
 # Installer.xpc is kept (SUEnableInstallerLauncherService); Downloader.xpc is removed and SUEnableDownloaderService is not
-# set. XPCServices must hold exactly Installer.xpc (check-app.sh and release.yml assert it too).
-mkdir -p "$APP/Contents/Frameworks"
-ditto "$BIN_DIR/Sparkle.framework" "$APP/Contents/Frameworks/Sparkle.framework"
-SPARKLE="$APP/Contents/Frameworks/Sparkle.framework"
+# set. XPCServices must hold exactly Installer.xpc (check-app.sh and release.yml assert it and the location too).
+mkdir -p "$APP/Contents/Frameworks/Updater"
+ditto "$BIN_DIR/Sparkle.framework" "$APP/Contents/Frameworks/Updater/Sparkle.framework"
+SPARKLE="$APP/Contents/Frameworks/Updater/Sparkle.framework"
 rm -rf "$SPARKLE/Versions/B/XPCServices/Downloader.xpc"
 for code in "$SPARKLE/Versions/B/XPCServices/Installer.xpc" "$SPARKLE/Versions/B/Autoupdate" "$SPARKLE/Versions/B/Updater.app"; do
   [ -e "$code" ] || fail "$code is missing; Sparkle's layout changed"
@@ -193,7 +196,7 @@ scripts/compile-app-icon.sh "$RES"   # the app icon (docs/contracts/app-icon.md)
 
 cp LICENSE "$RES/LICENSES/LICENSE"
 cp LICENSES/McBopomofo-MIT.txt LICENSES/data.md LICENSES/SCOWL.txt LICENSES/SymSpell-MIT.txt LICENSES/name-suggestion-index-BSD-3-Clause.txt "$RES/LICENSES/"
-# Sparkle.framework ships in Contents/Frameworks: its MIT notice with the bundled third-party notices (Sparkle's LICENSE, 2.10.0).
+# Sparkle.framework ships in Contents/Frameworks/Updater: its MIT notice with the bundled third-party notices (Sparkle's LICENSE, 2.10.0).
 cp LICENSES/Sparkle-MIT.txt "$RES/LICENSES/"
 cat > "$RES/LICENSES/CC-BY-SA-4.0-attribution.txt" <<'EOF'
 overlay-add.tsv, names-add.tsv, packs/acg-add.tsv, packs/acg-sources.tsv, packs/acg.json, demote.tsv, digits.tsv, bigram.sjlm,

@@ -1,5 +1,5 @@
 #!/bin/bash
-# docs/contracts/app-sandbox.md section 2.6 step 8: eight copies of the shipping-ID build, each changed one way and re-signed
+# docs/contracts/app-sandbox.md section 2.6 step 8: nine copies of the shipping-ID build, each changed one way and re-signed
 # ad-hoc, against scripts/check-entitlements.sh and scripts/check-app.sh (SKIP_RUN=1: checks 2 and 3 only). Nothing is ever
 # launched; the copies live in a temporary directory that is removed at the end. Runs locally and in CI.
 #
@@ -14,6 +14,7 @@
 #   6 a second .xpc in XPCServices                   check-app.sh check 3 fails
 #   7 SUEnableInstallerLauncherService false         check-app.sh check 2 fails
 #   8 a second .xpc outside XPCServices              check-app.sh check 3 fails (the whole-framework XPC layout)
+#   9 the framework back in Contents/Frameworks      check-app.sh check 3 fails (the framework's place, section 2.8)
 # release.yml's verify() has its own copy of the comparison and is not mutated here (`sign` runs only on main).
 set -euo pipefail
 
@@ -72,8 +73,9 @@ codesign --force --sign - --entitlements "$T/4.plist" "$A" 2>/dev/null
 ent_fails 4 "$A" "are not exactly the four keys"
 
 # 5 and 6 re-sign the framework and then the app with its entitlements kept, so only the XPC services differ.
-resign() { codesign --force --sign - "$1/Contents/Frameworks/Sparkle.framework" 2>/dev/null; codesign --force --sign - --preserve-metadata=entitlements "$1" 2>/dev/null; }
-X=Contents/Frameworks/Sparkle.framework/Versions/B/XPCServices
+F=Contents/Frameworks/Updater/Sparkle.framework
+resign() { codesign --force --sign - "$1/$F" 2>/dev/null; codesign --force --sign - --preserve-metadata=entitlements "$1" 2>/dev/null; }
+X=$F/Versions/B/XPCServices
 A="$(copy 5)"; rm -rf "$A/$X/Installer.xpc"; resign "$A"
 app_fails 5 "$A" 3 "XPCServices is not exactly Installer.xpc"
 
@@ -84,7 +86,11 @@ A="$(copy 7)"; plutil -replace SUEnableInstallerLauncherService -bool false "$A/
 codesign --force --sign - --preserve-metadata=entitlements "$A" 2>/dev/null
 app_fails 7 "$A" 2 "SUEnableInstallerLauncherService is not the bool true"
 
-A="$(copy 8)"; ditto "$A/$X/Installer.xpc" "$A/Contents/Frameworks/Sparkle.framework/Versions/B/Extra.xpc"; resign "$A"
+A="$(copy 8)"; ditto "$A/$X/Installer.xpc" "$A/$F/Versions/B/Extra.xpc"; resign "$A"
 app_fails 8 "$A" 3 "Sparkle.framework's XPC layout is not exactly"
 
-echo "sandbox mutations: all eight as expected"
+A="$(copy 9)"; mv "$A/$F" "$A/Contents/Frameworks/"; rmdir "$A/Contents/Frameworks/Updater"
+codesign --force --sign - --preserve-metadata=entitlements "$A" 2>/dev/null
+app_fails 9 "$A" 3 "Contents/Frameworks is not exactly Updater/Sparkle.framework"
+
+echo "sandbox mutations: all nine as expected"

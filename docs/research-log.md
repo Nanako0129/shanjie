@@ -7934,3 +7934,16 @@ XL 比 `MAX_FILE`（67,108,864）小 1,168,880 位元組。錨點：4 個模型 
 - 維護者打「你再給我一次驗收清單」出成「你在給我」。加成 `|你再給我一次驗收清單|ㄋㄧˇ ㄗㄞˋ ㄍㄟˇ ㄨㄛˇ ㄧ ㄘˋ ㄧㄢˋ ㄕㄡ ㄑㄧㄥ ㄉㄢ`（讀音由 `tools/readings.py` 產生，沒有 CHECK）。屬於在／再這一類。
 - 出貨設定（`cli --tinylm`，沒有前文）：聊天第一名「你在給我」（−23.915），正解第 2（−24.406，差 0.49）；書面第一名是正解（差 0.21）。
 - `eval/golden/s2h-lm-context.txt` 的錯字回報兩行用 Python 參考實作（`lm_eval.py --context`）重產，n 139：top1 聊天 31 不變、書面 39 → 40，oracle@64 135 → 136；`eval/README.md` 改成 139 列。
+
+## 2026-10-19：沙盒的實機 A 改在虛擬機、沙盒版經 Sparkle 更新失敗與根因（app-sandbox 修訂三）
+
+- **改在虛擬機**：開發版 ID 在維護者的 Mac 上沒出現過，系統設定的加入清單要登出一次才列得出來（10-05 的開發版測試同樣）；`shanjie install` 回 3 時，開發版的輸入模式被啟用、本體沒有，選單不列、加入清單反灰。改用 tart 的 macOS 26.6.2 虛擬機（全新 clone），維護者在虛擬機視窗裡點選與打字，測試用的 feed 經 SSH 反向轉送接回 Mac。Caps Lock 切換在虛擬機測不了，留到實機 B。
+- **第 1 步 A0 → B（沒有沙盒 → 沙盒，0.0.1 → 0.0.2）通過**：B 帶沙盒權限、活動監視器的「沙盒」是「是」；可以打字；沒有沙盒拒絕；開發版 ID 的 container 在 B 第一次啟動的同一秒建立；舊位置的合成 `learning.tsv` 雜湊前後相同（開發版 ID 沒有移轉清單，沒有被搬）。
+- **第 2 步 A → B（沙盒 → 沙盒）第一次失敗**：Sparkle 顯示「An error occurred while connecting to the installer」。launchd 在輸入法程序的 pid domain 找不到 `org.sparkle-project.InstallerLauncher`（`error = 3: No such process`），沒有沙盒拒絕。
+  - 把 `Installer.xpc` 另外放一份到 App 的 `Contents/XPCServices`，launchd 登記得到，但 Sparkle 2.10.0 啟動時檢查到就拒絕啟動（「must be in the Sparkle framework」），關於頁變成「檢查失敗」。
+  - 同一份 App 直接執行、每秒查一次 `launchctl print pid/<pid>`：複製到別的資料夾或改 bundle 名稱，2～9 秒內登記好；已安裝的那條路徑，程序活著卻一直沒有登記；`lsregister -u`、`-f` 之後一樣。
+  - 這條路徑開機後第一次跑的是 A0。A0 的 Sparkle.framework 沒有 XPC 服務（about-update 的做法，v0.4.7 相同）。
+  - 重開機之後，系統啟動的 A 就有登記，A → B 通過：容器沿用、裡面的 `learning.tsv` 雜湊不變、沒有沙盒拒絕。
+- **乾淨重現**（全新路徑；同一個主 bundle 路徑依序放三種版本）：沒有 XPC 服務的版本先跑一次 → 換成有服務的版本：沒有登記 → 同一版、framework 搬到 `Contents/Frameworks/U/`（加 rpath）：登記好 → 換回原位置：沒有登記；對照組（有服務的版本放全新路徑）：登記好。
+- **結論**：系統照 framework 的路徑記住「沒有 XPC 服務」，開機期間不會更新，重開機才清。登出沒量。只有黑箱量測，機制推論；只量了 macOS 26.6.2。照原配置，正式版 0.4.7 → 0.5.0 會成功，但重開機之前 0.5.0 → 0.5.1 會失敗。
+- **處置**（維護者選擇題）：0.5.0 起 Sparkle.framework 放在 `Contents/Frameworks/Updater/`，rpath 只留這一條；`check-app.sh`、`release.yml` 斷言位置，突變測試加第九份（搬回舊位置）。契約 `app-sandbox.md` 修訂三另加 §4.3 A 第 2b 步：虛擬機重開機後 A0 → B3 → C3，中間不重開機。另外兩個選項（不改配置、失敗時提示重新開機；沙盒延後到沙盒外的獨立更新程式）沒選。
