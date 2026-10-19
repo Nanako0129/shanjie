@@ -8009,6 +8009,6 @@ XL 比 `MAX_FILE`（67,108,864）小 1,168,880 位元組。錨點：4 個模型 
 
 ## 2026-10-20：沙盒的 release dry run 與 §4.2 虛擬機驗收（搬回文件的偏好設定修正）
 
-- release dry run（run 39265871734，main ce017923）在維護者核准 `release` 環境後完成：`gate`、`build` 成功，`publish` 照設計跳過。簽章版 `shanjie-0.0.0.zip` 雜湊相符，Developer ID（2LJ882GPY8）簽章、公證並裝訂，Gatekeeper 判定 Notarized Developer ID；沙盒的四項 entitlements 在；Sparkle 在 `Contents/Frameworks/Updater/`。
-- `docs/contracts/app-sandbox.md` §4.2 在全新的 tart 虛擬機量（細節寫在 §4.2 的 2026-10-20 結果）：第 1、2 項通過；第 3 項第一次沒過，原因是 `docs/sandbox-restore.md` 以網域名稱 `defaults import` 寫回偏好設定時，container 還在，`defaults` 把網域導向 container，寫進去的是 container，刪 container 時設定就不見了。修成以原位置 plist 的完整路徑寫回並檢查原位置有檔，在重新建立的虛擬機上第 1、3 項都通過。沙盒版還沒發佈。
-- 還沒量的：「不跳詢問」（無畫面虛擬機截不到圖；`tccd` 沒有相關紀錄只是佐證）、終端機 App 刪 container 會不會跳詢問、§4.2 第 5 項（Sparkle 讀 feed，留給 §4.3 A）。
+- release dry run（run 39265871734，main ce017923）在維護者核准 `release` 環境後完成：`gate`、`build`、`sign` 成功，`publish` 照設計跳過。簽章版 `shanjie-0.0.0.zip` 雜湊相符，Developer ID（2LJ882GPY8）簽章、公證並裝訂，Gatekeeper 判定 Notarized Developer ID；沙盒的四項 entitlements 在；Sparkle 在 `Contents/Frameworks/Updater/`。
+- `docs/contracts/app-sandbox.md` §4.2 在全新的 tart 虛擬機量（細節寫在 §4.2 的 2026-10-20 結果）：第 1、2 項通過；第 3 項第一次沒過，原因是 `docs/sandbox-restore.md` 以網域名稱 `defaults import` 寫回偏好設定時，container 還在，`defaults` 把網域導向 container，寫進去的是 container，刪 container 時設定就不見了。修成以原位置 plist 的完整路徑寫回並檢查原位置有檔，在重新建立的虛擬機上第 1 項通過、第 3 項除了詢問以外都通過。沙盒版還沒發佈。審查後另加「讀不到 container 就停」「設定檔是空的就不寫回」兩道防護，在同一台虛擬機重跑第 3 項並各做一次觸發（container 權限設 000：結束碼 1、什麼都沒動；空的設定檔：結束碼 0、只搬學習資料），都照預期。
+- 還沒量的：三處「不跳詢問」（第 2 項第二次啟動、第 3 項搬回與再升級；無畫面虛擬機截不到圖，`tccd` 沒有相關紀錄只是佐證）、終端機 App 刪 container 會不會跳詢問、§4.2 第 5 項（Sparkle 讀 feed，留給 §4.3 A）。

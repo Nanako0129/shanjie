@@ -40,8 +40,9 @@ DST_PREFS="$HOME/Library/Preferences/$ID.plist"
 pkill -f "^$HOME/Library/Input Methods/(善解輸入法|shanjie)\.app/Contents/MacOS/shanjie( |\$)" || true
 sleep 1
 for p in "$DST_AS" "$DST_PREFS"; do
-  [ ! -e "$p" ] || { echo "原位置已經有 ${p}（退回期間產生的）。先把它移到別處備份，再執行一次。" >&2; exit 1; }
+  [ ! -e "$p" ] || { echo "原位置已經有 ${p}（退回期間產生的，或上一次執行到一半停下時留下的複本）。先把它移到別處備份，再執行一次。" >&2; exit 1; }
 done
+ls "$C/Data/Library" > /dev/null   # 讀不到（例如系統擋住存取）就在這裡停下，不會把「讀不到」當成「沒有東西要搬」
 T="$(mktemp -d)"
 trap 'rm -rf "$T"' EXIT
 sums() { (cd "$1" && find . -type f -exec shasum -a 256 {} + | sort -k 2); }
@@ -51,11 +52,14 @@ if [ -d "$SRC_AS" ]; then
 fi
 if [ -f "$SRC_PREFS" ]; then
   defaults export "${SRC_PREFS%.plist}" "$T/from-container.plist"
-  defaults import "${DST_PREFS%.plist}" "$T/from-container.plist"
-  [ -f "$DST_PREFS" ] || { echo "偏好設定沒有寫到原位置，container 保留。" >&2; exit 1; }
-  defaults export "${DST_PREFS%.plist}" "$T/written.plist"
-  plutil -convert xml1 "$T/from-container.plist" "$T/written.plist"
-  cmp -s "$T/from-container.plist" "$T/written.plist" || { echo "偏好設定寫回後不一致，container 保留。" >&2; exit 1; }
+  LINES="$(plutil -p "$T/from-container.plist" | wc -l)"   # 空的設定檔印成兩行 {、}
+  if [ "$LINES" -gt 2 ]; then
+    defaults import "${DST_PREFS%.plist}" "$T/from-container.plist"
+    [ -f "$DST_PREFS" ] || { echo "偏好設定沒有寫到原位置，container 保留。" >&2; exit 1; }
+    defaults export "${DST_PREFS%.plist}" "$T/written.plist"
+    plutil -convert xml1 "$T/from-container.plist" "$T/written.plist"
+    cmp -s "$T/from-container.plist" "$T/written.plist" || { echo "偏好設定寫回後不一致，container 保留。" >&2; exit 1; }
+  fi
 fi
 rm -rf "$C"
 echo "已搬回，container 已刪除。"
@@ -75,4 +79,4 @@ EOF
 契約 §4.2 第 3 項在虛擬機量這些；任何一項不成立（跳詢問、資料不同），就是那一片的停止條件：
 
 - 終端機讀取或刪除 `~/Library/Containers` 底下的資料夾時，macOS 會不會跳「存取其他 App 的資料」的詢問。
-- ~~`defaults export` 以 container 裡 plist 的路徑當網域讀得出內容，`defaults import` 寫回之後舊版讀得到。~~ 2026-10-20 量過：讀得出；但以網域名稱 `defaults import` 會寫進 container，刪掉 container 時設定一起不見（契約 §4.2 第 3 項第一次就是這樣失敗的）。改成以原位置 plist 的完整路徑寫回之後，原位置有檔、刪掉 container 後舊版讀得到。
+- ~~`defaults export` 以 container 裡 plist 的路徑當網域讀得出內容，`defaults import` 寫回之後舊版讀得到。~~ 2026-10-20 量過：讀得出；但以網域名稱 `defaults import` 會寫進 container，刪掉 container 時設定一起不見（契約 §4.2 第 3 項第一次就是這樣失敗的）。改成以原位置 plist 的完整路徑寫回之後，原位置有檔，刪掉 container 後 `defaults read com.nyanako.inputmethod.shanjie layout` 讀得到 `eten`（0.4.x 本身讀到這個值沒有量，是推論：container 刪掉之後兩者讀的是同一個檔）。
