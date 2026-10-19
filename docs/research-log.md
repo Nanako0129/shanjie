@@ -8158,3 +8158,9 @@ XL 比 `MAX_FILE`（67,108,864）小 1,168,880 位元組。錨點：4 個模型 
 - 維護者在對話裡打「這個要理嗎？」，出成「這個藥裡嗎」。加到 `eval/dev/user-reported.txt` 最後面：`|這個要理嗎|ㄓㄜˋ ㄍㄜ˙ ㄧㄠˋ ㄌㄧˇ ㄇㄚ`（讀音由 `tools/readings.py` 產生，沒有 CHECK；句首沒有前文）。
 - 出貨設定（`cli --context --tinylm`，`tinylm.sjtl` `e7c179d8`）兩種設定都錯：聊天最後選「這個藥理嗎」，n-gram 前四名是 藥理、藥裡、要裡、要理（正解第 4）；書面選「這個藥裡嗎」。
 - golden 的兩行錯字集重產（`lm_eval.py --context`）：n 154，top1 聊天 32、書面 41 不變，oracle@64 150 → 151。
+
+## 2026-10-20：改裝 `/Library` 的探針 P0（維護者的 Mac）；三個探針都過
+
+- 維護者的 Mac（macOS 27.0.1），裝著的是 dry run 的 0.0.0（`~/Library`）。照 P1 的順序：以 root 複製到 `/Library/Input Methods`（`root:wheel`、`chmod -R a+rX`）、帳號層那份改名保留、`lsregister`、`TISRegisterInputSource` 並啟用、結束程序，維護者登出再登入。
+- 結果：執行中的是 `/Library` 那份；背景程式持有安全輸入時，善解**不反灰**、選單第一項「學習已暫停（安全輸入）」、打得出中文；**Caps Lock 切換正常**（重新登記發生在換位置之後，這次沒有觸發 2026-10-09 的問題）。
+- 三個探針（P0、P1、P3）都過，照維護者先前的決定，`/Library` 併進 v0.5.0，契約 `docs/contracts/system-install.md`。
