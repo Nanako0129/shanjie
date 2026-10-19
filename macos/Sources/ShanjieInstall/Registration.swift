@@ -64,9 +64,10 @@ public enum Registration {
     }
 
     /// installer-v2.md section 9.2 item 1. An unknown mode (first install) or an enabled mode of an
-    /// earlier version needs the whole sequence; otherwise nothing is changed.
-    public static func decide(modeListed: Bool, accepted: Bool, legacyEnabled: Bool) -> Decision {
-        if !modeListed || legacyEnabled { return .fullFlow }
+    /// earlier version needs the whole sequence; otherwise nothing is changed. system-install.md
+    /// section 2.4 item 4: `moved` (the install changed location) always takes the whole sequence.
+    public static func decide(modeListed: Bool, accepted: Bool, legacyEnabled: Bool, moved: Bool = false) -> Decision {
+        if moved || !modeListed || legacyEnabled { return .fullFlow }
         return accepted ? .skipDone : .skipNotAccepted
     }
 
@@ -74,9 +75,19 @@ public enum Registration {
         let all = inputSources(bundleID: bundleID, includeAllInstalled: true)
         let legacy: Set<String> = ["\(bundleID).standard", "\(bundleID).eten"]
         return State(
-            modeListed: all.contains { inputModeID($0) == "\(bundleID).zhuyin" },
+            modeListed: modeListed(in: all, bundleID: bundleID),
             accepted: isAccepted(bundleID: bundleID),
             legacyEnabled: all.contains { inputModeID($0).map(legacy.contains) ?? false && isEnabled($0) })
+    }
+
+    /// Whether the system lists the bundle ID's input mode (read only, one read). The installer reads
+    /// it once at its welcome screen, before copying anything (system-install.md section 2.2).
+    public static func modeListed(bundleID: String) -> Bool {
+        modeListed(in: inputSources(bundleID: bundleID, includeAllInstalled: true), bundleID: bundleID)
+    }
+
+    private static func modeListed(in sources: [TISInputSource], bundleID: String) -> Bool {
+        sources.contains { inputModeID($0) == "\(bundleID).zhuyin" }
     }
 
     /// How long `run` re-reads a mode that is not listed, before taking it for a first install.
@@ -101,8 +112,9 @@ public enum Registration {
     /// `fullFlow` are injected only by tests, to count the calls that would change something.
     /// A mode that is not listed is re-read for up to 2 s first (the system may list it a moment
     /// late right after the files were swapped; not measured), so a first install waits that long.
+    /// With `moved` there is no re-read: the whole sequence runs whatever the state.
     public static func run(
-        bundleURL: URL, bundleID: String, defaults: UserDefaults,
+        bundleURL: URL, bundleID: String, defaults: UserDefaults, moved: Bool = false,
         readState: ((String) -> State)? = nil,
         fullFlow: ((URL, String, UserDefaults) -> Result)? = nil,
         pause: (TimeInterval) -> Void = Registration.pause
@@ -110,12 +122,12 @@ public enum Registration {
         let read = readState ?? Self.readState(bundleID:)
         var state = read(bundleID)
         var waited: TimeInterval = 0
-        while !state.modeListed, waited < listedRecheckLimit {
+        while !moved, !state.modeListed, waited < listedRecheckLimit {
             pause(listedRecheckInterval)
             waited += listedRecheckInterval
             state = read(bundleID)
         }
-        switch decide(modeListed: state.modeListed, accepted: state.accepted, legacyEnabled: state.legacyEnabled) {
+        switch decide(modeListed: state.modeListed, accepted: state.accepted, legacyEnabled: state.legacyEnabled, moved: moved) {
         case .skipDone: return Result(outcome: .done, skipped: true)
         case .skipNotAccepted: return Result(outcome: .notAccepted, skipped: true)
         case .fullFlow: return (fullFlow ?? Self.fullFlow(bundleURL:bundleID:defaults:))(bundleURL, bundleID, defaults)

@@ -1,5 +1,6 @@
 import AppKit
 import CoreText
+import MachO
 import ShanjieInstall
 
 // docs/contracts/s3c-installer.md and installer-v2.md: 安裝善解輸入法.app. One window that walks
@@ -26,13 +27,43 @@ enum Paths {
     static let installed = URL(fileURLWithPath: home + "/Library/Input Methods/善解輸入法.app")
     /// The name before s3b section 13 (the two-mode versions), which install-ime.sh upgrades.
     static let legacy = URL(fileURLWithPath: home + "/Library/Input Methods/shanjie.app")
+    /// system-install.md: the copy for every account on this Mac.
+    static let system = URL(fileURLWithPath: RootStage.systemFolder + "/" + RootStage.appName)
     static let bundledVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? ""
     static let zip = Bundle.main.url(forResource: "shanjie-\(bundledVersion)", withExtension: "zip")
     static let script = Bundle.main.url(forResource: "install-ime", withExtension: "sh")
     static let licenses = Bundle.main.resourceURL?.appendingPathComponent("LICENSES")
 
-    static func installedVersion() -> String? {
-        Bundle(url: installed)?.infoDictionary?["CFBundleShortVersionString"] as? String
+    /// system-install.md section 2.3 step 6: the CFBundleVersion the root stage accepts, compiled
+    /// into this executable (the `__TEXT,__shanjie_ver` section scripts/build-installer.sh links in),
+    /// not read from Info.plist. nil in a build without it, which then cannot install for this Mac.
+    static let expectedBundleVersion: String? = {
+        var size: UInt = 0
+        let header = #dsohandle.assumingMemoryBound(to: mach_header_64.self)
+        guard let bytes = getsectiondata(header, "__TEXT", "__shanjie_ver", &size), size > 0 else { return nil }
+        let text = String(decoding: UnsafeBufferPointer(start: bytes, count: Int(size)), as: UTF8.self)
+        return text.trimmingCharacters(in: .whitespacesAndNewlines)
+    }()
+
+    /// Read from the Info.plist on disk each time: `Bundle(url:)` caches, and these copies change
+    /// while the installer runs (the root stage, a removal in Terminal before going back).
+    static func info(_ app: URL) -> [String: Any]? {
+        NSDictionary(contentsOf: app.appendingPathComponent("Contents/Info.plist")) as? [String: Any]
+    }
+
+    static func version(_ app: URL) -> String? { info(app)?["CFBundleShortVersionString"] as? String }
+
+    static func installedVersion() -> String? { version(installed) }
+
+    /// The /Library copy's version: nil when there is none, "" when its version cannot be read.
+    static func systemVersion() -> String? {
+        guard FileManager.default.fileExists(atPath: system.path) else { return nil }
+        return version(system) ?? ""
+    }
+
+    /// Whether the account layer holds the shipping-ID copy, under either name.
+    static func hasAccountCopy() -> Bool {
+        [installed, legacy].contains { info($0)?["CFBundleIdentifier"] as? String == InstallerPlan.shippingBundleID }
     }
 }
 
@@ -60,26 +91,56 @@ struct Failure: Error {
     var detail: String?
 }
 
-/// Extracts the bundled zip without quarantine and runs install-ime.sh on it with
-/// SHANJIE_INSTALL_SKIP_REGISTER=1 and no inherited environment (s3c section 2.2).
-func copyFiles() -> Failure? {
-    guard let zip = Paths.zip, let script = Paths.script else { return Screens.incomplete }
+let minimalEnvironment = ["HOME": Paths.home, "PATH": "/usr/bin:/bin:/usr/sbin:/sbin"]
+
+/// Extracts the bundled zip without quarantine into a new folder of this installer's own under
+/// NSTemporaryDirectory(); the caller removes it.
+func extractBundled() -> Result<URL, Failure> {
+    guard let zip = Paths.zip else { return .failure(Screens.incomplete) }
     let tmp = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("shanjie-installer-\(UUID().uuidString)")
-    defer { try? FileManager.default.removeItem(at: tmp) }
     do { try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true) } catch {
-        return Failure(message: L("無法建立暫存資料夾。", "Cannot create a temporary folder."))
+        return .failure(Failure(message: L("無法建立暫存資料夾。", "Cannot create a temporary folder.")))
     }
-    let minimal = ["HOME": Paths.home, "PATH": "/usr/bin:/bin:/usr/sbin:/sbin"]
-    let unzip = run("/usr/bin/ditto", ["-x", "-k", "--noqtn", zip.path, tmp.path], environment: minimal)
+    let unzip = run("/usr/bin/ditto", ["-x", "-k", "--noqtn", zip.path, tmp.path], environment: minimalEnvironment)
     guard unzip.status == 0 else {
-        return Failure(message: L("解開內附的輸入法時失敗了。", "Extracting the bundled input method failed."), detail: unzip.stderr)
+        try? FileManager.default.removeItem(at: tmp)
+        return .failure(Failure(message: L("解開內附的輸入法時失敗了。", "Extracting the bundled input method failed."), detail: unzip.stderr))
     }
-    var env = minimal
+    return .success(tmp)
+}
+
+/// Runs install-ime.sh on the extracted bundle with SHANJIE_INSTALL_SKIP_REGISTER=1 and no
+/// inherited environment (s3c section 2.2).
+func copyFiles() -> Failure? {
+    guard let script = Paths.script else { return Screens.incomplete }
+    let tmp: URL
+    switch extractBundled() {
+    case .failure(let failure): return failure
+    case .success(let url): tmp = url
+    }
+    defer { try? FileManager.default.removeItem(at: tmp) }
+    var env = minimalEnvironment
     env["SHANJIE_INSTALL_SKIP_REGISTER"] = "1"
-    let app = tmp.appendingPathComponent("善解輸入法.app").path
+    let app = tmp.appendingPathComponent(RootStage.appName).path
     let result = run("/bin/bash", [script.path, app], environment: env)
     guard result.status == 0 else {
         return Failure(message: L("把輸入法複製到你的帳號時失敗了。", "Copying the input method into your account failed."), detail: result.stderr)
+    }
+    return nil
+}
+
+/// system-install.md section 2.4 items 1 to 3, as this user, after the root stage (or instead of it,
+/// for `moveToSystem`): install-ime.sh's no-copy mode moves the account-layer copy to
+/// .shanjie-previous, runs lsregister -f on the /Library copy and ends the old processes of this
+/// account in both locations.
+func userStage() -> Failure? {
+    guard let script = Paths.script else { return Screens.incomplete }
+    var env = minimalEnvironment
+    env["SHANJIE_INSTALL_NO_COPY"] = "1"
+    env["SHANJIE_INSTALL_SKIP_REGISTER"] = "1"
+    let result = run("/bin/bash", [script.path, Paths.system.path], environment: env)
+    guard result.status == 0 else {
+        return Failure(message: L("把你帳號裡的那份移開時失敗了。", "Moving the copy in your account aside failed."), detail: result.stderr)
     }
     return nil
 }
@@ -122,6 +183,16 @@ enum Look {
     static let verticalInset: CGFloat = 20
     /// The error detail box: about six lines of the 11 pt monospaced text.
     static let detailHeight: CGFloat = 90
+    // system-install.md section 2.5, the two options of the welcome screen. First-round values, no
+    // reference screen; the maintainer judges them in the render-steps rounds.
+    /// Between the two option boxes.
+    static let choiceSpacing: CGFloat = 12
+    /// Inside an option box, around its content.
+    static let choiceInset: CGFloat = 12
+    /// Between the rows inside an option box.
+    static let choiceRowSpacing: CGFloat = 8
+    /// Corner radius of an option box's outline.
+    static let choiceRadius: CGFloat = 8
     static let seal = NSColor(name: nil) { appearance in
         appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
             ? NSColor(srgbRed: 0xD4 / 255, green: 0x55 / 255, blue: 0x3F / 255, alpha: 1)
@@ -228,6 +299,10 @@ struct Screen {
     var primary: String?
     var secondary: String?
     var close: String?
+    /// system-install.md section 2.5: the welcome screen's two options, side by side.
+    var choices = false
+    /// The label of the button that copies `detail` (default: copy the error details).
+    var copyLabel: String?
 }
 
 enum Screens {
@@ -236,33 +311,52 @@ enum Screens {
     static let incomplete = Failure(message: L("安裝程式不完整：找不到內附的輸入法。請重新下載安裝程式。",
                                                "The installer is incomplete: the bundled input method is missing. Download the installer again."))
 
-    static func welcome(plan: InstallerPlan, installed: String?, bundled: String) -> Screen {
-        let account = L("只裝在你的帳號，不需要管理員密碼。", "Installs for your account only; no administrator password needed.")
-        let line: String
-        var primary = L("安裝", "Install")
-        var secondary: String?
-        switch plan {
-        case .install:
-            line = account
-        case .update:
-            line = L("會從 \(installed ?? "") 更新到 \(bundled)。", "Updates \(installed ?? "") to \(bundled). ") + account
-            primary = L("更新", "Update")
-        case .enableSame:  // s3c-installer.md section 2.1: the note beside 重新安裝
-            line = L("這個版本已經裝好了。按「啟用」讓系統開始使用它；從系統設定加入後回到這裡，也是按這個。\n「重新安裝」會把目前這份當成上一版保留，取代原本保留的上一版。",
-                     "This version is already installed. Choose Enable to let the system use it, also after adding it in System Settings.\nReinstall keeps the current copy as the previous version, replacing the one kept before.")
-            primary = L("啟用", "Enable")
-            secondary = L("重新安裝", "Reinstall")
-        case .enableNewer:
-            line = L("已經裝了更新的版本（\(installed ?? "")），不會降版。按「啟用」讓系統開始使用已裝好的那一份。",
-                     "A newer version (\(installed ?? "")) is installed; this installer does not downgrade. Choose Enable to use it.")
-            primary = L("啟用", "Enable")
-        }
-        // app-sandbox.md section 2.5: the rollback note.
-        let details = L("安裝位置：~/Library/Input Methods（只有你的帳號）。\n執行中的舊版會被結束，上一版保留在同一個資料夾的 .shanjie-previous。\n退回 0.4.x 以前（沒有沙盒）的版本時，舊版看不到學習資料與設定，它們已搬進 ~/Library/Containers/com.nyanako.inputmethod.shanjie；退回期間學到的，再升級時不會搬過去。搬回的方法：https://github.com/Nanako0129/shanjie/blob/main/docs/sandbox-restore.md \n",
-                        "Installs into ~/Library/Input Methods (your account only).\nA running older copy is stopped; the previous version is kept there as .shanjie-previous.\nGoing back to a version without the sandbox (0.4.x or earlier), it sees no learned words or settings: they moved into ~/Library/Containers/com.nyanako.inputmethod.shanjie. What it learns is not moved on the next upgrade. To move the data back: https://github.com/Nanako0129/shanjie/blob/main/docs/sandbox-restore.md \n") + license
-        return Screen(step: 0, title: L("善解輸入法 ", "Shanjie ") + bundled,
-                      body: L("開源的 macOS 注音輸入法。", "An open-source Zhuyin input method for macOS.") + "\n" + line,
-                      seal: true, details: details, primary: primary, secondary: secondary, close: L("取消", "Cancel"))
+    // system-install.md section 2.5: the two options' texts, word for word.
+    static let thisMacTitle = L("安裝到這台 Mac", "Install for This Mac")
+    static let thisMacText = L("這台 Mac 的每個帳號都能用。有程式開著安全輸入時（密碼管理器、終端機的「加密的鍵盤輸入」），善解照常能用。",
+                               "Every account on this Mac can use it. Keeps working while another app holds Secure Keyboard Entry.")
+    static let thisMacCost = L("安裝和每次更新都要輸入一次管理員密碼。", "Installing and every update ask for an administrator password once.")
+    static let accountTitle = L("只裝在我的帳號", "My Account Only")
+    static let accountText = L("不需要密碼，一鍵更新。有程式開著安全輸入時，系統會暫時停用善解。",
+                               "No password, one-click updates. The system disables Shanjie while another app holds Secure Keyboard Entry.")
+    static let accountCost = L("其他帳號看不到善解。", "Other accounts do not see Shanjie.")
+
+    /// `system`: the /Library copy's version (nil: none); `account`: the account copy's, when there is one.
+    static func welcome(system: String?, account: String?, bundled: String) -> Screen {
+        var lines = [L("開源的 macOS 注音輸入法。", "An open-source Zhuyin input method for macOS.")]
+        if let system { lines.append(L("已裝給這台 Mac，版本 \(system)。", "Installed for this Mac, version \(system).")) }
+        if let account { lines.append(L("已裝在你的帳號，版本 \(account)。", "Installed for your account, version \(account).")) }
+        // system-install.md section 2.5 first, then app-sandbox.md section 2.5's rollback note.
+        let details = L("「這台 Mac」把善解放進系統的輸入法資料夾，由系統保護檔案；之後更新時，善解更新會跳出系統的密碼框，文字是「善解更新 wants permission to update 善解輸入法.」，只在你按下關於頁的「更新」之後出現。選「這台 Mac」時，有程式開著安全輸入的期間，你打的字會經過善解（和平常一樣：學習暫停、不讀前文、不記錄）；終端機開著「加密的鍵盤輸入」時，sudo 的密碼提示也一樣會經過善解。「只有我的帳號」就是之前的安裝方式。兩種之間可以重新打開安裝程式切換，學習資料與設定不受影響（container 依 bundle ID）。不是管理員的帳號，請選「只有我的帳號」，或請管理員安裝。\n執行中的舊版會被結束，上一版保留在同一個資料夾的 .shanjie-previous。\n退回 0.4.x 以前（沒有沙盒）的版本時，舊版看不到學習資料與設定，它們已搬進 ~/Library/Containers/com.nyanako.inputmethod.shanjie；退回期間學到的，再升級時不會搬過去。搬回的方法：https://github.com/Nanako0129/shanjie/blob/main/docs/sandbox-restore.md \n",
+                        "This Mac puts Shanjie in the system's input methods folder, where the system protects its files. Later updates show the system's password dialog, reading \"善解更新 wants permission to update 善解輸入法.\", and only after you choose Update on the About page. With This Mac, while another app holds Secure Keyboard Entry, what you type goes through Shanjie (as always: learning paused, no reading of earlier text, nothing recorded); with Secure Keyboard Entry on in Terminal, the sudo password prompt goes through Shanjie too. My Account Only is the way it was installed before. Open the installer again to switch between the two; learned words and settings stay (the container follows the bundle ID). On an account that is not an administrator, choose My Account Only, or ask an administrator to install it.\nA running older copy is stopped; the previous version is kept in the same folder as .shanjie-previous.\nGoing back to a version without the sandbox (0.4.x or earlier), it sees no learned words or settings: they moved into ~/Library/Containers/com.nyanako.inputmethod.shanjie. What it learns is not moved on the next upgrade. To move the data back: https://github.com/Nanako0129/shanjie/blob/main/docs/sandbox-restore.md \n") + license
+        // No primary button: Return chooses neither option (section 2.5).
+        return Screen(step: 0, title: L("善解輸入法 ", "Shanjie ") + bundled, body: lines.joined(separator: "\n"),
+                      seal: true, details: details, close: L("取消", "Cancel"), choices: true)
+    }
+
+    /// The same version is installed (s3c-installer.md section 2.1): enable, or reinstall.
+    static func same(canReinstall: Bool) -> Screen {
+        Screen(step: 0, title: L("這個版本已經裝好了", "This version is already installed"),
+               body: L("按「啟用」讓系統開始使用它；從系統設定加入後回到這裡，也是按這個。\n「重新安裝」會把目前這份當成上一版保留，取代原本保留的上一版。",
+                       "Choose Enable to let the system use it, also after adding it in System Settings.\nReinstall keeps the current copy as the previous version, replacing the one kept before."),
+               seal: true, primary: L("啟用", "Enable"), secondary: canReinstall ? L("重新安裝", "Reinstall") : nil, close: L("取消", "Cancel"))
+    }
+
+    /// system-install.md section 2.2: "My Account Only" while this Mac has a copy. Nothing changed.
+    static func blocked() -> Screen {
+        Screen(step: 0, title: L("這台 Mac 已經裝了善解", "Shanjie is already installed for this Mac"),
+               body: L("善解已經裝在 /Library/Input Methods，給這台 Mac 的每個帳號用，所以不能再只裝在你的帳號。什麼都沒有改。\n要改成只裝在你的帳號，請管理員在「終端機」執行下面的指令移除，再重新打開這個安裝程式。",
+                       "Shanjie is installed in /Library/Input Methods for every account on this Mac, so it cannot also be installed for your account only. Nothing was changed.\nTo install it for your account only instead, have an administrator run the command below in Terminal, then open this installer again."),
+               seal: true, detail: RootStage.removalCommand, secondary: L("返回", "Back"), close: L("完成", "Done"),
+               copyLabel: L("拷貝指令", "Copy Command"))
+    }
+
+    /// system-install.md section 2.4: after a location change. One button; never logs the user out.
+    static let logOutSentence = L("請登出再登入一次，善解才會在所有 App 裡正常。登入後輸入法選單裡如果沒有善解，請重新打開這個安裝程式。",
+                                  "Log out and back in once, so that Shanjie works in every app. If Shanjie is not in the input menu after you log back in, open this installer again.")
+
+    static func logOut() -> Screen {
+        Screen(step: 3, title: L("✓ 已經裝好了，請登出再登入", "✓ Installed: log out and back in"), body: logOutSentence, primary: L("好", "OK"))
     }
 
     static func working(_ status: String) -> Screen {
@@ -270,12 +364,21 @@ enum Screens {
     }
 
     static let copying = L("正在複製…", "Copying…")
-    static let enabling = L("正在請系統啟用…", "Asking the system to turn it on…")
+    /// system-install.md section 2.4: the system may ask whether the installer may enable Shanjie.
+    static let enabling = L("正在請系統啟用…如果系統問要不要允許，請按『允許』。", "Asking the system to turn it on… If it asks, choose Allow.")
+    static let password = L("請在系統的視窗輸入管理員密碼。", "Enter an administrator password in the system's dialog.")
     static let waiting = L("正在等系統啟用。如果系統跳出視窗，請允許「善解輸入法」。",
                            "Waiting for the system to turn it on. If it asks, allow Shanjie.")
 
     static func failed(_ failure: Failure) -> Screen {
         Screen(step: 1, title: L("沒有裝好", "Not installed"), body: failure.message, detail: failure.detail, close: L("完成", "Done"))
+    }
+
+    /// The failure screen after a location change, with the log-out sentence (section 2.4).
+    static func failedLogOut(_ failure: Failure) -> Screen {
+        var screen = failed(failure)
+        screen.body += "\n\n" + logOutSentence
+        return screen
     }
 
     /// installer-v2.md section 9.2 item 3: the system adds a new input method only when the user
@@ -289,6 +392,9 @@ enum Screens {
                close: L("完成", "Done"))
     }
 
+    static let notAcceptedMessage = L("系統沒有接受這個輸入法。可以到「系統設定 → 鍵盤 → 輸入方式」手動加入「善解輸入法」。",
+                                      "The system did not accept the input method. Add Shanjie in System Settings > Keyboard > Input Sources.")
+
     static let notDetected = L("還沒偵測到，請照上面三步加入。", "Not detected yet. Please add it with the three steps above.")
 
     static func tryIt(note: String?) -> Screen {
@@ -301,6 +407,34 @@ enum Screens {
 
     static let legacyNote = L("如果輸入方式清單裡還有舊版的「善解（標準）」或「善解（倚天）」，請到「系統設定 → 鍵盤 → 輸入方式」移除。",
                               "If the old Shanjie (Standard) or Shanjie (ETen) entries are still listed, remove them in System Settings > Keyboard > Input Sources.")
+}
+
+/// A push button Tab always reaches, whatever the system's keyboard navigation setting: the two
+/// options of the welcome screen have no default button, so the keyboard needs another way to them.
+final class FocusableButton: NSButton {
+    override var canBecomeKeyView: Bool { true }
+}
+
+/// One option of the welcome screen: its content inside a rounded outline in the separator colour.
+final class ChoiceBox: NSView {
+    init(content: NSView) {
+        super.init(frame: .zero)
+        translatesAutoresizingMaskIntoConstraints = false
+        content.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(content)
+        NSLayoutConstraint.activate([
+            content.leadingAnchor.constraint(equalTo: leadingAnchor), content.trailingAnchor.constraint(equalTo: trailingAnchor),
+            content.topAnchor.constraint(equalTo: topAnchor), content.bottomAnchor.constraint(equalTo: bottomAnchor),
+        ])
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let outline = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: Look.choiceRadius, yRadius: Look.choiceRadius)
+        NSColor.separatorColor.setStroke()
+        outline.stroke()
+    }
 }
 
 /// The window's content: every element of every screen, shown or hidden by `show`.
@@ -323,6 +457,9 @@ final class StepView: NSView {
     let primary = NSButton(title: "", target: nil, action: nil)
     let secondary = NSButton(title: "", target: nil, action: nil)
     let close = NSButton(title: "", target: nil, action: nil)
+    let thisMacButton = FocusableButton(title: Screens.thisMacTitle, target: nil, action: nil)
+    let accountButton = FocusableButton(title: Screens.accountTitle, target: nil, action: nil)
+    private let choiceRow: NSStackView
     private let statusRow: NSStackView
     private let detailRow: NSStackView
     private let detailsRow: NSStackView
@@ -338,7 +475,34 @@ final class StepView: NSView {
         let toggle = NSStackView(views: [disclosure, disclosureLabel])
         detailsRow = NSStackView(views: [toggle, detailsBody])
         tryRow = NSStackView(views: [tryField, switchButton, switchNote])
+        // Two boxes of the same width side by side, each its text, its cost and its button.
+        let boxWidth = (width - Look.choiceSpacing) / 2
+        let boxes = [(Screens.thisMacText, Screens.thisMacCost, thisMacButton), (Screens.accountText, Screens.accountCost, accountButton)]
+            .map { text, cost, button -> ChoiceBox in
+                let textLabel = NSTextField(wrappingLabelWithString: text)
+                let costLabel = NSTextField(wrappingLabelWithString: cost)
+                textLabel.font = Look.bodyFont
+                costLabel.font = Look.smallFont
+                costLabel.textColor = .secondaryLabelColor
+                for label in [textLabel, costLabel] { label.preferredMaxLayoutWidth = boxWidth - 2 * Look.choiceInset }
+                button.bezelStyle = .push
+                button.keyEquivalent = ""
+                let column = NSStackView(views: [textLabel, costLabel, NSView(), button])
+                column.orientation = .vertical
+                column.alignment = .leading
+                column.spacing = Look.choiceRowSpacing
+                column.edgeInsets = NSEdgeInsets(top: Look.choiceInset, left: Look.choiceInset, bottom: Look.choiceInset, right: Look.choiceInset)
+                let box = ChoiceBox(content: column)
+                box.widthAnchor.constraint(equalToConstant: boxWidth).isActive = true
+                return box
+            }
+        choiceRow = NSStackView(views: boxes)
+        choiceRow.spacing = Look.choiceSpacing
+        choiceRow.distribution = .fillEqually
+        choiceRow.alignment = .top
         super.init(frame: frame)
+        // The same height for both boxes, so the two buttons line up.
+        boxes[0].heightAnchor.constraint(equalTo: boxes[1].heightAnchor).isActive = true
 
         title.font = Look.titleFont
         for label in [body, status, detailsLabel, switchNote] {
@@ -379,7 +543,7 @@ final class StepView: NSView {
         let header = NSStackView(views: [seal, title])
         header.spacing = Look.headerSpacing
         let buttons = NSStackView(views: [NSView(), close, secondary, primary])
-        let stack = NSStackView(views: [indicator, header, body, statusRow, detailRow, detailsRow, tryRow, NSView(), buttons])
+        let stack = NSStackView(views: [indicator, header, body, choiceRow, statusRow, detailRow, detailsRow, tryRow, NSView(), buttons])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = Look.rowSpacing
@@ -407,7 +571,26 @@ final class StepView: NSView {
         bounds.fill()
     }
 
-    @objc func toggleDetails() { detailsBody.isHidden = disclosure.state != .on }
+    @objc func toggleDetails() {
+        detailsBody.isHidden = disclosure.state != .on
+        fitWindow()
+    }
+
+    /// The height the shown screen needs, never below the first-round window size (the welcome
+    /// screen with its two options and the details open is taller than the other screens).
+    var fittingHeight: CGFloat {
+        layoutSubtreeIfNeeded()
+        return max(Look.windowSize.height, fittingSize.height)
+    }
+
+    /// Grows or shrinks the window to `fittingHeight`, keeping its top edge where it is.
+    private func fitWindow() {
+        guard let window else { return }
+        let content = NSRect(origin: .zero, size: NSSize(width: Look.windowSize.width, height: fittingHeight))
+        var frame = window.frameRect(forContentRect: content)
+        frame.origin = NSPoint(x: window.frame.minX, y: window.frame.maxY - frame.height)
+        window.setFrame(frame, display: true)
+    }
 
     func show(_ screen: Screen) {
         indicator.show(current: screen.step)
@@ -426,29 +609,38 @@ final class StepView: NSView {
         detailsBody.isHidden = true
         tryRow.isHidden = !screen.tryIt
         switchNote.stringValue = ""
-        // Return is the default key everywhere except the try page, where it belongs to the field.
-        primary.keyEquivalent = screen.tryIt ? "" : "\r"
+        choiceRow.isHidden = !screen.choices
+        copyDetail.title = screen.copyLabel ?? L("拷貝錯誤細節", "Copy Details")
+        // Return is the default key everywhere except the try page, where it belongs to the field,
+        // and the welcome screen, where neither option is the default (system-install.md section 2.5).
+        primary.keyEquivalent = screen.tryIt || screen.choices ? "" : "\r"
         for (button, label) in [(primary, screen.primary), (secondary, screen.secondary), (close, screen.close)] {
             button.title = label ?? ""
             button.isHidden = label == nil
             button.isEnabled = !screen.busy
         }
+        fitWindow()
     }
 }
 
 // MARK: - Rendering for review (installer-v2 section 1.4)
 
-/// The eight screens with made-up versions and error text, for screenshots only.
+/// The review screens with made-up versions and error text, for screenshots only.
 func reviewScreens() -> [(String, Screen)] {
-    [("1-welcome-install", Screens.welcome(plan: .install, installed: nil, bundled: "0.3.1")),
-     ("2-welcome-update", Screens.welcome(plan: .update, installed: "0.3.0", bundled: "0.3.1")),
-     ("3-welcome-same", Screens.welcome(plan: .enableSame, installed: "0.3.1", bundled: "0.3.1")),
-     ("4-welcome-newer", Screens.welcome(plan: .enableNewer, installed: "0.4.0", bundled: "0.3.1")),
-     ("5-installing", Screens.working(Screens.copying)),
-     ("6-failed", Screens.failed(Failure(message: L("把輸入法複製到你的帳號時失敗了。", "Copying the input method into your account failed."),
+    [("1-welcome", Screens.welcome(system: nil, account: nil, bundled: "0.5.0")),
+     ("2-welcome-this-mac", Screens.welcome(system: "0.5.0", account: nil, bundled: "0.5.0")),
+     ("3-welcome-both", Screens.welcome(system: "0.4.9", account: "0.4.7", bundled: "0.5.0")),
+     ("4-same", Screens.same(canReinstall: true)),
+     ("5-blocked", Screens.blocked()),
+     ("6-installing", Screens.working(Screens.copying)),
+     ("7-password", Screens.working(Screens.password)),
+     ("8-failed", Screens.failed(Failure(message: L("把輸入法複製到你的帳號時失敗了。", "Copying the input method into your account failed."),
                                          detail: "error: cp: ~/Library/Input Methods/.shanjie-staging-AbC123/善解輸入法.app: No space left on device"))),
-     ("7-activate", Screens.activate()),
-     ("8-try", Screens.tryIt(note: nil))]
+     ("9-enabling", Screens.working(Screens.enabling)),
+     ("10-activate", Screens.activate()),
+     ("11-try", Screens.tryIt(note: nil)),
+     ("12-log-out", Screens.logOut()),
+     ("13-failed-log-out", Screens.failedLogOut(Failure(message: Screens.notAcceptedMessage)))]
 }
 
 /// Draws every review screen in light and dark at 2x into `folder`, which must already exist;
@@ -462,11 +654,7 @@ func renderSteps(into folder: URL) -> Int32 {
     }
     for (name, screen) in reviewScreens() {
         for (suffix, appearanceName) in [("light", NSAppearance.Name.aqua), ("dark", .darkAqua)] {
-            guard let appearance = NSAppearance(named: appearanceName),
-                  let bitmap = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int(Look.windowSize.width * 2),
-                                                pixelsHigh: Int(Look.windowSize.height * 2), bitsPerSample: 8,
-                                                samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
-                                                colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0) else { return 1 }
+            guard let appearance = NSAppearance(named: appearanceName) else { return 1 }
             let view = StepView(frame: NSRect(origin: .zero, size: Look.windowSize))
             view.appearance = appearance
             view.show(screen)
@@ -474,8 +662,15 @@ func renderSteps(into folder: URL) -> Int32 {
                 view.disclosure.state = .on
                 view.toggleDetails()
             }
+            // The window grows to fit its screen (StepView.fitWindow); the picture does the same.
+            let size = NSSize(width: Look.windowSize.width, height: view.fittingHeight)
+            view.setFrameSize(size)
             view.layoutSubtreeIfNeeded()
-            bitmap.size = Look.windowSize
+            guard let bitmap = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int(size.width * 2),
+                                                pixelsHigh: Int(size.height * 2), bitsPerSample: 8,
+                                                samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+                                                colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0) else { return 1 }
+            bitmap.size = size
             appearance.performAsCurrentDrawingAppearance { view.cacheDisplay(in: view.bounds, to: bitmap) }
             guard let png = bitmap.representation(using: .png, properties: [:]) else { return 1 }
             do {
@@ -499,11 +694,20 @@ final class Controller: NSObject, NSApplicationDelegate, NSWindowDelegate {
     /// After selecting the input source, how long to wait before reading back the current one.
     /// A first guess; the device run shows whether the switch is visible sooner.
     private let switchCheckDelay: TimeInterval = 0.3
+    /// AppleScript's "User canceled." (the password dialog's Cancel).
+    private let userCanceled = -128
 
     private var window: NSWindow!
     private let view = StepView(frame: NSRect(origin: .zero, size: Look.windowSize))
     private var isBusy = false
-    private var plan = InstallerPlan.install
+    /// system-install.md section 2.2: the inputs read at the welcome screen, before any copy.
+    private var systemVersion: String?
+    private var accountCopy = false
+    private var accountVersion: String?
+    private var listedBeforeCopy = false
+    private var decision = InstallDecision(action: .account(.install))
+    /// The copy this run enables: /Library's for "This Mac", the account's otherwise.
+    private var target = Paths.installed
     /// app-sandbox.md section 2.7: the installed copy's bundle ID and its enabled input modes, read
     /// once at the start, before anything is swapped.
     private var startBundleID: String?
@@ -517,9 +721,11 @@ final class Controller: NSObject, NSApplicationDelegate, NSWindowDelegate {
         window.title = L("安裝善解輸入法", "Shanjie Installer")
         window.delegate = self
         window.contentView = view
+        window.autorecalculatesKeyViewLoop = true
         for (button, selector) in [(view.primary, #selector(primaryPressed)), (view.secondary, #selector(secondaryPressed)),
                                    (view.close, #selector(closePressed)), (view.licenses, #selector(licensesPressed)),
-                                   (view.copyDetail, #selector(copyDetailPressed)), (view.switchButton, #selector(switchPressed))] {
+                                   (view.copyDetail, #selector(copyDetailPressed)), (view.switchButton, #selector(switchPressed)),
+                                   (view.thisMacButton, #selector(thisMacPressed)), (view.accountButton, #selector(accountPressed))] {
             button.target = self
             button.action = selector
         }
@@ -565,57 +771,160 @@ final class Controller: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     // MARK: steps
 
+    /// Reads the state once per welcome screen. The welcome screen is shown at launch, after a
+    /// cancelled password dialog and from the blocked screen; each time nothing has been copied in
+    /// this run yet, so `listedBeforeCopy` is always a read from before any copy (section 2.2).
     private func showWelcome() {
-        let installed = Paths.installedVersion()
-        plan = InstallerPlan.decide(installed: installed, bundled: Paths.bundledVersion)
-        startBundleID = Bundle(url: Paths.installed)?.bundleIdentifier ?? Bundle(url: Paths.legacy)?.bundleIdentifier
-        startModes = startBundleID.map(Registration.enabledModeIDs(bundleID:)) ?? []
-        show(Screens.welcome(plan: plan, installed: installed, bundled: Paths.bundledVersion),
-             primary: { [weak self] in
-                 guard let self else { return }
-                 if self.plan.copiesFiles { self.copyThenEnable() } else { self.enable(afterCopy: false) }
-             },
-             secondary: { [weak self] in self?.copyThenEnable() })
-        // Only copying needs the bundled zip and script; enabling an installed copy does not.
-        if Paths.zip == nil || Paths.script == nil || Paths.bundledVersion.isEmpty {
-            if plan.copiesFiles { fail(Screens.incomplete) } else { view.secondary.isHidden = true }
+        systemVersion = Paths.systemVersion()
+        accountCopy = Paths.hasAccountCopy()
+        accountVersion = Paths.installedVersion()
+        listedBeforeCopy = Registration.modeListed(bundleID: InstallerPlan.shippingBundleID)
+        let start = [Paths.installed, Paths.legacy].lazy.compactMap { Paths.info($0)?["CFBundleIdentifier"] as? String }.first
+        startBundleID = start
+        startModes = start.map(Registration.enabledModeIDs(bundleID:)) ?? []
+        show(Screens.welcome(system: systemVersion, account: accountCopy ? accountVersion : nil, bundled: Paths.bundledVersion))
+    }
+
+    @objc private func thisMacPressed() { choose(.thisMac) }
+    @objc private func accountPressed() { choose(.accountOnly) }
+
+    private func choose(_ choice: InstallChoice) {
+        decision = InstallDecision.decide(choice: choice, system: systemVersion, accountCopy: accountCopy, account: accountVersion,
+                                          bundled: Paths.bundledVersion, listedBeforeCopy: listedBeforeCopy)
+        target = choice == .thisMac ? Paths.system : Paths.installed
+        let canCopy = Paths.zip != nil && Paths.script != nil && !Paths.bundledVersion.isEmpty
+        switch decision.action {
+        case .blocked:
+            show(Screens.blocked(), secondary: { [weak self] in self?.showWelcome() })
+        case .copyToSystem:
+            installForThisMac()
+        case .moveToSystem:
+            guard Paths.script != nil else { return fail(Screens.incomplete) }
+            moveThenEnable()
+        case .enableSystemSame:
+            show(Screens.same(canReinstall: canCopy), primary: { [weak self] in self?.enable(afterCopy: false) },
+                 secondary: { [weak self] in
+                     self?.decision = InstallDecision.reinstallSystem
+                     self?.installForThisMac()
+                 })
+        case .enableSystemNewer, .account(.enableNewer):
+            enable(afterCopy: false)
+        case .account(.enableSame):
+            show(Screens.same(canReinstall: canCopy), primary: { [weak self] in self?.enable(afterCopy: false) },
+                 secondary: { [weak self] in self?.copyThenEnable() })
+        case .account(.install), .account(.update):
+            guard canCopy else { return fail(Screens.incomplete) }
+            copyThenEnable()
+        }
+    }
+
+    /// The ETen carry-over (app-sandbox.md section 2.7) with the state read at the start, before
+    /// `swap`, off the main thread; then `done` on the main thread with swap's result.
+    private func carryOverThen<T>(_ swap: @escaping () -> T, done: @escaping (T) -> Void) {
+        let (bundleID, modes) = (startBundleID, startModes)
+        // The controller lives as long as the app (it is the application delegate).
+        DispatchQueue.global(qos: .userInitiated).async {
+            let result = InstallerFlow.copy(bundleID: bundleID, modes: modes,
+                                            layoutOnDisk: { InstallerFlow.layoutOnDisk(bundleID: $0, home: Paths.home) },
+                                            swap: swap)
+            DispatchQueue.main.async { MainActor.assumeIsolated { done(result) } }
         }
     }
 
     private func copyThenEnable() {
         show(Screens.working(Screens.copying))
-        // app-sandbox.md section 2.7: the ETen carry-over with the state read at the start, before
-        // the swap (the fullFlow call after enabling stays; it does not rewrite a chosen layout).
-        let (bundleID, modes) = (startBundleID, startModes)
-        // The controller lives as long as the app (it is the application delegate).
-        DispatchQueue.global(qos: .userInitiated).async {
-            let failure = InstallerFlow.copy(bundleID: bundleID, modes: modes,
-                                             layoutOnDisk: { InstallerFlow.layoutOnDisk(bundleID: $0, home: Paths.home) },
-                                             swap: copyFiles)
-            DispatchQueue.main.async {
-                if let failure { self.fail(failure) } else { self.enable(afterCopy: true) }
+        // The fullFlow call after enabling stays; it does not rewrite a chosen layout.
+        carryOverThen(copyFiles) { failure in
+            if let failure { self.fail(failure) } else { self.enable(afterCopy: true) }
+        }
+    }
+
+    /// system-install.md section 2.3: extract, check the signature in this process (an early,
+    /// friendly failure only), then the root stage through the system's password dialog.
+    private func installForThisMac() {
+        guard Paths.zip != nil, Paths.script != nil else { return fail(Screens.incomplete) }
+        guard let version = Paths.expectedBundleVersion else {
+            return fail(Failure(message: L("這份安裝程式不能裝給這台 Mac（建置時沒有寫入版本）。請重新下載安裝程式。",
+                                           "This installer cannot install for this Mac (no version was built in). Download the installer again.")))
+        }
+        show(Screens.working(Screens.copying))
+        carryOverThen(extractBundled) { extracted in
+            switch extracted {
+            case .failure(let failure): self.fail(failure)
+            case .success(let tmp): self.rootStage(tmp, version: version)
             }
+        }
+    }
+
+    private func rootStage(_ tmp: URL, version: String) {
+        let remove = { try? FileManager.default.removeItem(at: tmp) }
+        guard RootStage.satisfies(bundle: tmp.appendingPathComponent(RootStage.appName), requirement: RootStage.requirement) else {
+            remove()
+            return fail(Failure(message: L("內附的輸入法簽章不對，沒有安裝。請重新下載安裝程式。",
+                                           "The bundled input method's signature is not valid; nothing was installed. Download the installer again.")))
+        }
+        let source: String
+        do { source = try RootStage.appleScript(source: tmp.path, .production(version: version)) } catch {
+            remove()
+            return fail(Failure(message: L("暫存資料夾的路徑不是預期的樣子，沒有安裝。", "The temporary folder's path is not as expected; nothing was installed."),
+                                detail: tmp.path))
+        }
+        show(Screens.working(Screens.password))
+        // On the main thread (section 2.3), after this screen has been drawn.
+        DispatchQueue.main.async {
+            var error: NSDictionary?
+            _ = NSAppleScript(source: source)?.executeAndReturnError(&error)
+            remove()
+            if let error {
+                if (error[NSAppleScript.errorNumber] as? Int) == self.userCanceled { return self.showWelcome() }
+                return self.fail(Failure(message: L("裝到這台 Mac 時失敗了，原本裝著的沒有變動。", "Installing for this Mac failed; the installed copy was not changed."),
+                                         detail: error[NSAppleScript.errorMessage] as? String))
+            }
+            self.userStageThenEnable()
+        }
+    }
+
+    /// Section 2.4 items 1 to 3 after the root stage, then registration.
+    private func userStageThenEnable() {
+        show(Screens.working(Screens.copying))
+        DispatchQueue.global(qos: .userInitiated).async {
+            let failure = userStage()
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated { if let failure { self.fail(failure) } else { self.enable(afterCopy: true) } }
+            }
+        }
+    }
+
+    /// `moveToSystem`: /Library already holds this version or a newer one, so only the user stage.
+    private func moveThenEnable() {
+        show(Screens.working(Screens.copying))
+        carryOverThen(userStage) { failure in
+            if let failure { self.fail(failure) } else { self.enable(afterCopy: true) }
         }
     }
 
     /// s3c section 2.3: against the installed copy, with its own bundle ID and preference domain.
     /// Installer-v2 section 9.2 item 2: only after a copy can the system's "not accepted" be a
     /// moment that passes, so only then is it polled; without a copy it goes straight to activate.
+    /// System-install.md section 2.4: after a location change (`decision.moved`) registration is
+    /// forced and the log-out screen follows.
     private func enable(afterCopy: Bool) {
         show(Screens.working(Screens.enabling))
-        guard let bundleID = Bundle(url: Paths.installed)?.bundleIdentifier,
+        guard let bundleID = Paths.info(target)?["CFBundleIdentifier"] as? String,
               let defaults = UserDefaults(suiteName: bundleID) else {
             fail(Failure(message: L("找不到已安裝的善解輸入法。", "The installed input method was not found.")))
             return
         }
-        let result = Registration.run(bundleURL: Paths.installed, bundleID: bundleID, defaults: defaults)
-        switch InstallerFlow.next(after: result.outcome) {
+        let moved = decision.moved
+        InstallerFlow.logRegistration(moved: moved)
+        let result = Registration.run(bundleURL: target, bundleID: bundleID, defaults: defaults, moved: moved)
+        switch InstallerFlow.next(after: result.outcome, moved: moved) {
         case .tryIt: showTry(note: result.legacyDisableFailed ? Screens.legacyNote : nil)
         case .activate: showActivate()
         case .waiting: if afterCopy { poll(bundleID: bundleID) } else { showActivate() }
-        case .failed:
-            fail(Failure(message: L("系統沒有接受這個輸入法。可以到「系統設定 → 鍵盤 → 輸入方式」手動加入「善解輸入法」。",
-                                    "The system did not accept the input method. Add Shanjie in System Settings > Keyboard > Input Sources.")))
+        case .failed: fail(Failure(message: Screens.notAcceptedMessage))
+        case .logOut: show(Screens.logOut(), primary: { NSApp.terminate(nil) })
+        case .failedLogOut: show(Screens.failedLogOut(Failure(message: Screens.notAcceptedMessage)))
         }
     }
 
@@ -630,7 +939,7 @@ final class Controller: NSObject, NSApplicationDelegate, NSWindowDelegate {
     /// modes of earlier versions). Not accepted never reaches a TIS call that changes anything,
     /// whatever `run` would have decided.
     private func recheck() {
-        guard let bundleID = Bundle(url: Paths.installed)?.bundleIdentifier,
+        guard let bundleID = Paths.info(target)?["CFBundleIdentifier"] as? String,
               let defaults = UserDefaults(suiteName: bundleID) else {
             fail(Failure(message: L("找不到已安裝的善解輸入法。", "The installed input method was not found.")))
             return
@@ -639,10 +948,10 @@ final class Controller: NSObject, NSApplicationDelegate, NSWindowDelegate {
             showActivate(note: Screens.notDetected)
             return
         }
-        let result = Registration.run(bundleURL: Paths.installed, bundleID: bundleID, defaults: defaults)
+        let result = Registration.run(bundleURL: target, bundleID: bundleID, defaults: defaults)
         switch InstallerFlow.next(after: result.outcome) {
         case .tryIt: showTry(note: result.legacyDisableFailed ? Screens.legacyNote : nil)
-        case .activate, .waiting: showActivate(note: Screens.notDetected)
+        case .activate, .waiting, .logOut, .failedLogOut: showActivate(note: Screens.notDetected)
         case .failed: fail(Failure(message: L("系統沒有接受這個輸入法。", "The system did not accept the input method.")))
         }
     }
@@ -671,7 +980,7 @@ final class Controller: NSObject, NSApplicationDelegate, NSWindowDelegate {
                     // Once accepted, a second run finishes the steps after the check (ETen
                     // carry-over, disabling the modes of earlier versions).
                     let again = UserDefaults(suiteName: bundleID).map {
-                        Registration.run(bundleURL: Paths.installed, bundleID: bundleID, defaults: $0)
+                        Registration.run(bundleURL: self.target, bundleID: bundleID, defaults: $0)
                     }
                     let finished = again.map { $0.outcome == .done && !$0.legacyDisableFailed } ?? false
                     self.showTry(note: finished ? nil : Screens.legacyNote)
@@ -700,7 +1009,7 @@ final class Controller: NSObject, NSApplicationDelegate, NSWindowDelegate {
     @objc private func switchPressed() {
         window.makeFirstResponder(view.tryField)
         let failed = L("切換失敗。請從選單列的輸入法選單選「善解輸入法」。", "Could not switch. Choose Shanjie from the input menu in the menu bar.")
-        guard let bundleID = Bundle(url: Paths.installed)?.bundleIdentifier, Registration.selectMode(bundleID: bundleID) else {
+        guard let bundleID = Paths.info(target)?["CFBundleIdentifier"] as? String, Registration.selectMode(bundleID: bundleID) else {
             view.switchNote.stringValue = failed
             return
         }

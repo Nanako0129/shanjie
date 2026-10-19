@@ -21,6 +21,9 @@ if $PB -c 'Print :LSUIElement' "$PLIST" >/dev/null 2>&1; then fail "the installe
 
 VERSION="$($PB -c 'Print :CFBundleShortVersionString' "$PLIST")"
 ZIP="${2:-$ROOT/build/shanjie-$VERSION.zip}"
+# docs/contracts/system-install.md section 2.3 step 6: the version the root stage accepts, compiled into the executable.
+[ "$("$ROOT/scripts/installer-version.sh" "$APP/Contents/MacOS/shanjie-installer")" = "$VERSION" ] \
+  || fail "the installer executable does not carry version $VERSION (__TEXT,__shanjie_ver)"
 [ -f "$RES/shanjie-$VERSION.zip" ] || fail "Resources/shanjie-$VERSION.zip missing (the name must carry the installer's own version)"
 cmp -s "$RES/shanjie-$VERSION.zip" "$ZIP" || fail "the bundled zip differs from $ZIP"
 [ "$(find "$RES" -name '*.app' | wc -l | tr -d ' ')" = 0 ] || fail "Resources must not contain an expanded .app"
