@@ -234,7 +234,7 @@
 - **搬回**：
   - `docs/sandbox-restore.md` 寫一個手動指令：
     1. 先結束輸入法程序；
-    2. 把 container 裡的學習資料夾 `ditto` 複製回原位置，比對雜湊；偏好設定用 `defaults export`（讀 container 裡的 plist）與 `defaults import` 寫回，不直接複製 plist（cfprefsd 的快取可能忽略直接寫入的檔案〔推論〕，和 §5 一致）；
+    2. 把 container 裡的學習資料夾 `ditto` 複製回原位置，比對雜湊；偏好設定用 `defaults export`（讀 container 裡的 plist）與以原位置 plist 完整路徑當網域的 `defaults import` 寫回（用網域名稱寫會寫進 container，2026-10-20 §4.2 第 3 項量到），不直接複製 plist（cfprefsd 的快取可能忽略直接寫入的檔案〔推論〕，和 §5 一致）；
     3. 相同時刪掉**整個** `~/Library/Containers/com.nyanako.inputmethod.shanjie`。
   - 一定要刪 container：它只在第一次建立時移轉，留著的話，下次升級到沙盒版不會再搬，搬回來的資料就看起來不見了。
   - §4.2 第 3 項在虛擬機驗證。不做自動搬回。
@@ -440,6 +440,13 @@
 4. **倚天排列**：dry run 的 0.0.0 用安裝程式裝不上去（見本節開頭），所以合併前由 §2.7 的單元測試與 §2.6 第 3 步代替。真正的安裝程式路徑在 v0.5.0 發佈後量（§4.4）。
 5. **Sparkle 讀得到 feed**：沙盒版用 `launchctl asuser` 啟動後，開關於頁的「立即檢查」需要介面操作。做不到時，這一項改在 §4.3 A 量。
 
+
+**2026-10-20 結果**（dry run 39265871734，`shanjie-0.0.0.zip` 雜湊與 Developer ID 簽章、公證裝訂、沙盒 entitlements、`Contents/Frameworks/Updater/Sparkle.framework` 都核對過；全新的 tart 虛擬機，macOS 26.6.2，帳號 admin；全新帳號裡 `install-ime.sh` 會停在「系統還沒接受新的輸入法」（啟用要在系統設定手動加入），檔案已複製到 `~/Library/Input Methods`，這一節只需要那份檔案，以版本號確認）：
+- 第 1 項通過：0.4.7 → dry run，原位置的 `learning.tsv` 消失，container 裡的雜湊相同、0600，偏好設定 `layout=eten`，`--selftest` 結束碼 0，換檔之後沒有善解或 Sparkle 的沙盒拒絕。`launchctl asuser` 啟動後程序沒有留著（不是由輸入法框架啟動，推論是自行結束）；兩次啟動之間沒有檢查，所以搬移是在哪一次完成的沒有量（推論是第一次的 `--selftest`）。
+- 第 2 項通過：同一個開發版 ID 的兩個 ad-hoc 組建（CDHash 不同），兩次 `--selftest` 都結束碼 0，container 的 `Data` inode 與建立時間不變。「不跳詢問」在無畫面的虛擬機截不到圖；`tccd` 的 log 在這段時間沒有和善解有關的紀錄、也沒有詢問紀錄（佐證，不是證明）。
+- 第 3 項**第一次沒過**：`docs/sandbox-restore.md` 的指令以網域名稱 `defaults import` 寫回偏好設定，container 還在時 `defaults` 把這個網域導向 container 裡的那一份，寫進去的是 container，接著刪 container 時設定一起不見（學習資料正確搬回）。改成以原位置 plist 的完整路徑寫回、並檢查原位置有檔之後，在重新建立的全新虛擬機上，第 1 項通過，第 3 項除了「沒有跳詢問」（沒量，見下）以外的斷言都通過：指令結束碼 0，學習資料雜湊相同、0600，`layout=eten`，container 已刪，再升級時搬回的資料正確搬進新 container，沒有沙盒拒絕。沙盒版還沒發佈，正式 ID 的 container 只存在於測試機，舊的指令傷不到使用者。之後依 PR #229 的審查在指令裡加了兩道防護（讀不到 container 就停、container 的設定檔是空的就不寫回），在同一台虛擬機重跑：第 3 項全部斷言照舊通過；把 container 的 `Data/Library` 設成 000 時指令結束碼 1、container 保留、原位置沒有寫入（模擬讀不到，不是真的 TCC 拒絕）；把 container 的設定檔換成空的 plist 時指令結束碼 0、原位置沒有寫入設定、學習資料雜湊相同、container 已刪。
+- 第 4 項由單元測試代替（照本節開頭），第 5 項留給 §4.3 A。還沒量的「詢問」：第 2 項第二次啟動、第 3 項搬回指令與再升級，三處的「不跳詢問」在無畫面的虛擬機都看不到；經 SSH 執行的指令也不能代表「終端機」App。
+
 ### 4.3 實機（維護者與 main；每次 ≤ 15 秒的部分由 `imeshot` 做）
 
 **A. Sparkle 在沙盒裡（合併後、dry run 之前；開發版 ID，不碰正式版的資料）**
@@ -559,6 +566,7 @@
   - **canary 0.5.0 → 0.5.1 經 Sparkle 失敗**（§4.4）：停發其他版本，回報維護者；
   - **新位置在不重開機的情況下仍登記不到安裝服務**（§4.3 A 第 2b 步，修訂三）：回報維護者，不改用其他位置再試；
   - 〔修訂三〕§4.3 A 第 2 步第一次失敗已處理（§1、§2.8），不再算停止條件；
+  - 〔2026-10-20〕§4.2 第 3 項第一次失敗（偏好設定沒有搬回）是 `docs/sandbox-restore.md` 指令的錯，不是沙盒版的行為；指令已修正並在重新建立的虛擬機重量通過，不再算停止條件；
   - Sparkle 2.10.0 的行為變動讓「關於」頁的檢查或更新流程不能照 about-update 的規格運作；
   - 需要第五個 entitlement 才能運作：停下來問，不自行加。
 - **預算**：`pilotfish:security-executor` 實作 1 次＋修正 1 次。
@@ -573,13 +581,13 @@
   - 合併之後、發佈之前（§4.2 或 §4.3 碰到停止條件）：先在 main 上 revert 這一片（任何 tag 之前），再處理資料：裝回 0.4.x，照 `docs/sandbox-restore.md` 搬回，或用 §4.3 B 第 0 步的備份。
   - §4.3 A 第 1 步 (f) 不通過（開發版 ID 沒有清單，卻把真正的學習資料搬進它的 container）：
     1. 先在系統設定停用開發版、結束它的程序；
-    2. 用 §4.3 B 第 0 步（§4.3 A 開始前做的那次）的備份，還原 `~/Library/Application Support/shanjie` 與偏好設定（`defaults import`）；
+    2. 用 §4.3 B 第 0 步（§4.3 A 開始前做的那次）的備份，還原 `~/Library/Application Support/shanjie` 與偏好設定（`defaults import`，以原位置 plist 的完整路徑當網域：container 還在時網域名稱會被導向 container，見 §4.2 結果）；
     3. 再移除開發版與它的 container。
   - §4.3 A 的其他失敗只動開發版 ID 的東西，移除開發版即可。
   - 發佈之後（F5）：
     - Sparkle 擋降版，所以 revert 要發成版本號更高的新版。
     - 已經更新到沙盒版的使用者，經 Sparkle 收到的是沒有沙盒的新版，它看到的學習資料與偏好設定是空的。只靠使用者照發版說明跑 Terminal 指令不可靠，所以 revert 版**內建一次性的自動複製**：
-      - 第一次啟動時，舊位置是空的、而且自己 ID 的 container 存在，就把 container 裡的學習資料複製回原位置；偏好設定用 `defaults` 的匯出與匯入，不直接複製 plist（cfprefsd 的快取可能忽略直接寫入的檔案〔推論〕）。
+      - 第一次啟動時，舊位置是空的、而且自己 ID 的 container 存在，就把 container 裡的學習資料複製回原位置；偏好設定用 `defaults` 的匯出與匯入，不直接複製 plist（cfprefsd 的快取可能忽略直接寫入的檔案〔推論〕）；寫回時用原位置 plist 的完整路徑或 App 自己的 UserDefaults，不用網域名稱呼叫 `defaults` 命令列：container 還在時，網域名稱會被導向 container（2026-10-20 §4.2 第 3 項量到）。
       - 只複製、不刪 container；在虛擬機量過才發。
     - 之後重新出沙盒版時，container 已經存在、不會再搬；回滾期間學到的資料要另外合併，到時候寫進那一片的契約。
     - `docs/sandbox-restore.md` 的手動指令仍然保留，給用安裝程式或 brew 降版的人。
@@ -631,7 +639,7 @@
 | F2 | P2 | Sparkle 2.9.3 有已公開的安全公告（2.9.6 修）；改成沙盒裡的程序驅動沙盒外的安裝端之後，安裝端的問題變得相關 | FIX：§2.8 升到 2.10.0（§6 第 5 項） |
 | F3 | P2 | 正式版「沙盒版經 Installer.xpc 更新成沙盒版」第一次執行會在 0.5.0 → 0.5.1，壞了所有 0.5.0 使用者都卡住 | FIX：§4.4 canary 0.5.1、發版說明寫明失敗時重裝；§5 停止條件 |
 | F4 | P2 | §4.3 A 的 A0 和正式版同時寫真正的學習資料（完整重寫沒有鎖）；第 2 步「第一次建立 container」和順序矛盾；CI 的 macOS 版本沒記；A0 和正式版同名 | FIX：§4.3 A 備份移到最前、A0 → B 先做、期間不打字、前後立刻取雜湊、做完當場移除；§2.6 第 3 步印 `sw_vers`；同名寫明用 ID 區分 |
-| F5 | P2 | 發佈後的回滾只靠使用者手動搬回 | FIX：§5 revert 版內建一次性自動複製（只複製不刪、偏好設定用 `defaults` 匯出匯入、虛擬機量過才發） |
+| F5 | P2 | 發佈後的回滾只靠使用者手動搬回 | FIX：§5 revert 版內建一次性自動複製（只複製不刪、偏好設定用 `defaults` 匯出匯入、寫回用原位置的完整路徑、虛擬機量過才發） |
 | F6 | P3 | 網路選擇的推論確認；Downloader.xpc 更糟（沙盒外、快取路徑由呼叫者組成） | 維持 `network.client`；§2.8 斷言 `SUEnableDownloaderService` 不存在；對外不寫「沙盒讓輸入內容無法送出」 |
 | F7 | P3 | 驗證只有「整份相等」才擋得下多出來的鍵；突變缺「多一個鍵」「別的 ID」；沒斷言 XPCServices 只有 Installer.xpc；release 那份沒有反向測試 | FIX：§2.4 寫明整份相等、`sign` 用 workflow 的字面值 `--entitlements`；§2.6 第 8 步加三種突變；§2.8 斷言只有 Installer.xpc；release 那份寫明不在分支上跑、和 `check-entitlements.sh` 同一套比對 |
 | F8 | P4 | ad-hoc 不加 runtime 對本機與 CI 沒有實質影響；ad-hoc 的 Installer.xpc 不驗呼叫者 | 接受；§4.3 A 註明 ad-hoc 和正式版的差別，正式版由 canary 量 |
