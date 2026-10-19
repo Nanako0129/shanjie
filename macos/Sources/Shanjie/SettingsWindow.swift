@@ -91,7 +91,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     /// `.popover` was picked by eye on the system's list, not measured; the user's device check passed (2026-10-10).
     static let backgroundMaterial: NSVisualEffectView.Material = .popover
     /// Above ordinary app windows even when the input method is not active, as AlertDialogs does with .modalPanel (contract
-    /// section 2.1, device check 2026-10-10). Sparkle's windows use the same level (`Updater`), so they can sit above it.
+    /// section 2.1, device check 2026-10-10).
     static let level: NSWindow.Level = .floating
 
     /// The glass runs under the title bar, as in Syrtis's settings window (TokenBar SettingsWindowController.swift):
@@ -385,6 +385,7 @@ private struct AboutSections: View {
             Toggle("自動檢查更新", isOn: Binding(get: { updates.autoCheck }, set: { updates.setAutoCheck($0) }))
             Text("開著時每天最多連線一次，到 GitHub 讀取有沒有新版本；有新版本只在這裡和輸入選單顯示，按下才更新。")
                 .font(.caption).foregroundStyle(.secondary)
+            Text(UpdateText.location(bundleURL: Bundle.main.bundleURL)).font(.caption).foregroundStyle(.secondary)
             LabeledContent("上次檢查") {
                 Text(status).foregroundStyle(.secondary)
             }

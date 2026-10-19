@@ -84,10 +84,11 @@ public final class Updates: ObservableObject {
 
     /// Starts Sparkle's information-only check (no window).
     public var probe: () -> ProbeStart = { .unavailable }
-    /// Sparkle's interactive flow (download progress, notes, install and relaunch). Called only from `finished`, after a
-    /// silent check the user started with `install` confirmed a newer version.
+    /// Opens 善解更新.app, where the download, the notes, the install and the relaunch happen (standalone-updater.md section
+    /// 3.3). Called only from `finished`, after a silent check the user started with `install` confirmed a newer version.
     public var interactive: () -> Void = {}
-    /// Brings the open Sparkle windows to the front: 更新到 X or the menu item pressed while a Sparkle session runs.
+    /// 更新到 X or the menu item pressed while a Sparkle session runs: opens 善解更新.app again, which LaunchServices turns into
+    /// an activation when it already runs.
     public var focus: () -> Void = {}
 
     private let store: UpdateStore
@@ -185,6 +186,15 @@ public enum UpdateText {
     public static let checking = "檢查中…"
     public static func install(_ v: String) -> String { "更新到 \(v)" }
     public static func menu(_ v: String) -> String { "有新版本 \(v)，按此更新…" }
+
+    /// The 關於 page's note on where this copy is installed and what updating it asks (standalone-updater.md section 5.2):
+    /// the system's Input Methods folder (the update asks for an administrator password), anything else is the user's.
+    public static func location(bundleURL: URL) -> String {
+        if bundleURL.deletingLastPathComponent().path == "/Library/Input Methods" {
+            return "善解裝在這台 Mac 的所有帳號裡（/Library/Input Methods）。更新時會先下載並驗證，再跳出系統的密碼框「善解更新 wants permission to update 善解輸入法」；善解只會在你按下這裡的「更新」之後才要密碼。不是管理員的帳號請請管理員更新。"
+        }
+        return "善解只裝在你的帳號裡（~/Library/Input Methods），更新不需要密碼。有程式開著安全輸入時，系統會暫時停用善解；要改裝給整台 Mac，請重新下載安裝程式並選「這台 Mac」。"
+    }
 
     public static func result(_ r: UpdateResult?, available: String?) -> String? {
         switch r {

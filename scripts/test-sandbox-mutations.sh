@@ -1,5 +1,5 @@
 #!/bin/bash
-# docs/contracts/app-sandbox.md section 2.6 step 8: ten copies of the shipping-ID build, each changed one way and re-signed
+# docs/contracts/app-sandbox.md section 2.6 step 8, standalone-updater.md section 7.2: twelve copies of the shipping-ID build, each changed one way and re-signed
 # ad-hoc, against scripts/check-entitlements.sh and scripts/check-app.sh (SKIP_RUN=1: checks 2 and 3 only). Nothing is ever
 # launched; the copies live in a temporary directory that is removed at the end. Runs locally and in CI.
 #
@@ -9,13 +9,15 @@
 #   1 re-signed without --preserve-metadata          check-entitlements.sh fails (the entitlements are gone)
 #   2 re-signed with --preserve-metadata=entitlements check-entitlements.sh passes
 #   3 one more entitlement                           check-entitlements.sh fails
-#   4 Sparkle's two mach names for another ID        check-entitlements.sh fails
-#   5 Installer.xpc removed                          check-app.sh check 3 fails
-#   6 a second .xpc in XPCServices                   check-app.sh check 3 fails
-#   7 SUEnableInstallerLauncherService false         check-app.sh check 2 fails
-#   8 a second .xpc outside XPCServices              check-app.sh check 3 fails (the whole-framework XPC layout)
-#   9 the framework back in Contents/Frameworks      check-app.sh check 3 fails (the framework's place, section 2.8)
+#   4 the Sparkle mach-lookup exception added back   check-entitlements.sh fails (exactly three keys)
+#   5 an .xpc in the framework's XPCServices         check-app.sh check 3 fails (no .xpc anywhere)
+#   6 an .xpc elsewhere, inside the helper           check-app.sh check 3 fails
+#   7 SUEnableInstallerLauncherService true          check-app.sh check 2 fails
+#   8 SUFeedURL in the helper's Info.plist           check-app.sh check 3 fails
+#   9 the framework back in Contents/Frameworks      check-app.sh check 3 fails (the framework's place)
 #  10 a second framework in Contents/Frameworks too  check-app.sh check 3 fails (exactly Updater/Sparkle.framework)
+#  11 a file with mode 700                           check-app.sh check 3 fails (o+r)
+#  12 a second item in Contents/Helpers              check-app.sh check 3 fails (exactly 善解更新.app)
 # release.yml's verify() has its own copy of the comparison and is not mutated here (`sign` runs only on main).
 set -euo pipefail
 
@@ -65,30 +67,30 @@ A="$(copy 3)"; ents "$A" "$T/3.plist"
 # PlistBuddy, not plutil: plutil reads the dots in an entitlement name as a key path.
 /usr/libexec/PlistBuddy -c 'Add :com.apple.security.cs.disable-library-validation bool true' "$T/3.plist"
 codesign --force --sign - --entitlements "$T/3.plist" "$A" 2>/dev/null
-ent_fails 3 "$A" "are not exactly the four keys"
+ent_fails 3 "$A" "are not exactly the three keys"
 
 A="$(copy 4)"; ents "$A" "$T/4.plist"
 K=:com.apple.security.temporary-exception.mach-lookup.global-name
-/usr/libexec/PlistBuddy -c "Set $K:0 com.example.other-spks" -c "Set $K:1 com.example.other-spki" "$T/4.plist"
+/usr/libexec/PlistBuddy -c "Add $K array" -c "Add $K:0 string com.nyanako.inputmethod.shanjie-spks" "$T/4.plist"
 codesign --force --sign - --entitlements "$T/4.plist" "$A" 2>/dev/null
-ent_fails 4 "$A" "are not exactly the four keys"
+ent_fails 4 "$A" "are not exactly the three keys"
 
-# 5 and 6 re-sign the framework and then the app with its entitlements kept, so only the XPC services differ.
+# 5, 6 and 8 re-sign what they touched and then the app with its entitlements kept, so only that differs.
 F=Contents/Frameworks/Updater/Sparkle.framework
-resign() { codesign --force --sign - "$1/$F" 2>/dev/null; codesign --force --sign - --preserve-metadata=entitlements "$1" 2>/dev/null; }
-X=$F/Versions/B/XPCServices
-A="$(copy 5)"; rm -rf "$A/$X/Installer.xpc"; resign "$A"
-app_fails 5 "$A" 3 "XPCServices is not exactly Installer.xpc"
+H=Contents/Helpers/善解更新.app
+resign() { codesign --force --sign - "$1/$F" 2>/dev/null || true; codesign --force --sign - "$1/$H" 2>/dev/null || true; codesign --force --sign - --preserve-metadata=entitlements "$1" 2>/dev/null; }
+A="$(copy 5)"; mkdir -p "$A/$F/Versions/B/XPCServices"; touch "$A/$F/Versions/B/XPCServices/Installer.xpc"; resign "$A"
+app_fails 5 "$A" 3 "the bundle contains an .xpc"
 
-A="$(copy 6)"; ditto "$A/$X/Installer.xpc" "$A/$X/Extra.xpc"; resign "$A"
-app_fails 6 "$A" 3 "XPCServices is not exactly Installer.xpc"
+A="$(copy 6)"; touch "$A/$H/Contents/Resources/Extra.xpc"; resign "$A"
+app_fails 6 "$A" 3 "the bundle contains an .xpc"
 
-A="$(copy 7)"; plutil -replace SUEnableInstallerLauncherService -bool false "$A/Contents/Info.plist"
+A="$(copy 7)"; plutil -replace SUEnableInstallerLauncherService -bool true "$A/Contents/Info.plist"
 codesign --force --sign - --preserve-metadata=entitlements "$A" 2>/dev/null
-app_fails 7 "$A" 2 "SUEnableInstallerLauncherService is not the bool true"
+app_fails 7 "$A" 2 "SUEnableInstallerLauncherService is not the bool false"
 
-A="$(copy 8)"; ditto "$A/$X/Installer.xpc" "$A/$F/Versions/B/Extra.xpc"; resign "$A"
-app_fails 8 "$A" 3 "Sparkle.framework's XPC layout is not exactly"
+A="$(copy 8)"; plutil -insert SUFeedURL -string https://example.com/appcast.xml "$A/$H/Contents/Info.plist"; resign "$A"
+app_fails 8 "$A" 3 "the helper's Info.plist sets SUFeedURL"
 
 A="$(copy 9)"; mv "$A/$F" "$A/Contents/Frameworks/"; rmdir "$A/Contents/Frameworks/Updater"
 codesign --force --sign - --preserve-metadata=entitlements "$A" 2>/dev/null
@@ -98,4 +100,10 @@ A="$(copy 10)"; ditto "$A/$F" "$A/Contents/Frameworks/Sparkle.framework"
 codesign --force --sign - --preserve-metadata=entitlements "$A" 2>/dev/null
 app_fails 10 "$A" 3 "Contents/Frameworks is not exactly Updater/Sparkle.framework"
 
-echo "sandbox mutations: all ten as expected"
+A="$(copy 11)"; chmod 700 "$A/Contents/Resources/english-words.txt"
+app_fails 11 "$A" 3 "a file in the bundle lacks o+r"
+
+A="$(copy 12)"; ditto "$A/$H" "$A/Contents/Helpers/Other.app"; codesign --force --sign - --preserve-metadata=entitlements "$A" 2>/dev/null
+app_fails 12 "$A" 3 "Contents/Helpers is not exactly"
+
+echo "sandbox mutations: all twelve as expected"

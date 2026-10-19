@@ -22,6 +22,16 @@ final class UpdatesTests: XCTestCase {
         return (u, c)
     }
 
+    /// The 關於 page's note follows the folder the bundle sits in: the system's one mentions the password, any other does not.
+    func testLocationNote() {
+        let system = UpdateText.location(bundleURL: URL(fileURLWithPath: "/Library/Input Methods/善解輸入法.app"))
+        XCTAssertTrue(system.contains("/Library/Input Methods") && system.contains("密碼框"))
+        for home in ["/Users/a/Library/Input Methods/善解輸入法.app", "/Users/a/Desktop/善解輸入法.app"] {
+            let user = UpdateText.location(bundleURL: URL(fileURLWithPath: home))
+            XCTAssertTrue(user.contains("~/Library/Input Methods") && user.contains("不需要密碼"), home)
+        }
+    }
+
     func testVersionText() {
         XCTAssertEqual(Updates.versionText("0.4.7"), "0.4.7")
         XCTAssertEqual(Updates.versionText("0.0.0"), "開發版")

@@ -54,6 +54,17 @@ let package = Package(
             dependencies: ["ShanjieInstall"],
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
+        // The decisions of the standalone updater (docs/contracts/standalone-updater.md section 3.2); Foundation only.
+        .target(name: "UpdateHost"),
+        // 善解更新.app, embedded at Contents/Helpers of the input method (scripts/build-app.sh). Sparkle.framework sits in its own
+        // Contents/Frameworks, which SwiftPM's @loader_path (Contents/MacOS) does not reach, hence the rpath.
+        .executableTarget(
+            name: "ShanjieUpdater",
+            dependencies: ["UpdateHost", .product(name: "Sparkle", package: "Sparkle")],
+            swiftSettings: [.swiftLanguageMode(.v5)],
+            linkerSettings: [.unsafeFlags(["-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks"])]
+        ),
+        .testTarget(name: "UpdateHostTests", dependencies: ["UpdateHost"]),
         .testTarget(name: "ShanjieKitTests", dependencies: ["ShanjieKit"]),
         .testTarget(name: "ShanjieInstallTests", dependencies: ["ShanjieInstall"]),
     ]
