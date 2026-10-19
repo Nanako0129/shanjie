@@ -51,10 +51,11 @@ stub "$T/v2/$APP" v2
 # anything is copied, registered or stopped. The HOME is read-only, so if the HOME check ever
 # regressed the script would fail creating its directory, before reaching the real lsregister
 # (SHANJIE_TEST_LSREGISTER is ignored outside files-only mode); the message proves which check
-# stopped it.
+# stopped it. A development-ID stub, so the shipping ID's signature check (case 12) does not stop it first.
 mkdir "$T/ro"
 chmod 500 "$T/ro"
-if err=$(run "$T/ro" "$T/v1/$APP" "" 2>&1 >/dev/null); then fail "ran on a temporary HOME without the hook"; fi
+stub "$T/guard/$DEV" guard "$SHIPPING_ID.dev"
+if err=$(run "$T/ro" "$T/guard/$DEV" "" 2>&1 >/dev/null); then fail "ran on a temporary HOME without the hook"; fi
 grep -q "HOME is not this account's home directory" <<<"$err" || fail "the refusal did not come from the HOME check: $err"
 [ -z "$(ls -A "$T/ro")" ] || fail "the refused run still created files"
 no_calls refusal
@@ -202,5 +203,22 @@ if err=$(run "$H" "$T/other-src/$APP" 2>&1 >/dev/null); then fail "a build with 
 grep -q "only $SHIPPING_ID and $SHIPPING_ID.dev are installed" <<<"$err" || fail "the refusal did not come from the ID check: $err"
 [ -z "$(ls -A "$H")" ] || fail "the refused install created files"
 no_calls "other bundle ID"
+
+# 12. app-sandbox.md section 2.3: outside files-only mode, a shipping-ID bundle that is not signed with this project's
+#     Developer ID is refused before anything is created: an ad-hoc one, and an unsigned one (codesign fails). The HOME is
+#     temporary and read-only, so a regressed check would still be stopped by the HOME check, never reach the system.
+chmod 700 "$T/ro"; rm -rf "$T/ro"; mkdir "$T/ro"; chmod 500 "$T/ro"
+stub "$T/adhoc/$APP" adhoc
+rm "$T/adhoc/$APP/Contents/marker"   # codesign refuses a loose file in Contents
+codesign --sign - "$T/adhoc/$APP/Contents/MacOS/shanjie"
+codesign --sign - "$T/adhoc/$APP"
+stub "$T/unsigned/$APP" unsigned
+for src in "$T/adhoc/$APP" "$T/unsigned/$APP"; do
+  if err=$(run "$T/ro" "$src" "" 2>&1 >/dev/null); then fail "installed a shipping-ID build that is not Developer ID signed: $src"; fi
+  grep -q "has the shipping bundle ID but .*refusing. For a local build use the development ID: make bundle" <<<"$err" \
+    || fail "the refusal did not come from the signature check: $err"
+  [ -z "$(ls -A "$T/ro")" ] || fail "the refused install created files"
+done
+no_calls "shipping ID without the Developer ID signature"
 
 echo "install-ime.sh file handling: ok"

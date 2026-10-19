@@ -18,8 +18,12 @@
 # Going back to a version without the App Sandbox (0.4.x or earlier; app-sandbox.md section 2.5): the sandboxed version moved
 # the learning data and preferences into ~/Library/Containers/com.nyanako.inputmethod.shanjie on its first run, so the older
 # version starts empty. What it learns stays in the old place and is not moved again on the next upgrade (the container
-# already exists). Sparkle never downgrades: going back takes this script or the installer. To move the data back:
-# docs/sandbox-restore.md.
+# already exists). Sparkle never downgrades, and neither does the installer (InstallerPlan.decide): going back takes this
+# script, or removing the installed copy first. To move the data back: docs/sandbox-restore.md.
+#
+# The shipping ID is installed only from a Developer ID build of this project's team (app-sandbox.md section 2.3): an
+# ad-hoc local build with that ID would create the shipping container and move the user's data into it. Local builds use
+# the development ID (`make bundle`).
 set -euo pipefail
 
 fail() { echo "error: $*" >&2; exit 1; }
@@ -39,6 +43,13 @@ case "$ID" in
   *) fail "$SRC has bundle ID '$ID'; only $SHIPPING_ID and $SHIPPING_ID.dev are installed" ;;
 esac
 DEST="$IM/$NAME.app"
+# Before anything else touches the system. Files-only mode (the tests) installs stubs that are not signed.
+if [ "$ID" = "$SHIPPING_ID" ] && [ "${SHANJIE_INSTALL_FILES_ONLY:-}" != 1 ]; then
+  SIG="$(codesign -dv --verbose=2 "$SRC" 2>&1)" \
+    || fail "$SRC has the shipping bundle ID but codesign cannot read its signature; refusing. For a local build use the development ID: make bundle"
+  grep -q '^Authority=Developer ID Application: ' <<<"$SIG" && grep -qx 'TeamIdentifier=2LJ882GPY8' <<<"$SIG" \
+    || fail "$SRC has the shipping bundle ID but is not signed with this project's Developer ID (team 2LJ882GPY8); refusing. For a local build use the development ID: make bundle"
+fi
 
 # Only a real install may touch the system (LaunchServices, running processes, the input source
 # registry). With HOME pointed anywhere other than this account's home directory, as the tests do,

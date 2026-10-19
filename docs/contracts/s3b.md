@@ -65,6 +65,7 @@
 ## 4. 安裝（由使用者執行）
 
 - `scripts/install-ime.sh <善解輸入法.app 的路徑>`（通常是解壓後的 Release 附件；也接受 `build/善解輸入法.app` 自己建的 ad-hoc 版）：
+  - **2026-10-19 修訂（`app-sandbox.md` §2.3、§5）**：目的地改依 bundle ID（正式 ID → `善解輸入法.app`，開發版 ID → `善解（開發版）.app`，其他 ID 拒絕），下面「固定為字面路徑」與「接受自己建的 ad-hoc 版」都已被取代。正式 ID 只接受本專案 Developer ID（`Developer ID Application`、Team `2LJ882GPY8`，`codesign -dv` 讀不到簽章也拒絕）簽章的版本，在複製任何東西之前檢查；只有 files-only 測試模式跳過。自己建的版本一律用開發版 ID（`make bundle` → `build/善解（開發版）.app`）。正式 ID 的本機組建不要在維護者的機器上執行或安裝：它第一次啟動就會建立正式版的 container、把學習資料搬進去。
   - `#!/bin/bash`、`set -euo pipefail`；`$HOME` 為空就中止；不用 sudo（R9）。
   - 目的地固定為字面路徑 `"$HOME/Library/Input Methods/善解輸入法.app"`。腳本只刪除或搬移 `~/Library/Input Methods` 裡的四個位置（§13.3）：這個目的地、舊名稱 `shanjie.app`、這次執行用 `mktemp` 建的暫存資料夾、保留上一版的 `.shanjie-previous`。輔助資料夾的名稱不是 `.app`（暫存資料夾在複製期間裡面有一個 `善解輸入法.app`）。不要同時執行兩次安裝（未加鎖）；被直接砍掉的執行可能留下 `.shanjie-staging-*`，不會自動清（同時執行的另一份看起來一樣），要手動刪。**HOME 不是這個帳號真正的家目錄時，除非設了 `SHANJIE_INSTALL_FILES_ONLY=1`，腳本一開始就拒絕執行**；files-only 模式完全不呼叫 lsregister、pkill 或註冊。
   - 順序（修訂 13 與 PR #5 審查後）：`ditto` 到暫存資料夾（複製失敗時什麼都不放上去）→ 刪掉更早保留的 `.shanjie-previous`（先 `chmod -R u+w`）→ 舊版（`善解輸入法.app`，沒有時是舊名稱 `shanjie.app`）**先改名**為 `.shanjie-previous`、成功後才 `lsregister -u`（改名失敗時舊版仍維持登記）→ 新版改名就位 → 新舊名稱並存時刪除舊名稱那份（失敗只警告）→ 新版 `lsregister -f` → 結束舊行程並等它退出 → 執行已安裝那一份的 `install`（**2026-10-09 起只在系統還不認得或有舊模式時註冊**，見 `installer-v2.md` §9；原文：一律重新註冊，見 §13.3）。`trap` 只在舊版**確實已改名移開**之後、新版就位之前被中斷時，才把新版放上去，並印出只重跑 `lsregister -f` 與 `install` 的指令（不要重跑整個腳本）。其餘描述（HOME 檢查、files-only、測試、未實測項目）見 §13.3 與 §11。
@@ -149,6 +150,7 @@
    - 斷言：擷取結果不含任何負向標記（送出的漢字、它的注音 preedit、按鍵字元序列、bundle ID 標記、路徑標記），而且殼的 subsystem 輸出裡沒有 `<private>`（殼只准記靜態字串與回傳碼）。
    - verifier 在殼的輸出套用路徑暫時加一行 `logger.debug("\(commit, privacy: .public)")` 時，這個測試必須失敗；改成 `.private` 時，`<private>` 斷言必須失敗；改成 `NSLog("%@", commit)` 時也必須失敗。
 6. `make selftest-bundled` 與 `build/善解輸入法.app/Contents/MacOS/shanjie --selftest` 都 exit 0（自測在不帶詞包之外，也用 `Resources/packs` 建一個帶詞包的引擎並要求打出詞包詞「碇源堂」，詞包缺檔或壞檔就失敗）；`make` 的過期防護有效（只動 `core/` 後 `make build`，執行檔會重新連結）；執行前後 `~/Library/Input Methods/`、`~/Library/Preferences/com.nyanako.inputmethod.shanjie.plist`、TIS 的輸入法清單都沒有變化。verifier 把 `build/善解輸入法.app/Contents/Resources/bigram.sjlm` 改名後再跑，必須 exit 非 0；還原後 exit 0。
+   - **2026-10-19 修訂（`app-sandbox.md` §2.3、§2.6、§5）**：本機只跑拋棄式 ID 的 `make selftest-bundled`（bundle 在 `build/selftest/善解（開發版）.app`，改名 `bigram.sjlm` 的反向檢查也用這一份）；selftest 第一次執行會建立那個 ID 的 `~/Library/Containers/<ID>`，這是預期的，不算在「沒有變化」裡。不在維護者的機器上執行 `build/善解輸入法.app` 的 `--selftest`：正式 ID 的 selftest 只在 CI 跑（移轉測試與 `check-app.sh`）。在 App 沙盒那一片的 CI 證明「沒有移轉清單就不搬」之前，拋棄式 ID 的也不在本機跑（§5）。
 7. 核心的 `cargo test` 與 PR #1 的 CI 步驟照舊全綠。
 8. `release.yml`：在 PR 上無法真正簽章，所以 agent 只驗證結構：gate 只等 `ci.yml`；有 `workflow_dispatch` 試跑（不 publish）；build 工作用固定的 Rust 1.97.1，並在 `build-app.sh` 之前下載模型、以 `data/bigram.sjlm.sha256` 比對；sign 工作的 `environment: release`、只接受 `refs/tags/v*`、缺材料就失敗的檢查、一次性鑰匙圈在結束時刪除、驗證步驟齊全。第一次真正的發布由使用者推 tag 觸發（見下）。
 

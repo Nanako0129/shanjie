@@ -152,6 +152,7 @@
   - `make installer` 只接受正式 ID 的組建：`build/善解輸入法.app` 不存在就報錯，訊息寫要先 `make bundle BUNDLE_ID=com.nyanako.inputmethod.shanjie`。
 - **`scripts/install-ime.sh`**（安裝程式裡附的是同一份，`check-installer.sh` 逐位元比對）：從傳入的 bundle 讀 `CFBundleIdentifier` 決定目的地，不寫死開發版的名稱。
   - 正式 ID：目的地 `善解輸入法.app`、舊版 `shanjie.app` 的升級、`.shanjie-previous`，和現在逐行相同。
+    - 只接受本專案 Developer ID（`Developer ID Application`、`TeamIdentifier=2LJ882GPY8`，從 `codesign -dv --verbose=2` 讀）簽章的 bundle；`codesign` 讀不到簽章也拒絕。在複製任何東西之前檢查，訊息指向開發版 ID 的 `make bundle`。只有 files-only 測試模式（`SHANJIE_INSTALL_FILES_ONLY=1`，假 app 沒有簽章）跳過。
   - `com.nyanako.inputmethod.shanjie.dev`：
     - 目的地 `善解（開發版）.app`，保留上一版在 `.shanjie-dev-previous`；
     - 沒有舊版名稱的處理；
@@ -160,6 +161,7 @@
   - `scripts/test-install-ime.sh`（暫存 HOME）加兩個情境：
     - 已有正式版 `善解輸入法.app` 時安裝開發版，正式版原封不動；
     - 正式版照舊裝到 `善解輸入法.app`。
+    - 沒開 files-only 時，正式 ID 的 ad-hoc 與未簽章 bundle 都被簽章檢查拒絕，什麼都沒建立。
 - **`scripts/check-app.sh`**：要檢查的 ID 由環境變數 `EXPECTED_BUNDLE_ID` 給（沒給時用正式 ID），資料夾與各個名稱照上表比對，不再寫死。另外：
   - CI 以外（`CI` 不是 `true`）遇到正式 ID 的組建時，第 6 項（執行 selftest 與被拒絕的參數）不跑，結束碼非 0，訊息寫明原因：本機的 ad-hoc 組建不能先建立正式 ID 的 container。
   - `SKIP_RUN=1` 時只做第 2、3 項，不執行 bundle，結束碼 0。§5 的本機限制期間用這個模式；正式 ID 的組建也一樣。
