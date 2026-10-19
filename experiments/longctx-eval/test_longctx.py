@@ -548,6 +548,36 @@ class Long(unittest.TestCase):
         self.assertGreaterEqual(good, thr)
         self.assertLess(bad, thr)
 
+    def test_wikisource_round2_filters_and_second_sample(self):
+        td = tempfile.mkdtemp()
+        ctx = han(100, 20)      # 20 Han characters: enough context for a row
+        works = {"簡體": [ctx + "，我们这样说为国家" + "，" + han(200, 6)],         # 6 simplified forms: the whole work goes
+                 "繁體": [ctx + "，短句" + "，" + han(300, 6) + "（《某刊" + "，" + han(400, 6)]}
+        titles = os.path.join(td, "titles.txt")
+        open(titles, "w", encoding="utf-8").write("\n".join(works) + "\n")
+        for t, paras in works.items():
+            json.dump({"paragraphs_tw": paras}, open(os.path.join(td, longtext.cache_name(t)), "w", encoding="utf-8"), ensure_ascii=False)
+        seen = {}
+        args = mock.Mock(fetched=td, titles=titles, out=os.path.join(td, "o.txt"), overlap_drop=[], overlap_report=[], procs=1,
+                         proofread_exclude=None)
+
+        def fake_build(docs, *a, **k):
+            seen.update(k)
+            seen["rows"] = longtext.rows_from_docs(list(docs), None, k["keep_row"])
+        with mock.patch.object(longtext, "build", fake_build):
+            longtext.cmd_wikisource(args)
+        self.assertEqual(seen["counts"]["simplified"], 1)
+        self.assertEqual([s for _, _, s in seen["rows"]], [han(300, 6)])      # 短句 and 某刊 too short; the row after （《某刊 is a citation
+        self.assertEqual((seen["counts"]["short_sentence"], seen["counts"]["citation"]), (2, 1))      # 短句 and 某刊
+        self.assertEqual((seen["proofread_seed"], seen["proofread_exclude"]), (20261019, frozenset()))
+        ex = os.path.join(td, "first.proofread.txt")
+        open(ex, "w", encoding="utf-8", newline="").write("前文|句子|ㄐㄩˋ ㄗ˙\n")
+        args.proofread_exclude = ex
+        with mock.patch.object(longtext, "build", fake_build):
+            longtext.cmd_wikisource(args)
+        self.assertEqual((seen["proofread_seed"], seen["proofread_exclude"]), (20261021, frozenset({"前文|句子|ㄐㄩˋ ㄗ˙\n"})))
+        self.assertFalse(set("說為國這們") & longtext.WS_SIMP)      # no Traditional form in the simplified list
+
     def test_wikisource_html_boundaries_and_noise(self):
         h = "<div class='x'><p>第一段<sup>[1]</sup>，續</p><p>第二<br/>段</p><style>p{}</style><h2>標題</h2>尾巴</div>"
         self.assertEqual(longtext.html_paragraphs(h), ["第一段[1]，續", "第二", "段", "標題", "尾巴"])
@@ -590,10 +620,12 @@ class Long(unittest.TestCase):
         self.assertEqual(len(urls) - n_urls, 2)                      # only 丙篇 was fetched
         with self.assertRaises(SystemExit):                           # 甲篇 is cached but not in the list; 丙篇 and 乙篇 are read
             open(titles, "w", encoding="utf-8").write("丁篇\n")
-            quiet(longtext.cmd_wikisource, mock.Mock(fetched=cache, titles=titles, out=os.path.join(td, "o.txt"), overlap_drop=[], overlap_report=[], procs=1))
+            quiet(longtext.cmd_wikisource, mock.Mock(fetched=cache, titles=titles, out=os.path.join(td, "o.txt"), overlap_drop=[], overlap_report=[], procs=1,
+                                                     proofread_exclude=None))
         open(titles, "w", encoding="utf-8").write("丙篇\n乙篇\n")
         with self.assertRaises(SystemExit):                           # too few rows: the manifest is still written
-            quiet(longtext.cmd_wikisource, mock.Mock(fetched=cache, titles=titles, out=os.path.join(td, "o.txt"), overlap_drop=[], overlap_report=[], procs=1))
+            quiet(longtext.cmd_wikisource, mock.Mock(fetched=cache, titles=titles, out=os.path.join(td, "o.txt"), overlap_drop=[], overlap_report=[], procs=1,
+                                                     proofread_exclude=None))
         m = json.load(open(os.path.join(td, "o.txt.manifest.json")))
         self.assertEqual(sorted(os.path.basename(p) for p in m["input_sha256"]), sorted([longtext.cache_name("丙篇"), longtext.cache_name("乙篇")]))
 

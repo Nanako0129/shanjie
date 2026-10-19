@@ -61,6 +61,18 @@ ADULT_RE = re.compile("色情|(?<![感風表])情色|(?<!恩)愛愛|(?<!支)援�
 SPIN_RE = re.compile("么|不克不及|可以或許|掉敗|(?<![一二兩三四五六七八九十幾這那哪每某半])隻是|裏麵(?![包條線粉食店])|"
                      "(?<!明)瞭(?![解望然若如])|傢(?![俱伙具夥私俬])")
 SPIN_MIN = 2
+# Wikisource round 2 (README): the first proofreading sample needed 41 fixes in 300 rows (13.7%). About half were works stored in
+# simplified script, which the API's zh-tw variant did not convert; the rest footnote or citation fragments, very short sentences,
+# classical quotations and readings. A work with at least WS_SIMP_MIN characters of WS_SIMP (frequent simplified-only forms, none of
+# them used in Traditional text) is dropped (`simplified`); a row whose sentence has fewer than WS_MIN_SENT_HAN Han characters, or
+# whose context ends in a citation (a 《 in its last 12 characters or a （ in its last 6), is dropped before the per-work cap
+# (`short_sentence`, `citation`). Measured on that sample: these three rules leave an estimated 7% to fix (classical quotations and
+# readings are not filterable this way).
+WS_SIMP = frozenset("们这说为国时来对会发现经学问东车门开关买卖实书长见让认识边过还进运动从个间题样头师么爱应该钱话觉写记读请谁听语诉"
+                    "红绿军战产农业总员务热闹医药岁马鸟鱼龙页顾")
+WS_SIMP_MIN = 5
+WS_MIN_SENT_HAN = 4
+WS_PROOFREAD_SEED = 20261021      # Wikisource's second proofreading sample (the first used 20261019), drawn from rows not in the first
 PROOFREAD_SEED = 20261021        # hplt's third proofreading sample (README; the first used 20261019, the second 20261020), drawn from rows
                                  # in neither earlier sample
 GIBBERISH_PERCENTILE = 0.01      # rows scoring below this percentile of the reference sets' gold sentences are dropped
@@ -74,13 +86,15 @@ def doc_hash(doc_id, salt=""):
     return int(hashlib.sha256(f"{SEED}:{doc_id}:{salt}".encode("utf-8")).hexdigest()[:12], 16) / 16 ** 12
 
 
-def rows_from_docs(docs, per_doc=None):
+def rows_from_docs(docs, per_doc=None, keep_row=None):
     """docs: (doc_id, [paragraph]) -> [(doc_id, context, sentence)] with at least MIN_CTX_HAN Han characters of context
     (the README's 「前文 ≥ 16 字」 read as 16 Han characters). per_doc: keep at most that many rows of a document, picked by a
     seeded hash order and returned in document order."""
     out = []
     for d, paras in docs:
         rows = [(d, x, s) for p in paras for s, x in segments_with_ctx(p) if len(HAN_CH.findall(x)) >= MIN_CTX_HAN]
+        if keep_row is not None:      # before the per-document cap, so a dropped row does not use up a document's share
+            rows = [r for r in rows if keep_row(r[1], r[2])]
         if per_doc is not None and len(rows) > per_doc:
             top = sorted(range(len(rows)), key=lambda i: doc_hash(d, i))[:per_doc]
             rows = [rows[i] for i in sorted(top)]
@@ -217,11 +231,11 @@ SAMPLING = ("documents: seeded hash of (20261019, document id) selects them whil
 
 
 def build(docs, out, inputs, drop_files=(), report_files=(), procs=None, readings=c.readings, counts=None, gibberish=None,
-          proofread_seed=SEED, proofread_exclude=frozenset()):
+          proofread_seed=SEED, proofread_exclude=frozenset(), keep_row=None):
     n = {} if counts is None else counts
     procs = procs or os.cpu_count() or 1
     n["sampling"] = SAMPLING
-    rows = rows_from_docs(docs, PER_DOC)
+    rows = rows_from_docs(docs, PER_DOC, keep_row)
     n["candidate_rows_ge16_han_context_max3_per_doc"] = len(rows)
     rd = readings([s for _, _, s in rows])
     n["dropped_check"] = sum(rd[s][0] == "check" for _, _, s in rows)
@@ -349,13 +363,7 @@ def hplt_docs(shards, counts, keep=None):
 
 def cmd_hplt(a):
     counts = {}
-    excluded = frozenset()
-    if a.proofread_exclude:      # split on "\n" only, as the rows are written: a context may hold U+2028, which splitlines() splits on
-        text = open(a.proofread_exclude, encoding="utf-8", newline="").read()
-        if "\r" in text or not text.endswith("\n"):
-            sys.exit(f"longtext: STOP, {a.proofread_exclude} is not an unedited proofreading file (CR or no final newline)")
-        excluded = frozenset(l + "\n" for l in text.split("\n")[:-1])
-        counts["proofread_exclude_file"] = {"rows": len(excluded), "sha256": sha256_stream(a.proofread_exclude)}
+    excluded = read_exclude(a.proofread_exclude, counts)
     g = load_gibberish(a.procs) if a.gibberish_ref else None      # stops early when the model files are missing or differ
     before = {s: sha256_stream(s) for s in a.shards}
     if a.doc_fraction is None:
@@ -483,6 +491,34 @@ def cmd_fetch(a):
     print(f"fetched {len(titles)} titles into {a.out}")
 
 
+def ws_keep_row(counts):
+    """The Wikisource row filter (round 2): counts the rows it drops."""
+    counts.setdefault("short_sentence", 0); counts.setdefault("citation", 0)
+
+    def keep(ctx, sentence):
+        if len(HAN_CH.findall(sentence)) < WS_MIN_SENT_HAN:
+            counts["short_sentence"] += 1
+            return False
+        if "《" in ctx[-12:] or "（" in ctx[-6:]:
+            counts["citation"] += 1
+            return False
+        return True
+    return keep
+
+
+def read_exclude(path, counts):
+    """An earlier .proofread.txt as the set of its rows. Split on "\n" only, as the rows are written: a context may hold U+2028,
+    which splitlines() splits on. Stops on an edited file (CR or no final newline)."""
+    if not path:
+        return frozenset()
+    text = open(path, encoding="utf-8", newline="").read()
+    if "\r" in text or not text.endswith("\n"):
+        sys.exit(f"longtext: STOP, {path} is not an unedited proofreading file (CR or no final newline)")
+    rows = frozenset(l + "\n" for l in text.split("\n")[:-1])
+    counts["proofread_exclude_file"] = {"rows": len(rows), "sha256": sha256_stream(path)}
+    return rows
+
+
 def cmd_wikisource(a):
     files = []
     for t in read_titles(a.titles):      # only the titles currently in the list
@@ -490,8 +526,18 @@ def cmd_wikisource(a):
         if not os.path.exists(p):
             sys.exit(f"wikisource: STOP, {t} is not fetched yet")
         files.append(p)
-    docs = ((os.path.basename(p), json.load(open(p, encoding="utf-8"))["paragraphs_tw"]) for p in files)
-    build(docs, a.out, files, a.overlap_drop, a.overlap_report, a.procs)
+    counts = {"simplified": 0}
+    excluded = read_exclude(a.proofread_exclude, counts)
+
+    def docs():
+        for p in files:
+            paras = json.load(open(p, encoding="utf-8"))["paragraphs_tw"]
+            if sum(ch in WS_SIMP for para in paras for ch in para) >= WS_SIMP_MIN:
+                counts["simplified"] += 1
+                continue
+            yield os.path.basename(p), paras
+    build(docs(), a.out, files, a.overlap_drop, a.overlap_report, a.procs, counts=counts, keep_row=ws_keep_row(counts),
+          proofread_seed=WS_PROOFREAD_SEED if excluded else SEED, proofread_exclude=excluded)
 
 
 def main(argv=None):
@@ -510,6 +556,7 @@ def main(argv=None):
                    help="row-level gibberish filter against the dev302 + user-typing percentile (default on; needs data/lm)")
     f = sub.add_parser("wikisource-fetch"); f.add_argument("--titles", required=True); f.add_argument("--out", required=True)
     w = sub.add_parser("wikisource"); w.add_argument("--fetched", required=True); w.add_argument("--titles", required=True); common(w)
+    w.add_argument("--proofread-exclude", help="an earlier .proofread.txt: its rows are not drawn into this build's proofreading sample")
     a = ap.parse_args(argv)
     {"hplt": cmd_hplt, "wikisource-fetch": cmd_fetch, "wikisource": cmd_wikisource}[a.cmd](a)
 
