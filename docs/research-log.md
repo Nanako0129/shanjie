@@ -8172,3 +8172,15 @@ XL 比 `MAX_FILE`（67,108,864）小 1,168,880 位元組。錨點：4 個模型 
   - 改裝 `/Library` 不新增這條路，但每次正式更新都要管理員密碼，使用者會習慣「善解要密碼」，假的對話框比較容易成功。
 - 維護者同日兩次選擇題：先選「v0.5.0 先不做 `/Library`，等沙盒外的獨立更新程式」；接著改成：安裝方式**讓使用者自己選**（安裝程式並列兩個選項、沒有預設，各寫功能與取捨），裝給整台 Mac 的更新**保留管理員密碼**，**獨立更新程式（根本解）一起進 v0.5.0**。v0.5.0 因此是 App 沙盒＋安裝方式選擇＋獨立更新程式，tag 等三者的驗收都過。
 - 跟著要做的：app-sandbox §4.5 的虛擬機逃脫驗證與給 Sparkle 的私下回報，加上「套件安裝 → 系統 domain」這個變體（只寫機制，送出前給維護者看）。三個探針（P0、P1、P3）與打包權限的發現照用；契約照 §7 的發現與這三個決定改寫，獨立更新程式另寫契約，先請研究顧問分析設計。
+
+## 2026-10-20：獨立更新程式「善解更新」的設計與虛擬機 V1–V5
+
+- 研究顧問比較五個架構（獨立更新 App、自寫更新程式、輸入法留 Sparkle 只換安裝端、`SMAppService` daemon、照修訂三），建議**選項 A**，維護者採用：輸入法 bundle 裡放一個不在沙盒、內嵌 Sparkle 的小 App（`Contents/Helpers/善解更新.app`），它只更新包著自己的那份輸入法（往上三層的 `realpath` 必須是兩個允許的安裝路徑之一），不吃呼叫者的任何輸入，只接受 `application` 類型的更新；輸入法拿掉 XPC 服務與兩個 mach-lookup 例外（entitlements 四個變三個），「更新到 X」只負責啟動它。Sparkle 2.10.0 的依據（〔原始碼〕）：host 與 application bundle 可以不是自己、feed 與公鑰從 host 讀、主 bundle 關掉 XPC 開關時安裝端在程序內執行。
+- 原型（分支 `feat/standalone-updater`）在 tart 虛擬機（macOS 26.6.2）用開發版 ID 的更新測試版走完一趟：
+  - V4：沙盒之前的舊版經自己的 Sparkle 更新到新配置：過（0.4.7 → 0.5.0 的路）。
+  - V1：沙盒輸入法啟動得了 `Contents/Helpers` 裡的善解更新，沒有沙盒拒絕；但它的視窗被我們 `.floating` 的設定視窗擋住，關掉設定視窗後才看得到。修法：按「更新到 X」時先關設定視窗。
+  - V2：帳號層更新不問密碼、container 沿用；`log` 有 1 筆拒絕：輸入法裡只做探測的 Sparkle 查 `<ID>-spks` 被沙盒擋下，探測與更新都不受影響。契約把它列為唯一允許的拒絕。
+  - V5：複製到桌面的副本打開立刻結束、沒有視窗。
+  - V3：`/Library`（root 擁有）的那份更新時跳系統密碼框，文字「善解更新 wants permission to update 善解（開發版）.」；結果 `root:wheel`、全部可讀、container 沿用、0 拒絕。
+- 另外量到：macOS 26 上程式呼叫 `TISEnableInputSource` 會跳「Allow "<呼叫者>" to enable "Shanjie"?」，按允許才啟用；安裝程式的啟用步驟要量（system-install §4.3 a）。
+- 契約：新的 `docs/contracts/standalone-updater.md`；`docs/contracts/system-install.md` 照兩份審查與維護者的三個決定改寫成修訂一。
