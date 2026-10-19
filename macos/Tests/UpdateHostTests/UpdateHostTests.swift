@@ -64,6 +64,65 @@ final class UpdateHostTests: XCTestCase {
         _ = h
     }
 
+    /// Both places (the system's and the user's folder, here two temporary roots standing in for them) with both names.
+    func testBothRootsWithBothNames() throws {
+        let system = tmp.path + "/system/Library/Input Methods", user = tmp.path + "/home/Library/Input Methods"
+        for r in [system, user] {
+            for name in UpdateHost.appNames {
+                let h = try helper(in: r, name)
+                XCTAssertEqual(UpdateHost.host(helper: h, roots: [system, user])?.path, r + "/" + name)
+            }
+        }
+    }
+
+    /// Copies a sandboxed caller could make (its container) or a user could (the Desktop) are not installed copies.
+    func testContainerAndDesktopCopiesAreRejected() throws {
+        let home = tmp.path + "/home"
+        let roots = UpdateHost.roots(home: home)
+        for dir in [home + "/Library/Containers/com.nyanako.inputmethod.shanjie/Data/Library/Input Methods",
+                    home + "/Library/Containers/com.nyanako.inputmethod.shanjie/Data", home + "/Desktop"] {
+            XCTAssertNil(UpdateHost.host(helper: try helper(in: dir, "善解輸入法.app"), roots: roots), dir)
+        }
+        XCTAssertEqual(UpdateHost.host(helper: try helper(in: home + "/Library/Input Methods", "善解輸入法.app"), roots: roots)?.path,
+                       home + "/Library/Input Methods/善解輸入法.app", "the control: the same home's real folder passes")
+    }
+
+    /// A home that is a prefix of another (`/Users/a` and `/Users/ab`) gives the other no way in.
+    func testHomePrefixBoundary() throws {
+        let a = tmp.path + "/a", ab = tmp.path + "/ab"
+        let h = try helper(in: ab + "/Library/Input Methods", "善解輸入法.app")
+        XCTAssertNil(UpdateHost.host(helper: h, roots: UpdateHost.roots(home: a)))
+        XCTAssertNotNil(UpdateHost.host(helper: h, roots: UpdateHost.roots(home: ab)))
+    }
+
+    /// The feed comes from Info.plist only, and a missing or empty one stops the helper.
+    func testFeedURLFromInfoPlist() {
+        XCTAssertEqual(UpdateHost.feedURL(info: ["SUFeedURL": "https://example.com/appcast.xml"]), "https://example.com/appcast.xml")
+        XCTAssertNil(UpdateHost.feedURL(info: [:]))
+        XCTAssertNil(UpdateHost.feedURL(info: nil))
+        XCTAssertNil(UpdateHost.feedURL(info: ["SUFeedURL": ""]))
+        XCTAssertNil(UpdateHost.feedURL(info: ["SUFeedURL": 1]))
+    }
+
+    /// The three keys Sparkle stores a skipped version under are removed, nothing else in the domain is touched.
+    func testSkippedVersionsAreCleared() throws {
+        let suite = "UpdateHostTests." + UUID().uuidString
+        let d = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { d.removePersistentDomain(forName: suite) }
+        XCTAssertEqual(UpdateHost.skippedVersionKeys, ["SUSkippedVersion", "SUSkippedMajorVersion", "SUSkippedMajorSubreleaseVersion"],
+                       "the stored names (SUConstants.m), not the constant names")
+        for k in UpdateHost.skippedVersionKeys { d.set("999", forKey: k) }
+        d.set(true, forKey: "updateAutoCheck")
+        UpdateHost.clearSkippedVersions(in: d)
+        for k in UpdateHost.skippedVersionKeys { XCTAssertNil(d.object(forKey: k), k) }
+        XCTAssertEqual(d.object(forKey: "updateAutoCheck") as? Bool, true)
+    }
+
+    func testOnlyApplicationUpdatesProceed() {
+        XCTAssertTrue(UpdateHost.allowsInstall(type: "application"))
+        for t in ["package", "interactive-package", "Application", ""] { XCTAssertFalse(UpdateHost.allowsInstall(type: t), t) }
+    }
+
     func testTheBuildDecidesTheTrustCheck() {
         XCTAssertEqual(UpdateHost.trust(build: "release"), .verifyDeveloperID)
         XCTAssertEqual(UpdateHost.trust(build: "test"), .skip)

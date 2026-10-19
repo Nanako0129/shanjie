@@ -37,7 +37,7 @@ let package = Package(
         .executableTarget(
             name: "Shanjie",
             // Sparkle only here: ShanjieKit and the tests stay free of it (the update decisions they test live in ShanjieKit).
-            dependencies: ["ShanjieKit", "ShanjieInstall", .product(name: "Sparkle", package: "Sparkle")],
+            dependencies: ["ShanjieKit", "ShanjieInstall", "UpdateHost", .product(name: "Sparkle", package: "Sparkle")],
             // The IMK glue only: IMKInputController's overrides cannot be main-actor isolated in
             // the Swift 6 mode, so the main-thread requirement is checked at run time instead
             // (MainActor.assumeIsolated). ShanjieKit and the tests stay in the Swift 6 mode.
@@ -54,7 +54,7 @@ let package = Package(
             dependencies: ["ShanjieInstall"],
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
-        // The decisions of the standalone updater (docs/contracts/standalone-updater.md section 3.2); Foundation only.
+        // The decisions of the standalone updater (docs/contracts/standalone-updater.md section 2.1); Foundation only.
         .target(name: "UpdateHost"),
         // 善解更新.app, embedded at Contents/Helpers of the input method (scripts/build-app.sh). Sparkle.framework sits in its own
         // Contents/Frameworks, which SwiftPM's @loader_path (Contents/MacOS) does not reach, hence the rpath.

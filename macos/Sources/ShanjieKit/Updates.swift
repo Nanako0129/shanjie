@@ -32,15 +32,15 @@ public enum ProbeStart: Sendable {
     /// The check runs and will report back through `Updates.finished`.
     case started
     /// A Sparkle session is already running (Sparkle would ignore the call and never report back): no check starts; `install`
-    /// brings Sparkle's windows to the front instead (`focus`).
+    /// opens 善解更新 directly instead.
     case busy
     /// The updater is not running (it did not start, or this build does not start it): the check fails.
     case unavailable
 }
 
 /// The update state shared by the 關於 page and the input menu (contract sections 1 and 2). Sparkle stays in the app target
-/// (`Updater`), which sets `probe`, `interactive` and `focus` and reports each finished check through `finished`; the decisions (when
-/// the background check runs, when the interactive flow may start, what the page and the menu show) are here, so the tests
+/// (`Updater`), which sets `probe` and `launchHelper` and reports each finished check through `finished`; the decisions (when
+/// the background check runs, when 善解更新 may open, what the page and the menu show) are here, so the tests
 /// reach them without Sparkle or the network.
 @MainActor
 public final class Updates: ObservableObject {
@@ -84,15 +84,15 @@ public final class Updates: ObservableObject {
 
     /// Starts Sparkle's information-only check (no window).
     public var probe: () -> ProbeStart = { .unavailable }
+    /// Closes the settings window. It floats above ordinary app windows (`SettingsWindowController.level`) and covered
+    /// 善解更新's dialog in the VM run V1 (standalone-updater.md sections 1.1 and 2.3), so it goes before the helper opens.
+    public var closeSettings: () -> Void = {}
     /// Opens 善解更新.app, where the download, the notes, the install and the relaunch happen (standalone-updater.md section
-    /// 3.3). Called only from `finished`, after a silent check the user started with `install` confirmed a newer version.
-    public var interactive: () -> Void = {}
-    /// 更新到 X or the menu item pressed while a Sparkle session runs: opens 善解更新.app again, which LaunchServices turns into
-    /// an activation when it already runs.
-    public var focus: () -> Void = {}
+    /// 2.2). A second open while it runs only activates it (LaunchServices).
+    public var launchHelper: () -> Void = {}
 
     private let store: UpdateStore
-    /// `install` started the running check: open the interactive flow if it finds a newer version.
+    /// `install` started the running check: open 善解更新 if it finds a newer version.
     private var installAfterCheck = false
 
     public init(store: UpdateStore, version: String) {
@@ -128,14 +128,14 @@ public final class Updates: ObservableObject {
         if begin(now) == .unavailable { failNow(now) }
     }
 
-    /// 更新到 X and the menu item: a silent check first, and Sparkle's interactive flow only if it confirms a newer version
-    /// (`finished`). Otherwise the state says 已是最新 or 檢查失敗 and no Sparkle window opens. While a session runs, the press
-    /// brings Sparkle's windows back to the front instead: the input method has no Dock icon to do it (device check 2026-10-16).
+    /// 更新到 X and the menu item: a silent check first, and 善解更新 only if it confirms a newer version (`finished`).
+    /// Otherwise the state says 已是最新 or 檢查失敗 and no window opens. While a Sparkle session of the input method runs (its
+    /// own probe), the press opens 善解更新 directly, which checks again by itself.
     public func install(now: Date = Date()) {
         guard !checking else { return }  // our own silent check runs and decides; no Sparkle window to bring up
         switch begin(now) {
         case .started: installAfterCheck = true
-        case .busy: focus()
+        case .busy: openHelper()
         case .unavailable: failNow(now)
         }
     }
@@ -159,7 +159,7 @@ public final class Updates: ObservableObject {
     }
 
     /// A check ended. A version already known stays known when a check fails or when a finished cycle reports a newer version
-    /// without saying which; `nil` only ends the check (an interactive session the user dismissed).
+    /// without saying which; `nil` only ends the check.
     public func finished(_ r: UpdateResult?, version newer: String? = nil) {
         checking = false
         let wantsInstall = installAfterCheck
@@ -174,7 +174,14 @@ public final class Updates: ObservableObject {
         var s = ["by": version, "result": r.rawValue]
         if let available { s["available"] = available }
         store.status = s
-        if wantsInstall, r == .available, available != nil { interactive() }
+        if wantsInstall, r == .available, available != nil { openHelper() }
+    }
+
+    /// 更新到 X once a silent check confirmed a newer version, or a press while a Sparkle session runs: the settings window
+    /// first, then the helper, in that order (section 2.3).
+    private func openHelper() {
+        closeSettings()
+        launchHelper()
     }
 }
 
@@ -187,13 +194,14 @@ public enum UpdateText {
     public static func install(_ v: String) -> String { "更新到 \(v)" }
     public static func menu(_ v: String) -> String { "有新版本 \(v)，按此更新…" }
 
-    /// The 關於 page's note on where this copy is installed and what updating it asks (standalone-updater.md section 5.2):
-    /// the system's Input Methods folder (the update asks for an administrator password), anything else is the user's.
+    /// The 關於 page's note on where this copy is installed and what updating it asks (standalone-updater.md section 2.3,
+    /// the U1 wording: the user-folder note ends before the sentence that points to the installer's 「這台 Mac」, which U2 adds).
+    /// Only the folder above the bundle decides: the system's Input Methods folder, or anything else (the user's).
+    public static let locationSystem = "善解裝給這台 Mac 的所有帳號。按更新後，善解更新會先下載並驗證，再跳出系統的密碼框，文字是「善解更新 wants permission to update 善解輸入法.」。善解只會在你按下這裡的「更新」之後才要密碼。不是管理員的帳號，請管理員更新。"
+    public static let locationUser = "善解只裝在你的帳號，更新不需要密碼。有程式開著安全輸入時，系統會暫時停用善解。"
+
     public static func location(bundleURL: URL) -> String {
-        if bundleURL.deletingLastPathComponent().path == "/Library/Input Methods" {
-            return "善解裝在這台 Mac 的所有帳號裡（/Library/Input Methods）。更新時會先下載並驗證，再跳出系統的密碼框「善解更新 wants permission to update 善解輸入法」；善解只會在你按下這裡的「更新」之後才要密碼。不是管理員的帳號請請管理員更新。"
-        }
-        return "善解只裝在你的帳號裡（~/Library/Input Methods），更新不需要密碼。有程式開著安全輸入時，系統會暫時停用善解；要改裝給整台 Mac，請重新下載安裝程式並選「這台 Mac」。"
+        bundleURL.deletingLastPathComponent().path == "/Library/Input Methods" ? locationSystem : locationUser
     }
 
     public static func result(_ r: UpdateResult?, available: String?) -> String? {

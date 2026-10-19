@@ -2,6 +2,7 @@ import AppKit
 import os
 import ShanjieKit
 import Sparkle
+import UpdateHost
 
 /// Sparkle's version check in the input method (docs/contracts/about-update.md sections 1 and 2), modeled on Syrtis's UpdaterService. The
 /// decisions live in `Updates` (ShanjieKit, tested); this class only connects them to Sparkle.
@@ -12,7 +13,8 @@ import Sparkle
 ///   runs `checkForUpdateInformation` (no window) at most once a day and only with 自動檢查更新 on: a window popping up while
 ///   the user types would take the focus.
 /// - Only the information-only check runs here, and the framework has no XPC services (`SUEnableInstallerLauncherService`
-///   false). The install flow is 善解更新.app's (`launchHelper`, docs/contracts/standalone-updater.md): it runs outside the
+///   false), no Autoupdate and no Updater.app. The feed is pinned to Info.plist and the skipped versions are cleared before
+///   every check (standalone-updater.md section 2.1). The install flow is 善解更新.app's (`launchHelper`, docs/contracts/standalone-updater.md): it runs outside the
 ///   sandbox and opens only after the user pressed 更新到 X or the menu item and a silent check just confirmed a newer version
 ///   (`Updates.install`).
 /// - Started with `startingUpdater: false` and `start()` here, unlike Syrtis: when the standard controller starts the updater
@@ -35,12 +37,15 @@ final class Updater: NSObject, SPUUpdaterDelegate {
     /// The version `didFindValidUpdate` reported in the current cycle.
     private var found: String?
     private var timer: Timer?
+    /// This bundle's Info.plist `SUFeedURL`, pinned through `feedURLString(for:)` like the helper's (standalone-updater.md
+    /// section 2.1); without it the updater does not start.
+    private nonisolated let feed = UpdateHost.feedURL(info: Bundle.main.infoDictionary)
 
     init(updates: Updates) {
         self.updates = updates
         super.init()
         let build = Bundle.main.object(forInfoDictionaryKey: Updates.buildKey) as? String
-        guard Updates.runsUpdater(bundleURL: Bundle.main.bundleURL, build: build) else { return }
+        guard Updates.runsUpdater(bundleURL: Bundle.main.bundleURL, build: build), feed != nil else { return }
         let c = SPUStandardUpdaterController(startingUpdater: false, updaterDelegate: self, userDriverDelegate: nil)
         controller = c
         do {
@@ -50,8 +55,7 @@ final class Updater: NSObject, SPUUpdaterDelegate {
             Self.log.error("the updater did not start")
         }
         updates.probe = { [weak self] in self?.probe() ?? .unavailable }
-        updates.interactive = { [weak self] in self?.launchHelper() }
-        updates.focus = { [weak self] in self?.launchHelper() }
+        updates.launchHelper = { [weak self] in self?.launchHelper() }
         let t = Timer(timeInterval: Self.tickEvery, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.updates.tick() }
         }
@@ -63,14 +67,16 @@ final class Updater: NSObject, SPUUpdaterDelegate {
     private func probe() -> ProbeStart {
         guard started, let updater = controller?.updater else { return .unavailable }
         guard !updater.sessionInProgress else { return .busy }
+        // Sparkle filters found versions by the skipped ones in this domain (standalone-updater.md section 2.1).
+        UpdateHost.clearSkippedVersions(in: .standard)
         updater.checkForUpdateInformation()
         return .started
     }
 
-    /// 更新到 X, after a silent check confirmed a newer version: opens 善解更新.app, the sandbox-free updater inside this bundle
-    /// (docs/contracts/standalone-updater.md section 3.3). No argument (a sandboxed caller's are ignored anyway); the helper
-    /// works out its host itself and shows Sparkle's dialogs. A press while it already runs just activates it (LaunchServices),
-    /// so `Updates.focus` is the same call.
+    /// 更新到 X, after a silent check confirmed a newer version (`Updates` closes the settings window first): opens
+    /// 善解更新.app, the sandbox-free updater inside this bundle (docs/contracts/standalone-updater.md section 2.2). No argument
+    /// (a sandboxed caller's are ignored anyway); the helper works out its host itself and shows Sparkle's dialogs. A press
+    /// while it already runs just activates it (LaunchServices).
     private func launchHelper() {
         let url = Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/善解更新.app")
         let c = NSWorkspace.OpenConfiguration()
@@ -83,6 +89,9 @@ final class Updater: NSObject, SPUUpdaterDelegate {
 
     // MARK: SPUUpdaterDelegate (Sparkle calls it on the main thread)
 
+    /// The Info.plist value, never this domain's user defaults, which Sparkle would read first (standalone-updater.md S2).
+    nonisolated func feedURLString(for updater: SPUUpdater) -> String? { feed }
+
     nonisolated func updater(_ updater: SPUUpdater, didFindValidUpdate item: SUAppcastItem) {
         let version = item.displayVersionString
         MainActor.assumeIsolated { found = version }
@@ -90,7 +99,7 @@ final class Updater: NSObject, SPUUpdaterDelegate {
 
     /// One place for every outcome: no error after `didFindValidUpdate` is a newer version, `SUNoUpdateError` is up to date,
     /// any other error (network, feed signature, appcast) is a failed check. `found` is taken before `finished`, which may
-    /// start the interactive cycle; that cycle sets its own.
+    /// open 善解更新.
     nonisolated func updater(_ updater: SPUUpdater, didFinishUpdateCycleFor updateCheck: SPUUpdateCheck, error: (any Error)?) {
         let e = error as NSError?
         let noUpdate = e.map { $0.domain == SUSparkleErrorDomain && $0.code == Int(SUError.noUpdateError.rawValue) } ?? false

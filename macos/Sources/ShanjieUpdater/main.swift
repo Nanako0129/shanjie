@@ -4,10 +4,11 @@ import Security
 import Sparkle
 import UpdateHost
 
-/// 善解更新.app (docs/contracts/standalone-updater.md section 3.2): not sandboxed, at `<input method>.app/Contents/Helpers`.
+/// 善解更新.app (docs/contracts/standalone-updater.md section 2.1): not sandboxed, at `<input method>.app/Contents/Helpers`.
 /// It updates the one bundle that contains it, and only when that bundle sits in an Input Methods folder under its own name;
-/// it takes no argument and no input from whoever launched it. Feed and key come from the host's Info.plist (Sparkle reads
-/// them from the host bundle); this bundle's own Info.plist has none, so it can update nothing else. Logging follows R2:
+/// it takes no argument and no input from whoever launched it. Feed and key come from the host's Info.plist (the key Sparkle
+/// reads from the host bundle; the feed this delegate pins, since Sparkle would read the host domain's defaults first); this
+/// bundle's own Info.plist has none, so it can update nothing else. Logging follows R2:
 /// static strings only.
 final class Helper: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
     private static let log = Logger(subsystem: "com.nyanako.inputmethod.shanjie", category: "updater")
@@ -16,10 +17,15 @@ final class Helper: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
         #"anchor apple generic and identifier "com.nyanako.inputmethod.shanjie" and certificate leaf[subject.OU] = "2LJ882GPY8""#
 
     private let host: Bundle
+    /// The host's Info.plist `SUFeedURL`, pinned through `feedURLString(for:)` (section 2.1).
+    private let feed: String
     private var updater: SPUUpdater?
     private var found = false
 
-    init(host: Bundle) { self.host = host }
+    init(host: Bundle, feed: String) {
+        self.host = host
+        self.feed = feed
+    }
 
     func applicationDidFinishLaunching(_ note: Notification) {
         let driver = SPUStandardUserDriver(hostBundle: host, delegate: nil)
@@ -35,9 +41,17 @@ final class Helper: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
         u.checkForUpdateInformation()
     }
 
-    /// Only plain application updates: a guided package would run Sparkle's installer as root.
+    /// An open-document event (`open -a 善解更新.app <file>`) shows nothing: without this AppKit would put up its own "cannot
+    /// open" alert with the caller's file name (section 2.1, security review P3-4). The URL variant is the one AppKit calls
+    /// when it is implemented; the file-name variants are then not called.
+    func application(_ application: NSApplication, open urls: [URL]) {}
+
+    /// The host's Info.plist value, never the host domain's user defaults, which Sparkle would read first (S2).
+    func feedURLString(for updater: SPUUpdater) -> String? { feed }
+
+    /// Only plain application updates (`UpdateHost.allowsInstall`): a guided package would run Apple's installer as root.
     func updater(_ updater: SPUUpdater, shouldProceedWithUpdate item: SUAppcastItem, updateCheck: SPUUpdateCheck) throws {
-        guard item.installationType == "application" else {
+        guard UpdateHost.allowsInstall(type: item.installationType) else {
             throw NSError(domain: "ShanjieUpdater", code: 1, userInfo: [NSLocalizedDescriptionKey: "unsupported update type"])
         }
     }
@@ -76,15 +90,23 @@ let home = getpwuid(getuid()).map { String(cString: $0.pointee.pw_dir) } ?? ""
 guard !home.isEmpty, let hostURL = UpdateHost.host(helper: Bundle.main.bundleURL, roots: UpdateHost.roots(home: home)),
       let host = Bundle(url: hostURL)
 else { exitQuietly("not inside an installed input method") }
-let build = host.object(forInfoDictionaryKey: "ShanjieUpdateBuild") as? String
+let build = host.infoDictionary?["ShanjieUpdateBuild"] as? String
 switch UpdateHost.trust(build: build) {
 case .exit: exitQuietly("this build does not update")
 case .skip: break
 case .verifyDeveloperID: if !hostIsDeveloperID(hostURL) { exitQuietly("the input method is not signed by the developer") }
 }
+guard let feed = UpdateHost.feedURL(info: host.infoDictionary) else { exitQuietly("the input method has no feed URL") }
+// Sparkle reads the skipped versions from the host's domain (SUHost: a suite named by the host's bundle ID when the host is
+// not the main bundle); cleared before Sparkle starts, so neither a press of 跳過這個版本 nor a value written by anyone else
+// hides the next update (section 2.1).
+guard let hostID = host.bundleIdentifier, let hostDefaults = UserDefaults(suiteName: hostID) else {
+    exitQuietly("the input method has no bundle identifier")
+}
+UpdateHost.clearSkippedVersions(in: hostDefaults)
 
 let app = NSApplication.shared
-let helper = Helper(host: host)
+let helper = Helper(host: host, feed: feed)
 app.delegate = helper
 app.setActivationPolicy(.regular)
 app.run()

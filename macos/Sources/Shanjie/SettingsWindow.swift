@@ -47,6 +47,9 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         w.orderFrontRegardless()
     }
 
+    /// Before 善解更新 opens (standalone-updater.md section 2.3): this window floats above it (`level`). Nothing when closed.
+    func close() { window?.close() }
+
     /// Measured page heights come out this much short of what the window draws: a 10-toggle grouped form measured 435 pt
     /// in a window and was drawn 438 pt tall (/code-review probe, 2026-10-15). Without it the tallest page would scroll.
     private static let measureSlack: CGFloat = 4

@@ -58,7 +58,7 @@ public struct MenuEntry: Equatable, Sendable {
         case toggleAcgPack
         case toggleAppChat
         case openSettings
-        /// docs/contracts/about-update.md section 1: a silent check, then Sparkle's interactive update flow if it confirms one.
+        /// docs/contracts/about-update.md section 1: a silent check, then 善解更新 (standalone-updater.md) if it confirms one.
         case installUpdate
     }
 
