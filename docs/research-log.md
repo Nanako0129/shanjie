@@ -8159,6 +8159,32 @@ XL 比 `MAX_FILE`（67,108,864）小 1,168,880 位元組。錨點：4 個模型 
 - 出貨設定（`cli --context --tinylm`，`tinylm.sjtl` `e7c179d8`）兩種設定都錯：聊天最後選「這個藥理嗎」，n-gram 前四名是 藥理、藥裡、要裡、要理（正解第 4）；書面選「這個藥裡嗎」。
 - golden 的兩行錯字集重產（`lm_eval.py --context`）：n 154，top1 聊天 32、書面 41 不變，oracle@64 150 → 151。
 
+## 2026-10-20：改裝 `/Library` 的探針 P0（維護者的 Mac）；三個探針都過
+
+- 維護者的 Mac（macOS 27.0.1），裝著的是 dry run 的 0.0.0（`~/Library`）。照 P1 的順序：以 root 複製到 `/Library/Input Methods`（`root:wheel`、`chmod -R a+rX`）、帳號層那份改名保留、`lsregister`、`TISRegisterInputSource` 並啟用、結束程序，維護者登出再登入。
+- 結果：執行中的是 `/Library` 那份；背景程式持有安全輸入時，善解**不反灰**、選單第一項「學習已暫停（安全輸入）」、打得出中文；**Caps Lock 切換正常**（重新登記發生在換位置之後，這次沒有觸發 2026-10-09 的問題）。
+- 三個探針（P0、P1、P3）都過，照維護者先前的決定，`/Library` 併進 v0.5.0，契約 `docs/contracts/system-install.md`。
+
+## 2026-10-20：`/Library` 的安全審查；改成使用者自選安裝方式，獨立更新程式一起進 v0.5.0
+
+- 契約 `docs/contracts/system-install.md` 第一版送 plan-verifier 與 security-reviewer，都是 REVISE（契約 §7）。最重的是安全審查的 P1-A：
+  - 〔原始碼，未實測〕Sparkle 2.10.0 的 `SPUUsesSystemDomainForBundlePath` 遇到「套件安裝」類型時，不看 host 路徑就走系統 domain；host 路徑與安裝類型都由呼叫者提供，安裝服務不綁呼叫者，同 Team 簽章的程序都連得上（Autoupdate 的連線檢查）。這擴大了 app-sandbox 修訂二的 F1（10-19）：被攻破的沙盒輸入法不只可能借它逃出沙盒，還可能叫出一個以 host 名義（「善解輸入法 wants permission to update.」）要管理員密碼的對話框。這條路**今天就存在**，和裝在哪裡無關。
+  - 改裝 `/Library` 不新增這條路，但每次正式更新都要管理員密碼，使用者會習慣「善解要密碼」，假的對話框比較容易成功。
+- 維護者同日兩次選擇題：先選「v0.5.0 先不做 `/Library`，等沙盒外的獨立更新程式」；接著改成：安裝方式**讓使用者自己選**（安裝程式並列兩個選項、沒有預設，各寫功能與取捨），裝給整台 Mac 的更新**保留管理員密碼**，**獨立更新程式（根本解）一起進 v0.5.0**。v0.5.0 因此是 App 沙盒＋安裝方式選擇＋獨立更新程式，tag 等三者的驗收都過。
+- 跟著要做的：app-sandbox §4.5 的虛擬機逃脫驗證與給 Sparkle 的私下回報，加上「套件安裝 → 系統 domain」這個變體（只寫機制，送出前給維護者看）。三個探針（P0、P1、P3）與打包權限的發現照用；契約照 §7 的發現與這三個決定改寫，獨立更新程式另寫契約，先請研究顧問分析設計。
+
+## 2026-10-20：獨立更新程式「善解更新」的設計與虛擬機 V1–V5
+
+- 研究顧問比較五個架構（獨立更新 App、自寫更新程式、輸入法留 Sparkle 只換安裝端、`SMAppService` daemon、照修訂三），建議**選項 A**，維護者採用：輸入法 bundle 裡放一個不在沙盒、內嵌 Sparkle 的小 App（`Contents/Helpers/善解更新.app`），它只更新包著自己的那份輸入法（往上三層的 `realpath` 必須是兩個允許的安裝路徑之一），不吃呼叫者的任何輸入，只接受 `application` 類型的更新；輸入法拿掉 XPC 服務與兩個 mach-lookup 例外（entitlements 四個變三個），「更新到 X」只負責啟動它。Sparkle 2.10.0 的依據（〔原始碼〕）：host 與 application bundle 可以不是自己、feed 與公鑰從 host 讀、主 bundle 關掉 XPC 開關時安裝端在程序內執行。
+- 原型（分支 `feat/standalone-updater`）在 tart 虛擬機（macOS 26.6.2）用開發版 ID 的更新測試版走完一趟：
+  - V4：沙盒之前的舊版經自己的 Sparkle 更新到新配置：過（0.4.7 → 0.5.0 的路）。
+  - V1：沙盒輸入法啟動得了 `Contents/Helpers` 裡的善解更新，沒有沙盒拒絕；但它的視窗被我們 `.floating` 的設定視窗擋住，關掉設定視窗後才看得到。修法：按「更新到 X」時先關設定視窗。
+  - V2：帳號層更新不問密碼、container 沿用；`log` 有 1 筆拒絕：輸入法裡只做探測的 Sparkle 查 `<ID>-spks` 被沙盒擋下，探測與更新都不受影響。契約把它列為唯一允許的拒絕。
+  - V5：複製到桌面的副本打開立刻結束、沒有視窗。
+  - V3：`/Library`（root 擁有）的那份更新時跳系統密碼框，文字「善解更新 wants permission to update 善解（開發版）.」；結果 `root:wheel`、全部可讀、container 沿用、0 拒絕。
+- 另外量到：macOS 26 上程式呼叫 `TISEnableInputSource` 會跳「Allow "<呼叫者>" to enable "Shanjie"?」，按允許才啟用；安裝程式的啟用步驟要量（system-install §4.3 a）。
+- 契約：新的 `docs/contracts/standalone-updater.md`；`docs/contracts/system-install.md` 照兩份審查與維護者的三個決定改寫成修訂一。
+
 ## 2026-10-20：零訓練診斷 D2、D3、D5 (1)(2)：單字同音整類結案，D3 壓線開 P4
 
 - 程式 `experiments/diag-near-miss/d23.py`（程式審查後 `5f1945ea`）；解讀規則在看到任何私人集合的數字之前補進登記頁（`c2557ebe`）。傾印只在 GCP 上、跑完刪掉，帶回 Mac 的只有計數與字對統計。
