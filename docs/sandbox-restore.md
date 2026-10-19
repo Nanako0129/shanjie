@@ -37,7 +37,7 @@ SRC_PREFS="$C/Data/Library/Preferences/$ID.plist"
 DST_AS="$HOME/Library/Application Support/shanjie"
 DST_PREFS="$HOME/Library/Preferences/$ID.plist"
 [ -d "$C" ] || { echo "沒有 ${C}，不需要搬回。"; exit 0; }
-pkill -f "^$HOME/Library/Input Methods/(善解輸入法|shanjie)\.app/Contents/MacOS/shanjie( |\$)" || true
+pkill -U "$(id -u)" -f "^($HOME/Library/Input Methods/|/Library/Input Methods/)(善解輸入法|shanjie)\.app/Contents/MacOS/shanjie( |\$)" || true
 sleep 1
 for p in "$DST_AS" "$DST_PREFS"; do
   [ ! -e "$p" ] || { echo "原位置已經有 ${p}（退回期間產生的，或上一次執行到一半停下時留下的複本）。先把它移到別處備份，再執行一次。" >&2; exit 1; }

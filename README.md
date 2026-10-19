@@ -79,7 +79,7 @@
 
 ## 安裝
 
-需要 macOS 26（Tahoe）以上、Apple 晶片。下面兩種方式擇一；換方式時：從 Homebrew 換成安裝程式，先執行 `brew uninstall --cask nanako0129/tap/shanjie`；從安裝程式換成 Homebrew，先刪掉 `~/Library/Input Methods/善解輸入法.app`。
+需要 macOS 26（Tahoe）以上、Apple 晶片。下面兩種方式擇一；換方式時：從 Homebrew 換成安裝程式，先執行 `brew uninstall --cask nanako0129/tap/shanjie`；從安裝程式換成 Homebrew，先刪掉 `~/Library/Input Methods/善解輸入法.app`（裝給「這台 Mac」的那份，見下面的「解除安裝」）。Homebrew 只裝在你的帳號。
 
 **Homebrew**
 
@@ -112,7 +112,23 @@ pkill -f '^[^ ]*/Library/Input Methods/(善解輸入法|shanjie)\.app/Contents/M
 scripts/install-ime.sh <解壓出來的 善解輸入法.app 路徑>
 ```
 
-也可以從 Releases 下載 `shanjie-installer-<版本>.zip`，解壓後點兩下「安裝善解輸入法」。
+也可以從 Releases 下載 `shanjie-installer-<版本>.zip`，解壓後點兩下「安裝善解輸入法」。v0.5.0 起歡迎頁有兩個並列的選項，沒有預設：
+
+| | 這台 Mac | 只有我的帳號 |
+|---|---|---|
+| 位置 | `/Library/Input Methods`，檔案由系統保護 | `~/Library/Input Methods`（之前的方式） |
+| 安全輸入 | 有程式開著安全輸入時（密碼管理器、終端機的「加密的鍵盤輸入」），善解照常能用 | 系統會暫時停用善解 |
+| 安裝與更新 | 各要輸入一次管理員密碼 | 不需要密碼、一鍵更新 |
+| 其他帳號 | 都能用 | 看不到 |
+
+兩種之間可以重新打開安裝程式切換，學習資料與設定不受影響；換了位置之後要登出再登入一次。`scripts/install-ime.sh` 只裝在你的帳號；這台 Mac 已經有一份時，它會停下來並印出移除指令。
+
+**解除安裝**：
+
+- 只有我的帳號：`rm -rf "$HOME/Library/Input Methods/善解輸入法.app" "$HOME/Library/Input Methods/.shanjie-previous"`。
+- 這台 Mac（要管理員）：`sudo rm -rf "/Library/Input Methods/善解輸入法.app" "/Library/Input Methods/.shanjie-previous"`。
+- 學習資料與設定在每個帳號自己的 container，用過善解的每個帳號各自刪：`rm -rf "$HOME/Library/Containers/com.nyanako.inputmethod.shanjie"`。
+- 最後到「系統設定 → 鍵盤 → 輸入方式」把善解移除，登出再登入一次。
 
 裝好後在選單列的輸入法選單選「善解輸入法」；標準／倚天鍵盤在它自己的選單裡切換。選單裡的「善解設定…」會開一個設定視窗，選單上的各項設定都能在裡面改，另外有候選窗的方向（橫排或直排）與玻璃深淺。聊天／書面的切換方式（依 App 自動、一律聊天、一律書面）與選單裡「這個 App 用聊天設定」從 v0.4.1 起有；選單的「語意校正」（v0.4.1 起預設開）也可以在這裡關掉。
 

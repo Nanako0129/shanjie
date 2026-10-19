@@ -67,6 +67,7 @@
 - `scripts/install-ime.sh <善解輸入法.app 的路徑>`（通常是解壓後的 Release 附件；也接受 `build/善解輸入法.app` 自己建的 ad-hoc 版）：
   - **2026-10-19 修訂（`app-sandbox.md` §2.3、§5）**：目的地改依 bundle ID（正式 ID → `善解輸入法.app`，開發版 ID → `善解（開發版）.app`，其他 ID 拒絕），下面「固定為字面路徑」與「接受自己建的 ad-hoc 版」都已被取代。正式 ID 只接受本專案 Developer ID（`Developer ID Application`、Team `2LJ882GPY8`，`codesign -dv` 讀不到簽章也拒絕）簽章的版本，在複製任何東西之前檢查；只有 files-only 測試模式跳過。自己建的版本一律用開發版 ID（`make bundle` → `build/善解（開發版）.app`）。正式 ID 的本機組建不要在維護者的機器上執行或安裝：它第一次啟動就會建立正式版的 container、把學習資料搬進去。
   - `#!/bin/bash`、`set -euo pipefail`；`$HOME` 為空就中止；不用 sudo（R9）。
+  - **2026-10-20 修訂（`system-install.md` §2.1、§2.4）**：腳本仍只裝帳號層。`/Library/Input Methods/善解輸入法.app` 存在時，正式 ID 不裝進 `~/Library`，停下來並印出完整加引號的 `sudo rm -rf` 移除指令。另有一個只給安裝程式用的不複製模式（`SHANJIE_INSTALL_NO_COPY=1`，參數只能是 `/Library` 那份）：把帳號層那份（含舊名）`lsregister -u` 後移到 `.shanjie-previous`、對 `/Library` 那份 `lsregister -f`、結束兩個位置裡自己帳號的舊程序，不註冊。選「這台 Mac」時寫 `/Library` 的是安裝程式的 root 階段，不是這個腳本。
   - 目的地固定為字面路徑 `"$HOME/Library/Input Methods/善解輸入法.app"`。腳本只刪除或搬移 `~/Library/Input Methods` 裡的四個位置（§13.3）：這個目的地、舊名稱 `shanjie.app`、這次執行用 `mktemp` 建的暫存資料夾、保留上一版的 `.shanjie-previous`。輔助資料夾的名稱不是 `.app`（暫存資料夾在複製期間裡面有一個 `善解輸入法.app`）。不要同時執行兩次安裝（未加鎖）；被直接砍掉的執行可能留下 `.shanjie-staging-*`，不會自動清（同時執行的另一份看起來一樣），要手動刪。**HOME 不是這個帳號真正的家目錄時，除非設了 `SHANJIE_INSTALL_FILES_ONLY=1`，腳本一開始就拒絕執行**；files-only 模式完全不呼叫 lsregister、pkill 或註冊。
   - 順序（修訂 13 與 PR #5 審查後）：`ditto` 到暫存資料夾（複製失敗時什麼都不放上去）→ 刪掉更早保留的 `.shanjie-previous`（先 `chmod -R u+w`）→ 舊版（`善解輸入法.app`，沒有時是舊名稱 `shanjie.app`）**先改名**為 `.shanjie-previous`、成功後才 `lsregister -u`（改名失敗時舊版仍維持登記）→ 新版改名就位 → 新舊名稱並存時刪除舊名稱那份（失敗只警告）→ 新版 `lsregister -f` → 結束舊行程並等它退出 → 執行已安裝那一份的 `install`（**2026-10-09 起只在系統還不認得或有舊模式時註冊**，見 `installer-v2.md` §9；原文：一律重新註冊，見 §13.3）。`trap` 只在舊版**確實已改名移開**之後、新版就位之前被中斷時，才把新版放上去，並印出只重跑 `lsregister -f` 與 `install` 的指令（不要重跑整個腳本）。其餘描述（HOME 檢查、files-only、測試、未實測項目）見 §13.3 與 §11。
   - 最後印出下一步：到「系統設定 → 鍵盤 → 輸入方式」確認「善解」已出現；沒出現就在那裡按「+」加入（2026-10-09 起，見 `installer-v2.md` §9；原本寫「沒出現就登出再登入」）。
@@ -225,6 +226,8 @@
 - **偏好**：介面 `LayoutStore`（讀／寫 `standard`／`eten`）是 `Shell.init` 的**必要參數、不給預設值**；UserDefaults 版（app 自己的網域，鍵 `layout`）只放在 `Shanjie` target，`ShanjieKit` 與測試用記憶體版，所以測試不可能寫到真正的偏好。值不存在或不合法時用標準排列。**`Shell.init` 先讀偏好、再建引擎，只建一次**（約 240 MB）。
 
 ### 13.3 註冊與升級
+
+> **2026-10-20 補充（`system-install.md` §2.2、§2.4）**：安裝程式換了安裝位置時（帳號層 ↔ `/Library`），`Registration.decide` 的 `moved` 為真，一律註冊與啟用，不套用下一段的跳過規則；`shanjie install` 不傳 `moved`，行為不變。
 
 > **2026-10-09 修訂（`installer-v2.md` §9）**：本節下面的「一律呼叫 `TISRegisterInputSource`」、exit 3 的「登出再登入後再執行一次」、`install-ime.sh` 回傳 3 時的訊息，都已被取代。現在的規則：`Registration.decide` 只在系統還不認得 `.zhuyin` 模式，或有已啟用的舊模式時，才呼叫註冊與啟用；已接受時印 `already enabled; registration skipped` 並 exit 0；認得但未接受時不改任何東西，最多等 5 秒，等不到就 exit 3，請使用者到「系統設定 → 鍵盤 → 輸入方式」加入。原因：bundle 換過之後再註冊或啟用，會讓系統的 Caps Lock 切換壞掉；而且對還沒接受的輸入法，程式化啟用實測沒有效果（研究紀錄 2026-10-09）。下面保留原文，作為 0.1.x 的紀錄。
 

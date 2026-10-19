@@ -16,6 +16,10 @@ cask "shanjie" do
   depends_on arch: :arm64
   depends_on macos: :tahoe
 
+  # The cask installs for the current account only (~/Library/Input Methods). The installer
+  # app's "This Mac" option puts it in /Library/Input Methods instead
+  # (docs/contracts/system-install.md); with that copy present, a brew install adds a second
+  # one, which is not blocked here.
   input_method "善解輸入法.app"
 
   # Upgrade and reinstall: stop the running old copy only once the new bundle is in place, so the

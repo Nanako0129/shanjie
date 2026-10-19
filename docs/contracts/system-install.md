@@ -27,9 +27,12 @@
 | **P3** Sparkle 更新 root 擁有的 bundle | 虛擬機，開發版 ID 的更新測試版（ad-hoc） | 「更新到 0.0.2」→ 系統管理員密碼框；第一次取消沒有錯誤、照常打字；第二次輸入密碼 → 更新完成；結果 `root:wheel`、全部可讀（zip 先 `chmod -R a+rX`）、container 沿用、0 deny。善解更新從 `/Library` 走同一條路也過（`standalone-updater.md` §1.1 V3） |
 | **P0** 維護者的 Mac | macOS 27.0.1，把裝著的 dry run 0.0.0 照 P1 的順序搬到 `/Library`、登出再登入 | 安全輸入期間不反灰、選單第一項「學習已暫停（安全輸入）」、打得出中文、**Caps Lock 切換正常**（重新登記發生在換位置之後，這次沒有觸發 installer-v2 §9 的問題；只量了一次） |
 | 打包權限 | `release.yml` | sign 步驟先 `umask 077` 再 `tar -xf`，zip 裡的 bundle 是 0700／0600。在 `~/Library` 無害；root 擁有時使用者讀不到、載不起來；Sparkle 以 root 換檔只改擁有者、不改權限。修正放在 U1（`standalone-updater.md` §2.4），這片依賴它 |
+| §4.0 `NSAppleScript` 取得管理員權限 | tart 虛擬機（macOS 26.6.2），2026-10-20 | ad-hoc 簽章、hardened runtime、沒有任何 entitlement 的最小 App 執行 `do shell script "/usr/bin/id -u" with administrator privileges`：回傳 `uid=0`；authd 記錄 `Succeeded authorizing right 'system.privilege.admin' by client '<那個 App 的路徑>'`（經 Security.framework 的 authtrampoline）。停止條件（§5 第一列）沒有發生 |
 | 程式啟用輸入法的系統詢問 | 虛擬機（macOS 26.6.2），P1 用的小工具呼叫 `TISEnableInputSource` | 系統跳出「Allow "<呼叫者>" to enable "Shanjie"?」，按允許才啟用。安裝程式的啟用步驟會不會跳、按「不允許」之後怎麼走，§4.3 量 |
 
-還沒量、這片要量的：安裝程式在 hardened runtime 下用 `NSAppleScript` 取得管理員權限（§4.0）；第二個帳號（§4.3 選做，只影響文件）。
+還沒量、這片要量的：第二個帳號（§4.3 選做，只影響文件）。§4.0 已在 2026-10-20 量過（上表）。
+
+實作時量到（U2，維護者的 Mac，macOS 27.0.1，以一般使用者）：`ditto --noacl` 仍把來源檔的 ACL 複製過去；把 ACL 清掉的是第 4 步的 `chmod -RN`，CI 的「來源帶 ACL」案例因此靠的是 `chmod -RN`（`RootStageTests`）。
 
 ## 2. 設計
 
