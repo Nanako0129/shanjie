@@ -1,0 +1,167 @@
+"""Tests for d23.py (README D2/D3): synthetic rows, dump files and lexicons; no model, no network, no private data.
+Run from the repo root: python3 -W ignore -m unittest experiments/diag-near-miss/test_d23.py -v"""
+import json, os, sys, tempfile, unittest
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+import d23 as D  # noqa: E402
+
+T = D.T
+LEN = T.load_lenient()
+BASE = "zai 再 -1\nzai 在 -1\na 甲 -1\nb 乙 -1\nb-c 乙丙 -2\na-b 甲乙 -3\nx-y 舊詞 -2\n"
+LEX = T.Lex(BASE, "x-y\t新詞\t-2\twikt\n", "", "", "")
+
+
+def row(truth, syls, cands, c=0, ll=None, ng=None):
+    """cands: [(surface, ng score, "w1 w2")]; the scores record covers the first 8, as the CLI writes it."""
+    cs = [(s, sc, w.split()) for s, sc, w in cands]
+    ng = ng or [sc for _, sc, _ in cands[:8]]
+    rec = {"i": 1, "n": len(ng), "ng": ng, "ok": [int(LEN(s) == LEN(truth)) for s, _, _ in cands[:8]], "c": c}
+    if ll is not None:
+        rec["ll"] = ll
+    return {"ctx": "", "truth": truth, "syls": syls.split(), "cands": cs, "gold0": None, "c": c, "scores": rec}
+
+
+def oks(rows):
+    return [LEN(r["cands"][r["c"]][0]) == LEN(r["truth"]) for r in rows]
+
+
+def c1(truth, wrong):   # a C1 row: the wrong one is the first, the gold the second
+    return row(truth, "a zai", [(wrong, -1.0, "甲 " + wrong[1]), (truth, -1.5, "甲 " + truth[1])], ll=[0.0, 1.0])
+
+
+class Pairs(unittest.TestCase):
+    def setUp(self):
+        self.rows = [c1("甲再", "甲在"), c1("甲再", "甲在"), c1("甲在", "甲再"),
+                     row("新詞", "x y", [("舊詞", -1.0, "舊詞"), ("新詞", -1.2, "新詞")], ll=[0.0, 0.0])]   # a C2 row: not in the C1 denominator
+        self.ok = oks(self.rows)
+
+    def test_c1_both_directions_and_denominator(self):
+        crows = D.c_rows(self.rows, self.ok, LEX, LEN)
+        c1t, n_c1, unpaired, _, _ = D.pair_tables(crows)
+        self.assertEqual(len(crows), 4)
+        self.assertEqual(n_c1, 3, "the C2 row is not in the denominator")
+        self.assertEqual({k: v["n"] for k, v in c1t.items()}, {("在", "再", "zai"): 2, ("再", "在", "zai"): 1})
+        self.assertEqual(D.ranked(c1t)[0], (("在", "再", "zai"), 2))
+        self.assertEqual(c1t[("在", "再", "zai")]["margin"]["0.5-1"], 2)   # n-gram gap 0.5, lower edge included
+        res = D.d2(self.rows, self.ok, crows, LEN)
+        self.assertEqual((res["c1"], res["top10"], res["top10_share"]), (3, 3, 1.0))
+
+    def test_c4_equal_split_by_position_unequal_only_counted(self):
+        r = row("乙丙甲再", "b c a zai", [("丙乙甲在", -1.0, "丙 乙 甲 在"), ("乙丙甲再", -1.5, "乙丙 甲 再")], ll=[0.0, 0.0])
+        crows = D.c_rows([r], [False], LEX, LEN)
+        self.assertEqual(crows[0][1]["sub"], "C4")
+        _, n_c1, _, c4, unequal = D.pair_tables(crows)
+        self.assertEqual((n_c1, unequal), (0, 1), "乙丙 against 丙 + 乙: counted, not split")
+        self.assertEqual(dict(c4), {("在", "再", "zai"): 1}, "the equal segment is split by position; it is not in the C1 table")
+
+
+class Bias(unittest.TestCase):
+    PAIR = ("在", "再", "zai")
+
+    def cells(self, rows):
+        return D.bias_cells(rows, oks(rows), self.PAIR, LEN)
+
+    def test_fix_and_break_over_the_whole_set(self):
+        fix = c1("甲再", "甲在")                                                                       # gold 再 at rank 2: fixed from b 0.5
+        brk = row("甲在", "a zai", [("甲在", -1.0, "甲 在"), ("甲再", -1.2, "甲 再")], ll=[0.0, 0.5])   # right, and 再 wins once b is large
+        other = row("甲乙", "a b", [("甲乙", -1.0, "甲乙"), ("乙乙", -1.1, "乙 乙")], ll=[0.0, 0.0])   # no 再 anywhere: untouched
+        c = self.cells([fix, brk, other])
+        self.assertEqual((c[0.1]["fixes"], c[0.1]["breaks"]), (0, 0))
+        self.assertEqual((c[0.5]["fixes"], c[0.5]["breaks"], c[0.5]["net"]), (1, 1, 0), "a row that was right and becomes wrong counts as a break")
+        self.assertEqual(c[0.5]["affected"], 2)
+
+    def test_reading_must_match_at_the_position(self):
+        r = row("甲再", "a b", [("甲在", -1.0, "甲 在"), ("甲再", -1.5, "甲 再")], ll=[0.0, 1.0])   # 再 sits on the reading b, not zai
+        self.assertEqual(self.cells([r])[1.0]["affected"], 0)
+
+    def test_candidate_without_ll_is_needs_rescoring(self):
+        fill = [(c + "在", -1.1 - 0.1 * i, c + " 在") for i, c in enumerate("乙丙丁戊己庚辛")]
+        r = row("甲在", "a zai", [("甲在", -1.0, "甲 在")] + fill + [("甲再", -2.5, "甲 再")], ll=[0.0] * 8)
+        self.assertEqual(len(r["cands"]), 9)
+        c = self.cells([r])
+        self.assertEqual((c[0.1]["rescoring"], c[0.1]["affected"]), (0, 1), "still outside the top 8")
+        self.assertEqual((c[1.0]["rescoring"], c[1.0]["fixes"], c[1.0]["breaks"]), (1, 0, 0), "in the top 8 without ll: not a fix, not a break")
+        self.assertTrue(c[1.0]["unreliable"], "1 of 1 affected rows is above 10%")
+        self.assertFalse(c[0.1]["unreliable"])
+
+
+class Classes(unittest.TestCase):
+    COUNT = {"在": 1000, "再": 10, "丙": 99, "丁": 99, "甲乙": 999}.get
+    LS = {(("zai",), "在"): -3.0, (("zai",), "再"): -1.0, (("a",), "丙"): -2.5, (("b",), "丁"): -2.5, (("a", "b"), "甲乙"): -4.0}
+
+    def klass(self, r):
+        (row_, res, segs, gw, _, _), = D.c_rows([r], oks([r]), LEX, LEN)
+        return D.d3_class(row_, res, segs, gw, LEX, lambda w: self.COUNT(w, 0), self.LS)[0]
+
+    def test_priority_i_over_ii_and_iii(self):
+        self.assertEqual(self.klass(c1("甲再", "甲在")), "i", "在 has more corpus and a lower prior (iii), but both are function characters: (i)")
+
+    def test_ii_overlay_only_word_in_the_first(self):
+        self.assertEqual(self.klass(row("舊詞", "x y", [("新詞", -1.0, "新詞"), ("舊詞", -1.2, "舊詞")], ll=[0.0, 0.0])), "ii")
+
+    def test_iii_sums_log10_over_a_multi_word_segment(self):
+        r = row("甲乙", "a b", [("丙丁", -1.0, "丙 丁"), ("甲乙", -1.2, "甲乙")], ll=[0.0, 0.0])
+        # corpus: log10(100) + log10(100) = 4 > log10(1000) = 3; prior: -2.5 + -2.5 = -5 < -4 (each single word alone would fail one of them)
+        self.assertEqual(self.klass(r), "iii")
+        flipped = D.d3_class(*self._args(r), lambda w: {"丙": 9, "丁": 9, "甲乙": 999}.get(w, 0), self.LS)[0]
+        self.assertEqual(flipped, "iv", "corpus sum 2 < 3: not (iii)")
+
+    def _args(self, r):
+        (row_, res, segs, gw, _, _), = D.c_rows([r], oks([r]), LEX, LEN)
+        return row_, res, segs, gw, LEX
+
+    def test_missing_prior_is_not_iii(self):
+        r = row("甲乙", "a b", [("丙丁", -1.0, "丙 丁"), ("甲乙", -1.2, "甲乙")], ll=[0.0, 0.0])
+        self.assertEqual(D.d3_class(*self._args(r), lambda w: 99, {})[1], True)
+
+    def test_breakdown_by_subtype(self):
+        rows = [c1("甲再", "甲在"), row("舊詞", "x y", [("新詞", -1.0, "新詞"), ("舊詞", -1.2, "舊詞")], ll=[0.0, 0.0]),
+                row("甲乙", "a b", [("丙丁", -1.0, "丙 丁"), ("甲乙", -1.2, "甲乙")], ll=[0.0, 0.0])]
+        res = D.d3(D.c_rows(rows, oks(rows), LEX, LEN), LEX, lambda w: self.COUNT(w, 0), self.LS)
+        self.assertEqual(res["classes"], {"i": 1, "ii": 1, "iii": 1, "iv": 0})
+        self.assertEqual((res["by_sub"]["C1"]["i"], res["by_sub"]["C2"]["ii"], res["by_sub"]["C3"]["iii"]), (1, 1, 1))
+        self.assertAlmostEqual(res["share_ii_iii"], 2 / 3)
+
+
+class Verdicts(unittest.TestCase):
+    def test_d2(self):
+        self.assertIn("< 40%", D.d2_verdict(39, 100, True))
+        self.assertIn("開「偏置表」小片", D.d2_verdict(40, 100, True))
+        self.assertIn("淨值都 ≤ 0", D.d2_verdict(40, 100, False))
+        self.assertIn("結案", D.d2_verdict(0, 0, False))
+
+    def test_d3(self):
+        self.assertIn("開 P4", D.d3_verdict(20, 100))
+        self.assertIn("報告，維護者決定", D.d3_verdict(19, 100))
+        self.assertIn("報告，維護者決定", D.d3_verdict(10, 100))
+        self.assertIn("結案", D.d3_verdict(9, 100))
+
+
+class Files(unittest.TestCase):
+    def test_files_to_json_without_sentences(self):
+        rows = [c1("甲再", "甲在"), row("新詞", "x y", [("舊詞", -1.0, "舊詞"), ("新詞", -1.2, "新詞")], ll=[0.0, 0.0])]
+        with tempfile.TemporaryDirectory() as d:
+            w = lambda n, t: (open(os.path.join(d, n), "w", encoding="utf-8").write(t), os.path.join(d, n))[1]
+            ctx = "秘密前文"
+            rf = w("rows", "".join(f"{ctx}|{r['truth']}|{' '.join(r['syls'])}\n" for r in rows))
+            df = w("dump", "".join(f"{i}\t{k}\t{s}\t{sc}\n" for i, r in enumerate(rows, 1) for k, (s, sc, _) in enumerate(r["cands"], 1)))
+            wf = w("words", "".join(f"{i}\t0\t-\n" + "".join(f"{i}\t{k}\t{' '.join(ws)}\n" for k, (_, _, ws) in enumerate(r["cands"], 1)) for i, r in enumerate(rows, 1)))
+            rs = w("rs", "".join(f"{i}\t{int(o)}\t0\t2\n" for i, o in enumerate(oks(rows), 1)))
+            sf = w("sc", "".join(json.dumps({**r["scores"], "i": i}) + "\n" for i, r in enumerate(rows, 1)))
+            got, ok = D.build_rows(rf, df, wf, rs, sf, LEN)
+            self.assertEqual((len(got), ok), (2, [False, False]))
+            self.assertEqual(got[0]["ctx"], ctx)
+            res = D.analyze("t", got, ok, LEX, LEN, lambda w: 0, {})
+            text = json.dumps(res, ensure_ascii=False) + D.render("t", 2, res)
+            for s in [ctx] + [c[0] for r in rows for c in r["cands"]] + ["甲", "新詞", "舊詞"]:
+                if len(s) > 1 or s == "甲":
+                    self.assertNotIn(s, text)
+            self.assertIn("在", text)   # the pair itself may appear
+            bad = w("rs2", "1\t1\t0\t2\n2\t0\t0\t2\n")   # rowstats says row 1 is right, the chosen candidate is wrong
+            with self.assertRaises(RuntimeError):
+                D.build_rows(rf, df, wf, bad, sf, LEN)
+
+
+if __name__ == "__main__":
+    unittest.main()
