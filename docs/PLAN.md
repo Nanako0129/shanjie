@@ -179,7 +179,7 @@ v4 日期 2026-10-03。v1 經 `pilotfish:plan-verifier`（REVISE，4 項）與 `
 - **安全輸入時第三方輸入法反灰**（2026-10-05 使用者遇到，見研究紀錄同日）。
   - 某個程式開著安全輸入時，善解和小麥在選單裡反灰、不能用，自然輸入法 V13 沒有反灰。
   - 兩個差別：自然沒有子模式（TIS 類型 `TISTypeKeyboardInputMethodWithoutModes`）、裝在 `/Library/Input Methods`。
-  - 待做：登出後用已裝好的「善解測試」（沒有子模式）和 `tools/secure-input.swift` 對照，找出是哪個差別，再決定善解要不要改成沒有子模式。
+  - 〔2026-10-20 量到〕是**安裝位置**，不是子模式（研究紀錄同日）：沒有子模式的「善解測試」裝在 `~/Library` 一樣反灰；在 tart 虛擬機（macOS 26.6.2）裡，同一個 Developer ID 版從 `~/Library` 搬到 `/Library/Input Methods`（root:wheel、`chmod -R a+rX`）並重開機之後，安全輸入期間不反灰、打得出字，選單第一項是「學習已暫停（安全輸入）」。改成裝在 `/Library` 會牽動安裝程式、Sparkle 更新與 Homebrew，要另寫契約、由維護者決定。
   - 一併做「指出卡住安全輸入的程式」（晶晶的做法，見「外部專案借鏡」）：選單顯示是哪個程式開著安全輸入。
 - **貝氏模型研究**（使用者 2026-10-06 排入，三個方向都要；各自寫契約、過 plan-verifier）。
   - **前文接進 n-gram 解碼（最先做）**：
