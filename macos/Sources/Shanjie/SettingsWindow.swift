@@ -212,6 +212,10 @@ struct SettingsForm: View {
                 Label(p.title, systemImage: p.symbol)
             }
             .listStyle(.sidebar)
+            // Hidden like the form's, so the window's glass shows through both columns: with the list's own sidebar
+            // background the two read as a different tint and opacity (maintainer's screenshots, 2026-10-19; checked in a
+            // VM, the device check is app-sandbox.md section 4.3 B).
+            .scrollContentBackground(.hidden)
             .frame(width: Self.sidebarWidth)
             // A fresh form per page, so a page opens at its top rather than at the previous page's scroll offset.
             SettingsPageForm(page: page, model: model, appLabels: appLabels)
