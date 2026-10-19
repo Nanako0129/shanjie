@@ -178,8 +178,13 @@ codesign --verify --strict --deep "$APP" || fail "codesign --verify --strict --d
 "$ROOT/scripts/check-entitlements.sh" "$APP" || fail "entitlements"
 # Sparkle (docs/contracts/about-update.md section 3.2, app-sandbox.md section 2.8): XPCServices holds exactly Installer.xpc, and
 # none of Sparkle's four code locations carries entitlements. A path that is gone fails rather than reading as "no
-# entitlements".
-SPARKLE="$APP/Contents/Frameworks/Sparkle.framework"
+# entitlements". The framework's place (app-sandbox.md section 2.8): Contents/Frameworks holds only Updater, and Updater only
+# Sparkle.framework. Moved back to Contents/Frameworks together with the rpath, Sparkle would still run and only the first
+# sandboxed update after v0.4.7 would fail, so nothing else would notice. release.yml's sign and verify_sparkle check the same.
+[ "$(ls -A "$APP/Contents/Frameworks" 2>/dev/null)" = Updater ] \
+  && [ "$(ls -A "$APP/Contents/Frameworks/Updater" 2>/dev/null)" = Sparkle.framework ] \
+  || fail "Contents/Frameworks is not exactly Updater/Sparkle.framework"
+SPARKLE="$APP/Contents/Frameworks/Updater/Sparkle.framework"
 [ "$(ls -A "$SPARKLE/Versions/B/XPCServices" 2>/dev/null)" = Installer.xpc ] || fail "Sparkle's XPCServices is not exactly Installer.xpc"
 # xpc_layout <Sparkle.framework>: the only .xpc anywhere in the framework (find does not follow symlinks) is
 # Versions/B/XPCServices/Installer.xpc, Versions/Current is a symlink to B, and a top-level XPCServices, if present, is the

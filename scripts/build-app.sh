@@ -163,13 +163,19 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources/zh-Hant.lproj" "$APP/Con
   "$APP/Contents/Resources/LICENSES"
 cp "$BIN" "$APP/Contents/MacOS/shanjie"
 
-# Sparkle.framework in Contents/Frameworks (the executable's rpath is @executable_path/../Frameworks, macos/Package.swift).
+# Sparkle.framework in Contents/Frameworks/Updater (the executable's rpath besides SwiftPM's @loader_path,
+# macos/Package.swift). Not Contents/Frameworks: in a macOS 26.6.2 VM, a build with Installer.xpc at a framework path where
+# a Sparkle without XPC services had run since boot (v0.4.7's layout) did not get the service registered until a reboot,
+# so the first sandboxed update failed; the same build with the framework in a new folder did (app-sandbox.md sections 1
+# and 2.8, 2026-10-19; black-box measurements, the per-path cache is an inference). So the XPC services under Updater must
+# stay exactly Installer.xpc: a release that changes them (Downloader.xpc back, a Sparkle that renames a service) moves
+# the framework to a new folder name instead.
 # app-sandbox.md section 2.8: the sandboxed app reaches the network itself (com.apple.security.network.client), so only
 # Installer.xpc is kept (SUEnableInstallerLauncherService); Downloader.xpc is removed and SUEnableDownloaderService is not
-# set. XPCServices must hold exactly Installer.xpc (check-app.sh and release.yml assert it too).
-mkdir -p "$APP/Contents/Frameworks"
-ditto "$BIN_DIR/Sparkle.framework" "$APP/Contents/Frameworks/Sparkle.framework"
-SPARKLE="$APP/Contents/Frameworks/Sparkle.framework"
+# set. XPCServices must hold exactly Installer.xpc (check-app.sh and release.yml assert it and the location too).
+mkdir -p "$APP/Contents/Frameworks/Updater"
+ditto "$BIN_DIR/Sparkle.framework" "$APP/Contents/Frameworks/Updater/Sparkle.framework"
+SPARKLE="$APP/Contents/Frameworks/Updater/Sparkle.framework"
 rm -rf "$SPARKLE/Versions/B/XPCServices/Downloader.xpc"
 for code in "$SPARKLE/Versions/B/XPCServices/Installer.xpc" "$SPARKLE/Versions/B/Autoupdate" "$SPARKLE/Versions/B/Updater.app"; do
   [ -e "$code" ] || fail "$code is missing; Sparkle's layout changed"
@@ -193,7 +199,7 @@ scripts/compile-app-icon.sh "$RES"   # the app icon (docs/contracts/app-icon.md)
 
 cp LICENSE "$RES/LICENSES/LICENSE"
 cp LICENSES/McBopomofo-MIT.txt LICENSES/data.md LICENSES/SCOWL.txt LICENSES/SymSpell-MIT.txt LICENSES/name-suggestion-index-BSD-3-Clause.txt "$RES/LICENSES/"
-# Sparkle.framework ships in Contents/Frameworks: its MIT notice with the bundled third-party notices (Sparkle's LICENSE, 2.10.0).
+# Sparkle.framework ships in Contents/Frameworks/Updater: its MIT notice with the bundled third-party notices (Sparkle's LICENSE, 2.10.0).
 cp LICENSES/Sparkle-MIT.txt "$RES/LICENSES/"
 cat > "$RES/LICENSES/CC-BY-SA-4.0-attribution.txt" <<'EOF'
 overlay-add.tsv, names-add.tsv, packs/acg-add.tsv, packs/acg-sources.tsv, packs/acg.json, demote.tsv, digits.tsv, bigram.sjlm,

@@ -42,9 +42,11 @@ let package = Package(
             // the Swift 6 mode, so the main-thread requirement is checked at run time instead
             // (MainActor.assumeIsolated). ShanjieKit and the tests stay in the Swift 6 mode.
             swiftSettings: [.swiftLanguageMode(.v5)],
-            // Sparkle.framework sits in Contents/Frameworks of the bundle (scripts/build-app.sh).
+            // Sparkle.framework sits in Contents/Frameworks/Updater of the bundle (scripts/build-app.sh, app-sandbox.md
+            // section 2.8). Contents/Frameworks itself is no longer searched, so a framework left there fails at launch;
+            // SwiftPM adds @loader_path (Contents/MacOS) on its own, where the build puts nothing but the executable.
             linkerSettings: [.linkedFramework("Carbon"), .linkedFramework("InputMethodKit"),
-                             .unsafeFlags(["-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks"])]
+                             .unsafeFlags(["-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks/Updater"])]
         ),
         // 安裝善解輸入法.app; AppKit only, the window is built in code.
         .executableTarget(
