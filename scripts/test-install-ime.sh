@@ -14,6 +14,8 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 T="$(mktemp -d)"
 trap 'chmod -R u+w "$T" 2>/dev/null; rm -rf "$T"' EXIT
 APP=善解輸入法.app
+DEV=善解（開發版）.app
+SHIPPING_ID=com.nyanako.inputmethod.shanjie
 
 # Stand-ins that only record their calls.
 CALLS="$T/calls"
@@ -24,11 +26,15 @@ for tool in lsregister pkill pgrep; do
 done
 no_calls() { [ ! -e "$CALLS" ] || fail "$1: the system was called: $(cat "$CALLS")"; }
 
-stub() {  # stub <dir> <marker>: a minimal bundle whose executable refuses to run
+# stub <dir> <marker> [bundle ID, default the shipping ID]: a minimal bundle whose executable
+# refuses to run; install-ime.sh picks the destination from the ID (app-sandbox.md section 2.3).
+stub() {
   mkdir -p "$1/Contents/MacOS"
   printf '#!/bin/sh\nexit 1\n' > "$1/Contents/MacOS/shanjie"
   chmod +x "$1/Contents/MacOS/shanjie"
   echo "$2" > "$1/Contents/marker"
+  plutil -create xml1 "$1/Contents/Info.plist"
+  plutil -insert CFBundleIdentifier -string "${3:-$SHIPPING_ID}" "$1/Contents/Info.plist"
 }
 # run <home> <source> [files-only value]
 run() {
@@ -154,5 +160,47 @@ grep -q '^files only: installed to ' <<<"$out" || fail "skip-register changed th
 ! grep -q 'registration skipped' <<<"$out" || fail "skip-register ran past the files-only hook: $out"
 [ "$(marker "$IM/$APP")" = v1 ] || fail "files-only with skip-register did not install"
 no_calls "files-only with skip-register"
+
+# 9. app-sandbox.md section 2.3: a development build next to an installed shipping copy goes to
+#    善解（開發版）.app and keeps its own previous version; the shipping copy and its kept previous
+#    version stay byte for byte as they were.
+H="$T/dev"
+IM="$H/Library/Input Methods"
+stub "$IM/$APP" ship
+stub "$IM/.shanjie-previous" ship-old
+stub "$IM/shanjie.app" legacy
+SNAP() { (cd "$IM" && find "$APP" .shanjie-previous shanjie.app -type f -exec shasum -a 256 {} + | sort); }
+before=$(SNAP)
+stub "$T/dev1/$DEV" dev1 "$SHIPPING_ID.dev"
+stub "$T/dev2/$DEV" dev2 "$SHIPPING_ID.dev"
+run "$H" "$T/dev1/$DEV" >/dev/null
+[ "$(marker "$IM/$DEV")" = dev1 ] || fail "the development build was not installed as $DEV"
+[ ! -e "$IM/.shanjie-dev-previous" ] || fail "a fresh development install kept a previous version"
+run "$H" "$T/dev2/$DEV" >/dev/null
+[ "$(marker "$IM/$DEV")" = dev2 ] || fail "the development reinstall did not replace $DEV"
+[ "$(marker "$IM/.shanjie-dev-previous")" = dev1 ] || fail "the development reinstall did not keep .shanjie-dev-previous"
+[ "$(SNAP)" = "$before" ] || fail "installing a development build changed the shipping copy, its previous version or shanjie.app"
+no_staging "$H" || fail "the development install left a staging directory"
+no_calls "development install next to the shipping copy"
+
+# 10. The shipping build still goes to 善解輸入法.app, with a development copy installed: the
+#     development copy and its previous version are untouched.
+dsnap() { (cd "$IM" && find "$DEV" .shanjie-dev-previous -type f -exec shasum -a 256 {} + | sort); }
+before=$(dsnap)
+run "$H" "$T/v2/$APP" >/dev/null
+[ "$(marker "$IM/$APP")" = v2 ] || fail "the shipping build was not installed as $APP"
+[ "$(marker "$IM/.shanjie-previous")" = ship ] || fail "the shipping install did not keep its previous version"
+[ ! -e "$IM/shanjie.app" ] || fail "the shipping install left shanjie.app"
+[ "$(dsnap)" = "$before" ] || fail "installing the shipping build changed the development copy"
+no_calls "shipping install next to the development copy"
+
+# 11. Any other bundle ID is refused before anything is created.
+H="$T/other"
+mkdir "$H"
+stub "$T/other-src/$APP" other com.nyanako.inputmethod.shanjie.selftest
+if err=$(run "$H" "$T/other-src/$APP" 2>&1 >/dev/null); then fail "a build with another bundle ID was installed"; fi
+grep -q "only $SHIPPING_ID and $SHIPPING_ID.dev are installed" <<<"$err" || fail "the refusal did not come from the ID check: $err"
+[ -z "$(ls -A "$H")" ] || fail "the refused install created files"
+no_calls "other bundle ID"
 
 echo "install-ime.sh file handling: ok"

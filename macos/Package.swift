@@ -13,10 +13,11 @@ let package = Package(
     name: "Shanjie",
     platforms: [.macOS("26.0")],
     // The first external dependency (docs/contracts/about-update.md section 2): Sparkle, pinned exactly. 2.9.0 added signed
-    // feeds and 2.9.2 fixed two security issues. The official prebuilt framework, whose binary is pinned by the checksum in
+    // feeds, 2.9.2 fixed two security issues and 2.9.5 and 2.9.6 three more (2.10.0: docs/contracts/app-sandbox.md section
+    // 2.8, where a sandboxed input method drives Sparkle's installer outside the sandbox). The official prebuilt framework, whose binary is pinned by the checksum in
     // Sparkle's own Package.swift; Package.resolved is committed and every build resolves with --force-resolved-versions.
     dependencies: [
-        .package(url: "https://github.com/sparkle-project/Sparkle", exact: "2.9.3"),
+        .package(url: "https://github.com/sparkle-project/Sparkle", exact: "2.10.0"),
     ],
     targets: [
         // Header-only module over core/include/shanjie.h; see Sources/CShanjie/module.modulemap.
