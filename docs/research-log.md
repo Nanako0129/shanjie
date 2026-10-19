@@ -7954,3 +7954,10 @@ XL 比 `MAX_FILE`（67,108,864）小 1,168,880 位元組。錨點：4 個模型 
 - **結論**：系統照 framework 的路徑記住「沒有 XPC 服務」，開機期間不會更新，重開機才清。登出沒量。只有黑箱量測，機制推論；只量了 macOS 26.6.2。照原配置，正式版 0.4.7 → 0.5.0 會成功，但重開機之前 0.5.0 → 0.5.1 會失敗。
 - **處置**（維護者選擇題）：0.5.0 起 Sparkle.framework 放在 `Contents/Frameworks/Updater/`，rpath 改指那裡（SwiftPM 另有 `@loader_path`）；`check-app.sh`、`release.yml` 斷言位置，突變測試加第九、十份（搬回舊位置、兩個位置都有）。契約 `app-sandbox.md` 修訂三另加 §4.3 A 第 2b 步：虛擬機重開機後 A0 → B3 → C3，中間不重開機。另外兩個選項（不改配置、失敗時提示重新開機；沙盒延後到沙盒外的獨立更新程式）沒選。
 - **第 2b 步（修訂三，合併前，虛擬機）通過**：B3（`0.0.2`）、C3（`0.0.3`）用修訂三 PR 的 head 組建，framework 在 `Contents/Frameworks/Updater/`。虛擬機從關機狀態開機（13:20 UTC），裝 A0（framework 在舊位置、沒有 XPC 服務），維護者先用 A0 打字，再經 Sparkle 更新到 B3：B3 執行中時 launchd 的 pid domain 列得到 `org.sparkle-project.InstallerLauncher`。接著不重開機，feed 換成只有 C3，再經 Sparkle 更新：成功，C3 執行中時同樣列得到；開發版 ID 的 container 沿用（建立時間不變），裡面的 `learning.tsv` 雜湊和更新前相同；開機之後沒有善解或 Sparkle 的沙盒拒絕，也沒有「connecting to the installer」。
+
+## 2026-10-19：錯字回報第 141 列（這支，前文被逗號切斷）
+
+- 維護者打「……所以雖然退了一支，這支乾脆留下來了」（講 SSD），App 出成「這隻」。加成 `所以雖然退了一支，|這支乾脆留下來了|ㄓㄜˋ ㄓ ㄍㄢ ㄘㄨㄟˋ ㄌㄧㄡˊ ㄒㄧㄚˋ ㄌㄞˊ ㄌㄜ˙`（讀音由 `tools/readings.py` 產生，沒有 CHECK）。前文照 App 當時看到的原文寫，含句尾的逗號。
+- 出貨設定（`cli --tinylm`，出貨的 `tinylm.sjtl` `e7c179d8`，`--context`）：前文的 2 字規則碰到逗號就停，等於沒有前文，兩種設定第一名都是「這隻」，正解第 2（聊天差 0.06、書面差 0.04）。同一列前文去掉逗號（「所以雖然退了一支」，2 字前文是「一支」）時，兩種設定第一名都是「這支」（聊天 −17.684 對 −17.832，書面 −17.287 對 −17.343）。
+- 這是「前文跨不過標點」的實例：App 現在給重排與學習的前文都在標點停下。P3（前文加長，`exp/p3-context`）的長前文跨標點，這一列是它要救的類型。
+- `eval/golden/s2h-lm-context.txt` 的錯字回報兩行用 Python 參考實作（`lm_eval.py --context`）重產，n 141：top1 聊天 32、書面 41 都不變，oracle@64 137 → 138；`eval/README.md` 改成 141 列。
