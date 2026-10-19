@@ -165,11 +165,11 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources/zh-Hant.lproj" "$APP/Con
 cp "$BIN" "$APP/Contents/MacOS/shanjie"
 
 # Sparkle.framework in Contents/Frameworks/Updater (the executable's rpath besides SwiftPM's @loader_path,
-# macos/Package.swift), with no XPC services at all: the input method only probes the feed
-# (SUEnableInstallerLauncherService false) and the install runs in 善解更新.app, outside the sandbox, with its own copy of the
-# framework (standalone-updater.md sections 3.3 and 3.4). With no XPC service in the bundle, the system has nothing to
-# remember by path (the folder name Updater is history from app-sandbox.md section 2.8's revision three, where Installer.xpc
-# was kept and the framework's folder had to change whenever the services did).
+# macos/Package.swift), with no XPC services, no Autoupdate and no Updater.app: the input method only probes the feed
+# (SUEnableInstallerLauncherService false), and the install runs in 善解更新.app, outside the sandbox, with its own copy of the
+# framework, which keeps Autoupdate and Updater.app (standalone-updater.md sections 2.2 and 2.4). With no XPC service in the
+# bundle, the system has nothing to remember by path (the folder name Updater is history from app-sandbox.md section 2.8's
+# revision three, where Installer.xpc was kept and the framework's folder had to change whenever the services did).
 strip_xpc() {  # strip_xpc <Sparkle.framework>: Versions/B/XPCServices and the top-level symlink to it
   rm -rf "$1/Versions/B/XPCServices" "$1/XPCServices"
   [ -z "$(find "$1" -name '*.xpc')" ] || fail "an .xpc is left in $1"
@@ -181,8 +181,12 @@ mkdir -p "$APP/Contents/Frameworks/Updater"
 ditto "$BIN_DIR/Sparkle.framework" "$APP/Contents/Frameworks/Updater/Sparkle.framework"
 SPARKLE="$APP/Contents/Frameworks/Updater/Sparkle.framework"
 strip_xpc "$SPARKLE"
+# Only the probe runs here: two programs fewer that could be submitted outside the sandbox (S6). Not a mitigation against
+# code already running in the process (section 3), only less to ship.
+# The top-level symlinks to them go too, or they would dangle.
+rm -rf "$SPARKLE/Versions/B/Autoupdate" "$SPARKLE/Versions/B/Updater.app" "$SPARKLE/Autoupdate" "$SPARKLE/Updater.app"
 
-# 善解更新.app (standalone-updater.md sections 3.2 and 3.4): not sandboxed, not LSUIElement, and no SUFeedURL, SUPublicEDKey or
+# 善解更新.app (standalone-updater.md sections 2.1 and 2.4): not sandboxed, not LSUIElement, and no SUFeedURL, SUPublicEDKey or
 # SUEnable* key: Sparkle reads those from the host, the input method that contains it. Its own Sparkle.framework has no XPC
 # services either.
 HELPER="$APP/Contents/Helpers/善解更新.app"
@@ -359,7 +363,7 @@ cat > "$APP/Contents/Info.plist" <<EOF
   <key>TICapsLockLanguageSwitchCapable</key><true/>
   <key>TISInputSourceID</key><string>$BUNDLE_ID</string>
   <key>TISIntendedLanguage</key><string>zh-Hant</string>
-  <!-- Sparkle (docs/contracts/about-update.md section 2, standalone-updater.md section 3.3). No SUEnableJavaScript and no
+  <!-- Sparkle (docs/contracts/about-update.md section 2, standalone-updater.md section 2.2). No SUEnableJavaScript and no
        SUEnableDownloaderService; SUEnableInstallerLauncherService false (no XPC services: the install is 善解更新.app's, which
        reads the feed and the key from here). A local build never starts the updater. -->
   <key>ShanjieUpdateBuild</key><string>$UPDATE_BUILD</string>
@@ -409,7 +413,7 @@ PLIST
   plutil -lint "$RES/container-migration.plist" >/dev/null
 fi
 
-# app-sandbox.md section 2.1 and standalone-updater.md section 3.3: exactly three entitlements, derived from BUNDLE_ID: the
+# app-sandbox.md section 2.1 and standalone-updater.md section 2.2: exactly three entitlements, derived from BUNDLE_ID: the
 # sandbox, the network (the feed probe) and the IMK connection name (must equal InputMethodConnectionName above). Checked by
 # scripts/check-entitlements.sh; release.yml signs with its own literals. The file stays next to the app
 # in $OUT_DIR (ignored by git).
@@ -430,18 +434,18 @@ cat > "$ENTITLEMENTS" <<PLIST
 PLIST
 plutil -lint "$ENTITLEMENTS" >/dev/null
 
-# Every file readable by others (cp keeps a source file's 0600; a root-owned bundle in /Library must load for the user,
-# standalone-updater.md section 3.4); check-app.sh asserts it.
-chmod -R a+rX "$APP"
+# Every file readable by others and none writable by group or others (cp keeps a source file's 0600 and a umask may leave
+# group write; a root-owned bundle in /Library must load for the user and must not be changeable by anyone else,
+# standalone-updater.md section 2.4); check-app.sh asserts both.
+chmod -R a+rX,go-w "$APP"
 
-# Ad-hoc, inside out, never --deep (standalone-updater.md section 3.4): the helper's Autoupdate, Updater.app and framework, the
-# helper app (no entitlements), then the input method's Autoupdate, Updater.app and framework, then the input method, the only
-# one with --entitlements. Removing the XPC services broke each framework's own seal, hence signing them here. No hardened
-# runtime: with it, library validation refuses the ad-hoc Sparkle.framework (dyld: "mapping process and mapped file
+# Ad-hoc, inside out, never --deep (standalone-updater.md section 2.4): the helper's Autoupdate, Updater.app and framework, the
+# helper app (no entitlements), then the input method's framework (no Autoupdate or Updater.app left in it), then the input
+# method, the only one with --entitlements. Removing parts broke each framework's own seal, hence signing them here. No
+# hardened runtime: with it, library validation refuses the ad-hoc Sparkle.framework (dyld: "mapping process and mapped file
 # (non-platform) have different Team IDs", measured 2026-10-16 with --selftest), since ad-hoc code has no Team ID to match; the
 # sandbox does not need it. The shipped app gets the runtime from release.yml's Developer ID signature.
-for code in "$HSPARKLE/Versions/B/Autoupdate" "$HSPARKLE/Versions/B/Updater.app" "$HSPARKLE" "$HELPER" \
-            "$SPARKLE/Versions/B/Autoupdate" "$SPARKLE/Versions/B/Updater.app" "$SPARKLE"; do
+for code in "$HSPARKLE/Versions/B/Autoupdate" "$HSPARKLE/Versions/B/Updater.app" "$HSPARKLE" "$HELPER" "$SPARKLE"; do
   codesign --force --sign - "$code"
 done
 codesign --force --sign - --entitlements "$ENTITLEMENTS" "$APP"

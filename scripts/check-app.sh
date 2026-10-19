@@ -153,7 +153,7 @@ sparkle_key SURequireSignedFeed bool true
 sparkle_key SUVerifyUpdateBeforeExtraction bool true
 sparkle_key SUAllowsAutomaticUpdates bool false
 sparkle_key SUEnableAutomaticChecks bool false
-# standalone-updater.md section 3.3: the installer service off (the install is 善解更新.app's), the downloader service never set.
+# standalone-updater.md section 2.2: the installer service off (the install is 善解更新.app's), the downloader service never set.
 sparkle_key SUEnableInstallerLauncherService bool false
 ! pb SUEnableDownloaderService >/dev/null || fail "Info.plist sets SUEnableDownloaderService"
 sparkle_key SUEnableSystemProfiling bool false
@@ -172,42 +172,46 @@ TRI_RECORDED="$(awk 'NR == 1 { print $1 }' "$ROOT/data/trigram.sjt3.sha256")"
 echo "check 2: ok"
 
 # --- 3: signature: valid, exactly the three App Sandbox entitlements on the app (app-sandbox.md section 2.1,
-# scripts/check-entitlements.sh). The ad-hoc build has no hardened runtime (scripts/build-app.sh: library validation refuses
-# the ad-hoc Sparkle.framework); release.yml's verify() requires it on the Developer ID build that ships.
-# No XPC service anywhere (standalone-updater.md section 3.4), looked for first: a stray one also breaks the seals below.
+# scripts/check-entitlements.sh), and the layout and permissions of standalone-updater.md section 2.4, the same assertions as
+# release.yml's verify() except Team and hardened runtime: the ad-hoc build has no runtime (scripts/build-app.sh: library
+# validation refuses the ad-hoc Sparkle.framework) and no Team.
+# No XPC service anywhere (the system has nothing to remember by path), looked for first: a stray one also breaks the seals.
 [ -z "$(find "$APP" -name '*.xpc')" ] || fail "the bundle contains an .xpc"
 codesign --verify --strict --deep "$APP" || fail "codesign --verify --strict --deep"
 "$ROOT/scripts/check-entitlements.sh" "$APP" || fail "entitlements"
-# standalone-updater.md sections 3.2 and 3.4: no XPC service anywhere in the bundle (the frameworks' XPCServices are removed, so
-# the system has nothing to register by path); Contents/Helpers holds exactly 善解更新.app, whose Info.plist has no feed, key or
-# SUEnable* key (Sparkle reads them from the host) and which is not LSUIElement; the frameworks (the input method's in
-# Contents/Frameworks/Updater, the helper's in its own Contents/Frameworks) and the helper carry no entitlements. A path that
-# is gone fails rather than reading as "no entitlements". release.yml's sign and verify check the same.
-[ "$(ls -A "$APP/Contents/Frameworks" 2>/dev/null)" = Updater ] \
-  && [ "$(ls -A "$APP/Contents/Frameworks/Updater" 2>/dev/null)" = Sparkle.framework ] \
-  || fail "Contents/Frameworks is not exactly Updater/Sparkle.framework"
+# Contents/Helpers holds exactly 善解更新.app, whose Info.plist has no feed, key or SUEnable* key (Sparkle reads them from the
+# host) and which is not LSUIElement. The input method's framework (Contents/Frameworks/Updater) has no Autoupdate or
+# Updater.app, the helper's (its own Contents/Frameworks) has both. Both frameworks and the helper carry no entitlements; a
+# path that is gone fails rather than reading as "no entitlements".
 [ "$(ls -A "$APP/Contents/Helpers" 2>/dev/null)" = 善解更新.app ] || fail "Contents/Helpers is not exactly 善解更新.app"
 HELPER="$APP/Contents/Helpers/善解更新.app"
 HPLIST="$HELPER/Contents/Info.plist"
 plutil -lint "$HPLIST" >/dev/null || fail "the helper's Info.plist does not lint"
 [ "$(pb CFBundleIdentifier "$HPLIST")" = "$ID.updater" ] || fail "the helper's bundle ID is not $ID.updater"
-for k in SUFeedURL SUPublicEDKey SURequireSignedFeed SUVerifyUpdateBeforeExtraction SUAllowsAutomaticUpdates SUEnableAutomaticChecks \
-         SUEnableInstallerLauncherService SUEnableDownloaderService SUEnableSystemProfiling SUEnableJavaScript LSUIElement; do
-  ! pb "$k" "$HPLIST" >/dev/null || fail "the helper's Info.plist sets $k"
-done
+HKEY="$(python3 -I -c 'import plistlib, sys
+d = plistlib.load(open(sys.argv[1], "rb"))
+print(" ".join(sorted(k for k in d if k in ("SUFeedURL", "SUPublicEDKey", "LSUIElement") or k.startswith("SUEnable"))))' "$HPLIST")" \
+  || fail "the helper's Info.plist cannot be read"
+[ -z "$HKEY" ] || fail "the helper's Info.plist sets $HKEY"
 [ -x "$HELPER/Contents/MacOS/$(pb CFBundleExecutable "$HPLIST")" ] || fail "the helper's executable is missing"
 SPARKLE="$APP/Contents/Frameworks/Updater/Sparkle.framework"
 HSPARKLE="$HELPER/Contents/Frameworks/Sparkle.framework"
-for code in "$SPARKLE" "$SPARKLE/Versions/B/Autoupdate" "$SPARKLE/Versions/B/Updater.app" \
-            "$HSPARKLE" "$HSPARKLE/Versions/B/Autoupdate" "$HSPARKLE/Versions/B/Updater.app" "$HELPER"; do
+[ -z "$(find "$SPARKLE" \( -name Autoupdate -o -name Updater.app \))" ] \
+  || fail "the input method's Sparkle.framework contains Autoupdate or Updater.app"
+for code in "$SPARKLE" "$HSPARKLE" "$HSPARKLE/Versions/B/Autoupdate" "$HSPARKLE/Versions/B/Updater.app" "$HELPER"; do
   [ -e "$code" ] || fail "$code is missing"
   codesign --verify --strict "$code" || fail "codesign --verify --strict: $code"
   ENT="$(codesign -d --entitlements - "$code" 2>/dev/null || true)"
   [ -z "$ENT" ] || fail "$code carries entitlements"
 done
-# The installer runs as the user or, in /Library, as root from a root-owned copy: every file must be readable by others
-# (a zip extracted under umask 077 once produced 0700 bundles that the user could not load).
+# Permissions (system-install section 1: a zip extracted under umask 077 once gave 0700 bundles): a root-owned copy in
+# /Library must be readable and runnable by every user and changeable by nobody else. Symlinks are left out of the write
+# check: their own mode is not used.
 [ -z "$(find "$APP" ! -perm -o+r)" ] || fail "a file in the bundle lacks o+r"
+[ -z "$(find "$APP" -type d ! -perm -o+x)" ] || fail "a directory in the bundle lacks o+x"
+[ -z "$(find "$APP" -type f -perm -u+x ! -perm -o+x)" ] || fail "an executable in the bundle lacks o+x"
+[ -z "$(find "$APP" ! -type l \( -perm -g+w -o -perm -o+w \))" ] || fail "a file in the bundle is writable by group or others"
+[ -z "$(find "$APP" \( -perm -u+s -o -perm -g+s \))" ] || fail "a file in the bundle is setuid or setgid"
 echo "check 3: ok"
 
 if [ "${SKIP_RUN:-}" = 1 ]; then

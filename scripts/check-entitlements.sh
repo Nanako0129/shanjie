@@ -1,5 +1,5 @@
 #!/bin/bash
-# docs/contracts/app-sandbox.md section 2.1, standalone-updater.md section 3.3: the input method's entitlements must be exactly these three keys, nothing more (no
+# docs/contracts/app-sandbox.md section 2.1, standalone-updater.md section 2.2: the input method's entitlements must be exactly these three keys, nothing more (no
 # get-task-allow, no disable-library-validation) and nothing less (a re-sign without --preserve-metadata=entitlements drops
 # them all):
 #   com.apple.security.app-sandbox                                     true
