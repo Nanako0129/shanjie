@@ -115,6 +115,20 @@ class BuildLm(unittest.TestCase):
                 build_lm.WORK = old
             self.assertEqual(data, open(self.path, "rb").read())   # 丟掉之後和沒有那兩個二元組時逐位元組相同
 
+    def test_corpora_option(self):
+        """--corpora: FILE:WEIGHT parsing, the default is CORPORA, and an explicit list builds from exactly those files and weights."""
+        self.assertEqual(build_lm.parse_corpora(["a.pkl:1", "/x/b:c.pkl:12", "C:\\w\\d.pkl:3"]), [("a.pkl", 1), ("/x/b:c.pkl", 12), ("C:\\w\\d.pkl", 3)])
+        for bad in ("a.pkl", "a.pkl:", ":3", "a.pkl:x", "a.pkl:-1"):
+            with self.assertRaises(ValueError, msg=bad):
+                build_lm.parse_corpora([bad])
+        self.assertEqual(build_lm.build(self.cls, corpora=list(build_lm.CORPORA))[0], open(self.path, "rb").read())   # default == CORPORA
+        coll_only = build_lm.build(self.cls, corpora=[("counts-colloquial3.pkl", 1)])[0]
+        path = os.path.join(self.tmp.name, "coll.sjlm")
+        open(path, "wb").write(coll_only)
+        lm = L.BigramLM(path, classes=False)
+        self.assertEqual(lm.count("起牀"), 1)      # weight 1, no wiki counts
+        self.assertEqual(lm.count("他"), 0)
+
     def test_rust_loads(self):
         rows = os.path.join(self.tmp.name, "rows.txt")
         open(rows, "w", encoding="utf-8").write("|起床|ㄑㄧˇ ㄔㄨㄤˊ\n")
