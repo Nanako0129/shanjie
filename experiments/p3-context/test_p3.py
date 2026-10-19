@@ -219,5 +219,22 @@ class TestTrainContext64(unittest.TestCase):
             self.assertIn("already exists", str(cm.exception))
 
 
+class TestVerdict(unittest.TestCase):
+    def test_registered_rules(self):
+        import p3ana
+        base = {("chat", "discordtune"): (10, 10, 1.0, 50, 50)}
+        for profile in ("chat", "formal"):
+            base.update({(profile, "dev302"): (0, 0), (profile, "typing"): (1, 1), (profile, "ur"): (1, 0)})
+        self.assertTrue(all(ok for _, ok in p3ana.verdict(base)))
+        for key, val, line in ((("chat", "discordtune"), (10, 10, 1.0, 51, 50), 0),    # more broken than shipped
+                               (("chat", "discordtune"), (0, 9, 0.004, 50, 50), 0),    # significantly worse
+                               (("formal", "typing"), (3, 3), 4),                       # broken > 2
+                               (("chat", "dev302"), (0, 1), 1),                         # net < 0
+                               (("formal", "ur"), (0, 2), 5)):                          # typo net 1 - 2 <= 0
+            lines = p3ana.verdict({**base, key: val})
+            self.assertFalse(lines[line][1], (key, val))
+            self.assertEqual(sum(not ok for _, ok in lines), 1, (key, val))
+
+
 if __name__ == "__main__":
     unittest.main()
