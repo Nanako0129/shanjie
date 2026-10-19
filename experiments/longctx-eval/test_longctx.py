@@ -458,6 +458,42 @@ class Long(unittest.TestCase):
         self.assertEqual(got, ["s.jsonl.zst:1", "s.jsonl.zst:3"])
         self.assertEqual((counts["adult"], counts["spinner"], counts["passing"]), (1, 2, 2))
         self.assertEqual(longtext.SPIN_MIN, 2)
+        # each lookaround on its own: ordinary words that contain a listed term match nothing
+        self.assertEqual(longtext.SPIN_RE.findall("我瞭解了，明瞭，一目瞭然，瞭若指掌，傢俱、傢伙、好傢夥、傢私，這隻是貓，這裏麵包好吃"), [])
+        self.assertEqual(longtext.ADULT_RE.findall("叫做愛情、做愛心便當、女性愛用、支援交流、感情色彩、外送茶飲、恩恩愛愛、Java片段、博弈論、"
+                                                   "LINE 聊天室、跟爸媽視訊聊天、成人網球課、辣妹風穿搭"), [])
+        self.assertEqual(longtext.SPIN_RE.findall("他吼瞭一通，跑我傢，也隻是"), ["瞭", "傢", "隻是"])
+
+    def test_cmd_hplt_passes_the_exclusion_file_and_the_second_seed(self):
+        td = tempfile.mkdtemp()
+        ex = os.path.join(td, "first.proofread.txt")
+        rows = ["前文 有分隔|句子|ㄐㄩˋ ㄗ˙\n", "別的前文|另一句|ㄌㄧㄥˋ ㄧ ㄐㄩˋ\n"]
+        open(ex, "w", encoding="utf-8", newline="").write("".join(rows))
+        seen = {}
+        args = mock.Mock(shards=[self.zst([self.hplt_line({"ID": 1.0}, "https://a.com.tw/")])], out=os.path.join(td, "o.txt"),
+                         overlap_drop=[], overlap_report=[], procs=1, doc_fraction=1.0, target_docs=1, gibberish_ref=False,
+                         proofread_exclude=ex)
+        with mock.patch.object(longtext, "build", lambda docs, *a, **k: (list(docs), seen.update(k))):      # drain: cmd_hplt reads the counts
+            quiet(longtext.cmd_hplt, args)
+        self.assertEqual(seen["proofread_seed"], 20261020)
+        self.assertEqual(seen["proofread_exclude"], frozenset(rows))
+        self.assertEqual(seen["counts"]["proofread_exclude_file"], {"rows": 2, "sha256": c.sha256_file(ex)})
+        for bad in ("".join(rows).replace("\n", "\r\n"), "".join(rows).rstrip("\n")):      # edited (CRLF) or truncated: stop
+            open(ex, "w", encoding="utf-8", newline="").write(bad)
+            with self.assertRaises(SystemExit):
+                quiet(longtext.cmd_hplt, args)
+
+    def test_proofread_pool_too_small_stops_before_writing(self):
+        td = tempfile.mkdtemp()
+        docs, *_ = self.make_docs_and_training(td)
+        first = os.path.join(td, "a.txt")
+        with mock.patch.object(longtext, "MIN_ROWS", 1):
+            quiet(longtext.build, list(docs), first, [], (), (), 1, ok_readings)
+        every = frozenset(l + "\n" for l in open(first, encoding="utf-8", newline="").read().split("\n")[:-1])
+        out = os.path.join(td, "b.txt")
+        with mock.patch.object(longtext, "MIN_ROWS", 1), self.assertRaises(SystemExit):
+            quiet(longtext.build, list(docs), out, [], (), (), 1, ok_readings, proofread_exclude=every)
+        self.assertFalse(os.path.exists(out))
 
     def test_proofread_sample_excludes_earlier_rows_and_records_its_seed(self):
         td = tempfile.mkdtemp()

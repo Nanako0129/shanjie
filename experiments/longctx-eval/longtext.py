@@ -1,6 +1,7 @@
 """Sets B (HPLT 3.0 Traditional Chinese) and C (Wikisource prose) of the long-context evaluation sets (README.md).
 
   longtext.py hplt --shards F.jsonl.zst... --out ROWS [--overlap-drop FILE...] [--overlap-report FILE...] [--procs N] [--doc-fraction F | --target-docs N]
+             [--proofread-exclude EARLIER.proofread.txt]
   longtext.py wikisource-fetch --titles FILE --out DIR
   longtext.py wikisource --fetched DIR --titles FILE --out ROWS [--overlap-drop FILE...] [--overlap-report FILE...] [--procs N]
 
@@ -48,9 +49,14 @@ SPAM_MIN = 5
 # SPIN_MIN matches of SPIN_RE drop it (`spinner`). The lookarounds keep 瞭解, 明瞭, 一目瞭然, 傢俱 and 傢伙. SPIN_RE lists only forms no
 # genuine text writes: the spinner also swaps in real but old words (怙恃, 黌舍, 如許, 以是, 已往, 德律風, the old Taiwanese loanword
 # for telephone), which are left out so that genuine posts using them stay. Wikisource does not go through these filters.
-ADULT_RE = re.compile("色情|情色|愛愛|援交|一夜情|裸聊|做愛|性愛|[aA][片漫]|成人(?:光碟|網|影|交友)|娛樂城|博弈|博彩|運彩|百家樂|六合彩|"
-                      "賭博|包養|甜心寶貝|交友網|視訊聊天|聊天室|辣妹|送茶|酒店兼職|金瓶梅")
-SPIN_RE = re.compile("不克不及|可以或許|掉敗|隻是|裏麵|(?<!明)瞭(?![解望然])|傢(?![俱伙具])")
+# The lookarounds keep ordinary words that contain a term (review of 2026-10-20): 叫做愛情, 女性愛用, 支援交流, 感情色彩, 外送茶飲,
+# 恩恩愛愛, Java片段; 博弈 (博弈論), 聊天室, 視訊聊天 and 辣妹 are left out as common in genuine posts (the gambling spam also carries
+# 博彩, 娛樂城 or 百家樂). SPIN_RE keeps 瞭若指掌, 好傢夥, 傢私, 這隻是 (a measure word before 是) and 裏麵包.
+ADULT_RE = re.compile("色情|(?<![感風表])情色|(?<!恩)愛愛|(?<!支)援交|一夜情|裸聊|(?<![叫當看])做愛(?!心)|(?<![女男個任理感人母本天習])性愛|"
+                      "(?<![A-Za-z])[aA][片漫]|成人(?:光碟|網站|影片|交友)|娛樂城|博彩|運彩|百家樂|六合彩|賭博|包養|甜心寶貝|交友網|"
+                      "(?<!外)送茶|酒店兼職|金瓶梅")
+SPIN_RE = re.compile("不克不及|可以或許|掉敗|(?<![一二兩三四五六七八九十幾這那哪每某半])隻是|裏麵(?![包條線粉食店])|"
+                     "(?<!明)瞭(?![解望然若如])|傢(?![俱伙具夥私俬])")
 SPIN_MIN = 2
 PROOFREAD_SEED = 20261020        # hplt's second proofreading sample (README), drawn from the rows not in the first sample
 GIBBERISH_PERCENTILE = 0.01      # rows scoring below this percentile of the reference sets' gold sentences are dropped
@@ -246,10 +252,13 @@ def build(docs, out, inputs, drop_files=(), report_files=(), procs=None, reading
         c.write_lf(out + ".manifest.json", json.dumps(manifest, ensure_ascii=False, indent=1) + "\n")
         print(json.dumps(manifest, ensure_ascii=False, indent=1))
         sys.exit(f"longtext: STOP, {len(rows)} rows < {MIN_ROWS}")
+    pool = [i for i, l in enumerate(lines) if l not in proofread_exclude]      # rows an earlier sample already proofread are not drawn again
+    k = math.ceil(len(rows) * 0.1)
+    if len(pool) < k:      # before anything is written, so no new rows sit next to an old manifest
+        sys.exit(f"longtext: STOP, {len(pool)} rows left for a {k}-row proofreading sample")
     c.write_lf(out, "".join(lines))
     check_rows(out, len(rows))
-    pool = [i for i, l in enumerate(lines) if l not in proofread_exclude]      # rows an earlier sample already proofread are not drawn again
-    pick = sorted(random.Random(proofread_seed).sample(pool, math.ceil(len(rows) * 0.1)))
+    pick = sorted(random.Random(proofread_seed).sample(pool, k))
     c.write_lf(out + ".proofread.txt", "".join(lines[i] for i in pick))
     n["proofread_rows"] = len(pick)
     n["proofread_seed"], n["proofread_excluded"] = proofread_seed, len(lines) - len(pool)
@@ -338,7 +347,11 @@ def cmd_hplt(a):
     counts = {}
     excluded = frozenset()
     if a.proofread_exclude:      # split on "\n" only, as the rows are written: a context may hold U+2028, which splitlines() splits on
-        excluded = frozenset(l + "\n" for l in open(a.proofread_exclude, encoding="utf-8", newline="").read().split("\n")[:-1])
+        text = open(a.proofread_exclude, encoding="utf-8", newline="").read()
+        if "\r" in text or not text.endswith("\n"):
+            sys.exit(f"longtext: STOP, {a.proofread_exclude} is not an unedited proofreading file (CR or no final newline)")
+        excluded = frozenset(l + "\n" for l in text.split("\n")[:-1])
+        counts["proofread_exclude_file"] = {"rows": len(excluded), "sha256": sha256_stream(a.proofread_exclude)}
     g = load_gibberish(a.procs) if a.gibberish_ref else None      # stops early when the model files are missing or differ
     before = {s: sha256_stream(s) for s in a.shards}
     if a.doc_fraction is None:
