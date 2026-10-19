@@ -8,13 +8,21 @@
 Reuses tools/triage.py: row parsing, dump/words/scores reading, Lex, classify (buckets, C1-C5, FUNCTION_CHARS), diff_segments, pick.
 Readings of the README that were ambiguous (chosen closest to the text):
   - "first place" of D3 = the finally chosen sentence (rowstats), the one whose difference segments triage computes.
-  - D3 (ii) uses triage's Lex.source (overlay-add, names-add, packs), minus the base lexicon.
-  - D3 (iii) corpus value = sum of log10(1 + count) over the words (count 0 counts as 0); a word with no lexicon entry under its reading
-    makes the row not (iii); a (reading, word) in several files takes the highest score.
+  - Gold segmentation: the gold's own candidate path in the first 64 (triage's rule, because the difference segments are cut on it),
+    not the dump-words rank-0 split; the number of C rows where the two differ is printed (`gold_path_not_gold0`, rank-0 `-` included).
+  - D3 (ii): a word of data/lexicon/overlay-add.tsv or of the pack (not names-add.tsv, unlike triage's Lex.source) that is not in the
+    base lexicon.
+  - D3 (iii) corpus value = sum of log10(count) over the words, literally; a word with count 0 makes that side -inf (it can never be
+    "higher"). A word with no lexicon entry under its reading makes the row not (iii); a (reading, word) in several files takes the highest
+    score. (iii) compares the words overlapping the segment, so unequal word counts favour the side with more words: the (iii) rows whose
+    two sides have the same number of words are printed apart (`iii_same_words`).
+  - D3 "first place" is the final pick; `c_not_rank1` prints how many C rows have c != 0 (final pick not the n-gram rank 1).
+  - Sets other than discordtune: verdict lines are labelled 只報.
   - C4 "equal length" (the README's example is 2 characters against 1 + 1): the chosen and the gold side of the segment hold the same
     number of words (dump-words split), and the two sentences have the same length (else no position map: all its segments count as
     unequal). Only positions where the characters differ become pairs.
-  - Bias counts only candidates whose surface length equals the syllable count (the position-to-reading map is unknown otherwise).
+  - Bias: a row is "affected" for (pair, b) only if the new top 8 (set and order) differs from the original top 8; a uniform shift
+    changes nothing and is skipped. Bias counts only candidates whose surface length equals the syllable count (the position-to-reading map is unknown otherwise).
     A row whose scores record has no `ll` is decided by the biased n-gram first; a pair/b cell with > 10% needs-rescoring rows is
     "unreliable" and is left out of the D2 verdict (listed apart).
 """
@@ -35,9 +43,9 @@ CLASSES = ("i", "ii", "iii", "iv")
 # ---------------------------------------------------------------- loading
 
 def load_lex_scores():
-    """{(reading tuple, word): score} of the files the engine loads (same filters as triage.Lex)."""
+    """({(reading tuple, word): score} of the files the engine loads (same filters as triage.Lex), words of overlay-add.tsv and the pack)."""
     r = lambda *p: T.read_text(os.path.join(ROOT, *p))
-    out = {}
+    out, ovl = {}, set()
 
     def add(reading, word, sc):
         k = (tuple(reading.split("-")), word)
@@ -52,7 +60,9 @@ def load_lex_scores():
             f = l.split("\t")
             if len(f) == 4:
                 add(f[0], f[1], float(f[2]))
-    return out
+                if p in ("data/lexicon/overlay-add.tsv", "data/packs/acg-add.tsv"):
+                    ovl.add(f[1])
+    return out, ovl
 
 
 def build_rows(rows_file, dump, words, rowstats, scores, lenient, par=SHIP):
@@ -144,6 +154,10 @@ def ranked(counts):
     return sorted(((k, v["n"] if isinstance(v, dict) else v) for k, v in counts.items()), key=lambda kv: (-kv[1], kv[0]))
 
 
+def unreliable(rescoring, affected):
+    return rescoring * 10 > affected      # strictly more than 10% of the affected rows
+
+
 def bias_cells(rows, ok, pair, lenient, bs=BS, par=SHIP):
     """pair = (wrong, gold, reading). Every candidate of every row gets +b per position that reads `reading` and shows `gold`; top 8 by the
     new n-gram score, shipped fusion; fixes/breaks against rowstats over the whole set. -> {b: {...}}"""
@@ -157,11 +171,14 @@ def bias_cells(rows, ok, pair, lenient, bs=BS, par=SHIP):
             continue
         ng = [sc["ng"][j] if j < len(sc["ng"]) else cands[j][1] for j in range(len(cands))]
         ll, t = sc.get("ll"), lenient(row["truth"])
+        orig = sorted(range(len(cands)), key=lambda j: (-ng[j], j))[:T.TOPK]
         for b in bs:
             o = out[b]
-            o["affected"] += 1
             new = [ng[j] + b * cn[j] for j in range(len(cands))]
             order = sorted(range(len(cands)), key=lambda j: (-new[j], j))[:T.TOPK]
+            if order == orig:      # same top 8, same order (a uniform shift too): nothing can change
+                continue
+            o["affected"] += 1
             if ll is None:
                 choice = order[0]
             elif any(j >= len(ll) for j in order):
@@ -174,15 +191,17 @@ def bias_cells(rows, ok, pair, lenient, bs=BS, par=SHIP):
             o["breaks"] += ok[i] and not now
     for o in out.values():
         o["net"] = o["fixes"] - o["breaks"]
-        o["unreliable"] = o["rescoring"] * 10 > o["affected"]
+        o["unreliable"] = unreliable(o["rescoring"], o["affected"])
     return out
 
 
-def d2_verdict(top10, n_c1, positive):
+def d2_verdict(top10, n_c1, positive, positive_unreliable=False):
     if not (n_c1 > 0 and top10 * 5 >= n_c1 * 2):             # >= 40%
         return "D2: 前 10 對 < 40% 的 C1 → 單字同音整類只能靠語意模型，結案"
     if positive:
         return "D2: 前 10 對 ≥ 40% 的 C1，而且至少一對在某個 b 淨值 > 0 → 開「偏置表」小片"
+    if positive_unreliable:
+        return "D2: 前 10 對 ≥ 40% 的 C1，淨值 > 0 只出現在不可靠的格子 → 報告，維護者決定"
     return "D2: 前 10 對 ≥ 40% 的 C1 但淨值都 ≤ 0（兩個方向都錯）→ 只有看語境的窄分類器才有意義，另議"
 
 
@@ -193,7 +212,7 @@ def d2(rows, ok, crows, lenient):
     cells = {k: bias_cells(rows, ok, k, lenient) for k, _ in top[:TOP_PAIRS]}
     good = [(k, b) for k, bc in cells.items() for b, o in bc.items() if o["net"] > 0 and not o["unreliable"]]
     odd = [(k, b) for k, bc in cells.items() for b, o in bc.items() if o["net"] > 0 and o["unreliable"]]
-    verdict = d2_verdict(top10, n_c1, bool(good))
+    verdict = d2_verdict(top10, n_c1, bool(good), bool(odd))
     return {"c1": n_c1, "c1_unpaired": c1_unpaired, "top10": top10, "top10_share": top10 / n_c1 if n_c1 else 0.0,
             "pairs": [{"pair": list(k), "n": n, "margin": c1[k]["margin"]} for k, n in top[:SHOW_PAIRS]],
             "bias": [{"pair": list(k), "n": c1[k]["n"], "cells": {str(b): o for b, o in bc.items()}} for k, bc in cells.items()],
@@ -203,19 +222,20 @@ def d2(rows, ok, crows, lenient):
 
 # ---------------------------------------------------------------- D3
 
-def d3_class(row, r, segs, gw, lex, count, lexscore):
-    """-> "i" | "ii" | "iii" | "iv", and whether (iii) could not be scored."""
+def d3_class(row, r, segs, gw, lex, ovl, count, lexscore):
+    """-> ("i" | "ii" | "iii" | "iv", (iii) could not be scored, both sides have the same number of words in the segment)."""
     if r["func_any"]:
-        return "i", False
+        return "i", False, False
     sel_w, gold_w, syls = words_in(row["cands"][row["c"]][2], segs), words_in(gw, segs), row["syls"]
-    if any(w in lex.source and w not in lex.base for _, _, w in sel_w):
-        return "ii", False
-    corpus = lambda ws: sum(math.log10(1 + count(w)) for _, _, w in ws)
+    if any(w in ovl and w not in lex.base for _, _, w in sel_w):
+        return "ii", False, False
+    corpus = lambda ws: sum(math.log10(count(w)) if count(w) > 0 else -math.inf for _, _, w in ws)
+    same = len(sel_w) == len(gold_w)
     try:
         prior = lambda ws: sum(lexscore[(tuple(syls[a:b]), w)] for a, b, w in ws)
-        return ("iii" if corpus(sel_w) > corpus(gold_w) and prior(sel_w) < prior(gold_w) else "iv"), False
+        return ("iii" if corpus(sel_w) > corpus(gold_w) and prior(sel_w) < prior(gold_w) else "iv"), False, same
     except KeyError:
-        return "iv", True
+        return "iv", True, same
 
 
 def d3_verdict(hit, n):
@@ -226,18 +246,21 @@ def d3_verdict(hit, n):
     return "D3: (ii)＋(iii) 在 10～20% → 報告，維護者決定"
 
 
-def d3(crows, lex, count, lexscore):
+def d3(crows, lex, ovl, count, lexscore):
     tot = dict.fromkeys(CLASSES, 0)
     by_sub = {s: dict.fromkeys(CLASSES, 0) for s in T.C_SUBS}
-    unscored = 0
+    unscored = same_iii = not_rank1 = gold_differs = 0
     for row, r, segs, gw, _, _ in crows:
-        k, u = d3_class(row, r, segs, gw, lex, count, lexscore)
+        k, u, same = d3_class(row, r, segs, gw, lex, ovl, count, lexscore)
         tot[k] += 1
         by_sub[r["sub"]][k] += 1
         unscored += u
+        same_iii += k == "iii" and same
+        not_rank1 += row["c"] != 0
+        gold_differs += row["gold0"] is None or gw != row["gold0"]
     n, hit = len(crows), tot["ii"] + tot["iii"]
-    return {"c_rows": n, "classes": tot, "share_ii_iii": hit / n if n else 0.0, "by_sub": by_sub, "iii_unscored": unscored,
-            "verdict": d3_verdict(hit, n)}
+    return {"c_rows": n, "classes": tot, "share_ii_iii": hit / n if n else 0.0, "by_sub": by_sub, "iii_unscored": unscored, "iii_same_words": same_iii,
+            "c_not_rank1": not_rank1, "gold_path_not_gold0": gold_differs, "verdict": d3_verdict(hit, n)}
 
 
 # ---------------------------------------------------------------- output
@@ -254,16 +277,21 @@ def render(name, n, res):
     L += [f"\nC4 equal-length pairs (top {SHOW_PAIRS}); unequal-length C4 segments: {d['c4_unequal_segments']}", "\n| wrong → gold | reading | count |\n|---|---|---|"]
     L += [f"| {p['pair'][0]} → {p['pair'][1]} | {p['pair'][2]} | {p['n']} |" for p in d["c4_pairs"]]
     L += ["\n" + d["verdict"], f"unreliable cells with net > 0 (left out of the verdict): {d['positive_unreliable']}",
-          f"\n### D3: C rows {e['c_rows']}; (ii)+(iii) = {100 * e['share_ii_iii']:.1f}%; (iii) not scorable: {e['iii_unscored']}",
+          f"\n### D3: C rows {e['c_rows']}; (ii)+(iii) = {100 * e['share_ii_iii']:.1f}%; (iii) not scorable: {e['iii_unscored']}; (iii) with equal word counts: {e['iii_same_words']}; "
+          f"C rows with c != 0: {e['c_not_rank1']}; gold path differs from rank 0: {e['gold_path_not_gold0']}",
           "\n| set | " + " | ".join(CLASSES) + " |\n|---|---|---|---|---|", f"| all C | " + " | ".join(str(e["classes"][k]) for k in CLASSES) + " |"]
     L += [f"| {s} | " + " | ".join(str(e["by_sub"][s][k]) for k in CLASSES) + " |" for s in T.C_SUBS]
     return "\n".join(L + ["\n" + e["verdict"], ""])
 
 
-def analyze(name, rows, ok, lex, lenient, count, lexscore):
+def analyze(name, rows, ok, lex, lenient, count, lexscore, ovl):
     crows = c_rows(rows, ok, lex, lenient)
-    return {"name": name, "n": len(rows), "errors": len(rows) - sum(ok), "setting": list(SHIP), "d2": d2(rows, ok, crows, lenient),
-            "d3": d3(crows, lex, count, lexscore)}
+    res = {"name": name, "n": len(rows), "errors": len(rows) - sum(ok), "setting": list(SHIP), "d2": d2(rows, ok, crows, lenient),
+           "d3": d3(crows, lex, ovl, count, lexscore)}
+    if name != "discordtune":          # only discordtune decides; the other sets are reported
+        for k in ("d2", "d3"):
+            res[k]["verdict"] = "只報：" + res[k]["verdict"]
+    return res
 
 
 def main(argv=None):
@@ -277,7 +305,7 @@ def main(argv=None):
     count = protolm.BigramLM(os.path.join(a.lm_dir, "bigram.sjlm"), classes=False).count
     lenient = T.load_lenient()
     rows, ok = build_rows(a.rows, a.dump, getattr(a, "dump_words"), a.rowstats, getattr(a, "tinylm_scores"), lenient)
-    res = analyze(a.name, rows, ok, T.Lex.load(), lenient, count, load_lex_scores())
+    res = analyze(a.name, rows, ok, T.Lex.load(), lenient, count, *load_lex_scores())
     print(render(a.name, len(rows), res))
     with open(a.out, "w", encoding="utf-8") as f:
         json.dump(res, f, ensure_ascii=False, indent=1)
