@@ -5,6 +5,7 @@ import contextlib
 import datetime as dt
 import io
 import json
+import math
 import os
 import shutil
 import subprocess
@@ -387,7 +388,7 @@ class Long(unittest.TestCase):
         self.assertEqual([g[0] for g in got], ["s.jsonl.zst:0", "s.jsonl.zst:7"])
         self.assertEqual(got[0][1], ["甲乙", "丙丁"])
         self.assertEqual(counts, {"docs": 11, "bad_json": 1, "not_object": 1, "null_text": 1, "register": 1, "host": 3, "bad_url": 1,
-                                  "pii": 1, "spam": 0, "passing": 2, "kept": 2})
+                                  "pii": 1, "spam": 0, "adult": 0, "spinner": 0, "passing": 2, "kept": 2})
 
     @unittest.skipUnless(shutil.which("zstd"), "zstd binary missing")
     def test_hplt_strict_records(self):
@@ -405,7 +406,7 @@ class Long(unittest.TestCase):
         shard = self.zst(lines)
         td = tempfile.mkdtemp()
         args = lambda **k: mock.Mock(shards=[shard], out=os.path.join(td, "o.txt"), overlap_drop=[], overlap_report=[], procs=1,  # noqa: E731
-                                     doc_fraction=k.get("f"), target_docs=k.get("t", 50), gibberish_ref=False)
+                                     doc_fraction=k.get("f"), target_docs=k.get("t", 50), gibberish_ref=False, proofread_exclude=None)
         ids = []
         for _ in range(2):
             with self.assertRaises(SystemExit):          # too few rows for the minimum: the manifest is still written
@@ -427,7 +428,7 @@ class Long(unittest.TestCase):
         with mock.patch.object(longtext, "sha256_stream", lambda p: next(it)):
             with self.assertRaises(SystemExit) as cm:
                 quiet(longtext.cmd_hplt, mock.Mock(shards=[shard], out=os.path.join(td, "o.txt"), overlap_drop=[], overlap_report=[],
-                                                   procs=1, doc_fraction=1.0, target_docs=1, gibberish_ref=False))
+                                                   procs=1, doc_fraction=1.0, target_docs=1, gibberish_ref=False, proofread_exclude=None))
         self.assertIn("changed", str(cm.exception.code))
         self.assertFalse(os.path.exists(os.path.join(td, "o.txt")))
 
@@ -443,6 +444,37 @@ class Long(unittest.TestCase):
         self.assertEqual([g[0] for g in got], ["s.jsonl.zst:0", "s.jsonl.zst:4"])
         self.assertEqual((counts["spam"], counts["passing"]), (3, 2))
         self.assertEqual((longtext.SPAM_MIN, longtext.GIBBERISH_PERCENTILE), (5, 0.01))
+
+    @unittest.skipUnless(shutil.which("zstd"), "zstd binary missing")
+    def test_hplt_adult_and_spinner_filters(self):
+        texts = ["今天天氣很好\n開著愛愛直播露營車",           # adult: one injected term is enough
+                 "他打德律風給我，咱們不克不及",              # 德律風 is a Taiwanese loanword, not counted: one spinner word, kept
+                 "咱們不克不及回到已往",                     # two spinner words
+                 "我瞭解了，明瞭，一目瞭然，傢俱和傢伙",        # legit 瞭 and 傢: no spinner match
+                 "閨蜜吼瞭一通，跑我傢"]                    # 瞭 and 傢 as 了 and 家
+        lines = [self.hplt_line({"ID": 1.0}, "https://a.com.tw/", text=t) for t in texts]
+        counts = {}
+        got = [g[0] for g in longtext.hplt_docs([self.zst(lines)], counts)]
+        self.assertEqual(got, ["s.jsonl.zst:1", "s.jsonl.zst:3"])
+        self.assertEqual((counts["adult"], counts["spinner"], counts["passing"]), (1, 2, 2))
+        self.assertEqual(longtext.SPIN_MIN, 2)
+
+    def test_proofread_sample_excludes_earlier_rows_and_records_its_seed(self):
+        td = tempfile.mkdtemp()
+        docs, *_ = self.make_docs_and_training(td)
+        out = os.path.join(td, "o.txt")
+        with mock.patch.object(longtext, "MIN_ROWS", 1):
+            quiet(longtext.build, list(docs), out, [], (), (), 1, ok_readings)
+        rows = open(out, encoding="utf-8", newline="").read().split("\n")[:-1]
+        first = set(open(out + ".proofread.txt", encoding="utf-8", newline="").read().split("\n")[:-1])
+        with mock.patch.object(longtext, "MIN_ROWS", 1):
+            quiet(longtext.build, list(docs), out, [], (), (), 1, ok_readings, proofread_seed=7,
+                  proofread_exclude=frozenset(l + "\n" for l in first))
+        second = open(out + ".proofread.txt", encoding="utf-8", newline="").read().split("\n")[:-1]
+        n = json.load(open(out + ".manifest.json"))["counts"]
+        self.assertEqual(len(second), math.ceil(len(rows) * 0.1))
+        self.assertFalse(first & set(second))
+        self.assertEqual((n["proofread_seed"], n["proofread_excluded"]), (7, len(first)))
 
     def test_gibberish_threshold_from_reference_and_row_drop(self):
         ref = [-3.0 + 2.0 * i / 199 for i in range(200)]      # -3 .. -1

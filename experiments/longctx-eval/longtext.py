@@ -42,6 +42,16 @@ TARGET_DOCS = 60000
 # keyword spam. A document with at least SPAM_MIN non-overlapping matches of SPAM_RE in its text is dropped (counted as `spam`).
 SPAM_RE = re.compile("貸款|借錢|借款|信貸|當舖|代書|小額|債務|二胎|免留車|地下錢莊|票貼|融資|週轉|周轉")
 SPAM_MIN = 5
+# 2026-10-20 proofreading of that build: 38 of 300 rows needed a fix, 26 of them whole-row drops. Most were adult and gambling SEO terms
+# injected mid-sentence (in the sentence or in its context), the rest the output of a word-by-word "spinner" that rewrites simplified
+# Chinese (不克不及 for 不能, 怙恃 for 父母, 瞭 and 傢 for 了 and 家). Any match of ADULT_RE drops the document (counted as `adult`),
+# SPIN_MIN matches of SPIN_RE drop it (`spinner`). The lookarounds keep 瞭解, 明瞭, 一目瞭然, 傢俱 and 傢伙. 德律風 is left out: the
+# spinner also writes it for 電話, but it is an old Taiwanese loanword for telephone that genuine posts use.
+ADULT_RE = re.compile("色情|情色|愛愛|援交|一夜情|裸聊|做愛|性愛|[aA][片漫]|成人(?:光碟|網|影|交友)|娛樂城|博弈|博彩|運彩|百家樂|六合彩|"
+                      "賭博|包養|甜心寶貝|交友網|視訊聊天|聊天室|辣妹|送茶|酒店兼職|金瓶梅")
+SPIN_RE = re.compile("不克不及|怙恃|黌舍|可以或許|掉敗|如許|以是|已往|隻是|裏麵|(?<!明)瞭(?![解望然])|傢(?![俱伙具])")
+SPIN_MIN = 2
+PROOFREAD_SEED = 20261020        # hplt's second proofreading sample (README), drawn from the rows not in the first sample
 GIBBERISH_PERCENTILE = 0.01      # rows scoring below this percentile of the reference sets' gold sentences are dropped
 GIBBERISH_PROFILE = "chat"
 REPO_URL = "https://github.com/Nanako0129/shanjie"
@@ -195,7 +205,8 @@ SAMPLING = ("documents: seeded hash of (20261019, document id) selects them whil
             "document and at most 3,000 rows, kept in document order")
 
 
-def build(docs, out, inputs, drop_files=(), report_files=(), procs=None, readings=c.readings, counts=None, gibberish=None):
+def build(docs, out, inputs, drop_files=(), report_files=(), procs=None, readings=c.readings, counts=None, gibberish=None,
+          proofread_seed=SEED, proofread_exclude=frozenset()):
     n = {} if counts is None else counts
     procs = procs or os.cpu_count() or 1
     n["sampling"] = SAMPLING
@@ -236,9 +247,11 @@ def build(docs, out, inputs, drop_files=(), report_files=(), procs=None, reading
         sys.exit(f"longtext: STOP, {len(rows)} rows < {MIN_ROWS}")
     c.write_lf(out, "".join(lines))
     check_rows(out, len(rows))
-    pick = sorted(random.Random(SEED).sample(range(len(rows)), math.ceil(len(rows) * 0.1)))
+    pool = [i for i, l in enumerate(lines) if l not in proofread_exclude]      # rows an earlier sample already proofread are not drawn again
+    pick = sorted(random.Random(proofread_seed).sample(pool, math.ceil(len(rows) * 0.1)))
     c.write_lf(out + ".proofread.txt", "".join(lines[i] for i in pick))
     n["proofread_rows"] = len(pick)
+    n["proofread_seed"], n["proofread_excluded"] = proofread_seed, len(lines) - len(pool)
     manifest["output_sha256"] = sha256_stream(out)
     c.write_lf(out + ".manifest.json", json.dumps(manifest, ensure_ascii=False, indent=1) + "\n")
     print(json.dumps(manifest, ensure_ascii=False, indent=1))
@@ -274,7 +287,8 @@ def tw_host(url):
 def hplt_docs(shards, counts, keep=None):
     """Yields (doc_id, [paragraph]) for the documents that pass every filter (and `keep(doc_id)`, when given); counts gets one
     counter per filter. A record without every key of REQUIRED stops the build."""
-    for k in ("docs", "bad_json", "not_object", "null_text", "register", "host", "bad_url", "pii", "spam", "passing", "kept"):
+    for k in ("docs", "bad_json", "not_object", "null_text", "register", "host", "bad_url", "pii", "spam", "adult", "spinner", "passing",
+              "kept"):
         counts.setdefault(k, 0)
     for shard in shards:
         p = subprocess.Popen(["zstd", "-dc", shard], stdout=subprocess.PIPE)
@@ -305,6 +319,10 @@ def hplt_docs(shards, counts, keep=None):
                 counts["pii"] += 1
             elif len(SPAM_RE.findall(d["text"])) >= SPAM_MIN:
                 counts["spam"] += 1
+            elif ADULT_RE.search(d["text"]):
+                counts["adult"] += 1
+            elif len(SPIN_RE.findall(d["text"])) >= SPIN_MIN:
+                counts["spinner"] += 1
             else:
                 counts["passing"] += 1
                 doc_id = f"{os.path.basename(shard)}:{i}"
@@ -317,6 +335,9 @@ def hplt_docs(shards, counts, keep=None):
 
 def cmd_hplt(a):
     counts = {}
+    excluded = frozenset()
+    if a.proofread_exclude:      # split on "\n" only, as the rows are written: a context may hold U+2028, which splitlines() splits on
+        excluded = frozenset(l + "\n" for l in open(a.proofread_exclude, encoding="utf-8", newline="").read().split("\n")[:-1])
     g = load_gibberish(a.procs) if a.gibberish_ref else None      # stops early when the model files are missing or differ
     before = {s: sha256_stream(s) for s in a.shards}
     if a.doc_fraction is None:
@@ -331,7 +352,8 @@ def cmd_hplt(a):
         keep = lambda d: doc_hash(d) < a.doc_fraction   # noqa: E731
     stop = None
     try:
-        build(hplt_docs(a.shards, counts, keep), a.out, a.shards, a.overlap_drop, a.overlap_report, a.procs, counts=counts, gibberish=g)
+        build(hplt_docs(a.shards, counts, keep), a.out, a.shards, a.overlap_drop, a.overlap_report, a.procs, counts=counts, gibberish=g,
+              proofread_seed=PROOFREAD_SEED, proofread_exclude=excluded)
     except SystemExit as e:      # any stop: the shard check still runs first
         stop = e
     print(f"documents kept {counts['kept']} of {counts['passing']} passing the filters")
@@ -465,6 +487,7 @@ def main(argv=None):
     h = sub.add_parser("hplt"); h.add_argument("--shards", nargs="+", required=True); common(h)
     h.add_argument("--doc-fraction", type=float, help="keep a passing document when its seeded hash is below this; default: the --target-docs smallest hashes")
     h.add_argument("--target-docs", type=int, default=TARGET_DOCS)
+    h.add_argument("--proofread-exclude", help="an earlier .proofread.txt: its rows are not drawn into this build's proofreading sample")
     h.add_argument("--gibberish-ref", action=argparse.BooleanOptionalAction, default=True,
                    help="row-level gibberish filter against the dev302 + user-typing percentile (default on; needs data/lm)")
     f = sub.add_parser("wikisource-fetch"); f.add_argument("--titles", required=True); f.add_argument("--out", required=True)
