@@ -201,7 +201,7 @@ fn main() {
     if timed.is_empty() {
         die("no scorable row in the items");
     }
-    println!("timed rows {} of {} (scorable), context {}", timed.len(), items.len(), if no_context { "none" } else { "as in the items" });
+    println!("timed rows {} of {} (scorable), context {}, VECLIB_MAXIMUM_THREADS {}", timed.len(), items.len(), if no_context { "none" } else { "as in the items" }, std::env::var("VECLIB_MAXIMUM_THREADS").unwrap_or_else(|_| "unset".into()));
     report("0c", rounds(&timed, |it| {
         std::hint::black_box(score(&oc, it, &ctx(it)));
     }));

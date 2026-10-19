@@ -297,18 +297,17 @@ impl Oc {
         }
         let mut ctx: Vec<u32> = context.chars().rev().take(CONTEXT).map(|c| self.chars.get(&c).copied().unwrap_or(UNK)).collect();
         ctx.reverse();
-        let run = |sounds: &[(u32, u32)]| -> Vec<f64> { cands.chunks(BATCH).flat_map(|ch| self.log_probs(be, &ctx, sounds, ch)).collect() };
-        let mut ll = run(&sounds);
+        let run = |sounds: &[(u32, u32)]| -> Result<Vec<f64>, OcError> {
+            let ll = self.log_probs(be, &ctx, sounds, &cands);
+            if ll.iter().all(|x| x.is_finite()) { Ok(ll) } else { Err(OcError::NonFinite) }
+        };
+        let mut ll = run(&sounds)?;
         let (base, _) = split_tone(syllables[n - 1]);
         if self.neutral.contains(base) && !syllables[n - 1].ends_with('˙') {
             sounds[n - 1].1 = NEUTRAL;
-            ll = ll.iter().zip(run(&sounds)).map(|(a, b)| a.max(b)).collect();
+            ll = ll.iter().zip(run(&sounds)?).map(|(a, b)| a.max(b)).collect();
         }
-        let ll: Vec<f64> = ll.into_iter().map(|x| x / LN10).collect();
-        if ll.iter().any(|x| !x.is_finite()) {
-            return Err(OcError::NonFinite);
-        }
-        Ok(ll.into_iter().map(Some).collect())
+        Ok(ll.into_iter().map(|x| Some(x / LN10)).collect())
     }
 
     /// (base id, tone id) of one syllable; `None` when the base is not in the file.
@@ -317,7 +316,7 @@ impl Oc {
         Some((*self.bases.get(base)?, tone))
     }
 
-    /// ln P(candidate | context, reading) for each candidate id list (all of length `sounds.len()`). The candidates share
+    /// ln P(candidate | context, reading) for each candidate id list (all of length `sounds.len()`), BATCH at a time. The candidates share
     /// `[BOS] context [SEP] reading x n [OUT]` (the same tokens, and the causal mask hides what follows), so that part is computed
     /// once (`prefix`) and each candidate then only adds its own n - 1 characters (`suffix`).
     fn log_probs(&self, be: Backend, ctx: &[u32], sounds: &[(u32, u32)], cands: &[Vec<u32>]) -> Vec<f64> {

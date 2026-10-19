@@ -63,7 +63,7 @@ def write(path, cfg, T, chars, bases, neutral, out_ids, src_sha):
     if len(chars) != c["n_tok"] - 8 or any(len(ch) != 1 for ch in chars) or len(bases) != c["n_base"] - 2:
         raise ValueError("vocabulary sizes differ from the header")
     if len(set(chars)) != len(chars) or len(set(bases)) != len(bases) or any("\n" in w or not w for w in [*bases, *neutral]):
-        raise ValueError("duplicate characters or bases, or an empty / multi-line base (core/src/oc.rs refuses them too)")
+        raise ValueError("duplicate characters or bases, or an empty / multi-line base or neutral entry (the lists are stored newline-joined)")
     if c["d"] % c["n_head"] or 2 * c["n_rope"] != c["d"] // c["n_head"]:
         raise ValueError(f"bad config {c}")
     o = np.asarray(out_ids)
@@ -230,7 +230,7 @@ def compare(model_dir, path, dump, dev, rust=None):
             if line.strip():
                 rec = json.loads(line)
                 r[rec["i"]] = rec["ll"]
-    A, B, U, R = [], [], [], []   # ORT, numpy (prefix tree, as ORT), numpy one sequence per candidate (as Rust), Rust
+    A, B, U, R = [], [], [], []   # ORT, numpy (prefix tree, as ORT), numpy one sequence per candidate (the golden's reference), Rust
     for i, prefix, syl, cs in items(dump, dev):
         try:
             s0.check_row(ort, syl, cs)
@@ -247,7 +247,7 @@ def compare(model_dir, path, dump, dev, rust=None):
             U.append(np.array(s0.score(ref, prefix, syl, cs, packed=False)) / math.log(10))
     stats(f"{os.path.basename(path)} numpy vs ORT", B, A)
     if rust:
-        stats("Rust vs numpy (one sequence per candidate, as Rust)", R, U)
+        stats("Rust vs numpy (one sequence per candidate)", R, U)
         stats("Rust vs ORT", R, A)
 
 

@@ -132,3 +132,67 @@ fn damaged_files_are_refused() {
     assert_eq!(Oc::load(&tmp.join("missing")).err(), Some(OcError::Io), "no such file");
     std::fs::remove_dir_all(tmp).unwrap();
 }
+
+/// A row with more candidates than one batch (BATCH is 8) still gives the golden's scores: the golden has a 10-candidate row, and the
+/// neutral-retry row of 6 candidates is cycled to 14 so the retry also crosses a batch.
+#[test]
+fn rows_with_more_than_a_batch_match_the_reference() {
+    let m = model();
+    let mut seen = (false, false);
+    for (ctx, syl, cands, want) in rows() {
+        let Some(want) = want else { continue };
+        let retry = ctx == "你好" && cands.len() == 6 && syl[1].ends_with('ˊ');
+        let (cands, want): (Vec<_>, Vec<_>) = if retry { (0..14).map(|i| (cands[i % 6].clone(), want[i % 6])).unzip() } else { (cands, want) };
+        if cands.len() <= 8 {
+            continue;
+        }
+        let got = m.score(&ctx, &refs(&syl), &refs(&cands));
+        for (g, w) in got.iter().zip(&want) {
+            assert!((g.expect("scored") - w).abs() < 1e-5, "{ctx:?} {syl:?}: {g:?} vs {w}");
+        }
+        if retry { seen.1 = true } else { seen.0 = true }
+    }
+    assert!(seen.0 && seen.1, "the 10-candidate row and the cycled retry row both ran");
+}
+
+/// A NaN in a weight is `NonFinite` from `try_score` and all-None from `score`. The decoder bias reaches the first attempt of every
+/// row; the neutral tone's embedding only the retry (a merge by `f64::max` would have hidden it behind the finite first attempt).
+#[test]
+fn a_non_finite_weight_is_refused() {
+    let good = std::fs::read(dir().join("tiny.sjoc")).unwrap();
+    let h = |at: usize| u32::from_le_bytes(good[at..at + 4].try_into().unwrap()) as usize;
+    // header (tools/oc_ref.py HEADER): n_layer 16, d 24, ffn 28, n_tok 32, n_base 40, n_tone 44, n_type 48, n_rope 52
+    let (nl, d, ffn, nt, nb, ntone, nty, nr) = (h(16), h(24), h(28), h(32), h(40), h(44), h(48), h(52));
+    let total = nt * d + nt + nb * d + ntone * d + nty * d + d + nr + nl * (4 * d * d + d + 3 * ffn * d) + (nl - 1) * d + 2 * d + d * d;
+    let start = good.len() - 4 * total; // the tensors are the end of the file: dec, dec_b, base, tone, ...
+    let dec_b = start + 4 * nt * d;
+    let tone5 = dec_b + 4 * (nt + nb * d + 5 * d);
+    let tmp = std::env::temp_dir().join(format!("shanjie-oc-nan-{}", std::process::id()));
+    std::fs::create_dir_all(&tmp).unwrap();
+    let nan = |name: &str, at: usize| {
+        let mut b = good.clone();
+        b[at..at + 4].copy_from_slice(&f32::NAN.to_le_bytes());
+        let p = tmp.join(name);
+        std::fs::write(&p, b).unwrap();
+        Oc::load(&p).unwrap()
+    };
+    let all = rows();
+    let row = |i: usize| (all[i].0.as_str(), refs(&all[i].1), refs(&all[i].2));
+    let (c0, s0, k0) = row(0); // no retry
+    let (c8, s8, k8) = row(8); // ends in a tone mark and a neutral-tolerant base: retried
+    let k8_long: Vec<&str> = (0..14).map(|i| k8[i % k8.len()]).collect();
+
+    let m = nan("dec_b", dec_b + 4 * 8);
+    for (c, s, k) in [(c0, &s0, &k0), (c8, &s8, &k8)] {
+        assert_eq!(m.try_score(c, s, k), Err(OcError::NonFinite));
+        assert_eq!(m.score(c, s, k), vec![None; k.len()]);
+    }
+
+    let m = nan("tone5", tone5);
+    assert!(m.try_score(c0, &s0, &k0).unwrap().iter().all(Option::is_some), "a row without the retry never reads the neutral tone");
+    for k in [&k8, &k8_long] {
+        assert_eq!(m.try_score(c8, &s8, k), Err(OcError::NonFinite), "the retry's NaN is not hidden by the first attempt");
+        assert_eq!(m.score(c8, &s8, k), vec![None; k.len()]);
+    }
+    std::fs::remove_dir_all(tmp).unwrap();
+}
