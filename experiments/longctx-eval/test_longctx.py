@@ -480,7 +480,7 @@ class Long(unittest.TestCase):
         self.assertEqual(seen["counts"]["proofread_exclude_file"], {"rows": 2, "sha256": c.sha256_file(ex)})
         for bad in ("".join(rows).replace("\n", "\r\n"), "".join(rows).rstrip("\n")):      # edited (CRLF) or truncated: stop
             open(ex, "w", encoding="utf-8", newline="").write(bad)
-            with self.assertRaises(SystemExit):
+            with self.assertRaisesRegex(SystemExit, "not an unedited"):      # the reader's own stop, not a later one
                 quiet(longtext.cmd_hplt, args)
 
     def test_proofread_pool_too_small_stops_before_writing(self):
@@ -551,8 +551,9 @@ class Long(unittest.TestCase):
     def test_wikisource_round2_filters_and_second_sample(self):
         td = tempfile.mkdtemp()
         ctx = han(100, 20)      # 20 Han characters: enough context for a row
-        works = {"簡體": [ctx + "，我们这样说为国家" + "，" + han(200, 6)],         # 6 simplified forms: the whole work goes
-                 "繁體": [ctx + "，短句" + "，" + han(300, 6) + "（《某刊" + "，" + han(400, 6)]}
+        works = {"簡體": [ctx + "，我们这说为国" + "，" + han(200, 6)],             # exactly 5 simplified forms: the whole work goes
+                 "四個": [ctx + "，我们这说为" + "，" + han(500, 6)],              # 4: kept (its row is kept)
+                 "繁體": [ctx + "，短句" + "，" + han(300, 6) + "（《某刊" + "，" + han(400, 6) + "（見某" + "，" + han(600, 6)]}
         titles = os.path.join(td, "titles.txt")
         open(titles, "w", encoding="utf-8").write("\n".join(works) + "\n")
         for t, paras in works.items():
@@ -567,8 +568,8 @@ class Long(unittest.TestCase):
         with mock.patch.object(longtext, "build", fake_build):
             longtext.cmd_wikisource(args)
         self.assertEqual(seen["counts"]["simplified"], 1)
-        self.assertEqual([s for _, _, s in seen["rows"]], [han(300, 6)])      # 短句 and 某刊 too short; the row after （《某刊 is a citation
-        self.assertEqual((seen["counts"]["short_sentence"], seen["counts"]["citation"]), (2, 1))      # 短句 and 某刊
+        self.assertEqual([s for _, _, s in seen["rows"]], ["我们这说为", han(500, 6), han(300, 6)])      # 短句, 某刊, 見某 too short; after 《 or （: citations
+        self.assertEqual((seen["counts"]["short_sentence"], seen["counts"]["citation"]), (3, 2))
         self.assertEqual((seen["proofread_seed"], seen["proofread_exclude"]), (20261019, frozenset()))
         ex = os.path.join(td, "first.proofread.txt")
         open(ex, "w", encoding="utf-8", newline="").write("前文|句子|ㄐㄩˋ ㄗ˙\n")
@@ -576,7 +577,14 @@ class Long(unittest.TestCase):
         with mock.patch.object(longtext, "build", fake_build):
             longtext.cmd_wikisource(args)
         self.assertEqual((seen["proofread_seed"], seen["proofread_exclude"]), (20261021, frozenset({"前文|句子|ㄐㄩˋ ㄗ˙\n"})))
-        self.assertFalse(set("說為國這們") & longtext.WS_SIMP)      # no Traditional form in the simplified list
+        # build() itself passes keep_row on to rows_from_docs, and the filter runs before the per-document cap
+        out = os.path.join(td, "b.txt")
+        with mock.patch.object(longtext, "MIN_ROWS", 1), self.assertRaises(SystemExit):
+            quiet(longtext.build, [("d", [ctx + "，" + han(700, 6)])], out, [], (), (), 1, ok_readings, keep_row=lambda x, s: False)
+        self.assertEqual(json.load(open(out + ".manifest.json"))["counts"]["candidate_rows_ge16_han_context_max3_per_doc"], 0)
+        paras = [ctx + "，" + "，".join([han(800, 6), "短", han(810, 6), han(820, 6)])]
+        kept = longtext.rows_from_docs([("d", paras)], 3, lambda x, s: len(s) >= 4)
+        self.assertEqual([s for _, _, s in kept], [han(800, 6), han(810, 6), han(820, 6)])      # the cap counts kept rows only
 
     def test_wikisource_html_boundaries_and_noise(self):
         h = "<div class='x'><p>第一段<sup>[1]</sup>，續</p><p>第二<br/>段</p><style>p{}</style><h2>標題</h2>尾巴</div>"

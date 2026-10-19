@@ -63,10 +63,12 @@ SPIN_RE = re.compile("么|不克不及|可以或許|掉敗|(?<![一二兩三四�
 SPIN_MIN = 2
 # Wikisource round 2 (README): the first proofreading sample needed 41 fixes in 300 rows (13.7%). About half were works stored in
 # simplified script, which the API's zh-tw variant did not convert; the rest footnote or citation fragments, very short sentences,
-# classical quotations and readings. A work with at least WS_SIMP_MIN characters of WS_SIMP (frequent simplified-only forms, none of
-# them used in Traditional text) is dropped (`simplified`); a row whose sentence has fewer than WS_MIN_SENT_HAN Han characters, or
+# classical quotations and readings. A work with at least WS_SIMP_MIN characters of WS_SIMP (frequent simplified forms; 么 and 听
+# also exist in Traditional text, as in 老么 and 听然, but every hit in the 1,837 fetched works was a simplified use such as 什么 or
+# 听說) is dropped (`simplified`, counted in works); a row whose sentence has fewer than WS_MIN_SENT_HAN Han characters, or
 # whose context ends in a citation (a 《 in its last 12 characters or a （ in its last 6), is dropped before the per-work cap
-# (`short_sentence`, `citation`). Measured on that sample: these three rules leave an estimated 7% to fix (classical quotations and
+# (`short_sentence`, `citation`, counted in rows over every row with enough context, before the cap; a short row is not also counted
+# as a citation). Measured on that sample: these three rules leave an estimated 7% to fix (classical quotations and
 # readings are not filterable this way).
 WS_SIMP = frozenset("们这说为国时来对会发现经学问东车门开关买卖实书长见让认识边过还进运动从个间题样头师么爱应该钱话觉写记读请谁听语诉"
                     "红绿军战产农业总员务热闹医药岁马鸟鱼龙页顾")
