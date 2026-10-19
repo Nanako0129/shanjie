@@ -372,18 +372,27 @@
 - 這一節與 §4.3 B 一律用 dry run 的 zip 解出來，以 `scripts/install-ime.sh` 安裝；它不比版本。
 - 安裝程式的升級路徑（0.4.x → 0.5.0，含 §2.7 的倚天排列）在 v0.5.0 發佈後量（§4.4）。
 
-1. **升級**：在全新帳號裝 0.4.x（現行 Latest），學一個詞，再用 `install-ime.sh` 換成 dry run 的沙盒版。斷言：
-   - 學習資料與偏好設定搬好；
-   - selftest 正常；
-   - `log` 沒有善解或 Sparkle 的沙盒拒絕。
-2. **同 ID 重建**：同一個開發版 ID 重新 ad-hoc 組建兩次，第二次仍能讀到第一次 container 裡的學習資料，也不跳詢問。
-3. **退回、搬回、再升級**：升級之前先設一個非預設的偏好設定（例如 `layout`），升級之後用 `install-ime.sh` 降回 0.4.x，照 `docs/sandbox-restore.md` 的指令搬回。斷言：
+虛擬機裡沒辦法用介面打字，所以學習資料用合成的檔案，驗收用檔案比對，不用「選字排第一」。
+
+1. **升級**：在全新帳號裝 0.4.x（現行 Latest）。第一次啟動沙盒版之前，放好來源（和 §2.6 第 3 步相同的做法）：
+   - `~/Library/Application Support/shanjie/learning.tsv`（合成，含一筆前文鍵 `#` 的新詞記錄），資料夾 0700、檔案 0600；
+   - `defaults write com.nyanako.inputmethod.shanjie layout eten`（非預設值）；
+   - 記下 `learning.tsv` 的雜湊與權限。
+   - 用 `install-ime.sh` 換成 dry run 的沙盒版，用 `--selftest` 與 `launchctl asuser` 各啟動一次。斷言：
+     - 原位置的 `learning.tsv` 消失，container 裡的那份雜湊相同、0600；
+     - container 裡的偏好設定 `layout=eten`；
+     - selftest 結束碼 0；
+     - `log show --start <換檔前的時間>` 沒有善解或 Sparkle 的沙盒拒絕。
+2. **同 ID 重建**：同一個開發版 ID 連續 ad-hoc 組建兩次，各啟動一次（`--selftest`）。斷言：
+   - 第二次不跳任何詢問；
+   - container 沒有被重建（`Data` 資料夾的 inode 與建立時間不變）。
+   - 「第二個組建讀得到第一個組建學到的詞」需要打字，改在 §4.3 A 第 2 步量：A 與 B 是同一個開發版 ID 的兩個不同 ad-hoc 組建。
+3. **退回、搬回、再升級**：接著第 1 項的狀態，用 `install-ime.sh` 降回 0.4.x，照 `docs/sandbox-restore.md` 的指令搬回。斷言：
    - 指令結束碼 0、沒有跳詢問；
-   - `learning.tsv` 和升級前的那份逐位元相同、權限 0600；
-   - `defaults read com.nyanako.inputmethod.shanjie layout` 等於升級前設的值；
+   - `learning.tsv` 和第 1 項放的那份雜湊相同、權限 0600；
+   - `defaults read com.nyanako.inputmethod.shanjie layout` 是 `eten`；
    - container 已不存在。
-   - 接著再升級成沙盒版一次：container 裡的 `learning.tsv` 和搬回的那份逐位元相同，沒有跳詢問。
-   - 虛擬機裡沒辦法用介面打字，所以用檔案比對，不用「選字排第一」。
+   - 接著再升級成沙盒版一次：container 裡的 `learning.tsv` 和搬回的那份雜湊相同，沒有跳詢問。
 4. **倚天排列**：dry run 的 0.0.0 用安裝程式裝不上去（見本節開頭），所以合併前由 §2.7 的單元測試與 §2.6 第 3 步代替。真正的安裝程式路徑在 v0.5.0 發佈後量（§4.4）。
 5. **Sparkle 讀得到 feed**：沙盒版用 `launchctl asuser` 啟動後，開關於頁的「立即檢查」需要介面操作。做不到時，這一項改在 §4.3 A 量。
 
@@ -396,7 +405,8 @@
   - 用測試金鑰、本機 feed（`http://127.0.0.1`，about-update §3 第 4 項的做法）建三個更新測試版，都是開發版 ID：
     - A0：合併前的 main，沒有沙盒。合併前的 `install-ime.sh` 只會裝到正式版的資料夾，所以 A0 由 main 手動放到 `~/Library/Input Methods/善解（開發版）.app`，不經 `install-ime.sh`。它的顯示名稱仍是「善解輸入法」（合併前的 `build-app.sh` 寫死），和正式版同名，選單裡用 ID 區分；
     - A：這片，有沙盒；
-    - B：這片，有沙盒、版本比 A 新。
+    - B：這片，有沙盒、版本比 A0 與 A 都新。
+    - 版本號用 `SHANJIE_VERSION` 指定：A0 與 A 都是 `0.0.1`，B 是 `0.0.2`。合併前的 `build-app.sh` 預設會取最新的 tag（0.4.x），A0 一定要明確給 `0.0.1`，否則 B 比它舊，Sparkle 會顯示「已是最新」。
 - 開發版 ID 沒有移轉清單，所以這一段不搬任何資料。
 - **步驟**（順序照這裡，F4）：
   1. **A0 → B**（沒有沙盒的版本經 Sparkle 更新成沙盒版，對應 0.4.x → 0.5.0 的路）：
@@ -419,20 +429,21 @@
 **B. 正式 ID 的沙盒版（dry run 的 Developer ID 版，正式發佈之前）**
 
 0. **先備份**（使用者自己做，main 給指令）：§4.3 A 開始前做一次；第一次啟動正式 ID 的沙盒版之前再做一次。把 `~/Library/Application Support/shanjie` 複製到備份位置，偏好設定用 `defaults export com.nyanako.inputmethod.shanjie <檔>` 匯出。
-1. 打一句、改選、按 Enter。斷言：
+1. **安裝**：記下開始時間。用 dry run 的 zip 解出來，以 `install-ime.sh` 安裝（0.0.0，見 §4.2 開頭），記下它最後一步 `shanjie install` 的結果。
+2. 安裝後第一次打字之前：`log show --start <第 1 步的時間> --predicate 'sender == "Sandbox" AND eventMessage CONTAINS "shanjie"'` 沒有任何 deny（涵蓋第一次啟動、資料搬移與 IMK 登記）。
+3. 打一句、改選、按 Enter。斷言：
    - 升級前學過的選字仍排第一；
    - 學過的新詞仍出現在候選裡；
    - 倚天排列、選單與設定視窗的設定都還在。
-2. Terminal 開 Secure Keyboard Entry，到別的 App 開輸入法選單：第一項是「學習已暫停（安全輸入）」。
-3. 清除學習資料的視窗出得來，關掉後焦點回到原本的 App。
-4. 更新之後 Caps Lock 切換正常。
-5. 活動監視器的「沙盒」欄位是「是」。
-6. 用 dry run 的 zip 解出來，以 `install-ime.sh` 安裝（0.0.0，見 §4.2 開頭），記下它最後一步 `shanjie install` 的結果。
-7. `log show --last 5m --predicate 'sender == "Sandbox" AND eventMessage CONTAINS "shanjie"'` 沒有任何 deny；log 裡沒有 "system table unavailable"（系統標點表讀得到）。
+4. Terminal 開 Secure Keyboard Entry，到別的 App 開輸入法選單：第一項是「學習已暫停（安全輸入）」。
+5. 清除學習資料的視窗出得來，關掉後焦點回到原本的 App。
+6. 換成沙盒版之後，Caps Lock 切換正常。
+7. 活動監視器的「沙盒」欄位是「是」。
 8. 設定→App 設定的清單顯示得出 App 名稱與圖示（§2.9）。
 9. 在聊天 App 與文字編輯器之間切換，聊天／書面的自動判斷照舊（§2.9）。
 10. 設定→關於→立即檢查：dry run 是 0.0.0，所以要顯示「有新版本 <當時的 Latest>」，不是「檢查失敗」。這證明沙盒版讀得到正式 feed、驗得過簽章。**不要按「更新到 X」**：按了 Sparkle 會換回沒有沙盒的 0.4.x，資料留在 container 裡；萬一按了，照 `docs/sandbox-restore.md` 搬回，或用第 0 步的備份。
 11. 開關一次設定視窗，關掉之後焦點回到原本的 App（§2.9）。
+12. 最後再跑一次第 2 步的 `log show --start <第 1 步的時間>`：從安裝到這一步都沒有善解的沙盒 deny；log 裡沒有 "system table unavailable"（系統標點表讀得到）。
 
 ### 4.4 順序與 tag
 
@@ -532,17 +543,17 @@
 | N1 | P0 | 移轉清單的路徑和 ID 無關，任何 ID 的沙盒組建第一次啟動都會搬走真正的資料，包括本機的 `check-app.sh` 與 `make selftest-bundled` | FIX：§2.2（只有正式 ID 放清單）、§2.3（預設開發版 ID、`check-app.sh` 拒絕）、§2.6 第 3 步驗證「沒有清單不搬」。審查建議其他 ID 用二元素路徑；改成不放清單，比較簡單，但要靠 CI 驗證那個推論 |
 | F3a | P1 | 沒有移轉清單，升級後選字記憶「消失」；清單必須和 entitlements 在同一版 | FIX：§2.2；同一個 PR |
 | F3b | P1 | 蘋果文件沒寫偏好設定會自動搬 | 量過（§1）：會自動搬。CI 斷言（§2.6 第 3 步）；搬不了就停 |
-| F10 | P1 | selftest 不建 IMKServer，mach 名稱寫錯 CI 抓不到 | FIX：名稱由 `BUNDLE_ID` 產生，`check-entitlements.sh` 斷言等於 `InputMethodConnectionName`；IMK 實際能不能用由實機驗收（§4.3） |
+| F10 | P1 | selftest 不建 IMKServer，mach 名稱寫錯 CI 抓不到 | FIX：名稱由 `BUNDLE_ID` 產生，`check-entitlements.sh` 斷言等於 `InputMethodConnectionName`；IMK 實際能不能用由實機驗收（§4.3 B 第 3 項） |
 | N2 | P1 | 改了預設 ID，釋出版可能帶錯 ID | FIX：§2.4，`release.yml` 明確傳、`verify()` 依 bundle 斷言 |
 | N3 | P1（推測） | ad-hoc 組建先建立的 container，Developer ID 版可能接手不了 | 避免：§2.3、§5 本機不執行正式 ID 的沙盒組建。量：§4.2 第 1 項；接手不了就停 |
 | F3c | P2 | 安裝程式在沙盒外寫 `layout` | FIX：§2.7 改在換檔之前寫；§4.2 第 4 項 |
-| F4 | P2 | `shanjie install` 和輸入法是同一個執行檔，會在沙盒裡註冊 | 量過（§1）：做得到。實機記結果（§4.3 B 第 6 項）；做不到才加輔助程式 |
-| F2 | P2 | `IsSecureEventInputEnabled` 在沙盒裡沒量過；永遠 false 會讓密碼欄繼續學習 | 實機量（§4.3 B 第 2 項）；停止條件 |
+| F4 | P2 | `shanjie install` 和輸入法是同一個執行檔，會在沙盒裡註冊 | 量過（§1）：做得到。實機記結果（§4.3 B 第 1 項）；做不到才加輔助程式 |
+| F2 | P2 | `IsSecureEventInputEnabled` 在沙盒裡沒量過；永遠 false 會讓密碼欄繼續學習 | 實機量（§4.3 B 第 4 項）；停止條件 |
 | N4 | P2 | 不備份旗標搬完後還在不在 | 量過（§1）：保留。CI 斷言（§2.6 第 3 步） |
 | N6 | P2（推測） | 測試讀別的 App 的 container，可能跳 TCC 詢問 | §2.6 第 3 步寫好替代做法；搬回指令在 §4.2 第 3 項量 |
 | F8 | P3 | selftest「不碰任何檔案」在沙盒下不再成立 | FIX：§2.3 改說法；container 由 §2.6 第 3、6 步分別檢查 |
 | F5 | P3 | cask 的 `zap` 漏了學習資料與 container | FIX：§2.5 |
-| F12 | P3 | 只有實機看得到沙盒拒絕 | §4.3 B 第 7 項、§4.3 A 第 1 項 (d) |
+| F12 | P3 | 只有實機看得到沙盒拒絕 | §4.3 B 第 2、12 項、§4.3 A 第 1 步 (d) |
 | N5 | P3 | 退回舊版讓資料滯留 | FIX：§2.5 寫進退回說明與搬回文件 |
 | F6、F7 | P3 | 網站沒提 Time Machine；denylist 太短 | DEFER：第二片（§3） |
 | F9 | P4 | 安裝程式的簽章檢查 | DEFER：第二片；F1 修好後 `verify()` 已會檢查 |
@@ -574,3 +585,4 @@
 | 收尾審查 REVISE（2026-10-10） | 1. §4.1 第 8 項要在維護者的機器上驗證本機防呆，防呆寫錯就會搬走真正的資料；P3：第 4 步家目錄檢查的順序、`SKIP_RUN` 的結束碼、第 7 步快照可能受 cfprefsd 影響 | 使用者決定「修掉再審一次」：1 → §2.6 第 2a 步在 CI 驗證、§4.1 第 8 項改指向它；P3 → 拒絕條件寫明檢查順序、`SKIP_RUN` 結束碼 0、第 3 步結束前確認來源偏好設定檔已搬走 |
 | plan-verifier 第 2 次 REVISE（2026-10-10；第二次之後逐項處置） | 1. 虛擬機與實機驗收只能在合併後做，沒寫順序、沒凍結 tag；2. 「沒有清單不搬」證明之前，本機的 selftest、check-app、開發版安裝都會啟動沙盒組建；3. 遷移測試的拒絕條件看 `$HOME`，`CI=true HOME=<暫存>` 可以繞過；4. §4.1 第 5、6 項沒有對應的 CI 步驟；5. 搬回後 container 還在，下次升級不會再搬 | 全部 FIX：1 → §4.4（合併後的順序、凍結 tag）、§5 回滾先 revert；2 → §5 限制擴及維護者，`check-app.sh` 加 `SKIP_RUN`；3 → §2.6 第 3 步用 `dscl` 查帳號家目錄、第 4 步加這個情況；4 → §2.6 第 0 步；5 → §2.5 刪整個 container、§4.2 第 3 項加再升級 |
 | plan-verifier（修訂二，第 1 次，2026-10-19） | REVISE：1. dry run 的版本是 0.0.0，安裝程式不降版、「立即檢查」會顯示 0.4.x，§4.2、§4.3 B 照寫做不到；2. §4.1 第 1 項寫四份突變，§2.6 第 8 步是七份；3. §2.6 第 3 步「只搬一次」的第二份來源含偏好設定，和結束前「偏好設定檔已不存在」衝突；4. §4.3 A 第 1 步 (f) 不通過時的回滾寫錯、停止條件的參照指錯；5. 搬回用 `ditto` 複製 plist，和 §5 的 cfprefsd 推論衝突，偏好設定也沒有驗收 | 全部照最小修改：1 → §4.2 開頭寫明 0.0.0、改用 `install-ime.sh`，安裝程式路徑移到發佈後（§4.4），§4.3 B 第 10 項改成「顯示有新版本、不要按」，§4.4 寫明 0.0.0 之後怎麼回到正式版（v0.5.0 發佈後經 Sparkle 更新，等於提早的 canary）；2 → §4.1 逐份列出預期；3 → 第二份只放學習檔；4 → §5 寫出用備份還原的步驟、參照改成 §4.3 A 第 1 步 (f)；5 → §2.5 改用 `defaults export／import`，§4.2 第 3 項加偏好設定的比對 |
+| plan-verifier（修訂二，第 2 次，2026-10-19；第二次之後逐項處置） | 前一輪五項都已解決；新的 REVISE：1. §4.3 B 的安裝排在第 6 步，前面的檢查都在沒有沙盒的版本上做，log 也看不到第一次啟動；2. §4.2 第 1–3 項要學習資料，虛擬機卻不能打字；3. §4.3 A 沒寫 A0、A、B 的版本號，B 可能不比 A0 新 | 三項都 FIX：1 → 安裝改成第 1 步、第 2 步裝完立刻看 log、第 12 步再看一次涵蓋全程的 log，§7.1 的交叉參照跟著改；2 → 第 1 項在第一次啟動前放合成的 `learning.tsv`（含 `#` 新詞）與 `layout=eten`、用雜湊比對，第 2 項改成可觀察的「不跳詢問、container 沒重建」、「讀得到」移到 §4.3 A 第 2 步，第 3 項接著第 1 項的資料；3 → A0 與 A 是 `0.0.1`、B 是 `0.0.2`，A0 一定要明確給版本號 |
