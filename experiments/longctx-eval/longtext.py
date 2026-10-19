@@ -51,14 +51,18 @@ SPAM_MIN = 5
 # for telephone), which are left out so that genuine posts using them stay. Wikisource does not go through these filters.
 # The lookarounds keep ordinary words that contain a term (review of 2026-10-20): 叫做愛情, 女性愛用, 支援交流, 感情色彩, 外送茶飲,
 # 恩恩愛愛, Java片段; 博弈 (博弈論), 聊天室, 視訊聊天 and 辣妹 are left out as common in genuine posts (the gambling spam also carries
-# 博彩, 娛樂城 or 百家樂). SPIN_RE keeps 瞭若指掌, 好傢夥, 傢私, 這隻是 (a measure word before 是) and 裏麵包.
+# 博彩, 娛樂城 or 百家樂). SPIN_RE keeps 瞭若指掌, 好傢夥, 傢私, 這隻是 (a measure word before 是) and 裏麵包. Round 3 (second sample, 16 of
+# 300 rows fixed): the simplified 么 (網上兼職是真的么) marks content-farm text and matched no clean row of either sample; the other
+# candidates measured on the two samples (a stricter gibberish percentile, a 3-4 character string repeated three times in a row,
+# 情趣用品) dropped as many clean rows as garbage ones and are not used.
 ADULT_RE = re.compile("色情|(?<![感風表])情色|(?<!恩)愛愛|(?<!支)援交|一夜情|裸聊|(?<![叫當看])做愛(?!心)|(?<![女男個任理感人母本天習])性愛|"
                       "(?<![A-Za-z])[aA][片漫]|成人(?:光碟|網站|影片|交友)|娛樂城|博彩|運彩|百家樂|六合彩|賭博|包養|甜心寶貝|交友網|"
                       "(?<!外)送茶|酒店兼職|金瓶梅")
-SPIN_RE = re.compile("不克不及|可以或許|掉敗|(?<![一二兩三四五六七八九十幾這那哪每某半])隻是|裏麵(?![包條線粉食店])|"
+SPIN_RE = re.compile("么|不克不及|可以或許|掉敗|(?<![一二兩三四五六七八九十幾這那哪每某半])隻是|裏麵(?![包條線粉食店])|"
                      "(?<!明)瞭(?![解望然若如])|傢(?![俱伙具夥私俬])")
 SPIN_MIN = 2
-PROOFREAD_SEED = 20261020        # hplt's second proofreading sample (README), drawn from the rows not in the first sample
+PROOFREAD_SEED = 20261021        # hplt's third proofreading sample (README; the first used 20261019, the second 20261020), drawn from rows
+                                 # in neither earlier sample
 GIBBERISH_PERCENTILE = 0.01      # rows scoring below this percentile of the reference sets' gold sentences are dropped
 GIBBERISH_PROFILE = "chat"
 REPO_URL = "https://github.com/Nanako0129/shanjie"
