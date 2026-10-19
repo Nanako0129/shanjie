@@ -32,7 +32,7 @@ def fixes_breaks(rows, alpha, tau, delta):
 
 def band(m):
     """(index, label) of the margin band."""
-    return next((i, f"{lo}–{hi}" if hi != float("inf") else f"≥ {lo}") for i, (lo, hi) in enumerate(BANDS) if lo <= m < hi)
+    return next((i, f"{lo}–{hi}" if hi != float("inf") else f"≥ {lo}") for i, (lo, hi) in enumerate(BANDS) if m < hi)   # a negative margin goes in the first band
 
 
 def cross(rows):
@@ -67,6 +67,8 @@ def main(d):
     for s in ("discordtune", "chatclause"):
         p = os.path.join(d, f"M8.chat.{s}.jsonl")
         if not os.path.exists(p):
+            if s == "discordtune":
+                sys.exit(f"STOP: no score file {p} (discordtune decides)")
             print(f"{s}: no score file, skipped\n")
             continue
         rows = fg.load_scores(p)

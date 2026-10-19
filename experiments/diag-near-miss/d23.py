@@ -21,8 +21,8 @@ Readings of the README that were ambiguous (chosen closest to the text):
   - C4 "equal length" (the README's example is 2 characters against 1 + 1): the chosen and the gold side of the segment hold the same
     number of words (dump-words split), and the two sentences have the same length (else no position map: all its segments count as
     unequal). Only positions where the characters differ become pairs.
-  - Bias: a row is "affected" for (pair, b) only if the new top 8 (set and order) differs from the original top 8; a uniform shift
-    changes nothing and is skipped. Bias counts only candidates whose surface length equals the syllable count (the position-to-reading map is unknown otherwise).
+  - Bias: a row is "affected" for (pair, b) unless the bonus is the same for every one of the original top 8 and the new top 8 is the same
+    set (then the order, the n-gram margins and the fused scores shift together and the shipped pick cannot differ); every other row runs pick. Bias counts only candidates whose surface length equals the syllable count (the position-to-reading map is unknown otherwise).
     A row whose scores record has no `ll` is decided by the biased n-gram first; a pair/b cell with > 10% needs-rescoring rows is
     "unreliable" and is left out of the D2 verdict (listed apart).
 """
@@ -160,7 +160,9 @@ def unreliable(rescoring, affected):
 
 def bias_cells(rows, ok, pair, lenient, bs=BS, par=SHIP):
     """pair = (wrong, gold, reading). Every candidate of every row gets +b per position that reads `reading` and shows `gold`; top 8 by the
-    new n-gram score, shipped fusion; fixes/breaks against rowstats over the whole set. -> {b: {...}}"""
+    new n-gram score, shipped fusion; fixes/breaks against rowstats over the whole set. "affected" = rows whose pick result could differ: the
+    bonus is not uniform over the original top 8 (an order-preserving bonus can still narrow the margin below tau or move the fused gold by
+    delta), or the new top 8 holds a candidate from outside it. -> {b: {...}}"""
     alpha, tau, delta = par
     _, g, rd = pair
     out = {b: {"fixes": 0, "breaks": 0, "rescoring": 0, "affected": 0} for b in bs}
@@ -176,7 +178,7 @@ def bias_cells(rows, ok, pair, lenient, bs=BS, par=SHIP):
             o = out[b]
             new = [ng[j] + b * cn[j] for j in range(len(cands))]
             order = sorted(range(len(cands)), key=lambda j: (-new[j], j))[:T.TOPK]
-            if order == orig:      # same top 8, same order (a uniform shift too): nothing can change
+            if set(order) == set(orig) and len({cn[j] for j in orig}) == 1:   # uniform bonus over the top 8: pick cannot differ
                 continue
             o["affected"] += 1
             if ll is None:

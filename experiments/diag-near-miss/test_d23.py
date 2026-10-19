@@ -82,6 +82,7 @@ class Bias(unittest.TestCase):
         other = row("甲乙", "a b", [("甲乙", -1.0, "甲乙"), ("乙乙", -1.1, "乙 乙")], ll=[0.0, 0.0])   # no 再 anywhere: untouched
         c = self.cells([fix, brk, other])
         self.assertEqual((c[0.1]["fixes"], c[0.1]["breaks"]), (0, 0))
+        self.assertEqual(c[0.5]["fixes"], 1, "gold 再 passes the wrong one from b 0.5")
         self.assertEqual((c[0.8]["fixes"], c[0.8]["breaks"], c[0.8]["net"]), (1, 1, 0), "a row that was right and becomes wrong counts as a break")
         self.assertEqual(c[0.8]["affected"], 2)
 
@@ -99,8 +100,13 @@ class Bias(unittest.TestCase):
     def test_row_without_ll_is_decided_by_ngram_and_not_rescoring(self):
         r = row("甲再", "a zai", [("甲在", -1.0, "甲 在"), ("甲再", -1.2, "甲 再")])
         c = self.cells([r])
-        self.assertEqual((c[0.1]["affected"], c[0.1]["fixes"]), (0, 0))
+        self.assertEqual((c[0.1]["affected"], c[0.1]["fixes"]), (1, 0), "order kept but the bonus is not uniform: pick runs")
         self.assertEqual((c[0.5]["affected"], c[0.5]["rescoring"], c[0.5]["fixes"]), (1, 0, 1))
+
+    def test_tau_gate_opens_without_an_order_change(self):
+        r = row("甲再", "a zai", [("甲在", -1.0, "甲 在"), ("甲再", -3.5, "甲 再")], ll=[0.0, 10.0])   # margin 2.5 >= tau: the pick stays on rank 1
+        c = self.cells([r])
+        self.assertEqual([(c[b]["affected"], c[b]["fixes"]) for b in (0.5, 0.8)], [(1, 0), (1, 1)], "b 0.8: margin 1.7 < tau, the fused gold wins; order unchanged")
 
     def test_uniform_shift_is_not_affected(self):
         r = row("甲再", "a zai", [("甲再", -1.0, "甲 再"), ("乙再", -1.0001, "乙 再")], ll=[0.0, 0.0])   # every candidate has 再 at zai
