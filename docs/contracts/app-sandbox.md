@@ -1,6 +1,6 @@
 # 契約：App 沙盒第一片（輸入法本體進沙盒、資料移轉）
 
-狀態：**修訂二（2026-10-19）草稿**，送安全審查與 plan-verifier。
+狀態：**修訂二（2026-10-19）**：安全審查完成（§7.2），維護者同日三題選擇題定案（§6 第 4–6 項），送 plan-verifier。
 
 - 修訂一在 2026-10-10 收尾審查 READY，實作放在分支 `feat/app-sandbox`（PR #94，草稿）。那時排定在 v0.4.0 之後合併、以 v0.5.0 發佈。
 - 之後 main 前進了 1,032 個 commit，其中 v0.4.7 內嵌了 Sparkle 自動更新（`docs/contracts/about-update.md`）。它在輸入法程序裡連網、刪掉了 Sparkle 的 XPC 服務，和修訂一「只有兩個 entitlements」的設計衝突。
@@ -20,7 +20,8 @@
   - 註冊輸入法連線的 mach 名稱；
   - Sparkle 安裝服務的兩個 mach 名稱。
 - **資料移轉**：第一次啟動沙盒版時，學習資料與偏好設定搬進 container。使用者看不出差別：學過的選字與新詞、倚天排列、選單與設定視窗的設定都在。
-- **自動更新**：在沙盒裡照常運作，「關於」頁的檢查與「更新到 X」照舊。
+- **自動更新**：Sparkle 升到 2.10.0，在沙盒裡照常運作，「關於」頁的檢查與「更新到 X」照舊。
+- **沙盒的定位是縱深防禦**（§2.8、§6 第 4 項）：它擋下沒有針對 Sparkle 的攻擊（例如讀使用者的文件與金鑰），但不是對所有攻擊者都成立的硬邊界，也擋不住把輸入內容送出去。所有對外文字照這個寫。
 - **怎麼看到**：
   - CI：
     - entitlements 逐鍵比對；
@@ -79,6 +80,17 @@
 - 預編的 Sparkle 2.9.3（`macos/.build/artifacts` 裡的那份，Package.resolved 釘住）：
   - `Installer.xpc`（`org.sparkle-project.InstallerLauncher`）與 `Downloader.xpc`（`org.sparkle-project.DownloaderService`）都**沒有 entitlements**（`codesign -d --entitlements -`，main 量）。
   - 文件寫 Downloader 從 2.6 起預設不在沙盒裡。
+- 安全審查讀 Sparkle 2.9.3 原始碼的結論（§7.2；只讀、沒有執行）：
+  - Downloader.xpc 照呼叫者給的請求原樣送出，連線驗證只看 Team。所以它擋不住被攻破的輸入法往外送資料（確認 §2.8 的推論）。
+  - Installer.xpc 沒有把「要更新的 App」綁定到呼叫者。被攻破的沙盒輸入法**理論上可能**借它在沙盒外執行程式，而且不需要我們的 EdDSA 私鑰。逃出去之後的能力等於現在沒有沙盒的輸入法。
+    - 這是原始碼層級的推論，有兩個環節沒驗證：macOS 的 container 保護會不會擋，以及最後一步能不能湊到。
+    - 依維護者的決定（§6 第 6 項），先在虛擬機驗證，成立就私下回報 Sparkle。在 Sparkle 回覆之前，repo 只寫到這個程度，步驟細節只留在維護者本機的審查紀錄。
+  - 換掉 `~/Library/Input Methods` 裡真正的 bundle 仍然要通過 EdDSA：公鑰從磁碟上真正的 bundle 讀，輸入法寫不到那裡。Sparkle 也擋降版。
+- Sparkle 2.9.3 有三則已公開、之後版本修好的安全公告（GitHub `gh api` 核對過）：
+  - GHSA-3x7w-j75x-ppq5（high，安裝端驗證與搬移用的路徑不一致，2.9.6 修）；
+  - GHSA-4v99-qgq9-6pxp（high，只影響以 root 執行，善解用不到，2.9.6 修）；
+  - GHSA-gmj2-gq3j-vqmj（medium，delta 更新，要 EdDSA 私鑰，2.9.5 修）。
+  - 最新是 2.10.0（2026-09-13），最低系統 macOS 12，善解要求 26.0，不受影響。這片升到 2.10.0（§2.8）。
 
 **沒量到，而且這片的安全靠它的**：沒有移轉清單時不搬。這是推論：只量過有清單的情況，而偏好設定沒寫進清單也被搬了，所以不能當然成立。§4.1 第 3 項在 CI 斷言；不成立就停（§5）。
 
@@ -161,7 +173,7 @@
 - `release.yml` 的 build 步驟明確傳 `BUNDLE_ID=com.nyanako.inputmethod.shanjie`（和 `SHANJIE_RELEASE_BUILD=1` 一起）。
 - `sign` 由內而外重簽：
   - 先簽 Sparkle：`Installer.xpc`、`Autoupdate`、`Updater.app`、framework，都加 runtime、timestamp，不加 entitlements（§2.8）；
-  - 再簽 App：加 `--preserve-metadata=entitlements`。
+  - 再簽 App：用 workflow 裡以字面值產生的四個鍵（正式 ID）加 `--entitlements` 簽，不沿用 build 產出的 entitlements（F7）。這樣出貨的 entitlements 不依賴 build 工作，`verify` 是第二道檢查。
   - 任何一步都不用 `--deep` 簽（驗證可以用 `--deep`）。
   - `sign` 仍然不執行 repo 裡的程式碼。
 - **`verify()` 與 `verify_sparkle()` 改成依 bundle 給預期值**。比對方式和 `check-entitlements.sh` 相同，但寫在 workflow 裡，因為 `sign` 不執行 repo 程式碼；兩處的說明互相指向對方。
@@ -171,8 +183,9 @@
     - mach 名稱等於由 ID 算出的值。
   - Sparkle 的五個程式碼位置：`Installer.xpc`、`Autoupdate`、`Updater.app`、framework，加上 App 本身的 Team 與 runtime 檢查照舊。
     - 前四個都沒有 entitlements；
-    - `Downloader.xpc` 不存在；
-    - Info.plist 的 `SUEnableInstallerLauncherService` 是 `true`（原本是 `false`），其他 Sparkle 鍵照舊逐字比對。
+    - `XPCServices` 裡只有 `Installer.xpc`；
+    - Info.plist 的 `SUEnableInstallerLauncherService` 是 `true`（原本是 `false`），`SUEnableDownloaderService` 不存在，其他 Sparkle 鍵照舊逐字比對。
+  - entitlements 的比對一律是「正規化後整份相等」，不是「每個預期的鍵都在」；多一個鍵就失敗（F7）。
   - 安裝程式：`CFBundleIdentifier` 是 `com.nyanako.shanjie.installer`，沒有任何 entitlements（現行規則）。
 - **dry run 保留產出檔一天**（使用者 2026-10-09 決定）：dry run 用 `actions/upload-artifact` 上傳簽章、公證後的兩個 zip，`retention-days: 1`，給 §4.2 的虛擬機與 §4.3 B 的實機驗收用。正式發佈不變。
 - 「沒有 entitlements」「XPC 服務移除」的說法要跟著改：
@@ -244,11 +257,16 @@
 6. `make selftest-bundled SELFTEST_BUNDLE_ID=com.nyanako.inputmethod.shanjie.selftest-$GITHUB_RUN_ID`，前後各檢查一次 `~/Library/Containers/<該 ID>`：之前不存在、之後存在。
    - 原本傳空值、用正式 ID 的那一步（`ci.yml` 現在的 `SELFTEST_BUNDLE_ID=`）取消；正式 ID 的 selftest 已在第 3 步與第 7 步跑過。
 7. `EXPECTED_BUNDLE_ID=com.nyanako.inputmethod.shanjie scripts/check-app.sh build/善解輸入法.app`。
-8. **突變測試**：複製 `build/善解輸入法.app` 四份。
-   - 第一份用 `codesign --force --sign -` 重簽（不帶 `--preserve-metadata`）：`scripts/check-entitlements.sh` 要失敗。
-   - 第二份帶 `--preserve-metadata=entitlements` 重簽：`scripts/check-entitlements.sh` 要通過。
-   - 第三份刪掉 `Installer.xpc` 再重簽 framework 與 App：`check-app.sh` 第 3 項要失敗。
-   - 第四份把 Info.plist 的 `SUEnableInstallerLauncherService` 改成 `false` 再重簽：`check-app.sh` 第 2 項要失敗。
+8. **突變測試**：複製 `build/善解輸入法.app` 七份，各做一種改動。
+   - 用 `codesign --force --sign -` 重簽（不帶 `--preserve-metadata`）：`scripts/check-entitlements.sh` 要失敗。
+   - 帶 `--preserve-metadata=entitlements` 重簽：`scripts/check-entitlements.sh` 要通過。
+   - entitlements 多一個鍵（例如 `com.apple.security.cs.disable-library-validation`）重簽：`scripts/check-entitlements.sh` 要失敗。
+   - 兩個 mach 名稱換成別的 ID 重簽：`scripts/check-entitlements.sh` 要失敗。
+   - 刪掉 `Installer.xpc` 再重簽 framework 與 App：`check-app.sh` 第 3 項要失敗。
+   - `XPCServices` 裡多放一個 `.xpc`（複製 `Installer.xpc` 改名）再重簽：`check-app.sh` 第 3 項要失敗。
+   - 把 Info.plist 的 `SUEnableInstallerLauncherService` 改成 `false` 再重簽：`check-app.sh` 第 2 項要失敗。
+   - 第 3 步開頭在 log 印出 runner 的 macOS 版本（`sw_vers`），「沒有清單不搬」量到的是哪一版要看得到（F4）。
+   - `release.yml` 的那份比對不在分支上跑反向測試（`sign` 只在 main 觸發）；它和 `check-entitlements.sh` 用同一套比對方式，兩處的說明互相指向。
 9. `make installer`、`scripts/check-installer.sh`（不變，用第 1 步的正式組建）。
 
 ### 2.7 倚天排列的沿用改在換檔之前寫
@@ -270,20 +288,35 @@
 
 ### 2.8 Sparkle 在沙盒裡（修訂二新增）
 
-- **Info.plist**：`SUEnableInstallerLauncherService` 由 `false` 改成 `true`，所有組建都一樣。本機組建不啟動更新服務（`ShanjieUpdateBuild=local`），這個鍵只在 release 與更新測試版有作用。其他 Sparkle 鍵不變。
+- **升到 Sparkle 2.10.0**（維護者 2026-10-19，§6 第 5 項）：
+  - `macos/Package.swift` 改 `exact: "2.10.0"`，`Package.resolved` 跟著更新；
+  - `release.yml` 下載 `generate_appcast` 的官方 tarball 改成 2.10.0，SHA-256 照樣以字面值寫在 workflow 裡；
+  - `LICENSES/Sparkle-MIT.txt` 換成 2.10.0 的 `LICENSE` 原文；
+  - about-update 與 PLAN R10 裡的版本號跟著改。
+  - 2.10.0 的行為變動以它的 release notes 為準；`Updater.swift` 用到的介面要能編譯、單元測試照過。§4.3 A 的更新實機測試同時就是 2.10.0 的重測。
+- **Info.plist**：
+  - `SUEnableInstallerLauncherService` 由 `false` 改成 `true`，所有組建都一樣。本機組建不啟動更新服務（`ShanjieUpdateBuild=local`），這個鍵只在 release 與更新測試版有作用。
+  - `SUEnableDownloaderService` 不設；`check-app.sh` 與 `verify_sparkle` 斷言它不存在（F6）。
+  - 其他 Sparkle 鍵不變。
 - **XPC 服務**：
   - `build-app.sh` 只刪 `Downloader.xpc`，保留 `Sparkle.framework/Versions/B/XPCServices/Installer.xpc`。
-  - 斷言 `Installer.xpc` 存在、`Downloader.xpc` 不存在。
-  - `check-app.sh` 第 3 項、`release.yml` 的 `sign` 與 `verify_sparkle` 照這個改：原本「XPCServices 不存在就對」改成這兩條。
+  - 斷言 `XPCServices` 裡**只有** `Installer.xpc`（F7）。
+  - `check-app.sh` 第 3 項、`release.yml` 的 `sign` 與 `verify_sparkle` 照這個改：原本「XPCServices 不存在就對」改成這一條。
 - **ad-hoc 簽章順序**（由內而外，不用 `--deep`）：`Installer.xpc` → `Autoupdate` → `Updater.app` → framework → App（只有 App 帶 entitlements）。
-- **網路：給輸入法 `network.client`，不用 Downloader.xpc**（main 的選擇，請安全審查挑戰）：
-  - **Downloader.xpc 的好處有限**：它讓輸入法程序本身沒有連網權限。但 Sparkle 2.9.3 的 Downloader.xpc 不在沙盒裡、沒有 entitlements（§1），而且接受 App 傳來的請求。輸入法程序如果被攻破，仍然可以透過它送出任意請求。所以在「被攻破的輸入法能不能把資料送出去」這件事上，兩種做法沒有差別〔推論，來自 Sparkle 的架構與 §1 的量測；安全審查確認或推翻〕。
-  - **network.client 的好處**：這是 Sparkle 的標準做法，少一個在沙盒外、可被 App 驅動的程序，也沒有 Downloader 的已知限制（更新說明的網頁檢視退回舊元件）。
-  - **沙盒實際擋下的**：被攻破的輸入法讀不到使用者的文件、SSH 金鑰、其他 App 的資料，也寫不到 container 以外的地方。網路本來就擋不住，現在沒有沙盒時同樣擋不住。
-  - **對外說明**：網站隱私段的內容（只有 Sparkle 連到 GitHub）不變。連線行為沒有改，這片不改網站。
-- **安裝服務**：`Installer.xpc` 啟動 Sparkle 的 `Autoupdate`。它在沙盒外，由它換掉 `~/Library/Input Methods` 裡的 bundle。
-  - EdDSA 驗證仍在 Sparkle 的安裝端做（R10 的信任模型不變）。
-  - 被攻破的輸入法要裝進未簽章的更新，仍然要先有 EdDSA 私鑰〔推論，來自 Sparkle 2 的設計文件；安全審查確認〕。
+- **網路：給輸入法 `network.client`，不用 Downloader.xpc**（安全審查確認，§7.2 F6）：
+  - 在「被攻破的輸入法能不能把資料送出去」這件事上，兩種做法沒有差別：Downloader.xpc 照呼叫者給的請求原樣送出（§1）。
+  - Downloader.xpc 反而更糟：它在沙盒外，快取路徑由呼叫者給的 bundle ID 組成，沒有清理，可能成為在 container 外寫入與刪除的代理（審查的推論）。
+  - `network.client` 是 Sparkle 的標準做法，也沒有 Downloader 的已知限制（更新說明的網頁檢視退回舊元件）。
+- **安裝服務與沙盒的定位**（維護者 2026-10-19：保留一鍵更新、說法改縱深防禦，§6 第 4 項）：
+  - `Installer.xpc` 啟動 Sparkle 的 `Autoupdate`。它在沙盒外，由它換掉 `~/Library/Input Methods` 裡的 bundle。
+  - 換掉真正的 bundle 仍然要通過 EdDSA（§1），R10 的信任模型不變。另外，持有 EdDSA 私鑰的人推的更新可以拿掉 entitlements，沙盒對這條路沒有幫助（和今天一樣）。
+  - Installer.xpc 理論上可能讓被攻破的沙盒輸入法在沙盒外執行程式（§1）。所以沙盒是**縱深防禦**：它讓一般的漏洞利用讀不到使用者的文件、金鑰與其他 App 的資料，也寫不到 container 以外；但針對 Sparkle 的攻擊者可能逃出，逃出之後等於今天沒有沙盒的輸入法。
+  - 網路本來就擋不住（`network.client`），現在沒有沙盒時同樣擋不住。
+  - **對外說明**：
+    - 網站隱私段的內容（只有 Sparkle 連到 GitHub）不變，連線行為沒有改。
+    - 新增的說法只能是「輸入法在 App 沙盒裡執行（縱深防禦）」，不寫「沙盒讓輸入內容無法外流」「沙盒擋下任何攻擊」之類的話。
+    - PLAN R9／R10、README、發版說明照這個口徑。
+  - **根本解**（沙盒外、固定更新對象的獨立更新程式）不在這片：排到 0c B 片，和 R8 的 XPC 輔助程式一起做（§3）。
 - **更新之後的 container**：新版同 ID、同 Team（正式版）。container 照簽章的指定需求比對，由新版接手（§4.2 第 1 項、§4.3 B 量）。
 - **從沒有沙盒的 0.4.x 經 Sparkle 更新到沙盒版**：舊版的 Sparkle（沒有安裝服務）換掉 bundle，新版第一次啟動時才移轉。這和用安裝程式換檔的差別只在誰換檔；移轉看的是新版第一次啟動（§4.3 A 第 2 項量開發版 ID 的同一條路）。
 
@@ -295,6 +328,8 @@
 - **設定頁「App 設定」**：用 `NSWorkspace` 取得 App 的位置、名稱與圖示。實機看清單顯示得出 App 名稱與圖示（§4.3 B 第 8 項）。顯示不出來不停，記下來另開一片。
 - **前景 App 的 bundle ID**（聊天／書面的自動判斷）：`NSWorkspace.frontmostApplication`。實機在聊天 App 與文字編輯器之間切換，設定照舊切換（§4.3 B 第 9 項）。
 - **網站連結**：SwiftUI `Link` 交給系統開啟，不需要額外權限。
+- **設定視窗的焦點**：代理型 App（`LSUIElement`）在沙盒裡呼叫 `NSApp.activate()`，關閉時把焦點還給前一個 App（`SettingsWindow.swift`、`InputController.swift` 的同一個做法）。實機開關一次設定視窗，看焦點有沒有回去（§4.3 B 第 11 項）。
+- `~/Applications` 裡的 App 在沙盒裡可能讀不到圖示〔推論〕；照上面「顯示不出來不停」處理。
 
 ## 3. 不在這一片（第二片或之後）
 
@@ -307,6 +342,7 @@
   - 0c 實驗開關的 B 片要下載第三方權重，PLAN R8 要求它在沒有網路的沙盒 XPC 輔助程式裡解析。
   - 這片只讓輸入法本體進沙盒，不做輔助程式。
   - B 片要在沙盒版上設計下載位置（container 裡）與輔助程式。
+  - 沙盒外、固定更新對象的獨立更新程式（F1 的根本解，§6 第 4 項）一起放在 B 片設計。
 - 詞庫與模型的更新管道（#121）。
 
 ## 4. 驗收
@@ -346,28 +382,34 @@
 
 **A. Sparkle 在沙盒裡（合併後、dry run 之前；開發版 ID，不碰正式版的資料）**
 
-- **準備**（main 執行）：用測試金鑰、本機 feed（`http://127.0.0.1`，about-update §3 第 4 項的做法）建三個更新測試版，都是開發版 ID：
-  - A0：合併前的 main，沒有沙盒。合併前的 `install-ime.sh` 只會裝到正式版的資料夾，所以 A0 由 main 手動放到 `~/Library/Input Methods/善解（開發版）.app`，不經 `install-ime.sh`；
-  - A：這片，有沙盒；
-  - B：這片，有沙盒、版本較新。
-- 開發版 ID 沒有移轉清單，所以這一段不搬任何資料。正式版的學習資料原封不動。
-- **步驟**：
-  1. 裝 A，在系統設定加入「善解（開發版）」一次。設定→關於→立即檢查→「更新到 B」→ Sparkle 下載、安裝、重新啟動。量：
-     - (a) 執行中的是 B（關於頁版本、`ps` 的路徑），活動監視器的「沙盒」是「是」；
-     - (b) 在 TextEdit 照常打得出字；
-     - (c) Caps Lock 切換正常；
-     - (d) `log show --last 5m --predicate 'sender == "Sandbox" AND (eventMessage CONTAINS "shanjie" OR eventMessage CONTAINS "sparkle")'` 沒有 deny；
-     - (e) A 學的一個詞在 B 仍排第一（同一個 container）。
-  2. 裝 A0（沒有沙盒），同樣更新到 B。量：
+- **準備**（main 執行）：
+  - **先做 B 第 0 步的備份**（F4）：A0 沒有沙盒，會讀寫真正的學習資料夾。
+  - 用測試金鑰、本機 feed（`http://127.0.0.1`，about-update §3 第 4 項的做法）建三個更新測試版，都是開發版 ID：
+    - A0：合併前的 main，沒有沙盒。合併前的 `install-ime.sh` 只會裝到正式版的資料夾，所以 A0 由 main 手動放到 `~/Library/Input Methods/善解（開發版）.app`，不經 `install-ime.sh`。它的顯示名稱仍是「善解輸入法」（合併前的 `build-app.sh` 寫死），和正式版同名，選單裡用 ID 區分；
+    - A：這片，有沙盒；
+    - B：這片，有沙盒、版本比 A 新。
+- 開發版 ID 沒有移轉清單，所以這一段不搬任何資料。
+- **步驟**（順序照這裡，F4）：
+  1. **A0 → B**（沒有沙盒的版本經 Sparkle 更新成沙盒版，對應 0.4.x → 0.5.0 的路）：
+     - 裝 A0，在系統設定加入一次。這段期間不用 A0 打字，也不用正式版打字，避免兩個程序同時寫同一份學習資料（`learn_store` 的完整重寫沒有鎖）。
+     - B 第一次啟動之前與之後，立刻各取一次 `~/Library/Application Support/shanjie` 的雜湊。
+     - 設定→關於→立即檢查→「更新到 B」→ Sparkle 下載、安裝、重新啟動。量：
+       - (a) 執行中的是 B（關於頁版本、`ps` 的路徑），活動監視器的「沙盒」是「是」；
+       - (b) 在 TextEdit 照常打得出字；
+       - (c) Caps Lock 切換正常；
+       - (d) `log show --last 5m --predicate 'sender == "Sandbox" AND (eventMessage CONTAINS "shanjie" OR eventMessage CONTAINS "sparkle")'` 沒有 deny；
+       - (e) 開發版 ID 的 container 是 B 第一次啟動時才建立；
+       - (f) 前後兩次雜湊相同：開發版 ID 沒有清單，學習資料夾沒有被搬。這是「沒有清單不搬」在維護者機器的 macOS 上的量測（CI 量的是 runner 的版本）。
+  2. **A → B**（沙盒版經 Sparkle 更新成沙盒版）：先用 `install-ime.sh` 裝回 A（開發版的位置），用 A 學一個詞，再照上面更新到 B。量：
      - (a)～(d) 同上；
-     - B 的 container 是第一次建立；
-     - A0 寫在 `~/Library/Application Support/shanjie` 的學習資料原封不動。開發版 ID 沒有清單，這也是「沒有清單不搬」在實機上的第二次量測。
-     - 注意：A0 沒有沙盒，用的就是真正的學習資料夾，所以這一步只看、不改那個資料夾。
+     - (g) A 學的詞在 B 仍排第一（同一個 container）。
+  3. 做完當場移除開發版（`~/Library/Input Methods/善解（開發版）.app` 與系統設定裡的輸入方式）。
 - **不通過**（更新失敗、需要登出、B 沒有接手）→ 停（§5），回報維護者。
+- 這一段的 A 與 B 都是 ad-hoc 簽章。ad-hoc 時 Sparkle 不驗呼叫者的 Team，和正式版不同（F3、F8），所以正式版的沙盒更新另外在 §4.4 的 canary 量。
 
 **B. 正式 ID 的沙盒版（dry run 的 Developer ID 版，正式發佈之前）**
 
-0. **先備份**（使用者自己做，main 給指令）：第一次啟動沙盒版之前，把 `~/Library/Application Support/shanjie` 與 `~/Library/Preferences/com.nyanako.inputmethod.shanjie.plist` 複製到備份位置。
+0. **先備份**（使用者自己做，main 給指令）：§4.3 A 開始前做一次；第一次啟動正式 ID 的沙盒版之前再做一次。把 `~/Library/Application Support/shanjie` 複製到備份位置，偏好設定用 `defaults export com.nyanako.inputmethod.shanjie <檔>` 匯出。
 1. 打一句、改選、按 Enter。斷言：
    - 升級前學過的選字仍排第一；
    - 學過的新詞仍出現在候選裡；
@@ -381,6 +423,7 @@
 8. 設定→App 設定的清單顯示得出 App 名稱與圖示（§2.9）。
 9. 在聊天 App 與文字編輯器之間切換，聊天／書面的自動判斷照舊（§2.9）。
 10. 設定→關於→立即檢查：顯示「已是最新」，不是「檢查失敗」。這證明沙盒版讀得到正式 feed、驗得過簽章。
+11. 開關一次設定視窗，關掉之後焦點回到原本的 App（§2.9）。
 
 ### 4.4 順序與 tag
 
@@ -396,6 +439,21 @@
 - 第一次真正經 Sparkle 從 0.4.x 更新到沙盒版，要在 v0.5.0 發佈之後實機看（同 about-update §3 第 6 項的做法）：
   - 已安裝的 0.4.x 按「更新到 0.5.0」；
   - 斷言更新後是沙盒版、學習資料已搬進 container。
+- **canary 0.5.1**（F3）：正式版「沙盒版經 Installer.xpc 更新成沙盒版」這條路，在 Developer ID 下第一次執行會是 0.5.0 → 0.5.1；壞掉的話所有 0.5.0 的使用者都卡住。所以：
+  - v0.5.0 發佈後，盡快發一個只有小改動的 v0.5.1（推 tag 照例問維護者）；
+  - 維護者實機從 0.5.0 按「更新到 0.5.1」：更新成功、container 裡的學習資料還在、`log` 沒有 Sparkle 或善解的沙盒拒絕；
+  - 通過之前不發別的版本。
+  - v0.5.0 的發版說明與網站安裝段寫明：自動更新失敗時，下載安裝程式重裝即可，資料在 container 裡不受影響。
+
+### 4.5 Sparkle 安裝服務的逃脫路徑（虛擬機驗證，維護者 2026-10-19，§6 第 6 項）
+
+- **目的**：確認 §1 的推論（被攻破的沙盒輸入法能不能借 Installer.xpc 在沙盒外執行程式）。成立就私下回報 Sparkle，不成立就把 §2.8 的說法改回去。
+- **做法**：
+  - 只在 tart 虛擬機（`shanjie-exp`）做，不在維護者的機器上做。
+  - 用一個最小的沙盒測試程式（和輸入法同樣的 entitlements，連結 Sparkle 2.10.0），不改輸入法本身。
+  - 測試程式與步驟細節放在 repo 外（`~/.cache/shanjie/` 底下），不進 repo；研究紀錄只寫「做了、結果是成立或不成立、已回報」，細節等 Sparkle 回覆或修好之後再公開。
+- **回報**：用 GitHub 的私下安全回報（Sparkle 的 security advisories），只描述機制，不帶私人資訊。送出前把內容給維護者看，維護者同意才送。
+- **時機**：和這片的實作平行，不擋合併。結果改變 §2.8 的說法時，用同一片的 PR 或下一個文件 PR 更正。
 
 ## 5. 停止條件、預算、回滾
 
@@ -409,6 +467,8 @@
   - Caps Lock 壞掉；
   - 系統標點表在沙盒裡讀不到；
   - **Sparkle 在沙盒裡讀不到 feed、安裝服務被拒，或更新後新版接手不了 container**（§4.3 A、B 第 10 項）；
+  - **canary 0.5.0 → 0.5.1 經 Sparkle 失敗**（§4.4）：停發其他版本，回報維護者；
+  - Sparkle 2.10.0 的行為變動讓「關於」頁的檢查或更新流程不能照 about-update 的規格運作；
   - 需要第五個 entitlement 才能運作：停下來問，不自行加。
 - **預算**：`pilotfish:security-executor` 實作 1 次＋修正 1 次。
   - 實作從修訂一的分支 `feat/app-sandbox`（`dee0c771`）讀改法，在現在的 main 上重寫，不合併那個分支。
@@ -420,15 +480,22 @@
   - 不推 tag。dry run 由 main 觸發，事先問使用者。
 - **回滾**：
   - 合併之後、發佈之前（§4.2 或 §4.3 碰到停止條件）：先在 main 上 revert 這一片（任何 tag 之前），再處理資料：裝回 0.4.x，照 `docs/sandbox-restore.md` 搬回，或用 §4.3 B 第 0 步的備份。§4.3 A 只動開發版 ID，不需要處理正式版的資料。
-  - 發佈之後：
-    - revert 這一片並發新版，再照同一份文件搬回；
-    - 已經更新到沙盒版的使用者，經 Sparkle 收到的是沒有沙盒的新版。它看不到 container 裡的資料，所以發版說明要附搬回指令。
+  - 發佈之後（F5）：
+    - Sparkle 擋降版，所以 revert 要發成版本號更高的新版。
+    - 已經更新到沙盒版的使用者，經 Sparkle 收到的是沒有沙盒的新版，它看到的學習資料與偏好設定是空的。只靠使用者照發版說明跑 Terminal 指令不可靠，所以 revert 版**內建一次性的自動複製**：
+      - 第一次啟動時，舊位置是空的、而且自己 ID 的 container 存在，就把 container 裡的學習資料複製回原位置；偏好設定用 `defaults` 的匯出與匯入，不直接複製 plist（cfprefsd 的快取可能忽略直接寫入的檔案〔推論〕）。
+      - 只複製、不刪 container；在虛擬機量過才發。
+    - 之後重新出沙盒版時，container 已經存在、不會再搬；回滾期間學到的資料要另外合併，到時候寫進那一片的契約。
+    - `docs/sandbox-restore.md` 的手動指令仍然保留，給用安裝程式或 brew 降版的人。
 
 ## 6. 使用者的決定
 
 1. **本機組建用開發版 ID**「善解（開發版）」（§2.3；2026-10-09）。
 2. **release dry run 保留產出檔一天**，供虛擬機與實機驗收 Developer ID 版（§2.4；2026-10-09）。
 3. **產品車道的順序**：沙盒是第一片（2026-10-18，`docs/iteration-plan.md`）。
+4. **保留一鍵更新、說法改縱深防禦**（2026-10-19，選擇題，安全審查 F1 之後）：保留 Installer.xpc；所有對外文字把沙盒寫成縱深防禦；沙盒外、固定更新對象的獨立更新程式（根本解）排到 0c B 片，和 R8 的 XPC 輔助程式一起做（§2.8、§3）。
+5. **Sparkle 跟這片一起升到 2.10.0**（2026-10-19，選擇題）：更新流程的實機重測只做一次（§4.3 A）；如果這片延後，改成單獨一小片先升。
+6. **先在虛擬機驗證逃脫路徑，成立再私下回報 Sparkle**（2026-10-19，選擇題，§4.5）：只描述機制、不帶私人資訊，送出前給維護者看。
 
 ## 7. 安全審查的處置
 
@@ -457,9 +524,22 @@
 | F11 | P4 | CI runner 是不是 GitHub-hosted | 確認是（`xcode-27` 是 GitHub-hosted 映像）；實作時看 job log 的 Runner Image 一次 |
 | N7 | — | 使用者層詞包的位置 | DEFER：ACG 詞包 C 片 |
 
-### 7.2 修訂二（2026-10-19）
+### 7.2 修訂二（2026-10-19 審查，同日處置）
 
-待 `pilotfish:security-reviewer` 審查（重點：§2.8 的網路選擇與安裝服務的信任邊界、§2.1 不加 runtime 的 ad-hoc 簽章、§4.3 A 在維護者機器上執行沙盒組建的時機）。
+`pilotfish:security-reviewer` 只讀審查（讀檔案與 Sparkle 2.9.3 的公開原始碼，沒有執行）；研究顧問另外核對了 F1、F2 的原始碼與版本。
+
+| 項目 | 嚴重度 | 內容 | 處置 |
+|---|---|---|---|
+| F1 | P1（原始碼推論） | Installer.xpc 沒有把要更新的 App 綁定到呼叫者，被攻破的沙盒輸入法理論上可能借它在沙盒外執行程式，不需要我們的 EdDSA 私鑰；兩個環節沒驗證。逃出去等於今天沒有沙盒，不是退步，但 §2.8 原本「寫不到 container 外」「要裝未簽章的更新仍要私鑰」兩句不能當沙盒保證 | 維護者選擇題（§6 第 4、6 項）：保留一鍵更新，§0、§2.8 與所有對外文字改成縱深防禦；根本解排到 0c B 片；§4.5 在虛擬機驗證，成立就私下回報。repo 只寫到高層描述 |
+| F2 | P2 | Sparkle 2.9.3 有已公開的安全公告（2.9.6 修）；改成沙盒裡的程序驅動沙盒外的安裝端之後，安裝端的問題變得相關 | FIX：§2.8 升到 2.10.0（§6 第 5 項） |
+| F3 | P2 | 正式版「沙盒版經 Installer.xpc 更新成沙盒版」第一次執行會在 0.5.0 → 0.5.1，壞了所有 0.5.0 使用者都卡住 | FIX：§4.4 canary 0.5.1、發版說明寫明失敗時重裝；§5 停止條件 |
+| F4 | P2 | §4.3 A 的 A0 和正式版同時寫真正的學習資料（完整重寫沒有鎖）；第 2 步「第一次建立 container」和順序矛盾；CI 的 macOS 版本沒記；A0 和正式版同名 | FIX：§4.3 A 備份移到最前、A0 → B 先做、期間不打字、前後立刻取雜湊、做完當場移除；§2.6 第 3 步印 `sw_vers`；同名寫明用 ID 區分 |
+| F5 | P2 | 發佈後的回滾只靠使用者手動搬回 | FIX：§5 revert 版內建一次性自動複製（只複製不刪、偏好設定用 `defaults` 匯出匯入、虛擬機量過才發） |
+| F6 | P3 | 網路選擇的推論確認；Downloader.xpc 更糟（沙盒外、快取路徑由呼叫者組成） | 維持 `network.client`；§2.8 斷言 `SUEnableDownloaderService` 不存在；對外不寫「沙盒讓輸入內容無法送出」 |
+| F7 | P3 | 驗證只有「整份相等」才擋得下多出來的鍵；突變缺「多一個鍵」「別的 ID」；沒斷言 XPCServices 只有 Installer.xpc；release 那份沒有反向測試 | FIX：§2.4 寫明整份相等、`sign` 用 workflow 的字面值 `--entitlements`；§2.6 第 8 步加三種突變；§2.8 斷言只有 Installer.xpc；release 那份寫明不在分支上跑、和 `check-entitlements.sh` 同一套比對 |
+| F8 | P4 | ad-hoc 不加 runtime 對本機與 CI 沒有實質影響；ad-hoc 的 Installer.xpc 不驗呼叫者 | 接受；§4.3 A 註明 ad-hoc 和正式版的差別，正式版由 canary 量 |
+| F9 | P4 | mach-lookup 例外本身沒有額外風險，風險在它後面的服務（F1） | 接受 |
+| F10 | P3／P4 | §7.1 沒有被推翻，但沙盒的價值被 F1 削弱；EdDSA 私鑰推的更新可以拿掉 entitlements；§2.9 漏了設定視窗的焦點與 `~/Applications` 的圖示 | §2.8 寫明 EdDSA 那條路沙盒幫不上；§2.9 補兩項、§4.3 B 第 11 項 |
 
 ## 8. 審查紀錄
 
