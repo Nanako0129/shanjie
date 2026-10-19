@@ -1,6 +1,6 @@
 # 契約：沙盒外的獨立更新程式「善解更新」（standalone-updater）
 
-狀態：草稿（2026-10-20）：security-reviewer 已審、處置在 §8，待 `pilotfish:plan-verifier`。和 `system-install.md`（安裝方式由使用者選）、`app-sandbox.md`（修訂三）一起以 v0.5.0 發佈。
+狀態：**維護者核准**（2026-10-20）：security-reviewer、兩次 plan-verifier 與一次收尾審查，處置都在 §8；收尾審查之後的最小修改由維護者核准。和 `system-install.md`（安裝方式由使用者選）、`app-sandbox.md`（修訂三）一起以 v0.5.0 發佈。
 
 維護者的決定（2026-10-20，選擇題）：沙盒外的獨立更新程式（app-sandbox §6 第 4 項的根本解，原排在 0c 開關 B 片）一起進 v0.5.0；架構採研究顧問分析的選項 A；先在虛擬機跑 V1–V5 再寫契約（§1.1，都量完了）。
 
