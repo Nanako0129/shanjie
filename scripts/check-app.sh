@@ -4,7 +4,16 @@
 # (TISCreateInputSourceList), never registered or enabled, and the app is never launched as an
 # input method: it runs only with `--selftest` and with arguments it must refuse.
 #
-#   scripts/check-app.sh [build/善解輸入法.app]
+# app-sandbox.md section 2.3: the bundle is sandboxed, so check 6 creates the bundle ID's container on its first run, and for
+# the shipping ID moves the user's learning data and preferences into it. Outside CI (CI is not `true`) check 6 therefore
+# refuses a shipping-ID build and exits non-zero: an ad-hoc local build must not create the shipping container first.
+# SKIP_RUN=1 runs checks 2 and 3 only, never executes the bundle, and exits 0 when they pass (any ID). Until CI has shown
+# that a build without a migration list moves no data, run this locally only with SKIP_RUN=1 (app-sandbox.md section 5).
+#
+#   [EXPECTED_BUNDLE_ID=<id>] [SKIP_RUN=1] scripts/check-app.sh [app]
+#
+# EXPECTED_BUNDLE_ID defaults to the shipping ID; the folder and names follow from it (the table in app-sandbox.md section
+# 2.3, the same as scripts/build-app.sh). The app defaults to build/<folder>.
 #
 # The Sparkle keys are compared with the production values below (docs/contracts/about-update.md section 3.2). An update
 # test build (scripts/build-app.sh with SHANJIE_UPDATE_TEST_FEED and SHANJIE_UPDATE_TEST_KEY) passes only when the same two
@@ -13,26 +22,40 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-APP="${1:-$ROOT/build/善解輸入法.app}"
+fail() { echo "error: $*" >&2; exit 1; }
+SHIPPING_ID=com.nyanako.inputmethod.shanjie
+ID="${EXPECTED_BUNDLE_ID:-$SHIPPING_ID}"
+if [ "$ID" = "$SHIPPING_ID" ]; then
+  NAME_ZH=善解輸入法 NAME_EN=Shanjie
+else
+  NAME_ZH=善解（開發版） NAME_EN="Shanjie (Dev)"
+fi
+APP="${1:-$ROOT/build/$NAME_ZH.app}"
 BIN="$APP/Contents/MacOS/shanjie"
 PLIST="$APP/Contents/Info.plist"
-fail() { echo "error: $*" >&2; exit 1; }
 pb() { /usr/libexec/PlistBuddy -c "Print :$1" "${2:-$PLIST}" 2>/dev/null; }
-MODE=com.nyanako.inputmethod.shanjie.zhuyin
+MODE="$ID.zhuyin"
+MIGRATION="$APP/Contents/Resources/container-migration.plist"
 # Production Sparkle values, written out again rather than read from build-app.sh, so a wrong value there fails here.
 SPARKLE_PUBLIC_KEY='cM3S7qQf78Hi2yH5gwD+nZm5T/6Vw05tD9ZWET3Rcew='
 SPARKLE_FEED_URL='https://raw.githubusercontent.com/Nanako0129/shanjie/main/appcast.xml'
 
-# --- 2: Info.plist and Resources (with section 13: one input mode, the 善解輸入法.app folder and
-# the zh-Hant / en names)
-[ "$(basename "$APP")" = 善解輸入法.app ] || fail "the bundle folder is not 善解輸入法.app"
+# --- 2: Info.plist and Resources (with section 13: one input mode, the folder and the zh-Hant / en names; with
+# app-sandbox.md section 2.2: the migration list only for the shipping ID)
+[ "$(basename "$APP")" = "$NAME_ZH.app" ] || fail "the bundle folder is not $NAME_ZH.app"
 plutil -lint "$PLIST" >/dev/null || fail "Info.plist does not lint"
 [ "$(pb CFBundleDevelopmentRegion)" = en ] || fail "CFBundleDevelopmentRegion"
-[ "$(pb CFBundleName)" = Shanjie ] || fail "CFBundleName"
-[ "$(pb CFBundleDisplayName)" = 善解輸入法 ] || fail "CFBundleDisplayName must equal the folder name"
+[ "$(pb CFBundleName)" = "$NAME_EN" ] || fail "CFBundleName"
+[ "$(pb CFBundleDisplayName)" = "$NAME_ZH" ] || fail "CFBundleDisplayName must equal the folder name"
 [ "$(pb LSHasLocalizedDisplayName)" = true ] || fail "LSHasLocalizedDisplayName"
-[ "$(pb CFBundleIdentifier)" = com.nyanako.inputmethod.shanjie ] || fail "bundle ID"
-[ "$(pb InputMethodConnectionName)" = com.nyanako.inputmethod.shanjie_Connection ] || fail "InputMethodConnectionName"
+[ "$(pb CFBundleIdentifier)" = "$ID" ] || fail "bundle ID is not $ID"
+[ "$(pb InputMethodConnectionName)" = "${ID}_Connection" ] || fail "InputMethodConnectionName"
+if [ "$ID" = "$SHIPPING_ID" ]; then
+  python3 -I -c 'import plistlib, sys; sys.exit(plistlib.load(open(sys.argv[1], "rb")) != {"Move": ["${ApplicationSupport}/shanjie"]})' \
+    "$MIGRATION" 2>/dev/null || fail "container-migration.plist is not exactly Move = [\${ApplicationSupport}/shanjie]"
+else
+  [ ! -e "$MIGRATION" ] || fail "a non-shipping build carries container-migration.plist"
+fi
 [ "$(pb InputMethodServerControllerClass)" = ShanjieInputController ] || fail "InputMethodServerControllerClass"
 [ "$(pb InputMethodServerDelegateClass)" = ShanjieInputController ] || fail "InputMethodServerDelegateClass"
 [ "$(pb LSUIElement)" = true ] || fail "LSUIElement"
@@ -44,8 +67,8 @@ K="ComponentInputModeDict:tsInputModeListKey:$MODE"
 [ "$(pb "$K:tsInputModeScriptKey")" = smTradChinese ] || fail "mode: tsInputModeScriptKey"
 [ "$(pb ComponentInputModeDict:tsVisibleInputModeOrderedArrayKey)" = "$(printf 'Array {\n    %s\n}' "$MODE")" ] || fail "visible mode list"
 R="$APP/Contents/Resources"
-for lp in "zh-Hant 善解輸入法" "en Shanjie"; do
-  read -r l name <<<"$lp"
+for lp in "zh-Hant|$NAME_ZH" "en|$NAME_EN"; do
+  IFS='|' read -r l name <<<"$lp"
   S="$R/$l.lproj/InfoPlist.strings"
   plutil -lint "$S" >/dev/null || fail "$l InfoPlist.strings does not lint"
   for k in CFBundleName CFBundleDisplayName "$MODE"; do
@@ -130,7 +153,9 @@ sparkle_key SURequireSignedFeed bool true
 sparkle_key SUVerifyUpdateBeforeExtraction bool true
 sparkle_key SUAllowsAutomaticUpdates bool false
 sparkle_key SUEnableAutomaticChecks bool false
-sparkle_key SUEnableInstallerLauncherService bool false
+# app-sandbox.md section 2.8: the installer service on, the downloader service never set (the app has network.client).
+sparkle_key SUEnableInstallerLauncherService bool true
+! pb SUEnableDownloaderService >/dev/null || fail "Info.plist sets SUEnableDownloaderService"
 sparkle_key SUEnableSystemProfiling bool false
 # An EdDSA public key is 32 bytes: 44 base64 characters ending in one '='; an empty or placeholder value fails.
 [[ "$(pb SUPublicEDKey)" =~ ^[A-Za-z0-9+/]{43}=$ ]] || fail "SUPublicEDKey is not a 44-character base64 key"
@@ -146,16 +171,27 @@ TRI_RECORDED="$(awk 'NR == 1 { print $1 }' "$ROOT/data/trigram.sjt3.sha256")"
   || fail "Resources/trigram.sjt3 does not match data/trigram.sjt3.sha256"
 echo "check 2: ok"
 
-# --- 3: signature: valid, no entitlements at all. The ad-hoc build has no hardened runtime (scripts/build-app.sh: library
-# validation refuses the ad-hoc Sparkle.framework); release.yml's verify() requires it on the Developer ID build that ships.
+# --- 3: signature: valid, exactly the four App Sandbox entitlements on the app (app-sandbox.md section 2.1,
+# scripts/check-entitlements.sh). The ad-hoc build has no hardened runtime (scripts/build-app.sh: library validation refuses
+# the ad-hoc Sparkle.framework); release.yml's verify() requires it on the Developer ID build that ships.
 codesign --verify --strict --deep "$APP" || fail "codesign --verify --strict --deep"
-ENT="$(codesign -d --entitlements - "$APP" 2>/dev/null || true)"
-[ -z "$ENT" ] || fail "the app carries entitlements"
-# Sparkle (docs/contracts/about-update.md section 3.2): the framework is there without its XPC services, and none of the four
-# code locations carries entitlements. A path that is gone fails rather than reading as "no entitlements".
+"$ROOT/scripts/check-entitlements.sh" "$APP" || fail "entitlements"
+# Sparkle (docs/contracts/about-update.md section 3.2, app-sandbox.md section 2.8): XPCServices holds exactly Installer.xpc, and
+# none of Sparkle's four code locations carries entitlements. A path that is gone fails rather than reading as "no
+# entitlements".
 SPARKLE="$APP/Contents/Frameworks/Sparkle.framework"
-[ ! -e "$SPARKLE/Versions/B/XPCServices" ] && [ ! -e "$SPARKLE/XPCServices" ] || fail "Sparkle.framework still has XPCServices"
-for code in "$APP" "$SPARKLE" "$SPARKLE/Versions/B/Autoupdate" "$SPARKLE/Versions/B/Updater.app"; do
+[ "$(ls -A "$SPARKLE/Versions/B/XPCServices" 2>/dev/null)" = Installer.xpc ] || fail "Sparkle's XPCServices is not exactly Installer.xpc"
+# xpc_layout <Sparkle.framework>: the only .xpc anywhere in the framework (find does not follow symlinks) is
+# Versions/B/XPCServices/Installer.xpc, Versions/Current is a symlink to B, and a top-level XPCServices, if present, is the
+# symlink Versions/Current/XPCServices. release.yml has its own copy (its sign job runs no repository code).
+xpc_layout() {
+  [ "$(cd "$1" && find . -name '*.xpc')" = ./Versions/B/XPCServices/Installer.xpc ] \
+    && [ -L "$1/Versions/Current" ] && [ "$(readlink "$1/Versions/Current")" = B ] \
+    && { { [ ! -e "$1/XPCServices" ] && [ ! -L "$1/XPCServices" ]; } \
+         || { [ -L "$1/XPCServices" ] && [ "$(readlink "$1/XPCServices")" = Versions/Current/XPCServices ]; }; }
+}
+xpc_layout "$SPARKLE" || fail "Sparkle.framework's XPC layout is not exactly Versions/B/XPCServices/Installer.xpc (Current -> B, XPCServices -> Versions/Current/XPCServices)"
+for code in "$SPARKLE" "$SPARKLE/Versions/B/XPCServices/Installer.xpc" "$SPARKLE/Versions/B/Autoupdate" "$SPARKLE/Versions/B/Updater.app"; do
   [ -e "$code" ] || fail "$code is missing"
   codesign --verify --strict "$code" || fail "codesign --verify --strict: $code"
   ENT="$(codesign -d --entitlements - "$code" 2>/dev/null || true)"
@@ -163,7 +199,16 @@ for code in "$APP" "$SPARKLE" "$SPARKLE/Versions/B/Autoupdate" "$SPARKLE/Version
 done
 echo "check 3: ok"
 
-# --- 6: selftest and refused arguments, with no side effects
+if [ "${SKIP_RUN:-}" = 1 ]; then
+  echo "check 6: skipped (SKIP_RUN=1; the bundle was not run)"
+  exit 0
+fi
+if [ "${CI:-}" != true ] && [ "$ID" = "$SHIPPING_ID" ]; then
+  fail "check 6 refused: running a shipping-ID build outside CI would create ~/Library/Containers/$SHIPPING_ID from an ad-hoc signature and move the learning data and preferences into it (app-sandbox.md section 2.3). Use SKIP_RUN=1 for checks 2 and 3."
+fi
+
+# --- 6: selftest and refused arguments, with no side effects. The sandbox container the first run creates is not part of
+# this comparison; CI checks it before and after separately (app-sandbox.md section 2.6).
 snapshot() {
   ls -laR "$HOME/Library/Input Methods" 2>&1 || true
   shasum -a 256 "$HOME/Library/Preferences/com.nyanako.inputmethod.shanjie.plist" 2>&1 || true

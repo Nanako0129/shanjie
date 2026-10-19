@@ -17,7 +17,7 @@ import Sparkle
 ///   or install); whether the input method keeps typing around them is a device check (contract section 3.4).
 /// - Sparkle's windows are lifted to the settings window's level while its session runs (`raise`).
 /// - Started with `startingUpdater: false` and `start()` here, unlike Syrtis: when the standard controller starts the updater
-///   itself and that fails, it shows a modal NSAlert (`runModal`, SPUStandardUpdaterController.m in Sparkle 2.9.3), which
+///   itself and that fails, it shows a modal NSAlert (`runModal`, SPUStandardUpdaterController.m in Sparkle 2.9.3 and 2.10.0), which
 ///   would block the input method. A failure here is logged and every check then reads 檢查失敗.
 ///
 /// Logging follows R2: static strings only, never a version, URL or error. Sparkle's own log (SULog) is the documented

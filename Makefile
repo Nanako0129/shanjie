@@ -4,11 +4,14 @@
 .PHONY: rust build test test-rust test-golden test-python test-swift bundle installer selftest-bundled clean-bundle
 
 SWIFT_OUT := macos/.build/out
-# The bundle folder (docs/contracts/s3b.md section 13.1). LEGACY_APP_NAME is the name before
+# The bundle folders (docs/contracts/s3b.md section 13.1, app-sandbox.md section 2.3): APP_NAME for the shipping bundle ID,
+# DEV_APP_NAME for any other (the default local build and the selftest's throwaway IDs). LEGACY_APP_NAME is the name before
 # section 13, still cleaned up by clean-bundle.
 APP_NAME := 善解輸入法.app
+DEV_APP_NAME := 善解（開發版）.app
 LEGACY_APP_NAME := shanjie.app
 INSTALLER_NAME := 安裝善解輸入法.app
+SHIPPING_ID := com.nyanako.inputmethod.shanjie
 LSREGISTER := /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
 
 rust:
@@ -64,43 +67,55 @@ test-swift: rust
 	@$(call rebuild_if_header_stale,Debug)
 	swift test --package-path macos --force-resolved-versions
 
-# The shipping bundle: build/$(APP_NAME) with the shipping bundle ID.
+# build/$(DEV_APP_NAME) with the development bundle ID by default; build/$(APP_NAME) with
+# `make bundle BUNDLE_ID=com.nyanako.inputmethod.shanjie` (scripts/build-app.sh reads BUNDLE_ID and OUT_DIR from the
+# environment; make exports command-line variables to it). Both are sandboxed: build only, do not run them locally until CI
+# has shown that a build without a migration list moves no data (app-sandbox.md section 5).
 bundle: rust
 	@$(call relink_if_stale,Release)
 	@$(call rebuild_if_header_stale,Release)
 	scripts/build-app.sh
 
-# The installer (docs/contracts/s3c-installer.md section 3) around the existing build/$(APP_NAME)
-# (run `make bundle` first; not rebuilt here, so the app check-app.sh verified is the one wrapped),
-# zipped the way release.yml zips it. Never launched; scripts/check-installer.sh inspects it.
+# The installer (docs/contracts/s3c-installer.md section 3) around the existing build/$(APP_NAME), the shipping-ID build only
+# (run `make bundle BUNDLE_ID=com.nyanako.inputmethod.shanjie` first; not rebuilt here, so the app check-app.sh verified is
+# the one wrapped), zipped the way release.yml zips it. Before packaging, the bundle must carry the shipping ID and pass
+# scripts/check-entitlements.sh. Never launched; scripts/check-installer.sh inspects it.
 installer:
-	@[ -d 'build/$(APP_NAME)' ] || { echo "error: build/$(APP_NAME) is missing; run make bundle first" >&2; exit 1; }
+	@[ -d 'build/$(APP_NAME)' ] || { echo "error: build/$(APP_NAME) is missing; run make bundle BUNDLE_ID=com.nyanako.inputmethod.shanjie first (the installer wraps only the shipping-ID build)" >&2; exit 1; }
+	@[ "$$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' 'build/$(APP_NAME)/Contents/Info.plist' 2>/dev/null)" = '$(SHIPPING_ID)' ] || { echo "error: build/$(APP_NAME) does not have the bundle ID $(SHIPPING_ID); run make bundle BUNDLE_ID=$(SHIPPING_ID)" >&2; exit 1; }
+	scripts/check-entitlements.sh 'build/$(APP_NAME)'
 	@V=$$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' 'build/$(APP_NAME)/Contents/Info.plist'); \
 	rm -f build/shanjie-$$V.zip; \
 	ditto -c -k --keepParent 'build/$(APP_NAME)' build/shanjie-$$V.zip; \
 	SHANJIE_VERSION=$$V scripts/build-installer.sh build build/shanjie-$$V.zip
 
-# The selftest from the configuration that ships: release, inside a .app, run from the bundle's
-# own Resources. The bundle ID is the one knob. Locally it defaults to a throwaway ID, the WEAKER
-# gate: a value keyed on the shipping ID itself would not be exercised. CI passes an empty value,
-# which means build-app.sh's default, i.e. the shipping ID, deliberately not spelled out again
-# here so a rename has one place to change. Nothing is installed or registered either way; the
-# selftest writes no files or preferences (docs/contracts/s3b.md section 9).
+# The selftest from the configuration that ships: release, sandboxed, inside a .app, run from the bundle's own Resources. The
+# bundle ID is the one knob and is always a throwaway ID with no migration list (CI passes one per run); the shipping ID's
+# selftest runs only in CI, in scripts/test-sandbox-migration.sh and check-app.sh (app-sandbox.md section 2.6). Nothing is
+# installed or registered. The selftest itself writes no files or preferences, but its first run in the sandbox creates
+# ~/Library/Containers/<that ID> (docs/contracts/s3b.md section 9). Until CI has shown that a build without a migration list
+# moves no data, this is not run on a maintainer's machine (app-sandbox.md section 5).
 SELFTEST_BUNDLE_ID ?= com.nyanako.inputmethod.shanjie.selftest
+# The folder the ID builds into, by the same rule as scripts/build-app.sh (the shipping ID, else the development name).
+SELFTEST_APP = build/selftest/$(if $(filter $(SHIPPING_ID),$(SELFTEST_BUNDLE_ID)),$(APP_NAME),$(DEV_APP_NAME))
 selftest-bundled: rust
 	@$(call relink_if_stale,Release)
 	@$(call rebuild_if_header_stale,Release)
 	BUNDLE_ID=$(SELFTEST_BUNDLE_ID) OUT_DIR=build/selftest scripts/build-app.sh
-	'build/selftest/$(APP_NAME)/Contents/MacOS/shanjie' --selftest
+	'$(SELFTEST_APP)/Contents/MacOS/shanjie' --selftest
 
 # Unregisters the local bundles, under the current and the legacy name, from LaunchServices
-# (errors ignored: usually never registered or not there) and deletes them. Touches nothing else.
-CLEAN_APPS := $(foreach d,build build/selftest,$(d)/$(APP_NAME) $(d)/$(LEGACY_APP_NAME)) build/$(INSTALLER_NAME)
+# (errors ignored: usually never registered or not there) and deletes them, with the entitlement files build-app.sh writes
+# next to them. Every OUT_DIR used here and in ci.yml: build, build/selftest, build/default, build/nomanifest. Touches
+# nothing else.
+CLEAN_DIRS := build build/selftest build/default build/nomanifest
+CLEAN_APPS := $(foreach d,$(CLEAN_DIRS),$(d)/$(APP_NAME) $(d)/$(DEV_APP_NAME) $(d)/$(LEGACY_APP_NAME)) build/$(INSTALLER_NAME)
 clean-bundle:
 	@for a in $(CLEAN_APPS); do \
 		echo "$(LSREGISTER) -u $$a"; $(LSREGISTER) -u "$$a" 2>/dev/null || true; \
 	done
 	rm -rf $(CLEAN_APPS) build/shanjie-*.zip
+	rm -f $(foreach d,$(CLEAN_DIRS),$(d)/.entitlements-*.plist)
 
 # SwiftPM may not treat the Rust staticlib as an input. Measured 2026-10-03 with Swift 6.4: it
 # does relink when libcore.a changes, so this guard is a backstop for other toolchains; it costs

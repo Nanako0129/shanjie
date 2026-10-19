@@ -5,7 +5,9 @@ name: Release
 #                      (GitHub release, appcast.xml on main, then the Homebrew cask in
 #                      Nanako0129/homebrew-tap; section 14.3)
 #   workflow_dispatch  dry run on main: gate, build, sign + notarize + verify + Sparkle key pair;
-#                      signs no feed and publishes nothing (the signed zip stays a one-day artifact)
+#                      signs no feed and publishes nothing (both signed zips, input method and installer,
+#                      stay a one-day artifact, `signed`, for the VM and device checks of app-sandbox.md
+#                      section 4)
 on:
   push:
     tags: ["v*"]
@@ -26,8 +28,9 @@ permissions: {}
 # machine is never involved.
 #
 # Trust model (docs/contracts/about-update.md section 0.1, docs/PLAN.md R10): with
-# SUVerifyUpdateBeforeExtraction, Sparkle 2.9.3 checks the downloaded zip's EdDSA signature before
-# extracting it; its fallback, the archive's own Developer ID signature, cannot apply to a zip
+# SUVerifyUpdateBeforeExtraction, Sparkle (read in 2.9.3's source; SUUpdateValidator.m differs in
+# 2.10.0 only by a dropped macOS 11.3 availability check) checks the downloaded zip's EdDSA signature
+# before extracting it; its fallback, the archive's own Developer ID signature, cannot apply to a zip
 # (a zip carries no code signature), so in practice only the EdDSA key admits an update, and the
 # update then installs without Gatekeeper or notarization looking at it again. The EdDSA key plus
 # write access to main's appcast.xml can therefore run code in every installed copy. The feed is
@@ -126,11 +129,14 @@ jobs:
 
       # SHANJIE_RELEASE_BUILD marks the bundle as a release build (Info.plist ShanjieUpdateBuild
       # release): only such a build and an update test build start the updater; verify_sparkle
-      # requires the marker.
+      # requires the marker. The shipping ID explicitly: build-app.sh defaults to the development ID
+      # and refuses SHANJIE_RELEASE_BUILD without the shipping one (app-sandbox.md section 2.4);
+      # verify() in `sign` checks the ID of what ships.
       - name: Build the app (ad-hoc)
         env:
           SHANJIE_VERSION: ${{ steps.version.outputs.version }}
           SHANJIE_RELEASE_BUILD: "1"
+          BUNDLE_ID: com.nyanako.inputmethod.shanjie
         run: scripts/build-app.sh
 
       # The installer skeleton (docs/contracts/s3c-installer.md section 3): everything except the
@@ -244,17 +250,43 @@ jobs:
           mkdir -p "$T/work" "$T/out" "$T/check"
           tar -xf "$T/unsigned/unsigned.tar" -C "$T/work"
           APP="$T/work/善解輸入法.app"
-          # Inside out, in Sparkle's documented order (docs/contracts/about-update.md section 2): its two
-          # helpers, the framework, then the app. Every one with the hardened runtime, a secure timestamp
-          # and no --entitlements. (The ad-hoc build from `build` has no runtime: library validation
-          # refuses an ad-hoc framework there; here all four share the team, and verify_sparkle requires
-          # the flag on each.) build-app.sh removed the XPC services; a bundle that still has them stops here.
+          # Inside out, in Sparkle's documented order (docs/contracts/about-update.md section 2, app-sandbox.md
+          # sections 2.4 and 2.8), never --deep: Installer.xpc, Autoupdate, Updater.app and the framework with
+          # the hardened runtime, a secure timestamp and no entitlements; then the app with the runtime, a
+          # timestamp and the four App Sandbox entitlements written here from literals, not taken from the
+          # build artifact (security review F7), so what ships does not depend on the build job and verify()
+          # is a second check. (The ad-hoc build from `build` has no runtime: library validation refuses an
+          # ad-hoc framework there; here all five share the team, and verify_sparkle requires the flag on
+          # each.) build-app.sh kept only Installer.xpc; a bundle with any other XPC service stops here.
           SPARKLE="$APP/Contents/Frameworks/Sparkle.framework"
-          [ ! -e "$SPARKLE/Versions/B/XPCServices" ] && [ ! -e "$SPARKLE/XPCServices" ] || fail "Sparkle.framework still has XPCServices"
-          for code in "$SPARKLE/Versions/B/Autoupdate" "$SPARKLE/Versions/B/Updater.app" "$SPARKLE" "$APP"; do
+          XPC="$SPARKLE/Versions/B/XPCServices"
+          [ "$(ls -A "$XPC" 2>/dev/null)" = Installer.xpc ] || fail "Sparkle's XPCServices is not exactly Installer.xpc"
+          # xpc_layout <Sparkle.framework>: the only .xpc anywhere in the framework (find does not follow symlinks) is
+          # Versions/B/XPCServices/Installer.xpc, Versions/Current is a symlink to B, and a top-level XPCServices, if present, is the
+          # symlink Versions/Current/XPCServices. The same function as scripts/check-app.sh (this job runs no repository code; a change there goes here too).
+          xpc_layout() {
+            [ "$(cd "$1" && find . -name '*.xpc')" = ./Versions/B/XPCServices/Installer.xpc ] \
+              && [ -L "$1/Versions/Current" ] && [ "$(readlink "$1/Versions/Current")" = B ] \
+              && { { [ ! -e "$1/XPCServices" ] && [ ! -L "$1/XPCServices" ]; } \
+                   || { [ -L "$1/XPCServices" ] && [ "$(readlink "$1/XPCServices")" = Versions/Current/XPCServices ]; }; }
+          }
+          xpc_layout "$SPARKLE" || fail "Sparkle.framework's XPC layout is not exactly Versions/B/XPCServices/Installer.xpc"
+          for code in "$XPC/Installer.xpc" "$SPARKLE/Versions/B/Autoupdate" "$SPARKLE/Versions/B/Updater.app" "$SPARKLE"; do
             [ -e "$code" ] || fail "$code is missing; Sparkle's layout changed"
             codesign --force --options runtime --timestamp --sign "$IDENTITY" --keychain "$KC" "$code"
           done
+          printf '%s\n' '<?xml version="1.0" encoding="UTF-8"?>' \
+            '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">' \
+            '<plist version="1.0"><dict>' \
+            '<key>com.apple.security.app-sandbox</key><true/>' \
+            '<key>com.apple.security.network.client</key><true/>' \
+            '<key>com.apple.security.temporary-exception.mach-register.global-name</key>' \
+            '<array><string>com.nyanako.inputmethod.shanjie_Connection</string></array>' \
+            '<key>com.apple.security.temporary-exception.mach-lookup.global-name</key>' \
+            '<array><string>com.nyanako.inputmethod.shanjie-spks</string><string>com.nyanako.inputmethod.shanjie-spki</string></array>' \
+            '</dict></plist>' > "$T/sign-entitlements.plist"
+          plutil -lint "$T/sign-entitlements.plist" > /dev/null
+          codesign --force --options runtime --timestamp --entitlements "$T/sign-entitlements.plist" --sign "$IDENTITY" --keychain "$KC" "$APP"
           codesign --verify --strict --deep "$APP"
 
           # notarytool can exit 0 on a rejected submission: the verdict is read from its JSON.
@@ -283,37 +315,81 @@ jobs:
           ditto -c -k --keepParent "$APP" "$T/out/$ZIP"
           (cd "$T/out" && shasum -a 256 "$ZIP" > "$ZIP.sha256")
 
-          # verify <app>: what ships, as extracted from its final zip.
+          # verify <app> <ime|installer>: what ships, as extracted from its final zip, with the expected
+          # values by bundle (app-sandbox.md section 2.4). The input method: the shipping ID, and its
+          # entitlements equal, as a whole plutil-normalized property list (an extra key fails, F7), the
+          # four App Sandbox keys with the mach names derived from that ID; the same comparison as
+          # scripts/check-entitlements.sh, written out here because this job runs no repository code (a
+          # change there goes here too; this copy has no mutation test of its own, since `sign` runs only
+          # on main, while CI mutates the script's copy). The installer: its ID and no entitlements.
           verify() {
             V="$1"
+            ID=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$V/Contents/Info.plist")
             codesign --verify --strict --deep "$V" || fail "codesign --verify --strict --deep: $V"
             INFO=$(codesign -dv --verbose=2 "$V" 2>&1)
             grep -q '^Authority=Developer ID Application: ' <<<"$INFO" || fail "not signed with Developer ID Application: $V"
             grep -qx "TeamIdentifier=$EXPECTED_TEAM" <<<"$INFO" || fail "team identifier is not $EXPECTED_TEAM: $V"
             grep -Eq 'flags=0x[0-9a-f]+\([^)]*runtime' <<<"$INFO" || fail "hardened runtime flag missing: $V"
-            ENT=$(codesign -d --entitlements - "$V" 2>/dev/null || true)
-            [ -z "$ENT" ] || fail "the app carries entitlements: $V"
+            case "$2" in
+              ime)
+                [ "$ID" = com.nyanako.inputmethod.shanjie ] || fail "bundle ID is $ID, not the shipping ID: $V"
+                [ "$(/usr/libexec/PlistBuddy -c 'Print :InputMethodConnectionName' "$V/Contents/Info.plist")" = "${ID}_Connection" ] \
+                  || fail "InputMethodConnectionName is not ${ID}_Connection: $V"
+                # app-sandbox.md section 2.2: the migration list, exactly (the same comparison as scripts/check-app.sh).
+                # shellcheck disable=SC2016
+                python3 -I -c 'import plistlib, sys; sys.exit(plistlib.load(open(sys.argv[1], "rb")) != {"Move": ["${ApplicationSupport}/shanjie"]})' \
+                  "$V/Contents/Resources/container-migration.plist" 2>/dev/null \
+                  || fail "container-migration.plist is missing or not exactly Move = [\${ApplicationSupport}/shanjie]: $V"
+                rm -f "$T/ent-actual.plist" "$T/ent-expected.plist"
+                codesign -d --entitlements - --xml "$V" > "$T/ent-actual.plist" 2>/dev/null || true
+                [ -s "$T/ent-actual.plist" ] || fail "the input method carries no entitlements: $V"
+                printf '%s\n' '<?xml version="1.0" encoding="UTF-8"?>' \
+                  '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">' \
+                  '<plist version="1.0"><dict>' \
+                  '<key>com.apple.security.app-sandbox</key><true/>' \
+                  '<key>com.apple.security.network.client</key><true/>' \
+                  '<key>com.apple.security.temporary-exception.mach-register.global-name</key>' \
+                  "<array><string>${ID}_Connection</string></array>" \
+                  '<key>com.apple.security.temporary-exception.mach-lookup.global-name</key>' \
+                  "<array><string>${ID}-spks</string><string>${ID}-spki</string></array>" \
+                  '</dict></plist>' > "$T/ent-expected.plist"
+                plutil -convert xml1 "$T/ent-actual.plist" || fail "the entitlements are not a property list: $V"
+                plutil -convert xml1 "$T/ent-expected.plist"
+                cmp -s "$T/ent-actual.plist" "$T/ent-expected.plist" \
+                  || fail "the entitlements are not exactly the four keys for $ID: $(plutil -p "$T/ent-actual.plist")"
+                ;;
+              installer)
+                [ "$ID" = com.nyanako.shanjie.installer ] || fail "bundle ID is $ID, not the installer's: $V"
+                ENT=$(codesign -d --entitlements - "$V" 2>/dev/null || true)
+                [ -z "$ENT" ] || fail "the installer carries entitlements: $V"
+                ;;
+              *) fail "verify: unknown kind $2" ;;
+            esac
             xcrun stapler validate "$V" > /dev/null || fail "no stapled notarization ticket: $V"
             # Captured first: `spctl | grep -q` under pipefail can fail on SIGPIPE.
             GK=$(spctl -a -t exec -vv "$V" 2>&1 || true)
             grep -qx 'source=Notarized Developer ID' <<<"$GK" || fail "Gatekeeper does not report Notarized Developer ID: $GK"
           }
-          # verify_sparkle <app>: the input method's Sparkle parts (docs/contracts/about-update.md section 2).
-          # Each of the four code locations: present (a missing path fails, never reads as "no
-          # entitlements"), the expected team, the hardened runtime, no entitlements. No XPC services.
-          # Info.plist's Sparkle keys verbatim, with their types, against the values in this job's env.
+          # verify_sparkle <app>: the input method's Sparkle parts (docs/contracts/about-update.md section 2,
+          # app-sandbox.md sections 2.4 and 2.8). Five code locations, each present (a missing path fails,
+          # never reads as "no entitlements") with the expected team and the hardened runtime: the app
+          # (its entitlements are verify()'s), and Installer.xpc, Autoupdate, Updater.app and the framework,
+          # which carry no entitlements. XPCServices holds exactly Installer.xpc. Info.plist's Sparkle keys
+          # verbatim, with their types, against the values in this job's env; SUEnableDownloaderService absent.
           verify_sparkle() {
             V="$1"
             S="$V/Contents/Frameworks/Sparkle.framework"
-            for code in "$V" "$S" "$S/Versions/B/Autoupdate" "$S/Versions/B/Updater.app"; do
+            for code in "$V" "$S" "$S/Versions/B/XPCServices/Installer.xpc" "$S/Versions/B/Autoupdate" "$S/Versions/B/Updater.app"; do
               [ -e "$code" ] || fail "$code is missing"
               C_INFO=$(codesign -dv --verbose=2 "$code" 2>&1)
               grep -qx "TeamIdentifier=$EXPECTED_TEAM" <<<"$C_INFO" || fail "team identifier is not $EXPECTED_TEAM: $code"
               grep -Eq 'flags=0x[0-9a-f]+\([^)]*runtime' <<<"$C_INFO" || fail "hardened runtime flag missing: $code"
+              [ "$code" = "$V" ] && continue
               C_ENT=$(codesign -d --entitlements - "$code" 2>/dev/null || true)
               [ -z "$C_ENT" ] || fail "$code carries entitlements"
             done
-            [ ! -e "$S/Versions/B/XPCServices" ] && [ ! -e "$S/XPCServices" ] || fail "Sparkle.framework has XPCServices"
+            [ "$(ls -A "$S/Versions/B/XPCServices" 2>/dev/null)" = Installer.xpc ] || fail "Sparkle's XPCServices is not exactly Installer.xpc"
+            xpc_layout "$S" || fail "Sparkle.framework's XPC layout is not exactly Versions/B/XPCServices/Installer.xpc: $S"
             P="$V/Contents/Info.plist"
             key() { [ "$(plutil -extract "$1" raw -expect "$2" -o - "$P" 2>/dev/null)" = "$3" ] || fail "Info.plist $1 is not the $2 $3"; }
             key ShanjieUpdateBuild string release
@@ -323,13 +399,14 @@ jobs:
             key SUVerifyUpdateBeforeExtraction bool true
             key SUAllowsAutomaticUpdates bool false
             key SUEnableAutomaticChecks bool false
-            key SUEnableInstallerLauncherService bool false
+            key SUEnableInstallerLauncherService bool true
+            ! plutil -extract SUEnableDownloaderService raw -o - "$P" > /dev/null 2>&1 || fail "Info.plist sets SUEnableDownloaderService"
             key SUEnableSystemProfiling bool false
             [[ "$SPARKLE_PUBLIC_KEY" =~ ^[A-Za-z0-9+/]{43}=$ ]] || fail "SPARKLE_PUBLIC_KEY is not a 44-character base64 key"
             ! plutil -extract SUEnableJavaScript raw -o - "$P" > /dev/null 2>&1 || fail "Info.plist sets SUEnableJavaScript"
           }
           ditto -x -k "$T/out/$ZIP" "$T/check"
-          verify "$T/check/善解輸入法.app"
+          verify "$T/check/善解輸入法.app" ime
           verify_sparkle "$T/check/善解輸入法.app"
           echo "verified $ZIP"
 
@@ -349,7 +426,7 @@ jobs:
           (cd "$T/out" && shasum -a 256 "$IZIP" > "$IZIP.sha256")
           mkdir -p "$T/check-installer"
           ditto -x -k "$T/out/$IZIP" "$T/check-installer"
-          verify "$T/check-installer/安裝善解輸入法.app"
+          verify "$T/check-installer/安裝善解輸入法.app" installer
           cmp -s "$T/check-installer/安裝善解輸入法.app/Contents/Resources/$ZIP" "$T/out/$ZIP" \
             || fail "the installer's bundled zip differs from $ZIP"
           echo "verified $IZIP"
@@ -426,12 +503,12 @@ jobs:
           ZIP="shanjie-$VERSION.zip"
           URL_PREFIX="https://github.com/Nanako0129/shanjie/releases/download/v$VERSION/"
           mkdir -p "$T/sparkle-dl" "$T/sparkle" "$T/feed"
-          curl -fsSL --retry 3 -o "$T/sparkle-dl/Sparkle-2.9.3.tar.xz" \
-            https://github.com/sparkle-project/Sparkle/releases/download/2.9.3/Sparkle-2.9.3.tar.xz
-          echo "74a07da821f92b79310009954c0e15f350173374a3abe39095b4fc5096916be6  $T/sparkle-dl/Sparkle-2.9.3.tar.xz" | shasum -a 256 -c -
-          tar -xJf "$T/sparkle-dl/Sparkle-2.9.3.tar.xz" -C "$T/sparkle"
+          curl -fsSL --retry 3 -o "$T/sparkle-dl/Sparkle-2.10.0.tar.xz" \
+            https://github.com/sparkle-project/Sparkle/releases/download/2.10.0/Sparkle-2.10.0.tar.xz
+          echo "c2bf58aa8387266ac179357b1415d6f2635f044da8be41042af32425dae6da0c  $T/sparkle-dl/Sparkle-2.10.0.tar.xz" | shasum -a 256 -c -
+          tar -xJf "$T/sparkle-dl/Sparkle-2.10.0.tar.xz" -C "$T/sparkle"
           GEN="$T/sparkle/bin/generate_appcast"
-          [ -x "$GEN" ] || fail "generate_appcast is not in Sparkle-2.9.3.tar.xz"
+          [ -x "$GEN" ] || fail "generate_appcast is not in Sparkle-2.10.0.tar.xz"
           NOTES="$GITHUB_WORKSPACE/feed/docs/releases/$GITHUB_REF_NAME.md"
           [ -s "$NOTES" ] || fail "docs/releases/$GITHUB_REF_NAME.md is missing or empty"
           cp "$T/out/$ZIP" "$T/feed/$ZIP"
