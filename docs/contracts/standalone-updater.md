@@ -1,6 +1,6 @@
 # 契約：沙盒外的獨立更新程式「善解更新」（standalone-updater）
 
-狀態：草稿（2026-10-20），待 `pilotfish:plan-verifier` 與 `pilotfish:security-reviewer`。和 `system-install.md`（安裝方式由使用者選）、`app-sandbox.md`（修訂三）一起以 v0.5.0 發佈。
+狀態：草稿（2026-10-20）：security-reviewer 已審、處置在 §8，待 `pilotfish:plan-verifier`。和 `system-install.md`（安裝方式由使用者選）、`app-sandbox.md`（修訂三）一起以 v0.5.0 發佈。
 
 維護者的決定（2026-10-20，選擇題）：沙盒外的獨立更新程式（app-sandbox §6 第 4 項的根本解，原排在 0c 開關 B 片）一起進 v0.5.0；架構採研究顧問分析的選項 A；先在虛擬機跑 V1–V5 再寫契約（§1.1，都量完了）。
 
@@ -33,11 +33,12 @@ tart 虛擬機（macOS 26.6.2），原型分支 `feat/standalone-updater`（`89c
 | # | 事實 | 來源 |
 |---|---|---|
 | S1 | `SPUUpdater(hostBundle:applicationBundle:userDriver:delegate:)`：host 是要更新的 bundle，application 是要等它結束再重新啟動的 App，兩者可以不是自己。從另一個程序更新固定路徑的 bundle 是 Sparkle 寫明的用法（`sparkle-cli` 就是這樣） | 〔原始碼〕Sparkle 2.10.0 `SPUUpdater.h`、`sparkle-cli` |
-| S2 | `SUFeedURL`、`SUPublicEDKey` 從 **host** 讀；`SUEnableInstallerLauncherService` 這類 XPC 開關從**執行中的主 bundle** 讀。所以善解更新自己的 Info.plist 沒有 feed、沒有金鑰，它只能更新 host 的 Info.plist 說的那個 feed | 〔原始碼〕`SPUUpdater.m` |
+| S2 | `SUPublicEDKey`、`SURequireSignedFeed`、`SUVerifyUpdateBeforeExtraction` 只從 **host 的 Info.plist** 讀；`SUEnableInstallerLauncherService` 這類 XPC 開關從**執行中的主 bundle** 讀。**`SUFeedURL` 不一樣**：host 不是主 bundle 時，Sparkle 用 host 的 bundle ID 開一個 user defaults（`initWithSuiteName:`），先讀 defaults、沒有才讀 Info.plist，而「defaults 裡有 `SUFeedURL`」的警告只在更新主 bundle 時才出現。所以 feed 網址可以被 host 網域的偏好設定蓋掉（安全審查 2026-10-20 P2-1），要由 delegate 釘住（§2.1） | 〔原始碼〕`SUHost.m`、`SPUUpdater.m` |
 | S3 | 主 bundle 的 `SUEnableInstallerLauncherService` 是 false 時，安裝端在自己程序內執行、不經 XPC。善解更新不在沙盒，所以不需要任何 XPC 服務或 mach-lookup 例外；輸入法把它設成 false、刪掉 XPC 服務，照樣能做探測 | 〔原始碼〕`SPUInstallerDriver.m`、`SPUUpdater.m`；〔量到〕V2 |
 | S4 | domain：非 root 時，「套件安裝」類型直接走系統 domain；其他類型看 host 與上層可不可寫。授權提示字串由 launcher 就地組出，host 不是主 bundle 時是「`<主 bundle 名> wants permission to update <host 名>.`」，不在地化 | 〔原始碼〕`SUInstallerLauncher.m`；〔量到〕V3 |
-| S5 | `Autoupdate` 以 root 執行時：下載檔搬進只有 root 能讀的唯一目錄、隨機檔名、確認是一般檔；只接受 bundle ID 等於 host 的新 bundle；EdDSA 公鑰取自 host 的 Info.plist（`/Library` 那份是 root 擁有的） | 〔原始碼〕`AppInstaller.m`、`SUInstaller.m`（2.9.6 的修補） |
-| A1 | 沙盒程序用 `NSWorkspace.OpenConfiguration.arguments` 傳的參數，系統一律忽略 | Apple 文件 |
+| S5 | `Autoupdate` 以 root 執行時：下載檔搬進只有 root 能讀的唯一目錄、隨機檔名、確認是一般檔；檢查已安裝的 host 的 bundle ID；新版的 `CFBundleVersion` 低於 host 時 `SUPlainInstaller` 中止（擋降版）；EdDSA 公鑰取自 host 的 Info.plist（`/Library` 那份是 root 擁有的）。「新 bundle 的 ID 要等於 host」這一條在 2.10.0 的原始碼裡**沒有找到**，不當成保證 | 〔原始碼〕`AppInstaller.m`、`SUPlainInstaller.m`（2.9.6 的修補） |
+| S6 | 主 bundle 的 `SUEnableInstallerLauncherService` 是 false 時，`SPUInstallerDriver` 在**自己的程序裡**建 `SUInstallerLauncher`，它用 `SMJobSubmit` 送出 `Autoupdate`，本身沒有沙盒檢查。所以輸入法程序裡只要還有 Sparkle，就有一份 launcher 可以叫；F1 關不關，取決於沙盒擋不擋這個送出（沒量，§4.2 V7） | 〔原始碼〕`SPUInstallerDriver.m`、`SUInstallerLauncher.m` |
+| A1 | 沙盒程序用 `NSWorkspace.OpenConfiguration.arguments` 與 `environment` 傳的參數與環境變數，系統一律忽略 | Apple 文件（兩頁都寫了） |
 
 ## 2. 設計
 
@@ -51,9 +52,10 @@ tart 虛擬機（macOS 26.6.2），原型分支 `feat/standalone-updater`（`89c
 | 沙盒、entitlements | 都沒有；Developer ID 版是 hardened runtime |
 | host | `Bundle.main.bundleURL` 往上三層取 `realpath`，必須**完全等於** `/Library/Input Methods/<名稱>` 或 `<家目錄>/Library/Input Methods/<名稱>`，名稱是 `善解輸入法.app` 或 `善解（開發版）.app`；家目錄用 `getpwuid`（不用 `$HOME`）。不符就結束碼 1、不開視窗 |
 | host 的組建類型 | 讀 host 的 `ShanjieUpdateBuild`：`release` → host 要通過指定需求 `anchor apple generic and identifier "com.nyanako.inputmethod.shanjie" and certificate leaf[subject.OU] = "2LJ882GPY8"`（`SecStaticCodeCheckValidity`），不過就結束；`test`（ad-hoc 的更新測試版）→ 不驗簽章；其他（含 `local`）→ 結束 |
-| 參數與輸入 | 不讀命令列參數、環境變數、URL、剪貼簿或任何 IPC；啟動它的人什麼都給不了（A1） |
+| 參數與輸入 | 不讀命令列參數、環境變數、URL、剪貼簿或任何 IPC；啟動它的人什麼都給不了（A1）。開檔事件：實作一個什麼都不做的 `application(_:open:)`，避免 AppKit 對送來的檔名跳「無法打開」的警告（安全審查 P3-4，§4.2 量） |
+| feed 網址 | delegate 的 `feedURLString(for:)` 回傳 **host 的 Info.plist** 裡的 `SUFeedURL`（`Bundle(url: host).object(forInfoDictionaryKey:)`，讀的是 bundle 的 Info.plist，不經 user defaults）；讀不到就結束。理由在 S2：不釘住的話，被攻破的輸入法若能在 host 網域的偏好設定寫 `SUFeedURL`，就能讓善解更新去讀一份重播的舊 appcast（有簽章、但沒有比現在新的版本），使用者永遠看不到新版，等於把有漏洞的版本凍結住。輸入法本體的探測也照做（它自己的 `Updater` delegate） |
 | 流程 | `SPUUpdater(hostBundle: host, applicationBundle: host, userDriver: SPUStandardUserDriver(hostBundle: host))`；先 `checkForUpdateInformation()`（靜默），**有新版才** `checkForUpdates()`（Sparkle 的標準對話框）；沒有新版、使用者取消或更新完成就結束。沒有新版時不出現任何視窗，所以被攻破的輸入法啟動它也叫不出任何畫面 |
-| 安裝類型 | delegate 的 `shouldProceedWithUpdate` 只放行 `application` 類型，其他（含套件安裝）丟錯誤 |
+| 安裝類型 | delegate 的 `shouldProceedWithUpdate` 只放行 `application` 類型，其他（含套件安裝）丟錯誤。接續先前中斷的安裝（resume）時 Sparkle 不呼叫這個 delegate；那條路仍關得住：`SUInstaller` 會比對壓縮檔裡實際是 `.app` 還是 `.pkg` 與項目的類型，不符就失敗，而能先起一個安裝的只有不在沙盒的同使用者程式（〔原始碼〕`SPUBasicUpdateDriver.m`、`SUInstaller.m`，安全審查 P3-3） |
 | 介面 | 只有 Sparkle 的標準對話框，用 host 的名字與圖示；不自己畫視窗 |
 | 日誌 | 靜態字串（R2） |
 
@@ -63,6 +65,7 @@ tart 虛擬機（macOS 26.6.2），原型分支 `feat/standalone-updater`（`89c
 |---|---|---|
 | entitlements | 4 組：沙盒、`network.client`、IMK 的 mach-register、Sparkle 的兩個 mach-lookup | **3 個**：`app-sandbox`、`network.client`（探測用）、`mach-register.global-name = <ID>_Connection` |
 | XPC 服務 | `Installer.xpc` 在 `Contents/Frameworks/Updater/Sparkle.framework` | **整個輸入法 bundle 裡沒有 `.xpc`**（含善解更新那份 framework）。修訂三「XPC 服務組合一變就換資料夾」的規則失效：沒有 XPC 服務，就沒有系統照路徑記住的問題；`Frameworks/Updater` 的資料夾名稱留著不改，只是歷史 |
+| 輸入法那份 framework 裡的 `Autoupdate`、`Updater.app` | 在 | **刪掉**（只做探測用不到；少兩個能在沙盒外被送出的程式，S6）。〔沒量〕Sparkle 啟動與探測時應該用不到它們，§4.2 V2 量探測照常；探測壞了就留著它們、只靠 V7 的結果。善解更新那份照留 |
 | Info.plist | `SUEnableInstallerLauncherService = true` | **false** |
 | Sparkle | 探測＋互動更新＋把 Sparkle 視窗抬到設定視窗層（`watch`／`raise`） | **只做每日探測與「立即檢查」**（`checkForUpdateInformation`）；互動路徑與抬視窗整段刪掉 |
 | 「更新到 X」 | `checkForUpdates` | 先關掉設定視窗（§2.3），再 `NSWorkspace.openApplication(at: Contents/Helpers/善解更新.app)`、`activates = true`、不帶參數 |
@@ -82,10 +85,10 @@ tart 虛擬機（macOS 26.6.2），原型分支 `feat/standalone-updater`（`89c
 | 檔案 | 改動 |
 |---|---|
 | `macos/Package.swift` | 新 `executableTarget ShanjieUpdater`（相依 Sparkle、`UpdateHost`）與 `UpdateHost`（只用 Foundation）、`UpdateHostTests`；輸入法的 Sparkle 相依保留 |
-| `scripts/build-app.sh` | 建善解更新、放進 `Contents/Helpers`，它自己的 `Contents/Frameworks` 帶一份 Sparkle.framework（刪掉 `XPCServices`）；輸入法那份 framework 也刪掉 `XPCServices`；ad-hoc 簽章由內而外：善解更新的 Sparkle（`Autoupdate`、`Updater.app`、framework）→ 善解更新 → 輸入法的 Sparkle → 輸入法（三個 entitlements）；簽章前 `chmod -R a+rX,go-w` |
-| `.github/workflows/release.yml` `sign` | 同一個順序，全部 `--options runtime --timestamp`，只有輸入法帶 `--entitlements`（字面值改成三個鍵）；**解開建置產物用 `tar -xpf`，簽章前 `chmod -R a+rX,go-w`**（`umask 077` 會讓 bundle 變成 0700／0600，root 擁有時使用者讀不到、善解更新也執行不了；system-install §1）；公證一次。`verify()`：entitlements 整份等於三個鍵；兩份 framework 都沒有 `.xpc`、都是 Team 簽章、hardened runtime、沒有 entitlements；善解更新是 Team 簽章、hardened runtime、沒有 entitlements、Info.plist 沒有那幾個鍵；輸入法的 `SUEnableInstallerLauncherService` 是 false；`find ! -perm -o+r` 為空、目錄與執行檔都有 `o+x`、沒有群組或其他人可寫、沒有 setuid／setgid |
+| `scripts/build-app.sh` | 建善解更新、放進 `Contents/Helpers`，它自己的 `Contents/Frameworks` 帶一份 Sparkle.framework（刪掉 `XPCServices`）；輸入法那份 framework 刪掉 `XPCServices`、`Autoupdate`、`Updater.app`；ad-hoc 簽章由內而外：善解更新的 Sparkle（`Autoupdate`、`Updater.app`、framework）→ 善解更新 → 輸入法的 Sparkle → 輸入法（三個 entitlements）；簽章前 `chmod -R a+rX,go-w` |
+| `.github/workflows/release.yml` `sign` | 同一個順序，全部 `--options runtime --timestamp`，只有輸入法帶 `--entitlements`（字面值改成三個鍵）；**解開建置產物用 `tar -xpf`，簽章前 `chmod -R a+rX,go-w`**（`umask 077` 會讓 bundle 變成 0700／0600，root 擁有時使用者讀不到、善解更新也執行不了；system-install §1）；公證一次。`verify()`：entitlements 整份等於三個鍵；兩份 framework 都沒有 `.xpc`，輸入法那份沒有 `Autoupdate` 與 `Updater.app`、善解更新那份兩個都在；都是 Team 簽章、hardened runtime、沒有 entitlements；善解更新是 Team 簽章、hardened runtime、沒有 entitlements、Info.plist 沒有那幾個鍵；輸入法的 `SUEnableInstallerLauncherService` 是 false；`find ! -perm -o+r` 為空、目錄與執行檔都有 `o+x`、沒有群組或其他人可寫、沒有 setuid／setgid |
 | `scripts/check-app.sh`、`check-entitlements.sh` | 和 `verify()` 同樣的斷言（ad-hoc 版不查 Team 與 runtime）；刪掉修訂三的 `Installer.xpc` 與資料夾位置那幾條 |
-| `scripts/test-sandbox-mutations.sh` | 刪掉修訂三那三種；每種新斷言一個突變，都要讓檢查失敗：entitlements 加回 `-spks`、輸入法 `SUEnableInstallerLauncherService` 改 true、善解更新的 Info.plist 塞 `SUFeedURL`、任何一份 framework 放回 `.xpc`、`Contents/Helpers` 多一個 App、`chmod 700` 一個檔、`chmod g+w` 一個檔 |
+| `scripts/test-sandbox-mutations.sh` | 刪掉修訂三那三種；每種新斷言一個突變，都要讓檢查失敗：entitlements 加回 `-spks`、輸入法 `SUEnableInstallerLauncherService` 改 true、善解更新的 Info.plist 塞 `SUFeedURL`、任何一份 framework 放回 `.xpc`、輸入法那份放回 `Autoupdate`、`Contents/Helpers` 多一個 App、`chmod 700` 一個檔、`chmod g+w` 一個檔 |
 | 安裝程式 | 不變（輸入法 zip 是它的資源） |
 
 ### 2.5 移轉與共存
@@ -106,15 +109,17 @@ tart 虛擬機（macOS 26.6.2），原型分支 `feat/standalone-updater`（`89c
 
 | 路徑 | 修訂三 | 這片之後 |
 |---|---|---|
-| 對安裝服務給假 host（可寫位置、自己的公鑰）→ 在沙盒外執行 | 可以（F1） | 不行：沒有 mach-lookup 例外，沙盒擋下查找（V2 那筆拒絕就是這個）；輸入法 bundle 裡沒有任何安裝服務；善解更新裡的 launcher 只用它自己算出的 host |
+| 對安裝服務給假 host（可寫位置、自己的公鑰）→ 在沙盒外執行 | 可以（F1） | 輸入法 bundle 裡沒有 XPC 安裝服務，也沒有 mach-lookup 例外；善解更新裡的 launcher 只用它自己算出的 host。**前提沒量**：輸入法程序裡的 Sparkle 仍帶著程序內的 launcher（S6），它用 `SMJobSubmit` 送出程式；沙盒擋不擋這個送出由 §4.2 V7 量，擋不住就是停止條件。另外輸入法那份 framework 刪掉 `Autoupdate` 與 `Updater.app`，launcher 找不到要送的程式 |
+| 在 host 網域的偏好設定寫 `SUFeedURL`，讓善解更新讀重播的舊 appcast（凍結更新） | — | 不行：善解更新與輸入法的 delegate 都把 feed 釘在 Info.plist（§2.1），§4.2 V6 量 |
 | 套件安裝類型 → 直接系統 domain → 以善解的名義跳密碼框 | 可以（P1-A） | 不行：類型來自有簽章的 feed，沒有 EdDSA 私鑰改不了；善解更新另外只接受 `application` 類型 |
 | 啟動善解更新 | — | 可以，但帶不了參數（A1）；沒有新版就靜靜結束；有新版時出現的是真的更新，等於替使用者按了一次「更新」 |
-| 把輸入法 bundle 複製到 container、改 Info.plist、啟動裡面的善解更新 | — | 路徑檢查失敗就結束（V5）；沙盒寫出的檔帶 quarantine |
+| 把輸入法 bundle 複製到 container、改 Info.plist、啟動裡面的善解更新 | — | 路徑檢查失敗就結束（V5）；沙盒寫出的檔〔推論，沒量〕帶 quarantine |
+| 對善解更新送開檔事件，讓 AppKit 跳出帶攻擊者檔名的警告 | — | 什麼都不做的 `application(_:open:)`（§2.1），§4.2 量 |
 | 自己畫一個假的密碼框 | 可以 | 仍然可以（任何有介面的 App 都做得到）。真的密碼框只在使用者按下「更新」、而且有新版時出現，標題是系統的，文字有「善解更新」與「善解輸入法」兩個名字；關於頁照實寫（§2.3） |
 | 把按鍵送出去 | 可以（`network.client`） | 不變。這是沙盒對這個 App 擋不住的事 |
 | 讀使用者文件、其他 App 資料、寫 container 外 | 擋得住，但 F1 可逃 | 擋得住，沒有已知的逃脫路 |
 
-- **以 root 執行的程式碼**：只有 Sparkle 的 `Autoupdate`（系統 domain 時，由系統的 `SMJobSubmit` 啟動）；我們沒有任何 root 程式碼，善解更新以使用者身分執行。
+- **更新路徑上以 root 執行的程式碼**：只有 Sparkle 的 `Autoupdate`（系統 domain 時，由系統的 `SMJobSubmit` 啟動）；更新路徑上沒有我們的 root 程式碼，善解更新以使用者身分執行。（安裝程式「這台 Mac」的 root 階段是我們的 root 程式碼，在 `system-install.md` §2.3。）
 - **持有 EdDSA 私鑰與 feed 寫入權的人**：今天能讓所有使用者的輸入法換成任意程式（R10）；`/Library` 之後多了「以 root 換檔」，換完仍以使用者身分執行。善解更新只接受 `application` 類型，所以拿不到「以 root 跑 `installer`」這條。R10 與 about-update §0.1 照實加這兩句。
 - **Sparkle 版本從此是發版關卡**：系統 domain 讓 Sparkle 以 root 執行的漏洞類別（2.9.6 修過的兩則）變得相關。`Package.resolved` 釘住版本；Sparkle 有新的安全公告就先升再發，寫進 `docs/releases/README.md`。
 - **還留著的攻擊面**：探測的 Sparkle（XML 與簽章解析）仍在看得到按鍵的程序裡，A-2 才搬走；`network.client` 不變；不在沙盒的使用者層惡意程式本來就能換掉 `~/Library` 的輸入法與善解更新，`/Library` 多一層 root 擁有。
@@ -135,8 +140,12 @@ tart 虛擬機（macOS 26.6.2），原型分支 `feat/standalone-updater`（`89c
 - V4、V1、V2、V5、V3 依序，和 §1.1 同樣的斷言，另外：
   - V1：按「更新到 X」後設定視窗關掉、善解更新的視窗在最前面（維護者在虛擬機裡看）；
   - V2：明確記下有沒有「存取其他 App 的資料」詢問（有的話不是停止條件，寫進發版說明與研究紀錄）；
-  - 每一步的 `log`（`/usr/bin/log show --predicate 'eventMessage CONTAINS "deny"'`，從按下更新到新版啟動）**只允許輸入法程序的 `mach-lookup <ID>-spks`**；
+  - 每一步的 `log`（從按下更新到新版啟動的沙盒拒絕）由腳本逐筆比對：**只允許**程序名稱是輸入法、操作是 `mach-lookup`、服務名稱**整串等於** `<ID>-spks` 的那一種，其他任何一筆（含 `-spki`）都算失敗。`log` 會合併重複的報告、也有不記錄的規則，所以「沒有其他拒絕」只是煙霧測試，不是證明；證明靠 V6、V7 的正面量測；
   - V3 另做一次取消：密碼框按取消，沒有錯誤視窗、輸入法照常打字、`/Library` 的 bundle 沒變。
+- 新增三項（安全審查 2026-10-20）：
+  - **V6 feed 釘住**：在輸入法 container 的偏好設定與 `~/Library/Preferences/<ID>.plist` 各寫 `SUFeedURL=http://127.0.0.1:<另一個埠>/x`，啟動善解更新與按「立即檢查」：那個埠收不到任何請求、照常讀正式（測試）feed。同時記下 container 的那份有沒有被不在沙盒的善解更新讀到（cfprefsd 導向的假說），寫進研究紀錄。
+  - **V7 沙盒擋不擋程序內的 launcher**（S6）：只在測試組建裡，讓輸入法保留 `Autoupdate` 與 `Updater.app`、直接呼叫 `checkForUpdates()`（舊的互動路徑），指向本機 feed 的新版。預期：安裝失敗、`log` 有送出被拒的紀錄、沒有 `Autoupdate` 程序、bundle 沒變。**裝成功就是停止條件**（F1 沒關）。這個組建只在虛擬機用，不進 repo 的出貨流程。
+  - **開檔事件**：`open -a <善解更新.app 的路徑> /tmp/任意檔名.txt`：沒有視窗、沒有警告，立刻結束。
 
 ### 4.3 dry run 與維護者的 Mac
 
@@ -156,6 +165,7 @@ tart 虛擬機（macOS 26.6.2），原型分支 `feat/standalone-updater`（`89c
 - **停止條件**（碰到就停，回報維護者）：
   - 沙盒輸入法啟動不了善解更新，或關掉設定視窗之後它的視窗仍抬不到前面（§4.2 V1）；
   - 系統 domain 從善解更新走不通（§4.2 V3；canary 的 `/Library` 那條）；
+  - 沙盒輸入法程序內的 launcher 裝得成功（§4.2 V7），或 feed 網址仍被偏好設定蓋掉（§4.2 V6）；
   - 允許清單以外的沙盒拒絕（§4.2、§4.3、canary）；
   - 公證拒絕巢狀 App（§4.3）；
   - 輸入法需要第四個 entitlement、或善解更新需要任何 entitlement 才能運作：停下來問，不自行加；
@@ -185,3 +195,4 @@ tart 虛擬機（macOS 26.6.2），原型分支 `feat/standalone-updater`（`89c
 
 | 審查 | 結果 | 處置 |
 |---|---|---|
+| security-reviewer（2026-10-20，草稿） | 這份沒有 P0、P1。P2-1：`SUFeedURL` 會先讀 host 網域的 user defaults（host 不是主 bundle 時），S2 不成立；被攻破的輸入法若寫得進那個網域，可以讓善解更新讀重播的舊 appcast，凍結更新（〔原始碼〕，cfprefsd 導向是假說）。P3-1：輸入法程序裡仍有程序內的 launcher，F1 關不關取決於沙盒擋不擋 `SMJobSubmit`，沒量；V2 那筆拒絕是探測的狀態查詢，不是證據。P3-2：允許清單要逐字比對，`log` 的「沒有拒絕」只是煙霧測試。P3-3：resume 不經過類型的 delegate。P3-4：開檔事件可能讓 AppKit 跳警告（假說）。P3-7：S5「新 bundle 的 ID 要等於 host」在原始碼裡找不到；「沒有 root 程式碼」要限定在更新路徑；quarantine 是推論；A1 可補 `environment` | 全部 FIX：P2-1 → S2 改寫、§2.1 feed 網址列（delegate 釘在 Info.plist，輸入法也照做）、§3 新列、§4.2 V6、§5；P3-1 → S6、§2.2 刪輸入法那份的 `Autoupdate`／`Updater.app`、§2.4、§3 第一列、§4.2 V7、§5；P3-2 → §4.2 腳本逐字比對；P3-3 → §2.1 安裝類型列；P3-4 → §2.1 參數列、§3、§4.2；P3-7 → S5、§3、A1。U2 的 P1-1、P2-2 等在 `system-install.md` §7 |

@@ -1,6 +1,6 @@
 # 契約：安裝方式由使用者選，「這台 Mac」裝到 `/Library/Input Methods`（system-install）
 
-狀態：**修訂一草稿**（2026-10-20），待 fresh `pilotfish:plan-verifier` 與 `pilotfish:security-reviewer`。第一版兩份審查都是 REVISE（§7），這一版照它們與維護者同日的三個決定改寫：
+狀態：**修訂一草稿**（2026-10-20）：security-reviewer 已審、處置在 §7，待 fresh `pilotfish:plan-verifier`。第一版兩份審查都是 REVISE（§7），這一版照它們與維護者同日的三個決定改寫：
 
 1. 安裝方式**讓使用者自己選**：安裝程式並列兩個選項、**沒有預設**，各寫清楚功能與取捨；
 2. 裝給整台 Mac 的更新**保留管理員密碼**；
@@ -70,18 +70,19 @@
 ### 2.3 root 階段（只在安裝程式裡；安全審查 P1-B、P2-C、P3）
 
 - **常數指令**：root 階段是編進安裝程式（`ShanjieInstall`）的固定指令字串，**不執行 bundle 裡的任何腳本**（安裝程式與它的資源在使用者寫得到的位置）。唯一的變數是安裝程式自己解開的暫存路徑（`NSTemporaryDirectory()` 底下、安裝程式自己建的 UUID 資料夾）；組字串前先斷言它只含預期的字元，再用單引號跳脫。
-- **執行**：`NSAppleScript` 的 `do shell script "<指令>" with administrator privileges`，在主執行緒呼叫；指令本身以 `/usr/bin/env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin` 開頭、`umask 022`、全部用絕對路徑。使用者按取消（AppleScript 錯誤 −128）就回到歡迎頁。
-- **步驟**（以 root；任何一步失敗就停、清掉暫存、不動現有的 bundle）：
-  1. 斷言 `/Library/Input Methods` 是目錄、不是符號連結、擁有者 `root:wheel`、沒有群組或其他人可寫；不存在就以 `root:wheel` 755 建立；
+- **執行**：`NSAppleScript` 的 `do shell script "<指令>" with administrator privileges`，在主執行緒呼叫。指令的結構固定是 `/usr/bin/env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin /bin/sh -c '<腳本>'`（`env -i` 只作用在它後面那一個指令，`umask 022` 是 shell 內建，所以腳本必須在 `sh -c` 裡）；腳本裡全部用絕對路徑。兩層跳脫（腳本裡的暫存路徑用 shell 單引號、整串放進 AppleScript 字串字面值時跳脫 `\` 與 `"`，指定需求裡的雙引號就在這一層）由同一個純函式負責，測試把組出的 AppleScript 來源還原回腳本與路徑、逐字比對（安全審查 P3-5）。使用者按取消（AppleScript 錯誤 −128）就回到歡迎頁。
+- **步驟**（以 root；任何一步失敗就停、清掉 staging、不動現有的 bundle）：
+  1. 斷言 `/Library/Input Methods` 是目錄、不是符號連結、擁有者 uid 0、群組與其他人都不可寫（群組不限定 wheel：出廠的群組 §4.3 a 在全新虛擬機量一次）；不存在就以 `root:wheel` 755 建立；
   2. `mktemp -d "/Library/Input Methods/.shanjie-staging.XXXXXX"`（root 擁有、只有 root 能寫）；
-  3. `ditto --noqtn <暫存路徑>/善解輸入法.app <staging>/善解輸入法.app`：從使用者的暫存**複製進 root 擁有的目錄**，之後使用者改不到它；
-  4. `chown -R root:wheel`、`chmod -R u+rwX,go+rX,go-w,ug-s`；
+  3. `ditto --noqtn --noacl <暫存路徑>/善解輸入法.app <staging>/善解輸入法.app`：從使用者的暫存**複製進 root 擁有的目錄**，不帶 ACL（`ditto` 預設會保留 ACL，安全審查 P1-1）；之後使用者改不到它；
+  4. `chown -R root:wheel`、`chmod -RN`（清掉任何 ACL）、`chmod -R u+rwX,go+rX,go-w,ug-s`；
   5. **在 root 擁有的副本上驗簽章**：`codesign --verify --strict --deep -R='anchor apple generic and identifier "com.nyanako.inputmethod.shanjie" and certificate leaf[subject.OU] = "2LJ882GPY8"'`（驗的是完整封印，不是 `codesign -dv` 的讀資訊）；
-  6. 目的地若是符號連結就停；舊的 `.shanjie-previous` 刪掉，現有的 `善解輸入法.app` 改名成 `.shanjie-previous`，副本 `mv` 到 `善解輸入法.app`（同一個檔案系統，改名是原子的）；刪掉 staging。
+  6. **斷言中繼資料與版本**：整棵樹沒有 ACL（`/bin/ls -leR` 的輸出沒有 ACL 列）；副本的 `CFBundleVersion`（`/usr/bin/plutil -extract CFBundleVersion raw`）**等於編進安裝程式執行檔的常數**（不讀安裝程式的 Info.plist），而且不低於 `/Library` 現有那份的 `CFBundleVersion`（「重新安裝」允許相同）。這兩條擋住「趁使用者輸入密碼的幾秒，同使用者的程式對解開的檔加 ACL」與「把暫存換成任何一個 Developer ID 簽過的舊版」（安全審查 P1-1、P2-2）；
+  7. 目的地若是符號連結就停；舊的 `.shanjie-previous` 刪掉，現有的 `善解輸入法.app` 改名成 `.shanjie-previous`，副本 `mv` 到 `善解輸入法.app`（同一個檔案系統，改名是原子的）；刪掉 staging。
 - 呼叫 root 階段之前，安裝程式在自己的程序裡對解開的 bundle 先驗一次同樣的指定需求，失敗就不跳密碼框、直接顯示錯誤（給使用者看的提早失敗，不是安全檢查；安全檢查是第 5 步）。
 - 不讀 HOME、不碰任何帳號的檔案；只寫 `/Library/Input Methods` 底下的 `善解輸入法.app`、`.shanjie-previous`、`.shanjie-staging.*` 三種路徑。
 - 不加任何 entitlement、不改簽章規則；需要 entitlement 才拿得到授權就是停止條件（§5）。
-- **測試**：指令由純函式組出，參數是根目錄、擁有者與指定需求（正式值是常數）。CI 以一般使用者跑組出的指令：根目錄是暫存目錄、擁有者是自己；ad-hoc 的測試 bundle 用 `identifier` 需求時要成功，用正式需求時要失敗而且目的地沒變、staging 清掉；開發版 ID 被拒；`/Library/Input Methods` 的替身被設成其他人可寫時要停。
+- **測試**：指令由純函式組出，參數是根目錄、擁有者與指定需求（正式值是常數）。CI 以一般使用者跑組出的指令：根目錄是暫存目錄、擁有者是自己；ad-hoc 的測試 bundle 用 `identifier` 需求時要成功，用正式需求時要失敗而且目的地沒變、staging 清掉；開發版 ID 被拒；`/Library/Input Methods` 的替身被設成其他人可寫時要停；**來源帶 ACL 時結果沒有 ACL**（`chmod +a` 不需要 root）；**版本低於常數或低於目的地現有那份時被拒、目的地不變**；AppleScript 來源的還原比對（含路徑裡的空格與全形字）。
 
 ### 2.4 使用者階段與登記
 
@@ -107,7 +108,7 @@
   | 英文代價 | Installing and every update ask for an administrator password once. | Other accounts do not see Shanjie. |
   | 英文按鈕 | Install for This Mac | My Account Only |
 
-- 下方「詳細資訊」（展開才看得到）：「這台 Mac」把善解放進系統的輸入法資料夾，由系統保護檔案；之後更新時，善解更新會跳出系統的密碼框，文字是「善解更新 wants permission to update 善解輸入法.」，只在你按下關於頁的「更新」之後出現。「只有我的帳號」就是之前的安裝方式。兩種之間可以重新打開安裝程式切換，學習資料與設定不受影響（container 依 bundle ID）。不是管理員的帳號，請選「只有我的帳號」，或請管理員安裝。
+- 下方「詳細資訊」（展開才看得到）：「這台 Mac」把善解放進系統的輸入法資料夾，由系統保護檔案；之後更新時，善解更新會跳出系統的密碼框，文字是「善解更新 wants permission to update 善解輸入法.」，只在你按下關於頁的「更新」之後出現。選「這台 Mac」時，有程式開著安全輸入的期間，你打的字會經過善解（和平常一樣：學習暫停、不讀前文、不記錄）；終端機開著「加密的鍵盤輸入」時，`sudo` 的密碼提示也一樣會經過善解。「只有我的帳號」就是之前的安裝方式。兩種之間可以重新打開安裝程式切換，學習資料與設定不受影響（container 依 bundle ID）。不是管理員的帳號，請選「只有我的帳號」，或請管理員安裝。
 - 「這台 Mac」按下後，系統的管理員密碼框掛安裝程式的名字；取消就回到歡迎頁。
 - `--render-steps` 多畫：歡迎頁（S 沒有、S 已有兩種）、「只有我的帳號」被擋下的畫面、要求登出的完成頁。文字與版面照外觀規則由維護者看圖逐輪定。
 
@@ -137,9 +138,9 @@
 
 ## 3. 安全
 
-- **安全輸入期間，按鍵會經過善解**（安全審查 P2-B，照實寫）：之前善解被反灰，背景程式持有安全輸入時使用者改用蘋果注音，按鍵經過的是蘋果注音；選「這台 Mac」之後經過的是善解。密碼欄本身由系統強制 ASCII，善解收不到。善解在安全輸入期間：學習暫停（每次可能學習的核心呼叫前都送 `setLearning(false)`）、不讀前文（`leftContext` 只在沒暫停時讀），兩者都由同一個 `learningPause` 決定；不寫日誌（R2）。網路只有每日的更新探測，和按鍵無關。
+- **安全輸入期間，按鍵會經過善解**（安全審查 P2-B，照實寫）：之前善解被反灰，背景程式持有安全輸入時使用者改用蘋果注音，按鍵經過的是蘋果注音；選「這台 Mac」之後經過的是善解。〔沒量〕系統的密碼欄（`NSSecureTextField`）應該會強制 ASCII、不經輸入法；但**不是密碼欄的地方不受這條保護**：例如終端機開著「加密的鍵盤輸入」時，`sudo` 的密碼提示只是一般文字，按鍵會照常經過善解（英數直通）。安裝程式的「詳細資訊」照實寫（§2.5）。善解在安全輸入期間：學習暫停（每次可能學習的核心呼叫前都送 `setLearning(false)`）、不讀前文（`leftContext` 只在沒暫停時讀），兩者都由同一個 `learningPause` 決定；不寫日誌（R2）。網路只有每日的更新探測，和按鍵無關。
 - **規則**：現在與之後任何會讀取或留存使用者文字的功能（例如 App 計數器、「回報這句」、前文回傳），都要經過 `learningPause`，在它的契約裡寫明。這片之後安全輸入期間善解會一直顯示學習暫停，「指出卡住安全輸入的程式」建議排下一小片（§6）。
-- **root 階段**（P1-B、P2-C、P3）：§2.3。重點：不執行使用者位置的腳本；先複製到 root 擁有的目錄、再在那裡驗完整簽章與指定需求，沒有檢查與使用之間的空窗；清環境變數、絕對路徑；權限清掉群組與其他人的寫入與 setuid／setgid；目的地與上層的擁有者、權限、符號連結先斷言。
+- **root 階段**（P1-B、P2-C、P3；修訂一的安全審查 P1-1、P2-2、P3-5、P3-6）：§2.3。重點：不執行使用者位置的腳本；先複製到 root 擁有的目錄（不帶 ACL）、再在那裡驗完整簽章與指定需求、斷言沒有 ACL、版本等於編進安裝程式的常數而且不降版，程式碼與中繼資料都沒有檢查與使用之間的空窗；清環境變數、絕對路徑、指令結構固定；權限清掉群組與其他人的寫入與 setuid／setgid；上層的擁有者、權限、符號連結先斷言。
 - **root 擁有的 bundle**：使用者層程序（含被攻破的輸入法）改不了自己的 bundle 來持久化，比帳號層多一層。
 - **更新**：由善解更新完成（`standalone-updater.md` §3）。善解只在使用者按下關於頁的「更新」、而且有新版時才會出現系統密碼框；安裝程式的說明與關於頁照實寫，讓使用者認得真的框。被攻破的輸入法自己畫的假密碼框擋不住，和任何 App 一樣。
 - **持有 EdDSA 私鑰與 feed 寫入權的人**：多了「以 root 換檔」，換完仍以使用者身分執行；善解更新只接受 `application` 類型。R10 與 about-update §0.1 照實加一句（U1 的 PR）。
@@ -167,7 +168,7 @@
 
 | # | 情境 | 斷言 |
 |---|---|---|
-| a | 全新安裝「這台 Mac」 | 密碼框 → `/Library/Input Methods/善解輸入法.app` 是 `root:wheel`、全部可讀、沒有群組可寫；記下有沒有「Allow … to enable "Shanjie"?」詢問與按下後的流程 → 完成頁要求登出 → 登出再登入 → 執行中的善解程序路徑在 `/Library`（`ps -o comm=`）→ 新開的文字編輯能打中文 → 背景持有安全輸入時不反灰、選單顯示學習暫停、打得出中文 |
+| a | 全新安裝「這台 Mac」 | 安裝前記下出廠的 `/Library/Input Methods` 擁有者、群組與權限（§2.3 第 1 步的條件）；密碼框 → `/Library/Input Methods/善解輸入法.app` 是 `root:wheel`、全部可讀、沒有群組可寫；記下有沒有「Allow … to enable "Shanjie"?」詢問與按下後的流程 → 完成頁要求登出 → 登出再登入 → 執行中的善解程序路徑在 `/Library`（`ps -o comm=`）→ 新開的文字編輯能打中文 → 背景持有安全輸入時不反灰、選單顯示學習暫停、打得出中文 |
 | b | 取消密碼框 | 回到歡迎頁；`/Library/Input Methods` 沒有任何新檔（含 staging） |
 | c | 移轉：0.4.7（`~/Library`）→ 安裝程式選「這台 Mac」 | 帳號層只剩 `.shanjie-previous`；安裝程式回報走了強制登記（不是跳過）；登出一次、不重開機；登入後程序路徑在 `/Library`、新開的 App 能打字、系統設定看得到善解；container 裡的學習檔雜湊不變；0 沙盒拒絕。「搬了沒登記」的壞狀態在「程序路徑」與「新開的 App 能打字」兩條會失敗（P1） |
 | d | 「只有我的帳號」，`/Library` 已有 | 停下並印出移除指令；什麼都沒改 |
@@ -213,3 +214,4 @@
 |---|---|---|
 | plan-verifier（2026-10-20，第一版） | REVISE，8 項：(1) 沒有 security-reviewer 的紀錄；(2) root 階段的信任邊界（腳本與來源 App 在使用者可寫的位置、`codesign -dv` 不驗封印、檢查與使用之間有空窗、`chmod -R a+rX` 不清寫入權與 setuid）；(3) 搬家時要強制重新登記，和 installer-v2 §9 的跳過規則衝突、要寫明換位置才註冊、同位置更新照舊跳過；(4) 移轉驗收在「搬了沒登記」的壞狀態也會過；(5) `InstallerPlan.decide` 的決策表不完整（兩份都在、帳號層較新、重新安裝裝到哪）；(6) §0 與實機步驟對不上；(7) 沒有凍結 tag；(8) Sparkle 系統 domain 的停止條件對不到任何步驟 | 修訂一全部 FIX：(1) 下一列；(2) §2.3；(3) §2.2 的登記欄、§2.4 第 4 步；(4) §4.3 c；(5) §2.2；(6) §0 改成對應 §4 的三項；(7) §4.5；(8) §5 表格 |
 | security-reviewer（2026-10-20，第一版） | P1-A：§3「F1 不會升成 root」不成立：Sparkle 2.10.0 對「套件安裝」類型不看 host 路徑就走系統 domain，host 路徑與類型都由呼叫者給、不綁呼叫者（〔原始碼〕，未實測）；`/Library` 不新增這條路，但讓密碼框變常態。P1-B：root 階段要先複製到 root 擁有的暫存目錄、驗完整簽章與指定需求、清環境變數、用編進安裝程式的常數指令。P2-A：系統 domain 讓 Sparkle 以 root 執行的漏洞類別（2.9.6 修）變得相關，版本要當發版關卡。P2-B：安全輸入期間不再擋住按鍵，要照實寫，並要求所有會讀或留存文字的功能都受 `learningPause` 管。P2-C：`NSAppleScript` 的引號與環境、要在主執行緒。P3：`/Library/Input Methods` 的擁有者與權限要先斷言；權限斷言加群組／其他可寫與 setuid；還原與解除安裝指令要完整加引號 | P1-A：維護者決定把獨立更新程式放進 v0.5.0（`standalone-updater.md` §3）；本文 §3 刪掉那句。P1-B、P2-C、P3：§2.3、§2.8 的 README 列。P2-A：`standalone-updater.md` §3。P2-B：§3 前兩點 |
+| security-reviewer（2026-10-20，修訂一） | P1-1：root 階段的 `ditto` 預設保留 ACL，`chown`／`chmod` 不清、`codesign` 不看；同使用者的程式趁輸入密碼的幾秒對解開的檔加 ACL，`/Library` 那份就變成這個使用者改得動、所有帳號都會載入。P2-2：指定需求擋不住任何一個 Developer ID 簽過的舊版，root 階段沒有版本檢查（降版到沒有沙盒的 0.4.7）。P2-B（第一版）只部分關：歡迎頁沒告訴使用者安全輸入期間按鍵會經過善解；終端機 `sudo` 提示不是密碼欄。P2-C 部分關：`env -i` 包在哪一層、AppleScript 跳脫沒寫死（P3-5）。P3-6：上層群組限定 wheel 可能太嚴（fail closed）。P3-7：「密碼欄強制 ASCII」沒量 | 全部 FIX：P1-1 → §2.3 第 3、4、6 步（`--noacl`、`chmod -RN`、斷言沒有 ACL）與 CI 案例；P2-2 → §2.3 第 6 步（版本等於編進執行檔的常數、不低於現有那份）與 CI 案例；P2-B → §2.5 詳細資訊、§3 第一點；P3-5 → §2.3 執行；P3-6 → §2.3 第 1 步、§4.3 a；P3-7 → §3 第一點標〔沒量〕 |
