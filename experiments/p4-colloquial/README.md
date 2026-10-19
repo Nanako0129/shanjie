@@ -14,8 +14,8 @@
 |---|---|
 | 基準 | 出貨的聊天設定：`--context --packs acg --tinylm`，`tinylm.sjtl` `e7c179d8`（M8），融合 α 0.3、τ 2、δ 0.25；這一頁 commit 時 main 的 CLI |
 | 傾印 | 每個集合跑一次基準加 `--dump --dump-words --rowstats --tinylm-scores`（前 64 名、每個候選的切分、最後選字、前 8 名的 `ll`）。私人集合的傾印只在 GCP 上，由腳本結束時刪掉 |
-| 表 T1 | 只用口語計數 `counts-colloquial3.pkl`（SHA-256 `13d0ab5b…`，model-v3 起的那份；已知帶著修 bug 前的「吃→喫、峯」問題）×1，和 `tools/build_lm.py` 同樣的剪枝（2）與折扣（0.75），不用詞類、不用 KN |
-| 表 T2 | T1 的計數加上公開口語池 `pool.tsv`（143,895 句、約 300 萬漢字，SHA-256 `19fdc474…`，Phase 2 建的、授權已核對、已對公開評測集去重）用 `experiments/s2/build_counts_text.py --expected` 算的計數，×1 相加 |
+| 表 T1 | 只用出貨模型（model-v6，`bigram.sjlm` `fc2bddd1…`）建置時的口語計數 `counts-colloquial3.pkl`（SHA-256 `1e7a15ef…`；口語訓練檔沿用舊版，已知帶著修 bug 前的「吃→喫、峯」問題）×1，用 `tools/build_lm.py --corpora` 建、同樣的剪枝（2）與折扣（0.75），不用詞類、不用 KN |
+| 表 T2 | T1 的計數加上公開口語池 `pool.tsv`（143,895 句、約 300 萬漢字，SHA-256 `19fdc474…`，Phase 2 建的、授權已核對、已對公開評測集去重）的計數，×1 相加。池的計數和 model-v6 的口語計數同一套：`experiments/s2/build_counts_text.py --expected --extra-lexicon acg-count.tsv --extra-lexicon names-count.tsv`（model-v6 建置時的兩份計數詞表，`e8757303…`、`5c14a359…`） |
 | 口語分數 lc | 候選的切分（`--dump-words`）w₁…wₖ：lc ＝ Σ log10 P(wᵢ｜wᵢ₋₁) ＋ log10 P(`</s>`｜wₖ)，w₀＝`<s>`（不接前文：前文已在 n-gram 分數裡）。P 用 `reference/proto/lm.py` `BigramLM.prob` 的絕對折扣回退；回退到的 unigram 是表自己的 (c(w)＋1)／(N＋V＋1)，表外的詞 c＝0 |
 | 疊加層扣分 | k ＝ 候選切分裡「在 `data/lexicon/overlay-add.tsv` 或詞包、不在基礎詞庫」的詞數（和 D3 (ii) 同一個定義，`names-add.tsv` 不算） |
 | 新分數 | s ＝ ng ＋ μ·lc − γ·k；依 s 重排前 64 名，取前 8 名，用出貨融合重選（融合裡的 n-gram 分數換成 s，τ 也看 s 的前兩名差）。書面設定不加（μ＝γ＝0），所以書面逐列不變 |
