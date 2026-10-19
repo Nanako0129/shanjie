@@ -3,7 +3,7 @@
 狀態：**修訂二（2026-10-19）收尾審查 READY**（§8）：安全審查完成（§7.2），維護者同日三題選擇題定案（§6 第 4–6 項）。實作中。
 
 - 修訂一在 2026-10-10 收尾審查 READY，實作放在分支 `feat/app-sandbox`（PR #94，草稿）。那時排定在 v0.4.0 之後合併、以 v0.5.0 發佈。
-- 之後 main 前進了 1,032 個 commit，其中 v0.4.7 內嵌了 Sparkle 自動更新（`docs/contracts/about-update.md`）。它在輸入法程序裡連網、刪掉了 Sparkle 的 XPC 服務，和修訂一「只有兩個 entitlements」的設計衝突。
+- 到 2026-10-19 清晨，舊分支已落後 main 1,032 個 commit（main 當時在 `e8c44f9e`），其中 v0.4.7 內嵌了 Sparkle 自動更新（`docs/contracts/about-update.md`）。它在輸入法程序裡連網、刪掉了 Sparkle 的 XPC 服務，和修訂一「只有兩個 entitlements」的設計衝突。
 - 修訂二改在現在的 main 上重做（新分支 `feat/app-sandbox-r2`）：
   - 舊分支只當參考，不合併；PR #94 在新 PR 開出時關掉。
   - 新增 §2.8（Sparkle 在沙盒裡）與 §2.9（輸入法碰到的其他系統資源）。
@@ -202,7 +202,7 @@
   - 移轉是「搬」。降回沒有沙盒的版本時，舊版看到的是空的學習資料與預設設定。
   - 退回期間學到的資料留在舊位置；再升級時 container 已經存在，不會再搬。
   - 這兩點寫進 `install-ime.sh` 與安裝程式「重新安裝」的退回說明。
-  - 另外寫進 `docs/sandbox-restore.md`：Sparkle 不會降版，退回只能用安裝程式或 `install-ime.sh` 裝舊版。
+  - 另外寫進 `docs/sandbox-restore.md`：Sparkle 不會降版，安裝程式也不會（`InstallerPlan.decide`），所以退回要用 `install-ime.sh`，或先刪掉已安裝的那一份再用舊版的安裝程式。
 - **搬回**：
   - `docs/sandbox-restore.md` 寫一個手動指令：
     1. 先結束輸入法程序；
@@ -257,7 +257,7 @@
 6. `make selftest-bundled SELFTEST_BUNDLE_ID=com.nyanako.inputmethod.shanjie.selftest-$GITHUB_RUN_ID`，前後各檢查一次 `~/Library/Containers/<該 ID>`：之前不存在、之後存在。
    - 原本傳空值、用正式 ID 的那一步（`ci.yml` 現在的 `SELFTEST_BUNDLE_ID=`）取消；正式 ID 的 selftest 已在第 3 步與第 7 步跑過。
 7. `EXPECTED_BUNDLE_ID=com.nyanako.inputmethod.shanjie scripts/check-app.sh build/善解輸入法.app`。
-8. **突變測試**：複製 `build/善解輸入法.app` 七份，各做一種改動。
+8. **突變測試**（`scripts/test-sandbox-mutations.sh`，本機與 CI 共用；實作時改成腳本）：複製 `build/善解輸入法.app` 七份，各做一種改動。
    - 用 `codesign --force --sign -` 重簽（不帶 `--preserve-metadata`）：`scripts/check-entitlements.sh` 要失敗。
    - 帶 `--preserve-metadata=entitlements` 重簽：`scripts/check-entitlements.sh` 要通過。
    - entitlements 多一個鍵（例如 `com.apple.security.cs.disable-library-validation`）重簽：`scripts/check-entitlements.sh` 要失敗。
@@ -265,7 +265,7 @@
    - 刪掉 `Installer.xpc` 再重簽 framework 與 App：`check-app.sh` 第 3 項要失敗。
    - `XPCServices` 裡多放一個 `.xpc`（複製 `Installer.xpc` 改名）再重簽：`check-app.sh` 第 3 項要失敗。
    - 把 Info.plist 的 `SUEnableInstallerLauncherService` 改成 `false` 再重簽：`check-app.sh` 第 2 項要失敗。
-   - 第 3 步開頭在 log 印出 runner 的 macOS 版本（`sw_vers`），「沒有清單不搬」量到的是哪一版要看得到（F4）。
+   - 第 3 步在拒絕檢查通過之後、放來源之前，在 log 印出 runner 的 macOS 版本（`sw_vers`），「沒有清單不搬」量到的是哪一版要看得到（F4）。拒絕路徑因此完全沒有輸出以外的副作用。
    - `release.yml` 的那份比對不在分支上跑反向測試（`sign` 只在 main 觸發）；它和 `check-entitlements.sh` 用同一套比對方式，兩處的說明互相指向。
 9. `make installer`、`scripts/check-installer.sh`（不變，用第 1 步的正式組建）。
 
