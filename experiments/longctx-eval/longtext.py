@@ -9,6 +9,7 @@
 import argparse
 import hashlib
 import html.parser
+import glob
 import json
 import math
 import os
@@ -32,7 +33,17 @@ PER_DOC = 3
 MIN_CTX_HAN = 16     # README "前文 ≥ 16 字": read as 16 Han characters of the context
 KEY_HAN = 16
 HAN_CH = re.compile(r"[一-鿿]")
-TARGET_DOCS = 30000    # hplt: about this many documents survive the seeded document selection
+# hplt: about this many documents survive the seeded document selection. 2026-10-20: the first real build (30,000 documents) gave 3,000
+# rows of which about 40% were loan/credit SEO keyword spam, so the content filters below now remove documents and rows after the
+# selection; 60,000 documents (at most 3 candidate rows each) keep the final 3,000-row sample reachable. Not measured: raise it if
+# a build stops under 1,000 rows or ends under 3,000.
+TARGET_DOCS = 60000
+# 2026-10-20 finding: most filter-passing HPLT documents are pixnet.net blogs (192,003 of 203,405), and many are loan/credit SEO
+# keyword spam. A document with at least SPAM_MIN non-overlapping matches of SPAM_RE in its text is dropped (counted as `spam`).
+SPAM_RE = re.compile("貸款|借錢|借款|信貸|當舖|代書|小額|債務|二胎|免留車|地下錢莊|票貼|融資|週轉|周轉")
+SPAM_MIN = 5
+GIBBERISH_PERCENTILE = 0.01      # rows scoring below this percentile of the reference sets' gold sentences are dropped
+GIBBERISH_PROFILE = "chat"
 REPO_URL = "https://github.com/Nanako0129/shanjie"
 MIN_ROWS = 1000
 
@@ -76,6 +87,83 @@ def sample_rows(rows, seed=SEED):
     return [rows[i] for i in keep]
 
 
+def gibberish_threshold(ref_scores):
+    """The GIBBERISH_PERCENTILE of the reference scores (the value at index floor(p * n) of the sorted list)."""
+    s = sorted(ref_scores)
+    return s[int(GIBBERISH_PERCENTILE * len(s))]
+
+
+# ---- the gibberish score: per-character log10 probability of the gold string under the repo's Python reference decoder
+# (reference/proto/lm.py decode, the profile GIBBERISH_PROFILE, the n-gram model of data/lm), as lm_eval.py loads it. There is no
+# fixed-string scorer in the repo, so: decode the row's reading, take the score of the candidate whose surface is the gold string (lenient
+# comparison), and when the gold is not among the 64 candidates the 64th candidate's score, which is an upper bound of the gold's.
+MODEL_FILES = ("bigram.sjlm", "classes.sjc", "kn.sjkn")
+_STATE = None
+
+
+def check_models(lm_dir):
+    """Stops unless every file of MODEL_FILES is in lm_dir and matches data/<name>.sha256. Returns {name: sha256}."""
+    out = {}
+    for name in MODEL_FILES:
+        p, shaf = os.path.join(lm_dir, name), os.path.join(c.ROOT, "data", name + ".sha256")
+        if not os.path.isfile(p):
+            sys.exit(f"longtext: STOP, model file {p} is missing")
+        want = open(shaf).read().split()[0]
+        got = sha256_stream(p)
+        if got != want:
+            sys.exit(f"longtext: STOP, {p} hashes to {got[:16]}…, {shaf} says {want[:16]}…")
+        out[name] = got
+    return out
+
+
+def _load_scorer(lm_dir):
+    sys.path.insert(0, os.path.join(c.ROOT, "reference", "proto"))
+    import lm_eval
+    base = lm_eval.ime.Lexicon(os.path.join(c.ROOT, "data", "lexicon", "mcbpmf-data.txt"), overlay=lm_eval.ime.overlays(None))
+    path = os.path.join(lm_dir, "bigram.sjlm")
+    lm = lm_eval.load_lm(path, base, True, lm_eval.kn_side(path), None)
+    lex = lm_eval.L.cap_overlay(base, lm_eval.ime.capping_words(None), lm)
+    return lm_eval, lex, lm
+
+
+def _init_worker(lm_dir):
+    global _STATE
+    _STATE = _load_scorer(lm_dir)
+
+
+def _char_logprob(pair):
+    lm_eval, lex, lm = _STATE
+    gold, syls = pair
+    nb = lm_eval.L.decode(lex, syls, lm, GIBBERISH_PROFILE)
+    if not nb:
+        return -99.0
+    t = lm_eval.lenient(gold)
+    score = next((sc for sc, ws in nb if lm_eval.lenient("".join(ws)) == t), nb[-1][0])
+    return score / len(gold)
+
+
+def load_gibberish(procs, lm_dir=None):
+    """The `gibberish` argument of build(): the scorer (a process pool of procs), the reference scores of dev302 and user-typing.txt
+    gold sentences, their counts, the model hashes."""
+    lm_dir = lm_dir or os.path.join(c.ROOT, "data", "lm")
+    shas = check_models(lm_dir)
+    _init_worker(lm_dir)
+    import lm_eval
+    dev = lm_eval.rows_of(sorted(glob.glob(os.path.join(c.ROOT, "eval", "dev", "*.txt"))))[:302]
+    typing = lm_eval.rows_of([os.path.join(c.ROOT, "eval", "dev", "user-typing.txt")])
+    pool = None
+    if procs > 1:
+        import multiprocessing as mp
+        pool = mp.Pool(procs, _init_worker, (lm_dir,))
+
+    def score(pairs):
+        work = [(s, rdg.split()) for s, rdg in pairs]
+        return pool.map(_char_logprob, work, chunksize=64) if pool else [_char_logprob(w) for w in work]
+    ref = [(t, syls) for t, syls, _ctx in dev + typing]
+    return {"score": score, "ref_scores": [_char_logprob(r) for r in ref],
+            "ref_counts": {"dev302": len(dev), "user-typing": len(typing)}, "model_sha256": shas}
+
+
 def han_only_copy(path, dst):
     """Streams a training file into dst, one Han-only line per input line. A line with `|` is L0's `context|clause|reading` row
     (context with punctuation): fields 0 and 1 are joined; a line without `|` is a Han run (M's runs-*.txt). Returns line counts."""
@@ -107,7 +195,7 @@ SAMPLING = ("documents: seeded hash of (20261019, document id) selects them whil
             "document and at most 3,000 rows, kept in document order")
 
 
-def build(docs, out, inputs, drop_files=(), report_files=(), procs=None, readings=c.readings, counts=None):
+def build(docs, out, inputs, drop_files=(), report_files=(), procs=None, readings=c.readings, counts=None, gibberish=None):
     n = {} if counts is None else counts
     procs = procs or os.cpu_count() or 1
     n["sampling"] = SAMPLING
@@ -127,6 +215,14 @@ def build(docs, out, inputs, drop_files=(), report_files=(), procs=None, reading
             n["overlap_dropped"][os.path.basename(p)] = sum(hits)
             rows = [r for r, h in zip(rows, hits) if not h]
     n["after_overlap"] = len(rows)
+    if gibberish:      # row level, after readings and overlap: drop the rows whose gold sentence the n-gram model finds far too unlikely
+        thr = gibberish_threshold(gibberish["ref_scores"])
+        sc = gibberish["score"]([(s, rd[s][1]) for _, _, s in rows])
+        n["gibberish_threshold"] = thr
+        n["gibberish_reference"] = {"counts": gibberish["ref_counts"], "percentile": GIBBERISH_PERCENTILE, "model_sha256": gibberish.get("model_sha256")}
+        n["gibberish"] = sum(v < thr for v in sc)
+        rows = [r for r, v in zip(rows, sc) if v >= thr]
+        n["after_gibberish"] = len(rows)
     rows = sample_rows(rows)
     n["final_rows"] = len(rows)
     lines = [f"{x}|{s}|{rd[s][1]}\n" for _, x, s in rows]       # never split the written text: a context may hold U+2028 and friends
@@ -178,7 +274,7 @@ def tw_host(url):
 def hplt_docs(shards, counts, keep=None):
     """Yields (doc_id, [paragraph]) for the documents that pass every filter (and `keep(doc_id)`, when given); counts gets one
     counter per filter. A record without every key of REQUIRED stops the build."""
-    for k in ("docs", "bad_json", "not_object", "null_text", "register", "host", "bad_url", "pii", "passing", "kept"):
+    for k in ("docs", "bad_json", "not_object", "null_text", "register", "host", "bad_url", "pii", "spam", "passing", "kept"):
         counts.setdefault(k, 0)
     for shard in shards:
         p = subprocess.Popen(["zstd", "-dc", shard], stdout=subprocess.PIPE)
@@ -207,6 +303,8 @@ def hplt_docs(shards, counts, keep=None):
                 counts["host"] += 1
             elif d["pii"]:
                 counts["pii"] += 1
+            elif len(SPAM_RE.findall(d["text"])) >= SPAM_MIN:
+                counts["spam"] += 1
             else:
                 counts["passing"] += 1
                 doc_id = f"{os.path.basename(shard)}:{i}"
@@ -219,6 +317,7 @@ def hplt_docs(shards, counts, keep=None):
 
 def cmd_hplt(a):
     counts = {}
+    g = load_gibberish(a.procs) if a.gibberish_ref else None      # stops early when the model files are missing or differ
     before = {s: sha256_stream(s) for s in a.shards}
     if a.doc_fraction is None:
         # two passes: the first only collects the hash of every document that passes the filters; the document selection keeps the
@@ -232,7 +331,7 @@ def cmd_hplt(a):
         keep = lambda d: doc_hash(d) < a.doc_fraction   # noqa: E731
     stop = None
     try:
-        build(hplt_docs(a.shards, counts, keep), a.out, a.shards, a.overlap_drop, a.overlap_report, a.procs, counts=counts)
+        build(hplt_docs(a.shards, counts, keep), a.out, a.shards, a.overlap_drop, a.overlap_report, a.procs, counts=counts, gibberish=g)
     except SystemExit as e:      # any stop: the shard check still runs first
         stop = e
     print(f"documents kept {counts['kept']} of {counts['passing']} passing the filters")
@@ -366,6 +465,8 @@ def main(argv=None):
     h = sub.add_parser("hplt"); h.add_argument("--shards", nargs="+", required=True); common(h)
     h.add_argument("--doc-fraction", type=float, help="keep a passing document when its seeded hash is below this; default: the --target-docs smallest hashes")
     h.add_argument("--target-docs", type=int, default=TARGET_DOCS)
+    h.add_argument("--gibberish-ref", action=argparse.BooleanOptionalAction, default=True,
+                   help="row-level gibberish filter against the dev302 + user-typing percentile (default on; needs data/lm)")
     f = sub.add_parser("wikisource-fetch"); f.add_argument("--titles", required=True); f.add_argument("--out", required=True)
     w = sub.add_parser("wikisource"); w.add_argument("--fetched", required=True); w.add_argument("--titles", required=True); common(w)
     a = ap.parse_args(argv)

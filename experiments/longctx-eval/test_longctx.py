@@ -387,7 +387,7 @@ class Long(unittest.TestCase):
         self.assertEqual([g[0] for g in got], ["s.jsonl.zst:0", "s.jsonl.zst:7"])
         self.assertEqual(got[0][1], ["甲乙", "丙丁"])
         self.assertEqual(counts, {"docs": 11, "bad_json": 1, "not_object": 1, "null_text": 1, "register": 1, "host": 3, "bad_url": 1,
-                                  "pii": 1, "passing": 2, "kept": 2})
+                                  "pii": 1, "spam": 0, "passing": 2, "kept": 2})
 
     @unittest.skipUnless(shutil.which("zstd"), "zstd binary missing")
     def test_hplt_strict_records(self):
@@ -405,7 +405,7 @@ class Long(unittest.TestCase):
         shard = self.zst(lines)
         td = tempfile.mkdtemp()
         args = lambda **k: mock.Mock(shards=[shard], out=os.path.join(td, "o.txt"), overlap_drop=[], overlap_report=[], procs=1,  # noqa: E731
-                                     doc_fraction=k.get("f"), target_docs=k.get("t", 50))
+                                     doc_fraction=k.get("f"), target_docs=k.get("t", 50), gibberish_ref=False)
         ids = []
         for _ in range(2):
             with self.assertRaises(SystemExit):          # too few rows for the minimum: the manifest is still written
@@ -427,9 +427,58 @@ class Long(unittest.TestCase):
         with mock.patch.object(longtext, "sha256_stream", lambda p: next(it)):
             with self.assertRaises(SystemExit) as cm:
                 quiet(longtext.cmd_hplt, mock.Mock(shards=[shard], out=os.path.join(td, "o.txt"), overlap_drop=[], overlap_report=[],
-                                                   procs=1, doc_fraction=1.0, target_docs=1))
+                                                   procs=1, doc_fraction=1.0, target_docs=1, gibberish_ref=False))
         self.assertIn("changed", str(cm.exception.code))
         self.assertFalse(os.path.exists(os.path.join(td, "o.txt")))
+
+    @unittest.skipUnless(shutil.which("zstd"), "zstd binary missing")
+    def test_hplt_spam_filter_threshold(self):
+        def text(n):
+            return "\n".join(["今天天氣很好"] + ["我要貸款"] * n)
+        lines = [self.hplt_line({"ID": 1.0}, "https://a.com.tw/", text=text(k)) for k in (4, 5, 6)]
+        lines.append(self.hplt_line({"ID": 1.0}, "https://a.com.tw/", text="週轉 周轉 借錢 借款 信貸"))                      # 5 different keywords
+        lines.append(self.hplt_line({"ID": 1.0}, "https://a.com.tw/", text="小額小額小額小額"))                                # 4 matches
+        counts = {}
+        got = list(longtext.hplt_docs([self.zst(lines)], counts))
+        self.assertEqual([g[0] for g in got], ["s.jsonl.zst:0", "s.jsonl.zst:4"])
+        self.assertEqual((counts["spam"], counts["passing"]), (3, 2))
+        self.assertEqual((longtext.SPAM_MIN, longtext.GIBBERISH_PERCENTILE), (5, 0.01))
+
+    def test_gibberish_threshold_from_reference_and_row_drop(self):
+        ref = [-3.0 + 2.0 * i / 199 for i in range(200)]      # -3 .. -1
+        self.assertEqual(longtext.gibberish_threshold(ref), sorted(ref)[2])     # floor(0.01 * 200)
+        self.assertEqual(longtext.gibberish_threshold(list(reversed(ref))), sorted(ref)[2])
+        td = tempfile.mkdtemp()
+        docs = [doc(i) for i in range(6)]
+        victim = longtext.rows_from_docs(docs)[3][2]
+        g = {"score": lambda pairs: [-9.0 if s == victim else -2.0 for s, _rd in pairs], "ref_scores": ref,
+             "ref_counts": {"dev302": 150, "user-typing": 50}}
+        out = os.path.join(td, "o.txt")
+        with mock.patch.object(longtext, "MIN_ROWS", 1):
+            quiet(longtext.build, docs, out, [], [], [], 1, ok_readings, None, g)
+        n = json.load(open(out + ".manifest.json"))["counts"]
+        self.assertEqual((n["gibberish"], n["after_gibberish"], n["final_rows"]), (1, 17, 17))
+        self.assertEqual(n["gibberish_threshold"], sorted(ref)[2])
+        self.assertEqual(n["gibberish_reference"]["counts"], {"dev302": 150, "user-typing": 50})
+        self.assertNotIn(victim, [l.split("|")[1] for l in open(out, encoding="utf-8").read().splitlines()])
+        g["score"] = lambda pairs: [sorted(ref)[2]] * len(pairs)      # exactly at the threshold stays
+        with mock.patch.object(longtext, "MIN_ROWS", 1):
+            quiet(longtext.build, docs, out, [], [], [], 1, ok_readings, None, g)
+        self.assertEqual(json.load(open(out + ".manifest.json"))["counts"]["gibberish"], 0)
+
+    def test_model_files_are_checked(self):
+        with self.assertRaises(SystemExit) as cm:
+            longtext.check_models(tempfile.mkdtemp())
+        self.assertIn("missing", str(cm.exception.code))
+
+    @unittest.skipUnless(os.path.isfile(os.path.join(c.ROOT, "data", "lm", "bigram.sjlm")), "data/lm model files absent in this checkout")
+    def test_real_scorer_ranks_gibberish_below_text(self):
+        g = longtext.load_gibberish(1)
+        self.assertEqual(g["ref_counts"]["user-typing"], 76)
+        good, bad = g["score"]([("今天天氣很好", "ㄐㄧㄣ ㄊㄧㄢ ㄊㄧㄢ ㄑㄧˋ ㄏㄣˇ ㄏㄠˇ"), ("騏鑫琥釭汲忒", "ㄑㄧˊ ㄒㄧㄣ ㄏㄨˋ ㄍㄤ ㄐㄧˊ ㄊㄜˋ")])
+        thr = longtext.gibberish_threshold(g["ref_scores"])
+        self.assertGreaterEqual(good, thr)
+        self.assertLess(bad, thr)
 
     def test_wikisource_html_boundaries_and_noise(self):
         h = "<div class='x'><p>第一段<sup>[1]</sup>，續</p><p>第二<br/>段</p><style>p{}</style><h2>標題</h2>尾巴</div>"
