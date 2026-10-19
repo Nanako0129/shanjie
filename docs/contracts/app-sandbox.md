@@ -295,7 +295,7 @@
    - `XPCServices` 以外（`Versions/B/`）多放一個 `.xpc` 再重簽：`check-app.sh` 第 3 項的整個 framework 檢查要失敗。
    - 把 Info.plist 的 `SUEnableInstallerLauncherService` 改成 `false` 再重簽：`check-app.sh` 第 2 項要失敗。
    - 〔修訂三〕把 `Sparkle.framework` 搬回 `Contents/Frameworks/`（舊位置）再重簽 App：`check-app.sh` 第 3 項的位置檢查要失敗。
-   - 〔修訂三〕新位置之外，`Contents/Frameworks/` 再放一份 `Sparkle.framework` 再重簽 App：`check-app.sh` 第 3 項的位置檢查要失敗（「只能有這一份」那一半）。
+   - 〔修訂三〕新位置之外，`Contents/Frameworks/` 再放一份 `Sparkle.framework` 再重簽 App：`check-app.sh` 第 3 項的位置檢查要失敗（`Contents/Frameworks` 裡多一項）。
    - 第 3 步在拒絕檢查通過之後、放來源之前，在 log 印出 runner 的 macOS 版本（`sw_vers`），「沒有清單不搬」量到的是哪一版要看得到（F4）。拒絕路徑因此完全沒有輸出以外的副作用。
    - `release.yml` 的那份比對不在分支上跑反向測試（`sign` 只在 main 觸發）；它和 `check-entitlements.sh` 用同一套比對方式，兩處的說明互相指向。
 9. `make installer`、`scripts/check-installer.sh`（不變，用第 1 步的正式組建）。
@@ -336,7 +336,7 @@
   - `check-app.sh` 第 3 項、`release.yml` 的 `sign` 與 `verify_sparkle` 照這個改：原本「XPCServices 不存在就對」改成這一條，另外查整個 framework 的版面（§2.4）。
 - **framework 的位置**（修訂三，維護者 2026-10-19 選擇題，§6 第 7 項）：
   - `Sparkle.framework` 放在 `Contents/Frameworks/Updater/Sparkle.framework`，不再放 `Contents/Frameworks/Sparkle.framework`。
-  - 原因（§1 的「2026-10-19，虛擬機」）：系統照 framework 的路徑記住「沒有 XPC 服務」，重開機才清。舊位置被 v0.4.7（沒有 XPC 服務）用過，0.5.0 留在那裡的話，更新上來之後、重開機之前，系統不會登記安裝服務。新位置在任何舊版裡都沒出現過，第一次出現就帶著 `Installer.xpc`。
+  - 原因（§1 的「2026-10-19，虛擬機」；黑箱量測，機制是〔推論〕）：看起來系統照 framework 的路徑記住「沒有 XPC 服務」，重開機才清。舊位置被 v0.4.7（沒有 XPC 服務）用過，0.5.0 留在那裡的話，更新上來之後、重開機之前，系統不會登記安裝服務。新位置在任何舊版裡都沒出現過，第一次出現就帶著 `Installer.xpc`。
   - 主程式的 rpath 由 `@executable_path/../Frameworks` 改成 `@executable_path/../Frameworks/Updater`（`macos/Package.swift`）。`Contents/Frameworks` 不再在搜尋路徑上，framework 留在舊位置時程式啟動就失敗（CI 的 selftest 會抓到）。SwiftPM 另外會自己加 `@loader_path`（`Contents/MacOS`），組建只在那裡放執行檔。
   - 檢查（舊位置被搬回來，Sparkle 照樣能跑，只有更新會壞，所以一定要擋）：
     - `check-app.sh` 第 3 項、`release.yml` 的 `sign` 與 `verify_sparkle` 斷言 `Contents/Frameworks` 裡只有 `Updater`、`Updater` 裡只有 `Sparkle.framework`；
