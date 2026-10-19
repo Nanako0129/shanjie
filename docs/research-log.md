@@ -8069,3 +8069,16 @@ XL 比 `MAX_FILE`（67,108,864）小 1,168,880 位元組。錨點：4 個模型 
 - release dry run（run 39265871734，main ce017923）在維護者核准 `release` 環境後完成：`gate`、`build`、`sign` 成功，`publish` 照設計跳過。簽章版 `shanjie-0.0.0.zip` 雜湊相符，Developer ID（2LJ882GPY8）簽章、公證並裝訂，Gatekeeper 判定 Notarized Developer ID；沙盒的四項 entitlements 在；Sparkle 在 `Contents/Frameworks/Updater/`。
 - `docs/contracts/app-sandbox.md` §4.2 在全新的 tart 虛擬機量（細節寫在 §4.2 的 2026-10-20 結果）：第 1、2 項通過；第 3 項第一次沒過，原因是 `docs/sandbox-restore.md` 以網域名稱 `defaults import` 寫回偏好設定時，container 還在，`defaults` 把網域導向 container，寫進去的是 container，刪 container 時設定就不見了。修成以原位置 plist 的完整路徑寫回並檢查原位置有檔，在重新建立的虛擬機上第 1 項通過、第 3 項除了詢問以外都通過。沙盒版還沒發佈。審查後另加「讀不到 container 就停」「設定檔是空的就不寫回」兩道防護，在同一台虛擬機重跑第 3 項並各做一次觸發（container 權限設 000：結束碼 1、什麼都沒動；空的設定檔：結束碼 0、只搬學習資料），都照預期。
 - 還沒量的：三處「不跳詢問」（第 2 項第二次啟動、第 3 項搬回與再升級；無畫面虛擬機截不到圖，`tccd` 沒有相關紀錄只是佐證）、終端機 App 刪 container 會不會跳詢問、§4.2 第 5 項（Sparkle 讀 feed，留給 §4.3 A）。
+
+## 2026-10-20：§4.3 B 實機驗收通過；安全輸入時反灰的原因是安裝位置
+
+- **§4.3 B**（`docs/contracts/app-sandbox.md`，維護者的 Mac，macOS 27.0.1）：dry run 的 `shanjie-0.0.0.zip`（雜湊相符、Developer ID 2LJ882GPY8）以 `install-ime.sh` 安裝，結束碼 0，最後一步「already enabled; registration skipped」（沒有走到會弄壞 Caps Lock 的註冊）。第 0～12 項全部通過：
+  - 移轉：原位置的學習檔消失，container 裡的那份 0600、和維護者的備份逐位元組相同；偏好設定搬過去；從安裝到第 12 項沒有善解的沙盒 deny，log 裡沒有 "system table unavailable"。改選後學習檔照常寫入（只看大小與時間）。
+  - 第 3 項：升級前學過的選字仍排第一。維護者回報「期中」要改兩次才學會、換了前文又不會，0.4.7 改一次就會。讀安裝後新寫的紀錄（維護者同意，只讀這幾筆）：期中記在句首（`^>$`）、「的是」「期中」三個前文，還有一筆全域紀錄，前文都有讀到。原因是 S4 的現行規則：全域層加分 `LEARN_EPS_GLOBAL` 是 0（s4-learning §13，2026-10-08 維護者決定），只有完全相同或最後一字相同的前文才加分；10-19 00:44 的本機組建（維護者的「0.4.7」）到 dry run，核心的學習程式沒改（核心只動了預設關的 `oc.rs`）。不是沙盒造成的退步。「改過幾次就到處排第一」另開一片，用現在的模型重量全域加分。
+  - 第 4 項：契約的測法量不到東西（Terminal 的安全鍵盤輸入切走就放掉）；改用沙盒探針量 `IsSecureEventInputEnabled`，沙盒裡沒有安全輸入回 false、背景持有時回 true（契約 §4.3 B 第 4 項的更正）。
+  - 第 6 項 Caps Lock、第 7 項活動監視器「沙盒：是」、第 8 項個別設定的 App 清單有圖示與名稱、第 9 項聊天／書面自動判斷、第 10 項「有新版本 0.4.7」、第 11 項焦點與側欄（含 `settings-sidebar.md` 第 6、7 步）都正常。
+- **安全輸入時反灰的原因（2026-10-05 的待做，量到了）**：
+  - 10-05 的兩個候選是「沒有子模式」與「裝在 `/Library/Input Methods`」（自然輸入法 V13 兩者都是，善解、小麥都不是）。10-20 維護者的 Mac 上，`tools/secure-input.swift` 從背景持有安全輸入時，沒有子模式、裝在 `~/Library` 的「善解測試」一樣反灰，子模式排除。
+  - tart 虛擬機（全新 clone，macOS 26.6.2），同一個 dry run 的 Developer ID 版：裝在 `~/Library/Input Methods` 時，背景持有安全輸入（`launchctl asuser` 在 GUI session 執行），善解反灰；搬到 `/Library/Input Methods`（`root:wheel`、`chmod -R a+rX`，簽章驗證過；zip 解出來的 bundle 是 0700，改成 root 擁有後要放寬讀取權限才載得起來）並重開機後，同樣持有安全輸入時不反灰、打得出字，選單第一項是「學習已暫停（安全輸入）」（程序路徑 `/Library/Input Methods/善解輸入法.app/Contents/MacOS/shanjie`，維護者在虛擬機視窗看的）。
+  - 結論：差別是安裝位置。系統為什麼這樣分沒有查到文件，推論是使用者自己寫得進的位置不被信任。S4 §3 的暫停學習本來就對；10-05 以來看不到那行選單，是因為善解在安全輸入期間根本沒在跑。
+  - 改成裝在 `/Library` 會牽動安裝程式（要管理員權限）、Sparkle 更新、Homebrew 與移轉，另寫契約、由維護者決定。

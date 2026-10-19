@@ -491,6 +491,8 @@
 
 **B. 正式 ID 的沙盒版（dry run 的 Developer ID 版，正式發佈之前）**
 
+- 結果（2026-10-20 凌晨，維護者的 Mac，macOS 27.0.1，dry run 的 `shanjie-0.0.0.zip` 以 `install-ime.sh` 安裝）：第 0～12 項全部通過，細節在研究紀錄同日。第 3 項「新學的詞要改兩次」是 S4 的現行規則（全域層加分 0），不是沙盒造成；第 4 項照下面的更正改用沙盒探針量。
+
 0. **先備份**（使用者自己做，main 給指令）：§4.3 A 開始前做一次；第一次啟動正式 ID 的沙盒版之前再做一次。把 `~/Library/Application Support/shanjie` 複製到備份位置，偏好設定用 `defaults export com.nyanako.inputmethod.shanjie <檔>` 匯出。
 1. **安裝**：記下開始時間。用 dry run 的 zip 解出來，以 `install-ime.sh` 安裝（0.0.0，見 §4.2 開頭），記下它最後一步 `shanjie install` 的結果。
 2. 安裝後第一次打字之前：`log show --start <第 1 步的時間> --predicate 'sender == "Sandbox" AND eventMessage CONTAINS "shanjie"'` 沒有任何 deny（涵蓋第一次啟動、資料搬移與 IMK 登記）。
@@ -499,6 +501,7 @@
    - 學過的新詞仍出現在候選裡；
    - 倚天排列、選單與設定視窗的設定都還在。
 4. Terminal 開 Secure Keyboard Entry，到別的 App 開輸入法選單：第一項是「學習已暫停（安全輸入）」。
+   - 〔2026-10-20 更正〕這個測法量不到東西：Terminal 的安全鍵盤輸入只在 Terminal 是前景時開著，切到別的 App 就放掉（`ioreg` 查不到持有者）；改用 `tools/secure-input.swift` 從背景持有時，裝在 `~/Library/Input Methods` 的善解被系統反灰，選單打不開。改量的是停止條件本身：一個只帶 `com.apple.security.app-sandbox`、嵌 Info.plist 的 ad-hoc 命令列探針，在沙盒裡呼叫 `IsSecureEventInputEnabled`，沒有安全輸入時回 false、背景持有時回 true。停止條件不成立。
 5. 清除學習資料的視窗出得來，關掉後焦點回到原本的 App。
 6. 換成沙盒版之後，Caps Lock 切換正常。
 7. 活動監視器的「沙盒」欄位是「是」。
