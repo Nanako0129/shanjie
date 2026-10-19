@@ -1,6 +1,8 @@
 # 系統層安裝：善解裝到 `/Library/Input Methods`（契約）
 
-狀態：草稿（2026-10-20）。過 fresh `pilotfish:plan-verifier` 與 `pilotfish:security-reviewer`，再經維護者核准才開工。這片和 App 沙盒（`docs/contracts/app-sandbox.md`）一起以 v0.5.0 發佈。
+狀態：**待改寫**（2026-10-20）。第一版草稿經 `pilotfish:plan-verifier` 與 `pilotfish:security-reviewer` 都是 REVISE（§7）；安全審查指出 Sparkle 更新走系統 domain 會讓「善解要管理員密碼」變成常態，而 Sparkle 的安裝服務不綁呼叫者（app-sandbox 修訂二的 F1）讓假冒的密碼框有機會成功。維護者同日的決定（兩次選擇題）：(1) 安裝方式**讓使用者自己選**，安裝程式並列兩個選項、沒有預設，各寫清楚功能與取捨；(2) 裝給整台 Mac 的更新**保留管理員密碼**；(3) **沙盒外的獨立更新程式（根本解，原排在 0c 開關 B 片）一起進 v0.5.0**。下一版契約照這三點與 §7 的發現改寫，§1 的量測照用。
+
+原本的狀態：這片和 App 沙盒（`docs/contracts/app-sandbox.md`）一起以 v0.5.0 發佈。
 
 ## 0. 為什麼、怎麼算做到
 
@@ -121,4 +123,5 @@
 
 | 審查 | 結果 | 處置 |
 |---|---|---|
-| （待） | | |
+| plan-verifier（2026-10-20） | REVISE，8 項：沒有 security-reviewer 的紀錄；root 階段的信任邊界（腳本與來源 App 在使用者可寫的位置、`codesign -dv` 不驗封印、檢查與使用之間有空窗、`chmod -R a+rX` 不清寫入權與 setuid）；搬家時要強制重新登記，和 installer-v2 §9 的跳過規則衝突、要寫明換位置才註冊、同位置更新照舊跳過；移轉驗收在「搬了沒登記」的壞狀態也會過；`InstallerPlan.decide` 的決策表不完整（兩份都在、帳號層較新、重新安裝裝到哪）；§0 與實機步驟對不上；沒有凍結 tag；Sparkle 系統 domain 的停止條件對不到任何步驟 | 暫緩，重開時照改 |
+| security-reviewer（2026-10-20） | P1-A：§3「F1 不會升成 root」不成立：Sparkle 2.10.0 的 `SPUUsesSystemDomainForBundlePath` 對「套件安裝」類型不看 host 路徑就走系統 domain，host 路徑與類型都由呼叫者給、不綁呼叫者，同 Team 簽章的程序都連得上（〔原始碼〕，未實測）；`/Library` 不新增這條路，但讓密碼框變常態。P1-B：root 階段要先複製到 root 擁有的暫存目錄、驗完整簽章與指定需求、清環境變數、用編進安裝程式的常數指令。P2-A：系統 domain 讓 Sparkle 以 root 執行的漏洞類別（GHSA-4v99、3x7w，2.9.6 修）變得相關，版本要當發版關卡。P2-B：安全輸入期間不再擋住按鍵，要照實寫，並要求所有會讀或留存文字的功能都受 `learningPause` 管。P2-C：`NSAppleScript` 的引號與環境、要在主執行緒。P3：`/Library/Input Methods` 的擁有者與權限要先斷言；權限斷言加群組／其他可寫與 setuid；還原與解除安裝指令要完整加引號 | 維護者同日決定讓使用者選安裝方式、保留密碼，並把沙盒外的獨立更新程式一起放進 v0.5.0（根本解，處理 P1-A）；P1-A 的系統 domain 變體另外併進 app-sandbox §4.5 的虛擬機驗證與給 Sparkle 的私下回報 |

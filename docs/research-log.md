@@ -8164,3 +8164,11 @@ XL 比 `MAX_FILE`（67,108,864）小 1,168,880 位元組。錨點：4 個模型 
 - 維護者的 Mac（macOS 27.0.1），裝著的是 dry run 的 0.0.0（`~/Library`）。照 P1 的順序：以 root 複製到 `/Library/Input Methods`（`root:wheel`、`chmod -R a+rX`）、帳號層那份改名保留、`lsregister`、`TISRegisterInputSource` 並啟用、結束程序，維護者登出再登入。
 - 結果：執行中的是 `/Library` 那份；背景程式持有安全輸入時，善解**不反灰**、選單第一項「學習已暫停（安全輸入）」、打得出中文；**Caps Lock 切換正常**（重新登記發生在換位置之後，這次沒有觸發 2026-10-09 的問題）。
 - 三個探針（P0、P1、P3）都過，照維護者先前的決定，`/Library` 併進 v0.5.0，契約 `docs/contracts/system-install.md`。
+
+## 2026-10-20：`/Library` 的安全審查；改成使用者自選安裝方式，獨立更新程式一起進 v0.5.0
+
+- 契約 `docs/contracts/system-install.md` 第一版送 plan-verifier 與 security-reviewer，都是 REVISE（契約 §7）。最重的是安全審查的 P1-A：
+  - 〔原始碼，未實測〕Sparkle 2.10.0 的 `SPUUsesSystemDomainForBundlePath` 遇到「套件安裝」類型時，不看 host 路徑就走系統 domain；host 路徑與安裝類型都由呼叫者提供，安裝服務不綁呼叫者，同 Team 簽章的程序都連得上（Autoupdate 的連線檢查）。這擴大了 app-sandbox 修訂二的 F1（10-19）：被攻破的沙盒輸入法不只可能借它逃出沙盒，還可能叫出一個以 host 名義（「善解輸入法 wants permission to update.」）要管理員密碼的對話框。這條路**今天就存在**，和裝在哪裡無關。
+  - 改裝 `/Library` 不新增這條路，但每次正式更新都要管理員密碼，使用者會習慣「善解要密碼」，假的對話框比較容易成功。
+- 維護者同日兩次選擇題：先選「v0.5.0 先不做 `/Library`，等沙盒外的獨立更新程式」；接著改成：安裝方式**讓使用者自己選**（安裝程式並列兩個選項、沒有預設，各寫功能與取捨），裝給整台 Mac 的更新**保留管理員密碼**，**獨立更新程式（根本解）一起進 v0.5.0**。v0.5.0 因此是 App 沙盒＋安裝方式選擇＋獨立更新程式，tag 等三者的驗收都過。
+- 跟著要做的：app-sandbox §4.5 的虛擬機逃脫驗證與給 Sparkle 的私下回報，加上「套件安裝 → 系統 domain」這個變體（只寫機制，送出前給維護者看）。三個探針（P0、P1、P3）與打包權限的發現照用；契約照 §7 的發現與這三個決定改寫，獨立更新程式另寫契約，先請研究顧問分析設計。
