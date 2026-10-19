@@ -5,9 +5,9 @@
 
 --data is ROWS / DUMP / TEACHER triples: rows `prefix|sentence|reading`, the `--dump` of those rows (top 8, n-gram order), and the
 score_0c.py JSONL of the same run (one record per row: i, n, skip, and for n >= 2 `ll` = 0c log10 per candidate in the dump's order).
---context 64 (P3): k = k_cross(prefix, CTX - 1 - len(c)) instead, the last Han characters of the prefix with every non-Han character skipped
-(across punctuation); the default 2 is the P2 behaviour unchanged.
-Student score of a candidate = sum_i ln p(c_i | [BOS] k c_<i) with k = tinylm.context_key(prefix) and the truncation of tinylm.ll_many
+k per candidate c (p3-context/p3ctx.key_for): --context 2 (default, P2) k = tinylm.context_key(prefix), cut from the left to fit CTX - 1 - |c|;
+--context 64 (P3) k = the last CTX - 1 - |c| Han characters of the prefix with every non-Han character skipped (across punctuation).
+Student score of a candidate = sum_i ln p(c_i | [BOS] k c_<i) with that k and the truncation of tinylm.ll_many
 (natural log, differentiable); q = softmax(ll_0c * ln 10), p = softmax(student score), both over the row's own candidates.
 Writes DIR/tinylm-S.npz (torch_model.export_npz, scored unchanged by s7a-tinylm/score.py) and DIR/train-S.json.
 Exit code 2 = diverged (non-finite loss, or a logged loss after warm-up above the first logged value).
@@ -27,6 +27,7 @@ import numpy as np
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), "s7a-tinylm"))      # S7a is imported, never edited
+sys.path.insert(0, os.path.join(os.path.dirname(HERE), "p3-context"))      # p3ctx: the context rule of --context 64
 import tinylm                      # noqa: E402
 import score                       # noqa: E402  load_rows / load_dump (the very readers of the S7a scorer)
 from tinylm import BOS, CTX, LN10  # noqa: E402
@@ -43,17 +44,6 @@ if torch is not None:
 TOPK = 8
 NEG = -1e9           # score of a missing candidate slot: finite, so softmax / products never meet inf - inf
 LOG_EVERY, VAL_EVERY = 100, 500
-
-
-def is_han(c):
-    return any(a <= ord(c) <= b for a, b in tinylm._HAN)
-
-
-def k_cross(prefix, n):
-    """The last n Han characters of prefix, punctuation and other characters skipped over; "" when n <= 0. (Same as l0core.k_cross, exp/l0-listwise.)"""
-    if n <= 0:
-        return ""
-    return "".join(c for c in prefix if is_han(c))[-n:]
 
 
 class Mismatch(ValueError):
@@ -100,22 +90,34 @@ def teacher_dist(ll, n):
 
 
 class Packed:
-    """Every usable row pre-tokenised once. Sequence = [BOS] + k + c (k truncated from the left exactly as tinylm.ll_many does), start st =
-    1 + len(k): positions st-1 .. len-2 of the logits predict the characters of c."""
+    """Every usable row pre-tokenised once. Sequence = [BOS] + k + c, start st = 1 + len(k): positions st-1 .. len-2 of the logits predict
+    the characters of c. context 2: k = context_key cut from the left to fit CTX - 1 - |c| (as tinylm.ll_many does); context 64: k = the last
+    CTX - 1 - |c| Han characters of the prefix, non-Han skipped (p3ctx.key_for; the row's Han string is encoded once and sliced).
+    self.klen = len(k) of every sequence."""
 
     def __init__(self, items, vocab, context=2):
         tok, off, st, rowseq = array.array("i"), [0], [], [0]
         self.q, self.logq, self.n = np.zeros((len(items), TOPK)), np.zeros((len(items), TOPK)), np.zeros(len(items), dtype=np.int64)
+        if context == 64:
+            import p3ctx                   # only for P3: the --context 2 path imports nothing new
+        elif context != 2:
+            raise ValueError(f"context must be 2 or 64, got {context!r}")
         for r, (prefix, surfs, ll) in enumerate(items):
             key = tinylm.row_key(prefix, 2)
+            if context == 64:
+                hid = vocab.enc(p3ctx.han_only(prefix)[-(CTX - 1):])
             for c in surfs:
-                k = k_cross(prefix, CTX - 1 - len(c)) if context == 64 else key[max(0, len(key) - (CTX - 1 - len(c))):]
-                tok.extend([BOS] + vocab.enc(k) + vocab.enc(c))
-                off.append(len(tok)); st.append(1 + len(k))
+                if context == 64:
+                    kt = hid[-(CTX - 1 - len(c)):] if len(c) < CTX - 1 else []
+                else:
+                    kt = vocab.enc(key[max(0, len(key) - (CTX - 1 - len(c))):])
+                tok.extend([BOS] + kt + vocab.enc(c))
+                off.append(len(tok)); st.append(1 + len(kt))
             rowseq.append(len(st))
             self.n[r] = len(surfs)
             self.q[r], self.logq[r] = teacher_dist(ll, len(surfs))
         self.tok, self.off, self.st, self.rowseq = np.frombuffer(tok, dtype=np.int32), np.array(off), np.array(st), np.array(rowseq)
+        self.klen = self.st - 1
 
     def __len__(self):
         return len(self.n)
@@ -209,6 +211,8 @@ def prefetch(P, batches, ahead=4):
 
 def run(a):
     cuda = a.device.startswith("cuda")
+    if os.path.exists(os.path.join(a.out, "tinylm-S.npz")):
+        sys.exit(f"train_p2: STOP, {os.path.join(a.out, 'tinylm-S.npz')} already exists; use a new --out per arm")
     os.makedirs(a.out, exist_ok=True)
     triples = list(zip(a.data[::3], a.data[1::3], a.data[2::3]))
     model, vocab = torch_model.from_npz(a.npz, a.device)
@@ -278,7 +282,9 @@ def run(a):
             print(f"step {end} val KL {v:.4f} top1 agreement {va:.4f}", flush=True)
     secs = time.time() - t0
     torch_model.export_npz(model, vocab.chars, os.path.join(a.out, "tinylm-S.npz"))
-    json.dump({"context": a.context, "seed": a.seed, "epochs": a.epochs, "batch": a.batch, "lr": a.lr, "warmup": a.warmup, "val_frac": a.val_frac,
+    kl = P.klen
+    key_stats = {"mean": float(kl.mean()), "max": int(kl.max()), "zero": int((kl == 0).sum()), "sequences": int(len(kl))}
+    json.dump({"context": a.context, "key_len": key_stats, "seed": a.seed, "epochs": a.epochs, "batch": a.batch, "lr": a.lr, "warmup": a.warmup, "val_frac": a.val_frac,
                "max_steps": a.max_steps, "steps": total, "counts": counts, "val_rows": int(len(val_idx)),
                "train_order_sha256": order_sha, "curve": curve, "val_curve": val_curve, "seconds": secs, "input_sha256": input_sha},
               open(os.path.join(a.out, "train-S.json"), "w"), indent=1)
@@ -290,7 +296,7 @@ def main(argv=None):
     ap.add_argument("--npz", required=True)
     ap.add_argument("--data", nargs="+", required=True, help="ROWS DUMP TEACHER [ROWS DUMP TEACHER ...]")
     ap.add_argument("--out", required=True)
-    ap.add_argument("--context", type=int, choices=[2, 64], default=2, help="2 = context_key (P2); 64 = k_cross, across punctuation (P3)")
+    ap.add_argument("--context", type=int, choices=[2, 64], default=2, help="2 = context_key (P2); 64 = last Han characters across punctuation (P3)")
     ap.add_argument("--seed", type=int, default=20261018); ap.add_argument("--epochs", type=int, default=3)
     ap.add_argument("--batch", type=int, default=64); ap.add_argument("--lr", type=float, default=1e-4)
     ap.add_argument("--warmup", type=int, default=100); ap.add_argument("--val-frac", type=float, default=0.02)

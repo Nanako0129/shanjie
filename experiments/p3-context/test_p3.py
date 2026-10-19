@@ -10,9 +10,12 @@ import numpy as np
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+sys.path.insert(0, os.path.join(os.path.dirname(HERE), "p2-distill"))
 import score_p3 as sp   # noqa: E402  (also puts s7a-tinylm and p2-distill on sys.path)
 import score            # noqa: E402
+import p3ctx as pc      # noqa: E402
 import train_p2 as tp   # noqa: E402
+import fusegrid as fg   # noqa: E402
 import tinylm           # noqa: E402
 from tinylm import BOS, CTX, NumpyLM, ll_many  # noqa: E402
 
@@ -35,15 +38,15 @@ def tiny_rows():
 
 class TestKCross(unittest.TestCase):
     def test_skips_non_han(self):
-        self.assertEqual(tp.k_cross("他說，我", 3), "他說我")
-        self.assertEqual(tp.k_cross("今天a1 氣。好", 4), "今天氣好")
-        self.assertEqual(tp.k_cross("abc，。 1", 5), "")
-        self.assertEqual(tp.k_cross("你好", 10), "你好")
-        self.assertEqual(tp.k_cross("你好", 1), "好")
+        self.assertEqual(pc.k_cross("他說，我", 3), "他說我")
+        self.assertEqual(pc.k_cross("今天a1 氣。好", 4), "今天氣好")
+        self.assertEqual(pc.k_cross("abc，。 1", 5), "")
+        self.assertEqual(pc.k_cross("你好", 10), "你好")
+        self.assertEqual(pc.k_cross("你好", 1), "好")
 
     def test_nonpositive(self):
-        self.assertEqual(tp.k_cross("你好", 0), "")
-        self.assertEqual(tp.k_cross("你好", -3), "")
+        self.assertEqual(pc.k_cross("你好", 0), "")
+        self.assertEqual(pc.k_cross("你好", -3), "")
 
 
 class TestScore(unittest.TestCase):
@@ -57,30 +60,60 @@ class TestScore(unittest.TestCase):
 
     def test_context2_equals_score_py(self):
         want = score.build_records(self.model, self.rows, self.cands)
-        got = sp.build_records(self.model, self.rows, self.cands, 2)
+        got = sp.build_records(self.model, self.rows, self.cands, 2, 64, "abc")
         for w, g in zip(want, got):
-            for f in ("i", "n", "ng", "ok", "ed", "glen", "key", "key16", "ll", "ll0"):
+            for f in ("i", "n", "ng", "ok", "ed", "glen", "key", "key16", "ll", "ll0", "ll16"):
                 self.assertEqual(w.get(f), g.get(f), f)
         self.assertEqual(got[3].get("ll"), None)          # n = 1: no ll
 
     def test_context64_uses_cross_key_and_truncates(self):
-        got = sp.build_records(self.model, self.rows, self.cands, 64)
+        got = sp.build_records(self.model, self.rows, self.cands, 64, 64, "abc")
         for r, (_g, _s, prefix), cs in zip(got, self.rows, self.cands):
             if len(cs) < 2:
                 continue
-            want = ll_many(self.model, [(tp.k_cross(prefix, CTX - 1 - len(s)), s) for s, _ in cs])
+            want = ll_many(self.model, [(pc.k_cross(prefix, CTX - 1 - len(s)), s) for s, _ in cs])
             np.testing.assert_allclose(r["ll"], want, rtol=0, atol=1e-9)   # batch composition differs: float noise only
-            self.assertEqual(r["key"], len(tp.k_cross(prefix, CTX - 1 - len(cs[0][0]))))
+            self.assertEqual(r["key"], len(pc.k_cross(prefix, CTX - 1 - len(cs[0][0]))))
         self.assertEqual((got[0]["key"], got[1]["key"]), (0, 2))     # prefixes "" and "你好"
         # row 2 (prefix "他說，我"): the 62-character candidate leaves room for 1 character, the 2-character one for the whole key
-        self.assertEqual(tp.k_cross(PREFIXES[2], CTX - 1 - 62), "我")
-        self.assertEqual(tp.k_cross(PREFIXES[2], CTX - 1 - 1), "他說我")
+        self.assertEqual(pc.k_cross(PREFIXES[2], CTX - 1 - 62), "我")
+        self.assertEqual(pc.k_cross(PREFIXES[2], CTX - 1 - 1), "他說我")
         self.assertEqual(got[2]["key"], 1)
-        a = sp.build_records(self.model, self.rows, self.cands, 2)
-        self.assertEqual(a[1]["ll"], got[1]["ll"])         # prefix "你好": the same key either way
-        self.assertNotEqual(a[5]["ll"], got[5]["ll"])      # prefix of 70 Han characters: 2 vs 61 characters of context
-        self.assertEqual(a[5]["ll0"], got[5]["ll0"])
+        a = sp.build_records(self.model, self.rows, self.cands, 2, 64, "abc")
+        close = lambda x, y: np.testing.assert_allclose(x, y, rtol=0, atol=1e-9)   # batch composition differs: float noise only
+        close(a[1]["ll"], got[1]["ll"])                    # prefix "你好": the same key either way
+        self.assertGreater(np.abs(np.array(a[5]["ll"]) - np.array(got[5]["ll"])).max(), 1e-6)   # 70 Han characters: 2 vs 60 of context
+        close(a[5]["ll0"], got[5]["ll0"])
+        close(a[5]["ll16"], got[5]["ll16"])                # ll16 does not depend on --context
+        self.assertEqual((got[5]["ctx"], got[5]["npz"], a[5]["ctx"]), (64, "abc", 2))
 
+
+    def test_key_for(self):
+        self.assertEqual(pc.key_for("他說，我", "好", 2), "我")
+        self.assertEqual(pc.key_for("他說，我", "好", 64), "他說我")
+        self.assertEqual(pc.key_for("他說，我", "好" * 62, 64), "我")
+        self.assertEqual(pc.key_for("他說，我", "好" * 63, 64), "")
+        self.assertEqual(pc.key_for("你好", "好" * 62, 2), "好")             # cut from the left to fit
+        self.assertEqual(pc.key_for("x", "好", 64, han="他說我"), "他說我")     # pre-filtered Han string
+        for bad in (0, 3, None, 16):
+            with self.assertRaises(ValueError):
+                pc.key_for("你好", "好", bad)
+
+    def test_context_required(self):
+        with self.assertRaises(SystemExit):
+            sp.main(["--npz", "x", "--dump", "x", "--rows", "x", "--name", "t", "--expect-top1", "1", "--out", "x"])
+
+    def test_fusegrid_reads_score_p3(self):
+        """fusegrid.select_weighted and the default path run_setting (which reads ll and ll16) accept score_p3 records in both modes."""
+        rows, cands = tiny_rows()
+        for context in (2, 64):
+            recs = sp.build_records(self.model, rows, cands, context, 64, "abc")
+            sets = {"cvtune": recs, "wikitune": recs}
+            self.assertEqual(len(fg.select_weighted(sets, 1.0)), 5)
+            out = os.path.join(self.td.name, f"fg{context}")
+            os.makedirs(os.path.join(out, "rowstats"))
+            cells, _gain, _stop = fg.run_setting("S", "chat", sets, out)
+            self.assertIn(("chat", "cvtune"), cells)
 
     def test_strict_ok(self):
         rows = [("他", ["ㄊ"], ""), ("你", ["ㄋ"], "")]
@@ -144,12 +177,46 @@ class TestPacked(unittest.TestCase):
         s = 0
         for prefix, surfs, _ll in self.items:
             for c in surfs:
-                k = tp.k_cross(prefix, CTX - 1 - len(c))
+                k = pc.k_cross(prefix, CTX - 1 - len(c))
                 self.assertEqual(list(P.tok[P.off[s]:P.off[s + 1]]), [BOS] + self.vocab.enc(k) + self.vocab.enc(c))
                 self.assertEqual(P.st[s], 1 + len(k))
                 self.assertLessEqual(P.off[s + 1] - P.off[s], CTX)
                 s += 1
         self.assertTrue((P.st != tp.Packed(self.items, self.vocab, 2).st).any())
+
+    def test_context64_equals_key_for(self):
+        P = tp.Packed(self.items, self.vocab, 64)
+        s = 0
+        for prefix, surfs, _ll in self.items:
+            for c in surfs:
+                k = pc.key_for(prefix, c, 64)
+                self.assertEqual(list(P.tok[P.off[s]:P.off[s + 1]]), [BOS] + self.vocab.enc(k) + self.vocab.enc(c))
+                self.assertEqual(P.klen[s], len(k))
+                s += 1
+
+    def test_bad_context(self):
+        with self.assertRaises(ValueError):
+            tp.Packed(self.items, self.vocab, 16)
+
+
+@unittest.skipUnless(tp.torch, "torch is not installed")
+class TestTrainContext64(unittest.TestCase):
+    def test_end_to_end_one_step(self):
+        import test_p2
+        with tempfile.TemporaryDirectory() as td:
+            test_p2.tiny_npz(td)
+            rows, cands, teacher = test_p2.make_data(40)
+            a = test_p2.write_files(td, "a", rows, cands, teacher)
+            out = os.path.join(td, "out64")
+            argv = ["--npz", os.path.join(td, "m.npz"), "--data", *a, "--out", out, "--context", "64", "--max-steps", "1", "--batch", "4",
+                    "--warmup", "1", "--val-frac", "0.1", "--log-every", "1000", "--val-every", "1000", "--device", "cpu"]
+            tp.main(argv)
+            info = json.load(open(os.path.join(out, "train-S.json")))
+            self.assertEqual(info["context"], 64)
+            self.assertGreater(info["key_len"]["mean"], 0)
+            with self.assertRaises(SystemExit) as cm:          # an arm never overwrites another arm's model
+                tp.main(argv)
+            self.assertIn("already exists", str(cm.exception))
 
 
 if __name__ == "__main__":
