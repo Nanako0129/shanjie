@@ -1,6 +1,6 @@
 # E-E 真引擎重播 `shanjie-replay`（研究工具，不出貨）
 
-狀態：已實作（PR #210）；契約 READY（2026-10-18 第二次審查，plan-verifier 第一次 REVISE 的 4 項照改）；`/code-review` 第一輪後修訂（§10）。
+狀態：已實作（PR #210；`--learn-file` 為後加的唯讀選項，§2、§6）；契約 READY（2026-10-18 第二次審查，plan-verifier 第一次 REVISE 的 4 項照改）；`/code-review` 第一輪後修訂（§10）。
 
 ## 0. 起因
 
@@ -27,8 +27,8 @@
 - 建立順序與預設值照 `macos/Sources/ShanjieKit/Shell.swift` 的 `build()`：帶詞包建引擎（`acg`）、`load_lm`（bigram，連帶的 classes／kn／trigram 照 `load_lm` 的規則）、`load_tinylm`、降權開、語意校正開、強度照 App 預設、`set_profile`。
 - **和 App 的已知差異**（寫進設定標記）：預測列關（`set_prediction(false)`）、英文混打關（不載英文詞表、`set_english(false)`）。App 預設兩者都開；開著時 Space 開的候選窗會把預測列的項目排在前面、有的項目不是以游標為結尾的範圍，英文也可能搶走 Space，改選的鍵數就無法照 §4 定義。兩者都不影響 n-gram 與語意校正的選字。縮寫、直式候選窗照 App 預設（橫式，一頁 9 項）。
 - `--profile chat|formal`（預設 chat）。`--no-tinylm` 關掉語意校正（對照用）。
-- 學習：`--learn off|on`（預設 off）。on 時在第一個鍵之前呼叫一次 `set_learning(true)`、不開學習檔（只在記憶體，`learning_open` 不呼叫），新詞 B 照預設開。學習狀態只在這一個引擎、這一次執行內累積。
-- `--learn-file FILE`（唯讀載入學習檔）：引擎建好後，把 FILE 的位元組複製到本次執行專用的暫存目錄（0700、每次不同、在 `std::env::temp_dir()` 下）的 `learning.tsv`，再對該目錄呼叫 `learning_open`；原檔只被讀，不寫、不改名、不隔離，與 `--rowstats`、`--keys`、`--firsts` 是同一個檔就拒絕（結束碼 2）。載入結果不是正常載入（檔頭錯、`Corrupt`）就報錯結束，不會在沒有學習資料下默默重放。`--learn on` 時學到的寫進暫存副本，隨暫存目錄在結束時（含錯誤路徑）刪除；解碼不論 `--learn` 開關都讀載入的學習資料。摘要標記加 `+learnfile`；stderr 只印筆數與跳過的行數，不印檔案內容衍生的任何字、前文或讀音。
+- 學習：`--learn off|on`（預設 off）。on 時在第一個鍵之前呼叫一次 `set_learning(true)`、單獨使用時不開學習檔（只在記憶體，`learning_open` 不呼叫；要載入學習檔見 `--learn-file`），新詞 B 照預設開。學習狀態只在這一個引擎、這一次執行內累積。
+- `--learn-file FILE`（唯讀載入學習檔）：引擎建好後、建立任何輸出檔之前，讀 FILE 的位元組（只有位元組，不帶權限、旗標、ACL、xattr），寫進本次執行專用的暫存目錄（0700、每次不同、在 `std::env::temp_dir()` 下）的 `learning.tsv`（`create_new`、0600），對該目錄呼叫 `learning_open`，**載入完立刻刪掉暫存目錄**（學習資料已在記憶體；刪除失敗在 stderr 警告；之後 `--learn on` 的存檔因目錄不在而無害地失敗）。原檔只被讀，不寫、不改名、不隔離。FILE 與 `--rows` 或任一輸出檔是同一個檔（比對裝置與 inode，硬連結也算）就拒絕（結束碼 2）；與 `--firsts` 併用一律拒絕（第一次顯示可能含學習檔裡的詞）。載入結果不是正常載入（檔頭錯、`Corrupt`、`Fresh`）、沒有任何可用的筆數、或 `learning_open` 失敗（錯誤只帶 `StoreError` 的種類）就報錯結束，不會在沒有學習資料下默默重放；這些失敗都發生在輸出檔建立之前，既有輸出檔不會被截斷。解碼不論 `--learn` 開關都讀載入的學習資料。摘要標記加 `+learnfile`；stderr 只印筆數與跳過的行數，不印檔案內容衍生的任何字、前文或讀音。**刻意不記錄載入的是哪一份學習檔**（隱私），所以不同快照的 `+learnfile` 結果無法從輸出區分，由執行者自己記。
 - 模型路徑同 CLI（`data/lm/`），啟動時印出各模型的 sha256 前 8 碼與旗標（像 CLI 的摘要行標記），讓結果對得回模型。
 
 ## 3. 語意校正的時序 `--rerank each|final`
@@ -50,7 +50,7 @@
 - `actual`：實際送進引擎的鍵數（打字＋改選的游標、開窗、翻頁、選字鍵＋ Enter）。
 - 按鍵分數＝Σideal ÷ Σactual（KySS 的做法，注音版）。
 - `picks`：改選次數；`final_ok`：送出的文字是否等於正解（寬鬆比對）。
-- 摘要行：列數、第一次顯示的 top1、送出時正確的列數、改不了的列數、按鍵分數、每百字改選次數、`rewrites` 合計、`top1_sha256`（第一次顯示的文字以 `\n` 串接的 sha256，算法與 `cli/src/main.rs` 的 `top1_sha256` 相同），以及設定標記（profile、learn、rerank、correct、模型雜湊前綴、預測列與英文關）。
+- 摘要行：列數、第一次顯示的 top1、送出時正確的列數、改不了的列數、按鍵分數、每百字改選次數、`rewrites` 合計、`top1_sha256`（第一次顯示的文字以 `\n` 串接的 sha256，算法與 `cli/src/main.rs` 的 `top1_sha256` 相同），以及設定標記（profile、learn、learnfile、rerank、correct、模型雜湊前綴、預測列與英文關）。
 - `--firsts FILE`（只給一致性比對用）：每列一行第一次顯示的文字。只能用在公開集合（dev302、typing76、錯字回報），檔案不進 repo；工具不知道哪個集合是私人的，這條由使用的人遵守。
 - 「本來對、學了之後錯」：同一份列檔跑 `--learn off` 與 `--learn on` 各一次（都 `--correct`），兩個 `--rowstats` 用 `evalstats compare`：改壞數就是這個數字。工具本身不另算。
 
@@ -67,6 +67,7 @@
    - 時序：找一列 `each` 的 `rewrites` ≥ 2 的句子，`final` 在同一列的 `rewrites` ≤ 1（`final` 若在打字中途套用，這條會失敗）；
    - 中途送出：一列讀音超過組字上限時，第一次顯示包含中途送出的文字、`autocommits` 計到這一列；
    - 輸出：`--rowstats`、`--keys` 只有 `[0-9\t\n]`；`--rowstats` 和 CLI 同一份列檔的格式逐位元組相容（`evalstats compare` 讀得進去）。
+   - `--learn-file`（`cli/tests/replay.rs`，只用合成檔）：載入後第一次顯示改變、原檔位元組與 mtime 不變（含 `--learn on --correct`）、暫存目錄不留；檔頭錯、沒有可用筆數、檔不存在都報錯且既有輸出檔不被截斷、不產生 `.corrupt`；輸出是同一個檔或硬連結（`--rowstats`、`--keys`）拒絕且原檔不變；與 `--firsts` 併用拒絕。
 3. 在 GCP 或 Windows 機器（不在 Mac）跑 dev302 與錯字回報兩種設定，learn off／on × correct，把摘要行與 `evalstats compare` 的結果寫進研究紀錄：這是每版 KPI「按鍵分數」與「錯字回報真引擎重播」的第一筆。
 4. `/code-review` ＋ fresh verifier ＋ CI（程式改動的關卡）。
 

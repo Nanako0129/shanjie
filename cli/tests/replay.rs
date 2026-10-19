@@ -297,10 +297,11 @@ fn text(o: &std::process::Output) -> String {
     String::from_utf8(o.stdout.clone()).unwrap()
 }
 
-/// Rules: the loaded file changes the choice (without it 再見 is shown for ㄗㄞˋ ㄐㄧㄢˋ, measured; the file holds one record,
-/// context `^>$` (sentence start, nothing after) for the word 在建 with weight 50 and today's day, so 在建 is shown); the
-/// source file is only read (bytes and mtime as before, also with `--learn on`); the temporary directory is gone afterwards;
-/// the tag says `+learnfile`.
+/// Rules: the loaded file changes the choice (without it 再見 is shown for ㄗㄞˋ ㄐㄧㄢˋ and is right, measured; the file holds one
+/// record, context `^>$` (sentence start, nothing after) for the word 在建 with weight 50 and today's day, so 在建 is shown and
+/// the row is wrong: the rowstats differ); the source file is only read (bytes and mtime as before, also with `--learn on
+/// --correct`, where the re-pick to 再見 is learned and saved against the already removed temporary directory); the temporary
+/// directory is gone afterwards; the tag says `+learnfile`; `--firsts` is refused with it.
 #[test]
 fn learn_file_changes_the_choice_and_the_source_is_untouched() {
     let dir = scratch("learnfile");
@@ -311,46 +312,68 @@ fn learn_file_changes_the_choice_and_the_source_is_untouched() {
     let _g = ONE_ENGINE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
     let rows = dir.join("rows.txt");
     std::fs::write(&rows, "|再見|ㄗㄞˋ ㄐㄧㄢˋ\n").unwrap();
-    let firsts = dir.join("firsts.txt");
-    let plain = text(&Command::new(env!("CARGO_BIN_EXE_shanjie-replay")).args(["--rows", rows.to_str().unwrap(), "--firsts", firsts.to_str().unwrap()]).output().unwrap());
-    assert_eq!(std::fs::read_to_string(&firsts).unwrap(), "再見\n");
-    for extra in [&[][..], &["--learn", "on"][..]] {
-        let with = text(&replay_with_learn(&dir, &src, &["--firsts", firsts.to_str().unwrap()].iter().chain(extra).copied().collect::<Vec<_>>()));
+    let rs = dir.join("rs.txt");
+    let plain = text(&Command::new(env!("CARGO_BIN_EXE_shanjie-replay")).args(["--rows", rows.to_str().unwrap(), "--rowstats", rs.to_str().unwrap()]).output().unwrap());
+    let plain_rs = std::fs::read(&rs).unwrap();
+    assert!(plain.contains("'top1': 1"), "{plain}");
+    for extra in [&[][..], &["--learn", "on", "--correct"][..]] {
+        let args: Vec<&str> = ["--rowstats", rs.to_str().unwrap()].iter().chain(extra).copied().collect();
+        let with = text(&replay_with_learn(&dir, &src, &args));
         assert!(with.contains("+learnfile") && !plain.contains("+learnfile"));
-        assert_eq!(std::fs::read_to_string(&firsts).unwrap(), "在建\n", "{extra:?}: the learned word changes the first display");
+        assert_ne!(std::fs::read(&rs).unwrap(), plain_rs, "{extra:?}: the learned word changes the first display");
+        assert!(with.contains("'top1': 0"), "{extra:?}: {with}");
         assert_eq!(std::fs::read(&src).unwrap(), bytes, "{extra:?}: source bytes");
         assert_eq!(std::fs::metadata(&src).unwrap().modified().unwrap(), mtime, "{extra:?}: source mtime");
         assert_eq!(std::fs::read_dir(dir.join("tmp")).unwrap().count(), 0, "{extra:?}: temporary directory removed");
     }
+    let out = replay_with_learn(&dir, &src, &["--firsts", dir.join("f.txt").to_str().unwrap()]);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(!dir.join("f.txt").exists());
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
-/// Rule: a file that is not a valid learning file (bad header) is an error, not a replay without the learnings; the source stays
-/// as it was (core's quarantine renames the copy only) and no temporary directory is left.
+/// Rules: a file that is not a valid learning file (bad header) is an error, not a replay without the learnings; the source stays
+/// as it was (core's quarantine renames the copy only), no temporary directory is left, and an existing output file keeps its
+/// bytes (the learning file is loaded before any output is created). Also an all-skipped file and a missing file are errors.
 #[test]
 fn a_corrupt_learn_file_is_an_error() {
     let dir = scratch("learncorrupt");
-    let src = dir.join("bad.tsv");
+    let src = dir.join("learning.tsv");
     std::fs::write(&src, "not a learning file\n").unwrap();
+    let out_file = dir.join("keep.rs");
+    std::fs::write(&out_file, "keep").unwrap();
     let _g = ONE_ENGINE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
-    let out = replay_with_learn(&dir, &src, &[]);
+    let out = replay_with_learn(&dir, &src, &["--rowstats", out_file.to_str().unwrap()]);
     assert_eq!(out.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("not a valid learning file"), "{}", String::from_utf8_lossy(&out.stderr));
     assert_eq!(std::fs::read(&src).unwrap(), b"not a learning file\n");
-    assert!(!dir.join("bad.tsv.corrupt").exists());
+    assert!(!dir.join("learning.tsv.corrupt").exists());
+    assert_eq!(std::fs::read(&out_file).unwrap(), b"keep", "an existing output is not truncated");
     assert_eq!(std::fs::read_dir(dir.join("tmp")).unwrap().count(), 0, "temporary directory removed on the error path");
+    std::fs::write(&src, "#shanjie-learning v1\nbad line\n").unwrap();
+    let out = replay_with_learn(&dir, &src, &["--rowstats", out_file.to_str().unwrap()]);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("no usable records"));
+    let out = replay_with_learn(&dir, &dir.join("missing.tsv"), &["--rowstats", out_file.to_str().unwrap()]);
+    assert_eq!(out.status.code(), Some(1));
+    assert_eq!(std::fs::read(&out_file).unwrap(), b"keep");
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
-/// Rule: an output that is the learning file is refused (exit 2) before anything is created, like the rows file.
+/// Rule: an output that is the learning file, spelled the same or as a hard link to it, is refused (exit 2) before anything is
+/// created, and the learning file keeps its bytes.
 #[test]
 fn an_output_that_is_the_learn_file_is_refused() {
     let dir = scratch("learnrefuse");
     let src = dir.join("mine.tsv");
     std::fs::write(&src, "#shanjie-learning v1\n").unwrap();
-    for opt in ["--rowstats", "--keys", "--firsts"] {
-        let out = replay_with_learn(&dir, &src, &[opt, src.to_str().unwrap()]);
-        assert_eq!(out.status.code(), Some(2), "{opt}");
-        assert_eq!(std::fs::read(&src).unwrap(), b"#shanjie-learning v1\n", "{opt}: untouched");
+    std::fs::hard_link(&src, dir.join("link.tsv")).unwrap();
+    for opt in ["--rowstats", "--keys"] {
+        for out_path in [&src, &dir.join("link.tsv")] {
+            let out = replay_with_learn(&dir, &src, &[opt, out_path.to_str().unwrap()]);
+            assert_eq!(out.status.code(), Some(2), "{opt} {out_path:?}");
+            assert_eq!(std::fs::read(&src).unwrap(), b"#shanjie-learning v1\n", "{opt}: untouched");
+        }
     }
     std::fs::remove_dir_all(&dir).unwrap();
 }

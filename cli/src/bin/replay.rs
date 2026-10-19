@@ -9,8 +9,17 @@ use core::eval::sha256_hex;
 use core::learn_store::{Opened, FILE};
 use core::lm::Profile;
 use std::fs;
-use std::os::unix::fs::DirBuilderExt;
+use std::io::Write;
+use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
+
+/// Whether two paths are the same file (same device and inode, so hard links and symlinks count); a path that does not exist is not.
+fn same_file(a: &str, b: &str) -> bool {
+    match (fs::metadata(a), fs::metadata(b)) {
+        (Ok(x), Ok(y)) => (x.dev(), x.ino()) == (y.dev(), y.ino()),
+        _ => false,
+    }
+}
 
 /// A private (0700) per-run directory holding the copy of the `--learn-file`; removed when dropped, also on error paths.
 struct TempDir(PathBuf);
@@ -74,23 +83,20 @@ fn run() -> Result<(), String> {
     };
     let root = root();
     let len = load_lenient()?;
-    // An output that is the rows file would be emptied before the rows are read: refuse, comparing the files themselves.
-    if let Some(rows) = rows_file.as_deref().and_then(|f| fs::canonicalize(f).ok()) {
-        for (opt, f) in [("--rowstats", &rowstats), ("--keys", &keys), ("--firsts", &firsts)] {
-            if f.as_deref().and_then(|f| fs::canonicalize(f).ok()) == Some(rows.clone()) {
-                eprintln!("error: {opt} is the same file as --rows");
-                std::process::exit(2);
+    // An output that is the rows file would be emptied before the rows are read, and one that is the learning file would empty
+    // it: refuse, comparing the files themselves (device and inode). `--firsts` could print learned words of the private file.
+    for (opt, f) in [("--rowstats", &rowstats), ("--keys", &keys), ("--firsts", &firsts)] {
+        for (what, src) in [("--rows", &rows_file), ("--learn-file", &learn_file)] {
+            if let (Some(f), Some(src)) = (f, src) {
+                if same_file(f, src) {
+                    eprintln!("error: {opt} is the same file as {what}");
+                    std::process::exit(2);
+                }
             }
         }
     }
-    // The learning file is only ever read, but an output that is the same file would be truncated: refuse as well.
-    if let Some(lf) = learn_file.as_deref().and_then(|f| fs::canonicalize(f).ok()) {
-        for (opt, f) in [("--rowstats", &rowstats), ("--keys", &keys), ("--firsts", &firsts)] {
-            if f.as_deref().and_then(|f| fs::canonicalize(f).ok()) == Some(lf.clone()) {
-                eprintln!("error: {opt} is the same file as --learn-file");
-                std::process::exit(2);
-            }
-        }
+    if learn_file.is_some() && firsts.is_some() {
+        return Err("--firsts cannot be combined with --learn-file (first displays can contain learned words)".into());
     }
     // The CLI's own readers (shared in cli::common), so the rows and their numbers are shanjie-eval's.
     let rows: Vec<RowIn> = match (&rows_file, dev) {
@@ -101,9 +107,6 @@ fn run() -> Result<(), String> {
     .into_iter()
     .map(|(sent, syls, ctx)| RowIn { ctx, sent, syls })
     .collect();
-    // Opened after the rows are read, like the CLI's outputs are not touched by a failed start.
-    let create = |f: Option<String>| f.map(|f| fs::File::create(f).map_err(|e| format!("cannot create output file ({:?})", e.kind()))).transpose();
-    let (rowstats, keys, firsts) = (create(rowstats)?, create(keys)?, create(firsts)?);
     let name = match (&rows_file, dev) {
         (Some(f), _) => Path::new(f).file_name().map_or(String::new(), |s| s.to_string_lossy().into_owned()),
         (_, n) => format!("dev{}", n.unwrap_or(0)),
@@ -129,18 +132,29 @@ fn run() -> Result<(), String> {
     let mut e = build_engine(&root, &lm_path, tl.then_some(tl_path.as_path()), profile, learn)?;
     // The file is copied (bytes only) into a private temporary directory under the name the store loads; core opens, and with
     // `--learn on` writes, only the copy. Anything but a normal load is an error: a replay without the learnings would mislead.
-    let _tmp = match &learn_file {
-        None => None,
-        Some(f) => {
-            let tmp = TempDir::new()?;
-            fs::copy(f, tmp.0.join(FILE)).map_err(|e| format!("cannot read --learn-file ({:?})", e.kind()))?;
-            match e.learning_open(&tmp.0).map_err(|_| "learning_open failed")? {
-                Opened::Loaded { skipped } => eprintln!("learning file: {} records, {skipped} lines skipped", e.learner().records().len()),
-                _ => return Err("--learn-file is not a valid learning file".into()),
-            }
-            Some(tmp)
+    if let Some(f) = &learn_file {
+        // Bytes only (no mode, flags, ACLs or xattrs of the source), read before any output file is created. The learner is in
+        // memory after `learning_open`, so the copy is removed right away; with `--learn on` later saves fail harmlessly
+        // against the missing directory.
+        let bytes = fs::read(f).map_err(|e| format!("cannot read --learn-file ({:?})", e.kind()))?;
+        let tmp = TempDir::new()?;
+        let mut copy = fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(tmp.0.join(FILE)).map_err(|e| format!("cannot write temporary copy ({:?})", e.kind()))?;
+        copy.write_all(&bytes).map_err(|e| format!("cannot write temporary copy ({:?})", e.kind()))?;
+        drop(copy);
+        let opened = e.learning_open(&tmp.0).map_err(|err| format!("learning_open failed ({err:?})"))?;
+        if let Err(err) = fs::remove_dir_all(&tmp.0) {
+            eprintln!("warning: cannot remove temporary directory ({:?})", err.kind());
         }
-    };
+        let Opened::Loaded { skipped } = opened else { return Err("--learn-file is not a valid learning file".into()) };
+        let n = e.learner().records().len();
+        eprintln!("learning file: {n} records, {skipped} lines skipped");
+        if n == 0 {
+            return Err("--learn-file has no usable records".into());
+        }
+    }
+    // Opened after the rows are read, like the CLI's outputs are not touched by a failed start.
+    let create = |f: Option<String>| f.map(|f| fs::File::create(f).map_err(|e| format!("cannot create output file ({:?})", e.kind()))).transpose();
+    let (rowstats, keys, firsts) = (create(rowstats)?, create(keys)?, create(firsts)?);
     let mut outs = Vec::with_capacity(rows.len());
     for (i, r) in rows.iter().enumerate() {
         outs.push(replay_row(&mut e, &r.ctx, &r.syls, &r.sent, &len, cfg).map_err(|m| format!("row {}: {m}", i + 1))?);
