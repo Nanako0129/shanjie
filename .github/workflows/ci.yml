@@ -447,7 +447,7 @@ jobs:
       - name: "Step 7: acceptance checks 2, 3 and 6"
         run: EXPECTED_BUNDLE_ID=com.nyanako.inputmethod.shanjie scripts/check-app.sh "build/善解輸入法.app"
 
-      # Step 8: nine changed copies of the shipping build against
+      # Step 8: ten changed copies of the shipping build against
       # check-entitlements.sh and check-app.sh (security review F1, F7); none is
       # launched.
       - name: "Step 8: entitlement and Sparkle mutations"

@@ -1,5 +1,5 @@
 #!/bin/bash
-# docs/contracts/app-sandbox.md section 2.6 step 8: nine copies of the shipping-ID build, each changed one way and re-signed
+# docs/contracts/app-sandbox.md section 2.6 step 8: ten copies of the shipping-ID build, each changed one way and re-signed
 # ad-hoc, against scripts/check-entitlements.sh and scripts/check-app.sh (SKIP_RUN=1: checks 2 and 3 only). Nothing is ever
 # launched; the copies live in a temporary directory that is removed at the end. Runs locally and in CI.
 #
@@ -15,6 +15,7 @@
 #   7 SUEnableInstallerLauncherService false         check-app.sh check 2 fails
 #   8 a second .xpc outside XPCServices              check-app.sh check 3 fails (the whole-framework XPC layout)
 #   9 the framework back in Contents/Frameworks      check-app.sh check 3 fails (the framework's place, section 2.8)
+#  10 a second framework in Contents/Frameworks too  check-app.sh check 3 fails (exactly Updater/Sparkle.framework)
 # release.yml's verify() has its own copy of the comparison and is not mutated here (`sign` runs only on main).
 set -euo pipefail
 
@@ -93,4 +94,8 @@ A="$(copy 9)"; mv "$A/$F" "$A/Contents/Frameworks/"; rmdir "$A/Contents/Framewor
 codesign --force --sign - --preserve-metadata=entitlements "$A" 2>/dev/null
 app_fails 9 "$A" 3 "Contents/Frameworks is not exactly Updater/Sparkle.framework"
 
-echo "sandbox mutations: all nine as expected"
+A="$(copy 10)"; ditto "$A/$F" "$A/Contents/Frameworks/Sparkle.framework"
+codesign --force --sign - --preserve-metadata=entitlements "$A" 2>/dev/null
+app_fails 10 "$A" 3 "Contents/Frameworks is not exactly Updater/Sparkle.framework"
+
+echo "sandbox mutations: all ten as expected"

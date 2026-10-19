@@ -43,7 +43,8 @@ let package = Package(
             // (MainActor.assumeIsolated). ShanjieKit and the tests stay in the Swift 6 mode.
             swiftSettings: [.swiftLanguageMode(.v5)],
             // Sparkle.framework sits in Contents/Frameworks/Updater of the bundle (scripts/build-app.sh, app-sandbox.md
-            // section 2.8): the only rpath, so a framework anywhere else fails at launch instead of loading quietly.
+            // section 2.8). Contents/Frameworks itself is no longer searched, so a framework left there fails at launch;
+            // SwiftPM adds @loader_path (Contents/MacOS) on its own, where the build puts nothing but the executable.
             linkerSettings: [.linkedFramework("Carbon"), .linkedFramework("InputMethodKit"),
                              .unsafeFlags(["-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks/Updater"])]
         ),

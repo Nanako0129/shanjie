@@ -163,10 +163,13 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources/zh-Hant.lproj" "$APP/Con
   "$APP/Contents/Resources/LICENSES"
 cp "$BIN" "$APP/Contents/MacOS/shanjie"
 
-# Sparkle.framework in Contents/Frameworks/Updater (the executable's only rpath, macos/Package.swift). Not
-# Contents/Frameworks: macOS remembers per framework path that a Sparkle.framework had no XPC services (v0.4.7's had none)
-# and, until a reboot, does not register the Installer.xpc a later build brings there, so the first sandboxed update would
-# fail (app-sandbox.md sections 1 and 2.8, measured 2026-10-19). Never put a Sparkle without XPC services in Updater either.
+# Sparkle.framework in Contents/Frameworks/Updater (the executable's rpath besides SwiftPM's @loader_path,
+# macos/Package.swift). Not Contents/Frameworks: in a macOS 26.6.2 VM, a build with Installer.xpc at a framework path where
+# a Sparkle without XPC services had run since boot (v0.4.7's layout) did not get the service registered until a reboot,
+# so the first sandboxed update failed; the same build with the framework in a new folder did (app-sandbox.md sections 1
+# and 2.8, 2026-10-19; black-box measurements, the per-path cache is an inference). So the XPC services under Updater must
+# stay exactly Installer.xpc: a release that changes them (Downloader.xpc back, a Sparkle that renames a service) moves
+# the framework to a new folder name instead.
 # app-sandbox.md section 2.8: the sandboxed app reaches the network itself (com.apple.security.network.client), so only
 # Installer.xpc is kept (SUEnableInstallerLauncherService); Downloader.xpc is removed and SUEnableDownloaderService is not
 # set. XPCServices must hold exactly Installer.xpc (check-app.sh and release.yml assert it and the location too).

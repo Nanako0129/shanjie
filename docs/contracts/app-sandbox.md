@@ -285,7 +285,7 @@
 6. `make selftest-bundled SELFTEST_BUNDLE_ID=com.nyanako.inputmethod.shanjie.selftest-$GITHUB_RUN_ID`，前後各檢查一次 `~/Library/Containers/<該 ID>`：之前不存在、之後存在。
    - 原本傳空值、用正式 ID 的那一步（`ci.yml` 現在的 `SELFTEST_BUNDLE_ID=`）取消；正式 ID 的 selftest 已在第 3 步與第 7 步跑過。
 7. `EXPECTED_BUNDLE_ID=com.nyanako.inputmethod.shanjie scripts/check-app.sh build/善解輸入法.app`。
-8. **突變測試**（`scripts/test-sandbox-mutations.sh`，本機與 CI 共用；實作時改成腳本）：複製 `build/善解輸入法.app` 九份（〔修訂三〕原本八份），各做一種改動（APFS 的 clone，`cp -Rc`，不支援時退回 `ditto`；放複本的暫存目錄先 `touch .metadata_never_index`）。
+8. **突變測試**（`scripts/test-sandbox-mutations.sh`，本機與 CI 共用；實作時改成腳本）：複製 `build/善解輸入法.app` 十份（〔修訂三〕原本八份），各做一種改動（APFS 的 clone，`cp -Rc`，不支援時退回 `ditto`；放複本的暫存目錄先 `touch .metadata_never_index`）。
    - 用 `codesign --force --sign -` 重簽（不帶 `--preserve-metadata`）：`scripts/check-entitlements.sh` 要失敗。
    - 帶 `--preserve-metadata=entitlements` 重簽：`scripts/check-entitlements.sh` 要通過。
    - entitlements 多一個鍵（例如 `com.apple.security.cs.disable-library-validation`）重簽：`scripts/check-entitlements.sh` 要失敗。
@@ -295,6 +295,7 @@
    - `XPCServices` 以外（`Versions/B/`）多放一個 `.xpc` 再重簽：`check-app.sh` 第 3 項的整個 framework 檢查要失敗。
    - 把 Info.plist 的 `SUEnableInstallerLauncherService` 改成 `false` 再重簽：`check-app.sh` 第 2 項要失敗。
    - 〔修訂三〕把 `Sparkle.framework` 搬回 `Contents/Frameworks/`（舊位置）再重簽 App：`check-app.sh` 第 3 項的位置檢查要失敗。
+   - 〔修訂三〕新位置之外，`Contents/Frameworks/` 再放一份 `Sparkle.framework` 再重簽 App：`check-app.sh` 第 3 項的位置檢查要失敗（「只能有這一份」那一半）。
    - 第 3 步在拒絕檢查通過之後、放來源之前，在 log 印出 runner 的 macOS 版本（`sw_vers`），「沒有清單不搬」量到的是哪一版要看得到（F4）。拒絕路徑因此完全沒有輸出以外的副作用。
    - `release.yml` 的那份比對不在分支上跑反向測試（`sign` 只在 main 觸發）；它和 `check-entitlements.sh` 用同一套比對方式，兩處的說明互相指向。
 9. `make installer`、`scripts/check-installer.sh`（不變，用第 1 步的正式組建）。
@@ -336,11 +337,11 @@
 - **framework 的位置**（修訂三，維護者 2026-10-19 選擇題，§6 第 7 項）：
   - `Sparkle.framework` 放在 `Contents/Frameworks/Updater/Sparkle.framework`，不再放 `Contents/Frameworks/Sparkle.framework`。
   - 原因（§1 的「2026-10-19，虛擬機」）：系統照 framework 的路徑記住「沒有 XPC 服務」，重開機才清。舊位置被 v0.4.7（沒有 XPC 服務）用過，0.5.0 留在那裡的話，更新上來之後、重開機之前，系統不會登記安裝服務。新位置在任何舊版裡都沒出現過，第一次出現就帶著 `Installer.xpc`。
-  - 主程式的 rpath 由 `@executable_path/../Frameworks` 改成 `@executable_path/../Frameworks/Updater`（`macos/Package.swift`），只留這一條：framework 不在新位置時，程式啟動就失敗（CI 的 selftest 會抓到），不會靜靜地載入別處的一份。
+  - 主程式的 rpath 由 `@executable_path/../Frameworks` 改成 `@executable_path/../Frameworks/Updater`（`macos/Package.swift`）。`Contents/Frameworks` 不再在搜尋路徑上，framework 留在舊位置時程式啟動就失敗（CI 的 selftest 會抓到）。SwiftPM 另外會自己加 `@loader_path`（`Contents/MacOS`），組建只在那裡放執行檔。
   - 檢查（舊位置被搬回來，Sparkle 照樣能跑，只有更新會壞，所以一定要擋）：
     - `check-app.sh` 第 3 項、`release.yml` 的 `sign` 與 `verify_sparkle` 斷言 `Contents/Frameworks` 裡只有 `Updater`、`Updater` 裡只有 `Sparkle.framework`；
     - 突變測試多一份「搬回舊位置」（§2.6 第 8 步）。
-  - 名稱 `Updater` 之後不能再拿來放沒有 XPC 服務的 Sparkle，否則同樣的問題會在下一次換配置時重現。這一點寫進 `build-app.sh` 的註解。
+  - `Updater` 底下的 XPC 服務之後要一直剛好是 `Installer.xpc`：哪一版要改（例如加回 `Downloader.xpc`、Sparkle 改了服務名稱），就把 framework 換到新的資料夾名稱，否則同樣的問題可能在那次換版重現（〔推論〕快取記的可能是整組服務，不只「有沒有」）。這一點寫進 `build-app.sh` 的註解。
   - Sparkle 自己用 `NSBundle` 找自己的 bundle 與 `Autoupdate`（`InstallerLauncher` 從 `Installer.xpc` 往上兩層找），和 framework 放在哪一層無關；`checkIfConfiguredProperly` 查的也是 framework 自己的 `XPCServices`。
 - **ad-hoc 簽章順序**（由內而外，不用 `--deep`）：`Installer.xpc` → `Autoupdate` → `Updater.app` → framework → App（只有 App 帶 entitlements）。
 - **網路：給輸入法 `network.client`，不用 Downloader.xpc**（安全審查確認，§7.2 F6）：
@@ -373,6 +374,8 @@
 
 ## 3. 不在這一片（第二片或之後）
 
+- 〔修訂三〕更新失敗時把 Sparkle 的「connecting to the installer」錯誤轉成「重新開機後就能更新」的提示（審查建議，涵蓋沒量過的情況：登出、其他 macOS 版本）；先靠 §4.3 A 第 2b 步與 §4.4 的實機量測，碰到再做；
+
 - 網站隱私說明補 Time Machine（F6）；
 - 學習的 denylist 擴充（F7）；
 - 安裝程式的簽章檢查（F9）；
@@ -391,12 +394,12 @@
 
 1. entitlements 與 Sparkle：
    - 第 7 步的 `check-app.sh` 第 2、3 項通過：四個鍵、`Installer.xpc` 在、`Downloader.xpc` 不在、Sparkle 位置沒有 entitlements、`SUEnableInstallerLauncherService` 是 true、framework 在 `Contents/Frameworks/Updater/`（修訂三）；
-   - 第 8 步的九份突變各自照預期：
+   - 第 8 步的十份突變各自照預期：
      - 不帶 `--preserve-metadata` 重簽、多一個鍵、mach 名稱換成別的 ID：`check-entitlements.sh` 失敗；
      - 帶 `--preserve-metadata=entitlements` 重簽：`check-entitlements.sh` 通過；
      - 刪掉 `Installer.xpc`、`XPCServices` 裡或外多一個 `.xpc`：`check-app.sh` 第 3 項失敗；
      - `SUEnableInstallerLauncherService` 改成 `false`：`check-app.sh` 第 2 項失敗；
-     - framework 搬回 `Contents/Frameworks/`：`check-app.sh` 第 3 項失敗（修訂三）。
+     - framework 搬回 `Contents/Frameworks/`，或兩個位置都有：`check-app.sh` 第 3 項失敗（修訂三）。
 2. 沙盒有套上：第 3 步拋棄式 ID 的 container、第 6 步 selftest ID 的 container，都是之前不存在、之後存在。
 3. 移轉與「沒有清單不搬」：第 3 步的所有斷言。
 4. 拒絕：第 4 步。
@@ -467,10 +470,11 @@
      - (a)～(d) 同上；
      - (g) A 學的詞在 B 仍排第一（同一個 container）。
   2b. **A0 → B3 → C3，中間不重開機**（修訂三；虛擬機）：
-     - 修訂三合併後，用 main 建 B3（`0.0.2`）與 C3（`0.0.3`），都有沙盒、framework 在新位置；A0 沿用（`0.0.1`，framework 在舊位置、沒有 XPC 服務）。
+     - **合併前**做（審查：沒看到它有效就不合併）：用修訂三 PR 的 head 建 B3（`0.0.2`）與 C3（`0.0.3`），都有沙盒、framework 在新位置；A0 沿用（`0.0.1`，framework 在舊位置、沒有 XPC 服務）。PR 之後再改到組建時要重做。
      - 虛擬機先重開機，清掉第 1、2 步留下的狀態。裝 A0、讓系統啟動它一次：等於使用者的機器開機後跑過 0.4.7。
      - feed 只放 B3，A0 → B3。接著 feed 只放 C3，**不重開機**，B3 → C3。量：
        - B3 執行中時，`launchctl print pid/<B3 的 pid>` 列得到 `org.sparkle-project.InstallerLauncher`；
+       - 更新到 C3 之後，C3 執行中時同樣列得到（同一條路徑換了一版之後仍有登記，之後每一次更新都是這種情況）；
        - 沒有「connecting to the installer」的錯誤，更新後執行中的是 C3；
        - container 沿用（建立時間不變），裡面的 `learning.tsv` 雜湊和 B3 → C3 之前相同；
        - (d) 同上。
@@ -500,7 +504,7 @@
 ### 4.4 順序與 tag
 
 - dry run 只能從 main 觸發（`release.yml` 的 `gate` 與 `sign` 只接受 `refs/heads/main` 的 `workflow_dispatch`）。所以順序是：
-  1. §4.1 的 CI 通過；
+  1. §4.1 的 CI 通過；〔修訂三〕修訂三的 PR 另外要先過 §4.3 A 第 2b 步；
   2. 合併；
   3. §4.3 A；
   4. dry run（main 觸發，事先問維護者）；
@@ -644,3 +648,4 @@
 | plan-verifier（修訂二，第 2 次，2026-10-19；第二次之後逐項處置） | 前一輪五項都已解決；新的 REVISE：1. §4.3 B 的安裝排在第 6 步，前面的檢查都在沒有沙盒的版本上做，log 也看不到第一次啟動；2. §4.2 第 1–3 項要學習資料，虛擬機卻不能打字；3. §4.3 A 沒寫 A0、A、B 的版本號，B 可能不比 A0 新 | 三項都 FIX：1 → 安裝改成第 1 步、第 2 步裝完立刻看 log、第 12 步再看一次涵蓋全程的 log，§7.1 的交叉參照跟著改；2 → 第 1 項在第一次啟動前放合成的 `learning.tsv`（含 `#` 新詞）與 `layout=eten`、用雜湊比對，第 2 項改成可觀察的「不跳詢問、container 沒重建」、「讀得到」移到 §4.3 A 第 2 步，第 3 項接著第 1 項的資料；3 → A0 與 A 是 `0.0.1`、B 是 `0.0.2`，A0 一定要明確給版本號 |
 | plan-verifier 收尾審查（修訂二，2026-10-19） | READY | — |
 | plan-verifier（修訂三，2026-10-19 晚上） | READY | — |
+| `/code-review` 與 fresh verifier（修訂三的實作，PR #226） | verifier CONFIRMED；審查 8 項：1. 「只留一條 rpath」不對，SwiftPM 另加 `@loader_path`；2. 第 2b 步沒查 C3 的登記；3. 規則太窄（XPC 服務的組合一變可能重演），也沒有失敗時的提示；4. 沒看到更新有效就要合併；5. `verification.md` 與 about-update 驗收 2 沒寫位置檢查；6. 方法論與註解把黑箱推論寫成事實；7. 突變沒測「只能有這一份」；8. `release.yml` 同一個檢查寫兩次 | 1、2、5、6、7、8 照改；3 → 規則改成「XPC 服務的組合一變就換資料夾」，失敗提示記進 §3；4 → 第 2b 步改在合併前、用 PR 的 head |

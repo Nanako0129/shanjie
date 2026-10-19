@@ -258,11 +258,14 @@ jobs:
           # is a second check. (The ad-hoc build from `build` has no runtime: library validation refuses an
           # ad-hoc framework there; here all five share the team, and verify_sparkle requires the flag on
           # each.) build-app.sh kept only Installer.xpc; a bundle with any other XPC service stops here.
-          # The framework's place (app-sandbox.md section 2.8, the same check as scripts/check-app.sh): only
-          # Contents/Frameworks/Updater/Sparkle.framework, a path v0.4.7's framework without XPC services never used.
-          [ "$(ls -A "$APP/Contents/Frameworks" 2>/dev/null)" = Updater ] \
-            && [ "$(ls -A "$APP/Contents/Frameworks/Updater" 2>/dev/null)" = Sparkle.framework ] \
-            || fail "Contents/Frameworks is not exactly Updater/Sparkle.framework"
+          # framework_place <app>: Contents/Frameworks holds exactly Updater/Sparkle.framework (app-sandbox.md section
+          # 2.8), a path v0.4.7's framework without XPC services never used. The same check as scripts/check-app.sh;
+          # verify_sparkle calls it too.
+          framework_place() {
+            [ "$(ls -A "$1/Contents/Frameworks" 2>/dev/null)" = Updater ] \
+              && [ "$(ls -A "$1/Contents/Frameworks/Updater" 2>/dev/null)" = Sparkle.framework ]
+          }
+          framework_place "$APP" || fail "Contents/Frameworks is not exactly Updater/Sparkle.framework"
           SPARKLE="$APP/Contents/Frameworks/Updater/Sparkle.framework"
           XPC="$SPARKLE/Versions/B/XPCServices"
           [ "$(ls -A "$XPC" 2>/dev/null)" = Installer.xpc ] || fail "Sparkle's XPCServices is not exactly Installer.xpc"
@@ -383,9 +386,7 @@ jobs:
           # verbatim, with their types, against the values in this job's env; SUEnableDownloaderService absent.
           verify_sparkle() {
             V="$1"
-            [ "$(ls -A "$V/Contents/Frameworks" 2>/dev/null)" = Updater ] \
-              && [ "$(ls -A "$V/Contents/Frameworks/Updater" 2>/dev/null)" = Sparkle.framework ] \
-              || fail "Contents/Frameworks is not exactly Updater/Sparkle.framework: $V"
+            framework_place "$V" || fail "Contents/Frameworks is not exactly Updater/Sparkle.framework: $V"
             S="$V/Contents/Frameworks/Updater/Sparkle.framework"
             for code in "$V" "$S" "$S/Versions/B/XPCServices/Installer.xpc" "$S/Versions/B/Autoupdate" "$S/Versions/B/Updater.app"; do
               [ -e "$code" ] || fail "$code is missing"
