@@ -2,7 +2,7 @@
 
 狀態：**修訂三（2026-10-19 晚上）審查 READY**（§8），實作中。修訂二收尾審查 READY，已合併（`a76e5150`）。
 
-- 修訂三的起因：§4.3 A 第 2 步（沙盒版經 Sparkle 更新成沙盒版）在虛擬機失敗，Sparkle 顯示「An error occurred while connecting to the installer」。根因量到了（§1 的「2026-10-19，虛擬機」）：同一條 framework 路徑，開機後第一次跑的 Sparkle 沒有 XPC 服務時，系統就不替後來的版本登記安裝服務，要重開機才恢復。v0.4.7 的 Sparkle.framework 沒有 XPC 服務，所以正式版 0.4.7 → 0.5.0 之後、重開機之前，0.5.0 → 0.5.1 會失敗。
+- 修訂三的起因：§4.3 A 第 2 步（沙盒版經 Sparkle 更新成沙盒版）在虛擬機失敗，Sparkle 顯示「An error occurred while connecting to the installer」。觸發條件量到了（黑箱量測，機制是推論；§1 的「2026-10-19，虛擬機」）：同一條 framework 路徑，開機後第一次跑的 Sparkle 沒有 XPC 服務時，系統就不替後來的版本登記安裝服務，要重開機才恢復。v0.4.7 的 Sparkle.framework 沒有 XPC 服務，所以正式版 0.4.7 → 0.5.0 之後、重開機之前，0.5.0 → 0.5.1 會失敗。
 - 修法（維護者 2026-10-19 選擇題，§6 第 7 項）：0.5.0 起把 Sparkle.framework 放到舊版沒用過的 `Contents/Frameworks/Updater/`（§2.8）。§1、§2.4、§2.6 第 8 步、§2.8、§4.1、§4.3 A、§4.4、§5 跟著改。
 
 - 修訂一在 2026-10-10 收尾審查 READY，實作放在分支 `feat/app-sandbox`（PR #94，草稿）。那時排定在 v0.4.0 之後合併、以 v0.5.0 發佈。
