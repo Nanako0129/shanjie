@@ -44,12 +44,13 @@ SPAM_RE = re.compile("貸款|借錢|借款|信貸|當舖|代書|小額|債務|�
 SPAM_MIN = 5
 # 2026-10-20 proofreading of that build: 38 of 300 rows needed a fix, 26 of them whole-row drops. Most were adult and gambling SEO terms
 # injected mid-sentence (in the sentence or in its context), the rest the output of a word-by-word "spinner" that rewrites simplified
-# Chinese (不克不及 for 不能, 怙恃 for 父母, 瞭 and 傢 for 了 and 家). Any match of ADULT_RE drops the document (counted as `adult`),
-# SPIN_MIN matches of SPIN_RE drop it (`spinner`). The lookarounds keep 瞭解, 明瞭, 一目瞭然, 傢俱 and 傢伙. 德律風 is left out: the
-# spinner also writes it for 電話, but it is an old Taiwanese loanword for telephone that genuine posts use.
+# Chinese (不克不及 for 不能, 可以或許 for 能夠, 瞭 and 傢 for 了 and 家). Any match of ADULT_RE drops the document (counted as `adult`),
+# SPIN_MIN matches of SPIN_RE drop it (`spinner`). The lookarounds keep 瞭解, 明瞭, 一目瞭然, 傢俱 and 傢伙. SPIN_RE lists only forms no
+# genuine text writes: the spinner also swaps in real but old words (怙恃, 黌舍, 如許, 以是, 已往, 德律風, the old Taiwanese loanword
+# for telephone), which are left out so that genuine posts using them stay. Wikisource does not go through these filters.
 ADULT_RE = re.compile("色情|情色|愛愛|援交|一夜情|裸聊|做愛|性愛|[aA][片漫]|成人(?:光碟|網|影|交友)|娛樂城|博弈|博彩|運彩|百家樂|六合彩|"
                       "賭博|包養|甜心寶貝|交友網|視訊聊天|聊天室|辣妹|送茶|酒店兼職|金瓶梅")
-SPIN_RE = re.compile("不克不及|怙恃|黌舍|可以或許|掉敗|如許|以是|已往|隻是|裏麵|(?<!明)瞭(?![解望然])|傢(?![俱伙具])")
+SPIN_RE = re.compile("不克不及|可以或許|掉敗|隻是|裏麵|(?<!明)瞭(?![解望然])|傢(?![俱伙具])")
 SPIN_MIN = 2
 PROOFREAD_SEED = 20261020        # hplt's second proofreading sample (README), drawn from the rows not in the first sample
 GIBBERISH_PERCENTILE = 0.01      # rows scoring below this percentile of the reference sets' gold sentences are dropped

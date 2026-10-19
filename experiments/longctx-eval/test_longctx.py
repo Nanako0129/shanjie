@@ -449,7 +449,7 @@ class Long(unittest.TestCase):
     def test_hplt_adult_and_spinner_filters(self):
         texts = ["今天天氣很好\n開著愛愛直播露營車",           # adult: one injected term is enough
                  "他打德律風給我，咱們不克不及",              # 德律風 is a Taiwanese loanword, not counted: one spinner word, kept
-                 "咱們不克不及回到已往",                     # two spinner words
+                 "咱們不克不及回到已往，可以或許",            # two spinner forms (已往 is an old word, not counted)
                  "我瞭解了，明瞭，一目瞭然，傢俱和傢伙",        # legit 瞭 and 傢: no spinner match
                  "閨蜜吼瞭一通，跑我傢"]                    # 瞭 and 傢 as 了 and 家
         lines = [self.hplt_line({"ID": 1.0}, "https://a.com.tw/", text=t) for t in texts]
