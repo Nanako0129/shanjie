@@ -16,7 +16,7 @@
 | 傾印 | 每個集合跑一次基準加 `--dump --dump-words --rowstats --tinylm-scores`（前 64 名、每個候選的切分、最後選字、前 8 名的 `ll`）。私人集合的傾印只在 GCP 上，由腳本結束時刪掉 |
 | 表 T1 | 只用出貨模型（model-v6，`bigram.sjlm` `fc2bddd1…`）建置時的口語計數 `counts-colloquial3.pkl`（SHA-256 `1e7a15ef…`；口語訓練檔沿用舊版，已知帶著修 bug 前的「吃→喫、峯」問題）×1，用 `tools/build_lm.py --corpora` 建、同樣的剪枝（2）與折扣（0.75），不用詞類、不用 KN |
 | 表 T2 | T1 的計數加上公開口語池 `pool.tsv`（143,895 句、約 300 萬漢字，SHA-256 `19fdc474…`，Phase 2 建的、授權已核對、已對公開評測集去重）的計數，×1 相加。池的計數和 model-v6 的口語計數同一套：`experiments/s2/build_counts_text.py --expected --extra-lexicon acg-count.tsv --extra-lexicon names-count.tsv`（model-v6 建置時的兩份計數詞表，`e8757303…`、`5c14a359…`） |
-| 口語分數 lc | 候選的切分（`--dump-words`）w₁…wₖ：lc ＝ Σ log10 P(wᵢ｜wᵢ₋₁) ＋ log10 P(`</s>`｜wₖ)，w₀＝`<s>`（不接前文：前文已在 n-gram 分數裡）。P 用 `reference/proto/lm.py` `BigramLM.prob` 的絕對折扣回退；回退到的 unigram 是表自己的 (c(w)＋1)／(N＋V＋1)，表外的詞 c＝0 |
+| 口語分數 lc | 候選的切分（`--dump-words`）w₁…wₖ：lc ＝ Σ log10 P(wᵢ｜wᵢ₋₁) ＋ log10 P(`</s>`｜wₖ)，w₀＝`<s>`（不接前文：前文已在 n-gram 分數裡）。P 用 `reference/proto/lm.py` `BigramLM.prob` 的絕對折扣回退；回退到的 unigram 是表自己的 (c(w)＋1)／(N＋V＋1)，表外的詞 c＝0；`</s>` 的回退照 `BigramLM.eos` 用表自己的句尾率（剪枝前的句尾總數 ÷ N），因為 `</s>` 沒有 unigram 次數（2026-10-20 看任何數字之前補：照字面套 (0＋1)／(N＋V＋1) 會讓每個句尾都被當成沒見過） |
 | 疊加層扣分 | k ＝ 候選切分裡「在 `data/lexicon/overlay-add.tsv` 或詞包、不在基礎詞庫」的詞數（和 D3 (ii) 同一個定義，`names-add.tsv` 不算） |
 | 新分數 | s ＝ ng ＋ μ·lc − γ·k；依 s 重排前 64 名，取前 8 名，用出貨融合重選（融合裡的 n-gram 分數換成 s，τ 也看 s 的前兩名差）。書面設定不加（μ＝γ＝0），所以書面逐列不變 |
 | 格點（事先固定，20 格） | 表 ∈ {T1, T2} × μ ∈ {0.2, 0.5, 1.0} × γ ∈ {0, 0.25, 0.5}（18 格）；另加只扣分不加表的 μ 0 × γ ∈ {0.25, 0.5}（2 格）。μ 0、γ 0 就是基準 |
@@ -26,7 +26,7 @@
 - **兩個層級**，都對基準比：
   - **n-gram 層**：s 的第一名和基準 n-gram 第一名比（改對、改壞、淨值、精確 McNemar p）。這是 P4 直接作用的地方，判讀用它。
   - **最後選字**：新前 8 名的集合都在原本的前 8 名裡時，`ll` 都有，融合可以照算；新前 8 名換進了沒有 `ll` 的候選，該列記「需重打分」，不算改對也不算改壞。需重打分超過該格受影響列（前 8 名集合或順序有變的列）的 10% 時，該格的最後選字標「不可靠」。只報。
-- 另報：D3 的 (ii) 25 列與 (iii) 97 列各有幾列在 n-gram 層變對；C1、C3 桶的大小；基準重算檢查（下面）。
+- 另報：D3 的 (ii) 25 列與 (iii) 97 列各有幾列在 n-gram 層變對；C1、C3 桶的大小（基準）與每格在 n-gram 層救回的 C1、C3 列數；基準重算檢查（下面）。
 
 ## 選格與判讀（事先寫死）
 
@@ -41,11 +41,12 @@
 ## 基準重算檢查（任一不符就停）
 
 - μ 0、γ 0 時，每列 s 的第一名＝傾印的名次 0；用出貨融合重選的結果＝rowstats 的最後選字（全部列逐列相同）。
-- discordtune 的基準最後選字對 n-gram 第一名的改對／改壞＝ D1 重算的 +107／−26。
+- 基準最後選字對 n-gram 第一名的改對／改壞＝ D1 重算的值：discordtune +107／−26、chatclause +111／−26（擋住「傾印不是出貨設定」，例如少了 `--context` 或 `--packs acg`）。
+- discordtune 的 D3 (ii)、(iii) 列數＝ D3 記錄的 25、97（同一個 CLI 與模型，傾印應逐列相同）。
 
 ## 預算、資料、停止條件、範圍外
 
-- **預算**：建表在有計數檔的那台 Windows 機器（188）或 GCP；傾印與打分在 GCP `shanjie-work`，合計 ≤ 3 小時；Mac 只跑單元測試。
+- **預算**：建表、傾印與打分都在雲端 VM，合計 ≤ 3 小時；Mac 只跑單元測試。
 - **私人資料**：私人集合的傾印與分數只在 GCP 上算，腳本用 `trap … EXIT` 刪；帶回 Mac 的只有計數與格點表（不含句子、前文、詞）。
 - **停止條件**：基準重算檢查不符；任何私人集合的句子或詞被帶回 Mac；要用到判讀集或保留集。碰到就停，回報維護者。
 - **程式**：`experiments/p4-colloquial/p4.py`（重用 `tools/triage.py` 的傾印讀取、`reference/proto/lm.py` 的 `BigramLM`、`experiments/s7a-tinylm/fusegrid.py` 的 `pick`）與它的單元測試；建 T1／T2 只加 `tools/build_lm.py` 的一個選項（指定計數檔與權重，預設行為不變）。走 `/code-review`，不送 verifier（探索片）。
