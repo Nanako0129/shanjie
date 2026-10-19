@@ -1,6 +1,6 @@
 ## dev302  lm-chat+ctx+kn:cbefbced:θ1:β1  {'n': 302, 'top1': 246, 'oracle@64': 300, 'top1_sha256': 'd8ac58795e5649a557bcd62e7639cee2a9bbdbbe13860f13794ff95092ce5be8'}
 ## typing76  lm-chat+ctx+kn:cbefbced:θ1:β1  {'n': 76, 'top1': 70, 'oracle@64': 76, 'top1_sha256': '192b2bf3c1d59ba9a35586cf21292ffee7c54590dba16ef0e246a45557bb292c'}
-## user-reported  lm-chat+ctx+kn:cbefbced:θ1:β1  {'n': 138, 'top1': 31, 'oracle@64': 135, 'top1_sha256': '0ebafbdba42a05a816d744126377634769263dcad873650d35028f847faeec9e'}
+## user-reported  lm-chat+ctx+kn:cbefbced:θ1:β1  {'n': 139, 'top1': 31, 'oracle@64': 136, 'top1_sha256': '77af256961a4de3073e9156b297bd5a9f4a5c59ee39867abd1144d5ad6471144'}
 ## dev302  lm-formal+ctx+tri:fdd3b05d  {'n': 302, 'top1': 253, 'oracle@64': 300, 'top1_sha256': 'f2fe56415ff1a62424487fd8cf8b61c0bf0e8f3cd59b5e9429e2aa1ef5559afd'}
 ## typing76  lm-formal+ctx+tri:fdd3b05d  {'n': 76, 'top1': 68, 'oracle@64': 76, 'top1_sha256': '7d53f185972097902f0046f50cec94c5b9a3676a035fa2656e70cf76bdb65075'}
-## user-reported  lm-formal+ctx+tri:fdd3b05d  {'n': 138, 'top1': 39, 'oracle@64': 135, 'top1_sha256': '5d1cb9d3759e55655ec615ff07e926e7fb64f93ea8105fb5dbe54b0aeb77ff1f'}
+## user-reported  lm-formal+ctx+tri:fdd3b05d  {'n': 139, 'top1': 40, 'oracle@64': 136, 'top1_sha256': 'ae580ed721d56f94006fca867718c9a98dcf1da946c75eec0553a1b1be6157d7'}
