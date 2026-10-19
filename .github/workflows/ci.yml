@@ -405,6 +405,7 @@ jobs:
             cat "$T.out"
             [ "$rc" -ne 0 ] || { echo "error: not refused with CI='$ci' HOME=$T" >&2; exit 1; }
             [ -z "$(ls -A "$T")" ] || { echo "error: the refused run wrote into $T" >&2; exit 1; }
+            [ -n "$ci" ] || grep -q 'refused: CI is not true' "$T.out"
           done
           grep -q "is not this account's home directory" "$T.out"
 

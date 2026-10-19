@@ -12,9 +12,12 @@
 #   CI=true scripts/test-sandbox-migration.sh <善解輸入法.app (shipping ID)> <no-list build>
 #
 # Refuses, exits non-zero, writes nothing and launches nothing, checked in this order: CI is not
-# `true`; HOME is not this account's home directory (from dscl, as install-ime.sh does: the system
-# migrates into the account's home, not $HOME); or, in that home, any of the learning folder, the
-# shipping preferences file, the shipping container or the no-list build's container already exists.
+# `true`, GITHUB_ACTIONS is not `true` or RUNNER_ENVIRONMENT is not `github-hosted` (a throwaway
+# GitHub-hosted runner, not a self-hosted one or a machine that only sets CI); HOME is not this
+# account's home directory (from dscl, as install-ime.sh does: the system migrates into the account's
+# home, not $HOME); or, in that home, any of the learning folder, the shipping preferences file, the
+# shipping container, the no-list build's container or an installed ~/Library/Input Methods/善解輸入法.app
+# already exists.
 # Never run it on a machine whose data matters: on success the learning data and the preferences
 # are inside ~/Library/Containers/com.nyanako.inputmethod.shanjie.
 set -euo pipefail
@@ -28,6 +31,8 @@ SHIPPING_ID=com.nyanako.inputmethod.shanjie
 
 # --- refusals, before anything is written or launched
 [ "${CI:-}" = true ] || fail "refused: CI is not true. This test moves the account's real learning data into a sandbox container; it runs only on a throwaway CI runner."
+[ "${GITHUB_ACTIONS:-}" = true ] || fail "refused: GITHUB_ACTIONS is not true; this test runs only on a throwaway GitHub-hosted runner."
+[ "${RUNNER_ENVIRONMENT:-}" = github-hosted ] || fail "refused: RUNNER_ENVIRONMENT is not github-hosted; this test runs only on a throwaway GitHub-hosted runner."
 ACCOUNT_HOME="$(dscl . -read "/Users/$(id -un)" NFSHomeDirectory 2>/dev/null | awk '{print $2}')"
 [ -n "$ACCOUNT_HOME" ] && [ "$(cd "$HOME" 2>/dev/null && pwd -P)" = "$(cd "$ACCOUNT_HOME" 2>/dev/null && pwd -P)" ] \
   || fail "refused: HOME ($HOME) is not this account's home directory ($ACCOUNT_HOME); the system migrates into the account's home, so a temporary HOME would not isolate anything."
@@ -37,14 +42,15 @@ AS="$HOME/Library/Application Support/shanjie"
 PREFS="$HOME/Library/Preferences/$SHIPPING_ID.plist"
 CS="$HOME/Library/Containers/$SHIPPING_ID"
 CN="$HOME/Library/Containers/$NOLIST_ID"
-for p in "$AS" "$PREFS" "$CS" "$CN"; do
+INSTALLED="$HOME/Library/Input Methods/善解輸入法.app"
+for p in "$AS" "$PREFS" "$CS" "$CN" "$INSTALLED"; do
   [ ! -e "$p" ] || fail "refused: $p already exists"
 done
 [ "$(pb CFBundleIdentifier "$SHIP/Contents/Info.plist")" = "$SHIPPING_ID" ] || fail "refused: $SHIP is not the shipping-ID build"
 [ -f "$SHIP/Contents/Resources/container-migration.plist" ] || fail "refused: $SHIP has no container-migration.plist"
 [ "$NOLIST_ID" != "$SHIPPING_ID" ] || fail "refused: $NOLIST has the shipping ID"
 [ ! -e "$NOLIST/Contents/Resources/container-migration.plist" ] || fail "refused: $NOLIST has a container-migration.plist"
-ok "refusal checks passed: CI=true, HOME is the account home, none of the four paths exists (the $NOLIST_ID container did not exist before)"
+ok "refusal checks passed: CI=true on a GitHub-hosted runner, HOME is the account home, none of the five paths exists (the $NOLIST_ID container did not exist before)"
 # Section 2.6 step 8 (F4): which macOS version "no list, no move" was measured on.
 echo "runner macOS:"; sw_vers
 

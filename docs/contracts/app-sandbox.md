@@ -236,9 +236,9 @@
    - 防呆如果寫錯，第 3 步的「container 已存在就拒絕」也會擋下來。
 3. **`scripts/test-sandbox-migration.sh build/善解輸入法.app "build/nomanifest/善解（開發版）.app"`**：這個 job 第一次啟動沙盒組建。
    - **拒絕條件**：結束碼非 0、什麼都不寫、不啟動任何東西。依這個順序檢查：
-     1. `CI` 不是 `true`；
+     1. `CI` 不是 `true`、`GITHUB_ACTIONS` 不是 `true`，或 `RUNNER_ENVIRONMENT` 不是 `github-hosted`（只在拋棄式的 GitHub-hosted runner 上跑，不在 self-hosted 或只設了 `CI` 的機器上跑）；
      2. `HOME` 不是這個帳號真正的家目錄：用 `dscl` 查 `NFSHomeDirectory`，和 `install-ime.sh` 的做法相同。container 的移轉看的是帳號的家目錄，不是 `$HOME`；
-     3. 帳號的家目錄下，下列任一已經存在：`~/Library/Application Support/shanjie`、`~/Library/Preferences/com.nyanako.inputmethod.shanjie.plist`、`~/Library/Containers/com.nyanako.inputmethod.shanjie`、拋棄式 ID 的 container。
+     3. 帳號的家目錄下，下列任一已經存在：`~/Library/Application Support/shanjie`、`~/Library/Preferences/com.nyanako.inputmethod.shanjie.plist`、`~/Library/Containers/com.nyanako.inputmethod.shanjie`、拋棄式 ID 的 container、已安裝的 `~/Library/Input Methods/善解輸入法.app`。
    - **放好來源**：
      - 合成的 `learning.tsv`（含一筆前文鍵 `#` 的新詞記錄）與 `learning.tsv.corrupt`；
      - 對目錄設不備份旗標；
@@ -257,7 +257,7 @@
    - 結束前確認來源的偏好設定檔 `~/Library/Preferences/com.nyanako.inputmethod.shanjie.plist` 已不存在（被搬走），第 7 步的快照才不會受 cfprefsd 延遲寫入影響。
    - 讀 container 如果在 CI 上跳 App Data 的 TCC 詢問而卡住（N6），改成由同一個沙盒執行檔回報它讀到的內容；改法寫進這份契約再做。
 4. 同一個腳本的拒絕測試，兩種情況都要結束碼非 0、暫存目錄裡沒有新檔案：
-   - `CI= HOME=<暫存目錄> …`；
+   - `CI= HOME=<暫存目錄> …`，log 裡有「CI is not true」的拒絕訊息；
    - `CI=true HOME=<暫存目錄> …`，log 裡有家目錄不符的訊息。
 5. `scripts/test-install-ime.sh`、`swift test`（不變）。
 6. `make selftest-bundled SELFTEST_BUNDLE_ID=com.nyanako.inputmethod.shanjie.selftest-$GITHUB_RUN_ID`，前後各檢查一次 `~/Library/Containers/<該 ID>`：之前不存在、之後存在。
