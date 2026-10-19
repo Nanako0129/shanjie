@@ -2,13 +2,31 @@
 //! Research tool, not shipped. Output is numbers only: the summary line on stdout, `--rowstats`, `--keys` and `--firsts` files.
 //!
 //! shanjie-replay (--rows FILE | --dev N) [--profile chat|formal] [--no-tinylm] [--learn off|on] [--rerank each|final]
-//!                [--correct] [--rowstats FILE] [--keys FILE] [--firsts FILE]
+//!                [--learn-file FILE] [--correct] [--rowstats FILE] [--keys FILE] [--firsts FILE]
 use cli::common::{dev_rows, format_rowstats, load_lenient, read_rows, root};
 use cli::replay::{build_engine, format_keys, replay_row, summary_line, Cfg, Rerank, RowIn};
 use core::eval::sha256_hex;
+use core::learn_store::{Opened, FILE};
 use core::lm::Profile;
 use std::fs;
-use std::path::Path;
+use std::os::unix::fs::DirBuilderExt;
+use std::path::{Path, PathBuf};
+
+/// A private (0700) per-run directory holding the copy of the `--learn-file`; removed when dropped, also on error paths.
+struct TempDir(PathBuf);
+impl TempDir {
+    fn new() -> Result<TempDir, String> {
+        let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos());
+        let dir = std::env::temp_dir().join(format!("shanjie-replay-learn-{}-{nanos}", std::process::id()));
+        fs::DirBuilder::new().mode(0o700).create(&dir).map_err(|e| format!("cannot create temporary directory ({:?})", e.kind()))?;
+        Ok(TempDir(dir))
+    }
+}
+impl Drop for TempDir {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
+    }
+}
 
 fn sha8(p: &Path) -> Result<String, String> {
     Ok(sha256_hex(&fs::read(p).map_err(|e| format!("cannot read model file ({:?})", e.kind()))?)[..8].to_string())
@@ -18,6 +36,7 @@ fn run() -> Result<(), String> {
     let (mut rows_file, mut dev, mut profile_name) = (None::<String>, None::<usize>, "chat".to_string());
     let (mut tl, mut learn, mut cfg) = (true, false, Cfg { correct: false, rerank: Rerank::Each });
     let (mut rowstats, mut keys, mut firsts) = (None::<String>, None::<String>, None::<String>);
+    let mut learn_file = None::<String>;
     let mut it = std::env::args().skip(1);
     while let Some(a) = it.next() {
         let mut val = || it.next().ok_or_else(|| "missing option value".to_string());
@@ -40,6 +59,7 @@ fn run() -> Result<(), String> {
                     _ => return Err("--rerank must be each or final".into()),
                 }
             }
+            "--learn-file" => learn_file = Some(val()?),
             "--correct" => cfg.correct = true,
             "--rowstats" => rowstats = Some(val()?),
             "--keys" => keys = Some(val()?),
@@ -59,6 +79,15 @@ fn run() -> Result<(), String> {
         for (opt, f) in [("--rowstats", &rowstats), ("--keys", &keys), ("--firsts", &firsts)] {
             if f.as_deref().and_then(|f| fs::canonicalize(f).ok()) == Some(rows.clone()) {
                 eprintln!("error: {opt} is the same file as --rows");
+                std::process::exit(2);
+            }
+        }
+    }
+    // The learning file is only ever read, but an output that is the same file would be truncated: refuse as well.
+    if let Some(lf) = learn_file.as_deref().and_then(|f| fs::canonicalize(f).ok()) {
+        for (opt, f) in [("--rowstats", &rowstats), ("--keys", &keys), ("--firsts", &firsts)] {
+            if f.as_deref().and_then(|f| fs::canonicalize(f).ok()) == Some(lf.clone()) {
+                eprintln!("error: {opt} is the same file as --learn-file");
                 std::process::exit(2);
             }
         }
@@ -90,13 +119,28 @@ fn run() -> Result<(), String> {
         .collect::<Result<_, String>>()?;
     eprintln!("models: bigram.sjlm:{lm8} {} tinylm.sjtl:{}", others.join(" "), tl8.as_deref().unwrap_or("none"));
     let tag = format!(
-        "replay-{profile_name}+ctx+acg+nopred+noen+lm:{lm8}{}{}{}{}",
+        "replay-{profile_name}+ctx+acg+nopred+noen+lm:{lm8}{}{}{}{}{}",
         tl8.as_ref().map_or("-notinylm".to_string(), |h| format!("+tl:{h}")),
         if learn { "+learn" } else { "" },
         if cfg.rerank == Rerank::Final { "+rerank:final" } else { "" },
         if cfg.correct { "+correct" } else { "" },
+        if learn_file.is_some() { "+learnfile" } else { "" },
     );
     let mut e = build_engine(&root, &lm_path, tl.then_some(tl_path.as_path()), profile, learn)?;
+    // The file is copied (bytes only) into a private temporary directory under the name the store loads; core opens, and with
+    // `--learn on` writes, only the copy. Anything but a normal load is an error: a replay without the learnings would mislead.
+    let _tmp = match &learn_file {
+        None => None,
+        Some(f) => {
+            let tmp = TempDir::new()?;
+            fs::copy(f, tmp.0.join(FILE)).map_err(|e| format!("cannot read --learn-file ({:?})", e.kind()))?;
+            match e.learning_open(&tmp.0).map_err(|_| "learning_open failed")? {
+                Opened::Loaded { skipped } => eprintln!("learning file: {} records, {skipped} lines skipped", e.learner().records().len()),
+                _ => return Err("--learn-file is not a valid learning file".into()),
+            }
+            Some(tmp)
+        }
+    };
     let mut outs = Vec::with_capacity(rows.len());
     for (i, r) in rows.iter().enumerate() {
         outs.push(replay_row(&mut e, &r.ctx, &r.syls, &r.sent, &len, cfg).map_err(|m| format!("row {}: {m}", i + 1))?);

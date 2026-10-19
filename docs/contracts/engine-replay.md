@@ -28,6 +28,7 @@
 - **和 App 的已知差異**（寫進設定標記）：預測列關（`set_prediction(false)`）、英文混打關（不載英文詞表、`set_english(false)`）。App 預設兩者都開；開著時 Space 開的候選窗會把預測列的項目排在前面、有的項目不是以游標為結尾的範圍，英文也可能搶走 Space，改選的鍵數就無法照 §4 定義。兩者都不影響 n-gram 與語意校正的選字。縮寫、直式候選窗照 App 預設（橫式，一頁 9 項）。
 - `--profile chat|formal`（預設 chat）。`--no-tinylm` 關掉語意校正（對照用）。
 - 學習：`--learn off|on`（預設 off）。on 時在第一個鍵之前呼叫一次 `set_learning(true)`、不開學習檔（只在記憶體，`learning_open` 不呼叫），新詞 B 照預設開。學習狀態只在這一個引擎、這一次執行內累積。
+- `--learn-file FILE`（唯讀載入學習檔）：引擎建好後，把 FILE 的位元組複製到本次執行專用的暫存目錄（0700、每次不同、在 `std::env::temp_dir()` 下）的 `learning.tsv`，再對該目錄呼叫 `learning_open`；原檔只被讀，不寫、不改名、不隔離，與 `--rowstats`、`--keys`、`--firsts` 是同一個檔就拒絕（結束碼 2）。載入結果不是正常載入（檔頭錯、`Corrupt`）就報錯結束，不會在沒有學習資料下默默重放。`--learn on` 時學到的寫進暫存副本，隨暫存目錄在結束時（含錯誤路徑）刪除；解碼不論 `--learn` 開關都讀載入的學習資料。摘要標記加 `+learnfile`；stderr 只印筆數與跳過的行數，不印檔案內容衍生的任何字、前文或讀音。
 - 模型路徑同 CLI（`data/lm/`），啟動時印出各模型的 sha256 前 8 碼與旗標（像 CLI 的摘要行標記），讓結果對得回模型。
 
 ## 3. 語意校正的時序 `--rerank each|final`

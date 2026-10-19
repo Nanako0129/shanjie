@@ -277,3 +277,80 @@ fn outputs_are_numbers_only_and_the_rowstats_are_the_clis() {
     }
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+/// `--learn-file` tests: a scratch dir per test, and TMPDIR pointed into it so the tool's temporary directory is countable.
+fn scratch(name: &str) -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!("shanjie-replay-{name}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("tmp")).unwrap();
+    dir
+}
+fn replay_with_learn(dir: &std::path::Path, learn: &std::path::Path, extra: &[&str]) -> std::process::Output {
+    let rows = dir.join("rows.txt");
+    std::fs::write(&rows, "|再見|ㄗㄞˋ ㄐㄧㄢˋ\n").unwrap();
+    let mut args = vec!["--rows", rows.to_str().unwrap(), "--learn-file", learn.to_str().unwrap()];
+    args.extend_from_slice(extra);
+    Command::new(env!("CARGO_BIN_EXE_shanjie-replay")).env("TMPDIR", dir.join("tmp")).args(args).output().unwrap()
+}
+fn text(o: &std::process::Output) -> String {
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    String::from_utf8(o.stdout.clone()).unwrap()
+}
+
+/// Rules: the loaded file changes the choice (without it 再見 is shown for ㄗㄞˋ ㄐㄧㄢˋ, measured; the file holds one record,
+/// context `^>$` (sentence start, nothing after) for the word 在建 with weight 50 and today's day, so 在建 is shown); the
+/// source file is only read (bytes and mtime as before, also with `--learn on`); the temporary directory is gone afterwards;
+/// the tag says `+learnfile`.
+#[test]
+fn learn_file_changes_the_choice_and_the_source_is_untouched() {
+    let dir = scratch("learnfile");
+    let src = dir.join("mine.tsv");
+    let today = core::learn::local_day();
+    std::fs::write(&src, format!("#shanjie-learning v1\n^>$\tㄗㄞˋ-ㄐㄧㄢˋ\t在建\t50\t{today}\n")).unwrap();
+    let (bytes, mtime) = (std::fs::read(&src).unwrap(), std::fs::metadata(&src).unwrap().modified().unwrap());
+    let _g = ONE_ENGINE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let rows = dir.join("rows.txt");
+    std::fs::write(&rows, "|再見|ㄗㄞˋ ㄐㄧㄢˋ\n").unwrap();
+    let firsts = dir.join("firsts.txt");
+    let plain = text(&Command::new(env!("CARGO_BIN_EXE_shanjie-replay")).args(["--rows", rows.to_str().unwrap(), "--firsts", firsts.to_str().unwrap()]).output().unwrap());
+    assert_eq!(std::fs::read_to_string(&firsts).unwrap(), "再見\n");
+    for extra in [&[][..], &["--learn", "on"][..]] {
+        let with = text(&replay_with_learn(&dir, &src, &["--firsts", firsts.to_str().unwrap()].iter().chain(extra).copied().collect::<Vec<_>>()));
+        assert!(with.contains("+learnfile") && !plain.contains("+learnfile"));
+        assert_eq!(std::fs::read_to_string(&firsts).unwrap(), "在建\n", "{extra:?}: the learned word changes the first display");
+        assert_eq!(std::fs::read(&src).unwrap(), bytes, "{extra:?}: source bytes");
+        assert_eq!(std::fs::metadata(&src).unwrap().modified().unwrap(), mtime, "{extra:?}: source mtime");
+        assert_eq!(std::fs::read_dir(dir.join("tmp")).unwrap().count(), 0, "{extra:?}: temporary directory removed");
+    }
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+/// Rule: a file that is not a valid learning file (bad header) is an error, not a replay without the learnings; the source stays
+/// as it was (core's quarantine renames the copy only) and no temporary directory is left.
+#[test]
+fn a_corrupt_learn_file_is_an_error() {
+    let dir = scratch("learncorrupt");
+    let src = dir.join("bad.tsv");
+    std::fs::write(&src, "not a learning file\n").unwrap();
+    let _g = ONE_ENGINE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let out = replay_with_learn(&dir, &src, &[]);
+    assert_eq!(out.status.code(), Some(1));
+    assert_eq!(std::fs::read(&src).unwrap(), b"not a learning file\n");
+    assert!(!dir.join("bad.tsv.corrupt").exists());
+    assert_eq!(std::fs::read_dir(dir.join("tmp")).unwrap().count(), 0, "temporary directory removed on the error path");
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+/// Rule: an output that is the learning file is refused (exit 2) before anything is created, like the rows file.
+#[test]
+fn an_output_that_is_the_learn_file_is_refused() {
+    let dir = scratch("learnrefuse");
+    let src = dir.join("mine.tsv");
+    std::fs::write(&src, "#shanjie-learning v1\n").unwrap();
+    for opt in ["--rowstats", "--keys", "--firsts"] {
+        let out = replay_with_learn(&dir, &src, &[opt, src.to_str().unwrap()]);
+        assert_eq!(out.status.code(), Some(2), "{opt}");
+        assert_eq!(std::fs::read(&src).unwrap(), b"#shanjie-learning v1\n", "{opt}: untouched");
+    }
+    std::fs::remove_dir_all(&dir).unwrap();
+}
