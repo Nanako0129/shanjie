@@ -8006,3 +8006,9 @@ XL 比 `MAX_FILE`（67,108,864）小 1,168,880 位元組。錨點：4 個模型 
 - 維護者打「不是GitHub Pro 的問題，我開源就不夠用」出成「開元」。照第 141 列的寫法，前文照原文寫、含英文與逗號：`不是GitHub Pro 的問題，|我開源就不夠用|ㄨㄛˇ ㄎㄞ ㄩㄢˊ ㄐㄧㄡˋ ㄅㄨˋ ㄍㄡˋ ㄩㄥˋ`（讀音由 `tools/readings.py` 產生，沒有 CHECK）。
 - 出貨設定（`cli --tinylm`，`tinylm.sjtl` `e7c179d8`，`--context`）兩種設定都錯：前文的 2 字規則碰到逗號就停；n-gram 第一名「開元」，正解聊天第 2（差 0.70）、書面第 4（差 0.95）。
 - `eval/golden/s2h-lm-context.txt` 的錯字回報兩行用 Python 參考實作（`lm_eval.py --context`）重產，n 153：top1 聊天 32、書面 41 都不變，oracle@64 149 → 150；`eval/README.md` 改成 153 列。
+
+## 2026-10-20：沙盒的 release dry run 與 §4.2 虛擬機驗收（搬回文件的偏好設定修正）
+
+- release dry run（run 39265871734，main ce017923）在維護者核准 `release` 環境後完成：`gate`、`build` 成功，`publish` 照設計跳過。簽章版 `shanjie-0.0.0.zip` 雜湊相符，Developer ID（2LJ882GPY8）簽章、公證並裝訂，Gatekeeper 判定 Notarized Developer ID；沙盒的四項 entitlements 在；Sparkle 在 `Contents/Frameworks/Updater/`。
+- `docs/contracts/app-sandbox.md` §4.2 在全新的 tart 虛擬機量（細節寫在 §4.2 的 2026-10-20 結果）：第 1、2 項通過；第 3 項第一次沒過，原因是 `docs/sandbox-restore.md` 以網域名稱 `defaults import` 寫回偏好設定時，container 還在，`defaults` 把網域導向 container，寫進去的是 container，刪 container 時設定就不見了。修成以原位置 plist 的完整路徑寫回並檢查原位置有檔，在重新建立的虛擬機上第 1、3 項都通過。沙盒版還沒發佈。
+- 還沒量的：「不跳詢問」（無畫面虛擬機截不到圖；`tccd` 沒有相關紀錄只是佐證）、終端機 App 刪 container 會不會跳詢問、§4.2 第 5 項（Sparkle 讀 feed，留給 §4.3 A）。

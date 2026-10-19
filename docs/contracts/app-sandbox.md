@@ -234,7 +234,7 @@
 - **搬回**：
   - `docs/sandbox-restore.md` 寫一個手動指令：
     1. 先結束輸入法程序；
-    2. 把 container 裡的學習資料夾 `ditto` 複製回原位置，比對雜湊；偏好設定用 `defaults export`（讀 container 裡的 plist）與 `defaults import` 寫回，不直接複製 plist（cfprefsd 的快取可能忽略直接寫入的檔案〔推論〕，和 §5 一致）；
+    2. 把 container 裡的學習資料夾 `ditto` 複製回原位置，比對雜湊；偏好設定用 `defaults export`（讀 container 裡的 plist）與以原位置 plist 完整路徑當網域的 `defaults import` 寫回（用網域名稱寫會寫進 container，2026-10-20 §4.2 第 3 項量到），不直接複製 plist（cfprefsd 的快取可能忽略直接寫入的檔案〔推論〕，和 §5 一致）；
     3. 相同時刪掉**整個** `~/Library/Containers/com.nyanako.inputmethod.shanjie`。
   - 一定要刪 container：它只在第一次建立時移轉，留著的話，下次升級到沙盒版不會再搬，搬回來的資料就看起來不見了。
   - §4.2 第 3 項在虛擬機驗證。不做自動搬回。
@@ -439,6 +439,13 @@
    - 接著再升級成沙盒版一次：container 裡的 `learning.tsv` 和搬回的那份雜湊相同，沒有跳詢問。
 4. **倚天排列**：dry run 的 0.0.0 用安裝程式裝不上去（見本節開頭），所以合併前由 §2.7 的單元測試與 §2.6 第 3 步代替。真正的安裝程式路徑在 v0.5.0 發佈後量（§4.4）。
 5. **Sparkle 讀得到 feed**：沙盒版用 `launchctl asuser` 啟動後，開關於頁的「立即檢查」需要介面操作。做不到時，這一項改在 §4.3 A 量。
+
+
+**2026-10-20 結果**（dry run 39265871734，`shanjie-0.0.0.zip` 雜湊與 Developer ID 簽章、公證裝訂、沙盒 entitlements、`Contents/Frameworks/Updater/Sparkle.framework` 都核對過；全新的 tart 虛擬機，macOS 26.6.2，帳號 admin；全新帳號裡 `install-ime.sh` 會停在「系統還沒接受新的輸入法」（啟用要在系統設定手動加入），檔案已複製到 `~/Library/Input Methods`，這一節只需要那份檔案，以版本號確認）：
+- 第 1 項通過：0.4.7 → dry run，原位置的 `learning.tsv` 消失，container 裡的雜湊相同、0600，偏好設定 `layout=eten`，`--selftest` 結束碼 0，換檔之後沒有善解或 Sparkle 的沙盒拒絕。`launchctl asuser` 啟動後程序沒有留著（不是由輸入法框架啟動，推論是自行結束），搬移在 `--selftest` 那次就完成了。
+- 第 2 項通過：同一個開發版 ID 的兩個 ad-hoc 組建（CDHash 不同），兩次 `--selftest` 都結束碼 0，container 的 `Data` inode 與建立時間不變。「不跳詢問」在無畫面的虛擬機截不到圖；`tccd` 的 log 在這段時間沒有和善解有關的紀錄、也沒有詢問紀錄（佐證，不是證明）。
+- 第 3 項**第一次沒過**：`docs/sandbox-restore.md` 的指令以網域名稱 `defaults import` 寫回偏好設定，container 還在時 `defaults` 把這個網域導向 container 裡的那一份，寫進去的是 container，接著刪 container 時設定一起不見（學習資料正確搬回）。改成以原位置 plist 的完整路徑寫回、並檢查原位置有檔之後，在重新建立的全新虛擬機上第 1、3 項都通過：學習資料雜湊相同、0600，`layout=eten`，container 已刪，再升級時搬回的資料正確搬進新 container，沒有沙盒拒絕。沙盒版還沒發佈，沒有使用者跑過舊的指令。
+- 第 4 項由單元測試代替（照本節開頭），第 5 項留給 §4.3 A。終端機刪 container 會不會跳詢問：經 SSH 執行的指令不能代表「終端機」App，這一項仍沒量過。
 
 ### 4.3 實機（維護者與 main；每次 ≤ 15 秒的部分由 `imeshot` 做）
 

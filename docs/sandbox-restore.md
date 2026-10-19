@@ -24,7 +24,7 @@
 1. 結束善解的程序（沙盒版與舊版都算）；
 2. 原位置如果已經有資料（退回期間學到的），停下來，請你先決定怎麼處理，不覆蓋；
 3. 用 `ditto` 把 container 裡的學習資料夾複製回原位置，逐檔比對 SHA-256；
-4. 偏好設定用 `defaults export` 讀出 container 裡的那一份、`defaults import` 寫回，再匯出一次比對內容。不直接複製 plist 檔：系統的 cfprefsd 有快取，直接換掉的檔案可能被忽略（推論，沒量過）；
+4. 偏好設定用 `defaults export` 讀出 container 裡的那一份，再以**原位置 plist 的完整路徑**當網域 `defaults import` 寫回，從同一個路徑匯出一次比對內容，並確認原位置真的有那個檔。不能用 `com.nyanako.inputmethod.shanjie` 這個網域名稱寫回：container 還在的時候，`defaults` 會把這個網域導向 container 裡的那一份，寫進去的是 container，接著刪掉 container 時設定就一起不見（2026-10-20 在虛擬機量到）。不直接複製 plist 檔：系統的 cfprefsd 有快取，直接換掉的檔案可能被忽略（推論，沒量過）；
 5. 兩樣都相同，才刪掉**整個** container；任何一步不同就停下來，container 留著。
 
 ```bash
@@ -51,8 +51,9 @@ if [ -d "$SRC_AS" ]; then
 fi
 if [ -f "$SRC_PREFS" ]; then
   defaults export "${SRC_PREFS%.plist}" "$T/from-container.plist"
-  defaults import "$ID" "$T/from-container.plist"
-  defaults export "$ID" "$T/written.plist"
+  defaults import "${DST_PREFS%.plist}" "$T/from-container.plist"
+  [ -f "$DST_PREFS" ] || { echo "偏好設定沒有寫到原位置，container 保留。" >&2; exit 1; }
+  defaults export "${DST_PREFS%.plist}" "$T/written.plist"
   plutil -convert xml1 "$T/from-container.plist" "$T/written.plist"
   cmp -s "$T/from-container.plist" "$T/written.plist" || { echo "偏好設定寫回後不一致，container 保留。" >&2; exit 1; }
 fi
@@ -74,4 +75,4 @@ EOF
 契約 §4.2 第 3 項在虛擬機量這些；任何一項不成立（跳詢問、資料不同），就是那一片的停止條件：
 
 - 終端機讀取或刪除 `~/Library/Containers` 底下的資料夾時，macOS 會不會跳「存取其他 App 的資料」的詢問。
-- `defaults export` 以 container 裡 plist 的路徑當網域讀得出內容，`defaults import` 寫回之後舊版讀得到。
+- ~~`defaults export` 以 container 裡 plist 的路徑當網域讀得出內容，`defaults import` 寫回之後舊版讀得到。~~ 2026-10-20 量過：讀得出；但以網域名稱 `defaults import` 會寫進 container，刪掉 container 時設定一起不見（契約 §4.2 第 3 項第一次就是這樣失敗的）。改成以原位置 plist 的完整路徑寫回之後，原位置有檔、刪掉 container 後舊版讀得到。
