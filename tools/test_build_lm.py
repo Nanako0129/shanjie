@@ -129,6 +129,12 @@ class BuildLm(unittest.TestCase):
         self.assertEqual(lm.count("起牀"), 1)      # weight 1, no wiki counts
         self.assertEqual(lm.count("他"), 0)
 
+    def test_corpora_requires_out(self):
+        """--corpora without --out is an argparse error (exit 2) and writes nothing; the default --out is still data/lm/bigram.sjlm for a plain run."""
+        r = subprocess.run([sys.executable, "-B", os.path.join(ROOT, "tools", "build_lm.py"), "--corpora", "x.pkl:1"], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("--out is required with --corpora", r.stderr)
+
     def test_rust_loads(self):
         rows = os.path.join(self.tmp.name, "rows.txt")
         open(rows, "w", encoding="utf-8").write("|起床|ㄑㄧˇ ㄔㄨㄤˊ\n")

@@ -1,6 +1,6 @@
 """Tests for p4.py: a hand-built tiny table, synthetic rows; no model, no network, no private data.
 Run from the repo root: python3 experiments/p4-colloquial/test_p4.py"""
-import math, os, pickle, sys, tempfile, unittest
+import contextlib, io, json, math, os, pickle, sys, tempfile, unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
@@ -163,6 +163,20 @@ class Selection(unittest.TestCase):
         self.assertNotIn(NOCELL, P.GRID)
 
 
+class Cells(unittest.TestCase):
+    def test_parse_cell_round_trips_every_grid_cell_and_refuses_the_rest(self):
+        for c in P.GRID:
+            self.assertEqual(P.parse_cell(P.cell_label(c)), c)
+        for bad in ("T1,0.5,0.1", "T3,0.5,0.25", "T1,0.0,0.0", "none,0.5,0.25", "T1,0.5", "T1,x,0.25"):
+            with self.assertRaises(SystemExit, msg=bad):
+                P.parse_cell(bad)
+
+    def test_c1_c3_fixed_columns(self):
+        rows = [row("乙", [("甲", -1.0), ("乙", -1.2)], ll=[0.0, 0.0]) for _ in range(3)]
+        o = P.eval_cell(rows, [False] * 3, [pre([0, 0], [0.0, 0.5])] * 3, ("T1", 1.0, 0.0), LEN, {}, {0: "C1", 1: "C3", 2: "C2"})
+        self.assertEqual((o["c1_fixed"], o["c3_fixed"], o["ng_fixes"]), (1, 1, 3))
+
+
 class BaselineCheck(unittest.TestCase):
     def good(self):
         rows = [row("乙", [("甲", -1.0), ("乙", -1.2)], ll=[0.0, 0.0]), row("甲", [("甲", -1.0), ("乙", -1.2)], ll=[0.0, 0.0])]
@@ -171,7 +185,7 @@ class BaselineCheck(unittest.TestCase):
 
     def test_consistent_baseline_passes(self):
         rows, ok, p = self.good()
-        self.assertEqual(P.check_baseline(rows, ok, p, "chatclause", LEN), {"final_fixes_vs_ng_first": 0, "final_breaks_vs_ng_first": 0})
+        self.assertEqual(P.check_baseline(rows, ok, p, "dev302", LEN), {"final_fixes_vs_ng_first": 0, "final_breaks_vs_ng_first": 0})
 
     def test_fusion_disagreeing_with_rowstats_stops(self):
         rows, ok, p = self.good()
@@ -189,11 +203,105 @@ class BaselineCheck(unittest.TestCase):
         with self.assertRaisesRegex(P.Stop, "D1"):
             P.check_baseline(rows, ok, p, "discordtune", LEN)
 
+    def test_chatclause_is_anchored_too(self):
+        rows, ok, p = self.good()
+        with self.assertRaisesRegex(P.Stop, "chatclause final vs n-gram first is \\+0/-0, D1 recomputed \\+111/-26"):
+            P.check_baseline(rows, ok, p, "chatclause", LEN)
+
+    def test_d3_anchor(self):
+        P.check_d3("discordtune", {i: "ii" for i in range(25)} | {i: "iii" for i in range(25, 122)})   # 25 ii, 97 iii
+        with self.assertRaisesRegex(P.Stop, "D3 recorded 25/97"):
+            P.check_d3("discordtune", {0: "ii"})
+        P.check_d3("dev302", {0: "ii"})      # only discordtune is anchored
+
     def test_unsorted_dump_stops(self):
         rows, ok, p = self.good()
         rows[0]["scores"]["ng"] = [-1.2, -1.0]     # the n-gram first would not be dump rank 0
         with self.assertRaisesRegex(P.Stop, "rank 0"):
             P.check_baseline(rows, ok, p, "chatclause", LEN)
+
+
+class Main(unittest.TestCase):
+    """main() on synthetic files and two tiny tables: the argument names, build_rows, d3_classes, the cell evaluation and the JSON are wired."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.TemporaryDirectory()
+        d = cls.d = cls.tmp.name
+        # T1 and T2 both prefer 再 after 甲 (6 against 2 pruned-or-small); T2 only adds mass.
+        pickle.dump({"uni": {"甲": 8, "再": 6, "在": 2}, "bi": {("<s>", "甲"): 8, ("甲", "再"): 6, ("甲", "在"): 2, ("再", "</s>"): 6, ("在", "</s>"): 2}},
+                    open(os.path.join(d, "a.pkl"), "wb"))
+        pickle.dump({"uni": {"再": 4}, "bi": {("甲", "再"): 4, ("再", "</s>"): 4}}, open(os.path.join(d, "b.pkl"), "wb"))
+        old, build_lm.WORK = build_lm.WORK, d
+        try:
+            for name, corp in (("t1", [("a.pkl", 1)]), ("t2", [("a.pkl", 1), ("b.pkl", 1)])):
+                open(os.path.join(d, name + ".sjlm"), "wb").write(build_lm.build({}, corpora=corp)[0])
+        finally:
+            build_lm.WORK = old
+        os.replace(os.path.join(d, "t1.sjlm"), os.path.join(d, "bigram.sjlm"))   # the --lm-dir table (D3 (iii) counts)
+        open(os.path.join(d, "t1.sjlm"), "wb").write(open(os.path.join(d, "bigram.sjlm"), "rb").read())
+        # r1: n-gram first 甲在 wrong, gold 甲再 second; r2: the n-gram first 甲在 is right, 甲再 second (the table will break it)
+        rows = [("甲再", [("甲在", -1.0, "甲 在"), ("甲再", -1.2, "甲 再")]), ("甲在", [("甲在", -1.0, "甲 在"), ("甲再", -1.2, "甲 再")])]
+        w = lambda n, t: (open(os.path.join(d, n), "w", encoding="utf-8").write(t), os.path.join(d, n))[1]
+        cls.f = dict(
+            rows=w("rows", "".join(f"|{t}|a zai\n" for t, _ in rows)),
+            dump=w("dump", "".join(f"{i}\t{k}\t{s}\t{sc}\n" for i, (_, cs) in enumerate(rows, 1) for k, (s, sc, _) in enumerate(cs, 1))),
+            words=w("words", "".join(f"{i}\t0\t-\n" + "".join(f"{i}\t{k}\t{ws}\n" for k, (_, _, ws) in enumerate(cs, 1)) for i, (_, cs) in enumerate(rows, 1))),
+            rowstats=w("rs", "1\t0\t0\t2\n2\t1\t0\t2\n"),
+            scores=w("sc", "".join(json.dumps({"i": i, "n": 2, "ng": [sc for _, sc, _ in cs], "ll": [0.0, 0.0], "c": 0,
+                                               "ok": [int(LEN(s) == LEN(t)) for s, _, _ in cs]}) + "\n" for i, (t, cs) in enumerate(rows, 1))))
+        cls.t1, cls.t2 = os.path.join(d, "t1.sjlm"), os.path.join(d, "t2.sjlm")
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.tmp.cleanup()
+
+    def run_main(self, name, extra, out):
+        f = self.f
+        argv = ["--name", name, "--rows", f["rows"], "--dump", f["dump"], "--dump-words", f["words"], "--rowstats", f["rowstats"],
+                "--tinylm-scores", f["scores"], "--lm-dir", self.d, "--out", out] + extra
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            P.main(argv)
+        return buf.getvalue(), json.load(open(out, encoding="utf-8"))
+
+    def test_select_then_cell_from_round_trip(self):
+        out = os.path.join(self.d, "sel.json")
+        text, res = self.run_main("dev302", ["--t1", self.t1, "--t2", self.t2, "--select"], out)
+        self.assertEqual((res["n"], res["errors"], len(res["cells"])), (2, 1, 20))
+        self.assertEqual(res["baseline"], {"final_fixes_vs_ng_first": 0, "final_breaks_vs_ng_first": 0})
+        self.assertIn(res["chosen"], [P.cell_label(c) for c in P.GRID])
+        self.assertIn(f"chosen cell (TABLE,MU,GAMMA): {res['chosen']}", text)
+        self.assertIn("C1 fixed", text)
+        big = res["cells"]["T1,1.0,0.0"]     # 再 is much likelier after 甲: r1 fixed, r2 broken
+        self.assertEqual((big["ng_fixes"], big["ng_breaks"]), (1, 1))
+        out2 = os.path.join(self.d, "cf.json")
+        _, res2 = self.run_main("dev302", ["--t1", self.t1, "--t2", self.t2, "--cell-from", out], out2)
+        self.assertEqual(list(res2["cells"]), [res["chosen"]])
+        self.assertEqual(res2["cells"][res["chosen"]], res["cells"][res["chosen"]])
+        self.assertNotIn("chosen", res2)
+
+    def test_single_cell_and_refusals(self):
+        _, res = self.run_main("dev302", ["--t2", self.t2, "--cell", "T2,0.5,0.25"], os.path.join(self.d, "one.json"))
+        self.assertEqual(list(res["cells"]), ["T2,0.5,0.25"])
+        for argv in (["--cell", "T1,0.5,0.1"], ["--cell", "none,0.0,0.0"]):
+            with self.assertRaises(SystemExit):
+                self.run_main("dev302", ["--t1", self.t1] + argv, os.path.join(self.d, "x.json"))
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as e:
+            self.run_main("dev3O2", ["--t1", self.t1, "--cell", "T1,0.5,0.25"], os.path.join(self.d, "x.json"))
+        self.assertEqual(e.exception.code, 2, "a name outside the list is refused by argparse")
+
+    def test_anchor_stop_through_main(self):
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err), self.assertRaises(SystemExit) as e:
+            self.run_main("chatclause", ["--t1", self.t1, "--cell", "T1,0.5,0.25"], os.path.join(self.d, "a.json"))
+        self.assertEqual(e.exception.code, 1)
+        self.assertIn("STOP: chatclause final vs n-gram first", err.getvalue())
+
+    def test_out_is_opened_before_any_work(self):
+        bad = os.path.join(self.d, "no-such-dir", "o.json")
+        with self.assertRaises(OSError):
+            self.run_main("dev302", ["--t1", "/nonexistent/table", "--cell", "T1,0.5,0.25"], bad)   # would fail later on the table otherwise
 
 
 if __name__ == "__main__":

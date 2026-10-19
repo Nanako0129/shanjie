@@ -62,6 +62,7 @@ test-python:
 	python3 -m unittest reference/proto/test_recombine.py
 	python3 -W ignore -m unittest experiments/newword/test_hijack.py
 	python3 -W ignore experiments/diag-near-miss/test_d23.py
+	python3 -W ignore experiments/p4-colloquial/test_p4.py
 
 test-swift: rust
 	@$(call relink_if_stale,Debug)

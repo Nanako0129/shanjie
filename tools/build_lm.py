@@ -149,11 +149,14 @@ def build(cls=None, extra_overlay=None, corpora=None):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--out", default=os.path.join(ROOT, "data", "lm", "bigram.sjlm"))
+    ap.add_argument("--out", help="輸出檔（預設 data/lm/bigram.sjlm；給了 --corpora 就必須明說，實驗表不會蓋掉出貨檔）")
     ap.add_argument("--check", action="store_true", help="重建並和現有檔比對 SHA-256，不寫檔")
     ap.add_argument("--extra-overlay", help="接在 ime.OVERLAYS 之後的疊加層檔（model-v6 §7 P3-4，預設關），影響異體類")
     ap.add_argument("--corpora", nargs="+", metavar="FILE:WEIGHT", help="計數檔與整數權重（預設：維基 ×1、口語 ×5，即 CORPORA）；實驗用，出貨檔不帶這個選項")
     a = ap.parse_args()
+    if a.corpora and not a.out:
+        ap.error("--out is required with --corpora (an experiment table must not overwrite data/lm/bigram.sjlm)")
+    a.out = a.out or os.path.join(ROOT, "data", "lm", "bigram.sjlm")
     data, V, C, E = build(extra_overlay=a.extra_overlay, corpora=parse_corpora(a.corpora) if a.corpora else None)
     sha = hashlib.sha256(data).hexdigest()
     print(f"V={V} contexts={C} entries={E} bytes={len(data)} sha256={sha}")
