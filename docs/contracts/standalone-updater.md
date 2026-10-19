@@ -26,7 +26,7 @@ tart 虛擬機（macOS 26.6.2），原型分支 `feat/standalone-updater`（`89c
 | V5 | 把輸入法 bundle 複製到桌面，打開副本裡的善解更新 | 過：立刻結束、沒有視窗（路徑檢查） |
 | V3 | B 以 root 放在 `/Library/Input Methods/善解（開發版）.app`（`root:wheel`、全部可讀）、登出再登入，再更新到 C | 過：系統的管理員密碼框，文字是「善解更新 wants permission to update 善解（開發版）.」；輸入密碼後 C 是 `root:wheel`、全部可讀，container 沿用，0 沙盒拒絕；`authd` 記的授權名稱是 `<更新程式 ID>.<輸入法 ID>.sparkle2-auth`（和修訂三從 `Installer.xpc` 走的那條不同，舊的那條留著無害） |
 
-沒量到的：Developer ID 簽章下的兩條 domain（只有 canary 會第一次跑，§4.4）；巢狀 App 的公證（dry run 會跑）；macOS 27 上的系統 domain（維護者的 Mac，選做）。
+沒量到的：Developer ID 簽章下的兩條 domain：系統 domain 第一次是發佈後維護者的 Mac 從 dry run 的 0.0.0 更新到 0.5.0（§4.4，那時已是新配置），使用者 domain 第一次是 canary 的虛擬機那條；巢狀 App 的公證（dry run 會跑）；macOS 27 上的系統 domain（就是維護者的 Mac 那一次）。
 
 ### 1.2 依據（原始碼與文件）
 
@@ -55,6 +55,7 @@ tart 虛擬機（macOS 26.6.2），原型分支 `feat/standalone-updater`（`89c
 | 參數與輸入 | 不讀命令列參數、環境變數、URL、剪貼簿或任何 IPC；啟動它的人什麼都給不了（A1）。開檔事件：實作一個什麼都不做的 `application(_:open:)`，避免 AppKit 對送來的檔名跳「無法打開」的警告（安全審查 P3-4，§4.2 量） |
 | feed 網址 | delegate 的 `feedURLString(for:)` 回傳 **host 的 Info.plist** 裡的 `SUFeedURL`（`Bundle(url: host).object(forInfoDictionaryKey:)`，讀的是 bundle 的 Info.plist，不經 user defaults）；讀不到就結束。理由在 S2：不釘住的話，被攻破的輸入法若能在 host 網域的偏好設定寫 `SUFeedURL`，就能讓善解更新去讀一份重播的舊 appcast（有簽章、但沒有比現在新的版本），使用者永遠看不到新版，等於把有漏洞的版本凍結住。輸入法本體的探測也照做（它自己的 `Updater` delegate） |
 | 流程 | `SPUUpdater(hostBundle: host, applicationBundle: host, userDriver: SPUStandardUserDriver(hostBundle: host))`；先 `checkForUpdateInformation()`（靜默），**有新版才** `checkForUpdates()`（Sparkle 的標準對話框）；沒有新版、使用者取消或更新完成就結束。沒有新版時不出現任何視窗，所以被攻破的輸入法啟動它也叫不出任何畫面 |
+| 跳過版本 | Sparkle 把「跳過這個版本」記在 host 網域的偏好設定（`SUSkippedMinorVersion`、`SUSkippedMajorVersion`、`SUSkippedMajorSubreleaseVersion`），背景檢查與探測會照它濾掉版本（〔原始碼〕`SPUSkippedUpdate.m`、`SUAppcastDriver.m`；安全審查之後的 plan-verifier 2026-10-20）。兩個問題：善解更新寫的是 `~/Library/Preferences/<ID>.plist`、輸入法讀的是 container，按了跳過之後關於頁仍顯示「更新到 X」、再按卻什麼都不出現（功能悄悄失效）；被攻破的輸入法也能寫一個很大的跳過版本，讓探測永遠看不到新版（凍結）。處置：**善解更新啟動時、輸入法每次探測前，都刪掉自己讀的那個網域裡這三個鍵**。善解只在使用者按下「更新」時才裝，所以「跳過」本來就沒有用處；按了之後下一次「更新到 X」照常出現對話框 |
 | 安裝類型 | delegate 的 `shouldProceedWithUpdate` 只放行 `application` 類型，其他（含套件安裝）丟錯誤。接續先前中斷的安裝（resume）時 Sparkle 不呼叫這個 delegate；那條路仍關得住：`SUInstaller` 會比對壓縮檔裡實際是 `.app` 還是 `.pkg` 與項目的類型，不符就失敗，而能先起一個安裝的只有不在沙盒的同使用者程式（〔原始碼〕`SPUBasicUpdateDriver.m`、`SUInstaller.m`，安全審查 P3-3） |
 | 介面 | 只有 Sparkle 的標準對話框，用 host 的名字與圖示；不自己畫視窗 |
 | 日誌 | 靜態字串（R2） |
@@ -67,7 +68,7 @@ tart 虛擬機（macOS 26.6.2），原型分支 `feat/standalone-updater`（`89c
 | XPC 服務 | `Installer.xpc` 在 `Contents/Frameworks/Updater/Sparkle.framework` | **整個輸入法 bundle 裡沒有 `.xpc`**（含善解更新那份 framework）。修訂三「XPC 服務組合一變就換資料夾」的規則失效：沒有 XPC 服務，就沒有系統照路徑記住的問題；`Frameworks/Updater` 的資料夾名稱留著不改，只是歷史 |
 | 輸入法那份 framework 裡的 `Autoupdate`、`Updater.app` | 在 | **刪掉**（只做探測用不到；少兩個能在沙盒外被送出的程式，S6）。〔沒量〕Sparkle 啟動與探測時應該用不到它們，§4.2 V2 量探測照常；探測壞了就留著它們、只靠 V7 的結果。善解更新那份照留 |
 | Info.plist | `SUEnableInstallerLauncherService = true` | **false** |
-| Sparkle | 探測＋互動更新＋把 Sparkle 視窗抬到設定視窗層（`watch`／`raise`） | **只做每日探測與「立即檢查」**（`checkForUpdateInformation`）；互動路徑與抬視窗整段刪掉 |
+| Sparkle | 探測＋互動更新＋把 Sparkle 視窗抬到設定視窗層（`watch`／`raise`） | **只做每日探測與「立即檢查」**（`checkForUpdateInformation`）；互動路徑與抬視窗整段刪掉；探測前刪掉自己網域的三個跳過鍵、feed 由 delegate 釘在 Info.plist（§2.1） |
 | 「更新到 X」 | `checkForUpdates` | 先關掉設定視窗（§2.3），再 `NSWorkspace.openApplication(at: Contents/Helpers/善解更新.app)`、`activates = true`、不帶參數 |
 
 - **V2 那筆拒絕的處置**：輸入法裡只做探測的 Sparkle 會查 `<ID>-spks`（Sparkle 確認有沒有進行中的安裝），沙盒擋下、Sparkle 當成沒有，探測與更新都不受影響（V2 量到）。這是沙盒照設計在擋，不加例外。驗收的「沒有沙盒拒絕」改成允許清單（§4.2）：**只允許輸入法程序的 `mach-lookup <ID>-spks`**，其他任何一筆都算失敗。輸入法整個拿掉 Sparkle、自己讀 feed（研究顧問分析的 A-2）之後這筆就會消失，排在 0.5.x（§6）。
@@ -96,7 +97,7 @@ tart 虛擬機（macOS 26.6.2），原型分支 `feat/standalone-updater`（`89c
 | 情境 | 行為 |
 |---|---|
 | 0.4.7（`~/Library`、沒有沙盒、程序內 Sparkle）→ 0.5.0 | 0.4.7 自己的 Sparkle 換檔（V4）；第一次啟動 0.5.0 照 app-sandbox §2.6 搬資料 |
-| 維護者的 0.0.0（修訂三配置、`/Library`）→ 0.5.0 | 0.0.0 的 Sparkle 經 `Installer.xpc` 走系統 domain（P3 在虛擬機量過同一條路），Developer ID 下第一次；記錄結果（§4.4） |
+| 維護者的 0.0.0 → 0.5.0 | §4.3 之後，維護者的 Mac 裝的是 U1＋U2 的 dry run（0.0.0、新配置、`ShanjieUpdateBuild=release`、`/Library`），所以這一步是**善解更新在 Developer ID 下第一次走系統 domain**（§4.4）。不再有修訂三配置的那份 |
 | 0.5.0 之後的每次更新 | 善解更新：`~/Library` 使用者 domain、不問密碼；`/Library` 系統 domain、一次管理員密碼 |
 | 從 `~/Library` 搬到 `/Library` | 只有安裝程式（`system-install.md`）；Sparkle 不搬位置 |
 | 多使用者 Mac（`/Library`） | 任一管理員按更新，換的是所有人共用的那一份；其他已登入帳號的舊程序〔推論〕要到登出或重新載入才換，發版說明寫一句。標準帳號按更新會停在密碼框 |
@@ -110,7 +111,7 @@ tart 虛擬機（macOS 26.6.2），原型分支 `feat/standalone-updater`（`89c
 | 路徑 | 修訂三 | 這片之後 |
 |---|---|---|
 | 對安裝服務給假 host（可寫位置、自己的公鑰）→ 在沙盒外執行 | 可以（F1） | 輸入法 bundle 裡沒有 XPC 安裝服務，也沒有 mach-lookup 例外；善解更新裡的 launcher 只用它自己算出的 host。**前提沒量**：輸入法程序裡的 Sparkle 仍帶著程序內的 launcher（S6），它用 `SMJobSubmit` 送出程式；沙盒擋不擋這個送出由 §4.2 V7 量，擋不住就是停止條件。另外輸入法那份 framework 刪掉 `Autoupdate` 與 `Updater.app`，launcher 找不到要送的程式 |
-| 在 host 網域的偏好設定寫 `SUFeedURL`，讓善解更新讀重播的舊 appcast（凍結更新） | — | 不行：善解更新與輸入法的 delegate 都把 feed 釘在 Info.plist（§2.1），§4.2 V6 量 |
+| 在 host 網域的偏好設定寫 `SUFeedURL`（讀重播的舊 appcast）或 `SUSkipped*`（濾掉新版），凍結更新 | — | 不行：feed 由 delegate 釘在 Info.plist；跳過的三個鍵在善解更新啟動時與每次探測前刪掉（§2.1），§4.2 V6 量 |
 | 套件安裝類型 → 直接系統 domain → 以善解的名義跳密碼框 | 可以（P1-A） | 不行：類型來自有簽章的 feed，沒有 EdDSA 私鑰改不了；善解更新另外只接受 `application` 類型 |
 | 啟動善解更新 | — | 可以，但帶不了參數（A1）；沒有新版就靜靜結束；有新版時出現的是真的更新，等於替使用者按了一次「更新」 |
 | 把輸入法 bundle 複製到 container、改 Info.plist、啟動裡面的善解更新 | — | 路徑檢查失敗就結束（V5）；沙盒寫出的檔〔推論，沒量〕帶 quarantine |
@@ -143,8 +144,11 @@ tart 虛擬機（macOS 26.6.2），原型分支 `feat/standalone-updater`（`89c
   - 每一步的 `log`（從按下更新到新版啟動的沙盒拒絕）由腳本逐筆比對：**只允許**程序名稱是輸入法、操作是 `mach-lookup`、服務名稱**整串等於** `<ID>-spks` 的那一種，其他任何一筆（含 `-spki`）都算失敗。`log` 會合併重複的報告、也有不記錄的規則，所以「沒有其他拒絕」只是煙霧測試，不是證明；證明靠 V6、V7 的正面量測；
   - V3 另做一次取消：密碼框按取消，沒有錯誤視窗、輸入法照常打字、`/Library` 的 bundle 沒變。
 - 新增三項（安全審查 2026-10-20）：
-  - **V6 feed 釘住**：在輸入法 container 的偏好設定與 `~/Library/Preferences/<ID>.plist` 各寫 `SUFeedURL=http://127.0.0.1:<另一個埠>/x`，啟動善解更新與按「立即檢查」：那個埠收不到任何請求、照常讀正式（測試）feed。同時記下 container 的那份有沒有被不在沙盒的善解更新讀到（cfprefsd 導向的假說），寫進研究紀錄。
-  - **V7 沙盒擋不擋程序內的 launcher**（S6）：只在測試組建裡，讓輸入法保留 `Autoupdate` 與 `Updater.app`、直接呼叫 `checkForUpdates()`（舊的互動路徑），指向本機 feed 的新版。預期：安裝失敗、`log` 有送出被拒的紀錄、沒有 `Autoupdate` 程序、bundle 沒變。**裝成功就是停止條件**（F1 沒關）。這個組建只在虛擬機用，不進 repo 的出貨流程。
+  - **V6 偏好設定左右不了更新**：(a) 在輸入法 container 的偏好設定與 `~/Library/Preferences/<ID>.plist` 各寫 `SUFeedURL=http://127.0.0.1:<另一個埠>/x`，啟動善解更新與按「立即檢查」：那個埠收不到任何請求、照常讀測試 feed；同時記下 container 的那份有沒有被不在沙盒的善解更新讀到（cfprefsd 導向的假說），寫進研究紀錄。(b) 兩個網域都寫 `SUSkippedMajorVersion=999`：「立即檢查」照樣顯示新版、按「更新到 X」照樣出現 Sparkle 對話框。(c) 在善解更新的對話框按「跳過這個版本」，再按「更新到 X」：對話框照常出現。不釘住或不刪鍵的組建，(a)、(b)、(c) 都會失敗。
+  - **V7 沙盒擋不擋程序內的 launcher**（S6）：用一份只在虛擬機用的測試組建：main 在虛擬機裡對 U1 的程式套一個不進 repo 的小 patch（輸入法那份 framework 保留 `Autoupdate` 與 `Updater.app`；關於頁「更新到 X」改回直接呼叫 `checkForUpdates()`，也就是修訂三的互動路徑），用 `build-app.sh` 的更新測試版做法建、裝在 `~/Library`（使用者 domain，不經授權那一段），指向本機 feed 的新版。三個互斥的結果：
+    - **關住**：Sparkle 的 log 有 `Submit error:` 或 `Failed to submit installer job`，或沙盒拒絕送出 launchd 工作的那筆紀錄（也就是 `SMJobSubmit` 確實被呼叫而且被拒）；沒有 `Autoupdate` 程序、bundle 沒變。
+    - **沒關**：更新裝成功。停止條件。
+    - **沒有結論**：其他任何失敗（例如在 `SMJobSubmit` 之前就因為找不到 `Autoupdate`、授權、家目錄而失敗），沙盒沒被測到。修 patch 再跑一次；仍沒有結論就是停止條件。
   - **開檔事件**：`open -a <善解更新.app 的路徑> /tmp/任意檔名.txt`：沒有視窗、沒有警告，立刻結束。
 
 ### 4.3 dry run 與維護者的 Mac
@@ -156,7 +160,7 @@ tart 虛擬機（macOS 26.6.2），原型分支 `feat/standalone-updater`（`89c
 
 - 順序：這片（U1）的 PR 先合併，`system-install.md` 那片（U2）後合併；兩片都合併後才 dry run。從 U1 合併到 §4.3 與 `system-install.md` §4 全部通過之前，main 不推任何 tag；其他片照常合併、一起等。
 - v0.5.0（推 tag 照例當下問維護者）發佈後：
-  - 維護者的 0.0.0（`/Library`）按「更新到 0.5.0」：Developer ID 下「修訂三配置經 `Installer.xpc` 走系統 domain」的第一次。記下開機時間（`sysctl -n kern.boottime`）、成功與否、container、`log`。
+  - 維護者的 0.0.0（U1＋U2 的 dry run、`/Library`）按「更新到 0.5.0」：善解更新在 Developer ID 下第一次走系統 domain。密碼框文字、成功、`root:wheel` 可讀、container 在、`log` 照允許清單；記下開機時間（`sysctl -n kern.boottime`）。失敗照 §5 的停止條件。
   - **canary 0.5.1**：盡快發一個只有小改動的 v0.5.1。維護者的 Mac（`/Library`）按「更新到 0.5.1」：善解更新、密碼框、成功、container 在、`log` 照允許清單；虛擬機裡用正式的 v0.5.0 安裝程式選「只有我的帳號」，再按「更新到 0.5.1」：不問密碼、成功、container 在。**兩條都過之前不發別的版本。**
   - v0.5.0 的發版說明與網站寫明：自動更新失敗時，下載安裝程式重裝即可，資料在 container 裡不受影響。
 
@@ -165,14 +169,20 @@ tart 虛擬機（macOS 26.6.2），原型分支 `feat/standalone-updater`（`89c
 - **停止條件**（碰到就停，回報維護者）：
   - 沙盒輸入法啟動不了善解更新，或關掉設定視窗之後它的視窗仍抬不到前面（§4.2 V1）；
   - 系統 domain 從善解更新走不通（§4.2 V3；canary 的 `/Library` 那條）；
-  - 沙盒輸入法程序內的 launcher 裝得成功（§4.2 V7），或 feed 網址仍被偏好設定蓋掉（§4.2 V6）；
+  - §4.2 V7 是「沒關」或兩次「沒有結論」；§4.2 V6 的 feed 網址或跳過版本仍被偏好設定左右；
+  - 維護者的 Mac 從 0.0.0 經善解更新到 0.5.0 失敗（§4.4，和 canary 的 `/Library` 那條同一類：停發其他版本，使用者照發版說明重裝）；
   - 允許清單以外的沙盒拒絕（§4.2、§4.3、canary）；
   - 公證拒絕巢狀 App（§4.3）；
   - 輸入法需要第四個 entitlement、或善解更新需要任何 entitlement 才能運作：停下來問，不自行加；
   - canary 任何一條失敗：停發其他版本。
 - **預算**：`pilotfish:security-executor` 實作 1 次＋修正 1 次，從原型 `feat/standalone-updater`（`89c9e43a`）接著做；虛擬機一輪。
 - **限制**：agent 不安裝、不啟動 App、不呼叫 TIS 或 lsregister、不在 .app 裡執行任何東西、不碰 `~/Library` 與鑰匙圈、不推 tag；dry run 由 main 觸發、事先問維護者。
-- **回滾**：發佈前 revert 這一片即回到修訂三（輸入法帶 `Installer.xpc`），沒有資料移轉。發佈後善解更新壞掉：不回頭用 `Installer.xpc`，向前修一版，使用者照發版說明下載安裝程式重裝（安裝程式和 Sparkle 無關，永遠可用）。
+- **回滾**（發佈前；§2.4 的權限修正 `tar -xpf`、`chmod -R a+rX,go-w` 與它的檢查**一律保留**，它對修訂三的配置也成立，不留 0700 的 bundle）：
+  - 只有 U1 合併：revert U1 除權限修正以外的部分，回到修訂三（輸入法帶 `Installer.xpc`、四個 entitlements）。
+  - U1、U2 都已合併、停在 U1 的問題：U2 依賴善解更新（安全審查 P1-A 的前提），所以兩片都 revert（U1 一樣保留權限修正）；v0.5.0 只出沙盒（修訂三）。已經裝在 `/Library` 的虛擬機與維護者的 Mac 照 `system-install.md` §4.3 g 退回帳號層。
+  - 停在 U2 的問題：照 `system-install.md` §5 只 revert U2，U1 照出。
+  - 沒有資料移轉，container 不動。
+- 發佈後善解更新壞掉：不回頭用 `Installer.xpc`，向前修一版，使用者照發版說明下載安裝程式重裝（安裝程式和 Sparkle 無關，永遠可用）。
 
 ## 6. 範圍外
 
@@ -196,3 +206,4 @@ tart 虛擬機（macOS 26.6.2），原型分支 `feat/standalone-updater`（`89c
 | 審查 | 結果 | 處置 |
 |---|---|---|
 | security-reviewer（2026-10-20，草稿） | 這份沒有 P0、P1。P2-1：`SUFeedURL` 會先讀 host 網域的 user defaults（host 不是主 bundle 時），S2 不成立；被攻破的輸入法若寫得進那個網域，可以讓善解更新讀重播的舊 appcast，凍結更新（〔原始碼〕，cfprefsd 導向是假說）。P3-1：輸入法程序裡仍有程序內的 launcher，F1 關不關取決於沙盒擋不擋 `SMJobSubmit`，沒量；V2 那筆拒絕是探測的狀態查詢，不是證據。P3-2：允許清單要逐字比對，`log` 的「沒有拒絕」只是煙霧測試。P3-3：resume 不經過類型的 delegate。P3-4：開檔事件可能讓 AppKit 跳警告（假說）。P3-7：S5「新 bundle 的 ID 要等於 host」在原始碼裡找不到；「沒有 root 程式碼」要限定在更新路徑；quarantine 是推論；A1 可補 `environment` | 全部 FIX：P2-1 → S2 改寫、§2.1 feed 網址列（delegate 釘在 Info.plist，輸入法也照做）、§3 新列、§4.2 V6、§5；P3-1 → S6、§2.2 刪輸入法那份的 `Autoupdate`／`Updater.app`、§2.4、§3 第一列、§4.2 V7、§5；P3-2 → §4.2 腳本逐字比對；P3-3 → §2.1 安裝類型列；P3-4 → §2.1 參數列、§3、§4.2；P3-7 → S5、§3、A1。U2 的 P1-1、P2-2 等在 `system-install.md` §7 |
+| plan-verifier（2026-10-20，安全處置之後） | REVISE，4 項：(1) V7 沒有「沒有結論」這一支：launcher 在 `SMJobSubmit` 之前還有好幾個自己失敗的出口，看起來像過關、其實沙盒沒被測到；V7 組建由誰、怎麼做沒寫；(2) 只釘住 `SUFeedURL`，Sparkle 的跳過版本鍵也在 host 網域：按了跳過之後關於頁仍顯示新版、再按卻什麼都不出現，被攻破的輸入法也能寫跳過鍵凍結更新（〔原始碼〕）；(3) 維護者 Mac 的 0.0.0 前後說法矛盾：§4.3 重裝之後已是新配置，「0.0.0 → 0.5.0」其實是善解更新在 Developer ID 下第一次走系統 domain，失敗沒有對到停止條件；(4) 回滾只寫 revert U1，U2 已合併時會留下權限壞掉的 `/Library` bundle | 全部 FIX：(1) §4.2 V7 三個互斥結果（關住要看到 `SMJobSubmit` 被拒的紀錄）、組建是 main 在虛擬機套的不進 repo 的 patch，§5；(2) §2.1 跳過版本列、§2.2 Sparkle 列、§3 凍結列、§4.2 V6 (b)(c)；(3) §1.1 沒量到的、§2.5、§4.4、§5；(4) §5 回滾分三種情況，權限修正一律保留 |
