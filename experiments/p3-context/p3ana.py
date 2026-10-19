@@ -122,20 +122,22 @@ def main(d, sjtl):
             ship = right["M8"]
             f0, b0 = fb(ship, ng)
             print(f"## {profile} {s} (n = {n}); n-gram top-1 {sum(ng)}\n")
-            print("| arm | top-1 | strict | vs n-gram +/- | UB / n | vs M8 shipped: new right / old right | net | McNemar p |")
-            print("|---|---|---|---|---|---|---|---|")
-            print(f"| M8 shipped | {sum(ship)} | {strict['M8']} | +{f0}/-{b0} | {ev.poisson_upper95(b0) / n:.2%} | | | |")
+            def kept(b):   # registered 留住率: of the rows the n-gram first got right, the share still right after the fused pick
+                return f"{(sum(ng) - b) / max(sum(ng), 1):.1%}"
+            print("| arm | top-1 | strict | vs n-gram +/- | kept | UB / n | vs M8 shipped: new right / old right | net | McNemar p |")
+            print("|---|---|---|---|---|---|---|---|---|")
+            print(f"| M8 shipped | {sum(ship)} | {strict['M8']} | +{f0}/-{b0} | {kept(b0)} | {ev.poisson_upper95(b0) / n:.2%} | | | |")
             for arm in SHOWN:
                 f, b = fb(right[arm], ng)
                 c1, c2 = fb(right[arm], ship)
                 p = ev.mcnemar_exact(c1, c2)
-                print(f"| {arm} | {sum(right[arm])} | {strict[arm]} | +{f}/-{b} | {ev.poisson_upper95(b) / n:.2%} | {c1} / {c2} | "
+                print(f"| {arm} | {sum(right[arm])} | {strict[arm]} | +{f}/-{b} | {kept(b)} | {ev.poisson_upper95(b) / n:.2%} | {c1} / {c2} | "
                       f"{c1 - c2:+d} | {p:.3g} |")
                 if arm == "S64":
                     v[(profile, s)] = (c1, c2, p, b, b0)
             f64, b64 = fb(right["S64"], right["S2"])
             print(f"\nS64 vs S2 (the context's own effect): +{f64} / -{b64}, net {f64 - b64:+d}, p {ev.mcnemar_exact(f64, b64):.3g}")
-            print("alone: " + "; ".join(f"{arm} {alone(data[(arm, profile, s)])}" for arm in ("S64", "S2", "M64", "M8")) + "\n")
+            print("model alone, no fusion (P2's alone-fix / retain): " + "; ".join(f"{arm} {alone(data[(arm, profile, s)])}" for arm in ("S64", "S2", "M64", "M8")) + "\n")
 
     print("## Verdict (registered, S64 vs the shipped M8)\n")
     lines = verdict(v)

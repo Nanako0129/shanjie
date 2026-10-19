@@ -234,6 +234,13 @@ class TestVerdict(unittest.TestCase):
             lines = p3ana.verdict({**base, key: val})
             self.assertFalse(lines[line][1], (key, val))
             self.assertEqual(sum(not ok for _, ok in lines), 1, (key, val))
+        for key, val in ((("chat", "discordtune"), (60, 30, 0.006, 50, 50)),    # significantly better passes
+                         (("chat", "discordtune"), (30, 40, 0.37, 50, 50)),     # worse but not significant passes
+                         (("chat", "discordtune"), (30, 31, 0.05, 50, 50)),     # net < 0 at p exactly 0.05 passes
+                         (("formal", "typing"), (2, 2))):                       # broken 2, net 0 passes
+            self.assertTrue(all(ok for _, ok in p3ana.verdict({**base, key: val})), (key, val))
+        zero = {**base, ("chat", "ur"): (1, 1), ("formal", "ur"): (0, 0)}       # typo nets summing to 0 fail
+        self.assertEqual([ok for _, ok in p3ana.verdict(zero)], [True] * 5 + [False])
 
 
 if __name__ == "__main__":
