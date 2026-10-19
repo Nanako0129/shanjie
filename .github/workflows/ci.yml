@@ -292,9 +292,11 @@ jobs:
       - name: Tests (debug)
         run: cargo test --locked
 
-  # The Swift input method (docs/contracts/s3b.md section 3): build the ad-hoc
-  # app, the Swift tests through the real core and model, the bundled
-  # selftest, and acceptance checks 2, 3 and 6 of contract section 10.
+  # The Swift input method (docs/contracts/s3b.md section 3, app-sandbox.md
+  # section 2.6): the ad-hoc sandboxed builds, the container migration, the
+  # Swift tests through the real core and model, the bundled selftest,
+  # acceptance checks 2, 3 and 6 of s3b section 10, the entitlement and
+  # Sparkle mutations, and the installer.
   shell:
     needs: changes
     if: needs.changes.outputs.run == 'true'
@@ -335,17 +337,83 @@ jobs:
           gh release download sj-cx-1-7.7m --repo "$GITHUB_REPOSITORY" -p trigram.sjt3 -D data/lm
           shasum -a 256 -c data/trigram.sjt3.sha256
 
-      # The local entry points (Makefile, docs/verification.md). cargo test
-      # runs in the core and core-debug jobs, so only the Swift tests run here.
-      - name: Build the app (ad-hoc)
-        run: make bundle
+      # docs/contracts/app-sandbox.md section 2.6, in its order: no step before
+      # step 3 launches any sandboxed build. cargo test runs in the core and
+      # core-debug jobs, so only the Swift tests run here.
+      # Step 0: the default build has the development ID, the names of the
+      # section 2.3 table, and no migration list. Build only.
+      - name: "Step 0: default build (development ID), build only"
+        shell: bash
+        run: |
+          set -euo pipefail
+          make bundle OUT_DIR=build/default
+          APP="build/default/善解（開發版）.app"
+          pb() { /usr/libexec/PlistBuddy -c "Print :$1" "$2"; }
+          ID=$(pb CFBundleIdentifier "$APP/Contents/Info.plist")
+          echo "default CFBundleIdentifier: $ID"
+          [ "$ID" = com.nyanako.inputmethod.shanjie.dev ]
+          [ "$(pb CFBundleDisplayName "$APP/Contents/Info.plist")" = 善解（開發版） ]
+          [ "$(pb CFBundleName "$APP/Contents/Info.plist")" = "Shanjie (Dev)" ]
+          [ "$(pb CFBundleDisplayName "$APP/Contents/Resources/zh-Hant.lproj/InfoPlist.strings")" = 善解（開發版） ]
+          [ "$(pb CFBundleDisplayName "$APP/Contents/Resources/en.lproj/InfoPlist.strings")" = "Shanjie (Dev)" ]
+          [ ! -e "$APP/Contents/Resources/container-migration.plist" ]
+          [ ! -e build/default/善解輸入法.app ]
+
+      - name: "Step 1: shipping-ID build, build only"
+        shell: bash
+        run: |
+          set -euo pipefail
+          make bundle BUNDLE_ID=com.nyanako.inputmethod.shanjie
+          M="build/善解輸入法.app/Contents/Resources/container-migration.plist"
+          plutil -p "$M"
+          [ "$(/usr/libexec/PlistBuddy -c 'Print :Move:0' "$M")" = '${ApplicationSupport}/shanjie' ]
+
+      - name: "Step 2: throwaway build with no migration list, build only"
+        run: make bundle BUNDLE_ID=com.nyanako.inputmethod.shanjie.ci-nomanifest OUT_DIR=build/nomanifest
+
+      # Step 2a: check-app.sh's local guard, verified here rather than on a
+      # maintainer's machine: outside CI it must refuse to run a shipping-ID
+      # build and must not have created the shipping container; with SKIP_RUN=1
+      # it passes checks 2 and 3.
+      - name: "Step 2a: check-app.sh refuses a shipping-ID run outside CI"
+        shell: bash
+        run: |
+          set -euo pipefail
+          rc=0
+          CI='' EXPECTED_BUNDLE_ID=com.nyanako.inputmethod.shanjie scripts/check-app.sh "build/善解輸入法.app" > "$RUNNER_TEMP/2a.out" 2>&1 || rc=$?
+          cat "$RUNNER_TEMP/2a.out"
+          [ "$rc" -ne 0 ] || { echo "error: check-app.sh ran a shipping-ID build with CI unset" >&2; exit 1; }
+          grep -q 'check 6 refused' "$RUNNER_TEMP/2a.out"
+          [ ! -e "$HOME/Library/Containers/com.nyanako.inputmethod.shanjie" ] || { echo "error: the shipping container exists" >&2; exit 1; }
+          CI='' SKIP_RUN=1 EXPECTED_BUNDLE_ID=com.nyanako.inputmethod.shanjie scripts/check-app.sh "build/善解輸入法.app"
+
+      # Step 3: the first sandboxed launches in this job (the script prints
+      # sw_vers). A TCC prompt while reading a container would hang here
+      # (contract N6), hence the timeout.
+      - name: "Step 3: container migration (shipping ID), and no list, no move"
+        timeout-minutes: 10
+        run: scripts/test-sandbox-migration.sh "build/善解輸入法.app" "build/nomanifest/善解（開發版）.app"
+
+      - name: "Step 4: the migration test refuses outside CI and with a temporary HOME"
+        shell: bash
+        run: |
+          set -euo pipefail
+          for ci in "" true; do
+            T=$(mktemp -d "$RUNNER_TEMP/refuse.XXXXXX")
+            rc=0
+            CI="$ci" HOME="$T" scripts/test-sandbox-migration.sh "build/善解輸入法.app" "build/nomanifest/善解（開發版）.app" > "$T.out" 2>&1 || rc=$?
+            cat "$T.out"
+            [ "$rc" -ne 0 ] || { echo "error: not refused with CI='$ci' HOME=$T" >&2; exit 1; }
+            [ -z "$(ls -A "$T")" ] || { echo "error: the refused run wrote into $T" >&2; exit 1; }
+          done
+          grep -q "is not this account's home directory" "$T.out"
 
       # release.yml's CI gate against a stub gh: a tag on an appcast.xml-only commit uses its parent's run.
       - name: CI gate script
         run: scripts/test-check-ci-gate.sh
 
-      # install-ime.sh file handling with a stub app in a temporary HOME; nothing can be registered.
-      - name: Install script file handling
+      # Step 5: install-ime.sh file handling with a stub app in a temporary HOME; nothing can be registered.
+      - name: "Step 5: install script file handling"
         run: scripts/test-install-ime.sh
 
       # Includes the log-stream test (acceptance 5): it needs /usr/bin/log
@@ -354,24 +422,39 @@ jobs:
       # docs/contracts/ci-speed.md). Trade-off: state that leaks from one test into the next inside one process is no longer
       # caught here, only by the serial `make test-swift`. --parallel drops XCTest's `Executed N tests` summary, so the number
       # of test cases is printed from the xUnit file (it does not mark XCTSkip, so there is no skip count to print).
-      - name: Swift tests
+      - name: "Step 5: Swift tests"
         run: |
           set -euo pipefail
           swift test --package-path macos --force-resolved-versions --parallel --xunit-output "$RUNNER_TEMP/swift-tests.xml"
           python3 -c 'import sys, xml.etree.ElementTree as E; print("swift tests: %d testcases" % sum(1 for _ in E.parse(sys.argv[1]).iter("testcase")))' "$RUNNER_TEMP/swift-tests.xml"
 
-      # The empty override builds with the shipping bundle ID: an ephemeral
-      # runner has no installation to collide with (see the Makefile).
-      - name: Bundled selftest (shipping bundle ID)
-        run: make selftest-bundled SELFTEST_BUNDLE_ID=
+      # Step 6: the bundled selftest with a per-run throwaway ID (no migration
+      # list); its container must not exist before and must exist after. The
+      # shipping ID's selftest already ran in steps 3 and 7.
+      - name: "Step 6: bundled selftest (throwaway ID)"
+        shell: bash
+        run: |
+          set -euo pipefail
+          ID="com.nyanako.inputmethod.shanjie.selftest-$GITHUB_RUN_ID"
+          C="$HOME/Library/Containers/$ID"
+          [ ! -e "$C" ] || { echo "error: $C exists before the selftest" >&2; exit 1; }
+          make selftest-bundled SELFTEST_BUNDLE_ID="$ID"
+          [ -d "$C" ] || { echo "error: no $C after the selftest: not sandboxed" >&2; exit 1; }
+          echo "ok: $C absent before, present after"
 
-      # Contract section 10, acceptance 2, 3 and 6, on build/善解輸入法.app.
-      - name: Acceptance checks 2, 3 and 6
-        run: scripts/check-app.sh
+      # Step 7: s3b section 10 acceptance 2, 3 and 6 on the shipping build.
+      - name: "Step 7: acceptance checks 2, 3 and 6"
+        run: EXPECTED_BUNDLE_ID=com.nyanako.inputmethod.shanjie scripts/check-app.sh "build/善解輸入法.app"
 
-      # docs/contracts/s3c-installer.md section 6, acceptance 1: the installer around this build,
-      # inspected only (never launched).
-      - name: Installer
+      # Step 8: seven changed copies of the shipping build against
+      # check-entitlements.sh and check-app.sh (security review F1, F7); none is
+      # launched.
+      - name: "Step 8: entitlement and Sparkle mutations"
+        run: scripts/test-sandbox-mutations.sh "build/善解輸入法.app"
+
+      # Step 9: docs/contracts/s3c-installer.md section 6, acceptance 1: the
+      # installer around the shipping build of step 1, inspected only (never launched).
+      - name: "Step 9: installer"
         run: |
           make installer
           scripts/check-installer.sh
