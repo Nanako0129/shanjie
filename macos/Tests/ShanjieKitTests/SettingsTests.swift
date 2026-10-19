@@ -27,7 +27,7 @@ final class SettingsTests: XCTestCase {
         let acg = MemoryAcgPackStore(), tint = MemoryGlassTintStore(), dialogs = FakeDialogs(), english = MemoryEnglishStore(false)  // saved off: the default is on (digits.md A.3.7), the tests below start from off
         let shell = Shell(resources: resources, panel: FakePanel(), isSecureInput: { secure }, layoutStore: layout,
                           learningDirectory: learning, dialogs: dialogs, demoteStore: demote, predictionStore: prediction, abbreviationStore: abbreviation, englishStore: english,
-                          acgPackStore: acg, glassTintStore: tint, candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore())
+                          acgPackStore: acg, glassTintStore: tint, candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore(), spacingStore: MemorySpacingStore())
         XCTAssertNotNil(shell.engine)
         return Rig(shell: shell, model: SettingsModel(shell: shell), controller: Controller(shell),
                    layout: layout, demote: demote, prediction: prediction, abbreviation: abbreviation, english: english, acg: acg, tint: tint, dialogs: dialogs)
@@ -73,7 +73,7 @@ final class SettingsTests: XCTestCase {
     func testEnglishMixingDefaultsOnAndTheNoteIsTheContractsLine() throws {
         let shell = Shell(resources: resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(),
                           learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), englishStore: MemoryEnglishStore(),
-                          acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore())
+                          acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore(), spacingStore: MemorySpacingStore())
         XCTAssertTrue(SettingsModel(shell: shell).english, "nothing saved is on")
         XCTAssertFalse(rig().model.english, "a saved off stays off")
         XCTAssertEqual(MenuEntry.Text.englishDigitsNote, "打英文不用切換輸入法；數字列的鍵也會打出數字（例如 2026年、3.14），由前文判斷是數字還是注音。")
@@ -97,7 +97,7 @@ final class SettingsTests: XCTestCase {
         let english = MemoryEnglishStore(true)
         let shell = Shell(resources: bare, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(),
                           learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), englishStore: english,
-                          acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore())
+                          acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore(), spacingStore: MemorySpacingStore())
         let model = SettingsModel(shell: shell)
         XCTAssertFalse(model.englishEnabled)
         XCTAssertTrue(model.english, "greyed, still showing the setting")
@@ -149,7 +149,7 @@ final class SettingsTests: XCTestCase {
         let english = MemoryEnglishStore(true, inline: false)
         let shell = Shell(resources: bare, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(),
                           learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), englishStore: english,
-                          acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore())
+                          acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore(), spacingStore: MemorySpacingStore())
         let model = SettingsModel(shell: shell)
         XCTAssertFalse(model.englishInlineEnabled)
         XCTAssertFalse(model.englishInline, "greyed, still showing the setting")
@@ -332,7 +332,7 @@ final class SettingsTests: XCTestCase {
         let tint = MemoryGlassTintStore(0.4)
         let shell = Shell(resources: resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(),
                           learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(),
-                          predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), englishStore: MemoryEnglishStore(), acgPackStore: MemoryAcgPackStore(), glassTintStore: tint, candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore())
+                          predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), englishStore: MemoryEnglishStore(), acgPackStore: MemoryAcgPackStore(), glassTintStore: tint, candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore(), spacingStore: MemorySpacingStore())
         XCTAssertEqual(shell.glassTint, 0.4)
         tint.glassTint = 0.9
         XCTAssertEqual(shell.glassTint, 0.4, "the Shell reads the store only at start and on set")
@@ -343,7 +343,7 @@ final class SettingsTests: XCTestCase {
         var secure = false
         let shell = Shell(resources: resources, panel: FakePanel(), isSecureInput: { secure }, layoutStore: MemoryLayoutStore(),
                           learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(),
-                          predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), englishStore: MemoryEnglishStore(), acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore())
+                          predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), englishStore: MemoryEnglishStore(), acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore(), spacingStore: MemorySpacingStore())
         let model = SettingsModel(shell: shell)
         secure = true
         shell.changed()

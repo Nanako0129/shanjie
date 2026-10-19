@@ -81,6 +81,9 @@ public struct MenuEntry: Equatable, Sendable {
         public static let englishDisplay = "英文的顯示"
         public static let englishDisplayTyped = "打字時就顯示"
         public static let englishDisplaySpace = "按空白才顯示"
+        /// The spacing toggle in the settings window and the line under it (docs/contracts/cjk-spacing.md section 2).
+        public static let spacing = "中英文之間自動加空格"
+        public static let spacingNote = "在漢字和半形英文、數字之間自動加一個空格（俗稱「盤古之白」）。只改善解送出的文字。"
         public static let abbreviation = "可省略韻母"
         public static let rerank = "語意校正"
         public static let acgPack = "動漫與遊戲詞"
@@ -192,12 +195,15 @@ extension Session {
     /// "No marked text" is an empty marked range at any location: on 2026-10-06 VS Code, Chrome,
     /// Finder's search field and others reported {insertion, 0} rather than NSTextInputClient's
     /// {NSNotFound, 0}, and one reported {NSNotFound, NSNotFound} (numbers-only log on device).
-    func leftContext() -> String? {
+    ///
+    /// Returns the trailing Han characters for the core and, from the same read, the raw last character for cjk-spacing section 1.
+    /// Changes no state.
+    func leftContext() -> (han: String?, last: Character?) {
         let selected = client.selectedRange(), marked = client.markedRange()
-        guard selected.location != NSNotFound, marked.location == NSNotFound || marked.length == 0 else { return nil }
+        guard selected.location != NSNotFound, marked.location == NSNotFound || marked.length == 0 else { return (nil, nil) }
         let range = LeftContext.range(insertion: selected.location)
-        guard range.length > 0, let text = client.attributedSubstring(from: range)?.string else { return nil }
-        return LeftContext.han(text, truncated: range.location > 0)
+        guard range.length > 0, let text = client.attributedSubstring(from: range)?.string else { return (nil, nil) }
+        return (LeftContext.han(text, truncated: range.location > 0), text.last)
     }
 
     /// The menu (s3b section 13.2, sw section 3 and S4 sections 3-4), in order.
