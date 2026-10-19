@@ -181,7 +181,16 @@ codesign --verify --strict --deep "$APP" || fail "codesign --verify --strict --d
 # entitlements".
 SPARKLE="$APP/Contents/Frameworks/Sparkle.framework"
 [ "$(ls -A "$SPARKLE/Versions/B/XPCServices" 2>/dev/null)" = Installer.xpc ] || fail "Sparkle's XPCServices is not exactly Installer.xpc"
-codesign --verify --strict "$APP" || fail "codesign --verify --strict: $APP"
+# xpc_layout <Sparkle.framework>: the only .xpc anywhere in the framework (find does not follow symlinks) is
+# Versions/B/XPCServices/Installer.xpc, Versions/Current is a symlink to B, and a top-level XPCServices, if present, is the
+# symlink Versions/Current/XPCServices. release.yml has its own copy (its sign job runs no repository code).
+xpc_layout() {
+  [ "$(cd "$1" && find . -name '*.xpc')" = ./Versions/B/XPCServices/Installer.xpc ] \
+    && [ -L "$1/Versions/Current" ] && [ "$(readlink "$1/Versions/Current")" = B ] \
+    && { { [ ! -e "$1/XPCServices" ] && [ ! -L "$1/XPCServices" ]; } \
+         || { [ -L "$1/XPCServices" ] && [ "$(readlink "$1/XPCServices")" = Versions/Current/XPCServices ]; }; }
+}
+xpc_layout "$SPARKLE" || fail "Sparkle.framework's XPC layout is not exactly Versions/B/XPCServices/Installer.xpc (Current -> B, XPCServices -> Versions/Current/XPCServices)"
 for code in "$SPARKLE" "$SPARKLE/Versions/B/XPCServices/Installer.xpc" "$SPARKLE/Versions/B/Autoupdate" "$SPARKLE/Versions/B/Updater.app"; do
   [ -e "$code" ] || fail "$code is missing"
   codesign --verify --strict "$code" || fail "codesign --verify --strict: $code"

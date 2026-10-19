@@ -261,6 +261,16 @@ jobs:
           SPARKLE="$APP/Contents/Frameworks/Sparkle.framework"
           XPC="$SPARKLE/Versions/B/XPCServices"
           [ "$(ls -A "$XPC" 2>/dev/null)" = Installer.xpc ] || fail "Sparkle's XPCServices is not exactly Installer.xpc"
+          # xpc_layout <Sparkle.framework>: the only .xpc anywhere in the framework (find does not follow symlinks) is
+          # Versions/B/XPCServices/Installer.xpc, Versions/Current is a symlink to B, and a top-level XPCServices, if present, is the
+          # symlink Versions/Current/XPCServices. The same function as scripts/check-app.sh (this job runs no repository code; a change there goes here too).
+          xpc_layout() {
+            [ "$(cd "$1" && find . -name '*.xpc')" = ./Versions/B/XPCServices/Installer.xpc ] \
+              && [ -L "$1/Versions/Current" ] && [ "$(readlink "$1/Versions/Current")" = B ] \
+              && { { [ ! -e "$1/XPCServices" ] && [ ! -L "$1/XPCServices" ]; } \
+                   || { [ -L "$1/XPCServices" ] && [ "$(readlink "$1/XPCServices")" = Versions/Current/XPCServices ]; }; }
+          }
+          xpc_layout "$SPARKLE" || fail "Sparkle.framework's XPC layout is not exactly Versions/B/XPCServices/Installer.xpc"
           for code in "$XPC/Installer.xpc" "$SPARKLE/Versions/B/Autoupdate" "$SPARKLE/Versions/B/Updater.app" "$SPARKLE"; do
             [ -e "$code" ] || fail "$code is missing; Sparkle's layout changed"
             codesign --force --options runtime --timestamp --sign "$IDENTITY" --keychain "$KC" "$code"
@@ -325,6 +335,11 @@ jobs:
                 [ "$ID" = com.nyanako.inputmethod.shanjie ] || fail "bundle ID is $ID, not the shipping ID: $V"
                 [ "$(/usr/libexec/PlistBuddy -c 'Print :InputMethodConnectionName' "$V/Contents/Info.plist")" = "${ID}_Connection" ] \
                   || fail "InputMethodConnectionName is not ${ID}_Connection: $V"
+                # app-sandbox.md section 2.2: the migration list, exactly (the same comparison as scripts/check-app.sh).
+                # shellcheck disable=SC2016
+                python3 -I -c 'import plistlib, sys; sys.exit(plistlib.load(open(sys.argv[1], "rb")) != {"Move": ["${ApplicationSupport}/shanjie"]})' \
+                  "$V/Contents/Resources/container-migration.plist" 2>/dev/null \
+                  || fail "container-migration.plist is missing or not exactly Move = [\${ApplicationSupport}/shanjie]: $V"
                 rm -f "$T/ent-actual.plist" "$T/ent-expected.plist"
                 codesign -d --entitlements - --xml "$V" > "$T/ent-actual.plist" 2>/dev/null || true
                 [ -s "$T/ent-actual.plist" ] || fail "the input method carries no entitlements: $V"
@@ -374,6 +389,7 @@ jobs:
               [ -z "$C_ENT" ] || fail "$code carries entitlements"
             done
             [ "$(ls -A "$S/Versions/B/XPCServices" 2>/dev/null)" = Installer.xpc ] || fail "Sparkle's XPCServices is not exactly Installer.xpc"
+            xpc_layout "$S" || fail "Sparkle.framework's XPC layout is not exactly Versions/B/XPCServices/Installer.xpc: $S"
             P="$V/Contents/Info.plist"
             key() { [ "$(plutil -extract "$1" raw -expect "$2" -o - "$P" 2>/dev/null)" = "$3" ] || fail "Info.plist $1 is not the $2 $3"; }
             key ShanjieUpdateBuild string release

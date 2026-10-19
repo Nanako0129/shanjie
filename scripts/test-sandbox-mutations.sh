@@ -1,5 +1,5 @@
 #!/bin/bash
-# docs/contracts/app-sandbox.md section 2.6 step 8: seven copies of the shipping-ID build, each changed one way and re-signed
+# docs/contracts/app-sandbox.md section 2.6 step 8: eight copies of the shipping-ID build, each changed one way and re-signed
 # ad-hoc, against scripts/check-entitlements.sh and scripts/check-app.sh (SKIP_RUN=1: checks 2 and 3 only). Nothing is ever
 # launched; the copies live in a temporary directory that is removed at the end. Runs locally and in CI.
 #
@@ -13,6 +13,7 @@
 #   5 Installer.xpc removed                          check-app.sh check 3 fails
 #   6 a second .xpc in XPCServices                   check-app.sh check 3 fails
 #   7 SUEnableInstallerLauncherService false         check-app.sh check 2 fails
+#   8 a second .xpc outside XPCServices              check-app.sh check 3 fails (the whole-framework XPC layout)
 # release.yml's verify() has its own copy of the comparison and is not mutated here (`sign` runs only on main).
 set -euo pipefail
 
@@ -24,8 +25,11 @@ fail() { echo "FAIL: $*" >&2; exit 1; }
   || fail "$SRC is not the shipping-ID build"
 T="$(mktemp -d)"
 trap 'rm -rf "$T"' EXIT
+# Before any copy exists: Spotlight and LaunchServices must not index the shipping-ID copies (as build-app.sh does for build/).
+touch "$T/.metadata_never_index"
 
-copy() { mkdir -p "$T/$1"; ditto "$SRC" "$T/$1/$NAME"; echo "$T/$1/$NAME"; }
+# APFS clones (cp -c) where the file system supports them, a full ditto otherwise.
+copy() { mkdir -p "$T/$1"; cp -Rc "$SRC" "$T/$1/$NAME" 2>/dev/null || { rm -rf "${T:?}/$1/$NAME"; ditto "$SRC" "$T/$1/$NAME"; }; echo "$T/$1/$NAME"; }
 ents() { codesign -d --entitlements - --xml "$1" 2>/dev/null > "$2"; plutil -lint "$2" >/dev/null; }
 ent_fails() {  # ent_fails <n> <app> <message it must print>
   if "$ROOT/scripts/check-entitlements.sh" "$2" > "$T/$1.out" 2>&1; then cat "$T/$1.out"; fail "mutation $1: check-entitlements.sh passed"; fi
@@ -80,4 +84,7 @@ A="$(copy 7)"; plutil -replace SUEnableInstallerLauncherService -bool false "$A/
 codesign --force --sign - --preserve-metadata=entitlements "$A" 2>/dev/null
 app_fails 7 "$A" 2 "SUEnableInstallerLauncherService is not the bool true"
 
-echo "sandbox mutations: all seven as expected"
+A="$(copy 8)"; ditto "$A/$X/Installer.xpc" "$A/Contents/Frameworks/Sparkle.framework/Versions/B/Extra.xpc"; resign "$A"
+app_fails 8 "$A" 3 "Sparkle.framework's XPC layout is not exactly"
+
+echo "sandbox mutations: all eight as expected"

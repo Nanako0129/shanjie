@@ -186,10 +186,11 @@
   - IME：
     - `CFBundleIdentifier` 是正式 ID；
     - entitlements 完全等於 §2.1 的四個鍵；
-    - mach 名稱等於由 ID 算出的值。
+    - mach 名稱等於由 ID 算出的值；
+    - `Contents/Resources/container-migration.plist` 存在，正規化後完全等於 `Move = [${ApplicationSupport}/shanjie]`（§2.2，和 `check-app.sh` 同一個比對）。
   - Sparkle 的五個程式碼位置：`Installer.xpc`、`Autoupdate`、`Updater.app`、framework，加上 App 本身的 Team 與 runtime 檢查照舊。
     - 前四個都沒有 entitlements；
-    - `XPCServices` 裡只有 `Installer.xpc`；
+    - `XPCServices` 裡只有 `Installer.xpc`；整個 framework 裡（不跟隨符號連結）唯一的 `.xpc` 是 `Versions/B/XPCServices/Installer.xpc`，`Versions/Current` 是指向 `B` 的符號連結，最上層的 `XPCServices` 若存在必須是指向 `Versions/Current/XPCServices` 的符號連結（`sign` 與 `verify_sparkle` 都查，和 `check-app.sh` 第 3 項同一個函式）；
     - Info.plist 的 `SUEnableInstallerLauncherService` 是 `true`（原本是 `false`），`SUEnableDownloaderService` 不存在，其他 Sparkle 鍵照舊逐字比對。
   - entitlements 的比對一律是「正規化後整份相等」，不是「每個預期的鍵都在」；多一個鍵就失敗（F7）。
   - 安裝程式：`CFBundleIdentifier` 是 `com.nyanako.shanjie.installer`，沒有任何 entitlements（現行規則）。
@@ -263,13 +264,14 @@
 6. `make selftest-bundled SELFTEST_BUNDLE_ID=com.nyanako.inputmethod.shanjie.selftest-$GITHUB_RUN_ID`，前後各檢查一次 `~/Library/Containers/<該 ID>`：之前不存在、之後存在。
    - 原本傳空值、用正式 ID 的那一步（`ci.yml` 現在的 `SELFTEST_BUNDLE_ID=`）取消；正式 ID 的 selftest 已在第 3 步與第 7 步跑過。
 7. `EXPECTED_BUNDLE_ID=com.nyanako.inputmethod.shanjie scripts/check-app.sh build/善解輸入法.app`。
-8. **突變測試**（`scripts/test-sandbox-mutations.sh`，本機與 CI 共用；實作時改成腳本）：複製 `build/善解輸入法.app` 七份，各做一種改動。
+8. **突變測試**（`scripts/test-sandbox-mutations.sh`，本機與 CI 共用；實作時改成腳本）：複製 `build/善解輸入法.app` 八份，各做一種改動（APFS 的 clone，`cp -Rc`，不支援時退回 `ditto`；放複本的暫存目錄先 `touch .metadata_never_index`）。
    - 用 `codesign --force --sign -` 重簽（不帶 `--preserve-metadata`）：`scripts/check-entitlements.sh` 要失敗。
    - 帶 `--preserve-metadata=entitlements` 重簽：`scripts/check-entitlements.sh` 要通過。
    - entitlements 多一個鍵（例如 `com.apple.security.cs.disable-library-validation`）重簽：`scripts/check-entitlements.sh` 要失敗。
    - 兩個 mach 名稱換成別的 ID 重簽：`scripts/check-entitlements.sh` 要失敗。
    - 刪掉 `Installer.xpc` 再重簽 framework 與 App：`check-app.sh` 第 3 項要失敗。
    - `XPCServices` 裡多放一個 `.xpc`（複製 `Installer.xpc` 改名）再重簽：`check-app.sh` 第 3 項要失敗。
+   - `XPCServices` 以外（`Versions/B/`）多放一個 `.xpc` 再重簽：`check-app.sh` 第 3 項的整個 framework 檢查要失敗。
    - 把 Info.plist 的 `SUEnableInstallerLauncherService` 改成 `false` 再重簽：`check-app.sh` 第 2 項要失敗。
    - 第 3 步在拒絕檢查通過之後、放來源之前，在 log 印出 runner 的 macOS 版本（`sw_vers`），「沒有清單不搬」量到的是哪一版要看得到（F4）。拒絕路徑因此完全沒有輸出以外的副作用。
    - `release.yml` 的那份比對不在分支上跑反向測試（`sign` 只在 main 觸發）；它和 `check-entitlements.sh` 用同一套比對方式，兩處的說明互相指向。
@@ -308,7 +310,7 @@
 - **XPC 服務**：
   - `build-app.sh` 只刪 `Downloader.xpc`，保留 `Sparkle.framework/Versions/B/XPCServices/Installer.xpc`。
   - 斷言 `XPCServices` 裡**只有** `Installer.xpc`（F7）。
-  - `check-app.sh` 第 3 項、`release.yml` 的 `sign` 與 `verify_sparkle` 照這個改：原本「XPCServices 不存在就對」改成這一條。
+  - `check-app.sh` 第 3 項、`release.yml` 的 `sign` 與 `verify_sparkle` 照這個改：原本「XPCServices 不存在就對」改成這一條，另外查整個 framework 的版面（§2.4）。
 - **ad-hoc 簽章順序**（由內而外，不用 `--deep`）：`Installer.xpc` → `Autoupdate` → `Updater.app` → framework → App（只有 App 帶 entitlements）。
 - **網路：給輸入法 `network.client`，不用 Downloader.xpc**（安全審查確認，§7.2 F6）：
   - 在「被攻破的輸入法能不能把資料送出去」這件事上，兩種做法沒有差別：Downloader.xpc 照呼叫者給的請求原樣送出（§1）。
@@ -358,10 +360,10 @@
 
 1. entitlements 與 Sparkle：
    - 第 7 步的 `check-app.sh` 第 2、3 項通過：四個鍵、`Installer.xpc` 在、`Downloader.xpc` 不在、Sparkle 位置沒有 entitlements、`SUEnableInstallerLauncherService` 是 true；
-   - 第 8 步的七份突變各自照預期：
+   - 第 8 步的八份突變各自照預期：
      - 不帶 `--preserve-metadata` 重簽、多一個鍵、mach 名稱換成別的 ID：`check-entitlements.sh` 失敗；
      - 帶 `--preserve-metadata=entitlements` 重簽：`check-entitlements.sh` 通過；
-     - 刪掉 `Installer.xpc`、多一個 `.xpc`：`check-app.sh` 第 3 項失敗；
+     - 刪掉 `Installer.xpc`、`XPCServices` 裡或外多一個 `.xpc`：`check-app.sh` 第 3 項失敗；
      - `SUEnableInstallerLauncherService` 改成 `false`：`check-app.sh` 第 2 項失敗。
 2. 沙盒有套上：第 3 步拋棄式 ID 的 container、第 6 步 selftest ID 的 container，都是之前不存在、之後存在。
 3. 移轉與「沒有清單不搬」：第 3 步的所有斷言。
