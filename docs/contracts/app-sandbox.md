@@ -1,6 +1,9 @@
 # 契約：App 沙盒第一片（輸入法本體進沙盒、資料移轉）
 
-狀態：**修訂二（2026-10-19）收尾審查 READY**（§8）：安全審查完成（§7.2），維護者同日三題選擇題定案（§6 第 4–6 項）。實作中。
+狀態：**修訂三（2026-10-19 晚上）待審**。修訂二收尾審查 READY（§8），已合併（`a76e5150`）。
+
+- 修訂三的起因：§4.3 A 第 2 步（沙盒版經 Sparkle 更新成沙盒版）在虛擬機失敗，Sparkle 顯示「An error occurred while connecting to the installer」。根因量到了（§1 的「2026-10-19，虛擬機」）：同一條 framework 路徑，開機後第一次跑的 Sparkle 沒有 XPC 服務時，系統就不替後來的版本登記安裝服務，要重開機才恢復。v0.4.7 的 Sparkle.framework 沒有 XPC 服務，所以正式版 0.4.7 → 0.5.0 之後、重開機之前，0.5.0 → 0.5.1 會失敗。
+- 修法（維護者 2026-10-19 選擇題，§6 第 7 項）：0.5.0 起把 Sparkle.framework 放到舊版沒用過的 `Contents/Frameworks/Updater/`（§2.8）。§1、§2.4、§2.6 第 8 步、§2.8、§4.1、§4.3 A、§4.4、§5 跟著改。
 
 - 修訂一在 2026-10-10 收尾審查 READY，實作放在分支 `feat/app-sandbox`（PR #94，草稿）。那時排定在 v0.4.0 之後合併、以 v0.5.0 發佈。
 - 到 2026-10-19 清晨，舊分支已落後 main 1,032 個 commit（main 當時在 `e8c44f9e`），其中 v0.4.7 內嵌了 Sparkle 自動更新（`docs/contracts/about-update.md`）。它在輸入法程序裡連網、刪掉了 Sparkle 的 XPC 服務，和修訂一「只有兩個 entitlements」的設計衝突。
@@ -91,6 +94,23 @@
   - GHSA-4v99-qgq9-6pxp（high，只影響以 root 執行，善解用不到，2.9.6 修）；
   - GHSA-gmj2-gq3j-vqmj（medium，delta 更新，要 EdDSA 私鑰，2.9.5 修）。
   - 最新是 2.10.0（2026-09-13），最低系統 macOS 12，善解要求 26.0，不受影響。這片升到 2.10.0（§2.8）。
+
+**2026-10-19，虛擬機（修訂三；tart 的 macOS 26.6.2，開發版 ID，ad-hoc）**：
+
+- 沙盒版 A（0.0.1）經 Sparkle 更新到 B（0.0.2）失敗：Sparkle 顯示「An error occurred while connecting to the installer」。launchd 在輸入法程序的 pid domain 找不到 `org.sparkle-project.InstallerLauncher`（`failed lookup … error = 3: No such process`），沒有沙盒拒絕。
+- 把 `Installer.xpc` 另外放一份到 App 的 `Contents/XPCServices`，launchd 就登記得到；但 Sparkle 2.10.0 啟動時檢查到它就拒絕啟動（`SPUUpdater.m` 的 `checkIfConfiguredProperly`：「must be in the Sparkle framework, not in the application bundle」），所以這條路不能用。
+- 同一份 App 換位置執行（直接執行主程式，每秒查一次 `launchctl print pid/<pid>`，最多 15 秒）：
+  - 複製到別的資料夾、改 bundle 名稱：2～9 秒內登記好；
+  - 已安裝的那條路徑：程序活著，一直沒有登記；`lsregister -u` 與 `-f` 之後一樣；
+  - 重開機之後，已安裝的那條路徑由系統啟動，登記好了；接著 A → B 更新成功（容器沿用、學習檔雜湊不變、沒有沙盒拒絕）。
+- **乾淨重現**（全新路徑，同一個主 bundle 路徑依序放三種版本）：
+  1. framework 裡沒有 XPC 服務的版本（v0.4.7 的配置），先跑一次；
+  2. 換成有 `Installer.xpc` 的版本：沒有登記；
+  3. 換成同一版、但 framework 搬到 `Contents/Frameworks/U/`（主程式加一條 rpath）：登記好了；
+  4. 換回原位置：又沒有登記；
+  - 對照組（有服務的版本放在全新路徑）：登記好了。
+- **結論**：系統照 framework 的路徑記住「這裡沒有 XPC 服務」，開機期間不會更新，重開機才清。登出能不能清，沒有量。機制在系統內部，這裡只有黑箱量測；其他 macOS 版本沒量（§4.3 B、§4.4 在維護者的系統上補量）。
+- **對正式版的影響**：v0.4.7 的 Sparkle.framework 沒有 XPC 服務（about-update 的做法），裝在 `~/Library/Input Methods/善解輸入法.app/Contents/Frameworks/Sparkle.framework`。如果 0.5.0 的 framework 還放在同一個位置，0.4.7 → 0.5.0 會成功（舊版的 Sparkle 不需要安裝服務），但重開機之前 0.5.0 → 0.5.1 會失敗。修法在 §2.8。
 
 **沒量到，而且這片的安全靠它的**：沒有移轉清單時不搬。這是推論：只量過有清單的情況，而偏好設定沒寫進清單也被搬了，所以不能當然成立。§4.1 第 3 項在 CI 斷言；不成立就停（§5）。
 
@@ -192,6 +212,7 @@
     - 前四個都沒有 entitlements；
     - `XPCServices` 裡只有 `Installer.xpc`；整個 framework 裡（不跟隨符號連結）唯一的 `.xpc` 是 `Versions/B/XPCServices/Installer.xpc`，`Versions/Current` 是指向 `B` 的符號連結，最上層的 `XPCServices` 若存在必須是指向 `Versions/Current/XPCServices` 的符號連結（`sign` 與 `verify_sparkle` 都查，和 `check-app.sh` 第 3 項同一個函式）；
     - Info.plist 的 `SUEnableInstallerLauncherService` 是 `true`（原本是 `false`），`SUEnableDownloaderService` 不存在，其他 Sparkle 鍵照舊逐字比對。
+    - 〔修訂三〕framework 在 `Contents/Frameworks/Updater/Sparkle.framework`：`Contents/Frameworks` 裡只有 `Updater`，`Updater` 裡只有 `Sparkle.framework`（`sign` 與 `verify_sparkle` 都查，和 `check-app.sh` 第 3 項同一條，§2.8）。
   - entitlements 的比對一律是「正規化後整份相等」，不是「每個預期的鍵都在」；多一個鍵就失敗（F7）。
   - 安裝程式：`CFBundleIdentifier` 是 `com.nyanako.shanjie.installer`，沒有任何 entitlements（現行規則）。
 - **dry run 保留產出檔一天**（使用者 2026-10-09 決定）：dry run 用 `actions/upload-artifact` 上傳簽章、公證後的兩個 zip，`retention-days: 1`，給 §4.2 的虛擬機與 §4.3 B 的實機驗收用。正式發佈不變。
@@ -264,7 +285,7 @@
 6. `make selftest-bundled SELFTEST_BUNDLE_ID=com.nyanako.inputmethod.shanjie.selftest-$GITHUB_RUN_ID`，前後各檢查一次 `~/Library/Containers/<該 ID>`：之前不存在、之後存在。
    - 原本傳空值、用正式 ID 的那一步（`ci.yml` 現在的 `SELFTEST_BUNDLE_ID=`）取消；正式 ID 的 selftest 已在第 3 步與第 7 步跑過。
 7. `EXPECTED_BUNDLE_ID=com.nyanako.inputmethod.shanjie scripts/check-app.sh build/善解輸入法.app`。
-8. **突變測試**（`scripts/test-sandbox-mutations.sh`，本機與 CI 共用；實作時改成腳本）：複製 `build/善解輸入法.app` 八份，各做一種改動（APFS 的 clone，`cp -Rc`，不支援時退回 `ditto`；放複本的暫存目錄先 `touch .metadata_never_index`）。
+8. **突變測試**（`scripts/test-sandbox-mutations.sh`，本機與 CI 共用；實作時改成腳本）：複製 `build/善解輸入法.app` 九份（〔修訂三〕原本八份），各做一種改動（APFS 的 clone，`cp -Rc`，不支援時退回 `ditto`；放複本的暫存目錄先 `touch .metadata_never_index`）。
    - 用 `codesign --force --sign -` 重簽（不帶 `--preserve-metadata`）：`scripts/check-entitlements.sh` 要失敗。
    - 帶 `--preserve-metadata=entitlements` 重簽：`scripts/check-entitlements.sh` 要通過。
    - entitlements 多一個鍵（例如 `com.apple.security.cs.disable-library-validation`）重簽：`scripts/check-entitlements.sh` 要失敗。
@@ -273,6 +294,7 @@
    - `XPCServices` 裡多放一個 `.xpc`（複製 `Installer.xpc` 改名）再重簽：`check-app.sh` 第 3 項要失敗。
    - `XPCServices` 以外（`Versions/B/`）多放一個 `.xpc` 再重簽：`check-app.sh` 第 3 項的整個 framework 檢查要失敗。
    - 把 Info.plist 的 `SUEnableInstallerLauncherService` 改成 `false` 再重簽：`check-app.sh` 第 2 項要失敗。
+   - 〔修訂三〕把 `Sparkle.framework` 搬回 `Contents/Frameworks/`（舊位置）再重簽 App：`check-app.sh` 第 3 項的位置檢查要失敗。
    - 第 3 步在拒絕檢查通過之後、放來源之前，在 log 印出 runner 的 macOS 版本（`sw_vers`），「沒有清單不搬」量到的是哪一版要看得到（F4）。拒絕路徑因此完全沒有輸出以外的副作用。
    - `release.yml` 的那份比對不在分支上跑反向測試（`sign` 只在 main 觸發）；它和 `check-entitlements.sh` 用同一套比對方式，兩處的說明互相指向。
 9. `make installer`、`scripts/check-installer.sh`（不變，用第 1 步的正式組建）。
@@ -311,6 +333,15 @@
   - `build-app.sh` 只刪 `Downloader.xpc`，保留 `Sparkle.framework/Versions/B/XPCServices/Installer.xpc`。
   - 斷言 `XPCServices` 裡**只有** `Installer.xpc`（F7）。
   - `check-app.sh` 第 3 項、`release.yml` 的 `sign` 與 `verify_sparkle` 照這個改：原本「XPCServices 不存在就對」改成這一條，另外查整個 framework 的版面（§2.4）。
+- **framework 的位置**（修訂三，維護者 2026-10-19 選擇題，§6 第 7 項）：
+  - `Sparkle.framework` 放在 `Contents/Frameworks/Updater/Sparkle.framework`，不再放 `Contents/Frameworks/Sparkle.framework`。
+  - 原因（§1 的「2026-10-19，虛擬機」）：系統照 framework 的路徑記住「沒有 XPC 服務」，重開機才清。舊位置被 v0.4.7（沒有 XPC 服務）用過，0.5.0 留在那裡的話，更新上來之後、重開機之前，系統不會登記安裝服務。新位置在任何舊版裡都沒出現過，第一次出現就帶著 `Installer.xpc`。
+  - 主程式的 rpath 由 `@executable_path/../Frameworks` 改成 `@executable_path/../Frameworks/Updater`（`macos/Package.swift`），只留這一條：framework 不在新位置時，程式啟動就失敗（CI 的 selftest 會抓到），不會靜靜地載入別處的一份。
+  - 檢查（舊位置被搬回來，Sparkle 照樣能跑，只有更新會壞，所以一定要擋）：
+    - `check-app.sh` 第 3 項、`release.yml` 的 `sign` 與 `verify_sparkle` 斷言 `Contents/Frameworks` 裡只有 `Updater`、`Updater` 裡只有 `Sparkle.framework`；
+    - 突變測試多一份「搬回舊位置」（§2.6 第 8 步）。
+  - 名稱 `Updater` 之後不能再拿來放沒有 XPC 服務的 Sparkle，否則同樣的問題會在下一次換配置時重現。這一點寫進 `build-app.sh` 的註解。
+  - Sparkle 自己用 `NSBundle` 找自己的 bundle 與 `Autoupdate`（`InstallerLauncher` 從 `Installer.xpc` 往上兩層找），和 framework 放在哪一層無關；`checkIfConfiguredProperly` 查的也是 framework 自己的 `XPCServices`。
 - **ad-hoc 簽章順序**（由內而外，不用 `--deep`）：`Installer.xpc` → `Autoupdate` → `Updater.app` → framework → App（只有 App 帶 entitlements）。
 - **網路：給輸入法 `network.client`，不用 Downloader.xpc**（安全審查確認，§7.2 F6）：
   - 在「被攻破的輸入法能不能把資料送出去」這件事上，兩種做法沒有差別：Downloader.xpc 照呼叫者給的請求原樣送出（§1）。
@@ -359,12 +390,13 @@
 ### 4.1 CI（§2.6 的步驟，PR 的 CI 紀錄裡看得到順序與 ID）
 
 1. entitlements 與 Sparkle：
-   - 第 7 步的 `check-app.sh` 第 2、3 項通過：四個鍵、`Installer.xpc` 在、`Downloader.xpc` 不在、Sparkle 位置沒有 entitlements、`SUEnableInstallerLauncherService` 是 true；
-   - 第 8 步的八份突變各自照預期：
+   - 第 7 步的 `check-app.sh` 第 2、3 項通過：四個鍵、`Installer.xpc` 在、`Downloader.xpc` 不在、Sparkle 位置沒有 entitlements、`SUEnableInstallerLauncherService` 是 true、framework 在 `Contents/Frameworks/Updater/`（修訂三）；
+   - 第 8 步的九份突變各自照預期：
      - 不帶 `--preserve-metadata` 重簽、多一個鍵、mach 名稱換成別的 ID：`check-entitlements.sh` 失敗；
      - 帶 `--preserve-metadata=entitlements` 重簽：`check-entitlements.sh` 通過；
      - 刪掉 `Installer.xpc`、`XPCServices` 裡或外多一個 `.xpc`：`check-app.sh` 第 3 項失敗；
-     - `SUEnableInstallerLauncherService` 改成 `false`：`check-app.sh` 第 2 項失敗。
+     - `SUEnableInstallerLauncherService` 改成 `false`：`check-app.sh` 第 2 項失敗；
+     - framework 搬回 `Contents/Frameworks/`：`check-app.sh` 第 3 項失敗（修訂三）。
 2. 沙盒有套上：第 3 步拋棄式 ID 的 container、第 6 步 selftest ID 的 container，都是之前不存在、之後存在。
 3. 移轉與「沒有清單不搬」：第 3 步的所有斷言。
 4. 拒絕：第 4 步。
@@ -409,6 +441,9 @@
 
 **A. Sparkle 在沙盒裡（合併後、dry run 之前；開發版 ID，不碰正式版的資料）**
 
+- 〔2026-10-19〕A 改在 tart 的 macOS 虛擬機做：開發版 ID 在維護者的 Mac 上沒出現過，要登出一次才加得進系統設定；虛擬機裡維護者一樣可以點選、打字。Caps Lock 切換在虛擬機測不了，(c) 留到 B 第 6 項。
+- 結果：第 1 步通過；第 2 步第一次失敗（§1 的「2026-10-19，虛擬機」），重開機之後通過。修訂三加第 2b 步。
+
 - **準備**（main 執行）：
   - **先做 B 第 0 步的備份**（F4）：A0 沒有沙盒，會讀寫真正的學習資料夾。
   - 用測試金鑰、本機 feed（`http://127.0.0.1`，about-update §3 第 4 項的做法）建三個更新測試版，都是開發版 ID：
@@ -431,6 +466,14 @@
   2. **A → B**（沙盒版經 Sparkle 更新成沙盒版）：先用 `install-ime.sh` 裝回 A（開發版的位置），用 A 學一個詞，再照上面更新到 B。量：
      - (a)～(d) 同上；
      - (g) A 學的詞在 B 仍排第一（同一個 container）。
+  2b. **A0 → B3 → C3，中間不重開機**（修訂三；虛擬機）：
+     - 修訂三合併後，用 main 建 B3（`0.0.2`）與 C3（`0.0.3`），都有沙盒、framework 在新位置；A0 沿用（`0.0.1`，framework 在舊位置、沒有 XPC 服務）。
+     - 虛擬機先重開機，清掉第 1、2 步留下的狀態。裝 A0、讓系統啟動它一次：等於使用者的機器開機後跑過 0.4.7。
+     - feed 只放 B3，A0 → B3。接著 feed 只放 C3，**不重開機**，B3 → C3。量：
+       - B3 執行中時，`launchctl print pid/<B3 的 pid>` 列得到 `org.sparkle-project.InstallerLauncher`；
+       - 沒有「connecting to the installer」的錯誤，更新後執行中的是 C3；
+       - container 沿用（建立時間不變），裡面的 `learning.tsv` 雜湊和 B3 → C3 之前相同；
+       - (d) 同上。
   3. 做完當場移除開發版（`~/Library/Input Methods/善解（開發版）.app` 與系統設定裡的輸入方式）。
 - **不通過**（更新失敗、需要登出、B 沒有接手）→ 停（§5），回報維護者。
 - 這一段的 A 與 B 都是 ad-hoc 簽章。ad-hoc 時 Sparkle 不驗呼叫者的 Team，和正式版不同（F3、F8），所以正式版的沙盒更新另外在 §4.4 的 canary 量。
@@ -479,6 +522,7 @@
 - 第一次真正經 Sparkle 從 0.4.x 更新到沙盒版，要在 v0.5.0 發佈之後實機看（同 about-update §3 第 6 項的做法）：
   - 已安裝的 0.4.x 按「更新到 0.5.0」；
   - 斷言更新後是沙盒版、學習資料已搬進 container。
+- **重開機與否要記下來**（修訂三）：上面「0.0.0 → 0.5.0」與下面「0.5.0 → 0.5.1」兩次經 Sparkle 的更新，按下更新之前都記下開機時間（`sysctl -n kern.boottime`）。和上一次換版之間沒有重開機，才算在維護者的 macOS 上量到 §1 的情況；有重開機也照樣記，結論寫明。
 - **canary 0.5.1**（F3）：正式版「沙盒版經 Installer.xpc 更新成沙盒版」這條路，在 Developer ID 下第一次執行會是 0.5.0 → 0.5.1；壞掉的話所有 0.5.0 的使用者都卡住。所以：
   - v0.5.0 發佈後，盡快發一個只有小改動的 v0.5.1（推 tag 照例問維護者）；
   - 維護者實機從 0.5.0 按「更新到 0.5.1」：更新成功、container 裡的學習資料還在、`log` 沒有 Sparkle 或善解的沙盒拒絕；
@@ -508,6 +552,8 @@
   - 系統標點表在沙盒裡讀不到；
   - **Sparkle 在沙盒裡讀不到 feed、安裝服務被拒，或更新後新版接手不了 container**（§4.3 A、B 第 10 項）；
   - **canary 0.5.0 → 0.5.1 經 Sparkle 失敗**（§4.4）：停發其他版本，回報維護者；
+  - **新位置在不重開機的情況下仍登記不到安裝服務**（§4.3 A 第 2b 步，修訂三）：回報維護者，不改用其他位置再試；
+  - 〔修訂三〕§4.3 A 第 2 步第一次失敗已處理（§1、§2.8），不再算停止條件；
   - Sparkle 2.10.0 的行為變動讓「關於」頁的檢查或更新流程不能照 about-update 的規格運作；
   - 需要第五個 entitlement 才能運作：停下來問，不自行加。
 - **預算**：`pilotfish:security-executor` 實作 1 次＋修正 1 次。
@@ -541,6 +587,7 @@
 4. **保留一鍵更新、說法改縱深防禦**（2026-10-19，選擇題，安全審查 F1 之後）：保留 Installer.xpc；所有對外文字把沙盒寫成縱深防禦；沙盒外、固定更新對象的獨立更新程式（根本解）排到 0c B 片，和 R8 的 XPC 輔助程式一起做（§2.8、§3）。
 5. **Sparkle 跟這片一起升到 2.10.0**（2026-10-19，選擇題）：更新流程的實機重測只做一次（§4.3 A）；如果這片延後，改成單獨一小片先升。
 6. **先在虛擬機驗證逃脫路徑，成立再私下回報 Sparkle**（2026-10-19，選擇題，§4.5）：只描述機制、不帶私人資訊，送出前給維護者看。
+7. **Sparkle.framework 搬到 `Contents/Frameworks/Updater/`**（2026-10-19 晚上，選擇題，修訂三）：另外兩個選項是「不改配置，失敗時提示重新開機」與「沙盒延後到沙盒外的獨立更新程式」（§2.8）。
 
 ## 7. 安全審查的處置
 
