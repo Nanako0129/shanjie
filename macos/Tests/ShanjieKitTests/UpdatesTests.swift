@@ -4,22 +4,39 @@ import XCTest
 
 /// docs/contracts/about-update.md section 3.1: the 關於 page's version string, the background check's decisions, the menu item
 /// only while an update is known, the install press (a silent check first), and the updater starting only from a release or
-/// update test bundle. No Sparkle and no network: `probe` and `interactive` are counting closures.
+/// update test bundle. No Sparkle and no network: `probe`, `closeSettings` and `launchHelper` are recording closures.
 @MainActor
 final class UpdatesTests: XCTestCase {
     private let day = Updates.interval
     private let now = Date(timeIntervalSince1970: 1_800_000_000)
 
-    final class Counter { var probes = 0, interactives = 0, focuses = 0 }
+    /// `opens` counts launches of 善解更新; `events` records the order of closing the settings window and launching it.
+    final class Counter {
+        var probes = 0, events: [String] = []
+        var opens: Int { events.filter { $0 == "launch" }.count }
+    }
 
     private func updates(_ store: MemoryUpdateStore = MemoryUpdateStore(), version: String = "0.4.7",
                          answer: ProbeStart = .started) -> (Updates, Counter) {
         let u = Updates(store: store, version: version)
         let c = Counter()
         u.probe = { c.probes += 1; return answer }
-        u.interactive = { c.interactives += 1 }
-        u.focus = { c.focuses += 1 }
+        u.closeSettings = { c.events.append("close") }
+        u.launchHelper = { c.events.append("launch") }
         return (u, c)
+    }
+
+    /// The 關於 page's note follows the folder the bundle sits in: the system's one names the password prompt, any other says no
+    /// password, and (U1) never points to the installer's 「這台 Mac」.
+    func testLocationNote() {
+        XCTAssertEqual(UpdateText.location(bundleURL: URL(fileURLWithPath: "/Library/Input Methods/善解輸入法.app")), UpdateText.locationSystem)
+        XCTAssertTrue(UpdateText.locationSystem.contains("善解更新 wants permission to update 善解輸入法."))
+        for path in ["/Users/a/Library/Input Methods/善解輸入法.app", "/Users/a/Desktop/善解輸入法.app",
+                     "/Library/Input Methods/sub/善解輸入法.app"] {
+            XCTAssertEqual(UpdateText.location(bundleURL: URL(fileURLWithPath: path)), UpdateText.locationUser, path)
+        }
+        XCTAssertTrue(UpdateText.locationUser.hasSuffix("系統會暫時停用善解。"))
+        XCTAssertFalse(UpdateText.locationUser.contains("這台 Mac"), "U1 has no 這台 Mac to choose")
     }
 
     func testVersionText() {
@@ -74,7 +91,7 @@ final class UpdatesTests: XCTestCase {
         XCTAssertFalse(u.checking)
         XCTAssertEqual(u.available, "0.4.8")
         XCTAssertEqual(UpdateText.result(u.result, available: u.available), "有新版本 0.4.8")
-        XCTAssertEqual(c.interactives, 0, "立即檢查 never opens Sparkle's window")
+        XCTAssertEqual(c.opens, 0, "立即檢查 never opens Sparkle's window")
     }
 
     /// An updater that is not running: 立即檢查 reads 檢查失敗 with the date; a busy Sparkle session is not a failure.
@@ -98,18 +115,18 @@ final class UpdatesTests: XCTestCase {
         u.finished(.available, version: "0.4.8")
         u.install(now: now)
         XCTAssertEqual(c.probes, 1, "install starts a silent check")
-        XCTAssertEqual(c.interactives, 0, "not the interactive flow yet")
+        XCTAssertEqual(c.opens, 0, "not the interactive flow yet")
         XCTAssertTrue(u.checking)
         u.install(now: now)
         XCTAssertEqual(c.probes, 1, "ignored while checking")
-        XCTAssertEqual(c.focuses, 0, "our own silent check has no Sparkle window to bring up")
+        XCTAssertEqual(c.opens, 0, "our own silent check has no Sparkle window to bring up")
         u.finished(.available, version: "0.4.9")
-        XCTAssertEqual(c.interactives, 1, "confirmed: the interactive flow opens")
+        XCTAssertEqual(c.events, ["close", "launch"], "confirmed: the settings window closes, then 善解更新 opens")
         XCTAssertEqual(u.available, "0.4.9")
 
         u.install(now: now)
         u.finished(.upToDate)
-        XCTAssertEqual(c.interactives, 1, "gone since: no Sparkle window")
+        XCTAssertEqual(c.opens, 1, "gone since: no Sparkle window")
         XCTAssertNil(u.available)
         XCTAssertEqual(UpdateText.result(u.result, available: u.available), "已是最新")
 
@@ -117,25 +134,26 @@ final class UpdatesTests: XCTestCase {
         f.finished(.available, version: "0.4.8")
         f.install(now: now)
         f.finished(.failed)
-        XCTAssertEqual(fc.interactives, 0, "failed check: no Sparkle window")
+        XCTAssertEqual(fc.opens, 0, "failed check: no Sparkle window")
         XCTAssertEqual(f.available, "0.4.8", "and the known version stays")
 
         let (down, dc) = updates(answer: .unavailable)
         down.install(now: now)
         XCTAssertEqual(down.result, .failed)
         XCTAssertEqual(down.lastCheck, now)
-        XCTAssertEqual(dc.interactives, 0)
+        XCTAssertEqual(dc.opens, 0)
     }
 
-    /// A press while a Sparkle session runs starts no check and brings Sparkle's windows to the front.
+    /// A press while the input method's Sparkle session runs starts no check and opens 善解更新 again (it checks by itself;
+    /// already running, LaunchServices only activates it).
     func testInstallWhileBusyFocuses() {
         let (u, c) = updates(answer: .busy)
         u.install(now: now)
-        XCTAssertEqual(c.focuses, 1)
+        XCTAssertEqual(c.events, ["close", "launch"], "the same two steps as a confirmed check")
         XCTAssertFalse(u.checking)
         XCTAssertNil(u.lastCheck, "no check started")
         u.checkNow(now: now)
-        XCTAssertEqual(c.focuses, 1, "立即檢查 never brings Sparkle's windows up")
+        XCTAssertEqual(c.opens, 1, "立即檢查 never brings Sparkle's windows up")
     }
 
     /// Only the check `install` started opens the interactive flow; a background check finding a version does not, and a
@@ -144,7 +162,7 @@ final class UpdatesTests: XCTestCase {
         let (u, c) = updates()
         u.tick(now: now)
         u.finished(.available, version: "0.4.8")
-        XCTAssertEqual(c.interactives, 0)
+        XCTAssertEqual(c.opens, 0)
         u.checkNow(now: now)
         u.finished(nil)
         XCTAssertEqual(u.available, "0.4.8", "a cycle ending without a result keeps the found version")
@@ -210,7 +228,7 @@ final class UpdatesTests: XCTestCase {
         XCTAssertEqual(c.probes, 1, "the menu item starts the silent check")
         XCTAssertEqual(updateItems().map(\.enabled), [false], "greyed while it runs")
         u.finished(.available, version: "0.4.8")
-        XCTAssertEqual(c.interactives, 1)
+        XCTAssertEqual(c.opens, 1)
         u.finished(.upToDate)
         XCTAssertTrue(updateItems().isEmpty, "gone once up to date")
     }
