@@ -42,6 +42,11 @@ fn keys_of(syl: &str) -> Vec<Key> {
 
 /// An engine with the real models, the context set and the row typed; `table` loads the colloquial table first or last.
 fn engine(packs: u32, tinylm: &Path, table: Option<(&Path, bool)>) -> Engine {
+    engine_row(packs, tinylm, table, CONTEXT, ROW)
+}
+
+/// `engine` for another context and row (syllables separated by spaces; `，` is Shift+comma).
+fn engine_row(packs: u32, tinylm: &Path, table: Option<(&Path, bool)>, context: &str, row: &str) -> Engine {
     let pdir = root().join("data/packs");
     let mut e = Engine::new_with_packs(&root().join("data/lexicon"), Layout::Standard, Some((&pdir, packs))).unwrap();
     if let Some((t, true)) = table {
@@ -53,8 +58,12 @@ fn engine(packs: u32, tinylm: &Path, table: Option<(&Path, bool)>) -> Engine {
         e.load_colloquial(t).unwrap();
     }
     e.set_rerank(true).unwrap();
-    e.set_left_context(CONTEXT);
-    for syl in ROW.split(' ') {
+    e.set_left_context(context);
+    for syl in row.split(' ') {
+        if syl == "，" {
+            e.key(Key::ch(',', MOD_SHIFT)).unwrap();
+            continue;
+        }
         for k in keys_of(syl) {
             e.key(k).unwrap();
         }
@@ -168,4 +177,60 @@ fn k_counts_the_pack_words_the_engine_was_built_with() {
     let word = pack.lines().next().unwrap().split('\t').nth(1).unwrap().to_string();
     let k = |packs: u32| engine(packs, &tl, Some((&table, false))).colloquial().unwrap().k(&[word.as_str()]);
     assert_eq!((k(PACK_ACG), k(0)), (1, 0));
+}
+
+/// Rows 10, 81 and 102 of eval/dev/user-reported.txt (public), the three rows of that set where the reading-channel term (docs/contracts/reading-channel.md)
+/// changes the colloquial term's choice: (context, syllables, the pick with the colloquial term alone, the pick with the channel too). The indices
+/// are those of the CLI's `--tinylm-scores` `c`, which `p5.py --cell lex,1.0,4` reproduces row for row.
+const CHANNEL_ROWS: [(&str, &str, usize, usize); 3] = [
+    ("", "ㄋㄧˇ ㄧㄡˇ ㄉㄨㄥ ㄒㄧ ㄧㄠˋ ㄒㄧㄢ ㄐㄧㄣˋ ㄅㄢˇ ㄎㄨㄥˋ ㄇㄚ", 0, 2),
+    ("", "ㄓㄤˇ ㄨㄞ ㄌㄜ˙", 1, 0),
+    ("幹opencc", "ㄕˋ ㄅㄨˋ ㄕˋ ㄏㄣˇ ㄌㄟˊ ㄚ˙", 1, 0),
+];
+
+/// The term rides on the colloquial term: with the table loaded and the four conditions holding the channel decides (and `set_reading_channel(false)`
+/// leaves the colloquial term alone); wherever the colloquial term does not apply (no table, formal, conservative, aggressive, another small model)
+/// the jobs are those of an engine without the table, the channel included.
+#[test]
+fn the_reading_channel_applies_only_where_the_colloquial_term_does() {
+    let (tl, table) = (data("tinylm.sjtl"), data("colloquial.sjlm"));
+    let other = other_sjtl("rc-other");
+    for (i, (ctx, row, alone, with)) in CHANNEL_ROWS.iter().enumerate() {
+        let mut on = engine_row(PACK_ACG, &tl, Some((&table, false)), ctx, row);
+        let mut off = engine_row(PACK_ACG, &tl, Some((&table, false)), ctx, row);
+        off.set_reading_channel(false);
+        let mut none = engine_row(PACK_ACG, &tl, None, ctx, row);
+        assert_ne!(alone, with);
+        assert_eq!(picks(&mut on), vec![*with], "row {i}: the channel's pick");
+        assert_eq!(picks(&mut off), vec![*alone], "row {i}: the colloquial term alone");
+        for (name, profile, level) in [
+            ("formal", Profile::Formal, RerankLevel::Standard),
+            ("conservative", Profile::Chat, RerankLevel::Conservative),
+            ("aggressive", Profile::Chat, RerankLevel::Aggressive),
+        ] {
+            for e in [&mut on, &mut none] {
+                e.set_profile(profile).unwrap();
+                e.set_rerank_level(level).unwrap();
+            }
+            assert_eq!(picks(&mut on), picks(&mut none), "row {i}, {name}: neither term is used");
+        }
+        let (a, b) = (picks(&mut engine_row(PACK_ACG, &other, Some((&table, false)), ctx, row)), picks(&mut engine_row(PACK_ACG, &other, None, ctx, row)));
+        assert_eq!(a, b, "row {i}, another .sjtl: neither term is used");
+    }
+}
+
+/// A composition with punctuation is several stretches, and each is cut over its own syllables: rows 10 and 81 of the set above on either side of
+/// a comma give two stretches whose picks are the channel's (the second one in the first's context, so it is compared with the term off, not with
+/// the row alone). Cut over the whole composition's syllables, no path would cover them and the term would be 0 in both.
+#[test]
+fn each_stretch_is_cut_over_its_own_syllables() {
+    let (tl, table) = (data("tinylm.sjtl"), data("colloquial.sjlm"));
+    let row = format!("{} ， {}", CHANNEL_ROWS[0].1, CHANNEL_ROWS[1].1);
+    let mut on = engine_row(PACK_ACG, &tl, Some((&table, false)), "", &row);
+    let mut off = engine_row(PACK_ACG, &tl, Some((&table, false)), "", &row);
+    off.set_reading_channel(false);
+    let (a, b) = (picks(&mut on), picks(&mut off));
+    assert_eq!(b.len(), 2, "two stretches");
+    assert_eq!((a[0], b[0]), (CHANNEL_ROWS[0].3, CHANNEL_ROWS[0].2), "the first stretch");
+    assert_eq!((a[1], b[1]), (CHANNEL_ROWS[1].3, CHANNEL_ROWS[1].2), "the second stretch");
 }

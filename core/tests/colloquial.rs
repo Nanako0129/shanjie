@@ -1,6 +1,7 @@
 //! The colloquial term (docs/contracts/colloquial-term.md section 2.2): lc, k and col on a synthetic table (expected values computed
 //! by hand below and by experiments/p4-colloquial/p4.py), the sets read from literal texts, and `TinyLm::rerank_colloquial`.
-use core::colloquial::{fused_pick, Colloquial, ColloquialError};
+use core::colloquial::{channel_of, fused_pick, Colloquial, ColloquialError};
+use core::Lexicon;
 use core::tinylm::{TinyLm, TOPK};
 use std::path::{Path, PathBuf};
 
@@ -162,12 +163,23 @@ fn rerank_colloquial_is_ll_then_fused_pick() {
     let cands = ["甲乙", "甲丙", "丁乙", "丁丙", "甲丁", "乙丙", "乙丁", "丙丁", "丙乙"];
     let words: Vec<Vec<&str>> = vec![vec!["a", "b"], vec!["x"], vec!["x", "x"], vec!["b"], vec!["a"], vec!["zzz"], vec!["a", "a"], vec!["b", "a"], vec!["x"]];
     let ng = [-10.0, -10.1, -10.2, -10.3, -10.4, -10.5, -10.6, -10.7, -10.8];
-    let (pick, ll) = tl.rerank_colloquial(&ng, &cands, &words, "你", &co).unwrap();
+    let (pick, ll) = tl.rerank_colloquial(&ng, &cands, &words, "你", &co, None).unwrap();
     let ll = ll.unwrap();
     let want_ll = tl.ll_many(&cands[..TOPK].iter().map(|c| ("你", *c)).collect::<Vec<_>>()).unwrap();
     assert_eq!(ll, want_ll);
     let col: Vec<f64> = words[..TOPK].iter().map(|w| co.col(w)).collect();
-    assert_eq!(pick, fused_pick(&ng[..TOPK], &ll, &col));
-    assert_eq!(tl.rerank_colloquial(&ng[..1], &cands[..1], &words[..1], "你", &co).unwrap(), (0, None));
-    assert_eq!(tl.rerank_colloquial(&ng, &cands, &words[..1], "你", &co).unwrap(), (0, None), "one split: fewer than two candidates");
+    assert_eq!(pick, fused_pick(&ng[..TOPK], &ll, &col, None));
+    // with the reading channel: the same LLs, the pick is `fused_pick` over each split's `channel_of` for the stretch's syllables
+    let lex = Lexicon::parse("p a -1.0\nq a -6.0\np b -1.0\nq b -1.0\n").unwrap();
+    let syls = strs(&["q", "p"]);
+    let rc = Some(core::colloquial::ReadingChannel { lex: &lex, syls: &syls });
+    let (pick_rc, ll_rc) = tl.rerank_colloquial(&ng, &cands, &words, "你", &co, rc).unwrap();
+    assert_eq!(ll_rc.unwrap(), ll);
+    let ch: Vec<f64> = words[..TOPK].iter().map(|w| channel_of(&lex, &syls, w)).collect();
+    assert_eq!(ch[0], -4.0, "premise: the first split reads a under q, 5 below its best, clipped at 4");
+    assert_eq!(pick_rc, fused_pick(&ng[..TOPK], &ll, &col, Some(&ch)));
+    assert_ne!(pick_rc, pick, "premise: the channel changes the pick for this input, so a rerank_colloquial that ignores `rc` fails");
+    assert_ne!(fused_pick(&ng[..TOPK], &ll, &col, Some(&ch)), fused_pick(&ng[..TOPK], &ll, &col, None));
+    assert_eq!(tl.rerank_colloquial(&ng[..1], &cands[..1], &words[..1], "你", &co, None).unwrap(), (0, None));
+    assert_eq!(tl.rerank_colloquial(&ng, &cands, &words[..1], "你", &co, None).unwrap(), (0, None), "one split: fewer than two candidates");
 }
