@@ -42,7 +42,8 @@ final class RootStageTests: XCTestCase {
 
     /// A minimal bundle in `<folder>/善解輸入法.app`, ad-hoc signed (its executable is a script that
     /// is never run). Returns the folder, the root stage's source.
-    private func bundle(_ name: String, id: String? = nil, version: String = "0.5.0", marker: String? = nil, sign: Bool = true) throws -> String {
+    private func bundle(_ name: String, id: String? = nil, version: String = "0.5.0", marker: String? = nil, sign: Bool = true,
+                        links: [String: String] = [:]) throws -> String {
         let folder = tmp.appendingPathComponent("src-\(name)")
         let app = folder.appendingPathComponent("善解輸入法.app")
         let contents = app.appendingPathComponent("Contents")
@@ -55,6 +56,11 @@ final class RootStageTests: XCTestCase {
         let plist: [String: Any] = ["CFBundleIdentifier": id ?? shipping, "CFBundleExecutable": "shanjie",
                                     "CFBundleVersion": version, "CFBundleShortVersionString": version, "CFBundlePackageType": "APPL"]
         try PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0).write(to: contents.appendingPathComponent("Info.plist"))
+        // Symbolic links in Contents/Resources (name -> destination), part of the signed bundle.
+        for (link, destination) in links {
+            try FileManager.default.createSymbolicLink(atPath: contents.appendingPathComponent("Resources/\(link)").path,
+                                                       withDestinationPath: destination)
+        }
         if sign { XCTAssertEqual(sh("/usr/bin/codesign", ["--sign", "-", app.path]).status, 0) }
         return folder.path
     }
@@ -180,6 +186,44 @@ final class RootStageTests: XCTestCase {
         XCTAssertTrue(hasACL(app), "the test did not set an ACL")
         let r = try runStage(src, params())
         XCTAssertEqual(r.status, 0, r.err)
+        XCTAssertFalse(hasACL(dest), "the copy carries an ACL")
+    }
+
+    /// Verifier finding F1 (caseG): links in the copy to an outside file and an outside folder that
+    /// carry ACLs. Nothing may follow them before the signature check: the outside ACLs survive,
+    /// under the production requirement and under the identifier requirement (the ad-hoc signature
+    /// is valid, but `--strict` refuses links that point out of the bundle, so a bundle with such
+    /// links never gets past step 5).
+    func testLinksOutOfTheCopyAreNeverFollowed() throws {
+        let outsideFile = tmp.appendingPathComponent("victimfile").path
+        let outsideDir = tmp.appendingPathComponent("victimdir").path
+        try FileManager.default.createDirectory(atPath: outsideDir, withIntermediateDirectories: true)
+        try "v".write(toFile: outsideFile, atomically: true, encoding: .utf8)
+        try "v".write(toFile: outsideDir + "/file", atomically: true, encoding: .utf8)
+        XCTAssertEqual(sh("/bin/chmod", ["+a", "everyone deny delete", outsideFile]).status, 0)
+        XCTAssertEqual(sh("/bin/chmod", ["+a", "everyone deny delete_child", outsideDir]).status, 0)
+        XCTAssertEqual(sh("/bin/chmod", ["+a", "everyone deny write", outsideDir + "/file"]).status, 0)
+        let src = try bundle("links", links: ["l1": outsideFile, "l2": outsideDir])
+        for requirement in [RootStage.requirement, identifierRequirement] {
+            let r = try runStage(src, params(requirement: requirement))
+            XCTAssertNotEqual(r.status, 0, "accepted a copy with links out of the bundle")
+            XCTAssertTrue(r.err.contains("signing requirement"), r.err)
+            for path in [outsideFile, outsideDir, outsideDir + "/file"] {
+                XCTAssertTrue(hasACL(path), "root stage removed the ACL of \(path) through a link")
+            }
+            XCTAssertNil(marker(dest))
+            noStaging()
+        }
+    }
+
+    /// A link inside the bundle is kept as a link, and its target's ACL is removed on the target
+    /// itself (the ACL step skips links but still covers every real file).
+    func testALinkInsideTheCopyIsKeptAndItsTargetCleaned() throws {
+        let src = try bundle("inner", links: ["alias": "marker"])
+        XCTAssertEqual(sh("/bin/chmod", ["+a", "everyone allow write,delete", src + "/善解輸入法.app/Contents/Resources/marker"]).status, 0)
+        let r = try runStage(src, params())
+        XCTAssertEqual(r.status, 0, r.err)
+        XCTAssertEqual(try FileManager.default.destinationOfSymbolicLink(atPath: dest + "/Contents/Resources/alias"), "marker")
         XCTAssertFalse(hasACL(dest), "the copy carries an ACL")
     }
 

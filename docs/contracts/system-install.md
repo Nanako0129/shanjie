@@ -81,9 +81,10 @@
   1. 斷言 `/Library/Input Methods` 是目錄、不是符號連結、擁有者 uid 0、群組與其他人都不可寫（群組不限定 wheel：出廠的群組 §4.3 a 在全新虛擬機量一次）；不存在就以 `root:wheel` 755 建立；
   2. `mktemp -d "/Library/Input Methods/.shanjie-staging.XXXXXX"`（root 擁有、只有 root 能寫）；
   3. `ditto --noqtn --noacl <暫存路徑>/善解輸入法.app <staging>/善解輸入法.app`：從使用者的暫存**複製進 root 擁有的目錄**，不帶 ACL（`ditto` 預設會保留 ACL，安全審查 P1-1）；之後使用者改不到它；
-  4. `chown -R root:wheel`、`chmod -RN`（清掉任何 ACL）、`chmod -R u+rwX,go+rX,go-w,ug-s`；
+  4. `chown -R root:wheel`、`chmod -R u+rwX,go+rX,go-w,ug-s`（兩者都不跟隨符號連結）；
+     - 實作時依 verifier 的發現改了順序：原本這一步還有 `chmod -RN`，但它會跟隨副本裡的符號連結（一層）。同使用者的程式趁輸入密碼的時候在解開的 bundle 裡放一個指向外面的連結，root 就會清掉外面任意路徑的 ACL，而且發生在驗簽章之前、bundle 被拒也一樣（在維護者的 Mac 上以一般使用者、暫存根目錄重現過）。所以清 ACL 移到第 5 步之後，而且不跟隨連結。
   5. **在 root 擁有的副本上驗簽章**：`codesign --verify --strict --deep -R='anchor apple generic and identifier "com.nyanako.inputmethod.shanjie" and certificate 1[field.1.2.840.113635.100.6.2.6] exists and certificate leaf[field.1.2.840.113635.100.6.1.13] exists and certificate leaf[subject.OU] = "2LJ882GPY8"'`（驗的是完整封印，不是 `codesign -dv` 的讀資訊。兩個 `field` 條件是實作時依 code review 加的強化：只看 Team OU 的話，同一個團隊的 Apple Development 與 Mac App Store 憑證也會過；現在要求中繼憑證是 Developer ID CA、葉憑證是 Developer ID Application）；
-  6. **斷言中繼資料與版本**：整棵樹沒有 ACL（`/bin/ls -leR` 的輸出沒有 ACL 列）；副本的 `CFBundleVersion`（`/usr/bin/plutil -extract CFBundleVersion raw`）**等於編進安裝程式執行檔的常數**（不讀安裝程式的 Info.plist），而且不低於 `/Library` 現有那份的 `CFBundleVersion`（「重新安裝」允許相同）。這兩條擋住「趁使用者輸入密碼的幾秒，同使用者的程式對解開的檔加 ACL」與「把暫存換成任何一個 Developer ID 簽過的舊版」（安全審查 P1-1、P2-2）；
+  6. **清 ACL、斷言中繼資料與版本**：`/usr/bin/find <副本> ! -type l -exec /bin/chmod -N {} +` 逐一清掉 ACL、跳過符號連結（第 5 步的 `--strict` 已拒絕指向 bundle 外面的連結，多出來的檔案也會破壞封印；staging 是 root 的 0700，這時使用者已經碰不到副本）；然後斷言整棵樹沒有 ACL（`/bin/ls -leR` 的輸出沒有 ACL 列）；副本的 `CFBundleVersion`（`/usr/bin/plutil -extract CFBundleVersion raw`）**等於編進安裝程式執行檔的常數**（不讀安裝程式的 Info.plist），而且不低於 `/Library` 現有那份的 `CFBundleVersion`（「重新安裝」允許相同）。這兩條擋住「趁使用者輸入密碼的幾秒，同使用者的程式對解開的檔加 ACL」與「把暫存換成任何一個 Developer ID 簽過的舊版」（安全審查 P1-1、P2-2）；
   7. 目的地若是符號連結就停；舊的 `.shanjie-previous` 刪掉，現有的 `善解輸入法.app` 改名成 `.shanjie-previous`，副本 `mv` 到 `善解輸入法.app`（同一個檔案系統，改名是原子的）；刪掉 staging。
      - 實作時依 code review 改：舊的 `.shanjie-previous` 不先刪，而是先移進 staging，新的一份就位之後才跟著 staging 一起刪；任何一步改名失敗就放回原處。staging 資料夾本身維持 `mktemp` 的 0700，第 4 步的擁有者與權限只套在裡面的副本上。
 - 呼叫 root 階段之前，安裝程式在自己的程序裡對解開的 bundle 先驗一次同樣的指定需求，失敗就不跳密碼框、直接顯示錯誤（給使用者看的提早失敗，不是安全檢查；安全檢查是第 5 步）。

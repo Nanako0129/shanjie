@@ -79,7 +79,11 @@ public enum RootStage {
 
     /// The shell script, steps 1 to 7. `source` is the folder holding the extracted 善解輸入法.app.
     /// The staging folder stays as mktemp made it (0700, root's) until it is removed; owner and
-    /// modes are set on the copy inside it only. The old .shanjie-previous is moved into the staging
+    /// modes are set on the copy inside it only. Nothing that follows a symbolic link runs on the
+    /// copy before its signature is verified (verifier finding: `chmod -RN` follows a link one
+    /// level, so a planted link made root strip ACLs outside the bundle even when the bundle was
+    /// then refused): `chown -R` and `chmod -R <mode>` do not follow links; `--strict` refuses
+    /// links that point out of the bundle; the ACLs are then removed per entry, links skipped. The old .shanjie-previous is moved into the staging
     /// folder, not deleted, and is deleted with it only once the new copy is in place.
     static func script(source: String, _ p: Parameters) -> String {
         """
@@ -125,8 +129,9 @@ public enum RootStage {
         fi
         S=$(/usr/bin/mktemp -d "$R/.shanjie-staging.XXXXXX") || { S=; fail "cannot create a staging folder"; }
         /usr/bin/ditto --noqtn --noacl "$SRC/$N" "$S/$N" || fail "copy failed"
-        /usr/sbin/chown -R "$OWNER" "$S/$N" && /bin/chmod -RN "$S/$N" && /bin/chmod -R u+rwX,go+rX,go-w,ug-s "$S/$N" || fail "cannot set owner and modes"
+        /usr/sbin/chown -R "$OWNER" "$S/$N" && /bin/chmod -R u+rwX,go+rX,go-w,ug-s "$S/$N" || fail "cannot set owner and modes"
         /usr/bin/codesign --verify --strict --deep -R="$REQ" "$S/$N" || fail "the copy does not satisfy the signing requirement"
+        /usr/bin/find "$S/$N" ! -type l -exec /bin/chmod -N {} + || fail "cannot remove ACLs"
         L=$(/bin/ls -leR "$S/$N") || fail "cannot list the copy"
         if printf '%s\\n' "$L" | /usr/bin/grep -q '^ *[0-9][0-9]*: '; then fail "the copy carries an ACL"; fi
         V=$(/usr/bin/plutil -extract CFBundleVersion raw "$S/$N/Contents/Info.plist") || fail "cannot read the version of the copy"
