@@ -153,6 +153,8 @@ fn run() -> Result<(), String> {
         tl8.as_deref().unwrap_or("none"),
         co8.as_ref().map_or(String::new(), |h| format!(" colloquial.sjlm:{h}"))
     );
+    // `+rc` only where the channel is read: the colloquial term applies (chat here, the standard level always, the paired small model).
+    let rc_model = tl8.as_deref() == Some(&core::colloquial::PAIRED_TINYLM_SHA256[..8]);
     let tag = format!(
         "replay-{profile_name}+ctx+acg+nopred+noen+lm:{lm8}{}{}{}{}{}{}{}",
         tl8.as_ref().map_or("-notinylm".to_string(), |h| format!("+tl:{h}")),
@@ -161,7 +163,7 @@ fn run() -> Result<(), String> {
         if cfg.correct { "+correct" } else { "" },
         if learn_file.is_some() { "+learnfile" } else { "" },
         if guard { "" } else { "+noguard" },
-        co8.as_ref().map_or(String::new(), |h| format!("+colloq:{h}{}", if reading_channel && profile == Profile::Chat { "+rc" } else { "" })),
+        co8.as_ref().map_or(String::new(), |h| format!("+colloq:{h}{}", if reading_channel && profile == Profile::Chat && rc_model { "+rc" } else { "" })),
     );
     let mut e = build_engine(&root, &lm_path, tl.then_some(tl_path.as_path()), colloquial.as_deref(), profile, learn)?;
     e.set_learn_guard(guard);
