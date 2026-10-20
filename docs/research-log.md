@@ -8294,3 +8294,14 @@ XL 比 `MAX_FILE`（67,108,864）小 1,168,880 位元組。錨點：4 個模型 
 - 還沒做（交給 main）：雲端的 cvtune-clean、chatclause、discordtune（CLI 對出貨的改對／改壞應是 113／37、74／43）、§3.5 的速度與記憶體、資料 Release `sj-cl-1-68k` 的建立、CI、維護者的實機一次。
 
 - **§3.5 記憶體超標與修正**（同日，雲端 VM 量）：`shanjie-replay --dev 302 --profile chat --rerank each`，尖峰 RSS 沒有口語表 406,400 KB、有 448,744 KB（+41.4 MiB，上限 40 MiB），其他項目都過（雲端 §3.2 逐列相同、113／37、74／43、45／17，重排 p95 不變，載入 +160 ms）。原因是 k 的兩個完整詞集合與兩個大文字（`overlay-add.tsv` 17 MB、`mcbpmf-data.txt` 7.5 MB）；k 只需要「在疊加層而不在基本詞表」的差集。`Colloquial::load` 改成：基本詞表的詞放進借用文字的短命集合，疊加層（`overlay-add.tsv` 用 `BufRead` 逐行讀，不整份讀進字串）與詞包的列逐行過濾，只留下不在基本詞表的詞（`overlay_only`）。k 對每個詞的結果不變（新增 `a_word_in_overlay_and_base_is_not_counted`；公開三集 `c` 與 rowstats 逐列相同、`top1_sha256` 不變）。Mac 的 `/usr/bin/time -l`（同一指令，各 3 次，單執行緒）：沒有口語表 max RSS 約 647 MiB；修正前有口語表 +27～30 MiB（674～677），修正後 +16～21 MiB（665～669）（peak memory footprint 同方向：+26～28 → +16～19 MiB）。Mac 數字只當參考，閘門由雲端重量。
+- **§3.5 雲端重量（修正後）**（2026-10-21，同一台 VM、同一指令，`/usr/bin/time -v`）：
+  - 在 `922ba686`，各 3 次：沒有口語表 406,112／406,408／406,476 KB，有口語表 435,860／435,848／435,952 KB，**+28.8～29.0 MiB**（上限 40 MiB，過）。
+  - 在審查修正後的 `36b7b4b8`，各 1 次：406,460 對 436,136 KB，+29.0 MiB。這一版的重播預設會載入口語表，所以「沒有」那一臂加 `--no-colloquial`。
+  - 載入（一列，3 次的中位數）：2.95 → 3.12 秒（+0.17 秒）。重排 p95 248.3 → 248.2 ms。
+  - 同一次的 §3.2：chatclause、discordtune、cvtune-clean 的 `c` 逐列等於 `p4d.py` 那一格，rowstats 相同（113／37、74／43、45／17）。
+- **審查修正**（`/code-review` 15 項，處置 14 項、不修 1 項：口語表不綁雜湊，因為 bundle 裡的表已由 build-app 照 `data/colloquial.sjlm.sha256` 固定）：
+  - 重播與 KPI 預設像 App 一樣載入口語表（`--no-colloquial` 關掉）；
+  - triage 的出貨設定加上口語表；跨版本 benchmark 認得出貨口語表的版本（VERSIONS2 的 `"colloquial": True`）；
+  - 口語分數不是有限值時退回原本的 pick；判斷與詞表載入只有一份（`colloquial::applies`、`Colloquial::load_from_dir`）；
+  - 殼只在小模型載入成功時才載入口語表；`.sjtl` 的 SHA-256 在載入時算完就放掉位元組（量過 35～52 ms，中位數約 37 ms）；
+  - build-app 在建置前檢查；check-app 拿掉不可能失敗的 grep；署名工具處理 CRLF、相對路徑、重複列。
