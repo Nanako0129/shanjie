@@ -4,11 +4,11 @@ A rowstats file has one line per evaluated row: `row\tok\terrors\tgold_len` (row
 errors = Levenshtein distance of the first candidate to the gold sentence when the row is wrong, else 0;
 gold_len = Unicode scalar count of the gold sentence). Digits, tabs and newlines only: no text.
 
-  python3 tools/evalstats.py compare BASE CAND [--label NAME] [--seed S] [--resamples N] [--net] [--cluster FILE]
+  python3 tools/evalstats.py compare BASE CAND [--label NAME] [--seed S] [--resamples N] [--net] [--cluster FILE] [--ci LEVEL]
   python3 tools/evalstats.py mde (--discordant D | --base BASE --cand CAND) --alpha A [--power 0.8]
 
 prints a Markdown table row: n, top1 base/new, fixed/broken, exact McNemar p, CER base/new, and the paired
-bootstrap 95% intervals of the top1 and CER differences (new - base). With --net three more columns: net (fixed - broken),
+bootstrap intervals (95% unless --ci LEVEL, 0.5 to 0.999, says otherwise) of the top1 and CER differences (new - base). With --net three more columns: net (fixed - broken),
 break rate (broken / n) and the one-sided exact 95% Poisson upper limit of the broken count. With --cluster FILE (one cluster id
 per line, same order and count as the rows: rows of one message or article) the bootstrap resamples clusters instead of rows and the
 label gains "(clustered, M clusters)"; McNemar is unchanged. Without it the output is exactly as before.
@@ -128,7 +128,7 @@ def paired_bootstrap(base, cand, seed=20261008, resamples=10000, clusters=None, 
         d_ok.append(sum(dok[i] for i in idx))
         g = sum(glen[i] for i in idx)
         d_err.append((sum(derr[i] for i in idx) / g) if g else 0.0)
-    q = 0.025 if level == 0.95 else round((1 - level) / 2, 10)   # 0.95 keeps the literal quantiles, so the default output is unchanged
+    q = round((1 - level) / 2, 10)   # 0.95 gives exactly 0.025 and 0.975 (checked by the default-output test)
     def ci(v):
         v.sort()
         return v[int(q * resamples)], v[int((1 - q) * resamples)]
@@ -146,6 +146,8 @@ def read_clusters(path, n):
 
 
 def compare(base_path, cand_path, label="", seed=20261008, resamples=10000, net=False, cluster_path=None, level=0.95):
+    if not 0.5 <= level <= 0.999:
+        raise ValueError("--ci must be between 0.5 and 0.999")
     base, cand = read_rowstats(base_path), read_rowstats(cand_path)
     if len(base) != len(cand):
         raise ValueError(f"row counts differ ({len(base)} vs {len(cand)})")
@@ -183,7 +185,7 @@ def main():
     c.add_argument("base"); c.add_argument("cand"); c.add_argument("--label", default="")
     c.add_argument("--seed", type=int, default=20261008); c.add_argument("--resamples", type=int, default=10000)
     c.add_argument("--net", action="store_true", help="E2: add net (fixed - broken), break rate (broken / n) and the 95%% exact Poisson upper limit of broken")
-    c.add_argument("--ci", type=float, default=0.95, help="level of the bootstrap intervals, within (0, 1) (default 0.95; P4b clause 2b uses 0.90)")
+    c.add_argument("--ci", type=float, default=0.95, help="level of the bootstrap intervals, 0.5 to 0.999 (default 0.95; P4b clause 2b uses 0.90)")
     c.add_argument("--cluster", help="file with one cluster id per line (rows of one message / article): the bootstrap resamples clusters")
     m = sub.add_parser("mde")
     m.add_argument("--discordant", type=int); m.add_argument("--base"); m.add_argument("--cand")
@@ -207,8 +209,6 @@ def main():
             print(f"D {a.discordant}, alpha {a.alpha:g}, power {a.power:g}: " +
                   (f"MDE net {m_:+d} rows" if m_ is not None else "no net reaches the power (D too small)"))
             return
-        if not 0 < a.ci < 1:
-            ap.error("--ci must be within (0, 1)")
         print(compare(a.base, a.cand, a.label, a.seed, a.resamples, a.net, a.cluster, a.ci))
     except (ValueError, OSError) as e:
         print(f"evalstats: {e}", file=sys.stderr)

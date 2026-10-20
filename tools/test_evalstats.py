@@ -274,6 +274,19 @@ class ClusterBootstrap(unittest.TestCase):
         # level 0.90 reads the 5% and 95% order statistics of the same draws
         self.assertEqual(r90.splitlines()[2].split("|")[10].strip(), f"[{lo9}, {hi9}]")
 
+    def test_ci_out_of_range_is_a_clean_error(self):
+        bp, cp = write(self.d, "b", "1\t0\t1\t3\n"), write(self.d, "c", "1\t1\t0\t3\n")
+        for level in ("0.4", "1", "0.9999", "-1"):
+            old, err = sys.argv, io.StringIO()
+            sys.argv = ["evalstats.py", "compare", bp, cp, "--resamples", "10", "--ci", level]
+            try:
+                with self.assertRaises(SystemExit) as e, contextlib.redirect_stderr(err):
+                    E.main()
+            finally:
+                sys.argv = old
+            self.assertEqual(e.exception.code, 1)
+            self.assertIn("evalstats: --ci must be between", err.getvalue())
+
     def test_count_mismatch_is_a_value_error_and_a_clean_exit(self):
         w = lambda name, text: write(self.d, name, text)
         bp, cp = w("b", "1\t0\t1\t3\n2\t0\t1\t3\n"), w("c", "1\t1\t0\t3\n2\t1\t0\t3\n")
