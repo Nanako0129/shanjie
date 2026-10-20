@@ -9,11 +9,25 @@ fn root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("..")
 }
 
-fn tmp(name: &str) -> PathBuf {
+/// A scratch directory that is removed when it goes out of scope, an assertion failure included (the flipped `.sjtl` alone is 14.6 MB).
+struct Dir(PathBuf);
+impl std::ops::Deref for Dir {
+    type Target = Path;
+    fn deref(&self) -> &Path {
+        &self.0
+    }
+}
+impl Drop for Dir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+fn tmp(name: &str) -> Dir {
     let d = std::env::temp_dir().join(format!("shanjie-cli-colloquial-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&d);
     std::fs::create_dir_all(&d).unwrap();
-    d
+    Dir(d)
 }
 
 fn text(b: &[u8]) -> String {
@@ -85,7 +99,8 @@ fn row202(dir: &Path) -> String {
 #[cfg(target_os = "macos")]
 #[test]
 fn no_option_is_byte_identical_to_before() {
-    let o = full_run(&tmp("golden"), &BASE, &["16"], &[]);
+    let d = tmp("golden");
+    let o = full_run(&d, &BASE, &["16"], &[]);
     let h = |s: &str| sha256_hex(s.as_bytes());
     assert_eq!(h(&o.dump), "7cd2988473895b8df271d8276489349809d2d6f50f761c56f3c96424b298c95a");
     assert_eq!(h(&o.words), "42152c06fa5c3b55a2e765ed9103128d4c780bfed4ff35e9f192220e3dce2a72");
@@ -125,17 +140,19 @@ fn rows_with_the_term_rows(dir: &Path) -> String {
 /// another small model (one bit differs in the file, so its SHA-256 is not the measured one).
 #[test]
 fn nothing_changes_elsewhere() {
+    let flip = tmp("flip");
     let flipped = {
         let mut b = std::fs::read(root().join("data/lm/tinylm.sjtl")).unwrap();
         *b.last_mut().unwrap() ^= 1;
-        let p = tmp("flip").join("other.sjtl");
+        let p = flip.join("other.sjtl");
         std::fs::write(&p, b).unwrap();
         p.to_string_lossy().into_owned()
     };
     let no_tl = ["--lm", "data/lm/bigram.sjlm", "--profile", "chat", "--context", "--packs", "acg"];
     let formal = ["--lm", "data/lm/bigram.sjlm", "--profile", "formal", "--context", "--packs", "acg", "--tinylm", "data/lm/tinylm.sjtl"];
     let other = ["--lm", "data/lm/bigram.sjlm", "--profile", "chat", "--context", "--packs", "acg", "--tinylm", &flipped];
-    let rows = rows_with_the_term_rows(&tmp("elrows"));
+    let rows_dir = tmp("elrows");
+    let rows = rows_with_the_term_rows(&rows_dir);
     let cases: [(&str, &[&str], &[&str]); 5] = [
         ("formal", &formal, &[]),
         ("conservative", &BASE[..9], &["--rerank-level", "conservative"]),

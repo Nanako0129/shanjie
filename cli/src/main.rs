@@ -1,5 +1,5 @@
 use cli::common::{dev_rows, format_rowstats, levenshtein, load_lenient, read_rows, root, three_field_rows};
-use core::colloquial::{Colloquial, PAIRED_TINYLM_SHA256};
+use core::colloquial::{self, Colloquial};
 use core::engine::{capping_overlay_detailed, load_lexicon_extra_detailed, load_lexicon_packs_detailed, read_packs_detailed, PACK_ACG};
 use core::eval::*;
 use core::learn::{context_key, SENTINEL};
@@ -124,7 +124,7 @@ fn load_tinylm(path: &str, lm: &Lm, classes: bool, demote: bool) -> Result<(Tiny
         return Err("--tinylm: this .sjtl was tuned with the class term and the demotion table on (drop --no-classes / --no-demote)".into());
     }
     let t0 = Instant::now();
-    let (tl, _) = TinyLm::load_paired(Path::new(path), lm).map_err(|e| match e {
+    let tl = TinyLm::load_paired(Path::new(path), lm).map_err(|e| match e {
         // model-v6 section 7 (P4-9): each mismatch has its own remedy; --no-kn helps only when the file was tuned without KN.
         TinyLmError::KneserNey(KnPairing::TunedWithout) => {
             format!("--tinylm: {e} (use --no-kn, or a .sjtl exported with --kn-side for this kn.sjkn)")
@@ -136,8 +136,8 @@ fn load_tinylm(path: &str, lm: &Lm, classes: bool, demote: bool) -> Result<(Tiny
         TinyLmError::OtherNgram => format!("--tinylm: {e}"),
         _ => e.to_string(),
     })?;
-    let load = t0.elapsed();
     let sha8 = tl.file_sha256()[..8].to_string();
+    let load = t0.elapsed();
     Ok((tl, load, sha8))
 }
 
@@ -307,20 +307,16 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     }
     let rss_after = tinylm.is_some().then(rss_kb).flatten();
     let dir = root().join("data/lexicon");
-    // The colloquial table and the word sets of its k term, as `Engine::load_colloquial` builds them (the engine's pack rows are the `--packs` rows).
+    // The colloquial table and the word sets of its k term, from the engine's own loader (the engine's pack rows are the `--packs` rows).
     let colloq = match &colloquial_core {
         Some(f) => {
-            let err = |n: &str, e: std::io::Error| format!("--colloquial-core: cannot read {n} ({:?})", e.kind());
             let pack_text = read_packs_detailed(&pdir, packs).map_err(|e| e.to_string())?;
-            let base = fs::read_to_string(dir.join("mcbpmf-data.txt")).map_err(|e| err("mcbpmf-data.txt", e))?;
-            let overlay = fs::File::open(dir.join("overlay-add.tsv")).map_err(|e| err("overlay-add.tsv", e))?;
-            let co = Colloquial::load(f, &base, std::io::BufReader::new(overlay), Some(&pack_text)).map_err(|e| format!("--colloquial-core: {e}"))?;
-            Some(co)
+            Some(Colloquial::load_from_dir(f, &dir, Some(&pack_text)).map_err(|e| format!("--colloquial-core: {e}"))?)
         }
         None => None,
     };
-    // The engine's conditions for the term (the table is loaded by here): chat, standard strength, the measured small model.
-    let colloq_on = colloq.as_ref().filter(|_| prof == Profile::Chat && level == RerankLevel::Standard && tl.as_ref().is_some_and(|(m, _, _)| m.file_sha256() == PAIRED_TINYLM_SHA256));
+    // The engine's conditions for the term (the table is loaded by here): `colloquial::applies` is the engine's own test.
+    let colloq_on = colloq.as_ref().filter(|_| tl.as_ref().is_some_and(|(m, _, _)| colloquial::applies(prof, level, m)));
     let (lex, overlay) = load_with_packs(&dir, packs, &pdir, extra_overlay.as_deref(), names)?;
     let demote_rows = fs::read_to_string(dir.join("demote.tsv")).map_err(|e| format!("cannot read demote.tsv ({:?})", e.kind()))?;
     let table = Demote::parse(&demote_rows).filter(|d| d.check(&lex)).ok_or("bad demote.tsv")?;

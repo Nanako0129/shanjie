@@ -31,12 +31,14 @@
 
 - 新模組 `core/src/colloquial.rs`：`cli/src/colloquial.rs` 的 lc、k、`read_sets` 搬進核心（`Colloquial`），CLI 刪掉自己那一份。
   - `Colloquial::load(table, base_lexicon_text, overlay_text, pack_text: Option<&str>) -> Result<Colloquial, ColloquialError>`：表用 `Lm::load_opts(path, false, false, false)`（純雙連詞）；基本詞表來自 `mcbpmf-data.txt`，疊加層是 `overlay-add.tsv` **加上引擎建立時讀的詞包內容**（`new_with_packs` 讀進來、引擎留著的 `pack_text`；沒有詞包建的引擎就沒有詞包的列），規則同 `read_sets`（基本詞表三欄、跳過 `#`／`_`、每音節一字；疊加層四欄）。CLI 用同一個函式，給它 `--packs acg` 讀的同一份詞包文字。成本照 §3 第 5 點量。
+  - `Colloquial::load_from_dir(table, lexicon_dir, pack_text: Option<&str>)`：從詞庫資料夾讀 `mcbpmf-data.txt` 與 `overlay-add.tsv` 再呼叫 `load`（讀不到＝`ColloquialError::Read`）。`Engine::load_colloquial` 與 CLI 的 `--colloquial-core` 都只呼叫它，k 的詞集合只有這一份讀法。
   - `Colloquial::col(words) = lc(words) − 0.5·k(words)`（lc 從 `<s>` 加到 `</s>`）。
 - **共用的評分函式**（引擎與 CLI 都只呼叫這一個）：`TinyLm::rerank_colloquial(&self, ng: &[f64], cands: &[&str], words: &[Vec<&str>], key: &str, co: &Colloquial) -> Result<(usize, Option<Vec<f64>>), TinyLmError>`，和 `rerank` 同樣取前 `TOPK` 個、同樣的 `ll_many`，之後：
   - col_i = `co.col(words[i])`，g_i = 1 / (1 + exp(−(ll_i − ll_0) / T))（不會溢位的寫法），ll_eff_i = ll_i + g_i·(μ / α)·(col_i − col_0)；
   - `pick(ng, ll_eff, α, τ, δ)`，`pick` 不改。
+  - 任何一個 col_i 不是有限值（`inf`、NaN）時，這一次呼叫整個不加口語項：用同一批 ll 與檔頭聊天標準強度的 (α, τ, δ) 做原本的 `pick`（`colloquial::guarded_pick`），不讓無限大或 NaN 決定選字。
   - 參數全部是 `colloquial.rs` 的具名常數，註解寫出處（P4d 登記、chatjudge-2 確認）：`MU = 0.5`、`GATE_T = 1.0`、`GAMMA_PER_MU = 0.5`、`ALPHA = 0.5`、`TAU = 2.0`、`DELTA = 0.25`。不讀 `.sjtl` 檔頭的值。
-- **何時用**（`engine.rs` 的 `refresh_lm` 建工作時決定，記在 `RerankJob` 裡；之後 `RerankJob::run` 對每一段呼叫 `rerank_colloquial` 或原本的 `rerank`）：口語表已載入、設定是聊天、強度是標準、而且載入的 `.sjtl` 的 SHA-256 等於常數 `PAIRED_TINYLM_SHA256`（P4d 量的那一份，即目前 `data/tinylm.sjtl.sha256` 記的值）。四個條件任一不成立 → 原本的 `rerank` 與檔頭的參數，行為不變。`load_tinylm` 時把 `.sjtl` 的 SHA-256 記在 `TinyLm` 裡（核心已有 `sha256_hex`）。
+- **何時用**（`engine.rs` 的 `refresh_lm` 建工作時決定，記在 `RerankJob` 裡；之後 `RerankJob::run` 對每一段呼叫 `rerank_colloquial` 或原本的 `rerank`）：口語表已載入、設定是聊天、強度是標準、而且載入的 `.sjtl` 的 SHA-256 等於常數 `PAIRED_TINYLM_SHA256`（P4d 量的那一份，即目前 `data/tinylm.sjtl.sha256` 記的值）。四個條件任一不成立 → 原本的 `rerank` 與檔頭的參數，行為不變。決定只有一個函式：`colloquial::applies(profile, level, &TinyLm)`（前三個條件；第四個是「有表」），引擎每次建工作與 CLI 都呼叫它。`.sjtl` 的 SHA-256（`TinyLm::file_sha256`）是 `load_paired` 解析的那一份位元組的雜湊，第一次被問到才算並記住（14.6 MB 的軟體 SHA-256 量過約 36 ms，沒有口語表的建置不付這筆）；`Engine::load_colloquial` 與 `load_tinylm`（另一邊已載入時）當場算，不留給第一個按鍵。
 - **段與列**：引擎的一段（兩個固定詞或標點之間）當一句算 lc（`<s>` 起、`</s>` 止）。CLI 與 `p4d.py` 一列就是一段，所以兩者相同；多段組字的差異是已知的，寫進研究紀錄，驗收的公開集合都是一段。
 - **載入與生命週期**：`Engine::load_colloquial(path)` 從引擎載入詞庫的資料夾讀 `mcbpmf-data.txt` 與 `overlay-add.tsv`，詞包用引擎自己留著的 `pack_text`（不從詞庫資料夾找 `acg-add.tsv`）；可以在 `load_lm`／`load_tinylm` 之前或之後呼叫（表和 n-gram、語意校正模型無關；配對在每次建工作時檢查，換語意校正模型、換設定或強度，下一次解碼就生效）。失敗時引擎維持原狀（原本沒有表就仍然沒有；原本有表就保留原本那一份），作廢進行中的工作。
 - **FFI**：`shanjie_engine_load_colloquial(engine, path)`，回傳碼和 `load_tinylm` 相同（0 成功、1 參數 NULL、3 讀取或格式錯誤），子程序輸出不帶路徑。`core/include/shanjie.h`、`core/tests/c/abi_smoke.c`、`docs/contracts/s3a.md` 的 FFI 表一起改；按鍵規則表不變。

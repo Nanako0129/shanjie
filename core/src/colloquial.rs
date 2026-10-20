@@ -4,8 +4,8 @@
 //!
 //! The constants are the cell P4d registered and chatjudge-2 confirmed (experiments/p4d-colloquial/README.md): mu 0.5, soft gate
 //! T 1.0, alpha 0.5, tau 2, delta 0.25, gamma = mu / 2. They do not come from the `.sjtl` header.
-use crate::lm::{Lm, LmError};
-use crate::tinylm::pick;
+use crate::lm::{Lm, LmError, Profile};
+use crate::tinylm::{pick, RerankLevel, TinyLm};
 use std::collections::HashSet;
 use std::fmt;
 use std::io::BufRead;
@@ -31,7 +31,7 @@ pub enum ColloquialError {
     Table,
     /// A row of the base lexicon has a score that is not a number.
     Lexicon,
-    /// The overlay file could not be read (an I/O error or text that is not UTF-8).
+    /// `mcbpmf-data.txt` or `overlay-add.tsv` could not be read (an I/O error or text that is not UTF-8).
     Read,
 }
 
@@ -40,7 +40,7 @@ impl fmt::Display for ColloquialError {
         f.write_str(match self {
             ColloquialError::Table => "cannot load the colloquial table (.sjlm)",
             ColloquialError::Lexicon => "mcbpmf-data.txt has a row whose score is not a number",
-            ColloquialError::Read => "cannot read overlay-add.tsv",
+            ColloquialError::Read => "cannot read mcbpmf-data.txt or overlay-add.tsv",
         })
     }
 }
@@ -51,7 +51,8 @@ pub struct Colloquial {
     /// N + V + 1 of the table, V counting `<s>` and `</s>` (p4.py `Table.n1`).
     n1: f64,
     /// The words of overlay-add.tsv and of the packs the engine was built with (not names-add.tsv, not sandhi-add.tsv) that mcbpmf-data.txt
-    /// lacks: the only words k counts, so the two full sets are never kept (the base set alone was tens of MiB of peak RSS).
+    /// lacks: the only words k counts, so the two full sets are never kept (keeping them cost about 10 MiB more peak RSS on a Mac, measured:
+    /// docs/research-log.md, the section 3.5 memory fix).
     overlay_only: HashSet<String>,
 }
 
@@ -63,8 +64,8 @@ impl Colloquial {
     /// `pack_text`, the pack rows the engine was built with) are tab lines with exactly four fields.
     ///
     /// Memory: only the words that are in the overlay and not in the base are kept. The base words are a short-lived set that borrows
-    /// from `base_text`, and the 17 MB overlay file is never held as text (the full overlay set plus the texts were about 30 MiB of the
-    /// peak RSS this term cost).
+    /// from `base_text`, and the 17 MB overlay file is never held as text (peak RSS with the table: +27 to +30 MiB on a Mac before this,
+    /// +16 to +21 MiB after; 3 runs each, `/usr/bin/time -l`, docs/research-log.md).
     pub fn load(table: &Path, base_text: &str, overlay: impl BufRead, pack_text: Option<&str>) -> Result<Colloquial, ColloquialError> {
         let lm = Lm::load_opts(table, false, false, false).map_err(|_: LmError| ColloquialError::Table)?;
         // `Lm` has no vocabulary-size accessor: `identity().1` is V + 1 (the length of the word-offset table), so N + V + 1 is
@@ -91,6 +92,15 @@ impl Colloquial {
         }
         pack_text.unwrap_or("").lines().for_each(&mut take);
         Ok(Colloquial { lm, n1, overlay_only })
+    }
+
+    /// `load` with the base lexicon and the overlay read from `lexicon_dir` (`mcbpmf-data.txt`, `overlay-add.tsv`): the one place the engine
+    /// (`Engine::load_colloquial`) and the evaluation CLI (`--colloquial-core`) build the word sets of k, so they cannot differ.
+    /// `pack_text` is the pack rows the caller's lexicon was built with.
+    pub fn load_from_dir(table: &Path, lexicon_dir: &Path, pack_text: Option<&str>) -> Result<Colloquial, ColloquialError> {
+        let base = std::fs::read_to_string(lexicon_dir.join("mcbpmf-data.txt")).map_err(|_| ColloquialError::Read)?;
+        let overlay = std::fs::File::open(lexicon_dir.join("overlay-add.tsv")).map_err(|_| ColloquialError::Read)?;
+        Colloquial::load(table, &base, std::io::BufReader::new(overlay), pack_text)
     }
 
     /// SHA-256 (hex) of the table file.
@@ -138,10 +148,27 @@ pub fn fuse(ll: &[f64], col: &[f64]) -> Vec<f64> {
     (0..ll.len()).map(|i| ll[i] + sigmoid((ll[i] - ll[0]) / GATE_T) * (MU / ALPHA) * (col[i] - col[0])).collect()
 }
 
+/// Whether the term is used for a rerank (docs/contracts/colloquial-term.md section 2.2): the chat profile, the standard strength and the small
+/// model the registered cell was measured with (`PAIRED_TINYLM_SHA256`). The fourth condition, a loaded table, is the caller having one.
+/// The engine (per job) and the evaluation CLI both decide with this function.
+pub fn applies(profile: Profile, level: RerankLevel, model: &TinyLm) -> bool {
+    profile == Profile::Chat && level == RerankLevel::Standard && model.file_sha256() == PAIRED_TINYLM_SHA256
+}
+
 /// The index `rerank_colloquial` chooses: `pick` over the fused scores with the registered cell's alpha, tau and delta (never the
 /// `.sjtl` header's). `ng`, `ll` and `col` are the first candidates of one n-best list, in the n-gram order.
 pub fn fused_pick(ng: &[f64], ll: &[f64], col: &[f64]) -> usize {
     pick(ng, &fuse(ll, col), ALPHA, TAU, DELTA)
+}
+
+/// `fused_pick`, unless a col is not finite (a word the table scores as log10 0, or a NaN): then no colloquial term at all, the plain `pick`
+/// with `plain` (the `.sjtl`'s own alpha, tau, delta), so an infinity or NaN never decides.
+pub fn guarded_pick(ng: &[f64], ll: &[f64], col: &[f64], plain: (f64, f64, f64)) -> usize {
+    if col.iter().all(|c| c.is_finite()) {
+        return fused_pick(ng, ll, col);
+    }
+    let (alpha, tau, delta) = plain;
+    pick(ng, ll, alpha, tau, delta)
 }
 
 #[cfg(test)]
@@ -189,5 +216,18 @@ mod tests {
         // tau: an n-gram margin of 2 or more keeps the first whatever the small model says
         assert_eq!(fused_pick(&[-10.0, -12.0], &[-50.0, 0.0], &[0.0, 0.0]), 0);
         assert_eq!(fused_pick(&[-10.0, -11.9], &[-50.0, 0.0], &[0.0, 0.0]), 1);
+    }
+
+    /// A col that is +inf, -inf or NaN (the anchor's or another candidate's) must not decide: the plain pick with the given triple is used.
+    /// With ng [-10.0, -10.3], ll [-5.0, -3.8] the plain triple (0.3, 2, 0.25) keeps candidate 0; a +inf col would make the fused score of
+    /// candidate 1 infinite (and a -inf anchor col makes col_1 - col_0 infinite) and so pick it.
+    #[test]
+    fn non_finite_col_falls_back_to_the_plain_pick() {
+        let (ng, ll, plain) = ([-10.0, -10.3], [-5.0, -3.8], (0.3, TAU, DELTA));
+        assert_eq!(fused_pick(&ng, &ll, &[0.0, f64::INFINITY]), 1, "premise: unguarded, +inf decides");
+        assert_eq!(guarded_pick(&ng, &ll, &[0.0, f64::INFINITY], plain), 0);
+        assert_eq!(guarded_pick(&ng, &ll, &[f64::NEG_INFINITY, 0.0], plain), 0, "-inf anchor");
+        assert_eq!(guarded_pick(&ng, &ll, &[0.0, f64::NAN], plain), 0);
+        assert_eq!(guarded_pick(&ng, &ll, &[0.0, 0.0], plain), fused_pick(&ng, &ll, &[0.0, 0.0]), "finite cols: the term as before");
     }
 }

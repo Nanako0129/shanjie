@@ -72,12 +72,27 @@ fn engine_picks(table: Option<&Path>, tinylm: &Path) -> Vec<usize> {
     picks(&mut engine(0, tinylm, table.map(|t| (t, false))))
 }
 
+/// A scratch file that is removed when it goes out of scope, an assertion failure included.
+struct Scratch(PathBuf);
+impl std::ops::Deref for Scratch {
+    type Target = Path;
+    fn deref(&self) -> &Path {
+        &self.0
+    }
+}
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
 /// The same `.sjtl` with its last bit flipped: it loads, pairs with the n-gram model and ranks as before, but its SHA-256 is another one.
-fn other_sjtl(name: &str) -> PathBuf {
+fn other_sjtl(name: &str) -> Scratch {
     let mut b = std::fs::read(data("tinylm.sjtl")).unwrap();
     *b.last_mut().unwrap() ^= 1;
     let p = std::env::temp_dir().join(format!("shanjie-colloq-{name}-{}.sjtl", std::process::id()));
-    std::fs::write(&p, b).unwrap();
+    let p = Scratch(p);
+    std::fs::write(&*p, b).unwrap();
     p
 }
 
@@ -125,8 +140,8 @@ fn load_order_does_not_matter() {
 #[test]
 fn a_failed_load_changes_nothing_but_the_job() {
     let (tl, table) = (data("tinylm.sjtl"), data("colloquial.sjlm"));
-    let bad = std::env::temp_dir().join(format!("shanjie-colloq-bad-{}.sjlm", std::process::id()));
-    std::fs::write(&bad, b"not a table").unwrap();
+    let bad = Scratch(std::env::temp_dir().join(format!("shanjie-colloq-bad-{}.sjlm", std::process::id())));
+    std::fs::write(&*bad, b"not a table").unwrap();
     let mut e = engine(0, &tl, None);
     assert!(e.colloquial().is_none());
     assert!(e.load_colloquial(&bad).is_err() && e.load_colloquial(Path::new("/nonexistent/x.sjlm")).is_err());

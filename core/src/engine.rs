@@ -1,7 +1,7 @@
 //! S3a key engine (docs/contracts/s3a.md): key events in, preedit / commit / candidates out.
 //! R2: no input text in errors or panics; types holding input text do not derive Debug.
 
-use crate::colloquial::{Colloquial, PAIRED_TINYLM_SHA256};
+use crate::colloquial::{self, Colloquial};
 use crate::learn::{context_key, digit_of, english_of, english_or_space, is_han, is_space_unit, local_day, newword_score, next_key, record_key, Learner, Level, Record, NEWWORD, NEWWORD_BREAK, NEWWORD_DIGITS, NEWWORD_MAX, NEWWORD_MIN, NEWWORD_SHADOW, PUNCT_PREFIX};
 use crate::learn_store::{LearnStore, Opened, StoreError, JOURNAL_MAX};
 use crate::predict::{predict, predict_digits, reading_matches_in, unit_of_syllable, Mode, Unit};
@@ -582,7 +582,7 @@ pub struct Engine {
     /// Stretches the guard kept out of the current decode's job (`guard_skips`); reset with the job in `invalidate`.
     guard_skips: usize,
     /// Section 2.3 (修正一): renewed from `GENERATION` only where decoding changes: every `refresh`, `clear_all`, the model and
-    /// decoding settings (`load_lm`, `set_lm`, `load_tinylm`, `set_rerank`, `set_rerank_level`, `set_profile`, `set_demote`,
+    /// decoding settings (`load_lm`, `set_lm`, `load_tinylm`, `load_colloquial`, `set_rerank`, `set_rerank_level`, `set_profile`, `set_demote`,
     /// learning open/clear, the evaluation-only `set_learn_guard`).
     generation: u64,
     /// The job of the last refresh, until `take_rerank_job` or the next change.
@@ -845,7 +845,7 @@ impl Engine {
     }
 
     /// Section 2.3 (revision 1): called wherever decoding changes (every `refresh`, `clear_all`, a new n-gram or small model,
-    /// the rerank switch, the rerank level, the profile, the demotion table, learning open / clear, `set_learn_guard`): a job made
+    /// a new colloquial table, the rerank switch, the rerank level, the profile, the demotion table, learning open / clear, `set_learn_guard`): a job made
     /// before is stale from now on, and its `guard_skips` count goes with it.
     /// `set_learning` is not among them: the flag only decides whether picks are recorded (`pre`), never how the composition
     /// decodes (decoding reads the learner whenever it is non-empty).
@@ -866,7 +866,10 @@ impl Engine {
     pub fn load_tinylm(&mut self, path: &Path) -> Result<(), EngineError> {
         self.invalidate();
         let st = self.lm.as_ref().ok_or(EngineError::LoadFailed)?;
-        let (model, _) = TinyLm::load_paired(path, &st.lm).map_err(|_| EngineError::LoadFailed)?;
+        let model = TinyLm::load_paired(path, &st.lm).map_err(|_| EngineError::LoadFailed)?;
+        if self.colloquial.is_some() {
+            model.file_sha256(); // the pairing with the colloquial term needs the file's hash: made here, not on a key press
+        }
         self.tinylm = Some(Arc::new(model));
         Ok(())
     }
@@ -878,14 +881,15 @@ impl Engine {
     pub fn load_colloquial(&mut self, path: &Path) -> Result<(), EngineError> {
         self.invalidate();
         let dir = self.data_dir.as_ref().ok_or(EngineError::LoadFailed)?;
-        let base = std::fs::read_to_string(dir.join("mcbpmf-data.txt")).map_err(|_| EngineError::LoadFailed)?;
-        let overlay = std::fs::File::open(dir.join("overlay-add.tsv")).map_err(|_| EngineError::LoadFailed)?;
-        let co = Colloquial::load(path, &base, std::io::BufReader::new(overlay), self.pack_text.as_deref()).map_err(|_| EngineError::LoadFailed)?;
+        let co = Colloquial::load_from_dir(path, dir, self.pack_text.as_deref()).map_err(|_| EngineError::LoadFailed)?;
+        if let Some(model) = &self.tinylm {
+            model.file_sha256(); // the pairing needs the small model's file hash: made here, not on a key press
+        }
         self.colloquial = Some(Arc::new(co));
         Ok(())
     }
 
-    /// The loaded colloquial table, if any (tests and the replay tool's summary line).
+    /// The loaded colloquial table, if any (tests).
     pub fn colloquial(&self) -> Option<&Colloquial> {
         self.colloquial.as_deref()
     }
@@ -2340,11 +2344,9 @@ impl Engine {
         self.path = path;
         if let (false, Some(model)) = (stretches.is_empty(), &self.tinylm) {
             let (params, left) = (model.params(self.profile, self.rerank_level), self.left.clone());
-            // The four conditions of docs/contracts/colloquial-term.md section 2.2 (the fourth is the pairing with the measured model).
-            let colloquial = self
-                .colloquial
-                .clone()
-                .filter(|_| self.profile == Profile::Chat && self.rerank_level == RerankLevel::Standard && model.file_sha256() == PAIRED_TINYLM_SHA256);
+            // The four conditions of docs/contracts/colloquial-term.md section 2.2: a table is loaded, and `colloquial::applies` (chat, standard
+            // strength, the measured small model).
+            let colloquial = self.colloquial.clone().filter(|_| colloquial::applies(self.profile, self.rerank_level, model));
             self.rerank_job = Some(RerankJob { generation: self.generation, model: model.clone(), params, colloquial, left, stretches });
         }
         Ok(())
