@@ -14,18 +14,26 @@ final class InstallerFlowTests: XCTestCase {
     /// system-install.md section 2.4, the table of screens after a location change, every cell.
     func testMovedScreens() {
         let all: [Registration.Outcome] = [.done, .modeNotListed, .notAccepted, .registrationFailed, .enableFailed]
-        let moved: [Registration.Outcome: InstallerScreen] = [
+        // A move (P1: listed again after the log out) is never told to add it; a first install is, unless the system
+        // already accepted it.
+        let move: [Registration.Outcome: InstallerScreen] = [
             .done: .logOut, .notAccepted: .logOut, .modeNotListed: .logOut,
             .registrationFailed: .failedLogOut, .enableFailed: .failedLogOut,
         ]
+        let first: [Registration.Outcome: InstallerScreen] = [
+            .done: .logOut, .notAccepted: .logOutThenAdd, .modeNotListed: .logOutThenAdd,
+            .registrationFailed: .failedLogOut, .enableFailed: .failedLogOut,
+        ]
         for outcome in all {
-            XCTAssertEqual(InstallerFlow.next(after: outcome, moved: true), moved[outcome], "moved, \(outcome)")
-            XCTAssertEqual(InstallerFlow.next(after: outcome, moved: false), InstallerFlow.next(after: outcome), "not moved, \(outcome)")
-        }
-        // Never a poll or a trip to System Settings before the log out.
-        for outcome in all {
-            XCTAssertNotEqual(InstallerFlow.next(after: outcome, moved: true), .waiting)
-            XCTAssertNotEqual(InstallerFlow.next(after: outcome, moved: true), .activate)
+            XCTAssertEqual(InstallerFlow.next(after: outcome, moved: true, firstInstall: false), move[outcome], "move, \(outcome)")
+            XCTAssertEqual(InstallerFlow.next(after: outcome, moved: true, firstInstall: true), first[outcome], "first install, \(outcome)")
+            for firstInstall in [false, true] {
+                XCTAssertEqual(InstallerFlow.next(after: outcome, moved: false, firstInstall: firstInstall), InstallerFlow.next(after: outcome),
+                               "not moved, \(outcome)")
+                // Never a poll or a trip to System Settings before the log out.
+                XCTAssertNotEqual(InstallerFlow.next(after: outcome, moved: true, firstInstall: firstInstall), .waiting)
+                XCTAssertNotEqual(InstallerFlow.next(after: outcome, moved: true, firstInstall: firstInstall), .activate)
+            }
         }
     }
 

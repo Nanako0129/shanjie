@@ -42,6 +42,18 @@ CLASSES = ("i", "ii", "iii", "iv")
 
 # ---------------------------------------------------------------- loading
 
+def mcbpmf_entries():
+    """[(reading string, word, score)] of data/lexicon/mcbpmf-data.txt with the filters the engine applies (comment and '_' lines, exactly 3
+    fields, as many '-'-separated syllables as characters). The one parser of that file: P5's mc estimator reads it through here too."""
+    out = []
+    for l in T.lines_of(T.read_text(os.path.join(ROOT, "data/lexicon/mcbpmf-data.txt"))):
+        f = l.split()
+        if l[:1] in ("#", "_") or len(f) != 3 or len(f[1]) != len(f[0].split("-")):
+            continue
+        out.append((f[0], f[1], float(f[2])))
+    return out
+
+
 def load_lex_scores():
     """({(reading tuple, word): score} of the files the engine loads (same filters as triage.Lex), words of overlay-add.tsv and the pack)."""
     r = lambda *p: T.read_text(os.path.join(ROOT, *p))
@@ -50,11 +62,8 @@ def load_lex_scores():
     def add(reading, word, sc):
         k = (tuple(reading.split("-")), word)
         out[k] = max(out.get(k, -1e9), sc)
-    for l in T.lines_of(r("data/lexicon/mcbpmf-data.txt")):
-        f = l.split()
-        if l[:1] in ("#", "_") or len(f) != 3 or len(f[1]) != len(f[0].split("-")):
-            continue
-        add(f[0], f[1], float(f[2]))
+    for reading, word, sc in mcbpmf_entries():
+        add(reading, word, sc)
     for p in ("data/lexicon/overlay-add.tsv", "data/lexicon/sandhi-add.tsv", "data/packs/acg-add.tsv", "data/lexicon/names-add.tsv"):
         for l in T.lines_of(r(p)):
             f = l.split("\t")
