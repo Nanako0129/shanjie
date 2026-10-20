@@ -62,6 +62,10 @@ final class CoreEngine {
     /// S7c-2a: the small model for the loaded n-gram model; call it after `loadLM`. Non-zero keeps the n-gram only.
     func loadTinyLM(path: String) -> Int32 { shanjie_engine_load_tinylm(handle, path) }
 
+    /// colloquial-term.md section 2.2: the colloquial table (常談). Independent of the n-gram and the small model; the core applies it per job
+    /// only in the chat profile at standard strength with the paired small model. Non-zero leaves the rerank as it was.
+    func loadColloquial(path: String) -> Int32 { shanjie_engine_load_colloquial(handle, path) }
+
     /// S7c-2a: whether rerank jobs are made (the core's default is off since S7c-2c; the shell sends its own value to every engine); returns the snapshot, like `setDemote`.
     func setRerank(_ on: Bool) -> CoreResult {
         var out: UnsafeMutablePointer<ShanjieOutput>?

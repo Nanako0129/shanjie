@@ -40,6 +40,21 @@ final class SelftestTests: XCTestCase {
         XCTAssertNotEqual(Selftest.run(resources: res), 0)
     }
 
+    /// colloquial-term.md section 2.3: the table ships in the bundle and the term is part of the chat rerank, so a bundle without it, or with
+    /// one the core refuses, must fail the selftest.
+    func testFailsWithoutTheColloquialTable() throws {
+        let res = try XCTUnwrap(TestData.resources(only: Set(TestData.files.map(\.name)).subtracting(["colloquial.sjlm"])))
+        try TestData.addBundledPack(to: res)
+        XCTAssertNotEqual(Selftest.run(resources: res), 0)
+    }
+
+    func testFailsWithACorruptColloquialTable() throws {
+        let res = try XCTUnwrap(TestData.resources(only: Set(TestData.files.map(\.name)).subtracting(["colloquial.sjlm"])))
+        try TestData.addBundledPack(to: res)
+        try Data("not a table".utf8).write(to: res.appendingPathComponent("colloquial.sjlm"))
+        XCTAssertNotEqual(Selftest.run(resources: res), 0)
+    }
+
     /// zhen-mixed section 3.2: the word list ships in the bundle and the switch can be turned on, so a bundle without it, with a list
     /// the core refuses, or with one where `rust` Space opens no English window must fail the selftest.
     func testFailsWithoutTheEnglishList() throws {
