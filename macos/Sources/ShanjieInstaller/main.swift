@@ -9,7 +9,9 @@ import ShanjieInstall
 // copied into place by the bundled install-ime.sh (files and processes only), then registered and
 // enabled in this process against the installed copy. Writes nothing of its own and no network;
 // the one exception is `--render-steps <dir>` (installer-v2 section 1.4), run only by the
-// maintainer, which draws every screen to PNG files in that folder and exits.
+// maintainer, which draws every screen to PNG files in that folder and exits. The installer also
+// runs itself with `--accepted-check <bundle ID>`, a read of whether the system accepted the input
+// method, because its own process does not see that change (system-install.md section 2.4).
 
 /// Traditional Chinese when the user's first preferred language is (zh-Hant, zh-TW, zh-HK,
 /// zh-MO), English otherwise. The strings live here, not in .lproj files (contract section 1).
@@ -742,6 +744,9 @@ final class Controller: NSObject, NSApplicationDelegate, NSWindowDelegate {
     // s3c section 2.4: poll every 0.5 s for at most 30 s on the main run loop.
     private let pollInterval: TimeInterval = 0.5
     private let pollLimit = 60
+    /// `returnWhenAccepted` checks once a second, up to 2 minutes, for the answer in System Settings.
+    private let returnInterval: TimeInterval = 1
+    private let returnLimit = 120
     /// After selecting the input source, how long to wait before reading back the current one.
     /// A first guess; the device run shows whether the switch is visible sooner.
     private let switchCheckDelay: TimeInterval = 0.3
@@ -829,7 +834,7 @@ final class Controller: NSObject, NSApplicationDelegate, NSWindowDelegate {
         systemVersion = Paths.systemVersion()
         accountCopy = Paths.hasAccountCopy()
         accountVersion = Paths.installedVersion()
-        listedBeforeCopy = Registration.modeListed(bundleID: InstallerPlan.shippingBundleID)
+        listedBeforeCopy = Registration.listedOrEnabled(bundleID: InstallerPlan.shippingBundleID)
         let start = [Paths.installed, Paths.legacy].lazy.compactMap { Paths.info($0)?["CFBundleIdentifier"] as? String }.first
         startBundleID = start
         startModes = start.map(Registration.enabledModeIDs(bundleID:)) ?? []
@@ -991,6 +996,65 @@ final class Controller: NSObject, NSApplicationDelegate, NSWindowDelegate {
             let message = result.outcome == .registrationFailed ? Screens.registrationFailedMessage : Screens.enableFailedMessage
             show(Screens.failedLogOut(Failure(message: message)))
         }
+        if moved && result.outcome == .notAccepted { returnWhenAccepted(bundleID: bundleID) }
+    }
+
+    /// The system asks "Allow … to enable" inside System Settings, which it opens itself right after the enable call and which keeps
+    /// the focus (VM, macOS 26.6.2, 2026-10-21: System Settings launched 2 ms before the installer's own activate, so activating at once
+    /// did nothing). Called once a fresh read says the system accepted the input method and the installer is not in front: the window
+    /// comes forward and the Dock icon bounces, since System Settings may still show its question afterwards and cover the window.
+    private func comeBack() {
+        NSApp.activate()
+        // macOS 14 and later may refuse the activation while another app is active; the window still comes above the others.
+        window.orderFrontRegardless()
+        window.makeKeyAndOrderFront(nil)
+        // The system may accept the input method before its question in System Settings appears (VM, 2026-10-21: accepted 1 s after
+        // the enable call, then System Settings covered the installer again), so the Dock icon also bounces until the user comes back.
+        _ = NSApp.requestUserAttention(.criticalRequest)   // stops by itself when the installer becomes active
+    }
+
+    private func returnWhenAccepted(bundleID: String) {
+        var ticks = 0
+        var checking = false
+        Timer.scheduledTimer(withTimeInterval: returnInterval, repeats: true) { [weak self] timer in
+            MainActor.assumeIsolated {
+                // Not stopped when the installer is in front at first: System Settings may take the focus only a moment later.
+                guard let self else { timer.invalidate(); return }
+                if ticks >= self.returnLimit {
+                    timer.invalidate()
+                    InstallerFlow.logReturn(accepted: false, wasActive: NSApp.isActive)
+                    return
+                }
+                guard !checking else { return }
+                ticks += 1
+                checking = true
+                self.checkAccepted(bundleID: bundleID) { accepted in
+                    checking = false
+                    guard accepted, timer.isValid else { return }
+                    timer.invalidate()
+                    let wasActive = NSApp.isActive
+                    InstallerFlow.logReturn(accepted: true, wasActive: wasActive)
+                    if !wasActive { self.comeBack() }
+                }
+            }
+        }
+    }
+
+    /// Whether the system has accepted the input method, read by a fresh process (this executable with `--accepted-check`): this
+    /// process's own input source list did not change after the user answered "Allow" (VM, macOS 26.6.2, 2026-10-21: another process
+    /// read the mode enabled 20 s after the answer; this one still read it not accepted 2 minutes later). The answer comes back on the
+    /// main thread; a failure to start the process counts as not accepted.
+    private func checkAccepted(bundleID: String, then: @escaping @MainActor (Bool) -> Void) {
+        guard let exe = Bundle.main.executableURL else { return then(false) }
+        let p = Process()
+        p.executableURL = exe
+        p.arguments = ["--accepted-check", bundleID]
+        p.environment = minimalEnvironment
+        p.terminationHandler = { proc in
+            let ok = proc.terminationReason == .exit && proc.terminationStatus == 0
+            DispatchQueue.main.async { MainActor.assumeIsolated { then(ok) } }
+        }
+        do { try p.run() } catch { then(false) }
     }
 
     private func showActivate(note: String? = nil) {
@@ -1036,24 +1100,37 @@ final class Controller: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private func poll(bundleID: String) {
         show(Screens.working(Screens.waiting))
         var ticks = 0
+        var checking = false
         Timer.scheduledTimer(withTimeInterval: pollInterval, repeats: true) { [weak self] timer in
             MainActor.assumeIsolated {
                 guard let self else { timer.invalidate(); return }
+                guard !checking else { return }
                 ticks += 1
-                if Registration.isAccepted(bundleID: bundleID) {
-                    timer.invalidate()
-                    // Once accepted, a second run finishes the steps after the check (ETen
-                    // carry-over, disabling the modes of earlier versions).
-                    let again = UserDefaults(suiteName: bundleID).map {
-                        Registration.run(bundleURL: self.target, bundleID: bundleID, defaults: $0)
-                    }
-                    let finished = again.map { $0.outcome == .done && !$0.legacyDisableFailed } ?? false
-                    self.showTry(note: finished ? nil : Screens.legacyNote)
-                } else if ticks >= self.pollLimit {
-                    timer.invalidate()
-                    self.showActivate()
+                checking = true
+                // A fresh process reads the answer (`checkAccepted`); this process's own list stays as it was.
+                self.checkAccepted(bundleID: bundleID) { accepted in
+                    checking = false
+                    guard timer.isValid else { return }
+                    self.pollTick(timer: timer, accepted: accepted, ticks: ticks, bundleID: bundleID)
                 }
             }
+        }
+    }
+
+    private func pollTick(timer: Timer, accepted: Bool, ticks: Int, bundleID: String) {
+        if accepted {
+            timer.invalidate()
+            if !NSApp.isActive { comeBack() }
+            // Once accepted, a second run finishes the steps after the check (ETen
+            // carry-over, disabling the modes of earlier versions).
+            let again = UserDefaults(suiteName: bundleID).map {
+                Registration.run(bundleURL: target, bundleID: bundleID, defaults: $0)
+            }
+            let finished = again.map { $0.outcome == .done && !$0.legacyDisableFailed } ?? false
+            showTry(note: finished ? nil : Screens.legacyNote)
+        } else if ticks >= pollLimit {
+            timer.invalidate()
+            showActivate()
         }
     }
 
@@ -1090,6 +1167,12 @@ let arguments = CommandLine.arguments
 if arguments.count == 3, arguments[1] == "--render-steps" {
     _ = NSApplication.shared
     exit(MainActor.assumeIsolated { renderSteps(into: URL(fileURLWithPath: arguments[2])) })
+}
+// system-install.md section 2.4 (revision of 2026-10-21): `--accepted-check <bundle ID>` exits 0 when the system has accepted that
+// input method, 1 otherwise; a read only. The installer runs itself this way because its own process does not see the change after
+// the user answers System Settings' "Allow" (`Controller.checkAccepted`).
+if arguments.count == 3, arguments[1] == "--accepted-check" {
+    exit(Registration.isAccepted(bundleID: arguments[2]) ? 0 : 1)
 }
 
 let app = NSApplication.shared

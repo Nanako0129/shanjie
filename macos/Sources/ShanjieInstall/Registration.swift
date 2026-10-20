@@ -90,6 +90,23 @@ public enum Registration {
         sources.contains { inputModeID($0) == "\(bundleID).zhuyin" }
     }
 
+    /// system-install.md section 2.2 (revision of 2026-10-21): whether the system had Shanjie before, read at the welcome screen.
+    /// TIS stops listing the input method within seconds after its bundle is removed (measured on a VM, macOS 26.6.2: listed right
+    /// after `sudo rm -rf`, gone 5 s later), while the user's enabled list keeps the entry that System Settings shows. So either
+    /// counts: the listing, or an entry with this bundle ID in the enabled lists of `com.apple.inputsources`
+    /// (`AppleEnabledThirdPartyInputSources`, where macOS 26 keeps third-party input methods) or `com.apple.HIToolbox`
+    /// (`AppleEnabledInputSources`).
+    public static func listedOrEnabled(bundleID: String) -> Bool {
+        if modeListed(bundleID: bundleID) { return true }
+        let lists = [("com.apple.inputsources", "AppleEnabledThirdPartyInputSources"), ("com.apple.HIToolbox", "AppleEnabledInputSources")]
+        return lists.contains { domain, key in enabled(UserDefaults(suiteName: domain)?.array(forKey: key), bundleID: bundleID) }
+    }
+
+    /// Whether an enabled-sources list (an array of dictionaries, as the system writes them) has an entry with this bundle ID.
+    public static func enabled(_ entries: [Any]?, bundleID: String) -> Bool {
+        (entries ?? []).contains { ($0 as? [String: Any])?["Bundle ID"] as? String == bundleID }
+    }
+
     /// How long `run` re-reads a mode that is not listed, before taking it for a first install.
     static let listedRecheckInterval: TimeInterval = 0.25
     static let listedRecheckLimit: TimeInterval = 2
