@@ -258,6 +258,35 @@ class ClusterBootstrap(unittest.TestCase):
         self.assertNotEqual(plain[2].split("|")[-3], clus[2].split("|")[-3])
         self.assertEqual(E.compare(bp, cp, "x", resamples=200), "\n".join(plain))      # default path unchanged
 
+    def test_ci_level_default_is_95_and_unchanged(self):
+        w = lambda name, rows: write(self.d, name, "".join(f"{i}\t{o}\t{e}\t{g}\n" for i, (o, e, g) in enumerate(rows, 1)))
+        bp, cp = w("b", self.base), w("c", self.cand)
+        default = E.compare(bp, cp, "x", resamples=1000)
+        self.assertEqual(default, E.compare(bp, cp, "x", resamples=1000, level=0.95))
+        self.assertIn("Δtop1 95%（列） | ΔCER 95%（百分點）", default)
+        # the quantiles are the literal 2.5% / 97.5% ones of before
+        (lo, hi), _ = E.paired_bootstrap(self.base, self.cand, 5, 1000)
+        self.assertEqual((lo, hi), E.paired_bootstrap(self.base, self.cand, 5, 1000, level=0.95)[0])
+        r90 = E.compare(bp, cp, "x", seed=5, resamples=1000, level=0.90)
+        self.assertIn("Δtop1 90%（列） | ΔCER 90%（百分點）", r90)
+        (lo9, hi9), _ = E.paired_bootstrap(self.base, self.cand, 5, 1000, level=0.90)
+        self.assertTrue(lo <= lo9 <= hi9 <= hi and hi9 - lo9 < hi - lo)
+        # level 0.90 reads the 5% and 95% order statistics of the same draws
+        self.assertEqual(r90.splitlines()[2].split("|")[10].strip(), f"[{lo9}, {hi9}]")
+
+    def test_ci_out_of_range_is_a_clean_error(self):
+        bp, cp = write(self.d, "b", "1\t0\t1\t3\n"), write(self.d, "c", "1\t1\t0\t3\n")
+        for level in ("0.4", "1", "0.9999", "-1"):
+            old, err = sys.argv, io.StringIO()
+            sys.argv = ["evalstats.py", "compare", bp, cp, "--resamples", "10", "--ci", level]
+            try:
+                with self.assertRaises(SystemExit) as e, contextlib.redirect_stderr(err):
+                    E.main()
+            finally:
+                sys.argv = old
+            self.assertEqual(e.exception.code, 1)
+            self.assertIn("evalstats: --ci must be between", err.getvalue())
+
     def test_count_mismatch_is_a_value_error_and_a_clean_exit(self):
         w = lambda name, text: write(self.d, name, text)
         bp, cp = w("b", "1\t0\t1\t3\n2\t0\t1\t3\n"), w("c", "1\t1\t0\t3\n2\t1\t0\t3\n")

@@ -1,3 +1,4 @@
+use cli::colloquial::{self, Colloq};
 use cli::common::{dev_rows, format_rowstats, levenshtein, load_lenient, read_rows, root, three_field_rows};
 use core::engine::{capping_overlay_detailed, load_lexicon_extra_detailed, load_lexicon_packs_detailed, PACK_ACG};
 use core::eval::*;
@@ -95,6 +96,14 @@ fn extra_overlay_checked(extra: Option<String>) -> Result<Option<PathBuf>, Strin
     }
 }
 
+/// `--colloquial FILE`: a missing file stops the run naming the path, checked with the other options before the model is read.
+fn colloquial_checked(path: &str) -> Result<(), String> {
+    match Path::new(path).is_file() {
+        true => Ok(()),
+        false => Err(format!("--colloquial: file not found: {path}")),
+    }
+}
+
 /// The lexicon with the chosen packs and the `--extra-overlay` rows, and the overlay text that caps the LM scores (the
 /// same helpers as the engine's `new` and `load_lm`). The extra rows travel with the pack rows, so they are capped too.
 /// `names` false is `--no-names`: names-add.tsv stays out of the lexicon (its words are then in no lexicon entry, so capping them changes nothing).
@@ -169,6 +178,8 @@ struct RowOut {
     in64: bool,
     long: bool,
     rerank: Option<Duration>,
+    /// P4b: the time of lc + k + the sort of the row's 64 candidates.
+    colloq: Option<Duration>,
     /// The row's chosen candidate (the `top1_sha256` input and the rowstats `top1`).
     first: String,
     scores: String,
@@ -188,6 +199,15 @@ struct RowOut {
 /// worker the line is as for N = 1. A panic in a row exits 101 on the inline path (N = 1, or one block) and exits 1 with "row N
 /// panicked in a --threads worker" on the threaded path. Only the `lm` mode takes it: the other modes refuse it
 /// as an unknown argument.
+///
+/// P4b `--colloquial FILE.sjlm --colloquial-mu X --colloquial-gamma Y` (evaluation only, not shipped; experiments/p4b-colloquial/README.md;
+/// chat profile only, refused with `--profile formal` and with `--set holdout`; mu and gamma are required with it and refused without):
+/// per row, after the decode, every candidate gets s = ng + mu * lc - gamma * k (lc: the file read as a plain bigram, no classes, no
+/// Kneser-Ney, no trigram, from `<s>`; k: words of overlay-add.tsv, and of the acg pack with `--packs acg`, that mcbpmf-data.txt lacks, repeats counted); the 64
+/// candidates are stably sorted by s, descending, and the first 8 go to the rerank with s in place of ng. `--dump`, `--dump-words`,
+/// `--tinylm-scores` and `--rowstats` follow that order and the `--dump` / `--tinylm-scores` scores are s, so those files must not be fed
+/// to tools that take rank 0 for the n-gram first. The summary line gains `+co:<sha8 of the table>:<mu>:<gamma>`, and stderr one more numbers-only
+/// line (p50/p95 of the lc + k + sort time per row, apart from the rerank; table load time; RSS around the load).
 fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     let (mut lm_path, mut profile, mut name, mut dev, mut rows_file) = (None, None, None, None, None);
     let (mut limit, mut set, mut dump, mut ctx_mode, mut demote) = (None::<usize>, None, None, false, true);
@@ -202,6 +222,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     let (mut packs, mut packs_dir) = (0u32, None::<String>);
     let mut extra_overlay = None::<String>;
     let mut threads = 1usize;
+    let (mut colloquial, mut co_mu, mut co_gamma) = (None::<String>, None::<f64>, None::<f64>);
     let mut it = args.iter();
     while let Some(a) = it.next() {
         let mut val = || it.next().cloned().ok_or_else(|| "missing option value".to_string());
@@ -243,10 +264,25 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
             "--packs" => packs |= pack_flag(&val()?)?,
             "--packs-dir" => packs_dir = Some(val()?),
             "--extra-overlay" => extra_overlay = Some(val()?),
+            "--colloquial" => colloquial = Some(val()?),
+            "--colloquial-mu" => co_mu = Some(val()?.parse::<f64>().ok().filter(|x| x.is_finite()).ok_or("--colloquial-mu takes a number")?),
+            "--colloquial-gamma" => co_gamma = Some(val()?.parse::<f64>().ok().filter(|x| x.is_finite()).ok_or("--colloquial-gamma takes a number")?),
             _ => return Err("unknown argument".into()),
         }
     }
     check_lm_opts(set.as_deref(), dump.is_some() || dump_words.is_some(), packs, packs_dir.is_some())?;
+    let colloq_args = match (&colloquial, co_mu, co_gamma) {
+        (None, None, None) => None,
+        (Some(f), Some(mu), Some(gamma)) => Some((f.clone(), mu, gamma)),
+        (None, _, _) => return Err("--colloquial-mu and --colloquial-gamma need --colloquial".into()),
+        _ => return Err("--colloquial needs both --colloquial-mu and --colloquial-gamma".into()),
+    };
+    if colloq_args.is_some() && profile.as_deref() == Some("formal") {
+        return Err("--colloquial is chat only: refused with --profile formal".into());
+    }
+    if colloq_args.is_some() && set.as_deref() == Some("holdout") {
+        return Err("--colloquial is not allowed with --set holdout".into());
+    }
     if tinylm_scores.is_some() && tinylm.is_none() {
         return Err("--tinylm-scores needs --tinylm".into());
     }
@@ -260,6 +296,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     }
     let pdir = packs_dir_checked(packs, packs_dir)?;
     let extra_overlay = extra_overlay_checked(extra_overlay)?;
+    let colloq_args = colloq_args.map(|(f, mu, gamma)| colloquial_checked(&f).map(|_| (f, mu, gamma))).transpose()?;
     // Summary-line marker `+xo:<sha8 of the file>`, only with the option, so a names-layer run never prints the baseline's label.
     let xo = match &extra_overlay {
         Some(p) => format!("+xo:{}", &sha256_hex(&fs::read(p).map_err(|e| format!("--extra-overlay: cannot read {} ({:?})", p.display(), e.kind()))?)[..8]),
@@ -287,6 +324,21 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     }
     let rss_after = tinylm.is_some().then(rss_kb).flatten();
     let dir = root().join("data/lexicon");
+    // The table alone is timed and RSS-windowed; the overlay and base word sets for k (built once) are timed apart.
+    let colloq = match &colloq_args {
+        Some((f, mu, gamma)) => {
+            let rss_before = rss_kb();
+            let t0 = Instant::now();
+            let table = Colloq::load(Path::new(f))?;
+            let load = t0.elapsed();
+            let rss = (rss_before, rss_kb());
+            let sha8 = table.sha256()[..8].to_string();
+            let t1 = Instant::now();
+            let (ovl, base) = colloquial::read_sets(&dir, &pdir, packs & PACK_ACG != 0)?;
+            Some((Colloq::new(table, *mu, *gamma, ovl, base), load, rss, t1.elapsed(), sha8))
+        }
+        None => None,
+    };
     let (lex, overlay) = load_with_packs(&dir, packs, &pdir, extra_overlay.as_deref(), names)?;
     let demote_rows = fs::read_to_string(dir.join("demote.tsv")).map_err(|e| format!("cannot read demote.tsv ({:?})", e.kind()))?;
     let table = Demote::parse(&demote_rows).filter(|d| d.check(&lex)).ok_or("bad demote.tsv")?;
@@ -344,11 +396,18 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
         // S2h: the first word is conditioned on the row's context, cut like the engine cuts it.
         let left = if ctx_mode { Some(context_key(ctx)) } else { None };
         let start = left.as_deref().filter(|k| *k != SENTINEL).map_or("<s>", |k| history(k, &lm));
-        let nb = decode_from(&capped, syls, &lm, prof, BEAM_S1, start, demote).map_err(|e| e.to_string())?;
+        let mut nb = decode_from(&capped, syls, &lm, prof, BEAM_S1, start, demote).map_err(|e| e.to_string())?;
+        let mut out = RowOut::default();
+        // P4b: one stable sort by s moves each candidate's score and split together (the surfaces are made from the splits below);
+        // from here on a candidate's score is s.
+        if let Some((co, ..)) = &colloq {
+            let t0 = Instant::now();
+            co.rescore(&mut nb).map_err(|e| format!("row {}: {e}", i + 1))?;
+            out.colloq = Some(t0.elapsed());
+        }
         let mut surf: Vec<String> = nb.iter().map(|(_, ws)| ws.concat()).collect();
         let t = len.apply(truth);
-        let mut out = RowOut::default();
-        // The row's chosen candidate: the first, or the small model's pick among the first 8 (the dump keeps the n-gram order).
+        // The row's chosen candidate: the first, or the small model's pick among the first 8 (the dump keeps the order of the candidates: the decoder's, or s's with --colloquial).
         let mut chosen = 0;
         if let Some((tl, _, _)) = &tl {
             let top: Vec<&str> = surf.iter().take(TOPK).map(String::as_str).collect();
@@ -394,12 +453,14 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
         Ok(out)
     };
     let (mut top1, mut o64, mut firsts, mut rs, mut rerank, mut long) = (0usize, 0usize, Vec::new(), Vec::new(), Vec::new(), 0usize);
+    let mut colloq_times: Vec<Duration> = Vec::new();
     // Puts one row's output in the files and the counters; called in row order, so every file and the summary line are those of N = 1.
     let mut emit = |i: usize, out: RowOut| -> Result<(), String> {
         top1 += out.ok as usize;
         o64 += out.in64 as usize;
         long += out.long as usize;
         rerank.extend(out.rerank);
+        colloq_times.extend(out.colloq);
         if let Some(w) = scores.as_mut() {
             w.write_all(out.scores.as_bytes()).map_err(|_| "cannot write tinylm scores".to_string())?;
         }
@@ -495,6 +556,22 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
             if threads > 1 { format!(" (threads {threads}: measured under contention)") } else { String::new() }
         );
     }
+    if let (Some((_, load, (rss_before, rss_after), sets, _)), false) = (&colloq, colloq_times.is_empty()) {
+        // P4b latency record, stderr only and apart from the rerank line: lc + k + the sort of one row's candidates.
+        colloq_times.sort();
+        let ms = |d: Duration| d.as_secs_f64() * 1000.0;
+        eprintln!(
+            "colloquial: lc+k+sort n={} p50={:.3} ms p95={:.3} ms; table load {:.0} ms, rss {:?} -> {:?} KiB around the table load alone; overlay/base word sets {:.0} ms{}",
+            colloq_times.len(),
+            ms(colloq_times[colloq_times.len() / 2]),
+            ms(colloq_times[(colloq_times.len() as f64 * 0.95) as usize]),
+            ms(*load),
+            rss_before,
+            rss_after,
+            ms(*sets),
+            if threads > 1 { format!(" (threads {threads}: measured under contention)") } else { String::new() }
+        );
+    }
     if let Some(mut d) = dump {
         d.flush().map_err(|_| "cannot write dump".to_string())?;
     }
@@ -511,7 +588,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
         RerankLevel::Conservative => "+rl:conservative",
         RerankLevel::Aggressive => "+rl:aggressive",
     };
-    println!("## {name}  lm-{profile_name}{}{}{}{}{}{}{}{}{xo}{}  {{'n': {}, 'top1': {top1}, 'oracle@64': {o64}, 'top1_sha256': '{sha}'}}", if ctx_mode { "+ctx" } else { "" }, if demote { "" } else { "-nodemote" }, if classes { "" } else { "-noclasses" }, if names { "" } else { "-nonames" }, if scoring.kn { lm.kn_tag().unwrap_or("") } else { "" }, tl.as_ref().map_or(String::new(), |(_, _, sha8)| format!("+tl:{sha8}")), rl_tag, if packs & PACK_ACG != 0 { "+acg" } else { "" }, if scoring.tri { lm.tri_tag().unwrap_or("") } else { "" }, rows.len());
+    println!("## {name}  lm-{profile_name}{}{}{}{}{}{}{}{}{xo}{}{}  {{'n': {}, 'top1': {top1}, 'oracle@64': {o64}, 'top1_sha256': '{sha}'}}", if ctx_mode { "+ctx" } else { "" }, if demote { "" } else { "-nodemote" }, if classes { "" } else { "-noclasses" }, if names { "" } else { "-nonames" }, if scoring.kn { lm.kn_tag().unwrap_or("") } else { "" }, tl.as_ref().map_or(String::new(), |(_, _, sha8)| format!("+tl:{sha8}")), rl_tag, if packs & PACK_ACG != 0 { "+acg" } else { "" }, if scoring.tri { lm.tri_tag().unwrap_or("") } else { "" }, colloq.as_ref().map_or(String::new(), |(co, _, _, _, sha8)| format!("+co:{sha8}:{}:{}", co.mu, co.gamma)), rows.len());
     Ok(())
 }
 
