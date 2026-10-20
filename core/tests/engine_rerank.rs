@@ -668,7 +668,7 @@ fn learned_stretch_is_not_reranked() {
 #[test]
 fn learn_guard_off_reranks_the_learned_stretch() {
     let syls = row(27);
-    for (guard, stretches, skips) in [(true, 1, 1), (false, 2, 0)] {
+    let taught = |guard: bool| {
         let mut e = engine();
         e.set_learn_guard(guard);
         e.set_learning(true);
@@ -679,9 +679,21 @@ fn learn_guard_off_reranks_the_learned_stretch() {
         e.set_left_context("");
         let o = fix_word(&mut e, &syls, 9, "郵件");
         assert!(o.preedit.starts_with("我已經回覆你的郵件"), "premise: the learned word is in the first path");
+        e
+    };
+    for (guard, stretches, skips) in [(true, 1, 1), (false, 2, 0)] {
+        let mut e = taught(guard);
         assert_eq!(e.guard_skips(), skips, "guard {guard}");
         assert_eq!(e.take_rerank_job().unwrap().run().picks().len(), stretches, "guard {guard}");
     }
+    // A setting change is a decoding change: the pending job (made with the guard on) and its count are dropped.
+    let mut e = taught(true);
+    e.set_learn_guard(false);
+    assert!(e.take_rerank_job().is_none() && e.guard_skips() == 0, "set_learn_guard drops the job and the count");
+    // So does a commit: Enter clears the composition, and the count of the sent text is not reported.
+    let mut e = taught(true);
+    e.key(k(KeyKind::Enter)).unwrap();
+    assert_eq!(e.guard_skips(), 0, "after Enter");
 }
 
 /// S7c-2c section 2.3 (docs/contracts/s7c2c-delta.md): a new engine with the small model loaded makes no rerank job until

@@ -202,6 +202,14 @@ fn text_committed_mid_row_is_kept_counted_and_not_re_picked() {
     assert!(summary_line("x", "t", &[o, short], 0).contains("'autocommits': 1,"));
 }
 
+/// Section 5: 'guard_skips' sums the rows' counts and 'guard_rows' counts the rows with one or more, in that order (a swap, or a
+/// sum in both, fails here). No engine: the summary line is a function of the row outputs.
+#[test]
+fn summary_line_sums_guard_skips_and_counts_guard_rows() {
+    let rows = [2, 0, 1].map(|g| RowOut { guard_skips: g, ..RowOut::default() });
+    assert!(summary_line("x", "t", &rows, 0).contains("'guard_skips': 3, 'guard_rows': 2,"));
+}
+
 /// Rule (section 4): a pick that leaves the shown text as it was ends the re-picking. The table below makes 我在重 and 我再重 differ
 /// as whole strings although the first character is right, so the first difference is reported at 我, and picking 我 changes nothing.
 #[test]
@@ -333,8 +341,9 @@ fn learn_file_changes_the_choice_and_the_source_is_untouched() {
 }
 
 /// engine-replay.md section 2 (`--learn-guard`): the one-record file of the test above (在建 learned for the row's reading, so
-/// the row's stretch has a boosted word): the default counts it in `guard_skips` and `guard_rows`, `--learn-guard off` counts none
-/// and tags `+noguard`, the default prints the same bytes as an explicit `--learn-guard on`, and another value is refused.
+/// the row's stretch has a boosted word): the default counts it in `guard_skips` and `guard_rows` (read before the re-pick),
+/// `--learn-guard off` counts none and tags `+noguard`, the default prints the same bytes as an explicit `--learn-guard on`, and
+/// another value is refused.
 #[test]
 fn learn_guard_counts_and_switches() {
     let dir = scratch("guard");
@@ -342,9 +351,10 @@ fn learn_guard_counts_and_switches() {
     let today = core::learn::local_day();
     std::fs::write(&src, format!("#shanjie-learning v1\n^>$\tㄗㄞˋ-ㄐㄧㄢˋ\t在建\t50\t{today}\n")).unwrap();
     let _g = ONE_ENGINE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
-    let default = text(&replay_with_learn(&dir, &src, &[]));
+    // With --correct the re-pick fixes 再見 after the first display: a count read after the re-pick (or after Enter) would be 0.
+    let default = text(&replay_with_learn(&dir, &src, &["--correct"]));
     let off = text(&replay_with_learn(&dir, &src, &["--learn-guard", "off"]));
-    assert_eq!(default, text(&replay_with_learn(&dir, &src, &["--learn-guard", "on"])));
+    assert_eq!(default, text(&replay_with_learn(&dir, &src, &["--correct", "--learn-guard", "on"])));
     assert!(default.contains("'guard_skips': 1, 'guard_rows': 1,") && !default.contains("+noguard"), "{default}");
     assert!(off.contains("'guard_skips': 0, 'guard_rows': 0,") && off.contains("+noguard"), "{off}");
     assert_eq!(replay_with_learn(&dir, &src, &["--learn-guard", "maybe"]).status.code(), Some(1));

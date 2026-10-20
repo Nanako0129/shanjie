@@ -40,7 +40,8 @@ pub struct RowOut {
     pub rewrites: usize,
     /// `apply_rerank` calls that returned `Some` after a typing key other than the last one.
     pub typing_applies: usize,
-    /// Stretches the learning guard kept out of the decode after the last reading key, before any `final` apply (section 5).
+    /// Stretches the learning guard kept out of the rerank job of the decode after the last reading key, read before any
+    /// `final` apply or re-pick (contract section 5).
     pub guard_skips: usize,
 }
 
