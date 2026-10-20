@@ -25,7 +25,7 @@
 - **授權**：檔案以 **CC BY-SA 4.0** 發佈（和其他模型檔相同；model-v6 的口語計數本來就以 CC BY-SA 4.0 隨模型出貨，口語池四個來源 ODC-BY、CC BY 3.0、CC BY 2.0 FR、CC BY 4.0 都只要求署名，可以併入 BY-SA）。
   - **App**：`scripts/build-app.sh` 產生的模型署名檔（現在逐一列出每個模型檔的授權與來源的那一份）加 `colloquial.sjlm` 一段：授權名稱、model-v6 口語計數的來源（沿用現有說明）、口語池四個來源的名稱與授權連結；`Resources/LICENSES/` 另放 `colloquial-attribution.tsv`。repo 的 `LICENSES/data.md` 同步。`scripts/check-app.sh` 加一條 grep：署名檔裡有 `colloquial.sjlm` 那一段，`colloquial-attribution.tsv` 存在且不是空的。
   - **資料 Release**：附同樣的 NOTICE 與 `colloquial-attribution.tsv`。`colloquial-attribution.tsv` 只有來源 id、名稱與句數，不含語料文字；它是資料 Release `sj-cl-1-68k` 的附件，SHA-256 記在 `data/colloquial-attribution.tsv.sha256`，`build-app.sh` 從 `data/lm/` 複製進 `Resources/LICENSES/`（和模型檔一樣：存在而且雜湊相符才組建）。
-  - `colloquial-attribution.tsv` 由一支新腳本（`tools/build_attribution.py`）從口語池 `pool.tsv` 的來源欄位產生，每個來源單位一列（YODAS 影片 id 與頻道、Tatoeba 句子 id 與作者、WildChat 與 MASSIVE 寫資料集出處與授權），並有一欄這個單位涵蓋的句數；各來源的句數加總要等於研究紀錄 2026-10-18「Phase 2 公開句子池」記的 WildChat 3,491、YODAS 90,080、Tatoeba 36,839、MASSIVE 13,485 句（這幾個數字在 repo 裡，不是腳本自己算的）。`pool.tsv` 的完整 SHA-256 寫進 `docs/releases/sj-cl-1-68k.md`。來源單位的資料不完整（例如缺頻道或作者）＝停止條件。
+  - `colloquial-attribution.tsv` 由一支新腳本（`tools/build_attribution.py`）從口語池 `pool.tsv` 的來源欄位產生，每個來源單位一列（YODAS 影片 id 與影片網址、Tatoeba 句子 id 與作者、WildChat 與 MASSIVE 寫資料集出處與授權），並有一欄這個單位涵蓋的句數；各來源的句數加總要等於研究紀錄 2026-10-18「Phase 2 公開句子池」記的 WildChat 3,491、YODAS 90,080、Tatoeba 36,839、MASSIVE 13,485 句（這幾個數字在 repo 裡，不是腳本自己算的）。`pool.tsv` 的完整 SHA-256 寫進 `docs/releases/sj-cl-1-68k.md`。YODAS 只能照資料集提供的內容署名：資料集本身只給影片 id，頻道名稱查不回來（oEmbed 抽 5 支都是 404／400），CC BY 3.0 §4(b) 的作者名稱是「有提供的話」；維護者 2026-10-20 選定照資料集提供的內容署名（資料集名稱、CC BY 3.0、每支影片的 id、網址與句數）。缺來源單位 id、或 Tatoeba 缺作者＝停止條件。
 
 ### 2.2 核心
 
@@ -104,3 +104,4 @@
 - plan-verifier 第一次（`898495b8`）REVISE 8 項，照改：共用的核心函式與 CLI 選項釘死、P4b 選項移除、`p4d.py --out-picks`（§2.2、§2.3、§3.2）；重播載入口語表與比對對象（§2.3、§3.4）；「其他地方不變」逐項標出有沒有口語表與工具（§3.3）；參數全部是常數、和語意校正模型的配對規則與測試（§2.2、§3.1）；bundle 路徑、selftest 的一步（§2.3）；檔案授權、App 與資料 Release 兩邊的署名、`check-app.sh` 的檢查、來源單位數的出處（§2.1、§3.6）；量法的工具、機器、基準與門檻（§3.5）；回退與預算（§4、§5）。名稱「常談」由維護者同日選定；驗收句由維護者同日指正改成「桌腳的螺絲鬆掉了」（「大夥」台灣很少人說）。
 - plan-verifier 第二次（`95e369a2`）REVISE 6 項，逐項處置：第 202 列的前文（FIX：selftest 與實機都先給前文「桌子一直在搖」，實作時先用 CLI 在同條件量一次）；k 的疊加層要含引擎建立時的詞包（FIX：用 `pack_text`，加有詞包／沒詞包的測試）；CI 與 release.yml 下載常談（FIX，資料 Release 先建）；署名的完整性檢查不能循環（FIX：每列句數、依來源加總對 repo 裡的數字、缺 id 就失敗）；關於頁沒有模型列表（拿掉這一項）；載入時間的量法（改用 `/usr/bin/time -v` 跑一列）。之後一次收尾審查。
 - 收尾審查（`88f556bd`）REVISE 2 項，照改：實機步驟的前文要不送出、游標接在後面（殼只讀游標前的字）；署名檔改成資料 Release 的附件、`data/` 記雜湊、CI 與 release.yml 一起下載（乾淨的 checkout 才拿得到）。
+- 實作前（2026-10-20）：YODAS 的頻道名稱查不回來，觸發 §2.1 原本的停止條件；維護者選「照資料集提供的內容署名」，§2.1 照改，其餘不變。
