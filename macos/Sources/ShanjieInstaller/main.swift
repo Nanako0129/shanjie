@@ -1110,7 +1110,9 @@ final class Controller: NSObject, NSApplicationDelegate, NSWindowDelegate {
             fail(Failure(message: L("找不到已安裝的善解輸入法。", "The installed input method was not found.")))
             return
         }
-        // The fresh check (`checkAccepted`): this process's own list may not have seen the user's answer in System Settings.
+        // The fresh check (`checkAccepted`): this process's own list may not have seen the user's answer in System Settings. The busy
+        // screen keeps a second press from starting a second check and registration.
+        show(Screens.working(Screens.waiting))
         checkAccepted(bundleID: bundleID) { [weak self] accepted in
             guard let self else { return }
             guard accepted else { return self.showActivate(note: Screens.notDetected) }
