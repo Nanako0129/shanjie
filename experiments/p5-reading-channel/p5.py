@@ -5,6 +5,7 @@ row (only --probe prints sentences, and it is for PUBLIC row files under eval/ o
 
   python3 p5.py --name chatclause --rows ROWS --dump D --dump-words W --rowstats R --tinylm-scores S --t2 T2.sjlm --select --out SEL.json
   python3 p5.py --name discordtune ... --cell-from SEL.json --clause 1 [--out-rowstats CELL.rs] [--out-picks PICKS.tsv] --out OUT.json
+  python3 p5.py --name dev302 ... --cell EST,NU,C --out OUT.json            (report only: --cell takes no --clause; judging is for the selected cell)
   python3 p5.py --probe PUBLIC_ROWS --dump D --dump-words W --rowstats R --tinylm-scores S --t2 T2.sjlm --cell EST,NU,C
 
 Inputs are one shipping-setting CLI run (--profile chat --context --packs acg --tinylm, plus --dump --dump-words --rowstats
@@ -28,9 +29,14 @@ Baseline: every cell is judged and selected against the P4D control's final ok (
 lex before mc. Judging (--cell-from, --clause) uses the README table with ratio limit 0.6, against P4D; 2b's paired baseline is the P4D
 control's (ok, ed, glen) per row. Each clause is bound to its set (1 discordtune, 2a typing76, 2b cvtune-clean, 3 user-reported) and each set
 name to its row count; a mismatch STOPs. --cell-from also reports the chosen cell with the colloquial term off against shipping ("off_vs_ship").
-Exit codes: 0 ok, 1 STOP or bad arguments, 2 --probe refused (a row file outside eval/ and experiments/), 3 NO CELL QUALIFIES.
+Each set name is bound to the SHA-256 of its --rows file (ROW_SHA256) as well as to its row count; the cell label is validated before the load.
+--out is checked early (directory writable, not the --cell-from file) and written only at the end, through a temp file and os.replace, so a STOP
+never truncates an earlier good JSON; --out-rowstats and --out-picks are written the same way. --out-picks has three columns per row: row,
+the P4D control's pick, the cell's pick. The JSON's "cell_source" is "cell" or "cell-from".
+--probe takes only files tracked by git under eval/ or experiments/ (never eval/holdout); anything else STOPs.
+Exit codes: 0 ok, 1 STOP or bad arguments (a refused --probe file included), 2 argparse usage error, 3 NO CELL QUALIFIES.
 """
-import argparse, json, math, os, sys
+import argparse, hashlib, json, math, os, subprocess, sys, tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
@@ -49,6 +55,14 @@ CAP_DISCORD = p4c.CAP_DISCORD
 ROW_COUNTS = {"chatclause": p4c.N_SELECT, "discordtune": p4c.N_DISCORD, "cvtune-clean": 3286, "typing76": 76, "user-reported": 154, "dev302": 302}
 NAMES = tuple(ROW_COUNTS)
 CLAUSE_SET = {"1": "discordtune", "2a": "typing76", "2b": "cvtune-clean", "3": "user-reported"}
+# SHA-256 of each set's --rows file, so a name cannot be run on another file of the same length. user-reported only grows: the judgement is
+# fixed to its first 154 rows, so a later file with more rows STOPs here until the hash is registered anew.
+ROW_SHA256 = {"chatclause": "81c035b086f91a0ff15143ed0b2e05f2d6af3b1947ebb2425fc467ff4f0e4203",
+              "discordtune": "77e1c90a507fa7e6085c3fca7d377abfd527a5146f43f8c4388e72342627a775",
+              "cvtune-clean": "d0960ebec0dc4562f104013951026d91950a73b33f85b10792d967185675d5fb",
+              "typing76": "c061f66dfade21996803137320aa986a81a3e72e3e4e1dd559abd5dc04b68d08",
+              "user-reported": "b78834cb3aab2ad2d37b66f887000bfa6948d7558a46c928bb62a879a95efeae",
+              "dev302": "603850e444efee38b8c121e3d666d6c540acd3a27d5a6a5070a78a962dd98456"}
 P4D_ANCHORS = {"chatclause": (113, 37), "discordtune": (74, 43), "cvtune-clean": (45, 17), "typing76": (0, 0), "user-reported": (17, 4),
                "dev302": (9, 2)}   # README: the P4d cell against shipping, fixes / breaks
 TOP_K = 8
@@ -86,14 +100,12 @@ def mc_logp(lex, mcb):
 
 
 def load_mcbpmf():
-    """{(reading tuple, word): max score} of data/lexicon/mcbpmf-data.txt with d23.load_lex_scores' filters."""
+    """{(reading tuple, word): max score} of data/lexicon/mcbpmf-data.txt, parsed by d23.mcbpmf_entries (the parser load_lex_scores uses)."""
+    import d23 as D
     out = {}
-    for l in triage.lines_of(triage.read_text(os.path.join(ROOT, "data", "lexicon", "mcbpmf-data.txt"))):
-        f = l.split()
-        if l[:1] in ("#", "_") or len(f) != 3 or len(f[1]) != len(f[0].split("-")):
-            continue
-        k = (tuple(f[0].split("-")), f[1])
-        out[k] = max(out.get(k, -1e9), float(f[2]))
+    for reading, word, sc in D.mcbpmf_entries():
+        k = (tuple(reading.split("-")), word)
+        out[k] = max(out.get(k, -1e9), sc)
     return out
 
 
@@ -239,6 +251,13 @@ def check_controls(name, scores, cols, base_ok):
     return s, picks
 
 
+def check_rows_sha(name, path):
+    with open(path, "rb") as f:
+        h = hashlib.sha256(f.read()).hexdigest()
+    if h != ROW_SHA256[name]:
+        stop(f"{name}: the --rows file's sha256 is not the registered one")
+
+
 def read_selection(path):
     """The chosen cell of a --select JSON; STOP unless it is the chatclause selection and chose a cell."""
     with open(path, encoding="utf-8") as f:
@@ -251,14 +270,37 @@ def read_selection(path):
 
 
 def public_path(path):
-    """--probe prints sentences: only public files of this repo (under eval/ or experiments/) are allowed; exit 2 otherwise."""
-    p = os.path.realpath(path)
-    for d in ("eval", "experiments"):
-        base = os.path.realpath(os.path.join(ROOT, d))
-        if os.path.commonpath([p, base]) == base:
-            return
-    print(f"refused: --probe prints sentences and takes only public row files under {ROOT}/eval or {ROOT}/experiments, not {p}")
-    raise SystemExit(2)
+    """--probe prints sentences: only files tracked by git under eval/ or experiments/, never eval/holdout; anything else is a STOP."""
+    p, root = os.path.realpath(path), os.path.realpath(ROOT)
+    under = lambda d: os.path.commonpath([p, os.path.join(root, d)]) == os.path.join(root, d)
+    if under("eval/holdout"):
+        stop(f"--probe refuses the holdout: {p}")
+    if not (under("eval") or under("experiments")):
+        stop(f"--probe prints sentences and takes only public row files under {root}/eval or {root}/experiments, not {p}")
+    if subprocess.run(["git", "-C", root, "ls-files", "--error-unmatch", os.path.relpath(p, root)], capture_output=True).returncode:
+        stop(f"--probe takes only files tracked by git, not {p}")
+
+
+def check_out(out, cell_from):
+    """Fail now: --out's directory must exist and be writable, and it must not be the --cell-from file. Nothing is written yet."""
+    d = os.path.dirname(os.path.abspath(out))
+    if not (os.path.isdir(d) and os.access(d, os.W_OK)):
+        raise SystemExit(f"--out: {d} is not a writable directory")
+    if cell_from and os.path.realpath(out) == os.path.realpath(cell_from):
+        raise SystemExit("--out is the --cell-from file")
+
+
+def write_atomic(path, text):
+    """Temp file in the same directory, then os.replace: a STOP or crash before this leaves an earlier file untouched."""
+    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(os.path.abspath(path)), prefix=".p5-")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(text)
+        os.replace(tmp, path)
+    except BaseException:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+        raise
 
 
 def check_args(a):
@@ -272,12 +314,46 @@ def check_args(a):
             raise SystemExit("--select is the chatclause step")
         if a.clause != "report" or a.out_rowstats or a.out_picks:
             raise SystemExit("--select takes no --clause, --out-rowstats or --out-picks")
+    if a.cell and a.clause != "report":
+        raise SystemExit("--cell is report only; judging (--clause) is for the selected cell (--cell-from)")
     check_clause(a.clause, a.name)
+
+
+def run_cell(scores, cols, by_c, p4d_ok, base_ok, cell, q=True):
+    """-> (stats of the cell against the P4D control's final ok (p4d_ok) with `vs_ship` (against base_ok, the shipping ok), picks).
+    q False: the colloquial term off (the report-only off_vs_ship)."""
+    e, nu, c = cell
+    picks = [final_index(sc, col, ch, nu, q) for sc, col, ch in zip(scores, cols, by_c[e, c])]
+    s = stats_vs(p4d_ok, scores, picks)
+    s["vs_ship"] = short(stats_vs(base_ok, scores, picks))
+    return s, picks
+
+
+def off_vs_ship(scores, cols, by_c, p4d_ok, base_ok, cell):
+    """Report only: the cell with the colloquial term OFF against shipping."""
+    return run_cell(scores, cols, by_c, p4d_ok, base_ok, cell, q=False)[0]["vs_ship"]
+
+
+def bootstrap_rows(scores, picks):
+    """[(ok, errors, gold length)] per row of the final picks: the rowstats shape paired_bootstrap reads."""
+    return [(int(bool(sc["ok"][j])), sc["ed"][j], sc["glen"]) for sc, j in zip(scores, picks)]
+
+
+def clause_2b(scores, p4d_picks, picks):
+    """Clause 2b: the 90% paired bootstrap lower bound of the cell's top1 change against the P4D control (not shipping). -> (verdict, rows, pp)."""
+    (lo, _), _ = evalstats.paired_bootstrap(bootstrap_rows(scores, p4d_picks), bootstrap_rows(scores, picks), level=0.90)
+    pp = 100 * lo / len(scores)
+    return pp >= -1.0, lo, pp
+
+
+def picks_text(p4d_picks, picks):
+    """--out-picks: row, the P4D control's pick, the cell's pick (so the cell's breaks against P4D can be labelled)."""
+    return "".join(f"{i}\t{p}\t{j}\n" for i, (p, j) in enumerate(zip(p4d_picks, picks), 1))
 
 
 def probe(a, rows, scores, cols, terms, base_ok):
     """PUBLIC rows only: per row the chosen sentence under shipping, the P4D control and --cell."""
-    est, nu, c = cell = parse_cell(a.cell)
+    est, nu, c = parse_cell(a.cell)
     P.check_anchor(scores, cols, base_ok)
     ch = channel(terms[est], c)
     for i, (r, sc, col, h) in enumerate(zip(rows, scores, cols, ch), 1):
@@ -300,6 +376,7 @@ def main(argv=None):
     ap.add_argument("--out-rowstats")
     ap.add_argument("--out-picks")
     a = ap.parse_args(argv)
+    cell = None
     if a.probe:
         if not a.cell:
             raise SystemExit("--probe needs --cell")
@@ -308,8 +385,10 @@ def main(argv=None):
         a.rows = a.probe
     else:
         check_args(a)
-        chosen = read_selection(a.cell_from) if a.cell_from else None
-        outf = open(a.out, "w", encoding="utf-8")   # fail now, not after the load
+        if not a.select:
+            cell = parse_cell(read_selection(a.cell_from) if a.cell_from else a.cell)
+        check_out(a.out, a.cell_from)
+        check_rows_sha(a.name, a.rows)
     rows, scores, cols, base_ok, base = P.load_full(a)
     import d23 as D
     lex = D.load_lex_scores()[0]
@@ -327,17 +406,10 @@ def main(argv=None):
     for e, t in res["terms"].items():
         print(f"terms {e} " + " ".join(f"{k} {v}" for k, v in t.items()))
     by_c = {(e, c): channel(terms[e], c) for e in ESTS for c in CS}
+    run = lambda c: run_cell(scores, cols, by_c, p4d_ok, base_ok, c)
 
-    def run(cell, q=True):
-        """-> (stats against P4D with `vs_ship` (against shipping), picks). q False: the colloquial term off (report only)."""
-        e, nu, c = cell
-        picks = [final_index(sc, col, ch, nu, q) for sc, col, ch in zip(scores, cols, by_c[e, c])]
-        s = stats_vs(p4d_ok, scores, picks)
-        s["vs_ship"] = short(stats_vs(base_ok, scores, picks))
-        return s, picks
-
-    def line(cell, s):
-        return f"cell {label(cell)} u2 {s['u2']} {p4c.kv(s)} vs_ship {s['vs_ship']['fixes']}/{s['vs_ship']['breaks']}"
+    def line(c, s):
+        return f"cell {label(c)} u2 {s['u2']} {p4c.kv(s)} vs_ship {s['vs_ship']['fixes']}/{s['vs_ship']['breaks']}"
     if a.select:
         cells = [(*c, run(c)[0]) for c in GRID]
         for e, nu, c, s in cells:
@@ -346,36 +418,25 @@ def main(argv=None):
         print(label(best[:3]) if best else "NO CELL QUALIFIES")
         res["cells"] = {label(c[:3]): p4c.jsonable(c[3]) for c in cells}
         res["chosen"] = label(best[:3]) if best else None
-        with outf:
-            json.dump(res, outf, indent=1)
+        write_atomic(a.out, json.dumps(res, indent=1))
         return 0 if best else 3
-    cell = parse_cell(chosen or a.cell)
     s, picks = run(cell)
     print(line(cell, s))
-    res.update({"cell": label(cell), "clause": a.clause, **p4c.jsonable(s)})
-    off, _ = run(cell, q=False)
-    res["off_vs_ship"] = off["vs_ship"]
-    print(f"off_vs_ship (colloquial off, 只報) {off['vs_ship']['fixes']}/{off['vs_ship']['breaks']} net {off['vs_ship']['net']}")
+    res.update({"cell": label(cell), "cell_source": "cell-from" if a.cell_from else "cell", "clause": a.clause, **p4c.jsonable(s)})
+    res["off_vs_ship"] = off = off_vs_ship(scores, cols, by_c, p4d_ok, base_ok, cell)
+    print(f"off_vs_ship (colloquial off, 只報) {off['fixes']}/{off['breaks']} net {off['net']}")
     if a.clause == "2b":
-        base_row = [(int(o), sc["ed"][j], sc["glen"]) for sc, j, o in zip(scores, p4d_picks, p4d_ok)]
-        cand = [(int(bool(sc["ok"][j])), sc["ed"][j], sc["glen"]) for sc, j in zip(scores, picks)]
-        (lo, _), _ = evalstats.paired_bootstrap(base_row, cand, level=0.90)
-        pp = 100 * lo / len(base)
-        res.update({"verdict": pp >= -1.0, "bootstrap90_lower_rows": lo, "bootstrap90_lower_pp": pp})
+        res["verdict"], lo, pp = clause_2b(scores, p4d_picks, picks)
+        res.update({"bootstrap90_lower_rows": lo, "bootstrap90_lower_pp": pp})
         print(f"clause 2b {'PASS' if res['verdict'] else 'FAIL'} lower90_rows {lo} lower90_pp {pp:.3f}")
     elif a.clause != "report":
         res["verdict"] = verdict(a.clause, s)
         print(f"clause {a.clause} {'PASS' if res['verdict'] else 'FAIL'}")
     if a.out_rowstats:
-        with open(a.out_rowstats, "w", encoding="utf-8") as f:
-            for i, (sc, j) in enumerate(zip(scores, picks), 1):
-                f.write(f"{i}\t{int(bool(sc['ok'][j]))}\t{sc['ed'][j]}\t{sc['glen']}\n")
+        write_atomic(a.out_rowstats, "".join(f"{i}\t{int(bool(sc['ok'][j]))}\t{sc['ed'][j]}\t{sc['glen']}\n" for i, (sc, j) in enumerate(zip(scores, picks), 1)))
     if a.out_picks:
-        with open(a.out_picks, "w", encoding="utf-8") as f:
-            for i, j in enumerate(picks, 1):
-                f.write(f"{i}\t{j}\n")
-    with outf:
-        json.dump(res, outf, indent=1)
+        write_atomic(a.out_picks, picks_text(p4d_picks, picks))
+    write_atomic(a.out, json.dumps(res, indent=1))
     return 0
 
 

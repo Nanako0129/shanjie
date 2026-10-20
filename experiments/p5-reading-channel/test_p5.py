@@ -1,4 +1,4 @@
-import json, math, os, sys, tempfile, unittest
+import hashlib, json, math, os, sys, tempfile, unittest
 from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -250,15 +250,38 @@ class Bindings(unittest.TestCase):
 
     def test_controls_stop_when_the_p4d_counts_differ_from_the_anchors(self):
         for name, (f, b) in Q.P4D_ANCHORS.items():
-            with mock.patch.object(P, "check_anchor"), mock.patch.object(P, "evaluate", return_value=({"fixes": f, "breaks": b}, [0])):
+            with mock.patch.object(P, "check_anchor"), mock.patch.object(P, "evaluate", return_value=({"fixes": f, "breaks": b}, [0])) as ev:
                 self.assertEqual(Q.check_controls(name, [], [], []), ({"fixes": f, "breaks": b}, [0]))
+                self.assertEqual(ev.call_args[0][3], Q.ON)                  # the control is the P4d cell, not shipping
             for fb in ((f + 1, b), (f, b + 1)):
                 with mock.patch.object(P, "check_anchor"), mock.patch.object(P, "evaluate", return_value=({"fixes": fb[0], "breaks": fb[1]}, [0])):
                     exits(self, 1, Q.check_controls, name, [], [], [])
 
+    def test_the_control_is_computed_with_the_colloquial_term_on(self):
+        # unmocked evaluate: colloquial col 4 switches the P4d cell to candidate 1 (right), shipping stays on 0 (wrong): 1/0, not the typing76 anchor 0/0
+        r = sc([0.0, -0.5], [0.0, 0.0], [0, 1], c=0)
+        exits(self, 1, Q.check_controls, "typing76", [r], [[0.0, 4.0]], [False])
+        # the same row with no colloquial difference: the control equals shipping, 0/0, and passes
+        s, picks = Q.check_controls("typing76", [r], [[0.0, 0.0]], [False])
+        self.assertEqual((s["fixes"], s["breaks"], picks), (0, 0, [0]))
+
     def test_controls_call_the_anchor_check(self):
         with mock.patch.object(P, "check_anchor", side_effect=SystemExit(1)), mock.patch.object(P, "evaluate"):
             exits(self, 1, Q.check_controls, "dev302", [], [], [])
+
+    def test_rows_file_is_bound_to_its_sha256(self):
+        self.assertEqual(set(Q.ROW_SHA256), set(Q.NAMES))
+        for name, rel in (("typing76", "eval/bench/suite-v1/typing76.txt"), ("user-reported", "eval/dev/user-reported.txt"),
+                          ("dev302", "eval/bench/suite-v1/dev302.txt")):
+            Q.check_rows_sha(name, os.path.join(Q.ROOT, rel))                # the registered hashes are those of the public files
+            exits(self, 1, Q.check_rows_sha, "chatclause" if name != "chatclause" else "dev302", os.path.join(Q.ROOT, rel))
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "rows.txt")
+            with open(p, "wb") as f:
+                f.write(b"x|y|z\n")
+            exits(self, 1, Q.check_rows_sha, "typing76", p)
+            with mock.patch.dict(Q.ROW_SHA256, {"typing76": hashlib.sha256(b"x|y|z\n").hexdigest()}):
+                Q.check_rows_sha("typing76", p)
 
     def write(self, d, obj):
         p = os.path.join(d, "sel.json")
@@ -282,14 +305,106 @@ class Bindings(unittest.TestCase):
             self.assertFalse(os.path.exists(out))
 
     def test_select_refuses_clause_and_outputs(self):
-        base = self.ARGS + ["--rows", "r", "--out", "o.json", "--name", "chatclause", "--select"]
-        for extra in (["--out-picks", "p.tsv"], ["--out-rowstats", "r.rs"], ["--clause", "1"], ["--clause", "2b"]):
-            with self.assertRaises(SystemExit) as cm:
-                Q.main(base + extra)
-            self.assertIn("--select", str(cm.exception.code))
+        with tempfile.TemporaryDirectory() as d:
+            base = self.ARGS + ["--rows", "r", "--out", os.path.join(d, "o.json"), "--name", "chatclause", "--select"]
+            for extra in (["--out-picks", os.path.join(d, "p.tsv")], ["--out-rowstats", os.path.join(d, "r.rs")], ["--clause", "1"], ["--clause", "2b"]):
+                with self.assertRaises(SystemExit) as cm:
+                    Q.main(base + extra)
+                self.assertIn("--select", str(cm.exception.code))
+
+    def test_cell_takes_only_the_report_clause(self):
+        with tempfile.TemporaryDirectory() as d:
+            for clause, name in (("1", "discordtune"), ("2a", "typing76"), ("2b", "cvtune-clean"), ("3", "user-reported")):
+                with self.assertRaises(SystemExit) as cm:
+                    Q.main(self.ARGS + ["--rows", "r", "--out", os.path.join(d, "o.json"), "--name", name, "--cell", "mc,0.25,2", "--clause", clause])
+                self.assertIn("--cell is report only", str(cm.exception.code))
 
     def test_a_clause_on_the_wrong_set_stops_before_loading(self):
-        exits(self, 1, Q.main, self.ARGS + ["--rows", "r", "--out", "o.json", "--name", "cvtune-clean", "--cell", "mc,0.25,2", "--clause", "3"])
+        with tempfile.TemporaryDirectory() as d:
+            exits(self, 1, Q.main, self.ARGS + ["--rows", "r", "--out", os.path.join(d, "o.json"), "--name", "cvtune-clean",
+                                                 "--cell-from", os.path.join(d, "none.json"), "--clause", "3"])
+
+    def test_a_bad_cell_label_stops_before_loading(self):
+        with tempfile.TemporaryDirectory() as d:
+            out = os.path.join(d, "o.json")
+            with self.assertRaises(SystemExit) as cm:
+                Q.main(self.ARGS + ["--rows", "r", "--out", out, "--name", "dev302", "--cell", "mc,0.2,2"])   # "x" files would fail the load: this must come first
+            self.assertIn("off-grid", str(cm.exception.code))
+            sel = self.write(d, {"name": "chatclause", "chosen": "lex,0.25,3"})
+            with self.assertRaises(SystemExit) as cm:
+                Q.main(self.ARGS + ["--rows", "r", "--out", out, "--name", "dev302", "--cell-from", sel])
+            self.assertIn("off-grid", str(cm.exception.code))
+            self.assertFalse(os.path.exists(out))
+
+    def test_out_is_checked_early_and_written_at_the_end_atomically(self):
+        with tempfile.TemporaryDirectory() as d:
+            sel = self.write(d, {"name": "chatclause", "chosen": "mc,0.25,2"})
+            with self.assertRaises(SystemExit) as cm:
+                Q.check_out(os.path.join(d, "no-such-dir", "o.json"), None)
+            self.assertIn("writable", str(cm.exception.code))
+            with self.assertRaises(SystemExit) as cm:
+                Q.check_out(sel, sel)
+            self.assertIn("--cell-from", str(cm.exception.code))
+            Q.check_out(os.path.join(d, "o.json"), sel)
+            # a STOP before the end (here: the registered rows hash) leaves an earlier good output as it was
+            out = os.path.join(d, "good.json")
+            with open(out, "w") as f:
+                f.write("GOOD")
+            rows = os.path.join(d, "rows.txt")
+            with open(rows, "w") as f:
+                f.write("not the registered rows\n")
+            exits(self, 1, Q.main, self.ARGS + ["--rows", rows, "--out", out, "--name", "dev302", "--cell", "mc,0.25,2"])
+            with open(out) as f:
+                self.assertEqual(f.read(), "GOOD")
+            self.assertEqual(sorted(os.listdir(d)), ["good.json", "rows.txt", "sel.json"])
+            Q.write_atomic(out, "NEW")
+            with open(out) as f:
+                self.assertEqual(f.read(), "NEW")
+            self.assertEqual(sorted(os.listdir(d)), ["good.json", "rows.txt", "sel.json"])      # no temp file left behind
+
+
+class Wiring(unittest.TestCase):
+    """Which baseline each number is taken against."""
+    # two identical rows: candidate 1 is right, the colloquial column (4) makes the P4d cell (on) pick it, off keeps candidate 0
+    ROWS = [sc([0.0, -0.5], [0.0, 0.0], [0, 1]), sc([0.0, -0.5], [0.0, 0.0], [0, 1])]
+    COLS = [[0.0, 4.0], [0.0, 4.0]]
+    CELL = ("lex", 0.1, 1)
+    BY_C = {("lex", 1): [[0.0, 0.0], [0.0, 0.0]]}                      # channel 0: the cell is the P4d cell here
+    P4D_OK, BASE_OK = [False, True], [True, True]                      # the cell's own ok is [True, True]
+
+    def test_the_cell_is_judged_against_the_p4d_control_and_vs_ship_against_shipping(self):
+        s, picks = Q.run_cell(self.ROWS, self.COLS, self.BY_C, self.P4D_OK, self.BASE_OK, self.CELL)
+        self.assertEqual(picks, [1, 1])
+        self.assertEqual((s["fixes"], s["breaks"]), (1, 0))                # against P4D_OK
+        self.assertEqual((s["vs_ship"]["fixes"], s["vs_ship"]["breaks"]), (0, 0))   # against BASE_OK
+        # swapped baselines give different numbers: the test would catch a swap
+        t, _ = Q.run_cell(self.ROWS, self.COLS, self.BY_C, self.BASE_OK, self.P4D_OK, self.CELL)
+        self.assertEqual((t["fixes"], t["breaks"]), (0, 0))
+        self.assertEqual((t["vs_ship"]["fixes"], t["vs_ship"]["breaks"]), (1, 0))
+        self.assertEqual(s["u2"], 1)
+
+    def test_off_vs_ship_has_the_colloquial_term_off(self):
+        off = Q.off_vs_ship(self.ROWS, self.COLS, self.BY_C, self.P4D_OK, self.BASE_OK, self.CELL)
+        self.assertEqual((off["fixes"], off["breaks"], off["net"]), (0, 2, -2))     # off picks candidate 0 (wrong) where shipping was right
+        on = Q.run_cell(self.ROWS, self.COLS, self.BY_C, self.P4D_OK, self.BASE_OK, self.CELL)[0]["vs_ship"]
+        self.assertNotEqual((off["fixes"], off["breaks"]), (on["fixes"], on["breaks"]))
+
+    def test_out_picks_has_the_p4d_pick_and_the_cell_pick(self):
+        self.assertEqual(Q.picks_text([0, 1, 0], [1, 1, 2]), "1\t0\t1\n2\t1\t1\n3\t0\t2\n")
+
+    def test_2b_baseline_is_the_p4d_control_not_shipping(self):
+        scores = [{**sc([0.0, -0.5], [0.0, 0.0], [0, 1]), "ed": [3, 0]}, {**sc([0.0, -0.5], [0.0, 0.0], [1, 0]), "ed": [0, 2]}]
+        p4d_picks, picks = [0, 1], [1, 1]
+        self.assertEqual(Q.bootstrap_rows(scores, p4d_picks), [(0, 3, 4), (0, 2, 4)])
+        with mock.patch.object(Q.evalstats, "paired_bootstrap", return_value=((-30, 5), (0.0, 0.0))) as pb:
+            v, lo, pp = Q.clause_2b(scores, p4d_picks, picks)
+        base, cand = pb.call_args[0]
+        self.assertEqual(base, [(0, 3, 4), (0, 2, 4)])                     # the P4D control's picks
+        self.assertEqual(cand, [(1, 0, 4), (0, 2, 4)])
+        self.assertEqual(pb.call_args[1], {"level": 0.90})
+        self.assertEqual((v, lo, pp), (False, -30, -1500.0))               # -30 rows of 2 is far below -1 pp
+        with mock.patch.object(Q.evalstats, "paired_bootstrap", return_value=((0, 5), (0.0, 0.0))):
+            self.assertTrue(Q.clause_2b(scores, p4d_picks, picks)[0])
 
 
 class Probe(unittest.TestCase):
@@ -299,11 +414,20 @@ class Probe(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             p = os.path.join(d, "rows.txt")
             open(p, "w").close()
-            exits(self, 2, Q.main, ["--probe", p] + self.ARGS)
-        exits(self, 2, Q.main, ["--probe", os.path.join(Q.ROOT, "README.md")] + self.ARGS)
-        exits(self, 2, Q.main, ["--probe", os.path.join(Q.ROOT, "experiments", "..", "README.md")] + self.ARGS)   # .. does not escape the check
+            exits(self, 1, Q.main, ["--probe", p] + self.ARGS)
+        exits(self, 1, Q.main, ["--probe", os.path.join(Q.ROOT, "README.md")] + self.ARGS)
+        exits(self, 1, Q.main, ["--probe", os.path.join(Q.ROOT, "experiments", "..", "README.md")] + self.ARGS)   # .. does not escape the check
 
-    def test_allows_public_files(self):
+    def test_refuses_untracked_files_even_under_experiments(self):
+        with tempfile.NamedTemporaryFile(dir=HERE, suffix=".txt") as f:
+            exits(self, 1, Q.public_path, f.name)
+
+    def test_refuses_the_holdout(self):
+        with mock.patch.object(Q.subprocess, "run") as run:                  # tracked or not, the holdout is refused before git is asked
+            exits(self, 1, Q.public_path, os.path.join(Q.ROOT, "eval", "holdout", "news.txt"))
+            run.assert_not_called()
+
+    def test_allows_public_tracked_files(self):
         Q.public_path(os.path.join(HERE, "r140.txt"))
         Q.public_path(os.path.join(Q.ROOT, "eval", "dev", "user-reported.txt"))
 
