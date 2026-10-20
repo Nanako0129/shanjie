@@ -867,9 +867,6 @@ impl Engine {
         self.invalidate();
         let st = self.lm.as_ref().ok_or(EngineError::LoadFailed)?;
         let model = TinyLm::load_paired(path, &st.lm).map_err(|_| EngineError::LoadFailed)?;
-        if self.colloquial.is_some() {
-            model.file_sha256(); // the pairing with the colloquial term needs the file's hash: made here, not on a key press
-        }
         self.tinylm = Some(Arc::new(model));
         Ok(())
     }
@@ -882,9 +879,6 @@ impl Engine {
         self.invalidate();
         let dir = self.data_dir.as_ref().ok_or(EngineError::LoadFailed)?;
         let co = Colloquial::load_from_dir(path, dir, self.pack_text.as_deref()).map_err(|_| EngineError::LoadFailed)?;
-        if let Some(model) = &self.tinylm {
-            model.file_sha256(); // the pairing needs the small model's file hash: made here, not on a key press
-        }
         self.colloquial = Some(Arc::new(co));
         Ok(())
     }

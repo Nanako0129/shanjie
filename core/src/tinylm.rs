@@ -18,7 +18,6 @@ use crate::lm::{Lm, Profile};
 use std::collections::HashMap;
 use std::fmt;
 use std::path::Path;
-use std::sync::{Mutex, OnceLock};
 
 const MAGIC: &[u8; 8] = b"SJTL0001";
 const HEADER: usize = 100;
@@ -232,12 +231,9 @@ pub struct TinyLm {
     /// A version 3 or 4 file (its own conservative and aggressive triples).
     levels: bool,
     ng_sha: [u8; 32],
-    /// The bytes `load_paired` parsed, kept only until `file_sha256` hashes them (`None` for a model made by `parse` or `load`, and after the
-    /// hash is made): the 14.6 MB file is hashed on first use, so a build that never asks pays neither the time nor the memory after that.
-    raw: Mutex<Option<Vec<u8>>>,
-    /// SHA-256 (hex) of those bytes, made by the first `file_sha256`; empty for a model made by `parse` or `load`, which the colloquial
-    /// term never pairs with.
-    file_sha: OnceLock<String>,
+    /// SHA-256 (hex) of the file `load_paired` read, made right there from the exact bytes it parsed; empty for a model made by `parse` or
+    /// `load`, which the colloquial term never pairs with.
+    file_sha: String,
     /// Version 4: the SHA-256 of the side file it was tuned with; `None` for all zero and for versions 1 to 3.
     kn_sha: Option<[u8; 32]>,
     ids: HashMap<char, u32>,
@@ -325,19 +321,19 @@ impl TinyLm {
     /// The one loader of the engine and the evaluation CLI (S7c-2a): `load`'s checks, then the pairing with `lm` — the n-gram
     /// model hash the file records must be `lm`'s, and the Kneser-Ney side file hash it records (model-v6 section 2.7: none for
     /// versions 1 to 3 and for an all-zero version 4 field) must be the one `lm` has loaded, all 32 bytes, or none when `lm` has none ("loaded" is about the file beside the model, not whether the formal profile scores with it).
-    /// A pairing check only, not an integrity check of the `.sjtl`. The model keeps the bytes it parsed, so `file_sha256` is the hash of
-    /// exactly what was loaded.
+    /// A pairing check only, not an integrity check of the `.sjtl`. `file_sha256` is the hash of exactly the bytes parsed, made here and the bytes
+    /// dropped on return (so a table loaded later never finds them alive). Measured: release build, the real tinylm.sjtl (14,638,352 bytes), 7 runs:
+    /// the core's software SHA-256 takes 35 to 52 ms (median about 37 ms), `parse` 5 to 9 ms.
     pub fn load_paired(path: &Path, lm: &Lm) -> Result<TinyLm, TinyLmError> {
         let bytes = read_bounded(path, MAX_FILE)?;
         let mut model = TinyLm::parse(&bytes)?;
+        model.file_sha = crate::eval::sha256_hex(&bytes);
+        drop(bytes);
         if model.ngram_sha256() != lm.sha256() {
             return Err(TinyLmError::OtherNgram);
         }
         match (model.kn_sha, lm.kn_sha256()) {
-            (tuned, on) if tuned == on => {
-                model.raw = Mutex::new(Some(bytes));
-                Ok(model)
-            }
+            (tuned, on) if tuned == on => Ok(model),
             (None, _) => Err(TinyLmError::KneserNey(KnPairing::TunedWithout)),
             (Some(_), None) => Err(TinyLmError::KneserNey(KnPairing::TunedWith)),
             (Some(_), Some(_)) => Err(TinyLmError::KneserNey(KnPairing::OtherSideFile)),
@@ -435,8 +431,7 @@ impl TinyLm {
             formal,
             levels,
             ng_sha: bytes[68..100].try_into().unwrap(),
-            raw: Mutex::new(None),
-            file_sha: OnceLock::new(),
+            file_sha: String::new(),
             kn_sha,
             ids,
             emb,
@@ -472,10 +467,9 @@ impl TinyLm {
         self.kn_sha
     }
 
-    /// SHA-256 (hex) of the `.sjtl` bytes `load_paired` parsed (empty for `parse` and `load`). Made on the first call and kept (the bytes are
-    /// dropped then); the model's own loading never calls it.
+    /// SHA-256 (hex) of the `.sjtl` bytes `load_paired` parsed (empty for `parse` and `load`).
     pub fn file_sha256(&self) -> &str {
-        self.file_sha.get_or_init(|| self.raw.lock().unwrap().take().map_or(String::new(), |b| crate::eval::sha256_hex(&b)))
+        &self.file_sha
     }
 
     /// SHA-256 (hex) of the n-gram model alpha and tau were tuned with.
