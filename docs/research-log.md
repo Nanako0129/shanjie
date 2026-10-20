@@ -8217,3 +8217,9 @@ XL 比 `MAX_FILE`（67,108,864）小 1,168,880 位元組。錨點：4 個模型 
 - **`ditto --noacl` 不會拿掉 ACL**（executor 在維護者的 Mac，macOS 27.0.1，一般使用者量到）：來源帶 ACL 時，複製出來的副本還是有。真正清掉 ACL 的是之後明確的一步。
 - **`chmod -RN` 會跟著符號連結走**（fresh verifier 量到、重現）：`chown -R` 與 `chmod -R <權限>` 不跟連結，但 `chmod -RN` 會跟一層。root 階段原本在驗簽章之前就對副本跑 `chmod -RN`，同使用者的程式只要在輸入密碼的那幾秒往解開的 bundle 裡放一個指向外部的連結，root 就會替它拿掉外部檔案的 ACL，即使這份 bundle 最後被拒。修正：先 `codesign --verify --strict`（嚴格模式拒絕指向 bundle 外的連結，`invalid destination for symbolic link in bundle`，也量過），通過之後才用 `find … ! -type l -exec chmod -N` 清 ACL。這兩個事實只以一般使用者量過，沒有以 root 量過。
 - 程式審查另外抓到：帳號層那份比內附的新時「這台 Mac」會降版、staging 在驗證前被打開、輪替 `.shanjie-previous` 失敗會弄丟上一版、倚天延續在密碼框之前寫入等，都在合併前修好（契約 §2.2、§2.3 已加註）。
+
+## 2026-10-20：P4c（口語表＋調強的語意校正）：接近，但第 1 條與打字測驗不過，口語表這條線結案
+
+- 登記 `experiments/p4c-colloquial/README.md`（任何數字之前 commit；維護者的方向：口語表的改壞讓語意校正來補）。24 格 μ × α × δ（γ 0.25、τ 2），每個 μ 用 CLI 跑一次、融合離線重算（錨點全對上），chatclause 選格，discordtune 只判選中的一格；標準是同日第二次放寬後的版本。
+- chatclause 12 格合格，選中 μ 0.5、α 0.5、δ 0（183／82，+101，比例 0.45）。判讀：discordtune 129／78，淨值 +51（p 0.0005），但**改壞÷改對 0.60 > 0.5**；打字測驗 0／1，**淨值 −1**；cvtune-clean 76／26，+50（90% 下界 +1.04 個百分點）；錯字回報 28／5，+23（比例 0.18）。第 1、2a 條不過 → **照登記結案**。
+- 只報：dev302 聊天 11／9（+2）；和 P4b 比，調強融合讓 discordtune 的改壞從 92 降到 78、cvtune-clean 從 +1 變成 +50。
