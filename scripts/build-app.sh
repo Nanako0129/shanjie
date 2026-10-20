@@ -197,6 +197,14 @@ ditto "$BIN_DIR/Sparkle.framework" "$HELPER/Contents/Frameworks/Sparkle.framewor
 HSPARKLE="$HELPER/Contents/Frameworks/Sparkle.framework"
 strip_xpc "$HSPARKLE"
 
+# The colloquial table of the chat rerank (docs/contracts/colloquial-term.md section 2.3) and the list that attributes the public sentences
+# its counts come from (section 2.1): both are assets of the data release sj-cl-1-68k, and both must match the hashes recorded in git.
+[ -f data/lm/colloquial.sjlm ] || fail "data/lm/colloquial.sjlm is missing (the colloquial table, 常談). Download the sj-cl-1-68k release assets:
+  gh release download sj-cl-1-68k -R Nanako0129/shanjie -p colloquial.sjlm -p colloquial-attribution.tsv -D data/lm"
+[ -s data/lm/colloquial-attribution.tsv ] || fail "data/lm/colloquial-attribution.tsv is missing or empty (the attribution list of the colloquial table). Download the sj-cl-1-68k release assets:
+  gh release download sj-cl-1-68k -R Nanako0129/shanjie -p colloquial.sjlm -p colloquial-attribution.tsv -D data/lm"
+shasum -a 256 -c data/colloquial.sjlm.sha256 data/colloquial-attribution.tsv.sha256 >/dev/null \
+  || fail "data/lm/colloquial.sjlm or colloquial-attribution.tsv does not match its data/*.sha256; download sj-cl-1-68k again"
 RES="$APP/Contents/Resources"
 # names-add.tsv: the always-on common proper nouns (model-v6 section 2.5); the core fails to start without it.
 cp data/lexicon/mcbpmf-data.txt data/lexicon/overlay-add.tsv data/lexicon/sandhi-add.tsv data/lexicon/names-add.tsv data/lexicon/demote.tsv "$RES/"
@@ -207,7 +215,7 @@ cp data/lexicon/digits.tsv "$RES/"
 # (acg-groups.tsv, acg-collisions.tsv, acg-exclude.tsv, acg-manual.tsv). The shell passes Resources/packs to shanjie_engine_new_packs.
 mkdir -p "$RES/packs"
 cp data/packs/acg-add.tsv data/packs/acg-sources.tsv data/packs/acg.json "$RES/packs/"
-cp -L data/lm/bigram.sjlm data/lm/classes.sjc data/lm/kn.sjkn data/lm/tinylm.sjtl data/lm/trigram.sjt3 "$RES/"   # -L: the worktree's model may be a symlink
+cp -L data/lm/bigram.sjlm data/lm/classes.sjc data/lm/kn.sjkn data/lm/tinylm.sjtl data/lm/trigram.sjt3 data/lm/colloquial.sjlm "$RES/"   # -L: the worktree's model may be a symlink
 cp "$EN_TMP/english-words.txt" "$RES/"   # generated above (docs/contracts/zhen-mixed.md section 3.4)
 swift scripts/make-icon.swift "$RES/shanjie.tiff"
 scripts/compile-app-icon.sh "$RES"   # the app icon (docs/contracts/app-icon.md): Assets.car and AppIcon.icns
@@ -242,9 +250,11 @@ cp LICENSE "$RES/LICENSES/LICENSE"
 cp LICENSES/McBopomofo-MIT.txt LICENSES/data.md LICENSES/SCOWL.txt LICENSES/SymSpell-MIT.txt LICENSES/name-suggestion-index-BSD-3-Clause.txt "$RES/LICENSES/"
 # Sparkle.framework ships in Contents/Frameworks/Updater: its MIT notice with the bundled third-party notices (Sparkle's LICENSE, 2.10.0).
 cp LICENSES/Sparkle-MIT.txt "$RES/LICENSES/"
+# The per-unit attribution of the colloquial table's public sentences (colloquial-term.md section 2.1); no corpus text in it.
+cp -L data/lm/colloquial-attribution.tsv "$RES/LICENSES/"
 cat > "$RES/LICENSES/CC-BY-SA-4.0-attribution.txt" <<'EOF'
 overlay-add.tsv, names-add.tsv, packs/acg-add.tsv, packs/acg-sources.tsv, packs/acg.json, demote.tsv, digits.tsv, bigram.sjlm,
-classes.sjc, kn.sjkn, trigram.sjt3 and tinylm.sjtl are licensed under the Creative Commons Attribution-ShareAlike 4.0 International license
+classes.sjc, kn.sjkn, trigram.sjt3, tinylm.sjtl and colloquial.sjlm are licensed under the Creative Commons Attribution-ShareAlike 4.0 International license
 (CC BY-SA 4.0):
 https://creativecommons.org/licenses/by-sa/4.0/
 
@@ -284,6 +294,25 @@ tinylm.sjtl: a small character model (the 語意校正 rerank) trained on text
   Voice sentences (CC0), Tatoeba sentences (CC BY 2.0 FR) and synthetic
   sentences. No private conversation data.
   Attribution: Wikipedia contributors, Tatoeba contributors.
+colloquial.sjlm: the colloquial table (常談 SJ-CL-1-68K, the chat rerank's colloquial term): word counts of colloquial text only,
+  from two groups of sources.
+  (1) The colloquial text counted into bigram.sjlm (model-v6): Mozilla Common Voice sentences (CC0), Tatoeba sentences
+      (CC BY 2.0 FR) and synthetic sentences. Attribution: Tatoeba contributors.
+  (2) A public pool of 143,895 colloquial sentences from four sources, each used under its own licence (all of them only ask for
+      attribution, which this paragraph and colloquial-attribution.tsv give):
+      - WildChat-1M, Taiwan subset (allenai/WildChat-1M, https://huggingface.co/datasets/allenai/WildChat-1M ), Allen Institute for AI,
+        Open Data Commons Attribution License v1.0 (ODC-BY 1.0, https://opendatacommons.org/licenses/by/1-0/ ): 3,491 sentences.
+      - YODAS zh000 Traditional-script subtitles (espnet/yodas, https://huggingface.co/datasets/espnet/yodas ) of YouTube videos
+        published under the Creative Commons Attribution 3.0 licence (CC BY 3.0, https://creativecommons.org/licenses/by/3.0/ ):
+        90,080 sentences from 1,138 videos. The dataset supplies the video id only (no channel name), so each video is attributed
+        by its id and URL in colloquial-attribution.tsv.
+      - Tatoeba Traditional-script Mandarin sentences (https://tatoeba.org ), Creative Commons Attribution 2.0 France
+        (CC BY 2.0 FR, https://creativecommons.org/licenses/by/2.0/fr/ ): 36,839 sentences, each attributed to its author by sentence id
+        in colloquial-attribution.tsv.
+      - MASSIVE zh-TW (AmazonScience/massive, https://huggingface.co/datasets/AmazonScience/massive ), Amazon.com Inc.,
+        Creative Commons Attribution 4.0 (CC BY 4.0, https://creativecommons.org/licenses/by/4.0/ ): 13,485 sentences.
+  The counts are not the sentences: the table holds words and word-pair counts, no sentence text. No private conversation data.
+  Attribution: Tatoeba contributors, the sources above; per-video and per-sentence attributions: LICENSES/colloquial-attribution.tsv.
 
 The program itself is Apache-2.0 (LICENSE); mcbpmf-data.txt is MIT
 (McBopomofo-MIT.txt). Details: data.md.
