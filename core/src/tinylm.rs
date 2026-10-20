@@ -12,6 +12,7 @@
 //! docstring is the format (and the tensor order, which `parse` repeats).
 //! R2: errors carry a kind only, never text.
 
+use crate::colloquial::{self, Colloquial};
 use crate::learn::SENTINEL;
 use crate::lm::{Lm, Profile};
 use std::collections::HashMap;
@@ -230,6 +231,8 @@ pub struct TinyLm {
     /// A version 3 or 4 file (its own conservative and aggressive triples).
     levels: bool,
     ng_sha: [u8; 32],
+    /// SHA-256 (hex) of the file `load_paired` read; empty for a model made by `parse` or `load`, which the colloquial term never pairs with.
+    file_sha: String,
     /// Version 4: the SHA-256 of the side file it was tuned with; `None` for all zero and for versions 1 to 3.
     kn_sha: Option<[u8; 32]>,
     ids: HashMap<char, u32>,
@@ -321,7 +324,8 @@ impl TinyLm {
     /// the engine drops them).
     pub fn load_paired(path: &Path, lm: &Lm) -> Result<(TinyLm, Vec<u8>), TinyLmError> {
         let bytes = read_bounded(path, MAX_FILE)?;
-        let model = TinyLm::parse(&bytes)?;
+        let mut model = TinyLm::parse(&bytes)?;
+        model.file_sha = crate::eval::sha256_hex(&bytes);
         if model.ngram_sha256() != lm.sha256() {
             return Err(TinyLmError::OtherNgram);
         }
@@ -424,6 +428,7 @@ impl TinyLm {
             formal,
             levels,
             ng_sha: bytes[68..100].try_into().unwrap(),
+            file_sha: String::new(),
             kn_sha,
             ids,
             emb,
@@ -459,6 +464,11 @@ impl TinyLm {
         self.kn_sha
     }
 
+    /// SHA-256 (hex) of the `.sjtl` file `load_paired` read (empty for `parse` and `load`).
+    pub fn file_sha256(&self) -> &str {
+        &self.file_sha
+    }
+
     /// SHA-256 (hex) of the n-gram model alpha and tau were tuned with.
     pub fn ngram_sha256(&self) -> String {
         hex(&self.ng_sha)
@@ -482,6 +492,24 @@ impl TinyLm {
         let ll = self.ll_many(&items)?;
         let (alpha, tau, delta) = params;
         Ok((pick(&ng[..n], &ll, alpha, tau, delta), Some(ll)))
+    }
+
+    /// `rerank` with the colloquial term (docs/contracts/colloquial-term.md section 2.2): the same first `TOPK` candidates and `ll_many`,
+    /// then col_i = `co.col(words[i])` for the word split of each candidate, ll_eff = `colloquial::fuse(ll, col)`, and `pick` with the
+    /// registered cell's alpha, tau and delta (`colloquial::ALPHA` ...), not the file's. The engine and the evaluation CLI both call
+    /// this one function. Returns the chosen index and the raw LLs, as `rerank` does.
+    pub fn rerank_colloquial(
+        &self, ng: &[f64], cands: &[&str], words: &[Vec<&str>], key: &str, co: &Colloquial,
+    ) -> Result<(usize, Option<Vec<f64>>), TinyLmError> {
+        let n = cands.len().min(ng.len()).min(words.len()).min(TOPK);
+        if n < 2 {
+            return Ok((0, None));
+        }
+        let k = if key == SENTINEL { "" } else { key };
+        let items: Vec<(&str, &str)> = cands[..n].iter().map(|c| (k, *c)).collect();
+        let ll = self.ll_many(&items)?;
+        let col: Vec<f64> = words[..n].iter().map(|w| co.col(w)).collect();
+        Ok((colloquial::fused_pick(&ng[..n], &ll, &col), Some(ll)))
     }
 
     /// LL of each (k, c): the sum over the characters of c of log10 P(c_i | [BOS] + k + c_<i), as `tinylm.ll_many`

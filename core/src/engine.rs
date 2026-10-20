@@ -1,6 +1,7 @@
 //! S3a key engine (docs/contracts/s3a.md): key events in, preedit / commit / candidates out.
 //! R2: no input text in errors or panics; types holding input text do not derive Debug.
 
+use crate::colloquial::{Colloquial, PAIRED_TINYLM_SHA256};
 use crate::learn::{context_key, digit_of, english_of, english_or_space, is_han, is_space_unit, local_day, newword_score, next_key, record_key, Learner, Level, Record, NEWWORD, NEWWORD_BREAK, NEWWORD_DIGITS, NEWWORD_MAX, NEWWORD_MIN, NEWWORD_SHADOW, PUNCT_PREFIX};
 use crate::learn_store::{LearnStore, Opened, StoreError, JOURNAL_MAX};
 use crate::predict::{predict, predict_digits, reading_matches_in, unit_of_syllable, Mode, Unit};
@@ -47,6 +48,9 @@ pub struct RerankJob {
     /// The profile's (alpha, tau, delta) at the engine's rerank level when the job was made (rerank-strength section 2.2): an own
     /// Copy value, so a later level or profile change never reaches a job already made (it is stale anyway).
     params: (f64, f64, f64),
+    /// The colloquial term (docs/contracts/colloquial-term.md section 2.2), decided when the job was made: `Some` only for chat,
+    /// standard strength and the small model the term was measured with. `None`: the plain `rerank` with `params`.
+    colloquial: Option<Arc<Colloquial>>,
     /// The engine's left context when the job was made.
     left: String,
     stretches: Vec<Stretch>,
@@ -83,7 +87,14 @@ impl RerankJob {
                 let key = context_key(&before);
                 let surfaces: Vec<String> = s.paths.iter().map(|p| p.iter().map(|w| w.0.as_str()).collect()).collect();
                 let cands: Vec<&str> = surfaces.iter().map(String::as_str).collect();
-                let pick = self.model.rerank(&s.ng, &cands, &key, self.params).map_or(0, |r| r.0);
+                let pick = match &self.colloquial {
+                    Some(co) => {
+                        let words: Vec<Vec<&str>> = s.paths.iter().map(|p| p.iter().map(|w| w.0.as_str()).collect()).collect();
+                        self.model.rerank_colloquial(&s.ng, &cands, &words, &key, co)
+                    }
+                    None => self.model.rerank(&s.ng, &cands, &key, self.params),
+                }
+                .map_or(0, |r| r.0);
                 let pick = if pick < s.paths.len() { pick } else { 0 };
                 before.push_str(&surfaces[pick]);
                 let words = if pick == 0 { Vec::new() } else { s.paths[pick].clone() };
@@ -555,6 +566,9 @@ pub struct Engine {
     /// S7c-2a: the small character model, from `load_tinylm`; dropped when another n-gram model is loaded (its `.sjtl` names
     /// the n-gram model's hash).
     tinylm: Option<Arc<TinyLm>>,
+    /// The colloquial table and the word sets of its k term (`load_colloquial`); independent of the n-gram and the small model.
+    /// Whether a job uses it is decided per job in `refresh_lm`.
+    colloquial: Option<Arc<Colloquial>>,
     /// Whether rerank jobs are made (default off since S7c-2c, docs/contracts/s7c2c-delta.md section 2.3; `set_rerank`).
     /// `load_tinylm` leaves it as it is.
     rerank_on: bool,
@@ -804,6 +818,7 @@ impl Engine {
             forget_panic: false,
             tinylm: None,
             rerank_on: false,
+            colloquial: None,
             rerank_level: RerankLevel::Standard,
             learn_guard: true,
             guard_skips: 0,
@@ -854,6 +869,24 @@ impl Engine {
         let (model, _) = TinyLm::load_paired(path, &st.lm).map_err(|_| EngineError::LoadFailed)?;
         self.tinylm = Some(Arc::new(model));
         Ok(())
+    }
+
+    /// The colloquial table at `path` (docs/contracts/colloquial-term.md section 2.2), with the word sets of its k term read from the
+    /// engine's lexicon folder (`mcbpmf-data.txt`, `overlay-add.tsv`) and the pack rows this engine was built with. Callable before or
+    /// after `load_lm` / `load_tinylm`: the pairing is checked per job. Fails (the previous table, or none, stays) when the engine has no
+    /// data folder or a file cannot be read or parsed. Drops the pending job.
+    pub fn load_colloquial(&mut self, path: &Path) -> Result<(), EngineError> {
+        self.invalidate();
+        let dir = self.data_dir.as_ref().ok_or(EngineError::LoadFailed)?;
+        let read = |f: &str| std::fs::read_to_string(dir.join(f)).map_err(|_| EngineError::LoadFailed);
+        let co = Colloquial::load(path, &read("mcbpmf-data.txt")?, &read("overlay-add.tsv")?, self.pack_text.as_deref()).map_err(|_| EngineError::LoadFailed)?;
+        self.colloquial = Some(Arc::new(co));
+        Ok(())
+    }
+
+    /// The loaded colloquial table, if any (tests and the replay tool's summary line).
+    pub fn colloquial(&self) -> Option<&Colloquial> {
+        self.colloquial.as_deref()
     }
 
     /// Whether rerank jobs are made (default off, S7c-2c); recomputes the composition and returns the snapshot like `set_demote`,
@@ -2306,7 +2339,12 @@ impl Engine {
         self.path = path;
         if let (false, Some(model)) = (stretches.is_empty(), &self.tinylm) {
             let (params, left) = (model.params(self.profile, self.rerank_level), self.left.clone());
-            self.rerank_job = Some(RerankJob { generation: self.generation, model: model.clone(), params, left, stretches });
+            // The four conditions of docs/contracts/colloquial-term.md section 2.2 (the fourth is the pairing with the measured model).
+            let colloquial = self
+                .colloquial
+                .clone()
+                .filter(|_| self.profile == Profile::Chat && self.rerank_level == RerankLevel::Standard && model.file_sha256() == PAIRED_TINYLM_SHA256);
+            self.rerank_job = Some(RerankJob { generation: self.generation, model: model.clone(), params, colloquial, left, stretches });
         }
         Ok(())
     }

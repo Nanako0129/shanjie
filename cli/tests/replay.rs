@@ -14,7 +14,7 @@ static ONE_ENGINE_AT_A_TIME: Mutex<()> = Mutex::new(());
 fn engine(learn: bool) -> (MutexGuard<'static, ()>, Engine) {
     let guard = ONE_ENGINE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
     let r = root();
-    let e = build_engine(&r, &r.join("data/lm/bigram.sjlm"), Some(&r.join("data/lm/tinylm.sjtl")), Profile::Chat, learn).expect("data/lm models");
+    let e = build_engine(&r, &r.join("data/lm/bigram.sjlm"), Some(&r.join("data/lm/tinylm.sjtl")), None, Profile::Chat, learn).expect("data/lm models");
     (guard, e)
 }
 
@@ -283,6 +283,40 @@ fn outputs_are_numbers_only_and_the_rowstats_are_the_clis() {
         let cols = if f.ends_with("keys") { 6 } else { 4 };
         assert!(text.lines().all(|l| l.split('\t').count() == cols), "{f}");
     }
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+/// `--colloquial FILE` (docs/contracts/colloquial-term.md section 2.3, item 4): on row 202 of dev302 and on the first rows of dev302 the replay's
+/// choices are the CLI's `--colloquial-core` choices (equal `top1_sha256`), the summary is tagged, and without the option nothing is tagged
+/// and the choice is the shipping one.
+#[test]
+fn colloquial_replay_agrees_with_the_cli() {
+    let dir = std::env::temp_dir().join(format!("shanjie-replay-colloq-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let rows = dir.join("rows.txt");
+    let dev = std::fs::read_to_string(root().join("eval/bench/suite-v1/dev302.txt")).unwrap();
+    let lines: Vec<&str> = dev.lines().collect();
+    assert!(lines[201].starts_with("桌子一直在搖|桌腳的螺絲鬆掉了|"));
+    std::fs::write(&rows, [&lines[..12], &lines[200..206]].concat().join("\n") + "\n").unwrap();
+    let rows = rows.to_str().unwrap();
+    let _g = ONE_ENGINE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let (replay, eval, r) = (env!("CARGO_BIN_EXE_shanjie-replay"), env!("CARGO_BIN_EXE_shanjie-eval"), root());
+    let (lm, tl, co) = (r.join("data/lm/bigram.sjlm"), r.join("data/lm/tinylm.sjtl"), r.join("data/lm/colloquial.sjlm"));
+    let cli = |extra: &[&str]| {
+        let mut a = vec!["--lm", lm.to_str().unwrap(), "--profile", "chat", "--context", "--packs", "acg", "--tinylm", tl.to_str().unwrap(), "--rows", rows];
+        a.extend_from_slice(extra);
+        run(eval, &a)
+    };
+    let (plain, with) = (cli(&[]), cli(&["--colloquial-core", co.to_str().unwrap()]));
+    let firsts = dir.join("firsts.txt");
+    let rep_plain = run(replay, &["--rows", rows, "--firsts", firsts.to_str().unwrap()]);
+    let rep_with = run(replay, &["--rows", rows, "--colloquial", co.to_str().unwrap(), "--firsts", firsts.to_str().unwrap()]);
+    assert_ne!(sha_of(&plain), sha_of(&with), "premise: the term changes a choice among these rows");
+    assert_eq!(sha_of(&plain), sha_of(&rep_plain));
+    assert_eq!(sha_of(&with), sha_of(&rep_with));
+    assert!(rep_with.contains("+colloq:2984eeb5") && !rep_plain.contains("colloq"), "{rep_with}{rep_plain}");
+    let shown = std::fs::read_to_string(&firsts).unwrap();
+    assert_eq!(shown.lines().nth(13), Some("桌腳的螺絲鬆掉了"), "row 202 is the 14th row of the file: the term's choice is the first display");
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
