@@ -23,7 +23,7 @@
 - 對外名稱「**常談**」，代號 SJ-CL，規模用詞彙數：第一版 `sj-cl-1-68k`＝常談 SJ-CL-1-68K（維護者 2026-10-20 選定）。`docs/releases/README.md` 的模型名稱表加一列。
 - 檔案 `data/lm/colloquial.sjlm`，內容就是 P4 的 T2（SHA-256 `2984eeb5…`，V 68,055）：出貨模型 model-v6 建置時的口語計數（`1e7a15ef…`）加上 Phase 2 的公開口語池（`19fdc474…`，143,895 句）的計數，`tools/build_lm.py --corpora`（P4 加的選項）建，剪枝 2、折扣 0.75，不用詞類、不用 KN。建置指令寫進 `docs/releases/sj-cl-1-68k.md`；repo 只放 `data/colloquial.sjlm.sha256`，檔案走資料 Release（手動流程照 `docs/releases/README.md`，建立前問維護者）。
 - **授權**：檔案以 **CC BY-SA 4.0** 發佈（和其他模型檔相同；model-v6 的口語計數本來就以 CC BY-SA 4.0 隨模型出貨，口語池四個來源 ODC-BY、CC BY 3.0、CC BY 2.0 FR、CC BY 4.0 都只要求署名，可以併入 BY-SA）。
-  - **App**：`scripts/build-app.sh` 產生的模型署名檔（現在逐一列出每個模型檔的授權與來源的那一份）加 `colloquial.sjlm` 一段：授權名稱、model-v6 口語計數的來源（沿用現有說明）、口語池四個來源的名稱與授權連結；`Resources/LICENSES/` 另放 `colloquial-attribution.tsv`。repo 的 `LICENSES/data.md` 同步。`scripts/check-app.sh` 加一條 grep：署名檔裡有 `colloquial.sjlm` 那一段，`colloquial-attribution.tsv` 存在且不是空的。
+  - **App**：`scripts/build-app.sh` 產生的模型署名檔（現在逐一列出每個模型檔的授權與來源的那一份）加 `colloquial.sjlm` 一段：授權名稱、model-v6 口語計數的來源（沿用現有說明）、口語池四個來源的名稱與授權連結；`Resources/LICENSES/` 另放 `colloquial-attribution.tsv`。repo 的 `LICENSES/data.md` 同步。`scripts/check-app.sh` 檢查 bundle 裡的 `colloquial.sjlm` 與 `colloquial-attribution.tsv` 存在、不是空的，雜湊和 `data/*.sha256` 相同（2026-10-21 實作修訂：原本寫的 grep 檢查的是 build-app 自己寫進去的文字，不可能失敗，審查後拿掉）。
   - **資料 Release**：附同樣的 NOTICE 與 `colloquial-attribution.tsv`。`colloquial-attribution.tsv` 只有來源 id、名稱與句數，不含語料文字；它是資料 Release `sj-cl-1-68k` 的附件，SHA-256 記在 `data/colloquial-attribution.tsv.sha256`，`build-app.sh` 從 `data/lm/` 複製進 `Resources/LICENSES/`（和模型檔一樣：存在而且雜湊相符才組建）。
   - `colloquial-attribution.tsv` 由一支新腳本（`tools/build_attribution.py`）從口語池 `pool.tsv` 的來源欄位產生，每個來源單位一列（YODAS 影片 id 與影片網址、Tatoeba 句子 id 與作者、WildChat 與 MASSIVE 寫資料集出處與授權），並有一欄這個單位涵蓋的句數；各來源的句數加總要等於研究紀錄 2026-10-18「Phase 2 公開句子池」記的 WildChat 3,491、YODAS 90,080、Tatoeba 36,839、MASSIVE 13,485 句（這幾個數字在 repo 裡，不是腳本自己算的）。`pool.tsv` 的完整 SHA-256 寫進 `docs/releases/sj-cl-1-68k.md`。YODAS 只能照資料集提供的內容署名：資料集本身只給影片 id，頻道名稱查不回來（oEmbed 抽 5 支都是 404／400），CC BY 3.0 §4(b) 的作者名稱是「有提供的話」；維護者 2026-10-20 選定照資料集提供的內容署名（資料集名稱、CC BY 3.0、每支影片的 id、網址與句數）。缺來源單位 id、或 Tatoeba 缺作者＝停止條件。
 
@@ -84,7 +84,7 @@
    - 同一台，載入時間：`/usr/bin/time -v shanjie-replay --rows <只有 dev302 第 1 列的列檔> …`，有（預設）與 `--no-colloquial` 各跑 3 次取中位數，總時間增加 ≤ 300 ms（一列的打字時間可以忽略，差就是載入的差）。
    - 維護者的 Mac 一次：裝好新版，用「活動監視器」看善解的記憶體，和舊版相比增加 ≤ 40 MiB（15 秒級）。
    超過任一項＝停止條件（先找原因，例如 k 的詞集合改從引擎已載入的詞庫取）。
-6. **授權**：`check-app.sh` 的 grep 通過；`colloquial-attribution.tsv` 每列有一欄「涵蓋的句數」，依來源加總要**正好等於**研究紀錄記的 WildChat 3,491、YODAS 90,080、Tatoeba 36,839、MASSIVE 13,485（合計 143,895）；`tools/build_attribution.py` 遇到任何一列沒有來源單位 id（影片 id、句子 id 等）就以非 0 結束，單元測試涵蓋這兩條。
+6. **授權**：`check-app.sh` 的存在與雜湊檢查通過（§2.1）；`colloquial-attribution.tsv` 每列有一欄「涵蓋的句數」，依來源加總要**正好等於**研究紀錄記的 WildChat 3,491、YODAS 90,080、Tatoeba 36,839、MASSIVE 13,485（合計 143,895）；`tools/build_attribution.py` 遇到任何一列沒有來源單位 id（影片 id、句子 id 等）就以非 0 結束，單元測試涵蓋這兩條。
 7. **實機**（維護者，15 秒級）：照 §0 第 2 點，先打「桌子一直在搖」不送出，接著打那一句，選「螺絲鬆」。
 8. `/code-review` ＋ fresh verifier ＋ CI。
 
