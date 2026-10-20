@@ -112,6 +112,15 @@ fn the_term_changes_row_202() {
     assert_eq!(ll(&ship.sc), ll(&new.sc), "the small model's LLs are the same numbers");
 }
 
+/// The first 60 rows of dev302 and rows 196-230, which hold 202, 218 and 223: the three rows only the term fixes in dev302 (P4d).
+fn rows_with_the_term_rows(dir: &Path) -> String {
+    let all = std::fs::read_to_string(root().join("eval/bench/suite-v1/dev302.txt")).unwrap();
+    let lines: Vec<&str> = all.lines().collect();
+    let p = dir.join("rows.txt");
+    std::fs::write(&p, [&lines[..60], &lines[195..230]].concat().join("\n") + "\n").unwrap();
+    p.to_string_lossy().into_owned()
+}
+
 /// Everywhere else the option changes nothing: the formal profile, the conservative and the aggressive strength, no small model, and
 /// another small model (one bit differs in the file, so its SHA-256 is not the measured one).
 #[test]
@@ -123,22 +132,23 @@ fn nothing_changes_elsewhere() {
         std::fs::write(&p, b).unwrap();
         p.to_string_lossy().into_owned()
     };
-    let no_tl = ["--lm", "data/lm/bigram.sjlm", "--profile", "chat", "--context", "--packs", "acg", "--dev"];
-    let formal = ["--lm", "data/lm/bigram.sjlm", "--profile", "formal", "--packs", "acg", "--tinylm", "data/lm/tinylm.sjtl", "--dev"];
-    let other = ["--lm", "data/lm/bigram.sjlm", "--profile", "chat", "--context", "--packs", "acg", "--tinylm", &flipped, "--dev"];
+    let no_tl = ["--lm", "data/lm/bigram.sjlm", "--profile", "chat", "--context", "--packs", "acg"];
+    let formal = ["--lm", "data/lm/bigram.sjlm", "--profile", "formal", "--context", "--packs", "acg", "--tinylm", "data/lm/tinylm.sjtl"];
+    let other = ["--lm", "data/lm/bigram.sjlm", "--profile", "chat", "--context", "--packs", "acg", "--tinylm", &flipped];
+    let rows = rows_with_the_term_rows(&tmp("elrows"));
     let cases: [(&str, &[&str], &[&str]); 5] = [
         ("formal", &formal, &[]),
-        ("conservative", &BASE, &["--rerank-level", "conservative"]),
-        ("aggressive", &BASE, &["--rerank-level", "aggressive"]),
+        ("conservative", &BASE[..9], &["--rerank-level", "conservative"]),
+        ("aggressive", &BASE[..9], &["--rerank-level", "aggressive"]),
         ("no small model", &no_tl, &[]),
         ("another small model", &other, &[]),
     ];
     for (i, (what, base, extra)) in cases.iter().enumerate() {
         let (a, b) = (tmp(&format!("el{i}a")), tmp(&format!("el{i}b")));
-        let plain = full_run(&a, base, &["40"], extra);
+        let plain = full_run(&a, base, &["--rows", &rows], extra);
         let mut with: Vec<&str> = extra.to_vec();
         with.extend(["--colloquial-core", TABLE]);
-        let tagged = full_run(&b, base, &["40"], &with);
+        let tagged = full_run(&b, base, &["--rows", &rows], &with);
         same_outputs(&tagged, &plain, what);
     }
 }
