@@ -103,8 +103,8 @@ def read_rowstats(path):
     return rows
 
 
-def paired_bootstrap(base, cand, seed=20261008, resamples=10000, clusters=None):
-    """95% intervals of (cand - base): (top1 count diff, CER diff), resampling rows with replacement. With `clusters` (one id per
+def paired_bootstrap(base, cand, seed=20261008, resamples=10000, clusters=None, level=0.95):
+    """`level` (default 95%) intervals of (cand - base): (top1 count diff, CER diff), resampling rows with replacement. With `clusters` (one id per
     row) whole clusters are resampled instead, so rows of one message / article stay together (clusters are numbered in order of
     first appearance: with every row its own cluster the draws equal the row bootstrap's)."""
     rng = random.Random(seed)
@@ -128,9 +128,10 @@ def paired_bootstrap(base, cand, seed=20261008, resamples=10000, clusters=None):
         d_ok.append(sum(dok[i] for i in idx))
         g = sum(glen[i] for i in idx)
         d_err.append((sum(derr[i] for i in idx) / g) if g else 0.0)
+    q = 0.025 if level == 0.95 else round((1 - level) / 2, 10)   # 0.95 keeps the literal quantiles, so the default output is unchanged
     def ci(v):
         v.sort()
-        return v[int(0.025 * resamples)], v[int(0.975 * resamples)]
+        return v[int(q * resamples)], v[int((1 - q) * resamples)]
     return ci(d_ok), ci(d_err)
 
 
@@ -144,7 +145,7 @@ def read_clusters(path, n):
     return ids
 
 
-def compare(base_path, cand_path, label="", seed=20261008, resamples=10000, net=False, cluster_path=None):
+def compare(base_path, cand_path, label="", seed=20261008, resamples=10000, net=False, cluster_path=None, level=0.95):
     base, cand = read_rowstats(base_path), read_rowstats(cand_path)
     if len(base) != len(cand):
         raise ValueError(f"row counts differ ({len(base)} vs {len(cand)})")
@@ -157,10 +158,11 @@ def compare(base_path, cand_path, label="", seed=20261008, resamples=10000, net=
     broken = sum(1 for b, c in zip(base, cand) if b[0] and not c[0])
     cer_b, cer_c = 100 * sum(r[1] for r in base) / g, 100 * sum(r[1] for r in cand) / g
     clusters = read_clusters(cluster_path, len(base)) if cluster_path else None
-    (tlo, thi), (clo, chi) = paired_bootstrap(base, cand, seed, resamples, clusters)
+    (tlo, thi), (clo, chi) = paired_bootstrap(base, cand, seed, resamples, clusters, level)
     if clusters is not None:
         label += f" (clustered, {len(set(clusters))} clusters)"
-    head = ["| 集合 | n | top1 基準 | top1 新 | 改對 | 改壞 | p | CER 基準 | CER 新 | Δtop1 95%（列） | ΔCER 95%（百分點） |",
+    pct = f"{100 * level:g}"
+    head = [f"| 集合 | n | top1 基準 | top1 新 | 改對 | 改壞 | p | CER 基準 | CER 新 | Δtop1 {pct}%（列） | ΔCER {pct}%（百分點） |",
             "|---|---|---|---|---|---|---|---|---|---|---|"]
     if net:  # E2: 1:1 scoring columns appended at the end, so the default output is unchanged
         head[0] += " 淨值 | 改壞率 | 改壞數 95% 上界 |"
@@ -181,6 +183,7 @@ def main():
     c.add_argument("base"); c.add_argument("cand"); c.add_argument("--label", default="")
     c.add_argument("--seed", type=int, default=20261008); c.add_argument("--resamples", type=int, default=10000)
     c.add_argument("--net", action="store_true", help="E2: add net (fixed - broken), break rate (broken / n) and the 95%% exact Poisson upper limit of broken")
+    c.add_argument("--ci", type=float, default=0.95, help="level of the bootstrap intervals, within (0, 1) (default 0.95; P4b clause 2b uses 0.90)")
     c.add_argument("--cluster", help="file with one cluster id per line (rows of one message / article): the bootstrap resamples clusters")
     m = sub.add_parser("mde")
     m.add_argument("--discordant", type=int); m.add_argument("--base"); m.add_argument("--cand")
@@ -204,7 +207,9 @@ def main():
             print(f"D {a.discordant}, alpha {a.alpha:g}, power {a.power:g}: " +
                   (f"MDE net {m_:+d} rows" if m_ is not None else "no net reaches the power (D too small)"))
             return
-        print(compare(a.base, a.cand, a.label, a.seed, a.resamples, a.net, a.cluster))
+        if not 0 < a.ci < 1:
+            ap.error("--ci must be within (0, 1)")
+        print(compare(a.base, a.cand, a.label, a.seed, a.resamples, a.net, a.cluster, a.ci))
     except (ValueError, OSError) as e:
         print(f"evalstats: {e}", file=sys.stderr)
         sys.exit(1)

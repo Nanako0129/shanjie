@@ -32,7 +32,7 @@ S2k 的保留集只回總數（聊天 180、書面 184，對第一段的 179、1
 
 ## 2. 比較工具 `tools/evalstats.py`
 
-- `python3 tools/evalstats.py compare BASE CAND [--label 名稱] [--seed S] [--resamples N] [--net]`：讀兩個 rowstats，列數不同或列號不對齊就報錯結束；印出 §0 的一行表格（Markdown）。`--net`（E2）在最後多三欄（淨值、改壞率、改壞數的 95% 上界）；不給 `--net` 時輸出逐位元組不變。
+- `python3 tools/evalstats.py compare BASE CAND [--label 名稱] [--seed S] [--resamples N] [--net]`：讀兩個 rowstats，列數不同或列號不對齊就報錯結束；印出 §0 的一行表格（Markdown）。`--net`（E2）在最後多三欄（淨值、改壞率、改壞數的 95% 上界）；不給 `--net` 時輸出逐位元組不變。`--ci L`（預設 0.95）改 bootstrap 區間的水準（表頭的「95%」跟著寫成 L，例如 `--ci 0.90` 取 5% 與 95% 分位；P4b 第 2b 條用）；不給時輸出逐位元組不變。
 - 〔2026-10-18 加，`docs/methodology.md`「2026-10-18：研究流程改版」#6、#9〕`compare … --cluster FILE`：FILE 每列一個叢集代號（同一則訊息、同一段發言、同一個條目），配對 bootstrap 以叢集為單位重抽；標籤後加「(clustered, M clusters)」，代號數和列數不同就報錯結束。`mde (--discordant D | --base BASE --cand CAND) --alpha A [--power 0.8]`：不一致 D 列時，雙尾精確 McNemar 在 α 下檢定力達到 power 的最小淨值（淨值和 D 同奇偶）；給兩個 rowstats 時 D 由檔案算。不給這些時其他輸出不變。
 - 預設 `--seed 20261008`、`--resamples 10000`；同樣的輸入與參數，輸出逐位元組相同。
 - 只用 Python 標準函式庫。
