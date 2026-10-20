@@ -34,7 +34,7 @@
 - 選單列圖示：單色 template 圖，「解」字加圓角方框（呼應網站的印章），由腳本用 CoreText 產生 TIFF，不下載字型或圖。
 - App 圖示（2026-10-17，`docs/contracts/app-icon.md`）：朱紅漸層底、白色的圓角框與「解」各是一層玻璃（系統畫出來是透著朱紅的乳白），原始檔 `packaging/AppIcon.icon/`（Icon Composer 文件），建置時 `actool` 編成 `Resources/Assets.car` 與 `AppIcon.icns`，Info.plist 的 `CFBundleIconName`／`CFBundleIconFile` 是 `AppIcon`；安裝程式帶同一個。
 - **entitlements：一律沒有**（不提供 entitlements 檔，所以也不會有 `get-task-allow` 或 `disable-library-validation`）；hardened runtime 一定要開（R9；〔2026-10-16〕指出貨的 Developer ID 版本，本機與 CI 的 ad-hoc 建置見上面的修訂）。
-  - **2026-10-19 修訂（`app-sandbox.md` §2.1）**：輸入法本體改成**恰好四個** entitlements：`com.apple.security.app-sandbox`、`com.apple.security.network.client`（只為了 Sparkle）、mach-register 例外 `[<bundle ID>_Connection]`（等於 `InputMethodConnectionName`）、mach-lookup 例外 `[<bundle ID>-spks, <bundle ID>-spki]`（Sparkle 的安裝服務）。仍然沒有 `get-task-allow` 或 `disable-library-validation`；`scripts/check-entitlements.sh` 整份比對，多一個鍵就失敗。Sparkle 的程式碼位置與安裝程式仍然沒有任何 entitlements。沙盒是縱深防禦，不是硬邊界（`app-sandbox.md` §2.8）。
+  - **2026-10-19 修訂（`app-sandbox.md` §2.1）**：輸入法本體改成**恰好四個** entitlements：`com.apple.security.app-sandbox`、`com.apple.security.network.client`（只為了 Sparkle）、mach-register 例外 `[<bundle ID>_Connection]`（等於 `InputMethodConnectionName`）、mach-lookup 例外 `[<bundle ID>-spks, <bundle ID>-spki]`（Sparkle 的安裝服務）。〔2026-10-20，`standalone-updater.md` §2.2：mach-lookup 例外刪掉，現在恰好三個。〕仍然沒有 `get-task-allow` 或 `disable-library-validation`；`scripts/check-entitlements.sh` 整份比對，多一個鍵就失敗。Sparkle 的程式碼位置與安裝程式仍然沒有任何 entitlements。沙盒是縱深防禦，不是硬邊界（`app-sandbox.md` §2.8）。
 
 ### 2.1 本機建置與測試流程（仿 syrtis，使用者 2026-10-03 要求）
 

@@ -283,7 +283,7 @@
    - 原本傳空值、用正式 ID 的那一步（`ci.yml` 現在的 `SELFTEST_BUNDLE_ID=`）取消；正式 ID 的 selftest 已在第 3 步與第 7 步跑過。
 7. `EXPECTED_BUNDLE_ID=com.nyanako.inputmethod.shanjie scripts/check-app.sh build/善解輸入法.app`。
 8. **突變測試**（`scripts/test-sandbox-mutations.sh`，本機與 CI 共用）：複製 `build/善解輸入法.app`，每份做一種改動（APFS 的 clone，`cp -Rc`，不支援時退回 `ditto`；放複本的暫存目錄先 `touch .metadata_never_index`）。
-   - 〔2026-10-20〕現行的 23 種突變照 `standalone-updater.md` §2.4，每一種斷言一種（腳本開頭有清單）：entitlements 的四種（不帶 `--preserve-metadata` 重簽、帶著重簽要通過、多一個鍵、加回 `-spks`）、任一份 framework 放回 `.xpc`、輸入法那份放回 `Autoupdate` 或 `Updater.app`、善解更新那份少了其中一個、善解更新或它的 `Autoupdate` 帶 entitlements、善解更新的 Info.plist 塞 `SUFeedURL`／`SUPublicEDKey`／`SUEnable*`、輸入法的 `SUEnableInstallerLauncherService` 改 true、`Contents/Helpers` 多一個 App、權限的六種（700、目錄或執行檔少 `o+x`、`g+w`、setuid、setgid）。修訂三的 `Installer.xpc` 與資料夾位置那幾種刪掉。
+   - 〔2026-10-20〕現行的 24 種突變照 `standalone-updater.md` §2.4，每一種斷言一種（腳本開頭有清單）：entitlements 的四種（不帶 `--preserve-metadata` 重簽、帶著重簽要通過、多一個鍵、加回 `-spks`）、任一份 framework 放回 `.xpc`、輸入法那份放回 `Autoupdate` 或 `Updater.app`、善解更新那份少了其中一個、善解更新或它的 `Autoupdate` 帶 entitlements、善解更新的 Info.plist 塞 `SUFeedURL`／`SUPublicEDKey`／`SUEnable*`、輸入法的 `SUEnableInstallerLauncherService` 改 true、`Contents/Helpers` 多一個 App、權限的六種（700、目錄或執行檔少 `o+x`、`g+w`、setuid、setgid），以及善解更新的 `CFBundleLocalizations` 拿掉（code review 2026-10-20）。修訂三的 `Installer.xpc` 與資料夾位置那幾種刪掉。
    - framework 本身帶 entitlements 這一條沒有突變：`codesign` 對函式庫給了 entitlements 也不會寫進簽章（2026-10-20 在 Sparkle.framework 上量到），所以改用 `Autoupdate`。
    - 第 3 步在拒絕檢查通過之後、放來源之前，在 log 印出 runner 的 macOS 版本（`sw_vers`），「沒有清單不搬」量到的是哪一版要看得到（F4）。拒絕路徑因此完全沒有輸出以外的副作用。
    - `release.yml` 的那份比對不在分支上跑反向測試（`sign` 只在 main 觸發）；它和 `check-entitlements.sh` 用同一套比對方式，兩處的說明互相指向。
@@ -369,7 +369,7 @@
 
 1. entitlements 與 Sparkle：
    - 第 7 步的 `check-app.sh` 第 2、3 項通過：三個鍵、整個 bundle 沒有 `.xpc`、`SUEnableInstallerLauncherService` 是 false、`standalone-updater.md` §2.4 的版面與權限（〔2026-10-20〕取代修訂三的 `Installer.xpc` 與資料夾位置）；
-   - 第 8 步的每一種突變各自照預期（腳本最後印 `sandbox mutations: all 23 as expected`）。
+   - 第 8 步的每一種突變各自照預期（腳本最後印 `sandbox mutations: all 24 as expected`）。
 2. 沙盒有套上：第 3 步拋棄式 ID 的 container、第 6 步 selftest ID 的 container，都是之前不存在、之後存在。
 3. 移轉與「沒有清單不搬」：第 3 步的所有斷言。
 4. 拒絕：第 4 步。
