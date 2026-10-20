@@ -62,17 +62,24 @@ def cols_from(pre):
     return [[lc - GAMMA_PER_MU * k for lc, k in zip(p["lc"]["T2"][:8], p["k"][:8])] for p in pre]
 
 
-def final_index(sc, col, mu, alpha, gate):
-    """The cell's final pick over the scores record `sc` (first 8 in n-gram order) with colloquial terms `col` (same order)."""
+def eff_ll(sc, col, mu, alpha, gate):
+    """(n-gram scores, ll_eff) of the first n candidates of the scores record `sc` with the colloquial term `col` added, or None when the
+    row has no `ll`. P5 adds its own term to this list before the pick."""
     ng, ll = sc["ng"], sc.get("ll")
     if ll is None:
-        return 0
+        return None
     n = min(len(ng), len(ll))
     eff = []
     for i in range(n):
         g = 1.0 if gate == INF else sigmoid((ll[i] - ll[0]) / gate)
         eff.append(ll[i] + (g * (mu / alpha) * (col[i] - col[0]) if mu else 0.0))
-    return triage.pick(ng[:n], eff, alpha, TAU, DELTA)
+    return ng[:n], eff
+
+
+def final_index(sc, col, mu, alpha, gate):
+    """The cell's final pick over the scores record `sc` (first 8 in n-gram order) with colloquial terms `col` (same order)."""
+    e = eff_ll(sc, col, mu, alpha, gate)
+    return 0 if e is None else triage.pick(e[0], e[1], alpha, TAU, DELTA)
 
 
 def confirm_verdict(s):
@@ -147,8 +154,9 @@ def check_anchor(scores, cols, base_ok, name=None):
         raise SystemExit(1)
 
 
-def load(a):
-    """The P4 loader (d23 consistency checks), the T2 lc and the overlay/pack k for the first 8 candidates."""
+def load_full(a):
+    """The P4 loader (d23 consistency checks), the T2 lc and the overlay/pack k for the first 8 candidates.
+    -> (d23 rows, scores, cols, ok, base rowstats)."""
     import d23 as D
     import p4
     with open(a.t2, "rb") as f:
@@ -168,7 +176,11 @@ def load(a):
     scores = [r["scores"] for r in rows]
     cols = cols_from(pre)
     base = evalstats.read_rowstats(a.rowstats)
-    return scores, cols, [bool(o) for o in ok], base
+    return rows, scores, cols, [bool(o) for o in ok], base
+
+
+def load(a):
+    return load_full(a)[1:]
 
 
 def main(argv=None):
