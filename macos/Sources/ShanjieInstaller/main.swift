@@ -382,8 +382,13 @@ enum Screens {
     static let logOutSentence = L("請登出再登入一次，善解才會在所有 App 裡正常。登入後輸入法選單裡如果沒有善解，請重新打開這個安裝程式。",
                                   "Log out and back in once, so that Shanjie works in every app. If Shanjie is not in the input menu after you log back in, open this installer again.")
 
+    /// System Settings may ask whether to allow Shanjie after the installer already shows its last page and bounces its Dock icon (the
+    /// system accepts before it asks: VM, 2026-10-21), so the last pages say to answer it first (the maintainer's choice, same day).
+    static let allowFirst = L("系統設定如果問要不要允許善解，先按「允許」再登出。", "If System Settings asks whether to allow Shanjie, choose Allow before you log out.")
+
     static func logOut() -> Screen {
-        Screen(step: 3, title: L("✓ 已經裝好了，請登出再登入", "✓ Installed: log out and back in"), body: logOutSentence, primary: L("好", "OK"))
+        Screen(step: 3, title: L("✓ 已經裝好了，請登出再登入", "✓ Installed: log out and back in"), body: allowFirst + "\n\n" + logOutSentence,
+               primary: L("好", "OK"))
     }
 
     /// The two steps in the Keyboard pane, shared by every screen that asks the user to add Shanjie. The labels are the
@@ -397,8 +402,8 @@ enum Screens {
         Screen(step: 2, title: L("✓ 已經裝好了，請登出再登入，再加入善解", "✓ Installed: log out and back in, then add Shanjie"),
                body: L("1. 請登出再登入一次。\n2. 登入後到「系統設定 → 鍵盤」，", "1. Log out and back in once.\n2. Then open System Settings > Keyboard. ")
                    + pressPlus + "\n3. " + chooseShanjie + "\n\n"
-                   + L("系統設定如果現在自己打開了，可以先關掉，登入後再加。登入後如果找不到善解，請重新打開這個安裝程式。",
-                       "If System Settings opened by itself just now, you can close it and add Shanjie after you log back in. If you cannot find Shanjie then, open this installer again."),
+                   + L("系統設定如果現在自己打開了：問要不要允許善解，就先按「允許」；然後可以關掉，登入後再加。登入後如果找不到善解，請重新打開這個安裝程式。",
+                       "If System Settings opened by itself just now: if it asks whether to allow Shanjie, choose Allow first; then you can close it and add Shanjie after you log back in. If you cannot find Shanjie then, open this installer again."),
                primary: L("好", "OK"))
     }
 
@@ -744,9 +749,10 @@ final class Controller: NSObject, NSApplicationDelegate, NSWindowDelegate {
     // s3c section 2.4: poll every 0.5 s for at most 30 s on the main run loop.
     private let pollInterval: TimeInterval = 0.5
     private let pollLimit = 60
-    /// `returnWhenAccepted` checks once a second, up to 2 minutes, for the answer in System Settings.
-    private let returnInterval: TimeInterval = 1
-    private let returnLimit = 120
+    /// `returnWhenAccepted` waits up to 2 minutes (every `pollInterval`) for the answer in System Settings.
+    private let returnLimit = 240
+    /// A `--accepted-check` child that has not finished by then is stopped and read as "not accepted".
+    private let checkTimeout: TimeInterval = 5
     /// After selecting the input source, how long to wait before reading back the current one.
     /// A first guess; the device run shows whether the switch is visible sooner.
     private let switchCheckDelay: TimeInterval = 0.3
@@ -768,6 +774,8 @@ final class Controller: NSObject, NSApplicationDelegate, NSWindowDelegate {
     /// once at the start, before anything is swapped.
     private var startBundleID: String?
     private var startModes: Set<String> = []
+    /// `callBack`'s watch for System Settings covering the installer after the system's answer.
+    private var callBackObserver: NSObjectProtocol?
     private var primaryAction: () -> Void = {}
     private var secondaryAction: () -> Void = {}
 
@@ -996,7 +1004,7 @@ final class Controller: NSObject, NSApplicationDelegate, NSWindowDelegate {
             let message = result.outcome == .registrationFailed ? Screens.registrationFailedMessage : Screens.enableFailedMessage
             show(Screens.failedLogOut(Failure(message: message)))
         }
-        if moved && result.outcome == .notAccepted { returnWhenAccepted(bundleID: bundleID) }
+        if moved && result.outcome == .notAccepted { returnWhenAccepted(bundleID: bundleID, firstInstall: decision.firstInstall) }
     }
 
     /// The system asks "Allow … to enable" inside System Settings, which it opens itself right after the enable call and which keeps
@@ -1013,37 +1021,45 @@ final class Controller: NSObject, NSApplicationDelegate, NSWindowDelegate {
         _ = NSApp.requestUserAttention(.criticalRequest)   // stops by itself when the installer becomes active
     }
 
-    private func returnWhenAccepted(bundleID: String) {
-        var ticks = 0
+    /// After a location change whose registration is not accepted yet: wait (up to 2 minutes) for the system's answer, then show the
+    /// log-out screen if the first-install screen was up (accepted now: section 2.4's moved table maps it to log out) and call the user
+    /// back if System Settings covers the installer, now or within 10 s after the answer.
+    private func returnWhenAccepted(bundleID: String, firstInstall: Bool) {
+        waitForAcceptance(bundleID: bundleID, limit: returnLimit, accepted: { [weak self] in
+            guard let self else { return }
+            if firstInstall { self.show(Screens.logOut(), primary: { NSApp.terminate(nil) }) }
+            InstallerFlow.logReturn(accepted: true, wasActive: NSApp.isActive)
+            self.callBack()
+        }, timedOut: { InstallerFlow.logReturn(accepted: false, wasActive: NSApp.isActive) })
+    }
+
+    /// Checks every `pollInterval`, up to `limit` checks, whether the system accepted the input method (`checkAccepted`, a fresh process:
+    /// this process's own input source list did not change after the user answered System Settings' "Allow": VM, macOS 26.6.2,
+    /// 2026-10-21, another process read it enabled within 20 s while this one still read "not accepted" 2 minutes later; keeping the
+    /// distributed notifications delivered while inactive did not change that). One check at a time; each counts toward the limit.
+    private func waitForAcceptance(bundleID: String, limit: Int, accepted: @escaping @MainActor () -> Void,
+                                   timedOut: @escaping @MainActor () -> Void) {
+        var checks = 0
         var checking = false
-        Timer.scheduledTimer(withTimeInterval: returnInterval, repeats: true) { [weak self] timer in
+        Timer.scheduledTimer(withTimeInterval: pollInterval, repeats: true) { [weak self] timer in
             MainActor.assumeIsolated {
-                // Not stopped when the installer is in front at first: System Settings may take the focus only a moment later.
                 guard let self else { timer.invalidate(); return }
-                if ticks >= self.returnLimit {
-                    timer.invalidate()
-                    InstallerFlow.logReturn(accepted: false, wasActive: NSApp.isActive)
-                    return
-                }
                 guard !checking else { return }
-                ticks += 1
+                guard checks < limit else { timer.invalidate(); return timedOut() }
+                checks += 1
                 checking = true
-                self.checkAccepted(bundleID: bundleID) { accepted in
+                self.checkAccepted(bundleID: bundleID) { ok in
                     checking = false
-                    guard accepted, timer.isValid else { return }
+                    guard ok, timer.isValid else { return }
                     timer.invalidate()
-                    let wasActive = NSApp.isActive
-                    InstallerFlow.logReturn(accepted: true, wasActive: wasActive)
-                    if !wasActive { self.comeBack() }
+                    accepted()
                 }
             }
         }
     }
 
-    /// Whether the system has accepted the input method, read by a fresh process (this executable with `--accepted-check`): this
-    /// process's own input source list did not change after the user answered "Allow" (VM, macOS 26.6.2, 2026-10-21: another process
-    /// read the mode enabled 20 s after the answer; this one still read it not accepted 2 minutes later). The answer comes back on the
-    /// main thread; a failure to start the process counts as not accepted.
+    /// Runs this executable with `--accepted-check`; the answer comes back on the main thread. A child that does not finish within
+    /// `checkTimeout`, or that cannot start, counts as not accepted.
     private func checkAccepted(bundleID: String, then: @escaping @MainActor (Bool) -> Void) {
         guard let exe = Bundle.main.executableURL else { return then(false) }
         let p = Process()
@@ -1054,7 +1070,28 @@ final class Controller: NSObject, NSApplicationDelegate, NSWindowDelegate {
             let ok = proc.terminationReason == .exit && proc.terminationStatus == 0
             DispatchQueue.main.async { MainActor.assumeIsolated { then(ok) } }
         }
-        do { try p.run() } catch { then(false) }
+        do { try p.run() } catch { return then(false) }
+        DispatchQueue.main.asyncAfter(deadline: .now() + checkTimeout) { if p.isRunning { p.terminate() } }
+    }
+
+    /// Brings the installer back if it is covered, or bounces the Dock icon if it gets covered within 10 s (the system may accept the
+    /// input method before System Settings shows its question: VM, 2026-10-21, accepted 1 s after the enable call).
+    private func callBack() {
+        if !NSApp.isActive { return comeBack() }
+        stopCallBack()
+        callBackObserver = NotificationCenter.default.addObserver(forName: NSApplication.didResignActiveNotification, object: nil,
+                                                                  queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.comeBack()
+                self?.stopCallBack()
+            }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 10) { [weak self] in MainActor.assumeIsolated { self?.stopCallBack() } }
+    }
+
+    private func stopCallBack() {
+        if let observer = callBackObserver { NotificationCenter.default.removeObserver(observer) }
+        callBackObserver = nil
     }
 
     private func showActivate(note: String? = nil) {
@@ -1073,15 +1110,17 @@ final class Controller: NSObject, NSApplicationDelegate, NSWindowDelegate {
             fail(Failure(message: L("找不到已安裝的善解輸入法。", "The installed input method was not found.")))
             return
         }
-        guard Registration.isAccepted(bundleID: bundleID) else {
-            showActivate(note: Screens.notDetected)
-            return
-        }
-        let result = Registration.run(bundleURL: target, bundleID: bundleID, defaults: defaults)
-        switch InstallerFlow.next(after: result.outcome) {
-        case .tryIt: showTry(note: result.legacyDisableFailed ? Screens.legacyNote : nil)
-        case .activate, .waiting, .logOut, .logOutThenAdd, .failedLogOut: showActivate(note: Screens.notDetected)
-        case .failed: fail(Failure(message: L("系統沒有接受這個輸入法。", "The system did not accept the input method.")))
+        // The fresh check (`checkAccepted`): this process's own list may not have seen the user's answer in System Settings.
+        checkAccepted(bundleID: bundleID) { [weak self] accepted in
+            guard let self else { return }
+            guard accepted else { return self.showActivate(note: Screens.notDetected) }
+            let result = Registration.run(bundleURL: self.target, bundleID: bundleID, defaults: defaults)
+            // A .notAccepted here is this process's stale list (the fresh check said accepted): the try screen, as for .done.
+            switch result.outcome == .notAccepted ? .tryIt : InstallerFlow.next(after: result.outcome) {
+            case .tryIt: self.showTry(note: result.legacyDisableFailed ? Screens.legacyNote : nil)
+            case .activate, .waiting, .logOut, .logOutThenAdd, .failedLogOut: self.showActivate(note: Screens.notDetected)
+            case .failed: self.fail(Failure(message: L("系統沒有接受這個輸入法。", "The system did not accept the input method.")))
+            }
         }
     }
 
@@ -1099,39 +1138,18 @@ final class Controller: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     private func poll(bundleID: String) {
         show(Screens.working(Screens.waiting))
-        var ticks = 0
-        var checking = false
-        Timer.scheduledTimer(withTimeInterval: pollInterval, repeats: true) { [weak self] timer in
-            MainActor.assumeIsolated {
-                guard let self else { timer.invalidate(); return }
-                guard !checking else { return }
-                ticks += 1
-                checking = true
-                // A fresh process reads the answer (`checkAccepted`); this process's own list stays as it was.
-                self.checkAccepted(bundleID: bundleID) { accepted in
-                    checking = false
-                    guard timer.isValid else { return }
-                    self.pollTick(timer: timer, accepted: accepted, ticks: ticks, bundleID: bundleID)
-                }
-            }
-        }
-    }
-
-    private func pollTick(timer: Timer, accepted: Bool, ticks: Int, bundleID: String) {
-        if accepted {
-            timer.invalidate()
-            if !NSApp.isActive { comeBack() }
-            // Once accepted, a second run finishes the steps after the check (ETen
-            // carry-over, disabling the modes of earlier versions).
+        waitForAcceptance(bundleID: bundleID, limit: pollLimit, accepted: { [weak self] in
+            guard let self else { return }
+            self.callBack()
+            // Once accepted, a second run finishes the steps after the check (ETen carry-over, disabling the modes of earlier
+            // versions). It reads this process's own list, which may still say "not accepted" (see waitForAcceptance); that outcome
+            // is not a legacy failure, since the fresh check said accepted, so it shows no legacy note.
             let again = UserDefaults(suiteName: bundleID).map {
-                Registration.run(bundleURL: target, bundleID: bundleID, defaults: $0)
+                Registration.run(bundleURL: self.target, bundleID: bundleID, defaults: $0)
             }
-            let finished = again.map { $0.outcome == .done && !$0.legacyDisableFailed } ?? false
-            showTry(note: finished ? nil : Screens.legacyNote)
-        } else if ticks >= pollLimit {
-            timer.invalidate()
-            showActivate()
-        }
+            let finished = again.map { ($0.outcome == .done || $0.outcome == .notAccepted) && !$0.legacyDisableFailed } ?? false
+            self.showTry(note: finished ? nil : Screens.legacyNote)
+        }, timedOut: { [weak self] in self?.showActivate() })
     }
 
     // MARK: actions
@@ -1168,9 +1186,9 @@ if arguments.count == 3, arguments[1] == "--render-steps" {
     _ = NSApplication.shared
     exit(MainActor.assumeIsolated { renderSteps(into: URL(fileURLWithPath: arguments[2])) })
 }
+
 // system-install.md section 2.4 (revision of 2026-10-21): `--accepted-check <bundle ID>` exits 0 when the system has accepted that
-// input method, 1 otherwise; a read only. The installer runs itself this way because its own process does not see the change after
-// the user answers System Settings' "Allow" (`Controller.checkAccepted`).
+// input method, 1 otherwise; a read only, before any NSApplication. The installer runs itself this way (`Controller.checkAccepted`).
 if arguments.count == 3, arguments[1] == "--accepted-check" {
     exit(Registration.isAccepted(bundleID: arguments[2]) ? 0 : 1)
 }

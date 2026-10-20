@@ -63,7 +63,7 @@ public struct InstallDecision: Equatable, Sendable {
     /// The location changed: registration is forced (`Registration.decide(moved:)`) and the last
     /// screen asks for a log out (`InstallerFlow.next(after:moved:firstInstall:)`).
     public var moved: Bool
-    /// A "This Mac" install where the system listed no copy before (no account copy, not listed at the welcome screen): after
+    /// A "This Mac" install where the system had no copy before (no account copy, `listedBeforeCopy` false at the welcome screen): after
     /// the log out the user still adds it in System Settings (section 2.4, revision of 2026-10-21). A move keeps the
     /// system's listing, so it only logs out.
     public var firstInstall: Bool
@@ -81,9 +81,10 @@ public struct InstallDecision: Equatable, Sendable {
     /// `system`: the version of /Library's copy (nil: none; "" when one is there but its version
     /// cannot be read). `accountCopy`: whether the account layer
     /// holds the shipping-ID copy under either name; `account`: the version of its 善解輸入法.app.
-    /// `listedBeforeCopy`: whether the system listed the shipping ID's input mode, read once at the
-    /// welcome screen before anything was copied (section 2.2: `Registration.run`'s own read comes
-    /// after the copy and may already see the bundle just put in place).
+    /// `listedBeforeCopy`: whether the system had the shipping ID before (`Registration.listedOrEnabled`: TIS lists its input mode,
+    /// or the user's enabled list still has it), read once at the welcome screen before anything was copied (section 2.2:
+    /// `Registration.run`'s own read comes after the copy and may already see the bundle just put in place). A stale enabled entry
+    /// counts on purpose: with one, the "add it in System Settings" path ends with an entry the user must remove and add again.
     public static func decide(choice: InstallChoice, system: String?, accountCopy: Bool, account: String?,
                               bundled: String, listedBeforeCopy: Bool) -> InstallDecision {
         // A /Library copy whose version cannot be read is there all the same: same location, taken
@@ -109,7 +110,7 @@ public struct InstallDecision: Equatable, Sendable {
         case .accountOnly:
             // Any copy in /Library blocks, also one whose version cannot be read ("").
             if system != nil { return InstallDecision(action: .blocked) }
-            // The reverse move: installed in /Library before, removed per the README, still listed.
+            // The reverse move: installed in /Library before, removed per the README, still in the enabled list.
             if !accountCopy && listedBeforeCopy { return InstallDecision(action: .account(.install), moved: true) }
             return InstallDecision(action: .account(InstallerPlan.decide(installed: account, bundled: bundled)))
         }
