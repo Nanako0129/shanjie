@@ -1,6 +1,6 @@
 # 契約：讀音通道項進核心（reading-channel）
 
-狀態：草稿（2026-10-21），待 plan-verifier。疊在常談（`docs/contracts/colloquial-term.md`）上面，和常談同一版出貨。
+狀態：READY（2026-10-21，plan-verifier 第二輪；第一輪的三項見修訂一 `09f70dcf`）。疊在常談（`docs/contracts/colloquial-term.md`）上面，和常談同一版出貨。
 
 ## 0. 起因、要做到什麼、怎麼看到
 
