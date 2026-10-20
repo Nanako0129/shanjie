@@ -228,6 +228,7 @@
   - 退回期間學到的資料留在舊位置；再升級時 container 已經存在，不會再搬。
   - 這兩點寫進 `install-ime.sh` 與安裝程式「重新安裝」的退回說明。
   - 另外寫進 `docs/sandbox-restore.md`：Sparkle 不會降版，安裝程式也不會（`InstallerPlan.decide`），所以退回要用 `install-ime.sh`，或先刪掉已安裝的那一份再用舊版的安裝程式。
+  - **2026-10-20 補充（`system-install.md`）**：裝給「這台 Mac」的那份在 `/Library/Input Methods`，刪除要管理員：`sudo rm -rf "/Library/Input Methods/善解輸入法.app" "/Library/Input Methods/.shanjie-previous"`（完整加引號）。刪掉之後才能用 `install-ime.sh` 或安裝程式的「只有我的帳號」裝回帳號層；`install-ime.sh` 看到 `/Library` 那份時會停下並印出同一行指令。container 每個帳號各一份，各自在自己的帳號刪。
 - **搬回**：
   - `docs/sandbox-restore.md` 寫一個手動指令：
     1. 先結束輸入法程序；

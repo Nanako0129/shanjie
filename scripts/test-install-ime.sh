@@ -36,9 +36,12 @@ stub() {
   plutil -create xml1 "$1/Contents/Info.plist"
   plutil -insert CFBundleIdentifier -string "${3:-$SHIPPING_ID}" "$1/Contents/Info.plist"
 }
-# run <home> <source> [files-only value]
+# run <home> <source> [files-only value]. SYS is the stand-in for /Library/Input Methods (system-install.md), empty
+# unless a case puts a copy there; install-ime.sh honours it only in files-only mode.
+SYS="$T/system/Input Methods"
+mkdir -p "$SYS"
 run() {
-  HOME="$1" SHANJIE_INSTALL_FILES_ONLY="${3-1}" SHANJIE_TEST_LSREGISTER="$T/tools/lsregister" \
+  HOME="$1" SHANJIE_INSTALL_FILES_ONLY="${3-1}" SHANJIE_TEST_LSREGISTER="$T/tools/lsregister" SHANJIE_TEST_SYSTEM_IM="$SYS" \
     PATH="$T/tools:$PATH" "$ROOT/scripts/install-ime.sh" "$2"
 }
 marker() { cat "$1/Contents/marker"; }
@@ -220,5 +223,57 @@ for src in "$T/adhoc/$APP" "$T/unsigned/$APP"; do
   [ -z "$(ls -A "$T/ro")" ] || fail "the refused install created files"
 done
 no_calls "shipping ID without the Developer ID signature"
+
+# 13. system-install.md section 2.1: with a copy in /Library (the stand-in), the shipping ID is not installed into the
+#     account; the error prints the fully quoted removal command and nothing is created. The development ID still installs.
+stub "$SYS/$APP" system
+H="$T/guarded"
+mkdir "$H"
+if err=$(run "$H" "$T/v2/$APP" 2>&1 >/dev/null); then fail "installed into the account while /Library holds a copy"; fi
+grep -qF "  sudo rm -rf \"$SYS/$APP\" \"$SYS/.shanjie-previous\"" <<<"$err" || fail "the refusal did not print the removal command: $err"
+[ -z "$(ls -A "$H")" ] || fail "the refused install created files"
+[ "$(marker "$SYS/$APP")" = system ] || fail "the refused install changed the /Library copy"
+stub "$T/dev3/$DEV" dev3 "$SHIPPING_ID.dev"
+run "$H" "$T/dev3/$DEV" >/dev/null
+[ "$(marker "$H/Library/Input Methods/$DEV")" = dev3 ] || fail "the guard stopped a development build"
+no_calls "shipping ID with a copy in /Library"
+
+# 14. The installer's user stage (SHANJIE_INSTALL_NO_COPY=1, section 2.4): nothing is copied; this account's copy becomes
+#     .shanjie-previous (replacing an older one), shanjie.app is removed, the /Library copy is untouched.
+H="$T/nocopy"
+IM="$H/Library/Input Methods"
+stub "$IM/$APP" account
+stub "$IM/shanjie.app" legacy
+stub "$IM/.shanjie-previous" older
+snap() { (cd "$SYS" && find "$APP" -type f -exec shasum -a 256 {} + | sort); }
+before=$(snap)
+out=$(SHANJIE_INSTALL_NO_COPY=1 run "$H" "$SYS/$APP")
+grep -q '^files only: moved this account' <<<"$out" || fail "the no-copy mode did not end at its files-only line: $out"
+[ "$(marker "$IM/.shanjie-previous")" = account ] || fail "the no-copy mode did not keep the account copy as .shanjie-previous"
+[ ! -e "$IM/$APP" ] && [ ! -e "$IM/shanjie.app" ] || fail "the no-copy mode left an account copy: $(ls -A "$IM")"
+[ "$(ls -A "$IM")" = .shanjie-previous ] || fail "unexpected files: $(ls -A "$IM")"
+[ "$(snap)" = "$before" ] || fail "the no-copy mode changed the /Library copy"
+no_calls "no-copy mode"
+#     Only the legacy name: it becomes .shanjie-previous.
+H="$T/nocopy-legacy"
+IM="$H/Library/Input Methods"
+stub "$IM/shanjie.app" legacy
+SHANJIE_INSTALL_NO_COPY=1 run "$H" "$SYS/$APP" >/dev/null
+[ "$(marker "$IM/.shanjie-previous")" = legacy ] && [ ! -e "$IM/shanjie.app" ] || fail "the no-copy mode did not move shanjie.app"
+#     Nothing in the account: nothing to do, no error.
+H="$T/nocopy-empty"
+mkdir "$H"
+SHANJIE_INSTALL_NO_COPY=1 run "$H" "$SYS/$APP" >/dev/null
+[ -z "$(ls -A "$H/Library/Input Methods")" ] || fail "the no-copy mode created files in an empty account"
+#     Any other argument, or the development ID, is refused before anything changes.
+H="$T/nocopy-bad"
+IM="$H/Library/Input Methods"
+stub "$IM/$APP" account
+for src in "$T/v2/$APP" "$T/dev3/$DEV"; do
+  if err=$(SHANJIE_INSTALL_NO_COPY=1 run "$H" "$src" 2>&1 >/dev/null); then fail "the no-copy mode accepted $src"; fi
+  grep -q "SHANJIE_INSTALL_NO_COPY=1 takes only" <<<"$err" || fail "refused for another reason: $err"
+done
+[ "$(marker "$IM/$APP")" = account ] && [ ! -e "$IM/.shanjie-previous" ] || fail "a refused no-copy run changed the account"
+no_calls "no-copy refusals"
 
 echo "install-ime.sh file handling: ok"

@@ -11,6 +11,10 @@ public enum InstallerScreen: Equatable, Sendable {
     /// A status of the install screen while polling, not a screen of its own.
     case waiting
     case failed
+    /// system-install.md section 2.4: after a location change, "log out and back in" (one OK button).
+    case logOut
+    /// The failure screen with the same log-out sentence.
+    case failedLogOut
 }
 
 public enum InstallerFlow {
@@ -21,6 +25,22 @@ public enum InstallerFlow {
         case .notAccepted: .waiting
         case .registrationFailed, .enableFailed: .failed
         }
+    }
+
+    /// system-install.md section 2.4: after a location change the system shows the input method
+    /// only after a log out (P1), so there is no polling and no trip to System Settings.
+    public static func next(after outcome: Registration.Outcome, moved: Bool) -> InstallerScreen {
+        guard moved else { return next(after: outcome) }
+        switch outcome {
+        case .done, .notAccepted, .modeNotListed: return .logOut
+        case .registrationFailed, .enableFailed: return .failedLogOut
+        }
+    }
+
+    /// system-install.md section 2.4 item 4: one static line per installer registration, read with
+    /// `log show --predicate 'subsystem == "com.nyanako.shanjie.installer"'` (section 4.3).
+    public static func logRegistration(moved: Bool) {
+        if moved { log.notice("registration: forced (location changed)") } else { log.notice("registration: as before") }
     }
 
     /// app-sandbox.md section 2.7: the installer's copy step, as its copy path runs it, with the

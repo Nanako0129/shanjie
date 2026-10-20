@@ -11,6 +11,24 @@ final class InstallerFlowTests: XCTestCase {
         XCTAssertEqual(InstallerFlow.next(after: .enableFailed), .failed)
     }
 
+    /// system-install.md section 2.4, the table of screens after a location change, every cell.
+    func testMovedScreens() {
+        let all: [Registration.Outcome] = [.done, .modeNotListed, .notAccepted, .registrationFailed, .enableFailed]
+        let moved: [Registration.Outcome: InstallerScreen] = [
+            .done: .logOut, .notAccepted: .logOut, .modeNotListed: .logOut,
+            .registrationFailed: .failedLogOut, .enableFailed: .failedLogOut,
+        ]
+        for outcome in all {
+            XCTAssertEqual(InstallerFlow.next(after: outcome, moved: true), moved[outcome], "moved, \(outcome)")
+            XCTAssertEqual(InstallerFlow.next(after: outcome, moved: false), InstallerFlow.next(after: outcome), "not moved, \(outcome)")
+        }
+        // Never a poll or a trip to System Settings before the log out.
+        for outcome in all {
+            XCTAssertNotEqual(InstallerFlow.next(after: outcome, moved: true), .waiting)
+            XCTAssertNotEqual(InstallerFlow.next(after: outcome, moved: true), .activate)
+        }
+    }
+
     func testPicksTheSelectableZhuyinMode() {
         let id = "com.nyanako.inputmethod.shanjie"
         // The input method itself, a leftover mode of an earlier version, then the one mode.
