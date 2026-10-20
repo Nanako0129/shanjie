@@ -181,7 +181,7 @@ class TableRules(Tmp):
 SPEC = bench.VERSIONS2["v0.4.3"]  # bigram + classes + tinylm
 
 
-def make_root(td, names=("bigram.sjlm", "classes.sjc", "tinylm.sjtl")):
+def make_root(td, names=("bigram.sjlm", "classes.sjc", "tinylm.sjtl")):  # (a version that ships the colloquial table adds "colloquial.sjlm")
     root = os.path.join(td, "root")
     os.makedirs(os.path.join(root, "data/lm"))
     for n in names:
@@ -195,6 +195,13 @@ class ReplayModels(Tmp):
     def test_matching_models_pass(self):
         root = make_root(self.td)
         self.assertEqual(set(kpi.check_models(root, SPEC)), {"bigram.sjlm", "classes.sjc", "tinylm.sjtl"})
+
+    def test_the_colloquial_table_is_a_model_only_for_a_version_that_ships_it(self):
+        root = make_root(self.td, ("bigram.sjlm", "classes.sjc", "tinylm.sjtl", "colloquial.sjlm"))
+        self.assertEqual(set(kpi.check_models(root, dict(SPEC, colloquial=True))), {"bigram.sjlm", "classes.sjc", "tinylm.sjtl", "colloquial.sjlm"})
+        with contextlib.redirect_stderr(io.StringIO()) as err, self.assertRaises(SystemExit):
+            kpi.check_models(root, SPEC)
+        self.assertIn("colloquial.sjlm", err.getvalue())
 
     def test_hash_mismatch_fails(self):
         root = make_root(self.td)
@@ -310,31 +317,35 @@ n, learn = len(rows), opt("--learn") == "on"
 bad = 2 if learn else 1
 open(opt("--rowstats"), "w").write("".join(f"{{i}}\\t{{int(i > bad)}}\\t0\\t3\\n" for i in range(1, n + 1)))
 sys.stderr.write(os.environ.get("FAKE_MODELS", {models!r}) + "\\n")
-tag = "replay-chat+ctx+acg+nopred+noen+lm:" + {lm8!r} + "+tl:" + {tl8!r} + ("+learn" if learn else "") + "+correct"
+if ("--no-colloquial" in a) != (not {co8!r}):  # the replay is told to leave the table out exactly when the version does not ship it
+    sys.exit(3)
+tag = "replay-chat+ctx+acg+nopred+noen+lm:" + {lm8!r} + "+tl:" + {tl8!r} + ("+learn" if learn else "") + "+correct" + ("+colloq:" + {co8!r} if {co8!r} else "")
 if os.environ.get("FAKE_TAG"): tag = os.environ["FAKE_TAG"]
 print("## " + os.path.basename(opt("--rows")) + "  " + tag + "  {{'n': %d, 'top1': %d, 'final_ok': %d, 'unfixable': 0, 'autocommits': 0, 'kyss': 0.9123, 'picks_per100': 1.5, 'rewrites': 3, 'top1_sha256': 'aa'}}" % (n, n - bad, n - bad))
 """
 
 
 class ReplayRun(Tmp):
+    NAMES, SPEC = ("bigram.sjlm", "classes.sjc", "tinylm.sjtl"), SPEC
+
     def setUp(self):
         super().setUp()
-        self.root = make_root(self.td)
-        self.models = kpi.check_models(self.root, SPEC)
+        self.root = make_root(self.td, self.NAMES)
+        self.models = kpi.check_models(self.root, self.SPEC)
         self.rows = {}
         for name, k in (("user-reported", 4), ("dev302", 6)):
             p = os.path.join(self.td, name + ".txt")
             open(p, "w", encoding="utf-8").write("".join(f"c|句{i}|ㄅㄚ\n" for i in range(k)))
             self.rows[name] = (p, bench.sha_file(p))
         self.fake = os.path.join(self.td, "fake-replay")
-        lm8, tl8 = self.models["bigram.sjlm"][:8], self.models["tinylm.sjtl"][:8]
-        open(self.fake, "w").write(FAKE.format(py=sys.executable, models=kpi.models_line(self.models), lm8=lm8, tl8=tl8))
+        lm8, tl8, co8 = self.models["bigram.sjlm"][:8], self.models["tinylm.sjtl"][:8], self.models.get("colloquial.sjlm", "")[:8]
+        open(self.fake, "w").write(FAKE.format(py=sys.executable, models=kpi.models_line(self.models), lm8=lm8, tl8=tl8, co8=co8))
         os.chmod(self.fake, 0o755)
 
     def replay(self, **env):
         a = types.SimpleNamespace(as_="v0.4.3")
         with mock.patch.object(kpi, "REPLAY_ROWS", self.rows), mock.patch.object(kpi, "git_clean_head", return_value="a" * 40), \
-                mock.patch.dict(os.environ, env), contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                mock.patch.dict(bench.VERSIONS2, {"v0.4.3": self.SPEC}), mock.patch.dict(os.environ, env), contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
             kpi.cmd_replay(a, root=self.root, kpi_dir=self.kp, build=lambda root: self.fake)
         return json.load(open(os.path.join(self.kp, "v0.4.3.json"), encoding="utf-8"))
 
@@ -363,6 +374,20 @@ class ReplayRun(Tmp):
     def test_setting_tag_must_match(self):
         with self.assertRaises(SystemExit):
             self.replay(FAKE_TAG="replay-formal+whatever")
+
+
+class ReplayRunWithTheColloquialTable(ReplayRun):
+    """The same checks for a version whose data/lm holds colloquial.sjlm: the models line and the tag carry it, and --no-colloquial is not passed."""
+    NAMES, SPEC = ("bigram.sjlm", "classes.sjc", "tinylm.sjtl", "colloquial.sjlm"), dict(SPEC, colloquial=True)
+
+    def test_the_table_is_in_the_record(self):
+        self.assertIn("colloquial.sjlm", self.replay()["replay"]["models"])
+        self.assertIn(" colloquial.sjlm:", kpi.models_line(self.models))
+
+    def test_the_tag_without_the_table_is_refused(self):
+        lm8, tl8 = self.models["bigram.sjlm"][:8], self.models["tinylm.sjtl"][:8]
+        with self.assertRaises(SystemExit):
+            self.replay(FAKE_TAG=f"replay-chat+ctx+acg+nopred+noen+lm:{lm8}+tl:{tl8}+correct")
 
 
 # ---------- run ----------

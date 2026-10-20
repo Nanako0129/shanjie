@@ -464,6 +464,52 @@ class SuiteV2(Tmp):
             with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
                 bench.setup_models(v, spec, os.path.join(self.td, "mf2"))  # a table version without data/trigram.sjt3.sha256 stops
 
+    def test_colloquial_version_gets_the_table_the_flag_and_the_chat_tag(self):
+        """A version with `"colloquial": True` (the rule kpi.py uses too): its table goes into the model folder, only the chat cells pass
+        --colloquial-core and their tag ends in +colloq:<sha8>; formal cells and the anchor run are as without it."""
+        spec = {"release": "vC", "flags": ["--context", "--packs", "acg"], "tinylm": True, "colloquial": True, "tag": "+ctx+tl:{tl8}+acg"}
+        HEX["colloquial.sjlm"] = "2984eeb5" + "d" * 56
+        self.addCleanup(HEX.pop, "colloquial.sjlm")
+        with mock.patch.dict(bench.VERSIONS2, {"vC": spec}):
+            v = self.stage_models("vC", HEX)
+            for n in HEX:
+                self.put_model(n)
+            with mock_hash():
+                bench.setup_models(v, spec, os.path.join(self.td, "mf"))
+            self.assertEqual(sorted(os.listdir(os.path.dirname(v.lm))), ["bigram.sjlm", "classes.sjc", "colloquial.sjlm"])
+            self.assertEqual((v.co8, os.path.basename(v.co)), ("2984eeb5", "colloquial.sjlm"))
+            self.assertEqual(v.models["colloquial.sjlm"][0], os.path.join(bench.MODELS, HEX["colloquial.sjlm"], "colloquial.sjlm"))
+            chat, formal, anchor = (bench.cell_cmd(v, p, "r", "d", "s", a) for p, a in (("chat", False), ("formal", False), ("chat", True)))
+            self.assertEqual(chat[chat.index("--colloquial-core") + 1], v.co)
+            self.assertNotIn("--colloquial-core", formal)
+            self.assertNotIn("--colloquial-core", anchor)
+            self.assertEqual(bench.expected_tag(v, "chat", False), "lm-chat+ctx+tl:7e73ef67+acg+colloq:2984eeb5")
+            self.assertEqual(bench.expected_tag(v, "formal", False), "lm-formal+ctx+tl:7e73ef67+acg")
+            self.assertEqual(bench.expected_tag(v, "chat", True), "lm-chat+ctx+tl:7e73ef67")
+            self.assertEqual(bench.replay_tag(v, "chat"), "lm-chat")  # the replay-setting cell is the bare model
+            # a cell is scored against that tag: the CLI that printed no +colloq: (flag dropped) is not the shipping setting
+            self.fake_cli(bench.expected_tag(v, "chat", False), [True, True], ("你好", "世界"))
+            self.assertEqual(bench.run_cell2(self.ctx, v, "pub", "chat", False)[0]["tag"], "lm-chat+ctx+tl:7e73ef67+acg+colloq:2984eeb5")
+            self.fake_cli("lm-chat+ctx+tl:7e73ef67+acg", [True, True], ("你好", "世界"))
+            with self.assertRaises(RuntimeError):
+                bench.run_cell2(self.ctx, v, "pub", "chat", False)
+            os.remove(os.path.join(v.dir, "data", "colloquial.sjlm.sha256"))
+            with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
+                bench.setup_models(v, spec, os.path.join(self.td, "mf2"))  # a colloquial version without data/colloquial.sjlm.sha256 stops
+
+    def test_a_version_without_the_key_never_gets_the_table(self):
+        """data/colloquial.sjlm.sha256 in the export does not matter: the VERSIONS2 row decides (as in tools/kpi.py)."""
+        HEX["colloquial.sjlm"] = "2984eeb5" + "d" * 56
+        self.addCleanup(HEX.pop, "colloquial.sjlm")
+        v = self.stage_models("v0.4.1", HEX)
+        for n in HEX:
+            self.put_model(n)
+        with mock_hash():
+            bench.setup_models(v, bench.VERSIONS2["v0.4.1"], os.path.join(self.td, "mf"))
+        self.assertEqual(sorted(os.listdir(os.path.dirname(v.lm))), ["bigram.sjlm", "classes.sjc"])
+        self.assertNotIn("--colloquial-core", bench.cell_cmd(v, "chat", "r", "d", "s", False))
+        self.assertEqual(bench.expected_tag(v, "chat", False), "lm-chat+ctx+tl:7e73ef67+acg")
+
     def test_v047_is_v046_plus_the_table(self):
         a, b = bench.VERSIONS2["v0.4.6"], bench.VERSIONS2["v0.4.7"]
         for k in ("flags", "tinylm", "kn", "tag"):

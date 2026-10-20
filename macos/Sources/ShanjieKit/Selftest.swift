@@ -6,7 +6,8 @@ import Foundation
 /// sentences, then build with the bundled ACG pack (Resources/packs), require the same sentences and one pack word, then load the
 /// small model (Resources/tinylm.sjtl) and require the rerank to change a chat sentence, and the switch off not to (s7c2b section
 /// 2.5), then load the word list (Resources/english-words.txt) and require `rust` Space to open the English window with `rust`
-/// first (zhen-mixed section 3.2). Returns the exit status. Writes nothing but a fixed message and a return code to stderr; touches no file, UserDefaults, TIS, NSApplication or IMK server.
+/// first (zhen-mixed section 3.2), and the colloquial table (Resources/colloquial.sjlm): with the rerank on and the context
+/// 桌子一直在搖 the chat sentence for dev302 row 202 must be 桌腳的螺絲鬆掉了 (colloquial-term.md section 2.3). Returns the exit status. Writes nothing but a fixed message and a return code to stderr; touches no file, UserDefaults, TIS, NSApplication or IMK server.
 @MainActor
 public enum Selftest {
     /// Row 284 `ㄔㄨˊ ㄈㄤˊ ㄒㄧㄣ ㄓㄨㄤ ㄌㄜ˙ ㄧ ㄍㄜ˙ ㄌㄩˋ ㄕㄨㄟˇ ㄏㄨˊ` on the standard layout (s3a section 1);
@@ -38,6 +39,13 @@ public enum Selftest {
     static let rerankRowStandard = "ji3u3ru/ cjo6zj4su32k7u.6ru04xk7"
     static let rerankedText = "我已經回覆你的郵件了"
     static let ngramText = "我已經回復你的郵件了"
+
+    /// colloquial-term.md section 2.3: dev302 row 202 `ㄓㄨㄛ ㄐㄧㄠˇ ㄉㄜ˙ ㄌㄨㄛˊ ㄙ ㄙㄨㄥ ㄉㄧㄠˋ ㄌㄜ˙` on the standard layout, chat profile, standard
+    /// strength, the bundled pack, the left context of that row. The n-gram's first and the shipping rerank give 桌腳的羅斯松掉了; the
+    /// colloquial term makes the rerank pick 螺絲鬆 (measured with the CLI, `--context`, one row: c 0 without `--colloquial-core`, c 4 with it).
+    static let colloquialRowStandard = "5ji rul32k7xji6n nj/ 2ul4xk7"
+    static let colloquialContext = "桌子一直在搖"
+    static let colloquialText = "桌腳的螺絲鬆掉了"
 
     /// zhen-mixed: `rust` then Space on the standard layout opens the English window (the shipped list and the tests' synthetic list
     /// both have the word; its leftover ㄔㄧ is not in the lexicon, so these are the window's only items).
@@ -77,6 +85,18 @@ public enum Selftest {
             guard c == 0 else { return fail("selftest: rerank typing failed, code", c) }
             guard shown == text else { return fail("selftest: unexpected rerank composition with the switch", on ? 1 : 0) }
         }
+        // The colloquial table, as the shell loads it after the small model: a bundle without it (or with one the core refuses), or where
+        // the term does nothing, fails here, so 常談 cannot ship silently doing nothing. The rerank and the context go back afterwards.
+        let colloquial = withPack.loadColloquial(path: resources.appendingPathComponent(Shell.colloquialFile).path)
+        guard colloquial == 0 else { return fail("selftest: shanjie_engine_load_colloquial failed, code", colloquial) }
+        if case .failed(let c) = withPack.setRerank(true) { return fail("selftest: shanjie_engine_set_rerank failed, code", c) }
+        let ctx = withPack.setLeftContext(colloquialContext)
+        guard ctx == 0 else { return fail("selftest: shanjie_engine_set_left_context failed, code", ctx) }
+        let (colloquialShown, cc) = typeReranked(colloquialRowStandard, withPack)
+        guard cc == 0 else { return fail("selftest: colloquial typing failed, code", cc) }
+        guard colloquialShown == colloquialText else { return fail("selftest: the colloquial term is not in effect, code", 0) }
+        _ = withPack.setLeftContext(nil)
+        if case .failed(let c) = withPack.setRerank(false) { return fail("selftest: shanjie_engine_set_rerank (off) failed, code", c) }
         // The word list, as the shell loads it: a bundle without it, or with a list the core refuses, fails here, so 中英混打 cannot
         // ship greyed out or silently doing nothing. The switch goes back off afterwards, as it starts.
         let english = withPack.loadEnglish(path: resources.appendingPathComponent(Shell.englishFile).path)

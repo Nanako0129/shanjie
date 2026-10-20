@@ -243,6 +243,10 @@ typedef struct ShanjieRerankJob ShanjieRerankJob;
 // load_tinylm：讀檔失敗、不是一般檔案、超過 64 MiB、格式錯、沒有載入 n-gram、.sjtl 記的 n-gram 雜湊不同、KN 側檔的狀態和 .sjtl 記的不同（v4 記調參時的 kn.sjkn 的 SHA-256、全 0＝沒有；v1～v3 當成沒有；載入的 kn.sjkn 或沒有，32 bytes 都要相同；model-v6 §2.7） → 3（只是配對檢查，不是 .sjtl 的完整性檢查），
 // 引擎維持原狀；NULL → 1、路徑不是 UTF-8 → 2。不改 set_rerank 的開關、不改目前顯示。load_lm 成功會丟掉小模型（要在 load_lm 之後呼叫）。
 int32_t shanjie_engine_load_tinylm(ShanjieEngine *engine, const char *path);
+// load_colloquial（colloquial-term.md §2.2）：口語表（常談 colloquial.sjlm）。引擎從建立時的詞庫資料夾讀 k 的詞集合（mcbpmf-data.txt、overlay-add.tsv），加上建立時讀的詞包列；可以在 load_lm、load_tinylm 之前或之後呼叫（表和它們無關）。
+// 口語項在每個工作建立時決定要不要用：聊天設定、標準強度、載入的 .sjtl 的 SHA-256 等於量測用的那一份，四個條件（含表已載入）都成立才用；其他情況的工作和沒有表的引擎逐位元組相同。
+// 讀檔失敗或格式錯 → 3（引擎維持原本的表，沒有就沒有）；NULL → 1；路徑不是 UTF-8 → 2。會讓進行中的重排工作作廢。路徑不寫進任何紀錄。
+int32_t shanjie_engine_load_colloquial(ShanjieEngine *engine, const char *path);
 // set_rerank：0 或 1（其他回 2、狀態不變），建立時預設 0（S7c-2c 起；之前是 1）；碼與快照同 set_demote（重算組字，關掉時畫面回到 n-gram 的結果）。殼每次建 engine 後都要呼叫。
 int32_t shanjie_engine_set_rerank(ShanjieEngine *engine, uint32_t enabled, ShanjieOutput **out);
 // 語意校正強度（docs/contracts/rerank-strength.md §2.2）：set_rerank_level 0 保守、1 標準（建立時預設）、2 積極，決定工作用小模型的哪一組 α、τ、δ；
@@ -323,6 +327,7 @@ void    shanjie_rerank_free(ShanjieRerankJob *job);
   - `shanjie_engine_free(e)`；最後呼叫 `shanjie_engine_free(NULL)`、`shanjie_output_free(NULL)`。
   - S7c-2a（檢查 901–918）：沒有 n-gram 時 `load_tinylm` 回 3、NULL 回 1、不存在的檔案回 3；`set_rerank` 的碼；沒有小模型時打字後 `rerank_take` 回 0 且 `*job` 為 NULL；take、run、apply 的 NULL 組合；`rerank_free(NULL)`。冒煙測試沒有 `.sjtl`，成功的 run／apply 由 §7.3 的子行程測試負責。
   - 語意校正強度（檢查 951–960）：沒有小模型時 `rerank_levels` 回 0、遮罩 0，NULL 回 1；`set_rerank_level` 的碼 1、2（`*out` 為 NULL）與沒有模型時回 0 和快照；`load_lm` 之後遮罩仍是 0。
+  - 口語表（檢查 961–963）：`load_colloquial` 的 NULL 引擎、NULL 路徑回 1，不存在的檔案回 3；成功載入與口語項本身由 `core/tests/engine_colloquial.rs` 負責。
   - 全部通過時 exit 0，任何一項不符時印出項目編號（不印任何字串內容）並 exit 1。
 - 指令（在 repo 根目錄，`$T` 是暫存目錄）：
 

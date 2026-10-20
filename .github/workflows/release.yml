@@ -94,7 +94,7 @@ jobs:
         with:
           toolchain: 1.97.1
 
-      # Before build-app.sh, against the tracked hashes (data/bigram.sjlm.sha256, data/classes.sjc.sha256, data/kn.sjkn.sha256, data/tinylm.sjtl.sha256 and data/trigram.sjt3.sha256, as ci.yml).
+      # Before build-app.sh, against the tracked hashes (data/bigram.sjlm.sha256, data/classes.sjc.sha256, data/kn.sjkn.sha256, data/tinylm.sjtl.sha256, data/trigram.sjt3.sha256, data/colloquial.sjlm.sha256 and data/colloquial-attribution.tsv.sha256, as ci.yml).
       - name: Fetch the language model
         env:
           GH_TOKEN: ${{ github.token }}
@@ -110,6 +110,8 @@ jobs:
           shasum -a 256 -c data/tinylm.sjtl.sha256
           gh release download sj-cx-1-7.7m --repo "$GITHUB_REPOSITORY" -p trigram.sjt3 -D data/lm
           shasum -a 256 -c data/trigram.sjt3.sha256
+          gh release download sj-cl-1-68k --repo "$GITHUB_REPOSITORY" -p colloquial.sjlm -p colloquial-attribution.tsv -D data/lm
+          shasum -a 256 -c data/colloquial.sjlm.sha256 data/colloquial-attribution.tsv.sha256
 
       # The input of the English word list (SymSpell, pinned commit; build-app.sh downloads it when missing and checks its SHA-256
       # either way, so a bad cache is only a miss). The key follows tools/build_english_words.py, where the pins live.

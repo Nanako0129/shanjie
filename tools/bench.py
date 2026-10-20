@@ -708,6 +708,10 @@ PROFILES2 = ["chat", "formal"]
 # A version that ships a trigram table (trigram.sjt3, trigram-core; hash from data/trigram.sjt3.sha256) has `"tri": True`: the table goes into the
 # model folder, the CLI loads it only for `--profile formal` (and then turns KN off), so the chat tag is unchanged and the formal cells need their own
 # `"formal_tag"` (`{tri8}` = first 8 hex of the table), which spells `+tri:{tri8}` after `+acg` and has no `+kn:`. Without `formal_tag` both profiles share `tag`.
+# A version that ships the colloquial table (colloquial-term.md; hash from data/colloquial.sjlm.sha256) has `"colloquial": True` (the rule tools/kpi.py's
+# check_models uses too: the VERSIONS2 row decides, not whether the sha file exists): its colloquial.sjlm goes into the model folder, the chat cells pass
+# `--colloquial-core` (as the App loads the table after the small model; the term applies in chat only) and their tag gains `+colloq:{co8}` (the first 8 hex
+# of the table) at the end. Formal cells and the anchor run are as without it; a version without the key is unchanged.
 # The App also learns locally, re-ranks asynchronously after every key, takes the context from the text field: the CLI does none of that.
 VERSIONS2 = {
     "v0.4.0": {"release": "v0.4.0", "flags": ["--context", "--packs", "acg"], "tinylm": False, "tag": "+ctx+acg"},
@@ -746,7 +750,8 @@ def version_labels(refs, as_):
 def resolve_models(ver, spec):
     """-> {file name: (path, sha256)}: hashes come from the exported version's data/*.sha256, files from MODELS/<sha256>/<name>."""
     out = {}
-    for n in ["bigram.sjlm", "classes.sjc"] + (["kn.sjkn"] if spec.get("kn") else []) + (["trigram.sjt3"] if spec.get("tri") else []) + (["tinylm.sjtl"] if spec["tinylm"] else []):
+    for n in ["bigram.sjlm", "classes.sjc"] + (["kn.sjkn"] if spec.get("kn") else []) + (["trigram.sjt3"] if spec.get("tri") else []) + (["tinylm.sjtl"] if spec["tinylm"] else []) \
+            + (["colloquial.sjlm"] if spec.get("colloquial") else []):
         f = os.path.join(ver.dir, "data", n + ".sha256")
         if not os.path.isfile(f):
             die(f"{ver.label}: the export has no data/{n}.sha256")
@@ -762,17 +767,20 @@ def resolve_models(ver, spec):
 
 def setup_models(ver, spec, td):
     """A model folder with only bigram.sjlm and classes.sjc, plus kn.sjkn and trigram.sjt3 for a version that ships them (the CLI loads
-    classes.sjc beside --lm, turns KN on when it sees kn.sjkn and reads the table for the formal profile when it sees trigram.sjt3)."""
+    classes.sjc beside --lm, turns KN on when it sees kn.sjkn and reads the table for the formal profile when it sees trigram.sjt3), and
+    colloquial.sjlm for a version with `"colloquial"` (not read from the folder: the chat cells name it with --colloquial-core)."""
     ver.spec, ver.models = spec, resolve_models(ver, spec)
     d = os.path.join(td, ver.label)
     os.makedirs(d)
-    for n in ("bigram.sjlm", "classes.sjc") + (("kn.sjkn",) if spec.get("kn") else ()) + (("trigram.sjt3",) if spec.get("tri") else ()):
+    for n in ("bigram.sjlm", "classes.sjc") + (("kn.sjkn",) if spec.get("kn") else ()) + (("trigram.sjt3",) if spec.get("tri") else ()) + (("colloquial.sjlm",) if spec.get("colloquial") else ()):
         os.symlink(ver.models[n][0], os.path.join(d, n))
     ver.lm = os.path.join(d, "bigram.sjlm")
     ver.tl = ver.models["tinylm.sjtl"][0] if spec["tinylm"] else None
     ver.tl8 = ver.models["tinylm.sjtl"][1][:8] if spec["tinylm"] else ""
     ver.kn8 = ver.models["kn.sjkn"][1][:8] if spec.get("kn") else ""
     ver.tri8 = ver.models["trigram.sjt3"][1][:8] if spec.get("tri") else ""
+    ver.co = os.path.join(d, "colloquial.sjlm") if spec.get("colloquial") else None
+    ver.co8 = ver.models["colloquial.sjlm"][1][:8] if spec.get("colloquial") else ""
 
 
 def ship_flags(ver, anchor):
@@ -786,12 +794,17 @@ def ship_flags(ver, anchor):
 def spec_tag(ver, prof):
     """The setting tag the settings table gives `ver` for `prof` (the formal profile has its own when the version ships a trigram table)."""
     t = ver.spec["formal_tag"] if prof == "formal" and "formal_tag" in ver.spec else ver.spec["tag"]
-    return t.format(tl8=ver.tl8, kn8=getattr(ver, "kn8", ""), tri8=getattr(ver, "tri8", ""))
+    return t.format(tl8=ver.tl8, kn8=getattr(ver, "kn8", ""), tri8=getattr(ver, "tri8", "")) + colloq_tag(ver, prof)
+
+
+def colloq_tag(ver, prof):
+    """`+colloq:<sha8>` for the chat cells of a version that ships the colloquial table, else ""."""
+    return f"+colloq:{ver.co8}" if getattr(ver, "co8", "") and prof == "chat" else ""
 
 
 def expected_tag(ver, prof, anchor):
     t = spec_tag(ver, prof)
-    return f"lm-{prof}" + (t.replace("+acg", "") if anchor else t)
+    return f"lm-{prof}" + (t.replace("+acg", "").replace(colloq_tag(ver, prof), "") if anchor else t)
 
 
 def replay_tag(ver, prof="chat"):
@@ -813,7 +826,8 @@ def cli_env(anchor):
 
 def cell_cmd(ver, prof, rows, dump, rowstats, anchor):
     return ([ver.cli, "--lm", ver.lm, "--profile", prof, "--rows", rows] + (["--dump", dump] if dump else []) + ["--rowstats", rowstats]
-            + ship_flags(ver, anchor) + (["--tinylm", ver.tl] if ver.tl else []))
+            + ship_flags(ver, anchor) + (["--tinylm", ver.tl] if ver.tl else [])
+            + (["--colloquial-core", ver.co] if getattr(ver, "co", None) and prof == "chat" and not anchor else []))
 
 
 def parse_summary(out):
@@ -991,7 +1005,7 @@ def cmd_run2(args):
             die(f"{v.ref}: build failed: {e}")
         setup_models(v, VERSIONS2[v.label], td.name)
         rec = {"ref": v.ref, "version": v.label, "sha": v.sha, "lexicon_sha256": v.lexicon_sha,
-               "models": {n: h for n, (_, h) in v.models.items()}, "flags": ship_flags(v, anchor) + (["--tinylm", "<file>"] if v.tl else []),
+               "models": {n: h for n, (_, h) in v.models.items()}, "flags": ship_flags(v, anchor) + (["--tinylm", "<file>"] if v.tl else []) + (["--colloquial-core", "<file>"] if getattr(v, "co", None) and not anchor else []),
                "tag": spec_tag(v, "chat"), "formal_tag": spec_tag(v, "formal"), "fingerprints": dict(ctx.fp), "accuracy": {}}
         result["versions"].append(rec)
 

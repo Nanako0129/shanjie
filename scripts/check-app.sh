@@ -75,10 +75,10 @@ for lp in "zh-Hant|$NAME_ZH" "en|$NAME_EN"; do
     [ "$(pb "$k" "$S")" = "$name" ] || fail "$l InfoPlist.strings: $k"
   done
 done
-for f in mcbpmf-data.txt overlay-add.tsv sandhi-add.tsv names-add.tsv demote.tsv digits.tsv bigram.sjlm classes.sjc kn.sjkn trigram.sjt3 tinylm.sjtl shanjie.tiff \
+for f in mcbpmf-data.txt overlay-add.tsv sandhi-add.tsv names-add.tsv demote.tsv digits.tsv bigram.sjlm classes.sjc kn.sjkn trigram.sjt3 tinylm.sjtl colloquial.sjlm shanjie.tiff \
          packs/acg-add.tsv packs/acg-sources.tsv packs/acg.json LICENSES/LICENSE LICENSES/McBopomofo-MIT.txt LICENSES/data.md LICENSES/CC-BY-SA-4.0-attribution.txt \
          english-words.txt LICENSES/SCOWL.txt LICENSES/SymSpell-MIT.txt LICENSES/english-words-attribution.txt \
-         LICENSES/name-suggestion-index-BSD-3-Clause.txt LICENSES/Sparkle-MIT.txt; do
+         LICENSES/name-suggestion-index-BSD-3-Clause.txt LICENSES/Sparkle-MIT.txt LICENSES/colloquial-attribution.tsv; do
   [ -s "$R/$f" ] || fail "Resources/$f is missing or empty"
 done
 # digits.tsv is optional for the core (a missing table turns the feature off without a word), so the bundle must carry exactly the repo's.
@@ -114,6 +114,13 @@ TINY_RECORDED="$(awk 'NR == 1 { print $1 }' "$ROOT/data/tinylm.sjtl.sha256")"
 [[ "$TINY_RECORDED" =~ ^[0-9a-f]{64}$ ]] || fail "data/tinylm.sjtl.sha256 holds no SHA-256"
 [ "$(shasum -a 256 "$R/tinylm.sjtl" | awk '{ print $1 }')" = "$TINY_RECORDED" ] \
   || fail "Resources/tinylm.sjtl does not match data/tinylm.sjtl.sha256"
+# The colloquial table (docs/contracts/colloquial-term.md section 2.3, 3.6): the bundled table and attribution list are the ones recorded in git.
+# The selftest (step 6 below, `--selftest`) then shows the term in effect on a sentence the shipping rerank gets wrong.
+for pair in "colloquial.sjlm:$R/colloquial.sjlm" "colloquial-attribution.tsv:$R/LICENSES/colloquial-attribution.tsv"; do
+  recorded="$(awk 'NR == 1 { print $1 }' "$ROOT/data/${pair%%:*}.sha256")"
+  [[ "$recorded" =~ ^[0-9a-f]{64}$ ]] || fail "data/${pair%%:*}.sha256 holds no SHA-256"
+  [ "$(shasum -a 256 "${pair#*:}" | awk '{ print $1 }')" = "$recorded" ] || fail "${pair#*:} does not match data/${pair%%:*}.sha256"
+done
 # The English word list of 中英混打 (docs/contracts/zhen-mixed.md section 3.4): every line a word the core's loader accepts (the
 # loader's own limits are tested in core), the three attributions present, and the bundled file against the hash recorded in git
 # (a record that is not a SHA-256 fails, like tinylm.sjtl's above).

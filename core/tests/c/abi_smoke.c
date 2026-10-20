@@ -472,6 +472,10 @@ static int run_rerank_level(const char *dir, const char *lm) {
   CHECK(959, shanjie_engine_load_lm(e, lm) == 0);
   m = 99u;
   CHECK(960, shanjie_engine_rerank_levels(e, &m) == 0 && m == 0u);
+  /* load_colloquial (docs/contracts/colloquial-term.md section 2.2): the codes; a successful load is covered by core/tests/engine_colloquial.rs. */
+  CHECK(961, shanjie_engine_load_colloquial(0, "/nonexistent/shanjie-missing.sjlm") == 1);
+  CHECK(962, shanjie_engine_load_colloquial(e, 0) == 1);
+  CHECK(963, shanjie_engine_load_colloquial(e, "/nonexistent/shanjie-missing.sjlm") == 3);
   shanjie_engine_free(e);
   return 0;
 }

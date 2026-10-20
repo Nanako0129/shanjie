@@ -405,6 +405,8 @@ public final class Shell {
     /// The small model's file in Resources (section 2.3). The only path it is loaded from: `build()` and the selftest join it to
     /// `resources`; no init parameter, defaults key or environment variable names another.
     static let tinyLMFile = "tinylm.sjtl"
+    /// colloquial-term.md section 2.3: the colloquial table (常談 SJ-CL), in Resources next to the other model files.
+    static let colloquialFile = "colloquial.sjlm"
     /// zhen-mixed section 3.2: the English word list, in Resources next to the model (build-app.sh generates it).
     static let englishFile = "english-words.txt"
     private let rerankRunner: RerankRunner
@@ -862,6 +864,12 @@ public final class Shell {
             let tiny = e.loadTinyLM(path: resources.appendingPathComponent(Shell.tinyLMFile).path)
             if tiny != 0 { Log.shell.error("shanjie_engine_load_tinylm failed, code \(tiny); no rerank") }
             rerankAvailable = tiny == 0
+            // colloquial-term.md section 2.3: after load_tinylm, and only when it loaded (the term applies to the small model's rerank, so there is
+            // nothing to load it for otherwise; "no rerank" is already logged above). A failure is logged (the code only) and the rerank runs without the term.
+            if tiny == 0 {
+                let colloquial = e.loadColloquial(path: resources.appendingPathComponent(Shell.colloquialFile).path)
+                if colloquial != 0 { Log.shell.error("shanjie_engine_load_colloquial failed, code \(colloquial); rerank without the colloquial term") }
+            }
         }
         // zhen-mixed section 3.2: the word list. A failure leaves the engine without it (the switch then has no effect) and greys the
         // item; only the code is logged.

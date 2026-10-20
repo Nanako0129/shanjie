@@ -12,6 +12,7 @@
   | 承接（平滑） | SJ-KN | `kn-vN` | `kn.sjkn` | 詞彙數 | kn-v1 ＝ SJ-KN-1-353K |
   | 連文（前兩個詞） | SJ-CX | （新） | `trigram.sjt3` | 三元組合條數 | `sj-cx-1-7.7m` ＝ SJ-CX-1-7.7M（7,700,964 條） |
   | 會意（語意校正） | SJ-SR | `tinylm-vN` | `tinylm.sjtl` | 參數數 | `sj-sr-6-14m` ＝ SJ-SR-6-14M（1,440 萬參數；tinylm-v5 ＝ SJ-SR-5-14M） |
+  | 常談（口語表） | SJ-CL | （新） | `colloquial.sjlm` | 詞彙數 | `sj-cl-1-68k` ＝ SJ-CL-1-68K（詞彙 68,055） |
 
   連文的第一版原本以 `trigram-v1` 建立，還沒有任何地方下載就改成 `sj-cx-1-7.7m`（舊的 Release 刪除）。
 
@@ -23,6 +24,8 @@
   rm -rf /tmp/check-<tag> && gh release download <tag> -R Nanako0129/shanjie -p <檔名> -D /tmp/check-<tag>/data/lm \
     && (cd /tmp/check-<tag> && shasum -a 256 -c "$OLDPWD/data/<檔名>.sha256")   # 上傳後
   ```
+
+  **常談（`sj-cl-…`）有三個附件**：`colloquial.sjlm`、`colloquial-attribution.tsv`（口語池的署名清單，雜湊檔 `data/colloquial-attribution.tsv.sha256`）與 NOTICE（`docs/releases/<tag>.NOTICE.txt`，列四個來源的授權；CC BY-SA 4.0 的檔案要附署名）。建立與核對的指令寫在 `docs/releases/sj-cl-1-68k.md`；下載時兩個檔用 `-p colloquial.sjlm -p colloquial-attribution.tsv` 一起抓。
 
   **雜湊檔什麼時候改**：換掉現有的檔（例如 model-v5 → model-v6）時，雜湊檔和 CI、`release.yml` 的下載在**同一個**切換的 PR 裡改（先把新雜湊合進 main，CI 會拿舊檔對新雜湊而失敗）。第一次加的新檔（例如 `tinylm-v1`）沒有人讀，雜湊檔可以和說明檔一起先進 main。
 

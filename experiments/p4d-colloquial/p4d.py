@@ -4,7 +4,7 @@ anchor of the shipping fusion, with an optional soft gate by the small model's a
 word or character of a row.
 
   python3 p4d.py --name chatclause --rows ROWS --dump D --dump-words W --rowstats R --tinylm-scores S --t2 T2.sjlm --select --out SEL.json
-  python3 p4d.py --name discordtune ... --cell-from SEL.json --clause 1 [--out-rowstats CELL.rs] --out OUT.json
+  python3 p4d.py --name discordtune ... --cell-from SEL.json --clause 1 [--out-rowstats CELL.rs] [--out-picks PICKS] --out OUT.json
 
 All inputs come from one shipping-setting run of the CLI (--context --packs acg --tinylm, plus --dump --dump-words --rowstats
 --tinylm-scores). For candidate i of the first 8 (the n-gram order of the scores record), col_i = lc_i - 0.5 k_i (P4's T2 log10 term
@@ -194,6 +194,7 @@ def main(argv=None):
     m.add_argument("--cell-from")
     ap.add_argument("--clause", choices=("1", "2a", "2b", "3", "confirm", "report"), default="report")
     ap.add_argument("--out-rowstats")
+    ap.add_argument("--out-picks", help="one line per row: the cell's chosen candidate (0-based, within the first 8); colloquial-term.md section 3.2")
     a = ap.parse_args(argv)
     if a.select and a.name != "chatclause":
         raise SystemExit("--select is the chatclause step")
@@ -259,6 +260,9 @@ def main(argv=None):
         with open(a.out_rowstats, "w", encoding="utf-8") as f:
             for i, (sc, j) in enumerate(zip(scores, picks), 1):
                 f.write(f"{i}\t{int(bool(sc['ok'][j]))}\t{sc['ed'][j]}\t{sc['glen']}\n")
+    if a.out_picks:
+        with open(a.out_picks, "w", encoding="utf-8") as f:
+            f.writelines(f"{j}\n" for j in picks)
     with outf:
         json.dump(res, outf, indent=1)
     return 0

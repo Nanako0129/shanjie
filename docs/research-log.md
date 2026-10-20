@@ -8279,6 +8279,33 @@ XL 比 `MAX_FILE`（67,108,864）小 1,168,880 位元組。錨點：4 個模型 
 - **維護者決定**（同日選擇題，看過數字之後）：出貨標準第 1 條（discordtune）與錯字回報那條的「改壞÷改對」上限從 0.5 放寬到 **0.6**，之後的片也適用；P4d 以 0.58 照新標準過關。照 10-20 的規定（只在放寬後的規則下過關的改動，開產品片之前先在 chatjudge-2 確認一發），確認規則由維護者在任何 chatjudge-2 的數字之前選定：**淨值 > 0、精確 McNemar p < 0.05、改壞÷改對 ≤ 0.65**。登記在同一份 README 的「chatjudge-2 確認」一節。
 - **chatjudge-2 確認通過**（同日，登記 `8fc93d3b` 之後才上傳判讀集）：108／39，淨值 +69，p 1.1×10⁻⁸，比例 0.36；CER 2.85% → 2.61%。對照臂「只把 α 調到 0.5」是 61／38（+23）。口語表這條線從 P4 走到 P4d，照確認規則可以開產品片（口語項進核心、T2 表隨 App 出貨），另寫契約。
 
+## 2026-10-20：口語項進核心（契約 `docs/contracts/colloquial-term.md`，分支 `feat/colloquial-term`；實作，還沒有雲端與實機的數字）
+
+- 實作：
+  - `core/src/colloquial.rs` 是 lc、k、col 的唯一實作（從 `cli/src/colloquial.rs` 搬來，CLI 那份與 P4b 的 `--colloquial`／`--colloquial-mu`／`--colloquial-gamma` 刪除）；P4d 登記的格（μ 0.5、閘門 T 1.0、γ＝μ／2、α 0.5、τ 2、δ 0.25）是具名常數，不讀 `.sjtl` 檔頭。`TinyLm::rerank_colloquial` 取前 8 名、同樣的 `ll_many`，之後 `ll_eff_i = ll_i + g_i·(μ/α)·(col_i − col_0)`、`pick` 不動；引擎、`shanjie-eval --colloquial-core`、`shanjie-replay --colloquial` 都只呼叫這一個函式。
+  - 引擎在每次建工作時決定（`refresh_lm`，結果記在 `RerankJob`）：口語表已載入、聊天、標準強度、載入的 `.sjtl` 的 SHA-256（`load_paired` 讀檔時記下）等於 `PAIRED_TINYLM_SHA256`，四個都成立才用 `rerank_colloquial`，否則照原本的 `rerank`。k 的疊加層詞集合是 `overlay-add.tsv` 加引擎建立時讀的 `pack_text`（沒有詞包建的引擎就沒有詞包的列）。`shanjie_engine_load_colloquial` 進 `shanjie.h`、`abi_smoke.c`（檢查 961–963）、`s3a.md`。
+  - App：殼在 `load_tinylm` 之後載入 `Resources/colloquial.sjlm`（失敗只記錯誤碼）；`--selftest` 多一步：載入、聊天標準強度、前文 `桌子一直在搖`，dev302 第 202 列的第一次顯示必須是 `桌腳的螺絲鬆掉了`。`build-app.sh`、`check-app.sh`、三個 CI job 與 `release.yml` 都核對 `colloquial.sjlm` 與 `colloquial-attribution.tsv` 的雜湊。
+  - 署名：`tools/build_attribution.py` 從口語池產生 `colloquial-attribution.tsv`（37,269 列：YODAS 1,138 支影片、Tatoeba 36,129 個句子 id（208 位作者）、WildChat 與 MASSIVE 各一列；句數加總 3,491／90,080／36,839／13,485，等於上面「Phase 2 公開句子池」記的數字；缺單位 id、YODAS 缺網址、Tatoeba 缺作者就以 1 結束）。池的 unit id 是 `<id>[:段[:塊]]`，單位取第一個冒號前面（YODAS 的影片 id、Tatoeba 的句子 id；後面的冒號只編號同一句被切成的塊）。授權：App 的署名檔加 `colloquial.sjlm` 一段、`LICENSES/data.md`、資料 Release 的說明與 NOTICE（`docs/releases/sj-cl-1-68k.md`、`sj-cl-1-68k.NOTICE.txt`）。
+- 第 202 列的量測（CLI，`--context --packs acg --tinylm`，一列的列檔）：出貨設定選 `桌腳的羅斯松掉了`（`c` 0），新路徑選 `桌腳的螺絲鬆掉了`（`c` 4，候選第 5 名），和 P4d 離線重算一致；兩次的 `ll` 是同一組數字。
+- §3.2（Mac，公開三集，`--profile chat --context --packs acg --tinylm`；`p4d.py --cell 0.5,0.5,1.0 --out-picks` 對 CLI `--colloquial-core`）：dev302、typing76、user-reported 的 `c` 欄對 `p4d.py` 的選字 0 列不同、rowstats 逐位元組相同；對出貨設定：dev302 改對 9／改壞 2（top1 262 → 269）、typing76 0／0、錯字回報 17／4（42 → 55）；`shanjie-replay --colloquial` 的 `top1_sha256` 三集都等於 CLI 新路徑的。
+- §3.3（三集的 `top1_sha256`）：書面、聊天保守、聊天積極、沒有 `--tinylm`、換一份別的 `.sjtl`（原檔最後一個位元翻過）各設定下，有表與沒表逐集相同；新 CLI 與 main（`4a9e85c8` 的 CLI，另建）不帶表的輸出相同，重播（`--learn off --rerank each`）也相同。
+- 突變（從乾淨的樹，各一個）：口語項不減錨點、閘門改看 `ll_i`、α 不換成 0.5、拿掉配對檢查，各讓 `cargo test -p core` 的對應測試失敗（`rc` 101，失敗的是斷言、不是編譯錯誤）。多做的：拿掉聊天條件、拿掉強度條件各讓 `engine_colloquial` 失敗；CLI 的配對、聊天、強度條件各讓 `cli/tests/colloquial.rs` 失敗。第一版 CLI 測試的「其他地方不變」只跑 dev302 前 40 列，那裡口語項不改任何列，所以拿掉 CLI 的配對檢查存活；改用前 60 列加第 196–230 列（含第 202、218、223 列）後會失敗。
+- 已知差異：引擎的一段（兩個固定詞或標點之間）當一句算 lc；CLI 與 `p4d.py` 一列就是一段，所以相同；多段組字時引擎與離線的 lc 切法不同（驗收的公開集都是一段）。
+- 還沒做（交給 main）：雲端的 cvtune-clean、chatclause、discordtune（CLI 對出貨的改對／改壞應是 113／37、74／43）、§3.5 的速度與記憶體、資料 Release `sj-cl-1-68k` 的建立、CI、維護者的實機一次。
+
+- **§3.5 記憶體超標與修正**（同日，雲端 VM 量）：`shanjie-replay --dev 302 --profile chat --rerank each`，尖峰 RSS 沒有口語表 406,400 KB、有 448,744 KB（+41.4 MiB，上限 40 MiB），其他項目都過（雲端 §3.2 逐列相同、113／37、74／43、45／17，重排 p95 不變，載入 +160 ms）。原因是 k 的兩個完整詞集合與兩個大文字（`overlay-add.tsv` 17 MB、`mcbpmf-data.txt` 7.5 MB）；k 只需要「在疊加層而不在基本詞表」的差集。`Colloquial::load` 改成：基本詞表的詞放進借用文字的短命集合，疊加層（`overlay-add.tsv` 用 `BufRead` 逐行讀，不整份讀進字串）與詞包的列逐行過濾，只留下不在基本詞表的詞（`overlay_only`）。k 對每個詞的結果不變（新增 `a_word_in_overlay_and_base_is_not_counted`；公開三集 `c` 與 rowstats 逐列相同、`top1_sha256` 不變）。Mac 的 `/usr/bin/time -l`（同一指令，各 3 次，單執行緒）：沒有口語表 max RSS 約 647 MiB；修正前有口語表 +27～30 MiB（674～677），修正後 +16～21 MiB（665～669）（peak memory footprint 同方向：+26～28 → +16～19 MiB）。Mac 數字只當參考，閘門由雲端重量。
+- **§3.5 雲端重量（修正後）**（2026-10-21，同一台 VM、同一指令，`/usr/bin/time -v`）：
+  - 在 `922ba686`，各 3 次：沒有口語表 406,112／406,408／406,476 KB，有口語表 435,860／435,848／435,952 KB，**+28.8～29.0 MiB**（上限 40 MiB，過）。
+  - 在審查修正後的 `36b7b4b8`，各 1 次：406,460 對 436,136 KB，+29.0 MiB。這一版的重播預設會載入口語表，所以「沒有」那一臂加 `--no-colloquial`。
+  - 載入（一列，3 次的中位數）：2.95 → 3.12 秒（+0.17 秒）。重排 p95 248.3 → 248.2 ms（CLI `--threads 1`、dev302 聊天，`tinylm: rerank` 那一行；這是整列重排的時間，不是每鍵延遲）。
+  - 同一次的 §3.2：chatclause、discordtune、cvtune-clean 的 `c` 逐列等於 `p4d.py` 那一格，rowstats 相同（113／37、74／43、45／17）。
+- **審查修正**（`/code-review` 15 項，處置 14 項、不修 1 項：口語表不綁雜湊，因為 bundle 裡的表已由 build-app 照 `data/colloquial.sjlm.sha256` 固定）：
+  - 重播與 KPI 預設像 App 一樣載入口語表（`--no-colloquial` 關掉）；
+  - triage 的出貨設定加上口語表；跨版本 benchmark 認得出貨口語表的版本（VERSIONS2 的 `"colloquial": True`）；
+  - 口語分數不是有限值時退回原本的 pick；判斷與詞表載入只有一份（`colloquial::applies`、`Colloquial::load_from_dir`）；
+  - 殼只在小模型載入成功時才載入口語表；`.sjtl` 的 SHA-256 在載入時算完就放掉位元組（量過 35～52 ms，中位數約 37 ms）；
+  - build-app 在建置前檢查；check-app 拿掉不可能失敗的 grep；署名工具處理 CRLF、相對路徑、重複列。
+
 ## 2026-10-21：D5 (3) 與「實機打字和離線不同」的來源〔推論〕：多半是評測沒有重現 App 當下的狀態
 
 - **D5 (3)**（`experiments/diag-near-miss/README.md`；維護者在自己的 Mac 用學習檔複本跑，複本跑完刪掉；`shanjie-replay --learn off --rerank final`，三臂；repo 只記數量，不記哪幾列）：

@@ -14,7 +14,7 @@ static ONE_ENGINE_AT_A_TIME: Mutex<()> = Mutex::new(());
 fn engine(learn: bool) -> (MutexGuard<'static, ()>, Engine) {
     let guard = ONE_ENGINE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
     let r = root();
-    let e = build_engine(&r, &r.join("data/lm/bigram.sjlm"), Some(&r.join("data/lm/tinylm.sjtl")), Profile::Chat, learn).expect("data/lm models");
+    let e = build_engine(&r, &r.join("data/lm/bigram.sjlm"), Some(&r.join("data/lm/tinylm.sjtl")), None, Profile::Chat, learn).expect("data/lm models");
     (guard, e)
 }
 
@@ -269,7 +269,9 @@ fn outputs_are_numbers_only_and_the_rowstats_are_the_clis() {
     let r = root();
     let lm = r.join("data/lm/bigram.sjlm");
     let tl = r.join("data/lm/tinylm.sjtl");
-    let cli = run(eval, &["--lm", lm.to_str().unwrap(), "--profile", "chat", "--context", "--packs", "acg", "--tinylm", tl.to_str().unwrap(), "--rows", &p("rows.txt"), "--rowstats", &p("cli.rs")]);
+    // The replay loads data/lm/colloquial.sjlm by default, as the App does, so the CLI is given it too.
+    let co = r.join("data/lm/colloquial.sjlm");
+    let cli = run(eval, &["--lm", lm.to_str().unwrap(), "--profile", "chat", "--context", "--packs", "acg", "--tinylm", tl.to_str().unwrap(), "--colloquial-core", co.to_str().unwrap(), "--rows", &p("rows.txt"), "--rowstats", &p("cli.rs")]);
     let mine = run(replay, &["--rows", &p("rows.txt"), "--rowstats", &p("rep.rs"), "--keys", &p("rep.keys")]);
     assert_eq!(std::fs::read(p("cli.rs")).unwrap(), std::fs::read(p("rep.rs")).unwrap());
     assert_eq!(sha_of(&cli), sha_of(&mine));
@@ -283,6 +285,46 @@ fn outputs_are_numbers_only_and_the_rowstats_are_the_clis() {
         let cols = if f.ends_with("keys") { 6 } else { 4 };
         assert!(text.lines().all(|l| l.split('\t').count() == cols), "{f}");
     }
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+/// The App's engine loads the colloquial table (docs/contracts/colloquial-term.md section 2.3, item 4), so the replay does by default: on row 202
+/// of dev302 and on the first rows of dev302 its choices are the CLI's `--colloquial-core` choices (equal `top1_sha256`) and the summary is
+/// tagged; `--colloquial FILE` is the same; `--no-colloquial` (and `--no-tinylm`) is untagged with the shipping choice; the two options together
+/// are an error.
+#[test]
+fn colloquial_replay_agrees_with_the_cli() {
+    let dir = std::env::temp_dir().join(format!("shanjie-replay-colloq-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let rows = dir.join("rows.txt");
+    let dev = std::fs::read_to_string(root().join("eval/bench/suite-v1/dev302.txt")).unwrap();
+    let lines: Vec<&str> = dev.lines().collect();
+    assert!(lines[201].starts_with("桌子一直在搖|桌腳的螺絲鬆掉了|"));
+    std::fs::write(&rows, [&lines[..12], &lines[200..206]].concat().join("\n") + "\n").unwrap();
+    let rows = rows.to_str().unwrap();
+    let _g = ONE_ENGINE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let (replay, eval, r) = (env!("CARGO_BIN_EXE_shanjie-replay"), env!("CARGO_BIN_EXE_shanjie-eval"), root());
+    let (lm, tl, co) = (r.join("data/lm/bigram.sjlm"), r.join("data/lm/tinylm.sjtl"), r.join("data/lm/colloquial.sjlm"));
+    let cli = |extra: &[&str]| {
+        let mut a = vec!["--lm", lm.to_str().unwrap(), "--profile", "chat", "--context", "--packs", "acg", "--tinylm", tl.to_str().unwrap(), "--rows", rows];
+        a.extend_from_slice(extra);
+        run(eval, &a)
+    };
+    let (plain, with) = (cli(&[]), cli(&["--colloquial-core", co.to_str().unwrap()]));
+    let firsts = dir.join("firsts.txt");
+    let rep_plain = run(replay, &["--rows", rows, "--no-colloquial", "--firsts", firsts.to_str().unwrap()]);
+    let rep_with = run(replay, &["--rows", rows, "--firsts", firsts.to_str().unwrap()]);
+    let rep_file = run(replay, &["--rows", rows, "--colloquial", co.to_str().unwrap()]);
+    assert_eq!(rep_with, rep_file, "the default is data/lm/colloquial.sjlm");
+    assert!(!run(replay, &["--rows", rows, "--no-tinylm"]).contains("colloq"), "no small model: the App loads no table either");
+    let both = Command::new(replay).args(["--rows", rows, "--colloquial", co.to_str().unwrap(), "--no-colloquial"]).output().unwrap();
+    assert_eq!(both.status.code(), Some(1));
+    assert_ne!(sha_of(&plain), sha_of(&with), "premise: the term changes a choice among these rows");
+    assert_eq!(sha_of(&plain), sha_of(&rep_plain));
+    assert_eq!(sha_of(&with), sha_of(&rep_with));
+    assert!(rep_with.contains("+colloq:2984eeb5") && !rep_plain.contains("colloq"), "{rep_with}{rep_plain}");
+    let shown = std::fs::read_to_string(&firsts).unwrap();
+    assert_eq!(shown.lines().nth(13), Some("桌腳的螺絲鬆掉了"), "row 202 is the 14th row of the file: the term's choice is the first display");
     std::fs::remove_dir_all(&dir).unwrap();
 }
 

@@ -97,9 +97,10 @@ jobs:
       # Kneser-Ney side file (kn-core) is the kn-v1 asset. The small model of
       # 語意校正 (S7c-2b) is the sj-sr-6-14m asset (會意 SJ-SR-6-14M, SJTL0004: it records model-v6's and kn-v1's hashes).
       # The trigram table of the formal profile (trigram-core) is the sj-cx-1-7.7m asset (bound to model-v6's hash).
+      # The colloquial table (常談 SJ-CL-1-68K, colloquial-term.md) and its attribution list are the sj-cl-1-68k assets.
       # Checking them here fails the run in seconds with a clear message instead
       # of after the build. The hashes are checked against data/bigram.sjlm.sha256,
-      # data/classes.sjc.sha256, data/kn.sjkn.sha256, data/tinylm.sjtl.sha256 and data/trigram.sjt3.sha256 (also read by build-app.sh and release.yml);
+      # data/classes.sjc.sha256, data/kn.sjkn.sha256, data/tinylm.sjtl.sha256, data/trigram.sjt3.sha256, data/colloquial.sjlm.sha256 and data/colloquial-attribution.tsv.sha256 (also read by build-app.sh and release.yml);
       # cli/tests/golden.rs repeats the first two, so a model switch updates both (docs/data-files.md).
       - name: Fetch the language model
         env:
@@ -116,6 +117,8 @@ jobs:
           shasum -a 256 -c data/tinylm.sjtl.sha256
           gh release download sj-cx-1-7.7m --repo "$GITHUB_REPOSITORY" -p trigram.sjt3 -D data/lm
           shasum -a 256 -c data/trigram.sjt3.sha256
+          gh release download sj-cl-1-68k --repo "$GITHUB_REPOSITORY" -p colloquial.sjlm -p colloquial-attribution.tsv -D data/lm
+          shasum -a 256 -c data/colloquial.sjlm.sha256 data/colloquial-attribution.tsv.sha256
 
       # Release also enforces the per-key p95 < 16 ms assertions in the replays.
       - name: Tests (release)
@@ -224,6 +227,10 @@ jobs:
       - name: Overlay manual words (Python)
         run: python3 -m unittest tools/test_build_overlay.py
 
+      # docs/contracts/colloquial-term.md section 3.6: the attribution list builder (per-source sums, the stop conditions), synthetic input.
+      - name: Colloquial attribution list (Python)
+        run: python3 -W ignore -m unittest tools/test_build_attribution.py
+
       # docs/contracts/holdout-refresh.md section 8: the held-out containment guard (tools/holdout_guard.py report, build_counts --holdout-guard), synthetic input and a fake conversion table.
       - name: Holdout guard (Python)
         run: python3 -W ignore -m unittest tools/test_holdout_guard.py
@@ -269,9 +276,10 @@ jobs:
       # Kneser-Ney side file (kn-core) is the kn-v1 asset. The small model of
       # 語意校正 (S7c-2b) is the sj-sr-6-14m asset (會意 SJ-SR-6-14M, SJTL0004: it records model-v6's and kn-v1's hashes).
       # The trigram table of the formal profile (trigram-core) is the sj-cx-1-7.7m asset (bound to model-v6's hash).
+      # The colloquial table (常談 SJ-CL-1-68K, colloquial-term.md) and its attribution list are the sj-cl-1-68k assets.
       # Checking them here fails the run in seconds with a clear message instead
       # of after the build. The hashes are checked against data/bigram.sjlm.sha256,
-      # data/classes.sjc.sha256, data/kn.sjkn.sha256, data/tinylm.sjtl.sha256 and data/trigram.sjt3.sha256 (also read by build-app.sh and release.yml);
+      # data/classes.sjc.sha256, data/kn.sjkn.sha256, data/tinylm.sjtl.sha256, data/trigram.sjt3.sha256, data/colloquial.sjlm.sha256 and data/colloquial-attribution.tsv.sha256 (also read by build-app.sh and release.yml);
       # cli/tests/golden.rs repeats the first two, so a model switch updates both (docs/data-files.md).
       - name: Fetch the language model
         env:
@@ -288,6 +296,8 @@ jobs:
           shasum -a 256 -c data/tinylm.sjtl.sha256
           gh release download sj-cx-1-7.7m --repo "$GITHUB_REPOSITORY" -p trigram.sjt3 -D data/lm
           shasum -a 256 -c data/trigram.sjt3.sha256
+          gh release download sj-cl-1-68k --repo "$GITHUB_REPOSITORY" -p colloquial.sjlm -p colloquial-attribution.tsv -D data/lm
+          shasum -a 256 -c data/colloquial.sjlm.sha256 data/colloquial-attribution.tsv.sha256
 
       - name: Tests (debug)
         run: cargo test --locked
@@ -336,6 +346,8 @@ jobs:
           shasum -a 256 -c data/tinylm.sjtl.sha256
           gh release download sj-cx-1-7.7m --repo "$GITHUB_REPOSITORY" -p trigram.sjt3 -D data/lm
           shasum -a 256 -c data/trigram.sjt3.sha256
+          gh release download sj-cl-1-68k --repo "$GITHUB_REPOSITORY" -p colloquial.sjlm -p colloquial-attribution.tsv -D data/lm
+          shasum -a 256 -c data/colloquial.sjlm.sha256 data/colloquial-attribution.tsv.sha256
 
       # docs/contracts/app-sandbox.md section 2.6, in its order: no step before
       # step 3 launches any sandboxed build. cargo test runs in the core and

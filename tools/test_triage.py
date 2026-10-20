@@ -393,7 +393,7 @@ class Jobs(unittest.TestCase):
 
             seen = []
 
-            def fake_cell(cli, lm, tl, prof, f, lex, par, lenient, report, tdir, kn, tri, threads):
+            def fake_cell(cli, lm, tl, prof, f, lex, par, lenient, report, tdir, kn, tri, threads, colloq):
                 seen.append(threads)
                 cn = T.empty_counts()
                 cn["n"], cn["errors"] = os.path.getsize(f) + len(prof), len(prof)
@@ -439,7 +439,7 @@ class FailingCell(unittest.TestCase):
                 files[name] = (p, False)
             a_dir, a_cleaned, started, ran, finished = [None], threading.Event(), [threading.Event(), threading.Event()], [], []
 
-            def fake_cell(cli, lm, tl, prof, f, lex, par, lenient, report, tdir, kn, tri, threads):
+            def fake_cell(cli, lm, tl, prof, f, lex, par, lenient, report, tdir, kn, tri, threads, colloq):
                 job = (os.path.basename(f)[:-4], prof)
                 ran.append(job)
                 open(os.path.join(tdir, "sentences"), "w").close()   # something a cell leaves in its temp dir
@@ -484,7 +484,7 @@ class FailingCell(unittest.TestCase):
                 files[name] = (p, False)
             a_dir, b_started, a_done, ran = [None], threading.Event(), threading.Event(), []
 
-            def fake_cell(cli, lm, tl, prof, f, lex, par, lenient, report, tdir, kn, tri, threads):
+            def fake_cell(cli, lm, tl, prof, f, lex, par, lenient, report, tdir, kn, tri, threads, colloq):
                 job = (os.path.basename(f)[:-4], prof)
                 ran.append(job)
                 if job == ("n0", "chat"):
@@ -519,7 +519,7 @@ class FailingCell(unittest.TestCase):
             for jobs in (1, 2):
                 ran = []
 
-                def fake_cell(cli, lm, tl, prof, f, lex, par, lenient, report, tdir, kn, tri, threads):
+                def fake_cell(cli, lm, tl, prof, f, lex, par, lenient, report, tdir, kn, tri, threads, colloq):
                     ran.append(prof)
                     return T.empty_counts(), []
                 with _patched(td, {"n0": (p, True)}, fake_cell):
@@ -549,6 +549,54 @@ class CliThreads(unittest.TestCase):
                 for cmd in calls:
                     self.assertEqual(cmd[cmd.index("--tinylm") + 2:][:len(want)], want)
                     self.assertEqual("--threads" in cmd, bool(want))
+
+
+class Colloquial(unittest.TestCase):
+    """The shipping setting S includes the colloquial table when data/lm/colloquial.sjlm exists (the App always loads it)."""
+
+    def test_the_command_and_the_tag_carry_the_table_only_when_given(self):
+        base = ["cli", "--lm", "lm", "--profile", "chat", "--rows", "r", "--context", "--packs", "acg", "--tinylm", "tl"]
+        self.assertEqual(T.cli_cmd("cli", "lm", "tl", "chat", "r", True, []), base)   # without the table: the command of before
+        self.assertEqual(T.cli_cmd("cli", "lm", "tl", "chat", "r", True, ["--rowstats", "x"], 3, "co.sjlm"),
+                         base + ["--colloquial-core", "co.sjlm", "--threads", "3", "--rowstats", "x"])
+        self.assertEqual(T.expected_tag("chat", "+ctx", "abcd1234", "", ""), "lm-chat+ctx+tl:abcd1234+acg")
+        self.assertEqual(T.expected_tag("chat", "+ctx", "abcd1234", "", "", "2984eeb5"), "lm-chat+ctx+tl:abcd1234+acg+colloq:2984eeb5")
+        self.assertEqual(T.expected_tag("formal", "", "abcd1234", "", "+tri:fdd3b05d", "2984eeb5"), "lm-formal+tl:abcd1234+acg+tri:fdd3b05d+colloq:2984eeb5")
+
+    def test_run_cell_passes_the_table_and_checks_its_tag(self):
+        from unittest import mock
+        calls = []
+        line = "## r.txt  lm-chat%s+tl:hhhhhhhh+acg+colloq:hhhhhhhh  {'n': 1, 'top1': 0, 'oracle@64': 0, 'top1_sha256': '" + "0" * 64 + "'}\n"
+
+        def fake_sh(cmd, **kw):
+            calls.append(cmd)
+            return line % ("+ctx" if "--context" in cmd else "")
+        with tempfile.TemporaryDirectory() as td:
+            rows = os.path.join(td, "r.txt")
+            with open(rows, "w", encoding="utf-8") as f:
+                f.write("|你|ni\n")
+            with mock.patch.object(T.bench, "sh", fake_sh), mock.patch.object(T.bench, "sha_file", lambda p: "h" * 64), \
+                    self.assertRaises(FileNotFoundError):   # past the tag check: the fake CLI wrote no rowstats
+                T.run_cell("cli", "lm", "tl", "chat", rows, None, PAR, LEN, False, td, "", "", 1, "co.sjlm")
+            self.assertEqual(len(calls), 2)
+            self.assertTrue(all(c[c.index("--colloquial-core") + 1] == "co.sjlm" for c in calls))
+            calls.clear()
+            with mock.patch.object(T.bench, "sh", fake_sh), mock.patch.object(T.bench, "sha_file", lambda p: "h" * 64), \
+                    self.assertRaisesRegex(RuntimeError, "setting tag"):   # the CLI printed +colloq: but the run has no table: not the shipping setting
+                T.run_cell("cli", "lm", "tl", "chat", rows, None, PAR, LEN, False, td, "", "", 1, "")
+
+    def test_the_plain_pick_check_is_skipped_only_in_chat_with_the_table(self):
+        # code review on the reading-channel slice: with the table the core's chat pick differs from Python's plain pick on purpose
+        # (dev302 row 202), so checking it would abort every shipping chat cell.
+        self.assertFalse(T.plain_pick_applies("chat", "co.sjlm"))
+        self.assertTrue(T.plain_pick_applies("formal", "co.sjlm"))
+        self.assertTrue(T.plain_pick_applies("chat", ""))
+
+    def test_the_table_says_what_the_d2_diagnosis_leaves_out(self):
+        doc = {"label": "t", "commit": "0" * 40, "setting": "s", "models": {"colloquial.sjlm": "a" * 64}, "alpha_tau_delta": {}, "sets": {}}
+        self.assertIn("D2b／D2c 的細分用 Python 的 `pick`", T.render(doc))
+        doc["models"] = {}
+        self.assertNotIn("口語項", T.render(doc))
 
 
 class Render(unittest.TestCase):

@@ -4,7 +4,7 @@ import XCTest
 @testable import ShanjieKit
 
 /// The repository's data, laid out like the app's Resources (docs/contracts/s3b.md section 10.4):
-/// a temporary directory of symlinks to data/lexicon/*, data/lm/bigram.sjlm, classes.sjc, kn.sjkn, trigram.sjt3 and tinylm.sjtl. Missing files fail
+/// a temporary directory of symlinks to data/lexicon/*, data/lm/bigram.sjlm, classes.sjc, kn.sjkn, trigram.sjt3, tinylm.sjtl and colloquial.sjlm. Missing files fail
 /// the test with instructions; nothing is skipped for a missing file (the one opt-in benchmark, CandidateCellTests.testBenchmark, is skipped without SHANJIE_BENCH=1).
 enum TestData {
     static let repo = URL(fileURLWithPath: #filePath)
@@ -23,6 +23,7 @@ enum TestData {
         ("kn.sjkn", "data/lm/kn.sjkn"),  // model-v6: the Kneser-Ney side file the shipped tinylm.sjtl (SJTL0004) records
         ("trigram.sjt3", "data/lm/trigram.sjt3"),  // trigram-core: the formal profile's table, loaded from beside the model
         ("tinylm.sjtl", "data/lm/tinylm.sjtl"),
+        ("colloquial.sjlm", "data/lm/colloquial.sjlm"),  // colloquial-term.md: the colloquial table the selftest requires
         // zhen-mixed: the synthetic list stands in for the generated Resources/english-words.txt (docs/contracts/zhen-mixed.md section 5.3).
         ("english-words.txt", "eval/golden/english-tiny.txt"),
     ]
@@ -52,6 +53,7 @@ enum TestData {
                     kn.sjkn: gh release download kn-v1 -R Nanako0129/shanjie -p kn.sjkn -D data/lm
                     trigram.sjt3: gh release download sj-cx-1-7.7m -R Nanako0129/shanjie -p trigram.sjt3 -D data/lm
                     tinylm.sjtl: gh release download sj-sr-6-14m -R Nanako0129/shanjie -p tinylm.sjtl -D data/lm
+                    colloquial.sjlm: gh release download sj-cl-1-68k -R Nanako0129/shanjie -p colloquial.sjlm -D data/lm
                     """, file: file, line: line)
                 return nil
             }

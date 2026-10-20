@@ -812,6 +812,33 @@ pub unsafe extern "C" fn shanjie_engine_load_tinylm(engine: *mut ShanjieEngine, 
 }
 
 /// # Safety
+/// `engine` is NULL or a live handle; `path` is NULL or a NUL-terminated string.
+#[no_mangle]
+pub unsafe extern "C" fn shanjie_engine_load_colloquial(engine: *mut ShanjieEngine, path: *const c_char) -> i32 {
+    let rc = guard(|| {
+        if engine.is_null() || path.is_null() {
+            return SHANJIE_ERR_NULL;
+        }
+        // SAFETY: non-NULL, NUL-terminated per the caller contract.
+        let Ok(path) = unsafe { CStr::from_ptr(path) }.to_str() else {
+            return SHANJIE_ERR_INVALID;
+        };
+        // SAFETY: live handle, single-threaded use (§6).
+        let e = unsafe { &mut (*engine).0 };
+        match e.load_colloquial(Path::new(path)) {
+            Ok(()) => SHANJIE_OK,
+            Err(EngineError::LoadFailed) => SHANJIE_ERR_LOAD,
+            Err(EngineError::Internal) => SHANJIE_ERR_INTERNAL,
+        }
+    });
+    if rc == SHANJIE_ERR_INTERNAL {
+        // SAFETY: forwarded caller contract.
+        unsafe { discard(engine) };
+    }
+    rc
+}
+
+/// # Safety
 /// `engine` is NULL or a live handle; `out` is NULL or valid for one pointer write.
 #[no_mangle]
 pub unsafe extern "C" fn shanjie_engine_set_rerank(engine: *mut ShanjieEngine, enabled: u32, out: *mut *mut ShanjieOutput) -> i32 {

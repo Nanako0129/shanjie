@@ -105,7 +105,8 @@ def git_clean_head(root, version):
 
 def check_models(root, spec):
     """-> {file name: sha256} of exactly the files the version ships (resolve_models' set), read from data/lm and matching data/*.sha256."""
-    names = ["bigram.sjlm", "classes.sjc"] + (["kn.sjkn"] if spec.get("kn") else []) + (["trigram.sjt3"] if spec.get("tri") else []) + (["tinylm.sjtl"] if spec["tinylm"] else [])
+    names = ["bigram.sjlm", "classes.sjc"] + (["kn.sjkn"] if spec.get("kn") else []) + (["trigram.sjt3"] if spec.get("tri") else []) + (["tinylm.sjtl"] if spec["tinylm"] else []) \
+        + (["colloquial.sjlm"] if spec.get("colloquial") else [])
     lm = os.path.join(root, "data/lm")
     extra = sorted(f for f in os.listdir(lm) if f not in names and not f.startswith("."))
     if extra:
@@ -126,9 +127,10 @@ def check_models(root, spec):
 
 
 def models_line(models):
-    """What shanjie-replay prints on stderr (cli/src/bin/replay.rs): bigram, then classes/kn/trigram that exist, then tinylm or none."""
+    """What shanjie-replay prints on stderr (cli/src/bin/replay.rs): bigram, then classes/kn/trigram that exist, then tinylm or none, then the colloquial table when loaded."""
     s = " ".join(f"{n}:{models[n][:8]}" for n in ("classes.sjc", "kn.sjkn", "trigram.sjt3") if n in models)
-    return f"models: bigram.sjlm:{models['bigram.sjlm'][:8]} {s} tinylm.sjtl:{models['tinylm.sjtl'][:8] if 'tinylm.sjtl' in models else 'none'}"
+    co = f" colloquial.sjlm:{models['colloquial.sjlm'][:8]}" if "colloquial.sjlm" in models else ""
+    return f"models: bigram.sjlm:{models['bigram.sjlm'][:8]} {s} tinylm.sjtl:{models['tinylm.sjtl'][:8] if 'tinylm.sjtl' in models else 'none'}{co}"
 
 
 def build_replay(root):
@@ -148,10 +150,14 @@ def build_replay(root):
 
 
 def replay_cell(binary, root, rows, models, learn, rowstats):
-    """One shanjie-replay run (chat, --correct); checks its models line, setting tag and row count. -> the summary dict."""
+    """One shanjie-replay run (chat, --correct); checks its models line, setting tag and row count. -> the summary dict.
+    The replay loads data/lm/colloquial.sjlm by default, as the App does: a version that ships the table (it is in `models`) runs as is and its tag
+    ends in +colloq:<sha8>; one that does not ships no data/lm/colloquial.sjlm, and `--no-colloquial` keeps the replay from loading another."""
     cmd = [binary, "--rows", rows, "--profile", "chat", "--correct", "--learn", "on" if learn else "off", "--rowstats", rowstats]
     if "tinylm.sjtl" not in models:
         cmd.append("--no-tinylm")
+    if "colloquial.sjlm" not in models:
+        cmd.append("--no-colloquial")
     r = subprocess.run(cmd, capture_output=True, text=True, cwd=root, env=bench.cli_env(False))
     if r.returncode:
         raise RuntimeError(f"shanjie-replay failed ({r.returncode}): {r.stderr[-300:]}")
@@ -163,7 +169,8 @@ def replay_cell(binary, root, rows, models, learn, rowstats):
     name, tag, d = found[0]
     s = {**ast.literal_eval(d), "tag": tag}
     lm8, tl8 = models["bigram.sjlm"][:8], models.get("tinylm.sjtl", "")[:8]
-    want = f"replay-chat+ctx+acg+nopred+noen+lm:{lm8}" + (f"+tl:{tl8}" if tl8 else "-notinylm") + ("+learn" if learn else "") + "+correct"
+    want = f"replay-chat+ctx+acg+nopred+noen+lm:{lm8}" + (f"+tl:{tl8}" if tl8 else "-notinylm") + ("+learn" if learn else "") + "+correct" \
+        + (f"+colloq:{models['colloquial.sjlm'][:8]}" if "colloquial.sjlm" in models else "")
     if tag != want:
         raise RuntimeError(f"setting tag {tag} != {want}")
     n = len(bench.truths(rows))
