@@ -360,6 +360,12 @@ def read_cli_files(dump, words, scores, n):
     return cands, gold0, recs
 
 
+def plain_pick_applies(prof, colloq):
+    """Whether the CLI's chosen index must equal the plain `pick(ng, ll, *par)`: not in chat with the colloquial table, where the core
+    adds the colloquial term (and the terms that ride on it) to the fusion on purpose, which this Python `pick` does not reproduce."""
+    return not (colloq and prof == "chat")
+
+
 def run_cell(cli, lm, tl, prof, rows_file, lex, par, lenient, report, td, kn="", tri="", threads=1, colloq=""):
     rows = parse_rows(read_text(rows_file))
     f = lambda n: os.path.join(td, n)
@@ -384,7 +390,7 @@ def run_cell(cli, lm, tl, prof, rows_file, lex, par, lenient, report, td, kn="",
         sc = recs[i]
         c = sc["c"]
         sel_ok = int(lenient(cands[i][c][0]) == lenient(truth))
-        if sel_ok != ok[i] or (sc["n"] > 1 and "ll" in sc and c != pick(sc["ng"], sc["ll"], *par)):
+        if sel_ok != ok[i] or (plain_pick_applies(prof, colloq) and sc["n"] > 1 and "ll" in sc and c != pick(sc["ng"], sc["ll"], *par)):
             raise RuntimeError(f"row {i + 1}: the chosen candidate disagrees with rowstats or with pick")
         recs_rows.append({"ctx": ctx, "truth": truth, "syls": syls, "cands": cands[i], "gold0": gold0[i], "c": c, "scores": sc})
     cn, per = triage_rows(recs_rows, [int(x) for x in ok], [int(x) for x in ok_nc], lex, par, lenient, report)

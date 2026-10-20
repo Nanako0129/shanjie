@@ -585,6 +585,13 @@ class Colloquial(unittest.TestCase):
                     self.assertRaisesRegex(RuntimeError, "setting tag"):   # the CLI printed +colloq: but the run has no table: not the shipping setting
                 T.run_cell("cli", "lm", "tl", "chat", rows, None, PAR, LEN, False, td, "", "", 1, "")
 
+    def test_the_plain_pick_check_is_skipped_only_in_chat_with_the_table(self):
+        # code review on the reading-channel slice: with the table the core's chat pick differs from Python's plain pick on purpose
+        # (dev302 row 202), so checking it would abort every shipping chat cell.
+        self.assertFalse(T.plain_pick_applies("chat", "co.sjlm"))
+        self.assertTrue(T.plain_pick_applies("formal", "co.sjlm"))
+        self.assertTrue(T.plain_pick_applies("chat", ""))
+
     def test_the_table_says_what_the_d2_diagnosis_leaves_out(self):
         doc = {"label": "t", "commit": "0" * 40, "setting": "s", "models": {"colloquial.sjlm": "a" * 64}, "alpha_tau_delta": {}, "sets": {}}
         self.assertIn("D2b／D2c 的細分用 Python 的 `pick`", T.render(doc))
