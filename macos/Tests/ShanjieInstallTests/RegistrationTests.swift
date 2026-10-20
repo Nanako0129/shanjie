@@ -88,6 +88,32 @@ final class RegistrationTests: XCTestCase {
         XCTAssertEqual(calls, 0)
     }
 
+    /// system-install.md section 2.4 item 4: a location change never skips, in every state that
+    /// would skip without it, and `run` does not re-read first.
+    func testMovedAlwaysTakesTheFullFlow() {
+        for listed in [false, true] {
+            for accepted in [false, true] {
+                for legacy in [false, true] {
+                    XCTAssertEqual(Registration.decide(modeListed: listed, accepted: accepted, legacyEnabled: legacy, moved: true),
+                                   .fullFlow, "listed \(listed) accepted \(accepted) legacy \(legacy)")
+                }
+            }
+        }
+        for state in [Registration.State(modeListed: true, accepted: true, legacyEnabled: false),
+                      Registration.State(modeListed: true, accepted: false, legacyEnabled: false),
+                      Registration.State(modeListed: false, accepted: false, legacyEnabled: false)] {
+            var flows = 0, pauses = 0
+            let result = Registration.run(
+                bundleURL: URL(fileURLWithPath: "/nonexistent"), bundleID: "x", defaults: UserDefaults(suiteName: "RegistrationTests")!,
+                moved: true, readState: { _ in state },
+                fullFlow: { _, _, _ in flows += 1; return Registration.Result(outcome: .notAccepted) },
+                pause: { _ in pauses += 1 })
+            XCTAssertEqual(flows, 1, "\(state)")
+            XCTAssertEqual(pauses, 0, "\(state)")
+            XCTAssertFalse(result.skipped)
+        }
+    }
+
     func testRunTakesTheFullFlowWhenNeeded() {
         var calls = 0
         _ = run(.init(modeListed: false, accepted: false, legacyEnabled: false), mutations: &calls)

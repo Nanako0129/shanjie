@@ -213,15 +213,19 @@
 
 <section id="install" class="install">
   <h2>安裝</h2>
-  <p class="sub">需要 macOS 26（Tahoe）以上、Apple 晶片。只裝在你的帳號，不需要管理員密碼。兩種方式擇一。</p>
+  <p class="sub">需要 macOS 26（Tahoe）以上、Apple 晶片。兩種方式擇一。</p>
   <div class="layers alt">
-    <div class="layer"><div><h3>安裝程式</h3><p>到 <a href="https://github.com/Nanako0129/shanjie/releases/latest">GitHub Releases</a> 下載 <code>shanjie-installer</code> 開頭的 zip，解壓縮後打開「安裝善解輸入法」，照四個步驟：歡迎、安裝、到系統設定加入、試打。</p><div class="when">推薦</div></div></div>
+    <div class="layer"><div><h3>安裝程式</h3><p>到 <a href="https://github.com/Nanako0129/shanjie/releases/latest">GitHub Releases</a> 下載 <code>shanjie-installer</code> 開頭的 zip，解壓縮後打開「安裝善解輸入法」，照四個步驟：歡迎、安裝、到系統設定加入、試打。v0.5.0 起歡迎頁有兩個選項：</p>
+      <ul>
+        <li><strong>這台 Mac</strong>：每個帳號都能用，有程式開著安全輸入時善解照常能用；安裝和每次更新都要輸入一次管理員密碼。</li>
+        <li><strong>只有我的帳號</strong>：不需要密碼、一鍵更新；有程式開著安全輸入時，系統會暫時停用善解。</li>
+      </ul><div class="when">推薦</div></div></div>
     <div class="layer"><div><h3>Homebrew</h3>
       <pre><code>brew install --cask nanako0129/tap/shanjie
 "$HOME/Library/Input Methods/善解輸入法.app/Contents/MacOS/shanjie" install</code></pre>
-      <p>第二行在系統還不認得善解時註冊；結束碼是 3 時，到「系統設定 → 鍵盤 → 輸入方式」按「+」，選「繁體中文」裡的「善解輸入法」，按「加入」。升級用 <code>brew upgrade --cask nanako0129/tap/shanjie</code>。</p></div></div>
+      <p>Homebrew 只裝在你的帳號。第二行在系統還不認得善解時註冊；結束碼是 3 時，到「系統設定 → 鍵盤 → 輸入方式」按「+」，選「繁體中文」裡的「善解輸入法」，按「加入」。升級用 <code>brew upgrade --cask nanako0129/tap/shanjie</code>。</p></div></div>
   </div>
-  <p class="note">兩種方式不要混用。從 Homebrew 換成安裝程式，先執行 <code>brew uninstall --cask nanako0129/tap/shanjie</code>；從安裝程式換成 Homebrew，先刪掉 <code>~/Library/Input Methods/善解輸入法.app</code>。</p>
+  <p class="note">兩種方式不要混用。從 Homebrew 換成安裝程式，先執行 <code>brew uninstall --cask nanako0129/tap/shanjie</code>；從安裝程式換成 Homebrew，先刪掉 <code>~/Library/Input Methods/善解輸入法.app</code>；裝給「這台 Mac」的那份要用管理員刪：<code>sudo rm -rf "/Library/Input Methods/善解輸入法.app" "/Library/Input Methods/.shanjie-previous"</code>。</p>
   <details>
     <summary>已經裝過舊版</summary>
     <p>照當初安裝的方式升級；選字記憶和設定都放在 App 外面，升級不會動到。升級後輸入法選單找不到善解時，照上面的系統設定步驟加回來。Caps Lock 切換不了任何輸入法時，到「系統設定 → 輔助使用 → 鍵盤」打開「慢速按鍵」，按一次 Caps Lock，再關掉。</p>

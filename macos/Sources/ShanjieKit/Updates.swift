@@ -194,11 +194,11 @@ public enum UpdateText {
     public static func install(_ v: String) -> String { "更新到 \(v)" }
     public static func menu(_ v: String) -> String { "有新版本 \(v)，按此更新…" }
 
-    /// The 關於 page's note on where this copy is installed and what updating it asks (standalone-updater.md section 2.3,
-    /// the U1 wording: the user-folder note ends before the sentence that points to the installer's 「這台 Mac」, which U2 adds).
+    /// The 關於 page's note on where this copy is installed and what updating it asks (standalone-updater.md section 2.3;
+    /// the user-folder note's last sentence points to the installer's 「這台 Mac」, added with U2, system-install.md section 2.6).
     /// Only the folder above the bundle decides: the system's Input Methods folder, or anything else (the user's).
     public static let locationSystem = "善解裝給這台 Mac 的所有帳號。按更新後，善解更新會先下載並驗證，再跳出系統的密碼框，文字是「善解更新 wants permission to update 善解輸入法.」。善解只會在你按下這裡的「更新」之後才要密碼。不是管理員的帳號，請管理員更新。"
-    public static let locationUser = "善解只裝在你的帳號，更新不需要密碼。有程式開著安全輸入時，系統會暫時停用善解。"
+    public static let locationUser = "善解只裝在你的帳號，更新不需要密碼。有程式開著安全輸入時，系統會暫時停用善解；要改裝給整台 Mac，請重新下載安裝程式並選「這台 Mac」。"
 
     public static func location(bundleURL: URL) -> String {
         bundleURL.deletingLastPathComponent().path == "/Library/Input Methods" ? locationSystem : locationUser

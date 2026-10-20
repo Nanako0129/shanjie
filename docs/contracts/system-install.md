@@ -27,9 +27,12 @@
 | **P3** Sparkle 更新 root 擁有的 bundle | 虛擬機，開發版 ID 的更新測試版（ad-hoc） | 「更新到 0.0.2」→ 系統管理員密碼框；第一次取消沒有錯誤、照常打字；第二次輸入密碼 → 更新完成；結果 `root:wheel`、全部可讀（zip 先 `chmod -R a+rX`）、container 沿用、0 deny。善解更新從 `/Library` 走同一條路也過（`standalone-updater.md` §1.1 V3） |
 | **P0** 維護者的 Mac | macOS 27.0.1，把裝著的 dry run 0.0.0 照 P1 的順序搬到 `/Library`、登出再登入 | 安全輸入期間不反灰、選單第一項「學習已暫停（安全輸入）」、打得出中文、**Caps Lock 切換正常**（重新登記發生在換位置之後，這次沒有觸發 installer-v2 §9 的問題；只量了一次） |
 | 打包權限 | `release.yml` | sign 步驟先 `umask 077` 再 `tar -xf`，zip 裡的 bundle 是 0700／0600。在 `~/Library` 無害；root 擁有時使用者讀不到、載不起來；Sparkle 以 root 換檔只改擁有者、不改權限。修正放在 U1（`standalone-updater.md` §2.4），這片依賴它 |
+| §4.0 `NSAppleScript` 取得管理員權限 | tart 虛擬機（macOS 26.6.2），2026-10-20 | ad-hoc 簽章、hardened runtime、沒有任何 entitlement 的最小 App 執行 `do shell script "/usr/bin/id -u" with administrator privileges`：回傳 `uid=0`；authd 記錄 `Succeeded authorizing right 'system.privilege.admin' by client '<那個 App 的路徑>'`（經 Security.framework 的 authtrampoline）。停止條件（§5 第一列）沒有發生 |
 | 程式啟用輸入法的系統詢問 | 虛擬機（macOS 26.6.2），P1 用的小工具呼叫 `TISEnableInputSource` | 系統跳出「Allow "<呼叫者>" to enable "Shanjie"?」，按允許才啟用。安裝程式的啟用步驟會不會跳、按「不允許」之後怎麼走，§4.3 量 |
 
-還沒量、這片要量的：安裝程式在 hardened runtime 下用 `NSAppleScript` 取得管理員權限（§4.0）；第二個帳號（§4.3 選做，只影響文件）。
+還沒量、這片要量的：第二個帳號（§4.3 選做，只影響文件）。§4.0 已在 2026-10-20 量過（上表）。
+
+實作時量到（U2，維護者的 Mac，macOS 27.0.1，以一般使用者）：`ditto --noacl` 仍把來源檔的 ACL 複製過去；把 ACL 清掉的是第 4 步的 `chmod -RN`，CI 的「來源帶 ACL」案例因此靠的是 `chmod -RN`（`RootStageTests`）。
 
 ## 2. 設計
 
@@ -60,9 +63,11 @@
 | 這台 Mac | 同版 | 沒有 | 只啟用；次要動作「重新安裝」＝上面「較舊、沒有」那一列 | 不要（重新安裝才要） | 照舊 | 不要 |
 | 這台 Mac | 同版或較新 | 有 | 不換 `/Library`；帳號層那份移走 | 不要 | 強制 | 要 |
 | 這台 Mac | 較新 | 沒有 | 只啟用，不降版 | 不要 | 照舊 | 不要 |
+| 這台 Mac | 任意 | 有，而且比內附的版本新 | 停下來，畫面說明「你的帳號裡是更新的版本 X」，請用 X 的安裝程式；不改任何東西（實作時依 code review 加的列：不降版） | — | — | — |
+| 這台 Mac | 有、但讀不到版本 | 依 U | 當成「較舊」：同上面「較舊」那兩列（同位置，`moved` 只看 U）；root 階段讀不到現有那份的版本時拒絕取代。歡迎頁寫「版本不明」（實作時依 code review 加的列） | 要 | 依 U | 依 U |
 | 只有我的帳號 | 沒有 | 沒有，而且系統已列出善解的模式（之前裝在 `/Library`、照 README 移除了） | 安裝到 `~/Library`（反方向的換位置） | 不要 | 強制 | 要 |
 | 只有我的帳號 | 沒有 | 其他 | 現在的路（`decide(installed: 帳號層版本, bundled:)`，安裝／更新／只啟用／不降版） | 不要 | 照舊 | 照舊 |
-| 只有我的帳號 | 有 | 任意 | 停下來，畫面說明「這台 Mac 已經裝了善解」並印出移除指令；不改任何東西 | — | — | — |
+| 只有我的帳號 | 有（含讀不到版本、懸空的符號連結） | 任意 | 停下來，畫面說明「這台 Mac 已經裝了善解」並印出移除指令；不改任何東西 | — | — | — |
 
 - 歡迎頁在 S 不是「沒有」時寫出目前的狀態（「已裝給這台 Mac，版本 X」）。
 - 「強制登記」只在**換了位置**時發生（`moved`）：選「這台 Mac」而帳號層那份被移走或 `/Library` 原本沒有；或選「只有我的帳號」而帳號層原本沒有、系統卻已列出善解的模式。這個「已列出」**在歡迎頁、複製任何檔案之前讀一次**：用正式 ID 的常數、只讀一次、不重讀（`Registration.run` 開頭那次是在複製之後，還會等最多 2 秒讓系統列出剛放好的 bundle，全新安裝也可能讀成「已列出」，所以不能用它），當成 `InstallerPlan` 的一個輸入。全新的帳號在複製之前讀到的是「沒有列出」〔推論，§4.3 e 量〕，照舊走完整流程、不要求登出。同位置的更新照 installer-v2 §9 跳過登記（避免 Caps Lock 的問題）。P0 量到換位置後的登記沒有觸發 Caps Lock 問題，但只有一次；§4.4 在實機上量兩次，壞掉而修不回來是停止條件（§5）。
@@ -76,10 +81,12 @@
   1. 斷言 `/Library/Input Methods` 是目錄、不是符號連結、擁有者 uid 0、群組與其他人都不可寫（群組不限定 wheel：出廠的群組 §4.3 a 在全新虛擬機量一次）；不存在就以 `root:wheel` 755 建立；
   2. `mktemp -d "/Library/Input Methods/.shanjie-staging.XXXXXX"`（root 擁有、只有 root 能寫）；
   3. `ditto --noqtn --noacl <暫存路徑>/善解輸入法.app <staging>/善解輸入法.app`：從使用者的暫存**複製進 root 擁有的目錄**，不帶 ACL（`ditto` 預設會保留 ACL，安全審查 P1-1）；之後使用者改不到它；
-  4. `chown -R root:wheel`、`chmod -RN`（清掉任何 ACL）、`chmod -R u+rwX,go+rX,go-w,ug-s`；
-  5. **在 root 擁有的副本上驗簽章**：`codesign --verify --strict --deep -R='anchor apple generic and identifier "com.nyanako.inputmethod.shanjie" and certificate leaf[subject.OU] = "2LJ882GPY8"'`（驗的是完整封印，不是 `codesign -dv` 的讀資訊）；
-  6. **斷言中繼資料與版本**：整棵樹沒有 ACL（`/bin/ls -leR` 的輸出沒有 ACL 列）；副本的 `CFBundleVersion`（`/usr/bin/plutil -extract CFBundleVersion raw`）**等於編進安裝程式執行檔的常數**（不讀安裝程式的 Info.plist），而且不低於 `/Library` 現有那份的 `CFBundleVersion`（「重新安裝」允許相同）。這兩條擋住「趁使用者輸入密碼的幾秒，同使用者的程式對解開的檔加 ACL」與「把暫存換成任何一個 Developer ID 簽過的舊版」（安全審查 P1-1、P2-2）；
+  4. `chown -R root:wheel`、`chmod -R u+rwX,go+rX,go-w,ug-s`（兩者都不跟隨符號連結）；
+     - 實作時依 verifier 的發現改了順序：原本這一步還有 `chmod -RN`，但它會跟隨副本裡的符號連結（一層）。同使用者的程式趁輸入密碼的時候在解開的 bundle 裡放一個指向外面的連結，root 就會清掉外面任意路徑的 ACL，而且發生在驗簽章之前、bundle 被拒也一樣（在維護者的 Mac 上以一般使用者、暫存根目錄重現過）。所以清 ACL 移到第 5 步之後，而且不跟隨連結。
+  5. **在 root 擁有的副本上驗簽章**：`codesign --verify --strict --deep -R='anchor apple generic and identifier "com.nyanako.inputmethod.shanjie" and certificate 1[field.1.2.840.113635.100.6.2.6] exists and certificate leaf[field.1.2.840.113635.100.6.1.13] exists and certificate leaf[subject.OU] = "2LJ882GPY8"'`（驗的是完整封印，不是 `codesign -dv` 的讀資訊。兩個 `field` 條件是實作時依 code review 加的強化：只看 Team OU 的話，同一個團隊的 Apple Development 與 Mac App Store 憑證也會過；現在要求中繼憑證是 Developer ID CA、葉憑證是 Developer ID Application）；
+  6. **清 ACL、斷言中繼資料與版本**：`/usr/bin/find <副本> ! -type l -exec /bin/chmod -N {} +` 逐一清掉 ACL、跳過符號連結（第 5 步的 `--strict` 已拒絕指向 bundle 外面的連結，多出來的檔案也會破壞封印；staging 是 root 的 0700，這時使用者已經碰不到副本）；然後斷言整棵樹沒有 ACL（`/bin/ls -leR` 的輸出沒有 ACL 列）；副本的 `CFBundleVersion`（`/usr/bin/plutil -extract CFBundleVersion raw`）**等於編進安裝程式執行檔的常數**（不讀安裝程式的 Info.plist），而且不低於 `/Library` 現有那份的 `CFBundleVersion`（「重新安裝」允許相同）。這兩條擋住「趁使用者輸入密碼的幾秒，同使用者的程式對解開的檔加 ACL」與「把暫存換成任何一個 Developer ID 簽過的舊版」（安全審查 P1-1、P2-2）；
   7. 目的地若是符號連結就停；舊的 `.shanjie-previous` 刪掉，現有的 `善解輸入法.app` 改名成 `.shanjie-previous`，副本 `mv` 到 `善解輸入法.app`（同一個檔案系統，改名是原子的）；刪掉 staging。
+     - 實作時依 code review 改：舊的 `.shanjie-previous` 不先刪，而是先移進 staging，新的一份就位之後才跟著 staging 一起刪；任何一步改名失敗就放回原處。staging 資料夾本身維持 `mktemp` 的 0700，第 4 步的擁有者與權限只套在裡面的副本上。
 - 呼叫 root 階段之前，安裝程式在自己的程序裡對解開的 bundle 先驗一次同樣的指定需求，失敗就不跳密碼框、直接顯示錯誤（給使用者看的提早失敗，不是安全檢查；安全檢查是第 5 步）。
 - 不讀 HOME、不碰任何帳號的檔案；只寫 `/Library/Input Methods` 底下的 `善解輸入法.app`、`.shanjie-previous`、`.shanjie-staging.*` 三種路徑。
 - 不加任何 entitlement、不改簽章規則；需要 entitlement 才拿得到授權就是停止條件（§5）。
