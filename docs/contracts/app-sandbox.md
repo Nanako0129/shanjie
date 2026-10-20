@@ -198,7 +198,7 @@
 
 - `release.yml` 的 build 步驟明確傳 `BUNDLE_ID=com.nyanako.inputmethod.shanjie`（和 `SHANJIE_RELEASE_BUILD=1` 一起）。
 - 〔2026-10-20〕`sign` 與 `verify()`、`verify_sparkle()` 的現行規格在 `standalone-updater.md` §2.4，這裡只留要點：
-  - 解開建置產物用 `tar -xpf`，簽章前 `chmod -R a+rX,go-w`；
+  - 解開建置產物用 `tar -xpf`；公證並蓋章之後、打包 zip 之前 `chmod -R a+rX,go-w`（`stapler` 在 `umask 077` 下寫出的檔是 0600）；
   - 由內而外重簽、不用 `--deep`，全部 `--options runtime --timestamp`：善解更新那份 Sparkle 的 `Autoupdate`、`Updater.app`、framework → 善解更新 → 輸入法那份 framework → 輸入法；
   - 只有輸入法帶 `--entitlements`，用 workflow 裡以字面值產生的三個鍵（正式 ID），不沿用 build 產出的 entitlements（F7）。這樣出貨的 entitlements 不依賴 build 工作，`verify` 是第二道檢查；
   - `sign` 仍然不執行 repo 裡的程式碼。
