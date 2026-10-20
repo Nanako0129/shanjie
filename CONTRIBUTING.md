@@ -113,7 +113,7 @@ PR 需要：
     ```
 
   - 前後比較用逐列統計：基準與新版各加 `--rowstats "$TMPDIR/before.rowstats"`／`--rowstats "$TMPDIR/after.rowstats"`（`--dev 302` 與 `--rows` 檔都可以），再跑 `python3 tools/evalstats.py compare "$TMPDIR/before.rowstats" "$TMPDIR/after.rowstats" --label dev302-chat`，把那一行表格貼進 PR（改對／改壞、McNemar p、CER、95% 區間）；dev302、打字測驗（`eval/dev/user-typing.txt`）、錯字回報檔在聊天與書面各一行；
-  - 只要求不退步；
+  - 只要求不退步（2026-10-20 起 dev302 的聊天設定只報、不擋，書面照擋；聊天另由維護者用 cvtune-clean 守門，這份集合不在 repo 裡，見 `docs/methodology.md` 同日一節）；
   - 有進步的話寫出是哪幾句。
 - **對應的文件一起更新**：契約、`docs/PLAN.md`、README。
 - **commit 加上 DCO 簽署**（見下一節）。
