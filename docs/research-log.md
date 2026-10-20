@@ -8184,3 +8184,10 @@ XL 比 `MAX_FILE`（67,108,864）小 1,168,880 位元組。錨點：4 個模型 
   - V3：`/Library`（root 擁有）的那份更新時跳系統密碼框，文字「善解更新 wants permission to update 善解（開發版）.」；結果 `root:wheel`、全部可讀、container 沿用、0 拒絕。
 - 另外量到：macOS 26 上程式呼叫 `TISEnableInputSource` 會跳「Allow "<呼叫者>" to enable "Shanjie"?」，按允許才啟用；安裝程式的啟用步驟要量（system-install §4.3 a）。
 - 契約：新的 `docs/contracts/standalone-updater.md`；`docs/contracts/system-install.md` 照兩份審查與維護者的三個決定改寫成修訂一。
+
+## 2026-10-20：安裝方式選擇（U2）實作時量到的事
+
+- **§4.0**（實作前，tart 虛擬機 macOS 26.6.2）：ad-hoc 簽章、hardened runtime、沒有任何 entitlement 的最小 App，用 `NSAppleScript` 的 `do shell script "/usr/bin/id -u" with administrator privileges` 拿到 `uid=0`；`authd` 記錄 `system.privilege.admin` 由那個 App 經系統的 `authtrampoline` 取得，所以密碼框掛的是呼叫者的名字。第一次的探針在 macOS 27 上編譯、目標版本是 27，虛擬機跑不了（`-10825`），改成以 macOS 26 為目標重編才量到。
+- **`ditto --noacl` 不會拿掉 ACL**（executor 在維護者的 Mac，macOS 27.0.1，一般使用者量到）：來源帶 ACL 時，複製出來的副本還是有。真正清掉 ACL 的是之後明確的一步。
+- **`chmod -RN` 會跟著符號連結走**（fresh verifier 量到、重現）：`chown -R` 與 `chmod -R <權限>` 不跟連結，但 `chmod -RN` 會跟一層。root 階段原本在驗簽章之前就對副本跑 `chmod -RN`，同使用者的程式只要在輸入密碼的那幾秒往解開的 bundle 裡放一個指向外部的連結，root 就會替它拿掉外部檔案的 ACL，即使這份 bundle 最後被拒。修正：先 `codesign --verify --strict`（嚴格模式拒絕指向 bundle 外的連結，`invalid destination for symbolic link in bundle`，也量過），通過之後才用 `find … ! -type l -exec chmod -N` 清 ACL。這兩個事實只以一般使用者量過，沒有以 root 量過。
+- 程式審查另外抓到：帳號層那份比內附的新時「這台 Mac」會降版、staging 在驗證前被打開、輪替 `.shanjie-previous` 失敗會弄丟上一版、倚天延續在密碼框之前寫入等，都在合併前修好（契約 §2.2、§2.3 已加註）。
