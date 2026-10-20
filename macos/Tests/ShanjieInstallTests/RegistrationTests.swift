@@ -5,6 +5,19 @@ import XCTest
 // docs/contracts/installer-v2.md section 9.3, item 1. No test calls TIS: the state is injected and
 // the full flow (the only code that registers, enables or disables) is replaced by a counter.
 final class RegistrationTests: XCTestCase {
+    /// system-install.md section 2.2 (revision of 2026-10-21): the enabled list as macOS 26 writes it (VM, after `sudo rm -rf` of the
+    /// /Library copy: TIS lists nothing, this list still has both entries).
+    func testEnabledListCountsAnEntryWithTheBundleID() {
+        let id = "com.nyanako.inputmethod.shanjie"
+        let stale: [Any] = [["Bundle ID": id, "Input Mode": "\(id).zhuyin", "InputSourceKind": "Input Mode"],
+                            ["Bundle ID": id, "InputSourceKind": "Keyboard Input Method"]]
+        XCTAssertTrue(Registration.enabled(stale, bundleID: id))
+        XCTAssertFalse(Registration.enabled([["InputSourceKind": "Keyboard Layout", "KeyboardLayout ID": 0]], bundleID: id))
+        XCTAssertFalse(Registration.enabled([["Bundle ID": "\(id).dev"]], bundleID: id))   // another ID is not this one
+        XCTAssertFalse(Registration.enabled(nil, bundleID: id))
+        XCTAssertFalse(Registration.enabled(["not a dictionary"], bundleID: id))
+    }
+
     func testDecisionTable() {
         // (modeListed, accepted, legacyEnabled) -> decision, written out row by row.
         let rows: [(Bool, Bool, Bool, Registration.Decision)] = [

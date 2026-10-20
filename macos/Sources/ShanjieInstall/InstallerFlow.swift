@@ -51,6 +51,16 @@ public enum InstallerFlow {
         if moved { log.notice("registration: forced (location changed)") } else { log.notice("registration: as before") }
     }
 
+    /// After a location change the installer waits for the system to accept the input method (the "Allow" question in System
+    /// Settings) and then comes back to the front; one static line for each end of that wait.
+    public static func logReturn(accepted: Bool, wasActive: Bool) {
+        switch (accepted, wasActive) {
+        case (true, false): log.notice("return: accepted, came back to the front")
+        case (true, true): log.notice("return: accepted, already in front")
+        case (false, _): log.notice("return: not accepted within the wait")
+        }
+    }
+
     /// The outcome of that registration, one static line, so a VM run shows which screen followed and why.
     public static func logOutcome(_ outcome: Registration.Outcome) {
         switch outcome {

@@ -8385,3 +8385,25 @@ XL 比 `MAX_FILE`（67,108,864）小 1,168,880 位元組。錨點：4 個模型 
   - triage 的 D2 說明涵蓋兩項。
   - 量測盲點另見同日一節。
 
+## 2026-10-21：退回帳號層沒被認出是換位置；登記後安裝程式被系統設定蓋住
+
+- v0.5.0 dry run（`8551f328`）在虛擬機 shanjie-u2a 驗收 §4.3：d（「只有我的帳號」被擋下）通過，`/Library` 兩份與帳號層都沒變動。
+- g（退回帳號層）沒照契約：
+  - 照 README `sudo rm -rf` 之後，安裝程式選「只有我的帳號」，寫的是 `registration: as before`、登記結果 `notAccepted`，落到「到系統設定加入」；
+  - 系統設定的清單裡還有舊的善解，要先移除再加入才能打字（維護者）。
+- 重現與量測（同一台 VM）：
+  - 先用安裝程式從帳號層移到這台 Mac：`registration: forced`、`done`，登出再登入能打字。順便驗了「帳號層 → 這台 Mac」的移轉。
+  - 再用 ssh 執行同一個 `sudo rm -rf`：剛刪完 TIS 還列出善解，5 秒後連未啟用的都不列；`com.apple.inputsources` 的 `AppleEnabledThirdPartyInputSources` 一直留著善解的兩筆，舊的善解程序也還在跑。
+  - 安裝程式的「已列出」只讀 TIS，所以讀成沒有，當成全新安裝。
+- 修正（`system-install.md` §2.2、§2.4 修訂，分支 `fix/installer-reverse-move`）：
+  - 「已列出」也讀已啟用清單（`com.apple.inputsources`、`com.apple.HIToolbox`）。
+  - 修正後同一個情境（測試版安裝程式，ad-hoc 簽章，內附 dry run 的善解）：`registration: forced (location changed)`、「請登出」畫面，登出再登入後不用動系統設定就能打字。
+- 另一個問題（維護者：「它會跳到設定頁問你allow 然後就不會回來安裝」）：啟用後系統打開系統設定問「允許」，安裝程式一直被蓋在後面。量了三輪：
+  1. 登記後馬上 `NSApp.activate()`：沒用。系統設定在安裝程式呼叫前 2 ms 才被打開，之後把焦點拿走。
+  2. 等系統「已接受」再回到前面：安裝程式自己的程序 2 分鐘內都讀成未接受（紀錄 `return: not accepted within the wait`）；同一段時間另一個程序 20 秒內就讀到已啟用。〔推論〕程序裡的輸入法列表沒有更新。
+  3. 改成每秒另開一個新程序（安裝程式自己加 `--accepted-check`）查：1 秒後就讀到已接受、把視窗帶到前面（紀錄 `return: accepted, came back to the front`），但系統設定的問題之後才出現，又蓋住了。
+  - 最後加上 Dock 圖示持續跳動：維護者確認「有跳」，點回來看到「請登出」。
+  - 第一次安裝時等候系統接受的那段輪詢、「重新檢查」按鈕，也改用新程序檢查（同一個原因）。這兩處的實機行為交給 §4.3 e（新的虛擬機、新的 dry run）驗，下一步就做。
+- 程式審查（PR #252）推論：AppKit 在 App 不在前景時暫停分散式通知，TIS 收不到更新。照這個改成背景時也照常送達（`DistributedNotificationCenter.default().suspended = false`），在同一個虛擬機情境量：安裝程式自己的程序仍然讀不到「已接受」（沒有 `return:` 那一行），所以這個推論不成立或不夠，改回新程序檢查。
+- 子程序（`--accepted-check`）有沒有被當成 App 註冊：那一輪的紀錄裡只有主程式自己一次 `LAUNCH`，子程序沒有寫任何紀錄。
+
