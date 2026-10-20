@@ -13,6 +13,9 @@ public enum InstallerScreen: Equatable, Sendable {
     case failed
     /// system-install.md section 2.4: after a location change, "log out and back in" (one OK button).
     case logOut
+    /// system-install.md section 2.4 (revision of 2026-10-21): after a first "This Mac" install that the system has not
+    /// accepted or listed yet: log out and back in, then add Shanjie in System Settings (one OK button).
+    case logOutThenAdd
     /// The failure screen with the same log-out sentence.
     case failedLogOut
 }
@@ -29,10 +32,15 @@ public enum InstallerFlow {
 
     /// system-install.md section 2.4: after a location change the system shows the input method
     /// only after a log out (P1), so there is no polling and no trip to System Settings.
-    public static func next(after outcome: Registration.Outcome, moved: Bool) -> InstallerScreen {
+    /// `firstInstall` is `InstallDecision.firstInstall`, known before any TIS call.
+    public static func next(after outcome: Registration.Outcome, moved: Bool, firstInstall: Bool) -> InstallerScreen {
         guard moved else { return next(after: outcome) }
         switch outcome {
-        case .done, .notAccepted, .modeNotListed: return .logOut
+        case .done: return .logOut
+        // A first install the system has not accepted is not in the input menu after the log out either (seen on a VM,
+        // 2026-10-21): the user adds it in System Settings once logged back in. A move is listed again after the log out
+        // (P1), so it is never told to add it.
+        case .notAccepted, .modeNotListed: return firstInstall ? .logOutThenAdd : .logOut
         case .registrationFailed, .enableFailed: return .failedLogOut
         }
     }
@@ -41,6 +49,17 @@ public enum InstallerFlow {
     /// `log show --predicate 'subsystem == "com.nyanako.shanjie.installer"'` (section 4.3).
     public static func logRegistration(moved: Bool) {
         if moved { log.notice("registration: forced (location changed)") } else { log.notice("registration: as before") }
+    }
+
+    /// The outcome of that registration, one static line, so a VM run shows which screen followed and why.
+    public static func logOutcome(_ outcome: Registration.Outcome) {
+        switch outcome {
+        case .done: log.notice("registration outcome: done")
+        case .modeNotListed: log.notice("registration outcome: modeNotListed")
+        case .notAccepted: log.notice("registration outcome: notAccepted")
+        case .registrationFailed: log.notice("registration outcome: registrationFailed")
+        case .enableFailed: log.notice("registration outcome: enableFailed")
+        }
     }
 
     /// app-sandbox.md section 2.7: the installer's copy step, as its copy path runs it, with the

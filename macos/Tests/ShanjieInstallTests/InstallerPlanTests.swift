@@ -32,22 +32,28 @@ final class InstallerPlanTests: XCTestCase {
     }
 
     private func check(_ d: InstallDecision, _ action: InstallDecision.Action, moves: Bool, password: Bool, moved: Bool,
-                       file: StaticString = #filePath, line: UInt = #line) {
+                       first: Bool = false, file: StaticString = #filePath, line: UInt = #line) {
         XCTAssertEqual(d.action, action, file: file, line: line)
         XCTAssertEqual(d.movesAccountCopy, moves, "moves the account copy", file: file, line: line)
         // The password column: only the root stage asks for it. The log-out column is `moved`.
         XCTAssertEqual(d.action == .copyToSystem, password, "password", file: file, line: line)
         XCTAssertEqual(d.moved, moved, "forced registration and log out", file: file, line: line)
+        XCTAssertEqual(d.firstInstall, first, "first install: add it after the log out", file: file, line: line)
     }
 
     func testThisMacNothingInstalled() {
+        // Listed at the welcome screen without any copy (a /Library copy removed while still listed) is a move, not a first install.
         for listed in [false, true] {
-            check(decide(.thisMac, system: nil, account: false, listed: listed), .copyToSystem, moves: false, password: true, moved: true)
+            check(decide(.thisMac, system: nil, account: false, listed: listed), .copyToSystem, moves: false, password: true, moved: true,
+                  first: !listed)
         }
     }
 
     func testThisMacFromTheAccountLayer() {
-        check(decide(.thisMac, system: nil, account: true, listed: true), .copyToSystem, moves: true, password: true, moved: true)
+        // A move whatever the system listed at the welcome screen: never a first install.
+        for listed in [false, true] {
+            check(decide(.thisMac, system: nil, account: true, listed: listed), .copyToSystem, moves: true, password: true, moved: true)
+        }
     }
 
     func testThisMacUpdateInPlace() {

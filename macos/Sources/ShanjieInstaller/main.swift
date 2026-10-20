@@ -384,6 +384,22 @@ enum Screens {
         Screen(step: 3, title: L("✓ 已經裝好了，請登出再登入", "✓ Installed: log out and back in"), body: logOutSentence, primary: L("好", "OK"))
     }
 
+    /// The two steps in the Keyboard pane, shared by every screen that asks the user to add Shanjie. The labels are the
+    /// zh_TW and en strings of KeyboardSettings.appex's Localizable.loctable (文字輸入, 輸入方式, 編輯⋯), read 2026-10-21.
+    static let pressPlus = L("在「文字輸入」的「輸入方式」按「編輯⋯」，再按「+」。", "Under Text Input, next to Input Sources, choose Edit…, then press +.")
+    static let chooseShanjie = L("選「繁體中文」裡的「善解輸入法」，按「加入」。", "Choose Shanjie under Chinese (Traditional) and press Add.")
+
+    /// system-install.md section 2.4: after a first "This Mac" install, the system may open System Settings by itself;
+    /// the input method is added only after the log out. Step 2, like `activate`: activation is still to do.
+    static func logOutThenAdd() -> Screen {
+        Screen(step: 2, title: L("✓ 已經裝好了，請登出再登入，再加入善解", "✓ Installed: log out and back in, then add Shanjie"),
+               body: L("1. 請登出再登入一次。\n2. 登入後到「系統設定 → 鍵盤」，", "1. Log out and back in once.\n2. Then open System Settings > Keyboard. ")
+                   + pressPlus + "\n3. " + chooseShanjie + "\n\n"
+                   + L("系統設定如果現在自己打開了，可以先關掉，登入後再加。登入後如果找不到善解，請重新打開這個安裝程式。",
+                       "If System Settings opened by itself just now, you can close it and add Shanjie after you log back in. If you cannot find Shanjie then, open this installer again."),
+               primary: L("好", "OK"))
+    }
+
     static func working(_ status: String) -> Screen {
         Screen(step: 1, title: L("正在安裝", "Installing"), body: "", status: status, busy: true)
     }
@@ -412,15 +428,15 @@ enum Screens {
     /// adds it in System Settings. `note` is the line after a recheck that found nothing.
     static func activate(note: String? = nil) -> Screen {
         Screen(step: 2, title: L("還差一步：到系統設定加入", "One more step: add it in System Settings"),
-               body: L("系統要在「輸入方式」裡加入，才會開始使用善解輸入法。\n\n1. 按「打開輸入方式設定」。\n2. 在「輸入方式」按「+」。\n3. 選「繁體中文」裡的「善解輸入法」，按「加入」。",
-                       "The system uses Shanjie only after you add it under Input Sources.\n\n1. Choose Open Input Sources Settings.\n2. Under Input Sources, press +.\n3. Choose Shanjie under Chinese (Traditional) and press Add.")
-                   + (note.map { "\n\n" + $0 } ?? ""),
+               body: L("系統要在「輸入方式」裡加入，才會開始使用善解輸入法。\n\n1. 按「打開輸入方式設定」。\n2. ",
+                       "The system uses Shanjie only after you add it under Input Sources.\n\n1. Choose Open Input Sources Settings.\n2. ")
+                   + pressPlus + "\n3. " + chooseShanjie + (note.map { "\n\n" + $0 } ?? ""),
                primary: L("打開輸入方式設定", "Open Input Sources Settings"), secondary: L("重新檢查", "Check Again"),
                close: L("完成", "Done"))
     }
 
-    static let notAcceptedMessage = L("系統沒有接受這個輸入法。可以到「系統設定 → 鍵盤 → 輸入方式」手動加入「善解輸入法」。",
-                                      "The system did not accept the input method. Add Shanjie in System Settings > Keyboard > Input Sources.")
+    static let notAcceptedMessage = L("系統沒有接受這個輸入法。可以到「系統設定 → 鍵盤」手動加入：", "The system did not accept the input method. Add it in System Settings > Keyboard: ")
+        + pressPlus + chooseShanjie
 
     /// The failure screen after a location change (section 2.4): what failed, never "add it in
     /// System Settings" (that comes only after the log out).
@@ -672,6 +688,7 @@ func reviewScreens() -> [(String, Screen)] {
      ("10-activate", Screens.activate()),
      ("11-try", Screens.tryIt(note: nil)),
      ("12-log-out", Screens.logOut()),
+     ("12b-log-out-then-add", Screens.logOutThenAdd()),
      ("13-failed-log-out", Screens.failedLogOut(Failure(message: Screens.enableFailedMessage))),
      ("14-newer", Screens.newer(installed: "0.6.0", bundled: "0.5.0")),
      ("15-account-newer", Screens.accountNewer(installed: "0.6.0", bundled: "0.5.0"))]
@@ -962,12 +979,14 @@ final class Controller: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let moved = decision.moved
         InstallerFlow.logRegistration(moved: moved)
         let result = Registration.run(bundleURL: target, bundleID: bundleID, defaults: defaults, moved: moved)
-        switch InstallerFlow.next(after: result.outcome, moved: moved) {
+        InstallerFlow.logOutcome(result.outcome)
+        switch InstallerFlow.next(after: result.outcome, moved: moved, firstInstall: decision.firstInstall) {
         case .tryIt: showTry(note: result.legacyDisableFailed ? Screens.legacyNote : nil)
         case .activate: showActivate()
         case .waiting: if afterCopy { poll(bundleID: bundleID) } else { showActivate() }
         case .failed: fail(Failure(message: Screens.notAcceptedMessage))
         case .logOut: show(Screens.logOut(), primary: { NSApp.terminate(nil) })
+        case .logOutThenAdd: show(Screens.logOutThenAdd(), primary: { NSApp.terminate(nil) })
         case .failedLogOut:
             let message = result.outcome == .registrationFailed ? Screens.registrationFailedMessage : Screens.enableFailedMessage
             show(Screens.failedLogOut(Failure(message: message)))
@@ -997,7 +1016,7 @@ final class Controller: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let result = Registration.run(bundleURL: target, bundleID: bundleID, defaults: defaults)
         switch InstallerFlow.next(after: result.outcome) {
         case .tryIt: showTry(note: result.legacyDisableFailed ? Screens.legacyNote : nil)
-        case .activate, .waiting, .logOut, .failedLogOut: showActivate(note: Screens.notDetected)
+        case .activate, .waiting, .logOut, .logOutThenAdd, .failedLogOut: showActivate(note: Screens.notDetected)
         case .failed: fail(Failure(message: L("系統沒有接受這個輸入法。", "The system did not accept the input method.")))
         }
     }
