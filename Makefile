@@ -63,6 +63,7 @@ test-python:
 	python3 -W ignore -m unittest experiments/newword/test_hijack.py
 	python3 -W ignore experiments/diag-near-miss/test_d23.py
 	python3 -W ignore experiments/p4-colloquial/test_p4.py
+	python3 -W ignore experiments/p4c-colloquial/test_p4c.py
 
 test-swift: rust
 	@$(call relink_if_stale,Debug)
