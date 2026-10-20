@@ -48,7 +48,12 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     }
 
     /// Before 善解更新 opens (standalone-updater.md section 2.3): this window floats above it (`level`). Nothing when closed.
-    func close() { window?.close() }
+    /// `previous` is dropped first, so `windowWillClose` re-activates no other app right before the helper asks to come to
+    /// the front (under cooperative activation that app could keep the focus).
+    func close() {
+        previous = nil
+        window?.close()
+    }
 
     /// Measured page heights come out this much short of what the window draws: a 10-toggle grouped form measured 435 pt
     /// in a window and was drawn 438 pt tall (/code-review probe, 2026-10-15). Without it the tallest page would scroll.

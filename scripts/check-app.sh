@@ -194,6 +194,10 @@ print(" ".join(sorted(k for k in d if k in ("SUFeedURL", "SUPublicEDKey", "LSUIE
   || fail "the helper's Info.plist cannot be read"
 [ -z "$HKEY" ] || fail "the helper's Info.plist sets $HKEY"
 [ -x "$HELPER/Contents/MacOS/$(pb CFBundleExecutable "$HPLIST")" ] || fail "the helper's executable is missing"
+# Sparkle's dialogs in Chinese (build-app.sh): the helper lists zh-Hant and allows the framework's own localizations.
+pb CFBundleLocalizations "$HPLIST" | grep -qx '    zh-Hant' || fail "the helper's CFBundleLocalizations lacks zh-Hant"
+[ "$(plutil -extract CFBundleAllowMixedLocalizations raw -expect bool -o - "$HPLIST" 2>/dev/null)" = true ] \
+  || fail "the helper's CFBundleAllowMixedLocalizations is not true"
 SPARKLE="$APP/Contents/Frameworks/Updater/Sparkle.framework"
 HSPARKLE="$HELPER/Contents/Frameworks/Sparkle.framework"
 [ -z "$(find "$SPARKLE" \( -name Autoupdate -o -name Updater.app \))" ] \

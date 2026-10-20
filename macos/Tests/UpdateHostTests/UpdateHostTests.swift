@@ -104,18 +104,62 @@ final class UpdateHostTests: XCTestCase {
         XCTAssertNil(UpdateHost.feedURL(info: ["SUFeedURL": 1]))
     }
 
-    /// The three keys Sparkle stores a skipped version under are removed, nothing else in the domain is touched.
-    func testSkippedVersionsAreCleared() throws {
-        let suite = "UpdateHostTests." + UUID().uuidString
-        let d = try XCTUnwrap(UserDefaults(suiteName: suite))
-        defer { d.removePersistentDomain(forName: suite) }
+    /// An in-memory store: the tests write nothing to real preferences (a suite name would create a plist in
+    /// ~/Library/Preferences).
+    final class FakeDefaults: KeyRemoving {
+        var values: [String: Any]
+        init(_ v: [String: Any]) { values = v }
+        func removeObject(forKey defaultName: String) { values[defaultName] = nil }
+    }
+
+    /// The three keys Sparkle stores a skipped version under and its three scheduler settings are removed, nothing else.
+    func testHostDefaultsAreCleared() {
         XCTAssertEqual(UpdateHost.skippedVersionKeys, ["SUSkippedVersion", "SUSkippedMajorVersion", "SUSkippedMajorSubreleaseVersion"],
                        "the stored names (SUConstants.m), not the constant names")
-        for k in UpdateHost.skippedVersionKeys { d.set("999", forKey: k) }
-        d.set(true, forKey: "updateAutoCheck")
-        UpdateHost.clearSkippedVersions(in: d)
-        for k in UpdateHost.skippedVersionKeys { XCTAssertNil(d.object(forKey: k), k) }
-        XCTAssertEqual(d.object(forKey: "updateAutoCheck") as? Bool, true)
+        XCTAssertEqual(UpdateHost.schedulerKeys, ["SUEnableAutomaticChecks", "SUScheduledCheckInterval", "SUAutomaticallyUpdate"])
+        var all: [String: Any] = ["updateAutoCheck": true]
+        for k in UpdateHost.skippedVersionKeys + UpdateHost.schedulerKeys { all[k] = "999" }
+        let d = FakeDefaults(all)
+        UpdateHost.clearHostDefaults(in: d)
+        XCTAssertEqual(Array(d.values.keys), ["updateAutoCheck"])
+    }
+
+    /// Background checks never run; the helper runs its probe and the user's check, the input method only the probe.
+    func testWhichChecksMayRun() {
+        XCTAssertTrue(UpdateHost.helperMayPerform(.information))
+        XCTAssertTrue(UpdateHost.helperMayPerform(.userInitiated))
+        XCTAssertFalse(UpdateHost.helperMayPerform(.background))
+        XCTAssertTrue(UpdateHost.inputMethodMayPerform(.information))
+        XCTAssertFalse(UpdateHost.inputMethodMayPerform(.userInitiated))
+        XCTAssertFalse(UpdateHost.inputMethodMayPerform(.background))
+    }
+
+    /// A home given through a symlink or with a trailing slash yields the real folder, so an installed copy still matches.
+    func testRootsResolveTheHome() throws {
+        let home = tmp.path + "/realhome"
+        try FileManager.default.createDirectory(atPath: home, withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(atPath: tmp.path + "/linkhome", withDestinationPath: home)
+        for given in [tmp.path + "/linkhome", tmp.path + "/linkhome/", home + "/"] {
+            XCTAssertEqual(UpdateHost.roots(home: given), ["/Library/Input Methods", home + "/Library/Input Methods"], given)
+        }
+        XCTAssertEqual(UpdateHost.roots(home: "/nonexistent/x/"), ["/Library/Input Methods", "/nonexistent/x/Library/Input Methods"])
+        let h = try helper(in: home + "/Library/Input Methods", "善解輸入法.app")
+        XCTAssertNotNil(UpdateHost.host(helper: h, roots: UpdateHost.roots(home: tmp.path + "/linkhome")))
+    }
+
+    /// A translocated helper is mapped to its original before the path check; anything else is left alone.
+    func testTranslocationIsResolvedToTheOriginal() throws {
+        let orig = try helper(in: root, "善解輸入法.app")
+        let moved = URL(fileURLWithPath: "/private/var/folders/x/AppTranslocation/ABCD/d/善解輸入法.app/Contents/Helpers/善解更新.app")
+        var asked: [URL] = []
+        let resolver: (URL) -> URL? = { asked.append($0); return orig }
+        XCTAssertEqual(UpdateHost.untranslocated(moved, original: resolver), orig)
+        XCTAssertEqual(asked, [moved])
+        XCTAssertEqual(UpdateHost.untranslocated(orig, original: { _ in XCTFail("not translocated"); return nil }), orig)
+        XCTAssertNil(UpdateHost.untranslocated(moved, original: { _ in nil }), "no original: no host")
+        XCTAssertNil(UpdateHost.host(helper: moved, roots: [root]), "the mount itself is never a host")
+        XCTAssertEqual(UpdateHost.host(helper: try XCTUnwrap(UpdateHost.untranslocated(moved, original: resolver)), roots: [root])?.path,
+                       root + "/善解輸入法.app")
     }
 
     func testOnlyApplicationUpdatesProceed() {

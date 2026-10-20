@@ -7,9 +7,26 @@ public enum UpdateHost {
     /// The folder names scripts/build-app.sh gives the shipping and the development ID.
     public static let appNames = ["善解輸入法.app", "善解（開發版）.app"]
 
-    /// The two places an input method bundle may be installed: the system's and the user's Input Methods folder.
+    /// The two places an input method bundle may be installed: the system's and the user's Input Methods folder. The home
+    /// (`pw_dir`) is resolved with realpath first, so a home given through a symlink, with other letter case or a trailing
+    /// slash still matches the real path `host` compares with; a home that does not exist is used as given, minus trailing
+    /// slashes.
     public static func roots(home: String) -> [String] {
-        ["/Library/Input Methods", home + "/Library/Input Methods"]
+        var h = home
+        if let real = realpath(home, nil) {
+            h = String(cString: real)
+            free(real)
+        }
+        while h.count > 1, h.hasSuffix("/") { h.removeLast() }
+        return ["/Library/Input Methods", h + "/Library/Input Methods"]
+    }
+
+    /// App Translocation: a quarantined bundle may run from a read-only mount under `/AppTranslocation/` (the same test as
+    /// Sparkle's SUHost.isRunningTranslocated), where three levels up is the mount, never an allowed place. Such a helper URL is mapped back to the
+    /// original path by `original` (the helper passes Security's SecTranslocateCreateOriginalPathForURL); `nil` from it
+    /// means no host. The original then goes through the same realpath check as any other path.
+    public static func untranslocated(_ helper: URL, original: (URL) -> URL?) -> URL? {
+        helper.path.contains("/AppTranslocation/") ? original(helper) : helper
     }
 
     /// The host: the bundle three levels above the helper (`<host>/Contents/Helpers/善解更新.app`), only when its real path
@@ -55,12 +72,30 @@ public enum UpdateHost {
     /// (standalone-updater.md section 2.1): the helper writes another domain than the sandboxed input method reads, and a
     /// skipped version written by anyone would hide every update.
     public static let skippedVersionKeys = ["SUSkippedVersion", "SUSkippedMajorVersion", "SUSkippedMajorSubreleaseVersion"]
+    /// Sparkle's scheduler settings, which it also reads from the host's defaults before Info.plist (SPUUpdaterSettings.m in
+    /// 2.10.0): a value there would start background checks the Info.plist turns off (SUEnableAutomaticChecks false), and in
+    /// the helper a running background session made the user's check return without a window.
+    public static let schedulerKeys = ["SUEnableAutomaticChecks", "SUScheduledCheckInterval", "SUAutomaticallyUpdate"]
 
-    public static func clearSkippedVersions(in defaults: UserDefaults) {
-        for k in skippedVersionKeys { defaults.removeObject(forKey: k) }
+    /// Removes the skipped versions and the scheduler settings before Sparkle reads them.
+    public static func clearHostDefaults(in defaults: some KeyRemoving) {
+        for k in skippedVersionKeys + schedulerKeys { defaults.removeObject(forKey: k) }
     }
+
+    /// Which of Sparkle's checks may run (the delegate's `updater(_:mayPerform:)`): the helper runs its own silent check and
+    /// then the user's interactive one; the input method only ever probes. Background (scheduled) checks never run in either.
+    public enum Check: Sendable { case userInitiated, background, information }
+    public static func helperMayPerform(_ c: Check) -> Bool { c != .background }
+    public static func inputMethodMayPerform(_ c: Check) -> Bool { c == .information }
 
     /// Only a plain application update proceeds; a package (`package`, `interactive-package`) would run Apple's installer
     /// as root in the system domain.
     public static func allowsInstall(type: String) -> Bool { type == "application" }
 }
+
+/// What `clearHostDefaults` needs from a defaults store; the tests use an in-memory one, so they write no real preferences.
+public protocol KeyRemoving {
+    func removeObject(forKey defaultName: String)
+}
+
+extension UserDefaults: KeyRemoving {}

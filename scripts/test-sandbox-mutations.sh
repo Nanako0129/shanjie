@@ -31,6 +31,7 @@
 #  21 a file with g+w                                 check-app.sh check 3 fails (no group or other write)
 #  22 a setuid file                                   check-app.sh check 3 fails
 #  23 a setgid file                                   check-app.sh check 3 fails
+#  24 CFBundleLocalizations gone from the helper       check-app.sh check 3 fails (Sparkle's dialogs in English)
 # release.yml's verify() has its own copy of the comparison and is not mutated here (`sign` runs only on main).
 set -euo pipefail
 
@@ -164,4 +165,7 @@ app_fails 22 "$A" 3 "a file in the bundle is setuid or setgid"
 A="$(copy 23)"; chmod g+s "$A/$H/Contents/MacOS/shanjie-updater"
 app_fails 23 "$A" 3 "a file in the bundle is setuid or setgid"
 
-echo "sandbox mutations: all 23 as expected"
+A="$(copy 24)"; plutil -remove CFBundleLocalizations "$A/$H/Contents/Info.plist"; resign_all "$A"
+app_fails 24 "$A" 3 "the helper's CFBundleLocalizations lacks zh-Hant"
+
+echo "sandbox mutations: all 24 as expected"

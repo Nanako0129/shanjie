@@ -249,12 +249,11 @@ jobs:
 
           mkdir -p "$T/work" "$T/out" "$T/check"
           # -p: this step's umask 077 would otherwise make the bundle 0700/0600, which a root-owned copy in /Library
-          # cannot load for the user (system-install.md section 1); then every file readable and nothing group- or
-          # other-writable (standalone-updater.md section 2.4). Measured 2026-10-20: tar -xf applies the umask, tar -xpf and
-          # ditto -x -k keep the stored modes.
+          # cannot load for the user (system-install.md section 1). Measured 2026-10-20: tar -xf applies the umask, tar -xpf
+          # and ditto -x -k keep the stored modes (build-app.sh already set a+rX,go-w). The umask stays 077 for the secret
+          # files above; what codesign and stapler write under it is fixed by the chmod after stapling, below.
           tar -xpf "$T/unsigned/unsigned.tar" -C "$T/work"
           APP="$T/work/善解輸入法.app"
-          chmod -R a+rX,go-w "$APP"
           # The layout of standalone-updater.md section 2.4, checked before signing and again by verify_sparkle on what
           # ships: no XPC service anywhere (the input method drives no installer service; the system has nothing to remember
           # by path), Contents/Helpers exactly 善解更新.app, the input method's Sparkle.framework (Contents/Frameworks/Updater)
@@ -318,6 +317,11 @@ jobs:
             xcrun stapler staple "$1"
           }
           notarize "$APP"
+          # After the last write into the bundle and before the zip (code review 2026-10-20): under this step's umask 077
+          # codesign and `stapler staple` write their files (Contents/CodeResources, _CodeSignature) as 0600, which a
+          # root-owned copy in /Library could not read for the user. Modes are not part of the code signature, so this
+          # changes neither the seal nor the ticket; verify_sparkle checks the modes on the copy extracted from the zip.
+          chmod -R a+rX,go-w "$APP"
 
           ZIP="shanjie-$VERSION.zip"
           ditto -c -k --keepParent "$APP" "$T/out/$ZIP"

@@ -218,6 +218,10 @@ cat > "$HELPER/Contents/Info.plist" <<EOF
 <plist version="1.0">
 <dict>
   <key>CFBundleDevelopmentRegion</key><string>en</string>
+  <!-- The helper has no .lproj of its own; without these, Sparkle's dialogs follow the development region (English).
+       With them the framework picks its own zh_TW strings for a zh-Hant system (code review 2026-10-20; checked in a VM). -->
+  <key>CFBundleLocalizations</key><array><string>zh-Hant</string><string>en</string></array>
+  <key>CFBundleAllowMixedLocalizations</key><true/>
   <key>CFBundleExecutable</key><string>shanjie-updater</string>
   <key>CFBundleIdentifier</key><string>$BUNDLE_ID.updater</string>
   <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>

@@ -9,7 +9,9 @@ import UpdateHost
 ///
 /// - Starts only from an app bundle built by the release workflow or as an update test build (`Updates.runsUpdater`, the
 ///   Info.plist key `ShanjieUpdateBuild`): a local build never reads the production feed.
-/// - Sparkle's own scheduler is off (`SUEnableAutomaticChecks` false in Info.plist). A timer here calls `Updates.tick`, which
+/// - Sparkle's own scheduler is off: `SUEnableAutomaticChecks` is false in Info.plist, but Sparkle reads this domain's user
+///   defaults first, so the scheduler keys are removed before `start()` and before every probe, and the delegate refuses any
+///   check but the probe (`updater(_:mayPerform:)`). A timer here calls `Updates.tick`, which
 ///   runs `checkForUpdateInformation` (no window) at most once a day and only with 自動檢查更新 on: a window popping up while
 ///   the user types would take the focus.
 /// - Only the information-only check runs here, and the framework has no XPC services (`SUEnableInstallerLauncherService`
@@ -46,6 +48,7 @@ final class Updater: NSObject, SPUUpdaterDelegate {
         super.init()
         let build = Bundle.main.object(forInfoDictionaryKey: Updates.buildKey) as? String
         guard Updates.runsUpdater(bundleURL: Bundle.main.bundleURL, build: build), feed != nil else { return }
+        UpdateHost.clearHostDefaults(in: UserDefaults.standard)  // before Sparkle reads the scheduler settings
         let c = SPUStandardUpdaterController(startingUpdater: false, updaterDelegate: self, userDriverDelegate: nil)
         controller = c
         do {
@@ -67,8 +70,9 @@ final class Updater: NSObject, SPUUpdaterDelegate {
     private func probe() -> ProbeStart {
         guard started, let updater = controller?.updater else { return .unavailable }
         guard !updater.sessionInProgress else { return .busy }
-        // Sparkle filters found versions by the skipped ones in this domain (standalone-updater.md section 2.1).
-        UpdateHost.clearSkippedVersions(in: .standard)
+        // Sparkle filters found versions by the skipped ones in this domain, and reads its scheduler settings from it before
+        // Info.plist (standalone-updater.md section 2.1).
+        UpdateHost.clearHostDefaults(in: UserDefaults.standard)
         updater.checkForUpdateInformation()
         return .started
     }
@@ -91,6 +95,15 @@ final class Updater: NSObject, SPUUpdaterDelegate {
 
     /// The Info.plist value, never this domain's user defaults, which Sparkle would read first (standalone-updater.md S2).
     nonisolated func feedURLString(for updater: SPUUpdater) -> String? { feed }
+
+    /// Only the information-only probe (`UpdateHost.inputMethodMayPerform`): no scheduled check, whatever this domain's
+    /// SUEnableAutomaticChecks says, and no interactive one (that is 善解更新's).
+    nonisolated func updater(_ updater: SPUUpdater, mayPerform updateCheck: SPUUpdateCheck) throws {
+        let c: UpdateHost.Check = updateCheck == .updateInformation ? .information : (updateCheck == .updates ? .userInitiated : .background)
+        guard UpdateHost.inputMethodMayPerform(c) else {
+            throw NSError(domain: "Shanjie", code: 1, userInfo: [NSLocalizedDescriptionKey: "only the probe runs here"])
+        }
+    }
 
     nonisolated func updater(_ updater: SPUUpdater, didFindValidUpdate item: SUAppcastItem) {
         let version = item.displayVersionString
