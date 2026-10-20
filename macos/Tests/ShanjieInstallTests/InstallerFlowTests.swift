@@ -15,7 +15,7 @@ final class InstallerFlowTests: XCTestCase {
     func testMovedScreens() {
         let all: [Registration.Outcome] = [.done, .modeNotListed, .notAccepted, .registrationFailed, .enableFailed]
         let moved: [Registration.Outcome: InstallerScreen] = [
-            .done: .logOut, .notAccepted: .logOut, .modeNotListed: .logOut,
+            .done: .logOut, .notAccepted: .logOutThenAdd, .modeNotListed: .logOutThenAdd,
             .registrationFailed: .failedLogOut, .enableFailed: .failedLogOut,
         ]
         for outcome in all {

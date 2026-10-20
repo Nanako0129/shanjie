@@ -384,6 +384,15 @@ enum Screens {
         Screen(step: 3, title: L("✓ 已經裝好了，請登出再登入", "✓ Installed: log out and back in"), body: logOutSentence, primary: L("好", "OK"))
     }
 
+    /// system-install.md section 2.4: after a location change on a first install, the system may open System Settings by
+    /// itself; the input method appears in its list only after the log out, so the user adds it then.
+    static func logOutThenAdd() -> Screen {
+        Screen(step: 3, title: L("✓ 已經裝好了：請登出再登入，再加入善解", "✓ Installed: log out, then add Shanjie"),
+               body: L("1. 請登出再登入一次。\n2. 登入後，到「系統設定 → 鍵盤 → 輸入方式」按「+」。\n3. 選「繁體中文」裡的「善解輸入法」，按「加入」。\n\n系統設定如果現在自己打開了，可以先關掉，登入後再加。",
+                       "1. Log out and back in once.\n2. Then open System Settings > Keyboard > Input Sources and press +.\n3. Choose Shanjie under Chinese (Traditional) and press Add.\n\nIf System Settings opened by itself just now, you can close it and add Shanjie after you log back in."),
+               primary: L("好", "OK"))
+    }
+
     static func working(_ status: String) -> Screen {
         Screen(step: 1, title: L("正在安裝", "Installing"), body: "", status: status, busy: true)
     }
@@ -968,6 +977,7 @@ final class Controller: NSObject, NSApplicationDelegate, NSWindowDelegate {
         case .waiting: if afterCopy { poll(bundleID: bundleID) } else { showActivate() }
         case .failed: fail(Failure(message: Screens.notAcceptedMessage))
         case .logOut: show(Screens.logOut(), primary: { NSApp.terminate(nil) })
+        case .logOutThenAdd: show(Screens.logOutThenAdd(), primary: { NSApp.terminate(nil) })
         case .failedLogOut:
             let message = result.outcome == .registrationFailed ? Screens.registrationFailedMessage : Screens.enableFailedMessage
             show(Screens.failedLogOut(Failure(message: message)))
@@ -997,7 +1007,7 @@ final class Controller: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let result = Registration.run(bundleURL: target, bundleID: bundleID, defaults: defaults)
         switch InstallerFlow.next(after: result.outcome) {
         case .tryIt: showTry(note: result.legacyDisableFailed ? Screens.legacyNote : nil)
-        case .activate, .waiting, .logOut, .failedLogOut: showActivate(note: Screens.notDetected)
+        case .activate, .waiting, .logOut, .logOutThenAdd, .failedLogOut: showActivate(note: Screens.notDetected)
         case .failed: fail(Failure(message: L("系統沒有接受這個輸入法。", "The system did not accept the input method.")))
         }
     }

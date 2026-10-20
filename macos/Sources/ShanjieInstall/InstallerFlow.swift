@@ -13,6 +13,9 @@ public enum InstallerScreen: Equatable, Sendable {
     case failed
     /// system-install.md section 2.4: after a location change, "log out and back in" (one OK button).
     case logOut
+    /// system-install.md section 2.4 (revision of 2026-10-21): after a location change when the system has not accepted or
+    /// listed the input method yet (a first install): log out and back in, then add Shanjie in System Settings (one OK button).
+    case logOutThenAdd
     /// The failure screen with the same log-out sentence.
     case failedLogOut
 }
@@ -32,7 +35,10 @@ public enum InstallerFlow {
     public static func next(after outcome: Registration.Outcome, moved: Bool) -> InstallerScreen {
         guard moved else { return next(after: outcome) }
         switch outcome {
-        case .done, .notAccepted, .modeNotListed: return .logOut
+        case .done: return .logOut
+        // A source the system has not accepted is not in the input menu after the log out either (seen on a first
+        // install, 2026-10-21): the user adds it in System Settings once logged back in.
+        case .notAccepted, .modeNotListed: return .logOutThenAdd
         case .registrationFailed, .enableFailed: return .failedLogOut
         }
     }
