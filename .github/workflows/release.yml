@@ -428,7 +428,7 @@ jobs:
             ! plutil -extract SUEnableJavaScript raw -o - "$P" > /dev/null 2>&1 || fail "Info.plist sets SUEnableJavaScript"
             # Links are left out: macOS ignores a link's own mode, and ditto -x creates links with this step's umask 077
             # (the 2026-10-20 dry run failed here on lrwx------ links inside Sparkle.framework, not on a file).
-            BAD=$(find "$V" ! -type l ! -perm -o+r | head -1)
+            BAD=$(find "$V" ! -type l ! -perm -o+r -print -quit)
             [ -z "$BAD" ] || fail "a file in the bundle lacks o+r: $BAD"
             [ -z "$(find "$V" -type d ! -perm -o+x)" ] || fail "a directory in the bundle lacks o+x: $V"
             [ -z "$(find "$V" -type f -perm -u+x ! -perm -o+x)" ] || fail "an executable in the bundle lacks o+x: $V"

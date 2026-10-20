@@ -213,7 +213,7 @@ done
 # check: their own mode is not used.
 # Symbolic links are left out: macOS ignores a link's own mode, and ditto -x creates links with the extracting umask
 # (release.yml extracts under umask 077, so every link in the checked copy is lrwx------; dry run 2026-10-20).
-BAD=$(find "$APP" ! -type l ! -perm -o+r | head -1)
+BAD=$(find "$APP" ! -type l ! -perm -o+r -print -quit)
 [ -z "$BAD" ] || fail "a file in the bundle lacks o+r: $BAD"
 [ -z "$(find "$APP" -type d ! -perm -o+x)" ] || fail "a directory in the bundle lacks o+x"
 [ -z "$(find "$APP" -type f -perm -u+x ! -perm -o+x)" ] || fail "an executable in the bundle lacks o+x"
