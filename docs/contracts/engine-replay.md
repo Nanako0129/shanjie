@@ -1,6 +1,6 @@
 # E-E 真引擎重播 `shanjie-replay`（研究工具，不出貨）
 
-狀態：已實作（PR #210；`--learn-file` 為後加的唯讀選項，§2、§6）；契約 READY（2026-10-18 第二次審查，plan-verifier 第一次 REVISE 的 4 項照改）；`/code-review` 第一輪後修訂（§10）。
+狀態：已實作（PR #210；`--learn-file` 為後加的唯讀選項，§2、§6；`--learn-guard` 為 2026-10-20 後加的評測開關，§2、§5、§6、§7）；契約 READY（2026-10-18 第二次審查，plan-verifier 第一次 REVISE 的 4 項照改）；`/code-review` 第一輪後修訂（§10）。
 
 ## 0. 起因
 
@@ -31,6 +31,8 @@
 - `--learn-file FILE`（唯讀載入學習檔）：引擎建好後、建立任何輸出檔之前，讀 FILE 的位元組（只有位元組，不帶權限、旗標、ACL、xattr），寫進本次執行專用的暫存目錄（0700、每次不同、在 `std::env::temp_dir()` 下）的 `learning.tsv`（`create_new`、0600），對該目錄呼叫 `learning_open`，**載入完立刻刪掉暫存目錄**（學習資料已在記憶體；刪除失敗在 stderr 警告；之後 `--learn on` 的存檔因目錄不在而無害地失敗）。原檔只被讀，不寫、不改名、不隔離。FILE 與 `--rows` 或任一輸出檔是同一個檔（比對裝置與 inode，硬連結也算）就拒絕（結束碼 2）；與 `--firsts` 併用一律拒絕（第一次顯示可能含學習檔裡的詞）。載入結果不是正常載入（檔頭錯、`Corrupt`、`Fresh`）、沒有任何可用的筆數、或 `learning_open` 失敗（錯誤只帶 `StoreError` 的種類）就報錯結束，不會在沒有學習資料下默默重放；這些失敗都發生在輸出檔建立之前，既有輸出檔不會被截斷。解碼不論 `--learn` 開關都讀載入的學習資料。摘要標記加 `+learnfile`；stderr 只印筆數與跳過的行數，不印檔案內容衍生的任何字、前文或讀音。**刻意不記錄載入的是哪一份學習檔**（隱私），所以不同快照的 `+learnfile` 結果無法從輸出區分，由執行者自己記。
 - 模型路徑同 CLI（`data/lm/`），啟動時印出各模型的 sha256 前 8 碼與旗標（像 CLI 的摘要行標記），讓結果對得回模型。
 
+- `--learn-guard on|off`（預設 on，等於 App；2026-10-20 加，診斷 D5 (3)）：學習守門（S7c-2a §2.2：一段的 n-gram 第一名裡有學習加過分的詞，整段不送語意校正）開或關。off 時那些段照常送語意校正，其他一切不變。用途是量守門在有學習檔時擋掉多少段、擋掉的段裡語意校正會不會改對（研究紀錄 2026-10-20「讀 0c 開源的輸入法 App」）。引擎多一個 Rust 的設定函式 `set_learn_guard(bool)`（預設 true）與唯讀的 `guard_skips()`，**不進 `shanjie.h`、App 與 CLI 都不提供**。設定標記 off 時加 `+noguard`。
+
 ## 3. 語意校正的時序 `--rerank each|final`
 
 - `each`（預設）：每一鍵之後 `take_rerank_job` → `run` → `apply_rerank`，等於模型每次都在下一鍵之前算完。
@@ -51,6 +53,7 @@
 - 按鍵分數＝Σideal ÷ Σactual（KySS 的做法，注音版）。
 - `picks`：改選次數；`final_ok`：送出的文字是否等於正解（寬鬆比對）。
 - 摘要行：列數、第一次顯示的 top1、送出時正確的列數、改不了的列數、按鍵分數、每百字改選次數、`rewrites` 合計、`top1_sha256`（第一次顯示的文字以 `\n` 串接的 sha256，算法與 `cli/src/main.rs` 的 `top1_sha256` 相同），以及設定標記（profile、learn、learnfile、rerank、correct、模型雜湊前綴、預測列與英文關）。
+- `guard_skips`（摘要行多一欄，2026-10-20）：每列打完最後一鍵時（第一次顯示之前、`final` 套用之前），最近一次解碼裡「本來會送語意校正（語意校正開、模型已載入、那段的候選 ≥ 2）而被學習守門擋下」的段數，全部列加總；另一欄 `guard_rows` 是其中段數 ≥ 1 的列數。引擎的 `guard_skips()` 回傳最近一次解碼的段數（每次解碼重算，不累加）。`--learn-guard off` 時兩欄都是 0。沒有學習資料或 `--no-tinylm` 時恆為 0。
 - `--firsts FILE`（只給一致性比對用）：每列一行第一次顯示的文字。只能用在公開集合（dev302、typing76、錯字回報），檔案不進 repo；工具不知道哪個集合是私人的，這條由使用的人遵守。
 - 「本來對、學了之後錯」：同一份列檔跑 `--learn off` 與 `--learn on` 各一次（都 `--correct`），兩個 `--rowstats` 用 `evalstats compare`：改壞數就是這個數字。工具本身不另算。
 
@@ -67,13 +70,14 @@
    - 時序：找一列 `each` 的 `rewrites` ≥ 2 的句子，`final` 在同一列的 `rewrites` ≤ 1（`final` 若在打字中途套用，這條會失敗）；
    - 中途送出：一列讀音超過組字上限時，第一次顯示包含中途送出的文字、`autocommits` 計到這一列；
    - 輸出：`--rowstats`、`--keys` 只有 `[0-9\t\n]`；`--rowstats` 和 CLI 同一份列檔的格式逐位元組相容（`evalstats compare` 讀得進去）。
+   - `--learn-guard`（`core/tests/engine_rerank.rs` 與 `cli/tests/replay.rs`）：照 `learned_stretch_is_not_reranked` 的設定（教過 回覆、郵件 把列切成兩段），守門開時工作只有右邊那一段、`guard_skips()` 是 1；`set_learn_guard(false)` 時兩段都在工作裡、`guard_skips()` 是 0。重播：用合成學習檔，`--learn-guard off` 與預設各跑一次，預設的 `guard_skips` ≥ 1、off 是 0、設定標記多 `+noguard`；預設的輸出和明寫 `--learn-guard on` 逐位元組相同。突變：讓 `set_learn_guard(false)` 不生效，引擎測試要失敗。
    - `--learn-file`（`cli/tests/replay.rs`，只用合成檔）：載入後第一次顯示改變、原檔位元組與 mtime 不變（含 `--learn on --correct`）、暫存目錄不留；檔頭錯、沒有可用筆數、檔不存在都報錯且既有輸出檔不被截斷、不產生 `.corrupt`；輸出是同一個檔或硬連結（`--rowstats`、`--keys`）拒絕且原檔不變；與 `--firsts` 併用拒絕。
 3. 在 GCP 或 Windows 機器（不在 Mac）跑 dev302 與錯字回報兩種設定，learn off／on × correct，把摘要行與 `evalstats compare` 的結果寫進研究紀錄：這是每版 KPI「按鍵分數」與「錯字回報真引擎重播」的第一筆。
 4. `/code-review` ＋ fresh verifier ＋ CI（程式改動的關卡）。
 
 ## 7. 範圍外
 
-- 不改引擎行為；需要讀取引擎內部狀態時只加唯讀的存取函式（不改既有函式的行為）。要改行為才能重播 → 停止條件。
+- 不改引擎行為；需要讀取引擎內部狀態時只加唯讀的存取函式（不改既有函式的行為）。要改行為才能重播 → 停止條件。例外（2026-10-20）：只給評測用、預設等於 App 的開關 `--learn-guard`（§2），引擎的設定函式不進 `shanjie.h`。
 - 不模擬打字速度與真的非同步執行緒（`final` 是極端情況的近似）；不用預測列、英文混打、標點、多句。
 - 不跑保留集；私人集合（discordtune 等）只在 Mac 以外的機器跑、只帶回數字。
 - 每版 KPI 表本身（回填 v0.4.0–v0.4.7）是 Phase 0 第 6 項，另做；這片只提供工具與第一筆數字。
