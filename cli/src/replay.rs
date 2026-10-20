@@ -69,9 +69,11 @@ pub fn move_cost(from: usize, to: usize, n: usize) -> usize {
     from.abs_diff(to).min(1 + to).min(1 + (n - to))
 }
 
-/// The engine as `Shell.build()` makes it (acg pack, bigram, small model, demotion on, rerank on at the standard level, profile),
-/// except the two recorded deviations: prediction row off and English mixing off (the word list is never loaded). `tinylm` None is
-/// `--no-tinylm`. `colloquial` is the colloquial table (`--colloquial`), loaded after the small model. `learn` turns learning on once, in memory only (no learning file is opened here; the bin's `--learn-file` opens a copy).
+/// The engine as `Shell.build()` makes it (acg pack, bigram, small model, colloquial table, demotion on, rerank on at the standard level,
+/// profile), except the two recorded deviations: prediction row off and English mixing off (the word list is never loaded). `tinylm` None is
+/// `--no-tinylm`. `colloquial` is the colloquial table, loaded after the small model as the App does; the bin passes `data/lm/colloquial.sjlm`
+/// by default and None for `--no-colloquial`. `learn` turns learning on once, in memory only (no learning file is opened here; the bin's
+/// `--learn-file` opens a copy).
 pub fn build_engine(root: &Path, lm: &Path, tinylm: Option<&Path>, colloquial: Option<&Path>, profile: Profile, learn: bool) -> Result<Engine, String> {
     fn fail<T>(what: &'static str) -> impl Fn(T) -> String {
         move |_| format!("{what} failed")

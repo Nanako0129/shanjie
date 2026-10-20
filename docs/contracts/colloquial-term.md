@@ -51,7 +51,7 @@
 - **CLI**：新選項 `--colloquial-core FILE`。它讓 CLI 和引擎一樣載入 `Colloquial`，每列照引擎的四個條件決定用 `rerank_colloquial` 或 `rerank`；不拒絕任何設定（書面、別的強度、沒有 `--tinylm` 時就照條件不加口語項），這樣「其他地方不變」才能用同一個選項驗。檔案不存在 → 開始前就報錯。摘要行的設定標記加 `+colloq:<表的 sha256 前 8 碼>`。`--set holdout` 照舊允許（出貨之後保留集要用出貨設定跑，出貨設定會帶這個選項）。
   - P4b 的 `--colloquial`、`--colloquial-mu`、`--colloquial-gamma` **移除**（P4b 的結果已寫在研究紀錄，要重現就 checkout 當時的 commit）。
 - **`p4d.py`** 加 `--out-picks FILE`：每列一行選中的候選編號（0 起，前 8 名內），供 §3 第 2 點比對。
-- **重播**：`shanjie-replay` 加 `--colloquial FILE`（照 App，在 `load_tinylm` 之後載入；詞包照重播的 `build_engine`，acg 開）；摘要行標記加 `+colloq:<sha8>`。不帶這個選項的輸出和現在逐位元組相同。
+- **重播**：`shanjie-replay` 照 App，小模型開著且 `data/lm/colloquial.sjlm` 存在時預設在 `load_tinylm` 之後載入口語表（詞包照重播的 `build_engine`，acg 開）；`--colloquial FILE` 改載另一份、`--no-colloquial` 不載；摘要行標記加 `+colloq:<sha8>`。`--no-colloquial` 的輸出和加這個功能以前逐位元組相同。`tools/kpi.py replay` 跟著 `data/*.sha256` 有沒有口語表決定要不要帶 `--no-colloquial`、標記該不該有 `+colloq:`。
 - **CI 與發版流程**：`.github/workflows/ci.yml` 每一個下載 `tinylm.sjtl` 的 job、`.github/workflows/release.yml` 的 build，都加 `gh release download sj-cl-1-68k -p colloquial.sjlm -p colloquial-attribution.tsv -D data/lm` 與 `shasum -a 256 -c data/colloquial.sjlm.sha256 data/colloquial-attribution.tsv.sha256`。資料 Release `sj-cl-1-68k` 要在實作 PR 第一次跑 CI 之前建好（建立前問維護者）。
 
 ## 3. 驗收
@@ -74,14 +74,14 @@
    | 聊天、積極強度 | 有 | CLI |
    | 聊天、沒有 `--tinylm`（語意校正關） | 有 | CLI |
    | 聊天、標準、換一份別的 `.sjtl`（測試用、雜湊不同） | 有 | CLI（只看「和同一份 `.sjtl` 不帶口語表」相同） |
-   | 聊天、標準 | 沒有 | CLI 與重播（重播不帶 `--colloquial`，`--learn off --rerank each`，和 main 的重播相同） |
+   | 聊天、標準 | 沒有 | CLI 與重播（重播帶 `--no-colloquial`，`--learn off --rerank each`，和 main 的重播相同） |
 
    golden 不變。
-4. **重播一致**：`shanjie-replay --profile chat --learn off --rerank each --colloquial data/lm/colloquial.sjlm` 在 dev302、打字測驗、錯字回報的第一次顯示，和 §3 第 2 點 CLI 新路徑的選字逐列相同（engine-replay §6 第 1 點的做法：先比 `top1_sha256`，不同再逐列歸因）。
+4. **重播一致**：`shanjie-replay --profile chat --learn off --rerank each`（預設就載入 `data/lm/colloquial.sjlm`；明給 `--colloquial data/lm/colloquial.sjlm` 一樣）在 dev302、打字測驗、錯字回報的第一次顯示，和 §3 第 2 點 CLI 新路徑的選字逐列相同（engine-replay §6 第 1 點的做法：先比 `top1_sha256`，不同再逐列歸因）。
 5. **速度與記憶體**（每一項都是「有口語表」對「沒有口語表」，同一台機器）：
    - 雲端 VM 或 Windows 機器，`shanjie-replay --rerank each`（單執行緒，dev302，聊天）：用 `/usr/bin/time -v` 量尖峰 RSS 與總時間；尖峰 RSS 增加 ≤ 40 MiB。
    - 同一台，CLI `--threads 1` 的重排時間（摘要的延遲行）p95 增加 ≤ 2 ms。
-   - 同一台，載入時間：`/usr/bin/time -v shanjie-replay --rows <只有 dev302 第 1 列的列檔> …`，有 `--colloquial` 與沒有各跑 3 次取中位數，總時間增加 ≤ 300 ms（一列的打字時間可以忽略，差就是載入的差）。
+   - 同一台，載入時間：`/usr/bin/time -v shanjie-replay --rows <只有 dev302 第 1 列的列檔> …`，有（預設）與 `--no-colloquial` 各跑 3 次取中位數，總時間增加 ≤ 300 ms（一列的打字時間可以忽略，差就是載入的差）。
    - 維護者的 Mac 一次：裝好新版，用「活動監視器」看善解的記憶體，和舊版相比增加 ≤ 40 MiB（15 秒級）。
    超過任一項＝停止條件（先找原因，例如 k 的詞集合改從引擎已載入的詞庫取）。
 6. **授權**：`check-app.sh` 的 grep 通過；`colloquial-attribution.tsv` 每列有一欄「涵蓋的句數」，依來源加總要**正好等於**研究紀錄記的 WildChat 3,491、YODAS 90,080、Tatoeba 36,839、MASSIVE 13,485（合計 143,895）；`tools/build_attribution.py` 遇到任何一列沒有來源單位 id（影片 id、句子 id 等）就以非 0 結束，單元測試涵蓋這兩條。
