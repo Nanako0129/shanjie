@@ -17,6 +17,8 @@ n-gram first and its own term is 0, so the colloquial term only ever acts throug
 Controls (not selectable): mu 0 at alpha 0.3 must equal the shipping rowstats row by row (the anchor: STOP otherwise); mu 0 at alpha
 0.5 is the fusion-only arm. Selection (chatclause): the largest U2 = fixes - 2 breaks among cells with U2 >= 0; ties larger net,
 smaller mu, gate inf then 1.0 then 0.5, alpha 0.3 first.
+--clause confirm is the chatjudge-2 confirmation (README "chatjudge-2 確認"): only with --name chatjudge2 (5,783 rows) and only for
+the registered cell CONFIRM_CELL; its verdict is net > 0, p < 0.05, breaks / fixes <= 0.65. The old-rule fields are not computed for it.
 Exit codes: 0 ok, 1 STOP, 3 NO CELL QUALIFIES.
 """
 import argparse, hashlib, json, math, os, sys
@@ -44,6 +46,7 @@ SETTING_ANCHORS = {"discordtune": (107, 26), "chatclause": (111, 26)}
 NAMES = ("chatclause", "discordtune", "cvtune-clean", "typing76", "user-reported", "dev302", "chatjudge2")
 N_CONFIRM = 5783                     # chatjudge-2 (README "chatjudge-2 確認")
 CONFIRM_RATIO = 0.65
+CONFIRM_CELL = (0.5, 0.5, 1.0)        # the registered cell; confirm refuses any other
 
 
 def sigmoid(x):
@@ -73,7 +76,8 @@ def final_index(sc, col, mu, alpha, gate):
 
 
 def confirm_verdict(s):
-    """README "chatjudge-2 確認": net > 0, exact McNemar p < 0.05, and breaks / fixes <= 0.65."""
+    """README "chatjudge-2 確認": net > 0, exact McNemar p < 0.05, and breaks / fixes <= 0.65. The registered text names net > 0;
+    the other two imply it (net <= 0 means a ratio >= 1, or no change at all and p 1), so it is kept as written, not as a test."""
     return s["net"] > 0 and s["p"] < 0.05 and p4c.ratio_ok(s, CONFIRM_RATIO)
 
 
@@ -219,6 +223,8 @@ def main(argv=None):
         cell = parse_cell(a.cell)
     else:
         raise SystemExit("give --select, --cell or --cell-from")
+    if a.clause == "confirm" and cell != CONFIRM_CELL:
+        raise SystemExit(f"--clause confirm is registered for {label(CONFIRM_CELL)} only")
     s, picks = evaluate(scores, cols, base_ok, cell)
     print(f"cell {label(cell)} u2 {s['u2']} {p4c.kv(s)}")
     res.update({"cell": label(cell), "clause": a.clause, **p4c.jsonable(s)})
@@ -234,8 +240,9 @@ def main(argv=None):
     elif a.clause != "report":
         res["verdict"] = p4c.clause_verdict(a.clause, s)
         print(f"clause {a.clause} {'PASS' if res['verdict'] else 'FAIL'}")
-    res["old_rule"] = p4c.old_rules(s)
-    print("old_rule " + " ".join(f"{k} {int(v)}" for k, v in res["old_rule"].items()))
+    if a.clause != "confirm":   # the old rules name discordtune's cap and the typo set; they mean nothing on chatjudge-2
+        res["old_rule"] = p4c.old_rules(s)
+        print("old_rule " + " ".join(f"{k} {int(v)}" for k, v in res["old_rule"].items()))
     if a.out_rowstats:
         with open(a.out_rowstats, "w", encoding="utf-8") as f:
             for i, (sc, j) in enumerate(zip(scores, picks), 1):

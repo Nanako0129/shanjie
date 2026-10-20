@@ -98,11 +98,16 @@ class Selection(unittest.TestCase):
 
 class Confirm(unittest.TestCase):
     def test_confirm_needs_net_significance_and_ratio(self):
-        ok = {"fixes": 100, "breaks": 60, "net": 40, "p": 0.003}
-        self.assertTrue(P.confirm_verdict(ok))                                  # ratio 0.60
+        ok = {"fixes": 100, "breaks": 62, "net": 38, "p": 0.003}
+        self.assertTrue(P.confirm_verdict(ok))                                  # ratio 0.62: above the shipping 0.6, under 0.65
+        self.assertTrue(P.confirm_verdict({**ok, "breaks": 65, "net": 35}))     # ratio 0.65 exactly passes
         self.assertFalse(P.confirm_verdict({**ok, "breaks": 66, "net": 34}))    # ratio 0.66
-        self.assertFalse(P.confirm_verdict({**ok, "p": 0.05}))                  # not significant
-        self.assertFalse(P.confirm_verdict({**ok, "breaks": 100, "net": 0}))    # no gain
+        self.assertFalse(P.confirm_verdict({**ok, "p": 0.05}))                  # not significant (p < 0.05 is strict)
+        self.assertFalse(P.confirm_verdict({**ok, "breaks": 100, "net": 0}))    # ratio 1 (net > 0 is implied by the ratio)
+
+    def test_confirm_cell_is_the_registered_one(self):
+        self.assertEqual(P.CONFIRM_CELL, (0.5, 0.5, 1.0))
+        self.assertIn(P.CONFIRM_CELL, P.GRID)
 
 
 class Reach(unittest.TestCase):
