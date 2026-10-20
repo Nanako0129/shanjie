@@ -4,12 +4,15 @@
   tools/triage.py run --label L [--set NAME ...] [--private-root DIR] [--cli FILE] [--rows-out DIR] [--jobs N] [--cli-threads K]
   tools/triage.py table [JSON ...] [--out docs/triage.md]
 
-`run` decodes each set in both profiles with the CLI (shipping setting S: --context --packs acg --tinylm, plus --dump --dump-words
---rowstats --tinylm-scores; and once more without --context for the E flags), puts every wrong row (rowstats ok=0) into one
+`run` decodes each set in both profiles with the CLI (shipping setting S: --context --packs acg --tinylm, plus `--colloquial-core
+data/lm/colloquial.sjlm` when that file exists, as the App loads it; and --dump --dump-words --rowstats --tinylm-scores; and once more
+without --context for the E flags), puts every wrong row (rowstats ok=0) into one
 main bucket (section 3: A1, B1, B2, D1, C; F is the user-reported rows that are right offline) and writes
 eval/bench/triage/<label>.json (counts only). Public sets also get a per-row numbers file under --rows-out (default
 ~/.cache/shanjie/triage), outside the repo; private sets only ever get counts. `table` renders docs/triage.md from the JSON files.
-The holdout is never a set here. Standard library only, except that `tinylm_params` needs numpy (export_sjtl.py's reader), plus tools/bench.py's set table, reference/proto/eval.py's `lenient` and reference/proto/lm_eval.py's `kn_tag`).
+The picks, the rowstats and the buckets (D1, the E flags) follow the CLI, so they include the colloquial term. The D2b / D2c sub-diagnosis does
+not: it re-picks in Python with `pick` and delta 0 on the file's alpha and tau, the plain small-model rule, so in a run with the table a row
+whose pick the term changed can be labelled by the plain rule. The holdout is never a set here. Standard library only, except that `tinylm_params` needs numpy (export_sjtl.py's reader), plus tools/bench.py's set table, reference/proto/eval.py's `lenient` and reference/proto/lm_eval.py's `kn_tag`).
 """
 import argparse, collections, concurrent.futures, importlib.util, json, os, struct, subprocess, sys, tempfile, threading
 
@@ -152,12 +155,14 @@ def tri_tag(path):
     return f"+tri:{bench.sha_file(path)[:8]}" if os.path.lexists(path) else ""
 
 
-def expected_tag(prof, ctx_tag, tl8, kn, tri):
+def expected_tag(prof, ctx_tag, tl8, kn, tri, colloq8=""):
     """The setting tag the CLI prints in the shipping setting (--packs acg --tinylm). With a trigram table the formal profile reads it,
-    scores without Kneser-Ney (no `+kn:`) and ends the tag with `+tri:`; chat ignores the table and keeps `+kn:`."""
+    scores without Kneser-Ney (no `+kn:`) and ends the tag with `+tri:`; chat ignores the table and keeps `+kn:`. With `--colloquial-core`
+    the tag ends in `+colloq:<sha8 of the table>` in both profiles."""
+    colloq = f"+colloq:{colloq8}" if colloq8 else ""
     if prof == "formal" and tri:
-        return f"lm-{prof}{ctx_tag}+tl:{tl8}+acg{tri}"
-    return f"lm-{prof}{ctx_tag}{kn}+tl:{tl8}+acg"
+        return f"lm-{prof}{ctx_tag}+tl:{tl8}+acg{tri}{colloq}"
+    return f"lm-{prof}{ctx_tag}{kn}+tl:{tl8}+acg{colloq}"
 
 
 def pick(ng, ll, alpha, tau, delta):
@@ -324,10 +329,11 @@ def triage_rows(rows, ok, ok_nc, lex, par, lenient, report=False):
 
 # ---------------------------------------------------------------- the CLI
 
-def cli_cmd(cli, lm, tl, prof, rows, context, extra, threads=1):
-    """`--threads` is added only above 1, so a CLI built before it still works with the default."""
+def cli_cmd(cli, lm, tl, prof, rows, context, extra, threads=1, colloq=""):
+    """`--threads` is added only above 1, so a CLI built before it still works with the default. `colloq` is the colloquial table's path
+    (`--colloquial-core`, part of the App's setting); "" leaves the command as it was before the option."""
     return ([cli, "--lm", lm, "--profile", prof, "--rows", rows] + (["--context"] if context else []) + ["--packs", "acg", "--tinylm", tl]
-            + (["--threads", str(threads)] if threads > 1 else []) + extra)
+            + (["--colloquial-core", colloq] if colloq else []) + (["--threads", str(threads)] if threads > 1 else []) + extra)
 
 
 def read_cli_files(dump, words, scores, n):
@@ -354,17 +360,17 @@ def read_cli_files(dump, words, scores, n):
     return cands, gold0, recs
 
 
-def run_cell(cli, lm, tl, prof, rows_file, lex, par, lenient, report, td, kn="", tri="", threads=1):
+def run_cell(cli, lm, tl, prof, rows_file, lex, par, lenient, report, td, kn="", tri="", threads=1, colloq=""):
     rows = parse_rows(read_text(rows_file))
     f = lambda n: os.path.join(td, n)
     env = dict(os.environ, SHANJIE_VARIANTS=os.path.join(ROOT, "eval/variants.tsv"))
-    tl8 = bench.sha_file(tl)[:8]
+    tl8, co8 = bench.sha_file(tl)[:8], bench.sha_file(colloq)[:8] if colloq else ""
     # bench.sh raises with the tail of the CLI's stderr; bench.parse_summary checks there is exactly one summary line.
-    m = bench.parse_summary(bench.sh(cli_cmd(cli, lm, tl, prof, rows_file, True, ["--dump", f("d"), "--dump-words", f("w"), "--rowstats", f("r"), "--tinylm-scores", f("s")], threads), env=env))
-    m0 = bench.parse_summary(bench.sh(cli_cmd(cli, lm, tl, prof, rows_file, False, ["--rowstats", f("r0")], threads), env=env))
+    m = bench.parse_summary(bench.sh(cli_cmd(cli, lm, tl, prof, rows_file, True, ["--dump", f("d"), "--dump-words", f("w"), "--rowstats", f("r"), "--tinylm-scores", f("s")], threads, colloq), env=env))
+    m0 = bench.parse_summary(bench.sh(cli_cmd(cli, lm, tl, prof, rows_file, False, ["--rowstats", f("r0")], threads, colloq), env=env))
     # The setting tag the CLI prints: a dropped flag (no context, no pack, no small model) must fail the cell, as in bench.run_cell2.
     for got, ctx_tag in ((m["tag"], "+ctx"), (m0["tag"], "")):
-        if got != expected_tag(prof, ctx_tag, tl8, kn, tri):
+        if got != expected_tag(prof, ctx_tag, tl8, kn, tri, co8):
             raise RuntimeError(f"{prof}: CLI setting tag {got} is not the shipping setting")
     n, top1, o64, sha = m["n"], m["top1"], m["oracle64"], m["top1_sha256"]
     if not (len(rows) == n == m0["n"]):
@@ -420,10 +426,12 @@ def cmd_run(a):
     lenient, lex, par = load_lenient(), Lex.load(), tinylm_params(tl)
     kn = kn_tag(os.path.join(ROOT, "data/lm/kn.sjkn"))   # the CLI turns KN on when the side file is beside the model
     tri = tri_tag(os.path.join(ROOT, "data/lm/trigram.sjt3"))   # the CLI reads it for the formal profile only
+    colloq = os.path.join(ROOT, "data/lm/colloquial.sjlm")   # the App always loads it (Shell.build()); the CLI applies it in chat at the standard strength
+    colloq = colloq if os.path.isfile(colloq) else ""
     path = os.path.join(OUT_DIR, a.label + ".json")
     doc = json.load(open(path, encoding="utf-8")) if os.path.isfile(path) else {"label": a.label, "sets": {}}
-    meta = {"commit": git_head(), "setting": "--context --packs acg --tinylm", "cli_sha256": bench.sha_file(cli),
-            "models": {n: bench.sha_file(os.path.join(ROOT, "data/lm", n)) for n in ("bigram.sjlm", "classes.sjc") + (("kn.sjkn",) if kn else ()) + ("tinylm.sjtl",) + (("trigram.sjt3",) if tri else ())},
+    meta = {"commit": git_head(), "setting": "--context --packs acg --tinylm" + (" --colloquial-core" if colloq else ""), "cli_sha256": bench.sha_file(cli),
+            "models": {n: bench.sha_file(os.path.join(ROOT, "data/lm", n)) for n in ("bigram.sjlm", "classes.sjc") + (("kn.sjkn",) if kn else ()) + ("tinylm.sjtl",) + (("trigram.sjt3",) if tri else ()) + (("colloquial.sjlm",) if colloq else ())},
             "alpha_tau_delta": {p: list(v) for p, v in par.items()}}
     check_same_run(doc, meta)
     doc.update(meta)
@@ -441,7 +449,7 @@ def cmd_run(a):
         try:
             with tempfile.TemporaryDirectory() as td:   # the dump and the word dump hold sentences: they are deleted here
                 try:
-                    cn, per = run_cell(cli, lm, tl, prof, files[name][0], lex, par[prof], lenient, name == "user-reported", td, kn, tri, a.cli_threads)
+                    cn, per = run_cell(cli, lm, tl, prof, files[name][0], lex, par[prof], lenient, name == "user-reported", td, kn, tri, a.cli_threads, colloq)
                 except BaseException:
                     stop.set()   # before the temp dir is removed: a worker freed by this failure finds the event set
                     raise
@@ -521,6 +529,8 @@ def render(doc):
     out = [f"## {doc['label']}（commit `{doc['commit'][:8]}{'-dirty' if doc['commit'].endswith('-dirty') else ''}`，出貨設定 `{doc['setting']}`）", ""]
     out.append("模型：" + "、".join(f"{n} `{h[:8]}`" for n, h in doc["models"].items()) + ("、CLI `" + doc["cli_sha256"][:8] + "`" if "cli_sha256" in doc else "") +
                "。α、τ、δ（依設定）：" + "、".join(f"{p} {tuple(v)}" for p, v in doc["alpha_tau_delta"].items()) + "。", )
+    if "colloquial.sjlm" in doc["models"]:
+        out += ["", "口語項：選字與各桶（D1、E）照 CLI，含口語項；D2b／D2c 的細分用 Python 的 `pick`（δ＝0、檔頭的 α、τ），不含口語項，口語項改過選字的列可能被它歸錯。"]
     out.append("")
     for prof in PROFILES:
         sets = {n: s["profiles"][prof] for n, s in doc["sets"].items() if prof in s["profiles"]}
