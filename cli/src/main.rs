@@ -310,9 +310,11 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     // The colloquial table and the word sets of its k term, as `Engine::load_colloquial` builds them (the engine's pack rows are the `--packs` rows).
     let colloq = match &colloquial_core {
         Some(f) => {
-            let read = |n: &str| fs::read_to_string(dir.join(n)).map_err(|e| format!("--colloquial-core: cannot read {n} ({:?})", e.kind()));
+            let err = |n: &str, e: std::io::Error| format!("--colloquial-core: cannot read {n} ({:?})", e.kind());
             let pack_text = read_packs_detailed(&pdir, packs).map_err(|e| e.to_string())?;
-            let co = Colloquial::load(f, &read("mcbpmf-data.txt")?, &read("overlay-add.tsv")?, Some(&pack_text)).map_err(|e| format!("--colloquial-core: {e}"))?;
+            let base = fs::read_to_string(dir.join("mcbpmf-data.txt")).map_err(|e| err("mcbpmf-data.txt", e))?;
+            let overlay = fs::File::open(dir.join("overlay-add.tsv")).map_err(|e| err("overlay-add.tsv", e))?;
+            let co = Colloquial::load(f, &base, std::io::BufReader::new(overlay), Some(&pack_text)).map_err(|e| format!("--colloquial-core: {e}"))?;
             Some(co)
         }
         None => None,

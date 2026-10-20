@@ -59,7 +59,7 @@ fn tiny_file(name: &str) -> PathBuf {
 fn colloq(name: &str, ovl: &[&str], base: &[&str], pack: Option<&[&str]>) -> Colloquial {
     let rows = |w: &[&str]| w.iter().map(|w| format!("ㄅ\t{w}\t-3.0\t0\n")).collect::<String>();
     let base: String = base.iter().map(|w| format!("{} {w} -3.0\n", vec!["ㄅ"; w.chars().count()].join("-"))).collect();
-    Colloquial::load(&tiny_file(name), &base, &rows(ovl), pack.map(rows).as_deref()).unwrap()
+    Colloquial::load(&tiny_file(name), &base, rows(ovl).as_bytes(), pack.map(rows).as_deref()).unwrap()
 }
 
 fn close(a: f64, b: f64) {
@@ -97,6 +97,19 @@ fn col_and_k() {
     close(c.col(&w), c.lc(&w));
 }
 
+/// The difference set: a word in both overlay and base is not counted, an overlay-only word is, a base-only word is not, and a base row is
+/// removed from the overlay wherever it comes from (overlay-add.tsv or the pack rows).
+#[test]
+fn a_word_in_overlay_and_base_is_not_counted() {
+    let base = "ㄅ-ㄅ 共有 -3.0\nㄅ-ㄅ 包共 -3.0\n";
+    let overlay = "ㄅ-ㄅ\t共有\t-3.0\t0\nㄅ-ㄅ\t只有疊加\t-3.0\t0\n";
+    let pack = "ㄅ-ㄅ\t包共\t-3.0\tacg\nㄅ-ㄅ\t只有詞包\t-3.0\tacg\n";
+    let c = Colloquial::load(&tiny_file("diff"), base, overlay.as_bytes(), Some(pack)).unwrap();
+    assert_eq!(c.k(&strs(&["共有", "包共"])), 0, "in both sets");
+    assert_eq!(c.k(&strs(&["只有疊加", "只有詞包"])), 2, "overlay-only words count, from overlay-add.tsv and from the pack");
+    assert_eq!(c.k(&strs(&["不在任何表"])), 0);
+}
+
 /// The two sets from literal texts: a row with the wrong field count, a comment, a control line and a base row whose syllable count differs
 /// from the characters are skipped; an overlay word that is also in the base lexicon is in the overlay set (k then leaves it out).
 #[test]
@@ -104,12 +117,14 @@ fn sets_from_the_texts() {
     let base = "# comment\n_ctl x y\nㄋㄧˇ-ㄏㄠˇ 你好 -3.0\nㄋㄧˇ 壞詞 -1.0\n";
     let overlay = "ㄋㄧˇ-ㄏㄠˇ\t你好\t-3.0\t0\nㄔㄨㄥˊ-ㄉㄧㄝˊ\t重疊\t-4.0\t0\nthree\tfields\tonly\n";
     let table = tiny_file("sets");
-    let c = Colloquial::load(&table, base, overlay, None).unwrap();
+    let c = Colloquial::load(&table, base, overlay.as_bytes(), None).unwrap();
     assert_eq!(c.k(&strs(&["你好", "重疊", "壞詞", "三"])), 1, "你好 is in both sets, 壞詞 has no row, 三 is in neither");
     assert_eq!(c.k(&strs(&["重疊", "重疊"])), 2);
-    assert_eq!(Colloquial::load(&table, "ㄋㄧˇ-ㄏㄠˇ 你好 not-a-number\n", overlay, None).err(), Some(ColloquialError::Lexicon));
-    assert_eq!(Colloquial::load(Path::new("/nonexistent/x.sjlm"), base, overlay, None).err(), Some(ColloquialError::Table));
+    assert_eq!(Colloquial::load(&table, "ㄋㄧˇ-ㄏㄠˇ 你好 not-a-number\n", overlay.as_bytes(), None).err(), Some(ColloquialError::Lexicon));
+    assert_eq!(Colloquial::load(Path::new("/nonexistent/x.sjlm"), base, overlay.as_bytes(), None).err(), Some(ColloquialError::Table));
     assert_eq!(c.sha256().len(), 64);
+    // an overlay that is not UTF-8 is a read error, not a silently shorter set
+    assert_eq!(Colloquial::load(&table, base, &[0xff, 0xfe, b'\n'][..], None).err(), Some(ColloquialError::Read));
 }
 
 /// k counts a pack word only when the pack text is given (the engine passes the rows of the packs it was built with).

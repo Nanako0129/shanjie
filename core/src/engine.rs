@@ -878,8 +878,9 @@ impl Engine {
     pub fn load_colloquial(&mut self, path: &Path) -> Result<(), EngineError> {
         self.invalidate();
         let dir = self.data_dir.as_ref().ok_or(EngineError::LoadFailed)?;
-        let read = |f: &str| std::fs::read_to_string(dir.join(f)).map_err(|_| EngineError::LoadFailed);
-        let co = Colloquial::load(path, &read("mcbpmf-data.txt")?, &read("overlay-add.tsv")?, self.pack_text.as_deref()).map_err(|_| EngineError::LoadFailed)?;
+        let base = std::fs::read_to_string(dir.join("mcbpmf-data.txt")).map_err(|_| EngineError::LoadFailed)?;
+        let overlay = std::fs::File::open(dir.join("overlay-add.tsv")).map_err(|_| EngineError::LoadFailed)?;
+        let co = Colloquial::load(path, &base, std::io::BufReader::new(overlay), self.pack_text.as_deref()).map_err(|_| EngineError::LoadFailed)?;
         self.colloquial = Some(Arc::new(co));
         Ok(())
     }

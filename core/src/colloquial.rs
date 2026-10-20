@@ -8,6 +8,7 @@ use crate::lm::{Lm, LmError};
 use crate::tinylm::pick;
 use std::collections::HashSet;
 use std::fmt;
+use std::io::BufRead;
 use std::path::Path;
 
 /// Weight of lc (P4d registered cell).
@@ -30,6 +31,8 @@ pub enum ColloquialError {
     Table,
     /// A row of the base lexicon has a score that is not a number.
     Lexicon,
+    /// The overlay file could not be read (an I/O error or text that is not UTF-8).
+    Read,
 }
 
 impl fmt::Display for ColloquialError {
@@ -37,6 +40,7 @@ impl fmt::Display for ColloquialError {
         f.write_str(match self {
             ColloquialError::Table => "cannot load the colloquial table (.sjlm)",
             ColloquialError::Lexicon => "mcbpmf-data.txt has a row whose score is not a number",
+            ColloquialError::Read => "cannot read overlay-add.tsv",
         })
     }
 }
@@ -46,41 +50,47 @@ pub struct Colloquial {
     lm: Lm,
     /// N + V + 1 of the table, V counting `<s>` and `</s>` (p4.py `Table.n1`).
     n1: f64,
-    /// Words of overlay-add.tsv and of the packs the engine was built with (not names-add.tsv, not sandhi-add.tsv).
-    overlay: HashSet<String>,
-    /// Words of mcbpmf-data.txt.
-    base: HashSet<String>,
+    /// The words of overlay-add.tsv and of the packs the engine was built with (not names-add.tsv, not sandhi-add.tsv) that mcbpmf-data.txt
+    /// lacks: the only words k counts, so the two full sets are never kept (the base set alone was tens of MiB of peak RSS).
+    overlay_only: HashSet<String>,
 }
 
 impl Colloquial {
-    /// The table at `table` read as a plain bigram (no classes, no Kneser-Ney, no trigram, whatever sits beside the file), and the
-    /// two word sets of k from the literal texts, with the filters of tools/triage.py `Lex` / experiments/diag-near-miss/d23.py
-    /// `load_lex_scores`: base rows (`base_text`, mcbpmf-data.txt) have three whitespace fields, no `#` / `_` first character, one
-    /// syllable per character, and a numeric score (a row whose score is not a number is an error, as in the engine); overlay rows
-    /// (`overlay_text`, overlay-add.tsv, then `pack_text`, the pack rows the engine was built with) are tab lines with exactly four
-    /// fields.
-    pub fn load(table: &Path, base_text: &str, overlay_text: &str, pack_text: Option<&str>) -> Result<Colloquial, ColloquialError> {
+    /// The table at `table` read as a plain bigram (no classes, no Kneser-Ney, no trigram, whatever sits beside the file), and the set of
+    /// k, with the filters of tools/triage.py `Lex` / experiments/diag-near-miss/d23.py `load_lex_scores`: base rows (`base_text`,
+    /// mcbpmf-data.txt) have three whitespace fields, no `#` / `_` first character, one syllable per character, and a numeric score (a row
+    /// whose score is not a number is an error, as in the engine); overlay rows (`overlay`, overlay-add.tsv, read line by line, then
+    /// `pack_text`, the pack rows the engine was built with) are tab lines with exactly four fields.
+    ///
+    /// Memory: only the words that are in the overlay and not in the base are kept. The base words are a short-lived set that borrows
+    /// from `base_text`, and the 17 MB overlay file is never held as text (the full overlay set plus the texts were about 30 MiB of the
+    /// peak RSS this term cost).
+    pub fn load(table: &Path, base_text: &str, overlay: impl BufRead, pack_text: Option<&str>) -> Result<Colloquial, ColloquialError> {
         let lm = Lm::load_opts(table, false, false, false).map_err(|_: LmError| ColloquialError::Table)?;
         // `Lm` has no vocabulary-size accessor: `identity().1` is V + 1 (the length of the word-offset table), so N + V + 1 is
         // N + identity().1.
         let n1 = (lm.total() + lm.identity().1 as u64) as f64;
-        let mut base = HashSet::new();
+        let mut base: HashSet<&str> = HashSet::new();
         for l in base_text.lines() {
             let f: Vec<&str> = l.split_whitespace().collect();
             if l.starts_with(['#', '_']) || f.len() != 3 || f[1].chars().count() != f[0].split('-').count() {
                 continue;
             }
             f[2].parse::<f64>().map_err(|_| ColloquialError::Lexicon)?;
-            base.insert(f[1].to_string());
+            base.insert(f[1]);
         }
-        let mut overlay = HashSet::new();
-        for l in overlay_text.lines().chain(pack_text.unwrap_or("").lines()) {
+        let mut overlay_only = HashSet::new();
+        let mut take = |l: &str| {
             let f: Vec<&str> = l.split('\t').collect();
-            if f.len() == 4 {
-                overlay.insert(f[1].to_string());
+            if f.len() == 4 && !base.contains(f[1]) {
+                overlay_only.insert(f[1].to_string());
             }
+        };
+        for l in overlay.lines() {
+            take(&l.map_err(|_| ColloquialError::Read)?);
         }
-        Ok(Colloquial { lm, n1, overlay, base })
+        pack_text.unwrap_or("").lines().for_each(&mut take);
+        Ok(Colloquial { lm, n1, overlay_only })
     }
 
     /// SHA-256 (hex) of the table file.
@@ -103,7 +113,7 @@ impl Colloquial {
 
     /// k: words of the split in the overlay set and not in the base lexicon, repeats counted.
     pub fn k<S: AsRef<str>>(&self, words: &[S]) -> usize {
-        words.iter().filter(|w| self.overlay.contains(w.as_ref()) && !self.base.contains(w.as_ref())).count()
+        words.iter().filter(|w| self.overlay_only.contains(w.as_ref())).count()
     }
 
     /// col = lc - GAMMA_PER_MU * k (the P4d colloquial score of one candidate's word split).
