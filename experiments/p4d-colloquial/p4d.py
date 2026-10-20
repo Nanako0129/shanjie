@@ -41,7 +41,9 @@ T2_SHA256 = "2984eeb525a06b12c244b3c04b84641c9a67492486132ebf404198372b684c33"  
 # P4's setting anchor (D1's recomputation): the shipping final against the n-gram first. A mismatch means the run was not the
 # shipping setting (e.g. no --context or --packs acg), which the self-consistency anchor cannot see.
 SETTING_ANCHORS = {"discordtune": (107, 26), "chatclause": (111, 26)}
-NAMES = ("chatclause", "discordtune", "cvtune-clean", "typing76", "user-reported", "dev302")
+NAMES = ("chatclause", "discordtune", "cvtune-clean", "typing76", "user-reported", "dev302", "chatjudge2")
+N_CONFIRM = 5783                     # chatjudge-2 (README "chatjudge-2 確認")
+CONFIRM_RATIO = 0.65
 
 
 def sigmoid(x):
@@ -68,6 +70,11 @@ def final_index(sc, col, mu, alpha, gate):
         g = 1.0 if gate == INF else sigmoid((ll[i] - ll[0]) / gate)
         eff.append(ll[i] + (g * (mu / alpha) * (col[i] - col[0]) if mu else 0.0))
     return triage.pick(ng[:n], eff, alpha, TAU, DELTA)
+
+
+def confirm_verdict(s):
+    """README "chatjudge-2 確認": net > 0, exact McNemar p < 0.05, and breaks / fixes <= 0.65."""
+    return s["net"] > 0 and s["p"] < 0.05 and p4c.ratio_ok(s, CONFIRM_RATIO)
 
 
 def u2(s):
@@ -169,16 +176,18 @@ def main(argv=None):
     m.add_argument("--select", action="store_true")
     m.add_argument("--cell")
     m.add_argument("--cell-from")
-    ap.add_argument("--clause", choices=("1", "2a", "2b", "3", "report"), default="report")
+    ap.add_argument("--clause", choices=("1", "2a", "2b", "3", "confirm", "report"), default="report")
     ap.add_argument("--out-rowstats")
     a = ap.parse_args(argv)
     if a.select and a.name != "chatclause":
         raise SystemExit("--select is the chatclause step")
     if a.clause == "1" and a.name != "discordtune":
         raise SystemExit("--clause 1 is the discordtune clause")
+    if (a.clause == "confirm") != (a.name == "chatjudge2"):
+        raise SystemExit("--clause confirm is the chatjudge2 clause, and chatjudge2 takes no other")
     outf = open(a.out, "w", encoding="utf-8")   # fail now, not after the load
     scores, cols, base_ok, base = load(a)
-    if a.select and len(base) != N_SELECT or a.clause == "1" and len(base) != N_DISCORD:
+    if a.select and len(base) != N_SELECT or a.clause == "1" and len(base) != N_DISCORD or a.clause == "confirm" and len(base) != N_CONFIRM:
         raise SystemExit(f"{a.name}: unexpected row count {len(base)}")
     check_anchor(scores, cols, base_ok, a.name)
     res = {"name": a.name, "n": len(base)}
@@ -219,6 +228,9 @@ def main(argv=None):
         pp = 100 * lo / len(base)
         res.update({"verdict": pp >= -1.0, "bootstrap90_lower_rows": lo, "bootstrap90_lower_pp": pp})
         print(f"clause 2b {'PASS' if res['verdict'] else 'FAIL'} lower90_rows {lo} lower90_pp {pp:.3f}")
+    elif a.clause == "confirm":
+        res["verdict"] = confirm_verdict(s)
+        print(f"clause confirm {'PASS' if res['verdict'] else 'FAIL'}")
     elif a.clause != "report":
         res["verdict"] = p4c.clause_verdict(a.clause, s)
         print(f"clause {a.clause} {'PASS' if res['verdict'] else 'FAIL'}")

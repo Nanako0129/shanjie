@@ -96,6 +96,15 @@ class Selection(unittest.TestCase):
         self.assertEqual(P.label((0.5, 0.3, P.INF)), "0.5,0.3,inf")
 
 
+class Confirm(unittest.TestCase):
+    def test_confirm_needs_net_significance_and_ratio(self):
+        ok = {"fixes": 100, "breaks": 60, "net": 40, "p": 0.003}
+        self.assertTrue(P.confirm_verdict(ok))                                  # ratio 0.60
+        self.assertFalse(P.confirm_verdict({**ok, "breaks": 66, "net": 34}))    # ratio 0.66
+        self.assertFalse(P.confirm_verdict({**ok, "p": 0.05}))                  # not significant
+        self.assertFalse(P.confirm_verdict({**ok, "breaks": 100, "net": 0}))    # no gain
+
+
 class Reach(unittest.TestCase):
     def test_counts_swap_fixes_and_the_ones_beyond_tau(self):
         rows = [sc([0.0, -0.5], [0.0, 0.0], [0, 1]), sc([0.0, -3.0], [0.0, 0.0], [0, 1]), sc([0.0, -0.5], [0.0, 0.0], [1, 0])]
