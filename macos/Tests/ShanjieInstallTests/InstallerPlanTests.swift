@@ -17,13 +17,11 @@ final class InstallerPlanTests: XCTestCase {
     func testSameVersionOnlyEnables() {
         let plan = InstallerPlan.decide(installed: "0.1.2", bundled: "0.1.2")
         XCTAssertEqual(plan, .enableSame)
-        XCTAssertFalse(plan.copiesFiles, "reopening after a log out must not rerun install-ime.sh")
     }
 
     func testNewerInstalledNeverDowngrades() {
         let plan = InstallerPlan.decide(installed: "0.10.0", bundled: "0.9.0")
         XCTAssertEqual(plan, .enableNewer)
-        XCTAssertFalse(plan.copiesFiles)
     }
 
     // docs/contracts/system-install.md section 2.2, one test per row of the table (bundled 0.5.0).
@@ -37,9 +35,9 @@ final class InstallerPlanTests: XCTestCase {
                        file: StaticString = #filePath, line: UInt = #line) {
         XCTAssertEqual(d.action, action, file: file, line: line)
         XCTAssertEqual(d.movesAccountCopy, moves, "moves the account copy", file: file, line: line)
-        XCTAssertEqual(d.needsPassword, password, "password", file: file, line: line)
-        XCTAssertEqual(d.moved, moved, "forced registration", file: file, line: line)
-        XCTAssertEqual(d.logoutRequired, moved, "log out", file: file, line: line)
+        // The password column: only the root stage asks for it. The log-out column is `moved`.
+        XCTAssertEqual(d.action == .copyToSystem, password, "password", file: file, line: line)
+        XCTAssertEqual(d.moved, moved, "forced registration and log out", file: file, line: line)
     }
 
     func testThisMacNothingInstalled() {
@@ -108,8 +106,22 @@ final class InstallerPlanTests: XCTestCase {
         }
     }
 
-    func testCopyingPlans() {
-        XCTAssertTrue(InstallerPlan.install.copiesFiles)
-        XCTAssertTrue(InstallerPlan.update.copiesFiles)
+    /// Never downgrade (added in implementation from code review): "This Mac" with a newer account
+    /// copy stops, whatever /Library holds; "My Account Only" still only enables it.
+    func testThisMacStopsOnANewerAccountCopy() {
+        for system in [nil, "0.4.9", "0.5.0", "0.6.0", ""] as [String?] {
+            for listed in [false, true] {
+                check(decide(.thisMac, system: system, account: true, accountVersion: "0.10.0", listed: listed),
+                      .accountNewer, moves: false, password: false, moved: false)
+            }
+        }
+        check(decide(.accountOnly, system: nil, account: true, accountVersion: "0.10.0"), .account(.enableNewer),
+              moves: false, password: false, moved: false)
+    }
+
+    /// A /Library copy whose version cannot be read is present: same location, taken as older.
+    func testThisMacWithAnUnreadableSystemCopy() {
+        check(decide(.thisMac, system: "", account: false, listed: true), .copyToSystem, moves: false, password: true, moved: false)
+        check(decide(.thisMac, system: "", account: true, listed: true), .copyToSystem, moves: true, password: true, moved: true)
     }
 }

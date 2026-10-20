@@ -1,4 +1,5 @@
 import Foundation
+import Security
 import ShanjieInstall
 import XCTest
 
@@ -20,6 +21,7 @@ final class RootStageTests: XCTestCase {
     }
 
     override func tearDownWithError() throws {
+        _ = sh("/usr/bin/chflags", ["-R", "nouchg", tmp.path])
         _ = sh("/bin/chmod", ["-R", "u+w", tmp.path])
         try? FileManager.default.removeItem(at: tmp)
     }
@@ -126,7 +128,37 @@ final class RootStageTests: XCTestCase {
         XCTAssertEqual(r.status, 0, r.err)
         XCTAssertEqual(marker(dest), "new")
         XCTAssertEqual(marker(root + "/.shanjie-previous"), "old", "the installed copy became the previous version")
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: root).sorted(), [".shanjie-previous", "善解輸入法.app"])
         noStaging()
+    }
+
+    /// Code review: the rename of the installed copy fails (here it is immutable, `chflags uchg`):
+    /// the kept previous version, already set aside in the staging folder, is put back, and the
+    /// installed copy and the destination stay as they were.
+    func testAFailedRenameKeepsThePreviousVersion() throws {
+        try installed(version: "0.4.9", marker: "installed")
+        let previous = try bundle("kept", version: "0.4.0", marker: "kept", sign: false) + "/善解輸入法.app"
+        try FileManager.default.moveItem(atPath: previous, toPath: root + "/.shanjie-previous")
+        XCTAssertEqual(sh("/usr/bin/chflags", ["uchg", dest]).status, 0)
+        let r = try runStage(try bundle("new"), params())
+        XCTAssertNotEqual(r.status, 0)
+        XCTAssertTrue(r.err.contains("cannot keep the previous version"), r.err)
+        XCTAssertEqual(marker(dest), "installed")
+        XCTAssertEqual(marker(root + "/.shanjie-previous"), "kept", "the previous version was lost")
+        noStaging()
+    }
+
+    /// Code review: the staging folder keeps mktemp's 0700 until it is removed; owner and modes
+    /// are applied to the copy inside it only. The run cannot be paused mid-way, so this reads the
+    /// built script: no chown or chmod names the staging folder itself.
+    func testTheStagingFolderIsNeverOpenedUp() throws {
+        let command = try RootStage.command(source: "/tmp/x", params())
+        let script = try XCTUnwrap(decodeShellSingleQuoted(String(command.dropFirst(RootStage.commandPrefix.count))))
+        let lines = script.split(separator: "\n").filter { $0.contains("/bin/chmod") || $0.contains("/usr/sbin/chown") }
+        XCTAssertFalse(lines.isEmpty)
+        for line in lines {
+            XCTAssertFalse(line.contains("\"$S\" ") || line.hasSuffix("\"$S\""), "touches the staging folder: \(line)")
+        }
     }
 
     func testUpdateFromAnOlderInstalledVersion() throws {
@@ -256,7 +288,7 @@ final class RootStageTests: XCTestCase {
         XCTAssertEqual(p.ownerUID, 0)
         XCTAssertEqual(p.ownerGID, 0)
         XCTAssertEqual(p.requirement,
-                       #"anchor apple generic and identifier "com.nyanako.inputmethod.shanjie" and certificate leaf[subject.OU] = "2LJ882GPY8""#)
+                       #"anchor apple generic and identifier "com.nyanako.inputmethod.shanjie" and certificate 1[field.1.2.840.113635.100.6.2.6] exists and certificate leaf[field.1.2.840.113635.100.6.1.13] exists and certificate leaf[subject.OU] = "2LJ882GPY8""#)
     }
 
     /// Security review P3-5: the AppleScript source decodes back to exactly the command, the command
@@ -329,6 +361,17 @@ final class RootStageTests: XCTestCase {
     }
 
     // MARK: the in-process check before the password dialog
+
+    /// The production requirement compiles: otherwise every "refused under the production
+    /// requirement" case above would pass for the wrong reason.
+    func testTheProductionRequirementParses() {
+        var req: SecRequirement?
+        XCTAssertEqual(SecRequirementCreateWithString(RootStage.requirement as CFString, [], &req), errSecSuccess)
+        XCTAssertNotNil(req)
+        var text: CFString?
+        XCTAssertEqual(SecRequirementCopyString(req!, [], &text), errSecSuccess)
+        XCTAssertTrue((text as String?)?.contains("1.2.840.113635.100.6.1.13") ?? false, "\(String(describing: text))")
+    }
 
     func testThePrecheckUsesTheSameRequirement() throws {
         let app = URL(fileURLWithPath: try bundle("pre") + "/善解輸入法.app")

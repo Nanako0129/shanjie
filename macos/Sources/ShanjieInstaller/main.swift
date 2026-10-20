@@ -57,7 +57,9 @@ enum Paths {
 
     /// The /Library copy's version: nil when there is none, "" when its version cannot be read.
     static func systemVersion() -> String? {
-        guard FileManager.default.fileExists(atPath: system.path) else { return nil }
+        // attributesOfItem does not follow a final symlink: a dangling one counts as a copy too
+        // (install-ime.sh's `-e || -L`), so "My Account Only" lands on the blocked screen.
+        guard (try? FileManager.default.attributesOfItem(atPath: system.path)) != nil else { return nil }
         return version(system) ?? ""
     }
 
@@ -324,8 +326,15 @@ enum Screens {
     /// `system`: the /Library copy's version (nil: none); `account`: the account copy's, when there is one.
     static func welcome(system: String?, account: String?, bundled: String) -> Screen {
         var lines = [L("開源的 macOS 注音輸入法。", "An open-source Zhuyin input method for macOS.")]
-        if let system { lines.append(L("已裝給這台 Mac，版本 \(system)。", "Installed for this Mac, version \(system).")) }
-        if let account { lines.append(L("已裝在你的帳號，版本 \(account)。", "Installed for your account, version \(account).")) }
+        // "" is a copy whose version cannot be read (or only the legacy shanjie.app in the account).
+        if let system {
+            lines.append(system.isEmpty ? L("已裝給這台 Mac，版本不明。", "Installed for this Mac, version unknown.")
+                                        : L("已裝給這台 Mac，版本 \(system)。", "Installed for this Mac, version \(system)."))
+        }
+        if let account {
+            lines.append(account.isEmpty ? L("已裝在你的帳號，版本不明。", "Installed for your account, version unknown.")
+                                         : L("已裝在你的帳號，版本 \(account)。", "Installed for your account, version \(account)."))
+        }
         // system-install.md section 2.5 first, then app-sandbox.md section 2.5's rollback note.
         let details = L("「這台 Mac」把善解放進系統的輸入法資料夾，由系統保護檔案；之後更新時，善解更新會跳出系統的密碼框，文字是「善解更新 wants permission to update 善解輸入法.」，只在你按下關於頁的「更新」之後出現。選「這台 Mac」時，有程式開著安全輸入的期間，你打的字會經過善解（和平常一樣：學習暫停、不讀前文、不記錄）；終端機開著「加密的鍵盤輸入」時，sudo 的密碼提示也一樣會經過善解。「只有我的帳號」就是之前的安裝方式。兩種之間可以重新打開安裝程式切換，學習資料與設定不受影響（container 依 bundle ID）。不是管理員的帳號，請選「只有我的帳號」，或請管理員安裝。\n執行中的舊版會被結束，上一版保留在同一個資料夾的 .shanjie-previous。\n退回 0.4.x 以前（沒有沙盒）的版本時，舊版看不到學習資料與設定，它們已搬進 ~/Library/Containers/com.nyanako.inputmethod.shanjie；退回期間學到的，再升級時不會搬過去。搬回的方法：https://github.com/Nanako0129/shanjie/blob/main/docs/sandbox-restore.md \n",
                         "This Mac puts Shanjie in the system's input methods folder, where the system protects its files. Later updates show the system's password dialog, reading \"善解更新 wants permission to update 善解輸入法.\", and only after you choose Update on the About page. With This Mac, while another app holds Secure Keyboard Entry, what you type goes through Shanjie (as always: learning paused, no reading of earlier text, nothing recorded); with Secure Keyboard Entry on in Terminal, the sudo password prompt goes through Shanjie too. My Account Only is the way it was installed before. Open the installer again to switch between the two; learned words and settings stay (the container follows the bundle ID). On an account that is not an administrator, choose My Account Only, or ask an administrator to install it.\nA running older copy is stopped; the previous version is kept in the same folder as .shanjie-previous.\nGoing back to a version without the sandbox (0.4.x or earlier), it sees no learned words or settings: they moved into ~/Library/Containers/com.nyanako.inputmethod.shanjie. What it learns is not moved on the next upgrade. To move the data back: https://github.com/Nanako0129/shanjie/blob/main/docs/sandbox-restore.md \n") + license
@@ -340,6 +349,22 @@ enum Screens {
                body: L("按「啟用」讓系統開始使用它；從系統設定加入後回到這裡，也是按這個。\n「重新安裝」會把目前這份當成上一版保留，取代原本保留的上一版。",
                        "Choose Enable to let the system use it, also after adding it in System Settings.\nReinstall keeps the current copy as the previous version, replacing the one kept before."),
                seal: true, primary: L("啟用", "Enable"), secondary: canReinstall ? L("重新安裝", "Reinstall") : nil, close: L("取消", "Cancel"))
+    }
+
+    /// A newer version is installed where the user chose (the old enableNewer welcome line).
+    static func newer(installed: String, bundled: String) -> Screen {
+        Screen(step: 0, title: L("已經裝了更新的版本", "A newer version is installed"),
+               body: L("已經裝了更新的版本（\(installed)），不會降版；內附的 \(bundled) 沒有安裝。按「啟用」讓系統開始使用已裝好的那一份。",
+                       "A newer version (\(installed)) is installed; this installer does not downgrade, and the bundled \(bundled) was not installed. Choose Enable to use the installed one."),
+               seal: true, primary: L("啟用", "Enable"), close: L("取消", "Cancel"))
+    }
+
+    /// Never downgrade: "This Mac" while the account holds a newer version. Nothing changed.
+    static func accountNewer(installed: String, bundled: String) -> Screen {
+        Screen(step: 0, title: L("你的帳號裡是更新的版本", "Your account has a newer version"),
+               body: L("你的帳號裡已經裝了 \(installed)，比這份安裝程式內附的 \(bundled) 新。裝給這台 Mac 會換成舊版，所以沒有安裝，什麼都沒有改。要裝給這台 Mac，請用 \(installed) 的安裝程式。",
+                       "Your account already has \(installed), newer than the \(bundled) in this installer. Installing for this Mac would replace it with an older version, so nothing was installed or changed. To install for this Mac, use the installer of \(installed)."),
+               seal: true, secondary: L("返回", "Back"), close: L("完成", "Done"))
     }
 
     /// system-install.md section 2.2: "My Account Only" while this Mac has a copy. Nothing changed.
@@ -366,6 +391,8 @@ enum Screens {
     static let copying = L("正在複製…", "Copying…")
     /// system-install.md section 2.4: the system may ask whether the installer may enable Shanjie.
     static let enabling = L("正在請系統啟用…如果系統問要不要允許，請按『允許』。", "Asking the system to turn it on… If it asks, choose Allow.")
+    static let movingAccountCopy = L("正在把你帳號裡的那份移到 .shanjie-previous…", "Moving the copy in your account to .shanjie-previous…")
+    static let loading = L("正在請系統改用新的那份…", "Asking the system to use the new copy…")
     static let password = L("請在系統的視窗輸入管理員密碼。", "Enter an administrator password in the system's dialog.")
     static let waiting = L("正在等系統啟用。如果系統跳出視窗，請允許「善解輸入法」。",
                            "Waiting for the system to turn it on. If it asks, allow Shanjie.")
@@ -394,6 +421,11 @@ enum Screens {
 
     static let notAcceptedMessage = L("系統沒有接受這個輸入法。可以到「系統設定 → 鍵盤 → 輸入方式」手動加入「善解輸入法」。",
                                       "The system did not accept the input method. Add Shanjie in System Settings > Keyboard > Input Sources.")
+
+    /// The failure screen after a location change (section 2.4): what failed, never "add it in
+    /// System Settings" (that comes only after the log out).
+    static let registrationFailedMessage = L("系統沒有登記這個輸入法。", "The system did not register the input method.")
+    static let enableFailedMessage = L("系統沒有啟用這個輸入法。", "The system did not turn on the input method.")
 
     static let notDetected = L("還沒偵測到，請照上面三步加入。", "Not detected yet. Please add it with the three steps above.")
 
@@ -640,7 +672,9 @@ func reviewScreens() -> [(String, Screen)] {
      ("10-activate", Screens.activate()),
      ("11-try", Screens.tryIt(note: nil)),
      ("12-log-out", Screens.logOut()),
-     ("13-failed-log-out", Screens.failedLogOut(Failure(message: Screens.notAcceptedMessage)))]
+     ("13-failed-log-out", Screens.failedLogOut(Failure(message: Screens.enableFailedMessage))),
+     ("14-newer", Screens.newer(installed: "0.6.0", bundled: "0.5.0")),
+     ("15-account-newer", Screens.accountNewer(installed: "0.6.0", bundled: "0.5.0"))]
 }
 
 /// Draws every review screen in light and dark at 2x into `folder`, which must already exist;
@@ -782,7 +816,7 @@ final class Controller: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let start = [Paths.installed, Paths.legacy].lazy.compactMap { Paths.info($0)?["CFBundleIdentifier"] as? String }.first
         startBundleID = start
         startModes = start.map(Registration.enabledModeIDs(bundleID:)) ?? []
-        show(Screens.welcome(system: systemVersion, account: accountCopy ? accountVersion : nil, bundled: Paths.bundledVersion))
+        show(Screens.welcome(system: systemVersion, account: accountCopy ? (accountVersion ?? "") : nil, bundled: Paths.bundledVersion))
     }
 
     @objc private func thisMacPressed() { choose(.thisMac) }
@@ -799,16 +833,22 @@ final class Controller: NSObject, NSApplicationDelegate, NSWindowDelegate {
         case .copyToSystem:
             installForThisMac()
         case .moveToSystem:
+            // /Library already holds this version or a newer one: only the user stage.
             guard Paths.script != nil else { return fail(Screens.incomplete) }
-            moveThenEnable()
+            userStageThenEnable()
         case .enableSystemSame:
             show(Screens.same(canReinstall: canCopy), primary: { [weak self] in self?.enable(afterCopy: false) },
                  secondary: { [weak self] in
                      self?.decision = InstallDecision.reinstallSystem
                      self?.installForThisMac()
                  })
-        case .enableSystemNewer, .account(.enableNewer):
-            enable(afterCopy: false)
+        case .enableSystemNewer:
+            show(Screens.newer(installed: systemVersion ?? "", bundled: Paths.bundledVersion), primary: { [weak self] in self?.enable(afterCopy: false) })
+        case .account(.enableNewer):
+            show(Screens.newer(installed: accountVersion ?? "", bundled: Paths.bundledVersion), primary: { [weak self] in self?.enable(afterCopy: false) })
+        case .accountNewer:
+            show(Screens.accountNewer(installed: accountVersion ?? "", bundled: Paths.bundledVersion),
+                 secondary: { [weak self] in self?.showWelcome() })
         case .account(.enableSame):
             show(Screens.same(canReinstall: canCopy), primary: { [weak self] in self?.enable(afterCopy: false) },
                  secondary: { [weak self] in self?.copyThenEnable() })
@@ -839,32 +879,43 @@ final class Controller: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
     }
 
-    /// system-install.md section 2.3: extract, check the signature in this process (an early,
-    /// friendly failure only), then the root stage through the system's password dialog.
+    /// system-install.md section 2.3: extract and check the signature in this process (an early,
+    /// friendly failure only), off the main thread; then the root stage through the system's
+    /// password dialog on the main thread.
     private func installForThisMac() {
         guard Paths.zip != nil, Paths.script != nil else { return fail(Screens.incomplete) }
-        guard let version = Paths.expectedBundleVersion else {
-            return fail(Failure(message: L("這份安裝程式不能裝給這台 Mac（建置時沒有寫入版本）。請重新下載安裝程式。",
-                                           "This installer cannot install for this Mac (no version was built in). Download the installer again.")))
-        }
         show(Screens.working(Screens.copying))
-        carryOverThen(extractBundled) { extracted in
-            switch extracted {
-            case .failure(let failure): self.fail(failure)
-            case .success(let tmp): self.rootStage(tmp, version: version)
+        DispatchQueue.global(qos: .userInitiated).async {
+            let prepared: Result<URL, Failure> = extractBundled().flatMap { tmp in
+                guard RootStage.satisfies(bundle: tmp.appendingPathComponent(RootStage.appName), requirement: RootStage.requirement) else {
+                    try? FileManager.default.removeItem(at: tmp)
+                    return .failure(Failure(message: L("內附的輸入法簽章不對，沒有安裝。請重新下載安裝程式。",
+                                                       "The bundled input method's signature is not valid; nothing was installed. Download the installer again.")))
+                }
+                return .success(tmp)
+            }
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    switch prepared {
+                    case .failure(let failure): self.fail(failure)
+                    case .success(let tmp): self.rootStage(tmp)
+                    }
+                }
             }
         }
     }
 
-    private func rootStage(_ tmp: URL, version: String) {
+    private func rootStage(_ tmp: URL) {
         let remove = { try? FileManager.default.removeItem(at: tmp) }
-        guard RootStage.satisfies(bundle: tmp.appendingPathComponent(RootStage.appName), requirement: RootStage.requirement) else {
-            remove()
-            return fail(Failure(message: L("內附的輸入法簽章不對，沒有安裝。請重新下載安裝程式。",
-                                           "The bundled input method's signature is not valid; nothing was installed. Download the installer again.")))
-        }
         let source: String
-        do { source = try RootStage.appleScript(source: tmp.path, .production(version: version)) } catch {
+        do {
+            // A build without the version section has no constant; the builder refuses it as a bad version.
+            source = try RootStage.appleScript(source: tmp.path, .production(version: Paths.expectedBundleVersion ?? ""))
+        } catch RootStage.BuildError.badVersion {
+            remove()
+            return fail(Failure(message: L("這份安裝程式建置時沒有寫入正確的版本，不能裝給這台 Mac，什麼都沒有改。請重新下載安裝程式。",
+                                           "This installer was built without a valid version, so it cannot install for this Mac; nothing was changed. Download the installer again.")))
+        } catch {
             remove()
             return fail(Failure(message: L("暫存資料夾的路徑不是預期的樣子，沒有安裝。", "The temporary folder's path is not as expected; nothing was installed."),
                                 detail: tmp.path))
@@ -880,28 +931,21 @@ final class Controller: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 return self.fail(Failure(message: L("裝到這台 Mac 時失敗了，原本裝著的沒有變動。", "Installing for this Mac failed; the installed copy was not changed."),
                                          detail: error[NSAppleScript.errorMessage] as? String))
             }
+            // The ETen carry-over only now (code review: before the dialog, Cancel would leave it
+            // written), and still before the swap that matters: the sandboxed /Library copy cannot
+            // run yet, since the old processes are ended only in the user stage.
             self.userStageThenEnable()
         }
     }
 
-    /// Section 2.4 items 1 to 3 after the root stage, then registration.
+    /// Section 2.4 items 1 to 3 (with the ETen carry-over first), then registration.
     private func userStageThenEnable() {
-        show(Screens.working(Screens.copying))
-        DispatchQueue.global(qos: .userInitiated).async {
-            let failure = userStage()
-            DispatchQueue.main.async {
-                MainActor.assumeIsolated { if let failure { self.fail(failure) } else { self.enable(afterCopy: true) } }
-            }
-        }
-    }
-
-    /// `moveToSystem`: /Library already holds this version or a newer one, so only the user stage.
-    private func moveThenEnable() {
-        show(Screens.working(Screens.copying))
+        show(Screens.working(decision.movesAccountCopy ? Screens.movingAccountCopy : Screens.loading))
         carryOverThen(userStage) { failure in
             if let failure { self.fail(failure) } else { self.enable(afterCopy: true) }
         }
     }
+
 
     /// s3c section 2.3: against the installed copy, with its own bundle ID and preference domain.
     /// Installer-v2 section 9.2 item 2: only after a copy can the system's "not accepted" be a
@@ -924,7 +968,9 @@ final class Controller: NSObject, NSApplicationDelegate, NSWindowDelegate {
         case .waiting: if afterCopy { poll(bundleID: bundleID) } else { showActivate() }
         case .failed: fail(Failure(message: Screens.notAcceptedMessage))
         case .logOut: show(Screens.logOut(), primary: { NSApp.terminate(nil) })
-        case .failedLogOut: show(Screens.failedLogOut(Failure(message: Screens.notAcceptedMessage)))
+        case .failedLogOut:
+            let message = result.outcome == .registrationFailed ? Screens.registrationFailedMessage : Screens.enableFailedMessage
+            show(Screens.failedLogOut(Failure(message: message)))
         }
     }
 

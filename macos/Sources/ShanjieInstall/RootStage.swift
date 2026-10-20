@@ -9,10 +9,13 @@ import Security
 public enum RootStage {
     public static let systemFolder = "/Library/Input Methods"
     public static let appName = "善解輸入法.app"
-    /// The designated requirement the copy must satisfy: the shipping ID, signed by this project's
-    /// Developer ID team.
+    /// The requirement the copy must satisfy: the shipping ID, signed by this project's team with a
+    /// Developer ID Application certificate. The two marker fields (the Developer ID intermediate
+    /// CA, 1.2.840.113635.100.6.2.6, and the Developer ID Application leaf, …6.1.13) are hardening
+    /// from code review: the team's OU alone also accepts its Apple Development and Mac App Store
+    /// certificates.
     public static let requirement =
-        #"anchor apple generic and identifier "com.nyanako.inputmethod.shanjie" and certificate leaf[subject.OU] = "2LJ882GPY8""#
+        #"anchor apple generic and identifier "com.nyanako.inputmethod.shanjie" and certificate 1[field.1.2.840.113635.100.6.2.6] exists and certificate leaf[field.1.2.840.113635.100.6.1.13] exists and certificate leaf[subject.OU] = "2LJ882GPY8""#
 
     /// Removes this Mac's copy (section 2.1), shown when "My Account Only" is blocked; the same line
     /// install-ime.sh prints and the README gives.
@@ -75,6 +78,9 @@ public enum RootStage {
     }
 
     /// The shell script, steps 1 to 7. `source` is the folder holding the extracted 善解輸入法.app.
+    /// The staging folder stays as mktemp made it (0700, root's) until it is removed; owner and
+    /// modes are set on the copy inside it only. The old .shanjie-previous is moved into the staging
+    /// folder, not deleted, and is deleted with it only once the new copy is in place.
     static func script(source: String, _ p: Parameters) -> String {
         """
         set -u
@@ -91,6 +97,12 @@ public enum RootStage {
         P="$R/.shanjie-previous"
         S=
         trap '[ -z "$S" ] || /bin/rm -rf "$S"' EXIT
+        # Puts the kept previous version back from the staging folder. If that fails, the staging
+        # folder (holding it) is left in place instead of being removed.
+        restore() {
+          [ -e "$S/previous" ] || [ -L "$S/previous" ] || return 0
+          /bin/mv "$S/previous" "$P" || { echo "root stage: the previous version is left in $S/previous" >&2; S=; }
+        }
         atleast() {
           a=$1; b=$2
           while [ -n "$a" ] || [ -n "$b" ]; do
@@ -113,7 +125,7 @@ public enum RootStage {
         fi
         S=$(/usr/bin/mktemp -d "$R/.shanjie-staging.XXXXXX") || { S=; fail "cannot create a staging folder"; }
         /usr/bin/ditto --noqtn --noacl "$SRC/$N" "$S/$N" || fail "copy failed"
-        /usr/sbin/chown -R "$OWNER" "$S" && /bin/chmod -RN "$S" && /bin/chmod -R u+rwX,go+rX,go-w,ug-s "$S" || fail "cannot set owner and modes"
+        /usr/sbin/chown -R "$OWNER" "$S/$N" && /bin/chmod -RN "$S/$N" && /bin/chmod -R u+rwX,go+rX,go-w,ug-s "$S/$N" || fail "cannot set owner and modes"
         /usr/bin/codesign --verify --strict --deep -R="$REQ" "$S/$N" || fail "the copy does not satisfy the signing requirement"
         L=$(/bin/ls -leR "$S/$N") || fail "cannot list the copy"
         if printf '%s\\n' "$L" | /usr/bin/grep -q '^ *[0-9][0-9]*: '; then fail "the copy carries an ACL"; fi
@@ -124,9 +136,9 @@ public enum RootStage {
           I=$(/usr/bin/plutil -extract CFBundleVersion raw "$D/Contents/Info.plist") || fail "cannot read the version of $D"
           case $I in ''|.*|*.|*..*|*[!0-9.]*) fail "unexpected version $I of $D" ;; esac
           atleast "$V" "$I" || fail "$D is version $I, newer than $V"
-          /bin/rm -rf "$P" || fail "cannot remove $P"
-          /bin/mv "$D" "$P" || fail "cannot keep the previous version"
-          if ! /bin/mv "$S/$N" "$D"; then /bin/mv "$P" "$D"; fail "cannot move the copy into place"; fi
+          if [ -e "$P" ] || [ -L "$P" ]; then /bin/mv "$P" "$S/previous" || fail "cannot set $P aside"; fi
+          if ! /bin/mv "$D" "$P"; then restore; fail "cannot keep the previous version"; fi
+          if ! /bin/mv "$S/$N" "$D"; then /bin/mv "$P" "$D" && restore; fail "cannot move the copy into place"; fi
         else
           /bin/mv "$S/$N" "$D" || fail "cannot move the copy into place"
         fi

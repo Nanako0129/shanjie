@@ -23,9 +23,6 @@ public enum InstallerPlan: Equatable, Sendable {
         }
     }
 
-    /// Whether the primary action runs the file copy (install-ime.sh) before enabling.
-    public var copiesFiles: Bool { self == .install || self == .update }
-
     /// The shipping bundle ID, the only one the installer installs.
     public static let shippingBundleID = "com.nyanako.inputmethod.shanjie"
 }
@@ -54,10 +51,14 @@ public struct InstallDecision: Equatable, Sendable {
         case account(InstallerPlan)
         /// "My Account Only" while /Library holds a copy: stop and change nothing.
         case blocked
+        /// "This Mac" while the account layer holds a version newer than the bundled one: never
+        /// downgrade; stop and change nothing (that version's installer can install it for this Mac).
+        case accountNewer
     }
 
     public var action: Action
-    /// The user stage moves the account-layer copy (and the legacy shanjie.app) to .shanjie-previous.
+    /// The user stage moves the account-layer copy (and the legacy shanjie.app) to .shanjie-previous;
+    /// the installer says so while it runs.
     public var movesAccountCopy: Bool
     /// The location changed: registration is forced (`Registration.decide(moved:)`) and the last
     /// screen asks for a log out (`InstallerFlow.next(after:moved:)`).
@@ -68,11 +69,6 @@ public struct InstallDecision: Equatable, Sendable {
         self.movesAccountCopy = movesAccountCopy
         self.moved = moved
     }
-
-    /// Only the root stage asks for the administrator password.
-    public var needsPassword: Bool { action == .copyToSystem }
-    /// Section 2.2's last column: the same rows as forced registration.
-    public var logoutRequired: Bool { moved }
 
     /// The secondary action of `enableSystemSame`: the row "older, no account copy".
     public static let reinstallSystem = InstallDecision(action: .copyToSystem)
@@ -85,9 +81,16 @@ public struct InstallDecision: Equatable, Sendable {
     /// after the copy and may already see the bundle just put in place).
     public static func decide(choice: InstallChoice, system: String?, accountCopy: Bool, account: String?,
                               bundled: String, listedBeforeCopy: Bool) -> InstallDecision {
-        let systemPlan = InstallerPlan.decide(installed: system, bundled: bundled)
+        // A /Library copy whose version cannot be read is there all the same: same location, taken
+        // as older (the root stage then refuses to replace it, since it cannot compare the versions).
+        let systemPlan = system == "" ? .update : InstallerPlan.decide(installed: system, bundled: bundled)
         switch choice {
         case .thisMac:
+            // Never downgrade (added in implementation, code review): moving a newer account copy
+            // aside to install the older bundled one would be one.
+            if accountCopy, InstallerPlan.decide(installed: account, bundled: bundled) == .enableNewer {
+                return InstallDecision(action: .accountNewer)
+            }
             switch systemPlan {
             case .install:
                 return InstallDecision(action: .copyToSystem, movesAccountCopy: accountCopy, moved: true)
