@@ -1,6 +1,6 @@
 # 契約：口語項進核心，常談隨 App 出貨（colloquial-term）
 
-狀態：修訂二（2026-10-20，plan-verifier 第二次 REVISE 的 6 項逐項處置，§8），待收尾審查。
+狀態：修訂三（2026-10-20，收尾審查 REVISE 的 2 項照改，§8）；照流程收尾審查之後由維護者決定。
 
 ## 0. 起因、要做到什麼、怎麼看到
 
@@ -8,7 +8,7 @@
 - **要做到**：聊天設定、語意校正開著、強度「標準」、載入的語意校正模型就是 P4d 量的那一份時，核心的融合多一項口語分數，選字和 P4d 那一格（μ 0.5、α 0.5、軟閘門 T 1.0、δ 0.25、τ 2）逐列相同。其他情況（書面、語意校正關、保守與積極強度、別的語意校正模型、沒有口語表）行為逐位元組不變。
 - **怎麼看到**：
   1. CLI 用核心的新路徑跑公開集合，每列選的候選和 `p4d.py --cell 0.5,0.5,1.0` 的離線選字相同；雲端跑 chatclause 與 discordtune，改對／改壞等於 P4d 的 113／37 與 74／43。
-  2. 維護者在自己的 Mac 用聊天 App，在同一個輸入框先打並送出「桌子一直在搖」，再打 dev302 第 202 列「桌腳的螺絲鬆掉了」（讀音照 `eval/bench/suite-v1/dev302.txt`；前文就是那一列的前文欄，P4d 的量測是帶前文 `--context` 跑的）：出貨版與「只調 α」的對照都選「羅斯松」，新版選「螺絲鬆」（P4d 的公開重算：dev302 只有口語項才改對的 3 列之一，另外兩列是第 218、223 列）。
+  2. 維護者在自己的 Mac 用聊天 App，在同一個輸入框先打「桌子一直在搖」（**不送出**，游標停在「搖」後面；殼只讀游標前面的字當前文），接著直接打 dev302 第 202 列「桌腳的螺絲鬆掉了」（讀音照 `eval/bench/suite-v1/dev302.txt`；前文就是那一列的前文欄，P4d 的量測是帶前文 `--context` 跑的）：出貨版與「只調 α」的對照都選「羅斯松」，新版選「螺絲鬆」（P4d 的公開重算：dev302 只有口語項才改對的 3 列之一，另外兩列是第 218、223 列）。
 
 ## 1. 已經量到的
 
@@ -24,7 +24,7 @@
 - 檔案 `data/lm/colloquial.sjlm`，內容就是 P4 的 T2（SHA-256 `2984eeb5…`，V 68,055）：出貨模型 model-v6 建置時的口語計數（`1e7a15ef…`）加上 Phase 2 的公開口語池（`19fdc474…`，143,895 句）的計數，`tools/build_lm.py --corpora`（P4 加的選項）建，剪枝 2、折扣 0.75，不用詞類、不用 KN。建置指令寫進 `docs/releases/sj-cl-1-68k.md`；repo 只放 `data/colloquial.sjlm.sha256`，檔案走資料 Release（手動流程照 `docs/releases/README.md`，建立前問維護者）。
 - **授權**：檔案以 **CC BY-SA 4.0** 發佈（和其他模型檔相同；model-v6 的口語計數本來就以 CC BY-SA 4.0 隨模型出貨，口語池四個來源 ODC-BY、CC BY 3.0、CC BY 2.0 FR、CC BY 4.0 都只要求署名，可以併入 BY-SA）。
   - **App**：`scripts/build-app.sh` 產生的模型署名檔（現在逐一列出每個模型檔的授權與來源的那一份）加 `colloquial.sjlm` 一段：授權名稱、model-v6 口語計數的來源（沿用現有說明）、口語池四個來源的名稱與授權連結；`Resources/LICENSES/` 另放 `colloquial-attribution.tsv`。repo 的 `LICENSES/data.md` 同步。`scripts/check-app.sh` 加一條 grep：署名檔裡有 `colloquial.sjlm` 那一段，`colloquial-attribution.tsv` 存在且不是空的。
-  - **資料 Release**：附同樣的 NOTICE 與 `colloquial-attribution.tsv`。
+  - **資料 Release**：附同樣的 NOTICE 與 `colloquial-attribution.tsv`。`colloquial-attribution.tsv` 只有來源 id、名稱與句數，不含語料文字；它是資料 Release `sj-cl-1-68k` 的附件，SHA-256 記在 `data/colloquial-attribution.tsv.sha256`，`build-app.sh` 從 `data/lm/` 複製進 `Resources/LICENSES/`（和模型檔一樣：存在而且雜湊相符才組建）。
   - `colloquial-attribution.tsv` 由一支新腳本（`tools/build_attribution.py`）從口語池 `pool.tsv` 的來源欄位產生，每個來源單位一列（YODAS 影片 id 與頻道、Tatoeba 句子 id 與作者、WildChat 與 MASSIVE 寫資料集出處與授權），並有一欄這個單位涵蓋的句數；各來源的句數加總要等於研究紀錄 2026-10-18「Phase 2 公開句子池」記的 WildChat 3,491、YODAS 90,080、Tatoeba 36,839、MASSIVE 13,485 句（這幾個數字在 repo 裡，不是腳本自己算的）。`pool.tsv` 的完整 SHA-256 寫進 `docs/releases/sj-cl-1-68k.md`。來源單位的資料不完整（例如缺頻道或作者）＝停止條件。
 
 ### 2.2 核心
@@ -50,7 +50,7 @@
   - P4b 的 `--colloquial`、`--colloquial-mu`、`--colloquial-gamma` **移除**（P4b 的結果已寫在研究紀錄，要重現就 checkout 當時的 commit）。
 - **`p4d.py`** 加 `--out-picks FILE`：每列一行選中的候選編號（0 起，前 8 名內），供 §3 第 2 點比對。
 - **重播**：`shanjie-replay` 加 `--colloquial FILE`（照 App，在 `load_tinylm` 之後載入；詞包照重播的 `build_engine`，acg 開）；摘要行標記加 `+colloq:<sha8>`。不帶這個選項的輸出和現在逐位元組相同。
-- **CI 與發版流程**：`.github/workflows/ci.yml` 每一個下載 `tinylm.sjtl` 的 job、`.github/workflows/release.yml` 的 build，都加 `gh release download sj-cl-1-68k -p colloquial.sjlm -D data/lm` 與 `shasum -a 256 -c data/colloquial.sjlm.sha256`。資料 Release `sj-cl-1-68k` 要在實作 PR 第一次跑 CI 之前建好（建立前問維護者）。
+- **CI 與發版流程**：`.github/workflows/ci.yml` 每一個下載 `tinylm.sjtl` 的 job、`.github/workflows/release.yml` 的 build，都加 `gh release download sj-cl-1-68k -p colloquial.sjlm -p colloquial-attribution.tsv -D data/lm` 與 `shasum -a 256 -c data/colloquial.sjlm.sha256 data/colloquial-attribution.tsv.sha256`。資料 Release `sj-cl-1-68k` 要在實作 PR 第一次跑 CI 之前建好（建立前問維護者）。
 
 ## 3. 驗收
 
@@ -83,7 +83,7 @@
    - 維護者的 Mac 一次：裝好新版，用「活動監視器」看善解的記憶體，和舊版相比增加 ≤ 40 MiB（15 秒級）。
    超過任一項＝停止條件（先找原因，例如 k 的詞集合改從引擎已載入的詞庫取）。
 6. **授權**：`check-app.sh` 的 grep 通過；`colloquial-attribution.tsv` 每列有一欄「涵蓋的句數」，依來源加總要**正好等於**研究紀錄記的 WildChat 3,491、YODAS 90,080、Tatoeba 36,839、MASSIVE 13,485（合計 143,895）；`tools/build_attribution.py` 遇到任何一列沒有來源單位 id（影片 id、句子 id 等）就以非 0 結束，單元測試涵蓋這兩條。
-7. **實機**（維護者，15 秒級）：照 §0 第 2 點，先送出「桌子一直在搖」，再打那一句，選「螺絲鬆」。
+7. **實機**（維護者，15 秒級）：照 §0 第 2 點，先打「桌子一直在搖」不送出，接著打那一句，選「螺絲鬆」。
 8. `/code-review` ＋ fresh verifier ＋ CI。
 
 ## 4. 發佈與回退
@@ -103,3 +103,4 @@
 
 - plan-verifier 第一次（`898495b8`）REVISE 8 項，照改：共用的核心函式與 CLI 選項釘死、P4b 選項移除、`p4d.py --out-picks`（§2.2、§2.3、§3.2）；重播載入口語表與比對對象（§2.3、§3.4）；「其他地方不變」逐項標出有沒有口語表與工具（§3.3）；參數全部是常數、和語意校正模型的配對規則與測試（§2.2、§3.1）；bundle 路徑、selftest 的一步（§2.3）；檔案授權、App 與資料 Release 兩邊的署名、`check-app.sh` 的檢查、來源單位數的出處（§2.1、§3.6）；量法的工具、機器、基準與門檻（§3.5）；回退與預算（§4、§5）。名稱「常談」由維護者同日選定；驗收句由維護者同日指正改成「桌腳的螺絲鬆掉了」（「大夥」台灣很少人說）。
 - plan-verifier 第二次（`95e369a2`）REVISE 6 項，逐項處置：第 202 列的前文（FIX：selftest 與實機都先給前文「桌子一直在搖」，實作時先用 CLI 在同條件量一次）；k 的疊加層要含引擎建立時的詞包（FIX：用 `pack_text`，加有詞包／沒詞包的測試）；CI 與 release.yml 下載常談（FIX，資料 Release 先建）；署名的完整性檢查不能循環（FIX：每列句數、依來源加總對 repo 裡的數字、缺 id 就失敗）；關於頁沒有模型列表（拿掉這一項）；載入時間的量法（改用 `/usr/bin/time -v` 跑一列）。之後一次收尾審查。
+- 收尾審查（`88f556bd`）REVISE 2 項，照改：實機步驟的前文要不送出、游標接在後面（殼只讀游標前的字）；署名檔改成資料 Release 的附件、`data/` 記雜湊、CI 與 release.yml 一起下載（乾淨的 checkout 才拿得到）。
