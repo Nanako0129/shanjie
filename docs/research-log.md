@@ -8278,3 +8278,17 @@ XL 比 `MAX_FILE`（67,108,864）小 1,168,880 位元組。錨點：4 個模型 
 - 只報：對照臂「不加口語表、只把 α 調到 0.5」在 chatclause +20、discordtune 44／52（−8）〔推論：融合調強在 discordtune 本身是負的〕；同一格比例從 chatclause 0.33 到 discordtune 0.58（P4b、P4c 也同方向）；把 n-gram 第一名固定當錨點，在 n-gram 分差 ≥ τ 的列沒有少任何改對（每個集合都是 0）。
 - **維護者決定**（同日選擇題，看過數字之後）：出貨標準第 1 條（discordtune）與錯字回報那條的「改壞÷改對」上限從 0.5 放寬到 **0.6**，之後的片也適用；P4d 以 0.58 照新標準過關。照 10-20 的規定（只在放寬後的規則下過關的改動，開產品片之前先在 chatjudge-2 確認一發），確認規則由維護者在任何 chatjudge-2 的數字之前選定：**淨值 > 0、精確 McNemar p < 0.05、改壞÷改對 ≤ 0.65**。登記在同一份 README 的「chatjudge-2 確認」一節。
 - **chatjudge-2 確認通過**（同日，登記 `8fc93d3b` 之後才上傳判讀集）：108／39，淨值 +69，p 1.1×10⁻⁸，比例 0.36；CER 2.85% → 2.61%。對照臂「只把 α 調到 0.5」是 61／38（+23）。口語表這條線從 P4 走到 P4d，照確認規則可以開產品片（口語項進核心、T2 表隨 App 出貨），另寫契約。
+
+## 2026-10-20：口語項進核心（契約 `docs/contracts/colloquial-term.md`，分支 `feat/colloquial-term`；實作，還沒有雲端與實機的數字）
+
+- 實作：
+  - `core/src/colloquial.rs` 是 lc、k、col 的唯一實作（從 `cli/src/colloquial.rs` 搬來，CLI 那份與 P4b 的 `--colloquial`／`--colloquial-mu`／`--colloquial-gamma` 刪除）；P4d 登記的格（μ 0.5、閘門 T 1.0、γ＝μ／2、α 0.5、τ 2、δ 0.25）是具名常數，不讀 `.sjtl` 檔頭。`TinyLm::rerank_colloquial` 取前 8 名、同樣的 `ll_many`，之後 `ll_eff_i = ll_i + g_i·(μ/α)·(col_i − col_0)`、`pick` 不動；引擎、`shanjie-eval --colloquial-core`、`shanjie-replay --colloquial` 都只呼叫這一個函式。
+  - 引擎在每次建工作時決定（`refresh_lm`，結果記在 `RerankJob`）：口語表已載入、聊天、標準強度、載入的 `.sjtl` 的 SHA-256（`load_paired` 讀檔時記下）等於 `PAIRED_TINYLM_SHA256`，四個都成立才用 `rerank_colloquial`，否則照原本的 `rerank`。k 的疊加層詞集合是 `overlay-add.tsv` 加引擎建立時讀的 `pack_text`（沒有詞包建的引擎就沒有詞包的列）。`shanjie_engine_load_colloquial` 進 `shanjie.h`、`abi_smoke.c`（檢查 961–963）、`s3a.md`。
+  - App：殼在 `load_tinylm` 之後載入 `Resources/colloquial.sjlm`（失敗只記錯誤碼）；`--selftest` 多一步：載入、聊天標準強度、前文 `桌子一直在搖`，dev302 第 202 列的第一次顯示必須是 `桌腳的螺絲鬆掉了`。`build-app.sh`、`check-app.sh`、三個 CI job 與 `release.yml` 都核對 `colloquial.sjlm` 與 `colloquial-attribution.tsv` 的雜湊。
+  - 署名：`tools/build_attribution.py` 從口語池產生 `colloquial-attribution.tsv`（37,269 列：YODAS 1,138 支影片、Tatoeba 36,129 個句子 id（208 位作者）、WildChat 與 MASSIVE 各一列；句數加總 3,491／90,080／36,839／13,485，等於上面「Phase 2 公開句子池」記的數字；缺單位 id、YODAS 缺網址、Tatoeba 缺作者就以 1 結束）。池的 unit id 是 `<id>[:段[:塊]]`，單位取第一個冒號前面（YODAS 的影片 id、Tatoeba 的句子 id；後面的冒號只編號同一句被切成的塊）。授權：App 的署名檔加 `colloquial.sjlm` 一段、`LICENSES/data.md`、資料 Release 的說明與 NOTICE（`docs/releases/sj-cl-1-68k.md`、`sj-cl-1-68k.NOTICE.txt`）。
+- 第 202 列的量測（CLI，`--context --packs acg --tinylm`，一列的列檔）：出貨設定選 `桌腳的羅斯松掉了`（`c` 0），新路徑選 `桌腳的螺絲鬆掉了`（`c` 4，候選第 5 名），和 P4d 離線重算一致；兩次的 `ll` 是同一組數字。
+- §3.2（Mac，公開三集，`--profile chat --context --packs acg --tinylm`；`p4d.py --cell 0.5,0.5,1.0 --out-picks` 對 CLI `--colloquial-core`）：dev302、typing76、user-reported 的 `c` 欄對 `p4d.py` 的選字 0 列不同、rowstats 逐位元組相同；對出貨設定：dev302 改對 9／改壞 2（top1 262 → 269）、typing76 0／0、錯字回報 17／4（42 → 55）；`shanjie-replay --colloquial` 的 `top1_sha256` 三集都等於 CLI 新路徑的。
+- §3.3（三集的 `top1_sha256`）：書面、聊天保守、聊天積極、沒有 `--tinylm`、換一份別的 `.sjtl`（原檔最後一個位元翻過）各設定下，有表與沒表逐集相同；新 CLI 與 main（`4a9e85c8` 的 CLI，另建）不帶表的輸出相同，重播（`--learn off --rerank each`）也相同。
+- 突變（從乾淨的樹，各一個）：口語項不減錨點、閘門改看 `ll_i`、α 不換成 0.5、拿掉配對檢查，各讓 `cargo test -p core` 的對應測試失敗（`rc` 101，失敗的是斷言、不是編譯錯誤）。多做的：拿掉聊天條件、拿掉強度條件各讓 `engine_colloquial` 失敗；CLI 的配對、聊天、強度條件各讓 `cli/tests/colloquial.rs` 失敗。第一版 CLI 測試的「其他地方不變」只跑 dev302 前 40 列，那裡口語項不改任何列，所以拿掉 CLI 的配對檢查存活；改用前 60 列加第 196–230 列（含第 202、218、223 列）後會失敗。
+- 已知差異：引擎的一段（兩個固定詞或標點之間）當一句算 lc；CLI 與 `p4d.py` 一列就是一段，所以相同；多段組字時引擎與離線的 lc 切法不同（驗收的公開集都是一段）。
+- 還沒做（交給 main）：雲端的 cvtune-clean、chatclause、discordtune（CLI 對出貨的改對／改壞應是 113／37、74／43）、§3.5 的速度與記憶體、資料 Release `sj-cl-1-68k` 的建立、CI、維護者的實機一次。
