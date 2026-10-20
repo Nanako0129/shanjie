@@ -68,7 +68,7 @@ pub fn move_cost(from: usize, to: usize, n: usize) -> usize {
 
 /// The engine as `Shell.build()` makes it (acg pack, bigram, small model, demotion on, rerank on at the standard level, profile),
 /// except the two recorded deviations: prediction row off and English mixing off (the word list is never loaded). `tinylm` None is
-/// `--no-tinylm`. `learn` turns learning on once, in memory only (no learning file is opened).
+/// `--no-tinylm`. `learn` turns learning on once, in memory only (no learning file is opened here; the bin's `--learn-file` opens a copy).
 pub fn build_engine(root: &Path, lm: &Path, tinylm: Option<&Path>, profile: Profile, learn: bool) -> Result<Engine, String> {
     fn fail<T>(what: &'static str) -> impl Fn(T) -> String {
         move |_| format!("{what} failed")
