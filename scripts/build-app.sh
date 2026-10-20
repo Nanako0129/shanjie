@@ -68,6 +68,14 @@ shasum -a 256 -c data/tinylm.sjtl.sha256 >/dev/null \
   gh release download sj-cx-1-7.7m -R Nanako0129/shanjie -p trigram.sjt3 -D data/lm"
 shasum -a 256 -c data/trigram.sjt3.sha256 >/dev/null \
   || fail "data/lm/trigram.sjt3 does not match data/trigram.sjt3.sha256; download sj-cx-1-7.7m again"
+# The colloquial table of the chat rerank (docs/contracts/colloquial-term.md section 2.3) and the list that attributes the public sentences
+# its counts come from (section 2.1): both are assets of the data release sj-cl-1-68k, and both must match the hashes recorded in git.
+[ -f data/lm/colloquial.sjlm ] || fail "data/lm/colloquial.sjlm is missing (the colloquial table, 常談). Download the sj-cl-1-68k release assets:
+  gh release download sj-cl-1-68k -R Nanako0129/shanjie -p colloquial.sjlm -p colloquial-attribution.tsv -D data/lm"
+[ -s data/lm/colloquial-attribution.tsv ] || fail "data/lm/colloquial-attribution.tsv is missing or empty (the attribution list of the colloquial table). Download the sj-cl-1-68k release assets:
+  gh release download sj-cl-1-68k -R Nanako0129/shanjie -p colloquial.sjlm -p colloquial-attribution.tsv -D data/lm"
+shasum -a 256 -c data/colloquial.sjlm.sha256 data/colloquial-attribution.tsv.sha256 >/dev/null \
+  || fail "data/lm/colloquial.sjlm or colloquial-attribution.tsv does not match its data/*.sha256; download sj-cl-1-68k again"
 for f in data/lexicon/mcbpmf-data.txt data/lexicon/overlay-add.tsv data/lexicon/sandhi-add.tsv data/lexicon/names-add.tsv data/lexicon/demote.tsv data/lexicon/digits.tsv data/packs/acg-add.tsv data/packs/acg-sources.tsv data/packs/acg.json LICENSE LICENSES/McBopomofo-MIT.txt LICENSES/data.md LICENSES/SCOWL.txt LICENSES/SymSpell-MIT.txt LICENSES/name-suggestion-index-BSD-3-Clause.txt LICENSES/Sparkle-MIT.txt; do
   [ -f "$f" ] || fail "$f is missing"
 done
@@ -197,14 +205,6 @@ ditto "$BIN_DIR/Sparkle.framework" "$HELPER/Contents/Frameworks/Sparkle.framewor
 HSPARKLE="$HELPER/Contents/Frameworks/Sparkle.framework"
 strip_xpc "$HSPARKLE"
 
-# The colloquial table of the chat rerank (docs/contracts/colloquial-term.md section 2.3) and the list that attributes the public sentences
-# its counts come from (section 2.1): both are assets of the data release sj-cl-1-68k, and both must match the hashes recorded in git.
-[ -f data/lm/colloquial.sjlm ] || fail "data/lm/colloquial.sjlm is missing (the colloquial table, 常談). Download the sj-cl-1-68k release assets:
-  gh release download sj-cl-1-68k -R Nanako0129/shanjie -p colloquial.sjlm -p colloquial-attribution.tsv -D data/lm"
-[ -s data/lm/colloquial-attribution.tsv ] || fail "data/lm/colloquial-attribution.tsv is missing or empty (the attribution list of the colloquial table). Download the sj-cl-1-68k release assets:
-  gh release download sj-cl-1-68k -R Nanako0129/shanjie -p colloquial.sjlm -p colloquial-attribution.tsv -D data/lm"
-shasum -a 256 -c data/colloquial.sjlm.sha256 data/colloquial-attribution.tsv.sha256 >/dev/null \
-  || fail "data/lm/colloquial.sjlm or colloquial-attribution.tsv does not match its data/*.sha256; download sj-cl-1-68k again"
 RES="$APP/Contents/Resources"
 # names-add.tsv: the always-on common proper nouns (model-v6 section 2.5); the core fails to start without it.
 cp data/lexicon/mcbpmf-data.txt data/lexicon/overlay-add.tsv data/lexicon/sandhi-add.tsv data/lexicon/names-add.tsv data/lexicon/demote.tsv "$RES/"

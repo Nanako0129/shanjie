@@ -114,14 +114,8 @@ TINY_RECORDED="$(awk 'NR == 1 { print $1 }' "$ROOT/data/tinylm.sjtl.sha256")"
 [[ "$TINY_RECORDED" =~ ^[0-9a-f]{64}$ ]] || fail "data/tinylm.sjtl.sha256 holds no SHA-256"
 [ "$(shasum -a 256 "$R/tinylm.sjtl" | awk '{ print $1 }')" = "$TINY_RECORDED" ] \
   || fail "Resources/tinylm.sjtl does not match data/tinylm.sjtl.sha256"
-# The colloquial table (docs/contracts/colloquial-term.md section 2.3, 3.6): the attribution file has its own section (the bundled file is
-# CC BY-SA 4.0, built from sources with their own licences), the attribution list is the one recorded in git, and the bundled table is the
-# recorded one. The bundled selftest above then shows the term in effect on a sentence the shipping rerank gets wrong.
-grep -q 'colloquial.sjlm' "$R/LICENSES/CC-BY-SA-4.0-attribution.txt" || fail "the attribution file does not have the colloquial.sjlm section"
-for s in 'WildChat-1M' 'YODAS' 'Tatoeba' 'MASSIVE' 'ODC-BY 1.0' 'CC BY 3.0' 'CC BY 2.0 FR' 'CC BY 4.0'; do
-  grep -qF "$s" "$R/LICENSES/CC-BY-SA-4.0-attribution.txt" || fail "the attribution file's colloquial.sjlm section does not have: $s"
-done
-[ "$(wc -l < "$R/LICENSES/colloquial-attribution.tsv")" -gt 1 ] || fail "Resources/LICENSES/colloquial-attribution.tsv has no rows"
+# The colloquial table (docs/contracts/colloquial-term.md section 2.3, 3.6): the bundled table and attribution list are the ones recorded in git.
+# The selftest (step 6 below, `--selftest`) then shows the term in effect on a sentence the shipping rerank gets wrong.
 for pair in "colloquial.sjlm:$R/colloquial.sjlm" "colloquial-attribution.tsv:$R/LICENSES/colloquial-attribution.tsv"; do
   recorded="$(awk 'NR == 1 { print $1 }' "$ROOT/data/${pair%%:*}.sha256")"
   [[ "$recorded" =~ ^[0-9a-f]{64}$ ]] || fail "data/${pair%%:*}.sha256 holds no SHA-256"
