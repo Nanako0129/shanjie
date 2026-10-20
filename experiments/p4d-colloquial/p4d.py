@@ -19,7 +19,7 @@ Controls (not selectable): mu 0 at alpha 0.3 must equal the shipping rowstats ro
 smaller mu, gate inf then 1.0 then 0.5, alpha 0.3 first.
 Exit codes: 0 ok, 1 STOP, 3 NO CELL QUALIFIES.
 """
-import argparse, json, math, os, sys
+import argparse, hashlib, json, math, os, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
@@ -37,7 +37,24 @@ GRID = [(mu, a, t) for mu in MUS for a in ALPHAS for t in GATES]          # 24 c
 CONTROLS = [(0.0, 0.3, INF), (0.0, 0.5, INF)]                              # shipping anchor, fusion-only arm
 SHIP = (0.0, 0.3, INF)
 N_SELECT, N_DISCORD = p4c.N_SELECT, p4c.N_DISCORD
+T2_SHA256 = "2984eeb525a06b12c244b3c04b84641c9a67492486132ebf404198372b684c33"   # README: P4's T2 table
+# P4's setting anchor (D1's recomputation): the shipping final against the n-gram first. A mismatch means the run was not the
+# shipping setting (e.g. no --context or --packs acg), which the self-consistency anchor cannot see.
+SETTING_ANCHORS = {"discordtune": (107, 26), "chatclause": (111, 26)}
 NAMES = ("chatclause", "discordtune", "cvtune-clean", "typing76", "user-reported", "dev302")
+
+
+def sigmoid(x):
+    """1 / (1 + e^-x) without overflow for large |x|."""
+    if x >= 0:
+        return 1.0 / (1.0 + math.exp(-x))
+    e = math.exp(x)
+    return e / (1.0 + e)
+
+
+def cols_from(pre):
+    """col_i = lc_i - 0.5 k_i (gamma = mu / 2) for the first 8 candidates of each row, from p4.precompute's output."""
+    return [[lc - GAMMA_PER_MU * k for lc, k in zip(p["lc"]["T2"][:8], p["k"][:8])] for p in pre]
 
 
 def final_index(sc, col, mu, alpha, gate):
@@ -48,7 +65,7 @@ def final_index(sc, col, mu, alpha, gate):
     n = min(len(ng), len(ll))
     eff = []
     for i in range(n):
-        g = 1.0 if gate == INF else 1.0 / (1.0 + math.exp(-(ll[i] - ll[0]) / gate))
+        g = 1.0 if gate == INF else sigmoid((ll[i] - ll[0]) / gate)
         eff.append(ll[i] + (g * (mu / alpha) * (col[i] - col[0]) if mu else 0.0))
     return triage.pick(ng[:n], eff, alpha, TAU, DELTA)
 
@@ -99,13 +116,18 @@ def reach(scores, cols, base_ok, mu):
         if ok or n < 2:
             continue
         top = max(range(n), key=lambda j: (ng[j] + mu * col[j], -j))
-        if sc["ok"][top]:
+        if top != 0 and sc["ok"][top]:   # a swap: the n-gram first itself is not P4's doing
             fixes += 1
             beyond_tau += ng[0] - ng[1] >= TAU
     return {"swap_fixes": fixes, "swap_fixes_gap_ge_tau": beyond_tau}
 
 
-def check_anchor(scores, cols, base_ok):
+def check_anchor(scores, cols, base_ok, name=None):
+    if name in SETTING_ANCHORS:
+        s = p4c.stats([bool(sc["ok"][0]) for sc in scores], base_ok)
+        if (s["fixes"], s["breaks"]) != SETTING_ANCHORS[name]:
+            print(f"STOP: setting anchor {name}: shipping vs n-gram first {s['fixes']}/{s['breaks']}, expected {SETTING_ANCHORS[name]}")
+            raise SystemExit(1)
     _, picks = evaluate(scores, cols, base_ok, SHIP)
     bad_c = [i for i, (sc, j) in enumerate(zip(scores, picks), 1) if "ll" in sc and sc["c"] != j]
     bad_ok = [i for i, (sc, j, o) in enumerate(zip(scores, picks, base_ok), 1) if bool(sc["ok"][j]) != o]
@@ -118,17 +140,22 @@ def load(a):
     """The P4 loader (d23 consistency checks), the T2 lc and the overlay/pack k for the first 8 candidates."""
     import d23 as D
     import p4
+    with open(a.t2, "rb") as f:
+        if hashlib.sha256(f.read()).hexdigest() != T2_SHA256:
+            print("STOP: --t2 is not P4's T2 table (sha256)")
+            raise SystemExit(1)
     lenient = D.T.load_lenient()
     try:
         rows, ok = D.build_rows(a.rows, a.dump, a.dump_words, a.rowstats, a.tinylm_scores, lenient)
         _, ovl = D.load_lex_scores()
         lex = D.T.Lex.load()
-        pre = p4.precompute(rows, {"T2": p4.Table(a.t2)}, ovl, lex.base)
+        # only the first 8 candidates carry ll, so only they need lc and k
+        pre = p4.precompute([{**r, "cands": r["cands"][:8]} for r in rows], {"T2": p4.Table(a.t2)}, ovl, lex.base)
     except (p4.Stop, RuntimeError) as e:
         print(f"STOP: {e}")
         raise SystemExit(1)
     scores = [r["scores"] for r in rows]
-    cols = [[lc - GAMMA_PER_MU * k for lc, k in zip(p["lc"]["T2"][:8], p["k"][:8])] for p in pre]
+    cols = cols_from(pre)
     base = evalstats.read_rowstats(a.rowstats)
     return scores, cols, [bool(o) for o in ok], base
 
@@ -149,10 +176,11 @@ def main(argv=None):
         raise SystemExit("--select is the chatclause step")
     if a.clause == "1" and a.name != "discordtune":
         raise SystemExit("--clause 1 is the discordtune clause")
+    outf = open(a.out, "w", encoding="utf-8")   # fail now, not after the load
     scores, cols, base_ok, base = load(a)
     if a.select and len(base) != N_SELECT or a.clause == "1" and len(base) != N_DISCORD:
         raise SystemExit(f"{a.name}: unexpected row count {len(base)}")
-    check_anchor(scores, cols, base_ok)
+    check_anchor(scores, cols, base_ok, a.name)
     res = {"name": a.name, "n": len(base)}
     ctrl = {label(c): p4c.jsonable(evaluate(scores, cols, base_ok, c)[0]) for c in CONTROLS}
     for k, s in ctrl.items():
@@ -169,8 +197,8 @@ def main(argv=None):
         print(label(best[:3]) if best else "NO CELL QUALIFIES")
         res["cells"] = {label(c[:3]): p4c.jsonable(c[3]) for c in cells}
         res["chosen"] = label(best[:3]) if best else None
-        with open(a.out, "w", encoding="utf-8") as f:
-            json.dump(res, f, indent=1)
+        with outf:
+            json.dump(res, outf, indent=1)
         return 0 if best else 3
     if a.cell_from:
         with open(a.cell_from, encoding="utf-8") as f:
@@ -194,12 +222,14 @@ def main(argv=None):
     elif a.clause != "report":
         res["verdict"] = p4c.clause_verdict(a.clause, s)
         print(f"clause {a.clause} {'PASS' if res['verdict'] else 'FAIL'}")
+    res["old_rule"] = p4c.old_rules(s)
+    print("old_rule " + " ".join(f"{k} {int(v)}" for k, v in res["old_rule"].items()))
     if a.out_rowstats:
         with open(a.out_rowstats, "w", encoding="utf-8") as f:
             for i, (sc, j) in enumerate(zip(scores, picks), 1):
                 f.write(f"{i}\t{int(bool(sc['ok'][j]))}\t{sc['ed'][j]}\t{sc['glen']}\n")
-    with open(a.out, "w", encoding="utf-8") as f:
-        json.dump(res, f, indent=1)
+    with outf:
+        json.dump(res, outf, indent=1)
     return 0
 
 
