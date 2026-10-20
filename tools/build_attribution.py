@@ -11,7 +11,7 @@ goes into the output, only unit ids, names or URLs and sentence counts.
 dataset supplies it (dataset name, licence, video id, URL; the channel is not in the dataset); Tatoeba per sentence id with its author;
 WildChat and MASSIVE are one dataset-level row each. The per-source sums must equal EXPECTED (the counts of the research log's
 "Phase 2 public sentence pool" entry, which live in the repository, not computed here); a pool row without a unit id, a YODAS unit without
-a URL or a Tatoeba unit without an author is an error. Exit codes: 0 ok, 1 an input is incomplete or the sums differ, 2 bad usage.
+a URL or a Tatoeba unit without an author, or the same (source, unit id) twice in --attribution, is an error; lines end in LF or CRLF. Exit codes: 0 ok, 1 an input is incomplete or the sums differ, 2 bad usage.
 
 A unit is the id before the first colon of the pool's unit id: the YODAS video id, the Tatoeba sentence id (the colon parts number the pieces
 one sentence was cut into). Output columns: source, unit_id, author, url, licence, sentences ("-" where the source supplies nothing). Rows:
@@ -22,6 +22,7 @@ import hashlib
 import os
 import sys
 
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 EXPECTED = {"wildchat": 3491, "yodas": 90080, "tatoeba": 36839, "massive": 13485}
 # Dataset-level rows: (unit_id = the dataset's name, url, licence). WildChat and MASSIVE carry no per-unit author in the pool.
 DATASETS = {
@@ -38,10 +39,10 @@ class Incomplete(Exception):
 
 
 def read_tsv(path, what, fields):
-    """Rows of `path` split on tabs, each with exactly `fields` fields; the message names the line, never its text."""
-    with open(path, encoding="utf-8") as f:
+    """Rows of `path` split on tabs, each with exactly `fields` fields; the message names the line, never its text. A line ends in LF or CRLF."""
+    with open(path, encoding="utf-8", newline="") as f:
         for n, line in enumerate(f, 1):
-            row = line.rstrip("\n").split("\t")
+            row = line.rstrip("\r\n").split("\t")
             if len(row) != fields:
                 raise Incomplete(f"{what} line {n}: {len(row)} fields, expected {fields}")
             yield n, row
@@ -59,6 +60,8 @@ def build(pool_path, attribution_path):
     for n, (src, unit, ref) in read_tsv(attribution_path, "attribution", 3):
         if not source_id(unit):
             raise Incomplete(f"attribution line {n}: no unit id")
+        if (src, unit) in refs:
+            raise Incomplete(f"attribution line {n}: the same source and unit id as an earlier line")
         refs[(src, unit)] = ref
     counts = {s: {} for s in ORDER}
     for n, row in read_tsv(pool_path, "pool", 3):
@@ -99,7 +102,8 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     for k in ("pool", "attribution", "out"):
         ap.add_argument("--" + k, required=True)
-    ap.add_argument("--sha-out", help="also write the `<sha256>  <path of --out>` line (data/*.sha256 format)")
+    ap.add_argument("--sha-out", help="also write the `<sha256>  <path of --out>` line (data/*.sha256 format; the path relative to the repository root, "
+                    "so `shasum -a 256 -c` works from there; --out as given when it is outside the repository)")
     a = ap.parse_args(argv)
     try:
         rows = build(a.pool, a.attribution)
@@ -114,7 +118,8 @@ def main(argv=None):
         f.write(text)
     if a.sha_out:
         with open(a.sha_out, "w", encoding="utf-8") as f:
-            f.write(f"{hashlib.sha256(text.encode('utf-8')).hexdigest()}  {os.path.relpath(a.out) if not os.path.isabs(a.out) else a.out}\n")
+            rel = os.path.relpath(os.path.abspath(a.out), ROOT)
+            f.write(f"{hashlib.sha256(text.encode('utf-8')).hexdigest()}  {a.out if rel.startswith(os.pardir) else rel}\n")
     sums = {s: sum(int(r[5]) for r in rows if r[0] == s) for s in ORDER}
     print(f"{len(rows)} rows; sentences " + " ".join(f"{s} {sums[s]}" for s in ORDER))
     return 0

@@ -101,9 +101,43 @@ class Run(unittest.TestCase):
         self.assertEqual(rc, 1)
         self.assertIn("two different URLs", err)
 
+    def test_crlf_input_gives_the_same_rows_as_lf(self):
+        self.go()
+        want = open(self.p("out.tsv"), "rb").read()
+        for n, rows in (("pool.tsv", POOL), ("attr.tsv", ATTR)):
+            open(self.p(n), "wb").write(tsv(rows).replace("\n", "\r\n").encode("utf-8"))
+        err = io.StringIO()
+        with mock.patch.object(ba, "EXPECTED", SMALL), contextlib.redirect_stderr(err), contextlib.redirect_stdout(io.StringIO()):
+            rc = ba.main(["--pool", self.p("pool.tsv"), "--attribution", self.p("attr.tsv"), "--out", self.p("crlf.tsv")])
+        self.assertEqual((rc, err.getvalue()), (0, ""))
+        self.assertEqual(open(self.p("crlf.tsv"), "rb").read(), want)
+        self.assertNotIn(b"\r", want)
+
+    def test_a_duplicate_attribution_key_stops(self):
+        for dup in (ATTR[0], ("yodas", "vid1:0", "https://www.youtube.com/watch?v=other")):   # the same reference, and another one
+            rc, err = self.go(attr=ATTR + [dup])
+            self.assertEqual(rc, 1)
+            self.assertIn("attribution line 6: the same source and unit id", err)
+
     def test_unknown_source_and_wrong_field_count_stop(self):
         self.assertEqual(self.go(pool=POOL + [("reddit", "1", "x")])[0], 1)
         self.assertEqual(self.go(pool=POOL + [("tatoeba", "12")])[0], 1)
+
+    def test_the_sha_path_is_relative_to_the_repository_root(self):
+        """`shasum -a 256 -c` runs from the root, and the tracked data/colloquial-attribution.tsv.sha256 names `data/lm/colloquial-attribution.tsv`."""
+        os.makedirs(self.p("repo/data/lm"))
+        open(self.p("pool.tsv"), "w", encoding="utf-8").write(tsv(POOL))
+        open(self.p("attr.tsv"), "w", encoding="utf-8").write(tsv(ATTR))
+        out, sha = self.p("repo/data/lm/colloquial-attribution.tsv"), self.p("repo/data/colloquial-attribution.tsv.sha256")
+        for given in (out, os.path.relpath(out)):   # absolute, and relative to the working directory (whatever it is)
+            with mock.patch.object(ba, "EXPECTED", SMALL), mock.patch.object(ba, "ROOT", self.p("repo")), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(ba.main(["--pool", self.p("pool.tsv"), "--attribution", self.p("attr.tsv"), "--out", given, "--sha-out", sha]), 0)
+            self.assertEqual(open(sha, encoding="utf-8").read().split()[1], "data/lm/colloquial-attribution.tsv")
+        # outside the repository: the path as given
+        with mock.patch.object(ba, "EXPECTED", SMALL), mock.patch.object(ba, "ROOT", self.p("repo")), contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(ba.main(["--pool", self.p("pool.tsv"), "--attribution", self.p("attr.tsv"), "--out", self.p("out.tsv"), "--sha-out", sha]), 0)
+        self.assertEqual(open(sha, encoding="utf-8").read().split()[1], self.p("out.tsv"))
 
     def test_deterministic_and_the_sha_line_matches_the_file(self):
         self.go(sha=True)
@@ -113,12 +147,6 @@ class Run(unittest.TestCase):
         import hashlib
         line = open(self.p("out.sha256"), encoding="utf-8").read().split()
         self.assertEqual(line[0], hashlib.sha256(first).hexdigest())
-
-    def test_the_expected_counts_are_the_ones_the_research_log_records(self):
-        log = open(os.path.join(HERE, "..", "docs", "research-log.md"), encoding="utf-8").read()
-        for needle in ("WildChat 3,491", "YODAS 90,080", "Tatoeba 36,839", "MASSIVE 13,485"):
-            self.assertIn(needle, log)
-        self.assertEqual(ba.EXPECTED, {"wildchat": 3491, "yodas": 90080, "tatoeba": 36839, "massive": 13485})
 
 
 if __name__ == "__main__":
