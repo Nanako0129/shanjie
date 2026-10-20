@@ -297,6 +297,19 @@ impl Lexicon {
         Some((self.key_of(r).iter().map(|&i| self.syl_names[i as usize].clone()).collect(), self.ents[p].score))
     }
 
+    /// Score of the row (`syl`, `word`) of the one-syllable reading `syl`: the largest over duplicate rows (a reading's entries are sorted
+    /// best first), before any demotion or learning; `None` when the lexicon has no such row. The reading-channel term's s(r, w).
+    pub fn syllable_score(&self, syl: &str, word: &str) -> Option<f64> {
+        let r = self.find(&[*self.syl_ids.get(syl)?])?;
+        self.reading_entries(r).find(|&(w, _)| w == word).map(|(_, s)| s)
+    }
+
+    /// The highest score of `word` under any of its readings (the by_word winner's), `None` for a word the lexicon lacks. The reading-channel
+    /// term's max over r' of s(r', w).
+    pub fn best_word_score(&self, word: &str) -> Option<f64> {
+        self.winner(word).map(|p| self.ents[p].score)
+    }
+
     /// Best word segmentation as (start, end) char spans; strict `>` keeps the first best.
     fn segment_spans(&self, chars: &[char]) -> Option<Vec<(usize, usize)>> {
         let n = chars.len();

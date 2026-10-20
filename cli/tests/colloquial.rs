@@ -199,3 +199,39 @@ fn options_are_checked() {
     // no small model, or formal: accepted, the term simply does not apply
     assert!(run(&args(&["--colloquial-core", TABLE])).status.success());
 }
+
+/// Rows 10, 81 and 102 of eval/dev/user-reported.txt (public): written to a rows file.
+fn channel_rows(dir: &Path) -> String {
+    let all = std::fs::read_to_string(root().join("eval/dev/user-reported.txt")).unwrap();
+    let lines: Vec<&str> = all.lines().collect();
+    assert!(lines[9].starts_with("|你有東西要先進版控嗎|") && lines[80].starts_with("|長歪了|") && lines[101].starts_with("幹opencc|是不是很雷啊|"));
+    let p = dir.join("channel-rows.txt");
+    std::fs::write(&p, [lines[9], lines[80], lines[101]].join("\n") + "\n").unwrap();
+    p.to_string_lossy().into_owned()
+}
+
+/// The chosen index (`c`) of each row of a `--tinylm-scores` file.
+fn chosen(sc: &str) -> Vec<usize> {
+    sc.lines().map(|l| l.split("\"c\": ").nth(1).unwrap().split(',').next().unwrap().parse().unwrap()).collect()
+}
+
+/// docs/contracts/reading-channel.md section 2.2: with `--colloquial-core` the reading-channel term goes with the colloquial term (the three rows
+/// of the set where it matters move to the picks `p5.py --cell lex,1.0,4` gives, [2, 0, 0]); `--no-reading-channel` is the colloquial term alone
+/// (the P4d picks, [0, 1, 1]) and its summary tag ends `+norc`; without `--colloquial-core` the option changes nothing at all.
+#[test]
+fn the_reading_channel_is_on_by_default_and_the_flag_leaves_the_colloquial_term_alone() {
+    let d = tmp("rc");
+    let rows = channel_rows(&d);
+    let set = ["--rows", rows.as_str()];
+    let (a, b, c, e) = (tmp("rc-a"), tmp("rc-b"), tmp("rc-c"), tmp("rc-d"));
+    let with = full_run(&a, &BASE[..9], &set, &["--colloquial-core", TABLE]);
+    let alone = full_run(&b, &BASE[..9], &set, &["--colloquial-core", TABLE, "--no-reading-channel"]);
+    assert_eq!(chosen(&with.sc), vec![2, 0, 0], "the channel's picks");
+    assert_eq!(chosen(&alone.sc), vec![0, 1, 1], "the colloquial term alone");
+    assert!(with.stdout.contains("+colloq:2984eeb5  {") && alone.stdout.contains("+colloq:2984eeb5+norc  {"), "{}{}", with.stdout, alone.stdout);
+    assert_eq!((&with.dump, &with.words), (&alone.dump, &alone.words), "the decoder's order is the same");
+    // without the table the option has nothing to switch: every output, the summary line included, is the plain run's
+    let plain = full_run(&c, &BASE[..9], &set, &[]);
+    let flag_only = full_run(&e, &BASE[..9], &set, &["--no-reading-channel"]);
+    assert_eq!((&flag_only.stdout, &flag_only.dump, &flag_only.words, &flag_only.rs, &flag_only.sc), (&plain.stdout, &plain.dump, &plain.words, &plain.rs, &plain.sc));
+}

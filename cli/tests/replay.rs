@@ -328,6 +328,38 @@ fn colloquial_replay_agrees_with_the_cli() {
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
+/// docs/contracts/reading-channel.md section 2.2 and item 4: the replay's engine adds the reading-channel term to the colloquial term by default,
+/// so its choices are the CLI's `--colloquial-core` choices (equal `top1_sha256`) on rows 10, 81 and 102 of the set, where the term moves the
+/// pick; `--no-reading-channel` is the colloquial term alone, the CLI's `--no-reading-channel` (and ends the tag `+norc`).
+#[test]
+fn reading_channel_replay_agrees_with_the_cli() {
+    let dir = std::env::temp_dir().join(format!("shanjie-replay-rc-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let rows = dir.join("rows.txt");
+    let all = std::fs::read_to_string(root().join("eval/dev/user-reported.txt")).unwrap();
+    let lines: Vec<&str> = all.lines().collect();
+    assert!(lines[9].starts_with("|你有東西要先進版控嗎|") && lines[80].starts_with("|長歪了|") && lines[101].starts_with("幹opencc|是不是很雷啊|"));
+    std::fs::write(&rows, [lines[9], lines[80], lines[101]].join("\n") + "\n").unwrap();
+    let rows = rows.to_str().unwrap();
+    let _g = ONE_ENGINE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let (replay, eval, r) = (env!("CARGO_BIN_EXE_shanjie-replay"), env!("CARGO_BIN_EXE_shanjie-eval"), root());
+    let (lm, tl, co) = (r.join("data/lm/bigram.sjlm"), r.join("data/lm/tinylm.sjtl"), r.join("data/lm/colloquial.sjlm"));
+    let cli = |extra: &[&str]| {
+        let mut a = vec!["--lm", lm.to_str().unwrap(), "--profile", "chat", "--context", "--packs", "acg", "--tinylm", tl.to_str().unwrap(), "--colloquial-core", co.to_str().unwrap(), "--rows", rows];
+        a.extend_from_slice(extra);
+        run(eval, &a)
+    };
+    let (with, alone) = (cli(&[]), cli(&["--no-reading-channel"]));
+    let (rep_with, rep_alone) = (run(replay, &["--rows", rows]), run(replay, &["--rows", rows, "--no-reading-channel"]));
+    assert_ne!(sha_of(&with), sha_of(&alone), "premise: the channel moves a choice among these rows");
+    assert_eq!(sha_of(&with), sha_of(&rep_with));
+    assert_eq!(sha_of(&alone), sha_of(&rep_alone));
+    assert!(rep_alone.contains("+colloq:2984eeb5+norc") && !rep_with.contains("+norc"), "{rep_with}{rep_alone}");
+    // no table loaded: nothing to switch off, the summary is the one without the option
+    assert_eq!(run(replay, &["--rows", rows, "--no-colloquial"]), run(replay, &["--rows", rows, "--no-colloquial", "--no-reading-channel"]));
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
 /// `--learn-file` tests: a scratch dir per test, and TMPDIR pointed into it so the tool's temporary directory is countable.
 fn scratch(name: &str) -> std::path::PathBuf {
     let dir = std::env::temp_dir().join(format!("shanjie-replay-{name}-{}", std::process::id()));
