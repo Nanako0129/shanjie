@@ -1,9 +1,10 @@
 #!/bin/bash
 # Build the input method bundle (docs/contracts/s3b.md sections 2 and 13, app-sandbox.md sections 2.1-2.3 and 2.8): the Rust
-# core, the Swift shell, the bundle with its data, model and licenses and Sparkle.framework, then an ad-hoc signature (without
-# the hardened runtime, see the signing step) with the four App Sandbox entitlements on the app only. Used locally and in CI;
+# core, the Swift shell, the bundle with its data, model and licenses, Sparkle.framework (no XPC services) and the standalone
+# updater 善解更新.app in Contents/Helpers (docs/contracts/standalone-updater.md), then an ad-hoc signature (without the
+# hardened runtime, see the signing step) with the three App Sandbox entitlements on the input method only. Used locally and in CI;
 # it never touches a keychain, installs or launches the app. Developer ID signing happens only in
-# .github/workflows/release.yml, which signs the app with its own literal copy of the same four entitlements.
+# .github/workflows/release.yml, which signs the app with its own literal copy of the same entitlements.
 #
 #   scripts/build-app.sh
 #
@@ -14,8 +15,8 @@
 #                    `make bundle BUNDLE_ID=com.nyanako.inputmethod.shanjie`). The ID alone decides:
 #                      shipping ID  善解輸入法.app, 善解輸入法 / Shanjie, with container-migration.plist
 #                      any other    善解（開發版）.app, 善解（開發版） / Shanjie (Dev), no migration list
-#                    The input mode ID, the connection name, Sparkle's two mach names, the preferences domain and the
-#                    sandbox container all follow the ID.
+#                    The input mode ID, the connection name, the helper's bundle ID (<ID>.updater), the preferences domain and
+#                    the sandbox container all follow the ID.
 #   OUT_DIR          default build, relative to the repository; the app is $OUT_DIR/<folder above>
 #   SHANJIE_UPDATE_TEST_FEED, SHANJIE_UPDATE_TEST_KEY
 #                    both or neither: a local test build for the update device check (docs/contracts/about-update.md
@@ -164,23 +165,37 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources/zh-Hant.lproj" "$APP/Con
 cp "$BIN" "$APP/Contents/MacOS/shanjie"
 
 # Sparkle.framework in Contents/Frameworks/Updater (the executable's rpath besides SwiftPM's @loader_path,
-# macos/Package.swift). Not Contents/Frameworks: in a macOS 26.6.2 VM, a build with Installer.xpc at a framework path where
-# a Sparkle without XPC services had run since boot (v0.4.7's layout) did not get the service registered until a reboot,
-# so the first sandboxed update failed; the same build with the framework in a new folder did (app-sandbox.md sections 1
-# and 2.8, 2026-10-19; black-box measurements, the per-path cache is an inference). So the XPC services under Updater must
-# stay exactly Installer.xpc: a release that changes them (Downloader.xpc back, a Sparkle that renames a service) moves
-# the framework to a new folder name instead.
-# app-sandbox.md section 2.8: the sandboxed app reaches the network itself (com.apple.security.network.client), so only
-# Installer.xpc is kept (SUEnableInstallerLauncherService); Downloader.xpc is removed and SUEnableDownloaderService is not
-# set. XPCServices must hold exactly Installer.xpc (check-app.sh and release.yml assert it and the location too).
+# macos/Package.swift), with no XPC services, no Autoupdate and no Updater.app: the input method only probes the feed
+# (SUEnableInstallerLauncherService false), and the install runs in 善解更新.app, outside the sandbox, with its own copy of the
+# framework, which keeps Autoupdate and Updater.app (standalone-updater.md sections 2.2 and 2.4). With no XPC service in the
+# bundle, the system has nothing to remember by path (the folder name Updater is history from app-sandbox.md section 2.8's
+# revision three, where Installer.xpc was kept and the framework's folder had to change whenever the services did).
+strip_xpc() {  # strip_xpc <Sparkle.framework>: Versions/B/XPCServices and the top-level symlink to it
+  rm -rf "$1/Versions/B/XPCServices" "$1/XPCServices"
+  [ -z "$(find "$1" -name '*.xpc')" ] || fail "an .xpc is left in $1"
+  for code in "$1/Versions/B/Autoupdate" "$1/Versions/B/Updater.app"; do
+    [ -e "$code" ] || fail "$code is missing; Sparkle's layout changed"
+  done
+}
 mkdir -p "$APP/Contents/Frameworks/Updater"
 ditto "$BIN_DIR/Sparkle.framework" "$APP/Contents/Frameworks/Updater/Sparkle.framework"
 SPARKLE="$APP/Contents/Frameworks/Updater/Sparkle.framework"
-rm -rf "$SPARKLE/Versions/B/XPCServices/Downloader.xpc"
-for code in "$SPARKLE/Versions/B/XPCServices/Installer.xpc" "$SPARKLE/Versions/B/Autoupdate" "$SPARKLE/Versions/B/Updater.app"; do
-  [ -e "$code" ] || fail "$code is missing; Sparkle's layout changed"
-done
-[ "$(ls -A "$SPARKLE/Versions/B/XPCServices")" = Installer.xpc ] || fail "Sparkle's XPCServices is not exactly Installer.xpc"
+strip_xpc "$SPARKLE"
+# Only the probe runs here: two programs fewer that could be submitted outside the sandbox (S6). Not a mitigation against
+# code already running in the process (section 3), only less to ship.
+# The top-level symlinks to them go too, or they would dangle.
+rm -rf "$SPARKLE/Versions/B/Autoupdate" "$SPARKLE/Versions/B/Updater.app" "$SPARKLE/Autoupdate" "$SPARKLE/Updater.app"
+
+# 善解更新.app (standalone-updater.md sections 2.1 and 2.4): not sandboxed, not LSUIElement, and no SUFeedURL, SUPublicEDKey or
+# SUEnable* key: Sparkle reads those from the host, the input method that contains it. Its own Sparkle.framework has no XPC
+# services either.
+HELPER="$APP/Contents/Helpers/善解更新.app"
+[ -x "$BIN_DIR/ShanjieUpdater" ] || fail "the Swift build produced no ShanjieUpdater executable"
+mkdir -p "$HELPER/Contents/MacOS" "$HELPER/Contents/Resources" "$HELPER/Contents/Frameworks"
+cp "$BIN_DIR/ShanjieUpdater" "$HELPER/Contents/MacOS/shanjie-updater"
+ditto "$BIN_DIR/Sparkle.framework" "$HELPER/Contents/Frameworks/Sparkle.framework"
+HSPARKLE="$HELPER/Contents/Frameworks/Sparkle.framework"
+strip_xpc "$HSPARKLE"
 
 RES="$APP/Contents/Resources"
 # names-add.tsv: the always-on common proper nouns (model-v6 section 2.5); the core fails to start without it.
@@ -196,6 +211,32 @@ cp -L data/lm/bigram.sjlm data/lm/classes.sjc data/lm/kn.sjkn data/lm/tinylm.sjt
 cp "$EN_TMP/english-words.txt" "$RES/"   # generated above (docs/contracts/zhen-mixed.md section 3.4)
 swift scripts/make-icon.swift "$RES/shanjie.tiff"
 scripts/compile-app-icon.sh "$RES"   # the app icon (docs/contracts/app-icon.md): Assets.car and AppIcon.icns
+cp "$RES/AppIcon.icns" "$HELPER/Contents/Resources/"   # the helper's Dock icon while it runs
+cat > "$HELPER/Contents/Info.plist" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleDevelopmentRegion</key><string>en</string>
+  <!-- The helper has no .lproj of its own; without these, Sparkle's dialogs follow the development region (English).
+       With them the framework picks its own zh_TW strings for a zh-Hant system (code review 2026-10-20; checked in a VM). -->
+  <key>CFBundleLocalizations</key><array><string>zh-Hant</string><string>en</string></array>
+  <key>CFBundleAllowMixedLocalizations</key><true/>
+  <key>CFBundleExecutable</key><string>shanjie-updater</string>
+  <key>CFBundleIdentifier</key><string>$BUNDLE_ID.updater</string>
+  <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
+  <key>CFBundleName</key><string>善解更新</string>
+  <key>CFBundleDisplayName</key><string>善解更新</string>
+  <key>CFBundleIconFile</key><string>AppIcon</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleShortVersionString</key><string>$VERSION</string>
+  <key>CFBundleVersion</key><string>$VERSION</string>
+  <key>LSMinimumSystemVersion</key><string>26.0</string>
+  <key>NSPrincipalClass</key><string>NSApplication</string>
+</dict>
+</plist>
+EOF
+plutil -lint "$HELPER/Contents/Info.plist" >/dev/null
 
 cp LICENSE "$RES/LICENSES/LICENSE"
 cp LICENSES/McBopomofo-MIT.txt LICENSES/data.md LICENSES/SCOWL.txt LICENSES/SymSpell-MIT.txt LICENSES/name-suggestion-index-BSD-3-Clause.txt "$RES/LICENSES/"
@@ -326,8 +367,9 @@ cat > "$APP/Contents/Info.plist" <<EOF
   <key>TICapsLockLanguageSwitchCapable</key><true/>
   <key>TISInputSourceID</key><string>$BUNDLE_ID</string>
   <key>TISIntendedLanguage</key><string>zh-Hant</string>
-  <!-- Sparkle (docs/contracts/about-update.md section 2, app-sandbox.md section 2.8). No SUEnableJavaScript and no
-       SUEnableDownloaderService. SUEnableInstallerLauncherService in every build; a local build never starts the updater. -->
+  <!-- Sparkle (docs/contracts/about-update.md section 2, standalone-updater.md section 2.2). No SUEnableJavaScript and no
+       SUEnableDownloaderService; SUEnableInstallerLauncherService false (no XPC services: the install is 善解更新.app's, which
+       reads the feed and the key from here). A local build never starts the updater. -->
   <key>ShanjieUpdateBuild</key><string>$UPDATE_BUILD</string>
   <key>SUFeedURL</key><string>$FEED_URL</string>
   <key>SUPublicEDKey</key><string>$ED_KEY</string>
@@ -335,7 +377,7 @@ cat > "$APP/Contents/Info.plist" <<EOF
   <key>SUVerifyUpdateBeforeExtraction</key><true/>
   <key>SUAllowsAutomaticUpdates</key><false/>
   <key>SUEnableAutomaticChecks</key><false/>
-  <key>SUEnableInstallerLauncherService</key><true/>
+  <key>SUEnableInstallerLauncherService</key><false/>
   <key>SUEnableSystemProfiling</key><false/>
   <key>tsInputMethodCharacterRepertoireKey</key><array><string>Hant</string></array>
   <key>tsInputMethodIconFileKey</key><string>shanjie.tiff</string>
@@ -375,9 +417,9 @@ PLIST
   plutil -lint "$RES/container-migration.plist" >/dev/null
 fi
 
-# app-sandbox.md section 2.1: exactly four entitlements, all derived from BUNDLE_ID: the sandbox, the network (Sparkle only),
-# the IMK connection name (must equal InputMethodConnectionName above) and Sparkle's two installer mach names. Checked by
-# scripts/check-entitlements.sh; release.yml signs with the same four from its own literals. The file stays next to the app
+# app-sandbox.md section 2.1 and standalone-updater.md section 2.2: exactly three entitlements, derived from BUNDLE_ID: the
+# sandbox, the network (the feed probe) and the IMK connection name (must equal InputMethodConnectionName above). Checked by
+# scripts/check-entitlements.sh; release.yml signs with its own literals. The file stays next to the app
 # in $OUT_DIR (ignored by git).
 ENTITLEMENTS="$ROOT/$OUT_DIR/.entitlements-$BUNDLE_ID.plist"
 cat > "$ENTITLEMENTS" <<PLIST
@@ -391,23 +433,23 @@ cat > "$ENTITLEMENTS" <<PLIST
   <array>
     <string>${BUNDLE_ID}_Connection</string>
   </array>
-  <key>com.apple.security.temporary-exception.mach-lookup.global-name</key>
-  <array>
-    <string>${BUNDLE_ID}-spks</string>
-    <string>${BUNDLE_ID}-spki</string>
-  </array>
 </dict>
 </plist>
 PLIST
 plutil -lint "$ENTITLEMENTS" >/dev/null
 
-# Ad-hoc, inside out in Sparkle's documented order (app-sandbox.md section 2.8), never --deep: Installer.xpc, Autoupdate,
-# Updater.app and the framework with no entitlements, then the app, the only one with --entitlements. Removing Downloader.xpc
-# broke the framework's own seal, hence the re-sign. No hardened runtime here: with it, library validation refuses the
-# ad-hoc Sparkle.framework (dyld: "mapping process and mapped file (non-platform) have different Team IDs", measured
-# 2026-10-16 with --selftest), since ad-hoc code has no Team ID to match; the sandbox does not need it. The shipped app gets
-# the runtime from release.yml's Developer ID signature, and its verify() requires the flag on all five code locations.
-for code in "$SPARKLE/Versions/B/XPCServices/Installer.xpc" "$SPARKLE/Versions/B/Autoupdate" "$SPARKLE/Versions/B/Updater.app" "$SPARKLE"; do
+# Every file readable by others and none writable by group or others (cp keeps a source file's 0600 and a umask may leave
+# group write; a root-owned bundle in /Library must load for the user and must not be changeable by anyone else,
+# standalone-updater.md section 2.4); check-app.sh asserts both.
+chmod -R a+rX,go-w "$APP"
+
+# Ad-hoc, inside out, never --deep (standalone-updater.md section 2.4): the helper's Autoupdate, Updater.app and framework, the
+# helper app (no entitlements), then the input method's framework (no Autoupdate or Updater.app left in it), then the input
+# method, the only one with --entitlements. Removing parts broke each framework's own seal, hence signing them here. No
+# hardened runtime: with it, library validation refuses the ad-hoc Sparkle.framework (dyld: "mapping process and mapped file
+# (non-platform) have different Team IDs", measured 2026-10-16 with --selftest), since ad-hoc code has no Team ID to match; the
+# sandbox does not need it. The shipped app gets the runtime from release.yml's Developer ID signature.
+for code in "$HSPARKLE/Versions/B/Autoupdate" "$HSPARKLE/Versions/B/Updater.app" "$HSPARKLE" "$HELPER" "$SPARKLE"; do
   codesign --force --sign - "$code"
 done
 codesign --force --sign - --entitlements "$ENTITLEMENTS" "$APP"

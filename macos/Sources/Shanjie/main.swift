@@ -212,6 +212,7 @@ func runServer() -> Never {
     let updater = Updater(updates: updates)
     let settings = SettingsWindowController(shell: App.shell)
     App.shell?.onOpenSettings = { settings.show() }
+    updates.closeSettings = { settings.close() }
     withExtendedLifetime((server, updater)) { app.run() }
     exit(0)
 }
