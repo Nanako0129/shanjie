@@ -41,10 +41,10 @@ class FinalIndex(unittest.TestCase):
         self.assertEqual(P.final_index(r, [-4.0, 0.0], 0.5, 0.5, 0.5), 0)
 
     def test_the_gate_measures_agreement_against_the_anchor(self):
-        # real ll are far below 0: ll [-20, -21] gives g_1 = sigmoid(-2) = 0.119, ll_eff_1 = -21 + 0.476, fused -10.76 < -10:
-        # no switch. A gate on ll_1 alone (sigmoid(42) = 1) would give -17, fused -9.0 against -10, and switch.
-        r = sc([0.0, -0.5], [-20.0, -21.0], [0, 1])
-        self.assertEqual(P.final_index(r, [0.0, 4.0], 0.5, 0.5, 0.5), 0)
+        # real ll are far below 0: ll [-21, -20] gives g_1 = sigmoid(2) = 0.881, ll_eff_1 = -20 + 3.52, fused -8.74 against
+        # -10.5: switch. A gate on ll_1 alone (sigmoid(-40), about 0) would drop the term: fused -10.5 against -10.5, no switch.
+        r = sc([0.0, -0.5], [-21.0, -20.0], [0, 1])
+        self.assertEqual(P.final_index(r, [0.0, 4.0], 0.5, 0.5, 0.5), 1)
 
     def test_sigmoid_does_not_overflow(self):
         self.assertEqual(P.sigmoid(-1e6), 0.0)
