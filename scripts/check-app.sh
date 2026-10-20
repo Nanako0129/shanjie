@@ -211,7 +211,10 @@ done
 # Permissions (system-install section 1: a zip extracted under umask 077 once gave 0700 bundles): a root-owned copy in
 # /Library must be readable and runnable by every user and changeable by nobody else. Symlinks are left out of the write
 # check: their own mode is not used.
-[ -z "$(find "$APP" ! -perm -o+r)" ] || fail "a file in the bundle lacks o+r"
+# Symbolic links are left out: macOS ignores a link's own mode, and ditto -x creates links with the extracting umask
+# (release.yml extracts under umask 077, so every link in the checked copy is lrwx------; dry run 2026-10-20).
+BAD=$(find "$APP" ! -type l ! -perm -o+r | head -1)
+[ -z "$BAD" ] || fail "a file in the bundle lacks o+r: $BAD"
 [ -z "$(find "$APP" -type d ! -perm -o+x)" ] || fail "a directory in the bundle lacks o+x"
 [ -z "$(find "$APP" -type f -perm -u+x ! -perm -o+x)" ] || fail "an executable in the bundle lacks o+x"
 [ -z "$(find "$APP" ! -type l \( -perm -g+w -o -perm -o+w \))" ] || fail "a file in the bundle is writable by group or others"
