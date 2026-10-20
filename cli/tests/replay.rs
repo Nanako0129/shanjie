@@ -330,7 +330,7 @@ fn colloquial_replay_agrees_with_the_cli() {
 
 /// docs/contracts/reading-channel.md section 2.2 and item 4: the replay's engine adds the reading-channel term to the colloquial term by default,
 /// so its choices are the CLI's `--colloquial-core` choices (equal `top1_sha256`) on rows 10, 81 and 102 of the set, where the term moves the
-/// pick; `--no-reading-channel` is the colloquial term alone, the CLI's `--no-reading-channel` (and ends the tag `+norc`).
+/// pick; `--no-reading-channel` is the colloquial term alone, the CLI's `--no-reading-channel` (and its tag lacks the `+rc` of the default).
 #[test]
 fn reading_channel_replay_agrees_with_the_cli() {
     let dir = std::env::temp_dir().join(format!("shanjie-replay-rc-{}", std::process::id()));
@@ -354,7 +354,7 @@ fn reading_channel_replay_agrees_with_the_cli() {
     assert_ne!(sha_of(&with), sha_of(&alone), "premise: the channel moves a choice among these rows");
     assert_eq!(sha_of(&with), sha_of(&rep_with));
     assert_eq!(sha_of(&alone), sha_of(&rep_alone));
-    assert!(rep_alone.contains("+colloq:2984eeb5+norc") && !rep_with.contains("+norc"), "{rep_with}{rep_alone}");
+    assert!(rep_with.contains("+colloq:2984eeb5+rc") && rep_alone.contains("+colloq:2984eeb5") && !rep_alone.contains("+rc"), "{rep_with}{rep_alone}");
     // no table loaded: nothing to switch off, the summary is the one without the option
     assert_eq!(run(replay, &["--rows", rows, "--no-colloquial"]), run(replay, &["--rows", rows, "--no-colloquial", "--no-reading-channel"]));
     std::fs::remove_dir_all(&dir).unwrap();

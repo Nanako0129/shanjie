@@ -710,7 +710,7 @@ PROFILES2 = ["chat", "formal"]
 # `"formal_tag"` (`{tri8}` = first 8 hex of the table), which spells `+tri:{tri8}` after `+acg` and has no `+kn:`. Without `formal_tag` both profiles share `tag`.
 # A version that ships the colloquial table (colloquial-term.md; hash from data/colloquial.sjlm.sha256) has `"colloquial": True` (the rule tools/kpi.py's
 # check_models uses too: the VERSIONS2 row decides, not whether the sha file exists): its colloquial.sjlm goes into the model folder, the chat cells pass
-# `--colloquial-core` (as the App loads the table after the small model; the term applies in chat only) and their tag gains `+colloq:{co8}` (the first 8 hex
+# `--colloquial-core` (as the App loads the table after the small model; the term applies in chat only) and their tag gains `+colloq:{co8}+rc` (the first 8 hex
 # of the table) at the end. Formal cells and the anchor run are as without it; a version without the key is unchanged.
 # The App also learns locally, re-ranks asynchronously after every key, takes the context from the text field: the CLI does none of that.
 VERSIONS2 = {
@@ -798,8 +798,9 @@ def spec_tag(ver, prof):
 
 
 def colloq_tag(ver, prof):
-    """`+colloq:<sha8>` for the chat cells of a version that ships the colloquial table, else ""."""
-    return f"+colloq:{ver.co8}" if getattr(ver, "co8", "") and prof == "chat" else ""
+    """`+colloq:<sha8>+rc` for the chat cells of a version that ships the colloquial table (the reading-channel term ships with it and is on by
+    default, so the CLI's tag carries `+rc`), else ""."""
+    return f"+colloq:{ver.co8}+rc" if getattr(ver, "co8", "") and prof == "chat" else ""
 
 
 def expected_tag(ver, prof, anchor):

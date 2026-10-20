@@ -560,13 +560,13 @@ class Colloquial(unittest.TestCase):
         self.assertEqual(T.cli_cmd("cli", "lm", "tl", "chat", "r", True, ["--rowstats", "x"], 3, "co.sjlm"),
                          base + ["--colloquial-core", "co.sjlm", "--threads", "3", "--rowstats", "x"])
         self.assertEqual(T.expected_tag("chat", "+ctx", "abcd1234", "", ""), "lm-chat+ctx+tl:abcd1234+acg")
-        self.assertEqual(T.expected_tag("chat", "+ctx", "abcd1234", "", "", "2984eeb5"), "lm-chat+ctx+tl:abcd1234+acg+colloq:2984eeb5")
+        self.assertEqual(T.expected_tag("chat", "+ctx", "abcd1234", "", "", "2984eeb5"), "lm-chat+ctx+tl:abcd1234+acg+colloq:2984eeb5+rc")   # chat: the reading-channel term rides on it
         self.assertEqual(T.expected_tag("formal", "", "abcd1234", "", "+tri:fdd3b05d", "2984eeb5"), "lm-formal+tl:abcd1234+acg+tri:fdd3b05d+colloq:2984eeb5")
 
     def test_run_cell_passes_the_table_and_checks_its_tag(self):
         from unittest import mock
         calls = []
-        line = "## r.txt  lm-chat%s+tl:hhhhhhhh+acg+colloq:hhhhhhhh  {'n': 1, 'top1': 0, 'oracle@64': 0, 'top1_sha256': '" + "0" * 64 + "'}\n"
+        line = "## r.txt  lm-chat%s+tl:hhhhhhhh+acg+colloq:hhhhhhhh+rc  {'n': 1, 'top1': 0, 'oracle@64': 0, 'top1_sha256': '" + "0" * 64 + "'}\n"
 
         def fake_sh(cmd, **kw):
             calls.append(cmd)
@@ -584,6 +584,17 @@ class Colloquial(unittest.TestCase):
             with mock.patch.object(T.bench, "sh", fake_sh), mock.patch.object(T.bench, "sha_file", lambda p: "h" * 64), \
                     self.assertRaisesRegex(RuntimeError, "setting tag"):   # the CLI printed +colloq: but the run has no table: not the shipping setting
                 T.run_cell("cli", "lm", "tl", "chat", rows, None, PAR, LEN, False, td, "", "", 1, "")
+
+    def test_a_run_without_the_reading_channel_is_not_the_shipping_setting(self):
+        from unittest import mock
+        line = "## r.txt  lm-chat%s+tl:hhhhhhhh+acg+colloq:hhhhhhhh  {'n': 1, 'top1': 0, 'oracle@64': 0, 'top1_sha256': '" + "0" * 64 + "'}\n"   # no +rc
+        with tempfile.TemporaryDirectory() as td:
+            rows = os.path.join(td, "r.txt")
+            with open(rows, "w", encoding="utf-8") as f:
+                f.write("|你|ni\n")
+            with mock.patch.object(T.bench, "sh", lambda cmd, **kw: line % ("+ctx" if "--context" in cmd else "")), \
+                    mock.patch.object(T.bench, "sha_file", lambda p: "h" * 64), self.assertRaisesRegex(RuntimeError, "setting tag"):
+                T.run_cell("cli", "lm", "tl", "chat", rows, None, PAR, LEN, False, td, "", "", 1, "co.sjlm")
 
     def test_the_plain_pick_check_is_skipped_only_in_chat_with_the_table(self):
         # code review on the reading-channel slice: with the table the core's chat pick differs from Python's plain pick on purpose

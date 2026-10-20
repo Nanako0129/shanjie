@@ -8,8 +8,9 @@
 //! The engine is the App's: with the small model on, `data/lm/colloquial.sjlm` is loaded when the file exists (`Shell.build()` always loads it
 //! after the small model), `--colloquial FILE` loads that table instead and `--no-colloquial` leaves it out. Loaded, the models line and the
 //! summary tag name it (`colloquial.sjlm:<sha8>`, `+colloq:<sha8>`). Where the colloquial term applies the reading-channel term goes with it, as in the
-//! App (docs/contracts/reading-channel.md); `--no-reading-channel` (research only) leaves the colloquial term alone, the P4d cell, and the tag then
-//! ends `+colloq:<sha8>+norc`. Without a loaded table the option changes nothing.
+//! App (docs/contracts/reading-channel.md); `--no-reading-channel` (research only) leaves the colloquial term alone, the P4d cell. The tag marks
+//! the shipping behavior: with the table loaded in chat and the channel on it ends `+colloq:<sha8>+rc`; with the option (or in formal) just `+colloq:<sha8>`.
+//! Without a loaded table the option changes nothing.
 use cli::common::{dev_rows, format_rowstats, load_lenient, read_rows, root};
 use cli::replay::{build_engine, format_keys, replay_row, summary_line, Cfg, Rerank, RowIn};
 use core::eval::sha256_hex;
@@ -160,7 +161,7 @@ fn run() -> Result<(), String> {
         if cfg.correct { "+correct" } else { "" },
         if learn_file.is_some() { "+learnfile" } else { "" },
         if guard { "" } else { "+noguard" },
-        co8.as_ref().map_or(String::new(), |h| format!("+colloq:{h}{}", if reading_channel { "" } else { "+norc" })),
+        co8.as_ref().map_or(String::new(), |h| format!("+colloq:{h}{}", if reading_channel && profile == Profile::Chat { "+rc" } else { "" })),
     );
     let mut e = build_engine(&root, &lm_path, tl.then_some(tl_path.as_path()), colloquial.as_deref(), profile, learn)?;
     e.set_learn_guard(guard);

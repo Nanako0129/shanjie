@@ -35,7 +35,8 @@ struct Stretch {
     paths: Vec<Vec<(String, f64, f64, usize)>>,
     /// Their n-gram scores.
     ng: Vec<f64>,
-    /// The stretch's syllables, one per character of every path (what the reading-channel term cuts over the paths' words).
+    /// The stretch's syllables, one per character of every path (what the reading-channel term cuts over the paths' words); empty when the job
+    /// does not read the term.
     syls: Vec<String>,
     /// The shown text between the previous stretch of the job (or the composition's start) and this one: fixed words, and the
     /// n-gram text of stretches left out of the job.
@@ -2275,6 +2276,11 @@ impl Engine {
         let (mut out, mut path) = (String::new(), Vec::new());
         // S7c-2a section 2.2: alpha and tau hold only for the scores with the demotion table on.
         let jobs = self.tinylm.is_some() && self.rerank_on && self.demote;
+        // Whether the job will read the reading-channel term (the same decision as `colloquial` and `channel_lex` at the end of this function): only
+        // then do the stretches keep their syllables, so formal, the other strengths, no table and the channel off allocate nothing for it.
+        let channel = self.reading_channel
+            && self.colloquial.is_some()
+            && self.tinylm.as_deref().is_some_and(|m| colloquial::applies(self.profile, self.rerank_level, m));
         let mut stretches = Vec::new();
         // Byte offset in `out` after the last stretch put into the job: the text from there on is the next stretch's `gap`.
         let mut job_end = 0;
@@ -2331,7 +2337,7 @@ impl Engine {
                         at: path.len(),
                         paths: top.iter().map(|(_, ws)| ws.iter().map(|&(w, lp, delta, l)| (w.to_string(), lp, delta, l)).collect()).collect(),
                         ng: top.iter().map(|(score, _)| *score).collect(),
-                        syls: self.syls[start..stop].to_vec(),
+                        syls: if channel { self.syls[start..stop].to_vec() } else { Vec::new() },
                         gap: gap_text,
                     });
                 }

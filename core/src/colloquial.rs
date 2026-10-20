@@ -175,6 +175,12 @@ pub struct ReadingChannel<'a> {
 /// character; each single-character word w read r adds max(s(r, w) - max_r' s(r', w), -CAP), s being the lexicon's score (largest over
 /// duplicate rows, before demotion and learning). A multi-character word adds 0, a single-character (r, w) the lexicon lacks adds 0, and
 /// words that do not cover the syllables exactly make the whole path 0.
+///
+/// Guarantees that hold by type, so no test can observe them: s is read from the raw `Lexicon` (demotion lives in `CappedLexicon`, a separate
+/// type, and learning never mutates the `Lexicon`), so it is before demotion and learning. The `len(w) == 1` guard states the contract; removing it
+/// is an equivalent mutant (a one-syllable lookup never holds a multi-character word). Cost, measured on the cloud VM at 093fc11c (CLI --threads 1,
+/// dev302 chat, the `tinylm: rerank` line): p95 248.844 ms without the term, 248.740 ms with it; replay dev302 peak RSS 436,144 vs 436,148 KB, so
+/// the lookups are not memoized.
 pub fn channel_of<S: AsRef<str>>(lex: &Lexicon, syls: &[String], words: &[S]) -> f64 {
     let len = |w: &str| w.chars().count();
     if words.iter().map(|w| len(w.as_ref())).sum::<usize>() != syls.len() {

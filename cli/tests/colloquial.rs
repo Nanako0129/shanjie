@@ -75,7 +75,8 @@ fn full_run(dir: &Path, base: &[&str], set: &[&str], extra: &[&str]) -> Out {
 /// The summary line without the tag the option adds.
 fn untagged(out: &str) -> String {
     let i = out.find("+colloq:").expect("the tag");
-    format!("{}{}", &out[..i], &out[i + "+colloq:".len() + 8..])
+    let rest = &out[i + "+colloq:".len() + 8..];
+    format!("{}{}", &out[..i], rest.strip_prefix("+rc").unwrap_or(rest))
 }
 
 /// The files and the summary line are equal, the summary tag aside (stderr holds timings).
@@ -217,7 +218,7 @@ fn chosen(sc: &str) -> Vec<usize> {
 
 /// docs/contracts/reading-channel.md section 2.2: with `--colloquial-core` the reading-channel term goes with the colloquial term (the three rows
 /// of the set where it matters move to the picks `p5.py --cell lex,1.0,4` gives, [2, 0, 0]); `--no-reading-channel` is the colloquial term alone
-/// (the P4d picks, [0, 1, 1]) and its summary tag ends `+norc`; without `--colloquial-core` the option changes nothing at all.
+/// (the P4d picks, [0, 1, 1]) and its summary tag lacks the `+rc` of the default run; without `--colloquial-core` the option changes nothing at all.
 #[test]
 fn the_reading_channel_is_on_by_default_and_the_flag_leaves_the_colloquial_term_alone() {
     let d = tmp("rc");
@@ -228,7 +229,7 @@ fn the_reading_channel_is_on_by_default_and_the_flag_leaves_the_colloquial_term_
     let alone = full_run(&b, &BASE[..9], &set, &["--colloquial-core", TABLE, "--no-reading-channel"]);
     assert_eq!(chosen(&with.sc), vec![2, 0, 0], "the channel's picks");
     assert_eq!(chosen(&alone.sc), vec![0, 1, 1], "the colloquial term alone");
-    assert!(with.stdout.contains("+colloq:2984eeb5  {") && alone.stdout.contains("+colloq:2984eeb5+norc  {"), "{}{}", with.stdout, alone.stdout);
+    assert!(with.stdout.contains("+colloq:2984eeb5+rc  {") && alone.stdout.contains("+colloq:2984eeb5  {"), "{}{}", with.stdout, alone.stdout);
     assert_eq!((&with.dump, &with.words), (&alone.dump, &alone.words), "the decoder's order is the same");
     // without the table the option has nothing to switch: every output, the summary line included, is the plain run's
     let plain = full_run(&c, &BASE[..9], &set, &[]);

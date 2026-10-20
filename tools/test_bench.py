@@ -466,7 +466,7 @@ class SuiteV2(Tmp):
 
     def test_colloquial_version_gets_the_table_the_flag_and_the_chat_tag(self):
         """A version with `"colloquial": True` (the rule kpi.py uses too): its table goes into the model folder, only the chat cells pass
-        --colloquial-core and their tag ends in +colloq:<sha8>; formal cells and the anchor run are as without it."""
+        --colloquial-core and their tag ends in +colloq:<sha8>+rc (the reading-channel term rides on the table); formal cells and the anchor run are as without it."""
         spec = {"release": "vC", "flags": ["--context", "--packs", "acg"], "tinylm": True, "colloquial": True, "tag": "+ctx+tl:{tl8}+acg"}
         HEX["colloquial.sjlm"] = "2984eeb5" + "d" * 56
         self.addCleanup(HEX.pop, "colloquial.sjlm")
@@ -483,16 +483,18 @@ class SuiteV2(Tmp):
             self.assertEqual(chat[chat.index("--colloquial-core") + 1], v.co)
             self.assertNotIn("--colloquial-core", formal)
             self.assertNotIn("--colloquial-core", anchor)
-            self.assertEqual(bench.expected_tag(v, "chat", False), "lm-chat+ctx+tl:7e73ef67+acg+colloq:2984eeb5")
+            self.assertEqual(bench.expected_tag(v, "chat", False), "lm-chat+ctx+tl:7e73ef67+acg+colloq:2984eeb5+rc")
             self.assertEqual(bench.expected_tag(v, "formal", False), "lm-formal+ctx+tl:7e73ef67+acg")
             self.assertEqual(bench.expected_tag(v, "chat", True), "lm-chat+ctx+tl:7e73ef67")
             self.assertEqual(bench.replay_tag(v, "chat"), "lm-chat")  # the replay-setting cell is the bare model
             # a cell is scored against that tag: the CLI that printed no +colloq: (flag dropped) is not the shipping setting
             self.fake_cli(bench.expected_tag(v, "chat", False), [True, True], ("你好", "世界"))
-            self.assertEqual(bench.run_cell2(self.ctx, v, "pub", "chat", False)[0]["tag"], "lm-chat+ctx+tl:7e73ef67+acg+colloq:2984eeb5")
-            self.fake_cli("lm-chat+ctx+tl:7e73ef67+acg", [True, True], ("你好", "世界"))
-            with self.assertRaises(RuntimeError):
-                bench.run_cell2(self.ctx, v, "pub", "chat", False)
+            self.assertEqual(bench.run_cell2(self.ctx, v, "pub", "chat", False)[0]["tag"], "lm-chat+ctx+tl:7e73ef67+acg+colloq:2984eeb5+rc")
+            # the table without the reading-channel term (--no-reading-channel, or a CLI that has none) is not the shipping setting either
+            for tag in ("lm-chat+ctx+tl:7e73ef67+acg", "lm-chat+ctx+tl:7e73ef67+acg+colloq:2984eeb5"):
+                self.fake_cli(tag, [True, True], ("你好", "世界"))
+                with self.assertRaises(RuntimeError):
+                    bench.run_cell2(self.ctx, v, "pub", "chat", False)
             os.remove(os.path.join(v.dir, "data", "colloquial.sjlm.sha256"))
             with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
                 bench.setup_models(v, spec, os.path.join(self.td, "mf2"))  # a colloquial version without data/colloquial.sjlm.sha256 stops

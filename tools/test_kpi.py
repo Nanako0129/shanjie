@@ -319,7 +319,7 @@ open(opt("--rowstats"), "w").write("".join(f"{{i}}\\t{{int(i > bad)}}\\t0\\t3\\n
 sys.stderr.write(os.environ.get("FAKE_MODELS", {models!r}) + "\\n")
 if ("--no-colloquial" in a) != (not {co8!r}):  # the replay is told to leave the table out exactly when the version does not ship it
     sys.exit(3)
-tag = "replay-chat+ctx+acg+nopred+noen+lm:" + {lm8!r} + "+tl:" + {tl8!r} + ("+learn" if learn else "") + "+correct" + ("+colloq:" + {co8!r} if {co8!r} else "")
+tag = "replay-chat+ctx+acg+nopred+noen+lm:" + {lm8!r} + "+tl:" + {tl8!r} + ("+learn" if learn else "") + "+correct" + ("+colloq:" + {co8!r} + "+rc" if {co8!r} else "")
 if os.environ.get("FAKE_TAG"): tag = os.environ["FAKE_TAG"]
 print("## " + os.path.basename(opt("--rows")) + "  " + tag + "  {{'n': %d, 'top1': %d, 'final_ok': %d, 'unfixable': 0, 'autocommits': 0, 'kyss': 0.9123, 'picks_per100': 1.5, 'rewrites': 3, 'top1_sha256': 'aa'}}" % (n, n - bad, n - bad))
 """
@@ -388,6 +388,11 @@ class ReplayRunWithTheColloquialTable(ReplayRun):
         lm8, tl8 = self.models["bigram.sjlm"][:8], self.models["tinylm.sjtl"][:8]
         with self.assertRaises(SystemExit):
             self.replay(FAKE_TAG=f"replay-chat+ctx+acg+nopred+noen+lm:{lm8}+tl:{tl8}+correct")
+
+    def test_the_tag_without_the_reading_channel_is_refused(self):
+        lm8, tl8, co8 = self.models["bigram.sjlm"][:8], self.models["tinylm.sjtl"][:8], self.models["colloquial.sjlm"][:8]
+        with self.assertRaises(SystemExit):
+            self.replay(FAKE_TAG=f"replay-chat+ctx+acg+nopred+noen+lm:{lm8}+tl:{tl8}+correct+colloq:{co8}")
 
 
 # ---------- run ----------

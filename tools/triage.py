@@ -10,9 +10,9 @@ without --context for the E flags), puts every wrong row (rowstats ok=0) into on
 main bucket (section 3: A1, B1, B2, D1, C; F is the user-reported rows that are right offline) and writes
 eval/bench/triage/<label>.json (counts only). Public sets also get a per-row numbers file under --rows-out (default
 ~/.cache/shanjie/triage), outside the repo; private sets only ever get counts. `table` renders docs/triage.md from the JSON files.
-The picks, the rowstats and the buckets (D1, the E flags) follow the CLI, so they include the colloquial term. The D2b / D2c sub-diagnosis does
-not: it re-picks in Python with `pick` and delta 0 on the file's alpha and tau, the plain small-model rule, so in a run with the table a row
-whose pick the term changed can be labelled by the plain rule. The holdout is never a set here. Standard library only, except that `tinylm_params` needs numpy (export_sjtl.py's reader), plus tools/bench.py's set table, reference/proto/eval.py's `lenient` and reference/proto/lm_eval.py's `kn_tag`).
+The picks, the rowstats and the buckets (D1, the E flags) follow the CLI, so they include the colloquial term and the reading-channel term that
+rides on it. The D2b / D2c sub-diagnosis does not: it re-picks in Python with `pick` and delta 0 on the file's alpha and tau, the plain small-model
+rule, so in a run with the table a row whose pick either term changed can be labelled by the plain rule. The holdout is never a set here. Standard library only, except that `tinylm_params` needs numpy (export_sjtl.py's reader), plus tools/bench.py's set table, reference/proto/eval.py's `lenient` and reference/proto/lm_eval.py's `kn_tag`).
 """
 import argparse, collections, concurrent.futures, importlib.util, json, os, struct, subprocess, sys, tempfile, threading
 
@@ -158,8 +158,9 @@ def tri_tag(path):
 def expected_tag(prof, ctx_tag, tl8, kn, tri, colloq8=""):
     """The setting tag the CLI prints in the shipping setting (--packs acg --tinylm). With a trigram table the formal profile reads it,
     scores without Kneser-Ney (no `+kn:`) and ends the tag with `+tri:`; chat ignores the table and keeps `+kn:`. With `--colloquial-core`
-    the tag ends in `+colloq:<sha8 of the table>` in both profiles."""
-    colloq = f"+colloq:{colloq8}" if colloq8 else ""
+    the tag ends in `+colloq:<sha8 of the table>` in both profiles, and in chat (where the term applies, with the reading-channel term on by default)
+    `+rc` after it: the CLI marks the shipping behavior, so a `--no-reading-channel` run is refused."""
+    colloq = f"+colloq:{colloq8}" + ("+rc" if prof == "chat" else "") if colloq8 else ""
     if prof == "formal" and tri:
         return f"lm-{prof}{ctx_tag}+tl:{tl8}+acg{tri}{colloq}"
     return f"lm-{prof}{ctx_tag}{kn}+tl:{tl8}+acg{colloq}"
@@ -536,7 +537,7 @@ def render(doc):
     out.append("模型：" + "、".join(f"{n} `{h[:8]}`" for n, h in doc["models"].items()) + ("、CLI `" + doc["cli_sha256"][:8] + "`" if "cli_sha256" in doc else "") +
                "。α、τ、δ（依設定）：" + "、".join(f"{p} {tuple(v)}" for p, v in doc["alpha_tau_delta"].items()) + "。", )
     if "colloquial.sjlm" in doc["models"]:
-        out += ["", "口語項：選字與各桶（D1、E）照 CLI，含口語項；D2b／D2c 的細分用 Python 的 `pick`（δ＝0、檔頭的 α、τ），不含口語項，口語項改過選字的列可能被它歸錯。"]
+        out += ["", "口語項：選字與各桶（D1、E）照 CLI，含口語項與跟在它後面的讀音通道項；D2b／D2c 的細分用 Python 的 `pick`（δ＝0、檔頭的 α、τ），不含這兩項，它們改過選字的列可能被它歸錯。"]
     out.append("")
     for prof in PROFILES:
         sets = {n: s["profiles"][prof] for n, s in doc["sets"].items() if prof in s["profiles"]}
