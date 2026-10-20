@@ -27,7 +27,7 @@ final class UpdatesTests: XCTestCase {
     }
 
     /// The 關於 page's note follows the folder the bundle sits in: the system's one names the password prompt, any other says no
-    /// password, and (U1) never points to the installer's 「這台 Mac」.
+    /// password, and (with U2) points to the installer's 「這台 Mac」.
     func testLocationNote() {
         XCTAssertEqual(UpdateText.location(bundleURL: URL(fileURLWithPath: "/Library/Input Methods/善解輸入法.app")), UpdateText.locationSystem)
         XCTAssertTrue(UpdateText.locationSystem.contains("善解更新 wants permission to update 善解輸入法."))
@@ -35,8 +35,8 @@ final class UpdatesTests: XCTestCase {
                      "/Library/Input Methods/sub/善解輸入法.app"] {
             XCTAssertEqual(UpdateText.location(bundleURL: URL(fileURLWithPath: path)), UpdateText.locationUser, path)
         }
-        XCTAssertTrue(UpdateText.locationUser.hasSuffix("系統會暫時停用善解。"))
-        XCTAssertFalse(UpdateText.locationUser.contains("這台 Mac"), "U1 has no 這台 Mac to choose")
+        XCTAssertTrue(UpdateText.locationUser.contains("系統會暫時停用善解"))
+        XCTAssertTrue(UpdateText.locationUser.hasSuffix("請重新下載安裝程式並選「這台 Mac」。"), "U2 ships the installer's 這台 Mac")
     }
 
     func testVersionText() {
