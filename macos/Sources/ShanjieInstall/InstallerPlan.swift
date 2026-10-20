@@ -61,13 +61,18 @@ public struct InstallDecision: Equatable, Sendable {
     /// the installer says so while it runs.
     public var movesAccountCopy: Bool
     /// The location changed: registration is forced (`Registration.decide(moved:)`) and the last
-    /// screen asks for a log out (`InstallerFlow.next(after:moved:)`).
+    /// screen asks for a log out (`InstallerFlow.next(after:moved:firstInstall:)`).
     public var moved: Bool
+    /// A "This Mac" install where the system listed no copy before (no account copy, not listed at the welcome screen): after
+    /// the log out the user still adds it in System Settings (section 2.4, revision of 2026-10-21). A move keeps the
+    /// system's listing, so it only logs out.
+    public var firstInstall: Bool
 
-    public init(action: Action, movesAccountCopy: Bool = false, moved: Bool = false) {
+    public init(action: Action, movesAccountCopy: Bool = false, moved: Bool = false, firstInstall: Bool = false) {
         self.action = action
         self.movesAccountCopy = movesAccountCopy
         self.moved = moved
+        self.firstInstall = firstInstall
     }
 
     /// The secondary action of `enableSystemSame`: the row "older, no account copy".
@@ -93,7 +98,8 @@ public struct InstallDecision: Equatable, Sendable {
             }
             switch systemPlan {
             case .install:
-                return InstallDecision(action: .copyToSystem, movesAccountCopy: accountCopy, moved: true)
+                return InstallDecision(action: .copyToSystem, movesAccountCopy: accountCopy, moved: true,
+                                       firstInstall: !accountCopy && !listedBeforeCopy)
             case .update:
                 return InstallDecision(action: .copyToSystem, movesAccountCopy: accountCopy, moved: accountCopy)
             case .enableSame, .enableNewer:
