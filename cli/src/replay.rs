@@ -40,6 +40,9 @@ pub struct RowOut {
     pub rewrites: usize,
     /// `apply_rerank` calls that returned `Some` after a typing key other than the last one.
     pub typing_applies: usize,
+    /// Stretches the learning guard kept out of the rerank job of the decode after the last reading key, read before any
+    /// `final` apply or re-pick (contract section 5).
+    pub guard_skips: usize,
 }
 
 /// The keys of one syllable: its symbols, then its tone key (Space for the first tone). `None` for a symbol without a key.
@@ -235,6 +238,9 @@ pub fn replay_row(e: &mut Engine, ctx: &str, syls: &[String], gold: &str, len: &
     for (k, key) in typed.into_iter().enumerate() {
         let before = s.committed.len();
         s.press(key, true)?;
+        if k == last {
+            out.guard_skips = s.e.guard_skips();
+        }
         if s.committed.len() > before {
             out.autocommit = true;
             committed_syls = ends.iter().filter(|&&end| end <= k + 1).count();
@@ -285,7 +291,7 @@ pub fn summary_line(name: &str, tag: &str, outs: &[RowOut], gold_chars: usize) -
     let ratio = |a: usize, b: usize, k: f64| if b == 0 { 0.0 } else { a as f64 * k / b as f64 };
     let firsts: Vec<&str> = outs.iter().map(|o| o.first.as_str()).collect();
     format!(
-        "## {name}  {tag}  {{'n': {}, 'top1': {}, 'final_ok': {}, 'unfixable': {}, 'autocommits': {}, 'kyss': {}, 'picks_per100': {}, 'rewrites': {}, 'top1_sha256': '{}'}}",
+        "## {name}  {tag}  {{'n': {}, 'top1': {}, 'final_ok': {}, 'unfixable': {}, 'autocommits': {}, 'kyss': {}, 'picks_per100': {}, 'rewrites': {}, 'guard_skips': {}, 'guard_rows': {}, 'top1_sha256': '{}'}}",
         outs.len(),
         sum(|o| o.first_ok as usize),
         sum(|o| o.final_ok as usize),
@@ -294,6 +300,8 @@ pub fn summary_line(name: &str, tag: &str, outs: &[RowOut], gold_chars: usize) -
         pyround(ratio(ideal, actual, 1.0), 4),
         pyround(ratio(picks, gold_chars, 100.0), 2),
         sum(|o| o.rewrites),
+        sum(|o| o.guard_skips),
+        sum(|o| (o.guard_skips > 0) as usize),
         sha256_hex(firsts.join("\n").as_bytes()),
     )
 }

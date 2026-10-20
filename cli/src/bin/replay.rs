@@ -2,7 +2,7 @@
 //! Research tool, not shipped. Output is numbers only: the summary line on stdout, `--rowstats`, `--keys` and `--firsts` files.
 //!
 //! shanjie-replay (--rows FILE | --dev N) [--profile chat|formal] [--no-tinylm] [--learn off|on] [--rerank each|final]
-//!                [--learn-file FILE] [--correct] [--rowstats FILE] [--keys FILE] [--firsts FILE]
+//!                [--learn-file FILE] [--learn-guard on|off] [--correct] [--rowstats FILE] [--keys FILE] [--firsts FILE]
 use cli::common::{dev_rows, format_rowstats, load_lenient, read_rows, root};
 use cli::replay::{build_engine, format_keys, replay_row, summary_line, Cfg, Rerank, RowIn};
 use core::eval::sha256_hex;
@@ -45,7 +45,7 @@ fn run() -> Result<(), String> {
     let (mut rows_file, mut dev, mut profile_name) = (None::<String>, None::<usize>, "chat".to_string());
     let (mut tl, mut learn, mut cfg) = (true, false, Cfg { correct: false, rerank: Rerank::Each });
     let (mut rowstats, mut keys, mut firsts) = (None::<String>, None::<String>, None::<String>);
-    let mut learn_file = None::<String>;
+    let (mut learn_file, mut guard) = (None::<String>, true);
     let mut it = std::env::args().skip(1);
     while let Some(a) = it.next() {
         let mut val = || it.next().ok_or_else(|| "missing option value".to_string());
@@ -69,6 +69,13 @@ fn run() -> Result<(), String> {
                 }
             }
             "--learn-file" => learn_file = Some(val()?),
+            "--learn-guard" => {
+                guard = match val()?.as_str() {
+                    "on" => true,
+                    "off" => false,
+                    _ => return Err("--learn-guard must be on or off".into()),
+                }
+            }
             "--correct" => cfg.correct = true,
             "--rowstats" => rowstats = Some(val()?),
             "--keys" => keys = Some(val()?),
@@ -122,14 +129,16 @@ fn run() -> Result<(), String> {
         .collect::<Result<_, String>>()?;
     eprintln!("models: bigram.sjlm:{lm8} {} tinylm.sjtl:{}", others.join(" "), tl8.as_deref().unwrap_or("none"));
     let tag = format!(
-        "replay-{profile_name}+ctx+acg+nopred+noen+lm:{lm8}{}{}{}{}{}",
+        "replay-{profile_name}+ctx+acg+nopred+noen+lm:{lm8}{}{}{}{}{}{}",
         tl8.as_ref().map_or("-notinylm".to_string(), |h| format!("+tl:{h}")),
         if learn { "+learn" } else { "" },
         if cfg.rerank == Rerank::Final { "+rerank:final" } else { "" },
         if cfg.correct { "+correct" } else { "" },
         if learn_file.is_some() { "+learnfile" } else { "" },
+        if guard { "" } else { "+noguard" },
     );
     let mut e = build_engine(&root, &lm_path, tl.then_some(tl_path.as_path()), profile, learn)?;
+    e.set_learn_guard(guard);
     // The file is copied (bytes only) into a private temporary directory under the name the store loads; core opens, and with
     // `--learn on` writes, only the copy. Anything but a normal load is an error: a replay without the learnings would mislead.
     if let Some(f) = &learn_file {

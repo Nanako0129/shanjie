@@ -562,9 +562,14 @@ pub struct Engine {
     /// `set_rerank_level`). Kept across `load_tinylm` and `load_lm`, and remembered without a model; a version 1 or 2 file has only
     /// the standard triple, which every level then gets.
     rerank_level: RerankLevel,
+    /// The S7c-2a section 2.2 learning guard (default on, the app's behavior). Off only from `set_learn_guard`, an evaluation
+    /// switch for `shanjie-replay --learn-guard` (engine-replay.md section 2); not in shanjie.h.
+    learn_guard: bool,
+    /// Stretches the guard kept out of the current decode's job (`guard_skips`); reset with the job in `invalidate`.
+    guard_skips: usize,
     /// Section 2.3 (修正一): renewed from `GENERATION` only where decoding changes: every `refresh`, `clear_all`, the model and
     /// decoding settings (`load_lm`, `set_lm`, `load_tinylm`, `set_rerank`, `set_rerank_level`, `set_profile`, `set_demote`,
-    /// learning open/clear).
+    /// learning open/clear, the evaluation-only `set_learn_guard`).
     generation: u64,
     /// The job of the last refresh, until `take_rerank_job` or the next change.
     rerank_job: Option<RerankJob>,
@@ -800,6 +805,8 @@ impl Engine {
             tinylm: None,
             rerank_on: false,
             rerank_level: RerankLevel::Standard,
+            learn_guard: true,
+            guard_skips: 0,
             generation: next_generation(),
             rerank_job: None,
             english: false,
@@ -823,13 +830,15 @@ impl Engine {
     }
 
     /// Section 2.3 (revision 1): called wherever decoding changes (every `refresh`, `clear_all`, a new n-gram or small model,
-    /// the rerank switch, the rerank level, the profile, the demotion table, learning open / clear): a job made before is stale from now on.
+    /// the rerank switch, the rerank level, the profile, the demotion table, learning open / clear, `set_learn_guard`): a job made
+    /// before is stale from now on, and its `guard_skips` count goes with it.
     /// `set_learning` is not among them: the flag only decides whether picks are recorded (`pre`), never how the composition
     /// decodes (decoding reads the learner whenever it is non-empty).
     /// Keys that do not re-decode (cursor moves, unfinished symbols, entering the prediction row, pass-through) keep it.
     fn invalidate(&mut self) {
         self.generation = next_generation();
         self.rerank_job = None;
+        self.guard_skips = 0;
     }
 
     // ---- S7c-2a rerank (docs/contracts/s7c2a-core-rerank.md) ----
@@ -858,6 +867,20 @@ impl Engine {
             return Err(e);
         }
         self.handled()
+    }
+
+    /// Evaluation only (engine-replay.md section 2, `--learn-guard`): turns the learning guard off so stretches with a learned
+    /// boost still go to the small model. The next decode uses it; the pending job is dropped like any decoding change.
+    pub fn set_learn_guard(&mut self, on: bool) {
+        self.invalidate();
+        self.learn_guard = on;
+    }
+
+    /// How many stretches the learning guard kept out of the current job: stretches that would have gone to the small model
+    /// (rerank on, model loaded, demotion table on, two candidates or more). Counted by each decode; 0 after any change that
+    /// drops the job (a commit, Esc, a setting) until the next decode, and 0 with the guard off.
+    pub fn guard_skips(&self) -> usize {
+        self.guard_skips
     }
 
     /// Rerank strength (rerank-strength section 2.2): which of the model's (alpha, tau, delta) the jobs use. Remembered without a
@@ -2245,7 +2268,10 @@ impl Engine {
                 )
                 .map_err(|_| EngineError::Internal)?;
                 let first = &best.first().ok_or(EngineError::Internal)?.1;
-                let in_job = jobs && best.len() >= 2 && !self.boosted(st, start, first);
+                let eligible = jobs && best.len() >= 2;
+                let guarded = eligible && self.learn_guard && self.boosted(st, start, first);
+                self.guard_skips += usize::from(guarded);
+                let in_job = eligible && !guarded;
                 if in_job {
                     let top = &best[..best.len().min(TOPK)];
                     let mut gap_text = out[job_end..].to_string();
