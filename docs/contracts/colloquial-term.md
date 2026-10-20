@@ -45,7 +45,7 @@
 
 ### 2.3 App、CLI、重播
 
-- **App**：殼的 `build()` 在 `load_tinylm` 之後呼叫 `load_colloquial`，檔案是 bundle 的 `Resources/colloquial.sjlm`（和其他模型檔同一層）。失敗只記靜態 log，照沒有口語表的方式重排。沒有新的設定開關（跟著語意校正開關與強度走）。關於頁不加東西（現在沒有模型列表）。
+- **App**：殼的 `build()` 在 `load_tinylm` 之後、而且小模型載入成功時才呼叫 `load_colloquial`，檔案是 bundle 的 `Resources/colloquial.sjlm`（和其他模型檔同一層）。失敗只記靜態 log，照沒有口語表的方式重排。沒有新的設定開關（跟著語意校正開關與強度走）。關於頁不加東西（現在沒有模型列表）。
 - **selftest**：`--selftest` 加一步：`load_colloquial` 回傳 0，而且在聊天、標準強度下先 `set_left_context("桌子一直在搖")`（第 202 列的前文欄），再打第 202 列的讀音，第一次顯示（套用重排之後）是「桌腳的螺絲鬆掉了」。實作時先用 CLI 在同一個條件（`--context`、這一列）量一次：出貨與「只調 α」是「羅斯松」、新路徑是「螺絲鬆」，數字寫進 PR；不成立就停（換句子要回頭問維護者）。bundle 裡沒有 `colloquial.sjlm` 或它沒有作用，selftest 失敗，`check-app.sh`（會執行 selftest）跟著失敗。
 - **打包**：`scripts/build-app.sh` 檢查 `data/lm/colloquial.sjlm` 存在、雜湊和 `data/colloquial.sjlm.sha256` 相同，複製進 `Resources/`；`check-app.sh` 檢查它在 bundle 裡、雜湊相同。
 - **CLI**：新選項 `--colloquial-core FILE`。它讓 CLI 和引擎一樣載入 `Colloquial`，每列照引擎的四個條件決定用 `rerank_colloquial` 或 `rerank`；不拒絕任何設定（書面、別的強度、沒有 `--tinylm` 時就照條件不加口語項），這樣「其他地方不變」才能用同一個選項驗。檔案不存在 → 開始前就報錯。摘要行的設定標記加 `+colloq:<表的 sha256 前 8 碼>`。`--set holdout` 照舊允許（出貨之後保留集要用出貨設定跑，出貨設定會帶這個選項）。

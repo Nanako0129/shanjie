@@ -864,9 +864,12 @@ public final class Shell {
             let tiny = e.loadTinyLM(path: resources.appendingPathComponent(Shell.tinyLMFile).path)
             if tiny != 0 { Log.shell.error("shanjie_engine_load_tinylm failed, code \(tiny); no rerank") }
             rerankAvailable = tiny == 0
-            // colloquial-term.md section 2.3: after load_tinylm. A failure is logged (the code only) and the rerank runs without the term.
-            let colloquial = e.loadColloquial(path: resources.appendingPathComponent(Shell.colloquialFile).path)
-            if colloquial != 0 { Log.shell.error("shanjie_engine_load_colloquial failed, code \(colloquial); rerank without the colloquial term") }
+            // colloquial-term.md section 2.3: after load_tinylm, and only when it loaded (the term applies to the small model's rerank, so there is
+            // nothing to load it for otherwise; "no rerank" is already logged above). A failure is logged (the code only) and the rerank runs without the term.
+            if tiny == 0 {
+                let colloquial = e.loadColloquial(path: resources.appendingPathComponent(Shell.colloquialFile).path)
+                if colloquial != 0 { Log.shell.error("shanjie_engine_load_colloquial failed, code \(colloquial); rerank without the colloquial term") }
+            }
         }
         // zhen-mixed section 3.2: the word list. A failure leaves the engine without it (the switch then has no effect) and greys the
         // item; only the code is logged.
