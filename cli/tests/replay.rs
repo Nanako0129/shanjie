@@ -332,6 +332,25 @@ fn learn_file_changes_the_choice_and_the_source_is_untouched() {
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
+/// engine-replay.md section 2 (`--learn-guard`): the one-record file of the test above (在建 learned for the row's reading, so
+/// the row's stretch has a boosted word): the default counts it in `guard_skips` and `guard_rows`, `--learn-guard off` counts none
+/// and tags `+noguard`, the default prints the same bytes as an explicit `--learn-guard on`, and another value is refused.
+#[test]
+fn learn_guard_counts_and_switches() {
+    let dir = scratch("guard");
+    let src = dir.join("mine.tsv");
+    let today = core::learn::local_day();
+    std::fs::write(&src, format!("#shanjie-learning v1\n^>$\tㄗㄞˋ-ㄐㄧㄢˋ\t在建\t50\t{today}\n")).unwrap();
+    let _g = ONE_ENGINE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let default = text(&replay_with_learn(&dir, &src, &[]));
+    let off = text(&replay_with_learn(&dir, &src, &["--learn-guard", "off"]));
+    assert_eq!(default, text(&replay_with_learn(&dir, &src, &["--learn-guard", "on"])));
+    assert!(default.contains("'guard_skips': 1, 'guard_rows': 1,") && !default.contains("+noguard"), "{default}");
+    assert!(off.contains("'guard_skips': 0, 'guard_rows': 0,") && off.contains("+noguard"), "{off}");
+    assert_eq!(replay_with_learn(&dir, &src, &["--learn-guard", "maybe"]).status.code(), Some(1));
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
 /// Rules: a file that is not a valid learning file (bad header) is an error, not a replay without the learnings; the source stays
 /// as it was (core's quarantine renames the copy only), no temporary directory is left, and an existing output file keeps its
 /// bytes (the learning file is loaded before any output is created). Also an all-skipped file and a missing file are errors.

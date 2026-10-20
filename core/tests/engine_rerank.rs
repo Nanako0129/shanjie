@@ -662,6 +662,28 @@ fn learned_stretch_is_not_reranked() {
     // Control: without the teach the same fix reranks both stretches (fixed_word_between_two_stretches).
 }
 
+/// engine-replay.md section 2 (`--learn-guard`): the same taught row as `learned_stretch_is_not_reranked`, once per guard setting
+/// on a new engine. With the guard on the job holds only the right stretch and `guard_skips` counts the taught one; with
+/// `set_learn_guard(false)` both stretches are in the job and none is counted.
+#[test]
+fn learn_guard_off_reranks_the_learned_stretch() {
+    let syls = row(27);
+    for (guard, stretches, skips) in [(true, 1, 1), (false, 2, 0)] {
+        let mut e = engine();
+        e.set_learn_guard(guard);
+        e.set_learning(true);
+        e.set_left_context("我已經");
+        type_syls(&mut e, &syls[3..5]);
+        choose_at_cursor(&mut e, "回覆");
+        e.key(k(KeyKind::Enter)).unwrap();
+        e.set_left_context("");
+        let o = fix_word(&mut e, &syls, 9, "郵件");
+        assert!(o.preedit.starts_with("我已經回覆你的郵件"), "premise: the learned word is in the first path");
+        assert_eq!(e.guard_skips(), skips, "guard {guard}");
+        assert_eq!(e.take_rerank_job().unwrap().run().picks().len(), stretches, "guard {guard}");
+    }
+}
+
 /// S7c-2c section 2.3 (docs/contracts/s7c2c-delta.md): a new engine with the small model loaded makes no rerank job until
 /// `set_rerank(true)`; the same keys then make one.
 #[test]
