@@ -50,7 +50,10 @@ final class InstallerPlanTests: XCTestCase {
     }
 
     func testThisMacFromTheAccountLayer() {
-        check(decide(.thisMac, system: nil, account: true, listed: true), .copyToSystem, moves: true, password: true, moved: true)
+        // A move whatever the system listed at the welcome screen: never a first install.
+        for listed in [false, true] {
+            check(decide(.thisMac, system: nil, account: true, listed: listed), .copyToSystem, moves: true, password: true, moved: true)
+        }
     }
 
     func testThisMacUpdateInPlace() {
