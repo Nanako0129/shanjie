@@ -206,6 +206,10 @@ struct RowOut {
 /// "everything else is unchanged" can be checked with the same option; a missing file stops the run before anything is read. The summary
 /// line gains `+colloq:<sha8 of the table>`. The files follow the n-gram order as without the option; `--tinylm-scores` `c` is the pick.
 ///
+/// `--tinylm-scores-topk N` (N >= 8, default 8; research, experiments/r1-reading-decode): the `--tinylm-scores` `ll` covers the first N
+/// candidates of the n-gram order instead of 8, the extra ones scored by `TinyLm::ll_many` under the key `rerank` uses. The pick `c`, the
+/// other score fields, the rowstats, the dump and the summary line are those of a run without it. It needs `--tinylm-scores`.
+///
 /// `--no-reading-channel` (research only; docs/contracts/reading-channel.md section 2.2): where the colloquial term applies it is applied alone, the P4d
 /// cell. Without it the reading-channel term goes with it (the cell `lex,1.0,4` of experiments/p5-reading-channel: each single-character word's reading
 /// against that word's most common reading, from the lexicon this run loaded), `TinyLm::rerank_colloquial` being the one function for the CLI and the
@@ -222,6 +226,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     // tools/build_names.py, which passes its own candidate list as --extra-overlay) leaves it out.
     let mut names = true;
     let (mut rowstats, mut tinylm, mut tinylm_scores) = (None::<String>, None::<String>, None::<String>);
+    let mut scores_topk = TOPK;
     let mut level = None::<RerankLevel>;
     // acg-pack contract A.2: `--packs acg` adds data/packs/acg-add.tsv (or `--packs-dir DIR`'s) to the lexicon and the cap; off by default.
     let (mut packs, mut packs_dir) = (0u32, None::<String>);
@@ -253,6 +258,10 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
             "--rowstats" => rowstats = Some(val()?),
             "--tinylm" => tinylm = Some(val()?),
             "--tinylm-scores" => tinylm_scores = Some(val()?),
+            "--tinylm-scores-topk" => match val().ok().and_then(|v| v.parse::<usize>().ok()) {
+                Some(n) if n >= TOPK => scores_topk = n,
+                _ => return Err(format!("--tinylm-scores-topk takes a whole number of at least {TOPK}")),
+            },
             "--rerank-level" => {
                 level = Some(match val()?.as_str() {
                     "conservative" => RerankLevel::Conservative,
@@ -284,6 +293,9 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
         return Err("--rerank-level needs --tinylm".into());
     }
     let level = level.unwrap_or(RerankLevel::Standard);
+    if scores_topk != TOPK && tinylm_scores.is_none() {
+        return Err("--tinylm-scores-topk needs --tinylm-scores".into());
+    }
     if tinylm_scores.is_some() && set.as_deref() == Some("holdout") {
         return Err("--tinylm-scores is not allowed with --set holdout".into());
     }
@@ -418,6 +430,18 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
             };
             if ll.is_some() {
                 out.rerank = Some(t0.elapsed());
+            }
+            // `--tinylm-scores-topk N`: the candidates 9..N get their `ll` from `ll_many` under the same key as `rerank_ll` (SENTINEL = the empty k),
+            // apart from the pick, which stays on the first 8. A candidate too long for the model leaves the row's `ll` at the first 8.
+            let mut ll = ll;
+            if let (true, Some(l)) = (want_scores && scores_topk > TOPK, ll.as_mut()) {
+                let k = if key == SENTINEL { "" } else { key };
+                let items: Vec<(&str, &str)> = surf.iter().skip(TOPK).take(scores_topk - TOPK).map(|c| (k, c.as_str())).collect();
+                match tl.ll_many(&items) {
+                    Ok(more) => l.extend(more),
+                    Err(TinyLmError::TooLong) => {}
+                    Err(e) => return Err(e.to_string()),
+                }
             }
             if want_scores {
                 let oks: Vec<bool> = top.iter().map(|s| len.apply(s) == t).collect();
