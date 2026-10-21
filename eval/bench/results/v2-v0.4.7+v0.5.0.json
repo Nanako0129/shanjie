@@ -1,0 +1,583 @@
+{
+ "label": "v0.4.7+v0.5.0",
+ "suite": "v2",
+ "date": "2026-10-22",
+ "variants_sha256": "50cb44bd0f1fa33c48624bc0185d03d4e87e99107bc15971d638528bcf69cdb3",
+ "sets": {
+  "dev302": {
+   "sha256": "603850e444efee38b8c121e3d666d6c540acd3a27d5a6a5070a78a962dd98456",
+   "private": false
+  },
+  "typing76": {
+   "sha256": "c061f66dfade21996803137320aa986a81a3e72e3e4e1dd559abd5dc04b68d08",
+   "private": false
+  },
+  "probe": {
+   "sha256": "75aac33877ddd7907cdd6789c6da6a0f3b7c775c8c6dfa6c752a5f3e87ab6801",
+   "private": false
+  },
+  "user-reported": {
+   "sha256": "9fd08e50f13eccea94a76faf5260e7edcf49826bd3dcf7ba4e2cf6de17bcce9a",
+   "private": false
+  },
+  "fw": {
+   "sha256": "6b853a329aee569ad51c731d6f188541b9670e9617838725f45a26d57845d18d",
+   "private": false
+  },
+  "cvtune": {
+   "sha256": "31de456d66ece98eb5d00154a31c3f7e9c9b38240690f7f76203485ca82acc51",
+   "private": false
+  },
+  "wikitune": {
+   "sha256": "8dcfe40c74cce73e0a070b49e166636580ef955da8555ea9ffbd65af20c998f2",
+   "private": false
+  },
+  "lytune": {
+   "sha256": "0e0fdbed0728a4c3b359995beb03040c6834eb091e4028c9dc1ec104b6eeca96",
+   "private": false
+  },
+  "wikitypo": {
+   "sha256": "50f4ceb89b6a3d021c0fe273e8512c7b0af7d20f6ffd5c2f145a7c3a251a2d47",
+   "private": false
+  },
+  "discordtune": {
+   "sha256": "77e1c90a507fa7e6085c3fca7d377abfd527a5146f43f8c4388e72342627a775",
+   "private": true
+  }
+ },
+ "versions": [
+  {
+   "ref": "v0.4.7",
+   "version": "v0.4.7",
+   "sha": "207b4b498cf7464b40db8c209eb4bccc400495bb",
+   "lexicon_sha256": "02ba8bcf5d32c4abcc1e4ab3928d9c183d5b8a3126e0fbd57c7db6885bc22254",
+   "models": {
+    "bigram.sjlm": "fc2bddd1f0c2029deb7e7568f64868c11f535b3d5c5c7c97c3d0599c8b2cde42",
+    "classes.sjc": "9e36fa1be4518adb34bcddc2c79761006b0b06c539aa64a4564ba00397cf0262",
+    "kn.sjkn": "cbefbced072f7e9d40dbfc3d2fad27c29f82e44bf801800dfb17b4eec962597e",
+    "trigram.sjt3": "fdd3b05d8c18cf85da434443d4fabbbfebf31e8c97a04e00e4a339bbe19eec84",
+    "tinylm.sjtl": "d07de71dbbe6f45ceab0dd67aa8b607802f40ff5fbfe60a1fa87ed69c379070f"
+   },
+   "flags": [
+    "--context",
+    "--packs",
+    "acg",
+    "--tinylm",
+    "<file>"
+   ],
+   "tag": "+ctx+kn:cbefbced:θ1:β1+tl:d07de71d+acg",
+   "formal_tag": "+ctx+tl:d07de71d+acg+tri:fdd3b05d",
+   "fingerprints": {
+    "dev302": "603850e444efee38b8c121e3d666d6c540acd3a27d5a6a5070a78a962dd98456",
+    "typing76": "c061f66dfade21996803137320aa986a81a3e72e3e4e1dd559abd5dc04b68d08",
+    "probe": "75aac33877ddd7907cdd6789c6da6a0f3b7c775c8c6dfa6c752a5f3e87ab6801",
+    "user-reported": "9fd08e50f13eccea94a76faf5260e7edcf49826bd3dcf7ba4e2cf6de17bcce9a",
+    "fw": "6b853a329aee569ad51c731d6f188541b9670e9617838725f45a26d57845d18d",
+    "cvtune": "31de456d66ece98eb5d00154a31c3f7e9c9b38240690f7f76203485ca82acc51",
+    "wikitune": "8dcfe40c74cce73e0a070b49e166636580ef955da8555ea9ffbd65af20c998f2",
+    "lytune": "0e0fdbed0728a4c3b359995beb03040c6834eb091e4028c9dc1ec104b6eeca96",
+    "wikitypo": "50f4ceb89b6a3d021c0fe273e8512c7b0af7d20f6ffd5c2f145a7c3a251a2d47",
+    "discordtune": "77e1c90a507fa7e6085c3fca7d377abfd527a5146f43f8c4388e72342627a775"
+   },
+   "accuracy": {
+    "dev302/chat": {
+     "n": 302,
+     "top1": 262,
+     "oracle64": 300,
+     "top1_sha256": "7a5949c5ce3248428c60dd0b351de79c8dd91228e9e6a587957f806e66b92736",
+     "tag": "lm-chat+ctx+kn:cbefbced:θ1:β1+tl:d07de71d+acg"
+    },
+    "dev302/formal": {
+     "n": 302,
+     "top1": 257,
+     "oracle64": 300,
+     "top1_sha256": "39b4790beaa2296df46e32483525f6c694d091fa80a3e62a47baf456695a8cd8",
+     "tag": "lm-formal+ctx+tl:d07de71d+acg+tri:fdd3b05d"
+    },
+    "typing76/chat": {
+     "n": 76,
+     "top1": 72,
+     "oracle64": 76,
+     "top1_sha256": "fc046ae3ec70787d02de90c96ffa1e4f276305cfd08e46808fcc46bb1f82ff7a",
+     "tag": "lm-chat+ctx+kn:cbefbced:θ1:β1+tl:d07de71d+acg"
+    },
+    "typing76/formal": {
+     "n": 76,
+     "top1": 69,
+     "oracle64": 76,
+     "top1_sha256": "363b43f171967eb5691eabda70b015d0d7e8c94a5038f502f13b3d58b91d19b0",
+     "tag": "lm-formal+ctx+tl:d07de71d+acg+tri:fdd3b05d"
+    },
+    "probe/chat": {
+     "n": 83,
+     "top1": 69,
+     "oracle64": 82,
+     "top1_sha256": "96af2f75b6027ffa537e9fdc2c17cdba96b76bc9342e3dca5b9868fc22b576cd",
+     "tag": "lm-chat+ctx+kn:cbefbced:θ1:β1+tl:d07de71d+acg"
+    },
+    "probe/formal": {
+     "n": 83,
+     "top1": 68,
+     "oracle64": 82,
+     "top1_sha256": "19433c92f327637d01a3e8f825bdcd57997cac95efcaead68bb2c10abd401de3",
+     "tag": "lm-formal+ctx+tl:d07de71d+acg+tri:fdd3b05d"
+    },
+    "user-reported/chat": {
+     "n": 80,
+     "top1": 28,
+     "oracle64": 78,
+     "top1_sha256": "6b69e03c51afc07181e8a1a7a2f314dc5f4bb9e10fb0cda13a0895bdc3e01ac2",
+     "tag": "lm-chat+ctx+kn:cbefbced:θ1:β1+tl:d07de71d+acg"
+    },
+    "user-reported/formal": {
+     "n": 80,
+     "top1": 24,
+     "oracle64": 78,
+     "top1_sha256": "6ce0aa5656fbaaf0c4eb67776f140d196f769002cd8639cbc9e2c99e2c7605c2",
+     "tag": "lm-formal+ctx+tl:d07de71d+acg+tri:fdd3b05d"
+    },
+    "fw/chat": {
+     "n": 186,
+     "top1": 157,
+     "oracle64": 186,
+     "top1_sha256": "c5269f9f7cc49b4a8b4b9de8dba4c90999ba5702c68b2d30a1f7123664a3bbb5",
+     "tag": "lm-chat+ctx+kn:cbefbced:θ1:β1+tl:d07de71d+acg"
+    },
+    "fw/formal": {
+     "n": 186,
+     "top1": 161,
+     "oracle64": 186,
+     "top1_sha256": "a1433e461e03549ff40e50a53cb95a19be41d83e38f00889108f0889b5b44cdc",
+     "tag": "lm-formal+ctx+tl:d07de71d+acg+tri:fdd3b05d"
+    },
+    "cvtune/chat": {
+     "n": 3791,
+     "top1": 3448,
+     "oracle64": 3773,
+     "top1_sha256": "31686a03d0f30651139e533c33ce8f63bd7cdd86bcad0d922a840a1a41a73338",
+     "tag": "lm-chat+ctx+kn:cbefbced:θ1:β1+tl:d07de71d+acg"
+    },
+    "cvtune/formal": {
+     "n": 3791,
+     "top1": 3440,
+     "oracle64": 3774,
+     "top1_sha256": "139935324450e1e690b36a4ad6825e989081513afeffddadecca5ac5268ae22a",
+     "tag": "lm-formal+ctx+tl:d07de71d+acg+tri:fdd3b05d"
+    },
+    "wikitune/chat": {
+     "n": 2827,
+     "top1": 2193,
+     "oracle64": 2698,
+     "top1_sha256": "0c62e3480784eb75461adfed7ead3ccbbf4e5715c8dc32978e5d6f3aff52a7b6",
+     "tag": "lm-chat+ctx+kn:cbefbced:θ1:β1+tl:d07de71d+acg"
+    },
+    "wikitune/formal": {
+     "n": 2827,
+     "top1": 2232,
+     "oracle64": 2718,
+     "top1_sha256": "e981362b92d012e47e68ea69df7a8decad544c51f67751a039c33ce34b591dd1",
+     "tag": "lm-formal+ctx+tl:d07de71d+acg+tri:fdd3b05d"
+    },
+    "lytune/chat": {
+     "n": 4811,
+     "top1": 4037,
+     "oracle64": 4787,
+     "top1_sha256": "1d903920f17d24eb2ecaa7860e6ab3d11970764b21d5feeb22e077d130eb75a5",
+     "tag": "lm-chat+ctx+kn:cbefbced:θ1:β1+tl:d07de71d+acg"
+    },
+    "lytune/formal": {
+     "n": 4811,
+     "top1": 4080,
+     "oracle64": 4790,
+     "top1_sha256": "bd4b3dece64640a01feac7c617fa7a9b4d724b0f6354c2af3abe6473fe650ca7",
+     "tag": "lm-formal+ctx+tl:d07de71d+acg+tri:fdd3b05d"
+    },
+    "wikitypo/chat": {
+     "n": 155,
+     "top1": 136,
+     "oracle64": 152,
+     "top1_sha256": "1eb02bc84d601131e69976beae74f5e7adf739506120391fa021ef3d089c6f0f",
+     "tag": "lm-chat+ctx+kn:cbefbced:θ1:β1+tl:d07de71d+acg"
+    },
+    "wikitypo/formal": {
+     "n": 155,
+     "top1": 137,
+     "oracle64": 153,
+     "top1_sha256": "73d151549e42f5e5080b7d8933697d62a4de4e434a5a0d59eb25a3af2670567a",
+     "tag": "lm-formal+ctx+tl:d07de71d+acg+tri:fdd3b05d"
+    },
+    "discordtune/chat": {
+     "n": 4958,
+     "top1": 4304,
+     "oracle64": 4935,
+     "top1_sha256": "a4bbd97db0f83635f9569ebe12f24a0c834701f6fb73ab205c963d8fdf980506",
+     "tag": "lm-chat+ctx+kn:cbefbced:θ1:β1+tl:d07de71d+acg"
+    },
+    "discordtune/formal": {
+     "n": 4958,
+     "top1": 4218,
+     "oracle64": 4933,
+     "top1_sha256": "9fb7b13764576cb7c9d9f01e4059de17dd63a260b3323cf61c8eb0b68039c2f6",
+     "tag": "lm-formal+ctx+tl:d07de71d+acg+tri:fdd3b05d"
+    }
+   },
+   "speed": {
+    "rows_match": "302/302",
+    "keys": 8336,
+    "rounds": 3,
+    "p95_us": 1997.0,
+    "max_us": 6498.3,
+    "load_ms": 752.5,
+    "rss_mb": 429.546875,
+    "formal": {
+     "rows_match": "302/302",
+     "keys": 8336,
+     "rounds": 3,
+     "p95_us": 2062.2,
+     "max_us": 6849.6,
+     "load_ms": 726.6,
+     "rss_mb": 428.578125
+    },
+    "rerank_p50_ms": 6.239,
+    "rerank_p95_ms": 7.954
+   },
+   "holdout": {
+    "commit": "207b4b498cf7464b40db8c209eb4bccc400495bb",
+    "chat": {
+     "n": 300,
+     "top1": 234
+    },
+    "formal": {
+     "n": 300,
+     "top1": 233
+    }
+   }
+  },
+  {
+   "ref": "299230a5",
+   "version": "v0.5.0",
+   "sha": "299230a5e2f5083d7f265c982ce6721b7ba7b071",
+   "lexicon_sha256": "52dcf86f812d74d228e40806adc41d5145152c29101c0b0e368dea7d99e407bc",
+   "models": {
+    "bigram.sjlm": "fc2bddd1f0c2029deb7e7568f64868c11f535b3d5c5c7c97c3d0599c8b2cde42",
+    "classes.sjc": "9e36fa1be4518adb34bcddc2c79761006b0b06c539aa64a4564ba00397cf0262",
+    "kn.sjkn": "cbefbced072f7e9d40dbfc3d2fad27c29f82e44bf801800dfb17b4eec962597e",
+    "trigram.sjt3": "fdd3b05d8c18cf85da434443d4fabbbfebf31e8c97a04e00e4a339bbe19eec84",
+    "tinylm.sjtl": "e7c179d85405ec42a40bb22adb58a7485c58f77aed89dfc2ca76a0d89568ed5e",
+    "colloquial.sjlm": "2984eeb525a06b12c244b3c04b84641c9a67492486132ebf404198372b684c33"
+   },
+   "flags": [
+    "--context",
+    "--packs",
+    "acg",
+    "--tinylm",
+    "<file>",
+    "--colloquial-core",
+    "<file>"
+   ],
+   "tag": "+ctx+kn:cbefbced:θ1:β1+tl:e7c179d8+acg+colloq:2984eeb5+rc",
+   "formal_tag": "+ctx+tl:e7c179d8+acg+tri:fdd3b05d",
+   "fingerprints": {
+    "dev302": "603850e444efee38b8c121e3d666d6c540acd3a27d5a6a5070a78a962dd98456",
+    "typing76": "c061f66dfade21996803137320aa986a81a3e72e3e4e1dd559abd5dc04b68d08",
+    "probe": "75aac33877ddd7907cdd6789c6da6a0f3b7c775c8c6dfa6c752a5f3e87ab6801",
+    "user-reported": "9fd08e50f13eccea94a76faf5260e7edcf49826bd3dcf7ba4e2cf6de17bcce9a",
+    "fw": "6b853a329aee569ad51c731d6f188541b9670e9617838725f45a26d57845d18d",
+    "cvtune": "31de456d66ece98eb5d00154a31c3f7e9c9b38240690f7f76203485ca82acc51",
+    "wikitune": "8dcfe40c74cce73e0a070b49e166636580ef955da8555ea9ffbd65af20c998f2",
+    "lytune": "0e0fdbed0728a4c3b359995beb03040c6834eb091e4028c9dc1ec104b6eeca96",
+    "wikitypo": "50f4ceb89b6a3d021c0fe273e8512c7b0af7d20f6ffd5c2f145a7c3a251a2d47",
+    "discordtune": "77e1c90a507fa7e6085c3fca7d377abfd527a5146f43f8c4388e72342627a775"
+   },
+   "accuracy": {
+    "dev302/chat": {
+     "n": 302,
+     "top1": 269,
+     "oracle64": 300,
+     "top1_sha256": "d7230f186c0653667b9e4fed032c6db1a24f4cfa6d8668895da37a834668de9e",
+     "tag": "lm-chat+ctx+kn:cbefbced:θ1:β1+tl:e7c179d8+acg+colloq:2984eeb5+rc"
+    },
+    "dev302/formal": {
+     "n": 302,
+     "top1": 265,
+     "oracle64": 300,
+     "top1_sha256": "2fe9bbfb5ac32d4c01433ba66bc0d1f40d9cecc70390bc1b294c473a9dceb3b0",
+     "tag": "lm-formal+ctx+tl:e7c179d8+acg+tri:fdd3b05d"
+    },
+    "typing76/chat": {
+     "n": 76,
+     "top1": 72,
+     "oracle64": 76,
+     "top1_sha256": "fc046ae3ec70787d02de90c96ffa1e4f276305cfd08e46808fcc46bb1f82ff7a",
+     "tag": "lm-chat+ctx+kn:cbefbced:θ1:β1+tl:e7c179d8+acg+colloq:2984eeb5+rc"
+    },
+    "typing76/formal": {
+     "n": 76,
+     "top1": 69,
+     "oracle64": 76,
+     "top1_sha256": "1311928bb7f109a478ccc145c2f3e4f7139749a8081a39c61db33b6b870decaa",
+     "tag": "lm-formal+ctx+tl:e7c179d8+acg+tri:fdd3b05d"
+    },
+    "probe/chat": {
+     "n": 83,
+     "top1": 72,
+     "oracle64": 82,
+     "top1_sha256": "a43bab6fc1a541caede422284aa4a349689ccba04ccb2b0a0751a9f31d5a75a2",
+     "tag": "lm-chat+ctx+kn:cbefbced:θ1:β1+tl:e7c179d8+acg+colloq:2984eeb5+rc"
+    },
+    "probe/formal": {
+     "n": 83,
+     "top1": 72,
+     "oracle64": 82,
+     "top1_sha256": "94583c7c5aa6ca2b1f0434a69ac6a6729dd93a87cfb2d9ee5d26b2ab6ff5da10",
+     "tag": "lm-formal+ctx+tl:e7c179d8+acg+tri:fdd3b05d"
+    },
+    "user-reported/chat": {
+     "n": 80,
+     "top1": 33,
+     "oracle64": 78,
+     "top1_sha256": "e0b98ca54c35760b23fa3b182d09accf203dde9c42eb001b43c079f832a0c166",
+     "tag": "lm-chat+ctx+kn:cbefbced:θ1:β1+tl:e7c179d8+acg+colloq:2984eeb5+rc"
+    },
+    "user-reported/formal": {
+     "n": 80,
+     "top1": 29,
+     "oracle64": 78,
+     "top1_sha256": "63782f6f0cbbd5614b3728ca5b6184c5fa10792121166d64bf22bcf84c409823",
+     "tag": "lm-formal+ctx+tl:e7c179d8+acg+tri:fdd3b05d"
+    },
+    "fw/chat": {
+     "n": 186,
+     "top1": 163,
+     "oracle64": 186,
+     "top1_sha256": "dba3bc79fa719b17724e3b8ac8215e24942519bde8ddeb8f466bee548c414eab",
+     "tag": "lm-chat+ctx+kn:cbefbced:θ1:β1+tl:e7c179d8+acg+colloq:2984eeb5+rc"
+    },
+    "fw/formal": {
+     "n": 186,
+     "top1": 165,
+     "oracle64": 186,
+     "top1_sha256": "15fda5de3660f07dc0e17d2c4bfa5726903c9eb8f599debaf1d667469de6423b",
+     "tag": "lm-formal+ctx+tl:e7c179d8+acg+tri:fdd3b05d"
+    },
+    "cvtune/chat": {
+     "n": 3791,
+     "top1": 3485,
+     "oracle64": 3773,
+     "top1_sha256": "60bb18dd6891b21fd63922dc206412dbee7a47b139b54592cd6d2be3c6d1fa9c",
+     "tag": "lm-chat+ctx+kn:cbefbced:θ1:β1+tl:e7c179d8+acg+colloq:2984eeb5+rc"
+    },
+    "cvtune/formal": {
+     "n": 3791,
+     "top1": 3480,
+     "oracle64": 3774,
+     "top1_sha256": "9f3a802d4e9ec14402863caa8a24fb554d3613fa6e15d27b80a8c7ff86f79d35",
+     "tag": "lm-formal+ctx+tl:e7c179d8+acg+tri:fdd3b05d"
+    },
+    "wikitune/chat": {
+     "n": 2827,
+     "top1": 2184,
+     "oracle64": 2698,
+     "top1_sha256": "b42670a15fd7a17ebe3d326206707779ad895f6318ad0d90c12847cdbf88dcf4",
+     "tag": "lm-chat+ctx+kn:cbefbced:θ1:β1+tl:e7c179d8+acg+colloq:2984eeb5+rc"
+    },
+    "wikitune/formal": {
+     "n": 2827,
+     "top1": 2266,
+     "oracle64": 2718,
+     "top1_sha256": "7fb06f5e9debcb981e6c25d77b5ba7884b239f890e948c36c6f08499cc73fd4f",
+     "tag": "lm-formal+ctx+tl:e7c179d8+acg+tri:fdd3b05d"
+    },
+    "lytune/chat": {
+     "n": 4811,
+     "top1": 4201,
+     "oracle64": 4787,
+     "top1_sha256": "22f39808a028dc2355516dcce9c833b0224336682b70458b567754a8f466a26b",
+     "tag": "lm-chat+ctx+kn:cbefbced:θ1:β1+tl:e7c179d8+acg+colloq:2984eeb5+rc"
+    },
+    "lytune/formal": {
+     "n": 4811,
+     "top1": 4122,
+     "oracle64": 4790,
+     "top1_sha256": "4306b2cea1c2a87aa8b9bf602be256d62617c17be258ca34d8ffadc7ee0e8b05",
+     "tag": "lm-formal+ctx+tl:e7c179d8+acg+tri:fdd3b05d"
+    },
+    "wikitypo/chat": {
+     "n": 155,
+     "top1": 136,
+     "oracle64": 152,
+     "top1_sha256": "87a741f3bc2124a65852bc09afa6f6fddffe7eaebd2db4e8203fba96cf06b534",
+     "tag": "lm-chat+ctx+kn:cbefbced:θ1:β1+tl:e7c179d8+acg+colloq:2984eeb5+rc"
+    },
+    "wikitypo/formal": {
+     "n": 155,
+     "top1": 137,
+     "oracle64": 153,
+     "top1_sha256": "e94b6d7a3e0c1e8376cc6814635e8fd76d62bb49d93e0d2d62ddc007027349f6",
+     "tag": "lm-formal+ctx+tl:e7c179d8+acg+tri:fdd3b05d"
+    },
+    "discordtune/chat": {
+     "n": 4958,
+     "top1": 4358,
+     "oracle64": 4935,
+     "top1_sha256": "d578016bc64cbaadcb34d2dd915b3878e920994e28c2f065d939c71b93b1e9ee",
+     "tag": "lm-chat+ctx+kn:cbefbced:θ1:β1+tl:e7c179d8+acg+colloq:2984eeb5+rc"
+    },
+    "discordtune/formal": {
+     "n": 4958,
+     "top1": 4267,
+     "oracle64": 4933,
+     "top1_sha256": "dc7337fce808c8ff93d2af2c4bbf57153cfe5f14465d4ebcdab45ba1ce2169aa",
+     "tag": "lm-formal+ctx+tl:e7c179d8+acg+tri:fdd3b05d"
+    }
+   },
+   "vs": "v0.4.7",
+   "vs_prev": {
+    "dev302/chat": {
+     "fixed": 9,
+     "broken": 2,
+     "p": 0.0654296875
+    },
+    "dev302/formal": {
+     "fixed": 9,
+     "broken": 1,
+     "p": 0.021484375
+    },
+    "typing76/chat": {
+     "fixed": 0,
+     "broken": 0,
+     "p": 1.0
+    },
+    "typing76/formal": {
+     "fixed": 0,
+     "broken": 0,
+     "p": 1.0
+    },
+    "probe/chat": {
+     "fixed": 4,
+     "broken": 1,
+     "p": 0.375
+    },
+    "probe/formal": {
+     "fixed": 4,
+     "broken": 0,
+     "p": 0.125
+    },
+    "user-reported/chat": {
+     "fixed": 7,
+     "broken": 2,
+     "p": 0.1796875
+    },
+    "user-reported/formal": {
+     "fixed": 6,
+     "broken": 1,
+     "p": 0.125
+    },
+    "fw/chat": {
+     "fixed": 6,
+     "broken": 0,
+     "p": 0.03125
+    },
+    "fw/formal": {
+     "fixed": 4,
+     "broken": 0,
+     "p": 0.125
+    },
+    "cvtune/chat": {
+     "fixed": 53,
+     "broken": 16,
+     "p": 9.095063055186201e-06
+    },
+    "cvtune/formal": {
+     "fixed": 42,
+     "broken": 2,
+     "p": 1.1266365618212149e-10
+    },
+    "wikitune/chat": {
+     "fixed": 37,
+     "broken": 46,
+     "p": 0.379999396411918
+    },
+    "wikitune/formal": {
+     "fixed": 39,
+     "broken": 5,
+     "p": 1.4051624930289108e-07
+    },
+    "lytune/chat": {
+     "fixed": 191,
+     "broken": 27,
+     "p": 1.299346189584812e-31
+    },
+    "lytune/formal": {
+     "fixed": 74,
+     "broken": 32,
+     "p": 5.541979465701251e-05
+    },
+    "wikitypo/chat": {
+     "fixed": 1,
+     "broken": 1,
+     "p": 1.0
+    },
+    "wikitypo/formal": {
+     "fixed": 0,
+     "broken": 0,
+     "p": 1.0
+    },
+    "discordtune/chat": {
+     "fixed": 88,
+     "broken": 34,
+     "p": 1.0823657506513733e-06
+    },
+    "discordtune/formal": {
+     "fixed": 69,
+     "broken": 20,
+     "p": 1.7769640600713887e-07
+    }
+   },
+   "speed": {
+    "rows_match": "302/302",
+    "keys": 8336,
+    "rounds": 3,
+    "p95_us": 2047.0,
+    "max_us": 6723.9,
+    "load_ms": 905.3,
+    "rss_mb": 441.15625,
+    "formal": {
+     "rows_match": "302/302",
+     "keys": 8336,
+     "rounds": 3,
+     "p95_us": 2019.1,
+     "max_us": 7435.9,
+     "load_ms": 889.1,
+     "rss_mb": 440.59375
+    },
+    "rerank_p50_ms": 6.346,
+    "rerank_p95_ms": 8.225
+   },
+   "holdout": {
+    "commit": "299230a5e2f5083d7f265c982ce6721b7ba7b071",
+    "chat": {
+     "n": 300,
+     "top1": 237,
+     "fixed": 7,
+     "broken": 4,
+     "p": 0.5488
+    },
+    "formal": {
+     "n": 300,
+     "top1": 241,
+     "fixed": 8,
+     "broken": 0,
+     "p": 0.0078
+    }
+   }
+  }
+ ],
+ "env": {
+  "machine": "Mac17,3",
+  "macos": "27.0.1",
+  "cargo": "cargo 1.97.1 (c980f4866 2026-06-30) (Homebrew)",
+  "load_avg_start": 4.12841796875,
+  "load_avg_end": 3.28759765625
+ }
+}

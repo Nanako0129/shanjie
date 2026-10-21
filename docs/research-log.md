@@ -8480,3 +8480,33 @@ XL 比 `MAX_FILE`（67,108,864）小 1,168,880 位元組。錨點：4 個模型 
 - **再快的方向**（這片不做）：
   - release 測試按套件拆成兩個 macOS job，代價是每次 run 佔 4 個名額。
   - 引擎建立的速度（產品片）。這是 Swift 測試與 cli 整合測試的主要成本，也是輸入法切換設定時重建引擎的成本。
+
+## 2026-10-22：v0.5.0 虛擬機驗收（dry run `f0a28c38`，含模型列表與叫回監看）
+
+- dry run run 39621845198（main `f0a28c38`，合併 #253、#254 之後）的簽章版，兩台新 clone 的 tart 虛擬機（macOS 26.6.2）。安裝程式 `spctl`：accepted，Notarized Developer ID。
+- **第一次安裝這台 Mac**（u5e）：
+  - 紀錄 `registration: forced (location changed)`、`notAccepted`。
+  - 系統設定拿到前景之後，安裝程式在幾秒內回到前面（維護者）。這是 #253 的新監看（只在換位置的兩個登出頁、10 秒內），第一次在簽章版上看到。
+  - 登出再登入、到「系統設定 → 鍵盤」加入之後：`/Library/Input Methods/善解輸入法.app`，輸入來源 enabled、selectable，輸入法從 `/Library` 執行。
+  - 關於頁「模型」一節列出六個模型與代號：通語 SJ-LM-6-9.1M、辨類 SJ-WC-5-512C、承接 SJ-KN-1-353K、連文 SJ-CX-1-7.7M、會意 SJ-SR-6-14M、常談 SJ-CL-1-68K（維護者截圖），「善解裝給這台 Mac 的所有帳號」那段也對。
+- **只有我的帳號、全新**（u5a）：`registration: as before`、`notAccepted`，手動加入後完成（維護者）；帳號層 `善解輸入法.app`，輸入來源 enabled、selectable。
+- 10-21 那一輪已通過的 a–g 不重做：這次 dry run 只多了 #253（叫回監看）與 #254（關於頁），兩項都在上面量了。
+
+## 2026-10-22：v0.5.0 發版前的跨版本基準測試、KPI 與保留集
+
+- **跨版本基準測試**（套件 v2，Mac，v0.4.7 `207b4b49` 對 `299230a5`）：
+  - 兩種設定都沒有集合顯著變差。
+  - 聊天：discordtune +88／−34（p 1.1e-6）、cvtune +53／−16、lytune +191／−27。wikitune 37／46（p 0.38）不顯著。
+  - 書面：wikitune +39／−5（p 1.4e-7）、discordtune +69／−20、cvtune +42／−2、lytune +74／−32。〔推論〕書面的變化主要來自會意換成 SJ-SR-6-14M（只換書面融合參數）；兩版之間詞庫（數字表）與核心（改選凍結、新詞 B、數字列）也有改，沒有只換小模型的單因子對照。
+  - 打字測驗兩種設定 0／0。
+  - 速度與記憶體（同一場輪流跑，load avg 約 4，`docs/benchmark.md`）：每鍵 p95 2.00 → 2.05 ms，載入 752 → 905 ms，RSS 430 → 441 MB。
+  - 第一次跑停在「v0.5.0 的小模型與常談不在 bench 的模型資料夾」。照 bench.py 的提示，從主 checkout 的 `data/lm/` 核對雜湊（`e7c179d8…`、`2984eeb5…`）後放進去，重跑通過。
+- **KPI**（`kpi.py run` 與 `replay`，Windows 機器 WSL）：
+  - wikitune-clean 書面 1,610 → 1,642（n 2,181）。
+  - 重播：dev302 聊天 top1 269、KySS 0.9773；錯字回報學習關 33、學習開 34（改對 1、改壞 0）。
+  - `replay` 是在發版分支 `93ddf32a` 跑的（JSON 的 `replay.sha`），不是被量的 `299230a5`：兩者之間只差 `tools/bench.py` 的 VERSIONS2 兩行與研究紀錄，核心、CLI 與資料相同。
+  - `replay` 第一次被拒：`data/lm` 裡多了 `colloquial-attribution.tsv`（執行腳本照 `data/*.sha256` 全部複製）。拿掉它再跑。
+- **保留集**（shard-1 第 4 次使用，fresh verifier，只回數字）：
+  - 聊天 234 → 237（7／4，p 0.55）、書面 233 → 241（8／0，p 0.0078）。
+  - 口語半邊（聊天）116 → 115（3／4，p 1.0），新聞半邊（書面）116 → 120（4／0，p 0.125）。
+  - 第一次派 verifier 時，bench 的匯出只帶 `Cargo.toml Cargo.lock core cli data eval/variants.tsv`，CLI 讀不到 `eval/holdout/`。讀任何一列之前就失敗，所以不算使用。之後從同一個 commit 用 `git archive` 把 `eval/holdout/` 解進兩個匯出，雜湊核對過、量完刪掉。
