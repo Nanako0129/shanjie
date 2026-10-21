@@ -61,7 +61,7 @@ shanjie-eval --lm data/lm/bigram.sjlm --profile <P> --context --packs acg --tiny
 
 R1 的每一格在聊天標準是「P4d 那一格＋λ·ch」（P5 那一項拿掉，ν 0）；其他設定是「各自那一檔＋λ·ch」。所有判讀都對錨點 1 的出貨比。
 
-**第 9 名以後的候選**：沒有 `ll` 的列（`--tinylm-scores` 沒寫紀錄的列）由 s 的第一名決定，照 d23 的規則。第 9–64 名的對錯用和 rowstats 相同的寬鬆對照，CER 用 `evalstats.levenshtein`。
+**第 9 名以後的候選**：沒有 `ll` 的列（`--tinylm-scores` 沒寫紀錄的列）由 s 的第一名決定，照 d23 的規則。新的前 8 名裡只要有一個候選沒有 `ll`（太長、模型打不了分），那一列也由 s 的第一名決定，和核心在前 8 名有候選太長時跳過重排一樣；這種列只報列數（修訂二，任何數字之前，`/code-review` 指出原本沒有規定）。第 9–64 名的對錯用和 rowstats 相同的寬鬆對照，CER 用 `evalstats.levenshtein`。
 
 ## 格點與選格（事先固定）
 
