@@ -1005,6 +1005,13 @@ final class Controller: NSObject, NSApplicationDelegate, NSWindowDelegate {
             show(Screens.failedLogOut(Failure(message: message)))
         }
         if moved && result.outcome == .notAccepted { returnWhenAccepted(bundleID: bundleID, firstInstall: decision.firstInstall) }
+        // The system may open System Settings at the enable call whether or not it accepts the input method (VM, dry run 82ce349a,
+        // 2026-10-21: a first "This Mac" install with notAccepted, a migration with done, a fresh account install with notAccepted),
+        // covering the page just shown: call the user back whenever that happens after a location change or a registration not done.
+        // The poll calls back when it ends.
+        if (moved || result.outcome != .done) && InstallerFlow.next(after: result.outcome, moved: moved, firstInstall: decision.firstInstall) != .waiting {
+            callBack()
+        }
     }
 
     /// The system asks "Allow … to enable" inside System Settings, which it opens itself right after the enable call and which keeps
@@ -1074,8 +1081,8 @@ final class Controller: NSObject, NSApplicationDelegate, NSWindowDelegate {
         DispatchQueue.main.asyncAfter(deadline: .now() + checkTimeout) { if p.isRunning { p.terminate() } }
     }
 
-    /// Brings the installer back if it is covered, or bounces the Dock icon if it gets covered within 10 s (the system may accept the
-    /// input method before System Settings shows its question: VM, 2026-10-21, accepted 1 s after the enable call).
+    /// Brings the installer back if it is covered, or bounces the Dock icon if it gets covered within 10 s (System Settings opens a
+    /// moment after the enable call, and the system may accept the input method before it shows its question: VM, 2026-10-21).
     private func callBack() {
         if !NSApp.isActive { return comeBack() }
         stopCallBack()
@@ -1151,7 +1158,10 @@ final class Controller: NSObject, NSApplicationDelegate, NSWindowDelegate {
             }
             let finished = again.map { ($0.outcome == .done || $0.outcome == .notAccepted) && !$0.legacyDisableFailed } ?? false
             self.showTry(note: finished ? nil : Screens.legacyNote)
-        }, timedOut: { [weak self] in self?.showActivate() })
+        }, timedOut: { [weak self] in
+            self?.showActivate()
+            self?.callBack()
+        })
     }
 
     // MARK: actions
