@@ -237,9 +237,9 @@
   <p class="sub">2026-10-19～10-22</p>
   <ul class="week">
     <li><span class="tag done">已發佈</span><span>v0.5.0：聊天更懂口語（口語詞頻表「常談」＋讀音通道項），「螺絲鬆」「很雷」「變快」選對了。</span></li>
-    <li><span class="tag done">已發佈</span><span>v0.5.0：安裝程式可以裝給「這台 Mac」，有程式開著安全輸入時善解照常能用。</span></li>
+    <li><span class="tag done">已發佈</span><span>v0.5.0：安裝程式可以裝給「這台 Mac」；裝在這台 Mac 時，有程式開著安全輸入善解也照常能用（學習暫停）。只裝在自己帳號的照舊會暫時停用。</span></li>
     <li><span class="tag done">已發佈</span><span>v0.5.0：輸入法改在 App 沙盒裡執行，更新交給另一個小程式「善解更新」。</span></li>
-    <li><span class="tag done">已發佈</span><span>v0.5.0：數字列直接打數字；中英混打改成預設開；改選後其他字不動；預測列與 ↓ 一致；逐字改選也學成新詞；中英文之間自動加空格（預設關）。</span></li>
+    <li><span class="tag done">已發佈</span><span>v0.5.0：數字列直接打數字（標準排列、中英混打開著時）；中英混打改成預設開；改選後其他字不動；預測列與 ↓ 一致；逐字改選也學成新詞；中英文之間自動加空格（預設關）。</span></li>
     <li><span class="tag done">已發佈</span><span>常談 SJ-CL-1-68K 發佈在 GitHub Releases。</span></li>
     <li><span class="tag wip">進行中</span><span>研究：電影字幕當口語資料，先做不花 GPU 的檢查。</span></li>
   </ul>
@@ -337,18 +337,18 @@
         <li class="done"><span class="mark"></span><span class="sr-only">已發佈：</span><h3>設定視窗改版（v0.4.4）</h3><p>左邊一列分類，視窗最高只到螢幕可用的高度（Discord 回饋：筆電上被 Dock 蓋住）。2026-10-15 發佈。</p></li>
         <li><span class="mark"></span><span class="sr-only">規劃中：</span><h3>領域詞包</h3><p>資訊與 AI 先，預設開；醫藥、法律接著，預設關。跟下一版語言模型一起。來源調查完：國教院樂詞網的資訊名詞（約 13 萬列，政府資料開放授權）等。同時修正建語料時把台灣用詞也轉掉的問題（「插件」被換成「外掛」）。</p></li>
         <li class="done"><span class="mark"></span><span class="sr-only">已發佈：</span><h3>常見專有名詞（v0.4.4）</h3><p>公司、學校、飲料店、餐廳、產品這類常見的專有名詞（例如「酷澎」）有自己的一層詞表，約 1,600 詞。2026-10-15 發佈。</p></li>
-        <li><span class="mark"></span><span class="sr-only">規劃中：</span><h3>從改選記住新詞組</h3><p>改選後送出的片段如果不是詞庫裡的詞（例如「版控」），記成你的詞，下次直接打得出來。</p></li>
+        <li class="done"><span class="mark"></span><span class="sr-only">已發佈：</span><h3>從改選記住新詞組（v0.5.0）</h3><p>逐字改選拼出的 2–4 字詞（例如「版控」）記成你的詞，下次直接打得出來。2026-10-22 發佈。</p></li>
         <li class="wip"><span class="mark"></span><span class="sr-only">進行中：</span><h3>預測可省略韻母</h3><p>每個字只打第一個注音也能找到詞。一次縮寫一個詞的版本做完了，但還不能整句縮寫，v0.4.0 先不放；做到整句縮寫再出。另外有使用者回報打了某些注音之後按鍵好像卡住；從設計推論，是有兩個以上縮寫單位時空白鍵與聲調鍵會被吃掉，沒有重現。</p></li>
-        <li class="wip"><span class="mark"></span><span class="sr-only">進行中：</span><h3>App 沙盒</h3><p>輸入法在 macOS 的 App 沙盒裡執行，只拿到需要的權限。已經有實作分支，目標是 v0.5.0。</p></li>
-        <li class="research wip"><span class="mark"></span><span class="sr-only">進行中：</span><h3><span class="kind">研究</span>Kneser–Ney 平滑</h3><p>回退時看一個詞接在幾種不同的詞後面，而不是只看它出現幾次。離線量測：調參集四格合計多對 33 列；保留集打平，但那一次用的是更正前的側檔。核心已能讀側檔（PR #107），預設關；正式側檔隨下一次模型重建（model-v6）產生。</p></li>
+        <li class="done"><span class="mark"></span><span class="sr-only">已發佈：</span><h3>App 沙盒（v0.5.0）</h3><p>輸入法在 macOS 的 App 沙盒裡執行，只拿到需要的權限；更新交給不在沙盒裡的「善解更新」。2026-10-22 發佈。</p></li>
+        <li class="research done"><span class="mark"></span><span class="sr-only">已發佈：</span><h3><span class="kind">研究</span>Kneser–Ney 平滑（v0.4.4）</h3><p>回退時看一個詞接在幾種不同的詞後面，而不是只看它出現幾次。離線量測：調參集四格合計多對 33 列；保留集打平，但那一次用的是更正前的側檔。側檔 kn-v1 隨 v0.4.4 出貨、預設開。</p></li>
         <li class="research done"><span class="mark"></span><span class="sr-only">完成：</span><h3><span class="kind">研究</span>在／再、作／做</h3><p>回報裡常見的一類同音錯。<b>結論：</b>第 1 階段只訓「ㄗㄞˋ」就觸發停止規則：「再＞在」11 → 10（要求減半），其他讀音沒做。要再試得另寫契約，並用聊天資料判斷。</p></li>
         <li><span class="mark"></span><span class="sr-only">規劃中：</span><h3>語料很少出現的名字</h3><p>像「宿儺」這種語料裡幾乎沒出現的名字，v0.4.0 的新模型也沒有救起來；需要另外寫契約處理。</p></li>
         <li class="research"><span class="mark"></span><span class="sr-only">規劃中：</span><h3><span class="kind">研究</span>口語與財經用語</h3><p>語料偏百科，「零股」「月繳」這類日常用語太少；找授權清楚的口語來源。</p></li>
         <li class="research done"><span class="mark"></span><span class="sr-only">完成：</span><h3><span class="kind">研究</span>貝氏選字記憶</h3><p>把改選記錄當成證據、以語言模型為先驗，取代固定的加分。2026-10-10 試過，40 組參數沒有一組符合條件。<b>結論：</b>保留現行規則；要再試得改設計。</p></li>
         <li><span class="mark"></span><span class="sr-only">規劃中：</span><h3>更多新詞</h3><p>從語料自動找出詞庫沒收的新詞（例如口語縮寫）；也能手動加詞。</p></li>
-        <li><span class="mark"></span><span class="sr-only">規劃中：</span><h3>改選後其他字不動（重新評估）</h3><p>新詞做完後，照蘋果注音的實測（含改選後繼續打字）重新評估要不要做、怎麼做。</p></li>
+        <li class="done"><span class="mark"></span><span class="sr-only">已發佈：</span><h3>改選後其他字不動（v0.5.0）</h3><p>照蘋果注音的實測：改選一段之後，其他已經顯示的字固定不動。2026-10-22 發佈。</p></li>
         <li><span class="mark"></span><span class="sr-only">規劃中：</span><h3>破音字的搭配</h3><p>同一個字的不同讀音分開計算搭配，例如「空」唸 ㄎㄨㄥˋ 時，不再借用「空間」的搭配而搶走「控」。</p></li>
-        <li class="done"><span class="mark"></span><span class="sr-only">已發佈：</span><h3>中英混打（實驗功能，預設關；v0.4.4、v0.4.5）</h3><p>不用按 Caps Lock：英文單字打到看得出是哪個字時直接顯示英文，選了或接著打中文都留在組字區，Enter 一起送出；Shift＋字母打一段英文。量過維護者自己的訊息，約兩成夾著英文單字。2026-10-16 發佈。</p></li>
+        <li class="done"><span class="mark"></span><span class="sr-only">已發佈：</span><h3>中英混打（實驗功能；v0.4.4、v0.4.5，v0.5.0 起預設開）</h3><p>不用按 Caps Lock：英文單字打到看得出是哪個字時直接顯示英文，選了或接著打中文都留在組字區，Enter 一起送出；Shift＋字母打一段英文。量過維護者自己的訊息，約兩成夾著英文單字。2026-10-16 發佈；v0.5.0 起預設開，並且標準排列下數字列可以直接打數字。</p></li>
         <li class="research done"><span class="mark"></span><span class="sr-only">完成：</span><h3><span class="kind">研究</span>外部模型 0c 的重排對照</h3><p>用同一批候選比靈犀注音 0c 公開的模型與善解的小模型。結果依設定與集合而不同：聊天設定在口語聊天與錯字上比較好、在百科與立法院發言比較差；書面設定在立法院發言與口語聊天比較好。<b>決定：</b>不直接接進善解，改走讓自己的模型吃讀音與聲調（是否有效還沒量）。數字在 <a href="https://github.com/Nanako0129/shanjie/blob/main/docs/benchmark.md">benchmark 文件</a>。</p></li>
         <li class="research"><span class="mark"></span><span class="sr-only">規劃中：</span><h3><span class="kind">研究</span>0c App 本身的打字測驗</h3><p>在虛擬機裡裝 0c 的 App，只當黑箱打字，連它自己的詞庫與解碼器一起比。</p></li>
         <li class="research"><span class="mark"></span><span class="sr-only">規劃中：</span><h3><span class="kind">研究</span>讀音感知的語言模型</h3><p>兩條線並行：語言模型改用依讀音分開的計數（上面的「破音字的搭配」），再用 log-linear 權重合併各種分數；小模型下一版吃讀音與聲調，再用我們自己的候選做排序訓練。</p></li>
