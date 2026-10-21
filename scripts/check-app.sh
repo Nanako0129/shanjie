@@ -75,12 +75,15 @@ for lp in "zh-Hant|$NAME_ZH" "en|$NAME_EN"; do
     [ "$(pb "$k" "$S")" = "$name" ] || fail "$l InfoPlist.strings: $k"
   done
 done
-for f in mcbpmf-data.txt overlay-add.tsv sandhi-add.tsv names-add.tsv demote.tsv digits.tsv bigram.sjlm classes.sjc kn.sjkn trigram.sjt3 tinylm.sjtl colloquial.sjlm shanjie.tiff \
+for f in mcbpmf-data.txt overlay-add.tsv sandhi-add.tsv names-add.tsv demote.tsv digits.tsv models.tsv shanjie.tiff \
          packs/acg-add.tsv packs/acg-sources.tsv packs/acg.json LICENSES/LICENSE LICENSES/McBopomofo-MIT.txt LICENSES/data.md LICENSES/CC-BY-SA-4.0-attribution.txt \
          english-words.txt LICENSES/SCOWL.txt LICENSES/SymSpell-MIT.txt LICENSES/english-words-attribution.txt \
          LICENSES/name-suggestion-index-BSD-3-Clause.txt LICENSES/Sparkle-MIT.txt LICENSES/colloquial-attribution.tsv; do
   [ -s "$R/$f" ] || fail "Resources/$f is missing or empty"
 done
+# The models: the bundled models.tsv is the list (about-models.md section 2), checked both ways against the files.
+"$(dirname "$0")/check-models.sh" bundle "$R" "$ROOT" || exit 1
+cmp -s "$R/models.tsv" "$(dirname "$0")/../data/models.tsv" || fail "Resources/models.tsv differs from data/models.tsv"
 # digits.tsv is optional for the core (a missing table turns the feature off without a word), so the bundle must carry exactly the repo's.
 cmp -s "$R/digits.tsv" "$(dirname "$0")/../data/lexicon/digits.tsv" || fail "Resources/digits.tsv differs from data/lexicon/digits.tsv"
 # The app icon (docs/contracts/app-icon.md): compiled by actool, named in Info.plist.
@@ -107,16 +110,11 @@ cmp -s "$R/names-add.tsv" "$ROOT/data/lexicon/names-add.tsv" || fail "Resources/
 for s in 'names-add.tsv' 'name-suggestion-index' 'Wikipedia contributors' '政府資料開放授權條款' 'Redistribution and use in source and binary forms'; do
   grep -qF "$s" "$R/LICENSES/CC-BY-SA-4.0-attribution.txt" || fail "the attribution file does not have: $s"
 done
-# The small model (docs/contracts/s7c2b-shell-rerank.md section 2.4, F6): the bundled file against the hash recorded in git,
-# not against data/lm (that would only show the copy was faithful).
+# The models (hashes against data/*.sha256, and each is a row of models.tsv) are checked by check-models.sh above; the attribution file names each.
 grep -q 'tinylm.sjtl' "$R/LICENSES/CC-BY-SA-4.0-attribution.txt" || fail "the attribution file does not list tinylm.sjtl"
-TINY_RECORDED="$(awk 'NR == 1 { print $1 }' "$ROOT/data/tinylm.sjtl.sha256")"
-[[ "$TINY_RECORDED" =~ ^[0-9a-f]{64}$ ]] || fail "data/tinylm.sjtl.sha256 holds no SHA-256"
-[ "$(shasum -a 256 "$R/tinylm.sjtl" | awk '{ print $1 }')" = "$TINY_RECORDED" ] \
-  || fail "Resources/tinylm.sjtl does not match data/tinylm.sjtl.sha256"
 # The colloquial table (docs/contracts/colloquial-term.md section 2.3, 3.6): the bundled table and attribution list are the ones recorded in git.
 # The selftest (step 6 below, `--selftest`) then shows the term in effect on a sentence the shipping rerank gets wrong.
-for pair in "colloquial.sjlm:$R/colloquial.sjlm" "colloquial-attribution.tsv:$R/LICENSES/colloquial-attribution.tsv"; do
+for pair in "colloquial-attribution.tsv:$R/LICENSES/colloquial-attribution.tsv"; do
   recorded="$(awk 'NR == 1 { print $1 }' "$ROOT/data/${pair%%:*}.sha256")"
   [[ "$recorded" =~ ^[0-9a-f]{64}$ ]] || fail "data/${pair%%:*}.sha256 holds no SHA-256"
   [ "$(shasum -a 256 "${pair#*:}" | awk '{ print $1 }')" = "$recorded" ] || fail "${pair#*:} does not match data/${pair%%:*}.sha256"
@@ -134,10 +132,6 @@ EN_RECORDED="$(awk 'NR == 1 { print $1 }' "$ROOT/data/english-words.txt.sha256")
 # The Kneser-Ney side file (model-v6 section 7 P3-7): against the hash recorded in git, like tinylm.sjtl; the bundled selftest then
 # shows the small model paired with it (a mismatch would leave 語意校正 off).
 grep -q 'kn.sjkn' "$R/LICENSES/CC-BY-SA-4.0-attribution.txt" || fail "the attribution file does not list kn.sjkn"
-KN_RECORDED="$(awk 'NR == 1 { print $1 }' "$ROOT/data/kn.sjkn.sha256")"
-[[ "$KN_RECORDED" =~ ^[0-9a-f]{64}$ ]] || fail "data/kn.sjkn.sha256 holds no SHA-256"
-[ "$(shasum -a 256 "$R/kn.sjkn" | awk '{ print $1 }')" = "$KN_RECORDED" ] \
-  || fail "Resources/kn.sjkn does not match data/kn.sjkn.sha256"
 # Sparkle's keys, verbatim (docs/contracts/about-update.md section 2). A key missing from Info.plist reads as empty and fails.
 WANT_FEED="$SPARKLE_FEED_URL"; WANT_KEY="$SPARKLE_PUBLIC_KEY"; WANT_BUILD=local
 [ "${SHANJIE_RELEASE_BUILD:-}" != 1 ] || WANT_BUILD=release
@@ -172,10 +166,6 @@ cmp -s "$R/LICENSES/Sparkle-MIT.txt" "$ROOT/LICENSES/Sparkle-MIT.txt" || fail "R
 grep -q 'EXTERNAL LICENSES' "$R/LICENSES/Sparkle-MIT.txt" || fail "Sparkle-MIT.txt lacks the third-party notices"
 # The trigram table of the formal profile (trigram-core): against the hash recorded in git, like kn.sjkn.
 grep -q 'trigram.sjt3' "$R/LICENSES/CC-BY-SA-4.0-attribution.txt" || fail "the attribution file does not list trigram.sjt3"
-TRI_RECORDED="$(awk 'NR == 1 { print $1 }' "$ROOT/data/trigram.sjt3.sha256")"
-[[ "$TRI_RECORDED" =~ ^[0-9a-f]{64}$ ]] || fail "data/trigram.sjt3.sha256 holds no SHA-256"
-[ "$(shasum -a 256 "$R/trigram.sjt3" | awk '{ print $1 }')" = "$TRI_RECORDED" ] \
-  || fail "Resources/trigram.sjt3 does not match data/trigram.sjt3.sha256"
 echo "check 2: ok"
 
 # --- 3: signature: valid, exactly the three App Sandbox entitlements on the app (app-sandbox.md section 2.1,

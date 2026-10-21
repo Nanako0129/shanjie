@@ -76,6 +76,8 @@ shasum -a 256 -c data/trigram.sjt3.sha256 >/dev/null \
   gh release download sj-cl-1-68k -R Nanako0129/shanjie -p colloquial.sjlm -p colloquial-attribution.tsv -D data/lm"
 shasum -a 256 -c data/colloquial.sjlm.sha256 data/colloquial-attribution.tsv.sha256 >/dev/null \
   || fail "data/lm/colloquial.sjlm or colloquial-attribution.tsv does not match its data/*.sha256; download sj-cl-1-68k again"
+# The one list of bundled models and their About-page names (docs/contracts/about-models.md): hashes against data/*.sha256 and data/lm.
+scripts/check-models.sh build "$ROOT" || exit 1
 for f in data/lexicon/mcbpmf-data.txt data/lexicon/overlay-add.tsv data/lexicon/sandhi-add.tsv data/lexicon/names-add.tsv data/lexicon/demote.tsv data/lexicon/digits.tsv data/packs/acg-add.tsv data/packs/acg-sources.tsv data/packs/acg.json LICENSE LICENSES/McBopomofo-MIT.txt LICENSES/data.md LICENSES/SCOWL.txt LICENSES/SymSpell-MIT.txt LICENSES/name-suggestion-index-BSD-3-Clause.txt LICENSES/Sparkle-MIT.txt; do
   [ -f "$f" ] || fail "$f is missing"
 done
@@ -215,7 +217,8 @@ cp data/lexicon/digits.tsv "$RES/"
 # (acg-groups.tsv, acg-collisions.tsv, acg-exclude.tsv, acg-manual.tsv). The shell passes Resources/packs to shanjie_engine_new_packs.
 mkdir -p "$RES/packs"
 cp data/packs/acg-add.tsv data/packs/acg-sources.tsv data/packs/acg.json "$RES/packs/"
-cp -L data/lm/bigram.sjlm data/lm/classes.sjc data/lm/kn.sjkn data/lm/tinylm.sjtl data/lm/trigram.sjt3 data/lm/colloquial.sjlm "$RES/"   # -L: the worktree's model may be a symlink
+while IFS=$'\t' read -r mf _; do cp -L "data/lm/$mf" "$RES/"; done < data/models.tsv   # -L: the worktree's model may be a symlink; models.tsv is the one list
+cp data/models.tsv "$RES/"
 cp "$EN_TMP/english-words.txt" "$RES/"   # generated above (docs/contracts/zhen-mixed.md section 3.4)
 swift scripts/make-icon.swift "$RES/shanjie.tiff"
 scripts/compile-app-icon.sh "$RES"   # the app icon (docs/contracts/app-icon.md): Assets.car and AppIcon.icns
