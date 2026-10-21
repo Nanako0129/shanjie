@@ -45,6 +45,16 @@ public enum InstallerFlow {
         }
     }
 
+    /// system-install.md section 2.4 (second revision, 2026-10-21): whether the installer watches for System Settings coming to the
+    /// front after this registration, to bring its last page back (the system opens System Settings at the enable call). Only for the
+    /// two log-out pages, whose text says to answer an allow question first, and only when the enable call ran: a skipped
+    /// registration, or one that stopped before enabling (modeNotListed, registrationFailed), never opens System Settings. Pages that
+    /// send the user to System Settings (activate, failed) never call back; the poll's waiting screen calls back when it ends.
+    public static func watchesSystemSettings(after result: Registration.Result, screen: InstallerScreen) -> Bool {
+        let enableRan = !result.skipped && [.done, .notAccepted, .enableFailed].contains(result.outcome)
+        return enableRan && (screen == .logOut || screen == .logOutThenAdd)
+    }
+
     /// system-install.md section 2.4 item 4: one static line per installer registration, read with
     /// `log show --predicate 'subsystem == "com.nyanako.shanjie.installer"'` (section 4.3).
     public static func logRegistration(moved: Bool) {

@@ -774,8 +774,11 @@ final class Controller: NSObject, NSApplicationDelegate, NSWindowDelegate {
     /// once at the start, before anything is swapped.
     private var startBundleID: String?
     private var startModes: Set<String> = []
-    /// `callBack`'s watch for System Settings covering the installer after the system's answer.
-    private var callBackObserver: NSObjectProtocol?
+    /// `watchSystemSettings`: the observer, its generation (a later watch is not ended by an earlier one's timer) and window.
+    private var watchObserver: NSObjectProtocol?
+    private var watchGeneration = 0
+    private let watchWindow: TimeInterval = 10
+    private static let systemSettingsID = "com.apple.systempreferences"
     private var primaryAction: () -> Void = {}
     private var secondaryAction: () -> Void = {}
 
@@ -993,7 +996,8 @@ final class Controller: NSObject, NSApplicationDelegate, NSWindowDelegate {
         InstallerFlow.logRegistration(moved: moved)
         let result = Registration.run(bundleURL: target, bundleID: bundleID, defaults: defaults, moved: moved)
         InstallerFlow.logOutcome(result.outcome)
-        switch InstallerFlow.next(after: result.outcome, moved: moved, firstInstall: decision.firstInstall) {
+        let screen = InstallerFlow.next(after: result.outcome, moved: moved, firstInstall: decision.firstInstall)
+        switch screen {
         case .tryIt: showTry(note: result.legacyDisableFailed ? Screens.legacyNote : nil)
         case .activate: showActivate()
         case .waiting: if afterCopy { poll(bundleID: bundleID) } else { showActivate() }
@@ -1005,27 +1009,45 @@ final class Controller: NSObject, NSApplicationDelegate, NSWindowDelegate {
             show(Screens.failedLogOut(Failure(message: message)))
         }
         if moved && result.outcome == .notAccepted { returnWhenAccepted(bundleID: bundleID, firstInstall: decision.firstInstall) }
-        // The system may open System Settings at the enable call whether or not it accepts the input method (VM, dry run 82ce349a,
-        // 2026-10-21: a first "This Mac" install with notAccepted, a migration with done, a fresh account install with notAccepted),
-        // covering the page just shown: call the user back whenever that happens after a location change or a registration not done.
-        // The poll calls back when it ends.
-        if (moved || result.outcome != .done) && InstallerFlow.next(after: result.outcome, moved: moved, firstInstall: decision.firstInstall) != .waiting {
-            callBack()
-        }
+        if InstallerFlow.watchesSystemSettings(after: result, screen: screen) { watchSystemSettings() }
     }
 
-    /// The system asks "Allow … to enable" inside System Settings, which it opens itself right after the enable call and which keeps
-    /// the focus (VM, macOS 26.6.2, 2026-10-21: System Settings launched 2 ms before the installer's own activate, so activating at once
-    /// did nothing). Called once a fresh read says the system accepted the input method and the installer is not in front: the window
-    /// comes forward and the Dock icon bounces, since System Settings may still show its question afterwards and cover the window.
+    /// Brings the installer's window forward and bounces its Dock icon until the user comes back.
     private func comeBack() {
         NSApp.activate()
         // macOS 14 and later may refuse the activation while another app is active; the window still comes above the others.
         window.orderFrontRegardless()
         window.makeKeyAndOrderFront(nil)
-        // The system may accept the input method before its question in System Settings appears (VM, 2026-10-21: accepted 1 s after
-        // the enable call, then System Settings covered the installer again), so the Dock icon also bounces until the user comes back.
         _ = NSApp.requestUserAttention(.criticalRequest)   // stops by itself when the installer becomes active
+    }
+
+    /// The system opens System Settings at the enable call and it covers the installer's last page (VM, dry run 82ce349a, 2026-10-21:
+    /// a first "This Mac" install and a 0.4.7 migration). For the next 10 s, when System Settings comes to the front, bring the
+    /// installer back once (VM u4a: back in front 40 ms after System Settings took it; the maintainer kept this over a Dock-only
+    /// call-back). If System Settings is already in front now, at once. Any button the user presses stops the watch.
+    private func watchSystemSettings() {
+        stopWatch()
+        if !NSApp.isActive, NSWorkspace.shared.frontmostApplication?.bundleIdentifier == Self.systemSettingsID { return comeBack() }
+        watchGeneration += 1
+        let generation = watchGeneration
+        let settingsID = Self.systemSettingsID
+        watchObserver = NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didActivateApplicationNotification,
+                                                                         object: nil, queue: .main) { [weak self] note in
+            let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
+            guard app?.bundleIdentifier == settingsID else { return }
+            MainActor.assumeIsolated {
+                self?.stopWatch()
+                self?.comeBack()
+            }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + watchWindow) { [weak self] in
+            MainActor.assumeIsolated { if self?.watchGeneration == generation { self?.stopWatch() } }
+        }
+    }
+
+    private func stopWatch() {
+        if let observer = watchObserver { NSWorkspace.shared.notificationCenter.removeObserver(observer) }
+        watchObserver = nil
     }
 
     /// After a location change whose registration is not accepted yet: wait (up to 2 minutes) for the system's answer, then show the
@@ -1036,7 +1058,6 @@ final class Controller: NSObject, NSApplicationDelegate, NSWindowDelegate {
             guard let self else { return }
             if firstInstall { self.show(Screens.logOut(), primary: { NSApp.terminate(nil) }) }
             InstallerFlow.logReturn(accepted: true, wasActive: NSApp.isActive)
-            self.callBack()
         }, timedOut: { InstallerFlow.logReturn(accepted: false, wasActive: NSApp.isActive) })
     }
 
@@ -1079,26 +1100,6 @@ final class Controller: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
         do { try p.run() } catch { return then(false) }
         DispatchQueue.main.asyncAfter(deadline: .now() + checkTimeout) { if p.isRunning { p.terminate() } }
-    }
-
-    /// Brings the installer back if it is covered, or bounces the Dock icon if it gets covered within 10 s (System Settings opens a
-    /// moment after the enable call, and the system may accept the input method before it shows its question: VM, 2026-10-21).
-    private func callBack() {
-        if !NSApp.isActive { return comeBack() }
-        stopCallBack()
-        callBackObserver = NotificationCenter.default.addObserver(forName: NSApplication.didResignActiveNotification, object: nil,
-                                                                  queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated {
-                self?.comeBack()
-                self?.stopCallBack()
-            }
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 10) { [weak self] in MainActor.assumeIsolated { self?.stopCallBack() } }
-    }
-
-    private func stopCallBack() {
-        if let observer = callBackObserver { NotificationCenter.default.removeObserver(observer) }
-        callBackObserver = nil
     }
 
     private func showActivate(note: String? = nil) {
@@ -1149,7 +1150,8 @@ final class Controller: NSObject, NSApplicationDelegate, NSWindowDelegate {
         show(Screens.working(Screens.waiting))
         waitForAcceptance(bundleID: bundleID, limit: pollLimit, accepted: { [weak self] in
             guard let self else { return }
-            self.callBack()
+            // Accepted after the user answered in System Settings: bring the next screen to them.
+            if !NSApp.isActive { self.comeBack() }
             // Once accepted, a second run finishes the steps after the check (ETen carry-over, disabling the modes of earlier
             // versions). It reads this process's own list, which may still say "not accepted" (see waitForAcceptance); that outcome
             // is not a legacy failure, since the fresh check said accepted, so it shows no legacy note.
@@ -1160,14 +1162,21 @@ final class Controller: NSObject, NSApplicationDelegate, NSWindowDelegate {
             self.showTry(note: finished ? nil : Screens.legacyNote)
         }, timedOut: { [weak self] in
             self?.showActivate()
-            self?.callBack()
+            // The user may still be answering or adding it in System Settings: only bounce the Dock icon, never take the front.
+            if !NSApp.isActive { _ = NSApp.requestUserAttention(.criticalRequest) }
         })
     }
 
     // MARK: actions
 
-    @objc private func primaryPressed() { primaryAction() }
-    @objc private func secondaryPressed() { secondaryAction() }
+    @objc private func primaryPressed() {
+        stopWatch()
+        primaryAction()
+    }
+    @objc private func secondaryPressed() {
+        stopWatch()
+        secondaryAction()
+    }
     @objc private func closePressed() { NSApp.terminate(nil) }
     @objc private func licensesPressed() { if let url = Paths.licenses { NSWorkspace.shared.open(url) } }
 
