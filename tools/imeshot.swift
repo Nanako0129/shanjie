@@ -4,15 +4,23 @@
 //   步驟：鍵碼（例如 49 是空白鍵、125 是 ↓）；後面加 s 表示按 Shift（43s 是 ⇧,）；
 //         `-` 只截圖不按鍵；`N*a,b,c` 把鍵碼 a、b、c 依序快速連打 N 次（每鍵約 10 ms），打完截一張。
 //   每一步截一張 `<輸出前綴>-<步驟序號>.png`，只截測試視窗和它下方候選窗的區域，不截全螢幕。
-//   環境變數 IMESHOT_VIDEO=<檔名.mov>：從視窗拿到焦點開始錄影，長度依步驟估算（一般步驟約 1.4 秒、
-//   快速連打另加每鍵 10 ms，再多留 3 秒）。錄影時 macOS 會讓周圍變暗，這是刻意保留的，使用者看得到正在錄。
+//   環境變數 IMESHOT_VIDEO=<檔名.mov>：從視窗拿到焦點開始錄影，長度依步驟估算（每步是按鍵約 0.2 秒加上
+//   IMESHOT_STEP_WAIT_MS，截圖時再加約 0.3 秒；快速連打另加每鍵 IMESHOT_PACE_MS；加上 IMESHOT_PRE_WAIT_MS；再多留 3 秒）。錄影時 macOS 會讓周圍變暗，這是刻意保留的，使用者看得到正在錄。
 //   環境變數 IMESHOT_SCREEN=builtin：視窗開在筆電內建螢幕的正中央（沒有內建螢幕就中止）。
 //   環境變數 IMESHOT_DEMO=1：視窗加高，候選窗開在本程式自己的空白文字區上，截圖與錄影只截這個視窗，
 //   不會拍到後面的任何畫面（給要分享的 demo 用）。
+//   demo 的其他環境變數（做 demo 的完整流程在維護者本機的 skill `shanjie-demo`）：
+//     IMESHOT_DEMO_SIZE=820x400 視窗大小；IMESHOT_FONT=34 字級；IMESHOT_TITLE 視窗標題；
+//     IMESHOT_PACE_MS=50 快速連打時每鍵的間隔（預設 10）；IMESHOT_STEP_WAIT_MS=700 每步之後的等待（預設 900）；
+//     IMESHOT_PRE_WAIT_MS=1000 開始錄影後、打字前的等待；IMESHOT_NOSHOT=1 不截圖；
+//     IMESHOT_RESTORE=<輸入法 ID> 結束時切到這個輸入法（預設切回原本的）。
+//   v0.5.0 的 demo 用 IMESHOT_DEMO=1 IMESHOT_SCREEN=builtin IMESHOT_NOSHOT=1 IMESHOT_PACE_MS=50 IMESHOT_STEP_WAIT_MS=700
+//   IMESHOT_DEMO_SIZE=820x400 IMESHOT_FONT=34 IMESHOT_PRE_WAIT_MS=1000，錄出 1640×864；v0.4.0、v0.4.1 有紀錄的只有
+//   820x400、字級 34、每鍵 50 ms。數值寫錯（解不開、負數、尺寸不是 寬x高）就中止，不會默默用預設值。
 //   結束時印出按 Esc 前的組字範圍（markedRange）與最後的文字（含換行，用 debugDescription）。
 // 安全：按鍵只用 CGEvent.postToPid 送給本程式自己的 pid（和 tools/imetype.swift 相同），就算焦點跑掉也不會
 // 打進別的 App；每一步之前確認視窗在最前面，不在就等，最多 60 秒，叫不回來就中止；步驟參數在開始前全部
-// 檢查過；中止或結束時都切回原本的輸入法。
+// 檢查過；中止或結束時都切回原本的輸入法（設了 IMESHOT_RESTORE 時切到它指定的輸入法）。
 // 使用者正在用電腦時，macOS 不讓背景程式搶焦點：要請使用者在「善解截圖探測」視窗跳出來時點一下，之後不要
 // 碰鍵盤。佔用鍵盤的時間要盡量短（見 CLAUDE.md「實機測試」）。
 // 剛重裝的輸入法第一次啟用時可能吃掉前幾個鍵，先打一個鍵再按 Esc 暖機。
@@ -58,7 +66,30 @@ let app = NSApplication.shared
 app.setActivationPolicy(.regular)
 /// IMESHOT_DEMO=1: a tall window, so the candidate panel opens over the probe's own empty text view and
 /// screenshots and video show only this window, never what is behind it (for demo clips to share).
-let demo = ProcessInfo.processInfo.environment["IMESHOT_DEMO"] == "1"
+let env = ProcessInfo.processInfo.environment
+let demo = env["IMESHOT_DEMO"] == "1"
+/// IMESHOT_RESTORE: checked here, before any window, like the other parameters.
+let restoreID: TISInputSource? = env["IMESHOT_RESTORE"].map { id in
+    guard let s = source(id) else { fail("no input source \(id) for IMESHOT_RESTORE") }
+    return s }
+// Demo parameters (the header lists them); unset, every one keeps the probe's old behaviour.
+/// A set variable that does not parse stops the run before anything is typed (a mistyped value would otherwise record a
+/// whole clip with the defaults, as the first v0.4.1 take did).
+func ms(_ k: String, _ d: Int) -> useconds_t {
+    guard let v = env[k] else { return useconds_t(d * 1000) }
+    guard let n = Int(v), n >= 0, n <= 600_000, let us = useconds_t(exactly: n * 1000) else { fail("bad \(k)=\(v): milliseconds 0-600000") }
+    return us
+}
+let paceUS = ms("IMESHOT_PACE_MS", 10), stepWaitUS = ms("IMESHOT_STEP_WAIT_MS", 900), preWaitUS = ms("IMESHOT_PRE_WAIT_MS", 0)
+let noShot = env["IMESHOT_NOSHOT"] == "1"
+let demoSize: NSSize? = env["IMESHOT_DEMO_SIZE"].map { v in
+    let parts = v.split(separator: "x", omittingEmptySubsequences: false)
+    let p = parts.compactMap { Double($0) }.filter { $0.isFinite && $0 > 0 }
+    guard demo, parts.count == 2, p.count == 2 else { fail("bad IMESHOT_DEMO_SIZE=\(v): WIDTHxHEIGHT with a lowercase x, and only with IMESHOT_DEMO=1") }
+    return NSSize(width: p[0], height: p[1]) }
+let fontSize: CGFloat = env["IMESHOT_FONT"].map { v in
+    guard let f = Double(v), f.isFinite, f > 0 else { fail("bad IMESHOT_FONT=\(v)") }
+    return CGFloat(f) } ?? 22
 /// IMESHOT_SCREEN=builtin: open the window on the Mac's built-in display (when there is one), centred,
 /// e.g. to record a Retina demo away from the screen the user is working on.
 func builtinScreen() -> NSScreen? {
@@ -67,9 +98,9 @@ func builtinScreen() -> NSScreen? {
             .map { CGDisplayIsBuiltin(CGDirectDisplayID($0.uint32Value)) != 0 } ?? false
     }
 }
-let size = demo ? NSSize(width: 900, height: 520) : NSSize(width: 520, height: 90)
+let size = demoSize ?? (demo ? NSSize(width: 900, height: 520) : NSSize(width: 520, height: 90))
 var origin = demo ? NSPoint(x: 300, y: 300) : NSPoint(x: 300, y: 500)
-if ProcessInfo.processInfo.environment["IMESHOT_SCREEN"] == "builtin" {
+if env["IMESHOT_SCREEN"] == "builtin" {
     guard let b = builtinScreen() else { fail("no built-in display") }
     origin = NSPoint(x: b.visibleFrame.midX - size.width / 2, y: b.visibleFrame.midY - size.height / 2)
 }
@@ -77,9 +108,9 @@ let window = NSWindow(contentRect: NSRect(origin: origin, size: size), styleMask
 // The initializer keeps a new window on the main screen (2026-10-05: a demo meant for the built-in
 // display opened on the external one); setting the frame afterwards places it in global coordinates.
 window.setFrame(window.frameRect(forContentRect: NSRect(origin: origin, size: size)), display: false)
-window.title = "善解截圖探測（請不要碰鍵盤）"
+window.title = env["IMESHOT_TITLE"] ?? "善解截圖探測（請不要碰鍵盤）"
 let textView = NSTextView(frame: window.contentView!.bounds)
-textView.font = NSFont.systemFont(ofSize: 22)
+textView.font = NSFont.systemFont(ofSize: fontSize)
 textView.isAutomaticQuoteSubstitutionEnabled = false
 // Demo: the candidate panel aligns its first glyph under the text and sits about 15-18 pt left of it,
 // so the text needs room on the left or the panel is cropped out of the captured window.
@@ -89,7 +120,8 @@ window.makeKeyAndOrderFront(nil)
 window.makeFirstResponder(textView)
 let pid = ProcessInfo.processInfo.processIdentifier
 let original = TISCopyCurrentKeyboardInputSource().takeRetainedValue()
-restore = { DispatchQueue.main.sync { _ = TISSelectInputSource(original) } }
+let restoreTo = restoreID ?? original
+restore = { DispatchQueue.main.sync { _ = TISSelectInputSource(restoreTo) } }
 
 func onMain<T>(_ f: () -> T) -> T { DispatchQueue.main.sync(execute: f) }
 func press(_ code: CGKeyCode, shift: Bool, gap: useconds_t = 80_000) {
@@ -135,12 +167,16 @@ DispatchQueue.global().async {
     // IMESHOT_VIDEO=<file.mov>: record the probe region with screencapture (its dimmed overlay tells the
     // user a recording is running) from the moment the window has focus, just long enough for the steps.
     var recorder: Process?
-    if let video = ProcessInfo.processInfo.environment["IMESHOT_VIDEO"] {
+    if let video = env["IMESHOT_VIDEO"] {
         let f = onMain { window.frame }, h = onMain { NSScreen.screens[0].frame.height }
-        // Estimated, not measured exactly: a step is about 0.16 s of keys, 0.9 s of wait and a
-        // screenshot; rapid steps add about 10 ms per key; 3 s spare.
-        let typing = plan.reduce(0.0) { sum, s in if case .rapid(let n, let c) = s { return sum + Double(n * c.count) * 0.01 }; return sum }
-        let seconds = Int((Double(plan.count) * 1.4 + typing).rounded(.up)) + 3
+        // Estimated, not measured exactly: a step is about 0.2 s of keys plus the step wait, plus about 0.3 s when it
+        // takes a screenshot (with the defaults 1.4 s, the old value); rapid steps add the pace per key; then the
+        // wait before typing; 3 s spare. With no demo variable set this equals the old formula for every length.
+        // Whole microseconds, not Double: 0.2 + 0.9 + 0.3 is not exactly 1.4 and rounded some lengths up a second.
+        let typingUS = plan.reduce(0) { sum, s in if case .rapid(let n, let c) = s { return sum + n * c.count * Int(paceUS) }; return sum }
+        let perStepUS = 200_000 + Int(stepWaitUS) + (noShot ? 0 : 300_000)
+        let totalUS = plan.count * perStepUS + typingUS + Int(preWaitUS)
+        let seconds = (totalUS + 999_999) / 1_000_000 + 3
         let r = Process(); r.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
         let area = demo ? "\(Int(f.minX)),\(Int(h - f.maxY)),\(Int(f.width)),\(Int(f.height))"
                         : "\(Int(f.minX) - 20),\(Int(h - f.maxY) - 20),620,330"
@@ -149,19 +185,20 @@ DispatchQueue.global().async {
         recorder = r
         usleep(1_500_000)  // screencapture's recording starts about a second after launch
     }
+    usleep(preWaitUS)
     for (i, step) in plan.enumerated() {
         ensureFront()
         switch step {
         case .rapid(let n, let codes):
-            // About 10 ms per key: the user cannot type while this runs (2026-10-05, "太慢了").
-            for _ in 0..<n { for code in codes { press(code, shift: false, gap: 5_000) } }
+            // IMESHOT_PACE_MS per key (10 ms unless set): the user cannot type while this runs (2026-10-05, "太慢了").
+            for _ in 0..<n { for code in codes { press(code, shift: false, gap: paceUS / 2) } }
         case .key(let code, let shift):
             press(code, shift: shift)
         case .capture:
             break
         }
-        usleep(900_000)
-        capture(i)
+        usleep(stepWaitUS)
+        if !noShot { capture(i) }
     }
     let state = onMain { () -> String in
         let r = textView.markedRange()
