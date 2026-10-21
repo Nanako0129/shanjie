@@ -57,8 +57,11 @@ class Pick(unittest.TestCase):
         r = row(ng, [0.0] * n, [0] * 11 + [1], ch=ch)
         j, order, how = R.r1_pick(PLAIN, r, 2.0, 4)
         self.assertEqual((order[:2], how), ([10, 11], "ok"))
-        r["sc"]["ll"] = [0.0] * 8                                          # the extra ll missing: s first decides
-        self.assertEqual(R.r1_pick(PLAIN, r, 2.0, 4), (10, order, "short"))
+        r["sc"]["ll"][10] = None                                           # a top-8 candidate without ll (null): s first decides
+        self.assertEqual(R.r1_pick(PLAIN, r, 2.0, 4), (10, order, "nollcand"))
+        r["sc"]["ll"][10] = 0.0
+        r["sc"]["ll"][9] = None                                            # a null outside the new top 8 does not matter
+        self.assertEqual(R.r1_pick(PLAIN, r, 2.0, 4)[2], "ok")
         del r["sc"]["ll"]
         self.assertEqual(R.r1_pick(PLAIN, r, 2.0, 4)[0::2], (10, "none"))
 
@@ -108,9 +111,18 @@ class Anchors(unittest.TestCase):
             with open(os.path.join(d, name), "w") as f:
                 f.write(text)
         p = lambda n: os.path.join(d, n)
-        R.anchor3(type("A", (), {"n64": p("a"), "n8": p("b")}))
+        res = R.anchor3(type("A", (), {"n64": p("a"), "n8": p("b"), "setting": "chat-std"}))
+        self.assertEqual((res["pass"], res["rows_with_more_than_8_ll"], len(res["n64_sha256"])), (True, 1, 64))
+        bad = type("A", (), {"n64": p("a"), "n8": p("c"), "setting": "chat-std", "out": p("res.json")})
         with self.assertRaises(SystemExit):
-            R.anchor3(type("A", (), {"n64": p("a"), "n8": p("c")}))
+            R.anchor3(bad)
+        R.main(["anchor3", "--setting", "chat-std", "--n64", p("a"), "--n8", p("b"), "--out", p("ok.json")])
+        with open(p("ok.json")) as f:
+            self.assertTrue(json.load(f)["pass"])
+        with self.assertRaises(SystemExit):
+            R.main(["anchor3", "--setting", "chat-std", "--n64", p("a"), "--n8", p("c"), "--out", p("bad.json")])
+        with open(p("bad.json")) as f:
+            self.assertFalse(json.load(f)["pass"])
 
 
 class Tags(unittest.TestCase):
@@ -170,25 +182,32 @@ class Final(unittest.TestCase):
             role = R.ROLES[s][n]
             doc = {"setting": s, "name": n, "role": role, "n": R.ROW_COUNTS[n], "anchor1": "ok", "cell": "0.5,2", "fixes": 3, "breaks": 1,
                    "net": 2, "error_ratio": 0.33, "ngram_fixes": 1, "ngram_breaks": 0, "top8_changed_rows": 2, "top8_needs_beyond_8_rows": 1,
-                   "rows_without_ll": 0, "rows_ll_short": 0, "gold_in_64": 10}
+                   "rows_without_ll": 0, "rows_top8_candidate_without_ll": 0, "gold_in_64": 10}
             if s == "chat-std" and n in R.ANCHOR2_SETS:
                 doc["anchor2"] = "ok"
             if role in ("1", "2a", "2b"):
                 doc["verdict"] = True
             if role == "3":
                 doc.update({"base_ok": "1" * 150 + "0" * 4, "cell_ok": "1" * 152 + "0" * 2, "gold_deducted": [[3, 1, -2.0]]})
+            if n == "cvtune-clean":
+                doc["scores_sha256"] = "sha-" + s
             doc.update(over.get((s, n), {}))
             paths.append(os.path.join(d, f"{s}-{n}.json"))
             with open(paths[-1], "w") as f:
                 json.dump(doc, f)
+        self.a3 = []
+        for s in ("chat-std", "formal-std"):
+            self.a3.append(os.path.join(d, f"a3-{s}.json"))
+            with open(self.a3[-1], "w") as f:
+                json.dump({"setting": s, "name": "cvtune-clean", "pass": True, "n64_sha256": "sha-" + s, "n8_sha256": "x"}, f)
         sel = os.path.join(d, "sel.json")
         with open(sel, "w") as f:
             json.dump({"chosen": "0.5,2"}, f)
         return sel, paths, os.path.join(d, "out.json")
 
-    def run_final(self, over=None):
+    def run_final(self, over=None, a3=None):
         sel, paths, out = self.judged(over)
-        R.main(["final", sel, *paths, "--out", out])
+        R.main(["final", sel, *paths, "--out", out, "--anchor3", *(a3 or self.a3)])
         with open(out) as f:
             return json.load(f)
 
@@ -200,10 +219,24 @@ class Final(unittest.TestCase):
     def test_one_failed_clause_is_not_all_pass(self):
         self.assertFalse(self.run_final({("formal-cons", "wikitune-clean"): {"verdict": False}})["all_pass"])
 
+    def test_final_needs_a_passing_anchor3_of_the_judged_scores_files(self):
+        sel, paths, _ = self.judged()
+        with open(self.a3[0]) as f:
+            doc = json.load(f)
+        for change in ({"pass": False}, {"n64_sha256": "another file"}):
+            with open(self.a3[0], "w") as f:
+                json.dump({**doc, **change}, f)
+            with self.assertRaises(SystemExit):
+                R.main(["final", sel, *paths, "--anchor3", *self.a3])
+        with self.assertRaises(SystemExit):
+            R.main(["final", sel, *paths, "--anchor3", self.a3[1], self.a3[1]])
+        with self.assertRaises(SystemExit):
+            R.main(["final", sel, *paths])
+
     def test_missing_wrong_cell_or_unchecked_anchor2_stop(self):
         sel, paths, _ = self.judged()
         with self.assertRaises(SystemExit):
-            R.main(["final", sel, *paths[1:]])
+            R.main(["final", sel, *paths[1:], "--anchor3", *self.a3])
         with self.assertRaises(SystemExit):
             self.run_final({("chat-std", "discordtune"): {"cell": "1.0,4"}})
         with self.assertRaises(SystemExit):

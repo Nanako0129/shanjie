@@ -398,12 +398,35 @@ fn scores_topk_extends_ll_and_changes_nothing_else() {
     }
     assert_eq!(rows_n, 40);
     assert!(longer > 0, "some row has a 9th candidate, or the check proves nothing");
+    // The extra `ll` are those of `TinyLm::rerank_ll`'s rule: ll_many of (k, candidate) with k = the context key, SENTINEL (no Han
+    // character before the cursor) being the empty k. Computed here by calling ll_many directly, in the same block of 8 as the CLI.
+    let tl = core::tinylm::TinyLm::load(Path::new(&sjtl)).unwrap();
+    let dump = text(&n16.0);
+    let ctxs: Vec<String> = std::fs::read_to_string(&rows).unwrap().lines().map(|l| l.split('|').next().unwrap().to_string()).collect();
+    let (mut checked, mut empty_k) = (0, 0);
+    for (i, line) in text(&n16.2).lines().enumerate() {
+        if !line.contains("\"ll\": [") {
+            continue;
+        }
+        let cands: Vec<&str> = dump.lines().map(|l| l.split('\t').collect::<Vec<_>>()).filter(|f| f[0] == (i + 1).to_string()).map(|f| f[2]).collect();
+        let key = core::learn::context_key(&ctxs[i]);
+        empty_k += (key == core::learn::SENTINEL) as usize;
+        let k = if key == core::learn::SENTINEL { "" } else { key.as_str() };
+        let items: Vec<(&str, &str)> = cands.iter().skip(8).take(8).map(|c| (k, *c)).collect();
+        let want = if items.is_empty() { vec![] } else { tl.ll_many(&items).unwrap() };
+        let got = list_of(line, "ll");
+        assert_eq!(got[8..].iter().map(|x| x.to_bits()).collect::<Vec<_>>(), want.iter().map(|x| x.to_bits()).collect::<Vec<_>>(), "row {}", i + 1);
+        checked += want.len();
+    }
+    assert!(checked > 0 && empty_k > 0, "extra candidates were compared, with an empty context among them");
     for bad in [&["--tinylm-scores-topk", "7"][..], &["--tinylm-scores-topk", "x"]] {
         let mut a = vec!["--lm", &lm, "--profile", "chat", "--rows", rows.to_str().unwrap(), "--tinylm", &sjtl, "--tinylm-scores", "/dev/null"];
         a.extend(bad);
         assert!(!run(&a).status.success());
     }
-    let o = run(&["--lm", &lm, "--profile", "chat", "--rows", rows.to_str().unwrap(), "--tinylm", &sjtl, "--tinylm-scores-topk", "16"]);
-    assert!(!o.status.success() && text(&o.stderr).contains("--tinylm-scores"));
+    for n in ["8", "16"] {   // given at all, any value, without --tinylm-scores
+        let o = run(&["--lm", &lm, "--profile", "chat", "--rows", rows.to_str().unwrap(), "--tinylm", &sjtl, "--tinylm-scores-topk", n]);
+        assert!(!o.status.success() && text(&o.stderr).contains("--tinylm-scores"), "topk {n}");
+    }
     std::fs::remove_dir_all(dir).unwrap();
 }

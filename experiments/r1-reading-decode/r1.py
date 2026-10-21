@@ -7,7 +7,7 @@ numbers only on stdout and in the JSON: never a sentence, context, word or chara
                 --sjtl data/lm/tinylm.sjtl [--t2 data/lm/colloquial.sjlm]  (--cells | --cell-from SEL.json)  --out OUT.json
                 [--norc-scores SC2 --norc-rowstats RS2 --norc-summary SUM2]    (chat-std on chatclause / discordtune: anchor 2)
   r1.py select  CHATCLAUSE_CELLS.json WIKITUNE_CLEAN_CELLS.json --out SEL.json
-  r1.py anchor3 --n64 SCORES_N64 --n8 SCORES_N8                                  (chat-std and formal-std cvtune-clean)
+  r1.py anchor3 --setting S --n64 SCORES_N64 --n8 SCORES_N8 --out A3.json                                 (chat-std and formal-std cvtune-clean)
   r1.py final   SEL.json JUDGE.json ...                                          (the four clauses from the 17 judged runs)
 
 S is one of chat-std chat-cons chat-aggr formal-std formal-cons formal-aggr (README table). `run` needs the CLI's stdout (the summary line)
@@ -51,15 +51,13 @@ ROLES = {"chat-std": {"chatclause": "select", "discordtune": "1", "cvtune-clean"
 SELECT_SETS = {("chat-std", "chatclause"), ("formal-std", "wikitune-clean")}
 ANCHOR2_SETS = {"chatclause", "discordtune"}             # chat-std runs that have a --no-reading-channel twin
 ROW_COUNTS = {**Q.ROW_COUNTS, "wikitune-clean": 2181}
-ROW_SHA256 = dict(Q.ROW_SHA256)
-WIKITUNE_SHA = "d576ea941242e04d718c3d5cf4711c43693588d1089461970293edcec9c5db92"  # eval/bench/kpi/*.json wikitune_clean.rows_sha256
+# p5's table and its check_rows_sha (a set without a hash is a STOP there: KeyError is not a pass), wikitune-clean added
+Q.ROW_SHA256["wikitune-clean"] = "d576ea941242e04d718c3d5cf4711c43693588d1089461970293edcec9c5db92"  # eval/bench/kpi/*.json wikitune_clean.rows_sha256
 # final: the judged runs the four clauses are read from (every (setting, set) of the table that is not a selection set)
 JUDGED = sorted((s, n) for s, d in ROLES.items() for n in d if (s, n) not in SELECT_SETS)
 
 
-def stop(msg):
-    print(f"STOP: {msg}")
-    raise SystemExit(1)
+stop = Q.stop
 
 
 # ---------------------------------------------------------------- the .sjtl header, summary line, row files
@@ -87,13 +85,6 @@ def header_params(path, profile, level):
 def sha_file(path):
     with open(path, "rb") as f:
         return hashlib.sha256(f.read()).hexdigest()
-
-
-def check_rows_file(name, path):
-    h = sha_file(path)
-    want = ROW_SHA256.get(name)
-    if (want and h != want) or (name == "wikitune-clean" and h != WIKITUNE_SHA):
-        stop(f"{name}: the --rows file's sha256 is not the registered one")
 
 
 def read_summary(path):
@@ -134,7 +125,9 @@ def load_run(a, setting, name):
     import d23 as D
     profile, level = SETTINGS[setting]
     n_want = ROW_COUNTS[name]
-    check_rows_file(name, a.rows)
+    if name not in Q.ROW_SHA256:
+        stop(f"{name}: no registered rows hash")
+    Q.check_rows_sha(name, a.rows)
     rows = T.parse_rows(T.read_text(a.rows))
     base = evalstats.read_rowstats(a.rowstats)
     tag, n_sum, top1 = read_summary(a.summary)
@@ -156,17 +149,18 @@ def load_run(a, setting, name):
         k = len(sc["ng"])
         if k != min(len(cs), TOP_K) or sc["ng"] != [c[1] for c in cs[:k]] or [bool(x) for x in sc["ok"]] != ok64[:k] or sc["ed"] != ed64[:k]:
             stop(f"row {i}: the scores record's ng / ok / ed are not the dump's and the lenient comparison's")
+        if "ll" in sc and len(sc["ll"]) != min(64, len(cs)):
+            stop(f"row {i}: {len(sc['ll'])} ll for {len(cs)} candidates: --tinylm-scores-topk 64 is required (an N 8 scores file is refused)")
         if sc["glen"] != base[i - 1][2]:
             stop(f"row {i}: gold length differs between scores and rowstats")
         out.append({"syls": syls, "cands": cs, "sc": sc, "ok64": ok64, "ed64": ed64, "ng64": [c[1] for c in cs]})
-    lex = D.load_lex_scores()[0]
+    lex, ovl = D.load_lex_scores()
     logp = Q.lex_logp(lex)
     for r in out:
         r["terms"] = [Q.word_terms(r["syls"], c[2], logp) for c in r["cands"]]
         r["ch"] = {c: [Q.ch_of(t, c) for t in r["terms"]] for c in CS}
     if setting == "chat-std":
         import p4
-        _, ovl = D.load_lex_scores()
         if sha_file(a.t2) != P.T2_SHA256:
             stop("--t2 is not P4's T2 table (sha256)")
         try:
@@ -219,8 +213,9 @@ def ship_picks(cfg, rows):
 
 
 def r1_pick(cfg, r, lam, c):
-    """-> (chosen candidate index among the 64, order of the 64 by s, 'ok' | 'none' | 'short'): the new top 8 by s = ng + lam * ch go into
-    the fusion with their own ll; a row without `ll` for all of them is decided by the first of s (README)."""
+    """-> (chosen candidate index among the 64, order of the 64 by s, 'ok' | 'none' | 'nollcand'): the new top 8 by s = ng + lam * ch go
+    into the fusion with their own ll; a row without `ll`, or whose new top 8 has a candidate without one (null: over the model's context), is decided
+    by the first of s (README, registered rule: core skips the rerank when a top-8 candidate is too long)."""
     ch = r["ch"][c]
     s = [g + lam * h for g, h in zip(r["ng64"], ch)]
     order = sorted(range(len(s)), key=lambda j: (-s[j], j))
@@ -228,8 +223,8 @@ def r1_pick(cfg, r, lam, c):
     ll = r["sc"].get("ll")
     if ll is None:
         return top[0], order, "none"
-    if any(j >= len(ll) for j in top):
-        return top[0], order, "short"
+    if any(ll[j] is None for j in top):
+        return top[0], order, "nollcand"
     col = [r["col"][j] for j in top] if "col" in r else []
     return top[fuse_index(cfg, [s[j] for j in top], [ll[j] for j in top], col, None)], order, "ok"
 
@@ -279,6 +274,10 @@ def check_lambda0(cfg, rows, ship):
         stop(f"lambda 0 reordering differs from the shipping cell on {len(bad)} rows (dump not in n-gram order?), first rows {bad[:10]}")
 
 
+def write_anchor3(a, res):
+    Q.write_atomic(a.out, json.dumps(res, indent=1))
+
+
 def anchor3(a):
     """The first 8 `ll` of the N 64 scores file equal the N 8 file's, byte for byte (as text), and nothing else in a record differs."""
     n64, n8 = (T.lines_of(T.read_text(p)) for p in (a.n64, a.n8))
@@ -295,8 +294,12 @@ def anchor3(a):
         if cut != y:
             bad.append(i)
     if bad:
+        write_anchor3(a, {"setting": a.setting, "name": "cvtune-clean", "pass": False, "rows": len(n64), "mismatched_rows": len(bad),
+                          "n64_sha256": sha_file(a.n64), "n8_sha256": sha_file(a.n8)})
         stop(f"anchor 3 mismatch: the first 8 ll (or another field) differ on {len(bad)} rows, first rows {bad[:10]}")
     print(f"anchor 3 OK rows {len(n64)} rows_with_more_than_8_ll {longer}")
+    return {"setting": a.setting, "name": "cvtune-clean", "pass": True, "rows": len(n64), "rows_with_more_than_8_ll": longer,
+            "n64_sha256": sha_file(a.n64), "n8_sha256": sha_file(a.n8)}
 
 
 # ---------------------------------------------------------------- report-only numbers
@@ -318,20 +321,20 @@ def term_counts(rows):
 
 def run_cell(cfg, rows, base_ok, cell):
     lam, c = cell
-    picks, firsts, moved, beyond, no_ll, short = [], [], 0, 0, 0, 0
+    picks, firsts, moved, beyond, no_ll, nollcand = [], [], 0, 0, 0, 0
     for r in rows:
         j, order, how = r1_pick(cfg, r, lam, c)
         picks.append(j)
         firsts.append(order[0])
         top = order[:TOP_K]
         moved += set(top) != set(range(min(len(order), TOP_K)))
-        beyond += any(x >= TOP_K for x in top)
+        beyond += how != "none" and any(x >= TOP_K for x in top)
         no_ll += how == "none"
-        short += how == "short"
+        nollcand += how == "nollcand"
     s = stats_of(base_ok, rows, picks)
     ng = p4c.stats([r["ok64"][0] for r in rows], [r["ok64"][j] for r, j in zip(rows, firsts)])
     s.update({"ngram_fixes": ng["fixes"], "ngram_breaks": ng["breaks"], "top8_changed_rows": moved, "top8_needs_beyond_8_rows": beyond,
-              "rows_without_ll": no_ll, "rows_ll_short": short})
+              "rows_without_ll": no_ll, "rows_top8_candidate_without_ll": nollcand})
     return s, picks
 
 
@@ -380,7 +383,7 @@ def cmd_run(a):
     cfg = make_cfg(a.sjtl, a.setting, SHIP_NU)
     cfg_r1 = make_cfg(a.sjtl, a.setting, 0.0)
     anchor1(cfg, rows, base_ok)
-    res = {"setting": a.setting, "name": a.name, "role": role, "n": len(rows), "anchor1": "ok",
+    res = {"setting": a.setting, "name": a.name, "role": role, "n": len(rows), "anchor1": "ok", "scores_sha256": sha_file(a.tinylm_scores),
            "gold_in_64": sum(any(r["ok64"]) for r in rows), "terms": term_counts(rows),
            "shipping_params": list(cfg["plain"])}
     p4d = ship_picks(cfg_r1, rows)        # chat-std: the P4d cell (nu 0); every other setting: the shipping cell again
@@ -460,6 +463,16 @@ def cmd_final(a):
         if d["setting"] == "chat-std" and d["name"] in ANCHOR2_SETS and d.get("anchor2") != "ok":
             stop(f"{p}: anchor 2 was not checked")
         runs[d["setting"], d["name"]] = d
+    seen3 = set()
+    for p in a.anchor3:
+        with open(p, encoding="utf-8") as f:
+            d = json.load(f)
+        run = runs.get((d.get("setting"), "cvtune-clean"))
+        if not d.get("pass") or d.get("name") != "cvtune-clean" or run is None or run.get("scores_sha256") != d.get("n64_sha256"):
+            stop(f"{p}: no passing anchor 3 for the N 64 scores file of the judged {d.get('setting')} cvtune-clean run")
+        seen3.add(d["setting"])
+    if seen3 != {"chat-std", "formal-std"}:
+        stop("anchor 3 is required for chat-std and formal-std")
     miss = [k for k in JUDGED if k not in runs]
     if miss or len(runs) != len(a.judged):
         stop(f"judged runs missing {miss} or duplicated ({len(a.judged)} files, {len(runs)} runs)")
@@ -482,7 +495,7 @@ def cmd_final(a):
     print(f"clause 3 pooled fixes {s['fixes']} breaks {s['breaks']} net {s['net']} error_ratio {s['error_ratio']:.3f}")
     print("ALL FOUR CLAUSES PASS" if res["all_pass"] else "NOT ALL CLAUSES PASS: 照登記不過")
     res["report_only"] = {f"{s}/{n}": {k: runs[s, n][k] for k in ("fixes", "breaks", "net", "error_ratio", "ngram_fixes", "ngram_breaks",
-                                                                      "top8_changed_rows", "top8_needs_beyond_8_rows", "rows_without_ll", "rows_ll_short", "gold_in_64")}
+                                                                      "top8_changed_rows", "top8_needs_beyond_8_rows", "rows_without_ll", "rows_top8_candidate_without_ll", "gold_in_64")}
                           for s, n in JUDGED}
     res["gold_deducted"] = {k[0]: runs[k]["gold_deducted"] for k in by_role("3")}
     if a.out:
@@ -510,14 +523,17 @@ def main(argv=None):
     s.add_argument("--out", required=True)
     f = sub.add_parser("final")
     f.add_argument("sel")
+    f.add_argument("--anchor3", nargs=2, required=True, metavar=("CHAT_STD.json", "FORMAL_STD.json"), help="the passing anchor3 results of the two cvtune-clean runs")
     f.add_argument("judged", nargs="+")
     f.add_argument("--out")
     n = sub.add_parser("anchor3")
+    n.add_argument("--setting", required=True, choices=("chat-std", "formal-std"))
+    n.add_argument("--out", required=True)
     n.add_argument("--n64", required=True)
     n.add_argument("--n8", required=True)
     a = ap.parse_args(argv)
     if a.cmd == "anchor3":
-        anchor3(a)
+        write_anchor3(a, anchor3(a))
         return 0
     return {"run": cmd_run, "select": cmd_select, "final": cmd_final}[a.cmd](a)
 
