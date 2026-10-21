@@ -8480,3 +8480,14 @@ XL 比 `MAX_FILE`（67,108,864）小 1,168,880 位元組。錨點：4 個模型 
 - **再快的方向**（這片不做）：
   - release 測試按套件拆成兩個 macOS job，代價是每次 run 佔 4 個名額。
   - 引擎建立的速度（產品片）。這是 Swift 測試與 cli 整合測試的主要成本，也是輸入法切換設定時重建引擎的成本。
+
+## 2026-10-22：v0.5.0 虛擬機驗收（dry run `f0a28c38`，含模型列表與叫回監看）
+
+- dry run run 39621845198（main `f0a28c38`，合併 #253、#254 之後）的簽章版，兩台新 clone 的 tart 虛擬機（macOS 26.6.2）。安裝程式 `spctl`：accepted，Notarized Developer ID。
+- **第一次安裝這台 Mac**（u5e）：
+  - 紀錄 `registration: forced (location changed)`、`notAccepted`。
+  - 系統設定拿到前景之後，安裝程式在幾秒內回到前面（維護者）。這是 #253 的新監看（只在換位置的兩個登出頁、10 秒內），第一次在簽章版上看到。
+  - 登出再登入、到「系統設定 → 鍵盤」加入之後：`/Library/Input Methods/善解輸入法.app`，輸入來源 enabled、selectable，輸入法從 `/Library` 執行。
+  - 關於頁「模型」一節列出六個模型與代號：通語 SJ-LM-6-9.1M、辨類 SJ-WC-5-512C、承接 SJ-KN-1-353K、連文 SJ-CX-1-7.7M、會意 SJ-SR-6-14M、常談 SJ-CL-1-68K（維護者截圖），「善解裝給這台 Mac 的所有帳號」那段也對。
+- **只有我的帳號、全新**（u5a）：`registration: as before`、`notAccepted`，手動加入後完成（維護者）；帳號層 `善解輸入法.app`，輸入來源 enabled、selectable。
+- 10-21 那一輪已通過的 a–g 不重做：這次 dry run 只多了 #253（叫回監看）與 #254（關於頁），兩項都在上面量了。
