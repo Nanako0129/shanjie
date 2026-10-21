@@ -425,6 +425,10 @@ jobs:
       - name: CI gate script
         run: scripts/test-check-ci-gate.sh
 
+      # The model list of the About page (about-models.md): scripts/check-models.sh on fake folders.
+      - name: Model list check
+        run: scripts/test-check-models.sh
+
       # Step 5: install-ime.sh file handling with a stub app in a temporary HOME; nothing can be registered.
       - name: "Step 5: install script file handling"
         run: scripts/test-install-ime.sh

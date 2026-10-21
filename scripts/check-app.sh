@@ -75,12 +75,16 @@ for lp in "zh-Hant|$NAME_ZH" "en|$NAME_EN"; do
     [ "$(pb "$k" "$S")" = "$name" ] || fail "$l InfoPlist.strings: $k"
   done
 done
-for f in mcbpmf-data.txt overlay-add.tsv sandhi-add.tsv names-add.tsv demote.tsv digits.tsv bigram.sjlm classes.sjc kn.sjkn trigram.sjt3 tinylm.sjtl colloquial.sjlm shanjie.tiff \
+for f in mcbpmf-data.txt overlay-add.tsv sandhi-add.tsv names-add.tsv demote.tsv digits.tsv models.tsv shanjie.tiff \
          packs/acg-add.tsv packs/acg-sources.tsv packs/acg.json LICENSES/LICENSE LICENSES/McBopomofo-MIT.txt LICENSES/data.md LICENSES/CC-BY-SA-4.0-attribution.txt \
          english-words.txt LICENSES/SCOWL.txt LICENSES/SymSpell-MIT.txt LICENSES/english-words-attribution.txt \
          LICENSES/name-suggestion-index-BSD-3-Clause.txt LICENSES/Sparkle-MIT.txt LICENSES/colloquial-attribution.tsv; do
   [ -s "$R/$f" ] || fail "Resources/$f is missing or empty"
 done
+# The models: the bundled models.tsv is the list (about-models.md section 2), checked both ways against the files.
+"$(dirname "$0")/check-models.sh" bundle "$R" || exit 1
+cmp -s "$R/models.tsv" "$(dirname "$0")/../data/models.tsv" || fail "Resources/models.tsv differs from data/models.tsv"
+while IFS=$'\t' read -r mf _; do [ -s "$R/$mf" ] || fail "Resources/$mf is missing or empty"; done < "$R/models.tsv"
 # digits.tsv is optional for the core (a missing table turns the feature off without a word), so the bundle must carry exactly the repo's.
 cmp -s "$R/digits.tsv" "$(dirname "$0")/../data/lexicon/digits.tsv" || fail "Resources/digits.tsv differs from data/lexicon/digits.tsv"
 # The app icon (docs/contracts/app-icon.md): compiled by actool, named in Info.plist.
