@@ -30,6 +30,9 @@ class FakeGuard:
     def hits(self, s):
         return ({"dev", "holdout"} if "一起去吃" in s else set()), set()
 
+    def hit_rows(self, s):
+        return {("dev", "d.txt:1"), ("holdout", "h.txt:3")} if "一起去吃" in s else set()
+
 
 def make_ctx(d, simp=SIMP):
     lex = write(d, "lex.txt", "# format\n_ctrl_x ！ 0.0\n" + "".join(f"ㄅ {c} -1.0\n" for c in LEXICON) + "bad line\n")
@@ -115,6 +118,73 @@ class Reject(unittest.TestCase):
         self.assertEqual(t("invade", KEEP + "視頻"), "視頻")
 
 
+class Guarding(unittest.TestCase):
+    CONV = ({}, {}, 1)
+
+    def guard(self, d, label="dev", text="大家都很開心|太棒了\n"):
+        g = C.RowGuard(self.CONV, C.P2.MIN_HAN)
+        g.add_rows_file(label, write(d, f"{label}.txt", text), f"{label}.txt")
+        g.build()
+        return g
+
+    def test_a_five_han_eval_sentence_inside_a_longer_line_is_dropped(self):
+        with tempfile.TemporaryDirectory() as d:
+            g = self.guard(d, text="好|你好嗎真的\n")                      # the 5-Han sentence is shorter than p2clean's CONTAIN_MIN 8
+            ctx, _ = make_ctx(d)
+            kept, man = C.clean(["我們今天一起去吃飯喔，你好嗎真的是這樣啊太棒了", "看電影很好玩啊真的是這樣"], ctx, g)
+            self.assertEqual([s for _, s in kept], ["看電影很好玩啊真的是這樣"])
+            self.assertEqual(man["guard"]["rows_hit_by_label"], {"dev": 1})
+            # with p2clean's default (8) the line would have been kept: only counted as a short hit
+            g8 = C.P2.Guard(self.CONV, C.P2.CONTAIN_MIN)
+            g8.add_rows_file("dev", os.path.join(d, "dev.txt"), "dev.txt")
+            g8.build()
+            labels, short = g8.hits("我們今天一起去吃飯喔你好嗎真的是這樣啊太棒了")
+            self.assertEqual((labels, short), (set(), {"dev"}))
+
+    def test_build_guard_uses_four_character_containment_and_the_row_guard(self):
+        seen = {}
+
+        def fake(repo, conv, contain_min):
+            seen["cm"], seen["cls"] = contain_min, C.P2.Guard
+            g = C.P2.Guard(conv, contain_min)
+            g.files.extend({"label": l} for l in C.REQUIRED_LABELS)
+            g.build()
+            return g, []
+        a = C.argparse.Namespace(cache=None, repo="r", conv=self.CONV, extra_rows=[])
+        with mock.patch.object(C.P2, "build_guard", fake), contextlib.redirect_stdout(io.StringIO()):
+            C.build_guard(a)
+        self.assertEqual((seen["cm"], seen["cls"]), (4, C.RowGuard))
+        self.assertIsNot(C.P2.Guard, C.RowGuard)                           # restored
+
+    def test_required_labels(self):
+        with tempfile.TemporaryDirectory() as d:
+            g = self.guard(d)
+            g.files.extend({"label": l} for l in C.REQUIRED_LABELS if l != "chatjudge2")
+            with contextlib.redirect_stdout(io.StringIO()) as out, self.assertRaises(SystemExit) as cm:
+                C.check_labels(g)
+            self.assertIn("chatjudge2", str(cm.exception.code))
+            self.assertIn("guard labels:", out.getvalue())
+            g.files.append({"label": "chatjudge2"})
+            with contextlib.redirect_stdout(io.StringIO()) as out:
+                self.assertEqual(C.check_labels(g), sorted(set(C.REQUIRED_LABELS) | {"dev"}))
+
+    def test_rows_hit_count_exact_and_containment_together(self):
+        with tempfile.TemporaryDirectory() as d:
+            g = self.guard(d, text="前文|看電影很好玩啊\n一起去吃飯\n")     # a row with fields (containment) and a word-list line (exact)
+            self.assertEqual(g.hit_rows("我們看電影很好玩啊喔"), {("dev", "dev.txt:1")})
+            self.assertEqual(g.hit_rows("一起去吃飯"), {("dev", "dev.txt:2")})
+            self.assertEqual(g.hit_rows("我們一起去吃飯喔"), set())          # exact entries are never contained
+            self.assertEqual(g.hit_rows("沒有的句子"), set())
+
+
+class TwoSpeakers(unittest.TestCase):
+    def test_inner_cue_dash_splits_a_line(self):
+        self.assertEqual(C.sentences("- 你好嗎啊 - 我很好啊"), ["你好嗎啊", "我很好啊"])
+        self.assertEqual(C.sentences("- 你好嗎啊 －我很好啊。再見了朋友"), ["你好嗎啊", "我很好啊", "再見了朋友"])
+        self.assertEqual(C.sentences("你好嗎啊-我很好啊"), ["你好嗎啊-我很好啊"])      # a hyphen with no space before it stays
+        self.assertEqual(C.sentences("你好嗎啊"), ["你好嗎啊"])
+
+
 class EndToEnd(unittest.TestCase):
     LINES = ["- " + KEEP, "「" + KEEP + "」", KEEP + "。" + "你好嗎真的是這樣啊太棒了", "看電影很好玩啊真的是這樣", KEEP + "あ", "好的", "龘龘龘龘龘龘龘" + KEEP,
              KEEP + " ok go", KEEP + SIMP, KEEP + "視頻", "看電影很好玩啊真的是這樣", "我們一起去吃飯喔太棒了"]
@@ -124,7 +194,7 @@ class EndToEnd(unittest.TestCase):
         make_ctx(d)
         out = os.path.join(d, "out")
         argv = ["--raw", raw, "--out", out, "--lexicon", os.path.join(d, "lex.txt"), "--invade", os.path.join(d, "invade"), "--repo", d,
-                "--min-han", min_han, *extra]
+                "--invade-sha256", C.invade.list_sha256({"視頻"}), "--min-han", min_han, *extra]
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf), mock.patch.object(C.bc, "TRAD_SIMP_ONLY", {SIMP}), mock.patch.object(C.bc, "load_conv", return_value=None), \
                 mock.patch.object(C, "build_guard", return_value=(FakeGuard(), [])):
@@ -146,6 +216,7 @@ class EndToEnd(unittest.TestCase):
             self.assertEqual(man["kept"]["sentences"], 2)
             self.assertEqual(man["guard"]["dropped_sentences_by_label_nonexclusive"], {"dev": 2, "holdout": 2})
             self.assertEqual(man["guard"]["distinct_patterns_hit_by_label"], {"dev": 1, "holdout": 1})
+            self.assertEqual(man["guard"]["rows_hit_by_label"], {"dev": 1, "holdout": 1})           # two dropped lines, one row each
             self.assertEqual(man["remaining_after_step"]["split"], len(self.LINES) + 1)    # one line splits in two
             self.assertEqual(man["remaining_after_step"]["guard"], 2)
             half = [l.split("\t")[2] for l in open(os.path.join(out, "subs-half.tsv"), encoding="utf-8").read().splitlines()]
@@ -169,6 +240,12 @@ class EndToEnd(unittest.TestCase):
             self.assertIn(tail[0].split("\t")[1], ["你好嗎真的是這樣啊太棒了", "看電影很好玩啊真的是這樣"])
             with self.assertRaises(SystemExit):
                 self.run_main(d, ["--sample", "1"])
+
+    def test_the_invade_hash_is_required(self):
+        with tempfile.TemporaryDirectory() as d:
+            raw = write(d, "x.txt", "")
+            with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
+                C.main(["--raw", raw, "--out", d, "--invade", d])
 
     def test_too_few_han_characters_is_a_stop(self):
         with tempfile.TemporaryDirectory() as d:

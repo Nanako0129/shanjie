@@ -582,7 +582,7 @@ def write_run(d, name, scores):
 class Sub0Inputs(unittest.TestCase):
     def ns(self, d):
         dump, words, scores = write_run(d, "ship", fixture4()[1])
-        return Q.argparse.Namespace(dump=dump, dump_words=words, tinylm_scores=scores, rows="r", rowstats="x", t2="x")
+        return {"dump": Q.sha_of(dump), "dump-words": Q.sha_of(words)}               # the shipped run's hashes, taken once
 
     def test_a_candidate_run_with_the_same_dump_loads_and_a_different_dump_stops(self):
         with tempfile.TemporaryDirectory() as d:
@@ -606,13 +606,39 @@ class Sub0Inputs(unittest.TestCase):
             p = os.path.join(d, "t.sjlm")
             with open(p, "wb") as f:
                 f.write(b"table")
-            with mock.patch.object(P, "load_full") as lf:
-                exits(self, 1, Q.load_table_cols, Q.argparse.Namespace(), p, "0" * 64)
-                exits(self, 1, Q.load_table_cols, Q.argparse.Namespace(), p, "ABC")
-                lf.assert_not_called()
-                Q.load_table_cols(Q.argparse.Namespace(a=1), p, hashlib.sha256(b"table").hexdigest())
-                self.assertEqual(lf.call_args[1], {"t2_sha256": hashlib.sha256(b"table").hexdigest()})
-                self.assertEqual(lf.call_args[0][0].t2, p)
+            import p4
+            with mock.patch.object(p4, "precompute") as pre, mock.patch.object(p4, "Table"):
+                exits(self, 1, Q.load_table_cols, [], p, "0" * 64, None, None)
+                exits(self, 1, Q.load_table_cols, [], p, "ABC", None, None)
+                pre.assert_not_called()
+                pre.return_value = []
+                self.assertEqual(Q.load_table_cols([{"cands": list(range(9))}], p, hashlib.sha256(b"table").hexdigest(), "ovl", "base"), [])
+                self.assertEqual(pre.call_args[0][0], [{"cands": list(range(8))}])       # only the first 8 candidates, from the rows loaded once
+                self.assertEqual(pre.call_args[0][2:], ("ovl", "base"))
+
+    def test_weights_manifest(self):
+        m = Q.load_manifest(os.path.join(Q.ROOT, "experiments", "sub0-subtitles", "weights.sha256"))     # the real, registered manifest
+        self.assertEqual(sorted(m.values()), sorted((l, sd) for l in ("A0", "A1", "A2") for sd in Q.SEEDS))
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "w.sjtl")
+            with open(p, "wb") as f:
+                f.write(b"w")
+            h = hashlib.sha256(b"w").hexdigest()
+            Q.check_weights({h: ("A1", 20261018)}, "A1", 20261018, p, h)
+            for man, label, seed, sha in (({h: ("A1", 20261018)}, "A2", 20261018, h),          # wrong arm label
+                                          ({h: ("A1", 20261018)}, "A1", 20261019, h),          # wrong seed
+                                          ({}, "A1", 20261018, h),                              # not in the manifest
+                                          ({h: ("A1", 5)}, "A1", 5, h),                          # seed outside the three
+                                          ({h: ("A1", 20261018)}, "A1", 20261018, "0" * 64)):   # file does not have the stated hash
+                exits(self, 1, Q.check_weights, man, label, seed, p, sha)
+            bad = os.path.join(d, "m.txt")
+            with open(bad, "w") as f:
+                f.write(h + "  seeds/other.sjtl\n")
+            exits(self, 1, Q.load_manifest, bad)
+
+
+def K(label, i):
+    return f"{label}/{Q.SEEDS[i - 1]}"
 
 
 class Sub0EndToEnd(unittest.TestCase):
@@ -621,9 +647,30 @@ class Sub0EndToEnd(unittest.TestCase):
         ship = write_run(d, "ship", fixture4()[1])      # the shipped run's files: --dump/--dump-words are compared byte for byte
         args = ["--sub0", "--arm", "A", "--dump", ship[0], "--dump-words", ship[1], "--rowstats", "x", "--tinylm-scores", ship[2], "--t2", "x",
                 "--rows", "r", "--out", os.path.join(d, "o.json")] + extra
-        for label, seed, scores in cands:
-            args += ["--cand", label, str(seed), *write_run(d, f"{label}{seed}", scores)]
-        return args
+        name = args[args.index("--name") + 1]
+        if name in Q.EXCLUDE_SETS and "--exclude" not in extra:       # required on these sets: an empty list drops nothing
+            args += ["--exclude", self.exclude_file(d, "")]
+        manifest = []
+        for label, i, scores in cands:
+            seed = Q.SEEDS[i - 1]
+            sjtl = os.path.join(d, f"w-{label}{seed}.sjtl")
+            with open(sjtl, "wb") as f:
+                f.write(f"{label}{seed}".encode())
+            sha = hashlib.sha256(f"{label}{seed}".encode()).hexdigest()
+            fname = (f"seeds/tinylm-a0p-{seed}.sjtl" if label == "A0" else "tinylm-S7F%s.sjtl" % label.lower() if seed == Q.SEEDS[0]
+                     else f"seeds/tinylm-{label.lower()}-{seed}.sjtl")
+            manifest.append(f"{sha}  {fname}\n")
+            args += ["--cand", label, str(seed), sjtl, sha, *write_run(d, f"{label}{seed}", scores)]
+        mp = os.path.join(d, "weights.sha256")
+        with open(mp, "w") as f:
+            f.writelines(manifest)
+        return args + ["--weights-manifest", mp]
+
+    def exclude_file(self, d, text):
+        p = os.path.join(d, f"ex-{abs(hash(text))}.txt")
+        with open(p, "w") as f:
+            f.write(text)
+        return p
 
     def run_sub0(self, args, tables=None):
         import contextlib, io
@@ -634,7 +681,8 @@ class Sub0EndToEnd(unittest.TestCase):
                 mock.patch.object(P, "check_anchor"), mock.patch.dict(Q.P4D_ANCHORS, {"chatclause": (1, 0), "discordtune": (1, 0), "typing76": (1, 0)}), \
                 mock.patch.dict(Q.C0_ANCHORS, {"chatclause": (2, 0), "discordtune": (2, 0)}), mock.patch.object(Q, "N_EXCLUDE_DISCORD", 1), \
                 mock.patch("d23.load_lex_scores", return_value=(LEX4, None)), \
-                mock.patch.object(Q, "load_table_cols", side_effect=lambda ns, path, sha: (tables or {})[os.path.basename(path)]):
+                mock.patch.object(Q.triage.Lex, "load", return_value=Q.argparse.Namespace(base=None)), \
+                mock.patch.object(Q, "load_table_cols", side_effect=lambda rows, path, sha, ovl, base: (tables or {})[os.path.basename(path)]):
             try:
                 rc = Q.main(args)
             except SystemExit as e:
@@ -667,10 +715,10 @@ class Sub0EndToEnd(unittest.TestCase):
             c0_ok = Q.ok_of(ship, Q.sub0_picks(ship, fixture4()[2], ch, P.CONFIRM_CELL))
             for cell in P.GRID:        # the A1 cell numbers are the fixes / breaks against C0's ok, recomputed here
                 exp = Q.stats_vs(c0_ok, ship, Q.sub0_picks(ship, fixture4()[2], ch, cell))
-                got = js["cells"]["A1/1"][P.label(cell)]
+                got = js["cells"][K("A1", 1)][P.label(cell)]
                 self.assertEqual((got["fixes"], got["breaks"], got["u2"]), (exp["fixes"], exp["breaks"], exp["u2"]))
-            self.assertEqual(js["cells"]["A1/1"][P.label(P.CONFIRM_CELL)]["fixes"], 0)       # the C0 cell itself: 0 / 0 against C0
-            self.assertEqual(js["cells"]["A1/1"][P.label(P.CONFIRM_CELL)]["breaks"], 0)
+            self.assertEqual(js["cells"][K("A1", 1)][P.label(P.CONFIRM_CELL)]["fixes"], 0)       # the C0 cell itself: 0 / 0 against C0
+            self.assertEqual(js["cells"][K("A1", 1)][P.label(P.CONFIRM_CELL)]["breaks"], 0)
             self.assertIsNone(js["chosen"])
 
     def test_a_select_picks_a_cell_and_condition_0_decides(self):
@@ -683,8 +731,8 @@ class Sub0EndToEnd(unittest.TestCase):
             self.assertEqual(rc, 0, out)
             self.assertTrue(js["condition0"]["pass"])
             ch = js["chosen"]
-            self.assertEqual((ch["arm"], ch["label"], ch["seed"], ch["median_tie"]), ("A", "A1", 1, True))     # three equal seeds: tie, lowest seed
-            self.assertGreater(js["cells"]["A1/1"][ch["cell"]]["u2"], 0)
+            self.assertEqual((ch["arm"], ch["label"], ch["seed"], ch["median_tie"]), ("A", "A1", Q.SEEDS[0], True))     # three equal seeds: tie, lowest seed
+            self.assertGreater(js["cells"][K("A1", 1)][ch["cell"]]["u2"], 0)
             # A0' as good as the arm: condition 0 fails and nothing is chosen
             cands = [("A1", s, better) for s in (1, 2, 3)] + [("A0", s, better) for s in (1, 2, 3)]
             rc, out, js = self.run_sub0(self.a_args(d, cands, ["--arm-label", "A1", "--name", "chatclause", "--select", ]))
@@ -704,22 +752,49 @@ class Sub0EndToEnd(unittest.TestCase):
             rc, out, js = self.run_sub0(args)
             self.assertEqual(rc, 0, out)
             r = js["runs"]
-            self.assertEqual(set(r), {f"{l}/{s}" for l in ("A0", "A1") for s in (1, 2, 3)})
-            self.assertEqual([k for k, v in r.items() if v["judged"]], ["A1/1"])
-            self.assertEqual((r["A1/1"]["fixes"], r["A1/1"]["breaks"]), (1, 0))                  # row 0 fixed against C0
-            self.assertEqual((r["A0/1"]["fixes"], r["A0/1"]["breaks"]), (0, 0))
-            self.assertTrue(r["A1/1"]["verdict"])
-            self.assertNotIn("whole_set", r["A1/1"])
-            # --exclude row 1 (the fixed row): the same cell now has no fix, and the whole set is reported beside it
-            ex = os.path.join(d, "ex.txt")
-            open(ex, "w").write("1\n")
+            self.assertEqual(set(r), {K(l, s) for l in ("A0", "A1") for s in (1, 2, 3)})
+            self.assertEqual([k for k, v in r.items() if v["judged"]], [K("A1", 1)])
+            self.assertEqual((r[K("A1", 1)]["fixes"], r[K("A1", 1)]["breaks"]), (1, 0))                  # row 0 fixed against C0
+            self.assertEqual((r[K("A0", 1)]["fixes"], r[K("A0", 1)]["breaks"]), (0, 0))
+            self.assertTrue(r[K("A1", 1)]["verdict"])
+            self.assertNotIn("whole_set", r[K("A1", 1)])
+            # --exclude row 1 (the fixed row): the same cell now has no fix
+            ex = self.exclude_file(d, "1\n")
             rc, out, js2 = self.run_sub0(self.a_args(d, cands, ["--arm-label", "A1", "--name", "chatclause", "--select", "--exclude", ex]))
             self.assertEqual((js2["n"], js2["n_kept"], js2["exclude_sha256"]), (4, 3, hashlib.sha256(b"1\n").hexdigest()))
             self.assertIsNone(js2["chosen"])                                                      # row 1 was the only gain
             self.assertIn("exclude sha256 " + hashlib.sha256(b"1\n").hexdigest(), out)
-            # a selection made without --exclude is refused when judging with one, and the other way round
-            rc, out, js3 = self.run_sub0(self.a_args(d, cands, ["--name", "typing76", "--cell-from", sel_path, "--clause", "2a", "--exclude", ex]))
-            self.assertEqual(rc, 1)
+
+    def test_each_judged_set_has_its_own_exclude_file(self):
+        ship = fixture4()[1]
+        better = [{**s, "ll": [0.0, 9.0, 0.1]} if i == 0 else s for i, s in enumerate(ship)]
+        with tempfile.TemporaryDirectory() as d:
+            cands = [("A1", s, better) for s in (1, 2, 3)] + [("A0", s, ship) for s in (1, 2, 3)]
+            ex_sel, ex_disc = self.exclude_file(d, "4\n"), self.exclude_file(d, "2\n")
+            rc, out, sel = self.run_sub0(self.a_args(d, cands, ["--arm-label", "A1", "--name", "chatclause", "--select", "--exclude", ex_sel]))
+            self.assertEqual(rc, 0, out)
+            self.assertEqual(sel["exclude_sha256"], hashlib.sha256(b"4\n").hexdigest())
+            sel_path = os.path.join(d, "sel.json")
+            json.dump(sel, open(sel_path, "w"))
+            judge = lambda name, clause, extra: self.run_sub0(self.a_args(d, cands, ["--name", name, "--cell-from", sel_path, "--clause", clause] + extra))
+            rc, out, js = judge("discordtune", "1", ["--exclude", ex_disc])                      # another file, its own hash and count
+            self.assertEqual(rc, 0, out)
+            self.assertEqual((js["n"], js["n_kept"], js["exclude_sha256"]), (4, 3, hashlib.sha256(b"2\n").hexdigest()))
+            self.assertIn("whole_set", js["runs"][K("A1", 1)])
+            self.assertEqual(self.run_sub0(self.a_args(d, cands, ["--name", "discordtune", "--cell-from", sel_path, "--clause", "1", "--exclude",
+                                                                  self.exclude_file(d, "1\n2\n")]))[0], 1)         # discordtune: exactly 865 (patched to 1) rows
+            # chatclause itself is checked against the selection's hash; the other sets are not
+            self.assertEqual(judge("chatclause", "report", ["--exclude", ex_disc])[0], 1)
+            self.assertEqual(judge("chatclause", "report", ["--exclude", ex_sel])[0], 0)
+            # A arm: --exclude required on the three sets, not allowed on the others
+            for name, clause, extra in (("discordtune", "1", []), ("typing76", "2a", ["--exclude", ex_disc])):
+                args = self.a_args(d, cands, ["--name", name, "--cell-from", sel_path, "--clause", clause] + extra)
+                if not extra:
+                    i = args.index("--exclude")
+                    del args[i:i + 2]
+                with self.assertRaises(SystemExit) as cm:
+                    Q.main(args)
+                self.assertIn("--exclude", str(cm.exception.code))
 
     def test_t_arm_selects_over_both_tables_and_judges_the_chosen_one(self):
         ship, cols = fixture4()[1], fixture4()[2]

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """SUB-0 T arm cleaning (README of this directory): OPUS OpenSubtitles zh_tw lines -> sentences for the colloquial counts.
 
-  clean_subs.py --raw zh_tw.txt.gz --out DIR --lexicon data/lexicon/mcbpmf-data.txt --invade INVADE_CLONE [--invade-sha256 HEX]
-                [--repo DIR] [--cache DIR] [--extra-rows LABEL=FILE ...] [--min-han 4000000] [--sample N --seed S]
+  clean_subs.py --raw zh_tw.txt.gz --out DIR --lexicon data/lexicon/mcbpmf-data.txt --invade INVADE_CLONE
+                --invade-sha256 HEX [--repo DIR] [--cache DIR] [--extra-rows LABEL=FILE ...] [--min-han 4000000] [--sample N --seed S]
 
 Order (README T arm steps 1-11), after p2clean.py's split / filters / Guard (copied from exp/p2-data 4f7504bf):
   split, cue    p2clean.split_sentences (。！？!? and line breaks, not commas), then a leading '-' / opening quote is stripped
@@ -18,11 +18,13 @@ Writes OUT/subs.tsv (all kept) and OUT/subs-half.tsv (the kept sentences whose S
 sentence` like p2-public/pool.tsv, plus OUT/manifest.json. Prints counts only: per step the sentences dropped and the 20 most frequent triggers,
 where a trigger is a member of a closed set (a rule, a bucket, a kana / simplified-only / non-lexicon character, a list term, a label), never
 a piece of a sentence. The only mode that prints sentences is --sample N --seed S, for proofreading the PUBLIC subtitle file.
---extra-rows adds row files (for example the private tuning / judging sets on the machine that has them) to the guard; --cache replaces the
+--extra-rows adds row files (the private tuning / judging sets on the machine that has them) to the guard, and the run STOPs unless the guard
+covers holdout, chatclause, discordtune, cvtune-clean and chatjudge2 (label them so); every label uses 4-character containment; --cache replaces the
 cache directory p2clean.guard_files reads the tuning sets from. Exit 1 with a STOP line when the kept Han characters are below --min-han.
 """
 import argparse
 import collections
+import glob
 import gzip
 import hashlib
 import json
@@ -47,9 +49,17 @@ MIN_ENGLISH_WORDS = 2
 MAX_NON_LEXICON = 0.30     # a sentence with this share or more of its Han characters outside the lexicon is dropped
 MIN_KEPT_HAN = 4_000_000   # README stop condition
 TOP = 20
+REQUIRED_LABELS = ("holdout", "chatclause", "discordtune", "cvtune-clean", "chatjudge2")   # README: the sets the guard must cover
+CUE_SPLIT = re.compile(r"\s+[-–—－]+\s*")      # a second speaker's dash inside a line ("- A - B"); a hyphen with no space before it is not one
 STEPS = ["han_len", "han_ratio", "url", "digits", "code", "kana", "lexicon", "english", "simplified", "invade", "dedupe", "guard"]
 CUE_LEAD = re.compile(r"^(?:[-–—－\s]|[「『“\"])+")
 QUOTE_PAIRS = (("「", "」"), ("『", "』"), ("“", "”"), ('"', '"'))
+
+
+def sentences(line):
+    """p2clean.split_sentences of each speaker's part of one subtitle line (two-speaker lines are cut at the inner dash before tidy() removes the
+    spaces that show it); the ids' running index k counts across the parts."""
+    return [x for part in CUE_SPLIT.split(line) for x in P2.split_sentences(part)]
 
 
 def strip_cue(s):
@@ -149,10 +159,10 @@ def clean(lines, ctx, guard):
     funnel = collections.OrderedDict([("split", 0)] + [(s, 0) for s in STEPS])   # sentences that passed each step
     dropped = {s: collections.Counter() for s in STEPS}
     missing = collections.Counter()                        # Han characters outside the lexicon in the lexicon-dropped sentences
-    guard_sets, guard_patterns = collections.Counter(), collections.defaultdict(set)
+    guard_sets, guard_patterns, guard_rows = collections.Counter(), collections.defaultdict(set), collections.defaultdict(set)
     seen, kept = set(), []
     for n, line in enumerate(lines, 1):
-        for k, s in enumerate(P2.split_sentences(line)):
+        for k, s in enumerate(sentences(line)):
             s = strip_cue(s)
             funnel["split"] += 1
             why = reject(s, ctx)
@@ -166,7 +176,8 @@ def clean(lines, ctx, guard):
                 dropped["dedupe"]["duplicate"] += 1
                 continue
             seen.add(key)
-            labels, _ = guard.hits(s)
+            labels, short = guard.hits(s)
+            labels = labels | short               # short entries drop the line too (none are left at 4-character containment)
             if labels:
                 dropped["guard"][",".join(sorted(labels))] += 1
                 for lab in labels:
@@ -175,6 +186,8 @@ def clean(lines, ctx, guard):
                     for p in guard.matcher.find(bc.fold(r)):
                         for lab in guard.contain[p]:
                             guard_patterns[lab].add(p)
+                for lab, row in guard.hit_rows(s):
+                    guard_rows[lab].add(row)
                 continue
             kept.append((f"{n}" if k == 0 else f"{n}:{k}", s))
     left = funnel["split"]
@@ -185,10 +198,93 @@ def clean(lines, ctx, guard):
            "dropped": {s: {"sentences": sum(c.values()), "top_triggers": c.most_common(TOP)} for s, c in dropped.items()},
            "lexicon_missing_characters_top": missing.most_common(TOP),
            "guard": {"dropped_sentences_by_label_nonexclusive": dict(sorted(guard_sets.items())),
+                     "rows_hit_by_label": {l: len(r) for l, r in sorted(guard_rows.items())},
                      "distinct_patterns_hit_by_label": {l: len(p) for l, p in sorted(guard_patterns.items())},
-                     "note": "a pattern is a Han run of an evaluation row (a row can give several), so this bounds the rows hit from above"},
+                     "note": "rows: distinct evaluation rows (exact and containment together; a JSON word-list file counts as one row) owning a pattern "
+                             "a dropped sentence contains; patterns: distinct Han runs, an extra count"},
            "kept": {"sentences": len(kept), "han_chars": sum(P2.han_count(s) for _, s in kept)}}
     return kept, man
+
+
+class RowGuard(P2.Guard):
+    """p2clean.Guard that also remembers which evaluation rows own each pattern, so the rows hit can be counted (`owner`: ("c" | "e", folded
+    pattern) -> {(label, row id)}). A JSON word-list file counts as one row per file. Row ids are never printed."""
+
+    def __init__(self, conv, contain_min):
+        super().__init__(conv, contain_min)
+        self.owner = collections.defaultdict(set)
+        self.cur = None
+
+    def _add_contain(self, label, text):
+        super()._add_contain(label, text)
+        for run in bc.HAN.findall(text):
+            if len(run) >= P2.MIN_HAN:
+                for v in {run, bc.convert(run, *self.conv)}:
+                    self.owner["c", bc.fold(v)].add((label, self.cur))
+
+    def _add_exact(self, label, text):
+        super()._add_exact(label, text)
+        h = "".join(bc.HAN.findall(text))
+        if len(h) >= P2.MIN_HAN:
+            for v in {h, "".join(bc.HAN.findall(bc.convert(h, *self.conv)))}:
+                self.owner["e", bc.fold(v)].add((label, self.cur))
+
+    def add_rows_file(self, label, path, shown):
+        n = 0
+        for i, line in enumerate(P2.hg.read_lines(path), 1):
+            line = line.rstrip("\r")
+            if not line.strip() or line.startswith("#"):
+                continue
+            n += 1
+            self.cur = f"{shown}:{i}"
+            if "|" in line:
+                for fld in line.split("|"):
+                    self._add_contain(label, fld)
+            else:
+                for fld in line.split("\t"):
+                    self._add_exact(label, fld)
+        self.files.append({"label": label, "path": shown, "sha256": sha256_file(path), "entries": n})
+
+    def add_json_file(self, label, path, shown):
+        self.cur = f"{shown}:json"
+        super().add_json_file(label, path, shown)
+
+    def add_holdout(self, repo):
+        rows = sorted(glob.glob(os.path.join(repo, "eval", "holdout", "**", "*.txt"), recursive=True))
+        _, owners, loaded, skipped = P2.hg.build_matcher(rows, self.conv)
+        for pat, ids in owners.items():
+            self.contain[pat].add("holdout")
+            self.owner["c", pat].update(("holdout", i) for i in ids)
+        for p in rows:
+            for n, line in enumerate(P2.hg.read_lines(p), 1):
+                f = line.split("|")
+                if len(f) == 3:
+                    self.cur = f"{p}:{n}"
+                    self._add_contain("holdout", f[0])
+            self.files.append({"label": "holdout", "path": os.path.relpath(p, repo), "sha256": sha256_file(p), "entries": None})
+        self.files.append({"label": "holdout", "path": "(holdout_guard.build_matcher)", "patterns_loaded": loaded, "skipped_short": skipped})
+
+    def hit_rows(self, s):
+        """{(label, row id)} of the evaluation rows whose pattern (containment or exact) this sentence contains."""
+        c = bc.convert(s, *self.conv)
+        out = set()
+        for r in bc.HAN.findall(s) + bc.HAN.findall(c):
+            for p in self.matcher.find(bc.fold(r)):
+                out |= self.owner.get(("c", p), set())
+        h, hc = "".join(bc.HAN.findall(s)), "".join(bc.HAN.findall(c))
+        for k in {bc.fold(h), bc.fold(hc)}:
+            out |= self.owner.get(("e", k), set())
+        return out
+
+
+def check_labels(guard):
+    """STOP unless the guard covers every set the README names; -> the sorted label list."""
+    labels = sorted({f["label"] for f in guard.files})
+    print("guard labels:", " ".join(labels))
+    missing = [l for l in REQUIRED_LABELS if l not in labels]
+    if missing:
+        raise SystemExit(f"STOP: the guard has no {', '.join(missing)} (give the row files with --extra-rows LABEL=FILE)")
+    return labels
 
 
 def write_tsv(path, rows):
@@ -214,13 +310,18 @@ def build_ctx(a):
 def build_guard(a):
     if a.cache:
         P2.CACHE = a.cache
-    guard, dups = P2.build_guard(a.repo, a.conv, P2.CONTAIN_MIN)
+    keep, P2.Guard = P2.Guard, RowGuard
+    try:       # 4-character containment for every label (README), not p2clean's CONTAIN_MIN 8: no "short" entries remain
+        guard, dups = P2.build_guard(a.repo, a.conv, P2.MIN_HAN)
+    finally:
+        P2.Guard = keep
     for item in a.extra_rows:
         label, _, path = item.partition("=")
         if not label or not path or not os.path.isfile(path):
             raise SystemExit("STOP: --extra-rows wants LABEL=FILE with an existing FILE")
         guard.add_rows_file(label, path, f"(extra) {label}")
     guard.build()
+    check_labels(guard)
     return guard, dups
 
 
@@ -230,7 +331,7 @@ def main(argv=None):
     ap.add_argument("--out", required=True)
     ap.add_argument("--lexicon", default=os.path.join(ROOT, "data", "lexicon", "mcbpmf-data.txt"))
     ap.add_argument("--invade", required=True)
-    ap.add_argument("--invade-sha256", default="")
+    ap.add_argument("--invade-sha256", required=True)
     ap.add_argument("--repo", default=ROOT)
     ap.add_argument("--cache")
     ap.add_argument("--extra-rows", action="append", default=[])
@@ -252,7 +353,7 @@ def main(argv=None):
                 "invade": {k: ctx.invade_info[k] for k in ("commit", "sha256", "terms")},
                 "outputs": {n: {"rows": len(r), "han_chars": sum(P2.han_count(s) for _, s in r), "sha256": sha256_file(os.path.join(a.out, n))}
                             for n, r in (("subs.tsv", kept), ("subs-half.tsv", halves))},
-                "guard_files": guard.files, "guard_byte_identical_copies_skipped": dups})
+                "guard_files": guard.files, "guard_labels": sorted({f["label"] for f in guard.files}), "guard_byte_identical_copies_skipped": dups})
     with open(os.path.join(a.out, "manifest.json"), "w", encoding="utf-8") as f:
         json.dump(man, f, ensure_ascii=False, indent=1)
         f.write("\n")

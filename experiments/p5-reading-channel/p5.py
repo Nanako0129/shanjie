@@ -40,8 +40,8 @@ SUB-0 (experiments/sub0-subtitles/README.md; `--sub0`, its own argument set, see
   python3 p5.py --sub0 --arm T --name chatclause --rows R --dump D --dump-words W --rowstats RS --tinylm-scores S --t2 T2.sjlm \
       --table T3-half PATH SHA256 --table T3-1 PATH SHA256 --select --out SEL.json
   python3 p5.py --sub0 --arm A --arm-label A1 --name chatclause ... --exclude ROWS.txt \
-      --cand A1 SEED D W S (x3) --cand A0 SEED D W S (x3) --select --out SEL.json
-  python3 p5.py --sub0 --arm A --name discordtune ... --exclude ROWS.txt --cand A1 SEED D W S [--cand ...] --cell-from SEL.json --clause 1 --out OUT.json
+      --weights-manifest weights.sha256 --cand A1 SEED SJTL SJTL_SHA D W S (x3) --cand A0 ... (x3) --select --out SEL.json
+  python3 p5.py --sub0 --arm A --name discordtune ... --exclude ROWS.txt --weights-manifest weights.sha256 --cand A1 SEED SJTL SJTL_SHA D W S [--cand ...] --cell-from SEL.json --clause 1 --out OUT.json
 The reading channel is fixed at lex / 1.0 / 4, the grid is P4d's 24 cells (mu, alpha, gate), delta 0.25, tau 2. Everything is compared with C0 =
 the P4d cell (0.5, 0.5, T 1.0) + the channel, computed from the shipped-weight run with T2 (the anchors run only there). --exclude FILE (1-based
 row numbers, digits and newlines only; its SHA-256 is printed) drops rows from selection, counts and rowstats; the anchors run on all rows first.
@@ -379,6 +379,8 @@ A_LABELS = ("A0", "A1", "A2")            # A0 is A0': the noise control, never s
 N_SEEDS = 3
 GATE_ORDER = {P.INF: 0, 1.0: 1, 0.5: 2}  # none, T 1.0, T 0.5
 C0_ANCHORS = {"chatclause": (126, 27), "discordtune": (88, 34), "cvtune-clean": (49, 12)}   # README anchor 2 (P5's record): C0 against shipping
+EXCLUDE_SETS = ("chatclause", "discordtune", "cvtune-clean")   # A arm: the sets the overlap-row exclusion is registered for (and no others)
+SEEDS = (20261012, 20261018, 20261019)
 N_EXCLUDE_DISCORD = 865                  # README: discordtune's overlap with chat-a2.txt; anything else STOPs
 
 
@@ -464,25 +466,62 @@ def keep_rows(lst, drop):
     return [x for i, x in enumerate(lst) if i not in drop]
 
 
-def sha_of(path):
-    with open(path, "rb") as f:
-        return hashlib.sha256(f.read()).hexdigest()
+sha_of = triage.bench.sha_file           # tools/bench.py's hasher
 
 
-def load_table_cols(ns, path, sha):
-    """The colloquial column of the shipped run under another table: STOP unless the file's SHA-256 is the one given on the command line."""
+def load_manifest(path):
+    """{sha256: (arm label, seed)} of weights.sha256 (`HASH  [seeds/]tinylm-{a0p,a1,a2}-SEED.sjtl`, and the S7F second-round files of seed
+    20261012). A line that names none of these STOPs."""
+    out = {}
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            if not line.strip():
+                continue
+            h, name = line.split()[0], os.path.basename(line.split()[1])
+            m = re.fullmatch(r"tinylm-(a0p|a1|a2)-(\d+)\.sjtl", name)
+            lab, seed = ({"a0p": "A0", "a1": "A1", "a2": "A2"}[m.group(1)], int(m.group(2))) if m else \
+                {"tinylm-S7Fa1.sjtl": ("A1", 20261012), "tinylm-S7Fa2.sjtl": ("A2", 20261012)}.get(name, (None, None))
+            if lab is None or seed not in SEEDS or not re.fullmatch(r"[0-9a-f]{64}", h):
+                stop(f"--weights-manifest: cannot read the line for {name}")
+            out[h] = (lab, seed)
+    return out
+
+
+def check_weights(manifest, label, seed, path, sha):
+    """STOP unless the .sjtl file has the SHA-256 given and the manifest lists that hash for this arm label and seed."""
+    if seed not in SEEDS:
+        stop(f"--cand: seed {seed} is not one of {SEEDS}")
+    if sha_of(path) != sha:
+        stop(f"--cand {label} {seed}: the weights file does not have the SHA-256 given")
+    if manifest.get(sha) != (label, seed):
+        stop(f"--cand {label} {seed}: SHA-256 {sha[:8]} is not that arm and seed in the weights manifest")
+
+
+def check_table(path, sha):
+    """STOP unless the file's SHA-256 is the one given on the command line."""
     if not re.fullmatch(r"[0-9a-f]{64}", sha):
         stop("a table's SHA-256 must be 64 lowercase hex digits")
     if sha_of(path) != sha:
         stop(f"the table {os.path.basename(path)} does not have the SHA-256 given on the command line")
-    return P.load_full(argparse.Namespace(**{**vars(ns), "t2": path}), t2_sha256=sha)[2]
 
 
-def load_cand(ns, dump, words, scores_path, ship_scores):
-    """A candidate-weight run's score records. STOP unless its dump and dump-words equal the shipped run's byte for byte (so the candidates, the
-    n-gram scores and the right / wrong marks are the same and only ll differs)."""
-    for mine, ship, what in ((dump, ns.dump, "dump"), (words, ns.dump_words, "dump-words")):
-        if sha_of(mine) != sha_of(ship):
+def load_table_cols(rows, path, sha, ovl, lex_base):
+    """The colloquial column of the shipped run's rows under another table. Only the table is read here: the rows, the overlay and the lexicon
+    come from the one load of sub0_main (what P.load_full does for T2)."""
+    import p4
+    check_table(path, sha)
+    try:
+        pre = p4.precompute([{**r, "cands": r["cands"][:8]} for r in rows], {"T2": p4.Table(path)}, ovl, lex_base)
+    except (p4.Stop, RuntimeError) as e:
+        stop(str(e))
+    return P.cols_from(pre)
+
+
+def load_cand(ship_hashes, dump, words, scores_path, ship_scores):
+    """A candidate-weight run's score records. STOP unless its dump and dump-words equal the shipped run's byte for byte (`ship_hashes`:
+    their SHA-256, taken once; so the candidates, the n-gram scores and the right / wrong marks are the same and only ll differs)."""
+    for mine, what in ((dump, "dump"), (words, "dump-words")):
+        if sha_of(mine) != ship_hashes[what]:
             stop(f"the candidate run's {what} differs from the shipped run's")
     recs = triage.read_cli_files(dump, words, scores_path, len(ship_scores))[2]
     for i, (r, s) in enumerate(zip(recs, ship_scores), 1):
@@ -498,15 +537,17 @@ def sub0_clause(clause, s, scores, c0_picks, picks):
     return {} if clause == "report" else {"verdict": verdict(clause, s)}
 
 
-def read_sub0_selection(path, arm, exclude_sha):
+def read_sub0_selection(path, arm, name, exclude_sha):
+    """The chosen cell. The selection records the chatclause --exclude hash; it is compared only when this run is on chatclause (other sets
+    have their own exclude files, validated by sub0_main)."""
     with open(path, encoding="utf-8") as f:
         sel = json.load(f)
     if sel.get("name") != "chatclause" or sel.get("sub0_arm") != arm:
         stop(f"--cell-from: {path} is not the chatclause selection of arm {arm}")
     if not sel.get("chosen"):
         stop("--cell-from: the selection chose no cell")
-    if sel.get("exclude_sha256") != exclude_sha:
-        stop("--cell-from: the selection was made with another --exclude file")
+    if name == "chatclause" and sel.get("exclude_sha256") != exclude_sha:
+        stop("--cell-from: the selection was made with another chatclause --exclude file")
     return sel["chosen"]
 
 
@@ -518,7 +559,8 @@ def sub0_parser():
     for k in ("name", "rows", "out", "dump", "dump-words", "rowstats", "tinylm-scores", "t2"):
         ap.add_argument("--" + k, required=True)
     ap.add_argument("--table", nargs=3, action="append", default=[], metavar=("LABEL", "PATH", "SHA256"))
-    ap.add_argument("--cand", nargs=5, action="append", default=[], metavar=("LABEL", "SEED", "DUMP", "WORDS", "SCORES"))
+    ap.add_argument("--cand", nargs=7, action="append", default=[], metavar=("LABEL", "SEED", "SJTL", "SJTL_SHA256", "DUMP", "WORDS", "SCORES"))
+    ap.add_argument("--weights-manifest", help="arm A: weights.sha256; every --cand's .sjtl must be listed there with its arm label and seed")
     ap.add_argument("--exclude")
     ap.add_argument("--select", action="store_true")
     ap.add_argument("--cell-from")
@@ -542,14 +584,20 @@ def sub0_args(a):
         if label not in TABLE_LABELS or label in tables:
             raise SystemExit(f"--table: label {label} is unknown or given twice")
         tables[label] = (path, sha)
-    for label, seed, d, w, s in a.cand:
+    manifest = load_manifest(a.weights_manifest) if a.weights_manifest else None
+    for label, seed, sjtl, sha, d, w, s in a.cand:
         if label not in A_LABELS or not seed.isdigit() or (label, int(seed)) in cands:
             raise SystemExit(f"--cand: {label} {seed} is unknown or given twice")
+        if manifest is None:
+            raise SystemExit("--cand needs --weights-manifest")
+        check_weights(manifest, label, int(seed), sjtl, sha)
         cands[label, int(seed)] = (d, w, s)
     if a.arm == "T" and (cands or a.exclude or not tables or a.arm_label):
         raise SystemExit("arm T takes --table (and no --cand, --exclude or --arm-label)")
     if a.arm == "A" and (tables or not cands):
         raise SystemExit("arm A takes --cand (and no --table)")
+    if a.arm == "A" and (a.name in EXCLUDE_SETS) != bool(a.exclude):
+        raise SystemExit(f"arm A: --exclude is required on {', '.join(EXCLUDE_SETS)} and not allowed on the other sets")
     if a.select and a.arm == "T" and set(tables) != set(TABLE_LABELS):
         raise SystemExit("the T selection wants both tables")
     if a.select and a.arm == "A":
@@ -566,8 +614,8 @@ def sub0_args(a):
 def run_inputs(ctx, tag):
     """(score records, colloquial columns) of one run over all rows: a T3 table's columns on the shipped scores, or a candidate's scores."""
     if ctx.a.arm == "T":
-        return ctx.scores, load_table_cols(ctx.ns, *ctx.tables[tag])
-    return load_cand(ctx.ns, *ctx.cands[tag], ctx.scores), ctx.cols
+        return ctx.scores, load_table_cols(ctx.rows, *ctx.tables[tag], ctx.ovl, ctx.lex_base)
+    return load_cand(ctx.ship_hashes, *ctx.cands[tag], ctx.scores), ctx.cols
 
 
 def tag_name(tag):
@@ -584,7 +632,8 @@ def sub0_main(argv):
     check_count(a.name, len(base))
     s_p4d, _ = check_controls(a.name, scores, cols, base_ok)          # the anchors: shipped weights, T2, all rows
     import d23 as D
-    ch = channel(row_terms(rows, lex_logp(D.load_lex_scores()[0])), SUB0_CH[2])
+    lex, ovl = D.load_lex_scores()
+    ch = channel(row_terms(rows, lex_logp(lex)), SUB0_CH[2])
     c0_picks = sub0_picks(scores, cols, ch, P.CONFIRM_CELL)
     c0_ok = ok_of(scores, c0_picks)
     c0 = stats_vs(base_ok, scores, c0_picks)
@@ -595,7 +644,8 @@ def sub0_main(argv):
         drop, ex_sha = read_exclude(a.exclude, len(base))
         check_exclude(a.name, drop)
         print(f"exclude sha256 {ex_sha} rows {len(drop)}")
-    ctx = argparse.Namespace(a=a, ns=ns, tables=tables, cands=cands, scores=scores, cols=cols, ch=ch, c0_ok=c0_ok, drop=drop, ex_sha=ex_sha,
+    ship_hashes = {"dump": sha_of(a.dump), "dump-words": sha_of(a.dump_words)} if cands else None
+    ctx = argparse.Namespace(a=a, ns=ns, rows=rows, ovl=ovl, lex_base=D.T.Lex.load().base if tables else None, ship_hashes=ship_hashes, tables=tables, cands=cands, scores=scores, cols=cols, ch=ch, c0_ok=c0_ok, drop=drop, ex_sha=ex_sha,
                              K=lambda lst: keep_rows(lst, drop))
     ctx.ch_k, ctx.c0_ok_k, ctx.c0_picks_k = ctx.K(ch), ctx.K(c0_ok), ctx.K(c0_picks)
     ctx.res = {"sub0": True, "sub0_arm": a.arm, "name": a.name, "n": len(base), "n_kept": len(ctx.ch_k), "exclude_sha256": ex_sha,
@@ -645,7 +695,7 @@ def sub0_select(ctx):
 def sub0_judge(ctx):
     """One set, the selected cell, every clause against C0. A arm: the judged seed plus every other --cand run (A0', other seeds) as report only."""
     a, res = ctx.a, ctx.res
-    sel = read_sub0_selection(a.cell_from, a.arm, ctx.ex_sha)
+    sel = read_sub0_selection(a.cell_from, a.arm, a.name, ctx.ex_sha)
     cell = P.parse_cell(sel["cell"])
     if a.arm == "T":
         if sel["table"] not in ctx.tables or ctx.tables[sel["table"]][1] != sel["table_sha256"]:
@@ -659,12 +709,12 @@ def sub0_judge(ctx):
     res.update({"cell": sel["cell"], "clause": a.clause, "chosen": sel, "runs": {}})
     for tag in tags:
         sc, cl = run_inputs(ctx, tag)
-        sc_k, cl_k = ctx.K(sc), ctx.K(cl)
-        picks = sub0_picks(sc_k, cl_k, ctx.ch_k, cell)
+        all_picks = sub0_picks(sc, cl, ctx.ch, cell)             # once, over all rows; the kept rows' picks are a selection of these
+        sc_k, picks = ctx.K(sc), ctx.K(all_picks)
         s = stats_vs(ctx.c0_ok_k, sc_k, picks)
         r = {**p4c.jsonable(s), "judged": tag == judged, **sub0_clause(a.clause, s, sc_k, ctx.c0_picks_k, picks)}
         if ctx.drop:                      # the whole set, overlap rows included: reported only
-            r["whole_set"] = short(stats_vs(ctx.c0_ok, sc, sub0_picks(sc, cl, ctx.ch, cell)))
+            r["whole_set"] = short(stats_vs(ctx.c0_ok, sc, all_picks))
         res["runs"][tag_name(tag)] = r
         text = cell_line(tag, cell, s) + (" JUDGED" if tag == judged else " report")
         if "verdict" in r:
