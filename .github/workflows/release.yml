@@ -89,12 +89,12 @@ jobs:
         with:
           persist-credentials: false
 
-      # The same toolchain as ci.yml (core, core-debug and shell jobs).
+      # The same toolchain as ci.yml (every job there that runs cargo).
       - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
         with:
           toolchain: 1.97.1
 
-      # Before build-app.sh, against the tracked hashes (data/bigram.sjlm.sha256, data/classes.sjc.sha256, data/kn.sjkn.sha256, data/tinylm.sjtl.sha256, data/trigram.sjt3.sha256, data/colloquial.sjlm.sha256 and data/colloquial-attribution.tsv.sha256, as ci.yml).
+      # Before build-app.sh, against the tracked hashes (data/bigram.sjlm.sha256, data/classes.sjc.sha256, data/kn.sjkn.sha256, data/tinylm.sjtl.sha256, data/trigram.sjt3.sha256, data/colloquial.sjlm.sha256 and data/colloquial-attribution.tsv.sha256, as scripts/fetch-models.sh does for ci.yml).
       - name: Fetch the language model
         env:
           GH_TOKEN: ${{ github.token }}

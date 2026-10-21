@@ -3,7 +3,7 @@ name: CI
 # Core build and tests on every pull request and every push to main.
 # Modeled on syrtis (Nanako0129/syrtis .github/workflows/ci.yml).
 # The workflow always runs, so every main commit keeps a concluded run for the
-# release gate (scripts/check-ci-gate.sh); the `changes` job skips the macOS
+# release gate (scripts/check-ci-gate.sh); the `changes` job skips the test
 # jobs when only documentation or the website changed (scripts/ci-changes.sh),
 # and skipped jobs leave the run's conclusion `success`.
 on:
@@ -75,70 +75,96 @@ jobs:
   core:
     needs: changes
     if: needs.changes.outputs.run == 'true'
-    # Xcode 27 / macOS 27, the same image the Swift shell (S3b) will need.
+    # docs/contracts/ci-speed-2.md: the release tests of both packages (the shipping profile, with the per-key p95 assertions and the
+    # f64 goldens made on macOS); the C header smoke test is in `swift`. The debug run is the `debug` job and the Python steps the `python` job, both on Linux.
     runs-on: xcode-27
-    # A full run takes about 3 minutes; a hung FFI child process should not
-    # hold the runner for the 6-hour default.
+    # A hung FFI child process should not hold the runner for the 6-hour default.
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
 
       # Pinned to the toolchain the golden files were generated with: scores
       # must be bit-identical to the Python reference, and a codegen change
       # has already moved one result by 1 ulp (docs/contracts/s3a.md section 9,
       # powf lowered to exp10). The action is pinned to a master commit, as its
       # README recommends; the `stable` branch is regenerated on every merge.
+      # There is no rust-toolchain file: every job that runs cargo carries this step.
       - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
         with:
           toolchain: 1.97.1
 
-      # The bigram model is not in git (docs/PLAN.md S2c); it is the model-v6
-      # release asset, its word-class table (S2k) is the classes-v5 asset and its
-      # Kneser-Ney side file (kn-core) is the kn-v1 asset. The small model of
-      # 語意校正 (S7c-2b) is the sj-sr-6-14m asset (會意 SJ-SR-6-14M, SJTL0004: it records model-v6's and kn-v1's hashes).
-      # The trigram table of the formal profile (trigram-core) is the sj-cx-1-7.7m asset (bound to model-v6's hash).
-      # The colloquial table (常談 SJ-CL-1-68K, colloquial-term.md) and its attribution list are the sj-cl-1-68k assets.
-      # Checking them here fails the run in seconds with a clear message instead
-      # of after the build. The hashes are checked against data/bigram.sjlm.sha256,
-      # data/classes.sjc.sha256, data/kn.sjkn.sha256, data/tinylm.sjtl.sha256, data/trigram.sjt3.sha256, data/colloquial.sjlm.sha256 and data/colloquial-attribution.tsv.sha256 (also read by build-app.sh and release.yml);
-      # cli/tests/golden.rs repeats the first two, so a model switch updates both (docs/data-files.md).
+      # docs/contracts/ci-speed-2.md: the one copy of the model download and hash check (the assets and why are in the script).
       - name: Fetch the language model
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          gh release download model-v6 --repo "$GITHUB_REPOSITORY" -p bigram.sjlm -D data/lm
-          shasum -a 256 -c data/bigram.sjlm.sha256
-          gh release download classes-v5 --repo "$GITHUB_REPOSITORY" -p classes.sjc -D data/lm
-          shasum -a 256 -c data/classes.sjc.sha256
-          gh release download kn-v1 --repo "$GITHUB_REPOSITORY" -p kn.sjkn -D data/lm
-          shasum -a 256 -c data/kn.sjkn.sha256
-          gh release download sj-sr-6-14m --repo "$GITHUB_REPOSITORY" -p tinylm.sjtl -D data/lm
-          shasum -a 256 -c data/tinylm.sjtl.sha256
-          gh release download sj-cx-1-7.7m --repo "$GITHUB_REPOSITORY" -p trigram.sjt3 -D data/lm
-          shasum -a 256 -c data/trigram.sjt3.sha256
-          gh release download sj-cl-1-68k --repo "$GITHUB_REPOSITORY" -p colloquial.sjlm -p colloquial-attribution.tsv -D data/lm
-          shasum -a 256 -c data/colloquial.sjlm.sha256 data/colloquial-attribution.tsv.sha256
+        run: scripts/fetch-models.sh
 
       # Release also enforces the per-key p95 < 16 ms assertions in the replays.
       - name: Tests (release)
         run: cargo test --release --locked
 
-      # docs/contracts/s3a.md section 7.4: compile the C header against the
-      # staticlib and drive both layouts, the LM and the profile switch.
-      # macOS cc links without the native libs too, so an empty capture would
-      # pass silently; it is captured and checked first.
-      - name: C header smoke test
-        shell: bash
-        run: |
-          set -euo pipefail
-          T="$RUNNER_TEMP"
-          LIBS=$(cargo rustc --color never --release --locked -p core --crate-type staticlib -- --print native-static-libs 2>&1 | sed -n 's/.*native-static-libs: //p')
-          test -n "$LIBS"
-          cc -std=c11 -Wall -Wextra -Werror -Icore/include core/tests/c/abi_smoke.c target/release/libcore.a $LIBS -o "$T/abi_smoke"
-          "$T/abi_smoke" data/lexicon data/lm/bigram.sjlm
-          # S4: a third argument (a fresh learning directory) runs the learning checks 518-521.
-          "$T/abi_smoke" data/lexicon data/lm/bigram.sjlm "$T/learn"
+  # docs/contracts/ci-speed-2.md: the debug run (overflow checks and the standard library's debug-only checks) on Linux, beside the
+  # release tests instead of on a second macOS runner. Linux runs the core package's tests faster than the macOS runner; the cli
+  # package's integration tests score with the small model, which has no Accelerate on Linux (2.4 times the macOS time), so they run
+  # in release only (the `core` job) and here only the cli package's unit tests run. Not checked in debug any more: the macOS-only
+  # branches (the small model's Accelerate calls, learn_store.rs's macOS constants) and the two f64 goldens in engine_digits.rs that
+  # return early on Linux (row49_scores_match_the_python_golden_bit_for_bit, predict_digits_matches_the_python_golden_bit_for_bit);
+  # all of them run in the `core` job. Skipped exactly when `core` is.
+  debug:
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
+    # The image the Linux results were measured on (PR #255), not ubuntu-latest: the goldens and libm-dependent tests are image facts.
+    runs-on: ubuntu-24.04
+    # A hung child process should not hold the runner for the 6-hour default.
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+
+      # The pinned toolchain of the core job (why: its comment).
+      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
+        with:
+          toolchain: 1.97.1
+
+      # docs/contracts/ci-speed-2.md: the one copy of the model download and hash check (the assets and why are in the script).
+      - name: Fetch the language model
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: scripts/fetch-models.sh
+
+      - name: Tests (debug, core package)
+        run: cargo test --locked -p core
+
+      - name: Tests (debug, cli unit tests)
+        run: cargo test --locked -p cli --lib --bins
+
+  # docs/contracts/ci-speed-2.md: the Python steps, which used to follow the release tests in `core`, on Linux. They are development
+  # tools; their goldens (the dev302 rowstats among them) match byte for byte on Linux (PR #255). A golden that only matches on macOS
+  # would move its step back to a macOS job. Skipped exactly when `core` is.
+  python:
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
+    # The measured image, as in `debug`.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+
+      # The pinned toolchain of the core job (why: its comment).
+      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
+        with:
+          toolchain: 1.97.1
+
+      # docs/contracts/ci-speed-2.md: the one copy of the model download and hash check (the assets and why are in the script).
+      - name: Fetch the language model
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: scripts/fetch-models.sh
 
       # docs/PLAN.md S2v acceptance 3: Rust and Python lenient comparison agree
       # on every probe line, and the variant table is actually applied.
@@ -166,7 +192,7 @@ jobs:
           python3 reference/proto/check_unigram_overlay.py
           python3 reference/proto/test_demote.py
 
-      # numpy for the Python steps that need it. The runner's python3 has none; with trigram.sjt3 beside the model,
+      # numpy for the Python steps that need it, in a throwaway venv (the runner's python3 may not have it); with trigram.sjt3 beside the model,
       # lm_eval.py --profile formal imports reference/proto/trigram.py (numpy), and the X0c and trigram-table tests need it too.
       # Steps that do not need numpy keep the runner's python3.
       - name: Python venv with numpy
@@ -248,65 +274,68 @@ jobs:
           "$RUNNER_TEMP/x0c-venv/bin/python" -W ignore -m unittest experiments/x0c/test_x0c.py
           "$RUNNER_TEMP/x0c-venv/bin/python" -W ignore -m unittest tools/test_build_trigram.py
 
-  # docs/contracts/ci-speed.md: the debug test run, beside `core` instead of before it (debug 455 s and release 252 s used to run
-  # one after the other). Skipped exactly when `core` is.
-  core-debug:
+  # docs/contracts/ci-speed-2.md: the Swift tests through the real core and model, on their own runner beside `shell`. They launch
+  # no sandboxed build (the installer tests make their own throwaway bundles), so app-sandbox.md section 2.6's order does not bind
+  # them, and they need only target/release/libcore.a (macos/Package.swift), the lexicon and the models: no `make bundle`.
+  swift:
     needs: changes
     if: needs.changes.outputs.run == 'true'
     runs-on: xcode-27
-    # Measured 4.5-6.5 minutes (research log 2026-10-17, CI speed); a hung FFI child process should not hold the runner for the
-    # 6-hour default.
-    timeout-minutes: 20
+    timeout-minutes: 30  # the Swift tests took 394-479 s on runners up to twice as slow as each other
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           persist-credentials: false
 
-      # Pinned to the toolchain the golden files were generated with: scores
-      # must be bit-identical to the Python reference, and a codegen change
-      # has already moved one result by 1 ulp (docs/contracts/s3a.md section 9,
-      # powf lowered to exp10). The action is pinned to a master commit, as its
-      # README recommends; the `stable` branch is regenerated on every merge.
+      # The pinned toolchain of the core job (why: its comment).
       - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
         with:
           toolchain: 1.97.1
 
-      # The bigram model is not in git (docs/PLAN.md S2c); it is the model-v6
-      # release asset, its word-class table (S2k) is the classes-v5 asset and its
-      # Kneser-Ney side file (kn-core) is the kn-v1 asset. The small model of
-      # 語意校正 (S7c-2b) is the sj-sr-6-14m asset (會意 SJ-SR-6-14M, SJTL0004: it records model-v6's and kn-v1's hashes).
-      # The trigram table of the formal profile (trigram-core) is the sj-cx-1-7.7m asset (bound to model-v6's hash).
-      # The colloquial table (常談 SJ-CL-1-68K, colloquial-term.md) and its attribution list are the sj-cl-1-68k assets.
-      # Checking them here fails the run in seconds with a clear message instead
-      # of after the build. The hashes are checked against data/bigram.sjlm.sha256,
-      # data/classes.sjc.sha256, data/kn.sjkn.sha256, data/tinylm.sjtl.sha256, data/trigram.sjt3.sha256, data/colloquial.sjlm.sha256 and data/colloquial-attribution.tsv.sha256 (also read by build-app.sh and release.yml);
-      # cli/tests/golden.rs repeats the first two, so a model switch updates both (docs/data-files.md).
+      # docs/contracts/ci-speed-2.md: the one copy of the model download and hash check (the assets and why are in the script).
       - name: Fetch the language model
         env:
           GH_TOKEN: ${{ github.token }}
+        run: scripts/fetch-models.sh
+
+      # `make rust`: the static library macos/Package.swift links.
+      - name: Core static library
+        run: cargo build --release --locked -p core
+
+      # docs/contracts/s3a.md section 7.4: compile the C header against the
+      # staticlib and drive both layouts, the LM and the profile switch.
+      # In this job since ci-speed-2 (off the slowest job, `core`), after the static library above.
+      # macOS cc links without the native libs too, so an empty capture would
+      # pass silently; it is captured and checked first.
+      - name: C header smoke test
+        shell: bash
         run: |
           set -euo pipefail
-          gh release download model-v6 --repo "$GITHUB_REPOSITORY" -p bigram.sjlm -D data/lm
-          shasum -a 256 -c data/bigram.sjlm.sha256
-          gh release download classes-v5 --repo "$GITHUB_REPOSITORY" -p classes.sjc -D data/lm
-          shasum -a 256 -c data/classes.sjc.sha256
-          gh release download kn-v1 --repo "$GITHUB_REPOSITORY" -p kn.sjkn -D data/lm
-          shasum -a 256 -c data/kn.sjkn.sha256
-          gh release download sj-sr-6-14m --repo "$GITHUB_REPOSITORY" -p tinylm.sjtl -D data/lm
-          shasum -a 256 -c data/tinylm.sjtl.sha256
-          gh release download sj-cx-1-7.7m --repo "$GITHUB_REPOSITORY" -p trigram.sjt3 -D data/lm
-          shasum -a 256 -c data/trigram.sjt3.sha256
-          gh release download sj-cl-1-68k --repo "$GITHUB_REPOSITORY" -p colloquial.sjlm -p colloquial-attribution.tsv -D data/lm
-          shasum -a 256 -c data/colloquial.sjlm.sha256 data/colloquial-attribution.tsv.sha256
+          T="$RUNNER_TEMP"
+          LIBS=$(cargo rustc --color never --release --locked -p core --crate-type staticlib -- --print native-static-libs 2>&1 | sed -n 's/.*native-static-libs: //p')
+          test -n "$LIBS"
+          cc -std=c11 -Wall -Wextra -Werror -Icore/include core/tests/c/abi_smoke.c target/release/libcore.a $LIBS -o "$T/abi_smoke"
+          "$T/abi_smoke" data/lexicon data/lm/bigram.sjlm
+          # S4: a third argument (a fresh learning directory) runs the learning checks 518-521.
+          "$T/abi_smoke" data/lexicon data/lm/bigram.sjlm "$T/learn"
 
-      - name: Tests (debug)
-        run: cargo test --locked
+      # Includes the log-stream test (acceptance 5): it needs /usr/bin/log
+      # stream, which the runner's user can run.
+      # --parallel starts one xctest process per test method (the log prints `[n/N] Testing Class/method`;
+      # docs/contracts/ci-speed.md). Trade-off: state that leaks from one test into the next inside one process is no longer
+      # caught here, only by the serial `make test-swift`. --parallel drops XCTest's `Executed N tests` summary, so the number
+      # of test cases is printed from the xUnit file (it does not mark XCTSkip, so there is no skip count to print).
+      - name: Swift tests
+        run: |
+          set -euo pipefail
+          swift test --package-path macos --force-resolved-versions --parallel --xunit-output "$RUNNER_TEMP/swift-tests.xml"
+          python3 -c 'import sys, xml.etree.ElementTree as E; print("swift tests: %d testcases" % sum(1 for _ in E.parse(sys.argv[1]).iter("testcase")))' "$RUNNER_TEMP/swift-tests.xml"
 
   # The Swift input method (docs/contracts/s3b.md section 3, app-sandbox.md
   # section 2.6): the ad-hoc sandboxed builds, the container migration, the
-  # Swift tests through the real core and model, the bundled selftest,
-  # acceptance checks 2, 3 and 6 of s3b section 10, the entitlement and
-  # Sparkle mutations, and the installer.
+  # bundled selftest, acceptance checks 2, 3 and 6 of s3b section 10, the
+  # entitlement and Sparkle mutations, and the installer. The Swift tests are
+  # the `swift` job (docs/contracts/ci-speed-2.md).
   shell:
     needs: changes
     if: needs.changes.outputs.run == 'true'
@@ -325,33 +354,20 @@ jobs:
           path: ~/.cache/shanjie/english
           key: symspell-${{ hashFiles('tools/build_english_words.py') }}
 
-      # The same toolchain as the core and core-debug jobs and release.yml:
-      # libcore.a is built by every job that links it.
+      # The same toolchain as the other cargo jobs and release.yml: libcore.a is built by every job that links it.
       - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
         with:
           toolchain: 1.97.1
 
+      # docs/contracts/ci-speed-2.md: the one copy of the model download and hash check (the assets and why are in the script).
       - name: Fetch the language model
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          gh release download model-v6 --repo "$GITHUB_REPOSITORY" -p bigram.sjlm -D data/lm
-          shasum -a 256 -c data/bigram.sjlm.sha256
-          gh release download classes-v5 --repo "$GITHUB_REPOSITORY" -p classes.sjc -D data/lm
-          shasum -a 256 -c data/classes.sjc.sha256
-          gh release download kn-v1 --repo "$GITHUB_REPOSITORY" -p kn.sjkn -D data/lm
-          shasum -a 256 -c data/kn.sjkn.sha256
-          gh release download sj-sr-6-14m --repo "$GITHUB_REPOSITORY" -p tinylm.sjtl -D data/lm
-          shasum -a 256 -c data/tinylm.sjtl.sha256
-          gh release download sj-cx-1-7.7m --repo "$GITHUB_REPOSITORY" -p trigram.sjt3 -D data/lm
-          shasum -a 256 -c data/trigram.sjt3.sha256
-          gh release download sj-cl-1-68k --repo "$GITHUB_REPOSITORY" -p colloquial.sjlm -p colloquial-attribution.tsv -D data/lm
-          shasum -a 256 -c data/colloquial.sjlm.sha256 data/colloquial-attribution.tsv.sha256
+        run: scripts/fetch-models.sh
 
       # docs/contracts/app-sandbox.md section 2.6, in its order: no step before
       # step 3 launches any sandboxed build. cargo test runs in the core and
-      # core-debug jobs, so only the Swift tests run here.
+      # debug jobs and the Swift tests in the swift job.
       # Step 0: the default build has the development ID, the names of the
       # section 2.3 table, and no migration list. Build only.
       - name: "Step 0: default build (development ID), build only"
@@ -432,18 +448,6 @@ jobs:
       # Step 5: install-ime.sh file handling with a stub app in a temporary HOME; nothing can be registered.
       - name: "Step 5: install script file handling"
         run: scripts/test-install-ime.sh
-
-      # Includes the log-stream test (acceptance 5): it needs /usr/bin/log
-      # stream, which the runner's user can run.
-      # --parallel starts one xctest process per test method (the log prints `[n/247] Testing Class/method`;
-      # docs/contracts/ci-speed.md). Trade-off: state that leaks from one test into the next inside one process is no longer
-      # caught here, only by the serial `make test-swift`. --parallel drops XCTest's `Executed N tests` summary, so the number
-      # of test cases is printed from the xUnit file (it does not mark XCTSkip, so there is no skip count to print).
-      - name: "Step 5: Swift tests"
-        run: |
-          set -euo pipefail
-          swift test --package-path macos --force-resolved-versions --parallel --xunit-output "$RUNNER_TEMP/swift-tests.xml"
-          python3 -c 'import sys, xml.etree.ElementTree as E; print("swift tests: %d testcases" % sum(1 for _ in E.parse(sys.argv[1]).iter("testcase")))' "$RUNNER_TEMP/swift-tests.xml"
 
       # Step 6: the bundled selftest with a per-run throwaway ID (no migration
       # list); its container must not exist before and must exist after. The

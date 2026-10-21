@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Decides whether ci.yml's macOS jobs have anything to test. Reads the changed paths on stdin, one
+# Decides whether ci.yml's test jobs (macOS and Linux) have anything to test. Reads the changed paths on stdin, one
 # per line, and prints `run=true` unless every path is documentation, the website or a cross-version
 # benchmark result (eval/bench/results/, read only by `tools/bench.py`, which CI never runs), which no
 # build or test reads. LICENSES/ is bundled into the app (scripts/build-app.sh), so it always counts.
