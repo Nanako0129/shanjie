@@ -83,11 +83,12 @@ func ms(_ k: String, _ d: Int) -> useconds_t {
 let paceUS = ms("IMESHOT_PACE_MS", 10), stepWaitUS = ms("IMESHOT_STEP_WAIT_MS", 900), preWaitUS = ms("IMESHOT_PRE_WAIT_MS", 0)
 let noShot = env["IMESHOT_NOSHOT"] == "1"
 let demoSize: NSSize? = env["IMESHOT_DEMO_SIZE"].map { v in
-    let p = v.split(separator: "x").compactMap { Double($0) }
-    guard demo, p.count == 2, p[0] > 0, p[1] > 0 else { fail("bad IMESHOT_DEMO_SIZE=\(v): WIDTHxHEIGHT with a lowercase x, and only with IMESHOT_DEMO=1") }
+    let parts = v.split(separator: "x", omittingEmptySubsequences: false)
+    let p = parts.compactMap { Double($0) }.filter { $0.isFinite && $0 > 0 }
+    guard demo, parts.count == 2, p.count == 2 else { fail("bad IMESHOT_DEMO_SIZE=\(v): WIDTHxHEIGHT with a lowercase x, and only with IMESHOT_DEMO=1") }
     return NSSize(width: p[0], height: p[1]) }
 let fontSize: CGFloat = env["IMESHOT_FONT"].map { v in
-    guard let f = Double(v), f > 0 else { fail("bad IMESHOT_FONT=\(v)") }
+    guard let f = Double(v), f.isFinite, f > 0 else { fail("bad IMESHOT_FONT=\(v)") }
     return CGFloat(f) } ?? 22
 /// IMESHOT_SCREEN=builtin: open the window on the Mac's built-in display (when there is one), centred,
 /// e.g. to record a Retina demo away from the screen the user is working on.
@@ -189,7 +190,7 @@ DispatchQueue.global().async {
         ensureFront()
         switch step {
         case .rapid(let n, let codes):
-            // About 10 ms per key: the user cannot type while this runs (2026-10-05, "太慢了").
+            // IMESHOT_PACE_MS per key (10 ms unless set): the user cannot type while this runs (2026-10-05, "太慢了").
             for _ in 0..<n { for code in codes { press(code, shift: false, gap: paceUS / 2) } }
         case .key(let code, let shift):
             press(code, shift: shift)
