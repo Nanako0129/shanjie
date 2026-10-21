@@ -46,16 +46,27 @@ expect bad "build: data/lm file missing" a.sjlm "$C" build "$T/r"
 mk; printf 'a.sjlm\tx\n' >| "$T/r/data/models.tsv"
 expect bad "build: row with the wrong field count" models.tsv "$C" build "$T/r"
 
+mk; printf 'x' >> "$T/r/data/models.tsv"; truncate -s -2 "$T/r/data/models.tsv"
+expect bad "build: no final newline" models.tsv "$C" build "$T/r"
+mk; python3 -c 'import sys; p=sys.argv[1]; s=open(p).read(); open(p,"w").write(s.replace("\t","\t\t",1))' "$T/r/data/models.tsv"
+expect bad "build: an extra tab" models.tsv "$C" build "$T/r"
+mk; python3 -c 'import sys; p=sys.argv[1]; open(p,"w").write("\t"+open(p).read())' "$T/r/data/models.tsv"
+expect bad "build: a leading tab" models.tsv "$C" build "$T/r"
+mk; python3 -c 'import sys; p=sys.argv[1]; open(p,"w").write(open(p).read().replace("\n","\r\n"))' "$T/r/data/models.tsv"
+expect bad "build: CRLF" models.tsv "$C" build "$T/r"
+
 # The real repo's own list passes (data/lm is present in a built worktree; skipped where the models are not downloaded).
 if [ -f "$ROOT/data/lm/bigram.sjlm" ]; then expect ok "build: the repo's models.tsv" - "$C" build "$ROOT"; fi
 
 # A fake Resources folder.
 mkb() { mk; mkdir "$T/r/Res"; cp "$T/r/data/lm/"* "$T/r/data/models.tsv" "$T/r/Res/"; }
 mkb
-expect ok "bundle: as is" - "$C" bundle "$T/r/Res"
+expect ok "bundle: as is" - "$C" bundle "$T/r/Res" "$T/r"
 mkb; echo extra >| "$T/r/Res/d.sjkn"
-expect bad "bundle: model file without a row" d.sjkn "$C" bundle "$T/r/Res"
+expect bad "bundle: model file without a row" d.sjkn "$C" bundle "$T/r/Res" "$T/r"
+mkb; python3 -c 'import re,sys; p=sys.argv[1]; s=open(p).read(); open(p,"w").write(re.sub(r"(b\.sjc\t)[0-9a-f]{64}", r"\g<1>"+sys.argv[2], s))' "$T/r/Res/models.tsv" "$HASH0"
+expect bad "bundle: row hash != data/*.sha256" b.sjc "$C" bundle "$T/r/Res" "$T/r"
 mkb; rm "$T/r/Res/b.sjc"
-expect bad "bundle: row whose file is missing" b.sjc "$C" bundle "$T/r/Res"
+expect bad "bundle: row whose file is missing" b.sjc "$C" bundle "$T/r/Res" "$T/r"
 mkb; echo changed >| "$T/r/Res/a.sjlm"
-expect bad "bundle: hash mismatch" a.sjlm "$C" bundle "$T/r/Res"
+expect bad "bundle: hash mismatch" a.sjlm "$C" bundle "$T/r/Res" "$T/r"

@@ -383,16 +383,17 @@ struct SettingsPageForm: View {
 private struct AboutSections: View {
     /// The site's front page, also the cask's homepage (packaging/Casks/shanjie.rb).
     private static let site = URL(string: "https://shanjie.nyanako.com/")!
+    /// The bundled models (about-models.md), read once; empty (no section) when models.tsv is missing or unreadable.
+    private static let models = ModelList.load(from: Bundle.main.url(forResource: "models", withExtension: "tsv"))
     @ObservedObject var updates: Updates
 
     var body: some View {
         Section("善解輸入法") {
             LabeledContent("版本", value: updates.versionText)
         }
-        let models = ModelList.load(from: Bundle.main.url(forResource: "models", withExtension: "tsv"))
-        if !models.isEmpty {
+        if !Self.models.isEmpty {
             Section("模型") {
-                ForEach(models, id: \.file) { LabeledContent($0.name, value: $0.code) }
+                ForEach(Self.models, id: \.file) { LabeledContent($0.name, value: $0.code) }
             }
         }
         Section("更新") {

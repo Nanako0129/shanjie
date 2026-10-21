@@ -9,14 +9,16 @@ public struct ModelRow: Equatable {
 }
 
 public enum ModelList {
-    /// Rows `file<TAB>SHA-256<TAB>中文名<TAB>對外名稱` in file order. No header, comments or blank lines exist in the file, so a line of
-    /// any other shape (the build refuses one) makes the whole file unreadable: `[]`, and the About page shows no section.
+    /// Rows `file<TAB>SHA-256<TAB>中文名<TAB>對外名稱` in file order. The format is strict, the same as scripts/check-models.sh (which
+    /// the build and check-app.sh run on this file): it ends with a newline, holds no CR, and every line is four non-empty
+    /// fields. Anything else makes the whole file unreadable: `[]`, and the About page shows no section.
     public static func parse(_ text: String) -> [ModelRow] {
+        guard text.hasSuffix("\n"), !text.unicodeScalars.contains("\r") else { return [] }
         var rows: [ModelRow] = []
-        for line in text.split(separator: "\n", omittingEmptySubsequences: false).dropLast(text.hasSuffix("\n") ? 1 : 0) {
-            let f = line.split(separator: "\t", omittingEmptySubsequences: false)
+        for line in text.dropLast().components(separatedBy: "\n") {
+            let f = line.components(separatedBy: "\t")
             guard f.count == 4, !f.contains(where: \.isEmpty) else { return [] }
-            rows.append(ModelRow(file: String(f[0]), name: String(f[2]), code: String(f[3])))
+            rows.append(ModelRow(file: f[0], name: f[2], code: f[3]))
         }
         return rows
     }
