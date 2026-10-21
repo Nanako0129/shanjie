@@ -94,7 +94,7 @@ jobs:
         with:
           toolchain: 1.97.1
 
-      # Before build-app.sh, against the tracked hashes (data/bigram.sjlm.sha256, data/classes.sjc.sha256, data/kn.sjkn.sha256, data/tinylm.sjtl.sha256, data/trigram.sjt3.sha256, data/colloquial.sjlm.sha256 and data/colloquial-attribution.tsv.sha256, as ci.yml).
+      # Before build-app.sh, against the tracked hashes (data/bigram.sjlm.sha256, data/classes.sjc.sha256, data/kn.sjkn.sha256, data/tinylm.sjtl.sha256, data/trigram.sjt3.sha256, data/colloquial.sjlm.sha256 and data/colloquial-attribution.tsv.sha256, as scripts/fetch-models.sh does for ci.yml).
       - name: Fetch the language model
         env:
           GH_TOKEN: ${{ github.token }}

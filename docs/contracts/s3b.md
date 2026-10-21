@@ -49,7 +49,7 @@
 ## 3. CI 與發布（GitHub Actions）
 
 - **模型雜湊只有一份**：`data/bigram.sjlm.sha256`（進 git）。`build-app.sh`、`ci.yml` 的兩個 job、`release.yml` 都讀它，不得各自寫死（原本 `ci.yml` 的 `LM_SHA256` 環境變數已移除）。
-- **Rust 工具鏈**：所有會建 `libcore.a` 的 job（`ci.yml` 的 `core` 與 `shell`、`release.yml` 的 `build`）都用和 `core` job 相同的 `dtolnay/rust-toolchain` 步驟，固定 1.97.1。
+- **Rust 工具鏈**：所有會建 `libcore.a` 的 job（`ci.yml` 的 `core`、`shell`、`swift`、`debug`、`python`（2026-10-22 起，`docs/contracts/ci-speed-2.md`），`release.yml` 的 `build`）都用和 `core` job 相同的 `dtolnay/rust-toolchain` 步驟，固定 1.97.1。
 - **`ci.yml`**（已在 main）加一個 `shell` 工作：下載 `model-v1` 的模型並比對雜湊 → `scripts/build-app.sh` → `swift test`（`macos/`）→ `build/善解輸入法.app/Contents/MacOS/shanjie --selftest` → §10 的驗收 2、3、6。
   - **2026-10-19 修訂**：`shell` 工作的步驟與順序改照 `app-sandbox.md` §2.6（三種 ID 的組建、本機防呆、移轉測試、拒絕測試、selftest、驗收、entitlements 與 Sparkle 的突變、安裝程式）。
 - **`release.yml`**（新增，仿 syrtis 的 `release.yml`）：推 `v*` tag 時：

@@ -1,6 +1,6 @@
 # 契約：CI 加速第二片（ci-speed-2）
 
-狀態：修訂一（2026-10-22；plan-verifier 第一次 REVISE：每個跑 cargo 的 job 都釘工具鏈、`release.yml` 註解與 `app-sandbox.md` §2.6 第 5 步、Linux 上直接 return 的兩個測試、量哪兩次 run）。
+狀態：修訂一（2026-10-22；plan-verifier 第一次 REVISE：每個跑 cargo 的 job 都釘工具鏈、`release.yml` 註解與 `app-sandbox.md` §2.6 第 5 步、Linux 上直接 return 的兩個測試、量哪兩次 run；第二次審查 READY）。實作後依 `/code-review` 改兩處：C 標頭冒煙測試移到 `swift`（`core` 是最慢的 job），Linux 的 job 釘 `ubuntu-24.04`（量測用的映像）。
 
 ## 0. 依據
 
@@ -46,11 +46,11 @@
 
    | job | runner | 內容 |
    |---|---|---|
-   | `core` | xcode-27 | 下載並核對模型、`cargo test --release --locked`（兩個套件全部）、C 標頭冒煙測試 |
-   | `debug` | ubuntu-latest | 下載並核對模型、`cargo test --locked -p core`、`cargo test --locked -p cli --lib --bins` |
-   | `python` | ubuntu-latest | 下載並核對模型、寬鬆比對一致性（Rust 對 Python）、原本 `core` 的所有 Python 步驟（同樣的指令、同樣的順序） |
+   | `core` | xcode-27 | 下載並核對模型、`cargo test --release --locked`（兩個套件全部） |
+   | `debug` | ubuntu-24.04 | 下載並核對模型、`cargo test --locked -p core`、`cargo test --locked -p cli --lib --bins` |
+   | `python` | ubuntu-24.04 | 下載並核對模型、寬鬆比對一致性（Rust 對 Python）、原本 `core` 的所有 Python 步驟（同樣的指令、同樣的順序） |
    | `shell` | xcode-27 | 原本的步驟，拿掉 Swift 測試 |
-   | `swift` | xcode-27 | 下載並核對模型、`cargo build --release --locked -p core`、原本那一步 Swift 測試（`--parallel`、從 xUnit 印測試數） |
+   | `swift` | xcode-27 | 下載並核對模型、`cargo build --release --locked -p core`、C 標頭冒煙測試、原本那一步 Swift 測試（`--parallel`、從 xUnit 印測試數） |
 
    拿掉 `core-debug`。會跑 cargo 的 job（`core`、`debug`、`python`、`swift`、`shell`）都有同一個釘住的 `dtolnay/rust-toolchain` 步驟（`toolchain: 1.97.1`）：repo 沒有 `rust-toolchain` 檔，golden 要逐位元組相同，工具鏈只靠這一步固定（`ci.yml` 的註解）。
 

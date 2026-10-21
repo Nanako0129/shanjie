@@ -76,12 +76,14 @@ jobs:
     needs: changes
     if: needs.changes.outputs.run == 'true'
     # docs/contracts/ci-speed-2.md: the release tests of both packages (the shipping profile, with the per-key p95 assertions and the
-    # f64 goldens made on macOS) and the C header. The debug run is the `debug` job and the Python steps the `python` job, both on Linux.
+    # f64 goldens made on macOS); the C header smoke test is in `swift`. The debug run is the `debug` job and the Python steps the `python` job, both on Linux.
     runs-on: xcode-27
     # A hung FFI child process should not hold the runner for the 6-hour default.
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
 
       # Pinned to the toolchain the golden files were generated with: scores
       # must be bit-identical to the Python reference, and a codegen change
@@ -103,22 +105,6 @@ jobs:
       - name: Tests (release)
         run: cargo test --release --locked
 
-      # docs/contracts/s3a.md section 7.4: compile the C header against the
-      # staticlib and drive both layouts, the LM and the profile switch.
-      # macOS cc links without the native libs too, so an empty capture would
-      # pass silently; it is captured and checked first.
-      - name: C header smoke test
-        shell: bash
-        run: |
-          set -euo pipefail
-          T="$RUNNER_TEMP"
-          LIBS=$(cargo rustc --color never --release --locked -p core --crate-type staticlib -- --print native-static-libs 2>&1 | sed -n 's/.*native-static-libs: //p')
-          test -n "$LIBS"
-          cc -std=c11 -Wall -Wextra -Werror -Icore/include core/tests/c/abi_smoke.c target/release/libcore.a $LIBS -o "$T/abi_smoke"
-          "$T/abi_smoke" data/lexicon data/lm/bigram.sjlm
-          # S4: a third argument (a fresh learning directory) runs the learning checks 518-521.
-          "$T/abi_smoke" data/lexicon data/lm/bigram.sjlm "$T/learn"
-
   # docs/contracts/ci-speed-2.md: the debug run (overflow checks and the standard library's debug-only checks) on Linux, beside the
   # release tests instead of on a second macOS runner. Linux runs the core package's tests faster than the macOS runner; the cli
   # package's integration tests score with the small model, which has no Accelerate on Linux (2.4 times the macOS time), so they run
@@ -129,8 +115,9 @@ jobs:
   debug:
     needs: changes
     if: needs.changes.outputs.run == 'true'
-    runs-on: ubuntu-latest
-    # Measured 4.3 minutes for the core package (PR #255); a hung child process should not hold the runner for the 6-hour default.
+    # The image the Linux results were measured on (PR #255), not ubuntu-latest: the goldens and libm-dependent tests are image facts.
+    runs-on: ubuntu-24.04
+    # A hung child process should not hold the runner for the 6-hour default.
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
@@ -160,7 +147,8 @@ jobs:
   python:
     needs: changes
     if: needs.changes.outputs.run == 'true'
-    runs-on: ubuntu-latest
+    # The measured image, as in `debug`.
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
@@ -293,7 +281,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.run == 'true'
     runs-on: xcode-27
-    timeout-minutes: 20
+    timeout-minutes: 30  # the Swift tests took 394-479 s on runners up to twice as slow as each other
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
@@ -313,6 +301,23 @@ jobs:
       # `make rust`: the static library macos/Package.swift links.
       - name: Core static library
         run: cargo build --release --locked -p core
+
+      # docs/contracts/s3a.md section 7.4: compile the C header against the
+      # staticlib and drive both layouts, the LM and the profile switch.
+      # In this job since ci-speed-2 (off the slowest job, `core`), after the static library above.
+      # macOS cc links without the native libs too, so an empty capture would
+      # pass silently; it is captured and checked first.
+      - name: C header smoke test
+        shell: bash
+        run: |
+          set -euo pipefail
+          T="$RUNNER_TEMP"
+          LIBS=$(cargo rustc --color never --release --locked -p core --crate-type staticlib -- --print native-static-libs 2>&1 | sed -n 's/.*native-static-libs: //p')
+          test -n "$LIBS"
+          cc -std=c11 -Wall -Wextra -Werror -Icore/include core/tests/c/abi_smoke.c target/release/libcore.a $LIBS -o "$T/abi_smoke"
+          "$T/abi_smoke" data/lexicon data/lm/bigram.sjlm
+          # S4: a third argument (a fresh learning directory) runs the learning checks 518-521.
+          "$T/abi_smoke" data/lexicon data/lm/bigram.sjlm "$T/learn"
 
       # Includes the log-stream test (acceptance 5): it needs /usr/bin/log
       # stream, which the runner's user can run.
