@@ -50,10 +50,12 @@ mk; printf 'x' >> "$T/r/data/models.tsv"; truncate -s -2 "$T/r/data/models.tsv"
 expect bad "build: no final newline" models.tsv "$C" build "$T/r"
 mk; python3 -c 'import sys; p=sys.argv[1]; s=open(p).read(); open(p,"w").write(s.replace("\t","\t\t",1))' "$T/r/data/models.tsv"
 expect bad "build: an extra tab" models.tsv "$C" build "$T/r"
-mk; python3 -c 'import sys; p=sys.argv[1]; open(p,"w").write("\t"+open(p).read())' "$T/r/data/models.tsv"
+mk; python3 -c 'import sys; p=sys.argv[1]; s=open(p).read(); open(p,"w").write("\t"+s)' "$T/r/data/models.tsv"
 expect bad "build: a leading tab" models.tsv "$C" build "$T/r"
-mk; python3 -c 'import sys; p=sys.argv[1]; open(p,"w").write(open(p).read().replace("\n","\r\n"))' "$T/r/data/models.tsv"
-expect bad "build: CRLF" models.tsv "$C" build "$T/r"
+mk; python3 -c 'import sys; p=sys.argv[1]; s=open(p).read(); open(p,"w").write(s.replace("\n","\r\n"))' "$T/r/data/models.tsv"
+expect bad "build: CRLF" "holds a CR" "$C" build "$T/r"
+mk; python3 -c 'import sys; p=sys.argv[1]; s=open(p).read(); a=s.split("\t"); a[2]=""; open(p,"w").write("\t".join(a))' "$T/r/data/models.tsv"
+expect bad "build: an empty field" models.tsv "$C" build "$T/r"
 
 # The real repo's own list passes (data/lm is present in a built worktree; skipped where the models are not downloaded).
 if [ -f "$ROOT/data/lm/bigram.sjlm" ]; then expect ok "build: the repo's models.tsv" - "$C" build "$ROOT"; fi
