@@ -31,6 +31,8 @@ final class UpdatesTests: XCTestCase {
     func testLocationNote() {
         XCTAssertEqual(UpdateText.location(bundleURL: URL(fileURLWithPath: "/Library/Input Methods/善解輸入法.app")), UpdateText.locationSystem)
         XCTAssertTrue(UpdateText.locationSystem.contains("善解更新 wants permission to update 善解輸入法."))
+        // The dialog itself is the system's (Chinese on a Chinese system); only that line is Sparkle's fixed English.
+        XCTAssertTrue(UpdateText.locationSystem.contains("請你輸入密碼來允許更新；框裡有一行說明固定是英文"))
         for path in ["/Users/a/Library/Input Methods/善解輸入法.app", "/Users/a/Desktop/善解輸入法.app",
                      "/Library/Input Methods/sub/善解輸入法.app"] {
             XCTAssertEqual(UpdateText.location(bundleURL: URL(fileURLWithPath: path)), UpdateText.locationUser, path)
