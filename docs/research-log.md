@@ -8510,3 +8510,15 @@ XL 比 `MAX_FILE`（67,108,864）小 1,168,880 位元組。錨點：4 個模型 
   - 聊天 234 → 237（7／4，p 0.55）、書面 233 → 241（8／0，p 0.0078）。
   - 口語半邊（聊天）116 → 115（3／4，p 1.0），新聞半邊（書面）116 → 120（4／0，p 0.125）。
   - 第一次派 verifier 時，bench 的匯出只帶 `Cargo.toml Cargo.lock core cli data eval/variants.tsv`，CLI 讀不到 `eval/holdout/`。讀任何一列之前就失敗，所以不算使用。之後從同一個 commit 用 `git archive` 把 `eval/holdout/` 解進兩個匯出，雜湊核對過、量完刪掉。
+
+## 2026-10-22：v0.5.0 發佈
+
+- 維護者同意「過了就合併然後推 tag」。PR #258（說明、基準測試、KPI、保留集）合併為 `1c9e0a7d`，和被量的 `299230a5` 在 `Cargo.toml Cargo.lock core cli data eval/variants.tsv macos scripts` 上沒有差異；`v0.5.0` 指向 `1c9e0a7d`。
+- 發佈流程 run 39657107635：gate、build、sign、publish 都成功。sign 與 publish 各要一次 release 環境的核准，都由維護者按。
+- PR #258 最後一個 head 的 CI 第一次失敗：shell job 下載 Sparkle 的 SwiftPM zip 時 GitHub 回 502。只重跑那個 job 就通過，和改動無關。
+- 核對：
+  - Release 是 Latest。附件 `shanjie-0.5.0.zip`（104,337,704 bytes）、`shanjie-installer-0.5.0.zip` 與兩個 `.sha256`。
+  - main 的 `appcast.xml`（`fc45d186`）有 0.5.0 的項目，enclosure 指向 `v0.5.0/shanjie-0.5.0.zip`，`length` 等於上傳的 zip。那個網址回 200，下載下來的 SHA-256 `e51a6571…` 等於 `.sha256`。
+  - Homebrew cask 是 0.5.0，sha256 相同。
+  - 已安裝版「立即檢查」看到 0.5.0：要維護者在自己的機器上看（還沒看）。
+- 發版公告：blobhaj，只標善解身分組，照 `release-lint.py --platform discord` 檢查通過（1,684 字）。
