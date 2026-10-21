@@ -122,7 +122,9 @@ jobs:
 
       # Release also enforces the per-key p95 < 16 ms assertions in the replays.
       - name: Tests (release)
-        run: cargo test --release --locked
+        run: |
+          sysctl -n hw.ncpu hw.memsize
+          RUSTC_BOOTSTRAP=1 cargo test --release --locked -- -Z unstable-options --report-time
 
       # docs/contracts/s3a.md section 7.4: compile the C header against the
       # staticlib and drive both layouts, the LM and the profile switch.
@@ -300,7 +302,9 @@ jobs:
           shasum -a 256 -c data/colloquial.sjlm.sha256 data/colloquial-attribution.tsv.sha256
 
       - name: Tests (debug)
-        run: cargo test --locked
+        run: |
+          sysctl -n hw.ncpu hw.memsize
+          RUSTC_BOOTSTRAP=1 cargo test --locked -- -Z unstable-options --report-time
 
   # The Swift input method (docs/contracts/s3b.md section 3, app-sandbox.md
   # section 2.6): the ad-hoc sandboxed builds, the container migration, the
@@ -444,6 +448,12 @@ jobs:
           set -euo pipefail
           swift test --package-path macos --force-resolved-versions --parallel --xunit-output "$RUNNER_TEMP/swift-tests.xml"
           python3 -c 'import sys, xml.etree.ElementTree as E; print("swift tests: %d testcases" % sum(1 for _ in E.parse(sys.argv[1]).iter("testcase")))' "$RUNNER_TEMP/swift-tests.xml"
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: swift-tests-xunit
+          path: ${{ runner.temp }}/swift-tests.xml
 
       # Step 6: the bundled selftest with a per-run throwaway ID (no migration
       # list); its container must not exist before and must exist after. The
