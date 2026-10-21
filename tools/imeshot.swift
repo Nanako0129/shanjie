@@ -5,7 +5,7 @@
 //         `-` 只截圖不按鍵；`N*a,b,c` 把鍵碼 a、b、c 依序快速連打 N 次（每鍵約 10 ms），打完截一張。
 //   每一步截一張 `<輸出前綴>-<步驟序號>.png`，只截測試視窗和它下方候選窗的區域，不截全螢幕。
 //   環境變數 IMESHOT_VIDEO=<檔名.mov>：從視窗拿到焦點開始錄影，長度依步驟估算（每步是按鍵約 0.2 秒加上
-//   IMESHOT_STEP_WAIT_MS，截圖時再加約 0.3 秒；快速連打另加每鍵 IMESHOT_PACE_MS；再多留 3 秒）。錄影時 macOS 會讓周圍變暗，這是刻意保留的，使用者看得到正在錄。
+//   IMESHOT_STEP_WAIT_MS，截圖時再加約 0.3 秒；快速連打另加每鍵 IMESHOT_PACE_MS；加上 IMESHOT_PRE_WAIT_MS；再多留 3 秒）。錄影時 macOS 會讓周圍變暗，這是刻意保留的，使用者看得到正在錄。
 //   環境變數 IMESHOT_SCREEN=builtin：視窗開在筆電內建螢幕的正中央（沒有內建螢幕就中止）。
 //   環境變數 IMESHOT_DEMO=1：視窗加高，候選窗開在本程式自己的空白文字區上，截圖與錄影只截這個視窗，
 //   不會拍到後面的任何畫面（給要分享的 demo 用）。
@@ -68,6 +68,10 @@ app.setActivationPolicy(.regular)
 /// screenshots and video show only this window, never what is behind it (for demo clips to share).
 let env = ProcessInfo.processInfo.environment
 let demo = env["IMESHOT_DEMO"] == "1"
+/// IMESHOT_RESTORE: checked here, before any window, like the other parameters.
+let restoreID: TISInputSource? = env["IMESHOT_RESTORE"].map { id in
+    guard let s = source(id) else { fail("no input source \(id) for IMESHOT_RESTORE") }
+    return s }
 // Demo parameters (the header lists them); unset, every one keeps the probe's old behaviour.
 /// A set variable that does not parse stops the run before anything is typed (a mistyped value would otherwise record a
 /// whole clip with the defaults, as the first v0.4.1 take did).
@@ -115,9 +119,7 @@ window.makeKeyAndOrderFront(nil)
 window.makeFirstResponder(textView)
 let pid = ProcessInfo.processInfo.processIdentifier
 let original = TISCopyCurrentKeyboardInputSource().takeRetainedValue()
-let restoreTo: TISInputSource = env["IMESHOT_RESTORE"].map { id in
-    guard let s = source(id) else { fail("no input source \(id) for IMESHOT_RESTORE") }
-    return s } ?? original
+let restoreTo = restoreID ?? original
 restore = { DispatchQueue.main.sync { _ = TISSelectInputSource(restoreTo) } }
 
 func onMain<T>(_ f: () -> T) -> T { DispatchQueue.main.sync(execute: f) }
@@ -167,10 +169,13 @@ DispatchQueue.global().async {
     if let video = env["IMESHOT_VIDEO"] {
         let f = onMain { window.frame }, h = onMain { NSScreen.screens[0].frame.height }
         // Estimated, not measured exactly: a step is about 0.2 s of keys plus the step wait, plus about 0.3 s when it
-        // takes a screenshot (with the defaults 1.4 s, as before); rapid steps add the pace per key; 3 s spare.
-        let typing = plan.reduce(0.0) { sum, s in if case .rapid(let n, let c) = s { return sum + Double(n * c.count) * Double(paceUS) / 1e6 }; return sum }
-        let perStep = 0.2 + Double(stepWaitUS) / 1e6 + (noShot ? 0 : 0.3)
-        let seconds = Int((Double(plan.count) * perStep + typing + Double(preWaitUS) / 1e6).rounded(.up)) + 3
+        // takes a screenshot (with the defaults 1.4 s, the old value); rapid steps add the pace per key; then the
+        // wait before typing; 3 s spare. With no demo variable set this equals the old formula for every length.
+        // Whole microseconds, not Double: 0.2 + 0.9 + 0.3 is not exactly 1.4 and rounded some lengths up a second.
+        let typingUS = plan.reduce(0) { sum, s in if case .rapid(let n, let c) = s { return sum + n * c.count * Int(paceUS) }; return sum }
+        let perStepUS = 200_000 + Int(stepWaitUS) + (noShot ? 0 : 300_000)
+        let totalUS = plan.count * perStepUS + typingUS + Int(preWaitUS)
+        let seconds = (totalUS + 999_999) / 1_000_000 + 3
         let r = Process(); r.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
         let area = demo ? "\(Int(f.minX)),\(Int(h - f.maxY)),\(Int(f.width)),\(Int(f.height))"
                         : "\(Int(f.minX) - 20),\(Int(h - f.maxY) - 20),620,330"
