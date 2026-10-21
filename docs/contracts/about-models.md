@@ -5,7 +5,7 @@
 ## 0. 起因、要做到什麼、怎麼看到
 
 - **起因**：常談的契約寫了「關於頁的模型列表多一列」，但關於頁本來沒有模型列表（v0.5.0 虛擬機驗收時發現）。維護者 2026-10-21 選擇題：加一個，跟 v0.5.0 一起出。
-- **要做到**：設定的「關於」頁多一節「模型」，列出這一版 App 內附的每個模型。每列顯示中文名與對外名稱（`docs/releases/README.md` 的命名規則，例如「通語」配「SJ-LM-6-9.1M」）。列表跟著 App 內附的檔案走：換了模型而表沒更新時，建置要失敗，不能顯示錯的版本。
+- **要做到**：設定的「關於」頁多一節「模型」，列出這一版 App 內附的每個模型。每列顯示中文名與對外名稱（`docs/releases/README.md` 的命名規則，例如「通語」配「SJ-LM-6-9.1M」）。列表跟著 App 內附的檔案走：打包的模型就是表上的模型；換了模型而表的雜湊、或 `docs/releases/README.md` 的名稱沒跟著改，建置要失敗。
 - **怎麼看到**：維護者在虛擬機裝 dry run，打開「設定 → 關於」，看到「模型」一節與六列，名稱和 `docs/releases/README.md` 的表一致。外觀照實機一輪一輪調。
 
 ## 1. 現況
@@ -28,11 +28,13 @@
   | `colloquial.sjlm` | 常談 | SJ-CL-1-68K |
 
   實作時逐一對 `docs/releases/README.md` 的表核對名稱與版本；SHA-256 欄等於 `data/<檔名>.sha256`。
-- **建置**：`scripts/build-app.sh` 在建置前檢查（和其他模型檢查放在一起）：
-  - `data/models.tsv` 的每一列，SHA-256 欄等於 `data/<檔名>.sha256`；
-  - 要複製進 bundle 的六個模型檔都各有一列；
-  - 不符就停，訊息寫哪一列、哪個檔。
-  - 通過後把 `models.tsv` 複製進 `Resources/`。`scripts/check-app.sh` 檢查 bundle 裡有這個檔，且每一列的 SHA-256 等於 bundle 裡同名模型檔的實際雜湊。
+- **建置**：`scripts/build-app.sh` 在建置前檢查（和其他模型檢查放在一起；寫成可以單獨呼叫的檢查，見 §3）：
+  - **一份清單**：要打包的模型就是 `data/models.tsv` 列的檔案。`build-app.sh` 複製模型那一行改成照 `models.tsv` 的檔名欄複製，不再另寫一串檔名；要加模型只能加一列。
+  - 每一列的 SHA-256 欄等於 `data/<檔名>.sha256`，而且 `data/lm/<檔名>` 存在、雜湊相符。
+  - 每一列的中文名與對外名稱，出現在 `docs/releases/README.md` 模型命名表裡寫著同一個檔名（`` `<檔名>` ``）的那一列。換模型時，雜湊要改，`docs/releases/README.md` 的表也要改；只改其中一個都會停。
+  - 不符就停，訊息寫哪一列、哪個檔、哪一欄。
+  - 通過後把 `models.tsv` 複製進 `Resources/`。
+  - `scripts/check-app.sh` 雙向核對 bundle：`Resources/` 裡每個模型檔（副檔名 `.sjlm`、`.sjc`、`.sjkn`、`.sjtl`、`.sjt3`）在 `models.tsv` 剛好一列，`models.tsv` 的每一列在 `Resources/` 都有檔案，而且雜湊等於那個檔的實際雜湊。原本 `check-app.sh` 另外寫死的模型檔名清單，改成讀 `models.tsv`。
 - **App**：
   - `AboutSections` 在「善解輸入法」那一節之後加一節「模型」，每列是 `LabeledContent(中文名, value: 對外名稱)`。
   - 讀 `Bundle.main` 的 `models.tsv`，解析成純函式（列的順序照檔案）。檔案不在或讀不了時，整節不顯示（開發環境、測試）。
@@ -42,13 +44,14 @@
 ## 3. 驗收
 
 1. `data/models.tsv` 的六列和 `docs/releases/README.md` 的表一致；SHA-256 等於 `data/*.sha256`。
-2. 建置檢查：
-   - 改壞 `models.tsv` 某一列的雜湊，`build-app.sh` 會停；
-   - 拿掉某一列，也會停；
-   - 照原樣則通過。
-   - 以上用一個 shell 測試或 `make` 目標跑，不需要真的建完整個 App；檢查寫成 `build-app.sh` 可以單獨呼叫的函式或腳本。
+2. 建置檢查（用一個 shell 測試跑，不需要真的建完整個 App；檢查寫成可以單獨呼叫的腳本）。各一個案例，前四個都要停：
+   - 改壞某一列的雜湊；
+   - 雜湊對、但對外名稱是舊的（不在 `docs/releases/README.md` 該檔那一列）；
+   - `data/lm/` 的檔案和列的雜湊不符；
+   - 某一列的檔案不在 `data/lm/`；
+   - 照原樣：通過。
 3. Swift 單元測試：解析函式照順序回傳六列；空檔、欄位數不對的列、檔案不存在各一個案例。
-4. `check-app.sh`（`SKIP_RUN=1`）在 dry run 的 bundle 上通過，且改壞 bundle 裡 `models.tsv` 的一個雜湊時會失敗。
+4. `check-app.sh` 的雙向核對（同一個 shell 測試，用假的 `Resources/` 資料夾）：多一個沒有列的模型檔會失敗；少一個有列的檔會失敗；雜湊不符會失敗；照原樣通過。另在 dry run 的 bundle 上 `SKIP_RUN=1` 跑一次，通過。
 5. 實機（維護者，虛擬機裡的 dry run）：「設定 → 關於」看到「模型」一節與六列。
 6. `/code-review` ＋ fresh verifier ＋ CI。
 
