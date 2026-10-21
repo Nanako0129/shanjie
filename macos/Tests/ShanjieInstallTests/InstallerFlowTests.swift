@@ -37,6 +37,23 @@ final class InstallerFlowTests: XCTestCase {
         }
     }
 
+    /// system-install.md section 2.4 (second revision): the System Settings watch only after an enable call, only for the log-out pages.
+    func testWatchesSystemSettingsOnlyAfterAnEnableCallOnTheLogOutPages() {
+        let screens: [InstallerScreen] = [.tryIt, .activate, .waiting, .failed, .logOut, .logOutThenAdd, .failedLogOut]
+        for screen in screens {
+            for outcome in [Registration.Outcome.done, .notAccepted, .enableFailed] {
+                XCTAssertEqual(InstallerFlow.watchesSystemSettings(after: Registration.Result(outcome: outcome), screen: screen),
+                               screen == .logOut || screen == .logOutThenAdd, "\(outcome) \(screen)")
+                // A skipped registration made no TIS call, so System Settings was not opened.
+                XCTAssertFalse(InstallerFlow.watchesSystemSettings(after: Registration.Result(outcome: outcome, skipped: true), screen: screen))
+            }
+            // Stopped before the enable call.
+            for outcome in [Registration.Outcome.modeNotListed, .registrationFailed] {
+                XCTAssertFalse(InstallerFlow.watchesSystemSettings(after: Registration.Result(outcome: outcome), screen: screen), "\(outcome) \(screen)")
+            }
+        }
+    }
+
     func testPicksTheSelectableZhuyinMode() {
         let id = "com.nyanako.inputmethod.shanjie"
         // The input method itself, a leftover mode of an earlier version, then the one mode.
