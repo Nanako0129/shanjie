@@ -153,7 +153,8 @@ let castGlyphs: [String]? = keycast.map { k in
     }
     if k != "zhuyin" && k != "keys" {
         guard let t = try? String(contentsOfFile: k, encoding: .utf8) else { fail("bad IMESHOT_KEYCAST=\(k): zhuyin, keys or a readable file") }
-        var l = t.split(separator: "\n", omittingEmptySubsequences: false).map { $0.hasSuffix("\r") ? String($0.dropLast()) : String($0) }
+        // Swift reads "\r\n" as one Character, which a split on "\n" never matches: turn CRLF into LF first.
+        var l = t.replacingOccurrences(of: "\r\n", with: "\n").split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
         if l.last == "" { l.removeLast() }
         guard l.count == presses.count else { fail("IMESHOT_KEYCAST file has \(l.count) labels, the steps press \(presses.count) keys") }
         return l   // a label file spells its own spacing and Shift
