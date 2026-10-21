@@ -109,3 +109,4 @@
 - 只改 `.github/workflows/ci.yml`、`scripts/fetch-models.sh`、§2 第 3 項列的文件（含 `release.yml` 那一行註解與 `app-sandbox.md` 那一句）與研究紀錄。
 - 不改 GitHub 的設定（保護規則、runner、secrets）。
 - PR #255（量測用）在本片合併後關閉；`ci/probe-times` 分支刪前先問維護者。
+
