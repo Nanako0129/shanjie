@@ -723,6 +723,8 @@ VERSIONS2 = {
     "v0.4.6": {"release": "v0.4.6", "flags": ["--context", "--packs", "acg"], "tinylm": True, "kn": True, "tag": "+ctx+kn:{kn8}:θ1:β1+tl:{tl8}+acg"},
     "v0.4.7": {"release": "v0.4.7", "flags": ["--context", "--packs", "acg"], "tinylm": True, "kn": True, "tri": True, "tag": "+ctx+kn:{kn8}:θ1:β1+tl:{tl8}+acg",
                "formal_tag": "+ctx+tl:{tl8}+acg+tri:{tri8}"},
+    "v0.5.0": {"release": "v0.5.0", "flags": ["--context", "--packs", "acg"], "tinylm": True, "kn": True, "tri": True, "colloquial": True,
+               "tag": "+ctx+kn:{kn8}:θ1:β1+tl:{tl8}+acg", "formal_tag": "+ctx+tl:{tl8}+acg+tri:{tri8}"},
 }
 # Anchor (contract 3.1): S7h's measurement in the research log of 2026-10-13, `--override-packs off`, chat, the CLI's own variants table.
 ANCHOR = {
