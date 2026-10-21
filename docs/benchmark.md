@@ -314,7 +314,7 @@
 
 ### 保留集
 
-照 `CLAUDE.md` 一片只跑一次：由 fresh verifier 以 `evalstats compare --net` 比上一版與新版，main 把 n 與兩版的 top1（可再加 `fixed`、`broken`、`p`）和實際量的 commit 填進 results JSON 的 `holdout`（`{"commit": …, "chat": {n, top1, fixed, broken, p}, "formal": ...}`）。下表版本下面的 commit 是保留集實際量的那一個；它和上面「出貨設定」表被量的 commit 在 `docs/verification.md` 列的路徑上必須沒有差異，或差異不改輸出（出貨設定的 rowstats 逐位元組相同，記在研究紀錄；契約 §2.3、§5）。
+照 `CLAUDE.md`，只在推 `v*` tag 前跑一次（2026-10-18 起；之前是一片一次）：由 fresh verifier 以 `evalstats compare --net` 比上一版與新版，main 把 n 與兩版的 top1（可再加 `fixed`、`broken`、`p`）和實際量的 commit 填進 results JSON 的 `holdout`（`{"commit": …, "chat": {n, top1, fixed, broken, p}, "formal": ...}`）。下表版本下面的 commit 是保留集實際量的那一個；它和上面「出貨設定」表被量的 commit 在 `docs/verification.md` 列的路徑上必須沒有差異，或差異不改輸出（出貨設定的 rowstats 逐位元組相同，記在研究紀錄；契約 §2.3、§5）。
 
 | 版本 | chat | formal |
 |---|---|---|

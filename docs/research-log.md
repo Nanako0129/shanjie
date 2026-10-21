@@ -8497,13 +8497,14 @@ XL 比 `MAX_FILE`（67,108,864）小 1,168,880 位元組。錨點：4 個模型 
 - **跨版本基準測試**（套件 v2，Mac，v0.4.7 `207b4b49` 對 `299230a5`）：
   - 兩種設定都沒有集合顯著變差。
   - 聊天：discordtune +88／−34（p 1.1e-6）、cvtune +53／−16、lytune +191／−27。wikitune 37／46（p 0.38）不顯著。
-  - 書面：wikitune +39／−5（p 1.4e-7）、discordtune +69／−20、cvtune +42／−2、lytune +74／−32。書面的變化來自會意換成 SJ-SR-6-14M（只換書面融合參數）。
+  - 書面：wikitune +39／−5（p 1.4e-7）、discordtune +69／−20、cvtune +42／−2、lytune +74／−32。〔推論〕書面的變化主要來自會意換成 SJ-SR-6-14M（只換書面融合參數）；兩版之間詞庫（數字表）與核心（改選凍結、新詞 B、數字列）也有改，沒有只換小模型的單因子對照。
   - 打字測驗兩種設定 0／0。
   - 速度與記憶體（同一場輪流跑，load avg 約 4，`docs/benchmark.md`）：每鍵 p95 2.00 → 2.05 ms，載入 752 → 905 ms，RSS 430 → 441 MB。
   - 第一次跑停在「v0.5.0 的小模型與常談不在 bench 的模型資料夾」。照 bench.py 的提示，從主 checkout 的 `data/lm/` 核對雜湊（`e7c179d8…`、`2984eeb5…`）後放進去，重跑通過。
 - **KPI**（`kpi.py run` 與 `replay`，Windows 機器 WSL）：
   - wikitune-clean 書面 1,610 → 1,642（n 2,181）。
   - 重播：dev302 聊天 top1 269、KySS 0.9773；錯字回報學習關 33、學習開 34（改對 1、改壞 0）。
+  - `replay` 是在發版分支 `93ddf32a` 跑的（JSON 的 `replay.sha`），不是被量的 `299230a5`：兩者之間只差 `tools/bench.py` 的 VERSIONS2 兩行與研究紀錄，核心、CLI 與資料相同。
   - `replay` 第一次被拒：`data/lm` 裡多了 `colloquial-attribution.tsv`（執行腳本照 `data/*.sha256` 全部複製）。拿掉它再跑。
 - **保留集**（shard-1 第 4 次使用，fresh verifier，只回數字）：
   - 聊天 234 → 237（7／4，p 0.55）、書面 233 → 241（8／0，p 0.0078）。
