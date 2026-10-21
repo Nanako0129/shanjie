@@ -389,6 +389,12 @@ private struct AboutSections: View {
         Section("善解輸入法") {
             LabeledContent("版本", value: updates.versionText)
         }
+        let models = ModelList.load(from: Bundle.main.url(forResource: "models", withExtension: "tsv"))
+        if !models.isEmpty {
+            Section("模型") {
+                ForEach(models, id: \.file) { LabeledContent($0.name, value: $0.code) }
+            }
+        }
         Section("更新") {
             Toggle("自動檢查更新", isOn: Binding(get: { updates.autoCheck }, set: { updates.setAutoCheck($0) }))
             Text("開著時每天最多連線一次，到 GitHub 讀取有沒有新版本；有新版本只在這裡和輸入選單顯示，按下才更新。")
