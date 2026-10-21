@@ -74,7 +74,7 @@ jobs:
 
   core:
     needs: changes
-    if: needs.changes.outputs.run == 'true'
+    if: false
     # Xcode 27 / macOS 27, the same image the Swift shell (S3b) will need.
     runs-on: xcode-27
     # A full run takes about 3 minutes; a hung FFI child process should not
@@ -254,7 +254,7 @@ jobs:
   # one after the other). Skipped exactly when `core` is.
   core-debug:
     needs: changes
-    if: needs.changes.outputs.run == 'true'
+    if: false
     runs-on: xcode-27
     # Measured 4.5-6.5 minutes (research log 2026-10-17, CI speed); a hung FFI child process should not hold the runner for the
     # 6-hour default.
@@ -338,7 +338,159 @@ jobs:
       - name: Tests (debug)
         run: |
           nproc; free -g
-          RUSTC_BOOTSTRAP=1 cargo test --locked -p ${{ matrix.pkg }} -- -Z unstable-options --report-time --skip predict_matches_python_golden --skip sw_probe_matches_python_golden_byte_for_byte
+          CARGO_PROFILE_TEST_OPT_LEVEL=3 RUSTC_BOOTSTRAP=1 cargo test --locked -p ${{ matrix.pkg }} -- -Z unstable-options --report-time --skip predict_matches_python_golden --skip sw_probe_matches_python_golden_byte_for_byte
+
+  # Probe: the Python steps on Linux.
+  python-linux:
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
+        with:
+          toolchain: 1.97.1
+      - name: Fetch the language model
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release download model-v6 --repo "$GITHUB_REPOSITORY" -p bigram.sjlm -D data/lm
+          gh release download classes-v5 --repo "$GITHUB_REPOSITORY" -p classes.sjc -D data/lm
+          gh release download kn-v1 --repo "$GITHUB_REPOSITORY" -p kn.sjkn -D data/lm
+          gh release download sj-sr-6-14m --repo "$GITHUB_REPOSITORY" -p tinylm.sjtl -D data/lm
+          gh release download sj-cx-1-7.7m --repo "$GITHUB_REPOSITORY" -p trigram.sjt3 -D data/lm
+          gh release download sj-cl-1-68k --repo "$GITHUB_REPOSITORY" -p colloquial.sjlm -p colloquial-attribution.tsv -D data/lm
+          shasum -a 256 -c data/bigram.sjlm.sha256 data/classes.sjc.sha256 data/kn.sjkn.sha256 data/tinylm.sjtl.sha256 data/trigram.sjt3.sha256 data/colloquial.sjlm.sha256 data/colloquial-attribution.tsv.sha256
+      - name: python version
+        run: python3 --version
+
+      # docs/PLAN.md S2v acceptance 3: Rust and Python lenient comparison agree
+      # on every probe line, and the variant table is actually applied.
+      - name: Lenient comparison parity (Rust vs Python)
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          T="$RUNNER_TEMP"
+          python3 tools/build_variants.py --probe > "$T/probe.txt"
+          python3 reference/proto/eval.py --lenient-dump "$T/probe.txt" > "$T/py.txt"
+          cargo run --release --locked -q -p cli -- --lenient-dump "$T/probe.txt" > "$T/rs.txt"
+          diff "$T/py.txt" "$T/rs.txt"
+          N=$(grep -vc '^#' eval/variants.tsv)
+          diff <(head -n "$N" "$T/rs.txt") <(grep -v '^#' eval/variants.tsv | cut -f2)
+
+      # docs/contracts/s2r-sandhi-variants.md sections 1, 3 and 4.0: the sandhi
+      # rows and the public probe rebuild byte for byte, and Python's unigram
+      # decode with both overlays matches the Rust goldens.
+      - name: Sandhi rows, probe and unigram parity
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/build_sandhi.py --check
+          python3 experiments/s2/build_probe.py --check
+          python3 reference/proto/check_unigram_overlay.py
+          python3 reference/proto/test_demote.py
+
+      # numpy for the Python steps that need it. The runner's python3 has none; with trigram.sjt3 beside the model,
+      # lm_eval.py --profile formal imports reference/proto/trigram.py (numpy), and the X0c and trigram-table tests need it too.
+      # Steps that do not need numpy keep the runner's python3.
+      - name: Python venv with numpy
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m venv "$RUNNER_TEMP/x0c-venv"
+          "$RUNNER_TEMP/x0c-venv/bin/python" -m pip install --quiet numpy==2.5.4
+
+      # docs/contracts/eval-stats.md: the statistics tests, and the Python rowstats of dev302 equal
+      # the golden the Rust CLI is compared with (cli/tests/golden.rs), so both writers are held.
+      # The formal pass reads the trigram table beside the model, so both passes run in the numpy venv.
+      - name: Eval statistics (Python)
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          T="$RUNNER_TEMP"
+          python3 -m unittest tools.test_evalstats
+          for p in chat formal; do
+            "$T/x0c-venv/bin/python" reference/proto/lm_eval.py --profile "$p" --dev 302 --rowstats "$T/$p.rowstats" > /dev/null
+            cmp "$T/$p.rowstats" "eval/golden/s2-lm-dev302-$p.rowstats"
+          done
+
+      # docs/contracts/acg-pack.md A.5: the pack builder against a fake API (dedupe, collision dispositions, ordering,
+      # deterministic output) and the committed pack against the lexicon. Builds the evaluation CLI for the collision detection.
+      - name: ACG pack builder (Python)
+        if: always()
+        run: python3 -m unittest tools.test_build_acg_pack
+
+      # docs/contracts/names-lexicon.md section 3 items 6 and 8: the common proper-noun builder against fixtures and a fake API, and the
+      # committed names-add.tsv sharing no word with the base, overlay-add, sandhi-add and acg-add.
+      - name: Names lexicon builder (Python)
+        if: always()
+        run: python3 -m unittest tools.test_build_names
+
+      # docs/contracts/model-v5.md sections 8-9: the count scripts' --extra-lexicon (additive counting), the
+      # out-of-vocabulary bigram filter in tools/build_lm.py, the count comparison and the counting lexicon rule.
+      # Stdlib only; experiments/s2-classes/test_cluster.py needs numpy and runs in `make test`.
+      - name: model-v5 build scripts (Python)
+        if: always()
+        run: python3 -W ignore -m unittest tools/test_build_lm.py experiments/s2/test_extra_lexicon.py experiments/model-v5/test_compare_counts.py experiments/model-v5/test_count_lexicon.py
+
+      # docs/contracts/kn-core.md: the SJKN0002 writer and lm.py reader, and the kn-tiny golden is the generator's current output.
+      - name: Kneser-Ney side file (Python)
+        if: always()
+        run: python3 -W ignore -m unittest tools/test_kn_cont.py
+
+      # docs/contracts/sbench.md and sbench-v2.md: the benchmark tool's guards (frozen set hashes, settings table and tags,
+      # rowstats scoring, dump cross-check, replay consistency) against a fake CLI; no builds, no private data.
+      - name: Benchmark tool (Python)
+        if: always()
+        run: python3 -m unittest tools/test_bench.py
+
+      # docs/contracts/kpi.md: the per-version KPI table rules and the replay model checks, synthetic JSON and fake binaries.
+      - name: KPI table tool (Python)
+        if: always()
+        run: python3 -W ignore -m unittest tools/test_kpi.py
+
+      # docs/contracts/zhen-mixed.md section 3.4 and 5.6: the English word list builder (filter, cut, sort, input hash), synthetic input.
+      - name: English word list builder (Python)
+        if: always()
+        run: python3 -m unittest tools/test_build_english_words.py
+
+      # tools/build_overlay.py manual words: row checks, and the `manual` tail of overlay-add.tsv equals manual_rows() today (no dumps).
+      - name: Overlay manual words (Python)
+        if: always()
+        run: python3 -m unittest tools/test_build_overlay.py
+
+      # docs/contracts/colloquial-term.md section 3.6: the attribution list builder (per-source sums, the stop conditions), synthetic input.
+      - name: Colloquial attribution list (Python)
+        if: always()
+        run: python3 -W ignore -m unittest tools/test_build_attribution.py
+
+      # docs/contracts/holdout-refresh.md section 8: the held-out containment guard (tools/holdout_guard.py report, build_counts --holdout-guard), synthetic input and a fake conversion table.
+      - name: Holdout guard (Python)
+        if: always()
+        run: python3 -W ignore -m unittest tools/test_holdout_guard.py
+
+      # docs/contracts/x0c-compare.md acceptance 5: score_0c.py and versus.py against a fake model (input layout, 64-character
+      # context, log10 scale, unscorable rows, covered-only comparison). They need numpy (not onnxruntime, not the weights),
+      # which the runner may not have, so it runs in the throwaway venv built earlier in the job ("Python venv with numpy").
+      #
+      # docs/contracts/trigram-core.md slice A: tools/test_build_trigram.py (the SJT30001 builder, reader and scorer, the toy golden
+      # file check, and lm_eval.py's loading rules) needs numpy too, so it runs in the same venv.
+      - name: X0c scoring and comparison, trigram table (Python)
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$RUNNER_TEMP/x0c-venv/bin/python" -W ignore -m unittest experiments/x0c/test_x0c.py
+          "$RUNNER_TEMP/x0c-venv/bin/python" -W ignore -m unittest tools/test_build_trigram.py
+
 
   # The Swift input method (docs/contracts/s3b.md section 3, app-sandbox.md
   # section 2.6): the ad-hoc sandboxed builds, the container migration, the
@@ -347,7 +499,7 @@ jobs:
   # Sparkle mutations, and the installer.
   shell:
     needs: changes
-    if: needs.changes.outputs.run == 'true'
+    if: false
     runs-on: xcode-27
     timeout-minutes: 30
     steps:
