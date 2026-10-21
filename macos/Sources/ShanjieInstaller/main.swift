@@ -1023,8 +1023,9 @@ final class Controller: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     /// The system opens System Settings at the enable call and it covers the installer's last page (VM, dry run 82ce349a, 2026-10-21:
     /// a first "This Mac" install and a 0.4.7 migration). For the next 10 s, when System Settings comes to the front, bring the
-    /// installer back once (VM u4a: back in front 40 ms after System Settings took it; the maintainer kept this over a Dock-only
-    /// call-back). If System Settings is already in front now, at once. Any button the user presses stops the watch.
+    /// installer back once; if System Settings is already in front now, at once. Any button the user presses stops the watch. The VM
+    /// measured the earlier version (watching the installer resign active): back in front 40 ms after System Settings took it, and
+    /// the maintainer kept bringing it back over a Dock-only call-back; this watch itself is not yet seen on a VM.
     private func watchSystemSettings() {
         stopWatch()
         if !NSApp.isActive, NSWorkspace.shared.frontmostApplication?.bundleIdentifier == Self.systemSettingsID { return comeBack() }
@@ -1050,9 +1051,9 @@ final class Controller: NSObject, NSApplicationDelegate, NSWindowDelegate {
         watchObserver = nil
     }
 
-    /// After a location change whose registration is not accepted yet: wait (up to 2 minutes) for the system's answer, then show the
-    /// log-out screen if the first-install screen was up (accepted now: section 2.4's moved table maps it to log out) and call the user
-    /// back if System Settings covers the installer, now or within 10 s after the answer.
+    /// After a location change whose registration is not accepted yet: wait (up to 240 checks) for the system's answer, then show the
+    /// log-out screen if the first-install screen was up (accepted now: section 2.4's moved table maps it to log out) and write the
+    /// `return:` line. It does not call the user back; `watchSystemSettings` does that when System Settings comes to the front.
     private func returnWhenAccepted(bundleID: String, firstInstall: Bool) {
         waitForAcceptance(bundleID: bundleID, limit: returnLimit, accepted: { [weak self] in
             guard let self else { return }
