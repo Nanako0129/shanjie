@@ -280,6 +280,7 @@
    - `CI= HOME=<暫存目錄> …`，log 裡有「CI is not true」的拒絕訊息；
    - `CI=true HOME=<暫存目錄> …`，log 裡有家目錄不符的訊息。
 5. `scripts/test-install-ime.sh`、`swift test`（不變）。
+   - 2026-10-22 起 `swift test` 在自己的 `swift` job 跑，不在這個順序裡（`docs/contracts/ci-speed-2.md`）：Swift 測試不啟動任何沙盒組建（安裝程式的測試自己建暫存的假 bundle），只連結 `target/release/libcore.a`。
 6. `make selftest-bundled SELFTEST_BUNDLE_ID=com.nyanako.inputmethod.shanjie.selftest-$GITHUB_RUN_ID`，前後各檢查一次 `~/Library/Containers/<該 ID>`：之前不存在、之後存在。
    - 原本傳空值、用正式 ID 的那一步（`ci.yml` 現在的 `SELFTEST_BUNDLE_ID=`）取消；正式 ID 的 selftest 已在第 3 步與第 7 步跑過。
 7. `EXPECTED_BUNDLE_ID=com.nyanako.inputmethod.shanjie scripts/check-app.sh build/善解輸入法.app`。

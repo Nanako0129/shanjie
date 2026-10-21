@@ -44,9 +44,11 @@
 
 | 工作流程 | 觸發 | 內容 |
 |---|---|---|
-| `ci.yml` core | 每個 PR、每次推到 main（只改文件、網站、`eval/bench/results/` 時略過，`scripts/ci-changes.sh`；推到 main 時還要前一個 main 的 run 是 success 才略過） | 下載並比對模型、`cargo test --release`、C 標頭冒煙測試、寬鬆比對一致性、Python 各步 |
-| `ci.yml` core-debug | 同上，和 core 同時跑 | 下載並比對模型、`cargo test`（debug；`docs/contracts/ci-speed.md`） |
-| `ci.yml` shell | 同上 | 照 `app-sandbox.md` §2.6 的順序：預設（開發版）、正式、沒有清單三種組建（只建置）→ `check-app.sh` 的本機防呆 → 移轉測試（印出 runner 的 `sw_vers`）→ 移轉測試的拒絕 → `scripts/test-check-ci-gate.sh`、模型列表檢查（`scripts/test-check-models.sh`）、`scripts/test-install-ime.sh`、`swift test --parallel`（測試數從 xUnit 檔印出）→ `make selftest-bundled`（每次不同的拋棄式 ID，前後檢查 container）→ 正式組建的 `check-app.sh` → `scripts/test-sandbox-mutations.sh` → `make installer`＋`scripts/check-installer.sh` → Homebrew cask（`scripts/test-render-cask.sh`、`brew style`） |
+| `ci.yml` core（macOS） | 每個 PR、每次推到 main（只改文件、網站、`eval/bench/results/` 時略過，`scripts/ci-changes.sh`；推到 main 時還要前一個 main 的 run 是 success 才略過） | 下載並比對模型（`scripts/fetch-models.sh`，下面每個 job 都用它）、`cargo test --release`（兩個套件）、C 標頭冒煙測試 |
+| `ci.yml` debug（Linux） | 同上，和 core 同時跑 | `cargo test`（debug）：`core` 套件全部、`cli` 套件只跑單元測試。cli 的整合測試用小模型打分，Linux 沒有 Accelerate，只在 core 跑 release；只在 macOS 才編進去的分支與在 Linux 直接 return 的兩個 digit golden 也只在 core 跑（`docs/contracts/ci-speed-2.md` §2.1） |
+| `ci.yml` python（Linux） | 同上 | 寬鬆比對一致性（Rust 對 Python）、連讀變調列與 probe 重建、單字解碼一致性、Python 各步（評測統計與 dev302 rowstats golden、詞包、專有名詞、model-v5 建置腳本、KN 側檔、benchmark、KPI、英文詞表、手動加詞、常談署名、保留集防護、X0c 與三元表） |
+| `ci.yml` swift（macOS） | 同上 | `cargo build --release -p core`、`swift test --parallel`（測試數從 xUnit 檔印出；不需要 `make bundle`，也不啟動沙盒組建） |
+| `ci.yml` shell | 同上 | 照 `app-sandbox.md` §2.6 的順序：預設（開發版）、正式、沒有清單三種組建（只建置）→ `check-app.sh` 的本機防呆 → 移轉測試（印出 runner 的 `sw_vers`）→ 移轉測試的拒絕 → `scripts/test-check-ci-gate.sh`、模型列表檢查（`scripts/test-check-models.sh`）、`scripts/test-install-ime.sh` → `make selftest-bundled`（每次不同的拋棄式 ID，前後檢查 container）→ 正式組建的 `check-app.sh` → `scripts/test-sandbox-mutations.sh` → `make installer`＋`scripts/check-installer.sh` → Homebrew cask（`scripts/test-render-cask.sh`、`brew style`） |
 | `release.yml` | 推 `v*` tag；或在 main 手動觸發（演練） | gate（這個 commit 在 main 的 ci.yml 必須全綠）→ build → 在 `release` environment 用一次性鑰匙圈以 Developer ID 簽章（`tar -xpf`，由內而外：善解更新那份 Sparkle、善解更新、輸入法那份 framework，最後輸入法用 workflow 裡以字面值寫的三個沙盒 entitlements）、公證、staple、`chmod -R a+rX,go-w`（staple 在 `umask 077` 下寫出的檔是 0600）、驗證（`verify()` 依 bundle 比對 entitlements 整份相等）→ 只有 tag 才發布 Release；演練時兩個簽好的 zip 留在一天的 `signed` artifact。推 tag 時 `docs/releases/<tag>.md` 必須存在而且有內容（在等 CI 之前檢查），發布用它當說明；版本號最大時標成 Latest（`docs/releases/README.md`） |
 
 ## build/ 的 bundle
