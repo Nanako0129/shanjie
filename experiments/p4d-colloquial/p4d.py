@@ -154,13 +154,13 @@ def check_anchor(scores, cols, base_ok, name=None):
         raise SystemExit(1)
 
 
-def load_full(a):
+def load_full(a, t2_sha256=T2_SHA256):
     """The P4 loader (d23 consistency checks), the T2 lc and the overlay/pack k for the first 8 candidates.
     -> (d23 rows, scores, cols, ok, base rowstats)."""
     import d23 as D
     import p4
     with open(a.t2, "rb") as f:
-        if hashlib.sha256(f.read()).hexdigest() != T2_SHA256:
+        if hashlib.sha256(f.read()).hexdigest() != t2_sha256:
             print("STOP: --t2 is not P4's T2 table (sha256)")
             raise SystemExit(1)
     lenient = D.T.load_lenient()
