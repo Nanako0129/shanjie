@@ -61,12 +61,12 @@ public enum InstallerFlow {
         if moved { log.notice("registration: forced (location changed)") } else { log.notice("registration: as before") }
     }
 
-    /// After a location change the installer waits for the system to accept the input method (the "Allow" question in System
-    /// Settings) and then comes back to the front; one static line for each end of that wait.
+    /// After a location change the installer waits for the system to accept the input method; one static line for each end of that
+    /// wait, with whether the installer was in front (the call-back itself is `watchSystemSettings`, not this wait).
     public static func logReturn(accepted: Bool, wasActive: Bool) {
         switch (accepted, wasActive) {
-        case (true, false): log.notice("return: accepted, came back to the front")
-        case (true, true): log.notice("return: accepted, already in front")
+        case (true, false): log.notice("return: accepted, not in front")
+        case (true, true): log.notice("return: accepted, in front")
         case (false, _): log.notice("return: not accepted within the wait")
         }
     }
