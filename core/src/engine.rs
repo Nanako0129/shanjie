@@ -3040,14 +3040,13 @@ impl Engine {
 
     /// Fuzzy input, bit 4 (docs/contracts/fuzzy-input.md section 2.1): a syllable the lexicon lacks is accepted when it has a lexicon
     /// syllable it may have been mistyped from. Needs a language model (the bigram decoder reads the alternatives; `decode_beam`
-    /// does not) and the standard layout (the neighbour table is that layout's keyboard). The alternative must itself be a
-    /// syllable with entries, so the decoder always has a path.
+    /// does not) and the standard layout (the neighbour table is that layout's keyboard).
     fn adjacent_accepts(&self, syl: &str) -> bool {
         self.fuzzy & FUZZY_ADJACENT != 0
             && self.lm.is_some()
             && self.layout == Layout::Standard
             && !self.lex.has_syllable(syl)
-            && self.lex.adjacent_alts(syl).iter().any(|a| !self.lex.entries(&[a.to_string()]).is_empty())
+            && !self.lex.adjacent_alts(syl).is_empty()
     }
 
     /// Insert one token (a syllable, or punctuation with its fixed word) at the cursor, shift the
