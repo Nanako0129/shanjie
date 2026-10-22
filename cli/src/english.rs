@@ -51,7 +51,7 @@
 //!   an overwrite; after three tries the run stops instead of looping).
 //! - Rows with a reading the lexicon lacks, or a symbol without a key, are skipped (their number goes to stderr).
 //! - Random numbers: splitmix64 from the seed (no crate); one draw decides a mistake, one more picks the neighbour.
-use core::engine::{load_lexicon, Engine, Key, KeyKind, Layout, ResetMode};
+use core::engine::{load_lexicon, Engine, Key, KeyKind, Layout, ResetMode, MAX_SYLLABLES};
 use core::eval::{parse_rows, row_syllables, sha256_hex, usable};
 use core::Lexicon;
 use std::path::{Path, PathBuf};
@@ -60,8 +60,9 @@ use std::sync::Arc;
 const ROWS: [&str; 4] = ["1234567890-=", "qwertyuiop[]", "asdfghjkl;'", "zxcvbnm,./"];
 const TONE_MARKS: [char; 4] = ['ˊ', 'ˇ', 'ˋ', '˙'];
 const LAYOUT: Layout = Layout::Standard;
-/// The most Backspaces one repair presses (a composition holds 40 units at most, and each press takes one symbol or one unit).
-const MAX_REPAIR_BACKSPACES: u32 = 64;
+/// The most Backspaces one repair presses (a composition holds `MAX_SYLLABLES` units at most, and each press takes one symbol or one unit; the
+/// 24 over it are the margin the bound had at 40 units: 64).
+const MAX_REPAIR_BACKSPACES: u32 = MAX_SYLLABLES as u32 + 24;
 
 struct Rng(u64);
 
@@ -223,7 +224,7 @@ impl Sim {
                         // Backspace instead turns the letters left into an English run and the unfinished syllable is gone
                         // (zhen-inline section 1.3g): Esc takes the run, and the symbols are typed again from the start below. Each
                         // key is a step that shortens the symbols or empties them, so the loop ends with them empty at the latest.
-                        // An empty preedit ends it as well: a slip that made the 40th unit sent the whole composition (A.10), so the preedit
+                        // An empty preedit ends it as well: a slip that made the last unit sent the whole composition (A.10), so the preedit
                         // never starts with `base_preedit` again, and the syllable is typed again from its first symbol below.
                         let mut presses = 0;
                         while !want.starts_with(&self.repair_have()) && !self.last_preedit.is_empty() {
@@ -547,11 +548,11 @@ mod tests {
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
-    /// Digits.md A.10, the Backspace repair when a slip makes the 40th unit: the slip after the ㄅ turns the `1` into a digit token, which is
-    /// the 40th unit, so the engine sends the whole composition and the preedit never again starts with `base_preedit`. The repair stops
+    /// Digits.md A.10, the Backspace repair when a slip makes the last unit: the slip after the ㄅ turns the `1` into a digit token, which is
+    /// the last unit, so the engine sends the whole composition and the preedit never again starts with `base_preedit`. The repair stops
     /// at the empty composition and types the syllable again (it used to press Backspace for ever).
     #[test]
-    fn backspace_repair_ends_when_the_40th_unit_sent_the_composition() {
+    fn backspace_repair_ends_when_the_last_unit_sent_the_composition() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
         let mut sim = Sim {
             engine: engine_digits(root, &root.join("data/lm/bigram.sjlm"), &root.join("eval/golden/english-tiny.txt")).unwrap(),
@@ -575,11 +576,11 @@ mod tests {
         for _ in 0..20 {
             sim.engine.reset(ResetMode::Discard);
             sim.last_preedit.clear();
-            for _ in 0..39 {
+            for _ in 0..MAX_SYLLABLES - 1 {
                 sim.raw(Key::ch(',', MOD_SHIFT)).unwrap();
             }
             sim.syllable(&syms, tone).unwrap();
         }
-        assert!(sim.final_digits > 0, "premise: a slip made a digit the 40th unit, and it was sent");
+        assert!(sim.final_digits > 0, "premise: a slip made a digit the last unit, and it was sent");
     }
 }

@@ -222,7 +222,7 @@ v4 日期 2026-10-03。v1 經 `pilotfish:plan-verifier`（REVISE，4 項）與 `
     - **〔狀態，2026-10-10〕** 第一片（`docs/contracts/s4-bayes.md`，機率歸一化的 Dirichlet 後驗取代固定 ε，離線）：40 組參數沒有一組符合條件：鏡像學會率每一組都低於現行規則（0–3／8 對 7／8），D 變體 α_g = 4 的 4 組另有調參集全域污染。保留現行規則；程式留在歷史（e469768，已 revert），要再試得改設計（研究紀錄同日）。
 - **跨版本基準測試（S-bench）**：`tools/bench.py` 與 `docs/benchmark.md`（v0.1.0–v0.1.2 基準線、小麥資料基準列、實打對照表；研究紀錄 2026-10-06）。發版前照 `docs/verification.md` 跑；model-v2 出貨時升套件 v2，並做第一次里程碑實打（使用者排時間）。〔2026-10-13〕套件 v2（`docs/contracts/sbench-v2.md`）：每一版用自己出貨的模型與旗標量，已量 v0.4.0 與 v0.4.1（研究紀錄同日），保留集聊天 180 → 191（11／0）、書面 184 → 187（3／0）；v0.2.0–v0.3.0 之後補；發版前的指令改成套件 v2（`docs/verification.md`）。
 - **錯字回報當線索補語料**（使用者 2026-10-13，選擇題；起因是問「能不能把答案直接訓練」）：`eval/dev/user-reported.txt` 照舊只當評測，不拿來訓練（訓練了就量不出沒看過的句子有沒有變好）。之後開一片：照錯字裡的詞（例如「直式」「語意」）找公開文字補進語料，下一次重建模型（model-v6）時一起訓練。**評分不能用當過線索的列**：挑語料用到的列在評分時排除，改用那一片開始之後才回報的列（或事先固定留一半不看）；錯字檔的前 3 列在 dev302 裡，不當線索（CLAUDE.md：調參數不用 dev302）。使用者自己的打字靠本機學習（S4：在候選窗改選並送出才會學，同前文下次多半就對，鏡像測試 7／8；安全輸入等情況不學）。
-- 組字區上限改成可設定（使用者 2026-10-05），預設對照蘋果注音或小麥注音。目前是 40 個音節。
+- 組字區上限改成可設定（使用者 2026-10-05），預設對照蘋果注音或小麥注音。原本是 40 個音節，composition-cap（2026-10-22）起是 128 個單位。
 - 真正的句首判斷（issue #30）。
 - 詞類回退實驗（`exp/word-classes`，Brown 分群 K=512）：dev302 chat 238 → 250、formal 237 → 254。要在 S2n 的乾淨計數上重跑，再決定要不要成片。
   - 已在 model-v3 上重跑並做進 Python 參考實作與 Rust 核心（`docs/contracts/s2k-word-classes.md`，結果見 `docs/research-log.md` 2026-10-08）；GitHub Release `classes-v1` 已建（使用者 2026-10-08 同意，獨立的 Release；下載比對雜湊相符），CI、`release.yml`、`build-app.sh` 與 golden 測試都釘它的雜湊（`data/classes.sjc.sha256`），說明在 `docs/data-files.md`。〔更正，2026-10-08〕現在釘的是 classes-v2（配 model-v4，`docs/contracts/model-v4.md`）。〔更正，2026-10-10〕v0.4.0 起釘的是 classes-v3（配 model-v5，`docs/contracts/model-v5.md` §9）。〔更正，2026-10-16〕v0.4.4 起是 classes-v4（配 model-v6），v0.4.6 起是 classes-v5（同一份詞類、μ 0.8 → 0.2，`docs/contracts/classes-v5.md`）。
@@ -661,7 +661,7 @@ S3a 不需要外觀參考，可以先做；S3b 等使用者提供 macOS 內建�
 - **引擎（`engine.rs`）。** `Engine` 吃按鍵事件、輸出畫面狀態。細節全部寫在 `docs/contracts/s3a.md`，以契約檔為準：
   - **鍵盤排列**：標準（大千）與倚天，各一張「ASCII 按鍵 → 注音符號」表。
   - **拼音節**：聲母、介音、韻母三欄，同一欄再按就取代；聲調鍵完成音節；兩種排列的空白鍵在有未完成音節時都等於一聲；詞庫沒有的音節不收。
-  - **組字區**：已完成音節的序列加游標，上限 40 個音節。每次變動都用 `decode_beam(…, BEAM_S1)`、`NoLearning` 重算第一名（基底＋疊加層，和評測 CLI 預設相同），使用者選過的固定詞保留。不讀左文。
+  - **組字區**：已完成音節的序列加游標，上限 128 個單位（原本 40，composition-cap）。每次變動都用 `decode_beam(…, BEAM_S1)`、`NoLearning` 重算第一名（基底＋疊加層，和評測 CLI 預設相同），使用者選過的固定詞保留。不讀左文。
   - **選字**：行為跟 macOS 內建注音一樣（使用者決定）。截圖到手前先依契約檔的按鍵行為表實作，S3b 再對照截圖修正。
   - **送出**：Enter 送出整句；中文標點先送出組字區再送出標點（對照表由本專案自訂）；Ctrl+\ 輸出「、」。
   - **Command、Option、Caps Lock、Ctrl 組合鍵**：引擎回報「不處理」，不改任何狀態（R3 的英數直通）。
@@ -985,7 +985,7 @@ plan-verifier 第一次：REVISE，4 項阻擋。security-reviewer：無 P0，2 
 | security P2-2 | 修飾鍵規則、Caps Lock 優先順序 | FIX：判斷順序第 1 條；直通鍵用「插入前後輸出相同」驗證 |
 | security P2-3 | panic payload 可能帶出原文 | FIX：契約 §6 的寫法規則 |
 | security P2-4 | 左文的讀取量與計數 | 隨 plan-verifier 3 一起移出 S3a |
-| security P3 | 組字區沒有上限；Swift 端日誌；bundle ID 進核心 | FIX：上限 40 音節；`shanjie.h` 註解；殼只傳聊天／書面列舉 |
+| security P3 | 組字區沒有上限；Swift 端日誌；bundle ID 進核心 | FIX：上限 40 音節（composition-cap 起 128，仍有界）；`shanjie.h` 註解；殼只傳聊天／書面列舉 |
 | security P3 | 清零（zeroization） | REJECT：同一段文字也在 AppKit 與 client App 裡，只清 Rust 的 buffer 是假保證；縮短保留時間（reset）才有效 |
 | 非阻擋 | crate-type、`usable()` 過濾後的 302 列、讀音格式、分頁、重播測試只證明按鍵到解碼 | 全部寫進契約 |
 | plan-verifier 第二次 1 | 子行程跑 libtest，stdout 一定有 harness 行，「輸出為空」永遠不會通過 | FIX：改成「除了 harness 行沒有其他內容，且不含任何一列的句子或讀音」 |

@@ -106,19 +106,19 @@ final class CJKSpacingShellTests: XCTestCase {
         XCTAssertEqual(inserts(c), [" 你好"])
     }
 
-    /// Two commits in one composition: 39 syllables, an English run (Shift+C...), and the next key close it as the 40th unit, so
+    /// Two commits in one composition: 127 syllables, an English run (Shift+C...), and the next key close it as the 128th unit, so
     /// the whole string is committed while the key itself starts a new syllable in the same composition. The second commit's
     /// leading space follows the last character of the first (the "e" of the English token), not the client's text.
     func testSecondCommitInTheSameCompositionUsesTheLastCommittedCharacter() {
         let c = Controller(makeShell(spacing: true))
         c.session.activate()
-        for _ in 0..<39 { c.type("su3") }
+        for _ in 0..<127 { c.type("su3") }
         c.type("c", flags: .shift)
         c.type("laude")
-        c.type("2")  // a Zhuyin key closes the run: the token is unit 40, 39 x 你 + Claude is committed, and ㄉ starts a new syllable
+        c.type("2")  // a Zhuyin key closes the run: the token is unit 128, 127 x 你 + Claude is committed, and ㄉ starts a new syllable
         let first = inserts(c)
         XCTAssertEqual(first.count, 1)
-        XCTAssertEqual(first.first, String(repeating: "你", count: 39) + " Claude")
+        XCTAssertEqual(first.first, String(repeating: "你", count: 127) + " Claude")
         c.type("u3")
         c.press(Keys.enter)  // commits the new syllable as the second commit of this composition
         XCTAssertEqual(inserts(c).count, 2)
@@ -155,16 +155,16 @@ final class CJKSpacingShellTests: XCTestCase {
         XCTAssertEqual(inserts(c), [" Claude"])
     }
 
-    /// The leftover of a finished composition: 39 x 你 + Claude is committed by the 40th unit and the pending ㄉ stays in the
+    /// The leftover of a finished composition: 127 x 你 + Claude is committed by the 128th unit and the pending ㄉ stays in the
     /// composition (p is the e of Claude). Returns the controller with that first commit made.
     private func afterTheFirstCommitOfOneComposition() -> Controller {
         let c = Controller(makeShell(spacing: true))
         c.session.activate()
-        for _ in 0..<39 { c.type("su3") }
+        for _ in 0..<127 { c.type("su3") }
         c.type("c", flags: .shift)
         c.type("laude")
         c.type("2")
-        XCTAssertEqual(inserts(c), [String(repeating: "你", count: 39) + " Claude"])
+        XCTAssertEqual(inserts(c), [String(repeating: "你", count: 127) + " Claude"])
         return c
     }
 

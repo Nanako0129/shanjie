@@ -712,13 +712,13 @@ fn the_prediction_row_after_the_token_is_recomputed_and_empty() {
 
 #[test]
 fn the_unit_limit_counts_the_word() {
-    // 39 syllables then the English token is the 40th unit: everything is sent (s3d section 1).
+    // 127 syllables then the English token is the 128th unit: everything is sent (s3d section 1).
     let mut e = eng();
-    for _ in 0..39 {
+    for _ in 0..MAX_SYLLABLES - 1 {
         syllable(&mut e, "ㄅㄚ");
     }
     let o = run(&mut e, "r u s t _ 1");
-    assert!(o.commit.chars().count() == 39 + 4 && o.commit.ends_with("rust"), "{}", o.commit);
+    assert!(o.commit.chars().count() == MAX_SYLLABLES - 1 + 4 && o.commit.ends_with("rust"), "{}", o.commit);
     assert!(o.preedit.is_empty() && is_empty(&mut e));
 }
 
@@ -1065,12 +1065,12 @@ fn three(e: &mut Engine) -> String {
 fn first_entry(syl: &str) -> String {
     real().entries(&[syl.to_string()]).first().expect("a syllable of the lexicon").0.to_string()
 }
-/// 39 punctuation marks: 39 units, one short of the limit.
+/// 127 punctuation marks: 127 units, one short of the limit.
 fn nearly_full(e: &mut Engine) -> String {
-    for _ in 0..39 {
+    for _ in 0..MAX_SYLLABLES - 1 {
         e.key(Key::ch(',', MOD_SHIFT)).unwrap();
     }
-    "，".repeat(39)
+    "，".repeat(MAX_SYLLABLES - 1)
 }
 
 #[test]
@@ -1190,10 +1190,10 @@ fn space_after_chinese_a_mark_or_an_unfinished_syllable_is_as_before() {
 
 #[test]
 fn space_unit_at_the_unit_limit_and_in_the_middle() {
-    // 38 marks, the token `Win` (the 39th unit): the second Space types the 40th unit, so everything is sent with this key.
+    // 126 marks, the token `Win` (the 127th unit): the second Space types the 128th unit, so everything is sent with this key.
     let mut e = win();
-    let marks = "，".repeat(38);
-    for _ in 0..38 {
+    let marks = "，".repeat(MAX_SYLLABLES - 2);
+    for _ in 0..MAX_SYLLABLES - 2 {
         e.key(Key::ch(',', MOD_SHIFT)).unwrap();
     }
     run(&mut e, "S-w i n _");
@@ -1405,7 +1405,7 @@ fn other_keys_end_the_run_first() {
 
 #[test]
 fn run_at_the_unit_limit_sends_in_the_output_of_the_ending_key() {
-    // 39 units, `Windows`, Space: the 40th unit is the token, everything goes in this output, the space is eaten.
+    // 127 units, `Windows`, Space: the 128th unit is the token, everything goes in this output, the space is eaten.
     let mut e = win();
     let marks = nearly_full(&mut e);
     run(&mut e, "S-w i n d o w s");
@@ -1538,11 +1538,11 @@ fn window_open_and_a_zhuyin_key_keeps_the_selected_item() {
 fn autokeep_at_the_unit_limit_sends_in_this_keys_output() {
     for keys in ["r u s t j", "r u s t _ j"] {
         let mut e = eng_inline();
-        for _ in 0..39 {
+        for _ in 0..MAX_SYLLABLES - 1 {
             syllable(&mut e, "ㄅㄚ");
         }
         let o = run(&mut e, keys);
-        assert!(o.handled && o.commit.chars().count() == 39 + 4 && o.commit.ends_with("rust"), "{keys}: {}", o.commit);
+        assert!(o.handled && o.commit.chars().count() == MAX_SYLLABLES - 1 + 4 && o.commit.ends_with("rust"), "{keys}: {}", o.commit);
         assert!(o.preedit == "ㄨ", "{keys}: the key began a syllable in the emptied composition: {}", o.preedit);
     }
 }

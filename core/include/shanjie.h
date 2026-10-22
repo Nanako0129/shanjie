@@ -151,7 +151,7 @@ int32_t shanjie_engine_set_candidate_vertical(ShanjieEngine *engine, uint32_t en
 //   shown symbols, Esc drops all units (the composition, fixed words and cursor stay) and Backspace takes the last symbol.
 //   Turning it off, or the prediction row off, while there are two or more units drops them all (as Esc) and returns
 //   that state; with one unit nothing changes. Turning it on closes an open English window and ends an open English run
-//   (see set_english) as a token; if that is the 40th unit the snapshot carries the composition in `commit`.
+//   (see set_english) as a token; if that is the 128th unit the snapshot carries the composition in `commit`.
 //   No effect without a loaded model.
 int32_t shanjie_engine_set_abbreviation(ShanjieEngine *engine, uint32_t enabled, ShanjieOutput **out); // 0 or 1; returns a snapshot
 // zhen-mixed (docs/contracts/zhen-mixed.md): the English word list. 0 ok; 1 engine or path NULL; 2 path not UTF-8; 3 unreadable,
@@ -185,17 +185,17 @@ int32_t shanjie_engine_load_english(ShanjieEngine *engine, const char *path);
 //     A space unit is learned under the same neighbour key as an English token (`^>_punct_en`).
 //   - With the cursor right after an English token and no unfinished syllable, only Down lists its writings (as typed, lower
 //     case, Capitalised, UPPER); a token made by an auto-keep adds a Chinese item, so a wrong keep can be undone.
-//   - An English token or space unit (from an item, an auto-keep, a run or Space) that makes the 40th unit sends the whole
+//   - An English token or space unit (from an item, an auto-keep, a run or Space) that makes the 128th unit sends the whole
 //     composition in `commit` of that call's output (the key that did it, the pick, or the settings call), never in a later one.
 //   Turning it off, like turning the abbreviation composer on, closes the window and ends an open English run as a token
-//   (a run that makes the 40th unit sends the composition in the snapshot's `commit`).
+//   (a run that makes the 128th unit sends the composition in the snapshot's `commit`).
 //   Digits (docs/contracts/digits.md): with it on (standard layout, abbreviation composer off, a model and `digits.tsv` in the data
 //   directory; the table is optional, without it nothing below happens) the keys 0-9 . / - type half-width digit-string tokens
 //   into the composition: each key is scored as digit or Zhuyin from the text before it, a run keeps its last four keys unsettled,
 //   and a Zhuyin key outside the alphabet, a tone key or Space settles the syllable when it wins. DOWN, ENTER and SHIFT+ENTER end
 //   the run as the screen shows it (digits.md A.12: the keys shown as digits become tokens, the keys shown as Zhuyin stay an
 //   unfinished syllable); every other key first turns the unsettled keys into digits. Turning it off (or the abbreviation composer on) does that too; the snapshot's `commit` may carry
-//   the 40th-unit composition.
+//   the 128-unit composition.
 int32_t shanjie_engine_set_english(ShanjieEngine *engine, uint32_t enabled, ShanjieOutput **out); // 0 or 1; returns a snapshot
 // set_english_inline 0 or 1 (2 otherwise, state unchanged), default 1 at engine creation, like set_english in its codes and its
 //   snapshot (handled 1, commit ""); 1 when engine or out is NULL. With 1 (and set_english(1)) the unfinished syllable shows as
@@ -264,7 +264,7 @@ int32_t shanjie_engine_learning_clear(ShanjieEngine *engine);
 //   under the key at the commit.
 //   The shell computes none of this; it only passes the left-context text (section 14).
 // Learning happens only at a commit (Enter, a key the engine passes through after committing, or the
-//   40-syllable auto-commit), never on shanjie_engine_reset or Esc, and never for punctuation picks.
+//   128-syllable auto-commit), never on shanjie_engine_reset or Esc, and never for punctuation picks.
 // New-word B (docs/contracts/newword-b.md), no new function: at a learning commit, a run of 2-4 single Han
 //   characters on the decoded path that holds a character re-picked in the candidate window (runs split at
 //   punctuation, non-Han characters and a fixed table of function characters; not all numerals; not a word the
@@ -295,7 +295,9 @@ int32_t shanjie_engine_learning_status(ShanjieEngine *engine, uint32_t *flags);
 //   a completed syllable, a deletion, a candidate or prediction pick, punctuation (it does not commit: it enters the composition,
 //   re-decodes and leaves a new job), a learning forget, and the settings that change decoding (profile, demote, rerank, rerank
 //   level, a new model, learning open / clear; set_learning never makes the job stale: it does not change decoding, S7c-2b). Keys that do not re-decode (cursor moves, unfinished zhuyin symbols, entering the
-//   prediction row, pass-through keys) keep the job valid. Commits (ENTER, the auto-commit at 40 tokens, reset) send what is
+//   prediction row, pass-through keys) keep the job valid. A key or pick that decodes a free stretch longer than the window W (the small
+//   model's context minus 3 characters, 61 without a model; rerank on or off) first freezes its head down to W - 16 characters as
+//   frozen words (docs/contracts/composition-cap.md section 1.2), then decodes again: its output and its job are those after the freeze. Commits (ENTER, the auto-commit at 128 tokens, reset) send what is
 //   shown; a job not yet applied is dropped.
 // Logging: a job and its result hold candidate text. Never log them, their pointers, or the .sjtl path (the rules at the top).
 #define SHANJIE_NO_CHANGE 5

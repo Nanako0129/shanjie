@@ -3,7 +3,7 @@
 //! test states the display it relies on, so a model change fails there first. Each engine is about 700 MB, so the tests take turns.
 use cli::common::{load_lenient, root};
 use cli::replay::{build_engine, keys_of, move_cost, replay_row, summary_line, Cfg, Rerank, RowOut};
-use core::engine::{Engine, Key, KeyKind};
+use core::engine::{Engine, Key, KeyKind, MAX_SYLLABLES};
 use core::eval::Lenient;
 use core::lm::Profile;
 use std::process::Command;
@@ -180,19 +180,19 @@ fn rerank_each_applies_while_typing_and_final_only_at_the_end() {
     assert_eq!((fin.rewrites, &fin.first), (changed, &shown));
 }
 
-/// Rule (section 1.1.3): a reading longer than the composition limit (40 syllables) makes the engine commit text before Enter. That
+/// Rule (section 1.1.3): a reading longer than the composition limit (`MAX_SYLLABLES`, 128 syllables) makes the engine commit text before Enter. That
 /// text is part of the first display and of what is sent, `autocommits` counts the row, and a re-pick works on the syllables still
-/// in the composition (here 我再重打, four, so Left, Left, Space, digit as without the commit), not on the 44.
+/// in the composition (here 我再重打, four, so Left, Left, Space, digit as without the commit), not on the 132.
 #[test]
 fn text_committed_mid_row_is_kept_counted_and_not_re_picked() {
     let (_g, mut e) = engine(false);
     let len = load_lenient().unwrap();
-    let filler = "你好".repeat(20);
-    let mut syls: Vec<String> = ["ㄋㄧˇ", "ㄏㄠˇ"].repeat(20).into_iter().map(String::from).collect();
+    let filler = "你好".repeat(MAX_SYLLABLES / 2);
+    let mut syls: Vec<String> = ["ㄋㄧˇ", "ㄏㄠˇ"].repeat(MAX_SYLLABLES / 2).into_iter().map(String::from).collect();
     syls.extend(zai().syls);
     let long = Row { ctx: "", gold: Box::leak(format!("{filler}我再重打").into_boxed_str()), syls };
     let o = go(&mut e, &long, &len, EACH);
-    assert!(o.autocommit && o.first.chars().count() == 44, "the 40 committed characters come first");
+    assert!(o.autocommit && o.first.chars().count() == MAX_SYLLABLES + 4, "the 128 committed characters come first");
     assert!(o.first.starts_with(&filler) && !o.first_ok, "the display ends in 我在重打, which is wrong");
     let short = go(&mut e, &zai(), &len, EACH);
     assert!(!short.autocommit);
