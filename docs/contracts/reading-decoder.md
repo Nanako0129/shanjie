@@ -1,6 +1,6 @@
 # 契約：讀音項進解碼器（R1e 產品片，reading-decoder）
 
-狀態：修訂一（2026-10-23；plan-verifier 第一次 REVISE 七項照改），送第二次審查。取代 `reading-decode.md`：那份把讀音項放在重排工作裡，只在語意校正開著時生效，已經作廢。
+狀態：修訂一（2026-10-23；plan-verifier 第一次 REVISE 七項照改；第二次 REVISE 一項：延遲量測的測試名與「計時的引擎帶著讀音項」，照改），送收尾審查。取代 `reading-decode.md`：那份把讀音項放在重排工作裡，只在語意校正開著時生效，已經作廢。
 
 ## 0. 起因、要做到什麼、怎麼看到
 
@@ -36,7 +36,7 @@
   - 學習加分照舊：讀音項另外再加，學習守門的規則不變。
   - 沒有載入語言模型時，引擎走 `decode_beam`（只用詞頻），**不加**讀音項（範圍外，§4）。
   - 模糊音（`feat/fuzzy-input`，另一片）合進來時，容錯讀音的詞條也照同一條加讀音項；哪一片先合併，另一片在合併時處理。
-- **表**：讀音項表（含 mc）在**載入詞庫時**建一次，不依賴語言模型（引擎與 CLI 同一個函式）；`CappedLexicon` 與候選窗都讀同一份。解碼器用的部分事先算成和詞條對齊的陣列，解碼時直接取，不再每鍵查字串（`/code-review` 2026-10-23 延後到產品片的那一項）。
+- **表**：讀音項表（含 mc）在**載入詞庫時**建一次（`load_lexicon_packs`／`CappedLexicon::new` 裡），不依賴語言模型（引擎與 CLI 同一個函式）；`CappedLexicon` 與候選窗都讀同一份。解碼器用的部分事先算成和詞條對齊的陣列，解碼時直接取，不再每鍵查字串（`/code-review` 2026-10-23 延後到產品片的那一項）。
 - **候選窗**（逐處寫明）：
   - `window_list`：每個窗裡 **l = 1 的那一段**（游標前一個音節的詞條，排在窗的最後），完全吻合的詞庫詞條改用「原始詞庫分數＋讀音項」做**穩定排序**（同分保持原本順序）。l ≥ 2 的段不變；預測列（排在最前面）、新詞（各段開頭）的位置與規則不變。
   - 英文窗裡的中文項（`engine.rs` `open_english` 取 `entries(..).first()`）：**改**，取上面同一個排序的第一個。
@@ -80,7 +80,9 @@
      - 候選窗：打 ㄎㄨㄞˋ 開窗，「會」的名次比原始詞庫順序後面；英文窗的中文項、英文 token 窗的中文項、數字層的另一種讀法，各一個測試斷言取到的是排序後的第一個（挑一個讀音項會改變第一名的音節）。
    - 突變：拿掉變調免扣、拿掉 mc、λ 改 0、融合加回 ν、讀音項只在重排開時加、候選窗不加讀音項。每個至少讓一個測試以斷言失敗（看結束碼與斷言數，編譯錯誤不算）。
 4. **延遲與記憶體**（這台 Mac、release、閒置窗，和 main `67651c73` 用同樣的方式量，兩邊交錯各跑一次）：
-   - 每鍵延遲：`cargo test --release -p core --test engine_predict timing_typing76_keys -- --ignored --nocapture --test-threads=1`，取它印的「median of 5」：重排開的每鍵 p95 ≤ 16 ms，`RerankJob::run` 的 p95 ≤ 300 ms（同一個測試印的、它也斷言的值），重排關的每鍵 p95 一起報；和 main 的倍數一起報。
+   - 重排與每鍵延遲：`cargo test --release -p core --test engine_predict timing_composition_cap_128_syllables -- --ignored --nocapture --test-threads=1`（`Engine::new`＋`load_lm`＋小模型＋常談表），取它印的「median of 5」三個數：重排開的每鍵 p95 ≤ 16 ms、`RerankJob::run` 的 p95 ≤ 300 ms、重排關的每鍵 p95 ≤ 16 ms（就是它斷言的三個門檻）；和 main 的倍數一起報。
+   - 另一道：`timing_typing76_keys`（同一個指令換測試名）印的那一行 typing76 p95 ≤ 16 ms。
+   - **計時的引擎帶著讀音項**：讀音項表在 `load_lexicon_packs`／`CappedLexicon::new` 裡建（§1「表」），所以 `engine_predict.rs` 的 `shared()` 與 `Engine::new` 兩條路都帶。兩個計時測試開頭各加一個斷言：一個已知會因讀音項改變第一名的公開列（例如錯字回報第 10 列），在被計時的那個引擎上選到加了讀音項的結果。
    - RSS：`/usr/bin/time -l` 量 CLI 跑 dev302 聊天標準（帶 `--tinylm` 與 `--colloquial-core`）的最大常駐記憶體，本分支對 main 增加 ≤ 10 MiB。
    - 載入時間：引擎建構加 `load_lm` 的時間（本分支對 main），只報，不設門檻。
    - 超過門檻就停。
