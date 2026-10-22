@@ -3,6 +3,9 @@
 Writes ROWS in the CLI's --rows format (`|sentence|syllables`: sentence start, as the research's Ctx) with fuzzy.inject and the
 per-row seed of fuzzy.exact_of, so row i gets the same injected input as in grid.py; p = 0 writes the clean rows. Also writes
 ROWS.flags, one `row\tchanged\tinvalid` line per row (digits only).
+  python3 experiments/fuzzy/export_rows.py --rows FILE --kind fuzzy --p 0.1 [--seed 1] --out ROWS
+--rows takes the place of --set: FILE is in the CLI's `前文|句子|讀音` format (eval/dev/*.txt); each row's context field is kept as it is
+and only the reading is injected, by the same rule and per-row seed; ROWS and ROWS.flags are written as with --set.
   python3 experiments/fuzzy/export_rows.py --score ROWS.flags CLEAN EXACT TOL
 CLEAN, EXACT, TOL: shanjie-eval rowstats of the same set on the clean rows, on ROWS with `--fuzzy 0` (exact, a row without a path
 counts as wrong) and on ROWS with `--fuzzy FLAGS`. Prints per class what fuzzy.rescue counts at k = 1: changed rows, excluded
@@ -17,13 +20,13 @@ import fuzzy as F
 from evalstats import read_rowstats
 
 
-def export(rows, kind, p, seed, valid):
-    """(rows file text, flags file text)."""
+def export(rows, kind, p, seed, valid, ctxs=None):
+    """(rows file text, flags file text). `ctxs`: the context field of each row (default empty: sentence start)."""
     out, flags = [], []
     for i, (gold, syls) in enumerate(rows):
         rng = random.Random(f"{seed}|{kind}|{p}|{i}")  # the same string as fuzzy.exact_of
         inp, changed, invalid = F.inject(syls, kind, p, rng, valid) if p > 0 else (syls, False, False)
-        out.append(f"|{gold}|{' '.join(inp)}\n")
+        out.append(f"{ctxs[i] if ctxs else ''}|{gold}|{' '.join(inp)}\n")
         flags.append(f"{i + 1}\t{int(changed)}\t{int(invalid)}\n")
     return "".join(out), "".join(flags)
 
@@ -42,6 +45,14 @@ def score(flags, clean, exact, tol):
     return out
 
 
+def read_rows3(path):
+    """(contexts, rows) of a `前文|句子|讀音` file, with the rows kept as in fuzzy.rows_of."""
+    with open(path, encoding="utf-8") as f:
+        parts = [l.rstrip("\n").split("|") for l in f]
+    parts = [p for p in parts if len(p) == 3]
+    return [p[0] for p in parts], [(p[1], p[2].split()) for p in parts]
+
+
 def read_flags(path):
     with open(path, encoding="utf-8") as f:
         return [tuple(int(x) for x in l.split("\t")[1:]) for l in f]
@@ -49,7 +60,7 @@ def read_flags(path):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--set", choices=("dev299", "typing76")); ap.add_argument("--kind", choices=F.KINDS)
+    ap.add_argument("--set", choices=("dev299", "typing76")); ap.add_argument("--rows"); ap.add_argument("--kind", choices=F.KINDS)
     ap.add_argument("--p", type=float); ap.add_argument("--seed", default="1"); ap.add_argument("--out")
     ap.add_argument("--score", nargs=4, metavar=("FLAGS", "CLEAN", "EXACT", "TOL"))
     a = ap.parse_args()
@@ -58,10 +69,11 @@ def main():
         for name, (ch, ex, wr, r1) in score(read_flags(f), *map(read_rowstats, rs)).items():
             print(f"{name}\tchanged {ch}\texcluded {ex}\twrong {wr}\trescued@1 {r1}")
         return
-    if not (a.set and a.kind and a.p is not None and a.out):
-        ap.error("--set, --kind, --p and --out are required without --score")
+    if not ((a.set is None) != (a.rows is None) and a.kind and a.p is not None and a.out):
+        ap.error("one of --set and --rows, and --kind, --p and --out are required without --score")
     valid = F.Ctx().tol(a.kind).valid
-    text, flags = export(F.load_set(a.set), a.kind, a.p, a.seed, valid)
+    ctxs, rows = read_rows3(a.rows) if a.rows else (None, F.load_set(a.set))
+    text, flags = export(rows, a.kind, a.p, a.seed, valid, ctxs)
     with open(a.out, "w", encoding="utf-8") as f:
         f.write(text)
     with open(a.out + ".flags", "w", encoding="utf-8") as f:
