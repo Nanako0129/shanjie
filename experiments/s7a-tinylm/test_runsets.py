@@ -14,6 +14,10 @@ import run_sets
 import tinylm
 
 
+# eval/dev/user-reported.txt as S7a/S7b/P5 ran it: main c8842c8e later corrected row 3's 一 from ㄧˋ to ㄧˊ (the maintainer's typing);
+# the registered hashes stay those of the file the experiments used, so the tests undo that one correction.
+ROW3_NOW, ROW3_RUN = "ㄩㄥˋ ㄧˊ ㄍㄜˋ ㄎㄨㄞˋ", "ㄩㄥˋ ㄧˋ ㄍㄜˋ ㄎㄨㄞˋ"
+
 class TestRunSets(unittest.TestCase):
     def test_dumps_then_score(self):
         chars = list("你好嗎我他")
@@ -94,6 +98,8 @@ class TestRunSets(unittest.TestCase):
         self.assertEqual(run_sets.rows_args("user-reported", pinned)[-2:], ["--limit", "66"])
         self.assertNotIn("--limit", run_sets.rows_args("user-reported", whole))
         real = open(os.path.join(run_sets.EVAL_DEV, "user-reported.txt"), encoding="utf-8").read()
+        self.assertEqual(real.count(ROW3_NOW), 1)
+        real = real.replace(ROW3_NOW, ROW3_RUN)
         with tempfile.TemporaryDirectory() as td:
             path = os.path.join(td, "user-reported.txt")
             open(path, "w", encoding="utf-8", newline="").write(real + "|多加一列|ㄉㄨㄛ ㄐㄧㄚ ㄧ ㄌㄧㄝˋ\n")

@@ -23,6 +23,10 @@ def exits(test, code, fn, *args, **kw):
     test.assertEqual(cm.exception.code, code)
 
 
+# eval/dev/user-reported.txt as S7a/S7b/P5 ran it: main c8842c8e later corrected row 3's 一 from ㄧˋ to ㄧˊ (the maintainer's typing);
+# the registered hashes stay those of the file the experiments used, so the tests undo that one correction.
+ROW3_NOW, ROW3_RUN = "ㄩㄥˋ ㄧˊ ㄍㄜˋ ㄎㄨㄞˋ", "ㄩㄥˋ ㄧˋ ㄍㄜˋ ㄎㄨㄞˋ"
+
 class Estimators(unittest.TestCase):
     # word X: readings a, b tied at the top, c rare. word Z: p is the top reading, q and r sit at the -6.8 floor.
     LEX = {(("a",), "X"): -1.0, (("b",), "X"): -1.0, (("c",), "X"): -3.0,
@@ -271,10 +275,18 @@ class Bindings(unittest.TestCase):
 
     def test_rows_file_is_bound_to_its_sha256(self):
         self.assertEqual(set(Q.ROW_SHA256), set(Q.NAMES))
-        for name, rel in (("typing76", "eval/bench/suite-v1/typing76.txt"), ("user-reported", "eval/dev/user-reported.txt"),
-                          ("dev302", "eval/bench/suite-v1/dev302.txt")):
-            Q.check_rows_sha(name, os.path.join(Q.ROOT, rel))                # the registered hashes are those of the public files
-            exits(self, 1, Q.check_rows_sha, "chatclause" if name != "chatclause" else "dev302", os.path.join(Q.ROOT, rel))
+        with tempfile.TemporaryDirectory() as d:
+            # user-reported only grows: P5's --rows was its first 154 rows, as P5 ran them (row 3 before the correction)
+            run = os.path.join(d, "user-reported154.txt")
+            with open(os.path.join(Q.ROOT, "eval/dev/user-reported.txt"), encoding="utf-8", newline="") as f:
+                text = f.read()
+            self.assertEqual(text.count(ROW3_NOW), 1)
+            with open(run, "w", encoding="utf-8", newline="") as g:
+                g.write("".join(text.replace(ROW3_NOW, ROW3_RUN).splitlines(keepends=True)[:Q.ROW_COUNTS["user-reported"]]))
+            for name, path in (("typing76", os.path.join(Q.ROOT, "eval/bench/suite-v1/typing76.txt")), ("user-reported", run),
+                               ("dev302", os.path.join(Q.ROOT, "eval/bench/suite-v1/dev302.txt"))):
+                Q.check_rows_sha(name, path)                                    # the registered hashes are those of the public files
+                exits(self, 1, Q.check_rows_sha, "chatclause" if name != "chatclause" else "dev302", path)
         with tempfile.TemporaryDirectory() as d:
             p = os.path.join(d, "rows.txt")
             with open(p, "wb") as f:
