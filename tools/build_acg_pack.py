@@ -792,13 +792,14 @@ NEW_BEHIND_SHIPPED = 3.0
 TIE = 1e-6      # 同讀音的詞包詞，排在第 k 位的分數減 k × TIE：解碼器遇到同分時的先後與檔案順序無關（2026-10-10 實測），要讓「來源數多的在前」成立只能靠分數
 
 
-def pack_rows(order, reading, sc, extra=None, shipped=frozenset()):
+def pack_rows(order, reading, sc, extra=None, shipped=frozenset(), tag=TAG):
     """每個詞的列，格式和 build_overlay 共用同一個函式；同讀音的列依 order 的先後各減 k × TIE，讓同分的詞有固定的第一名。
     extra：{詞: [另外的讀音]}（手動詞第四欄），這些讀音也各有一列（含變調列），和主要讀音同分數。
+    tag：來源標籤（經典台詞詞包用 quotes）。
     shipped（契約 A3 使用者決定）：已出貨的詞的讀音上，新詞的列另外減 NEW_BEHIND_SHIPPED，新詞只是候選、不搶已出貨的選字；order 裡已出貨的詞要排在前面，它們的 k 才和 v0.4.0 一樣。"""
     rows, seen = [], collections.Counter()
     extra = extra or {}
-    gen = lambda w: [(w, syls, r.rstrip("\n").split("\t")) for syls in [reading[w]] + list(extra.get(w, [])) for r in bo.overlay_rows(w, syls, sc[len(w)], TAG)]
+    gen = lambda w: [(w, syls, r.rstrip("\n").split("\t")) for syls in [reading[w]] + list(extra.get(w, [])) for r in bo.overlay_rows(w, syls, sc[len(w)], tag)]
     ship_keys = {f[0] for w in order if w in shipped for _, _, f in gen(w)}
     for w in order:
         for _, _, (key, word, score, tag) in gen(w):
@@ -844,16 +845,16 @@ def top1(pairs, profile, packs_dir=None, lm=LM):
 LEXICON_RULE_ROUNDS = 5      # 類型 c 規則重跑的上限；丟一個詞只會讓少數鄰居改變，實測幾輪就穩
 
 
-def detect_collisions(words, reading, rows, ref, decode=top1, existing=None, extra=None):
+def detect_collisions(words, reading, rows, ref, decode=top1, existing=None, extra=None, pack_file="acg-add.tsv"):
     """對每個詞包詞 w 的讀音（含「一」「不」變調列的讀音），各解碼兩次（不開／開詞包；聊天與書面）。符合其一就列出：
     (a) 開了之後第一名是另一個詞包詞；(b) 不開時第一名不是 w，而且在參考名單 ref 裡；
     (c) 不開時第一名 o 不是 w、是既有詞庫的詞（existing，預設 lexicon_words()），開了之後第一名變成 w（w 把既有詞擠下第一名）。
     都只在開了之後第一名有改變時才算：
     第一名沒變的，詞包的寫法只多一個候選，不改變打出來的結果（使用者 2026-10-09 決定這類留做候選、不必人工處置）。
-    回傳 {讀音: [(w, 條件, 設定, 不開第一名, 開第一名)]}。"""
+    回傳 {讀音: [(w, 條件, 設定, 不開第一名, 開第一名)]}。pack_file：rows 寫進 decode 的詞包資料夾裡的檔名（經典台詞詞包用 quotes-add.tsv，build_quote_pack.py）。"""
     existing = lexicon_words() if existing is None else existing
     with tempfile.TemporaryDirectory() as d:
-        with open(os.path.join(d, "acg-add.tsv"), "w", encoding="utf-8") as f:
+        with open(os.path.join(d, pack_file), "w", encoding="utf-8") as f:
             f.writelines(rows)
         inpack, found = set(words), collections.defaultdict(list)
         pairs, extra = [], extra or {}
