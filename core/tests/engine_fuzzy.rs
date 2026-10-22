@@ -302,7 +302,7 @@ fn only_the_unknown_syllable_uses_its_alternative() {
     let s = shared();
     let syls: Syls = vec![UNKNOWN.to_string(), "ㄒㄧㄣ".to_string()];
     let surfaces = |flags| -> Vec<String> {
-        decode_from_fuzzy(&s.capped, &syls, &s.lm, Profile::Chat, BEAM_S1, "<s>", true, flags).unwrap().into_iter().map(|(_, w)| w.concat()).collect()
+        decode_from_fuzzy(&s.capped, &syls, &s.lm, Profile::Chat, BEAM_S1, "<s>", true, flags, core::fuzzy::DELTA_SOUND).unwrap().into_iter().map(|(_, w)| w.concat()).collect()
     };
     assert!(s.lex.entries(&["ㄅㄧㄝ".to_string(), "ㄒㄧㄥ".to_string()]).iter().any(|e| e.0 == "鱉星"), "premise: 鱉星 is a word of the pair's reading");
     assert!(!surfaces(FUZZY_ADJACENT).iter().any(|w| w == "鱉星"), "bit 4 alone does not read ㄒㄧㄣ as ㄒㄧㄥ");
@@ -327,7 +327,7 @@ fn eten_does_not_accept() {
 fn word_score(syls: &[&str], flags: u32, word: &str) -> f64 {
     let s = shared();
     let v: Vec<String> = syls.iter().map(|x| x.to_string()).collect();
-    let nb = decode_from_fuzzy(&s.capped, &v, &s.lm, Profile::Chat, BEAM_S1, "<s>", true, flags).unwrap();
+    let nb = decode_from_fuzzy(&s.capped, &v, &s.lm, Profile::Chat, BEAM_S1, "<s>", true, flags, core::fuzzy::DELTA_SOUND).unwrap();
     nb.iter().find(|(_, ws)| ws == &[word.to_string()]).unwrap_or_else(|| panic!("no path of the one word {word}")).0
 }
 
@@ -344,7 +344,7 @@ fn a_sound_pair_costs_one_and_an_adjacent_slip_two() {
     let s = shared();
     let v: Vec<String> = ["ㄓ", "ㄉㄠˋ"].iter().map(|x| x.to_string()).collect();
     let a = decode_from(&s.capped, &v, &s.lm, Profile::Chat, BEAM_S1, "<s>", true).unwrap();
-    let b = decode_from_fuzzy(&s.capped, &v, &s.lm, Profile::Chat, BEAM_S1, "<s>", true, 0).unwrap();
+    let b = decode_from_fuzzy(&s.capped, &v, &s.lm, Profile::Chat, BEAM_S1, "<s>", true, 0, core::fuzzy::DELTA_SOUND).unwrap();
     assert!(a == b, "flags 0 is the plain decoder");
 }
 
@@ -443,4 +443,15 @@ fn choosing_an_adjacent_word_rewrites_the_unknown_syllable() {
     let o = press(&mut e, KeyKind::Enter);
     assert_eq!(o.preedit, first);
     assert!(shared().lex.has_syllable(&e.syllables()[0]) && e.syllables()[0] != UNKNOWN);
+}
+
+/// Contract fuzzy-input.md 2.1b: an adjacent-key syllable is accepted without checking that an alternative reading has a
+/// one-syllable entry, because every syllable of the lexicon (base, overlay, sandhi, names and the word pack) has one. This is
+/// what makes an accepted syllable always decodable; if it fails, restore the check in `Engine::adjacent_accepts`.
+#[test]
+fn every_syllable_has_a_single_entry() {
+    let (lex, _) = load_lexicon_packs(&root().join("data/lexicon"), Some((&root().join("data/packs"), PACK_ALL))).unwrap();
+    assert!(lex.syllables().len() > 1000, "the lexicon did not load");
+    let missing: Vec<&String> = lex.syllables().iter().filter(|s| lex.entries(std::slice::from_ref(*s)).is_empty()).collect();
+    assert!(missing.is_empty(), "syllables without a one-syllable entry: {missing:?}");
 }

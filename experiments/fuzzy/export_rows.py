@@ -46,9 +46,14 @@ def score(flags, clean, exact, tol):
 
 
 def read_rows3(path):
-    """(contexts, rows) of a `前文|句子|讀音` file, with the rows kept as in fuzzy.rows_of."""
-    with open(path, encoding="utf-8") as f:
-        parts = [l.rstrip("\n").split("|") for l in f]
+    r"""(contexts, rows) of a `前文|句子|讀音` file, with the rows kept as the CLI's three_field_rows does: lines split on "\n" only
+    (one trailing "\r" dropped, so a lone "\r" does not split a row), exactly three fields. A local reader on purpose: lm_eval.rows_of
+    and fuzzy.rows_of open the file in text mode, where a lone "\r" ends a line, which the CLI does not do."""
+    with open(path, encoding="utf-8", newline="") as f:
+        lines = f.read().split("\n")
+    if lines and lines[-1] == "":
+        lines.pop()  # str::lines: a final "\n" ends the last line, it does not start another
+    parts = [l.removesuffix("\r").split("|") for l in lines]
     parts = [p for p in parts if len(p) == 3]
     return [p[0] for p in parts], [(p[1], p[2].split()) for p in parts]
 

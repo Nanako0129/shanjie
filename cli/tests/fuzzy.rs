@@ -61,11 +61,10 @@ fn fuzzy_flags_are_validated() {
     }
 }
 
-/// dev302 row 298 (排骨酥, ㄙㄨ): the dump of `--fuzzy 15` with the given extra options, as (sentence, score) pairs.
-fn dump_298(extra: &[&str]) -> (String, Vec<(String, f64)>) {
+/// The dump of `--fuzzy 15` (or `flags`) on `rows` with the given extra options, as (sentence, score) pairs.
+fn dump_of(rows: &str, flags: &str, extra: &[&str]) -> (String, Vec<(String, f64)>) {
     let dump = std::env::temp_dir().join(format!("shanjie-fuzzy-dump-{}-{}", std::process::id(), RUN.fetch_add(1, Ordering::Relaxed)));
-    let rows = "|這家店的排骨酥很好吃|ㄓㄜˋ ㄐㄧㄚ ㄉㄧㄢˋ ㄉㄜ˙ ㄆㄞˊ ㄍㄨˇ ㄙㄨ ㄏㄣˇ ㄏㄠˇ ㄔ\n";
-    let mut args = vec!["--fuzzy", "15", "--dump", dump.to_str().unwrap()];
+    let mut args = vec!["--fuzzy", flags, "--dump", dump.to_str().unwrap()];
     args.extend_from_slice(extra);
     let o = lm(rows, &args);
     assert!(o.status.success());
@@ -73,6 +72,13 @@ fn dump_298(extra: &[&str]) -> (String, Vec<(String, f64)>) {
     std::fs::remove_file(&dump).unwrap();
     let cands = text.lines().map(|l| { let f: Vec<&str> = l.split('\t').collect(); (f[2].to_string(), f[3].parse().unwrap()) }).collect();
     (summary(&o), cands)
+}
+/// dev302 row 298 (排骨酥, ㄙㄨ).
+fn dump_298(extra: &[&str]) -> (String, Vec<(String, f64)>) {
+    dump_of("|這家店的排骨酥很好吃|ㄓㄜˋ ㄐㄧㄚ ㄉㄧㄢˋ ㄉㄜ˙ ㄆㄞˊ ㄍㄨˇ ㄙㄨ ㄏㄣˇ ㄏㄠˇ ㄔ\n", "15", extra)
+}
+fn score_of(c: &[(String, f64)], w: &str) -> f64 {
+    c.iter().find(|x| x.0 == w).unwrap_or_else(|| panic!("{w} is not in {c:?}")).1
 }
 
 /// `--fuzzy-delta-sound` (section 3.5, evaluation only): 1 is the default, so the summary line (tag and top1_sha256) and the dump
@@ -87,9 +93,60 @@ fn fuzzy_delta_sound_default_is_identical_and_other_values_shift_fuzzy_candidate
     let (s2, c2) = dump_298(&["--fuzzy-delta-sound", "2.5"]);
     assert!(s2.contains("+fz:15:d2.5  {"), "{s2}");
     assert_ne!(s0.split("'top1_sha256'").nth(1), s2.split("'top1_sha256'").nth(1));
-    let score = |c: &[(String, f64)], w: &str| c.iter().find(|x| x.0 == w).unwrap().1;
     let (shu, su) = ("這家店的排骨書很好吃", "這家店的排骨酥很好吃");
-    assert!((score(&c0, shu) - score(&c2, shu) - 1.5).abs() < 1e-9, "{c0:?} {c2:?}");
-    assert_eq!(score(&c0, su), score(&c2, su));
-    assert!(!lm("|知道|ㄗ ㄉㄠˋ\n", &["--fuzzy", "2", "--fuzzy-delta-sound", "x"]).status.success());
+    assert!((score_of(&c0, shu) - score_of(&c2, shu) - 1.5).abs() < 1e-9, "{c0:?} {c2:?}");
+    assert_eq!(score_of(&c0, su), score_of(&c2, su));
+}
+
+/// The adjacent-key penalty (delta 2) is not the sound penalty: with `--fuzzy-delta-sound 2.5` a candidate read through an adjacent-key
+/// syllable (ㄅㄩ is not a lexicon syllable; 鱉星 is a word of ㄅㄧㄝ ㄒㄧㄥ) keeps exactly its default score.
+#[test]
+fn fuzzy_delta_sound_leaves_the_adjacent_key_penalty_alone() {
+    let rows = "|鱉星|ㄅㄩ ㄒㄧㄥ\n";
+    let (_, c0) = dump_of(rows, "31", &[]);
+    let (_, c2) = dump_of(rows, "31", &["--fuzzy-delta-sound", "2.5"]);
+    assert_eq!(score_of(&c0, "鱉星"), score_of(&c2, "鱉星"), "{c0:?} {c2:?}");
+}
+
+/// The option is refused without a fuzzy-sound bit (it would change nothing) and for a value that is not a number above 0.
+#[test]
+fn fuzzy_delta_sound_is_validated() {
+    let msg = |extra: &[&str]| {
+        let o = lm("|知道|ㄗ ㄉㄠˋ\n", extra);
+        assert!(!o.status.success(), "{extra:?}");
+        String::from_utf8_lossy(&o.stderr).to_string()
+    };
+    assert!(msg(&["--fuzzy-delta-sound", "2"]).contains("needs --fuzzy with a sound bit"));
+    assert!(msg(&["--fuzzy", "16", "--fuzzy-delta-sound", "2"]).contains("needs --fuzzy with a sound bit"));
+    for bad in ["x", "0", "-1", "inf", "NaN"] {
+        assert!(msg(&["--fuzzy", "2", "--fuzzy-delta-sound", bad]).contains("takes a number above 0"), "{bad}");
+    }
+    assert!(lm("|知道|ㄗ ㄉㄠˋ\n", &["--fuzzy", "2", "--fuzzy-delta-sound", "2"]).status.success());
+}
+
+/// The recorded delta 1 results of docs/contracts/fuzzy-input.md 3.2 (dev302, `--fuzzy 15`, the shipping command without
+/// `--colloquial-core`): the default and an explicit `--fuzzy-delta-sound 1` must reproduce them. The small model's floats differ across
+/// platforms, so the counts and hashes are asserted on macOS only (where they were recorded).
+#[cfg(target_os = "macos")]
+#[test]
+fn fuzzy_delta_sound_one_reproduces_the_recorded_dev302_results() {
+    const RECORDED: [(&str, &str, &str); 2] = [
+        ("chat", "'top1': 261,", "5f74eb6b002c1f1a2dec51c498eae6a936d8a66892918d48d82ea872583dabb8"),
+        ("formal", "'top1': 263,", "dcda2d0173157c138f07c1472c54ed89014de644f66776dea3cf246ad2a468f7"),
+    ];
+    let root = concat!(env!("CARGO_MANIFEST_DIR"), "/..");
+    for (profile, top1, sha) in RECORDED {
+        for delta in [&[][..], &["--fuzzy-delta-sound", "1"][..]] {
+            let o = Command::new(env!("CARGO_BIN_EXE_shanjie-eval"))
+                .current_dir(root)
+                .args(["--lm", "data/lm/bigram.sjlm", "--profile", profile, "--context", "--packs", "acg", "--tinylm", "data/lm/tinylm.sjtl"])
+                .args(["--fuzzy", "15", "--rows", "eval/bench/suite-v1/dev302.txt"])
+                .args(delta)
+                .output()
+                .unwrap();
+            assert!(o.status.success(), "{profile} {delta:?}");
+            let s = summary(&o);
+            assert!(s.contains(top1) && s.contains(sha), "{profile} {delta:?}: {s}");
+        }
+    }
 }

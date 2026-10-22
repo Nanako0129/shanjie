@@ -1297,27 +1297,13 @@ pub fn decode_from(
     start: &str,
     demote: bool,
 ) -> Result<Vec<(f64, Vec<String>)>, Error> {
-    decode_from_fuzzy(lex, syls, lm, profile, beam, start, demote, 0)
+    decode_from_fuzzy(lex, syls, lm, profile, beam, start, demote, 0, crate::fuzzy::DELTA_SOUND)
 }
 
-/// `decode_from` with the fuzzy flags of `decode_segment_fuzzy` (the evaluation CLI's `--fuzzy`).
+/// `decode_from` with the fuzzy flags of `decode_segment_fuzzy` (the evaluation CLI's `--fuzzy`) and the fuzzy-sound penalty
+/// `delta_sound` of `decode_segment_fuzzy_delta` (the CLI's evaluation-only `--fuzzy-delta-sound`; `fuzzy::DELTA_SOUND` by default).
 #[allow(clippy::too_many_arguments)]
 pub fn decode_from_fuzzy(
-    lex: &CappedLexicon,
-    syls: &[String],
-    lm: &Lm,
-    profile: Profile,
-    beam: usize,
-    start: &str,
-    demote: bool,
-    fuzzy: u32,
-) -> Result<Vec<(f64, Vec<String>)>, Error> {
-    decode_from_fuzzy_delta(lex, syls, lm, profile, beam, start, demote, fuzzy, crate::fuzzy::DELTA_SOUND)
-}
-
-/// `decode_from_fuzzy` with the evaluation-only fuzzy-sound penalty of `decode_segment_fuzzy_delta` (the CLI's `--fuzzy-delta-sound`).
-#[allow(clippy::too_many_arguments)]
-pub fn decode_from_fuzzy_delta(
     lex: &CappedLexicon,
     syls: &[String],
     lm: &Lm,

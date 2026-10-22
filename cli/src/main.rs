@@ -4,7 +4,7 @@ use core::engine::{capping_overlay_detailed, load_lexicon_extra_detailed, load_l
 use core::eval::*;
 use core::learn::{context_key, SENTINEL};
 use core::fuzzy::FUZZY_ALL;
-use core::lm::{decode_from_fuzzy_delta, history, CappedLexicon, Demote, Lm, Profile};
+use core::lm::{decode_from_fuzzy, history, CappedLexicon, Demote, Lm, Profile};
 use core::tinylm::{KnPairing, RerankLevel, TinyLm, TinyLmError, TOPK};
 use core::predict::{parse_units, predict, units_of, units_str, Index, Mode};
 use core::{decode_beam, Error, Lexicon, NoLearning, Syls, BEAM_S1};
@@ -235,6 +235,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     let mut fuzzy = None::<u32>;
     // `--fuzzy-delta-sound D` (section 3.5, evaluation only): the fuzzy-sound penalty of this run; the summary tag gets `:dD` when it is not the default.
     let mut delta_sound = core::fuzzy::DELTA_SOUND;
+    let mut delta_given = false;
     let mut reading_channel = true;
     let mut it = args.iter();
     while let Some(a) = it.next() {
@@ -278,7 +279,10 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
             "--packs-dir" => packs_dir = Some(val()?),
             "--extra-overlay" => extra_overlay = Some(val()?),
             "--colloquial-core" => colloquial_core = Some(val()?),
-            "--fuzzy-delta-sound" => delta_sound = val()?.parse::<f64>().ok().filter(|d| d.is_finite()).ok_or("--fuzzy-delta-sound takes a number")?,
+            "--fuzzy-delta-sound" => {
+                delta_sound = val()?.parse::<f64>().ok().filter(|d| d.is_finite() && *d > 0.0).ok_or("--fuzzy-delta-sound takes a number above 0")?;
+                delta_given = true;
+            }
             "--fuzzy" => fuzzy = Some(val()?.parse::<u32>().ok().filter(|f| f & !FUZZY_ALL == 0).ok_or("--fuzzy takes flags 0-31")?),
             "--no-reading-channel" => reading_channel = false,
             _ => return Err("unknown argument".into()),
@@ -291,6 +295,10 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     // Section 9 P3-8: without a small model a level (standard included) would silently measure the n-gram alone.
     if level.is_some() && tinylm.is_none() {
         return Err("--rerank-level needs --tinylm".into());
+    }
+    // The sound penalty only exists on a fuzzy-sound bit; without one the option would silently change nothing.
+    if delta_given && fuzzy.unwrap_or(0) & core::fuzzy::FUZZY_SOUND == 0 {
+        return Err("--fuzzy-delta-sound needs --fuzzy with a sound bit (0-3)".into());
     }
     let level = level.unwrap_or(RerankLevel::Standard);
     if tinylm_scores.is_some() && set.as_deref() == Some("holdout") {
@@ -394,7 +402,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
         let left = if ctx_mode { Some(context_key(ctx)) } else { None };
         let start = left.as_deref().filter(|k| *k != SENTINEL).map_or("<s>", |k| history(k, &lm));
         let mut out = RowOut::default();
-        let nb = match decode_from_fuzzy_delta(&capped, syls, &lm, prof, BEAM_S1, start, demote, fuzzy.unwrap_or(0), delta_sound) {
+        let nb = match decode_from_fuzzy(&capped, syls, &lm, prof, BEAM_S1, start, demote, fuzzy.unwrap_or(0), delta_sound) {
             Ok(nb) => nb,
             // --fuzzy: a row no reading covers is a wrong answer with an empty first candidate, and the set goes on.
             Err(Error::NoPath { .. }) if fuzzy.is_some() => {

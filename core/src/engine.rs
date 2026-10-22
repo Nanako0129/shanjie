@@ -3042,6 +3042,8 @@ impl Engine {
     /// syllable it may have been mistyped from. Needs a language model (the bigram decoder reads the alternatives; `decode_beam`
     /// does not) and the standard layout (the neighbour table is that layout's keyboard).
     fn adjacent_accepts(&self, syl: &str) -> bool {
+        // An accepted syllable always decodes: every lexicon syllable has a one-syllable entry (test every_syllable_has_a_single_entry,
+        // contract fuzzy-input.md 2.1b), so some adjacent alternative always does.
         self.fuzzy & FUZZY_ADJACENT != 0
             && self.lm.is_some()
             && self.layout == Layout::Standard

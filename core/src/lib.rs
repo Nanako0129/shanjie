@@ -287,6 +287,11 @@ impl Lexicon {
         self.syl_ids.contains_key(syl)
     }
 
+    /// Every interned syllable (any reading of any entry).
+    pub fn syllables(&self) -> &[String] {
+        &self.syl_names
+    }
+
     /// Fuzzy sound (bits 0-3 of `flags`): the other lexicon syllables that read as `syl` once the enabled pairs are merged,
     /// sorted by name. Empty for a syllable the lexicon does not have.
     pub fn sound_alts(&self, syl: &str, flags: u32) -> Vec<&str> {
