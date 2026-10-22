@@ -1,6 +1,6 @@
 # 契約：經典台詞詞包（quote pack）
 
-狀態：修訂一（2026-10-22；plan-verifier REVISE 五項照改），送收尾審查。
+狀態：READY（2026-10-22；plan-verifier REVISE 五項照改後，收尾審查 READY）。
 
 ## 0. 起因、要做到什麼、怎麼看到
 
