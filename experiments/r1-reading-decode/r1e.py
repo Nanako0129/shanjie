@@ -3,7 +3,7 @@
 is no offline recomputation: this tool checks each run's summary tag and row count, then judges the four shipping clauses against the
 setting's shipping baseline. Counts and row numbers only.
 
-  r1e.py judge DIR [--out OUT.json]
+  r1e.py judge DIR [--sjtl data/lm/tinylm.sjtl] [--out OUT.json]
 
 DIR holds, for each (setting, set) of ROLES, `base.<setting>.<set>.r` / `.cli.txt` (the shipping run) and `e.<setting>.<set>.r` / `.cli.txt`
 (the R1e run). Exit codes: 0 judged (pass or fail), 1 STOP.
@@ -18,34 +18,22 @@ import r1d as RD  # noqa: E402  (SETTINGS and ROLES with the two -off settings, 
 Q, p4c, evalstats = R.Q, R.p4c, R.evalstats
 stop = R.stop
 ROLES, SETTINGS = RD.ROLES, RD.SETTINGS
-PAIRS = (("chat-std", "formal-std"), ("chat-off", "formal-off"))
 
 
-def check_tags(setting, base_tag, tag):
-    """STOP unless the R1e run is the setting's: `+rd` last; chat with the rerank on keeps the colloquial term without `+rc` (the reading
-    channel is replaced by the decoder term); the baseline is the shipping run (chat on: `+rc`; off: no small model)."""
-    profile, level, on = SETTINGS[setting]
-    bad = []
-    if not tag.endswith("+rd"):
-        bad.append("R1e run without +rd last")
-    if ("+tl:" in tag) != on or ("+tl:" in base_tag) != on:
-        bad.append("+tl: (rerank on/off)")
-    if on and level != "standard" and (f"+rl:{level}" not in tag or f"+rl:{level}" not in base_tag):
-        bad.append("+rl:")
-    if profile == "chat":
-        if "+kn:" not in tag or "+kn:" not in base_tag:
-            bad.append("+kn:")
-        if on and ("+colloq:" not in tag or "+rc" in tag or not base_tag.endswith("+rc")):
-            bad.append("+colloq / +rc")
-        if not on and ("+colloq" in tag or "+colloq" in base_tag):
-            bad.append("colloquial with the rerank off")
-    elif "+tri:" not in tag or "+tri:" not in base_tag or "+colloq" in tag:
-        bad.append("+tri / +colloq")
-    if bad:
-        stop(f"{setting}: tags {base_tag} / {tag}: {', '.join(bad)}")
+def check_tags(setting, base_tag, tag, sjtl_sha8):
+    """STOP unless the baseline tag is the setting's shipping run (r1d's own check) and the R1e tag is that tag with `+rd` last; chat with the
+    rerank on drops `+rc` (the reading channel is replaced by the decoder term), everything else is identical, so every other tag
+    (+tl:, +rl:, +kn:, +colloq:, +tri:, +acg, +ctx, the demote / class / name switches) is the baseline's."""
+    RD.check_tag(base_tag, setting, sjtl_sha8, rd=False)
+    chat_on = SETTINGS[setting][0] == "chat" and SETTINGS[setting][2]
+    want = (base_tag.removesuffix("+rc") if chat_on else base_tag) + "+rd"
+    if tag != want:
+        stop(f"{setting}: R1e tag {tag} is not the baseline tag {base_tag} with +rd ({want})")
 
 
-def judge_one(d, setting, name):
+def judge_one(d, setting, name, sjtl_sha8):
+    """Both rowstats files must be the same rows: same count and the same gold length per row (the rows-file hashes are checked by the run
+    script, not here)."""
     role = ROLES[setting][name]
     paths = {k: os.path.join(d, f"{k}.{setting}.{name}") for k in ("base", "e")}
     tags, rows = {}, {}
@@ -54,7 +42,9 @@ def judge_one(d, setting, name):
         rows[k] = evalstats.read_rowstats(p + ".r")
         if not (n == len(rows[k]) == R.ROW_COUNTS[name]) or sum(r[0] for r in rows[k]) != top1:
             stop(f"{setting} {name} {k}: {n} summary rows, {len(rows[k])} rowstats, expected {R.ROW_COUNTS[name]} (or top1 mismatch)")
-    check_tags(setting, tags["base"], tags["e"])
+    check_tags(setting, tags["base"], tags["e"], sjtl_sha8)
+    if [r[2] for r in rows["base"]] != [r[2] for r in rows["e"]]:
+        stop(f"{setting} {name}: baseline and R1e rowstats differ in the gold lengths (not the same rows)")
     base_ok, new_ok = [bool(r[0]) for r in rows["base"]], [bool(r[0]) for r in rows["e"]]
     s = p4c.stats(base_ok, new_ok)
     res = {"setting": setting, "name": name, "role": role, "n": len(base_ok), **p4c.jsonable(s),
@@ -68,14 +58,13 @@ def judge_one(d, setting, name):
     return res
 
 
-def judge(d):
-    runs = {(s, n): judge_one(d, s, n) for s, roles in ROLES.items() for n in roles}
-    out = {"clauses": {"1": {}, "2a": {}, "2b": {}, "3": {}}, "runs": {f"{s}/{n}": {k: v for k, v in r.items() if k not in ("base_ok", "cell_ok")}
-                                                                       for (s, n), r in runs.items()}}
+def judge(d, sjtl_sha8):
+    runs = {(s, n): judge_one(d, s, n, sjtl_sha8) for s, roles in ROLES.items() for n in roles}
+    out = {"clauses": {"1": {}, "2a": {}, "2b": {}, "3": {}}, "runs": {f"{s}/{n}": r for (s, n), r in runs.items()}}
     for (s, n), r in sorted(runs.items()):
         if "verdict" in r:
             out["clauses"][r["role"]][f"{s}/{n}"] = r["verdict"]
-    for pair in PAIRS:
+    for pair in RD.CLAUSE3_PAIRS:
         base = "".join(runs[s, "user-reported"]["base_ok"] for s in pair)
         cell = "".join(runs[s, "user-reported"]["cell_ok"] for s in pair)
         st = p4c.stats([c == "1" for c in base], [c == "1" for c in cell])
@@ -95,8 +84,10 @@ def main(argv=None):
     j = sub.add_parser("judge")
     j.add_argument("dir")
     j.add_argument("--out")
+    j.add_argument("--sjtl", default="data/lm/tinylm.sjtl")
     a = ap.parse_args(argv)
-    res = judge(a.dir)
+    Q.check_out(a.out, None) if a.out else None
+    res = judge(a.dir, R.sha_file(a.sjtl)[:8])
     for k, r in sorted(res["runs"].items()):
         print(f"{k} n {r['n']} fixes {r['fixes']} breaks {r['breaks']} net {r['net']} top1 {r['top1_before']} -> {r['top1_after']}"
               + (f" verdict {'PASS' if r['verdict'] else 'FAIL'}" if "verdict" in r else ""))
