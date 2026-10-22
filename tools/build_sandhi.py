@@ -4,8 +4,8 @@
 輸入 data/lexicon/mcbpmf-data.txt（小麥基底，MIT）；讀 data/lexicon/overlay-add.tsv 只為了去重。
 輸出 data/lexicon/sandhi-add.tsv，每列「讀音\\t詞\\t分數\\tsandhi」，依（讀音, 詞）的 UTF-8 位元組序排序。
 
-規則依據：《國語辭典簡編本》〈單一音讀〉（https://dict.concised.moe.edu.tw/page.jsp?ID=55&la=0&powerMode=0 ）、
-88 年《國語一字多音審訂表》。規則本身是事實，這個檔案不含任何教育部資料。
+R1–R5 的規則依據：《國語辭典簡編本》〈單一音讀〉（https://dict.concised.moe.edu.tw/page.jsp?ID=55&la=0&powerMode=0 ）、
+88 年《國語一字多音審訂表》；R6 的 ㄓㄚ 是口語讀音，不是審訂音（維護者逐字同意，zha-reading.md）。規則本身是事實，這個檔案不含任何教育部資料。
 
 用法：python3 tools/build_sandhi.py [--check]
 """
