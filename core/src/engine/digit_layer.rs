@@ -179,7 +179,7 @@ impl Engine {
         (group > 0).then(|| self.history_of(st, &self.text_before(self.cursor - group)))
     }
 
-    /// The keys as digit tokens at the cursor, one unit each. Returns what a 40th unit sent, if it did. The previous key's tail is not part
+    /// The keys as digit tokens at the cursor, one unit each. Returns what a unit that reaches `MAX_SYLLABLES` sent, if it did. The previous key's tail is not part
     /// of that commit (`take_commit` sends what `shown` shows, unfinished symbols included): it is dropped first, and every caller sets
     /// the tail it wants after this call (`set_pend_from`, `clear_pend`, or `apply_pred_at` which clears it).
     fn emit_tokens(&mut self, keys: &[char]) -> Result<String, EngineError> {
@@ -223,7 +223,7 @@ impl Engine {
     }
 
     /// The buffered keys become tokens and the run ends (a setting that ends English mixing, `reset(Commit)`, a boundary key). Returns what a
-    /// 40th unit sent and whether there was a run.
+    /// unit that reaches `MAX_SYLLABLES` sent and whether there was a run.
     pub(super) fn digit_flush(&mut self) -> Result<(String, bool), EngineError> {
         self.digit_end(false)
     }
@@ -340,7 +340,7 @@ impl Engine {
         self.set_pend_from(symbols);
         let tail_keys: String = run.buf[m..].iter().collect();
         let mut o = self.finish_syllable(tone_no, Vec::new())?;
-        // A.3.6: the keys stay available as the other reading of this syllable, unless the syllable went out with a 40-unit commit.
+        // A.3.6: the keys stay available as the other reading of this syllable, unless the syllable went out with a `MAX_SYLLABLES`-unit commit.
         if o.commit.is_empty() {
             self.last_digits = Some(tail_keys);
         }
@@ -425,7 +425,7 @@ impl Engine {
         let (commit, _) = self.digit_end(matches!(k.kind, KeyKind::Down | KeyKind::Enter))?;
         let tail = self.pend.iter().any(Option::is_some);
         if k.kind == KeyKind::Enter && !commit.is_empty() && self.syls.is_empty() && !tail {
-            return Ok(self.view(true, commit)); // Enter that sent everything stops there (a 40th unit can leave tokens in a new composition)
+            return Ok(self.view(true, commit)); // Enter that sent everything stops there (a unit that reaches `MAX_SYLLABLES` can leave tokens in a new composition)
         }
         self.pred_dirty = false;
         self.recompute_pred();
@@ -435,7 +435,7 @@ impl Engine {
     }
 
     /// A row item is chosen while a run is open (digits.md A.3.5): the buffered keys that show as digits become tokens (the item starts
-    /// behind them), the tail is consumed like `pend`. Returns what a 40th unit sent.
+    /// behind them), the tail is consumed like `pend`. Returns what a unit that reaches `MAX_SYLLABLES` sent.
     pub(super) fn digit_pre_pick(&mut self, p: &mut Pred) -> Result<String, EngineError> {
         let Some(run) = self.drun.take() else { return Ok(String::new()) };
         let mut commit = String::new();
@@ -469,7 +469,7 @@ impl Engine {
         None
     }
 
-    /// The last item of a window (digits.md A.3.6) was chosen. Returns what a 40th unit sent.
+    /// The last item of a window (digits.md A.3.6) was chosen. Returns what a unit that reaches `MAX_SYLLABLES` sent.
     pub(super) fn choose_digit_alt(&mut self, alt: DigitAlt, word: String) -> Result<String, EngineError> {
         self.pred_dirty = true;
         match alt {

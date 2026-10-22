@@ -820,7 +820,7 @@ fn row_max_syllables_commit_learns() {
             }
         }
     }
-    assert_eq!(commit.chars().count(), MAX_SYLLABLES, "the 40th syllable auto-commits");
+    assert_eq!(commit.chars().count(), MAX_SYLLABLES, "the last syllable auto-commits");
     assert!(commit.starts_with('欣'));
     assert_eq!(n_records(&e), 1);
 }

@@ -33,9 +33,9 @@ pub fn send(e: &mut Engine, tok: &str) -> Output {
     }
 }
 
-/// 39 units in the composition (full-width commas), for the 40-unit row.
-pub fn thirty_nine() -> String {
-    vec!["S-,"; 39].join(" ")
+/// 127 units in the composition (full-width commas), for the 128-unit row.
+pub fn one_short_of_full() -> String {
+    vec!["S-,"; core::engine::MAX_SYLLABLES - 1].join(" ")
 }
 
 /// The scripts of rows #1-#39 of the contract's table (digits.md A.4.1), by row number; the keys of the row, nothing else.
@@ -78,7 +78,7 @@ pub fn rows() -> Vec<(&'static str, String)> {
         r("r34", "1 Esc"),
         r("r35", "s u 3 3 Enter"),
         r("r36", "1 S-, Esc 1 S-1"),
-        ("r37", format!("{} 1 2 3 4 5", thirty_nine())),
+        ("r37", format!("{} 1 2 3 4 5", one_short_of_full())),
         r("r38", "2 0 2 6 @commit"),
         r("r39", "1 0 Down"),
     ]

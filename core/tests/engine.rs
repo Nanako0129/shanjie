@@ -343,12 +343,12 @@ fn set_punctuation_validates_and_keeps_the_old_table() {
     assert!(kk(&mut e, KeyKind::Space).candidates == vec!["「".to_string()]);
 }
 
-/// s3d acceptance 5: punctuation counts toward the 40-token limit.
+/// s3d acceptance 5: punctuation counts toward the 128-token limit.
 #[test]
 fn punctuation_counts_toward_the_limit() {
     let mut e = std();
     let mut shown = String::new();
-    for _ in 1..40 {
+    for _ in 1..MAX_SYLLABLES {
         shown = typ(&mut e, "su3").preedit;
     }
     let o = k(&mut e, Key::ch(',', MOD_SHIFT));
@@ -938,16 +938,16 @@ fn reset_both_modes_equal_fresh_engine() {
     assert!(o == blank(true));
 }
 
-// ---------- 40-syllable auto commit ----------
+// ---------- 128-syllable auto commit ----------
 #[test]
-fn auto_commit_at_40th_syllable() {
+fn auto_commit_at_128th_syllable() {
     let mut e = std();
-    for i in 1..40 {
+    for i in 1..MAX_SYLLABLES {
         let o = typ(&mut e, "su3");
         assert!(o.handled && o.commit.is_empty() && o.preedit.chars().count() == i);
     }
     let o = typ(&mut e, "su3");
-    assert!(o.handled && o.commit.chars().count() == 40 && o.preedit.is_empty() && o.cursor_utf16 == 0);
+    assert!(o.handled && o.commit.chars().count() == MAX_SYLLABLES && o.preedit.is_empty() && o.cursor_utf16 == 0);
     let o = typ(&mut e, "su3");
     assert!(o.commit.is_empty() && o.preedit == top(NI));
 }
