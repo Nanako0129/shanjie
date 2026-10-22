@@ -237,6 +237,53 @@ fn accepted_syllable_survives_turning_bit_4_off() {
     assert!(e.key(Key::new(KeyKind::Enter)).is_ok());
 }
 
+/// The shipping engine (real lexicon with packs, small model, colloquial table, chat context) with all the flags on: a sentence with a
+/// sound-pair slip and one with an accepted adjacent-key syllable go through the rerank job (the job reads the composition's
+/// syllables, which here include one the lexicon lacks) without an internal error, and the composition stays one character per syllable.
+#[test]
+fn shipping_models_take_a_rerank_job_over_tolerant_syllables() {
+    let lm = |f: &str| root().join("data/lm").join(f);
+    let mut e = Engine::new_with_packs(&root().join("data/lexicon"), Layout::Standard, Some((&root().join("data/packs"), 1))).unwrap();
+    e.load_lm(&lm("bigram.sjlm")).unwrap();
+    e.load_tinylm(&lm("tinylm.sjtl")).unwrap();
+    e.load_colloquial(&lm("colloquial.sjlm")).unwrap();
+    e.set_rerank(true).unwrap();
+    e.set_left_context("今天");
+    e.set_fuzzy(FUZZY_ALL).unwrap();
+    for reading in ["ㄗ ㄉㄠˋ ㄋㄧˇ ㄉㄜ˙", &format!("ㄨㄛˇ {UNKNOWN} ㄉㄠˋ ㄋㄧˇ")] {
+        type_syls(&mut e, Layout::Standard, reading);
+        let n = reading.split(' ').count();
+        assert_eq!(e.syllables().len(), n, "every syllable was accepted: {reading}");
+        let job = e.take_rerank_job().expect("a job over the tolerant composition");
+        let shown = match e.apply_rerank(job.run()).expect("no internal error") {
+            Some(o) => o.preedit,
+            None => press(&mut e, KeyKind::Right).preedit,
+        };
+        assert!(is_han(&shown) && shown.chars().count() == n, "one character per syllable after the rerank: {shown}");
+        e.reset(ResetMode::Discard);
+    }
+}
+
+/// Composition cap (128 units, the head freezes and is sent): an accepted adjacent-key syllable at the head of a composition that
+/// outgrows the cap is frozen and committed like any other, without an internal error; everything typed comes out as characters.
+#[test]
+fn an_accepted_syllable_in_the_head_survives_the_composition_cap() {
+    let mut e = engine(Layout::Standard, FUZZY_ALL, false);
+    let mut sent = String::new();
+    let mut typed = 0;
+    for reading in std::iter::once(UNKNOWN).chain(std::iter::repeat("ㄋㄧˇ ㄏㄠˇ").take(80)) {
+        for syl in reading.split(' ') {
+            for k in keys_of(Layout::Standard, syl) {
+                sent.push_str(&e.key(k).expect("no internal error").commit);
+            }
+            typed += 1;
+        }
+    }
+    sent.push_str(&press(&mut e, KeyKind::Enter).commit);
+    assert!(typed > 128 && sent.chars().all(|c| c as u32 >= 0x3400), "all {typed} syllables came out as characters: {sent}");
+    assert_eq!(sent.chars().count(), typed, "one character per syllable");
+}
+
 /// Section 3.4, per syllable: in a sentence with one unknown syllable only that syllable is read through its alternative; a
 /// legal syllable beside it is read as typed even when it could be a slip (here ㄗ for ㄓ with the pair on would be a fuzzy
 /// sound, and the pair is off).
