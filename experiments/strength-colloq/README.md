@@ -4,7 +4,7 @@
 
 - 錄 v0.5.0 demo 時發現強度不是「標準」就沒有常談。維護者：「保守或積極都不應該覆蓋常談」。
 - `colloquial::applies` 要求聊天、標準強度、配對的小模型，所以常談（P4d 那一格）和讀音通道項（P5）只在聊天標準生效。
-- 研究顧問（Fable、Argon，`~/.cache/shanjie/advice/{fable,argon}-2026-10-22-strength-levels.md`）分析後，維護者 2026-10-22 三題選擇題：
+- 研究顧問（Fable、Argon；全文在維護者本機的顧問資料夾）分析後，維護者 2026-10-22 三題選擇題：
   1. **現在做，在 main 上量**：R1 產品片出貨時再重跑傾印。
   2. **14 格**：保守 6、積極 8。
   3. **探索過了就出貨**：對這一片的例外，記在維護者的 `decisions.md`。
@@ -48,7 +48,7 @@
 
 ## 資料與工具
 
-- **CLI**（同一個 commit、同一台 GCP VM）：每個集合跑一次聊天標準的出貨設定，加上 `--colloquial-core`、`--dump --dump-words --rowstats --tinylm-scores --tinylm-scores-topk 64`。候選與 ll 和強度無關，14 格都從這一次離線算。
+- **CLI**（同一個 commit、同一台 GCP VM）：每個集合跑一次聊天標準的出貨設定，加上 `--colloquial-core`、`--dump --dump-words --rowstats --tinylm-scores`（融合只讀前 8 名的 ll，不需要 `--tinylm-scores-topk 64`，main 的 CLI 也沒有這個選項；〔同日更正，任何數字之前〕）。候選與 ll 和強度無關，14 格都從這一次離線算。
   - 集合：chatclause、discordtune、cvtune-clean、打字測驗、錯字回報（157 列）、dev302。
 - **錨點**：
   - 錨點 1：聊天標準的出貨那一格離線重算，逐列等於 CLI 的選字。
