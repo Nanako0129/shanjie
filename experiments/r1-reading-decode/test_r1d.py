@@ -1,4 +1,4 @@
-import json, os, subprocess, sys, tempfile, unittest
+import json, os, shutil, subprocess, sys, tempfile, unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -71,6 +71,27 @@ class Pick(unittest.TestCase):
         s, picks = D.run_mu((), False, rows, [False, True], 0.25)
         self.assertEqual((picks, s["fixes"], s["breaks"], s["top1_before"], s["top1_after"], s["u2"]), ([1, 1], 1, 1, 1, 1, -1))
         self.assertEqual((s["b_first_fixes"], s["b_first_breaks"]), (1, 1))
+        s, _ = D.run_mu(PARAMS, True, [row([0.0, -0.5], [0.0, 0.0], [0, 1])], [False], 0.0)       # rerank on: no b-first fields
+        self.assertNotIn("b_first_fixes", s)
+
+    def test_top8_counts_compare_sets_and_count_every_non_none_row(self):
+        n = 10
+        ng = [-0.1 * i for i in range(n)]
+        # col swaps candidates 0 and 1 (both inside the top eight): the SET of the top eight is unchanged
+        r = row(ng, None, [0] * n, col=[0.0, 1.0] + [0.0] * 8)
+        s, _ = D.run_mu((), False, [r], [False], 1.0)
+        self.assertEqual(s["top8_changed_rows"], 0)
+        # candidate 9 enters the top eight; a "nollcand" row counts as needing the 9th, a "none" row does not
+        r = row(ng, None, [0] * n, col=[0.0] * 9 + [9.0])
+        s, _ = D.run_mu((), False, [r], [False], 1.0)
+        self.assertEqual((s["top8_changed_rows"], s["top8_needs_beyond_8_rows"]), (1, 1))
+        r = row(ng, [0.0] * n, [0] * n, col=[0.0] * 9 + [9.0])
+        r["sc"]["ll"][9] = None
+        s, _ = D.run_mu(PARAMS, True, [r], [False], 1.0)
+        self.assertEqual((s["rows_top8_candidate_without_ll"], s["top8_needs_beyond_8_rows"]), (1, 1))
+        del r["sc"]["ll"]
+        s, _ = D.run_mu(PARAMS, True, [r], [False], 1.0)
+        self.assertEqual((s["rows_without_ll"], s["top8_needs_beyond_8_rows"]), (1, 0))
 
 
 class Anchors(unittest.TestCase):
@@ -112,6 +133,8 @@ class Tags(unittest.TestCase):
         self.bad(f"lm-chat+ctx{self.KN}{self.TL}+acg+colloq:{R.COLLOQ8}+rc", "chat-off", False)         # a rerank-off baseline has no small model
         self.bad(f"lm-formal+ctx{self.TL}+acg", "formal-std", False)                                    # no +tri
         self.bad(f"lm-chat+ctx{self.KN}{self.TL}+acg+colloq:{R.COLLOQ8}+rc+rd", "chat-std", False)      # a baseline must not be an rd run
+        self.bad(f"lm-chat+ctx{self.TL}+acg+colloq:{R.COLLOQ8}+rc", "chat-std", False)                  # a --no-kn run: no +kn:
+        self.bad("lm-chat+ctx+acg", "chat-off", False)
 
     def test_rd_run_tags(self):
         self.ok(f"lm-chat+ctx{self.KN}{self.TL}+acg+rd", "chat-std", True)
@@ -121,6 +144,7 @@ class Tags(unittest.TestCase):
         self.bad(f"lm-chat+ctx{self.KN}{self.TL}+acg+colloq:{R.COLLOQ8}+rc+rd", "chat-std", True)        # the CLI's own colloquial term must be off
         self.bad(f"lm-chat+ctx{self.KN}{self.TL}+acg+rd+x", "chat-std", True)                            # +rd is the last tag
         self.bad(f"lm-formal+ctx{self.TL}+acg+rd", "formal-std", True)
+        self.bad(f"lm-chat+ctx{self.TL}+acg+rd", "chat-std", True)                                       # no +kn:
         self.bad(f"lm-chat+ctx{self.KN}{self.TL}+rl:aggressive+acg+rd", "chat-std", True)                # the level of another run
 
 
@@ -134,6 +158,7 @@ class Choose(unittest.TestCase):
 
     def test_select_writes_the_chosen_mu(self):
         d = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, d, True)
         cells = {"setting": "chat-off", "name": "chatclause", "n": R.ROW_COUNTS["chatclause"], "anchor2": "ok",
                  "cells": {D.mu_label(m): {"u2": u} for m, u in zip(D.MUS, (1, 4, 4, 2))}}
         p = os.path.join(d, "c.json")
@@ -149,11 +174,14 @@ class Choose(unittest.TestCase):
             D.main(["select", p, "--out", os.path.join(d, "sel2.json")])
 
 
+SEL = "sel.json"
+
+
 def synth(setting, name, mu, verdict=True, base="1", cell="1", n=None):
     n = n or R.ROW_COUNTS[name]
     role = D.ROLES[setting][name]
     base = "0" if role == "3" else base          # clause 3 needs a net gain: every row a fix
-    d = {"setting": setting, "name": name, "role": role, "n": n, "anchor1": "ok", "anchor2": "ok", "scores_sha256": f"{setting}{name}",
+    d = {"setting": setting, "name": name, "role": role, "n": n, "anchor1": "ok", "anchor2": "ok", "scores_sha256": f"{D.RUN_OF.get(setting, setting)}{name}", "selection": SEL if mu else None,
          "mu": mu, "base_ok": base * n, "cell_ok": cell * n}
     for k in ("fixes", "breaks", "net", "error_ratio", "b_first_fixes", "b_first_breaks", "top8_changed_rows", "top8_needs_beyond_8_rows",
               "rows_without_ll", "rows_top8_candidate_without_ll", "top1_before", "top1_after", "gold_in_64"):
@@ -166,6 +194,8 @@ def synth(setting, name, mu, verdict=True, base="1", cell="1", n=None):
 class Final(unittest.TestCase):
     def setUp(self):
         self.d = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.d, True)
+        self.sel = self.write(SEL, {"chosen": "0.5", "cells": {"0": 1, "0.25": 2, "0.5": 3, "1": 0}})
 
     def write(self, name, obj):
         p = os.path.join(self.d, name)
@@ -194,7 +224,7 @@ class Final(unittest.TestCase):
     def test_all_pass_and_report(self):
         runs, a3 = self.inputs()
         out = os.path.join(self.d, "final.json")
-        self.assertEqual(D.main(["final", "0.5", "--anchor3", *a3, *runs, "--out", out]), 0)
+        self.assertEqual(D.main(["final", self.sel, "--anchor3", *a3, *runs, "--out", out]), 0)
         with open(out) as f:
             res = json.load(f)
         self.assertTrue(res["all_pass"])
@@ -212,7 +242,7 @@ class Final(unittest.TestCase):
                 d["base_ok"], d["cell_ok"] = d["base_ok"] * d["n"], d["cell_ok"] * d["n"]
         runs, a3 = self.inputs(mutate=mutate)
         out = os.path.join(self.d, "final.json")
-        self.assertEqual(D.main(["final", "0.5", "--anchor3", *a3, *runs, "--out", out]), 0)
+        self.assertEqual(D.main(["final", self.sel, "--anchor3", *a3, *runs, "--out", out]), 0)
         with open(out) as f:
             res = json.load(f)
         self.assertEqual(res["clauses"]["3"], {"user-reported chat-std + formal-std": False, "user-reported chat-off + formal-off": False})
@@ -222,21 +252,67 @@ class Final(unittest.TestCase):
     def test_final_stops_on_a_wrong_mu_missing_run_or_anchor(self):
         runs, a3 = self.inputs()
         with self.assertRaises(SystemExit):
-            D.main(["final", "0.25", "--anchor3", *a3, *runs])                  # runs were made at mu 0.5
+            D.main(["final", self.write("sel25.json", {"chosen": "0.25", "cells": {}}), "--anchor3", *a3, *runs])      # runs were made at mu 0.5
         with self.assertRaises(SystemExit):
-            D.main(["final", "0.5", "--anchor3", *a3, *runs[1:]])                # a judged run missing
+            D.main(["final", self.sel, "--anchor3", *a3, *runs[1:]])                # a judged run missing
         with self.assertRaises(SystemExit):
-            D.main(["final", "0.3", "--anchor3", *a3, *runs])                    # off-grid mu
+            D.main(["final", self.write("sel3.json", {"chosen": "0.3", "cells": {}}), "--anchor3", *a3, *runs])      # off-grid mu
         bad_a3 = self.write("bad.json", {"setting": "chat-std", "name": "cvtune-clean", "pass": True, "n64_sha256": "other"})
         with self.assertRaises(SystemExit):
-            D.main(["final", "0.5", "--anchor3", bad_a3, a3[1], *runs])
+            D.main(["final", self.sel, "--anchor3", bad_a3, a3[1], *runs])
         runs2, a32 = self.inputs(mutate=lambda d: d.update(anchor1="n/a"))
         with self.assertRaises(SystemExit):
-            D.main(["final", "0.5", "--anchor3", *a32, *runs2])
+            D.main(["final", self.sel, "--anchor3", *a32, *runs2])
+
+    def stops(self, *args):
+        with self.assertRaises(SystemExit) as cm:
+            D.main(["final", *args])
+        self.assertEqual(cm.exception.code, 1)
+
+    def test_final_takes_only_the_selection_json_and_runs_made_from_it(self):
+        runs, a3 = self.inputs()
+        self.stops("0.5", "--anchor3", *a3, *runs)                                       # a bare MU is refused
+        self.stops(self.write("nochosen.json", {"cells": {}}), "--anchor3", *a3, *runs)  # not select's output
+        self.stops(self.write("nocells.json", {"chosen": "0.5"}), "--anchor3", *a3, *runs)
+        other = self.write("other.json", {"chosen": "0.5", "cells": {}})                 # chat runs say selection sel.json, not other.json
+        self.stops(other, "--anchor3", *a3, *runs)
+        runs2, a32 = self.inputs(mutate=lambda d: d.update(selection="fixed") if d["mu"] else None)    # --mu 0.5 by hand
+        self.stops(self.sel, "--anchor3", *a32, *runs2)
+
+    def test_an_off_run_must_share_the_scores_file_of_its_std_run(self):
+        runs, a3 = self.inputs(mutate=lambda d: d.update(scores_sha256="other") if d["setting"] == "formal-off" and d["name"] == "dev302" else None)
+        self.stops(self.sel, "--anchor3", *a3, *runs)
+
+    def test_report_keeps_b_first_for_off_settings_only(self):
+        runs, a3 = self.inputs()
+        out = os.path.join(self.d, "final.json")
+        D.main(["final", self.sel, "--anchor3", *a3, *runs, "--out", out])
+        with open(out) as f:
+            rep = json.load(f)["report_only"]
+        self.assertIn("b_first_fixes", rep["chat-off/discordtune"])
+        self.assertNotIn("b_first_fixes", rep["chat-std/discordtune"])
+
+    def test_level_order_covers_the_formal_main_set(self):
+        runs, a3 = self.inputs()
+        extra = self.write("fstd.json", synth("formal-std", "wikitune-clean", None))   # report-only select-role run
+        out = os.path.join(self.d, "final.json")
+        D.main(["final", self.sel, "--anchor3", *a3, *runs, extra, "--out", out])
+        with open(out) as f:
+            self.assertIn("formal/wikitune-clean", json.load(f)["level_order"])
+
+
+def cli_has_reading_decode():
+    """An older binary stops on `--reading-decode` itself ("unknown argument"); a current one gets as far as the missing --profile."""
+    try:
+        r = subprocess.run([CLI, "--lm", "/nonexistent", "--reading-decode"], capture_output=True, text=True, cwd=R.ROOT)
+    except OSError:
+        return False
+    return "unknown argument" not in r.stderr
 
 
 @unittest.skipUnless(os.path.exists(CLI) and os.path.exists(SJTL) and os.path.exists(os.path.join(R.ROOT, "data", "lm", "colloquial.sjlm")),
                      "target/release/shanjie-eval and data/lm (build the CLI first)")
+@unittest.skipUnless(cli_has_reading_decode(), "target/release/shanjie-eval is older than --reading-decode (rebuild it)")
 class EndToEndOnTyping76(unittest.TestCase):
     """The CLI's real rd run and shipping baseline on typing76 (public): the anchors hold for the six rerank-on settings' std runs and the -off
     settings read the same files; mu 0 and a formal run reproduce the CLI's own pick."""
@@ -244,6 +320,7 @@ class EndToEndOnTyping76(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.d = tempfile.mkdtemp()
+        cls.addClassCleanup(shutil.rmtree, cls.d, True)
         cls.rows = os.path.join(R.ROOT, "eval", "bench", "suite-v1", "typing76.txt")
 
     def cli(self, prof, tag, extra):

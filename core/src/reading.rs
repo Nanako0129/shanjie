@@ -116,9 +116,12 @@ impl ReadingDecode {
         Some(t)
     }
 
-    /// The term one single-character word adds to a path: `LAMBDA * max(logp, -CAP)`; 0 for a pair the lexicon lacks. A word of more than one
-    /// character never reaches this (the decoder asks for spans of one syllable only).
+    /// The term one single-character word adds to a path: `LAMBDA * max(logp, -CAP)`; 0 for a pair the lexicon lacks and for any word of
+    /// more than one character (a one-syllable multi-character entry is not a reading of a character).
     pub fn term(&self, lex: &Lexicon, syl: &str, word: &str) -> f64 {
+        if word.chars().count() != 1 {
+            return 0.0;
+        }
         self.logp(lex, syl, word).map_or(0.0, |t| LAMBDA * t.max(-CAP))
     }
 }
@@ -154,6 +157,18 @@ mod tests {
         close(rd.term(&lex, "b", "甲"), LAMBDA * -2.0);
         close(rd.term(&lex, "z", "甲"), 0.0);
         close(rd.term(&lex, "a", "甲"), 0.0);
+    }
+
+    /// A one-syllable entry whose word has two characters is not a character's reading: the term is 0 whatever the lexicon scores it.
+    #[test]
+    fn a_multi_character_word_gets_no_term() {
+        // the base file drops such a row; an overlay row (pack, learned word) can carry one
+        let base = "a 甲 -1.0\nb 甲 -3.0\n";
+        let lex = Lexicon::parse_with(base, Some("b\t甲乙\t-9.0\tx\n")).unwrap();
+        let rd = ReadingDecode::new(&lex, base);
+        close(rd.term(&lex, "b", "甲"), LAMBDA * -2.0);
+        assert!(rd.logp(&lex, "b", "甲乙").is_some());
+        close(rd.term(&lex, "b", "甲乙"), 0.0);
     }
 
     /// The term is clipped at -CAP before it is weighted (-8 becomes -4, so -8.0 with LAMBDA 2).

@@ -227,8 +227,9 @@ struct RowOut {
 /// `--reading-decode` (evaluation only; experiments/r1-reading-decode, section R1d; not in the engine or the C ABI): the n-gram decoder adds
 /// `core::reading`'s term (lambda 2.0, c 4, the sandhi readings of 一 and 不 free, the lexicon's floor-score readings estimated from the
 /// multi-character words: arm B-f) to the path score of every single-character word, in every setting, so the beam, the n-best, the dump,
-/// `--tinylm-scores` `ng` and the pick all see it. The summary tag gains `+rd` at its very end. Without it every output is byte for byte that of
-/// a build without the option (cli/tests/reading_decode.rs).
+/// `--tinylm-scores` `ng` and the pick all see it. The summary tag gains `+rd` at its very end. Without it the path is the one it was: cli/tests/reading_decode.rs checks the summary line of eight settings
+/// (chat and formal, with and without `--tinylm`, dev302 and typing76) and, on macOS, the sha256 of the `--dump` file of the four n-gram-only ones
+/// against the binary before the option; other outputs (rowstats, `--tinylm-scores`, `--dump-words`) are not compared.
 fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     let (mut lm_path, mut profile, mut name, mut dev, mut rows_file) = (None, None, None, None, None);
     let (mut limit, mut set, mut dump, mut ctx_mode, mut demote) = (None::<usize>, None, None, false, true);

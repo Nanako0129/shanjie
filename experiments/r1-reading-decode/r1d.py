@@ -9,7 +9,7 @@ stdout and in the JSON: never a sentence, context, word or character of a row (r
                 (--mu-cells | --mu-from SEL.json | --mu M)  --out OUT.json                          (mu is chat only)
   r1d.py select CHATCLAUSE_CHAT_OFF_CELLS.json --out SEL.json
   r1d.py anchor3 --setting S --n64 SCORES_N64 --n8 SCORES_N8 --out A3.json                           (chat-std and formal-std cvtune-clean)
-  r1d.py final  SEL.json|MU --anchor3 CHAT_STD.json FORMAL_STD.json JUDGED.json ...                  (the four clauses of the 8 settings)
+  r1d.py final  SEL.json --anchor3 CHAT_STD.json FORMAL_STD.json JUDGED.json ...                  (the four clauses of the 8 settings)
 
 S is one of chat-std chat-cons chat-aggr formal-std formal-cons formal-aggr chat-off formal-off. The rd run (`--rows` ... `--summary`) is
 ONE CLI run with `--reading-decode --context --packs acg --tinylm ... --rerank-level L --tinylm-scores-topk 64 --dump --dump-words --rowstats
@@ -75,6 +75,8 @@ def check_tag(tag, setting, sjtl_sha8, rd):
     elif "+tl:" in tag or "+rl:" in tag:
         bad.append("+tl: / +rl: in a rerank-off run")
     if profile == "chat":
+        if "+kn:" not in tag:
+            bad.append("+kn:")
         ship_colloq = rerank and not rd
         if ship_colloq != (f"+colloq:{R.COLLOQ8}" in tag) or ship_colloq != tag.endswith("+rc") or (not ship_colloq and "+colloq" in tag):
             bad.append("+colloq / +rc")
@@ -175,16 +177,19 @@ def stats_of(base_ok, rows, picks):
 
 def run_mu(params, rerank, rows, base_ok, mu):
     picks, firsts, moved, beyond, kinds = [], [], 0, 0, {"off": 0, "ok": 0, "none": 0, "nollcand": 0}
+    top8 = list(range(TOP_K))
     for r in rows:
         j, order, how = r1d_pick(params, rerank, r, mu)
         picks.append(j)
         firsts.append(order[0])
         kinds[how] += 1
-        moved += order[:TOP_K] != list(range(min(len(order), TOP_K)))
-        beyond += how == "ok" and any(x >= TOP_K for x in order[:TOP_K])
+        moved += set(order[:TOP_K]) != set(top8[:len(order)])
+        beyond += how != "none" and any(x >= TOP_K for x in order[:TOP_K])
     s = stats_of(base_ok, rows, picks)
-    bf = p4c.stats(base_ok, [r["ok64"][j] for r, j in zip(rows, firsts)])     # the base layer alone (b-first), against the baseline
-    s.update({"b_first_fixes": bf["fixes"], "b_first_breaks": bf["breaks"], "top8_changed_rows": moved, "top8_needs_beyond_8_rows": beyond,
+    if not rerank:      # the pick IS the first of b, so b-first against the n-gram shipping baseline is the setting's own fixes / breaks
+        bf = p4c.stats(base_ok, [r["ok64"][j] for r, j in zip(rows, firsts)])
+        s.update({"b_first_fixes": bf["fixes"], "b_first_breaks": bf["breaks"]})
+    s.update({"top8_changed_rows": moved, "top8_needs_beyond_8_rows": beyond,
               "rows_without_ll": kinds["none"], "rows_top8_candidate_without_ll": kinds["nollcand"], "top1_before": sum(base_ok),
               "top1_after": sum(r["ok64"][j] for r, j in zip(rows, picks))})
     return s, picks
@@ -307,14 +312,14 @@ def cmd_select(a):
 
 
 def cmd_final(a):
-    if a.sel.endswith(".json"):
+    try:
         with open(a.sel, encoding="utf-8") as f:
-            chosen = json.load(f).get("chosen")
-        if chosen is None:
-            stop("the selection chose no mu")
-    else:
-        chosen = a.sel
-    chosen = mu_label(parse_mu(chosen))
+            sel = json.load(f)
+    except (OSError, ValueError):
+        stop(f"{a.sel} is not the JSON written by `select` (a bare MU is refused)")
+    if not isinstance(sel, dict) or "cells" not in sel or sel.get("chosen") is None:
+        stop(f"{a.sel} is not the JSON written by `select` (cells and chosen)")
+    chosen = mu_label(parse_mu(sel["chosen"]))
     runs = {}
     for p in a.judged:
         with open(p, encoding="utf-8") as f:
@@ -324,8 +329,8 @@ def cmd_final(a):
             stop(f"{p}: not a run of a (setting, set) of the table")
         if k in runs:
             stop(f"{p}: duplicate run of {k}")
-        if SETTINGS[k[0]][0] == "chat" and d.get("mu") != chosen:
-            stop(f"{p}: not a run at the chosen mu {chosen}")
+        if SETTINGS[k[0]][0] == "chat" and (d.get("mu") != chosen or d.get("selection") != os.path.basename(a.sel)):
+            stop(f"{p}: not a run at the chosen mu {chosen} made with --mu-from {os.path.basename(a.sel)}")
         if d.get("anchor1") != "ok":
             stop(f"{p}: anchor 1 was not checked")
         if "verdict" not in d and d["role"] in ("1", "2a", "2b"):
@@ -342,12 +347,13 @@ def cmd_final(a):
     if seen3 != {"chat-std", "formal-std"}:
         stop("anchor 3 is required for chat-std and formal-std")
     miss = [k for k in JUDGED if k not in runs]
-    extra = [k for k in runs if k not in JUDGED and ROLES[k[0]][k[1]] != "select"]
-    if miss or extra:
-        stop(f"judged runs missing {miss} or unexpected {extra}")
+    if miss:
+        stop(f"judged runs missing {miss}")
     for k, d in runs.items():
         if d["n"] != ROW_COUNTS[k[1]]:
             stop(f"{k}: {d['n']} rows")
+        if k[0] in RUN_OF and (RUN_OF[k[0]], k[1]) in runs and runs[RUN_OF[k[0]], k[1]]["scores_sha256"] != d["scores_sha256"]:
+            stop(f"{k}: not the rd scores file of {(RUN_OF[k[0]], k[1])} (the -off setting reads the -std run's files)")
     res = {"mu": chosen, "clauses": {}}
     for role in ("1", "2a", "2b"):
         res["clauses"][role] = {f"{s}/{n}": runs[s, n]["verdict"] for s, n in JUDGED if ROLES[s][n] == role}
@@ -365,12 +371,13 @@ def cmd_final(a):
         for k, v in c.items():
             print(f"clause {role} {k} {'PASS' if v else 'FAIL'}")
     print("ALL FOUR CLAUSES PASS" if res["all_pass"] else "NOT ALL CLAUSES PASS: 照登記不過")
-    keys = ("fixes", "breaks", "net", "error_ratio", "b_first_fixes", "b_first_breaks", "top8_changed_rows", "top8_needs_beyond_8_rows",
+    keys = ("fixes", "breaks", "net", "error_ratio", "top8_changed_rows", "top8_needs_beyond_8_rows",
             "rows_without_ll", "rows_top8_candidate_without_ll", "top1_before", "top1_after", "gold_in_64")
-    res["report_only"] = {f"{s}/{n}": {k: d[k] for k in keys} for (s, n), d in sorted(runs.items())}
+    res["report_only"] = {f"{s}/{n}": {k: d[k] for k in keys + (("b_first_fixes", "b_first_breaks") if s.endswith("-off") else ())}
+                          for (s, n), d in sorted(runs.items())}
     # the three levels' order after R1d, per set they share (README: the order of the levels must still hold)
     res["level_order"] = {}
-    for n in sorted({n for (s, n) in runs if s in ("chat-cons", "chat-std", "chat-aggr")}):
+    for n in sorted({n for (s, n) in runs}):
         for prof in ("chat", "formal"):
             lv = [(s, runs[s, n]) for s in (f"{prof}-cons", f"{prof}-std", f"{prof}-aggr") if (s, n) in runs]
             if len(lv) == 3:
