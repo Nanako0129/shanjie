@@ -105,12 +105,12 @@ fn other_sjtl(name: &str) -> Scratch {
     p
 }
 
-/// The four conditions (docs/contracts/colloquial-term.md section 2.2, any strength since colloquial-levels): all hold -> the term picks `螺絲鬆`
+/// The conditions (docs/contracts/colloquial-term.md section 2.2; the strength is no longer one, colloquial-levels): chat, the paired model, a table: all hold -> the term picks `螺絲鬆`
 /// (standard, and aggressive with its own cell); the table missing, the formal profile and another small model each leave the jobs those of an
 /// engine without a table (the plain `rerank`). At the conservative strength this row is kept by both (its own cell is tested by
 /// `each_level_uses_its_own_cell`).
 #[test]
-fn the_term_applies_only_under_its_four_conditions() {
+fn the_term_applies_only_under_its_conditions() {
     let (tl, table) = (data("tinylm.sjtl"), data("colloquial.sjlm"));
     assert_eq!(engine_picks(None, &tl), vec![SHIPPING], "premise: shipping keeps the n-gram first");
     let mut with = engine(0, &tl, Some((&table, false)));
@@ -193,7 +193,7 @@ const CHANNEL_ROWS: [(&str, &str, usize, usize); 3] = [
     ("幹opencc", "ㄕˋ ㄅㄨˋ ㄕˋ ㄏㄣˇ ㄌㄟˊ ㄚ˙", 1, 0),
 ];
 
-/// The term rides on the colloquial term: with the table loaded and the four conditions holding the channel decides (and `set_reading_channel(false)`
+/// The term rides on the colloquial term: with the table loaded and the conditions holding the channel decides (and `set_reading_channel(false)`
 /// leaves the colloquial term alone); wherever the colloquial term does not apply (no table, formal, another small model) the jobs are those of an
 /// engine without the table, the channel included. At the aggressive strength the channel decides as at the standard one (the same alpha).
 #[test]

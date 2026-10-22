@@ -2538,7 +2538,7 @@ impl Engine {
         self.path = path;
         if let (false, Some(model)) = (stretches.is_empty(), &self.tinylm) {
             let (params, left) = (model.params(self.profile, self.rerank_level), self.left.clone());
-            // The four conditions of docs/contracts/colloquial-term.md section 2.2: a table is loaded, and `colloquial::applies` (chat, the
+            // The conditions of docs/contracts/colloquial-term.md section 2.2: a table is loaded, and `colloquial::applies` (chat, the
             // measured small model; any strength, docs/contracts/colloquial-levels.md).
             let colloquial = self.colloquial.clone().filter(|_| colloquial::applies(self.profile, self.rerank_level, model));
             let channel_lex = colloquial.as_ref().filter(|_| self.reading_channel).map(|_| self.lex.clone());

@@ -1,4 +1,4 @@
-善解的常談模型 **SJ-CL-1-68K**（口語詞頻表，檔案 `colloquial.sjlm`，SJLM0001 格式；模型命名見 `docs/releases/README.md`）：聊天設定的語意校正多參考一項「這個說法在口語裡常不常見」。只有聊天設定、標準強度、搭配語意校正模型 [`sj-sr-6-14m`](https://github.com/Nanako0129/shanjie/releases/tag/sj-sr-6-14m)（`tinylm.sjtl`）時核心才會用它（`docs/contracts/colloquial-term.md`）；其他設定不載入也沒差，核心自己判斷。CI 與發布版從這裡下載。**這不是輸入法的發行版。**
+善解的常談模型 **SJ-CL-1-68K**（口語詞頻表，檔案 `colloquial.sjlm`，SJLM0001 格式；模型命名見 `docs/releases/README.md`）：聊天設定的語意校正多參考一項「這個說法在口語裡常不常見」。只有聊天設定（保守、標準、積極三種強度都用，各用自己的值）、搭配語意校正模型 [`sj-sr-6-14m`](https://github.com/Nanako0129/shanjie/releases/tag/sj-sr-6-14m)（`tinylm.sjtl`）時核心才會用它（`docs/contracts/colloquial-term.md`）；其他設定不載入也沒差，核心自己判斷。CI 與發布版從這裡下載。**這不是輸入法的發行版。**
 
 - 檔案：`colloquial.sjlm`，4,680,680 bytes
 - SHA-256：`2984eeb525a06b12c244b3c04b84641c9a67492486132ebf404198372b684c33`
