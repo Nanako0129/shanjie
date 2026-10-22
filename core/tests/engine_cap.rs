@@ -94,11 +94,14 @@ fn material(first: usize, n: usize, fill: usize) -> Vec<String> {
     out
 }
 
-/// The 70 syllables most tests type: dev302 row 25 (the n-gram has 程式 there, and with these rows after it the small model picks 城市),
-/// then rows 41 on that fit. No punctuation; one character per syllable.
+/// The 70 syllables most tests type: dev302 row 25 (the n-gram has 城市 there, and with these rows after it the small model picks 程式),
+/// then rows 47 on that fit. No punctuation; one character per syllable.
 fn long_material() -> Vec<String> {
-    material(25, 70, 41)
+    material(25, 70, 47)
 }
+
+/// The composition-cap buffer H (`CAP_BUFFER`): a stretch past W is frozen down to W - H characters.
+const H: usize = 16;
 
 /// The small model's window minus 3 characters (docs/contracts/composition-cap.md section 1.2); the model of data/lm has ctx 64.
 const W: usize = 61;
@@ -150,19 +153,18 @@ fn the_model_window_is_64() {
 }
 
 /// Contract 2, test 1. 70 syllables, no punctuation, typed with `--rerank each` timing (each job runs and applies before the next
-/// key). Row 25 is first: the small model shows 城市 where the n-gram has 程式. From the 62nd key on, the head is frozen word by word:
-/// no candidate of any job is longer than W, the frozen words are what the previous key showed (the n-gram decode of the key itself
-/// would show 程式 again, so this is the snapshot of the path at work), the output of the key is what Enter sends, and the model's
-/// 城市 is still there after it left the window. `b` is the control: the same keys with rerank off, which decodes the head again at
-/// every key.
+/// key). Row 25 is first: the n-gram has 城市 there and the small model shows 程式. From the 62nd key on, the head is frozen word by
+/// word down to W - H characters: no candidate of any job is longer than W, the frozen words are what the previous key showed (the
+/// n-gram decode of the key itself would show 城市 again, so this is the snapshot of the path at work), the output of the key is what
+/// Enter sends, and the model's 程式 is still there after it left the window. `b` is the control: the same keys with rerank off, which
+/// freezes the n-gram path (it shows 城市 in the head).
 #[test]
 fn the_head_of_a_long_composition_is_frozen_word_by_word() {
     let syls = long_material();
     assert_eq!(syls.len(), 70);
     let (mut a, mut b) = (engine(true), engine(false));
     let mut shown = String::new();
-    let (mut jobs, mut rewritten) = (0, 0);
-    let mut b_prev = String::new();
+    let mut jobs = 0;
     for (i, s) in syls.iter().enumerate() {
         let n = i + 1;
         let raw = syllable(&mut a, s);
@@ -170,28 +172,24 @@ fn the_head_of_a_long_composition_is_frozen_word_by_word() {
         assert_eq!(a.key(k(KeyKind::Right)).unwrap().preedit, raw.preedit, "key {n}: the output is the state");
         let (job_max, applied) = settle(&mut a);
         let now = applied.map_or(raw.preedit, |o| o.preedit);
-        let b_now = syllable(&mut b, s).preedit;
+        syllable(&mut b, s);
         if n >= 62 {
             assert!(job_max <= W, "key {n}: a candidate of {job_max} characters is longer than the window allows");
             jobs += (job_max > 0) as usize;
             let head = head_text(&a);
-            assert!(!head.is_empty(), "key {n}: the head is frozen");
             let len = head.chars().count();
+            assert!(len >= n - W, "key {n}: the head holds {len} characters");
             assert_eq!(now.chars().take(len).collect::<String>(), head, "key {n}: the frozen words are the display");
             assert_eq!(shown.chars().take(len).collect::<String>(), head, "key {n}: the frozen words are what the key before showed");
-            // The control: the n-gram decode of this key shows another head than the one the key before showed.
-            rewritten += (b_now.chars().take(len).collect::<String>() != shown.chars().take(len).collect::<String>()) as usize;
         } else {
             assert!(frozen(&a).is_empty(), "key {n}: nothing is frozen while the stretch fits");
         }
         shown = now;
-        b_prev = b_now;
     }
     assert!(jobs > 0, "the jobs were made");
-    let head = head_text(&a);
-    assert!(head.contains("城市"), "the frozen head holds the model's word: {head}");
-    assert!(!b_prev.starts_with(&head), "premise: the n-gram shows {b_prev} where the model showed {head}");
-    assert!(rewritten >= 1, "premise: the decode of a key alone shows another head than the one before it ({rewritten} keys)");
+    let (head, b_head) = (head_text(&a), head_text(&b));
+    assert!(head.chars().count() >= 62 - (W - H), "the head after the freeze at key 62 holds the {} characters over W - H: {head}", 62 - (W - H));
+    assert!(head.contains("程式") && b_head.contains("城市"), "premise: the model's word {head} against the n-gram's {b_head}");
     assert_frozen(&a, &EXPECT_TEST1, "the frozen words after key 70");
     assert_eq!(a.key(k(KeyKind::Enter)).unwrap().commit, shown, "Enter sends the display");
 }
@@ -221,38 +219,47 @@ fn a_syllable_typed_in_front_of_the_stretch_freezes_nothing_after_it() {
     assert_eq!(e.key(k(KeyKind::Enter)).unwrap().commit, o.preedit);
 }
 
-/// The frozen head of the 70 syllables of `material(25, 70, 42)` typed with rerank each: 執行 這個 城市 我們 公司 (10 characters), so the
-/// free tail has R = 60 characters. The cursor is moved to the boundary, in front of the tail.
+/// 78 syllables (`material(25, 78, 45)`) typed with rerank each: the freeze at key 62 left a head of 18 characters (…會議 已經, the last
+/// word 已經 at 16-18), the free tail has R = 60 characters (the next freeze would come at key 78 + 1 = the tail past W = 61). The cursor is
+/// moved to the boundary, in front of the tail.
 fn long_composition_at_the_boundary() -> (Engine, Vec<String>, usize) {
-    let syls = material(25, 70, 42);
+    let syls = material(25, 78, 45);
     let mut e = engine(true);
     for s in &syls {
         syllable(&mut e, s);
         settle(&mut e);
     }
     let end = frozen(&e).last().expect("a frozen head").1;
-    for _ in end..70 {
+    for _ in end..78 {
         e.key(k(KeyKind::Left)).unwrap();
     }
     (e, syls, end)
 }
 
-/// Contract 2, test 5. Rerank off: no job is made, so nothing is frozen; the display of 70 syllables is the decoder's first path, the
-/// same as an engine without the small model shows.
+/// Contract 2, test 5 (revision 1). Rerank off, the small model loaded: no job is made, and the head is frozen all the same. 70
+/// syllables: from key 62 on the frozen words lead the display and the free tail is at most W characters; up to key 61, where nothing
+/// is frozen, the display is what an engine without the small model shows (the freeze needs no model: both agree on every key).
 #[test]
-fn rerank_off_freezes_nothing_and_shows_the_ngram_first() {
+fn rerank_off_freezes_the_head_and_shows_the_ngram_first() {
     let syls = long_material();
     let mut off = engine(false);
     let mut plain = Engine::new(&root().join("data/lexicon"), Layout::Standard).unwrap();
     plain.load_lm(&data("bigram.sjlm")).unwrap();
-    let (d_off, d_plain) = (off.decodes(), plain.decodes());
-    for s in &syls {
+    for (i, s) in syls.iter().enumerate() {
         let (x, y) = (syllable(&mut off, s), syllable(&mut plain, s));
+        let n = i + 1;
         assert!(off.take_rerank_job().is_none(), "no job with rerank off");
-        assert!(frozen(&off).is_empty());
-        assert_eq!(x.preedit, y.preedit);
+        assert_eq!(x.preedit, y.preedit, "key {n}: the model or its switch changes nothing for the n-gram first");
+        assert_eq!(frozen(&off), frozen(&plain), "key {n}: the same frozen words");
+        let head = head_text(&off);
+        let len = head.chars().count();
+        if n <= W {
+            assert!(head.is_empty(), "key {n}: nothing frozen while the stretch fits");
+        } else {
+            assert!(len >= n - W && x.preedit.starts_with(&head), "key {n}: a frozen head of {len} leads the display");
+        }
+        assert!(n - len <= W, "key {n}: the free tail is {} characters", n - len);
     }
-    assert_eq!(off.decodes() - d_off, plain.decodes() - d_plain, "the same number of decodes: the freeze did not run");
 }
 
 /// Contract 2, test 6. Two sentences of 40 characters with a punctuation mark between: deleting the mark joins them into a stretch of
@@ -281,7 +288,7 @@ fn deleting_a_mark_between_two_long_sentences_freezes_the_front_one() {
     assert_eq!(raw.preedit.chars().count(), 80);
     let head = head_text(&e);
     let len = head.chars().count();
-    assert!(len >= 80 - W, "the head holds {len} characters: the stretch of 80 is cut to {}", 80 - len);
+    assert!(len >= 80 - (W - H), "the head holds {len} characters: the stretch of 80 is cut to {}, not more than W - H = {}", 80 - len, W - H);
     assert_eq!(before.chars().take(len).collect::<String>(), head, "the frozen words are what was shown");
     assert_eq!(raw.preedit.chars().take(len).collect::<String>(), head);
     let (job_max, _) = settle(&mut e);
@@ -303,31 +310,28 @@ fn the_128th_unit_sends_and_the_127th_does_not() {
 }
 
 /// Contract 2, test 8. After a job changed the display, ← and ↓ leave the display, the job and the decode count alone; and a key whose
-/// stretch fits decodes once, as with rerank off (the freeze, when it applies, adds one decode).
+/// stretch fits decodes once, with rerank on and off alike (the freeze does not depend on the switch since revision 1).
 #[test]
 fn keys_that_decode_nothing_leave_the_state_alone_and_a_fitting_key_decodes_once() {
     let syls = long_material();
     let (mut a, mut b) = (engine(true), engine(false));
-    let mut freezing_keys = 0;
     for (i, s) in syls.iter().enumerate() {
         let (da, db) = (a.decodes(), b.decodes());
         syllable(&mut a, s);
         syllable(&mut b, s);
-        // The freeze, when a key has one, is the only decode rerank on adds to what rerank off does for the same key.
-        let extra = (a.decodes() - da) - (b.decodes() - db);
+        let (xa, xb) = (a.decodes() - da, b.decodes() - db);
+        assert_eq!(xa, xb, "key {}: the same decodes with rerank on and off", i + 1);
         if i < W {
-            assert_eq!(extra, 0, "key {}: the stretch fits, one decode as without the model", i + 1);
+            assert_eq!(xa, 1, "key {}: the stretch fits, one decode", i + 1);
         } else {
-            assert!(extra <= 1, "key {}: {extra} extra decodes", i + 1);
-            freezing_keys += extra;
+            assert!(xa <= 2, "key {}: {xa} decodes", i + 1);
         }
         settle(&mut a);
     }
-    assert!(freezing_keys > 0, "some key froze");
     assert!(!frozen(&a).is_empty());
-    // A changed display to hold on to: the model shows 城市 where the n-gram shows 程式.
+    // A changed display to hold on to: the model shows 程式 where the n-gram shows 城市 (the frozen head keeps it).
     let shown = a.key(k(KeyKind::End)).unwrap().preedit;
-    assert!(shown.contains("城市"));
+    assert!(shown.contains("程式"));
     let decodes = a.decodes();
     let job = a.take_rerank_job();
     assert!(job.is_none(), "the job was taken and applied");
@@ -336,6 +340,50 @@ fn keys_that_decode_nothing_leave_the_state_alone_and_a_fitting_key_decodes_once
         assert_eq!(o.preedit, shown, "the display after {:?}", key.kind as u32);
         assert!(a.take_rerank_job().is_none());
         assert_eq!(a.decodes(), decodes, "no decode");
+    }
+}
+
+/// Contract 2, test 9 (revision 1). Four arms type 127 syllables (no punctuation; the 128th would send them) and check, after every key,
+/// that no free stretch is longer than W, and, once after the 127th, that the keys that decoded twice (`Engine::decodes` up by 2) number
+/// at most ceil((127 - W) / H) + 1: the freeze runs down to W - H, so about one key in H freezes. The arms: (a) small model loaded, rerank
+/// on; (b) loaded, rerank off; (c) no small model (W is 61 then: the first freeze is at the 62nd key); (d) loaded, rerank on, demotion
+/// table off (no jobs). H = 0 makes the freeze come at every key past W (65 double decodes), and gating the freeze on `jobs_on()`, on the
+/// small model or on the demotion table leaves (b), (c) or (d) with free stretches up to 127.
+#[test]
+fn the_freeze_has_a_buffer_and_needs_neither_the_rerank_nor_the_model() {
+    let syls = material(25, MAX_SYLLABLES - 1, 47);
+    assert_eq!(syls.len(), MAX_SYLLABLES - 1);
+    let bound = (MAX_SYLLABLES - 1 - W).div_ceil(H) + 1;
+    for arm in ["a rerank on", "b rerank off", "c no small model", "d no demotion table"] {
+        let mut e = match arm.as_bytes()[0] {
+            b'a' => engine(true),
+            b'b' => engine(false),
+            b'c' => {
+                let mut e = Engine::new(&root().join("data/lexicon"), Layout::Standard).unwrap();
+                e.load_lm(&data("bigram.sjlm")).unwrap();
+                e
+            }
+            _ => {
+                let mut e = engine(true);
+                e.set_demote(false).unwrap();
+                e
+            }
+        };
+        let mut doubles = 0;
+        for (i, s) in syls.iter().enumerate() {
+            let n = i + 1;
+            let before = e.decodes();
+            let o = syllable(&mut e, s);
+            let per_key = e.decodes() - before;
+            doubles += (per_key >= 2) as usize;
+            settle(&mut e);
+            let (len, head) = (o.preedit.chars().count(), head_text(&e).chars().count());
+            assert_eq!(len, n, "{arm}, key {n}: one character a syllable");
+            assert!(len - head <= W, "{arm}, key {n}: a free stretch of {} characters", len - head);
+            assert_eq!(head > 0, n > W, "{arm}, key {n}: the first freeze comes at key {}", W + 1);
+        }
+        assert!(doubles <= bound, "{arm}: {doubles} keys decoded twice, the bound is {bound}");
+        assert!(doubles >= 1, "{arm}: the freeze ran");
     }
 }
 
@@ -361,50 +409,63 @@ fn a_word_the_user_picked_is_never_frozen_over() {
     assert!(e.key(k(KeyKind::End)).unwrap().preedit.starts_with(&want), "the picked word is where it was");
 }
 
-const EXPECT_TEST1: [(usize, usize, &str); 5] = [(0, 2, "執行"), (2, 4, "這個"), (4, 6, "城市"), (6, 8, "祝你"), (8, 12, "事事順心")];
+const EXPECT_TEST1: [(usize, usize, &str); 7] = [(0, 2, "執行"), (2, 4, "這個"), (4, 6, "程式"), (6, 8, "他是"), (8, 11, "我媽媽"), (11, 13, "這個"), (13, 17, "數學公式")];
 
 
-const HEAD10: [(usize, usize, &str); 5] = [(0, 2, "執行"), (2, 4, "這個"), (4, 6, "城市"), (6, 8, "我們"), (8, 10, "公司")];
+const HEAD18: [(usize, usize, &str); 9] = [
+    (0, 2, "執行"),
+    (2, 4, "這個"),
+    (4, 6, "城市"),
+    (6, 8, "結果"),
+    (8, 10, "不如"),
+    (10, 12, "預期"),
+    (12, 14, "你的"),
+    (14, 16, "帳單"),
+    (16, 18, "已經"),
+];
 const TAIL_R: usize = 60;
 
-/// Contract 2, test 3. At the boundary a syllable is typed that makes a word with the last frozen word (公司 + ㄌㄧˇ: 公司裡; with ㄈㄚˇ, 公司法, the decode keeps 公司 apart and nothing is released). The
-/// word is released as repick-freeze section 6.1 says, and released, the stretch (公司, the new syllable, R = 60 characters: 63) is
-/// longer than W, so the same key freezes 公司 again: the frozen words are those of before, and no candidate is longer than W.
-/// Without the second freeze the list lacks 公司 and the job holds 63 characters.
+/// Contract 2, test 3. At the boundary a syllable is typed that makes a word with the last frozen word (已經 + ㄧㄡˇ: 已經有). The word
+/// is released as repick-freeze section 6.1 says, and released, the stretch (已經, the new syllable, R = 60 characters: 63) is longer
+/// than W, so the same key freezes 已經 again: the frozen words are those of before, and no candidate is longer than W. Without the
+/// second freeze the list lacks 已經 and the job holds 63 characters. (At 78 syllables: the freeze of key 62 left the head of 18
+/// characters and the next freeze is not due before the tail is past W.)
 #[test]
 fn a_frozen_word_that_merges_with_the_new_syllable_is_frozen_again() {
     let (mut e, _, end) = long_composition_at_the_boundary();
-    assert_eq!(end, 10);
-    assert_frozen(&e, &HEAD10, "before");
-    let raw = syllable(&mut e, "ㄌㄧˇ");
-    assert_frozen(&e, &HEAD10, "after the key: the merge is cancelled, 公司 is frozen again");
+    assert_eq!(end, 18);
+    assert_frozen(&e, &HEAD18, "before");
+    let raw = syllable(&mut e, "ㄧㄡˇ");
+    assert_frozen(&e, &HEAD18, "after the key: the merge is cancelled, 已經 is frozen again");
     let (job_max, applied) = settle(&mut e);
     assert!(job_max <= W, "{job_max} characters in a candidate: the stretch fits");
     assert_eq!(2 + 1 + TAIL_R, 63, "R = {TAIL_R} makes the released stretch longer than W");
     let shown = applied.map_or(raw.preedit, |o| o.preedit);
-    assert!(shown.starts_with("執行這個城市我們公司"), "{shown}");
-    assert_eq!(shown.chars().count(), 71);
+    assert!(shown.starts_with("執行這個城市結果不如預期你的帳單已經"), "{shown}");
+    assert_eq!(shown.chars().count(), 79);
     e.key(k(KeyKind::End)).unwrap();
     assert_eq!(e.key(k(KeyKind::Enter)).unwrap().commit, shown);
 }
 
-/// Contract 2, test 4. At the boundary Backspace takes the 司 out of the frozen 公司 (repick-freeze section 15: the 公 stays as a
-/// frozen piece), and the next syllable typed frees the piece and, as the stretch (公, the new syllable, R = 60 characters: 62) is longer
-/// than W, freezes it again. Without the second freeze the list lacks 公 and the job holds 62 characters.
+/// Contract 2, test 4. At the boundary Backspace takes the 經 out of the frozen 已經 (repick-freeze section 15: the 已 stays as a
+/// frozen piece), and the next syllable typed frees the piece and, as the stretch (已, the new syllable, R = 60 characters: 62) is longer
+/// than W, freezes it again. Without the second freeze the list lacks 已 and the job holds 62 characters.
 #[test]
 fn a_piece_left_by_backspace_is_frozen_again_when_a_syllable_follows() {
     let (mut e, _, _) = long_composition_at_the_boundary();
+    let mut with_piece: Vec<_> = HEAD18[..8].to_vec();
+    with_piece.push((16, 17, "已"));
     e.key(k(KeyKind::Backspace)).unwrap();
-    assert_frozen(&e, &[HEAD10[0], HEAD10[1], HEAD10[2], HEAD10[3], (8, 9, "公")], "the piece 公 is left");
+    assert_frozen(&e, &with_piece, "the piece 已 is left");
     settle(&mut e);
     let raw = syllable(&mut e, "ㄏㄠˇ");
-    assert_frozen(&e, &[HEAD10[0], HEAD10[1], HEAD10[2], HEAD10[3], (8, 9, "公")], "after the key: 公 is frozen again");
+    assert_frozen(&e, &with_piece, "after the key: 已 is frozen again");
     let (job_max, applied) = settle(&mut e);
     assert!(job_max <= W, "{job_max} characters in a candidate: the stretch fits");
     assert_eq!(1 + 1 + TAIL_R, 62, "R = {TAIL_R} makes the released stretch longer than W");
     let shown = applied.map_or(raw.preedit, |o| o.preedit);
-    assert!(shown.starts_with("執行這個城市我們公"), "{shown}");
-    assert_eq!(shown.chars().count(), 70);
+    assert!(shown.starts_with("執行這個城市結果不如預期你的帳單已"), "{shown}");
+    assert_eq!(shown.chars().count(), 78);
     e.key(k(KeyKind::End)).unwrap();
     assert_eq!(e.key(k(KeyKind::Enter)).unwrap().commit, shown);
 }

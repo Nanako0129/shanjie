@@ -738,7 +738,8 @@ fn timing_typing76_keys() {
 /// cut to fit),
 /// typed key by key into the shipping engine (n-gram, small model, colloquial table, chat), the way `shanjie-replay --rerank each` does:
 /// the job of each syllable is run and applied before the next. Five rounds; per round the p95 of the key path with rerank on, the p95 of
-/// `RerankJob::run`, and the p95 of the key path with rerank off (every key decodes the whole composition, up to 127 syllables). Printed,
+/// `RerankJob::run`, and the p95 of the key path with rerank off (since revision 1 the head is frozen with rerank off too, so a key decodes
+/// at most a stretch of W characters), and the slowest single key of each setting. Printed,
 /// and asserted at the contract's limits (16 ms, 300 ms, 16 ms) on the median of the five rounds. Run it at low load:
 /// `cargo test --release -p core --test engine_predict timing_composition_cap -- --ignored --nocapture`.
 #[test]
@@ -771,15 +772,21 @@ fn timing_composition_cap_128_syllables() {
     };
     let ms = |d: Duration| d.as_secs_f64() * 1000.0;
     let (mut on_keys, mut on_jobs, mut off_keys) = (Vec::new(), Vec::new(), Vec::new());
+    // The slowest single key of every round: (milliseconds, the syllable it finished), rerank on and rerank off.
+    let (mut on_max, mut off_max) = (Vec::new(), Vec::new());
     for round in 0..5 {
         for rerank in [true, false] {
             let mut e = build(rerank);
-            let (mut keys, mut jobs) = (Vec::new(), Vec::new());
-            for s in &syls {
+            let (mut keys, mut jobs, mut max) = (Vec::new(), Vec::new(), (Duration::ZERO, 0));
+            for (n, s) in syls.iter().enumerate() {
                 for k in syl_keys(s) {
                     let t = Instant::now();
                     e.key(k).unwrap();
-                    keys.push(t.elapsed());
+                    let d = t.elapsed();
+                    keys.push(d);
+                    if d > max.0 {
+                        max = (d, n + 1);
+                    }
                 }
                 if let Some(job) = e.take_rerank_job() {
                     let t = Instant::now();
@@ -791,14 +798,23 @@ fn timing_composition_cap_128_syllables() {
             if rerank {
                 on_keys.push(p95(keys));
                 on_jobs.push(p95(jobs));
+                on_max.push(max);
             } else {
                 off_keys.push(p95(keys));
+                off_max.push(max);
             }
         }
-        println!("round {round}: rerank on key p95 {:.3} ms, RerankJob::run p95 {:.3} ms; rerank off key p95 {:.3} ms", ms(on_keys[round]), ms(on_jobs[round]), ms(off_keys[round]));
+        println!(
+            "round {round}: rerank on key p95 {:.3} ms (max {:.3} ms at syllable {}), RerankJob::run p95 {:.3} ms; rerank off key p95 {:.3} ms (max {:.3} ms at syllable {})",
+            ms(on_keys[round]), ms(on_max[round].0), on_max[round].1, ms(on_jobs[round]), ms(off_keys[round]), ms(off_max[round].0), off_max[round].1
+        );
     }
     let (k_on, j_on, k_off) = (median(on_keys), median(on_jobs), median(off_keys));
     println!("median of 5: rerank on key p95 {:.3} ms, RerankJob::run p95 {:.3} ms; rerank off key p95 {:.3} ms", ms(k_on), ms(j_on), ms(k_off));
+    // Contract section 2: the slowest single key per setting (a key over 50 ms has to be explained in the research log).
+    let worst = |v: &[(Duration, usize)]| *v.iter().max().unwrap();
+    let (w_on, w_off) = (worst(&on_max), worst(&off_max));
+    println!("slowest single key over the 5 rounds: rerank on {:.3} ms (syllable {}), rerank off {:.3} ms (syllable {})", ms(w_on.0), w_on.1, ms(w_off.0), w_off.1);
     assert!(k_on < Duration::from_millis(16), "rerank on: key path p95 over 16 ms");
     assert!(j_on < Duration::from_millis(300), "RerankJob::run p95 over 300 ms");
     assert!(k_off < Duration::from_millis(16), "rerank off: key path p95 over 16 ms");

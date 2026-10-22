@@ -377,6 +377,14 @@ struct PathWord {
     syllables: usize,
 }
 
+/// composition-cap §1.2: the window W (characters) when no small model is loaded, so the head freeze does not depend on one: the shipping
+/// model's `ctx` 64 minus 3. With a model loaded W is its `ctx - 3`.
+const CAP_WINDOW_NO_MODEL: usize = 61;
+/// composition-cap §1.2 and §7: once a free stretch is longer than W the freeze goes on down to W - H characters, so a head that has left the
+/// window is not decoded again and only about one key in H decodes twice (measured: with H = 0 almost every key past W froze one more word and
+/// decoded twice, 26 ms against 13 to 17 expected).
+const CAP_BUFFER: usize = 16;
+
 /// What `cap_snapshot` keeps of the state before a key (composition-cap §1.2 step 1).
 struct CapSnap {
     /// Each word of `path` with the syllables it covers.
@@ -1998,10 +2006,11 @@ impl Engine {
         self.tinylm.is_some() && self.rerank_on && self.demote
     }
 
-    /// composition-cap §1.2 step 1: the path and the syllables before a key or pick runs, when step 3 could apply to it at all.
+    /// composition-cap §1.2 step 1: the path and the syllables before a key or pick runs, when step 3 could apply to it at all (revision 1:
+    /// with the rerank on or off, with or without the small model; the n-gram model gives the path).
     fn cap_snapshot(&mut self) -> Option<CapSnap> {
         self.forgot.clear();
-        (self.jobs_on() && !self.syls.is_empty()).then(|| CapSnap {
+        (self.lm.is_some() && !self.syls.is_empty()).then(|| CapSnap {
             path: self.path.iter().map(|w| (w.word.clone(), w.syllables)).collect(),
             syls: self.syls.clone(),
             generation: self.generation,
@@ -2009,7 +2018,7 @@ impl Engine {
     }
 
     /// The part of `key()` and `pick()` after `dispatch` (composition-cap §1.2 steps 3 and 4): when the key decoded a non-empty
-    /// composition, freeze the head of each free stretch longer than the model's window and, if anything froze, decode again and
+    /// composition, freeze the head of each free stretch longer than the window and, if anything froze, decode again and
     /// rebuild `o` from the new state (`view` with the key's `handled` and `commit`; the caller adds the prediction row).
     fn cap_after(&mut self, snap: Option<CapSnap>, o: &mut Output) -> Result<(), EngineError> {
         let Some(snap) = snap.filter(|s| s.generation != self.generation && !self.syls.is_empty()) else { return Ok(()) };
@@ -2025,12 +2034,14 @@ impl Engine {
     /// composition-cap §1.2 step 3. A free stretch is the units between two fixed words (or an open English run), as the rerank job
     /// takes it. Per stretch of more than W = ctx - 3 characters (`ll_many` drops context characters to fit the key and the
     /// candidate in the window, and keeps two of them for `context_key`): from its start, word by word (the word across the
-    /// W-from-the-end point too), freeze the words of the path shown before the key until W or fewer characters are left. Only words
+    /// W-H-from-the-end point too), freeze the words of the path shown before the key until W - H (`CAP_BUFFER`) or fewer characters are left. W is
+    /// the model's `ctx - 3`, or `CAP_WINDOW_NO_MODEL` without one; rerank on or off makes no difference (composition-cap revision 1). Only words
     /// that lie wholly in the longest common prefix of the syllables before and after the key are frozen, and the freeze stops at the
     /// first word that is not, or lies in a range ⌘⌫ forgot. Returns whether anything froze.
     fn cap_refreeze(&mut self, snap: &CapSnap) -> bool {
-        let (Some(model), Some(st)) = (&self.tinylm, &self.lm) else { return false };
-        let Some(w) = model.ctx().checked_sub(3).filter(|&w| w > 0) else { return false };
+        let Some(st) = &self.lm else { return false };
+        let w = self.tinylm.as_ref().map_or(Some(CAP_WINDOW_NO_MODEL), |m| m.ctx().checked_sub(3)).filter(|&w| w > CAP_BUFFER);
+        let Some(w) = w else { return false };
         // The alignment guard of `freeze_outside`, for the path as it was shown.
         if snap.path.iter().map(|p| p.1).sum::<usize>() != snap.syls.len() || self.path.iter().map(|p| p.syllables).sum::<usize>() != self.syls.len() {
             return false;
@@ -2066,7 +2077,9 @@ impl Engine {
         for (from, to) in bounds {
             let mut left: usize = chars_at[from..to].iter().sum();
             let mut next = from;
-            while left > w {
+            // A stretch past W is frozen from its head down to W - H (`CAP_BUFFER`) characters.
+            let target = if left > w { w - CAP_BUFFER } else { left };
+            while left > target {
                 // The old word that starts here and lies in the stretch and the common prefix.
                 let Some(&(a, b, word)) = old.iter().find(|o| o.0 == next) else { break };
                 let fits = b <= to.min(lcp) && !self.forgot.iter().any(|&(x, y)| a < y && x < b);

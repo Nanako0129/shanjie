@@ -295,9 +295,9 @@ int32_t shanjie_engine_learning_status(ShanjieEngine *engine, uint32_t *flags);
 //   a completed syllable, a deletion, a candidate or prediction pick, punctuation (it does not commit: it enters the composition,
 //   re-decodes and leaves a new job), a learning forget, and the settings that change decoding (profile, demote, rerank, rerank
 //   level, a new model, learning open / clear; set_learning never makes the job stale: it does not change decoding, S7c-2b). Keys that do not re-decode (cursor moves, unfinished zhuyin symbols, entering the
-//   prediction row, pass-through keys) keep the job valid. A key or pick that decodes with the job's conditions on (small model
-//   loaded, rerank on, demotion on) first freezes the head of any free stretch longer than the model's window minus 3 characters
-//   as frozen words (docs/contracts/composition-cap.md section 1.2), then decodes again: its output and its job are those after the freeze. Commits (ENTER, the auto-commit at 128 tokens, reset) send what is
+//   prediction row, pass-through keys) keep the job valid. A key or pick that decodes a free stretch longer than the window W (the small
+//   model's context minus 3 characters, 61 without a model; rerank on or off) first freezes its head down to W - 16 characters as
+//   frozen words (docs/contracts/composition-cap.md section 1.2), then decodes again: its output and its job are those after the freeze. Commits (ENTER, the auto-commit at 128 tokens, reset) send what is
 //   shown; a job not yet applied is dropped.
 // Logging: a job and its result hold candidate text. Never log them, their pointers, or the .sjtl path (the rules at the top).
 #define SHANJIE_NO_CHANGE 5
