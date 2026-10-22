@@ -21,7 +21,7 @@
 
 ## 1. 規則（`core/src/colloquial.rs`）
 
-- `applies(profile, level, model)`：拿掉 `level == Standard` 這個條件；聊天、配對的小模型兩個條件不變，常談表已載入照舊由呼叫端判斷。
+- `applies(profile, level, model)`：拿掉 `level == Standard` 這個條件（實作時連 `level` 參數一起拿掉，成為 `applies(profile, model)`）；聊天、配對的小模型兩個條件不變，常談表已載入照舊由呼叫端判斷。
 - 新增每一檔的三個值，寫成具名常數，註解寫出處（探索片 README 的哪一次、選格或登記），用一個依 `RerankLevel` 取值的函式取用：
   - `STANDARD` (0.5, 2.0, 0.25)：現在的 `ALPHA`、`TAU`、`DELTA`；
   - `CONSERVATIVE` (1.0, 2.0, 3.0)；
