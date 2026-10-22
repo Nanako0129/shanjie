@@ -60,3 +60,36 @@ fn fuzzy_flags_are_validated() {
         assert!(!lm(ROWS, &["--fuzzy", bad]).status.success(), "--fuzzy {bad:?}");
     }
 }
+
+/// dev302 row 298 (排骨酥, ㄙㄨ): the dump of `--fuzzy 15` with the given extra options, as (sentence, score) pairs.
+fn dump_298(extra: &[&str]) -> (String, Vec<(String, f64)>) {
+    let dump = std::env::temp_dir().join(format!("shanjie-fuzzy-dump-{}-{}", std::process::id(), RUN.fetch_add(1, Ordering::Relaxed)));
+    let rows = "|這家店的排骨酥很好吃|ㄓㄜˋ ㄐㄧㄚ ㄉㄧㄢˋ ㄉㄜ˙ ㄆㄞˊ ㄍㄨˇ ㄙㄨ ㄏㄣˇ ㄏㄠˇ ㄔ\n";
+    let mut args = vec!["--fuzzy", "15", "--dump", dump.to_str().unwrap()];
+    args.extend_from_slice(extra);
+    let o = lm(rows, &args);
+    assert!(o.status.success());
+    let text = std::fs::read_to_string(&dump).unwrap();
+    std::fs::remove_file(&dump).unwrap();
+    let cands = text.lines().map(|l| { let f: Vec<&str> = l.split('\t').collect(); (f[2].to_string(), f[3].parse().unwrap()) }).collect();
+    (summary(&o), cands)
+}
+
+/// `--fuzzy-delta-sound` (section 3.5, evaluation only): 1 is the default, so the summary line (tag and top1_sha256) and the dump
+/// are the same with and without it; another D appends `:dD` to the tag and moves the score of a candidate read through a
+/// fuzzy-sound syllable (書 for ㄙㄨ) by exactly the delta difference, while the exact candidate (酥) does not move.
+#[test]
+fn fuzzy_delta_sound_default_is_identical_and_other_values_shift_fuzzy_candidates() {
+    let (s0, c0) = dump_298(&[]);
+    let (s1, c1) = dump_298(&["--fuzzy-delta-sound", "1"]);
+    assert_eq!((&s0, &c0), (&s1, &c1));
+    assert!(s0.contains("+fz:15  {"), "{s0}");
+    let (s2, c2) = dump_298(&["--fuzzy-delta-sound", "2.5"]);
+    assert!(s2.contains("+fz:15:d2.5  {"), "{s2}");
+    assert_ne!(s0.split("'top1_sha256'").nth(1), s2.split("'top1_sha256'").nth(1));
+    let score = |c: &[(String, f64)], w: &str| c.iter().find(|x| x.0 == w).unwrap().1;
+    let (shu, su) = ("這家店的排骨書很好吃", "這家店的排骨酥很好吃");
+    assert!((score(&c0, shu) - score(&c2, shu) - 1.5).abs() < 1e-9, "{c0:?} {c2:?}");
+    assert_eq!(score(&c0, su), score(&c2, su));
+    assert!(!lm("|知道|ㄗ ㄉㄠˋ\n", &["--fuzzy", "2", "--fuzzy-delta-sound", "x"]).status.success());
+}

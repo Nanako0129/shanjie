@@ -4,7 +4,7 @@ use core::engine::{capping_overlay_detailed, load_lexicon_extra_detailed, load_l
 use core::eval::*;
 use core::learn::{context_key, SENTINEL};
 use core::fuzzy::FUZZY_ALL;
-use core::lm::{decode_from_fuzzy, history, CappedLexicon, Demote, Lm, Profile};
+use core::lm::{decode_from_fuzzy_delta, history, CappedLexicon, Demote, Lm, Profile};
 use core::tinylm::{KnPairing, RerankLevel, TinyLm, TinyLmError, TOPK};
 use core::predict::{parse_units, predict, units_of, units_str, Index, Mode};
 use core::{decode_beam, Error, Lexicon, NoLearning, Syls, BEAM_S1};
@@ -233,6 +233,8 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     // docs/contracts/fuzzy-input.md section 2.3: `--fuzzy FLAGS` (the bits of shanjie_engine_set_fuzzy). Given, the summary line gets
     // `+fz:FLAGS` and a row no reading covers counts as wrong instead of stopping the run.
     let mut fuzzy = None::<u32>;
+    // `--fuzzy-delta-sound D` (section 3.5, evaluation only): the fuzzy-sound penalty of this run; the summary tag gets `:dD` when it is not the default.
+    let mut delta_sound = core::fuzzy::DELTA_SOUND;
     let mut reading_channel = true;
     let mut it = args.iter();
     while let Some(a) = it.next() {
@@ -276,6 +278,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
             "--packs-dir" => packs_dir = Some(val()?),
             "--extra-overlay" => extra_overlay = Some(val()?),
             "--colloquial-core" => colloquial_core = Some(val()?),
+            "--fuzzy-delta-sound" => delta_sound = val()?.parse::<f64>().ok().filter(|d| d.is_finite()).ok_or("--fuzzy-delta-sound takes a number")?,
             "--fuzzy" => fuzzy = Some(val()?.parse::<u32>().ok().filter(|f| f & !FUZZY_ALL == 0).ok_or("--fuzzy takes flags 0-31")?),
             "--no-reading-channel" => reading_channel = false,
             _ => return Err("unknown argument".into()),
@@ -391,7 +394,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
         let left = if ctx_mode { Some(context_key(ctx)) } else { None };
         let start = left.as_deref().filter(|k| *k != SENTINEL).map_or("<s>", |k| history(k, &lm));
         let mut out = RowOut::default();
-        let nb = match decode_from_fuzzy(&capped, syls, &lm, prof, BEAM_S1, start, demote, fuzzy.unwrap_or(0)) {
+        let nb = match decode_from_fuzzy_delta(&capped, syls, &lm, prof, BEAM_S1, start, demote, fuzzy.unwrap_or(0), delta_sound) {
             Ok(nb) => nb,
             // --fuzzy: a row no reading covers is a wrong answer with an empty first candidate, and the set goes on.
             Err(Error::NoPath { .. }) if fuzzy.is_some() => {
@@ -577,7 +580,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
         RerankLevel::Conservative => "+rl:conservative",
         RerankLevel::Aggressive => "+rl:aggressive",
     };
-    let fz = fuzzy.map_or(String::new(), |f| format!("+fz:{f}"));
+    let fz = fuzzy.map_or(String::new(), |f| if delta_sound == core::fuzzy::DELTA_SOUND { format!("+fz:{f}") } else { format!("+fz:{f}:d{delta_sound}") });
     println!("## {name}  lm-{profile_name}{}{}{}{}{}{}{}{}{xo}{}{}{fz}  {{'n': {}, 'top1': {top1}, 'oracle@64': {o64}, 'top1_sha256': '{sha}'}}", if ctx_mode { "+ctx" } else { "" }, if demote { "" } else { "-nodemote" }, if classes { "" } else { "-noclasses" }, if names { "" } else { "-nonames" }, if scoring.kn { lm.kn_tag().unwrap_or("") } else { "" }, tl.as_ref().map_or(String::new(), |(_, _, sha8)| format!("+tl:{sha8}")), rl_tag, if packs & PACK_ACG != 0 { "+acg" } else { "" }, if scoring.tri { lm.tri_tag().unwrap_or("") } else { "" }, colloq.as_ref().map_or(String::new(), |co| format!("+colloq:{}{}", &co.sha256()[..8], if colloq_on.is_some() && reading_channel { "+rc" } else { "" })), rows.len());
     Ok(())
 }

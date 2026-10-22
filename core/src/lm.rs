@@ -994,14 +994,14 @@ impl CappedLexicon {
     /// The readings the words of one span are looked up under: the typed reading, then (a span with an unknown syllable, or the
     /// sound pairs in `fuzzy` on) the tolerant ones: words of a reading with one syllable replaced, not already words of the typed
     /// reading, each word at its best score, the best `PER_KEY` over all of them (the research's `tolerant_entries`).
-    fn sources(&self, ids: &[u32], span: &[String], fuzzy: u32) -> Vec<Source> {
+    fn sources(&self, ids: &[u32], span: &[String], fuzzy: u32, delta_sound: f64) -> Vec<Source> {
         let base = &*self.base;
         let exact = base.find(ids);
         let mut out = vec![Source { r: exact, pen: 0.0, names: None, picked: Vec::new() }];
         if fuzzy & crate::fuzzy::FUZZY_SOUND == 0 && !ids.contains(&u32::MAX) {
             return out;
         }
-        let pen = if ids.contains(&u32::MAX) { crate::fuzzy::DELTA_ADJACENT } else { crate::fuzzy::DELTA_SOUND };
+        let pen = if ids.contains(&u32::MAX) { crate::fuzzy::DELTA_ADJACENT } else { delta_sound };
         let readings: Vec<(usize, Vec<u32>)> =
             base.tolerant_readings(ids, span, fuzzy).into_iter().filter_map(|k| base.find(&k).map(|r| (r, k))).collect();
         let exact_words: HashSet<&str> = exact.into_iter().flat_map(|r| base.range(r)).map(|p| self.word_of(&self.ents[p])).collect();
@@ -1055,6 +1055,25 @@ pub fn decode_segment_fuzzy<'a>(
     demote: bool,
     fuzzy: u32,
 ) -> Result<Vec<Scored<'a>>, Error> {
+    decode_segment_fuzzy_delta(lex, syls, lm, scoring, start, end, beam, learn, demote, fuzzy, crate::fuzzy::DELTA_SOUND)
+}
+
+/// `decode_segment_fuzzy` with the fuzzy-sound penalty `delta_sound` in place of `fuzzy::DELTA_SOUND` (evaluation only: the
+/// engine and the app always use the default; docs/contracts/fuzzy-input.md section 3.5). The adjacent-key penalty is unchanged.
+#[allow(clippy::too_many_arguments)]
+pub fn decode_segment_fuzzy_delta<'a>(
+    lex: &'a CappedLexicon,
+    syls: &[String],
+    lm: &Lm,
+    scoring: impl Into<Scoring>,
+    start: &str,
+    end: End<'_>,
+    beam: usize,
+    learn: Option<&Learn<'a>>,
+    demote: bool,
+    fuzzy: u32,
+    delta_sound: f64,
+) -> Result<Vec<Scored<'a>>, Error> {
     let base = &*lex.base;
     // New words are 2..=NEWWORD_MAX syllables and their reading may be no lexicon reading at all.
     let fresh_on = learn.filter(|ln| ln.learner.has_new_words());
@@ -1091,7 +1110,7 @@ pub fn decode_segment_fuzzy<'a>(
             if hyps[i - l].is_empty() {
                 continue;
             }
-            for src in lex.sources(&ids[i - l..i], &syls[i - l..i], fuzzy) {
+            for src in lex.sources(&ids[i - l..i], &syls[i - l..i], fuzzy, delta_sound) {
                 let found = src.r;
                 // A tolerant source is learned under its lexicon reading (fuzzy-input section 2.1): a pick of its word was recorded there.
                 let span = src.names.as_deref().unwrap_or(&syls[i - l..i]);
@@ -1293,7 +1312,23 @@ pub fn decode_from_fuzzy(
     demote: bool,
     fuzzy: u32,
 ) -> Result<Vec<(f64, Vec<String>)>, Error> {
-    Ok(decode_segment_fuzzy(lex, syls, lm, lm.scoring(profile), start, End::Eos, beam, None, demote, fuzzy)?
+    decode_from_fuzzy_delta(lex, syls, lm, profile, beam, start, demote, fuzzy, crate::fuzzy::DELTA_SOUND)
+}
+
+/// `decode_from_fuzzy` with the evaluation-only fuzzy-sound penalty of `decode_segment_fuzzy_delta` (the CLI's `--fuzzy-delta-sound`).
+#[allow(clippy::too_many_arguments)]
+pub fn decode_from_fuzzy_delta(
+    lex: &CappedLexicon,
+    syls: &[String],
+    lm: &Lm,
+    profile: Profile,
+    beam: usize,
+    start: &str,
+    demote: bool,
+    fuzzy: u32,
+    delta_sound: f64,
+) -> Result<Vec<(f64, Vec<String>)>, Error> {
+    Ok(decode_segment_fuzzy_delta(lex, syls, lm, lm.scoring(profile), start, End::Eos, beam, None, demote, fuzzy, delta_sound)?
         .into_iter()
         .map(|(s, ws)| (s, ws.into_iter().map(|(w, ..)| w.to_string()).collect()))
         .collect())
