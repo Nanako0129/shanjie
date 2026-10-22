@@ -286,5 +286,21 @@ class SandhiWiring(unittest.TestCase):
             R.parse_cell("3.0,4")
 
 
+class SandhiVariant(unittest.TestCase):
+    """sandhi.py: the spoken tones of 一 and 不 by the next syllable, the ordinal / date exceptions, misaligned rows untouched."""
+
+    def test_rules(self):
+        import sandhi as S
+        cases = [("不要", ["ㄅㄨˋ", "ㄧㄠˋ"], ["ㄅㄨˊ", "ㄧㄠˋ"]), ("不好", ["ㄅㄨˋ", "ㄏㄠˇ"], ["ㄅㄨˋ", "ㄏㄠˇ"]),
+                 ("一個", ["ㄧ", "ㄍㄜˋ"], ["ㄧˊ", "ㄍㄜˋ"]), ("一天", ["ㄧ", "ㄊㄧㄢ"], ["ㄧˋ", "ㄊㄧㄢ"]),
+                 ("第一次", ["ㄉㄧˋ", "ㄧ", "ㄘˋ"], ["ㄉㄧˋ", "ㄧ", "ㄘˋ"]), ("一月", ["ㄧ", "ㄩㄝˋ"], ["ㄧ", "ㄩㄝˋ"]),
+                 ("統一", ["ㄊㄨㄥˇ", "ㄧ"], ["ㄊㄨㄥˇ", "ㄧ"]), ("一個", ["ㄧ", "ㄍㄜ˙"], ["ㄧ", "ㄍㄜ˙"]),
+                 ("用A一個", ["ㄩㄥˋ", "ㄧ", "ㄍㄜˋ"], ["ㄩㄥˋ", "ㄧˊ", "ㄍㄜˋ"])]
+        for s, syls, want in cases:
+            self.assertEqual(S.sandhi(s, syls)[0], want, s)
+        self.assertEqual(S.sandhi("不要", ["ㄅㄨˋ", "ㄧㄠˋ"])[1], 1)
+        self.assertIsNone(S.sandhi("一個", ["ㄧ"]))
+
+
 if __name__ == "__main__":
     unittest.main()
