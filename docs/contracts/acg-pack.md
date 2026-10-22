@@ -319,21 +319,27 @@
 - **預算**：executor 實作 1 次＋修正 1 次。
 - **限制**：只用 A2 的快取（`--offline`），不連網；不讀 `eval/holdout`（verifier 照慣例除外）、學習檔、`~/Library`、鑰匙圈、`~/side-project/shanjie-private`；不安裝、不啟動 App、不呼叫 TIS；不 push、不開 PR、不碰其他 worktree。
 
-## A4 片：同步更新到最新來源（2026-10-23）
+## A4 片：同步更新到最新來源（2026-10-23；plan-verifier 第一次 REVISE 六項照改）
 
-- **起因**：維護者 2026-10-23：「動漫詞包也可以同步更新」。現在的詞包來源停在 2026-10-08（`acg.json` 的 `latest_source_revision`）。
-- **做法**：工具與規則都不改，用 `build_acg_pack.py` 重新抓取（新的快取資料夾，放外接碟，不覆蓋舊快取）重建；規則模型照 A3.3（`build/rule-lm`，雜湊已核對）；兩份使用者清單（`acg-collisions.tsv`、`acg-keep-both.tsv`、`acg-kept-c.tsv`、`acg-exclude.tsv`、`acg-manual.tsv`）照舊。
-- **驗收**（沿用 A3.5，標號照 A3.5）：
-  - 第 2 項：dev302、打字測驗、錯字回報（當下的列數），聊天與書面，開詞包對現在出貨的詞包 0 改壞。
-  - 第 3 項：動漫集（works、characters、charparts、recent、interpunct）0 改壞；**現在出貨的詞包的詞一個都不能少**，少了的逐一列出原因並停下來問維護者。新增與移除的詞數依來源分開報。
-  - 第 4 項：新出現的 (a)、(b) 衝突列出來由維護者決定（選擇題，推薦在前）；超過 50 組先問怎麼分批。
-  - 第 5 項：從新增的詞用固定種子抽 100 個看出處，至少 90 個是名字。
-  - 第 6 項：出貨模型（現在的 `data/lm`）上重驗 (a)、(b)、(c)。
-  - 第 8 項：同一份新快取 `--offline` 跑兩次，輸出逐位元相同。
-  - 第 9 項：列數、檔案大小、開詞包時的峰值記憶體，比不開多超過 40 MiB 就停。
-  - 關掉詞包時和 main 逐位元組相同（詞包預設開，所以「關」只是對照）。
-  - 保留集照現行規則：只在推 tag 前跑，這一片不跑（A3.5 第 10 項的保留集那句由此取代）。
+- **起因**：維護者 2026-10-23：「動漫詞包也可以同步更新」。現在的詞包來源停在 2026-10-08。
+- **基準（現在出貨的詞包）**：main `67651c73` 的 `data/packs/`（`acg.json` 的 version `20261008-74ba461e`，`latest_source_revision` `2026-10-08T23:36:32Z`）。開工前把 `acg-add.tsv`、`acg-sources.tsv`、`acg.json` 複製到 `build/acg-base/`，之後的比較都對這份。
+- **做法**：工具與規則都不改。五份使用者清單（`acg-collisions.tsv`、`acg-keep-both.tsv`、`acg-kept-c.tsv`、`acg-exclude.tsv`、`acg-manual.tsv`）照舊；規則模型照 A3.3（`build/rule-lm`，雜湊已核對）。
+  - **抓取由 main 做**：新快取放外接碟 `/Volumes/hermit/shanjie-cache/sources/acg-20261023/`（不覆蓋舊快取），只連 `zh.wikipedia.org/w/api.php` 與 `query.wikidata.org`，用工具既有的 User-Agent、每秒 ≤ 1 個、maxlag 5。之後的建置一律 `--offline` 用這份新快取。
+  - 維護者對新衝突的決定，**只以新增列**寫進 `acg-collisions.tsv` 或 `acg-keep-both.tsv`，既有的列不改；寫完重建一次，下面第 2–9 項全部重跑。
+- **驗收**：
+  1. **對照組**（抓新資料之前）：用舊快取 `--offline` 重建，`acg-add.tsv` 與 `acg-sources.tsv` 要和基準逐位元相同（`cmp`）。不同就停：代表工具或詞庫已經漂移，原因和來源的變化分不開。
+  2. **來源真的更新了**：新 `acg.json` 的 `latest_source_revision` 晚於 `2026-10-08T23:36:32Z`，`revision_ids` 的最大值大於 94888159；報告寫出新快取的路徑。
+  3. **一般集合**：dev302、打字測驗、錯字回報（當下的列數），聊天與書面，開新詞包對開基準詞包 0 改壞。
+  4. **動漫集**（works、characters、charparts、recent、interpunct）：0 改壞。基準詞包的詞一個都不能少；少了的逐一列出原因並停下來問維護者。新增、移除的詞數依來源分開報。
+  5. **基準詞包的選字不變**：用 `--recheck --base build/acg-base` 跑兩次（出貨的 `data/lm`，以及 `--recheck-rule` 的規則模型），聊天與書面。基準詞包每一個（詞, 讀音）的第一名都要相同，報告的 total 必須是 0；不是 0 就逐列列出，停下來給維護者決定。兩份 `recheck*.txt` 的 total 那一行附在報告。
+  6. **新衝突**：新出現的 (a)、(b) 列出來由維護者決定（選擇題，推薦在前，附規則模型與出貨模型的第一名）；超過 50 組先問怎麼分批。最終建置的 `acg.json` 裡 `unresolved_collision_readings` 是 0，`git diff` 看兩份清單只有新增的列。
+  7. **出貨模型上的重驗**：新、舊詞包各跑一次 `--recheck`（出貨的 `data/lm`）。和基準的報告比：(c) 不能多出新詞；沒處置的 (a)、(b) 不能多出新讀音；`first_named` 的失效清單維持空的。多出來的逐一列出，停下來問維護者；報告差異的每一列都要對應到維護者處置過的項目。
+  8. **新增詞的抽樣**：母體＝新詞包 `acg-add.tsv` 第二欄的詞集合減去基準詞包第二欄的詞集合。種子 20261023，抽 min(100, 母體大小) 個，逐一看出處判斷是不是角色名或作品名，至少 90% 是名字才算過。研究紀錄記下母體大小、種子、抽到的個數與判定。
+  9. **可重現與大小**：新快取 `--offline` 跑兩次，輸出逐位元相同；報列數、`acg-add.tsv` 大小、開詞包時的峰值記憶體，比不開詞包多超過 40 MiB 就停。
+  10. 詞包關掉時和 main 逐位元組相同。保留集照現行規則只在推 tag 前跑，這一片不跑（A3.5 第 10 項保留集那句由此取代）。
 - **範圍外**：改工具或規則（新的過濾、新來源）；B、C 片。
+- **預算**：抓取（main）一次；executor 驗收 1 次＋修正 1 次。
+- **限制**：executor 不連網（只用新快取 `--offline`）、不讀 `eval/holdout/` 與私人資料、不 push、不開 PR、不碰其他 worktree。
 - **停止條件**：上面任何一項不過；抓取時維基 API 連續錯誤或被限流。
 
 ## B 片：CI 排程與詞包 Release（A 合併後補細節）
@@ -379,6 +385,7 @@
 - B：停用 workflow；已發的詞包 Release 由使用者決定要不要刪（外部動作，要先問）。
 - C：撤下 cask；輸入法會退回 App 內附的那一份。
 - **A3**：revert A3 的 merge commit。`data/packs` 回到 v0.4.0 的詞包（含 `acg-add.tsv`、`acg-sources.tsv`、`acg.json`），`acg-kept-c.tsv`、`acg-keep-both.tsv`、`--rule-lm` 參數與 `build/rule-lm` 的用法一起消失，使用者端回到 v0.4.0 的選字；模型檔不受影響（A3 不動模型）。
+- **A4**：revert A4 的 merge commit。`data/packs` 回到基準詞包（`20261008-74ba461e`），選單的灰字日期回到 2026-10-08；兩份使用者清單新增的列一起消失。
 
 ## 審查紀錄
 
