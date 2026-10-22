@@ -8591,3 +8591,11 @@ XL 比 `MAX_FILE`（67,108,864）小 1,168,880 位元組。錨點：4 個模型 
 - 維護者在對話裡打「sonnet 在改的東西工作量很大嗎？」，出成「再改」。加到 `eval/dev/user-reported.txt` 最後面：`sonnet|在改的東西工作量很大嗎|ㄗㄞˋ ㄍㄞˇ ㄉㄜ˙ ㄉㄨㄥ ㄒㄧ ㄍㄨㄥ ㄗㄨㄛˋ ㄌㄧㄤˋ ㄏㄣˇ ㄉㄚˋ ㄇㄚ`（讀音由 `tools/readings.py` 產生，沒有 CHECK；前文是英文 `sonnet`）。
 - 出貨設定（`cli --context --packs acg --tinylm`，`tinylm.sjtl` `e7c179d8`）：聊天（加常談與讀音通道項）錯，n-gram 第一名是正解「在改」（−23.62，「再改」第 2、−23.90），語意校正把它換成「再改」；書面對（n-gram 第一名、沒有換）。也就是聊天這列是重排改壞的。
 - golden 的兩行錯字集重產（`lm_eval.py --context`）：n 155，top1 聊天 32 → 33、書面 41 → 42，oracle@64 151 → 152。
+
+## 2026-10-22：錯字回報第 3 列「一個」的讀音更正為 ㄧˊ
+
+- 第 3 列（`…用一個快速鍵自動校正`）的「一」原本手動填成 ㄧˋ；維護者實際打 ㄧˊ（照變調打，「我小學時候教的那套」）。照維護者的選擇在 R1b 跑完之後更正成 ㄧˊ；其他列不動。
+- **只改 `eval/dev/user-reported.txt`**。凍結的跨版本套件（`eval/bench/suite-v1/dev302.txt` 第 302 列、`eval/bench/suite-v2/user-reported.txt` 第 3 列，同一句）不改：`tools/bench.py` 寫死它們的雜湊，改檔等於開新版套件。之後開套件 v3 時一起帶進去。所以研究工具裡讀 `suite-v1/dev302.txt` 的 dev302 仍是 ㄧˋ，讀錯字回報的才是更正後的列。
+- 出貨的引擎在三種讀法（ㄧˋ、ㄧˊ、ㄧ）都選「一個」（`cli --context --packs acg --tinylm`，聊天、書面）。詞庫只收「一個」ㄧ-ㄍㄜ˙，打 ㄍㄜˋ 時走單字；讀 ㄧˊ 時排在後面的候選也都有「一」，R1 的讀音項互相抵銷。
+- golden：`--set dev --limit 302` 的第 302 列就是這一列（開發集是 `eval/dev/` 各檔依序串接），只用字詞頻的 S1 解碼器在 ㄧˋ 時選「意個」、ㄧˊ 時選對，`s1-dev302.txt`、`s1-dev302-nooverlay.txt` 少一行錯例、sent_acc 各 +1 列（用 Rust CLI 重產；`reference/proto/eval.py` 缺 `reference/proto/data/`，跑不了）。其他 golden 不變，`make test-golden` 25 個都過。
+- 評測讀音的慣例：辭典與作業考卷寫本調、低年級課本標變調（國語日報 2013-10-07 報導引國教院），`tools/readings.py` 照舊用本調；維護者同日選「加一份變調版、只報告」，R1c 的登記（`exp/r1-reading-decode`）已加上。
