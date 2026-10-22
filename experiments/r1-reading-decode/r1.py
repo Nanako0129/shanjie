@@ -5,7 +5,7 @@ numbers only on stdout and in the JSON: never a sentence, context, word or chara
 
   r1.py run     --setting S --name SET --rows R --dump D --dump-words W --rowstats RS --tinylm-scores SC --summary STDOUT_OF_THE_CLI
                 --sjtl data/lm/tinylm.sjtl [--t2 data/lm/colloquial.sjlm]  (--cells | --cell-from SEL.json)  --out OUT.json
-                [--norc-scores SC2 --norc-rowstats RS2 --norc-summary SUM2]    (chat-std on chatclause / discordtune: anchor 2)
+                [--norc-scores SC2 --norc-rowstats RS2 --norc-summary SUM2]    (anchor 2: ANCHOR2 below)
   r1.py select  CHATCLAUSE_CELLS.json WIKITUNE_CLEAN_CELLS.json --out SEL.json
   r1.py anchor3 --setting S --n64 SCORES_N64 --n8 SCORES_N8 --out A3.json                                 (chat-std and formal-std cvtune-clean)
   r1.py final   SEL.json JUDGE.json ...                                          (the four clauses from the 17 judged runs)
@@ -14,10 +14,12 @@ S is one of chat-std chat-cons chat-aggr formal-std formal-cons formal-aggr (REA
 for the setting tag. Before any cell it STOPs (exit 1) on: a row count other than the registered one (rows, dump, scores, rowstats,
 summary), a rows file whose sha256 is not the registered one, a summary tag that is not the setting's (profile, +tl: of --sjtl, +acg,
 +rl:, +colloq / +rc, +tri), a scores record whose ng / ok differ from the dump or from the lenient comparison, anchor 1 (the shipping cell
-offline, lambda 0: the pick equals the run's `c` and the final ok equals rowstats, every row), anchor 2 (the P4d cell offline equals the
---no-reading-channel run), or the lambda 0 reordering not reproducing the shipping cell (the dump is then not in n-gram order). The
-fusion of each setting comes from the .sjtl header at its level (chat-std: the colloquial cell of core/src/colloquial.rs = P4d's, plus
-P5's lex,1.0,4 for the shipping cell; there the R1 cells drop the P5 term).
+offline, lambda 0: the pick equals the run's `c` and the final ok equals rowstats, every row), anchor 2 (the level's colloquial cell
+offline, nu 0, equals the --no-reading-channel run), or the lambda 0 reordering not reproducing the shipping cell (the dump is then not in
+n-gram order). The fusion of each setting: chat at every level is the colloquial cell of core/src/colloquial.rs `cell(level)` (PR #271:
+the level's own alpha, tau, delta, P4d's mu and gate) plus P5's lex,1.0,4 for the shipping cell, the R1 cells dropping the P5 term;
+formal is the .sjtl header's triple at its level. The re-measure of the product contract (docs/contracts/reading-decode.md section 2.1)
+also writes each row's pick as a dump index (`pick_idx`, numbers only) for the core parity.
 Exit codes: 0 ok, 1 STOP or bad arguments, 3 NO CELL QUALIFIES (select).
 """
 import argparse, hashlib, json, math, os, re, sys
@@ -38,6 +40,8 @@ GRID = [(lam, c) for lam in LAMBDAS for c in CS]        # 12 cells, estimator le
 SHIP_NU, SHIP_C = 1.0, 4                                 # P5's registered cell lex,1.0,4 (the shipping chat-std cell with the P4d cell)
 TRI8, COLLOQ8 = "fdd3b05d", P.T2_SHA256[:8]
 LEVELS = {"conservative": 0, "standard": 1, "aggressive": 2}
+# core/src/colloquial.rs `cell(level)` (STANDARD, CONSERVATIVE, AGGRESSIVE): the chat (alpha, tau, delta) the colloquial term fuses with
+COLLOQ_CELLS = {"standard": (0.5, 2.0, 0.25), "conservative": (1.0, 2.0, 3.0), "aggressive": (0.5, 2.0, 0.1)}
 
 # setting -> (profile, level). The roles below are the README tables: select (the selection set), 1 / 2a / 2b / 3 (clauses), report.
 SETTINGS = {"chat-std": ("chat", "standard"), "chat-cons": ("chat", "conservative"), "chat-aggr": ("chat", "aggressive"),
@@ -49,7 +53,8 @@ ROLES = {"chat-std": {"chatclause": "select", "discordtune": "1", "cvtune-clean"
          "formal-cons": {"wikitune-clean": "2b", "typing76": "2a"},
          "formal-aggr": {"wikitune-clean": "2b", "typing76": "2a"}}
 SELECT_SETS = {("chat-std", "chatclause"), ("formal-std", "wikitune-clean")}
-ANCHOR2_SETS = {"chatclause", "discordtune"}             # chat-std runs that have a --no-reading-channel twin
+# (setting, set) runs that have a --no-reading-channel twin (README: R1c's two plus the product contract's two)
+ANCHOR2 = {("chat-std", "chatclause"), ("chat-std", "discordtune"), ("chat-cons", "discordtune"), ("chat-aggr", "discordtune")}
 ROW_COUNTS = {**Q.ROW_COUNTS, "wikitune-clean": 2181}
 # p5's table and its check_rows_sha (a set without a hash is a STOP there: KeyError is not a pass), wikitune-clean added
 Q.ROW_SHA256["wikitune-clean"] = "d576ea941242e04d718c3d5cf4711c43693588d1089461970293edcec9c5db92"  # eval/bench/kpi/*.json wikitune_clean.rows_sha256
@@ -139,7 +144,7 @@ def load_run(a, setting, name):
     rows = T.parse_rows(T.read_text(a.rows))
     base = evalstats.read_rowstats(a.rowstats)
     tag, n_sum, top1 = read_summary(a.summary)
-    check_tag(tag, setting, sha_file(a.sjtl)[:8], rc=(setting == "chat-std"))
+    check_tag(tag, setting, sha_file(a.sjtl)[:8], rc=(profile == "chat"))
     cands, _, recs = T.read_cli_files(a.dump, a.dump_words, a.tinylm_scores, len(rows))
     for what, n in (("rows", len(rows)), ("rowstats", len(base)), ("summary", n_sum)):
         if n != n_want:
@@ -178,7 +183,7 @@ def load_run(a, setting, name):
         else:
             r["terms_r1"] = [Q.word_terms(r["syls"], cand[2], rlogp) for cand in r["cands"]]
             r["ch_r1"] = {c: [Q.ch_of(t, c) for t in r["terms_r1"]] for c in CS}
-    if setting == "chat-std":
+    if profile == "chat":
         import p4
         if sha_file(a.t2) != P.T2_SHA256:
             stop("--t2 is not P4's T2 table (sha256)")
@@ -194,13 +199,13 @@ def load_run(a, setting, name):
 # ---------------------------------------------------------------- the fusion of one setting, and the R1 cells
 
 def make_cfg(a_sjtl, setting, nu):
-    """The fusion of a setting: chat-std is the colloquial cell (core/src/colloquial.rs: P4d's, tau and delta included) with the reading term
-    weight `nu` (SHIP_NU shipping, 0 the P4d cell) and, for a non-finite col, the file's plain chat standard triple; any other setting is the
-    plain rerank with the header's triple of its profile and level."""
+    """The fusion of a setting: chat is the level's colloquial cell (COLLOQ_CELLS) with the reading term weight `nu` (SHIP_NU shipping, 0
+    the colloquial cell alone) and, for a non-finite col, the file's plain chat triple of the level; formal is the plain rerank with the
+    header's triple of its level."""
     profile, level = SETTINGS[setting]
     plain = header_params(a_sjtl, profile, level)
-    if setting == "chat-std":
-        return {"kind": "colloq", "nu": nu, "plain": plain}
+    if profile == "chat":
+        return {"kind": "colloq", "nu": nu, "plain": plain, "cell": COLLOQ_CELLS[level]}
     return {"kind": "plain", "plain": plain}
 
 
@@ -211,14 +216,14 @@ def fuse_index(cfg, ng, ll, col, ch):
         return 0
     if cfg["kind"] == "plain":
         return T.pick(ng, ll, *cfg["plain"])
-    if not all(math.isfinite(x) for x in col):                 # core guarded_pick: both terms dropped, the plain chat standard triple
+    if not all(math.isfinite(x) for x in col):                 # core guarded_pick: both terms dropped, the plain chat triple of the level
         return T.pick(ng, ll, *cfg["plain"])
-    mu, alpha, gate = P.CONFIRM_CELL
-    e = P.eff_ll({"ng": ng, "ll": ll}, col, mu, alpha, gate)
-    ng, eff = e
+    mu, gate = P.CONFIRM_CELL[0], P.CONFIRM_CELL[2]
+    alpha, tau, delta = cfg["cell"]                              # mu / alpha and nu / alpha with the level's own alpha (strength-colloq)
+    ng, eff = P.eff_ll({"ng": ng, "ll": ll}, col, mu, alpha, gate)
     if cfg["nu"]:
         eff = [x + (cfg["nu"] / alpha) * (ch[i] - ch[0]) for i, x in enumerate(eff)]
-    return T.pick(ng, eff, alpha, P.TAU, P.DELTA)
+    return T.pick(ng, eff, alpha, tau, delta)
 
 
 def ship_picks(cfg, rows):
@@ -297,12 +302,12 @@ def anchor1(cfg, rows, base_ok):
     return picks
 
 
-def anchor2(a, p4d, rows, name):
-    """chat-std: the P4d cell offline (`p4d`, nu 0, the first 8 in order) equals the --no-reading-channel run: pick and ok, every row."""
+def anchor2(a, p4d, rows, setting, name):
+    """The level's colloquial cell offline (`p4d`, nu 0, the first 8 in order) equals the --no-reading-channel run: pick and ok, every row."""
     if not (a.norc_scores and a.norc_rowstats and a.norc_summary):
-        stop("anchor 2: --norc-scores, --norc-rowstats and --norc-summary are required for chat-std on chatclause and discordtune")
+        stop(f"anchor 2: --norc-scores, --norc-rowstats and --norc-summary are required for {setting} on {name}")
     tag, n, _ = read_summary(a.norc_summary)
-    check_tag(tag, "chat-std", sha_file(a.sjtl)[:8], rc=False)
+    check_tag(tag, setting, sha_file(a.sjtl)[:8], rc=False)
     recs = [json.loads(l) for l in T.lines_of(T.read_text(a.norc_scores))]
     ok2 = [bool(b[0]) for b in evalstats.read_rowstats(a.norc_rowstats)]
     if not (n == len(recs) == len(ok2) == len(rows) == ROW_COUNTS[name]):
@@ -423,11 +428,11 @@ def cmd_run(a):
     role = ROLES[a.setting][a.name]
     if a.cells and (a.setting, a.name) not in SELECT_SETS:
         stop("--cells is for the selection sets (chat-std chatclause, formal-std wikitune-clean)")
-    if a.setting == "chat-std" and not a.t2:
-        stop("chat-std needs --t2")
-    needs2 = a.setting == "chat-std" and a.name in ANCHOR2_SETS
+    if SETTINGS[a.setting][0] == "chat" and not a.t2:
+        stop("chat needs --t2")
+    needs2 = (a.setting, a.name) in ANCHOR2
     if not needs2 and (a.norc_scores or a.norc_rowstats or a.norc_summary):
-        stop("--norc-* belongs to chat-std on chatclause and discordtune only")
+        stop("--norc-* belongs to the ANCHOR2 runs only")
     cell = None
     if a.cell_from or a.cell_label:
         chosen = a.cell_label
@@ -445,9 +450,9 @@ def cmd_run(a):
            "gold_in_64": sum(any(r["ok64"]) for r in rows), "terms": term_counts(rows),
            "shipping_params": list(cfg["plain"]), "sandhi_exempt": bool(getattr(a, "sandhi_exempt", False)),
            "floor_mc": bool(getattr(a, "floor_mc", False)), "sandhi_variant": bool(getattr(a, "sandhi_of", None))}
-    p4d = ship_picks(cfg_r1, rows)        # chat-std: the P4d cell (nu 0); every other setting: the shipping cell again
+    p4d = ship_picks(cfg_r1, rows)        # chat: the level's colloquial cell (nu 0); formal: the shipping cell again
     if needs2:
-        anchor2(a, p4d, rows, a.name)
+        anchor2(a, p4d, rows, a.setting, a.name)
         res["anchor2"] = "ok"
     check_lambda0(cfg_r1, rows, p4d)
     print(f"{a.setting} {a.name} n {len(rows)} anchors ok; gold_in_64 {res['gold_in_64']}")
@@ -476,6 +481,7 @@ def cmd_run(a):
     # per-row 0/1 (numbers only): clause 3 pools them, and R1c compares two arms row by row from them
     res["base_ok"] = "".join(str(int(o)) for o in base_ok)
     res["cell_ok"] = "".join(str(int(r["ok64"][j])) for r, j in zip(rows, picks))
+    res["pick_idx"] = picks               # the cell's pick per row as a dump index (0-63): the core parity compares it with the CLI's `c`
     if "verdict" in res:
         print(f"clause {role} {'PASS' if res['verdict'] else 'FAIL'}")
     Q.write_atomic(a.out, json.dumps(res, indent=1))
@@ -525,7 +531,7 @@ def cmd_final(a):
             stop(f"{p}: a sandhi-variant run is report only, never judged")
         if d.get("cell") != sel["chosen"] or d.get("anchor1") != "ok" or "verdict" not in d and d["role"] in ("1", "2a", "2b"):
             stop(f"{p}: not a judged run of the chosen cell {sel['chosen']}")
-        if d["setting"] == "chat-std" and d["name"] in ANCHOR2_SETS and d.get("anchor2") != "ok":
+        if (d["setting"], d["name"]) in ANCHOR2 and d.get("anchor2") != "ok":
             stop(f"{p}: anchor 2 was not checked")
         runs[d["setting"], d["name"]] = d
     flags = {(bool(d.get("sandhi_exempt", False)), bool(d.get("floor_mc", False))) for d in runs.values()}

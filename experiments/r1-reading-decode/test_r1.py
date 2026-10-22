@@ -74,9 +74,13 @@ class Pick(unittest.TestCase):
 
     def test_colloquial_cell_uses_the_new_first_as_the_anchor_and_drops_p5_with_nu_zero(self):
         # equal ll: the gate is sigmoid(0) = 0.5, so candidate 1 gains 0.5 * (0.5 / 0.5) * 6 = 3 in ll_eff, fused -0.5 + 0.5 * 3 = 1.0
-        cfg = {"kind": "colloq", "nu": 0.0, "plain": (0.3, 2.0, 0.25)}
+        cfg = {"kind": "colloq", "nu": 0.0, "plain": (0.3, 2.0, 0.25), "cell": R.COLLOQ_CELLS["standard"]}
         r = row([0.0, -0.5], [0.0, 0.0], [0, 1], col=[0.0, 6.0])
         self.assertEqual(R.r1_pick(cfg, r, 0.5, 4)[0], 1)
+        # conservative (1.0, 2, 3.0): mu / alpha with the level's alpha, 0.5 * (0.5 / 1.0) * 6 = 1.5, fused -0.5 + 1.0 * 1.5 = 1.0 < delta 3
+        cons = {**cfg, "cell": R.COLLOQ_CELLS["conservative"]}
+        self.assertEqual(R.r1_pick(cons, r, 0.5, 4)[0], 0)
+        self.assertEqual(R.r1_pick(cons, row([0.0, -0.5], [0.0, 0.0], [0, 1], col=[0.0, 16.0]), 0.5, 4)[0], 1)   # 4 - 0.5 = 3.5 >= 3
         r2 = row([0.0, -0.5], [0.0, 0.0], [0, 1], col=[0.0, 0.0], ch=[0.0, -4.0])
         self.assertEqual(R.r1_pick(cfg, r2, 0.0, 4)[0], 0)
         ship = {**cfg, "nu": 1.0}                                          # P5 term: only the shipping cell has it
@@ -184,7 +188,7 @@ class Final(unittest.TestCase):
             doc = {"setting": s, "name": n, "role": role, "n": R.ROW_COUNTS[n], "anchor1": "ok", "cell": "0.5,2", "fixes": 3, "breaks": 1,
                    "net": 2, "error_ratio": 0.33, "ngram_fixes": 1, "ngram_breaks": 0, "top8_changed_rows": 2, "top8_needs_beyond_8_rows": 1,
                    "rows_without_ll": 0, "rows_top8_candidate_without_ll": 0, "gold_in_64": 10}
-            if s == "chat-std" and n in R.ANCHOR2_SETS:
+            if (s, n) in R.ANCHOR2:
                 doc["anchor2"] = "ok"
             if role in ("1", "2a", "2b"):
                 doc["verdict"] = True
