@@ -170,7 +170,7 @@ def check_count(what, n, want):
 def plain_pick(sc, params):
     """The CLI's pick where no term applies (`TinyLm::rerank`): `pick` over the first 8 with the header triple; 0 without `ll`."""
     ll = sc.get("ll")
-    return 0 if ll is None or len(sc["ng"]) < 2 else T.pick(sc["ng"], ll[:len(sc["ng"])], *params)
+    return 0 if ll is None or len(sc["ng"]) < 2 else T.pick(sc["ng"], ll, *params)
 
 
 def cell_pick(r, cell, plain):
@@ -182,9 +182,9 @@ def cell_pick(r, cell, plain):
     if ll is None or k < 2:
         return 0
     if not all(math.isfinite(x) for x in r["col"][:k]):
-        return T.pick(sc["ng"], ll[:k], *plain)
+        return T.pick(sc["ng"], ll, *plain)
     alpha, tau, delta = cell
-    ng, eff = P.eff_ll({"ng": sc["ng"], "ll": ll[:k]}, r["col"], MU, alpha, GATE)
+    ng, eff = P.eff_ll(sc, r["col"], MU, alpha, GATE)
     eff = [x + (NU / alpha) * (r["ch"][i] - r["ch"][0]) for i, x in enumerate(eff)]
     return T.pick(ng, eff, alpha, tau, delta)
 

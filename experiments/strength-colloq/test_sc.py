@@ -352,6 +352,13 @@ class Clauses(unittest.TestCase):
         self.assertNotEqual(lo90, lo95)
         self.assertEqual(arm["bootstrap90_lower_rows"], lo90, "the 90% level, against the level's shipping rows")
 
+    def test_clause_3_verdict_is_the_threshold_function(self):
+        rows = [row([-10.0, -10.3], [-5.0, -3.0], [1, 0], [0.0, 0.0], [0.0, 0.0]) for _ in range(20)]
+        args = ("cvtune-clean", rows, [True] * 20, [(1, 0, 4)] * 20, [True] * 20, (0.5, 2.0, 100.0), S.STD)
+        for v in (True, False):
+            with mock.patch.object(S, "boot_ok", return_value=v):
+                self.assertIs(S.arm_of(*args)["verdict"], v)
+
     def test_clause_3_threshold_is_minus_one_point(self):
         self.assertTrue(S.boot_ok(-2, 200))              # exactly -1.0 pp
         self.assertFalse(S.boot_ok(-3, 200))
@@ -424,6 +431,16 @@ class Anchors(unittest.TestCase):
         exits(self, S.anchor2, "aggressive", rows, recs, [not ship_ok[0], ship_ok[1]], params)
         exits(self, S.anchor2, "aggressive", rows, recs[:1], ship_ok, params)
         exits(self, S.anchor2, "aggressive", rows, recs, ship_ok[:1], params)
+
+    def test_anchor_2_compares_the_first_8_ll_of_a_longer_list(self):         # a scores file made with a longer ll list
+        params = (1.0, 2.0, 3.0)
+        rows, recs, ship_ok = self.level(params)
+        for r, rec in zip(rows, recs):
+            r["sc"]["ll"] = r["sc"]["ll"] + [-1.0] * 6 + [-2.0, -3.0]
+            rec["ll"] = rec["ll"] + [-1.0] * 6 + [-9.0, None]                # differs only after the 8th
+        S.anchor2("conservative", rows, recs, ship_ok, params)
+        recs[0]["ll"][7] = -7.0
+        exits(self, S.anchor2, "conservative", rows, recs, ship_ok, params)
 
     def test_anchor_2_stops_when_the_runs_are_not_the_same_candidates(self):
         params = (1.0, 2.0, 3.0)

@@ -67,6 +67,7 @@ test-python:
 	python3 -W ignore experiments/p4c-colloquial/test_p4c.py
 	python3 -W ignore experiments/p4d-colloquial/test_p4d.py
 	python3 -W ignore experiments/p5-reading-channel/test_p5.py
+	python3 -W ignore experiments/strength-colloq/test_sc.py
 
 test-swift: rust
 	@$(call relink_if_stale,Debug)
