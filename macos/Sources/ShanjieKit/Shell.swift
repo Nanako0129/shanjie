@@ -172,6 +172,20 @@ public final class MemoryAcgPackStore: AcgPackStore {
     public init(_ acgPack: Bool? = nil) { self.acgPack = acgPack }
 }
 
+/// Where the "經典台詞" switch is kept (docs/contracts/quote-pack.md section 2): `nil` means never chosen, which is **off**
+/// (the opposite of `AcgPackStore`: the maintainer's decision 2026-10-22 is that the quote pack ships off).
+@MainActor
+public protocol QuotePackStore: AnyObject {
+    var quotePack: Bool? { get set }
+}
+
+/// The in-memory QuotePackStore.
+@MainActor
+public final class MemoryQuotePackStore: QuotePackStore {
+    public var quotePack: Bool?
+    public init(_ quotePack: Bool? = nil) { self.quotePack = quotePack }
+}
+
 /// Where the candidate glass tint slider is kept (docs/contracts/settings-window.md section 2.3): 0...1,
 /// `nil` means never set, which is 0 (no tint). Same arrangement as `DemoteStore`.
 @MainActor
@@ -390,6 +404,12 @@ public final class Shell {
     /// The pack's source date for the grey menu line (acg-pack contract A2.4): `latest_source_revision` of `Resources/packs/acg.json`
     /// as a UTC date, read once at init. `nil` (file or field missing or unreadable) means no line.
     let acgDataDate: String?
+    private let quotePackStore: QuotePackStore
+    /// The classic quote pack (default off, quote-pack contract section 2): a bit of the same packs mask as the ACG pack, so a change rebuilds the engine too.
+    private(set) var quotePackOn = false
+    /// The mask `build()` passes to `shanjie_engine_new_packs`: the ACG bit while that switch is on, the quote bit while that one is.
+    /// A quote switch never chosen is off, so the mask of an app that never touched it is the ACG bit alone, as before the quote pack existed.
+    var packMask: UInt32 { (acgPackOn ? CoreEngine.packACG : 0) | (quotePackOn ? CoreEngine.packQuotes : 0) }
     private let glassTintStore: GlassTintStore
     private let candidateOrientationStore: CandidateOrientationStore
     /// The orientation setting (default horizontal); sent to every engine `build()` makes and on every change (candidate-vertical
@@ -523,6 +543,7 @@ public final class Shell {
     /// `abbreviationStore`: the abbreviation switch (V3 section 12.1). Required, like `predictionStore`.
     /// `englishStore`: the 中英混打 switch (zhen-mixed section 3.2). Required, like `abbreviationStore`.
     /// `acgPackStore`: the ACG word pack switch (acg-pack contract A.2). Required, like `demoteStore`.
+    /// `quotePackStore`: the classic quote pack switch (quote-pack contract section 2). Required, like `acgPackStore`.
     /// `glassTintStore`: the candidate glass tint (settings-window section 2.3). Required, like `demoteStore`.
     /// `candidateOrientationStore`: the candidate window's orientation (candidate-vertical contract section 2.1). Required, like `glassTintStore`.
     /// `rerankStore`: the 語意校正 switch (s7c2b section 2.2). Required, like `predictionStore`.
@@ -537,7 +558,7 @@ public final class Shell {
     /// (v0.4.0). No test sees the app's value: the release device check does (no 可省略韻母 in the menu).
     public init(resources: URL, panel: CandidatePanel, isSecureInput: @escaping () -> Bool,
                 layoutStore: LayoutStore, learningDirectory: URL?, dialogs: LearningDialogs,
-                demoteStore: DemoteStore, predictionStore: PredictionStore, abbreviationStore: AbbreviationStore, englishStore: EnglishStore, acgPackStore: AcgPackStore,
+                demoteStore: DemoteStore, predictionStore: PredictionStore, abbreviationStore: AbbreviationStore, englishStore: EnglishStore, acgPackStore: AcgPackStore, quotePackStore: QuotePackStore,
                 glassTintStore: GlassTintStore, candidateOrientationStore: CandidateOrientationStore,
                 rerankStore: RerankStore, rerankRunner: RerankRunner,
                 profileModeStore: ProfileModeStore, appProfileStore: AppProfileStore,
@@ -575,6 +596,7 @@ public final class Shell {
         englishInlineOn = englishStore.englishInline ?? true
         self.acgPackStore = acgPackStore
         acgDataDate = Shell.readAcgDataDate(resources.appendingPathComponent("packs/acg.json"))
+        self.quotePackStore = quotePackStore
         self.glassTintStore = glassTintStore
         glassTint = glassTintStore.glassTint ?? 0
         self.candidateOrientationStore = candidateOrientationStore
@@ -588,6 +610,7 @@ public final class Shell {
         self.appProfileStore = appProfileStore
         appProfiles = AppProfiles.parse(appProfileStore.appProfiles)
         acgPackOn = acgPackStore.acgPack ?? true
+        quotePackOn = quotePackStore.quotePack ?? false
         // The preference is read before the one engine is built (about 240 MB): building first
         // and switching after would build twice.
         mode = layoutStore.layout.flatMap(InputMode.init(rawValue:)) ?? .standard
@@ -835,6 +858,18 @@ public final class Shell {
         Log.shell.debug("word pack switched")
     }
 
+    /// The 經典台詞 switch (quote-pack contract section 2): like `setAcgPack`, the pack is part of the lexicon, so the composition
+    /// is committed and the engine rebuilt; the choice is stored. Same value: nothing happens.
+    func setQuotePack(_ on: Bool) {
+        guard on != quotePackOn else { return }
+        commitThenRebuild {
+            quotePackOn = on
+            quotePackStore.quotePack = on
+        }
+        changed()
+        Log.shell.debug("quote pack switched")
+    }
+
     /// Creates the engine for the current mode, then loads the LM and the current profile. A
     /// failure leaves an engine without the LM (still usable) or no engine (every key passes).
     private func build() {
@@ -844,14 +879,19 @@ public final class Shell {
         englishAvailable = false
         rerankPending = nil  // the old engine's; one still running is not applied (its engine is gone)
         let packsDir = resources.appendingPathComponent("packs").path
-        var (made, code) = CoreEngine.make(dataDir: resources.path, layout: mode.layout, packsDir: acgPackOn ? packsDir : nil)
-        if made == nil && acgPackOn {
-            // Any build failure retries without the pack, so the first code alone does not say whose fault it is:
-            // blame the pack only if the pack-less build works; otherwise the second code is the real cause.
-            // The stored choice is untouched and nothing is shown; the next rebuild tries the pack again.
+        let mask = packMask
+        var (made, code) = CoreEngine.make(dataDir: resources.path, layout: mode.layout, packsDir: mask != 0 ? packsDir : nil, packs: mask)
+        if made == nil && mask != 0 {
+            // Any build failure retries with fewer packs, so the first code alone does not say whose fault it is: with both packs on, try
+            // the ACG pack alone (a broken quote file must not take the default-on ACG pack with it), then none. Blame the packs only if a
+            // retry works; otherwise the last code is the real cause. The stored choices are untouched and nothing is shown; the next
+            // rebuild tries the packs again.
             let packCode = code
-            (made, code) = CoreEngine.make(dataDir: resources.path, layout: mode.layout)
-            if made != nil { Log.shell.error("shanjie_engine_new_packs failed, code \(packCode); built without the pack") }
+            let retries: [UInt32] = mask == (mask & CoreEngine.packACG) || mask & CoreEngine.packACG == 0 ? [0] : [CoreEngine.packACG, 0]
+            for retry in retries where made == nil {
+                (made, code) = CoreEngine.make(dataDir: resources.path, layout: mode.layout, packsDir: retry != 0 ? packsDir : nil, packs: retry)
+                if made != nil { Log.shell.error("shanjie_engine_new_packs failed, code \(packCode); built with packs mask \(retry)") }
+            }
         }
         guard let e = made else {
             Log.shell.error("shanjie_engine_new failed, code \(code)")

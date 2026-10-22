@@ -47,7 +47,7 @@ final class CJKSpacingShellTests: XCTestCase {
     final class Gate { var secure = false }
 
     private func makeShell(spacing: Bool?, gate: Gate = Gate(), store: MemorySpacingStore? = nil) -> Shell {
-        let shell = Shell(resources: resources, panel: FakePanel(), isSecureInput: { gate.secure }, layoutStore: MemoryLayoutStore(), learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), englishStore: MemoryEnglishStore(), acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore(), spacingStore: store ?? MemorySpacingStore(spacing))
+        let shell = Shell(resources: resources, panel: FakePanel(), isSecureInput: { gate.secure }, layoutStore: MemoryLayoutStore(), learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), englishStore: MemoryEnglishStore(), acgPackStore: MemoryAcgPackStore(), quotePackStore: MemoryQuotePackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore(), spacingStore: store ?? MemorySpacingStore(spacing))
         XCTAssertNotNil(shell.engine)
         return shell
     }

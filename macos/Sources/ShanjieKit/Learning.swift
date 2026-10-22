@@ -87,6 +87,7 @@ public struct MenuEntry: Equatable, Sendable {
         public static let abbreviation = "可省略韻母"
         public static let rerank = "語意校正"
         public static let acgPack = "動漫與遊戲詞"
+        public static let quotePack = "經典台詞"
         public static func acgDataDate(_ date: String) -> String { "資料更新至 \(date)（維基百科）" }
         /// No app name in the title (profile-choice section 2.3).
         public static let appChat = "這個 App 用聊天設定"
