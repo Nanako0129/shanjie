@@ -245,3 +245,18 @@ class Final(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class Sandhi(unittest.TestCase):
+    """R1b arm B: the sandhi readings of 一 and 不 cost 0 in the R1 term only; every other pair, and the input, are unchanged."""
+
+    def test_exempt_only_the_three_sandhi_pairs(self):
+        logp = {(("ㄧˊ",), "一"): -0.69, (("ㄧˋ",), "一"): -1.39, (("ㄧ",), "一"): 0.0, (("ㄅㄨˊ",), "不"): -0.5,
+                (("ㄓㄤˇ",), "長"): -3.75}
+        out = R.sandhi_exempt(logp)
+        self.assertEqual([out[k] for k in R.SANDHI], [0.0, 0.0, 0.0])
+        self.assertEqual(out[(("ㄓㄤˇ",), "長")], -3.75)
+        self.assertEqual(logp[(("ㄧˋ",), "一")], -1.39, "the input is not modified")
+
+    def test_missing_pair_is_not_added(self):
+        self.assertNotIn((("ㄅㄨˊ",), "不"), R.sandhi_exempt({(("ㄧˋ",), "一"): -1.0}))

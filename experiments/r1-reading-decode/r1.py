@@ -159,6 +159,11 @@ def load_run(a, setting, name):
     for r in out:
         r["terms"] = [Q.word_terms(r["syls"], c[2], logp) for c in r["cands"]]
         r["ch"] = {c: [Q.ch_of(t, c) for t in r["terms"]] for c in CS}
+    # R1b arm B (README, R1b): the R1 term only, never P5's shipping term (anchor 1 reproduces shipping with r["ch"]), counts the
+    # tone-sandhi readings of 一 and 不 as 0. Without the flag r["ch_r1"] is r["ch"], so R1 is unchanged.
+    rlogp = sandhi_exempt(logp) if getattr(a, "sandhi_exempt", False) else logp
+    for r in out:
+        r["ch_r1"] = r["ch"] if rlogp is logp else {c: [Q.ch_of(Q.word_terms(r["syls"], cand[2], rlogp), c) for cand in r["cands"]] for c in CS}
     if setting == "chat-std":
         import p4
         if sha_file(a.t2) != P.T2_SHA256:
@@ -212,11 +217,24 @@ def ship_picks(cfg, rows):
     return out
 
 
+SANDHI = ((("ㄧˊ",), "一"), (("ㄧˋ",), "一"), (("ㄅㄨˊ",), "不"))
+
+
+def sandhi_exempt(logp):
+    """A copy of `logp` where the sandhi readings of 一 (ㄧˊ, ㄧˋ) and 不 (ㄅㄨˊ) cost 0: they are the standard readings before the right
+    tones (docs/contracts/s2r), not rare ones. ponytail: exempt whatever the next syllable, the rule that picks the sandhi tone is not checked."""
+    out = dict(logp)
+    for k in SANDHI:
+        if k in out:
+            out[k] = 0.0
+    return out
+
+
 def r1_pick(cfg, r, lam, c):
     """-> (chosen candidate index among the 64, order of the 64 by s, 'ok' | 'none' | 'nollcand'): the new top 8 by s = ng + lam * ch go
     into the fusion with their own ll; a row without `ll`, or whose new top 8 has a candidate without one (null: over the model's context), is decided
     by the first of s (README, registered rule: core skips the rerank when a top-8 candidate is too long)."""
-    ch = r["ch"][c]
+    ch = r.get("ch_r1", r["ch"])[c]
     s = [g + lam * h for g, h in zip(r["ng64"], ch)]
     order = sorted(range(len(s)), key=lambda j: (-s[j], j))
     top = order[:TOP_K]
@@ -385,7 +403,7 @@ def cmd_run(a):
     anchor1(cfg, rows, base_ok)
     res = {"setting": a.setting, "name": a.name, "role": role, "n": len(rows), "anchor1": "ok", "scores_sha256": sha_file(a.tinylm_scores),
            "gold_in_64": sum(any(r["ok64"]) for r in rows), "terms": term_counts(rows),
-           "shipping_params": list(cfg["plain"])}
+           "shipping_params": list(cfg["plain"]), "sandhi_exempt": bool(getattr(a, "sandhi_exempt", False))}
     p4d = ship_picks(cfg_r1, rows)        # chat-std: the P4d cell (nu 0); every other setting: the shipping cell again
     if needs2:
         anchor2(a, p4d, rows, a.name)
@@ -517,6 +535,7 @@ def main(argv=None):
     g.add_argument("--cell-from")
     for k in ("norc-scores", "norc-rowstats", "norc-summary"):
         r.add_argument("--" + k)
+    r.add_argument("--sandhi-exempt", action="store_true", help="R1b arm B: the R1 term counts the sandhi readings of 一 and 不 as 0")
     s = sub.add_parser("select")
     s.add_argument("chatclause")
     s.add_argument("wikitune")
