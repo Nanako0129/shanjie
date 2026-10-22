@@ -455,15 +455,15 @@ fn row32_backspace_in_the_buffer() {
     assert!(syls(&e).is_empty());
 }
 
-/// #37: with 39 units, the fifth key of a run pushes the oldest key out as the 40th unit: the whole composition is sent, ending with that digit.
+/// #37: with 127 units, the fifth key of a run pushes the oldest key out as the 128th unit: the whole composition is sent, ending with that digit.
 #[test]
-fn row37_forty_units() {
+fn row37_full_composition() {
     let mut e = eng();
     let os = run_all(&mut e, &script("r37"));
     let n = os.len();
     assert!(os[..n - 1].iter().all(|o| o.commit.is_empty()));
     let o = &os[n - 1];
-    assert_eq!(o.commit.chars().count(), 40);
+    assert_eq!(o.commit.chars().count(), MAX_SYLLABLES);
     assert!(o.commit.ends_with('1') && o.commit.starts_with('，'));
     assert!(syls(&e).is_empty(), "the composition is empty: only the buffer is left");
     assert_eq!(o.preedit, "234ㄓ", "the buffer shows as the baseline scores 12345: 234, then the unfinished ㄓ");
@@ -734,37 +734,37 @@ fn cmd_bs() -> Key {
     Key { kind: KeyKind::Backspace, ch: '\0', modifiers: MOD_COMMAND }
 }
 
-/// P2-1: the 40th unit that a flushed digit sends does not take the previous key's unfinished tail along (the 5 still in `pend` as ㄓ).
+/// P2-1: the last unit (`MAX_SYLLABLES`) that a flushed digit sends does not take the previous key's unfinished tail along (the 5 still in `pend` as ㄓ).
 #[test]
-fn review_p2_1_the_40th_unit_sends_no_stale_tail() {
+fn review_p2_1_the_last_unit_sends_no_stale_tail() {
     let mut e = eng();
-    let os = run_all(&mut e, &format!("{} 1 2 3 4 5 8", commas(38)));
+    let os = run_all(&mut e, &format!("{} 1 2 3 4 5 8", commas(MAX_SYLLABLES - 2)));
     assert!(os[os.len() - 2].preedit.ends_with("234ㄓ"), "premise: the tail of the 5 is on screen before the 8");
     let o = os.last().unwrap();
-    assert_eq!(o.commit, format!("{}12", "，".repeat(38)), "{:?}", o.commit);
+    assert_eq!(o.commit, format!("{}12", "，".repeat(MAX_SYLLABLES - 2)), "{:?}", o.commit);
     assert!(!o.commit.contains('ㄓ') && !o.preedit.contains('ㄓ'));
     assert_eq!(o.preedit, "3458", "the rest of the buffer, shown as the baseline scores it");
     // Space then Enter behind 1 2 3 4 5: nothing but the keys typed (the ㄓ of the 5 is a digit key, not a syllable that was finished).
     let mut e = eng();
-    let os = run_all(&mut e, &format!("{} 1 2 3 4 5 _ Enter", commas(38)));
+    let os = run_all(&mut e, &format!("{} 1 2 3 4 5 _ Enter", commas(MAX_SYLLABLES - 2)));
     let all = all_commit(&os);
     assert!(!all.contains('ㄓ'), "{all:?}");
-    assert!(all.starts_with(&"，".repeat(38)) && all.contains("12345"), "{all:?}");
+    assert!(all.starts_with(&"，".repeat(MAX_SYLLABLES - 2)) && all.contains("12345"), "{all:?}");
     // A.12 (was: no ㄓ either): Enter sends what the screen shows, the ㄓ of the 5 included.
     let mut e = eng();
-    let os = run_all(&mut e, &format!("{} 1 2 3 4 5 Enter", commas(38)));
+    let os = run_all(&mut e, &format!("{} 1 2 3 4 5 Enter", commas(MAX_SYLLABLES - 2)));
     let shown = &os[os.len() - 2].preedit;
     assert!(shown.ends_with("234ㄓ"), "premise: {shown:?}");
-    assert_eq!(all_commit(&os), format!("{}{}", "，".repeat(38), shown.trim_start_matches('，')), "{:?}", all_commit(&os));
+    assert_eq!(all_commit(&os), format!("{}{}", "，".repeat(MAX_SYLLABLES - 2), shown.trim_start_matches('，')), "{:?}", all_commit(&os));
 }
 
-/// P2-2: Enter ends a run whose flush reaches the 40th unit while more of the buffer is left: everything is sent, nothing stays behind.
+/// P2-2: Enter ends a run whose flush reaches `MAX_SYLLABLES` while more of the buffer is left: everything is sent, nothing stays behind.
 #[test]
-fn review_p2_2_enter_sends_the_rest_of_the_buffer_after_the_40th_unit() {
+fn review_p2_2_enter_sends_the_rest_of_the_buffer_after_the_last_unit() {
     let mut e = eng();
-    let os = run_all(&mut e, &format!("{} 1 2 3 4 Enter", commas(38)));
+    let os = run_all(&mut e, &format!("{} 1 2 3 4 Enter", commas(MAX_SYLLABLES - 2)));
     let o = os.last().unwrap();
-    assert_eq!(all_commit(&os), format!("{}1234", "，".repeat(38)));
+    assert_eq!(all_commit(&os), format!("{}1234", "，".repeat(MAX_SYLLABLES - 2)));
     assert_eq!(o.preedit, "");
     assert!(syls(&e).is_empty());
 }

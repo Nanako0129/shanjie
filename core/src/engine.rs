@@ -112,6 +112,11 @@ impl RerankJob {
         RerankResult { generation: self.generation, choices }
     }
 
+    /// The most characters any candidate of any stretch has (composition-cap: at most `ctx - 3`, so none ends in `TooLong`).
+    pub fn max_candidate_chars(&self) -> usize {
+        self.stretches.iter().flat_map(|s| &s.paths).map(|p| p.iter().map(|w| w.0.chars().count()).sum()).max().unwrap_or(0)
+    }
+
     /// Test hook (the FFI panic test): every candidate's text, so an injected panic payload carries input text.
     #[cfg(test)]
     pub(crate) fn texts(&self) -> String {
@@ -149,7 +154,10 @@ pub const MOD_CONTROL: u32 = 2;
 pub const MOD_OPTION: u32 = 4;
 pub const MOD_COMMAND: u32 = 8;
 pub const MOD_CAPSLOCK: u32 = 16;
-pub const MAX_SYLLABLES: usize = 40;
+/// Most units (syllables, punctuation, English / digit tokens, space units) a composition holds; the one that makes this many sends
+/// everything (s3d §1). 128 since docs/contracts/composition-cap.md: past the small model's window (`TinyLm::ctx`), the head of a
+/// long free stretch is frozen (`cap_refreeze`) so the rerank still sees a stretch that fits.
+pub const MAX_SYLLABLES: usize = 128;
 pub const PAGE_SIZE: usize = 9;
 /// Rows visible in the expanded grid (a-4: five, with a scroll bar).
 pub const GRID_ROWS: usize = 5;
@@ -367,6 +375,14 @@ struct PathWord {
     delta: f64,
     /// Syllables the word covers (punctuation is 1).
     syllables: usize,
+}
+
+/// What `cap_snapshot` keeps of the state before a key (composition-cap §1.2 step 1).
+struct CapSnap {
+    /// Each word of `path` with the syllables it covers.
+    path: Vec<(String, usize)>,
+    syls: Vec<String>,
+    generation: u64,
 }
 
 struct Fixed {
@@ -607,7 +623,7 @@ pub struct Engine {
     /// replaced a symbol in an occupied column (rule 9). Empty unless `shadow_on`; cleared with `clear_pend`.
     shadow: Vec<char>,
     shadow_over: u32,
-    /// Set by `choose_english` when the token it inserted was the 40th unit and sent everything: the committed text, for the
+    /// Set by `choose_english` when the token it inserted was the unit that reaches `MAX_SYLLABLES` and sent everything: the committed text, for the
     /// output of the key or pick that made it. Choosing an English item sends nothing otherwise (zhen-inline section 1.0).
     commit_out: Option<String>,
     /// zhen-inline section 1.3b: the English run being typed (Shift+letter starts it): letters shown at the cursor, not yet a
@@ -630,6 +646,11 @@ pub struct Engine {
     d_shown: usize,
     d_emitted: usize,
     dtrace: Option<Vec<DigitEvent>>,
+    /// composition-cap §1.2 step 3: the syllable ranges ⌘⌫ forgot an entry over in the latest `key()`; the head freeze leaves them alone, so
+    /// a forget shows on screen at once. Cleared by `cap_snapshot`.
+    forgot: Vec<(usize, usize)>,
+    /// Test hook (`decodes`): how many times the composition was decoded (every `invalidate`).
+    decodes: u64,
 }
 
 /// Base lexicon + overlay from `data_dir` (§5), same as the eval CLI default. The overlay rows are
@@ -852,6 +873,8 @@ impl Engine {
             d_shown: 0,
             d_emitted: 0,
             dtrace: None,
+            forgot: Vec::new(),
+            decodes: 0,
         }
     }
 
@@ -862,6 +885,7 @@ impl Engine {
     /// decodes (decoding reads the learner whenever it is non-empty).
     /// Keys that do not re-decode (cursor moves, unfinished symbols, entering the prediction row, pass-through) keep it.
     fn invalidate(&mut self) {
+        self.decodes += 1;
         self.generation = next_generation();
         self.rerank_job = None;
         self.guard_skips = 0;
@@ -1615,7 +1639,7 @@ impl Engine {
 
     /// Section 2.3 and zhen-inline section 1.0: item `idx` of the English window. The unfinished syllable and the shadow go;
     /// an English item becomes an English token at the cursor (`insert_english`), a Chinese item the leftover syllable with the
-    /// item fixed over it. Neither is learned, and nothing is committed here (a 40th unit's commit waits in `commit_out`).
+    /// item fixed over it. Neither is learned, and nothing is committed here (the commit of a unit that reaches `MAX_SYLLABLES` waits in `commit_out`).
     ///
     /// `keep`: the window was closed by a Zhuyin key (section 1.3), so an English token is an auto-keep.
     fn choose_english(&mut self, idx: usize, keep: bool) -> Result<(), EngineError> {
@@ -1630,14 +1654,14 @@ impl Engine {
             self.insert_token(reading, Some(word), None)?.commit
         };
         if !commit.is_empty() {
-            self.commit_out = Some(commit); // the 40th syllable committed everything (section 2.1 of s3d)
+            self.commit_out = Some(commit); // the syllable that reached `MAX_SYLLABLES` committed everything (section 2.1 of s3d)
         }
         Ok(())
     }
 
     /// Letters become an English token at the cursor (reading `PUNCT_PREFIX` + the word, the word as its fixed word). `auto`: an
     /// auto-keep (section 1.3), which is reported by `english_autokept` and remembers the unfinished syllable (what the window's
-    /// Chinese item would be) for section 1.3c. Returns what the 40th unit sent, if it did (section 1.3: it goes in this key's output).
+    /// Chinese item would be) for section 1.3c. Returns what the unit that reaches `MAX_SYLLABLES` sent, if it did (section 1.3: it goes in this key's output).
     fn insert_english(&mut self, word: String, auto: bool) -> Result<String, EngineError> {
         let zh = auto.then(|| self.pending());
         self.autokept |= auto;
@@ -1694,7 +1718,7 @@ impl Engine {
     // ---- zhen-inline section 1.3b: the English run ----
 
     /// Ends the run: its letters become an English token at the cursor (reading `PUNCT_PREFIX` + the letters as typed). Returns
-    /// what the 40th unit sent, if it did.
+    /// what the unit that reaches `MAX_SYLLABLES` sent, if it did.
     fn end_run(&mut self) -> Result<String, EngineError> {
         let word = std::mem::take(&mut self.run);
         if let Some((_, zh, reading)) = self.run_zh.take().filter(|(w, _, _)| *w == word) {
@@ -1787,7 +1811,7 @@ impl Engine {
         Ok(o)
     }
 
-    /// The output of a key or pick that chose a candidate: the commit of the 40th unit (an item of the English window), or the
+    /// The output of a key or pick that chose a candidate: the commit of the unit that reaches `MAX_SYLLABLES` (an item of the English window), or the
     /// plain snapshot.
     fn chosen(&mut self) -> Result<Output, EngineError> {
         match self.commit_out.take() {
@@ -1835,6 +1859,17 @@ impl Engine {
             return Err(e);
         }
         self.handled()
+    }
+
+    /// How many times the composition was decoded since the engine was made (a test hook: a key that freezes the head of a long stretch
+    /// decodes once more than the same key without the freeze).
+    pub fn decodes(&self) -> u64 {
+        self.decodes
+    }
+
+    /// The frozen fixed words as (first syllable, end, word), in composition order (read-only; repick-freeze, composition-cap).
+    pub fn frozen_words(&self) -> Vec<(usize, usize, String)> {
+        self.fixed.iter().filter(|f| f.frozen).map(|f| (f.start, f.end, f.word.clone())).collect()
     }
 
     /// Where each token of the current best path starts (a word or a punctuation mark), from the composition's start.
@@ -1944,7 +1979,8 @@ impl Engine {
         if !self.learning {
             self.paused = true;
         }
-        let mut r = self.dispatch(k);
+        let snap = self.cap_snapshot();
+        let mut r = self.dispatch(k).and_then(|mut o| self.cap_after(snap, &mut o).map(|()| o));
         match &mut r {
             Err(_) => self.clear_all(),
             Ok(o) if std::mem::take(&mut self.pred_dirty) => {
@@ -1955,6 +1991,97 @@ impl Engine {
             Ok(_) => {}
         }
         r
+    }
+
+    /// The core's rerank-job condition (S7c-2a section 2.2): the small model is loaded, the switch is on and the demotion table is on.
+    fn jobs_on(&self) -> bool {
+        self.tinylm.is_some() && self.rerank_on && self.demote
+    }
+
+    /// composition-cap §1.2 step 1: the path and the syllables before a key or pick runs, when step 3 could apply to it at all.
+    fn cap_snapshot(&mut self) -> Option<CapSnap> {
+        self.forgot.clear();
+        (self.jobs_on() && !self.syls.is_empty()).then(|| CapSnap {
+            path: self.path.iter().map(|w| (w.word.clone(), w.syllables)).collect(),
+            syls: self.syls.clone(),
+            generation: self.generation,
+        })
+    }
+
+    /// The part of `key()` and `pick()` after `dispatch` (composition-cap §1.2 steps 3 and 4): when the key decoded a non-empty
+    /// composition, freeze the head of each free stretch longer than the model's window and, if anything froze, decode again and
+    /// rebuild `o` from the new state (`view` with the key's `handled` and `commit`; the caller adds the prediction row).
+    fn cap_after(&mut self, snap: Option<CapSnap>, o: &mut Output) -> Result<(), EngineError> {
+        let Some(snap) = snap.filter(|s| s.generation != self.generation && !self.syls.is_empty()) else { return Ok(()) };
+        if !self.cap_refreeze(&snap) {
+            return Ok(());
+        }
+        self.refresh()?;
+        let commit = std::mem::take(&mut o.commit);
+        *o = self.view(o.handled, commit);
+        Ok(())
+    }
+
+    /// composition-cap §1.2 step 3. A free stretch is the units between two fixed words (or an open English run), as the rerank job
+    /// takes it. Per stretch of more than W = ctx - 3 characters (`ll_many` drops context characters to fit the key and the
+    /// candidate in the window, and keeps two of them for `context_key`): from its start, word by word (the word across the
+    /// W-from-the-end point too), freeze the words of the path shown before the key until W or fewer characters are left. Only words
+    /// that lie wholly in the longest common prefix of the syllables before and after the key are frozen, and the freeze stops at the
+    /// first word that is not, or lies in a range ⌘⌫ forgot. Returns whether anything froze.
+    fn cap_refreeze(&mut self, snap: &CapSnap) -> bool {
+        let (Some(model), Some(st)) = (&self.tinylm, &self.lm) else { return false };
+        let Some(w) = model.ctx().checked_sub(3).filter(|&w| w > 0) else { return false };
+        // The alignment guard of `freeze_outside`, for the path as it was shown.
+        if snap.path.iter().map(|p| p.1).sum::<usize>() != snap.syls.len() || self.path.iter().map(|p| p.syllables).sum::<usize>() != self.syls.len() {
+            return false;
+        }
+        let lcp = snap.syls.iter().zip(&self.syls).take_while(|(a, b)| a == b).count();
+        // Characters of the new decode's words by the syllable each starts at.
+        let mut chars_at = vec![0usize; self.syls.len()];
+        let mut at = 0;
+        for p in &self.path {
+            chars_at[at] = p.word.chars().count();
+            at += p.syllables;
+        }
+        // The old path's words with their syllable ranges.
+        let mut old = Vec::with_capacity(snap.path.len());
+        let mut at = 0;
+        for (word, n) in &snap.path {
+            old.push((at, at + n, word));
+            at += n;
+        }
+        let cut = self.run_cut();
+        let mut bounds: Vec<(usize, usize)> = Vec::new(); // the free stretches [from, to)
+        let mut from = 0;
+        for f in self.fixed.iter().map(|f| (f.start, f.end)).chain([(self.syls.len(), self.syls.len())]) {
+            if from < f.0 {
+                match cut.filter(|&c| from < c && c < f.0) {
+                    Some(c) => bounds.extend([(from, c), (c, f.0)]),
+                    None => bounds.push((from, f.0)),
+                }
+            }
+            from = f.1;
+        }
+        let mut frozen = Vec::new();
+        for (from, to) in bounds {
+            let mut left: usize = chars_at[from..to].iter().sum();
+            let mut next = from;
+            while left > w {
+                // The old word that starts here and lies in the stretch and the common prefix.
+                let Some(&(a, b, word)) = old.iter().find(|o| o.0 == next) else { break };
+                let fits = b <= to.min(lcp) && !self.forgot.iter().any(|&(x, y)| a < y && x < b);
+                if !fits || st.capped.best_lp_delta(&self.syls[a..b], word).is_none() {
+                    break;
+                }
+                frozen.push(Fixed::frozen(a, b, word.clone()));
+                left = left.saturating_sub(word.chars().count());
+                next = b;
+            }
+        }
+        let any = !frozen.is_empty();
+        self.fixed.extend(frozen);
+        self.fixed.sort_by_key(|f| f.start);
+        any
     }
 
     fn clear_pred(&mut self) {
@@ -2127,7 +2254,7 @@ impl Engine {
         self.handled()
     }
 
-    /// Also renews the generation (section 2.3): a commit or a reset inside one call (the 40-syllable auto-commit, a commit from
+    /// Also renews the generation (section 2.3): a commit or a reset inside one call (the `MAX_SYLLABLES` auto-commit, a commit from
     /// the prediction row) voids the job the refresh before it made.
     fn clear_all(&mut self) {
         self.invalidate();
@@ -2156,7 +2283,7 @@ impl Engine {
     fn shown(&self) -> (String, u32, (u32, u32)) {
         let chars: Vec<char> = self.display.chars().collect();
         // Zhen-inline section 1.2: with D, the unfinished syllable shows as the shadow's letters. Every path that sends what
-        // is shown (Enter, `reset(Commit)`, the 40th token) comes through here.
+        // is shown (Enter, `reset(Commit)`, the token that reaches `MAX_SYLLABLES`) comes through here.
         let unfinished: String = if !self.run.is_empty() {
             self.run.clone() // section 1.3b: the English run sits at the cursor
         } else if self.english_inline_shown() {
@@ -2275,7 +2402,7 @@ impl Engine {
         }
         let (mut out, mut path) = (String::new(), Vec::new());
         // S7c-2a section 2.2: alpha and tau hold only for the scores with the demotion table on.
-        let jobs = self.tinylm.is_some() && self.rerank_on && self.demote;
+        let jobs = self.jobs_on();
         // Whether the job will read the reading-channel term (the same decision as `colloquial` and `channel_lex` at the end of this function): only
         // then do the stretches keep their syllables, so formal, the other strengths, no table and the channel off allocate nothing for it.
         let channel = self.reading_channel
@@ -2423,6 +2550,7 @@ impl Engine {
         if let (KeyKind::Backspace, true, Some(sel)) = (k.kind, m & MOD_COMMAND != 0, self.pred_sel) {
             let Pred { word, reading, .. } = &self.pred[sel];
             let (word, reading) = (word.clone(), reading.clone());
+            self.note_forgot(&reading);
             self.forget_entry(&reading, &word);
             // The free segments decode without the forgotten record; unlike the candidate window's ⌘⌫ no frozen word
             // is freed (repick-freeze section 7.2).
@@ -2498,7 +2626,7 @@ impl Engine {
         };
         if let Some(p) = punct {
             // Zhen-inline section 1.3h: English on screen (rule D) or selected in an open English window is kept as a token first,
-            // as an auto-keep; what the 40th unit sent goes first in this output. Anything else unfinished is dropped.
+            // as an auto-keep; what the unit that reaches `MAX_SYLLABLES` sent goes first in this output. Anything else unfinished is dropped.
             let kept = if self.english_open() {
                 let sel = self.cands.as_ref().map_or(0, |c| c.sel);
                 self.choose_english(sel, true)?;
@@ -2786,13 +2914,14 @@ impl Engine {
     /// the window closed, the V3 prediction row's (entered or not). `Ok(None)` when there is neither or `index` is
     /// outside that output (state unchanged).
     pub fn pick(&mut self, index: usize) -> Result<Option<Output>, EngineError> {
+        let snap = self.cap_snapshot();
         let Some(c) = &self.cands else {
             // V3 section 4: a click on the prediction row selects at once, entered or not.
             if index >= self.pred.len() {
                 return Ok(None);
             }
             self.last_digits = None; // digits.md A.3.6: the next state-changing key clears the other reading of the syllable that closed
-            let r = self.choose_pred(index);
+            let r = self.choose_pred(index).and_then(|mut o| self.cap_after(snap, &mut o).map(|()| o));
             if r.is_err() {
                 self.clear_all();
             }
@@ -2803,7 +2932,8 @@ impl Engine {
             return Ok(None);
         }
         self.pred_dirty = false;
-        let mut r = self.choose(first + index).and_then(|()| self.chosen());
+        // The frozen head (composition-cap) is part of the pick, before the row is recomputed from the path.
+        let mut r = self.choose(first + index).and_then(|()| self.chosen()).and_then(|mut o| self.cap_after(snap, &mut o).map(|()| o));
         if r.is_err() {
             self.clear_all();
         } else if std::mem::take(&mut self.pred_dirty) {
@@ -3150,6 +3280,7 @@ impl Engine {
             // (its keys and its "not the shown word" filter follow the new decoding), then the window stays open on the
             // rebuilt list, selected on the same word if it is still there.
             let reading = c.rows[c.sel].reading.clone();
+            self.note_forgot(&reading);
             self.forget_entry(&reading, &word);
             self.refresh()?;
             let Some(mut c) = self.cands.take() else { return Ok(()) };
@@ -3185,6 +3316,7 @@ impl Engine {
         let key = context_key(&format!("{}{shown_before}", self.left));
         // Rule 8: under the sentence-start key the record also holds the syllable after the word, as in the decoder.
         let in_effect = self.learned_weight(&key, self.syls.get(end).map(String::as_str), &reading, &word, self.today()) > 0.0;
+        self.forgot.push((start, end));
         self.forget_entry(&reading, &word);
         if in_effect {
             self.fixed.retain(|f| !(f.frozen && f.start < end && start < f.end));
@@ -3203,6 +3335,13 @@ impl Engine {
         c.sel = c.sel.min(c.list.len() - 1);
         self.cands = Some(c.reclamped());
         Ok(())
+    }
+
+    /// composition-cap §1.2 step 3: every place `reading` stands in the composition, for the head freeze to leave alone this key.
+    fn note_forgot(&mut self, reading: &[String]) {
+        let n = reading.len();
+        let spots: Vec<(usize, usize)> = (0..(self.syls.len() + 1).saturating_sub(n)).filter(|&p| self.syls[p..p + n] == *reading).map(|p| (p, p + n)).collect();
+        self.forgot.extend(spots);
     }
 
     /// Forget (reading, word) everywhere: pending learns of it are dropped and its records go, then the file is
@@ -3278,7 +3417,7 @@ impl Engine {
         // Predict-down contract B.3.1 (revision 2026-10-17): a row item over exactly the typed syllables before the cursor is
         // the lexicon's candidate for that span and falls through to the re-pick below (`list[idx]` is the same word and
         // length); one whose reading is longer or differs (it completes an unfinished unit or an abbreviation, or runs past the
-        // typed syllables) is chosen from the row, and the 40th unit's commit waits in `commit_out` for `chosen`, as an English
+        // typed syllables) is chosen from the row, and the commit of a unit that reaches `MAX_SYLLABLES` waits in `commit_out` for `chosen`, as an English
         // item's does.
         if c.rows.get(idx).is_some_and(|p| p.reading[..] != self.syls[p.start..self.cursor]) {
             let o = self.apply_pred(c.rows.swap_remove(idx))?;

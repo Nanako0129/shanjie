@@ -442,6 +442,11 @@ impl TinyLm {
         })
     }
 
+    /// The context window in characters (a candidate longer than `ctx - 1` is `TooLong`).
+    pub fn ctx(&self) -> usize {
+        self.ctx
+    }
+
     /// The standard (alpha, tau, delta) tuned for the profile; delta is 0 in a version 1 file.
     pub fn alpha_tau_delta(&self, p: Profile) -> (f64, f64, f64) {
         self.params(p, RerankLevel::Standard)

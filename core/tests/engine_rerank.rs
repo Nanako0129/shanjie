@@ -533,27 +533,27 @@ fn pre_after_apply_is_the_reranked_text() {
     assert!(!c.learner().is_empty(), "control: over the n-gram text the same pick teaches");
 }
 
-/// Section 2.3: the 40-syllable auto-commit voids the job of the refresh just before it, both for a key and for a prediction pick
-/// that reaches 40.
+/// Section 2.3: the 128-syllable auto-commit voids the job of the refresh just before it, both for a key and for a prediction pick
+/// that reaches 128.
 #[test]
 fn auto_commit_voids_the_job() {
-    let ni: Syls = vec!["ㄋㄧˇ".to_string(); 39];
+    let ni: Syls = vec!["ㄋㄧˇ".to_string(); MAX_SYLLABLES - 1];
     let mut e = engine();
     type_syls(&mut e, &ni);
-    let r = e.take_rerank_job().expect("a job at 39").run();
+    let r = e.take_rerank_job().expect("a job at 127").run();
     let mut o = None;
     for key in keys_of("ㄋㄧˇ") {
         o = Some(e.key(key).unwrap());
     }
-    assert!(!o.unwrap().commit.is_empty(), "premise: the 40th syllable commits");
+    assert!(!o.unwrap().commit.is_empty(), "premise: the 128th syllable commits");
     assert!(e.take_rerank_job().is_none(), "no job after the auto-commit");
     assert!(e.apply_rerank(r).unwrap().is_none());
-    // A prediction pick: 39 syllables, then ㄋ shows a row of words for it; picking one makes 40.
+    // A prediction pick: 127 syllables, then ㄋ shows a row of words for it; picking one makes 128.
     type_syls(&mut e, &ni);
     let row = e.key(Key::ch('s', 0)).unwrap();
     assert!(!row.candidates.is_empty() && row.selected.is_none(), "premise: a prediction row");
     let o = e.pick(0).unwrap().unwrap();
-    assert!(!o.commit.is_empty(), "premise: the pick reached 40 and committed");
+    assert!(!o.commit.is_empty(), "premise: the pick reached 128 and committed");
     assert!(e.take_rerank_job().is_none(), "no job after the prediction pick's commit");
 }
 

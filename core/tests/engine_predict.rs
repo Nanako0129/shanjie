@@ -644,14 +644,14 @@ fn the_row_is_cleared_by_other_state_changes() {
     // set_profile and set_demote snapshots
     assert_no_row(&with_row().set_profile(Profile::Formal).unwrap());
     assert_no_row(&with_row().set_demote(false).unwrap());
-    // 40 syllables auto-commit
+    // 128 syllables auto-commit
     let mut e = engine();
     let mut last = None;
-    for _ in 0..40 {
+    for _ in 0..MAX_SYLLABLES {
         last = Some(typ(&mut e, &["ㄋㄧˇ"], ""));
     }
     let o = last.unwrap();
-    assert!(!o.commit.is_empty(), "40 syllables commit");
+    assert!(!o.commit.is_empty(), "128 syllables commit");
     assert_no_row(&o);
 }
 
@@ -732,6 +732,76 @@ fn rss_kb() -> u64 {
 #[ignore]
 fn timing_typing76_keys() {
     time_typing76(None);
+}
+
+/// docs/contracts/composition-cap.md section 2: a 128-syllable sentence without punctuation (typing76 readings, one after the other, the last
+/// cut to fit),
+/// typed key by key into the shipping engine (n-gram, small model, colloquial table, chat), the way `shanjie-replay --rerank each` does:
+/// the job of each syllable is run and applied before the next. Five rounds; per round the p95 of the key path with rerank on, the p95 of
+/// `RerankJob::run`, and the p95 of the key path with rerank off (every key decodes the whole composition, up to 127 syllables). Printed,
+/// and asserted at the contract's limits (16 ms, 300 ms, 16 ms) on the median of the five rounds. Run it at low load:
+/// `cargo test --release -p core --test engine_predict timing_composition_cap -- --ignored --nocapture`.
+#[test]
+#[ignore]
+fn timing_composition_cap_128_syllables() {
+    let text = std::fs::read_to_string(root().join("eval/dev/user-typing.txt")).unwrap();
+    let mut syls: Vec<String> = Vec::new();
+    for line in text.lines().filter(|l| !l.is_empty()) {
+        let reading: Vec<&str> = line.split('|').nth(2).unwrap().split(' ').collect();
+        let room = MAX_SYLLABLES - syls.len();
+        syls.extend(reading.iter().take(room).map(|s| s.to_string()));
+    }
+    assert_eq!(syls.len(), MAX_SYLLABLES, "the typing76 readings (the last one cut short) fill the composition exactly");
+    let data = |f: &str| root().join("data/lm").join(f);
+    let build = |rerank: bool| {
+        let mut e = Engine::new(&root().join("data/lexicon"), L).unwrap();
+        e.load_lm(&data("bigram.sjlm")).unwrap();
+        e.load_tinylm(&data("tinylm.sjtl")).unwrap();
+        e.load_colloquial(&data("colloquial.sjlm")).unwrap();
+        e.set_rerank(rerank).unwrap();
+        e
+    };
+    let p95 = |mut v: Vec<Duration>| {
+        v.sort();
+        v[v.len() * 95 / 100]
+    };
+    let median = |mut v: Vec<Duration>| {
+        v.sort();
+        v[v.len() / 2]
+    };
+    let ms = |d: Duration| d.as_secs_f64() * 1000.0;
+    let (mut on_keys, mut on_jobs, mut off_keys) = (Vec::new(), Vec::new(), Vec::new());
+    for round in 0..5 {
+        for rerank in [true, false] {
+            let mut e = build(rerank);
+            let (mut keys, mut jobs) = (Vec::new(), Vec::new());
+            for s in &syls {
+                for k in syl_keys(s) {
+                    let t = Instant::now();
+                    e.key(k).unwrap();
+                    keys.push(t.elapsed());
+                }
+                if let Some(job) = e.take_rerank_job() {
+                    let t = Instant::now();
+                    let r = job.run();
+                    jobs.push(t.elapsed());
+                    e.apply_rerank(r).unwrap();
+                }
+            }
+            if rerank {
+                on_keys.push(p95(keys));
+                on_jobs.push(p95(jobs));
+            } else {
+                off_keys.push(p95(keys));
+            }
+        }
+        println!("round {round}: rerank on key p95 {:.3} ms, RerankJob::run p95 {:.3} ms; rerank off key p95 {:.3} ms", ms(on_keys[round]), ms(on_jobs[round]), ms(off_keys[round]));
+    }
+    let (k_on, j_on, k_off) = (median(on_keys), median(on_jobs), median(off_keys));
+    println!("median of 5: rerank on key p95 {:.3} ms, RerankJob::run p95 {:.3} ms; rerank off key p95 {:.3} ms", ms(k_on), ms(j_on), ms(k_off));
+    assert!(k_on < Duration::from_millis(16), "rerank on: key path p95 over 16 ms");
+    assert!(j_on < Duration::from_millis(300), "RerankJob::run p95 over 300 ms");
+    assert!(k_off < Duration::from_millis(16), "rerank off: key path p95 over 16 ms");
 }
 
 /// The same with the abbreviation composer on (section 12.4 item 6).
