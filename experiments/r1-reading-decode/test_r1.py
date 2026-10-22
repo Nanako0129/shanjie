@@ -259,6 +259,18 @@ class Sandhi(unittest.TestCase):
         self.assertNotIn((("ㄅㄨˊ",), "不"), R.sandhi_exempt({(("ㄧˋ",), "一"): -1.0}))
 
 
+class FloorMc(unittest.TestCase):
+    """R1c: only single-character pairs at the lexicon floor take mc; a sandhi-exempted 0 stays 0."""
+
+    def test_floor_pairs_only(self):
+        lex = {(("ㄓㄤˇ",), "長"): -6.8, (("ㄔㄤˊ",), "長"): -3.05, (("ㄧˋ",), "一"): -6.8, (("ㄓㄤˇ", "ㄉㄚˋ"), "長大"): -6.8}
+        logp = {(("ㄓㄤˇ",), "長"): -3.75, (("ㄔㄤˊ",), "長"): 0.0, (("ㄧˋ",), "一"): 0.0}
+        mc = {(("ㄓㄤˇ",), "長"): -0.1, (("ㄔㄤˊ",), "長"): -0.5, (("ㄧˋ",), "一"): -2.0}
+        out = R.floor_mc(logp, lex, mc)
+        self.assertEqual(out, {(("ㄓㄤˇ",), "長"): -0.1, (("ㄔㄤˊ",), "長"): 0.0, (("ㄧˋ",), "一"): 0.0})
+        self.assertEqual(logp[(("ㄓㄤˇ",), "長")], -3.75, "the input is not modified")
+
+
 class SandhiWiring(unittest.TestCase):
     def test_r1_pick_reads_ch_r1_not_the_shipping_terms(self):
         # same row twice: with ch_r1 = ch the reading term keeps candidate 0; with an exempted ch_r1 candidate 1 wins

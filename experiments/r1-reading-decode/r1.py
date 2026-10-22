@@ -162,6 +162,8 @@ def load_run(a, setting, name):
     # R1b arm B (README, R1b): the R1 term only, never P5's shipping term (anchor 1 reproduces shipping with r["ch"]), counts the
     # tone-sandhi readings of 一 and 不 as 0. Without the flag r["ch_r1"] is r["ch"], so R1 is unchanged.
     rlogp = sandhi_exempt(logp) if getattr(a, "sandhi_exempt", False) else logp
+    if getattr(a, "floor_mc", False):         # R1c: the R1 term only, like the sandhi flag
+        rlogp = floor_mc(rlogp, lex, Q.mc_logp(lex, Q.load_mcbpmf()))
     for r in out:
         if rlogp is logp:
             r["terms_r1"], r["ch_r1"] = r["terms"], r["ch"]
@@ -231,6 +233,19 @@ def sandhi_exempt(logp):
     for k in SANDHI:
         if k in out:
             out[k] = 0.0
+    return out
+
+
+LEX_FLOOR = -6.8   # the score data/lexicon/mcbpmf-data.txt gives a single character's secondary reading it has no count for
+
+
+def floor_mc(logp, lex, mc):
+    """R1c: a copy of `logp` where each single-character pair whose lexicon score is the floor takes P5's mc value (the mass of the
+    multi-character words that read the character that way) instead; a sandhi pair already exempted (0) stays 0."""
+    out = dict(logp)
+    for k, s in lex.items():
+        if len(k[1]) == 1 and abs(s - LEX_FLOOR) < 1e-9 and k in mc and out.get(k) != 0.0:
+            out[k] = mc[k]
     return out
 
 
@@ -419,7 +434,8 @@ def cmd_run(a):
     anchor1(cfg, rows, base_ok)
     res = {"setting": a.setting, "name": a.name, "role": role, "n": len(rows), "anchor1": "ok", "scores_sha256": sha_file(a.tinylm_scores),
            "gold_in_64": sum(any(r["ok64"]) for r in rows), "terms": term_counts(rows),
-           "shipping_params": list(cfg["plain"]), "sandhi_exempt": bool(getattr(a, "sandhi_exempt", False))}
+           "shipping_params": list(cfg["plain"]), "sandhi_exempt": bool(getattr(a, "sandhi_exempt", False)),
+           "floor_mc": bool(getattr(a, "floor_mc", False))}
     p4d = ship_picks(cfg_r1, rows)        # chat-std: the P4d cell (nu 0); every other setting: the shipping cell again
     if needs2:
         anchor2(a, p4d, rows, a.name)
@@ -500,9 +516,9 @@ def cmd_final(a):
         if d["setting"] == "chat-std" and d["name"] in ANCHOR2_SETS and d.get("anchor2") != "ok":
             stop(f"{p}: anchor 2 was not checked")
         runs[d["setting"], d["name"]] = d
-    flags = {bool(d.get("sandhi_exempt", False)) for d in runs.values()}
+    flags = {(bool(d.get("sandhi_exempt", False)), bool(d.get("floor_mc", False))) for d in runs.values()}
     if len(flags) != 1:
-        stop("the judged runs mix --sandhi-exempt and plain runs")
+        stop("the judged runs mix --sandhi-exempt / --floor-mc settings")
     seen3 = set()
     for p in a.anchor3:
         with open(p, encoding="utf-8") as f:
@@ -519,7 +535,8 @@ def cmd_final(a):
     for k, d in runs.items():
         if d["n"] != ROW_COUNTS[k[1]]:
             stop(f"{k}: {d['n']} rows")
-    res = {"cell": sel["chosen"], "sandhi_exempt": flags.pop(), "clauses": {}}
+    sandhi, floor = flags.pop()
+    res = {"cell": sel["chosen"], "sandhi_exempt": sandhi, "floor_mc": floor, "clauses": {}}
     by_role = lambda role: [k for k in JUDGED if ROLES[k[0]][k[1]] == role]
     for role in ("1", "2a", "2b"):
         res["clauses"][role] = {f"{s}/{n}": runs[s, n]["verdict"] for s, n in by_role(role)}
@@ -559,6 +576,7 @@ def main(argv=None):
     for k in ("norc-scores", "norc-rowstats", "norc-summary"):
         r.add_argument("--" + k)
     r.add_argument("--sandhi-exempt", action="store_true", help="R1b arm B: the R1 term counts the sandhi readings of 一 and 不 as 0")
+    r.add_argument("--floor-mc", action="store_true", help="R1c: the R1 term takes mc for the lexicon's floor-score single characters")
     s = sub.add_parser("select")
     s.add_argument("chatclause")
     s.add_argument("wikitune")
