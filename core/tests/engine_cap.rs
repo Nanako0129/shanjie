@@ -1,4 +1,7 @@
 //! Composition cap (docs/contracts/composition-cap.md).
+//! Release only: every test types 70-128 syllables with the small model's rerank, which took 957 s in the debug job on Linux (no
+//! Accelerate there; PR #268's first CI run), over that job's 20-minute limit. The `core` job runs this file in release on macOS.
+#![cfg(not(debug_assertions))]
 use core::engine::*;
 use core::eval::{parse_rows, usable};
 use core::lm::Profile;
