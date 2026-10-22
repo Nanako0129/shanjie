@@ -1,4 +1,5 @@
-"""S2r：依教育部規範補齊「一」「不」的本調／變調讀音與「法」的 ㄈㄚˇ（docs/contracts/s2r-sandhi-variants.md §1）。
+"""S2r：依教育部規範補齊「一」「不」的本調／變調讀音與「法」的 ㄈㄚˇ（docs/contracts/s2r-sandhi-variants.md §1），
+以及「紮」的口語讀音 ㄓㄚ（R6，docs/contracts/zha-reading.md）。
 
 輸入 data/lexicon/mcbpmf-data.txt（小麥基底，MIT）；讀 data/lexicon/overlay-add.tsv 只為了去重。
 輸出 data/lexicon/sandhi-add.tsv，每列「讀音\\t詞\\t分數\\tsandhi」，依（讀音, 詞）的 UTF-8 位元組序排序。
@@ -147,7 +148,17 @@ def r5_fa(word, syls):
     return out if changed else None
 
 
-RULES = [("R1", r1_yi_sandhi), ("R2", r2_base_tone), ("R3", r3_bu_sandhi), ("R5", r5_fa)]
+def r6_zha(word, syls):
+    """R6：「紮」讀 ㄓㄚˊ 或 ㄗㄚ → 口語讀音 ㄓㄚ（docs/contracts/zha-reading.md；單字列也處理）。"""
+    out, changed = list(syls), False
+    for i, ch in enumerate(word):
+        if ch == "紮" and syls[i] in ("ㄓㄚˊ", "ㄗㄚ"):
+            out[i], changed = "ㄓㄚ", True
+    return out if changed else None
+
+
+RULES = [("R1", r1_yi_sandhi), ("R2", r2_base_tone), ("R3", r3_bu_sandhi), ("R5", r5_fa), ("R6", r6_zha)]
+SINGLE_CHAR_RULES = {"R6"}   # 其他規則只處理多字列：單字的變調讀音本來就在基底；「紮」單字沒有 ㄓㄚ
 
 
 def self_check():
@@ -158,6 +169,8 @@ def self_check():
     assert got == YI_RISE, f"一不做二不休: first 一 before 不 must be ㄧˊ, got {got!r}"
     got = other_reading("不一會", ["ㄅㄨˋ", "ㄧ", "ㄏㄨㄟˋ"], 0)
     assert got != BU_RISE, f"不一會: 不 before 一 must not become ㄅㄨˊ, got {got!r}"
+    assert r6_zha("紮", ["ㄗㄚ"]) == ["ㄓㄚ"] and r6_zha("結紮", ["ㄐㄧㄝˊ", "ㄓㄚˊ"]) == ["ㄐㄧㄝˊ", "ㄓㄚ"], "R6: 紮 ㄗㄚ / ㄓㄚˊ -> ㄓㄚ"
+    assert r6_zha("扎", ["ㄓㄚ"]) is None, "R6 touches only 紮"
 
 
 def base_rows(path=BASE):
@@ -186,9 +199,9 @@ def build():
     best = {}          # (reading, word) -> (score float, score text)
     per_rule = collections.Counter()
     for word, syls, score, text in rows:
-        if len(word) < 2:
-            continue   # 單字列不動
         for name, rule in RULES:
+            if len(word) < 2 and name not in SINGLE_CHAR_RULES:
+                continue   # 單字列只給 SINGLE_CHAR_RULES
             new = rule(word, syls)
             if new is None:
                 continue
