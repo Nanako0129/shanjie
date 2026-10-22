@@ -240,7 +240,7 @@ int32_t shanjie_engine_set_english(ShanjieEngine *engine, uint32_t enabled, Shan
 int32_t shanjie_engine_set_english_inline(ShanjieEngine *engine, uint32_t enabled, ShanjieOutput **out);
 // fuzzy-input 新增（docs/contracts/fuzzy-input.md §2.1）：set_fuzzy 的 flags 位元 0–3 是四對模糊音（ㄣ/ㄥ、ㄓ/ㄗ、ㄔ/ㄘ、ㄕ/ㄙ，依此順序），位元 4 是鄰鍵打錯；其他位元非 0 回 2、狀態不變。
 // 建立時預設 0，0 什麼都不改。回傳碼與快照同 set_english（handled 1、commit ""；engine 或 out 為 NULL 回 1；組字區照新設定重算，快照顯示結果；解碼失敗回 4 並丟棄組字）。
-// 模糊音：每個詞可以有一個音節換成同一對的另一個（讀音替代），分數減 1。位元 4：見 §2 的例外；候選窗在完全吻合的詞之後列出容錯得到的詞，選了以後那一段換成詞的詞庫讀音。殼在每次建 engine 後都要呼叫。
+// 模糊音：每個詞可以有一個音節換成同一對的另一個（讀音替代），分數減 2.5（`fuzzy::DELTA_SOUND`）；語意校正不選這樣得到的詞：第一名有這樣的詞的段不送語意校正，否則候選只取沒有這樣的詞的路徑（fuzzy-input §3.6）。位元 4：見 §2 的例外；候選窗在完全吻合的詞之後列出容錯得到的詞，選了以後那一段換成詞的詞庫讀音。殼在每次建 engine 後都要呼叫。
 int32_t shanjie_engine_set_fuzzy(ShanjieEngine *engine, uint32_t flags, ShanjieOutput **out);
 // S7c-2a 新增（docs/contracts/s7c2a-core-rerank.md §2.5）：小模型重排的兩段式 API。每次組字改變可能留下一個重排工作；殼取走、在別的執行緒 run、回到引擎的執行緒 apply。
 #define SHANJIE_NO_CHANGE 5
