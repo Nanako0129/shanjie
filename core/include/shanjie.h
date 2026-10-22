@@ -316,8 +316,8 @@ int32_t shanjie_engine_load_tinylm(ShanjieEngine *engine, const char *path);
 // load_colloquial: the colloquial table (colloquial.sjlm, docs/contracts/colloquial-term.md). The engine reads the word sets of its k term
 //   from the lexicon folder it was created with (mcbpmf-data.txt, overlay-add.tsv) and from the pack rows it was created with. May be
 //   called before or after load_lm and load_tinylm (the table does not depend on them). The term applies per job, only with the chat
-//   profile, standard rerank strength and a small model whose SHA-256 is the one the term was measured with; in every other case the
-//   jobs are those of an engine without the table. Where the term applies the fusion also gets the reading-channel term (docs/contracts/reading-channel.md:
+//   profile, at any of the three rerank strengths (each with its own alpha, tau and delta: docs/contracts/colloquial-levels.md) and a small
+//   model whose SHA-256 is the one the term was measured with; in every other case the jobs are those of an engine without the table. Where the term applies the fusion also gets the reading-channel term (docs/contracts/reading-channel.md:
 //   each single-character word's reading against that word's most common reading in the lexicon, a rare reading costs up to 4 per character); it has no
 //   switch, file or setting of its own and changes nothing where the colloquial term does not apply. 3 when a file cannot be read or is malformed (the engine keeps its previous table,
 //   or none); 1 for a NULL engine or path; 2 for a path that is not UTF-8. Drops the pending rerank job. Never log the path.

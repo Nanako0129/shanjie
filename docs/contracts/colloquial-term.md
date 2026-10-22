@@ -1,11 +1,11 @@
 # 契約：口語項進核心，常談隨 App 出貨（colloquial-term）
 
-狀態：修訂三（2026-10-20，收尾審查 REVISE 的 2 項照改，§8）；照流程收尾審查之後由維護者決定。〔維護者 2026-10-22 決定：保守與積極也要生效（「保守或積極都不應該覆蓋常談」），另寫產品契約；在那之前本契約的條件照舊，見研究紀錄同日一節。〕
+狀態：修訂三（2026-10-20，收尾審查 REVISE 的 2 項照改，§8）；照流程收尾審查之後由維護者決定。〔修訂四（2026-10-22）：常談與讀音通道項在保守、積極也生效，各用自己的 (α, τ, δ)，見 `docs/contracts/colloquial-levels.md`；下文原本寫「只在標準強度」的條件，以那份契約為準，這裡逐處改成三檔，標準那一檔的值不變。〕
 
 ## 0. 起因、要做到什麼、怎麼看到
 
 - **起因**：P4d（`experiments/p4d-colloquial/README.md`）在 chatjudge-2 確認通過：108／39，淨值 +69，p 1.1×10⁻⁸，改壞÷改對 0.36。照登記開產品片：口語項進核心，口語表隨 App 出貨。
-- **要做到**：聊天設定、語意校正開著、強度「標準」、載入的語意校正模型就是 P4d 量的那一份時，核心的融合多一項口語分數，選字和 P4d 那一格（μ 0.5、α 0.5、軟閘門 T 1.0、δ 0.25、τ 2）逐列相同。其他情況（書面、語意校正關、保守與積極強度、別的語意校正模型、沒有口語表）行為逐位元組不變。
+- **要做到**：聊天設定、語意校正開著、載入的語意校正模型就是 P4d 量的那一份時，核心的融合多一項口語分數；標準強度的選字和 P4d 那一格（μ 0.5、α 0.5、軟閘門 T 1.0、δ 0.25、τ 2）逐列相同，保守與積極用自己的 (α, τ, δ)（修訂四，`colloquial-levels.md`）。其他情況（書面、語意校正關、別的語意校正模型、沒有口語表）行為逐位元組不變。
 - **怎麼看到**：
   1. CLI 用核心的新路徑跑公開集合，每列選的候選和 `p4d.py --cell 0.5,0.5,1.0` 的離線選字相同；雲端跑 chatclause 與 discordtune，改對／改壞等於 P4d 的 113／37 與 74／43。
   2. 維護者在自己的 Mac 用聊天 App，在同一個輸入框先打「桌子一直在搖」（**不送出**，游標停在「搖」後面；殼只讀游標前面的字當前文），接著直接打 dev302 第 202 列「桌腳的螺絲鬆掉了」（讀音照 `eval/bench/suite-v1/dev302.txt`；前文就是那一列的前文欄，P4d 的量測是帶前文 `--context` 跑的）：出貨版與「只調 α」的對照都選「羅斯松」，新版選「螺絲鬆」（P4d 的公開重算：dev302 只有口語項才改對的 3 列之一，另外兩列是第 218、223 列）。
@@ -36,9 +36,9 @@
 - **共用的評分函式**（引擎與 CLI 都只呼叫這一個）：`TinyLm::rerank_colloquial(&self, ng: &[f64], cands: &[&str], words: &[Vec<&str>], key: &str, co: &Colloquial) -> Result<(usize, Option<Vec<f64>>), TinyLmError>`，和 `rerank` 同樣取前 `TOPK` 個、同樣的 `ll_many`，之後：
   - col_i = `co.col(words[i])`，g_i = 1 / (1 + exp(−(ll_i − ll_0) / T))（不會溢位的寫法），ll_eff_i = ll_i + g_i·(μ / α)·(col_i − col_0)；
   - `pick(ng, ll_eff, α, τ, δ)`，`pick` 不改。
-  - 任何一個 col_i 不是有限值（`inf`、NaN）時，這一次呼叫整個不加口語項：用同一批 ll 與檔頭聊天標準強度的 (α, τ, δ) 做原本的 `pick`（`colloquial::guarded_pick`），不讓無限大或 NaN 決定選字。
-  - 參數全部是 `colloquial.rs` 的具名常數，註解寫出處（P4d 登記、chatjudge-2 確認）：`MU = 0.5`、`GATE_T = 1.0`、`GAMMA_PER_MU = 0.5`、`ALPHA = 0.5`、`TAU = 2.0`、`DELTA = 0.25`。不讀 `.sjtl` 檔頭的值。
-- **何時用**（`engine.rs` 的 `refresh_lm` 建工作時決定，記在 `RerankJob` 裡；之後 `RerankJob::run` 對每一段呼叫 `rerank_colloquial` 或原本的 `rerank`）：口語表已載入、設定是聊天、強度是標準、而且載入的 `.sjtl` 的 SHA-256 等於常數 `PAIRED_TINYLM_SHA256`（P4d 量的那一份，即目前 `data/tinylm.sjtl.sha256` 記的值）。四個條件任一不成立 → 原本的 `rerank` 與檔頭的參數，行為不變。決定只有一個函式：`colloquial::applies(profile, level, &TinyLm)`（前三個條件；第四個是「有表」），引擎每次建工作與 CLI 都呼叫它。`.sjtl` 的 SHA-256（`TinyLm::file_sha256`）是 `load_paired` 解析的那一份位元組的雜湊，在 `load_paired` 裡當場算、字串記在 `TinyLm`、位元組隨即釋放（不讓 14.6 MB 的原始位元組在載入口語表時還活著）；量過：release 版、真的 tinylm.sjtl（14,638,352 bytes）、7 次，核心的軟體 SHA-256 35 到 52 ms（中位數約 37 ms），`parse` 5 到 9 ms。
+  - 任何一個 col_i 不是有限值（`inf`、NaN）時，這一次呼叫整個不加口語項：用同一批 ll 與檔頭聊天、同一強度的 (α, τ, δ) 做原本的 `pick`（`colloquial::guarded_pick`；修訂四前只有標準強度），不讓無限大或 NaN 決定選字。
+  - 參數全部是 `colloquial.rs` 的具名常數，註解寫出處（P4d 登記、chatjudge-2 確認）：`MU = 0.5`、`GATE_T = 1.0`、`GAMMA_PER_MU = 0.5`，以及每一檔的 (α, τ, δ)：標準 `STANDARD = (0.5, 2.0, 0.25)`（修訂四前是 `ALPHA`、`TAU`、`DELTA`），保守與積極見 `colloquial-levels.md`，由 `colloquial::cell(level)` 取用。不讀 `.sjtl` 檔頭的值。
+- **何時用**（`engine.rs` 的 `refresh_lm` 建工作時決定，記在 `RerankJob` 裡；之後 `RerankJob::run` 對每一段呼叫 `rerank_colloquial` 或原本的 `rerank`）：口語表已載入、設定是聊天（任何強度，修訂四前只有標準）、而且載入的 `.sjtl` 的 SHA-256 等於常數 `PAIRED_TINYLM_SHA256`（P4d 量的那一份，即目前 `data/tinylm.sjtl.sha256` 記的值）。三個條件任一不成立（修訂四前還有「強度是標準」）→ 原本的 `rerank` 與檔頭的參數，行為不變。決定只有一個函式：`colloquial::applies(profile, &TinyLm)`（聊天與配對的小模型兩個條件；修訂四前是 `applies(profile, level, &TinyLm)`，多一個「強度是標準」；另一個條件是「有表」，由呼叫端判斷），引擎每次建工作與 CLI 都呼叫它。`.sjtl` 的 SHA-256（`TinyLm::file_sha256`）是 `load_paired` 解析的那一份位元組的雜湊，在 `load_paired` 裡當場算、字串記在 `TinyLm`、位元組隨即釋放（不讓 14.6 MB 的原始位元組在載入口語表時還活著）；量過：release 版、真的 tinylm.sjtl（14,638,352 bytes）、7 次，核心的軟體 SHA-256 35 到 52 ms（中位數約 37 ms），`parse` 5 到 9 ms。
 - **段與列**：引擎的一段（兩個固定詞或標點之間）當一句算 lc（`<s>` 起、`</s>` 止）。CLI 與 `p4d.py` 一列就是一段，所以兩者相同；多段組字的差異是已知的，寫進研究紀錄，驗收的公開集合都是一段。
 - **載入與生命週期**：`Engine::load_colloquial(path)` 從引擎載入詞庫的資料夾讀 `mcbpmf-data.txt` 與 `overlay-add.tsv`，詞包用引擎自己留著的 `pack_text`（不從詞庫資料夾找 `acg-add.tsv`）；可以在 `load_lm`／`load_tinylm` 之前或之後呼叫（表和 n-gram、語意校正模型無關；配對在每次建工作時檢查，換語意校正模型、換設定或強度，下一次解碼就生效）。失敗時引擎維持原狀（原本沒有表就仍然沒有；原本有表就保留原本那一份），作廢進行中的工作。
 - **FFI**：`shanjie_engine_load_colloquial(engine, path)`，回傳碼和 `load_tinylm` 相同（0 成功、1 參數 NULL、3 讀取或格式錯誤），子程序輸出不帶路徑。`core/include/shanjie.h`、`core/tests/c/abi_smoke.c`、`docs/contracts/s3a.md` 的 FFI 表一起改；按鍵規則表不變。
@@ -48,7 +48,7 @@
 - **App**：殼的 `build()` 在 `load_tinylm` 之後、而且小模型載入成功時才呼叫 `load_colloquial`，檔案是 bundle 的 `Resources/colloquial.sjlm`（和其他模型檔同一層）。失敗只記靜態 log，照沒有口語表的方式重排。沒有新的設定開關（跟著語意校正開關與強度走）。關於頁不加東西（現在沒有模型列表）。
 - **selftest**：`--selftest` 加一步：`load_colloquial` 回傳 0，而且在聊天、標準強度下先 `set_left_context("桌子一直在搖")`（第 202 列的前文欄），再打第 202 列的讀音，第一次顯示（套用重排之後）是「桌腳的螺絲鬆掉了」。實作時先用 CLI 在同一個條件（`--context`、這一列）量一次：出貨與「只調 α」是「羅斯松」、新路徑是「螺絲鬆」，數字寫進 PR；不成立就停（換句子要回頭問維護者）。bundle 裡沒有 `colloquial.sjlm` 或它沒有作用，selftest 失敗，`check-app.sh`（會執行 selftest）跟著失敗。
 - **打包**：`scripts/build-app.sh` 檢查 `data/lm/colloquial.sjlm` 存在、雜湊和 `data/colloquial.sjlm.sha256` 相同，複製進 `Resources/`；`check-app.sh` 檢查它在 bundle 裡、雜湊相同。
-- **CLI**：新選項 `--colloquial-core FILE`。它讓 CLI 和引擎一樣載入 `Colloquial`，每列照引擎的四個條件決定用 `rerank_colloquial` 或 `rerank`；不拒絕任何設定（書面、別的強度、沒有 `--tinylm` 時就照條件不加口語項），這樣「其他地方不變」才能用同一個選項驗。檔案不存在 → 開始前就報錯。摘要行的設定標記加 `+colloq:<表的 sha256 前 8 碼>`。`--set holdout` 照舊允許（出貨之後保留集要用出貨設定跑，出貨設定會帶這個選項）。
+- **CLI**：新選項 `--colloquial-core FILE`。它讓 CLI 和引擎一樣載入 `Colloquial`，每列照引擎的條件（修訂四前四個，現在沒有強度這一項）決定用 `rerank_colloquial` 或 `rerank`；不拒絕任何設定（書面、沒有 `--tinylm` 時就照條件不加口語項），這樣「其他地方不變」才能用同一個選項驗。檔案不存在 → 開始前就報錯。摘要行的設定標記加 `+colloq:<表的 sha256 前 8 碼>`。`--set holdout` 照舊允許（出貨之後保留集要用出貨設定跑，出貨設定會帶這個選項）。
   - P4b 的 `--colloquial`、`--colloquial-mu`、`--colloquial-gamma` **移除**（P4b 的結果已寫在研究紀錄，要重現就 checkout 當時的 commit）。
 - **`p4d.py`** 加 `--out-picks FILE`：每列一行選中的候選編號（0 起，前 8 名內），供 §3 第 2 點比對。
 - **重播**：`shanjie-replay` 照 App，小模型開著且 `data/lm/colloquial.sjlm` 存在時預設在 `load_tinylm` 之後載入口語表（詞包照重播的 `build_engine`，acg 開）；`--colloquial FILE` 改載另一份、`--no-colloquial` 不載；摘要行標記加 `+colloq:<sha8>`。`--no-colloquial` 的輸出和加這個功能以前逐位元組相同。`tools/kpi.py replay` 跟著 `data/*.sha256` 有沒有口語表決定要不要帶 `--no-colloquial`、標記該不該有 `+colloq:`。
@@ -56,7 +56,7 @@
 
 ## 3. 驗收
 
-1. **核心單元測試**（每條規則一個「規則壞掉就會失敗」的測試）：口語項是相對錨點的差；閘門用 ll_0；不會溢位；只在聊天、標準強度、配對的語意校正模型（換一份 `.sjtl` 就沒有口語項）；沒有表時逐位元組不變；載入失敗引擎不變、原本的表保留；k 只算疊加層與詞包、而且不在基本詞表的詞；一個只在 acg 詞包裡的詞，引擎用 `PACK_ACG` 建時算進 k、沒有詞包建時不算。突變：拿掉相對錨點、閘門改用 ll_i、α 不換成 0.5、拿掉配對檢查，各要讓測試失敗。
+1. **核心單元測試**（每條規則一個「規則壞掉就會失敗」的測試）：口語項是相對錨點的差；閘門用 ll_0；不會溢位；只在聊天、配對的語意校正模型（換一份 `.sjtl` 就沒有口語項；修訂四起三種強度都用，各用自己的格）；沒有表時逐位元組不變；載入失敗引擎不變、原本的表保留；k 只算疊加層與詞包、而且不在基本詞表的詞；一個只在 acg 詞包裡的詞，引擎用 `PACK_ACG` 建時算進 k、沒有詞包建時不算。突變：拿掉相對錨點、閘門改用 ll_i、α 不換成 0.5、拿掉配對檢查，各要讓測試失敗。
 2. **和離線逐列相同**：
    ```
    shanjie-eval --lm data/lm/bigram.sjlm --profile chat --context --packs acg --tinylm data/lm/tinylm.sjtl \
@@ -70,8 +70,8 @@
    | 設定 | 口語表 | 工具 |
    |---|---|---|
    | 書面 | 有（`--colloquial-core`） | CLI |
-   | 聊天、保守強度（`--rerank-level conservative`） | 有 | CLI |
-   | 聊天、積極強度 | 有 | CLI |
+   | ~~聊天、保守強度（`--rerank-level conservative`）~~ | 有 | 修訂四起這兩列不再是「不變」：保守、積極也有口語項，驗收改為 `colloquial-levels.md` §2.2 的逐列比對；「沒有口語表」的保守、積極仍和 main 相同 |
+   | ~~聊天、積極強度~~ | 有 | （同上） |
    | 聊天、沒有 `--tinylm`（語意校正關） | 有 | CLI |
    | 聊天、標準、換一份別的 `.sjtl`（測試用、雜湊不同） | 有 | CLI（只看「和同一份 `.sjtl` 不帶口語表」相同） |
    | 聊天、標準 | 沒有 | CLI 與重播（重播帶 `--no-colloquial`，`--learn off --rerank each`，和 main 的重播相同） |
@@ -99,7 +99,7 @@
 
 - **預算**：`pilotfish:executor` 實作 1 次＋修正 1 次；雲端 VM ≤ 1.5 小時（所有集合同一台、同一種 CPU；私人集合的傾印只在 VM 上、跑完刪掉，帶回的只有數字）。
 - **停止條件**：CLI 與離線有不能歸因的差異；口語池任一來源的署名資料不完整；§3 第 5 點任一項超過門檻；需要改 `pick` 或解碼器才能做到逐列相同；署名或授權的推論被證明不成立。
-- **範圍外**：書面設定、保守與積極強度的口語項（沒量）；重新選 μ／T／α；跨段的 lc；App 計數器；設定頁的開關。
+- **範圍外**：書面設定；保守與積極強度的口語項（原本沒量，修訂四由 `colloquial-levels.md` 補上）；重新選 μ／T／α；跨段的 lc；App 計數器；設定頁的開關。
 
 ## 8. 審查紀錄
 

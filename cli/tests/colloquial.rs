@@ -137,8 +137,9 @@ fn rows_with_the_term_rows(dir: &Path) -> String {
     p.to_string_lossy().into_owned()
 }
 
-/// Everywhere else the option changes nothing: the formal profile, the conservative and the aggressive strength, no small model, and
-/// another small model (one bit differs in the file, so its SHA-256 is not the measured one).
+/// Everywhere else the option changes nothing: the formal profile, no small model, and another small model (one bit differs in the file, so its
+/// SHA-256 is not the measured one). The conservative and the aggressive strength are no longer here (colloquial-levels): see
+/// `the_term_applies_at_every_strength`.
 #[test]
 fn nothing_changes_elsewhere() {
     let flip = tmp("flip");
@@ -154,10 +155,8 @@ fn nothing_changes_elsewhere() {
     let other = ["--lm", "data/lm/bigram.sjlm", "--profile", "chat", "--context", "--packs", "acg", "--tinylm", &flipped];
     let rows_dir = tmp("elrows");
     let rows = rows_with_the_term_rows(&rows_dir);
-    let cases: [(&str, &[&str], &[&str]); 5] = [
+    let cases: [(&str, &[&str], &[&str]); 3] = [
         ("formal", &formal, &[]),
-        ("conservative", &BASE[..9], &["--rerank-level", "conservative"]),
-        ("aggressive", &BASE[..9], &["--rerank-level", "aggressive"]),
         ("no small model", &no_tl, &[]),
         ("another small model", &other, &[]),
     ];
@@ -168,6 +167,48 @@ fn nothing_changes_elsewhere() {
         with.extend(["--colloquial-core", TABLE]);
         let tagged = full_run(&b, base, &["--rows", &rows], &with);
         same_outputs(&tagged, &plain, what);
+    }
+}
+
+/// Four public rows: 127 and 202 of eval/bench/suite-v1/dev302.txt, 54 and 132 of eval/dev/user-reported.txt.
+fn level_rows(dir: &Path) -> String {
+    let dev = std::fs::read_to_string(root().join("eval/bench/suite-v1/dev302.txt")).unwrap();
+    let user = std::fs::read_to_string(root().join("eval/dev/user-reported.txt")).unwrap();
+    let (dev, user): (Vec<&str>, Vec<&str>) = (dev.lines().collect(), user.lines().collect());
+    let rows = [dev[126], dev[201], user[53], user[131]];
+    assert!(rows[0].starts_with("廟裡有場法會|道士在廟裡設壇作法|") && rows[2].starts_with("|可以準備做|") && rows[3].starts_with("|那要遍歷所有端點的分類"));
+    let p = dir.join("level-rows.txt");
+    std::fs::write(&p, rows.join("\n") + "\n").unwrap();
+    p.to_string_lossy().into_owned()
+}
+
+/// docs/contracts/colloquial-levels.md: with `--colloquial-core` the terms apply at every strength, each with its own (alpha, tau, delta), and the summary
+/// tag says so (`+rc`, after `+rl:` at the other two). The picks are those of the offline arithmetic (experiments/strength-colloq `cell_pick`, checked
+/// row by row on the whole public sets by experiments/colloq-levels): standard [5, 4, 0, 3]; conservative (1.0, 2, 3.0) keeps the n-gram first on all four,
+/// where the header triple without the term picks [1, 0, 0, 7]; aggressive (0.5, 2, 0.1) picks [5, 4, 1, 3], the header triple (0.3, 2, 0.25) [1, 0, 0, 7].
+#[test]
+fn the_term_applies_at_every_strength() {
+    let d = tmp("lvrows");
+    let rows = level_rows(&d);
+    let set = ["--rows", rows.as_str()];
+    for (i, (level, with, without)) in [
+        ("standard", vec![5, 4, 0, 3], None),
+        ("conservative", vec![0, 0, 0, 0], Some(vec![1, 0, 0, 7])),
+        ("aggressive", vec![5, 4, 1, 3], Some(vec![1, 0, 0, 7])),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let (a, b) = (tmp(&format!("lv{i}a")), tmp(&format!("lv{i}b")));
+        let extra = ["--rerank-level", level];
+        let new = full_run(&a, &BASE[..9], &set, &[&extra[..], &["--colloquial-core", TABLE]].concat());
+        assert_eq!(chosen(&new.sc), with, "{level}: the level's own cell");
+        let rl = if level == "standard" { String::new() } else { format!("+rl:{level}") };
+        assert!(new.stdout.contains(&format!("{rl}+acg+colloq:2984eeb5+rc  {{")), "{level}: {}", new.stdout);
+        if let Some(plain) = without {
+            let old = full_run(&b, &BASE[..9], &set, &extra);
+            assert_eq!(chosen(&old.sc), plain, "{level}: the header triple, no term");
+        }
     }
 }
 
