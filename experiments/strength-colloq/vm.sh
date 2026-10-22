@@ -5,7 +5,7 @@
 # the three private rows files are deleted on exit, so a failed run needs them uploaded again; only the numbers-only JSONs go to $OUT.
 #
 #   REPO=<checkout at the commit the README names, with data/lm/ models>  OUT=<new or empty dir for the JSONs>
-#   [ROWS_DIR=~/sets] [THREADS=$(nproc)] [PY="$HOME/venv/bin/python -W ignore"]  bash experiments/strength-colloq/vm.sh
+#   [SEL_FIXED=experiments/strength-colloq/sel-r2.json] [ROWS_DIR=~/sets] [THREADS=$(nproc)] [PY="$HOME/venv/bin/python -W ignore"]  bash experiments/strength-colloq/vm.sh
 #
 # ROWS_DIR holds the VM's private rows files under their own names (mapping in PRIVATE below). All six rows files and the models are
 # checked against their registered sha256 before any CLI run, and sc.py checks them again. Run it on one machine (the comparison arms must
@@ -94,7 +94,11 @@ echo "$(date +%T) 18 CLI runs done"
 
 # Selection on chatclause only, then the judged sets with the selected cells, then the four clauses and the gates.
 sc_run chatclause --cells --out "$OUT/chatclause.cells.json"
-sc select "$OUT/chatclause.cells.json" --out "$OUT/sel.json"
+if [ -n "${SEL_FIXED:-}" ]; then   # R2 (README): a registered fixed selection, no select step
+  cp "$REPO/$SEL_FIXED" "$OUT/sel.json"
+else
+  sc select "$OUT/chatclause.cells.json" --out "$OUT/sel.json"
+fi
 for set in discordtune typing76 cvtune-clean user-reported dev302; do
   sc_run "$set" --sel "$OUT/sel.json" --out "$OUT/$set.run.json"
 done

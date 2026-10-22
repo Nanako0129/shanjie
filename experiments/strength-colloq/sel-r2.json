@@ -1,0 +1,11 @@
+{
+ "chosen": {
+  "conservative": "1.0,2,3.0",
+  "aggressive": "0.5,2,0.1"
+ },
+ "selection_fallback": {
+  "conservative": false,
+  "aggressive": false
+ },
+ "note": "R2 (README): conservative fixed to its shipping triple plus the colloquial and reading terms, no selection; aggressive as chosen in R1"
+}
