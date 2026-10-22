@@ -8682,3 +8682,23 @@ XL 比 `MAX_FILE`（67,108,864）小 1,168,880 位元組。錨點：4 個模型 
 - 對照修訂一之前（`80847c83`，負載約 6）：重排開 26.0、重排關 28.5 ms，過不了；改成「已固定的前段不再解碼」加 16 字緩衝之後，兩種設定都是一鍵大約只解一個 ≤ 61 字的自由段。
 - **重播比對**（契約 §2 評測；GCP VM，`shanjie-replay --rerank each`，main `8fe1df41` 對本分支 `94ea6982`）：dev302、打字測驗、錯字回報（157 列）在聊天與書面，`top1_sha256` 六格全部相同。
 - **繁中虛擬機實測**（`shanjie-demo1` clone、macOS 26.6.2 繁體中文，裝本分支的開發版 `make bundle`，維護者在虛擬機加入輸入法、登出再登入；`apptype` 切到開發版、送按鍵、截全螢幕）：同一句 51 字（契約第 0 節那句）在終端機、文字編輯、Safari 的文字框都整句留在組字區、底線連續不斷；同一句連打三次（153 字）時，第 128 個單位把前段整段送出，剩下的 25 字仍在組字區、有底線。三個 App 結果相同。截圖只留在 session 暫存區。
+
+## 2026-10-22：常談與讀音通道項在保守、積極也生效（實作，`docs/contracts/colloquial-levels.md`）
+
+- **改了什麼**：`colloquial::applies` 不再看強度；每一檔有自己的 (α, τ, δ)，核心常數 `STANDARD` (0.5, 2, 0.25)、`CONSERVATIVE` (1.0, 2, 3.0)、`AGGRESSIVE` (0.5, 2, 0.1)，由 `colloquial::cell(level)` 取用。`fuse`／`fused_pick` 的係數是 μ／α、ν／α，用那一檔的 α；非有限 col 的退路用同一檔的 `.sjtl` 檔頭三個值。`TinyLm::rerank_colloquial` 與 `RerankJob` 帶 level（原本退路寫死標準）。`.sjtl` 沒有重新匯出。
+- **和探索片逐列相同**（公開集合，Mac；工具 `experiments/colloq-levels/expect_core.py`，指令 `experiments/colloq-levels/parity.sh`）：CLI commit `075a4cee`（核心程式和 `a75d48fb` 相同，只差註解，CLI 二進位雜湊前 12 碼 `7e5c078d3dd2` 兩次相同），模型 `tinylm.sjtl e7c179d8…`、`colloquial.sjlm 2984eeb5…`、`bigram.sjlm fc2bddd1…`、`classes.sjc 9e36fa1b…`、`kn.sjkn cbefbced…`（都等於 `data/*.sha256`）。dev302（302）、打字測驗（76）、錯字回報前 157 列（`5659f5f6…`）× 標準、保守、積極：**每格 0 列不同**（比 `--tinylm-scores` 的 `c`、`ok[c]` 與 rowstats 的對錯）。負向對照：把保守或積極的格換成標準格，dev302 差 17／2 列、錯字回報差 32／6 列。私人集合（chatclause、discordtune、cvtune-clean）還沒跑，等 GCP。
+- **不變的部分**：書面三檔、聊天沒有常談表三檔、聊天標準，在三個公開集合的摘要行、rowstats、`--tinylm-scores` 和 main 逐位元組相同；重播（`shanjie-replay --rerank each`，預設與 `--no-colloquial`）六格的摘要行、rowstats、firsts 相同，聊天標準的 `top1_sha256` 也等於 CLI 的（dev302 `d7230f18`、打字測驗 `fc046ae3`、錯字回報 `96b5ad1c`）。只有「聊天、保守或積極、帶 `--colloquial-core`」變了，那就是這一片。
+- **測試與突變**（乾淨的工作樹，`git checkout --` 還原；結束碼）：
+
+  | 突變 | 結束碼 | 失敗的測試 |
+  |---|---|---|
+  | 退路的 `plain` 寫死標準（`tinylm.rs`） | 101 | `a_non_finite_col_falls_back_to_the_levels_header_triple` |
+  | 建工作時不記 level（`level: RerankLevel::Standard`） | 101 | `the_term_applies_only_under_its_conditions`、`each_level_uses_its_own_cell` |
+  | `fuse` 的 μ／α 改成 μ／0.5 | 101 | `the_terms_weigh_the_same_at_every_alpha`、`each_level_uses_its_own_cell`（引擎）、`the_term_applies_at_every_strength`（CLI） |
+  | `fused_pick` 的 ν／α 改成 ν／0.5 | 101 | `the_terms_weigh_the_same_at_every_alpha` |
+  | `rerank_colloquial` 融合用 `STANDARD` | 101 | `rerank_colloquial_fuses_with_the_levels_cell`、引擎 2 個、CLI 1 個 |
+  | `applies` 加回標準強度條件 | 101 | 引擎 4 個、CLI 1 個 |
+  | `AGGRESSIVE` 的 δ 改成 0.25 | 101 | 單元、`rerank_colloquial_fuses_with_the_levels_cell`、引擎、CLI 各 1 個 |
+
+  讀音通道項的 ν／α 突變只被單元測試抓到：這一片的引擎與 CLI 測試用的列，沒有一列在保守下靠通道項決定（引擎的通道測試用積極，α 和標準相同，係數 2 不變）。
+- **還沒做**：私人集合的逐列比對（GCP）、實機（維護者在繁中虛擬機切到保守或積極，打事先用 CLI 確認的公開句子）。
