@@ -1,6 +1,6 @@
 # 契約：模糊輸入（模糊音、鄰鍵打錯）
 
-狀態：READY（2026-10-14；plan-verifier 兩次 REVISE 逐項處置後，收尾審查 READY，§7）。修訂一（2026-10-23，§3.5 模糊音 δ 用出貨設定重選）：第一次 REVISE 兩項（注入列的輸入與前文、加總哪一類與三份 rowstats）照改，送收尾審查。研究見 `docs/contracts/fuzzy-research.md` 與研究紀錄 2026-10-14「模糊輸入的調查與離線量測」（數字以 `8007b25c…` 那次為準）。
+狀態：READY（2026-10-14；plan-verifier 兩次 REVISE 逐項處置後，收尾審查 READY，§7）。修訂一（2026-10-23，§3.5 模糊音 δ 用出貨設定重選）：第一次 REVISE 兩項（注入列的輸入與前文、加總哪一類與三份 rowstats）照改；收尾審查 REVISE 一項（`--score` 第一個參數是旗標檔）照改，再一次收尾審查。研究見 `docs/contracts/fuzzy-research.md` 與研究紀錄 2026-10-14「模糊輸入的調查與離線量測」（數字以 `8007b25c…` 那次為準）。
 
 ## 0. 起因
 
@@ -85,9 +85,9 @@
 - **選格**（調參層 cvtune-clean、wikitune-clean，私人集合在 GCP）：
   1. 乾淨輸入：每一格 `--fuzzy 15` 對全關的改壞率，四組（兩個集合 × 兩種設定）都要 ≤ 0.5%。
   2. 救回：
-     - **注入**：`export_rows.py` 加 `--rows FILE`（`前文|句子|讀音` 格式），每列的前文欄原樣保留、只對讀音注入；`--kind fuzzy --p 0.1 --seed 1`，同一個種子字串的規則不變；合法／不合法照原本的 `Ctx().tol("fuzzy").valid` 判。指令：`python3 experiments/fuzzy/export_rows.py --rows <cvtune-clean 或 wikitune-clean> --kind fuzzy --p 0.1 --seed 1 --out <注入列>`。加一個測試：前文欄保留、同一個種子給出同樣的注入。
+     - **注入**：`export_rows.py` 加 `--rows FILE`（`前文|句子|讀音` 格式），每列的前文欄原樣保留、只對讀音注入；`--kind fuzzy --p 0.1 --seed 1`，同一個種子字串的規則不變；合法／不合法照原本的 `Ctx().tol("fuzzy").valid` 判。指令：`python3 experiments/fuzzy/export_rows.py --rows <cvtune-clean 或 wikitune-clean> --kind fuzzy --p 0.1 --seed 1 --out <注入列>`。`--rows` 模式和原本一樣另寫 `<注入列>.flags`（每列 `列號\t讀音有改變\t不合法`，列序和列檔相同）。加一個測試：前文欄保留、同一個種子給出同樣的注入、`.flags` 的列數等於列檔的列數。
      - **三份 rowstats**（每組＝集合 × 設定，算一次、5 格共用前兩份）：CLEAN＝出貨指令、全關、未注入的列；EXACT＝出貨指令、`--fuzzy 0`、注入列；TOL＝出貨指令、`--fuzzy 15 --fuzzy-delta-sound D`、注入列（每格一份）。三份都帶 `--context`，前文來自列檔。
-     - 用 `export_rows.py --score 15 CLEAN EXACT TOL` 算，**加總的數字是 `valid` 那一類的 `rescued@1`**（和 §3.1 一樣只算合法讀音；不合法那一類走鄰鍵、照 §2.1b 留給之後）。分母同研究：注入後讀音有改變、CLEAN 解對、EXACT 解錯的列。
+     - 用 `export_rows.py --score <注入列>.flags CLEAN EXACT TOL` 算（第一個參數是注入時寫出的逐列旗標檔），**加總的數字是 `valid` 那一類的 `rescued@1`**（和 §3.1 一樣只算合法讀音；不合法那一類走鄰鍵、照 §2.1b 留給之後）。分母同研究：注入後讀音有改變、CLEAN 解對、EXACT 解錯的列。
   3. 在符合 1 的格裡取四組 `valid` 類 `rescued@1` 合計最大的；同分取較大的 δ。沒有任何一格符合 1 就停、報數字。
 - **判讀**：選中的 δ 照 §3.2 原本的閘門：dev302、typing76、錯字回報兩種設定改壞 0（cvtune、wikitune 的 ≤ 0.5% 已在選格裡）。不過就停下來和維護者討論，不再加格。
 - **已看過的數字**：dev302 第 217、298 列在 δ 1 的結果（上面），以及 §3.2 那張表（δ 1）。
