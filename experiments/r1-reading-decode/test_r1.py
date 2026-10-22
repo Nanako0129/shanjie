@@ -301,6 +301,13 @@ class SandhiVariant(unittest.TestCase):
         self.assertEqual(S.sandhi("不要", ["ㄅㄨˋ", "ㄧㄠˋ"])[1], 1)
         self.assertIsNone(S.sandhi("一個", ["ㄧ"]))
 
+    def test_rows_file(self):
+        import sandhi as S
+        text = "# comment\n|不要|ㄅㄨˋ ㄧㄠˋ\n|一個人|ㄧ ㄍㄜˋ\n"
+        out, n = S.sandhi_rows(text)
+        self.assertEqual(out, "# comment\n|不要|ㄅㄨˊ ㄧㄠˋ\n|一個人|ㄧ ㄍㄜˋ\n")
+        self.assertEqual(n, {"rows": 2, "rows_changed": 1, "syllables_changed": 1, "misaligned": 1})
+
 
 if __name__ == "__main__":
     unittest.main()

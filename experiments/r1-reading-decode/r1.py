@@ -53,6 +53,8 @@ ANCHOR2_SETS = {"chatclause", "discordtune"}             # chat-std runs that ha
 ROW_COUNTS = {**Q.ROW_COUNTS, "wikitune-clean": 2181}
 # p5's table and its check_rows_sha (a set without a hash is a STOP there: KeyError is not a pass), wikitune-clean added
 Q.ROW_SHA256["wikitune-clean"] = "d576ea941242e04d718c3d5cf4711c43693588d1089461970293edcec9c5db92"  # eval/bench/kpi/*.json wikitune_clean.rows_sha256
+# R1c: the first 154 rows of eval/dev/user-reported.txt after main c8842c8e (row 3 reads 一 as ㄧˊ); R1 and R1b used b78834cb…
+Q.ROW_SHA256["user-reported"] = "63f67b724e877bba26b8ddc307f56360dbd599823924303639d366e711a11cef"
 # final: the judged runs the four clauses are read from (every (setting, set) of the table that is not a selection set)
 JUDGED = sorted((s, n) for s, d in ROLES.items() for n in d if (s, n) not in SELECT_SETS)
 
@@ -127,7 +129,13 @@ def load_run(a, setting, name):
     n_want = ROW_COUNTS[name]
     if name not in Q.ROW_SHA256:
         stop(f"{name}: no registered rows hash")
-    Q.check_rows_sha(name, a.rows)
+    if getattr(a, "sandhi_of", None):         # R1c report-only: the rows are sandhi.py of the registered file, line for line
+        import sandhi
+        Q.check_rows_sha(name, a.sandhi_of)
+        if sandhi.sandhi_rows(T.read_text(a.sandhi_of))[0] != T.read_text(a.rows):
+            stop(f"{name}: --rows is not sandhi.py of --sandhi-of")
+    else:
+        Q.check_rows_sha(name, a.rows)
     rows = T.parse_rows(T.read_text(a.rows))
     base = evalstats.read_rowstats(a.rowstats)
     tag, n_sum, top1 = read_summary(a.summary)
@@ -435,7 +443,7 @@ def cmd_run(a):
     res = {"setting": a.setting, "name": a.name, "role": role, "n": len(rows), "anchor1": "ok", "scores_sha256": sha_file(a.tinylm_scores),
            "gold_in_64": sum(any(r["ok64"]) for r in rows), "terms": term_counts(rows),
            "shipping_params": list(cfg["plain"]), "sandhi_exempt": bool(getattr(a, "sandhi_exempt", False)),
-           "floor_mc": bool(getattr(a, "floor_mc", False))}
+           "floor_mc": bool(getattr(a, "floor_mc", False)), "sandhi_variant": bool(getattr(a, "sandhi_of", None))}
     p4d = ship_picks(cfg_r1, rows)        # chat-std: the P4d cell (nu 0); every other setting: the shipping cell again
     if needs2:
         anchor2(a, p4d, rows, a.name)
@@ -511,6 +519,8 @@ def cmd_final(a):
     for p in a.judged:
         with open(p, encoding="utf-8") as f:
             d = json.load(f)
+        if d.get("sandhi_variant"):
+            stop(f"{p}: a sandhi-variant run is report only, never judged")
         if d.get("cell") != sel["chosen"] or d.get("anchor1") != "ok" or "verdict" not in d and d["role"] in ("1", "2a", "2b"):
             stop(f"{p}: not a judged run of the chosen cell {sel['chosen']}")
         if d["setting"] == "chat-std" and d["name"] in ANCHOR2_SETS and d.get("anchor2") != "ok":
@@ -576,6 +586,7 @@ def main(argv=None):
     for k in ("norc-scores", "norc-rowstats", "norc-summary"):
         r.add_argument("--" + k)
     r.add_argument("--sandhi-exempt", action="store_true", help="R1b arm B: the R1 term counts the sandhi readings of 一 and 不 as 0")
+    r.add_argument("--sandhi-of", help="R1c report only: --rows is sandhi.py of this registered rows file")
     r.add_argument("--floor-mc", action="store_true", help="R1c: the R1 term takes mc for the lexicon's floor-score single characters")
     s = sub.add_parser("select")
     s.add_argument("chatclause")

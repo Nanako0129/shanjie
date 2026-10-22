@@ -47,26 +47,31 @@ def sandhi(sentence, syls):
     return out, changed
 
 
-def main(src, dst):
-    rows = changed = rows_changed = misaligned = 0
+def sandhi_rows(text):
+    """-> (the sandhi text of a whole rows file, counts): every line that is a row gets sandhi(); other lines are kept."""
+    n = {"rows": 0, "rows_changed": 0, "syllables_changed": 0, "misaligned": 0}
     lines = []
-    with open(src, encoding="utf-8") as f:
-        for line in f:
-            line = line.rstrip("\n")
-            parts = line.split("|")
-            if len(parts) == 3:
-                rows += 1
-                r = sandhi(parts[1], parts[2].split(" "))
-                if r is None:
-                    misaligned += 1
-                else:
-                    changed += r[1]
-                    rows_changed += r[1] > 0
-                    line = "|".join(parts[:2] + [" ".join(r[0])])
-            lines.append(line)
-    with open(dst, "x", encoding="utf-8") as f:
-        f.write("\n".join(lines) + "\n")
-    print(f"rows {rows} rows_changed {rows_changed} syllables_changed {changed} misaligned {misaligned}")
+    for line in text.split("\n"):
+        parts = line.split("|")
+        if len(parts) == 3:
+            n["rows"] += 1
+            r = sandhi(parts[1], parts[2].split(" "))
+            if r is None:
+                n["misaligned"] += 1
+            else:
+                n["syllables_changed"] += r[1]
+                n["rows_changed"] += r[1] > 0
+                line = "|".join(parts[:2] + [" ".join(r[0])])
+        lines.append(line)
+    return "\n".join(lines), n
+
+
+def main(src, dst):
+    with open(src, encoding="utf-8", newline="") as f:
+        out, n = sandhi_rows(f.read())
+    with open(dst, "x", encoding="utf-8", newline="") as f:
+        f.write(out)
+    print(" ".join(f"{k} {v}" for k, v in n.items()))
 
 
 if __name__ == "__main__":
