@@ -249,10 +249,11 @@ LEX_FLOOR = -6.8   # the score data/lexicon/mcbpmf-data.txt gives a single chara
 
 def floor_mc(logp, lex, mc):
     """R1c: a copy of `logp` where each single-character pair whose lexicon score is the floor takes P5's mc value (the mass of the
-    multi-character words that read the character that way) instead; a sandhi pair already exempted (0) stays 0."""
+    multi-character words that read the character that way) instead. No sandhi pair (SANDHI) is a floor pair, so the order of the
+    two R1 flags does not matter."""
     out = dict(logp)
     for k, s in lex.items():
-        if len(k[1]) == 1 and abs(s - LEX_FLOOR) < 1e-9 and k in mc and out.get(k) != 0.0:
+        if len(k[1]) == 1 and abs(s - LEX_FLOOR) < 1e-9 and k in mc:
             out[k] = mc[k]
     return out
 
@@ -472,8 +473,9 @@ def cmd_run(a):
         res["break_rows"] = [i for i, (r, j, o) in enumerate(zip(rows, picks, base_ok), 1) if o and not r["ok64"][j]]
     if a.name == "user-reported":
         res["gold_deducted"] = gold_deducted(rows)
-        res["base_ok"] = "".join(str(int(o)) for o in base_ok)
-        res["cell_ok"] = "".join(str(int(r["ok64"][j])) for r, j in zip(rows, picks))
+    # per-row 0/1 (numbers only): clause 3 pools them, and R1c compares two arms row by row from them
+    res["base_ok"] = "".join(str(int(o)) for o in base_ok)
+    res["cell_ok"] = "".join(str(int(r["ok64"][j])) for r, j in zip(rows, picks))
     if "verdict" in res:
         print(f"clause {role} {'PASS' if res['verdict'] else 'FAIL'}")
     Q.write_atomic(a.out, json.dumps(res, indent=1))

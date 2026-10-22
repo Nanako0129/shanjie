@@ -260,14 +260,15 @@ class Sandhi(unittest.TestCase):
 
 
 class FloorMc(unittest.TestCase):
-    """R1c: only single-character pairs at the lexicon floor take mc; a sandhi-exempted 0 stays 0."""
+    """R1c: only single-character pairs at the lexicon floor take mc."""
 
     def test_floor_pairs_only(self):
-        lex = {(("ㄓㄤˇ",), "長"): -6.8, (("ㄔㄤˊ",), "長"): -3.05, (("ㄧˋ",), "一"): -6.8, (("ㄓㄤˇ", "ㄉㄚˋ"), "長大"): -6.8}
-        logp = {(("ㄓㄤˇ",), "長"): -3.75, (("ㄔㄤˊ",), "長"): 0.0, (("ㄧˋ",), "一"): 0.0}
-        mc = {(("ㄓㄤˇ",), "長"): -0.1, (("ㄔㄤˊ",), "長"): -0.5, (("ㄧˋ",), "一"): -2.0}
+        lex = {(("ㄓㄤˇ",), "長"): -6.8, (("ㄔㄤˊ",), "長"): -3.05, (("ㄗㄚ",), "嘁"): -6.8, (("ㄓㄤˇ", "ㄉㄚˋ"), "長大"): -6.8}
+        logp = {(("ㄓㄤˇ",), "長"): -3.75, (("ㄔㄤˊ",), "長"): 0.0, (("ㄗㄚ",), "嘁"): 0.0}
+        mc = {(("ㄓㄤˇ",), "長"): -0.1, (("ㄔㄤˊ",), "長"): -0.5, (("ㄗㄚ",), "嘁"): -0.98}
         out = R.floor_mc(logp, lex, mc)
-        self.assertEqual(out, {(("ㄓㄤˇ",), "長"): -0.1, (("ㄔㄤˊ",), "長"): 0.0, (("ㄧˋ",), "一"): 0.0})
+        # every floor pair takes mc, also one whose lex value is 0 (all its readings at the floor)
+        self.assertEqual(out, {(("ㄓㄤˇ",), "長"): -0.1, (("ㄔㄤˊ",), "長"): 0.0, (("ㄗㄚ",), "嘁"): -0.98})
         self.assertEqual(logp[(("ㄓㄤˇ",), "長")], -3.75, "the input is not modified")
 
 
@@ -294,7 +295,8 @@ class SandhiVariant(unittest.TestCase):
         cases = [("不要", ["ㄅㄨˋ", "ㄧㄠˋ"], ["ㄅㄨˊ", "ㄧㄠˋ"]), ("不好", ["ㄅㄨˋ", "ㄏㄠˇ"], ["ㄅㄨˋ", "ㄏㄠˇ"]),
                  ("一個", ["ㄧ", "ㄍㄜˋ"], ["ㄧˊ", "ㄍㄜˋ"]), ("一天", ["ㄧ", "ㄊㄧㄢ"], ["ㄧˋ", "ㄊㄧㄢ"]),
                  ("第一次", ["ㄉㄧˋ", "ㄧ", "ㄘˋ"], ["ㄉㄧˋ", "ㄧ", "ㄘˋ"]), ("一月", ["ㄧ", "ㄩㄝˋ"], ["ㄧ", "ㄩㄝˋ"]),
-                 ("統一", ["ㄊㄨㄥˇ", "ㄧ"], ["ㄊㄨㄥˇ", "ㄧ"]), ("一個", ["ㄧ", "ㄍㄜ˙"], ["ㄧ", "ㄍㄜ˙"]),
+                 ("統一", ["ㄊㄨㄥˇ", "ㄧ"], ["ㄊㄨㄥˇ", "ㄧ"]), ("一個", ["ㄧ", "ㄍㄜ˙"], ["ㄧˊ", "ㄍㄜ˙"]), ("一下", ["ㄧ", "ㄒㄧㄚ˙"], ["ㄧ", "ㄒㄧㄚ˙"]),
+                 ("之一，我們", ["ㄓ", "ㄧ", "ㄨㄛˇ", "ㄇㄣ˙"], ["ㄓ", "ㄧ", "ㄨㄛˇ", "ㄇㄣ˙"]),
                  ("用A一個", ["ㄩㄥˋ", "ㄧ", "ㄍㄜˋ"], ["ㄩㄥˋ", "ㄧˊ", "ㄍㄜˋ"])]
         for s, syls, want in cases:
             self.assertEqual(S.sandhi(s, syls)[0], want, s)
@@ -307,6 +309,7 @@ class SandhiVariant(unittest.TestCase):
         out, n = S.sandhi_rows(text)
         self.assertEqual(out, "# comment\n|不要|ㄅㄨˊ ㄧㄠˋ\n|一個人|ㄧ ㄍㄜˋ\n")
         self.assertEqual(n, {"rows": 2, "rows_changed": 1, "syllables_changed": 1, "misaligned": 1})
+        self.assertEqual(S.sandhi_rows("|不要|ㄅㄨˋ  ㄧㄠˋ\r\n")[0], "|不要|ㄅㄨˊ ㄧㄠˋ\r\n", "CRLF and a double space read as the CLI does")
 
 
 if __name__ == "__main__":
