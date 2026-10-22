@@ -8775,3 +8775,11 @@ XL 比 `MAX_FILE`（67,108,864）小 1,168,880 位元組。錨點：4 個模型 
   - **活下來的兩個突變**（都是守門條件，在出貨詞庫上到不了）：(1) 收下音節時「至少一個替代讀音有單音節詞條」那一項：詞庫 1,417 個音節都有單音節詞條（s3a），4,742 個長得像音節但詞庫沒有的字串裡 1,721 個有鄰鍵替代讀音，沒有一個的替代讀音全都沒有單音節詞條，所以這個條件永遠為真；(2) 候選窗容錯詞的 `seen.insert` 去重：試了所有有模糊音替代的單音節與幾句，沒有一個重複，拿掉不影響。兩個都沒有改程式碼（契約 §2.1b 寫了第一個），留給維護者決定要刪還是留作防線。
 - **§3.3 只做了冒煙**（Mac、單一測試執行緒、不是量測）：每鍵 p95 全開對全關 1.03 倍（1.93 ms 對 1.88 ms）；`shanjie-eval` 最大常駐記憶體（dev302，聊天，不載小模型）main 266.6 MiB、分支旗標全關 267.6、`--fuzzy 31` 273.0（比 main 多約 6.7 MiB；CLI 的數字，不是 App 的）。正式量測在別的機器：`cargo test --release --locked -p core --test engine_fuzzy per_key_latency -- --ignored --nocapture --test-threads=1`（Linux 機器上跑，p95 倍數 ≤ 2）；記憶體增量（≤ 20 MiB）沒有測試，要量 App 或引擎的常駐記憶體。
 - **還沒做、沒驗證**：cvtune、wikitune（私人，在 GCP 跑，§3.2 的改壞率 ≤ 0.5% 與 `--fuzzy 16` 的雜湊）；§3.3 的正式延遲與記憶體；§3.2 的停止條件要維護者決定；保留集這一片不用（契約已改，發版前基準才跑）；實機（設定視窗的勾選、打 `ㄗ ㄉㄠˋ`）沒有跑。
+
+## 2026-10-23：模糊輸入分支的審查修正（`docs/contracts/fuzzy-input.md` §2.1b、§3.5）
+
+- **更正**：上面「活下來的兩個突變」一段結尾寫「兩個都沒有改程式碼……留給維護者決定要刪還是留作防線」，不精確：第一個守門條件（收下鄰鍵音節時「至少一個替代讀音有單音節詞條」）已在 `40443ecf` 刪掉，契約 §2.1b 與 s3a 的相關句子跟著改；第二個（候選窗容錯詞的 `seen.insert` 去重）沒有動，留著。
+- **刪掉守門條件的依據改成測試**：新增 `core/tests/engine_fuzzy.rs::every_syllable_has_a_single_entry`，載入含詞包的詞庫（基底、overlay、sandhi、人名與 acg 詞包），斷言每個音節都有至少一個單音節詞條。這就是「收下的鄰鍵音節一定解得出來」的前提（§2.1b）；測試不過就要把檢查放回 `Engine::adjacent_accepts`。為此 `Lexicon` 多一個唯讀的 `syllables()`。收下處的註解指向這個測試。
+- **只給評測用的工具**：CLI `--fuzzy-delta-sound D`（§3.5）現在要有 `--fuzzy` 的模糊音位元（0 至 3）才收，D 要是大於 0 的有限數字，否則報錯（和 `--rerank-level needs --tinylm` 同一類）；`decode_from_fuzzy` 直接多一個 `delta_sound` 參數，取代 `decode_from_fuzzy_delta`；引擎走的 `decode_segment_fuzzy` 沒有動。`export_rows.py --rows` 讀列的方式改成和 CLI 的 `three_field_rows` 一致（只以 `\n` 分行、去掉行尾一個 `\r`、只收恰好三欄）。
+- **測試補強**：`--fuzzy-delta-sound 2.5` 下鄰鍵候選（`鱉星`，`ㄅㄩ` 詞庫沒有）的分數和預設相同（鄰鍵的 δ 2 沒動）；兩個拒絕的情形；dev302 `--fuzzy 15`（出貨指令，不帶 `--colloquial-core`）在預設與 `--fuzzy-delta-sound 1` 下都等於紀錄的 δ 1 結果（聊天 261／302、`top1_sha256` 開頭 `5f74eb6b`；書面 263／302、開頭 `dcda2d01`；只在 macOS 斷言，小模型的浮點數跨平台有差）；`test_export_rows.py` 跑 `main()` 的 `--rows`，檢查前文保留、`.flags` 列數相同，且共用一個 `Ctx`。
+- **已看過的數字**：寫工具時看過 dev302 第 298 列在 δ 2.5 的結果（不帶 `--context`、`--tinylm`）：第一名在那裡換了；已補進契約 §3.5。
