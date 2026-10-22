@@ -320,6 +320,8 @@ fn select(e: &mut Engine, o: Output, word: &str) {
 fn window_lists_tolerant_words_last_and_choosing_one_teaches_the_lexicon_reading() {
     let lex = &shared().lex;
     let mut e = engine(Layout::Standard, 0b0010, true);
+    // Without the prediction row, whose items come first in the window (predict-down B.3.1): this test is about the lexicon's part.
+    e.set_prediction(false).unwrap();
     assert_eq!(type_syls(&mut e, Layout::Standard, "ㄗ ㄉㄠˋ").preedit, "知道");
     let o = press(&mut e, KeyKind::Space);
     let list = window_list(&mut e, o);

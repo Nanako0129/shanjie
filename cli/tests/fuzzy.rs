@@ -44,11 +44,11 @@ fn fuzzy_tags_the_summary_counts_an_uncovered_row_wrong_and_goes_on() {
     let o = lm(ROWS, &["--fuzzy", "0"]);
     assert!(o.status.success());
     let s = summary(&o);
-    assert!(s.contains("lm-chat+fz:0  {'n': 3, 'top1': 1,"), "{s}");
+    assert!(s.contains("+fz:0  {'n': 3, 'top1': 1,"), "{s}");
     let o = lm(ROWS, &["--fuzzy", "2"]);
     assert!(o.status.success());
     let s = summary(&o);
-    assert!(s.contains("lm-chat+fz:2  {'n': 3, 'top1': 2,"), "{s}");
+    assert!(s.contains("+fz:2  {'n': 3, 'top1': 2,"), "{s}");
     // bit 4 alone does not touch the legal slip
     assert!(summary(&lm(ROWS, &["--fuzzy", "16"])).contains("'top1': 1,"));
 }

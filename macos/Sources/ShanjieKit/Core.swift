@@ -20,6 +20,9 @@ struct CoreOutput {
     /// candidate-vertical contract section 2.2: 0 horizontal (or no candidates), 1 vertical candidate window, 2 vertical
     /// prediction row (entered or not).
     var vertical: Int
+    /// zhen-inline section 1.3f: the open English run in `preedit`, UTF-16 start and length; both 0 when no run is open.
+    var englishRunStart: Int = 0
+    var englishRunLength: Int = 0
 }
 
 /// The result of a core call: an output, or the non-zero C ABI return code (carries no input).
@@ -59,10 +62,30 @@ final class CoreEngine {
     /// S7c-2a: the small model for the loaded n-gram model; call it after `loadLM`. Non-zero keeps the n-gram only.
     func loadTinyLM(path: String) -> Int32 { shanjie_engine_load_tinylm(handle, path) }
 
+    /// colloquial-term.md section 2.2: the colloquial table (常談). Independent of the n-gram and the small model; the core applies it per job
+    /// only in the chat profile, at any rerank strength, with the paired small model. Non-zero leaves the rerank as it was.
+    func loadColloquial(path: String) -> Int32 { shanjie_engine_load_colloquial(handle, path) }
+
     /// S7c-2a: whether rerank jobs are made (the core's default is off since S7c-2c; the shell sends its own value to every engine); returns the snapshot, like `setDemote`.
     func setRerank(_ on: Bool) -> CoreResult {
         var out: UnsafeMutablePointer<ShanjieOutput>?
         return Self.take(shanjie_engine_set_rerank(handle, on ? 1 : 0, &out), out)
+    }
+
+    /// Rerank strength (docs/contracts/rerank-strength.md section 2.2): 0 conservative, 1 standard, 2 aggressive; returns the
+    /// snapshot, like `setRerank`. The core remembers it without a small model and keeps it across `loadLM` / `loadTinyLM`.
+    func setRerankLevel(_ level: UInt32) -> CoreResult {
+        var out: UnsafeMutablePointer<ShanjieOutput>?
+        return Self.take(shanjie_engine_set_rerank_level(handle, level, &out), out)
+    }
+
+    /// The levels the loaded small model offers (bit0 conservative, bit1 standard, bit2 aggressive); 0 without one, and on a
+    /// non-zero code (logged; then nothing is offered).
+    func rerankLevels() -> UInt32 {
+        var mask: UInt32 = 0
+        let code = shanjie_engine_rerank_levels(handle, &mask)
+        if code != 0 { Log.shell.error("shanjie_engine_rerank_levels failed, code \(code)") }
+        return code == 0 ? mask : 0
     }
 
     /// S7c-2a: the job of the last change, once; `(nil, 0)` when there is none, `(nil, code)` on a non-zero code (the header
@@ -134,6 +157,14 @@ final class CoreEngine {
         return Self.take(shanjie_engine_set_fuzzy(handle, flags, &out), out)
     }
 
+    /// zhen-inline: whether the English typed into the unfinished syllable shows as letters while it can still become a listed word
+    /// (the core's default is true); returns the snapshot, so a composition on screen is drawn again. Sent to every engine
+    /// `Shell.build()` makes.
+    func setEnglishInline(_ on: Bool) -> CoreResult {
+        var out: UnsafeMutablePointer<ShanjieOutput>?
+        return Self.take(shanjie_engine_set_english_inline(handle, on ? 1 : 0, &out), out)
+    }
+
     func setLearning(_ enabled: Bool) -> Int32 { shanjie_engine_set_learning(handle, enabled ? 1 : 0) }
 
     func learningOpen(dir: String) -> Int32 { shanjie_engine_learning_open(handle, dir) }
@@ -197,7 +228,9 @@ final class CoreEngine {
             columns: Int(o.candidate_columns),
             first: Int(o.candidate_first),
             total: Int(o.candidate_total),
-            vertical: Int(o.candidate_vertical)
+            vertical: Int(o.candidate_vertical),
+            englishRunStart: Int(o.english_run_utf16_start),
+            englishRunLength: Int(o.english_run_utf16_len)
         ))
     }
 }

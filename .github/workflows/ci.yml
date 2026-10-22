@@ -3,7 +3,7 @@ name: CI
 # Core build and tests on every pull request and every push to main.
 # Modeled on syrtis (Nanako0129/syrtis .github/workflows/ci.yml).
 # The workflow always runs, so every main commit keeps a concluded run for the
-# release gate (scripts/check-ci-gate.sh); the `changes` job skips the macOS
+# release gate (scripts/check-ci-gate.sh); the `changes` job skips the test
 # jobs when only documentation or the website changed (scripts/ci-changes.sh),
 # and skipped jobs leave the run's conclusion `success`.
 on:
@@ -75,64 +75,96 @@ jobs:
   core:
     needs: changes
     if: needs.changes.outputs.run == 'true'
-    # Xcode 27 / macOS 27, the same image the Swift shell (S3b) will need.
+    # docs/contracts/ci-speed-2.md: the release tests of both packages (the shipping profile, with the per-key p95 assertions and the
+    # f64 goldens made on macOS); the C header smoke test is in `swift`. The debug run is the `debug` job and the Python steps the `python` job, both on Linux.
     runs-on: xcode-27
-    # A full run takes about 3 minutes; a hung FFI child process should not
-    # hold the runner for the 6-hour default.
+    # A hung FFI child process should not hold the runner for the 6-hour default.
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
 
       # Pinned to the toolchain the golden files were generated with: scores
       # must be bit-identical to the Python reference, and a codegen change
       # has already moved one result by 1 ulp (docs/contracts/s3a.md section 9,
       # powf lowered to exp10). The action is pinned to a master commit, as its
       # README recommends; the `stable` branch is regenerated on every merge.
+      # There is no rust-toolchain file: every job that runs cargo carries this step.
       - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
         with:
           toolchain: 1.97.1
 
-      # The bigram model is not in git (docs/PLAN.md S2c); it is the model-v5
-      # release asset, and its word-class table (S2k) is the classes-v3 asset.
-      # The small model of 語意校正 (S7c-2b) is the tinylm-v3 asset (S7h), paired with model-v5.
-      # Checking them here fails the run in seconds with a clear message instead
-      # of after the build. The hashes are checked against data/bigram.sjlm.sha256,
-      # data/classes.sjc.sha256 and data/tinylm.sjtl.sha256 (also read by build-app.sh and release.yml); cli/tests/golden.rs
-      # repeats the first two, so a model switch updates both (docs/data-files.md).
+      # docs/contracts/ci-speed-2.md: the one copy of the model download and hash check (the assets and why are in the script).
       - name: Fetch the language model
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          gh release download model-v5 --repo "$GITHUB_REPOSITORY" -p bigram.sjlm -D data/lm
-          shasum -a 256 -c data/bigram.sjlm.sha256
-          gh release download classes-v3 --repo "$GITHUB_REPOSITORY" -p classes.sjc -D data/lm
-          shasum -a 256 -c data/classes.sjc.sha256
-          gh release download tinylm-v3 --repo "$GITHUB_REPOSITORY" -p tinylm.sjtl -D data/lm
-          shasum -a 256 -c data/tinylm.sjtl.sha256
-
-      - name: Tests (debug)
-        run: cargo test --locked
+        run: scripts/fetch-models.sh
 
       # Release also enforces the per-key p95 < 16 ms assertions in the replays.
       - name: Tests (release)
         run: cargo test --release --locked
 
-      # docs/contracts/s3a.md section 7.4: compile the C header against the
-      # staticlib and drive both layouts, the LM and the profile switch.
-      # macOS cc links without the native libs too, so an empty capture would
-      # pass silently; it is captured and checked first.
-      - name: C header smoke test
-        shell: bash
-        run: |
-          set -euo pipefail
-          T="$RUNNER_TEMP"
-          LIBS=$(cargo rustc --color never --release --locked -p core --crate-type staticlib -- --print native-static-libs 2>&1 | sed -n 's/.*native-static-libs: //p')
-          test -n "$LIBS"
-          cc -std=c11 -Wall -Wextra -Werror -Icore/include core/tests/c/abi_smoke.c target/release/libcore.a $LIBS -o "$T/abi_smoke"
-          "$T/abi_smoke" data/lexicon data/lm/bigram.sjlm
-          # S4: a third argument (a fresh learning directory) runs the learning checks 518-521.
-          "$T/abi_smoke" data/lexicon data/lm/bigram.sjlm "$T/learn"
+  # docs/contracts/ci-speed-2.md: the debug run (overflow checks and the standard library's debug-only checks) on Linux, beside the
+  # release tests instead of on a second macOS runner. Linux runs the core package's tests faster than the macOS runner; the cli
+  # package's integration tests score with the small model, which has no Accelerate on Linux (2.4 times the macOS time), so they run
+  # in release only (the `core` job) and here only the cli package's unit tests run. Not checked in debug any more: the macOS-only
+  # branches (the small model's Accelerate calls, learn_store.rs's macOS constants) and the two f64 goldens in engine_digits.rs that
+  # return early on Linux (row49_scores_match_the_python_golden_bit_for_bit, predict_digits_matches_the_python_golden_bit_for_bit);
+  # all of them run in the `core` job. Skipped exactly when `core` is.
+  debug:
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
+    # The image the Linux results were measured on (PR #255), not ubuntu-latest: the goldens and libm-dependent tests are image facts.
+    runs-on: ubuntu-24.04
+    # A hung child process should not hold the runner for the 6-hour default.
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+
+      # The pinned toolchain of the core job (why: its comment).
+      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
+        with:
+          toolchain: 1.97.1
+
+      # docs/contracts/ci-speed-2.md: the one copy of the model download and hash check (the assets and why are in the script).
+      - name: Fetch the language model
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: scripts/fetch-models.sh
+
+      - name: Tests (debug, core package)
+        run: cargo test --locked -p core
+
+      - name: Tests (debug, cli unit tests)
+        run: cargo test --locked -p cli --lib --bins
+
+  # docs/contracts/ci-speed-2.md: the Python steps, which used to follow the release tests in `core`, on Linux. They are development
+  # tools; their goldens (the dev302 rowstats among them) match byte for byte on Linux (PR #255). A golden that only matches on macOS
+  # would move its step back to a macOS job. Skipped exactly when `core` is.
+  python:
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
+    # The measured image, as in `debug`.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+
+      # The pinned toolchain of the core job (why: its comment).
+      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
+        with:
+          toolchain: 1.97.1
+
+      # docs/contracts/ci-speed-2.md: the one copy of the model download and hash check (the assets and why are in the script).
+      - name: Fetch the language model
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: scripts/fetch-models.sh
 
       # docs/PLAN.md S2v acceptance 3: Rust and Python lenient comparison agree
       # on every probe line, and the variant table is actually applied.
@@ -160,8 +192,19 @@ jobs:
           python3 reference/proto/check_unigram_overlay.py
           python3 reference/proto/test_demote.py
 
+      # numpy for the Python steps that need it, in a throwaway venv (the runner's python3 may not have it); with trigram.sjt3 beside the model,
+      # lm_eval.py --profile formal imports reference/proto/trigram.py (numpy), and the X0c and trigram-table tests need it too.
+      # Steps that do not need numpy keep the runner's python3.
+      - name: Python venv with numpy
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m venv "$RUNNER_TEMP/x0c-venv"
+          "$RUNNER_TEMP/x0c-venv/bin/python" -m pip install --quiet numpy==2.5.4
+
       # docs/contracts/eval-stats.md: the statistics tests, and the Python rowstats of dev302 equal
       # the golden the Rust CLI is compared with (cli/tests/golden.rs), so both writers are held.
+      # The formal pass reads the trigram table beside the model, so both passes run in the numpy venv.
       - name: Eval statistics (Python)
         shell: bash
         run: |
@@ -169,7 +212,7 @@ jobs:
           T="$RUNNER_TEMP"
           python3 -m unittest tools.test_evalstats
           for p in chat formal; do
-            python3 reference/proto/lm_eval.py --profile "$p" --dev 302 --rowstats "$T/$p.rowstats" > /dev/null
+            "$T/x0c-venv/bin/python" reference/proto/lm_eval.py --profile "$p" --dev 302 --rowstats "$T/$p.rowstats" > /dev/null
             cmp "$T/$p.rowstats" "eval/golden/s2-lm-dev302-$p.rowstats"
           done
 
@@ -177,6 +220,11 @@ jobs:
       # deterministic output) and the committed pack against the lexicon. Builds the evaluation CLI for the collision detection.
       - name: ACG pack builder (Python)
         run: python3 -m unittest tools.test_build_acg_pack
+
+      # docs/contracts/names-lexicon.md section 3 items 6 and 8: the common proper-noun builder against fixtures and a fake API, and the
+      # committed names-add.tsv sharing no word with the base, overlay-add, sandhi-add and acg-add.
+      - name: Names lexicon builder (Python)
+        run: python3 -m unittest tools.test_build_names
 
       # docs/contracts/model-v5.md sections 8-9: the count scripts' --extra-lexicon (additive counting), the
       # out-of-vocabulary bigram filter in tools/build_lm.py, the count comparison and the counting lexicon rule.
@@ -193,6 +241,10 @@ jobs:
       - name: Benchmark tool (Python)
         run: python3 -m unittest tools/test_bench.py
 
+      # docs/contracts/kpi.md: the per-version KPI table rules and the replay model checks, synthetic JSON and fake binaries.
+      - name: KPI table tool (Python)
+        run: python3 -W ignore -m unittest tools/test_kpi.py
+
       # docs/contracts/zhen-mixed.md section 3.4 and 5.6: the English word list builder (filter, cut, sort, input hash), synthetic input.
       - name: English word list builder (Python)
         run: python3 -m unittest tools/test_build_english_words.py
@@ -201,20 +253,89 @@ jobs:
       - name: Overlay manual words (Python)
         run: python3 -m unittest tools/test_build_overlay.py
 
+      # docs/contracts/colloquial-term.md section 3.6: the attribution list builder (per-source sums, the stop conditions), synthetic input.
+      - name: Colloquial attribution list (Python)
+        run: python3 -W ignore -m unittest tools/test_build_attribution.py
+
+      # docs/contracts/holdout-refresh.md section 8: the held-out containment guard (tools/holdout_guard.py report, build_counts --holdout-guard), synthetic input and a fake conversion table.
+      - name: Holdout guard (Python)
+        run: python3 -W ignore -m unittest tools/test_holdout_guard.py
+
       # docs/contracts/x0c-compare.md acceptance 5: score_0c.py and versus.py against a fake model (input layout, 64-character
       # context, log10 scale, unscorable rows, covered-only comparison). They need numpy (not onnxruntime, not the weights),
-      # which the runner may not have, so it goes into a throwaway venv.
-      - name: X0c scoring and comparison (Python)
+      # which the runner may not have, so it runs in the throwaway venv built earlier in the job ("Python venv with numpy").
+      #
+      # docs/contracts/trigram-core.md slice A: tools/test_build_trigram.py (the SJT30001 builder, reader and scorer, the toy golden
+      # file check, and lm_eval.py's loading rules) needs numpy too, so it runs in the same venv.
+      - name: X0c scoring and comparison, trigram table (Python)
         shell: bash
         run: |
           set -euo pipefail
-          python3 -m venv "$RUNNER_TEMP/x0c-venv"
-          "$RUNNER_TEMP/x0c-venv/bin/python" -m pip install --quiet numpy==2.5.4
           "$RUNNER_TEMP/x0c-venv/bin/python" -W ignore -m unittest experiments/x0c/test_x0c.py
+          "$RUNNER_TEMP/x0c-venv/bin/python" -W ignore -m unittest tools/test_build_trigram.py
 
-  # The Swift input method (docs/contracts/s3b.md section 3): build the ad-hoc
-  # app, the Swift tests through the real core and model, the bundled
-  # selftest, and acceptance checks 2, 3 and 6 of contract section 10.
+  # docs/contracts/ci-speed-2.md: the Swift tests through the real core and model, on their own runner beside `shell`. They launch
+  # no sandboxed build (the installer tests make their own throwaway bundles), so app-sandbox.md section 2.6's order does not bind
+  # them, and they need only target/release/libcore.a (macos/Package.swift), the lexicon and the models: no `make bundle`.
+  swift:
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
+    runs-on: xcode-27
+    timeout-minutes: 30  # the Swift tests took 394-479 s on runners up to twice as slow as each other
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+
+      # The pinned toolchain of the core job (why: its comment).
+      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
+        with:
+          toolchain: 1.97.1
+
+      # docs/contracts/ci-speed-2.md: the one copy of the model download and hash check (the assets and why are in the script).
+      - name: Fetch the language model
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: scripts/fetch-models.sh
+
+      # `make rust`: the static library macos/Package.swift links.
+      - name: Core static library
+        run: cargo build --release --locked -p core
+
+      # docs/contracts/s3a.md section 7.4: compile the C header against the
+      # staticlib and drive both layouts, the LM and the profile switch.
+      # In this job since ci-speed-2 (off the slowest job, `core`), after the static library above.
+      # macOS cc links without the native libs too, so an empty capture would
+      # pass silently; it is captured and checked first.
+      - name: C header smoke test
+        shell: bash
+        run: |
+          set -euo pipefail
+          T="$RUNNER_TEMP"
+          LIBS=$(cargo rustc --color never --release --locked -p core --crate-type staticlib -- --print native-static-libs 2>&1 | sed -n 's/.*native-static-libs: //p')
+          test -n "$LIBS"
+          cc -std=c11 -Wall -Wextra -Werror -Icore/include core/tests/c/abi_smoke.c target/release/libcore.a $LIBS -o "$T/abi_smoke"
+          "$T/abi_smoke" data/lexicon data/lm/bigram.sjlm
+          # S4: a third argument (a fresh learning directory) runs the learning checks 518-521.
+          "$T/abi_smoke" data/lexicon data/lm/bigram.sjlm "$T/learn"
+
+      # Includes the log-stream test (acceptance 5): it needs /usr/bin/log
+      # stream, which the runner's user can run.
+      # --parallel starts one xctest process per test method (the log prints `[n/N] Testing Class/method`;
+      # docs/contracts/ci-speed.md). Trade-off: state that leaks from one test into the next inside one process is no longer
+      # caught here, only by the serial `make test-swift`. --parallel drops XCTest's `Executed N tests` summary, so the number
+      # of test cases is printed from the xUnit file (it does not mark XCTSkip, so there is no skip count to print).
+      - name: Swift tests
+        run: |
+          set -euo pipefail
+          swift test --package-path macos --force-resolved-versions --parallel --xunit-output "$RUNNER_TEMP/swift-tests.xml"
+          python3 -c 'import sys, xml.etree.ElementTree as E; print("swift tests: %d testcases" % sum(1 for _ in E.parse(sys.argv[1]).iter("testcase")))' "$RUNNER_TEMP/swift-tests.xml"
+
+  # The Swift input method (docs/contracts/s3b.md section 3, app-sandbox.md
+  # section 2.6): the ad-hoc sandboxed builds, the container migration, the
+  # bundled selftest, acceptance checks 2, 3 and 6 of s3b section 10, the
+  # entitlement and Sparkle mutations, and the installer. The Swift tests are
+  # the `swift` job (docs/contracts/ci-speed-2.md).
   shell:
     needs: changes
     if: needs.changes.outputs.run == 'true'
@@ -233,50 +354,128 @@ jobs:
           path: ~/.cache/shanjie/english
           key: symspell-${{ hashFiles('tools/build_english_words.py') }}
 
-      # The same toolchain as the core job and release.yml: libcore.a is built
-      # by every job that links it.
+      # The same toolchain as the other cargo jobs and release.yml: libcore.a is built by every job that links it.
       - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
         with:
           toolchain: 1.97.1
 
+      # docs/contracts/ci-speed-2.md: the one copy of the model download and hash check (the assets and why are in the script).
       - name: Fetch the language model
         env:
           GH_TOKEN: ${{ github.token }}
+        run: scripts/fetch-models.sh
+
+      # docs/contracts/app-sandbox.md section 2.6, in its order: no step before
+      # step 3 launches any sandboxed build. cargo test runs in the core and
+      # debug jobs and the Swift tests in the swift job.
+      # Step 0: the default build has the development ID, the names of the
+      # section 2.3 table, and no migration list. Build only.
+      - name: "Step 0: default build (development ID), build only"
+        shell: bash
         run: |
           set -euo pipefail
-          gh release download model-v5 --repo "$GITHUB_REPOSITORY" -p bigram.sjlm -D data/lm
-          shasum -a 256 -c data/bigram.sjlm.sha256
-          gh release download classes-v3 --repo "$GITHUB_REPOSITORY" -p classes.sjc -D data/lm
-          shasum -a 256 -c data/classes.sjc.sha256
-          gh release download tinylm-v3 --repo "$GITHUB_REPOSITORY" -p tinylm.sjtl -D data/lm
-          shasum -a 256 -c data/tinylm.sjtl.sha256
+          make bundle OUT_DIR=build/default
+          APP="build/default/善解（開發版）.app"
+          pb() { /usr/libexec/PlistBuddy -c "Print :$1" "$2"; }
+          ID=$(pb CFBundleIdentifier "$APP/Contents/Info.plist")
+          echo "default CFBundleIdentifier: $ID"
+          [ "$ID" = com.nyanako.inputmethod.shanjie.dev ]
+          [ "$(pb CFBundleDisplayName "$APP/Contents/Info.plist")" = 善解（開發版） ]
+          [ "$(pb CFBundleName "$APP/Contents/Info.plist")" = "Shanjie (Dev)" ]
+          [ "$(pb CFBundleDisplayName "$APP/Contents/Resources/zh-Hant.lproj/InfoPlist.strings")" = 善解（開發版） ]
+          [ "$(pb CFBundleDisplayName "$APP/Contents/Resources/en.lproj/InfoPlist.strings")" = "Shanjie (Dev)" ]
+          [ ! -e "$APP/Contents/Resources/container-migration.plist" ]
+          [ ! -e build/default/善解輸入法.app ]
 
-      # The local entry points (Makefile, docs/verification.md). cargo test
-      # already ran in the core job, so only the Swift tests run here.
-      - name: Build the app (ad-hoc)
-        run: make bundle
+      - name: "Step 1: shipping-ID build, build only"
+        shell: bash
+        run: |
+          set -euo pipefail
+          make bundle BUNDLE_ID=com.nyanako.inputmethod.shanjie
+          M="build/善解輸入法.app/Contents/Resources/container-migration.plist"
+          plutil -p "$M"
+          [ "$(/usr/libexec/PlistBuddy -c 'Print :Move:0' "$M")" = '${ApplicationSupport}/shanjie' ]
 
-      # install-ime.sh file handling with a stub app in a temporary HOME; nothing can be registered.
-      - name: Install script file handling
+      - name: "Step 2: throwaway build with no migration list, build only"
+        run: make bundle BUNDLE_ID=com.nyanako.inputmethod.shanjie.ci-nomanifest OUT_DIR=build/nomanifest
+
+      # Step 2a: check-app.sh's local guard, verified here rather than on a
+      # maintainer's machine: outside CI it must refuse to run a shipping-ID
+      # build and must not have created the shipping container; with SKIP_RUN=1
+      # it passes checks 2 and 3.
+      - name: "Step 2a: check-app.sh refuses a shipping-ID run outside CI"
+        shell: bash
+        run: |
+          set -euo pipefail
+          rc=0
+          CI='' EXPECTED_BUNDLE_ID=com.nyanako.inputmethod.shanjie scripts/check-app.sh "build/善解輸入法.app" > "$RUNNER_TEMP/2a.out" 2>&1 || rc=$?
+          cat "$RUNNER_TEMP/2a.out"
+          [ "$rc" -ne 0 ] || { echo "error: check-app.sh ran a shipping-ID build with CI unset" >&2; exit 1; }
+          grep -q 'check 6 refused' "$RUNNER_TEMP/2a.out"
+          [ ! -e "$HOME/Library/Containers/com.nyanako.inputmethod.shanjie" ] || { echo "error: the shipping container exists" >&2; exit 1; }
+          CI='' SKIP_RUN=1 EXPECTED_BUNDLE_ID=com.nyanako.inputmethod.shanjie scripts/check-app.sh "build/善解輸入法.app"
+
+      # Step 3: the first sandboxed launches in this job (the script prints
+      # sw_vers). A TCC prompt while reading a container would hang here
+      # (contract N6), hence the timeout.
+      - name: "Step 3: container migration (shipping ID), and no list, no move"
+        timeout-minutes: 10
+        run: scripts/test-sandbox-migration.sh "build/善解輸入法.app" "build/nomanifest/善解（開發版）.app"
+
+      - name: "Step 4: the migration test refuses outside CI and with a temporary HOME"
+        shell: bash
+        run: |
+          set -euo pipefail
+          for ci in "" true; do
+            T=$(mktemp -d "$RUNNER_TEMP/refuse.XXXXXX")
+            rc=0
+            CI="$ci" HOME="$T" scripts/test-sandbox-migration.sh "build/善解輸入法.app" "build/nomanifest/善解（開發版）.app" > "$T.out" 2>&1 || rc=$?
+            cat "$T.out"
+            [ "$rc" -ne 0 ] || { echo "error: not refused with CI='$ci' HOME=$T" >&2; exit 1; }
+            [ -z "$(ls -A "$T")" ] || { echo "error: the refused run wrote into $T" >&2; exit 1; }
+            [ -n "$ci" ] || grep -q 'refused: CI is not true' "$T.out"
+          done
+          grep -q "is not this account's home directory" "$T.out"
+
+      # release.yml's CI gate against a stub gh: a tag on an appcast.xml-only commit uses its parent's run.
+      - name: CI gate script
+        run: scripts/test-check-ci-gate.sh
+
+      # The model list of the About page (about-models.md): scripts/check-models.sh on fake folders.
+      - name: Model list check
+        run: scripts/test-check-models.sh
+
+      # Step 5: install-ime.sh file handling with a stub app in a temporary HOME; nothing can be registered.
+      - name: "Step 5: install script file handling"
         run: scripts/test-install-ime.sh
 
-      # Includes the log-stream test (acceptance 5): it needs /usr/bin/log
-      # stream, which the runner's user can run.
-      - name: Swift tests
-        run: swift test --package-path macos
+      # Step 6: the bundled selftest with a per-run throwaway ID (no migration
+      # list); its container must not exist before and must exist after. The
+      # shipping ID's selftest already ran in steps 3 and 7.
+      - name: "Step 6: bundled selftest (throwaway ID)"
+        shell: bash
+        run: |
+          set -euo pipefail
+          ID="com.nyanako.inputmethod.shanjie.selftest-$GITHUB_RUN_ID"
+          C="$HOME/Library/Containers/$ID"
+          [ ! -e "$C" ] || { echo "error: $C exists before the selftest" >&2; exit 1; }
+          make selftest-bundled SELFTEST_BUNDLE_ID="$ID"
+          [ -d "$C" ] || { echo "error: no $C after the selftest: not sandboxed" >&2; exit 1; }
+          echo "ok: $C absent before, present after"
 
-      # The empty override builds with the shipping bundle ID: an ephemeral
-      # runner has no installation to collide with (see the Makefile).
-      - name: Bundled selftest (shipping bundle ID)
-        run: make selftest-bundled SELFTEST_BUNDLE_ID=
+      # Step 7: s3b section 10 acceptance 2, 3 and 6 on the shipping build.
+      - name: "Step 7: acceptance checks 2, 3 and 6"
+        run: EXPECTED_BUNDLE_ID=com.nyanako.inputmethod.shanjie scripts/check-app.sh "build/善解輸入法.app"
 
-      # Contract section 10, acceptance 2, 3 and 6, on build/善解輸入法.app.
-      - name: Acceptance checks 2, 3 and 6
-        run: scripts/check-app.sh
+      # Step 8: ten changed copies of the shipping build against
+      # check-entitlements.sh and check-app.sh (security review F1, F7); none is
+      # launched.
+      - name: "Step 8: entitlement and Sparkle mutations"
+        run: scripts/test-sandbox-mutations.sh "build/善解輸入法.app"
 
-      # docs/contracts/s3c-installer.md section 6, acceptance 1: the installer around this build,
-      # inspected only (never launched).
-      - name: Installer
+      # Step 9: docs/contracts/s3c-installer.md section 6, acceptance 1: the
+      # installer around the shipping build of step 1, inspected only (never launched).
+      - name: "Step 9: installer"
         run: |
           make installer
           scripts/check-installer.sh

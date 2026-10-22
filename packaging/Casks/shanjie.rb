@@ -8,9 +8,18 @@ cask "shanjie" do
   desc "Zhuyin input method that converts whole sentences on the device"
   homepage "https://shanjie.nyanako.com/"
 
+  # The input method updates itself with Sparkle (docs/contracts/about-update.md section 2).
+  # What a plain `brew upgrade` then does with this cask is to be measured (contract section
+  # 3.5); naming it upgrades it (documented for auto_updates):
+  # `brew upgrade --cask nanako0129/tap/shanjie`.
+  auto_updates true
   depends_on arch: :arm64
   depends_on macos: :tahoe
 
+  # The cask installs for the current account only (~/Library/Input Methods). The installer
+  # app's "This Mac" option puts it in /Library/Input Methods instead
+  # (docs/contracts/system-install.md); with that copy present, a brew install adds a second
+  # one, which is not blocked here.
   input_method "善解輸入法.app"
 
   # Upgrade and reinstall: stop the running old copy only once the new bundle is in place, so the
@@ -28,7 +37,13 @@ cask "shanjie" do
 
   uninstall signal: ["TERM", "com.nyanako.inputmethod.shanjie"]
 
-  zap trash: "~/Library/Preferences/com.nyanako.inputmethod.shanjie.plist"
+  # The learning data and preferences: unsandboxed versions keep them in the first and last paths;
+  # the sandboxed version moves them into its container (docs/contracts/app-sandbox.md section 2.5).
+  zap trash: [
+    "~/Library/Application Support/shanjie",
+    "~/Library/Containers/com.nyanako.inputmethod.shanjie",
+    "~/Library/Preferences/com.nyanako.inputmethod.shanjie.plist",
+  ]
 
   caveats <<~EOS
     After the first install, register and enable the input method:

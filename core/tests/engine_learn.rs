@@ -13,7 +13,7 @@ fn root() -> PathBuf {
 }
 fn lm_path() -> PathBuf {
     let p = root().join("data/lm/bigram.sjlm");
-    assert!(root().join("data/lm/classes.sjc").exists(), "data/lm/classes.sjc is missing: download it with `gh release download classes-v3 -R Nanako0129/shanjie -p classes.sjc -D data/lm` (or build it with tools/build_classes.py)");
+    assert!(root().join("data/lm/classes.sjc").exists(), "data/lm/classes.sjc is missing: download it with `gh release download classes-v5 -R Nanako0129/shanjie -p classes.sjc -D data/lm` (or build it with tools/build_classes.py)");
     assert!(p.exists(), "data/lm/bigram.sjlm is missing (see engine_lm.rs)");
     p
 }
@@ -28,18 +28,58 @@ fn shared() -> &'static Shared {
     S.get_or_init(|| {
         let lex = load_lexicon(&root().join("data/lexicon")).unwrap();
         let lm = Lm::load(&lm_path()).unwrap();
-        let overlay = std::fs::read_to_string(root().join("data/lexicon/overlay-add.tsv")).unwrap();
+        let overlay = capping_overlay(&root().join("data/lexicon"), "").unwrap(); // as Engine::load_lm: overlay-add.tsv + names-add.tsv
         let capped = Arc::new(CappedLexicon::new(lex.clone(), &overlay, &lm, None).unwrap());
         Shared { lex, lm: Arc::new(lm), capped }
     })
+}
+/// SHANJIE_TEST_PROFILE=formal (docs/contracts/trigram-core.md, B2): run the engine under the formal profile and require the
+/// trigram table beside the model, so a missing `trigram.sjt3` fails here instead of silently scoring the bigram. Unset: no-op;
+/// any other value panics. Only the four B2 tests (a2_mirror_teach_the_other_word, a2_candidate_pick_learning_on_cases_tsv,
+/// pollution_zai_taught_under_two_contexts, global_eps_table) are meant to run with it; the others call `chat_only`.
+/// Call after the model is in place.
+fn use_test_profile(e: &mut Engine) {
+    match std::env::var("SHANJIE_TEST_PROFILE") {
+        Err(_) => {}
+        Ok(v) if v == "formal" => {
+            assert!(lm_path().with_file_name("trigram.sjt3").exists(), "SHANJIE_TEST_PROFILE=formal needs data/lm/trigram.sjt3 (trigram table missing)");
+            e.set_profile(lm::Profile::Formal).unwrap();
+        }
+        Ok(v) => panic!("SHANJIE_TEST_PROFILE={v:?}: only the exact value \"formal\" is understood"),
+    }
+}
+/// Chat-pinned tests: the formal profile would change their expectations.
+fn chat_only() {
+    assert!(
+        std::env::var("SHANJIE_TEST_PROFILE").is_err(),
+        "SHANJIE_TEST_PROFILE changes this test's expectations (chat profile): run only the four B2 tests under SHANJIE_TEST_PROFILE=formal"
+    );
+}
+/// `Engine::new` + `load_lm` (reads `trigram.sjt3` beside the model itself) + fixed clock, learning on, test profile.
+fn loaded_engine() -> Engine {
+    let mut e = Engine::new(&root().join("data/lexicon"), L).unwrap();
+    e.load_lm(&lm_path()).unwrap();
+    use_test_profile(&mut e);
+    e.set_today(Some(DAY));
+    e.set_learning(true);
+    e
+}
+/// `use_test_profile` for engines built on `shared()`: the table must be in the shared model itself.
+fn shared_profile_check(e: &mut Engine) {
+    use_test_profile(e);
+    if std::env::var("SHANJIE_TEST_PROFILE").is_ok() {
+        assert!(shared().lm.scoring(lm::Profile::Formal).tri, "SHANJIE_TEST_PROFILE=formal needs data/lm/trigram.sjt3 (trigram table missing)");
+    }
 }
 /// Production lexicon + model, learning on, fixed clock (day 20000).
 fn engine() -> Engine {
     let s = shared();
     let mut e = Engine::with_lexicon(s.lex.clone(), Layout::Standard);
     e.set_lm(s.lm.clone(), s.capped.clone());
+    shared_profile_check(&mut e);
     e.set_today(Some(DAY));
     e.set_learning(true);
+    e.set_prediction(false).unwrap(); // predict-down contract B.4: the subject is the lexicon window, which now lists a prediction row first
     e
 }
 const DAY: i64 = 20_000;
@@ -54,8 +94,10 @@ fn tiny(engine_text: &str, capped_text: &str) -> Engine {
     let capped = Arc::new(CappedLexicon::new(cl, "", &s.lm, None).unwrap());
     let mut e = Engine::with_lexicon(lex, L);
     e.set_lm(s.lm.clone(), capped);
+    shared_profile_check(&mut e);
     e.set_today(Some(DAY));
     e.set_learning(true);
+    e.set_prediction(false).unwrap(); // predict-down contract B.4: as in `engine`
     e
 }
 /// Single characters learn only after exactly two Han characters (§12 rule 6, §14 rule 7), so the one-syllable
@@ -202,6 +244,7 @@ fn ok(e: &mut Engine, row: &Row) -> bool {
 
 #[test]
 fn step0_ceiling_collisions_baselines() {
+    chat_only();
     let gs = groups();
     assert_eq!(gs.len(), 14);
     let mut ceiling = 0;
@@ -255,10 +298,7 @@ fn judge(e: &mut Engine, g: &Group, row: &Row) -> (bool, bool) {
 #[test]
 fn a2_candidate_pick_learning_on_cases_tsv() {
     let t = std::time::Instant::now();
-    let mut e = Engine::new(&root().join("data/lexicon"), L).unwrap();
-    e.load_lm(&lm_path()).unwrap();
-    e.set_today(Some(DAY));
-    e.set_learning(true);
+    let mut e = loaded_engine();
     println!("engine new + load_lm {:?}", t.elapsed());
     let gs = groups();
     // same-context rare rows wrong before: learned / total, all and only those with a reachable key (§1.1)
@@ -345,10 +385,7 @@ fn a2_mirror_teach_the_other_word() {
 
 /// (learned reachable, wrong reachable, learned, wrong) of the mirror run with global ε `eps`.
 fn mirror(eps: f64) -> (usize, usize, usize, usize) {
-    let mut e = Engine::new(&root().join("data/lexicon"), L).unwrap();
-    e.load_lm(&lm_path()).unwrap();
-    e.set_today(Some(DAY));
-    e.set_learning(true);
+    let mut e = loaded_engine();
     e.set_eps_global(eps);
     let (mut learned, mut wrong, mut learned_reach, mut wrong_reach) = (0, 0, 0, 0);
     for g in &groups() {
@@ -398,16 +435,17 @@ fn context_key_learned_equals_context_key_queried() {
     assert_eq!(type_syls(&mut e, "ㄒㄧㄣ").preedit, "鑫", "key ^ is not the key 他他");
     e.key(k(KeyKind::Esc)).unwrap();
 
-    // (b) after a fixed word (single characters learn only under two Han characters, §14 rule 7, so 奔 takes 你好)
+    // (b) after a fixed word (single characters learn only under two Han characters, §14 rule 7, so the first character takes 你好).
+    // The pick is whichever of 奔／犇 the model does not show, so it is a correction under any class weight (classes-v5 shows 奔).
     let mut e = tiny(TINY, TINY);
     e.set_left_context("你好");
-    type_syls(&mut e, "ㄅㄣ ㄒㄧㄣ");
-    pick(&mut e, 2, 1, "奔");
+    let b = if type_syls(&mut e, "ㄅㄣ ㄒㄧㄣ").preedit.starts_with('奔') { "犇" } else { "奔" };
+    pick(&mut e, 2, 1, b);
     pick(&mut e, 2, 2, "欣");
-    assert_eq!(e.key(k(KeyKind::Enter)).unwrap().commit, "奔欣");
-    assert_eq!(keys(&e), ["你好", "好奔"], "奔 after 你好, 欣 after 好 and the fixed word 奔");
+    assert_eq!(e.key(k(KeyKind::Enter)).unwrap().commit, format!("{b}欣"));
+    assert_eq!(keys(&e), ["你好".to_string(), format!("好{b}")], "{b} after 你好, 欣 after 好 and the fixed word {b}");
     e.set_left_context("你好");
-    assert_eq!(type_syls(&mut e, "ㄅㄣ ㄒㄧㄣ").preedit, "奔欣");
+    assert_eq!(type_syls(&mut e, "ㄅㄣ ㄒㄧㄣ").preedit, format!("{b}欣"));
     e.key(k(KeyKind::Esc)).unwrap();
 
     // (c) after punctuation the key is ^ (rule 8: ^> and the next reading): a single character is not learned there (rule 6) ...
@@ -464,9 +502,10 @@ fn context_key_learned_equals_context_key_queried() {
     e.set_left_context("");
     assert_eq!(type_syls(&mut e, "ㄒㄧㄣ").preedit, "鑫");
 }
-/// The context keys of the learner's records, in insertion order.
+/// The context keys of the learner's S4 records, in insertion order. New-word records ("#", new-word B) are no
+/// context: two re-picked single characters next to each other, as in (b), also teach a new word.
 fn keys(e: &Engine) -> Vec<String> {
-    e.learner().records().iter().map(|r| r.context.clone()).collect()
+    e.learner().records().iter().filter(|r| r.context != core::learn::NEWWORD).map(|r| r.context.clone()).collect()
 }
 
 // ---------- 4: sentinel, 1-char match, globalization ----------
@@ -568,6 +607,7 @@ fn commit_syls(e: &mut Engine, s: &Syls) -> String {
 /// empty learner and a learning-off engine commit the same dev302 rows: learning alone changes nothing.
 #[test]
 fn empty_learner_matches_goldens() {
+    chat_only();
     let gold: Vec<String> = std::fs::read_to_string(root().join("eval/golden/s2-lm-dev302-top1.tsv"))
         .unwrap()
         .lines()
@@ -693,10 +733,7 @@ fn command_backspace_forgets_the_highlighted_word() {
     let g = gs.iter().find(|g| g.name == "警官/景觀").unwrap();
     let teach = &g.rows[0];
     let same = g.rows.iter().find(|r| r.same == Some(true)).unwrap();
-    let mut e = Engine::new(&root().join("data/lexicon"), L).unwrap();
-    e.load_lm(&lm_path()).unwrap();
-    e.set_today(Some(DAY));
-    e.set_learning(true);
+    let mut e = loaded_engine();
     let plain = type_syls(&mut e, &same.reading).preedit;
     e.key(k(KeyKind::Esc)).unwrap();
     assert!(plain.contains(&g.other) && !plain.contains(&g.word), "baseline shows the common word");
@@ -783,7 +820,7 @@ fn row_max_syllables_commit_learns() {
             }
         }
     }
-    assert_eq!(commit.chars().count(), MAX_SYLLABLES, "the 40th syllable auto-commits");
+    assert_eq!(commit.chars().count(), MAX_SYLLABLES, "the last syllable auto-commits");
     assert!(commit.starts_with('欣'));
     assert_eq!(n_records(&e), 1);
 }
@@ -819,7 +856,14 @@ fn row_decode_failure_does_not_learn() {
         failed |= e.key(key).is_err();
     }
     assert!(failed, "decode failure reported");
-    assert_eq!(type_syls(&mut e, "ㄅㄣ").preedit, "犇", "engine was reset");
+    // The engine was reset: ㄅㄣ decodes as on an engine that never failed. Until model-v6 that was 犇; with model-v6 and its
+    // Kneser-Ney side file the unlearned decode is 奔 (model-v6 section 2.8 acceptance 5), so the expectation comes from a fresh engine.
+    let fresh = {
+        let mut f = tiny(&format!("{TINY}ㄆㄧㄥˊ 平 -1.0\n"), TINY);
+        type_syls(&mut f, "ㄅㄣ").preedit
+    };
+    assert_eq!(fresh, "奔", "premise: the unlearned decode of ㄅㄣ on model-v6 with KN");
+    assert_eq!(type_syls(&mut e, "ㄅㄣ").preedit, fresh, "engine was reset");
     e.key(k(KeyKind::Enter)).unwrap();
     assert_eq!(n_records(&e), 0);
 }
@@ -1894,6 +1938,83 @@ fn global_eps_table() {
     }
 }
 
+// ---------- repick-freeze: forgetting a frozen word (s4-learning section 1.5, repick-freeze section 2) ----------
+
+/// Two words A+B. A is taught (警官 over the default 景觀), B is re-picked so A is frozen, then ⌘⌫ on A's learned word.
+/// Expected display: A's syllables decoded alone without the record (`lm::decode_segment`, same profile, same start,
+/// closing into the picked B), then B. Measured: A reads 景觀 again, B stays the picked 公座.
+#[test]
+fn forget_a_frozen_word_redecodes_it_without_the_record() {
+    let (a_reading, b_reading) = ("ㄐㄧㄥˇ ㄍㄨㄢ", "ㄍㄨㄥ ㄗㄨㄛˋ");
+    let (a_taught, b_picked) = ("警官", "公座");
+    let s = shared();
+    let mut e = engine();
+    // teach A (in front of B: a sentence-start record holds the syllable after the word, rule 8): type, re-pick A's span, commit
+    type_syls(&mut e, &format!("{a_reading} {b_reading}"));
+    pick(&mut e, 4, 2, a_taught);
+    e.key(k(KeyKind::Enter)).unwrap();
+    assert!(e.learner().records().iter().any(|r| r.word == a_taught), "A is taught");
+    // A+B: A shows the learned word; re-pick B so A is frozen
+    let o = type_syls(&mut e, &format!("{a_reading} {b_reading}"));
+    assert!(o.preedit.starts_with(a_taught), "learned A shown: {}", o.preedit);
+    pick(&mut e, 4, 4, b_picked);
+    // ⌘⌫ on A's learned word
+    e.key(k(KeyKind::Home)).unwrap();
+    e.key(k(KeyKind::Right)).unwrap();
+    e.key(k(KeyKind::Right)).unwrap();
+    let o = e.key(k(KeyKind::Space)).unwrap();
+    highlight(&mut e, o, a_taught);
+    let o = e.key(Key { kind: KeyKind::Backspace, ch: '\0', modifiers: MOD_COMMAND }).unwrap();
+    assert!(e.learner().records().iter().all(|r| r.word != a_taught));
+    let a_syls = syls(a_reading);
+    let (lp, delta) = s.capped.best_lp_delta(&syls(b_reading), b_picked).unwrap();
+    let want = lm::decode_segment(
+        &s.capped, &a_syls, &s.lm, lm::Profile::Chat.lambda(), "<s>", lm::End::Next { word: b_picked, lp, delta }, 64,
+    )
+    .unwrap()[0]
+        .1
+        .iter()
+        .map(|w| w.0)
+        .collect::<String>();
+    assert_ne!(want, a_taught, "the unlearned decode differs from the taught word");
+    println!("forget on frozen A: {} (taught {a_taught}, unlearned {want})", o.preedit);
+    assert_eq!(o.preedit, format!("{want}{b_picked}"));
+}
+
+/// Repick-freeze section 7.2: a re-pick cuts the learned word 警官 (井 over the first syllable); the left-over 官 and
+/// 工作 are frozen. ⌘⌫ on 警官 (records go) frees the frozen words over its span (官) only: ㄍㄨㄢ decodes again between
+/// the user's 井 and the still frozen 工作, without the record.
+#[test]
+fn forget_a_cut_learned_word_leaves_no_pieces() {
+    let reading = "ㄐㄧㄥˇ ㄍㄨㄢ ㄍㄨㄥ ㄗㄨㄛˋ";
+    let mut e = engine();
+    // Taught in front of 工作 (a sentence-start record holds the syllable after the word, rule 8).
+    type_syls(&mut e, reading);
+    pick(&mut e, 4, 2, "警官");
+    e.key(k(KeyKind::Enter)).unwrap();
+    assert!(type_syls(&mut e, reading).preedit.starts_with("警官"));
+    pick(&mut e, 4, 1, "井");
+    e.key(k(KeyKind::Home)).unwrap();
+    e.key(k(KeyKind::Right)).unwrap();
+    e.key(k(KeyKind::Right)).unwrap();
+    let o = e.key(k(KeyKind::Space)).unwrap();
+    highlight(&mut e, o, "警官");
+    let got = e.key(Key { kind: KeyKind::Backspace, ch: '\0', modifiers: MOD_COMMAND }).unwrap().preedit;
+    assert!(e.learner().records().iter().all(|r| r.word != "警官"));
+    let s = shared();
+    let (lp, delta) = s.capped.best_lp_delta(&syls("ㄍㄨㄥ ㄗㄨㄛˋ"), "工作").unwrap();
+    let mid = lm::decode_segment(
+        &s.capped, &syls("ㄍㄨㄢ"), &s.lm, lm::Profile::Chat.lambda(), "井", lm::End::Next { word: "工作", lp, delta }, 64,
+    )
+    .unwrap()[0]
+        .1
+        .iter()
+        .map(|w| w.0)
+        .collect::<String>();
+    println!("cut learned word, forgotten: {got} (shown with the record: 井官工作)");
+    assert_eq!(got, format!("井{mid}工作"));
+}
+
 /// enter-pending contract §3 item 2: an unfinished syllable before a re-picked word, committed by Enter, changes nothing
 /// in what is learned (learn_commit sees the decoded text, not the shown one).
 #[test]
@@ -1964,18 +2085,20 @@ fn rule8_zai_taught_at_sentence_start_does_not_bend_other_sentences() {
 
 /// Rule 8 still learns: the same next syllable boosts the word, another one does not. (The contract's
 /// example 我試試看 is already the unlearned default of the real model, so this teaches 我再 before 牛 instead.)
+/// The control sentence was 我在買 (ㄇㄞˇ) until model-v6, whose unlearned default there is already 我再買, so it could no
+/// longer show "not boosted"; 我在家 (ㄐㄧㄚ, unlearned default 我在家) is the control now (model-v6 section 2.8 acceptance 5).
 #[test]
 fn rule8_the_same_next_syllable_still_boosts() {
     const SAME: &str = "ㄨㄛˇ ㄗㄞˋ ㄋㄧㄡˊ ㄩˇ";
-    const OTHER: &str = "ㄨㄛˇ ㄗㄞˋ ㄇㄞˇ";
+    const OTHER: &str = "ㄨㄛˇ ㄗㄞˋ ㄐㄧㄚ";
     assert_eq!(baseline(SAME), "我在牛與", "precondition: the default is not already 我再牛與");
-    assert_eq!(baseline(OTHER), "我在買", "precondition");
+    assert_eq!(baseline(OTHER), "我在家", "precondition: the default is not already 我再家");
     let mut e = engine();
     repick_commit(&mut e, SAME, 2, "我再");
     let keys: Vec<_> = e.learner().records().iter().filter(|r| r.word == "我再").map(|r| r.context.as_str()).collect();
     assert_eq!(keys, ["^>ㄋㄧㄡˊ"], "precondition: recorded under the next syllable");
     assert_eq!(commit_of(&mut e, SAME), "我再牛與");
-    assert_eq!(commit_of(&mut e, OTHER), "我在買");
+    assert_eq!(commit_of(&mut e, OTHER), "我在家");
 }
 
 /// Rule 7: a single character after a one-character context is not learned (the key would be the whole

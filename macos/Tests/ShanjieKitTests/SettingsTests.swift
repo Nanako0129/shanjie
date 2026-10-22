@@ -24,10 +24,10 @@ final class SettingsTests: XCTestCase {
 
     private func rig(secure: Bool = false, learning: URL? = nil) -> Rig {
         let layout = MemoryLayoutStore(), demote = MemoryDemoteStore(), prediction = MemoryPredictionStore(), abbreviation = MemoryAbbreviationStore()
-        let acg = MemoryAcgPackStore(), tint = MemoryGlassTintStore(), dialogs = FakeDialogs(), english = MemoryEnglishStore()
+        let acg = MemoryAcgPackStore(), tint = MemoryGlassTintStore(), dialogs = FakeDialogs(), english = MemoryEnglishStore(false)  // saved off: the default is on (digits.md A.3.7), the tests below start from off
         let shell = Shell(resources: resources, panel: FakePanel(), isSecureInput: { secure }, layoutStore: layout,
                           learningDirectory: learning, dialogs: dialogs, demoteStore: demote, predictionStore: prediction, abbreviationStore: abbreviation, englishStore: english,
-                          acgPackStore: acg, glassTintStore: tint, candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore())
+                          acgPackStore: acg, glassTintStore: tint, candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore(), spacingStore: MemorySpacingStore())
         XCTAssertNotNil(shell.engine)
         return Rig(shell: shell, model: SettingsModel(shell: shell), controller: Controller(shell),
                    layout: layout, demote: demote, prediction: prediction, abbreviation: abbreviation, english: english, acg: acg, tint: tint, dialogs: dialogs)
@@ -68,12 +68,23 @@ final class SettingsTests: XCTestCase {
         XCTAssertEqual(item(r, .toggleAbbreviation)?.enabled, true)
     }
 
+    /// Digits.md A.3.7: nothing saved is on; a saved off stays off; the line under the toggle is the contract's. (Its place in the window,
+    /// right under the toggle, is in the app target's form, which has no tests: the shipping layout cannot be observed here.)
+    func testEnglishMixingDefaultsOnAndTheNoteIsTheContractsLine() throws {
+        let shell = Shell(resources: resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(),
+                          learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), englishStore: MemoryEnglishStore(),
+                          acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore(), spacingStore: MemorySpacingStore())
+        XCTAssertTrue(SettingsModel(shell: shell).english, "nothing saved is on")
+        XCTAssertFalse(rig().model.english, "a saved off stays off")
+        XCTAssertEqual(MenuEntry.Text.englishDigitsNote, "打英文不用切換輸入法；數字列的鍵也會打出數字（例如 2026年、3.14），由前文判斷是數字還是注音。")
+    }
+
     /// zhen-mixed section 3.2 / 5.3: the window's 中英混打（實驗） goes through the same setter and store as the menu item, the two stay in
     /// sync, and it is greyed (setting kept) when the engine has no word list, which the window's toggle follows. The toggle's
     /// place in the window (right after 即時預測, as in the menu) is in the app target's form, which has no tests.
     func testEnglishFromTheWindowReachesStoreAndMenuAndFollowsAvailability() throws {
         let r = rig()
-        XCTAssertFalse(r.model.english, "default off")
+        XCTAssertFalse(r.model.english, "saved off")
         XCTAssertTrue(r.model.englishEnabled)
         r.model.setEnglish(true)
         XCTAssertEqual(r.english.english, true)
@@ -86,7 +97,7 @@ final class SettingsTests: XCTestCase {
         let english = MemoryEnglishStore(true)
         let shell = Shell(resources: bare, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(),
                           learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), englishStore: english,
-                          acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore())
+                          acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore(), spacingStore: MemorySpacingStore())
         let model = SettingsModel(shell: shell)
         XCTAssertFalse(model.englishEnabled)
         XCTAssertTrue(model.english, "greyed, still showing the setting")
@@ -112,6 +123,36 @@ final class SettingsTests: XCTestCase {
         r.controller.session.perform(.layout(.standard))
         XCTAssertEqual(item(r, .toggleEnglish)?.enabled, true)
         XCTAssertTrue(r.model.englishEnabled, "the window followed the menu's layout change")
+    }
+
+    /// zhen-inline section 2 / 4.3: the window's 英文的顯示 choice defaults to true, goes to the store, and is greyed with the 中英混打
+    /// switch off, with the switch greyed (Eten), and with no word list; the setting is kept while greyed.
+    func testEnglishInlineChoiceStoresAndFollowsTheSwitch() throws {
+        let r = rig()
+        XCTAssertTrue(r.model.englishInline, "default true")
+        XCTAssertFalse(r.model.englishInlineEnabled, "the switch is off")
+        r.model.setEnglish(true)
+        XCTAssertTrue(r.model.englishInlineEnabled)
+        r.model.setEnglishInline(false)
+        XCTAssertEqual(r.english.englishInline, false)
+        XCTAssertFalse(r.model.englishInline)
+        XCTAssertTrue(r.model.englishInlineEnabled, "the choice itself does not grey it")
+        r.model.selectLayout(.eten)
+        XCTAssertFalse(r.model.englishInlineEnabled, "Eten greys the switch and so the choice")
+        XCTAssertFalse(r.model.englishInline, "the setting is kept")
+        r.controller.session.perform(.layout(.standard))
+        XCTAssertTrue(r.model.englishInlineEnabled)
+        r.controller.session.perform(.toggleEnglish)
+        XCTAssertFalse(r.model.englishInlineEnabled, "the menu's switch off greys it too")
+        // No word list: greyed, the stored choice still shows.
+        let bare = try XCTUnwrap(TestData.resources(only: Set(TestData.files.map(\.name)).subtracting(["english-words.txt"])))
+        let english = MemoryEnglishStore(true, inline: false)
+        let shell = Shell(resources: bare, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(),
+                          learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), englishStore: english,
+                          acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore(), spacingStore: MemorySpacingStore())
+        let model = SettingsModel(shell: shell)
+        XCTAssertFalse(model.englishInlineEnabled)
+        XCTAssertFalse(model.englishInline, "greyed, still showing the setting")
     }
 
     /// s7c2b section 2.2: the window's 語意校正 goes through the same setter as the menu item, the two stay in sync, and with the
@@ -291,7 +332,7 @@ final class SettingsTests: XCTestCase {
         let tint = MemoryGlassTintStore(0.4)
         let shell = Shell(resources: resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(),
                           learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(),
-                          predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), englishStore: MemoryEnglishStore(), acgPackStore: MemoryAcgPackStore(), glassTintStore: tint, candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore())
+                          predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), englishStore: MemoryEnglishStore(), acgPackStore: MemoryAcgPackStore(), glassTintStore: tint, candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore(), spacingStore: MemorySpacingStore())
         XCTAssertEqual(shell.glassTint, 0.4)
         tint.glassTint = 0.9
         XCTAssertEqual(shell.glassTint, 0.4, "the Shell reads the store only at start and on set")
@@ -302,12 +343,24 @@ final class SettingsTests: XCTestCase {
         var secure = false
         let shell = Shell(resources: resources, panel: FakePanel(), isSecureInput: { secure }, layoutStore: MemoryLayoutStore(),
                           learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(),
-                          predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), englishStore: MemoryEnglishStore(), acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore())
+                          predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), englishStore: MemoryEnglishStore(), acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore(), spacingStore: MemorySpacingStore())
         let model = SettingsModel(shell: shell)
         secure = true
         shell.changed()
         XCTAssertFalse(model.pausedSecure, "a settings change does not re-read secure input")
         model.refreshExternal()
         XCTAssertTrue(model.pausedSecure)
+    }
+
+    // MARK: settings-sidebar section 2.2
+
+    func testFrameIsClampedIntoTheUsableArea() {
+        let area = CGRect(x: 0, y: 80, width: 1470, height: 860)  // Dock below y 80, menu bar above y 940
+        let inside = CGRect(x: 100, y: 200, width: 580, height: 500)
+        XCTAssertEqual(settingsFrame(inside, clampedInto: area), inside)
+        // Grew downward past the Dock: moved up so the bottom edge sits on the area's.
+        XCTAssertEqual(settingsFrame(CGRect(x: 100, y: 30, width: 580, height: 500), clampedInto: area), CGRect(x: 100, y: 80, width: 580, height: 500))
+        // Sticks out above the menu bar: moved down so the top edge sits on the area's.
+        XCTAssertEqual(settingsFrame(CGRect(x: 100, y: 600, width: 580, height: 500), clampedInto: area), CGRect(x: 100, y: 440, width: 580, height: 500))
     }
 }

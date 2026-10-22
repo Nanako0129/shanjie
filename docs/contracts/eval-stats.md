@@ -32,7 +32,8 @@ S2k 的保留集只回總數（聊天 180、書面 184，對第一段的 179、1
 
 ## 2. 比較工具 `tools/evalstats.py`
 
-- `python3 tools/evalstats.py compare BASE CAND [--label 名稱] [--seed S] [--resamples N] [--net]`：讀兩個 rowstats，列數不同或列號不對齊就報錯結束；印出 §0 的一行表格（Markdown）。`--net`（E2）在最後多三欄（淨值、改壞率、改壞數的 95% 上界）；不給 `--net` 時輸出逐位元組不變。
+- `python3 tools/evalstats.py compare BASE CAND [--label 名稱] [--seed S] [--resamples N] [--net]`：讀兩個 rowstats，列數不同或列號不對齊就報錯結束；印出 §0 的一行表格（Markdown）。`--net`（E2）在最後多三欄（淨值、改壞率、改壞數的 95% 上界）；不給 `--net` 時輸出逐位元組不變。`--ci L`（預設 0.95）改 bootstrap 區間的水準（表頭的「95%」跟著寫成 L，例如 `--ci 0.90` 取 5% 與 95% 分位；P4b 第 2b 條用）；不給時輸出逐位元組不變。
+- 〔2026-10-18 加，`docs/methodology.md`「2026-10-18：研究流程改版」#6、#9〕`compare … --cluster FILE`：FILE 每列一個叢集代號（同一則訊息、同一段發言、同一個條目），配對 bootstrap 以叢集為單位重抽；標籤後加「(clustered, M clusters)」，代號數和列數不同就報錯結束。`mde (--discordant D | --base BASE --cand CAND) --alpha A [--power 0.8]`：不一致 D 列時，雙尾精確 McNemar 在 α 下檢定力達到 power 的最小淨值（淨值和 D 同奇偶）；給兩個 rowstats 時 D 由檔案算。不給這些時其他輸出不變。
 - 預設 `--seed 20261008`、`--resamples 10000`；同樣的輸入與參數，輸出逐位元組相同。
 - 只用 Python 標準函式庫。
 - 函式（`mcnemar_exact`、`levenshtein`、`paired_bootstrap`）可以給其他工具 import；這一片不改 `tools/bench.py`（§5）。
@@ -73,7 +74,7 @@ S2k 的保留集只回總數（聊天 180、書面 184，對第一段的 179、1
 
 ## 5. 不在這一片
 
-- **D：擴大或輪替保留集**（使用者同意，排在 v0.3.0 之後另寫契約）：由不參與實作的 agent 盲寫新的句子；每個版本換一批，舊的降成開發集。
+- **D：擴大或輪替保留集**（使用者同意，排在 v0.3.0 之後另寫契約）：已由 `docs/contracts/holdout-refresh.md` 做（2026-10-16）：從公開語料由 fresh agent 抽三份互斥的新集，每份用 8 次或因它做了決定就換，舊集退役成可讀的挑戰集。
 - **Discord 調參集挑長句**（使用者 2026-10-08：「Discord 的調參集雖然夠口語，但是挑出來測試的句子都太短」）：改挑長一點的句子，或把同一串連續訊息合成一列，和 D 一起做。
 - **`tools/bench.py` 加 CER 與區間**（第二次審查後移出，2026-10-08）：`bench.py` 的比較只在 `run` 裡算，executor 不能跑 `run`，這一片驗不到。v0.3.0 的基準量測之前另做：先把 `vs_prev` 的計算抽成純函式、每一格都算 CER，再加單元測試，然後才跑 `run`。這一片之前，跨版本表照舊。
 - 可重複使用的保留集（Dwork 等 2015，Thresholdout）：只列為參考。

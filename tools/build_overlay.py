@@ -28,7 +28,8 @@ MANUAL = os.path.join(ROOT, "data", "lexicon", "overlay-manual.tsv")   # 維護�
 PACK = os.path.join(ROOT, "data", "packs", "acg-add.tsv")   # 手動詞也不能是詞包的詞：引擎把詞包接在疊加層後面，同詞同讀音重複就整個載入失敗
 # 手動詞的分數＝同字數的 length_scores ＋ 這個值（log10）。2026-10-14 量的：書面設定下「米雅歌」輸給「米亞哥」0.25（加 0.25 仍輸，
 # 加 0.5 時四個名字（五列）單獨打與放在句子裡，兩種設定 9 句都是第一名；研究紀錄同日）。手動加的是維護者明確要的詞，所以比一般疊加層詞高一點。
-MANUAL_BONUS = 0.5
+# model-v6 §2.8 規則 2（維護者 2026-10-14）：0.5 是 model-v5 上剛好過關的最小值；開 KN 的 model-v6 書面「米雅歌唱得很好」輸，改 0.75。
+MANUAL_BONUS = 0.75
 # canto-prune（docs/contracts/canto-prune.md，維護者 2026-10-14）：含這些粵語用字、又不是教育部國語辭典詞目（build() 本來就讀的
 # moe_titles()）的標題不進候選。「俾」「咩」「喎」（喎斜）「嘞」（好嘞）國語也用，不在內；審查補了嗮 噏 揸 攞 餸 嚫 撳 搣 嗌 掟 喐 睩 嗱。
 CANTO_CHARS = frozenset("冇嘅啲喺佢嘢唔咁嚟搵睇畀乜啱攰嗰哋嚿諗噉嗮噏揸攞餸嚫撳搣嗌掟喐睩嗱")

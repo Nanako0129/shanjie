@@ -1,5 +1,5 @@
 """Tests for tools/evalstats.py. Run: python3 -m unittest tools.test_evalstats   (from the repo root). No network, no data files."""
-import math, os, sys, tempfile, unittest
+import contextlib, io, math, os, sys, tempfile, unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import bench  # noqa: E402
@@ -148,6 +148,160 @@ class Net(unittest.TestCase):
         self.assertEqual(cells[4:6], ["3", "1"])                      # fixed, broken
         self.assertEqual(cells[-3:], ["2", "10.00%", "4.7"])         # net 3 - 1, 1 / 10, upper limit of 1 event
         self.assertEqual(out[1].count("|"), out[0].count("|"))
+
+
+class Mde(unittest.TestCase):
+    @staticmethod
+    def brute(d, alpha, power):
+        """Independent power: exact enumeration with math.comb, McNemar p written out again."""
+        def p_two_sided(b, c):
+            n = b + c
+            return min(1.0, 2 * sum(math.comb(n, k) for k in range(min(b, c) + 1)) / 2 ** n)
+        for net in range(d % 2, d + 1, 2):
+            p = (d + net) / (2 * d)
+            pw = sum(math.comb(d, c) * p ** c * (1 - p) ** (d - c) for c in range(d + 1) if p_two_sided(d - c, c) <= alpha)
+            if pw >= power - 1e-12:
+                return net
+
+    def test_matches_brute_force_for_small_d(self):
+        for d in range(6, 31):
+            for alpha in (0.05, 0.01):
+                self.assertEqual(E.mde(d, alpha), self.brute(d, alpha, 0.8), (d, alpha))
+        self.assertEqual(E.mde(20, 0.05, 0.9), self.brute(20, 0.05, 0.9))
+
+    def test_d61_values(self):
+        # computed here: net must have the parity of D = 61 (odd), so the smallest is 23 (not 22) at 0.05 and 27 at 0.01
+        self.assertEqual(E.mde(61, 0.05), 23)
+        self.assertEqual(E.mde(61, 0.01), 27)
+
+    def test_power_is_reached_at_the_mde_and_not_two_rows_below(self):
+        d = 61
+        net = E.mde(d, 0.05)
+        def power(n):
+            p = (d + n) / (2 * d)
+            return sum(math.comb(d, c) * p ** c * (1 - p) ** (d - c) for c in range(d + 1) if E.mcnemar_exact(d - c, c) <= 0.05)
+        self.assertGreaterEqual(power(net), 0.8)
+        self.assertLess(power(net - 2), 0.8)
+
+    def test_monotone_in_alpha_and_d(self):
+        self.assertGreater(E.mde(61, 0.01), E.mde(61, 0.05))
+        self.assertGreater(E.mde(61, 0.05), E.mde(61, 0.2))
+        ms = [E.mde(d, 0.05) for d in range(10, 200, 10)]
+        self.assertEqual(ms, sorted(ms))
+        self.assertGreater(E.mde(200, 0.05), E.mde(20, 0.05))
+
+    def test_unreachable(self):
+        self.assertIsNone(E.mde(0, 0.05))
+        self.assertIsNone(E.mde(3, 0.01))     # even 3-0 gives p = 0.25
+
+    def test_cli(self):
+        d = tempfile.mkdtemp()
+        # 3 discordant rows of 5 in these files
+        b = write(d, "b", "1\t1\t0\t3\n2\t0\t1\t3\n3\t0\t1\t3\n4\t1\t0\t3\n5\t1\t0\t3\n")
+        c = write(d, "c", "1\t1\t0\t3\n2\t1\t0\t3\n3\t1\t0\t3\n4\t0\t1\t3\n5\t1\t0\t3\n")
+        for argv, want in ((["mde", "--discordant", "61", "--alpha", "0.05"], "D 61, alpha 0.05, power 0.8: MDE net +23 rows"),
+                           (["mde", "--base", b, "--cand", c, "--alpha", "0.05"], "D 3, alpha 0.05, power 0.8: no net")):
+            old, buf = sys.argv, io.StringIO()
+            sys.argv = ["evalstats.py"] + argv
+            try:
+                with contextlib.redirect_stdout(buf):
+                    E.main()
+            finally:
+                sys.argv = old
+            self.assertTrue(buf.getvalue().startswith(want), buf.getvalue())
+        for bad in ([], ["--discordant", "61", "--base", b], ["--discordant", "61", "--base", b, "--cand", c], ["--base", b],
+                    ["--discordant", "-5"]):
+            old = sys.argv
+            sys.argv = ["evalstats.py", "mde", "--alpha", "0.05"] + bad
+            try:
+                with self.assertRaises(SystemExit) as e, contextlib.redirect_stderr(io.StringIO()):
+                    E.main()
+            finally:
+                sys.argv = old
+            self.assertEqual(e.exception.code, 2, bad)
+
+
+class ClusterBootstrap(unittest.TestCase):
+    def setUp(self):
+        self.d = tempfile.mkdtemp()
+        # 20 clusters of 5 rows; the candidate fixes every row of clusters 0-7 (+40 rows), the effect is perfectly clustered
+        self.ids = [str(j) for j in range(20) for _ in range(5)]
+        self.base = [(0, 1, 4)] * 100
+        self.cand = [(1 if j < 8 else 0, 0 if j < 8 else 1, 4) for j in range(20) for _ in range(5)]
+
+    def test_every_row_its_own_cluster_equals_the_row_bootstrap(self):
+        ids = [str(i) for i in range(len(self.base))]
+        self.assertEqual(E.paired_bootstrap(self.base, self.cand, 7, 300, ids), E.paired_bootstrap(self.base, self.cand, 7, 300))
+        self.assertEqual(E.paired_bootstrap(self.base, self.cand, 7, 300, None), E.paired_bootstrap(self.base, self.cand, 7, 300))
+
+    def test_correlated_clusters_widen_the_interval(self):
+        (rlo, rhi), _ = E.paired_bootstrap(self.base, self.cand, 7, 2000)
+        (clo, chi), _ = E.paired_bootstrap(self.base, self.cand, 7, 2000, self.ids)
+        self.assertGreater(chi - clo, 1.5 * (rhi - rlo))
+        self.assertTrue(clo <= 40 <= chi)
+
+    def test_cluster_names_do_not_matter(self):
+        # same clusters named differently: the same intervals
+        renamed = ["c" + i for i in self.ids]
+        self.assertEqual(E.paired_bootstrap(self.base, self.cand, 3, 200, renamed), E.paired_bootstrap(self.base, self.cand, 3, 200, self.ids))
+
+    def test_compare_marks_the_label_and_keeps_mcnemar(self):
+        w = lambda name, rows: write(self.d, name, "".join(f"{i}\t{o}\t{e}\t{g}\n" for i, (o, e, g) in enumerate(rows, 1)))
+        bp, cp = w("b", self.base), w("c", self.cand)
+        cl = write(self.d, "cl", "".join(i + "\n" for i in self.ids))
+        plain = E.compare(bp, cp, "x", resamples=200).splitlines()
+        clus = E.compare(bp, cp, "x", resamples=200, cluster_path=cl).splitlines()
+        self.assertIn("x (clustered, 20 clusters)", clus[2])
+        self.assertNotIn("clustered", plain[2])
+        cut = lambda row: row.split("|")[2:9]          # n, top1 base and new, fixed, broken, p, CER base: untouched by the bootstrap
+        self.assertEqual(cut(plain[2]), cut(clus[2]))
+        self.assertNotEqual(plain[2].split("|")[-3], clus[2].split("|")[-3])
+        self.assertEqual(E.compare(bp, cp, "x", resamples=200), "\n".join(plain))      # default path unchanged
+
+    def test_ci_level_default_is_95_and_unchanged(self):
+        w = lambda name, rows: write(self.d, name, "".join(f"{i}\t{o}\t{e}\t{g}\n" for i, (o, e, g) in enumerate(rows, 1)))
+        bp, cp = w("b", self.base), w("c", self.cand)
+        default = E.compare(bp, cp, "x", resamples=1000)
+        self.assertEqual(default, E.compare(bp, cp, "x", resamples=1000, level=0.95))
+        self.assertIn("Δtop1 95%（列） | ΔCER 95%（百分點）", default)
+        # the quantiles are the literal 2.5% / 97.5% ones of before
+        (lo, hi), _ = E.paired_bootstrap(self.base, self.cand, 5, 1000)
+        self.assertEqual((lo, hi), E.paired_bootstrap(self.base, self.cand, 5, 1000, level=0.95)[0])
+        r90 = E.compare(bp, cp, "x", seed=5, resamples=1000, level=0.90)
+        self.assertIn("Δtop1 90%（列） | ΔCER 90%（百分點）", r90)
+        (lo9, hi9), _ = E.paired_bootstrap(self.base, self.cand, 5, 1000, level=0.90)
+        self.assertTrue(lo <= lo9 <= hi9 <= hi and hi9 - lo9 < hi - lo)
+        # level 0.90 reads the 5% and 95% order statistics of the same draws
+        self.assertEqual(r90.splitlines()[2].split("|")[10].strip(), f"[{lo9}, {hi9}]")
+
+    def test_ci_out_of_range_is_a_clean_error(self):
+        bp, cp = write(self.d, "b", "1\t0\t1\t3\n"), write(self.d, "c", "1\t1\t0\t3\n")
+        for level in ("0.4", "1", "0.9999", "-1"):
+            old, err = sys.argv, io.StringIO()
+            sys.argv = ["evalstats.py", "compare", bp, cp, "--resamples", "10", "--ci", level]
+            try:
+                with self.assertRaises(SystemExit) as e, contextlib.redirect_stderr(err):
+                    E.main()
+            finally:
+                sys.argv = old
+            self.assertEqual(e.exception.code, 1)
+            self.assertIn("evalstats: --ci must be between", err.getvalue())
+
+    def test_count_mismatch_is_a_value_error_and_a_clean_exit(self):
+        w = lambda name, text: write(self.d, name, text)
+        bp, cp = w("b", "1\t0\t1\t3\n2\t0\t1\t3\n"), w("c", "1\t1\t0\t3\n2\t1\t0\t3\n")
+        for text in ("a\n", "a\nb\nc\n"):
+            with self.assertRaises(ValueError):
+                E.compare(bp, cp, "x", resamples=10, cluster_path=w("cl", text))
+        old, err = sys.argv, io.StringIO()
+        sys.argv = ["evalstats.py", "compare", bp, cp, "--resamples", "10", "--cluster", w("cl2", "a\n")]
+        try:
+            with self.assertRaises(SystemExit) as e, contextlib.redirect_stderr(err):
+                E.main()
+        finally:
+            sys.argv = old
+        self.assertEqual(e.exception.code, 1)
+        self.assertIn("1 cluster ids for 2 rows", err.getvalue())
 
 
 if __name__ == "__main__":

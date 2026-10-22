@@ -58,6 +58,8 @@ public struct MenuEntry: Equatable, Sendable {
         case toggleAcgPack
         case toggleAppChat
         case openSettings
+        /// docs/contracts/about-update.md section 1: a silent check, then 善解更新 (standalone-updater.md) if it confirms one.
+        case installUpdate
     }
 
     public var title: String
@@ -73,6 +75,15 @@ public struct MenuEntry: Equatable, Sendable {
         public static let demote = "避免把敏感字詞排在前面"
         public static let prediction = "即時預測"
         public static let english = "中英混打（實驗）"
+        /// The line under that toggle in the settings window (docs/contracts/digits.md A.3.7).
+        public static let englishDigitsNote = "打英文不用切換輸入法；數字列的鍵也會打出數字（例如 2026年、3.14），由前文判斷是數字還是注音。"
+        /// The choice under it in the settings window (zhen-inline section 2): the label and its two values.
+        public static let englishDisplay = "英文的顯示"
+        public static let englishDisplayTyped = "打字時就顯示"
+        public static let englishDisplaySpace = "按空白才顯示"
+        /// The spacing toggle in the settings window and the line under it (docs/contracts/cjk-spacing.md section 2).
+        public static let spacing = "中英文之間自動加空格"
+        public static let spacingNote = "在漢字和半形英文、數字之間自動加一個空格（俗稱「盤古之白」）。只改善解送出的文字。"
         public static let abbreviation = "可省略韻母"
         public static let rerank = "語意校正"
         public static let acgPack = "動漫與遊戲詞"
@@ -102,7 +113,8 @@ public protocol LearningDialogs: AnyObject {
 /// Fixed strings of those windows (R2: no app name, path or count).
 public enum DialogText {
     public static let clearTitle = "要清除選字記憶嗎？"
-    public static let clearMessage = "會刪除這台電腦上記住的改選與預測列選取紀錄，之後要重新學。清除只刪本機檔案；已經進 Time Machine 備份或本機快照的副本不受影響。"
+    /// Names the new words too (new-word B, docs/contracts/newword-b.md section 2.7).
+    public static let clearMessage = "會刪除這台電腦上記住的改選、預測列選取，以及從逐字改選學到的新詞，之後要重新學。清除只刪本機檔案；已經進 Time Machine 備份或本機快照的副本不受影響。"
     public static let clearButton = "清除"
     public static let cancel = "取消"
     public static let failedTitle = "清除選字記憶失敗"
@@ -183,12 +195,15 @@ extension Session {
     /// "No marked text" is an empty marked range at any location: on 2026-10-06 VS Code, Chrome,
     /// Finder's search field and others reported {insertion, 0} rather than NSTextInputClient's
     /// {NSNotFound, 0}, and one reported {NSNotFound, NSNotFound} (numbers-only log on device).
-    func leftContext() -> String? {
+    ///
+    /// Returns the trailing Han characters for the core and, from the same read, the raw last character for cjk-spacing section 1.
+    /// Changes no state.
+    func leftContext() -> (han: String?, last: Character?) {
         let selected = client.selectedRange(), marked = client.markedRange()
-        guard selected.location != NSNotFound, marked.location == NSNotFound || marked.length == 0 else { return nil }
+        guard selected.location != NSNotFound, marked.location == NSNotFound || marked.length == 0 else { return (nil, nil) }
         let range = LeftContext.range(insertion: selected.location)
-        guard range.length > 0, let text = client.attributedSubstring(from: range)?.string else { return nil }
-        return LeftContext.han(text, truncated: range.location > 0)
+        guard range.length > 0, let text = client.attributedSubstring(from: range)?.string else { return (nil, nil) }
+        return (LeftContext.han(text, truncated: range.location > 0), text.last)
     }
 
     /// The menu (s3b section 13.2, sw section 3 and S4 sections 3-4), in order.
@@ -221,6 +236,11 @@ extension Session {
         if let bundle, !bundle.isEmpty {
             items.append(MenuEntry(title: T.appChat, action: .toggleAppChat, checked: profile(for: bundle) == Shell.chat,
                                    enabled: shell.profileMode == .auto))
+        }
+        // about-update section 1: only while a newer version is known; never shown otherwise.
+        // Greyed while a check runs (the press would be ignored).
+        if let u = shell.updates, let v = u.available {
+            items.append(MenuEntry(title: UpdateText.menu(v), action: .installUpdate, enabled: !u.checking))
         }
         items.append(MenuEntry(title: T.settings, action: .openSettings))
         items.append(MenuEntry(title: T.clear, action: .clear))
@@ -255,6 +275,8 @@ extension Session {
             toggleAppChat()
         case .openSettings:
             shell.openSettings()
+        case .installUpdate:
+            shell.updates?.install()
         }
     }
 }

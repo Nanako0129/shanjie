@@ -4,11 +4,19 @@ A rowstats file has one line per evaluated row: `row\tok\terrors\tgold_len` (row
 errors = Levenshtein distance of the first candidate to the gold sentence when the row is wrong, else 0;
 gold_len = Unicode scalar count of the gold sentence). Digits, tabs and newlines only: no text.
 
-  python3 tools/evalstats.py compare BASE CAND [--label NAME] [--seed S] [--resamples N] [--net]
+  python3 tools/evalstats.py compare BASE CAND [--label NAME] [--seed S] [--resamples N] [--net] [--cluster FILE] [--ci LEVEL]
+  python3 tools/evalstats.py mde (--discordant D | --base BASE --cand CAND) --alpha A [--power 0.8]
 
 prints a Markdown table row: n, top1 base/new, fixed/broken, exact McNemar p, CER base/new, and the paired
-bootstrap 95% intervals of the top1 and CER differences (new - base). With --net three more columns: net (fixed - broken),
-break rate (broken / n) and the one-sided exact 95% Poisson upper limit of the broken count. Standard library only.
+bootstrap intervals (95% unless --ci LEVEL, 0.5 to 0.999, says otherwise) of the top1 and CER differences (new - base). With --net three more columns: net (fixed - broken),
+break rate (broken / n) and the one-sided exact 95% Poisson upper limit of the broken count. With --cluster FILE (one cluster id
+per line, same order and count as the rows: rows of one message or article) the bootstrap resamples clusters instead of rows and the
+label gains "(clustered, M clusters)"; McNemar is unchanged. Without it the output is exactly as before.
+
+`mde` prints the minimum detectable effect: the smallest net (cand right - base right, among D discordant rows) whose exact two-sided
+McNemar test (mcnemar_exact, reject when p <= A) rejects with probability >= power, the D rows splitting binomially with
+p(cand right) = (D + net) / (2 D). Run it before a confirmation: a net below it cannot be told from zero at this n.
+Standard library only.
 """
 import argparse
 import math
@@ -38,6 +46,25 @@ def poisson_upper95(k):
         mid = (lo + hi) / 2
         lo, hi = (mid, hi) if cdf(mid) > 0.05 else (lo, mid)
     return (lo + hi) / 2
+
+
+def mde(d, alpha, power=0.8):
+    """Smallest net = c - b (same parity as d, since b + c = d) whose exact two-sided McNemar test rejects (p <= alpha) with
+    probability >= power when c ~ Binomial(d, (d + net) / (2 d)). None when even net = d does not reach the power (or d = 0)."""
+    if d == 0:
+        return None
+    reject = [mcnemar_exact(d - c, c) <= alpha for c in range(d + 1)]
+    for net in range(d % 2, d + 1, 2):
+        p = (d + net) / (2 * d)
+        if p >= 1:
+            pw = float(reject[d])
+        else:
+            lp, lq = math.log(p), math.log1p(-p)
+            pw = sum(math.exp(math.lgamma(d + 1) - math.lgamma(c + 1) - math.lgamma(d - c + 1) + c * lp + (d - c) * lq)
+                     for c in range(d + 1) if reject[c])
+        if pw >= power - 1e-12:
+            return net
+    return None
 
 
 def levenshtein(a, b):
@@ -76,27 +103,51 @@ def read_rowstats(path):
     return rows
 
 
-def paired_bootstrap(base, cand, seed=20261008, resamples=10000):
-    """95% intervals of (cand - base): (top1 count diff, CER diff), resampling rows with replacement."""
-    n = len(base)
+def paired_bootstrap(base, cand, seed=20261008, resamples=10000, clusters=None, level=0.95):
+    """`level` (default 95%) intervals of (cand - base): (top1 count diff, CER diff), resampling rows with replacement. With `clusters` (one id per
+    row) whole clusters are resampled instead, so rows of one message / article stay together (clusters are numbered in order of
+    first appearance: with every row its own cluster the draws equal the row bootstrap's)."""
     rng = random.Random(seed)
     # Per-row differences once; each resample is then three sums over the drawn indexes.
     dok = [c[0] - b[0] for b, c in zip(base, cand)]
     derr = [c[1] - b[1] for b, c in zip(base, cand)]
     glen = [b[2] for b in base]
+    if clusters is not None:
+        ids = {}
+        for k, cid in enumerate(clusters):
+            ids.setdefault(cid, len(ids))
+        dok_c, derr_c, glen_c = ([0] * len(ids) for _ in range(3))
+        for k, cid in enumerate(clusters):
+            j = ids[cid]
+            dok_c[j] += dok[k]; derr_c[j] += derr[k]; glen_c[j] += glen[k]
+        dok, derr, glen = dok_c, derr_c, glen_c
+    n = len(dok)
     d_ok, d_err = [], []
     for _ in range(resamples):
         idx = rng.choices(range(n), k=n)
         d_ok.append(sum(dok[i] for i in idx))
         g = sum(glen[i] for i in idx)
         d_err.append((sum(derr[i] for i in idx) / g) if g else 0.0)
+    q = round((1 - level) / 2, 10)   # 0.95 gives exactly 0.025 and 0.975 (checked by the default-output test)
     def ci(v):
         v.sort()
-        return v[int(0.025 * resamples)], v[int(0.975 * resamples)]
+        return v[int(q * resamples)], v[int((1 - q) * resamples)]
     return ci(d_ok), ci(d_err)
 
 
-def compare(base_path, cand_path, label="", seed=20261008, resamples=10000, net=False):
+def read_clusters(path, n):
+    with open(path, encoding="utf-8") as f:
+        ids = f.read().split("\n")
+    if ids and ids[-1] == "":
+        ids.pop()
+    if len(ids) != n:
+        raise ValueError(f"{path}: {len(ids)} cluster ids for {n} rows")
+    return ids
+
+
+def compare(base_path, cand_path, label="", seed=20261008, resamples=10000, net=False, cluster_path=None, level=0.95):
+    if not 0.5 <= level <= 0.999:
+        raise ValueError("--ci must be between 0.5 and 0.999")
     base, cand = read_rowstats(base_path), read_rowstats(cand_path)
     if len(base) != len(cand):
         raise ValueError(f"row counts differ ({len(base)} vs {len(cand)})")
@@ -108,8 +159,12 @@ def compare(base_path, cand_path, label="", seed=20261008, resamples=10000, net=
     fixed = sum(1 for b, c in zip(base, cand) if not b[0] and c[0])
     broken = sum(1 for b, c in zip(base, cand) if b[0] and not c[0])
     cer_b, cer_c = 100 * sum(r[1] for r in base) / g, 100 * sum(r[1] for r in cand) / g
-    (tlo, thi), (clo, chi) = paired_bootstrap(base, cand, seed, resamples)
-    head = ["| 集合 | n | top1 基準 | top1 新 | 改對 | 改壞 | p | CER 基準 | CER 新 | Δtop1 95%（列） | ΔCER 95%（百分點） |",
+    clusters = read_clusters(cluster_path, len(base)) if cluster_path else None
+    (tlo, thi), (clo, chi) = paired_bootstrap(base, cand, seed, resamples, clusters, level)
+    if clusters is not None:
+        label += f" (clustered, {len(set(clusters))} clusters)"
+    pct = f"{100 * level:g}"
+    head = [f"| 集合 | n | top1 基準 | top1 新 | 改對 | 改壞 | p | CER 基準 | CER 新 | Δtop1 {pct}%（列） | ΔCER {pct}%（百分點） |",
             "|---|---|---|---|---|---|---|---|---|---|---|"]
     if net:  # E2: 1:1 scoring columns appended at the end, so the default output is unchanged
         head[0] += " 淨值 | 改壞率 | 改壞數 95% 上界 |"
@@ -130,9 +185,31 @@ def main():
     c.add_argument("base"); c.add_argument("cand"); c.add_argument("--label", default="")
     c.add_argument("--seed", type=int, default=20261008); c.add_argument("--resamples", type=int, default=10000)
     c.add_argument("--net", action="store_true", help="E2: add net (fixed - broken), break rate (broken / n) and the 95%% exact Poisson upper limit of broken")
+    c.add_argument("--ci", type=float, default=0.95, help="level of the bootstrap intervals, 0.5 to 0.999 (default 0.95; P4b clause 2b uses 0.90)")
+    c.add_argument("--cluster", help="file with one cluster id per line (rows of one message / article): the bootstrap resamples clusters")
+    m = sub.add_parser("mde")
+    m.add_argument("--discordant", type=int); m.add_argument("--base"); m.add_argument("--cand")
+    m.add_argument("--alpha", type=float, required=True); m.add_argument("--power", type=float, default=0.8)
     a = ap.parse_args()
     try:
-        print(compare(a.base, a.cand, a.label, a.seed, a.resamples, a.net))
+        if a.cmd == "mde":
+            files = (a.base is not None) + (a.cand is not None)
+            if (a.discordant is None) != (files == 2) or (a.discordant is not None and files):
+                ap.error("give --discordant D, or --base and --cand")
+            if a.discordant is not None and a.discordant < 0:
+                ap.error("--discordant must be >= 0")
+            if not 0 < a.alpha < 1 or not 0 < a.power < 1:
+                ap.error("--alpha and --power must be within (0, 1)")
+            if a.discordant is None:
+                b, c = read_rowstats(a.base), read_rowstats(a.cand)
+                if len(b) != len(c):
+                    raise ValueError(f"row counts differ ({len(b)} vs {len(c)})")
+                a.discordant = sum(x[0] != y[0] for x, y in zip(b, c))
+            m_ = mde(a.discordant, a.alpha, a.power)
+            print(f"D {a.discordant}, alpha {a.alpha:g}, power {a.power:g}: " +
+                  (f"MDE net {m_:+d} rows" if m_ is not None else "no net reaches the power (D too small)"))
+            return
+        print(compare(a.base, a.cand, a.label, a.seed, a.resamples, a.net, a.cluster, a.ci))
     except (ValueError, OSError) as e:
         print(f"evalstats: {e}", file=sys.stderr)
         sys.exit(1)

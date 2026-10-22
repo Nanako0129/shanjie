@@ -32,9 +32,18 @@ if [ -n "$ZIP" ]; then
   [ "$(basename "$ZIP")" = "shanjie-$VERSION.zip" ] || fail "the zip must be named shanjie-$VERSION.zip"
 fi
 
-swift build -c release --package-path macos --product ShanjieInstaller
-BIN="$(swift build -c release --package-path macos --show-bin-path)/ShanjieInstaller"
+# docs/contracts/system-install.md section 2.3 step 6: the root stage accepts only the CFBundleVersion compiled into the
+# installer executable (not its Info.plist), linked in as the __TEXT,__shanjie_ver section. The file name carries the
+# version and the old executable is removed first, so the link never reuses an executable with another version.
+BIN="$(swift build -c release --package-path macos --force-resolved-versions --show-bin-path)/ShanjieInstaller"
+VERSION_FILE="$ROOT/macos/.build/shanjie-installer-version-$VERSION"
+mkdir -p "$ROOT/macos/.build"
+printf '%s' "$VERSION" >| "$VERSION_FILE"
+rm -f "$BIN"
+swift build -c release --package-path macos --force-resolved-versions --product ShanjieInstaller \
+  -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __shanjie_ver -Xlinker "$VERSION_FILE"
 [ -x "$BIN" ] || fail "the Swift build produced no installer executable"
+[ "$(scripts/installer-version.sh "$BIN")" = "$VERSION" ] || fail "the installer executable does not carry version $VERSION"
 
 mkdir -p "$ROOT/$OUT_DIR"
 touch "$ROOT/$OUT_DIR/.metadata_never_index"
@@ -46,6 +55,7 @@ cp "$BIN" "$APP/Contents/MacOS/shanjie-installer"
 cp scripts/install-ime.sh "$RES/install-ime.sh"
 cp LICENSE "$RES/LICENSES/LICENSE"
 cp LICENSES/McBopomofo-MIT.txt LICENSES/data.md "$RES/LICENSES/"
+scripts/compile-app-icon.sh "$RES"   # the app icon (docs/contracts/app-icon.md): Assets.car and AppIcon.icns
 
 printf '"CFBundleName" = "%s";\n"CFBundleDisplayName" = "%s";\n' 安裝善解輸入法 安裝善解輸入法 > "$RES/zh-Hant.lproj/InfoPlist.strings"
 printf '"CFBundleName" = "%s";\n"CFBundleDisplayName" = "%s";\n' "Shanjie Installer" "Shanjie Installer" > "$RES/en.lproj/InfoPlist.strings"
@@ -62,6 +72,8 @@ cat > "$APP/Contents/Info.plist" <<EOF
   <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
   <key>CFBundleName</key><string>Shanjie Installer</string>
   <key>CFBundleDisplayName</key><string>安裝善解輸入法</string>
+  <key>CFBundleIconFile</key><string>AppIcon</string>
+  <key>CFBundleIconName</key><string>AppIcon</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>$VERSION</string>
   <key>CFBundleVersion</key><string>$VERSION</string>

@@ -19,7 +19,7 @@ final class LearningTests: XCTestCase {
 
     private func makeShell(gate: Gate = Gate(), learning: URL? = nil, dialogs: FakeDialogs = FakeDialogs()) -> Shell {
         let shell = Shell(resources: resources, panel: FakePanel(), isSecureInput: { gate.secure },
-                          layoutStore: MemoryLayoutStore(), learningDirectory: learning, dialogs: dialogs, demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), englishStore: MemoryEnglishStore(), acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore())
+                          layoutStore: MemoryLayoutStore(), learningDirectory: learning, dialogs: dialogs, demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), englishStore: MemoryEnglishStore(), acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore(), spacingStore: MemorySpacingStore())
         XCTAssertNotNil(shell.engine)
         return shell
     }
@@ -35,17 +35,17 @@ final class LearningTests: XCTestCase {
         for (before, expected) in cases {
             c.client.before = before
             XCTAssertEqual(c.client.markedRange().location, NSNotFound, "no marked text: {NSNotFound, 0}")
-            XCTAssertEqual(c.session.leftContext(), expected, "case \(cases.firstIndex { $0.0 == before }!)")
+            XCTAssertEqual(c.session.leftContext().han, expected, "case \(cases.firstIndex { $0.0 == before }!)")
         }
     }
 
     func testRangeIsAtMost32UnitsBeforeTheInsertion() {
         let c = Controller(makeShell())
         c.client.before = String(repeating: "中", count: 10_000)
-        XCTAssertEqual(c.session.leftContext(), "中中")
+        XCTAssertEqual(c.session.leftContext().han, "中中")
         XCTAssertEqual(c.client.requested, [NSRange(location: 10_000 - 32, length: 32)])
         c.client.before = "ab中"
-        XCTAssertEqual(c.session.leftContext(), "中")
+        XCTAssertEqual(c.session.leftContext().han, "中")
         XCTAssertEqual(c.client.requested.last, NSRange(location: 0, length: 3))
         XCTAssertTrue(c.client.requested.allSatisfy { $0.length <= LeftContext.maxUTF16 })
     }
@@ -54,10 +54,10 @@ final class LearningTests: XCTestCase {
         let c = Controller(makeShell())
         c.client.before = "ab\t中"
         c.client.selectedOverride = NSRange(location: NSNotFound, length: 0)
-        XCTAssertNil(c.session.leftContext())
+        XCTAssertNil(c.session.leftContext().han)
         c.client.selectedOverride = nil
         c.client.markedOverride = NSRange(location: 3, length: 1)
-        XCTAssertNil(c.session.leftContext())
+        XCTAssertNil(c.session.leftContext().han)
         XCTAssertEqual(c.client.requested, [], "nothing read in either case")
     }
 
@@ -69,7 +69,7 @@ final class LearningTests: XCTestCase {
         for marked in [NSRange(location: 4, length: 0), NSRange(location: 0, length: 0),
                        NSRange(location: NSNotFound, length: NSNotFound)] {
             c.client.markedOverride = marked
-            XCTAssertEqual(c.session.leftContext(), "中", "\(marked)")
+            XCTAssertEqual(c.session.leftContext().han, "中", "\(marked)")
         }
     }
 
@@ -167,12 +167,18 @@ final class LearningTests: XCTestCase {
         XCTAssertEqual(c.session.menu.map(\.title), ["標準鍵盤", "倚天鍵盤", "避免把敏感字詞排在前面", "即時預測", "可省略韻母", "中英混打（實驗）", "語意校正", "動漫與遊戲詞", "這個 App 用聊天設定", "善解設定…", "清除選字記憶…", "不要備份選字記憶"])
     }
 
+    /// The clear window's disclosure (new-word B section 2.7): the words learned from character re-picks are named
+    /// along with re-picks and prediction picks, and the Time Machine caveat stays.
+    func testClearMessageNamesNewWords() {
+        XCTAssertEqual(DialogText.clearMessage, "會刪除這台電腦上記住的改選、預測列選取，以及從逐字改選學到的新詞，之後要重新學。清除只刪本機檔案；已經進 Time Machine 備份或本機快照的副本不受影響。")
+    }
+
     /// A clear that does not succeed is shown, never passed off as done (here: no engine at all).
     func testFailedClearIsShown() {
         let dialogs = FakeDialogs()
         let shell = Shell(resources: resources.appendingPathComponent("missing"), panel: FakePanel(),
                           isSecureInput: { false }, layoutStore: MemoryLayoutStore(),
-                          learningDirectory: TestLearning.directory(), dialogs: dialogs, demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), englishStore: MemoryEnglishStore(), acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore())
+                          learningDirectory: TestLearning.directory(), dialogs: dialogs, demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), englishStore: MemoryEnglishStore(), acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore(), spacingStore: MemorySpacingStore())
         XCTAssertNil(shell.engine)
         let c = Controller(shell)
         c.session.perform(.clear)
@@ -193,6 +199,15 @@ final class LearningTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: dir.path), "the directory stays")
         XCTAssertEqual(try excluded(), true, "a clear keeps the flag")
         c.session.perform(.toggleBackup)
+        // Clearing the flag soon after setting it can reach the file system a few ms after setResourceValues returns
+        // (measured for PR #198: a fresh read right after said true in 12 of 400 runs with no gap, none with 50 ms or more;
+        // the slowest clear seen, under load, landed after about 740 ms), so wait for it to land before the two reads.
+        let deadline = Date().addingTimeInterval(5)
+        while try excluded() != false && Date() < deadline {
+            var d = dir
+            d.removeAllCachedResourceValues()
+            usleep(2_000)
+        }
         XCTAssertEqual(try excluded(), false)
         XCTAssertEqual(toggle()?.checked, false)
     }

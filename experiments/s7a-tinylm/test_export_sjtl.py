@@ -2,6 +2,11 @@
 equals `q.astype(float32) * scale` of latency.quantize_int8, and the committed golden of tools/gen_tinylm_tiny.py still reads back.
 S7c-2c (docs/contracts/s7c2c-delta.md section 3, item 2): without delta the output is byte for byte the committed version 1 golden;
 two deltas write version 2; one delta or a bad one is an error and writes nothing.
+Rerank strength (docs/contracts/rerank-strength.md sections 2.1 and 9): `export` with levels writes version 3, a 212-byte header whose
+four extra sets sit at 116 / 140 / 164 / 188 with the rest equal to version 2; every set is checked like the standard ones.
+model-v6 (docs/contracts/model-v6.md sections 2.7 and 7, P3-5): on the command line --levels writes version 4 (version 3 plus, at
+212, the SHA-256 of the --kn-side file, or 32 zero bytes without it); without --levels version 1 / 2 as before; --kn-side alone is a
+usage error; a side file that is not SJKN0002 or records another model is refused before anything is written; read_sjtl reads v4.
 Run: /opt/homebrew/bin/python3 -m unittest discover -s experiments/s7a-tinylm -p 'test_*.py'
 """
 import contextlib
@@ -143,6 +148,153 @@ class TestExport(unittest.TestCase):
         with contextlib.redirect_stdout(io.StringIO()) as so:
             ex.main(["--npz", self.npz, "--out", out, "--type", "int8", "--ngram-model", lm, "--chat", "0.2", "1", "0.25", "--formal", "0.7", "1", "2"])
         self.assertIn("version 2, delta chat 0.25 formal 2.0", so.getvalue())
+
+
+    LEVELS = (1.125, 3.0, 0.375, 0.875, 1.5, 0.0625, 0.3, 0.75, 1.25, 1.75, 2.25, 0.625)   # 12 distinct values
+
+    def test_levels_write_version_3(self):
+        v2 = os.path.join(self.td.name, "v2.sjtl")
+        ex.export(self.npz, v2, "int8", (0.7, 2.0, 0.25), (0.5, 1.0, 2.0), SHA)
+        out = os.path.join(self.td.name, "v3.sjtl")
+        self.assertEqual(ex.export(self.npz, out, "int8", (0.7, 2.0, 0.25), (0.5, 1.0, 2.0), SHA, self.LEVELS), 3)
+        raw, raw2 = open(out, "rb").read(), open(v2, "rb").read()
+        self.assertEqual((raw[:8], struct.unpack_from("<I", raw, 8)[0]), (b"SJTL0003", 3))
+        self.assertEqual(len(raw), len(raw2) + 96)
+        # the documented offsets, field by field: chat conservative 116, chat aggressive 140, formal conservative 164, formal aggressive 188
+        for i, at in enumerate(range(116, 212, 8)):
+            self.assertEqual(struct.unpack_from("<d", raw, at)[0], self.LEVELS[i], at)
+        self.assertEqual((raw[12:116], raw[212:]), (raw2[12:116], raw2[116:]), "the rest is version 2's")
+        head, chars, params = ex.read_sjtl(out)
+        self.assertEqual((head["version"], head["chat"], head["formal"], head["delta"], head["levels"]),
+                         (3, (0.7, 2.0), (0.5, 1.0), (0.25, 2.0), self.LEVELS))
+        self.assertIsNone(ex.read_sjtl(v2)[0]["levels"])
+        _h2, chars2, params2 = ex.read_sjtl(v2)
+        self.assertEqual(chars, chars2)
+        for k in params:
+            np.testing.assert_array_equal(params[k], params2[k], err_msg=k)
+
+    def test_bad_levels_write_nothing(self):
+        out = os.path.join(self.td.name, "bad.sjtl")
+        std = ((0.7, 2.0, 0.25), (0.5, 1.0, 2.0))
+        bad = {0: (float("nan"), float("inf"), float("-inf")), 1: (float("nan"),),
+               2: (float("nan"), float("inf"), float("-inf"), -0.25, 1000.5)}
+        for i in range(12):
+            for x in bad[i % 3]:
+                levels = list(self.LEVELS)
+                levels[i] = x
+                with self.assertRaises(ValueError, msg=(i, x)):
+                    ex.export(self.npz, out, "int8", *std, SHA, levels)
+                self.assertFalse(os.path.exists(out), (i, x))
+        for levels in (self.LEVELS[:11], self.LEVELS + (1.0,)):
+            with self.assertRaises(ValueError):
+                ex.export(self.npz, out, "int8", *std, SHA, levels)
+        with self.assertRaises(ValueError, msg="levels need both deltas"):
+            ex.export(self.npz, out, "int8", (0.7, 2.0), (0.5, 1.0), SHA, self.LEVELS)
+        self.assertFalse(os.path.exists(out))
+        # accepted, as by the Rust reader: -0.0 anywhere, delta 1000, an infinite tau
+        for i, x in ((0, -0.0), (2, -0.0), (2, 1000.0), (1, float("inf")), (10, float("inf")), (11, 1000.0)):
+            levels = list(self.LEVELS)
+            levels[i] = x
+            self.assertEqual(ex.export(self.npz, out, "int8", *std, SHA, levels), 3, (i, x))
+            os.remove(out)
+
+    def test_levels_on_the_command_line(self):
+        out = os.path.join(self.td.name, "cli.sjtl")
+        lm = os.path.join(self.td.name, "lm.bin")
+        open(lm, "wb").write(b"ngram model")
+        args = ["--npz", self.npz, "--out", out, "--type", "int8", "--ngram-model", lm]
+        levels = [repr(x) for x in self.LEVELS]
+        with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
+            ex.main(args + ["--chat", "0.3", "2", "--formal", "0.7", "1", "--levels", *levels])     # no deltas
+        bad = list(levels)
+        bad[5] = "nan"
+        with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
+            ex.main(args + ["--chat", "0.3", "2", "0.25", "--formal", "0.7", "1", "2", "--levels", *bad])
+        self.assertFalse(os.path.exists(out))
+        with contextlib.redirect_stdout(io.StringIO()) as so:
+            ex.main(args + ["--chat", "0.3", "2", "0.25", "--formal", "0.7", "1", "2", "--levels", *levels])
+        self.assertIn("version 4, delta chat 0.25 formal 2.0, levels 1.125 3.0 0.375", so.getvalue())
+        self.assertEqual(ex.read_sjtl(out)[0]["levels"], self.LEVELS)
+
+    # ---- model-v6 section 7, P3-5: --kn-side and the version rule of the command line ----
+
+    def cli(self, out, *extra, levels=True, deltas=True):
+        """main() with this test's model; returns stdout. `lm.bin` is the n-gram model (its SHA-256 is SHA)."""
+        lm = os.path.join(self.td.name, "lm.bin")
+        open(lm, "wb").write(b"ngram model")
+        args = ["--npz", self.npz, "--out", out, "--type", "int8", "--ngram-model", lm,
+                "--chat", "0.3", "2", *(["0.25"] if deltas else []), "--formal", "0.7", "1", *(["2"] if deltas else [])]
+        if levels:
+            args += ["--levels", *(repr(x) for x in self.LEVELS)]
+        with contextlib.redirect_stdout(io.StringIO()) as so:
+            ex.main(args + list(extra))
+        return so.getvalue()
+
+    def side(self, magic=b"SJKN0002", model_sha=SHA, name="kn.sjkn"):
+        """A synthetic side file: only the magic and the recorded model hash (offset 12) are what export_sjtl checks."""
+        path = os.path.join(self.td.name, name)
+        open(path, "wb").write(magic + struct.pack("<I", 11) + model_sha + b"rest of the side file")
+        return path
+
+    def v3_bytes(self):
+        path = os.path.join(self.td.name, "ref-v3.sjtl")
+        ex.export(self.npz, path, "int8", (0.3, 2.0, 0.25), (0.7, 1.0, 2.0), SHA, self.LEVELS)
+        return open(path, "rb").read()
+
+    def test_levels_with_kn_side_write_version_4_with_its_hash(self):
+        out, side = os.path.join(self.td.name, "v4.sjtl"), self.side()
+        so = self.cli(out, "--kn-side", side)
+        raw, v3 = open(out, "rb").read(), self.v3_bytes()
+        want = hashlib.sha256(open(side, "rb").read()).digest()
+        self.assertEqual((raw[:8], struct.unpack_from("<I", raw, 8)[0]), (b"SJTL0004", 4))
+        self.assertEqual(raw[212:244], want, "bytes 212..244 are the side file's SHA-256")
+        self.assertEqual((len(raw), raw[12:212], raw[244:]), (len(v3) + 32, v3[12:212], v3[212:]), "the rest is version 3's")
+        self.assertIn(f"version 4, delta chat 0.25 formal 2.0, levels 1.125", so)
+        self.assertIn(f"kn.sjkn sha256 {want.hex()}", so)
+        head, chars, params = ex.read_sjtl(out)
+        self.assertEqual((head["version"], head["levels"], head["kn_sha"], head["ngram_sha"]), (4, self.LEVELS, want, SHA))
+        _h3, chars3, params3 = ex.read_sjtl(os.path.join(self.td.name, "ref-v3.sjtl"))
+        self.assertEqual(chars, chars3)
+        for k in params:
+            np.testing.assert_array_equal(params[k], params3[k], err_msg=k)
+
+    def test_levels_without_kn_side_write_version_4_all_zero(self):
+        out = os.path.join(self.td.name, "v4.sjtl")
+        self.assertIn("none (tuned without Kneser-Ney)", self.cli(out))
+        raw = open(out, "rb").read()
+        self.assertEqual((raw[:8], raw[212:244]), (b"SJTL0004", bytes(32)))
+        self.assertEqual(raw[244:], self.v3_bytes()[212:])
+        self.assertEqual(ex.read_sjtl(out)[0]["kn_sha"], bytes(32))
+        self.assertEqual(ex.read_sjtl(os.path.join(self.td.name, "ref-v3.sjtl"))[0]["kn_sha"], bytes(32), "version 3: none")
+
+    def test_without_levels_the_output_is_version_1_or_2_as_before(self):
+        for deltas, version in ((False, 1), (True, 2)):
+            out, ref = os.path.join(self.td.name, f"cli-{version}.sjtl"), os.path.join(self.td.name, f"ref-{version}.sjtl")
+            self.assertIn(f"version {version}", self.cli(out, levels=False, deltas=deltas))
+            chat, formal = ((0.3, 2.0, 0.25), (0.7, 1.0, 2.0)) if deltas else ((0.3, 2.0), (0.7, 1.0))
+            self.assertEqual(ex.export(self.npz, ref, "int8", chat, formal, SHA), version)
+            self.assertEqual(open(out, "rb").read(), open(ref, "rb").read())
+
+    def test_kn_side_alone_and_bad_side_files_write_nothing(self):
+        out = os.path.join(self.td.name, "bad.sjtl")
+        cases = [(dict(levels=False), self.side()),                                      # --kn-side without --levels
+                 (dict(levels=False, deltas=False), self.side()),
+                 ({}, self.side(magic=b"SJKN0001", name="old.sjkn")),                   # not SJKN0002
+                 ({}, self.side(model_sha=hashlib.sha256(b"other").digest(), name="other.sjkn"))]   # another model's side file
+        for kw, side in cases:
+            with self.assertRaises(SystemExit, msg=(kw, side)), contextlib.redirect_stderr(io.StringIO()):
+                self.cli(out, "--kn-side", side, **kw)
+            self.assertFalse(os.path.exists(out), (kw, side))
+        with self.assertRaises(ValueError):            # the library refuses a hash without levels too
+            ex.export(self.npz, out, "int8", (0.3, 2.0, 0.25), (0.7, 1.0, 2.0), SHA, None, bytes(32))
+        self.assertFalse(os.path.exists(out))
+
+    def test_committed_v4_golden_records_hashlib_of_kn_tiny(self):
+        g = os.path.join(tinylm.ROOT, "eval", "golden")
+        raw = open(os.path.join(g, "tinylm-tiny", "tiny-int8-v4.sjtl"), "rb").read()
+        side = open(os.path.join(g, "kn-tiny", "kn.sjkn"), "rb").read()
+        self.assertEqual(raw[212:244], hashlib.sha256(side).digest())
+        self.assertEqual(ex.read_sjtl(os.path.join(g, "tinylm-tiny", "tiny-int8-v4.sjtl"))[0]["kn_sha"], hashlib.sha256(side).digest())
 
 
 if __name__ == "__main__":

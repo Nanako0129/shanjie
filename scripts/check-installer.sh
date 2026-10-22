@@ -21,11 +21,17 @@ if $PB -c 'Print :LSUIElement' "$PLIST" >/dev/null 2>&1; then fail "the installe
 
 VERSION="$($PB -c 'Print :CFBundleShortVersionString' "$PLIST")"
 ZIP="${2:-$ROOT/build/shanjie-$VERSION.zip}"
+# docs/contracts/system-install.md section 2.3 step 6: the version the root stage accepts, compiled into the executable.
+[ "$("$ROOT/scripts/installer-version.sh" "$APP/Contents/MacOS/shanjie-installer")" = "$VERSION" ] \
+  || fail "the installer executable does not carry version $VERSION (__TEXT,__shanjie_ver)"
 [ -f "$RES/shanjie-$VERSION.zip" ] || fail "Resources/shanjie-$VERSION.zip missing (the name must carry the installer's own version)"
 cmp -s "$RES/shanjie-$VERSION.zip" "$ZIP" || fail "the bundled zip differs from $ZIP"
 [ "$(find "$RES" -name '*.app' | wc -l | tr -d ' ')" = 0 ] || fail "Resources must not contain an expanded .app"
 cmp -s "$RES/install-ime.sh" "$ROOT/scripts/install-ime.sh" || fail "the bundled install-ime.sh differs from scripts/install-ime.sh"
 for f in LICENSE McBopomofo-MIT.txt data.md; do [ -f "$RES/LICENSES/$f" ] || fail "LICENSES/$f missing"; done
+# The app icon (docs/contracts/app-icon.md), the same one the input method carries.
+for f in Assets.car AppIcon.icns; do [ -s "$RES/$f" ] || fail "Resources/$f (the app icon) is missing or empty"; done
+for k in CFBundleIconName CFBundleIconFile; do [ "$($PB -c "Print :$k" "$PLIST" 2>/dev/null)" = AppIcon ] || fail "Info.plist $k is not AppIcon"; done
 
 ent="$(codesign -d --entitlements - "$APP" 2>/dev/null | tr -d '\0' | grep -v '^Executable=' || true)"
 [ -z "$ent" ] || fail "the installer has entitlements: $ent"

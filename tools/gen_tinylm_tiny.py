@@ -6,6 +6,10 @@
   items.tsv：`k<TAB>c<TAB>LL(f32 檔)<TAB>LL(int8 檔)`，LL 是 numpy（float64）在**同一份還原後權重**上算的（int8 檔是 q * scale 還原後的值）。
     項目含字表外的字、空的 k、需要丟前文的長 k、c 剛好 63 字（k 全丟）、單字候選、空的 c。
   tiny-int8-v2.sjtl（S7c-2c，docs/contracts/s7c2c-delta.md §2.4）：同一份權重的 SJTL0002，α／τ 同上，δ 聊天 0.25、書面 2。
+  tiny-int8-v3.sjtl（語意校正強度，docs/contracts/rerank-strength.md §2.1）：同一份權重的 SJTL0003，標準三元組同 v2，
+    另外四組（聊天保守、聊天積極、書面保守、書面積極）是 LEVELS 的 12 個互不相同、也和標準值不同的數（位移或順序錯都抓得到）。
+  tiny-int8-v4.sjtl（docs/contracts/model-v6.md §2.7）：v3 檔的 SJTL0004，位移 212 多 32 bytes：eval/golden/kn-tiny/kn.sjkn 的
+    SHA-256（Python hashlib）。和 kn-tiny 的模型＋側檔配對，Rust 的 `Lm::kn_sha256` 要算出同一個值才載入得了（跨語言的雜湊核對）。
   pick.tsv（S7c-2c §3 第 1 項）：`fusegrid.pick` 在固定種子的隨機 ng／ll 與幾組融合差剛好是 0.25、2 的手寫例子上的選擇。
     前三列是格點（`alpha`／`tau`／`delta<TAB>逗號分隔`），之後每列 `ng<TAB>ll<TAB>選擇`，選擇依 alpha、tau、delta 的巢狀順序；
     數值都用 repr 寫出，Rust 讀回來是同一個 f64。
@@ -45,6 +49,11 @@ ITEMS = [
 ]
 
 
+# tiny-int8-v3.sjtl's (and v4's) four extra sets, in file order: chat conservative, chat aggressive, formal conservative, formal aggressive
+# (alpha, tau, delta each). core/tests/tinylm_tiny.rs repeats them.
+LEVELS = (1.125, 3.0, 0.375, 0.875, 1.5, 0.0625, 0.3, 0.75, 1.25, 1.75, 2.25, 0.625)
+
+
 def build():
     """filename -> bytes."""
     params = tinylm.random_params(list(CHARS), n_layer=2, d=16, n_head=2, seed=7)
@@ -70,6 +79,14 @@ def build():
         path = os.path.join(tmp, "tiny-int8-v2.sjtl")
         export_sjtl.export(npz, path, "int8", (0.7, 2.0, 0.25), (0.5, 1.0, 2.0), sha)
         files["tiny-int8-v2.sjtl"] = open(path, "rb").read()
+        path = os.path.join(tmp, "tiny-int8-v3.sjtl")
+        export_sjtl.export(npz, path, "int8", (0.7, 2.0, 0.25), (0.5, 1.0, 2.0), sha, LEVELS)
+        files["tiny-int8-v3.sjtl"] = open(path, "rb").read()
+        with open(os.path.join(ROOT, "eval", "golden", "kn-tiny", "kn.sjkn"), "rb") as f:
+            kn_sha = export_sjtl.check_kn_side(f.read(), sha)
+        path = os.path.join(tmp, "tiny-int8-v4.sjtl")
+        export_sjtl.export(npz, path, "int8", (0.7, 2.0, 0.25), (0.5, 1.0, 2.0), sha, LEVELS, kn_sha)
+        files["tiny-int8-v4.sjtl"] = open(path, "rb").read()
     files["items.tsv"] = "".join(f"{k}\t{c}\t{float(a)!r}\t{float(b)!r}\n" for (k, c), a, b in zip(ITEMS, *lls)).encode()
     files["pick.tsv"] = pick_table().encode()
     return files

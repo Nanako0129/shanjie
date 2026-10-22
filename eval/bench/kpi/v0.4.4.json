@@ -1,0 +1,11 @@
+{
+ "sha": "3560fe535fa75769d63ea52a7e8e28f706b0ea2b",
+ "version": "v0.4.4",
+ "wikitune_clean": {
+  "n": 2181,
+  "rows_sha256": "d576ea941242e04d718c3d5cf4711c43693588d1089461970293edcec9c5db92",
+  "tag": "lm-formal+ctx+kn:cbefbced:θ1:β1+tl:d07de71d+acg",
+  "top1": 1581,
+  "top1_sha256": "89ee1be709eeaaca9c2ef526c0a07ed239914ae093d4aca3ef791f27a281a47f"
+ }
+}

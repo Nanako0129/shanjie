@@ -6,7 +6,8 @@ import Foundation
 /// sentences, then build with the bundled ACG pack (Resources/packs), require the same sentences and one pack word, then load the
 /// small model (Resources/tinylm.sjtl) and require the rerank to change a chat sentence, and the switch off not to (s7c2b section
 /// 2.5), then load the word list (Resources/english-words.txt) and require `rust` Space to open the English window with `rust`
-/// first (zhen-mixed section 3.2). Returns the exit status. Writes nothing but a fixed message and a return code to stderr; touches no file, UserDefaults, TIS, NSApplication or IMK server.
+/// first (zhen-mixed section 3.2), and the colloquial table (Resources/colloquial.sjlm): with the rerank on and the context
+/// 桌子一直在搖 the chat sentence for dev302 row 202 must be 桌腳的螺絲鬆掉了 (colloquial-term.md section 2.3). Returns the exit status. Writes nothing but a fixed message and a return code to stderr; touches no file, UserDefaults, TIS, NSApplication or IMK server.
 @MainActor
 public enum Selftest {
     /// Row 284 `ㄔㄨˊ ㄈㄤˊ ㄒㄧㄣ ㄓㄨㄤ ㄌㄜ˙ ㄧ ㄍㄜ˙ ㄌㄩˋ ㄕㄨㄟˇ ㄏㄨˊ` on the standard layout (s3a section 1);
@@ -14,24 +15,37 @@ public enum Selftest {
     /// before dec-recombine, whose chat and formal answers the one-path-per-(surface, last word) decoder made equal;
     /// a space is the first tone. The tests derive the same keys from the zhuyin independently.
     static let row284Standard = "tj6z;6vup 5j; xk7u ek7xm4gjo3cj6"
-    static let expected: [(profile: UInt32, text: String)] = [(0, "廚房新裝了一個綠水壺"), (1, "廚房新裝了一個濾水壺")]
+    /// Formal is 律水壺 with trigram.sjt3 beside the model and 濾水壺 without it, so this also catches a missing table.
+    static let expected: [(profile: UInt32, text: String)] = [(0, "廚房新裝了一個率水壺"), (1, "廚房新裝了一個律水壺")]
 
     /// The bundled word pack (acg-pack contract A.2): 碇源堂 `ㄉㄧㄥˋ ㄩㄢˊ ㄊㄤˊ` on the standard layout. The chat
     /// profile spells it 定元堂 without the pack, so the sentence is the pack word only if the pack loaded.
     static let packWordStandard = "2u/4m06w;6"
     static let packWord = "碇源堂"
 
-    /// s7c2b section 2.5 (revised 2026-10-12): dev302 row 65 `ㄨㄛˇ ㄉㄥˇ ㄧ ㄒㄧㄚˋ ㄗㄞˋ ㄍㄨㄛˋ ㄑㄩˋ` on the standard layout, chat
+    /// classes-v5 (2026-10-16, docs/contracts/classes-v5.md): dev302 row 27 `ㄨㄛˇ ㄧˇ ㄐㄧㄥ ㄏㄨㄟˊ ㄈㄨˋ ㄋㄧˇ ㄉㄜ˙ ㄧㄡˊ ㄐㄧㄢˋ ㄌㄜ˙` on the
+    /// standard layout, chat profile, no left context, the bundled pack loaded: the n-gram's first is 我已經回復你的郵件了 and
+    /// tinylm-v5 picks 回覆. Measured with the CLI (chat dev302 rowstats, with and without `--packs acg`: wrong without
+    /// `--tinylm`, right with it) and by SelftestTests/RerankTests. Row 65 below stopped working because μ 0.2 makes the n-gram
+    /// itself give 再過去. History: s7c2b section 2.5 (revised 2026-10-12): dev302 row 65 `ㄨㄛˇ ㄉㄥˇ ㄧ ㄒㄧㄚˋ ㄗㄞˋ ㄍㄨㄛˋ ㄑㄩˋ` on the standard layout, chat
     /// profile, no left context, the bundled pack loaded; a space is the first tone. The n-gram's first is 我等一下在過去; the small
-    /// model picks 我等一下再過去, tinylm-v2 (2026-10-12) and tinylm-v3 (2026-10-13) alike: measured by this selftest under these
-    /// conditions (SelftestTests) and by RerankTests without the pack. Row 25 (執行這個城市 -> 程式), the sentence under tinylm-v1,
+    /// model picks 我等一下再過去, tinylm-v2 (2026-10-12), tinylm-v3 (2026-10-13) and tinylm-v4 (2026-10-14; its standard level equals v3's) alike: measured by this selftest under these
+    /// conditions (SelftestTests) and by RerankTests without the pack. Under model-v6 + kn-v1 + tinylm-v5 (chat standard 0.3/2/0.25)
+    /// `SelftestTests.testPassesWithTheFullResources` and the RerankTests passed on 2026-10-15 (`make test-swift`). Row 25 (執行這個城市 -> 程式), the sentence under tinylm-v1,
     /// stayed 城市 under v2 in the same XCTest run (14 failures before the swap); v3 changes it again, and it is the device sentence
     /// (s7h section 1, `DeviceRow` in the tests). A different condition, for context only, under v2: the CLI with `--profile chat
     /// --context --tinylm` and no pack gave top1 0 -> 4 on rows 25, 27, 46, 49 and 65, row 25 being the one that did not change.
     /// The tests derive the same keys from the zhuyin independently.
-    static let rerankRowStandard = "ji32/3u vu84y94eji4fm4"
-    static let rerankedText = "我等一下再過去"
-    static let ngramText = "我等一下在過去"
+    static let rerankRowStandard = "ji3u3ru/ cjo6zj4su32k7u.6ru04xk7"
+    static let rerankedText = "我已經回覆你的郵件了"
+    static let ngramText = "我已經回復你的郵件了"
+
+    /// colloquial-term.md section 2.3: dev302 row 202 `ㄓㄨㄛ ㄐㄧㄠˇ ㄉㄜ˙ ㄌㄨㄛˊ ㄙ ㄙㄨㄥ ㄉㄧㄠˋ ㄌㄜ˙` on the standard layout, chat profile, standard
+    /// strength, the bundled pack, the left context of that row. The n-gram's first and the shipping rerank give 桌腳的羅斯松掉了; the
+    /// colloquial term makes the rerank pick 螺絲鬆 (measured with the CLI, `--context`, one row: c 0 without `--colloquial-core`, c 4 with it).
+    static let colloquialRowStandard = "5ji rul32k7xji6n nj/ 2ul4xk7"
+    static let colloquialContext = "桌子一直在搖"
+    static let colloquialText = "桌腳的螺絲鬆掉了"
 
     /// zhen-mixed: `rust` then Space on the standard layout opens the English window (the shipped list and the tests' synthetic list
     /// both have the word; its leftover ㄔㄧ is not in the lexicon, so these are the window's only items).
@@ -71,6 +85,18 @@ public enum Selftest {
             guard c == 0 else { return fail("selftest: rerank typing failed, code", c) }
             guard shown == text else { return fail("selftest: unexpected rerank composition with the switch", on ? 1 : 0) }
         }
+        // The colloquial table, as the shell loads it after the small model: a bundle without it (or with one the core refuses), or where
+        // the term does nothing, fails here, so 常談 cannot ship silently doing nothing. The rerank and the context go back afterwards.
+        let colloquial = withPack.loadColloquial(path: resources.appendingPathComponent(Shell.colloquialFile).path)
+        guard colloquial == 0 else { return fail("selftest: shanjie_engine_load_colloquial failed, code", colloquial) }
+        if case .failed(let c) = withPack.setRerank(true) { return fail("selftest: shanjie_engine_set_rerank failed, code", c) }
+        let ctx = withPack.setLeftContext(colloquialContext)
+        guard ctx == 0 else { return fail("selftest: shanjie_engine_set_left_context failed, code", ctx) }
+        let (colloquialShown, cc) = typeReranked(colloquialRowStandard, withPack)
+        guard cc == 0 else { return fail("selftest: colloquial typing failed, code", cc) }
+        guard colloquialShown == colloquialText else { return fail("selftest: the colloquial term is not in effect, code", 0) }
+        _ = withPack.setLeftContext(nil)
+        if case .failed(let c) = withPack.setRerank(false) { return fail("selftest: shanjie_engine_set_rerank (off) failed, code", c) }
         // The word list, as the shell loads it: a bundle without it, or with a list the core refuses, fails here, so 中英混打 cannot
         // ship greyed out or silently doing nothing. The switch goes back off afterwards, as it starts.
         let english = withPack.loadEnglish(path: resources.appendingPathComponent(Shell.englishFile).path)

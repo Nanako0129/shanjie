@@ -14,21 +14,21 @@ S7c-2 分兩片：這一片（2a）只做核心與 FFI，用同步的測試驅�
 
 ### 2.1 引擎的狀態
 
-`tinylm: Option<Arc<TinyLm>>`、`rerank_on: bool`（預設 true；〔更正，2026-10-12〕S7c-2c 起預設 false，要 `set_rerank(true)` 才產生工作，`docs/contracts/s7c2c-delta.md` §2.3）、`generation: u64`（從整個程序共用的 `AtomicU64` 取號，重建的引擎不會重用號碼）、`pending: Option<RerankJob>`。沒有呼叫 `load_tinylm` 時，引擎的一切行為與輸出逐位元組不變。
+`tinylm: Option<Arc<TinyLm>>`、`rerank_on: bool`（預設 true；〔更正，2026-10-12〕S7c-2c 起預設 false，要 `set_rerank(true)` 才產生工作，`docs/contracts/s7c2c-delta.md` §2.3）、`generation: u64`（從整個程序共用的 `AtomicU64` 取號，重建的引擎不會重用號碼）、`pending: Option<RerankJob>`。沒有呼叫 `load_tinylm` 時，引擎的一切行為與輸出逐位元組不變。〔例外，組字區上限 composition-cap 修訂一，2026-10-22：組字區裡有過 §1.2 第 3 步固定的詞之後（這個組字區曾經有自由段超過 W ＝ 61 字），前段照那份契約固定，輸出和沒有固定時不同；固定不看有沒有載入會意、重排開或關。〕
 
 ### 2.2 產生工作（`refresh_lm` 結尾，模型已載入且 `rerank_on`）
 
 - 每一段自由段（兩個固定詞之間，`refresh_lm` 的 gap 迴圈）若 n-best 有 ≥ 2 條：取前 `TOPK` 條路徑（保留 `(詞, lp, delta)`，套用時要重建 `path`）、各條的字串（`cands`）、分數（`ng`）、前文鍵 `context_key(before)`（`before` 就是那一段左邊已顯示的文字加左文；哨兵 → 空的 k 由 `TinyLm::rerank` 處理）、設定、這一段在 `path` 裡的範圍。
-- **選字記憶的保護**：某段 n-gram 第一條路徑裡有任何一個詞被學習加分（`lp` 大於該詞在該讀音下不加分時的 `best_lp`），這一段不放進工作（使用者教過的選擇不被重排改掉）。
+- **選字記憶的保護**：某段 n-gram 第一條路徑裡有任何一個詞被學習加分（`lp` 大於該詞在該讀音下不加分時的 `best_lp`），這一段不放進工作（使用者教過的選擇不被重排改掉）。〔2026-10-20 補：只給評測用的 `set_learn_guard(false)`（`shanjie-replay --learn-guard off`，`engine-replay.md` §2）可以關掉這條；App 不呼叫，預設照舊。〕
 - 沒有任何一段可以重排時，不產生工作。
 - **降權表關掉時不產生工作**（`set_demote(false)`）：α、τ 只對降權表開著的分數成立，和 CLI 拒絕 `--no-demote` 同理。
 
 ### 2.3 世代與丟棄
 
-每個會改變狀態的公開方法（所有 `&mut self` 的公開方法，`take_rerank_job` 與 `apply_rerank` 除外）一進來就換新的世代號、清掉 `pending`；**`clear_all`（送出與清空組字都經過它）也換世代號、清掉 `pending`**，所以同一次呼叫裡「先重算、再自動送出」（40 音節自動送出、預測列選字觸發的送出，`insert_token`、`choose_pred` 都是先 `refresh()` 再 `take_commit()`）產生的工作會作廢。工作帶著產生時的世代號。
+每個會改變狀態的公開方法（所有 `&mut self` 的公開方法，`take_rerank_job` 與 `apply_rerank` 除外）一進來就換新的世代號、清掉 `pending`；**`clear_all`（送出與清空組字都經過它）也換世代號、清掉 `pending`**，所以同一次呼叫裡「先重算、再自動送出」（128 音節自動送出（原本 40，composition-cap）、預測列選字觸發的送出，`insert_token`、`choose_pred` 都是先 `refresh()` 再 `take_commit()`）產生的工作會作廢。工作帶著產生時的世代號。
 - **換 n-gram 模型時丟掉小模型**：`load_lm`、`set_lm` 成功後把 `tinylm` 設為 None（殼在載入 n-gram 之後才載入小模型；`.sjtl` 綁的是 n-gram 的雜湊）。
 
-**修正一（2026-10-11，PR #116 /code-review）取代上面「每個公開方法一進來就換號」的規則**：只有會改變解碼結果的地方換號並作廢工作——每次 `refresh()`（重新解碼時產生新工作、新號碼）、`clear_all`、`load_lm`／`set_lm`／`load_tinylm`、`set_rerank`、`set_profile`、`set_demote`、選字記憶的開關／開檔／清除。不重新解碼的鍵（游標移動、還沒完成音節的注音符號、進入預測列、直通鍵）**不再**作廢進行中的工作，算完照樣套用；原規則會讓「打得快」時 Enter 送出 n-gram 的字。另外工作記下每一段在 `path` 裡原本的詞，套用時逐一核對，不同就整個不套用（不只靠號碼）。
+**修正一（2026-10-11，PR #116 /code-review）取代上面「每個公開方法一進來就換號」的規則**：只有會改變解碼結果的地方換號並作廢工作——每次 `refresh()`（重新解碼時產生新工作、新號碼）、`clear_all`、`load_lm`／`set_lm`／`load_tinylm`、`set_rerank`、`set_profile`、`set_demote`、選字記憶的開關／開檔／清除（2026-10-20 加：只給評測用的 `set_learn_guard`）。不重新解碼的鍵（游標移動、還沒完成音節的注音符號、進入預測列、直通鍵）**不再**作廢進行中的工作，算完照樣套用；原規則會讓「打得快」時 Enter 送出 n-gram 的字。另外工作記下每一段在 `path` 裡原本的詞，套用時逐一核對，不同就整個不套用（不只靠號碼）。
 
 **更正（2026-10-11，S7c-2b 的 /code-review）**：上面清單裡的「選字記憶的開關」拿掉。`set_learning` 不改變解碼（解碼只要學習資料不是空的就會讀它；開關只決定選字要不要記下來），所以不再換號；開檔、清除會改學習資料，照樣換號。
 
@@ -37,7 +37,7 @@ S7c-2 分兩片：這一片（2a）只做核心與 FFI，用同步的測試驅�
 - `RerankJob::run(&self) -> RerankResult`：只用工作裡的 `Arc<TinyLm>` 與資料（不碰引擎），對每一段呼叫 `TinyLm::rerank`；`TooLong` 記為選 0。`RerankJob`、`RerankResult` 是 `Send`。
 - **修正一**：`RerankJob::run` 依序處理各段，後一段的前文鍵用前面各段**選定後**的字（加上中間的固定詞與左文）重算 `context_key`，不用 n-gram 第一名的字；只有一段時和原本相同（CLI 的一致性不變）。套用時：**候選窗開著 → `None`**；**預測列只在套用當下非空時才重算**（V3 規則清掉的列不會因為套用又出現）。
 - `Engine::apply_rerank(result) -> Result<Option<Output>, EngineError>`：世代號不同 → `None`；**預測列已進入（`pred_sel` 有值）→ `None`**（不把使用者在列裡的選取踢掉）；每一段都選 0 → `None`（不輸出，不閃）；工作記的範圍超出現在的 `path` → `None`（防呆，正常不會發生）；否則把選到的路徑換進 `path` 的那一段、重建 `display`、重算預測列，回傳新的輸出。不動 `syls`、游標、固定詞、候選窗。
-- **送出**：Enter、40 個字元自動送出、`reset` 等，一律送出畫面上的內容（標點不是送出：它進組字區、重新解碼、產生新工作）；還沒套用的工作因為換了世代號而作廢（不等待）。
+- **送出**：Enter、128 個字元自動送出、`reset` 等，一律送出畫面上的內容（標點不是送出：它進組字區、重新解碼、產生新工作）；還沒套用的工作因為換了世代號而作廢（不等待）。
 
 ### 2.5 FFI 與標頭（`core/src/ffi.rs`、`core/include/shanjie.h`、`docs/contracts/s3a.md` §6）
 
@@ -66,7 +66,7 @@ S7c-2 分兩片：這一片（2a）只做核心與 FFI，用同步的測試驅�
 ## 3. 驗收
 
 1. **沒有模型或重排關掉**：`take` 永遠是 None；現有測試與 golden 全過、不改任何 golden 檔。
-2. **引擎測試**（不開執行緒，`core/tests/engine_rerank.rs`）：套用後 `display`、`path`、預測列等於 `cands[TinyLm::rerank 的選擇]`；過期（取工作後再按鍵、改設定）→ None；兩個引擎不共用世代號；被學習加分的段不重排、其他段照樣重排；兩段夾一個固定詞時兩段都重排、固定詞不動，之後選字時的 `pre` 是重排後的文字；有工作還沒套用時按 Enter 送出畫面上的字、之後套用 → None；**打滿 40 音節自動送出後 `take` 為 None（或 apply → None），預測列選字觸發的送出也是**；**`set_demote(false)` 之後 `take` 為 None**；**`load_lm`／`set_lm` 換模型之後 `take` 為 None**；**預測列已進入（⌘⌫ 後）時 apply → None 且 `pred_sel` 不變**；全部選 0 → None。突變：拿掉世代檢查、拿掉 `clear_all` 的清除、拿掉學習保護、拿掉降權檢查、套用時漏掉重算預測列，各要讓測試失敗。
+2. **引擎測試**（不開執行緒，`core/tests/engine_rerank.rs`）：套用後 `display`、`path`、預測列等於 `cands[TinyLm::rerank 的選擇]`；過期（取工作後再按鍵、改設定）→ None；兩個引擎不共用世代號；被學習加分的段不重排、其他段照樣重排；兩段夾一個固定詞時兩段都重排、固定詞不動，之後選字時的 `pre` 是重排後的文字；有工作還沒套用時按 Enter 送出畫面上的字、之後套用 → None；**打滿 128 音節自動送出後 `take` 為 None（或 apply → None），預測列選字觸發的送出也是**；**`set_demote(false)` 之後 `take` 為 None**；**`load_lm`／`set_lm` 換模型之後 `take` 為 None**；**預測列已進入（⌘⌫ 後）時 apply → None 且 `pred_sel` 不變**；全部選 0 → None。突變：拿掉世代檢查、拿掉 `clear_all` 的清除、拿掉學習保護、拿掉降權檢查、套用時漏掉重算預測列，各要讓測試失敗。
 3. **FFI 測試**（照 `ffi.rs` 現有的子程序測試）：載入的各種錯誤碼、`load_tinylm` 失敗時子程序輸出不含暫存路徑、沒有工作時 NULL、run → apply → free、還沒 run 就 apply（回 `SHANJIE_NO_CHANGE`）、同一個工作 apply 兩次、所有 NULL 組合、`free(NULL)`、run 在注入點 panic → 回 4 且子程序的 stdout／stderr 不含標記（另用預設 hook 做正向對照，照 s3a §7.3），**之後引擎的組字不變**（下一個快照仍是原本的組字），同一個工作 apply 回 `SHANJIE_NO_CHANGE`、apply 碼 4 後組字為空、`load_tinylm` 不改重排的開關。**C 標頭冒煙測試**（`core/tests/c/abi_smoke.c`）每個新函式至少呼叫一次（含 NULL 路徑、沒有模型時 `take` 得到 NULL），並照 s3a §7.4 做一次對調欄位的反向檢查。**壞 `.sjtl` 的單元測試**：超過上限的檔頭（例如 V 2^24、d 1、檔長吻合）→ `Format`；int8 縮放值為 `f32::MAX` 使還原成 inf → `Format`；長度差 1 byte → `Format`；不是一般檔案、超過大小上限 → 錯誤。突變：拿掉 run 的 `guard`，注入 panic 的子程序測試要失敗。
 4. **一致性重播**（main 執行；真模型的 `.sjtl` 用環境變數給路徑，不放進任何 `data/lm`；沒給時測試標明略過）：引擎用 `Engine::new(<repo>/data/lexicon, Layout::Standard)`（和 `engine_lm.rs` 的效能測試同一個建法） ＋ `load_lm(<repo>/data/lm/bigram.sjlm)` ＋ `load_tinylm(<.sjtl>)`、聊天設定、降權開著（預設）、不呼叫 `set_left_context`（不用 `engine_lm.rs` 的 `shared()`：它的 capped 沒有降權表）；dev302 每列逐鍵打、每個鍵之後同步「取 → 算 → 套用」、最後 Enter。對照：`cargo run --release -q -p cli -- --lm data/lm/bigram.sjlm --profile chat --dev 302 --tinylm <.sjtl> --rowstats …`（不加 `--context`、不加 `--no-demote`）的每列第一名；302 句逐字相同。
 5. **量測**（main，空閒的機器，release）：載入模型時按鍵路徑 p95（含產生工作）< 16 ms；一次 run 的 p50／p95；CPU 時間／牆鐘時間比；重播裡「產生的工作數、套用後字有變的次數、按鍵數」與「同一個字在連續兩個鍵之間先變回 n-gram 再換回」的比例。寫進研究紀錄。

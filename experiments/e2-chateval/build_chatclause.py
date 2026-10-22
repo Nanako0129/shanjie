@@ -7,12 +7,16 @@ Private data: run by main on the maintainer's machine with --work in the private
       exclusions, in time order) and DIR/counts.json, prints the per-month counts table (numbers only).
   split --work DIR
       fixes the judge months from the mechanical counts (DIR/split.json; written once, a later run must give the same file).
-  freeze --work DIR --period tune|judge [--corrections FILE] [--draft]
-      tune: min(6,000, pool) clauses of the pool months, seed 20261012; judge: every clause of the judge months. Applies the optional
+  freeze --work DIR --period tune|judge|chatjudge|chatjudge2 [--corrections FILE] [--draft]
+      tune: min(6,000, pool) clauses of the pool months, seed 20261012; judge: every clause of the judge months; chatjudge
+      (docs/contracts/rerank-size.md section 3.4): min(3,000, rest) clauses of the pool months that the tuning sample neither drew
+      nor repeats as a sentence, seed 20261017 (needs the tune freeze, like judge); chatjudge2 (docs/iteration-plan.md Phase 0
+      item 7): min(6,000, rest) clauses of the pool months whose sentence neither the tuning sample nor the chatjudge sample holds,
+      seed 20261018 (needs the tune and chatjudge freezes). Applies the optional
       corrections, spells with tools/readings.py, drops CHECK and unreadable rows, writes DIR/<period>.rows.txt (`context|sentence|reading`),
       DIR/<period>.manifest.json and DIR/<period>.sha256. With --draft only DIR/<period>.draft.txt (readings marked CHECK) for proofreading.
       A frozen period is never rewritten with other content; judge needs the tune freeze first (contract order (1) before (3)).
-  emit --work DIR --period tune|judge --out FILE
+  emit --work DIR --period tune|judge|chatjudge|chatjudge2 --out FILE
       copies the frozen rows to FILE for run_sets.py dumps, and refuses (exit 1, nothing written) when the rows no longer hash to
       the frozen SHA-256.
 
@@ -32,7 +36,8 @@ decode_tree undoes it. Comments are kept only when the author is --self-name. Ea
 a post or comment's first segment is blank, later segments follow the previous one.
 
 Corrections file (optional, UTF-8, tab separated, applied before spelling; the proofreading itself is main's job):
-  OLD<TAB>NEW           the sentence OLD becomes NEW
+  OLD<TAB>NEW           the sentence OLD becomes NEW; NEW is spelled again, and a CHECK spelling drops the row (freeze warns and counts
+                        it as corrected_then_check), so give READ with every changed sentence
   OLD<TAB>              drop the row
   OLD<TAB>NEW<TAB>READ  as the first, and READ (space separated syllables) is taken as the confirmed reading of NEW, so a CHECK row stays.
 """
@@ -55,6 +60,11 @@ JUDGE_START = "2026-09"                # the judge months run back from here; ne
 JUDGE_MIN = 2950                       # mechanical rows (2,500 plus about 15% for proofreading and reading losses)
 MIN_USABLE = 2500                      # fewer mechanical rows than this before SHANJIE_FROM: stop and ask
 TUNE_MAX = 6000
+CHATJUDGE_MAX = 3000       # rerank-size section 3.4: the unseen chat judge set
+CHATJUDGE_SEED = 20261017
+CHATJUDGE2_MAX = 6000      # maintainer 2026-10-18: a private judge set is at most 6,000 rows (one a month)
+CHATJUDGE2_SEED = 20261018
+PRIOR = {"judge": ("tune",), "chatjudge": ("tune",), "chatjudge2": ("tune", "chatjudge")}   # periods frozen before this one
 CHECK_MAX = 0.10   # contract 2.1: more CHECK readings than this stops the freeze
 URL = re.compile(r"https?://|www\.", re.I)
 FENCE = "```"
@@ -382,14 +392,45 @@ def read_clauses(work):
     return [tuple(l.rstrip("\n").split("\t")) for l in open(os.path.join(work, "clauses.tsv"), encoding="utf-8")]
 
 
+def frozen_sentences(work, period):
+    return {l.split("|")[1] for l in open(os.path.join(work, f"{period}.rows.txt"), encoding="utf-8") if l.strip()}
+
+
 def period_rows(work, period):
-    """[(context, sentence)] before corrections: the whole judge months, or the seeded tuning sample of the pool."""
+    """[(context, sentence)] before corrections: the whole judge months, the seeded tuning sample of the pool, (chatjudge) a sample
+    of the pool rows whose sentence the tuning sample does not hold, with a seed of its own, or (chatjudge2) a sample of the pool
+    rows whose sentence neither the tuning sample nor the chatjudge sample holds, nor any frozen file main has read (tune,
+    chatjudge and, when frozen here, judge; corrected sentences included), with a third seed. chatjudge2 stops when a replayed
+    sample is not the frozen one: more frozen tune (chatjudge) sentences fall outside the replayed sample than that period's
+    manifest counts corrections."""
     split = json.load(open(os.path.join(work, "split.json"), encoding="utf-8"))
     months = set(split["judge_months"] if period == "judge" else split["pool_months"])
     rows = [(x, s) for mon, _src, x, s in read_clauses(work) if mon in months]
     pool = len(rows)
     if period == "tune":
         rows = random.Random(c.SEED).sample(rows, min(TUNE_MAX, len(rows)))
+    elif period in ("chatjudge", "chatjudge2"):
+        # Every sentence of the tuning sample (drawn exactly as above) is left out wherever it sits, its own rows included; freeze
+        # then checks the corrected rows against the frozen chatclause sentences.
+        tuned = {s for _x, s in random.Random(c.SEED).sample(rows, min(TUNE_MAX, len(rows)))}
+        rest = [r for r in rows if r[1] not in tuned]
+        drawn = random.Random(CHATJUDGE_SEED).sample(rest, min(CHATJUDGE_MAX, len(rest)))
+        if period == "chatjudge":
+            rows = drawn
+        else:   # the chatjudge sample's sentences go the same way; freeze checks against the frozen chatjudge rows too
+            # The replays must be the samples that were frozen: a frozen sentence outside its replayed sample can only be a corrected
+            # one. Checked on content, not on the recorded pool size: a reshuffled clauses.tsv keeps the size, and the work-v2 tune
+            # freeze (2026-10-13, 81c035b0) wrote its sample size, 6,000, in clauses_before_sampling_or_corrections.
+            for p, sample in (("tune", tuned), ("chatjudge", {s for _x, s in drawn})):
+                corrected = json.load(open(os.path.join(work, f"{p}.manifest.json"), encoding="utf-8"))["corrected"]
+                stray = len(frozen_sentences(work, p) - sample)
+                if stray > corrected:
+                    sys.exit(f"build_chatclause: STOP, {stray} frozen {p} sentences are not in its replayed sample (it has {corrected} "
+                             f"corrections); clauses.tsv changed since that freeze, so its sample cannot be replayed")
+            seen = {s for _x, s in drawn}.union(*(frozen_sentences(work, p) for p in ("tune", "chatjudge", "judge")
+                                                  if os.path.isfile(os.path.join(work, f"{p}.rows.txt"))))
+            rest = [r for r in rest if r[1] not in seen]
+            rows = random.Random(CHATJUDGE2_SEED).sample(rest, min(CHATJUDGE2_MAX, len(rest)))
     return rows, pool
 
 
@@ -404,7 +445,8 @@ def load_corrections(path):
 
 def build_period(rows, corrections, readings=c.readings):
     """-> (frozen rows [(ctx, sentence, reading)], draft rows [(ctx, sentence, reading, status)], stats)."""
-    st = {"rows_in": len(rows), "corrected": 0, "dropped_by_correction": 0, "dropped_check": 0, "dropped_unreadable": 0}
+    st = {"rows_in": len(rows), "corrected": 0, "dropped_by_correction": 0, "dropped_check": 0, "corrected_then_check": 0,
+          "dropped_unreadable": 0}
     work = []
     for x, s in rows:
         if s in corrections:
@@ -413,14 +455,15 @@ def build_period(rows, corrections, readings=c.readings):
                 st["dropped_by_correction"] += 1
                 continue
             st["corrected"] += new != s
-            work.append((x, new, rd))
+            work.append((x, new, rd, new != s))
         else:
-            work.append((x, s, None))
-    rd = readings([s for _, s, _ in work])
+            work.append((x, s, None, False))
+    rd = readings([s for _, s, _, _ in work])
     draft = []
-    for x, s, given in work:
+    for x, s, given, changed in work:
         status, reading = ("ok", given) if given else rd[s]
         draft.append((x, s, reading, status))
+        st["corrected_then_check"] += changed and status == "check"
     frozen = [(x, s, r) for x, s, r, status in draft if status == "ok"]
     st["dropped_check"] = sum(d[3] == "check" for d in draft)
     st["dropped_unreadable"] = sum(d[3] == "unreadable" for d in draft)
@@ -429,8 +472,12 @@ def build_period(rows, corrections, readings=c.readings):
 
 
 def freeze(work, period, corrections_file=None, draft=False, readings=c.readings):
-    if period == "judge" and not os.path.isfile(os.path.join(work, "tune.sha256")):
-        sys.exit("build_chatclause: STOP, freeze the tuning period first (contract 2.1 order (1) before (3))")
+    for p in PRIOR.get(period, ()):
+        if not os.path.isfile(os.path.join(work, f"{p}.sha256")):
+            sys.exit("build_chatclause: STOP, freeze the tuning period first (contract 2.1 order (1) before (3))" if p == "tune" else
+                     f"build_chatclause: STOP, freeze the {p} period before {period}")
+        if period.startswith("chatjudge") and not os.path.isfile(os.path.join(work, f"{p}.rows.txt")):
+            sys.exit(f"build_chatclause: STOP, {p}.rows.txt is missing; {period} is checked against it")
     rows, pool_rows = period_rows(work, period)
     frozen, drafted, st = build_period(rows, load_corrections(corrections_file), readings)
     check_share = st["dropped_check"] / st["rows_in"] if st["rows_in"] else 0
@@ -442,6 +489,14 @@ def freeze(work, period, corrections_file=None, draft=False, readings=c.readings
         return st
     if check_share > CHECK_MAX:
         sys.exit(f"build_chatclause: STOP, {check_share:.1%} of the {period} rows are CHECK (> {CHECK_MAX:.0%}); report to main (contract 2.1)")
+    if st["corrected_then_check"]:
+        print(f"build_chatclause: WARNING, {st['corrected_then_check']} corrected {period} rows spell as CHECK and are dropped; give READ",
+              file=sys.stderr)
+    for p in (PRIOR[period] if period.startswith("chatjudge") else ()):     # judge months never meet the pool
+        seen = frozen_sentences(work, p)
+        if any(s in seen for _x, s, _r in frozen):
+            sys.exit(f"build_chatclause: STOP, a {period} sentence is also in the frozen {'chatclause' if p == 'tune' else p}; "
+                     f"report to main ({'rerank-size 3.4' if period == 'chatjudge' else 'iteration plan Phase 0 item 7'})")
     text = "".join(f"{x}|{s}|{r}\n" for x, s, r in frozen)
     sha = c.sha256_bytes(text.encode("utf-8"))
     sf = os.path.join(work, f"{period}.sha256")
@@ -485,7 +540,7 @@ def main(argv=None):
         if name == "prepare":
             p.add_argument("--discord"); p.add_argument("--meta"); p.add_argument("--self-name"); p.add_argument("--exclude", nargs="*", default=[])
         if name in ("freeze", "emit"):
-            p.add_argument("--period", choices=["tune", "judge"], required=True)
+            p.add_argument("--period", choices=["tune", "judge", "chatjudge", "chatjudge2"], required=True)
         if name == "split":
             # Maintainer 2026-10-13: 2026-09 is skipped (never read or used); the judge period starts at 2026-08. Months from the start
             # up to SHANJIE_FROM are in neither the judge period nor the pool.

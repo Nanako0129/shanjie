@@ -392,6 +392,149 @@ class Freeze(unittest.TestCase):
         self.assertEqual(judge["months"], ["2026-08", "2026-09"])
         self.assertFalse({s for _x, s in want} & {l.split("|")[1] for l in open(os.path.join(self.work, "judge.rows.txt"), encoding="utf-8") if l.strip()})
 
+    def test_chatjudge_leaves_out_the_tuning_sample_and_its_sentences(self):
+        # rerank-size section 3.4: the unseen chat set is drawn from the pool without the tuning sample, with its own seed.
+        pool = [(x, s) for m, _src, x, s in bc.read_clauses(self.work) if m in ("2026-05", "2026-06", "2026-07")]
+        tuned = {s for _x, s in random.Random(20261012).sample(pool, 4)}
+        rest = [r for r in pool if r[1] not in tuned]
+        with mock.patch.object(bc, "CHATJUDGE_MAX", 3):
+            bc.freeze(self.work, "tune", readings=fake_readings)
+            st = bc.freeze(self.work, "chatjudge", readings=fake_readings)
+        got = [tuple(l.split("|")[:2]) for l in open(os.path.join(self.work, "chatjudge.rows.txt"), encoding="utf-8").read().split("\n") if l]
+        self.assertEqual(got, random.Random(20261017).sample(rest, 3))
+        tune = {l.split("|")[1] for l in open(os.path.join(self.work, "tune.rows.txt"), encoding="utf-8") if l.strip()}
+        self.assertFalse(tune & {s for _x, s in got})
+        self.assertEqual((st["rows"], st["months"]), (3, ["2026-05", "2026-06", "2026-07"]))
+
+    def test_chatjudge_leaves_out_a_tuning_sentence_repeated_elsewhere(self):
+        # 2026-06 repeats 2026-05 word for word, so a sentence the tuning sample drew can sit at another pool position too.
+        td = tempfile.mkdtemp()
+        texts = {"2026-05": "甲乙丙", "2026-06": "甲乙丙", "2026-07": "丁戊己", "2026-08": "庚辛壬", "2026-09": "子丑寅"}
+        msgs = [(f"{i}{j}", f"{mon}-10 {10 + j}:00:00.000000+00:00", ch + "字") for i, (mon, t) in enumerate(texts.items()) for j, ch in enumerate(t)]
+        work = os.path.join(td, "w")
+        bc.prepare(package(td, {"c1": msgs}), None, None, [], work)
+        with contextlib.redirect_stdout(io.StringIO()):
+            bc.main(["split", "--work", work])
+        pool = [(x, s) for m, _src, x, s in bc.read_clauses(work) if m in ("2026-05", "2026-06", "2026-07")]
+        idx = random.Random(20261012).sample(range(len(pool)), 4)                 # the same positions as sampling the rows
+        tuned = {pool[i][1] for i in idx}
+        self.assertTrue([i for i, r in enumerate(pool) if r[1] in tuned and i not in idx])   # a drawn sentence also sits elsewhere
+        with mock.patch.object(bc, "CHATJUDGE_MAX", 100):
+            bc.freeze(work, "tune", readings=fake_readings)
+            bc.freeze(work, "chatjudge", readings=fake_readings)
+        got = [l.split("|")[1] for l in open(os.path.join(work, "chatjudge.rows.txt"), encoding="utf-8") if l.strip()]
+        self.assertEqual(sorted(got), sorted(s for _x, s in pool if s not in tuned))
+
+    def test_chatjudge_stops_when_a_correction_meets_a_chatclause_sentence(self):
+        with mock.patch.object(bc, "CHATJUDGE_MAX", 3):
+            bc.freeze(self.work, "tune", readings=fake_readings)
+            rows, _pool = bc.period_rows(self.work, "chatjudge")
+            tune = [l.split("|")[1] for l in open(os.path.join(self.work, "tune.rows.txt"), encoding="utf-8") if l.strip()]
+            corr = os.path.join(self.td, "c.tsv")
+            open(corr, "w", encoding="utf-8").write(f"{rows[0][1]}\t{tune[0]}\n")
+            with self.assertRaises(SystemExit) as e:
+                bc.freeze(self.work, "chatjudge", corrections_file=corr, readings=fake_readings)
+        self.assertIn("also in the frozen chatclause", str(e.exception.code))
+        self.assertFalse(os.path.exists(os.path.join(self.work, "chatjudge.rows.txt")))
+
+    def test_chatjudge2_leaves_out_the_tuning_and_chatjudge_samples(self):
+        # iteration plan Phase 0 item 7: the second chat judge set never repeats a sentence of the first one or of chatclause.
+        pool = [(x, s) for m, _src, x, s in bc.read_clauses(self.work) if m in ("2026-05", "2026-06", "2026-07")]
+        tuned = {s for _x, s in random.Random(20261012).sample(pool, 4)}
+        rest = [r for r in pool if r[1] not in tuned]
+        first = {s for _x, s in random.Random(20261017).sample(rest, 2)}
+        rest2 = [r for r in rest if r[1] not in first]
+        with mock.patch.object(bc, "CHATJUDGE_MAX", 2), mock.patch.object(bc, "CHATJUDGE2_MAX", 2):
+            bc.freeze(self.work, "tune", readings=fake_readings)
+            with self.assertRaises(SystemExit) as e:
+                bc.freeze(self.work, "chatjudge2", readings=fake_readings)
+            self.assertIn("freeze the chatjudge period before chatjudge2", str(e.exception.code))
+            bc.freeze(self.work, "chatjudge", readings=fake_readings)
+            st = bc.freeze(self.work, "chatjudge2", readings=fake_readings)
+        got = [tuple(l.split("|")[:2]) for l in open(os.path.join(self.work, "chatjudge2.rows.txt"), encoding="utf-8").read().split("\n") if l]
+        self.assertEqual(got, random.Random(20261018).sample(rest2, 2))
+        self.assertFalse((tuned | first) & {s for _x, s in got})
+        self.assertEqual(st["rows"], 2)
+
+    def test_chatjudge2_stops_when_a_correction_meets_a_chatjudge_sentence(self):
+        with mock.patch.object(bc, "CHATJUDGE_MAX", 2), mock.patch.object(bc, "CHATJUDGE2_MAX", 2):
+            bc.freeze(self.work, "tune", readings=fake_readings)
+            bc.freeze(self.work, "chatjudge", readings=fake_readings)
+            rows, _pool = bc.period_rows(self.work, "chatjudge2")
+            first = [l.split("|")[1] for l in open(os.path.join(self.work, "chatjudge.rows.txt"), encoding="utf-8") if l.strip()]
+            corr = os.path.join(self.td, "c2.tsv")
+            open(corr, "w", encoding="utf-8").write(f"{rows[0][1]}\t{first[0]}\n")
+            with self.assertRaises(SystemExit) as e:
+                bc.freeze(self.work, "chatjudge2", corrections_file=corr, readings=fake_readings)
+        self.assertIn("a chatjudge2 sentence is also in the frozen chatjudge", str(e.exception.code))
+        self.assertFalse(os.path.exists(os.path.join(self.work, "chatjudge2.rows.txt")))
+
+    def test_chatjudge2_leaves_out_repeated_and_corrected_sentences(self):
+        # A sentence chatjudge drew also sits at another pool position, and a chatjudge correction turns a row into a sentence that
+        # sits elsewhere in the pool: chatjudge2 holds neither.
+        td = tempfile.mkdtemp()
+        texts = {"2026-05": "甲乙丙丁", "2026-06": "甲乙丙丁", "2026-07": "戊己庚辛", "2026-08": "壬癸子丑", "2026-09": "寅卯辰巳"}
+        msgs = [(f"{i}{j}", f"{mon}-10 {10 + j}:00:00.000000+00:00", ch + "字") for i, (mon, t) in enumerate(texts.items()) for j, ch in enumerate(t)]
+        work = os.path.join(td, "w")
+        bc.prepare(package(td, {"c1": msgs}), None, None, [], work)
+        with contextlib.redirect_stdout(io.StringIO()):
+            bc.main(["split", "--work", work])
+        pool = [(x, s) for m, _src, x, s in bc.read_clauses(work) if m in ("2026-05", "2026-06", "2026-07")]
+        with mock.patch.object(bc, "TUNE_MAX", 2), mock.patch.object(bc, "CHATJUDGE_MAX", 2), mock.patch.object(bc, "CHATJUDGE2_MAX", 100):
+            bc.freeze(work, "tune", readings=fake_readings)
+            drawn, _ = bc.period_rows(work, "chatjudge")
+            tuned = bc.frozen_sentences(work, "tune")
+            target = next(s for _x, s in pool if s not in tuned and s not in {d for _x, d in drawn})
+            corr = os.path.join(td, "c.tsv")
+            open(corr, "w", encoding="utf-8").write(f"{drawn[0][1]}\t{target}\n")
+            bc.freeze(work, "chatjudge", corrections_file=corr, readings=fake_readings)
+            bc.freeze(work, "chatjudge2", readings=fake_readings)
+        got = [l.split("|")[1] for l in open(os.path.join(work, "chatjudge2.rows.txt"), encoding="utf-8") if l.strip()]
+        read = tuned | {s for _x, s in drawn} | {target}
+        self.assertTrue([s for _x, s in pool if s in {d for _x, d in drawn}][1:])          # a drawn sentence repeats in the pool
+        self.assertEqual(sorted(got), sorted(s for _x, s in pool if s not in read))
+
+    def test_chatjudge2_stops_on_a_tune_sentence_a_changed_pool_or_a_missing_rows_file(self):
+        with mock.patch.object(bc, "CHATJUDGE_MAX", 2), mock.patch.object(bc, "CHATJUDGE2_MAX", 2):
+            bc.freeze(self.work, "tune", readings=fake_readings)
+            bc.freeze(self.work, "chatjudge", readings=fake_readings)
+            rows, _pool = bc.period_rows(self.work, "chatjudge2")
+            corr = os.path.join(self.td, "c3.tsv")
+            open(corr, "w", encoding="utf-8").write(f"{rows[0][1]}\t{sorted(bc.frozen_sentences(self.work, 'tune'))[0]}\n")
+            with self.assertRaises(SystemExit) as e:
+                bc.freeze(self.work, "chatjudge2", corrections_file=corr, readings=fake_readings)
+            self.assertIn("a chatjudge2 sentence is also in the frozen chatclause; report to main (iteration plan", str(e.exception.code))
+            tman = os.path.join(self.work, "tune.manifest.json")       # as the work-v2 tune freeze (2026-10-13) wrote it: the sample size
+            m = json.load(open(tman, encoding="utf-8"))
+            m["clauses_before_sampling_or_corrections"] = m["rows_in"]
+            open(tman, "w", encoding="utf-8").write(json.dumps(m))
+            self.assertEqual(bc.period_rows(self.work, "chatjudge2")[0], rows)      # not a reason to stop
+            ct = os.path.join(self.work, "clauses.tsv")                 # same rows, other order: the pool size alone would not tell
+            lines = open(ct, encoding="utf-8").read().splitlines(keepends=True)
+            open(ct, "w", encoding="utf-8").write("".join(reversed(lines)))
+            with self.assertRaises(SystemExit) as e:
+                bc.freeze(self.work, "chatjudge2", readings=fake_readings)
+            self.assertIn("cannot be replayed", str(e.exception.code))
+            open(ct, "w", encoding="utf-8").write("".join(lines))
+            os.remove(os.path.join(self.work, "chatjudge.rows.txt"))
+            with self.assertRaises(SystemExit) as e:
+                bc.freeze(self.work, "chatjudge2", readings=fake_readings)
+            self.assertIn("chatjudge.rows.txt is missing", str(e.exception.code))
+        self.assertFalse(os.path.exists(os.path.join(self.work, "chatjudge2.rows.txt")))
+
+    def test_a_corrected_row_that_spells_as_check_is_counted(self):
+        def readings(sentences):
+            return {s: ("check", "") if s == "新句" else ("ok", " ".join("ㄅ" for _ in s)) for s in set(sentences)}
+        _frozen, _draft, st = bc.build_period([("", "舊句"), ("", "甲字")], {"舊句": ("新句", None)}, readings)
+        self.assertEqual((st["corrected"], st["corrected_then_check"], st["dropped_check"], st["rows"]), (1, 1, 1, 1))
+        _frozen, _draft, st = bc.build_period([("", "舊句")], {"舊句": ("新句", "ㄒㄧㄣ ㄐㄩˋ")}, readings)
+        self.assertEqual((st["corrected_then_check"], st["rows"]), (0, 1))                # READ given: kept
+
+    def test_chatjudge_needs_the_tune_freeze_first(self):
+        with self.assertRaises(SystemExit) as e:
+            bc.freeze(self.work, "chatjudge", readings=fake_readings)
+        self.assertIn("tuning period first", str(e.exception.code))
+
     def test_judge_needs_the_tune_freeze_first(self):
         with self.assertRaises(SystemExit) as e:
             bc.freeze(self.work, "judge", readings=fake_readings)

@@ -9,6 +9,7 @@
 import AppKit
 import Carbon
 
+// tools/imeshot.swift has the inverse of this table (zhuyinOf, for its key strip): change both together.
 let keyCode: [Character: CGKeyCode] = [
     "ㄅ": 18, "ㄉ": 19, "ˇ": 20, "ˋ": 21, "ㄓ": 23, "ˊ": 22, "˙": 26, "ㄚ": 28, "ㄞ": 25, "ㄢ": 29, "ㄦ": 27,
     "ㄆ": 12, "ㄊ": 13, "ㄍ": 14, "ㄐ": 15, "ㄔ": 17, "ㄗ": 16, "ㄧ": 32, "ㄛ": 34, "ㄟ": 31, "ㄣ": 35,

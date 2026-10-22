@@ -5,6 +5,19 @@ import XCTest
 // docs/contracts/installer-v2.md section 9.3, item 1. No test calls TIS: the state is injected and
 // the full flow (the only code that registers, enables or disables) is replaced by a counter.
 final class RegistrationTests: XCTestCase {
+    /// system-install.md section 2.2 (revision of 2026-10-21): the enabled list as macOS 26 writes it (VM, after `sudo rm -rf` of the
+    /// /Library copy: TIS lists nothing, this list still has both entries).
+    func testEnabledListCountsAnEntryWithTheBundleID() {
+        let id = "com.nyanako.inputmethod.shanjie"
+        let stale: [Any] = [["Bundle ID": id, "Input Mode": "\(id).zhuyin", "InputSourceKind": "Input Mode"],
+                            ["Bundle ID": id, "InputSourceKind": "Keyboard Input Method"]]
+        XCTAssertTrue(Registration.enabled(stale, bundleID: id))
+        XCTAssertFalse(Registration.enabled([["InputSourceKind": "Keyboard Layout", "KeyboardLayout ID": 0]], bundleID: id))
+        XCTAssertFalse(Registration.enabled([["Bundle ID": "\(id).dev"]], bundleID: id))   // another ID is not this one
+        XCTAssertFalse(Registration.enabled(nil, bundleID: id))
+        XCTAssertFalse(Registration.enabled(["not a dictionary"], bundleID: id))
+    }
+
     func testDecisionTable() {
         // (modeListed, accepted, legacyEnabled) -> decision, written out row by row.
         let rows: [(Bool, Bool, Bool, Registration.Decision)] = [
@@ -86,6 +99,32 @@ final class RegistrationTests: XCTestCase {
         let waiting = run(.init(modeListed: true, accepted: false, legacyEnabled: false), mutations: &calls)
         XCTAssertEqual(waiting, Registration.Result(outcome: .notAccepted, skipped: true))
         XCTAssertEqual(calls, 0)
+    }
+
+    /// system-install.md section 2.4 item 4: a location change never skips, in every state that
+    /// would skip without it, and `run` does not re-read first.
+    func testMovedAlwaysTakesTheFullFlow() {
+        for listed in [false, true] {
+            for accepted in [false, true] {
+                for legacy in [false, true] {
+                    XCTAssertEqual(Registration.decide(modeListed: listed, accepted: accepted, legacyEnabled: legacy, moved: true),
+                                   .fullFlow, "listed \(listed) accepted \(accepted) legacy \(legacy)")
+                }
+            }
+        }
+        for state in [Registration.State(modeListed: true, accepted: true, legacyEnabled: false),
+                      Registration.State(modeListed: true, accepted: false, legacyEnabled: false),
+                      Registration.State(modeListed: false, accepted: false, legacyEnabled: false)] {
+            var flows = 0, pauses = 0
+            let result = Registration.run(
+                bundleURL: URL(fileURLWithPath: "/nonexistent"), bundleID: "x", defaults: UserDefaults(suiteName: "RegistrationTests")!,
+                moved: true, readState: { _ in state },
+                fullFlow: { _, _, _ in flows += 1; return Registration.Result(outcome: .notAccepted) },
+                pause: { _ in pauses += 1 })
+            XCTAssertEqual(flows, 1, "\(state)")
+            XCTAssertEqual(pauses, 0, "\(state)")
+            XCTAssertFalse(result.skipped)
+        }
     }
 
     func testRunTakesTheFullFlowWhenNeeded() {

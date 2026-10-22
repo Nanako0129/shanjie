@@ -1,10 +1,13 @@
 name: Release
 
 # docs/contracts/s3b.md section 3, modeled on syrtis's release.yml.
-#   push of a v* tag   gate, build, sign + notarize + verify, publish (GitHub release, then the
-#                      Homebrew cask in Nanako0129/homebrew-tap; section 14.3)
-#   workflow_dispatch  dry run on main: gate, build, sign + notarize + verify; publishes nothing
-#                      (the signed zip stays a one-day artifact)
+#   push of a v* tag   gate, build, sign + notarize + verify + Sparkle key pair + EdDSA feed, publish
+#                      (GitHub release, appcast.xml on main, then the Homebrew cask in
+#                      Nanako0129/homebrew-tap; section 14.3)
+#   workflow_dispatch  dry run on main: gate, build, sign + notarize + verify + Sparkle key pair;
+#                      signs no feed and publishes nothing (both signed zips, input method and installer,
+#                      stay a one-day artifact, `signed`, for the VM and device checks of app-sandbox.md
+#                      section 4)
 on:
   push:
     tags: ["v*"]
@@ -16,12 +19,24 @@ permissions: {}
 # Signing material and the tap key live only in the `release` Environment, never in repository
 # secrets:
 #   secrets    DEVELOPER_ID_P12_BASE64, DEVELOPER_ID_P12_PASSWORD, NOTARY_KEY_P8,
+#              SPARKLE_PRIVATE_KEY (the EdDSA seed of the update feed, docs/contracts/about-update.md),
 #              HOMEBREW_TAP_DEPLOY_KEY (write deploy key of Nanako0129/homebrew-tap)
 #   variables  NOTARY_KEY_ID, NOTARY_ISSUER_ID, APPLE_TEAM_ID
 # `sign` and `publish` enter it. An Environment secret reaches a job only where the job references
-# it: `sign` references only the signing material, `publish` only the tap key. `build` runs the
-# Rust and Swift toolchains, so it holds no secret. The login keychain of any machine is never
-# involved.
+# it: `sign` references only the signing material and the Sparkle key, `publish` only the tap key.
+# `build` runs the Rust and Swift toolchains, so it holds no secret. The login keychain of any
+# machine is never involved.
+#
+# Trust model (docs/contracts/about-update.md section 0.1, docs/PLAN.md R10): with
+# SUVerifyUpdateBeforeExtraction, Sparkle (read in 2.9.3's source; SUUpdateValidator.m differs in
+# 2.10.0 only by a dropped macOS 11.3 availability check) checks the downloaded zip's EdDSA signature
+# before extracting it; its fallback, the archive's own Developer ID signature, cannot apply to a zip
+# (a zip carries no code signature), so in practice only the EdDSA key admits an update, and the
+# update then installs without Gatekeeper or notarization looking at it again. The EdDSA key plus
+# write access to main's appcast.xml can therefore run code in every installed copy. The feed is
+# EdDSA-signed too (SURequireSignedFeed). Three steps of `sign` reference the key: the emptiness
+# check of the signing material, the key-pair check (dry runs and tags) and the feed step (tags
+# only, after the signing keychain is gone, handed to Sparkle's own tool on stdin).
 
 jobs:
   # CI does not run on tags: the tagged (or dispatched) commit's own ci.yml run on main must be
@@ -74,23 +89,29 @@ jobs:
         with:
           persist-credentials: false
 
-      # The same toolchain as ci.yml (core and shell jobs).
+      # The same toolchain as ci.yml (every job there that runs cargo).
       - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
         with:
           toolchain: 1.97.1
 
-      # Before build-app.sh, against the tracked hashes (data/bigram.sjlm.sha256, data/classes.sjc.sha256 and data/tinylm.sjtl.sha256, as ci.yml).
+      # Before build-app.sh, against the tracked hashes (data/bigram.sjlm.sha256, data/classes.sjc.sha256, data/kn.sjkn.sha256, data/tinylm.sjtl.sha256, data/trigram.sjt3.sha256, data/colloquial.sjlm.sha256 and data/colloquial-attribution.tsv.sha256, as scripts/fetch-models.sh does for ci.yml).
       - name: Fetch the language model
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          gh release download model-v5 --repo "$GITHUB_REPOSITORY" -p bigram.sjlm -D data/lm
+          gh release download model-v6 --repo "$GITHUB_REPOSITORY" -p bigram.sjlm -D data/lm
           shasum -a 256 -c data/bigram.sjlm.sha256
-          gh release download classes-v3 --repo "$GITHUB_REPOSITORY" -p classes.sjc -D data/lm
+          gh release download classes-v5 --repo "$GITHUB_REPOSITORY" -p classes.sjc -D data/lm
           shasum -a 256 -c data/classes.sjc.sha256
-          gh release download tinylm-v3 --repo "$GITHUB_REPOSITORY" -p tinylm.sjtl -D data/lm
+          gh release download kn-v1 --repo "$GITHUB_REPOSITORY" -p kn.sjkn -D data/lm
+          shasum -a 256 -c data/kn.sjkn.sha256
+          gh release download sj-sr-6-14m --repo "$GITHUB_REPOSITORY" -p tinylm.sjtl -D data/lm
           shasum -a 256 -c data/tinylm.sjtl.sha256
+          gh release download sj-cx-1-7.7m --repo "$GITHUB_REPOSITORY" -p trigram.sjt3 -D data/lm
+          shasum -a 256 -c data/trigram.sjt3.sha256
+          gh release download sj-cl-1-68k --repo "$GITHUB_REPOSITORY" -p colloquial.sjlm -p colloquial-attribution.tsv -D data/lm
+          shasum -a 256 -c data/colloquial.sjlm.sha256 data/colloquial-attribution.tsv.sha256
 
       # The input of the English word list (SymSpell, pinned commit; build-app.sh downloads it when missing and checks its SHA-256
       # either way, so a bad cache is only a miss). The key follows tools/build_english_words.py, where the pins live.
@@ -108,9 +129,16 @@ jobs:
           [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "error: tag $GITHUB_REF_NAME is not vMAJOR.MINOR.PATCH" >&2; exit 1; }
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
+      # SHANJIE_RELEASE_BUILD marks the bundle as a release build (Info.plist ShanjieUpdateBuild
+      # release): only such a build and an update test build start the updater; verify_sparkle
+      # requires the marker. The shipping ID explicitly: build-app.sh defaults to the development ID
+      # and refuses SHANJIE_RELEASE_BUILD without the shipping one (app-sandbox.md section 2.4);
+      # verify() in `sign` checks the ID of what ships.
       - name: Build the app (ad-hoc)
         env:
           SHANJIE_VERSION: ${{ steps.version.outputs.version }}
+          SHANJIE_RELEASE_BUILD: "1"
+          BUNDLE_ID: com.nyanako.inputmethod.shanjie
         run: scripts/build-app.sh
 
       # The installer skeleton (docs/contracts/s3c-installer.md section 3): everything except the
@@ -131,8 +159,10 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-  # Developer ID signing, notarization, stapling and verification. Runs no repository code: no
-  # checkout at all, only Apple's tools on the artifact, which is unpacked into RUNNER_TEMP.
+  # Developer ID signing, notarization, stapling and verification, the Sparkle key-pair check and
+  # (tags only) the signed feed. Runs no repository code: Apple's tools on the artifact, which is
+  # unpacked into RUNNER_TEMP, Sparkle's official tools for the feed, and on tags a sparse checkout
+  # of two data files (appcast.xml and this tag's release notes) that are only read.
   sign:
     needs: build
     runs-on: xcode-27
@@ -145,6 +175,10 @@ jobs:
       VERSION: ${{ needs.build.outputs.version }}
       # The team every release must be signed by (docs/contracts/s3b.md section 3).
       EXPECTED_TEAM: 2LJ882GPY8
+      # The Sparkle values the shipped Info.plist must carry, verbatim (docs/contracts/about-update.md
+      # section 2); scripts/build-app.sh writes them and scripts/check-app.sh has its own copy.
+      SPARKLE_PUBLIC_KEY: cM3S7qQf78Hi2yH5gwD+nZm5T/6Vw05tD9ZWET3Rcew=
+      SPARKLE_FEED_URL: https://raw.githubusercontent.com/Nanako0129/shanjie/main/appcast.xml
     steps:
       # Backstop for the Environment's deployment policy.
       - name: Require a release ref
@@ -160,12 +194,13 @@ jobs:
           DEVELOPER_ID_P12_BASE64: ${{ secrets.DEVELOPER_ID_P12_BASE64 }}
           DEVELOPER_ID_P12_PASSWORD: ${{ secrets.DEVELOPER_ID_P12_PASSWORD }}
           NOTARY_KEY_P8: ${{ secrets.NOTARY_KEY_P8 }}
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
           NOTARY_KEY_ID: ${{ vars.NOTARY_KEY_ID }}
           NOTARY_ISSUER_ID: ${{ vars.NOTARY_ISSUER_ID }}
           APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
         run: |
           missing=0
-          for name in DEVELOPER_ID_P12_BASE64 DEVELOPER_ID_P12_PASSWORD NOTARY_KEY_P8 NOTARY_KEY_ID NOTARY_ISSUER_ID APPLE_TEAM_ID; do
+          for name in DEVELOPER_ID_P12_BASE64 DEVELOPER_ID_P12_PASSWORD NOTARY_KEY_P8 SPARKLE_PRIVATE_KEY NOTARY_KEY_ID NOTARY_ISSUER_ID APPLE_TEAM_ID; do
             if [ -z "${!name}" ]; then echo "error: $name is empty in the release Environment" >&2; missing=1; fi
           done
           if [ "$APPLE_TEAM_ID" != "$EXPECTED_TEAM" ]; then echo "error: APPLE_TEAM_ID is not $EXPECTED_TEAM" >&2; missing=1; fi
@@ -215,10 +250,52 @@ jobs:
           [ -n "$IDENTITY" ] || fail "no Developer ID Application identity for team $EXPECTED_TEAM"
 
           mkdir -p "$T/work" "$T/out" "$T/check"
-          tar -xf "$T/unsigned/unsigned.tar" -C "$T/work"
+          # -p: this step's umask 077 would otherwise make the bundle 0700/0600, which a root-owned copy in /Library
+          # cannot load for the user (system-install.md section 1). Measured 2026-10-20: tar -xf applies the umask, tar -xpf
+          # and ditto -x -k keep the stored modes (build-app.sh already set a+rX,go-w). The umask stays 077 for the secret
+          # files above; what codesign and stapler write under it is fixed by the chmod after stapling, below.
+          tar -xpf "$T/unsigned/unsigned.tar" -C "$T/work"
           APP="$T/work/善解輸入法.app"
-          # Hardened runtime, secure timestamp, and no --entitlements.
-          codesign --force --options runtime --timestamp --sign "$IDENTITY" --keychain "$KC" "$APP"
+          # The layout of standalone-updater.md section 2.4, checked before signing and again by verify_sparkle on what
+          # ships: no XPC service anywhere (the input method drives no installer service; the system has nothing to remember
+          # by path), Contents/Helpers exactly 善解更新.app, the input method's Sparkle.framework (Contents/Frameworks/Updater)
+          # without Autoupdate and Updater.app, the helper's own framework with both. The same assertions as
+          # scripts/check-app.sh (this job runs no repository code; a change there goes here too).
+          HELPER="$APP/Contents/Helpers/善解更新.app"
+          SPARKLE="$APP/Contents/Frameworks/Updater/Sparkle.framework"
+          HSPARKLE="$HELPER/Contents/Frameworks/Sparkle.framework"
+          # layout <app>
+          layout() {
+            local S="$1/Contents/Frameworks/Updater/Sparkle.framework" HS="$1/Contents/Helpers/善解更新.app/Contents/Frameworks/Sparkle.framework"
+            [ -z "$(find "$1" -name '*.xpc')" ] || fail "the bundle contains an .xpc: $1"
+            [ "$(ls -A "$1/Contents/Helpers" 2>/dev/null)" = 善解更新.app ] || fail "Contents/Helpers is not exactly 善解更新.app: $1"
+            [ -d "$S" ] || fail "$S is missing"
+            [ -z "$(find "$S" \( -name Autoupdate -o -name Updater.app \))" ] || fail "the input method's Sparkle.framework contains Autoupdate or Updater.app: $1"
+            for code in "$HS" "$HS/Versions/B/Autoupdate" "$HS/Versions/B/Updater.app"; do
+              [ -e "$code" ] || fail "$code is missing"
+            done
+          }
+          layout "$APP"
+          # Inside out, never --deep (standalone-updater.md section 2.4): the helper's Autoupdate, Updater.app and
+          # framework, the helper, the input method's framework, each with the hardened runtime, a secure timestamp and no
+          # entitlements; then the input method with the runtime, a timestamp and the three App Sandbox entitlements
+          # written here from literals, not taken from the build artifact (security review F7), so what ships does not
+          # depend on the build job and verify() is a second check. (The ad-hoc build from `build` has no runtime: library
+          # validation refuses an ad-hoc framework there; here all share the team, and verify_sparkle requires the flag on
+          # each.)
+          for code in "$HSPARKLE/Versions/B/Autoupdate" "$HSPARKLE/Versions/B/Updater.app" "$HSPARKLE" "$HELPER" "$SPARKLE"; do
+            codesign --force --options runtime --timestamp --sign "$IDENTITY" --keychain "$KC" "$code"
+          done
+          printf '%s\n' '<?xml version="1.0" encoding="UTF-8"?>' \
+            '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">' \
+            '<plist version="1.0"><dict>' \
+            '<key>com.apple.security.app-sandbox</key><true/>' \
+            '<key>com.apple.security.network.client</key><true/>' \
+            '<key>com.apple.security.temporary-exception.mach-register.global-name</key>' \
+            '<array><string>com.nyanako.inputmethod.shanjie_Connection</string></array>' \
+            '</dict></plist>' > "$T/sign-entitlements.plist"
+          plutil -lint "$T/sign-entitlements.plist" > /dev/null
+          codesign --force --options runtime --timestamp --entitlements "$T/sign-entitlements.plist" --sign "$IDENTITY" --keychain "$KC" "$APP"
           codesign --verify --strict --deep "$APP"
 
           # notarytool can exit 0 on a rejected submission: the verdict is read from its JSON.
@@ -242,28 +319,127 @@ jobs:
             xcrun stapler staple "$1"
           }
           notarize "$APP"
+          # After the last write into the bundle and before the zip (code review 2026-10-20): under this step's umask 077
+          # codesign and `stapler staple` write their files (Contents/CodeResources, _CodeSignature) as 0600, which a
+          # root-owned copy in /Library could not read for the user. Modes are not part of the code signature, so this
+          # changes neither the seal nor the ticket; verify_sparkle checks the modes on the copy extracted from the zip.
+          chmod -R a+rX,go-w "$APP"
 
           ZIP="shanjie-$VERSION.zip"
           ditto -c -k --keepParent "$APP" "$T/out/$ZIP"
           (cd "$T/out" && shasum -a 256 "$ZIP" > "$ZIP.sha256")
 
-          # verify <app>: what ships, as extracted from its final zip.
+          # verify <app> <ime|installer>: what ships, as extracted from its final zip, with the expected
+          # values by bundle (app-sandbox.md section 2.4). The input method: the shipping ID, and its
+          # entitlements equal, as a whole plutil-normalized property list (an extra key fails, F7), the
+          # three App Sandbox keys with the connection name derived from that ID; the same comparison as
+          # scripts/check-entitlements.sh, written out here because this job runs no repository code (a
+          # change there goes here too; this copy has no mutation test of its own, since `sign` runs only
+          # on main, while CI mutates the script's copy). The installer: its ID and no entitlements.
           verify() {
             V="$1"
+            ID=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$V/Contents/Info.plist")
             codesign --verify --strict --deep "$V" || fail "codesign --verify --strict --deep: $V"
             INFO=$(codesign -dv --verbose=2 "$V" 2>&1)
             grep -q '^Authority=Developer ID Application: ' <<<"$INFO" || fail "not signed with Developer ID Application: $V"
             grep -qx "TeamIdentifier=$EXPECTED_TEAM" <<<"$INFO" || fail "team identifier is not $EXPECTED_TEAM: $V"
             grep -Eq 'flags=0x[0-9a-f]+\([^)]*runtime' <<<"$INFO" || fail "hardened runtime flag missing: $V"
-            ENT=$(codesign -d --entitlements - "$V" 2>/dev/null || true)
-            [ -z "$ENT" ] || fail "the app carries entitlements: $V"
+            case "$2" in
+              ime)
+                [ "$ID" = com.nyanako.inputmethod.shanjie ] || fail "bundle ID is $ID, not the shipping ID: $V"
+                [ "$(/usr/libexec/PlistBuddy -c 'Print :InputMethodConnectionName' "$V/Contents/Info.plist")" = "${ID}_Connection" ] \
+                  || fail "InputMethodConnectionName is not ${ID}_Connection: $V"
+                # app-sandbox.md section 2.2: the migration list, exactly (the same comparison as scripts/check-app.sh).
+                # shellcheck disable=SC2016
+                python3 -I -c 'import plistlib, sys; sys.exit(plistlib.load(open(sys.argv[1], "rb")) != {"Move": ["${ApplicationSupport}/shanjie"]})' \
+                  "$V/Contents/Resources/container-migration.plist" 2>/dev/null \
+                  || fail "container-migration.plist is missing or not exactly Move = [\${ApplicationSupport}/shanjie]: $V"
+                rm -f "$T/ent-actual.plist" "$T/ent-expected.plist"
+                codesign -d --entitlements - --xml "$V" > "$T/ent-actual.plist" 2>/dev/null || true
+                [ -s "$T/ent-actual.plist" ] || fail "the input method carries no entitlements: $V"
+                printf '%s\n' '<?xml version="1.0" encoding="UTF-8"?>' \
+                  '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">' \
+                  '<plist version="1.0"><dict>' \
+                  '<key>com.apple.security.app-sandbox</key><true/>' \
+                  '<key>com.apple.security.network.client</key><true/>' \
+                  '<key>com.apple.security.temporary-exception.mach-register.global-name</key>' \
+                  "<array><string>${ID}_Connection</string></array>" \
+                  '</dict></plist>' > "$T/ent-expected.plist"
+                plutil -convert xml1 "$T/ent-actual.plist" || fail "the entitlements are not a property list: $V"
+                plutil -convert xml1 "$T/ent-expected.plist"
+                cmp -s "$T/ent-actual.plist" "$T/ent-expected.plist" \
+                  || fail "the entitlements are not exactly the three keys for $ID: $(plutil -p "$T/ent-actual.plist")"
+                ;;
+              installer)
+                [ "$ID" = com.nyanako.shanjie.installer ] || fail "bundle ID is $ID, not the installer's: $V"
+                ENT=$(codesign -d --entitlements - "$V" 2>/dev/null || true)
+                [ -z "$ENT" ] || fail "the installer carries entitlements: $V"
+                ;;
+              *) fail "verify: unknown kind $2" ;;
+            esac
             xcrun stapler validate "$V" > /dev/null || fail "no stapled notarization ticket: $V"
             # Captured first: `spctl | grep -q` under pipefail can fail on SIGPIPE.
             GK=$(spctl -a -t exec -vv "$V" 2>&1 || true)
             grep -qx 'source=Notarized Developer ID' <<<"$GK" || fail "Gatekeeper does not report Notarized Developer ID: $GK"
           }
+          # verify_sparkle <app>: the input method's Sparkle parts and 善解更新 (docs/contracts/about-update.md section 2,
+          # standalone-updater.md section 2.4): the layout above; the helper, its framework with Autoupdate and Updater.app,
+          # and the input method's framework, each present (a missing path fails, never reads as "no entitlements") with
+          # the expected team, the hardened runtime and no entitlements; the app's team and runtime (its entitlements are
+          # verify()'s); the helper's ID and an Info.plist without SUFeedURL, SUPublicEDKey or any SUEnable* key; the input
+          # method's Sparkle keys verbatim, with their types, against the values in this job's env (the installer launcher
+          # off), SUEnableDownloaderService absent; and the permissions: every path o+r, directories and executables o+x,
+          # nothing but symlinks writable by group or others, nothing setuid or setgid.
+          verify_sparkle() {
+            V="$1"
+            layout "$V"
+            H="$V/Contents/Helpers/善解更新.app"
+            S="$V/Contents/Frameworks/Updater/Sparkle.framework"
+            HS="$H/Contents/Frameworks/Sparkle.framework"
+            for code in "$V" "$S" "$H" "$HS" "$HS/Versions/B/Autoupdate" "$HS/Versions/B/Updater.app"; do
+              [ -e "$code" ] || fail "$code is missing"
+              C_INFO=$(codesign -dv --verbose=2 "$code" 2>&1)
+              grep -qx "TeamIdentifier=$EXPECTED_TEAM" <<<"$C_INFO" || fail "team identifier is not $EXPECTED_TEAM: $code"
+              grep -Eq 'flags=0x[0-9a-f]+\([^)]*runtime' <<<"$C_INFO" || fail "hardened runtime flag missing: $code"
+              [ "$code" = "$V" ] && continue
+              codesign --verify --strict "$code" || fail "codesign --verify --strict: $code"
+              C_ENT=$(codesign -d --entitlements - "$code" 2>/dev/null || true)
+              [ -z "$C_ENT" ] || fail "$code carries entitlements"
+            done
+            HP="$H/Contents/Info.plist"
+            [ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$HP")" = com.nyanako.inputmethod.shanjie.updater ] \
+              || fail "the helper's bundle ID is not com.nyanako.inputmethod.shanjie.updater: $V"
+            HKEY=$(python3 -I -c 'import plistlib, sys
+          d = plistlib.load(open(sys.argv[1], "rb"))
+          print(" ".join(sorted(k for k in d if k in ("SUFeedURL", "SUPublicEDKey", "LSUIElement") or k.startswith("SUEnable"))))' "$HP") \
+              || fail "the helper's Info.plist cannot be read: $V"
+            [ -z "$HKEY" ] || fail "the helper's Info.plist sets $HKEY"
+            P="$V/Contents/Info.plist"
+            key() { [ "$(plutil -extract "$1" raw -expect "$2" -o - "$P" 2>/dev/null)" = "$3" ] || fail "Info.plist $1 is not the $2 $3"; }
+            key ShanjieUpdateBuild string release
+            key SUFeedURL string "$SPARKLE_FEED_URL"
+            key SUPublicEDKey string "$SPARKLE_PUBLIC_KEY"
+            key SURequireSignedFeed bool true
+            key SUVerifyUpdateBeforeExtraction bool true
+            key SUAllowsAutomaticUpdates bool false
+            key SUEnableAutomaticChecks bool false
+            key SUEnableInstallerLauncherService bool false
+            ! plutil -extract SUEnableDownloaderService raw -o - "$P" > /dev/null 2>&1 || fail "Info.plist sets SUEnableDownloaderService"
+            key SUEnableSystemProfiling bool false
+            [[ "$SPARKLE_PUBLIC_KEY" =~ ^[A-Za-z0-9+/]{43}=$ ]] || fail "SPARKLE_PUBLIC_KEY is not a 44-character base64 key"
+            ! plutil -extract SUEnableJavaScript raw -o - "$P" > /dev/null 2>&1 || fail "Info.plist sets SUEnableJavaScript"
+            # Links are left out: macOS ignores a link's own mode, and ditto -x creates links with this step's umask 077
+            # (the 2026-10-20 dry run failed here on lrwx------ links inside Sparkle.framework, not on a file).
+            BAD=$(find "$V" ! -type l ! -perm -o+r -print -quit)
+            [ -z "$BAD" ] || fail "a file in the bundle lacks o+r: $BAD"
+            [ -z "$(find "$V" -type d ! -perm -o+x)" ] || fail "a directory in the bundle lacks o+x: $V"
+            [ -z "$(find "$V" -type f -perm -u+x ! -perm -o+x)" ] || fail "an executable in the bundle lacks o+x: $V"
+            [ -z "$(find "$V" ! -type l \( -perm -g+w -o -perm -o+w \))" ] || fail "a file in the bundle is writable by group or others: $V"
+            [ -z "$(find "$V" \( -perm -u+s -o -perm -g+s \))" ] || fail "a file in the bundle is setuid or setgid: $V"
+          }
           ditto -x -k "$T/out/$ZIP" "$T/check"
-          verify "$T/check/善解輸入法.app"
+          verify "$T/check/善解輸入法.app" ime
+          verify_sparkle "$T/check/善解輸入法.app"
           echo "verified $ZIP"
 
           # The installer (docs/contracts/s3c-installer.md section 3): the skeleton from `build`,
@@ -282,7 +458,7 @@ jobs:
           (cd "$T/out" && shasum -a 256 "$IZIP" > "$IZIP.sha256")
           mkdir -p "$T/check-installer"
           ditto -x -k "$T/out/$IZIP" "$T/check-installer"
-          verify "$T/check-installer/安裝善解輸入法.app"
+          verify "$T/check-installer/安裝善解輸入法.app" installer
           cmp -s "$T/check-installer/安裝善解輸入法.app/Contents/Resources/$ZIP" "$T/out/$ZIP" \
             || fail "the installer's bundled zip differs from $ZIP"
           echo "verified $IZIP"
@@ -291,6 +467,117 @@ jobs:
         if: always()
         run: security delete-keychain "$RUNNER_TEMP/signing.keychain-db" 2>/dev/null || true
 
+      # Dry runs and tags (docs/contracts/about-update.md section 2): the public key derived from the
+      # secret must equal the SUPublicEDKey of the zip just verified, or every update signed with this
+      # secret would be refused by the shipped app. The derivation is the Swift below, written here
+      # rather than taken from the repo or the build artifact; the key goes in on stdin and only the
+      # public half comes out. A dry run signs nothing with it.
+      - name: Check the Sparkle key pair
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          umask 077
+          fail() { echo "error: $*" >&2; exit 1; }
+          T="$RUNNER_TEMP"
+          mkdir -p "$T/edpub"
+          cat > "$T/edpub/edpub.swift" <<'SWIFT'
+          import CryptoKit
+          import Foundation
+          // generate_keys exports a new key as the base64 of its 32-byte Ed25519 seed.
+          let line = (readLine(strippingNewline: true) ?? "").trimmingCharacters(in: .whitespaces)
+          guard let seed = Data(base64Encoded: line), seed.count == 32,
+                let key = try? Curve25519.Signing.PrivateKey(rawRepresentation: seed) else {
+              FileHandle.standardError.write(Data("error: SPARKLE_PRIVATE_KEY is not the base64 of a 32-byte Ed25519 seed\n".utf8))
+              exit(1)
+          }
+          print(key.publicKey.rawRepresentation.base64EncodedString())
+          SWIFT
+          FROM_SECRET=$(cd "$T/edpub" && printf '%s\n' "$SPARKLE_PRIVATE_KEY" | swift edpub.swift)
+          IN_ZIP=$(plutil -extract SUPublicEDKey raw -expect string -o - "$T/check/善解輸入法.app/Contents/Info.plist")
+          [ "$FROM_SECRET" = "$IN_ZIP" ] || fail "SPARKLE_PRIVATE_KEY does not belong to the SUPublicEDKey in shanjie-$VERSION.zip"
+          echo "the Sparkle key pair matches"
+
+      # Two data files of the tagged commit, only read (never executed): the previous feed, whose items
+      # generate_appcast reads back so older versions keep their entries and signatures (absent before
+      # the first Sparkle release), and this tag's hand-written release notes, which the gate already
+      # required.
+      - name: Fetch the current appcast and the release notes (data only)
+        if: github.event_name == 'push'
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+          path: feed
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /appcast.xml
+            /docs/releases/${{ github.ref_name }}.md
+
+      # Tags only, after the signing keychain is gone. Sparkle's own generate_appcast from its official
+      # release (the version macos/Package.resolved pins; SHA-256 checked against the literal below,
+      # verified by main against GitHub's asset digest), never the build artifact or repo code. Its
+      # input folder holds the previous feed, shanjie-<V>.zip (the same bytes `publish` uploads) and
+      # the release notes as shanjie-<V>.md, embedded into the new item as markdown (Sparkle shows it
+      # in a text view: no web view, no remote resources, no JavaScript); the key goes to it on stdin.
+      # The app has SURequireSignedFeed, so the feed is signed too. --download-url-prefix: otherwise
+      # the enclosure URL would be built from SUFeedURL's folder. --maximum-versions 0 keeps every
+      # version, and --versions names the new one, so a fix for an older line is neither pruned nor
+      # skipped as older than the feed's newest.
+      - name: Sign the update feed
+        if: github.event_name == 'push'
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          umask 077
+          fail() { echo "error: $*" >&2; exit 1; }
+          T="$RUNNER_TEMP"
+          ZIP="shanjie-$VERSION.zip"
+          URL_PREFIX="https://github.com/Nanako0129/shanjie/releases/download/v$VERSION/"
+          mkdir -p "$T/sparkle-dl" "$T/sparkle" "$T/feed"
+          curl -fsSL --retry 3 -o "$T/sparkle-dl/Sparkle-2.10.0.tar.xz" \
+            https://github.com/sparkle-project/Sparkle/releases/download/2.10.0/Sparkle-2.10.0.tar.xz
+          echo "c2bf58aa8387266ac179357b1415d6f2635f044da8be41042af32425dae6da0c  $T/sparkle-dl/Sparkle-2.10.0.tar.xz" | shasum -a 256 -c -
+          tar -xJf "$T/sparkle-dl/Sparkle-2.10.0.tar.xz" -C "$T/sparkle"
+          GEN="$T/sparkle/bin/generate_appcast"
+          [ -x "$GEN" ] || fail "generate_appcast is not in Sparkle-2.10.0.tar.xz"
+          NOTES="$GITHUB_WORKSPACE/feed/docs/releases/$GITHUB_REF_NAME.md"
+          [ -s "$NOTES" ] || fail "docs/releases/$GITHUB_REF_NAME.md is missing or empty"
+          cp "$T/out/$ZIP" "$T/feed/$ZIP"
+          cp "$NOTES" "$T/feed/shanjie-$VERSION.md"
+          if [ -f "$GITHUB_WORKSPACE/feed/appcast.xml" ]; then cp "$GITHUB_WORKSPACE/feed/appcast.xml" "$T/feed/appcast.xml"; fi
+          printf '%s\n' "$SPARKLE_PRIVATE_KEY" | "$GEN" --ed-key-file - --download-url-prefix "$URL_PREFIX" \
+            --embed-release-notes --maximum-versions 0 --versions "$VERSION" "$T/feed"
+          unset SPARKLE_PRIVATE_KEY
+          F="$T/feed/appcast.xml"
+          cmp -s "$T/feed/$ZIP" "$T/out/$ZIP" || fail "the zip in the feed folder changed"
+          # The new item only (older items keep their own signatures): exactly one item with this
+          # enclosure URL, the zip's length, an EdDSA signature, this version and the embedded notes.
+          python3 -I - "$F" "$URL_PREFIX$ZIP" "$(stat -f %z "$T/out/$ZIP")" "$VERSION" <<'PY'
+          import sys
+          import xml.etree.ElementTree as ET
+          feed, url, length, version = sys.argv[1:5]
+          SP = "{http://www.andymatuschak.org/xml-namespaces/sparkle}"
+          items = [i for i in ET.parse(feed).getroot().iter("item")
+                   if i.find("enclosure") is not None and i.find("enclosure").get("url") == url]
+          if len(items) != 1:
+              sys.exit(f"error: appcast.xml has {len(items)} items with the enclosure {url}")
+          item = items[0]
+          enc = item.find("enclosure")
+          if enc.get("length") != length:
+              sys.exit(f"error: the new item's length is {enc.get('length')}, the zip is {length} bytes")
+          if not enc.get(SP + "edSignature"):
+              sys.exit("error: the new item has no EdDSA signature (does the app's SUPublicEDKey match the key?)")
+          if item.findtext(SP + "version") != version:
+              sys.exit("error: the new item's sparkle:version is not " + version)
+          notes = item.find("description")
+          if notes is None or notes.get(SP + "format") != "markdown" or not (notes.text or "").strip():
+              sys.exit("error: the new item has no embedded markdown release notes")
+          print("the new appcast item is complete")
+          PY
+          grep -qF '<!-- sparkle-signatures:' "$F" || fail "appcast.xml is not signed (SURequireSignedFeed would refuse it)"
+          cp "$F" "$T/out/appcast.xml"
+
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: signed
@@ -298,9 +585,9 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-  # The only job that writes: the GitHub release, then the cask in the tap (section 14.3). Tags
-  # only; a dry run never gets here. Rerunning it with the same artifact finishes a release whose
-  # cask bump failed.
+  # The only job that writes: the GitHub release, appcast.xml on main, then the cask in the tap
+  # (section 14.3). Tags only; a dry run never gets here. Rerunning it with the same artifact
+  # finishes a release whose cask bump failed.
   publish:
     needs: [build, sign]
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
@@ -337,6 +624,34 @@ jobs:
         with:
           name: signed
           path: ${{ runner.temp }}/signed
+
+      # Before anything is published (Syrtis's pattern, docs/contracts/about-update.md section 2): the
+      # new feed extends the tagged commit's appcast.xml. If main's has changed since (another release
+      # landed in between), publishing would drop that release's entry; stop while nothing is public.
+      # A rerun after this release's feed reached main finds main equal to the new feed and goes on.
+      - name: Require main's appcast to match the tagged commit
+        id: appcast
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # blob <ref>: the Git blob SHA of appcast.xml at <ref>, `absent` when there is none.
+          blob() {
+            local out rc=0
+            out=$(gh api "repos/$GITHUB_REPOSITORY/contents/appcast.xml?ref=$1" -q .sha 2>&1) || rc=$?
+            if [ "$rc" -eq 0 ]; then echo "$out"
+            elif grep -q 'HTTP 404' <<<"$out"; then echo absent
+            else echo "error: reading appcast.xml at $1: $out" >&2; return 1; fi
+          }
+          TAGGED=$(blob "$GITHUB_SHA")
+          MAIN=$(blob main)
+          [ -f "$RUNNER_TEMP/signed/appcast.xml" ] || { echo "error: the signed artifact has no appcast.xml" >&2; exit 1; }
+          NEW=$(git hash-object "$RUNNER_TEMP/signed/appcast.xml")
+          if [ "$MAIN" != "$TAGGED" ] && [ "$MAIN" != "$NEW" ]; then
+            echo "error: main's appcast.xml changed after $GITHUB_REF_NAME was tagged; regenerate the feed on top of it" >&2
+            exit 1
+          fi
+          echo "tagged=$TAGGED" >> "$GITHUB_OUTPUT"
 
       # A rerun of this job (same artifact) finds the release already there: creation is skipped
       # when both zips (input method and installer) are attached and both .sha256 assets are
@@ -379,6 +694,32 @@ jobs:
               --repo "$GITHUB_REPOSITORY" --title "善解 $VERSION" \
               --notes-file "$GITHUB_WORKSPACE/docs/releases/$GITHUB_REF_NAME.md" --latest="$LATEST"
           fi
+
+      # Checked again (main may have moved while the release was created), then written through the
+      # contents API with the blob SHA just read, so a change in between makes GitHub refuse the write
+      # (409) instead of overwriting it. Already there (a rerun): nothing to do. The installed apps
+      # read it from SUFeedURL (raw.githubusercontent.com, main).
+      - name: Publish the appcast to main
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAGGED: ${{ steps.appcast.outputs.tagged }}
+        run: |
+          set -euo pipefail
+          F="$RUNNER_TEMP/signed/appcast.xml"
+          NEW=$(git hash-object "$F")
+          rc=0
+          out=$(gh api "repos/$GITHUB_REPOSITORY/contents/appcast.xml?ref=main" -q .sha 2>&1) || rc=$?
+          if [ "$rc" -eq 0 ]; then MAIN="$out"
+          elif grep -q 'HTTP 404' <<<"$out"; then MAIN=absent
+          else echo "error: reading main's appcast.xml: $out" >&2; exit 1; fi
+          if [ "$MAIN" = "$NEW" ]; then echo "main already has this appcast"; exit 0; fi
+          [ -n "$TAGGED" ] && [ "$MAIN" = "$TAGGED" ] \
+            || { echo "error: main's appcast.xml changed after $GITHUB_REF_NAME was tagged; regenerate the feed on top of it" >&2; exit 1; }
+          ARGS=(-X PUT "repos/$GITHUB_REPOSITORY/contents/appcast.xml" -f branch=main
+                -f message="chore(release): appcast for $GITHUB_REF_NAME" -f content="$(base64 < "$F" | tr -d '\n')")
+          [ "$MAIN" = absent ] || ARGS+=(-f sha="$MAIN")
+          gh api "${ARGS[@]}" > /dev/null
+          echo "appcast.xml for $GITHUB_REF_NAME is on main"
 
       # No secret in scope while repository scripts run. The hash is the first field of the
       # .sha256 file; render-cask.sh checks both values' format again.

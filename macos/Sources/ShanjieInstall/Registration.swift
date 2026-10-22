@@ -64,9 +64,10 @@ public enum Registration {
     }
 
     /// installer-v2.md section 9.2 item 1. An unknown mode (first install) or an enabled mode of an
-    /// earlier version needs the whole sequence; otherwise nothing is changed.
-    public static func decide(modeListed: Bool, accepted: Bool, legacyEnabled: Bool) -> Decision {
-        if !modeListed || legacyEnabled { return .fullFlow }
+    /// earlier version needs the whole sequence; otherwise nothing is changed. system-install.md
+    /// section 2.4 item 4: `moved` (the install changed location) always takes the whole sequence.
+    public static func decide(modeListed: Bool, accepted: Bool, legacyEnabled: Bool, moved: Bool = false) -> Decision {
+        if moved || !modeListed || legacyEnabled { return .fullFlow }
         return accepted ? .skipDone : .skipNotAccepted
     }
 
@@ -74,9 +75,36 @@ public enum Registration {
         let all = inputSources(bundleID: bundleID, includeAllInstalled: true)
         let legacy: Set<String> = ["\(bundleID).standard", "\(bundleID).eten"]
         return State(
-            modeListed: all.contains { inputModeID($0) == "\(bundleID).zhuyin" },
+            modeListed: modeListed(in: all, bundleID: bundleID),
             accepted: isAccepted(bundleID: bundleID),
             legacyEnabled: all.contains { inputModeID($0).map(legacy.contains) ?? false && isEnabled($0) })
+    }
+
+    /// Whether the system lists the bundle ID's input mode (read only, one read). The installer reads
+    /// it once at its welcome screen, before copying anything (system-install.md section 2.2).
+    public static func modeListed(bundleID: String) -> Bool {
+        modeListed(in: inputSources(bundleID: bundleID, includeAllInstalled: true), bundleID: bundleID)
+    }
+
+    private static func modeListed(in sources: [TISInputSource], bundleID: String) -> Bool {
+        sources.contains { inputModeID($0) == "\(bundleID).zhuyin" }
+    }
+
+    /// system-install.md section 2.2 (revision of 2026-10-21): whether the system had Shanjie before, read at the welcome screen.
+    /// TIS stops listing the input method within seconds after its bundle is removed (measured on a VM, macOS 26.6.2: listed right
+    /// after `sudo rm -rf`, gone 5 s later), while the user's enabled list keeps the entry that System Settings shows. So either
+    /// counts: the listing, or an entry with this bundle ID in the enabled lists of `com.apple.inputsources`
+    /// (`AppleEnabledThirdPartyInputSources`, where macOS 26 keeps third-party input methods) or `com.apple.HIToolbox`
+    /// (`AppleEnabledInputSources`).
+    public static func listedOrEnabled(bundleID: String) -> Bool {
+        if modeListed(bundleID: bundleID) { return true }
+        let lists = [("com.apple.inputsources", "AppleEnabledThirdPartyInputSources"), ("com.apple.HIToolbox", "AppleEnabledInputSources")]
+        return lists.contains { domain, key in enabled(UserDefaults(suiteName: domain)?.array(forKey: key), bundleID: bundleID) }
+    }
+
+    /// Whether an enabled-sources list (an array of dictionaries, as the system writes them) has an entry with this bundle ID.
+    public static func enabled(_ entries: [Any]?, bundleID: String) -> Bool {
+        (entries ?? []).contains { ($0 as? [String: Any])?["Bundle ID"] as? String == bundleID }
     }
 
     /// How long `run` re-reads a mode that is not listed, before taking it for a first install.
@@ -101,8 +129,9 @@ public enum Registration {
     /// `fullFlow` are injected only by tests, to count the calls that would change something.
     /// A mode that is not listed is re-read for up to 2 s first (the system may list it a moment
     /// late right after the files were swapped; not measured), so a first install waits that long.
+    /// With `moved` there is no re-read: the whole sequence runs whatever the state.
     public static func run(
-        bundleURL: URL, bundleID: String, defaults: UserDefaults,
+        bundleURL: URL, bundleID: String, defaults: UserDefaults, moved: Bool = false,
         readState: ((String) -> State)? = nil,
         fullFlow: ((URL, String, UserDefaults) -> Result)? = nil,
         pause: (TimeInterval) -> Void = Registration.pause
@@ -110,12 +139,12 @@ public enum Registration {
         let read = readState ?? Self.readState(bundleID:)
         var state = read(bundleID)
         var waited: TimeInterval = 0
-        while !state.modeListed, waited < listedRecheckLimit {
+        while !moved, !state.modeListed, waited < listedRecheckLimit {
             pause(listedRecheckInterval)
             waited += listedRecheckInterval
             state = read(bundleID)
         }
-        switch decide(modeListed: state.modeListed, accepted: state.accepted, legacyEnabled: state.legacyEnabled) {
+        switch decide(modeListed: state.modeListed, accepted: state.accepted, legacyEnabled: state.legacyEnabled, moved: moved) {
         case .skipDone: return Result(outcome: .done, skipped: true)
         case .skipNotAccepted: return Result(outcome: .notAccepted, skipped: true)
         case .fullFlow: return (fullFlow ?? Self.fullFlow(bundleURL:bundleID:defaults:))(bundleURL, bundleID, defaults)
@@ -164,17 +193,44 @@ public enum Registration {
             return result
         }
 
-        // Carry over an ETen-only setup from the two-mode versions, unless a layout was chosen.
-        let enabled = { (id: String) in sources.contains { inputModeID($0) == id && isEnabled($0) } }
-        if defaults.string(forKey: "layout") == nil,
-           enabled("\(bundleID).eten"), !enabled("\(bundleID).standard") {
-            defaults.set("eten", forKey: "layout")
-        }
+        // Kept for `shanjie install`, which runs sandboxed and so writes the container's domain; the
+        // installer also calls it before the files are swapped (app-sandbox.md section 2.7).
+        carryOverEten(enabledModeIDs: Set(sources.filter(isEnabled).compactMap(inputModeID)), bundleID: bundleID, defaults: defaults)
         let legacy: Set<String> = ["\(bundleID).standard", "\(bundleID).eten"]
         for source in sources where inputModeID(source).map(legacy.contains) ?? false {
             if TISDisableInputSource(source) != noErr { result.legacyDisableFailed = true }
         }
         return result
+    }
+
+    /// Carry over an ETen-only setup from the two-mode versions: no layout chosen yet, and of the two
+    /// earlier modes only `.eten` is enabled.
+    public static func carriesOverEten(layout: String?, enabledModeIDs: Set<String>, bundleID: String) -> Bool {
+        layout == nil && enabledModeIDs.contains("\(bundleID).eten") && !enabledModeIDs.contains("\(bundleID).standard")
+    }
+
+    /// Writes `layout=eten` when `carriesOverEten`; never rewrites a chosen layout.
+    /// app-sandbox.md section 2.7: the installer calls this before the files are swapped, with the
+    /// state it read at its start, while the unsandboxed old version is installed and the container
+    /// does not exist yet, so the first sandboxed launch moves the value along with the preferences.
+    /// `synchronize` hands the value to cfprefsd; the installer then waits until the file on disk
+    /// holds it (`InstallerFlow.copy`).
+    /// When the container already exists (upgrading from a sandboxed version), a value written here
+    /// from outside is never read: the input method reads its container's domain. Nothing is done
+    /// about it: by then the input method already has its own `layout`, or the user has used the
+    /// sandboxed version, so there is nothing left to carry over.
+    /// Returns whether it wrote the value.
+    @discardableResult
+    public static func carryOverEten(enabledModeIDs: Set<String>, bundleID: String, defaults: UserDefaults) -> Bool {
+        guard carriesOverEten(layout: defaults.string(forKey: "layout"), enabledModeIDs: enabledModeIDs, bundleID: bundleID) else { return false }
+        defaults.set("eten", forKey: "layout")
+        defaults.synchronize()
+        return true
+    }
+
+    /// The input mode IDs of this bundle ID that are enabled (read only).
+    public static func enabledModeIDs(bundleID: String) -> Set<String> {
+        Set(inputSources(bundleID: bundleID, includeAllInstalled: true).filter(isEnabled).compactMap(inputModeID))
     }
 
     /// Measured 2026-10-04: before the first log out after registration, both enable calls return

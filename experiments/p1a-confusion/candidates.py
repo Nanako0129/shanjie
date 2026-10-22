@@ -29,7 +29,7 @@ def main():
     rows = rows_of(sorted(glob.glob(os.path.join(ROOT, "eval", "dev", "*.txt"))))[:a.dev] if a.dev else rows_of([a.rows])
     lm = L.BigramLM(a.lm)
     base = ime.Lexicon(os.path.join(ROOT, "data", "lexicon", "mcbpmf-data.txt"), overlay=ime.OVERLAYS)
-    ov = {l.split("\t")[1] for l in open(os.path.join(ROOT, "data", "lexicon", "overlay-add.tsv"), encoding="utf-8")}
+    ov = ime.capping_words()
     lex = L.cap_overlay(base, ov, lm)
     if a.equalize:
         lex = p1a.equalize(lex, tuple(a.equalize.split(",")))

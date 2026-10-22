@@ -15,9 +15,9 @@
 
 | 檔案 | 現行 Release | 內容 | 由什麼產生 |
 |---|---|---|---|
-| `bigram.sjlm` | `model-v5` | 詞與詞相鄰出現的次數（SJLM0001 格式）；含少量用來辨識來源的指紋條目（`docs/data-files.md`、`docs/contracts/model-v4.md` §0） | 語料計數 → `tools/build_lm.py` → 加指紋 |
-| `classes.sjc` | `classes-v3` | 512 個詞類、每個詞的類別與發射機率、類別接續機率、μ = 0.8（SJCL0001 格式；`tools/build_classes.py` 檔頭、`docs/contracts/s2k-word-classes.md` §4.1） | 對計數做詞類分群 → `tools/build_classes.py` |
-| `tinylm.sjtl` | `tinylm-v3` | 1,440 萬參數的字元語言模型，6 層、d 384、字表 9,714 字，int8；檔頭帶聊天與書面各一組融合參數 α、τ、δ（SJTL0002；`docs/releases/tinylm-v3.md`、`experiments/s7a-tinylm/export_sjtl.py` 檔頭） | 訓練 → 匯出 → 調融合參數 |
+| `bigram.sjlm` | `model-v6`（旁邊另有 KN 側檔 `kn.sjkn`，`kn-v1`） | 詞與詞相鄰出現的次數（SJLM0001 格式）；含少量用來辨識來源的指紋條目（`docs/data-files.md`、`docs/contracts/model-v4.md` §0） | 語料計數 → `tools/build_lm.py` → 加指紋 |
+| `classes.sjc` | `classes-v5` | 512 個詞類、每個詞的類別與發射機率、類別接續機率、μ = 0.2（classes-v4 以前是 0.8；SJCL0001 格式；`tools/build_classes.py` 檔頭、`docs/contracts/s2k-word-classes.md` §4.1） | 對計數做詞類分群 → `tools/build_classes.py` |
+| `tinylm.sjtl` | `sj-sr-6-14m`（會意 SJ-SR-6-14M；SJTL0004，檔頭另記 kn-v1 的雜湊；權重同 `tinylm-v5`，書面融合參數重選） | 1,440 萬參數的字元語言模型，6 層、d 384、字表 9,714 字，int8；檔頭帶聊天與書面各三組（保守、標準、積極）融合參數 α、τ、δ（SJTL0003；`docs/releases/tinylm-v4.md`、`tinylm-v3.md`、`experiments/s7a-tinylm/export_sjtl.py` 檔頭） | 訓練 → 匯出 → 調融合參數 |
 
 ### 1.2 三個檔案怎麼互相綁定
 
@@ -34,8 +34,9 @@
 |---|---|---|
 | 詞類表 → 模型 | `classes.sjc` 檔頭記模型的 SHA-256；缺檔、配到別的模型、內容不對，載入都回 3 | 重建模型就要重建詞類表（`docs/data-files.md`「現在用的檔案」） |
 | 語意校正模型 → 模型 | `tinylm.sjtl` 檔頭記調參時用的模型的 SHA-256；不符時核心拒絕載入、只用 n-gram（`docs/data-files.md`） | 重建模型就要重新匯出、重新調參 |
-| 語意校正模型 → 詞類表 | **沒有檢查**，只在 α、τ、δ 的調法上依賴：它們是在 model-v5＋classes-v3 上調的 | 只換詞類表也要重調，雜湊攔不住這種錯配，只能靠 `docs/data-files.md` 的版本表 |
-| 語意校正 → Kneser–Ney 側檔 | `--tinylm` 要求 `kn.sjkn` 不能開（`experiments/s7a-tinylm/README.md`「S7c-1」）；〔推論〕原因是調參時沒有開，來源只寫了要求 | 之後若開 KN，融合參數要重調（見 §9） |
+| 語意校正模型 → 詞類表 | **沒有檢查**，只在 α、τ、δ 的調法上依賴：聊天三檔是在 model-v6＋classes-v4＋kn-v1 上調的（tinylm-v5），書面三檔在 model-v6＋classes-v5＋`sj-cx-1-7.7m` 上重選（書面有表時 KN 關；`sj-sr-6-14m`） | 重新分群也要重調，雜湊攔不住這種錯配，只能靠 `docs/data-files.md` 的版本表；只改 μ 而且開著出貨的小模型量過，可以沿用（classes-v5 沿用 tinylm-v5） |
+| 語意校正 → trigram 表 | **沒有檢查**：`sj-sr-6-14m` 的書面三檔是在 `sj-cx-1-7.7m` 上選的，檔頭不記表的雜湊 | 換 trigram 表（下一個 `sj-cx-…`）時，開著出貨的小模型重量書面；沒量過就重調書面三檔、發下一個 `sj-sr-…` |
+| 語意校正 → Kneser–Ney 側檔 | SJTL0004 記調參時用的 `kn.sjkn` 的 SHA-256（全 0＝沒開 KN 時調的）；核心要求載入的側檔狀態和它相同，否則拒絕載入（`docs/contracts/model-v6.md` §2.7） | 換側檔就要重新調參、發新的 `tinylm-v…` |
 
 ### 1.3 改了什麼，要發哪些新 Release
 
@@ -43,9 +44,10 @@
 
 | 改了什麼 | 要發 |
 |---|---|
-| 語料、計數或模型格式 | `model-v6`＋`classes-v4`＋下一個 `tinylm-v…` |
-| 只重新分群 | `classes-v4`＋下一個 `tinylm-v…` |
-| 小模型的訓練、大小、匯出格式或融合參數 | 下一個 `tinylm-v…`（`tinylm-v2`、`tinylm-v3` 都只換融合參數） |
+| 語料、計數或模型格式 | 下一個 `model-v…`＋下一個 `classes-v…`＋下一個 `kn-v…`＋下一個 `tinylm-v…` |
+| 只重新分群 | 下一個 `classes-v…`＋下一個 `tinylm-v…` |
+| 只改詞類權重 μ（開著出貨的小模型量過） | 下一個 `classes-v…`（classes-v5），小模型沿用 |
+| 小模型的訓練、大小、匯出格式或融合參數 | 下一個 `tinylm-v…`（`tinylm-v2`、`tinylm-v3` 都只換融合參數；`tinylm-v4` 換檔頭格式） |
 
 ## 2. 語料與輸入
 
@@ -220,18 +222,19 @@ classes-v3 分群在 188 約花多少時間：沒有紀錄（model-v5 README 只
 
 ### 5.4 匯出成 `tinylm.sjtl`（int8）
 
-指令（`experiments/s7a-tinylm/export_sjtl.py` 檔頭、`docs/releases/tinylm-v3.md`「產生」）：
+指令（`experiments/s7a-tinylm/export_sjtl.py` 檔頭、`docs/releases/tinylm-v4.md`「產生」）：
 
 ```sh
 python3 experiments/s7a-tinylm/export_sjtl.py --npz ~/.cache/shanjie/work/s7a/tinylm-M.npz \
   --out <輸出>.sjtl --type int8 --ngram-model data/lm/bigram.sjlm \
-  --chat 0.3 2 0.25 --formal 0.7 1 2
+  --chat 0.3 2 0.25 --formal 0.7 1 2 \
+  --levels 1 2 3 0.3 2 0.25 0.7 0.5 2 0.5 1 0.25
 ```
 
-- 格式 SJTL0001（檔頭 100 bytes：magic、版本、權重型別、形狀、聊天與書面各一組 α、τ、**32 bytes 的 n-gram 模型 SHA-256**）；給 δ 時寫 SJTL0002（再多 16 bytes：聊天 δ、書面 δ）。δ 要兩邊都給或都不給（`export_sjtl.py`、`docs/contracts/s7c-core-tinylm.md` §2.1、`s7c2c-delta.md` §2.1）。
+- 格式 SJTL0001（檔頭 100 bytes：magic、版本、權重型別、形狀、聊天與書面各一組 α、τ、**32 bytes 的 n-gram 模型 SHA-256**）；給 δ 時寫 SJTL0002（再多 16 bytes：聊天 δ、書面 δ）；再給 `--levels` 時寫 SJTL0003（再多 96 bytes：聊天保守、聊天積極、書面保守、書面積極各一組 α、τ、δ，檔頭 212 bytes）。δ 要兩邊都給或都不給（`export_sjtl.py`、`docs/contracts/s7c-core-tinylm.md` §2.1、`s7c2c-delta.md` §2.1）。
 - 二維權重每列對稱 int8 加一個 float32 縮放（`latency.quantize_int8`），載入時還原成 float32；一維向量是 float32（`export_sjtl.py`）。
 - `--ngram-model` 讀的是「加過指紋的發佈版模型」，它的雜湊被寫進檔頭，這就是和 n-gram 的綁定（§1.2）。
-- 重現同一個檔：`tinylm-v3` 用同一個指令匯出，雜湊必須是 `7e73ef67…12ce`，14,638,224 bytes；它和 `tinylm-v2` 的檔只差 9 個 byte（`docs/contracts/s7h-tinylm-v3.md` §2.1）。
+- 重現同一個檔：`tinylm-v4` 用上面的指令（含 `--levels`）匯出，SHA-256 必須是 `7b39c7529071d97fa911380ce96aad93f9f89b69ef554e383eacacca425c0865`，14,638,320 bytes；它和 `tinylm-v3` 的檔只差檔頭（116 變 212 bytes，多 96 bytes），字表與張量逐位元組相同（`docs/releases/tinylm-v4.md`）。`tinylm-v3`（不帶 `--levels`）的雜湊是 `7e73ef67…12ce`，14,638,224 bytes，和 `tinylm-v2` 的檔只差 9 個 byte（`docs/contracts/s7h-tinylm-v3.md` §2.1）。
 - int8 夠用：M 的權重 int8 對 float32 在 12 格都沒有「淨值為負而且 p < 0.05」（研究紀錄 2026-10-11 S7b）。Rust 的 int8 路徑與 numpy 逐列相同（最大 |ΔLL| 約 1.6e-5，門檻 1e-4；研究紀錄 2026-10-11 S7c-1）。
 
 ### 5.5 融合參數 α、τ、δ：怎麼調、每一版怎麼選的
@@ -250,13 +253,16 @@ python3 experiments/s7a-tinylm/export_sjtl.py --npz ~/.cache/shanjie/work/s7a/ti
 | `tinylm-v1` | 0.7／2／（無） | 0.7／2／（無） | S7a：cvtune＋wikitune 合計 top1 最高，同分取 τ 較小、再取 α 較小；選好凍結。S7d 只用和訓練文字沒有整句重疊的調參列重選，M 選到的值完全不變 | `s7a-tinylm.md` §2.3、§8；`s7d-tune-overlap.md`；研究紀錄 2026-10-11 S7a、S7d |
 | `tinylm-v2` | 0.2／1／0.25 | 0.7／1／2 | S7e：在 cvtune＋wikitune 合計（6,618 列）上，照「改對 − 10 × 改壞」選；`fusegrid.py --break-weight 10`。「改壞 1 句 ≈ 改對 10 句」是使用者的權重 | `s7e-fewer-breaks.md` §2.2；研究紀錄 2026-10-12 S7e；`docs/releases/tinylm-v2.md` |
 | `tinylm-v3` | **0.3／2／0.25** | 0.7／1／2（不變） | E2：計分改 1:1 的「改對 − 改壞」、改壞率 ≤ 0.5%；在**維護者自己的聊天訊息**建的調參期（5,761 列）上選，先凍結（`judge.py --select R3p --tuning chatclause --weight 1 --cap 0.005`；`R3p` 只是名稱（輸出那一列與 rowstats 檔名的前綴），值由 `--tuning`、`--weight`、`--cap` 選出），之後只在判斷期 2026-08（6,559 列）算一次 | `e2-chat-eval.md`；`s7h-tinylm-v3.md` §0；研究紀錄 2026-10-13「E2 的新調參期與 R3′」「E2 判斷期（2026-08）的表與結論」 |
+| `tinylm-v4` | 0.3／2／0.25（同 v3） | 0.7／1／2（同 v3） | 標準值不變，另加保守與積極兩檔（SJTL0003）。保守：聊天 1／2／3、書面 0.7／0.5／2；積極：聊天 0.3／2／0.25（選出的 0.5／1／0 在 `lytune` 改對 236 < 改壞 374，沒過出貨門檻，照規則寫成標準值）、書面 0.5／1／0.25。聊天用維護者的聊天訊息建的調參集，書面用 cvtune＋wikitune，依各檔的改壞上限或權重選值，再過契約 §4.3 的門檻 | `rerank-strength.md` §11；`docs/releases/tinylm-v4.md`；研究紀錄 2026-10-14「語意校正強度修訂一」 |
+| `tinylm-v5` | 0.3／2／0.25（同 v4） | 1／1／3 | model-v6 §2.7：換 model-v6＋kn-v1 後在新候選上重選。聊天照 E2 的 1:1＋改壞上限（chatclause 調參期）；書面照「改對 − 10 × 改壞」（`--weight 10`），那時書面還沒有三元表。保守：聊天 1／2／3、書面 1／1／4；積極＝標準 | `model-v6.md` §2.7；研究紀錄 2026-10-15；`docs/releases/tinylm-v5.md` |
+| `sj-sr-6-14m` | 0.3／2／0.25（同 v5） | **0.7／2／1** | 只重選書面：在現在的書面解碼器（三元表、KN 關）上 1:1＋改壞上限選，篩選後在沒看過的 wikijudge2 上確認（對出貨 +39／−11，改壞率 0.35%）。保守 1／1／4（同 v5）、積極＝標準；聊天三檔同 v5 | `rerank-formal.md` §8–§10；研究紀錄 2026-10-17；`docs/releases/sj-sr-6-14m.md` |
 
 注意事項：
 
-- **v2、v3 與 v1 的權重相同**（同一個 `tinylm-M.npz`），只是檔頭的融合參數不同；v3 與 v2 的檔只差檔頭裡聊天的 α、τ（9 個 byte）（`docs/releases/tinylm-v2.md`、`tinylm-v3.md`）。所以換融合參數不需要重新訓練，只要重新匯出。
+- **v2、v3、v4 與 v1 的權重相同**（同一個 `tinylm-M.npz`），只是檔頭的融合參數不同；v3 與 v2 的檔只差檔頭裡聊天的 α、τ（9 個 byte）（`docs/releases/tinylm-v2.md`、`tinylm-v3.md`）。所以換融合參數不需要重新訓練，只要重新匯出。
 - v3 的聊天值是在維護者私人訊息建的評測集上選的（檔案裡沒有任何訊息的文字，評測集不公開）。**repo 裡只有選出的值、判斷用的程式（`experiments/e2-chateval/judge.py`）與數字，沒有那份評測集**，所以別人無法用 repo 重選這三個數字（`docs/releases/tinylm-v3.md`、`CLAUDE.md`「私有資料」）。
 - 判斷期用過就退役，下一次要用新的月份（`e2-chat-eval.md` §2.1 的順序）。
-- 融合參數是在 model-v5＋classes-v3 上調的；換 n-gram 或詞類表就要重調（§1.2）。
+- 融合參數是在出貨的 n-gram 上調的（tinylm-v4 以前是 model-v5＋classes-v3，tinylm-v5 是 model-v6＋classes-v4＋kn-v1、KN 開著；`sj-sr-6-14m` 的書面三檔是 model-v6＋classes-v5＋`sj-cx-1-7.7m`、KN 關）；換 n-gram、詞類表、KN 側檔或 trigram 表就要重量或重調（§1.2）。
 - v3 判斷期的結果：聊天改對 125／改壞 16、淨值 +109、改壞率 0.24%（`docs/releases/tinylm-v3.md`）。
 
 ### 5.6 試過、沒有出貨的方向
@@ -281,7 +287,7 @@ python3 experiments/s7a-tinylm/export_sjtl.py --npz ~/.cache/shanjie/work/s7a/ti
 | 規模 | 模型 < 100 MB；每一批計數 < 8 小時、記憶體 < 48 GB（model-v5 的記憶體沒有量）；每鍵延遲照既有的 perf 測試 | model-v5 契約 §3.5 |
 | 指紋核對 | 見 §3.3 | model-v4 契約 §2、model-v5 契約 §3.6 |
 | golden | 所有依模型的 golden 用 Python 參考實作重產，Rust 逐位元組相同；`sp-predict.txt` 照它的程序 | model-v5 契約 §2.5 PR 2；`docs/data-files.md` |
-| 保留集 `eval/holdout/` | 只在一片收尾時由 **fresh verifier** 跑一次、只回數字：基準與新版各跑一次 `--set holdout --rowstats`（寫到它自己的暫存目錄、檔內只能有 `[0-9\t\n]`），再跑 `tools/evalstats.py compare`，只回那一行表格，然後刪掉兩個 rowstats。其他時候不讀、不用來調參 | `CLAUDE.md`「評測與資料」 |
+| 保留集 `eval/holdout/` | 只在推 `v*` tag 前由 **fresh verifier** 跑一次（2026-10-18 起；之前是每片收尾時）、只回數字：基準與新版各跑一次 `--set holdout --rowstats`（寫到它自己的暫存目錄、檔內只能有 `[0-9\t\n]`），再跑 `tools/evalstats.py compare`，只回那一行表格，然後刪掉兩個 rowstats。其他時候不讀、不用來調參 | `CLAUDE.md`「評測與資料」 |
 | 私人資料 | 使用者的聊天評測集、Discord 調參集由維護者（main）跑，只貼表格數字；agent 一律不讀。2026-10-13 起重運算不在 Mac 上跑，私人評測集可以放 188 或 Colab，搬過去要核對雜湊、只用來評測 | `CLAUDE.md`「評測與資料」 |
 | 語意校正專屬 | 判斷期淨值 > 0、改壞率點估計 ≤ 0.5%、公開與守門集合沒有「改對 < 改壞而且 p < 0.05」的格；保留集在建 Release 之前跑一次 | `s7h-tinylm-v3.md` §0、§3 |
 | 合併關卡 | 本地 `/code-review` 沒有未處置的問題、fresh `pilotfish:verifier` CONFIRMED、CI 全綠，merge commit（repo 未滿 100 顆星） | `CLAUDE.md`「一片工作的流程」第 4 項 |
@@ -293,7 +299,7 @@ python3 experiments/s7a-tinylm/export_sjtl.py --npz ~/.cache/shanjie/work/s7a/ti
 
 1. **PR 1（不換檔）**：契約、`docs/releases/<tag>.md` 說明檔、研究紀錄；本地驗收（§6）通過後開，`/code-review`、fresh verifier、CI 全綠後 merge。保留集在這個階段、**建 Release 之前**跑（`s7h-tinylm-v3.md` §2.1）。
 2. **建 Release（對外動作，先問使用者）**：指令、核對步驟與規則（資料類 Release 不標 Latest、上傳前後用說明檔的雜湊核對、說明檔不能留草稿標記）只寫在 `docs/releases/README.md`（`CLAUDE.md`「發版」），照那裡做，這裡不另抄一份。
-3. **PR 2（換引用）**：同一個 PR 更新 `docs/data-files.md`「換版時同一個 PR 更新」那一串：雜湊檔（`data/*.sha256`）、CI 兩個 job 與 `release.yml` 的下載、`cli/tests/golden.rs` 的雜湊與訊息、`core/tests/engine_*.rs` 的缺檔訊息、`macos/Tests/ShanjieKitTests/Support.swift`、`scripts/build-app.sh`、README、CONTRIBUTING、`docs/verification.md`、`LICENSES/data.md`、`docs/PLAN.md` 的模型檔那一條與 `docs/data-files.md` 本身；換 `tinylm.sjtl` 時另外照 `docs/releases/README.md`，融合參數有變時要重量 selftest 的那一句（`Selftest.rerankRowStandard` 等）；依模型的 golden 重產。
+3. **PR 2（換引用）**：同一個 PR 更新 `docs/data-files.md`「換版時同一個 PR 更新」那一串：雜湊檔（`data/*.sha256`）、CI 的 `scripts/fetch-models.sh` 與 `release.yml` 的下載、`cli/tests/golden.rs` 的雜湊與訊息、`core/tests/engine_*.rs` 的缺檔訊息、`macos/Tests/ShanjieKitTests/Support.swift`、`scripts/build-app.sh`、README、CONTRIBUTING、`docs/verification.md`、`LICENSES/data.md`、`docs/PLAN.md` 的模型檔那一條與 `docs/data-files.md` 本身；換 `tinylm.sjtl` 時另外照 `docs/releases/README.md`，融合參數有變時要重量 selftest 的那一句（`Selftest.rerankRowStandard` 等）；依模型的 golden 重產。
 4. **舊 Release**：保留，可以回到那一版；model-v3 與 classes-v1 是依 `docs/contracts/model-v4.md` §4 第 4 步的條件移除的例外（`docs/data-files.md`）。
 5. **換檔順序**：先把新雜湊合進 main 會讓 CI 拿舊檔對新雜湊而失敗，所以雜湊檔和 CI 下載在**同一個切換的 PR** 裡改；第一次加的新檔沒有人讀，雜湊檔可以和說明檔一起先進 main（`docs/releases/README.md`「雜湊檔什麼時候改」）。
 

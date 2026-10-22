@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Decides whether ci.yml's macOS jobs have anything to test. Reads the changed paths on stdin, one
-# per line, and prints `run=true` unless every path is documentation or the website, which no build
-# or test reads. LICENSES/ is bundled into the app (scripts/build-app.sh), so it always counts.
+# Decides whether ci.yml's test jobs (macOS and Linux) have anything to test. Reads the changed paths on stdin, one
+# per line, and prints `run=true` unless every path is documentation, the website or a cross-version
+# benchmark result (eval/bench/results/, read only by `tools/bench.py`, which CI never runs), which no
+# build or test reads. LICENSES/ is bundled into the app (scripts/build-app.sh), so it always counts.
 # No input means run: an empty or unreadable diff never skips the tests.
 #
 #   git diff --name-only BASE...HEAD | scripts/ci-changes.sh >> "$GITHUB_OUTPUT"
@@ -14,7 +15,7 @@ while IFS= read -r f; do
   seen=true
   case "$f" in
     LICENSES/*) run=true ;;
-    docs/* | site/* | scripts/deploy-site.sh | *.md) ;;
+    docs/* | site/* | scripts/deploy-site.sh | *.md | eval/bench/results/*) ;;
     *) run=true ;;
   esac
 done

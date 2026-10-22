@@ -2,6 +2,7 @@
 //! Port of experiments/sp/predict.py (units, compatibility, Index) and predict3.py (reference, order_s);
 //! the Python code is ground truth, scores come from `Lm::word` unchanged.
 
+use crate::digits::DigitTable;
 use crate::lm::{CappedLexicon, Lm};
 use std::collections::{HashMap, HashSet};
 use std::cmp::Ordering;
@@ -254,6 +255,99 @@ pub fn predict(idx: &Index, lm: &Lm, lam: f64, v: &str, units: &[Unit], mode: Mo
         .map(|(e, s, succ)| {
             let r = &idx.pool[idx.off[e.rd as usize] as usize..idx.off[e.rd as usize + 1] as usize];
             (e.word.to_string(), s, succ, r.iter().map(|&i| idx.names[i as usize].to_string()).collect())
+        })
+        .collect()
+}
+
+/// The words compatible (prefix reading) with `units`, one entry per word in bucket order: (word, score, model id). The first compatible
+/// entry of a word is its best, so the score is the word's best compatible lp (predict3.reference of the Python baseline).
+pub fn compat_words<'i>(idx: &'i Index, units: &[Unit]) -> Vec<(&'i str, f64, Option<u32>)> {
+    let Some(bucket) = units.first().and_then(|u| idx.by_prefix.get(u.chars.as_slice())) else { return Vec::new() };
+    let mut seen = HashSet::new();
+    let mut out = Vec::new();
+    for &i in bucket {
+        let e = &idx.ents[i as usize];
+        let syls = &idx.pool[idx.off[e.rd as usize] as usize..idx.off[e.rd as usize + 1] as usize];
+        if compat_prefix(units, syls, &idx.syls) && seen.insert(e.wix) {
+            out.push((e.word, e.lp, (e.wid != u32::MAX).then_some(e.wid)));
+        }
+    }
+    out
+}
+
+/// What the row of the digit context needs of a word when no syllable is unfinished: its best entry (`lex.by_word` of the baseline).
+pub struct DigitWord {
+    lp: f64,
+    rd: u32,
+    wlen: u32,
+    wid: Option<u32>,
+    reading: Vec<String>,
+}
+
+/// The best entry of each word of a set (digits.md A.3.5), built once per index and table.
+pub struct DigitWords(HashMap<String, DigitWord>);
+
+impl Index<'_> {
+    /// The first entry in the index order (highest score, then word length, reading, word) of every word in `words` that has one.
+    pub fn digit_words(&self, words: &HashSet<&str>) -> DigitWords {
+        let mut out: HashMap<String, DigitWord> = HashMap::new();
+        for e in &self.ents {
+            if words.contains(e.word) && !out.contains_key(e.word) {
+                let r = &self.pool[self.off[e.rd as usize] as usize..self.off[e.rd as usize + 1] as usize];
+                let reading = r.iter().map(|&i| self.names[i as usize].to_string()).collect();
+                out.insert(e.word.to_string(), DigitWord { lp: e.lp, rd: e.rd, wlen: e.wlen, wid: (e.wid != u32::MAX).then_some(e.wid), reading });
+            }
+        }
+        DigitWords(out)
+    }
+}
+
+/// The prediction row after digits (digits.md A.3.5): (word, score, reading), best first, at most `limit`. `v` is the run's history word,
+/// `lam` the profile's lambda. With units (an unfinished syllable): the candidates of `predict` (compatibility, buckets, dedupe, order),
+/// scored `lam * log10 P(w | v, D) + (1 - lam) * lp`, the successor layer (N(v,D->w) > 0 or N(D->w) > 0) first. Without units: the words of
+/// the successor layer that the lexicon has, scored `log10 P(w | v, D)` alone, ordered the same way.
+pub fn predict_digits(idx: &Index, lm: &Lm, table: &DigitTable, words: &DigitWords, lam: f64, v: &str, units: &[Unit], limit: usize) -> Vec<(String, f64, Vec<String>)> {
+    if units.is_empty() {
+        let mut rows: Vec<(f64, &str, &DigitWord)> = table
+            .successors(v)
+            .filter_map(|w| {
+                let info = words.0.get(w)?;
+                Some((table.p_w_given_vd(w, v, lm.unigram_back(info.wid, info.lp)).log10(), w, info))
+            })
+            .collect();
+        rows.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(Ordering::Equal).then(a.2.wlen.cmp(&b.2.wlen)).then(a.2.rd.cmp(&b.2.rd)).then(a.1.cmp(b.1)));
+        rows.truncate(limit);
+        return rows.into_iter().map(|(s, w, info)| (w.to_string(), s, info.reading.clone())).collect();
+    }
+    let Some(bucket) = units.first().and_then(|u| idx.by_prefix.get(u.chars.as_slice())) else { return Vec::new() };
+    let mut seen = HashSet::new();
+    let mut tiers: [Vec<(f64, &Ent)>; 2] = Default::default();
+    for &i in bucket {
+        let e = &idx.ents[i as usize];
+        let syls = &idx.pool[idx.off[e.rd as usize] as usize..idx.off[e.rd as usize + 1] as usize];
+        if compat_prefix(units, syls, &idx.syls) && seen.insert(e.wix) {
+            let p = table.p_w_given_vd(e.word, v, lm.unigram_back((e.wid != u32::MAX).then_some(e.wid), e.lp));
+            let s = if p > 0.0 { lam * p.log10() + (1.0 - lam) * e.lp } else { f64::NEG_INFINITY };
+            tiers[if table.is_successor(v, e.word) { 0 } else { 1 }].push((s, e));
+        }
+    }
+    let mut out: Vec<(&Ent, f64)> = Vec::new();
+    for tier in tiers.iter_mut() {
+        let order = |a: &(f64, &Ent), b: &(f64, &Ent)| {
+            b.0.partial_cmp(&a.0).unwrap_or(Ordering::Equal).then(a.1.wlen.cmp(&b.1.wlen)).then(a.1.rd.cmp(&b.1.rd)).then(a.1.word.cmp(b.1.word))
+        };
+        if tier.len() > limit && limit > 0 {
+            tier.select_nth_unstable_by(limit - 1, order);
+            tier.truncate(limit);
+        }
+        tier.sort_by(order);
+        out.extend(tier.iter().map(|&(s, e)| (e, s)));
+    }
+    out.truncate(limit);
+    out.into_iter()
+        .map(|(e, s)| {
+            let r = &idx.pool[idx.off[e.rd as usize] as usize..idx.off[e.rd as usize + 1] as usize];
+            (e.word.to_string(), s, r.iter().map(|&i| idx.names[i as usize].to_string()).collect())
         })
         .collect()
 }

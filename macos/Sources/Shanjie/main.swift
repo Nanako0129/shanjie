@@ -69,12 +69,26 @@ final class DefaultsAbbreviationStore: AbbreviationStore {
     }
 }
 
-/// The "中英混打（實驗）" switch (docs/contracts/zhen-mixed.md section 3.2), key `english` in the same domain; absent means off.
+/// The "中英文之間自動加空格" switch (docs/contracts/cjk-spacing.md section 2), key `cjkSpacing`; absent means off.
+@MainActor
+final class DefaultsSpacingStore: SpacingStore {
+    var spacing: Bool? {
+        get { UserDefaults.standard.object(forKey: "cjkSpacing") as? Bool }
+        set { UserDefaults.standard.set(newValue, forKey: "cjkSpacing") }
+    }
+}
+
+/// The "中英混打（實驗）" switch (docs/contracts/zhen-mixed.md section 3.2), key `english` in the same domain; absent means on (digits.md A.3.7), a saved value wins.
 @MainActor
 final class DefaultsEnglishStore: EnglishStore {
     var english: Bool? {
         get { UserDefaults.standard.object(forKey: "english") as? Bool }
         set { UserDefaults.standard.set(newValue, forKey: "english") }
+    }
+    /// The 英文的顯示 choice (docs/contracts/zhen-inline.md section 2), key `englishInline`; absent means true.
+    var englishInline: Bool? {
+        get { UserDefaults.standard.object(forKey: "englishInline") as? Bool }
+        set { UserDefaults.standard.set(newValue, forKey: "englishInline") }
     }
 }
 
@@ -123,6 +137,12 @@ final class DefaultsRerankStore: RerankStore {
         get { UserDefaults.standard.object(forKey: "rerank") as? Bool }
         set { UserDefaults.standard.set(newValue, forKey: "rerank") }
     }
+    /// docs/contracts/rerank-strength.md section 3: key `rerankLevel` (`conservative`, `standard` or `aggressive`); absent or any
+    /// other value is standard.
+    var rerankLevel: String? {
+        get { UserDefaults.standard.string(forKey: "rerankLevel") }
+        set { UserDefaults.standard.set(newValue, forKey: "rerankLevel") }
+    }
 }
 
 /// How chat or formal is chosen (docs/contracts/profile-choice.md section 2.1), key `profileMode` (`auto`, `chat` or `formal`);
@@ -147,6 +167,24 @@ final class DefaultsAppProfileStore: AppProfileStore {
         } else {
             UserDefaults.standard.set(profiles, forKey: "appProfiles")
         }
+    }
+}
+
+/// The update settings and the last check (docs/contracts/about-update.md section 2): keys `updateAutoCheck` (Bool, absent
+/// means on), `updateLastCheck` (Date) and `updateStatus` (a dictionary of strings, see `UpdateStore`) in the same domain.
+@MainActor
+final class DefaultsUpdateStore: UpdateStore {
+    var autoCheck: Bool? {
+        get { UserDefaults.standard.object(forKey: "updateAutoCheck") as? Bool }
+        set { UserDefaults.standard.set(newValue, forKey: "updateAutoCheck") }
+    }
+    var lastCheck: Date? {
+        get { UserDefaults.standard.object(forKey: "updateLastCheck") as? Date }
+        set { UserDefaults.standard.set(newValue, forKey: "updateLastCheck") }
+    }
+    var status: [String: String]? {
+        get { UserDefaults.standard.dictionary(forKey: "updateStatus") as? [String: String] }
+        set { UserDefaults.standard.set(newValue, forKey: "updateStatus") }
     }
 }
 
@@ -175,10 +213,16 @@ func runServer() -> Never {
         // 可省略韻母 does not ship in v0.4.0 (user, 2026-10-10); see Shell.showsAbbreviation. Flip to true to offer it again.
         // This argument alone hides it (Shell's default true is for the tests) and the app target has no tests: the release
         // device check confirms the menu has no 可省略韻母.
-        showsAbbreviation: false)
+        showsAbbreviation: false, spacingStore: DefaultsSpacingStore())
+    // about-update section 2: the state always exists (the 關於 page shows the version); Sparkle starts only inside the .app.
+    let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0.0"
+    let updates = Updates(store: DefaultsUpdateStore(), version: version)
+    App.shell?.updates = updates
+    let updater = Updater(updates: updates)
     let settings = SettingsWindowController(shell: App.shell)
     App.shell?.onOpenSettings = { settings.show() }
-    withExtendedLifetime(server) { app.run() }
+    updates.closeSettings = { settings.close() }
+    withExtendedLifetime((server, updater)) { app.run() }
     exit(0)
 }
 

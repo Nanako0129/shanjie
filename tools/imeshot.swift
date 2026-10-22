@@ -4,15 +4,33 @@
 //   步驟：鍵碼（例如 49 是空白鍵、125 是 ↓）；後面加 s 表示按 Shift（43s 是 ⇧,）；
 //         `-` 只截圖不按鍵；`N*a,b,c` 把鍵碼 a、b、c 依序快速連打 N 次（每鍵約 10 ms），打完截一張。
 //   每一步截一張 `<輸出前綴>-<步驟序號>.png`，只截測試視窗和它下方候選窗的區域，不截全螢幕。
-//   環境變數 IMESHOT_VIDEO=<檔名.mov>：從視窗拿到焦點開始錄影，長度依步驟估算（一般步驟約 1.4 秒、
-//   快速連打另加每鍵 10 ms，再多留 3 秒）。錄影時 macOS 會讓周圍變暗，這是刻意保留的，使用者看得到正在錄。
+//   環境變數 IMESHOT_VIDEO=<檔名.mov>：從視窗拿到焦點開始錄影，長度依步驟估算（每步是按鍵約 0.2 秒加上
+//   IMESHOT_STEP_WAIT_MS，截圖時再加約 0.3 秒；快速連打另加每鍵 IMESHOT_PACE_MS；加上 IMESHOT_PRE_WAIT_MS；再多留 3 秒）。錄影時 macOS 會讓周圍變暗，這是刻意保留的，使用者看得到正在錄。
 //   環境變數 IMESHOT_SCREEN=builtin：視窗開在筆電內建螢幕的正中央（沒有內建螢幕就中止）。
 //   環境變數 IMESHOT_DEMO=1：視窗加高，候選窗開在本程式自己的空白文字區上，截圖與錄影只截這個視窗，
 //   不會拍到後面的任何畫面（給要分享的 demo 用）。
+//   demo 的其他環境變數（做 demo 的完整流程在維護者本機的 skill `shanjie-demo`）：
+//     IMESHOT_DEMO_SIZE=820x400 視窗大小；IMESHOT_FONT=34 字級；IMESHOT_TITLE 視窗標題；
+//     IMESHOT_PACE_MS=50 快速連打時每鍵的間隔（預設 10）；IMESHOT_STEP_WAIT_MS=700 每步之後的等待（預設 900）；
+//     IMESHOT_PRE_WAIT_MS=1000 開始錄影後、打字前的等待；IMESHOT_NOSHOT=1 不截圖；
+//     IMESHOT_RESTORE=<輸入法 ID> 結束時切到這個輸入法（預設切回原本的）。
+//     IMESHOT_KEYCAST=zhuyin|keys|<檔名> 在視窗底部顯示這一行按過的鍵：標準排列的注音、鍵帽，或照檔案逐鍵顯示
+//     （一行一個標籤，順序對應步驟裡的每一次按鍵；注音與英文、數字混打或用到 Shift 時用檔案）；按 Enter 換一行，結尾的
+//     Esc 不顯示。開始前就檢查：檔案的標籤數要等於按鍵數，注音、鍵帽兩種模式要認得每一個鍵（注音模式不收 Shift）。
+//   v0.5.0 的 demo 用 IMESHOT_DEMO=1 IMESHOT_SCREEN=builtin IMESHOT_NOSHOT=1 IMESHOT_PACE_MS=50 IMESHOT_STEP_WAIT_MS=700
+//   IMESHOT_DEMO_SIZE=820x400 IMESHOT_FONT=34 IMESHOT_PRE_WAIT_MS=1000，錄出 1640×864；v0.4.0、v0.4.1 有紀錄的只有
+//   820x400、字級 34、每鍵 50 ms。數值寫錯（解不開、負數、尺寸不是 寬x高）就中止，不會默默用預設值。
+//   前文：殼對沒有 bundle ID 的程式暫停學習，連前文也不讀，所以直接執行編出來的檔案時，預測列與選字都當作沒有前文
+//   （2026-10-22 量：先送出「一杯」再打 ㄔㄚˊ，直接執行送出「一杯查」，放進 .app 執行送出「一杯茶」；把 Info.plist
+//   嵌進執行檔沒有用）。要看前文的效果，就把它放進 `<名稱>.app/Contents/MacOS/`、Info.plist 寫 CFBundleIdentifier，
+//   從終端機執行裡面的檔案。同一天量到：這樣跑時按鍵照樣送得進去，但它自己啟動的 screencapture 錄影存檔失敗
+//   （「Failed to save to final location」），改由終端機自己跑 screencapture 就錄得到；原因推論是螢幕錄製權限改算在
+//   那個 .app 身上，沒有查證。截圖與錄影的 screencapture 不檢查結束碼，失敗時本程式不會報錯，要看輸出檔在不在。
+//   .app 會登記到 LaunchServices，這樣跑只在虛擬機裡做。
 //   結束時印出按 Esc 前的組字範圍（markedRange）與最後的文字（含換行，用 debugDescription）。
 // 安全：按鍵只用 CGEvent.postToPid 送給本程式自己的 pid（和 tools/imetype.swift 相同），就算焦點跑掉也不會
 // 打進別的 App；每一步之前確認視窗在最前面，不在就等，最多 60 秒，叫不回來就中止；步驟參數在開始前全部
-// 檢查過；中止或結束時都切回原本的輸入法。
+// 檢查過；中止或結束時都切回原本的輸入法（設了 IMESHOT_RESTORE 時切到它指定的輸入法）。
 // 使用者正在用電腦時，macOS 不讓背景程式搶焦點：要請使用者在「善解截圖探測」視窗跳出來時點一下，之後不要
 // 碰鍵盤。佔用鍵盤的時間要盡量短（見 CLAUDE.md「實機測試」）。
 // 剛重裝的輸入法第一次啟用時可能吃掉前幾個鍵，先打一個鍵再按 Esc 暖機。
@@ -58,7 +76,30 @@ let app = NSApplication.shared
 app.setActivationPolicy(.regular)
 /// IMESHOT_DEMO=1: a tall window, so the candidate panel opens over the probe's own empty text view and
 /// screenshots and video show only this window, never what is behind it (for demo clips to share).
-let demo = ProcessInfo.processInfo.environment["IMESHOT_DEMO"] == "1"
+let env = ProcessInfo.processInfo.environment
+let demo = env["IMESHOT_DEMO"] == "1"
+/// IMESHOT_RESTORE: checked here, before any window, like the other parameters.
+let restoreID: TISInputSource? = env["IMESHOT_RESTORE"].map { id in
+    guard let s = source(id) else { fail("no input source \(id) for IMESHOT_RESTORE") }
+    return s }
+// Demo parameters (the header lists them); unset, every one keeps the probe's old behaviour.
+/// A set variable that does not parse stops the run before anything is typed (a mistyped value would otherwise record a
+/// whole clip with the defaults, as the first v0.4.1 take did).
+func ms(_ k: String, _ d: Int) -> useconds_t {
+    guard let v = env[k] else { return useconds_t(d * 1000) }
+    guard let n = Int(v), n >= 0, n <= 600_000, let us = useconds_t(exactly: n * 1000) else { fail("bad \(k)=\(v): milliseconds 0-600000") }
+    return us
+}
+let paceUS = ms("IMESHOT_PACE_MS", 10), stepWaitUS = ms("IMESHOT_STEP_WAIT_MS", 900), preWaitUS = ms("IMESHOT_PRE_WAIT_MS", 0)
+let noShot = env["IMESHOT_NOSHOT"] == "1"
+let demoSize: NSSize? = env["IMESHOT_DEMO_SIZE"].map { v in
+    let parts = v.split(separator: "x", omittingEmptySubsequences: false)
+    let p = parts.compactMap { Double($0) }.filter { $0.isFinite && $0 > 0 }
+    guard demo, parts.count == 2, p.count == 2 else { fail("bad IMESHOT_DEMO_SIZE=\(v): WIDTHxHEIGHT with a lowercase x, and only with IMESHOT_DEMO=1") }
+    return NSSize(width: p[0], height: p[1]) }
+let fontSize: CGFloat = env["IMESHOT_FONT"].map { v in
+    guard let f = Double(v), f.isFinite, f > 0 else { fail("bad IMESHOT_FONT=\(v)") }
+    return CGFloat(f) } ?? 22
 /// IMESHOT_SCREEN=builtin: open the window on the Mac's built-in display (when there is one), centred,
 /// e.g. to record a Retina demo away from the screen the user is working on.
 func builtinScreen() -> NSScreen? {
@@ -67,9 +108,9 @@ func builtinScreen() -> NSScreen? {
             .map { CGDisplayIsBuiltin(CGDirectDisplayID($0.uint32Value)) != 0 } ?? false
     }
 }
-let size = demo ? NSSize(width: 900, height: 520) : NSSize(width: 520, height: 90)
+let size = demoSize ?? (demo ? NSSize(width: 900, height: 520) : NSSize(width: 520, height: 90))
 var origin = demo ? NSPoint(x: 300, y: 300) : NSPoint(x: 300, y: 500)
-if ProcessInfo.processInfo.environment["IMESHOT_SCREEN"] == "builtin" {
+if env["IMESHOT_SCREEN"] == "builtin" {
     guard let b = builtinScreen() else { fail("no built-in display") }
     origin = NSPoint(x: b.visibleFrame.midX - size.width / 2, y: b.visibleFrame.midY - size.height / 2)
 }
@@ -77,22 +118,94 @@ let window = NSWindow(contentRect: NSRect(origin: origin, size: size), styleMask
 // The initializer keeps a new window on the main screen (2026-10-05: a demo meant for the built-in
 // display opened on the external one); setting the frame afterwards places it in global coordinates.
 window.setFrame(window.frameRect(forContentRect: NSRect(origin: origin, size: size)), display: false)
-window.title = "善解截圖探測（請不要碰鍵盤）"
+window.title = env["IMESHOT_TITLE"] ?? "善解截圖探測（請不要碰鍵盤）"
 let textView = NSTextView(frame: window.contentView!.bounds)
-textView.font = NSFont.systemFont(ofSize: 22)
+textView.font = NSFont.systemFont(ofSize: fontSize)
 textView.isAutomaticQuoteSubstitutionEnabled = false
 // Demo: the candidate panel aligns its first glyph under the text and sits about 15-18 pt left of it,
 // so the text needs room on the left or the panel is cropped out of the captured window.
 if demo { textView.textContainerInset = NSSize(width: 32, height: 16) }
 window.contentView!.addSubview(textView)
+/// IMESHOT_KEYCAST=zhuyin|keys|<file> (demo only): a strip at the bottom of the window shows the keys of the current line as they
+/// are pressed, as standard-layout zhuyin, as keycaps, or as the labels in <file> (one per line, one per key press of the steps, in
+/// order: a script that mixes zhuyin, Shift punctuation and English knows which is which); Enter starts a new line. The closing Esc
+/// is not shown. Checked before anything is typed, like the other parameters: the file must have exactly one label per key press,
+/// and the built-in maps must know every key (zhuyin mode takes no Shift: Shift on the standard layout types punctuation).
+let keycast = env["IMESHOT_KEYCAST"]
+if let k = keycast, !demo { fail("bad IMESHOT_KEYCAST=\(k): only with IMESHOT_DEMO=1") }
+/// Keycap and zhuyin per key code. zhuyinOf is the inverse of `keyCode` in tools/imetype.swift: change both together.
+let capOf: [CGKeyCode: String] = [0: "a", 1: "s", 2: "d", 3: "f", 4: "h", 5: "g", 6: "z", 7: "x", 8: "c", 9: "v", 11: "b", 12: "q", 13: "w",
+    14: "e", 15: "r", 16: "y", 17: "t", 18: "1", 19: "2", 20: "3", 21: "4", 22: "6", 23: "5", 25: "9", 26: "7", 27: "-", 28: "8", 29: "0",
+    31: "o", 32: "u", 34: "i", 35: "p", 37: "l", 38: "j", 40: "k", 41: ";", 43: ",", 44: "/", 45: "n", 46: "m", 47: "."]
+let zhuyinOf: [CGKeyCode: String] = [18: "ㄅ", 19: "ㄉ", 20: "ˇ", 21: "ˋ", 23: "ㄓ", 22: "ˊ", 26: "˙", 28: "ㄚ", 25: "ㄞ", 29: "ㄢ", 27: "ㄦ",
+    12: "ㄆ", 13: "ㄊ", 14: "ㄍ", 15: "ㄐ", 17: "ㄔ", 16: "ㄗ", 32: "ㄧ", 34: "ㄛ", 31: "ㄟ", 35: "ㄣ", 0: "ㄇ", 1: "ㄋ", 2: "ㄎ", 3: "ㄑ",
+    5: "ㄕ", 4: "ㄘ", 38: "ㄨ", 40: "ㄜ", 37: "ㄠ", 41: "ㄤ", 6: "ㄈ", 7: "ㄌ", 8: "ㄏ", 9: "ㄒ", 11: "ㄖ", 45: "ㄙ", 46: "ㄩ", 43: "ㄝ",
+    47: "ㄡ", 44: "ㄥ"]
+let specialOf: [CGKeyCode: String] = [49: "␣", 36: "⏎", 48: "⇥", 125: "↓", 126: "↑", 123: "←", 124: "→", 51: "⌫", 53: "esc"]
+/// What the strip shows for each key press of the steps, in order (nil: no strip).
+let castGlyphs: [String]? = keycast.map { k in
+    let presses: [(CGKeyCode, Bool)] = plan.flatMap { s -> [(CGKeyCode, Bool)] in
+        switch s {
+        case .rapid(let n, let codes): return Array(repeating: codes.map { ($0, false) }, count: n).flatMap { $0 }
+        case .key(let code, let shift): return [(code, shift)]
+        case .capture: return []
+        }
+    }
+    if k != "zhuyin" && k != "keys" {
+        guard let t = try? String(contentsOfFile: k, encoding: .utf8) else { fail("bad IMESHOT_KEYCAST=\(k): zhuyin, keys or a readable file") }
+        // Swift reads "\r\n" as one Character, which a split on "\n" never matches: turn CRLF into LF first.
+        var l = t.replacingOccurrences(of: "\r\n", with: "\n").split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        if l.last == "" { l.removeLast() }
+        guard l.count == presses.count else { fail("IMESHOT_KEYCAST file has \(l.count) labels, the steps press \(presses.count) keys") }
+        return l   // a label file spells its own spacing and Shift
+    }
+    return presses.map { code, shift in
+        if let s = specialOf[code] { return (shift ? "⇧" : "") + s + (s.count > 1 ? " " : "") }
+        guard let g = k == "zhuyin" ? zhuyinOf[code] : capOf[code], !(shift && k == "zhuyin") else {
+            fail("IMESHOT_KEYCAST=\(k) cannot show key \(code)\(shift ? " with Shift" : ""); use a label file")
+        }
+        return (shift ? "⇧" : "") + g + (k == "keys" ? " " : "")
+    }
+}
+var castIndex = 0
+/// Strip geometry, chosen by eye in the v0.5.0 demo (2026-10-22, 820x400 at font 34, approved by the maintainer): the inset matches
+/// the text view's left inset of 32 pt; the height holds one line of the smaller font; the text view stops above the strip so
+/// typed text never runs under it.
+let castInsetX: CGFloat = 32, castBottom: CGFloat = 10
+let castFontScale: CGFloat = 0.75, castHeightScale: CGFloat = 1.6
+let castLabel = NSTextField(labelWithString: "")
+var castText = "", castNewLine = false
+if castGlyphs != nil {
+    let h = fontSize * castHeightScale
+    castLabel.frame = NSRect(x: castInsetX, y: castBottom, width: size.width - 2 * castInsetX, height: h)
+    castLabel.font = NSFont.monospacedSystemFont(ofSize: fontSize * castFontScale, weight: .medium)
+    castLabel.textColor = .secondaryLabelColor
+    castLabel.alignment = .left
+    castLabel.lineBreakMode = .byTruncatingHead
+    window.contentView!.addSubview(castLabel)
+    let b = window.contentView!.bounds
+    textView.frame = NSRect(x: b.minX, y: castBottom + h, width: b.width, height: b.height - castBottom - h)
+}
+func cast(_ code: CGKeyCode) {
+    guard let glyphs = castGlyphs else { return }
+    let g = glyphs[castIndex]; castIndex += 1
+    DispatchQueue.main.async {
+        if castNewLine { castText = ""; castNewLine = false }
+        castText += g
+        castLabel.stringValue = castText
+        if code == 36 { castNewLine = true }
+    }
+}
 window.makeKeyAndOrderFront(nil)
 window.makeFirstResponder(textView)
 let pid = ProcessInfo.processInfo.processIdentifier
 let original = TISCopyCurrentKeyboardInputSource().takeRetainedValue()
-restore = { DispatchQueue.main.sync { _ = TISSelectInputSource(original) } }
+let restoreTo = restoreID ?? original
+restore = { DispatchQueue.main.sync { _ = TISSelectInputSource(restoreTo) } }
 
 func onMain<T>(_ f: () -> T) -> T { DispatchQueue.main.sync(execute: f) }
-func press(_ code: CGKeyCode, shift: Bool, gap: useconds_t = 80_000) {
+func press(_ code: CGKeyCode, shift: Bool, gap: useconds_t = 80_000, show: Bool = true) {
+    if show { cast(code) }
     for down in [true, false] {
         let e = CGEvent(keyboardEventSource: nil, virtualKey: code, keyDown: down)!
         if shift { e.flags = .maskShift }
@@ -135,12 +248,16 @@ DispatchQueue.global().async {
     // IMESHOT_VIDEO=<file.mov>: record the probe region with screencapture (its dimmed overlay tells the
     // user a recording is running) from the moment the window has focus, just long enough for the steps.
     var recorder: Process?
-    if let video = ProcessInfo.processInfo.environment["IMESHOT_VIDEO"] {
+    if let video = env["IMESHOT_VIDEO"] {
         let f = onMain { window.frame }, h = onMain { NSScreen.screens[0].frame.height }
-        // Estimated, not measured exactly: a step is about 0.16 s of keys, 0.9 s of wait and a
-        // screenshot; rapid steps add about 10 ms per key; 3 s spare.
-        let typing = plan.reduce(0.0) { sum, s in if case .rapid(let n, let c) = s { return sum + Double(n * c.count) * 0.01 }; return sum }
-        let seconds = Int((Double(plan.count) * 1.4 + typing).rounded(.up)) + 3
+        // Estimated, not measured exactly: a step is about 0.2 s of keys plus the step wait, plus about 0.3 s when it
+        // takes a screenshot (with the defaults 1.4 s, the old value); rapid steps add the pace per key; then the
+        // wait before typing; 3 s spare. With no demo variable set this equals the old formula for every length.
+        // Whole microseconds, not Double: 0.2 + 0.9 + 0.3 is not exactly 1.4 and rounded some lengths up a second.
+        let typingUS = plan.reduce(0) { sum, s in if case .rapid(let n, let c) = s { return sum + n * c.count * Int(paceUS) }; return sum }
+        let perStepUS = 200_000 + Int(stepWaitUS) + (noShot ? 0 : 300_000)
+        let totalUS = plan.count * perStepUS + typingUS + Int(preWaitUS)
+        let seconds = (totalUS + 999_999) / 1_000_000 + 3
         let r = Process(); r.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
         let area = demo ? "\(Int(f.minX)),\(Int(h - f.maxY)),\(Int(f.width)),\(Int(f.height))"
                         : "\(Int(f.minX) - 20),\(Int(h - f.maxY) - 20),620,330"
@@ -149,19 +266,20 @@ DispatchQueue.global().async {
         recorder = r
         usleep(1_500_000)  // screencapture's recording starts about a second after launch
     }
+    usleep(preWaitUS)
     for (i, step) in plan.enumerated() {
         ensureFront()
         switch step {
         case .rapid(let n, let codes):
-            // About 10 ms per key: the user cannot type while this runs (2026-10-05, "太慢了").
-            for _ in 0..<n { for code in codes { press(code, shift: false, gap: 5_000) } }
+            // IMESHOT_PACE_MS per key (10 ms unless set): the user cannot type while this runs (2026-10-05, "太慢了").
+            for _ in 0..<n { for code in codes { press(code, shift: false, gap: paceUS / 2) } }
         case .key(let code, let shift):
             press(code, shift: shift)
         case .capture:
             break
         }
-        usleep(900_000)
-        capture(i)
+        usleep(stepWaitUS)
+        if !noShot { capture(i) }
     }
     let state = onMain { () -> String in
         let r = textView.markedRange()
@@ -169,9 +287,9 @@ DispatchQueue.global().async {
         return "before Esc: total \(total), marked \(r.location == NSNotFound ? "none" : "\(r.location)+\(r.length)")"
     }
     print(state)
-    press(53, shift: false)   // Esc
+    press(53, shift: false, show: false)   // Esc
     usleep(200_000)
-    press(53, shift: false)
+    press(53, shift: false, show: false)
     restore?()
     recorder?.waitUntilExit()
     print("text: \(onMain { textView.string }.debugDescription)")

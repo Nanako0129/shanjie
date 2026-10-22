@@ -700,13 +700,31 @@ SETS2 = {
 }
 PROFILES2 = ["chat", "formal"]
 # Shipped settings (contract 2.1). `flags` and `tag` are two independent statements of the same thing on purpose: the CLI summary
-# line must carry `lm-<profile>` + `tag` (`{tl8}` = first 8 hex of the .sjtl), so a dropped flag or an auto-loaded kn.sjkn fails the cell.
+# line must carry `lm-<profile>` + `tag` (`{tl8}` = first 8 hex of the .sjtl), so a dropped flag or an auto-loaded kn.sjkn fails the cell. The comparison is exact, so a run with
+# `--rerank-level` other than standard (the CLI adds `+rl:<level>` after `+tl:`) fails it too: not the shipping setting.
+# A version that ships a Kneser-Ney side file (model-v6 and later) has `"kn": True`: its kn.sjkn (hash from that version's
+# data/kn.sjkn.sha256) goes into the model folder, so the CLI turns KN on as the App does, and its tag spells `+kn:{kn8}:θ<θ>:β<β>`
+# (`{kn8}` = first 8 hex of the side file) before `+tl:`. A version without the key gets no kn.sjkn, so an auto-loaded one still fails.
+# A version that ships a trigram table (trigram.sjt3, trigram-core; hash from data/trigram.sjt3.sha256) has `"tri": True`: the table goes into the
+# model folder, the CLI loads it only for `--profile formal` (and then turns KN off), so the chat tag is unchanged and the formal cells need their own
+# `"formal_tag"` (`{tri8}` = first 8 hex of the table), which spells `+tri:{tri8}` after `+acg` and has no `+kn:`. Without `formal_tag` both profiles share `tag`.
+# A version that ships the colloquial table (colloquial-term.md; hash from data/colloquial.sjlm.sha256) has `"colloquial": True` (the rule tools/kpi.py's
+# check_models uses too: the VERSIONS2 row decides, not whether the sha file exists): its colloquial.sjlm goes into the model folder, the chat cells pass
+# `--colloquial-core` (as the App loads the table after the small model; the term applies in chat only) and their tag gains `+colloq:{co8}+rc` (the first 8 hex
+# of the table) at the end. Formal cells and the anchor run are as without it; a version without the key is unchanged.
 # The App also learns locally, re-ranks asynchronously after every key, takes the context from the text field: the CLI does none of that.
 VERSIONS2 = {
     "v0.4.0": {"release": "v0.4.0", "flags": ["--context", "--packs", "acg"], "tinylm": False, "tag": "+ctx+acg"},
     "v0.4.1": {"release": "v0.4.1", "flags": ["--context", "--packs", "acg"], "tinylm": True, "tag": "+ctx+tl:{tl8}+acg"},
     "v0.4.2": {"release": "v0.4.2", "flags": ["--context", "--packs", "acg"], "tinylm": True, "tag": "+ctx+tl:{tl8}+acg"},
     "v0.4.3": {"release": "v0.4.3", "flags": ["--context", "--packs", "acg"], "tinylm": True, "tag": "+ctx+tl:{tl8}+acg"},
+    "v0.4.4": {"release": "v0.4.4", "flags": ["--context", "--packs", "acg"], "tinylm": True, "kn": True, "tag": "+ctx+kn:{kn8}:θ1:β1+tl:{tl8}+acg"},
+    "v0.4.5": {"release": "v0.4.5", "flags": ["--context", "--packs", "acg"], "tinylm": True, "kn": True, "tag": "+ctx+kn:{kn8}:θ1:β1+tl:{tl8}+acg"},
+    "v0.4.6": {"release": "v0.4.6", "flags": ["--context", "--packs", "acg"], "tinylm": True, "kn": True, "tag": "+ctx+kn:{kn8}:θ1:β1+tl:{tl8}+acg"},
+    "v0.4.7": {"release": "v0.4.7", "flags": ["--context", "--packs", "acg"], "tinylm": True, "kn": True, "tri": True, "tag": "+ctx+kn:{kn8}:θ1:β1+tl:{tl8}+acg",
+               "formal_tag": "+ctx+tl:{tl8}+acg+tri:{tri8}"},
+    "v0.5.0": {"release": "v0.5.0", "flags": ["--context", "--packs", "acg"], "tinylm": True, "kn": True, "tri": True, "colloquial": True,
+               "tag": "+ctx+kn:{kn8}:θ1:β1+tl:{tl8}+acg", "formal_tag": "+ctx+tl:{tl8}+acg+tri:{tri8}"},
 }
 # Anchor (contract 3.1): S7h's measurement in the research log of 2026-10-13, `--override-packs off`, chat, the CLI's own variants table.
 ANCHOR = {
@@ -734,14 +752,15 @@ def version_labels(refs, as_):
 def resolve_models(ver, spec):
     """-> {file name: (path, sha256)}: hashes come from the exported version's data/*.sha256, files from MODELS/<sha256>/<name>."""
     out = {}
-    for n in ["bigram.sjlm", "classes.sjc"] + (["tinylm.sjtl"] if spec["tinylm"] else []):
+    for n in ["bigram.sjlm", "classes.sjc"] + (["kn.sjkn"] if spec.get("kn") else []) + (["trigram.sjt3"] if spec.get("tri") else []) + (["tinylm.sjtl"] if spec["tinylm"] else []) \
+            + (["colloquial.sjlm"] if spec.get("colloquial") else []):
         f = os.path.join(ver.dir, "data", n + ".sha256")
         if not os.path.isfile(f):
             die(f"{ver.label}: the export has no data/{n}.sha256")
         want = open(f).read().split()[0]
         p = os.path.join(MODELS, want, n)
         if not os.path.isfile(p):
-            die(f"{ver.label}: model file missing: {p}; download {n} from Release {spec['release']}, check its SHA-256 is {want}, and put it there")
+            die(f"{ver.label}: model file missing: {p}; download {n} from its own Release (docs/data-files.md names it; {spec['release']} is the app release, which carries no model files), check its SHA-256 is {want}, and put it there")
         if sha_file(p) != want:
             die(f"{ver.label}: {p} does not match data/{n}.sha256 ({want})")
         out[n] = (p, want)
@@ -749,15 +768,21 @@ def resolve_models(ver, spec):
 
 
 def setup_models(ver, spec, td):
-    """A model folder with only bigram.sjlm and classes.sjc (the CLI loads classes.sjc beside --lm and turns KN on when it sees kn.sjkn)."""
+    """A model folder with only bigram.sjlm and classes.sjc, plus kn.sjkn and trigram.sjt3 for a version that ships them (the CLI loads
+    classes.sjc beside --lm, turns KN on when it sees kn.sjkn and reads the table for the formal profile when it sees trigram.sjt3), and
+    colloquial.sjlm for a version with `"colloquial"` (not read from the folder: the chat cells name it with --colloquial-core)."""
     ver.spec, ver.models = spec, resolve_models(ver, spec)
     d = os.path.join(td, ver.label)
     os.makedirs(d)
-    for n in ("bigram.sjlm", "classes.sjc"):
+    for n in ("bigram.sjlm", "classes.sjc") + (("kn.sjkn",) if spec.get("kn") else ()) + (("trigram.sjt3",) if spec.get("tri") else ()) + (("colloquial.sjlm",) if spec.get("colloquial") else ()):
         os.symlink(ver.models[n][0], os.path.join(d, n))
     ver.lm = os.path.join(d, "bigram.sjlm")
     ver.tl = ver.models["tinylm.sjtl"][0] if spec["tinylm"] else None
     ver.tl8 = ver.models["tinylm.sjtl"][1][:8] if spec["tinylm"] else ""
+    ver.kn8 = ver.models["kn.sjkn"][1][:8] if spec.get("kn") else ""
+    ver.tri8 = ver.models["trigram.sjt3"][1][:8] if spec.get("tri") else ""
+    ver.co = os.path.join(d, "colloquial.sjlm") if spec.get("colloquial") else None
+    ver.co8 = ver.models["colloquial.sjlm"][1][:8] if spec.get("colloquial") else ""
 
 
 def ship_flags(ver, anchor):
@@ -768,9 +793,30 @@ def ship_flags(ver, anchor):
     return f
 
 
+def spec_tag(ver, prof):
+    """The setting tag the settings table gives `ver` for `prof` (the formal profile has its own when the version ships a trigram table)."""
+    t = ver.spec["formal_tag"] if prof == "formal" and "formal_tag" in ver.spec else ver.spec["tag"]
+    return t.format(tl8=ver.tl8, kn8=getattr(ver, "kn8", ""), tri8=getattr(ver, "tri8", "")) + colloq_tag(ver, prof)
+
+
+def colloq_tag(ver, prof):
+    """`+colloq:<sha8>+rc` for the chat cells of a version that ships the colloquial table (the reading-channel term ships with it and is on by
+    default, so the CLI's tag carries `+rc`), else ""."""
+    return f"+colloq:{ver.co8}+rc" if getattr(ver, "co8", "") and prof == "chat" else ""
+
+
 def expected_tag(ver, prof, anchor):
-    t = ver.spec["tag"].format(tl8=ver.tl8)
-    return f"lm-{prof}" + (t.replace("+acg", "") if anchor else t)
+    t = spec_tag(ver, prof)
+    return f"lm-{prof}" + (t.replace("+acg", "").replace(colloq_tag(ver, prof), "") if anchor else t)
+
+
+def replay_tag(ver, prof="chat"):
+    """Setting tag of the replay-setting CLI cell (version's bigram + classes, nothing else): `lm-<prof>`, plus the version's own `+kn:...` part
+    when its model folder holds kn.sjkn (the CLI turns KN on beside the model, so the cell carries the same KN tag as the shipping cells), or
+    for the formal profile of a version with a table its `+tri:...` part instead (the table turns KN off)."""
+    tri = re.search(r"\+tri:[^+]*", spec_tag(ver, prof)) if prof == "formal" and ver.spec.get("tri") else None
+    kn = re.search(r"\+kn:[^+]*", spec_tag(ver, prof)) if ver.spec.get("kn") else None
+    return f"lm-{prof}" + (tri.group() if tri else kn.group() if kn else "")
 
 
 def cli_env(anchor):
@@ -783,7 +829,8 @@ def cli_env(anchor):
 
 def cell_cmd(ver, prof, rows, dump, rowstats, anchor):
     return ([ver.cli, "--lm", ver.lm, "--profile", prof, "--rows", rows] + (["--dump", dump] if dump else []) + ["--rowstats", rowstats]
-            + ship_flags(ver, anchor) + (["--tinylm", ver.tl] if ver.tl else []))
+            + ship_flags(ver, anchor) + (["--tinylm", ver.tl] if ver.tl else [])
+            + (["--colloquial-core", ver.co] if getattr(ver, "co", None) and prof == "chat" and not anchor else []))
 
 
 def parse_summary(out):
@@ -837,64 +884,72 @@ def run_cell2(ctx, ver, name, prof, anchor):
 
 
 def measure_speed2(ctx, vers):
-    """Replay speed with the replay's own settings (version's bigram + classes, no packs, no context, no rerank), 3 interleaved rounds.
-    The consistency check runs one more CLI cell with exactly those settings (not the result cells) and compares row for row."""
+    """Replay speed with the replay's own settings (version's bigram + classes, no packs, no context, no rerank), 3 interleaved rounds, for
+    the chat profile (the top-level numbers) and the formal one (`out["formal"]`, replay's 5th argument; a version with a trigram table
+    loads it either way, so its chat row carries the table's memory too). The consistency check runs one more CLI cell with exactly those
+    settings and the same profile (not the result cells) and compares row for row. A profile that fails gets `{"error": ...}` in its own place."""
     rows = ctx.files["dev302"]
-    want, errs, runs, rr = {}, {}, {v.sha: [] for v in vers}, {v.sha: [] for v in vers}
+    want, errs, runs, rr = {}, {}, {(v.sha, p): [] for v in vers for p in PROFILES2}, {v.sha: [] for v in vers}
     with tempfile.TemporaryDirectory() as td:
         for v in vers:
-            try:
-                dump = os.path.join(td, v.label + ".dump")
-                tag = parse_summary(sh([v.cli, "--lm", v.lm, "--profile", "chat", "--rows", rows, "--dump", dump], cwd=v.dir, env=cli_env(False)))["tag"]
-                if tag != "lm-chat":
-                    raise RuntimeError("the replay-setting CLI cell carries setting tag " + tag)
-                want[v.sha] = [c[0] for c in read_dump(dump)]
-            except Exception as e:
-                errs[v.sha] = f"replay-setting CLI cell failed: {str(e)[-300:]}"
+            for prof in PROFILES2:
+                try:
+                    dump = os.path.join(td, v.label + "." + prof + ".dump")
+                    tag = parse_summary(sh([v.cli, "--lm", v.lm, "--profile", prof, "--rows", rows, "--dump", dump], cwd=v.dir, env=cli_env(False)))["tag"]
+                    if tag != replay_tag(v, prof):
+                        raise RuntimeError("the replay-setting CLI cell carries setting tag " + tag)
+                    want[v.sha, prof] = [c[0] for c in read_dump(dump)]
+                except Exception as e:
+                    errs[v.sha, prof] = f"replay-setting CLI cell failed: {str(e)[-300:]}"
         for rnd in range(3):
             for v in vers:
-                if v.sha in errs:
-                    continue
-                with tempfile.TemporaryFile() as out:
-                    p = subprocess.Popen([v.replay, os.path.join(v.dir, "data/lexicon"), v.lm, rows, td + "/c"], stdout=out, stderr=subprocess.PIPE, text=True)
-                    _, st, ru = os.wait4(p.pid, 0)
-                    p.returncode = os.waitstatus_to_exitcode(st)
-                    if p.returncode:
-                        errs[v.sha] = f"replay failed ({p.returncode}): {p.stderr.read()[-300:]}"
+                for prof in PROFILES2:
+                    if (v.sha, prof) in errs:
                         continue
-                    out.seek(0)
-                    m = json.loads(out.read())
-                got = open(td + "/c", encoding="utf-8").read().split("\n")[:-1]
-                w = want[v.sha]
-                bad = [i + 1 for i in range(max(len(got), len(w))) if i >= len(got) or i >= len(w) or got[i] != w[i]]
-                if bad:
-                    errs[v.sha] = f"replay differs from the replay-setting CLI cell at rows {bad[:20]} ({len(bad)} of {len(w)})"
-                    continue
-                m["rss_mb"] = ru.ru_maxrss / 2 ** 20  # macOS reports bytes
-                runs[v.sha].append(m)
+                    with tempfile.TemporaryFile() as out:
+                        cmd = [v.replay, os.path.join(v.dir, "data/lexicon"), v.lm, rows, td + "/c"] + (["formal"] if prof == "formal" else [])
+                        p = subprocess.Popen(cmd, stdout=out, stderr=subprocess.PIPE, text=True)
+                        _, st, ru = os.wait4(p.pid, 0)
+                        p.returncode = os.waitstatus_to_exitcode(st)
+                        if p.returncode:
+                            errs[v.sha, prof] = f"replay failed ({p.returncode}): {p.stderr.read()[-300:]}"
+                            continue
+                        out.seek(0)
+                        m = json.loads(out.read())
+                    got = open(td + "/c", encoding="utf-8").read().split("\n")[:-1]
+                    w = want[v.sha, prof]
+                    bad = [i + 1 for i in range(max(len(got), len(w))) if i >= len(got) or i >= len(w) or got[i] != w[i]]
+                    if bad:
+                        errs[v.sha, prof] = f"replay differs from the replay-setting CLI cell at rows {bad[:20]} ({len(bad)} of {len(w)})"
+                        continue
+                    m["rss_mb"] = ru.ru_maxrss / 2 ** 20  # macOS reports bytes
+                    runs[v.sha, prof].append(m)
         # rerank latency the CLI prints on stderr: after every replay round, so no replay starts on a CPU a rerank run just heated,
         # and alone, so the parallel accuracy cells do not skew it
         for rnd in range(3):
             for v in vers:
-                if not v.tl or v.sha in errs:
+                if not v.tl or (v.sha, "chat") in errs:
                     continue
                 r = subprocess.run(cell_cmd(v, "chat", rows, None, td + "/rr.rs", False), capture_output=True, text=True, cwd=v.dir, env=cli_env(False))
                 g = RERANK.search(r.stderr)
                 if r.returncode or not g:
-                    errs[v.sha] = f"rerank timing run failed ({r.returncode}): {r.stderr[-300:]}"
+                    errs[v.sha, "chat"] = f"rerank timing run failed ({r.returncode}): {r.stderr[-300:]}"
                     continue
                 rr[v.sha].append((float(g.group(2)), float(g.group(3))))
     out = {}
     for v in vers:
-        if v.sha in errs:
-            out[v.sha] = {"error": errs[v.sha]}
-            continue
-        r = runs[v.sha]
-        n = len(want[v.sha])
-        out[v.sha] = {"rows_match": f"{n}/{n}", "keys": r[0]["keys"], "rounds": len(r),
-                      "p95_us": statistics.median(x["p95_us"] for x in r), "max_us": max(x["max_us"] for x in r),
-                      "load_ms": statistics.median(x["load_ms"] for x in r), "rss_mb": max(x["rss_mb"] for x in r)}
-        if rr[v.sha]:
+        res = {}
+        for prof in PROFILES2:
+            if (v.sha, prof) in errs:
+                res[prof] = {"error": errs[v.sha, prof]}
+                continue
+            r = runs[v.sha, prof]
+            n = len(want[v.sha, prof])
+            res[prof] = {"rows_match": f"{n}/{n}", "keys": r[0]["keys"], "rounds": len(r),
+                         "p95_us": statistics.median(x["p95_us"] for x in r), "max_us": max(x["max_us"] for x in r),
+                         "load_ms": statistics.median(x["load_ms"] for x in r), "rss_mb": max(x["rss_mb"] for x in r)}
+        out[v.sha] = {**res["chat"], "formal": res["formal"]}
+        if rr[v.sha] and "error" not in res["chat"]:
             out[v.sha]["rerank_p50_ms"] = statistics.median(a for a, _ in rr[v.sha])
             out[v.sha]["rerank_p95_ms"] = statistics.median(b for _, b in rr[v.sha])
     return out
@@ -953,8 +1008,8 @@ def cmd_run2(args):
             die(f"{v.ref}: build failed: {e}")
         setup_models(v, VERSIONS2[v.label], td.name)
         rec = {"ref": v.ref, "version": v.label, "sha": v.sha, "lexicon_sha256": v.lexicon_sha,
-               "models": {n: h for n, (_, h) in v.models.items()}, "flags": ship_flags(v, anchor) + (["--tinylm", "<file>"] if v.tl else []),
-               "tag": v.spec["tag"].format(tl8=v.tl8), "fingerprints": dict(ctx.fp), "accuracy": {}}
+               "models": {n: h for n, (_, h) in v.models.items()}, "flags": ship_flags(v, anchor) + (["--tinylm", "<file>"] if v.tl else []) + (["--colloquial-core", "<file>"] if getattr(v, "co", None) and not anchor else []),
+               "tag": spec_tag(v, "chat"), "formal_tag": spec_tag(v, "formal"), "fingerprints": dict(ctx.fp), "accuracy": {}}
         result["versions"].append(rec)
 
         def one(n, p):
@@ -1002,9 +1057,10 @@ def cmd_run2(args):
     speed = measure_speed2(ctx, vers) if "dev302" in ctx.files else {}
     for rec, v in zip(result["versions"], vers):
         rec["speed"] = speed.get(v.sha, {"error": "no dev302"})
-        if "error" in rec["speed"]:
-            failed = True
-            print(f"bench: {v.label}: {rec['speed']['error']}", file=sys.stderr)
+        for part, sp in (("", rec["speed"]), (" formal", rec["speed"].get("formal", {}))):
+            if "error" in sp:
+                failed = True
+                print(f"bench: {v.label}{part}: {sp['error']}", file=sys.stderr)
     td.cleanup()
     result["env"] = {"machine": sh(["sysctl", "-n", "hw.model"]).strip(), "macos": platform.mac_ver()[0],
                      "cargo": sh(["cargo", "--version"]).strip(), "load_avg_start": load0, "load_avg_end": os.getloadavg()[0]}
@@ -1033,7 +1089,7 @@ def render_v2(results):
             n = next((r["accuracy"][c]["n"] for r in vs if "n" in r.get("accuracy", {}).get(c, {})), "—")
             L.append(f"| {c} | {n} | " + " | ".join(cell_text(r, c) if "accuracy" in r else "失敗" for r in vs) + " |")
     L += ["", "### 保留集", "",
-          "照 `CLAUDE.md` 一片只跑一次：由 fresh verifier 以 `evalstats compare --net` 比上一版與新版，main 把 n 與兩版的 top1（可再加 `fixed`、`broken`、`p`）和實際量的 commit 填進 results JSON 的 `holdout`（`{\"commit\": …, \"chat\": {n, top1, fixed, broken, p}, \"formal\": ...}`）。下表版本下面的 commit 是保留集實際量的那一個；它和上面「出貨設定」表被量的 commit 在 `docs/verification.md` 列的路徑上必須沒有差異，或差異不改輸出（出貨設定的 rowstats 逐位元組相同，記在研究紀錄；契約 §2.3、§5）。", "",
+          "照 `CLAUDE.md`，只在推 `v*` tag 前跑一次（2026-10-18 起；之前是一片一次）：由 fresh verifier 以 `evalstats compare --net` 比上一版與新版，main 把 n 與兩版的 top1（可再加 `fixed`、`broken`、`p`）和實際量的 commit 填進 results JSON 的 `holdout`（`{\"commit\": …, \"chat\": {n, top1, fixed, broken, p}, \"formal\": ...}`）。下表版本下面的 commit 是保留集實際量的那一個；它和上面「出貨設定」表被量的 commit 在 `docs/verification.md` 列的路徑上必須沒有差異，或差異不改輸出（出貨設定的 rowstats 逐位元組相同，記在研究紀錄；契約 §2.3、§5）。", "",
           "| 版本 | chat | formal |", "|---|---|---|"]
     for res in results:
         for rec in res["versions"]:
@@ -1041,21 +1097,25 @@ def render_v2(results):
             f = lambda p: "—（尚未量測）" if p not in h else f"{100 * h[p]['top1'] / h[p]['n']:.2f}%<br>{h[p]['top1']}/{h[p]['n']}" + (f"<br>+{h[p]['fixed']} / −{h[p]['broken']}，p={h[p]['p']:.3g}" if "fixed" in h[p] else "")
             L.append(f"| {rec['version']}<br>`{h.get('commit', rec['sha'])[:7]}` | {f('chat')} | {f('formal')} |")
     L += ["", "### 速度與記憶體（同場）", "",
-          "重播程式用該版的 `bigram.sjlm` 與 `classes.sjc`，**不載詞包、沒有前文、沒有語意校正**（重播是同步打鍵，語意校正是非同步、不在按鍵路徑上）；標準排列、chat、dev302，每版 3 輪輪流，p95 取中位數。「重播＝CLI」是和另跑的一格同設定 CLI（`--profile chat`，不帶 `--context`、`--packs`、`--tinylm`）逐列比。重排是 CLI 在 stderr 印的語意校正每列耗時（p50／p95：三輪重播都跑完之後再跑三次、取中位數，不和其他格同時跑）。", "",
+          "重播程式用該版的 `bigram.sjlm` 與 `classes.sjc`，**不載詞包、沒有前文、沒有語意校正**（重播是同步打鍵，語意校正是非同步、不在按鍵路徑上）；標準排列、dev302，每版 3 輪輪流，p95 取中位數；每版兩列：聊天（版本名）與書面（版本名後加「書面」；重播程式的第五個參數 `formal`，舊的結果檔沒有這一列時顯示「—」）。有 trigram 表的版本，兩列都把表載進記憶體（只有書面用它）。「重播＝CLI」是和另跑的一格同設定 CLI（`--profile` 同該列，不帶 `--context`、`--packs`、`--tinylm`）逐列比。重排是 CLI 在 stderr 印的語意校正每列耗時（p50／p95：三輪重播都跑完之後再跑三次、取中位數，不和其他格同時跑）。", "",
           "| 版本 | 日期 | 機型／macOS／load avg | p95 | max | 載入 | RSS | 按鍵數 | 重播＝CLI | 重排 p50／p95 |", "|---|---|---|---|---|---|---|---|---|---|"]
+    def speed_row(head, s, rr_text):
+        if "error" in s:
+            return head + " 失敗：" + s["error"].replace("|", "/").replace("\n", " ")[:300] + " | | | | | | |"
+        return head + f" {s['p95_us'] / 1000:.3f} ms | {s['max_us'] / 1000:.2f} ms | {s['load_ms']:.0f} ms | {s['rss_mb']:.0f} MB | {s['keys']} | {s['rows_match']} | {rr_text} |"
     for res in results:
         e = res["env"]
         for rec in res["versions"]:
             s = rec.get("speed", {"error": "沒有速度結果"})
             head = f"| {rec['version']} | {res['date']} | {e['machine']} / {e['macos']} / {e['load_avg_start']:.1f}→{e['load_avg_end']:.1f} |"
-            if "error" in s:
-                L.append(head + " 失敗：" + s["error"].replace("|", "/").replace("\n", " ")[:300] + " | | | | | | |")
-            else:
-                rr = f"{s['rerank_p50_ms']:.2f}／{s['rerank_p95_ms']:.2f} ms" if "rerank_p50_ms" in s else "—（沒有語意校正）"
-                L.append(head + f" {s['p95_us'] / 1000:.3f} ms | {s['max_us'] / 1000:.2f} ms | {s['load_ms']:.0f} ms | {s['rss_mb']:.0f} MB | {s['keys']} | {s['rows_match']} | {rr} |")
+            rr = f"{s['rerank_p50_ms']:.2f}／{s['rerank_p95_ms']:.2f} ms" if "rerank_p50_ms" in s else "—（沒有語意校正）"
+            L.append(speed_row(head, s, rr))
+            f = s.get("formal")  # results written before the formal replay row existed have none
+            head = f"| {rec['version']} 書面 | {res['date']} | 同上 |"
+            L.append(speed_row(head, f, "—（重播不含語意校正）") if f else head + " — | — | — | — | — | — | — |")
     L += ["", "### 量測規則（套件 v2）", "",
           "- 集合凍結：dev302、typing76、probe 與套件 v1 同檔；user-reported 是 `eval/dev/user-reported.txt` 76beb24 時的前 80 列、fw 是 `eval/rerank/s7e-function-words.txt`（兩者在 `eval/bench/suite-v2/`）；cvtune、wikitune、lytune、wikitypo 不進 repo；SHA-256 都寫死在工具裡。計分用套件 v1 的 `variants.tsv`。",
-          "- 每一版的模型雜湊取自該版 `data/*.sha256`，檔案由 main 放在 `~/.cache/shanjie/bench/models/<sha256>/`；工具為每版組只含 `bigram.sjlm` 與 `classes.sjc` 的資料夾，不讓 CLI 自動載入 `kn.sjkn`。",
+          "- 每一版的模型雜湊取自該版 `data/*.sha256`，檔案由 main 放在 `~/.cache/shanjie/bench/models/<sha256>/`；工具為每版組只含 `bigram.sjlm` 與 `classes.sjc` 的資料夾（出貨帶 `kn.sjkn` 的版本，model-v6 起，另放它自己的 `kn.sjkn`，CLI 在模型旁自動開 KN；沒有的版本不放，所以自動載入 `kn.sjkn` 會讓該格失敗；出貨帶 `trigram.sjt3` 的版本也放它自己的表，CLI 只在書面設定載入、摘要行多 `+tri:`、同時關 KN，所以這種版本的書面格另有預期標記 `formal_tag`）。",
           "- 每一格的 CLI 摘要行設定標記必須等於工具裡設定表推出的字串，不符就該格失敗。沒有 `--tinylm` 的格另從 dump 重算 top1，要和 rowstats 逐列相同。",
           "- 重跑：`tools/bench.py run --suite v2 <上一版 tag> <commit> --as <新版> --private-root <目錄>`，再 `tools/bench.py table`。新版要先在工具的 `VERSIONS2` 加一列（Release 名、出貨旗標、摘要行設定標記）。`--override-packs off` 是對 S7h 錨點的檢查（只有 v0.4.0、v0.4.1），不寫結果。", ""]
     return "\n".join(L)

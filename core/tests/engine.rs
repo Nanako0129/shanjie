@@ -38,7 +38,7 @@ const NIHAO: &str = "su3cl3"; // standard layout: ㄋㄧˇ ㄏㄠˇ
 const NI: &str = "ㄋㄧˇ";
 const HAO: &str = "ㄏㄠˇ";
 fn blank(handled: bool) -> Output {
-    Output { handled, commit: String::new(), preedit: String::new(), cursor_utf16: 0, candidates: vec![], selected: None, columns: 0, first: 0, total: 0, vertical: 0 }
+    Output { handled, commit: String::new(), preedit: String::new(), cursor_utf16: 0, candidates: vec![], selected: None, columns: 0, first: 0, total: 0, vertical: 0, english_run_utf16_start: 0, english_run_utf16_len: 0 }
 }
 /// Independent expectation of the candidate list. `end`: readings end at `ks.len()`; otherwise they start at 0.
 fn expect_cands(ks: &[&str], from_start: bool) -> Vec<String> {
@@ -343,12 +343,12 @@ fn set_punctuation_validates_and_keeps_the_old_table() {
     assert!(kk(&mut e, KeyKind::Space).candidates == vec!["「".to_string()]);
 }
 
-/// s3d acceptance 5: punctuation counts toward the 40-token limit.
+/// s3d acceptance 5: punctuation counts toward the 128-token limit.
 #[test]
 fn punctuation_counts_toward_the_limit() {
     let mut e = std();
     let mut shown = String::new();
-    for _ in 1..40 {
+    for _ in 1..MAX_SYLLABLES {
         shown = typ(&mut e, "su3").preedit;
     }
     let o = k(&mut e, Key::ch(',', MOD_SHIFT));
@@ -798,6 +798,45 @@ fn row22a_tone_key_on_empty_composition_types_its_mark() {
     }
 }
 
+/// Row 22a with the English-mixing switch on and the digit feature live (docs/contracts/digits.md A.3.4): in the standard layout a tone key
+/// on an empty composition is the digit token (3 types "3", not the mark ˇ); Backspace takes it back, Enter sends it. The Eten layout
+/// keeps the marks (the digit feature is standard-only), switch on or off. Needs the model and `data/lexicon/digits.tsv`.
+#[test]
+fn row22a_with_english_on_the_standard_tone_keys_type_digits() {
+    use core::digits::DigitTable;
+    use core::lm::{CappedLexicon, Lm};
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+    let lm = Lm::load(&root.join("data/lm/bigram.sjlm")).unwrap();
+    let overlay = capping_overlay(&root.join("data/lexicon"), "").unwrap();
+    let capped = Arc::new(CappedLexicon::new(lex(), &overlay, &lm, None).unwrap());
+    let table = Arc::new(DigitTable::parse(&std::fs::read_to_string(root.join("data/lexicon/digits.tsv")).unwrap()).unwrap());
+    let lm = Arc::new(lm);
+    let build = |layout: Layout, on: bool| {
+        let mut e = eng(layout);
+        e.set_lm(lm.clone(), capped.clone());
+        e.set_digit_table(Some(table.clone()));
+        e.set_english(on).unwrap();
+        e
+    };
+    for (key, digit, mark) in [('6', "6", "ˊ"), ('3', "3", "ˇ"), ('4', "4", "ˋ"), ('7', "7", "˙")] {
+        let mut e = build(Layout::Standard, true);
+        let o = k(&mut e, plain(key));
+        assert!(o.handled && o.commit.is_empty() && o.preedit == digit, "standard {key}: the digit, not {mark}");
+        let gone = kk(&mut e, KeyKind::Backspace);
+        assert!(gone.handled && gone.preedit.is_empty(), "standard {key}: Backspace takes it back");
+        k(&mut e, plain(key));
+        assert_eq!(kk(&mut e, KeyKind::Enter).commit, digit, "standard {key}: Enter sends the digit");
+        let mut off = build(Layout::Standard, false);
+        assert_eq!(k(&mut off, plain(key)).preedit, mark, "standard {key}: the switch off is rule 22a");
+    }
+    for (key, mark) in [('2', "ˊ"), ('3', "ˇ"), ('4', "ˋ"), ('1', "˙")] {
+        for on in [true, false] {
+            let mut e = build(Layout::Eten, on);
+            assert_eq!(k(&mut e, plain(key)).preedit, mark, "eten {key}, switch {on}");
+        }
+    }
+}
+
 // ---------- fixed words ----------
 fn pick(e: &mut Engine, list: &[String], word: &str) -> Output {
     let idx = list.iter().position(|w| w == word).unwrap();
@@ -899,16 +938,16 @@ fn reset_both_modes_equal_fresh_engine() {
     assert!(o == blank(true));
 }
 
-// ---------- 40-syllable auto commit ----------
+// ---------- 128-syllable auto commit ----------
 #[test]
-fn auto_commit_at_40th_syllable() {
+fn auto_commit_at_128th_syllable() {
     let mut e = std();
-    for i in 1..40 {
+    for i in 1..MAX_SYLLABLES {
         let o = typ(&mut e, "su3");
         assert!(o.handled && o.commit.is_empty() && o.preedit.chars().count() == i);
     }
     let o = typ(&mut e, "su3");
-    assert!(o.handled && o.commit.chars().count() == 40 && o.preedit.is_empty() && o.cursor_utf16 == 0);
+    assert!(o.handled && o.commit.chars().count() == MAX_SYLLABLES && o.preedit.is_empty() && o.cursor_utf16 == 0);
     let o = typ(&mut e, "su3");
     assert!(o.commit.is_empty() && o.preedit == top(NI));
 }

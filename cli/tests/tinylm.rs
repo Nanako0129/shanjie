@@ -1,6 +1,7 @@
 //! `--tinylm` / `--tinylm-scores` (docs/contracts/s7c-core-tinylm.md section 2.3, acceptance 2) on the toy model of
 //! eval/golden/tinylm-tiny/. Its .sjtl records the hash of eval/golden/kn-tiny/bigram.sjlm, so it is refused with data/lm/bigram.sjlm
-//! as it is; the tests that need it accepted patch the 32 hash bytes (header offset 68) to the model they run with.
+//! as it is; the tests that need it accepted patch the 32 hash bytes (header offset 68) to the model they run with, loaded without
+//! the Kneser-Ney side file (`lm_path`).
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
@@ -15,10 +16,24 @@ fn run(args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_shanjie-eval")).args(args).output().unwrap()
 }
 
+/// data/lm/bigram.sjlm and classes.sjc symlinked into a temporary directory without the kn.sjkn model-v6 puts beside them: the
+/// toy files here are versions 1 and 3 (tuned without a side file), which pair only with the model loaded without KN
+/// (`kneser_ney_side_file_must_be_the_recorded_one` covers the pairing).
+// ponytail: the directory (two symlinks) is left in the temp dir; a OnceLock never drops.
 fn lm_path() -> String {
-    let p = root().join("data/lm/bigram.sjlm");
-    assert!(p.exists() && root().join("data/lm/classes.sjc").exists(), "{NO_LM}");
-    p.to_string_lossy().into_owned()
+    static P: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    P.get_or_init(|| {
+        let real = root().join("data/lm");
+        assert!(real.join("bigram.sjlm").exists() && real.join("classes.sjc").exists(), "{NO_LM}");
+        let d = std::env::temp_dir().join(format!("shanjie-cli-tinylm-nokn-{}", std::process::id()));
+        std::fs::create_dir_all(&d).unwrap();
+        for f in ["bigram.sjlm", "classes.sjc"] {
+            let _ = std::fs::remove_file(d.join(f));
+            std::os::unix::fs::symlink(real.join(f), d.join(f)).unwrap();
+        }
+        d.join("bigram.sjlm").to_string_lossy().into_owned()
+    })
+    .clone()
 }
 
 fn sha_bytes(file: &Path) -> Vec<u8> {
@@ -76,9 +91,12 @@ fn bad_file_and_orphan_scores_option_are_errors() {
     assert!(!orphan.status.success() && text(&orphan.stderr).contains("--tinylm"));
 }
 
-/// Alpha and tau were tuned without the Kneser-Ney side file: with one beside the model, `--tinylm` refuses (and `--no-kn` runs).
+/// model-v6 sections 2.7 and 7 (P4-9): the Kneser-Ney side file beside the model must be the one the `.sjtl` records. Each
+/// mismatch is refused with its own message and remedy: a file tuned without KN (version 1 here) with the side file on suggests
+/// `--no-kn` (which then runs); the version 4 toy (recording kn-tiny/kn.sjkn) runs with that side file on, is refused with another
+/// side file (no `--no-kn` advice) and with `--no-kn` (advice to drop it).
 #[test]
-fn kneser_ney_side_file_is_refused() {
+fn kneser_ney_side_file_must_be_the_recorded_one() {
     let toy = root().join("eval/golden/kn-tiny");
     let (dir, sjtl) = tmp_with_sjtl("kn", &toy.join("bigram.sjlm"));
     for f in ["bigram.sjlm", "classes.sjc", "kn.sjkn"] {
@@ -87,12 +105,30 @@ fn kneser_ney_side_file_is_refused() {
     let rows = dir.join("rows.txt");
     std::fs::write(&rows, "|你好|ㄋㄧˇ ㄏㄠˇ\n").unwrap();
     let lm = dir.join("bigram.sjlm");
-    let base = ["--lm", lm.to_str().unwrap(), "--profile", "chat", "--rows", rows.to_str().unwrap(), "--tinylm", &sjtl];
-    let refused = run(&base);
-    assert!(!refused.status.success() && refused.stdout.is_empty());
-    assert!(text(&refused.stderr).contains(".sjtl") && text(&refused.stderr).contains("Kneser-Ney"), "{}", text(&refused.stderr));
-    let off = run(&[&base[..], &["--no-kn"]].concat());
+    let v4 = root().join("eval/golden/tinylm-tiny/tiny-int8-v4.sjtl");
+    let args = |tl: &str, extra: &[&str]| -> Output {
+        let base = ["--lm", lm.to_str().unwrap(), "--profile", "chat", "--rows", rows.to_str().unwrap(), "--tinylm", tl];
+        run(&[&base[..], extra].concat())
+    };
+    let refused = |o: &Output, has: &[&str], lacks: &[&str]| {
+        let err = text(&o.stderr);
+        assert!(!o.status.success() && o.stdout.is_empty(), "{err}");
+        assert!(err.contains(".sjtl") && err.contains("Kneser-Ney"), "{err}");
+        assert!(has.iter().all(|h| err.contains(h)) && !lacks.iter().any(|l| err.contains(l)), "{err}");
+    };
+    // Tuned without KN, side file on.
+    refused(&args(&sjtl, &[]), &["tuned without", "--no-kn"], &[]);
+    let off = args(&sjtl, &["--no-kn"]);
     assert!(off.status.success(), "{}", text(&off.stderr));
+    // Tuned with this side file: runs with it on.
+    let on = args(v4.to_str().unwrap(), &[]);
+    assert!(on.status.success(), "{}", text(&on.stderr));
+    assert!(text(&on.stdout).contains("+kn:"), "{}", text(&on.stdout));
+    // Tuned with this side file, but it is off.
+    refused(&args(v4.to_str().unwrap(), &["--no-kn"]), &["none is loaded", "drop --no-kn"], &[]);
+    // Another side file beside the model.
+    std::fs::copy(toy.join("kn-beta075.sjkn"), dir.join("kn.sjkn")).unwrap();
+    refused(&args(v4.to_str().unwrap(), &[]), &["another Kneser-Ney side file"], &["--no-kn"]);
     std::fs::remove_dir_all(dir).unwrap();
 }
 
@@ -152,6 +188,80 @@ fn refusals_before_anything_is_read() {
         let o = run(&["--lm", &lm, "--profile", "chat", "--rows", rows.to_str().unwrap(), "--tinylm", &sjtl, flag]);
         assert!(!o.status.success() && text(&o.stderr).contains(".sjtl") && o.stdout.is_empty(), "{flag}: {}", text(&o.stderr));
     }
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+/// The synthetic version 3 toy (eval/golden/tinylm-tiny/tiny-int8-v3.sjtl) with the hash of `lm` and, for both profiles, alpha 100 /
+/// tau infinite / delta 0 (its LLs decide: rows move) at level `moving` (0 conservative, 1 standard, 2 aggressive) and alpha 0
+/// (the n-gram first always stays) at the other two. Offsets: docs/contracts/rerank-strength.md section 2.1.
+fn v3_with_moving(dir: &Path, lm: &Path, moving: u32) -> String {
+    let mut b = std::fs::read(root().join("eval/golden/tinylm-tiny/tiny-int8-v3.sjtl")).unwrap();
+    b[HASH_AT..HASH_AT + 32].copy_from_slice(&sha_bytes(lm));
+    // (alpha, tau, delta offsets, level): chat and formal standard, chat conservative / aggressive, formal conservative / aggressive
+    for (a, t, d, level) in [(36, 44, 100, 1), (52, 60, 108, 1), (116, 124, 132, 0), (140, 148, 156, 2), (164, 172, 180, 0), (188, 196, 204, 2)] {
+        let alpha: f64 = if level == moving { 100.0 } else { 0.0 };
+        b[a..a + 8].copy_from_slice(&alpha.to_le_bytes());
+        b[t..t + 8].copy_from_slice(&f64::INFINITY.to_le_bytes());
+        b[d..d + 8].copy_from_slice(&0f64.to_le_bytes());
+    }
+    let p = dir.join(format!("v3-{moving}.sjtl"));
+    std::fs::write(&p, b).unwrap();
+    p.to_string_lossy().into_owned()
+}
+
+/// The `top1_sha256` of a successful run's summary line.
+fn top1_sha(o: &Output) -> String {
+    assert!(o.status.success(), "{}", text(&o.stderr));
+    let line = text(&o.stdout);
+    line[line.find("'top1_sha256': '").expect("summary line") + 16..].chars().take(64).collect()
+}
+
+/// Rerank strength section 2.3: `--rerank-level` picks the file's set of that level. With the moving set at one level only, that
+/// level changes the chosen candidates (top1 hash differs from the n-gram run) and the other two give exactly the n-gram run,
+/// in both profiles.
+#[test]
+fn rerank_level_uses_that_levels_set() {
+    let lm = lm_path();
+    let (dir, _) = tmp_with_sjtl("level", Path::new(&lm));
+    let names = ["conservative", "standard", "aggressive"];
+    for profile in ["chat", "formal"] {
+        let base = ["--lm", lm.as_str(), "--profile", profile, "--dev", "40"];
+        let ngram = top1_sha(&run(&base));
+        for moving in [0u32, 2] {
+            let sjtl = v3_with_moving(&dir, Path::new(&lm), moving);
+            for (level, name) in names.iter().enumerate() {
+                let sha = top1_sha(&run(&[&base[..], &["--tinylm", &sjtl, "--rerank-level", name]].concat()));
+                assert_eq!(sha == ngram, level as u32 != moving, "{profile}: moving set at {moving}, --rerank-level {name}");
+            }
+        }
+        // the default is standard
+        let sjtl = v3_with_moving(&dir, Path::new(&lm), 1);
+        assert_ne!(top1_sha(&run(&[&base[..], &["--tinylm", &sjtl]].concat())), ngram, "{profile}: default standard");
+    }
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+/// Section 2.3 and 9 (P3-8): a level other than standard on a version 1 or 2 file exits with 2 and says why, before any row;
+/// standard on it runs. Without `--tinylm`, or with an unknown name, it is an error too.
+#[test]
+fn rerank_level_refusals() {
+    let lm = lm_path();
+    let (dir, v1) = tmp_with_sjtl("level-refuse", Path::new(&lm));
+    let base = ["--lm", lm.as_str(), "--profile", "chat", "--dev", "1"];
+    for name in ["conservative", "aggressive"] {
+        let o = run(&[&base[..], &["--tinylm", &v1, "--rerank-level", name]].concat());
+        assert_eq!(o.status.code(), Some(2), "{name}: {}", text(&o.stderr));
+        assert!(text(&o.stderr).contains("--rerank-level") && text(&o.stderr).contains("version") && o.stdout.is_empty());
+    }
+    // any level without --tinylm, standard included: it would silently measure the n-gram alone
+    for name in ["conservative", "standard", "aggressive"] {
+        let o = run(&[&base[..], &["--rerank-level", name]].concat());
+        assert!(!o.status.success() && text(&o.stderr).contains("needs --tinylm") && o.stdout.is_empty(), "{name}: {}", text(&o.stderr));
+    }
+    let o = run(&[&base[..], &["--tinylm", &v1, "--rerank-level", "standard"]].concat());
+    assert!(o.status.success(), "{}", text(&o.stderr));
+    let o = run(&[&base[..], &["--tinylm", &v1, "--rerank-level", "bold"]].concat());
+    assert!(!o.status.success() && text(&o.stderr).contains("--rerank-level") && o.stdout.is_empty());
     std::fs::remove_dir_all(dir).unwrap();
 }
 
@@ -219,4 +329,26 @@ fn dump_words_align_with_dump_and_c_is_the_chosen_index() {
 fn dump_words_refused_with_holdout() {
     let o = run(&["--lm", &lm_path(), "--profile", "chat", "--set", "holdout", "--dump-words", "x.tsv"]);
     assert!(!o.status.success() && text(&o.stderr).contains("holdout"), "{}", text(&o.stderr));
+}
+
+/// The summary line records a non-standard level (`+rl:<level>`, after `+tl:`) so a tool comparing the whole setting tag sees a run
+/// that is not the shipping setting; standard (given or default) leaves the line as before.
+#[test]
+fn summary_line_records_a_non_standard_level() {
+    let lm = lm_path();
+    let (dir, _) = tmp_with_sjtl("level-tag", Path::new(&lm));
+    let sjtl = v3_with_moving(&dir, Path::new(&lm), 1);
+    let base = ["--lm", lm.as_str(), "--profile", "chat", "--dev", "5", "--tinylm", sjtl.as_str()];
+    let head = |extra: &[&str]| {
+        let o = run(&[&base[..], extra].concat());
+        assert!(o.status.success(), "{}", text(&o.stderr));
+        text(&o.stdout).split("  {").next().unwrap().to_string()
+    };
+    let plain = head(&[]);
+    assert!(plain.contains("+tl:") && !plain.contains("+rl:"), "{plain}");
+    assert_eq!(head(&["--rerank-level", "standard"]), plain);
+    for name in ["conservative", "aggressive"] {
+        assert_eq!(head(&["--rerank-level", name]), format!("{plain}+rl:{name}"));
+    }
+    std::fs::remove_dir_all(dir).unwrap();
 }

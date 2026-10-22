@@ -23,6 +23,96 @@ public enum InstallerPlan: Equatable, Sendable {
         }
     }
 
-    /// Whether the primary action runs the file copy (install-ime.sh) before enabling.
-    public var copiesFiles: Bool { self == .install || self == .update }
+    /// The shipping bundle ID, the only one the installer installs.
+    public static let shippingBundleID = "com.nyanako.inputmethod.shanjie"
+}
+
+/// docs/contracts/system-install.md section 2.1: the two options on the welcome screen.
+public enum InstallChoice: Equatable, Sendable {
+    /// /Library/Input Methods, root-owned, put there by the root stage (section 2.3).
+    case thisMac
+    /// ~/Library/Input Methods, the path before system-install.md.
+    case accountOnly
+}
+
+/// docs/contracts/system-install.md section 2.2: the decision table. Pure, unit tested row by row.
+public struct InstallDecision: Equatable, Sendable {
+    public enum Action: Equatable, Sendable {
+        /// The root stage puts the bundled copy into /Library (none there, an older one, or a reinstall).
+        case copyToSystem
+        /// /Library holds the same version: enable only; the secondary action is `reinstallSystem`.
+        case enableSystemSame
+        /// /Library holds a newer version: enable only, never downgrade.
+        case enableSystemNewer
+        /// /Library holds the same or a newer version and the account layer a copy: only the user
+        /// stage (the account copy moves away), no root stage and no password.
+        case moveToSystem
+        /// The account layer, as before system-install.md, with the plan from the account copy.
+        case account(InstallerPlan)
+        /// "My Account Only" while /Library holds a copy: stop and change nothing.
+        case blocked
+        /// "This Mac" while the account layer holds a version newer than the bundled one: never
+        /// downgrade; stop and change nothing (that version's installer can install it for this Mac).
+        case accountNewer
+    }
+
+    public var action: Action
+    /// The user stage moves the account-layer copy (and the legacy shanjie.app) to .shanjie-previous;
+    /// the installer says so while it runs.
+    public var movesAccountCopy: Bool
+    /// The location changed: registration is forced (`Registration.decide(moved:)`) and the last
+    /// screen asks for a log out (`InstallerFlow.next(after:moved:firstInstall:)`).
+    public var moved: Bool
+    /// A "This Mac" install where the system had no copy before (no account copy, `listedBeforeCopy` false at the welcome screen): after
+    /// the log out the user still adds it in System Settings (section 2.4, revision of 2026-10-21). A move keeps the
+    /// system's listing, so it only logs out.
+    public var firstInstall: Bool
+
+    public init(action: Action, movesAccountCopy: Bool = false, moved: Bool = false, firstInstall: Bool = false) {
+        self.action = action
+        self.movesAccountCopy = movesAccountCopy
+        self.moved = moved
+        self.firstInstall = firstInstall
+    }
+
+    /// The secondary action of `enableSystemSame`: the row "older, no account copy".
+    public static let reinstallSystem = InstallDecision(action: .copyToSystem)
+
+    /// `system`: the version of /Library's copy (nil: none; "" when one is there but its version
+    /// cannot be read). `accountCopy`: whether the account layer
+    /// holds the shipping-ID copy under either name; `account`: the version of its 善解輸入法.app.
+    /// `listedBeforeCopy`: whether the system had the shipping ID before (`Registration.listedOrEnabled`: TIS lists its input mode,
+    /// or the user's enabled list still has it), read once at the welcome screen before anything was copied (section 2.2:
+    /// `Registration.run`'s own read comes after the copy and may already see the bundle just put in place). A stale enabled entry
+    /// counts on purpose: with one, the "add it in System Settings" path ends with an entry the user must remove and add again.
+    public static func decide(choice: InstallChoice, system: String?, accountCopy: Bool, account: String?,
+                              bundled: String, listedBeforeCopy: Bool) -> InstallDecision {
+        // A /Library copy whose version cannot be read is there all the same: same location, taken
+        // as older (the root stage then refuses to replace it, since it cannot compare the versions).
+        let systemPlan = system == "" ? .update : InstallerPlan.decide(installed: system, bundled: bundled)
+        switch choice {
+        case .thisMac:
+            // Never downgrade (added in implementation, code review): moving a newer account copy
+            // aside to install the older bundled one would be one.
+            if accountCopy, InstallerPlan.decide(installed: account, bundled: bundled) == .enableNewer {
+                return InstallDecision(action: .accountNewer)
+            }
+            switch systemPlan {
+            case .install:
+                return InstallDecision(action: .copyToSystem, movesAccountCopy: accountCopy, moved: true,
+                                       firstInstall: !accountCopy && !listedBeforeCopy)
+            case .update:
+                return InstallDecision(action: .copyToSystem, movesAccountCopy: accountCopy, moved: accountCopy)
+            case .enableSame, .enableNewer:
+                if accountCopy { return InstallDecision(action: .moveToSystem, movesAccountCopy: true, moved: true) }
+                return InstallDecision(action: systemPlan == .enableSame ? .enableSystemSame : .enableSystemNewer)
+            }
+        case .accountOnly:
+            // Any copy in /Library blocks, also one whose version cannot be read ("").
+            if system != nil { return InstallDecision(action: .blocked) }
+            // The reverse move: installed in /Library before, removed per the README, still in the enabled list.
+            if !accountCopy && listedBeforeCopy { return InstallDecision(action: .account(.install), moved: true) }
+            return InstallDecision(action: .account(InstallerPlan.decide(installed: account, bundled: bundled)))
+        }
+    }
 }

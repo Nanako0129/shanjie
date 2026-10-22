@@ -43,6 +43,11 @@ public protocol CandidatePanel: AnyObject {
     /// `columns` is 0 for both. The panel draws what it is told and reads no setting.
     func show(_ candidates: [String], notes: [String?], selected: Int, columns: Int, first: Int, total: Int, vertical: Int,
               lineRect: NSRect?, appearance: NSAppearance?, glassTint: Double)
+    /// zhen-inline section 1.3f: a one-line hint in the candidate window's place, drawn like the prediction row (`vertical` 2 when
+    /// the vertical orientation is chosen, else 0) but without a number's room, an expand mark or a highlight. It is not a
+    /// candidate: the session ignores a click on it. Replaces whatever was on screen without an animation; hidden by `hide()`
+    /// like any other content.
+    func showHint(_ text: String, vertical: Int, lineRect: NSRect?, appearance: NSAppearance?, glassTint: Double)
     func hide()
     /// Re-applies the tint to what is on screen now, without a new `show` (the slider moved while the panel is up).
     func setGlassTint(_ glassTint: Double)
@@ -118,18 +123,39 @@ public final class MemoryAbbreviationStore: AbbreviationStore {
     public init(_ abbreviation: Bool? = nil) { self.abbreviation = abbreviation }
 }
 
-/// Where the "中英混打（實驗）" switch is kept (docs/contracts/zhen-mixed.md section 3.2): `nil` means never chosen, which is off.
+/// Where the "中英文之間自動加空格" switch is kept (docs/contracts/cjk-spacing.md section 2): `nil` means never chosen, which is off.
+@MainActor
+public protocol SpacingStore: AnyObject {
+    var spacing: Bool? { get set }
+}
+
+/// The in-memory SpacingStore.
+@MainActor
+public final class MemorySpacingStore: SpacingStore {
+    public var spacing: Bool?
+    public init(_ spacing: Bool? = nil) { self.spacing = spacing }
+}
+
+/// Where the "中英混打（實驗）" switch is kept (docs/contracts/zhen-mixed.md section 3.2): `nil` means never chosen, which is on (digits.md A.3.7;
+/// it was off before). A saved value, either way, wins.
 /// Same arrangement as `AbbreviationStore`.
 @MainActor
 public protocol EnglishStore: AnyObject {
     var english: Bool? { get set }
+    /// The display choice under it (docs/contracts/zhen-inline.md section 2): true shows the English as it is typed, false only
+    /// when Space opens the window. `nil` means never chosen, which is true.
+    var englishInline: Bool? { get set }
 }
 
 /// The in-memory EnglishStore.
 @MainActor
 public final class MemoryEnglishStore: EnglishStore {
     public var english: Bool?
-    public init(_ english: Bool? = nil) { self.english = english }
+    public var englishInline: Bool?
+    public init(_ english: Bool? = nil, inline: Bool? = nil) {
+        self.english = english
+        self.englishInline = inline
+    }
 }
 
 /// Where the 模糊輸入 flags are kept (docs/contracts/fuzzy-input.md section 2.2): bits 0-3 the four sound pairs, bit 4 the adjacent-key
@@ -190,17 +216,38 @@ public final class MemoryCandidateOrientationStore: CandidateOrientationStore {
 
 /// Where the "語意校正" switch is kept (docs/contracts/s7c2b-shell-rerank.md section 2.2): `nil` means never chosen, which is on
 /// (docs/contracts/s7h-tinylm-v3.md section 2.3; off before S7h).
-/// Same arrangement as `PredictionStore`.
+/// Same arrangement as `PredictionStore`. `rerankLevel` is the strength (docs/contracts/rerank-strength.md section 3): the raw
+/// value of a `RerankLevel`; `nil` or any other string is standard, like `ProfileModeStore`.
 @MainActor
 public protocol RerankStore: AnyObject {
     var rerank: Bool? { get set }
+    var rerankLevel: String? { get set }
 }
 
 /// The in-memory RerankStore.
 @MainActor
 public final class MemoryRerankStore: RerankStore {
     public var rerank: Bool?
-    public init(_ rerank: Bool? = nil) { self.rerank = rerank }
+    public var rerankLevel: String?
+    public init(_ rerank: Bool? = nil, level: String? = nil) {
+        self.rerank = rerank
+        rerankLevel = level
+    }
+}
+
+/// 語意校正的強度 (docs/contracts/rerank-strength.md section 3): stored by raw value; `code` is the C ABI's level, fixed per case.
+public enum RerankLevel: String, CaseIterable, Sendable {
+    case conservative
+    case standard
+    case aggressive
+
+    var code: UInt32 {
+        switch self {
+        case .conservative: return 0
+        case .standard: return 1
+        case .aggressive: return 2
+        }
+    }
 }
 
 /// Runs a rerank job off the main thread (s7c2b section 2.1): `job.run()` on another thread, then `done` with its code on the
@@ -338,10 +385,16 @@ public final class Shell {
     /// stuck keys are read against V3 section 12.2, not reproduced: Space and tone keys are eaten while two or more units are
     /// pending). Hidden means always off; the stored value is neither read nor written.
     public let showsAbbreviation: Bool
+    private let spacingStore: SpacingStore
+    /// cjk-spacing: space between Han and ASCII letters or digits in the text the shell commits (default off).
+    private(set) var spacingOn = false
     private let englishStore: EnglishStore
-    /// zhen-mixed: the experimental English window (default off); sent to every engine `build()` makes. Unlike the abbreviation
+    /// zhen-mixed: the experimental English window (default on since digits.md A.3.7; absent in the store is on, a saved off stays off); sent to every engine `build()` makes. Unlike the abbreviation
     /// switch it ships (the app shows it).
     private(set) var englishOn = false
+    /// zhen-inline section 2: how the English shows while it is typed (default true: as letters, `UserDefaults` key
+    /// `englishInline`, absent is true); sent to every engine `build()` makes. Only matters while `englishOn`.
+    private(set) var englishInlineOn = true
     /// Whether this engine loaded the word list (`Resources/english-words.txt`); false greys the menu item and the settings toggle
     /// (the checkmark keeps the setting), as `rerankAvailable` does for the small model.
     private(set) var englishAvailable = false
@@ -372,6 +425,8 @@ public final class Shell {
     /// The small model's file in Resources (section 2.3). The only path it is loaded from: `build()` and the selftest join it to
     /// `resources`; no init parameter, defaults key or environment variable names another.
     static let tinyLMFile = "tinylm.sjtl"
+    /// colloquial-term.md section 2.3: the colloquial table (常談 SJ-CL), in Resources next to the other model files.
+    static let colloquialFile = "colloquial.sjlm"
     /// zhen-mixed section 3.2: the English word list, in Resources next to the model (build-app.sh generates it).
     static let englishFile = "english-words.txt"
     private let rerankRunner: RerankRunner
@@ -389,18 +444,29 @@ public final class Shell {
     var rerankApply: (RerankJob, CoreEngine) -> CoreResult = { $0.apply(on: $1) }
     /// Every value `build()` passed to `setRerank`, in order (the tests read it: a nil store must send true, not nothing).
     private(set) var rerankSent: [Bool] = []
+    /// Rerank strength (section 3): the stored level, sent to every engine `build()` makes and on every change.
+    private(set) var rerankLevel: RerankLevel
+    /// Every level code sent to an engine, by `build()` and by `setRerankLevel`, in order (the tests read it, as `rerankSent`).
+    private(set) var rerankLevelSent: [UInt32] = []
+    /// `shanjie_engine_rerank_levels` of the current engine after `build()` loaded the small model (0 without one).
+    private(set) var rerankLevels: UInt32 = 0
     /// Whether the current engine has the small model (set by every `build()`): false when there is no engine, when load_lm
     /// failed (load_tinylm is then skipped) or when load_tinylm returned non-zero. Without it no job is ever made.
     private(set) var rerankAvailable = false
     /// The 語意校正 menu item and settings toggle are enabled only when the switch can do something: the demotion table on (the
     /// core makes no job without it, F11) and the small model loaded. The checkmark still shows the stored choice.
     var rerankEnabled: Bool { demoteOn && rerankAvailable }
+    /// The settings window's 強度 control (section 3) is enabled only when the switch is on and can do something, and the loaded
+    /// model offers the conservative and the aggressive set (a version 3 file); otherwise it shows greyed with the stored choice.
+    var rerankLevelEnabled: Bool { rerankOn && rerankEnabled && rerankLevels & 0b101 == 0b101 }
     /// The 中英混打（實驗） menu item and settings toggle, likewise: the word list loaded and the standard layout (the core records no
     /// shadow in the Eten layout, zhen-mixed section 2.1, so the switch would do nothing there). The checkmark still shows the choice.
     var englishEnabled: Bool { englishAvailable && mode == .standard }
     /// The adjacent-key checkbox of 模糊輸入: the core's neighbour table is the standard layout's keyboard, so bit 4 does nothing
     /// in the Eten layout and the checkbox is greyed there (the value is kept; fuzzy-input section 2.2).
     var fuzzyAdjacentEnabled: Bool { mode == .standard }
+    /// The 英文的顯示 choice under it is enabled on the same condition and while the switch itself is on.
+    var englishInlineEnabled: Bool { englishEnabled && englishOn }
 
     /// A job waiting for the runner, with the session and engine it was taken for. Weak (F3): a waiting job keeps neither alive,
     /// and an identity is never compared by address.
@@ -443,6 +509,11 @@ public final class Shell {
     /// synchronous IPC on the key path, so a pure selection move (same preedit and cursor) reuses it.
     /// Cleared whenever the panel hides: commit, reset, owner change.
     var lineCache: (preedit: String, cursor: Int, rect: NSRect?)?
+    /// Zhen-inline section 1.3f: the hint is anchored at the start of the open English run, and the `lineRect` answer for that
+    /// start is kept for the run's lifetime, so only a run's first key asks the client. Cleared when the hint goes.
+    var hintAnchor: (start: Int, rect: NSRect?)?
+    /// Whether the hint is what the panel shows now. A click on it is not a candidate pick (`Session.candidateSelected`).
+    private(set) var hintShown = false
 
     /// `latest_source_revision` ("2026-10-06T00:08:14Z") of the manifest at `url` as a UTC "yyyy-MM-dd"; `nil` for anything else.
     static func readAcgDataDate(_ url: URL) -> String? {
@@ -486,6 +557,7 @@ public final class Shell {
     /// UserDefaults-backed store.
     /// `punctuationTable`: Apple's punctuation candidate table (s3e); tests pass another path.
     /// `punctuationNames`: Apple's punctuation names (s3f); tests pass another path.
+    /// `spacingStore`: the 中英文之間自動加空格 switch (cjk-spacing section 2). Required, with no default, like the other stores.
     /// `showsAbbreviation`: whether the abbreviation switch is offered. The default `true` is for the tests; the app passes `false`
     /// (v0.4.0). No test sees the app's value: the release device check does (no 可省略韻母 in the menu).
     public init(resources: URL, panel: CandidatePanel, isSecureInput: @escaping () -> Bool,
@@ -497,7 +569,8 @@ public final class Shell {
                 fuzzyStore: FuzzyStore = MemoryFuzzyStore(),
                 punctuationTable: URL = PunctuationTable.systemURL,
                 punctuationNames: URL = PunctuationNames.systemURL,
-                showsAbbreviation: Bool = true) {
+                showsAbbreviation: Bool = true,
+                spacingStore: SpacingStore) {
         self.resources = resources
         self.learningDirectory = learningDirectory
         self.dialogs = dialogs
@@ -521,8 +594,11 @@ public final class Shell {
         self.abbreviationStore = abbreviationStore
         self.showsAbbreviation = showsAbbreviation
         abbreviationOn = showsAbbreviation && abbreviationStore.abbreviation == true
+        self.spacingStore = spacingStore
+        spacingOn = spacingStore.spacing == true
         self.englishStore = englishStore
-        englishOn = englishStore.english == true
+        englishOn = englishStore.english ?? true // digits.md A.3.7: on unless the person turned it off (a saved value wins)
+        englishInlineOn = englishStore.englishInline ?? true
         self.fuzzyStore = fuzzyStore
         fuzzyFlags = (fuzzyStore.fuzzyFlags ?? 0) & 0b11111
         self.acgPackStore = acgPackStore
@@ -533,6 +609,7 @@ public final class Shell {
         candidateVertical = candidateOrientationStore.candidateVertical ?? false
         self.rerankStore = rerankStore
         rerankOn = rerankStore.rerank ?? true
+        rerankLevel = rerankStore.rerankLevel.flatMap(RerankLevel.init(rawValue:)) ?? .standard
         self.rerankRunner = rerankRunner
         self.profileModeStore = profileModeStore
         profileMode = profileModeStore.profileMode.flatMap(ProfileMode.init(rawValue:)) ?? .auto
@@ -559,6 +636,9 @@ public final class Shell {
 
     /// Set by the app to show the settings window; the menu's 善解設定… calls it.
     public var onOpenSettings: (() -> Void)?
+    /// Set by the app (docs/contracts/about-update.md): the update state the menu and the 關於 page read; `nil` in the tests
+    /// that do not set it.
+    public var updates: Updates?
     func openSettings() { onOpenSettings?() }
 
     /// The menu's switches, for a caller with no session (the settings window): the owner of the
@@ -587,8 +667,16 @@ public final class Shell {
         if let o = owner { o.applyCandidateVertical(on) } else { dropOnFailure(setCandidateVertical(on)) }
     }
 
+    func applyEnglishInline(_ on: Bool) {
+        if let o = owner { o.applyEnglishInline(on) } else { dropOnFailure(setEnglishInline(on)) }
+    }
+
     func applyRerank(_ on: Bool) {
         if let o = owner { o.applyRerank(on) } else { dropOnFailure(setRerank(on)) }
+    }
+
+    func applyRerankLevel(_ level: RerankLevel) {
+        if let o = owner { o.applyRerankLevel(level) } else { dropOnFailure(setRerankLevel(level)) }
     }
 
     /// No session to ask: a failed core call is logged and the composition dropped, as `Session.fail` does.
@@ -666,6 +754,13 @@ public final class Shell {
         return engine?.setPrediction(on)
     }
 
+    /// The settings window's 中英文之間自動加空格 (cjk-spacing section 2): the shell's own switch, nothing goes to the core.
+    func setSpacing(_ on: Bool) {
+        spacingOn = on
+        spacingStore.spacing = on
+        changed()
+    }
+
     /// The menu's choice (V3 section 12.1): stored, and sent to the engine; the snapshot is for the caller to show.
     func setAbbreviation(_ on: Bool) -> CoreResult? {
         guard showsAbbreviation else { return nil }
@@ -693,6 +788,15 @@ public final class Shell {
         return engine?.setFuzzy(fuzzyFlags)
     }
 
+    /// The settings window's 英文的顯示 choice (zhen-inline section 2): stored, and sent to the engine; the snapshot is for the
+    /// caller to show, so a composition on screen is drawn again in the new display.
+    func setEnglishInline(_ on: Bool) -> CoreResult? {
+        englishInlineOn = on
+        englishStore.englishInline = on
+        defer { changed() }
+        return engine?.setEnglishInline(on)
+    }
+
     /// The settings window's choice (candidate-vertical contract section 2.1): stored, and sent to the engine, which applies it
     /// to the next window that opens. An open candidate window keeps its orientation; a prediction row on screen is re-rendered
     /// in the snapshot, for the caller to show. In the app only the settings window calls this, and a click there is inferred
@@ -713,6 +817,17 @@ public final class Shell {
         if !on { rerankPending = nil }
         defer { changed() }
         return engine?.setRerank(on)
+    }
+
+    /// The settings window's 強度 (rerank-strength section 3): stored, and sent to the engine, which recomputes the composition;
+    /// the snapshot is for the caller to show (its job uses the new level; one already taken is stale in the core).
+    func setRerankLevel(_ level: RerankLevel) -> CoreResult? {
+        rerankLevel = level
+        rerankStore.rerankLevel = level.rawValue
+        defer { changed() }
+        guard let engine else { return nil }
+        rerankLevelSent.append(level.code)
+        return engine.setRerankLevel(level.code)
     }
 
     /// Section 2.1: a job taken for `session` from `engine` runs now, or waits if another is running (only the latest waits).
@@ -766,6 +881,7 @@ public final class Shell {
     private func build() {
         engine = nil  // free the old engine first: only one exists at a time
         rerankAvailable = false
+        rerankLevels = 0
         englishAvailable = false
         rerankPending = nil  // the old engine's; one still running is not applied (its engine is gone)
         let packsDir = resources.appendingPathComponent("packs").path
@@ -789,6 +905,12 @@ public final class Shell {
             let tiny = e.loadTinyLM(path: resources.appendingPathComponent(Shell.tinyLMFile).path)
             if tiny != 0 { Log.shell.error("shanjie_engine_load_tinylm failed, code \(tiny); no rerank") }
             rerankAvailable = tiny == 0
+            // colloquial-term.md section 2.3: after load_tinylm, and only when it loaded (the term applies to the small model's rerank, so there is
+            // nothing to load it for otherwise; "no rerank" is already logged above). A failure is logged (the code only) and the rerank runs without the term.
+            if tiny == 0 {
+                let colloquial = e.loadColloquial(path: resources.appendingPathComponent(Shell.colloquialFile).path)
+                if colloquial != 0 { Log.shell.error("shanjie_engine_load_colloquial failed, code \(colloquial); rerank without the colloquial term") }
+            }
         }
         // zhen-mixed section 3.2: the word list. A failure leaves the engine without it (the switch then has no effect) and greys the
         // item; only the code is logged.
@@ -809,6 +931,10 @@ public final class Shell {
         if case .failed(let c) = e.setEnglish(englishOn) {
             Log.shell.error("shanjie_engine_set_english failed, code \(c)")
         }
+        // And its display choice (zhen-inline section 2), every time for the same reason: the core's default is true.
+        if case .failed(let c) = e.setEnglishInline(englishInlineOn) {
+            Log.shell.error("shanjie_engine_set_english_inline failed, code \(c)")
+        }
         // And the 模糊輸入 flags (fuzzy-input section 2.2), every time: the core's default is 0.
         fuzzySent.append(fuzzyFlags)
         if case .failed(let c) = e.setFuzzy(fuzzyFlags) {
@@ -824,6 +950,13 @@ public final class Shell {
         if case .failed(let c) = e.setRerank(rerankOn) {
             Log.shell.error("shanjie_engine_set_rerank failed, code \(c)")
         }
+        // Rerank strength (section 3, P4-13): after load_tinylm and before `engine = e`, the stored level, every build (the core
+        // starts at standard); then what the loaded model offers, for the settings window.
+        rerankLevelSent.append(rerankLevel.code)
+        if case .failed(let c) = e.setRerankLevel(rerankLevel.code) {
+            Log.shell.error("shanjie_engine_set_rerank_level failed, code \(c)")
+        }
+        rerankLevels = e.rerankLevels()
         if case .failed(let c) = e.setProfile(profile) {
             Log.shell.error("shanjie_engine_set_profile failed, code \(c)")
         }
@@ -869,12 +1002,26 @@ public final class Shell {
         // Only an exact punctuation mark has a name: a word candidate is never a key of the table.
         let notes = list.map { names[$0] }
         shownVertical = vertical
+        hintShown = false
         panel.show(list, notes: notes, selected: selected, columns: columns, first: first, total: total, vertical: vertical,
                    lineRect: lineRect, appearance: appearance, glassTint: glassTint)
     }
 
+    /// The hint shown while an English run is open (zhen-inline section 1.3f).
+    static let englishRunHint = "空白：英文斷開"
+
+    /// The hint in the candidate window's place, in the prediction row's orientation. It is not a candidate list, so Page Up /
+    /// Down see no vertical window (`verticalOpen` is false for the prediction row).
+    func showHint(lineRect: NSRect?, appearance: NSAppearance?) {
+        shownVertical = candidateVertical ? VerticalLayout.predictions : 0
+        hintShown = true
+        panel.showHint(Self.englishRunHint, vertical: shownVertical, lineRect: lineRect, appearance: appearance, glassTint: glassTint)
+    }
+
     func hideCandidates() {
         lineCache = nil
+        hintAnchor = nil
+        hintShown = false
         shownVertical = 0
         panel.hide()
     }
@@ -896,6 +1043,10 @@ public final class Shell {
 public final class Session {
     let shell: Shell
     let client: TextClient
+    /// cjk-spacing section 1: the character before the cursor as far as this session knows it; `nil` when unknown. Cleared when
+    /// a composition may start, read from the client by the key that may start it, set to the last character of every commit,
+    /// cleared by a pass-through key, a deactivation and an owner change. Never logged.
+    private var spacingPrev: Character?
 
     public init(shell: Shell, client: TextClient) {
         self.shell = shell
@@ -938,6 +1089,7 @@ public final class Session {
 
     /// Only the owner acts; a late call from any other controller does nothing at all.
     public func deactivate() {
+        spacingPrev = nil
         guard shell.owner === self else { return }
         // Never send the composition into a field that has just turned secure.
         if shell.composing { finish(mode: shell.isSecureInput() ? 1 : 0) }
@@ -953,14 +1105,18 @@ public final class Session {
     /// A mouse click on a candidate (s3b2 section 8.3): `i` is its position in the output the panel
     /// shows. The core picks it through the same path as Enter and checks the range (code 2 leaves
     /// everything as it was); the learning gate is sampled first, as for a key.
-    public func candidateSelected(at i: Int) {
-        guard shell.owner === self, let engine = shell.engine else { return }
+    /// Returns whether a pick was sent to the core (false: not the owner, or the hint is what the panel shows).
+    @discardableResult
+    public func candidateSelected(at i: Int) -> Bool {
+        // The hint is on the panel, not a list: a click on it picks nothing and never reaches the core.
+        guard shell.owner === self, let engine = shell.engine, !shell.hintShown else { return false }
         applyLearningGate(engine)
         switch engine.pick(UInt32(truncatingIfNeeded: i)) {
         case .ok(let o): apply(o)
         case .failed(2): Log.shell.error("core call failed, code 2")
         case .failed(let c): _ = fail(c)
         }
+        return true
     }
 
     /// The input method menu (section 13.2).
@@ -978,6 +1134,8 @@ public final class Session {
         if shell.composing {
             if let previous = shell.owner { previous.finish(mode: 0) } else { shell.discardOrphan() }
         }
+        shell.owner?.spacingPrev = nil
+        spacingPrev = nil
         shell.owner = self
         return true
     }
@@ -1004,6 +1162,16 @@ public final class Session {
     /// The menu's 中英混打 switch: the snapshot is shown, if this session owns the composition.
     func applyEnglish(_ on: Bool) {
         switch shell.setEnglish(on) {
+        case .ok(let o)? where shell.owner === self: apply(o)
+        case .failed(let c)?: _ = fail(c)
+        default: break
+        }
+    }
+
+    /// The settings window's 英文的顯示 choice: the snapshot is shown, if this session owns the composition (letters turn into
+    /// Zhuyin or back on screen).
+    func applyEnglishInline(_ on: Bool) {
+        switch shell.setEnglishInline(on) {
         case .ok(let o)? where shell.owner === self: apply(o)
         case .failed(let c)?: _ = fail(c)
         default: break
@@ -1045,6 +1213,15 @@ public final class Session {
     /// The menu's 語意校正 switch: the snapshot is shown, if this session owns the composition.
     func applyRerank(_ on: Bool) {
         switch shell.setRerank(on) {
+        case .ok(let o)? where shell.owner === self: apply(o)
+        case .failed(let c)?: _ = fail(c)
+        default: break
+        }
+    }
+
+    /// The settings window's 強度: the snapshot is shown, if this session owns the composition.
+    func applyRerankLevel(_ level: RerankLevel) {
+        switch shell.setRerankLevel(level) {
         case .ok(let o)? where shell.owner === self: apply(o)
         case .failed(let c)?: _ = fail(c)
         default: break
@@ -1107,15 +1284,24 @@ public final class Session {
         // Section 2: once per composition, before the key that may start it and so before its
         // first setMarkedText. Only a character key without Control, Option, Command or Caps Lock
         // can start one, so pass-through keys outside a composition never read the client.
-        if !shell.composing && key.kind == KeyMap.char && key.modifiers & ~1 == 0 {
-            let code = engine.setLeftContext(paused ? nil : leftContext())
-            if code != 0 { Log.shell.error("shanjie_engine_set_left_context failed, code \(code)") }
+        // cjk-spacing section 1: p starts as unknown for every key that may start a composition, modifiers or not, and is
+        // taken from the same read.
+        if !shell.composing {
+            spacingPrev = nil
+            if key.kind == KeyMap.char && key.modifiers & ~1 == 0 {
+                let read = paused ? nil : leftContext()
+                spacingPrev = read?.last
+                let code = engine.setLeftContext(read?.han)
+                if code != 0 { Log.shell.error("shanjie_engine_set_left_context failed, code \(code)") }
+            }
         }
         switch engine.key(key) {
         case .ok(let o):
             // handled 0 with nothing to commit is a pure pass-through (s3a rules 1 and 22): the
-            // core's state is unchanged, so the client is not touched either.
+            // core's state is unchanged, so the client is not touched either. The app inserts or moves
+            // the cursor by itself then, so p is unknown (cjk-spacing section 1).
             if o.handled || !o.commit.isEmpty { apply(o) }
+            if !o.handled { spacingPrev = nil }
             return o.handled
         case .failed(let c):
             return fail(c)
@@ -1133,35 +1319,67 @@ public final class Session {
         }
     }
 
-    /// Section 7: commit first, then the preedit (single underline, caret at cursor_utf16), then
-    /// the candidates.
+    /// Section 7: commit first, then the preedit (single underline with a thick one over the open English run, caret at
+    /// cursor_utf16), then the candidates.
     private func apply(_ o: CoreOutput) {
         if !o.commit.isEmpty {
-            client.insertText(o.commit, replacementRange: NSRange(location: NSNotFound, length: 0))
+            var text = o.commit
+            if shell.spacingOn {
+                text = CJKSpacing.apply(previous: spacingPrev, text: text)
+            }
+            spacingPrev = text.last
+            client.insertText(text, replacementRange: NSRange(location: NSNotFound, length: 0))
         }
         if !o.preedit.isEmpty {
-            let marked = NSAttributedString(
-                string: o.preedit, attributes: [.underlineStyle: NSUnderlineStyle.single.rawValue])
-            client.setMarkedText(marked, selectionRange: NSRange(location: o.cursorUTF16, length: 0))
+            client.setMarkedText(Self.marked(o), selectionRange: NSRange(location: o.cursorUTF16, length: 0))
         } else if shell.composing {
             clearMarkedText()
         }
         shell.composing = !o.preedit.isEmpty
-        if o.candidates.isEmpty {
+        // Zhen-inline section 1.3f: an open English run has no candidates, so the hint takes the window's place.
+        let hint = o.candidates.isEmpty && o.englishRunLength > 0
+        if o.candidates.isEmpty && !hint {
             shell.hideCandidates()
         } else {
             let cursor = Int(o.cursorUTF16)
-            let rect: NSRect?
-            if let c = shell.lineCache, c.preedit == o.preedit, c.cursor == cursor {
-                rect = c.rect
+            if hint {
+                // Anchored at the run's start, asked once per run (the cursor moves a letter per key; the start does not).
+                let start = o.englishRunStart
+                let rect: NSRect?
+                if let a = shell.hintAnchor, a.start == start {
+                    rect = a.rect
+                } else {
+                    rect = client.lineRect(cursor: start)
+                    shell.hintAnchor = (start, rect)
+                }
+                shell.showHint(lineRect: rect, appearance: client.appearance)
             } else {
-                rect = client.lineRect(cursor: cursor)
-                shell.lineCache = (o.preedit, cursor, rect)
+                shell.hintAnchor = nil
+                let rect: NSRect?
+                if let c = shell.lineCache, c.preedit == o.preedit, c.cursor == cursor {
+                    rect = c.rect
+                } else {
+                    rect = client.lineRect(cursor: cursor)
+                    shell.lineCache = (o.preedit, cursor, rect)
+                }
+                shell.showCandidates(o.candidates, selected: o.selected, columns: o.columns, first: o.first, total: o.total,
+                                     vertical: o.vertical, lineRect: rect, appearance: client.appearance)
             }
-            shell.showCandidates(o.candidates, selected: o.selected, columns: o.columns, first: o.first, total: o.total,
-                                 vertical: o.vertical, lineRect: rect, appearance: client.appearance)
         }
         takeRerank()
+    }
+
+    /// Section 7 and zhen-inline section 1.3f: the preedit with a single underline, and a thick one over the open English run
+    /// (clamped to the text, so a wrong range from the core can never throw).
+    static func marked(_ o: CoreOutput) -> NSAttributedString {
+        let text = NSMutableAttributedString(
+            string: o.preedit, attributes: [.underlineStyle: NSUnderlineStyle.single.rawValue])
+        let run = NSRange(location: o.englishRunStart, length: o.englishRunLength)
+        let range = NSIntersectionRange(run, NSRange(location: 0, length: text.length))
+        if range.length > 0 {
+            text.addAttribute(.underlineStyle, value: NSUnderlineStyle.thick.rawValue, range: range)
+        }
+        return text
     }
 
     /// Section 7, non-zero return code: the core discards its composition too (reset mode 1; it

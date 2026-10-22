@@ -77,24 +77,83 @@ def fixed_broken(rows, alpha, tau, delta, col="ll", names=None):
     return f, b
 
 
-def select_weighted(sets, weight, col="ll", names=TUNING, cap=None):
+def grid_cells(rows, col="ll"):
+    """Every (alpha, tau, delta, fixed, broken) of the grid over a flat list of rows, in select_weighted's iteration order."""
+    return [(alpha, tau, delta, *fixed_broken(rows, alpha, tau, delta, col)) for alpha in ALPHAS for tau in TAUS for delta in DELTAS]
+
+
+def n_jright(rows):
+    """Informational count. J-right: rows whose n-gram first is correct (the only rows a fusion can break)."""
+    return sum(bool(r["ok"][0]) for r in rows)
+
+
+def _choose(cells, weight, n, cap, cap_ub):
+    best = key = None
+    ub = {}
+    for alpha, tau, delta, f, b in cells:
+        if cap is not None and b > cap * n + 1e-9:   # b is an integer: the epsilon keeps cells exactly at the cap (float rounding)
+            continue
+        if cap_ub is not None:   # the bound only depends on b: compute it once per distinct b
+            if b not in ub:
+                ub[b] = evalstats.poisson_upper95(b) / n   # the bound `compare --net` prints, over all pooled rows
+            if ub[b] > cap_ub + 1e-12:
+                continue
+        k = (f - weight * b, -b, delta, -tau, -alpha)
+        if key is None or k > key:
+            best, key = (alpha, tau, delta, f, b), k
+    return best
+
+
+def select_weighted(sets, weight, col="ll", names=TUNING, cap=None, cap_ub=None):
     """S7e section 2.2: (alpha, tau, delta, fixed, broken) maximising fixed - weight * broken over the `names` sets pooled (default
     TUNING); ties: fewer broken, then larger delta, then smaller tau, then smaller alpha. Only `names` are read.
-    E2: with `cap` set, a cell whose broken / rows exceeds cap is never chosen; if every cell exceeds it, ValueError."""
+    E2: with `cap` set, a cell whose broken / rows exceeds cap is never chosen; if every cell exceeds it, ValueError.
+    With `cap_ub` (mutually exclusive with `cap`) a cell is eligible only if the 95% upper bound of broken (one-sided exact Poisson,
+    evalstats.poisson_upper95, as `compare --net` prints) divided by the pooled rows n is <= cap_ub; if none is, ValueError."""
+    if cap is not None and cap_ub is not None:
+        raise ValueError("select_weighted: cap and cap_ub are mutually exclusive")
     rows = [r for name in names for r in sets[name]]
-    best = key = None
-    for alpha in ALPHAS:
-        for tau in TAUS:
-            for delta in DELTAS:
-                f, b = fixed_broken(rows, alpha, tau, delta, col)
-                if cap is not None and b > cap * len(rows) + 1e-9:   # b is an integer: the epsilon keeps cells exactly at the cap (float rounding)
-                    continue
-                k = (f - weight * b, -b, delta, -tau, -alpha)
-                if key is None or k > key:
-                    best, key = (alpha, tau, delta, f, b), k
+    best = _choose(grid_cells(rows, col), weight, len(rows), cap, cap_ub)
     if best is None:  # cap excluded every cell
-        raise ValueError(f"select_weighted: no grid cell has broken / rows <= {cap}")
+        raise ValueError(f"select_weighted: no grid cell has " + (f"broken / rows <= {cap}" if cap is not None else
+                         f"95% upper bound of broken / rows <= {cap_ub}"))
     return best
+
+
+FRONTIER_CAPS = (0.001, 0.002, 0.003, 0.004, 0.005)
+
+
+def frontier(sets, weight, col="ll", names=TUNING, ub=False, caps=FRONTIER_CAPS):
+    """[(cap, cell or None)] where cell = (alpha, tau, delta, fixed, broken): the cell select_weighted would choose under each cap
+    (maximum fixed - weight * broken, same ties), with the cap judged as broken / rows (point rate) or, with `ub`, as the 95% Poisson
+    upper bound of broken / rows (select_weighted's `cap` / `cap_ub`). Not the most-fixed cell per cap. One grid pass."""
+    rows = [r for name in names for r in sets[name]]
+    cells, n = grid_cells(rows, col), len(rows)
+    return [(c, _choose(cells, weight, n, None if ub else c, c if ub else None)) for c in caps]
+
+
+def jsubsets(rows, picks):
+    """The three fixed judgement subsets of the rows against the n-gram first, for the given picks (one index per row):
+    J-right (ok[0]): n_right, broken (pick wrong); J-wrong-in-top-8 (ok[0] false, some candidate right): n_wrong_in8, fixed (pick
+    right); J-wrong-outside-top-8 (no candidate right): n_wrong_out8. Counts only: the break-rate cap is judged over all rows
+    (methodology 2026-10-18 #3, #4), so no rate over n_right is offered. The subsets follow ok[0] of the score file given."""
+    right = [(r, p) for r, p in zip(rows, picks) if r["ok"][0]]
+    w_in = [(r, p) for r, p in zip(rows, picks) if not r["ok"][0] and any(r["ok"])]
+    return {"n": len(rows), "n_right": len(right), "broken": sum(not r["ok"][p] for r, p in right),
+            "n_wrong_in8": len(w_in), "fixed": sum(bool(r["ok"][p]) for r, p in w_in),
+            "n_wrong_out8": sum(not any(r["ok"]) for r in rows)}
+
+
+def diagnose(rows, col="ll"):
+    """Cheap diagnostics of the small model without any grid: n; headroom (J-wrong-in-top-8 rows: n-gram first wrong, a candidate
+    right) and its share of n; alone_head = of the headroom rows, those the model alone picks right (lm_alone); keep = of the J-right
+    rows, those where the model alone picks candidate 0 (n_right is their count); oracle8 = rows with any candidate right."""
+    head = [r for r in rows if not r["ok"][0] and any(r["ok"])]
+    right = [r for r in rows if r["ok"][0]]
+    return {"n": len(rows), "headroom": len(head), "share": len(head) / len(rows) if rows else 0.0,
+            "alone_head": sum(bool(r["ok"][lm_alone(r, col)]) for r in head),
+            "n_right": len(right), "keep": sum(lm_alone(r, col) == 0 for r in right),
+            "oracle8": sum(any(r["ok"]) for r in rows)}
 
 
 def kept(sets, keep):

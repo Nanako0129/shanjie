@@ -64,7 +64,7 @@ class ClassLM(L.BigramLM):
 
 def make_lex(lm):
     base = ime.Lexicon(os.path.join(ROOT, "data", "lexicon", "mcbpmf-data.txt"), overlay=ime.OVERLAYS)
-    ov = {l.split("\t")[1] for l in open(os.path.join(ROOT, "data", "lexicon", "overlay-add.tsv"), encoding="utf-8")}
+    ov = ime.capping_words()
     return L.cap_overlay(base, ov, lm)
 
 

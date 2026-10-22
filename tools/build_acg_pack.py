@@ -13,7 +13,7 @@
 
 只連 zh.wikipedia.org/w/api.php 與 query.wikidata.org，依序送出、每秒不超過 1 個、帶 User-Agent 與 maxlag=5。
 讀音靠 tools/readings.py（需要萌典與小麥的破音字表，路徑見該檔），同音衝突靠評測 CLI（target/release/shanjie-eval，
-沒有就用 cargo 建，一律加 --no-kn）與 --rule-lm 的規則模型；--recheck 預設用 data/lm/bigram.sjlm。
+沒有就用 cargo 建；規則模型加 --no-kn，出貨的 data/lm 照出貨設定）與 --rule-lm 的規則模型；--recheck 預設用 data/lm/bigram.sjlm。
 """
 import argparse
 import collections
@@ -715,15 +715,15 @@ def base_lexicon():
 
 @functools.lru_cache(maxsize=1)
 def lexicon_words():
-    """基底、overlay-add.tsv、sandhi-add.tsv 的詞（任何讀音下）。"""
+    """基底、overlay-add.tsv、sandhi-add.tsv、names-add.tsv（名單層，常開、先於詞包載入）的詞（任何讀音下）。"""
     have = set(base_lexicon().by_word)
-    for f in ("overlay-add.tsv", "sandhi-add.tsv"):
+    for f in ("overlay-add.tsv", "sandhi-add.tsv", "names-add.tsv"):
         have |= {l.split("\t")[1] for l in open(os.path.join(LEX, f), encoding="utf-8")}
     return frozenset(have)
 
 
 def dedupe(words, have):
-    """任何來源的詞只要字串已在基底、overlay-add.tsv 或 sandhi-add.tsv（任何讀音下）就丟掉。"""
+    """任何來源的詞只要字串已在基底、overlay-add.tsv、sandhi-add.tsv 或 names-add.tsv（任何讀音下）就丟掉。"""
     return sorted(set(words) - have)
 
 
@@ -826,7 +826,9 @@ def top1(pairs, profile, packs_dir=None, lm=LM):
         rows, dump = os.path.join(d, "rows.txt"), os.path.join(d, "dump.txt")
         with open(rows, "w", encoding="utf-8") as f:
             f.writelines(f"|{w}|{' '.join(syls)}\n" for w, syls in pairs)
-        cmd = [eval_bin(), "--lm", lm, "--profile", profile, "--rows", rows, "--dump", dump, "--no-kn"]   # 釘住的模型不含 KN 側檔（模型旁有 kn.sjkn 時 CLI 會開）
+        cmd = [eval_bin(), "--lm", lm, "--profile", profile, "--rows", rows, "--dump", dump]
+        if lm != LM:   # 釘住的規則模型不含 KN 側檔、名單層也不在它的詞庫裡，加 --no-kn --no-names 固定結果；出貨的 data/lm（--recheck）照出貨設定：旁邊有 kn.sjkn 就開、名單層常開（model-v6 §3.3）
+            cmd += ["--no-kn", "--no-names"]
         if packs_dir:
             cmd += ["--packs", "acg", "--packs-dir", packs_dir]
         subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL)
@@ -870,6 +872,14 @@ def detect_collisions(words, reading, rows, ref, decode=top1, existing=None, ext
                     if hit:
                         found[" ".join(syls)].append((w, cond, prof, o, n))
     return dict(found)
+
+
+MODEL_V6_C = "model-v6："      # acg-collisions.tsv 理由欄的開頭：model-v6 §3.3 照 A2 規則排除的類型 (c) 詞（使用者 2026-10-15）
+
+
+def model_v6_dropped(path=os.path.join(PACKS, "acg-collisions.tsv")):
+    """model-v6 上擠下詞庫詞、照 A2 規則排除的詞包詞（含 v0.4.0 出貨過的詞）；契約 A3.5 第 3 項 (ii)「v0.4.0 的詞不能少」不算它們。"""
+    return {r[2] for r in read_tsv(path) if len(r) == 4 and r[3].startswith(MODEL_V6_C)} if os.path.exists(path) else set()
 
 
 def read_collisions(path):
@@ -1276,8 +1286,8 @@ def main():
     decode = rule_decoder(rule)       # 契約 A3.3：(c) 規則與衝突偵測都用規則模型
     info = {}
     files, manifest, col, unread, ref, ldrop = build(Api(a.cache, a.offline), decode=decode, a3=a.a3 == "on", info=info)
-    lost = sorted(info["v040"] - set(info["words"]))
-    if lost:        # 契約 A3.5 第 3 項 (ii)：v0.4.0 的詞少了就停，不寫檔
+    lost = sorted(info["v040"] - set(info["words"]) - model_v6_dropped())
+    if lost:        # 契約 A3.5 第 3 項 (ii)：v0.4.0 的詞少了就停，不寫檔（model-v6 §3.3 照 A2 規則排除的不算）
         raise SystemExit(f"v0.4.0 words missing from the new pack ({len(lost)}), nothing written: {lost}")
     write_all(files, manifest, a.out)
     os.makedirs(a.report, exist_ok=True)

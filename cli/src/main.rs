@@ -1,21 +1,23 @@
-use core::engine::{capping_overlay_detailed, load_lexicon_packs_detailed, PACK_ACG};
+use cli::common::{dev_rows, format_rowstats, levenshtein, load_lenient, read_rows, root, three_field_rows};
+use core::colloquial::{self, Colloquial, ReadingChannel};
+use core::engine::{capping_overlay_detailed, load_lexicon_extra_detailed, load_lexicon_packs_detailed, read_packs_detailed, PACK_ACG};
 use core::eval::*;
 use core::learn::{context_key, SENTINEL};
 use core::fuzzy::FUZZY_ALL;
 use core::lm::{decode_from_fuzzy, history, CappedLexicon, Demote, Lm, Profile};
-use core::tinylm::{TinyLm, TinyLmError, TOPK};
+use core::tinylm::{KnPairing, RerankLevel, TinyLm, TinyLmError, TOPK};
 use core::predict::{parse_units, predict, units_of, units_str, Index, Mode};
 use core::{decode_beam, Error, Lexicon, NoLearning, Syls, BEAM_S1};
+use std::collections::BTreeMap;
+use std::fmt::Write as _;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 mod english;
-
-fn root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().to_path_buf()
-}
 
 /// (display name, rows). Messages never include row text (R2).
 fn load_set(lex: &Lexicon, name: &str) -> Result<(&'static str, Vec<Row>), String> {
@@ -53,58 +55,6 @@ fn oov_words(name: &str) -> Vec<String> {
     fs::read_to_string(p).unwrap_or_default().lines().filter(|l| !l.is_empty()).map(String::from).collect()
 }
 
-/// S2v lenient table: SHANJIE_VARIANTS if set, else the repo's eval/variants.tsv; missing or bad is an error.
-fn load_lenient() -> Result<Lenient, String> {
-    // An empty value counts as unset, same as the Python reference (`os.environ.get(...) or default`).
-    let p = std::env::var_os("SHANJIE_VARIANTS")
-        .filter(|v| !v.is_empty())
-        .map(PathBuf::from)
-        .unwrap_or_else(|| root().join("eval/variants.tsv"));
-    let text = fs::read_to_string(p).map_err(|e| format!("cannot read variants table ({:?})", e.kind()))?;
-    Lenient::parse(&text).map_err(|e| e.to_string())
-}
-
-/// lm_eval.py `rows_of`: only lines with exactly three `|` fields (context|sentence|reading).
-/// Each row is (sentence, reading, context text).
-fn three_field_rows(text: &str) -> Vec<(String, Syls, String)> {
-    text.lines()
-        .filter_map(|l| {
-            let p: Vec<&str> = l.split('|').collect();
-            (p.len() == 3).then(|| (p[1].to_string(), p[2].split_whitespace().map(String::from).collect(), p[0].to_string()))
-        })
-        .collect()
-}
-
-/// Levenshtein distance over Unicode scalar values.
-fn levenshtein(a: &str, b: &str) -> u32 {
-    let b: Vec<char> = b.chars().collect();
-    let mut prev: Vec<u32> = (0..=b.len() as u32).collect();
-    for (i, x) in a.chars().enumerate() {
-        let mut cur = vec![i as u32 + 1];
-        for (j, y) in b.iter().enumerate() {
-            cur.push((prev[j + 1] + 1).min(cur[j] + 1).min(prev[j] + (x != *y) as u32));
-        }
-        prev = cur;
-    }
-    prev[b.len()]
-}
-
-/// (errors, gold length) of one row (docs/contracts/eval-stats.md §1). `ok` is the lenient top-1 judgment made by the
-/// caller; a row that is ok has 0 errors even when the first candidate differs from the gold text.
-fn row_stats(top1: &str, gold: &str, ok: bool) -> (u32, u32) {
-    (if ok { 0 } else { levenshtein(top1, gold) }, gold.chars().count() as u32)
-}
-
-/// The one writer of a rowstats file: `row\tok\terrors\tgold_len` per row, rows counted from 1. Digits only.
-fn format_rowstats(rows: &[(bool, String, String)]) -> String {
-    let mut out = String::new();
-    for (i, (ok, top1, gold)) in rows.iter().enumerate() {
-        let (e, n) = row_stats(top1, gold, *ok);
-        out += &format!("{}\t{}\t{e}\t{n}\n", i + 1, *ok as u8);
-    }
-    out
-}
-
 /// Option combinations of `lm`, checked before any file is read. The holdout never prints its sentences, so
 /// `--dump` and `--dump-words` (`dump` is true for either) are refused there; `--rowstats` holds numbers only and is allowed.
 fn check_lm_opts(set: Option<&str>, dump: bool, packs: u32, packs_dir: bool) -> Result<(), String> {
@@ -137,31 +87,59 @@ fn packs_dir_checked(packs: u32, packs_dir: Option<String>) -> Result<PathBuf, S
     Ok(pdir)
 }
 
-/// The lexicon with the chosen packs and the overlay text that caps the LM scores (the same helpers as the engine's
-/// `new` and `load_lm`).
-fn load_with_packs(dir: &Path, packs: u32, pdir: &Path) -> Result<(std::sync::Arc<Lexicon>, String), String> {
+/// `--extra-overlay FILE` (evaluation only, names-lexicon contract section 3.5): a missing file stops the run naming the path,
+/// checked with the other options before the model is read.
+fn extra_overlay_checked(extra: Option<String>) -> Result<Option<PathBuf>, String> {
+    let extra = extra.map(PathBuf::from);
+    match extra.as_deref() {
+        Some(p) if !p.is_file() => Err(format!("--extra-overlay: file not found: {}", p.display())),
+        _ => Ok(extra),
+    }
+}
+
+/// `--colloquial-core FILE`: a missing file stops the run naming the path, checked with the other options before the model is read.
+fn colloquial_checked(path: Option<String>) -> Result<Option<PathBuf>, String> {
+    let path = path.map(PathBuf::from);
+    match path.as_deref() {
+        Some(p) if !p.is_file() => Err(format!("--colloquial-core: file not found: {}", p.display())),
+        _ => Ok(path),
+    }
+}
+
+/// The lexicon with the chosen packs and the `--extra-overlay` rows, and the overlay text that caps the LM scores (the
+/// same helpers as the engine's `new` and `load_lm`). The extra rows travel with the pack rows, so they are capped too.
+/// `names` false is `--no-names`: names-add.tsv stays out of the lexicon (its words are then in no lexicon entry, so capping them changes nothing).
+fn load_with_packs(dir: &Path, packs: u32, pdir: &Path, extra: Option<&Path>, names: bool) -> Result<(std::sync::Arc<Lexicon>, String), String> {
     // The pack rows are read once and reused for the cap; overlay-add.tsv is read again by capping_overlay, as load_lm does.
-    let (lex, pack_text) = load_lexicon_packs_detailed(dir, Some((pdir, packs))).map_err(|e| e.to_string())?;
+    let (lex, pack_text) = load_lexicon_extra_detailed(dir, Some((pdir, packs)), extra, names).map_err(|e| e.to_string())?;
     let overlay = capping_overlay_detailed(dir, &pack_text).map_err(|e| e.to_string())?;
     Ok((lex, overlay))
 }
 
 /// S7c-1 `--tinylm`: alpha and tau hold only for the n-gram scores they were tuned on (S7a: this model, its classes and the demotion
-/// table on, Kneser-Ney off). A different model hash, the KN side file, `--no-classes` or `--no-demote` is refused before anything
-/// is printed. The file is read, checked and paired by the engine's loader (`TinyLm::load_paired`, S7c-2a). Returns the model, the
-/// load time (read + parse + the pairing checks; the hash below is the CLI's, outside it) and the sha8 of the bytes it parsed.
+/// table on, and the Kneser-Ney side file it records, or none: model-v6 section 2.7). A different model hash, another side file
+/// state, `--no-classes` or `--no-demote` is refused before anything is printed. The file is read, checked and paired by the
+/// engine's loader (`TinyLm::load_paired`, S7c-2a). Returns the model, the load time (read + parse + the pairing checks and the file's hash) and the sha8 of the bytes it parsed.
 fn load_tinylm(path: &str, lm: &Lm, classes: bool, demote: bool) -> Result<(TinyLm, Duration, String), String> {
     if !classes || !demote {
         return Err("--tinylm: this .sjtl was tuned with the class term and the demotion table on (drop --no-classes / --no-demote)".into());
     }
     let t0 = Instant::now();
-    let (tl, bytes) = TinyLm::load_paired(Path::new(path), lm).map_err(|e| match e {
-        TinyLmError::KneserNey => format!("--tinylm: {e} (use --no-kn)"),
+    let tl = TinyLm::load_paired(Path::new(path), lm).map_err(|e| match e {
+        // model-v6 section 7 (P4-9): each mismatch has its own remedy; --no-kn helps only when the file was tuned without KN.
+        TinyLmError::KneserNey(KnPairing::TunedWithout) => {
+            format!("--tinylm: {e} (use --no-kn, or a .sjtl exported with --kn-side for this kn.sjkn)")
+        }
+        TinyLmError::KneserNey(KnPairing::OtherSideFile) => format!("--tinylm: {e} (put the kn.sjkn it was tuned with beside the model)"),
+        TinyLmError::KneserNey(KnPairing::TunedWith) => {
+            format!("--tinylm: {e} (put the kn.sjkn it was tuned with beside the model and drop --no-kn)")
+        }
         TinyLmError::OtherNgram => format!("--tinylm: {e}"),
         _ => e.to_string(),
     })?;
+    let sha8 = tl.file_sha256()[..8].to_string();
     let load = t0.elapsed();
-    Ok((tl, load, sha256_hex(&bytes)[..8].to_string()))
+    Ok((tl, load, sha8))
 }
 
 /// One `--tinylm-scores` line, the record of experiments/s7a-tinylm/score.py without the key columns and the two other LLs:
@@ -186,27 +164,88 @@ fn scores_line(i: usize, ng: &[f64], ok: &[bool], ed: &[u32], glen: usize, chose
     Ok(s + "}\n")
 }
 
+/// Sets the flag when dropped, panic included: the threaded `run_lm` uses it to release workers that wait for the writer.
+struct Release<'a>(&'a AtomicBool);
+
+impl Drop for Release<'_> {
+    fn drop(&mut self) {
+        self.0.store(true, Ordering::Relaxed);
+    }
+}
+
+/// What one row of `run_lm` hands to the writers: the counters it adds to and the text it adds to each output file.
+#[derive(Default)]
+struct RowOut {
+    ok: bool,
+    in64: bool,
+    long: bool,
+    rerank: Option<Duration>,
+    /// The row's chosen candidate (the `top1_sha256` input and the rowstats `top1`).
+    first: String,
+    scores: String,
+    dump: String,
+    words: String,
+}
+
 /// S2c LM mode (docs/PLAN.md S2c): the one summary line of lm_eval.py, plus the optional `--dump` and `--rowstats`.
 /// S7c-1: `--tinylm FILE.sjtl` reranks the first 8 candidates of every row with the small character model (docs/contracts/s7c-core-tinylm.md);
 /// `--tinylm-scores OUT` writes score.py's numbers-only records for them. `--dump-words OUT` (tools/triage.py) writes, per row, the
 /// word split of every `--dump` line (`row\trank\twords`, same ranks and order) after rank 0, the gold sentence split by the core's
-/// `segment_words` (`-` when it cannot be split).
+/// `segment_words` (`-` when it cannot be split). `--rerank-level conservative|standard|aggressive` (default standard) picks which of
+/// the file's (alpha, tau, delta) the rerank uses (docs/contracts/rerank-strength.md section 2.3). `--threads N` (default 1) decodes the
+/// rows on N threads sharing one copy of the models; the output files and the summary line are byte for byte those of N = 1. With N
+/// above 1 the stderr tinylm latency line has other timings (measured under contention) and ends with " (threads N: measured under
+/// contention)", N being the worker count after capping it at the number of 32-row blocks; its counts are the same, and with one
+/// worker the line is as for N = 1. A panic in a row exits 101 on the inline path (N = 1, or one block) and exits 1 with "row N
+/// panicked in a --threads worker" on the threaded path. Only the `lm` mode takes it: the other modes refuse it
+/// as an unknown argument.
+///
+/// `--colloquial-core FILE.sjlm` (docs/contracts/colloquial-term.md section 2.3): loads the colloquial table like the engine's
+/// `load_colloquial` (word sets of k from `data/lexicon` and the `--packs` rows) and decides per run, by the engine's conditions (chat
+/// profile, any rerank level (each with its own alpha, tau and delta: docs/contracts/colloquial-levels.md), a `--tinylm` whose SHA-256 is the one
+/// the term was measured with), whether each row's rerank is `TinyLm::rerank_colloquial` (the word split of each of the first 8 candidates goes in,
+/// and the `--rerank-level`) or the plain `rerank`. It refuses no setting, so
+/// "everything else is unchanged" can be checked with the same option; a missing file stops the run before anything is read. The summary
+/// line gains `+colloq:<sha8 of the table>`. The files follow the n-gram order as without the option; `--tinylm-scores` `c` is the pick.
+///
+/// `--no-reading-channel` (research only; docs/contracts/reading-channel.md section 2.2): where the colloquial term applies it is applied alone, the P4d
+/// cell. Without it the reading-channel term goes with it (the cell `lex,1.0,4` of experiments/p5-reading-channel: each single-character word's reading
+/// against that word's most common reading, from the lexicon this run loaded), `TinyLm::rerank_colloquial` being the one function for the CLI and the
+/// engine. It changes nothing where the colloquial term does not apply. The summary tag marks the shipping behavior: where the colloquial term
+/// applies and the channel is on it reads `+colloq:<sha8>+rc`; with the option, or where the term does not apply (formal or another
+/// small model), just `+colloq:<sha8>`, so a P4d-cell run is never taken for the shipping setting. The option alone, without `--colloquial-core`,
+/// changes nothing.
 fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     let (mut lm_path, mut profile, mut name, mut dev, mut rows_file) = (None, None, None, None, None);
     let (mut limit, mut set, mut dump, mut ctx_mode, mut demote) = (None::<usize>, None, None, false, true);
     let mut dump_words = None::<String>;
-    let (mut classes, mut kn) = (true, true);
+    let (mut classes, mut kn, mut tri) = (true, true, true);
+    // model-v6 section 2.5: the names layer is always on; `--no-names` (evaluation only: the section 3.1 breakdown, and
+    // tools/build_names.py, which passes its own candidate list as --extra-overlay) leaves it out.
+    let mut names = true;
     let (mut rowstats, mut tinylm, mut tinylm_scores) = (None::<String>, None::<String>, None::<String>);
+    let mut level = None::<RerankLevel>;
     // acg-pack contract A.2: `--packs acg` adds data/packs/acg-add.tsv (or `--packs-dir DIR`'s) to the lexicon and the cap; off by default.
     let (mut packs, mut packs_dir) = (0u32, None::<String>);
+    let mut extra_overlay = None::<String>;
+    let mut threads = 1usize;
+    let mut colloquial_core = None::<String>;
     // docs/contracts/fuzzy-input.md section 2.3: `--fuzzy FLAGS` (the bits of shanjie_engine_set_fuzzy). Given, the summary line gets
     // `+fz:FLAGS` and a row no reading covers counts as wrong instead of stopping the run.
     let mut fuzzy = None::<u32>;
+    let mut reading_channel = true;
     let mut it = args.iter();
     while let Some(a) = it.next() {
         let mut val = || it.next().cloned().ok_or_else(|| "missing option value".to_string());
         let num = |v: String| v.parse::<usize>().map_err(|_| format!("bad number (length {})", v.chars().count()));
         match a.as_str() {
+            "--threads" => match val().ok().and_then(|v| v.parse::<usize>().ok()) {
+                Some(n) if n >= 1 => threads = n,
+                _ => {
+                    eprintln!("error: --threads takes a whole number of at least 1");
+                    std::process::exit(2);
+                }
+            },
             "--lm" => lm_path = Some(val()?),
             "--profile" => profile = Some(val()?),
             "--name" => name = Some(val()?),
@@ -219,13 +258,26 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
             "--rowstats" => rowstats = Some(val()?),
             "--tinylm" => tinylm = Some(val()?),
             "--tinylm-scores" => tinylm_scores = Some(val()?),
+            "--rerank-level" => {
+                level = Some(match val()?.as_str() {
+                    "conservative" => RerankLevel::Conservative,
+                    "standard" => RerankLevel::Standard,
+                    "aggressive" => RerankLevel::Aggressive,
+                    _ => return Err("--rerank-level must be conservative, standard or aggressive".into()),
+                })
+            }
             "--context" => ctx_mode = true,
             "--no-demote" => demote = false,
             "--no-classes" => classes = false,
             "--no-kn" => kn = false,
+            "--no-tri" => tri = false,
+            "--no-names" => names = false,
             "--packs" => packs |= pack_flag(&val()?)?,
             "--packs-dir" => packs_dir = Some(val()?),
+            "--extra-overlay" => extra_overlay = Some(val()?),
+            "--colloquial-core" => colloquial_core = Some(val()?),
             "--fuzzy" => fuzzy = Some(val()?.parse::<u32>().ok().filter(|f| f & !FUZZY_ALL == 0).ok_or("--fuzzy takes flags 0-31")?),
+            "--no-reading-channel" => reading_channel = false,
             _ => return Err("unknown argument".into()),
         }
     }
@@ -233,10 +285,22 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     if tinylm_scores.is_some() && tinylm.is_none() {
         return Err("--tinylm-scores needs --tinylm".into());
     }
+    // Section 9 P3-8: without a small model a level (standard included) would silently measure the n-gram alone.
+    if level.is_some() && tinylm.is_none() {
+        return Err("--rerank-level needs --tinylm".into());
+    }
+    let level = level.unwrap_or(RerankLevel::Standard);
     if tinylm_scores.is_some() && set.as_deref() == Some("holdout") {
         return Err("--tinylm-scores is not allowed with --set holdout".into());
     }
     let pdir = packs_dir_checked(packs, packs_dir)?;
+    let extra_overlay = extra_overlay_checked(extra_overlay)?;
+    let colloquial_core = colloquial_checked(colloquial_core)?;
+    // Summary-line marker `+xo:<sha8 of the file>`, only with the option, so a names-layer run never prints the baseline's label.
+    let xo = match &extra_overlay {
+        Some(p) => format!("+xo:{}", &sha256_hex(&fs::read(p).map_err(|e| format!("--extra-overlay: cannot read {} ({:?})", p.display(), e.kind()))?)[..8]),
+        None => String::new(),
+    };
     let profile_name = profile.ok_or("--profile is required")?;
     let prof = match profile_name.as_str() {
         "chat" => Profile::Chat,
@@ -245,37 +309,41 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     };
     let lm_path = lm_path.ok_or("--lm is required")?;
     // S2k: the class term is part of the model; classes.sjc beside it is required unless --no-classes.
-    // A kn.sjkn beside the model (docs/contracts/kn-core.md) turns the Kneser-Ney term on unless --no-kn.
-    let lm = Lm::load_with(std::path::Path::new(&lm_path), classes, kn).map_err(|e| e.to_string())?;
+    // A kn.sjkn beside the model (docs/contracts/kn-core.md) turns the Kneser-Ney term on unless --no-kn. A trigram.sjt3 beside it
+    // (docs/contracts/trigram-core.md) is read only for --profile formal and without --no-tri (chat never uses it, so it is not read
+    // at all); the formal profile then scores with it and without Kneser-Ney. The kn.sjkn is read and checked either way.
+    let lm = Lm::load_opts(std::path::Path::new(&lm_path), classes, kn, tri && prof == Profile::Formal).map_err(|e| e.to_string())?;
+    let scoring = lm.scoring(prof);
     let rss_before = tinylm.is_some().then(rss_kb).flatten();
     let tl = tinylm.as_deref().map(|p| load_tinylm(p, &lm, classes, demote)).transpose()?;
+    // Section 2.3: a version 1 or 2 file has only the standard set; another level would silently measure the standard one.
+    if level != RerankLevel::Standard && tl.as_ref().is_some_and(|(m, _, _)| !m.has_levels()) {
+        eprintln!("error: --rerank-level: this .sjtl (version 1 or 2) has only the standard set; use a version 3 or 4 file or --rerank-level standard");
+        std::process::exit(2);
+    }
     let rss_after = tinylm.is_some().then(rss_kb).flatten();
     let dir = root().join("data/lexicon");
-    let (lex, overlay) = load_with_packs(&dir, packs, &pdir)?;
+    // The colloquial table and the word sets of its k term, from the engine's own loader (the engine's pack rows are the `--packs` rows).
+    let colloq = match &colloquial_core {
+        Some(f) => {
+            let pack_text = read_packs_detailed(&pdir, packs).map_err(|e| e.to_string())?;
+            Some(Colloquial::load_from_dir(f, &dir, Some(&pack_text)).map_err(|e| format!("--colloquial-core: {e}"))?)
+        }
+        None => None,
+    };
+    // The engine's conditions for the term (the table is loaded by here): `colloquial::applies` is the engine's own test.
+    let colloq_on = colloq.as_ref().filter(|_| tl.as_ref().is_some_and(|(m, _, _)| colloquial::applies(prof, m)));
+    let (lex, overlay) = load_with_packs(&dir, packs, &pdir, extra_overlay.as_deref(), names)?;
     let demote_rows = fs::read_to_string(dir.join("demote.tsv")).map_err(|e| format!("cannot read demote.tsv ({:?})", e.kind()))?;
     let table = Demote::parse(&demote_rows).filter(|d| d.check(&lex)).ok_or("bad demote.tsv")?;
     // The table is always loaded, so a malformed one stops the run even with --no-demote.
     let capped = CappedLexicon::new(lex.clone(), &overlay, &lm, Some(&table)).ok_or("bad demote.tsv")?;
 
-    let read = |p: &Path| fs::read_to_string(p).map_err(|e| format!("cannot read file ({:?})", e.kind()));
     // (display name, [(truth, reading)])
     let (default_name, rows): (String, Vec<(String, Syls, String)>) = match (dev, rows_file, set.as_deref()) {
-        (Some(n), None, None) => {
-            let mut files: Vec<PathBuf> = fs::read_dir(root().join("eval/dev"))
-                .map_err(|e| format!("cannot read directory ({:?})", e.kind()))?
-                .filter_map(|e| e.ok().map(|e| e.path()))
-                .filter(|p| p.extension().is_some_and(|x| x == "txt"))
-                .collect();
-            files.sort();
-            let mut rows = Vec::new();
-            for f in files {
-                rows.extend(three_field_rows(&read(&f)?));
-            }
-            rows.truncate(n);
-            (format!("dev{n}"), rows)
-        }
+        (Some(n), None, None) => (format!("dev{n}"), dev_rows(n)?),
         (None, Some(f), None) => {
-            let mut rows = three_field_rows(&read(Path::new(&f))?);
+            let mut rows = read_rows(&f)?;
             if let Some(n) = limit.filter(|&n| n != 0) {
                 rows.truncate(n);
             }
@@ -310,73 +378,168 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
         Some(f) => Some(std::io::BufWriter::new(fs::File::create(f).map_err(|e| format!("cannot create tinylm scores ({:?})", e.kind()))?)),
         None => None,
     };
-    let (mut top1, mut o64, mut firsts, mut rs, mut rerank, mut long) = (0usize, 0usize, Vec::new(), Vec::new(), Vec::new(), 0usize);
-    for (i, (truth, syls, ctx)) in rows.iter().enumerate() {
+    let (want_scores, want_dump, want_words) = (scores.is_some(), dump.is_some(), dump_words.is_some());
+    // `--threads N`: the rows are decoded in blocks of BLOCK contiguous rows; no more workers than blocks.
+    const BLOCK: usize = 32;
+    let (nrows, nblocks) = (rows.len(), rows.len().div_ceil(BLOCK));
+    let threads = threads.min(nblocks.max(1));
+    // One row, a function of the row alone (nothing carries over from one row to the next), so the rows can be decoded in any
+    // order or at once. Everything the row writes is built here as text; the loop below puts it in the files, in row order.
+    let work = |i: usize| -> Result<RowOut, String> {
+        let (truth, syls, ctx) = &rows[i];
         // S2h: the first word is conditioned on the row's context, cut like the engine cuts it.
         let left = if ctx_mode { Some(context_key(ctx)) } else { None };
         let start = left.as_deref().filter(|k| *k != SENTINEL).map_or("<s>", |k| history(k, &lm));
+        let mut out = RowOut::default();
         let nb = match decode_from_fuzzy(&capped, syls, &lm, prof, BEAM_S1, start, demote, fuzzy.unwrap_or(0)) {
             Ok(nb) => nb,
             // --fuzzy: a row no reading covers is a wrong answer with an empty first candidate, and the set goes on.
             Err(Error::NoPath { .. }) if fuzzy.is_some() => {
-                rs.push((false, String::new(), truth.clone()));
-                firsts.push(String::new());
-                if let Some(d) = dump_words.as_mut() {
+                if want_words {
                     let gold = lex.segment_words(truth).map_or("-".to_string(), |ws| ws.iter().map(|(w, _)| w.as_str()).collect::<Vec<_>>().join(" "));
-                    writeln!(d, "{}\t0\t{gold}", i + 1).map_err(|_| "cannot write word dump".to_string())?;
+                    writeln!(out.words, "{}\t0\t{gold}", i + 1).unwrap();
                 }
-                continue;
+                return Ok(out);
             }
             Err(e) => return Err(e.to_string()),
         };
         let mut surf: Vec<String> = nb.iter().map(|(_, ws)| ws.concat()).collect();
         let t = len.apply(truth);
-        // The row's chosen candidate: the first, or the small model's pick among the first 8 (the dump keeps the n-gram order).
+        // The row's chosen candidate: the first, or the small model's pick among the first 8 (the dump keeps the decoder's order).
         let mut chosen = 0;
         if let Some((tl, _, _)) = &tl {
             let top: Vec<&str> = surf.iter().take(TOPK).map(String::as_str).collect();
             let ng: Vec<f64> = nb.iter().take(TOPK).map(|(sc, _)| *sc).collect();
             // The key is the context key (its SENTINEL is the empty k, in TinyLm::rerank); without --context, no key.
             let t0 = Instant::now();
-            let ll = match tl.rerank(&ng, &top, left.as_deref().unwrap_or(""), prof) {
+            let key = left.as_deref().unwrap_or("");
+            let picked = match colloq_on {
+                Some(co) => {
+                    let words: Vec<Vec<&str>> = nb.iter().take(TOPK).map(|(_, ws)| ws.iter().map(String::as_str).collect()).collect();
+                    let rc = reading_channel.then_some(ReadingChannel { lex: &lex, syls });
+                    tl.rerank_colloquial(&ng, &top, &words, key, co, rc, level)
+                }
+                None => tl.rerank(&ng, &top, key, tl.params(prof, level)),
+            };
+            let ll = match picked {
                 Ok((c, ll)) => {
                     chosen = c;
                     ll
                 }
                 // A candidate longer than the model's context: this row keeps the n-gram first (counted on stderr), the set goes on.
                 Err(TinyLmError::TooLong) => {
-                    long += 1;
+                    out.long = true;
                     None
                 }
                 Err(e) => return Err(e.to_string()),
             };
             if ll.is_some() {
-                rerank.push(t0.elapsed());
+                out.rerank = Some(t0.elapsed());
             }
-            if let Some(w) = scores.as_mut() {
+            if want_scores {
                 let oks: Vec<bool> = top.iter().map(|s| len.apply(s) == t).collect();
                 let ed: Vec<u32> = top.iter().zip(&oks).map(|(s, &ok)| if ok { 0 } else { levenshtein(s, truth) }).collect();
-                w.write_all(scores_line(i + 1, &ng, &oks, &ed, truth.chars().count(), chosen, ll.as_deref())?.as_bytes())
-                    .map_err(|_| "cannot write tinylm scores".to_string())?;
+                out.scores = scores_line(i + 1, &ng, &oks, &ed, truth.chars().count(), chosen, ll.as_deref())?;
             }
         }
-        let ok = len.apply(&surf[chosen]) == t;
-        top1 += ok as usize;
-        rs.push((ok, surf[chosen].clone(), truth.clone()));
-        o64 += surf.iter().any(|s| len.apply(s) == t) as usize;
-        if let Some(d) = dump.as_mut() {
+        out.ok = len.apply(&surf[chosen]) == t;
+        out.in64 = surf.iter().any(|s| len.apply(s) == t);
+        if want_dump {
             for (r, ((sc, _), s)) in nb.iter().zip(&surf).enumerate() {
-                writeln!(d, "{}\t{}\t{s}\t{sc:?}", i + 1, r + 1).map_err(|_| "cannot write dump".to_string())?;
+                writeln!(out.dump, "{}\t{}\t{s}\t{sc:?}", i + 1, r + 1).unwrap();   // a String: cannot fail
             }
+        }
+        if want_words {
+            let gold = lex.segment_words(truth).map_or("-".to_string(), |ws| ws.iter().map(|(w, _)| w.as_str()).collect::<Vec<_>>().join(" "));
+            writeln!(out.words, "{}\t0\t{gold}", i + 1).unwrap();
+            for (r, (_, ws)) in nb.iter().enumerate() {
+                writeln!(out.words, "{}\t{}\t{}", i + 1, r + 1, ws.join(" ")).unwrap();
+            }
+        }
+        out.first = surf.swap_remove(chosen);
+        Ok(out)
+    };
+    let (mut top1, mut o64, mut firsts, mut rs, mut rerank, mut long) = (0usize, 0usize, Vec::new(), Vec::new(), Vec::new(), 0usize);
+    // Puts one row's output in the files and the counters; called in row order, so every file and the summary line are those of N = 1.
+    let mut emit = |i: usize, out: RowOut| -> Result<(), String> {
+        top1 += out.ok as usize;
+        o64 += out.in64 as usize;
+        long += out.long as usize;
+        rerank.extend(out.rerank);
+        if let Some(w) = scores.as_mut() {
+            w.write_all(out.scores.as_bytes()).map_err(|_| "cannot write tinylm scores".to_string())?;
+        }
+        if let Some(d) = dump.as_mut() {
+            d.write_all(out.dump.as_bytes()).map_err(|_| "cannot write dump".to_string())?;
         }
         if let Some(d) = dump_words.as_mut() {
-            let gold = lex.segment_words(truth).map_or("-".to_string(), |ws| ws.iter().map(|(w, _)| w.as_str()).collect::<Vec<_>>().join(" "));
-            writeln!(d, "{}\t0\t{gold}", i + 1).map_err(|_| "cannot write word dump".to_string())?;
-            for (r, (_, ws)) in nb.iter().enumerate() {
-                writeln!(d, "{}\t{}\t{}", i + 1, r + 1, ws.join(" ")).map_err(|_| "cannot write word dump".to_string())?;
-            }
+            d.write_all(out.words.as_bytes()).map_err(|_| "cannot write word dump".to_string())?;
         }
-        firsts.push(surf.swap_remove(chosen));
+        rs.push((out.ok, out.first.clone(), rows[i].0.clone()));
+        firsts.push(out.first);
+        Ok(())
+    };
+    if threads == 1 {
+        for i in 0..rows.len() {
+            emit(i, work(i)?)?;
+        }
+    } else {
+        // N workers take the next block of BLOCK rows from a shared counter and send its outputs back; the main thread writes the
+        // blocks in row order, holding the ones that arrive early. The first error in row order is the error: a block stops at its
+        // first error, workers claim no new block once any error is seen (a block already claimed is still decoded, so an earlier
+        // error is not missed), and returning drops `rx`, which stops the workers at their next send. A panic in a row is turned into
+        // that row's error. The early blocks held in memory are bounded: a worker does not start block b while
+        // b >= written + lookahead (the lowest unwritten block is always within it, so the wait cannot deadlock).
+        let lookahead = 4 * threads;
+        let (next, written, failed, closed) = (AtomicUsize::new(0), AtomicUsize::new(0), AtomicBool::new(false), AtomicBool::new(false));
+        std::thread::scope(|sc| {
+            let (tx, rx) = mpsc::channel::<(usize, Vec<Result<RowOut, String>>)>();
+            for _ in 0..threads {
+                let (tx, work, next, written, failed, closed) = (tx.clone(), &work, &next, &written, &failed, &closed);
+                sc.spawn(move || {
+                    while !failed.load(Ordering::Relaxed) {
+                        let b = next.fetch_add(1, Ordering::Relaxed);
+                        if b >= nblocks {
+                            return;
+                        }
+                        while b >= written.load(Ordering::Acquire) + lookahead {
+                            if closed.load(Ordering::Relaxed) {
+                                return;
+                            }
+                            std::thread::sleep(Duration::from_millis(1));
+                        }
+                        let mut outs = Vec::new();
+                        for i in b * BLOCK..((b + 1) * BLOCK).min(nrows) {
+                            let out = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| work(i)))
+                                .unwrap_or_else(|_| Err(format!("row {} panicked in a --threads worker", i + 1)));
+                            let bad = out.is_err();
+                            outs.push(out);
+                            if bad {
+                                failed.store(true, Ordering::Relaxed);
+                                break;
+                            }
+                        }
+                        if tx.send((b, outs)).is_err() {
+                            return;
+                        }
+                    }
+                });
+            }
+            drop(tx);
+            let _release = Release(&closed);   // also on a panic of this thread: the workers waiting in the lookahead loop leave
+            let (mut early, mut want) = (BTreeMap::new(), 0);
+            for (b, outs) in &rx {
+                early.insert(b, outs);
+                while let Some(outs) = early.remove(&want) {
+                    for (i, out) in (want * BLOCK..).zip(outs) {
+                        emit(i, out?)?;
+                    }
+                    want += 1;
+                    written.store(want, Ordering::Release);
+                }
+            }
+            Ok::<(), String>(())
+        })?;
     }
     if let Some(mut w) = scores {
         w.flush().map_err(|_| "cannot write tinylm scores".to_string())?;
@@ -387,13 +550,15 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
         rerank.sort();
         let ms = |d: Duration| d.as_secs_f64() * 1000.0;
         eprintln!(
-            "tinylm: rerank n={} p50={:.3} ms p95={:.3} ms; rows kept first (candidate over the context) {long}; load {:.0} ms, rss {:?} -> {:?} KiB around the .sjtl load",
+            "tinylm: rerank n={} p50={:.3} ms p95={:.3} ms; rows kept first (candidate over the context) {long}; load {:.0} ms, rss {:?} -> {:?} KiB around the .sjtl load{}",
             rerank.len(),
             ms(rerank[rerank.len() / 2]),
             ms(rerank[(rerank.len() as f64 * 0.95) as usize]),
             ms(*load),
             rss_before,
-            rss_after
+            rss_after,
+            // The percentiles of a parallel run are measured under contention; N = 1 prints the line as before (tools/bench.py parses it).
+            if threads > 1 { format!(" (threads {threads}: measured under contention)") } else { String::new() }
         );
     }
     if let Some(mut d) = dump {
@@ -406,7 +571,14 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
         f.write_all(format_rowstats(&rs).as_bytes()).map_err(|e| format!("cannot write rowstats ({:?})", e.kind()))?;
     }
     let sha = sha256_hex(firsts.join("\n").as_bytes());
-    println!("## {name}  lm-{profile_name}{}{}{}{}{}{}{}  {{'n': {}, 'top1': {top1}, 'oracle@64': {o64}, 'top1_sha256': '{sha}'}}", if ctx_mode { "+ctx" } else { "" }, if demote { "" } else { "-nodemote" }, if classes { "" } else { "-noclasses" }, lm.kn_tag().unwrap_or(""), tl.as_ref().map_or(String::new(), |(_, _, sha8)| format!("+tl:{sha8}")), if packs & PACK_ACG != 0 { "+acg" } else { "" }, fuzzy.map_or(String::new(), |f| format!("+fz:{f}")), rows.len());
+    // A non-standard level is a different setting from the shipping one: tools/bench.py and tools/triage.py compare the whole tag, so it fails their cells.
+    let rl_tag = match level {
+        RerankLevel::Standard => "",
+        RerankLevel::Conservative => "+rl:conservative",
+        RerankLevel::Aggressive => "+rl:aggressive",
+    };
+    let fz = fuzzy.map_or(String::new(), |f| format!("+fz:{f}"));
+    println!("## {name}  lm-{profile_name}{}{}{}{}{}{}{}{}{xo}{}{}{fz}  {{'n': {}, 'top1': {top1}, 'oracle@64': {o64}, 'top1_sha256': '{sha}'}}", if ctx_mode { "+ctx" } else { "" }, if demote { "" } else { "-nodemote" }, if classes { "" } else { "-noclasses" }, if names { "" } else { "-nonames" }, if scoring.kn { lm.kn_tag().unwrap_or("") } else { "" }, tl.as_ref().map_or(String::new(), |(_, _, sha8)| format!("+tl:{sha8}")), rl_tag, if packs & PACK_ACG != 0 { "+acg" } else { "" }, if scoring.tri { lm.tri_tag().unwrap_or("") } else { "" }, colloq.as_ref().map_or(String::new(), |co| format!("+colloq:{}{}", &co.sha256()[..8], if colloq_on.is_some() && reading_channel { "+rc" } else { "" })), rows.len());
     Ok(())
 }
 
@@ -456,7 +628,7 @@ fn rss_kb() -> Option<u64> {
 /// (RSS before and after one index, and after a second one).
 fn run_predict(args: &[String]) -> Result<(), String> {
     let (mut file, mut lm_path, mut profile, mut time) = (None, None, None, false);
-    let (mut packs, mut packs_dir) = (0u32, None::<String>);
+    let (mut packs, mut packs_dir, mut kn) = (0u32, None::<String>, true);
     let mut it = args.iter();
     while let Some(a) = it.next() {
         let mut val = || it.next().cloned().ok_or_else(|| "missing option value".to_string());
@@ -465,6 +637,7 @@ fn run_predict(args: &[String]) -> Result<(), String> {
             "--lm" => lm_path = Some(val()?),
             "--profile" => profile = Some(val()?),
             "--predict-time" => time = true,
+            "--no-kn" => kn = false,
             "--packs" => packs |= pack_flag(&val()?)?,
             "--packs-dir" => packs_dir = Some(val()?),
             _ => return Err("unknown argument".into()),
@@ -478,11 +651,13 @@ fn run_predict(args: &[String]) -> Result<(), String> {
         _ => return Err("--profile must be chat or formal".into()),
     }
     .lambda();
-    // The Kneser-Ney side file is deliberately off here: the Python predict reference (experiments/sp/predict.py) does not
-    // load it, so the sp-predict golden would stop being comparable (docs/contracts/kn-core.md, model-v6 note).
-    let lm = Lm::load_with(Path::new(&lm_path.ok_or("--lm is required")?), true, false).map_err(|e| e.to_string())?;
+    // A kn.sjkn beside the model turns the Kneser-Ney term on unless --no-kn, as in the other modes: the App's prediction row
+    // scores with it (Engine::recompute_pred -> predict -> Lm::word_by_id -> prob_c), and the Python reference
+    // (experiments/sp/predict.py) loads it the same way.
+    // The trigram table is never read here: the prediction row scores with the bigram whatever the profile (trigram-core.md (d)).
+    let lm = Lm::load_opts(Path::new(&lm_path.ok_or("--lm is required")?), true, kn, false).map_err(|e| e.to_string())?;
     let dir = root().join("data/lexicon");
-    let (lex, overlay) = load_with_packs(&dir, packs, &pdir)?;
+    let (lex, overlay) = load_with_packs(&dir, packs, &pdir, None, true)?;
     // Prediction scores use the capped lp only; demotion applies to decoding (sw §3).
     let capped = CappedLexicon::new(lex.clone(), &overlay, &lm, None).ok_or("cannot build the capped lexicon")?;
     let text = fs::read_to_string(file.ok_or("--predict is required")?).map_err(|e| format!("cannot read file ({:?})", e.kind()))?;
@@ -694,18 +869,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn row_stats_zero_for_ok_rows() {
-        assert_eq!(row_stats("他很好", "她很好", true), (0, 3));
-        assert_eq!(row_stats("他很好", "她很好", false), (1, 3));
-        assert_eq!(row_stats("", "𠮷野家", false), (3, 3));
-    }
-
-    #[test]
-    fn rowstats_rows_count_from_one() {
-        assert_eq!(format_rowstats(&[(true, "a".into(), "a".into()), (false, "ab".into(), "ac".into())]), "1\t1\t0\t1\n2\t0\t1\t2\n");
-    }
-
-    #[test]
     fn lm_opts_holdout_allows_rowstats_not_dump() {
         // --rowstats is not an argument: it is allowed everywhere, holdout included.
         assert!(check_lm_opts(Some("holdout"), false, 0, false).is_ok());
@@ -713,5 +876,35 @@ mod tests {
         assert!(check_lm_opts(None, true, 0, false).is_ok());
         assert!(check_lm_opts(None, false, 0, true).is_err(), "--packs-dir without --packs");
         assert!(check_lm_opts(None, false, PACK_ACG, true).is_ok());
+    }
+
+    /// names-lexicon 3.5: `--extra-overlay` rows are capped like pack rows. Goes through the CLI's own load path
+    /// (`load_with_packs`, then `CappedLexicon::new`); a word the corpus never saw is scored fixture score minus 1.0.
+    /// If the rows reached only the lexicon and not the capping text, the score would stay -7.5. 酷澎 is in the shipped names layer
+    /// since model-v6, so both runs leave it out (`--no-names`); loading the same row twice is a parse error.
+    #[test]
+    fn extra_overlay_rows_are_capped_like_pack_rows() {
+        let lm = Lm::load(&root().join("data/lm/bigram.sjlm")).expect("data/lm/bigram.sjlm and classes.sjc are required (see cli/tests/golden.rs)");
+        assert_eq!(lm.count("酷澎"), 0, "the fixture word must be one the corpus never saw");
+        let file = std::env::temp_dir().join(format!("shanjie-extra-overlay-{}.tsv", std::process::id()));
+        fs::write(&file, "ㄎㄨˋ-ㄆㄥˊ\t酷澎\t-7.5\tnames\n").unwrap();
+        let (dir, pdir) = (root().join("data/lexicon"), root().join("data/packs"));
+        let key = ["ㄎㄨˋ".to_string(), "ㄆㄥˊ".to_string()];
+        let score = |extra: Option<&Path>| {
+            let (lex, overlay) = load_with_packs(&dir, 0, &pdir, extra, false).unwrap();
+            CappedLexicon::new(lex, &overlay, &lm, None).unwrap().best_lp(&key, "酷澎")
+        };
+        let (with, without) = (score(Some(&file)), score(None));
+        fs::remove_file(&file).unwrap();
+        assert_eq!(with, Some(-8.5));
+        assert_eq!(without, None);
+    }
+
+    #[test]
+    fn extra_overlay_missing_file_names_the_path() {
+        let missing = std::env::temp_dir().join("shanjie-no-such-extra-overlay.tsv");
+        let err = extra_overlay_checked(Some(missing.to_str().unwrap().into())).unwrap_err();
+        assert!(err.contains(missing.to_str().unwrap()), "{err}");
+        assert_eq!(extra_overlay_checked(None), Ok(None));
     }
 }

@@ -18,7 +18,7 @@ final class FuzzyShellTests: XCTestCase {
                           abbreviationStore: MemoryAbbreviationStore(), englishStore: MemoryEnglishStore(), acgPackStore: MemoryAcgPackStore(),
                           glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(),
                           rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(),
-                          appProfileStore: MemoryAppProfileStore(), fuzzyStore: store)
+                          appProfileStore: MemoryAppProfileStore(), fuzzyStore: store, spacingStore: MemorySpacingStore())
         XCTAssertNotNil(shell.engine)
         return shell
     }

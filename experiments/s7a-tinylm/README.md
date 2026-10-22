@@ -17,7 +17,7 @@
 | `fusegrid.py` | 格點、凍結選擇、rowstats、`evalstats` 表格、§3／§4 報告；`--tune-keep` 只用旗標 0 的調參列選（S7d）；`--break-weight W` 照「改對 − W × 改壞」在 (α, τ, δ) 上選、照 S7e §3 判斷，δ 是融合的門檻（S7e） | 否 |
 | `latency.py` | numpy 延遲（8 候選 × 17 字，200 次）與 int8 大小 | 否 |
 | `int8check.py` | S7b §2.3：`dequant`（權重 int8 還原成 float32 的複本）、`compare`（int8 對 n-gram 的 §4 與 int8 對 fp32 的表，結論「int8 夠用／需要 FP32／不適用」） | 否 |
-| `export_sjtl.py` | S7c-1：`.npz` → `SJTL0001`，S7c-2c 起給 δ 時寫 `SJTL0002`（Rust 讀的模型檔；檔案格式寫在檔頭的 docstring）；`read_sjtl` 供測試與 golden 產生器用 | 否 |
+| `export_sjtl.py` | S7c-1：`.npz` → `SJTL0001`，S7c-2c 起給 δ 時寫 `SJTL0002`，model-v6 起給 `--levels` 時寫 `SJTL0004`（可加 `--kn-side`）（Rust 讀的模型檔；檔案格式寫在檔頭的 docstring）；`read_sjtl` 供測試與 golden 產生器用 | 否 |
 | `test_*.py` | 單元測試；`test_torch.py` 沒有 torch 時整檔跳過 | 只有 `test_torch.py` |
 
 ## 契約沒寫死、我做的決定
@@ -208,7 +208,8 @@ cargo run --release -q -p cli -- --lm $LM --profile chat --context --dev 302 --r
 cargo run --release -q -p cli -- --lm $LM --profile chat --context --rows $W/tune/cvtune.txt --tinylm $W/tinylm-M8.sjtl --tinylm-scores OUT.jsonl
 ```
 
-- `--tinylm` 要求載入的 n-gram 模型的 SHA-256 等於檔頭記的，而且 `kn.sjkn` 不能開（旁邊有的話加 `--no-kn`）；否則結束碼 1、訊息點名 `.sjtl`，不輸出結果。
+- `--tinylm` 要求載入的 n-gram 模型的 SHA-256 等於檔頭記的，而且 KN 側檔的狀態和檔頭記的相同（`docs/contracts/model-v6.md` §2.7）：`SJTL0004` 記了側檔的 SHA-256，就要開著**那一個** `kn.sjkn`；記的是全 0，或是 `SJTL0001`～`0003` 的檔，就不能開 KN。不符時結束碼 1、訊息點名 `.sjtl`，不輸出結果；KN 的三種不符各有自己的訊息與建議：KN 開著但檔是在沒有 KN 時調的（加 `--no-kn`，或改用 `--kn-side` 匯出的檔）、KN 開著但側檔不是調參時那一個（換回那個 `kn.sjkn`）、檔是在 KN 開著時調的但 KN 沒開（把那個 `kn.sjkn` 放回模型旁邊、拿掉 `--no-kn`）。
+- `export_sjtl.py` 給了 `--levels` 就寫 `SJTL0004`：加 `--kn-side <kn.sjkn>` 時位移 212 寫進側檔的 SHA-256（寫檔前先核對側檔是 `SJKN0002`、記的模型雜湊等於 `--ngram-model`），沒給時寫 32 bytes 全 0；沒給 `--levels` 照舊寫 `SJTL0001`／`0002`；只給 `--kn-side` 是用法錯誤。
 - `k` 是 `context_key(前文)`（`--context`）或空；`context_key` 回哨兵 `"^"` 時 k 是空字串，和 `tinylm.row_key` 一致。
 - 沒有 `--tinylm` 時輸出逐位元組不變。有的時候 stderr 多一行 `tinylm: rerank …`（每列重排時間 p50／p95、載入時間、載入前後的 RSS），給契約第 6 項的紀錄用。
 - 一致性：f32 檔對 `tinylm-M.npz`、int8 檔對 `tinylm-M8.npz`（`int8check.dequant` 的還原權重）的 numpy LL，用 `--tinylm-scores` 的輸出和 `score.py` 的輸出跑 `parity.py`（`ng` 容許 1e-9，`i`、`n` 要相同）。

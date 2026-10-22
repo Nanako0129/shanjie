@@ -29,13 +29,24 @@ public final class SettingsModel: ObservableObject {
     /// value is kept).
     @Published public private(set) var fuzzyFlags: UInt32 = 0
     @Published public private(set) var fuzzyAdjacentEnabled = true
+    /// The 英文的顯示 choice under it (zhen-inline section 2): true shows the English as it is typed. Enabled when the toggle is
+    /// enabled and on.
+    @Published public private(set) var englishInline = true
+    @Published public private(set) var englishInlineEnabled = false
+    /// 中英文之間自動加空格 (cjk-spacing section 2).
+    @Published public private(set) var spacing = false
     /// The abbreviation toggle is shown only when the shell offers it (`Shell.showsAbbreviation`).
     public var showsAbbreviation: Bool { shell.showsAbbreviation }
+    /// The 關於 page's update state (docs/contracts/about-update.md section 1); it publishes its own changes.
+    public var updates: Updates? { shell.updates }
     @Published public private(set) var demote = true
     /// 語意校正 (s7c2b section 2.2).
     @Published public private(set) var rerank = true
     /// Whether the window's 語意校正 toggle is enabled: the demotion table on and the small model loaded, like the menu item.
     @Published public private(set) var rerankEnabled = true
+    /// 語意校正的強度 (docs/contracts/rerank-strength.md section 3), and whether its control is enabled (`Shell.rerankLevelEnabled`).
+    @Published public private(set) var rerankLevel = RerankLevel.standard
+    @Published public private(set) var rerankLevelEnabled = false
     @Published public private(set) var acgPack = true
     /// The grey "資料更新至 …" line under the 動漫與遊戲詞 toggle (acg-pack contract A2.4): the same text as the menu's, `nil` for no line.
     public var acgDataLine: String? { shell.acgDataDate.map(MenuEntry.Text.acgDataDate) }
@@ -75,13 +86,18 @@ public final class SettingsModel: ObservableObject {
         layout = shell.layout
         prediction = shell.predictionOn
         abbreviation = shell.abbreviationOn
+        spacing = shell.spacingOn
         english = shell.englishOn
         englishEnabled = shell.englishEnabled
         fuzzyFlags = shell.fuzzyFlags
         fuzzyAdjacentEnabled = shell.fuzzyAdjacentEnabled
+        englishInline = shell.englishInlineOn
+        englishInlineEnabled = shell.englishInlineEnabled
         demote = shell.demoteOn
         rerank = shell.rerankOn
         rerankEnabled = shell.rerankEnabled
+        rerankLevel = shell.rerankLevel
+        rerankLevelEnabled = shell.rerankLevelEnabled
         acgPack = shell.acgPackOn
         glassTint = shell.glassTint
         candidateVertical = shell.candidateVertical
@@ -100,14 +116,17 @@ public final class SettingsModel: ObservableObject {
     public func selectLayout(_ m: InputMode) { shell.selectLayout(m) }
     public func setPrediction(_ on: Bool) { shell.applyPrediction(on) }
     public func setAbbreviation(_ on: Bool) { shell.applyAbbreviation(on) }
+    public func setSpacing(_ on: Bool) { shell.setSpacing(on) }
     public func setEnglish(_ on: Bool) { shell.applyEnglish(on) }
     /// One checkbox of 模糊輸入: `bit` is a bit of the flags (0-3 the pairs, 4 the adjacent-key slips).
     public func setFuzzy(bit: Int, _ on: Bool) {
         precondition((0..<5).contains(bit))
         shell.applyFuzzy(on ? shell.fuzzyFlags | (1 << UInt32(bit)) : shell.fuzzyFlags & ~(1 << UInt32(bit)))
     }
+    public func setEnglishInline(_ on: Bool) { shell.applyEnglishInline(on) }
     public func setDemote(_ on: Bool) { shell.applyDemote(on) }
     public func setRerank(_ on: Bool) { shell.applyRerank(on) }
+    public func setRerankLevel(_ level: RerankLevel) { shell.applyRerankLevel(level) }
     public func setAcgPack(_ on: Bool) { shell.setAcgPack(on) }
     public func setBackupExcluded(_ on: Bool) {
         shell.setBackupExcluded(on)
@@ -121,4 +140,14 @@ public final class SettingsModel: ObservableObject {
     public func clear() {
         shell.confirmAndClear { [weak self] in self?.refreshExternal() }  // the "cannot save" row may change
     }
+}
+
+/// Settings-sidebar section 2.2: the settings window's frame moved vertically into its screen's usable area, up when it
+/// hangs below (the Dock), down when it sticks out above (the menu bar). The window's height is capped to the area's, so
+/// both never apply at once.
+public func settingsFrame(_ frame: CGRect, clampedInto area: CGRect) -> CGRect {
+    var r = frame
+    if r.minY < area.minY { r.origin.y = area.minY }
+    if r.maxY > area.maxY { r.origin.y = area.maxY - r.height }
+    return r
 }

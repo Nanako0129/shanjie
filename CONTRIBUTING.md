@@ -33,18 +33,25 @@
 步驟：
 
 ```sh
-# 語言模型、詞類表與語意校正模型不在 repo 裡，從 Release 下載（CC BY-SA 4.0；三個都要，說明見 docs/data-files.md）
-gh release download model-v5 -R Nanako0129/shanjie -p bigram.sjlm -D data/lm
-gh release download classes-v3 -R Nanako0129/shanjie -p classes.sjc -D data/lm
-gh release download tinylm-v3 -R Nanako0129/shanjie -p tinylm.sjtl -D data/lm
+# 語言模型、詞類表、Kneser–Ney 側檔、語意校正模型、trigram 表與口語表（常談）不在 repo 裡，從 Release 下載（CC BY-SA 4.0；都要，說明見 docs/data-files.md）
+gh release download model-v6 -R Nanako0129/shanjie -p bigram.sjlm -D data/lm
+gh release download classes-v5 -R Nanako0129/shanjie -p classes.sjc -D data/lm
+gh release download kn-v1 -R Nanako0129/shanjie -p kn.sjkn -D data/lm
+gh release download sj-sr-6-14m -R Nanako0129/shanjie -p tinylm.sjtl -D data/lm
+gh release download sj-cx-1-7.7m -R Nanako0129/shanjie -p trigram.sjt3 -D data/lm
+gh release download sj-cl-1-68k -R Nanako0129/shanjie -p colloquial.sjlm -p colloquial-attribution.tsv -D data/lm
 # 沒有登入 gh 的話改用：
-# curl -L --create-dirs -o data/lm/bigram.sjlm https://github.com/Nanako0129/shanjie/releases/download/model-v5/bigram.sjlm
-# curl -L --create-dirs -o data/lm/classes.sjc https://github.com/Nanako0129/shanjie/releases/download/classes-v3/classes.sjc
-# curl -L --create-dirs -o data/lm/tinylm.sjtl https://github.com/Nanako0129/shanjie/releases/download/tinylm-v3/tinylm.sjtl
-shasum -a 256 -c data/bigram.sjlm.sha256 data/classes.sjc.sha256 data/tinylm.sjtl.sha256
+# curl -L --create-dirs -o data/lm/bigram.sjlm https://github.com/Nanako0129/shanjie/releases/download/model-v6/bigram.sjlm
+# curl -L --create-dirs -o data/lm/classes.sjc https://github.com/Nanako0129/shanjie/releases/download/classes-v5/classes.sjc
+# curl -L --create-dirs -o data/lm/kn.sjkn https://github.com/Nanako0129/shanjie/releases/download/kn-v1/kn.sjkn
+# curl -L --create-dirs -o data/lm/tinylm.sjtl https://github.com/Nanako0129/shanjie/releases/download/sj-sr-6-14m/tinylm.sjtl
+# curl -L --create-dirs -o data/lm/trigram.sjt3 https://github.com/Nanako0129/shanjie/releases/download/sj-cx-1-7.7m/trigram.sjt3
+# curl -L --create-dirs -o data/lm/colloquial.sjlm https://github.com/Nanako0129/shanjie/releases/download/sj-cl-1-68k/colloquial.sjlm
+# curl -L --create-dirs -o data/lm/colloquial-attribution.tsv https://github.com/Nanako0129/shanjie/releases/download/sj-cl-1-68k/colloquial-attribution.tsv
+shasum -a 256 -c data/bigram.sjlm.sha256 data/classes.sjc.sha256 data/kn.sjkn.sha256 data/tinylm.sjtl.sha256 data/trigram.sjt3.sha256 data/colloquial.sjlm.sha256 data/colloquial-attribution.tsv.sha256
 
 make test      # Rust 核心測試，再跑 Swift 殼的測試，以及詞包建置工具的 python3 單元測試（需要 python3、真的模型與 cargo 建出來的 CLI）
-make bundle    # 組出 build/善解輸入法.app
+make bundle    # 組出 build/善解（開發版）.app（開發版 bundle ID）
 ```
 
 需要模型的測試，找不到模型時會直接失敗並說明怎麼取得，不會跳過。
@@ -52,11 +59,13 @@ make bundle    # 組出 build/善解輸入法.app
 **想實際裝起來試**：
 
 ```sh
-scripts/install-ime.sh build/善解輸入法.app
+scripts/install-ime.sh "build/善解（開發版）.app"
 ```
 
-- 會覆蓋 `~/Library/Input Methods/` 裡的善解；上一版留在 `.shanjie-previous`。
-- 從 Homebrew 版換成自己建置的版本前，先 `brew uninstall --cask shanjie`，否則之後的 `brew upgrade` 會蓋掉你的建置。
+- 本機組建裝成「善解（開發版）」：`~/Library/Input Methods/善解（開發版）.app`，上一版留在 `.shanjie-dev-previous`。第一次要在「系統設定 → 鍵盤 → 輸入方式」加入一次。
+- 它的 bundle ID 是 `com.nyanako.inputmethod.shanjie.dev`，輸入模式、偏好設定與學習資料（App 沙盒的 container）都和正式版分開，不會覆蓋或搬走已裝好的「善解輸入法」（正式版或 Homebrew 版），所以不必先移除 Homebrew 版。
+- 正式 bundle ID 的組建（`make bundle BUNDLE_ID=com.nyanako.inputmethod.shanjie`）只給 CI 與發版用；不要在自己的機器上執行或安裝：它第一次啟動就會把正式版的學習資料搬進它的 container（`docs/contracts/app-sandbox.md` §2.3）。
+- 在 App 沙盒那一片的 CI 證明「沒有移轉清單就不搬」之前，開發版也先不要裝（`docs/verification.md` 的本機關卡）。
 
 各項檢查的細節在 `docs/verification.md`。
 
@@ -107,7 +116,7 @@ PR 需要：
     ```
 
   - 前後比較用逐列統計：基準與新版各加 `--rowstats "$TMPDIR/before.rowstats"`／`--rowstats "$TMPDIR/after.rowstats"`（`--dev 302` 與 `--rows` 檔都可以），再跑 `python3 tools/evalstats.py compare "$TMPDIR/before.rowstats" "$TMPDIR/after.rowstats" --label dev302-chat`，把那一行表格貼進 PR（改對／改壞、McNemar p、CER、95% 區間）；dev302、打字測驗（`eval/dev/user-typing.txt`）、錯字回報檔在聊天與書面各一行；
-  - 只要求不退步；
+  - 只要求不退步（2026-10-20 起 dev302 的聊天設定只報、不擋，書面照擋；聊天另由維護者用 cvtune-clean 守門，這份集合不在 repo 裡，見 `docs/methodology.md` 同日一節）；
   - 有進步的話寫出是哪幾句。
 - **對應的文件一起更新**：契約、`docs/PLAN.md`、README。
 - **commit 加上 DCO 簽署**（見下一節）。
@@ -123,12 +132,12 @@ git worktree remove <worktree 路徑>   # 有用 worktree 的話
 
 ### 保留集不要拿來調參數
 
-`eval/holdout/` 是保留集，只在一片（`docs/PLAN.md` 的一個切片）做完時，由沒參與實作的人跑一次，用來確認沒有對開發集過度調整（規則見 `eval/README.md`）。
+`eval/holdout/` 是保留集，只在發版（推 `v*` tag）前，由沒參與實作的人跑一次，用來確認沒有對開發集過度調整（規則見 `eval/README.md`）。
 
 - 請不要讀它的內容來找錯字或調參數；
 - 也不要把它的句子加進其他地方。
 
-你的 PR 只需要附開發集的數字（上面那張表）；保留集由維護者在那一片收尾時跑。
+你的 PR 只需要附開發集的數字（上面那張表）；保留集由維護者在發版前跑。
 
 ## DCO 簽署
 

@@ -2,7 +2,8 @@
 Run: python3 -m unittest tools/test_triage.py   (from the repo root). No network, no models, no private data.
 
 Syllables are placeholders ("a", "ni", ...): the tool only compares them. A row is built by `row`; `classify` is called directly for wrong rows."""
-import io, json, os, struct, sys, tempfile, unittest
+import hashlib
+import concurrent.futures, io, json, os, struct, sys, tempfile, unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import triage as T  # noqa: E402
@@ -31,11 +32,12 @@ a-b 單 -1
 OVERLAY = "x-y\t新詞\t-2\twikt\nz-w\t舊詞\t-2\twikt\n"   # 舊詞 is also in the base file: not an overlay-only word
 SANDHI = "yi2-ge\t一個\t-2\tsandhi\nm-n\t只變\t-2\tsandhi\n"
 PACK = "k-l\t包詞\t-2\tacg\n"
+NAMES = "p-q\t名店\t-2\tnames\n"
 PAR = (1.0, 2.0, 0.5)   # alpha, tau, delta
 
 
 def lex(sandhi=SANDHI):
-    return T.Lex(BASE, OVERLAY, sandhi, PACK)
+    return T.Lex(BASE, OVERLAY, sandhi, PACK, NAMES)
 
 
 def row(truth, syls, cands, gold0=None, c=0, scores=None, ctx=""):
@@ -63,8 +65,9 @@ class Lexicon(unittest.TestCase):
         self.assertFalse(l.has("字"), "a row with two fields is skipped")
         self.assertFalse(l.has("單"), "a word whose length differs from its syllable count is skipped")
         self.assertEqual(l.by_reading[("yi2", "ge")], {"一個"}, "sandhi-add.tsv rows are entries")
-        self.assertEqual(l.base & {"新詞", "包詞", "只變"}, set())
-        self.assertEqual(l.source, {"新詞", "舊詞", "包詞"}, "overlay and pack words are sources; sandhi readings are not")
+        self.assertEqual(l.base & {"新詞", "包詞", "只變", "名店"}, set())
+        self.assertEqual(l.by_reading[("p", "q")], {"名店"}, "names-add.tsv rows are entries (model-v6: the names layer is always on)")
+        self.assertEqual(l.source, {"新詞", "舊詞", "包詞", "名店"}, "overlay, names and pack words are sources; sandhi readings are not")
 
     def test_bad_overlay_row_is_refused(self):
         with self.assertRaises(ValueError):
@@ -80,20 +83,56 @@ class Pick(unittest.TestCase):
         self.assertEqual(T.pick([0, -1, -1], [-2, 0.0, 0.0], 1.0, 9.0, 0.0), 1, "ties go to the better n-gram rank")
 
     def test_header_params(self):
-        def head(v):
-            b = bytearray(116 if v == 2 else 100)
-            b[:8] = b"SJTL0002" if v == 2 else b"SJTL0001"
-            struct.pack_into("<I", b, 8, v)
-            struct.pack_into("<dd", b, 36, 0.3, 2.0)
-            struct.pack_into("<dd", b, 52, 0.7, 1.0)
-            if v == 2:
-                struct.pack_into("<dd", b, 100, 0.25, 2.0)
-            return bytes(b)
+        """Real tiny files from the exporter, one per format version (the version 3 one used to be refused: ValueError 'not a .sjtl file')."""
+        sys.path.insert(0, os.path.join(T.ROOT, "experiments", "s7a-tinylm"))
+        import export_sjtl as ex, tinylm
+        chars = "甲乙丙丁戊己庚辛"
+        chat, formal = (0.3, 2.0), (0.7, 1.0)
+        levels = (0.1, 1.0, 0.5, 0.9, 3.0, 0.5, 0.2, 0.5, 0.25, 0.8, 2.0, 1.0)
         with tempfile.TemporaryDirectory() as td:
-            for v, want in ((1, {"chat": (0.3, 2.0, 0.0), "formal": (0.7, 1.0, 0.0)}), (2, {"chat": (0.3, 2.0, 0.25), "formal": (0.7, 1.0, 2.0)})):
-                p = os.path.join(td, f"v{v}.sjtl")
-                open(p, "wb").write(head(v))
-                self.assertEqual(T.tinylm_params(p), want)
+            npz = os.path.join(td, "m.npz")
+            tinylm.save_params(npz, tinylm.random_params(list(chars), n_layer=1, d=8, n_head=2, seed=1), chars, n_layer=1, n_head=2)
+            cases = [("v1", chat, formal, None, {"chat": (0.3, 2.0, 0.0), "formal": (0.7, 1.0, 0.0)}),
+                     ("v2", chat + (0.25,), formal + (2.0,), None, {"chat": (0.3, 2.0, 0.25), "formal": (0.7, 1.0, 2.0)}),
+                     ("v3", chat + (0.25,), formal + (2.0,), levels, {"chat": (0.3, 2.0, 0.25), "formal": (0.7, 1.0, 2.0)}),
+                     ("v4", chat + (0.25,), formal + (2.0,), levels, {"chat": (0.3, 2.0, 0.25), "formal": (0.7, 1.0, 2.0)})]
+            for name, c, f, lv, want in cases:
+                out = os.path.join(td, name + ".sjtl")
+                # version 4 (model-v6 section 2.7): the same header plus the SHA-256 of the kn.sjkn it was tuned with
+                ex.export(npz, out, "int8", c, f, b"\0" * 32, levels=lv, kn_sha=b"\x07" * 32 if name == "v4" else None)
+                self.assertEqual(open(out, "rb").read()[:8], f"SJTL000{name[1]}".encode(), name)
+                self.assertEqual(T.tinylm_params(out), want, name)
+            junk = os.path.join(td, "junk.sjtl")
+            open(junk, "wb").write(b"x" * 300)
+            self.assertRaises(ValueError, T.tinylm_params, junk)
+
+
+class KnTag(unittest.TestCase):
+    def test_kn_tag_is_the_clis(self):
+        """The setting tag the CLI prints for the side file beside the model (core Lm::kn_tag; the eval/golden/kn-tiny files), "" without one."""
+        kn = os.path.join(T.ROOT, "eval/golden/kn-tiny")
+        for f, beta in (("kn.sjkn", "1"), ("kn-beta075.sjkn", "0.75")):
+            b = open(os.path.join(kn, f), "rb").read()
+            self.assertEqual(T.kn_tag(os.path.join(kn, f)), f"+kn:{hashlib.sha256(b).hexdigest()[:8]}:θ1:β{beta}")
+        self.assertEqual(T.kn_tag(os.path.join(kn, "no-such.sjkn")), "")
+        self.assertRaises(ValueError, T.kn_tag, os.path.join(kn, "bigram.sjlm"))
+
+
+class SettingTag(unittest.TestCase):
+    def test_formal_with_the_table_has_tri_and_no_kn_chat_keeps_kn(self):
+        """The tag the CLI prints (cli/src/main.rs): trigram.sjt3 beside the model turns KN off for formal and appends +tri: after +acg."""
+        kn, tri = "+kn:cbefbced:θ1:β1", "+tri:fdd3b05d"
+        self.assertEqual(T.expected_tag("formal", "+ctx", "abcd1234", kn, tri), "lm-formal+ctx+tl:abcd1234+acg+tri:fdd3b05d")
+        self.assertEqual(T.expected_tag("formal", "", "abcd1234", kn, tri), "lm-formal+tl:abcd1234+acg+tri:fdd3b05d")
+        self.assertEqual(T.expected_tag("chat", "+ctx", "abcd1234", kn, tri), "lm-chat+ctx+kn:cbefbced:θ1:β1+tl:abcd1234+acg")
+        self.assertEqual(T.expected_tag("formal", "+ctx", "abcd1234", kn, ""), "lm-formal+ctx+kn:cbefbced:θ1:β1+tl:abcd1234+acg")
+
+    def test_tri_tag_is_the_sha8_of_the_file_or_empty(self):
+        with tempfile.TemporaryDirectory() as td:
+            f = os.path.join(td, "trigram.sjt3")
+            open(f, "wb").write(b"table")
+            self.assertEqual(T.tri_tag(f), "+tri:" + hashlib.sha256(b"table").hexdigest()[:8])
+            self.assertEqual(T.tri_tag(os.path.join(td, "no-such.sjt3")), "")
 
 
 class Segments(unittest.TestCase):
@@ -324,6 +363,251 @@ class Run(unittest.TestCase):
         for k, v in (("commit", "b"), ("models", {"m": "2"}), ("alpha_tau_delta", {"chat": [1, 2, 4]}), ("cli_sha256", "d")):
             with self.assertRaises(SystemExit):
                 T.check_same_run({**new, k: v}, new)
+
+
+def _patched(td, files, fake_cell, out=None):
+    """The patches under which `cmd_run` runs the fake cell on the given set files: no CLI, models or lexicon."""
+    from unittest import mock
+    import contextlib
+    stack = contextlib.ExitStack()
+    stack.enter_context(mock.patch.multiple(T, OUT_DIR=out or os.path.join(td, "out"), load_lenient=lambda: None, kn_tag=lambda p: "",
+                                            tinylm_params=lambda p: {"chat": (0.3, 2.0, 0.25), "formal": (0.7, 2.0, 1.0)},
+                                            tri_tag=lambda p: "", git_head=lambda: "abc", run_cell=fake_cell, set_file=lambda n, r: files[n]))
+    stack.enter_context(mock.patch.object(T.Lex, "load", lambda: None))
+    stack.enter_context(mock.patch.object(T.bench, "sha_file", lambda p: "h"))
+    stack.enter_context(mock.patch("sys.stderr", io.StringIO()))
+    return stack
+
+
+class Jobs(unittest.TestCase):
+    def test_parallel_cells_write_the_same_json_and_rows(self):
+        """`run --jobs 3` writes byte for byte the JSON and rows files of `--jobs 1` (the CLI, models and lexicon are faked)."""
+        import argparse
+        with tempfile.TemporaryDirectory() as td:
+            files = {}
+            for name, size, private in (("dev302", 30, False), ("fw", 10, False), ("discordtune", 20, True)):
+                p = os.path.join(td, name + ".txt")
+                with open(p, "w", encoding="utf-8") as f:
+                    f.write("x" * size)
+                files[name] = (p, private)
+
+            seen = []
+
+            def fake_cell(cli, lm, tl, prof, f, lex, par, lenient, report, tdir, kn, tri, threads, colloq):
+                seen.append(threads)
+                cn = T.empty_counts()
+                cn["n"], cn["errors"] = os.path.getsize(f) + len(prof), len(prof)
+                return cn, [("C", 1, "0.5", 0), ("A1", 2, "1-2", 1)]
+
+            out = {}
+            for jobs in (1, 3):
+                rows_out = os.path.join(td, f"rows{jobs}")
+                with _patched(td, files, fake_cell, out=os.path.join(td, f"out{jobs}")):
+                    T.cmd_run(argparse.Namespace(label="L", set=list(files), private_root=td, cli="cli", rows_out=rows_out, jobs=jobs, cli_threads=3))
+                got = {"json": open(os.path.join(td, f"out{jobs}", "L.json"), encoding="utf-8").read()}
+                got.update({n: open(os.path.join(rows_out, n), encoding="utf-8").read() for n in sorted(os.listdir(rows_out))})
+                out[jobs] = got
+            self.assertEqual(seen, [3] * 12, "cmd_run passes --cli-threads to every cell")
+            self.assertEqual(out[1], out[3])
+            self.assertEqual(sorted(out[1]), ["L-dev302-chat.tsv", "L-dev302-formal.tsv", "L-fw-chat.tsv", "L-fw-formal.tsv", "json"])
+            self.assertEqual(list(json.loads(out[3]["json"])["sets"]), ["dev302", "fw", "discordtune"])
+
+
+class FailingCell(unittest.TestCase):
+    def test_a_failing_cell_starts_no_later_cell_and_leaves_no_temp_dir(self):
+        """--jobs 3 on threads: cell A fails while B and C are running; no cell starts after the failure, B and C finish and their temp
+        dirs are deleted, the error is A's. Synchronised by events: A waits until B and C have started; B and C wait until A's temp dir
+        has been removed (the test's TemporaryDirectory subclass sets the event), which happens after the stop event is set, so the
+        two workers that become free find it set. The other cells must never reach run_cell."""
+        import argparse, threading, time
+        from unittest import mock
+
+        class Dir(tempfile.TemporaryDirectory):
+            def cleanup(self):
+                super().cleanup()
+                if self.name == a_dir[0]:
+                    a_cleaned.set()
+                    time.sleep(0.05)   # not a synchronisation: it widens the window in which a stop set only after the cleanup would be late
+
+        with tempfile.TemporaryDirectory() as td:
+            files, tmp = {}, os.path.join(td, "tmp")
+            os.makedirs(tmp)
+            for i, name in enumerate(("n0", "n1", "n2", "n3", "n4")):   # decreasing size: the pool's order is n0 chat, n0 formal, n1 chat, ...
+                p = os.path.join(td, name + ".txt")
+                with open(p, "w", encoding="utf-8") as f:
+                    f.write("x" * (50 - i))
+                files[name] = (p, False)
+            a_dir, a_cleaned, started, ran, finished = [None], threading.Event(), [threading.Event(), threading.Event()], [], []
+
+            def fake_cell(cli, lm, tl, prof, f, lex, par, lenient, report, tdir, kn, tri, threads, colloq):
+                job = (os.path.basename(f)[:-4], prof)
+                ran.append(job)
+                open(os.path.join(tdir, "sentences"), "w").close()   # something a cell leaves in its temp dir
+                if job == ("n0", "chat"):
+                    a_dir[0] = tdir
+                    for e in started:
+                        self.assertTrue(e.wait(10))
+                    raise RuntimeError("boom")
+                self.assertIn(job, [("n0", "formal"), ("n1", "chat")], "a cell started after the failure")
+                started[job == ("n1", "chat")].set()
+                self.assertTrue(a_cleaned.wait(10))
+                finished.append(job)
+                return T.empty_counts(), [("C", 1, "0.5", 0)]
+
+            with _patched(td, files, fake_cell), mock.patch.object(tempfile, "tempdir", tmp), mock.patch.object(tempfile, "TemporaryDirectory", Dir):
+                with self.assertRaisesRegex(RuntimeError, "boom"):
+                    T.cmd_run(argparse.Namespace(label="L", set=list(files), private_root=td, cli="cli", rows_out=os.path.join(td, "rows"), jobs=3, cli_threads=1))
+            self.assertEqual(sorted(ran), [("n0", "chat"), ("n0", "formal"), ("n1", "chat")])
+            self.assertEqual(sorted(finished), [("n0", "formal"), ("n1", "chat")])
+            self.assertEqual(os.listdir(tmp), [])
+            self.assertFalse(os.path.exists(os.path.join(td, "out", "L.json")))
+
+    def test_a_failing_temp_dir_cleanup_also_stops_the_later_cells(self):
+        """--jobs 2: cell A's run_cell succeeds but removing its temp dir raises; cell B is held until A's future is done (a done
+        callback, added by wrapping submit), so the worker B frees finds the stop event set: no third cell runs."""
+        import argparse, threading
+        from unittest import mock
+
+        class Dir(tempfile.TemporaryDirectory):
+            def cleanup(self):
+                super().cleanup()
+                if self.name == a_dir[0]:
+                    raise OSError("cannot remove the temp dir")
+
+        with tempfile.TemporaryDirectory() as td:
+            files, tmp = {}, os.path.join(td, "tmp")
+            os.makedirs(tmp)
+            for i, name in enumerate(("n0", "n1", "n2")):
+                p = os.path.join(td, name + ".txt")
+                with open(p, "w", encoding="utf-8") as f:
+                    f.write("x" * (50 - i))
+                files[name] = (p, False)
+            a_dir, b_started, a_done, ran = [None], threading.Event(), threading.Event(), []
+
+            def fake_cell(cli, lm, tl, prof, f, lex, par, lenient, report, tdir, kn, tri, threads, colloq):
+                job = (os.path.basename(f)[:-4], prof)
+                ran.append(job)
+                if job == ("n0", "chat"):
+                    a_dir[0] = tdir
+                    self.assertTrue(b_started.wait(10))
+                else:
+                    self.assertEqual(job, ("n0", "formal"), "a cell started after the failure")
+                    b_started.set()
+                    self.assertTrue(a_done.wait(10))
+                return T.empty_counts(), []
+
+            real_submit = concurrent.futures.ThreadPoolExecutor.submit
+
+            def submit(self, fn, job):
+                fut = real_submit(self, fn, job)
+                if job == ("n0", "chat"):
+                    fut.add_done_callback(lambda _: a_done.set())
+                return fut
+
+            with _patched(td, files, fake_cell), mock.patch.object(tempfile, "tempdir", tmp), mock.patch.object(tempfile, "TemporaryDirectory", Dir), \
+                    mock.patch.object(concurrent.futures.ThreadPoolExecutor, "submit", submit):
+                with self.assertRaisesRegex(OSError, "cannot remove"):
+                    T.cmd_run(argparse.Namespace(label="L", set=list(files), private_root=td, cli="cli", rows_out=os.path.join(td, "rows"), jobs=2, cli_threads=1))
+            self.assertEqual(sorted(ran), [("n0", "chat"), ("n0", "formal")])
+            self.assertEqual(os.listdir(tmp), [])
+
+    def test_a_repeated_set_name_runs_once(self):
+        import argparse
+        with tempfile.TemporaryDirectory() as td:
+            p = os.path.join(td, "n0.txt")
+            open(p, "w").close()
+            for jobs in (1, 2):
+                ran = []
+
+                def fake_cell(cli, lm, tl, prof, f, lex, par, lenient, report, tdir, kn, tri, threads, colloq):
+                    ran.append(prof)
+                    return T.empty_counts(), []
+                with _patched(td, {"n0": (p, True)}, fake_cell):
+                    T.cmd_run(argparse.Namespace(label="L", set=["n0", "n0"], private_root=td, cli="cli", rows_out=td, jobs=jobs, cli_threads=1))
+                self.assertEqual(sorted(ran), ["chat", "formal"])
+
+
+class CliThreads(unittest.TestCase):
+    def test_threads_reach_both_cli_calls_of_a_cell(self):
+        from unittest import mock
+        calls = []
+        line = "## r.txt  lm-chat+ctx  {'n': 1, 'top1': 0, 'oracle@64': 0, 'top1_sha256': '" + "0" * 64 + "'}\n"
+
+        def fake_sh(cmd, **kw):
+            calls.append(cmd)
+            return line
+        with tempfile.TemporaryDirectory() as td:
+            rows = os.path.join(td, "r.txt")
+            with open(rows, "w", encoding="utf-8") as f:
+                f.write("|你|ni\n")
+            for threads, want in ((3, ["--threads", "3"]), (1, [])):
+                calls.clear()
+                with mock.patch.object(T.bench, "sh", fake_sh), mock.patch.object(T.bench, "sha_file", lambda p: "h" * 64):
+                    with self.assertRaisesRegex(RuntimeError, "setting tag"):   # the fake summary's tag is not the shipping one; both calls are made first
+                        T.run_cell("cli", "lm", "tl", "chat", rows, None, PAR, LEN, False, td, "", "", threads)
+                self.assertEqual(len(calls), 2)
+                for cmd in calls:
+                    self.assertEqual(cmd[cmd.index("--tinylm") + 2:][:len(want)], want)
+                    self.assertEqual("--threads" in cmd, bool(want))
+
+
+class Colloquial(unittest.TestCase):
+    """The shipping setting S includes the colloquial table when data/lm/colloquial.sjlm exists (the App always loads it)."""
+
+    def test_the_command_and_the_tag_carry_the_table_only_when_given(self):
+        base = ["cli", "--lm", "lm", "--profile", "chat", "--rows", "r", "--context", "--packs", "acg", "--tinylm", "tl"]
+        self.assertEqual(T.cli_cmd("cli", "lm", "tl", "chat", "r", True, []), base)   # without the table: the command of before
+        self.assertEqual(T.cli_cmd("cli", "lm", "tl", "chat", "r", True, ["--rowstats", "x"], 3, "co.sjlm"),
+                         base + ["--colloquial-core", "co.sjlm", "--threads", "3", "--rowstats", "x"])
+        self.assertEqual(T.expected_tag("chat", "+ctx", "abcd1234", "", ""), "lm-chat+ctx+tl:abcd1234+acg")
+        self.assertEqual(T.expected_tag("chat", "+ctx", "abcd1234", "", "", "2984eeb5"), "lm-chat+ctx+tl:abcd1234+acg+colloq:2984eeb5+rc")   # chat: the reading-channel term rides on it
+        self.assertEqual(T.expected_tag("formal", "", "abcd1234", "", "+tri:fdd3b05d", "2984eeb5"), "lm-formal+tl:abcd1234+acg+tri:fdd3b05d+colloq:2984eeb5")
+
+    def test_run_cell_passes_the_table_and_checks_its_tag(self):
+        from unittest import mock
+        calls = []
+        line = "## r.txt  lm-chat%s+tl:hhhhhhhh+acg+colloq:hhhhhhhh+rc  {'n': 1, 'top1': 0, 'oracle@64': 0, 'top1_sha256': '" + "0" * 64 + "'}\n"
+
+        def fake_sh(cmd, **kw):
+            calls.append(cmd)
+            return line % ("+ctx" if "--context" in cmd else "")
+        with tempfile.TemporaryDirectory() as td:
+            rows = os.path.join(td, "r.txt")
+            with open(rows, "w", encoding="utf-8") as f:
+                f.write("|你|ni\n")
+            with mock.patch.object(T.bench, "sh", fake_sh), mock.patch.object(T.bench, "sha_file", lambda p: "h" * 64), \
+                    self.assertRaises(FileNotFoundError):   # past the tag check: the fake CLI wrote no rowstats
+                T.run_cell("cli", "lm", "tl", "chat", rows, None, PAR, LEN, False, td, "", "", 1, "co.sjlm")
+            self.assertEqual(len(calls), 2)
+            self.assertTrue(all(c[c.index("--colloquial-core") + 1] == "co.sjlm" for c in calls))
+            calls.clear()
+            with mock.patch.object(T.bench, "sh", fake_sh), mock.patch.object(T.bench, "sha_file", lambda p: "h" * 64), \
+                    self.assertRaisesRegex(RuntimeError, "setting tag"):   # the CLI printed +colloq: but the run has no table: not the shipping setting
+                T.run_cell("cli", "lm", "tl", "chat", rows, None, PAR, LEN, False, td, "", "", 1, "")
+
+    def test_a_run_without_the_reading_channel_is_not_the_shipping_setting(self):
+        from unittest import mock
+        line = "## r.txt  lm-chat%s+tl:hhhhhhhh+acg+colloq:hhhhhhhh  {'n': 1, 'top1': 0, 'oracle@64': 0, 'top1_sha256': '" + "0" * 64 + "'}\n"   # no +rc
+        with tempfile.TemporaryDirectory() as td:
+            rows = os.path.join(td, "r.txt")
+            with open(rows, "w", encoding="utf-8") as f:
+                f.write("|你|ni\n")
+            with mock.patch.object(T.bench, "sh", lambda cmd, **kw: line % ("+ctx" if "--context" in cmd else "")), \
+                    mock.patch.object(T.bench, "sha_file", lambda p: "h" * 64), self.assertRaisesRegex(RuntimeError, "setting tag"):
+                T.run_cell("cli", "lm", "tl", "chat", rows, None, PAR, LEN, False, td, "", "", 1, "co.sjlm")
+
+    def test_the_plain_pick_check_is_skipped_only_in_chat_with_the_table(self):
+        # code review on the reading-channel slice: with the table the core's chat pick differs from Python's plain pick on purpose
+        # (dev302 row 202), so checking it would abort every shipping chat cell.
+        self.assertFalse(T.plain_pick_applies("chat", "co.sjlm"))
+        self.assertTrue(T.plain_pick_applies("formal", "co.sjlm"))
+        self.assertTrue(T.plain_pick_applies("chat", ""))
+
+    def test_the_table_says_what_the_d2_diagnosis_leaves_out(self):
+        doc = {"label": "t", "commit": "0" * 40, "setting": "s", "models": {"colloquial.sjlm": "a" * 64}, "alpha_tau_delta": {}, "sets": {}}
+        self.assertIn("D2b／D2c 的細分用 Python 的 `pick`", T.render(doc))
+        doc["models"] = {}
+        self.assertNotIn("口語項", T.render(doc))
 
 
 class Render(unittest.TestCase):
