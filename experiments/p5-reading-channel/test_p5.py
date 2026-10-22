@@ -282,7 +282,7 @@ class Bindings(unittest.TestCase):
                 text = f.read()
             self.assertEqual(text.count(ROW3_NOW), 1)
             with open(run, "w", encoding="utf-8", newline="") as g:
-                g.write("".join(text.replace(ROW3_NOW, ROW3_RUN).splitlines(keepends=True)[:Q.ROW_COUNTS["user-reported"]]))
+                g.write("".join(l + "\n" for l in text.replace(ROW3_NOW, ROW3_RUN).split("\n")[:Q.ROW_COUNTS["user-reported"]]))   # lines as the file is read, LF only
             for name, path in (("typing76", os.path.join(Q.ROOT, "eval/bench/suite-v1/typing76.txt")), ("user-reported", run),
                                ("dev302", os.path.join(Q.ROOT, "eval/bench/suite-v1/dev302.txt"))):
                 Q.check_rows_sha(name, path)                                    # the registered hashes are those of the public files
