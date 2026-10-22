@@ -15,6 +15,7 @@ def row(ng, ll, ok, ch=None, col=None, c=0):
     if ll is not None:
         sc["ll"] = ll
     r = {"sc": sc, "ok64": [bool(o) for o in ok], "ed64": [1 - o for o in ok], "ng64": ng, "ch": {1: ch, 2: ch, 4: ch}}
+    r["ch_r1"] = r["ch"]
     if col is not None:
         r["col"] = col
     return r
@@ -67,7 +68,7 @@ class Pick(unittest.TestCase):
 
     def test_clip_c_limits_the_term(self):
         r = row([0.0, -1.0], [0.0, 0.0], [0, 1], ch=[-5.0, 0.0])
-        r["ch"] = {1: [-1.0, 0.0], 2: [-2.0, 0.0], 4: [-4.0, 0.0]}
+        r["ch"] = r["ch_r1"] = {1: [-1.0, 0.0], 2: [-2.0, 0.0], 4: [-4.0, 0.0]}
         self.assertEqual(R.r1_pick(PLAIN, r, 0.5, 1)[1], [0, 1])           # -0.5 vs -1
         self.assertEqual(R.r1_pick(PLAIN, r, 1.0, 4)[1], [1, 0])           # -4 vs -1
 
@@ -243,10 +244,6 @@ class Final(unittest.TestCase):
             self.run_final({("chat-std", "discordtune"): {"anchor2": "no"}})
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class Sandhi(unittest.TestCase):
     """R1b arm B: the sandhi readings of 一 and 不 cost 0 in the R1 term only; every other pair, and the input, are unchanged."""
 
@@ -260,3 +257,22 @@ class Sandhi(unittest.TestCase):
 
     def test_missing_pair_is_not_added(self):
         self.assertNotIn((("ㄅㄨˊ",), "不"), R.sandhi_exempt({(("ㄧˋ",), "一"): -1.0}))
+
+
+class SandhiWiring(unittest.TestCase):
+    def test_r1_pick_reads_ch_r1_not_the_shipping_terms(self):
+        # same row twice: with ch_r1 = ch the reading term keeps candidate 0; with an exempted ch_r1 candidate 1 wins
+        r = row([0.0, -0.5], [0.0, 0.0], [0, 1], ch=[0.0, -1.39])
+        self.assertEqual(R.r1_pick(PLAIN, r, 2.0, 4)[0], 0)
+        r["ch_r1"] = {1: [0.0, 0.0], 2: [0.0, 0.0], 4: [-2.0, 0.0]}
+        self.assertEqual(R.r1_pick(PLAIN, r, 2.0, 4)[0], 1)
+        self.assertEqual(r["ch"][4], [0.0, -1.39], "the shipping terms are untouched")
+
+    def test_parse_cell_refuses_off_grid(self):
+        self.assertEqual(R.parse_cell("1.0,4"), (1.0, 4))
+        with self.assertRaises(SystemExit):
+            R.parse_cell("3.0,4")
+
+
+if __name__ == "__main__":
+    unittest.main()

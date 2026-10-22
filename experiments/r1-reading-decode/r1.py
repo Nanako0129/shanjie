@@ -163,7 +163,11 @@ def load_run(a, setting, name):
     # tone-sandhi readings of 一 and 不 as 0. Without the flag r["ch_r1"] is r["ch"], so R1 is unchanged.
     rlogp = sandhi_exempt(logp) if getattr(a, "sandhi_exempt", False) else logp
     for r in out:
-        r["ch_r1"] = r["ch"] if rlogp is logp else {c: [Q.ch_of(Q.word_terms(r["syls"], cand[2], rlogp), c) for cand in r["cands"]] for c in CS}
+        if rlogp is logp:
+            r["terms_r1"], r["ch_r1"] = r["terms"], r["ch"]
+        else:
+            r["terms_r1"] = [Q.word_terms(r["syls"], cand[2], rlogp) for cand in r["cands"]]
+            r["ch_r1"] = {c: [Q.ch_of(t, c) for t in r["terms_r1"]] for c in CS}
     if setting == "chat-std":
         import p4
         if sha_file(a.t2) != P.T2_SHA256:
@@ -234,7 +238,7 @@ def r1_pick(cfg, r, lam, c):
     """-> (chosen candidate index among the 64, order of the 64 by s, 'ok' | 'none' | 'nollcand'): the new top 8 by s = ng + lam * ch go
     into the fusion with their own ll; a row without `ll`, or whose new top 8 has a candidate without one (null: over the model's context), is decided
     by the first of s (README, registered rule: core skips the rerank when a top-8 candidate is too long)."""
-    ch = r.get("ch_r1", r["ch"])[c]
+    ch = r["ch_r1"][c]
     s = [g + lam * h for g, h in zip(r["ng64"], ch)]
     order = sorted(range(len(s)), key=lambda j: (-s[j], j))
     top = order[:TOP_K]
@@ -325,7 +329,7 @@ def anchor3(a):
 def term_counts(rows):
     cands = uncut = slots = missing = 0
     for r in rows:
-        for t, c in zip(r["terms"], r["cands"]):
+        for t, c in zip(r["terms_r1"], r["cands"]):
             cands += 1
             if t is None:
                 uncut += 1
@@ -362,7 +366,7 @@ def gold_deducted(rows):
     out = []
     for i, r in enumerate(rows, 1):
         j = next((j for j, o in enumerate(r["ok64"]) if o), None)
-        t = None if j is None else r["terms"][j]
+        t = None if j is None else r["terms_r1"][j]
         neg = [x for x in (t or []) if x is not None and x < 0]
         if neg:
             out.append([i, len(neg), round(min(neg), 4)])
@@ -376,9 +380,22 @@ def check_pair(setting, name):
         stop(f"{name} is not a set of {setting} in the README table")
 
 
+def parse_cell(text):
+    """'L,C' -> (lambda, c), refused unless it is a cell of the registered grid."""
+    try:
+        lam, c = text.split(",")
+        cell = (float(lam), int(c))
+    except ValueError:
+        stop(f"bad cell {text!r}: L,C")
+    if cell not in GRID:
+        stop("off-grid cell refused")
+    return cell
+
+
 def cmd_run(a):
     check_pair(a.setting, a.name)
     Q.check_out(a.out, a.cell_from)
+    a.cell_label = getattr(a, "cell", None)
     role = ROLES[a.setting][a.name]
     if a.cells and (a.setting, a.name) not in SELECT_SETS:
         stop("--cells is for the selection sets (chat-std chatclause, formal-std wikitune-clean)")
@@ -388,15 +405,14 @@ def cmd_run(a):
     if not needs2 and (a.norc_scores or a.norc_rowstats or a.norc_summary):
         stop("--norc-* belongs to chat-std on chatclause and discordtune only")
     cell = None
-    if a.cell_from:
-        with open(a.cell_from, encoding="utf-8") as f:
-            sel = json.load(f)
-        if not sel.get("chosen"):
-            stop("--cell-from: the selection chose no cell")
-        lam, c = sel["chosen"].split(",")
-        cell = (float(lam), int(c))
-        if cell not in GRID:
-            stop("off-grid cell refused")
+    if a.cell_from or a.cell_label:
+        chosen = a.cell_label
+        if a.cell_from:
+            with open(a.cell_from, encoding="utf-8") as f:
+                chosen = json.load(f).get("chosen")
+            if not chosen:
+                stop("--cell-from: the selection chose no cell")
+        cell = parse_cell(chosen)
     rows, base_ok, base = load_run(a, a.setting, a.name)
     cfg = make_cfg(a.sjtl, a.setting, SHIP_NU)
     cfg_r1 = make_cfg(a.sjtl, a.setting, 0.0)
@@ -419,7 +435,7 @@ def cmd_run(a):
         Q.write_atomic(a.out, json.dumps(res, indent=1))
         return 0
     s, picks = run_cell(cfg_r1, rows, base_ok, cell)
-    res.update({"cell": label(cell), "selection": os.path.basename(a.cell_from), **p4c.jsonable(s)})
+    res.update({"cell": label(cell), "selection": os.path.basename(a.cell_from) if a.cell_from else "fixed", **p4c.jsonable(s)})
     print(f"cell {label(cell)} u2 {s['u2']} {p4c.kv(s)}")
     if role in ("1", "2a"):
         res["verdict"] = bool(Q.verdict(role, s))
@@ -468,10 +484,13 @@ def cmd_select(a):
 
 
 def cmd_final(a):
-    with open(a.sel, encoding="utf-8") as f:
-        sel = json.load(f)
-    if not sel.get("chosen"):
-        stop("the selection chose no cell")
+    if a.sel.endswith(".json"):
+        with open(a.sel, encoding="utf-8") as f:
+            sel = json.load(f)
+        if not sel.get("chosen"):
+            stop("the selection chose no cell")
+    else:                                   # R1b: a fixed cell, no selection
+        sel = {"chosen": label(parse_cell(a.sel))}
     runs = {}
     for p in a.judged:
         with open(p, encoding="utf-8") as f:
@@ -481,6 +500,9 @@ def cmd_final(a):
         if d["setting"] == "chat-std" and d["name"] in ANCHOR2_SETS and d.get("anchor2") != "ok":
             stop(f"{p}: anchor 2 was not checked")
         runs[d["setting"], d["name"]] = d
+    flags = {bool(d.get("sandhi_exempt", False)) for d in runs.values()}
+    if len(flags) != 1:
+        stop("the judged runs mix --sandhi-exempt and plain runs")
     seen3 = set()
     for p in a.anchor3:
         with open(p, encoding="utf-8") as f:
@@ -497,7 +519,7 @@ def cmd_final(a):
     for k, d in runs.items():
         if d["n"] != ROW_COUNTS[k[1]]:
             stop(f"{k}: {d['n']} rows")
-    res = {"cell": sel["chosen"], "clauses": {}}
+    res = {"cell": sel["chosen"], "sandhi_exempt": flags.pop(), "clauses": {}}
     by_role = lambda role: [k for k in JUDGED if ROLES[k[0]][k[1]] == role]
     for role in ("1", "2a", "2b"):
         res["clauses"][role] = {f"{s}/{n}": runs[s, n]["verdict"] for s, n in by_role(role)}
@@ -533,6 +555,7 @@ def main(argv=None):
     g = r.add_mutually_exclusive_group(required=True)
     g.add_argument("--cells", action="store_true")
     g.add_argument("--cell-from")
+    g.add_argument("--cell", help="a fixed cell L,C of the grid (R1b): no selection file")
     for k in ("norc-scores", "norc-rowstats", "norc-summary"):
         r.add_argument("--" + k)
     r.add_argument("--sandhi-exempt", action="store_true", help="R1b arm B: the R1 term counts the sandhi readings of 一 and 不 as 0")
