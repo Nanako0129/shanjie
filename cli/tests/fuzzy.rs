@@ -81,30 +81,30 @@ fn score_of(c: &[(String, f64)], w: &str) -> f64 {
     c.iter().find(|x| x.0 == w).unwrap_or_else(|| panic!("{w} is not in {c:?}")).1
 }
 
-/// `--fuzzy-delta-sound` (section 3.5, evaluation only): 1 is the default, so the summary line (tag and top1_sha256) and the dump
-/// are the same with and without it; another D appends `:dD` to the tag and moves the score of a candidate read through a
-/// fuzzy-sound syllable (書 for ㄙㄨ) by exactly the delta difference, while the exact candidate (酥) does not move.
+/// `--fuzzy-delta-sound` (section 3.5, evaluation only): 2.5 is the default (`fuzzy::DELTA_SOUND`), so the summary line (tag and
+/// top1_sha256) and the dump are the same with and without it; another D appends `:dD` to the tag and moves the score of a candidate read
+/// through a fuzzy-sound syllable (書 for ㄙㄨ) by exactly the delta difference, while the exact candidate (酥) does not move.
 #[test]
 fn fuzzy_delta_sound_default_is_identical_and_other_values_shift_fuzzy_candidates() {
     let (s0, c0) = dump_298(&[]);
-    let (s1, c1) = dump_298(&["--fuzzy-delta-sound", "1"]);
+    let (s1, c1) = dump_298(&["--fuzzy-delta-sound", "2.5"]);
     assert_eq!((&s0, &c0), (&s1, &c1));
     assert!(s0.contains("+fz:15  {"), "{s0}");
-    let (s2, c2) = dump_298(&["--fuzzy-delta-sound", "2.5"]);
-    assert!(s2.contains("+fz:15:d2.5  {"), "{s2}");
+    let (s2, c2) = dump_298(&["--fuzzy-delta-sound", "1"]);
+    assert!(s2.contains("+fz:15:d1  {"), "{s2}");
     assert_ne!(s0.split("'top1_sha256'").nth(1), s2.split("'top1_sha256'").nth(1));
     let (shu, su) = ("這家店的排骨書很好吃", "這家店的排骨酥很好吃");
-    assert!((score_of(&c0, shu) - score_of(&c2, shu) - 1.5).abs() < 1e-9, "{c0:?} {c2:?}");
+    assert!((score_of(&c2, shu) - score_of(&c0, shu) - 1.5).abs() < 1e-9, "{c0:?} {c2:?}");
     assert_eq!(score_of(&c0, su), score_of(&c2, su));
 }
 
-/// The adjacent-key penalty (delta 2) is not the sound penalty: with `--fuzzy-delta-sound 2.5` a candidate read through an adjacent-key
+/// The adjacent-key penalty (delta 2) is not the sound penalty: with `--fuzzy-delta-sound 1` a candidate read through an adjacent-key
 /// syllable (ㄅㄩ is not a lexicon syllable; 鱉星 is a word of ㄅㄧㄝ ㄒㄧㄥ) keeps exactly its default score.
 #[test]
 fn fuzzy_delta_sound_leaves_the_adjacent_key_penalty_alone() {
     let rows = "|鱉星|ㄅㄩ ㄒㄧㄥ\n";
     let (_, c0) = dump_of(rows, "31", &[]);
-    let (_, c2) = dump_of(rows, "31", &["--fuzzy-delta-sound", "2.5"]);
+    let (_, c2) = dump_of(rows, "31", &["--fuzzy-delta-sound", "1"]);
     assert_eq!(score_of(&c0, "鱉星"), score_of(&c2, "鱉星"), "{c0:?} {c2:?}");
 }
 
@@ -122,31 +122,4 @@ fn fuzzy_delta_sound_is_validated() {
         assert!(msg(&["--fuzzy", "2", "--fuzzy-delta-sound", bad]).contains("takes a number above 0"), "{bad}");
     }
     assert!(lm("|知道|ㄗ ㄉㄠˋ\n", &["--fuzzy", "2", "--fuzzy-delta-sound", "2"]).status.success());
-}
-
-/// The recorded delta 1 results of docs/contracts/fuzzy-input.md 3.2 (dev302, `--fuzzy 15`, the shipping command without
-/// `--colloquial-core`): the default and an explicit `--fuzzy-delta-sound 1` must reproduce them. The small model's floats differ across
-/// platforms, so the counts and hashes are asserted on macOS only (where they were recorded).
-#[cfg(target_os = "macos")]
-#[test]
-fn fuzzy_delta_sound_one_reproduces_the_recorded_dev302_results() {
-    const RECORDED: [(&str, &str, &str); 2] = [
-        ("chat", "'top1': 261,", "5f74eb6b002c1f1a2dec51c498eae6a936d8a66892918d48d82ea872583dabb8"),
-        ("formal", "'top1': 263,", "dcda2d0173157c138f07c1472c54ed89014de644f66776dea3cf246ad2a468f7"),
-    ];
-    let root = concat!(env!("CARGO_MANIFEST_DIR"), "/..");
-    for (profile, top1, sha) in RECORDED {
-        for delta in [&[][..], &["--fuzzy-delta-sound", "1"][..]] {
-            let o = Command::new(env!("CARGO_BIN_EXE_shanjie-eval"))
-                .current_dir(root)
-                .args(["--lm", "data/lm/bigram.sjlm", "--profile", profile, "--context", "--packs", "acg", "--tinylm", "data/lm/tinylm.sjtl"])
-                .args(["--fuzzy", "15", "--rows", "eval/bench/suite-v1/dev302.txt"])
-                .args(delta)
-                .output()
-                .unwrap();
-            assert!(o.status.success(), "{profile} {delta:?}");
-            let s = summary(&o);
-            assert!(s.contains(top1) && s.contains(sha), "{profile} {delta:?}: {s}");
-        }
-    }
 }

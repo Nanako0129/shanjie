@@ -882,14 +882,32 @@ pub enum End<'a> {
     Next { word: &'a str, lp: f64, delta: f64 },
 }
 
-/// A path: total score and its words with the lp each was scored with and its demotion delta.
-/// The last number of a word is the count of syllables it covers.
-pub type Scored<'a> = (f64, Vec<(&'a str, f64, f64, usize)>);
+/// A path: total score and its words with the lp each was scored with, its demotion delta, the count of syllables it covers, and
+/// whether it is a fuzzy word (docs/contracts/fuzzy-input.md section 3.6): read through the fuzzy-sound alternative of a span with no
+/// unknown syllable. The marker is set by the decoder from the word's `Source`, never inferred from the delta or the scores.
+pub type Scored<'a> = (f64, Vec<(&'a str, f64, f64, usize, bool)>);
+
+/// A path with a fuzzy word is a fuzzy path.
+fn fuzzy_path(ws: &[(&str, f64, f64, usize, bool)]) -> bool {
+    ws.iter().any(|w| w.4)
+}
+
+/// The fuzzy-sound rule of the semantic correction (docs/contracts/fuzzy-input.md section 3.6), the one function the engine's rerank job
+/// and the evaluation CLI both use. From the decoder's n-best (one path per surface): `None` when the n-gram first path is a fuzzy path
+/// (a rescue: no rerank, the segment shows the n-gram first), otherwise the indices into the n-best of the first `topk` paths that are
+/// not fuzzy paths, in n-best order (all of them if fewer; the n-gram first is the first). Without a fuzzy-sound bit no word is a fuzzy
+/// word, so this is the first `topk` indices, as before.
+pub fn rerank_pool(best: &[Scored<'_>], topk: usize) -> Option<Vec<usize>> {
+    if fuzzy_path(&best.first()?.1) {
+        return None;
+    }
+    Some(best.iter().enumerate().filter(|(_, (_, ws))| !fuzzy_path(ws)).map(|(i, _)| i).take(topk).collect())
+}
 
 struct Hyp<'a> {
     score: f64,
     surface: String,
-    words: Vec<(&'a str, f64, f64, usize)>,
+    words: Vec<(&'a str, f64, f64, usize, bool)>,
     /// The two history words (docs/contracts/trigram-core.md): `prev` the one before `last`, `None` when unknown.
     prev: Option<u32>,
     last: Option<u32>,
@@ -986,6 +1004,9 @@ struct Source {
     pen: f64,
     /// The reading's syllables when it is a tolerant one (what learning is looked up under); `None` for the typed one.
     names: Option<Vec<String>>,
+    /// The fuzzy-word marker (fuzzy-input section 3.6): a tolerant source of a span with no unknown syllable, i.e. a fuzzy-sound
+    /// alternative. An adjacent-key source (a span with an unknown syllable) and the typed reading are not.
+    sound: bool,
     /// A tolerant source's words (entry positions), already chosen; unused for the exact one.
     picked: Vec<usize>,
 }
@@ -997,7 +1018,7 @@ impl CappedLexicon {
     fn sources(&self, ids: &[u32], span: &[String], fuzzy: u32, delta_sound: f64) -> Vec<Source> {
         let base = &*self.base;
         let exact = base.find(ids);
-        let mut out = vec![Source { r: exact, pen: 0.0, names: None, picked: Vec::new() }];
+        let mut out = vec![Source { r: exact, pen: 0.0, names: None, sound: false, picked: Vec::new() }];
         if fuzzy & crate::fuzzy::FUZZY_SOUND == 0 && !ids.contains(&u32::MAX) {
             return out;
         }
@@ -1030,7 +1051,7 @@ impl CappedLexicon {
             let picked: Vec<usize> = words.iter().filter(|w| w.2 == a).map(|w| w.1).collect();
             if !picked.is_empty() {
                 let names = k.iter().map(|&i| base.syl_names[i as usize].clone()).collect();
-                out.push(Source { r: Some(*r), pen, names: Some(names), picked });
+                out.push(Source { r: Some(*r), pen, names: Some(names), sound: !ids.contains(&u32::MAX), picked });
             }
         }
         out
@@ -1207,7 +1228,7 @@ pub fn decode_segment_fuzzy_delta<'a>(
                             Some(q) if !(sc > cand[q].score) => {}
                             found => {
                                 let mut words = h.words.clone();
-                                words.push((word, lp, delta, l));
+                                words.push((word, lp, delta, l, src.sound));
                                 // The surface is cloned only for a new slot (the index keeps one copy); a replacement moves it.
                                 let surface = match found {
                                     Some(_) => key.0,
@@ -1241,7 +1262,7 @@ pub fn decode_segment_fuzzy_delta<'a>(
         End::Eos => None,
         End::Next { word, lp, delta } => Some((lm.word_id(word), pow10(lp), lp, delta)),
     };
-    let mut out: Vec<(f64, Vec<(&'a str, f64, f64, usize)>, String)> = last
+    let mut out: Vec<(f64, Vec<(&'a str, f64, f64, usize, bool)>, String)> = last
         .into_iter()
         .map(|h| {
             // (b') a one-word segment from an unknown start closes without the table.
@@ -1314,10 +1335,26 @@ pub fn decode_from_fuzzy(
     fuzzy: u32,
     delta_sound: f64,
 ) -> Result<Vec<(f64, Vec<String>)>, Error> {
-    Ok(decode_segment_fuzzy_delta(lex, syls, lm, lm.scoring(profile), start, End::Eos, beam, None, demote, fuzzy, delta_sound)?
+    Ok(decode_from_fuzzy_scored(lex, syls, lm, profile, beam, start, demote, fuzzy, delta_sound)?
         .into_iter()
         .map(|(s, ws)| (s, ws.into_iter().map(|(w, ..)| w.to_string()).collect()))
         .collect())
+}
+
+/// `decode_from_fuzzy` with the paths as the decoder has them, fuzzy-word markers included (what `rerank_pool` reads).
+#[allow(clippy::too_many_arguments)]
+pub fn decode_from_fuzzy_scored<'a>(
+    lex: &'a CappedLexicon,
+    syls: &[String],
+    lm: &Lm,
+    profile: Profile,
+    beam: usize,
+    start: &str,
+    demote: bool,
+    fuzzy: u32,
+    delta_sound: f64,
+) -> Result<Vec<Scored<'a>>, Error> {
+    decode_segment_fuzzy_delta(lex, syls, lm, lm.scoring(profile), start, End::Eos, beam, None, demote, fuzzy, delta_sound)
 }
 
 #[cfg(test)]
@@ -1874,5 +1911,51 @@ mod tests {
         std::fs::create_dir(&t).unwrap();
         assert_eq!(Lm::load_opts(&m, false, true, true).err(), Some(LmError::TriTable), "directory");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The words of the n-best of one typed syllable with their fuzzy markers: (word, delta, fuzzy), best path first.
+    fn marked(lex_text: &str, demote: &str, syl: &str, flags: u32) -> Vec<(String, f64, bool)> {
+        let lm = Lm::parse(&tiny()).unwrap();
+        let lex = Arc::new(Lexicon::parse(lex_text).unwrap());
+        let capped = CappedLexicon::new(lex, "", &lm, Some(&Demote::parse(demote).unwrap())).unwrap();
+        decode_from_fuzzy_scored(&capped, &[syl.to_string()], &lm, Profile::Chat, 64, "<s>", true, flags, crate::fuzzy::DELTA_SOUND)
+            .unwrap()
+            .into_iter()
+            .map(|(_, ws)| (ws[0].0.to_string(), ws[0].2, ws[0].4))
+            .collect()
+    }
+
+    /// Fuzzy-input section 3.6, the marker. (a) A word of the typed reading is no fuzzy word whatever its demotion: here the demotion is
+    /// exactly the sound penalty (2.5), so a marker inferred from the delta would take it for one. (c) The same word under the fuzzy-sound
+    /// alternative reading is one (and carries that same delta).
+    #[test]
+    fn marker_a_typed_reading_word_with_the_sound_penalty_as_its_demotion_is_not_fuzzy_and_a_sound_alternative_is() {
+        assert_eq!(crate::fuzzy::DELTA_SOUND, 2.5, "premise: the demotion below equals the sound penalty");
+        let v = marked("ㄓ a -1.0\nㄗ b -1.0\n", "ㄓ\ta\t2.5\treading\tt\n", "ㄓ", 0b0010);
+        let get = |w: &str| v.iter().find(|x| x.0 == w).unwrap_or_else(|| panic!("no path {w}: {v:?}")).clone();
+        assert_eq!(get("a"), ("a".to_string(), 2.5, false), "(a) demoted, typed reading");
+        assert_eq!(get("b"), ("b".to_string(), 2.5, true), "(c) the sound alternative");
+    }
+
+    /// Section 3.6 (b): a word read through the adjacent-key alternative of a syllable the lexicon lacks (it too carries a penalty, 2) is
+    /// no fuzzy word, with the sound pairs on or off.
+    #[test]
+    fn marker_an_adjacent_key_word_is_not_fuzzy() {
+        for flags in [0b10000, 0b11111] {
+            let v = marked("ㄉ b -1.0\n", "", "ㄅ", flags);
+            assert_eq!(v, [("b".to_string(), crate::fuzzy::DELTA_ADJACENT, false)], "flags {flags}");
+        }
+    }
+
+    /// The pool rule on hand-made n-bests: a fuzzy first path is a skip; otherwise the first `topk` paths without a fuzzy word, in order.
+    #[test]
+    fn rerank_pool_takes_the_first_non_fuzzy_paths_and_skips_a_fuzzy_first() {
+        let path = |f: bool| (0.0, vec![("x", 0.0, 0.0, 1, false), ("y", 0.0, 0.0, 1, f)]);
+        let nb = |fz: &[bool]| fz.iter().map(|&f| path(f)).collect::<Vec<Scored>>();
+        assert_eq!(rerank_pool(&nb(&[false, true, false, false, true, false]), 3), Some(vec![0, 2, 3]));
+        assert_eq!(rerank_pool(&nb(&[false, true, false]), 8), Some(vec![0, 2]), "fewer than topk: all of them");
+        assert_eq!(rerank_pool(&nb(&[true, false, false]), 8), None, "fuzzy first: no rerank");
+        assert_eq!(rerank_pool(&nb(&[false, false, false, false]), 2), Some(vec![0, 1]));
+        assert_eq!(rerank_pool(&[], 8), None);
     }
 }

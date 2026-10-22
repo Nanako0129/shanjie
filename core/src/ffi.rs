@@ -2074,8 +2074,9 @@ mod tests {
         if !is_child("child_fuzzy") {
             return;
         }
-        // 星 (ㄒㄧㄥ) beside 鑫 and 心 (ㄒㄧㄣ); the toy model likes 鑫 (see `tiny_lm`).
-        let dir = tiny_dir("fuzzy", "ㄒㄧㄣ 鑫 -1.0\nㄒㄧㄣ 心 -4.0\nㄒㄧㄥ 星 -3.0\n".as_bytes());
+        // 星 (ㄒㄧㄥ) beside 鑫 and 心 (ㄒㄧㄣ); the toy model likes 鑫 (see `tiny_lm`), and 星 is scored low enough that 鑫 beats it with the pair on even after
+        // the sound penalty (`fuzzy::DELTA_SOUND`, 2.5).
+        let dir = tiny_dir("fuzzy", "ㄒㄧㄣ 鑫 -1.0\nㄒㄧㄣ 心 -4.0\nㄒㄧㄥ 星 -6.0\n".as_bytes());
         let lm_path = dir.join("tiny.sjlm");
         std::fs::write(&lm_path, tiny_lm()).unwrap();
         let tiny = tiny_lm();

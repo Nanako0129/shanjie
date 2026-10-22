@@ -6,7 +6,7 @@ use crate::learn::{context_key, digit_of, english_of, english_or_space, is_han, 
 use crate::learn_store::{LearnStore, Opened, StoreError, JOURNAL_MAX};
 use crate::predict::{predict, predict_digits, reading_matches_in, unit_of_syllable, Mode, Unit};
 use crate::fuzzy::{FUZZY_ADJACENT, FUZZY_ALL};
-use crate::lm::{decode_segment_fuzzy, history, CappedLexicon, Demote, End, Learn, Lm, Profile};
+use crate::lm::{decode_segment_fuzzy, history, rerank_pool, CappedLexicon, Demote, End, Learn, Lm, Profile, Scored};
 use crate::trigram::TriMemo;
 use crate::digits::DigitTable;
 mod digit_layer;
@@ -114,6 +114,12 @@ impl RerankJob {
             })
             .collect();
         RerankResult { generation: self.generation, choices }
+    }
+
+    /// Every stretch's candidate texts, in the job's order (the n-gram first, then the rest of the pool): what the small model is asked
+    /// to choose among. Tests and the evaluation tools read it; the job does not change.
+    pub fn candidates(&self) -> Vec<Vec<String>> {
+        self.stretches.iter().map(|s| s.paths.iter().map(|p| p.iter().map(|w| w.0.as_str()).collect()).collect()).collect()
     }
 
     /// The most characters any candidate of any stretch has (composition-cap: at most `ctx - 3`, so none ends in `TooLong`).
@@ -631,6 +637,9 @@ pub struct Engine {
     learn_guard: bool,
     /// Stretches the guard kept out of the current decode's job (`guard_skips`); reset with the job in `invalidate`.
     guard_skips: usize,
+    /// Stretches the fuzzy-sound rule kept out of the current decode's job (`fuzzy_skips`): their n-gram first path has a fuzzy word. Reset
+    /// with the job in `invalidate`.
+    fuzzy_skips: usize,
     /// Section 2.3 (修正一): renewed from `GENERATION` only where decoding changes: every `refresh`, `clear_all`, the model and
     /// decoding settings (`load_lm`, `set_lm`, `load_tinylm`, `load_colloquial`, `set_rerank`, `set_rerank_level`, `set_profile`, `set_demote`,
     /// learning open/clear, the evaluation-only `set_learn_guard` and `set_reading_channel`).
@@ -886,6 +895,7 @@ impl Engine {
             rerank_level: RerankLevel::Standard,
             learn_guard: true,
             guard_skips: 0,
+            fuzzy_skips: 0,
             generation: next_generation(),
             rerank_job: None,
             english: false,
@@ -923,6 +933,7 @@ impl Engine {
         self.generation = next_generation();
         self.rerank_job = None;
         self.guard_skips = 0;
+        self.fuzzy_skips = 0;
     }
 
     // ---- S7c-2a rerank (docs/contracts/s7c2a-core-rerank.md) ----
@@ -989,6 +1000,13 @@ impl Engine {
     /// drops the job (a commit, Esc, a setting) until the next decode, and 0 with the guard off.
     pub fn guard_skips(&self) -> usize {
         self.guard_skips
+    }
+
+    /// How many stretches the fuzzy-sound rule kept out of the current job (docs/contracts/fuzzy-input.md section 3.6): stretches that would have
+    /// gone to the small model whose n-gram first path has a fuzzy word (a rescue is shown as the n-gram has it). Counted and reset like
+    /// `guard_skips`; always 0 without a fuzzy-sound bit.
+    pub fn fuzzy_skips(&self) -> usize {
+        self.fuzzy_skips
     }
 
     /// Rerank strength (rerank-strength section 2.2): which of the model's (alpha, tau, delta) the jobs use. Remembered without a
@@ -2527,24 +2545,28 @@ impl Engine {
                 .map_err(|_| EngineError::Internal)?;
                 let first = &best.first().ok_or(EngineError::Internal)?.1;
                 let eligible = jobs && best.len() >= 2;
-                let guarded = eligible && self.learn_guard && self.boosted(st, start, first);
+                // Fuzzy-input section 3.6: the pool is the first TOPK paths with no fuzzy word; none when the n-gram first has one.
+                let pool = if eligible { rerank_pool(&best, TOPK) } else { None };
+                self.fuzzy_skips += usize::from(eligible && pool.is_none());
+                let guarded = pool.is_some() && self.learn_guard && self.boosted(st, start, first);
                 self.guard_skips += usize::from(guarded);
-                let in_job = eligible && !guarded;
-                if in_job {
-                    let top = &best[..best.len().min(TOPK)];
+                let pool = pool.filter(|p| !guarded && p.len() >= 2);
+                let in_job = pool.is_some();
+                if let Some(pool) = pool {
+                    let top: Vec<&Scored> = pool.iter().map(|&i| &best[i]).collect();
                     let mut gap_text = out[job_end..].to_string();
                     if let Some(o) = cut_out.filter(|&o| o >= job_end) {
                         gap_text.insert_str(o - job_end, &self.run); // the model sees the run between the Chinese on its two sides
                     }
                     stretches.push(Stretch {
                         at: path.len(),
-                        paths: top.iter().map(|(_, ws)| ws.iter().map(|&(w, lp, delta, l)| (w.to_string(), lp, delta, l)).collect()).collect(),
+                        paths: top.iter().map(|(_, ws)| ws.iter().map(|&(w, lp, delta, l, _)| (w.to_string(), lp, delta, l)).collect()).collect(),
                         ng: top.iter().map(|(score, _)| *score).collect(),
                         syls: if channel { self.syls[start..stop].to_vec() } else { Vec::new() },
                         gap: gap_text,
                     });
                 }
-                for (w, lp, delta, l) in first {
+                for (w, lp, delta, l, _) in first {
                     out.push_str(w);
                     path.push(PathWord { word: w.to_string(), lp: *lp, is_punct: false, delta: *delta, syllables: *l });
                 }
@@ -2577,12 +2599,12 @@ impl Engine {
     /// S7c-2a section 2.2, the learning guard: whether a word of a stretch's first path (the stretch starts at syllable `from`)
     /// was scored with a learned boost, i.e. with an lp above the best capped lp of that word under its reading (the decoder
     /// raises lp only that way). Such a stretch is not reranked, so a choice the user taught is never undone by the model.
-    fn boosted(&self, st: &LmState, from: usize, words: &[(&str, f64, f64, usize)]) -> bool {
+    fn boosted(&self, st: &LmState, from: usize, words: &[(&str, f64, f64, usize, bool)]) -> bool {
         if self.learner.is_empty() {
             return false;
         }
         let mut at = from;
-        words.iter().any(|&(w, lp, _, n)| {
+        words.iter().any(|&(w, lp, _, n, _)| {
             let span = self.syls.get(at..at + n);
             at += n;
             // A span that does not fit cannot happen (one character per syllable); counted as boosted, the safe side.

@@ -208,7 +208,8 @@ int32_t shanjie_engine_set_english_inline(ShanjieEngine *engine, uint32_t enable
 // fuzzy input (docs/contracts/fuzzy-input.md): set_fuzzy flags are bits 0-3 the four sound pairs (ㄣ/ㄥ, ㄓ/ㄗ, ㄔ/ㄘ, ㄕ/ㄙ, in that order)
 //   and bit 4 the adjacent-key slips; any other bit returns 2 with the state unchanged. Default 0 at engine creation, and 0 changes
 //   nothing. The codes and the snapshot (handled 1, commit "") are those of set_english; the composition is recomputed, so the
-//   snapshot shows it. A sound pair also reads a word through one syllable replaced by the other of the pair (a lower score).
+//   snapshot shows it. A sound pair also reads a word through one syllable replaced by the other of the pair (a lower score); the
+//   rerank never chooses such a word: a stretch whose n-gram first has one is not reranked, the others offer the model only paths without one.
 //   Bit 4, with a loaded model and the standard layout (it does nothing with the ETen layout), makes a tone key accept a syllable the
 //   lexicon lacks when a key typed as a left or right neighbour in its keyboard row would give a syllable it has; the composition
 //   then shows the word read through that syllable. A syllable already accepted keeps decoding when bit 4 is turned off. The

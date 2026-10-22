@@ -4,7 +4,7 @@ use core::engine::{capping_overlay_detailed, load_lexicon_extra_detailed, load_l
 use core::eval::*;
 use core::learn::{context_key, SENTINEL};
 use core::fuzzy::FUZZY_ALL;
-use core::lm::{decode_from_fuzzy, history, CappedLexicon, Demote, Lm, Profile};
+use core::lm::{decode_from_fuzzy_scored, history, rerank_pool, CappedLexicon, Demote, Lm, Profile};
 use core::tinylm::{KnPairing, RerankLevel, TinyLm, TinyLmError, TOPK};
 use core::predict::{parse_units, predict, units_of, units_str, Index, Mode};
 use core::{decode_beam, Error, Lexicon, NoLearning, Syls, BEAM_S1};
@@ -144,8 +144,9 @@ fn load_tinylm(path: &str, lm: &Lm, classes: bool, demote: bool) -> Result<(Tiny
 
 /// One `--tinylm-scores` line, the record of experiments/s7a-tinylm/score.py without the key columns and the two other LLs:
 /// `i, n, ng, ok, ed, glen`, then `c` (the 0-based index the rerank chose, 0 when it did not run; tools/triage.py) and, for n >= 2, `ll`.
-/// Numbers only.
-fn scores_line(i: usize, ng: &[f64], ok: &[bool], ed: &[u32], glen: usize, chosen: usize, ll: Option<&[f64]>) -> Result<String, String> {
+/// With a fuzzy-sound bit (`--fuzzy`, section 3.6) `n`, `ng`, `ok`, `ed` and `ll` list the rerank pool in pool order, `c` is still an index
+/// into the decoder's n-best (the dump's order), and `idx` gives each pool entry's n-best index. Numbers only.
+fn scores_line(i: usize, ng: &[f64], ok: &[bool], ed: &[u32], glen: usize, chosen: usize, ll: Option<&[f64]>, idx: Option<&[usize]>) -> Result<String, String> {
     // JSON has no inf / NaN (Python's json.loads rejects inf, and a NaN would slip through parity.py's tolerance test).
     if !ng.iter().chain(ll.unwrap_or(&[])).all(|x| x.is_finite()) {
         return Err(format!("--tinylm-scores: row {i} has a non-finite score"));
@@ -160,6 +161,9 @@ fn scores_line(i: usize, ng: &[f64], ok: &[bool], ed: &[u32], glen: usize, chose
     );
     if let Some(ll) = ll {
         s += &format!(", \"ll\": {}", list(ll.iter().map(|x| format!("{x:?}")).collect()));
+    }
+    if let Some(idx) = idx {
+        s += &format!(", \"idx\": {}", list(idx.iter().map(usize::to_string).collect()));
     }
     Ok(s + "}\n")
 }
@@ -402,7 +406,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
         let left = if ctx_mode { Some(context_key(ctx)) } else { None };
         let start = left.as_deref().filter(|k| *k != SENTINEL).map_or("<s>", |k| history(k, &lm));
         let mut out = RowOut::default();
-        let nb = match decode_from_fuzzy(&capped, syls, &lm, prof, BEAM_S1, start, demote, fuzzy.unwrap_or(0), delta_sound) {
+        let scored = match decode_from_fuzzy_scored(&capped, syls, &lm, prof, BEAM_S1, start, demote, fuzzy.unwrap_or(0), delta_sound) {
             Ok(nb) => nb,
             // --fuzzy: a row no reading covers is a wrong answer with an empty first candidate, and the set goes on.
             Err(Error::NoPath { .. }) if fuzzy.is_some() => {
@@ -414,19 +418,24 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
             }
             Err(e) => return Err(e.to_string()),
         };
+        // The decoder's n-best with the fuzzy-word markers dropped: the strings the rest of the row works with.
+        let nb: Vec<(f64, Vec<String>)> = scored.iter().map(|(sc, ws)| (*sc, ws.iter().map(|w| w.0.to_string()).collect())).collect();
         let mut surf: Vec<String> = nb.iter().map(|(_, ws)| ws.concat()).collect();
         let t = len.apply(truth);
         // The row's chosen candidate: the first, or the small model's pick among the first 8 (the dump keeps the decoder's order).
         let mut chosen = 0;
         if let Some((tl, _, _)) = &tl {
-            let top: Vec<&str> = surf.iter().take(TOPK).map(String::as_str).collect();
-            let ng: Vec<f64> = nb.iter().take(TOPK).map(|(sc, _)| *sc).collect();
+            // The engine's rule (fuzzy-input section 3.6, `rerank_pool`): the pool is the first 8 paths with no fuzzy word, in n-best order; a
+            // fuzzy n-gram first path is not reranked (a pool of just that path: n 1, `c` 0, no `ll`). `pool` holds the paths' n-best indices.
+            let pool: Vec<usize> = rerank_pool(&scored, TOPK).unwrap_or_else(|| vec![0]);
+            let top: Vec<&str> = pool.iter().map(|&p| surf[p].as_str()).collect();
+            let ng: Vec<f64> = pool.iter().map(|&p| nb[p].0).collect();
             // The key is the context key (its SENTINEL is the empty k, in TinyLm::rerank); without --context, no key.
             let t0 = Instant::now();
             let key = left.as_deref().unwrap_or("");
             let picked = match colloq_on {
                 Some(co) => {
-                    let words: Vec<Vec<&str>> = nb.iter().take(TOPK).map(|(_, ws)| ws.iter().map(String::as_str).collect()).collect();
+                    let words: Vec<Vec<&str>> = pool.iter().map(|&p| nb[p].1.iter().map(String::as_str).collect()).collect();
                     let rc = reading_channel.then_some(ReadingChannel { lex: &lex, syls });
                     tl.rerank_colloquial(&ng, &top, &words, key, co, rc, level)
                 }
@@ -434,7 +443,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
             };
             let ll = match picked {
                 Ok((c, ll)) => {
-                    chosen = c;
+                    chosen = pool[c];
                     ll
                 }
                 // A candidate longer than the model's context: this row keeps the n-gram first (counted on stderr), the set goes on.
@@ -450,7 +459,9 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
             if want_scores {
                 let oks: Vec<bool> = top.iter().map(|s| len.apply(s) == t).collect();
                 let ed: Vec<u32> = top.iter().zip(&oks).map(|(s, &ok)| if ok { 0 } else { levenshtein(s, truth) }).collect();
-                out.scores = scores_line(i + 1, &ng, &oks, &ed, truth.chars().count(), chosen, ll.as_deref())?;
+                // With a sound bit the record lists the pool and says which n-best paths it is (`idx`); without one the pool is the first 8, as before.
+                let idx = (fuzzy.unwrap_or(0) & core::fuzzy::FUZZY_SOUND != 0).then_some(pool.as_slice());
+                out.scores = scores_line(i + 1, &ng, &oks, &ed, truth.chars().count(), chosen, ll.as_deref(), idx)?;
             }
         }
         out.ok = len.apply(&surf[chosen]) == t;

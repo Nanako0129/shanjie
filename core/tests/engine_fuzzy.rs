@@ -237,9 +237,10 @@ fn accepted_syllable_survives_turning_bit_4_off() {
     assert!(e.key(Key::new(KeyKind::Enter)).is_ok());
 }
 
-/// The shipping engine (real lexicon with packs, small model, colloquial table, chat context) with all the flags on: a sentence with a
-/// sound-pair slip and one with an accepted adjacent-key syllable go through the rerank job (the job reads the composition's
-/// syllables, which here include one the lexicon lacks) without an internal error, and the composition stays one character per syllable.
+/// The shipping engine (real lexicon with packs, small model, colloquial table, chat context) with all the flags on: a sentence with an
+/// accepted adjacent-key syllable goes through the rerank job (the job reads the composition's syllables, which here include one the
+/// lexicon lacks) without an internal error, and the composition stays one character per syllable. A sentence with a sound-pair slip
+/// whose n-gram first path is a rescue (知道你的) has no job (section 3.6) and shows that first path, one character per syllable.
 #[test]
 fn shipping_models_take_a_rerank_job_over_tolerant_syllables() {
     let lm = |f: &str| root().join("data/lm").join(f);
@@ -250,14 +251,18 @@ fn shipping_models_take_a_rerank_job_over_tolerant_syllables() {
     e.set_rerank(true).unwrap();
     e.set_left_context("今天");
     e.set_fuzzy(FUZZY_ALL).unwrap();
-    for reading in ["ㄗ ㄉㄠˋ ㄋㄧˇ ㄉㄜ˙", &format!("ㄨㄛˇ {UNKNOWN} ㄉㄠˋ ㄋㄧˇ")] {
-        type_syls(&mut e, Layout::Standard, reading);
+    for (reading, rescue) in [("ㄗ ㄉㄠˋ ㄋㄧˇ ㄉㄜ˙", true), (&*format!("ㄨㄛˇ {UNKNOWN} ㄉㄠˋ ㄋㄧˇ"), false)] {
+        let o = type_syls(&mut e, Layout::Standard, reading);
         let n = reading.split(' ').count();
         assert_eq!(e.syllables().len(), n, "every syllable was accepted: {reading}");
-        let job = e.take_rerank_job().expect("a job over the tolerant composition");
-        let shown = match e.apply_rerank(job.run()).expect("no internal error") {
-            Some(o) => o.preedit,
-            None => press(&mut e, KeyKind::Right).preedit,
+        let job = e.take_rerank_job();
+        assert_eq!((job.is_none(), e.fuzzy_skips()), (rescue, usize::from(rescue)), "{reading}");
+        let shown = match job {
+            None => o.preedit,
+            Some(job) => match e.apply_rerank(job.run()).expect("no internal error") {
+                Some(o) => o.preedit,
+                None => press(&mut e, KeyKind::Right).preedit,
+            },
         };
         assert!(is_han(&shown) && shown.chars().count() == n, "one character per syllable after the rerank: {shown}");
         e.reset(ResetMode::Discard);
@@ -331,13 +336,13 @@ fn word_score(syls: &[&str], flags: u32, word: &str) -> f64 {
     nb.iter().find(|(_, ws)| ws == &[word.to_string()]).unwrap_or_else(|| panic!("no path of the one word {word}")).0
 }
 
-/// Section 2.1: a word read through one syllable of a sound pair scores 1 less than the same word read as the lexicon has it, and
-/// through the adjacent reading of a syllable the lexicon lacks, 2 less (log10); and with flags 0 `decode_from_fuzzy` is
-/// `decode_from`.
+/// Section 2.1: a word read through one syllable of a sound pair scores `DELTA_SOUND` (2.5, section 3.5) less than the same word read as
+/// the lexicon has it, and through the adjacent reading of a syllable the lexicon lacks, 2 less (log10); and with flags 0
+/// `decode_from_fuzzy` is `decode_from`.
 #[test]
-fn a_sound_pair_costs_one_and_an_adjacent_slip_two() {
+fn a_sound_pair_costs_its_delta_and_an_adjacent_slip_two() {
     let exact = word_score(&["ㄓ", "ㄉㄠˋ"], 0, "知道");
-    assert!((exact - word_score(&["ㄗ", "ㄉㄠˋ"], 0b0010, "知道") - 1.0).abs() < 1e-9);
+    assert!((exact - word_score(&["ㄗ", "ㄉㄠˋ"], 0b0010, "知道") - core::fuzzy::DELTA_SOUND).abs() < 1e-9);
     let exact = word_score(&["ㄅㄧㄝ"], 0, "憋");
     assert!((exact - word_score(&[UNKNOWN], 0, "憋") - 2.0).abs() < 1e-9, "whatever the flags say");
     assert!((exact - word_score(&[UNKNOWN], FUZZY_ALL, "憋") - 2.0).abs() < 1e-9);

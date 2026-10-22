@@ -16,8 +16,10 @@ pub const FUZZY_PAIRS: [(char, char); 4] = [('ㄣ', 'ㄥ'), ('ㄓ', 'ㄗ'), ('�
 pub const FUZZY_SOUND: u32 = 0b1111;
 pub const FUZZY_ADJACENT: u32 = 1 << 4;
 pub const FUZZY_ALL: u32 = FUZZY_SOUND | FUZZY_ADJACENT;
-/// Score taken off a word read through one tolerant syllable (log10, as the demotion deltas): the research's choice.
-pub const DELTA_SOUND: f64 = 1.0;
+/// Score taken off a word read through one tolerant syllable (log10, as the demotion deltas). The sound pairs' value is 2.5, the
+/// cell docs/contracts/fuzzy-input.md section 3.5 chose with the shipping setting (the research's 1 was chosen with no word pack,
+/// no small model and no Kneser-Ney, and let a tolerant common word cover the typed reading); the adjacent-key value is the research's.
+pub const DELTA_SOUND: f64 = 2.5;
 pub const DELTA_ADJACENT: f64 = 2.0;
 
 /// Keyboard rows (research contract section 2): a key's neighbours are the keys left and right in its row.
