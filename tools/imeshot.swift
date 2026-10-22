@@ -14,9 +14,19 @@
 //     IMESHOT_PACE_MS=50 快速連打時每鍵的間隔（預設 10）；IMESHOT_STEP_WAIT_MS=700 每步之後的等待（預設 900）；
 //     IMESHOT_PRE_WAIT_MS=1000 開始錄影後、打字前的等待；IMESHOT_NOSHOT=1 不截圖；
 //     IMESHOT_RESTORE=<輸入法 ID> 結束時切到這個輸入法（預設切回原本的）。
+//     IMESHOT_KEYCAST=zhuyin|keys|<檔名> 在視窗底部顯示這一行按過的鍵：標準排列的注音、鍵帽，或照檔案逐鍵顯示
+//     （一行一個標籤，順序對應步驟裡的每一次按鍵；注音與英文、數字混打或用到 Shift 時用檔案）；按 Enter 換一行，結尾的
+//     Esc 不顯示。開始前就檢查：檔案的標籤數要等於按鍵數，注音、鍵帽兩種模式要認得每一個鍵（注音模式不收 Shift）。
 //   v0.5.0 的 demo 用 IMESHOT_DEMO=1 IMESHOT_SCREEN=builtin IMESHOT_NOSHOT=1 IMESHOT_PACE_MS=50 IMESHOT_STEP_WAIT_MS=700
 //   IMESHOT_DEMO_SIZE=820x400 IMESHOT_FONT=34 IMESHOT_PRE_WAIT_MS=1000，錄出 1640×864；v0.4.0、v0.4.1 有紀錄的只有
 //   820x400、字級 34、每鍵 50 ms。數值寫錯（解不開、負數、尺寸不是 寬x高）就中止，不會默默用預設值。
+//   前文：殼對沒有 bundle ID 的程式暫停學習，連前文也不讀，所以直接執行編出來的檔案時，預測列與選字都當作沒有前文
+//   （2026-10-22 量：先送出「一杯」再打 ㄔㄚˊ，直接執行送出「一杯查」，放進 .app 執行送出「一杯茶」；把 Info.plist
+//   嵌進執行檔沒有用）。要看前文的效果，就把它放進 `<名稱>.app/Contents/MacOS/`、Info.plist 寫 CFBundleIdentifier，
+//   從終端機執行裡面的檔案。同一天量到：這樣跑時按鍵照樣送得進去，但它自己啟動的 screencapture 錄影存檔失敗
+//   （「Failed to save to final location」），改由終端機自己跑 screencapture 就錄得到；原因推論是螢幕錄製權限改算在
+//   那個 .app 身上，沒有查證。截圖與錄影的 screencapture 不檢查結束碼，失敗時本程式不會報錯，要看輸出檔在不在。
+//   .app 會登記到 LaunchServices，這樣跑只在虛擬機裡做。
 //   結束時印出按 Esc 前的組字範圍（markedRange）與最後的文字（含換行，用 debugDescription）。
 // 安全：按鍵只用 CGEvent.postToPid 送給本程式自己的 pid（和 tools/imetype.swift 相同），就算焦點跑掉也不會
 // 打進別的 App；每一步之前確認視窗在最前面，不在就等，最多 60 秒，叫不回來就中止；步驟參數在開始前全部
@@ -116,6 +126,76 @@ textView.isAutomaticQuoteSubstitutionEnabled = false
 // so the text needs room on the left or the panel is cropped out of the captured window.
 if demo { textView.textContainerInset = NSSize(width: 32, height: 16) }
 window.contentView!.addSubview(textView)
+/// IMESHOT_KEYCAST=zhuyin|keys|<file> (demo only): a strip at the bottom of the window shows the keys of the current line as they
+/// are pressed, as standard-layout zhuyin, as keycaps, or as the labels in <file> (one per line, one per key press of the steps, in
+/// order: a script that mixes zhuyin, Shift punctuation and English knows which is which); Enter starts a new line. The closing Esc
+/// is not shown. Checked before anything is typed, like the other parameters: the file must have exactly one label per key press,
+/// and the built-in maps must know every key (zhuyin mode takes no Shift: Shift on the standard layout types punctuation).
+let keycast = env["IMESHOT_KEYCAST"]
+if let k = keycast, !demo { fail("bad IMESHOT_KEYCAST=\(k): only with IMESHOT_DEMO=1") }
+/// Keycap and zhuyin per key code. zhuyinOf is the inverse of `keyCode` in tools/imetype.swift: change both together.
+let capOf: [CGKeyCode: String] = [0: "a", 1: "s", 2: "d", 3: "f", 4: "h", 5: "g", 6: "z", 7: "x", 8: "c", 9: "v", 11: "b", 12: "q", 13: "w",
+    14: "e", 15: "r", 16: "y", 17: "t", 18: "1", 19: "2", 20: "3", 21: "4", 22: "6", 23: "5", 25: "9", 26: "7", 27: "-", 28: "8", 29: "0",
+    31: "o", 32: "u", 34: "i", 35: "p", 37: "l", 38: "j", 40: "k", 41: ";", 43: ",", 44: "/", 45: "n", 46: "m", 47: "."]
+let zhuyinOf: [CGKeyCode: String] = [18: "ㄅ", 19: "ㄉ", 20: "ˇ", 21: "ˋ", 23: "ㄓ", 22: "ˊ", 26: "˙", 28: "ㄚ", 25: "ㄞ", 29: "ㄢ", 27: "ㄦ",
+    12: "ㄆ", 13: "ㄊ", 14: "ㄍ", 15: "ㄐ", 17: "ㄔ", 16: "ㄗ", 32: "ㄧ", 34: "ㄛ", 31: "ㄟ", 35: "ㄣ", 0: "ㄇ", 1: "ㄋ", 2: "ㄎ", 3: "ㄑ",
+    5: "ㄕ", 4: "ㄘ", 38: "ㄨ", 40: "ㄜ", 37: "ㄠ", 41: "ㄤ", 6: "ㄈ", 7: "ㄌ", 8: "ㄏ", 9: "ㄒ", 11: "ㄖ", 45: "ㄙ", 46: "ㄩ", 43: "ㄝ",
+    47: "ㄡ", 44: "ㄥ"]
+let specialOf: [CGKeyCode: String] = [49: "␣", 36: "⏎", 48: "⇥", 125: "↓", 126: "↑", 123: "←", 124: "→", 51: "⌫", 53: "esc"]
+/// What the strip shows for each key press of the steps, in order (nil: no strip).
+let castGlyphs: [String]? = keycast.map { k in
+    let presses: [(CGKeyCode, Bool)] = plan.flatMap { s -> [(CGKeyCode, Bool)] in
+        switch s {
+        case .rapid(let n, let codes): return Array(repeating: codes.map { ($0, false) }, count: n).flatMap { $0 }
+        case .key(let code, let shift): return [(code, shift)]
+        case .capture: return []
+        }
+    }
+    if k != "zhuyin" && k != "keys" {
+        guard let t = try? String(contentsOfFile: k, encoding: .utf8) else { fail("bad IMESHOT_KEYCAST=\(k): zhuyin, keys or a readable file") }
+        // Swift reads "\r\n" as one Character, which a split on "\n" never matches: turn CRLF into LF first.
+        var l = t.replacingOccurrences(of: "\r\n", with: "\n").split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        if l.last == "" { l.removeLast() }
+        guard l.count == presses.count else { fail("IMESHOT_KEYCAST file has \(l.count) labels, the steps press \(presses.count) keys") }
+        return l   // a label file spells its own spacing and Shift
+    }
+    return presses.map { code, shift in
+        if let s = specialOf[code] { return (shift ? "⇧" : "") + s + (s.count > 1 ? " " : "") }
+        guard let g = k == "zhuyin" ? zhuyinOf[code] : capOf[code], !(shift && k == "zhuyin") else {
+            fail("IMESHOT_KEYCAST=\(k) cannot show key \(code)\(shift ? " with Shift" : ""); use a label file")
+        }
+        return (shift ? "⇧" : "") + g + (k == "keys" ? " " : "")
+    }
+}
+var castIndex = 0
+/// Strip geometry, chosen by eye in the v0.5.0 demo (2026-10-22, 820x400 at font 34, approved by the maintainer): the inset matches
+/// the text view's left inset of 32 pt; the height holds one line of the smaller font; the text view stops above the strip so
+/// typed text never runs under it.
+let castInsetX: CGFloat = 32, castBottom: CGFloat = 10
+let castFontScale: CGFloat = 0.75, castHeightScale: CGFloat = 1.6
+let castLabel = NSTextField(labelWithString: "")
+var castText = "", castNewLine = false
+if castGlyphs != nil {
+    let h = fontSize * castHeightScale
+    castLabel.frame = NSRect(x: castInsetX, y: castBottom, width: size.width - 2 * castInsetX, height: h)
+    castLabel.font = NSFont.monospacedSystemFont(ofSize: fontSize * castFontScale, weight: .medium)
+    castLabel.textColor = .secondaryLabelColor
+    castLabel.alignment = .left
+    castLabel.lineBreakMode = .byTruncatingHead
+    window.contentView!.addSubview(castLabel)
+    let b = window.contentView!.bounds
+    textView.frame = NSRect(x: b.minX, y: castBottom + h, width: b.width, height: b.height - castBottom - h)
+}
+func cast(_ code: CGKeyCode) {
+    guard let glyphs = castGlyphs else { return }
+    let g = glyphs[castIndex]; castIndex += 1
+    DispatchQueue.main.async {
+        if castNewLine { castText = ""; castNewLine = false }
+        castText += g
+        castLabel.stringValue = castText
+        if code == 36 { castNewLine = true }
+    }
+}
 window.makeKeyAndOrderFront(nil)
 window.makeFirstResponder(textView)
 let pid = ProcessInfo.processInfo.processIdentifier
@@ -124,7 +204,8 @@ let restoreTo = restoreID ?? original
 restore = { DispatchQueue.main.sync { _ = TISSelectInputSource(restoreTo) } }
 
 func onMain<T>(_ f: () -> T) -> T { DispatchQueue.main.sync(execute: f) }
-func press(_ code: CGKeyCode, shift: Bool, gap: useconds_t = 80_000) {
+func press(_ code: CGKeyCode, shift: Bool, gap: useconds_t = 80_000, show: Bool = true) {
+    if show { cast(code) }
     for down in [true, false] {
         let e = CGEvent(keyboardEventSource: nil, virtualKey: code, keyDown: down)!
         if shift { e.flags = .maskShift }
@@ -206,9 +287,9 @@ DispatchQueue.global().async {
         return "before Esc: total \(total), marked \(r.location == NSNotFound ? "none" : "\(r.location)+\(r.length)")"
     }
     print(state)
-    press(53, shift: false)   // Esc
+    press(53, shift: false, show: false)   // Esc
     usleep(200_000)
-    press(53, shift: false)
+    press(53, shift: false, show: false)
     restore?()
     recorder?.waitUntilExit()
     print("text: \(onMain { textView.string }.debugDescription)")
