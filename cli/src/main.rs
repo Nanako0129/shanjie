@@ -223,6 +223,12 @@ struct RowOut {
 /// applies and the channel is on it reads `+colloq:<sha8>+rc`; with the option, or where the term does not apply (formal or another
 /// small model), just `+colloq:<sha8>`, so a P4d-cell run is never taken for the shipping setting. The option alone, without `--colloquial-core`,
 /// changes nothing.
+///
+/// `--reading-decode` (evaluation only; experiments/r1-reading-decode, section R1d; not in the engine or the C ABI): the n-gram decoder adds
+/// `core::reading`'s term (lambda 2.0, c 4, the sandhi readings of 一 and 不 free, the lexicon's floor-score readings estimated from the
+/// multi-character words: arm B-f) to the path score of every single-character word, in every setting, so the beam, the n-best, the dump,
+/// `--tinylm-scores` `ng` and the pick all see it. The summary tag gains `+rd` at its very end. Without it every output is byte for byte that of
+/// a build without the option (cli/tests/reading_decode.rs).
 fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     let (mut lm_path, mut profile, mut name, mut dev, mut rows_file) = (None, None, None, None, None);
     let (mut limit, mut set, mut dump, mut ctx_mode, mut demote) = (None::<usize>, None, None, false, true);
@@ -240,6 +246,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     let mut threads = 1usize;
     let mut colloquial_core = None::<String>;
     let mut reading_channel = true;
+    let mut reading_decode = false;
     let mut it = args.iter();
     while let Some(a) = it.next() {
         let mut val = || it.next().cloned().ok_or_else(|| "missing option value".to_string());
@@ -287,6 +294,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
             "--extra-overlay" => extra_overlay = Some(val()?),
             "--colloquial-core" => colloquial_core = Some(val()?),
             "--no-reading-channel" => reading_channel = false,
+            "--reading-decode" => reading_decode = true,
             _ => return Err("unknown argument".into()),
         }
     }
@@ -350,6 +358,13 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     let table = Demote::parse(&demote_rows).filter(|d| d.check(&lex)).ok_or("bad demote.tsv")?;
     // The table is always loaded, so a malformed one stops the run even with --no-demote.
     let capped = CappedLexicon::new(lex.clone(), &overlay, &lm, Some(&table)).ok_or("bad demote.tsv")?;
+    // R1d: the mc estimate of the floor readings counts the multi-character rows of mcbpmf-data.txt alone (the base the lexicon was parsed from).
+    let capped = if reading_decode {
+        let base = fs::read_to_string(dir.join("mcbpmf-data.txt")).map_err(|e| format!("--reading-decode: cannot read mcbpmf-data.txt ({:?})", e.kind()))?;
+        capped.with_reading_decode(&base)
+    } else {
+        capped
+    };
 
     // (display name, [(truth, reading)])
     let (default_name, rows): (String, Vec<(String, Syls, String)>) = match (dev, rows_file, set.as_deref()) {
@@ -612,7 +627,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
         RerankLevel::Conservative => "+rl:conservative",
         RerankLevel::Aggressive => "+rl:aggressive",
     };
-    println!("## {name}  lm-{profile_name}{}{}{}{}{}{}{}{}{xo}{}{}  {{'n': {}, 'top1': {top1}, 'oracle@64': {o64}, 'top1_sha256': '{sha}'}}", if ctx_mode { "+ctx" } else { "" }, if demote { "" } else { "-nodemote" }, if classes { "" } else { "-noclasses" }, if names { "" } else { "-nonames" }, if scoring.kn { lm.kn_tag().unwrap_or("") } else { "" }, tl.as_ref().map_or(String::new(), |(_, _, sha8)| format!("+tl:{sha8}")), rl_tag, if packs & PACK_ACG != 0 { "+acg" } else { "" }, if scoring.tri { lm.tri_tag().unwrap_or("") } else { "" }, colloq.as_ref().map_or(String::new(), |co| format!("+colloq:{}{}", &co.sha256()[..8], if colloq_on.is_some() && reading_channel { "+rc" } else { "" })), rows.len());
+    println!("## {name}  lm-{profile_name}{}{}{}{}{}{}{}{}{xo}{}{}{}  {{'n': {}, 'top1': {top1}, 'oracle@64': {o64}, 'top1_sha256': '{sha}'}}", if ctx_mode { "+ctx" } else { "" }, if demote { "" } else { "-nodemote" }, if classes { "" } else { "-noclasses" }, if names { "" } else { "-nonames" }, if scoring.kn { lm.kn_tag().unwrap_or("") } else { "" }, tl.as_ref().map_or(String::new(), |(_, _, sha8)| format!("+tl:{sha8}")), rl_tag, if packs & PACK_ACG != 0 { "+acg" } else { "" }, if scoring.tri { lm.tri_tag().unwrap_or("") } else { "" }, colloq.as_ref().map_or(String::new(), |co| format!("+colloq:{}{}", &co.sha256()[..8], if colloq_on.is_some() && reading_channel { "+rc" } else { "" })), if reading_decode { "+rd" } else { "" }, rows.len());
     Ok(())
 }
 
