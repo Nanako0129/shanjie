@@ -677,7 +677,7 @@ pub struct Engine {
 }
 
 /// Base lexicon + overlay from `data_dir` (§5), same as the eval CLI default. The overlay rows are
-/// `overlay-add.tsv`, `sandhi-add.tsv` (S2r: MOE-standard 一/不 readings derived from the base), then `names-add.tsv`
+/// `overlay-add.tsv`, `sandhi-add.tsv` (S2r: MOE-standard 一/不 readings derived from the base, plus rule R6's colloquial 紮 ㄓㄚ), then `names-add.tsv`
 /// (the always-on common proper nouns, docs/contracts/model-v6.md section 2.5), in that fixed order; all three are required.
 pub fn load_lexicon(data_dir: &Path) -> Result<Arc<Lexicon>, EngineError> {
     load_lexicon_packs(data_dir, None).map(|(lex, _)| lex)
