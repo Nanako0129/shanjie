@@ -1,0 +1,117 @@
+#!/usr/bin/env python3
+"""R1e (README of this directory, section "R1e"): the reading term inside the n-gram decoder only. Every setting is a plain CLI run, so there
+is no offline recomputation: this tool checks each run's summary tag and row count, then judges the four shipping clauses against the
+setting's shipping baseline. Counts and row numbers only.
+
+  r1e.py judge DIR [--out OUT.json]
+
+DIR holds, for each (setting, set) of ROLES, `base.<setting>.<set>.r` / `.cli.txt` (the shipping run) and `e.<setting>.<set>.r` / `.cli.txt`
+(the R1e run). Exit codes: 0 judged (pass or fail), 1 STOP.
+"""
+import argparse, json, os, sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+import r1 as R  # noqa: E402  (read_summary, ROW_COUNTS, ROLES, p4c, evalstats, Q)
+import r1d as RD  # noqa: E402  (SETTINGS and ROLES with the two -off settings, CLAUSE3_PAIRS)
+
+Q, p4c, evalstats = R.Q, R.p4c, R.evalstats
+stop = R.stop
+ROLES, SETTINGS = RD.ROLES, RD.SETTINGS
+PAIRS = (("chat-std", "formal-std"), ("chat-off", "formal-off"))
+
+
+def check_tags(setting, base_tag, tag):
+    """STOP unless the R1e run is the setting's: `+rd` last; chat with the rerank on keeps the colloquial term without `+rc` (the reading
+    channel is replaced by the decoder term); the baseline is the shipping run (chat on: `+rc`; off: no small model)."""
+    profile, level, on = SETTINGS[setting]
+    bad = []
+    if not tag.endswith("+rd"):
+        bad.append("R1e run without +rd last")
+    if ("+tl:" in tag) != on or ("+tl:" in base_tag) != on:
+        bad.append("+tl: (rerank on/off)")
+    if on and level != "standard" and (f"+rl:{level}" not in tag or f"+rl:{level}" not in base_tag):
+        bad.append("+rl:")
+    if profile == "chat":
+        if "+kn:" not in tag or "+kn:" not in base_tag:
+            bad.append("+kn:")
+        if on and ("+colloq:" not in tag or "+rc" in tag or not base_tag.endswith("+rc")):
+            bad.append("+colloq / +rc")
+        if not on and ("+colloq" in tag or "+colloq" in base_tag):
+            bad.append("colloquial with the rerank off")
+    elif "+tri:" not in tag or "+tri:" not in base_tag or "+colloq" in tag:
+        bad.append("+tri / +colloq")
+    if bad:
+        stop(f"{setting}: tags {base_tag} / {tag}: {', '.join(bad)}")
+
+
+def judge_one(d, setting, name):
+    role = ROLES[setting][name]
+    paths = {k: os.path.join(d, f"{k}.{setting}.{name}") for k in ("base", "e")}
+    tags, rows = {}, {}
+    for k, p in paths.items():
+        tags[k], n, top1 = R.read_summary(p + ".cli.txt")
+        rows[k] = evalstats.read_rowstats(p + ".r")
+        if not (n == len(rows[k]) == R.ROW_COUNTS[name]) or sum(r[0] for r in rows[k]) != top1:
+            stop(f"{setting} {name} {k}: {n} summary rows, {len(rows[k])} rowstats, expected {R.ROW_COUNTS[name]} (or top1 mismatch)")
+    check_tags(setting, tags["base"], tags["e"])
+    base_ok, new_ok = [bool(r[0]) for r in rows["base"]], [bool(r[0]) for r in rows["e"]]
+    s = p4c.stats(base_ok, new_ok)
+    res = {"setting": setting, "name": name, "role": role, "n": len(base_ok), **p4c.jsonable(s),
+           "top1_before": sum(base_ok), "top1_after": sum(new_ok),
+           "base_ok": "".join(str(int(o)) for o in base_ok), "cell_ok": "".join(str(int(o)) for o in new_ok)}
+    if role in ("1", "2a"):
+        res["verdict"] = bool(Q.verdict(role, s))
+    elif role == "2b":
+        (lo, _), _ = evalstats.paired_bootstrap(rows["base"], rows["e"], level=0.90)
+        res.update({"bootstrap90_lower_pp": 100 * lo / len(base_ok), "verdict": 100 * lo / len(base_ok) >= -1.0})
+    return res
+
+
+def judge(d):
+    runs = {(s, n): judge_one(d, s, n) for s, roles in ROLES.items() for n in roles}
+    out = {"clauses": {"1": {}, "2a": {}, "2b": {}, "3": {}}, "runs": {f"{s}/{n}": {k: v for k, v in r.items() if k not in ("base_ok", "cell_ok")}
+                                                                       for (s, n), r in runs.items()}}
+    for (s, n), r in sorted(runs.items()):
+        if "verdict" in r:
+            out["clauses"][r["role"]][f"{s}/{n}"] = r["verdict"]
+    for pair in PAIRS:
+        base = "".join(runs[s, "user-reported"]["base_ok"] for s in pair)
+        cell = "".join(runs[s, "user-reported"]["cell_ok"] for s in pair)
+        st = p4c.stats([c == "1" for c in base], [c == "1" for c in cell])
+        out["clauses"]["3"][" + ".join(pair)] = bool(Q.verdict("3", st))
+        out.setdefault("clause3_stats", {})[" + ".join(pair)] = p4c.jsonable({k: st[k] for k in ("n", "fixes", "breaks", "net", "p", "error_ratio")})
+    out["all_pass"] = all(v for c in out["clauses"].values() for v in c.values())
+    out["level_order"] = {f"{p}/{n}": {"before": [runs[f"{p}-{l}", n]["top1_before"] for l in ("cons", "std", "aggr")],
+                                       "after": [runs[f"{p}-{l}", n]["top1_after"] for l in ("cons", "std", "aggr")]}
+                          for p, n in (("chat", "discordtune"), ("chat", "typing76"), ("formal", "typing76"), ("formal", "wikitune-clean"))
+                          if all((f"{p}-{l}", n) in runs for l in ("cons", "std", "aggr"))}
+    return out
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    j = sub.add_parser("judge")
+    j.add_argument("dir")
+    j.add_argument("--out")
+    a = ap.parse_args(argv)
+    res = judge(a.dir)
+    for k, r in sorted(res["runs"].items()):
+        print(f"{k} n {r['n']} fixes {r['fixes']} breaks {r['breaks']} net {r['net']} top1 {r['top1_before']} -> {r['top1_after']}"
+              + (f" verdict {'PASS' if r['verdict'] else 'FAIL'}" if "verdict" in r else ""))
+    for k, st in res["clause3_stats"].items():
+        print(f"clause 3 {k}: fixes {st['fixes']} breaks {st['breaks']} net {st['net']}")
+    for role, c in res["clauses"].items():
+        for k, v in c.items():
+            print(f"clause {role} {k} {'PASS' if v else 'FAIL'}")
+    for k, v in res["level_order"].items():
+        print(f"top1 cons/std/aggr {k}: before {v['before']} after {v['after']}")
+    print("ALL FOUR CLAUSES PASS" if res["all_pass"] else "NOT ALL CLAUSES PASS: 照登記不過")
+    if a.out:
+        Q.write_atomic(a.out, json.dumps(res, indent=1))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
