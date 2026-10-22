@@ -14,7 +14,7 @@ S7c-2 分兩片：這一片（2a）只做核心與 FFI，用同步的測試驅�
 
 ### 2.1 引擎的狀態
 
-`tinylm: Option<Arc<TinyLm>>`、`rerank_on: bool`（預設 true；〔更正，2026-10-12〕S7c-2c 起預設 false，要 `set_rerank(true)` 才產生工作，`docs/contracts/s7c2c-delta.md` §2.3）、`generation: u64`（從整個程序共用的 `AtomicU64` 取號，重建的引擎不會重用號碼）、`pending: Option<RerankJob>`。沒有呼叫 `load_tinylm` 時，引擎的一切行為與輸出逐位元組不變。
+`tinylm: Option<Arc<TinyLm>>`、`rerank_on: bool`（預設 true；〔更正，2026-10-12〕S7c-2c 起預設 false，要 `set_rerank(true)` 才產生工作，`docs/contracts/s7c2c-delta.md` §2.3）、`generation: u64`（從整個程序共用的 `AtomicU64` 取號，重建的引擎不會重用號碼）、`pending: Option<RerankJob>`。沒有呼叫 `load_tinylm` 時，引擎的一切行為與輸出逐位元組不變。〔例外，組字區上限 composition-cap 修訂一，2026-10-22：組字區裡有過 §1.2 第 3 步固定的詞之後（這個組字區曾經有自由段超過 W ＝ 61 字），前段照那份契約固定，輸出和沒有固定時不同；固定不看有沒有載入會意、重排開或關。〕
 
 ### 2.2 產生工作（`refresh_lm` 結尾，模型已載入且 `rerank_on`）
 
