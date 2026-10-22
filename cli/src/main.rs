@@ -1,6 +1,6 @@
 use cli::common::{dev_rows, format_rowstats, levenshtein, load_lenient, read_rows, root, three_field_rows};
 use core::colloquial::{self, Colloquial, ReadingChannel};
-use core::engine::{capping_overlay_detailed, load_lexicon_extra_detailed, load_lexicon_packs_detailed, read_packs_detailed, PACK_ACG};
+use core::engine::{capping_overlay_detailed, load_lexicon_extra_detailed, load_lexicon_packs_detailed, read_packs_detailed, PACK_ACG, PACK_FILES, PACK_QUOTES};
 use core::eval::*;
 use core::learn::{context_key, SENTINEL};
 use core::lm::{decode_from, history, CappedLexicon, Demote, Lm, Profile};
@@ -67,21 +67,29 @@ fn check_lm_opts(set: Option<&str>, dump: bool, packs: u32, packs_dir: bool) -> 
     Ok(())
 }
 
-/// `--packs acg`: sets the pack bit; anything else is refused.
+/// `--packs acg`, `--packs quotes` or `--packs acg,quotes`: sets the pack bits; anything else is refused.
 fn pack_flag(v: &str) -> Result<u32, String> {
-    match v {
-        "acg" => Ok(PACK_ACG),
-        _ => Err("--packs takes acg".into()),
-    }
+    v.split(',').try_fold(0, |bits, name| match name {
+        "acg" => Ok(bits | PACK_ACG),
+        "quotes" => Ok(bits | PACK_QUOTES),
+        _ => Err("--packs takes acg, quotes or acg,quotes".to_string()),
+    })
+}
+
+/// The summary line's pack marker: `+acg`, `+quotes` or `+acg+quotes`; nothing with no pack (the existing golden lines are untouched).
+fn pack_tag(packs: u32) -> String {
+    format!("{}{}", if packs & PACK_ACG != 0 { "+acg" } else { "" }, if packs & PACK_QUOTES != 0 { "+quotes" } else { "" })
 }
 
 /// The packs directory (`--packs-dir` or data/packs); a run that asks for a pack must fail loudly when its file is
 /// missing (the engine tolerates it), so this is checked with the other options, before the model is read.
 fn packs_dir_checked(packs: u32, packs_dir: Option<String>) -> Result<PathBuf, String> {
     let pdir = packs_dir.map_or_else(|| root().join("data/packs"), PathBuf::from);
-    let acg = pdir.join("acg-add.tsv");
-    if packs & PACK_ACG != 0 && !acg.is_file() {
-        return Err(format!("--packs acg: pack file not found: {}", acg.display()));
+    for (bit, file) in PACK_FILES {
+        let path = pdir.join(file);
+        if packs & bit != 0 && !path.is_file() {
+            return Err(format!("--packs {}: pack file not found: {}", if bit == PACK_ACG { "acg" } else { "quotes" }, path.display()));
+        }
     }
     Ok(pdir)
 }
@@ -560,7 +568,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
         RerankLevel::Conservative => "+rl:conservative",
         RerankLevel::Aggressive => "+rl:aggressive",
     };
-    println!("## {name}  lm-{profile_name}{}{}{}{}{}{}{}{}{xo}{}{}  {{'n': {}, 'top1': {top1}, 'oracle@64': {o64}, 'top1_sha256': '{sha}'}}", if ctx_mode { "+ctx" } else { "" }, if demote { "" } else { "-nodemote" }, if classes { "" } else { "-noclasses" }, if names { "" } else { "-nonames" }, if scoring.kn { lm.kn_tag().unwrap_or("") } else { "" }, tl.as_ref().map_or(String::new(), |(_, _, sha8)| format!("+tl:{sha8}")), rl_tag, if packs & PACK_ACG != 0 { "+acg" } else { "" }, if scoring.tri { lm.tri_tag().unwrap_or("") } else { "" }, colloq.as_ref().map_or(String::new(), |co| format!("+colloq:{}{}", &co.sha256()[..8], if colloq_on.is_some() && reading_channel { "+rc" } else { "" })), rows.len());
+    println!("## {name}  lm-{profile_name}{}{}{}{}{}{}{}{}{xo}{}{}  {{'n': {}, 'top1': {top1}, 'oracle@64': {o64}, 'top1_sha256': '{sha}'}}", if ctx_mode { "+ctx" } else { "" }, if demote { "" } else { "-nodemote" }, if classes { "" } else { "-noclasses" }, if names { "" } else { "-nonames" }, if scoring.kn { lm.kn_tag().unwrap_or("") } else { "" }, tl.as_ref().map_or(String::new(), |(_, _, sha8)| format!("+tl:{sha8}")), rl_tag, pack_tag(packs), if scoring.tri { lm.tri_tag().unwrap_or("") } else { "" }, colloq.as_ref().map_or(String::new(), |co| format!("+colloq:{}{}", &co.sha256()[..8], if colloq_on.is_some() && reading_channel { "+rc" } else { "" })), rows.len());
     Ok(())
 }
 
@@ -858,6 +866,16 @@ mod tests {
         assert!(check_lm_opts(None, true, 0, false).is_ok());
         assert!(check_lm_opts(None, false, 0, true).is_err(), "--packs-dir without --packs");
         assert!(check_lm_opts(None, false, PACK_ACG, true).is_ok());
+    }
+
+    /// quote-pack section 2: `--packs` takes acg, quotes and the comma list, and the summary marker follows the bits.
+    #[test]
+    fn packs_flag_takes_quotes_and_the_list() {
+        assert_eq!(pack_flag("acg"), Ok(PACK_ACG));
+        assert_eq!(pack_flag("quotes"), Ok(PACK_QUOTES));
+        assert_eq!(pack_flag("acg,quotes"), Ok(PACK_ACG | PACK_QUOTES));
+        assert!(pack_flag("quote").is_err() && pack_flag("acg,").is_err() && pack_flag("").is_err());
+        assert_eq!((pack_tag(0), pack_tag(PACK_QUOTES), pack_tag(PACK_ACG | PACK_QUOTES)), (String::new(), "+quotes".to_string(), "+acg+quotes".to_string()));
     }
 
     /// names-lexicon 3.5: `--extra-overlay` rows are capped like pack rows. Goes through the CLI's own load path
