@@ -1,8 +1,8 @@
 //! The colloquial term (docs/contracts/colloquial-term.md section 2.2): lc, k and col on a synthetic table (expected values computed
 //! by hand below and by experiments/p4-colloquial/p4.py), the sets read from literal texts, and `TinyLm::rerank_colloquial`.
-use core::colloquial::{channel_of, fused_pick, Colloquial, ColloquialError};
+use core::colloquial::{self, channel_of, fused_pick, Colloquial, ColloquialError, STANDARD};
 use core::Lexicon;
-use core::tinylm::{TinyLm, TOPK};
+use core::tinylm::{RerankLevel, TinyLm, TOPK};
 use std::path::{Path, PathBuf};
 
 fn root() -> PathBuf {
@@ -16,11 +16,17 @@ fn strs(v: &[&str]) -> Vec<String> {
 /// The toy table of core/src/lm.rs's tests: vocabulary `<s> </s> a b` (V 4), N 10, eos total 4 (p_eos 0.4), D 0.75; unigrams a 6, b 4;
 /// context `<s>` (total 5: a 3, b 2), context `a` (total 4: `</s>` 2). So N + V + 1 = 15, back(`<s>`) = 0.3, back(a) = 0.6875.
 fn tiny() -> Vec<u8> {
+    tiny_d(0.75)
+}
+
+/// `tiny` with the discount `d`: at d = 0 the context `<s>` (a 3, b 2, total 5) has no back-off mass left, so a word it has no entry for has
+/// probability 0 there and log10 of it is -inf (the non-finite col of `rerank_colloquial`'s fallback).
+fn tiny_d(d: f64) -> Vec<u8> {
     let mut b = b"SJLM0001".to_vec();
     b.extend(4u32.to_le_bytes());
     b.extend(10u64.to_le_bytes());
     b.extend(4u64.to_le_bytes());
-    b.extend(0.75f64.to_le_bytes());
+    b.extend(d.to_le_bytes());
     for w in ["<s>", "</s>", "a", "b"] {
         b.extend((w.len() as u16).to_le_bytes());
         b.extend(w.as_bytes());
@@ -49,10 +55,14 @@ fn tiny() -> Vec<u8> {
 }
 
 fn tiny_file(name: &str) -> PathBuf {
+    table_file(name, tiny())
+}
+
+fn table_file(name: &str, bytes: Vec<u8>) -> PathBuf {
     let d = std::env::temp_dir().join(format!("shanjie-core-colloquial-{name}-{}", std::process::id()));
     std::fs::create_dir_all(&d).unwrap();
     let p = d.join("tiny.sjlm");
-    std::fs::write(&p, tiny()).unwrap();
+    std::fs::write(&p, bytes).unwrap();
     p
 }
 
@@ -163,23 +173,71 @@ fn rerank_colloquial_is_ll_then_fused_pick() {
     let cands = ["甲乙", "甲丙", "丁乙", "丁丙", "甲丁", "乙丙", "乙丁", "丙丁", "丙乙"];
     let words: Vec<Vec<&str>> = vec![vec!["a", "b"], vec!["x"], vec!["x", "x"], vec!["b"], vec!["a"], vec!["zzz"], vec!["a", "a"], vec!["b", "a"], vec!["x"]];
     let ng = [-10.0, -10.1, -10.2, -10.3, -10.4, -10.5, -10.6, -10.7, -10.8];
-    let (pick, ll) = tl.rerank_colloquial(&ng, &cands, &words, "你", &co, None).unwrap();
+    let (pick, ll) = tl.rerank_colloquial(&ng, &cands, &words, "你", &co, None, RerankLevel::Standard).unwrap();
     let ll = ll.unwrap();
     let want_ll = tl.ll_many(&cands[..TOPK].iter().map(|c| ("你", *c)).collect::<Vec<_>>()).unwrap();
     assert_eq!(ll, want_ll);
     let col: Vec<f64> = words[..TOPK].iter().map(|w| co.col(w)).collect();
-    assert_eq!(pick, fused_pick(&ng[..TOPK], &ll, &col, None));
+    assert_eq!(pick, fused_pick(&ng[..TOPK], &ll, &col, None, STANDARD));
     // with the reading channel: the same LLs, the pick is `fused_pick` over each split's `channel_of` for the stretch's syllables
     let lex = Lexicon::parse("p a -1.0\nq a -6.0\np b -1.0\nq b -1.0\n").unwrap();
     let syls = strs(&["q", "p"]);
     let rc = Some(core::colloquial::ReadingChannel { lex: &lex, syls: &syls });
-    let (pick_rc, ll_rc) = tl.rerank_colloquial(&ng, &cands, &words, "你", &co, rc).unwrap();
+    let (pick_rc, ll_rc) = tl.rerank_colloquial(&ng, &cands, &words, "你", &co, rc, RerankLevel::Standard).unwrap();
     assert_eq!(ll_rc.unwrap(), ll);
     let ch: Vec<f64> = words[..TOPK].iter().map(|w| channel_of(&lex, &syls, w)).collect();
     assert_eq!(ch[0], -4.0, "premise: the first split reads a under q, 5 below its best, clipped at 4");
-    assert_eq!(pick_rc, fused_pick(&ng[..TOPK], &ll, &col, Some(&ch)));
+    assert_eq!(pick_rc, fused_pick(&ng[..TOPK], &ll, &col, Some(&ch), STANDARD));
     assert_ne!(pick_rc, pick, "premise: the channel changes the pick for this input, so a rerank_colloquial that ignores `rc` fails");
-    assert_ne!(fused_pick(&ng[..TOPK], &ll, &col, Some(&ch)), fused_pick(&ng[..TOPK], &ll, &col, None));
-    assert_eq!(tl.rerank_colloquial(&ng[..1], &cands[..1], &words[..1], "你", &co, None).unwrap(), (0, None));
-    assert_eq!(tl.rerank_colloquial(&ng, &cands, &words[..1], "你", &co, None).unwrap(), (0, None), "one split: fewer than two candidates");
+    assert_ne!(fused_pick(&ng[..TOPK], &ll, &col, Some(&ch), STANDARD), fused_pick(&ng[..TOPK], &ll, &col, None, STANDARD));
+    assert_eq!(tl.rerank_colloquial(&ng[..1], &cands[..1], &words[..1], "你", &co, None, RerankLevel::Standard).unwrap(), (0, None));
+    assert_eq!(tl.rerank_colloquial(&ng, &cands, &words[..1], "你", &co, None, RerankLevel::Standard).unwrap(), (0, None), "one split: fewer than two candidates");
+}
+
+const LEVELS: [RerankLevel; 3] = [RerankLevel::Standard, RerankLevel::Conservative, RerankLevel::Aggressive];
+
+fn toy_v3() -> TinyLm {
+    TinyLm::load(&root().join("eval/golden/tinylm-tiny/tiny-int8-v3.sjtl")).unwrap()
+}
+
+/// Which candidate each level's `rerank_colloquial` picks: (standard, conservative, aggressive).
+fn picks_by_level(tl: &TinyLm, ng: &[f64], cands: &[&str], words: &[Vec<&str>], co: &Colloquial) -> [usize; 3] {
+    LEVELS.map(|l| tl.rerank_colloquial(ng, cands, words, "", co, None, l).unwrap().0)
+}
+
+/// `rerank_colloquial` fuses with the level's own cell (colloquial-levels section 1), not the standard one. One list, equal col everywhere (so the
+/// colloquial term is 0 and only alpha, tau and delta of the cell decide), the toy model's LLs: candidate 1 gains 0.5 * 3.9124 - 1.78 = 0.176
+/// at alpha 0.5, which delta 0.1 (aggressive) takes and delta 0.25 (standard) does not; candidate 2 gains 1.0 * 8.0212 - 4 = 4.02 at alpha 1.0,
+/// which delta 3 (conservative) takes, against 0.5 * 8.0212 - 4 = 0.011 at alpha 0.5. So standard keeps 0, conservative takes 2, aggressive 1.
+#[test]
+fn rerank_colloquial_fuses_with_the_levels_cell() {
+    let (tl, co) = (toy_v3(), colloq("lv", &[], &["a"], None));
+    let cands = ["你好你好你好", "龘龘", "好"];
+    let words = vec![vec!["a"]; 3];
+    let ng = [-10.0, -11.78, -14.0];
+    let ll = tl.ll_many(&cands.iter().map(|c| ("", *c)).collect::<Vec<_>>()).unwrap();
+    assert!((ll[1] - ll[0] - 3.9124).abs() < 1e-3 && (ll[2] - ll[0] - 8.0212).abs() < 1e-3, "premise: the toy model's LLs {ll:?}");
+    assert_eq!(picks_by_level(&tl, &ng, &cands, &words, &co), [0, 2, 1]);
+    // the cells themselves (the fusion with the level's alpha and delta decides, whatever the header says)
+    assert_eq!(colloquial::cell(RerankLevel::Standard), (0.5, 2.0, 0.25));
+    assert_eq!(colloquial::cell(RerankLevel::Conservative), (1.0, 2.0, 3.0));
+    assert_eq!(colloquial::cell(RerankLevel::Aggressive), (0.5, 2.0, 0.1));
+}
+
+/// The fallback of a non-finite col is the plain pick with the header triple of the same level, tested at `rerank_colloquial`: the toy file's chat
+/// header is standard (0.7, 2, 0.25), conservative (1.125, 3, 0.375), aggressive (0.875, 1.5, 0.0625). Candidate 1's col is -inf (the discount-0
+/// table gives a word the context has no entry for probability 0). List A: an n-gram gap of 2.5 is inside only the conservative tau, where
+/// 1.125 * 3.1496 - 2.5 = 1.04 >= 0.375, so conservative takes 1 and the others keep 0. List B: gap 0.5 and an LL gain of 0.667, where only the
+/// aggressive header takes it (0.875 * 0.667 - 0.5 = 0.084 >= 0.0625; conservative 0.251 < 0.375, standard -0.033). A fallback that uses the standard
+/// header for every level (rerank_colloquial's `plain`) fails both lists; unguarded, an -inf col never wins, so list A would keep 0 at every level.
+#[test]
+fn a_non_finite_col_falls_back_to_the_levels_header_triple() {
+    let tl = toy_v3();
+    let co = Colloquial::load(&table_file("inf", tiny_d(0.0)), "", "".as_bytes(), None).unwrap();
+    assert!(co.col(&["zzz"]).is_infinite() && co.col(&["a"]).is_finite(), "premise: -inf for a word the discount-0 context lacks");
+    let words = vec![vec!["a"], vec!["zzz"]];
+    let hdr = |l| tl.params(core::lm::Profile::Chat, l);
+    assert_eq!([hdr(RerankLevel::Standard), hdr(RerankLevel::Conservative), hdr(RerankLevel::Aggressive)], [(0.7, 2.0, 0.25), (1.125, 3.0, 0.375), (0.875, 1.5, 0.0625)]);
+    assert_eq!(picks_by_level(&tl, &[-10.0, -12.5], &["你好", "不"], &words, &co), [0, 1, 0], "list A");
+    assert_eq!(picks_by_level(&tl, &[-10.0, -10.5], &["你好", "我們"], &words, &co), [0, 0, 1], "list B");
 }

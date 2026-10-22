@@ -8690,3 +8690,27 @@ XL 比 `MAX_FILE`（67,108,864）小 1,168,880 位元組。錨點：4 個模型 
 - 實作：`build_sandhi.py` 的 R6，基底裡「紮」讀 ㄓㄚˊ／ㄗㄚ 的 29 列（含單字）各加一個 ㄓㄚ 讀音，分數照抄。golden 只動預期的兩處（錯字集 oracle@64 153 → 154；預測 golden 一行）。第 156 列的「結紮」對了，句尾講字本身的「紮」仍選「扎」。
 - 審查時的一次接觸：plan-verifier 為了查 golden 在 `eval/` 底下 grep ㄓㄚ，結果顯示了 `eval/holdout/next/shard-2/news.txt` 的兩列。那一份是之後才用的保留集，不是現役 shard-1；沒有數字、沒有拿來做任何判斷，內容不寫在這裡。照保留集規則記下這次接觸；之後給審查者的指示一律寫明不讀 `eval/holdout/`。
 - 評測（出貨標準四條，對 main `8fe1df41`，GCP）：每個集合都是 0 改對 0 改壞；錯字回報的 CER 聊天 10.71% → 10.63%、書面 11.65% → 11.56%（第 156 列的「結紮」對了，句尾講字本身的「紮」仍選「扎」）。條件 1–3 過，條件 4「錯字回報淨值 > 0」淨值 0，**照登記不過**，和維護者討論。
+
+## 2026-10-22：常談與讀音通道項在保守、積極也生效（實作，`docs/contracts/colloquial-levels.md`）
+
+- **改了什麼**：`colloquial::applies` 不再看強度；每一檔有自己的 (α, τ, δ)，核心常數 `STANDARD` (0.5, 2, 0.25)、`CONSERVATIVE` (1.0, 2, 3.0)、`AGGRESSIVE` (0.5, 2, 0.1)，由 `colloquial::cell(level)` 取用。`fuse`／`fused_pick` 的係數是 μ／α、ν／α，用那一檔的 α；非有限 col 的退路用同一檔的 `.sjtl` 檔頭三個值。`TinyLm::rerank_colloquial` 與 `RerankJob` 帶 level（原本退路寫死標準）。`.sjtl` 沒有重新匯出。
+- **和探索片逐列相同**（公開集合，Mac；工具 `experiments/colloq-levels/expect_core.py`，指令 `experiments/colloq-levels/parity.sh`）：CLI commit `075a4cee`（核心程式和 `a75d48fb` 相同，只差註解，CLI 二進位雜湊前 12 碼 `7e5c078d3dd2` 兩次相同），模型 `tinylm.sjtl e7c179d8…`、`colloquial.sjlm 2984eeb5…`、`bigram.sjlm fc2bddd1…`、`classes.sjc 9e36fa1b…`、`kn.sjkn cbefbced…`（都等於 `data/*.sha256`）。dev302（302）、打字測驗（76）、錯字回報前 157 列（`5659f5f6…`）× 標準、保守、積極：**每格 0 列不同**（比 `--tinylm-scores` 的 `c`、`ok[c]` 與 rowstats 的對錯）。負向對照：把保守或積極的格換成標準格，dev302 差 17／2 列、錯字回報差 32／6 列。私人集合（chatclause、discordtune、cvtune-clean）還沒跑，等 GCP。
+- **不變的部分**：書面三檔、聊天沒有常談表三檔、聊天標準，在三個公開集合的摘要行、rowstats、`--tinylm-scores` 和 main 逐位元組相同；重播（`shanjie-replay --rerank each`，預設與 `--no-colloquial`）六格的摘要行、rowstats、firsts 相同，聊天標準的 `top1_sha256` 也等於 CLI 的（dev302 `d7230f18`、打字測驗 `fc046ae3`、錯字回報 `96b5ad1c`）。只有「聊天、保守或積極、帶 `--colloquial-core`」變了，那就是這一片。
+- **測試與突變**（乾淨的工作樹，`git checkout --` 還原；結束碼）：
+
+  | 突變 | 結束碼 | 失敗的測試 |
+  |---|---|---|
+  | 退路的 `plain` 寫死標準（`tinylm.rs`） | 101 | `a_non_finite_col_falls_back_to_the_levels_header_triple` |
+  | 建工作時不記 level（`level: RerankLevel::Standard`） | 101 | `the_term_applies_only_under_its_conditions`、`each_level_uses_its_own_cell` |
+  | `fuse` 的 μ／α 改成 μ／0.5 | 101 | `the_terms_weigh_the_same_at_every_alpha`、`each_level_uses_its_own_cell`（引擎）、`the_term_applies_at_every_strength`（CLI） |
+  | `fused_pick` 的 ν／α 改成 ν／0.5 | 101 | `the_terms_weigh_the_same_at_every_alpha` |
+  | `rerank_colloquial` 融合用 `STANDARD` | 101 | `rerank_colloquial_fuses_with_the_levels_cell`、引擎 2 個、CLI 1 個 |
+  | `applies` 加回標準強度條件 | 101 | 引擎 4 個、CLI 1 個 |
+  | `AGGRESSIVE` 的 δ 改成 0.25 | 101 | 單元、`rerank_colloquial_fuses_with_the_levels_cell`、引擎、CLI 各 1 個 |
+
+  讀音通道項的 ν／α 突變只被單元測試抓到：這一片的引擎與 CLI 測試用的列，沒有一列在保守下靠通道項決定（引擎的通道測試用積極，α 和標準相同，係數 2 不變）。
+- **`/code-review` 之後的修正**（`56378128`、`893484aa`）：`colloquial::applies` 拿掉沒用的 `level` 參數；引擎的讀音通道測試在積極檔多斷言「關掉通道時是常談單獨的選字」，突變「`channel_lex` 只在標準強度建」（結束碼 101）讓 `the_reading_channel_applies_only_where_the_colloquial_term_does` 失敗。保守檔沒有公開列是通道項決定的（dev302、打字測驗、錯字回報 157 列，CLI 有無 `--no-reading-channel` 每列相同），那一檔的守門是單元測試 `the_terms_weigh_the_same_at_every_alpha`。`parity.sh` 的 EXIT trap 提前、只有 `DELETE_ROWS=1`（且 ROWS_DIR 不在 `~/side-project` 內）才刪私人列檔、乾淨檢查用 `git diff --quiet HEAD`；`expect_core.py` 補回 gold length 檢查與標準檔頭三個值的檢查。公開集合三組在 `893484aa` 重跑，每格仍 0 列不同，CLI 二進位雜湊前 12 碼不變（`7e5c078d3dd2`）；`make test-python` 全過（`test_runsets` 的失敗隨 #270 消失）。
+- **還沒做**：私人集合的逐列比對（GCP）、實機（維護者在繁中虛擬機切到保守或積極，打事先用 CLI 確認的公開句子）。
+- **私人集合的逐列比對**（GCP VM，CLI commit `6ae50f3c`，`experiments/colloq-levels/parity.sh`；之後的 `56378128` 只改了比對工具的清理與檢查、核心的選字不變）：chatclause 5,761、discordtune 4,958、cvtune-clean 3,286，以及打字測驗、錯字回報 157 列、dev302，在標準、保守、積極三檔都是 **0 列不同**。核心的選字和探索片的離線選中格逐列相同。
+- **實機確認**（繁中 tart 虛擬機，裝本分支的開發版）：用 `defaults write` 把開發版容器偏好檔（`~/Library/Containers/<bundle id>/Data/Library/Preferences/<bundle id>.plist`）的 `rerankLevel` 設成 `aggressive`、`profileMode` 設成 `chat`，在文字編輯打錯字回報第 54 列 `ㄎㄜˇ ㄧˇ ㄓㄨㄣˇ ㄅㄟˋ ㄗㄨㄛˋ`，組字區是「可以準備做」。同一句用 CLI 量：本分支只有積極選「做」（標準、保守是「作」），main 的積極是「作」。所以引擎吃到了寫進去的積極設定，常談在積極生效。v0.5.0 的輸入法在這台虛擬機沒有啟用，沒有實機對照，對照用 CLI。
+- 順帶確認：改設定不用新程式，輸入法程序沒在跑時用 `defaults write` 寫容器偏好檔，下次啟動就讀到（程序在跑時要先結束它）。

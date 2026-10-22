@@ -433,7 +433,7 @@ def cmd_run(a):
     lenient, lex, par = load_lenient(), Lex.load(), tinylm_params(tl)
     kn = kn_tag(os.path.join(ROOT, "data/lm/kn.sjkn"))   # the CLI turns KN on when the side file is beside the model
     tri = tri_tag(os.path.join(ROOT, "data/lm/trigram.sjt3"))   # the CLI reads it for the formal profile only
-    colloq = os.path.join(ROOT, "data/lm/colloquial.sjlm")   # the App always loads it (Shell.build()); the CLI applies it in chat at the standard strength
+    colloq = os.path.join(ROOT, "data/lm/colloquial.sjlm")   # the App always loads it (Shell.build()); the CLI applies it in chat at every strength (the triage runs the standard)
     colloq = colloq if os.path.isfile(colloq) else ""
     path = os.path.join(OUT_DIR, a.label + ".json")
     doc = json.load(open(path, encoding="utf-8")) if os.path.isfile(path) else {"label": a.label, "sets": {}}

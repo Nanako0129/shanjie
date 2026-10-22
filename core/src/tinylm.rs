@@ -508,21 +508,22 @@ impl TinyLm {
         self.ll_many(&items).map(Some)
     }
 
-    /// `rerank` with the colloquial term (docs/contracts/colloquial-term.md section 2.2): the same first `TOPK` candidates and `ll_many`,
-    /// then col_i = `co.col(words[i])` for the word split of each candidate, ll_eff = `colloquial::fuse(ll, col)`, and `pick` with the
-    /// registered cell's alpha, tau and delta (`colloquial::ALPHA` ...), not the file's. With `rc` (docs/contracts/reading-channel.md) ll_eff
-    /// also gains (NU / ALPHA) * (ch_i - ch_0), ch_i = `colloquial::channel_of` of the stretch's syllables over the candidate's words. A col that
-    /// is not finite drops both terms for this call: the plain `pick` with the file's chat standard triple (`colloquial::guarded_pick`). The
-    /// engine and the evaluation CLI both call this one function. Returns the chosen index and the raw LLs, as `rerank` does.
+    /// `rerank` with the colloquial term (docs/contracts/colloquial-term.md section 2.2, docs/contracts/colloquial-levels.md): the same first `TOPK`
+    /// candidates and `ll_many`, then col_i = `co.col(words[i])` for the word split of each candidate, ll_eff = `colloquial::fuse(ll, col, alpha)`, and
+    /// `pick` with `colloquial::cell(level)`, the level's registered alpha, tau and delta, not the file's. With `rc`
+    /// (docs/contracts/reading-channel.md) ll_eff also gains (NU / alpha) * (ch_i - ch_0), ch_i = `colloquial::channel_of` of the stretch's syllables
+    /// over the candidate's words. A col that is not finite drops both terms for this call: the plain `pick` with the file's chat triple of the same
+    /// `level` (`colloquial::guarded_pick`). The engine and the evaluation CLI both call this one function. Returns the chosen index and the raw LLs,
+    /// as `rerank` does.
     pub fn rerank_colloquial(
-        &self, ng: &[f64], cands: &[&str], words: &[Vec<&str>], key: &str, co: &Colloquial, rc: Option<ReadingChannel>,
+        &self, ng: &[f64], cands: &[&str], words: &[Vec<&str>], key: &str, co: &Colloquial, rc: Option<ReadingChannel>, level: RerankLevel,
     ) -> Result<(usize, Option<Vec<f64>>), TinyLmError> {
         let n = cands.len().min(ng.len()).min(words.len()).min(TOPK);
         let Some(ll) = self.rerank_ll(&cands[..n], key)? else { return Ok((0, None)) };
         let col: Vec<f64> = words[..n].iter().map(|w| co.col(w)).collect();
         let ch: Option<Vec<f64>> = rc.map(|rc| words[..n].iter().map(|w| colloquial::channel_of(rc.lex, rc.syls, w)).collect());
-        let plain = self.params(Profile::Chat, RerankLevel::Standard);
-        Ok((colloquial::guarded_pick(&ng[..n], &ll, &col, ch.as_deref(), plain), Some(ll)))
+        let plain = self.params(Profile::Chat, level);
+        Ok((colloquial::guarded_pick(&ng[..n], &ll, &col, ch.as_deref(), colloquial::cell(level), plain), Some(ll)))
     }
 
     /// LL of each (k, c): the sum over the characters of c of log10 P(c_i | [BOS] + k + c_<i), as `tinylm.ll_many`

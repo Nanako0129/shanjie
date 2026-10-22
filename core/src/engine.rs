@@ -51,9 +51,12 @@ pub struct RerankJob {
     /// The profile's (alpha, tau, delta) at the engine's rerank level when the job was made (rerank-strength section 2.2): an own
     /// Copy value, so a later level or profile change never reaches a job already made (it is stale anyway).
     params: (f64, f64, f64),
-    /// The colloquial term (docs/contracts/colloquial-term.md section 2.2), decided when the job was made: `Some` only for chat,
-    /// standard strength and the small model the term was measured with. `None`: the plain `rerank` with `params`.
+    /// The colloquial term (docs/contracts/colloquial-term.md section 2.2), decided when the job was made: `Some` only for chat (any
+    /// strength) and the small model the term was measured with. `None`: the plain `rerank` with `params`.
     colloquial: Option<Arc<Colloquial>>,
+    /// The engine's rerank level when the job was made (docs/contracts/colloquial-levels.md): the colloquial and reading-channel terms use that
+    /// level's (alpha, tau, delta), and their fallback the header triple of that level. Copy, like `params`.
+    level: RerankLevel,
     /// The engine's lexicon, `Some` only where the reading-channel term applies (docs/contracts/reading-channel.md): when `colloquial` is
     /// `Some` and the engine's reading channel is on (the default; `Engine::set_reading_channel`).
     channel_lex: Option<Arc<Lexicon>>,
@@ -97,7 +100,7 @@ impl RerankJob {
                     Some(co) => {
                         let words: Vec<Vec<&str>> = s.paths.iter().map(|p| p.iter().map(|w| w.0.as_str()).collect()).collect();
                         let rc = self.channel_lex.as_deref().map(|lex| ReadingChannel { lex, syls: &s.syls });
-                        self.model.rerank_colloquial(&s.ng, &cands, &words, &key, co, rc)
+                        self.model.rerank_colloquial(&s.ng, &cands, &words, &key, co, rc, self.level)
                     }
                     None => self.model.rerank(&s.ng, &cands, &key, self.params),
                 }
@@ -2451,7 +2454,7 @@ impl Engine {
         // then do the stretches keep their syllables, so formal, the other strengths, no table and the channel off allocate nothing for it.
         let channel = self.reading_channel
             && self.colloquial.is_some()
-            && self.tinylm.as_deref().is_some_and(|m| colloquial::applies(self.profile, self.rerank_level, m));
+            && self.tinylm.as_deref().is_some_and(|m| colloquial::applies(self.profile, m));
         let mut stretches = Vec::new();
         self.free.clear();
         // Byte offset in `out` after the last stretch put into the job: the text from there on is the next stretch's `gap`.
@@ -2535,11 +2538,11 @@ impl Engine {
         self.path = path;
         if let (false, Some(model)) = (stretches.is_empty(), &self.tinylm) {
             let (params, left) = (model.params(self.profile, self.rerank_level), self.left.clone());
-            // The four conditions of docs/contracts/colloquial-term.md section 2.2: a table is loaded, and `colloquial::applies` (chat, standard
-            // strength, the measured small model).
-            let colloquial = self.colloquial.clone().filter(|_| colloquial::applies(self.profile, self.rerank_level, model));
+            // The conditions of docs/contracts/colloquial-term.md section 2.2: a table is loaded, and `colloquial::applies` (chat, the
+            // measured small model; any strength, docs/contracts/colloquial-levels.md).
+            let colloquial = self.colloquial.clone().filter(|_| colloquial::applies(self.profile, model));
             let channel_lex = colloquial.as_ref().filter(|_| self.reading_channel).map(|_| self.lex.clone());
-            self.rerank_job = Some(RerankJob { generation: self.generation, model: model.clone(), params, colloquial, channel_lex, left, stretches });
+            self.rerank_job = Some(RerankJob { generation: self.generation, model: model.clone(), params, colloquial, level: self.rerank_level, channel_lex, left, stretches });
         }
         Ok(())
     }
