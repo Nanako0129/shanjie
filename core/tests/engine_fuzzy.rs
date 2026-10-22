@@ -130,6 +130,33 @@ fn all_off_and_adjacent_only_replay_the_python_golden() {
     }
 }
 
+/// Section 3.3, a measurement (run with `--ignored --nocapture` in release on the Linux box): per-key latency of the dev302 replay,
+/// all on (31) against all off. The contract's bound is a p95 ratio of at most 2; the numbers go to the research log.
+#[test]
+#[ignore]
+fn per_key_latency_all_on_against_all_off() {
+    let rows = dev302();
+    let mut p95s = Vec::new();
+    for flags in [0, FUZZY_ALL] {
+        let mut e = engine(Layout::Standard, flags, false);
+        let mut t = Vec::new();
+        for syls in &rows {
+            let mut keys: Vec<Key> = syls.iter().flat_map(|s| keys_of(Layout::Standard, s)).collect();
+            keys.push(Key::new(KeyKind::Enter));
+            for k in keys {
+                let t0 = std::time::Instant::now();
+                e.key(k).unwrap();
+                t.push(t0.elapsed());
+            }
+        }
+        t.sort();
+        let p = t[t.len() * 95 / 100];
+        println!("flags {flags}: keys {} p50 {:?} p95 {:?} max {:?}", t.len(), t[t.len() / 2], p, t[t.len() - 1]);
+        p95s.push(p);
+    }
+    println!("p95 ratio {:.2}", p95s[1].as_secs_f64() / p95s[0].as_secs_f64());
+}
+
 // ---------- fuzzy sound ----------
 
 /// Section 3.4: with ㄓ/ㄗ on, `ㄗ ㄉㄠˋ` (wanted 知道) shows 知道 and the typed reading stays in the composition; with the pair off
