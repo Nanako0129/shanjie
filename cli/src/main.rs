@@ -201,8 +201,9 @@ struct RowOut {
 ///
 /// `--colloquial-core FILE.sjlm` (docs/contracts/colloquial-term.md section 2.3): loads the colloquial table like the engine's
 /// `load_colloquial` (word sets of k from `data/lexicon` and the `--packs` rows) and decides per run, by the engine's conditions (chat
-/// profile, standard rerank level, a `--tinylm` whose SHA-256 is the one the term was measured with), whether each row's rerank is
-/// `TinyLm::rerank_colloquial` (the word split of each of the first 8 candidates goes in) or the plain `rerank`. It refuses no setting, so
+/// profile, any rerank level (each with its own alpha, tau and delta: docs/contracts/colloquial-levels.md), a `--tinylm` whose SHA-256 is the one
+/// the term was measured with), whether each row's rerank is `TinyLm::rerank_colloquial` (the word split of each of the first 8 candidates goes in,
+/// and the `--rerank-level`) or the plain `rerank`. It refuses no setting, so
 /// "everything else is unchanged" can be checked with the same option; a missing file stops the run before anything is read. The summary
 /// line gains `+colloq:<sha8 of the table>`. The files follow the n-gram order as without the option; `--tinylm-scores` `c` is the pick.
 ///
@@ -210,7 +211,7 @@ struct RowOut {
 /// cell. Without it the reading-channel term goes with it (the cell `lex,1.0,4` of experiments/p5-reading-channel: each single-character word's reading
 /// against that word's most common reading, from the lexicon this run loaded), `TinyLm::rerank_colloquial` being the one function for the CLI and the
 /// engine. It changes nothing where the colloquial term does not apply. The summary tag marks the shipping behavior: where the colloquial term
-/// applies and the channel is on it reads `+colloq:<sha8>+rc`; with the option, or where the term does not apply (formal, another strength or
+/// applies and the channel is on it reads `+colloq:<sha8>+rc`; with the option, or where the term does not apply (formal or another
 /// small model), just `+colloq:<sha8>`, so a P4d-cell run is never taken for the shipping setting. The option alone, without `--colloquial-core`,
 /// changes nothing.
 fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
@@ -400,7 +401,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
                 Some(co) => {
                     let words: Vec<Vec<&str>> = nb.iter().take(TOPK).map(|(_, ws)| ws.iter().map(String::as_str).collect()).collect();
                     let rc = reading_channel.then_some(ReadingChannel { lex: &lex, syls });
-                    tl.rerank_colloquial(&ng, &top, &words, key, co, rc)
+                    tl.rerank_colloquial(&ng, &top, &words, key, co, rc, level)
                 }
                 None => tl.rerank(&ng, &top, key, tl.params(prof, level)),
             };

@@ -153,7 +153,7 @@ fn run() -> Result<(), String> {
         tl8.as_deref().unwrap_or("none"),
         co8.as_ref().map_or(String::new(), |h| format!(" colloquial.sjlm:{h}"))
     );
-    // `+rc` only where the channel is read: the colloquial term applies (chat here, the standard level always, the paired small model).
+    // `+rc` only where the channel is read: the colloquial term applies (chat here, any rerank level, the paired small model).
     let rc_model = tl8.as_deref() == Some(&core::colloquial::PAIRED_TINYLM_SHA256[..8]);
     let tag = format!(
         "replay-{profile_name}+ctx+acg+nopred+noen+lm:{lm8}{}{}{}{}{}{}{}",
